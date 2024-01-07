@@ -24,6 +24,7 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -1031,6 +1032,7 @@ func (t *LocalTracker) processEvent(e *PresenceEvent) {
 	// Notify locally hosted authoritative matches of join and leave events.
 	for matchID, joins := range matchJoins {
 		t.matchJoinListener(matchID, joins)
+
 	}
 	for matchID, leaves := range matchLeaves {
 		t.matchLeaveListener(matchID, leaves)
@@ -1153,6 +1155,15 @@ func (t *LocalTracker) processEvent(e *PresenceEvent) {
 
 			var err error
 			switch session.Format() {
+			case SessionFormatEvr:
+				if s, ok := session.(*sessionWS); ok {
+					// Send the event to the session.
+					var messages []evr.Message
+					messages, err = ProcessOutgoing(s.logger, s, envelope)
+					if err == nil {
+						err = s.SendEvr(messages)
+					}
+				}
 			case SessionFormatProtobuf:
 				if payloadProtobuf == nil {
 					// Marshal the payload now that we know this format is needed.
@@ -1287,6 +1298,10 @@ func (t *LocalTracker) processEvent(e *PresenceEvent) {
 
 			var err error
 			switch session.Format() {
+			case SessionFormatEvr:
+				t.logger.Debug("Could not deliver presence event, session is using unsupported format", zap.Any("message", envelope))
+				// Evr does not support presence events.
+				return
 			case SessionFormatProtobuf:
 				if payloadProtobuf == nil {
 					// Marshal the payload now that we know this format is needed.
