@@ -57,6 +57,7 @@ func (r *LocalMessageRouter) SendToPresenceIDs(logger *zap.Logger, presenceIDs [
 	}
 
 	// Prepare payload variables but do not initialize until we hit a session that needs them to avoid unnecessary work.
+	var payloadEvr []byte
 	var payloadProtobuf []byte
 	var payloadJSON []byte
 
@@ -69,6 +70,21 @@ func (r *LocalMessageRouter) SendToPresenceIDs(logger *zap.Logger, presenceIDs [
 
 		var err error
 		switch session.Format() {
+		case SessionFormatEvr:
+			switch envelope.Message.(type) {
+			case *rtapi.Envelope_StreamData:
+				message := envelope.GetStreamData()
+				payloadEvr = []byte(message.GetData())
+			case *rtapi.Envelope_MatchData:
+				message := envelope.GetMatchData()
+				if message.GetOpCode() == OpCodeEvrPacketData {
+					payloadEvr = message.GetData()
+				}
+			default:
+				logger.Error("Unknown message type", zap.Any("message", envelope.Message))
+				payloadEvr = []byte{}
+			}
+			err = session.SendBytes(payloadEvr, reliable)
 		case SessionFormatProtobuf:
 			if payloadProtobuf == nil {
 				// Marshal the payload now that we know this format is needed.
@@ -118,6 +134,9 @@ func (r *LocalMessageRouter) SendToAll(logger *zap.Logger, envelope *rtapi.Envel
 	r.sessionRegistry.Range(func(session Session) bool {
 		var err error
 		switch session.Format() {
+		case SessionFormatEvr:
+			logger.Warn("EVR format not supported for broadcast")
+			return true
 		case SessionFormatProtobuf:
 			if payloadProtobuf == nil {
 				// Marshal the payload now that we know this format is needed.

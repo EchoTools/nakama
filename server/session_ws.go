@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"sync"
 	"time"
 
@@ -26,88 +27,168 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
 
-var ErrSessionQueueFull = errors.New("session outgoing queue full")
+const (
+	StreamModeEvr = 0x10
+)
 
-type sessionWS struct {
-	sync.Mutex
-	logger     *zap.Logger
-	config     Config
-	id         uuid.UUID
-	format     SessionFormat
-	userID     uuid.UUID
-	username   *atomic.String
-	vars       map[string]string
-	expiry     int64
-	clientIP   string
-	clientPort string
-	lang       string
+var (
+	ErrSessionQueueFull = errors.New("session outgoing queue full")
 
-	ctx         context.Context
-	ctxCancelFn context.CancelFunc
+	serviceIdByPath = map[string]uuid.UUID{
+		"/ws/evr/login":    svcLoginID,
+		"/ws/evr/matching": svcMatchID,
+		"/ws/evr/serverdb": svcBroadcasterID,
+	}
+	svcLoginID       = uuid.FromStringOrNil("00000000-0000-0000-0000-000000000001")
+	svcMatchID       = uuid.FromStringOrNil("00000000-0000-0000-0000-000000000002")
+	svcBroadcasterID = uuid.FromStringOrNil("00000000-0000-0000-0000-000000000003")
+)
 
-	protojsonMarshaler   *protojson.MarshalOptions
-	protojsonUnmarshaler *protojson.UnmarshalOptions
-	wsMessageType        int
-	pingPeriodDuration   time.Duration
-	pongWaitDuration     time.Duration
-	writeWaitDuration    time.Duration
+type (
+	sessionWS struct {
+		sync.Mutex
+		logger     *zap.Logger
+		baseLogger *zap.Logger
+		config     Config
+		id         uuid.UUID
+		format     SessionFormat
+		userID     uuid.UUID
+		username   *atomic.String
+		vars       map[string]string
+		expiry     int64
+		clientIP   string
+		clientPort string
+		lang       string
 
-	sessionRegistry SessionRegistry
-	statusRegistry  *StatusRegistry
-	matchmaker      Matchmaker
-	tracker         Tracker
-	metrics         Metrics
-	pipeline        *Pipeline
-	runtime         *Runtime
+		ctx         context.Context
+		ctxCancelFn context.CancelFunc
 
-	stopped                bool
-	conn                   *websocket.Conn
-	receivedMessageCounter int
-	pingTimer              *time.Timer
-	pingTimerCAS           *atomic.Uint32
-	outgoingCh             chan []byte
-}
+		protojsonMarshaler   *protojson.MarshalOptions
+		protojsonUnmarshaler *protojson.UnmarshalOptions
+		wsMessageType        int
+		pingPeriodDuration   time.Duration
+		pongWaitDuration     time.Duration
+		writeWaitDuration    time.Duration
 
-func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessionID, userID uuid.UUID, username string, vars map[string]string, expiry int64, clientIP, clientPort, lang string, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, conn *websocket.Conn, sessionRegistry SessionRegistry, statusRegistry *StatusRegistry, matchmaker Matchmaker, tracker Tracker, metrics Metrics, pipeline *Pipeline, runtime *Runtime) Session {
-	sessionLogger := logger.With(zap.String("uid", userID.String()), zap.String("sid", sessionID.String()))
+		sessionRegistry SessionRegistry
+		statusRegistry  *StatusRegistry
+		matchmaker      Matchmaker
+		tracker         Tracker
+		metrics         Metrics
+		pipeline        *Pipeline
+		runtime         *Runtime
 
-	sessionLogger.Info("New WebSocket session connected", zap.Uint8("format", uint8(format)))
+		stopped                bool
+		conn                   *websocket.Conn
+		receivedMessageCounter int
+		pingTimer              *time.Timer
+		pingTimerCAS           *atomic.Uint32
+		outgoingCh             chan []byte
+
+		storageIndex StorageIndex
+		evrPipeline  *EvrPipeline
+	}
+
+	// Keys used for storing/retrieving user information in the context of a request after authentication.
+	ctxNodeKey              struct{} // The node name
+	ctxEvrIDKey             struct{} // The EchoVR ID
+	ctxLoginSessionKey      struct{} // The Session ID of the login connection
+	ctxSessionIDKey         struct{} // The Session ID
+	ctxHMDSerialOverrideKey struct{} // The HMD Serial Override
+	ctxDiscordIdKey         struct{} // The Discord ID from the urlparam (used to authenticate broadcaster connections)
+	ctxPasswordKey          struct{} // The Password from the urlparam(used to authenticate login/broadcaster connections)
+	ctxUrlParamsKey         struct{} // The URL parameters from the request
+	//ctxMatchmakingQueryKey         struct{} // The Matchmaking query from the urlparam
+	//ctxMatchmakingGuildPriorityKey struct{} // The Matchmaking guild priority from the urlparam
+)
+
+func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessionID, userID uuid.UUID, username string, vars map[string]string, expiry int64, clientIP, clientPort, lang string, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, conn *websocket.Conn, sessionRegistry SessionRegistry, statusRegistry *StatusRegistry, matchmaker Matchmaker, tracker Tracker, metrics Metrics, pipeline *Pipeline, evrPipeline *EvrPipeline, runtime *Runtime, request http.Request, storageIndex StorageIndex) Session {
+	sessionLogger := logger.With(zap.String("sid", sessionID.String()))
+
+	if userID != uuid.Nil {
+		sessionLogger = sessionLogger.With(zap.String("uid", userID.String()))
+	}
+
+	sessionLogger.Info("New WebSocket session connected", zap.String("requestUri", request.URL.Path), zap.Uint8("format", uint8(format)))
 
 	ctx, ctxCancelFn := context.WithCancel(context.Background())
 
+	ctx = context.WithValue(ctx, ctxSessionIDKey{}, sessionID)
+	ctx = context.WithValue(ctx, ctxVarsKey{}, vars)     // apiServer compatibility
+	ctx = context.WithValue(ctx, ctxExpiryKey{}, expiry) // apiServer compatibility
+
+	// Add the HMD Serial Override to the context if it's present in the request URL
+	if sn := request.URL.Query().Get(HMDSerialOverrideUrlParam); sn != "" {
+		// Limit the serial to 16 characters
+		if len(sn) > 16 {
+			sn = sn[:16]
+		}
+		ctx = context.WithValue(ctx, ctxHMDSerialOverrideKey{}, sn)
+	}
+
+	// Add the Discord ID to the context if it's present in the request URL
+	if v := request.URL.Query().Get(DiscordIdUrlParam); v != "" {
+		// Discord IDs are 18/19 characters long
+		if len(v) > 19 {
+			v = v[:19]
+		}
+		ctx = context.WithValue(ctx, ctxDiscordIdKey{}, v)
+	}
+
+	// Add the Discord ID to the context if it's present in the request URL
+	if v := request.URL.Query().Get(UserPasswordUrlParam); v != "" {
+		if len(v) > 32 {
+			v = v[:32]
+		}
+		ctx = context.WithValue(ctx, ctxPasswordKey{}, v)
+	}
+
+	// Add the URL parameters to the context
+	p := make(map[string][]string, 0)
+	for k, v := range request.URL.Query() {
+		p[k] = v
+	}
+	ctx = context.WithValue(ctx, ctxUrlParamsKey{}, p)
+
 	wsMessageType := websocket.TextMessage
-	if format == SessionFormatProtobuf {
+	if format == SessionFormatProtobuf || format == SessionFormatEvr {
 		wsMessageType = websocket.BinaryMessage
 	}
 
-	return &sessionWS{
-		logger:     sessionLogger,
-		config:     config,
-		id:         sessionID,
-		format:     format,
-		userID:     userID,
-		username:   atomic.NewString(username),
-		vars:       vars,
-		expiry:     expiry,
-		clientIP:   clientIP,
-		clientPort: clientPort,
-		lang:       lang,
+	if vars == nil {
+		vars = make(map[string]string)
+	}
 
+	return &sessionWS{
+		logger:      sessionLogger,
+		baseLogger:  logger,
+		config:      config,
+		id:          sessionID,
+		format:      format,
+		userID:      userID,
+		username:    atomic.NewString(username),
+		vars:        vars,
+		expiry:      expiry,
+		clientIP:    clientIP,
+		clientPort:  clientPort,
+		lang:        lang,
 		ctx:         ctx,
 		ctxCancelFn: ctxCancelFn,
 
 		protojsonMarshaler:   protojsonMarshaler,
 		protojsonUnmarshaler: protojsonUnmarshaler,
-		wsMessageType:        wsMessageType,
-		pingPeriodDuration:   time.Duration(config.GetSocket().PingPeriodMs) * time.Millisecond,
-		pongWaitDuration:     time.Duration(config.GetSocket().PongWaitMs) * time.Millisecond,
-		writeWaitDuration:    time.Duration(config.GetSocket().WriteWaitMs) * time.Millisecond,
+
+		wsMessageType:      wsMessageType,
+		pingPeriodDuration: time.Duration(config.GetSocket().PingPeriodMs) * time.Millisecond,
+		pongWaitDuration:   time.Duration(config.GetSocket().PongWaitMs) * time.Millisecond,
+		writeWaitDuration:  time.Duration(config.GetSocket().WriteWaitMs) * time.Millisecond,
 
 		sessionRegistry: sessionRegistry,
 		statusRegistry:  statusRegistry,
@@ -116,6 +197,8 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 		metrics:         metrics,
 		pipeline:        pipeline,
 		runtime:         runtime,
+		evrPipeline:     evrPipeline,
+		storageIndex:    storageIndex,
 
 		stopped:                false,
 		conn:                   conn,
@@ -124,6 +207,231 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 		pingTimerCAS:           atomic.NewUint32(1),
 		outgoingCh:             make(chan []byte, config.GetSocket().OutgoingQueueSize),
 	}
+}
+
+func (s *sessionWS) LoginSession(userID string, username string, evrID evr.EvrId, deviceId *DeviceId) error {
+	// Each player has a single login connection, which will act as the core session.
+	// When this connection is terminated, all other connections should be terminated.
+
+	// Configure the session fields and minimal context values.
+
+	// The EVR context is used by the secondary connections, once they have validated.
+	// It ensures that all secondary connections are disconnected when the login
+	// connection  is disconnected. It is passed at the pipeline level to ensure
+	// that evr functions have access to it.
+
+	// TODO FIXME Verify there are no other user's with this EVR ID online. This can be done at a match level too.
+
+	// Replace the session context with a derived one that includes the login session ID and the EVR ID
+
+	ctx := context.WithValue(s.Context(), ctxLoginSessionKey{}, s)
+	ctx = context.WithValue(ctx, ctxEvrIDKey{}, evrID)
+	ctx = context.WithValue(ctx, ctxUserIDKey{}, uuid.FromStringOrNil(userID)) // apiServer compatibility
+	ctx = context.WithValue(ctx, ctxUsernameKey{}, username)                   // apiServer compatibility
+	s.Lock()
+	s.ctx = ctx
+	s.userID = uuid.FromStringOrNil(userID)
+	s.SetUsername(username)
+	s.logger = s.logger.With(zap.String("evrid", evrID.Token()), zap.String("username", username), zap.String("uid", userID))
+	s.Unlock()
+
+	// Register initial status tracking and presence(s) for this session.
+	s.statusRegistry.Follow(s.id, map[uuid.UUID]struct{}{s.userID: {}})
+
+	// Both notification and status presence.
+	s.tracker.TrackMulti(ctx, s.id, []*TrackerOp{
+		// EVR packet data stream for the login session by user ID, and service ID, with EVR ID
+		{
+			Stream: PresenceStream{Mode: StreamModeEvr, Subject: s.userID, Subcontext: svcLoginID},
+			Meta:   PresenceMeta{Format: s.format, Username: evrID.Token(), Hidden: true},
+		},
+		// EVR packet data stream for the login session by session ID and service ID, with EVR ID
+		{
+			Stream: PresenceStream{Mode: StreamModeEvr, Subject: s.id, Subcontext: svcLoginID},
+			Meta:   PresenceMeta{Format: s.format, Username: evrID.Token(), Hidden: true},
+		},
+		// Notification presence.
+		{
+			Stream: PresenceStream{Mode: StreamModeNotifications, Subject: s.userID},
+			Meta:   PresenceMeta{Format: s.format, Username: username, Hidden: true},
+		},
+		// Status presence.
+		{
+			Stream: PresenceStream{Mode: StreamModeStatus, Subject: s.userID},
+			Meta:   PresenceMeta{Format: s.format, Username: username, Status: ""},
+		},
+	}, s.userID, true)
+
+	return nil
+}
+
+func (s *sessionWS) BroadcasterSession(userID string, username string) error {
+	// Broadcaster's are "partial" sessions, and aren't directly associated with the user.
+	// There's no information that directly links this connection to the login connection.
+
+	// This is the first time the session has been validated.
+
+	ctx := context.WithValue(s.Context(), ctxUserIDKey{}, uuid.FromStringOrNil(userID)) // apiServer compatibility
+	ctx = context.WithValue(ctx, ctxUsernameKey{}, username)                            // apiServer compatibility
+	ctx = context.WithValue(ctx, ctxVarsKey{}, s.vars)                                  // apiServer compatibility
+	ctx = context.WithValue(ctx, ctxExpiryKey{}, s.expiry)                              // apiServer compatibility
+
+	s.SetUsername(username)
+	s.Lock()
+	s.ctx = ctx
+	s.userID = uuid.FromStringOrNil(userID)
+	s.SetUsername(username)
+	s.logger = s.logger.With(zap.String("username", username), zap.String("uid", userID))
+	s.Unlock()
+
+	// Register initial status tracking and presence(s) for this session.
+	s.statusRegistry.Follow(s.id, map[uuid.UUID]struct{}{s.userID: {}})
+
+	s.tracker.TrackMulti(ctx, s.id, []*TrackerOp{
+		// EVR packet data stream for the login session by userID, and service ID
+		{
+			Stream: PresenceStream{Mode: StreamModeEvr, Subject: s.userID},
+			Meta:   PresenceMeta{Format: s.format, Username: s.username.String(), Hidden: true},
+		},
+		// EVR packet data stream for the login session by Session ID and broadcaster ID
+		{
+			Stream: PresenceStream{Mode: StreamModeEvr, Subject: s.userID, Subcontext: svcBroadcasterID},
+			Meta:   PresenceMeta{Format: s.format, Username: s.username.String(), Hidden: true},
+		},
+		// EVR packet data stream by session ID and broadcaster ID
+		{
+			Stream: PresenceStream{Mode: StreamModeEvr, Subject: s.id, Subcontext: svcBroadcasterID},
+			Meta:   PresenceMeta{Format: s.format, Username: s.username.String(), Hidden: true},
+		},
+	}, s.userID, true)
+
+	return nil
+}
+
+// MatchSession validates the session information provided by the client.
+func (s *sessionWS) MatchSession(loginSessionID uuid.UUID, evrID evr.EvrId) error {
+	if loginSessionID == uuid.Nil {
+		return fmt.Errorf("login session ID is nil")
+	}
+
+	if evrID.Equals(&evr.EvrIdNil) {
+		return fmt.Errorf("evr ID is nil")
+	}
+
+	// EVR uses multiple connections, that reference the login session, without using session IDs for any of the secondary connections.
+	// The login session is the primary session, and the secondary sessions are validated against it.
+
+	// If the session is not authenticated, use the login session to set the session information.
+	if s.UserID() == uuid.Nil {
+		// Obtain the login session.
+		loginSession, ok := s.sessionRegistry.Get(loginSessionID).(*sessionWS)
+		if !ok || loginSession == nil {
+			return fmt.Errorf("login session not found: %v", loginSessionID)
+		}
+
+		// Use the context to avoid any locking issues.
+		loginCtx, cancel := context.WithCancel(loginSession.Context())
+
+		// cancel/disconnect this session if the login session is cancelled.
+		go func() {
+			defer cancel()
+			<-loginCtx.Done()
+			s.Close("echovr login session closed", runtime.PresenceReasonDisconnect)
+		}()
+
+		// Verify that the login sessions context values match the request.
+		loginEvrID, ok := loginCtx.Value(ctxEvrIDKey{}).(evr.EvrId)
+		if !ok {
+			return fmt.Errorf("login session does not have an EVR ID")
+		}
+		if !loginEvrID.Equals(&evrID) {
+			return fmt.Errorf("echovr id mismatch (login/request): %s != %s", loginEvrID.String(), evrID.String())
+		}
+
+		// Get the userID and username from the login session's context
+		userID, ok := loginCtx.Value(ctxUserIDKey{}).(uuid.UUID)
+		if !ok {
+			return fmt.Errorf("login session does not have a user ID")
+		}
+
+		username, ok := loginCtx.Value(ctxUsernameKey{}).(string)
+		if !ok {
+			return fmt.Errorf("login session does not have a username")
+		}
+
+		// Require the login session to be authenticated.
+		if userID == uuid.Nil {
+			return fmt.Errorf("login session not authenticated")
+		}
+
+		// Create a derived context for this session.
+		ctx := context.WithValue(s.Context(), ctxLoginSessionKey{}, loginSession)
+		ctx = context.WithValue(ctx, ctxEvrIDKey{}, evrID)
+		ctx = context.WithValue(ctx, ctxUserIDKey{}, userID)     // apiServer compatibility
+		ctx = context.WithValue(ctx, ctxUsernameKey{}, username) // apiServer compatibility
+
+		// Set the session information
+		s.Lock()
+		s.ctx = ctx
+		s.userID = userID
+		s.SetUsername(username)
+		s.logger = s.logger.With(zap.String("loginsid", loginSessionID.String()), zap.String("uid", userID.String()), zap.String("evrid", evrID.Token()), zap.String("username", username))
+		s.Unlock()
+
+	}
+
+	// Check for duplicate match connections to find duplicate players.
+	// Multiple logins are valid, but only one may be in a match at a time.
+	// Broadcaster's will be ignored because they do not use the match service.
+
+	// Find other matchmaking sessions
+	// If the session is a match session, disconnect all other match sessions (by disconnecting their login sessions)
+
+	stream := PresenceStream{Mode: StreamModeEvr, Subject: s.userID, Subcontext: svcMatchID}
+
+	// List other match sessions
+	presences := s.tracker.ListPresenceIDByStream(stream)
+
+	for _, presence := range presences {
+		// Ignore this session
+		if presence.SessionID == s.ID() {
+			continue
+		}
+		// Obtain the session to identify its login session
+		// Obtain the login session's context.
+		matchSession, ok := s.sessionRegistry.Get(presence.SessionID).(*sessionWS)
+		if !ok || matchSession == nil {
+			continue
+		}
+
+		otherLoginSession, ok := matchSession.Context().Value(ctxLoginSessionKey{}).(*sessionWS)
+		if !ok {
+			s.logger.Warn("Other match session does not have a login session ID", zap.String("session_id", presence.SessionID.String()))
+			continue
+		}
+
+		if otherLoginSession.id == loginSessionID {
+			// Do not disconnect _this_ match session's login session.
+			continue
+		}
+		s.logger.Warn("Disconnecting other login session", zap.String("this_login_session", loginSessionID.String()), zap.String("this_match_session", s.ID().String()), zap.String("other_match_session", matchSession.ID().String()), zap.String("other_session_id", otherLoginSession.id.String()))
+		s.sessionRegistry.Disconnect(s.ctx, otherLoginSession.id, false, runtime.PresenceReasonDisconnect)
+	}
+
+	s.tracker.TrackMulti(s.ctx, s.id, []*TrackerOp{
+		// EVR packet data stream for the match session by userID, and service ID
+		{
+			Stream: PresenceStream{Mode: StreamModeEvr, Subject: s.userID, Subcontext: svcMatchID},
+			Meta:   PresenceMeta{Format: s.format, Username: evrID.Token(), Hidden: true},
+		},
+		// EVR packet data stream for the match session by Session ID and service ID
+		{
+			Stream: PresenceStream{Mode: StreamModeEvr, Subject: s.id, Subcontext: svcMatchID},
+			Meta:   PresenceMeta{Format: s.format, Username: evrID.Token(), Hidden: true},
+		},
+	}, s.userID, true)
+
+	return nil
 }
 
 func (s *sessionWS) Logger() *zap.Logger {
@@ -151,6 +459,8 @@ func (s *sessionWS) Lang() string {
 }
 
 func (s *sessionWS) Context() context.Context {
+	s.Lock()
+	defer s.Unlock()
 	return s.ctx
 }
 
@@ -179,7 +489,7 @@ func (s *sessionWS) Consume() {
 	s.conn.SetReadLimit(s.config.GetSocket().MaxMessageSizeBytes)
 	if err := s.conn.SetReadDeadline(time.Now().Add(s.pongWaitDuration)); err != nil {
 		s.logger.Warn("Failed to set initial read deadline", zap.Error(err))
-		s.Close("failed to set initial read deadline", runtime.PresenceReasonDisconnect)
+		go s.Close("failed to set initial read deadline", runtime.PresenceReasonDisconnect)
 		return
 	}
 	s.conn.SetPongHandler(func(string) error {
@@ -195,18 +505,23 @@ func (s *sessionWS) Consume() {
 
 IncomingLoop:
 	for {
+
 		messageType, data, err := s.conn.ReadMessage()
 		if err != nil {
 			// Ignore "normal" WebSocket errors.
 			if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseNoStatusReceived) {
 				// Ignore underlying connection being shut down while read is waiting for data.
 				if e, ok := err.(*net.OpError); !ok || e.Err.Error() != "use of closed network connection" {
-					s.logger.Debug("Error reading message from client", zap.Error(err))
+					if s.format != SessionFormatEvr {
+						// EchoVR does not cleanly close connections.
+						s.logger.Debug("Error reading message from client", zap.Error(err))
+					}
 					reason = err.Error()
 				}
 			}
 			break
 		}
+		start := time.Now()
 		if messageType != s.wsMessageType {
 			// Expected text but received binary, or expected binary but received text.
 			// Disconnect client if it attempts to use this kind of mixed protocol mode.
@@ -224,39 +539,59 @@ IncomingLoop:
 				break
 			}
 		}
-
-		request := &rtapi.Envelope{}
-		switch s.format {
-		case SessionFormatProtobuf:
-			err = proto.Unmarshal(data, request)
-		case SessionFormatJson:
-			fallthrough
-		default:
-			err = s.protojsonUnmarshaler.Unmarshal(data, request)
-		}
-		if err != nil {
-			// If the payload is malformed the client is incompatible or misbehaving, either way disconnect it now.
-			s.logger.Warn("Received malformed payload", zap.Binary("data", data))
-			reason = "received malformed payload"
-			break
-		}
-
-		switch request.Cid {
-		case "":
-			if !s.pipeline.ProcessRequest(s.logger, s, request) {
-				reason = "error processing message"
-				break IncomingLoop
+		if s.format == SessionFormatEvr {
+			// EchoVR messages do not map directly onto nakama messages.
+			// TODO a switch statement here could direct to the match or not.
+			requests := make([]evr.Message, 0)
+			err := evr.Unmarshal(data, &requests)
+			if errors.Is(err, evr.ErrSymbolNotFound) {
+				s.logger.Error("Received unknown message", zap.Error(err))
+			} else if err != nil {
+				// If the payload is malformed the client is incompatible or misbehaving, either way disconnect it now.
+				s.logger.Warn("Received malformed payload", zap.Binary("data", data), zap.Error(err))
+				reason = "received malformed payload"
 			}
-		default:
-			requestLogger := s.logger.With(zap.String("cid", request.Cid))
-			if !s.pipeline.ProcessRequest(requestLogger, s, request) {
-				reason = "error processing message"
-				break IncomingLoop
+			// Send to the Evr pipeline for routing/processing.
+			for _, request := range requests {
+				if !s.evrPipeline.ProcessRequestEvr(s.logger, s, request) {
+					reason = "error processing message"
+					break IncomingLoop
+				}
+			}
+		} else {
+			request := &rtapi.Envelope{}
+			switch s.format {
+			case SessionFormatProtobuf:
+				err = proto.Unmarshal(data, request)
+			case SessionFormatJson:
+				fallthrough
+			default:
+				err = s.protojsonUnmarshaler.Unmarshal(data, request)
+			}
+			if err != nil {
+				// If the payload is malformed the client is incompatible or misbehaving, either way disconnect it now.
+				s.logger.Warn("Received malformed payload", zap.Binary("data", data))
+				reason = "received malformed payload"
+				break
+			}
+
+			switch request.Cid {
+			case "":
+				if !s.pipeline.ProcessRequest(s.logger, s, request) {
+					reason = "error processing message"
+					break IncomingLoop
+				}
+			default:
+				requestLogger := s.logger.With(zap.String("cid", request.Cid))
+				if !s.pipeline.ProcessRequest(requestLogger, s, request) {
+					reason = "error processing message"
+					break IncomingLoop
+				}
 			}
 		}
-
 		// Update incoming message metrics.
 		s.metrics.Message(int64(len(data)), false)
+		s.metrics.CustomTimer("socket_incoming_message_processing_time", nil, time.Since(start))
 	}
 
 	if reason != "" {
@@ -299,11 +634,13 @@ func (s *sessionWS) maybeResetPingTimer() bool {
 
 func (s *sessionWS) processOutgoing() {
 	var reason string
-
+	s.Lock()
+	ctx := s.ctx
+	s.Unlock()
 OutgoingLoop:
 	for {
 		select {
-		case <-s.ctx.Done():
+		case <-ctx.Done():
 			// Session is closing, close the outgoing process routine.
 			break OutgoingLoop
 		case <-s.pingTimer.C:
@@ -340,7 +677,6 @@ OutgoingLoop:
 			s.metrics.MessageBytesSent(int64(len(payload)))
 		}
 	}
-
 	s.Close(reason, runtime.PresenceReasonDisconnect)
 }
 
@@ -369,10 +705,42 @@ func (s *sessionWS) Format() SessionFormat {
 	return s.format
 }
 
+// SendEvr sends a message to the client in the EchoVR format.
+// TODO Transition to using streamsend for all messages.
+func (s *sessionWS) SendEvr(messages []evr.Message) error {
+	if s.logger.Core().Enabled(zap.DebugLevel) {
+		for _, message := range messages {
+			s.logger.Debug("Sending Message.", zap.Any("message", message))
+		}
+	}
+	// Send the EVR messages one at a time.
+	for _, message := range messages {
+		if message == nil {
+			continue
+		}
+		// Marshal the message.
+		payload, err := evr.Marshal(message)
+		if err != nil {
+			return fmt.Errorf("could not marshal message: %w", err)
+		}
+		// Send the message.
+		if err := s.SendBytes(payload, true); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *sessionWS) Send(envelope *rtapi.Envelope, reliable bool) error {
 	var payload []byte
 	var err error
 	switch s.format {
+	case SessionFormatEvr:
+		messages, err := ProcessOutgoing(s.logger, s, envelope)
+		if err != nil {
+			return fmt.Errorf("could not process outgoing message: %w", err)
+		}
+		return s.SendEvr(messages)
 	case SessionFormatProtobuf:
 		payload, err = proto.Marshal(envelope)
 	case SessionFormatJson:
@@ -436,29 +804,33 @@ func (s *sessionWS) Close(msg string, reason runtime.PresenceReason, envelopes .
 		s.logger.Warn("Failed to remove all matchmaking tickets", zap.Error(err))
 	}
 	if s.logger.Core().Enabled(zap.DebugLevel) {
-		s.logger.Info("Cleaned up closed connection matchmaker")
+		//s.logger.Info("Cleaned up closed connection matchmaker")
 	}
 	s.tracker.UntrackAll(s.id, reason)
 	if s.logger.Core().Enabled(zap.DebugLevel) {
-		s.logger.Info("Cleaned up closed connection tracker")
+		//s.logger.Info("Cleaned up closed connection tracker")
 	}
 	s.statusRegistry.UnfollowAll(s.id)
 	if s.logger.Core().Enabled(zap.DebugLevel) {
-		s.logger.Info("Cleaned up closed connection status registry")
+		//s.logger.Info("Cleaned up closed connection status registry")
 	}
 	s.sessionRegistry.Remove(s.id)
 	if s.logger.Core().Enabled(zap.DebugLevel) {
-		s.logger.Info("Cleaned up closed connection session registry")
+		// s.logger.Info("Cleaned up closed connection session registry")
 	}
 
 	// Clean up internals.
 	s.pingTimer.Stop()
 
-	// Send final messages, if any are specified.
 	for _, envelope := range envelopes {
 		var payload []byte
 		var err error
 		switch s.format {
+		case SessionFormatEvr:
+			if s.logger.Core().Enabled(zap.DebugLevel) {
+				s.logger.Warn("Blocked attempt to send protobuf message to EVR client.", zap.Any("envelope", envelope))
+			}
+			continue
 		case SessionFormatProtobuf:
 			payload, err = proto.Marshal(envelope)
 		case SessionFormatJson:

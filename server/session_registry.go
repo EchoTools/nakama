@@ -32,6 +32,7 @@ type SessionFormat uint8
 const (
 	SessionFormatJson SessionFormat = iota
 	SessionFormatProtobuf
+	SessionFormatEvr
 )
 
 type Session interface {
