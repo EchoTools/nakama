@@ -372,65 +372,16 @@ func writeAuditObjects(ctx context.Context, session *sessionWS, userId string, e
 func (p *EvrPipeline) channelInfoRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	_ = in.(*evr.ChannelInfoRequest)
 
-	var document evr.ChannelInfoResource
-	// TODO FIXME Generate the channel info, don't pull it from storage.
-	// retrieve the base document from storage
-	objs, err := StorageReadObjects(ctx, logger, session.pipeline.db, uuid.Nil, []*api.ReadStorageObjectId{
-		{
-			Collection: ChannelInfoStorageCollection,
-			Key:        ChannelInfoStorageKey,
-			UserId:     SystemUserId,
-		},
-	})
+	groups, err := p.discordRegistry.GetGuildGroups(ctx, session.userID.String())
 	if err != nil {
-		return fmt.Errorf("failed to read channelinfo object: %w", err)
+		return fmt.Errorf("error getting guild groups: %w", err)
 	}
 
-	// Create a default document if it doesn't exist
-	if len(objs.Objects) == 0 {
-		// if the document doesn't exist, try to get the default document
-		channelInfo := evr.NewChannelInfoResource()
-		jsonBytes, err := json.Marshal(channelInfo)
-		if err != nil {
-			return fmt.Errorf("error marshalling channelinfo document: %w", err)
-		}
-		ops := StorageOpWrites{
-			{
-				OwnerID: uuid.Nil.String(),
-				Object: &api.WriteStorageObject{
-					Collection:      ChannelInfoStorageCollection,
-					Key:             ChannelInfoStorageKey,
-					Value:           string(jsonBytes),
-					PermissionRead:  &wrapperspb.Int32Value{Value: int32(0)},
-					PermissionWrite: &wrapperspb.Int32Value{Value: int32(0)},
-				},
-			},
-		}
+	// TODO Allow players to set what is listed for their lobbies
+	// Sort the groups by the edgecount
 
-		if _, _, err = StorageWriteObjects(ctx, session.logger, session.pipeline.db, session.metrics, session.storageIndex, true, ops); err != nil {
-			return fmt.Errorf("failed to write objects: %w", err)
-		}
-	} else {
-		// unmarshal the document
-		if err := json.Unmarshal([]byte(objs.Objects[0].Value), &document); err != nil {
-			return fmt.Errorf("error unmarshalling document: %w", err)
-		}
-	}
-
-	// Get the 4 Largest groups that this player is a member of
-	groups, _, err := p.runtimeModule.UserGroupsList(ctx, session.userID.String(), 100, nil, "")
-	if err != nil {
-		return fmt.Errorf("error checking user groups: %w", err)
-	}
-
-	// Filter only the groups that are Discord. They have "guild" as the language
-	groups = lo.Filter(groups, func(group *api.UserGroupList_UserGroup, idx int) bool {
-		return group.GetGroup().GetLangTag() == "guild" && group.GetState().GetValue() <= 2
-	})
-
-	// Sort by the number of members in the group
-	slices.SortFunc(groups, func(a, b *api.UserGroupList_UserGroup) int {
-		return cmp.Compare(b.GetGroup().GetEdgeCount(), a.GetGroup().GetEdgeCount())
+	sort.SliceStable(groups, func(i, j int) bool {
+		return groups[i].EdgeCount > groups[j].EdgeCount
 	})
 
 	// Limit to 4 results
@@ -438,18 +389,17 @@ func (p *EvrPipeline) channelInfoRequest(ctx context.Context, logger *zap.Logger
 		groups = groups[:4]
 	}
 
+	resource := evr.NewChannelInfoResource()
+
 	// Overwrite the existing channel info
-	for i, group := range groups {
-		mdjson := group.GetGroup().GetMetadata()
-		// unmarshal the metadata
+	for i, g := range groups {
+		// Get the group metadata
 		md := &GroupMetadata{}
-		if err := json.Unmarshal([]byte(mdjson), md); err != nil {
+		if err := json.Unmarshal([]byte(g.Metadata), md); err != nil {
 			return fmt.Errorf("error unmarshalling group metadata: %w", err)
 		}
 
-		// Overwrite the existing channel data
-		g := group.GetGroup()
-		document.Groups[i] = evr.ChannelGroup{
+		resource.Groups[i] = evr.ChannelGroup{
 			ChannelUuid:  strings.ToUpper(g.GetId()),
 			Name:         g.Name,
 			Description:  g.Description,
@@ -463,7 +413,7 @@ func (p *EvrPipeline) channelInfoRequest(ctx context.Context, logger *zap.Logger
 
 	// send the document to the client
 	session.SendEvr([]evr.Message{
-		evr.NewSNSChannelInfoResponse(&document),
+		evr.NewSNSChannelInfoResponse(&resource),
 		evr.NewSTcpConnectionUnrequireEvent(),
 	})
 
