@@ -448,7 +448,9 @@ func (r *LocalDiscordRegistry) UpdateAccount(ctx context.Context, discordId stri
 			}
 			r.logger.Error("Error getting guild group %s: %w", guild.Name, err)
 		}
-
+		if md == nil {
+			continue
+		}
 		guildGroups := []string{
 			groupId,
 			md.ModeratorGroupId,

@@ -29,6 +29,31 @@ func (p *EvrPipeline) lobbyMatchmakerStatusRequest(ctx context.Context, logger *
 
 // authorizeMatchmaking checks if the user is allowed to join a public match or spawn a new match
 func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logger, session *sessionWS, channel uuid.UUID) (bool, error) {
+	// Send a match leave if this user is in another match
+	sessionIDs := session.tracker.ListLocalSessionIDByStream(PresenceStream{Mode: StreamModeMatchAuthoritative, Subject: session.userID})
+	for _, foundSessionID := range sessionIDs {
+		if foundSessionID == session.id {
+			// Allow the current session, only disconnect any older ones.
+			continue
+		}
+		p.tracker.UntrackLocalByModes(foundSessionID, matchStreamModes, PresenceStream{})
+	}
+
+	// Track this session as a matchmaking session.
+	s := session
+	s.tracker.TrackMulti(s.ctx, s.id, []*TrackerOp{
+		// EVR packet data stream for the match session by userID, and service ID
+		{
+			Stream: PresenceStream{Mode: StreamModeEvr, Subject: s.userID, Subcontext: svcMatchID},
+			Meta:   PresenceMeta{Format: s.format, Hidden: true},
+		},
+		// EVR packet data stream for the match session by Session ID and service ID
+		{
+			Stream: PresenceStream{Mode: StreamModeEvr, Subject: s.id, Subcontext: svcMatchID},
+			Meta:   PresenceMeta{Format: s.format, Hidden: true},
+		},
+	}, s.userID, true)
+
 	// Check for suspensions on this channel.
 	suspensions, err := p.checkSuspensionStatus(ctx, logger, session.UserID().String(), channel)
 	if err != nil {
@@ -45,6 +70,7 @@ func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logg
 // lobbyFindSessionRequest is a message requesting to find a public session to join.
 func (p *EvrPipeline) lobbyFindSessionRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.LobbyFindSessionRequest)
+
 	result := NewMatchmakingResult(request.Mode, request.Channel)
 
 	// Check for suspensions on this channel, if this is a request for a public match.

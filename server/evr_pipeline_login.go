@@ -1,20 +1,18 @@
 package server
 
 import (
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
-	"slices"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama/v3/server/evr"
-	"github.com/samber/lo"
 
 	"github.com/muesli/reflow/wordwrap"
 	"go.uber.org/zap"

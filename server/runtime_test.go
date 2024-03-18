@@ -102,7 +102,7 @@ func runtimeWithModulesWithData(t *testing.T, modules map[string]string) (*Runti
 
 	tracker := &LocalTracker{}
 
-	rt, rtInfo, err := NewRuntime(ctx, logger, logger, db, protojsonMarshaler, protojsonUnmarshaler, cfg, "", nil, lbCache, lbRankCache, lbSched, nil, nil, nil, nil, tracker, metrics, nil, &DummyMessageRouter{}, storageIdx)
+	rt, rtInfo, err := NewRuntime(ctx, logger, logger, db, protojsonMarshaler, protojsonUnmarshaler, cfg, "", nil, lbCache, lbRankCache, lbSched, nil, nil, nil, nil, tracker, metrics, nil, &DummyMessageRouter{}, storageIdx, nil)
 
 	return rt, rtInfo, data, err
 }

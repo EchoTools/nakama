@@ -41,11 +41,6 @@ const (
 var (
 	ErrSessionQueueFull = errors.New("session outgoing queue full")
 
-	serviceIdByPath = map[string]uuid.UUID{
-		"/ws/evr/login":    svcLoginID,
-		"/ws/evr/matching": svcMatchID,
-		"/ws/evr/serverdb": svcBroadcasterID,
-	}
 	svcLoginID       = uuid.FromStringOrNil("00000000-0000-0000-0000-000000000001")
 	svcMatchID       = uuid.FromStringOrNil("00000000-0000-0000-0000-000000000002")
 	svcBroadcasterID = uuid.FromStringOrNil("00000000-0000-0000-0000-000000000003")
@@ -308,8 +303,8 @@ func (s *sessionWS) BroadcasterSession(userID string, username string) error {
 	return nil
 }
 
-// MatchSession validates the session information provided by the client.
-func (s *sessionWS) MatchSession(loginSessionID uuid.UUID, evrID evr.EvrId) error {
+// ValidateSession validates the session information provided by the client.
+func (s *sessionWS) ValidateSession(loginSessionID uuid.UUID, evrID evr.EvrId) error {
 	if loginSessionID == uuid.Nil {
 		return fmt.Errorf("login session ID is nil")
 	}
@@ -379,58 +374,6 @@ func (s *sessionWS) MatchSession(loginSessionID uuid.UUID, evrID evr.EvrId) erro
 		s.Unlock()
 
 	}
-
-	// Check for duplicate match connections to find duplicate players.
-	// Multiple logins are valid, but only one may be in a match at a time.
-	// Broadcaster's will be ignored because they do not use the match service.
-
-	// Find other matchmaking sessions
-	// If the session is a match session, disconnect all other match sessions (by disconnecting their login sessions)
-
-	stream := PresenceStream{Mode: StreamModeEvr, Subject: s.userID, Subcontext: svcMatchID}
-
-	// List other match sessions
-	presences := s.tracker.ListPresenceIDByStream(stream)
-
-	for _, presence := range presences {
-		// Ignore this session
-		if presence.SessionID == s.ID() {
-			continue
-		}
-		// Obtain the session to identify its login session
-		// Obtain the login session's context.
-		matchSession, ok := s.sessionRegistry.Get(presence.SessionID).(*sessionWS)
-		if !ok || matchSession == nil {
-			continue
-		}
-
-		otherLoginSession, ok := matchSession.Context().Value(ctxLoginSessionKey{}).(*sessionWS)
-		if !ok {
-			s.logger.Warn("Other match session does not have a login session ID", zap.String("session_id", presence.SessionID.String()))
-			continue
-		}
-
-		if otherLoginSession.id == loginSessionID {
-			// Do not disconnect _this_ match session's login session.
-			continue
-		}
-		s.logger.Warn("Disconnecting other login session", zap.String("this_login_session", loginSessionID.String()), zap.String("this_match_session", s.ID().String()), zap.String("other_match_session", matchSession.ID().String()), zap.String("other_session_id", otherLoginSession.id.String()))
-		s.sessionRegistry.Disconnect(s.ctx, otherLoginSession.id, false, runtime.PresenceReasonDisconnect)
-	}
-
-	s.tracker.TrackMulti(s.ctx, s.id, []*TrackerOp{
-		// EVR packet data stream for the match session by userID, and service ID
-		{
-			Stream: PresenceStream{Mode: StreamModeEvr, Subject: s.userID, Subcontext: svcMatchID},
-			Meta:   PresenceMeta{Format: s.format, Username: evrID.Token(), Hidden: true},
-		},
-		// EVR packet data stream for the match session by Session ID and service ID
-		{
-			Stream: PresenceStream{Mode: StreamModeEvr, Subject: s.id, Subcontext: svcMatchID},
-			Meta:   PresenceMeta{Format: s.format, Username: evrID.Token(), Hidden: true},
-		},
-	}, s.userID, true)
-
 	return nil
 }
 
