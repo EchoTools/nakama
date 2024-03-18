@@ -568,8 +568,9 @@ func SetDisplayNameByPriority(ctx context.Context, nk runtime.NakamaModule, user
 	}
 
 	walletUpdates := []*runtime.WalletUpdate{}
+	storageDeletes := []*runtime.StorageDelete{}
 	updateLedger := true
-	if _, _, err = nk.MultiUpdate(ctx, accountUpdates, storageWrites, walletUpdates, updateLedger); err != nil {
+	if _, _, err = nk.MultiUpdate(ctx, accountUpdates, storageWrites, storageDeletes, walletUpdates, updateLedger); err != nil {
 		return "", fmt.Errorf("error updating account: %w", err)
 	}
 	return displayName, nil
