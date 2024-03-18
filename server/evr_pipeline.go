@@ -177,10 +177,6 @@ func (p *EvrPipeline) SetApiServer(apiServer *ApiServer) {
 
 func (p *EvrPipeline) Stop() {}
 
-func isAuthenticatedSession(session *sessionWS) bool {
-	return session != nil && session.UserID() != uuid.Nil
-}
-
 func (p *EvrPipeline) ProcessRequestEvr(logger *zap.Logger, session *sessionWS, in evr.Message) bool {
 	if in == nil {
 		logger.Error("Received nil message, disconnecting client.")
@@ -274,7 +270,7 @@ func (p *EvrPipeline) ProcessRequestEvr(logger *zap.Logger, session *sessionWS, 
 
 	if idmessage, ok := in.(evr.IdentifyingMessage); ok {
 		// If the message is an identifying message, validate the session and evr id.
-		if err := session.MatchSession(idmessage.SessionID(), idmessage.EvrID()); err != nil {
+		if err := session.ValidateSession(idmessage.SessionID(), idmessage.EvrID()); err != nil {
 			logger.Error("Invalid session", zap.Error(err))
 			// Disconnect the client if the session is invalid.
 			return false

@@ -223,9 +223,9 @@ func (p *EvrPipeline) BuildMatchmakingQuery(ctx context.Context, broadcasters []
 
 		// If this is the user's current channel, then give it a +3 boost
 		if g.Id == msession.Label.Channel.String() {
-			qparts = append(qparts, fmt.Sprintf("properties.%s:T^3", s, 3))
+			qparts = append(qparts, fmt.Sprintf("properties.%s:T^3", s))
 		} else {
-			qparts = append(qparts, fmt.Sprintf("properties.%s:T"))
+			qparts = append(qparts, fmt.Sprintf("properties.%s:T", s))
 		}
 	}
 	query := strings.Join(qparts, " ")
