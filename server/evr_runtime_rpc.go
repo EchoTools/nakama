@@ -349,3 +349,7 @@ func LinkUserIdDeviceRpc(ctx context.Context, logger runtime.Logger, db *sql.DB,
 	// Return "success" and nil error on successful execution
 	return `{"success": true}`, nil
 }
+
+func LinkingAppRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	return "Hello Sir.", nil
+}

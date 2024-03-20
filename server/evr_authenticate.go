@@ -109,7 +109,7 @@ type LinkTicket struct {
 
 	// NOTE: The UserIDToken has an index that is created in the InitModule function
 	UserIDToken string `json:"evrid_token"` // the xplatform ID used by EchoVR as a UserID
-	// FIXME this is showing all zero values.
+
 	LoginRequest *evr.LoginData `json:"game_login_request"` // the login request payload that generated this link ticket
 }
 
@@ -751,7 +751,7 @@ func SetDisplayNameByChannelBySession(ctx context.Context, nk runtime.NakamaModu
 	options = append(options, discordUser.GlobalName)
 
 	// Get the guild
-	if groupId != uuid.Nil.String() {
+	if uuid.FromStringOrNil(groupId) != uuid.Nil {
 		// Get the guild by the user's primary guild
 		guild, err := discordRegistry.GetGuildByGroupId(ctx, groupId)
 		if err != nil {

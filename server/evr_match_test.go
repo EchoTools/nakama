@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"reflect"
 	"testing"
+
+	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
 func TestEvrMatch_EvrMatchState(t *testing.T) {
@@ -49,5 +51,233 @@ func TestInjectDisplayName(t *testing.T) {
 
 	if !reflect.DeepEqual(result, expected) {
 		t.Errorf("injectDisplayName() = %s, want %s", string(result), string(expected))
+	}
+}
+func TestSelectTeamForPlayer(t *testing.T) {
+	state := &EvrMatchState{
+		presences: map[string]*EvrMatchPresence{
+			"player1": {TeamIndex: evr.TeamBlue},
+			"player2": {TeamIndex: evr.TeamOrange},
+			"player3": {TeamIndex: evr.TeamSpectator},
+			"player4": {TeamIndex: evr.TeamOrange},
+			"player5": {TeamIndex: evr.TeamOrange},
+		},
+	}
+
+	tests := []struct {
+		name           string
+		preferred      int
+		lobbyType      LobbyType
+		presences      map[string]*EvrMatchPresence
+		expectedTeam   int
+		expectedResult bool
+	}{
+		{
+			name:           "UnassignedPlayer",
+			lobbyType:      PrivateLobby,
+			preferred:      evr.TeamUnassigned,
+			presences:      map[string]*EvrMatchPresence{},
+			expectedTeam:   evr.TeamBlue,
+			expectedResult: true,
+		},
+		{
+			name:      "Public match, blue team full, puts the player on orange",
+			lobbyType: PublicLobby,
+			preferred: evr.TeamBlue,
+			presences: map[string]*EvrMatchPresence{
+				"player1": {TeamIndex: evr.TeamBlue},
+				"player2": {TeamIndex: evr.TeamBlue},
+				"player3": {TeamIndex: evr.TeamBlue},
+				"player4": {TeamIndex: evr.TeamBlue},
+				"player5": {TeamIndex: evr.TeamOrange},
+				"player6": {TeamIndex: evr.TeamSpectator},
+				"player7": {TeamIndex: evr.TeamOrange},
+				"player8": {TeamIndex: evr.TeamOrange},
+			},
+			expectedTeam:   evr.TeamOrange,
+			expectedResult: true,
+		},
+		{
+			name:      "Public match, orange team full, puts the player on blue",
+			lobbyType: PublicLobby,
+			preferred: evr.TeamOrange,
+			presences: map[string]*EvrMatchPresence{
+				"player1": {TeamIndex: evr.TeamSpectator},
+				"player2": {TeamIndex: evr.TeamBlue},
+				"player3": {TeamIndex: evr.TeamBlue},
+				"player4": {TeamIndex: evr.TeamBlue},
+				"player5": {TeamIndex: evr.TeamOrange},
+				"player6": {TeamIndex: evr.TeamOrange},
+				"player7": {TeamIndex: evr.TeamOrange},
+				"player8": {TeamIndex: evr.TeamOrange},
+			},
+			expectedTeam:   evr.TeamBlue,
+			expectedResult: true,
+		},
+		{
+			name:      "Public match, teams equal, use preference",
+			lobbyType: PublicLobby,
+			preferred: evr.TeamOrange,
+			presences: map[string]*EvrMatchPresence{
+				"player1": {TeamIndex: evr.TeamSpectator},
+				"player2": {TeamIndex: evr.TeamBlue},
+				"player3": {TeamIndex: evr.TeamBlue},
+				"player4": {TeamIndex: evr.TeamBlue},
+				"player5": {TeamIndex: evr.TeamOrange},
+				"player6": {TeamIndex: evr.TeamOrange},
+				"player7": {TeamIndex: evr.TeamOrange},
+				"player8": {TeamIndex: evr.TeamSpectator},
+			},
+			expectedTeam:   evr.TeamOrange,
+			expectedResult: true,
+		},
+		{
+			name:      "Public match, full reject",
+			lobbyType: PublicLobby,
+			preferred: evr.TeamBlue,
+			presences: map[string]*EvrMatchPresence{
+				"player1": {TeamIndex: evr.TeamBlue},
+				"player2": {TeamIndex: evr.TeamBlue},
+				"player3": {TeamIndex: evr.TeamBlue},
+				"player4": {TeamIndex: evr.TeamBlue},
+				"player5": {TeamIndex: evr.TeamOrange},
+				"player6": {TeamIndex: evr.TeamOrange},
+				"player7": {TeamIndex: evr.TeamOrange},
+				"player8": {TeamIndex: evr.TeamOrange},
+			},
+			expectedTeam:   evr.TeamUnassigned,
+			expectedResult: false,
+		},
+		{
+			name:      "Public match, spectators full, reject",
+			lobbyType: PublicLobby,
+			preferred: evr.TeamSpectator,
+			presences: map[string]*EvrMatchPresence{
+				"player1": {TeamIndex: evr.TeamBlue},
+				"player2": {TeamIndex: evr.TeamBlue},
+				"player3": {TeamIndex: evr.TeamSpectator},
+				"player4": {TeamIndex: evr.TeamSpectator},
+				"player5": {TeamIndex: evr.TeamSpectator},
+				"player6": {TeamIndex: evr.TeamSpectator},
+				"player7": {TeamIndex: evr.TeamSpectator},
+				"player8": {TeamIndex: evr.TeamSpectator},
+			},
+			expectedTeam:   evr.TeamUnassigned,
+			expectedResult: false,
+		},
+		{
+			name:      "Private match, use preference",
+			lobbyType: PrivateLobby,
+			preferred: evr.TeamOrange,
+			presences: map[string]*EvrMatchPresence{
+				"player1": {TeamIndex: evr.TeamBlue},
+				"player2": {TeamIndex: evr.TeamBlue},
+				"player3": {TeamIndex: evr.TeamBlue},
+				"player4": {TeamIndex: evr.TeamBlue},
+				"player5": {TeamIndex: evr.TeamSpectator},
+				"player6": {TeamIndex: evr.TeamSpectator},
+				"player7": {TeamIndex: evr.TeamSpectator},
+				"player8": {TeamIndex: evr.TeamOrange},
+			},
+			expectedTeam:   evr.TeamOrange,
+			expectedResult: true,
+		},
+		{
+			name:      "Private match, use preference (5 player teams)",
+			lobbyType: PrivateLobby,
+			preferred: evr.TeamOrange,
+			presences: map[string]*EvrMatchPresence{
+				"player1": {TeamIndex: evr.TeamSpectator},
+				"player2": {TeamIndex: evr.TeamBlue},
+				"player3": {TeamIndex: evr.TeamBlue},
+				"player4": {TeamIndex: evr.TeamBlue},
+				"player5": {TeamIndex: evr.TeamOrange},
+				"player6": {TeamIndex: evr.TeamOrange},
+				"player7": {TeamIndex: evr.TeamOrange},
+				"player8": {TeamIndex: evr.TeamOrange},
+			},
+			expectedTeam:   evr.TeamOrange,
+			expectedResult: true,
+		},
+		{
+			name:      "Private match, preference full, put on other team",
+			lobbyType: PrivateLobby,
+			preferred: evr.TeamOrange,
+			presences: map[string]*EvrMatchPresence{
+				"player1":  {TeamIndex: evr.TeamSpectator},
+				"player2":  {TeamIndex: evr.TeamBlue},
+				"player3":  {TeamIndex: evr.TeamBlue},
+				"player4":  {TeamIndex: evr.TeamBlue},
+				"player5":  {TeamIndex: evr.TeamBlue},
+				"player6":  {TeamIndex: evr.TeamOrange},
+				"player7":  {TeamIndex: evr.TeamOrange},
+				"player8":  {TeamIndex: evr.TeamOrange},
+				"player9":  {TeamIndex: evr.TeamOrange},
+				"player10": {TeamIndex: evr.TeamOrange},
+			},
+			expectedTeam:   evr.TeamBlue,
+			expectedResult: true,
+		},
+		{
+			name:      "Full private match, puts the player on spectator",
+			lobbyType: PrivateLobby,
+			preferred: evr.TeamOrange,
+			presences: map[string]*EvrMatchPresence{
+				"player1":  {TeamIndex: evr.TeamBlue},
+				"player2":  {TeamIndex: evr.TeamBlue},
+				"player3":  {TeamIndex: evr.TeamBlue},
+				"player4":  {TeamIndex: evr.TeamBlue},
+				"player5":  {TeamIndex: evr.TeamBlue},
+				"player6":  {TeamIndex: evr.TeamOrange},
+				"player7":  {TeamIndex: evr.TeamOrange},
+				"player8":  {TeamIndex: evr.TeamOrange},
+				"player9":  {TeamIndex: evr.TeamOrange},
+				"player10": {TeamIndex: evr.TeamOrange},
+			},
+			expectedTeam:   evr.TeamSpectator,
+			expectedResult: true,
+		},
+		{
+			name:      "Private match, spectators full, reject",
+			lobbyType: PrivateLobby,
+			preferred: evr.TeamSpectator,
+			presences: map[string]*EvrMatchPresence{
+				"player1": {TeamIndex: evr.TeamBlue},
+				"player2": {TeamIndex: evr.TeamBlue},
+				"player3": {TeamIndex: evr.TeamSpectator},
+				"player4": {TeamIndex: evr.TeamSpectator},
+				"player5": {TeamIndex: evr.TeamSpectator},
+				"player6": {TeamIndex: evr.TeamSpectator},
+				"player7": {TeamIndex: evr.TeamSpectator},
+				"player8": {TeamIndex: evr.TeamSpectator},
+			},
+			expectedTeam:   evr.TeamUnassigned,
+			expectedResult: false,
+		},
+	}
+
+	for _, tt := range tests {
+		presence := &EvrMatchPresence{
+			TeamIndex: tt.preferred,
+		}
+		state.presences = tt.presences
+		state.LobbyType = tt.lobbyType
+		if state.LobbyType == PublicLobby {
+			state.TeamSize = 4
+		} else {
+			state.TeamSize = 5
+		}
+
+		t.Run(tt.name, func(t *testing.T) {
+			team, result := selectTeamForPlayer(presence, state)
+
+			if team != tt.expectedTeam {
+				t.Errorf("selectTeamForPlayer() returned incorrect team, got: %d, want: %d", team, tt.expectedTeam)
+			}
+
+			if result != tt.expectedResult {
+				t.Errorf("selectTeamForPlayer() returned incorrect result, got: %t, want: %t", result, tt.expectedResult)
+			}
+		})
 	}
 }

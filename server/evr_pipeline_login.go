@@ -381,6 +381,13 @@ func (p *EvrPipeline) channelInfoRequest(ctx context.Context, logger *zap.Logger
 	sort.SliceStable(groups, func(i, j int) bool {
 		return groups[i].EdgeCount > groups[j].EdgeCount
 	})
+	// XXX TESTING
+	// log a comma-delimited list of the groups with their edge counts
+	groupsStr := ""
+	for _, g := range groups {
+		groupsStr += fmt.Sprintf("%s: %d, ", g.GetName(), g.EdgeCount)
+	}
+	logger.Debug("Groups", zap.String("groups", groupsStr))
 
 	// Limit to 4 results
 	if len(groups) > 4 {
@@ -723,13 +730,14 @@ func (p *EvrPipeline) updateProfile(ctx context.Context, logger *zap.Logger, ses
 		}
 	}()
 	// Update the displayname based on the user's selected channel.
-	groupId := request.ClientProfile.Social.Group
-	if groupId != "" {
-		displayName, err := SetDisplayNameByChannelBySession(ctx, p.runtimeModule, p.discordRegistry, session, groupId)
+	groupId := uuid.FromStringOrNil(request.ClientProfile.Social.Group)
+	if groupId != uuid.Nil {
+		displayName, err := SetDisplayNameByChannelBySession(ctx, p.runtimeModule, p.discordRegistry, session, groupId.String())
 		if err != nil {
 			logger.Error("Failed to set display name.", zap.Error(err))
+		} else {
+			request.ClientProfile.DisplayName = displayName
 		}
-		request.ClientProfile.DisplayName = displayName
 	}
 	// Write the profile to storage.
 	requestProfileJson, err := json.Marshal(request.ClientProfile)
@@ -1096,11 +1104,7 @@ func (p *EvrPipeline) documentRequest(ctx context.Context, logger *zap.Logger, s
 			return fmt.Errorf("error unmarshalling document %s: %w: %s", key, err, data)
 		}
 
-		// Get the players current channel
-		channel, err := p.getPlayersCurrentChannel(ctx, session)
-		if err != nil {
-			return status.Errorf(codes.Internal, "Failed to get players current channel: %v", err)
-		}
+		// If the channel is nil, then check everything.
 
 		// Get the players current suspensions
 		if key == "en,eula" {
@@ -1109,10 +1113,32 @@ func (p *EvrPipeline) documentRequest(ctx context.Context, logger *zap.Logger, s
 				return fmt.Errorf("failed to cast document to EulaDocument")
 			}
 
-			// Check the suspension status for this channel (and if they are suspended, every all of the other guilds)
-			suspensions, err := p.checkSuspensionStatus(ctx, logger, session.UserID().String(), channel)
+			// Get the players current channel
+			channel, err := p.getPlayersCurrentChannel(ctx, session)
 			if err != nil {
-				return fmt.Errorf("failed to check suspension status: %w", err)
+				return status.Errorf(codes.Internal, "Failed to get players current channel: %v", err)
+			}
+			// FIXME make sure the use a valid channel so the user's channelInfo comes through.
+			suspensions := make([]*SuspensionStatus, 0)
+			if channel != uuid.Nil {
+				// Check the suspension status for this channel (and if they are suspended, check the other guilds)
+				suspensions, err = p.checkSuspensionStatus(ctx, logger, session.UserID().String(), channel)
+				if err != nil {
+					return fmt.Errorf("failed to check suspension status: %w", err)
+				}
+
+			} else {
+				// The user is not in a channel, so check all of their guilds.
+				groups, err := p.discordRegistry.GetGuildGroups(ctx, session.userID.String())
+				if err != nil {
+					return fmt.Errorf("error getting guild groups: %w", err)
+				}
+				for _, g := range groups {
+					suspensions, err = p.checkSuspensionStatus(ctx, logger, session.UserID().String(), uuid.FromStringOrNil(g.GetId()))
+					if err != nil {
+						return fmt.Errorf("failed to check suspension status: %w", err)
+					}
+				}
 			}
 
 			if len(suspensions) > 0 {

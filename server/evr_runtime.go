@@ -79,23 +79,19 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	}
 
 	// Register RPC's for device linking
-	if err = initializer.RegisterRpc("signin/discord", DiscordSignInRpc); err != nil {
-		logger.Error("Unable to register: %v", err)
-		return
+	rpcs := map[string]func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error){
+		"link/device":         LinkDeviceRpc,
+		"link/usernamedevice": LinkUserIdDeviceRpc,
+		"signin/discord":      DiscordSignInRpc,
+		"match":               MatchRpc,
+		"link":                LinkingAppRpc,
 	}
 
-	if err = initializer.RegisterRpc("link/device", LinkDeviceRpc); err != nil {
-		logger.Error("Unable to register: %v", err)
-		return
-	}
-	if err = initializer.RegisterRpc("link/usernamedevice", LinkUserIdDeviceRpc); err != nil {
-		logger.Error("Unable to register: %v", err)
-		return
-	}
-
-	if err = initializer.RegisterRpc("match", MatchRpc); err != nil {
-		logger.Error("Unable to register: %v", err)
-		return
+	for name, rpc := range rpcs {
+		if err = initializer.RegisterRpc(name, rpc); err != nil {
+			logger.Error("Unable to register: %v", err)
+			return
+		}
 	}
 
 	go RegisterIndexes(initializer)

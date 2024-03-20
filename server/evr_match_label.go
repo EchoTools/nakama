@@ -50,6 +50,15 @@ func (l Label) Unescaped() string {
 	return fmt.Sprintf("%clabel.%s:%s%s", l.Op, l.Name, l.Value, b)
 }
 
+// Escaped returns the label as a query string (e.g. "+label.mode:social_2\.0^2")
+func (l Label) Property() string {
+	b := ""
+	if l.boost != 0 {
+		b = fmt.Sprintf("^%d", l.boost)
+	}
+	return fmt.Sprintf("%cproperties.%s:%s%s", l.Op, l.Name, l.Value, b)
+}
+
 // Label returns the label as a label string (e.g. "lobbytype=0")
 
 // The symbol representation of the label name (only used by a few labels)
@@ -209,12 +218,15 @@ func (t TeamIndex) String() string {
 type GameMode evr.Symbol // Symbol
 
 func (m GameMode) Query(o QueryOperator, b int) string {
+	return m.Label(o, b).Escaped()
+}
+func (m GameMode) Label(o QueryOperator, b int) Label {
 	return Label{
 		Op:    rune(o),
 		Name:  "mode",
 		Value: evr.Symbol(m).Token().String(),
 		boost: b,
-	}.Escaped()
+	}
 }
 
 func (m GameMode) String() string {
@@ -244,6 +256,14 @@ func (l Level) Query(o QueryOperator, b int) string {
 	}.Escaped()
 }
 
+func (l Level) Label(o QueryOperator, b int) Label {
+	return Label{
+		Op:    rune(o),
+		Name:  "level",
+		Value: evr.Symbol(l).Token().String(),
+		boost: b,
+	}
+}
 func (l *MatchStatGroup) Query(o QueryOperator, b int) string {
 	return fmt.Sprintf("%clabel.statgroup:%s^%d", o, queryEscape(string(*l)), b)
 }
@@ -288,7 +308,7 @@ func (c Channel) Query(o QueryOperator, b int) string {
 		Name:  "channel",
 		Value: c.String(),
 		boost: b,
-	}.Escaped()
+	}.Unescaped()
 }
 
 func (c Channel) String() string {
@@ -369,7 +389,7 @@ func (c MatchId) Query(o QueryOperator, b int) string {
 		Name:  "match_id",
 		Value: uuid.UUID(c).String(),
 		boost: b,
-	}.Escaped()
+	}.Unescaped()
 }
 
 func queryEscape(input string) string {

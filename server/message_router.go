@@ -80,9 +80,13 @@ func (r *LocalMessageRouter) SendToPresenceIDs(logger *zap.Logger, presenceIDs [
 				if message.GetOpCode() == OpCodeEvrPacketData {
 					payloadEvr = message.GetData()
 				}
+			case *rtapi.Envelope_Match:
+				return
 			default:
-				logger.Error("Unknown message type", zap.Any("message", envelope.Message))
-				payloadEvr = []byte{}
+				if logger.Core().Enabled(zap.DebugLevel) {
+					logger.Error("Unknown message type", zap.Any("message", envelope.Message))
+				}
+				return
 			}
 			err = session.SendBytes(payloadEvr, reliable)
 		case SessionFormatProtobuf:

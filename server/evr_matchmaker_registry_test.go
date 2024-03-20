@@ -22,18 +22,14 @@ func TestMatchmakingRegistry_GetPingCandidates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error creating test match registry: %v", err)
 	}
+	config := NewConfig(logger)
 
-	// Create a MatchmakingRegistry instance
-	config := &MatchmakingRegistryConfig{
-		Logger:        logger,
-		MatchRegistry: matchRegistry,
-		Metrics:       &testMetrics{},
-	}
-	r := NewMatchmakingRegistry(config)
+	matchmaker, _, _ := createTestMatchmaker(t, logger, false, nil)
+	r := NewMatchmakingRegistry(logger, matchRegistry, matchmaker, &testMetrics{}, config)
 
 	// Create a user ID and endpoints for testing
 	userId := uuid.Must(uuid.NewV4())
-	endpoints := []*evr.Endpoint{
+	endpoints := []evr.Endpoint{
 		{
 			InternalIP: net.ParseIP("192.168.1.1"),
 			Port:       1234,
@@ -59,7 +55,7 @@ func TestMatchmakingRegistry_GetPingCandidates(t *testing.T) {
 	cache := r.GetCache(userId)
 	cache.Lock()
 	for i, endpoint := range endpoints {
-		cache.Store[endpoint.ID()] = &EndpointWithLatency{
+		cache.Store[endpoint.ID()] = EndpointWithLatency{
 			Endpoint:  endpoint,
 			RTT:       rttUnit * time.Duration(i+1),
 			Timestamp: time.Now(),
@@ -84,7 +80,12 @@ func TestMatchmakingRegistry_GetPingCandidates(t *testing.T) {
 		r.UpdateBroadcasters(endpoints[:2])
 		cache := r.GetCache(userId)
 		cache.Lock()
-		cache.Store[endpoints[0].ID()].Timestamp = time.Now().Add(-2 * latencyCacheExpiry)
+		cache.Store[endpoints[0].ID()] = EndpointWithLatency{
+			Endpoint:  endpoints[0],
+			RTT:       rttUnit,
+			Timestamp: time.Now().Add(-2 * latencyCacheExpiry),
+		}
+
 		cache.Unlock()
 
 		pingCandidates := r.GetPingCandidates(userId, endpoints)
@@ -98,8 +99,17 @@ func TestMatchmakingRegistry_GetPingCandidates(t *testing.T) {
 		r.UpdateBroadcasters(endpoints[:2])
 		cache := r.GetCache(userId)
 		cache.Lock()
-		cache.Store[endpoints[0].ID()].Timestamp = time.Now().Add(-2 * latencyCacheExpiry)
-		cache.Store[endpoints[2].ID()].Timestamp = time.Now().Add(-3 * latencyCacheExpiry)
+		cache.Store[endpoints[0].ID()] = EndpointWithLatency{
+			Endpoint:  endpoints[0],
+			RTT:       rttUnit,
+			Timestamp: time.Now().Add(-2 * latencyCacheExpiry),
+		}
+		cache.Store[endpoints[2].ID()] = EndpointWithLatency{
+			Endpoint:  endpoints[2],
+			RTT:       rttUnit,
+			Timestamp: time.Now(),
+		}
+
 		cache.Unlock()
 
 		pingCandidates := r.GetPingCandidates(userId, endpoints)
@@ -115,9 +125,9 @@ func TestMatchmakingRegistry_GetPingCandidates(t *testing.T) {
 		cache := r.GetCache(userId)
 		cache.Lock()
 
-		endpoints := make([]*evr.Endpoint, 20)
+		endpoints := make([]evr.Endpoint, 20)
 		for i := 1; i <= 20; i++ {
-			endpoints[i-1] = &evr.Endpoint{
+			endpoints[i-1] = evr.Endpoint{
 				InternalIP: net.ParseIP(fmt.Sprintf("192.168.1.%d", i)),
 				Port:       1234,
 				ExternalIP: net.ParseIP(fmt.Sprintf("1.1.1.%d", i)),
@@ -128,4 +138,97 @@ func TestMatchmakingRegistry_GetPingCandidates(t *testing.T) {
 		pingCandidates := r.GetPingCandidates(userId, endpoints)
 		assert.Equal(t, 16, len(pingCandidates), "Expected 16 ping candidates")
 	})
+}
+func TestMatchmakingRegistry_UpdateBroadcasters(t *testing.T) {
+
+	logger, _ := zap.NewProduction()
+	defer logger.Sync() // flushes buffer, if any
+
+	matchRegistry, _, err := createTestMatchRegistry(t, logger)
+	if err != nil {
+		t.Fatalf("error creating test match registry: %v", err)
+	}
+
+	matchmaker, _, _ := createTestMatchmaker(t, logger, false, nil)
+	r := NewMatchmakingRegistry(logger, matchRegistry, matchmaker, &testMetrics{}, NewConfig(logger))
+
+	// Create test endpoints
+	endpoints := []evr.Endpoint{
+		{
+			InternalIP: net.ParseIP("192.168.1.1"),
+			Port:       1234,
+			ExternalIP: net.ParseIP("1.1.1.1"),
+		},
+		{
+			InternalIP: net.ParseIP("192.168.1.2"),
+			Port:       1235,
+			ExternalIP: net.ParseIP("1.1.1.2"),
+		},
+	}
+
+	// Test case 1: Update broadcasters with new endpoints
+	t.Run("UpdateBroadcastersWithNewEndpoints", func(t *testing.T) {
+		r.UpdateBroadcasters(endpoints)
+
+		// Verify that the broadcasters have been updated correctly
+		r.Lock()
+		defer r.Unlock()
+		assert.Equal(t, 2, len(r.broadcasters), "Expected 2 broadcasters")
+		assert.Equal(t, endpoints[0], r.broadcasters[endpoints[0].ID()], "Expected first broadcaster to be updated")
+		assert.Equal(t, endpoints[1], r.broadcasters[endpoints[1].ID()], "Expected second broadcaster to be updated")
+	})
+
+	// Test case 2: Update broadcasters with existing endpoints
+	t.Run("UpdateBroadcastersWithExistingEndpoints", func(t *testing.T) {
+		// Add additional endpoints
+		existingEndpoints := []evr.Endpoint{
+			{
+				InternalIP: net.ParseIP("192.168.1.3"),
+				Port:       1236,
+				ExternalIP: net.ParseIP("1.1.1.3"),
+			},
+			{
+				InternalIP: net.ParseIP("192.168.1.4"),
+				Port:       1237,
+				ExternalIP: net.ParseIP("1.1.1.4"),
+			},
+		}
+		allEndpoints := append(endpoints, existingEndpoints...)
+		r.UpdateBroadcasters(allEndpoints)
+
+		// Verify that the broadcasters have been updated correctly
+		r.Lock()
+		defer r.Unlock()
+		assert.Equal(t, 4, len(r.broadcasters), "Expected 4 broadcasters")
+		assert.Equal(t, allEndpoints[0], r.broadcasters[allEndpoints[0].ID()], "Expected first broadcaster to be updated")
+		assert.Equal(t, allEndpoints[1], r.broadcasters[allEndpoints[1].ID()], "Expected second broadcaster to be updated")
+		assert.Equal(t, existingEndpoints[0], r.broadcasters[existingEndpoints[0].ID()], "Expected third broadcaster to be updated")
+		assert.Equal(t, existingEndpoints[1], r.broadcasters[existingEndpoints[1].ID()], "Expected fourth broadcaster to be updated")
+	})
+}
+
+func Test_ipToKey(t *testing.T) {
+	type args struct {
+		ip net.IP
+	}
+	tests := []struct {
+		name string
+		args args
+		want string
+	}{
+		{
+			name: "IPv4",
+			args: args{
+				ip: net.ParseIP("192.168.1.1"),
+			},
+			want: "rttc0a80101",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ipToKey(tt.args.ip); got != tt.want {
+				t.Errorf("ipToKey() = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }
