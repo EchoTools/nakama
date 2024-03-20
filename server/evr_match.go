@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"reflect"
@@ -116,6 +117,7 @@ type EvrMatchPresence struct {
 	EvrId         evr.EvrId // The player's evr id.
 	PlayerSession uuid.UUID // Match-scoped session id.
 	TeamIndex     int       // the team index the player prefers/has been assigned to.
+	PartyID       uuid.UUID // The party id the player is in.
 }
 
 func (p *EvrMatchPresence) String() string {
@@ -176,7 +178,7 @@ type JoinMeta struct {
 // This also makes it easier to update the match label, and query against it.
 type EvrMatchState struct {
 	MatchId              uuid.UUID    `json:"match_id,omitempty"`               // The Session Id used by EVR (the same as match id)
-	Open                 bool         `json:"open,omitempty"`                   // Whether the lobby is open to new players (Matching Only)
+	Ready                bool         `json:"open,omitempty"`                   // Whether the lobby is open to new players (Matching Only)
 	LobbyType            LobbyType    `json:"lobby_type"`                       // The type of lobby (Public, Private, Unassigned) (EVR)
 	BroadcasterSessionId string       `json:"broadcaster_session_id,omitempty"` // The broadcaster's Session ID
 	BroadcasterUserId    string       `json:"broadcaster_user_id,omitempty"`    // The user id of the broadcaster.
@@ -196,13 +198,13 @@ type EvrMatchState struct {
 	LevelSelection  MatchLevelSelection `json:"level_selection,omitempty"`  // The level selection method (EVR).
 	SessionSettings evr.SessionSettings `json:"session_settings,omitempty"` // The session settings for the match (EVR).
 
-	Tags        []string  `json:"tags,omitempty"`          // The tags given on the urlparam for the match.
-	MaxSize     uint8     `json:"max_size,omitempty"`      // The total lobby size limit (players + specs)
-	Size        int       `json:"size,omitempty"`          // The number of players (not including spectators) in the match.
-	MaxTeamSize int       `json:"max_team_size,omitempty"` // The size of each team in arena/combat (either 4 or 5)
-	TeamIndex   TeamIndex `json:"team,omitempty"`          // What team index a player prefers (Used by Matching only)
-	EvrIds      []string  `json:"evr_ids,omitempty"`       // []evrIdToken Matching only
-	UserIds     []string  `json:"user_ids,omitempty"`      // The user ids of the players in the match.
+	Tags      []string  `json:"tags,omitempty"`      // The tags given on the urlparam for the match.
+	MaxSize   uint8     `json:"limit,omitempty"`     // The total lobby size limit (players + specs)
+	Size      int       `json:"size,omitempty"`      // The number of players (not including spectators) in the match.
+	TeamSize  int       `json:"team_size,omitempty"` // The size of each team in arena/combat (either 4 or 5)
+	TeamIndex TeamIndex `json:"team,omitempty"`      // What team index a player prefers (Used by Matching only)
+	EvrIds    []string  `json:"evr_ids,omitempty"`   // []evrIdToken Matching only
+	UserIds   []string  `json:"user_ids,omitempty"`  // The user ids of the players in the match.
 
 	presences               map[string]*EvrMatchPresence // [userId]EvrMatchPresence
 	broadcaster             runtime.Presence             // The broadcaster's presence
@@ -285,7 +287,7 @@ func NewEvrMatchState(endpoint evr.Endpoint, config *EvrMatchState, sessionId st
 	// the players. It would have to join first though.  - @thesprockee
 	initState := *config
 
-	initState.Open = false
+	initState.Ready = false
 	initState.LobbyType = UnassignedLobby
 	initState.Mode = evr.ModeUnloaded
 	initState.Level = evr.LevelUnloaded
@@ -352,9 +354,9 @@ func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql
 }
 
 // selectTeamForPlayer decides which team to assign a player to.
-func selectTeamForPlayer(t int, mode evr.Symbol, presences map[string]*EvrMatchPresence) (int, bool) {
-
-	if len(presences) >= MaxMatchSize {
+func selectTeamForPlayer(presence *EvrMatchPresence, state *EvrMatchState) (int, bool) {
+	t := presence.TeamIndex
+	if len(state.presences) >= MaxMatchSize {
 		// Lobby full, reject.
 		return t, false
 	}
@@ -364,38 +366,47 @@ func selectTeamForPlayer(t int, mode evr.Symbol, presences map[string]*EvrMatchP
 		t = evr.TeamBlue
 	}
 
-	teams := lo.GroupBy(lo.Values(presences), func(p *EvrMatchPresence) int { return p.TeamIndex })
+	teams := lo.GroupBy(lo.Values(state.presences), func(p *EvrMatchPresence) int { return p.TeamIndex })
 
 	blueTeam := teams[evr.TeamBlue]
 	orangeTeam := teams[evr.TeamOrange]
 	playerpop := len(blueTeam) + len(orangeTeam)
 	spectators := len(teams[evr.TeamSpectator]) + len(teams[evr.TeamModerator])
 
-	// Private Arena and Combat lobbies have a 10 player limit.
-	if t == evr.TeamBlue || t == evr.TeamOrange {
-		if mode == evr.ModeArenaPrivate || mode == evr.ModeCombatPrivate && playerpop >= 10 {
-			// Teams are full, send to spectator
-			t = evr.TeamSpectator
-		} else {
-			// Public Match
-			if playerpop >= 8 {
-				// Teams are full, reject.
-				return t, false
-			}
-			// Assign to the smallest team.
-			if len(blueTeam) < len(orangeTeam) {
-				t = evr.TeamBlue
-			} else {
-				t = evr.TeamOrange
-			}
+	// If the teams are full
+	if (t == evr.TeamBlue || t == evr.TeamOrange) && playerpop >= state.TeamSize*2 {
+		// If it's a public, reject them.
+		if state.LobbyType == PublicLobby {
+			return evr.TeamUnassigned, false
 		}
-	} else {
+		// Put them on spectator
+		t = evr.TeamSpectator
+	}
+
+	// If the player is a spectator or moderator, assign them to the spectator team.
+	if t == evr.TeamSpectator || t == evr.TeamModerator {
 		// Spectator or Moderator
 		if spectators >= 6 {
 			// Spectator population is full, reject.
-			return t, false
+			return evr.TeamUnassigned, false
+		}
+		return t, true
+	}
+
+	if state.LobbyType == PrivateLobby {
+		// If the player's team has room, assign them to it.
+		if len(teams[t]) < state.TeamSize {
+			return t, true
 		}
 	}
+
+	// Assign them to the lowest population team
+	if len(blueTeam) < len(orangeTeam) {
+		t = evr.TeamBlue
+	} else {
+		t = evr.TeamOrange
+	}
+
 	return t, true
 }
 
@@ -452,7 +463,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		}
 	}
 
-	if mp.TeamIndex, ok = selectTeamForPlayer(mp.TeamIndex, state.Mode, state.presences); !ok {
+	if mp.TeamIndex, ok = selectTeamForPlayer(&mp, state); !ok {
 		// The lobby is full, reject the player.
 		return state, false, "lobby full"
 	}
@@ -478,7 +489,7 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 		if p.GetSessionId() == state.BroadcasterSessionId {
 			logger.Debug("Broadcaster joined the match.")
 			state.broadcaster = p
-			state.Open = true // Available
+			state.Ready = true // Available
 
 			if state.LobbyType == UnassignedLobby {
 				// This is a parking match. do nothing.
@@ -495,47 +506,35 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 				logger.Error("failed to dispatch load message to broadcaster: %v", err)
 				return nil
 			}
+
+			// If there are already players in this match, then notify them to load.
+			for _, presence := range state.presences {
+				err := m.sendPlayerStart(ctx, logger, dispatcher, state, presence)
+				if err != nil {
+					logger.Error("failed to send player start: %v", err)
+				}
+			}
+
 			continue
 		}
+
+		// This is a player joining
 
 		// the cache entry is kept even after a player leaves. This helps put them back on the same team.
 		matchPresence, ok := state.presenceCache[p.GetUserId()]
 		if !ok {
 			// TODO FIXME Kick the player from the match.
 			logger.Error("Player not in cache. This shouldn't happen.")
-			return state
+			return errors.New("player not in cache")
 		}
 
 		state.presences[p.GetUserId()] = matchPresence
-		// NOTE TODO Should multiple players be treated as a group?
 
-		// TODO FIXME: Validate access to the moderator team (in the calling function).
-		// TODO FIXME: Determine what team the player will be on. (by balance, limit, etc.)
-
-		// Add the player to a direct match presence stream.
-
-		// Send the success messages to the client and server.
-		// The server still technically has to accept the player session, but
-		// it's assumed that will be successful. If the server rejects them, they will
-		// be removed from the match.
-		gameMode := state.Mode
-		teamIndex := int16(matchPresence.TeamIndex)
-		channel := state.Channel
-		matchSession := uuid.UUID(state.MatchId)
-		endpoint := state.Endpoint
-		success := evr.NewLobbySessionSuccess(gameMode, matchSession, channel, endpoint, teamIndex)
-		successV4 := success.Version4()
-		successV5 := success.Version5()
-		messages := []evr.Message{
-			successV4,
-			successV5,
-			evr.NewSTcpConnectionUnrequireEvent(),
+		err := m.sendPlayerStart(ctx, logger, dispatcher, state, matchPresence)
+		if err != nil {
+			logger.Error("failed to send player start: %v", err)
 		}
 
-		// Dispatch the message for delivery.
-		if err := m.dispatchMessages(ctx, logger, dispatcher, messages, []runtime.Presence{state.broadcaster, p}, nil); err != nil {
-			logger.Error("failed to dispatch success message to broadcaster: %v", err)
-		}
 	}
 
 	state.rebuildCache()
@@ -545,6 +544,30 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 		logger.Error("failed to update label: %v", err)
 	}
 	return state
+}
+
+func (m *EvrMatch) sendPlayerStart(ctx context.Context, logger runtime.Logger, dispatcher runtime.MatchDispatcher, state *EvrMatchState, p *EvrMatchPresence) error {
+
+	gameMode := state.Mode
+	teamIndex := int16(p.TeamIndex)
+	channel := state.Channel
+	matchSession := uuid.UUID(state.MatchId)
+	endpoint := state.Endpoint
+	success := evr.NewLobbySessionSuccess(gameMode, matchSession, channel, endpoint, teamIndex)
+	successV4 := success.Version4()
+	successV5 := success.Version5()
+	messages := []evr.Message{
+		successV4,
+		successV5,
+		evr.NewSTcpConnectionUnrequireEvent(),
+	}
+
+	// Dispatch the message for delivery.
+	if err := m.dispatchMessages(ctx, logger, dispatcher, messages, []runtime.Presence{state.broadcaster, p}, nil); err != nil {
+		logger.Error("failed to dispatch success message to broadcaster: %v", err)
+		return err
+	}
+	return nil
 }
 
 // MatchLeave is called after a player leaves the match.
@@ -679,6 +702,12 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		}
 		return state, string(jsonData)
 	case SignalStartSession:
+		// if the match is already started, return an error.
+		if state.LobbyType != UnassignedLobby {
+			logger.Error("Failed to start session: session already started")
+			return state, "session already started"
+		}
+
 		// Start a new session by loading a level
 		newState := &EvrMatchState{}
 		err := json.Unmarshal(signal.Data, newState)
@@ -691,9 +720,9 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		state.MaxSize = newState.MaxSize
 		state.LobbyType = newState.LobbyType
 		state.Mode = newState.Mode
-		state.MaxTeamSize = newState.MaxTeamSize
+		state.TeamSize = newState.TeamSize
 		state.Level = newState.Level
-		state.Open = newState.Open
+		state.Ready = newState.Ready
 		state.SessionSettings = newState.SessionSettings
 		state.LevelSelection = newState.LevelSelection
 		if state.Level == 0xffffffffffffffff {

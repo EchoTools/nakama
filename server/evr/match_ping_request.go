@@ -62,17 +62,13 @@ func (m *LobbyPingRequest) Stream(s *EasyStream) error {
 	return nil
 }
 
-func NewLobbyPingRequest(rttMax int, endpoints []*Endpoint) *LobbyPingRequest {
-	targets := make([]Endpoint, len(endpoints))
-	for i, e := range endpoints {
-		targets[i] = *e
-	}
+func NewLobbyPingRequest(rttMax int, endpoints []Endpoint) *LobbyPingRequest {
 
 	return &LobbyPingRequest{
 		Unk0:      0,
 		Unk1:      4,
 		RTTMax:    uint32(rttMax),
-		Endpoints: targets,
+		Endpoints: endpoints,
 	}
 }
 
@@ -148,7 +144,15 @@ func (e Endpoint) ExternalAddress() string {
 
 // StringIps returns a string of "internalIP:externalIP"
 func (e Endpoint) ID() string {
-	return fmt.Sprintf("%s:%s", e.InternalIP.String(), e.ExternalIP.String())
+	intIP := e.InternalIP
+	if intIP == nil {
+		intIP = net.IPv4zero
+	}
+	extIP := e.ExternalIP
+	if e.ExternalIP == nil {
+		extIP = net.IPv4zero
+	}
+	return fmt.Sprintf("%s:%s", intIP.String(), extIP.String())
 }
 
 // String returns a string of "internalIP:externalIP:port"

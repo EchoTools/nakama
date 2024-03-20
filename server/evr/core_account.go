@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/go-playground/validator/v10"
+	"github.com/gofrs/uuid/v5"
 )
 
 var (
@@ -20,6 +21,54 @@ var (
 
 	EvrIdNil = EvrId{}
 )
+
+type GUID uuid.UUID
+
+// GUID is a wrapper around uuid.UUID to provide custom JSON marshaling and unmarshaling. (i.e. uppercase it)
+
+func (g GUID) String() string {
+	return strings.ToUpper(uuid.UUID(g).String())
+}
+
+func (g GUID) MarshalJSON() ([]byte, error) {
+	return json.Marshal(g.String())
+}
+
+func (g *GUID) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	u, err := uuid.FromString(s)
+	if err != nil {
+		return err
+	}
+	*g = GUID(u)
+	return nil
+}
+
+func (g GUID) MarshalBytes() []byte {
+	b := uuid.UUID(g).Bytes()
+	b[0], b[1], b[2], b[3] = b[3], b[2], b[1], b[0]
+	b[4], b[5] = b[5], b[4]
+	b[6], b[7] = b[7], b[6]
+	return b
+}
+
+func (g *GUID) UnmarshalBytes(b []byte) error {
+	if len(b) != 16 {
+		return fmt.Errorf("GUID: UUID must be exactly 16 bytes long, got %d bytes", len(b))
+	}
+	b[0], b[1], b[2], b[3] = b[3], b[2], b[1], b[0]
+	b[4], b[5] = b[5], b[4]
+	b[6], b[7] = b[7], b[6]
+	u, err := uuid.FromBytes(b)
+	if err != nil {
+		return err
+	}
+	*g = GUID(u)
+	return nil
+}
 
 func init() {
 	validate = validator.New()
@@ -167,7 +216,7 @@ type Social struct {
 	// WARNING: EchoVR dictates this struct/schema.
 	CommunityValuesVersion int64  `json:"community_values_version,omitempty" validate:"gte=0"`
 	SetupVersion           int64  `json:"setup_version,omitempty" validate:"gte=0"`
-	Group                  string `json:"group,omitempty" validate:"uuid_rfc4122"` // The channel
+	Group                  string `json:"group,omitempty" validate:"uuid_rfc4122"` // The channel. It is a GUID, uppercase.
 }
 
 type ServerProfile struct {
@@ -1484,7 +1533,6 @@ func NewClientProfile() ClientProfile {
 		Social: Social{
 			CommunityValuesVersion: 1,
 			SetupVersion:           1,
-			Group:                  "deadbeaf-dead-beef-dead-deadbeefdead",
 		},
 		NewUnlocks: []int64{},
 	}

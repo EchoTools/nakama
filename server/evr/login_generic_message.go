@@ -60,7 +60,7 @@ func (m GenericMessage) String() string {
 }
 
 type GenericMessageData struct {
-	Mode        uint64 `json:"matchtype"`
+	Mode        int64  `json:"matchtype"`
 	HeadsetType int    `json:"headsettype"`
 	Status      string `json:"status"`
 	LobbyType   uint8  `json:"lobbytype"`
@@ -71,7 +71,7 @@ type GenericMessageData struct {
 
 func NewGenericMessageData(matchType Symbol, headsetType int, status string, lobbyType LobbyType, lobbyId string, team int, roomId int) *GenericMessageData {
 	return &GenericMessageData{
-		Mode:        uint64(matchType),
+		Mode:        int64(matchType),
 		HeadsetType: int(headsetType),
 		Status:      status,
 		LobbyType:   uint8(lobbyType),

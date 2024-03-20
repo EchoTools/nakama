@@ -330,12 +330,12 @@ func (r *LocalDiscordRegistry) GetGuildGroupMetadata(ctx context.Context, groupI
 	// Fetch the group using the provided groupId
 	groups, err := r.nk.GroupsGetId(ctx, []string{groupId})
 	if err != nil {
-		return nil, fmt.Errorf("error getting group: %w", err)
+		return nil, fmt.Errorf("error getting group (%s): %w", groupId, err)
 	}
 
 	// Check if the group exists
 	if len(groups) == 0 {
-		return nil, fmt.Errorf("group not found")
+		return nil, fmt.Errorf("group not found: %s", groupId)
 	}
 
 	if groups[0].LangTag != "guild" {
@@ -367,7 +367,7 @@ func (r *LocalDiscordRegistry) GetGuildGroups(ctx context.Context, userId string
 	// Fetch the groups using the provided userId
 	groups, _, err := r.nk.UserGroupsList(ctx, userId, 100, nil, "")
 	if err != nil {
-		return nil, fmt.Errorf("error getting user groups: %w", err)
+		return nil, fmt.Errorf("error getting user `%s`'s group groups: %w", userId, err)
 	}
 	guildGroups := make([]*api.Group, 0, len(groups))
 	for _, g := range groups {
@@ -383,6 +383,8 @@ func (r *LocalDiscordRegistry) UpdateAccount(ctx context.Context, discordId stri
 
 	if r.metrics != nil {
 		timer := time.Now()
+
+		defer func() { r.logger.Debug("UpdateAccount took %dms", time.Since(timer)/time.Millisecond) }()
 		defer func() { r.metrics.CustomTimer("UpdateAccountFn", nil, time.Since(timer)) }()
 	}
 
@@ -425,7 +427,12 @@ func (r *LocalDiscordRegistry) UpdateAccount(ctx context.Context, discordId stri
 			userGroupIds = append(userGroupIds, g.Group.Id)
 		}
 	}
+	if r.metrics != nil {
+		timer := time.Now()
 
+		defer func() { r.logger.Debug("UpdateAccount (discord part) took %dms", time.Since(timer)/time.Millisecond) }()
+		defer func() { r.metrics.CustomTimer("UpdateAccountFn_discord", nil, time.Since(timer)) }()
+	}
 	guilds, err := r.bot.UserGuilds(100, "", "")
 	if err != nil {
 		return fmt.Errorf("error getting user guilds: %v", err)
@@ -529,6 +536,7 @@ func (r *LocalDiscordRegistry) GetUserIdByDiscordId(ctx context.Context, discord
 	}
 
 	if u.Username != username {
+		r.logger.Warn("Username mismatch: %s != %s, running full account update", u.Username, username)
 		go func() {
 			if err := r.UpdateAccount(ctx, discordId); err != nil {
 				return
@@ -814,6 +822,7 @@ func (r *LocalDiscordRegistry) InitializeDiscordBot(ctx context.Context, logger 
 			return
 		}
 		discordId := e.User.ID
+		// TODO FIXME Make this only update what changed.
 		err := r.UpdateAccount(ctx, discordId)
 		if err != nil {
 			logger.Debug("Error updating account: %w", err)

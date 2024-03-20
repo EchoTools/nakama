@@ -113,12 +113,8 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		runtimeModule:        nk,
 		runtimeLogger:        runtimeLogger,
 
-		discordRegistry: discordRegistry,
-		matchmakingRegistry: NewMatchmakingRegistry(&MatchmakingRegistryConfig{
-			Logger:        logger,
-			MatchRegistry: matchRegistry,
-			Metrics:       metrics,
-		}),
+		discordRegistry:     discordRegistry,
+		matchmakingRegistry: NewMatchmakingRegistry(logger, matchRegistry, matchmaker, metrics, config),
 
 		externalIP: DetermineExternalIPAddress(),
 
@@ -131,7 +127,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		placeholderEmail: config.GetRuntime().Environment["PLACEHOLDER_EMAIL_DOMAIN"],
 		linkDeviceUrl:    config.GetRuntime().Environment["LINK_DEVICE_URL"],
 	}
-
+	runtime.MatchmakerMatched()
 	return evrPipeline
 }
 
@@ -282,7 +278,15 @@ func (p *EvrPipeline) ProcessRequestEvr(logger *zap.Logger, session *sessionWS, 
 		// If the session is not authenticated, log the error and return.
 		if session != nil && session.UserID() == uuid.Nil {
 			logger.Error("Session not authenticated")
-			return false
+			// As a work around to the serverdb connection getting lost and needing to reauthenticate
+			err := p.attemptOutOfBandAuthentication(session)
+			if err == nil {
+				return true
+			} else {
+				// If the session is now authenticated, continue processing the request.
+				logger.Error("Failed to authenticate session with discordId and password", zap.Error(err))
+				return false
+			}
 		}
 	}
 
@@ -413,7 +417,7 @@ func (p *EvrPipeline) MatchSignalData(logger *zap.Logger, session *sessionWS, ma
 
 // sendMatchData sends the data to the match.
 func sendMatchData(matchRegistry MatchRegistry, matchIdStr string, session *sessionWS, in evr.Message) error {
-	matchIDComponents := strings.Split(matchIdStr, ".")
+	matchIDComponents := strings.SplitN(matchIdStr, ".", 2)
 	if len(matchIDComponents) != 2 {
 		return fmt.Errorf("invalid match id: %s", matchIdStr)
 	}
@@ -429,4 +433,42 @@ func sendMatchData(matchRegistry MatchRegistry, matchIdStr string, session *sess
 	matchRegistry.SendData(matchId, matchNode, session.UserID(), session.ID(), session.Username(), matchNode, opCode, requestJson, true, time.Now().UTC().UnixNano()/int64(time.Millisecond))
 
 	return nil
+}
+
+// configRequest handles the config request.
+func (p *EvrPipeline) attemptOutOfBandAuthentication(session *sessionWS) error {
+	ctx := session.Context()
+	// If the session is already authenticated, return.
+	if session.UserID() != uuid.Nil {
+		return nil
+	}
+	userPassword, ok := ctx.Value(ctxPasswordKey{}).(string)
+	if !ok {
+		return nil
+	}
+
+	discordId, ok := ctx.Value(ctxDiscordIdKey{}).(string)
+	if !ok {
+		return nil
+	}
+
+	// Get the account for this discordId
+	userId, err := p.discordRegistry.GetUserIdByDiscordId(ctx, discordId, false)
+	if err != nil {
+		return err
+	}
+
+	// The account was found.
+	account, err := GetAccount(ctx, session.logger, session.pipeline.db, session.statusRegistry, uuid.FromStringOrNil(userId))
+	if err != nil {
+		return err
+	}
+
+	// Do email authentication
+	userId, _, _, err = AuthenticateEmail(ctx, session.logger, session.pipeline.db, account.Email, userPassword, "", false)
+	if err != nil {
+		return err
+	}
+
+	return session.BroadcasterSession(userId, "")
 }

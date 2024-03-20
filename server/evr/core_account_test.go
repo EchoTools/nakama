@@ -70,3 +70,35 @@ func TestValidateUnlocks(t *testing.T) {
 		})
 	}
 }
+func TestGUID_UnmarshalBytes(t *testing.T) {
+	tests := []struct {
+		name    string
+		g       *GUID
+		b       []byte
+		wantErr bool
+	}{
+		{
+			name:    "valid bytes",
+			g:       &GUID{},
+			b:       []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
+			wantErr: false,
+		},
+		{
+			name:    "invalid bytes",
+			g:       &GUID{},
+			b:       []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
+			wantErr: true,
+		},
+		// Add more test cases as needed
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.g.UnmarshalBytes(tt.b)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GUID.UnmarshalBytes() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			// Add additional assertions if needed
+		})
+	}
+}

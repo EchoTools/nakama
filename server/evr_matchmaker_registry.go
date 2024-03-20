@@ -18,14 +18,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama/v3/server/evr"
-	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -41,11 +42,11 @@ const (
 )
 
 var (
-	ErrMatchmakingPingTimeout        = fmt.Errorf("ping timeout")
-	ErrMatchmakingTimeout            = fmt.Errorf("matchmaking timeout")
-	ErrMatchmakingNoAvailableServers = fmt.Errorf("no available servers")
-	ErrMatchmakingCancelled          = fmt.Errorf("matchmaking cancelled")
-	ErrMatchmakingRestarted          = fmt.Errorf("matchmaking restarted")
+	ErrMatchmakingPingTimeout        = status.Errorf(codes.DeadlineExceeded, "Ping timeout")
+	ErrMatchmakingTimeout            = status.Errorf(codes.DeadlineExceeded, "Matchmaking timeout")
+	ErrMatchmakingNoAvailableServers = status.Errorf(codes.ResourceExhausted, "No available servers")
+	ErrMatchmakingCancelled          = status.Errorf(codes.Canceled, "Matchmaking cancelled")
+	ErrMatchmakingRestarted          = status.Errorf(codes.Canceled, "matchmaking restarted")
 )
 
 // MatchmakingSession represents a user session looking for a match.
@@ -54,7 +55,7 @@ type MatchmakingSession struct {
 	UserId         uuid.UUID
 	Ctx            context.Context
 	CtxCancelFn    context.CancelCauseFunc
-	JoinMatchCh    chan string // Channel for MatchId to join.
+	MatchIdCh      chan string // Channel for MatchId to join.
 	PingCompleteCh chan error  // Channel for ping completion.
 	Expiry         time.Time
 	Label          *EvrMatchState
@@ -66,9 +67,10 @@ func (s *MatchmakingSession) Cancel(reason error) {
 	s.Lock()
 	defer s.Unlock()
 
-	// Check if context is already done before cancelling.
-	if s.Ctx.Err() != nil {
+	select {
+	case <-s.Ctx.Done():
 		return
+	default:
 	}
 
 	s.CtxCancelFn(reason)
@@ -91,16 +93,28 @@ func (s *MatchmakingSession) RemoveTicket(ticket string) {
 	}
 }
 
+func (s *MatchmakingSession) TicketsCount() int {
+	s.RLock()
+	defer s.RUnlock()
+	return len(s.Tickets)
+}
+
+func (s *MatchmakingSession) Context() context.Context {
+	s.RLock()
+	defer s.RUnlock()
+	return s.Ctx
+}
+
 // LatencyCache represents a cache for latencies.
 type LatencyCache struct {
 	sync.RWMutex
-	Store map[string]*EndpointWithLatency
+	Store map[string]EndpointWithLatency
 }
 
 // NewLatencyCache initializes a new latency cache.
 func NewLatencyCache() *LatencyCache {
 	return &LatencyCache{
-		Store: make(map[string]*EndpointWithLatency),
+		Store: make(map[string]EndpointWithLatency),
 	}
 }
 
@@ -157,6 +171,9 @@ func determineErrorCode(code codes.Code) evr.LobbySessionFailureErrorCode {
 // SendErrorToSession sends an error message to a session
 func (mr *MatchmakingResult) SendErrorToSession(s *sessionWS, err error) error {
 	result := mr.SetErrorFromStatus(err)
+	if result == nil {
+		return nil
+	}
 	payload := []evr.Message{
 		evr.NewLobbySessionFailure(result.Mode, result.Channel, result.Code, result.Message).Version4(),
 	}
@@ -165,7 +182,7 @@ func (mr *MatchmakingResult) SendErrorToSession(s *sessionWS, err error) error {
 
 // EndpointWithLatency is a struct that holds an endpoint and its latency
 type EndpointWithLatency struct {
-	Endpoint  *evr.Endpoint
+	Endpoint  evr.Endpoint
 	RTT       time.Duration
 	Timestamp time.Time
 }
@@ -181,56 +198,172 @@ func (e *EndpointWithLatency) ID() string {
 	return s
 }
 
-// MatchmakingRegistryConfig is a configuration for the matchmaking registry
-type MatchmakingRegistryConfig struct {
-	Logger        *zap.Logger
-	MatchRegistry MatchRegistry
-	Metrics       Metrics
-}
-
-// MatchRegistry is a registry for matches
-func NewMatchmakingRegistryConfig(logger *zap.Logger, matchRegistry MatchRegistry, metrics Metrics) *MatchmakingRegistryConfig {
-	return &MatchmakingRegistryConfig{
-		Logger:        logger,
-		MatchRegistry: matchRegistry,
-		Metrics:       metrics,
-	}
-}
-
 // MatchmakingRegistry is a registry for matchmaking sessions
 type MatchmakingRegistry struct {
 	sync.RWMutex
+
 	ctx         context.Context
 	ctxCancelFn context.CancelFunc
 
 	logger        *zap.Logger
 	matchRegistry MatchRegistry
 	metrics       Metrics
+	config        Config
 
 	matchingBySession map[uuid.UUID]*MatchmakingSession
 	cacheByUserId     map[uuid.UUID]*LatencyCache
-	broadcasters      map[string]*evr.Endpoint
+	broadcasters      map[string]evr.Endpoint // EndpointID -> Endpoint
+	// FIXME This is ugly. make a registry.
+
 }
 
-func NewMatchmakingRegistry(cfg *MatchmakingRegistryConfig) *MatchmakingRegistry {
+func NewMatchmakingRegistry(logger *zap.Logger, matchRegistry MatchRegistry, matchmaker Matchmaker, metrics Metrics, config Config) *MatchmakingRegistry {
 	ctx, ctxCancelFn := context.WithCancel(context.Background())
-
 	c := &MatchmakingRegistry{
 		ctx:         ctx,
 		ctxCancelFn: ctxCancelFn,
 
-		logger:        cfg.Logger,
-		matchRegistry: cfg.MatchRegistry,
-		metrics:       cfg.Metrics,
+		logger:        logger,
+		matchRegistry: matchRegistry,
+		metrics:       metrics,
+		config:        config,
 
-		matchingBySession: make(map[uuid.UUID]*MatchmakingSession, 200),
-		broadcasters:      make(map[string]*evr.Endpoint, 200),
+		matchingBySession: make(map[uuid.UUID]*MatchmakingSession, 1000),
+		broadcasters:      make(map[string]evr.Endpoint, 200),
 		cacheByUserId:     make(map[uuid.UUID]*LatencyCache, 1000),
 	}
-
+	// Set the matchmaker's OnMatchedEntries callback
+	matchmaker.OnMatchedEntries(c.matchedEntriesFn)
 	go c.rebuildBroadcasters()
 
 	return c
+}
+
+func ipToKey(ip net.IP) string {
+	b := ip.To4()
+	return fmt.Sprintf("rtt%02x%02x%02x%02x", b[0], b[1], b[2], b[3])
+}
+
+func (c *MatchmakingRegistry) matchedEntriesFn(entries [][]*MatchmakerEntry) {
+	// Find all the unassigned broadcasters
+
+	for _, entry := range entries {
+		stringProperties := entry[0].StringProperties
+		channel := uuid.FromStringOrNil(stringProperties["channel"])
+
+		// TODO FIXME loop for a bit until some are available.
+		// List all the unassigned lobbies on this channel
+		broadcasters, err := c.ListUnassignedLobbies(c.ctx, channel)
+		if err != nil {
+			c.logger.Error("Error listing unassigned lobbies", zap.Error(err))
+
+		}
+		// Create a map of each endpoint and it's latencies
+		latencies := make(map[string][]int, len(broadcasters))
+		for _, e := range entry {
+			nprops := e.NumericProperties
+			//sprops := e.StringProperties
+
+			// loop over the number props and get the latencies
+			for k, v := range nprops {
+				if strings.HasPrefix(k, "rtt") {
+					latencies[k] = append(latencies[k], int(v))
+				}
+			}
+		}
+
+		// Create a map of ExternalIP -> state
+		endpoints := make(map[string]*EvrMatchState, len(broadcasters))
+		for _, v := range broadcasters {
+			k := ipToKey(v.Endpoint.ExternalIP)
+			endpoints[k] = v
+		}
+
+		// Score each endpoint based on the latencies
+		scored := make(map[string]int, len(latencies))
+		for k, v := range latencies {
+			// Sort the latencies
+			sort.Ints(v)
+			// Get the average
+			average := 0
+			for _, i := range v {
+				average += i
+			}
+			average /= len(v)
+			scored[k] = average
+		}
+		// Sort the scored endpoints
+		sorted := make([]string, 0, len(scored))
+		for k := range scored {
+			sorted = append(sorted, k)
+		}
+		sort.SliceStable(sorted, func(i, j int) bool {
+			return scored[sorted[i]] < scored[sorted[j]]
+		})
+
+		// Find a valid participant to get the label from
+		// Get the label from the first participant
+		var label *EvrMatchState
+
+		for _, e := range entry {
+			if s, ok := c.GetMatchingBySessionId(e.Presence.SessionID); ok {
+				label = s.Label
+				break
+			}
+		}
+		if label == nil {
+			c.logger.Error("No label found")
+			continue
+		}
+
+		matchId := ""
+		for _, k := range sorted {
+			// Get the endpoint
+			state, ok := endpoints[k]
+			if !ok {
+				c.logger.Error("Endpoint not found", zap.String("ip", k))
+				continue
+			}
+			// Load the level.
+			m := fmt.Sprintf("%s.%s", state.MatchId, c.config.GetName())
+
+			// Instruct the server to load the level
+			response, err := SignalMatch(c.ctx, c.matchRegistry, m, SignalStartSession, label)
+			if err != nil {
+				c.logger.Error("Error signaling match", zap.Error(err))
+				continue
+			} else if response == "session already started" {
+				c.logger.Info("Session already started", zap.String("matchId", m))
+				continue
+			}
+			matchId = m
+			break
+		}
+		// Give the server 5 seconds to load the match
+
+		// Join the players to the match
+		for _, e := range entry {
+			// Get the players matching session and join them to the match
+			if s, ok := c.GetMatchingBySessionId(e.Presence.SessionID); ok {
+				if matchId == "" {
+					s.CtxCancelFn(ErrMatchmakingNoAvailableServers)
+					continue
+				}
+				// Send the matchId to the session
+				go func() {
+					// Give the server 5 seconds to load the match
+					time.Sleep(5 * time.Second)
+					s.MatchIdCh <- matchId
+				}()
+			}
+		}
+	}
+}
+
+func (c *MatchmakingRegistry) Broadcasters() map[string]evr.Endpoint {
+	c.RLock()
+	defer c.RUnlock()
+	return c.broadcasters
 }
 
 func (c *MatchmakingRegistry) rebuildBroadcasters() {
@@ -247,11 +380,11 @@ func (c *MatchmakingRegistry) rebuildBroadcasters() {
 }
 
 func (c *MatchmakingRegistry) updateBroadcasters() {
-	matches, err := c.listMatches(c.ctx, 1000, true, "", lo.ToPtr(1), lo.ToPtr(MaxMatchSize), "")
+	matches, err := c.listMatches(c.ctx, 1000, 1, MaxMatchSize, "")
 	if err != nil {
 		c.logger.Error("Error listing matches", zap.Error(err))
 	}
-	endpoints := make(map[string]*evr.Endpoint)
+	endpoints := make(map[string]evr.Endpoint)
 	// Get the endpoints from the match labels
 	for _, match := range matches {
 		l := match.GetLabel().GetValue()
@@ -261,7 +394,7 @@ func (c *MatchmakingRegistry) updateBroadcasters() {
 			continue
 		}
 		id := s.Endpoint.ID()
-		endpoints[id] = &s.Endpoint
+		endpoints[id] = s.Endpoint
 	}
 
 	c.Lock()
@@ -269,13 +402,53 @@ func (c *MatchmakingRegistry) updateBroadcasters() {
 	c.Unlock()
 }
 
+func (c *MatchmakingRegistry) ListUnassignedLobbies(ctx context.Context, channel uuid.UUID) ([]*EvrMatchState, error) {
+	// TODO Move this into the matchmaking registry
+	qparts := make([]string, 0, 10)
+
+	// MUST be an unassigned lobby
+	qparts = append(qparts, LobbyType(evr.UnassignedLobby).Query(Must, 0))
+
+	if channel != uuid.Nil {
+		// MUST be hosting for this channel
+		qparts = append(qparts, HostedChannels([]uuid.UUID{channel}).Query(Must, 0))
+	}
+
+	// TODO FIXME Add version lock and appid
+	query := strings.Join(qparts, " ")
+
+	limit := 200
+	minSize, maxSize := 1, 1 // Only the 1 broadcaster should be there.
+	matches, err := c.listMatches(ctx, limit, minSize, maxSize, query)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to find matches: %v", err)
+	}
+
+	// If no servers are available, return immediately.
+	if len(matches) == 0 {
+		return nil, status.Errorf(codes.NotFound, "No available servers")
+	}
+
+	// Create a slice containing the matches' labels
+	labels := make([]*EvrMatchState, 0, len(matches))
+	for _, match := range matches {
+		label := &EvrMatchState{}
+		if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), label); err != nil {
+			return nil, status.Errorf(codes.Internal, "Failed to unmarshal match label: %v", err)
+		}
+		labels = append(labels, label)
+	}
+
+	return labels, nil
+}
+
 // GetPingCandidates returns a list of endpoints to ping for a user. It also updates the broadcasters.
-func (r *MatchmakingRegistry) GetPingCandidates(userId uuid.UUID, endpoints []*evr.Endpoint) (candidates []*evr.Endpoint) {
+func (r *MatchmakingRegistry) GetPingCandidates(userId uuid.UUID, endpoints []evr.Endpoint) (candidates []evr.Endpoint) {
 
 	const LatencyCacheExpiry = 5 * time.Minute
 
 	// Initialize candidates with a capacity of 16
-	candidates = make([]*evr.Endpoint, 0, 16)
+	candidates = make([]evr.Endpoint, 0, 16)
 
 	// Return early if there are no endpoints
 	if len(endpoints) == 0 {
@@ -291,17 +464,13 @@ func (r *MatchmakingRegistry) GetPingCandidates(userId uuid.UUID, endpoints []*e
 	defer cache.Unlock()
 
 	// Get the endpoint latencies from the cache
-	cacheEntries := make([]*EndpointWithLatency, 0, len(endpoints))
+	cacheEntries := make([]EndpointWithLatency, 0, len(endpoints))
 	// Iterate over the endpoints
 	for _, endpoint := range endpoints {
-		if endpoint == nil {
-			continue
-		}
-
 		id := endpoint.ID()
 		entry, exists := cache.Store[id]
 		if !exists || entry.RTT == 0 || time.Since(entry.Timestamp) > LatencyCacheExpiry {
-			entry = &EndpointWithLatency{
+			entry = EndpointWithLatency{
 				Endpoint:  endpoint,
 				RTT:       0,
 				Timestamp: time.Now(),
@@ -342,7 +511,7 @@ func (r *MatchmakingRegistry) GetPingCandidates(userId uuid.UUID, endpoints []*e
 }
 
 // sortCacheEntriesByTimestamp sorts the cache entries by timestamp in descending order
-func (r *MatchmakingRegistry) sortCacheEntriesByTimestamp(entries []*EndpointWithLatency) {
+func (r *MatchmakingRegistry) sortCacheEntriesByTimestamp(entries []EndpointWithLatency) {
 	sort.SliceStable(entries, func(i, j int) bool {
 		return entries[i].Timestamp.After(entries[j].Timestamp)
 	})
@@ -361,7 +530,7 @@ func (r *MatchmakingRegistry) GetCache(userId uuid.UUID) *LatencyCache {
 }
 
 // UpdateBroadcasters updates the broadcasters map
-func (r *MatchmakingRegistry) UpdateBroadcasters(endpoints []*evr.Endpoint) {
+func (r *MatchmakingRegistry) UpdateBroadcasters(endpoints []evr.Endpoint) {
 	r.Lock()
 	defer r.Unlock()
 	for _, e := range endpoints {
@@ -370,24 +539,17 @@ func (r *MatchmakingRegistry) UpdateBroadcasters(endpoints []*evr.Endpoint) {
 }
 
 // listMatches returns a list of matches
-func (c *MatchmakingRegistry) listMatches(ctx context.Context, limit int, authoritative bool, label string, minSize, maxSize *int, query string) ([]*api.Match, error) {
-	authoritativeWrapper := &wrapperspb.BoolValue{Value: authoritative}
+func (c *MatchmakingRegistry) listMatches(ctx context.Context, limit int, minSize, maxSize int, query string) ([]*api.Match, error) {
+	authoritativeWrapper := &wrapperspb.BoolValue{Value: true}
 	var labelWrapper *wrapperspb.StringValue
-	if label != "" {
-		labelWrapper = &wrapperspb.StringValue{Value: label}
-	}
 	var queryWrapper *wrapperspb.StringValue
 	if query != "" {
 		queryWrapper = &wrapperspb.StringValue{Value: query}
 	}
-	var minSizeWrapper *wrapperspb.Int32Value
-	if minSize != nil {
-		minSizeWrapper = &wrapperspb.Int32Value{Value: int32(*minSize)}
-	}
-	var maxSizeWrapper *wrapperspb.Int32Value
-	if maxSize != nil {
-		maxSizeWrapper = &wrapperspb.Int32Value{Value: int32(*maxSize)}
-	}
+	minSizeWrapper := &wrapperspb.Int32Value{Value: int32(minSize)}
+
+	maxSizeWrapper := &wrapperspb.Int32Value{Value: int32(maxSize)}
+
 	matches, _, err := c.matchRegistry.ListMatches(ctx, limit, authoritativeWrapper, labelWrapper, minSizeWrapper, maxSizeWrapper, queryWrapper, nil)
 	return matches, err
 }
@@ -469,39 +631,39 @@ func (c *MatchmakingRegistry) GetMatchingBySessionId(sessionId uuid.UUID) (sessi
 	c.RLock()
 	defer c.RUnlock()
 	session, ok = c.matchingBySession[sessionId]
-	return
+	return session, ok
 }
 
 // Delete removes a matching session from the registry
 func (c *MatchmakingRegistry) Delete(sessionId uuid.UUID) {
 	c.Lock()
 	defer c.Unlock()
+	c.logger.Debug("Deleting matchmaking session", zap.String("sessionId", sessionId.String()))
 	delete(c.matchingBySession, sessionId)
 }
 
 // Add adds a matching session to the registry
 func (c *MatchmakingRegistry) Create(ctx context.Context, session *sessionWS, ml *EvrMatchState, partySize int) (*MatchmakingSession, error) {
-	// Cancel the existing session if it exists
-	c.Cancel(session.ID(), ErrMatchmakingCancelled)
+	// Check if a matching session exists
 
 	// Set defaults for the matching label
-	ml.Open = true // Open for joining
+	ml.Ready = true // Open for joining
 	ml.MaxSize = MaxMatchSize
 
 	// Set defaults for public matches
 	switch {
 	case ml.Mode == evr.ModeSocialPrivate || ml.Mode == evr.ModeSocialPublic:
 		ml.Level = evr.LevelSocial // Include the level in the search
-		ml.MaxTeamSize = MaxMatchSize
-		ml.Size = MaxMatchSize
+		ml.TeamSize = MaxMatchSize
+		ml.Size = MaxMatchSize - partySize
 
 	case ml.Mode == evr.ModeArenaPublic || ml.Mode == evr.ModeCombatPublic:
-		ml.MaxTeamSize = 4
-		ml.Size = ml.MaxTeamSize*2 - partySize // Both teams, minus the party size
+		ml.TeamSize = 4
+		ml.Size = ml.TeamSize*2 - partySize // Both teams, minus the party size
 
 	default: // Privates
 		ml.Size = MaxMatchSize - partySize
-		ml.MaxTeamSize = 5
+		ml.TeamSize = 5
 	}
 
 	// Add the user's accessible groups/guilds
@@ -528,7 +690,7 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, session *sessionWS, ml
 		UserId:         session.UserID(),
 		Ctx:            ctx,
 		CtxCancelFn:    cancel,
-		JoinMatchCh:    make(chan string, 1),
+		MatchIdCh:      make(chan string, 1),
 		PingCompleteCh: make(chan error, 1),
 		Expiry:         time.Now().UTC().Add(findAttemptsExpiry),
 		Label:          ml,
@@ -541,6 +703,7 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, session *sessionWS, ml
 
 	go func() {
 		<-ctx.Done()
+		// Context done.
 		// Store the latency values
 		c.StoreLatencyCache(session)
 		// Remove the session from the registry
@@ -553,6 +716,7 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, session *sessionWS, ml
 
 func (c *MatchmakingRegistry) Cancel(sessionId uuid.UUID, reason error) {
 	if session, ok := c.GetMatchingBySessionId(sessionId); ok {
+		c.logger.Debug("Canceling matchmaking session", zap.String("reason", reason.Error()))
 		session.Cancel(reason)
 	}
 }
@@ -565,7 +729,7 @@ func (c *MatchmakingRegistry) Add(id uuid.UUID, s *MatchmakingSession) {
 }
 
 // BroadcasterEndpoints returns the broadcaster endpoints
-func (c *MatchmakingRegistry) BroadcasterEndpoints() map[string]*evr.Endpoint {
+func (c *MatchmakingRegistry) BroadcasterEndpoints() map[string]evr.Endpoint {
 	c.RLock()
 	defer c.RUnlock()
 	return c.broadcasters
@@ -589,7 +753,7 @@ func (c *MatchmakingRegistry) ProcessPingResults(userId uuid.UUID, responses []e
 			continue
 		}
 
-		r := &EndpointWithLatency{
+		r := EndpointWithLatency{
 			Endpoint:  broadcaster,
 			RTT:       response.RTT(),
 			Timestamp: time.Now(),
@@ -600,7 +764,7 @@ func (c *MatchmakingRegistry) ProcessPingResults(userId uuid.UUID, responses []e
 }
 
 // GetLatencies returns the cached latencies for a user
-func (c *MatchmakingRegistry) GetLatencies(userId uuid.UUID, endpoints []*evr.Endpoint) map[string]*EndpointWithLatency {
+func (c *MatchmakingRegistry) GetLatencies(userId uuid.UUID, endpoints []evr.Endpoint) map[string]EndpointWithLatency {
 
 	// If the user ID is nil or there are no endpoints, return nil
 	if userId == uuid.Nil {
@@ -619,14 +783,14 @@ func (c *MatchmakingRegistry) GetLatencies(userId uuid.UUID, endpoints []*evr.En
 	// If no endpoints are provided, get all the latencies from the cache
 	// build a new map to avoid locking the cache for too long
 	if len(endpointIds) == 0 {
-		results := make(map[string]*EndpointWithLatency, len(cache.Store))
+		results := make(map[string]EndpointWithLatency, len(cache.Store))
 		for k, v := range cache.Store {
 			results[k] = v
 		}
 		return results
 	}
 	// Return just the endpoints requested
-	results := make(map[string]*EndpointWithLatency, len(endpointIds))
+	results := make(map[string]EndpointWithLatency, len(endpointIds))
 	for _, id := range endpointIds {
 		if v, ok := cache.Store[id]; ok {
 			results[id] = v
@@ -634,8 +798,8 @@ func (c *MatchmakingRegistry) GetLatencies(userId uuid.UUID, endpoints []*evr.En
 			// Parse the endpoint ID
 			endpoint := evr.FromEndpointID(id)
 			// Create the endpoint and add it to the cache
-			results[id] = &EndpointWithLatency{
-				Endpoint:  &endpoint,
+			results[id] = EndpointWithLatency{
+				Endpoint:  endpoint,
 				RTT:       0,
 				Timestamp: time.Now(),
 			}
