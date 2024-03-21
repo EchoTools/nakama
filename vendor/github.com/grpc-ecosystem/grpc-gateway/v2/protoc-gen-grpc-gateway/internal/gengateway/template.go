@@ -69,17 +69,9 @@ func (b binding) QueryParamFilter() queryParamFilter {
 	var seqs [][]string
 	if b.Body != nil {
 		seqs = append(seqs, strings.Split(b.Body.FieldPath.String(), "."))
-		for _, comp := range b.Body.FieldPath {
-			if comp.Target.JsonName != nil {
-				seqs = append(seqs, strings.Split(*comp.Target.JsonName, "."))
-			}
-		}
 	}
 	for _, p := range b.PathParams {
 		seqs = append(seqs, strings.Split(p.FieldPath.String(), "."))
-		if p.Target.JsonName != nil {
-			seqs = append(seqs, strings.Split(*p.Target.JsonName, "."))
-		}
 	}
 	return queryParamFilter{utilities.NewDoubleArray(seqs)}
 }
@@ -333,18 +325,26 @@ var (
 	var protoReq {{.Method.RequestType.GoType .Method.Service.File.GoPkg.Path}}
 	var metadata runtime.ServerMetadata
 {{if .Body}}
+	{{- $isFieldMask := and $AllowPatchFeature (eq (.HTTPMethod) "PATCH") (.FieldMaskField) (not (eq "*" .GetBodyFieldPath)) }}
+	{{- if $isFieldMask }}
 	newReader, berr := utilities.IOReaderFactory(req.Body)
 	if berr != nil {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", berr)
 	}
+	{{- end}}
 	{{- $protoReq := .Body.AssignableExprPrep "protoReq" .Method.Service.File.GoPkg.Path -}}
 	{{- if ne "" $protoReq }}
 	{{printf "%s" $protoReq }}
 	{{- end}}
+	{{- if not $isFieldMask }}
+	if err := marshaler.NewDecoder(req.Body).Decode(&{{.Body.AssignableExpr "protoReq" .Method.Service.File.GoPkg.Path}}); err != nil && err != io.EOF  {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+	{{end}}
+	{{- if $isFieldMask }}
 	if err := marshaler.NewDecoder(newReader()).Decode(&{{.Body.AssignableExpr "protoReq" .Method.Service.File.GoPkg.Path}}); err != nil && err != io.EOF  {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
 	}
-	{{- if and $AllowPatchFeature (eq (.HTTPMethod) "PATCH") (.FieldMaskField) (not (eq "*" .GetBodyFieldPath)) }}
 	if protoReq.{{.FieldMaskField}} == nil || len(protoReq.{{.FieldMaskField}}.GetPaths()) == 0 {
 			if fieldMask, err := runtime.FieldMaskFromRequestBody(newReader(), protoReq.{{.GetBodyFieldStructName}}); err != nil {
 				return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
@@ -502,18 +502,26 @@ func local_request_{{.Method.Service.GetName}}_{{.Method.GetName}}_{{.Index}}(ct
 	var protoReq {{.Method.RequestType.GoType .Method.Service.File.GoPkg.Path}}
 	var metadata runtime.ServerMetadata
 {{if .Body}}
+	{{- $isFieldMask := and $AllowPatchFeature (eq (.HTTPMethod) "PATCH") (.FieldMaskField) (not (eq "*" .GetBodyFieldPath)) }}
+	{{- if $isFieldMask }}
 	newReader, berr := utilities.IOReaderFactory(req.Body)
 	if berr != nil {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", berr)
 	}
+	{{- end}}
 	{{- $protoReq := .Body.AssignableExprPrep "protoReq" .Method.Service.File.GoPkg.Path -}}
 	{{- if ne "" $protoReq }}
 	{{printf "%s" $protoReq }}
 	{{- end}}
+	{{- if not $isFieldMask }}
+	if err := marshaler.NewDecoder(req.Body).Decode(&{{.Body.AssignableExpr "protoReq" .Method.Service.File.GoPkg.Path}}); err != nil && err != io.EOF  {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+	{{end}}
+	{{- if $isFieldMask }}
 	if err := marshaler.NewDecoder(newReader()).Decode(&{{.Body.AssignableExpr "protoReq" .Method.Service.File.GoPkg.Path}}); err != nil && err != io.EOF  {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
 	}
-	{{- if and $AllowPatchFeature (eq (.HTTPMethod) "PATCH") (.FieldMaskField) (not (eq "*" .GetBodyFieldPath)) }}
 	if protoReq.{{.FieldMaskField}} == nil || len(protoReq.{{.FieldMaskField}}.GetPaths()) == 0 {
 			if fieldMask, err := runtime.FieldMaskFromRequestBody(newReader(), protoReq.{{.GetBodyFieldStructName}}); err != nil {
 				return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
