@@ -44,6 +44,7 @@ const (
 	ActiveSocialGroupIndex       = "Index_SocialGroup"
 	CacheStorageCollection       = "Cache"
 	IPinfoCacheKey               = "IPinfo"
+	CosmeticLoadoutCollection    = "CosmeticLoadouts"
 
 	// The Application ID for Echo VR
 	NoOvrAppId uint64 = 0x0
