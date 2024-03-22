@@ -732,7 +732,6 @@ func SetDisplayNameByChannelBySession(ctx context.Context, nk runtime.NakamaModu
 	}
 
 	// set the fallback
-
 	if dn := account.GetUser().GetDisplayName(); dn != "" {
 		options = append(options, dn)
 		// set the fallback
@@ -758,7 +757,8 @@ func SetDisplayNameByChannelBySession(ctx context.Context, nk runtime.NakamaModu
 		// Get the guild by the user's primary guild
 		guild, err := discordRegistry.GetGuildByGroupId(ctx, groupId)
 		if err != nil {
-			session.logger.Error("Error getting guild by group id.", zap.String("group_id", groupId), zap.Error(err))
+			session.logger.Warn("Error getting guild by group id.", zap.String("group_id", groupId), zap.Error(err))
+			return displayName, nil
 		}
 		if guild != nil {
 			// Get the guild member

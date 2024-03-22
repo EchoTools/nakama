@@ -885,7 +885,7 @@ func (p *EvrPipeline) updateProfile(ctx context.Context, logger *zap.Logger, ses
 		}
 	}()
 	// Update the displayname based on the user's selected channel.
-	groupId := uuid.FromStringOrNil(request.ClientProfile.Social.Group)
+	groupId := uuid.UUID(request.ClientProfile.Social.Group)
 	if groupId != uuid.Nil {
 		displayName, err := SetDisplayNameByChannelBySession(ctx, p.runtimeModule, p.discordRegistry, session, groupId.String())
 		if err != nil {
@@ -1389,7 +1389,7 @@ func (p *EvrPipeline) getPlayersCurrentChannel(ctx context.Context, session *ses
 		return uuid.Nil, fmt.Errorf("error unmarshalling document: %w", err)
 	}
 
-	return uuid.FromStringOrNil(document.Social.Group), nil
+	return uuid.UUID(document.Social.Group), nil
 }
 
 func generateSuspensionNotice(statuses []*SuspensionStatus) string {

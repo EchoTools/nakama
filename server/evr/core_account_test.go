@@ -102,3 +102,54 @@ func TestGUID_UnmarshalBytes(t *testing.T) {
 		})
 	}
 }
+
+func TestGUID_UnmarshalJSON(t *testing.T) {
+
+	// Test unmarshalling
+
+	tests := []struct {
+		name string
+		data string
+		want GUID
+	}{
+		{
+			name: "valid GUID",
+			data: `"01020304-0506-0708-090A-0A0B0C0D0E0F"`,
+			want: GUID(uuid.FromStringOrNil("01020304-0506-0708-090A-0A0B0C0D0E0F")),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got GUID
+			if err := got.UnmarshalJSON([]byte(tt.data)); err != nil {
+				t.Errorf("GUID.JSON() error = %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("GUID.JSON() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGUID_MarshalJSON(t *testing.T) {
+	// Test marshalling
+
+	tests := []struct {
+		name string
+		g    GUID
+		want string
+	}{
+		{
+			name: "valid GUID",
+			g:    GUID(uuid.FromStringOrNil("01020304-0506-0708-090a-0A0b0C0D0E0F")),
+			want: `"01020304-0506-0708-090A-0A0B0C0D0E0F"`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got, _ := tt.g.MarshalJSON(); string(got) != tt.want {
+				t.Errorf("GUID.JSON() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

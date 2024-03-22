@@ -82,6 +82,8 @@ func (r *LocalMessageRouter) SendToPresenceIDs(logger *zap.Logger, presenceIDs [
 				}
 			case *rtapi.Envelope_Match:
 				return
+			case *rtapi.Envelope_MatchmakerMatched:
+				return
 			default:
 				if logger.Core().Enabled(zap.DebugLevel) {
 					logger.Error("Unknown message type", zap.Any("message", envelope.Message))

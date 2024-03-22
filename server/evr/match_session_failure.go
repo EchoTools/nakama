@@ -137,7 +137,7 @@ func (m LobbySessionFailurev4) Token() string   { return "SNSLobbySessionFailure
 func (m *LobbySessionFailurev4) Symbol() Symbol { return SymbolOf(m) }
 
 func (m *LobbySessionFailurev4) String() string {
-	return fmt.Sprintf("LobbySessionFailurev4(game_type=%d, channel=%s, error_code=%d, unk0=%d, msg=%s, expiry=%d)",
+	return fmt.Sprintf("LobbySessionFailurev4(game_type=%d, channel=%s, error_code=%d, unk0=%d, msg=%s)",
 		m.GameTypeSymbol,
 		m.ChannelUUID.String(),
 		m.ErrorCode,

@@ -1070,7 +1070,7 @@ func (m *EvrMatch) otherUserProfileRequest(ctx context.Context, logger runtime.L
 	}
 	presence, ok := state.presenceByEvrId[request.EvrId.Token()]
 	if !ok {
-		return state, errFailure(fmt.Errorf("user not in match"), 404)
+		return state, errFailure(fmt.Errorf("user %s not in match", request.EvrId.Token()), 404)
 	}
 	// Use the cached version if available.
 	if presence.UserID != uuid.Nil {
