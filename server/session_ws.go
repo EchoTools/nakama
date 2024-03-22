@@ -100,6 +100,7 @@ type (
 	ctxDiscordIdKey         struct{} // The Discord ID from the urlparam (used to authenticate broadcaster connections)
 	ctxPasswordKey          struct{} // The Password from the urlparam(used to authenticate login/broadcaster connections)
 	ctxUrlParamsKey         struct{} // The URL parameters from the request
+	ctxIPinfoTokenKey       struct{} // The IPinfo token from the config
 	//ctxMatchmakingQueryKey         struct{} // The Matchmaking query from the urlparam
 	//ctxMatchmakingGuildPriorityKey struct{} // The Matchmaking guild priority from the urlparam
 )

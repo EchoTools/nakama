@@ -50,6 +50,7 @@ type EvrPipeline struct {
 	runtimeLogger        runtime.Logger
 
 	discordRegistry DiscordRegistry
+	ipCache         *IPinfoCache
 
 	broadcasterRegistrationBySession *MapOf[uuid.UUID, *EvrMatchState]
 	matchBySession                   *MapOf[uuid.UUID, string]
@@ -89,6 +90,32 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		logger.Error("Failed to initialize party bot", zap.Error(err))
 	}
 
+	// Configure the IPinfo cache
+	ipCache := NewIPinfoCache(logger, db, vars["IPINFO_TOKEN"])
+
+	// Every 5 minutes, store the cache.
+
+	go func() {
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+
+		ipCache.LoadCache(ctx, nk, db)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				ipCache.StoreCache(ctx, nk, db)
+			}
+		}
+	}()
+	externalIP, err := ipCache.DetermineExternalIPAddress()
+	if err != nil {
+		logger.Error("Failed to determine external IP address", zap.Error(err))
+	}
+
 	evrPipeline := &EvrPipeline{
 		ctx:                  ctx,
 		node:                 config.GetName(),
@@ -113,10 +140,11 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		runtimeModule:        nk,
 		runtimeLogger:        runtimeLogger,
 
-		discordRegistry:     discordRegistry,
-		matchmakingRegistry: NewMatchmakingRegistry(logger, matchRegistry, matchmaker, metrics, config),
+		discordRegistry: discordRegistry,
+		ipCache:         ipCache,
+		externalIP:      externalIP,
 
-		externalIP: DetermineExternalIPAddress(),
+		matchmakingRegistry: NewMatchmakingRegistry(logger, matchRegistry, matchmaker, metrics, config),
 
 		broadcasterRegistrationBySession: &MapOf[uuid.UUID, *EvrMatchState]{},
 		matchBySession:                   &MapOf[uuid.UUID, string]{},
@@ -129,42 +157,6 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	}
 	runtime.MatchmakerMatched()
 	return evrPipeline
-}
-
-func DetermineExternalIPAddress() net.IP {
-	response, err := http.Get("https://api.ipify.org?format=text")
-	if err != nil {
-		return nil
-	} else {
-		data, _ := io.ReadAll(response.Body)
-		addr := net.ParseIP(string(data))
-		if addr != nil {
-			return addr
-		}
-		return nil
-	}
-}
-
-// isPrivateIP checks if the given IP address is a private address.
-// Returns true if it is private, false otherwise.
-func isPrivateIP(ip net.IP) bool {
-	// Private IP ranges
-	// 10.0.0.0 - 10.255.255.255
-	// 172.16.0.0 - 172.31.255.255
-	// 192.168.0.0 - 192.168.255.255
-	privateRanges := []string{
-		"127.0.0.0/8",
-		"10.0.0.0/8",
-		"172.16.0.0/12",
-		"192.168.0.0/16",
-	}
-	for _, cidr := range privateRanges {
-		_, subnet, _ := net.ParseCIDR(cidr)
-		if subnet.Contains(ip) {
-			return true
-		}
-	}
-	return false
 }
 
 func (p *EvrPipeline) SetApiServer(apiServer *ApiServer) {

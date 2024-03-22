@@ -15,6 +15,7 @@ import (
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"github.com/ipinfo/go/v2/ipinfo"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 )
@@ -104,10 +105,21 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 
 	// Set the external address in the request (to use for the registration cache).
 	externalIP := net.ParseIP(session.ClientIP())
-	if isPrivateIP(externalIP) {
+	if p.ipCache.isPrivateIP(externalIP) {
 		logger.Warn("Broadcaster is on a private IP, using this systems external IP")
 		externalIP = p.externalIP
 	}
+	// Get the broadcasters geoIP data
+	geoIPch := make(chan *ipinfo.Core)
+	go func() {
+		geoIP, err := p.ipCache.retrieveIPinfo(ctx, logger, externalIP)
+		if err != nil {
+			logger.Warn("Failed to retrieve geoIP data", zap.Error(err))
+			geoIPch <- nil
+			return
+		}
+		geoIPch <- geoIP
+	}()
 
 	// Create the broadcaster config
 	config := broadcasterConfig(userId, session.id.String(), request.ServerId, request.InternalIP, externalIP, request.Port, request.Region, request.VersionLock, tags)

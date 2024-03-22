@@ -16,6 +16,7 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"github.com/ipinfo/go/v2/ipinfo"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 )
@@ -118,6 +119,8 @@ type EvrMatchPresence struct {
 	PlayerSession uuid.UUID // Match-scoped session id.
 	TeamIndex     int       // the team index the player prefers/has been assigned to.
 	PartyID       uuid.UUID // The party id the player is in.
+	IPinfo        *ipinfo.Core
+	DiscordID     string
 }
 
 func (p *EvrMatchPresence) String() string {
