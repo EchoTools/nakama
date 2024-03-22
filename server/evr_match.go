@@ -39,6 +39,8 @@ const (
 
 	SignalStartSession
 	SignalGetEndpoint
+	SignalGetPresences
+	SignalPruneUnderutilized
 	SignalShutdown
 )
 
@@ -719,12 +721,29 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 	switch signal.Signal {
 	case SignalShutdown:
 		return nil, "shutdown signal"
+
+	case SignalPruneUnderutilized:
+		// Prune this match if it's utilization is low.
+		if len(state.presences) <= 3 {
+			// Free the resources.
+			return nil, "pruned"
+		}
 	case SignalGetEndpoint:
 		jsonData, err := json.Marshal(state.Broadcaster.Endpoint)
 		if err != nil {
 			return state, fmt.Sprintf("failed to marshal endpoint: %v", err)
 		}
 		return state, string(jsonData)
+
+	case SignalGetPresences:
+		// Return the presences in the match.
+
+		jsonData, err := json.Marshal(state.presences)
+		if err != nil {
+			return state, fmt.Sprintf("failed to marshal presences: %v", err)
+		}
+		return state, string(jsonData)
+
 	case SignalStartSession:
 		// if the match is already started, return an error.
 		if state.LobbyType != UnassignedLobby {
@@ -777,6 +796,8 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		logger.Warn("Unknown signal: %v", signal.Signal)
 		return state, "unknown signal"
 	}
+	return state, ""
+
 }
 
 // SignalMatch is a helper function to send a signal to a match.

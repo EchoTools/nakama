@@ -170,21 +170,46 @@ func (p *EvrPipeline) lobbyFindSessionRequest(ctx context.Context, logger *zap.L
 
 			// If it's a social lobby, create a new one, don't matchmake
 			if ml.Mode == evr.ModeSocialPublic {
-				match, err := p.MatchCreate(ctx, session, msession, ml)
-				if err != nil {
-					return result.SendErrorToSession(session, err)
-				}
-				matchId := match.MatchId.String()
-				err = p.JoinEvrMatch(ctx, session, matchId, request.Channel, int(ml.TeamIndex))
-				if err != nil {
-					return result.SendErrorToSession(session, err)
+				// set a timeout
+
+				stageTimer := time.NewTimer(30 * time.Second)
+				for {
+					// Stage 1: Check if there is an available lobby
+					match, err := p.MatchCreate(ctx, session, msession, ml)
+
+					switch status.Code(err) {
+
+					case codes.OK:
+						matchId := match.MatchId.String()
+						err = p.JoinEvrMatch(ctx, session, matchId, request.Channel, int(ml.TeamIndex))
+						if err != nil {
+							return result.SendErrorToSession(session, err)
+						}
+						return nil
+
+					case codes.Unavailable:
+						// No servers are connected. This can happen if the server is starting up or shutting down.
+						fallthrough
+					case codes.ResourceExhausted:
+						// All teh servers are being used.
+						select {
+
+						case <-time.After(5 * time.Second):
+							continue
+						case <-ctx.Done():
+							return result.SendErrorToSession(session, ErrMatchmakingTimeout)
+						case <-stageTimer.C:
+							// Move Stage 2: Kill a private lobby that has existing with only 1-2 people in it.
+							err := p.pruneMatches(ctx, session)
+							if err != nil {
+								return result.SendErrorToSession(session, err)
+							}
+						}
+					}
 				}
 			}
 
-			// Add ticket in to find a match
-
 			// Monitor the ticket in a separate goroutine.
-
 			ticket, err := p.AddMatchmakingTicket(ctx, session, logger, msession)
 			if err != nil {
 				result.SendErrorToSession(session, err)
@@ -364,6 +389,24 @@ func (p *EvrPipeline) lobbyPendingSessionCancel(ctx context.Context, logger *zap
 	// Look up the matching session.
 	if matchingSession, ok := p.matchmakingRegistry.GetMatchingBySessionId(session.id); ok {
 		matchingSession.Cancel(ErrMatchmakingCancelled)
+	}
+	return nil
+}
+
+// pruneMatches prunes matches that are underutilized
+func (p *EvrPipeline) pruneMatches(ctx context.Context, session *sessionWS) error {
+	session.logger.Warn("Pruning matches")
+	matches, err := p.matchmakingRegistry.listMatches(ctx, 1000, 2, 3, "*")
+	if err != nil {
+		return err
+	}
+
+	for _, match := range matches {
+		_, err := SignalMatch(ctx, p.matchRegistry, match.MatchId, SignalPruneUnderutilized, nil)
+		if err != nil {
+			return err
+
+		}
 	}
 	return nil
 }
