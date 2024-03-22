@@ -676,8 +676,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 				messageFn = m.broadcasterPlayerRemoved
 			case *evr.UserServerProfileUpdateRequest:
 				// The broadcaster is updating the user's profile.
-				// TODO consider pushing this into a go routine.
-				messageFn = m.userServerProfileUpdateRequest
+				go m.userServerProfileUpdateRequest(ctx, logger, db, nk, dispatcher, state, in, msg)
 			case *evr.OtherUserProfileRequest:
 				// The broadcaster is requesting the profile of joining user.
 				messageFn = m.otherUserProfileRequest
@@ -1067,6 +1066,13 @@ func (m *EvrMatch) otherUserProfileRequest(ctx context.Context, logger runtime.L
 	if !ok {
 		return state, errFailure(fmt.Errorf("user not in match"), 404)
 	}
+	// Use the cached version if available.
+	if presence.UserID != uuid.Nil {
+		profile, found := state.profiles[presence.UserID]
+		if found {
+			return state, sendMessagesToStream(ctx, nk, in.GetSessionId(), svcLoginID.String(), evr.NewOtherUserProfileSuccess(request.EvrId, profile))
+		}
+	}
 
 	// Retrieve the server profile from storage.
 	objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
@@ -1095,15 +1101,11 @@ func (m *EvrMatch) otherUserProfileRequest(ctx context.Context, logger runtime.L
 	profile.DisplayName = presence.DisplayName
 	profile.UpdateTime = time.Now().Unix()
 
+	// Cache the profile
+	state.profiles[presence.UserID] = &profile
+
 	// Send the server profile to the requesting user over it's login connection.
 	return state, sendMessagesToStream(ctx, nk, in.GetSessionId(), svcLoginID.String(), evr.NewOtherUserProfileSuccess(request.EvrId, &profile))
-}
-
-func injectDisplayName(profileJson []byte, displayName string) []byte {
-	replacement := fmt.Sprintf(`"displayname": "%s"`, displayName)
-	profileJson = displayNameRegex.ReplaceAll(profileJson, []byte(replacement))
-	profileJson = updatetimeRegex.ReplaceAll(profileJson, []byte(fmt.Sprintf(`"updatetime": %d`, time.Now().Unix())))
-	return profileJson
 }
 
 func sendMessagesToStream(_ context.Context, nk runtime.NakamaModule, sessionId string, serviceId string, messages ...evr.Message) error {
