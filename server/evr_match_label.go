@@ -82,7 +82,7 @@ func (l LobbyType) Query(o QueryOperator, b int) string {
 	return Label{
 		Op:    rune(o),
 		Name:  "lobby_type",
-		Value: fmt.Sprintf("%s", l.String()),
+		Value: l.String(),
 		boost: b,
 	}.Escaped()
 }
@@ -281,7 +281,7 @@ type Region evr.Symbol
 func (r Region) Query(o QueryOperator, b int) string {
 	return Label{
 		Op:    rune(o),
-		Name:  "region",
+		Name:  "broadcaster.region",
 		Value: evr.Symbol(r).Token().String(),
 		boost: b,
 	}.Escaped()
@@ -293,7 +293,7 @@ type PlayerCount int
 func (c PlayerCount) Query(o QueryOperator, b int, expr string) string {
 	return Label{
 		Op:    rune(o),
-		Name:  "player_count",
+		Name:  "size",
 		Value: fmt.Sprintf("%s%d", expr, c),
 		boost: b,
 	}.Escaped()
@@ -403,7 +403,7 @@ type EndpointId string
 func (e EndpointId) Query(o QueryOperator, b int) string {
 	return Label{
 		Op:    rune(o),
-		Name:  "endpoint",
+		Name:  "broadcaster.endpoint",
 		Value: fmt.Sprintf("/%s:.+/", string(e)),
 		boost: b,
 	}.Escaped()

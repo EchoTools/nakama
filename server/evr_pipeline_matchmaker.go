@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gofrs/uuid/v5"
+	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -33,16 +34,24 @@ func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logg
 	if session.userID == uuid.Nil {
 		return false, status.Errorf(codes.PermissionDenied, "User not authenticated")
 	}
-
+	//evrModes := map[uint8]struct{}{StreamModeEvr: {}, StreamModeMatchAuthoritative: {}}
+	//stream := PresenceStream{Mode: StreamModeEvr, Subject: session.userID, Subcontext: svcMatchID, Label: p.node}
 	sessionIDs := session.tracker.ListLocalSessionIDByStream(PresenceStream{Mode: StreamModeEvr, Subject: session.userID, Subcontext: svcMatchID})
 	for _, foundSessionID := range sessionIDs {
 		if foundSessionID == session.id {
 			// Allow the current session, only disconnect any older ones.
 			continue
 		}
+
 		// Disconnect the older session.
 		logger.Debug("Disconnecting older session from matchmaking", zap.String("other_sid", foundSessionID.String()))
-		p.tracker.UntrackLocalByModes(foundSessionID, matchStreamModes, PresenceStream{})
+		fs := p.sessionRegistry.Get(foundSessionID)
+		if fs == nil {
+			logger.Warn("Failed to find older session to disconnect", zap.String("other_sid", foundSessionID.String()))
+			continue
+		}
+		fs.Close("New session started", runtime.PresenceReasonDisconnect)
+
 	}
 
 	// Track this session as a matchmaking session.
@@ -104,7 +113,7 @@ func (p *EvrPipeline) lobbyFindSessionRequest(ctx context.Context, logger *zap.L
 	if authorized, err := p.authorizeMatchmaking(ctx, logger, session, request.Channel); !authorized {
 		return result.SendErrorToSession(session, err)
 	} else if err != nil {
-		logger.Error("Failed to authorize matchmaking", zap.Error(err))
+		logger.Warn("Failed to authorize matchmaking, allowing player to continue. ", zap.Error(err))
 	}
 	gracePeriod := MatchJoinGracePeriod
 
@@ -172,7 +181,7 @@ func (p *EvrPipeline) lobbyFindSessionRequest(ctx context.Context, logger *zap.L
 			if ml.Mode == evr.ModeSocialPublic {
 				// set a timeout
 
-				stageTimer := time.NewTimer(30 * time.Second)
+				stageTimer := time.NewTimer(3 * time.Minute)
 				for {
 					// Stage 1: Check if there is an available lobby
 					match, err := p.MatchCreate(ctx, session, msession, ml)
@@ -191,7 +200,7 @@ func (p *EvrPipeline) lobbyFindSessionRequest(ctx context.Context, logger *zap.L
 						// No servers are connected. This can happen if the server is starting up or shutting down.
 						fallthrough
 					case codes.ResourceExhausted:
-						// All teh servers are being used.
+						// All the servers are being used.
 						select {
 
 						case <-time.After(5 * time.Second):
@@ -303,7 +312,7 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 	if authorized, err := p.authorizeMatchmaking(ctx, logger, session, request.Channel); !authorized {
 		return result.SendErrorToSession(session, err)
 	} else if err != nil {
-		logger.Error("Failed to authorize matchmaking", zap.Error(err))
+		logger.Warn("Failed to authorize matchmaking, allowing player to continue. ", zap.Error(err))
 	}
 
 	ml := &EvrMatchState{
@@ -373,7 +382,7 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 		if authorized, err := p.authorizeMatchmaking(ctx, logger, session, *ml.Channel); !authorized {
 			return result.SendErrorToSession(session, err)
 		} else if err != nil {
-			logger.Error("Failed to authorize matchmaking", zap.Error(err))
+			logger.Warn("Failed to authorize matchmaking, allowing player to continue. ", zap.Error(err))
 		}
 	}
 
