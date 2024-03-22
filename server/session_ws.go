@@ -205,7 +205,7 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 	}
 }
 
-func (s *sessionWS) LoginSession(userID string, username string, evrID evr.EvrId, deviceId *DeviceId) error {
+func (s *sessionWS) LoginSession(userID string, username string, evrID evr.EvrId, deviceId *DeviceId, noVR bool) error {
 	// Each player has a single login connection, which will act as the core session.
 	// When this connection is terminated, all other connections should be terminated.
 
@@ -224,6 +224,8 @@ func (s *sessionWS) LoginSession(userID string, username string, evrID evr.EvrId
 	ctx = context.WithValue(ctx, ctxEvrIDKey{}, evrID)
 	ctx = context.WithValue(ctx, ctxUserIDKey{}, uuid.FromStringOrNil(userID)) // apiServer compatibility
 	ctx = context.WithValue(ctx, ctxUsernameKey{}, username)                   // apiServer compatibility
+	ctx = context.WithValue(ctx, ctxNoVRKey{}, noVR)
+
 	s.Lock()
 	s.ctx = ctx
 	s.userID = uuid.FromStringOrNil(userID)
@@ -247,15 +249,18 @@ func (s *sessionWS) LoginSession(userID string, username string, evrID evr.EvrId
 			Meta:   PresenceMeta{Format: s.format, Username: evrID.Token(), Hidden: true},
 		},
 		// Notification presence.
-		{
-			Stream: PresenceStream{Mode: StreamModeNotifications, Subject: s.userID},
-			Meta:   PresenceMeta{Format: s.format, Username: username, Hidden: true},
-		},
-		// Status presence.
-		{
-			Stream: PresenceStream{Mode: StreamModeStatus, Subject: s.userID},
-			Meta:   PresenceMeta{Format: s.format, Username: username, Status: ""},
-		},
+		/*
+			{
+				Stream: PresenceStream{Mode: StreamModeNotifications, Subject: s.userID},
+				Meta:   PresenceMeta{Format: s.format, Username: username, Hidden: true},
+			},
+
+			// Status presence.
+			{
+				Stream: PresenceStream{Mode: StreamModeStatus, Subject: s.userID},
+				Meta:   PresenceMeta{Format: s.format, Username: username, Status: ""},
+			},
+		*/
 	}, s.userID, true)
 
 	return nil

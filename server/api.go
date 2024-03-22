@@ -59,6 +59,7 @@ type ctxUserIDKey struct{}
 type ctxUsernameKey struct{}
 type ctxVarsKey struct{}
 type ctxExpiryKey struct{}
+type ctxNoVRKey struct{}
 
 type ctxFullMethodKey struct{}
 

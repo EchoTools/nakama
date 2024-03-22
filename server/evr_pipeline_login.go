@@ -162,9 +162,10 @@ func (p *EvrPipeline) processLogin(ctx context.Context, session *sessionWS, evrI
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
+	noVR := payload.SystemInfo.HeadsetType == "No VR"
 
 	// Initialize the full session
-	if err := session.LoginSession(userId, user.GetUsername(), evrId, deviceId); err != nil {
+	if err := session.LoginSession(userId, user.GetUsername(), evrId, deviceId, noVR); err != nil {
 		return nil, fmt.Errorf("failed to login: %w", err)
 	}
 
@@ -1032,7 +1033,20 @@ func (p *EvrPipeline) documentRequest(ctx context.Context, logger *zap.Logger, s
 		return fmt.Errorf("unknown document: %s", key)
 	}
 
-	// TODO If this is a request from a non-VR user (i.e. broadcaster).
+	// If this is a NoVR user, then use hte original EULA with version 1.
+	// Get the NoVR from the ctx
+
+	noVr, ok := ctx.Value(ctxNoVRKey{}).(bool)
+	if ok && noVr {
+		document = evr.NewEulaDocument(1, 1, "")
+
+		session.SendEvr([]evr.Message{
+			evr.NewSNSDocumentSuccess(document),
+			evr.NewSTcpConnectionUnrequireEvent(),
+		})
+
+	}
+
 	// Then always return a default document with a version of 1.
 	// This is to prevent headless clients from hanging waiting for the
 	// button interaction to get past the EULA dialog.
@@ -1103,6 +1117,7 @@ func (p *EvrPipeline) documentRequest(ctx context.Context, logger *zap.Logger, s
 		if err := json.Unmarshal([]byte(data), &document); err != nil {
 			return fmt.Errorf("error unmarshalling document %s: %w: %s", key, err, data)
 		}
+		// Set the version to 1
 
 		// If the channel is nil, then check everything.
 
@@ -1112,6 +1127,7 @@ func (p *EvrPipeline) documentRequest(ctx context.Context, logger *zap.Logger, s
 			if !ok {
 				return fmt.Errorf("failed to cast document to EulaDocument")
 			}
+			eula.Version = 1
 
 			// Get the players current channel
 			channel, err := p.getPlayersCurrentChannel(ctx, session)
