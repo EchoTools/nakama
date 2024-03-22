@@ -275,7 +275,7 @@ func (c *MatchmakingRegistry) matchedEntriesFn(entries [][]*MatchmakerEntry) {
 		// Create a map of ExternalIP -> state
 		endpoints := make(map[string]*EvrMatchState, len(broadcasters))
 		for _, v := range broadcasters {
-			k := ipToKey(v.Endpoint.ExternalIP)
+			k := ipToKey(v.Broadcaster.Endpoint.ExternalIP)
 			endpoints[k] = v
 		}
 
@@ -326,7 +326,7 @@ func (c *MatchmakingRegistry) matchedEntriesFn(entries [][]*MatchmakerEntry) {
 			}
 			// Load the level.
 			m := fmt.Sprintf("%s.%s", state.MatchId, c.config.GetName())
-
+			label.SpawnedBy = state.Broadcaster.Endpoint.ID()
 			// Instruct the server to load the level
 			response, err := SignalMatch(c.ctx, c.matchRegistry, m, SignalStartSession, label)
 			if err != nil {
@@ -393,8 +393,8 @@ func (c *MatchmakingRegistry) updateBroadcasters() {
 			c.logger.Error("Error unmarshalling match label", zap.Error(err))
 			continue
 		}
-		id := s.Endpoint.ID()
-		endpoints[id] = s.Endpoint
+		id := s.Broadcaster.Endpoint.ID()
+		endpoints[id] = s.Broadcaster.Endpoint
 	}
 
 	c.Lock()
@@ -647,7 +647,7 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, session *sessionWS, ml
 	// Check if a matching session exists
 
 	// Set defaults for the matching label
-	ml.Ready = true // Open for joining
+	ml.Open = true // Open for joining
 	ml.MaxSize = MaxMatchSize
 
 	// Set defaults for public matches
@@ -682,7 +682,7 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, session *sessionWS, ml
 		if cid == uuid.Nil {
 			continue
 		}
-		ml.BroadcasterChannels = append(ml.BroadcasterChannels, cid)
+		ml.Broadcaster.HostedChannels = append(ml.Broadcaster.HostedChannels, cid)
 	}
 
 	ctx, cancel := context.WithCancelCause(ctx)

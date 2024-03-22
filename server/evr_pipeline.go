@@ -5,9 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net"
-	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +15,7 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/heroiclabs/nakama/v3/social"
+
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/encoding/protojson"
 )
@@ -52,13 +51,12 @@ type EvrPipeline struct {
 	discordRegistry DiscordRegistry
 	ipCache         *IPinfoCache
 
-	broadcasterRegistrationBySession *MapOf[uuid.UUID, *EvrMatchState]
+	broadcasterRegistrationBySession *MapOf[uuid.UUID, *MatchBroadcaster]
 	matchBySession                   *MapOf[uuid.UUID, string]
 	matchByUserId                    *MapOf[uuid.UUID, string]
 	loginSessionByEvrID              *MapOf[string, *sessionWS]
 	matchByEvrId                     *MapOf[string, string] // full match string by evrId token
-
-	matchmakingRegistry *MatchmakingRegistry
+	matchmakingRegistry              *MatchmakingRegistry
 
 	placeholderEmail string
 	linkDeviceUrl    string
@@ -146,7 +144,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 
 		matchmakingRegistry: NewMatchmakingRegistry(logger, matchRegistry, matchmaker, metrics, config),
 
-		broadcasterRegistrationBySession: &MapOf[uuid.UUID, *EvrMatchState]{},
+		broadcasterRegistrationBySession: &MapOf[uuid.UUID, *MatchBroadcaster]{},
 		matchBySession:                   &MapOf[uuid.UUID, string]{},
 		matchByUserId:                    &MapOf[uuid.UUID, string]{},
 		loginSessionByEvrID:              &MapOf[string, *sessionWS]{},
@@ -236,15 +234,15 @@ func (p *EvrPipeline) ProcessRequestEvr(logger *zap.Logger, session *sessionWS, 
 		pipelineFn = p.broadcasterSessionEnded
 	case *evr.BroadcasterPlayersAccept:
 		pipelineFn = p.relayMatchData
-	case *evr.GameServerSessionStarted:
+	case *evr.BroadcasterSessionStarted:
 		pipelineFn = p.relayMatchData
-	case *evr.GameServerChallengeRequest:
+	case *evr.BroadcasterChallengeRequest:
 		pipelineFn = p.relayMatchData
 	case *evr.BroadcasterPlayersRejected:
 		pipelineFn = p.relayMatchData
-	case *evr.GameServerPlayerSessionsLocked:
+	case *evr.BroadcasterPlayerSessionsLocked:
 		pipelineFn = p.relayMatchData
-	case *evr.ERGameServerPlayerSessionsUnlocked:
+	case *evr.BroadcasterPlayerSessionsUnlocked:
 		pipelineFn = p.relayMatchData
 	case *evr.BroadcasterPlayerRemoved:
 		pipelineFn = p.relayMatchData

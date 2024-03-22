@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net"
 	"sort"
 	"strings"
 	"time"
@@ -37,20 +38,19 @@ func (p *EvrPipeline) ListUnassignedLobbies(ctx context.Context, session *sessio
 	qparts = append(qparts, LobbyType(evr.UnassignedLobby).Query(Must, 0))
 
 	// MUST be one of the accessible channels (if provided)
-	if len(ml.BroadcasterChannels) > 0 {
+	if len(ml.Broadcaster.HostedChannels) > 0 {
 		// Add the channels to the query
-		qparts = append(qparts, HostedChannels(ml.BroadcasterChannels).Query(Must, 0))
+		qparts = append(qparts, HostedChannels(ml.Broadcaster.HostedChannels).Query(Must, 0))
 	}
 
 	// SHOULD match the region (if specified)
-	if ml.Region != evr.Symbol(0) {
-		qparts = append(qparts, Region(ml.Region).Query(Should, 0))
+	if ml.Broadcaster.Region != evr.Symbol(0) {
+		qparts = append(qparts, Region(ml.Broadcaster.Region).Query(Should, 0))
 	}
 
 	// TODO FIXME Add version lock and appid
 	query := strings.Join(qparts, " ")
 
-	// setup a channel on the registry that the ping cycle can use to signal that the pings are finished.
 	limit := 100
 	minSize, maxSize := 1, 1 // Only the 1 broadcaster should be there.
 	matches, err := listMatches(ctx, p, limit, minSize, maxSize, query)
@@ -260,18 +260,18 @@ func buildMatchQueryFromLabel(ml *EvrMatchState) string {
 	}
 
 	// MUST be a broadcaster on a channel the user has access to
-	if len(ml.BroadcasterChannels) != 0 {
-		qparts = append(qparts, Channels(ml.BroadcasterChannels).Query(Must, 0))
+	if len(ml.Broadcaster.HostedChannels) != 0 {
+		qparts = append(qparts, Channels(ml.Broadcaster.HostedChannels).Query(Must, 0))
 	}
 
 	// SHOULD Add the current channel as a high boost SHOULD
-	if ml.Channel != uuid.Nil {
-		qparts = append(qparts, Channel(ml.Channel).Query(Should, 3))
+	if *ml.Channel != uuid.Nil {
+		qparts = append(qparts, Channel(*ml.Channel).Query(Should, 3))
 	}
 
 	// Add the region as a SHOULD
-	if ml.Region != evr.Symbol(0) {
-		qparts = append(qparts, Region(ml.Region).Query(Should, 2))
+	if ml.Broadcaster.Region != evr.Symbol(0) {
+		qparts = append(qparts, Region(ml.Broadcaster.Region).Query(Should, 2))
 	}
 
 	// Setup the query and logger
@@ -363,7 +363,7 @@ func (p *EvrPipeline) MatchSort(ctx context.Context, session *sessionWS, msessio
 	// Only ping the unique endpoints
 	endpoints := make(map[string]evr.Endpoint, len(labels))
 	for _, label := range labels {
-		endpoints[label.Endpoint.ID()] = label.Endpoint
+		endpoints[label.Broadcaster.Endpoint.ID()] = label.Broadcaster.Endpoint
 	}
 
 	// Ping the endpoints
@@ -387,7 +387,7 @@ func (p *EvrPipeline) MatchSort(ctx context.Context, session *sessionWS, msessio
 	// Create a map of endpoint Ids to sizes and latencies
 	datas := make([]labelData, 0, len(labels))
 	for _, label := range labels {
-		id := label.Endpoint.ID()
+		id := label.Broadcaster.Endpoint.ID()
 		rtt := endpointRTTs[id]
 		// If the rtt is 0 or over 270ms, skip the match
 		if rtt == 0 || rtt > 270*time.Millisecond {
@@ -422,7 +422,7 @@ func (p *EvrPipeline) MatchSort(ctx context.Context, session *sessionWS, msessio
 	filtered = make([]*EvrMatchState, 0, len(datas))
 	for _, data := range datas {
 		for _, label := range labels {
-			if label.Endpoint.ID() == data.Id {
+			if label.Broadcaster.Endpoint.ID() == data.Id {
 				filtered = append(filtered, label)
 				rtts = append(rtts, data.RTT)
 				break
@@ -454,6 +454,7 @@ func (p *EvrPipeline) MatchCreate(ctx context.Context, session *sessionWS, msess
 	// Load the level.
 	matchId := fmt.Sprintf("%s.%s", match.MatchId, p.node)
 
+	label.SpawnedBy = session.UserID().String()
 	// Instruct the server to load the level
 	_, err = SignalMatch(ctx, p.matchRegistry, matchId, SignalStartSession, label)
 	if err != nil {

@@ -111,15 +111,19 @@ func (p *EvrPipeline) lobbyFindSessionRequest(ctx context.Context, logger *zap.L
 	// TODO Check if the user is in a party.
 	partySize := 1
 	ml := &EvrMatchState{
-		Channel:         request.Channel,
-		Level:           request.Level,
-		MatchId:         request.MatchingSession, // The existing lobby/match that the player is in (if any)
-		Mode:            request.Mode,
-		Ready:           true,
-		Platform:        request.Platform,
-		SessionSettings: request.SessionSettings,
+		Channel: &request.Channel,
+		Level:   request.Level,
+		MatchId: request.MatchingSession, // The existing lobby/match that the player is in (if any)
+		Mode:    request.Mode,
+		Open:    true,
+
+		SessionSettings: &request.SessionSettings,
 		TeamIndex:       TeamIndex(request.TeamIndex),
-		VersionLock:     request.VersionLock,
+
+		Broadcaster: MatchBroadcaster{
+			Platform:    request.Platform,
+			VersionLock: request.VersionLock,
+		},
 	}
 
 	// Unless this is a social lobby, wait for a grace period before starting the matchmaker
@@ -157,7 +161,7 @@ func (p *EvrPipeline) lobbyFindSessionRequest(ctx context.Context, logger *zap.L
 			// Join the first match, or continue to create one
 			if len(labels) > 0 {
 				label := labels[0]
-				err = p.JoinEvrMatch(ctx, session, label.MatchId.String(), label.Channel, int(ml.TeamIndex))
+				err = p.JoinEvrMatch(ctx, session, label.MatchId.String(), *label.Channel, int(ml.TeamIndex))
 				if err != nil {
 					return result.SendErrorToSession(session, err)
 				}
@@ -211,9 +215,9 @@ func (p *EvrPipeline) lobbyFindSessionRequest(ctx context.Context, logger *zap.L
 					}
 				}
 			case matchId := <-msession.MatchIdCh:
-				logger.Debug("Match found", zap.String("match_id", matchId))
+				logger.Debug("Match found", zap.String("mid", matchId))
 				// join the match
-				err := p.JoinEvrMatch(ctx, session, matchId, ml.Channel, int(ml.TeamIndex))
+				err := p.JoinEvrMatch(ctx, session, matchId, *ml.Channel, int(ml.TeamIndex))
 				if err != nil {
 					logger.Error("Failed to join match", zap.Error(err))
 					err := result.SendErrorToSession(session, ErrMatchmakingTimeout)
@@ -278,16 +282,20 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 	}
 
 	ml := &EvrMatchState{
-		Channel:         request.Channel,
+		Channel:         &request.Channel,
 		Level:           request.Level,
 		LobbyType:       LobbyType(request.LobbyType),
 		Mode:            request.Mode,
-		Ready:           true,
-		Platform:        request.Platform,
-		Region:          request.Region,
-		SessionSettings: request.SessionSettings,
+		Open:            true,
+		SessionSettings: &request.SessionSettings,
 		TeamIndex:       TeamIndex(request.TeamIndex),
-		VersionLock:     uint64(request.VersionLock),
+
+		Broadcaster: MatchBroadcaster{
+			Platform: request.Platform,
+
+			VersionLock: uint64(request.VersionLock),
+			Region:      request.Region,
+		},
 	}
 
 	// Start the search in a goroutine.
@@ -333,11 +341,11 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 	if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), ml); err != nil {
 		return NewMatchmakingResult(0, uuid.Nil).SendErrorToSession(session, err)
 	}
-	result := NewMatchmakingResult(ml.Mode, ml.Channel)
+	result := NewMatchmakingResult(ml.Mode, *ml.Channel)
 	// Check for suspensions on this channel.
 	if ml.Mode == evr.ModeArenaPublic || ml.Mode == evr.ModeCombatPublic || ml.Mode == evr.ModeSocialPublic {
 		// Check for suspensions on this channel, if this is a request for a public match.
-		if authorized, err := p.authorizeMatchmaking(ctx, logger, session, ml.Channel); !authorized {
+		if authorized, err := p.authorizeMatchmaking(ctx, logger, session, *ml.Channel); !authorized {
 			return result.SendErrorToSession(session, err)
 		} else if err != nil {
 			logger.Error("Failed to authorize matchmaking", zap.Error(err))
@@ -345,7 +353,7 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 	}
 
 	// Join the match
-	if err = p.JoinEvrMatch(ctx, session, matchId, ml.Channel, int(ml.TeamIndex)); err != nil {
+	if err = p.JoinEvrMatch(ctx, session, matchId, *ml.Channel, int(ml.TeamIndex)); err != nil {
 		return result.SendErrorToSession(session, err)
 	}
 	return nil

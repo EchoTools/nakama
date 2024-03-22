@@ -5,27 +5,27 @@ import (
 	"fmt"
 )
 
-// GameServerChallengeRequest represents a message from server to game server, providing a challenge to the game server to complete prior to registration.
+// BroadcasterChallengeRequest represents a message from server to game server, providing a challenge to the game server to complete prior to registration.
 // NOTE: This is an unofficial message created for Echo Relay.
 // TODO: This is unused in favor of lazy SERVERDB API key authentication.
-type GameServerChallengeRequest struct {
+type BroadcasterChallengeRequest struct {
 	InputPayload []byte
 }
 
-func (m *GameServerChallengeRequest) Token() string {
+func (m *BroadcasterChallengeRequest) Token() string {
 	return "ERGameServerChallengeRequest"
 }
 
-func (m *GameServerChallengeRequest) Symbol() Symbol {
+func (m *BroadcasterChallengeRequest) Symbol() Symbol {
 	return 0x7777777777770A00
 }
 
 // String returns a string representation of the ERGameServerChallengeRequest.
-func (r *GameServerChallengeRequest) String() string {
+func (r *BroadcasterChallengeRequest) String() string {
 	return fmt.Sprintf("ERGameServerChallengeRequest(input_payload=%s)", hex.EncodeToString(r.InputPayload))
 }
 
-func (m *GameServerChallengeRequest) Stream(s *EasyStream) error {
+func (m *BroadcasterChallengeRequest) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
 		func() error {
 			if s.Mode == DecodeMode {
@@ -36,8 +36,8 @@ func (m *GameServerChallengeRequest) Stream(s *EasyStream) error {
 	})
 }
 
-func NewERGameServerChallengeRequest(inputPayload []byte) *GameServerChallengeRequest {
-	return &GameServerChallengeRequest{
+func NewERGameServerChallengeRequest(inputPayload []byte) *BroadcasterChallengeRequest {
+	return &BroadcasterChallengeRequest{
 		InputPayload: inputPayload,
 	}
 }
