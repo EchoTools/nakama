@@ -33,6 +33,7 @@ const (
 	GamePlayerSettingsStorageKey        = "playerSettings"
 	DocumentStorageCollection           = "GameDocuments"
 	GameProfileStorageCollection        = "GameProfiles"
+	RemoteLogStorageCollection          = "RemoteLogs"
 	ServerGameProfileStorageKey         = "server"
 	ClientGameProfileStorageKey         = "client"
 )
@@ -1012,6 +1013,25 @@ func (p *EvrPipeline) remoteLogSetv3(ctx context.Context, logger *zap.Logger, se
 			}
 		default:
 			if logger.Core().Enabled(zap.DebugLevel) {
+				// Write the remoteLog to storage.
+				ops := StorageOpWrites{
+					{
+						OwnerID: session.userID.String(),
+						Object: &api.WriteStorageObject{
+							Collection:      RemoteLogStorageCollection,
+							Key:             messagetype,
+							Value:           l,
+							PermissionRead:  &wrapperspb.Int32Value{Value: int32(1)},
+							PermissionWrite: &wrapperspb.Int32Value{Value: int32(0)},
+							Version:         "",
+						},
+					},
+				}
+				_, _, err := StorageWriteObjects(ctx, logger, session.pipeline.db, session.metrics, session.storageIndex, true, ops)
+				if err != nil {
+					logger.Error("Failed to write remote log", zap.Error(err))
+				}
+			} else {
 				//logger.Debug("Received unknown remote log", zap.Any("entry", entry))
 			}
 		}
