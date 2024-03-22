@@ -31,9 +31,9 @@ func (r LoggedInUserProfileSuccess) String() string {
 	return fmt.Sprintf("LoggedInUserProfileSuccess(user_id=%v)", r.UserId)
 }
 
-func NewLoggedInUserProfileSuccess(userId EvrId, gameProfiles GameProfiles) *LoggedInUserProfileSuccess {
+func NewLoggedInUserProfileSuccess(userId EvrId, gameProfiles *GameProfiles) *LoggedInUserProfileSuccess {
 	return &LoggedInUserProfileSuccess{
 		UserId:       userId,
-		GameProfiles: gameProfiles,
+		GameProfiles: *gameProfiles,
 	}
 }

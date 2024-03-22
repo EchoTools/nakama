@@ -65,8 +65,8 @@ func NewChannelGroup() ChannelGroup {
 	}
 }
 
-func NewChannelInfoResource() ChannelInfoResource {
-	return ChannelInfoResource{
+func NewChannelInfoResource() *ChannelInfoResource {
+	return &ChannelInfoResource{
 		Groups: []ChannelGroup{
 			{
 				ChannelUuid:  "90DD4DB5-B5DD-4655-839E-FDBE5F4BC0BF",

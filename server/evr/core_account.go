@@ -214,9 +214,9 @@ type Versioned struct {
 
 type Social struct {
 	// WARNING: EchoVR dictates this struct/schema.
-	CommunityValuesVersion int64  `json:"community_values_version,omitempty" validate:"gte=0"`
-	SetupVersion           int64  `json:"setup_version,omitempty" validate:"gte=0"`
-	Group                  string `json:"group,omitempty" validate:"uuid_rfc4122"` // The channel. It is a GUID, uppercase.
+	CommunityValuesVersion int64 `json:"community_values_version,omitempty" validate:"gte=0"`
+	SetupVersion           int64 `json:"setup_version,omitempty" validate:"gte=0"`
+	Group                  GUID  `json:"group,omitempty" validate:"uuid_rfc4122"` // The channel. It is a GUID, uppercase.
 }
 
 type ServerProfile struct {
@@ -457,19 +457,19 @@ type WeelkyStats struct {
 }
 
 type EquippedCosmetics struct {
-	Instances Instances `json:"instances"`
-	Number    int64     `json:"number"`
+	Instances CosmeticInstances `json:"instances"`
+	Number    int64             `json:"number"`
 }
 
-type Instances struct {
-	Unified Unified `json:"unified"`
+type CosmeticInstances struct {
+	Unified UnifiedCosmeticInstance `json:"unified"`
 }
 
-type Unified struct {
-	Slots Slots `json:"slots"`
+type UnifiedCosmeticInstance struct {
+	Slots CosmeticLoadout `json:"slots"`
 }
 
-type Slots struct {
+type CosmeticLoadout struct {
 	Decal          string `json:"decal"`
 	DecalBody      string `json:"decal_body"`
 	Emote          string `json:"emote"`
@@ -742,14 +742,14 @@ type ArenaUnlocks struct {
 	DecalLoneEcho2_A            bool `json:"rwd_decal_lone_echo_2_a,omitempty"`
 	DecalMusicNoteA             bool `json:"decal_music_note_a,omitempty"`
 	DecalNarwhalA               bool `json:"rwd_decal_narwhal_a,omitempty"`
-	DecalOculusA                bool `json:"decal_oculus_a,omitempty"`
+	DecalOculusA                bool `json:"decal_oculus_a,omitempty"  validate:"restricted"`
 	DecalOneYearA               bool `json:"decal_one_year_a,omitempty" validate:"restricted"`
 	DecalOniA                   bool `json:"rwd_decal_oni_a,omitempty"`
 	DecalPenguinA               bool `json:"decal_penguin_a,omitempty"`
 	DecalPepperA                bool `json:"rwd_decal_pepper_a,omitempty"`
 	DecalPresentA               bool `json:"decal_present_a,omitempty"`
 	DecalProfileWolfA           bool `json:"decal_profile_wolf_a,omitempty"`
-	DecalQuestLaunchA           bool `json:"decal_quest_launch_a,omitempty"`
+	DecalQuestLaunchA           bool `json:"decal_quest_launch_a,omitempty" validate:"restricted"`
 	DecalRadioactiveA           bool `json:"decal_radioactive_a,omitempty"`
 	DecalRadioactiveBioA        bool `json:"decal_radioactive_bio_a,omitempty"`
 	DecalRadLogo                bool `json:"decal_radlogo_a,omitempty" validate:"restricted"`
