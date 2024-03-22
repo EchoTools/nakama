@@ -680,6 +680,12 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 			case *evr.OtherUserProfileRequest:
 				// The broadcaster is requesting the profile of joining user.
 				messageFn = m.otherUserProfileRequest
+			case *evr.BroadcasterPlayerSessionsLocked:
+				// The server has locked the player sessions.
+				messageFn = m.broadcasterPlayerSessionsLocked
+			case *evr.BroadcasterPlayerSessionsUnlocked:
+				// The server has locked the player sessions.
+				messageFn = m.broadcasterPlayerSessionsUnlocked
 			default:
 				logger.Warn("Unknown message type: %T", msg)
 			}
@@ -1124,4 +1130,18 @@ func sendMessagesToStream(_ context.Context, nk runtime.NakamaModule, sessionId 
 		return fmt.Errorf("failed to send message: %w", err)
 	}
 	return nil
+}
+
+func (m *EvrMatch) broadcasterPlayerSessionsLocked(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, state *EvrMatchState, in runtime.MatchData, msg evr.Message) (*EvrMatchState, error) {
+	_ = msg.(*evr.BroadcasterPlayerSessionsLocked)
+	// Verify that the update is coming from the broadcaster.
+	state.Open = false
+	return state, nil
+}
+
+func (m *EvrMatch) broadcasterPlayerSessionsUnlocked(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, state *EvrMatchState, in runtime.MatchData, msg evr.Message) (*EvrMatchState, error) {
+	_ = msg.(*evr.BroadcasterPlayerSessionsLocked)
+	// Verify that the update is coming from the broadcaster.
+	state.Open = true
+	return state, nil
 }
