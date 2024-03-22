@@ -66,7 +66,7 @@ func (s *BroadcasterStartSession) String() string {
 		s.MatchID, s.PlayerLimit, s.LobbyType, s.Settings.String(), s.Entrants)
 }
 
-func NewBroadcasterStartSession(sessionId uuid.UUID, channel uuid.UUID, playerLimit uint8, lobbyType uint8, appId string, mode Symbol, level Symbol, entrants []EvrId) *BroadcasterStartSession {
+func NewBroadcasterStartSession(sessionId uuid.UUID, channel *uuid.UUID, playerLimit uint8, lobbyType uint8, appId string, mode Symbol, level Symbol, entrants []EvrId) *BroadcasterStartSession {
 	descriptors := make([]EntrantDescriptor, len(entrants))
 	for i, entrant := range entrants {
 		descriptors[i] = *NewEntrantDescriptor(entrant)
@@ -85,7 +85,7 @@ func NewBroadcasterStartSession(sessionId uuid.UUID, channel uuid.UUID, playerLi
 
 	return &BroadcasterStartSession{
 		MatchID:     sessionId,
-		Channel:     channel,
+		Channel:     *channel,
 		PlayerLimit: byte(playerLimit),
 		LobbyType:   byte(lobbyType),
 		Settings:    settings,

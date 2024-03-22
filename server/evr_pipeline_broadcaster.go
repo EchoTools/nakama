@@ -20,13 +20,6 @@ import (
 	"go.uber.org/zap"
 )
 
-type BroadcasterConfig struct {
-	Endpoint    evr.Endpoint
-	ServerId    uint64
-	Region      evr.Symbol
-	VersionLock uint64
-}
-
 // sendDiscordError sends an error message to the user on discord
 func sendDiscordError(e error, discordId string, logger *zap.Logger, discordRegistry DiscordRegistry) {
 	// Message the user on discord
@@ -137,7 +130,7 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 	if err != nil {
 		return errFailedRegistration(session, err, evr.BroadcasterRegistration_Failure)
 	}
-	config.BroadcasterChannels = channels
+	config.HostedChannels = channels
 
 	p.broadcasterRegistrationBySession.Store(session.ID(), config)
 
@@ -228,19 +221,20 @@ func (p *EvrPipeline) authenticateBroadcaster(ctx context.Context, session *sess
 	return userId, username, nil
 }
 
-func broadcasterConfig(userId, sessionId string, serverId uint64, internalIP, externalIP net.IP, port uint16, region evr.Symbol, versionLock uint64, tags []string) *EvrMatchState {
-	config := &EvrMatchState{
-		BroadcasterSessionId: sessionId,
-		BroadcasterUserId:    userId,
-		ServerId:             serverId,
+func broadcasterConfig(userId, sessionId string, serverId uint64, internalIP, externalIP net.IP, port uint16, region evr.Symbol, versionLock uint64, tags []string) *MatchBroadcaster {
+
+	config := &MatchBroadcaster{
+		SessionID: sessionId,
+		UserID:    userId,
+		ServerId:  serverId,
 		Endpoint: evr.Endpoint{
 			InternalIP: internalIP,
 			ExternalIP: externalIP,
 			Port:       port,
 		},
-		Region:              region,
-		VersionLock:         versionLock,
-		BroadcasterChannels: make([]uuid.UUID, 0),
+		Region:         region,
+		VersionLock:    versionLock,
+		HostedChannels: make([]uuid.UUID, 0),
 
 		Tags: make([]string, 0),
 	}
@@ -332,7 +326,7 @@ func (p *EvrPipeline) getBroadcasterHostInfo(ctx context.Context, session *sessi
 	return groupIds, nil
 }
 
-func (p *EvrPipeline) newParkingMatch(session *sessionWS, config *EvrMatchState) error {
+func (p *EvrPipeline) newParkingMatch(session *sessionWS, config *MatchBroadcaster) error {
 
 	// Create the match state from the config
 	_, params, _, err := NewEvrMatchState(config.Endpoint, config, session.id.String())

@@ -355,7 +355,7 @@ func (c HostedChannels) Query(o QueryOperator, b int) string {
 	s = fmt.Sprintf("/(%s)/", s)
 	return Label{
 		Op:    rune(o),
-		Name:  "broadcaster_channels",
+		Name:  "broadcaster.channels",
 		Value: s,
 		boost: b,
 	}.Unescaped()
@@ -372,7 +372,7 @@ func (s BroadcasterSession) ToUUID() uuid.UUID {
 func (s BroadcasterSession) Query(o QueryOperator, b int) string {
 	return Label{
 		Op:    rune(o),
-		Name:  "bsid",
+		Name:  "broadcaster.sid",
 		Value: string(s),
 		boost: b,
 	}.Escaped()
@@ -386,7 +386,7 @@ type MatchId uuid.UUID // uuid.UUID
 func (c MatchId) Query(o QueryOperator, b int) string {
 	return Label{
 		Op:    rune(o),
-		Name:  "match_id",
+		Name:  "id",
 		Value: uuid.UUID(c).String(),
 		boost: b,
 	}.Unescaped()
