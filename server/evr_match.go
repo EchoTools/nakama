@@ -24,7 +24,7 @@ const (
 	VersionLock       uint64 = 0xc62f01d78f77910d // The game build version.
 	MatchmakingModule        = "evr"              // The module used for matchmaking
 
-	MaxMatchSize = 15 // The total max players for a social lobby.
+	MatchMaxSize = 14 // The total max players for a EVR lobby.
 
 	LevelSelectionFirst  MatchLevelSelection = "first"
 	LevelSelectionRandom MatchLevelSelection = "random"

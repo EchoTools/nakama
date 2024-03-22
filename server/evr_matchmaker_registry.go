@@ -380,7 +380,7 @@ func (c *MatchmakingRegistry) rebuildBroadcasters() {
 }
 
 func (c *MatchmakingRegistry) updateBroadcasters() {
-	matches, err := c.listMatches(c.ctx, 1000, 1, MaxMatchSize, "")
+	matches, err := c.listMatches(c.ctx, 1000, 1, MatchMaxSize, "")
 	if err != nil {
 		c.logger.Error("Error listing matches", zap.Error(err))
 	}
@@ -648,21 +648,21 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, session *sessionWS, ml
 
 	// Set defaults for the matching label
 	ml.Open = true // Open for joining
-	ml.MaxSize = MaxMatchSize
+	ml.MaxSize = MatchMaxSize
 
 	// Set defaults for public matches
 	switch {
 	case ml.Mode == evr.ModeSocialPrivate || ml.Mode == evr.ModeSocialPublic:
 		ml.Level = evr.LevelSocial // Include the level in the search
-		ml.TeamSize = MaxMatchSize
-		ml.Size = MaxMatchSize - partySize
+		ml.TeamSize = MatchMaxSize
+		ml.Size = MatchMaxSize - partySize
 
 	case ml.Mode == evr.ModeArenaPublic || ml.Mode == evr.ModeCombatPublic:
 		ml.TeamSize = 4
 		ml.Size = ml.TeamSize*2 - partySize // Both teams, minus the party size
 
 	default: // Privates
-		ml.Size = MaxMatchSize - partySize
+		ml.Size = MatchMaxSize - partySize
 		ml.TeamSize = 5
 	}
 

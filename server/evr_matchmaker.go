@@ -287,7 +287,7 @@ func (p *EvrPipeline) MatchSearch(ctx context.Context, logger *zap.Logger, sessi
 	// Basic search defaults
 	const (
 		minSize = 1
-		maxSize = MaxMatchSize + 1 // +1 for the broadcaster
+		maxSize = MatchMaxSize + 1 // +1 for the broadcaster
 		limit   = 50
 	)
 
@@ -434,7 +434,7 @@ func (p *EvrPipeline) MatchSort(ctx context.Context, session *sessionWS, msessio
 
 // MatchCreate creates a match on an available unassigned broadcaster using the given label
 func (p *EvrPipeline) MatchCreate(ctx context.Context, session *sessionWS, msession *MatchmakingSession, label *EvrMatchState) (match *EvrMatchState, err error) {
-	label.MaxSize = MaxMatchSize
+	label.MaxSize = MatchMaxSize
 	// TODO Move this into the matchmaking registry
 	// Create a new match
 	matches, err := p.ListUnassignedLobbies(ctx, session, label)
