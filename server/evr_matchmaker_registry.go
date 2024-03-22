@@ -254,9 +254,20 @@ func (c *MatchmakingRegistry) matchedEntriesFn(entries [][]*MatchmakerEntry) {
 		// TODO FIXME loop for a bit until some are available.
 		// List all the unassigned lobbies on this channel
 		broadcasters, err := c.ListUnassignedLobbies(c.ctx, channel)
+		switch status.Code(err) {
+		case codes.Unavailable:
+			// No servers are available/connected. This might resolve itself if the system just came online.
+			c.logger.Info("No servers are available/connected")
+		case codes.ResourceExhausted:
+			// Servers are available, but in use. This should signal to keep matchmaking.
+			c.logger.Info("Servers are available, but in use")
+		case codes.Internal:
+			c.logger.Error("Error listing unassigned lobbies", zap.Error(err))
+			return
+		}
+
 		if err != nil {
 			c.logger.Error("Error listing unassigned lobbies", zap.Error(err))
-
 		}
 		// Create a map of each endpoint and it's latencies
 		latencies := make(map[string][]int, len(broadcasters))
@@ -426,7 +437,18 @@ func (c *MatchmakingRegistry) ListUnassignedLobbies(ctx context.Context, channel
 
 	// If no servers are available, return immediately.
 	if len(matches) == 0 {
-		return nil, status.Errorf(codes.NotFound, "No available servers")
+		// Check if there are *any* matches
+		matches, err := c.listMatches(ctx, 100, 1, MatchMaxSize, "*")
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "Failed to find matches: %v", err)
+		}
+		if len(matches) == 0 {
+			// No servers are available/connected.
+			return nil, status.Errorf(codes.Unavailable, "No available broadcasters")
+		} else {
+			// Servers are available, but in use. This should signal to keep matchmaking.
+			return nil, status.Errorf(codes.ResourceExhausted, "No servers exist")
+		}
 	}
 
 	// Create a slice containing the matches' labels
