@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand"
 	"reflect"
 	"sort"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"github.com/samber/lo"
 
 	"github.com/muesli/reflow/wordwrap"
 	"go.uber.org/zap"

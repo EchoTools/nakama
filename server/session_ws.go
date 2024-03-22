@@ -249,18 +249,16 @@ func (s *sessionWS) LoginSession(userID string, username string, evrID evr.EvrId
 			Meta:   PresenceMeta{Format: s.format, Username: evrID.Token(), Hidden: true},
 		},
 		// Notification presence.
-		/*
-			{
-				Stream: PresenceStream{Mode: StreamModeNotifications, Subject: s.userID},
-				Meta:   PresenceMeta{Format: s.format, Username: username, Hidden: true},
-			},
+		{
+			Stream: PresenceStream{Mode: StreamModeNotifications, Subject: s.userID},
+			Meta:   PresenceMeta{Format: s.format, Username: username, Hidden: true},
+		},
 
-			// Status presence.
-			{
-				Stream: PresenceStream{Mode: StreamModeStatus, Subject: s.userID},
-				Meta:   PresenceMeta{Format: s.format, Username: username, Status: ""},
-			},
-		*/
+		// Status presence.
+		{
+			Stream: PresenceStream{Mode: StreamModeStatus, Subject: s.userID},
+			Meta:   PresenceMeta{Format: s.format, Username: username, Status: ""},
+		},
 	}, s.userID, true)
 
 	return nil

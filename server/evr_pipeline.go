@@ -294,8 +294,10 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 	// TODO FIXME Catch the match leave message and translate it to an evr message
 	p := session.evrPipeline
 
-	pipelineFn := func(*zap.Logger, *sessionWS, *rtapi.Envelope) ([]evr.Message, error) {
-		logger.Warn(fmt.Sprintf("Unhandled protobuf message: %T", in.Message))
+	pipelineFn := func(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope) ([]evr.Message, error) {
+		if logger.Core().Enabled(zap.DebugLevel) {
+			logger.Debug(fmt.Sprintf("Unhandled protobuf message: %T", in.Message))
+		}
 		return nil, nil
 	}
 
