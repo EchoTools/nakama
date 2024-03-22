@@ -270,9 +270,7 @@ func (p *EvrPipeline) ProcessRequestEvr(logger *zap.Logger, session *sessionWS, 
 			logger.Error("Session not authenticated")
 			// As a work around to the serverdb connection getting lost and needing to reauthenticate
 			err := p.attemptOutOfBandAuthentication(session)
-			if err == nil {
-				return true
-			} else {
+			if err != nil {
 				// If the session is now authenticated, continue processing the request.
 				logger.Error("Failed to authenticate session with discordId and password", zap.Error(err))
 				return false
@@ -445,19 +443,19 @@ func (p *EvrPipeline) attemptOutOfBandAuthentication(session *sessionWS) error {
 	// Get the account for this discordId
 	userId, err := p.discordRegistry.GetUserIdByDiscordId(ctx, discordId, false)
 	if err != nil {
-		return err
+		return fmt.Errorf("Out of band Auth: ", err)
 	}
 
 	// The account was found.
 	account, err := GetAccount(ctx, session.logger, session.pipeline.db, session.statusRegistry, uuid.FromStringOrNil(userId))
 	if err != nil {
-		return err
+		return fmt.Errorf("Out of band Auth: ", err)
 	}
 
 	// Do email authentication
 	userId, _, _, err = AuthenticateEmail(ctx, session.logger, session.pipeline.db, account.Email, userPassword, "", false)
 	if err != nil {
-		return err
+		return fmt.Errorf("Out of band Auth: ", err)
 	}
 
 	return session.BroadcasterSession(userId, "")
