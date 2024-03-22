@@ -133,36 +133,21 @@ func (p *EvrPipeline) processLogin(ctx context.Context, session *sessionWS, evrI
 
 	// If user ID is not empty, write out the login payload to storage.
 	if userId != "" {
-		if err := writeAuditObjects(ctx, session, userId, evrId.Token(), payload); err != nil {
-			return nil, fmt.Errorf("failed to write audit objects: %w", err)
-		}
+		go func() {
+			if err := writeAuditObjects(ctx, session, userId, evrId.Token(), payload); err != nil {
+				session.logger.Warn("Failed to write audit objects", zap.Error(err))
+			}
+		}()
 	}
-
-	// Channels for handling game settings and errors.
-	loginSettingsCh := make(chan *evr.EchoClientSettings, 1)
-	errorCh := make(chan error, 1)
-
 	// Load game settings in a separate goroutine.
-	go func() {
-		ctx, cancel := context.WithTimeout(ctx, 1*time.Second)
-		defer cancel()
 
-		settings, err := p.loadGameSettings(ctx, user.GetId(), session)
-		if err != nil {
-			errorCh <- err
-			return
-		}
-		loginSettingsCh <- settings
-	}()
-
-	// Select block to handle the results from the goroutine.
-	select {
-	case settings = <-loginSettingsCh:
-	case err = <-errorCh:
-		return nil, err
-	case <-ctx.Done():
-		return nil, ctx.Err()
+	settings, err = p.loadGameSettings(ctx, user.GetId(), session)
+	if err != nil {
+		session.logger.Error("failed to load game settings", zap.Error(err))
+		// Use the defaults
+		settings = evr.DefaultEchoClientSettings()
 	}
+
 	noVR := payload.SystemInfo.HeadsetType == "No VR"
 
 	// Initialize the full session
@@ -176,16 +161,30 @@ func (p *EvrPipeline) processLogin(ctx context.Context, session *sessionWS, evrI
 		<-session.Context().Done()
 		session.evrPipeline.loginSessionByEvrID.Delete(evrId.String())
 	}()
-	// Update the discord registry in a separate goroutine.
-	go func() {
+
+	// Update the user from Discord
+	// Give discord 5 seconds before moving on
+
+	timerCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+
+	if discordId == "" {
 		// Get the userId
-		discordId, err := p.discordRegistry.GetDiscordIdByUserId(ctx, userId)
-		if err != nil {
-			return
-		}
+		discordId, err = p.discordRegistry.GetDiscordIdByUserId(ctx, userId)
+	}
+
+	go func() {
+		defer cancel()
 		// Update the account
-		p.discordRegistry.UpdateAccount(ctx, discordId)
+		if err := p.discordRegistry.UpdateAccount(timerCtx, discordId); err != nil {
+			session.logger.Warn("Failed to update account", zap.Error(err))
+		}
 	}()
+
+	select {
+	case <-time.After(5 * time.Second):
+		session.logger.Warn("Discord update timed out")
+	case <-ctx.Done():
+	}
 
 	return settings, nil
 }
@@ -238,7 +237,6 @@ func (p *EvrPipeline) authenticateAccount(ctx context.Context, session *sessionW
 			userId = ""
 
 		} else if account.GetEmail() != "" {
-
 			// The account has a password, authenticate the password.
 			_, _, _, err := AuthenticateEmail(ctx, session.logger, session.pipeline.db, account.Email, userPassword, "", false)
 			return account, err
@@ -372,38 +370,57 @@ func writeAuditObjects(ctx context.Context, session *sessionWS, userId string, e
 func (p *EvrPipeline) channelInfoRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	_ = in.(*evr.ChannelInfoRequest)
 
+	resource, err := p.buildChannelInfo(ctx, logger, session)
+	if err != nil {
+		logger.Warn("Error building channel info", zap.Error(err))
+	}
+
+	if resource == nil {
+		resource = evr.NewChannelInfoResource()
+	}
+
+	// send the document to the client
+	if err := session.SendEvr([]evr.Message{
+		evr.NewSNSChannelInfoResponse(resource),
+		evr.NewSTcpConnectionUnrequireEvent(),
+	}); err != nil {
+		return fmt.Errorf("failed to send ChannelInfoResponse: %w", err)
+	}
+	return nil
+}
+
+func (p *EvrPipeline) buildChannelInfo(ctx context.Context, logger *zap.Logger, session *sessionWS) (*evr.ChannelInfoResource, error) {
+	resource := evr.NewChannelInfoResource()
+
+	// Get the user's groups
 	groups, err := p.discordRegistry.GetGuildGroups(ctx, session.userID.String())
 	if err != nil {
-		return fmt.Errorf("error getting guild groups: %w", err)
+		logger.Warn("Failed to get guild groups", zap.Error(err))
+	}
+
+	if len(groups) == 0 {
+		// TODO FIXME Handle a user that doesn't have access to any guild groups
+		return nil, fmt.Errorf("user is not in any guild groups")
 	}
 
 	// TODO Allow players to set what is listed for their lobbies
-	// Sort the groups by the edgecount
 
+	// Sort the groups by the edgecount
 	sort.SliceStable(groups, func(i, j int) bool {
 		return groups[i].EdgeCount > groups[j].EdgeCount
 	})
-	// XXX TESTING
-	// log a comma-delimited list of the groups with their edge counts
-	groupsStr := ""
-	for _, g := range groups {
-		groupsStr += fmt.Sprintf("%s: %d, ", g.GetName(), g.EdgeCount)
-	}
-	logger.Debug("Groups", zap.String("groups", groupsStr))
 
 	// Limit to 4 results
 	if len(groups) > 4 {
 		groups = groups[:4]
 	}
 
-	resource := evr.NewChannelInfoResource()
-
 	// Overwrite the existing channel info
 	for i, g := range groups {
 		// Get the group metadata
 		md := &GroupMetadata{}
 		if err := json.Unmarshal([]byte(g.Metadata), md); err != nil {
-			return fmt.Errorf("error unmarshalling group metadata: %w", err)
+			return resource, fmt.Errorf("error unmarshalling group metadata: %w", err)
 		}
 
 		resource.Groups[i] = evr.ChannelGroup{
@@ -418,13 +435,7 @@ func (p *EvrPipeline) channelInfoRequest(ctx context.Context, logger *zap.Logger
 		}
 	}
 
-	// send the document to the client
-	session.SendEvr([]evr.Message{
-		evr.NewSNSChannelInfoResponse(&resource),
-		evr.NewSTcpConnectionUnrequireEvent(),
-	})
-
-	return nil
+	return resource, nil
 }
 
 func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
@@ -434,133 +445,116 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 	defer func() { p.metrics.CustomTimer("loggedInUserProfileRequest", nil, time.Since(timer)) }()
 
 	// Ignore the request and use what was authenticated with
-	evrId, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
+	evrID, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
 	if !ok {
-		return fmt.Errorf("evrId not found in context")
+		logger.Error("evrId not found in context")
+		// Get it from the request
+		evrID = request.EvrId
 	}
 
 	// TODO FIXME move the rest of the code to a seperate func and just return errors here and handle the response packet here.
 	errFailure := func(e error, code int) error {
-		if err := session.SendEvr([]evr.Message{
+		return session.SendEvr([]evr.Message{
 			evr.NewLoggedInUserProfileFailure(request.EvrId, uint64(code), e.Error()),
-		}); err != nil {
-			return fmt.Errorf("send LoggedInUserProfileFailure: %w", err)
-		}
-		return fmt.Errorf("LoggedInUserProfile: %w", e)
+		})
 	}
 
-	// Get the account.
-	account, err := GetAccount(ctx, session.logger, session.pipeline.db, session.statusRegistry, session.userID)
+	gameProfiles, err := p.loadGameProfiles(ctx, session, evrID)
 	if err != nil {
-		return errFailure(fmt.Errorf("failed to get account: %w", err), 500)
-	}
-
-	playerNkUserID := account.User.Id
-	currentTimestamp := time.Now().UTC().Unix()
-
-	// Retrieve the default and player server game profile.
-	objs, err := StorageReadObjects(ctx, logger, session.pipeline.db, uuid.Nil, []*api.ReadStorageObjectId{
-
-		{
-			Collection: GameProfileStorageCollection,
-			Key:        ServerGameProfileStorageKey,
-			UserId:     playerNkUserID,
-		},
-		{
-			Collection: GameProfileStorageCollection,
-			Key:        ClientGameProfileStorageKey,
-			UserId:     playerNkUserID,
-		},
-		{
-			Collection: GameProfileStorageCollection,
-			Key:        ServerGameProfileStorageKey,
-			UserId:     SystemUserId,
-		},
-		{
-			Collection: GameProfileStorageCollection,
-			Key:        ClientGameProfileStorageKey,
-			UserId:     SystemUserId,
-		},
-		{
-			Collection: EvrLoginStorageCollection,
-			Key:        evrId.Token(),
-			UserId:     playerNkUserID,
-		},
-	})
-	if err != nil {
-		return errFailure(fmt.Errorf("failed to read game profile: %w", err), 500)
-	}
-	gameProfiles := evr.GameProfiles{
-		Client: nil,
-		Server: nil,
-	}
-	loginData := &evr.LoginData{}
-	for _, record := range objs.Objects {
-		switch record.Key {
-		case ClientGameProfileStorageKey:
-			// Only use the default profile if the user doesn't have a profile.
-			if record.UserId == uuid.Nil.String() && gameProfiles.Client != nil {
-				continue
-			}
-			gameProfiles.Client = &evr.ClientProfile{}
-			if err = json.Unmarshal([]byte(record.Value), gameProfiles.Client); err != nil {
-				return errFailure(fmt.Errorf("error unmarshalling client profile: %w", err), 500)
-			}
-		case ServerGameProfileStorageKey:
-			// Only use the default profile if the user doesn't have a profile.
-			if record.UserId == uuid.Nil.String() && gameProfiles.Server != nil {
-				continue
-			}
-			gameProfiles.Server = &evr.ServerProfile{}
-			if err = json.Unmarshal([]byte(record.Value), gameProfiles.Server); err != nil {
-				return errFailure(fmt.Errorf("error unmarshalling server profile: %w", err), 500)
-			}
-		case evrId.Token():
-			loginData := &evr.LoginData{}
-			if err = json.Unmarshal([]byte(record.Value), loginData); err != nil {
-				return errFailure(fmt.Errorf("error unmarshalling login data: %w", err), 500)
-			}
+		logger.Warn("Failed to load game profiles", zap.Error(err))
+		// Keep going if the profiles are not nil
+		if gameProfiles == nil || gameProfiles.Server == nil {
+			return errFailure(fmt.Errorf("failed to load game profiles: %w", err), 500)
 		}
 	}
-	// Set sane defaults
-	gameProfiles.Client.SetDefaults()
-	gameProfiles.Server.SetDefaults()
 
-	now := time.Now().UTC().Unix()
-	// Set the basic profile data
-	gameProfiles.Server.PublisherLock = loginData.PublisherLock
-	gameProfiles.Server.LobbyVersion = loginData.LobbyVersion
-	gameProfiles.Client.EchoUserIdToken = evrId.Token()
-	gameProfiles.Client.ModifyTime = now + 5
-	gameProfiles.Client.DisplayName = account.User.DisplayName
+	// Validate the user's social group (channel)
+	groupID, err := p.validateSocialGroup(ctx, logger, session, gameProfiles.Client.Social.Group)
+	if err != nil {
+		logger.Warn("Failed to validate social group", zap.Error(err))
+		// try to continue
+	} else {
+		gameProfiles.Client.Social.Group = groupID
+	}
 
-	gameProfiles.Server.EchoUserIdToken = evrId.Token()
-	gameProfiles.Server.DisplayName = account.User.DisplayName
-	gameProfiles.Server.LoginTime = currentTimestamp
-	gameProfiles.Server.UpdateTime = now + 5
-	gameProfiles.Server.CreateTime = account.User.CreateTime.Seconds
 	gameProfiles.Server.Social.Group = gameProfiles.Client.Social.Group
 
-	// Check if the user has any groups that would grant them cosmetics
-	groups, err := p.apiServer.ListUserGroups(ctx, &api.ListUserGroupsRequest{
-		UserId: playerNkUserID,
-	})
+	// Apply any unlocks based on the user's groups
+	gameProfiles, err = p.setProfileBasedOnCosmeticGroups(ctx, logger, session, evrID, gameProfiles)
 	if err != nil {
-		return errFailure(fmt.Errorf("error checking user groups: %w", err), 500)
+		logger.Warn("failed to set profile based on groups", zap.Error(err))
+	}
+
+	go func() {
+		err = p.storeGameProfile(ctx, logger, session, gameProfiles)
+		if err != nil {
+			logger.Warn("Failed to store game profile", zap.Error(err))
+		}
+	}()
+
+	return session.SendEvr([]evr.Message{
+		evr.NewLoggedInUserProfileSuccess(evrID, gameProfiles),
+	})
+}
+
+func (p *EvrPipeline) validateSocialGroup(ctx context.Context, logger *zap.Logger, session *sessionWS, groupID evr.GUID) (evr.GUID, error) {
+	groups, err := p.discordRegistry.GetGuildGroups(ctx, session.userID.String())
+	if err != nil {
+		return groupID, fmt.Errorf("failed to get guild groups: %w", err)
+	}
+
+	if len(groups) == 0 {
+		return groupID, fmt.Errorf("user is not in any groups")
+	}
+
+	groupIds := lo.Map(groups, func(g *api.Group, _ int) string { return g.GetId() })
+	if lo.Contains(groupIds, groupID.String()) {
+		// User is in the group
+		return groupID, nil
+	}
+
+	// If the user is not in the group, find the group with the most members
+	sort.Slice(groups, func(i, j int) bool {
+		return groups[i].EdgeCount > groups[j].EdgeCount
+	})
+
+	return evr.GUID(uuid.FromStringOrNil(groups[0].GetId())), nil
+
+}
+
+// Set the user's profile based on their groups
+func (p *EvrPipeline) setProfileBasedOnCosmeticGroups(ctx context.Context, logger *zap.Logger, session *sessionWS, evrId evr.EvrId, gameProfiles *evr.GameProfiles) (*evr.GameProfiles, error) {
+	// Get the user's groups
+	// Check if the user has any groups that would grant them cosmetics
+	userGroups, _, err := p.runtimeModule.UserGroupsList(ctx, session.userID.String(), 100, nil, "")
+	if err != nil {
+		return gameProfiles, fmt.Errorf("failed to get user groups: %w", err)
+	}
+
+	for i, group := range userGroups {
+		// If the user is not a member of the group, remove it
+		if group.GetState().GetValue() > int32(api.GroupUserList_GroupUser_MEMBER) {
+			// Remove the group
+			userGroups = append(userGroups[:i], userGroups[i+1:]...)
+		}
 	}
 
 	// Set the user's unlocked cosmetics based on their groups
 	unlocks := &gameProfiles.Server.UnlockedCosmetics.Arena
-	for _, group := range groups.UserGroups {
-		name := group.Group.GetName()
-		if group.Group.GetName()[:5] == "VRML" {
+	for _, group := range userGroups {
+		name := group.GetGroup().GetName()
+		if name[:5] == "VRML" {
 			unlocks.DecalVRML = true
 			unlocks.EmoteVRMLA = true
 		}
+
+		// Set VRML tags and medals based on the user's groups
+		unlocks.DecalVRML = true
+		unlocks.EmoteVRMLA = true
 		switch name {
-		case "Global Testers":
-			unlocks.DecalOneYearA = true
-			unlocks.RWDEmoteGhost = true
+		default:
+			unlocks.DecalVRML = false
+			unlocks.EmoteVRMLA = false
 		case "VRML Season Preseason":
 			unlocks.TagVrmlPreseason = true
 			unlocks.MedalVrmlPreseason = true
@@ -637,6 +631,11 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 			fallthrough
 		case "VRML Season 7":
 			unlocks.TagVrmlS7 = true
+		}
+
+		// Other group-based unlocks
+		switch name {
+
 		case "Global Developers":
 			unlocks.TagDeveloper = true
 			gameProfiles.Server.DeveloperFeatures = &evr.DeveloperFeatures{
@@ -645,19 +644,179 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 			fallthrough
 		case "Global Moderators":
 			unlocks.TagGameAdmin = true
-
+			fallthrough
+		case "Global Testers":
+			unlocks.DecalOneYearA = true
+			unlocks.RWDEmoteGhost = true
 		}
 	}
 
+	return gameProfiles, nil
+}
+
+func (p *EvrPipeline) retrieveGameProfiles(ctx context.Context, session *sessionWS, userID uuid.UUID, evrID *evr.EvrId) (*evr.GameProfiles, *evr.LoginData, error) {
+
+	// Retrieve the default and player server game profile.
+	ops := []*api.ReadStorageObjectId{
+
+		{
+			Collection: GameProfileStorageCollection,
+			Key:        ServerGameProfileStorageKey,
+			UserId:     userID.String(),
+		},
+		{
+			Collection: GameProfileStorageCollection,
+			Key:        ClientGameProfileStorageKey,
+			UserId:     userID.String(),
+		},
+	}
+
+	if evrID != nil {
+		ops = append(ops, &api.ReadStorageObjectId{
+			Collection: GameProfileStorageCollection,
+			Key:        evrID.Token(),
+			UserId:     userID.String(),
+		})
+	}
+
+	objs, err := StorageReadObjects(ctx, session.logger, session.pipeline.db, uuid.Nil, ops)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to read game profile: %w", err)
+	}
+
+	gameProfiles := &evr.GameProfiles{}
+	loginData := &evr.LoginData{}
+
+	for _, record := range objs.Objects {
+		switch record.Key {
+		case ClientGameProfileStorageKey:
+			gameProfiles.Client = &evr.ClientProfile{}
+			if err = json.Unmarshal([]byte(record.Value), gameProfiles.Client); err != nil {
+				return nil, nil, fmt.Errorf("error unmarshalling client profile: %w", err)
+			}
+
+		case ServerGameProfileStorageKey:
+			gameProfiles.Server = &evr.ServerProfile{}
+			if err = json.Unmarshal([]byte(record.Value), gameProfiles.Server); err != nil {
+				return nil, nil, fmt.Errorf("error unmarshalling server profile: %w", err)
+			}
+
+		case evrID.Token():
+			loginData = &evr.LoginData{}
+			if err = json.Unmarshal([]byte(record.Value), loginData); err != nil {
+				return nil, nil, fmt.Errorf("error unmarshalling client profile: %w", err)
+			}
+		}
+	}
+	return gameProfiles, loginData, nil
+}
+
+func (p *EvrPipeline) loadGameProfiles(ctx context.Context, session *sessionWS, evrID evr.EvrId) (*evr.GameProfiles, error) {
+	// Get the user's profiles, or set the default profiles
+	gameProfiles, loginData, err := p.retrieveGameProfiles(ctx, session, session.userID, &evrID)
+	if err != nil {
+		return nil, err
+	}
+
+	// If either of the profiles is nil, get the default profiles
+	if gameProfiles.Client == nil || gameProfiles.Server == nil {
+		// Retrieve the defaults
+		defaultProfiles, _, err := p.retrieveGameProfiles(ctx, session, uuid.Nil, nil)
+		if err != nil {
+			return nil, err
+		}
+
+		if gameProfiles.Client == nil {
+			gameProfiles.Client = defaultProfiles.Client
+		}
+		if gameProfiles.Server == nil {
+			gameProfiles.Server = defaultProfiles.Server
+
+			// Apply a community "designed" loadout to the new user
+			loadout, err := p.retrieveStarterLoadout(ctx, session)
+			if err != nil {
+				session.logger.Warn("Failed to retrieve starter loadout", zap.Error(err))
+			}
+			if loadout != nil {
+				gameProfiles.Server.EquippedCosmetics.Instances.Unified.Slots = *loadout
+			}
+
+		}
+	}
+	// Unlock if the user has been a quest user.
+	if strings.Contains(loginData.SystemInfo.HeadsetType, "Quest") {
+		gameProfiles.Server.UnlockedCosmetics.Arena.DecalQuestLaunchA = true
+		gameProfiles.Server.UnlockedCosmetics.Arena.PatternQuestA = true
+		gameProfiles.Server.UnlockedCosmetics.Arena.PatternQuestA = true
+	}
+	currentTimestamp := time.Now().UTC().Unix()
+
+	// Set sane defaults
+	gameProfiles.Client.SetDefaults()
+	gameProfiles.Server.SetDefaults()
+
+	now := time.Now().UTC().Unix()
+	// Set the basic profile data
+	gameProfiles.Server.PublisherLock = loginData.PublisherLock
+	gameProfiles.Server.LobbyVersion = loginData.LobbyVersion
+	gameProfiles.Client.EchoUserIdToken = evrID.Token()
+	gameProfiles.Client.ModifyTime = now - 30
+
+	gameProfiles.Server.EchoUserIdToken = evrID.Token()
+	gameProfiles.Server.LoginTime = currentTimestamp
+	gameProfiles.Server.UpdateTime = now - 30
+
+	displayName := ""
+	if gameProfiles.Client.DisplayName != "" {
+		displayName = gameProfiles.Client.DisplayName
+	} else if gameProfiles.Server.DisplayName != "" {
+		displayName = gameProfiles.Server.DisplayName
+	} else {
+		// Get the account.
+		account, err := GetAccount(ctx, session.logger, session.pipeline.db, session.statusRegistry, session.userID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get account: %w", err)
+		}
+		displayName = account.GetUser().GetDisplayName()
+	}
+	gameProfiles.Client.DisplayName = displayName
+	gameProfiles.Server.DisplayName = displayName
+
+	return gameProfiles, nil
+}
+
+func (p *EvrPipeline) retrieveStarterLoadout(ctx context.Context, session *sessionWS) (*evr.CosmeticLoadout, error) {
+	// Retrieve the default and player server game profile.
+	ids, err := StorageListObjectsUser(ctx, session.logger, session.pipeline.db, true, uuid.Nil, CosmeticLoadoutCollection, 200, "", nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list objects: %w", err)
+	}
+
+	if len(ids.Objects) == 0 {
+		session.logger.Warn("No starter loadouts available.")
+		return nil, nil
+	}
+	// pick a random id
+	obj := ids.Objects[rand.Intn(len(ids.Objects))]
+
+	loadout := &StoredCosmeticLoadout{}
+	if err = json.Unmarshal([]byte(obj.Value), loadout); err != nil {
+		return nil, fmt.Errorf("error unmarshalling client profile: %w", err)
+	}
+
+	return loadout.Loadout, nil
+}
+
+func (p *EvrPipeline) storeGameProfile(ctx context.Context, logger *zap.Logger, session *sessionWS, gameProfiles *evr.GameProfiles) error {
 	// Write the profile data to storage
 	clientProfileJson, err := json.Marshal(gameProfiles.Client)
 	if err != nil {
-		return errFailure(fmt.Errorf("error marshalling client profile: %w", err), 500)
+		return fmt.Errorf("error marshalling client profile: %w", err)
 	}
 
 	serverProfileJson, err := json.Marshal(gameProfiles.Server)
 	if err != nil {
-		return errFailure(fmt.Errorf("error marshalling server profile: %w", err), 500)
+		return fmt.Errorf("error marshalling server profile: %w", err)
 	}
 
 	userId := session.userID.String()
@@ -690,12 +849,6 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 	if err != nil {
 		return fmt.Errorf("SNSLoggedInUserProfileRequest: failed to write objects: %w", err)
 	}
-
-	messages := []evr.Message{
-		evr.NewLoggedInUserProfileSuccess(evrId, gameProfiles),
-	}
-	session.SendEvr(messages)
-
 	return nil
 }
 
