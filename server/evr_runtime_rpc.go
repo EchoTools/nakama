@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/gofrs/uuid/v5"
 	jwt "github.com/golang-jwt/jwt/v4"
 	"github.com/heroiclabs/nakama-common/runtime"
 )
@@ -122,7 +123,7 @@ func ExportAccountData(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 			return "", err
 		}
 
-		// Convert the account data to a JSON object.
+		// Convert the account data to a jsonN object.
 		accountData, err := json.Marshal(account)
 		if err != nil {
 			return "", err
@@ -147,7 +148,7 @@ type DiscordSignInRpcResponse struct {
 // retrieves the Discord user, checks if a user exists with the Discord ID as a Nakama username,
 // creates a user if necessary, gets the account data, relinks the custom ID if necessary,
 // writes the access token to storage, updates the account information, generates a session token,
-// stores the JWT in the user's metadata, and returns the session token and Discord username as a JSON response.
+// stores the JWT in the user's metadata, and returns the session token and Discord username as a jsonN response.
 // If any error occurs during the process, an error message is returned.
 func DiscordSignInRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 	logger.WithField("payload", payload).Info("DiscordSignInRpc")
@@ -222,17 +223,17 @@ func DiscordSignInRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		DiscordUsername: user.Username,
 	}
 
-	responseJson, err := json.Marshal(response)
+	responsejson, err := json.Marshal(response)
 	if err != nil {
 		return "", runtime.NewError(fmt.Sprintf("error marshalling LoginSuccess response: %v", err), StatusInternalError)
 	}
 
-	return string(responseJson), nil
+	return string(responsejson), nil
 }
 
 // LinkDeviceRpc is a function that handles the linking of a device to a user account.
 // It takes in the context, logger, database connection, Nakama module, and payload as parameters.
-// The payload should be a JSON string containing the session token and link code.
+// The payload should be a jsonN string containing the session token and link code.
 // It returns an empty string and an error.
 // The function performs the following steps:
 // 1. Unmarshalls the payload to extract the session token and link code.
@@ -250,7 +251,7 @@ type LinkDeviceRpcRequest struct {
 
 // LinkDeviceRpc is a function that handles the linking of a device to a user account.
 // It takes in the context, logger, database connection, Nakama module, and payload as parameters.
-// The payload should be a JSON string containing the session token and link code.
+// The payload should be a jsonN string containing the session token and link code.
 // It returns an empty string and an error.
 func LinkDeviceRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 	// Extract environment variables from the context
@@ -305,7 +306,7 @@ type LinkUserIdDeviceRpcRequest struct {
 
 // LinkUserIdDeviceRpc is a function that links a device to a user account using the username and link code.
 // It takes in the context, logger, database connection, Nakama module, and payload as parameters.
-// The payload should be a JSON string containing the username and link code.
+// The payload should be a jsonN string containing the username and link code.
 // It returns a string indicating the status of the operation and an error.
 func LinkUserIdDeviceRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 	// Unmarshal the payload into a LinkUserIdDeviceRpcRequest struct
@@ -352,4 +353,60 @@ func LinkUserIdDeviceRpc(ctx context.Context, logger runtime.Logger, db *sql.DB,
 
 func LinkingAppRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 	return "Hello Sir.", nil
+}
+
+type ServiceStatusResponse struct {
+	Services []ServiceStatusService `json:"14466474907882883491"`
+	News     []string               `json:"-3980269165826668125"`
+}
+
+type ServiceStatusService struct {
+	ServiceId int    `json:"serviceid"`
+	Available bool   `json:"available"`
+	Message   string `json:"message"`
+}
+
+func ServiceStatusRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	// /status/services,news?env=live&projectid=rad14
+	// Get the serviceStatus object from storage
+
+	payload = `{
+		2731580513406714229: [
+		  {
+			"serviceid": 1,
+			"available": true,
+			"message": "Service 1 operational."
+		  },
+		  {
+			"serviceid": 2,
+			"available": false,
+			"message": "Service 2 under maintenance."
+		  }
+		],
+		-3980269165826668125: [
+		  {
+			"message": "New feature release next week."
+		  },
+		  {
+			"message": "Scheduled downtime for maintenance."
+		  }
+		]
+	  }`
+
+	objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
+		&runtime.StorageRead{
+			Collection: "serviceStatus",
+			Key:        "services",
+			UserID:     uuid.Nil.String(),
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+
+	if len(objs) == 0 {
+		return "", nil
+	}
+
+	return objs[0].Value, nil
 }
