@@ -19,11 +19,11 @@ func TestHandleMessageReactionAdd(t *testing.T) {
 			MessageID: "messageID",
 		},
 	}
-
+	logger := NewRuntimeGoLogger(logger)
 	nk := &RuntimeGoNakamaModule{}
 	hailRegistry := &echoTaxiHailRegistry{}
 
-	handleMessageReactionAdd(ctx, s, reaction, nk, hailRegistry)
+	handleMessageReactionAdd(ctx, s, reaction, nk, logger, hailRegistry)
 
 	// Validate that the reaction resulted in a new entry in the hail registry
 	userId, found := hailRegistry.userIdByDiscordId.Load(reaction.UserID)
