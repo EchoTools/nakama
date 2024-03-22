@@ -5,12 +5,14 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/gofrs/uuid/v5"
 	jwt "github.com/golang-jwt/jwt/v4"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
 const (
@@ -409,4 +411,78 @@ func ServiceStatusRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	}
 
 	return objs[0].Value, nil
+}
+
+type StoredCosmeticLoadout struct {
+	LoadoutID string               `json:"loadout_id"`
+	Loadout   *evr.CosmeticLoadout `json:"loadout"`
+	UserID    string               `json:"user_id"` // the creator
+}
+
+type ImportLoadoutRpcRequest struct {
+	Loadouts []*evr.CosmeticLoadout `json:"loadouts"`
+}
+
+type ImportLoadoutRpcResponse struct {
+	LoadoutIDs []string `json:"loadout_ids"`
+}
+
+func (r *ImportLoadoutRpcResponse) String() string {
+	data, err := json.MarshalIndent(r, "", "  ")
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+func ImportLoadoutsRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	// Import communinty generated outfits (loadouts)
+
+	request := &ImportLoadoutRpcRequest{}
+	if err := json.Unmarshal([]byte(payload), request); err != nil {
+		return "", err
+	}
+
+	response := &ImportLoadoutRpcResponse{
+		LoadoutIDs: make([]string, 0),
+	}
+	// Loop through the loadouts and write them to storage
+	for _, loadout := range request.Loadouts {
+		value, err := json.Marshal(loadout)
+		if err != nil {
+			return "", err
+		}
+
+		// Create a hash of the loadout to use as the key
+		hash := fnv.New64a()
+		hash.Write(value)
+		key := fmt.Sprintf("%d", hash.Sum64())
+
+		response.LoadoutIDs = append(response.LoadoutIDs, key)
+
+		data := &StoredCosmeticLoadout{
+			LoadoutID: key,
+			Loadout:   loadout,
+			UserID:    uuid.Nil.String(),
+		}
+
+		value, err = json.Marshal(data)
+		if err != nil {
+			return "", err
+		}
+
+		if _, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{&runtime.StorageWrite{
+			PermissionRead:  0,
+			PermissionWrite: 0,
+			Collection:      CosmeticLoadoutCollection,
+			Key:             key,
+			Value:           string(value),
+			UserID:          uuid.Nil.String(),
+		}}); err != nil {
+			return "", err
+		}
+	}
+
+	return response.String(), nil
+
 }
