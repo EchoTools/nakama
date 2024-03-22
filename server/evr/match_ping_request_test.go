@@ -12,7 +12,7 @@ import (
 )
 
 func TestLobbyPingRequest_Marshal(t *testing.T) {
-	endpoints := []*Endpoint{
+	endpoints := []Endpoint{
 		{
 			InternalIP: net.ParseIP("192.168.56.1"),
 			ExternalIP: net.ParseIP("172.29.112.1"),
