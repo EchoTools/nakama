@@ -488,15 +488,32 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, session *sessionWS, matc
 	// TODO FIXME Get the party id if the player is in a party
 
 	// Prepare the player session metadata.
-	playermeta := JoinMeta{
-		TeamIndex:     int16(teamIndex),
-		PlayerSession: uuid.Must(uuid.NewV4()),
-		EvrId:         evrID,
-		DisplayName:   displayName,
+
+	// Get the IP info ffor this player from the ipinfo cache
+	ipinfo, err := p.ipCache.retrieveIPinfo(ctx, session.logger, net.ParseIP(session.ClientIP()))
+	if err != nil {
+		return fmt.Errorf("failed to get IPinfo: %w", err)
 	}
 
+	discordID, err := p.discordRegistry.GetDiscordIdByUserId(ctx, session.UserID().String())
+	if err != nil {
+		p.logger.Error("Failed to get discord id", zap.Error(err))
+	}
+
+	mp := EvrMatchPresence{
+		Node:          p.node,
+		UserID:        session.userID,
+		SessionID:     session.id,
+		Username:      session.Username(),
+		DisplayName:   displayName,
+		EvrId:         evrID,
+		PlayerSession: uuid.Must(uuid.NewV4()),
+		TeamIndex:     int(teamIndex),
+		IPinfo:        ipinfo,
+		DiscordID:     discordID,
+	}
 	// Marshal the player metadata into JSON.
-	jsonMeta, err := json.Marshal(playermeta)
+	jsonMeta, err := json.Marshal(mp)
 	if err != nil {
 		return fmt.Errorf("failed to marshal player meta: %w", err)
 	}

@@ -42,6 +42,8 @@ const (
 	DisplayNameIndex             = "Index_DisplayName"
 	GhostedUsersIndex            = "Index_MutedUsers"
 	ActiveSocialGroupIndex       = "Index_SocialGroup"
+	CacheStorageCollection       = "Cache"
+	IPinfoCacheKey               = "IPinfo"
 
 	// The Application ID for Echo VR
 	NoOvrAppId uint64 = 0x0
