@@ -203,11 +203,11 @@ func extractAuthenticationDetailsFromContext(ctx context.Context) (discordId, pa
 
 func (p *EvrPipeline) authenticateBroadcaster(ctx context.Context, session *sessionWS, discordId, password string, guildIds []string, tags []string) (string, string, error) {
 	// Get the user id from the discord id
-	userId, err := p.discordRegistry.GetUserIdByDiscordId(ctx, discordId, false)
+	uid, err := p.discordRegistry.GetUserIdByDiscordId(ctx, discordId, false)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to find user for Discord ID: %v", err)
 	}
-
+	userId := uid.String()
 	// Authenticate the user
 	userId, username, _, err := AuthenticateEmail(ctx, session.logger, session.pipeline.db, userId+"@"+p.placeholderEmail, password, "", false)
 	if err != nil {
@@ -253,7 +253,7 @@ func (p *EvrPipeline) getBroadcasterHostInfo(ctx context.Context, session *sessi
 	if len(guildIds) == 0 {
 
 		// Get the user's guild groups
-		groups, err := p.discordRegistry.GetGuildGroups(ctx, userId)
+		groups, err := p.discordRegistry.GetGuildGroups(ctx, uuid.FromStringOrNil(userId))
 		if err != nil {
 			return nil, fmt.Errorf("failed to get user's guild groups: %v", err)
 		}
@@ -337,7 +337,7 @@ func (p *EvrPipeline) newParkingMatch(session *sessionWS, config *MatchBroadcast
 	}
 
 	// Create the match
-	matchId, err := p.matchRegistry.CreateMatch(context.Background(), p.runtime.matchCreateFunction, EvrMatchModule, params)
+	matchId, err := p.matchRegistry.CreateMatch(context.Background(), p.runtime.matchCreateFunction, EvrMatchmakerModule, params)
 	if err != nil {
 		return fmt.Errorf("failed to create match: %v", err)
 	}

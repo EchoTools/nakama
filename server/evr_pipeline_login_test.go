@@ -103,7 +103,7 @@ func TestEvrPipeline_authenticateAccount(t *testing.T) {
 		deviceId     *DeviceId
 		discordId    string
 		userPassword string
-		payload      evr.LoginData
+		payload      evr.LoginProfile
 	}
 	tests := []struct {
 		name    string
@@ -124,7 +124,7 @@ func TestEvrPipeline_authenticateAccount(t *testing.T) {
 				deviceId:     &DeviceId{},
 				discordId:    "1234567890",
 				userPassword: "",
-				payload:      evr.LoginData{},
+				payload:      evr.LoginProfile{},
 			},
 			nil,
 			codes.InvalidArgument,
@@ -141,7 +141,7 @@ func TestEvrPipeline_authenticateAccount(t *testing.T) {
 				deviceId:     &DeviceId{},
 				discordId:    "1234567890",
 				userPassword: "",
-				payload:      evr.LoginData{},
+				payload:      evr.LoginProfile{},
 			},
 			nil,
 			codes.InvalidArgument,

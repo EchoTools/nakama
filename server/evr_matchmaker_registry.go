@@ -245,13 +245,10 @@ func ipToKey(ip net.IP) string {
 }
 
 func (c *MatchmakingRegistry) matchedEntriesFn(entries [][]*MatchmakerEntry) {
-	// Find all the unassigned broadcasters
-
 	for _, entry := range entries {
 		stringProperties := entry[0].StringProperties
 		channel := uuid.FromStringOrNil(stringProperties["channel"])
 
-		// TODO FIXME loop for a bit until some are available.
 		// List all the unassigned lobbies on this channel
 		broadcasters, err := c.ListUnassignedLobbies(c.ctx, channel)
 		switch status.Code(err) {

@@ -48,18 +48,18 @@ type EvrPipeline struct {
 	runtimeModule        *RuntimeGoNakamaModule
 	runtimeLogger        runtime.Logger
 
-	discordRegistry DiscordRegistry
-	ipCache         *IPinfoCache
+	matchmakingRegistry *MatchmakingRegistry
+	profileRegistry     *ProfileRegistry
+	discordRegistry     DiscordRegistry
+	ipCache             *IPinfoCache
 
 	broadcasterRegistrationBySession *MapOf[uuid.UUID, *MatchBroadcaster]
 	matchBySession                   *MapOf[uuid.UUID, string]
 	matchByUserId                    *MapOf[uuid.UUID, string]
 	loginSessionByEvrID              *MapOf[string, *sessionWS]
 	matchByEvrId                     *MapOf[string, string] // full match string by evrId token
-	matchmakingRegistry              *MatchmakingRegistry
-
-	placeholderEmail string
-	linkDeviceUrl    string
+	placeholderEmail                 string
+	linkDeviceUrl                    string
 }
 
 type ctxDiscordBotTokenKey struct{}
@@ -82,7 +82,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	// TODO Add a symbol cache that gets populated and stored back occasionally
 
 	runtimeLogger := NewRuntimeGoLogger(logger)
-	discordRegistry := NewLocalDiscordRegistry(ctx, nk, runtimeLogger, metrics)
+	discordRegistry := NewLocalDiscordRegistry(ctx, nk, runtimeLogger, metrics, config)
 	err := discordRegistry.InitializePartyBot(ctx, pipeline)
 	if err != nil {
 		logger.Error("Failed to initialize party bot", zap.Error(err))
@@ -143,6 +143,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		externalIP:      externalIP,
 
 		matchmakingRegistry: NewMatchmakingRegistry(logger, matchRegistry, matchmaker, metrics, config),
+		profileRegistry:     NewProfileRegistry(nk, db, runtimeLogger, discordRegistry),
 
 		broadcasterRegistrationBySession: &MapOf[uuid.UUID, *MatchBroadcaster]{},
 		matchBySession:                   &MapOf[uuid.UUID, string]{},
@@ -204,9 +205,9 @@ func (p *EvrPipeline) ProcessRequestEvr(logger *zap.Logger, session *sessionWS, 
 	case *evr.UpdateProfile:
 		pipelineFn = p.updateProfile
 	case *evr.OtherUserProfileRequest: // Broadcaster only via it's login connection
-		pipelineFn = p.relayMatchData
+		pipelineFn = p.otherUserProfileRequest
 	case *evr.UserServerProfileUpdateRequest: // Broadcaster only via it's login connection
-		pipelineFn = p.relayMatchData
+		pipelineFn = p.userServerProfileUpdateRequest
 	case *evr.GenericMessage:
 		pipelineFn = p.genericMessage
 
@@ -443,21 +444,22 @@ func (p *EvrPipeline) attemptOutOfBandAuthentication(session *sessionWS) error {
 	}
 
 	// Get the account for this discordId
-	userId, err := p.discordRegistry.GetUserIdByDiscordId(ctx, discordId, false)
+	uid, err := p.discordRegistry.GetUserIdByDiscordId(ctx, discordId, false)
 	if err != nil {
-		return fmt.Errorf("Out of band Auth: ", err)
+		return fmt.Errorf("Out of band Auth: %v", err)
 	}
+	userId := uid.String()
 
 	// The account was found.
 	account, err := GetAccount(ctx, session.logger, session.pipeline.db, session.statusRegistry, uuid.FromStringOrNil(userId))
 	if err != nil {
-		return fmt.Errorf("Out of band Auth: ", err)
+		return fmt.Errorf("Out of band Auth: %v", err)
 	}
 
 	// Do email authentication
 	userId, _, _, err = AuthenticateEmail(ctx, session.logger, session.pipeline.db, account.Email, userPassword, "", false)
 	if err != nil {
-		return fmt.Errorf("Out of band Auth: ", err)
+		return fmt.Errorf("Out of band Auth: %v", err)
 	}
 
 	return session.BroadcasterSession(userId, "")
