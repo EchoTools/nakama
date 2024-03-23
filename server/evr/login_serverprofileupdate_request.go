@@ -6,7 +6,7 @@ import (
 
 type UserServerProfileUpdateRequest struct {
 	EvrId      EvrId
-	UpdateInfo UpdateInfo
+	UpdateInfo any
 }
 
 func (m UserServerProfileUpdateRequest) Token() string {

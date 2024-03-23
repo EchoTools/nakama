@@ -208,7 +208,7 @@ func (p *EvrPipeline) BuildMatchmakingQuery(ctx context.Context, latencies map[s
 	qparts = append(qparts, GameMode(ml.Mode).Label(Must, 0).Property())
 	stringProps["mode"] = ml.Mode.Token().String()
 
-	groups, err := p.discordRegistry.GetGuildGroups(ctx, session.UserID().String())
+	groups, err := p.discordRegistry.GetGuildGroups(ctx, session.UserID())
 	if err != nil {
 		return "", nil, nil, status.Errorf(codes.Internal, "Failed to get guild groups: %v", err)
 	}
@@ -429,6 +429,7 @@ func (p *EvrPipeline) MatchSort(ctx context.Context, session *sessionWS, msessio
 			}
 		}
 	}
+
 	return filtered, rtts, nil
 }
 
@@ -486,6 +487,12 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, session *sessionWS, matc
 	// Extract the display name.
 	displayName := account.GetUser().GetDisplayName()
 
+	// Set the profile's display name.
+	profile := p.profileRegistry.GetProfile(session.UserID())
+	if profile != nil {
+		profile.UpdateDisplayName(displayName)
+	}
+
 	// TODO FIXME Get the party id if the player is in a party
 
 	// Prepare the player session metadata.
@@ -496,7 +503,7 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, session *sessionWS, matc
 		return fmt.Errorf("failed to get IPinfo: %w", err)
 	}
 
-	discordID, err := p.discordRegistry.GetDiscordIdByUserId(ctx, session.UserID().String())
+	discordID, err := p.discordRegistry.GetDiscordIdByUserId(ctx, session.UserID())
 	if err != nil {
 		p.logger.Error("Failed to get discord id", zap.Error(err))
 	}
@@ -622,7 +629,7 @@ func (p *EvrPipeline) checkSuspensionStatus(ctx context.Context, logger *zap.Log
 	}
 
 	// Get the user's discordId
-	discordId, err := p.discordRegistry.GetDiscordIdByUserId(ctx, userID)
+	discordId, err := p.discordRegistry.GetDiscordIdByUserId(ctx, uuid.FromStringOrNil(userID))
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Failed to get discord id: %v", err)
 

@@ -41,18 +41,7 @@ func TestEvrMatch_EvrMatchState(t *testing.T) {
 		})
 	}
 }
-func TestInjectDisplayName(t *testing.T) {
-	profileJson := []byte(`{"displayname": "John Doe"}`)
-	displayName := "John"
 
-	expected := []byte(`{"displayname": "John"}`)
-
-	result := injectDisplayName(profileJson, displayName)
-
-	if !reflect.DeepEqual(result, expected) {
-		t.Errorf("injectDisplayName() = %s, want %s", string(result), string(expected))
-	}
-}
 func TestSelectTeamForPlayer(t *testing.T) {
 	state := &EvrMatchState{
 		presences: map[string]*EvrMatchPresence{

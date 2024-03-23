@@ -1,9 +1,5 @@
 package evr
 
-import (
-	"encoding/json"
-)
-
 type LoginSettings struct {
 	LoginSettings EchoClientSettings `json:"Resource"`
 }
@@ -20,9 +16,9 @@ func (m LoginSettings) String() string {
 	return "SNSLoginSettings{...}"
 }
 
-func NewSNSLoginSettings(settings EchoClientSettings) *LoginSettings {
+func NewSNSLoginSettings(settings *EchoClientSettings) *LoginSettings {
 	return &LoginSettings{
-		LoginSettings: settings,
+		LoginSettings: *settings,
 	}
 }
 
@@ -30,24 +26,6 @@ func (m *LoginSettings) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
 		func() error { return s.StreamJson(&m.LoginSettings, false, ZlibCompression) },
 	})
-}
-
-func UnmarshalEchoClientSettings(data []byte) (*EchoClientSettings, error) {
-	var r *EchoClientSettings
-	err := json.Unmarshal(data, &r)
-	if err != nil {
-		return nil, err
-	}
-	if err := ValidateStruct(r); err != nil {
-		return r, err
-	}
-	return r, err
-
-}
-
-func (r *EchoClientSettings) Marshal() ([]byte, error) {
-
-	return json.Marshal(r)
 }
 
 // Represents the settings for an EchoVR client.
@@ -78,40 +56,34 @@ type Active struct {
 
 const (
 	LoneEchoDay = 17911198800
-
-	DefaultLoginSettings string = `{
-		"iap_unlocked": true,
-		"remote_log_social": false,
-		"remote_log_warnings": false,
-		"remote_log_errors": false,
-		"remote_log_rich_presence": false,
-		"remote_log_metrics": true,
-		"env": "live",
-		"matchmaker_queue_mode": "disabled",
-		"config_data": {
-		  "active_battle_pass_season": {
-			"id": "active_battle_pass_season",
-			"starttime": 0,
-			"endtime": 17911198800
-		  },
-		  "active_store_entry": {
-			"id": "active_store_entry",
-			"starttime": 0,
-			"endtime": 17911198800
-		  },
-		  "active_store_featured_entry": {
-			"id": "active_store_featured_entry",
-			"starttime": 0,
-			"endtime": 17911198800
-		  }
-		}
-	  }`
 )
 
-func DefaultEchoClientSettings() *EchoClientSettings {
-	var settings EchoClientSettings
-	if err := json.Unmarshal([]byte(DefaultLoginSettings), &settings); err != nil {
-		panic(err)
+var (
+	DefaultGameSettingsSettings = EchoClientSettings{
+		IapUnlocked:           true,
+		RemoteLogSocial:       false,
+		RemoteLogWarnings:     false,
+		RemoteLogErrors:       false,
+		RemoteLogRichPresence: false,
+		RemoteLogMetrics:      true,
+		Env:                   "live",
+		MatchmakerQueueMode:   "disabled",
+		ConfigData: ConfigData{
+			ActiveBattlePassSeason: Active{
+				ID:        "active_battle_pass_season",
+				Starttime: 0,
+				Endtime:   LoneEchoDay,
+			},
+			ActiveStoreEntry: Active{
+				ID:        "active_store_entry",
+				Starttime: 0,
+				Endtime:   LoneEchoDay,
+			},
+			ActiveStoreFeaturedEntry: Active{
+				ID:        "active_store_featured_entry",
+				Starttime: 0,
+				Endtime:   LoneEchoDay,
+			},
+		},
 	}
-	return &settings
-}
+)

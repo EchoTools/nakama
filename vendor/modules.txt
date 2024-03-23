@@ -128,6 +128,9 @@ github.com/go-restruct/restruct/expr
 ## explicit
 github.com/go-sourcemap/sourcemap
 github.com/go-sourcemap/sourcemap/internal/base64vlq
+# github.com/gofrs/uuid v4.0.0+incompatible
+## explicit
+github.com/gofrs/uuid
 # github.com/gofrs/uuid/v5 v5.0.0
 ## explicit; go 1.19
 github.com/gofrs/uuid/v5

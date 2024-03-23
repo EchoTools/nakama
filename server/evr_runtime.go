@@ -4,11 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
-	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
 
 	_ "google.golang.org/protobuf/proto"
@@ -67,7 +64,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 
 	// TODO FIXME Make sure the system works without a bot. Add interfaces.
 	if botToken != "" {
-		discordRegistry := NewLocalDiscordRegistry(ctx, nk, logger, nil)
+		discordRegistry := NewLocalDiscordRegistry(ctx, nk, logger, nil, nil)
 		if err != nil {
 			logger.Error("Unable to create discord registry: %v", err)
 			return err
@@ -98,20 +95,14 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 
 	go RegisterIndexes(initializer)
 
-	// Create default storage objects
-	if err := createDefaultStorageObjects(ctx, logger, db, nk, initializer); err != nil {
-		logger.Error("Unable to create default storage objects: %v", err)
-		return err
-	}
-
 	// Create the core groups
 	if err := createCoreGroups(ctx, logger, db, nk, initializer); err != nil {
 		logger.Error("Unable to create core groups: %v", err)
 		return err
 	}
 
-	// Register the match handler
-	if err := initializer.RegisterMatch(EvrMatchModule, func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule) (runtime.Match, error) {
+	// Register the "matchmaking" handler
+	if err := initializer.RegisterMatch(EvrMatchmakerModule, func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule) (runtime.Match, error) {
 		return &EvrMatch{}, nil
 	}); err != nil {
 		return err
@@ -124,73 +115,6 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	}
 
 	logger.Info("Initialized runtime module.")
-	return nil
-}
-
-func createDefaultStorageObjects(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) error {
-	var serverProfile *evr.ServerProfile = nil
-	var clientProfile *evr.ClientProfile = nil
-
-	// List the storage objects
-	objects, _, err := nk.StorageList(ctx, uuid.Nil.String(), uuid.Nil.String(), GameProfileStorageCollection, 10, "")
-	if err != nil {
-		return fmt.Errorf("error listing storage objects: %w", err)
-	}
-	for _, object := range objects {
-		if object.Key == ServerGameProfileStorageKey {
-			if err := json.Unmarshal([]byte(object.Value), &serverProfile); err != nil {
-				return fmt.Errorf("error unmarshalling server profile: %w", err)
-			}
-		}
-		if object.Key == ClientGameProfileStorageKey {
-			if err := json.Unmarshal([]byte(object.Value), &clientProfile); err != nil {
-				return fmt.Errorf("error unmarshalling client profile: %w", err)
-			}
-		}
-	}
-
-	ops := []*runtime.StorageWrite{}
-	if serverProfile == nil {
-		profile := evr.NewServerProfile()
-		serverJson, err := json.Marshal(profile)
-		if err != nil {
-			return fmt.Errorf("error marshalling server profile: %w", err)
-		}
-		ops = append(ops, &runtime.StorageWrite{
-			Collection:      GameProfileStorageCollection,
-			Key:             ServerGameProfileStorageKey,
-			Value:           string(serverJson),
-			PermissionRead:  2,
-			PermissionWrite: 1,
-			UserID:          SystemUserId,
-			Version:         "*",
-		})
-	}
-	if clientProfile == nil {
-		// Client Profile
-		client := evr.NewClientProfile()
-		clientJson, err := json.Marshal(client)
-		if err != nil {
-			return fmt.Errorf("error marshalling client profile: %w", err)
-		}
-
-		ops = append(ops, &runtime.StorageWrite{
-			Collection:      GameProfileStorageCollection,
-			Key:             ClientGameProfileStorageKey,
-			Value:           string(clientJson),
-			PermissionRead:  2,
-			PermissionWrite: 1,
-			UserID:          SystemUserId,
-			Version:         "*",
-		})
-
-	}
-	if len(ops) == 0 {
-		return nil
-	}
-	if _, err := nk.StorageWrite(ctx, ops); err != nil {
-		return fmt.Errorf("error writing default profiles: %w", err)
-	}
 	return nil
 }
 
@@ -301,8 +225,8 @@ func RegisterIndexes(initializer runtime.Initializer) error {
 
 	name = GhostedUsersIndex
 	collection = GameProfileStorageCollection
-	key = ClientGameProfileStorageKey // Set to empty string to match all keys instead
-	fields = []string{"ghost.users"}  // index on these fields
+	key = GameProfileStorageKey             // Set to empty string to match all keys instead
+	fields = []string{"client.ghost.users"} // index on these fields
 	maxEntries = 1000000
 	if err := initializer.RegisterStorageIndex(name, collection, key, fields, maxEntries, indexOnly); err != nil {
 		return err
@@ -310,8 +234,8 @@ func RegisterIndexes(initializer runtime.Initializer) error {
 
 	name = ActiveSocialGroupIndex
 	collection = GameProfileStorageCollection
-	key = ClientGameProfileStorageKey // Set to empty string to match all keys instead
-	fields = []string{"social.group"} // index on these fields
+	key = GameProfileStorageKey              // Set to empty string to match all keys instead
+	fields = []string{"client.social.group"} // index on these fields
 	maxEntries = 100000
 	if err := initializer.RegisterStorageIndex(name, collection, key, fields, maxEntries, indexOnly); err != nil {
 		return err

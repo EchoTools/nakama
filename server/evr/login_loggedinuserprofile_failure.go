@@ -34,10 +34,10 @@ func (m *LoggedInUserProfileFailure) Stream(s *EasyStream) error {
 	})
 }
 
-func NewLoggedInUserProfileFailure(evrId EvrId, statusCode uint64, message string) *LoggedInUserProfileFailure {
+func NewLoggedInUserProfileFailure(evrId EvrId, statusCode int, message string) *LoggedInUserProfileFailure {
 	return &LoggedInUserProfileFailure{
 		EvrId:        evrId,
-		StatusCode:   statusCode,
+		StatusCode:   uint64(statusCode),
 		ErrorMessage: message,
 	}
 }

@@ -413,12 +413,6 @@ func ServiceStatusRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	return objs[0].Value, nil
 }
 
-type StoredCosmeticLoadout struct {
-	LoadoutID string               `json:"loadout_id"`
-	Loadout   *evr.CosmeticLoadout `json:"loadout"`
-	UserID    string               `json:"user_id"` // the creator
-}
-
 type ImportLoadoutRpcRequest struct {
 	Loadouts []*evr.CosmeticLoadout `json:"loadouts"`
 }

@@ -373,6 +373,7 @@ func RegisterSlashCommands(ctx context.Context, logger runtime.Logger, nk runtim
 				if err != nil {
 					return fmt.Errorf("failed to authenticate (or create) user %s: %w", discordId, err)
 				}
+
 				// Update the accounts roles, etc.
 				go discordRegistry.UpdateAccount(ctx, userId)
 
@@ -385,7 +386,7 @@ func RegisterSlashCommands(ctx context.Context, logger runtime.Logger, nk runtim
 				if err != nil {
 					return err
 				}
-				return nk.LinkDevice(ctx, userId, token)
+				return nk.LinkDevice(ctx, userId.String(), token)
 			}(); err != nil {
 				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 					Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -417,7 +418,7 @@ func RegisterSlashCommands(ctx context.Context, logger runtime.Logger, nk runtim
 					return fmt.Errorf("failed to authenticate (or create) user %s: %w", i.Member.User.ID, err)
 				}
 
-				return nk.UnlinkDevice(ctx, userId, deviceId)
+				return nk.UnlinkDevice(ctx, userId.String(), deviceId)
 
 			}(); err != nil {
 				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -618,12 +619,12 @@ func RegisterSlashCommands(ctx context.Context, logger runtime.Logger, nk runtim
 					return err
 				}
 				// Get the account
-				account, err := nk.AccountGetId(ctx, userId)
+				account, err := nk.AccountGetId(ctx, userId.String())
 				if err != nil {
 					return err
 				}
 				// Clear the password
-				return nk.UnlinkEmail(ctx, userId, account.GetEmail())
+				return nk.UnlinkEmail(ctx, userId.String(), account.GetEmail())
 
 			}(); err != nil {
 				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -705,6 +706,8 @@ func RegisterSlashCommands(ctx context.Context, logger runtime.Logger, nk runtim
 			}
 		},
 		"lookup": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+			// Verify the user is part of the Global Moderators group
+			return
 			options := i.ApplicationCommandData().Options
 			user := options[0].UserValue(s)
 			if err := handleProfileRequest(ctx, logger, nk, s, discordRegistry, i, user.ID, user.Username); err != nil {
@@ -959,7 +962,7 @@ func RegisterPartySlashCommands(ctx context.Context, discordRegistry DiscordRegi
 				allMembers := lo.Map(lo.Values(idMap), func(v string, i int) string {
 					return fmt.Sprintf("<@%s>", v)
 				})
-				joinee, err := discordRegistry.GetDiscordIdByUserId(ctx, presence.UserId)
+				joinee, err := discordRegistry.GetDiscordIdByUserId(ctx, uuid.FromStringOrNil(presence.UserId))
 				if err != nil {
 					pipeline.logger.Error("Failed to get discord id by user id.")
 					return
@@ -1003,7 +1006,7 @@ func getPartyDiscordIds(ctx context.Context, discordRegistry DiscordRegistry, pa
 	partyHandler.RLock()
 	defer partyHandler.RUnlock()
 	memberMap := make(map[string]string, len(partyHandler.members.presences)+1)
-	leaderID, err := discordRegistry.GetDiscordIdByUserId(ctx, partyHandler.leader.UserPresence.GetUserId())
+	leaderID, err := discordRegistry.GetDiscordIdByUserId(ctx, uuid.FromStringOrNil(partyHandler.leader.UserPresence.GetUserId()))
 	if err != nil {
 		return nil, err
 	}
@@ -1013,7 +1016,7 @@ func getPartyDiscordIds(ctx context.Context, discordRegistry DiscordRegistry, pa
 		if presence.UserPresence.GetUserId() == partyHandler.leader.UserPresence.GetUserId() {
 			continue
 		}
-		discordId, err := discordRegistry.GetDiscordIdByUserId(ctx, presence.UserPresence.UserId)
+		discordId, err := discordRegistry.GetDiscordIdByUserId(ctx, uuid.FromStringOrNil(presence.UserPresence.UserId))
 		if err != nil {
 			return nil, err
 		}
@@ -1088,24 +1091,24 @@ func handleProfileRequest(ctx context.Context, logger runtime.Logger, nk runtime
 		return fmt.Errorf("failed to authenticate (or create) user %s: %w", discordId, err)
 	}
 
-	if userId == "" { // assertion
+	if userId == uuid.Nil { // assertion
 		logger.Error("Failed to get or create an account.")
 		return fmt.Errorf("failed to get or create an account for %s (%s)", discordId, username)
 	}
 
 	// Get the account.
-	account, err := nk.AccountGetId(ctx, userId)
+	account, err := nk.AccountGetId(ctx, userId.String())
 	if err != nil {
 		return err
 	}
 	// Get the nakama groups
-	groups, _, err := nk.UserGroupsList(ctx, userId, 100, nil, "")
+	groups, _, err := nk.UserGroupsList(ctx, userId.String(), 100, nil, "")
 	if err != nil {
 		return err
 	}
 
 	// Get the EvrUserId
-	evrUserIds, err := GetEvrRecords(ctx, logger, nk, userId)
+	evrUserIds, err := GetEvrRecords(ctx, logger, nk, userId.String())
 	if err != nil {
 		return err
 	}
@@ -1114,7 +1117,7 @@ func handleProfileRequest(ctx context.Context, logger runtime.Logger, nk runtime
 	// extract a mapping of the evr ids and hte alst time they were logged into
 	evrIdMap := make([]EvrIdLogins, 0, len(evrUserIds))
 	for _, evrUserId := range evrUserIds {
-		loginData := &evr.LoginData{}
+		loginData := &evr.LoginProfile{}
 		if err := json.Unmarshal([]byte(evrUserId.Value), loginData); err != nil {
 			logger.WithField("err", err).Error("Failed to unmarshal login data.")
 			continue
@@ -1127,7 +1130,7 @@ func handleProfileRequest(ctx context.Context, logger runtime.Logger, nk runtime
 	}
 
 	// Get the EvrUserId
-	result, err := GetAddressRecords(ctx, logger, nk, userId)
+	result, err := GetAddressRecords(ctx, logger, nk, userId.String())
 	if err != nil {
 		return err
 	}
@@ -1144,7 +1147,7 @@ func handleProfileRequest(ctx context.Context, logger runtime.Logger, nk runtime
 	}
 
 	// Get the MatchId for the user from it's presence
-	presences, err := nk.StreamUserList(StreamModeStatus, userId, "", "", true, true)
+	presences, err := nk.StreamUserList(StreamModeStatus, userId.String(), "", "", true, true)
 	if err != nil {
 		return err
 	}
@@ -1167,7 +1170,7 @@ func handleProfileRequest(ctx context.Context, logger runtime.Logger, nk runtime
 	}
 
 	whoami := &WhoAmI{
-		NakamaId:     userId,
+		NakamaId:     userId.String(),
 		Username:     account.GetUser().GetUsername(),
 		DiscordId:    discordId,
 		DisplayName:  account.GetUser().GetDisplayName(),
@@ -1350,11 +1353,10 @@ func sendPartyInvite(ctx context.Context, s *discordgo.Session, i *discordgo.Int
 
 func getLoginSessionForUser(ctx context.Context, discordId string, discordRegistry DiscordRegistry, pipeline *Pipeline) (uid uuid.UUID, sessionID uuid.UUID, err error) {
 	// Get the userId for this inviter
-	u, err := discordRegistry.GetUserIdByDiscordId(ctx, discordId, true)
+	uid, err = discordRegistry.GetUserIdByDiscordId(ctx, discordId, true)
 	if err != nil {
 		return uuid.Nil, uuid.Nil, fmt.Errorf("failed to get user id from discord id: %w", err)
 	}
-	uid = uuid.FromStringOrNil(u)
 
 	// Get existing login session for the user
 	presenceIDs := pipeline.tracker.ListPresenceIDByStream(PresenceStream{

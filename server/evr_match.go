@@ -10,7 +10,6 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -103,7 +102,8 @@ func (s EvrSignal) String() string {
 }
 
 const (
-	EvrMatchModule = "evrmatch"
+	EvrMatchmakerModule = "evrmatchmaker"
+	EvrBackfillModule   = "evrbackfill"
 )
 
 var _ runtime.Presence = &EvrMatchPresence{}
@@ -222,18 +222,16 @@ type EvrMatchState struct {
 	TeamSize  int       `json:"team_size,omitempty"` // The size of each team in arena/combat (either 4 or 5)
 	TeamIndex TeamIndex `json:"team,omitempty"`      // What team index a player prefers (Used by Matching only)
 
-	Players                 []string                         `json:"players,omitempty"` // The displayNames of the players (by team name) in the match.
-	EvrIDs                  []evr.EvrId                      `json:"evrids,omitempty"`  // The evr ids of the players in the match.
-	UserIDs                 []string                         `json:"userids,omitempty"` // The user ids of the players in the match.
-	presences               map[string]*EvrMatchPresence     // [userId]EvrMatchPresence
-	broadcaster             runtime.Presence                 // The broadcaster's presence
-	presenceByEvrId         map[string]*EvrMatchPresence     // lookup table for EchoVR ID
-	presenceByPlayerSession map[string]*EvrMatchPresence     // lookup table for match-scoped session id
-	presenceCache           map[string]*EvrMatchPresence     // [userId]PlayerMeta cache for all players that have attempted to join the match.
-	emptyTicks              int                              // The number of ticks the match has been empty.
-	tickRate                int                              // The number of ticks per second.
-	UtilizationRate         int                              // The utilization rate of the match.
-	profiles                map[uuid.UUID]*evr.ServerProfile // [userId]IPinfo cache for all players that have attempted to join the match.
+	Players                 []string                     `json:"players,omitempty"` // The displayNames of the players (by team name) in the match.
+	EvrIDs                  []evr.EvrId                  `json:"evrids,omitempty"`  // The evr ids of the players in the match.
+	UserIDs                 []string                     `json:"userids,omitempty"` // The user ids of the players in the match.
+	presences               map[string]*EvrMatchPresence // [userId]EvrMatchPresence
+	broadcaster             runtime.Presence             // The broadcaster's presence
+	presenceByEvrId         map[string]*EvrMatchPresence // lookup table for EchoVR ID
+	presenceByPlayerSession map[string]*EvrMatchPresence // lookup table for match-scoped session id
+	presenceCache           map[string]*EvrMatchPresence // [userId]PlayerMeta cache for all players that have attempted to join the match.
+	emptyTicks              int                          // The number of ticks the match has been empty.
+	tickRate                int                          // The number of ticks per second.
 }
 
 func (s *EvrMatchState) String() string {
@@ -325,7 +323,6 @@ func NewEvrMatchState(endpoint evr.Endpoint, config *MatchBroadcaster, sessionId
 		UserIDs:                 make([]string, 0, MatchMaxSize),
 		emptyTicks:              0,
 		tickRate:                4,
-		profiles:                make(map[uuid.UUID]*evr.ServerProfile),
 	}
 
 	evrMatchConfig := evrMatchConfig{
@@ -375,7 +372,6 @@ func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql
 	state.Broadcaster.Endpoint = config.Endpoint
 	state.presenceCache = make(map[string]*EvrMatchPresence)
 	state.presences = make(map[string]*EvrMatchPresence)
-	state.profiles = make(map[uuid.UUID]*evr.ServerProfile)
 	state.presenceByEvrId = make(map[string]*EvrMatchPresence)
 	state.presenceByPlayerSession = make(map[string]*EvrMatchPresence)
 
@@ -674,12 +670,6 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 			case *evr.BroadcasterPlayerRemoved:
 				// The client has disconnected from the broadcaster.
 				messageFn = m.broadcasterPlayerRemoved
-			case *evr.UserServerProfileUpdateRequest:
-				// The broadcaster is updating the user's profile.
-				go m.userServerProfileUpdateRequest(ctx, logger, db, nk, dispatcher, state, in, msg)
-			case *evr.OtherUserProfileRequest:
-				// The broadcaster is requesting the profile of joining user.
-				messageFn = m.otherUserProfileRequest
 			case *evr.BroadcasterPlayerSessionsLocked:
 				// The server has locked the player sessions.
 				messageFn = m.broadcasterPlayerSessionsLocked
@@ -972,148 +962,6 @@ func (m *EvrMatch) broadcasterPlayerRemoved(ctx context.Context, logger runtime.
 	return state, nil
 }
 
-// UpdateUnlocks updates the unlocked cosmetic fields in the dst with the src.
-func UpdateUnlocks(dst, src interface{}) {
-	dVal := reflect.ValueOf(dst)
-	sVal := reflect.ValueOf(src)
-
-	if dVal.Kind() == reflect.Ptr {
-		dVal = dVal.Elem()
-		sVal = sVal.Elem()
-	}
-
-	for i := 0; i < sVal.NumField(); i++ {
-		sField := sVal.Field(i)
-		dField := dVal.Field(i)
-
-		// Check if the field is a boolean
-		if sField.Kind() == reflect.Bool {
-			dField.SetBool(sField.Bool())
-		}
-	}
-}
-
-// userServerProfileUpdateRequest is called when the broadcaster is updating the user's server profile.
-func (m *EvrMatch) userServerProfileUpdateRequest(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, state *EvrMatchState, in runtime.MatchData, msg evr.Message) (*EvrMatchState, error) {
-	message := msg.(*evr.UserServerProfileUpdateRequest)
-
-	// Verify that the update is coming from the broadcaster.
-	if in.GetUserId() != state.broadcaster.GetUserId() {
-		logger.Warn("unauthorized server profile update of %s by %v", message.EvrId, in.GetUserId())
-		return state, fmt.Errorf("unauthorized")
-	}
-
-	presence, found := state.presenceByEvrId[message.EvrId.Token()]
-	if !found {
-		return state, fmt.Errorf("user not in match")
-	}
-	// Retrieve the server profile
-	ops := []*runtime.StorageRead{
-		{
-			Collection: GameProfileStorageCollection,
-			Key:        ServerGameProfileStorageKey,
-			UserID:     presence.GetUserId(),
-		},
-	}
-	objs, err := nk.StorageRead(ctx, ops)
-	if err != nil {
-		return state, fmt.Errorf("error writing server profile: %w", err)
-	}
-	if len(objs) == 0 {
-		return state, fmt.Errorf("server profile not found")
-	}
-
-	// Unmarshal the server profile.
-	profile := evr.ServerProfile{}
-	if err := json.Unmarshal([]byte(objs[0].Value), &profile); err != nil {
-		return state, fmt.Errorf("error unmarshalling server profile: %w", err)
-	}
-
-	unlocks := message.UpdateInfo.Update.Unlocks
-	UpdateUnlocks(profile.UnlockedCosmetics, unlocks)
-
-	// Write the profile to storage.
-	profileJson, err := json.Marshal(profile)
-	if err != nil {
-		return state, fmt.Errorf("error marshalling server profile: %w", err)
-	}
-
-	objectIDs := []*runtime.StorageWrite{
-		{
-			Collection:      GameProfileStorageCollection,
-			Key:             ServerGameProfileStorageKey,
-			UserID:          presence.GetUserId(),
-			Value:           string(profileJson),
-			PermissionRead:  1,
-			PermissionWrite: 0,
-		},
-	}
-
-	if _, err := nk.StorageWrite(ctx, objectIDs); err != nil {
-		return state, fmt.Errorf("error writing server profile: %w", err)
-	}
-	if err := sendMessagesToStream(ctx, nk, in.GetSessionId(), svcLoginID.String(), evr.NewUserServerProfileUpdateSuccess(message.EvrId)); err != nil {
-		return state, fmt.Errorf("failed to send message: %w", err)
-	}
-	return state, nil
-}
-
-// A request from a broadcaster (over its _unrelated_ login connection) for a profile of a joining user.
-func (m *EvrMatch) otherUserProfileRequest(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, state *EvrMatchState, in runtime.MatchData, msg evr.Message) (*EvrMatchState, error) {
-	request := msg.(*evr.OtherUserProfileRequest)
-
-	errFailure := func(e error, code int) error {
-		if err := sendMessagesToStream(ctx, nk, in.GetSessionId(), svcLoginID.String(), evr.NewOtherUserProfileFailure(request.EvrId, uint64(code), e.Error())); err != nil {
-			return fmt.Errorf("failed to send message: %w", err)
-		}
-		return e
-	}
-	presence, ok := state.presenceByEvrId[request.EvrId.Token()]
-	if !ok {
-		return state, errFailure(fmt.Errorf("user %s not in match", request.EvrId.Token()), 404)
-	}
-	// Use the cached version if available.
-	if presence.UserID != uuid.Nil {
-		profile, found := state.profiles[presence.UserID]
-		if found {
-			return state, sendMessagesToStream(ctx, nk, in.GetSessionId(), svcLoginID.String(), evr.NewOtherUserProfileSuccess(request.EvrId, profile))
-		}
-	}
-
-	// Retrieve the server profile from storage.
-	objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
-		{
-			Collection: GameProfileStorageCollection,
-			Key:        ServerGameProfileStorageKey,
-			UserID:     presence.UserID.String(),
-		},
-	})
-	if err != nil {
-		return state, errFailure(fmt.Errorf("failed to read game profile: %w", err), 500)
-	}
-
-	if len(objs) == 0 {
-		return state, errFailure(fmt.Errorf("server profile not found"), 500)
-	}
-
-	profileJson := []byte(objs[0].GetValue())
-
-	// Parse the profile
-	profile := evr.ServerProfile{}
-	if err := json.Unmarshal(profileJson, &profile); err != nil {
-		return state, errFailure(fmt.Errorf("failed to unmarshal game profile: %w", err), 500)
-	}
-	// Update the display name and times
-	profile.DisplayName = presence.DisplayName
-	profile.UpdateTime = time.Now().Unix()
-
-	// Cache the profile
-	state.profiles[presence.UserID] = &profile
-
-	// Send the server profile to the requesting user over it's login connection.
-	return state, sendMessagesToStream(ctx, nk, in.GetSessionId(), svcLoginID.String(), evr.NewOtherUserProfileSuccess(request.EvrId, &profile))
-}
-
 func sendMessagesToStream(_ context.Context, nk runtime.NakamaModule, sessionId string, serviceId string, messages ...evr.Message) error {
 	data, err := evr.Marshal(messages...)
 	if err != nil {
@@ -1140,7 +988,7 @@ func (m *EvrMatch) broadcasterPlayerSessionsLocked(ctx context.Context, logger r
 }
 
 func (m *EvrMatch) broadcasterPlayerSessionsUnlocked(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, state *EvrMatchState, in runtime.MatchData, msg evr.Message) (*EvrMatchState, error) {
-	_ = msg.(*evr.BroadcasterPlayerSessionsLocked)
+	_ = msg.(*evr.BroadcasterPlayerSessionsUnlocked)
 	// Verify that the update is coming from the broadcaster.
 	state.Open = true
 	return state, nil

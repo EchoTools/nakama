@@ -2,7 +2,6 @@ package evr
 
 import (
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 
 	"github.com/gofrs/uuid/v5"
@@ -12,9 +11,9 @@ var Symbol_SNSLoginRequestv2 Symbol = LoginFailure{}.Symbol()
 
 // LoginRequest represents a message from client to server requesting for a user sign-in.
 type LoginRequest struct {
-	Session   uuid.UUID `json:"Session"` // This is the old session id, if it had one.
-	EvrId     EvrId     `json:"UserId"`
-	LoginData LoginData `json:"LoginData"`
+	Session   uuid.UUID    `json:"Session"` // This is the old session id, if it had one.
+	EvrId     EvrId        `json:"UserId"`
+	LoginData LoginProfile `json:"LoginData"`
 }
 
 func (m LoginRequest) Token() string   { return "SNSLogInRequestv2" }
@@ -34,7 +33,7 @@ func (m *LoginRequest) Stream(s *EasyStream) error {
 	})
 }
 
-func NewLoginRequest(session uuid.UUID, userId EvrId, loginData LoginData) (*LoginRequest, error) {
+func NewLoginRequest(session uuid.UUID, userId EvrId, loginData LoginProfile) (*LoginRequest, error) {
 	return &LoginRequest{
 		Session:   session,
 		EvrId:     userId,
@@ -46,7 +45,7 @@ func (m *LoginRequest) EvrID() EvrId {
 	return m.EvrId
 }
 
-type LoginData struct {
+type LoginProfile struct {
 	// WARNING: EchoVR dictates this schema.
 	AccountId                   uint64     `json:"accountid"`
 	DisplayName                 string     `json:"displayname"`
@@ -62,19 +61,9 @@ type LoginData struct {
 	SystemInfo                  SystemInfo `json:"system_info"`
 }
 
-func (ld *LoginData) String() string {
+func (ld *LoginProfile) String() string {
 	return fmt.Sprintf("%s(account_id=%d, display_name=%s, hmd_serial_number=%s, "+
 		")", "LoginData", ld.AccountId, ld.DisplayName, ld.HmdSerialNumber)
-}
-
-func UnmarshalLoginData(data []byte) (LoginData, error) {
-	var r LoginData
-	err := json.Unmarshal(data, &r)
-	return r, err
-}
-
-func (r *LoginData) Marshal() ([]byte, error) {
-	return json.Marshal(r)
 }
 
 type GraphicsSettings struct {

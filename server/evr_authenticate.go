@@ -113,12 +113,12 @@ type LinkTicket struct {
 	// NOTE: The UserIDToken has an index that is created in the InitModule function
 	UserIDToken string `json:"evrid_token"` // the xplatform ID used by EchoVR as a UserID
 
-	LoginRequest *evr.LoginData `json:"game_login_request"` // the login request payload that generated this link ticket
+	LoginRequest *evr.LoginProfile `json:"game_login_request"` // the login request payload that generated this link ticket
 }
 
 // TODO Move this to the evrbackend runtime module
 // linkTicket generates a link ticket for the provided xplatformId and hmdSerialNumber.
-func (p *EvrPipeline) linkTicket(session *sessionWS, deviceId *DeviceId, loginData *evr.LoginData) (*LinkTicket, error) {
+func (p *EvrPipeline) linkTicket(session *sessionWS, deviceId *DeviceId, loginData *evr.LoginProfile) (*LinkTicket, error) {
 	ctx := session.Context()
 
 	// Check if a link ticket already exists for the provided xplatformId and hmdSerialNumber

@@ -2,6 +2,7 @@ package evr
 
 import (
 	"fmt"
+	"strings"
 
 	"encoding/binary"
 	"encoding/json"
@@ -145,6 +146,36 @@ type RemoteLogCustomizationMetricsPayload struct {
 	ItemID      int64  `json:"[item_id]"`
 	ItemName    string `json:"[item_name]"`
 	UserID      string `json:"[user_id]"`
+}
+
+// GetCategory returns the category of the item. The category is what determines the equipment slot.
+func (m *RemoteLogCustomizationMetricsPayload) GetCategory() string {
+	itemName := m.ItemName
+	if itemName[:4] == "rwd_" {
+		// Reward Item.
+		s := strings.SplitN(itemName, "_", 3)
+		if len(s) != 3 {
+			return ""
+		}
+		return s[1]
+	} else {
+		// Standard Item.
+		s := strings.SplitN(itemName, "_", 2)
+		if len(s) != 2 {
+			return ""
+		}
+		return s[0]
+	}
+}
+
+func (m *RemoteLogCustomizationMetricsPayload) GetEquippedCustomization() (category string, name string, err error) {
+	if m.EventType != "item_equipped" {
+		return "", "", fmt.Errorf("invalid event type or item name")
+	}
+	if m.ItemName == "" {
+		return "", "", fmt.Errorf("item name is empty")
+	}
+	return m.GetCategory(), m.ItemName, nil
 }
 
 // CUSTOMIZATION_ITEM_PREVIEW
