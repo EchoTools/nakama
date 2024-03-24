@@ -54,7 +54,7 @@ const (
 
 var (
 	DisplayNameFilterRegex = regexp.MustCompile(`[^-0-9A-Za-z_\[\]]`)
-	DisplayNameMatchRegex  = regexp.MustCompile(`[A-Za-z]{2}`)
+	DisplayNameMatchRegex  = regexp.MustCompile(`[A-Za-z0-9]{2}`)
 )
 
 // The data used to generate the Device ID authentication string.
