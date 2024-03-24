@@ -79,12 +79,23 @@ func TestSetDisplayNameByPriority(t *testing.T) {
 				&MockNakamaModule{},
 				userId,
 				"TestUsername",
-				[]string{"OtherUsername1", "@!#$!@#$", "!", "OTHERDISPLAYNAME1", "OtherDisplayName1", "OtherDisplayName2", "", "OtherUsername2", "OtherDisplayName1", "WantedDisplayName"},
+				[]string{"", "@!#$!@#$", "!", "WantedDisplayName", "OtherDisplayName1", "OtherDisplayName2", "", "OtherUsername2", "OtherDisplayName1", "WantedDisplayName"},
 			},
 			"WantedDisplayName",
 			false,
 		},
-
+		{
+			"Test Options numbers in name",
+			args{
+				context.Background(),
+				&MockNakamaModule{},
+				userId,
+				"TestUsername",
+				[]string{"", "015A", "015a", "015a", "015a"},
+			},
+			"015A",
+			false,
+		},
 		// TODO: Add test cases.
 	}
 	for _, tt := range tests {
@@ -96,6 +107,46 @@ func TestSetDisplayNameByPriority(t *testing.T) {
 			}
 			if got != tt.want {
 				t.Errorf("SetDisplayNameByPriority() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_sanitizeDisplayName(t *testing.T) {
+	type args struct {
+		displayName string
+	}
+	tests := []struct {
+		name string
+		args args
+		want string
+	}{
+		{
+			"Test DisplayName with special characters",
+			args{
+				"!@#$%^&*()_+",
+			},
+			"",
+		},
+		{
+			"Test DisplayName with numbers",
+			args{
+				"1234567890",
+			},
+			"",
+		},
+		{
+			"Test DisplayName with numbers and letters",
+			args{
+				"015A",
+			},
+			"015A",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sanitizeDisplayName(tt.args.displayName); got != tt.want {
+				t.Errorf("sanitizeDisplayName() = %v, want %v", got, tt.want)
 			}
 		})
 	}
