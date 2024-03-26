@@ -55,7 +55,7 @@ func TestMatchmakingRegistry_GetPingCandidates(t *testing.T) {
 	cache := r.GetCache(userId)
 	cache.Lock()
 	for i, endpoint := range endpoints {
-		cache.Store[endpoint.ID()] = EndpointWithLatency{
+		cache.Store[endpoint.ID()] = EndpointWithRTT{
 			Endpoint:  endpoint,
 			RTT:       rttUnit * time.Duration(i+1),
 			Timestamp: time.Now(),
@@ -80,7 +80,7 @@ func TestMatchmakingRegistry_GetPingCandidates(t *testing.T) {
 		r.UpdateBroadcasters(endpoints[:2])
 		cache := r.GetCache(userId)
 		cache.Lock()
-		cache.Store[endpoints[0].ID()] = EndpointWithLatency{
+		cache.Store[endpoints[0].ID()] = EndpointWithRTT{
 			Endpoint:  endpoints[0],
 			RTT:       rttUnit,
 			Timestamp: time.Now().Add(-2 * latencyCacheExpiry),
@@ -99,12 +99,12 @@ func TestMatchmakingRegistry_GetPingCandidates(t *testing.T) {
 		r.UpdateBroadcasters(endpoints[:2])
 		cache := r.GetCache(userId)
 		cache.Lock()
-		cache.Store[endpoints[0].ID()] = EndpointWithLatency{
+		cache.Store[endpoints[0].ID()] = EndpointWithRTT{
 			Endpoint:  endpoints[0],
 			RTT:       rttUnit,
 			Timestamp: time.Now().Add(-2 * latencyCacheExpiry),
 		}
-		cache.Store[endpoints[2].ID()] = EndpointWithLatency{
+		cache.Store[endpoints[2].ID()] = EndpointWithRTT{
 			Endpoint:  endpoints[2],
 			RTT:       rttUnit,
 			Timestamp: time.Now(),

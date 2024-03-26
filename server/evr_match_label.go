@@ -56,7 +56,7 @@ func (l Label) Property() string {
 	if l.boost != 0 {
 		b = fmt.Sprintf("^%d", l.boost)
 	}
-	return fmt.Sprintf("%cproperties.%s:%s%s", l.Op, l.Name, l.Value, b)
+	return fmt.Sprintf("%cproperties.%s:%s%s", l.Op, l.Name, queryEscape(l.Value), b)
 }
 
 // Label returns the label as a label string (e.g. "lobbytype=0")

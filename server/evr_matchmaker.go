@@ -38,9 +38,9 @@ func (p *EvrPipeline) ListUnassignedLobbies(ctx context.Context, session *sessio
 	qparts = append(qparts, LobbyType(evr.UnassignedLobby).Query(Must, 0))
 
 	// MUST be one of the accessible channels (if provided)
-	if len(ml.Broadcaster.HostedChannels) > 0 {
+	if len(ml.Broadcaster.Channels) > 0 {
 		// Add the channels to the query
-		qparts = append(qparts, HostedChannels(ml.Broadcaster.HostedChannels).Query(Must, 0))
+		qparts = append(qparts, HostedChannels(ml.Broadcaster.Channels).Query(Must, 0))
 	}
 
 	// SHOULD match the region (if specified)
@@ -77,7 +77,7 @@ func (p *EvrPipeline) ListUnassignedLobbies(ctx context.Context, session *sessio
 }
 
 // Backfill returns a list of matches that the player can backfill
-func (p *EvrPipeline) Backfill(ctx context.Context, session *sessionWS, msession *MatchmakingSession) ([]*EvrMatchState, error) { // Create a new matching session
+func (p *EvrPipeline) Backfill(ctx context.Context, session *sessionWS, msession *MatchmakingSession) (*EvrMatchState, error) { // Create a new matching session
 	// TODO Move this into the matchmaking registry
 	// TODO Add a goroutine to look for matches that:
 	// Are short 1 or more players
@@ -88,12 +88,11 @@ func (p *EvrPipeline) Backfill(ctx context.Context, session *sessionWS, msession
 
 	var err error
 	logger := session.logger
-
-	labels := make([]*EvrMatchState, 0)
+	var labels []*EvrMatchState
 
 	if msession.Label.LobbyType != PublicLobby {
 		// Do not backfill for private lobbies
-		return labels, status.Errorf(codes.InvalidArgument, "Cannot backfill private lobbies")
+		return nil, status.Errorf(codes.InvalidArgument, "Cannot backfill private lobbies")
 	}
 
 	// Search for existing matches
@@ -106,7 +105,10 @@ func (p *EvrPipeline) Backfill(ctx context.Context, session *sessionWS, msession
 		return nil, status.Errorf(codes.Internal, "Failed to filter matches: %v", err)
 	}
 
-	return labels, nil
+	if len(labels) == 0 {
+		return nil, nil
+	}
+	return labels[0], nil
 }
 
 // TODO FIXME Create a broadcaster registry
@@ -117,30 +119,20 @@ type BroadcasterLatencies struct {
 }
 
 // Matchmake attempts to find/create a match for the user using the nakama matchmaker
-func (p *EvrPipeline) AddMatchmakingTicket(ctx context.Context, session *sessionWS, matchLogger *zap.Logger, msession *MatchmakingSession) (ticket string, err error) {
+func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession) (ticket string, err error) {
 	// TODO Move this into the matchmaking registry
-
+	ctx := msession.Context()
 	// TODO FIXME Add a custom matcher for broadcaster matching
 	// Get a list of all the broadcasters
 	broadcasters := p.matchmakingRegistry.Broadcasters()
 
 	// Ping endpoints
-	result, err := p.PingEndpoints(ctx, session, msession, lo.Values(broadcasters))
+	allRTTs, err := p.PingEndpoints(ctx, session, msession, lo.Values(broadcasters))
 	if err != nil {
 		return "", err
 	}
 
-	// make(map[string]time.Duration, len(result))
-	// Create a map of broadcasters and their latencies
-	latencies := make(map[string]BroadcasterLatencies, len(broadcasters))
-	for _, r := range result {
-		latencies[r.Endpoint.ID()] = BroadcasterLatencies{
-			Endpoint: r.Endpoint,
-			Latency:  mroundRTT(r.RTT, 10*time.Millisecond),
-		}
-	}
-
-	query, stringProps, numericProps, err := p.BuildMatchmakingQuery(ctx, latencies, session, msession)
+	query, stringProps, numericProps, err := msession.BuildQuery(allRTTs)
 	if err != nil {
 		return "", status.Errorf(codes.Internal, "Failed to build matchmaking query: %v", err)
 	}
@@ -170,71 +162,6 @@ func (p *EvrPipeline) AddMatchmakingTicket(ctx context.Context, session *session
 	return ticket, nil
 }
 
-func (p *EvrPipeline) BuildMatchmakingQuery(ctx context.Context, latencies map[string]BroadcasterLatencies, session *sessionWS, msession *MatchmakingSession) (string, map[string]string, map[string]float64, error) {
-	// Create the properties maps
-	stringProps := make(map[string]string)
-	numericProps := make(map[string]float64)
-	qparts := make([]string, 0, 10)
-	ml := msession.Label
-	// MUST match this channel
-	qparts = append(qparts, fmt.Sprintf("+properties.channel:%s", msession.Label.Channel.String()))
-	stringProps["channel"] = msession.Label.Channel.String()
-
-	// Add a property of the external IP's RTT
-	for _, b := range latencies {
-		latency := b.Latency
-		// Turn the IP into a hex string like 127.0.0.1 -> 7f000001
-		ip := ipToKey(b.Endpoint.ExternalIP)
-		// Add the property
-		numericProps[ip] = float64(latency.Milliseconds())
-
-		// TODO FIXME Add second matchmaking ticket for over 150ms
-		n := 0
-		switch {
-		case latency < 25:
-			n = 10
-		case latency < 40:
-			n = 7
-		case latency < 60:
-			n = 5
-		case latency < 80:
-			n = 2
-			// Add a score for each endpoint
-			p := fmt.Sprintf("properties.%s:<=%d^%d", ip, latency+15, n)
-			qparts = append(qparts, p)
-		}
-	}
-	// MUST be the same mode
-	qparts = append(qparts, GameMode(ml.Mode).Label(Must, 0).Property())
-	stringProps["mode"] = ml.Mode.Token().String()
-
-	groups, err := p.discordRegistry.GetGuildGroups(ctx, session.UserID())
-	if err != nil {
-		return "", nil, nil, status.Errorf(codes.Internal, "Failed to get guild groups: %v", err)
-	}
-
-	for _, g := range groups {
-
-		// Add the properties
-		// Strip out teh hiphens form the UUID and add it ot teh porties and query
-		s := strings.ReplaceAll(g.Id, "-", "")
-		stringProps[s] = "T"
-
-		// If this is the user's current channel, then give it a +3 boost
-		if g.Id == msession.Label.Channel.String() {
-			qparts = append(qparts, fmt.Sprintf("properties.%s:T^3", s))
-		} else {
-			qparts = append(qparts, fmt.Sprintf("properties.%s:T", s))
-		}
-	}
-
-	query := strings.Join(qparts, " ")
-	// TODO Promote friends
-	session.logger.Debug("Matchmaking query", zap.String("query", query), zap.Any("stringProps", stringProps), zap.Any("numericProps", numericProps))
-	// TODO Avoid ghosted
-	return query, stringProps, numericProps, nil
-}
-
 // Wrapper for the matchRegistry.ListMatches function.
 func listMatches(ctx context.Context, p *EvrPipeline, limit int, minSize int, maxSize int, query string) ([]*api.Match, error) {
 	return p.runtimeModule.MatchList(ctx, limit, true, "", &minSize, &maxSize, query)
@@ -260,8 +187,8 @@ func buildMatchQueryFromLabel(ml *EvrMatchState) string {
 	}
 
 	// MUST be a broadcaster on a channel the user has access to
-	if len(ml.Broadcaster.HostedChannels) != 0 {
-		qparts = append(qparts, Channels(ml.Broadcaster.HostedChannels).Query(Must, 0))
+	if len(ml.Broadcaster.Channels) != 0 {
+		qparts = append(qparts, Channels(ml.Broadcaster.Channels).Query(Must, 0))
 	}
 
 	// SHOULD Add the current channel as a high boost SHOULD
@@ -434,35 +361,35 @@ func (p *EvrPipeline) MatchSort(ctx context.Context, session *sessionWS, msessio
 }
 
 // MatchCreate creates a match on an available unassigned broadcaster using the given label
-func (p *EvrPipeline) MatchCreate(ctx context.Context, session *sessionWS, msession *MatchmakingSession, label *EvrMatchState) (match *EvrMatchState, err error) {
+func (p *EvrPipeline) MatchCreate(ctx context.Context, session *sessionWS, msession *MatchmakingSession, label *EvrMatchState) (matchId string, err error) {
 	label.MaxSize = MatchMaxSize
 	// TODO Move this into the matchmaking registry
 	// Create a new match
 	matches, err := p.ListUnassignedLobbies(ctx, session, label)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
 	// Filter/sort the results
 	matches, _, err = p.MatchSort(ctx, session, msession, matches)
 	if err != nil {
-		return nil, fmt.Errorf("failed to filter matches: %v", err)
+		return "", fmt.Errorf("failed to filter matches: %v", err)
 	}
 
 	// Join the lowest rtt match
-	match = matches[0]
+	match := matches[0]
 
 	// Load the level.
-	matchId := fmt.Sprintf("%s.%s", match.MatchId, p.node)
+	parkingMatchId := fmt.Sprintf("%s.%s", match.MatchId, p.node)
 
 	label.SpawnedBy = session.UserID().String()
 	// Instruct the server to load the level
-	_, err = SignalMatch(ctx, p.matchRegistry, matchId, SignalStartSession, label)
+	_, err = SignalMatch(ctx, p.matchRegistry, parkingMatchId, SignalStartSession, label)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load level: %v", err)
+		return "", fmt.Errorf("failed to load level: %v", err)
 	}
 	// Return the newly active match.
-	return match, nil
+	return parkingMatchId, nil
 }
 
 // JoinEvrMatch allows a player to join a match.
@@ -547,7 +474,7 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, session *sessionWS, matc
 }
 
 // PingEndpoints pings the endpoints and returns the latencies.
-func (p *EvrPipeline) PingEndpoints(ctx context.Context, session *sessionWS, msession *MatchmakingSession, endpoints []evr.Endpoint) ([]EndpointWithLatency, error) {
+func (p *EvrPipeline) PingEndpoints(ctx context.Context, session *sessionWS, msession *MatchmakingSession, endpoints []evr.Endpoint) ([]EndpointWithRTT, error) {
 	if len(endpoints) == 0 {
 		return nil, nil
 	}
@@ -594,10 +521,10 @@ func (p *EvrPipeline) waitForPingCompletion(msession *MatchmakingSession) error 
 }
 
 // getEndpointLatencies returns the latencies for the given endpoints.
-func (p *EvrPipeline) getEndpointLatencies(session *sessionWS, endpoints []evr.Endpoint) []EndpointWithLatency {
+func (p *EvrPipeline) getEndpointLatencies(session *sessionWS, endpoints []evr.Endpoint) []EndpointWithRTT {
 	endpointRTTs := p.matchmakingRegistry.GetLatencies(session.UserID(), endpoints)
 
-	results := make([]EndpointWithLatency, 0, len(endpoints))
+	results := make([]EndpointWithRTT, 0, len(endpoints))
 	for _, e := range endpoints {
 		if l, ok := endpointRTTs[e.ID()]; ok {
 			results = append(results, l)

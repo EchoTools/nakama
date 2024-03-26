@@ -71,6 +71,9 @@ func (r *LocalMessageRouter) SendToPresenceIDs(logger *zap.Logger, presenceIDs [
 		var err error
 		switch session.Format() {
 		case SessionFormatEvr:
+			if logger.Core().Enabled(zap.DebugLevel) {
+				logger.Debug("message for routing", zap.Any("message", envelope.Message))
+			}
 			switch envelope.Message.(type) {
 			case *rtapi.Envelope_StreamData:
 				message := envelope.GetStreamData()
@@ -83,6 +86,9 @@ func (r *LocalMessageRouter) SendToPresenceIDs(logger *zap.Logger, presenceIDs [
 			case *rtapi.Envelope_Match:
 				return
 			case *rtapi.Envelope_MatchmakerMatched:
+				if logger.Core().Enabled(zap.DebugLevel) {
+					logger.Error("Matchmaker Matched", zap.Any("message", envelope.Message))
+				}
 				return
 			default:
 				if logger.Core().Enabled(zap.DebugLevel) {

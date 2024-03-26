@@ -157,7 +157,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, session *sessionWS, evrI
 		session.logger.Error("failed to load game profiles", zap.Error(err))
 	}
 	if profile == nil {
-		return nil, fmt.Errorf("failed to load game profiles")
+		return &evr.DefaultGameSettingsSettings, fmt.Errorf("failed to load game profiles")
 	}
 
 	settings := &evr.DefaultGameSettingsSettings
