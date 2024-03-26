@@ -306,6 +306,30 @@ var (
 	}
 )
 
+func UnregisterAllGuildCommands(ctx context.Context, logger runtime.Logger, dg *discordgo.Session) {
+	guilds, err := dg.UserGuilds(100, "", "")
+	if err != nil {
+		logger.Error("Error fetching guilds,", zap.Error(err))
+		return
+	}
+	for _, guild := range guilds {
+		commands, err := dg.ApplicationCommands(dg.State.User.ID, guild.ID)
+		if err != nil {
+			logger.Error("Error fetching commands,", zap.Error(err))
+			continue
+		}
+
+		for _, command := range commands {
+			err := dg.ApplicationCommandDelete(dg.State.User.ID, guild.ID, command.ID)
+			if err != nil {
+				logger.Error("Error deleting command,", zap.Error(err))
+			} else {
+				logger.Info("Deleted command", zap.String("command", command.Name))
+			}
+		}
+	}
+}
+
 func RegisterSlashCommands(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, bot *discordgo.Session, discordRegistry DiscordRegistry) error {
 	commandHandlers := map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate){
 		"evrsymbol": func(s *discordgo.Session, i *discordgo.InteractionCreate) {

@@ -221,6 +221,12 @@ func (r *LocalDiscordRegistry) Get(discordId string) (nakamaId string, ok bool) 
 
 // Store adds or updates the Nakama group ID by the Discord guild or role ID
 func (r *LocalDiscordRegistry) Store(discordId string, nakamaId string) {
+	if discordId == "" || nakamaId == "" {
+		r.logger.Error("discordId and nakamaId cannot be nil")
+	}
+	if discordId == "00000000-0000-0000-0000-000000000000" || nakamaId == "00000000-0000-0000-0000-000000000000" {
+		r.logger.Error("discordId and nakamaId cannot be nil")
+	}
 	r.cache.Store(discordId, nakamaId)
 }
 
@@ -516,34 +522,41 @@ func (r *LocalDiscordRegistry) UpdateAccount(ctx context.Context, userID uuid.UU
 }
 
 // GetUserIdByDiscordId looks up, or creates, the Nakama user ID by the Discord user ID; potentially using the cache.
-func (r *LocalDiscordRegistry) GetUserIdByDiscordId(ctx context.Context, discordId string, create bool) (userId uuid.UUID, err error) {
-	if discordId == "" {
-		return userId, fmt.Errorf("discordId is required")
+func (r *LocalDiscordRegistry) GetUserIdByDiscordId(ctx context.Context, discordID string, create bool) (userID uuid.UUID, err error) {
+
+	if discordID == "" {
+		return userID, fmt.Errorf("discordId is required")
 	}
 
 	// Check the cache
-	if s, ok := r.Get(discordId); ok {
-		userId, err = uuid.FromString(s)
+	if s, found := r.Get(discordID); found {
+		userID, err = uuid.FromString(s)
 		if err != nil {
-			return userId, fmt.Errorf("error parsing user id: %w", err)
+			return userID, fmt.Errorf("error parsing user id: %w", err)
 		}
-		return userId, nil
+		return userID, nil
 	}
 
 	// Lookup the nakama user by the discord user id
-	u, err := r.GetUser(ctx, discordId)
+	discordUser, err := r.GetUser(ctx, discordID)
 	if err != nil {
-		return uuid.Nil, fmt.Errorf("error getting discord user %s: %w", discordId, err)
+		return uuid.Nil, fmt.Errorf("error getting discord user %s: %w", discordID, err)
 	}
 
-	uid, _, _, err := r.nk.AuthenticateCustom(ctx, discordId, u.Username, create)
+	userIDstr, _, _, err := r.nk.AuthenticateCustom(ctx, discordID, discordUser.Username, create)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("error authenticating user %s: %w", discordID, err)
+	}
+	userID = uuid.FromStringOrNil(userIDstr)
 
-	if uid != "" {
-		defer r.Store(discordId, userId.String())
-		defer r.Store(userId.String(), discordId)
+	if userID == uuid.Nil {
+		return uuid.Nil, fmt.Errorf("uuid is nil")
 	}
 
-	return uuid.FromStringOrNil(uid), err
+	defer r.Store(discordID, userID.String())
+	defer r.Store(userID.String(), discordID)
+
+	return userID, err
 
 }
 
@@ -623,9 +636,11 @@ func (r *LocalDiscordRegistry) InitializePartyBot(ctx context.Context, pipeline 
 	r.bot.Identify.Intents |= discordgo.IntentDirectMessages
 	r.bot.Identify.Intents |= discordgo.IntentDirectMessageReactions
 
-	if err := RegisterPartySlashCommands(ctx, r, pipeline); err != nil {
-		return err
-	}
+	/*
+		if err := RegisterPartySlashCommands(ctx, r, pipeline); err != nil {
+			return err
+		}
+	*/
 
 	if err := r.bot.Open(); err != nil {
 		return err
