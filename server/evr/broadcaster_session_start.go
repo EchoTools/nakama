@@ -2,6 +2,7 @@ package evr
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 
@@ -114,7 +115,11 @@ func NewSessionSettings(appId string, mode Symbol, level Symbol) SessionSettings
 }
 
 func (s *SessionSettings) String() string {
-	return fmt.Sprintf("SessionSettings(appid=%s, gametype=%s, level=%v)", s.AppId, Symbol(s.Mode).Token(), s.Level)
+	b, err := json.Marshal(s)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
 }
 
 type EntrantDescriptor struct {

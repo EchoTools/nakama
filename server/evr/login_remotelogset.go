@@ -169,9 +169,7 @@ func (m *RemoteLogCustomizationMetricsPayload) GetCategory() string {
 }
 
 func (m *RemoteLogCustomizationMetricsPayload) GetEquippedCustomization() (category string, name string, err error) {
-	if m.EventType != "item_equipped" {
-		return "", "", fmt.Errorf("invalid event type or item name")
-	}
+
 	if m.ItemName == "" {
 		return "", "", fmt.Errorf("item name is empty")
 	}

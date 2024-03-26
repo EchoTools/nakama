@@ -433,7 +433,7 @@ func (p *EvrPipeline) remoteLogSetv3(ctx context.Context, logger *zap.Logger, se
 		if !ok {
 			logger.Warn("RemoteLogSet: missing message property", zap.Any("entry", entry))
 		}
-
+		logger.Debug("RemoteLogSet: message property", zap.Any("entry", entry))
 		messagetype, ok := s.(string)
 		if !ok {
 			logger.Debug("RemoteLogSet: message property is not a string", zap.Any("entry", entry))
@@ -497,6 +497,9 @@ func (p *EvrPipeline) remoteLogSetv3(ctx context.Context, logger *zap.Logger, se
 				continue
 			}
 
+			if c.EventType != "item_equipped" {
+				continue
+			}
 			category, name, err := c.GetEquippedCustomization()
 			if err != nil {
 				logger.Error("Failed to get equipped customization", zap.Error(err))
@@ -506,8 +509,9 @@ func (p *EvrPipeline) remoteLogSetv3(ctx context.Context, logger *zap.Logger, se
 				logger.Error("Equipped customization is empty")
 			}
 
-			p.profileRegistry.UpdateEquippedItem(ctx, session.userID, category, name)
-
+			profile := p.profileRegistry.GetProfile(session.userID)
+			p.profileRegistry.UpdateEquippedItem(profile, category, name)
+			p.profileRegistry.SetProfile(session.userID, profile)
 		default:
 			if logger.Core().Enabled(zap.DebugLevel) {
 				// Write the remoteLog to storage.
@@ -794,32 +798,41 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	message := in.(*evr.OtherUserProfileRequest)
 
-	// Find the match connection of this user
-	// Verify this person is the match with the target
-	targetMatchId, found := p.matchByEvrId.Load(message.EvrId.Token())
+	// Get the other user's matchId
+	matchID, found := p.matchByEvrId.Load(message.EvrId.Token())
 	if !found {
-		return fmt.Errorf("failed to find match by EvrID: %s", message.EvrId.Token())
+		return fmt.Errorf("failed to find match by (other) EvrID: %s", message.EvrId.Token())
+	}
+	matchComponents := strings.SplitN(matchID, ".", 2)
+	if len(matchComponents) != 2 {
+		return fmt.Errorf("failed to split matchID: %s", matchID)
 	}
 
-	sessionIDs := session.tracker.ListLocalSessionIDByStream(PresenceStream{Mode: StreamModeEvr, Subject: session.userID, Subcontext: svcMatchID})
-	for _, foundSessionID := range sessionIDs {
-		if foundSessionID == session.id {
-			// This is the session that is in the match
-			matchId, found := p.matchBySession.Load(session.id)
-			if !found {
-				return fmt.Errorf("failed to find match by session: %s", session.id)
-			}
-			// Check that the match is the same as the target
-			if matchId != targetMatchId {
-				return fmt.Errorf("requestor is not in the same match as the target")
-			}
-			// continue on to send the profile
+	// Check if this user is in the match.
+	// If this is a broadcaster, Check if this user is also in the match
+	presences, err := p.runtimeModule.StreamUserList(StreamModeMatchAuthoritative, matchComponents[0], "", matchComponents[1], true, true)
+	if err != nil {
+		return fmt.Errorf("failed to get presence: %w", err)
+	}
+
+	found = false
+	userID := session.UserID().String()
+	for _, p := range presences {
+		if p.GetUserId() == userID {
+			// The user is in the match
+			found = true
 			break
 		}
 	}
 
+	// Get the session ID of the target user
+	otherSession, ok := p.loginSessionByEvrID.Load(message.EvrId.Token())
+	if !ok {
+		return fmt.Errorf("failed to find user by EvrID: %s", message.EvrId.Token())
+	}
+
 	// Get the user's profile
-	profile := p.profileRegistry.GetProfile(session.userID)
+	profile := p.profileRegistry.GetProfile(otherSession.userID)
 	if profile == nil {
 		return fmt.Errorf("failed to load game profiles")
 	}
