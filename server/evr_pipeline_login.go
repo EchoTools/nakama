@@ -27,6 +27,7 @@ const (
 	DiscordIdUrlParam           = "discordid"
 	EvrIdOverrideUrlParam       = "evrid"
 
+	EvrIDStorageIndex            = "EvrIDs_Index"
 	GameClientSettingsStorageKey = "clientSettings"
 	GamePlayerSettingsStorageKey = "playerSettings"
 	DocumentStorageCollection    = "GameDocuments"
@@ -82,7 +83,7 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 
 	// Validate the user identifier
 	if !request.EvrId.Valid() {
-		return status.Error(codes.InvalidArgument, "invalid EVR ID")
+		return msgFailedLoginFn(session, request.EvrId, status.Error(codes.InvalidArgument, "invalid EVR ID"))
 	}
 
 	payload := request.LoginData
@@ -128,13 +129,24 @@ func (p *EvrPipeline) processLogin(ctx context.Context, session *sessionWS, evrI
 	user := account.GetUser()
 	userId := user.GetId()
 
+	// Check that this EVR-ID is only used by this userID
+	otherLogins, err := p.checkEvrIDOwner(ctx, evrId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check EVR-ID owner: %w", err)
+	}
+
+	if len(otherLogins) > 0 {
+		// Check if the user is the owner of the EVR-ID
+		if otherLogins[0].UserID != uuid.FromStringOrNil(userId) {
+			session.logger.Warn("EVR-ID is already in use", zap.String("evrId", evrId.Token()), zap.String("userId", userId))
+		}
+	}
+
 	// If user ID is not empty, write out the login payload to storage.
 	if userId != "" {
-		go func() {
-			if err := writeAuditObjects(ctx, session, userId, evrId.Token(), loginProfile); err != nil {
-				session.logger.Warn("Failed to write audit objects", zap.Error(err))
-			}
-		}()
+		if err := writeAuditObjects(ctx, session, userId, evrId.Token(), loginProfile); err != nil {
+			session.logger.Warn("Failed to write audit objects", zap.Error(err))
+		}
 	}
 
 	noVR := loginProfile.SystemInfo.HeadsetType == "No VR"
@@ -143,6 +155,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, session *sessionWS, evrI
 	if err := session.LoginSession(userId, user.GetUsername(), evrId, deviceId, noVR); err != nil {
 		return nil, fmt.Errorf("failed to login: %w", err)
 	}
+	ctx = session.Context()
 
 	go func() {
 		p.loginSessionByEvrID.Store(evrId.String(), session)
@@ -165,6 +178,36 @@ func (p *EvrPipeline) processLogin(ctx context.Context, session *sessionWS, evrI
 
 }
 
+type EvrIDHistory struct {
+	Created time.Time
+	Updated time.Time
+	UserID  uuid.UUID
+}
+
+func (p *EvrPipeline) checkEvrIDOwner(ctx context.Context, evrId evr.EvrId) ([]EvrIDHistory, error) {
+
+	// Check the storage index for matching evrIDs
+	objectIds, err := p.storageIndex.List(ctx, uuid.Nil, EvrIDStorageIndex, fmt.Sprintf("+value.server.xplatformid:%s", evrId.String()), 1)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list evrIDs: %w", err)
+	}
+
+	history := make([]EvrIDHistory, len(objectIds.Objects))
+	for i, obj := range objectIds.Objects {
+		history[i] = EvrIDHistory{
+			Updated: obj.GetUpdateTime().AsTime(),
+			Created: obj.GetCreateTime().AsTime(),
+			UserID:  uuid.FromStringOrNil(obj.UserId),
+		}
+	}
+
+	// sort history by updated time descending
+	sort.Slice(history, func(i, j int) bool {
+		return history[i].Updated.After(history[j].Updated)
+	})
+
+	return history, nil
+}
 func (p *EvrPipeline) authenticateAccount(ctx context.Context, session *sessionWS, deviceId *DeviceId, discordId string, userPassword string, payload evr.LoginProfile) (*api.Account, error) {
 	var err error
 	var userId string

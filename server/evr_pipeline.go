@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bwmarrin/discordgo"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -82,9 +83,23 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	// TODO Add a symbol cache that gets populated and stored back occasionally
 
 	runtimeLogger := NewRuntimeGoLogger(logger)
-	discordRegistry := NewLocalDiscordRegistry(ctx, nk, runtimeLogger, metrics, config)
-	err := discordRegistry.InitializePartyBot(ctx, pipeline)
-	if err != nil {
+
+	botToken, ok := ctx.Value(ctxDiscordBotTokenKey{}).(string)
+	if !ok {
+		panic("Bot token is not set in context.")
+	}
+
+	var dg *discordgo.Session
+	var err error
+	if botToken != "" {
+		dg, err = discordgo.New("Bot " + botToken)
+		if err != nil {
+			logger.Error("Unable to create bot")
+		}
+	}
+	discordRegistry := NewLocalDiscordRegistry(ctx, nk, runtimeLogger, metrics, config, dg)
+
+	if err = discordRegistry.InitializePartyBot(ctx, pipeline); err != nil {
 		logger.Error("Failed to initialize party bot", zap.Error(err))
 	}
 
@@ -154,6 +169,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		placeholderEmail: config.GetRuntime().Environment["PLACEHOLDER_EMAIL_DOMAIN"],
 		linkDeviceUrl:    config.GetRuntime().Environment["LINK_DEVICE_URL"],
 	}
+	evrPipeline.profileRegistry.checkDefaultProfile()
 	runtime.MatchmakerMatched()
 	return evrPipeline
 }
@@ -446,20 +462,20 @@ func (p *EvrPipeline) attemptOutOfBandAuthentication(session *sessionWS) error {
 	// Get the account for this discordId
 	uid, err := p.discordRegistry.GetUserIdByDiscordId(ctx, discordId, false)
 	if err != nil {
-		return fmt.Errorf("Out of band Auth: %v", err)
+		return fmt.Errorf("Out of band for discord ID %s: %v", discordId, err)
 	}
 	userId := uid.String()
 
 	// The account was found.
 	account, err := GetAccount(ctx, session.logger, session.pipeline.db, session.statusRegistry, uuid.FromStringOrNil(userId))
 	if err != nil {
-		return fmt.Errorf("Out of band Auth: %v", err)
+		return fmt.Errorf("Out of band Auth: %s: %v", discordId, err)
 	}
 
 	// Do email authentication
 	userId, _, _, err = AuthenticateEmail(ctx, session.logger, session.pipeline.db, account.Email, userPassword, "", false)
 	if err != nil {
-		return fmt.Errorf("Out of band Auth: %v", err)
+		return fmt.Errorf("Out of band Auth: %s: %v", discordId, err)
 	}
 
 	return session.BroadcasterSession(userId, "")

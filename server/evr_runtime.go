@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 
+	"github.com/bwmarrin/discordgo"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"go.uber.org/zap"
 
@@ -64,7 +65,12 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 
 	// TODO FIXME Make sure the system works without a bot. Add interfaces.
 	if botToken != "" {
-		discordRegistry := NewLocalDiscordRegistry(ctx, nk, logger, nil, nil)
+		// Start the bot
+		dg, err := discordgo.New("Bot " + botToken)
+		if err != nil {
+			logger.Error("Unable to create bot")
+		}
+		discordRegistry := NewLocalDiscordRegistry(ctx, nk, logger, nil, nil, dg)
 		if err != nil {
 			logger.Error("Unable to create discord registry: %v", err)
 			return err
@@ -208,6 +214,15 @@ func RegisterIndexes(initializer runtime.Initializer) error {
 	key = ""                                           // Set to empty string to match all keys instead
 	fields = []string{"client_ip_address,displayname"} // index on these fields
 	maxEntries = 1000000
+	indexOnly = false
+	if err := initializer.RegisterStorageIndex(name, collection, key, fields, maxEntries, indexOnly); err != nil {
+		return err
+	}
+	name = EvrIDStorageIndex
+	collection = GameProfileStorageCollection
+	key = GameProfileStorageKey             // Set to empty string to match all keys instead
+	fields = []string{"server.xplatformid"} // index on these fields
+	maxEntries = 100000
 	indexOnly = false
 	if err := initializer.RegisterStorageIndex(name, collection, key, fields, maxEntries, indexOnly); err != nil {
 		return err
