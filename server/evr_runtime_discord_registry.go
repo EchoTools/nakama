@@ -75,19 +75,7 @@ type LocalDiscordRegistry struct {
 	cache sync.Map // Generic cache for map[discordId]nakamaId lookup
 }
 
-func NewLocalDiscordRegistry(ctx context.Context, nk runtime.NakamaModule, logger runtime.Logger, metrics Metrics, config Config) (r *LocalDiscordRegistry) {
-	var err error
-	var dg *discordgo.Session
-
-	botToken, ok := ctx.Value(ctxDiscordBotTokenKey{}).(string)
-	if !ok {
-		panic("Bot token is not set in context.")
-	}
-	// Start the bot
-	dg, err = discordgo.New("Bot " + botToken)
-	if err != nil {
-		logger.Error("Unable to create bot")
-	}
+func NewLocalDiscordRegistry(ctx context.Context, nk runtime.NakamaModule, logger runtime.Logger, metrics Metrics, config Config, dg *discordgo.Session) (r *LocalDiscordRegistry) {
 
 	dg.StateEnabled = true
 
@@ -549,15 +537,14 @@ func (r *LocalDiscordRegistry) GetUserIdByDiscordId(ctx context.Context, discord
 	}
 
 	uid, _, _, err := r.nk.AuthenticateCustom(ctx, discordId, u.Username, create)
-	if err != nil {
-		return uuid.Nil, err
+
+	if uid != "" {
+		defer r.Store(discordId, userId.String())
+		defer r.Store(userId.String(), discordId)
 	}
-	userId = uuid.FromStringOrNil(uid)
 
-	// Store the discordId and userId in the cache when the function returns
-	defer r.Store(discordId, userId.String())
+	return uuid.FromStringOrNil(uid), err
 
-	return userId, nil
 }
 
 // GetDiscordIdByUserId looks up the Discord user ID by the Nakama user ID; potentially using the cache.
