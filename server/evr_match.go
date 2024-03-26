@@ -183,18 +183,18 @@ type PlayerInfo struct {
 }
 
 type MatchBroadcaster struct {
-	SessionID      string       `json:"sid,omitempty"`            // The broadcaster's Session ID
-	UserID         string       `json:"uid,omitempty"`            // The user id of the broadcaster.
-	HostedChannels []uuid.UUID  `json:"channels,omitempty"`       // The channels this broadcaster will host matches for.
-	Endpoint       evr.Endpoint `json:"endpoint,omitempty"`       // The endpoint data used for connections.
-	VersionLock    uint64       `json:"version_lock,omitempty"`   // The game build version. (EVR)
-	AppId          string       `json:"app_id,omitempty"`         // The game app id. (EVR)
-	Region         evr.Symbol   `json:"region,omitempty"`         // The region the match is hosted in. (Matching Only) (EVR)
-	IPinfo         *ipinfo.Core `json:"ip_info,omitempty"`        // The IPinfo of the broadcaster.
-	ServerId       uint64       `json:"server_id,omitempty"`      // The server id of the broadcaster. (EVR)
-	PublisherLock  bool         `json:"publisher_lock,omitempty"` // Publisher lock (EVR)
-	Platform       evr.Symbol   `json:"platform,omitempty"`       // The platform the match is hosted on. (EVR)
-	Tags           []string     `json:"tags,omitempty"`           // The tags given on the urlparam for the match.
+	SessionID     string       `json:"sid,omitempty"`            // The broadcaster's Session ID
+	UserID        string       `json:"uid,omitempty"`            // The user id of the broadcaster.
+	Channels      []uuid.UUID  `json:"channels,omitempty"`       // The channels this broadcaster will host matches for.
+	Endpoint      evr.Endpoint `json:"endpoint,omitempty"`       // The endpoint data used for connections.
+	VersionLock   uint64       `json:"version_lock,omitempty"`   // The game build version. (EVR)
+	AppId         string       `json:"app_id,omitempty"`         // The game app id. (EVR)
+	Region        evr.Symbol   `json:"region,omitempty"`         // The region the match is hosted in. (Matching Only) (EVR)
+	IPinfo        *ipinfo.Core `json:"ip_info,omitempty"`        // The IPinfo of the broadcaster.
+	ServerId      uint64       `json:"server_id,omitempty"`      // The server id of the broadcaster. (EVR)
+	PublisherLock bool         `json:"publisher_lock,omitempty"` // Publisher lock (EVR)
+	Platform      evr.Symbol   `json:"platform,omitempty"`       // The platform the match is hosted on. (EVR)
+	Tags          []string     `json:"tags,omitempty"`           // The tags given on the urlparam for the match.
 }
 
 // The lobby state is used for the match label.
@@ -203,6 +203,7 @@ type MatchBroadcaster struct {
 type EvrMatchState struct {
 	MatchId     uuid.UUID        `json:"id,omitempty"`          // The Session Id used by EVR (the same as match id)
 	Open        bool             `json:"open,omitempty"`        // Whether the lobby is open to new players (Matching Only)
+	Node        string           `json:"node,omitempty"`        // The node the match is running on.
 	LobbyType   LobbyType        `json:"lobby_type"`            // The type of lobby (Public, Private, Unassigned) (EVR)
 	Broadcaster MatchBroadcaster `json:"broadcaster,omitempty"` // The broadcaster's data
 

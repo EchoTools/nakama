@@ -41,53 +41,46 @@ type GameProfile struct {
 	Server *evr.ServerProfile `json:"server"`
 }
 
-func (p *GameProfile) SetLoginProfile(login evr.LoginProfile) {
-	p.Lock()
-	defer p.Unlock()
-
+func (p *GameProfile) SetLogin(login evr.LoginProfile) {
+	p.Login = &login
 }
 
-func (p *GameProfile) SetClientProfile(client evr.ClientProfile) {
-	p.Lock()
-	defer p.Unlock()
+func (p *GameProfile) SetClient(client evr.ClientProfile) {
 	p.Client = &client
 }
 
-func (p *GameProfile) SetServerProfile(server evr.ServerProfile) {
-	p.Lock()
-	defer p.Unlock()
+func (p *GameProfile) SetServer(server evr.ServerProfile) {
 	p.Server = &server
 	p.Server.UpdateTime = time.Now().UTC().Unix()
 }
 
-func (p *GameProfile) GetServerProfile() *evr.ServerProfile {
-	p.RLock()
-	defer p.RUnlock()
+func (p *GameProfile) GetServer() *evr.ServerProfile {
 	return p.Server
 }
 
-func (p *GameProfile) GetClientProfile() *evr.ClientProfile {
-	p.RLock()
-	defer p.RUnlock()
+func (p *GameProfile) GetClient() *evr.ClientProfile {
 	return p.Client
 }
 
-func (p *GameProfile) GetLoginProfile() *evr.LoginProfile {
-	p.RLock()
-	defer p.RUnlock()
+func (p *GameProfile) GetLogin() *evr.LoginProfile {
 	return p.Login
 }
 
 func (p *GameProfile) GetChannel() uuid.UUID {
-	p.RLock()
-	defer p.RUnlock()
-	return uuid.UUID(p.Client.Social.Group)
+	return uuid.UUID(p.Server.Social.Group)
 }
 
+func (p *GameProfile) SetChannel(c evr.GUID) {
+	p.Server.Social.Group = c
+	p.Client.Social.Group = p.Server.Social.Group
+
+}
 func (p *GameProfile) UpdateDisplayName(displayName string) {
-	p.Lock()
-	defer p.Unlock()
 	p.Server.DisplayName = displayName
+	p.Client.DisplayName = displayName
+	p.Server.UpdateTime = time.Now().UTC().Unix()
+	p.Client.ModifyTime = time.Now().UTC().Unix()
+
 }
 
 func (r *GameProfile) UpdateUnlocks(unlocks any) error {
@@ -112,7 +105,7 @@ func NewProfileRegistry(nk runtime.NakamaModule, db *sql.DB, logger runtime.Logg
 	ctx, cancel := context.WithCancel(context.Background())
 
 	unlocksByFieldName := createUnlocksFieldByKey()
-	registry := &ProfileRegistry{
+	return &ProfileRegistry{
 		ctx:             ctx,
 		ctxCancelFn:     cancel,
 		logger:          logger,
@@ -123,8 +116,6 @@ func NewProfileRegistry(nk runtime.NakamaModule, db *sql.DB, logger runtime.Logg
 
 		unlocksByItemName: unlocksByFieldName,
 	}
-	registry.checkDefaultProfile()
-	return registry
 }
 
 func (r *ProfileRegistry) checkDefaultProfile() *GameProfile {
@@ -159,7 +150,6 @@ func (r *ProfileRegistry) GetProfile(userID uuid.UUID) *GameProfile {
 			r.logger.Error("failed to load profile", zap.Error(err))
 		}
 	}
-
 	return profile
 }
 
@@ -175,8 +165,8 @@ func (r *ProfileRegistry) SetProfile(userID uuid.UUID, profile *GameProfile) {
 
 // Unload the profile from memory
 func (r *ProfileRegistry) Unload(userID uuid.UUID) {
-	profile, found := r.profiles.LoadAndDelete(userID)
-	if !found {
+	profile, loaded := r.profiles.LoadAndDelete(userID)
+	if loaded {
 		r.storeProfile(context.Background(), userID, profile)
 	}
 }
@@ -248,13 +238,14 @@ func (r *ProfileRegistry) storeProfile(ctx context.Context, userID uuid.UUID, pr
 	if err != nil {
 		return err
 	}
-
+	uid := userID.String()
+	data := string(b)
 	if _, err := r.nk.StorageWrite(ctx, []*runtime.StorageWrite{
 		{
 			Collection: GameProfileStorageCollection,
 			Key:        GameProfileStorageKey,
-			UserID:     userID.String(),
-			Value:      string(b),
+			UserID:     uid,
+			Value:      data,
 		},
 	}); err != nil {
 		return err
@@ -616,23 +607,25 @@ func (r *ProfileRegistry) ValidateArenaUnlockByName(i interface{}, itemName stri
 
 func (r *ProfileRegistry) GetSessionProfile(ctx context.Context, session *sessionWS, loginProfile evr.LoginProfile) (*GameProfile, error) {
 	p, _ := r.GetProfileOrNew(session.userID)
-	p.Lock()
-	defer p.Unlock()
+
+	// Get the EVR ID from the context
+	evrID, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
+	if !ok {
+		return p, fmt.Errorf("failed to get EVR ID from context")
+	}
 
 	go func() {
-		<-ctx.Done()
+		<-session.Context().Done()
 		r.Unload(session.userID)
 	}()
 
 	p.Login = &loginProfile
 	p.Server.PublisherLock = p.Login.PublisherLock
 	p.Server.LobbyVersion = p.Login.LobbyVersion
+	p.Server.EchoUserIdToken = evrID.Token()
+	p.Server.CreateTime = time.Date(2023, 10, 31, 0, 0, 0, 0, time.UTC).Unix()
 	p.Server.LoginTime = time.Now().UTC().Unix()
-
-	// Apply any unlocks based on the user's groups
-	if err := r.UpdateEntitledCosmetics(ctx, session.userID, p); err != nil {
-		return p, fmt.Errorf("failed to update entitled cosmetics: %w", err)
-	}
+	p.Server.UpdateTime = time.Now().UTC().Unix()
 
 	// Update the account
 	if err := r.discordRegistry.UpdateAccount(ctx, session.userID); err != nil {
@@ -643,41 +636,52 @@ func (r *ProfileRegistry) GetSessionProfile(ctx context.Context, session *sessio
 		return p, fmt.Errorf("failed to validate social group: %w", err)
 		// try to continue
 	} else {
-		p.Client.Social.Group = groupID
-		p.Server.Social.Group = groupID
+		p.SetChannel(groupID)
 	}
+
+	// Apply any unlocks based on the user's groups
+	if err := r.UpdateEntitledCosmetics(ctx, session.userID, p); err != nil {
+		return p, fmt.Errorf("failed to update entitled cosmetics: %w", err)
+	}
+	r.SetProfile(session.userID, p)
 	return p, nil
 }
 func (r *ProfileRegistry) UpdateSessionProfile(ctx context.Context, session *sessionWS, update evr.ClientProfile) (*GameProfile, error) {
-	// Get the user's profile
-	profile := r.GetProfile(session.userID)
-	if profile == nil {
+	// Get the user's p
+	p := r.GetProfile(session.userID)
+	if p == nil {
 		return nil, fmt.Errorf("failed to get user profile")
 	}
-	profile.Lock()
-	defer profile.Unlock()
+
 	// Validate the client profile.
 	// TODO FIXME Validate the profile data
 	//if errs := evr.ValidateStruct(request.ClientProfile); errs != nil {
 	//	return errFailure(fmt.Errorf("invalid client profile: %s", errs), 400)
 	//}
-	profile.Client = &update
+	p.Client = &update
 
+	groupID, err := r.ValidateSocialGroup(r.ctx, session.userID, p.Client.Social.Group)
+	if err != nil {
+		return p, fmt.Errorf("failed to validate social group: %w", err)
+		// try to continue
+	} else {
+		p.SetChannel(groupID)
+	}
 	// Update the displayname based on the user's selected channel.
-	groupId := uuid.UUID(profile.Client.Social.Group)
-	if groupId != uuid.Nil {
-		displayName, err := SetDisplayNameByChannelBySession(ctx, r.nk, r.discordRegistry, session, groupId.String())
+
+	if groupID != evr.GUID(uuid.Nil) {
+		displayName, err := SetDisplayNameByChannelBySession(ctx, r.nk, r.discordRegistry, session, groupID.String())
 		if err != nil {
 			r.logger.Error("Failed to set display name.", zap.Error(err))
 		} else {
-			profile.Server.DisplayName = displayName
-			profile.Server.UpdateTime = time.Now().UTC().Unix()
+			p.UpdateDisplayName(displayName)
+			p.Server.UpdateTime = time.Now().UTC().Unix()
 		}
 	}
 
 	// Save the profile
-	r.SetProfile(session.userID, profile)
-	return profile, nil
+	r.SetProfile(session.userID, p)
+	return p, nil
 
 }
 

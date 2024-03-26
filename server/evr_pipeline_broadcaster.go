@@ -132,7 +132,7 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 	if err != nil {
 		return errFailedRegistration(session, err, evr.BroadcasterRegistration_Failure)
 	}
-	config.HostedChannels = channels
+	config.Channels = channels
 
 	p.broadcasterRegistrationBySession.Store(session.ID(), config)
 
@@ -234,9 +234,9 @@ func broadcasterConfig(userId, sessionId string, serverId uint64, internalIP, ex
 			ExternalIP: externalIP,
 			Port:       port,
 		},
-		Region:         region,
-		VersionLock:    versionLock,
-		HostedChannels: make([]uuid.UUID, 0),
+		Region:      region,
+		VersionLock: versionLock,
+		Channels:    make([]uuid.UUID, 0),
 
 		Tags: make([]string, 0),
 	}

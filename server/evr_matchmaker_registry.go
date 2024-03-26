@@ -16,6 +16,7 @@ package server
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -52,28 +53,30 @@ var (
 // MatchmakingSession represents a user session looking for a match.
 type MatchmakingSession struct {
 	sync.RWMutex
-	UserId         uuid.UUID
 	Ctx            context.Context
 	CtxCancelFn    context.CancelCauseFunc
+	Logger         *zap.Logger
+	UserId         uuid.UUID
 	MatchIdCh      chan string // Channel for MatchId to join.
 	PingCompleteCh chan error  // Channel for ping completion.
 	Expiry         time.Time
 	Label          *EvrMatchState
 	Tickets        []string // Matchmaking tickets
+
 }
 
-// Cancel cancels the matchmaking session with a given reason.
-func (s *MatchmakingSession) Cancel(reason error) {
+// Cancel cancels the matchmaking session with a given reason, and returns the reason.
+func (s *MatchmakingSession) Cancel(reason error) error {
 	s.Lock()
 	defer s.Unlock()
-
 	select {
 	case <-s.Ctx.Done():
-		return
+		return nil
 	default:
 	}
 
 	s.CtxCancelFn(reason)
+	return nil
 }
 
 func (s *MatchmakingSession) AddTicket(ticket string) {
@@ -93,6 +96,11 @@ func (s *MatchmakingSession) RemoveTicket(ticket string) {
 	}
 }
 
+func (s *MatchmakingSession) Wait() error {
+	<-s.Ctx.Done()
+	return nil
+}
+
 func (s *MatchmakingSession) TicketsCount() int {
 	s.RLock()
 	defer s.RUnlock()
@@ -108,13 +116,13 @@ func (s *MatchmakingSession) Context() context.Context {
 // LatencyCache represents a cache for latencies.
 type LatencyCache struct {
 	sync.RWMutex
-	Store map[string]EndpointWithLatency
+	Store map[string]EndpointWithRTT
 }
 
 // NewLatencyCache initializes a new latency cache.
 func NewLatencyCache() *LatencyCache {
 	return &LatencyCache{
-		Store: make(map[string]EndpointWithLatency),
+		Store: make(map[string]EndpointWithRTT),
 	}
 }
 
@@ -127,8 +135,8 @@ type MatchmakingResult struct {
 	Channel uuid.UUID
 }
 
-// NewMatchmakingResult initializes a new instance of MatchmakingResult
-func NewMatchmakingResult(mode evr.Symbol, channel uuid.UUID) *MatchmakingResult {
+// NewMatchmakingResponse initializes a new instance of MatchmakingResult
+func NewMatchmakingResponse(mode evr.Symbol, channel uuid.UUID) *MatchmakingResult {
 	return &MatchmakingResult{
 		Mode:    mode,
 		Channel: channel,
@@ -155,12 +163,16 @@ func (mr *MatchmakingResult) SetErrorFromStatus(err error) *MatchmakingResult {
 // determineErrorCode maps grpc status codes to evr lobby session failure codes
 func determineErrorCode(code codes.Code) evr.LobbySessionFailureErrorCode {
 	switch code {
+	case codes.DeadlineExceeded:
+		return evr.LobbySessionFailure_Timeout0
 	case codes.FailedPrecondition, codes.InvalidArgument:
 		return evr.LobbySessionFailure_BadRequest
 	case codes.ResourceExhausted:
 		return evr.LobbySessionFailure_ServerIsFull
-	case codes.Unavailable, codes.NotFound:
+	case codes.Unavailable:
 		return evr.LobbySessionFailure_ServerFindFailed
+	case codes.NotFound:
+		return evr.LobbySessionFailure_ServerDoesNotExist
 	case codes.PermissionDenied, codes.Unauthenticated:
 		return evr.LobbySessionFailure_KickedFromLobbyGroup
 	default:
@@ -180,20 +192,20 @@ func (mr *MatchmakingResult) SendErrorToSession(s *sessionWS, err error) error {
 	return s.SendEvr(payload)
 }
 
-// EndpointWithLatency is a struct that holds an endpoint and its latency
-type EndpointWithLatency struct {
+// EndpointWithRTT is a struct that holds an endpoint and its latency
+type EndpointWithRTT struct {
 	Endpoint  evr.Endpoint
 	RTT       time.Duration
 	Timestamp time.Time
 }
 
 // String returns a string representation of the endpoint
-func (e *EndpointWithLatency) String() string {
+func (e *EndpointWithRTT) String() string {
 	return fmt.Sprintf("EndpointWithLatency(InternalIP=%s, ExternalIP=%s, RTT=%s, Timestamp=%s)", e.Endpoint.InternalIP, e.Endpoint.ExternalIP, e.RTT, e.Timestamp)
 }
 
 // ID returns a unique identifier for the endpoint
-func (e *EndpointWithLatency) ID() string {
+func (e *EndpointWithRTT) ID() string {
 	s := fmt.Sprintf("%s:%s", e.Endpoint.InternalIP, e.Endpoint.ExternalIP)
 	return s
 }
@@ -243,126 +255,160 @@ func ipToKey(ip net.IP) string {
 	b := ip.To4()
 	return fmt.Sprintf("rtt%02x%02x%02x%02x", b[0], b[1], b[2], b[3])
 }
+func keyToIP(key string) net.IP {
+	b, _ := hex.DecodeString(key[3:])
+	return net.IPv4(b[0], b[1], b[2], b[3])
+}
 
 func (c *MatchmakingRegistry) matchedEntriesFn(entries [][]*MatchmakerEntry) {
-	for _, entry := range entries {
-		stringProperties := entry[0].StringProperties
-		channel := uuid.FromStringOrNil(stringProperties["channel"])
+	for _, entrants := range entries {
+		go c.buildMatch(entrants)
+	}
+}
 
-		// List all the unassigned lobbies on this channel
-		broadcasters, err := c.ListUnassignedLobbies(c.ctx, channel)
-		switch status.Code(err) {
-		case codes.Unavailable:
-			// No servers are available/connected. This might resolve itself if the system just came online.
-			c.logger.Info("No servers are available/connected")
-		case codes.ResourceExhausted:
-			// Servers are available, but in use. This should signal to keep matchmaking.
-			c.logger.Info("Servers are available, but in use")
-		case codes.Internal:
-			c.logger.Error("Error listing unassigned lobbies", zap.Error(err))
-			return
-		}
+func (c *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry) {
+	// Use the properties from the first entrant to get the channel
+	stringProperties := entrants[0].StringProperties
+	channel := uuid.FromStringOrNil(stringProperties["channel"])
 
-		if err != nil {
-			c.logger.Error("Error listing unassigned lobbies", zap.Error(err))
-		}
-		// Create a map of each endpoint and it's latencies
-		latencies := make(map[string][]int, len(broadcasters))
-		for _, e := range entry {
-			nprops := e.NumericProperties
-			//sprops := e.StringProperties
+	allBroadcasters := c.BroadcasterEndpoints()
+	// Get a map of all broadcasters by their key
+	broadcastersByExtIP := make(map[string]evr.Endpoint, len(allBroadcasters))
+	for _, v := range allBroadcasters {
+		k := ipToKey(v.ExternalIP)
+		broadcastersByExtIP[k] = v
+	}
 
-			// loop over the number props and get the latencies
-			for k, v := range nprops {
-				if strings.HasPrefix(k, "rtt") {
-					latencies[k] = append(latencies[k], int(v))
-				}
+	// Create a map of each endpoint and it's latencies to each entrant
+	latencies := make(map[string][]int, len(allBroadcasters))
+	for _, e := range entrants {
+		nprops := e.NumericProperties
+		//sprops := e.StringProperties
+
+		// loop over the number props and get the latencies
+		for k, v := range nprops {
+			if strings.HasPrefix(k, "rtt") {
+				latencies[k] = append(latencies[k], int(v))
 			}
 		}
+	}
 
-		// Create a map of ExternalIP -> state
-		endpoints := make(map[string]*EvrMatchState, len(broadcasters))
-		for _, v := range broadcasters {
-			k := ipToKey(v.Broadcaster.Endpoint.ExternalIP)
-			endpoints[k] = v
+	// Score each endpoint based on the latencies
+	scored := make(map[string]int, len(latencies))
+	for k, v := range latencies {
+		// Sort the latencies
+		sort.Ints(v)
+		// Get the average
+		average := 0
+		for _, i := range v {
+			average += i
 		}
+		average /= len(v)
+		scored[k] = average
+	}
+	// Sort the scored endpoints
+	sorted := make([]string, 0, len(scored))
+	for k := range scored {
+		sorted = append(sorted, k)
+	}
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return scored[sorted[i]] < scored[sorted[j]]
+	})
 
-		// Score each endpoint based on the latencies
-		scored := make(map[string]int, len(latencies))
-		for k, v := range latencies {
-			// Sort the latencies
-			sort.Ints(v)
-			// Get the average
-			average := 0
-			for _, i := range v {
-				average += i
-			}
-			average /= len(v)
-			scored[k] = average
-		}
-		// Sort the scored endpoints
-		sorted := make([]string, 0, len(scored))
-		for k := range scored {
-			sorted = append(sorted, k)
-		}
-		sort.SliceStable(sorted, func(i, j int) bool {
-			return scored[sorted[i]] < scored[sorted[j]]
-		})
+	// Find a valid participant to get the label from
+	// Get the label from the first participant
+	var label *EvrMatchState
 
-		// Find a valid participant to get the label from
-		// Get the label from the first participant
-		var label *EvrMatchState
-
-		for _, e := range entry {
-			if s, ok := c.GetMatchingBySessionId(e.Presence.SessionID); ok {
-				label = s.Label
-				break
-			}
-		}
-		if label == nil {
-			c.logger.Error("No label found")
-			continue
-		}
-
-		matchId := ""
-		for _, k := range sorted {
-			// Get the endpoint
-			state, ok := endpoints[k]
-			if !ok {
-				c.logger.Error("Endpoint not found", zap.String("ip", k))
-				continue
-			}
-			// Load the level.
-			m := fmt.Sprintf("%s.%s", state.MatchId, c.config.GetName())
-			label.SpawnedBy = state.Broadcaster.Endpoint.ID()
-			// Instruct the server to load the level
-			response, err := SignalMatch(c.ctx, c.matchRegistry, m, SignalStartSession, label)
-			if err != nil {
-				c.logger.Error("Error signaling match", zap.Error(err))
-				continue
-			} else if response == "session already started" {
-				c.logger.Info("Session already started", zap.String("matchId", m))
-				continue
-			}
-			matchId = m
+	for _, e := range entrants {
+		if s, ok := c.GetMatchingBySessionId(e.Presence.SessionID); ok {
+			label = s.Label
 			break
 		}
-		// Give the server 5 seconds to load the match
+	}
+	if label == nil {
+		c.logger.Error("No label found")
+		return // No label found
+	}
 
-		// Join the players to the match
-		for _, e := range entry {
-			// Get the players matching session and join them to the match
-			if s, ok := c.GetMatchingBySessionId(e.Presence.SessionID); ok {
-				if matchId == "" {
-					s.CtxCancelFn(ErrMatchmakingNoAvailableServers)
+	label.SpawnedBy = uuid.Nil.String()
+
+	// Get the players matching session and join them to the match
+	sessions := make([]*MatchmakingSession, 0, len(entrants))
+	for _, e := range entrants {
+		if s, ok := c.GetMatchingBySessionId(e.Presence.SessionID); ok {
+			sessions = append(sessions, s)
+		}
+	}
+
+	// Loop until a server becomes available or matchmaking times out.
+	timeout := time.After(10 * time.Minute)
+	interval := time.NewTicker(3 * time.Second)
+
+	for {
+		select {
+		case <-c.ctx.Done(): // Context cancelled
+			return
+
+		case <-timeout: // Timeout
+
+			c.logger.Info("Matchmaking timeout looking for an available server")
+			for _, s := range sessions {
+				s.CtxCancelFn(ErrMatchmakingNoAvailableServers)
+			}
+			return
+		case <-interval.C: // List all the unassigned lobbies on this channel
+
+			available, err := c.ListUnassignedLobbies(c.ctx, channel)
+
+			switch status.Code(err) {
+			case codes.Unavailable:
+				// No servers are available/connected. This might resolve itself if the system just came online.
+				c.logger.Info("No servers are available/connected")
+			case codes.ResourceExhausted:
+				// Servers are available, but in use. This should signal to keep matchmaking.
+				c.logger.Info("Servers are available, but in use")
+			case codes.Internal:
+				c.logger.Error("Error listing unassigned lobbies", zap.Error(err))
+				return
+			}
+			if err != nil {
+				c.logger.Error("Error listing unassigned lobbies", zap.Error(err))
+			}
+
+			availableByExtIP := make(map[string]string, len(available))
+
+			for _, label := range available {
+				k := ipToKey(label.Broadcaster.Endpoint.ExternalIP)
+				v := fmt.Sprintf("%s.%s", label.MatchId, c.config.GetName()) // Parking match ID
+				availableByExtIP[k] = v
+			}
+
+			var matchID string
+			var found bool
+
+			for _, k := range sorted {
+				// Get the endpoint
+				matchID, found = availableByExtIP[k]
+				if !found {
 					continue
 				}
+				// Found a match
+
+				// Instruct the server to load the level
+				response, err := SignalMatch(c.ctx, c.matchRegistry, matchID, SignalStartSession, label)
+				if err != nil {
+					c.logger.Error("Error signaling match", zap.Error(err))
+					continue
+				} else if response == "session already started" {
+					c.logger.Info("Session already started", zap.String("matchId", matchID))
+					continue
+				}
+				time.Sleep(3 * time.Second) // Wait for the server to start the session
 				// Send the matchId to the session
-				go func() {
-					// Give the server 5 seconds to load the match
-					time.Sleep(5 * time.Second)
-					s.MatchIdCh <- matchId
-				}()
+				for _, s := range sessions {
+					s.MatchIdCh <- matchID
+				}
+				return
 			}
 		}
 	}
@@ -464,7 +510,7 @@ func (c *MatchmakingRegistry) ListUnassignedLobbies(ctx context.Context, channel
 // GetPingCandidates returns a list of endpoints to ping for a user. It also updates the broadcasters.
 func (r *MatchmakingRegistry) GetPingCandidates(userId uuid.UUID, endpoints []evr.Endpoint) (candidates []evr.Endpoint) {
 
-	const LatencyCacheExpiry = 5 * time.Minute
+	const LatencyCacheExpiry = 6 * time.Hour
 
 	// Initialize candidates with a capacity of 16
 	candidates = make([]evr.Endpoint, 0, 16)
@@ -483,27 +529,27 @@ func (r *MatchmakingRegistry) GetPingCandidates(userId uuid.UUID, endpoints []ev
 	defer cache.Unlock()
 
 	// Get the endpoint latencies from the cache
-	cacheEntries := make([]EndpointWithLatency, 0, len(endpoints))
+	cacheEntries := make([]EndpointWithRTT, 0, len(endpoints))
 	// Iterate over the endpoints
 	for _, endpoint := range endpoints {
 		id := endpoint.ID()
-		entry, exists := cache.Store[id]
-		if !exists || entry.RTT == 0 || time.Since(entry.Timestamp) > LatencyCacheExpiry {
-			entry = EndpointWithLatency{
+		e, exists := cache.Store[id]
+		if !exists || e.RTT == 0 || time.Since(e.Timestamp) > LatencyCacheExpiry {
+			e = EndpointWithRTT{
 				Endpoint:  endpoint,
 				RTT:       0,
 				Timestamp: time.Now(),
 			}
-			cache.Store[id] = entry
+			cache.Store[id] = e
 		}
 
-		cacheEntries = append(cacheEntries, entry)
+		cacheEntries = append(cacheEntries, e)
 	}
 
 	/*
 		// Clean up the cache by removing expired entries
-		for id, entry := range cache.Store {
-			if time.Since(entry.Timestamp) > LatencyCacheExpiry {
+		for id, e := range cache.Store {
+			if time.Since(e.Timestamp) > LatencyCacheExpiry {
 				delete(cache.Store, id)
 			}
 		}
@@ -530,7 +576,7 @@ func (r *MatchmakingRegistry) GetPingCandidates(userId uuid.UUID, endpoints []ev
 }
 
 // sortCacheEntriesByTimestamp sorts the cache entries by timestamp in descending order
-func (r *MatchmakingRegistry) sortCacheEntriesByTimestamp(entries []EndpointWithLatency) {
+func (r *MatchmakingRegistry) sortCacheEntriesByTimestamp(entries []EndpointWithRTT) {
 	sort.SliceStable(entries, func(i, j int) bool {
 		return entries[i].Timestamp.After(entries[j].Timestamp)
 	})
@@ -657,12 +703,11 @@ func (c *MatchmakingRegistry) GetMatchingBySessionId(sessionId uuid.UUID) (sessi
 func (c *MatchmakingRegistry) Delete(sessionId uuid.UUID) {
 	c.Lock()
 	defer c.Unlock()
-	c.logger.Debug("Deleting matchmaking session", zap.String("sessionId", sessionId.String()))
 	delete(c.matchingBySession, sessionId)
 }
 
 // Add adds a matching session to the registry
-func (c *MatchmakingRegistry) Create(ctx context.Context, session *sessionWS, ml *EvrMatchState, partySize int) (*MatchmakingSession, error) {
+func (c *MatchmakingRegistry) Create(ctx context.Context, session *sessionWS, ml *EvrMatchState, partySize int, timeout time.Duration, errorFn func(err error) error, joinFn func(matchId string) error) (*MatchmakingSession, error) {
 	// Check if a matching session exists
 
 	// Set defaults for the matching label
@@ -701,14 +746,16 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, session *sessionWS, ml
 		if cid == uuid.Nil {
 			continue
 		}
-		ml.Broadcaster.HostedChannels = append(ml.Broadcaster.HostedChannels, cid)
+		ml.Broadcaster.Channels = append(ml.Broadcaster.Channels, cid)
 	}
-
+	logger := session.logger.With(zap.String("msid", session.ID().String()))
 	ctx, cancel := context.WithCancelCause(ctx)
 	msession := &MatchmakingSession{
+		Ctx:         ctx,
+		CtxCancelFn: cancel,
+
+		Logger:         logger,
 		UserId:         session.UserID(),
-		Ctx:            ctx,
-		CtxCancelFn:    cancel,
 		MatchIdCh:      make(chan string, 1),
 		PingCompleteCh: make(chan error, 1),
 		Expiry:         time.Now().UTC().Add(findAttemptsExpiry),
@@ -720,15 +767,29 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, session *sessionWS, ml
 		return nil, status.Errorf(codes.Internal, "Failed to load latency cache: %v", err)
 	}
 
+	// listen for a match ID to join
 	go func() {
-		<-ctx.Done()
-		// Context done.
-		// Store the latency values
+		defer cancel(nil)
+		select {
+		case <-time.After(timeout):
+			// Timeout
+			errorFn(ErrMatchmakingTimeout)
+		case matchId := <-msession.MatchIdCh:
+			// join the match
+			if err := joinFn(matchId); err != nil {
+				errorFn(err)
+			}
+		case <-ctx.Done():
+			if ctx.Err() != nil {
+				errorFn(context.Cause(ctx))
+			}
+		}
 		c.StoreLatencyCache(session)
-		// Remove the session from the registry
 		c.Delete(session.id)
+		if err := session.matchmaker.RemoveSessionAll(session.id.String()); err != nil {
+			logger.Error("Failed to remove session from matchmaker", zap.Error(err))
+		}
 	}()
-
 	c.Add(session.id, msession)
 	return msession, nil
 }
@@ -772,7 +833,7 @@ func (c *MatchmakingRegistry) ProcessPingResults(userId uuid.UUID, responses []e
 			continue
 		}
 
-		r := EndpointWithLatency{
+		r := EndpointWithRTT{
 			Endpoint:  broadcaster,
 			RTT:       response.RTT(),
 			Timestamp: time.Now(),
@@ -783,7 +844,7 @@ func (c *MatchmakingRegistry) ProcessPingResults(userId uuid.UUID, responses []e
 }
 
 // GetLatencies returns the cached latencies for a user
-func (c *MatchmakingRegistry) GetLatencies(userId uuid.UUID, endpoints []evr.Endpoint) map[string]EndpointWithLatency {
+func (c *MatchmakingRegistry) GetLatencies(userId uuid.UUID, endpoints []evr.Endpoint) map[string]EndpointWithRTT {
 
 	// If the user ID is nil or there are no endpoints, return nil
 	if userId == uuid.Nil {
@@ -802,14 +863,14 @@ func (c *MatchmakingRegistry) GetLatencies(userId uuid.UUID, endpoints []evr.End
 	// If no endpoints are provided, get all the latencies from the cache
 	// build a new map to avoid locking the cache for too long
 	if len(endpointIds) == 0 {
-		results := make(map[string]EndpointWithLatency, len(cache.Store))
+		results := make(map[string]EndpointWithRTT, len(cache.Store))
 		for k, v := range cache.Store {
 			results[k] = v
 		}
 		return results
 	}
 	// Return just the endpoints requested
-	results := make(map[string]EndpointWithLatency, len(endpointIds))
+	results := make(map[string]EndpointWithRTT, len(endpointIds))
 	for _, id := range endpointIds {
 		if v, ok := cache.Store[id]; ok {
 			results[id] = v
@@ -817,7 +878,7 @@ func (c *MatchmakingRegistry) GetLatencies(userId uuid.UUID, endpoints []evr.End
 			// Parse the endpoint ID
 			endpoint := evr.FromEndpointID(id)
 			// Create the endpoint and add it to the cache
-			results[id] = EndpointWithLatency{
+			results[id] = EndpointWithRTT{
 				Endpoint:  endpoint,
 				RTT:       0,
 				Timestamp: time.Now(),
@@ -826,4 +887,69 @@ func (c *MatchmakingRegistry) GetLatencies(userId uuid.UUID, endpoints []evr.End
 		}
 	}
 	return results
+}
+
+func (ms *MatchmakingSession) BuildQuery(latencies []EndpointWithRTT) (query string, stringProps map[string]string, numericProps map[string]float64, err error) {
+	// Create the properties maps
+	stringProps = make(map[string]string)
+	numericProps = make(map[string]float64, len(latencies))
+	qparts := make([]string, 0, 10)
+	ml := ms.Label
+	// MUST match this channel
+	chstr := strings.Replace(ms.Label.Channel.String(), "-", "", -1)
+	qparts = append(qparts, fmt.Sprintf("+properties.channel:%s", chstr))
+	stringProps["channel"] = chstr
+
+	// Add a property of the external IP's RTT
+	for _, b := range latencies {
+		if b.RTT == 0 {
+			continue
+		}
+
+		latency := mroundRTT(b.RTT, 10)
+		// Turn the IP into a hex string like 127.0.0.1 -> 7f000001
+		ip := ipToKey(b.Endpoint.ExternalIP)
+		// Add the property
+		numericProps[ip] = float64(latency.Milliseconds())
+
+		// TODO FIXME Add second matchmaking ticket for over 150ms
+		n := 0
+		switch {
+		case latency < 25:
+			n = 10
+		case latency < 40:
+			n = 7
+		case latency < 60:
+			n = 5
+		case latency < 80:
+			n = 2
+
+			// Add a score for each endpoint
+			p := fmt.Sprintf("properties.%s:<=%d^%d", ip, latency+15, n)
+			qparts = append(qparts, p)
+		}
+	}
+	// MUST be the same mode
+	qparts = append(qparts, GameMode(ml.Mode).Label(Must, 0).Property())
+	stringProps["mode"] = ml.Mode.Token().String()
+
+	for _, groupId := range ml.Broadcaster.Channels {
+		// Add the properties
+		// Strip out the hyphens from the group ID
+		s := strings.ReplaceAll(groupId.String(), "-", "")
+		stringProps[s] = "T"
+
+		// If this is the user's current channel, then give it a +3 boost
+		if groupId == *ms.Label.Channel {
+			qparts = append(qparts, fmt.Sprintf("properties.%s:T^3", s))
+		} else {
+			qparts = append(qparts, fmt.Sprintf("properties.%s:T", s))
+		}
+	}
+
+	query = strings.Join(qparts, " ")
+	// TODO Promote friends
+	ms.Logger.Debug("Matchmaking query", zap.String("query", query), zap.Any("stringProps", stringProps), zap.Any("numericProps", numericProps))
+	// TODO Avoid ghosted
+	return query, stringProps, numericProps, nil
 }

@@ -1,8 +1,12 @@
 package server
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 func TestMroundRTT(t *testing.T) {
@@ -87,4 +91,77 @@ func TestRTTweightedPopulationComparison(t *testing.T) {
 			}
 		})
 	}
+}
+func TestEvrPipeline_Matchmaking(t *testing.T) {
+	ctx := context.Background()
+	session := &sessionWS{}
+	matchLogger := zap.NewNop()
+	msession := &MatchmakingSession{}
+
+	p := &EvrPipeline{}
+
+	t.Run("PingEndpoints returns error", func(t *testing.T) {
+		expectedErr := errors.New("ping error")
+		p.PingEndpoints = func(ctx context.Context, session *sessionWS, msession *MatchmakingSession, broadcasters []string) ([]PingResult, error) {
+			return nil, expectedErr
+		}
+
+		_, err := p.MatchMake(ctx, session, matchLogger, msession)
+		if err != expectedErr {
+			t.Errorf("Expected error: %v, but got: %v", expectedErr, err)
+		}
+	})
+
+	t.Run("BuildMatchmakingQuery returns error", func(t *testing.T) {
+		expectedErr := errors.New("build query error")
+		p.PingEndpoints = func(ctx context.Context, session *sessionWS, msession *MatchmakingSession, broadcasters []string) ([]PingResult, error) {
+			return []PingResult{}, nil
+		}
+		p.BuildMatchmakingQuery = func(ctx context.Context, latencies map[string]BroadcasterLatencies, session *sessionWS, msession *MatchmakingSession) (string, map[string]string, map[string]float64, error) {
+			return "", nil, nil, expectedErr
+		}
+
+		_, err := p.MatchMake(ctx, session, matchLogger, msession)
+		if err != expectedErr {
+			t.Errorf("Expected error: %v, but got: %v", expectedErr, err)
+		}
+	})
+
+	t.Run("Add returns error", func(t *testing.T) {
+		expectedErr := errors.New("add error")
+		p.PingEndpoints = func(ctx context.Context, session *sessionWS, msession *MatchmakingSession, broadcasters []string) ([]PingResult, error) {
+			return []PingResult{}, nil
+		}
+		p.BuildMatchmakingQuery = func(ctx context.Context, latencies map[string]BroadcasterLatencies, session *sessionWS, msession *MatchmakingSession) (string, map[string]string, map[string]float64, error) {
+			return "", nil, nil, nil
+		}
+		session.matchmaker.Add = func(ctx context.Context, presences []*MatchmakerPresence, sessionID, partyID, query string, minCount, maxCount, countMultiple int, stringProps map[string]string, numericProps map[string]float64) (string, int, error) {
+			return "", 0, expectedErr
+		}
+
+		_, err := p.MatchMake(ctx, session, matchLogger, msession)
+		if err != expectedErr {
+			t.Errorf("Expected error: %v, but got: %v", expectedErr, err)
+		}
+	})
+
+	t.Run("Successful matchmake", func(t *testing.T) {
+		p.PingEndpoints = func(ctx context.Context, session *sessionWS, msession *MatchmakingSession, broadcasters []string) ([]PingResult, error) {
+			return []PingResult{}, nil
+		}
+		p.BuildMatchmakingQuery = func(ctx context.Context, latencies map[string]BroadcasterLatencies, session *sessionWS, msession *MatchmakingSession) (string, map[string]string, map[string]float64, error) {
+			return "", nil, nil, nil
+		}
+		session.matchmaker.Add = func(ctx context.Context, presences []*MatchmakerPresence, sessionID, partyID, query string, minCount, maxCount, countMultiple int, stringProps map[string]string, numericProps map[string]float64) (string, int, error) {
+			return "ticket123", 0, nil
+		}
+
+		ticket, err := p.MatchMake(ctx, session, matchLogger, msession)
+		if err != nil {
+			t.Errorf("Expected no error, but got: %v", err)
+		}
+		if ticket != "ticket123" {
+			t.Errorf("Expected ticket: %s, but got: %s", "ticket123", ticket)
+		}
+	})
 }

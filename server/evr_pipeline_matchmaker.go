@@ -9,7 +9,6 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
-	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -31,6 +30,10 @@ func (p *EvrPipeline) lobbyMatchmakerStatusRequest(ctx context.Context, logger *
 
 // authorizeMatchmaking checks if the user is allowed to join a public match or spawn a new match
 func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logger, session *sessionWS, channel uuid.UUID) (bool, error) {
+	if channel == uuid.Nil {
+		return false, fmt.Errorf("channel is nil")
+	}
+
 	// Send a match leave if this user is in another match
 	if session.userID == uuid.Nil {
 		return false, status.Errorf(codes.PermissionDenied, "User not authenticated")
@@ -52,7 +55,6 @@ func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logg
 			continue
 		}
 		fs.Close("New session started", runtime.PresenceReasonDisconnect)
-
 	}
 
 	// Track this session as a matchmaking session.
@@ -70,21 +72,6 @@ func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logg
 		},
 	}, s.userID, true)
 
-	if channel == uuid.Nil {
-		// Get the user's currently selection social channel
-		profile := p.profileRegistry.GetProfile(session.userID)
-		if profile == nil {
-			return false, status.Errorf(codes.Internal, "Failed to get player's profile")
-		}
-
-		channel := profile.GetChannel()
-
-		if channel == uuid.Nil {
-			return true, nil
-		}
-		// TODO FIXME check the user's channels for suspensions and add them as MUST NOT to the matchmaker.
-	}
-
 	// Check for suspensions on this channel.
 	suspensions, err := p.checkSuspensionStatus(ctx, logger, session.UserID().String(), channel)
 	if err != nil {
@@ -97,18 +84,34 @@ func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logg
 	}
 	return true, nil
 }
+func (p *EvrPipeline) matchmakingLabelFromFindRequest(ctx context.Context, session *sessionWS, request *evr.LobbyFindSessionRequest) (*EvrMatchState, error) {
+	// If the channel is nil, use the players profile channel
+	channel := request.Channel
+	if channel == uuid.Nil {
+		profile := p.profileRegistry.GetProfile(session.userID)
+		if profile == nil {
+			return nil, status.Errorf(codes.Internal, "Failed to get players profile")
+		}
+		channel = profile.GetChannel()
+	}
 
-// lobbyFindSessionRequest is a message requesting to find a public session to join.
-func (p *EvrPipeline) lobbyFindSessionRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) (err error) {
-	request := in.(*evr.LobbyFindSessionRequest)
+	// Set the channels this player is allowed to matchmake/create a match on.
+	groups, err := p.discordRegistry.GetGuildGroups(ctx, session.UserID())
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to get guild groups: %v", err)
+	}
 
-	// TODO Check if the user is in a party.
-	partySize := 1
-	ml := &EvrMatchState{
-		Channel: &request.Channel,
-		Level:   request.Level,
+	allowedChannels := make([]uuid.UUID, 0, len(groups))
+	for _, group := range groups {
+		allowedChannels = append(allowedChannels, uuid.FromStringOrNil(group.Id))
+	}
+
+	return &EvrMatchState{
+		Channel: &channel,
+
 		MatchId: request.MatchingSession, // The existing lobby/match that the player is in (if any)
 		Mode:    request.Mode,
+		Level:   request.Level,
 		Open:    true,
 
 		SessionSettings: &request.SessionSettings,
@@ -117,189 +120,202 @@ func (p *EvrPipeline) lobbyFindSessionRequest(ctx context.Context, logger *zap.L
 		Broadcaster: MatchBroadcaster{
 			Platform:    request.Platform,
 			VersionLock: request.VersionLock,
+			Channels:    allowedChannels,
 		},
+	}, nil
+}
+
+// lobbyFindSessionRequest is a message requesting to find a public session to join.
+func (p *EvrPipeline) lobbyFindSessionRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) (err error) {
+	request := in.(*evr.LobbyFindSessionRequest)
+	response := NewMatchmakingResponse(request.Mode, request.Channel)
+
+	// Build the matchmaking label using the request parameters
+	ml, err := p.matchmakingLabelFromFindRequest(ctx, session, request)
+	if err != nil {
+		return response.SendErrorToSession(session, err)
 	}
 
-	if ml.Channel == nil || ml.Channel == &uuid.Nil {
-		profile := p.profileRegistry.GetProfile(session.userID)
-		if profile == nil {
-			return status.Errorf(codes.Internal, "Failed to get players profile")
-		}
-		ml.Channel = lo.ToPtr(profile.GetChannel())
-	}
-	result := NewMatchmakingResult(ml.Mode, *ml.Channel)
+	// TODO Check if the user is in a party.
 
 	// Check for suspensions on this channel, if this is a request for a public match.
 	if authorized, err := p.authorizeMatchmaking(ctx, logger, session, *ml.Channel); !authorized {
-		return result.SendErrorToSession(session, err)
+		return response.SendErrorToSession(session, err)
 	} else if err != nil {
 		logger.Warn("Failed to authorize matchmaking, allowing player to continue. ", zap.Error(err))
 	}
-	gracePeriod := MatchJoinGracePeriod
 
-	// Unless this is a social lobby, wait for a grace period before starting the matchmaker
-	if ml.Mode != evr.ModeSocialPublic {
-		select {
-		case <-time.After(gracePeriod):
-		case <-ctx.Done():
-			return result.SendErrorToSession(session, ErrMatchmakingTimeout)
-		}
+	// Do not delay if this is matching into a social lobby
+	matchmakingDelay := MatchJoinGracePeriod
+	if ml.Mode == evr.ModeSocialPublic {
+		matchmakingDelay = 0
 	}
 
-	// Create a goroutine for the matching session
-	go func() error {
-		if s, ok := p.matchmakingRegistry.GetMatchingBySessionId(session.id); ok {
-			logger.Error("Label for matching session", zap.Any("lable", s.Label))
-			logger.Error("Matchmaking session already exists", zap.Any("session", s))
-		}
-		// Create a new matching session
-		msession, err := p.matchmakingRegistry.Create(ctx, session, ml, partySize)
+	// Wait for a graceperiod Unless this is a social lobby, wait for a grace period before starting the matchmaker
+	select {
+	case <-time.After(matchmakingDelay):
+	case <-ctx.Done():
+		return nil
+	}
+
+	go func() {
+		// Create the matchmaking session
+		err = p.MatchFind(ctx, session, ml)
 		if err != nil {
-			return result.SendErrorToSession(session, err)
+			response.SendErrorToSession(session, err)
 		}
-		ctx := msession.Context()
-		defer msession.Cancel(nil)
+	}()
 
-		switch {
-		// Public matches
-		case ml.Mode == evr.ModeArenaPublic || ml.Mode == evr.ModeCombatPublic || ml.Mode == evr.ModeSocialPublic:
-			// Backfill any existing matches
-			labels, err := p.Backfill(ctx, session, msession)
-			if err != nil {
-				return result.SendErrorToSession(session, err)
-			}
+	return nil
+}
 
-			// Join the first match, or continue to create one
-			if len(labels) > 0 {
-				label := labels[0]
-				err = p.JoinEvrMatch(ctx, session, label.MatchId.String(), *label.Channel, int(ml.TeamIndex))
-				if err != nil {
-					return result.SendErrorToSession(session, err)
-				}
-				return nil
-			}
+func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *MatchmakingSession, skipDelay bool) error {
+	interval := p.config.GetMatchmaker().IntervalSec
+	idealMatchIntervals := p.config.GetMatchmaker().RevThreshold
 
-			// If it's a social lobby, create a new one, don't matchmake
-			if ml.Mode == evr.ModeSocialPublic {
-				// set a timeout
+	ctx := msession.Context()
+	// Wait for at least 1 interval before starting to look for a backfill.
+	// This gives the matchmaker a chance to find a full ideal match
+	backfillDelay := time.Duration(interval*idealMatchIntervals) * time.Second
+	if skipDelay {
+		backfillDelay = 0
+	}
 
-				stageTimer := time.NewTimer(3 * time.Minute)
-				for {
-					// Stage 1: Check if there is an available lobby
-					match, err := p.MatchCreate(ctx, session, msession, ml)
+	// Check for a backfill match on a regular basis
+	backfilInterval := time.Duration(10) * time.Second
+	backfillTicker := time.NewTicker(backfilInterval)
 
-					switch status.Code(err) {
-
-					case codes.OK:
-						matchId := match.MatchId.String()
-						err = p.JoinEvrMatch(ctx, session, matchId, *ml.Channel, int(ml.TeamIndex))
-						if err != nil {
-							return result.SendErrorToSession(session, err)
-						}
-						return nil
-
-					case codes.Unavailable:
-						// No servers are connected. This can happen if the server is starting up or shutting down.
-						fallthrough
-					case codes.ResourceExhausted:
-						// All the servers are being used.
-						select {
-
-						case <-time.After(5 * time.Second):
-							continue
-						case <-ctx.Done():
-							return result.SendErrorToSession(session, ErrMatchmakingTimeout)
-						case <-stageTimer.C:
-							// Move Stage 2: Kill a private lobby that has existing with only 1-2 people in it.
-							err := p.pruneMatches(ctx, session)
-							if err != nil {
-								return result.SendErrorToSession(session, err)
-							}
-						}
-					}
-				}
-			}
-
-			// Monitor the ticket in a separate goroutine.
-			ticket, err := p.AddMatchmakingTicket(ctx, session, logger, msession)
-			if err != nil {
-				result.SendErrorToSession(session, err)
-			}
-			defer session.matchmaker.RemoveSessionAll(session.id.String())
-
-			backfillTicker := time.NewTicker(15 * time.Second)
-
-			select {
-			case <-backfillTicker.C:
-				// Backfill any existing matches
-				// TODO FIXME have backfill return a single match.
-				labels, err := p.Backfill(ctx, session, msession)
-				if err != nil {
-					return result.SendErrorToSession(session, err)
-				}
-
-				// Join the first match, or continue to create one
-				if len(labels) > 0 {
-					label := labels[0]
-					err = p.JoinEvrMatch(ctx, session, label.MatchId.String(), *label.Channel, int(ml.TeamIndex))
-					if err != nil {
-						return result.SendErrorToSession(session, err)
-					}
-					return nil
-				}
-
-			case <-time.After(6 * time.Minute):
-				logger.Debug("Matchmaking ticket timeout", zap.String("ticket", ticket))
-				// TODO FIXME Send matchmaking cancel to user
-				msession.RemoveTicket(ticket)
-				msession.Cancel(ErrMatchmakingTimeout)
-				// Send timeout
-				err := result.SendErrorToSession(session, ErrMatchmakingTimeout)
-				if err != nil {
-					logger.Error("Failed to send error to session", zap.Error(err))
-				}
-
-			case <-msession.Ctx.Done():
-				// TODO FIXME Send matchmaker cancel to the matchmaker
-				err := context.Cause(ctx)
-				logger.Debug("Matchmaking session context done", zap.Error(err))
-				if err != nil {
-					logger.Error("Matchmaking session context error", zap.Error(err))
-					err = result.SendErrorToSession(session, err)
-					if err != nil {
-						logger.Error("Failed to send error to session", zap.Error(err))
-					}
-				}
-			case matchId := <-msession.MatchIdCh:
-				logger.Debug("Match found", zap.String("mid", matchId))
-				// join the match
-				err := p.JoinEvrMatch(ctx, session, matchId, *ml.Channel, int(ml.TeamIndex))
-				if err != nil {
-					logger.Error("Failed to join match", zap.Error(err))
-					err := result.SendErrorToSession(session, ErrMatchmakingTimeout)
-					if err != nil {
-						logger.Error("Failed to send error to session", zap.Error(err))
-					}
-				}
-			}
-
+	<-time.After(backfillDelay)
+	for {
+		select {
+		case <-ctx.Done():
 			return nil
-		case ml.Mode == evr.ModeArenaPrivate || ml.Mode == evr.ModeCombatPrivate || ml.Mode == evr.ModeSocialPrivate:
-			// Create a new match
-			match, err := p.MatchCreate(ctx, session, msession, ml)
+		case <-backfillTicker.C:
+			// Backfill any existing matches
+			label, err := p.Backfill(ctx, session, msession)
 			if err != nil {
-				return result.SendErrorToSession(session, err)
+				return msession.Cancel(fmt.Errorf("failed to find backfill match: %w", err))
 			}
-			matchId := match.MatchId.String()
-			err = p.JoinEvrMatch(ctx, session, matchId, *ml.Channel, int(ml.TeamIndex))
-			if err != nil {
-				return result.SendErrorToSession(session, err)
+			if label != nil {
+				msession.MatchIdCh <- label.MatchId.String()
+			}
+		}
+	}
+}
+
+func (p *EvrPipeline) MatchCreateLoop(session *sessionWS, msession *MatchmakingSession, pruneDelay time.Duration) error {
+	ctx := msession.Context()
+	// set a timeout
+	stageTimer := time.NewTimer(pruneDelay)
+	for {
+
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
+		// Stage 1: Check if there is an available broadcaster
+		matchID, err := p.MatchCreate(ctx, session, msession, msession.Label)
+
+		switch status.Code(err) {
+
+		case codes.OK:
+			if matchID == "" {
+				return msession.Cancel(fmt.Errorf("match is nil"))
+			}
+
+			msession.MatchIdCh <- matchID
+			return nil
+
+		case codes.NotFound:
+			fallthrough
+		case codes.Unavailable:
+			// No servers are connected. This can happen if the server is starting up or shutting down.
+			fallthrough
+		case codes.ResourceExhausted:
+			// All the servers are being used.
+			select {
+
+			case <-time.After(5 * time.Second):
+				// Wait 5 seconds before trying again.
+				continue
+
+			case <-stageTimer.C:
+				// Move Stage 2: Kill a private lobby with only 1-2 people in it.
+				err := p.pruneMatches(ctx, session)
+				if err != nil {
+					return msession.Cancel(err)
+				}
 			}
 		default:
-			return result.SendErrorToSession(session, status.Errorf(codes.InvalidArgument, "Invalid mode: %v", ml.Mode))
+			return msession.Cancel(err)
 		}
-		return nil
-	}()
+	}
+}
+
+func (p *EvrPipeline) MatchFind(parentCtx context.Context, session *sessionWS, ml *EvrMatchState) error {
+	if s, found := p.matchmakingRegistry.GetMatchingBySessionId(session.id); found {
+		// Replace the session
+		session.logger.Error("Matchmaking session already exists", zap.Any("tickets", s.Tickets))
+	}
+
+	joinFn := func(matchID string) error {
+		return p.JoinEvrMatch(parentCtx, session, matchID, *ml.Channel, int(ml.TeamIndex))
+	}
+	errorFn := func(err error) error {
+		return NewMatchmakingResponse(ml.Mode, *ml.Channel).SendErrorToSession(session, err)
+	}
+
+	// Create a new matching session
+	session.logger.Debug("Creating a new matchmaking session")
+	msession, err := p.matchmakingRegistry.Create(parentCtx, session, ml, 1, 5*time.Minute, errorFn, joinFn)
+	if err != nil {
+		session.logger.Error("Failed to create matchmaking session", zap.Error(err))
+		return err
+	}
+
+	logger := msession.Logger
+
+	skipBackfillDelay := false
+
+	switch ml.Mode {
+	// For public matches, backfill or matchmake
+	// If it's a social match, backfill or create immediately
+	case evr.ModeSocialPublic:
+		// Backfill any existing matches or create one
+		label, err := p.Backfill(msession.Context(), session, msession)
+		if err != nil {
+			logger.Error("Failed to find backfill match", zap.Error(err))
+			return err
+		}
+		if label != nil {
+			msession.MatchIdCh <- label.MatchId.String()
+			return nil
+		} else {
+			// Continue to try to backfill
+			go p.MatchBackfillLoop(session, msession, skipBackfillDelay)
+			// While also trying to create a match
+			go p.MatchCreateLoop(session, msession, 5*time.Minute)
+		}
+		// For public arena/combat matches, backfill while matchmaking
+	case evr.ModeCombatPublic:
+		// Join any on-going combat match without delay
+		skipBackfillDelay = true
+		// For Arena and combat matches try to backfill while matchmaking
+		fallthrough
+	case evr.ModeArenaPublic:
+
+		// Start the backfill loop
+		go p.MatchBackfillLoop(session, msession, skipBackfillDelay)
+
+		// Put a ticket in for matching
+		_, err := p.MatchMake(session, msession)
+		if err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("unknown mode: %v", ml.Mode)
+	}
 
 	return nil
 }
@@ -329,7 +345,14 @@ func (p *EvrPipeline) lobbyPingResponse(ctx context.Context, logger *zap.Logger,
 // lobbyCreateSessionRequest is a request to create a new session.
 func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.LobbyCreateSessionRequest)
-	result := NewMatchmakingResult(request.Mode, request.Channel)
+	result := NewMatchmakingResponse(request.Mode, request.Channel)
+	if request.Channel == uuid.Nil {
+		profile := p.profileRegistry.GetProfile(session.userID)
+		if profile == nil {
+			return status.Errorf(codes.Internal, "Failed to get players profile")
+		}
+		request.Channel = profile.GetChannel()
+	}
 	// Check for suspensions on this channel. The user will not be allowed to create lobby's
 	if authorized, err := p.authorizeMatchmaking(ctx, logger, session, request.Channel); !authorized {
 		return result.SendErrorToSession(session, err)
@@ -359,19 +382,28 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 		// Set some defaults
 		partySize := 1 // TODO FIXME this should include the party size
 
+		joinFn := func(matchID string) error {
+			return p.JoinEvrMatch(ctx, session, matchID, *ml.Channel, int(ml.TeamIndex))
+		}
+
+		errorFn := func(err error) error {
+			return NewMatchmakingResponse(ml.Mode, *ml.Channel).SendErrorToSession(session, err)
+		}
+
 		// Create a matching session
-		msession, err := p.matchmakingRegistry.Create(ctx, session, ml, partySize)
+		timeout := 15 * time.Minute
+		msession, err := p.matchmakingRegistry.Create(ctx, session, ml, partySize, timeout, errorFn, joinFn)
 		if err != nil {
 			return result.SendErrorToSession(session, status.Errorf(codes.Internal, "Failed to create matchmaking session: %v", err))
 		}
 
 		// Create a new match
-		match, err := p.MatchCreate(ctx, session, msession, ml)
+		matchID, err := p.MatchCreate(ctx, session, msession, ml)
 		if err != nil {
 			return result.SendErrorToSession(session, err)
 		}
-		matchId := match.MatchId.String()
-		err = p.JoinEvrMatch(msession.Ctx, session, matchId, request.Channel, int(ml.TeamIndex))
+
+		err = p.JoinEvrMatch(msession.Ctx, session, matchID, request.Channel, int(ml.TeamIndex))
 		if err != nil {
 			return result.SendErrorToSession(session, err)
 		}
@@ -389,15 +421,17 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 	matchId := request.LobbyId.String() + "." + p.node
 	match, _, err := p.matchRegistry.GetMatch(ctx, matchId)
 	if err != nil {
-		return NewMatchmakingResult(0, uuid.Nil).SendErrorToSession(session, err)
+		return NewMatchmakingResponse(0, uuid.Nil).SendErrorToSession(session, err)
 	}
-
+	if match == nil {
+		return NewMatchmakingResponse(0, uuid.Nil).SendErrorToSession(session, status.Errorf(codes.NotFound, "Match not found"))
+	}
 	// Extract the label
 	ml := &EvrMatchState{}
 	if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), ml); err != nil {
-		return NewMatchmakingResult(0, uuid.Nil).SendErrorToSession(session, err)
+		return NewMatchmakingResponse(0, uuid.Nil).SendErrorToSession(session, err)
 	}
-	result := NewMatchmakingResult(ml.Mode, *ml.Channel)
+	result := NewMatchmakingResponse(ml.Mode, *ml.Channel)
 	// Check for suspensions on this channel.
 	if ml.Mode == evr.ModeArenaPublic || ml.Mode == evr.ModeCombatPublic || ml.Mode == evr.ModeSocialPublic {
 		// Check for suspensions on this channel, if this is a request for a public match.
