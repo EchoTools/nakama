@@ -59,3 +59,11 @@ func (m *LobbyPlayerSessionsRequest) String() string {
 		strings.Join(lo.Map(m.PlayerEvrIds, func(id EvrId, i int) string { return id.Token() }), ", "),
 	)
 }
+
+func (m *LobbyPlayerSessionsRequest) SessionID() uuid.UUID {
+	return m.Session
+}
+
+func (m *LobbyPlayerSessionsRequest) EvrID() EvrId {
+	return m.EvrId
+}
