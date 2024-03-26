@@ -32,6 +32,13 @@ func TestRemoteLogCustomizationMetricsPayload_GetCategory(t *testing.T) {
 			},
 			want: "category",
 		},
+		{
+			name: "Test goal FX category name",
+			fields: fields{
+				ItemName: "rwd_goal_fx_0014",
+			},
+			want: "goal",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

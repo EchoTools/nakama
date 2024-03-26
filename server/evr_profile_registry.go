@@ -263,7 +263,7 @@ func (r *ProfileRegistry) storeProfile(ctx context.Context, userID uuid.UUID, pr
 	return nil
 }
 
-func (r *ProfileRegistry) LookupUnlockByJSONProperty(i interface{}, itemName string) (bool, error) {
+func (r *ProfileRegistry) GetFieldByJSONProperty(i interface{}, itemName string) (bool, error) {
 	// Lookup the field name by it's item name (json key)
 	fieldName, found := r.unlocksByItemName[itemName]
 	if !found {
@@ -283,64 +283,107 @@ func (r *ProfileRegistry) LookupUnlockByJSONProperty(i interface{}, itemName str
 	return false, fmt.Errorf("unknown unlock field name: %s", fieldName)
 }
 
-func (r *ProfileRegistry) UpdateEquippedItem(ctx context.Context, userID uuid.UUID, category string, name string) error {
+func (r *ProfileRegistry) UpdateEquippedItem(profile *GameProfile, category string, name string) error {
 	// Get the current profile.
-	profile := r.GetProfile(userID)
 
-	profile.Lock()
-	defer profile.Unlock()
-
-	slots := profile.Server.EquippedCosmetics.Instances.Unified.Slots
 	unlocksArena := profile.Server.UnlockedCosmetics.Arena
 	unlocksCombat := profile.Server.UnlockedCosmetics.Combat
 
 	// Validate that this user has the item unlocked.
-	if unlocked, err := r.LookupUnlockByJSONProperty(unlocksArena, name); err != nil {
-		return fmt.Errorf("failed to validate arena unlock: %w", err)
-	} else if !unlocked {
+	unlocked, err := r.GetFieldByJSONProperty(unlocksArena, name)
+	if err != nil {
+		// Check if it is a combat unlock
+		unlocked, err = r.GetFieldByJSONProperty(unlocksCombat, name)
+		if err != nil {
+			return fmt.Errorf("failed to validate unlock: %w", err)
+		}
+	}
+	if !unlocked {
 		return nil
 	}
 
-	if unlocked, err := r.LookupUnlockByJSONProperty(unlocksCombat, name); err != nil {
-		return fmt.Errorf("failed to validate combat unlock: %w", err)
-	} else if !unlocked {
-		return nil
+	alignmentTints := map[string][]string{
+		"tint_alignment_a": {
+			"tint_blue_a_default",
+			"tint_blue_b_default",
+			"tint_blue_c_default",
+			"tint_blue_d_default",
+			"tint_blue_e_default",
+			"tint_blue_f_default",
+			"tint_blue_g_default",
+			"tint_blue_h_default",
+			"tint_blue_i_default",
+			"tint_blue_j_default",
+			"tint_blue_k_default",
+			"tint_neutral_summer_a_default",
+			"rwd_tint_s3_tint_e",
+		},
+		"tint_alignment_b": {
+			"tint_orange_a_default",
+			"tint_orange_b_default",
+			"tint_orange_c_default",
+			"tint_orange_i_default",
+			"tint_neutral_spooky_a_default",
+			"tint_neutral_spooky_d_default",
+			"tint_neutral_xmas_c_default",
+			"rwd_tint_s3_tint_b",
+			"tint_orange_j_default",
+			"tint_orange_d_default",
+			"tint_orange_e_default",
+			"tint_orange_f_default",
+			"tint_orange_g_default",
+			"tint_orange_h_default",
+			"tint_orange_k_default",
+		},
 	}
 
 	// Equip the item
-	s := &slots
-	itemMap := map[string]*string{
-		"secondemote":      &s.SecondEmote,
-		"emote":            &s.Emote,
-		"decal":            &s.Decal,
-		"decal_body":       &s.DecalBody,
-		"tint":             &s.Tint,
-		"tint_body":        &s.TintBody,
-		"pattern":          &s.Pattern,
-		"pattern_body":     &s.PatternBody,
-		"decalback":        &s.Pip,
-		"chassis":          &s.Chassis,
-		"bracer":           &s.Bracer,
-		"booster":          &s.Booster,
-		"title":            &s.Title,
-		"tag":              &s.Tag,
-		"banner":           &s.Banner,
-		"medal":            &s.Medal,
-		"goal_fx":          &s.GoalFx,
-		"emissive":         &s.Emissive,
-		"tent_alignment_a": &s.TintAlignmentA,
-		"tint_alignment_b": &s.TintAlignmentB,
-		"pip":              &s.Pip,
-	}
-
-	if val, ok := itemMap[category]; ok {
-		// Special case for "tint" category
-		if category == "tint" && name == "tint_chassis_default" {
-			return nil
+	s := &profile.Server.EquippedCosmetics.Instances.Unified.Slots
+	switch category {
+	case "emote":
+		s.Emote = name
+		s.SecondEmote = name
+	case "decal":
+		s.Decal = name
+		s.DecalBody = name
+	case "tint":
+		if lo.Contains(alignmentTints["tint_alignment_a"], name) {
+			s.TintAlignmentA = name
+		} else if lo.Contains(alignmentTints["tint_alignment_b"], name) {
+			s.TintAlignmentB = name
+		} else {
+			if name != "tint_chassis_default" {
+				s.Tint = name
+			}
+			s.TintBody = name
 		}
-		*val = name
-	} else {
-
+	case "pattern":
+		s.Pattern = name
+		s.PatternBody = name
+	case "chassis":
+		s.Chassis = name
+	case "bracer":
+		s.Bracer = name
+	case "booster":
+		s.Booster = name
+	case "title":
+		s.Title = name
+	case "tag":
+		s.Tag = name
+	case "banner":
+		s.Banner = name
+	case "medal":
+		s.Medal = name
+	case "goal":
+		s.GoalFx = name
+	case "emissive":
+		s.Emissive = name
+	case "decalback":
+		fallthrough
+	case "pip":
+		s.Pip = name
+	default:
+		r.logger.Warn("Unknown cosmetic category", zap.String("category", category))
 		return nil
 	}
 
@@ -348,19 +391,17 @@ func (r *ProfileRegistry) UpdateEquippedItem(ctx context.Context, userID uuid.UU
 	now := time.Now().UTC().Unix()
 	profile.Server.UpdateTime = now
 
-	go func() {
-		profile.RLock()
-		defer profile.RUnlock()
-		if err := r.storeProfile(r.ctx, userID, profile); err != nil {
-			r.logger.Error("failed to save profile", zap.Error(err))
-		}
-	}()
-
 	return nil
 }
 
 // Set the user's profile based on their groups
 func (r *ProfileRegistry) UpdateEntitledCosmetics(ctx context.Context, userID uuid.UUID, profile *GameProfile) error {
+	// Disable Restricted Cosmetics
+	err := SetCosmeticDefaults(profile.Server)
+	if err != nil {
+		return fmt.Errorf("failed to disable restricted cosmetics: %w", err)
+	}
+
 	// Get the user's groups
 	// Check if the user has any groups that would grant them cosmetics
 	userGroups, _, err := r.nk.UserGroupsList(ctx, userID.String(), 100, nil, "")
@@ -681,4 +722,26 @@ func updateUnlocks(dst, src interface{}) {
 			dField.SetBool(sField.Bool())
 		}
 	}
+}
+
+// SetCosmeticDefaults sets all the restricted cosmetics to false.
+func SetCosmeticDefaults(s *evr.ServerProfile) error {
+	// Set all the VRML cosmetics to false
+
+	structs := []interface{}{&s.UnlockedCosmetics.Arena, &s.UnlockedCosmetics.Combat}
+	for _, t := range structs {
+		v := reflect.ValueOf(t)
+		if v.Kind() == reflect.Ptr {
+			v = v.Elem()
+		}
+
+		for i := 0; i < v.NumField(); i++ {
+			tag := v.Type().Field(i).Tag.Get("validate")
+			disabled := strings.Contains(tag, "restricted") || strings.Contains(tag, "blocked")
+			if v.Field(i).CanSet() {
+				v.Field(i).Set(reflect.ValueOf(!disabled))
+			}
+		}
+	}
+	return nil
 }
