@@ -104,6 +104,7 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 		logger.Warn("Broadcaster is on a private IP, using this systems external IP")
 		externalIP = p.externalIP
 	}
+
 	// Get the broadcasters geoIP data
 	geoIPch := make(chan *ipinfo.Core)
 	go func() {
@@ -116,23 +117,38 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 		geoIPch <- geoIP
 	}()
 
-	// Create the broadcaster config
-	config := broadcasterConfig(userId, session.id.String(), request.ServerId, request.InternalIP, externalIP, request.Port, request.Region, request.VersionLock, tags)
-
-	// Validate connectivity to the broadcaster.
-	rtt, err := BroadcasterHealthcheck(config.Endpoint.ExternalIP, int(config.Endpoint.Port), 500*time.Millisecond)
-	if rtt < 0 || err != nil {
-		// If the broadcaster is not available, send an error message to the user on discord
-		go sendDiscordError(err, discordId, logger, p.discordRegistry)
-		return errFailedRegistration(session, fmt.Errorf("broadcaster failed availability check: %v", err), evr.BroadcasterRegistration_Failure)
-	}
-
 	// Get the hosted channels
 	channels, err := p.getBroadcasterHostInfo(ctx, session, userId, discordId, guildIds)
 	if err != nil {
 		return errFailedRegistration(session, err, evr.BroadcasterRegistration_Failure)
 	}
-	config.Channels = channels
+
+	geoIP := <-geoIPch
+
+	endpoint := evr.Endpoint{
+		InternalIP: externalIP,
+		ExternalIP: externalIP,
+		Port:       request.Port,
+	}
+
+	config := NewMatchBroadcaster(session.id.String(), userId, channels, endpoint, request.VersionLock, string(PcvrAppId), request.Region, geoIP, request.ServerId, "", evr.Symbol(0), tags)
+
+	rtts, err := BroadcasterRTTcheck(externalIP, int(request.Port), 1, 500*time.Millisecond, 2*time.Second)
+	if err != nil {
+		return errFailedRegistration(session, err, evr.BroadcasterRegistration_Failure)
+	}
+
+	// Check for how many missed packets
+	packetLoss := 0
+	for _, rtt := range rtts {
+		if rtt < 0 {
+			packetLoss++
+		}
+	}
+
+	if packetLoss > 3 {
+		return errFailedRegistration(session, fmt.Errorf("packet loss is greater than 3, statistics: %v", rtts), evr.BroadcasterRegistration_Failure)
+	}
 
 	p.broadcasterRegistrationBySession.Store(session.ID(), config)
 
@@ -221,30 +237,6 @@ func (p *EvrPipeline) authenticateBroadcaster(ctx context.Context, session *sess
 	}
 
 	return userId, username, nil
-}
-
-func broadcasterConfig(userId, sessionId string, serverId uint64, internalIP, externalIP net.IP, port uint16, region evr.Symbol, versionLock uint64, tags []string) *MatchBroadcaster {
-
-	config := &MatchBroadcaster{
-		SessionID: sessionId,
-		UserID:    userId,
-		ServerId:  serverId,
-		Endpoint: evr.Endpoint{
-			InternalIP: internalIP,
-			ExternalIP: externalIP,
-			Port:       port,
-		},
-		Region:      region,
-		VersionLock: versionLock,
-		Channels:    make([]uuid.UUID, 0),
-
-		Tags: make([]string, 0),
-	}
-
-	if len(tags) > 0 {
-		config.Tags = tags
-	}
-	return config
 }
 
 func (p *EvrPipeline) getBroadcasterHostInfo(ctx context.Context, session *sessionWS, userId, discordId string, guildIds []string) (channels []uuid.UUID, err error) {
@@ -470,7 +462,7 @@ func BroadcasterRTTcheck(ip net.IP, port, count int, interval, timeout time.Dura
 	go func() {
 		// Ensure the task is marked done on return
 		defer wg.Done()
-		// Loop 5 times
+		// Loop for the specified number of times
 		for i := 0; i < count; i++ {
 			// Perform a health check on the broadcaster
 			rtt, err := BroadcasterHealthcheck(ip, port, timeout)
