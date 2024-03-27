@@ -144,141 +144,143 @@ var (
 				},
 			},
 		},
-		{
-			Name:        "badges",
-			Description: "manage badge entitlements",
-			Options: []*discordgo.ApplicationCommandOption{
-				{
-					Name:        "request",
-					Description: "request badge(s)",
-					Type:        discordgo.ApplicationCommandOptionSubCommand,
-					Options: []*discordgo.ApplicationCommandOption{
-						// Also, subcommand groups aren't capable of
-						// containing options, by the name of them, you can see
-						// they can only contain subcommands
-						{
-							Type:        discordgo.ApplicationCommandOptionString,
-							Name:        "title",
-							Description: "Badge to request",
-							Required:    true,
-							Choices:     vrmlGroupChoices,
-						},
-					},
-				},
-				{
-					Name:        "manage",
-					Description: "manage badge(s)",
-					Type:        discordgo.ApplicationCommandOptionSubCommand,
-					Options: []*discordgo.ApplicationCommandOption{
-						{
-							Type:        discordgo.ApplicationCommandOptionString,
-							Name:        "action",
-							Description: "Action to perform",
-							Required:    true,
-							Choices: []*discordgo.ApplicationCommandOptionChoice{
-								{
-									Name:  "add user(s)",
-									Value: "add",
-								},
-								{
-									Name:  "remove user(s)",
-									Value: "remove",
-								},
-								{
-									Name:  "ban user(s) (from requesting)",
-									Value: "ban",
-								},
+		/*
+			{
+				Name:        "badges",
+				Description: "manage badge entitlements",
+				Options: []*discordgo.ApplicationCommandOption{
+					{
+						Name:        "request",
+						Description: "request badge(s)",
+						Type:        discordgo.ApplicationCommandOptionSubCommand,
+						Options: []*discordgo.ApplicationCommandOption{
+							// Also, subcommand groups aren't capable of
+							// containing options, by the name of them, you can see
+							// they can only contain subcommands
+							{
+								Type:        discordgo.ApplicationCommandOptionString,
+								Name:        "title",
+								Description: "Badge to request",
+								Required:    true,
+								Choices:     vrmlGroupChoices,
 							},
 						},
-						{
-							Type:        discordgo.ApplicationCommandOptionUser,
-							Name:        "user",
-							Description: "user to add or remove",
-							Required:    true,
-						},
-						{
-							Type:        discordgo.ApplicationCommandOptionString,
-							Name:        "group",
-							Description: "Group to manage",
-							Required:    true,
-							Choices:     vrmlGroupChoices,
-						},
-						{
-							Type:        discordgo.ApplicationCommandOptionString,
-							Name:        "group2",
-							Description: "Group to manage",
-							Required:    false,
-							Choices:     vrmlGroupChoices,
+					},
+					{
+						Name:        "manage",
+						Description: "manage badge(s)",
+						Type:        discordgo.ApplicationCommandOptionSubCommand,
+						Options: []*discordgo.ApplicationCommandOption{
+							{
+								Type:        discordgo.ApplicationCommandOptionString,
+								Name:        "action",
+								Description: "Action to perform",
+								Required:    true,
+								Choices: []*discordgo.ApplicationCommandOptionChoice{
+									{
+										Name:  "add user(s)",
+										Value: "add",
+									},
+									{
+										Name:  "remove user(s)",
+										Value: "remove",
+									},
+									{
+										Name:  "ban user(s) (from requesting)",
+										Value: "ban",
+									},
+								},
+							},
+							{
+								Type:        discordgo.ApplicationCommandOptionUser,
+								Name:        "user",
+								Description: "user to add or remove",
+								Required:    true,
+							},
+							{
+								Type:        discordgo.ApplicationCommandOptionString,
+								Name:        "group",
+								Description: "Group to manage",
+								Required:    true,
+								Choices:     vrmlGroupChoices,
+							},
+							{
+								Type:        discordgo.ApplicationCommandOptionString,
+								Name:        "group2",
+								Description: "Group to manage",
+								Required:    false,
+								Choices:     vrmlGroupChoices,
+							},
 						},
 					},
 				},
 			},
-		},
-		{
-			Name:        "party",
-			Description: "Manage EchoVR parties.",
-			Options: []*discordgo.ApplicationCommandOption{
-				{
-					Name:        "invite",
-					Description: "Invite a user to your party.",
-					Type:        discordgo.ApplicationCommandOptionSubCommand,
-					Options: []*discordgo.ApplicationCommandOption{
-						{
-							Type:        discordgo.ApplicationCommandOptionUser,
-							Name:        "user-option",
-							Description: "User to invite to your party.",
-							Required:    false,
+			{
+				Name:        "party",
+				Description: "Manage EchoVR parties.",
+				Options: []*discordgo.ApplicationCommandOption{
+					{
+						Name:        "invite",
+						Description: "Invite a user to your party.",
+						Type:        discordgo.ApplicationCommandOptionSubCommand,
+						Options: []*discordgo.ApplicationCommandOption{
+							{
+								Type:        discordgo.ApplicationCommandOptionUser,
+								Name:        "user-option",
+								Description: "User to invite to your party.",
+								Required:    false,
+							},
 						},
 					},
-				},
-				{
-					Name:        "cancel",
-					Description: "cancel a party invite (or leave blank to cancel all).",
-					Type:        discordgo.ApplicationCommandOptionSubCommand,
-					Options: []*discordgo.ApplicationCommandOption{
-						{
-							Type:        discordgo.ApplicationCommandOptionUser,
-							Name:        "user-option",
-							Description: "User to cancel invite for.",
-							Required:    false,
+					{
+						Name:        "cancel",
+						Description: "cancel a party invite (or leave blank to cancel all).",
+						Type:        discordgo.ApplicationCommandOptionSubCommand,
+						Options: []*discordgo.ApplicationCommandOption{
+							{
+								Type:        discordgo.ApplicationCommandOptionUser,
+								Name:        "user-option",
+								Description: "User to cancel invite for.",
+								Required:    false,
+							},
 						},
 					},
-				},
-				{
-					Name:        "transfer",
-					Description: "Make another user the party leader.",
-					Type:        discordgo.ApplicationCommandOptionSubCommand,
-					Options: []*discordgo.ApplicationCommandOption{
-						{
-							Type:        discordgo.ApplicationCommandOptionUser,
-							Name:        "user-option",
-							Description: "User to transfer party to.",
-							Required:    true,
+					{
+						Name:        "transfer",
+						Description: "Make another user the party leader.",
+						Type:        discordgo.ApplicationCommandOptionSubCommand,
+						Options: []*discordgo.ApplicationCommandOption{
+							{
+								Type:        discordgo.ApplicationCommandOptionUser,
+								Name:        "user-option",
+								Description: "User to transfer party to.",
+								Required:    true,
+							},
 						},
 					},
-				},
-				{
-					Name:        "help",
-					Description: "Help with party commands.",
-					Type:        discordgo.ApplicationCommandOptionSubCommand,
-				},
-				{
-					Name:        "status",
-					Description: "Status of your party.",
-					Type:        discordgo.ApplicationCommandOptionSubCommand,
-				},
-				{
-					Name:        "warp",
-					Description: "Warp your party to your lobby.",
-					Type:        discordgo.ApplicationCommandOptionSubCommand,
-				},
-				{
-					Name:        "leave",
-					Description: "Leave the party.",
-					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					{
+						Name:        "help",
+						Description: "Help with party commands.",
+						Type:        discordgo.ApplicationCommandOptionSubCommand,
+					},
+					{
+						Name:        "status",
+						Description: "Status of your party.",
+						Type:        discordgo.ApplicationCommandOptionSubCommand,
+					},
+					{
+						Name:        "warp",
+						Description: "Warp your party to your lobby.",
+						Type:        discordgo.ApplicationCommandOptionSubCommand,
+					},
+					{
+						Name:        "leave",
+						Description: "Leave the party.",
+						Type:        discordgo.ApplicationCommandOptionSubCommand,
+					},
 				},
 			},
-		},
+		*/
 		/*
 			{
 				Name:        "responses",
@@ -306,26 +308,32 @@ var (
 	}
 )
 
-func UnregisterAllGuildCommands(ctx context.Context, logger runtime.Logger, dg *discordgo.Session) {
+func UnregisterCommandsAll(ctx context.Context, logger runtime.Logger, dg *discordgo.Session) {
 	guilds, err := dg.UserGuilds(100, "", "")
 	if err != nil {
 		logger.Error("Error fetching guilds,", zap.Error(err))
 		return
 	}
 	for _, guild := range guilds {
-		commands, err := dg.ApplicationCommands(dg.State.User.ID, guild.ID)
-		if err != nil {
-			logger.Error("Error fetching commands,", zap.Error(err))
-			continue
-		}
+		UnregisterCommands(ctx, logger, dg, guild.ID)
+	}
 
-		for _, command := range commands {
-			err := dg.ApplicationCommandDelete(dg.State.User.ID, guild.ID, command.ID)
-			if err != nil {
-				logger.Error("Error deleting command,", zap.Error(err))
-			} else {
-				logger.Info("Deleted command", zap.String("command", command.Name))
-			}
+}
+
+// If guildID is empty, it will unregister all global commands.
+func UnregisterCommands(ctx context.Context, logger runtime.Logger, dg *discordgo.Session, guildID string) {
+	commands, err := dg.ApplicationCommands(dg.State.User.ID, guildID)
+	if err != nil {
+		logger.Error("Error fetching commands,", zap.Error(err))
+		return
+	}
+
+	for _, command := range commands {
+		err := dg.ApplicationCommandDelete(dg.State.User.ID, guildID, command.ID)
+		if err != nil {
+			logger.Error("Error deleting command,", zap.Error(err))
+		} else {
+			logger.Info("Deleted command", zap.String("command", command.Name))
 		}
 	}
 }
@@ -686,6 +694,17 @@ func RegisterSlashCommands(ctx context.Context, logger runtime.Logger, nk runtim
 					_, _ = role, group
 				}
 			case "badges":
+				// Send "Coming this week. Stay tuned!" message
+				content = "Coming soon. Stay tuned!"
+
+				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+					Type: discordgo.InteractionResponseChannelMessageWithSource,
+					Data: &discordgo.InteractionResponseData{
+						Flags:   discordgo.MessageFlagsEphemeral,
+						Content: content,
+					},
+				})
+				return
 				options := options[0].Options
 				switch options[0].Name {
 				case "request":
