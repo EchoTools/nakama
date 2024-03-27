@@ -476,13 +476,21 @@ func (p *EvrPipeline) remoteLogSetv3(ctx context.Context, logger *zap.Logger, se
 		if !ok {
 			logger.Warn("RemoteLogSet: missing message property", zap.Any("entry", entry))
 		}
-		logger.Debug("RemoteLogSet: message property", zap.Any("entry", entry))
+
 		messagetype, ok := s.(string)
 		if !ok {
 			logger.Debug("RemoteLogSet: message property is not a string", zap.Any("entry", entry))
 		}
 
 		switch strings.ToLower(messagetype) {
+		case "ghost_user":
+			// This is a ghost user message.
+			ghostUser := &evr.RemoteLogGhostUser{}
+			if err := json.Unmarshal(logBytes, ghostUser); err != nil {
+				logger.Error("Failed to unmarshal ghost user", zap.Error(err))
+				continue
+			}
+			_ = ghostUser
 		case "game_settings":
 			gameSettings := &evr.RemoteLogGameSettings{}
 			if err := json.Unmarshal(logBytes, gameSettings); err != nil {
