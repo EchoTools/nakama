@@ -229,10 +229,8 @@ func (p *EvrPipeline) MatchCreateLoop(session *sessionWS, msession *MatchmakingS
 
 		case codes.NotFound:
 			fallthrough
-		case codes.Unavailable:
-			// No servers are connected. This can happen if the server is starting up or shutting down.
-			fallthrough
-		case codes.ResourceExhausted:
+
+		case codes.ResourceExhausted, codes.Unavailable:
 			// All the servers are being used.
 			select {
 
