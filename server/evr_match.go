@@ -192,9 +192,26 @@ type MatchBroadcaster struct {
 	Region        evr.Symbol   `json:"region,omitempty"`         // The region the match is hosted in. (Matching Only) (EVR)
 	IPinfo        *ipinfo.Core `json:"ip_info,omitempty"`        // The IPinfo of the broadcaster.
 	ServerId      uint64       `json:"server_id,omitempty"`      // The server id of the broadcaster. (EVR)
-	PublisherLock bool         `json:"publisher_lock,omitempty"` // Publisher lock (EVR)
+	PublisherLock string       `json:"publisher_lock,omitempty"` // Publisher lock (EVR)
 	Platform      evr.Symbol   `json:"platform,omitempty"`       // The platform the match is hosted on. (EVR)
 	Tags          []string     `json:"tags,omitempty"`           // The tags given on the urlparam for the match.
+}
+
+func NewMatchBroadcaster(sessionId, userId string, channels []uuid.UUID, endpoint evr.Endpoint, versionLock uint64, appId string, region evr.Symbol, ipinfo *ipinfo.Core, serverId uint64, publisherLock string, platform evr.Symbol, tags []string) *MatchBroadcaster {
+	return &MatchBroadcaster{
+		SessionID:     sessionId,
+		UserID:        userId,
+		Channels:      channels,
+		Endpoint:      endpoint,
+		VersionLock:   versionLock,
+		AppId:         appId,
+		Region:        region,
+		IPinfo:        ipinfo,
+		ServerId:      serverId,
+		PublisherLock: publisherLock,
+		Platform:      platform,
+		Tags:          tags,
+	}
 }
 
 // The lobby state is used for the match label.
@@ -920,6 +937,7 @@ func (m *EvrMatch) lobbyPlayerSessionsRequest(ctx context.Context, logger runtim
 			success.VersionU(),
 			success.Version2(),
 			success.Version3(),
+			evr.NewSTcpConnectionUnrequireEvent(),
 		}
 		if err := m.dispatchMessages(ctx, logger, dispatcher, messages, []runtime.Presence{sender}, nil); err != nil {
 			logger.Error("lobbyPlayerSessionsRequest: failed to dispatch message: %v", err)
