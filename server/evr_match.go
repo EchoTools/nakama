@@ -416,6 +416,9 @@ func selectTeamForPlayer(presence *EvrMatchPresence, state *EvrMatchState) (int,
 	if state.Mode == evr.ModeSocialPublic || state.Mode == evr.ModeSocialPrivate {
 		// Social mode, put them on the spectator team.
 		return evr.TeamSocial, true
+	} else if t == evr.TeamSocial {
+		// Disallow social team outside of social lobbies
+		t = evr.TeamUnassigned
 	}
 
 	// If the player is unassigned, assign them to a team.

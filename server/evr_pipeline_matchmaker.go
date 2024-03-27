@@ -33,6 +33,14 @@ func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logg
 	if channel == uuid.Nil {
 		return false, fmt.Errorf("channel is nil")
 	}
+	// Get the EvrID from the context
+	evrId, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
+	if !ok {
+		return false, fmt.Errorf("failed to get evrID from context")
+	}
+	if !evrId.Valid() {
+		return false, fmt.Errorf("evrID is invalid")
+	}
 
 	// Send a match leave if this user is in another match
 	if session.userID == uuid.Nil {
