@@ -853,6 +853,7 @@ func (r *LocalDiscordRegistry) InitializeDiscordBot(ctx context.Context, logger 
 	})
 
 	bot.AddHandler(func(s *discordgo.Session, e *discordgo.Ready) {
+		<-time.After(40 * time.Second)
 		if err := RegisterSlashCommands(ctx, logger, nk, s, r); err != nil {
 			logger.Error("Failed to register slash commands: %w", err)
 		}
