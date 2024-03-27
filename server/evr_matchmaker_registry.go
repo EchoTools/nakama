@@ -393,7 +393,7 @@ func (c *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry) {
 					continue
 				}
 				// Found a match
-
+				label.SpawnedBy = SystemUserId
 				// Instruct the server to load the level
 				response, err := SignalMatch(c.ctx, c.matchRegistry, matchID, SignalStartSession, label)
 				if err != nil {

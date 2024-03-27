@@ -23,7 +23,7 @@ const (
 	VersionLock       uint64 = 0xc62f01d78f77910d // The game build version.
 	MatchmakingModule        = "evr"              // The module used for matchmaking
 
-	MatchMaxSize = 14 // The total max players for a EVR lobby.
+	MatchMaxSize = 12 // The total max players for a EVR lobby.
 
 	LevelSelectionFirst  MatchLevelSelection = "first"
 	LevelSelectionRandom MatchLevelSelection = "random"
@@ -395,6 +395,12 @@ func selectTeamForPlayer(presence *EvrMatchPresence, state *EvrMatchState) (int,
 		return t, false
 	}
 
+	// Force the player to be on the spectator team if the match is in social mode.
+	if state.Mode == evr.ModeSocialPublic || state.Mode == evr.ModeSocialPrivate {
+		// Social mode, put them on the spectator team.
+		return evr.TeamSocial, true
+	}
+
 	// If the player is unassigned, assign them to a team.
 	if t == evr.TeamUnassigned {
 		t = evr.TeamBlue
@@ -490,6 +496,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		// The lobby is full, reject the player.
 		return state, false, "lobby full"
 	}
+
 	// The player data will be looked up by MatchJoin()
 	state.presenceCache[presence.GetUserId()] = &mp
 	// Accept the player(s) into the session.
@@ -683,7 +690,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 			if messageFn != nil {
 				state, err = messageFn(ctx, logger, db, nk, dispatcher, state, in, msg)
 				if err != nil {
-					logger.Error("lobbyPlayerSessionsRequest: %v", err)
+					logger.Error("match pipeline: %v", err)
 				}
 			}
 		}
@@ -757,6 +764,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 			return state, fmt.Sprintf("failed to unmarshal match label: %v", err)
 		}
 		matchId, _ := MatchIdFromContext(ctx)
+		state.SpawnedBy = newState.SpawnedBy
 		state.MatchId = matchId
 		state.Channel = newState.Channel
 		state.MaxSize = newState.MaxSize

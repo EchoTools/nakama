@@ -54,7 +54,7 @@ var (
 	MatchFilterPtr     = &MatchFilterValue
 	MatchFilterRelayed = map[uint8]*uint8{StreamModeMatchRelayed: MatchFilterPtr}
 
-	MatchLabelMaxBytes = 2048
+	MatchLabelMaxBytes = 8192
 )
 
 type MatchIndexEntry struct {
