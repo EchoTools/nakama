@@ -376,6 +376,10 @@ func (p *EvrPipeline) MatchCreate(ctx context.Context, session *sessionWS, msess
 		return "", fmt.Errorf("failed to filter matches: %v", err)
 	}
 
+	if len(matches) == 0 {
+		return "", status.Errorf(codes.ResourceExhausted, "No available servers")
+	}
+
 	// Join the lowest rtt match
 	match := matches[0]
 
