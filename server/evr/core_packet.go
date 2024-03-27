@@ -22,9 +22,9 @@ var (
 
 	SymbolTypes = map[uint64]interface{}{
 		// This is the complete list of implemented message types.
-		0x4c1fed6cb4d96c64: (*SNSLobbySmiteEntrant)(nil),
-		0x013e99cb47eb3669: (*GenericMessage)(nil),
-		0x35d810572a230837: (*GenericMessageNotify)(nil),
+		0x4c1fed6cb4d96c64: nil, // (*SNSLobbySmiteEntrant)(nil),
+		0x013e99cb47eb3669: nil, // (*GenericMessage)(nil),
+		0x35d810572a230837: nil, // (*GenericMessageNotify)(nil),
 		0x80119c19ac72d695: (*MatchEnded)(nil),
 		0x0dabc24265508a82: (*ReconcileIAPResult)(nil),
 		0x1225133828150da3: (*OtherUserProfileFailure)(nil),
@@ -258,7 +258,11 @@ func Unmarshal(data []byte, m *[]Message) error {
 		typ, ok := SymbolTypes[sym]
 		if !ok {
 			return errors.Join(ErrSymbolNotFound, fmt.Errorf("Symbol not found: symbol=0x%x", sym))
+		} else if typ == nil {
+			// Skip unimplemented message types.
+			continue
 		}
+
 		// Create a new message of the correct type and unmarshal the data into it.
 		message := reflect.New(reflect.TypeOf(typ).Elem()).Interface().(Message)
 		if err = message.Stream(NewEasyStream(DecodeMode, b)); err != nil {
