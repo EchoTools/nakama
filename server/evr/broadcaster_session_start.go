@@ -21,8 +21,8 @@ const (
 	TeamUnassigned int = iota - 1
 	TeamBlue
 	TeamOrange
-	TeamSocial
 	TeamSpectator
+	TeamSocial
 	TeamModerator
 )
 
