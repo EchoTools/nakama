@@ -320,7 +320,6 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 
 	switch in.Message.(type) {
 	case *rtapi.Envelope_MatchPresenceEvent:
-
 		envelope := in.GetMatchPresenceEvent()
 		userID := session.UserID().String()
 		matchID := envelope.GetMatchId()
