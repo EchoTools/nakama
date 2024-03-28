@@ -42,10 +42,15 @@ func (p *EvrPipeline) ListUnassignedLobbies(ctx context.Context, session *sessio
 		// Add the channels to the query
 		qparts = append(qparts, HostedChannels(ml.Broadcaster.Channels).Query(Must, 0))
 	}
+	// Add each hosted channel as a SHOULD, with decreasing boost
+
+	for i, channel := range ml.Broadcaster.Channels {
+		qparts = append(qparts, Channel(channel).Query(Should, len(ml.Broadcaster.Channels)-i))
+	}
 
 	// SHOULD match the region (if specified)
 	if ml.Broadcaster.Region != evr.Symbol(0) {
-		qparts = append(qparts, Region(ml.Broadcaster.Region).Query(Should, 0))
+		qparts = append(qparts, Region(ml.Broadcaster.Region).Query(Should, 3))
 	}
 
 	// TODO FIXME Add version lock and appid
@@ -60,7 +65,7 @@ func (p *EvrPipeline) ListUnassignedLobbies(ctx context.Context, session *sessio
 
 	// If no servers are available, return immediately.
 	if len(matches) == 0 {
-		return nil, status.Errorf(codes.NotFound, "No available servers")
+		return nil, status.Errorf(codes.Unavailable, "No available servers")
 	}
 
 	// Create a slice containing the matches' labels

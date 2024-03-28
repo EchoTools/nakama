@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -348,38 +350,97 @@ func (p *EvrPipeline) lobbyPingResponse(ctx context.Context, logger *zap.Logger,
 	return nil
 }
 
+func (p *EvrPipeline) GetGuildPriorityList(ctx context.Context, userID uuid.UUID) (all []uuid.UUID, selected []uuid.UUID, err error) {
+
+	profile := p.profileRegistry.GetProfile(userID)
+	if profile == nil {
+		return nil, nil, status.Errorf(codes.Internal, "Failed to get players profile")
+	}
+	currentChannel := profile.GetChannel()
+
+	// Get the guild priority from the context
+	groups, err := p.discordRegistry.GetGuildGroups(ctx, userID)
+	if err != nil {
+		return nil, nil, status.Errorf(codes.Internal, "Failed to get guilds: %v", err)
+	}
+
+	groupIDs := make([]uuid.UUID, 0)
+	for _, group := range groups {
+		groupIDs = append(groupIDs, uuid.FromStringOrNil(group.Id))
+	}
+
+	guildPriority := make([]uuid.UUID, 0)
+	params, ok := ctx.Value(ctxUrlParamsKey{}).(map[string][]string)
+	if ok {
+		// If the params are set, use them
+		for _, gid := range params["guilds"] {
+			for _, guildId := range strings.Split(gid, ",") {
+				s := strings.Trim(guildId, " ")
+				if s != "" {
+					// Get the groupId for the guild
+					groupIDstr, found := p.discordRegistry.Get(s)
+					if !found {
+						continue
+					}
+					groupID := uuid.FromStringOrNil(groupIDstr)
+					if groupID != uuid.Nil && lo.Contains(groupIDs, groupID) {
+						guildPriority = append(guildPriority, groupID)
+					}
+				}
+			}
+		}
+	} else {
+		// If the params are not set, use the user's guilds
+		guildPriority = []uuid.UUID{currentChannel}
+		for _, groupID := range groupIDs {
+			if groupID != currentChannel {
+				guildPriority = append(guildPriority, groupID)
+			}
+		}
+	}
+
+	return groupIDs, selected, nil
+}
+
 // lobbyCreateSessionRequest is a request to create a new session.
 func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.LobbyCreateSessionRequest)
-	result := NewMatchmakingResponse(request.Mode, request.Channel)
-	if request.Channel == uuid.Nil {
-		profile := p.profileRegistry.GetProfile(session.userID)
-		if profile == nil {
-			return status.Errorf(codes.Internal, "Failed to get players profile")
-		}
-		request.Channel = profile.GetChannel()
+
+	groups, priorities, err := p.GetGuildPriorityList(ctx, session.userID)
+	if err != nil {
+		logger.Warn("Failed to get guild priority list", zap.Error(err))
 	}
+
+	result := NewMatchmakingResponse(request.Mode, request.Channel)
+
+	// If the channel is nil, use the players primary channel
+	/*
+
+	 */
 	// Check for suspensions on this channel. The user will not be allowed to create lobby's
 	if authorized, err := p.authorizeMatchmaking(ctx, logger, session, request.Channel); !authorized {
 		return result.SendErrorToSession(session, err)
 	} else if err != nil {
 		logger.Warn("Failed to authorize matchmaking, allowing player to continue. ", zap.Error(err))
 	}
+	// Validate that the channel is in the user's guilds
+	if !lo.Contains(groups, request.Channel) {
+		request.Channel = priorities[0]
+	}
 
 	ml := &EvrMatchState{
-		Channel:         &request.Channel,
+
 		Level:           request.Level,
 		LobbyType:       LobbyType(request.LobbyType),
 		Mode:            request.Mode,
 		Open:            true,
 		SessionSettings: &request.SessionSettings,
 		TeamIndex:       TeamIndex(request.TeamIndex),
-
+		Channel:         &request.Channel,
 		Broadcaster: MatchBroadcaster{
-			Platform: request.Platform,
-
 			VersionLock: uint64(request.VersionLock),
 			Region:      request.Region,
+			Channels:    priorities,
 		},
 	}
 

@@ -815,24 +815,6 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, session *sessionWS, ml
 		ml.TeamSize = 5
 	}
 
-	// Add the user's accessible groups/guilds
-	userGroups, err := ListUserGroups(ctx, session.logger, session.pipeline.db, session.UserID(), 1000, wrapperspb.Int32(2), "")
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "Failed to list user groups: %v", err)
-	}
-
-	// Get the channels the user has access to
-	for _, g := range userGroups.GetUserGroups() {
-		// Verify the group is a guild
-		if g.Group.GetLangTag() != "guild" {
-			continue
-		}
-		cid := uuid.FromStringOrNil(g.Group.GetId())
-		if cid == uuid.Nil {
-			continue
-		}
-		ml.Broadcaster.Channels = append(ml.Broadcaster.Channels, cid)
-	}
 	logger := session.logger.With(zap.String("msid", session.ID().String()))
 	ctx, cancel := context.WithCancelCause(ctx)
 	msession := &MatchmakingSession{
