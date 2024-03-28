@@ -123,20 +123,23 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 	// Create the broadcaster config
 	config := broadcasterConfig(userId, session.id.String(), request.ServerId, request.InternalIP, externalIP, request.Port, request.Region, request.VersionLock, tags)
 
-	// Validate connectivity to the broadcaster.
-	rtt, err := BroadcasterHealthcheck(config.Endpoint.ExternalIP, int(config.Endpoint.Port), 500*time.Millisecond)
-	if rtt < 0 || err != nil {
-		// If the broadcaster is not available, send an error message to the user on discord
-		go sendDiscordError(err, discordId, logger, p.discordRegistry)
-		return errFailedRegistration(session, fmt.Errorf("broadcaster failed availability check: %v", err), evr.BroadcasterRegistration_Failure)
-	}
-
 	// Get the hosted channels
 	channels, err := p.getBroadcasterHostInfo(ctx, session, userId, discordId, guildIds)
 	if err != nil {
 		return errFailedRegistration(session, err, evr.BroadcasterRegistration_Failure)
 	}
 	config.Channels = channels
+
+	// Validate connectivity to the broadcaster.
+	// Wait 2 seconds, then check
+
+	time.Sleep(2 * time.Second)
+	rtt, err := BroadcasterHealthcheck(config.Endpoint.ExternalIP, int(config.Endpoint.Port), 500*time.Millisecond)
+	if rtt < 0 || err != nil {
+		// If the broadcaster is not available, send an error message to the user on discord
+		go sendDiscordError(err, discordId, logger, p.discordRegistry)
+		return errFailedRegistration(session, fmt.Errorf("broadcaster failed availability check: %v", err), evr.BroadcasterRegistration_Failure)
+	}
 
 	p.broadcasterRegistrationBySession.Store(session.ID(), config)
 
