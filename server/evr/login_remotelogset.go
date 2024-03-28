@@ -38,8 +38,7 @@ func (m RemoteLogSet) Symbol() Symbol {
 }
 
 func (m RemoteLogSet) String() string {
-	return fmt.Sprintf("SNSRemoteLogSetv3 {EvrId=%s,LogLevel=%d, Logs=%s}",
-		m.UserId.String(), m.LogLevel, m.Logs)
+	return fmt.Sprintf("SNSRemoteLogSetv3 {EvrId=%s,LogLevel=%d, Logs=%d}", m.UserId.String(), m.LogLevel, len(m.Logs))
 }
 
 func (m *RemoteLogSet) Stream(s *EasyStream) error {
