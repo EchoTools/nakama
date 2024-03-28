@@ -789,7 +789,11 @@ func generateSuspensionNotice(statuses []*SuspensionStatus) string {
 func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	message := in.(*evr.UserServerProfileUpdateRequest)
 
-	logger.Error("UserServerProfileUpdateRequest", zap.String("evrid", message.EvrId.Token()), zap.Any("update", message.UpdateInfo))
+	if session.userID == uuid.Nil {
+		logger.Warn("UserServerProfileUpdateRequest: user not logged in")
+	}
+
+	logger.Debug("UserServerProfileUpdateRequest", zap.String("evrid", message.EvrId.Token()), zap.Any("update", message.UpdateInfo))
 
 	// These messages are just ignored.
 	// Check that this is the broadcaster for that match
