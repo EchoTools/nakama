@@ -114,6 +114,10 @@ func EchoTaxiRuntimeModule(ctx context.Context, logger runtime.Logger, db *sql.D
 	})
 
 	bot.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
+
+	})
+
+	bot.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
 		handleMessageCreate_EchoTaxi_React(ctx, s, m, logger, nk)
 	})
 	bot.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
@@ -132,29 +136,28 @@ func EchoTaxiRuntimeModule(ctx context.Context, logger runtime.Logger, db *sql.D
 		// Get the user's information from the context
 		username := ctx.Value(runtime.RUNTIME_CTX_USERNAME).(string)
 		userId := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
-		node := ctx.Value(runtime.RUNTIME_CTX_NODE).(string)
 
 		// Do not lookup hails for broadcasters.
-		if strings.Contains(username, "broadcaster:") {
+		if username == "broadcaster" {
 			return in, nil
 		}
 
 		// Check if the user has a matchId in the hailRegistry
-		matchId, found := hailRegistry.matchIdByUserId.LoadAndDelete(userId)
+		v, found := hailRegistry.matchIdByUserId.LoadAndDelete(userId)
 		if !found {
 			return in, nil
 		}
-
-		matchId = strings.ToLower(matchId.(string)) + "." + node
+		matchId := v.(string)
+		matchId = strings.ToLower(matchId)
 
 		// check that the match exists.
-		_, err := nk.MatchGet(ctx, matchId.(string))
+		_, err := nk.MatchGet(ctx, matchId)
 		if err != nil {
 			logger.Warn("Error getting match: %s", err.Error())
 			return in, nil
 		}
 
-		in.Message.(*rtapi.Envelope_MatchJoin).MatchJoin.Id = &rtapi.MatchJoin_MatchId{MatchId: matchId.(string)}
+		in.Message.(*rtapi.Envelope_MatchJoin).MatchJoin.Id = &rtapi.MatchJoin_MatchId{MatchId: matchId}
 
 		return in, nil
 	}); err != nil {
@@ -200,6 +203,11 @@ func handleMessageCreate_EchoTaxi_React(ctx context.Context, s *discordgo.Sessio
 // handleMessageReactionAdd handles the reaction add event
 // It checks if the reaction is a taxi, and if so, it arms the taxi redirect
 func handleMessageReactionAdd(ctx context.Context, s *discordgo.Session, reaction *discordgo.MessageReactionAdd, nk runtime.NakamaModule, logger runtime.Logger, hailRegistry *echoTaxiHailRegistry) {
+	node, found := ctx.Value(runtime.RUNTIME_CTX_NODE).(string)
+	if !found {
+		logger.Warn("Node not found in context")
+		return
+	}
 
 	if reaction.GuildID == "" || reaction.UserID == s.State.User.ID {
 		// ignore dm reactions and reactions from the bot
@@ -222,10 +230,11 @@ func handleMessageReactionAdd(ctx context.Context, s *discordgo.Session, reactio
 	// Ignore messages with a space in them. They likely have two or more links in them.
 	if !strings.Contains(message.Content, " ") && (strings.Contains(message.Content, echoTaxiPrefix) || strings.Contains(message.Content, sprockLinkPrefix)) {
 		// Extract the matchId from the message
-		matchId := matchIdRegex.FindString(message.Content)
-		if matchId == "" {
+		mid := matchIdRegex.FindString(message.Content)
+		if mid == "" {
 			return
 		}
+		matchId := mid + "." + node
 		// Verify that the match is in process
 		_, err := nk.MatchGet(ctx, matchId)
 		if err != nil {
