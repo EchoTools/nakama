@@ -13,6 +13,7 @@ require (
 	github.com/go-gorp/gorp/v3 v3.1.0
 	github.com/go-playground/validator/v10 v10.16.0
 	github.com/go-restruct/restruct v1.2.0-alpha
+	github.com/gofrs/uuid v4.0.0+incompatible
 	github.com/gofrs/uuid/v5 v5.0.0
 	github.com/golang-jwt/jwt/v4 v4.5.0
 	github.com/golang/snappy v0.0.4
@@ -48,16 +49,10 @@ require (
 )
 
 require (
-	github.com/agnivade/levenshtein v1.1.1 // indirect
-	github.com/google/uuid v1.6.0 // indirect
-	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/mattn/go-runewidth v0.0.12 // indirect
 	github.com/matttproud/golang_protobuf_extensions/v2 v2.0.0 // indirect
-	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/patrickmn/go-cache v2.1.0+incompatible // indirect
 	github.com/rivo/uniseg v0.2.0 // indirect
-	github.com/sosodev/duration v1.2.0 // indirect
-	github.com/vektah/gqlparser/v2 v2.5.11 // indirect
 	golang.org/x/exp v0.0.0-20230905200255-921286631fa9 // indirect
 	golang.org/x/sync v0.4.0 // indirect
 )
@@ -65,7 +60,6 @@ require (
 require (
 	cloud.google.com/go/compute v1.23.3 // indirect
 	cloud.google.com/go/compute/metadata v0.2.3 // indirect
-	github.com/99designs/gqlgen v0.17.45
 	github.com/RoaringBitmap/roaring v1.7.0 // indirect
 	github.com/axiomhq/hyperloglog v0.0.0-20230201085229-3ddf4bad03dc // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
@@ -85,7 +79,6 @@ require (
 	github.com/gabriel-vasile/mimetype v1.4.3 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
-	github.com/go-playground/validator v9.31.0+incompatible
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/google/pprof v0.0.0-20231229205709-960ae82b1e42 // indirect
