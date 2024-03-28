@@ -108,6 +108,7 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 		logger.Warn("Broadcaster is on a private IP, using this systems external IP", zap.String("privateIP", externalIP.String()), zap.String("externalIP", p.externalIP.String()))
 		externalIP = p.externalIP
 	}
+
 	// Get the broadcasters geoIP data
 	geoIPch := make(chan *ipinfo.Core)
 	go func() {
@@ -134,8 +135,21 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 	// Wait 2 seconds, then check
 
 	time.Sleep(2 * time.Second)
-	rtt, err := BroadcasterHealthcheck(config.Endpoint.ExternalIP, int(config.Endpoint.Port), 500*time.Millisecond)
-	if rtt < 0 || err != nil {
+
+	alive := false
+	for i := 0; i < 5; i++ {
+		rtt, err := BroadcasterHealthcheck(config.Endpoint.ExternalIP, int(config.Endpoint.Port), 500*time.Millisecond)
+		if err != nil {
+			logger.Warn("Failed to healthcheck broadcaster", zap.Error(err))
+			continue
+		}
+		if rtt >= 0 {
+			alive = true
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	if !alive {
 		// If the broadcaster is not available, send an error message to the user on discord
 		go sendDiscordError(err, discordId, logger, p.discordRegistry)
 		return errFailedRegistration(session, fmt.Errorf("broadcaster failed availability check: %v", err), evr.BroadcasterRegistration_Failure)

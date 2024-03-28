@@ -455,7 +455,7 @@ func (c *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config *Ma
 
 			for _, label := range available {
 				k := ipToKey(label.Broadcaster.Endpoint.ExternalIP)
-				v := fmt.Sprintf("%s.%s", label.MatchId, c.config.GetName()) // Parking match ID
+				v := fmt.Sprintf("%s.%s", label.MatchID, c.config.GetName()) // Parking match ID
 				availableByExtIP[k] = v
 			}
 
