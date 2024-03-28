@@ -76,7 +76,11 @@ func (p *EvrPipeline) broadcasterSessionEnded(ctx context.Context, logger *zap.L
 		return fmt.Errorf("failed process leave request")
 	}
 
-	return p.newParkingMatch(session, config)
+	go func() {
+		<-time.After(5 * time.Second)
+		p.newParkingMatch(session, config)
+	}()
+	return nil
 }
 
 // broadcasterRegistrationRequest is called when the broadcaster has sent a registration request.
