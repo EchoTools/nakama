@@ -492,7 +492,7 @@ IncomingLoop:
 			requests := make([]evr.Message, 0)
 			err := evr.Unmarshal(data, &requests)
 			if errors.Is(err, evr.ErrSymbolNotFound) {
-				s.logger.Error("Received unknown message", zap.Error(err))
+				s.logger.Warn("Received unknown message", zap.Error(err))
 			} else if err != nil {
 				// If the payload is malformed the client is incompatible or misbehaving, either way disconnect it now.
 				s.logger.Warn("Received malformed payload", zap.Binary("data", data), zap.Error(err))

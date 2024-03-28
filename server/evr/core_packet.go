@@ -22,10 +22,12 @@ var (
 
 	SymbolTypes = map[uint64]interface{}{
 		// This is the complete list of implemented message types.
-		0x4c1fed6cb4d96c64: nil, // (*SNSLobbySmiteEntrant)(nil),
-		0x013e99cb47eb3669: nil, // (*GenericMessage)(nil),
-		0x35d810572a230837: nil, // (*GenericMessageNotify)(nil),
-		0x80119c19ac72d695: (*MatchEnded)(nil),
+		/*
+			0x4c1fed6cb4d96c64: (*SNSLobbySmiteEntrant)(nil),
+			0x013e99cb47eb3669: (*GenericMessage)(nil),
+			0x35d810572a230837: (*GenericMessageNotify)(nil),
+			0x80119c19ac72d695: (*MatchEnded)(nil),
+		*/
 		0x0dabc24265508a82: (*ReconcileIAPResult)(nil),
 		0x1225133828150da3: (*OtherUserProfileFailure)(nil),
 		0x1230073227050cb5: (*OtherUserProfileSuccess)(nil),
