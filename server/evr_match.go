@@ -919,14 +919,14 @@ func (m *EvrMatch) lobbyPlayerSessionsRequest(ctx context.Context, logger runtim
 	// Prefer the match data over the message data message data, use the match data.
 	sender, ok := state.presences[in.GetUserId()]
 	if !ok {
-		logger.Warn("lobbyPlayerSessionsRequest: player not in match: %v", in.GetUserId())
+		logger.Warn("lobbyPlayerSessionsRequest: requesting player %s is not in match %v", in.GetUserId(), state.MatchId)
 	}
 	// build the player sessions list.
 	playerSessions := make([]uuid.UUID, 0, len(message.PlayerEvrIds))
 	for _, e := range message.PlayerEvrIds {
 		p, ok := state.presenceByEvrId[e.Token()]
 		if !ok {
-			logger.Warn("lobbyPlayerSessionsRequest: player not in match: %v", e)
+			logger.Warn("lobbyPlayerSessionsRequest: requested player not in match: %v", e)
 			continue
 		}
 		playerSessions = append(playerSessions, p.PlayerSession)

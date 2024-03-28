@@ -101,7 +101,7 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 	// Set the external address in the request (to use for the registration cache).
 	externalIP := net.ParseIP(session.ClientIP())
 	if p.ipCache.isPrivateIP(externalIP) {
-		logger.Warn("Broadcaster is on a private IP, using this systems external IP")
+		logger.Warn("Broadcaster is on a private IP, using this systems external IP", zap.String("privateIP", externalIP.String()), zap.String("externalIP", p.externalIP.String()))
 		externalIP = p.externalIP
 	}
 
