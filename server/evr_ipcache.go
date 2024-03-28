@@ -98,11 +98,39 @@ func (c *IPinfoCache) retrieveIPinfo(ctx context.Context, logger *zap.Logger, ip
 	return info, nil
 }
 
-func (c *IPinfoCache) DetermineExternalIPAddress() (net.IP, error) {
+func (c *IPinfoCache) GetIPinfo(ctx context.Context, logger *zap.Logger, ip net.IP) (*ipinfo.Core, error) {
+	c.mu.RLock()
+	info, ok := c.store[ip.String()]
+	c.mu.RUnlock()
+	if ok {
+		return info, nil
+	}
+
+	info, err := c.retrieveIPinfo(ctx, logger, ip)
+	if err != nil {
+		return nil, err
+	}
+
+	c.mu.Lock()
+	c.store[ip.String()] = info
+	c.mu.Unlock()
+	return info, nil
+}
+
+func DetermineLocalIPAddress() (net.IP, error) {
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		return nil, err
+	}
+	return conn.LocalAddr().(*net.UDPAddr).IP, nil
+}
+
+func DetermineExternalIPAddress() (net.IP, error) {
 	response, err := http.Get("https://api.ipify.org?format=text")
 	if err != nil {
 		return nil, err
 	}
+
 	defer response.Body.Close()
 
 	data, _ := io.ReadAll(response.Body)

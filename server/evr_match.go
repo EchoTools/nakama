@@ -184,14 +184,14 @@ type PlayerInfo struct {
 
 type MatchBroadcaster struct {
 	SessionID     string       `json:"sid,omitempty"`            // The broadcaster's Session ID
-	UserID        string       `json:"uid,omitempty"`            // The user id of the broadcaster.
+	OperatorID    string       `json:"oper,omitempty"`           // The user id of the broadcaster.
 	Channels      []uuid.UUID  `json:"channels,omitempty"`       // The channels this broadcaster will host matches for.
 	Endpoint      evr.Endpoint `json:"endpoint,omitempty"`       // The endpoint data used for connections.
 	VersionLock   uint64       `json:"version_lock,omitempty"`   // The game build version. (EVR)
 	AppId         string       `json:"app_id,omitempty"`         // The game app id. (EVR)
 	Region        evr.Symbol   `json:"region,omitempty"`         // The region the match is hosted in. (Matching Only) (EVR)
 	IPinfo        *ipinfo.Core `json:"ip_info,omitempty"`        // The IPinfo of the broadcaster.
-	ServerId      uint64       `json:"server_id,omitempty"`      // The server id of the broadcaster. (EVR)
+	ServerID      uint64       `json:"server_id,omitempty"`      // The server id of the broadcaster. (EVR)
 	PublisherLock bool         `json:"publisher_lock,omitempty"` // Publisher lock (EVR)
 	Platform      evr.Symbol   `json:"platform,omitempty"`       // The platform the match is hosted on. (EVR)
 	Tags          []string     `json:"tags,omitempty"`           // The tags given on the urlparam for the match.
@@ -309,7 +309,7 @@ func NewEvrMatchState(endpoint evr.Endpoint, config *MatchBroadcaster, sessionId
 	// the players. It would have to join first though.  - @thesprockee
 	initState := &EvrMatchState{
 		Broadcaster:             *config,
-		SpawnedBy:               config.UserID,
+		SpawnedBy:               config.OperatorID,
 		Open:                    false,
 		LobbyType:               UnassignedLobby,
 		Mode:                    evr.ModeUnloaded,
@@ -855,48 +855,70 @@ func (m *EvrMatch) updateLabel(dispatcher runtime.MatchDispatcher, state *EvrMat
 }
 
 func checkIfModerator(ctx context.Context, nk runtime.NakamaModule, userId string, channelId string) (bool, error) {
-	result, _, err := nk.GroupsList(ctx, "Global Moderators", "", nil, nil, 1, "")
-	if err != nil {
-		return false, fmt.Errorf("failed to list groups: %q", err)
-	}
-	modgroups := []string{}
-	for _, group := range result {
-		modgroups = append(modgroups, group.GetId())
-	}
-	// Pull the channel's group
-	result, err = nk.GroupsGetId(ctx, []string{channelId})
-	if err != nil {
-		return false, fmt.Errorf("failed to get group: %q", err)
-	}
-	if len(result) == 0 {
-		// No group found for this channel.
-		return false, fmt.Errorf("no group found for channel: %q", channelId)
-	}
-	cgroup := result[0]
-	// Extract the metadata from the group
-	metadata := GroupMetadata{}
-	if err := json.Unmarshal([]byte(cgroup.GetMetadata()), &metadata); err != nil {
-		return false, fmt.Errorf("failed to unmarshal group metadata: %q", err)
-	}
-
-	// Get the moderator group from the channel's metadata.
-	moderatorGroup := metadata.ModeratorGroupId
-	if moderatorGroup == "" {
-		return false, fmt.Errorf("no moderator group found for channel: %q", channelId)
-	} else {
-		modgroups = append(modgroups, moderatorGroup)
-	}
 
 	groups, _, err := nk.UserGroupsList(ctx, userId, 1, lo.ToPtr(2), "")
 	if err != nil {
 		return false, fmt.Errorf("failed to list user groups: %q", err)
 	}
+
+	modgroups := []string{}
+
+	result, _, err := nk.GroupsList(ctx, "Global Moderators", "", nil, nil, 1, "")
+	if err != nil {
+		return false, fmt.Errorf("failed to list groups: %q", err)
+	}
+	if len(result) == 0 {
+		return false, nil
+	} else {
+		modgroups = append(modgroups, result[0].GetId())
+	}
+
 	for _, group := range groups {
 		if lo.Contains(modgroups, group.GetGroup().GetId()) {
 			return true, nil
 		}
 	}
 	return false, nil
+	/*
+		modgroups := []string{}
+		for _, group := range result {
+			modgroups = append(modgroups, group.GetId())
+		}
+		// Pull the channel's group
+		result, err = nk.GroupsGetId(ctx, []string{channelId})
+		if err != nil {
+			return false, fmt.Errorf("failed to get group: %q", err)
+		}
+		if len(result) == 0 {
+			// No group found for this channel.
+			return false, fmt.Errorf("no group found for channel: %q", channelId)
+		}
+		cgroup := result[0]
+		// Extract the metadata from the group
+		metadata := GroupMetadata{}
+		if err := json.Unmarshal([]byte(cgroup.GetMetadata()), &metadata); err != nil {
+			return false, fmt.Errorf("failed to unmarshal group metadata: %q", err)
+		}
+
+		// Get the moderator group from the channel's metadata.
+		moderatorGroup := metadata.ModeratorGroupId
+		if moderatorGroup == "" {
+			return false, fmt.Errorf("no moderator group found for channel: %q", channelId)
+		} else {
+			modgroups = append(modgroups, moderatorGroup)
+		}
+
+		groups, _, err := nk.UserGroupsList(ctx, userId, 1, lo.ToPtr(2), "")
+		if err != nil {
+			return false, fmt.Errorf("failed to list user groups: %q", err)
+		}
+		for _, group := range groups {
+			if lo.Contains(modgroups, group.GetGroup().GetId()) {
+				return true, nil
+			}
+		}
+		return false, nil
+	*/
 }
 
 // lobbyPlayerSessionsRequest is called when a client requests the player sessions for a list of EchoVR IDs.

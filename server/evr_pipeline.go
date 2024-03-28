@@ -23,10 +23,13 @@ import (
 
 type EvrPipeline struct {
 	sync.RWMutex
+	ctx context.Context
 
-	ctx                  context.Context
-	node                 string
-	externalIP           net.IP
+	node              string
+	broadcasterUserID string // The userID used for broadcaster connections
+	externalIP        net.IP // Server's external IP for external connections
+	localIP           net.IP // Server's local IP for external connections
+
 	logger               *zap.Logger
 	db                   *sql.DB
 	config               Config
@@ -124,9 +127,20 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 			}
 		}
 	}()
-	externalIP, err := ipCache.DetermineExternalIPAddress()
+	localIP, err := DetermineLocalIPAddress()
 	if err != nil {
-		logger.Error("Failed to determine external IP address", zap.Error(err))
+		logger.Fatal("Failed to determine local IP address", zap.Error(err))
+	}
+
+	// loop until teh external IP is set
+	externalIP, err := DetermineExternalIPAddress()
+	if err != nil {
+		logger.Fatal("Failed to determine external IP address", zap.Error(err))
+	}
+
+	broadcasterUserID, _, _, err := nk.AuthenticateCustom(ctx, "000000000000000000", "broadcasthost", true)
+	if err != nil {
+		logger.Fatal("Failed to authenticate broadcaster", zap.Error(err))
 	}
 
 	evrPipeline := &EvrPipeline{
@@ -153,9 +167,11 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		runtimeModule:        nk,
 		runtimeLogger:        runtimeLogger,
 
-		discordRegistry: discordRegistry,
-		ipCache:         ipCache,
-		externalIP:      externalIP,
+		discordRegistry:   discordRegistry,
+		ipCache:           ipCache,
+		localIP:           localIP,
+		externalIP:        externalIP,
+		broadcasterUserID: broadcasterUserID,
 
 		matchmakingRegistry: NewMatchmakingRegistry(logger, matchRegistry, matchmaker, metrics, db, nk, config),
 		profileRegistry:     NewProfileRegistry(nk, db, runtimeLogger, discordRegistry),
@@ -478,5 +494,5 @@ func (p *EvrPipeline) attemptOutOfBandAuthentication(session *sessionWS) error {
 		return fmt.Errorf("Out of band Auth: %s: %v", discordId, err)
 	}
 
-	return session.BroadcasterSession(userId, "")
+	return session.BroadcasterSession(p.broadcasterUserID, "broadcaster")
 }
