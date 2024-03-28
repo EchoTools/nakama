@@ -442,13 +442,13 @@ func (c *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config *Ma
 				c.logger.Info("No servers are available/connected")
 			case codes.ResourceExhausted:
 				// Servers are available, but in use. This should signal to keep matchmaking.
-				c.logger.Info("Servers are available, but in use")
+				c.logger.Warn("Servers are available, but in use")
 			case codes.Internal:
 				c.logger.Error("Error listing unassigned lobbies", zap.Error(err))
 				return
 			}
 			if err != nil {
-				c.logger.Error("Error listing unassigned lobbies", zap.Error(err))
+				c.logger.Warn("Error listing unassigned lobbies", zap.Error(err))
 			}
 
 			availableByExtIP := make(map[string]string, len(available))
@@ -477,7 +477,10 @@ func (c *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config *Ma
 				}
 				break
 			}
-
+			if !found || matchID == "" {
+				// No match found
+				continue
+			}
 			// Found a match
 			label.SpawnedBy = SystemUserId
 			// Instruct the server to load the level
