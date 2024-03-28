@@ -1,6 +1,7 @@
 package server
 
 import (
+	"database/sql"
 	"fmt"
 	"net"
 	"testing"
@@ -23,9 +24,9 @@ func TestMatchmakingRegistry_GetPingCandidates(t *testing.T) {
 		t.Fatalf("error creating test match registry: %v", err)
 	}
 	config := NewConfig(logger)
-
+	nk := &TestRuntimeModule{}
 	matchmaker, _, _ := createTestMatchmaker(t, logger, false, nil)
-	r := NewMatchmakingRegistry(logger, matchRegistry, matchmaker, &testMetrics{}, config)
+	r := NewMatchmakingRegistry(logger, matchRegistry, matchmaker, &testMetrics{}, &sql.DB{}, nk, config)
 
 	// Create a user ID and endpoints for testing
 	userId := uuid.Must(uuid.NewV4())
@@ -150,7 +151,7 @@ func TestMatchmakingRegistry_UpdateBroadcasters(t *testing.T) {
 	}
 
 	matchmaker, _, _ := createTestMatchmaker(t, logger, false, nil)
-	r := NewMatchmakingRegistry(logger, matchRegistry, matchmaker, &testMetrics{}, NewConfig(logger))
+	r := NewMatchmakingRegistry(logger, matchRegistry, matchmaker, &testMetrics{}, &sql.DB{}, &TestRuntimeModule{}, NewConfig(logger))
 
 	// Create test endpoints
 	endpoints := []evr.Endpoint{
