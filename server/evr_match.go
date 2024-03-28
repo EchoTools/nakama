@@ -920,7 +920,6 @@ func (m *EvrMatch) lobbyPlayerSessionsRequest(ctx context.Context, logger runtim
 	sender, ok := state.presences[in.GetUserId()]
 	if !ok {
 		logger.Warn("lobbyPlayerSessionsRequest: player not in match: %v", in.GetUserId())
-		return state, fmt.Errorf("player not in match: %s", in.GetUserId())
 	}
 	// build the player sessions list.
 	playerSessions := make([]uuid.UUID, 0, len(message.PlayerEvrIds))
@@ -940,7 +939,6 @@ func (m *EvrMatch) lobbyPlayerSessionsRequest(ctx context.Context, logger runtim
 			success.VersionU(),
 			success.Version2(),
 			success.Version3(),
-			evr.NewSTcpConnectionUnrequireEvent(),
 		}
 		if err := m.dispatchMessages(ctx, logger, dispatcher, messages, []runtime.Presence{sender}, nil); err != nil {
 			logger.Error("lobbyPlayerSessionsRequest: failed to dispatch message: %v", err)
