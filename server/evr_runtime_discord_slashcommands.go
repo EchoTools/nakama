@@ -500,8 +500,8 @@ func RegisterSlashCommands(ctx context.Context, logger runtime.Logger, nk runtim
 				return
 			}
 			// Parse the address
-			ip := net.ParseIP(parts[0])
-			if ip == nil {
+			remoteIP := net.ParseIP(parts[0])
+			if remoteIP == nil {
 				// Try resolving the hostname
 				ips, err := net.LookupIP(parts[0])
 				if err != nil {
@@ -509,12 +509,12 @@ func RegisterSlashCommands(ctx context.Context, logger runtime.Logger, nk runtim
 					return
 				}
 				// Select the ipv4 address
-				for _, ip = range ips {
-					if ip.To4() != nil {
+				for _, remoteIP = range ips {
+					if remoteIP.To4() != nil {
 						break
 					}
 				}
-				if ip == nil {
+				if remoteIP == nil {
 					errFn(errors.New("failed to resolve address to an ipv4 address"))
 					return
 
@@ -549,7 +549,7 @@ func RegisterSlashCommands(ctx context.Context, logger runtime.Logger, nk runtim
 
 			// Do some basic validation
 			switch {
-			case ip == nil:
+			case remoteIP == nil:
 				errFn(errors.New("invalid IP address"))
 				return
 			case startPort < 0:
@@ -568,14 +568,19 @@ func RegisterSlashCommands(ctx context.Context, logger runtime.Logger, nk runtim
 				errFn(errors.New("end port must be less than or equal to 65535"))
 				return
 			}
-
+			localIP, err := DetermineLocalIPAddress()
 			if startPort == endPort {
 				count := 5
 				interval := 100 * time.Millisecond
 				timeout := 500 * time.Millisecond
 
+				if err != nil {
+					errFn(fmt.Errorf("failed to determine local IP address: %v", err))
+					return
+				}
+
 				// If a single port is specified, do not scan
-				rtts, err := BroadcasterRTTcheck(ip, startPort, count, interval, timeout)
+				rtts, err := BroadcasterRTTcheck(localIP, remoteIP, startPort, count, interval, timeout)
 				if err != nil {
 					errFn(fmt.Errorf("failed to healthcheck broadcaster: %v", err))
 					return
@@ -605,7 +610,7 @@ func RegisterSlashCommands(ctx context.Context, logger runtime.Logger, nk runtim
 
 						Data: &discordgo.InteractionResponseData{
 							Flags:   discordgo.MessageFlagsEphemeral,
-							Content: fmt.Sprintf("Broadcaster %s:%d RTTs (AVG: %.0f): %s", ip, startPort, avgrtt.Seconds()*1000, rttMessage),
+							Content: fmt.Sprintf("Broadcaster %s:%d RTTs (AVG: %.0f): %s", remoteIP, startPort, avgrtt.Seconds()*1000, rttMessage),
 						},
 					})
 					return
@@ -614,8 +619,9 @@ func RegisterSlashCommands(ctx context.Context, logger runtime.Logger, nk runtim
 					return
 				}
 			} else {
+
 				// Scan the address for responding broadcasters and then return the results as a newline-delimited list of ip:port
-				responses, _ := BroadcasterPortScan(ip, 6792, 6820, 500*time.Millisecond)
+				responses, _ := BroadcasterPortScan(localIP, remoteIP, 6792, 6820, 500*time.Millisecond)
 				if len(responses) == 0 {
 					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 						Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -630,7 +636,7 @@ func RegisterSlashCommands(ctx context.Context, logger runtime.Logger, nk runtim
 				// Craft a message that contains the newline-delimited list of the responding broadcasters
 				var b strings.Builder
 				for port, r := range responses {
-					b.WriteString(fmt.Sprintf("%s:%-5d %3.0fms\n", ip, port, r.Seconds()*1000))
+					b.WriteString(fmt.Sprintf("%s:%-5d %3.0fms\n", remoteIP, port, r.Seconds()*1000))
 				}
 
 				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{

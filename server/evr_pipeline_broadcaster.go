@@ -138,7 +138,7 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 
 	alive := false
 	for i := 0; i < 5; i++ {
-		rtt, err := BroadcasterHealthcheck(config.Endpoint.ExternalIP, int(config.Endpoint.Port), 500*time.Millisecond)
+		rtt, err := BroadcasterHealthcheck(p.localIP, config.Endpoint.ExternalIP, int(config.Endpoint.Port), 500*time.Millisecond)
 		if err != nil {
 			logger.Warn("Failed to healthcheck broadcaster", zap.Error(err))
 			continue
@@ -164,7 +164,7 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 
 	// Send the registration success message
 	if err := session.SendEvr([]evr.Message{
-		evr.NewBroadcasterRegistrationSuccess(config.ServerId, config.Endpoint.ExternalIP),
+		evr.NewBroadcasterRegistrationSuccess(config.ServerID, config.Endpoint.ExternalIP),
 		evr.NewSTcpConnectionUnrequireEvent(),
 	}); err != nil {
 		return errFailedRegistration(session, fmt.Errorf("failed to send lobby registration failure: %v", err), evr.BroadcasterRegistration_Failure)
@@ -234,9 +234,11 @@ func (p *EvrPipeline) authenticateBroadcaster(ctx context.Context, session *sess
 	if err != nil {
 		return "", "", fmt.Errorf("password authentication failure")
 	}
+	p.logger.Info("Authenticated broadcaster", zap.String("operator_userID", userId), zap.String("operator_username", username))
 
+	// The broadcaster is authenticated, set the userID as the broadcasterID and create a broadcaster session
 	// Broadcasters are not linked to the login session, they have a generic username and only use the serverdb path.
-	err = session.BroadcasterSession(userId, "broadcaster:"+username)
+	err = session.BroadcasterSession(p.broadcasterUserID, "broadcaster")
 	if err != nil {
 		return "", "", fmt.Errorf("failed to create broadcaster session: %v", err)
 	}
@@ -247,9 +249,9 @@ func (p *EvrPipeline) authenticateBroadcaster(ctx context.Context, session *sess
 func broadcasterConfig(userId, sessionId string, serverId uint64, internalIP, externalIP net.IP, port uint16, region evr.Symbol, versionLock uint64, tags []string) *MatchBroadcaster {
 
 	config := &MatchBroadcaster{
-		SessionID: sessionId,
-		UserID:    userId,
-		ServerId:  serverId,
+		SessionID:  sessionId,
+		OperatorID: userId,
+		ServerID:   serverId,
 		Endpoint: evr.Endpoint{
 			InternalIP: internalIP,
 			ExternalIP: externalIP,
@@ -384,26 +386,31 @@ func (p *EvrPipeline) newParkingMatch(session *sessionWS, config *MatchBroadcast
 	return nil
 }
 
-func BroadcasterHealthcheck(ip net.IP, port int, timeout time.Duration) (rtt time.Duration, err error) {
+func BroadcasterHealthcheck(localIP net.IP, remoteIP net.IP, port int, timeout time.Duration) (rtt time.Duration, err error) {
 	const (
 		pingRequestSymbol               uint64 = 0x997279DE065A03B0
 		RawPingAcknowledgeMessageSymbol uint64 = 0x4F7AE556E0B77891
 	)
 
-	addr := &net.UDPAddr{
-		IP:   ip,
+	laddr := &net.UDPAddr{
+		IP:   localIP,
+		Port: 0,
+	}
+
+	raddr := &net.UDPAddr{
+		IP:   remoteIP,
 		Port: int(port),
 	}
 	// Establish a UDP connection to the specified address
-	conn, err := net.DialUDP("udp", nil, addr)
+	conn, err := net.DialUDP("udp", laddr, raddr)
 	if err != nil {
-		return 0, fmt.Errorf("could not establish connection to %v: %v", addr, err)
+		return 0, fmt.Errorf("could not establish connection to %v: %v", raddr, err)
 	}
 	defer conn.Close() // Ensure the connection is closed when the function ends
 
 	// Set a deadline for the connection to prevent hanging indefinitely
 	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
-		return 0, fmt.Errorf("could not set deadline for connection to %v: %v", addr, err)
+		return 0, fmt.Errorf("could not set deadline for connection to %v: %v", raddr, err)
 	}
 
 	// Generate a random 8-byte number for the ping request
@@ -423,33 +430,33 @@ func BroadcasterHealthcheck(ip net.IP, port int, timeout time.Duration) (rtt tim
 
 	// Send the ping request to the broadcaster
 	if _, err := conn.Write(request); err != nil {
-		return 0, fmt.Errorf("could not send ping request to %v: %v", addr, err)
+		return 0, fmt.Errorf("could not send ping request to %v: %v", raddr, err)
 	}
 
 	// Read the response from the broadcaster
 	if _, err := conn.Read(response); err != nil {
 		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-			return -1, fmt.Errorf("ping request to %v timed out (>%dms)", addr, timeout.Milliseconds())
+			return -1, fmt.Errorf("ping request to %v timed out (>%dms)", raddr, timeout.Milliseconds())
 		}
-		return 0, fmt.Errorf("could not read ping response from %v: %v", addr, err)
+		return 0, fmt.Errorf("could not read ping response from %v: %v", raddr, err)
 	}
 	// Calculate the round trip time
 	rtt = time.Since(start)
 
 	// Check if the response's symbol matches the expected acknowledge symbol
 	if binary.LittleEndian.Uint64(response[:8]) != RawPingAcknowledgeMessageSymbol {
-		return 0, fmt.Errorf("received unexpected response from %v: %v", addr, response)
+		return 0, fmt.Errorf("received unexpected response from %v: %v", raddr, response)
 	}
 
 	// Check if the response's number matches the sent number, indicating a successful ping
 	if ok := binary.LittleEndian.Uint64(response[8:]) == binary.LittleEndian.Uint64(token); !ok {
-		return 0, fmt.Errorf("received unexpected response from %v: %v", addr, response)
+		return 0, fmt.Errorf("received unexpected response from %v: %v", raddr, response)
 	}
 
 	return rtt, nil
 }
 
-func BroadcasterPortScan(ip net.IP, startPort, endPort int, timeout time.Duration) (map[int]time.Duration, []error) {
+func BroadcasterPortScan(lIP net.IP, rIP net.IP, startPort, endPort int, timeout time.Duration) (map[int]time.Duration, []error) {
 
 	// Prepare slices to store results
 	rtts := make(map[int]time.Duration, endPort-startPort+1)
@@ -462,7 +469,7 @@ func BroadcasterPortScan(ip net.IP, startPort, endPort int, timeout time.Duratio
 		go func(port int) {
 			defer wg.Done()
 
-			rtt, err := BroadcasterHealthcheck(ip, port, timeout)
+			rtt, err := BroadcasterHealthcheck(lIP, rIP, port, timeout)
 			mu.Lock()
 			if err != nil {
 				errs[port-startPort] = err
@@ -477,7 +484,7 @@ func BroadcasterPortScan(ip net.IP, startPort, endPort int, timeout time.Duratio
 	return rtts, errs
 }
 
-func BroadcasterRTTcheck(ip net.IP, port, count int, interval, timeout time.Duration) (rtts []time.Duration, err error) {
+func BroadcasterRTTcheck(lIP net.IP, rIP net.IP, port, count int, interval, timeout time.Duration) (rtts []time.Duration, err error) {
 	// Create a slice to store round trip times (rtts)
 	rtts = make([]time.Duration, count)
 	// Set a timeout duration
@@ -494,7 +501,7 @@ func BroadcasterRTTcheck(ip net.IP, port, count int, interval, timeout time.Dura
 		// Loop 5 times
 		for i := 0; i < count; i++ {
 			// Perform a health check on the broadcaster
-			rtt, err := BroadcasterHealthcheck(ip, port, timeout)
+			rtt, err := BroadcasterHealthcheck(lIP, rIP, port, timeout)
 			if err != nil {
 				// If there's an error, set the rtt to -1
 				rtts[i] = -1
