@@ -188,8 +188,8 @@ func buildMatchQueryFromLabel(ml *EvrMatchState) string {
 	}
 
 	// MUST NOT much into the same lobby
-	if ml.MatchId != uuid.Nil {
-		qparts = append(qparts, MatchId(ml.MatchId).Query(MustNot, boost))
+	if ml.MatchID != uuid.Nil {
+		qparts = append(qparts, MatchId(ml.MatchID).Query(MustNot, boost))
 	}
 
 	// MUST be a broadcaster on a channel the user has access to
@@ -390,7 +390,7 @@ func (p *EvrPipeline) MatchCreate(ctx context.Context, session *sessionWS, msess
 	match := matches[0]
 
 	// Load the level.
-	parkingMatchId := fmt.Sprintf("%s.%s", match.MatchId, p.node)
+	parkingMatchId := fmt.Sprintf("%s.%s", match.MatchID, p.node)
 
 	label.SpawnedBy = session.UserID().String()
 	// Instruct the server to load the level

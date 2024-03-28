@@ -117,7 +117,7 @@ func (p *EvrPipeline) matchmakingLabelFromFindRequest(ctx context.Context, sessi
 	return &EvrMatchState{
 		Channel: &channel,
 
-		MatchId: request.MatchingSession, // The existing lobby/match that the player is in (if any)
+		MatchID: request.MatchingSession, // The existing lobby/match that the player is in (if any)
 		Mode:    request.Mode,
 		Level:   request.Level,
 		Open:    true,
@@ -205,7 +205,7 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 				return msession.Cancel(fmt.Errorf("failed to find backfill match: %w", err))
 			}
 			if label != nil {
-				msession.MatchIdCh <- label.MatchId.String()
+				msession.MatchIdCh <- label.MatchID.String()
 			}
 		}
 	}
@@ -295,7 +295,7 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, session *sessionWS, m
 			return err
 		}
 		if label != nil {
-			msession.MatchIdCh <- label.MatchId.String()
+			msession.MatchIdCh <- label.MatchID.String()
 			return nil
 		} else {
 			// Continue to try to backfill
