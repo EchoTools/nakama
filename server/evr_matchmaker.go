@@ -140,9 +140,6 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 	// Add the user to the matchmaker
 	sessionID := session.ID()
 	partyID := ""
-	minCount := 1
-	maxCount := 8
-	countMultiple := 2
 
 	presences := []*MatchmakerPresence{
 		{
@@ -153,6 +150,15 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 			SessionID: sessionID,
 		},
 	}
+	config, err := p.matchmakingRegistry.LoadMatchmakingConfig(ctx)
+	if err != nil {
+		return "", status.Errorf(codes.Internal, "Failed to load matchmaking config: %v", err)
+	}
+
+	query = fmt.Sprintf("%s %s", query, config.QueryAddon)
+	minCount := config.MinCount
+	maxCount := config.MaxCount
+	countMultiple := config.CountMultiple
 
 	ticket, _, err = session.matchmaker.Add(ctx, presences, sessionID.String(), partyID, query, minCount, maxCount, countMultiple, stringProps, numericProps)
 	if err != nil {

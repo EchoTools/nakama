@@ -16,6 +16,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -27,6 +28,7 @@ import (
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
+	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -217,6 +219,8 @@ type MatchmakingRegistry struct {
 	ctx         context.Context
 	ctxCancelFn context.CancelFunc
 
+	nk            runtime.NakamaModule
+	db            *sql.DB
 	logger        *zap.Logger
 	matchRegistry MatchRegistry
 	metrics       Metrics
@@ -229,12 +233,14 @@ type MatchmakingRegistry struct {
 
 }
 
-func NewMatchmakingRegistry(logger *zap.Logger, matchRegistry MatchRegistry, matchmaker Matchmaker, metrics Metrics, config Config) *MatchmakingRegistry {
+func NewMatchmakingRegistry(logger *zap.Logger, matchRegistry MatchRegistry, matchmaker Matchmaker, metrics Metrics, db *sql.DB, nk runtime.NakamaModule, config Config) *MatchmakingRegistry {
 	ctx, ctxCancelFn := context.WithCancel(context.Background())
 	c := &MatchmakingRegistry{
 		ctx:         ctx,
 		ctxCancelFn: ctxCancelFn,
 
+		nk:            nk,
+		db:            db,
 		logger:        logger,
 		matchRegistry: matchRegistry,
 		metrics:       metrics,
@@ -251,6 +257,68 @@ func NewMatchmakingRegistry(logger *zap.Logger, matchRegistry MatchRegistry, mat
 	return c
 }
 
+type MatchmakingConfig struct {
+	MinCount             int      `json:"min_count"`             // Minimum number of matches to create
+	MaxCount             int      `json:"max_count"`             // Maximum number of matches to create
+	CountMultiple        int      `json:"count_multiple"`        // Count multiple of the party size
+	QueryAddon           string   `json:"query_addon"`           // Additional query to add to the matchmaking query
+	PriorityPlayers      []string `json:"priority_players"`      // Prioritize these players
+	PriorityBroadcasters []string `json:"priority_broadcasters"` // Prioritize these broadcasters
+}
+
+func (r *MatchmakingRegistry) LoadMatchmakingConfig(ctx context.Context) (*MatchmakingConfig, error) {
+	objs, err := StorageReadObjects(ctx, r.logger, r.db, uuid.Nil, []*api.ReadStorageObjectId{
+		{
+			Collection: "Matchmaker",
+			Key:        "config",
+			UserId:     uuid.Nil.String(),
+		},
+	})
+	if err != nil {
+		r.logger.Error("Failed to read matchmaking config", zap.Error(err))
+		return nil, err
+	}
+	if len(objs.Objects) == 0 {
+		r.logger.Warn("No matchmaking config found, writing new one")
+		config := &MatchmakingConfig{
+			CountMultiple: 2,
+			MinCount:      1,
+			MaxCount:      8,
+		}
+		err := r.storeMatchmakingConfig(ctx, *config)
+		if err != nil {
+			r.logger.Error("Failed to write matchmaking config", zap.Error(err))
+		}
+		return config, err
+	}
+	config := &MatchmakingConfig{}
+	if err := json.Unmarshal([]byte(objs.Objects[0].Value), config); err != nil {
+		r.logger.Error("Failed to unmarshal matchmaking config", zap.Error(err))
+		return nil, err
+	}
+	return config, nil
+}
+
+func (r *MatchmakingRegistry) storeMatchmakingConfig(ctx context.Context, config MatchmakingConfig) error {
+	data, err := json.Marshal(config)
+	if err != nil {
+		r.logger.Error("Failed to marshal matchmaking config", zap.Error(err))
+	}
+	_, err = r.nk.StorageWrite(ctx, []*runtime.StorageWrite{
+		{
+			Collection:      "Matchmaker",
+			Key:             "config",
+			Value:           string(data),
+			PermissionRead:  0,
+			PermissionWrite: 0,
+		},
+	})
+	if err != nil {
+		r.logger.Error("Failed to write matchmaking config", zap.Error(err))
+	}
+	return err
+}
+
 func ipToKey(ip net.IP) string {
 	b := ip.To4()
 	return fmt.Sprintf("rtt%02x%02x%02x%02x", b[0], b[1], b[2], b[3])
@@ -261,12 +329,20 @@ func keyToIP(key string) net.IP {
 }
 
 func (c *MatchmakingRegistry) matchedEntriesFn(entries [][]*MatchmakerEntry) {
+	// Get the matchmaking config from the storage
+	config, err := c.LoadMatchmakingConfig(c.ctx)
+	if err != nil {
+		c.logger.Error("Failed to load matchmaking config", zap.Error(err))
+		return
+	}
+
 	for _, entrants := range entries {
-		go c.buildMatch(entrants)
+		go c.buildMatch(entrants, config)
 	}
 }
 
-func (c *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry) {
+func (c *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config *MatchmakingConfig) {
+
 	// Use the properties from the first entrant to get the channel
 	stringProperties := entrants[0].StringProperties
 	channel := uuid.FromStringOrNil(stringProperties["channel"])
@@ -383,33 +459,42 @@ func (c *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry) {
 				availableByExtIP[k] = v
 			}
 
+			// Convert the priority broadcasters to a list of rtt's
+			priority := make([]string, 0, len(config.PriorityBroadcasters))
+			for i, ip := range config.PriorityBroadcasters {
+				priority[i] = ipToKey(net.ParseIP(ip))
+			}
+
+			sorted := append(priority, sorted...)
+
 			var matchID string
 			var found bool
-
 			for _, k := range sorted {
 				// Get the endpoint
 				matchID, found = availableByExtIP[k]
 				if !found {
 					continue
 				}
-				// Found a match
-				label.SpawnedBy = SystemUserId
-				// Instruct the server to load the level
-				response, err := SignalMatch(c.ctx, c.matchRegistry, matchID, SignalStartSession, label)
-				if err != nil {
-					c.logger.Error("Error signaling match", zap.Error(err))
-					continue
-				} else if response == "session already started" {
-					c.logger.Info("Session already started", zap.String("matchId", matchID))
-					continue
-				}
-				time.Sleep(3 * time.Second) // Wait for the server to start the session
-				// Send the matchId to the session
-				for _, s := range sessions {
-					s.MatchIdCh <- matchID
-				}
-				return
+				break
 			}
+
+			// Found a match
+			label.SpawnedBy = SystemUserId
+			// Instruct the server to load the level
+			response, err := SignalMatch(c.ctx, c.matchRegistry, matchID, SignalStartSession, label)
+			if err != nil {
+				c.logger.Error("Error signaling match", zap.Error(err))
+				continue
+			} else if response == "session already started" {
+				c.logger.Info("Session already started", zap.String("matchId", matchID))
+				continue
+			}
+			time.Sleep(3 * time.Second) // Wait for the server to start the session
+			// Send the matchId to the session
+			for _, s := range sessions {
+				s.MatchIdCh <- matchID
+			}
+			return
 		}
 	}
 }
@@ -899,6 +984,9 @@ func (ms *MatchmakingSession) BuildQuery(latencies []EndpointWithRTT) (query str
 	chstr := strings.Replace(ms.Label.Channel.String(), "-", "", -1)
 	qparts = append(qparts, fmt.Sprintf("+properties.channel:%s", chstr))
 	stringProps["channel"] = chstr
+
+	// Add this user's ID to the string props
+	stringProps["userid"] = strings.Replace(ms.UserId.String(), "-", "", -1)
 
 	// Add a property of the external IP's RTT
 	for _, b := range latencies {

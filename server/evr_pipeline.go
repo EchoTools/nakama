@@ -157,7 +157,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		ipCache:         ipCache,
 		externalIP:      externalIP,
 
-		matchmakingRegistry: NewMatchmakingRegistry(logger, matchRegistry, matchmaker, metrics, config),
+		matchmakingRegistry: NewMatchmakingRegistry(logger, matchRegistry, matchmaker, metrics, db, nk, config),
 		profileRegistry:     NewProfileRegistry(nk, db, runtimeLogger, discordRegistry),
 
 		broadcasterRegistrationBySession: &MapOf[uuid.UUID, *MatchBroadcaster]{},
