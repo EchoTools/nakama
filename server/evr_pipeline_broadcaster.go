@@ -156,11 +156,13 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 	}
 
 	p.broadcasterRegistrationBySession.Store(session.ID(), config)
-
+	p.matchmakingRegistry.broadcasters.Store(config.Endpoint.ID(), config.Endpoint)
 	// Create a new parking match
 	if err := p.newParkingMatch(session, config); err != nil {
 		return errFailedRegistration(session, err, evr.BroadcasterRegistration_Failure)
 	}
+
+	// Add the broadcaster to teh list
 
 	// Send the registration success message
 	if err := session.SendEvr([]evr.Message{

@@ -208,7 +208,7 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 	// This gives the matchmaker a chance to find a full ideal match
 	backfillDelay := time.Duration(interval*idealMatchIntervals) * time.Second
 	if skipDelay {
-		backfillDelay = 15 * time.Second
+		backfillDelay = 5 * time.Second
 	}
 
 	// Check for a backfill match on a regular basis
@@ -237,7 +237,7 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 func (p *EvrPipeline) MatchCreateLoop(session *sessionWS, msession *MatchmakingSession, pruneDelay time.Duration) error {
 	ctx := msession.Context()
 	// set a timeout
-	stageTimer := time.NewTimer(pruneDelay)
+	//stageTimer := time.NewTimer(pruneDelay)
 	for {
 
 		select {
@@ -258,24 +258,24 @@ func (p *EvrPipeline) MatchCreateLoop(session *sessionWS, msession *MatchmakingS
 			msession.MatchIdCh <- matchID
 			return nil
 
-		case codes.NotFound:
-			fallthrough
-
-		case codes.ResourceExhausted, codes.Unavailable:
+		case codes.NotFound, codes.ResourceExhausted, codes.Unavailable:
 			// All the servers are being used.
-			select {
+			<-time.After(5 * time.Second)
+			/*
+				select {
 
-			case <-time.After(5 * time.Second):
-				// Wait 5 seconds before trying again.
-				continue
+				case <-time.After(5 * time.Second):
+					// Wait 5 seconds before trying again.
+					continue
 
-			case <-stageTimer.C:
-				// Move Stage 2: Kill a private lobby with only 1-2 people in it.
-				err := p.pruneMatches(ctx, session)
-				if err != nil {
-					return msession.Cancel(err)
+				case <-stageTimer.C:
+					// Move Stage 2: Kill a private lobby with only 1-2 people in it.
+					err := p.pruneMatches(ctx, session)
+					if err != nil {
+						return msession.Cancel(err)
+					}
 				}
-			}
+			*/
 		default:
 			return msession.Cancel(err)
 		}
@@ -565,7 +565,7 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 func (p *EvrPipeline) lobbyPendingSessionCancel(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	// Look up the matching session.
 	if matchingSession, ok := p.matchmakingRegistry.GetMatchingBySessionId(session.id); ok {
-		matchingSession.Cancel(ErrMatchmakingCancelled)
+		matchingSession.Cancel(ErrMatchmakingCancelledByPlayer)
 	}
 	return nil
 }
