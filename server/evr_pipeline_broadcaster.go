@@ -238,7 +238,7 @@ func (p *EvrPipeline) authenticateBroadcaster(ctx context.Context, session *sess
 
 	// The broadcaster is authenticated, set the userID as the broadcasterID and create a broadcaster session
 	// Broadcasters are not linked to the login session, they have a generic username and only use the serverdb path.
-	err = session.BroadcasterSession(p.broadcasterUserID, "broadcaster")
+	err = session.BroadcasterSession(userId, "broadcaster:"+username)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to create broadcaster session: %v", err)
 	}

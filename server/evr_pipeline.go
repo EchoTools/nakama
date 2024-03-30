@@ -489,10 +489,10 @@ func (p *EvrPipeline) attemptOutOfBandAuthentication(session *sessionWS) error {
 	}
 
 	// Do email authentication
-	userId, _, _, err = AuthenticateEmail(ctx, session.logger, session.pipeline.db, account.Email, userPassword, "", false)
+	userId, username, _, err := AuthenticateEmail(ctx, session.logger, session.pipeline.db, account.Email, userPassword, "", false)
 	if err != nil {
 		return fmt.Errorf("Out of band Auth: %s: %v", discordId, err)
 	}
 
-	return session.BroadcasterSession(p.broadcasterUserID, "broadcaster")
+	return session.BroadcasterSession(userId, "broadcaster:"+username)
 }

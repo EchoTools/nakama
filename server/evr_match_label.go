@@ -408,8 +408,3 @@ func (e EndpointId) Query(o QueryOperator, b int) string {
 		boost: b,
 	}.Escaped()
 }
-
-type EndpointRTT struct {
-	Endpoint evr.Endpoint
-	RTT      int
-}

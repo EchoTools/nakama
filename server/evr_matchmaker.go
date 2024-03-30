@@ -129,10 +129,15 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 	ctx := msession.Context()
 	// TODO FIXME Add a custom matcher for broadcaster matching
 	// Get a list of all the broadcasters
-	broadcasters := p.matchmakingRegistry.Broadcasters()
 
 	// Ping endpoints
-	allRTTs, err := p.PingEndpoints(ctx, session, msession, lo.Values(broadcasters))
+	endpoints := make([]evr.Endpoint, 0, 100)
+	p.matchmakingRegistry.broadcasters.Range(func(key string, value evr.Endpoint) bool {
+		endpoints = append(endpoints, value)
+		return true
+	})
+
+	allRTTs, err := p.PingEndpoints(ctx, session, msession, endpoints)
 	if err != nil {
 		return "", err
 	}
@@ -439,7 +444,7 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, session *sessionWS, matc
 
 	// Prepare the player session metadata.
 
-	// Get the IP info ffor this player from the ipinfo cache
+	// Get the IP info for this player from the ipinfo cache
 	ipinfo, err := p.ipCache.retrieveIPinfo(ctx, session.logger, net.ParseIP(session.ClientIP()))
 	if err != nil {
 		return fmt.Errorf("failed to get IPinfo: %w", err)
@@ -477,9 +482,9 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, session *sessionWS, matc
 			},
 		},
 	}
-
-	// Wait for the grace period before attempting to join the match.
-
+	p.matchBySession.Store(session.ID(), matchID)
+	p.matchByUserId.Store(session.UserID(), matchID)
+	p.matchByEvrId.Store(evrID.Token(), matchID)
 	// Send the join request.
 	if ok := session.pipeline.ProcessRequest(session.logger, session, msg); !ok {
 		return errors.New("failed to send join request")
@@ -489,19 +494,47 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, session *sessionWS, matc
 }
 
 // PingEndpoints pings the endpoints and returns the latencies.
-func (p *EvrPipeline) PingEndpoints(ctx context.Context, session *sessionWS, msession *MatchmakingSession, endpoints []evr.Endpoint) ([]EndpointWithRTT, error) {
+func (p *EvrPipeline) PingEndpoints(ctx context.Context, session *sessionWS, msession *MatchmakingSession, endpoints []evr.Endpoint) ([]LatencyMetric, error) {
 	if len(endpoints) == 0 {
 		return nil, nil
 	}
 
-	candidates := p.matchmakingRegistry.GetPingCandidates(session.UserID(), endpoints)
+	p.matchmakingRegistry.UpdateBroadcasters(endpoints)
+
+	// Get the candidates for pinging
+	candidates := msession.GetPingCandidates(endpoints...)
 	if len(candidates) > 0 {
 		if err := p.sendPingRequest(session, candidates); err != nil {
 			return nil, err
 		}
 
-		if err := p.waitForPingCompletion(msession); err != nil {
-			return nil, err
+		select {
+		case <-time.After(5 * time.Second):
+			return nil, ErrMatchmakingPingTimeout
+		case <-msession.Ctx.Done():
+			return nil, ErrMatchmakingCancelled
+		case results := <-msession.PingResultsCh:
+			cache := msession.LatencyCache
+			// Look up the endpoint in the cache and update the latency
+
+			// Add the latencies to the cache
+			for _, response := range results {
+
+				broadcaster, ok := p.matchmakingRegistry.broadcasters.Load(response.EndpointID())
+				if !ok {
+					session.logger.Warn("Endpoint not found in cache", zap.String("endpoint", response.EndpointID()))
+					continue
+				}
+
+				r := LatencyMetric{
+					Endpoint:  broadcaster,
+					RTT:       response.RTT(),
+					Timestamp: time.Now(),
+				}
+
+				cache.Store(r.ID(), r)
+			}
+
 		}
 	}
 
@@ -523,23 +556,11 @@ func (p *EvrPipeline) sendPingRequest(session *sessionWS, candidates []evr.Endpo
 	return nil
 }
 
-// waitForPingCompletion waits for the ping to complete or for an error to occur.
-func (p *EvrPipeline) waitForPingCompletion(msession *MatchmakingSession) error {
-	select {
-	case <-time.After(5 * time.Second):
-		return ErrMatchmakingPingTimeout
-	case <-msession.Ctx.Done():
-		return ErrMatchmakingCancelled
-	case err := <-msession.PingCompleteCh:
-		return err
-	}
-}
-
 // getEndpointLatencies returns the latencies for the given endpoints.
-func (p *EvrPipeline) getEndpointLatencies(session *sessionWS, endpoints []evr.Endpoint) []EndpointWithRTT {
+func (p *EvrPipeline) getEndpointLatencies(session *sessionWS, endpoints []evr.Endpoint) []LatencyMetric {
 	endpointRTTs := p.matchmakingRegistry.GetLatencies(session.UserID(), endpoints)
 
-	results := make([]EndpointWithRTT, 0, len(endpoints))
+	results := make([]LatencyMetric, 0, len(endpoints))
 	for _, e := range endpoints {
 		if l, ok := endpointRTTs[e.ID()]; ok {
 			results = append(results, l)
