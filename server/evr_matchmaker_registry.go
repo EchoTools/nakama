@@ -50,6 +50,7 @@ var (
 	ErrMatchmakingTimeout            = status.Errorf(codes.DeadlineExceeded, "Matchmaking timeout")
 	ErrMatchmakingNoAvailableServers = status.Errorf(codes.ResourceExhausted, "No available servers")
 	ErrMatchmakingCancelled          = status.Errorf(codes.Canceled, "Matchmaking cancelled")
+	ErrMatchmakingCancelledByPlayer  = status.Errorf(codes.Canceled, "Matchmaking cancelled by player")
 	ErrMatchmakingRestarted          = status.Errorf(codes.Canceled, "matchmaking restarted")
 )
 
@@ -371,20 +372,20 @@ func keyToIP(key string) net.IP {
 	return net.IPv4(b[0], b[1], b[2], b[3])
 }
 
-func (c *MatchmakingRegistry) matchedEntriesFn(entries [][]*MatchmakerEntry) {
+func (mr *MatchmakingRegistry) matchedEntriesFn(entries [][]*MatchmakerEntry) {
 	// Get the matchmaking config from the storage
-	config, err := c.LoadMatchmakingConfig(c.ctx)
+	config, err := mr.LoadMatchmakingConfig(mr.ctx)
 	if err != nil {
-		c.logger.Error("Failed to load matchmaking config", zap.Error(err))
+		mr.logger.Error("Failed to load matchmaking config", zap.Error(err))
 		return
 	}
 
 	for _, entrants := range entries {
-		go c.buildMatch(entrants, config)
+		go mr.buildMatch(entrants, config)
 	}
 }
 
-func (c *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config *MatchmakingConfig) {
+func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config *MatchmakingConfig) {
 
 	// Use the properties from the first entrant to get the channel
 	stringProperties := entrants[0].StringProperties
@@ -392,7 +393,7 @@ func (c *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config *Ma
 
 	// Get a map of all broadcasters by their key
 	broadcastersByExtIP := make(map[string]evr.Endpoint, 100)
-	c.broadcasters.Range(func(k string, v evr.Endpoint) bool {
+	mr.broadcasters.Range(func(k string, v evr.Endpoint) bool {
 		broadcastersByExtIP[k] = v
 		return true
 	})
@@ -438,13 +439,13 @@ func (c *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config *Ma
 	var label *EvrMatchState
 
 	for _, e := range entrants {
-		if s, ok := c.GetMatchingBySessionId(e.Presence.SessionID); ok {
+		if s, ok := mr.GetMatchingBySessionId(e.Presence.SessionID); ok {
 			label = s.Label
 			break
 		}
 	}
 	if label == nil {
-		c.logger.Error("No label found")
+		mr.logger.Error("No label found")
 		return // No label found
 	}
 
@@ -453,7 +454,7 @@ func (c *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config *Ma
 	// Get the players matching session and join them to the match
 	sessions := make([]*MatchmakingSession, 0, len(entrants))
 	for _, e := range entrants {
-		if s, ok := c.GetMatchingBySessionId(e.Presence.SessionID); ok {
+		if s, ok := mr.GetMatchingBySessionId(e.Presence.SessionID); ok {
 			sessions = append(sessions, s)
 		}
 	}
@@ -464,76 +465,23 @@ func (c *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config *Ma
 
 	for {
 		select {
-		case <-c.ctx.Done(): // Context cancelled
+		case <-mr.ctx.Done(): // Context cancelled
 			return
 
 		case <-timeout: // Timeout
 
-			c.logger.Info("Matchmaking timeout looking for an available server")
+			mr.logger.Info("Matchmaking timeout looking for an available server")
 			for _, s := range sessions {
 				s.CtxCancelFn(ErrMatchmakingNoAvailableServers)
 			}
 			return
 		case <-interval.C: // List all the unassigned lobbies on this channel
-
-			available, err := c.ListUnassignedLobbies(c.ctx, channel)
-
-			switch status.Code(err) {
-			case codes.Unavailable:
-				// No servers are available/connected. This might resolve itself if the system just came online.
-				c.logger.Info("No servers are available/connected")
-			case codes.ResourceExhausted:
-				// Servers are available, but in use. This should signal to keep matchmaking.
-				c.logger.Warn("Servers are available, but in use")
-			case codes.Internal:
-				c.logger.Error("Error listing unassigned lobbies", zap.Error(err))
-				return
-			}
+			matchID, err := mr.allocateBroadcaster(channel, config, sorted, label)
 			if err != nil {
-				c.logger.Warn("Error listing unassigned lobbies", zap.Error(err))
-			}
-
-			availableByExtIP := make(map[string]string, len(available))
-
-			for _, label := range available {
-				k := ipToKey(label.Broadcaster.Endpoint.ExternalIP)
-				v := fmt.Sprintf("%s.%s", label.MatchID, c.config.GetName()) // Parking match ID
-				availableByExtIP[k] = v
-			}
-
-			// Convert the priority broadcasters to a list of rtt's
-			priority := make([]string, 0, len(config.PriorityBroadcasters))
-			for i, ip := range config.PriorityBroadcasters {
-				priority[i] = ipToKey(net.ParseIP(ip))
-			}
-
-			sorted := append(priority, sorted...)
-
-			var matchID string
-			var found bool
-			for _, k := range sorted {
-				// Get the endpoint
-				matchID, found = availableByExtIP[k]
-				if !found {
-					continue
-				}
-				break
-			}
-			if !found || matchID == "" {
-				// No match found
+				mr.logger.Error("Error allocating broadcaster", zap.Error(err))
 				continue
 			}
-			// Found a match
-			label.SpawnedBy = SystemUserId
-			// Instruct the server to load the level
-			response, err := SignalMatch(c.ctx, c.matchRegistry, matchID, SignalStartSession, label)
-			if err != nil {
-				c.logger.Error("Error signaling match", zap.Error(err))
-				continue
-			} else if response == "session already started" {
-				c.logger.Info("Session already started", zap.String("matchId", matchID))
-				continue
-			}
+
 			time.Sleep(3 * time.Second) // Wait for the server to start the session
 			// Send the matchId to the session
 			for _, s := range sessions {
@@ -544,8 +492,57 @@ func (c *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config *Ma
 	}
 }
 
+func (mr *MatchmakingRegistry) allocateBroadcaster(channel uuid.UUID, config *MatchmakingConfig, sorted []string, label *EvrMatchState) (string, error) {
+	// Lock the broadcasters so that they aren't double allocated
+	mr.Lock()
+	defer mr.Unlock()
+	available, err := mr.ListUnassignedLobbies(mr.ctx, channel)
+	if err != nil {
+		return "", err
+	}
+
+	availableByExtIP := make(map[string]string, len(available))
+
+	for _, label := range available {
+		k := ipToKey(label.Broadcaster.Endpoint.ExternalIP)
+		v := fmt.Sprintf("%s.%s", label.MatchID, mr.config.GetName()) // Parking match ID
+		availableByExtIP[k] = v
+	}
+
+	// Convert the priority broadcasters to a list of rtt's
+	priority := make([]string, 0, len(config.PriorityBroadcasters))
+	for i, ip := range config.PriorityBroadcasters {
+		priority[i] = ipToKey(net.ParseIP(ip))
+	}
+
+	sorted = append(priority, sorted...)
+
+	var matchID string
+	var found bool
+	for _, k := range sorted {
+		// Get the endpoint
+		matchID, found = availableByExtIP[k]
+		if !found {
+			continue
+		}
+		break
+	}
+	// Found a match
+	label.SpawnedBy = SystemUserId
+	// Instruct the server to load the level
+	response, err := SignalMatch(mr.ctx, mr.matchRegistry, matchID, SignalStartSession, label)
+	if err != nil {
+		return "", fmt.Errorf("error signaling match: %s: %v", response, err)
+	}
+	if response != "session started" {
+		return "", fmt.Errorf("error signaling match: %s", response)
+	}
+
+	return matchID, nil
+}
+
 func (c *MatchmakingRegistry) rebuildBroadcasters() {
-	ticker := time.NewTicker(1 * time.Minute)
+	ticker := time.NewTicker(20 * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
@@ -576,7 +573,7 @@ func (c *MatchmakingRegistry) updateBroadcasters() {
 }
 
 func (c *MatchmakingRegistry) ListUnassignedLobbies(ctx context.Context, channel uuid.UUID) ([]*EvrMatchState, error) {
-	// TODO Move this into the matchmaking registry
+
 	qparts := make([]string, 0, 10)
 
 	// MUST be an unassigned lobby
@@ -599,18 +596,7 @@ func (c *MatchmakingRegistry) ListUnassignedLobbies(ctx context.Context, channel
 
 	// If no servers are available, return immediately.
 	if len(matches) == 0 {
-		// Check if there are *any* matches
-		matches, err := c.listMatches(ctx, 100, 1, MatchMaxSize, "*")
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "Failed to find matches: %v", err)
-		}
-		if len(matches) == 0 {
-			// No servers are available/connected.
-			return nil, status.Errorf(codes.Unavailable, "No available broadcasters")
-		} else {
-			// Servers are available, but in use. This should signal to keep matchmaking.
-			return nil, status.Errorf(codes.ResourceExhausted, "No servers exist")
-		}
+		return nil, ErrMatchmakingNoAvailableServers
 	}
 
 	// Create a slice containing the matches' labels
@@ -701,8 +687,6 @@ func (r *MatchmakingRegistry) GetCache(userId uuid.UUID) *LatencyCache {
 
 // UpdateBroadcasters updates the broadcasters map
 func (r *MatchmakingRegistry) UpdateBroadcasters(endpoints []evr.Endpoint) {
-	r.Lock()
-	defer r.Unlock()
 	for _, e := range endpoints {
 		r.broadcasters.Store(e.ID(), e)
 	}

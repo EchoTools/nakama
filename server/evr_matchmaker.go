@@ -58,6 +58,7 @@ func (p *EvrPipeline) ListUnassignedLobbies(ctx context.Context, session *sessio
 
 	limit := 100
 	minSize, maxSize := 1, 1 // Only the 1 broadcaster should be there.
+	session.logger.Debug("Listing unassigned lobbies", zap.String("query", query))
 	matches, err := listMatches(ctx, p, limit, minSize, maxSize, query)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Failed to find matches: %v", err)
@@ -65,7 +66,7 @@ func (p *EvrPipeline) ListUnassignedLobbies(ctx context.Context, session *sessio
 
 	// If no servers are available, return immediately.
 	if len(matches) == 0 {
-		return nil, status.Errorf(codes.Unavailable, "No available servers")
+		return nil, ErrMatchmakingNoAvailableServers
 	}
 
 	// Create a slice containing the matches' labels
@@ -240,6 +241,7 @@ func (p *EvrPipeline) MatchSearch(ctx context.Context, logger *zap.Logger, sessi
 	logger = logger.With(zap.String("query", query), zap.Any("label", ml))
 
 	// Search for possible matches
+	logger.Debug("Searching for matches")
 	matches, err := listMatches(ctx, p, limit, minSize, maxSize, query)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Failed to find matches: %v", err)
@@ -382,6 +384,9 @@ func (p *EvrPipeline) MatchSort(ctx context.Context, session *sessionWS, msessio
 // MatchCreate creates a match on an available unassigned broadcaster using the given label
 func (p *EvrPipeline) MatchCreate(ctx context.Context, session *sessionWS, msession *MatchmakingSession, label *EvrMatchState) (matchId string, err error) {
 	label.MaxSize = MatchMaxSize
+	// Lock the broadcaster's until the match is created
+	p.matchmakingRegistry.Lock()
+	defer p.matchmakingRegistry.Unlock()
 	// TODO Move this into the matchmaking registry
 	// Create a new match
 	matches, err := p.ListUnassignedLobbies(ctx, session, label)
@@ -396,7 +401,7 @@ func (p *EvrPipeline) MatchCreate(ctx context.Context, session *sessionWS, msess
 	}
 
 	if len(matches) == 0 {
-		return "", status.Errorf(codes.ResourceExhausted, "No available servers")
+		return "", ErrMatchmakingNoAvailableServers
 	}
 
 	// Join the lowest rtt match
