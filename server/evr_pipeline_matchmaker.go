@@ -451,16 +451,6 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 
 	result := NewMatchmakingResponse(request.Mode, request.Channel)
 
-	// If the channel is nil, use the players primary channel
-	/*
-
-	 */
-	// Check for suspensions on this channel. The user will not be allowed to create lobby's
-	if authorized, err := p.authorizeMatchmaking(ctx, logger, session, request.Channel); !authorized {
-		return result.SendErrorToSession(session, err)
-	} else if err != nil {
-		logger.Warn("Failed to authorize matchmaking, allowing player to continue. ", zap.Error(err))
-	}
 	// Validate that the channel is in the user's guilds
 	if request.Channel == uuid.Nil || !lo.Contains(groups, request.Channel) {
 		if len(priorities) > 0 {
@@ -473,8 +463,15 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 			// If the player has no guilds,
 			return NewMatchmakingResponse(request.Mode, uuid.Nil).SendErrorToSession(session, status.Errorf(codes.PermissionDenied, "No guilds available"))
 		}
+
 	}
 
+	// Check for suspensions on this channel. The user will not be allowed to create lobby's
+	if authorized, err := p.authorizeMatchmaking(ctx, logger, session, request.Channel); !authorized {
+		return result.SendErrorToSession(session, err)
+	} else if err != nil {
+		logger.Warn("Failed to authorize matchmaking, allowing player to continue. ", zap.Error(err))
+	}
 	ml := &EvrMatchState{
 
 		Level:           request.Level,
