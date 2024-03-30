@@ -138,7 +138,7 @@ func EchoTaxiRuntimeModule(ctx context.Context, logger runtime.Logger, db *sql.D
 		userId := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
 
 		// Do not lookup hails for broadcasters.
-		if username == "broadcaster" {
+		if strings.HasPrefix(username, "broadcaster") {
 			return in, nil
 		}
 

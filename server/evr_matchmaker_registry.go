@@ -37,8 +37,9 @@ import (
 )
 
 const (
-	findAttemptsExpiry = time.Minute * 3
-	LatencyCacheExpiry = time.Minute * 3 * 60 // 3 hours
+	findAttemptsExpiry          = time.Minute * 3
+	LatencyCacheRefreshInterval = time.Hour * 3
+	LatencyCacheExpiry          = time.Hour * 72 // 3 hours
 
 	MatchmakingStorageCollection = "MatchmakingRegistry"
 	LatencyCacheStorageKey       = "LatencyCache"
@@ -52,19 +53,92 @@ var (
 	ErrMatchmakingRestarted          = status.Errorf(codes.Canceled, "matchmaking restarted")
 )
 
+type LatencyMetric struct {
+	Endpoint  evr.Endpoint
+	RTT       time.Duration
+	Timestamp time.Time
+}
+
+// String returns a string representation of the endpoint
+func (e *LatencyMetric) String() string {
+	return fmt.Sprintf("EndpointRTT(InternalIP=%s, ExternalIP=%s, RTT=%s, Timestamp=%s)", e.Endpoint.InternalIP, e.Endpoint.ExternalIP, e.RTT, e.Timestamp)
+}
+
+// ID returns a unique identifier for the endpoint
+func (e *LatencyMetric) ID() string {
+	return fmt.Sprintf("%s:%s", e.Endpoint.InternalIP.String(), e.Endpoint.ExternalIP.String())
+}
+
+// The key used for matchmaking properties
+func (e *LatencyMetric) AsProperty() (string, float64) {
+	k := fmt.Sprintf("rtt%s", ipToKey(e.Endpoint.ExternalIP))
+	v := float64(e.RTT / time.Millisecond)
+	return k, v
+}
+
+// LatencyCache is a cache of broadcaster RTTs for a user
+type LatencyCache struct {
+	MapOf[string, LatencyMetric]
+}
+
+func NewLatencyCache() *LatencyCache {
+	return &LatencyCache{
+		MapOf[string, LatencyMetric]{},
+	}
+}
+
+func (c *LatencyCache) SelectPingCandidates(endpoints ...evr.Endpoint) []evr.Endpoint {
+	// Initialize candidates with a capacity of 16
+	metrics := make([]LatencyMetric, 0, len(endpoints))
+	for _, endpoint := range endpoints {
+		id := endpoint.ID()
+		e, ok := c.Load(id)
+		if !ok {
+			e = LatencyMetric{
+				Endpoint:  endpoint,
+				RTT:       0,
+				Timestamp: time.Now(),
+			}
+			c.Store(id, e)
+		}
+		metrics = append(metrics, e)
+	}
+
+	sort.SliceStable(endpoints, func(i, j int) bool {
+		// sort by expired first
+		if time.Since(metrics[i].Timestamp) > LatencyCacheRefreshInterval {
+			// Then by those that have responded
+			if metrics[j].RTT > 0 {
+				// Then by timestamp
+				return metrics[i].Timestamp.Before(metrics[j].Timestamp)
+			}
+		}
+		// Otherwise, sort by RTT
+		return metrics[i].RTT < metrics[j].RTT
+	})
+
+	if len(endpoints) == 0 {
+		return []evr.Endpoint{}
+	}
+	if len(endpoints) > 16 {
+		endpoints = endpoints[:16]
+	}
+	return endpoints
+}
+
 // MatchmakingSession represents a user session looking for a match.
 type MatchmakingSession struct {
 	sync.RWMutex
-	Ctx            context.Context
-	CtxCancelFn    context.CancelCauseFunc
-	Logger         *zap.Logger
-	UserId         uuid.UUID
-	MatchIdCh      chan string // Channel for MatchId to join.
-	PingCompleteCh chan error  // Channel for ping completion.
-	Expiry         time.Time
-	Label          *EvrMatchState
-	Tickets        []string // Matchmaking tickets
-
+	Ctx           context.Context
+	CtxCancelFn   context.CancelCauseFunc
+	Logger        *zap.Logger
+	UserId        uuid.UUID
+	MatchIdCh     chan string                   // Channel for MatchId to join.
+	PingResultsCh chan []evr.EndpointPingResult // Channel for ping completion.
+	Expiry        time.Time
+	Label         *EvrMatchState
+	Tickets       []string // Matchmaking tickets
+	LatencyCache  *LatencyCache
 }
 
 // Cancel cancels the matchmaking session with a given reason, and returns the reason.
@@ -113,19 +187,6 @@ func (s *MatchmakingSession) Context() context.Context {
 	s.RLock()
 	defer s.RUnlock()
 	return s.Ctx
-}
-
-// LatencyCache represents a cache for latencies.
-type LatencyCache struct {
-	sync.RWMutex
-	Store map[string]EndpointWithRTT
-}
-
-// NewLatencyCache initializes a new latency cache.
-func NewLatencyCache() *LatencyCache {
-	return &LatencyCache{
-		Store: make(map[string]EndpointWithRTT),
-	}
 }
 
 // MatchmakingResult represents the outcome of a matchmaking request
@@ -194,24 +255,6 @@ func (mr *MatchmakingResult) SendErrorToSession(s *sessionWS, err error) error {
 	return s.SendEvr(payload)
 }
 
-// EndpointWithRTT is a struct that holds an endpoint and its latency
-type EndpointWithRTT struct {
-	Endpoint  evr.Endpoint
-	RTT       time.Duration
-	Timestamp time.Time
-}
-
-// String returns a string representation of the endpoint
-func (e *EndpointWithRTT) String() string {
-	return fmt.Sprintf("EndpointWithLatency(InternalIP=%s, ExternalIP=%s, RTT=%s, Timestamp=%s)", e.Endpoint.InternalIP, e.Endpoint.ExternalIP, e.RTT, e.Timestamp)
-}
-
-// ID returns a unique identifier for the endpoint
-func (e *EndpointWithRTT) ID() string {
-	s := fmt.Sprintf("%s:%s", e.Endpoint.InternalIP, e.Endpoint.ExternalIP)
-	return s
-}
-
 // MatchmakingRegistry is a registry for matchmaking sessions
 type MatchmakingRegistry struct {
 	sync.RWMutex
@@ -226,9 +269,9 @@ type MatchmakingRegistry struct {
 	metrics       Metrics
 	config        Config
 
-	matchingBySession map[uuid.UUID]*MatchmakingSession
-	cacheByUserId     map[uuid.UUID]*LatencyCache
-	broadcasters      map[string]evr.Endpoint // EndpointID -> Endpoint
+	matchingBySession *MapOf[uuid.UUID, *MatchmakingSession]
+	cacheByUserId     *MapOf[uuid.UUID, *LatencyCache]
+	broadcasters      *MapOf[string, evr.Endpoint] // EndpointID -> Endpoint
 	// FIXME This is ugly. make a registry.
 
 }
@@ -246,9 +289,9 @@ func NewMatchmakingRegistry(logger *zap.Logger, matchRegistry MatchRegistry, mat
 		metrics:       metrics,
 		config:        config,
 
-		matchingBySession: make(map[uuid.UUID]*MatchmakingSession, 1000),
-		broadcasters:      make(map[string]evr.Endpoint, 200),
-		cacheByUserId:     make(map[uuid.UUID]*LatencyCache, 1000),
+		matchingBySession: &MapOf[uuid.UUID, *MatchmakingSession]{},
+		cacheByUserId:     &MapOf[uuid.UUID, *LatencyCache]{},
+		broadcasters:      &MapOf[string, evr.Endpoint]{},
 	}
 	// Set the matchmaker's OnMatchedEntries callback
 	matchmaker.OnMatchedEntries(c.matchedEntriesFn)
@@ -282,7 +325,7 @@ func (r *MatchmakingRegistry) LoadMatchmakingConfig(ctx context.Context) (*Match
 		r.logger.Warn("No matchmaking config found, writing new one")
 		config := &MatchmakingConfig{
 			CountMultiple: 2,
-			MinCount:      1,
+			MinCount:      2,
 			MaxCount:      8,
 		}
 		err := r.storeMatchmakingConfig(ctx, *config)
@@ -347,16 +390,15 @@ func (c *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config *Ma
 	stringProperties := entrants[0].StringProperties
 	channel := uuid.FromStringOrNil(stringProperties["channel"])
 
-	allBroadcasters := c.BroadcasterEndpoints()
 	// Get a map of all broadcasters by their key
-	broadcastersByExtIP := make(map[string]evr.Endpoint, len(allBroadcasters))
-	for _, v := range allBroadcasters {
-		k := ipToKey(v.ExternalIP)
+	broadcastersByExtIP := make(map[string]evr.Endpoint, 100)
+	c.broadcasters.Range(func(k string, v evr.Endpoint) bool {
 		broadcastersByExtIP[k] = v
-	}
+		return true
+	})
 
 	// Create a map of each endpoint and it's latencies to each entrant
-	latencies := make(map[string][]int, len(allBroadcasters))
+	latencies := make(map[string][]int, 100)
 	for _, e := range entrants {
 		nprops := e.NumericProperties
 		//sprops := e.StringProperties
@@ -418,7 +460,7 @@ func (c *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config *Ma
 
 	// Loop until a server becomes available or matchmaking times out.
 	timeout := time.After(10 * time.Minute)
-	interval := time.NewTicker(3 * time.Second)
+	interval := time.NewTicker(10 * time.Second)
 
 	for {
 		select {
@@ -502,12 +544,6 @@ func (c *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config *Ma
 	}
 }
 
-func (c *MatchmakingRegistry) Broadcasters() map[string]evr.Endpoint {
-	c.RLock()
-	defer c.RUnlock()
-	return c.broadcasters
-}
-
 func (c *MatchmakingRegistry) rebuildBroadcasters() {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
@@ -526,7 +562,6 @@ func (c *MatchmakingRegistry) updateBroadcasters() {
 	if err != nil {
 		c.logger.Error("Error listing matches", zap.Error(err))
 	}
-	endpoints := make(map[string]evr.Endpoint)
 	// Get the endpoints from the match labels
 	for _, match := range matches {
 		l := match.GetLabel().GetValue()
@@ -536,12 +571,8 @@ func (c *MatchmakingRegistry) updateBroadcasters() {
 			continue
 		}
 		id := s.Broadcaster.Endpoint.ID()
-		endpoints[id] = s.Broadcaster.Endpoint
+		c.broadcasters.Store(id, s.Broadcaster.Endpoint)
 	}
-
-	c.Lock()
-	c.broadcasters = endpoints
-	c.Unlock()
 }
 
 func (c *MatchmakingRegistry) ListUnassignedLobbies(ctx context.Context, channel uuid.UUID) ([]*EvrMatchState, error) {
@@ -596,7 +627,7 @@ func (c *MatchmakingRegistry) ListUnassignedLobbies(ctx context.Context, channel
 }
 
 // GetPingCandidates returns a list of endpoints to ping for a user. It also updates the broadcasters.
-func (r *MatchmakingRegistry) GetPingCandidates(userId uuid.UUID, endpoints []evr.Endpoint) (candidates []evr.Endpoint) {
+func (m *MatchmakingSession) GetPingCandidates(endpoints ...evr.Endpoint) (candidates []evr.Endpoint) {
 
 	const LatencyCacheExpiry = 6 * time.Hour
 
@@ -608,30 +639,46 @@ func (r *MatchmakingRegistry) GetPingCandidates(userId uuid.UUID, endpoints []ev
 		return candidates
 	}
 
-	// Update the existing broadcaster list with these endpoints
-	r.UpdateBroadcasters(endpoints)
-
 	// Retrieve the user's cache and lock it for use
-	cache := r.GetCache(userId)
-	cache.Lock()
-	defer cache.Unlock()
+	cache := m.LatencyCache
 
 	// Get the endpoint latencies from the cache
-	cacheEntries := make([]EndpointWithRTT, 0, len(endpoints))
-	// Iterate over the endpoints
+	entries := make([]LatencyMetric, 0, len(endpoints))
+
+	// Iterate over the endpoints, and load/create their cache entry
 	for _, endpoint := range endpoints {
 		id := endpoint.ID()
-		e, exists := cache.Store[id]
-		if !exists || e.RTT == 0 || time.Since(e.Timestamp) > LatencyCacheExpiry {
-			e = EndpointWithRTT{
+
+		e, ok := cache.Load(id)
+		if !ok {
+			e = LatencyMetric{
 				Endpoint:  endpoint,
 				RTT:       0,
 				Timestamp: time.Now(),
 			}
-			cache.Store[id] = e
+			cache.Store(id, e)
 		}
+		entries = append(entries, e)
+	}
 
-		cacheEntries = append(cacheEntries, e)
+	// If there are no cache entries, return the empty endpoints
+	if len(entries) == 0 {
+		return candidates
+	}
+
+	// Sort the cache entries by timestamp in descending order.
+	// This will prioritize the oldest endpoints first.
+	sort.SliceStable(entries, func(i, j int) bool {
+		return entries[i].RTT == 0 && entries[i].Timestamp.Before(entries[j].Timestamp)
+	})
+
+	// Fill the rest of the candidates with the oldest entries
+	for _, e := range entries {
+		endpoint := e.Endpoint
+		candidates = append(candidates, endpoint)
+		if len(candidates) >= 16 {
+			break
+		}
 	}
 
 	/*
@@ -643,42 +690,12 @@ func (r *MatchmakingRegistry) GetPingCandidates(userId uuid.UUID, endpoints []ev
 		}
 	*/
 
-	// If there are no cache entries, return the empty endpoints
-	if len(cacheEntries) == 0 {
-		return candidates
-	}
-
-	// Sort the cache entries by timestamp in descending order.
-	// This will prioritize the oldest endpoints first.
-	r.sortCacheEntriesByTimestamp(cacheEntries)
-
-	// Fill the rest of the candidates with the oldest entries
-	for _, e := range cacheEntries {
-		endpoint := e.Endpoint
-		candidates = append(candidates, endpoint)
-		if len(candidates) >= 16 {
-			break
-		}
-	}
 	return candidates
-}
-
-// sortCacheEntriesByTimestamp sorts the cache entries by timestamp in descending order
-func (r *MatchmakingRegistry) sortCacheEntriesByTimestamp(entries []EndpointWithRTT) {
-	sort.SliceStable(entries, func(i, j int) bool {
-		return entries[i].Timestamp.After(entries[j].Timestamp)
-	})
 }
 
 // GetCache returns the latency cache for a user
 func (r *MatchmakingRegistry) GetCache(userId uuid.UUID) *LatencyCache {
-	r.Lock()
-	defer r.Unlock()
-	cache, ok := r.cacheByUserId[userId]
-	if !ok {
-		cache = NewLatencyCache()
-		r.cacheByUserId[userId] = cache
-	}
+	cache, _ := r.cacheByUserId.LoadOrStore(userId, &LatencyCache{})
 	return cache
 }
 
@@ -687,7 +704,7 @@ func (r *MatchmakingRegistry) UpdateBroadcasters(endpoints []evr.Endpoint) {
 	r.Lock()
 	defer r.Unlock()
 	for _, e := range endpoints {
-		r.broadcasters[e.ID()] = e
+		r.broadcasters.Store(e.ID(), e)
 	}
 }
 
@@ -707,15 +724,17 @@ func (c *MatchmakingRegistry) listMatches(ctx context.Context, limit int, minSiz
 	return matches, err
 }
 
+type LatencyCacheStorageObject struct {
+	Entries map[string]LatencyMetric `json:"entries"`
+}
+
 // LoadLatencyCache loads the latency cache for a user
-func (c *MatchmakingRegistry) LoadLatencyCache(ctx context.Context, logger *zap.Logger, session *sessionWS, msession *MatchmakingSession) error {
+func (c *MatchmakingRegistry) LoadLatencyCache(ctx context.Context, logger *zap.Logger, session *sessionWS, msession *MatchmakingSession) (*LatencyCache, error) {
 	// Load the latency cache
 	// retrieve the document from storage
 	userId := session.UserID()
 	// Get teh user's latency cache
 	cache := c.GetCache(userId)
-	cache.Lock()
-	defer cache.Unlock()
 	result, err := StorageReadObjects(ctx, logger, session.pipeline.db, uuid.Nil, []*api.ReadStorageObjectId{
 		{
 			Collection: MatchmakingStorageCollection,
@@ -724,19 +743,24 @@ func (c *MatchmakingRegistry) LoadLatencyCache(ctx context.Context, logger *zap.
 		},
 	})
 	if err != nil {
-		logger.Error("SNSDocumentRequest: failed to read objects", zap.Error(err))
-		return status.Errorf(codes.Internal, "Failed to read latency cache: %v", err)
+		logger.Error("failed to read objects", zap.Error(err))
+		return nil, status.Errorf(codes.Internal, "Failed to read latency cache: %v", err)
 	}
 
 	objs := result.Objects
 	if len(objs) != 0 {
-		// Latency cache was found. Unmarshal it.
-		if err := json.Unmarshal([]byte(objs[0].Value), &cache.Store); err != nil {
-			return status.Errorf(codes.Internal, "Failed to unmarshal latency cache: %v", err)
+		store := &LatencyCacheStorageObject{}
+		if err := json.Unmarshal([]byte(objs[0].Value), store); err != nil {
+			return nil, status.Errorf(codes.Internal, "Failed to unmarshal latency cache: %v", err)
+		}
+		// Load the entries into the cache
+		for k, v := range store.Entries {
+			cache.Store(k, v)
+
 		}
 	}
 
-	return nil
+	return cache, nil
 }
 
 // StoreLatencyCache stores the latency cache for a user
@@ -747,11 +771,17 @@ func (c *MatchmakingRegistry) StoreLatencyCache(session *sessionWS) {
 		return
 	}
 
-	cache.RLock()
-	defer cache.RUnlock()
+	store := &LatencyCacheStorageObject{
+		Entries: make(map[string]LatencyMetric, 100),
+	}
+
+	cache.Range(func(k string, v LatencyMetric) bool {
+		store.Entries[k] = v
+		return true
+	})
 
 	// Save the latency cache
-	jsonBytes, err := json.Marshal(cache.Store)
+	jsonBytes, err := json.Marshal(cache)
 	if err != nil {
 		session.logger.Error("Failed to marshal latency cache", zap.Error(err))
 		return
@@ -781,17 +811,13 @@ func (c *MatchmakingRegistry) Stop() {
 
 // GetMatchingBySessionId returns the matching session for a given session ID
 func (c *MatchmakingRegistry) GetMatchingBySessionId(sessionId uuid.UUID) (session *MatchmakingSession, ok bool) {
-	c.RLock()
-	defer c.RUnlock()
-	session, ok = c.matchingBySession[sessionId]
+	session, ok = c.matchingBySession.Load(sessionId)
 	return session, ok
 }
 
 // Delete removes a matching session from the registry
 func (c *MatchmakingRegistry) Delete(sessionId uuid.UUID) {
-	c.Lock()
-	defer c.Unlock()
-	delete(c.matchingBySession, sessionId)
+	c.matchingBySession.Delete(sessionId)
 }
 
 // Add adds a matching session to the registry
@@ -824,19 +850,20 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, session *sessionWS, ml
 		Ctx:         ctx,
 		CtxCancelFn: cancel,
 
-		Logger:         logger,
-		UserId:         session.UserID(),
-		MatchIdCh:      make(chan string, 1),
-		PingCompleteCh: make(chan error, 1),
-		Expiry:         time.Now().UTC().Add(findAttemptsExpiry),
-		Label:          ml,
+		Logger:        logger,
+		UserId:        session.UserID(),
+		MatchIdCh:     make(chan string, 1),
+		PingResultsCh: make(chan []evr.EndpointPingResult),
+		Expiry:        time.Now().UTC().Add(findAttemptsExpiry),
+		Label:         ml,
 	}
 
 	// Load the latency cache
-	if err := c.LoadLatencyCache(ctx, session.logger, session, msession); err != nil {
+	cache, err := c.LoadLatencyCache(ctx, session.logger, session, msession)
+	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Failed to load latency cache: %v", err)
 	}
-
+	msession.LatencyCache = cache
 	// listen for a match ID to join
 	go func() {
 		defer cancel(nil)
@@ -872,49 +899,18 @@ func (c *MatchmakingRegistry) Cancel(sessionId uuid.UUID, reason error) {
 }
 
 func (c *MatchmakingRegistry) Add(id uuid.UUID, s *MatchmakingSession) {
-	c.Lock()
-	defer c.Unlock()
-	c.matchingBySession[id] = s
+	c.matchingBySession.Store(id, s)
 
-}
-
-// BroadcasterEndpoints returns the broadcaster endpoints
-func (c *MatchmakingRegistry) BroadcasterEndpoints() map[string]evr.Endpoint {
-	c.RLock()
-	defer c.RUnlock()
-	return c.broadcasters
 }
 
 // ProcessPingResults adds latencies for a userId It takes ping responses.
 func (c *MatchmakingRegistry) ProcessPingResults(userId uuid.UUID, responses []evr.EndpointPingResult) {
 	// Get the user's cache
-	cache := c.GetCache(userId)
-	broadcasters := c.BroadcasterEndpoints()
 
-	cache.Lock()
-	defer cache.Unlock()
-	// Look up the endpoint in the cache and update the latency
-
-	// Add the latencies to the cache
-	for _, response := range responses {
-		broadcaster, ok := broadcasters[response.EndpointID()]
-		if !ok {
-			c.logger.Warn("Endpoint not found in cache", zap.String("endpoint", response.EndpointID()))
-			continue
-		}
-
-		r := EndpointWithRTT{
-			Endpoint:  broadcaster,
-			RTT:       response.RTT(),
-			Timestamp: time.Now(),
-		}
-
-		cache.Store[r.ID()] = r
-	}
 }
 
 // GetLatencies returns the cached latencies for a user
-func (c *MatchmakingRegistry) GetLatencies(userId uuid.UUID, endpoints []evr.Endpoint) map[string]EndpointWithRTT {
+func (c *MatchmakingRegistry) GetLatencies(userId uuid.UUID, endpoints []evr.Endpoint) map[string]LatencyMetric {
 
 	// If the user ID is nil or there are no endpoints, return nil
 	if userId == uuid.Nil {
@@ -927,39 +923,34 @@ func (c *MatchmakingRegistry) GetLatencies(userId uuid.UUID, endpoints []evr.End
 	}
 
 	cache := c.GetCache(userId)
-	cache.Lock()
-	defer cache.Unlock()
 
 	// If no endpoints are provided, get all the latencies from the cache
 	// build a new map to avoid locking the cache for too long
 	if len(endpointIds) == 0 {
-		results := make(map[string]EndpointWithRTT, len(cache.Store))
-		for k, v := range cache.Store {
+		results := make(map[string]LatencyMetric, 100)
+		cache.Range(func(k string, v LatencyMetric) bool {
 			results[k] = v
-		}
+			return true
+		})
 		return results
 	}
 	// Return just the endpoints requested
-	results := make(map[string]EndpointWithRTT, len(endpointIds))
+	results := make(map[string]LatencyMetric, len(endpointIds))
 	for _, id := range endpointIds {
-		if v, ok := cache.Store[id]; ok {
-			results[id] = v
-		} else {
-			// Parse the endpoint ID
-			endpoint := evr.FromEndpointID(id)
-			// Create the endpoint and add it to the cache
-			results[id] = EndpointWithRTT{
-				Endpoint:  endpoint,
-				RTT:       0,
-				Timestamp: time.Now(),
-			}
-			cache.Store[id] = results[id]
+		endpoint := evr.FromEndpointID(id)
+		// Create the endpoint and add it to the cache
+		e := LatencyMetric{
+			Endpoint:  endpoint,
+			RTT:       0,
+			Timestamp: time.Now(),
 		}
+		r, _ := cache.LoadOrStore(id, e)
+		results[id] = r
 	}
 	return results
 }
 
-func (ms *MatchmakingSession) BuildQuery(latencies []EndpointWithRTT) (query string, stringProps map[string]string, numericProps map[string]float64, err error) {
+func (ms *MatchmakingSession) BuildQuery(latencies []LatencyMetric) (query string, stringProps map[string]string, numericProps map[string]float64, err error) {
 	// Create the properties maps
 	stringProps = make(map[string]string)
 	numericProps = make(map[string]float64, len(latencies))

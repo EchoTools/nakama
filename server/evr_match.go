@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -264,8 +265,6 @@ func MatchStateFromLabel(label string) (*EvrMatchState, error) {
 func (s *EvrMatchState) rebuildCache() {
 	// Rebuild the lookup tables.
 
-	s.presenceByEvrId = make(map[string]*EvrMatchPresence)
-	s.presenceByPlayerSession = make(map[string]*EvrMatchPresence)
 	s.Players = make([]string, 0, len(s.presences))
 	s.EvrIDs = make([]evr.EvrId, 0, len(s.presences))
 	s.UserIDs = make([]string, 0, len(s.presences))
@@ -277,8 +276,6 @@ func (s *EvrMatchState) rebuildCache() {
 		if presence.TeamIndex != evr.TeamSpectator && presence.TeamIndex != evr.TeamModerator {
 			s.Size += 1
 		}
-		s.presenceByPlayerSession[presence.GetPlayerSession()] = presence
-		s.presenceByEvrId[presence.GetEvrId()] = presence
 		s.Players = append(s.Players, presence.GetUsername())
 		s.EvrIDs = append(s.EvrIDs, presence.EvrId)
 		s.UserIDs = append(s.UserIDs, presence.GetUserId())
@@ -470,11 +467,13 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	// This is a player joining.
 	if state.LobbyType == UnassignedLobby {
 		// This is a parking match. reject the player.
+		logger.Debug("Unassigned lobby, rejecting player.")
 		return state, false, "unassigned lobby"
 	}
 
 	// Verify this isn't a duplicate. It will crash the server if they are allowed to join.
 	if _, ok := state.presences[presence.GetUserId()]; ok {
+		logger.Warn("Duplicate join attempt.")
 		return state, false, "duplicate join"
 	}
 
@@ -531,7 +530,7 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 
 			// Tell the broadcaster to load the level.
 			messages := []evr.Message{
-				evr.NewBroadcasterStartSession(state.MatchID, state.Channel, state.MaxSize, uint8(state.LobbyType), state.Broadcaster.AppId, state.Mode, state.Level, []evr.EvrId{}),
+				evr.NewBroadcasterStartSession(state.MatchID, *state.Channel, state.MaxSize, uint8(state.LobbyType), state.Broadcaster.AppId, state.Mode, state.Level, []evr.EvrId{}),
 			}
 
 			// Dispatch the message for delivery.
@@ -562,14 +561,14 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 		}
 
 		state.presences[p.GetUserId()] = matchPresence
+		state.presenceByPlayerSession[matchPresence.GetPlayerSession()] = matchPresence
+		state.presenceByEvrId[matchPresence.GetEvrId()] = matchPresence
 
-		defer func() {
-			// Send this after the function returns to ensure the match is ready to receive the player.
-			err := m.sendPlayerStart(ctx, logger, dispatcher, state, matchPresence)
-			if err != nil {
-				logger.Error("failed to send player start: %v", err)
-			}
-		}()
+		// Send this after the function returns to ensure the match is ready to receive the player.
+		err := m.sendPlayerStart(ctx, logger, dispatcher, state, matchPresence)
+		if err != nil {
+			logger.Error("failed to send player start: %v", err)
+		}
 
 	}
 
@@ -598,12 +597,16 @@ func (m *EvrMatch) sendPlayerStart(ctx context.Context, logger runtime.Logger, d
 		evr.NewSTcpConnectionUnrequireEvent(),
 	}
 
-	// Dispatch the message for delivery.
-	if err := m.dispatchMessages(ctx, logger, dispatcher, messages, []runtime.Presence{state.broadcaster, p}, nil); err != nil {
-		logger.Error("failed to dispatch success message to broadcaster: %v", err)
-		return err
-	}
+	go func() {
+		// Delay to allow everything to be ready for the user to join.
+		<-time.After(1 * time.Second)
+		// Dispatch the message for delivery.
+		if err := m.dispatchMessages(ctx, logger, dispatcher, messages, []runtime.Presence{state.broadcaster, p}, nil); err != nil {
+			logger.Error("failed to dispatch success message to broadcaster: %v", err)
+		}
+	}()
 	return nil
+
 }
 
 // MatchLeave is called after a player leaves the match.
@@ -787,18 +790,24 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		}
 		// Tell the broadcaster to start the session.
 		//entrants := lo.Map(lo.Values(state.presences), func(presence *EvrMatchPresence, _ int) evr.EvrId { return presence.EvrId })
+		channel := uuid.Nil
+		if state.Channel != nil {
+			channel = *state.Channel
+		}
+
 		entrants := make([]evr.EvrId, 0)
-		message := evr.NewBroadcasterStartSession(state.MatchID, state.Channel, state.MaxSize, uint8(state.LobbyType), state.Broadcaster.AppId, state.Mode, state.Level, entrants)
+		message := evr.NewBroadcasterStartSession(state.MatchID, channel, state.MaxSize, uint8(state.LobbyType), state.Broadcaster.AppId, state.Mode, state.Level, entrants)
 		messages := []evr.Message{
 			message,
+		}
+
+		if err := m.updateLabel(dispatcher, state); err != nil {
+			logger.Error("failed to update label: %v", err)
 		}
 
 		// Dispatch the message for delivery.
 		if err := m.dispatchMessages(ctx, logger, dispatcher, messages, []runtime.Presence{state.broadcaster}, nil); err != nil {
 			return state, fmt.Sprintf("failed to dispatch message: %v", err)
-		}
-		if err := m.updateLabel(dispatcher, state); err != nil {
-			logger.Error("failed to update label: %v", err)
 		}
 		return state, "session started"
 
@@ -837,7 +846,7 @@ func (m *EvrMatch) dispatchMessages(_ context.Context, logger runtime.Logger, di
 		}
 		bytes = append(bytes, payload...)
 	}
-	if err := dispatcher.BroadcastMessageDeferred(OpCodeEvrPacketData, bytes, presences, sender, true); err != nil {
+	if err := dispatcher.BroadcastMessage(OpCodeEvrPacketData, bytes, presences, sender, true); err != nil {
 		return fmt.Errorf("could not broadcast message: %v", err)
 	}
 	return nil
@@ -926,7 +935,7 @@ func (m *EvrMatch) lobbyPlayerSessionsRequest(ctx context.Context, logger runtim
 	message := msg.(*evr.LobbyPlayerSessionsRequest)
 
 	if message.MatchSession != state.MatchID {
-		logger.Warn("lobbyPlayerSessionsRequest: match session %s does nto match this one: %s", message.MatchSession, state.MatchID)
+		logger.Warn("lobbyPlayerSessionsRequest: match session %s does not match this one: %s", message.MatchSession, state.MatchID)
 	}
 
 	playerSession := uuid.Must(uuid.NewV4())
@@ -939,6 +948,7 @@ func (m *EvrMatch) lobbyPlayerSessionsRequest(ctx context.Context, logger runtim
 		teamIndex = sender.TeamIndex
 	} else {
 		logger.Warn("lobbyPlayerSessionsRequest: %s not found in match", in.GetUserId())
+
 	}
 
 	playerSessions := make([]uuid.UUID, 0)
@@ -958,7 +968,7 @@ func (m *EvrMatch) lobbyPlayerSessionsRequest(ctx context.Context, logger runtim
 		success.Version2(),
 		success.Version3(),
 	}
-	if err := m.dispatchMessages(ctx, logger, dispatcher, messages, []runtime.Presence{sender}, nil); err != nil {
+	if err := m.dispatchMessages(ctx, logger, dispatcher, messages, []runtime.Presence{in}, nil); err != nil {
 		logger.Error("lobbyPlayerSessionsRequest: failed to dispatch message: %v", err)
 	}
 

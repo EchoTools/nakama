@@ -208,7 +208,7 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 	// This gives the matchmaker a chance to find a full ideal match
 	backfillDelay := time.Duration(interval*idealMatchIntervals) * time.Second
 	if skipDelay {
-		backfillDelay = 0
+		backfillDelay = 15 * time.Second
 	}
 
 	// Check for a backfill match on a regular basis
@@ -347,7 +347,7 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, session *sessionWS, m
 		// For public arena/combat matches, backfill while matchmaking
 	case evr.ModeCombatPublic:
 		// Join any on-going combat match without delay
-		skipBackfillDelay = true
+		skipBackfillDelay = false
 		// For Arena and combat matches try to backfill while matchmaking
 		fallthrough
 	case evr.ModeArenaPublic:
@@ -377,15 +377,14 @@ func (p *EvrPipeline) lobbyPingResponse(ctx context.Context, logger *zap.Logger,
 		return fmt.Errorf("session not authenticated")
 	}
 
-	p.matchmakingRegistry.ProcessPingResults(userID, response.Results)
-
 	// Look up the matching session.
 	msession, ok := p.matchmakingRegistry.GetMatchingBySessionId(session.id)
 	if !ok {
 		return fmt.Errorf("matching session not found")
 	}
 	// Send a signal to the matching session to continue searching.
-	msession.PingCompleteCh <- nil
+	msession.PingResultsCh <- response.Results
+
 	return nil
 }
 

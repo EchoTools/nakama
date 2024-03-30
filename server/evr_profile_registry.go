@@ -412,7 +412,7 @@ func (r *ProfileRegistry) UpdateEntitledCosmetics(ctx context.Context, userID uu
 	unlocks := profile.Server.UnlockedCosmetics.Arena
 	for _, group := range userGroups {
 		name := group.GetGroup().GetName()
-		if name[:5] == "VRML" {
+		if len(name) > 5 && name[:5] == "VRML" {
 			unlocks.DecalVRML = true
 			unlocks.EmoteVRMLA = true
 		}
