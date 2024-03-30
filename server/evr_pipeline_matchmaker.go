@@ -314,7 +314,7 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, session *sessionWS, m
 	logger := msession.Logger
 
 	skipBackfillDelay := false
-	if ml.TeamIndex == TeamIndex(evr.TeamSpectator) {
+	if ml.TeamIndex == TeamIndex(evr.TeamSpectator) || ml.TeamIndex == TeamIndex(evr.TeamModerator) {
 		skipBackfillDelay = true
 		if ml.Mode != evr.ModeArenaPublic && ml.Mode != evr.ModeCombatPublic {
 			return fmt.Errorf("spectators are only allowed in arena and combat matches")

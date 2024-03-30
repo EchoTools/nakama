@@ -193,8 +193,11 @@ func buildMatchQueryFromLabel(ml *EvrMatchState) string {
 		LobbyType(ml.LobbyType).Query(Must, boost),
 		// MUST be the same mode
 		GameMode(ml.Mode).Query(Must, boost),
-		// MUST have room for this party
-		fmt.Sprintf("+label.size:<=%d", ml.Size),
+	}
+
+	if ml.TeamIndex != Spectator && ml.TeamIndex != Moderator {
+		// MUST have room for this party on the teams
+		qparts = append(qparts, fmt.Sprintf("+label.size:<=%d", ml.Size))
 	}
 
 	// MUST NOT much into the same lobby
