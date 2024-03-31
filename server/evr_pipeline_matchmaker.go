@@ -553,6 +553,25 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 	} else if err != nil {
 		logger.Warn("Failed to authorize matchmaking, allowing player to continue. ", zap.Error(err))
 	}
+
+	// Validating the level against the game mode
+	switch request.Mode {
+	case evr.ModeArenaPublic, evr.ModeArenaPrivate, evr.ModeArenaTournment, evr.ModeArenaPublicAI, evr.ModeArenaTutorial:
+		if request.Level != evr.LevelArena {
+			return result.SendErrorToSession(session, status.Errorf(codes.Internal, "Failed to create matchmaking session: %v is not a valid level for the gamemode %v", request.Level, request.Mode))
+		}
+	case evr.ModeSocialPublic, evr.ModeSocialPrivate, evr.ModeSocialNPE:
+		if request.Level != evr.LevelSocial {
+			return result.SendErrorToSession(session, status.Errorf(codes.Internal, "Failed to create matchmaking session: %v is not a valid level for the gamemode %v", request.Level, request.Mode))
+		}
+	case evr.ModeCombatPublic, evr.ModeCombatPrivate, evr.ModeEchoCombatTournament:
+		if request.Level != evr.LevelCombustion && request.Level != evr.LevelDyson && request.Level != evr.LevelFission && request.Level != evr.LevelGauss {
+			return result.SendErrorToSession(session, status.Errorf(codes.Internal, "Failed to create matchmaking session: %v is not a valid level for the gamemode %v", request.Level, request.Mode))
+		}
+	default:
+		return result.SendErrorToSession(session, status.Errorf(codes.Internal, "Failed to create matchmaking session: Tried to create a match with an unknown level or gamemode"))
+	}
+
 	ml := &EvrMatchState{
 
 		Level:           request.Level,
