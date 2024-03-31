@@ -55,7 +55,6 @@ type EvrPipeline struct {
 	matchmakingRegistry *MatchmakingRegistry
 	profileRegistry     *ProfileRegistry
 	discordRegistry     DiscordRegistry
-	ipCache             *IPinfoCache
 
 	broadcasterRegistrationBySession *MapOf[uuid.UUID, *MatchBroadcaster]
 	matchBySession                   *MapOf[uuid.UUID, string]
@@ -106,27 +105,8 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		logger.Error("Failed to initialize party bot", zap.Error(err))
 	}
 
-	// Configure the IPinfo cache
-	ipCache := NewIPinfoCache(logger, db, vars["IPINFO_TOKEN"])
-
 	// Every 5 minutes, store the cache.
 
-	go func() {
-		ctx, cancel := context.WithCancel(ctx)
-		defer cancel()
-		ticker := time.NewTicker(5 * time.Minute)
-		defer ticker.Stop()
-
-		ipCache.LoadCache(ctx, nk, db)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				ipCache.StoreCache(ctx, nk, db)
-			}
-		}
-	}()
 	localIP, err := DetermineLocalIPAddress()
 	if err != nil {
 		logger.Fatal("Failed to determine local IP address", zap.Error(err))
@@ -168,7 +148,6 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		runtimeLogger:        runtimeLogger,
 
 		discordRegistry:   discordRegistry,
-		ipCache:           ipCache,
 		localIP:           localIP,
 		externalIP:        externalIP,
 		broadcasterUserID: broadcasterUserID,
