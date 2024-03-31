@@ -130,7 +130,6 @@ func (p *EvrPipeline) matchmakingLabelFromFindRequest(ctx context.Context, sessi
 		TeamIndex:       TeamIndex(request.TeamIndex),
 
 		Broadcaster: MatchBroadcaster{
-			Platform:    request.Platform,
 			VersionLock: request.VersionLock,
 			Channels:    allowedChannels,
 		},

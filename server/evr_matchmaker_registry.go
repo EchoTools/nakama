@@ -586,7 +586,7 @@ func (c *MatchmakingRegistry) ListUnassignedLobbies(ctx context.Context, channel
 
 	// TODO FIXME Add version lock and appid
 	query := strings.Join(qparts, " ")
-
+	c.logger.Debug("Listing unassigned lobbies", zap.String("query", query))
 	limit := 200
 	minSize, maxSize := 1, 1 // Only the 1 broadcaster should be there.
 	matches, err := c.listMatches(ctx, limit, minSize, maxSize, query)

@@ -4,7 +4,10 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"errors"
+	"io"
 	"net"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -15,7 +18,6 @@ import (
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
-	"github.com/ipinfo/go/v2/ipinfo"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 )
@@ -104,23 +106,24 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 
 	// Set the external address in the request (to use for the registration cache).
 	externalIP := net.ParseIP(session.ClientIP())
-	if p.ipCache.isPrivateIP(externalIP) {
+	if isPrivateIP(externalIP) {
 		logger.Warn("Broadcaster is on a private IP, using this systems external IP", zap.String("privateIP", externalIP.String()), zap.String("externalIP", p.externalIP.String()))
 		externalIP = p.externalIP
 	}
 
-	// Get the broadcasters geoIP data
-	geoIPch := make(chan *ipinfo.Core)
-	go func() {
-		geoIP, err := p.ipCache.retrieveIPinfo(ctx, logger, externalIP)
-		if err != nil {
-			logger.Warn("Failed to retrieve geoIP data", zap.Error(err))
-			geoIPch <- nil
-			return
-		}
-		geoIPch <- geoIP
-	}()
-
+	/*
+		// Get the broadcasters geoIP data
+		geoIPch := make(chan *ipinfo.Core)
+		go func() {
+			geoIP, err := p.ipCache.retrieveIPinfo(ctx, logger, externalIP)
+			if err != nil {
+				logger.Warn("Failed to retrieve geoIP data", zap.Error(err))
+				geoIPch <- nil
+				return
+			}
+			geoIPch <- geoIP
+		}()
+	*/
 	// Create the broadcaster config
 	config := broadcasterConfig(userId, session.id.String(), request.ServerId, request.InternalIP, externalIP, request.Port, request.Region, request.VersionLock, tags)
 
@@ -518,4 +521,44 @@ func BroadcasterRTTcheck(lIP net.IP, rIP net.IP, port, count int, interval, time
 
 	wg.Wait()
 	return rtts, nil
+}
+
+func DetermineLocalIPAddress() (net.IP, error) {
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		return nil, err
+	}
+	return conn.LocalAddr().(*net.UDPAddr).IP, nil
+}
+
+func DetermineExternalIPAddress() (net.IP, error) {
+	response, err := http.Get("https://api.ipify.org?format=text")
+	if err != nil {
+		return nil, err
+	}
+
+	defer response.Body.Close()
+
+	data, _ := io.ReadAll(response.Body)
+	addr := net.ParseIP(string(data))
+	if addr == nil {
+		return nil, errors.New("failed to parse IP address")
+	}
+	return addr, nil
+}
+
+func isPrivateIP(ip net.IP) bool {
+	privateRanges := []string{
+		"127.0.0.0/8",
+		"10.0.0.0/8",
+		"172.16.0.0/12",
+		"192.168.0.0/16",
+	}
+	for _, cidr := range privateRanges {
+		_, subnet, _ := net.ParseCIDR(cidr)
+		if subnet.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }

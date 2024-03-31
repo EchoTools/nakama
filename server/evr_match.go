@@ -194,7 +194,6 @@ type MatchBroadcaster struct {
 	IPinfo        *ipinfo.Core `json:"ip_info,omitempty"`        // The IPinfo of the broadcaster.
 	ServerID      uint64       `json:"server_id,omitempty"`      // The server id of the broadcaster. (EVR)
 	PublisherLock bool         `json:"publisher_lock,omitempty"` // Publisher lock (EVR)
-	Platform      evr.Symbol   `json:"platform,omitempty"`       // The platform the match is hosted on. (EVR)
 	Tags          []string     `json:"tags,omitempty"`           // The tags given on the urlparam for the match.
 }
 
@@ -385,7 +384,7 @@ func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql
 }
 
 // selectTeamForPlayer decides which team to assign a player to.
-func selectTeamForPlayer(presence *EvrMatchPresence, state *EvrMatchState) (int, bool) {
+func selectTeamForPlayer(logger runtime.Logger, presence *EvrMatchPresence, state *EvrMatchState) (int, bool) {
 	t := presence.TeamIndex
 	if len(state.presences) >= MatchMaxSize {
 		// Lobby full, reject.
@@ -417,6 +416,7 @@ func selectTeamForPlayer(presence *EvrMatchPresence, state *EvrMatchState) (int,
 	if (t == evr.TeamBlue || t == evr.TeamOrange) && playerpop >= state.TeamSize*2 {
 		// If it's a public, reject them.
 		if state.LobbyType == PublicLobby {
+			logger.Debug("Teams are full")
 			return evr.TeamUnassigned, false
 		}
 		// Put them on spectator
@@ -427,6 +427,7 @@ func selectTeamForPlayer(presence *EvrMatchPresence, state *EvrMatchState) (int,
 	if t == evr.TeamSpectator || t == evr.TeamModerator {
 		// Spectator or Moderator
 		if spectators >= 6 {
+			logger.Debug("Too many spectators")
 			// Spectator population is full, reject.
 			return evr.TeamUnassigned, false
 		}
@@ -436,6 +437,7 @@ func selectTeamForPlayer(presence *EvrMatchPresence, state *EvrMatchState) (int,
 	if state.LobbyType == PrivateLobby {
 		// If the player's team has room, assign them to it.
 		if len(teams[t]) < state.TeamSize {
+			logger.Debug("Private has room.")
 			return t, true
 		}
 	}
@@ -446,7 +448,7 @@ func selectTeamForPlayer(presence *EvrMatchPresence, state *EvrMatchState) (int,
 	} else {
 		t = evr.TeamOrange
 	}
-
+	logger.Debug("picked team", zap.Int("team", t))
 	return t, true
 }
 
@@ -487,15 +489,18 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	if mp.TeamIndex == evr.TeamModerator {
 		found, err := checkIfModerator(ctx, nk, presence.GetUserId(), state.Channel.String())
 		if err != nil {
+			logger.Debug("failed to check if moderator")
 			return state, false, fmt.Sprintf("failed to check if moderator: %q", err)
 		}
 		if !found {
+			logger.Debug("not a moderator")
 			return state, false, "not a moderator"
 		}
 	}
 
-	if mp.TeamIndex, ok = selectTeamForPlayer(&mp, state); !ok {
+	if mp.TeamIndex, ok = selectTeamForPlayer(logger, &mp, state); !ok {
 		// The lobby is full, reject the player.
+		logger.Debug("lobby full.")
 		return state, false, "lobby full"
 	}
 
@@ -809,6 +814,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		if err := m.dispatchMessages(ctx, logger, dispatcher, messages, []runtime.Presence{state.broadcaster}, nil); err != nil {
 			return state, fmt.Sprintf("failed to dispatch message: %v", err)
 		}
+		logger.Debug("Session started.", zap.Any("state", state))
 		return state, "session started"
 
 	default:
@@ -835,6 +841,7 @@ func SignalMatch(ctx context.Context, matchRegistry MatchRegistry, matchId strin
 	}
 	return matchRegistry.Signal(ctx, matchId, string(signalJson))
 }
+
 func (m *EvrMatch) dispatchMessages(_ context.Context, logger runtime.Logger, dispatcher runtime.MatchDispatcher, messages []evr.Message, presences []runtime.Presence, sender runtime.Presence) error {
 	bytes := []byte{}
 	for _, message := range messages {

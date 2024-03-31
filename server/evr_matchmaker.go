@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"net"
 	"sort"
 	"strings"
 	"time"
@@ -452,12 +451,6 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, session *sessionWS, matc
 
 	// Prepare the player session metadata.
 
-	// Get the IP info for this player from the ipinfo cache
-	ipinfo, err := p.ipCache.retrieveIPinfo(ctx, session.logger, net.ParseIP(session.ClientIP()))
-	if err != nil {
-		return fmt.Errorf("failed to get IPinfo: %w", err)
-	}
-
 	discordID, err := p.discordRegistry.GetDiscordIdByUserId(ctx, session.UserID())
 	if err != nil {
 		p.logger.Error("Failed to get discord id", zap.Error(err))
@@ -472,7 +465,6 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, session *sessionWS, matc
 		EvrId:         evrID,
 		PlayerSession: uuid.Must(uuid.NewV4()),
 		TeamIndex:     int(teamIndex),
-		IPinfo:        ipinfo,
 		DiscordID:     discordID,
 	}
 	// Marshal the player metadata into JSON.
