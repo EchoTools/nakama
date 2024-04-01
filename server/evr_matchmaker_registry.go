@@ -197,11 +197,13 @@ type MatchmakingResult struct {
 	Code    evr.LobbySessionFailureErrorCode
 	Mode    evr.Symbol
 	Channel uuid.UUID
+	Logger  *zap.Logger
 }
 
-// NewMatchmakingResponse initializes a new instance of MatchmakingResult
-func NewMatchmakingResponse(mode evr.Symbol, channel uuid.UUID) *MatchmakingResult {
+// NewMatchmakingResult initializes a new instance of MatchmakingResult
+func NewMatchmakingResult(logger *zap.Logger, mode evr.Symbol, channel uuid.UUID) *MatchmakingResult {
 	return &MatchmakingResult{
+		Logger:  logger,
 		Mode:    mode,
 		Channel: channel,
 	}
@@ -250,6 +252,7 @@ func (mr *MatchmakingResult) SendErrorToSession(s *sessionWS, err error) error {
 	if result == nil {
 		return nil
 	}
+	mr.Logger.Warn("Matchmaking error", zap.String("message", result.Message), zap.Error(result.err))
 	payload := []evr.Message{
 		evr.NewLobbySessionFailure(result.Mode, result.Channel, result.Code, result.Message).Version4(),
 	}
@@ -805,7 +808,7 @@ func (c *MatchmakingRegistry) Delete(sessionId uuid.UUID) {
 }
 
 // Add adds a matching session to the registry
-func (c *MatchmakingRegistry) Create(ctx context.Context, session *sessionWS, ml *EvrMatchState, partySize int, timeout time.Duration, errorFn func(err error) error, joinFn func(matchId string) error) (*MatchmakingSession, error) {
+func (c *MatchmakingRegistry) Create(ctx context.Context, logger *zap.Logger, session *sessionWS, ml *EvrMatchState, partySize int, timeout time.Duration, errorFn func(err error) error, joinFn func(matchId string) error) (*MatchmakingSession, error) {
 	// Check if a matching session exists
 
 	// Set defaults for the matching label
@@ -828,7 +831,7 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, session *sessionWS, ml
 		ml.TeamSize = 5
 	}
 
-	logger := session.logger.With(zap.String("msid", session.ID().String()))
+	logger = logger.With(zap.String("msid", session.ID().String()))
 	ctx, cancel := context.WithCancelCause(ctx)
 	msession := &MatchmakingSession{
 		Ctx:         ctx,
@@ -843,7 +846,7 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, session *sessionWS, ml
 	}
 
 	// Load the latency cache
-	cache, err := c.LoadLatencyCache(ctx, session.logger, session, msession)
+	cache, err := c.LoadLatencyCache(ctx, logger, session, msession)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Failed to load latency cache: %v", err)
 	}

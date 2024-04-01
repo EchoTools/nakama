@@ -420,7 +420,7 @@ func (p *EvrPipeline) MatchCreate(ctx context.Context, session *sessionWS, msess
 }
 
 // JoinEvrMatch allows a player to join a match.
-func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, session *sessionWS, matchID string, channel uuid.UUID, teamIndex int) error {
+func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, session *sessionWS, matchID string, channel uuid.UUID, teamIndex int) error {
 	// Append the node to the matchID if it doesn't already contain one.
 	if !strings.Contains(matchID, ".") {
 		matchID = fmt.Sprintf("%s.%s", matchID, p.node)
@@ -433,7 +433,7 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, session *sessionWS, matc
 	}
 
 	// Fetch the account details.
-	account, err := GetAccount(ctx, session.logger, p.db, p.statusRegistry, session.UserID())
+	account, err := GetAccount(ctx, logger, p.db, p.statusRegistry, session.UserID())
 	if err != nil {
 		return fmt.Errorf("failed to get account: %w", err)
 	}
@@ -453,7 +453,7 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, session *sessionWS, matc
 
 	discordID, err := p.discordRegistry.GetDiscordIdByUserId(ctx, session.UserID())
 	if err != nil {
-		p.logger.Error("Failed to get discord id", zap.Error(err))
+		logger.Error("Failed to get discord id", zap.Error(err))
 	}
 
 	mp := EvrMatchPresence{
@@ -486,7 +486,7 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, session *sessionWS, matc
 	p.matchByUserId.Store(session.UserID(), matchID)
 	p.matchByEvrId.Store(evrID.Token(), matchID)
 	// Send the join request.
-	if ok := session.pipeline.ProcessRequest(session.logger, session, msg); !ok {
+	if ok := session.pipeline.ProcessRequest(logger, session, msg); !ok {
 		return errors.New("failed to send join request")
 	}
 
@@ -498,13 +498,13 @@ func (p *EvrPipeline) PingEndpoints(ctx context.Context, session *sessionWS, mse
 	if len(endpoints) == 0 {
 		return nil, nil
 	}
-
+	logger := msession.Logger
 	p.matchmakingRegistry.UpdateBroadcasters(endpoints)
 
 	// Get the candidates for pinging
 	candidates := msession.GetPingCandidates(endpoints...)
 	if len(candidates) > 0 {
-		if err := p.sendPingRequest(session, candidates); err != nil {
+		if err := p.sendPingRequest(logger, session, candidates); err != nil {
 			return nil, err
 		}
 
@@ -522,7 +522,7 @@ func (p *EvrPipeline) PingEndpoints(ctx context.Context, session *sessionWS, mse
 
 				broadcaster, ok := p.matchmakingRegistry.broadcasters.Load(response.EndpointID())
 				if !ok {
-					session.logger.Warn("Endpoint not found in cache", zap.String("endpoint", response.EndpointID()))
+					logger.Warn("Endpoint not found in cache", zap.String("endpoint", response.EndpointID()))
 					continue
 				}
 
@@ -542,7 +542,7 @@ func (p *EvrPipeline) PingEndpoints(ctx context.Context, session *sessionWS, mse
 }
 
 // sendPingRequest sends a ping request to the given candidates.
-func (p *EvrPipeline) sendPingRequest(session *sessionWS, candidates []evr.Endpoint) error {
+func (p *EvrPipeline) sendPingRequest(logger *zap.Logger, session *sessionWS, candidates []evr.Endpoint) error {
 	messages := []evr.Message{
 		evr.NewLobbyPingRequest(275, candidates),
 		evr.NewSTcpConnectionUnrequireEvent(),
@@ -552,7 +552,7 @@ func (p *EvrPipeline) sendPingRequest(session *sessionWS, candidates []evr.Endpo
 		return err
 	}
 
-	session.logger.Debug("Sent ping request", zap.Any("candidates", candidates))
+	logger.Debug("Sent ping request", zap.Any("candidates", candidates))
 	return nil
 }
 
