@@ -219,7 +219,7 @@ type EvrMatchState struct {
 	SessionSettings *evr.SessionSettings `json:"session_settings,omitempty"` // The session settings for the match (EVR).
 
 	MaxSize   uint8     `json:"limit,omitempty"`     // The total lobby size limit (players + specs)
-	Size      int       `json:"size,omitempty"`      // The number of players (not including spectators) in the match.
+	Size      int       `json:"size"`                // The number of players (not including spectators) in the match.
 	TeamSize  int       `json:"team_size,omitempty"` // The size of each team in arena/combat (either 4 or 5)
 	TeamIndex TeamIndex `json:"team,omitempty"`      // What team index a player prefers (Used by Matching only)
 
@@ -271,7 +271,7 @@ func (s *EvrMatchState) rebuildCache() {
 
 	// Construct Player list
 	for _, presence := range s.presences {
-		// Do not include moderators in player count
+		// Do not include spectators or moderators in player count
 		if presence.TeamIndex != evr.TeamSpectator && presence.TeamIndex != evr.TeamModerator {
 			s.Size += 1
 		}
@@ -283,7 +283,7 @@ func (s *EvrMatchState) rebuildCache() {
 
 // The match config is used internally to create a new match.
 type evrMatchConfig struct {
-	Endpoint     evr.Endpoint // TODO FIXME this si extraneous since it's now in the state.
+	Endpoint     evr.Endpoint // TODO FIXME this is extraneous since it's now in the state.
 	InitialState *EvrMatchState
 }
 
@@ -574,7 +574,6 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 		if err != nil {
 			logger.Error("failed to send player start: %v", err)
 		}
-
 	}
 
 	state.rebuildCache()
@@ -622,7 +621,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 		return nil
 	}
 	// Remove the player from the match.
-	for _, p := range presences {
+	for i, p := range presences {
 		logger.Debug("Removing player from match: %s", p.GetUsername())
 		sessionId := p.GetSessionId()
 		if sessionId == state.Broadcaster.SessionID {
@@ -630,7 +629,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 			// TODO maybe send the users back to the lobby? if possible.
 			return nil
 		}
-		delete(state.presences, p.GetUserId())
+		presences = append(presences[:i], presences[i+1:]...)
 	}
 
 	state.rebuildCache()
@@ -717,6 +716,7 @@ func (m *EvrMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, db
 	//message := "Server shutting down in " + strconv.Itoa(graceSeconds) + " seconds."
 	//dispatcher.BroadcastMessage(OpCodeBroadcasterDisconnected, []byte(message), []runtime.Presence{}, nil, false)
 	// TODO FIXME send disconnect messages to clients.
+	logger.Info("MatchTerminate called.")
 	return state
 }
 
@@ -737,7 +737,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 
 	switch signal.Signal {
 	case SignalShutdown:
-		return nil, "shutdown signal"
+		return nil, "shutting down"
 
 	case SignalPruneUnderutilized:
 		// Prune this match if it's utilization is low.
