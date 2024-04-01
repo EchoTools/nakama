@@ -1529,9 +1529,9 @@ func NewClientProfile() *ClientProfile {
 	return &ClientProfile{
 
 		CombatWeapon:       "assault",
-		CombatGrenade:      "arc",
+		CombatGrenade:      "det",
 		CombatDominantHand: 1,
-		CombatAbility:      "buff",
+		CombatAbility:      "heal",
 		LegalConsents: LegalConsents{
 			PointsPolicyVersion: 1,
 			EulaVersion:         1,
