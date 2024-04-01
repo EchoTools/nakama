@@ -480,3 +480,44 @@ func ImportLoadoutsRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 	return response.String(), nil
 
 }
+
+type terminateMatchRequest struct {
+	MatchIds []string `json:"match_ids"`
+}
+
+type terminateMatchResponse struct {
+	results []string `json:"results"`
+}
+
+func terminateMatchRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+
+	request := &terminateMatchRequest{}
+	if err := json.Unmarshal([]byte(payload), request); err != nil {
+		return "", err
+	}
+
+	signal := EvrSignal{
+		Signal: SignalShutdown,
+	}
+	signalJson := signal.String()
+
+	responses := make([]string, 0)
+	for _, matchId := range request.MatchIds {
+		response, err := nk.MatchSignal(ctx, matchId, signalJson)
+		if err != nil {
+			responses = append(responses, err.Error())
+		}
+		responses = append(responses, response)
+	}
+
+	response := &terminateMatchResponse{
+		results: make([]string, 0),
+	}
+
+	jsonData, err := json.Marshal(response)
+	if err != nil {
+		return "", err
+	}
+
+	return string(jsonData), nil
+}

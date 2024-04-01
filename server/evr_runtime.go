@@ -90,6 +90,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		"link":                LinkingAppRpc,
 		"evr/servicestatus":   ServiceStatusRpc,
 		"importloadouts":      ImportLoadoutsRpc,
+		"terminateMatch":      terminateMatchRpc,
 	}
 
 	for name, rpc := range rpcs {
