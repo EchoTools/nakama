@@ -211,7 +211,7 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 	}
 
 	// Check for a backfill match on a regular basis
-	backfilInterval := time.Duration(5) * time.Second
+	backfilInterval := time.Duration(10) * time.Second
 	backfillTicker := time.NewTicker(backfilInterval)
 
 	<-time.After(backfillDelay)
@@ -255,10 +255,9 @@ func (p *EvrPipeline) MatchCreateLoop(session *sessionWS, msession *MatchmakingS
 			if matchID == "" {
 				return msession.Cancel(fmt.Errorf("match is nil"))
 			}
-
 			msession.MatchIdCh <- matchID
-			return nil
-
+			<-time.After(10 * time.Second)
+			// Keep trying until the context is done
 		case codes.NotFound, codes.ResourceExhausted, codes.Unavailable:
 			// All the servers are being used.
 			<-time.After(5 * time.Second)

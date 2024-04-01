@@ -271,6 +271,7 @@ func TestSelectTeamForPlayer(t *testing.T) {
 			TeamIndex: tt.preferred,
 		}
 		state.presences = tt.presences
+		state.MaxSize = MatchMaxSize
 		state.LobbyType = tt.lobbyType
 		if state.LobbyType == PublicLobby {
 			state.TeamSize = 4

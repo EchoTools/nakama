@@ -466,7 +466,27 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config *M
 	timeout := time.After(10 * time.Minute)
 	interval := time.NewTicker(10 * time.Second)
 
+	select {
+	case <-mr.ctx.Done(): // Context cancelled
+		return
+	default:
+	}
+
 	for {
+
+		matchID, err := mr.allocateBroadcaster(channel, config, sorted, label)
+		if err != nil {
+			mr.logger.Error("Error allocating broadcaster", zap.Error(err))
+			continue
+		}
+		if matchID != "" {
+			// Send the matchId to the session
+			for _, s := range sessions {
+				s.MatchIdCh <- matchID
+			}
+			break
+		}
+
 		select {
 		case <-mr.ctx.Done(): // Context cancelled
 			return
@@ -479,18 +499,8 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config *M
 			}
 			return
 		case <-interval.C: // List all the unassigned lobbies on this channel
-			matchID, err := mr.allocateBroadcaster(channel, config, sorted, label)
-			if err != nil {
-				mr.logger.Error("Error allocating broadcaster", zap.Error(err))
-				continue
-			}
+			// Check if the match is still unassigned
 
-			time.Sleep(3 * time.Second) // Wait for the server to start the session
-			// Send the matchId to the session
-			for _, s := range sessions {
-				s.MatchIdCh <- matchID
-			}
-			return
 		}
 	}
 }
@@ -1003,4 +1013,10 @@ func (ms *MatchmakingSession) BuildQuery(latencies []LatencyMetric) (query strin
 	ms.Logger.Debug("Matchmaking query", zap.String("query", query), zap.Any("stringProps", stringProps), zap.Any("numericProps", numericProps))
 	// TODO Avoid ghosted
 	return query, stringProps, numericProps, nil
+}
+
+func (ms *MatchmakingSession) JoinMatch(matchID string) error {
+	// Send the matchId to the session
+	ms.MatchIdCh <- matchID
+	return nil
 }
