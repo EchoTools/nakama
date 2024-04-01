@@ -12,7 +12,6 @@ import (
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
-	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/samber/lo"
@@ -380,6 +379,7 @@ func (p *EvrPipeline) MatchSort(ctx context.Context, session *sessionWS, msessio
 	return filtered, rtts, nil
 }
 
+// TODO FIXME This need to use allocateBroadcaster instad.
 // MatchCreate creates a match on an available unassigned broadcaster using the given label
 func (p *EvrPipeline) MatchCreate(ctx context.Context, session *sessionWS, msession *MatchmakingSession, label *EvrMatchState) (matchId string, err error) {
 	label.MaxSize = MatchMaxSize
@@ -424,6 +424,12 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 	// Append the node to the matchID if it doesn't already contain one.
 	if !strings.Contains(matchID, ".") {
 		matchID = fmt.Sprintf("%s.%s", matchID, p.node)
+	}
+
+	s := strings.Split(matchID, ".")[0]
+	mid := uuid.FromStringOrNil(s)
+	if mid == uuid.Nil {
+		return fmt.Errorf("invalid match id: %s", matchID)
 	}
 
 	// Retrieve the evrID from the context.
@@ -472,23 +478,19 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 	if err != nil {
 		return fmt.Errorf("failed to marshal player meta: %w", err)
 	}
-
-	// Construct the match join request.
-	msg := &rtapi.Envelope{
-		Message: &rtapi.Envelope_MatchJoin{
-			MatchJoin: &rtapi.MatchJoin{
-				Id:       &rtapi.MatchJoin_MatchId{MatchId: matchID},
-				Metadata: map[string]string{"playermeta": string(jsonMeta)},
-			},
-		},
+	metadata := map[string]string{"playermeta": string(jsonMeta)}
+	// Do the join attempt to avoid race conditions
+	found, allowed, _, reason, _, _ := p.matchRegistry.JoinAttempt(ctx, mid, p.node, session.UserID(), session.ID(), session.Username(), session.Expiry(), session.Vars(), session.clientIP, session.clientPort, p.node, metadata)
+	if !found {
+		return fmt.Errorf("match not found: %s", matchID)
 	}
+	if !allowed {
+		return fmt.Errorf("join not allowed: %s", reason)
+	}
+	logger.Info("Joining match")
 	p.matchBySession.Store(session.ID(), matchID)
 	p.matchByUserId.Store(session.UserID(), matchID)
 	p.matchByEvrId.Store(evrID.Token(), matchID)
-	// Send the join request.
-	if ok := session.pipeline.ProcessRequest(logger, session, msg); !ok {
-		return errors.New("failed to send join request")
-	}
 
 	return nil
 }

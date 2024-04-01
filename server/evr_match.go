@@ -487,6 +487,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	switch {
 	case presence.GetSessionId() == state.Broadcaster.SessionID:
 		logger.Debug("Broadcaster joining the match.")
+		state.broadcaster = presence
 		// This is the broadcaster joining, this completes the match init.
 		return state, true, ""
 	}
@@ -504,7 +505,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		return state, false, "duplicate join"
 	}
 
-	mp := EvrMatchPresence{}
+	mp := &EvrMatchPresence{}
 	if err := json.Unmarshal([]byte(metadata["playermeta"]), &mp); err != nil {
 		logger.Error("Failed to unmarshal metadata", zap.Error(err))
 		return state, false, fmt.Sprintf("failed to unmarshal metadata: %q", err)
@@ -523,15 +524,37 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		}
 	}
 
-	if mp.TeamIndex, ok = selectTeamForPlayer(logger, &mp, state); !ok {
-		// The lobby is full, reject the player.
-		logger.Warn("Lobby full.")
-		return state, false, "lobby full"
+	// If the entrant is joining as a spectator, do not look up their previous team.
+	if mp.TeamIndex != evr.TeamSpectator && mp.TeamIndex != evr.TeamModerator {
+
+		// If this is the player rejoining, prefer the same team.
+		matchPresence, ok := state.presenceCache[presence.GetUserId()]
+		if ok {
+			mp.TeamIndex = matchPresence.TeamIndex
+		}
+	} else {
+
+		if mp.TeamIndex, ok = selectTeamForPlayer(logger, mp, state); !ok {
+			// The lobby is full, reject the player.
+			logger.Warn("Lobby full.")
+			return state, false, "lobby full"
+		}
 	}
 
-	// The player data will be looked up by MatchJoin()
-	state.presenceCache[presence.GetUserId()] = &mp
+	// Reserve this player's spot in the match.
+	state.presences[mp.GetUserId()] = mp
+	state.presenceByPlayerSession[mp.GetPlayerSession()] = mp
+	state.presenceByEvrId[mp.GetEvrId()] = mp
+
+	// The player data will reused if the player rejoins the match.
+	state.presenceCache[presence.GetUserId()] = mp
 	// Accept the player(s) into the session.
+
+	state.rebuildCache()
+	err := m.updateLabel(dispatcher, state)
+	if err != nil {
+		logger.Error("failed to update label: %v", err)
+	}
 	logger.Debug("Accepting player into match: %s", presence.GetUsername())
 	return state, true, ""
 }
@@ -592,10 +615,6 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 			logger.Error("Player not in cache. This shouldn't happen.")
 			return errors.New("player not in cache")
 		}
-
-		state.presences[p.GetUserId()] = matchPresence
-		state.presenceByPlayerSession[matchPresence.GetPlayerSession()] = matchPresence
-		state.presenceByEvrId[matchPresence.GetEvrId()] = matchPresence
 
 		// Send this after the function returns to ensure the match is ready to receive the player.
 		err := m.sendPlayerStart(ctx, logger, dispatcher, state, matchPresence)
@@ -1020,11 +1039,20 @@ func (m *EvrMatch) broadcasterPlayersAccept(ctx context.Context, logger runtime.
 	accepted := make([]uuid.UUID, 0)
 	rejected := make([]uuid.UUID, 0)
 	for _, playerSession := range message.PlayerSessions {
-		if _, ok := state.presenceByPlayerSession[playerSession.String()]; !ok {
+		mp, ok := state.presenceByPlayerSession[playerSession.String()]
+		if !ok {
 			logger.Warn("rejecting %v: player not in this match.", playerSession)
 			rejected = append(rejected, playerSession)
 			continue
 		}
+		// Join the user to the stream (this calls MatchJoin)
+		_, err := nk.StreamUserJoin(StreamModeMatchAuthoritative, state.MatchID.String(), "", state.Node, mp.UserID.String(), mp.SessionID.String(), false, false, "")
+		if err != nil {
+			logger.Error("failed to join user to stream: %v", err)
+			rejected = append(rejected, playerSession)
+			continue
+		}
+
 		accepted = append(accepted, playerSession)
 	}
 	// Only include the message if there are players to accept or reject.
@@ -1039,6 +1067,7 @@ func (m *EvrMatch) broadcasterPlayersAccept(ctx context.Context, logger runtime.
 	if err := m.dispatchMessages(ctx, logger, dispatcher, messages, []runtime.Presence{state.broadcaster}, nil); err != nil {
 		return nil, fmt.Errorf("failed to dispatch message: %v", err)
 	}
+
 	return state, nil
 }
 
