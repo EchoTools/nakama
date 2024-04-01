@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"sync"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -54,8 +55,18 @@ func (r *MatchRpcResponse) String() string {
 	return string(data)
 }
 
+var matchRpcCache = struct {
+	sync.RWMutex
+	response string
+	expiry   time.Time
+}{
+	response: "",
+	expiry:   time.Now(),
+}
+
 func MatchRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 	request := &MatchRpcRequest{}
+
 	response := &MatchRpcResponse{
 		Matches: make([]*EvrMatchState, 0),
 	}
@@ -85,6 +96,18 @@ func MatchRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime
 		// TODO Query the match state from the API, if available.
 		return response.String(), nil
 	} else {
+
+		// If the cache is not expired, use it
+		matchRpcCache.RLock()
+
+		if time.Now().Before(matchRpcCache.expiry) {
+			defer matchRpcCache.RUnlock()
+			return matchRpcCache.response, nil
+		}
+		matchRpcCache.RUnlock()
+
+		// If the cache is expired, update it
+
 		// List all matches
 		if request.Limit == 0 {
 			request.Limit = 1000
@@ -101,6 +124,12 @@ func MatchRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime
 			}
 			response.Matches = append(response.Matches, state)
 		}
+
+		// Update the cache
+		matchRpcCache.Lock()
+		defer matchRpcCache.Unlock()
+		matchRpcCache.response = response.String()
+		matchRpcCache.expiry = time.Now().Add(5 * time.Second)
 
 		return response.String(), nil
 	}
@@ -486,7 +515,7 @@ type terminateMatchRequest struct {
 }
 
 type terminateMatchResponse struct {
-	results []string `json:"results"`
+	Results []string `json:"results"`
 }
 
 func terminateMatchRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
@@ -511,7 +540,50 @@ func terminateMatchRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 	}
 
 	response := &terminateMatchResponse{
-		results: responses,
+		Results: responses,
+	}
+
+	jsonData, err := json.Marshal(response)
+	if err != nil {
+		return "", err
+	}
+
+	return string(jsonData), nil
+}
+
+type matchmakingStatusRequest struct {
+}
+
+type matchmakingStatusResponse struct {
+	Tickets []TicketMeta `json:"tickets"`
+}
+
+func matchmakingStatusRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	request := &matchmakingStatusRequest{}
+	if payload != "" {
+		if err := json.Unmarshal([]byte(payload), request); err != nil {
+			return "", err
+		}
+	}
+	subcontext := uuid.NewV5(uuid.NamespaceOID, "matchmakingStatus").String()
+	presences, err := nk.StreamUserList(StreamModeEvr, "", subcontext, "", true, true)
+	if err != nil {
+		return "", err
+	}
+
+	tickets := make([]TicketMeta, len(presences))
+
+	for _, presence := range presences {
+		status := presence.GetStatus()
+		ticketMeta := &TicketMeta{}
+		if err := json.Unmarshal([]byte(status), ticketMeta); err != nil {
+			return "", err
+		}
+		tickets = append(tickets, *ticketMeta)
+	}
+
+	response := &matchmakingStatusResponse{
+		Tickets: tickets,
 	}
 
 	jsonData, err := json.Marshal(response)
