@@ -80,7 +80,7 @@ func (p *EvrPipeline) broadcasterSessionEnded(ctx context.Context, logger *zap.L
 
 	go func() {
 		<-time.After(5 * time.Second)
-		p.newParkingMatch(session, config)
+		p.newParkingMatch(logger, session, config)
 	}()
 	return nil
 }
@@ -99,7 +99,7 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 	}
 
 	// Authenticate the broadcaster
-	userId, _, err := p.authenticateBroadcaster(ctx, session, discordId, password, guildIds, tags)
+	userId, _, err := p.authenticateBroadcaster(ctx, logger, session, discordId, password, guildIds, tags)
 	if err != nil {
 		return errFailedRegistration(session, err, evr.BroadcasterRegistration_Failure)
 	}
@@ -128,7 +128,7 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 	config := broadcasterConfig(userId, session.id.String(), request.ServerId, request.InternalIP, externalIP, request.Port, request.Region, request.VersionLock, tags)
 
 	// Get the hosted channels
-	channels, err := p.getBroadcasterHostInfo(ctx, session, userId, discordId, guildIds)
+	channels, err := p.getBroadcasterHostInfo(ctx, logger, session, userId, discordId, guildIds)
 	if err != nil {
 		return errFailedRegistration(session, err, evr.BroadcasterRegistration_Failure)
 	}
@@ -161,7 +161,7 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 	p.broadcasterRegistrationBySession.Store(session.ID(), config)
 	p.matchmakingRegistry.broadcasters.Store(config.Endpoint.ID(), config.Endpoint)
 	// Create a new parking match
-	if err := p.newParkingMatch(session, config); err != nil {
+	if err := p.newParkingMatch(logger, session, config); err != nil {
 		return errFailedRegistration(session, err, evr.BroadcasterRegistration_Failure)
 	}
 
@@ -227,7 +227,7 @@ func extractAuthenticationDetailsFromContext(ctx context.Context) (discordId, pa
 	return discordId, password, tags, guildIds, nil
 }
 
-func (p *EvrPipeline) authenticateBroadcaster(ctx context.Context, session *sessionWS, discordId, password string, guildIds []string, tags []string) (string, string, error) {
+func (p *EvrPipeline) authenticateBroadcaster(ctx context.Context, logger *zap.Logger, session *sessionWS, discordId, password string, guildIds []string, tags []string) (string, string, error) {
 	// Get the user id from the discord id
 	uid, err := p.discordRegistry.GetUserIdByDiscordId(ctx, discordId, false)
 	if err != nil {
@@ -235,7 +235,7 @@ func (p *EvrPipeline) authenticateBroadcaster(ctx context.Context, session *sess
 	}
 	userId := uid.String()
 	// Authenticate the user
-	userId, username, _, err := AuthenticateEmail(ctx, session.logger, session.pipeline.db, userId+"@"+p.placeholderEmail, password, "", false)
+	userId, username, _, err := AuthenticateEmail(ctx, logger, session.pipeline.db, userId+"@"+p.placeholderEmail, password, "", false)
 	if err != nil {
 		return "", "", fmt.Errorf("password authentication failure")
 	}
@@ -275,7 +275,7 @@ func broadcasterConfig(userId, sessionId string, serverId uint64, internalIP, ex
 	return config
 }
 
-func (p *EvrPipeline) getBroadcasterHostInfo(ctx context.Context, session *sessionWS, userId, discordId string, guildIds []string) (channels []uuid.UUID, err error) {
+func (p *EvrPipeline) getBroadcasterHostInfo(ctx context.Context, logger *zap.Logger, session *sessionWS, userId, discordId string, guildIds []string) (channels []uuid.UUID, err error) {
 
 	// If the list of guilds is empty, get the user's guild groups
 	if len(guildIds) == 0 {
@@ -290,7 +290,7 @@ func (p *EvrPipeline) getBroadcasterHostInfo(ctx context.Context, session *sessi
 		for _, g := range groups {
 			guildId, ok := p.discordRegistry.Get(g.GetId())
 			if !ok {
-				session.logger.Warn("Guild not found", zap.String("groupId", g.GetId()))
+				logger.Warn("Guild not found", zap.String("groupId", g.GetId()))
 				continue
 			}
 
@@ -308,21 +308,21 @@ func (p *EvrPipeline) getBroadcasterHostInfo(ctx context.Context, session *sessi
 		// Get the guild member
 		member, err := p.discordRegistry.GetGuildMember(ctx, guildId, discordId)
 		if err != nil {
-			session.logger.Warn("User not a member of the guild", zap.String("guildId", guildId))
+			logger.Warn("User not a member of the guild", zap.String("guildId", guildId))
 			continue
 		}
 
 		// Get the group id for the guild
 		groupId, found := p.discordRegistry.Get(guildId)
 		if !found {
-			session.logger.Warn("Guild not found", zap.String("guildId", guildId))
+			logger.Warn("Guild not found", zap.String("guildId", guildId))
 			continue
 		}
 
 		// Get the guild's metadata
 		md, err := p.discordRegistry.GetGuildGroupMetadata(ctx, groupId)
 		if err != nil {
-			session.logger.Warn("Failed to get guild group metadata", zap.String("groupId", groupId), zap.Error(err))
+			logger.Warn("Failed to get guild group metadata", zap.String("groupId", groupId), zap.Error(err))
 			continue
 		}
 
@@ -334,7 +334,7 @@ func (p *EvrPipeline) getBroadcasterHostInfo(ctx context.Context, session *sessi
 
 		// Verify the user has the broadcaster role
 		if !lo.Contains(member.Roles, md.BroadcasterHostRole) {
-			session.logger.Warn("User does not have the broadcaster role", zap.String("guildId", guildId))
+			logger.Warn("User does not have the broadcaster role, allowing anyway", zap.String("guildId", guildId))
 			continue
 		}
 
@@ -347,7 +347,7 @@ func (p *EvrPipeline) getBroadcasterHostInfo(ctx context.Context, session *sessi
 	for _, guildId := range allowed {
 		groupId, found := p.discordRegistry.Get(guildId)
 		if !found {
-			session.logger.Warn("Guild not found", zap.String("guildId", guildId))
+			logger.Warn("Guild not found", zap.String("guildId", guildId))
 			continue
 		}
 		groupIds = append(groupIds, uuid.FromStringOrNil(groupId))
@@ -356,7 +356,7 @@ func (p *EvrPipeline) getBroadcasterHostInfo(ctx context.Context, session *sessi
 	return groupIds, nil
 }
 
-func (p *EvrPipeline) newParkingMatch(session *sessionWS, config *MatchBroadcaster) error {
+func (p *EvrPipeline) newParkingMatch(logger *zap.Logger, session *sessionWS, config *MatchBroadcaster) error {
 
 	// Create the match state from the config
 	_, params, _, err := NewEvrMatchState(config.Endpoint, config, session.id.String())
@@ -381,10 +381,10 @@ func (p *EvrPipeline) newParkingMatch(session *sessionWS, config *MatchBroadcast
 	}
 
 	// Process the join request
-	if ok := session.pipeline.ProcessRequest(session.logger, session, joinmsg); !ok {
+	if ok := session.pipeline.ProcessRequest(logger, session, joinmsg); !ok {
 		return fmt.Errorf("failed process join request")
 	}
-	session.logger.Debug("New parking match", zap.String("matchId", matchId))
+	logger.Debug("New parking match", zap.String("matchId", matchId))
 
 	p.matchBySession.Store(session.ID(), matchId)
 

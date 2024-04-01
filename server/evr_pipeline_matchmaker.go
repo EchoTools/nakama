@@ -155,11 +155,11 @@ func (p *EvrPipeline) lobbyFindSessionRequest(ctx context.Context, logger *zap.L
 			request.Channel = groups[0]
 		} else {
 			// If the player has no guilds,
-			return NewMatchmakingResponse(request.Mode, uuid.Nil).SendErrorToSession(session, status.Errorf(codes.PermissionDenied, "No guilds available"))
+			return NewMatchmakingResult(logger, request.Mode, uuid.Nil).SendErrorToSession(session, status.Errorf(codes.PermissionDenied, "No guilds available"))
 		}
 	}
 
-	response := NewMatchmakingResponse(request.Mode, request.Channel)
+	response := NewMatchmakingResult(logger, request.Mode, request.Channel)
 
 	// Build the matchmaking label using the request parameters
 	ml, err := p.matchmakingLabelFromFindRequest(ctx, session, request)
@@ -189,7 +189,7 @@ func (p *EvrPipeline) lobbyFindSessionRequest(ctx context.Context, logger *zap.L
 
 	go func() {
 		// Create the matchmaking session
-		err = p.MatchFind(ctx, session, ml)
+		err = p.MatchFind(ctx, logger, session, ml)
 		if err != nil {
 			response.SendErrorToSession(session, err)
 		}
@@ -226,8 +226,10 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 				return msession.Cancel(fmt.Errorf("failed to find backfill match: %w", err))
 			}
 			if label != nil {
+				msession.Logger.Debug("Backfilling match", zap.String("mid", label.MatchID.String()))
 				msession.MatchIdCh <- label.MatchID.String()
 			}
+			// Continue to loop until the context is done
 		}
 		<-backfillTicker.C
 	}
@@ -281,21 +283,21 @@ func (p *EvrPipeline) MatchCreateLoop(session *sessionWS, msession *MatchmakingS
 	}
 }
 
-func (p *EvrPipeline) MatchFind(parentCtx context.Context, session *sessionWS, ml *EvrMatchState) error {
+func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, session *sessionWS, ml *EvrMatchState) error {
 	if s, found := p.matchmakingRegistry.GetMatchingBySessionId(session.id); found {
 		// Replace the session
-		session.logger.Error("Matchmaking session already exists", zap.Any("tickets", s.Tickets))
+		logger.Warn("Matchmaking session already exists", zap.Any("tickets", s.Tickets))
 	}
 
 	joinFn := func(matchID string) error {
-		return p.JoinEvrMatch(parentCtx, session, matchID, *ml.Channel, int(ml.TeamIndex))
+		return p.JoinEvrMatch(parentCtx, logger, session, matchID, *ml.Channel, int(ml.TeamIndex))
 	}
 	errorFn := func(err error) error {
-		return NewMatchmakingResponse(ml.Mode, *ml.Channel).SendErrorToSession(session, err)
+		return NewMatchmakingResult(logger, ml.Mode, *ml.Channel).SendErrorToSession(session, err)
 	}
 
 	// Create a new matching session
-	session.logger.Debug("Creating a new matchmaking session")
+	logger.Debug("Creating a new matchmaking session")
 	partySize := 1
 	timeout := 60 * time.Minute
 	pruneDelay := 5 * time.Minute // The amount of time to wait before pruning solo private matches
@@ -304,13 +306,13 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, session *sessionWS, m
 		timeout = 12 * time.Hour
 	}
 
-	msession, err := p.matchmakingRegistry.Create(parentCtx, session, ml, partySize, timeout, errorFn, joinFn)
+	msession, err := p.matchmakingRegistry.Create(parentCtx, logger, session, ml, partySize, timeout, errorFn, joinFn)
 	if err != nil {
-		session.logger.Error("Failed to create matchmaking session", zap.Error(err))
+		logger.Error("Failed to create matchmaking session", zap.Error(err))
 		return err
 	}
 
-	logger := msession.Logger
+	logger = msession.Logger
 
 	skipBackfillDelay := false
 	if ml.TeamIndex == TeamIndex(evr.TeamSpectator) || ml.TeamIndex == TeamIndex(evr.TeamModerator) {
@@ -448,7 +450,7 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 		logger.Warn("Failed to get guild priority list", zap.Error(err))
 	}
 
-	result := NewMatchmakingResponse(request.Mode, request.Channel)
+	result := NewMatchmakingResult(logger, request.Mode, request.Channel)
 
 	// Validate that the channel is in the user's guilds
 	if request.Channel == uuid.Nil || !lo.Contains(groups, request.Channel) {
@@ -460,7 +462,7 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 			request.Channel = groups[0]
 		} else {
 			// If the player has no guilds,
-			return NewMatchmakingResponse(request.Mode, uuid.Nil).SendErrorToSession(session, status.Errorf(codes.PermissionDenied, "No guilds available"))
+			return NewMatchmakingResult(logger, request.Mode, uuid.Nil).SendErrorToSession(session, status.Errorf(codes.PermissionDenied, "No guilds available"))
 		}
 
 	}
@@ -493,16 +495,16 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 		partySize := 1 // TODO FIXME this should include the party size
 
 		joinFn := func(matchID string) error {
-			return p.JoinEvrMatch(ctx, session, matchID, *ml.Channel, int(ml.TeamIndex))
+			return p.JoinEvrMatch(ctx, logger, session, matchID, *ml.Channel, int(ml.TeamIndex))
 		}
 
 		errorFn := func(err error) error {
-			return NewMatchmakingResponse(ml.Mode, *ml.Channel).SendErrorToSession(session, err)
+			return NewMatchmakingResult(logger, ml.Mode, *ml.Channel).SendErrorToSession(session, err)
 		}
 
 		// Create a matching session
 		timeout := 15 * time.Minute
-		msession, err := p.matchmakingRegistry.Create(ctx, session, ml, partySize, timeout, errorFn, joinFn)
+		msession, err := p.matchmakingRegistry.Create(ctx, logger, session, ml, partySize, timeout, errorFn, joinFn)
 		if err != nil {
 			return result.SendErrorToSession(session, status.Errorf(codes.Internal, "Failed to create matchmaking session: %v", err))
 		}
@@ -513,7 +515,7 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 			return result.SendErrorToSession(session, err)
 		}
 
-		err = p.JoinEvrMatch(msession.Ctx, session, matchID, request.Channel, int(ml.TeamIndex))
+		err = p.JoinEvrMatch(msession.Ctx, logger, session, matchID, request.Channel, int(ml.TeamIndex))
 		if err != nil {
 			return result.SendErrorToSession(session, err)
 		}
@@ -531,28 +533,28 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 	matchId := request.LobbyId.String() + "." + p.node
 	match, _, err := p.matchRegistry.GetMatch(ctx, matchId)
 	if err != nil {
-		return NewMatchmakingResponse(0, uuid.Nil).SendErrorToSession(session, err)
+		return NewMatchmakingResult(logger, 0, uuid.Nil).SendErrorToSession(session, err)
 	}
 	if match == nil {
-		return NewMatchmakingResponse(0, uuid.Nil).SendErrorToSession(session, status.Errorf(codes.NotFound, "Match not found"))
+		return NewMatchmakingResult(logger, 0, uuid.Nil).SendErrorToSession(session, status.Errorf(codes.NotFound, "Match not found"))
 	}
 
 	// Extract the label
 	ml := &EvrMatchState{}
 	if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), ml); err != nil {
-		return NewMatchmakingResponse(0, uuid.Nil).SendErrorToSession(session, err)
+		return NewMatchmakingResult(logger, 0, uuid.Nil).SendErrorToSession(session, err)
 	}
 
 	// Check if the match is a lobby (and not a parking match)
 	if ml.LobbyType == UnassignedLobby {
-		return NewMatchmakingResponse(0, uuid.Nil).SendErrorToSession(session, status.Errorf(codes.InvalidArgument, "Match is not a lobby"))
+		return NewMatchmakingResult(logger, 0, uuid.Nil).SendErrorToSession(session, status.Errorf(codes.InvalidArgument, "Match is not a lobby"))
 	}
 
 	if ml.Channel == nil {
 		ml.Channel = &uuid.Nil
 	}
 
-	result := NewMatchmakingResponse(ml.Mode, *ml.Channel)
+	result := NewMatchmakingResult(logger, ml.Mode, *ml.Channel)
 	// Check for suspensions on this channel.
 	if ml.Mode == evr.ModeArenaPublic || ml.Mode == evr.ModeCombatPublic || ml.Mode == evr.ModeSocialPublic {
 		// Check for suspensions on this channel, if this is a request for a public match.
@@ -564,7 +566,7 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 	}
 
 	// Join the match
-	if err = p.JoinEvrMatch(ctx, session, matchId, *ml.Channel, int(ml.TeamIndex)); err != nil {
+	if err = p.JoinEvrMatch(ctx, logger, session, matchId, *ml.Channel, int(ml.TeamIndex)); err != nil {
 		return result.SendErrorToSession(session, err)
 	}
 	return nil

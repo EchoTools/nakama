@@ -316,7 +316,7 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 	switch in.Message.(type) {
 	case *rtapi.Envelope_Error:
 		envelope := in.GetError()
-		logger.Error("Got error from server", zap.Int32("code", envelope.Code), zap.String("message", envelope.Message))
+		logger.Error("Envelope_Error", zap.Int32("code", envelope.Code), zap.String("message", envelope.Message))
 
 	case *rtapi.Envelope_MatchPresenceEvent:
 		envelope := in.GetMatchPresenceEvent()
