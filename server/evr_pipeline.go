@@ -166,6 +166,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	}
 	evrPipeline.profileRegistry.checkDefaultProfile()
 	runtime.MatchmakerMatched()
+
 	return evrPipeline
 }
 
@@ -340,11 +341,19 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 				// This is not this user.
 				continue
 			}
+
 			if evrId, ok := session.Context().Value(ctxEvrIDKey{}).(evr.EvrId); ok {
 				p.matchByEvrId.Store(evrId.Token(), matchID)
 			}
-			p.matchBySession.Store(session.ID(), matchID)
-			p.matchByUserId.Store(session.UserID(), matchID)
+			if strings.HasPrefix(session.Username(), "broadcaster:") {
+				// Broadcaster connections are matched by session.
+				p.matchBySession.Store(session.ID(), matchID)
+			} else {
+				if evrId, ok := session.Context().Value(ctxEvrIDKey{}).(evr.EvrId); ok {
+					p.matchByEvrId.Store(evrId.Token(), matchID)
+				}
+				p.matchByUserId.Store(session.UserID(), matchID)
+			}
 		}
 
 		pipelineFn = func(_ *zap.Logger, _ *sessionWS, _ *rtapi.Envelope) ([]evr.Message, error) {

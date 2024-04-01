@@ -511,7 +511,7 @@ func terminateMatchRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 	}
 
 	response := &terminateMatchResponse{
-		results: make([]string, 0),
+		results: responses,
 	}
 
 	jsonData, err := json.Marshal(response)

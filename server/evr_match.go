@@ -125,6 +125,7 @@ type EvrMatchPresence struct {
 	PartyID       uuid.UUID // The party id the player is in.
 	IPinfo        *ipinfo.Core
 	DiscordID     string
+	Query         string // Matchmaking query used to find this match.
 }
 
 func (p *EvrMatchPresence) String() string {
@@ -532,13 +533,12 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		if ok {
 			mp.TeamIndex = matchPresence.TeamIndex
 		}
-	} else {
+	}
 
-		if mp.TeamIndex, ok = selectTeamForPlayer(logger, mp, state); !ok {
-			// The lobby is full, reject the player.
-			logger.Warn("Lobby full.")
-			return state, false, "lobby full"
-		}
+	if mp.TeamIndex, ok = selectTeamForPlayer(logger, mp, state); !ok {
+		// The lobby is full, reject the player.
+		logger.Warn("Lobby full.")
+		return state, false, "lobby full"
 	}
 
 	// Reserve this player's spot in the match.
@@ -547,7 +547,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	state.presenceByEvrId[mp.GetEvrId()] = mp
 
 	// The player data will reused if the player rejoins the match.
-	state.presenceCache[presence.GetUserId()] = mp
+	state.presenceCache[mp.GetUserId()] = mp
 	// Accept the player(s) into the session.
 
 	state.rebuildCache()
@@ -609,7 +609,7 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 		// This is a player joining
 
 		// the cache entry is kept even after a player leaves. This helps put them back on the same team.
-		matchPresence, ok := state.presenceCache[p.GetUserId()]
+		matchPresence, ok := state.presences[p.GetUserId()]
 		if !ok {
 			// TODO FIXME Kick the player from the match.
 			logger.Error("Player not in cache. This shouldn't happen.")
@@ -1045,8 +1045,9 @@ func (m *EvrMatch) broadcasterPlayersAccept(ctx context.Context, logger runtime.
 			rejected = append(rejected, playerSession)
 			continue
 		}
+
 		// Join the user to the stream (this calls MatchJoin)
-		_, err := nk.StreamUserJoin(StreamModeMatchAuthoritative, state.MatchID.String(), "", state.Node, mp.UserID.String(), mp.SessionID.String(), false, false, "")
+		_, err := nk.StreamUserJoin(StreamModeMatchAuthoritative, state.MatchID.String(), "", state.Node, mp.UserID.String(), mp.SessionID.String(), false, false, mp.Query)
 		if err != nil {
 			logger.Error("failed to join user to stream: %v", err)
 			rejected = append(rejected, playerSession)
