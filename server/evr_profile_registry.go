@@ -359,7 +359,7 @@ func (r *ProfileRegistry) UpdateEquippedItem(profile *GameProfile, category stri
 		s.Booster = name
 	case "title":
 		s.Title = name
-	case "tag":
+	case "tag", "heraldry":
 		s.Tag = name
 	case "banner":
 		s.Banner = name
