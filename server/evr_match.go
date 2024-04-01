@@ -620,16 +620,26 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 		logger.Error("state not a valid lobby state object")
 		return nil
 	}
+
 	// Remove the player from the match.
-	for i, p := range presences {
-		logger.Debug("Removing player from match: %s", p.GetUsername())
-		sessionId := p.GetSessionId()
-		if sessionId == state.Broadcaster.SessionID {
+	for _, p := range presences {
+
+		// If the broadcaster left the match, shut it down.
+		if p.GetSessionId() == state.Broadcaster.SessionID {
 			logger.Debug("Broadcaster left the match. Shutting down.")
 			// TODO maybe send the users back to the lobby? if possible.
 			return nil
 		}
-		presences = append(presences[:i], presences[i+1:]...)
+
+		// Check if the player is in the match.
+		if _, ok := state.presences[p.GetUserId()]; !ok {
+			// This player is not in the match.
+			logger.Warn("Player not in match.")
+			continue
+		}
+
+		// Remove the player from the match.
+		delete(state.presences, p.GetUserId())
 	}
 
 	state.rebuildCache()
