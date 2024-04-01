@@ -542,6 +542,16 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 	if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), ml); err != nil {
 		return NewMatchmakingResponse(0, uuid.Nil).SendErrorToSession(session, err)
 	}
+
+	// Check if the match is a lobby (and not a parking match)
+	if ml.LobbyType == UnassignedLobby {
+		return NewMatchmakingResponse(0, uuid.Nil).SendErrorToSession(session, status.Errorf(codes.InvalidArgument, "Match is not a lobby"))
+	}
+
+	if ml.Channel == nil {
+		ml.Channel = &uuid.Nil
+	}
+
 	result := NewMatchmakingResponse(ml.Mode, *ml.Channel)
 	// Check for suspensions on this channel.
 	if ml.Mode == evr.ModeArenaPublic || ml.Mode == evr.ModeCombatPublic || ml.Mode == evr.ModeSocialPublic {
