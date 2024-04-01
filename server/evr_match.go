@@ -460,6 +460,9 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		return nil, false, ""
 	}
 
+	logger = logger.WithField("mid", state.MatchID.String()+"."+state.Node)
+	logger = logger.WithField("username", presence.GetUsername())
+
 	if presence.GetSessionId() == state.Broadcaster.SessionID {
 		logger.Debug("Broadcaster joining the match.")
 		// This is the broadcaster joining, this completes the match init.
