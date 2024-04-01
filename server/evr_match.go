@@ -9,10 +9,12 @@ import (
 	"log"
 	"reflect"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/gofrs/uuid/v5"
+	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/ipinfo/go/v2/ipinfo"
@@ -177,9 +179,9 @@ type EvrMatchMeta struct {
 	// Stats
 }
 type PlayerInfo struct {
-	UserId      string    `json:"userid,omitempty"`
-	DisplayName string    `json:"displayname,omitempty"`
-	EvrId       evr.EvrId `json:"evrid,omitempty"`
+	UserID      string    `json:"user_id,omitempty"`
+	DisplayName string    `json:"display_name,omitempty"`
+	EvrID       evr.EvrId `json:"evr_id,omitempty"`
 	Team        TeamIndex `json:"team,omitempty"`
 }
 
@@ -206,11 +208,11 @@ type EvrMatchState struct {
 	Node        string           `json:"node,omitempty"`        // The node the match is running on.
 	LobbyType   LobbyType        `json:"lobby_type"`            // The type of lobby (Public, Private, Unassigned) (EVR)
 	Broadcaster MatchBroadcaster `json:"broadcaster,omitempty"` // The broadcaster's data
-
-	SpawnedBy string     `json:"spawned_by,omitempty"` // The userId of the player that spawned this match.
-	Channel   *uuid.UUID `json:"channel,omitempty"`    // The channel id of the broadcaster. (EVR)
-	GuildID   string     `json:"guild_id,omitempty"`   // The guild id of the broadcaster. (EVR)
-	GuildName string     `json:"guild_name,omitempty"` // The guild name of the broadcaster. (EVR)
+	Started     time.Time        `json:"started,omitempty"`     // The time the match was started.
+	SpawnedBy   string           `json:"spawned_by,omitempty"`  // The userId of the player that spawned this match.
+	Channel     *uuid.UUID       `json:"channel,omitempty"`     // The channel id of the broadcaster. (EVR)
+	GuildID     string           `json:"guild_id,omitempty"`    // The guild id of the broadcaster. (EVR)
+	GuildName   string           `json:"guild_name,omitempty"`  // The guild name of the broadcaster. (EVR)
 
 	Mode            evr.Symbol           `json:"mode,omitempty"`             // The mode of the lobby (Arena, Combat, Social, etc.) (EVR)
 	Level           evr.Symbol           `json:"level,omitempty"`            // The level to play on (EVR).
@@ -223,7 +225,7 @@ type EvrMatchState struct {
 	TeamSize  int       `json:"team_size,omitempty"` // The size of each team in arena/combat (either 4 or 5)
 	TeamIndex TeamIndex `json:"team,omitempty"`      // What team index a player prefers (Used by Matching only)
 
-	Players                 []string                     `json:"players,omitempty"` // The displayNames of the players (by team name) in the match.
+	Players                 []PlayerInfo                 `json:"players,omitempty"` // The displayNames of the players (by team name) in the match.
 	EvrIDs                  []evr.EvrId                  `json:"evrids,omitempty"`  // The evr ids of the players in the match.
 	UserIDs                 []string                     `json:"userids,omitempty"` // The user ids of the players in the match.
 	presences               map[string]*EvrMatchPresence // [userId]EvrMatchPresence
@@ -236,7 +238,7 @@ type EvrMatchState struct {
 }
 
 func (s *EvrMatchState) String() string {
-	b, err := json.Marshal(s)
+	b, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return ""
 	}
@@ -264,7 +266,7 @@ func MatchStateFromLabel(label string) (*EvrMatchState, error) {
 func (s *EvrMatchState) rebuildCache() {
 	// Rebuild the lookup tables.
 
-	s.Players = make([]string, 0, len(s.presences))
+	s.Players = make([]PlayerInfo, 0, len(s.presences))
 	s.EvrIDs = make([]evr.EvrId, 0, len(s.presences))
 	s.UserIDs = make([]string, 0, len(s.presences))
 	s.Size = 0
@@ -275,10 +277,23 @@ func (s *EvrMatchState) rebuildCache() {
 		if presence.TeamIndex != evr.TeamSpectator && presence.TeamIndex != evr.TeamModerator {
 			s.Size += 1
 		}
-		s.Players = append(s.Players, presence.GetUsername())
+		playerinfo := PlayerInfo{
+			UserID:      presence.UserID.String(),
+			DisplayName: presence.DisplayName,
+			EvrID:       presence.EvrId,
+			Team:        TeamIndex(presence.TeamIndex),
+		}
+
+		s.Players = append(s.Players, playerinfo)
 		s.EvrIDs = append(s.EvrIDs, presence.EvrId)
 		s.UserIDs = append(s.UserIDs, presence.GetUserId())
 	}
+	sort.SliceStable(s.Players, func(i, j int) bool {
+		if s.Players[i].Team < s.Players[j].Team {
+			return true
+		}
+		return false
+	})
 }
 
 // The match config is used internally to create a new match.
@@ -304,6 +319,7 @@ func NewEvrMatchState(endpoint evr.Endpoint, config *MatchBroadcaster, sessionId
 	// Then when the matchmaker decides spawning a new server is nominal approach, the broadcaster joins the match along with
 	// the players. It would have to join first though.  - @thesprockee
 	initState := &EvrMatchState{
+		Started:                 time.Now().UTC(),
 		Broadcaster:             *config,
 		SpawnedBy:               config.OperatorID,
 		Open:                    false,
@@ -311,7 +327,7 @@ func NewEvrMatchState(endpoint evr.Endpoint, config *MatchBroadcaster, sessionId
 		Mode:                    evr.ModeUnloaded,
 		Level:                   evr.LevelUnloaded,
 		Levels:                  make([]Level, 0),
-		Players:                 make([]string, 0, MatchMaxSize),
+		Players:                 make([]PlayerInfo, 0, MatchMaxSize),
 		EvrIDs:                  make([]evr.EvrId, 0, MatchMaxSize),
 		presences:               make(map[string]*EvrMatchPresence),
 		presenceByEvrId:         make(map[string]*EvrMatchPresence),
@@ -535,12 +551,15 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 				// This is a parking match. do nothing.
 				continue
 			}
-
+			if state.Channel == nil {
+				logger.Error("Channel is nil. This shouldn't happen.")
+				state.Channel = &uuid.Nil
+			}
 			// Tell the broadcaster to load the level.
 			messages := []evr.Message{
 				evr.NewBroadcasterStartSession(state.MatchID, *state.Channel, state.MaxSize, uint8(state.LobbyType), state.Broadcaster.AppId, state.Mode, state.Level, []evr.EvrId{}),
 			}
-
+			state.Started = time.Now().UTC()
 			// Dispatch the message for delivery.
 			if err := m.dispatchMessages(ctx, logger, dispatcher, messages, []runtime.Presence{state.broadcaster}, nil); err != nil {
 				logger.Error("failed to dispatch load message to broadcaster: %v", err)
@@ -812,7 +831,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		if state.Channel != nil {
 			channel = *state.Channel
 		}
-
+		state.Started = time.Now().UTC()
 		entrants := make([]evr.EvrId, 0)
 		message := evr.NewBroadcasterStartSession(state.MatchID, channel, state.MaxSize, uint8(state.LobbyType), state.Broadcaster.AppId, state.Mode, state.Level, entrants)
 		messages := []evr.Message{
