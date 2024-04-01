@@ -330,21 +330,12 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 	// For public matches, backfill or matchmake
 	// If it's a social match, backfill or create immediately
 	case evr.ModeSocialPublic:
-		// Backfill any existing matches or create one
-		label, err := p.Backfill(msession.Context(), session, msession)
-		if err != nil {
-			logger.Error("Failed to find backfill match", zap.Error(err))
-			return err
-		}
-		if label != nil {
-			msession.MatchIdCh <- label.MatchID.String()
-			return nil
-		} else {
-			// Continue to try to backfill
-			go p.MatchBackfillLoop(session, msession, skipBackfillDelay)
-			// While also trying to create a match
-			go p.MatchCreateLoop(session, msession, pruneDelay)
-		}
+		// Continue to try to backfill
+		go p.MatchBackfillLoop(session, msession, skipBackfillDelay)
+
+		// While also trying to create a match
+		go p.MatchCreateLoop(session, msession, pruneDelay)
+
 		// For public arena/combat matches, backfill while matchmaking
 	case evr.ModeCombatPublic:
 		// Join any on-going combat match without delay

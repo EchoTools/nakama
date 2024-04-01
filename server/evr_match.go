@@ -414,7 +414,7 @@ func selectTeamForPlayer(logger runtime.Logger, presence *EvrMatchPresence, stat
 
 	if len(state.presences) >= MatchMaxSize {
 		// Lobby full, reject.
-		return t, false
+		return evr.TeamUnassigned, false
 	}
 
 	// Force the player to be on the spectator team if the match is in social mode.
