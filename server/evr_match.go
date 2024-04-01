@@ -402,6 +402,16 @@ func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql
 // selectTeamForPlayer decides which team to assign a player to.
 func selectTeamForPlayer(logger runtime.Logger, presence *EvrMatchPresence, state *EvrMatchState) (int, bool) {
 	t := presence.TeamIndex
+
+	teams := lo.GroupBy(lo.Values(state.presences), func(p *EvrMatchPresence) int { return p.TeamIndex })
+
+	blueTeam := teams[evr.TeamBlue]
+	orangeTeam := teams[evr.TeamOrange]
+	playerpop := len(blueTeam) + len(orangeTeam)
+	spectators := len(teams[evr.TeamSpectator]) + len(teams[evr.TeamModerator])
+	teamsFull := playerpop >= state.TeamSize*2
+	specsFull := spectators >= int(state.MaxSize)-state.TeamSize*2
+
 	if len(state.presences) >= MatchMaxSize {
 		// Lobby full, reject.
 		return t, false
@@ -421,29 +431,23 @@ func selectTeamForPlayer(logger runtime.Logger, presence *EvrMatchPresence, stat
 		t = evr.TeamBlue
 	}
 
-	teams := lo.GroupBy(lo.Values(state.presences), func(p *EvrMatchPresence) int { return p.TeamIndex })
-
-	blueTeam := teams[evr.TeamBlue]
-	orangeTeam := teams[evr.TeamOrange]
-	playerpop := len(blueTeam) + len(orangeTeam)
-	spectators := len(teams[evr.TeamSpectator]) + len(teams[evr.TeamModerator])
-
 	// If the teams are full
-	if (t == evr.TeamBlue || t == evr.TeamOrange) && playerpop >= state.TeamSize*2 {
-		// If it's a public, reject them.
-		if state.LobbyType == PublicLobby {
+	if (t == evr.TeamBlue || t == evr.TeamOrange) && teamsFull {
+		// If it's a private, put the player on spectator.
+		if state.LobbyType == PrivateLobby {
+			t = evr.TeamSpectator
+		} else {
+			// Reject the player.
 			logger.Debug("Teams are full")
 			return evr.TeamUnassigned, false
 		}
-		// Put them on spectator
-		t = evr.TeamSpectator
 	}
 
 	// If the player is a spectator or moderator, assign them to the spectator team.
 	if t == evr.TeamSpectator || t == evr.TeamModerator {
-		// Spectator or Moderator
-		if spectators >= 6 {
-			logger.Debug("Too many spectators")
+		if specsFull {
+			// Spectator or Moderator
+			logger.Debug("Spectators full.")
 			// Spectator population is full, reject.
 			return evr.TeamUnassigned, false
 		}
@@ -473,13 +477,15 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	state, ok := state_.(*EvrMatchState)
 	if !ok {
 		logger.Error("state not a valid lobby state object")
+
 		return nil, false, ""
 	}
 
 	logger = logger.WithField("mid", state.MatchID.String()+"."+state.Node)
 	logger = logger.WithField("username", presence.GetUsername())
 
-	if presence.GetSessionId() == state.Broadcaster.SessionID {
+	switch {
+	case presence.GetSessionId() == state.Broadcaster.SessionID:
 		logger.Debug("Broadcaster joining the match.")
 		// This is the broadcaster joining, this completes the match init.
 		return state, true, ""
@@ -519,7 +525,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 
 	if mp.TeamIndex, ok = selectTeamForPlayer(logger, &mp, state); !ok {
 		// The lobby is full, reject the player.
-		logger.Debug("lobby full.")
+		logger.Warn("Lobby full.")
 		return state, false, "lobby full"
 	}
 
@@ -904,28 +910,21 @@ func (m *EvrMatch) updateLabel(dispatcher runtime.MatchDispatcher, state *EvrMat
 
 func checkIfModerator(ctx context.Context, nk runtime.NakamaModule, userId string, channelId string) (bool, error) {
 
-	groups, _, err := nk.UserGroupsList(ctx, userId, 1, lo.ToPtr(2), "")
+	// Get the user's groups
+	groups, _, err := nk.UserGroupsList(ctx, userId, 1, nil, "")
 	if err != nil {
 		return false, fmt.Errorf("failed to list user groups: %q", err)
 	}
 
-	modgroups := []string{}
-
-	result, _, err := nk.GroupsList(ctx, "Global Moderators", "", nil, nil, 1, "")
-	if err != nil {
-		return false, fmt.Errorf("failed to list groups: %q", err)
-	}
-	if len(result) == 0 {
-		return false, nil
-	} else {
-		modgroups = append(modgroups, result[0].GetId())
-	}
-
 	for _, group := range groups {
-		if lo.Contains(modgroups, group.GetGroup().GetId()) {
-			return true, nil
+
+		if group.GetGroup().GetId() == "Global Moderators" {
+			if group.GetState().Value <= int32(api.GroupUserList_GroupUser_MEMBER) {
+				return true, nil
+			}
 		}
 	}
+
 	return false, nil
 	/*
 		modgroups := []string{}
