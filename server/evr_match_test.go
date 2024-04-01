@@ -243,6 +243,27 @@ func TestSelectTeamForPlayer(t *testing.T) {
 			expectedTeam:   evr.TeamUnassigned,
 			expectedResult: false,
 		},
+		{
+			name:      "full social lobby, reject",
+			lobbyType: PublicLobby,
+			preferred: evr.TeamSpectator,
+			presences: map[string]*EvrMatchPresence{
+				"player1":  {TeamIndex: evr.TeamSocial},
+				"player2":  {TeamIndex: evr.TeamSocial},
+				"player3":  {TeamIndex: evr.TeamSocial},
+				"player4":  {TeamIndex: evr.TeamSocial},
+				"player5":  {TeamIndex: evr.TeamSocial},
+				"player6":  {TeamIndex: evr.TeamSocial},
+				"player7":  {TeamIndex: evr.TeamSocial},
+				"player8":  {TeamIndex: evr.TeamSocial},
+				"player9":  {TeamIndex: evr.TeamSocial},
+				"player10": {TeamIndex: evr.TeamSocial},
+				"player11": {TeamIndex: evr.TeamSocial},
+				"player12": {TeamIndex: evr.TeamSocial},
+			},
+			expectedTeam:   evr.TeamUnassigned,
+			expectedResult: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -258,7 +279,7 @@ func TestSelectTeamForPlayer(t *testing.T) {
 		}
 
 		t.Run(tt.name, func(t *testing.T) {
-			team, result := selectTeamForPlayer(presence, state)
+			team, result := selectTeamForPlayer(NewRuntimeGoLogger(logger), presence, state)
 
 			if team != tt.expectedTeam {
 				t.Errorf("selectTeamForPlayer() returned incorrect team, got: %d, want: %d", team, tt.expectedTeam)
