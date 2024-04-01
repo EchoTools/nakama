@@ -12,6 +12,7 @@ import (
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
+	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/samber/lo"
@@ -81,7 +82,7 @@ func (p *EvrPipeline) ListUnassignedLobbies(ctx context.Context, session *sessio
 }
 
 // Backfill returns a list of matches that the player can backfill
-func (p *EvrPipeline) Backfill(ctx context.Context, session *sessionWS, msession *MatchmakingSession) (*EvrMatchState, error) { // Create a new matching session
+func (p *EvrPipeline) Backfill(ctx context.Context, session *sessionWS, msession *MatchmakingSession) (*EvrMatchState, string, error) { // Create a new matching session
 	// TODO Move this into the matchmaking registry
 	// TODO Add a goroutine to look for matches that:
 	// Are short 1 or more players
@@ -91,28 +92,29 @@ func (p *EvrPipeline) Backfill(ctx context.Context, session *sessionWS, msession
 	// The match will be added to the match.
 
 	var err error
+	var query string
 	logger := session.logger
 	var labels []*EvrMatchState
 
 	if msession.Label.LobbyType != PublicLobby {
 		// Do not backfill for private lobbies
-		return nil, status.Errorf(codes.InvalidArgument, "Cannot backfill private lobbies")
+		return nil, "", status.Errorf(codes.InvalidArgument, "Cannot backfill private lobbies")
 	}
 
 	// Search for existing matches
-	if labels, err = p.MatchSearch(ctx, logger, session, msession.Label); err != nil {
-		return nil, status.Errorf(codes.Internal, "Failed to search for matches: %v", err)
+	if labels, query, err = p.MatchSearch(ctx, logger, session, msession.Label); err != nil {
+		return nil, "", status.Errorf(codes.Internal, "Failed to search for matches: %v", err)
 	}
 
 	// Filter/sort the results
 	if labels, _, err = p.MatchSort(ctx, session, msession, labels); err != nil {
-		return nil, status.Errorf(codes.Internal, "Failed to filter matches: %v", err)
+		return nil, "", status.Errorf(codes.Internal, "Failed to filter matches: %v", err)
 	}
 
 	if len(labels) == 0 {
-		return nil, nil
+		return nil, "", nil
 	}
-	return labels[0], nil
+	return labels[0], query, nil
 }
 
 // TODO FIXME Create a broadcaster registry
@@ -128,7 +130,7 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 	ctx := msession.Context()
 	// TODO FIXME Add a custom matcher for broadcaster matching
 	// Get a list of all the broadcasters
-
+	logger := msession.Logger
 	// Ping endpoints
 	endpoints := make([]evr.Endpoint, 0, 100)
 	p.matchmakingRegistry.broadcasters.Range(func(key string, value evr.Endpoint) bool {
@@ -148,32 +150,102 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 
 	// Add the user to the matchmaker
 	sessionID := session.ID()
-	partyID := ""
 
+	userID := session.UserID().String()
 	presences := []*MatchmakerPresence{
 		{
-			UserId:    session.UserID().String(),
+			UserId:    userID,
 			SessionId: session.ID().String(),
 			Username:  session.Username(),
 			Node:      p.node,
 			SessionID: sessionID,
 		},
 	}
-	config, err := p.matchmakingRegistry.LoadMatchmakingConfig(ctx)
+	// Load the global matchmaking config
+	gconfig, err := p.matchmakingRegistry.LoadMatchmakingConfig(ctx, SystemUserId)
+	if err != nil {
+		return "", status.Errorf(codes.Internal, "Failed to load global matchmaking config: %v", err)
+	}
+
+	// Load the user's matchmaking config
+	config, err := p.matchmakingRegistry.LoadMatchmakingConfig(ctx, userID)
 	if err != nil {
 		return "", status.Errorf(codes.Internal, "Failed to load matchmaking config: %v", err)
 	}
+	// Merge the user's config with the global config
+	query = fmt.Sprintf("%s %s %s", query, gconfig.QueryAddon, config.QueryAddon)
 
-	query = fmt.Sprintf("%s %s", query, config.QueryAddon)
-	minCount := config.MinCount
-	maxCount := config.MaxCount
-	countMultiple := config.CountMultiple
+	partyID := uuid.Nil
 
-	ticket, _, err = session.matchmaker.Add(ctx, presences, sessionID.String(), partyID, query, minCount, maxCount, countMultiple, stringProps, numericProps)
+	if config.GroupID != "" {
+		// Attempt to join the party
+		userPresence := &rtapi.UserPresence{
+			UserId:    userID,
+			SessionId: sessionID.String(),
+			Username:  session.Username(),
+		}
+		presence := []*Presence{&Presence{
+			ID: PresenceID{
+				Node:      p.node,
+				SessionID: sessionID,
+			},
+			// Presence stream not needed.
+			UserID: uuid.FromStringOrNil(userID),
+			Meta: PresenceMeta{
+				Username: session.Username(),
+				// Other meta fields not needed.
+			},
+		}}
+
+		partyID = uuid.NewV5(uuid.Nil, config.GroupID)
+		partyRegistry := session.pipeline.partyRegistry
+		// Try to join the party group
+		ph, found := partyRegistry.(*LocalPartyRegistry).parties.Load(partyID)
+		if found {
+			ph.Lock()
+
+			if ph.members.Size() < ph.members.maxSize {
+				partyRegistry.Join(partyID, presence)
+				logger.Debug("Joined party", zap.String("party_id", partyID.String()), zap.Any("members", ph.members.List()))
+			} else {
+				logger.Warn("Party is full", zap.String("party_id", partyID.String()))
+				partyID = uuid.Nil
+			}
+			ph.Unlock()
+		} else {
+			// Create the party
+			_ = partyRegistry.Create(true, 8, userPresence)
+		}
+
+		// Add the user's group to the string properties
+		stringProps["group"] = config.GroupID
+		// Add the user's group to the query string
+		query = fmt.Sprintf("%s properties.group:%s^5", query, config.GroupID)
+	}
+
+	minCount := gconfig.MinCount
+	maxCount := gconfig.MaxCount
+	countMultiple := gconfig.CountMultiple
+	pID := ""
+	if partyID != uuid.Nil {
+		pID = partyID.String()
+	}
+	subcontext := uuid.NewV5(uuid.Nil, "matchmaking")
+	// Create a status presence for the user
+	session.tracker.TrackMulti(ctx, session.id, []*TrackerOp{
+		// EVR packet data stream for the login session by user ID, and service ID, with EVR ID
+		{
+			Stream: PresenceStream{Mode: StreamModeEvr, Subject: session.userID, Subcontext: subcontext},
+			Meta:   PresenceMeta{Format: session.format, Username: session.Username(), Hidden: true},
+		},
+	}, session.userID, true)
+
+	// Add the user to the matchmaker
+	ticket, _, err = session.matchmaker.Add(ctx, presences, sessionID.String(), pID, query, minCount, maxCount, countMultiple, stringProps, numericProps)
 	if err != nil {
 		return "", fmt.Errorf("failed to add to matchmaker: %v", err)
 	}
-
+	msession.AddTicket(ticket, query)
 	return ticket, nil
 }
 
@@ -224,7 +296,7 @@ func buildMatchQueryFromLabel(ml *EvrMatchState) string {
 }
 
 // MatchSearch attempts to find/create a match for the user.
-func (p *EvrPipeline) MatchSearch(ctx context.Context, logger *zap.Logger, session *sessionWS, ml *EvrMatchState) ([]*EvrMatchState, error) {
+func (p *EvrPipeline) MatchSearch(ctx context.Context, logger *zap.Logger, session *sessionWS, ml *EvrMatchState) ([]*EvrMatchState, string, error) {
 	// TODO FIXME Handle spectators separately from players.
 	// TODO Move this into the matchmaking registry
 	query := buildMatchQueryFromLabel(ml)
@@ -242,7 +314,7 @@ func (p *EvrPipeline) MatchSearch(ctx context.Context, logger *zap.Logger, sessi
 	logger.Debug("Searching for matches")
 	matches, err := listMatches(ctx, p, limit, minSize, maxSize, query)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "Failed to find matches: %v", err)
+		return nil, "", status.Errorf(codes.Internal, "Failed to find matches: %v", err)
 	}
 
 	// Create a label slice of the matches
@@ -256,7 +328,7 @@ func (p *EvrPipeline) MatchSearch(ctx context.Context, logger *zap.Logger, sessi
 		labels[i] = label
 	}
 
-	return labels, nil
+	return labels, query, nil
 }
 
 // mroundRTT rounds the rtt to the nearest modulus
@@ -420,7 +492,7 @@ func (p *EvrPipeline) MatchCreate(ctx context.Context, session *sessionWS, msess
 }
 
 // JoinEvrMatch allows a player to join a match.
-func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, session *sessionWS, matchID string, channel uuid.UUID, teamIndex int) error {
+func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, session *sessionWS, query string, matchID string, channel uuid.UUID, teamIndex int) error {
 	// Append the node to the matchID if it doesn't already contain one.
 	if !strings.Contains(matchID, ".") {
 		matchID = fmt.Sprintf("%s.%s", matchID, p.node)
@@ -472,7 +544,9 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 		PlayerSession: uuid.Must(uuid.NewV4()),
 		TeamIndex:     int(teamIndex),
 		DiscordID:     discordID,
+		Query:         query,
 	}
+
 	// Marshal the player metadata into JSON.
 	jsonMeta, err := json.Marshal(mp)
 	if err != nil {
@@ -488,6 +562,7 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 		return fmt.Errorf("join not allowed: %s", reason)
 	}
 	logger.Info("Joining match")
+
 	p.matchBySession.Store(session.ID(), matchID)
 	p.matchByUserId.Store(session.UserID(), matchID)
 	p.matchByEvrId.Store(evrID.Token(), matchID)

@@ -30,6 +30,7 @@ import (
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -52,6 +53,11 @@ var (
 	ErrMatchmakingCancelled          = status.Errorf(codes.Canceled, "Matchmaking cancelled")
 	ErrMatchmakingCancelledByPlayer  = status.Errorf(codes.Canceled, "Matchmaking cancelled by player")
 	ErrMatchmakingRestarted          = status.Errorf(codes.Canceled, "matchmaking restarted")
+
+	MatchmakingStreamSubject = uuid.NewV5(uuid.Nil, "matchmaking").String()
+
+	MatchmakingConfigStorageCollection = "Matchmaker"
+	MatchmakingConfigStorageKey        = "config"
 )
 
 type LatencyMetric struct {
@@ -127,6 +133,19 @@ func (c *LatencyCache) SelectPingCandidates(endpoints ...evr.Endpoint) []evr.End
 	return endpoints
 }
 
+// FoundMatch represents the match found and send over the match join channel
+type FoundMatch struct {
+	MatchID string
+	Ticket  string // matchmaking ticket if any
+	Query   string
+}
+
+type TicketMeta struct {
+	TicketID  string
+	Query     string
+	Timestamp time.Time
+}
+
 // MatchmakingSession represents a user session looking for a match.
 type MatchmakingSession struct {
 	sync.RWMutex
@@ -134,11 +153,11 @@ type MatchmakingSession struct {
 	CtxCancelFn   context.CancelCauseFunc
 	Logger        *zap.Logger
 	UserId        uuid.UUID
-	MatchIdCh     chan string                   // Channel for MatchId to join.
+	MatchJoinCh   chan FoundMatch               // Channel for MatchId to join.
 	PingResultsCh chan []evr.EndpointPingResult // Channel for ping completion.
 	Expiry        time.Time
 	Label         *EvrMatchState
-	Tickets       []string // Matchmaking tickets
+	Tickets       map[string]TicketMeta // map[ticketId]TicketMeta
 	LatencyCache  *LatencyCache
 }
 
@@ -156,21 +175,21 @@ func (s *MatchmakingSession) Cancel(reason error) error {
 	return nil
 }
 
-func (s *MatchmakingSession) AddTicket(ticket string) {
+func (s *MatchmakingSession) AddTicket(ticket string, query string) {
 	s.Lock()
 	defer s.Unlock()
-	s.Tickets = append(s.Tickets, ticket)
+	ticketMeta := TicketMeta{
+		TicketID:  ticket,
+		Query:     query,
+		Timestamp: time.Now(),
+	}
+	s.Tickets[ticket] = ticketMeta
 }
 
 func (s *MatchmakingSession) RemoveTicket(ticket string) {
 	s.Lock()
 	defer s.Unlock()
-	for i, t := range s.Tickets {
-		if t == ticket {
-			s.Tickets = append(s.Tickets[:i], s.Tickets[i+1:]...)
-			return
-		}
-	}
+	delete(s.Tickets, ticket)
 }
 
 func (s *MatchmakingSession) Wait() error {
@@ -309,52 +328,55 @@ type MatchmakingConfig struct {
 	MaxCount             int      `json:"max_count"`             // Maximum number of matches to create
 	CountMultiple        int      `json:"count_multiple"`        // Count multiple of the party size
 	QueryAddon           string   `json:"query_addon"`           // Additional query to add to the matchmaking query
+	GroupID              string   `json:"group_id"`              // Group ID to matchmake with
 	PriorityPlayers      []string `json:"priority_players"`      // Prioritize these players
 	PriorityBroadcasters []string `json:"priority_broadcasters"` // Prioritize these broadcasters
 }
 
-func (r *MatchmakingRegistry) LoadMatchmakingConfig(ctx context.Context) (*MatchmakingConfig, error) {
-	objs, err := StorageReadObjects(ctx, r.logger, r.db, uuid.Nil, []*api.ReadStorageObjectId{
+func (r *MatchmakingRegistry) LoadMatchmakingConfig(ctx context.Context, userID string) (*MatchmakingConfig, error) {
+	objs, err := r.nk.StorageRead(ctx, []*runtime.StorageRead{
 		{
-			Collection: "Matchmaker",
-			Key:        "config",
-			UserId:     uuid.Nil.String(),
+			Collection: MatchmakingConfigStorageCollection,
+			Key:        MatchmakingConfigStorageKey,
+			UserID:     userID,
 		},
 	})
 	if err != nil {
 		r.logger.Error("Failed to read matchmaking config", zap.Error(err))
 		return nil, err
 	}
-	if len(objs.Objects) == 0 {
+
+	if len(objs) == 0 {
 		r.logger.Warn("No matchmaking config found, writing new one")
 		config := &MatchmakingConfig{
 			CountMultiple: 2,
 			MinCount:      2,
 			MaxCount:      8,
 		}
-		err := r.storeMatchmakingConfig(ctx, *config)
+		err := r.storeMatchmakingConfig(ctx, *config, userID)
 		if err != nil {
 			r.logger.Error("Failed to write matchmaking config", zap.Error(err))
 		}
 		return config, err
 	}
 	config := &MatchmakingConfig{}
-	if err := json.Unmarshal([]byte(objs.Objects[0].Value), config); err != nil {
+	if err := json.Unmarshal([]byte(objs[0].Value), config); err != nil {
 		r.logger.Error("Failed to unmarshal matchmaking config", zap.Error(err))
 		return nil, err
 	}
 	return config, nil
 }
 
-func (r *MatchmakingRegistry) storeMatchmakingConfig(ctx context.Context, config MatchmakingConfig) error {
+func (r *MatchmakingRegistry) storeMatchmakingConfig(ctx context.Context, config MatchmakingConfig, userID string) error {
 	data, err := json.Marshal(config)
 	if err != nil {
 		r.logger.Error("Failed to marshal matchmaking config", zap.Error(err))
 	}
 	_, err = r.nk.StorageWrite(ctx, []*runtime.StorageWrite{
 		{
-			Collection:      "Matchmaker",
-			Key:             "config",
+			UserID:          userID,
+			Collection:      MatchmakingConfigStorageCollection,
+			Key:             MatchmakingConfigStorageKey,
 			Value:           string(data),
 			PermissionRead:  0,
 			PermissionWrite: 0,
@@ -377,7 +399,7 @@ func keyToIP(key string) net.IP {
 
 func (mr *MatchmakingRegistry) matchedEntriesFn(entries [][]*MatchmakerEntry) {
 	// Get the matchmaking config from the storage
-	config, err := mr.LoadMatchmakingConfig(mr.ctx)
+	config, err := mr.LoadMatchmakingConfig(mr.ctx, SystemUserId)
 	if err != nil {
 		mr.logger.Error("Failed to load matchmaking config", zap.Error(err))
 		return
@@ -389,7 +411,7 @@ func (mr *MatchmakingRegistry) matchedEntriesFn(entries [][]*MatchmakerEntry) {
 }
 
 func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config *MatchmakingConfig) {
-
+	logger := mr.logger
 	// Use the properties from the first entrant to get the channel
 	stringProperties := entrants[0].StringProperties
 	channel := uuid.FromStringOrNil(stringProperties["channel"])
@@ -437,30 +459,31 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config *M
 		return scored[sorted[i]] < scored[sorted[j]]
 	})
 
-	// Find a valid participant to get the label from
-	// Get the label from the first participant
-	var label *EvrMatchState
+	parties := make(map[string][]*MatchmakerEntry, 8)
+	for _, e := range entrants {
+		id := e.GetPartyId()
+		parties[id] = append(parties[id], e)
+	}
+
+	// Get the ml from the first participant
+	var ml *EvrMatchState
 
 	for _, e := range entrants {
 		if s, ok := mr.GetMatchingBySessionId(e.Presence.SessionID); ok {
-			label = s.Label
+			ml = s.Label
 			break
 		}
 	}
-	if label == nil {
+	if ml == nil {
 		mr.logger.Error("No label found")
 		return // No label found
 	}
 
-	label.SpawnedBy = uuid.Nil.String()
+	teams := distributeParties(lo.Values(parties))
 
-	// Get the players matching session and join them to the match
-	sessions := make([]*MatchmakingSession, 0, len(entrants))
-	for _, e := range entrants {
-		if s, ok := mr.GetMatchingBySessionId(e.Presence.SessionID); ok {
-			sessions = append(sessions, s)
-		}
-	}
+	// Find a valid participant to get the label from
+
+	ml.SpawnedBy = uuid.Nil.String()
 
 	// Loop until a server becomes available or matchmaking times out.
 	timeout := time.After(10 * time.Minute)
@@ -471,19 +494,15 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config *M
 		return
 	default:
 	}
-
+	matchID := ""
+	var err error
 	for {
 
-		matchID, err := mr.allocateBroadcaster(channel, config, sorted, label)
+		matchID, err = mr.allocateBroadcaster(channel, config, sorted, ml)
 		if err != nil {
 			mr.logger.Error("Error allocating broadcaster", zap.Error(err))
-			continue
 		}
 		if matchID != "" {
-			// Send the matchId to the session
-			for _, s := range sessions {
-				s.MatchIdCh <- matchID
-			}
 			break
 		}
 
@@ -494,7 +513,12 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config *M
 		case <-timeout: // Timeout
 
 			mr.logger.Info("Matchmaking timeout looking for an available server")
-			for _, s := range sessions {
+			for _, e := range entrants {
+				s, ok := mr.GetMatchingBySessionId(e.Presence.SessionID)
+				if !ok {
+					logger.Warn("Could not find matching session for user", zap.String("sessionID", e.Presence.SessionID.String()))
+					continue
+				}
 				s.CtxCancelFn(ErrMatchmakingNoAvailableServers)
 			}
 			return
@@ -503,6 +527,88 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config *M
 
 		}
 	}
+	// Assign the teams to the match, taking one from each team at a time
+	// and sending the join instruction to the server
+
+	if len(teams) != 2 {
+		logger.Error("Invalid number of teams", zap.Int("teams", len(teams)))
+		return
+	}
+	if matchID == "" {
+		logger.Error("No match ID found")
+		return
+	}
+
+	teamIndex := 0
+	for _, team := range teams {
+		// Assign each player in the team to the match
+		for _, e := range team {
+			s, ok := mr.GetMatchingBySessionId(e.Presence.SessionID)
+			if !ok {
+				logger.Warn("Could not find matching session for user", zap.String("sessionID", e.Presence.SessionID.String()))
+				continue
+			}
+			// Get the ticket metadata
+			ticket := e.GetTicket()
+			ticketMeta, ok := s.Tickets[ticket]
+			if !ok {
+				logger.Warn("Could not find ticket metadata for user", zap.String("sessionID", e.Presence.SessionID.String()), zap.String("ticket", ticket))
+				continue
+			}
+
+			foundMatch := FoundMatch{
+				MatchID: matchID,
+				Ticket:  ticketMeta.TicketID,
+				Query:   ticketMeta.Query,
+			}
+			// Send the join instruction
+			s.MatchJoinCh <- foundMatch
+
+			// Alternate between teams
+			teamIndex = (teamIndex + 1) % 2
+		}
+	}
+
+}
+
+func distributeParties(parties [][]*MatchmakerEntry) [][]*MatchmakerEntry {
+	// Distribute the players from each party on the two teams.
+	// Try to keep the parties together, but the teams must be balanced.
+	// The algorithm is greedy and may not always produce the best result.
+	// Each team must be 4 players or less
+	teams := [][]*MatchmakerEntry{{}, {}}
+
+	// Sort the parties by size
+	sort.SliceStable(parties, func(i, j int) bool {
+		return len(parties[i]) < len(parties[j])
+	})
+
+	// Distribute the parties to the teams
+	for _, party := range parties {
+		// Find the team with the least players
+		team := 0
+		for i, t := range teams {
+			if len(t) < len(teams[team]) {
+				team = i
+			}
+		}
+		teams[team] = append(teams[team], party...)
+	}
+	// sort the teams by size
+	sort.SliceStable(teams, func(i, j int) bool {
+		return len(teams[i]) > len(teams[j])
+	})
+
+	for i, player := range teams[0] {
+		// If the team is more than two players larger than the other team, distribute the players evenly
+		if len(teams[0]) > len(teams[1])+1 {
+			// Move a player from teams[0] to teams[1]
+			teams[1] = append(teams[1], player)
+			teams[0] = append(teams[0][:i], teams[0][i+1:]...)
+		}
+	}
+
+	return teams
 }
 
 func (mr *MatchmakingRegistry) allocateBroadcaster(channel uuid.UUID, config *MatchmakingConfig, sorted []string, label *EvrMatchState) (string, error) {
@@ -818,7 +924,7 @@ func (c *MatchmakingRegistry) Delete(sessionId uuid.UUID) {
 }
 
 // Add adds a matching session to the registry
-func (c *MatchmakingRegistry) Create(ctx context.Context, logger *zap.Logger, session *sessionWS, ml *EvrMatchState, partySize int, timeout time.Duration, errorFn func(err error) error, joinFn func(matchId string) error) (*MatchmakingSession, error) {
+func (c *MatchmakingRegistry) Create(ctx context.Context, logger *zap.Logger, session *sessionWS, ml *EvrMatchState, partySize int, timeout time.Duration, errorFn func(err error) error, joinFn func(matchId string, query string) error) (*MatchmakingSession, error) {
 	// Check if a matching session exists
 
 	// Set defaults for the matching label
@@ -849,10 +955,11 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, logger *zap.Logger, se
 
 		Logger:        logger,
 		UserId:        session.UserID(),
-		MatchIdCh:     make(chan string, 1),
+		MatchJoinCh:   make(chan FoundMatch, 1),
 		PingResultsCh: make(chan []evr.EndpointPingResult),
 		Expiry:        time.Now().UTC().Add(findAttemptsExpiry),
 		Label:         ml,
+		Tickets:       make(map[string]TicketMeta),
 	}
 
 	// Load the latency cache
@@ -861,6 +968,7 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, logger *zap.Logger, se
 		return nil, status.Errorf(codes.Internal, "Failed to load latency cache: %v", err)
 	}
 	msession.LatencyCache = cache
+
 	// listen for a match ID to join
 	go func() {
 		defer cancel(nil)
@@ -868,9 +976,9 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, logger *zap.Logger, se
 		case <-time.After(timeout):
 			// Timeout
 			errorFn(ErrMatchmakingTimeout)
-		case matchId := <-msession.MatchIdCh:
+		case matchFound := <-msession.MatchJoinCh:
 			// join the match
-			if err := joinFn(matchId); err != nil {
+			if err := joinFn(matchFound.MatchID, matchFound.Query); err != nil {
 				errorFn(err)
 			}
 		case <-ctx.Done():
@@ -953,9 +1061,9 @@ func (ms *MatchmakingSession) BuildQuery(latencies []LatencyMetric) (query strin
 	numericProps = make(map[string]float64, len(latencies))
 	qparts := make([]string, 0, 10)
 	ml := ms.Label
-	// MUST match this channel
+	// SHOULD match this channel
 	chstr := strings.Replace(ms.Label.Channel.String(), "-", "", -1)
-	qparts = append(qparts, fmt.Sprintf("+properties.channel:%s", chstr))
+	qparts = append(qparts, fmt.Sprintf("properties.channel:%s^3", chstr))
 	stringProps["channel"] = chstr
 
 	// Add this user's ID to the string props
@@ -1013,10 +1121,4 @@ func (ms *MatchmakingSession) BuildQuery(latencies []LatencyMetric) (query strin
 	ms.Logger.Debug("Matchmaking query", zap.String("query", query), zap.Any("stringProps", stringProps), zap.Any("numericProps", numericProps))
 	// TODO Avoid ghosted
 	return query, stringProps, numericProps, nil
-}
-
-func (ms *MatchmakingSession) JoinMatch(matchID string) error {
-	// Send the matchId to the session
-	ms.MatchIdCh <- matchID
-	return nil
 }

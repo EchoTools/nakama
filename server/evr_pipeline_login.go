@@ -158,7 +158,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, session *sessionWS, evrI
 	ctx = session.Context()
 
 	go func() {
-		p.loginSessionByEvrID.Store(evrId.String(), session)
+		p.loginSessionByEvrID.Store(evrId.Token(), session)
 		// Create a goroutine to clear the session info when the login session is closed.
 		<-session.Context().Done()
 		session.evrPipeline.loginSessionByEvrID.Delete(evrId.String())

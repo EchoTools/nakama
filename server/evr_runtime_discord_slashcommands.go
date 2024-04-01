@@ -75,6 +75,8 @@ var (
 		{Name: "VRML S7 Champion", Value: "VRML S7 Champion"},
 	}
 
+	groupRegex = regexp.MustCompile("^[a-z0-9]+$")
+
 	mainSlashCommands = []*discordgo.ApplicationCommand{
 		{
 			Name:        "evrsymbol",
@@ -84,6 +86,18 @@ var (
 					Type:        discordgo.ApplicationCommandOptionString,
 					Name:        "token",
 					Description: "String to convert to symbol.",
+					Required:    true,
+				},
+			},
+		},
+		{
+			Name:        "group",
+			Description: "Set your matchmaking group name.",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "group-name",
+					Description: "Your matchmaking group name.",
 					Required:    true,
 				},
 			},
@@ -381,6 +395,98 @@ func RegisterSlashCommands(ctx context.Context, logger runtime.Logger, nk runtim
 							},
 						},
 					},
+				},
+			})
+		},
+		"group": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+			options := i.ApplicationCommandData().Options
+			groupID := options[0].StringValue()
+			// Validate the group is 1 to 8 characters long
+			if len(groupID) < 1 || len(groupID) > 8 {
+				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+					Type: discordgo.InteractionResponseChannelMessageWithSource,
+					Data: &discordgo.InteractionResponseData{
+						Flags:   discordgo.MessageFlagsEphemeral,
+						Content: "Invalid group ID. It must be between one (1) and eight (8) characters long.",
+					},
+				})
+			}
+			// Validate the group is alphanumeric
+			if !groupRegex.MatchString(groupID) {
+				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+					Type: discordgo.InteractionResponseChannelMessageWithSource,
+					Data: &discordgo.InteractionResponseData{
+						Flags:   discordgo.MessageFlagsEphemeral,
+						Content: "Invalid group ID. It must be alphanumeric.",
+					},
+				})
+			}
+			// Validate the group is not a reserved group
+			if lo.Contains([]string{"admin", "moderator", "verified", "broadcaster"}, groupID) {
+				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+					Type: discordgo.InteractionResponseChannelMessageWithSource,
+					Data: &discordgo.InteractionResponseData{
+						Flags:   discordgo.MessageFlagsEphemeral,
+						Content: "Invalid group ID. It is a reserved group.",
+					},
+				})
+			}
+			// lowercase the group
+			groupID = strings.ToLower(groupID)
+
+			// Get the userID
+			userID, err := discordRegistry.GetUserIdByDiscordId(ctx, i.Member.User.ID, true)
+			if err != nil {
+				logger.Error("Failed to get user ID", zap.Error(err))
+				return
+			}
+
+			objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
+				{
+					Collection: MatchmakingConfigStorageCollection,
+					Key:        MatchmakingConfigStorageKey,
+					UserID:     userID.String(),
+				},
+			})
+			if err != nil {
+				logger.Error("Failed to read matchmaking config", zap.Error(err))
+			}
+			matchmakingConfig := &MatchmakingConfig{}
+			if len(objs) != 0 {
+				if err := json.Unmarshal([]byte(objs[0].Value), matchmakingConfig); err != nil {
+					logger.Error("Failed to unmarshal matchmaking config", zap.Error(err))
+					return
+				}
+			}
+			matchmakingConfig.GroupID = groupID
+			// Store it back
+
+			data, err := json.Marshal(matchmakingConfig)
+			if err != nil {
+				logger.Error("Failed to marshal matchmaking config", zap.Error(err))
+				return
+			}
+
+			if _, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{
+				{
+					Collection:      MatchmakingConfigStorageCollection,
+					Key:             MatchmakingConfigStorageKey,
+					UserID:          userID.String(),
+					Value:           string(data),
+					PermissionRead:  1,
+					PermissionWrite: 0,
+				},
+			}); err != nil {
+				logger.Error("Failed to write matchmaking config", zap.Error(err))
+				return
+			}
+
+			// Inform the user of the groupid
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Flags:   discordgo.MessageFlagsEphemeral,
+					Content: fmt.Sprintf("Your group ID has been set to `%s`.", groupID),
 				},
 			})
 		},
