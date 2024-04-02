@@ -21,6 +21,13 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
+var GlobalConfig = &struct {
+	sync.RWMutex
+	rejectMatchmaking bool
+}{
+	rejectMatchmaking: true,
+}
+
 type EvrPipeline struct {
 	sync.RWMutex
 	ctx context.Context

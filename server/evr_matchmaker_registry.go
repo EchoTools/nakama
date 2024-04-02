@@ -53,8 +53,8 @@ var (
 	ErrMatchmakingCancelled          = status.Errorf(codes.Canceled, "Matchmaking cancelled")
 	ErrMatchmakingCancelledByPlayer  = status.Errorf(codes.Canceled, "Matchmaking cancelled by player")
 	ErrMatchmakingRestarted          = status.Errorf(codes.Canceled, "matchmaking restarted")
-
-	MatchmakingStreamSubject = uuid.NewV5(uuid.Nil, "matchmaking").String()
+	ErrMatchmakingMigrationRequired  = status.Errorf(codes.FailedPrecondition, "Server upgraded, migration")
+	MatchmakingStreamSubject         = uuid.NewV5(uuid.Nil, "matchmaking").String()
 
 	MatchmakingConfigStorageCollection = "Matchmaker"
 	MatchmakingConfigStorageKey        = "config"
@@ -250,7 +250,7 @@ func determineErrorCode(code codes.Code) evr.LobbySessionFailureErrorCode {
 	switch code {
 	case codes.DeadlineExceeded:
 		return evr.LobbySessionFailure_Timeout0
-	case codes.FailedPrecondition, codes.InvalidArgument:
+	case codes.InvalidArgument:
 		return evr.LobbySessionFailure_BadRequest
 	case codes.ResourceExhausted:
 		return evr.LobbySessionFailure_ServerIsFull
@@ -260,6 +260,9 @@ func determineErrorCode(code codes.Code) evr.LobbySessionFailureErrorCode {
 		return evr.LobbySessionFailure_ServerDoesNotExist
 	case codes.PermissionDenied, codes.Unauthenticated:
 		return evr.LobbySessionFailure_KickedFromLobbyGroup
+	case codes.FailedPrecondition:
+		return evr.LobbySessionFailure_UpdateRequired
+
 	default:
 		return evr.LobbySessionFailure_InternalError
 	}

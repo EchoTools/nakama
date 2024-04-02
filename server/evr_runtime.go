@@ -83,15 +83,16 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 
 	// Register RPC's for device linking
 	rpcs := map[string]func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error){
-		"link/device":         LinkDeviceRpc,
-		"link/usernamedevice": LinkUserIdDeviceRpc,
-		"signin/discord":      DiscordSignInRpc,
-		"match":               MatchRpc,
-		"link":                LinkingAppRpc,
-		"evr/servicestatus":   ServiceStatusRpc,
-		"importloadouts":      ImportLoadoutsRpc,
-		"terminateMatch":      terminateMatchRpc,
-		"matchmaker":          matchmakingStatusRpc,
+		"link/device":          LinkDeviceRpc,
+		"link/usernamedevice":  LinkUserIdDeviceRpc,
+		"signin/discord":       DiscordSignInRpc,
+		"match":                MatchRpc,
+		"link":                 LinkingAppRpc,
+		"evr/servicestatus":    ServiceStatusRpc,
+		"importloadouts":       ImportLoadoutsRpc,
+		"terminateMatch":       terminateMatchRpc,
+		"matchmaker":           matchmakingStatusRpc,
+		"setmatchamakerstatus": setMatchmakingStatusRpc,
 	}
 
 	for name, rpc := range rpcs {

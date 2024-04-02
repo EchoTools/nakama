@@ -141,6 +141,16 @@ func (p *EvrPipeline) matchmakingLabelFromFindRequest(ctx context.Context, sessi
 // lobbyFindSessionRequest is a message requesting to find a public session to join.
 func (p *EvrPipeline) lobbyFindSessionRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) (err error) {
 	request := in.(*evr.LobbyFindSessionRequest)
+	if GlobalConfig.rejectMatchmaking {
+
+		go func() {
+			<-time.After(15 * time.Second)
+			p.sessionRegistry.Disconnect(context.Background(), session.id, false, runtime.PresenceReasonDisconnect)
+			p.sessionRegistry.Disconnect(context.Background(), request.Session, false, runtime.PresenceReasonDisconnect)
+		}()
+
+		return NewMatchmakingResult(logger, request.Mode, uuid.Nil).SendErrorToSession(session, ErrMatchmakingMigrationRequired)
+	}
 
 	groups, priorities, err := p.GetGuildPriorityList(ctx, session.userID)
 	if err != nil {
@@ -472,6 +482,15 @@ func (p *EvrPipeline) GetGuildPriorityList(ctx context.Context, userID uuid.UUID
 // lobbyCreateSessionRequest is a request to create a new session.
 func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.LobbyCreateSessionRequest)
+
+	if GlobalConfig.rejectMatchmaking {
+		go func() {
+			<-time.After(15 * time.Second)
+			p.sessionRegistry.Disconnect(context.Background(), session.id, false, runtime.PresenceReasonDisconnect)
+			p.sessionRegistry.Disconnect(context.Background(), request.Session, false, runtime.PresenceReasonDisconnect)
+		}()
+		return NewMatchmakingResult(logger, request.Mode, uuid.Nil).SendErrorToSession(session, ErrMatchmakingMigrationRequired)
+	}
 
 	groups, priorities, err := p.GetGuildPriorityList(ctx, session.userID)
 	if err != nil {

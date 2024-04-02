@@ -81,7 +81,7 @@ func (p *EvrPipeline) ListUnassignedLobbies(ctx context.Context, session *sessio
 	return labels, nil
 }
 
-// Backfill returns a list of matches that the player can backfill
+// Backfill returns a match that the player can backfill
 func (p *EvrPipeline) Backfill(ctx context.Context, session *sessionWS, msession *MatchmakingSession) (*EvrMatchState, string, error) { // Create a new matching session
 	// TODO Move this into the matchmaking registry
 	// TODO Add a goroutine to look for matches that:
