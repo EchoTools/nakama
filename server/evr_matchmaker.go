@@ -115,14 +115,21 @@ func (p *EvrPipeline) Backfill(ctx context.Context, session *sessionWS, msession
 		return nil, query, nil
 	}
 
-	// Find a backfill that hasn't been backfilled in the past 5 seconds.
 	var selected *EvrMatchState
-	for _, label := range labels {
-		matchID := label.MatchID.String()
-		actual, loaded := p.backfillQueue.LoadOrStore(matchID, time.Now())
-		if loaded && time.Since(actual) < 5*time.Second {
-			continue
+	if msession.Label.Mode == evr.ModeArenaPublic || msession.Label.Mode == evr.ModeCombatPublic {
+
+		// Find a backfill that hasn't been backfilled in the past 5 seconds.
+		for _, label := range labels {
+			matchID := label.MatchID.String()
+			actual, loaded := p.backfillQueue.LoadOrStore(matchID, time.Now())
+			if loaded && time.Since(actual) < 3*time.Second {
+				continue
+			}
+			selected = label
 		}
+	} else {
+		// Select the first match
+		selected = labels[0]
 	}
 
 	return selected, query, nil
