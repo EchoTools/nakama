@@ -1,6 +1,7 @@
 package evr
 
 import (
+	"encoding/json"
 	"fmt"
 )
 
@@ -8,14 +9,19 @@ import (
 // It contains profile information about the requested user.
 type OtherUserProfileSuccess struct {
 	Message
-	EvrId         EvrId
-	ServerProfile *ServerProfile
+	EvrId             EvrId
+	ServerProfileJSON []byte
 }
 
 func NewOtherUserProfileSuccess(evrId EvrId, profile *ServerProfile) *OtherUserProfileSuccess {
+	data, err := json.Marshal(profile)
+	if err != nil {
+		panic("failed to marshal profile")
+	}
+
 	return &OtherUserProfileSuccess{
-		EvrId:         evrId,
-		ServerProfile: profile,
+		EvrId:             evrId,
+		ServerProfileJSON: data,
 	}
 }
 
@@ -31,11 +37,20 @@ func (m *OtherUserProfileSuccess) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
 		func() error { return s.StreamStruct(&m.EvrId) },
 		func() error {
-			return s.StreamJson(m.ServerProfile, true, ZstdCompression)
+			return s.StreamCompressedBytes(m.ServerProfileJSON, true, ZstdCompression)
 		},
 	})
 }
 
 func (m *OtherUserProfileSuccess) String() string {
 	return fmt.Sprintf("%s(user_id=%s)", m.Token(), m.EvrId.Token())
+}
+
+func (m *OtherUserProfileSuccess) GetProfile() ServerProfile {
+	profile := ServerProfile{}
+	err := json.Unmarshal(m.ServerProfileJSON, &profile)
+	if err != nil {
+		panic("failed to unmarshal profile")
+	}
+	return profile
 }

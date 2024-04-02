@@ -104,7 +104,9 @@ func (p *EvrPipeline) matchmakingLabelFromFindRequest(ctx context.Context, sessi
 		if profile == nil {
 			return nil, status.Errorf(codes.Internal, "Failed to get players profile")
 		}
+		profile.RLock()
 		channel = profile.GetChannel()
+		profile.RUnlock()
 	}
 
 	// Set the channels this player is allowed to matchmake/create a match on.
@@ -419,7 +421,9 @@ func (p *EvrPipeline) GetGuildPriorityList(ctx context.Context, userID uuid.UUID
 	if profile == nil {
 		return nil, nil, status.Errorf(codes.Internal, "Failed to get players profile")
 	}
+	profile.RLock()
 	currentChannel := profile.GetChannel()
+	profile.RUnlock()
 
 	// Get the guild priority from the context
 	groups, err := p.discordRegistry.GetGuildGroups(ctx, userID)

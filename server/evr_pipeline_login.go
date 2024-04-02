@@ -119,11 +119,11 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 }
 
 // processLogin handles the authentication of the login connection.
-func (p *EvrPipeline) processLogin(ctx context.Context, session *sessionWS, evrId evr.EvrId, deviceId *DeviceId, discordId string, userPassword string, loginProfile evr.LoginProfile) (*evr.EchoClientSettings, error) {
+func (p *EvrPipeline) processLogin(ctx context.Context, session *sessionWS, evrId evr.EvrId, deviceId *DeviceId, discordId string, userPassword string, loginProfile evr.LoginProfile) (settings evr.EchoClientSettings, err error) {
 	// Authenticate the account.
 	account, err := p.authenticateAccount(ctx, session, deviceId, discordId, userPassword, loginProfile)
 	if err != nil {
-		return nil, err
+		return settings, err
 	}
 
 	user := account.GetUser()
@@ -132,7 +132,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, session *sessionWS, evrI
 	// Check that this EVR-ID is only used by this userID
 	otherLogins, err := p.checkEvrIDOwner(ctx, evrId)
 	if err != nil {
-		return nil, fmt.Errorf("failed to check EVR-ID owner: %w", err)
+		return settings, fmt.Errorf("failed to check EVR-ID owner: %w", err)
 	}
 
 	if len(otherLogins) > 0 {
@@ -153,7 +153,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, session *sessionWS, evrI
 
 	// Initialize the full session
 	if err := session.LoginSession(userId, user.GetUsername(), evrId, deviceId, noVR); err != nil {
-		return nil, fmt.Errorf("failed to login: %w", err)
+		return settings, fmt.Errorf("failed to login: %w", err)
 	}
 	ctx = session.Context()
 
@@ -166,14 +166,13 @@ func (p *EvrPipeline) processLogin(ctx context.Context, session *sessionWS, evrI
 
 	// Load the user's profile
 	profile, err := p.profileRegistry.GetSessionProfile(ctx, session, loginProfile)
-	if err != nil {
+	if err != nil || profile == nil {
 		session.logger.Error("failed to load game profiles", zap.Error(err))
-	}
-	if profile == nil {
-		return &evr.DefaultGameSettingsSettings, fmt.Errorf("failed to load game profiles")
+		return evr.DefaultGameSettingsSettings, fmt.Errorf("failed to load game profiles")
 	}
 
-	settings := &evr.DefaultGameSettingsSettings
+	// TODO Add the settings to the user profile
+	settings = evr.DefaultGameSettingsSettings
 	return settings, nil
 
 }
@@ -891,6 +890,8 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 	if profile == nil {
 		return fmt.Errorf("failed to load game profiles")
 	}
+	profile.Lock()
+	defer profile.Unlock()
 
 	// Send the profile to the client
 	if err := session.SendEvr([]evr.Message{
