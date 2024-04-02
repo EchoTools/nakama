@@ -1039,28 +1039,29 @@ func (m *EvrMatch) broadcasterPlayersAccept(ctx context.Context, logger runtime.
 	accepted := make([]uuid.UUID, 0)
 	rejected := make([]uuid.UUID, 0)
 	for _, playerSession := range message.PlayerSessions {
-		mp, ok := state.presenceByPlayerSession[playerSession.String()]
+		_, ok := state.presenceByPlayerSession[playerSession.String()]
 		if !ok {
 			logger.Warn("rejecting %v: player not in this match.", playerSession)
 			rejected = append(rejected, playerSession)
 			continue
 		}
-
-		// Join the user to the stream (this calls MatchJoin)
-		_, err := nk.StreamUserJoin(StreamModeMatchAuthoritative, state.MatchID.String(), "", state.Node, mp.UserID.String(), mp.SessionID.String(), false, false, mp.Query)
-		if err != nil {
-			logger.Error("failed to join user to stream: %v", err)
-			rejected = append(rejected, playerSession)
-			continue
-		}
-
+		/*
+			_, err := nk.StreamUserJoin(StreamModeMatchAuthoritative, state.MatchID.String(), "", state.Node, mp.UserID.String(), mp.SessionID.String(), false, false, mp.Query)
+			if err != nil {
+				logger.Error("failed to join user to stream: %v", err)
+				rejected = append(rejected, playerSession)
+				continue
+			}
+		*/
 		accepted = append(accepted, playerSession)
 	}
+
 	// Only include the message if there are players to accept or reject.
 	messages := []evr.Message{}
 	if len(accepted) > 0 {
 		messages = append(messages, evr.NewBroadcasterPlayersAccepted(accepted...))
 	}
+
 	if len(rejected) > 0 {
 		messages = append(messages, evr.NewBroadcasterPlayersRejected(evr.PlayerRejectionReasonBadRequest, rejected...))
 	}

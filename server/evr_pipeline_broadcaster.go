@@ -111,19 +111,6 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 		externalIP = p.externalIP
 	}
 
-	/*
-		// Get the broadcasters geoIP data
-		geoIPch := make(chan *ipinfo.Core)
-		go func() {
-			geoIP, err := p.ipCache.retrieveIPinfo(ctx, logger, externalIP)
-			if err != nil {
-				logger.Warn("Failed to retrieve geoIP data", zap.Error(err))
-				geoIPch <- nil
-				return
-			}
-			geoIPch <- geoIP
-		}()
-	*/
 	// Create the broadcaster config
 	config := broadcasterConfig(userId, session.id.String(), request.ServerId, request.InternalIP, externalIP, request.Port, request.Region, request.VersionLock, tags)
 
