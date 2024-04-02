@@ -103,18 +103,29 @@ func (p *EvrPipeline) Backfill(ctx context.Context, session *sessionWS, msession
 
 	// Search for existing matches
 	if labels, query, err = p.MatchSearch(ctx, logger, session, msession.Label); err != nil {
-		return nil, "", status.Errorf(codes.Internal, "Failed to search for matches: %v", err)
+		return nil, query, status.Errorf(codes.Internal, "Failed to search for matches: %v", err)
 	}
 
 	// Filter/sort the results
 	if labels, _, err = p.MatchSort(ctx, session, msession, labels); err != nil {
-		return nil, "", status.Errorf(codes.Internal, "Failed to filter matches: %v", err)
+		return nil, query, status.Errorf(codes.Internal, "Failed to filter matches: %v", err)
 	}
 
 	if len(labels) == 0 {
-		return nil, "", nil
+		return nil, query, nil
 	}
-	return labels[0], query, nil
+
+	// Find a backfill that hasn't been backfilled in the past 5 seconds.
+	var selected *EvrMatchState
+	for _, label := range labels {
+		matchID := label.MatchID.String()
+		actual, loaded := p.backfillQueue.LoadOrStore(matchID, time.Now())
+		if loaded && time.Since(actual) < 5*time.Second {
+			continue
+		}
+	}
+
+	return selected, query, nil
 }
 
 // TODO FIXME Create a broadcaster registry

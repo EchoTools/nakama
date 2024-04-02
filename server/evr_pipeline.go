@@ -60,7 +60,8 @@ type EvrPipeline struct {
 	matchBySession                   *MapOf[uuid.UUID, string]
 	matchByUserId                    *MapOf[uuid.UUID, string]
 	loginSessionByEvrID              *MapOf[string, *sessionWS]
-	matchByEvrId                     *MapOf[string, string] // full match string by evrId token
+	matchByEvrId                     *MapOf[string, string]    // full match string by evrId token
+	backfillQueue                    *MapOf[string, time.Time] // A queue of backfills to avoid double backfill
 	placeholderEmail                 string
 	linkDeviceUrl                    string
 }
@@ -160,12 +161,30 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		matchByUserId:                    &MapOf[uuid.UUID, string]{},
 		loginSessionByEvrID:              &MapOf[string, *sessionWS]{},
 		matchByEvrId:                     &MapOf[string, string]{},
+		backfillQueue:                    &MapOf[string, time.Time]{},
 
 		placeholderEmail: config.GetRuntime().Environment["PLACEHOLDER_EMAIL_DOMAIN"],
 		linkDeviceUrl:    config.GetRuntime().Environment["LINK_DEVICE_URL"],
 	}
 	evrPipeline.profileRegistry.checkDefaultProfile()
 	runtime.MatchmakerMatched()
+
+	// Create a timer to periodically clear the backfill queue
+	go func() {
+		interval := 5 * time.Minute
+		ticker := time.NewTicker(interval)
+		for {
+			select {
+			case <-ticker.C:
+				evrPipeline.backfillQueue.Range(func(key string, value time.Time) bool {
+					if time.Since(value) > interval {
+						evrPipeline.backfillQueue.Delete(key)
+					}
+					return true
+				})
+			}
+		}
+	}()
 
 	return evrPipeline
 }
