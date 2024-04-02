@@ -167,6 +167,8 @@ func (r *ProfileRegistry) SetProfile(userID uuid.UUID, profile *GameProfile) {
 func (r *ProfileRegistry) Unload(userID uuid.UUID) {
 	profile, loaded := r.profiles.LoadAndDelete(userID)
 	if loaded {
+		profile.Lock()
+		defer profile.Unlock()
 		r.storeProfile(context.Background(), userID, profile)
 	}
 }
@@ -607,7 +609,8 @@ func (r *ProfileRegistry) ValidateArenaUnlockByName(i interface{}, itemName stri
 
 func (r *ProfileRegistry) GetSessionProfile(ctx context.Context, session *sessionWS, loginProfile evr.LoginProfile) (*GameProfile, error) {
 	p, _ := r.GetProfileOrNew(session.userID)
-
+	p.Lock()
+	defer p.Unlock()
 	// Get the EVR ID from the context
 	evrID, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
 	if !ok {
@@ -652,7 +655,8 @@ func (r *ProfileRegistry) UpdateSessionProfile(ctx context.Context, session *ses
 	if p == nil {
 		return nil, fmt.Errorf("failed to get user profile")
 	}
-
+	p.Lock()
+	defer p.Unlock()
 	// Validate the client profile.
 	// TODO FIXME Validate the profile data
 	//if errs := evr.ValidateStruct(request.ClientProfile); errs != nil {

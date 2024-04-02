@@ -22,7 +22,7 @@ func (m OtherUserProfileRequest) Symbol() Symbol {
 func (m *OtherUserProfileRequest) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
 		func() error { return s.StreamStruct(&m.EvrId) },
-		func() error { return s.StreamCompressedBytes(&m.Data, true, NoCompression) },
+		func() error { return s.StreamCompressedBytes(m.Data, true, NoCompression) },
 	})
 }
 

@@ -444,7 +444,7 @@ func (s *EasyStream) StreamJson(data interface{}, isNullTerminated bool, compres
 	return nil
 }
 
-func (s *EasyStream) StreamCompressedBytes(data *[]byte, isNullTerminated bool, compressionMode CompressionMode) error {
+func (s *EasyStream) StreamCompressedBytes(data []byte, isNullTerminated bool, compressionMode CompressionMode) error {
 	buf := bytes.Buffer{}
 	var err error
 	switch s.Mode {
@@ -489,10 +489,10 @@ func (s *EasyStream) StreamCompressedBytes(data *[]byte, isNullTerminated bool, 
 		if isNullTerminated && len(b) > 0 && b[len(b)-1] == 0x0 {
 			b = b[:len(b)-1]
 		}
-		*data = b
+		data = b
 		return nil
 	case EncodeMode:
-		b := *data
+		b := data
 		if isNullTerminated {
 			b = append(b, 0x0)
 		}

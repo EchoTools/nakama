@@ -167,7 +167,7 @@ func TestEasyStream_StreamCompressedBytes(t *testing.T) {
 		Mode: EncodeMode,
 		w:    buf,
 	}
-	if err := stream.StreamCompressedBytes(&data, false, NoCompression); err != nil {
+	if err := stream.StreamCompressedBytes(data, false, NoCompression); err != nil {
 		t.Fatalf("failed to stream compressed bytes: %v", err)
 	}
 	want := data

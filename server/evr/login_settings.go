@@ -16,9 +16,9 @@ func (m LoginSettings) String() string {
 	return "SNSLoginSettings{...}"
 }
 
-func NewSNSLoginSettings(settings *EchoClientSettings) *LoginSettings {
+func NewSNSLoginSettings(settings EchoClientSettings) *LoginSettings {
 	return &LoginSettings{
-		LoginSettings: *settings,
+		LoginSettings: settings,
 	}
 }
 
