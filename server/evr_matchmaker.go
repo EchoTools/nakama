@@ -492,16 +492,16 @@ func (p *EvrPipeline) MatchCreate(ctx context.Context, session *sessionWS, msess
 }
 
 // JoinEvrMatch allows a player to join a match.
-func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, session *sessionWS, query string, matchID string, channel uuid.UUID, teamIndex int) error {
+func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, session *sessionWS, query string, matchIDStr string, channel uuid.UUID, teamIndex int) error {
 	// Append the node to the matchID if it doesn't already contain one.
-	if !strings.Contains(matchID, ".") {
-		matchID = fmt.Sprintf("%s.%s", matchID, p.node)
+	if !strings.Contains(matchIDStr, ".") {
+		matchIDStr = fmt.Sprintf("%s.%s", matchIDStr, p.node)
 	}
 
-	s := strings.Split(matchID, ".")[0]
-	mid := uuid.FromStringOrNil(s)
-	if mid == uuid.Nil {
-		return fmt.Errorf("invalid match id: %s", matchID)
+	s := strings.Split(matchIDStr, ".")[0]
+	matchID := uuid.FromStringOrNil(s)
+	if matchID == uuid.Nil {
+		return fmt.Errorf("invalid match id: %s", matchIDStr)
 	}
 
 	// Retrieve the evrID from the context.
@@ -554,18 +554,31 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 	}
 	metadata := map[string]string{"playermeta": string(jsonMeta)}
 	// Do the join attempt to avoid race conditions
-	found, allowed, _, reason, _, _ := p.matchRegistry.JoinAttempt(ctx, mid, p.node, session.UserID(), session.ID(), session.Username(), session.Expiry(), session.Vars(), session.clientIP, session.clientPort, p.node, metadata)
+	found, allowed, isNew, reason, _, _ := p.matchRegistry.JoinAttempt(ctx, matchID, p.node, session.UserID(), session.ID(), session.Username(), session.Expiry(), session.Vars(), session.clientIP, session.clientPort, p.node, metadata)
 	if !found {
-		return fmt.Errorf("match not found: %s", matchID)
+		return fmt.Errorf("match not found: %s", matchIDStr)
 	}
 	if !allowed {
 		return fmt.Errorf("join not allowed: %s", reason)
 	}
-	logger.Info("Joining match")
 
-	p.matchBySession.Store(session.ID(), matchID)
-	p.matchByUserId.Store(session.UserID(), matchID)
-	p.matchByEvrId.Store(evrID.Token(), matchID)
+	if isNew {
+		stream := PresenceStream{Mode: StreamModeMatchAuthoritative, Subject: matchID, Label: p.node}
+		m := PresenceMeta{
+			Username: session.Username(),
+			Format:   session.Format(),
+			Status:   mp.Query,
+		}
+		if success, _ := p.tracker.Track(session.Context(), session.ID(), stream, session.UserID(), m, false); success {
+			// Kick the user from any other matches they may be part of.
+			// WARNING this cannot be used when joining a broadcaster to a match
+			//p.tracker.UntrackLocalByModes(session.ID(), matchStreamModes, stream)
+		}
+	}
+
+	p.matchBySession.Store(session.ID(), matchIDStr)
+	p.matchByUserId.Store(session.UserID(), matchIDStr)
+	p.matchByEvrId.Store(evrID.Token(), matchIDStr)
 
 	return nil
 }

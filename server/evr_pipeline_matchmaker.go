@@ -322,7 +322,11 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 	}
 
 	joinFn := func(matchID string, query string) error {
-		return p.JoinEvrMatch(parentCtx, logger, session, query, matchID, *ml.Channel, int(ml.TeamIndex))
+		err := p.JoinEvrMatch(parentCtx, logger, session, query, matchID, *ml.Channel, int(ml.TeamIndex))
+		if err != nil {
+			return NewMatchmakingResult(logger, ml.Mode, *ml.Channel).SendErrorToSession(session, err)
+		}
+		return nil
 	}
 	errorFn := func(err error) error {
 		return NewMatchmakingResult(logger, ml.Mode, *ml.Channel).SendErrorToSession(session, err)
