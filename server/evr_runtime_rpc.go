@@ -593,3 +593,26 @@ func matchmakingStatusRpc(ctx context.Context, logger runtime.Logger, db *sql.DB
 
 	return string(jsonData), nil
 }
+
+type setMatchmakingStatusRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
+func setMatchmakingStatusRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	request := &setMatchmakingStatusRequest{}
+	if err := json.Unmarshal([]byte(payload), request); err != nil {
+		return "", err
+	}
+
+	g := GlobalConfig
+	g.Lock()
+	defer g.Unlock()
+	g.rejectMatchmaking = !request.Enabled
+
+	statusJson, err := json.Marshal(request)
+	if err != nil {
+		return "", err
+	}
+
+	return string(statusJson), nil
+}
