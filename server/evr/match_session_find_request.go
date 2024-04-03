@@ -46,7 +46,7 @@ func (m *LobbyFindSessionRequest) Stream(s *EasyStream) error {
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.EvrId.PlatformCode) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.EvrId.AccountId) },
 		func() error {
-			// TODO: Figure this out properly
+			// The team index is only present if it's defined.
 			if s.Mode == DecodeMode {
 				if s.Len() >= 2 {
 					return s.StreamNumber(binary.LittleEndian, &m.TeamIndex)

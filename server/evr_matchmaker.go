@@ -577,9 +577,19 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 		return fmt.Errorf("match not found: %s", matchIDStr)
 	}
 	if !allowed {
-		return fmt.Errorf("join not allowed: %s", reason)
+		switch reason {
+		case ErrJoinRejectedUnassignedLobby:
+			return status.Errorf(codes.FailedPrecondition, "join not allowed: %s", reason)
+		case ErrJoinRejectedDuplicateJoin:
+			return status.Errorf(codes.AlreadyExists, "join not allowed: %s", reason)
+		case ErrJoinRejectedNotModerator:
+			return status.Errorf(codes.PermissionDenied, "join not allowed: %s", reason)
+		case ErrJoinRejectedLobbyFull:
+			return status.Errorf(codes.ResourceExhausted, "join not allowed: %s", reason)
+		default:
+			return status.Errorf(codes.Internal, "join not allowed: %s", reason)
+		}
 	}
-
 	if isNew {
 		stream := PresenceStream{Mode: StreamModeMatchAuthoritative, Subject: matchID, Label: p.node}
 		m := PresenceMeta{
