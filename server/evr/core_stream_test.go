@@ -183,7 +183,7 @@ func TestEasyStream_StreamCompressedBytes(t *testing.T) {
 	}
 	want = data
 	got = []byte{}
-	if err := stream.StreamCompressedBytes(&got, false, NoCompression); err != nil {
+	if err := stream.StreamCompressedBytes(got, false, NoCompression); err != nil {
 		t.Fatalf("failed to stream compressed bytes: %v", err)
 	}
 	if !bytes.Equal(got, want) {
@@ -196,7 +196,7 @@ func TestEasyStream_StreamCompressedBytes(t *testing.T) {
 		Mode: EncodeMode,
 		w:    buf,
 	}
-	if err := stream.StreamCompressedBytes(&data, true, NoCompression); err != nil {
+	if err := stream.StreamCompressedBytes(data, true, NoCompression); err != nil {
 		t.Fatalf("failed to stream compressed bytes: %v", err)
 	}
 	want = append(data, 0x00)
@@ -213,7 +213,7 @@ func TestEasyStream_StreamCompressedBytes(t *testing.T) {
 	}
 	want = data
 	got = []byte{}
-	if err := stream.StreamCompressedBytes(&got, true, NoCompression); err != nil {
+	if err := stream.StreamCompressedBytes(got, true, NoCompression); err != nil {
 		t.Fatalf("failed to stream compressed bytes: %v", err)
 	}
 	if !bytes.Equal(got, want) {
@@ -227,7 +227,7 @@ func TestEasyStream_StreamCompressedBytes(t *testing.T) {
 		w:    buf,
 	}
 
-	if err := stream.StreamCompressedBytes(&data, false, ZlibCompression); err != nil {
+	if err := stream.StreamCompressedBytes(data, false, ZlibCompression); err != nil {
 		t.Fatalf("failed to stream compressed bytes: %v", err)
 	}
 	encoded = buf.Bytes()
@@ -240,7 +240,7 @@ func TestEasyStream_StreamCompressedBytes(t *testing.T) {
 	}
 
 	got = []byte{}
-	if err := stream.StreamCompressedBytes(&got, false, ZlibCompression); err != nil {
+	if err := stream.StreamCompressedBytes(got, false, ZlibCompression); err != nil {
 		t.Fatalf("failed to stream compressed bytes: %v", err)
 	}
 	if !bytes.Equal(got, want) {
@@ -254,7 +254,7 @@ func TestEasyStream_StreamCompressedBytes(t *testing.T) {
 		w:    buf,
 	}
 
-	if err := stream.StreamCompressedBytes(&data, true, ZlibCompression); err != nil {
+	if err := stream.StreamCompressedBytes(data, true, ZlibCompression); err != nil {
 		t.Fatalf("failed to stream compressed bytes: %v", err)
 	}
 	encoded = buf.Bytes()
@@ -267,7 +267,7 @@ func TestEasyStream_StreamCompressedBytes(t *testing.T) {
 	}
 
 	got = []byte{}
-	if err := stream.StreamCompressedBytes(&got, true, ZlibCompression); err != nil {
+	if err := stream.StreamCompressedBytes(got, true, ZlibCompression); err != nil {
 		t.Fatalf("failed to stream compressed bytes: %v", err)
 	}
 	if !bytes.Equal(got, want) {

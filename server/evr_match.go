@@ -181,9 +181,10 @@ type EvrMatchMeta struct {
 }
 type PlayerInfo struct {
 	UserID      string    `json:"user_id,omitempty"`
+	Username    string    `json:"username,omitempty"`
 	DisplayName string    `json:"display_name,omitempty"`
 	EvrID       evr.EvrId `json:"evr_id,omitempty"`
-	Team        TeamIndex `json:"team,omitempty"`
+	Team        TeamIndex `json:"team"`
 }
 
 type MatchBroadcaster struct {
@@ -280,6 +281,7 @@ func (s *EvrMatchState) rebuildCache() {
 		}
 		playerinfo := PlayerInfo{
 			UserID:      presence.UserID.String(),
+			Username:    presence.Username,
 			DisplayName: presence.DisplayName,
 			EvrID:       presence.EvrId,
 			Team:        TeamIndex(presence.TeamIndex),
@@ -290,10 +292,7 @@ func (s *EvrMatchState) rebuildCache() {
 		s.UserIDs = append(s.UserIDs, presence.GetUserId())
 	}
 	sort.SliceStable(s.Players, func(i, j int) bool {
-		if s.Players[i].Team < s.Players[j].Team {
-			return true
-		}
-		return false
+		return s.Players[i].Team < s.Players[j].Team
 	})
 }
 
@@ -336,7 +335,7 @@ func NewEvrMatchState(endpoint evr.Endpoint, config *MatchBroadcaster, sessionId
 		presenceCache:           make(map[string]*EvrMatchPresence),
 		UserIDs:                 make([]string, 0, MatchMaxSize),
 		emptyTicks:              0,
-		tickRate:                4,
+		tickRate:                8,
 	}
 
 	evrMatchConfig := evrMatchConfig{
@@ -396,7 +395,7 @@ func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql
 		logger.WithField("err", err).Error("Match label marshal error.")
 	}
 
-	state.tickRate = 4
+	state.tickRate = 8
 	return state, state.tickRate, string(labelJson)
 }
 
@@ -473,6 +472,13 @@ func selectTeamForPlayer(logger runtime.Logger, presence *EvrMatchPresence, stat
 	return t, true
 }
 
+const (
+	ErrJoinRejectedUnassignedLobby = "unassigned lobby"
+	ErrJoinRejectedDuplicateJoin   = "duplicate join"
+	ErrJoinRejectedLobbyFull       = "lobby full"
+	ErrJoinRejectedNotModerator    = "not a moderator"
+)
+
 // MatchJoinAttempt decides whether to accept or deny the player session.
 func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ interface{}, presence runtime.Presence, metadata map[string]string) (interface{}, bool, string) {
 	state, ok := state_.(*EvrMatchState)
@@ -496,19 +502,17 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	// This is a player joining.
 	if state.LobbyType == UnassignedLobby {
 		// This is a parking match. reject the player.
-		logger.Debug("Unassigned lobby, rejecting player.")
-		return state, false, "unassigned lobby"
+		return state, false, ErrJoinRejectedUnassignedLobby
 	}
 
 	// Verify this isn't a duplicate. It will crash the server if they are allowed to join.
 	if _, ok := state.presences[presence.GetUserId()]; ok {
 		logger.Warn("Duplicate join attempt.")
-		return state, false, "duplicate join"
+		//return state, false, ErrJoinRejectedDuplicateJoin
 	}
 
 	mp := &EvrMatchPresence{}
 	if err := json.Unmarshal([]byte(metadata["playermeta"]), &mp); err != nil {
-		logger.Error("Failed to unmarshal metadata", zap.Error(err))
 		return state, false, fmt.Sprintf("failed to unmarshal metadata: %q", err)
 	}
 
@@ -516,12 +520,10 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	if mp.TeamIndex == evr.TeamModerator {
 		found, err := checkIfModerator(ctx, nk, presence.GetUserId(), state.Channel.String())
 		if err != nil {
-			logger.Debug("failed to check if moderator")
 			return state, false, fmt.Sprintf("failed to check if moderator: %q", err)
 		}
 		if !found {
-			logger.Debug("not a moderator")
-			return state, false, "not a moderator"
+			return state, false, ErrJoinRejectedNotModerator
 		}
 	}
 
@@ -537,8 +539,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 
 	if mp.TeamIndex, ok = selectTeamForPlayer(logger, mp, state); !ok {
 		// The lobby is full, reject the player.
-		logger.Warn("Lobby full.")
-		return state, false, "lobby full"
+		return state, false, ErrJoinRejectedLobbyFull
 	}
 
 	// Reserve this player's spot in the match.
@@ -553,7 +554,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	state.rebuildCache()
 	err := m.updateLabel(dispatcher, state)
 	if err != nil {
-		logger.Error("failed to update label: %v", err)
+		return state, false, fmt.Sprintf("failed to update label: %q", err)
 	}
 	logger.Debug("Accepting player into match: %s", presence.GetUsername())
 	return state, true, ""
@@ -910,7 +911,7 @@ func (m *EvrMatch) dispatchMessages(_ context.Context, logger runtime.Logger, di
 		}
 		bytes = append(bytes, payload...)
 	}
-	if err := dispatcher.BroadcastMessage(OpCodeEvrPacketData, bytes, presences, sender, true); err != nil {
+	if err := dispatcher.BroadcastMessageDeferred(OpCodeEvrPacketData, bytes, presences, sender, true); err != nil {
 		return fmt.Errorf("could not broadcast message: %v", err)
 	}
 	return nil
@@ -921,6 +922,7 @@ func (m *EvrMatch) updateLabel(dispatcher runtime.MatchDispatcher, state *EvrMat
 	if err != nil {
 		return fmt.Errorf("failed to marshal match label: %v", err)
 	}
+
 	if err := dispatcher.MatchLabelUpdate(string(labelJson)); err != nil {
 		return fmt.Errorf("could not update label: %v", err)
 	}
@@ -1053,6 +1055,7 @@ func (m *EvrMatch) broadcasterPlayersAccept(ctx context.Context, logger runtime.
 				continue
 			}
 		*/
+
 		accepted = append(accepted, playerSession)
 	}
 
