@@ -400,6 +400,10 @@ func RegisterSlashCommands(ctx context.Context, logger runtime.Logger, nk runtim
 			})
 		},
 		"group": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+			if i.User == nil {
+				return
+			}
+
 			options := i.ApplicationCommandData().Options
 			groupID := options[0].StringValue()
 			// Validate the group is 1 to 8 characters long
@@ -436,7 +440,7 @@ func RegisterSlashCommands(ctx context.Context, logger runtime.Logger, nk runtim
 			groupID = strings.ToLower(groupID)
 
 			// Get the userID
-			userID, err := discordRegistry.GetUserIdByDiscordId(ctx, i.Member.User.ID, true)
+			userID, err := discordRegistry.GetUserIdByDiscordId(ctx, i.User.ID, true)
 			if err != nil {
 				logger.Error("Failed to get user ID", zap.Error(err))
 				return
@@ -504,8 +508,11 @@ func RegisterSlashCommands(ctx context.Context, logger runtime.Logger, nk runtim
 					},
 				})
 			}
+			if i.User == nil {
+				return
+			}
 			if err := func() error {
-				discordId := i.Member.User.ID
+				discordId := i.User.ID
 
 				// Authenticate/create an account.
 				userId, err := discordRegistry.GetUserIdByDiscordId(ctx, discordId, true)
@@ -549,12 +556,14 @@ func RegisterSlashCommands(ctx context.Context, logger runtime.Logger, nk runtim
 			options := i.ApplicationCommandData().Options
 			deviceId := options[0].StringValue()
 			// Validate the link code as a 4 character string
-
+			if i.User == nil {
+				return
+			}
 			if err := func() error {
 				// Get the userid by username
-				userId, err := discordRegistry.GetUserIdByDiscordId(ctx, i.Member.User.ID, false)
+				userId, err := discordRegistry.GetUserIdByDiscordId(ctx, i.User.ID, false)
 				if err != nil {
-					return fmt.Errorf("failed to authenticate (or create) user %s: %w", i.Member.User.ID, err)
+					return fmt.Errorf("failed to authenticate (or create) user %s: %w", i.User.ID, err)
 				}
 
 				return nk.UnlinkDevice(ctx, userId.String(), deviceId)
@@ -757,9 +766,11 @@ func RegisterSlashCommands(ctx context.Context, logger runtime.Logger, nk runtim
 			}
 		},
 		"reset-password": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-
+			if i.User == nil {
+				return
+			}
 			if err := func() error {
-				userId, err := discordRegistry.GetUserIdByDiscordId(ctx, i.Member.User.ID, true)
+				userId, err := discordRegistry.GetUserIdByDiscordId(ctx, i.User.ID, true)
 				if err != nil {
 					return err
 				}
@@ -850,7 +861,10 @@ func RegisterSlashCommands(ctx context.Context, logger runtime.Logger, nk runtim
 			})
 		},
 		"whoami": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-			if err := handleProfileRequest(ctx, logger, nk, s, discordRegistry, i, i.Member.User.ID, i.Member.User.Username); err != nil {
+			if i.User == nil {
+				return
+			}
+			if err := handleProfileRequest(ctx, logger, nk, s, discordRegistry, i, i.User.ID, i.User.Username); err != nil {
 				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 					Type: discordgo.InteractionResponseChannelMessageWithSource,
 					Data: &discordgo.InteractionResponseData{
@@ -862,6 +876,7 @@ func RegisterSlashCommands(ctx context.Context, logger runtime.Logger, nk runtim
 			}
 		},
 		"lookup": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+
 			// Verify the user is part of the Global Moderators group
 			return
 			options := i.ApplicationCommandData().Options
@@ -953,11 +968,14 @@ func RegisterPartySlashCommands(ctx context.Context, discordRegistry DiscordRegi
 			if i.Type != discordgo.InteractionApplicationCommand {
 				return
 			}
+			if i.User == nil {
+				return
+			}
 			options := i.ApplicationCommandData().Options
 			switch options[0].Name {
 			case "invite":
 				options := options[0].Options
-				inviter := i.Member.User
+				inviter := i.User
 				invitee := options[0].UserValue(s)
 
 				if err := sendPartyInvite(ctx, s, i, inviter, invitee, pipeline, discordRegistry); err != nil {
