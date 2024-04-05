@@ -659,11 +659,12 @@ func (r *LocalDiscordRegistry) InitializePartyBot(ctx context.Context, pipeline 
 	r.bot.Identify.Intents |= discordgo.IntentDirectMessages
 	r.bot.Identify.Intents |= discordgo.IntentDirectMessageReactions
 
-	/*
-		if err := RegisterPartySlashCommands(ctx, r, pipeline); err != nil {
-			return err
-		}
-	*/
+	if pipeline == nil {
+		return fmt.Errorf("pipeline is required")
+	}
+	if err := RegisterPartySlashCommands(ctx, r.logger, r.nk, pipeline, r.bot, r); err != nil {
+		return err
+	}
 
 	if err := r.bot.Open(); err != nil {
 		return err
@@ -876,7 +877,6 @@ func (r *LocalDiscordRegistry) InitializeDiscordBot(ctx context.Context, logger 
 	})
 
 	bot.AddHandler(func(s *discordgo.Session, e *discordgo.Ready) {
-		<-time.After(40 * time.Second)
 		if err := RegisterSlashCommands(ctx, logger, nk, s, r); err != nil {
 			logger.Error("Failed to register slash commands: %w", err)
 		}

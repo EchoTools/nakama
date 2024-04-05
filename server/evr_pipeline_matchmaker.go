@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -208,6 +209,48 @@ func (p *EvrPipeline) lobbyFindSessionRequest(ctx context.Context, logger *zap.L
 	return nil
 }
 
+func (p *EvrPipeline) MatchSpectateStreamLoop(session *sessionWS, msession *MatchmakingSession, skipDelay bool, create bool) error {
+
+	ctx := msession.Context()
+
+	// Create a ticker to spectate
+	spectateInterval := time.Duration(10) * time.Second
+
+	limit := 10
+	minSize := 2
+	maxSize := MatchMaxSize - 1
+	query := "+label.open:T +label.lobby_type:public +label.mode:echo_arena +label.size:>=2"
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(spectateInterval):
+		}
+
+		// list existing matches
+		matches, err := listMatches(ctx, p, limit, minSize, maxSize, query)
+		if err != nil {
+			return msession.Cancel(fmt.Errorf("failed to find spectate match: %w", err))
+		}
+
+		if len(matches) == 0 {
+			continue
+		}
+
+		// sort matches by population
+		sort.SliceStable(matches, func(i, j int) bool {
+			return matches[i].Size > matches[j].Size
+		})
+
+		// Found a backfill match
+		foundMatch := FoundMatch{
+			MatchID: matches[0].GetMatchId(),
+			Query:   query,
+		}
+		msession.MatchJoinCh <- foundMatch
+	}
+}
+
 func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *MatchmakingSession, skipDelay bool, create bool) error {
 	interval := p.config.GetMatchmaker().IntervalSec
 	idealMatchIntervals := p.config.GetMatchmaker().RevThreshold
@@ -221,6 +264,7 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 	}
 	// Check for a backfill match on a regular basis
 	backfilInterval := time.Duration(10) * time.Second
+
 	// Create a ticker to check for backfill matches
 	backfillTicker := time.NewTimer(backfilInterval)
 	backfillDelayTimer := time.NewTimer(backfillDelay)
@@ -367,7 +411,7 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 		}
 		// Spectators don't matchmake, and they don't have a delay for backfill.
 		// Spectators also don't time out.
-		go p.MatchBackfillLoop(session, msession, skipBackfillDelay, false)
+		go p.MatchSpectateStreamLoop(session, msession, skipBackfillDelay, false)
 		return nil
 	}
 
