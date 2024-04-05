@@ -526,7 +526,7 @@ func terminateMatchRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 	}
 
 	signal := EvrSignal{
-		Signal: SignalShutdown,
+		Signal: SignalTerminate,
 	}
 	signalJson := signal.String()
 

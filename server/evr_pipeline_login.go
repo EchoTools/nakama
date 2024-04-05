@@ -852,7 +852,7 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	message := in.(*evr.OtherUserProfileRequest)
 
-	// Get the other user's matchId
+	// Get the other user's matchID
 	matchID, found := p.matchByEvrId.Load(message.EvrId.Token())
 	if !found {
 		return fmt.Errorf("failed to find match by (other) EvrID: %s", message.EvrId.Token())

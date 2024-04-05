@@ -48,6 +48,8 @@ func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logg
 	}
 	//evrModes := map[uint8]struct{}{StreamModeEvr: {}, StreamModeMatchAuthoritative: {}}
 	//stream := PresenceStream{Mode: StreamModeEvr, Subject: session.userID, Subcontext: svcMatchID, Label: p.node}
+
+	// Disconnect the player from other matches
 	sessionIDs := session.tracker.ListLocalSessionIDByStream(PresenceStream{Mode: StreamModeEvr, Subject: session.userID, Subcontext: svcMatchID})
 	for _, foundSessionID := range sessionIDs {
 		if foundSessionID == session.id {
@@ -68,6 +70,11 @@ func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logg
 	// Track this session as a matchmaking session.
 	s := session
 	s.tracker.TrackMulti(s.ctx, s.id, []*TrackerOp{
+		// EVR packet data stream for the match session by EvrID
+		{
+			Stream: PresenceStream{Mode: StreamModeEvr, Subject: evrId.UUID()},
+			Meta:   PresenceMeta{Format: s.format, Hidden: true},
+		},
 		// EVR packet data stream for the match session by userID, and service ID
 		{
 			Stream: PresenceStream{Mode: StreamModeEvr, Subject: s.userID, Subcontext: svcMatchID},
@@ -84,6 +91,7 @@ func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logg
 		logger.Warn("Channel is nil")
 		return true, nil
 	}
+
 	// Check for suspensions on this channel.
 	suspensions, err := p.checkSuspensionStatus(ctx, logger, session.UserID().String(), channel)
 	if err != nil {
@@ -156,7 +164,7 @@ func (p *EvrPipeline) lobbyFindSessionRequest(ctx context.Context, logger *zap.L
 			// If the player has no guilds, use the first guild
 			request.Channel = groups[0]
 		} else {
-			// If the player has no guilds,
+			// If the player has no guilds
 			return NewMatchmakingResult(logger, request.Mode, uuid.Nil).SendErrorToSession(session, status.Errorf(codes.PermissionDenied, "No guilds available"))
 		}
 	}
@@ -589,6 +597,7 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 			return NewMatchmakingResult(logger, 0xFFFFFFFFFFFFFFFF, request.LobbyId).SendErrorToSession(session, status.Errorf(codes.InvalidArgument, "Match is a public match"))
 		}
 	}
+
 	// Check if the match is full
 	if ml.Size >= int(ml.MaxSize) {
 		return NewMatchmakingResult(logger, 0xFFFFFFFFFFFFFFFF, request.LobbyId).SendErrorToSession(session, status.Errorf(codes.ResourceExhausted, "Match is full"))

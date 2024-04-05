@@ -78,10 +78,11 @@ func (p *EvrPipeline) broadcasterSessionEnded(ctx context.Context, logger *zap.L
 		return fmt.Errorf("failed process leave request")
 	}
 
-	go func() {
-		<-time.After(5 * time.Second)
-		p.newParkingMatch(logger, session, config)
-	}()
+	err := p.newParkingMatch(logger, session, config)
+	if err != nil {
+		return fmt.Errorf("failed to create new parking match: %v", err)
+	}
+
 	return nil
 }
 
@@ -151,9 +152,6 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 	if err := p.newParkingMatch(logger, session, config); err != nil {
 		return errFailedRegistration(session, err, evr.BroadcasterRegistration_Failure)
 	}
-
-	// Add the broadcaster to teh list
-
 	// Send the registration success message
 	if err := session.SendEvr([]evr.Message{
 		evr.NewBroadcasterRegistrationSuccess(config.ServerID, config.Endpoint.ExternalIP),
@@ -161,6 +159,28 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 	}); err != nil {
 		return errFailedRegistration(session, fmt.Errorf("failed to send lobby registration failure: %v", err), evr.BroadcasterRegistration_Failure)
 	}
+
+	go func() {
+		// Every 10 seconds, check that this broadcaster is a member of a match
+		// If not, disconnect the broadcaster
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-session.Context().Done():
+				return
+			case <-ticker.C:
+				if _, found := p.matchBySession.Load(session.ID()); !found {
+					logger.Warn("Broadcaster is not in a match, disconnecting")
+					session.Close("", runtime.PresenceReasonDisconnect)
+					return
+				}
+			}
+		}
+
+	}()
+
 	return nil
 }
 
