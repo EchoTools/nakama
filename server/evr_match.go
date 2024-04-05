@@ -43,7 +43,7 @@ const (
 	SignalGetEndpoint
 	SignalGetPresences
 	SignalPruneUnderutilized
-	SignalShutdown
+	SignalTerminate
 )
 
 var (
@@ -356,20 +356,28 @@ func NewEvrMatchState(endpoint evr.Endpoint, config *MatchBroadcaster, sessionId
 }
 
 // MatchIdFromContext is a helper function to extract the match id from the context.
-func MatchIdFromContext(ctx context.Context) (uuid.UUID, string) {
-	matchId, ok := ctx.Value(runtime.RUNTIME_CTX_MATCH_ID).(string)
+func MatchIdFromContext(ctx context.Context) (matchID uuid.UUID, node string) {
+	matchIDStr, ok := ctx.Value(runtime.RUNTIME_CTX_MATCH_ID).(string)
 	if !ok {
 		return uuid.Nil, ""
 	}
-	matchIdComponents := strings.SplitN(matchId, ".", 2)
-	if len(matchIdComponents) != 2 {
-		return uuid.Nil, ""
-	}
-	u, err := uuid.FromString(matchIdComponents[0])
+	matchID, node, err := splitMatchID(matchIDStr)
 	if err != nil {
 		return uuid.Nil, ""
 	}
-	return u, matchIdComponents[1]
+	return matchID, node
+}
+
+func splitMatchID(matchIDStr string) (uuid.UUID, string, error) {
+	matchIdComponents := strings.SplitN(matchIDStr, ".", 2)
+	if len(matchIdComponents) != 2 {
+		return uuid.Nil, "", errors.New("invalid match id")
+	}
+	u, err := uuid.FromString(matchIdComponents[0])
+	if err != nil {
+		return uuid.Nil, "", err
+	}
+	return u, matchIdComponents[1], nil
 }
 
 // MatchInit is called when the match is created.
@@ -675,7 +683,23 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 		// If the broadcaster left the match, shut it down.
 		if p.GetSessionId() == state.Broadcaster.SessionID {
 			logger.Debug("Broadcaster left the match. Shutting down.")
-			// TODO maybe send the users back to the lobby? if possible.
+
+			sessions := make([]uuid.UUID, 0, len(state.presences))
+			for _, presence := range state.presences {
+				sessions = append(sessions, uuid.FromStringOrNil(presence.GetPlayerSession()))
+			}
+
+			messages := []evr.Message{
+				evr.NewBroadcasterPlayersRejected(evr.PlayerRejectionReasonDisconnected, sessions...),
+			}
+
+			go func() {
+				// Inform players (if they are still in the match) that the broadcaster has disconnected.
+				err := m.dispatchMessages(ctx, logger, dispatcher, messages, []runtime.Presence{state.broadcaster}, nil)
+				if err != nil {
+					logger.Error("failed to dispatch broadcaster disconnected message: %v", err)
+				}
+			}()
 			return nil
 		}
 
@@ -702,18 +726,75 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 
 // MatchLoop is called every tick of the match and handles state, plus messages from the client.
 func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ interface{}, messages []runtime.MatchData) interface{} {
-	var err error
 	state, ok := state_.(*EvrMatchState)
 	if !ok {
 		logger.Error("state not a valid lobby state object")
 		return nil
 	}
 
+	var err error
+
+	const (
+		BroadcasterJoinTimeoutSecs = 10
+	)
+
 	// Keep track of how many ticks the match has been empty.
 	if len(state.presences) == 0 {
 		state.emptyTicks++
 	} else {
 		state.emptyTicks = 0
+	}
+	emptySecs := state.emptyTicks / state.tickRate
+
+	// Every 5 seconds, check the match state.
+	// If there are any missing or stale presences, shut down the match.
+	if int(tick)%(5*state.tickRate) == 0 {
+
+		// Get the match ID from the context
+		matchID, node := MatchIdFromContext(ctx)
+
+		// Validate the state's presence list
+		presences, err := nk.StreamUserList(StreamModeMatchAuthoritative, matchID.String(), "", node, true, true)
+		if err != nil {
+			logger.Error("failed to get presence list: %v", err)
+			return nil
+		}
+		nkPresences := make([]string, 0, len(presences))
+		for _, p := range presences {
+			nkPresences = append(nkPresences, p.GetSessionId())
+		}
+
+		matchPresences := make([]string, len(state.presences))
+		for _, p := range state.presences {
+			matchPresences = append(matchPresences, p.GetSessionId())
+		}
+		// Include the broadcaster
+		if state.broadcaster != nil {
+			matchPresences = append(matchPresences, state.broadcaster.GetSessionId())
+		}
+
+		// Check the match presences vs the stream presences
+		stale, missing := lo.Difference(matchPresences, nkPresences)
+		if len(stale) > 0 || len(missing) > 0 {
+			logger.Error("Shutting down due to stale or missing presences: stale(%d)=%s, missing(%d)=%s, state=%s", len(stale), stale, len(missing), missing, state.presences)
+			m.MatchTerminate(ctx, logger, db, nk, dispatcher, tick, state, 0)
+			return nil
+		}
+
+		if state.broadcaster == nil {
+			// If the join timeout has expired, shut down the match.
+			if emptySecs > BroadcasterJoinTimeoutSecs {
+				logger.Error("Parking match join timeout expired. Shutting down.")
+				m.MatchTerminate(ctx, logger, db, nk, dispatcher, tick, state, 0)
+				return nil
+			}
+			// if the match is not a parking match, and there is no broadcaster, shut down the match.
+			if state.LobbyType != UnassignedLobby {
+				logger.Error("Parking match has a lobby type. Shutting down.")
+				m.MatchTerminate(ctx, logger, db, nk, dispatcher, tick, state, 0)
+				return nil
+			}
+		}
 	}
 
 	// Handle the messages, one by one
@@ -770,11 +851,18 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 }
 
 // MatchTerminate is called when the match is being terminated.
-func (m *EvrMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state interface{}, graceSeconds int) interface{} {
-	//message := "Server shutting down in " + strconv.Itoa(graceSeconds) + " seconds."
-	//dispatcher.BroadcastMessage(OpCodeBroadcasterDisconnected, []byte(message), []runtime.Presence{}, nil, false)
-	// TODO FIXME send disconnect messages to clients.
-	logger.Info("MatchTerminate called.")
+func (m *EvrMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ interface{}, graceSeconds int) interface{} {
+	state, ok := state_.(*EvrMatchState)
+	if !ok {
+		logger.Error("state not a valid lobby state object")
+		return nil
+	}
+	logger.Info("MatchTerminate called. %v", state)
+	if state.broadcaster != nil {
+		// Disconnect the broadcasters session
+		nk.SessionDisconnect(ctx, state.broadcaster.GetSessionId(), runtime.PresenceReasonDisconnect)
+	}
+
 	return state
 }
 
@@ -794,7 +882,8 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 	}
 
 	switch signal.Signal {
-	case SignalShutdown:
+	case SignalTerminate:
+		m.MatchTerminate(ctx, logger, db, nk, dispatcher, tick, state, 0)
 		return nil, "shutting down"
 
 	case SignalPruneUnderutilized:
@@ -851,8 +940,8 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 			// The level is not set, set it to zero
 			state.Level = 0
 		}
+
 		// Tell the broadcaster to start the session.
-		//entrants := lo.Map(lo.Values(state.presences), func(presence *EvrMatchPresence, _ int) evr.EvrId { return presence.EvrId })
 		channel := uuid.Nil
 		if state.Channel != nil {
 			channel = *state.Channel
@@ -872,7 +961,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		if err := m.dispatchMessages(ctx, logger, dispatcher, messages, []runtime.Presence{state.broadcaster}, nil); err != nil {
 			return state, fmt.Sprintf("failed to dispatch message: %v", err)
 		}
-		logger.Debug("Session started.", zap.Any("state", state))
+		logger.Debug("Session started. %v", state)
 		return state, "session started"
 
 	default:
