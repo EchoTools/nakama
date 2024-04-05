@@ -748,7 +748,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 
 	// Every 5 seconds, check the match state.
 	// If there are any missing or stale presences, shut down the match.
-	if int(tick)%(5*state.tickRate) == 0 {
+	if int(tick)%(30*state.tickRate) == 0 {
 
 		// Get the match ID from the context
 		matchID, node := MatchIdFromContext(ctx)
@@ -776,9 +776,9 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		// Check the match presences vs the stream presences
 		stale, missing := lo.Difference(matchPresences, nkPresences)
 		if len(stale) > 0 || len(missing) > 0 {
-			logger.Error("Shutting down due to stale or missing presences: stale(%d)=%s, missing(%d)=%s, state=%s", len(stale), stale, len(missing), missing, state.presences)
-			m.MatchTerminate(ctx, logger, db, nk, dispatcher, tick, state, 0)
-			return nil
+			logger.Error("difference in presences: stale(%d)=%s, missing(%d)=%s, state=%s", len(stale), stale, len(missing), missing, state.presences)
+			//m.MatchTerminate(ctx, logger, db, nk, dispatcher, tick, state, 0)
+			//return nil
 		}
 
 		if state.broadcaster == nil {

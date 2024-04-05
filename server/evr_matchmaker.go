@@ -315,14 +315,14 @@ func buildMatchQueryFromLabel(ml *EvrMatchState) string {
 
 // MatchSearch attempts to find/create a match for the user.
 func (p *EvrPipeline) MatchSearch(ctx context.Context, logger *zap.Logger, session *sessionWS, ml *EvrMatchState) ([]*EvrMatchState, string, error) {
-	// TODO FIXME Handle spectators separately from players.
+
 	// TODO Move this into the matchmaking registry
 	query := buildMatchQueryFromLabel(ml)
 
 	// Basic search defaults
 	const (
 		minSize = 1
-		maxSize = MatchMaxSize + 1 // +1 for the broadcaster
+		maxSize = MatchMaxSize // the broadcaster is included, so this has one free spot
 		limit   = 50
 	)
 
