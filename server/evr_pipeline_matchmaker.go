@@ -570,6 +570,9 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 		return NewMatchmakingResult(logger, 0xFFFFFFFFFFFFFFFF, request.LobbyId).SendErrorToSession(session, status.Errorf(codes.NotFound, err.Error()))
 	}
 
+	// Set the desired team index
+	ml.TeamIndex = TeamIndex(request.TeamIndex)
+
 	// Check if the match is a parking match
 	if ml.LobbyType == UnassignedLobby {
 		return NewMatchmakingResult(logger, 0xFFFFFFFFFFFFFFFF, request.LobbyId).SendErrorToSession(session, status.Errorf(codes.NotFound, "Match is not a lobby"))
@@ -580,11 +583,12 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 		return NewMatchmakingResult(logger, 0xFFFFFFFFFFFFFFFF, request.LobbyId).SendErrorToSession(session, status.Errorf(codes.InvalidArgument, "Match is not open"))
 	}
 
-	if ml.Mode == evr.ModeArenaPublic || ml.Mode == evr.ModeCombatPublic || ml.Mode == evr.ModeSocialPublic {
-		// Do not allow direct joining public matches right now
-		return NewMatchmakingResult(logger, 0xFFFFFFFFFFFFFFFF, request.LobbyId).SendErrorToSession(session, status.Errorf(codes.InvalidArgument, "Match is a public match"))
+	if ml.TeamIndex != Spectator || ml.TeamIndex != Moderator {
+		if ml.Mode == evr.ModeArenaPublic || ml.Mode == evr.ModeCombatPublic || ml.Mode == evr.ModeSocialPublic {
+			// Do not allow direct joining public matches right now
+			return NewMatchmakingResult(logger, 0xFFFFFFFFFFFFFFFF, request.LobbyId).SendErrorToSession(session, status.Errorf(codes.InvalidArgument, "Match is a public match"))
+		}
 	}
-
 	// Check if the match is full
 	if ml.Size >= int(ml.MaxSize) {
 		return NewMatchmakingResult(logger, 0xFFFFFFFFFFFFFFFF, request.LobbyId).SendErrorToSession(session, status.Errorf(codes.ResourceExhausted, "Match is full"))
