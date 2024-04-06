@@ -975,19 +975,21 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, logger *zap.Logger, se
 	// listen for a match ID to join
 	go func() {
 		defer cancel(nil)
+		var err error
 		select {
-		case <-time.After(timeout):
-			// Timeout
-			errorFn(ErrMatchmakingTimeout)
-		case matchFound := <-msession.MatchJoinCh:
-			// join the match
-			if err := joinFn(matchFound.MatchID, matchFound.Query); err != nil {
-				errorFn(err)
-			}
 		case <-ctx.Done():
 			if ctx.Err() != nil {
-				errorFn(context.Cause(ctx))
+				err = context.Cause(ctx)
 			}
+		case <-time.After(timeout):
+			// Timeout
+			err = ErrMatchmakingTimeout
+		case matchFound := <-msession.MatchJoinCh:
+			// join the match
+			err = joinFn(matchFound.MatchID, matchFound.Query)
+		}
+		if err != nil {
+			defer errorFn(err)
 		}
 		c.StoreLatencyCache(session)
 		c.Delete(session.id)

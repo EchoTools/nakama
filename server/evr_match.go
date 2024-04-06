@@ -735,7 +735,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 	var err error
 
 	const (
-		BroadcasterJoinTimeoutSecs = 10
+		BroadcasterJoinTimeoutSecs = 45
 	)
 
 	// Keep track of how many ticks the match has been empty.
