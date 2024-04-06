@@ -102,7 +102,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		}
 	}
 
-	go RegisterIndexes(initializer)
+	RegisterIndexes(initializer)
 
 	// Create the core groups
 	if err := createCoreGroups(ctx, logger, db, nk, initializer); err != nil {
