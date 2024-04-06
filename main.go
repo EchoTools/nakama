@@ -144,7 +144,7 @@ func main() {
 	sessionCache := server.NewLocalSessionCache(config.GetSession().TokenExpirySec, config.GetSession().RefreshTokenExpirySec)
 	consoleSessionCache := server.NewLocalSessionCache(config.GetConsole().TokenExpirySec, 0)
 	loginAttemptCache := server.NewLocalLoginAttemptCache()
-	statusRegistry := server.NewStatusRegistry(logger, config, sessionRegistry, jsonpbMarshaler)
+	statusRegistry := server.NewLocalStatusRegistry(logger, config, sessionRegistry, jsonpbMarshaler)
 	tracker := server.StartLocalTracker(logger, config, sessionRegistry, statusRegistry, metrics, jsonpbMarshaler)
 	router := server.NewLocalMessageRouter(sessionRegistry, tracker, jsonpbMarshaler)
 	leaderboardCache := server.NewLocalLeaderboardCache(ctx, logger, startupLogger, db)
@@ -296,7 +296,7 @@ func newOrLoadCookie(config server.Config) string {
 	cookie := uuid.FromBytesOrNil(b)
 	if err != nil || cookie == uuid.Nil {
 		cookie = uuid.Must(uuid.NewV4())
-		_ = os.WriteFile(filePath, cookie.Bytes(), 0644)
+		_ = os.WriteFile(filePath, cookie.Bytes(), 0o644)
 	}
 	return cookie.String()
 }
