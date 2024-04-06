@@ -410,8 +410,13 @@ func (r *ProfileRegistry) UpdateEntitledCosmetics(ctx context.Context, userID uu
 		}
 	}
 
+	// Set the user's developer features
+	profile.Server.DeveloperFeatures = nil
+
 	// Set the user's unlocked cosmetics based on their groups
 	unlocks := profile.Server.UnlockedCosmetics.Arena
+
+	// Set the user's unlocked cosmetics based on their groups
 	for _, group := range userGroups {
 		name := group.GetGroup().GetName()
 		if len(name) > 5 && name[:5] == "VRML" {
