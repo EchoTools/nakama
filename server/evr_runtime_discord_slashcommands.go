@@ -25,6 +25,38 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+type DiscordAppBot struct {
+	sync.Mutex
+
+	ctx      context.Context
+	cancelFn context.CancelFunc
+
+	nk       runtime.NakamaModule
+	logger   runtime.Logger
+	metrics  Metrics
+	pipeline *Pipeline
+	config   Config
+
+	discordRegistry DiscordRegistry
+	dg              *discordgo.Session
+}
+
+func NewDiscordAppBot(nk runtime.NakamaModule, logger runtime.Logger, metrics Metrics, pipeline *Pipeline, config Config, discordRegistry DiscordRegistry, dg *discordgo.Session) *DiscordAppBot {
+	ctx, cancelFn := context.WithCancel(context.Background())
+	return &DiscordAppBot{
+		ctx:      ctx,
+		cancelFn: cancelFn,
+
+		logger:   logger,
+		nk:       nk,
+		pipeline: pipeline,
+		metrics:  metrics,
+
+		discordRegistry: discordRegistry,
+		dg:              dg,
+	}
+}
+
 type WhoAmI struct {
 	Username     string        `json:"username"`
 	NakamaId     string        `json:"nakama_id"`
@@ -49,8 +81,6 @@ type EvrIdLogins struct {
 }
 
 var (
-	mu = &sync.Mutex{}
-
 	vrmlGroupChoices = []*discordgo.ApplicationCommandOptionChoice{
 		{Name: "Preseason", Value: "Preseason"},
 		{Name: "VRML S1 Champion", Value: "VRML S1 Champion"},
@@ -342,20 +372,237 @@ var (
 	}
 )
 
-func UnregisterCommandsAll(ctx context.Context, logger runtime.Logger, dg *discordgo.Session) {
+// InitializeDiscordBot initializes the discord bot and synchronizes the guilds with nakama groups. It also registers the bot's handlers.
+func (d *DiscordAppBot) InitializeDiscordBot() error {
+	var err error
+	bot := d.dg
+	if bot == nil {
+		return nil
+	}
+
+	ctx := d.ctx
+	logger := d.logger
+	nk := d.nk
+
+	bot.Identify.Intents |= discordgo.IntentAutoModerationExecution
+	bot.Identify.Intents |= discordgo.IntentMessageContent
+	bot.Identify.Intents |= discordgo.IntentGuilds
+	bot.Identify.Intents |= discordgo.IntentGuildMembers
+	bot.Identify.Intents |= discordgo.IntentGuildBans
+	bot.Identify.Intents |= discordgo.IntentGuildEmojis
+	bot.Identify.Intents |= discordgo.IntentGuildWebhooks
+	bot.Identify.Intents |= discordgo.IntentGuildInvites
+	//bot.Identify.Intents |= discordgo.IntentGuildPresences
+	bot.Identify.Intents |= discordgo.IntentGuildMessages
+	bot.Identify.Intents |= discordgo.IntentGuildMessageReactions
+	bot.Identify.Intents |= discordgo.IntentDirectMessages
+	bot.Identify.Intents |= discordgo.IntentDirectMessageReactions
+	bot.Identify.Intents |= discordgo.IntentMessageContent
+	bot.Identify.Intents |= discordgo.IntentAutoModerationConfiguration
+	bot.Identify.Intents |= discordgo.IntentAutoModerationExecution
+
+	bot.AddHandler(func(session *discordgo.Session, ready *discordgo.Ready) {
+		logger.Info("Discord bot is ready.")
+	})
+
+	bot.AddHandler(func(s *discordgo.Session, m *discordgo.Ready) {
+		// Create a user for the bot based on it's discord profile
+		_, _, _, err := nk.AuthenticateCustom(ctx, m.User.ID, s.State.User.Username, true)
+		if err != nil {
+			logger.Error("Error creating discordbot user: %s", err)
+		}
+
+		// Synchronize the guilds with nakama groups
+		logger.Info("Bot is in %d guilds", len(s.State.Guilds))
+		for _, g := range m.Guilds {
+			g, err := s.Guild(g.ID)
+			if err != nil {
+				logger.Error("Error getting guild: %w", err)
+				return
+			}
+
+			if err := d.discordRegistry.SynchronizeGroup(ctx, g); err != nil {
+				logger.Error("Error synchronizing group: %w", err)
+				return
+			}
+		}
+	})
+
+	bot.AddHandler(func(se *discordgo.Session, m *discordgo.MessageCreate) {
+		if se == nil || m == nil || m.Author == nil {
+			return
+		}
+
+		if m.Author.ID == se.State.User.ID {
+			return
+		}
+		if m.Author.ID != "155149108183695360" { // Dyno bot
+			return
+		}
+		if m.Embeds == nil || len(m.Embeds) == 0 {
+			return
+		}
+		guild, err := se.Guild(m.ID)
+		if err != nil {
+			logger.Error("Error getting guild: %w", err)
+			return
+		}
+
+		suspensionStatus := &SuspensionStatus{
+			GuildName: guild.Name,
+			GuildId:   guild.ID,
+		}
+		e := m.Embeds[0]
+		for _, f := range e.Fields {
+			switch f.Name {
+			case "User":
+				suspensionStatus.UserDiscordId = strings.Trim(strings.Replace(strings.Replace(f.Value, "\\u003c", "<", -1), "\\u003e", ">", -1), "<@!>")
+				userId, err := d.discordRegistry.GetUserIdByDiscordId(ctx, suspensionStatus.UserDiscordId, true)
+				if err != nil {
+					logger.Error("Error getting user id: %w", err)
+					return
+				}
+				suspensionStatus.UserId = userId.String()
+			case "Moderator":
+				suspensionStatus.ModeratorDiscordId = d.discordRegistry.ReplaceMentions(m.GuildID, f.Value)
+			case "Length":
+				suspensionStatus.Duration, err = parseDuration(f.Value)
+				if err != nil || suspensionStatus.Duration <= 0 {
+					logger.Error("Error parsing duration: %w", err)
+					return
+				}
+				suspensionStatus.Expiry = m.Timestamp.Add(suspensionStatus.Duration)
+			case "Role":
+				roles, err := se.GuildRoles(m.GuildID)
+				if err != nil {
+					logger.Error("Error getting guild roles: %w", err)
+					return
+				}
+				for _, role := range roles {
+					if role.Name == f.Value {
+						suspensionStatus.RoleId = role.ID
+						suspensionStatus.RoleName = role.Name
+						break
+					}
+				}
+			case "Reason":
+				suspensionStatus.Reason = d.discordRegistry.ReplaceMentions(m.GuildID, f.Value)
+			}
+		}
+
+		if !suspensionStatus.Valid() {
+			return
+		}
+
+		// Marshal it
+		suspensionStatusBytes, err := json.Marshal(suspensionStatus)
+		if err != nil {
+			logger.Error("Error marshalling suspension status: %w", err)
+			return
+		}
+
+		// Save the storage object.
+
+		_, err = nk.StorageWrite(ctx, []*runtime.StorageWrite{
+			{
+				Collection:      SuspensionStatusCollection,
+				Key:             m.GuildID,
+				UserID:          suspensionStatus.UserId,
+				Value:           string(suspensionStatusBytes),
+				PermissionRead:  0,
+				PermissionWrite: 0,
+			},
+		})
+		if err != nil {
+			logger.Error("Error writing suspension status: %w", err)
+			return
+		}
+
+	})
+
+	bot.AddHandler(func(s *discordgo.Session, m *discordgo.GuildBanAdd) {
+		if s == nil || m == nil {
+			return
+		}
+
+		if groupId, found := d.discordRegistry.Get(m.GuildID); found {
+			if user, err := d.discordRegistry.GetUserIdByDiscordId(ctx, m.User.ID, true); err == nil {
+				nk.GroupUsersKick(ctx, SystemUserId, groupId, []string{user.String()})
+			}
+		}
+	})
+
+	bot.AddHandler(func(s *discordgo.Session, m *discordgo.GuildBanRemove) {
+		if s == nil || m == nil {
+			return
+		}
+
+		_, _ = d.discordRegistry.GetUserIdByDiscordId(ctx, m.User.ID, true)
+	})
+
+	bot.AddHandler(func(s *discordgo.Session, m *discordgo.GuildMemberRemove) {
+		if s == nil || m == nil {
+			return
+		}
+
+		if groupId, found := d.discordRegistry.Get(m.GuildID); found {
+			if user, err := d.discordRegistry.GetUserIdByDiscordId(ctx, m.User.ID, true); err == nil {
+				_ = nk.GroupUserLeave(ctx, SystemUserId, groupId, user.String())
+			}
+		}
+	})
+
+	bot.AddHandler(func(s *discordgo.Session, e *discordgo.GuildMemberUpdate) {
+		if s == nil || e == nil {
+			return
+		}
+		discordId := e.User.ID
+		// TODO FIXME Make this only update what changed.
+		userId, err := d.discordRegistry.GetUserIdByDiscordId(ctx, discordId, true)
+		if err != nil {
+			logger.Error("Error getting user id: %w", err)
+			return
+		}
+		if err := d.discordRegistry.UpdateAccount(ctx, userId); err != nil {
+			logger.Debug("Error updating account: %w", err)
+		}
+	})
+
+	/*
+		bot.AddHandler(func(s *discordgo.Session, m *discordgo.GuildMembersChunk) {
+			if err := OnGuildMembersChunk(ctx, s, m); err != nil {
+				logger.Error("Error calling OnGuildMembersChunk: %w", err)
+			}
+		})
+	*/
+
+	bot.AddHandler(func(s *discordgo.Session, e *discordgo.Ready) {
+		if err := d.RegisterSlashCommands(); err != nil {
+			logger.Error("Failed to register slash commands: %w", err)
+		}
+	})
+
+	if err = bot.Open(); err != nil {
+		logger.Error("Failed to open discord bot connection: %w", err)
+	}
+
+	logger.Info("Discord bot started: %s", bot.State.User.String())
+	return nil
+}
+func (d *DiscordAppBot) UnregisterCommandsAll(ctx context.Context, logger runtime.Logger, dg *discordgo.Session) {
 	guilds, err := dg.UserGuilds(100, "", "")
 	if err != nil {
 		logger.Error("Error fetching guilds,", zap.Error(err))
 		return
 	}
 	for _, guild := range guilds {
-		UnregisterCommands(ctx, logger, dg, guild.ID)
+		d.UnregisterCommands(ctx, logger, dg, guild.ID)
 	}
 
 }
 
 // If guildID is empty, it will unregister all global commands.
-func UnregisterCommands(ctx context.Context, logger runtime.Logger, dg *discordgo.Session, guildID string) {
+func (d *DiscordAppBot) UnregisterCommands(ctx context.Context, logger runtime.Logger, dg *discordgo.Session, guildID string) {
 	commands, err := dg.ApplicationCommands(dg.State.User.ID, guildID)
 	if err != nil {
 		logger.Error("Error fetching commands,", zap.Error(err))
@@ -372,7 +619,13 @@ func UnregisterCommands(ctx context.Context, logger runtime.Logger, dg *discordg
 	}
 }
 
-func RegisterSlashCommands(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, pipeline *Pipeline, bot *discordgo.Session, discordRegistry DiscordRegistry) error {
+func (d *DiscordAppBot) RegisterSlashCommands() error {
+	ctx := d.ctx
+	nk := d.nk
+	logger := d.logger
+	dg := d.dg
+	discordRegistry := d.discordRegistry
+
 	commandHandlers := map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate){
 		"evrsymbol": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			options := i.ApplicationCommandData().Options
@@ -760,7 +1013,7 @@ func RegisterSlashCommands(ctx context.Context, logger runtime.Logger, nk runtim
 					},
 				})
 				return
-				options := options[0].Options
+				options = options[0].Options
 				switch options[0].Name {
 				case "request":
 					badges := make([]string, len(options[1:]))
@@ -799,7 +1052,7 @@ func RegisterSlashCommands(ctx context.Context, logger runtime.Logger, nk runtim
 				}
 				user = i.Member.User
 			}
-			if err := handleProfileRequest(ctx, logger, nk, s, discordRegistry, i, user.ID, user.Username); err != nil {
+			if err := d.handleProfileRequest(ctx, logger, nk, s, discordRegistry, i, user.ID, user.Username); err != nil {
 				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 					Type: discordgo.InteractionResponseChannelMessageWithSource,
 					Data: &discordgo.InteractionResponseData{
@@ -816,7 +1069,7 @@ func RegisterSlashCommands(ctx context.Context, logger runtime.Logger, nk runtim
 			return
 			options := i.ApplicationCommandData().Options
 			user := options[0].UserValue(s)
-			if err := handleProfileRequest(ctx, logger, nk, s, discordRegistry, i, user.ID, user.Username); err != nil {
+			if err := d.handleProfileRequest(ctx, logger, nk, s, discordRegistry, i, user.ID, user.Username); err != nil {
 				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 					Type: discordgo.InteractionResponseChannelMessageWithSource,
 					Data: &discordgo.InteractionResponseData{
@@ -848,7 +1101,7 @@ func RegisterSlashCommands(ctx context.Context, logger runtime.Logger, nk runtim
 				inviter := i.User
 				invitee := options[0].UserValue(s)
 
-				if err := sendPartyInvite(ctx, s, i, inviter, invitee, pipeline, discordRegistry); err != nil {
+				if err := d.sendPartyInvite(ctx, s, i, inviter, invitee); err != nil {
 					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 						Type: discordgo.InteractionResponseChannelMessageWithSource,
 						Data: &discordgo.InteractionResponseData{
@@ -957,7 +1210,7 @@ func RegisterSlashCommands(ctx context.Context, logger runtime.Logger, nk runtim
 		},
 	}
 
-	bot.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		logger.Info("Received interaction: %s", i.ApplicationCommandData().Name)
 		switch i.Type {
 		case discordgo.InteractionApplicationCommand:
@@ -971,12 +1224,12 @@ func RegisterSlashCommands(ctx context.Context, logger runtime.Logger, nk runtim
 
 	logger.Info("Registering slash commands.")
 	// Register global guild commands
-	updateSlashCommands(bot, logger, "")
-	logger.Info("%d Slash commands registered/updated in %d guilds.", len(mainSlashCommands), len(bot.State.Guilds))
+	d.updateSlashCommands(dg, logger, "")
+	logger.Info("%d Slash commands registered/updated in %d guilds.", len(mainSlashCommands), len(dg.State.Guilds))
 
 	return nil
 }
-func updateSlashCommands(s *discordgo.Session, logger runtime.Logger, guildID string) {
+func (d *DiscordAppBot) updateSlashCommands(s *discordgo.Session, logger runtime.Logger, guildID string) {
 	// create a map of current commands
 	currentCommands := make(map[string]*discordgo.ApplicationCommand, 0)
 	for _, command := range mainSlashCommands {
@@ -1031,11 +1284,17 @@ func updateSlashCommands(s *discordgo.Session, logger runtime.Logger, guildID st
 	}
 }
 
-func RegisterPartySlashCommands(ctx context.Context, discordRegistry DiscordRegistry, pipeline *Pipeline) error {
-
+// TODO FIXME put this as part of a bot.
+func (d *DiscordAppBot) RegisterPartySlashCommands() error {
+	bot := d.dg
+	logger := d.logger
+	nk := d.nk
+	ctx := d.ctx
+	pipeline := d.pipeline
 	partyCommandHandlers := map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate){
 		"party": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
 			if i.Type != discordgo.InteractionApplicationCommand {
 				return
 			}
@@ -1049,7 +1308,7 @@ func RegisterPartySlashCommands(ctx context.Context, discordRegistry DiscordRegi
 				inviter := i.User
 				invitee := options[0].UserValue(s)
 
-				if err := sendPartyInvite(ctx, s, i, inviter, invitee, pipeline, discordRegistry); err != nil {
+				if err := d.sendPartyInvite(ctx, s, i, inviter, invitee); err != nil {
 					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 						Type: discordgo.InteractionResponseChannelMessageWithSource,
 						Data: &discordgo.InteractionResponseData{
@@ -1101,7 +1360,7 @@ func RegisterPartySlashCommands(ctx context.Context, discordRegistry DiscordRegi
 				groupID = strings.ToLower(groupID)
 
 				// Get the userID
-				userID, err := discordRegistry.GetUserIdByDiscordId(ctx, user.ID, true)
+				userID, err := d.discordRegistry.GetUserIdByDiscordId(ctx, user.ID, true)
 				if err != nil {
 					logger.Error("Failed to get user ID", zap.Error(err))
 					return
@@ -1160,6 +1419,7 @@ func RegisterPartySlashCommands(ctx context.Context, discordRegistry DiscordRegi
 	}
 
 	bot.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+
 		switch i.Type {
 		case discordgo.InteractionApplicationCommand:
 			if h, ok := partyCommandHandlers[i.ApplicationCommandData().Name]; ok {
@@ -1194,9 +1454,9 @@ func RegisterPartySlashCommands(ctx context.Context, discordRegistry DiscordRegi
 				}
 				if presence != nil {
 					// Remove the invitee
-					err := pipeline.partyRegistry.PartyRemove(ctx, partyID, pipeline.node, presence.SessionId, pipeline.node, presence)
+					err := d.pipeline.partyRegistry.PartyRemove(ctx, partyID, pipeline.node, presence.SessionId, pipeline.node, presence)
 					if err != nil {
-						pipeline.logger.Error("Failed to remove party invite.")
+						d.pipeline.logger.Error("Failed to remove party invite.")
 						return
 					}
 					// Send an emphemeral message to the inviter
@@ -1294,7 +1554,7 @@ func RegisterPartySlashCommands(ctx context.Context, discordRegistry DiscordRegi
 					return
 				}
 				// Send a message to the entire party
-				idMap, err := getPartyDiscordIds(ctx, discordRegistry, ph)
+				idMap, err := d.getPartyDiscordIds(ctx, d.discordRegistry, ph)
 				if err != nil {
 					pipeline.logger.Error("Failed to get party discord ids.")
 					return
@@ -1303,7 +1563,7 @@ func RegisterPartySlashCommands(ctx context.Context, discordRegistry DiscordRegi
 				allMembers := lo.Map(lo.Values(idMap), func(v string, i int) string {
 					return fmt.Sprintf("<@%s>", v)
 				})
-				joinee, err := discordRegistry.GetDiscordIdByUserId(ctx, uuid.FromStringOrNil(presence.UserId))
+				joinee, err := d.discordRegistry.GetDiscordIdByUserId(ctx, uuid.FromStringOrNil(presence.UserId))
 				if err != nil {
 					pipeline.logger.Error("Failed to get discord id by user id.")
 					return
@@ -1343,7 +1603,7 @@ func RegisterPartySlashCommands(ctx context.Context, discordRegistry DiscordRegi
 	return nil
 }
 
-func getPartyDiscordIds(ctx context.Context, discordRegistry DiscordRegistry, partyHandler *PartyHandler) (map[string]string, error) {
+func (d *DiscordAppBot) getPartyDiscordIds(ctx context.Context, discordRegistry DiscordRegistry, partyHandler *PartyHandler) (map[string]string, error) {
 	partyHandler.RLock()
 	defer partyHandler.RUnlock()
 	memberMap := make(map[string]string, len(partyHandler.members.presences)+1)
@@ -1366,7 +1626,7 @@ func getPartyDiscordIds(ctx context.Context, discordRegistry DiscordRegistry, pa
 	return memberMap, nil
 }
 
-func ManageUserGroups(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer, callerUsername string, action string, usernames []string, groupNames []string) error {
+func (d *DiscordAppBot) ManageUserGroups(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer, callerUsername string, action string, usernames []string, groupNames []string) error {
 	// FIXME validate the discord caller has rights to add to this group (i.e. is a admin of the group)
 	// lookup the nakama group
 
@@ -1426,7 +1686,7 @@ func ManageUserGroups(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	return nil
 }
 
-func handleProfileRequest(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, s *discordgo.Session, discordRegistry DiscordRegistry, i *discordgo.InteractionCreate, discordId string, username string) error {
+func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, s *discordgo.Session, discordRegistry DiscordRegistry, i *discordgo.InteractionCreate, discordId string, username string) error {
 	userId, err := discordRegistry.GetUserIdByDiscordId(ctx, discordId, true)
 	if err != nil {
 		return fmt.Errorf("failed to authenticate (or create) user %s: %w", discordId, err)
@@ -1499,7 +1759,7 @@ func handleProfileRequest(ctx context.Context, logger runtime.Logger, nk runtime
 	}
 
 	// Get the suspensions
-	dr := discordRegistry.(*LocalDiscordRegistry)
+	dr := d.discordRegistry.(*LocalDiscordRegistry)
 	suspensions, err := dr.GetAllSuspensions(ctx, userId)
 	if err != nil {
 		return err
@@ -1578,7 +1838,7 @@ func handleProfileRequest(ctx context.Context, logger runtime.Logger, nk runtime
 	return nil
 }
 
-func sendPartyInvite(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate, inviter, invitee *discordgo.User, pipeline *Pipeline, discordRegistry DiscordRegistry) error {
+func (d *DiscordAppBot) sendPartyInvite(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate, inviter, invitee *discordgo.User) error {
 	/*
 
 		if inviter.ID == invitee.ID {
@@ -1692,7 +1952,7 @@ func sendPartyInvite(ctx context.Context, s *discordgo.Session, i *discordgo.Int
 	return nil
 }
 
-func getLoginSessionForUser(ctx context.Context, discordId string, discordRegistry DiscordRegistry, pipeline *Pipeline) (uid uuid.UUID, sessionID uuid.UUID, err error) {
+func (d *DiscordAppBot) getLoginSessionForUser(ctx context.Context, discordId string, discordRegistry DiscordRegistry, pipeline *Pipeline) (uid uuid.UUID, sessionID uuid.UUID, err error) {
 	// Get the userId for this inviter
 	uid, err = discordRegistry.GetUserIdByDiscordId(ctx, discordId, true)
 	if err != nil {
@@ -1714,7 +1974,7 @@ func getLoginSessionForUser(ctx context.Context, discordId string, discordRegist
 	return uid, sessionID, nil
 }
 
-func getOrCreateParty(ctx context.Context, pipeline *Pipeline, discordRegistry DiscordRegistry, userID uuid.UUID, username string, sessionID uuid.UUID, leaderID string) (partyHandler *PartyHandler, err error) {
+func (d *DiscordAppBot) getOrCreateParty(ctx context.Context, pipeline *Pipeline, discordRegistry DiscordRegistry, userID uuid.UUID, username string, sessionID uuid.UUID, leaderID string) (partyHandler *PartyHandler, err error) {
 	partyRegistry := pipeline.partyRegistry.(*LocalPartyRegistry)
 
 	// Check if this user is already in a party

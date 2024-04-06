@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 
-	"github.com/bwmarrin/discordgo"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"go.uber.org/zap"
 
@@ -56,30 +55,6 @@ func NewEvrRuntime(logger *zap.Logger, config Config, db *sql.DB, matchRegistry 
 }
 
 func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) (err error) {
-	// Setup the discord registry with the bot
-
-	vars, _ := ctx.Value(runtime.RUNTIME_CTX_ENV).(map[string]string)
-	botToken := vars["DISCORD_BOT_TOKEN"]
-
-	ctx = context.WithValue(ctx, ctxDiscordBotTokenKey{}, vars["DISCORD_BOT_TOKEN"])
-
-	// TODO FIXME Make sure the system works without a bot. Add interfaces.
-	if botToken != "" {
-		// Start the bot
-		dg, err := discordgo.New("Bot " + botToken)
-		if err != nil {
-			logger.Error("Unable to create bot")
-		}
-		discordRegistry := NewLocalDiscordRegistry(ctx, nk, logger, nil, nil, nil, dg)
-		if err != nil {
-			logger.Error("Unable to create discord registry: %v", err)
-			return err
-		}
-		if err = discordRegistry.InitializeDiscordBot(ctx, logger, nk, initializer); err != nil {
-			logger.Error("Unable to initialize discord: %v", err)
-			return err
-		}
-	}
 
 	// Register RPC's for device linking
 	rpcs := map[string]func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error){

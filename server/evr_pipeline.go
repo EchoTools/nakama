@@ -62,6 +62,7 @@ type EvrPipeline struct {
 	matchmakingRegistry *MatchmakingRegistry
 	profileRegistry     *ProfileRegistry
 	discordRegistry     DiscordRegistry
+	appBot              *DiscordAppBot
 
 	broadcasterRegistrationBySession *MapOf[uuid.UUID, *MatchBroadcaster]
 	matchBySession                   *MapOf[uuid.UUID, string]
@@ -108,6 +109,12 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		}
 	}
 	discordRegistry := NewLocalDiscordRegistry(ctx, nk, runtimeLogger, metrics, config, pipeline, dg)
+
+	appBot := NewDiscordAppBot(nk, runtimeLogger, metrics, pipeline, config, discordRegistry, dg)
+
+	if err := appBot.InitializeDiscordBot(); err != nil {
+		logger.Error("Failed to initialize app bot", zap.Error(err))
+	}
 
 	/*
 		if err = discordRegistry.InitializePartyBot(ctx, pipeline); err != nil {
@@ -158,6 +165,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		runtimeLogger:        runtimeLogger,
 
 		discordRegistry:   discordRegistry,
+		appBot:            appBot,
 		localIP:           localIP,
 		externalIP:        externalIP,
 		broadcasterUserID: broadcasterUserID,
