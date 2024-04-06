@@ -128,8 +128,10 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 	time.Sleep(2 * time.Second)
 
 	alive := false
+
+	var rtt time.Duration
 	for i := 0; i < 5; i++ {
-		rtt, err := BroadcasterHealthcheck(p.localIP, config.Endpoint.ExternalIP, int(config.Endpoint.Port), 500*time.Millisecond)
+		rtt, err = BroadcasterHealthcheck(p.localIP, config.Endpoint.ExternalIP, int(config.Endpoint.Port), 500*time.Millisecond)
 		if err != nil {
 			logger.Warn("Failed to healthcheck broadcaster", zap.Error(err))
 			continue
