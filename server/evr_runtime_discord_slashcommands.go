@@ -432,11 +432,18 @@ func RegisterSlashCommands(ctx context.Context, logger runtime.Logger, nk runtim
 					},
 				})
 			}
-			if i.User == nil {
+
+			discordId := ""
+			switch {
+			case i.User != nil:
+				discordId = i.User.ID
+			case i.Member.User != nil:
+				discordId = i.Member.User.ID
+			default:
 				return
 			}
+
 			if err := func() error {
-				discordId := i.User.ID
 
 				// Authenticate/create an account.
 				userId, err := discordRegistry.GetUserIdByDiscordId(ctx, discordId, true)
@@ -785,10 +792,14 @@ func RegisterSlashCommands(ctx context.Context, logger runtime.Logger, nk runtim
 			})
 		},
 		"whoami": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+			user := i.User
 			if i.User == nil {
-				return
+				if i.Member == nil || i.Member.User == nil {
+					return
+				}
+				user = i.Member.User
 			}
-			if err := handleProfileRequest(ctx, logger, nk, s, discordRegistry, i, i.User.ID, i.User.Username); err != nil {
+			if err := handleProfileRequest(ctx, logger, nk, s, discordRegistry, i, user.ID, user.Username); err != nil {
 				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 					Type: discordgo.InteractionResponseChannelMessageWithSource,
 					Data: &discordgo.InteractionResponseData{
@@ -818,10 +829,13 @@ func RegisterSlashCommands(ctx context.Context, logger runtime.Logger, nk runtim
 	}
 
 	bot.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+		logger.Info("Received interaction: %s", i.ApplicationCommandData().Name)
 		switch i.Type {
 		case discordgo.InteractionApplicationCommand:
 			if h, ok := commandHandlers[i.ApplicationCommandData().Name]; ok {
 				h(s, i)
+			} else {
+				logger.Info("Unhandled command: %v", i.ApplicationCommandData().Name)
 			}
 		}
 	})
@@ -889,7 +903,6 @@ func updateSlashCommands(s *discordgo.Session, logger runtime.Logger, guildID st
 }
 
 func RegisterPartySlashCommands(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, pipeline *Pipeline, bot *discordgo.Session, discordRegistry DiscordRegistry) error {
-
 	partyCommandHandlers := map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate){
 		"party": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
@@ -917,8 +930,9 @@ func RegisterPartySlashCommands(ctx context.Context, logger runtime.Logger, nk r
 				}
 
 			case "group":
-				if i.User == nil {
-					return
+				user := i.User
+				if i.Member != nil && i.Member.User != nil {
+					user = i.Member.User
 				}
 
 				options := i.ApplicationCommandData().Options
@@ -957,7 +971,7 @@ func RegisterPartySlashCommands(ctx context.Context, logger runtime.Logger, nk r
 				groupID = strings.ToLower(groupID)
 
 				// Get the userID
-				userID, err := discordRegistry.GetUserIdByDiscordId(ctx, i.User.ID, true)
+				userID, err := discordRegistry.GetUserIdByDiscordId(ctx, user.ID, true)
 				if err != nil {
 					logger.Error("Failed to get user ID", zap.Error(err))
 					return
@@ -1008,7 +1022,7 @@ func RegisterPartySlashCommands(ctx context.Context, logger runtime.Logger, nk r
 					Type: discordgo.InteractionResponseChannelMessageWithSource,
 					Data: &discordgo.InteractionResponseData{
 						Flags:   discordgo.MessageFlagsEphemeral,
-						Content: fmt.Sprintf("Your group ID has been set to `%s`. Everyone must matchmake at the same time (within ~15-30 seconds)", groupID),
+						Content: fmt.Sprintf("Your group ID has been set to `%s`. Everyone must matchmake at the same time (~15-30 seconds)", groupID),
 					},
 				})
 			}
