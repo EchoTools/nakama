@@ -86,7 +86,7 @@ func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logg
 			Stream: PresenceStream{Mode: StreamModeEvr, Subject: s.id, Subcontext: svcMatchID},
 			Meta:   PresenceMeta{Format: s.format, Hidden: true},
 		},
-	}, s.userID, true)
+	}, s.userID)
 
 	if channel == uuid.Nil {
 		logger.Warn("Channel is nil")
