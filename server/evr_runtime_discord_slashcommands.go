@@ -372,7 +372,7 @@ func UnregisterCommands(ctx context.Context, logger runtime.Logger, dg *discordg
 	}
 }
 
-func RegisterSlashCommands(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, bot *discordgo.Session, discordRegistry DiscordRegistry) error {
+func RegisterSlashCommands(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, pipeline *Pipeline, bot *discordgo.Session, discordRegistry DiscordRegistry) error {
 	commandHandlers := map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate){
 		"evrsymbol": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			options := i.ApplicationCommandData().Options
@@ -826,6 +826,135 @@ func RegisterSlashCommands(ctx context.Context, logger runtime.Logger, nk runtim
 				})
 			}
 		},
+		"party": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+
+			if i.Type != discordgo.InteractionApplicationCommand {
+				return
+			}
+			user := i.User
+			if user == nil {
+				if i.Member != nil && i.Member.User != nil {
+					user = i.Member.User
+				} else {
+					return
+				}
+
+			}
+
+			options := i.ApplicationCommandData().Options
+			switch options[0].Name {
+			case "invite":
+				options := options[0].Options
+				inviter := i.User
+				invitee := options[0].UserValue(s)
+
+				if err := sendPartyInvite(ctx, s, i, inviter, invitee, pipeline, discordRegistry); err != nil {
+					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+						Type: discordgo.InteractionResponseChannelMessageWithSource,
+						Data: &discordgo.InteractionResponseData{
+							Flags:   discordgo.MessageFlagsEphemeral,
+							Content: err.Error(),
+						},
+					})
+				}
+
+			case "group":
+				user := i.User
+				if i.Member != nil && i.Member.User != nil {
+					user = i.Member.User
+				}
+				options := options[0].Options
+				groupID := options[0].StringValue()
+				// Validate the group is 1 to 8 characters long
+				if len(groupID) < 1 || len(groupID) > 8 {
+					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+						Type: discordgo.InteractionResponseChannelMessageWithSource,
+						Data: &discordgo.InteractionResponseData{
+							Flags:   discordgo.MessageFlagsEphemeral,
+							Content: "Invalid group ID. It must be between one (1) and eight (8) characters long.",
+						},
+					})
+				}
+				// Validate the group is alphanumeric
+				if !groupRegex.MatchString(groupID) {
+					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+						Type: discordgo.InteractionResponseChannelMessageWithSource,
+						Data: &discordgo.InteractionResponseData{
+							Flags:   discordgo.MessageFlagsEphemeral,
+							Content: "Invalid group ID. It must be alphanumeric.",
+						},
+					})
+				}
+				// Validate the group is not a reserved group
+				if lo.Contains([]string{"admin", "moderator", "verified", "broadcaster"}, groupID) {
+					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+						Type: discordgo.InteractionResponseChannelMessageWithSource,
+						Data: &discordgo.InteractionResponseData{
+							Flags:   discordgo.MessageFlagsEphemeral,
+							Content: "Invalid group ID. It is a reserved group.",
+						},
+					})
+				}
+				// lowercase the group
+				groupID = strings.ToLower(groupID)
+
+				// Get the userID
+				userID, err := discordRegistry.GetUserIdByDiscordId(ctx, user.ID, true)
+				if err != nil {
+					logger.Error("Failed to get user ID", zap.Error(err))
+					return
+				}
+
+				objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
+					{
+						Collection: MatchmakingConfigStorageCollection,
+						Key:        MatchmakingConfigStorageKey,
+						UserID:     userID.String(),
+					},
+				})
+				if err != nil {
+					logger.Error("Failed to read matchmaking config", zap.Error(err))
+				}
+				matchmakingConfig := &MatchmakingConfig{}
+				if len(objs) != 0 {
+					if err := json.Unmarshal([]byte(objs[0].Value), matchmakingConfig); err != nil {
+						logger.Error("Failed to unmarshal matchmaking config", zap.Error(err))
+						return
+					}
+				}
+				matchmakingConfig.GroupID = groupID
+				// Store it back
+
+				data, err := json.Marshal(matchmakingConfig)
+				if err != nil {
+					logger.Error("Failed to marshal matchmaking config", zap.Error(err))
+					return
+				}
+
+				if _, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{
+					{
+						Collection:      MatchmakingConfigStorageCollection,
+						Key:             MatchmakingConfigStorageKey,
+						UserID:          userID.String(),
+						Value:           string(data),
+						PermissionRead:  1,
+						PermissionWrite: 0,
+					},
+				}); err != nil {
+					logger.Error("Failed to write matchmaking config", zap.Error(err))
+					return
+				}
+
+				// Inform the user of the groupid
+				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+					Type: discordgo.InteractionResponseChannelMessageWithSource,
+					Data: &discordgo.InteractionResponseData{
+						Flags:   discordgo.MessageFlagsEphemeral,
+						Content: fmt.Sprintf("Your group ID has been set to `%s`. Everyone must matchmake at the same time (~15-30 seconds)", groupID),
+					},
+				})
+			}
+		},
 	}
 
 	bot.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -902,7 +1031,8 @@ func updateSlashCommands(s *discordgo.Session, logger runtime.Logger, guildID st
 	}
 }
 
-func RegisterPartySlashCommands(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, pipeline *Pipeline, bot *discordgo.Session, discordRegistry DiscordRegistry) error {
+func RegisterPartySlashCommands(ctx context.Context, discordRegistry DiscordRegistry, pipeline *Pipeline) error {
+
 	partyCommandHandlers := map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate){
 		"party": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
