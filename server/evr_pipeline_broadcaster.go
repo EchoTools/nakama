@@ -129,23 +129,26 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 
 	alive := false
 
+	// Check if the broadcaster is available
+	retries := 5
 	var rtt time.Duration
-	for i := 0; i < 5; i++ {
+	for i := 0; i < retries; i++ {
 		rtt, err = BroadcasterHealthcheck(p.localIP, config.Endpoint.ExternalIP, int(config.Endpoint.Port), 500*time.Millisecond)
 		if err != nil {
 			logger.Warn("Failed to healthcheck broadcaster", zap.Error(err))
+			time.Sleep(500 * time.Millisecond)
 			continue
 		}
 		if rtt >= 0 {
 			alive = true
 			break
 		}
-		time.Sleep(500 * time.Millisecond)
 	}
 	if !alive {
 		// If the broadcaster is not available, send an error message to the user on discord
-		go sendDiscordError(err, discordId, logger, p.discordRegistry)
-		return errFailedRegistration(session, fmt.Errorf("broadcaster failed availability check: %v", err), evr.BroadcasterRegistration_Failure)
+		errorMessage := fmt.Sprintf("Broadcaster (Endpoint ID: %s, Server ID: %d) could not be reached. Error: %v", config.Endpoint.ID(), config.ServerID, err)
+		go sendDiscordError(errors.New(errorMessage), discordId, logger, p.discordRegistry)
+		return errFailedRegistration(session, errors.New(errorMessage), evr.BroadcasterRegistration_Failure)
 	}
 
 	p.broadcasterRegistrationBySession.Store(session.ID(), config)
