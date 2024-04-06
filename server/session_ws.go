@@ -73,7 +73,7 @@ type (
 		writeWaitDuration    time.Duration
 
 		sessionRegistry SessionRegistry
-		statusRegistry  *StatusRegistry
+		statusRegistry  StatusRegistry
 		matchmaker      Matchmaker
 		tracker         Tracker
 		metrics         Metrics
@@ -86,6 +86,7 @@ type (
 		pingTimer              *time.Timer
 		pingTimerCAS           *atomic.Uint32
 		outgoingCh             chan []byte
+		closeMu                sync.Mutex
 
 		storageIndex StorageIndex
 		evrPipeline  *EvrPipeline
@@ -105,7 +106,7 @@ type (
 	//ctxMatchmakingGuildPriorityKey struct{} // The Matchmaking guild priority from the urlparam
 )
 
-func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessionID, userID uuid.UUID, username string, vars map[string]string, expiry int64, clientIP, clientPort, lang string, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, conn *websocket.Conn, sessionRegistry SessionRegistry, statusRegistry *StatusRegistry, matchmaker Matchmaker, tracker Tracker, metrics Metrics, pipeline *Pipeline, evrPipeline *EvrPipeline, runtime *Runtime, request http.Request, storageIndex StorageIndex) Session {
+func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessionID, userID uuid.UUID, username string, vars map[string]string, expiry int64, clientIP, clientPort, lang string, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, conn *websocket.Conn, sessionRegistry SessionRegistry, statusRegistry StatusRegistry, matchmaker Matchmaker, tracker Tracker, metrics Metrics, pipeline *Pipeline, evrPipeline *EvrPipeline, runtime *Runtime, request http.Request, storageIndex StorageIndex) Session {
 	sessionLogger := logger.With(zap.String("sid", sessionID.String()))
 
 	if userID != uuid.Nil {
@@ -259,7 +260,7 @@ func (s *sessionWS) LoginSession(userID string, username string, evrID evr.EvrId
 			Stream: PresenceStream{Mode: StreamModeStatus, Subject: s.userID},
 			Meta:   PresenceMeta{Format: s.format, Username: username, Status: ""},
 		},
-	}, s.userID, true)
+	}, s.userID)
 
 	return nil
 }
@@ -302,7 +303,7 @@ func (s *sessionWS) BroadcasterSession(userID string, username string) error {
 			Stream: PresenceStream{Mode: StreamModeEvr, Subject: s.id, Subcontext: svcBroadcasterID},
 			Meta:   PresenceMeta{Format: s.format, Username: s.username.String(), Hidden: true},
 		},
-	}, s.userID, true)
+	}, s.userID)
 
 	return nil
 }
@@ -731,7 +732,20 @@ func (s *sessionWS) SendBytes(payload []byte, reliable bool) error {
 	}
 }
 
+func (s *sessionWS) CloseLock() {
+	s.closeMu.Lock()
+}
+
+func (s *sessionWS) CloseUnlock() {
+	s.closeMu.Unlock()
+}
+
 func (s *sessionWS) Close(msg string, reason runtime.PresenceReason, envelopes ...*rtapi.Envelope) {
+	s.CloseLock()
+	// Cancel any ongoing operations tied to this session.
+	s.ctxCancelFn()
+	s.CloseUnlock()
+
 	s.Lock()
 	if s.stopped {
 		s.Unlock()
@@ -739,9 +753,6 @@ func (s *sessionWS) Close(msg string, reason runtime.PresenceReason, envelopes .
 	}
 	s.stopped = true
 	s.Unlock()
-
-	// Cancel any ongoing operations tied to this session.
-	s.ctxCancelFn()
 
 	if s.logger.Core().Enabled(zap.DebugLevel) {
 		s.logger.Info("Cleaning up closed client connection")

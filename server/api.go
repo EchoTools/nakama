@@ -75,7 +75,7 @@ type ApiServer struct {
 	leaderboardRankCache LeaderboardRankCache
 	sessionCache         SessionCache
 	sessionRegistry      SessionRegistry
-	statusRegistry       *StatusRegistry
+	statusRegistry       StatusRegistry
 	matchRegistry        MatchRegistry
 	tracker              Tracker
 	router               MessageRouter
