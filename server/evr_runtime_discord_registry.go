@@ -64,10 +64,11 @@ type DiscordRegistry interface {
 // It also carries the bot session and a cache for the lookup table.
 type LocalDiscordRegistry struct {
 	sync.RWMutex
-	ctx     context.Context
-	nk      runtime.NakamaModule
-	logger  runtime.Logger
-	metrics Metrics
+	ctx      context.Context
+	nk       runtime.NakamaModule
+	logger   runtime.Logger
+	metrics  Metrics
+	pipeline *Pipeline
 
 	bot       *discordgo.Session // The bot
 	botUserId uuid.UUID
@@ -75,21 +76,22 @@ type LocalDiscordRegistry struct {
 	cache sync.Map // Generic cache for map[discordId]nakamaId lookup
 }
 
-func NewLocalDiscordRegistry(ctx context.Context, nk runtime.NakamaModule, logger runtime.Logger, metrics Metrics, config Config, dg *discordgo.Session) (r *LocalDiscordRegistry) {
+func NewLocalDiscordRegistry(ctx context.Context, nk runtime.NakamaModule, logger runtime.Logger, metrics Metrics, config Config, pipeline *Pipeline, dg *discordgo.Session) (r *LocalDiscordRegistry) {
 
 	dg.StateEnabled = true
 
 	discordRegistry := &LocalDiscordRegistry{
-		ctx:     ctx,
-		nk:      nk,
-		logger:  logger,
-		metrics: metrics,
-		bot:     dg,
-		cache:   sync.Map{},
+		ctx:      ctx,
+		nk:       nk,
+		logger:   logger,
+		metrics:  metrics,
+		pipeline: pipeline,
+		bot:      dg,
+		cache:    sync.Map{},
 	}
 
 	dg.AddHandler(func(s *discordgo.Session, m *discordgo.Ready) {
-		discordRegistry.PopulateCache()
+
 	})
 
 	/*
@@ -109,6 +111,7 @@ func (r *LocalDiscordRegistry) GetBot() *discordgo.Session {
 
 // PopulateCache populates the lookup cache with all the guilds and their roles
 func (r *LocalDiscordRegistry) PopulateCache() (cnt int, err error) {
+
 	botId, err := r.GetUserIdByDiscordId(r.ctx, r.bot.State.User.ID, true)
 	if err == nil {
 		r.botUserId = botId
@@ -877,7 +880,7 @@ func (r *LocalDiscordRegistry) InitializeDiscordBot(ctx context.Context, logger 
 	})
 
 	bot.AddHandler(func(s *discordgo.Session, e *discordgo.Ready) {
-		if err := RegisterSlashCommands(ctx, logger, nk, s, r); err != nil {
+		if err := RegisterSlashCommands(ctx, logger, nk, r.pipeline, s, r); err != nil {
 			logger.Error("Failed to register slash commands: %w", err)
 		}
 	})

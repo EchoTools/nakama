@@ -70,7 +70,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		if err != nil {
 			logger.Error("Unable to create bot")
 		}
-		discordRegistry := NewLocalDiscordRegistry(ctx, nk, logger, nil, nil, dg)
+		discordRegistry := NewLocalDiscordRegistry(ctx, nk, logger, nil, nil, nil, dg)
 		if err != nil {
 			logger.Error("Unable to create discord registry: %v", err)
 			return err

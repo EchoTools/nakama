@@ -107,11 +107,13 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 			logger.Error("Unable to create bot")
 		}
 	}
-	discordRegistry := NewLocalDiscordRegistry(ctx, nk, runtimeLogger, metrics, config, dg)
+	discordRegistry := NewLocalDiscordRegistry(ctx, nk, runtimeLogger, metrics, config, pipeline, dg)
 
-	if err = discordRegistry.InitializePartyBot(ctx, pipeline); err != nil {
-		logger.Error("Failed to initialize party bot", zap.Error(err))
-	}
+	/*
+		if err = discordRegistry.InitializePartyBot(ctx, pipeline); err != nil {
+			logger.Error("Failed to initialize party bot", zap.Error(err))
+		}
+	*/
 
 	// Every 5 minutes, store the cache.
 
