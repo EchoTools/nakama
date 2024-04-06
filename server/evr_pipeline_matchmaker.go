@@ -553,23 +553,27 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 	} else if err != nil {
 		logger.Warn("Failed to authorize matchmaking, allowing player to continue. ", zap.Error(err))
 	}
-
 	// Validating the level against the game mode
-	switch request.Mode {
-	case evr.ModeArenaPublic, evr.ModeArenaPrivate, evr.ModeArenaTournment, evr.ModeArenaPublicAI, evr.ModeArenaTutorial:
-		if request.Level != evr.LevelArena {
-			return result.SendErrorToSession(session, status.Errorf(codes.Internal, "Failed to create matchmaking session: %v is not a valid level for the gamemode %v", request.Level, request.Mode))
+	validLevels := map[evr.Symbol][]evr.Symbol{
+		evr.ModeArenaPublic:          {evr.LevelArena},
+		evr.ModeArenaPrivate:         {evr.LevelArena},
+		evr.ModeArenaTournment:       {evr.LevelArena},
+		evr.ModeArenaPublicAI:        {evr.LevelArena},
+		evr.ModeArenaTutorial:        {evr.LevelArena},
+		evr.ModeSocialPublic:         {evr.LevelSocial},
+		evr.ModeSocialPrivate:        {evr.LevelSocial},
+		evr.ModeSocialNPE:            {evr.LevelSocial},
+		evr.ModeCombatPublic:         {evr.LevelCombustion, evr.LevelDyson, evr.LevelFission, evr.LevelGauss},
+		evr.ModeCombatPrivate:        {evr.LevelCombustion, evr.LevelDyson, evr.LevelFission, evr.LevelGauss},
+		evr.ModeEchoCombatTournament: {evr.LevelCombustion, evr.LevelDyson, evr.LevelFission, evr.LevelGauss},
+	}
+
+	if levels, ok := validLevels[request.Mode]; ok {
+		if !lo.Contains(levels, request.Level) {
+			return result.SendErrorToSession(session, status.Errorf(codes.InvalidArgument, "Invalid level %v for game mode %v", request.Level, request.Mode))
 		}
-	case evr.ModeSocialPublic, evr.ModeSocialPrivate, evr.ModeSocialNPE:
-		if request.Level != evr.LevelSocial {
-			return result.SendErrorToSession(session, status.Errorf(codes.Internal, "Failed to create matchmaking session: %v is not a valid level for the gamemode %v", request.Level, request.Mode))
-		}
-	case evr.ModeCombatPublic, evr.ModeCombatPrivate, evr.ModeEchoCombatTournament:
-		if request.Level != evr.LevelCombustion && request.Level != evr.LevelDyson && request.Level != evr.LevelFission && request.Level != evr.LevelGauss {
-			return result.SendErrorToSession(session, status.Errorf(codes.Internal, "Failed to create matchmaking session: %v is not a valid level for the gamemode %v", request.Level, request.Mode))
-		}
-	default:
-		return result.SendErrorToSession(session, status.Errorf(codes.Internal, "Failed to create matchmaking session: Tried to create a match with an unknown level or gamemode"))
+	} else {
+		return result.SendErrorToSession(session, status.Errorf(codes.InvalidArgument, "Failed to create matchmaking session: Tried to create a match with an unknown level or gamemode: %v", request.Mode))
 	}
 
 	ml := &EvrMatchState{
