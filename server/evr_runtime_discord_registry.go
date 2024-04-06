@@ -39,6 +39,8 @@ type LookupTable struct {
 type DiscordRegistry interface {
 	Get(discordId string) (nakamaId string, ok bool)
 	GetBot() *discordgo.Session
+	Logger() runtime.Logger
+	RuntimeModule() runtime.NakamaModule
 	Store(discordId string, nakamaId string)
 	Delete(discordId string)
 	GetDiscordIdByUserId(ctx context.Context, userId uuid.UUID) (discordId string, err error)
@@ -57,7 +59,6 @@ type DiscordRegistry interface {
 	GetGuildGroups(ctx context.Context, userId uuid.UUID) ([]*api.Group, error)
 	// GetUser looks up the Discord user by the user ID. Potentially using the state cache.
 	GetUser(ctx context.Context, discordId string) (*discordgo.User, error)
-	InitializeDiscordBot(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, initializer runtime.Initializer) error
 }
 
 // The discord registry is a storage-backed lookup table for discord user ids to nakama user ids.
@@ -90,10 +91,6 @@ func NewLocalDiscordRegistry(ctx context.Context, nk runtime.NakamaModule, logge
 		cache:    sync.Map{},
 	}
 
-	dg.AddHandler(func(s *discordgo.Session, m *discordgo.Ready) {
-
-	})
-
 	/*
 		if config != nil {
 			dg.AddHandler(func(s *discordgo.Session, m *discordgo.Ready) {
@@ -107,6 +104,14 @@ func NewLocalDiscordRegistry(ctx context.Context, nk runtime.NakamaModule, logge
 
 func (r *LocalDiscordRegistry) GetBot() *discordgo.Session {
 	return r.bot
+}
+
+func (r *LocalDiscordRegistry) Logger() runtime.Logger {
+	return r.logger
+}
+
+func (r *LocalDiscordRegistry) RuntimeModule() runtime.NakamaModule {
+	return r.nk
 }
 
 // PopulateCache populates the lookup cache with all the guilds and their roles
@@ -655,244 +660,6 @@ func parseDuration(s string) (time.Duration, error) {
 	return 0, fmt.Errorf("invalid duration: invalid unit: %s", s)
 }
 
-func (r *LocalDiscordRegistry) InitializePartyBot(ctx context.Context, pipeline *Pipeline) error {
-
-	r.bot.Identify.Intents |= discordgo.IntentGuilds
-	r.bot.Identify.Intents |= discordgo.IntentGuildMembers
-	r.bot.Identify.Intents |= discordgo.IntentDirectMessages
-	r.bot.Identify.Intents |= discordgo.IntentDirectMessageReactions
-
-	if pipeline == nil {
-		return fmt.Errorf("pipeline is required")
-	}
-	if err := RegisterPartySlashCommands(ctx, r.logger, r.nk, pipeline, r.bot, r); err != nil {
-		return err
-	}
-
-	if err := r.bot.Open(); err != nil {
-		return err
-	}
-	return nil
-}
-
-// InitializeDiscordBot initializes the discord bot and synchronizes the guilds with nakama groups. It also registers the bot's handlers.
-func (r *LocalDiscordRegistry) InitializeDiscordBot(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, initializer runtime.Initializer) error {
-	var err error
-	bot := r.bot
-	if bot == nil {
-		return nil
-	}
-
-	// Verify that this is a runtime model context
-	_, ok := ctx.Value(runtime.RUNTIME_CTX_NODE).(string)
-	if !ok {
-		return fmt.Errorf("context is not a runtime model context")
-	}
-
-	bot.Identify.Intents |= discordgo.IntentAutoModerationExecution
-	bot.Identify.Intents |= discordgo.IntentMessageContent
-	bot.Identify.Intents |= discordgo.IntentGuilds
-	bot.Identify.Intents |= discordgo.IntentGuildMembers
-	bot.Identify.Intents |= discordgo.IntentGuildBans
-	bot.Identify.Intents |= discordgo.IntentGuildEmojis
-	bot.Identify.Intents |= discordgo.IntentGuildWebhooks
-	bot.Identify.Intents |= discordgo.IntentGuildInvites
-	//bot.Identify.Intents |= discordgo.IntentGuildPresences
-	bot.Identify.Intents |= discordgo.IntentGuildMessages
-	bot.Identify.Intents |= discordgo.IntentGuildMessageReactions
-	bot.Identify.Intents |= discordgo.IntentDirectMessages
-	bot.Identify.Intents |= discordgo.IntentDirectMessageReactions
-	bot.Identify.Intents |= discordgo.IntentMessageContent
-	bot.Identify.Intents |= discordgo.IntentAutoModerationConfiguration
-	bot.Identify.Intents |= discordgo.IntentAutoModerationExecution
-
-	bot.AddHandler(func(session *discordgo.Session, ready *discordgo.Ready) {
-		logger.Info("Discord bot is ready.")
-	})
-
-	bot.AddHandler(func(s *discordgo.Session, m *discordgo.Ready) {
-		// Create a user for the bot based on it's discord profile
-		_, _, _, err := nk.AuthenticateCustom(ctx, m.User.ID, s.State.User.Username, true)
-		if err != nil {
-			logger.Error("Error creating discordbot user: %s", err)
-		}
-
-		// Synchronize the guilds with nakama groups
-		logger.Info("Bot is in %d guilds", len(s.State.Guilds))
-		for _, g := range m.Guilds {
-			g, err := s.Guild(g.ID)
-			if err != nil {
-				logger.Error("Error getting guild: %w", err)
-				return
-			}
-
-			if err := r.SynchronizeGroup(ctx, g); err != nil {
-				logger.Error("Error synchronizing group: %w", err)
-				return
-			}
-		}
-	})
-
-	bot.AddHandler(func(se *discordgo.Session, m *discordgo.MessageCreate) {
-		if se == nil || m == nil || m.Author == nil {
-			return
-		}
-
-		if m.Author.ID == se.State.User.ID {
-			return
-		}
-		if m.Author.ID != "155149108183695360" { // Dyno bot
-			return
-		}
-		if m.Embeds == nil || len(m.Embeds) == 0 {
-			return
-		}
-		guild, err := se.Guild(m.ID)
-		if err != nil {
-			logger.Error("Error getting guild: %w", err)
-			return
-		}
-
-		suspensionStatus := &SuspensionStatus{
-			GuildName: guild.Name,
-			GuildId:   guild.ID,
-		}
-		e := m.Embeds[0]
-		for _, f := range e.Fields {
-			switch f.Name {
-			case "User":
-				suspensionStatus.UserDiscordId = strings.Trim(strings.Replace(strings.Replace(f.Value, "\\u003c", "<", -1), "\\u003e", ">", -1), "<@!>")
-				userId, err := r.GetUserIdByDiscordId(ctx, suspensionStatus.UserDiscordId, true)
-				if err != nil {
-					logger.Error("Error getting user id: %w", err)
-					return
-				}
-				suspensionStatus.UserId = userId.String()
-			case "Moderator":
-				suspensionStatus.ModeratorDiscordId = r.ReplaceMentions(m.GuildID, f.Value)
-			case "Length":
-				suspensionStatus.Duration, err = parseDuration(f.Value)
-				if err != nil || suspensionStatus.Duration <= 0 {
-					logger.Error("Error parsing duration: %w", err)
-					return
-				}
-				suspensionStatus.Expiry = m.Timestamp.Add(suspensionStatus.Duration)
-			case "Role":
-				roles, err := se.GuildRoles(m.GuildID)
-				if err != nil {
-					logger.Error("Error getting guild roles: %w", err)
-					return
-				}
-				for _, role := range roles {
-					if role.Name == f.Value {
-						suspensionStatus.RoleId = role.ID
-						suspensionStatus.RoleName = role.Name
-						break
-					}
-				}
-			case "Reason":
-				suspensionStatus.Reason = r.ReplaceMentions(m.GuildID, f.Value)
-			}
-		}
-
-		if !suspensionStatus.Valid() {
-			return
-		}
-
-		// Marshal it
-		suspensionStatusBytes, err := json.Marshal(suspensionStatus)
-		if err != nil {
-			logger.Error("Error marshalling suspension status: %w", err)
-			return
-		}
-
-		// Save the storage object.
-
-		_, err = nk.StorageWrite(ctx, []*runtime.StorageWrite{
-			{
-				Collection:      SuspensionStatusCollection,
-				Key:             m.GuildID,
-				UserID:          suspensionStatus.UserId,
-				Value:           string(suspensionStatusBytes),
-				PermissionRead:  0,
-				PermissionWrite: 0,
-			},
-		})
-		if err != nil {
-			logger.Error("Error writing suspension status: %w", err)
-			return
-		}
-
-	})
-
-	bot.AddHandler(func(s *discordgo.Session, m *discordgo.GuildBanAdd) {
-		if s == nil || m == nil {
-			return
-		}
-
-		if groupId, found := r.Get(m.GuildID); found {
-			if user, err := r.GetUserIdByDiscordId(ctx, m.User.ID, true); err == nil {
-				nk.GroupUsersKick(ctx, SystemUserId, groupId, []string{user.String()})
-			}
-		}
-	})
-
-	bot.AddHandler(func(s *discordgo.Session, m *discordgo.GuildBanRemove) {
-		if s == nil || m == nil {
-			return
-		}
-
-		_, _ = r.GetUserIdByDiscordId(ctx, m.User.ID, true)
-	})
-
-	bot.AddHandler(func(s *discordgo.Session, m *discordgo.GuildMemberRemove) {
-		if s == nil || m == nil {
-			return
-		}
-
-		if groupId, found := r.Get(m.GuildID); found {
-			if user, err := r.GetUserIdByDiscordId(ctx, m.User.ID, true); err == nil {
-				_ = nk.GroupUserLeave(ctx, SystemUserId, groupId, user.String())
-			}
-		}
-	})
-
-	bot.AddHandler(func(s *discordgo.Session, e *discordgo.GuildMemberUpdate) {
-		if s == nil || e == nil {
-			return
-		}
-		discordId := e.User.ID
-		// TODO FIXME Make this only update what changed.
-		userId, err := r.GetUserIdByDiscordId(ctx, discordId, true)
-		if err != nil {
-			logger.Error("Error getting user id: %w", err)
-			return
-		}
-		if err := r.UpdateAccount(ctx, userId); err != nil {
-			logger.Debug("Error updating account: %w", err)
-		}
-	})
-
-	bot.AddHandler(func(s *discordgo.Session, m *discordgo.GuildMembersChunk) {
-		if err := OnGuildMembersChunk(ctx, s, m, logger, nk, initializer); err != nil {
-			logger.Error("Error calling OnGuildMembersChunk: %w", err)
-		}
-	})
-
-	bot.AddHandler(func(s *discordgo.Session, e *discordgo.Ready) {
-		if err := RegisterSlashCommands(ctx, logger, nk, r.pipeline, s, r); err != nil {
-			logger.Error("Failed to register slash commands: %w", err)
-		}
-	})
-
-	if err = bot.Open(); err != nil {
-		logger.Error("Failed to open discord bot connection: %w", err)
-	}
-
-	logger.Info("Discord bot started: %s", bot.State.User.String())
-	return nil
-}
-
 // Helper function to get or create a group
 func (r *LocalDiscordRegistry) findOrCreateGroup(ctx context.Context, groupId, name, description, ownerId, langtype string, guild *discordgo.Guild) (*api.Group, error) {
 	nk := r.nk
@@ -1010,7 +777,7 @@ func (r *LocalDiscordRegistry) SynchronizeGroup(ctx context.Context, guild *disc
 	return nil
 }
 
-func OnGuildMembersChunk(ctx context.Context, b *discordgo.Session, e *discordgo.GuildMembersChunk, logger runtime.Logger, nk runtime.NakamaModule, initializer runtime.Initializer) error {
+func (r *LocalDiscordRegistry) OnGuildMembersChunk(ctx context.Context, b *discordgo.Session, e *discordgo.GuildMembersChunk, logger runtime.Logger, nk runtime.NakamaModule, initializer runtime.Initializer) error {
 	// Get the nakama group for the guild
 
 	// Add all the members of the guild to the group, in chunks
