@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/gofrs/uuid/v5"
 )
 
 // PlatformCode represents the platforms on which a client may be operating.
@@ -52,6 +54,18 @@ func (e *EvrId) UnmarshalJSON(b []byte) error {
 
 func (xpi *EvrId) Valid() bool {
 	return xpi.PlatformCode > STM && xpi.PlatformCode < TEN && xpi.AccountId > 0
+}
+
+func (xpi *EvrId) Nil() bool {
+	return xpi.PlatformCode == 0 && xpi.AccountId == 0
+}
+
+func (xpi *EvrId) NotNil() bool {
+	return xpi.PlatformCode != 0 && xpi.AccountId != 0
+}
+
+func (xpi *EvrId) UUID() uuid.UUID {
+	return uuid.NewV5(uuid.NamespaceOID, xpi.Token())
 }
 
 // Parse parses a string into a given platform identifier.
