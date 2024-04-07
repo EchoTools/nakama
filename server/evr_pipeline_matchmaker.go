@@ -569,7 +569,7 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 	}
 
 	if levels, ok := validLevels[request.Mode]; ok {
-		if !lo.Contains(levels, request.Level) {
+		if request.Level != evr.LevelUnspecified && !lo.Contains(levels, request.Level) {
 			return result.SendErrorToSession(session, status.Errorf(codes.InvalidArgument, "Invalid level %v for game mode %v", request.Level, request.Mode))
 		}
 	} else {

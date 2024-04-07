@@ -241,6 +241,7 @@ func TestToSymbol(t *testing.T) {
 		symbol Symbol
 	}{
 		{"", Symbol(0)},
+		{"0xffffffffffffffff", Symbol(0xffffffffffffffff)},
 		{"selfgoalscored", Symbol(0x0ace406868d574c2)},
 		{"0x7777777777770000", Symbol(0x7777777777770000)},
 		{"SNSConfigRequestv2", Symbol(0x82869F0B37EB4378)},

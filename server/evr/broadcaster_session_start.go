@@ -42,6 +42,7 @@ var (
 
 	LevelUnloaded     Symbol = Symbol(0)                         // Unloaded Lobby
 	LevelSocial       Symbol = ToSymbol("mpl_lobby_b2")          // Social Lobby
+	LevelUnspecified  Symbol = Symbol(0xffffffffffffffff)        // Unspecified Level
 	LevelArena        Symbol = ToSymbol("mpl_arena_a")           // Echo Arena
 	ModeArenaTutorial Symbol = ToSymbol("mpl_tutorial_arena")    // Echo Arena Tutorial
 	LevelFission      Symbol = ToSymbol("mpl_combat_fission")    // Echo Combat
