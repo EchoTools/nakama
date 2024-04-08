@@ -545,11 +545,9 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		}
 	}
 
-	if mp.TeamIndex == evr.TeamUnassigned {
-		if mp.TeamIndex, ok = selectTeamForPlayer(logger, mp, state); !ok {
-			// The lobby is full, reject the player.
-			return state, false, ErrJoinRejectedLobbyFull
-		}
+	if mp.TeamIndex, ok = selectTeamForPlayer(logger, mp, state); !ok {
+		// The lobby is full, reject the player.
+		return state, false, ErrJoinRejectedLobbyFull
 	}
 
 	// Reserve this player's spot in the match.
@@ -781,6 +779,14 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 			logger.Error("difference in presences: stale(%d)=%s, missing(%d)=%s, state=%s", len(stale), stale, len(missing), missing, state.presences)
 			//m.MatchTerminate(ctx, logger, db, nk, dispatcher, tick, state, 0)
 			//return nil
+		}
+
+		// If the match was started more than 60 seconds ago, and there are no players, shut down the match.
+		if state.Started.Before(time.Now().Add(-60*time.Second)) && state.LobbyType != UnassignedLobby && state.Size == 0 {
+			// If the match is not a parking match, and there are no players, shut down the match.
+			logger.Error("Match is empty. Shutting down.")
+			m.MatchTerminate(ctx, logger, db, nk, dispatcher, tick, state, 0)
+			return nil
 		}
 
 		if state.broadcaster == nil {
