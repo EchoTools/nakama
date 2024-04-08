@@ -1118,8 +1118,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 				options := options[0].Options
 				groupID := options[0].StringValue()
-				// Validate the group is 1 to 8 characters long
-				if len(groupID) < 1 || len(groupID) > 8 {
+				// Validate the group is 1 to 12 characters long
+				if len(groupID) < 1 || len(groupID) > 12 {
 					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 						Type: discordgo.InteractionResponseChannelMessageWithSource,
 						Data: &discordgo.InteractionResponseData{
@@ -1326,8 +1326,8 @@ func (d *DiscordAppBot) RegisterPartySlashCommands() error {
 
 				options := i.ApplicationCommandData().Options
 				groupID := options[0].StringValue()
-				// Validate the group is 1 to 8 characters long
-				if len(groupID) < 1 || len(groupID) > 8 {
+				// Validate the group is 1 to 12 characters long
+				if len(groupID) < 1 || len(groupID) > 12 {
 					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 						Type: discordgo.InteractionResponseChannelMessageWithSource,
 						Data: &discordgo.InteractionResponseData{
