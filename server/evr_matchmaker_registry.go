@@ -135,9 +135,10 @@ func (c *LatencyCache) SelectPingCandidates(endpoints ...evr.Endpoint) []evr.End
 
 // FoundMatch represents the match found and send over the match join channel
 type FoundMatch struct {
-	MatchID string
-	Ticket  string // matchmaking ticket if any
-	Query   string
+	MatchID   string
+	Ticket    string // matchmaking ticket if any
+	Query     string
+	TeamIndex TeamIndex
 }
 
 type TicketMeta struct {
@@ -298,7 +299,6 @@ type MatchmakingRegistry struct {
 	matchingBySession *MapOf[uuid.UUID, *MatchmakingSession]
 	cacheByUserId     *MapOf[uuid.UUID, *LatencyCache]
 	broadcasters      *MapOf[string, evr.Endpoint] // EndpointID -> Endpoint
-	// FIXME This is ugly. make a registry.
 
 }
 
@@ -542,36 +542,46 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config *M
 		return
 	}
 
+	// Send players to the match alternating between teams for each join instruction
+
 	teamIndex := 0
-	for _, team := range teams {
+	for i, players := range teams {
 		// Assign each player in the team to the match
-		for _, e := range team {
-			s, ok := mr.GetMatchingBySessionId(e.Presence.SessionID)
+		for _, entry := range players {
+			s, ok := mr.GetMatchingBySessionId(entry.Presence.SessionID)
 			if !ok {
-				logger.Warn("Could not find matching session for user", zap.String("sessionID", e.Presence.SessionID.String()))
+				logger.Warn("Could not find matching session for user", zap.String("sessionID", entry.Presence.SessionID.String()))
 				continue
 			}
 			// Get the ticket metadata
-			ticket := e.GetTicket()
+			ticket := entry.GetTicket()
 			ticketMeta, ok := s.Tickets[ticket]
 			if !ok {
-				logger.Warn("Could not find ticket metadata for user", zap.String("sessionID", e.Presence.SessionID.String()), zap.String("ticket", ticket))
+				logger.Warn("Could not find ticket metadata for user", zap.String("sessionID", entry.Presence.SessionID.String()), zap.String("ticket", ticket))
 				continue
 			}
 
 			foundMatch := FoundMatch{
-				MatchID: matchID,
-				Ticket:  ticketMeta.TicketID,
-				Query:   ticketMeta.Query,
+				MatchID:   matchID,
+				Ticket:    ticketMeta.TicketID,
+				Query:     ticketMeta.Query,
+				TeamIndex: TeamIndex(i),
 			}
 			// Send the join instruction
-			s.MatchJoinCh <- foundMatch
+			select {
+			case <-s.Ctx.Done():
+				logger.Warn("Matchmaking session cancelled", zap.String("sessionID", entry.Presence.SessionID.String()))
+				continue
+			case s.MatchJoinCh <- foundMatch:
+				logger.Info("Sent match join instruction", zap.String("sessionID", entry.Presence.SessionID.String()))
+			case <-time.After(2 * time.Second):
+				logger.Warn("Failed to send match join instruction", zap.String("sessionID", entry.Presence.SessionID.String()))
+			}
 
 			// Alternate between teams
 			teamIndex = (teamIndex + 1) % 2
 		}
 	}
-
 }
 
 func distributeParties(parties [][]*MatchmakerEntry) [][]*MatchmakerEntry {

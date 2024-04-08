@@ -809,7 +809,7 @@ func (r *LocalDiscordRegistry) OnGuildMembersChunk(ctx context.Context, b *disco
 }
 
 func (r *LocalDiscordRegistry) GetAllSuspensions(ctx context.Context, userId uuid.UUID) ([]*SuspensionStatus, error) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	// Get the discordId for the userId
 	discordId, err := r.GetDiscordIdByUserId(ctx, userId)

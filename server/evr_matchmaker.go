@@ -89,7 +89,6 @@ func (p *EvrPipeline) Backfill(ctx context.Context, session *sessionWS, msession
 	// Have been short a player for X amount of time (~30 seconds?)
 	// afterwhich, the match is considered a backfill candidate and the goroutine
 	// Will open a matchmaking ticket. Any players that have a (backfill) ticket that matches
-	// The match will be added to the match.
 
 	var err error
 	var query string
@@ -627,10 +626,10 @@ func (p *EvrPipeline) PingEndpoints(ctx context.Context, session *sessionWS, mse
 		}
 
 		select {
-		case <-time.After(5 * time.Second):
-			return nil, ErrMatchmakingPingTimeout
 		case <-msession.Ctx.Done():
 			return nil, ErrMatchmakingCancelled
+		case <-time.After(5 * time.Second):
+			return nil, ErrMatchmakingPingTimeout
 		case results := <-msession.PingResultsCh:
 			cache := msession.LatencyCache
 			// Look up the endpoint in the cache and update the latency
