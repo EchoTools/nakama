@@ -210,7 +210,7 @@ func (p *EvrPipeline) lobbyFindSessionRequest(ctx context.Context, logger *zap.L
 }
 
 func (p *EvrPipeline) MatchSpectateStreamLoop(session *sessionWS, msession *MatchmakingSession, skipDelay bool, create bool) error {
-
+	logger := msession.Logger
 	ctx := msession.Context()
 
 	// Create a ticker to spectate
@@ -244,10 +244,18 @@ func (p *EvrPipeline) MatchSpectateStreamLoop(session *sessionWS, msession *Matc
 
 		// Found a backfill match
 		foundMatch := FoundMatch{
-			MatchID: matches[0].GetMatchId(),
-			Query:   query,
+			MatchID:   matches[0].GetMatchId(),
+			Query:     query,
+			TeamIndex: TeamIndex(evr.TeamSpectator),
 		}
-		msession.MatchJoinCh <- foundMatch
+		select {
+		case <-ctx.Done():
+			return nil
+		case msession.MatchJoinCh <- foundMatch:
+			logger.Debug("Spectating match", zap.String("mid", foundMatch.MatchID))
+		case <-time.After(3 * time.Second):
+			logger.Warn("Failed to spectate match", zap.String("mid", foundMatch.MatchID))
+		}
 	}
 }
 
@@ -285,13 +293,11 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 		}
 		if label != nil {
 			// Found a backfill match
-			if label != nil {
-				foundMatch = FoundMatch{
-					MatchID: label.MatchID.String(),
-					Query:   query,
-				}
+			foundMatch = FoundMatch{
+				MatchID:   label.MatchID.String(),
+				Query:     query,
+				TeamIndex: TeamIndex(evr.TeamUnassigned),
 			}
-
 		} else if create {
 			// No backfill match found
 			// Try to create a match
@@ -302,8 +308,9 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 				continue
 			}
 			foundMatch = FoundMatch{
-				MatchID: matchID,
-				Query:   "",
+				MatchID:   matchID,
+				Query:     "",
+				TeamIndex: TeamIndex(evr.TeamUnassigned),
 			}
 		}
 
@@ -311,9 +318,15 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 			// No match found
 			continue
 		}
-		msession.Logger.Debug("Backfilling match", zap.String("mid", foundMatch.MatchID))
-		msession.MatchJoinCh <- foundMatch
 
+		select {
+		case <-ctx.Done():
+			return nil
+		case msession.MatchJoinCh <- foundMatch:
+			logger.Debug("Backfilling match", zap.String("mid", foundMatch.MatchID))
+		case <-time.After(3 * time.Second):
+			logger.Warn("Failed to backfill match", zap.String("mid", foundMatch.MatchID))
+		}
 		// Continue to loop until the context is done
 
 	}
@@ -321,6 +334,7 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 
 func (p *EvrPipeline) MatchCreateLoop(session *sessionWS, msession *MatchmakingSession, pruneDelay time.Duration) error {
 	ctx := msession.Context()
+	logger := msession.Logger
 	// set a timeout
 	//stageTimer := time.NewTimer(pruneDelay)
 	for {
@@ -340,11 +354,18 @@ func (p *EvrPipeline) MatchCreateLoop(session *sessionWS, msession *MatchmakingS
 				return msession.Cancel(fmt.Errorf("match is nil"))
 			}
 			foundMatch := FoundMatch{
-				MatchID: matchID,
-				Query:   "",
+				MatchID:   matchID,
+				Query:     "",
+				TeamIndex: TeamIndex(evr.TeamUnassigned),
 			}
-			msession.MatchJoinCh <- foundMatch
-
+			select {
+			case <-ctx.Done():
+				return nil
+			case msession.MatchJoinCh <- foundMatch:
+				logger.Debug("Joining match", zap.String("mid", foundMatch.MatchID))
+			case <-time.After(3 * time.Second):
+				msession.Cancel(fmt.Errorf("failed to join match"))
+			}
 			// Keep trying until the context is done
 		case codes.NotFound, codes.ResourceExhausted, codes.Unavailable:
 			/*
@@ -461,8 +482,13 @@ func (p *EvrPipeline) lobbyPingResponse(ctx context.Context, logger *zap.Logger,
 	if !ok {
 		return fmt.Errorf("matching session not found")
 	}
-	// Send a signal to the matching session to continue searching.
-	msession.PingResultsCh <- response.Results
+	select {
+	case <-msession.Ctx.Done():
+		return nil
+	case msession.PingResultsCh <- response.Results:
+	case <-time.After(time.Second * 2):
+		logger.Debug("Failed to send ping results")
+	}
 
 	return nil
 }
@@ -598,7 +624,16 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 		partySize := 1 // TODO FIXME this should include the party size
 
 		joinFn := func(matchID string, query string) error {
-			return p.JoinEvrMatch(ctx, logger, session, query, matchID, *ml.Channel, int(ml.TeamIndex))
+			logger := logger.With(zap.String("mid", matchID))
+
+			err := p.JoinEvrMatch(ctx, logger, session, query, matchID, *ml.Channel, int(ml.TeamIndex))
+			switch status.Code(err) {
+			case codes.ResourceExhausted:
+				logger.Warn("Failed to join match (retrying): ", zap.Error(err))
+				return nil
+			default:
+				return err
+			}
 		}
 
 		errorFn := func(err error) error {

@@ -329,10 +329,10 @@ func NewEvrMatchState(endpoint evr.Endpoint, config *MatchBroadcaster, sessionId
 		Levels:                  make([]Level, 0),
 		Players:                 make([]PlayerInfo, 0, MatchMaxSize),
 		EvrIDs:                  make([]evr.EvrId, 0, MatchMaxSize),
-		presences:               make(map[string]*EvrMatchPresence),
-		presenceByEvrId:         make(map[string]*EvrMatchPresence),
-		presenceByPlayerSession: make(map[string]*EvrMatchPresence),
-		presenceCache:           make(map[string]*EvrMatchPresence),
+		presences:               make(map[string]*EvrMatchPresence, MatchMaxSize),
+		presenceByEvrId:         make(map[string]*EvrMatchPresence, MatchMaxSize),
+		presenceByPlayerSession: make(map[string]*EvrMatchPresence, MatchMaxSize),
+		presenceCache:           make(map[string]*EvrMatchPresence, MatchMaxSize),
 		UserIDs:                 make([]string, 0, MatchMaxSize),
 		emptyTicks:              0,
 		tickRate:                8,
@@ -545,9 +545,11 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		}
 	}
 
-	if mp.TeamIndex, ok = selectTeamForPlayer(logger, mp, state); !ok {
-		// The lobby is full, reject the player.
-		return state, false, ErrJoinRejectedLobbyFull
+	if mp.TeamIndex == evr.TeamUnassigned {
+		if mp.TeamIndex, ok = selectTeamForPlayer(logger, mp, state); !ok {
+			// The lobby is full, reject the player.
+			return state, false, ErrJoinRejectedLobbyFull
+		}
 	}
 
 	// Reserve this player's spot in the match.
