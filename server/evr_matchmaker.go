@@ -321,7 +321,7 @@ func (p *EvrPipeline) MatchSearch(ctx context.Context, logger *zap.Logger, sessi
 	// Basic search defaults
 	const (
 		minSize = 1
-		maxSize = MatchMaxSize // the broadcaster is included, so this has one free spot
+		maxSize = MatchMaxSize - 1 // the broadcaster is included, so this has one free spot
 		limit   = 50
 	)
 
@@ -590,6 +590,7 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 		}
 	}
 	if isNew {
+		// Trigger the MatchJoin event.
 		stream := PresenceStream{Mode: StreamModeMatchAuthoritative, Subject: matchID, Label: p.node}
 		m := PresenceMeta{
 			Username: session.Username(),
