@@ -234,7 +234,7 @@ func RegisterIndexes(initializer runtime.Initializer) error {
 		return err
 	}
 
-	name = ActiveSocialGroupIndex
+	name = ActivePartyGroupIndex
 	collection = MatchmakingStorageCollection
 	key = MatchmakingConfigStorageKey // Set to empty string to match all keys instead
 	fields = []string{"group_id"}     // index on these fields
