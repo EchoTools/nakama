@@ -1317,6 +1317,80 @@ func (d *DiscordAppBot) RegisterPartySlashCommands() error {
 						},
 					})
 				}
+			case "members":
+				logger := logger.WithField("discord_id", user.ID)
+				// List the other players in this party group
+				user := getScopedUser(i)
+				if user == nil {
+					return
+				}
+				// Get the user's party group
+				// Get the userID
+				userID, err := d.discordRegistry.GetUserIdByDiscordId(ctx, user.ID, true)
+				if err != nil {
+					logger.Error("Failed to get user ID", zap.Error(err))
+					return
+				}
+
+				objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
+					{
+						Collection: MatchmakingConfigStorageCollection,
+						Key:        MatchmakingConfigStorageKey,
+						UserID:     userID.String(),
+					},
+				})
+				if err != nil {
+					logger.Error("Failed to read matchmaking config", zap.Error(err))
+				}
+				matchmakingConfig := &MatchmakingConfig{}
+				if len(objs) != 0 {
+					if err := json.Unmarshal([]byte(objs[0].Value), matchmakingConfig); err != nil {
+						logger.Error("Failed to unmarshal matchmaking config", zap.Error(err))
+						return
+					}
+				}
+				logger = logger.WithField("group_id", matchmakingConfig.GroupID)
+
+				// Query the storage index
+				query := "+group_id:" + matchmakingConfig.GroupID
+				var members []string
+
+				idxobjs, err := nk.StorageIndexList(ctx, SystemUserId, ActivePartyGroupIndex, query, 1000)
+				if err != nil {
+					logger.Error("Failed to list party members", zap.Error(err))
+					return
+				}
+				for _, obj := range idxobjs.GetObjects() {
+					members = append(members, obj.UserId)
+				}
+
+				// Convert the members to discord user IDs
+				discordIds := make([]string, 0, len(members))
+				for _, member := range members {
+					discordId, err := d.discordRegistry.GetDiscordIdByUserId(ctx, uuid.FromStringOrNil(member))
+					if err != nil {
+						logger.Error("Failed to get discord ID", zap.Error(err))
+						return
+					}
+					discordIds = append(discordIds, fmt.Sprintf("<@%s>", discordId))
+				}
+
+				// Create a list of the members
+				var content string
+				if len(discordIds) == 0 {
+					content = "No members in your party group."
+				} else {
+					content = "Members in your party group:\n" + strings.Join(discordIds, ", ")
+				}
+
+				// Send the messge to the user
+				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+					Type: discordgo.InteractionResponseChannelMessageWithSource,
+					Data: &discordgo.InteractionResponseData{
+						Flags:   discordgo.MessageFlagsEphemeral,
+						Content: content,
+					},
+				})
 
 			case "group":
 				user := i.User

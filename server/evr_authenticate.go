@@ -42,6 +42,7 @@ const (
 	DisplayNameIndex             = "Index_DisplayName"
 	GhostedUsersIndex            = "Index_MutedUsers"
 	ActiveSocialGroupIndex       = "Index_SocialGroup"
+	ActivePartyGroupIndex        = "Index_PartyGroup"
 	CacheStorageCollection       = "Cache"
 	IPinfoCacheKey               = "IPinfo"
 	CosmeticLoadoutCollection    = "CosmeticLoadouts"
