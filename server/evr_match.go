@@ -279,6 +279,7 @@ func (s *EvrMatchState) rebuildCache() {
 		if presence.TeamIndex != evr.TeamSpectator && presence.TeamIndex != evr.TeamModerator {
 			s.Size += 1
 		}
+
 		playerinfo := PlayerInfo{
 			UserID:      presence.UserID.String(),
 			Username:    presence.Username,
@@ -291,6 +292,7 @@ func (s *EvrMatchState) rebuildCache() {
 		s.EvrIDs = append(s.EvrIDs, presence.EvrId)
 		s.UserIDs = append(s.UserIDs, presence.GetUserId())
 	}
+
 	sort.SliceStable(s.Players, func(i, j int) bool {
 		return s.Players[i].Team < s.Players[j].Team
 	})

@@ -234,6 +234,15 @@ func RegisterIndexes(initializer runtime.Initializer) error {
 		return err
 	}
 
+	name = ActiveSocialGroupIndex
+	collection = MatchmakingStorageCollection
+	key = MatchmakingConfigStorageKey // Set to empty string to match all keys instead
+	fields = []string{"group_id"}     // index on these fields
+	maxEntries = 100000
+	if err := initializer.RegisterStorageIndex(name, collection, key, fields, maxEntries, indexOnly); err != nil {
+		return err
+	}
+
 	return nil
 }
 
