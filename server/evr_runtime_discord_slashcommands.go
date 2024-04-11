@@ -740,14 +740,21 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			options := i.ApplicationCommandData().Options
 			deviceId := options[0].StringValue()
 			// Validate the link code as a 4 character string
-			if i.User == nil {
+			var user *discordgo.User
+			switch {
+			case i.User != nil:
+				user = i.User
+			case i.Member.User != nil:
+				user = i.Member.User
+			default:
 				return
 			}
+
 			if err := func() error {
 				// Get the userid by username
-				userId, err := discordRegistry.GetUserIdByDiscordId(ctx, i.User.ID, false)
+				userId, err := discordRegistry.GetUserIdByDiscordId(ctx, user.ID, false)
 				if err != nil {
-					return fmt.Errorf("failed to authenticate (or create) user %s: %w", i.User.ID, err)
+					return fmt.Errorf("failed to authenticate (or create) user %s: %w", user.ID, err)
 				}
 
 				return nk.UnlinkDevice(ctx, userId.String(), deviceId)
@@ -950,11 +957,17 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 		},
 		"reset-password": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-			if i.User == nil {
+			var user *discordgo.User
+			switch {
+			case i.User != nil:
+				user = i.User
+			case i.Member.User != nil:
+				user = i.Member.User
+			default:
 				return
 			}
 			if err := func() error {
-				userId, err := discordRegistry.GetUserIdByDiscordId(ctx, i.User.ID, true)
+				userId, err := discordRegistry.GetUserIdByDiscordId(ctx, user.ID, true)
 				if err != nil {
 					return err
 				}
@@ -1045,12 +1058,14 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			})
 		},
 		"whoami": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-			user := i.User
-			if i.User == nil {
-				if i.Member == nil || i.Member.User == nil {
-					return
-				}
+			var user *discordgo.User
+			switch {
+			case i.User != nil:
+				user = i.User
+			case i.Member.User != nil:
 				user = i.Member.User
+			default:
+				return
 			}
 			if err := d.handleProfileRequest(ctx, logger, nk, s, discordRegistry, i, user.ID, user.Username); err != nil {
 				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -1298,14 +1313,20 @@ func (d *DiscordAppBot) RegisterPartySlashCommands() error {
 			if i.Type != discordgo.InteractionApplicationCommand {
 				return
 			}
-			if i.User == nil {
+			var user *discordgo.User
+			switch {
+			case i.User != nil:
+				user = i.User
+			case i.Member.User != nil:
+				user = i.Member.User
+			default:
 				return
 			}
 			options := i.ApplicationCommandData().Options
 			switch options[0].Name {
 			case "invite":
 				options := options[0].Options
-				inviter := i.User
+				inviter := user
 				invitee := options[0].UserValue(s)
 
 				if err := d.sendPartyInvite(ctx, s, i, inviter, invitee); err != nil {
@@ -1393,9 +1414,14 @@ func (d *DiscordAppBot) RegisterPartySlashCommands() error {
 				})
 
 			case "group":
-				user := i.User
-				if i.Member != nil && i.Member.User != nil {
+				var user *discordgo.User
+				switch {
+				case i.User != nil:
+					user = i.User
+				case i.Member.User != nil:
 					user = i.Member.User
+				default:
+					return
 				}
 
 				options := i.ApplicationCommandData().Options
@@ -2080,4 +2106,15 @@ func (d *DiscordAppBot) getOrCreateParty(ctx context.Context, pipeline *Pipeline
 	}
 	ph := partyRegistry.Create(false, 15, presence)
 	return ph, nil
+}
+
+func getScopedUser(i *discordgo.InteractionCreate) *discordgo.User {
+	switch {
+	case i.User != nil:
+		return i.User
+	case i.Member.User != nil:
+		return i.Member.User
+	default:
+		return nil
+	}
 }
