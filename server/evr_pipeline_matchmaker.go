@@ -217,14 +217,14 @@ func (p *EvrPipeline) MatchSpectateStreamLoop(session *sessionWS, msession *Matc
 	spectateInterval := time.Duration(10) * time.Second
 
 	limit := 10
-	minSize := 2
+	minSize := 3
 	maxSize := MatchMaxSize - 1
 	query := "+label.open:T +label.lobby_type:public +label.mode:echo_arena +label.size:>=2"
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-time.After(spectateInterval):
+		default:
 		}
 
 		// list existing matches
@@ -239,6 +239,7 @@ func (p *EvrPipeline) MatchSpectateStreamLoop(session *sessionWS, msession *Matc
 
 		// sort matches by population
 		sort.SliceStable(matches, func(i, j int) bool {
+			// Sort by newer matches
 			return matches[i].Size > matches[j].Size
 		})
 
@@ -256,6 +257,7 @@ func (p *EvrPipeline) MatchSpectateStreamLoop(session *sessionWS, msession *Matc
 		case <-time.After(3 * time.Second):
 			logger.Warn("Failed to spectate match", zap.String("mid", foundMatch.MatchID))
 		}
+		<-time.After(spectateInterval)
 	}
 }
 
