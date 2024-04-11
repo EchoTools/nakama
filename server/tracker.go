@@ -223,6 +223,7 @@ func StartLocalTracker(logger *zap.Logger, config Config, sessionRegistry Sessio
 		for {
 			select {
 			case <-t.ctx.Done():
+				logger.Error("Local tracker event loop has stopped.")
 				return
 			case e := <-t.eventsCh:
 				t.processEvent(e)
