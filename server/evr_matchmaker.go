@@ -195,49 +195,18 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 	partyID := uuid.Nil
 
 	if config.GroupID != "" {
-		// Attempt to join the party
-		userPresence := &rtapi.UserPresence{
-			UserId:    userID,
-			SessionId: sessionID.String(),
-			Username:  session.Username(),
-		}
-		presence := []*Presence{&Presence{
-			ID: PresenceID{
-				Node:      p.node,
-				SessionID: sessionID,
-			},
-			// Presence stream not needed.
-			UserID: uuid.FromStringOrNil(userID),
-			Meta: PresenceMeta{
-				Username: session.Username(),
-				// Other meta fields not needed.
-			},
-		}}
-
-		partyID = uuid.NewV5(uuid.Nil, config.GroupID)
 		partyRegistry := session.pipeline.partyRegistry
-		// Try to join the party group
-		ph, found := partyRegistry.(*LocalPartyRegistry).parties.Load(partyID)
-		if found {
-			ph.Lock()
-
-			if ph.members.Size() < ph.members.maxSize {
-				partyRegistry.Join(partyID, presence)
-				logger.Debug("Joined party", zap.String("party_id", partyID.String()), zap.Any("members", ph.members.List()))
-			} else {
-				logger.Warn("Party is full", zap.String("party_id", partyID.String()))
-				partyID = uuid.Nil
-			}
-			ph.Unlock()
+		ph, err := joinPartyGroup(logger, partyRegistry, userID, sessionID.String(), session.Username(), p.node, config.GroupID)
+		if err != nil {
+			logger.Warn("Failed to join party group", zap.String("group_id", config.GroupID), zap.Error(err))
 		} else {
-			// Create the party
-			_ = partyRegistry.Create(true, 8, userPresence)
+			logger.Debug("Joined party", zap.String("party_id", partyID.String()), zap.Any("members", ph.members.List()))
 		}
-
+		partyID = ph.ID
 		// Add the user's group to the string properties
-		stringProps["group"] = config.GroupID
+		stringProps["party_group"] = config.GroupID
 		// Add the user's group to the query string
-		query = fmt.Sprintf("%s properties.group:%s^5", query, config.GroupID)
+		query = fmt.Sprintf("%s properties.party_group:%s^5", query, config.GroupID)
 	}
 
 	minCount := gconfig.MinCount
@@ -264,6 +233,47 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 	}
 	msession.AddTicket(ticket, query)
 	return ticket, nil
+}
+
+func joinPartyGroup(logger *zap.Logger, partyRegistry PartyRegistry, userID, sessionID, username, node, groupID string) (*PartyHandler, error) {
+	// Attempt to join the party
+	userPresence := &rtapi.UserPresence{
+		UserId:    userID,
+		SessionId: sessionID,
+		Username:  username,
+	}
+	presence := []*Presence{&Presence{
+		ID: PresenceID{
+			Node:      node,
+			SessionID: uuid.FromStringOrNil(sessionID),
+		},
+		// Presence stream not needed.
+		UserID: uuid.FromStringOrNil(userID),
+		Meta: PresenceMeta{
+			Username: username,
+			// Other meta fields not needed.
+		},
+	}}
+
+	partyID := uuid.NewV5(uuid.Nil, groupID)
+
+	// Try to join the party group
+	ph, found := partyRegistry.(*LocalPartyRegistry).parties.Load(partyID)
+	if found {
+		ph.Lock()
+		defer ph.Unlock()
+		if ph.members.Size() < ph.members.maxSize {
+			partyRegistry.Join(partyID, presence)
+			return ph, nil
+		} else {
+			logger.Warn("Party is full", zap.String("party_id", partyID.String()))
+			return ph, status.Errorf(codes.ResourceExhausted, "Party is full")
+		}
+	} else {
+		// Create the party
+		ph = partyRegistry.Create(true, 8, userPresence)
+		return ph, nil
+	}
 }
 
 // Wrapper for the matchRegistry.ListMatches function.
