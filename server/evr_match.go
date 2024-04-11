@@ -337,7 +337,7 @@ func NewEvrMatchState(endpoint evr.Endpoint, config *MatchBroadcaster, sessionId
 		presenceCache:           make(map[string]*EvrMatchPresence, MatchMaxSize),
 		UserIDs:                 make([]string, 0, MatchMaxSize),
 		emptyTicks:              0,
-		tickRate:                8,
+		tickRate:                16,
 	}
 
 	evrMatchConfig := evrMatchConfig{
@@ -405,7 +405,7 @@ func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql
 		logger.WithField("err", err).Error("Match label marshal error.")
 	}
 
-	state.tickRate = 8
+	state.tickRate = 16
 	return state, state.tickRate, string(labelJson)
 }
 
@@ -679,42 +679,47 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 		return nil
 	}
 
-	// Remove the player from the match.
+	// if the broadcaster is in the presences, then shut down.
 	for _, p := range presences {
-
-		// If the broadcaster left the match, shut it down.
 		if p.GetSessionId() == state.Broadcaster.SessionID {
 			logger.Debug("Broadcaster left the match. Shutting down.")
-
-			sessions := make([]uuid.UUID, 0, len(state.presences))
-			for _, presence := range state.presences {
-				sessions = append(sessions, uuid.FromStringOrNil(presence.GetPlayerSession()))
-			}
-
-			messages := []evr.Message{
-				evr.NewBroadcasterPlayersRejected(evr.PlayerRejectionReasonDisconnected, sessions...),
-			}
-
-			go func() {
-				// Inform players (if they are still in the match) that the broadcaster has disconnected.
-				err := m.dispatchMessages(ctx, logger, dispatcher, messages, []runtime.Presence{state.broadcaster}, nil)
-				if err != nil {
-					logger.Error("failed to dispatch broadcaster disconnected message: %v", err)
-				}
-			}()
+			m.MatchTerminate(ctx, logger, db, nk, dispatcher, tick, state, 0)
 			return nil
 		}
+	}
 
-		// Check if the player is in the match.
-		if _, ok := state.presences[p.GetUserId()]; !ok {
+	// Create a list of sessions to remove
+	rejects := lo.Map(presences, func(p runtime.Presence, _ int) uuid.UUID {
+		// Get the match presence for this user
+		matchPresence, ok := state.presenceCache[p.GetUserId()]
+		if !ok {
 			// This player is not in the match.
 			logger.Warn("Player not in match.")
-			continue
+			return uuid.Nil
 		}
+		return uuid.FromStringOrNil(matchPresence.GetPlayerSession())
+	})
 
-		// Remove the player from the match.
+	// Filter out the uuid.Nil's
+	rejects = lo.Filter(rejects, func(u uuid.UUID, _ int) bool {
+		return u != uuid.Nil
+	})
+
+	// Delete the each user from the match.
+	for _, p := range presences {
 		delete(state.presences, p.GetUserId())
 	}
+
+	go func(rejects []uuid.UUID) {
+		// Inform players (if they are still in the match) that the broadcaster has disconnected.
+		messages := []evr.Message{
+			evr.NewBroadcasterPlayersRejected(evr.PlayerRejectionReasonDisconnected, rejects...),
+		}
+		err := m.dispatchMessages(ctx, logger, dispatcher, messages, []runtime.Presence{state.broadcaster}, nil)
+		if err != nil {
+			logger.Error("failed to dispatch broadcaster disconnected message: %v", err)
+		}
+	}(rejects)
 
 	state.rebuildCache()
 	// Update the label that includes the new player list.
@@ -1185,6 +1190,8 @@ func (m *EvrMatch) broadcasterPlayerRemoved(ctx context.Context, logger runtime.
 		logger.Debug("broadcasterPlayerRemoved: player not in match: %v", message.PlayerSession)
 		return state, nil
 	}
+
+	logger.Debug("broadcasterPlayerRemoved: kicking player presence from match: %v", message.PlayerSession)
 	// Kick the presence from the match. This will trigger the MatchLeave function.
 	nk.StreamUserKick(StreamModeMatchAuthoritative, matchId.String(), "", node, presence)
 	return state, nil
