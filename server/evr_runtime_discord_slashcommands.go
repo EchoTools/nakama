@@ -267,6 +267,11 @@ var (
 						},
 					},
 				},
+				{
+					Name:        "members",
+					Description: "See members of your party.",
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+				},
 				/*
 					{
 						Name:        "invite",
@@ -1125,6 +1130,80 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						},
 					})
 				}
+			case "members":
+				logger := logger.WithField("discord_id", user.ID)
+				// List the other players in this party group
+				user := getScopedUser(i)
+				if user == nil {
+					return
+				}
+				// Get the user's party group
+				// Get the userID
+				userID, err := d.discordRegistry.GetUserIdByDiscordId(ctx, user.ID, false)
+				if err != nil {
+					logger.Error("Failed to get user ID", zap.Error(err))
+					return
+				}
+
+				objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
+					{
+						Collection: MatchmakingConfigStorageCollection,
+						Key:        MatchmakingConfigStorageKey,
+						UserID:     userID.String(),
+					},
+				})
+				if err != nil {
+					logger.Error("Failed to read matchmaking config", zap.Error(err))
+				}
+				matchmakingConfig := &MatchmakingConfig{}
+				if len(objs) != 0 {
+					if err := json.Unmarshal([]byte(objs[0].Value), matchmakingConfig); err != nil {
+						logger.Error("Failed to unmarshal matchmaking config", zap.Error(err))
+						return
+					}
+				}
+				logger = logger.WithField("group_id", matchmakingConfig.GroupID)
+
+				// Query the storage index
+				query := "+group_id:" + matchmakingConfig.GroupID
+				var members []string
+
+				idxobjs, err := nk.StorageIndexList(ctx, SystemUserId, ActivePartyGroupIndex, query, 1000)
+				if err != nil {
+					logger.Error("Failed to list party members", zap.Error(err))
+					return
+				}
+				for _, obj := range idxobjs.GetObjects() {
+					members = append(members, obj.UserId)
+				}
+
+				// Convert the members to discord user IDs
+				discordIds := make([]string, 0, len(members))
+				for _, member := range members {
+					discordId, err := d.discordRegistry.GetDiscordIdByUserId(ctx, uuid.FromStringOrNil(member))
+					if err != nil {
+						logger.Error("Failed to get discord ID", zap.Error(err))
+						return
+					}
+					discordIds = append(discordIds, fmt.Sprintf("<@%s>", discordId))
+				}
+
+				// Create a list of the members
+				var content string
+				if len(discordIds) == 0 {
+					content = "No members in your party group."
+				} else {
+					content = "Members in your party group:\n" + strings.Join(discordIds, ", ")
+				}
+
+				// Send the messge to the user
+				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+					Type: discordgo.InteractionResponseChannelMessageWithSource,
+					Data: &discordgo.InteractionResponseData{
+						Flags:   discordgo.MessageFlagsEphemeral,
+						Content: content,
+					},
+				})
 
 			case "group":
 				user := i.User
@@ -1299,121 +1378,22 @@ func (d *DiscordAppBot) updateSlashCommands(s *discordgo.Session, logger runtime
 	}
 }
 
+/*
 // TODO FIXME put this as part of a bot.
-func (d *DiscordAppBot) RegisterPartySlashCommands() error {
-	bot := d.dg
-	logger := d.logger
-	nk := d.nk
-	ctx := d.ctx
-	pipeline := d.pipeline
-	partyCommandHandlers := map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate){
-		"party": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-			defer cancel()
-			if i.Type != discordgo.InteractionApplicationCommand {
-				return
-			}
-			var user *discordgo.User
-			switch {
-			case i.User != nil:
-				user = i.User
-			case i.Member.User != nil:
-				user = i.Member.User
-			default:
-				return
-			}
-			options := i.ApplicationCommandData().Options
-			switch options[0].Name {
-			case "invite":
-				options := options[0].Options
-				inviter := user
-				invitee := options[0].UserValue(s)
 
-				if err := d.sendPartyInvite(ctx, s, i, inviter, invitee); err != nil {
-					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-						Type: discordgo.InteractionResponseChannelMessageWithSource,
-						Data: &discordgo.InteractionResponseData{
-							Flags:   discordgo.MessageFlagsEphemeral,
-							Content: err.Error(),
-						},
-					})
-				}
-			case "members":
-				logger := logger.WithField("discord_id", user.ID)
-				// List the other players in this party group
-				user := getScopedUser(i)
-				if user == nil {
+	func (d *DiscordAppBot) RegisterPartySlashCommands() error {
+		bot := d.dg
+		logger := d.logger
+		nk := d.nk
+		ctx := d.ctx
+		pipeline := d.pipeline
+		partyCommandHandlers := map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate){
+			"party": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer cancel()
+				if i.Type != discordgo.InteractionApplicationCommand {
 					return
 				}
-				// Get the user's party group
-				// Get the userID
-				userID, err := d.discordRegistry.GetUserIdByDiscordId(ctx, user.ID, true)
-				if err != nil {
-					logger.Error("Failed to get user ID", zap.Error(err))
-					return
-				}
-
-				objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
-					{
-						Collection: MatchmakingConfigStorageCollection,
-						Key:        MatchmakingConfigStorageKey,
-						UserID:     userID.String(),
-					},
-				})
-				if err != nil {
-					logger.Error("Failed to read matchmaking config", zap.Error(err))
-				}
-				matchmakingConfig := &MatchmakingConfig{}
-				if len(objs) != 0 {
-					if err := json.Unmarshal([]byte(objs[0].Value), matchmakingConfig); err != nil {
-						logger.Error("Failed to unmarshal matchmaking config", zap.Error(err))
-						return
-					}
-				}
-				logger = logger.WithField("group_id", matchmakingConfig.GroupID)
-
-				// Query the storage index
-				query := "+group_id:" + matchmakingConfig.GroupID
-				var members []string
-
-				idxobjs, err := nk.StorageIndexList(ctx, SystemUserId, ActivePartyGroupIndex, query, 1000)
-				if err != nil {
-					logger.Error("Failed to list party members", zap.Error(err))
-					return
-				}
-				for _, obj := range idxobjs.GetObjects() {
-					members = append(members, obj.UserId)
-				}
-
-				// Convert the members to discord user IDs
-				discordIds := make([]string, 0, len(members))
-				for _, member := range members {
-					discordId, err := d.discordRegistry.GetDiscordIdByUserId(ctx, uuid.FromStringOrNil(member))
-					if err != nil {
-						logger.Error("Failed to get discord ID", zap.Error(err))
-						return
-					}
-					discordIds = append(discordIds, fmt.Sprintf("<@%s>", discordId))
-				}
-
-				// Create a list of the members
-				var content string
-				if len(discordIds) == 0 {
-					content = "No members in your party group."
-				} else {
-					content = "Members in your party group:\n" + strings.Join(discordIds, ", ")
-				}
-
-				// Send the messge to the user
-				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-					Type: discordgo.InteractionResponseChannelMessageWithSource,
-					Data: &discordgo.InteractionResponseData{
-						Flags:   discordgo.MessageFlagsEphemeral,
-						Content: content,
-					},
-				})
-
-			case "group":
 				var user *discordgo.User
 				switch {
 				case i.User != nil:
@@ -1423,286 +1403,387 @@ func (d *DiscordAppBot) RegisterPartySlashCommands() error {
 				default:
 					return
 				}
-
 				options := i.ApplicationCommandData().Options
-				groupID := options[0].StringValue()
-				// Validate the group is 1 to 12 characters long
-				if len(groupID) < 1 || len(groupID) > 12 {
-					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-						Type: discordgo.InteractionResponseChannelMessageWithSource,
-						Data: &discordgo.InteractionResponseData{
-							Flags:   discordgo.MessageFlagsEphemeral,
-							Content: "Invalid group ID. It must be between one (1) and eight (8) characters long.",
-						},
-					})
-				}
-				// Validate the group is alphanumeric
-				if !groupRegex.MatchString(groupID) {
-					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-						Type: discordgo.InteractionResponseChannelMessageWithSource,
-						Data: &discordgo.InteractionResponseData{
-							Flags:   discordgo.MessageFlagsEphemeral,
-							Content: "Invalid group ID. It must be alphanumeric.",
-						},
-					})
-				}
-				// Validate the group is not a reserved group
-				if lo.Contains([]string{"admin", "moderator", "verified", "broadcaster"}, groupID) {
-					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-						Type: discordgo.InteractionResponseChannelMessageWithSource,
-						Data: &discordgo.InteractionResponseData{
-							Flags:   discordgo.MessageFlagsEphemeral,
-							Content: "Invalid group ID. It is a reserved group.",
-						},
-					})
-				}
-				// lowercase the group
-				groupID = strings.ToLower(groupID)
+				switch options[0].Name {
+				case "invite":
+					options := options[0].Options
+					inviter := user
+					invitee := options[0].UserValue(s)
 
-				// Get the userID
-				userID, err := d.discordRegistry.GetUserIdByDiscordId(ctx, user.ID, true)
-				if err != nil {
-					logger.Error("Failed to get user ID", zap.Error(err))
-					return
-				}
-
-				objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
-					{
-						Collection: MatchmakingConfigStorageCollection,
-						Key:        MatchmakingConfigStorageKey,
-						UserID:     userID.String(),
-					},
-				})
-				if err != nil {
-					logger.Error("Failed to read matchmaking config", zap.Error(err))
-				}
-				matchmakingConfig := &MatchmakingConfig{}
-				if len(objs) != 0 {
-					if err := json.Unmarshal([]byte(objs[0].Value), matchmakingConfig); err != nil {
-						logger.Error("Failed to unmarshal matchmaking config", zap.Error(err))
+					if err := d.sendPartyInvite(ctx, s, i, inviter, invitee); err != nil {
+						s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+							Type: discordgo.InteractionResponseChannelMessageWithSource,
+							Data: &discordgo.InteractionResponseData{
+								Flags:   discordgo.MessageFlagsEphemeral,
+								Content: err.Error(),
+							},
+						})
+					}
+				case "members":
+					logger := logger.WithField("discord_id", user.ID)
+					// List the other players in this party group
+					user := getScopedUser(i)
+					if user == nil {
 						return
 					}
-				}
-				matchmakingConfig.GroupID = groupID
-				// Store it back
-
-				data, err := json.Marshal(matchmakingConfig)
-				if err != nil {
-					logger.Error("Failed to marshal matchmaking config", zap.Error(err))
-					return
-				}
-
-				if _, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{
-					{
-						Collection:      MatchmakingConfigStorageCollection,
-						Key:             MatchmakingConfigStorageKey,
-						UserID:          userID.String(),
-						Value:           string(data),
-						PermissionRead:  1,
-						PermissionWrite: 0,
-					},
-				}); err != nil {
-					logger.Error("Failed to write matchmaking config", zap.Error(err))
-					return
-				}
-
-				// Inform the user of the groupid
-				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-					Type: discordgo.InteractionResponseChannelMessageWithSource,
-					Data: &discordgo.InteractionResponseData{
-						Flags:   discordgo.MessageFlagsEphemeral,
-						Content: fmt.Sprintf("Your group ID has been set to `%s`. Everyone must matchmake at the same time (~15-30 seconds)", groupID),
-					},
-				})
-			}
-		},
-	}
-
-	bot.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-
-		switch i.Type {
-		case discordgo.InteractionApplicationCommand:
-			if h, ok := partyCommandHandlers[i.ApplicationCommandData().Name]; ok {
-				h(s, i)
-			}
-		case discordgo.InteractionMessageComponent:
-			// Handle the button press
-			parts := strings.Split(i.MessageComponentData().CustomID, ":")
-			switch parts[0] {
-			case "fd_cancel_invite":
-				// Cancel the invite
-				// Get the partyID and inviteeSessionID
-				partyID := uuid.FromStringOrNil(parts[1])
-				sessionID := parts[2]
-
-				// Loop over the invitations and remove the invitee
-				// Get the party handler
-				ph, found := pipeline.partyRegistry.(*LocalPartyRegistry).parties.Load(partyID)
-				if !found {
-					pipeline.logger.Error("Failed to find party.")
-					return
-				}
-				ph.Lock()
-				defer ph.Unlock()
-				// Check if the invitee has a join request
-				var presence *rtapi.UserPresence
-				for _, p := range ph.joinRequests {
-					if p.UserPresence.SessionId == sessionID {
-						presence = p.UserPresence
-						break
-					}
-				}
-				if presence != nil {
-					// Remove the invitee
-					err := d.pipeline.partyRegistry.PartyRemove(ctx, partyID, pipeline.node, presence.SessionId, pipeline.node, presence)
+					// Get the user's party group
+					// Get the userID
+					userID, err := d.discordRegistry.GetUserIdByDiscordId(ctx, user.ID, false)
 					if err != nil {
-						d.pipeline.logger.Error("Failed to remove party invite.")
+						logger.Error("Failed to get user ID", zap.Error(err))
 						return
 					}
-					// Send an emphemeral message to the inviter
-					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-						Type: discordgo.InteractionResponseChannelMessageWithSource,
-						Data: &discordgo.InteractionResponseData{
-							Flags:   discordgo.MessageFlagsEphemeral,
-							Content: "Invite cancelled.",
+
+					objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
+						{
+							Collection: MatchmakingConfigStorageCollection,
+							Key:        MatchmakingConfigStorageKey,
+							UserID:     userID.String(),
 						},
 					})
-				} else {
-					// Check if the invitee is already in the party
-					for _, p := range ph.members.presences {
-						if p.UserPresence.SessionId == sessionID {
-							presence := p.UserPresence
-							// Send an emphemeral message to the inviter
-							err := pipeline.partyRegistry.PartyRemove(ctx, partyID, pipeline.node, presence.SessionId, pipeline.node, presence)
-							if err != nil {
-								pipeline.logger.Error("Failed to remove party invite.")
-								return
-							}
-							// Send an emphemeral message to the inviter
-							s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-								Type: discordgo.InteractionResponseChannelMessageWithSource,
-								Data: &discordgo.InteractionResponseData{
-									Flags:   discordgo.MessageFlagsEphemeral,
-									Content: "Player removed from party.",
-								},
-							})
-							// Send message to the invitee
-							channel, err := s.UserChannelCreate(presence.UserId)
-							if err != nil {
-								pipeline.logger.Error("Failed to create user channel.")
-								return
-							}
-							s.ChannelMessageSendComplex(channel.ID, &discordgo.MessageSend{
-								Content: "You are no longer in a party.",
-							})
+					if err != nil {
+						logger.Error("Failed to read matchmaking config", zap.Error(err))
+					}
+					matchmakingConfig := &MatchmakingConfig{}
+					if len(objs) != 0 {
+						if err := json.Unmarshal([]byte(objs[0].Value), matchmakingConfig); err != nil {
+							logger.Error("Failed to unmarshal matchmaking config", zap.Error(err))
 							return
 						}
 					}
+					logger = logger.WithField("group_id", matchmakingConfig.GroupID)
+
+					// Query the storage index
+					query := "+group_id:" + matchmakingConfig.GroupID
+					var members []string
+
+					idxobjs, err := nk.StorageIndexList(ctx, SystemUserId, ActivePartyGroupIndex, query, 1000)
+					if err != nil {
+						logger.Error("Failed to list party members", zap.Error(err))
+						return
+					}
+					for _, obj := range idxobjs.GetObjects() {
+						members = append(members, obj.UserId)
+					}
+
+					// Convert the members to discord user IDs
+					discordIds := make([]string, 0, len(members))
+					for _, member := range members {
+						discordId, err := d.discordRegistry.GetDiscordIdByUserId(ctx, uuid.FromStringOrNil(member))
+						if err != nil {
+							logger.Error("Failed to get discord ID", zap.Error(err))
+							return
+						}
+						discordIds = append(discordIds, fmt.Sprintf("<@%s>", discordId))
+					}
+
+					// Create a list of the members
+					var content string
+					if len(discordIds) == 0 {
+						content = "No members in your party group."
+					} else {
+						content = "Members in your party group:\n" + strings.Join(discordIds, ", ")
+					}
+
+					// Send the messge to the user
+					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+						Type: discordgo.InteractionResponseChannelMessageWithSource,
+						Data: &discordgo.InteractionResponseData{
+							Flags:   discordgo.MessageFlagsEphemeral,
+							Content: content,
+						},
+					})
+
+				case "group":
+					var user *discordgo.User
+					switch {
+					case i.User != nil:
+						user = i.User
+					case i.Member.User != nil:
+						user = i.Member.User
+					default:
+						return
+					}
+
+					options := i.ApplicationCommandData().Options
+					groupID := options[0].StringValue()
+					// Validate the group is 1 to 12 characters long
+					if len(groupID) < 1 || len(groupID) > 12 {
+						s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+							Type: discordgo.InteractionResponseChannelMessageWithSource,
+							Data: &discordgo.InteractionResponseData{
+								Flags:   discordgo.MessageFlagsEphemeral,
+								Content: "Invalid group ID. It must be between one (1) and eight (8) characters long.",
+							},
+						})
+					}
+					// Validate the group is alphanumeric
+					if !groupRegex.MatchString(groupID) {
+						s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+							Type: discordgo.InteractionResponseChannelMessageWithSource,
+							Data: &discordgo.InteractionResponseData{
+								Flags:   discordgo.MessageFlagsEphemeral,
+								Content: "Invalid group ID. It must be alphanumeric.",
+							},
+						})
+					}
+					// Validate the group is not a reserved group
+					if lo.Contains([]string{"admin", "moderator", "verified", "broadcaster"}, groupID) {
+						s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+							Type: discordgo.InteractionResponseChannelMessageWithSource,
+							Data: &discordgo.InteractionResponseData{
+								Flags:   discordgo.MessageFlagsEphemeral,
+								Content: "Invalid group ID. It is a reserved group.",
+							},
+						})
+					}
+					// lowercase the group
+					groupID = strings.ToLower(groupID)
+
+					// Get the userID
+					userID, err := d.discordRegistry.GetUserIdByDiscordId(ctx, user.ID, true)
+					if err != nil {
+						logger.Error("Failed to get user ID", zap.Error(err))
+						return
+					}
+
+					objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
+						{
+							Collection: MatchmakingConfigStorageCollection,
+							Key:        MatchmakingConfigStorageKey,
+							UserID:     userID.String(),
+						},
+					})
+					if err != nil {
+						logger.Error("Failed to read matchmaking config", zap.Error(err))
+					}
+					matchmakingConfig := &MatchmakingConfig{}
+					if len(objs) != 0 {
+						if err := json.Unmarshal([]byte(objs[0].Value), matchmakingConfig); err != nil {
+							logger.Error("Failed to unmarshal matchmaking config", zap.Error(err))
+							return
+						}
+					}
+					matchmakingConfig.GroupID = groupID
+					// Store it back
+
+					data, err := json.Marshal(matchmakingConfig)
+					if err != nil {
+						logger.Error("Failed to marshal matchmaking config", zap.Error(err))
+						return
+					}
+
+					if _, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{
+						{
+							Collection:      MatchmakingConfigStorageCollection,
+							Key:             MatchmakingConfigStorageKey,
+							UserID:          userID.String(),
+							Value:           string(data),
+							PermissionRead:  1,
+							PermissionWrite: 0,
+						},
+					}); err != nil {
+						logger.Error("Failed to write matchmaking config", zap.Error(err))
+						return
+					}
+
+					// Inform the user of the groupid
+					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+						Type: discordgo.InteractionResponseChannelMessageWithSource,
+						Data: &discordgo.InteractionResponseData{
+							Flags:   discordgo.MessageFlagsEphemeral,
+							Content: fmt.Sprintf("Your group ID has been set to `%s`. Everyone must matchmake at the same time (~15-30 seconds)", groupID),
+						},
+					})
 				}
-			case "fd_accept_invite":
-				// Accept the invite
-				// Get the partyId and the inviteeSessionID
+			},
+		}
 
-				partyID := uuid.FromStringOrNil(parts[1])
-				inviteeSessionID := uuid.FromStringOrNil(parts[2])
+		bot.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
-				// Verify that the user has a join request.
-				// Get the party
-				ph, found := pipeline.partyRegistry.(*LocalPartyRegistry).parties.Load(partyID)
-				if !found {
-					pipeline.logger.Error("Failed to find party.")
-					return
+			switch i.Type {
+			case discordgo.InteractionApplicationCommand:
+				if h, ok := partyCommandHandlers[i.ApplicationCommandData().Name]; ok {
+					h(s, i)
 				}
-				ph.Lock()
-				defer ph.Unlock()
-				// Check if the invitee is already in the party
+			case discordgo.InteractionMessageComponent:
+				// Handle the button press
+				parts := strings.Split(i.MessageComponentData().CustomID, ":")
+				switch parts[0] {
+				case "fd_cancel_invite":
+					// Cancel the invite
+					// Get the partyID and inviteeSessionID
+					partyID := uuid.FromStringOrNil(parts[1])
+					sessionID := parts[2]
 
-				for _, p := range ph.members.presences {
-					if p.UserPresence.SessionId == inviteeSessionID.String() {
+					// Loop over the invitations and remove the invitee
+					// Get the party handler
+					ph, found := pipeline.partyRegistry.(*LocalPartyRegistry).parties.Load(partyID)
+					if !found {
+						pipeline.logger.Error("Failed to find party.")
+						return
+					}
+					ph.Lock()
+					defer ph.Unlock()
+					// Check if the invitee has a join request
+					var presence *rtapi.UserPresence
+					for _, p := range ph.joinRequests {
+						if p.UserPresence.SessionId == sessionID {
+							presence = p.UserPresence
+							break
+						}
+					}
+					if presence != nil {
+						// Remove the invitee
+						err := d.pipeline.partyRegistry.PartyRemove(ctx, partyID, pipeline.node, presence.SessionId, pipeline.node, presence)
+						if err != nil {
+							d.pipeline.logger.Error("Failed to remove party invite.")
+							return
+						}
 						// Send an emphemeral message to the inviter
 						s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 							Type: discordgo.InteractionResponseChannelMessageWithSource,
 							Data: &discordgo.InteractionResponseData{
 								Flags:   discordgo.MessageFlagsEphemeral,
-								Content: "You are already in the party.",
+								Content: "Invite cancelled.",
+							},
+						})
+					} else {
+						// Check if the invitee is already in the party
+						for _, p := range ph.members.presences {
+							if p.UserPresence.SessionId == sessionID {
+								presence := p.UserPresence
+								// Send an emphemeral message to the inviter
+								err := pipeline.partyRegistry.PartyRemove(ctx, partyID, pipeline.node, presence.SessionId, pipeline.node, presence)
+								if err != nil {
+									pipeline.logger.Error("Failed to remove party invite.")
+									return
+								}
+								// Send an emphemeral message to the inviter
+								s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+									Type: discordgo.InteractionResponseChannelMessageWithSource,
+									Data: &discordgo.InteractionResponseData{
+										Flags:   discordgo.MessageFlagsEphemeral,
+										Content: "Player removed from party.",
+									},
+								})
+								// Send message to the invitee
+								channel, err := s.UserChannelCreate(presence.UserId)
+								if err != nil {
+									pipeline.logger.Error("Failed to create user channel.")
+									return
+								}
+								s.ChannelMessageSendComplex(channel.ID, &discordgo.MessageSend{
+									Content: "You are no longer in a party.",
+								})
+								return
+							}
+						}
+					}
+				case "fd_accept_invite":
+					// Accept the invite
+					// Get the partyId and the inviteeSessionID
+
+					partyID := uuid.FromStringOrNil(parts[1])
+					inviteeSessionID := uuid.FromStringOrNil(parts[2])
+
+					// Verify that the user has a join request.
+					// Get the party
+					ph, found := pipeline.partyRegistry.(*LocalPartyRegistry).parties.Load(partyID)
+					if !found {
+						pipeline.logger.Error("Failed to find party.")
+						return
+					}
+					ph.Lock()
+					defer ph.Unlock()
+					// Check if the invitee is already in the party
+
+					for _, p := range ph.members.presences {
+						if p.UserPresence.SessionId == inviteeSessionID.String() {
+							// Send an emphemeral message to the inviter
+							s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+								Type: discordgo.InteractionResponseChannelMessageWithSource,
+								Data: &discordgo.InteractionResponseData{
+									Flags:   discordgo.MessageFlagsEphemeral,
+									Content: "You are already in the party.",
+								},
+							})
+							return
+						}
+					}
+					// Find the join request
+					var presence *rtapi.UserPresence
+					for _, p := range ph.joinRequests {
+						if p.UserPresence.SessionId == inviteeSessionID.String() {
+							presence = p.UserPresence
+							break
+						}
+					}
+					if presence == nil {
+						// Send an regular channel message to the invitee
+						s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+							Type: discordgo.InteractionResponseChannelMessageWithSource,
+							Data: &discordgo.InteractionResponseData{
+								Flags:   discordgo.MessageFlagsEphemeral,
+								Content: "Failed to find join request.",
 							},
 						})
 						return
 					}
-				}
-				// Find the join request
-				var presence *rtapi.UserPresence
-				for _, p := range ph.joinRequests {
-					if p.UserPresence.SessionId == inviteeSessionID.String() {
-						presence = p.UserPresence
-						break
-					}
-				}
-				if presence == nil {
-					// Send an regular channel message to the invitee
-					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-						Type: discordgo.InteractionResponseChannelMessageWithSource,
-						Data: &discordgo.InteractionResponseData{
-							Flags:   discordgo.MessageFlagsEphemeral,
-							Content: "Failed to find join request.",
-						},
-					})
-					return
-				}
-				if err := pipeline.partyRegistry.PartyAccept(ctx, partyID, pipeline.node, inviteeSessionID.String(), pipeline.node, presence); err != nil {
-					pipeline.logger.Error("Failed to accept party invite.")
-					return
-				}
-				// Send a message to the entire party
-				idMap, err := d.getPartyDiscordIds(ctx, d.discordRegistry, ph)
-				if err != nil {
-					pipeline.logger.Error("Failed to get party discord ids.")
-					return
-				}
-				// make a string of comma seperated discord ids
-				allMembers := lo.Map(lo.Values(idMap), func(v string, i int) string {
-					return fmt.Sprintf("<@%s>", v)
-				})
-				joinee, err := d.discordRegistry.GetDiscordIdByUserId(ctx, uuid.FromStringOrNil(presence.UserId))
-				if err != nil {
-					pipeline.logger.Error("Failed to get discord id by user id.")
-					return
-				}
-
-				memberList := strings.Join(allMembers, ", ")
-				for userID, discordId := range idMap {
-					channel, err := s.UserChannelCreate(discordId)
-					if err != nil {
-						pipeline.logger.Error("Failed to create user channel.")
+					if err := pipeline.partyRegistry.PartyAccept(ctx, partyID, pipeline.node, inviteeSessionID.String(), pipeline.node, presence); err != nil {
+						pipeline.logger.Error("Failed to accept party invite.")
 						return
 					}
-					s.ChannelMessageSendComplex(channel.ID, &discordgo.MessageSend{
-						Content: fmt.Sprintf("<@%s> has joined. The party is now: %s", joinee, memberList),
-						Components: []discordgo.MessageComponent{
-							discordgo.ActionsRow{
-								Components: []discordgo.MessageComponent{
+					// Send a message to the entire party
+					idMap, err := d.getPartyDiscordIds(ctx, d.discordRegistry, ph)
+					if err != nil {
+						pipeline.logger.Error("Failed to get party discord ids.")
+						return
+					}
+					// make a string of comma seperated discord ids
+					allMembers := lo.Map(lo.Values(idMap), func(v string, i int) string {
+						return fmt.Sprintf("<@%s>", v)
+					})
+					joinee, err := d.discordRegistry.GetDiscordIdByUserId(ctx, uuid.FromStringOrNil(presence.UserId))
+					if err != nil {
+						pipeline.logger.Error("Failed to get discord id by user id.")
+						return
+					}
 
-									discordgo.Button{
-										Label:    "Leave Party",
-										Style:    discordgo.DangerButton,
-										Disabled: false,
-										CustomID: fmt.Sprintf("fd_leave:%s:%s", partyID, userID),
+					memberList := strings.Join(allMembers, ", ")
+					for userID, discordId := range idMap {
+						channel, err := s.UserChannelCreate(discordId)
+						if err != nil {
+							pipeline.logger.Error("Failed to create user channel.")
+							return
+						}
+						s.ChannelMessageSendComplex(channel.ID, &discordgo.MessageSend{
+							Content: fmt.Sprintf("<@%s> has joined. The party is now: %s", joinee, memberList),
+							Components: []discordgo.MessageComponent{
+								discordgo.ActionsRow{
+									Components: []discordgo.MessageComponent{
+
+										discordgo.Button{
+											Label:    "Leave Party",
+											Style:    discordgo.DangerButton,
+											Disabled: false,
+											CustomID: fmt.Sprintf("fd_leave:%s:%s", partyID, userID),
+										},
 									},
 								},
 							},
-						},
-					})
+						})
+					}
 				}
+			default:
+				pipeline.logger.Warn("Unhandled interaction type", zap.Any("type", i.Type))
+				return
 			}
-		default:
-			pipeline.logger.Warn("Unhandled interaction type", zap.Any("type", i.Type))
-			return
-		}
-	})
+		})
 
-	return nil
-}
-
+		return nil
+	}
+*/
 func (d *DiscordAppBot) getPartyDiscordIds(ctx context.Context, discordRegistry DiscordRegistry, partyHandler *PartyHandler) (map[string]string, error) {
 	partyHandler.RLock()
 	defer partyHandler.RUnlock()
