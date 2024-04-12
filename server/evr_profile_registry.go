@@ -654,7 +654,7 @@ func (r *ProfileRegistry) GetSessionProfile(ctx context.Context, session *sessio
 	r.SetProfile(session.userID, p)
 	return p, nil
 }
-func (r *ProfileRegistry) UpdateSessionProfile(ctx context.Context, session *sessionWS, update evr.ClientProfile) (*GameProfile, error) {
+func (r *ProfileRegistry) UpdateSessionProfile(ctx context.Context, logger *zap.Logger, session *sessionWS, update evr.ClientProfile) (*GameProfile, error) {
 	// Get the user's p
 	p := r.GetProfile(session.userID)
 	if p == nil {
@@ -679,9 +679,9 @@ func (r *ProfileRegistry) UpdateSessionProfile(ctx context.Context, session *ses
 	// Update the displayname based on the user's selected channel.
 
 	if groupID != evr.GUID(uuid.Nil) {
-		displayName, err := SetDisplayNameByChannelBySession(ctx, r.nk, r.discordRegistry, session, groupID.String())
+		displayName, err := SetDisplayNameByChannelBySession(ctx, r.nk, logger, r.discordRegistry, session, groupID.String())
 		if err != nil {
-			r.logger.Error("Failed to set display name.", zap.Error(err))
+			logger.Error("Failed to set display name.", zap.Error(err))
 		} else {
 			p.UpdateDisplayName(displayName)
 			p.Server.UpdateTime = time.Now().UTC().Unix()
