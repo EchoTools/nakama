@@ -714,7 +714,7 @@ func (md *RoleGroupMetadata) MarshalToMap() (map[string]interface{}, error) {
 	return guildGroupMap, nil
 }
 
-func SetDisplayNameByChannelBySession(ctx context.Context, nk runtime.NakamaModule, discordRegistry DiscordRegistry, session *sessionWS, groupId string) (displayName string, err error) {
+func SetDisplayNameByChannelBySession(ctx context.Context, nk runtime.NakamaModule, logger *zap.Logger, discordRegistry DiscordRegistry, session *sessionWS, groupId string) (displayName string, err error) {
 
 	// Priority order from least to most preferred
 	options := make([]string, 0, 6)
@@ -729,7 +729,6 @@ func SetDisplayNameByChannelBySession(ctx context.Context, nk runtime.NakamaModu
 		displayName = username
 		// Add the option
 		options = append(options, username)
-
 	}
 
 	// set the fallback
@@ -773,6 +772,6 @@ func SetDisplayNameByChannelBySession(ctx context.Context, nk runtime.NakamaModu
 
 	// Reverse the options
 	options = lo.Reverse(options)
-
+	logger.Debug("SetDisplayNameByChannelBySession", zap.String("options", strings.Join(options, ",")))
 	return SetDisplayNameByPriority(ctx, nk, account.GetUser().GetId(), account.GetUser().GetUsername(), options)
 }

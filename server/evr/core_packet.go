@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"reflect"
+	"slices"
 	"strconv"
 
 	"go.uber.org/zap"
@@ -233,7 +234,7 @@ func SplitPacket(data []byte) [][]byte {
 	return bytes.Split(data, MessageMarker)
 }
 
-var ignoredMessages = []Symbol{
+var ignoredSymbols = []uint64{
 	0x4c1fed6cb4d96c64,
 	0x013e99cb47eb3669,
 	0x35d810572a230837,
@@ -258,10 +259,8 @@ func Unmarshal(data []byte, m *[]Message) error {
 		sym := dUint64(buf.Next(8))
 
 		// Ignore specific messages
-		for _, v := range ignoredMessages {
-			if Symbol(sym) == v {
-				continue
-			}
+		if slices.Contains(ignoredSymbols, sym) {
+			continue
 		}
 
 		l := int(dUint64(buf.Next(8)))

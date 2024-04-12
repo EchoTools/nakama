@@ -435,7 +435,7 @@ func (p *EvrPipeline) updateProfile(ctx context.Context, logger *zap.Logger, ses
 	// Set the EVR ID from the context
 	request.ClientProfile.EchoUserIdToken = evrId.Token()
 
-	if _, err := p.profileRegistry.UpdateSessionProfile(ctx, session, request.ClientProfile); err != nil {
+	if _, err := p.profileRegistry.UpdateSessionProfile(ctx, logger, session, request.ClientProfile); err != nil {
 		code := 400
 		if err := session.SendEvr([]evr.Message{
 			evr.NewUpdateProfileFailure(evrId, uint64(code), err.Error()),
