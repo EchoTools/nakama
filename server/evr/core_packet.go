@@ -233,6 +233,13 @@ func SplitPacket(data []byte) [][]byte {
 	return bytes.Split(data, MessageMarker)
 }
 
+var ignoredMessages = []Symbol{
+	0x4c1fed6cb4d96c64,
+	0x013e99cb47eb3669,
+	0x35d810572a230837,
+	0x80119c19ac72d695,
+}
+
 // Unmarshal parses the wire-format packet in data and places the result in m.
 // The provided message must be mutable (e.g., a non-nil pointer to a slice).
 func Unmarshal(data []byte, m *[]Message) error {
@@ -249,6 +256,14 @@ func Unmarshal(data []byte, m *[]Message) error {
 		}
 		// Read the message type and data length.
 		sym := dUint64(buf.Next(8))
+
+		// Ignore specific messages
+		for _, v := range ignoredMessages {
+			if Symbol(sym) == v {
+				continue
+			}
+		}
+
 		l := int(dUint64(buf.Next(8)))
 		// Verify the message data can be read from the rest of the packet.
 		if buf.Len() != l {
