@@ -76,11 +76,6 @@ func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logg
 			Stream: PresenceStream{Mode: StreamModeEvr, Subject: evrId.UUID()},
 			Meta:   PresenceMeta{Format: s.format, Hidden: true},
 		},
-		// EVR packet data stream for the match session by userID, and service ID
-		{
-			Stream: PresenceStream{Mode: StreamModeEvr, Subject: s.userID, Subcontext: svcMatchID},
-			Meta:   PresenceMeta{Format: s.format, Hidden: true},
-		},
 		// EVR packet data stream for the match session by Session ID and service ID
 		{
 			Stream: PresenceStream{Mode: StreamModeEvr, Subject: s.id, Subcontext: svcMatchID},
