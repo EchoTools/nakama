@@ -55,12 +55,12 @@ func (p *EvrPipeline) broadcasterSessionEnded(ctx context.Context, logger *zap.L
 	// The broadcaster has ended the session.
 	// shutdown the match. A new parking match will be created in response to the match leave message.
 
-	config, found := p.broadcasterRegistrationBySession.Load(session.ID())
+	config, found := p.broadcasterRegistrationBySession.Load(session.ID().String())
 	if !found {
 		return fmt.Errorf("broadcaster session not found")
 	}
 
-	matchId, found := p.matchBySession.Load(session.ID())
+	matchId, found := p.matchBySessionID.Load(session.ID().String())
 	if !found {
 		return fmt.Errorf("match not found")
 	}
@@ -151,7 +151,7 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 		return errFailedRegistration(session, errors.New(errorMessage), evr.BroadcasterRegistration_Failure)
 	}
 
-	p.broadcasterRegistrationBySession.Store(session.ID(), config)
+	p.broadcasterRegistrationBySession.Store(session.ID().String(), config)
 	p.matchmakingRegistry.broadcasters.Store(config.Endpoint.ID(), config.Endpoint)
 	// Create a new parking match
 	if err := p.newParkingMatch(logger, session, config); err != nil {
@@ -176,7 +176,7 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 			case <-session.Context().Done():
 				return
 			case <-ticker.C:
-				if _, found := p.matchBySession.Load(session.ID()); !found {
+				if _, found := p.matchBySessionID.Load(session.ID().String()); !found {
 					logger.Warn("Broadcaster is not in a match, disconnecting")
 					session.Close("", runtime.PresenceReasonDisconnect)
 					return
@@ -398,7 +398,7 @@ func (p *EvrPipeline) newParkingMatch(logger *zap.Logger, session *sessionWS, co
 	}
 	logger.Debug("New parking match", zap.String("matchId", matchId))
 
-	p.matchBySession.Store(session.ID(), matchId)
+	p.matchBySessionID.Store(session.ID().String(), matchId)
 
 	return nil
 }

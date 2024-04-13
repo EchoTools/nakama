@@ -78,7 +78,7 @@ func TestGetSessionProfile(t *testing.T) {
 		userID: uuid.Must(uuid.NewV4()),
 		logger: zap.NewNop(),
 	}
-	profile := &GameProfile{
+	profile := &GameProfileData{
 		Client: evr.NewClientProfile(),
 		Server: evr.NewServerProfile(),
 		Login:  &evr.LoginProfile{},
@@ -140,7 +140,7 @@ func TestGetSessionProfile(t *testing.T) {
 }
 func TestUpdateEquippedItem(t *testing.T) {
 	// Create a test profile
-	profile := &GameProfile{
+	profile := &GameProfileData{
 		Server: &evr.ServerProfile{
 			EquippedCosmetics: evr.EquippedCosmetics{
 				Instances: evr.CosmeticInstances{
