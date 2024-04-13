@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -558,9 +559,15 @@ func (d *DiscordAppBot) InitializeDiscordBot() error {
 	})
 
 	bot.AddHandler(func(s *discordgo.Session, e *discordgo.GuildMemberUpdate) {
-		if s == nil || e == nil {
+		if s == nil || e == nil || e.BeforeUpdate == nil {
 			return
 		}
+
+		// Only concerned with role changes
+		if slices.Equal(e.BeforeUpdate.Roles, e.Roles) {
+			return
+		}
+
 		discordId := e.User.ID
 		// TODO FIXME Make this only update what changed.
 		userId, err := d.discordRegistry.GetUserIdByDiscordId(ctx, discordId, true)
@@ -568,9 +575,7 @@ func (d *DiscordAppBot) InitializeDiscordBot() error {
 			logger.Error("Error getting user id: %w", err)
 			return
 		}
-		if err := d.discordRegistry.UpdateAccount(ctx, userId); err != nil {
-			logger.Debug("Error updating account: %w", err)
-		}
+		go d.discordRegistry.UpdateAccount(context.Background(), userId)
 	})
 
 	/*
@@ -710,7 +715,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 
 				// Update the accounts roles, etc.
-				go discordRegistry.UpdateAccount(ctx, userId)
+				go discordRegistry.UpdateAccount(context.Background(), userId)
 
 				if linkCode == "0000" {
 					return errors.New("sychronized Discord<->Nakama")

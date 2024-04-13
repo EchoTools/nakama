@@ -328,6 +328,7 @@ func (r *LocalDiscordRegistry) GetGuildMember(ctx context.Context, guildId, memb
 	if err != nil {
 		return nil, fmt.Errorf("error getting member %s in guild %s: %w", memberId, guildId, err)
 	}
+	r.bot.State.MemberAdd(member)
 
 	return member, nil
 }
@@ -391,15 +392,19 @@ func (r *LocalDiscordRegistry) GetGuildGroups(ctx context.Context, userId uuid.U
 
 // UpdateAccount updates the Nakama account with the Discord user data
 func (r *LocalDiscordRegistry) UpdateAccount(ctx context.Context, userID uuid.UUID) error {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	logger := r.logger.WithField("function", "UpdateAccount")
 	discordId, err := r.GetDiscordIdByUserId(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("error getting discord id: %v", err)
 	}
 
+	timer := time.Now()
 	if r.metrics != nil {
-		timer := time.Now()
 
-		defer func() { r.logger.Debug("UpdateAccount took %dms", time.Since(timer)/time.Millisecond) }()
+		defer func() { logger.Debug("UpdateAccount took %dms", time.Since(timer)/time.Millisecond) }()
 		defer func() { r.metrics.CustomTimer("UpdateAccountFn", nil, time.Since(timer)) }()
 	}
 
@@ -422,43 +427,48 @@ func (r *LocalDiscordRegistry) UpdateAccount(ctx context.Context, userID uuid.UU
 	avatar := u.AvatarURL("512")
 
 	// Update the basic account details
-	go func() {
-		if err := r.nk.AccountUpdateId(ctx, userId.String(), username, nil, "", "", "", langTag, avatar); err != nil {
-			r.logger.Error("Error updating account %s: %v", username, err)
-		}
-	}()
+
+	if err := r.nk.AccountUpdateId(ctx, userId.String(), username, nil, "", "", "", langTag, avatar); err != nil {
+		r.logger.Error("Error updating account %s: %v", username, err)
+	}
 
 	// Synchronize the user's guilds with nakama groups
+	err = r.updateGuildGroups(ctx, logger, userID, discordId)
+	if err != nil {
+		return fmt.Errorf("error updating guild groups: %v", err)
+	}
 
-	// Get the user's groups
-	userGroups, _, err := r.nk.UserGroupsList(ctx, userId.String(), 100, nil, "")
+	logger.Debug("Final step took %dms", time.Since(timer)/time.Millisecond)
+	defer r.Store(discordId, userId.String())
+	defer r.Store(userId.String(), discordId)
+
+	return nil
+}
+
+func (r *LocalDiscordRegistry) updateGuildGroups(ctx context.Context, logger runtime.Logger, userID uuid.UUID, discordId string) error {
+	// If discord bot is not responding, return
+	if r.bot == nil {
+		return fmt.Errorf("discord bot is not responding")
+	}
+
+	// Get all of the user's groups
+	groups, _, err := r.nk.UserGroupsList(ctx, userID.String(), 100, nil, "")
 	if err != nil {
 		return fmt.Errorf("error getting user groups: %v", err)
 	}
 
-	userGroupIds := make([]string, 0)
-	for _, g := range userGroups {
-		if g.Group.LangTag == "guild" && api.UserGroupList_UserGroup_State(g.State.GetValue()) <= api.UserGroupList_UserGroup_MEMBER {
-			userGroupIds = append(userGroupIds, g.Group.Id)
-		}
-	}
-	if r.metrics != nil {
-		timer := time.Now()
-
-		defer func() { r.logger.Debug("UpdateAccount (discord part) took %dms", time.Since(timer)/time.Millisecond) }()
-		defer func() { r.metrics.CustomTimer("UpdateAccountFn_discord", nil, time.Since(timer)) }()
-	}
-	guilds, err := r.bot.UserGuilds(100, "", "")
-	if err != nil {
-		return fmt.Errorf("error getting user guilds: %v", err)
+	// Create the group id slice
+	userGroupIds := make([]string, 0, len(groups))
+	for _, g := range groups {
+		userGroupIds = append(userGroupIds, g.Group.Id)
 	}
 
-	for _, guild := range guilds {
-
+	// Check the state for guilds the user is in
+	for _, guild := range r.bot.State.Guilds {
 		// Get the guild's group ID
 		groupId, found := r.Get(guild.ID)
 		if !found {
-			r.logger.Warn("Could not find group for guild %s", guild.ID)
+			logger.Warn("Could not find group for guild %s", guild.ID)
 			continue
 		}
 
@@ -473,28 +483,43 @@ func (r *LocalDiscordRegistry) UpdateAccount(ctx context.Context, userID uuid.UU
 		if md == nil {
 			continue
 		}
-		guildGroups := []string{
+
+		guildRoleGroups := []string{
 			groupId,
 			md.ModeratorGroupId,
 			md.BroadcasterHostGroupId,
 		}
 
-		// Get the guild member
+		// Get the member from the cache
+
+		// Get the member
 		member, err := r.GetGuildMember(ctx, guild.ID, discordId)
+		// return if the context is cancelled
 		if err != nil {
-			// TODO FIXME check if discord is down
-			if slices.Contains(userGroupIds, groupId) {
-				// Remove to user from the guild group
-				defer r.nk.GroupUsersKick(ctx, SystemUserId, groupId, []string{userId.String()})
+			if ctx.Err() != nil {
+				return fmt.Errorf("context cancelled: %w", err)
 			}
-		}
-		if member == nil {
+			logger.Warn("Error getting guild member %s in guild %s: %v, removing", discordId, guild.ID, err)
+			for _, groupId := range guildRoleGroups {
+				_ = groupId
+				//defer r.nk.GroupUsersKick(ctx, SystemUserId, groupId, []string{userID.String()})
+			}
 			continue
 		}
+
+		if member == nil {
+			logger.Warn("Could not find member %s in guild %s, kicking...", discordId, guild.ID)
+			for _, groupId := range guildRoleGroups {
+				defer r.nk.GroupUsersKick(ctx, SystemUserId, groupId, []string{userID.String()})
+			}
+			continue
+		}
+
 		currentRoles := member.Roles
 
 		isSuspended := len(lo.Intersect(currentRoles, md.SuspensionRoles)) > 0
-		currentGroups := lo.Intersect(userGroupIds, guildGroups)
+
+		currentGroups := lo.Intersect(userGroupIds, guildRoleGroups)
 
 		actualGroups := make([]string, 0)
 		actualGroups = append(actualGroups, groupId)
@@ -514,7 +539,7 @@ func (r *LocalDiscordRegistry) UpdateAccount(ctx context.Context, userID uuid.UU
 			adds = []string{}
 
 			// If the player has a match connection, disconnect it.
-			subject := userId.String()
+			subject := userID.String()
 			subcontext := svcMatchID.String()
 			users, err := r.nk.StreamUserList(StreamModeEvr, subject, subcontext, "", true, true)
 			if err != nil {
@@ -524,7 +549,7 @@ func (r *LocalDiscordRegistry) UpdateAccount(ctx context.Context, userID uuid.UU
 			// Disconnect any matchmaking sessions (this will put them back to the login screen)
 			for _, user := range users {
 				// Disconnect the user
-				if user.GetUserId() == userId.String() {
+				if user.GetUserId() == userID.String() {
 					go func() {
 						r.logger.Debug("Disconnecting suspended user %s match session: %s", user.GetUserId(), user.GetSessionId())
 						// Add a wait time, otherwise the user will not see the suspension message
@@ -538,17 +563,13 @@ func (r *LocalDiscordRegistry) UpdateAccount(ctx context.Context, userID uuid.UU
 		}
 
 		for _, groupId := range removes {
-			defer r.nk.GroupUsersKick(ctx, SystemUserId, groupId, []string{userId.String()})
+			defer r.nk.GroupUsersKick(ctx, SystemUserId, groupId, []string{userID.String()})
 		}
 
 		for _, groupId := range adds {
-			defer r.nk.GroupUsersAdd(ctx, SystemUserId, groupId, []string{userId.String()})
+			defer r.nk.GroupUsersAdd(ctx, SystemUserId, groupId, []string{userID.String()})
 		}
 	}
-
-	defer r.Store(discordId, userId.String())
-	defer r.Store(userId.String(), discordId)
-
 	return nil
 }
 
@@ -568,16 +589,20 @@ func (r *LocalDiscordRegistry) GetUserIdByDiscordId(ctx context.Context, discord
 		return userID, nil
 	}
 
-	// Lookup the nakama user by the discord user id
-	discordUser, err := r.GetUser(ctx, discordID)
-	if err != nil {
-		return uuid.Nil, fmt.Errorf("error getting discord user %s: %w", discordID, err)
+	username := ""
+	if create {
+		// Get the user from discord
+		discordUser, err := r.GetUser(ctx, discordID)
+		if err != nil {
+			return uuid.Nil, fmt.Errorf("error getting discord user %s: %w", discordID, err)
+		}
+		username = discordUser.Username
 	}
-
-	userIDstr, _, _, err := r.nk.AuthenticateCustom(ctx, discordID, discordUser.Username, create)
+	userIDstr, _, _, err := r.nk.AuthenticateCustom(ctx, discordID, username, create)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("error authenticating user %s: %w", discordID, err)
 	}
+
 	userID = uuid.FromStringOrNil(userIDstr)
 
 	if userID == uuid.Nil {
