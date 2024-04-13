@@ -64,9 +64,9 @@ type EvrPipeline struct {
 	discordRegistry     DiscordRegistry
 	appBot              *DiscordAppBot
 
-	broadcasterRegistrationBySession *MapOf[uuid.UUID, *MatchBroadcaster]
-	matchBySession                   *MapOf[uuid.UUID, string]
-	matchByUserId                    *MapOf[uuid.UUID, string]
+	broadcasterRegistrationBySession *MapOf[string, *MatchBroadcaster] // sessionID -> MatchBroadcaster
+	matchBySessionID                 *MapOf[string, string]            // sessionID -> matchID
+	matchByUserId                    *MapOf[string, string]            // userID -> matchID
 	loginSessionByEvrID              *MapOf[string, *sessionWS]
 	matchByEvrId                     *MapOf[string, string]    // full match string by evrId token
 	backfillQueue                    *MapOf[string, time.Time] // A queue of backfills to avoid double backfill
@@ -173,9 +173,9 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		matchmakingRegistry: NewMatchmakingRegistry(logger, matchRegistry, matchmaker, metrics, db, nk, config),
 		profileRegistry:     NewProfileRegistry(nk, db, runtimeLogger, discordRegistry),
 
-		broadcasterRegistrationBySession: &MapOf[uuid.UUID, *MatchBroadcaster]{},
-		matchBySession:                   &MapOf[uuid.UUID, string]{},
-		matchByUserId:                    &MapOf[uuid.UUID, string]{},
+		broadcasterRegistrationBySession: &MapOf[string, *MatchBroadcaster]{},
+		matchBySessionID:                 &MapOf[string, string]{},
+		matchByUserId:                    &MapOf[string, string]{},
 		loginSessionByEvrID:              &MapOf[string, *sessionWS]{},
 		matchByEvrId:                     &MapOf[string, string]{},
 		backfillQueue:                    &MapOf[string, time.Time]{},
@@ -368,8 +368,8 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 			if evrId, ok := session.Context().Value(ctxEvrIDKey{}).(evr.EvrId); ok {
 				p.matchByEvrId.Delete(evrId.Token())
 			}
-			p.matchBySession.Delete(session.ID())
-			p.matchByUserId.Delete(session.UserID())
+			p.matchBySessionID.Delete(session.ID().String())
+			p.matchByUserId.Delete(session.UserID().String())
 		}
 
 		for _, join := range envelope.GetJoins() {
@@ -383,12 +383,12 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 			}
 			if strings.HasPrefix(session.Username(), "broadcaster:") {
 				// Broadcaster connections are matched by session.
-				p.matchBySession.Store(session.ID(), matchID)
+				p.matchBySessionID.Store(session.ID().String(), matchID)
 			} else {
 				if evrId, ok := session.Context().Value(ctxEvrIDKey{}).(evr.EvrId); ok {
 					p.matchByEvrId.Store(evrId.Token(), matchID)
 				}
-				p.matchByUserId.Store(session.UserID(), matchID)
+				p.matchByUserId.Store(session.UserID().String(), matchID)
 			}
 		}
 
@@ -426,10 +426,10 @@ func (p *EvrPipeline) relayMatchData(ctx context.Context, logger *zap.Logger, se
 		}
 	default:
 		// broadcasters will match by session.
-		matchIdStr, found = p.matchBySession.Load(session.ID())
+		matchIdStr, found = p.matchBySessionID.Load(session.ID().String())
 		if !found {
 			// If the match is not found by session, try to find it by user id.
-			matchIdStr, found = p.matchByUserId.Load(session.UserID())
+			matchIdStr, found = p.matchByUserId.Load(session.UserID().String())
 			if !found {
 				return fmt.Errorf("no match found for user %s or session: %s", session.UserID(), session.ID())
 			}

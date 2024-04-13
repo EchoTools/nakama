@@ -599,6 +599,13 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 			return status.Errorf(codes.Internal, "join not allowed: %s", reason)
 		}
 	}
+
+	// Add the user's profile to the cache
+	err = p.profileRegistry.SetProfileByMatchIDByEvrID(matchIDStr, evrID, profile.GetServer())
+	if err != nil {
+		logger.Warn("Failed to set profile by match id", zap.Error(err))
+	}
+
 	if isNew {
 		// Trigger the MatchJoin event.
 		stream := PresenceStream{Mode: StreamModeMatchAuthoritative, Subject: matchID, Label: p.node}
@@ -614,8 +621,8 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 		}
 	}
 
-	p.matchBySession.Store(session.ID(), matchIDStr)
-	p.matchByUserId.Store(session.UserID(), matchIDStr)
+	p.matchBySessionID.Store(session.ID().String(), matchIDStr)
+	p.matchByUserId.Store(session.UserID().String(), matchIDStr)
 	p.matchByEvrId.Store(evrID.Token(), matchIDStr)
 
 	return nil

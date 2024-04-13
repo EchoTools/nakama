@@ -20,62 +20,69 @@ import (
 	"go.uber.org/zap"
 )
 
-type ProfileRegistry struct {
-	ctx         context.Context
-	ctxCancelFn context.CancelFunc
-	logger      runtime.Logger
-	db          *sql.DB
-	nk          runtime.NakamaModule
-
-	discordRegistry DiscordRegistry
-
-	profiles *MapOf[uuid.UUID, *GameProfile]
-
-	unlocksByItemName map[string]string
+type GameProfile interface {
+	SetLogin(login evr.LoginProfile)
+	SetClient(client evr.ClientProfile)
+	SetServer(server evr.ServerProfile)
+	GetServer() evr.ServerProfile
+	GetClient() evr.ClientProfile
+	GetLogin() evr.LoginProfile
+	GetChannel() uuid.UUID
+	SetChannel(c evr.GUID)
+	UpdateDisplayName(displayName string)
+	UpdateUnlocks(unlocks any) error
 }
 
-type GameProfile struct {
+type GameProfileData struct {
 	sync.RWMutex
 	Login  *evr.LoginProfile  `json:"login"`
 	Client *evr.ClientProfile `json:"client"`
 	Server *evr.ServerProfile `json:"server"`
 }
 
-func (p *GameProfile) SetLogin(login evr.LoginProfile) {
+func NewGameProfile(login evr.LoginProfile, client evr.ClientProfile, server evr.ServerProfile) *GameProfileData {
+	return &GameProfileData{
+		Login:  &login,
+		Client: &client,
+		Server: &server,
+	}
+}
+
+func (p *GameProfileData) SetLogin(login evr.LoginProfile) {
 	p.Login = &login
 }
 
-func (p *GameProfile) SetClient(client evr.ClientProfile) {
+func (p *GameProfileData) SetClient(client evr.ClientProfile) {
 	p.Client = &client
 }
 
-func (p *GameProfile) SetServer(server evr.ServerProfile) {
+func (p *GameProfileData) SetServer(server evr.ServerProfile) {
 	p.Server = &server
 	p.Server.UpdateTime = time.Now().UTC().Unix()
 }
 
-func (p *GameProfile) GetServer() *evr.ServerProfile {
+func (p *GameProfileData) GetServer() *evr.ServerProfile {
 	return p.Server
 }
 
-func (p *GameProfile) GetClient() *evr.ClientProfile {
+func (p *GameProfileData) GetClient() *evr.ClientProfile {
 	return p.Client
 }
 
-func (p *GameProfile) GetLogin() *evr.LoginProfile {
+func (p *GameProfileData) GetLogin() *evr.LoginProfile {
 	return p.Login
 }
 
-func (p *GameProfile) GetChannel() uuid.UUID {
+func (p *GameProfileData) GetChannel() uuid.UUID {
 	return uuid.UUID(p.Server.Social.Group)
 }
 
-func (p *GameProfile) SetChannel(c evr.GUID) {
+func (p *GameProfileData) SetChannel(c evr.GUID) {
 	p.Server.Social.Group = c
 	p.Client.Social.Group = p.Server.Social.Group
 
 }
-func (p *GameProfile) UpdateDisplayName(displayName string) {
+func (p *GameProfileData) UpdateDisplayName(displayName string) {
 	p.Server.DisplayName = displayName
 	p.Client.DisplayName = displayName
 	p.Server.UpdateTime = time.Now().UTC().Unix()
@@ -83,7 +90,7 @@ func (p *GameProfile) UpdateDisplayName(displayName string) {
 
 }
 
-func (r *GameProfile) UpdateUnlocks(unlocks any) error {
+func (r *GameProfileData) UpdateUnlocks(unlocks any) error {
 	// Validate the unlocks
 	err := ValidateUnlocks(unlocks)
 	if err != nil {
@@ -101,30 +108,117 @@ func (r *GameProfile) UpdateUnlocks(unlocks any) error {
 	return nil
 }
 
+// ProfileRegistry is a registry of user evr profiles.
+type ProfileRegistry struct {
+	sync.RWMutex
+
+	ctx         context.Context
+	ctxCancelFn context.CancelFunc
+	logger      runtime.Logger
+	db          *sql.DB
+	nk          runtime.NakamaModule
+
+	discordRegistry DiscordRegistry
+
+	profileByUserID *MapOf[string, *GameProfileData]
+
+	unlocksByItemName map[string]string
+
+	// Fast lookup of profiles for players already in matches
+	profileByMatchIDByEvrID map[string]map[evr.EvrId][]byte // map[matchID]map[evrID]profileJSON
+}
+
 func NewProfileRegistry(nk runtime.NakamaModule, db *sql.DB, logger runtime.Logger, discordRegistry DiscordRegistry) *ProfileRegistry {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	unlocksByFieldName := createUnlocksFieldByKey()
-	return &ProfileRegistry{
+	registry := &ProfileRegistry{
 		ctx:             ctx,
 		ctxCancelFn:     cancel,
 		logger:          logger,
 		db:              db,
 		nk:              nk,
 		discordRegistry: discordRegistry,
-		profiles:        &MapOf[uuid.UUID, *GameProfile]{},
+
+		profileByUserID:         &MapOf[string, *GameProfileData]{},
+		profileByMatchIDByEvrID: make(map[string]map[evr.EvrId][]byte),
 
 		unlocksByItemName: unlocksByFieldName,
 	}
+
+	// Every 5 minutes, remove cached profiles for matches that do not exist
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := registry.removeStaleProfiles(ctx); err != nil {
+					registry.logger.Error("failed to remove stale profiles", zap.Error(err))
+				}
+			}
+		}
+	}()
+
+	return registry
 }
 
-func (r *ProfileRegistry) checkDefaultProfile() *GameProfile {
+func (r *ProfileRegistry) removeStaleProfiles(ctx context.Context) error {
+	minSize := 2
+	maxSize := MatchMaxSize
+	matches, err := r.nk.MatchList(ctx, 100, true, "", &minSize, &maxSize, "*")
+	if err != nil {
+		r.logger.Error("failed to list matches", zap.Error(err))
+	}
+
+	matchIDs := lo.Map(matches, func(m *api.Match, _ int) string { return m.GetMatchId() })
+
+	r.Lock()
+	for matchID := range r.profileByMatchIDByEvrID {
+		if !lo.Contains(matchIDs, matchID) {
+			delete(r.profileByMatchIDByEvrID, matchID)
+		}
+	}
+	r.Unlock()
+
+	return nil
+}
+
+// Fast lookup of profiles for players already in matches
+func (r *ProfileRegistry) GetProfileByMatchIDByEvrID(matchID string, evrID evr.EvrId) (data []byte, found bool) {
+	r.RLock()
+	p, ok := r.profileByMatchIDByEvrID[matchID][evrID]
+	r.RUnlock()
+	return p, ok
+}
+
+// Fast lookup of profiles for players already in matches
+func (r *ProfileRegistry) SetProfileByMatchIDByEvrID(matchID string, evrID evr.EvrId, profile *evr.ServerProfile) error {
+	data, err := json.Marshal(profile)
+	if err != nil {
+		return err
+	}
+
+	r.Lock()
+	if matchProfiles, ok := r.profileByMatchIDByEvrID[matchID]; ok {
+		matchProfiles[evrID] = data
+	} else {
+		r.profileByMatchIDByEvrID[matchID] = map[evr.EvrId][]byte{evrID: data}
+	}
+	r.Unlock()
+	return nil
+}
+
+func (r *ProfileRegistry) checkDefaultProfile() *GameProfileData {
 	// Create default profiles under the system user
 	userID := uuid.Nil
 
 	profile := r.GetProfile(userID)
+
 	if profile == nil {
-		profile = &GameProfile{}
+		profile = &GameProfileData{}
 	}
 	if profile.Login == nil {
 		profile.Login = &evr.LoginProfile{}
@@ -140,9 +234,9 @@ func (r *ProfileRegistry) checkDefaultProfile() *GameProfile {
 	return profile
 }
 
-func (r *ProfileRegistry) GetProfile(userID uuid.UUID) *GameProfile {
+func (r *ProfileRegistry) GetProfile(userID uuid.UUID) *GameProfileData {
 	var err error
-	profile, found := r.profiles.Load(userID)
+	profile, found := r.profileByUserID.Load(userID.String())
 	if !found {
 		// Load the profile from storage
 		profile, err = r.loadProfile(context.Background(), userID)
@@ -153,8 +247,8 @@ func (r *ProfileRegistry) GetProfile(userID uuid.UUID) *GameProfile {
 	return profile
 }
 
-func (r *ProfileRegistry) SetProfile(userID uuid.UUID, profile *GameProfile) {
-	r.profiles.Store(userID, profile)
+func (r *ProfileRegistry) SetProfile(userID uuid.UUID, profile *GameProfileData) {
+	r.profileByUserID.Store(userID.String(), profile)
 
 	// Save the profile to storage
 	err := r.storeProfile(context.Background(), userID, profile)
@@ -165,7 +259,7 @@ func (r *ProfileRegistry) SetProfile(userID uuid.UUID, profile *GameProfile) {
 
 // Unload the profile from memory
 func (r *ProfileRegistry) Unload(userID uuid.UUID) {
-	profile, loaded := r.profiles.LoadAndDelete(userID)
+	profile, loaded := r.profileByUserID.LoadAndDelete(userID.String())
 	if loaded {
 		profile.Lock()
 		defer profile.Unlock()
@@ -173,7 +267,7 @@ func (r *ProfileRegistry) Unload(userID uuid.UUID) {
 	}
 }
 
-func (r *ProfileRegistry) GetProfileOrNew(userID uuid.UUID) (profile *GameProfile, created bool) {
+func (r *ProfileRegistry) GetProfileOrNew(userID uuid.UUID) (profile *GameProfileData, created bool) {
 
 	profile = r.GetProfile(userID)
 
@@ -185,7 +279,7 @@ func (r *ProfileRegistry) GetProfileOrNew(userID uuid.UUID) (profile *GameProfil
 			panic("failed to load default profile")
 		}
 		if profile == nil {
-			profile = &GameProfile{}
+			profile = &GameProfileData{}
 		}
 		if profile.Client == nil {
 			profile.Client = defaultprofile.Client
@@ -213,7 +307,7 @@ func (r *ProfileRegistry) GetProfileOrNew(userID uuid.UUID) (profile *GameProfil
 	return profile, created
 }
 
-func (r *ProfileRegistry) loadProfile(ctx context.Context, userID uuid.UUID) (*GameProfile, error) {
+func (r *ProfileRegistry) loadProfile(ctx context.Context, userID uuid.UUID) (*GameProfileData, error) {
 	uid := userID.String()
 	objs, err := r.nk.StorageRead(ctx, []*runtime.StorageRead{
 		{
@@ -227,14 +321,14 @@ func (r *ProfileRegistry) loadProfile(ctx context.Context, userID uuid.UUID) (*G
 		return nil, err
 	}
 
-	profile := &GameProfile{}
+	profile := &GameProfileData{}
 	if err := json.Unmarshal([]byte(objs[0].Value), profile); err != nil {
 		return nil, err
 	}
 
 	return profile, nil
 }
-func (r *ProfileRegistry) storeProfile(ctx context.Context, userID uuid.UUID, profile *GameProfile) error {
+func (r *ProfileRegistry) storeProfile(ctx context.Context, userID uuid.UUID, profile *GameProfileData) error {
 
 	b, err := json.Marshal(profile)
 	if err != nil {
@@ -276,7 +370,7 @@ func (r *ProfileRegistry) GetFieldByJSONProperty(i interface{}, itemName string)
 	return false, fmt.Errorf("unknown unlock field name: %s", fieldName)
 }
 
-func (r *ProfileRegistry) UpdateEquippedItem(profile *GameProfile, category string, name string) error {
+func (r *ProfileRegistry) UpdateEquippedItem(profile *GameProfileData, category string, name string) error {
 	// Get the current profile.
 
 	unlocksArena := profile.Server.UnlockedCosmetics.Arena
@@ -388,7 +482,7 @@ func (r *ProfileRegistry) UpdateEquippedItem(profile *GameProfile, category stri
 }
 
 // Set the user's profile based on their groups
-func (r *ProfileRegistry) UpdateEntitledCosmetics(ctx context.Context, userID uuid.UUID, profile *GameProfile) error {
+func (r *ProfileRegistry) UpdateEntitledCosmetics(ctx context.Context, userID uuid.UUID, profile *GameProfileData) error {
 	// Disable Restricted Cosmetics
 	err := SetCosmeticDefaults(profile.Server)
 	if err != nil {
@@ -612,7 +706,7 @@ func (r *ProfileRegistry) ValidateArenaUnlockByName(i interface{}, itemName stri
 	return false, fmt.Errorf("unknown unlock field name: %s", fieldName)
 }
 
-func (r *ProfileRegistry) GetSessionProfile(ctx context.Context, session *sessionWS, loginProfile evr.LoginProfile) (*GameProfile, error) {
+func (r *ProfileRegistry) GetSessionProfile(ctx context.Context, session *sessionWS, loginProfile evr.LoginProfile) (*GameProfileData, error) {
 	p, _ := r.GetProfileOrNew(session.userID)
 	p.Lock()
 	defer p.Unlock()
@@ -654,7 +748,7 @@ func (r *ProfileRegistry) GetSessionProfile(ctx context.Context, session *sessio
 	r.SetProfile(session.userID, p)
 	return p, nil
 }
-func (r *ProfileRegistry) UpdateSessionProfile(ctx context.Context, logger *zap.Logger, session *sessionWS, update evr.ClientProfile) (*GameProfile, error) {
+func (r *ProfileRegistry) UpdateSessionProfile(ctx context.Context, logger *zap.Logger, session *sessionWS, update evr.ClientProfile) (*GameProfileData, error) {
 	// Get the user's p
 	p := r.GetProfile(session.userID)
 	if p == nil {

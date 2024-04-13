@@ -65,6 +65,9 @@ func (xpi *EvrId) NotNil() bool {
 }
 
 func (xpi *EvrId) UUID() uuid.UUID {
+	if xpi.PlatformCode == 0 || xpi.AccountId == 0 {
+		return uuid.Nil
+	}
 	return uuid.NewV5(uuid.NamespaceOID, xpi.Token())
 }
 

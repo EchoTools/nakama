@@ -850,53 +850,34 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 }
 
 func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	message := in.(*evr.OtherUserProfileRequest)
+	request := in.(*evr.OtherUserProfileRequest)
 
-	// Get the other user's matchID
-	matchID, found := p.matchByEvrId.Load(message.EvrId.Token())
+	// Check the presences for this user in a match
+
+	subject := request.EvrId.UUID()
+	if subject == uuid.Nil {
+		return fmt.Errorf("invalid EvrID")
+	}
+
+	// Get this users matchID
+	matchID, found := p.matchBySessionID.Load(session.id.String())
 	if !found {
-		return fmt.Errorf("failed to find match by (other) EvrID: %s", message.EvrId.Token())
+		return fmt.Errorf("failed to find match by sessionID: %s", session.id)
 	}
-	matchComponents := strings.SplitN(matchID, ".", 2)
-	if len(matchComponents) != 2 {
-		return fmt.Errorf("failed to split matchID: %s", matchID)
-	}
-
-	// Check if this user is in the match.
-	// If this is a broadcaster, Check if this user is also in the match
-	presences, err := p.runtimeModule.StreamUserList(StreamModeMatchAuthoritative, matchComponents[0], "", matchComponents[1], true, true)
-	if err != nil {
-		return fmt.Errorf("failed to get presence: %w", err)
+	// Lookup the the profile
+	data, found := p.profileRegistry.GetProfileByMatchIDByEvrID(matchID, request.EvrId)
+	if !found {
+		return fmt.Errorf("failed to find profile for %s by matchID: %s", request.EvrId.Token(), matchID)
 	}
 
-	found = false
-	userID := session.UserID().String()
-	for _, p := range presences {
-		if p.GetUserId() == userID {
-			// The user is in the match
-			found = true
-			break
-		}
+	// Construct the response
+	response := &evr.OtherUserProfileSuccess{
+		EvrId:             request.EvrId,
+		ServerProfileJSON: data,
 	}
-
-	// Get the session ID of the target user
-	otherSession, ok := p.loginSessionByEvrID.Load(message.EvrId.Token())
-	if !ok {
-		return fmt.Errorf("failed to find user by EvrID: %s", message.EvrId.Token())
-	}
-
-	// Get the user's profile
-	profile := p.profileRegistry.GetProfile(otherSession.userID)
-	if profile == nil {
-		return fmt.Errorf("failed to load game profiles")
-	}
-	profile.Lock()
-	defer profile.Unlock()
 
 	// Send the profile to the client
-	if err := session.SendEvr([]evr.Message{
-		evr.NewOtherUserProfileSuccess(message.EvrId, profile.Server),
-	}); err != nil {
+	if err := session.SendEvr([]evr.Message{response}); err != nil {
 		return fmt.Errorf("failed to send OtherUserProfileSuccess: %w", err)
 	}
 	return nil
