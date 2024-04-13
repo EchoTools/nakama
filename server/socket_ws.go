@@ -124,10 +124,10 @@ func NewSocketWsAcceptor(logger *zap.Logger, config Config, sessionRegistry Sess
 		// Add to the session registry.
 		sessionRegistry.Add(session)
 
+		// Register initial status tracking and presence(s) for this session.
+		statusRegistry.Follow(sessionID, map[uuid.UUID]struct{}{userID: {}})
 		if format != SessionFormatEvr { // Evr sessions are authenticated in-band.
 
-			// Register initial status tracking and presence(s) for this session.
-			statusRegistry.Follow(sessionID, map[uuid.UUID]struct{}{userID: {}})
 			if status {
 				// Both notification and status presence.
 				tracker.TrackMulti(session.Context(), sessionID, []*TrackerOp{

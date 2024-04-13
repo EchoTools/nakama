@@ -218,14 +218,16 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 	}
 	subcontext := uuid.NewV5(uuid.Nil, "matchmaking")
 	// Create a status presence for the user
-	session.tracker.TrackMulti(ctx, session.id, []*TrackerOp{
+	ok := session.tracker.TrackMulti(ctx, session.id, []*TrackerOp{
 		// EVR packet data stream for the login session by user ID, and service ID, with EVR ID
 		{
 			Stream: PresenceStream{Mode: StreamModeEvr, Subject: session.userID, Subcontext: subcontext},
 			Meta:   PresenceMeta{Format: session.format, Username: session.Username(), Hidden: true},
 		},
 	}, session.userID)
-
+	if !ok {
+		return "", status.Errorf(codes.Internal, "Failed to track user: %v", err)
+	}
 	// Add the user to the matchmaker
 	ticket, _, err = session.matchmaker.Add(ctx, presences, sessionID.String(), pID, query, minCount, maxCount, countMultiple, stringProps, numericProps)
 	if err != nil {
@@ -242,18 +244,19 @@ func joinPartyGroup(logger *zap.Logger, partyRegistry PartyRegistry, userID, ses
 		SessionId: sessionID,
 		Username:  username,
 	}
-	presence := []*Presence{&Presence{
-		ID: PresenceID{
-			Node:      node,
-			SessionID: uuid.FromStringOrNil(sessionID),
-		},
-		// Presence stream not needed.
-		UserID: uuid.FromStringOrNil(userID),
-		Meta: PresenceMeta{
-			Username: username,
-			// Other meta fields not needed.
-		},
-	}}
+	presence := []*Presence{
+		{
+			ID: PresenceID{
+				Node:      node,
+				SessionID: uuid.FromStringOrNil(sessionID),
+			},
+			// Presence stream not needed.
+			UserID: uuid.FromStringOrNil(userID),
+			Meta: PresenceMeta{
+				Username: username,
+				// Other meta fields not needed.
+			},
+		}}
 
 	partyID := uuid.NewV5(uuid.Nil, groupID)
 
