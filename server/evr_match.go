@@ -337,7 +337,7 @@ func NewEvrMatchState(endpoint evr.Endpoint, config *MatchBroadcaster, sessionId
 		presenceCache:           make(map[string]*EvrMatchPresence, MatchMaxSize),
 		UserIDs:                 make([]string, 0, MatchMaxSize),
 		emptyTicks:              0,
-		tickRate:                16,
+		tickRate:                10,
 	}
 
 	evrMatchConfig := evrMatchConfig{
@@ -405,7 +405,7 @@ func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql
 		logger.WithField("err", err).Error("Match label marshal error.")
 	}
 
-	state.tickRate = 16
+	state.tickRate = 10
 	return state, state.tickRate, string(labelJson)
 }
 
@@ -683,7 +683,6 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 	for _, p := range presences {
 		if p.GetSessionId() == state.Broadcaster.SessionID {
 			logger.Debug("Broadcaster left the match. Shutting down.")
-			m.MatchTerminate(ctx, logger, db, nk, dispatcher, tick, state, 0)
 			return nil
 		}
 	}
@@ -783,8 +782,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		// Check the match presences vs the stream presences
 		stale, missing := lo.Difference(matchPresences, nkPresences)
 		if len(stale) > 0 || len(missing) > 0 {
-			logger.Error("difference in presences: stale(%d)=%s, missing(%d)=%s, state=%s", len(stale), stale, len(missing), missing, state.presences)
-			//m.MatchTerminate(ctx, logger, db, nk, dispatcher, tick, state, 0)
+			//logger.Error("difference in presences: stale(%d)=%s, missing(%d)=%s, state=%s", len(stale), stale, len(missing), missing, state.presences)
 			//return nil
 		}
 
@@ -792,7 +790,6 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		if state.Started.Before(time.Now().Add(-60*time.Second)) && state.LobbyType != UnassignedLobby && state.Size == 0 {
 			// If the match is not a parking match, and there are no players, shut down the match.
 			logger.Error("Match is empty. Shutting down.")
-			m.MatchTerminate(ctx, logger, db, nk, dispatcher, tick, state, 0)
 			return nil
 		}
 
@@ -800,13 +797,11 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 			// If the join timeout has expired, shut down the match.
 			if emptySecs > BroadcasterJoinTimeoutSecs {
 				logger.Error("Parking match join timeout expired. Shutting down.")
-				m.MatchTerminate(ctx, logger, db, nk, dispatcher, tick, state, 0)
 				return nil
 			}
 			// if the match is not a parking match, and there is no broadcaster, shut down the match.
 			if state.LobbyType != UnassignedLobby {
 				logger.Error("Parking match has a lobby type. Shutting down.")
-				m.MatchTerminate(ctx, logger, db, nk, dispatcher, tick, state, 0)
 				return nil
 			}
 		}
@@ -854,12 +849,16 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 			default:
 				logger.Warn("Unknown message type: %T", msg)
 			}
+			// Time the execution
+			start := time.Now()
+			// Execute the message function
 			if messageFn != nil {
 				state, err = messageFn(ctx, logger, db, nk, dispatcher, state, in, msg)
 				if err != nil {
 					logger.Error("match pipeline: %v", err)
 				}
 			}
+			logger.Debug("Message %T took %dms", msg, time.Since(start)/time.Millisecond)
 		}
 	}
 	return state
@@ -898,8 +897,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 
 	switch signal.Signal {
 	case SignalTerminate:
-		m.MatchTerminate(ctx, logger, db, nk, dispatcher, tick, state, 0)
-		return nil, "shutting down"
+		return nil, "terminating match"
 
 	case SignalPruneUnderutilized:
 		// Prune this match if it's utilization is low.
