@@ -216,8 +216,10 @@ func StartLocalTracker(logger *zap.Logger, config Config, sessionRegistry Sessio
 		ctx:         ctx,
 		ctxCancelFn: ctxCancelFn,
 	}
+	eventQueueHeartbeatCh := make(chan struct{}, 2)
 
-	go func() {
+	eventQueueFn := func() {
+		logger.Debug("Started local tracker event loop.")
 		// Asynchronously process and dispatch presence events.
 		ticker := time.NewTicker(15 * time.Second)
 		for {
@@ -228,7 +230,39 @@ func StartLocalTracker(logger *zap.Logger, config Config, sessionRegistry Sessio
 			case e := <-t.eventsCh:
 				t.processEvent(e)
 			case <-ticker.C:
+				// send heartbeat
+				eventQueueHeartbeatCh <- struct{}{}
 				t.metrics.GaugePresences(float64(t.count.Load()))
+			}
+		}
+	}
+
+	// If the event queue doesn't send a heartbeat within the timeout, the event loop is considered unhealthy.
+	// Then start a new goroutine to handle the event queue.
+
+	go func() {
+
+		go eventQueueFn()
+		// Initial heartbeat.
+		eventQueueHeartbeatCh <- struct{}{}
+
+		for {
+			select {
+			case <-t.ctx.Done():
+				logger.Error("Local tracker event loop has stopped.")
+				return
+			case <-eventQueueHeartbeatCh:
+				// Heartbeat received, reset the timer.
+			case <-time.After(30 * time.Second):
+				// No heartbeat received, the event loop is unhealthy.
+				logger.Warn("Local tracker event loop is unhealthy.")
+				if t.eventsCh == nil {
+					logger.Warn("Local tracker event channel is nil. Recreating...")
+					t.Lock()
+					t.eventsCh = make(chan *PresenceEvent, config.GetTracker().EventQueueSize)
+					t.Unlock()
+				}
+				go eventQueueFn()
 			}
 		}
 	}()
