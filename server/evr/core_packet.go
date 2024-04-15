@@ -223,7 +223,7 @@ func WrapBytes(symbol Symbol, data []byte) ([]byte, error) {
 	// Write the Header (Marker + Symbol + Data Length)
 	b = append(b, MessageMarker...)
 	b = appendUint64(b, uint64(symbol))
-	b = appendUint64(b, uint64(len(b)))
+	b = appendUint64(b, uint64(len(data)))
 	// Write the message data.
 	b = append(b, data...)
 	return b, nil
@@ -241,11 +241,17 @@ var ignoredSymbols = []uint64{
 	0x80119c19ac72d695,
 }
 
-// Unmarshal parses the wire-format packet in data and places the result in m.
+// ParsePacket parses the wire-format packet in data and places the result in m.
 // The provided message must be mutable (e.g., a non-nil pointer to a slice).
-func Unmarshal(data []byte, m *[]Message) error {
+func ParsePacket(data []byte) ([]Message, error) {
 	var err error
-	for _, b := range bytes.Split(data, MessageMarker) {
+
+	// Split the packet into individual messages.
+	chunks := bytes.Split(data, MessageMarker)
+
+	messages := make([]Message, 0, len(chunks))
+
+	for _, b := range chunks {
 		if len(b) == 0 {
 			// Skip empty messages.
 			continue
@@ -253,7 +259,7 @@ func Unmarshal(data []byte, m *[]Message) error {
 		buf := bytes.NewBuffer(b)
 		// Verify packet length.
 		if buf.Len() < 16 {
-			return errors.Join(ErrInvalidPacket, fmt.Errorf("truncated packet"))
+			return nil, errors.Join(ErrInvalidPacket, fmt.Errorf("invalid packet"))
 		}
 		// Read the message type and data length.
 		sym := dUint64(buf.Next(8))
@@ -266,14 +272,14 @@ func Unmarshal(data []byte, m *[]Message) error {
 		l := int(dUint64(buf.Next(8)))
 		// Verify the message data can be read from the rest of the packet.
 		if buf.Len() != l {
-			return errors.Join(ErrInvalidPacket, fmt.Errorf("truncated packet"))
+			return nil, errors.Join(ErrInvalidPacket, fmt.Errorf("truncated packet (expected %d bytes, got %d)", l, buf.Len()))
 		}
 		// Read the payload.
 		b = buf.Next(l)
 		// Unmarshal the message.
 		typ, ok := SymbolTypes[sym]
 		if !ok {
-			return errors.Join(ErrSymbolNotFound, fmt.Errorf("Symbol not found: symbol=0x%x", sym))
+			return nil, errors.Join(ErrSymbolNotFound, fmt.Errorf("Symbol not found: symbol=0x%x", sym))
 		} else if typ == nil {
 			// Skip unimplemented message types.
 			continue
@@ -282,12 +288,12 @@ func Unmarshal(data []byte, m *[]Message) error {
 		// Create a new message of the correct type and unmarshal the data into it.
 		message := reflect.New(reflect.TypeOf(typ).Elem()).Interface().(Message)
 		if err = message.Stream(NewEasyStream(DecodeMode, b)); err != nil {
-			return fmt.Errorf("Stream error %T: %w", typ, err)
+			return nil, fmt.Errorf("Stream error %T: %w", typ, err)
 
 		}
-		*m = append(*m, message)
+		messages = append(messages, message)
 	}
-	return err
+	return messages, err
 }
 
 // AppendUint64 appends the (little-endian) byte representation of v to b and returns the resulting slice.

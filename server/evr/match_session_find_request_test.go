@@ -35,8 +35,7 @@ func TestLobbyFindSessionRequest_Unmarshal(t *testing.T) {
 		0xfd, 0x39, 0x7e, 0x1c, 0x77, 0x02, 0x00,
 	}
 
-	packet := make([]Message, 0)
-	err := Unmarshal(data, &packet)
+	packet, err := ParsePacket(data)
 	if err != nil {
 		t.Error(err)
 	}
@@ -95,8 +94,7 @@ func TestLobbyFindSessionRequest_Unpack(t *testing.T) {
 		0xfd, 0x39, 0x7e, 0x1c, 0x77, 0x02, 0x00,
 	}
 
-	packet := make([]Message, 0)
-	err := Unmarshal(data, &packet)
+	packet, err := ParsePacket(data)
 	if err != nil {
 		t.Error(err)
 	}

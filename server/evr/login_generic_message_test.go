@@ -19,8 +19,7 @@ func TestGenericMessageEncodeDecode(t *testing.T) {
 	}
 
 	// Unmarshal test packet
-	msgs := &[]Message{}
-	err := Unmarshal(packet, msgs)
+	msgs, err := ParsePacket(packet)
 	if err != nil {
 		t.Errorf("Unmarshal returned an error: %v", err)
 	}

@@ -38,8 +38,7 @@ func TestLobbyPingRequest_Marshal(t *testing.T) {
 	}
 
 	// Unmarshal the expected result to a string
-	var packet []Message
-	err := Unmarshal(expectedResult, &packet)
+	packet, err := ParsePacket(expectedResult)
 	if err != nil {
 		t.Fatalf("error in Unmarshal: %v", err)
 	}
