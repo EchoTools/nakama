@@ -894,7 +894,7 @@ func (c *MatchmakingRegistry) StoreLatencyCache(session *sessionWS) {
 	})
 
 	// Save the latency cache
-	jsonBytes, err := json.Marshal(cache)
+	jsonBytes, err := json.Marshal(store)
 	if err != nil {
 		session.logger.Error("Failed to marshal latency cache", zap.Error(err))
 		return
@@ -1017,12 +1017,6 @@ func (c *MatchmakingRegistry) Cancel(sessionId uuid.UUID, reason error) {
 
 func (c *MatchmakingRegistry) Add(id uuid.UUID, s *MatchmakingSession) {
 	c.matchingBySession.Store(id, s)
-
-}
-
-// ProcessPingResults adds latencies for a userId It takes ping responses.
-func (c *MatchmakingRegistry) ProcessPingResults(userId uuid.UUID, responses []evr.EndpointPingResult) {
-	// Get the user's cache
 
 }
 
