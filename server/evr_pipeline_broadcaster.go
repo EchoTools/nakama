@@ -306,52 +306,52 @@ func (p *EvrPipeline) getBroadcasterHostInfo(ctx context.Context, logger *zap.Lo
 				continue
 			}
 
-			guildIds = append(guildIds, guildId)
+			guildIDs = append(guildIDs, guildId)
 		}
 	}
 
 	allowed := make([]string, 0)
 	// Validate the group memberships
-	for _, guildId := range guildIds {
-		if guildId == "" {
+	for _, guildID := range guildIDs {
+		if guildID == "" {
 			continue
 		}
 
 		// Get the guild member
-		member, err := p.discordRegistry.GetGuildMember(ctx, guildId, discordId)
+		member, err := p.discordRegistry.GetGuildMember(ctx, guildID, discordID)
 		if err != nil {
-			logger.Warn("User not a member of the guild", zap.String("guildId", guildId))
+			logger.Warn("User not a member of the guild", zap.String("guildId", guildID))
 			continue
 		}
 
 		// Get the group id for the guild
-		groupId, found := p.discordRegistry.Get(guildId)
+		groupID, found := p.discordRegistry.Get(guildID)
 		if !found {
-			logger.Warn("Guild not found", zap.String("guildId", guildId))
+			logger.Warn("Guild not found", zap.String("guildId", guildID))
 			continue
 		}
 
 		// Get the guild's metadata
-		md, err := p.discordRegistry.GetGuildGroupMetadata(ctx, groupId)
+		md, err := p.discordRegistry.GetGuildGroupMetadata(ctx, groupID)
 		if err != nil {
-			logger.Warn("Failed to get guild group metadata", zap.String("groupId", groupId), zap.Error(err))
+			logger.Warn("Failed to get guild group metadata", zap.String("groupId", groupID), zap.Error(err))
 			continue
 		}
 
 		// If the broadcaster role is blank, add it to the channels
 		if md.BroadcasterHostRole == "" {
-			allowed = append(allowed, guildId)
+			allowed = append(allowed, guildID)
 			continue
 		}
 
 		// Verify the user has the broadcaster role
 		if !lo.Contains(member.Roles, md.BroadcasterHostRole) {
-			logger.Warn("User does not have the broadcaster role, allowing anyway", zap.String("guildId", guildId))
+			logger.Warn("User does not have the broadcaster role, allowing anyway", zap.String("guildId", guildID))
 			continue
 		}
 
 		// Add the channel to the list of hosting channels
-		allowed = append(allowed, guildId)
+		allowed = append(allowed, guildID)
 	}
 
 	// Get the groupId for each guildId

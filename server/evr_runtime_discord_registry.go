@@ -433,12 +433,6 @@ func (r *LocalDiscordRegistry) UpdateAccount(ctx context.Context, userID uuid.UU
 		r.logger.Error("Error updating account %s: %v", username, err)
 	}
 
-	// Synchronize the user's guilds with nakama groups
-	err = r.updateGuildGroups(ctx, logger, userID, discordId)
-	if err != nil {
-		return fmt.Errorf("error updating guild groups: %v", err)
-	}
-
 	logger.Debug("Final step took %dms", time.Since(timer)/time.Millisecond)
 	defer r.Store(discordId, userId.String())
 	defer r.Store(userId.String(), discordId)
@@ -446,7 +440,7 @@ func (r *LocalDiscordRegistry) UpdateAccount(ctx context.Context, userID uuid.UU
 	return nil
 }
 
-func (r *LocalDiscordRegistry) updateGuildGroups(ctx context.Context, logger runtime.Logger, userID uuid.UUID, discordId string) error {
+func (r *LocalDiscordRegistry) UpdateGuildGroup(ctx context.Context, logger runtime.Logger, userID uuid.UUID, guildID, discordID string) error {
 	// If discord bot is not responding, return
 	if r.bot == nil {
 		return fmt.Errorf("discord bot is not responding")
@@ -459,118 +453,113 @@ func (r *LocalDiscordRegistry) updateGuildGroups(ctx context.Context, logger run
 	}
 
 	// Create the group id slice
-	userGroupIds := make([]string, 0, len(groups))
+	userGroupIDs := make([]string, 0, len(groups))
 	for _, g := range groups {
-		userGroupIds = append(userGroupIds, g.Group.Id)
+		userGroupIDs = append(userGroupIDs, g.Group.Id)
 	}
 
-	// Check the state for guilds the user is in
-	for _, guild := range r.bot.State.Guilds {
-		// Get the guild's group ID
-		groupId, found := r.Get(guild.ID)
-		if !found {
-			logger.Warn("Could not find group for guild %s", guild.ID)
-			continue
+	// Get the guild's group ID
+	groupID, found := r.Get(guildID)
+	if !found {
+		return fmt.Errorf("group not found for guild %s", guildID)
+	}
+
+	// Get the guild's group metadata
+	md, err := r.GetGuildGroupMetadata(ctx, groupID)
+	if err != nil {
+		if err == ErrGroupIsNotaGuild {
+			return fmt.Errorf("group is not a guild: %w", err)
 		}
+		return fmt.Errorf("error getting guild group metadata: %w", err)
+	}
+	if md == nil {
+		return fmt.Errorf("group metadata is nil")
+	}
 
-		// Get the guild's group metadata
-		md, err := r.GetGuildGroupMetadata(ctx, groupId)
-		if err != nil {
-			if err == ErrGroupIsNotaGuild {
-				continue
-			}
-			r.logger.Error("Error getting guild group %s: %w", guild.Name, err)
+	guildRoleGroups := []string{
+		groupID,
+		md.ModeratorGroupId,
+		md.BroadcasterHostGroupId,
+	}
+
+	// Get the member
+	member, err := r.GetGuildMember(ctx, guildID, discordID)
+	// return if the context is cancelled
+	if err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("context cancelled: %w", err)
 		}
-		if md == nil {
-			continue
-		}
-
-		guildRoleGroups := []string{
-			groupId,
-			md.ModeratorGroupId,
-			md.BroadcasterHostGroupId,
-		}
-
-		// Get the member from the cache
-
-		// Get the member
-		member, err := r.GetGuildMember(ctx, guild.ID, discordId)
-		// return if the context is cancelled
-		if err != nil {
-			if ctx.Err() != nil {
-				return fmt.Errorf("context cancelled: %w", err)
-			}
-			logger.Warn("Error getting guild member %s in guild %s: %v, removing", discordId, guild.ID, err)
-			for _, groupId := range guildRoleGroups {
-				_ = groupId
-				//defer r.nk.GroupUsersKick(ctx, SystemUserId, groupId, []string{userID.String()})
-			}
-			continue
-		}
-
-		if member == nil {
-			logger.Warn("Could not find member %s in guild %s, kicking...", discordId, guild.ID)
-			for _, groupId := range guildRoleGroups {
-				defer r.nk.GroupUsersKick(ctx, SystemUserId, groupId, []string{userID.String()})
-			}
-			continue
-		}
-
-		currentRoles := member.Roles
-
-		isSuspended := len(lo.Intersect(currentRoles, md.SuspensionRoles)) > 0
-
-		currentGroups := lo.Intersect(userGroupIds, guildRoleGroups)
-
-		actualGroups := make([]string, 0)
-		actualGroups = append(actualGroups, groupId)
-
-		if slices.Contains(currentRoles, md.ModeratorRole) {
-			actualGroups = append(actualGroups, md.ModeratorGroupId)
-		}
-
-		if slices.Contains(currentRoles, md.BroadcasterHostRole) {
-			actualGroups = append(actualGroups, md.BroadcasterHostGroupId)
-		}
-
-		adds, removes := lo.Difference(actualGroups, currentGroups)
-
-		if isSuspended {
-			removes = append(removes, md.ModeratorGroupId, md.BroadcasterHostGroupId)
-			adds = []string{}
-
-			// If the player has a match connection, disconnect it.
-			subject := userID.String()
-			subcontext := svcMatchID.String()
-			users, err := r.nk.StreamUserList(StreamModeEvr, subject, subcontext, "", true, true)
-			if err != nil {
-				r.logger.Error("Error getting stream users: %w", err)
-			}
-
-			// Disconnect any matchmaking sessions (this will put them back to the login screen)
-			for _, user := range users {
-				// Disconnect the user
-				if user.GetUserId() == userID.String() {
-					go func() {
-						r.logger.Debug("Disconnecting suspended user %s match session: %s", user.GetUserId(), user.GetSessionId())
-						// Add a wait time, otherwise the user will not see the suspension message
-						<-time.After(15 * time.Second)
-						if err := r.nk.SessionDisconnect(ctx, user.GetSessionId(), runtime.PresenceReasonDisconnect); err != nil {
-							r.logger.Error("Error disconnecting suspended user: %w", err)
-						}
-					}()
-				}
-			}
-		}
-
-		for _, groupId := range removes {
+		logger.Warn("Error getting guild member %s in guild %s: %v, removing", discordID, guildID, err)
+		for _, groupId := range guildRoleGroups {
+			_ = groupId
 			defer r.nk.GroupUsersKick(ctx, SystemUserId, groupId, []string{userID.String()})
 		}
+		return fmt.Errorf("error getting guild member: %w", err)
+	}
 
-		for _, groupId := range adds {
-			defer r.nk.GroupUsersAdd(ctx, SystemUserId, groupId, []string{userID.String()})
+	if member == nil {
+		logger.Warn("Could not find member %s in guild %s, kicking...", discordID, guildID)
+		for _, groupId := range guildRoleGroups {
+			defer r.nk.GroupUsersKick(ctx, SystemUserId, groupId, []string{userID.String()})
+		}
+		return fmt.Errorf("member is nil")
+	}
+
+	currentRoles := member.Roles
+
+	isSuspended := len(lo.Intersect(currentRoles, md.SuspensionRoles)) > 0
+
+	currentGroups := lo.Intersect(userGroupIDs, guildRoleGroups)
+
+	actualGroups := make([]string, 0)
+	actualGroups = append(actualGroups, groupID)
+
+	if slices.Contains(currentRoles, md.ModeratorRole) {
+		actualGroups = append(actualGroups, md.ModeratorGroupId)
+	}
+
+	if slices.Contains(currentRoles, md.BroadcasterHostRole) {
+		actualGroups = append(actualGroups, md.BroadcasterHostGroupId)
+	}
+
+	adds, removes := lo.Difference(actualGroups, currentGroups)
+
+	if isSuspended {
+		removes = append(removes, md.ModeratorGroupId, md.BroadcasterHostGroupId)
+		adds = []string{}
+
+		// If the player has a match connection, disconnect it.
+		subject := userID.String()
+		subcontext := svcMatchID.String()
+		users, err := r.nk.StreamUserList(StreamModeEvr, subject, subcontext, "", true, true)
+		if err != nil {
+			r.logger.Error("Error getting stream users: %w", err)
+		}
+
+		// Disconnect any matchmaking sessions (this will put them back to the login screen)
+		for _, user := range users {
+			// Disconnect the user
+			if user.GetUserId() == userID.String() {
+				go func() {
+					r.logger.Debug("Disconnecting suspended user %s match session: %s", user.GetUserId(), user.GetSessionId())
+					// Add a wait time, otherwise the user will not see the suspension message
+					<-time.After(15 * time.Second)
+					if err := r.nk.SessionDisconnect(ctx, user.GetSessionId(), runtime.PresenceReasonDisconnect); err != nil {
+						r.logger.Error("Error disconnecting suspended user: %w", err)
+					}
+				}()
+			}
 		}
 	}
+
+	for _, groupId := range removes {
+		defer r.nk.GroupUsersKick(ctx, SystemUserId, groupId, []string{userID.String()})
+	}
+
+	for _, groupId := range adds {
+		defer r.nk.GroupUsersAdd(ctx, SystemUserId, groupId, []string{userID.String()})
+	}
+
 	return nil
 }
 

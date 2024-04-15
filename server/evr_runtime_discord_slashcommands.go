@@ -568,14 +568,23 @@ func (d *DiscordAppBot) InitializeDiscordBot() error {
 			return
 		}
 
-		discordId := e.User.ID
+		discordID := e.User.ID
+
+		// Update the user's guild group
+
 		// TODO FIXME Make this only update what changed.
-		userId, err := d.discordRegistry.GetUserIdByDiscordId(ctx, discordId, true)
+		userID, err := d.discordRegistry.GetUserIdByDiscordId(ctx, discordID, true)
 		if err != nil {
 			logger.Error("Error getting user id: %w", err)
 			return
 		}
-		go d.discordRegistry.UpdateAccount(context.Background(), userId)
+		err = d.discordRegistry.UpdateGuildGroup(ctx, logger, userID, e.GuildID, discordID)
+		if err != nil {
+			logger.Error("Error updating guild group: %w", err)
+			return
+		}
+
+		go d.discordRegistry.UpdateAccount(context.Background(), userID)
 	})
 
 	/*
@@ -1882,7 +1891,11 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		logger.Error("Failed to get or create an account.")
 		return fmt.Errorf("failed to get or create an account for %s (%s)", discordId, username)
 	}
-
+	// Synchronize the user's guilds with nakama groups
+	err = d.discordRegistry.UpdateGuildGroup(ctx, logger, userId, i.GuildID, discordId)
+	if err != nil {
+		return fmt.Errorf("error updating guild groups: %v", err)
+	}
 	// Get the account.
 	account, err := nk.AccountGetId(ctx, userId.String())
 	if err != nil {
