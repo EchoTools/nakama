@@ -662,6 +662,7 @@ func (s *sessionWS) SendEvr(messages []evr.Message) error {
 			s.logger.Debug("Sending Message.", zap.Any("message", message))
 		}
 	}
+
 	// Send the EVR messages one at a time.
 	for _, message := range messages {
 		if message == nil {
@@ -754,27 +755,28 @@ func (s *sessionWS) Close(msg string, reason runtime.PresenceReason, envelopes .
 	s.stopped = true
 	s.Unlock()
 
-	if s.logger.Core().Enabled(zap.DebugLevel) {
-		s.logger.Info("Cleaning up closed client connection")
+	isDebug := s.logger.Core().Enabled(zap.DebugLevel)
+	if isDebug {
+		s.logger.Debug("Cleaning up closed client connection")
 	}
 
 	// When connection close originates internally in the session, ensure cleanup of external resources and references.
 	if err := s.matchmaker.RemoveSessionAll(s.id.String()); err != nil {
 		s.logger.Warn("Failed to remove all matchmaking tickets", zap.Error(err))
 	}
-	if s.logger.Core().Enabled(zap.DebugLevel) {
+	if isDebug {
 		//s.logger.Info("Cleaned up closed connection matchmaker")
 	}
 	s.tracker.UntrackAll(s.id, reason)
-	if s.logger.Core().Enabled(zap.DebugLevel) {
+	if isDebug {
 		//s.logger.Info("Cleaned up closed connection tracker")
 	}
 	s.statusRegistry.UnfollowAll(s.id)
-	if s.logger.Core().Enabled(zap.DebugLevel) {
+	if isDebug {
 		//s.logger.Info("Cleaned up closed connection status registry")
 	}
 	s.sessionRegistry.Remove(s.id)
-	if s.logger.Core().Enabled(zap.DebugLevel) {
+	if isDebug {
 		// s.logger.Info("Cleaned up closed connection session registry")
 	}
 
@@ -804,7 +806,7 @@ func (s *sessionWS) Close(msg string, reason runtime.PresenceReason, envelopes .
 			continue
 		}
 
-		if s.logger.Core().Enabled(zap.DebugLevel) {
+		if isDebug {
 			switch envelope.Message.(type) {
 			case *rtapi.Envelope_Error:
 				s.logger.Debug("Sending error message", zap.Binary("payload", payload))
