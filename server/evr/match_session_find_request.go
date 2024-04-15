@@ -52,14 +52,8 @@ func (m *LobbyFindSessionRequest) Stream(s *EasyStream) error {
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.EvrId.AccountId) },
 		func() error {
 			// The team index is only present if it's defined.
-			if s.Mode == DecodeMode {
-				if s.Len() >= 2 {
-					return s.StreamNumber(binary.LittleEndian, &m.TeamIndex)
-				}
-			} else {
-				if m.TeamIndex != -1 {
-					return s.StreamNumber(binary.LittleEndian, &m.TeamIndex)
-				}
+			if s.Len() >= 2 || m.TeamIndex != -1 { // only decode/encode if the value is not "any"
+				return s.StreamNumber(binary.LittleEndian, &m.TeamIndex)
 			}
 			return nil
 		},
