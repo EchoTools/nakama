@@ -674,48 +674,38 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 	if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), ml); err != nil {
 		return NewMatchmakingResult(logger, 0xFFFFFFFFFFFFFFFF, request.LobbyId).SendErrorToSession(session, status.Errorf(codes.NotFound, err.Error()))
 	}
-
-	// Set the desired team index
-	ml.TeamIndex = TeamIndex(request.TeamIndex)
-
-	// Check if the match is a parking match
-	if ml.LobbyType == UnassignedLobby {
-		return NewMatchmakingResult(logger, 0xFFFFFFFFFFFFFFFF, request.LobbyId).SendErrorToSession(session, status.Errorf(codes.NotFound, "Match is not a lobby"))
-	}
-
-	// Check if the match is open
-	if !ml.Open {
-		return NewMatchmakingResult(logger, 0xFFFFFFFFFFFFFFFF, request.LobbyId).SendErrorToSession(session, status.Errorf(codes.InvalidArgument, "Match is not open"))
-	}
-
-	if ml.TeamIndex != Spectator || ml.TeamIndex != Moderator {
-		if ml.Mode == evr.ModeArenaPublic || ml.Mode == evr.ModeCombatPublic || ml.Mode == evr.ModeSocialPublic {
-			// Do not allow direct joining public matches right now
-			return NewMatchmakingResult(logger, 0xFFFFFFFFFFFFFFFF, request.LobbyId).SendErrorToSession(session, status.Errorf(codes.InvalidArgument, "Match is a public match"))
-		}
-	}
-
-	// Check if the match is full
-	if ml.Size >= int(ml.MaxSize) {
-		return NewMatchmakingResult(logger, 0xFFFFFFFFFFFFFFFF, request.LobbyId).SendErrorToSession(session, status.Errorf(codes.ResourceExhausted, "Match is full"))
-	}
-
 	if ml.Channel == nil {
 		ml.Channel = &uuid.Nil
 	}
 
-	// Check for suspensions on this channel.
-	if ml.Mode == evr.ModeArenaPublic || ml.Mode == evr.ModeCombatPublic || ml.Mode == evr.ModeSocialPublic {
-		// Check for suspensions on this channel, if this is a request for a public match.
-		if authorized, err := p.authorizeMatchmaking(ctx, logger, session, *ml.Channel); !authorized {
-			return NewMatchmakingResult(logger, 0xFFFFFFFFFFFFFFFF, request.LobbyId).SendErrorToSession(session, status.Errorf(codes.NotFound, err.Error()))
-		} else if err != nil {
-			logger.Warn("Failed to authorize matchmaking, allowing player to continue. ", zap.Error(err))
+	switch {
+
+	case ml.LobbyType == UnassignedLobby:
+		err = status.Errorf(codes.NotFound, "Match is not a lobby")
+	case !ml.Open:
+		err = status.Errorf(codes.InvalidArgument, "Match is not open")
+	case int(match.GetSize()) >= MatchMaxSize:
+		err = status.Errorf(codes.ResourceExhausted, "Match is full")
+	case ml.LobbyType == PublicLobby:
+		if ml.TeamIndex != Spectator && ml.TeamIndex != Moderator {
+			err = status.Errorf(codes.InvalidArgument, "Match is a public match")
 		}
+		authorized, err2 := p.authorizeMatchmaking(ctx, logger, session, *ml.Channel)
+		if err2 != nil {
+			if authorized {
+				logger.Warn("Failed to authorize matchmaking, allowing player to continue. ", zap.Error(err2))
+				err = nil
+			} else {
+				err = status.Errorf(codes.PermissionDenied, err2.Error())
+			}
+		}
+	}
+	if err != nil {
+		return NewMatchmakingResult(logger, 0xFFFFFFFFFFFFFFFF, request.LobbyId).SendErrorToSession(session, err)
 	}
 
 	// Join the match
-	if err = p.JoinEvrMatch(ctx, logger, session, "", matchId, *ml.Channel, int(ml.TeamIndex)); err != nil {
+	if err = p.JoinEvrMatch(ctx, logger, session, "", matchId, *ml.Channel, int(request.TeamIndex)); err != nil {
 		return NewMatchmakingResult(logger, 0xFFFFFFFFFFFFFFFF, request.LobbyId).SendErrorToSession(session, status.Errorf(codes.NotFound, err.Error()))
 	}
 	return nil
