@@ -19,7 +19,7 @@ type LobbyFindSessionRequest struct {
 	Mode            Symbol
 	Level           Symbol
 	Platform        Symbol // DMO, OVR_ORG, etc.
-	LoginSession    uuid.UUID
+	LoginSessionID  uuid.UUID
 	Unk1            uint64
 	CurrentMatch    uuid.UUID
 	Channel         uuid.UUID
@@ -43,7 +43,7 @@ func (m *LobbyFindSessionRequest) Stream(s *EasyStream) error {
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Mode) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Level) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Platform) },
-		func() error { return s.StreamGuid(&m.LoginSession) },
+		func() error { return s.StreamGuid(&m.LoginSessionID) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Unk1) },
 		func() error { return s.StreamGuid(&m.CurrentMatch) },
 		func() error { return s.StreamGuid(&m.Channel) },
@@ -51,11 +51,10 @@ func (m *LobbyFindSessionRequest) Stream(s *EasyStream) error {
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.EvrId.PlatformCode) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.EvrId.AccountId) },
 		func() error {
-			// The team index is only present if it's defined.
-			if s.Len() >= 2 || m.TeamIndex != -1 { // only decode/encode if the value is not "any"
-				return s.StreamNumber(binary.LittleEndian, &m.TeamIndex)
+			if s.Mode == DecodeMode && s.Len() < 2 || s.Mode == EncodeMode && m.TeamIndex == -1 {
+				return nil
 			}
-			return nil
+			return s.StreamNumber(binary.LittleEndian, &m.TeamIndex)
 		},
 	})
 
@@ -68,7 +67,7 @@ func (m LobbyFindSessionRequest) String() string {
 		m.Mode.Token(),
 		m.Level.Token(),
 		m.Platform.String(),
-		m.LoginSession.String(),
+		m.LoginSessionID.String(),
 		m.Unk1,
 		m.CurrentMatch,
 		m.Channel.String(),
@@ -84,7 +83,7 @@ func NewLobbyFindSessionRequest(versionLock uint64, matchMode Symbol, matchLevel
 		Mode:            matchMode,
 		Level:           matchLevel,
 		Platform:        platform,
-		LoginSession:    loginSession,
+		LoginSessionID:  loginSession,
 		Unk1:            unk1,
 		CurrentMatch:    currentSession,
 		Channel:         channel,
@@ -95,7 +94,7 @@ func NewLobbyFindSessionRequest(versionLock uint64, matchMode Symbol, matchLevel
 }
 
 func (m *LobbyFindSessionRequest) SessionID() uuid.UUID {
-	return m.LoginSession
+	return m.LoginSessionID
 }
 
 func (m *LobbyFindSessionRequest) EvrID() EvrId {

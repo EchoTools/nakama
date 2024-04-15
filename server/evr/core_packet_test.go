@@ -187,43 +187,80 @@ func TestUnmarshalInvalidPacket(t *testing.T) {
 
 	data := append(testMessage, testMessage...)
 	data[10] = 0x00
-	envelopes := make([]Message, 0)
-	err := Unmarshal(data, &envelopes)
+	packet, err := ParsePacket(data)
 	if !errors.Is(err, ErrSymbolNotFound) {
 		t.Errorf("got %s, want %s", err, ErrSymbolNotFound)
 		return
 	}
-	if len(envelopes) != 0 {
-		t.Fatalf("expected 1 message, got %v", len(envelopes))
+	if len(packet) != 0 {
+		t.Fatalf("expected 1 message, got %v", len(packet))
 	}
 
 	// Test case: Unknown symbol in first packet, known symbol in second packet
 	data = append(testMessage, testMessage...)
 	data[len(testMessage)+10] = 0x00
-	envelopes = make([]Message, 0)
-	err = Unmarshal(data, &envelopes)
+	packet, err = ParsePacket(data)
 	if !errors.Is(err, ErrSymbolNotFound) {
 		t.Errorf("got %s, want %s", err, ErrSymbolNotFound)
 		return
 	}
-	if len(envelopes) != 1 {
-		t.Fatalf("expected 1 message, got %v", len(envelopes))
+	if len(packet) != 1 {
+		t.Fatalf("expected 1 message, got %v", len(packet))
 	}
 
 	// Test case: Unknown symbol in both packets
 	data = append(testMessage, testMessage...)
 	data[10] = 0x00
 	data[len(testMessage)+10] = 0x00
-	envelopes = make([]Message, 0)
-	err = Unmarshal(data, &envelopes)
+	packet, err = ParsePacket(data)
 	if !errors.Is(err, ErrSymbolNotFound) {
 		t.Errorf("got %s, want %s", err, ErrSymbolNotFound)
 		return
 	}
-	if len(envelopes) != 0 {
-		t.Fatalf("expected 0 messages, got %v", len(envelopes))
+	if len(packet) != 0 {
+		t.Fatalf("expected 0 messages, got %v", len(packet))
 	}
 
 }
 
-type notSymbolizable struct{}
+func TestWrapBytes(t *testing.T) {
+	type args struct {
+		symbol Symbol
+		data   []byte
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    []byte
+		wantErr bool
+	}{
+		{
+			"Valid",
+			args{
+				SymbolOf(&STcpConnectionUnrequireEvent{}),
+				[]byte{
+					0xfe,
+				},
+			},
+			[]byte{
+				0xf6, 0x40, 0xbb, 0x78, 0xa2, 0xe7, 0x8c, 0xbb,
+				0xe4, 0xee, 0x6b, 0xc7, 0x3a, 0x96, 0xe6, 0x43,
+				0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+				0xfe,
+			},
+			false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := WrapBytes(tt.args.symbol, tt.args.data)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("WrapBytes() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("WrapBytes() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

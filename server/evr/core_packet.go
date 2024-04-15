@@ -288,7 +288,7 @@ func ParsePacket(data []byte) ([]Message, error) {
 		// Create a new message of the correct type and unmarshal the data into it.
 		message := reflect.New(reflect.TypeOf(typ).Elem()).Interface().(Message)
 		if err = message.Stream(NewEasyStream(DecodeMode, b)); err != nil {
-			return nil, fmt.Errorf("Stream error %T: %w", typ, err)
+			return nil, fmt.Errorf("Stream error: %T: %w", typ, err)
 
 		}
 		messages = append(messages, message)
