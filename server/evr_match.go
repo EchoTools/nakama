@@ -756,36 +756,6 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 	// If there are any missing or stale presences, shut down the match.
 	if int(tick)%(30*state.tickRate) == 0 {
 
-		// Get the match ID from the context
-		matchID, node := MatchIdFromContext(ctx)
-
-		// Validate the state's presence list
-		presences, err := nk.StreamUserList(StreamModeMatchAuthoritative, matchID.String(), "", node, true, true)
-		if err != nil {
-			logger.Error("failed to get presence list: %v", err)
-			return nil
-		}
-		nkPresences := make([]string, 0, len(presences))
-		for _, p := range presences {
-			nkPresences = append(nkPresences, p.GetSessionId())
-		}
-
-		matchPresences := make([]string, len(state.presences))
-		for _, p := range state.presences {
-			matchPresences = append(matchPresences, p.GetSessionId())
-		}
-		// Include the broadcaster
-		if state.broadcaster != nil {
-			matchPresences = append(matchPresences, state.broadcaster.GetSessionId())
-		}
-
-		// Check the match presences vs the stream presences
-		stale, missing := lo.Difference(matchPresences, nkPresences)
-		if len(stale) > 0 || len(missing) > 0 {
-			//logger.Error("difference in presences: stale(%d)=%s, missing(%d)=%s, state=%s", len(stale), stale, len(missing), missing, state.presences)
-			//return nil
-		}
-
 		// If the match was started more than 60 seconds ago, and there are no players, shut down the match.
 		if state.Started.Before(time.Now().Add(-60*time.Second)) && state.LobbyType != UnassignedLobby && state.Size == 0 {
 			// If the match is not a parking match, and there are no players, shut down the match.
