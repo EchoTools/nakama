@@ -59,6 +59,7 @@ type DiscordRegistry interface {
 	GetGuildGroups(ctx context.Context, userId uuid.UUID) ([]*api.Group, error)
 	// GetUser looks up the Discord user by the user ID. Potentially using the state cache.
 	GetUser(ctx context.Context, discordId string) (*discordgo.User, error)
+	UpdateGuildGroup(ctx context.Context, logger runtime.Logger, userID uuid.UUID, guildID, discordID string) error
 }
 
 // The discord registry is a storage-backed lookup table for discord user ids to nakama user ids.

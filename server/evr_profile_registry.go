@@ -74,12 +74,12 @@ func (p *GameProfileData) GetLogin() *evr.LoginProfile {
 }
 
 func (p *GameProfileData) GetChannel() uuid.UUID {
-	return uuid.UUID(p.Server.Social.Group)
+	return uuid.UUID(p.Server.Social.Channel)
 }
 
 func (p *GameProfileData) SetChannel(c evr.GUID) {
-	p.Server.Social.Group = c
-	p.Client.Social.Group = p.Server.Social.Group
+	p.Server.Social.Channel = c
+	p.Client.Social.Channel = p.Server.Social.Channel
 
 }
 func (p *GameProfileData) UpdateDisplayName(displayName string) {
@@ -734,7 +734,7 @@ func (r *ProfileRegistry) GetSessionProfile(ctx context.Context, session *sessio
 		session.logger.Warn("Failed to update account", zap.Error(err))
 	}
 
-	if groupID, err := r.ValidateSocialGroup(r.ctx, session.userID, p.Client.Social.Group); err != nil {
+	if groupID, err := r.ValidateSocialGroup(r.ctx, session.userID, p.Client.Social.Channel); err != nil {
 		return p, fmt.Errorf("failed to validate social group: %w", err)
 		// try to continue
 	} else {
@@ -763,7 +763,7 @@ func (r *ProfileRegistry) UpdateSessionProfile(ctx context.Context, logger *zap.
 	//}
 	p.Client = &update
 
-	groupID, err := r.ValidateSocialGroup(r.ctx, session.userID, p.Client.Social.Group)
+	groupID, err := r.ValidateSocialGroup(r.ctx, session.userID, p.Client.Social.Channel)
 	if err != nil {
 		return p, fmt.Errorf("failed to validate social group: %w", err)
 		// try to continue

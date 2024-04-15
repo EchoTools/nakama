@@ -204,7 +204,7 @@ type Social struct {
 	// WARNING: EchoVR dictates this struct/schema.
 	CommunityValuesVersion int64 `json:"community_values_version,omitempty" validate:"gte=0"`
 	SetupVersion           int64 `json:"setup_version,omitempty" validate:"gte=0"`
-	Group                  GUID  `json:"group,omitempty" validate:"uuid_rfc4122"` // The channel. It is a GUID, uppercase.
+	Channel                GUID  `json:"group,omitempty" validate:"uuid_rfc4122"` // The channel. It is a GUID, uppercase.
 }
 
 type ServerProfile struct {
