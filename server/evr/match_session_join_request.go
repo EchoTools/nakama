@@ -41,15 +41,8 @@ func (m *LobbyJoinSessionRequest) Stream(s *EasyStream) error {
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.EvrId.PlatformCode) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.EvrId.AccountId) },
 		func() error {
-			// TODO (@thesprockee) Figure what's going on here.
-			// The envelope's length is different by 2 bytes
-			// When the team index is -1 (Any Team)?
-			if s.Mode == DecodeMode {
-				if s.Len()-s.Position() >= 2 { // Ensure there's two bytes left.
-					return s.StreamNumber(binary.LittleEndian, &m.TeamIndex)
-				}
-			} else if m.TeamIndex != -1 { // // Do not send if set to "Any Team".
-
+			// The team index is only present if it's defined.
+			if s.Len() >= 2 || m.TeamIndex != -1 { // only decode/encode if the value is not "any"
 				return s.StreamNumber(binary.LittleEndian, &m.TeamIndex)
 			}
 			return nil
