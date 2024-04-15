@@ -1144,7 +1144,7 @@ func (t *LocalTracker) processEvent(e *PresenceEvent) {
 					var messages []evr.Message
 					messages, err = ProcessOutgoing(s.logger, s, envelope)
 					if err == nil {
-						err = s.SendEvr(messages)
+						err = s.SendEvr(messages...)
 					}
 				}
 			case SessionFormatProtobuf:

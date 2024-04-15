@@ -32,7 +32,7 @@ func (p *EvrPipeline) configRequest(ctx context.Context, logger *zap.Logger, ses
 				ErrorCode:  0x00000001,
 				Error:      "user not authenticated",
 			}
-			session.SendEvr([]evr.Message{evr.NewSNSConfigFailure(errorInfo)})
+			session.SendEvr(evr.NewSNSConfigFailure(errorInfo))
 			return fmt.Errorf("session not authenticated")
 		}
 	}
@@ -55,7 +55,7 @@ func (p *EvrPipeline) configRequest(ctx context.Context, logger *zap.Logger, ses
 			ErrorCode:  0x00000001,
 			Error:      "failed to read objects",
 		}
-		session.SendEvr([]evr.Message{evr.NewSNSConfigFailure(errorInfo)})
+		session.SendEvr(evr.NewSNSConfigFailure(errorInfo))
 		return fmt.Errorf("failed to read objects: %w", err)
 	}
 
@@ -75,7 +75,7 @@ func (p *EvrPipeline) configRequest(ctx context.Context, logger *zap.Logger, ses
 			ErrorCode:  0x00000001,
 			Error:      "resource not found",
 		}
-		session.SendEvr([]evr.Message{evr.NewSNSConfigFailure(errorInfo)})
+		session.SendEvr(evr.NewSNSConfigFailure(errorInfo))
 		return fmt.Errorf("resource not found: %s", message.ConfigInfo.Id)
 	}
 
@@ -89,15 +89,15 @@ func (p *EvrPipeline) configRequest(ctx context.Context, logger *zap.Logger, ses
 			ErrorCode:  0x00000001,
 			Error:      "failed to parse json",
 		}
-		session.SendEvr([]evr.Message{evr.NewSNSConfigFailure(errorInfo)})
+		session.SendEvr(evr.NewSNSConfigFailure(errorInfo))
 		return fmt.Errorf("failed to parse %s json: %w", message.ConfigInfo.Id, err)
 	}
 
 	// Send the resource to the client.
-	if err := session.SendEvr([]evr.Message{
+	if err := session.SendEvr(
 		evr.NewConfigSuccess(message.ConfigInfo.Type, message.ConfigInfo.Id, resource),
 		evr.NewSTcpConnectionUnrequireEvent(),
-	}); err != nil {
+	); err != nil {
 		return fmt.Errorf("failed to send SNSConfigSuccess: %w", err)
 	}
 	return nil
