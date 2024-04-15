@@ -13,7 +13,7 @@ type LobbyJoinSessionRequest struct {
 	LobbyId         uuid.UUID
 	VersionLock     int64
 	Platform        Symbol
-	Session         uuid.UUID
+	LoginSessionID  uuid.UUID
 	Unk1            uint64
 	Unk2            uint64
 	SessionSettings SessionSettings
@@ -34,18 +34,17 @@ func (m *LobbyJoinSessionRequest) Stream(s *EasyStream) error {
 		func() error { return s.StreamGuid(&m.LobbyId) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.VersionLock) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Platform) },
-		func() error { return s.StreamGuid(&m.Session) },
+		func() error { return s.StreamGuid(&m.LoginSessionID) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Unk1) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Unk2) },
 		func() error { return s.StreamJson(&m.SessionSettings, true, NoCompression) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.EvrId.PlatformCode) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.EvrId.AccountId) },
 		func() error {
-			// The team index is only present if it's defined.
-			if s.Len() >= 2 || m.TeamIndex != -1 { // only decode/encode if the value is not "any"
-				return s.StreamNumber(binary.LittleEndian, &m.TeamIndex)
+			if s.Mode == DecodeMode && s.Len() < 2 || s.Mode == EncodeMode && m.TeamIndex == -1 {
+				return nil
 			}
-			return nil
+			return s.StreamNumber(binary.LittleEndian, &m.TeamIndex)
 		},
 	})
 }
@@ -56,7 +55,7 @@ func (m LobbyJoinSessionRequest) String() string {
 		m.LobbyId.String(),
 		m.VersionLock,
 		m.Platform,
-		m.Session,
+		m.LoginSessionID,
 		m.Unk1,
 		m.Unk2,
 		m.SessionSettings,
@@ -66,7 +65,7 @@ func (m LobbyJoinSessionRequest) String() string {
 }
 
 func (m *LobbyJoinSessionRequest) SessionID() uuid.UUID {
-	return m.Session
+	return m.LoginSessionID
 }
 
 func (m *LobbyJoinSessionRequest) EvrID() EvrId {

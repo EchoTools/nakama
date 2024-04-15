@@ -45,12 +45,12 @@ func TestLobbyFindSessionRequest_Unmarshal(t *testing.T) {
 	}
 
 	want := LobbyFindSessionRequest{
-		VersionLock:  0xc62f01d78f77910d,
-		Mode:         ModeArenaPublic,
-		Level:        0xffffffffffffffff,
-		Platform:     ToSymbol("DMO"),
-		LoginSession: uuid.Must(uuid.FromString("0a223cf0-8b73-3dfa-2ee8-7774c3b28097")),
-		Unk1:         769,
+		VersionLock:    0xc62f01d78f77910d,
+		Mode:           ModeArenaPublic,
+		Level:          0xffffffffffffffff,
+		Platform:       ToSymbol("DMO"),
+		LoginSessionID: uuid.Must(uuid.FromString("0a223cf0-8b73-3dfa-2ee8-7774c3b28097")),
+		Unk1:           769,
 		SessionSettings: SessionSettings{
 			AppId: "1369078409873402",
 			Mode:  -3791849610740453517,
@@ -104,12 +104,12 @@ func TestLobbyFindSessionRequest_Unpack(t *testing.T) {
 	}
 
 	want := LobbyFindSessionRequest{
-		VersionLock:  0xc62f01d78f77910d,
-		Mode:         ModeArenaPublic,
-		Level:        0xffffffffffffffff,
-		Platform:     ToSymbol("DMO"),
-		LoginSession: uuid.Must(uuid.FromString("0a223cf0-8b73-3dfa-2ee8-7774c3b28097")),
-		Unk1:         769,
+		VersionLock:    0xc62f01d78f77910d,
+		Mode:           ModeArenaPublic,
+		Level:          0xffffffffffffffff,
+		Platform:       ToSymbol("DMO"),
+		LoginSessionID: uuid.Must(uuid.FromString("0a223cf0-8b73-3dfa-2ee8-7774c3b28097")),
+		Unk1:           769,
 		SessionSettings: SessionSettings{
 			AppId: "1369078409873402",
 			Mode:  -3791849610740453517,

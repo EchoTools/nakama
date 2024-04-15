@@ -14,7 +14,7 @@ type LobbyCreateSessionRequest struct {
 	Mode            Symbol          // Symbol representing the game type
 	Level           Symbol          // Symbol representing the level
 	Platform        Symbol          // Symbol representing the platform
-	Session         uuid.UUID       // Session identifier
+	LoginSessionID  uuid.UUID       // Session identifier
 	Unk1            uint64          // Unknown field 1
 	LobbyType       uint32          // the visibility of the session to create.
 	Unk2            uint32          // Unknown field 2
@@ -39,7 +39,7 @@ func (m *LobbyCreateSessionRequest) Stream(s *EasyStream) error {
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Mode) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Level) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Platform) },
-		func() error { return s.StreamGuid(&m.Session) },
+		func() error { return s.StreamGuid(&m.LoginSessionID) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Unk1) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.LobbyType) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Unk2) },
@@ -47,11 +47,10 @@ func (m *LobbyCreateSessionRequest) Stream(s *EasyStream) error {
 		func() error { return s.StreamJson(&m.SessionSettings, true, NoCompression) },
 		func() error { return s.StreamStruct(&m.EvrId) },
 		func() error {
-			// TODO: Figure out this property.
-			if s.Len() >= 2 || m.TeamIndex != -1 { // only decode/encode if the value is not "any"
-				return s.StreamNumber(binary.LittleEndian, &m.TeamIndex)
+			if s.Mode == DecodeMode && s.Len() < 2 || s.Mode == EncodeMode && m.TeamIndex == -1 {
+				return nil
 			}
-			return nil
+			return s.StreamNumber(binary.LittleEndian, &m.TeamIndex)
 		},
 	})
 
@@ -64,7 +63,7 @@ func (m *LobbyCreateSessionRequest) String() string {
 		m.Mode,
 		m.Level,
 		m.Platform,
-		m.Session.String(),
+		m.LoginSessionID.String(),
 		m.Unk1,
 		m.LobbyType,
 		m.Unk2,
@@ -76,7 +75,7 @@ func (m *LobbyCreateSessionRequest) String() string {
 }
 
 func (m *LobbyCreateSessionRequest) SessionID() uuid.UUID {
-	return m.Session
+	return m.LoginSessionID
 }
 
 func (m *LobbyCreateSessionRequest) EvrID() EvrId {
