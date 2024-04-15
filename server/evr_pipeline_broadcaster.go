@@ -40,9 +40,9 @@ func sendDiscordError(e error, discordId string, logger *zap.Logger, discordRegi
 
 // errFailedRegistration sends a failure message to the broadcaster and closes the session
 func errFailedRegistration(session *sessionWS, err error, code evr.BroadcasterRegistrationFailureCode) error {
-	if err := session.SendEvr([]evr.Message{
+	if err := session.SendEvr(
 		evr.NewBroadcasterRegistrationFailure(code),
-	}); err != nil {
+	); err != nil {
 		return fmt.Errorf("failed to send lobby registration failure: %v", err)
 	}
 
@@ -158,10 +158,10 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 		return errFailedRegistration(session, err, evr.BroadcasterRegistration_Failure)
 	}
 	// Send the registration success message
-	if err := session.SendEvr([]evr.Message{
+	if err := session.SendEvr(
 		evr.NewBroadcasterRegistrationSuccess(config.ServerID, config.Endpoint.ExternalIP),
 		evr.NewSTcpConnectionUnrequireEvent(),
-	}); err != nil {
+	); err != nil {
 		return errFailedRegistration(session, fmt.Errorf("failed to send lobby registration failure: %v", err), evr.BroadcasterRegistration_Failure)
 	}
 

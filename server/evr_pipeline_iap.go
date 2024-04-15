@@ -11,9 +11,9 @@ import (
 func (p *EvrPipeline) reconcileIAP(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.ReconcileIAP)
 
-	if err := session.SendEvr([]evr.Message{
+	if err := session.SendEvr(
 		evr.NewReconcileIAPResult(request.EvrId),
-	}); err != nil {
+	); err != nil {
 		return err
 	}
 	return nil

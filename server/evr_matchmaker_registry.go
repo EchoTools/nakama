@@ -276,10 +276,7 @@ func (mr *MatchmakingResult) SendErrorToSession(s *sessionWS, err error) error {
 		return nil
 	}
 	mr.Logger.Warn("Matchmaking error", zap.String("message", result.Message), zap.Error(result.err))
-	payload := []evr.Message{
-		evr.NewLobbySessionFailure(result.Mode, result.Channel, result.Code, result.Message).Version4(),
-	}
-	return s.SendEvr(payload)
+	return s.SendEvr(evr.NewLobbySessionFailure(result.Mode, result.Channel, result.Code, result.Message).Version4())
 }
 
 // MatchmakingRegistry is a registry for matchmaking sessions

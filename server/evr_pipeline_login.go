@@ -53,14 +53,11 @@ func msgFailedLoginFn(session *sessionWS, evrId evr.EvrId, err error) error {
 	// Word wrap the error message
 	errMessage := wordwrap.String(s, 60)
 
-	// Create a slice of messages
-	messages := []evr.Message{
+	// Send the messages
+	if err := session.SendEvr(
 		evr.NewLoginFailure(evrId, errMessage),
 		evr.NewSTcpConnectionUnrequireEvent(),
-	}
-
-	// Send the messages
-	if err := session.SendEvr(messages); err != nil {
+	); err != nil {
 		// If there's an error, prefix it with the EchoVR Id
 		return errWithEvrIdFn(evrId, "send LoginFailure failed: %w", err)
 	}
@@ -109,13 +106,11 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 
 	// Let the client know that the login was successful.
 	// Send the login success message and the login settings.
-	messages := []evr.Message{
+	return session.SendEvr(
 		evr.NewLoginSuccess(session.id, request.EvrId),
 		evr.NewSTcpConnectionUnrequireEvent(),
 		evr.NewSNSLoginSettings(loginSettings),
-	}
-
-	return session.SendEvr(messages)
+	)
 }
 
 // processLogin handles the authentication of the login connection.
@@ -337,10 +332,10 @@ func (p *EvrPipeline) channelInfoRequest(ctx context.Context, logger *zap.Logger
 	}
 
 	// send the document to the client
-	if err := session.SendEvr([]evr.Message{
+	if err := session.SendEvr(
 		evr.NewSNSChannelInfoResponse(resource),
 		evr.NewSTcpConnectionUnrequireEvent(),
-	}); err != nil {
+	); err != nil {
 		return fmt.Errorf("failed to send ChannelInfoResponse: %w", err)
 	}
 	return nil
@@ -411,18 +406,14 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 
 	profile := p.profileRegistry.GetProfile(session.userID)
 	if profile == nil {
-		return session.SendEvr([]evr.Message{
-			evr.NewLoggedInUserProfileFailure(request.EvrId, 400, "failed to load game profiles"),
-		})
+		return session.SendEvr(evr.NewLoggedInUserProfileFailure(request.EvrId, 400, "failed to load game profiles"))
 	}
 	gameProfiles := &evr.GameProfiles{
 		Client: profile.Client,
 		Server: profile.Server,
 	}
 
-	return session.SendEvr([]evr.Message{
-		evr.NewLoggedInUserProfileSuccess(evrID, gameProfiles),
-	})
+	return session.SendEvr(evr.NewLoggedInUserProfileSuccess(evrID, gameProfiles))
 }
 
 func (p *EvrPipeline) updateProfile(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
@@ -437,9 +428,7 @@ func (p *EvrPipeline) updateProfile(ctx context.Context, logger *zap.Logger, ses
 
 	if _, err := p.profileRegistry.UpdateSessionProfile(ctx, logger, session, request.ClientProfile); err != nil {
 		code := 400
-		if err := session.SendEvr([]evr.Message{
-			evr.NewUpdateProfileFailure(evrId, uint64(code), err.Error()),
-		}); err != nil {
+		if err := session.SendEvr(evr.NewUpdateProfileFailure(evrId, uint64(code), err.Error())); err != nil {
 			return fmt.Errorf("send UpdateProfileFailure: %w", err)
 		}
 		return fmt.Errorf("UpdateProfile: %w", err)
@@ -447,10 +436,10 @@ func (p *EvrPipeline) updateProfile(ctx context.Context, logger *zap.Logger, ses
 
 	go func() {
 		// Send the profile update to the client
-		if err := session.SendEvr([]evr.Message{
+		if err := session.SendEvr(
 			evr.NewSNSUpdateProfileSuccess(&evrId),
 			evr.NewSTcpConnectionUnrequireEvent(),
-		}); err != nil {
+		); err != nil {
 			logger.Warn("Failed to send UpdateProfileSuccess", zap.Error(err))
 		}
 	}()
@@ -611,10 +600,10 @@ func (p *EvrPipeline) documentRequest(ctx context.Context, logger *zap.Logger, s
 	if ok && noVr {
 		document = evr.NewEulaDocument(1, 1, "")
 
-		session.SendEvr([]evr.Message{
+		session.SendEvr(
 			evr.NewSNSDocumentSuccess(document),
 			evr.NewSTcpConnectionUnrequireEvent(),
-		})
+		)
 
 	}
 
@@ -738,10 +727,10 @@ func (p *EvrPipeline) documentRequest(ctx context.Context, logger *zap.Logger, s
 		}
 	}
 	// send the document to the client
-	session.SendEvr([]evr.Message{
+	session.SendEvr(
 		evr.NewSNSDocumentSuccess(document),
 		evr.NewSTcpConnectionUnrequireEvent(),
-	})
+	)
 	return nil
 }
 
@@ -757,11 +746,11 @@ func (p *EvrPipeline) genericMessage(ctx context.Context, logger *zap.Logger, se
 
 	msg := evr.NewGenericMessageNotify(request.MessageType, request.Session, request.RoomID, request.PartyData)
 
-	if err := otherSession.SendEvr([]evr.Message{msg}); err != nil {
+	if err := otherSession.SendEvr(msg); err != nil {
 		return fmt.Errorf("failed to send generic message: %w", err)
 	}
 
-	if err := session.SendEvr([]evr.Message{msg}); err != nil {
+	if err := session.SendEvr(msg); err != nil {
 		return fmt.Errorf("failed to send generic message success: %w", err)
 	}
 
@@ -841,9 +830,9 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 		return state, nil
 	*/
 
-	if err := session.SendEvr([]evr.Message{
+	if err := session.SendEvr(
 		evr.NewUserServerProfileUpdateSuccess(message.EvrId),
-	}); err != nil {
+	); err != nil {
 		return fmt.Errorf("failed to send UserServerProfileUpdateSuccess: %w", err)
 	}
 	return nil
@@ -877,7 +866,7 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 	}
 
 	// Send the profile to the client
-	if err := session.SendEvr([]evr.Message{response}); err != nil {
+	if err := session.SendEvr(response); err != nil {
 		return fmt.Errorf("failed to send OtherUserProfileSuccess: %w", err)
 	}
 	return nil

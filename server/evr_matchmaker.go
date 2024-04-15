@@ -681,12 +681,11 @@ func (p *EvrPipeline) PingEndpoints(ctx context.Context, session *sessionWS, mse
 
 // sendPingRequest sends a ping request to the given candidates.
 func (p *EvrPipeline) sendPingRequest(logger *zap.Logger, session *sessionWS, candidates []evr.Endpoint) error {
-	messages := []evr.Message{
+
+	if err := session.SendEvr(
 		evr.NewLobbyPingRequest(275, candidates),
 		evr.NewSTcpConnectionUnrequireEvent(),
-	}
-
-	if err := session.SendEvr(messages); err != nil {
+	); err != nil {
 		return err
 	}
 

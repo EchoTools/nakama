@@ -656,7 +656,7 @@ func (s *sessionWS) Format() SessionFormat {
 
 // SendEvr sends a message to the client in the EchoVR format.
 // TODO Transition to using streamsend for all messages.
-func (s *sessionWS) SendEvr(messages []evr.Message) error {
+func (s *sessionWS) SendEvr(messages ...evr.Message) error {
 	if s.logger.Core().Enabled(zap.DebugLevel) {
 		for _, message := range messages {
 			s.logger.Debug("Sending Message.", zap.Any("message", message))
@@ -690,7 +690,7 @@ func (s *sessionWS) Send(envelope *rtapi.Envelope, reliable bool) error {
 		if err != nil {
 			return fmt.Errorf("could not process outgoing message: %w", err)
 		}
-		return s.SendEvr(messages)
+		return s.SendEvr(messages...)
 	case SessionFormatProtobuf:
 		payload, err = proto.Marshal(envelope)
 	case SessionFormatJson:

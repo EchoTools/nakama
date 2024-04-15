@@ -22,9 +22,7 @@ func (p *EvrPipeline) lobbyMatchmakerStatusRequest(ctx context.Context, logger *
 	_ = in.(*evr.LobbyMatchmakerStatusRequest)
 
 	// TODO Check if the matchmaking ticket is still open
-	err := session.SendEvr([]evr.Message{
-		evr.NewLobbyMatchmakerStatusResponse(),
-	})
+	err := session.SendEvr(evr.NewLobbyMatchmakerStatusResponse())
 	if err != nil {
 		return fmt.Errorf("LobbyMatchmakerStatus: %v", err)
 	}
