@@ -139,7 +139,7 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 		ctx = context.WithValue(ctx, ctxDiscordIdKey{}, v)
 	}
 
-	// Add the Discord ID to the context if it's present in the request URL
+	// Add the Password to the context if it's present in the request URL
 	if v := request.URL.Query().Get(UserPasswordUrlParam); v != "" {
 		if len(v) > 32 {
 			v = v[:32]
@@ -490,15 +490,17 @@ IncomingLoop:
 
 		if s.format == SessionFormatEvr {
 			// EchoVR messages do not map directly onto nakama messages.
-			// TODO a switch statement here could direct to the match or not.
-			requests := make([]evr.Message, 0)
-			err := evr.Unmarshal(data, &requests)
-			if errors.Is(err, evr.ErrSymbolNotFound) {
-				s.logger.Debug("Received unknown message", zap.Error(err))
-			} else if err != nil {
+
+			requests, err := evr.ParsePacket(data)
+			if err != nil {
+				if errors.Is(err, evr.ErrSymbolNotFound) {
+					s.logger.Debug("Received unknown message", zap.Error(err))
+					continue
+				}
 				// If the payload is malformed the client is incompatible or misbehaving, either way disconnect it now.
 				s.logger.Warn("Received malformed payload", zap.Binary("data", data), zap.Error(err))
 				reason = "received malformed payload"
+				break
 			}
 			// Send to the Evr pipeline for routing/processing.
 			for _, request := range requests {
