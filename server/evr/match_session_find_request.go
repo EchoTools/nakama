@@ -7,16 +7,21 @@ import (
 	"github.com/gofrs/uuid/v5"
 )
 
+const (
+	Unk1_Flag0 = 1
+	Unk1_Flag1 = 768
+)
+
 // LobbyFindSessionRequest is a message from client to server requesting finding of an existing game session that
 // matches the message's underlying arguments.
 type LobbyFindSessionRequest struct {
 	VersionLock     uint64
 	Mode            Symbol
 	Level           Symbol
-	Platform        Symbol
-	Session         uuid.UUID
+	Platform        Symbol // DMO, OVR_ORG, etc.
+	LoginSession    uuid.UUID
 	Unk1            uint64
-	MatchingSession uuid.UUID
+	CurrentMatch    uuid.UUID
 	Channel         uuid.UUID
 	SessionSettings SessionSettings
 	EvrId           EvrId
@@ -38,9 +43,9 @@ func (m *LobbyFindSessionRequest) Stream(s *EasyStream) error {
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Mode) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Level) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Platform) },
-		func() error { return s.StreamGuid(&m.Session) },
+		func() error { return s.StreamGuid(&m.LoginSession) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Unk1) },
-		func() error { return s.StreamGuid(&m.MatchingSession) },
+		func() error { return s.StreamGuid(&m.CurrentMatch) },
 		func() error { return s.StreamGuid(&m.Channel) },
 		func() error { return s.StreamJson(&m.SessionSettings, true, NoCompression) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.EvrId.PlatformCode) },
@@ -63,15 +68,15 @@ func (m *LobbyFindSessionRequest) Stream(s *EasyStream) error {
 }
 
 func (m LobbyFindSessionRequest) String() string {
-	return fmt.Sprintf("%s(version_lock=%016x, mode=%s, level=%s, platform=%s, session=%s, unk1=%d, currentsession=%s, channel=%s, session_settings=%v, evr_id=%s, team_index=%d)",
+	return fmt.Sprintf("%s(version_lock=%016x, mode=%s, level=%s, platform=%s, login_session=%s, unk1=%d, current_match_id=%s, channel=%s, session_settings=%v, evr_id=%s, team_index=%d)",
 		m.Token(),
 		m.VersionLock,
 		m.Mode.Token(),
 		m.Level.Token(),
-		m.Platform.Token(),
-		m.Session.String(),
+		m.Platform.String(),
+		m.LoginSession.String(),
 		m.Unk1,
-		m.MatchingSession,
+		m.CurrentMatch,
 		m.Channel.String(),
 		m.SessionSettings.String(),
 		m.EvrId.Token(),
@@ -79,24 +84,24 @@ func (m LobbyFindSessionRequest) String() string {
 	)
 }
 
-func NewLobbyFindSessionRequest(versionLock uint64, matchMode Symbol, matchLevel Symbol, platform Symbol, session uuid.UUID, unk1 uint64, matchingSession uuid.UUID, channel uuid.UUID, sessionSettings SessionSettings, evrId EvrId, teamIndex int16) LobbyFindSessionRequest {
+func NewLobbyFindSessionRequest(versionLock uint64, matchMode Symbol, matchLevel Symbol, loginSession uuid.UUID, unk1 uint64, currentSession uuid.UUID, channel uuid.UUID, sessionSettings SessionSettings, platform Symbol, evrID EvrId, teamIndex int16) LobbyFindSessionRequest {
 	return LobbyFindSessionRequest{
 		VersionLock:     versionLock,
 		Mode:            matchMode,
 		Level:           matchLevel,
 		Platform:        platform,
-		Session:         session,
+		LoginSession:    loginSession,
 		Unk1:            unk1,
-		MatchingSession: matchingSession,
+		CurrentMatch:    currentSession,
 		Channel:         channel,
 		SessionSettings: sessionSettings,
-		EvrId:           evrId,
+		EvrId:           evrID,
 		TeamIndex:       teamIndex,
 	}
 }
 
 func (m *LobbyFindSessionRequest) SessionID() uuid.UUID {
-	return m.Session
+	return m.LoginSession
 }
 
 func (m *LobbyFindSessionRequest) EvrID() EvrId {
