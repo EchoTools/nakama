@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"log"
+	"reflect"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -24,8 +25,7 @@ func TestMultipleUnmarshal(t *testing.T) {
 	// Test case 2: Valid byte slice
 	b3 := append(testMessage, testMessage...)
 
-	packet := make([]Message, 0)
-	err2 := Unmarshal(b3, &packet)
+	packet, err2 := ParsePacket(b3)
 	if err2 != nil {
 		t.Errorf("Unexpected error: %v", err2)
 	}
@@ -54,8 +54,7 @@ func TestMarshal(t *testing.T) {
 
 	b3 := append(testMessage, testMessage...)
 
-	packets := make([]Message, 0)
-	err2 := Unmarshal(b3, &packets)
+	packets, err2 := ParsePacket(b3)
 	if err2 != nil {
 		t.Errorf("Unexpected error: %v", err2)
 	}
@@ -88,8 +87,7 @@ func TestMultipleMarshal(t *testing.T) {
 	// Test case 2: Valid byte slice
 	b3 := append(testMessage, testMessage...)
 
-	packet := make([]Message, 0)
-	err2 := Unmarshal(b3, &packet)
+	packet, err2 := ParsePacket(b3)
 	if err2 != nil {
 		t.Errorf("Unexpected error: %v", err2)
 	}
@@ -118,28 +116,26 @@ func TestUnmarshalUnknownSymbolPacket(t *testing.T) {
 
 	data := append(testMessage, testMessage...)
 	data[10] = 0x00
-	envelopes := make([]Message, 0)
-	err := Unmarshal(data, &envelopes)
+	packet, err := ParsePacket(data)
 	if !errors.Is(err, ErrSymbolNotFound) {
 		t.Errorf("got %v, want %s", err, ErrSymbolNotFound)
 		return
 	}
-	if len(envelopes) != 0 {
-		t.Fatalf("expected 0 message, got %v", len(envelopes))
+	if len(packet) != 0 {
+		t.Fatalf("expected 0 message, got %v", len(packet))
 	}
 
 	// Test case: Unknown symbol in first packet, known symbol in second packet
 
 	data = append(testMessage, testMessage...)
 	data[len(testMessage)+10] = 0x00
-	envelopes = make([]Message, 0)
-	err = Unmarshal(data, &envelopes)
+	packet, err = ParsePacket(data)
 	if !errors.Is(err, ErrSymbolNotFound) {
 		t.Errorf("got %s, want %s", err, ErrSymbolNotFound)
 		return
 	}
-	if len(envelopes) != 1 {
-		t.Fatalf("expected 1 message, got %v", len(envelopes))
+	if len(packet) != 1 {
+		t.Fatalf("expected 1 message, got %v", len(packet))
 	}
 
 	// Test case: Unknown symbol in both packets
@@ -147,43 +143,40 @@ func TestUnmarshalUnknownSymbolPacket(t *testing.T) {
 	data = append(testMessage, testMessage...)
 	data[10] = 0x00
 	data[len(testMessage)+10] = 0x00
-	envelopes = make([]Message, 0)
-	err = Unmarshal(data, &envelopes)
+	packet, err = ParsePacket(data)
 	if !errors.Is(err, ErrSymbolNotFound) {
 		t.Errorf("got %s, want %s", err, ErrSymbolNotFound)
 		return
 	}
-	if len(envelopes) != 0 {
-		t.Fatalf("expected 0 messages, got %v", len(envelopes))
+	if len(packet) != 0 {
+		t.Fatalf("expected 0 messages, got %v", len(packet))
 	}
 
 	// Test case: Short packet in first message, valid second
 
 	data = append(testMessage[:len(testMessage)-8], testMessage...)
 	data[len(testMessage)+10] = 0x00
-	envelopes = make([]Message, 0)
-	err = Unmarshal(data, &envelopes)
+	packet, err = ParsePacket(data)
 	if !errors.Is(err, ErrInvalidPacket) {
 		t.Errorf("got %v, want %v", err, ErrInvalidPacket)
 		return
 	}
-	if len(envelopes) != 0 {
-		t.Fatalf("expected 0 messages, got %v", len(envelopes))
+	if len(packet) != 0 {
+		t.Fatalf("expected 0 messages, got %v", len(packet))
 	}
 
 	// Test case: Short packet in second message, valid first
 
 	data = append(testMessage, testMessage[:len(testMessage)-8]...)
 	data[len(testMessage)+10] = 0x00
-	envelopes = make([]Message, 0)
-	err = Unmarshal(data, &envelopes)
+	packet, err = ParsePacket(data)
 	if !errors.Is(err, ErrInvalidPacket) {
 		t.Errorf("got %s, want %s", err, ErrInvalidPacket)
 		return
 	}
 
-	if len(envelopes) != 1 {
-		t.Fatalf("expected 1 messages, got %v", len(envelopes))
+	if len(packet) != 1 {
+		t.Fatalf("expected 1 messages, got %v", len(packet))
 	}
 
 }
