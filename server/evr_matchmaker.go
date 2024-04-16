@@ -678,8 +678,8 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 		}
 		if success, _ := p.tracker.Track(session.Context(), session.ID(), stream, session.UserID(), m); success {
 			// Kick the user from any other matches they may be part of.
-			// WARNING this cannot be used when joining a broadcaster to a match
-			p.tracker.UntrackLocalByModes(session.ID(), matchStreamModes, stream)
+			// WARNING This cannot be used during transition. It will kick the player from their current match.
+			//p.tracker.UntrackLocalByModes(session.ID(), matchStreamModes, stream)
 		}
 	}
 

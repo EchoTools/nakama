@@ -268,8 +268,7 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 	backfillDelay := time.Duration(interval*idealMatchIntervals) * time.Second
 	if skipDelay {
 		backfillDelay = 0 * time.Second
-	}
-	if msession.Party != nil && !msession.Party.ID.IsNil() {
+	} else if msession.Party != nil && !msession.Party.ID.IsNil() {
 		// Add extra delay for backfill when a user is in a party
 		backfillDelay += 45 * time.Second
 	}
@@ -281,12 +280,11 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 	backfillTicker := time.NewTimer(backfilInterval)
 	backfillDelayTimer := time.NewTimer(backfillDelay)
 
-	<-backfillDelayTimer.C
-
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
+		case <-backfillDelayTimer.C:
 		case <-backfillTicker.C:
 		}
 

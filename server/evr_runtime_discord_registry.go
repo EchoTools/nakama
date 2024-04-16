@@ -542,14 +542,15 @@ func (r *LocalDiscordRegistry) UpdateGuildGroup(ctx context.Context, logger runt
 		for _, user := range users {
 			// Disconnect the user
 			if user.GetUserId() == userID.String() {
-				go func() {
-					r.logger.Debug("Disconnecting suspended user %s match session: %s", user.GetUserId(), user.GetSessionId())
+
+				go func(userID, sessionID string) {
+					r.logger.Debug("Disconnecting suspended user %s match session: %s", userID, sessionID)
 					// Add a wait time, otherwise the user will not see the suspension message
 					<-time.After(15 * time.Second)
-					if err := r.nk.SessionDisconnect(ctx, user.GetSessionId(), runtime.PresenceReasonDisconnect); err != nil {
+					if err := r.nk.SessionDisconnect(ctx, sessionID, runtime.PresenceReasonDisconnect); err != nil {
 						r.logger.Error("Error disconnecting suspended user: %w", err)
 					}
-				}()
+				}(user.GetUserId(), user.GetSessionId())
 			}
 		}
 	}
