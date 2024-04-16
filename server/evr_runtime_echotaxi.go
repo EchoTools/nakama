@@ -105,6 +105,13 @@ func EchoTaxiRuntimeModule(ctx context.Context, logger runtime.Logger, db *sql.D
 		})
 	*/
 
+	// Respond to messages
+	respond := true
+
+	if s, ok := env["DISABLE_DISCORD_BOT"]; ok && s == "true" {
+		respond = false
+	}
+
 	bot.AddHandler(func(s *discordgo.Session, m *discordgo.MessageReactionAdd) {
 		handleMessageReactionAdd(ctx, s, m, nk, logger, hailRegistry)
 	})
@@ -113,19 +120,18 @@ func EchoTaxiRuntimeModule(ctx context.Context, logger runtime.Logger, db *sql.D
 		handleMessageReactionRemove(ctx, s, m, logger, hailRegistry)
 	})
 
-	bot.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
+	if respond {
+		bot.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
+			handleMessageCreate_EchoTaxi_React(ctx, s, m, logger, nk)
+		})
 
-	})
-
-	bot.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
-		handleMessageCreate_EchoTaxi_React(ctx, s, m, logger, nk)
-	})
-	bot.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
-		if m.Author.Bot || m.Author.ID == sprockLinkDiscordId {
-			return
-		}
-		checkForSparkLink(s, m, hailRegistry)
-	})
+		bot.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
+			if m.Author.Bot || m.Author.ID == sprockLinkDiscordId {
+				return
+			}
+			checkForSparkLink(s, m, hailRegistry)
+		})
+	}
 
 	err = bot.Open()
 	if err != nil {
