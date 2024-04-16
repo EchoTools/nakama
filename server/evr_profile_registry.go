@@ -125,7 +125,7 @@ type ProfileRegistry struct {
 	unlocksByItemName map[string]string
 
 	// Fast lookup of profiles for players already in matches
-	profileByMatchIDByEvrID map[string]map[evr.EvrId][]byte // map[matchID]map[evrID]profileJSON
+	profileByEvrID map[evr.EvrId][]byte // map[matchID]map[evrID]profileJSON
 }
 
 func NewProfileRegistry(nk runtime.NakamaModule, db *sql.DB, logger runtime.Logger, discordRegistry DiscordRegistry) *ProfileRegistry {
@@ -140,8 +140,8 @@ func NewProfileRegistry(nk runtime.NakamaModule, db *sql.DB, logger runtime.Logg
 		nk:              nk,
 		discordRegistry: discordRegistry,
 
-		profileByUserID:         &MapOf[string, *GameProfileData]{},
-		profileByMatchIDByEvrID: make(map[string]map[evr.EvrId][]byte),
+		profileByUserID: &MapOf[string, *GameProfileData]{},
+		profileByEvrID:  make(map[evr.EvrId][]byte),
 
 		unlocksByItemName: unlocksByFieldName,
 	}
@@ -166,47 +166,37 @@ func NewProfileRegistry(nk runtime.NakamaModule, db *sql.DB, logger runtime.Logg
 }
 
 func (r *ProfileRegistry) removeStaleProfiles(ctx context.Context) error {
-	minSize := 2
-	maxSize := MatchMaxSize
-	matches, err := r.nk.MatchList(ctx, 100, true, "", &minSize, &maxSize, "*")
-	if err != nil {
-		r.logger.Error("failed to list matches", zap.Error(err))
-	}
-
-	matchIDs := lo.Map(matches, func(m *api.Match, _ int) string { return m.GetMatchId() })
-
 	r.Lock()
-	for matchID := range r.profileByMatchIDByEvrID {
-		if !lo.Contains(matchIDs, matchID) {
-			delete(r.profileByMatchIDByEvrID, matchID)
+	defer r.Unlock()
+	for evrID := range r.profileByEvrID {
+		count, err := r.nk.StreamCount(StreamModeEvr, evrID.UUID().String(), svcMatchID.String(), "")
+		if err != nil {
+			return err
+		}
+		if count == 0 {
+			delete(r.profileByEvrID, evrID)
 		}
 	}
-	r.Unlock()
-
 	return nil
 }
 
 // Fast lookup of profiles for players already in matches
-func (r *ProfileRegistry) GetProfileByMatchIDByEvrID(matchID string, evrID evr.EvrId) (data []byte, found bool) {
+func (r *ProfileRegistry) GetProfileByEvrID(evrID evr.EvrId) (data []byte, found bool) {
 	r.RLock()
-	p, ok := r.profileByMatchIDByEvrID[matchID][evrID]
+	p, ok := r.profileByEvrID[evrID]
 	r.RUnlock()
 	return p, ok
 }
 
 // Fast lookup of profiles for players already in matches
-func (r *ProfileRegistry) SetProfileByMatchIDByEvrID(matchID string, evrID evr.EvrId, profile *evr.ServerProfile) error {
+func (r *ProfileRegistry) SetProfileByEvrID(evrID evr.EvrId, profile *evr.ServerProfile) error {
 	data, err := json.Marshal(profile)
 	if err != nil {
 		return err
 	}
 
 	r.Lock()
-	if matchProfiles, ok := r.profileByMatchIDByEvrID[matchID]; ok {
-		matchProfiles[evrID] = data
-	} else {
-		r.profileByMatchIDByEvrID[matchID] = map[evr.EvrId][]byte{evrID: data}
-	}
+	r.profileByEvrID[evrID] = data
 	r.Unlock()
 	return nil
 }

@@ -373,21 +373,7 @@ func (p *EvrPipeline) MatchCreateLoop(session *sessionWS, msession *MatchmakingS
 			}
 			// Keep trying until the context is done
 		case codes.NotFound, codes.ResourceExhausted, codes.Unavailable:
-			/*
-				select {
 
-				case <-time.After(5 * time.Second):
-					// Wait 5 seconds before trying again.
-					continue
-
-				case <-stageTimer.C:
-					// Move Stage 2: Kill a private lobby with only 1-2 people in it.
-					err := p.pruneMatches(ctx, session)
-					if err != nil {
-						return msession.Cancel(err)
-					}
-				}
-			*/
 		default:
 			return msession.Cancel(err)
 		}
@@ -401,7 +387,7 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 		logger.Warn("Matchmaking session already exists", zap.Any("tickets", s.Tickets))
 	}
 	joinFn := func(matchID string, query string) error {
-		err := p.JoinEvrMatch(parentCtx, logger, session, query, matchID, *ml.Channel, int(ml.TeamIndex))
+		err := p.JoinEvrMatch(parentCtx, logger, session, query, matchID, int(ml.TeamIndex))
 		if err != nil {
 			return NewMatchmakingResult(logger, ml.Mode, *ml.Channel).SendErrorToSession(session, err)
 		}
@@ -429,7 +415,24 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 	logger = msession.Logger
 
 	skipBackfillDelay := false
-	if ml.TeamIndex == TeamIndex(evr.TeamSpectator) || ml.TeamIndex == TeamIndex(evr.TeamModerator) {
+	if ml.TeamIndex == TeamIndex(evr.TeamModerator) {
+		skipBackfillDelay = true
+		// Check that the user is a moderator for this channel, or globally
+		guild, err := p.discordRegistry.GetGuildByGroupId(parentCtx, ml.Channel.String())
+		if err != nil || guild == nil {
+			logger.Warn("failed to get guild: %v", zap.Error(err))
+			ml.TeamIndex = TeamIndex(evr.TeamSpectator)
+		} else {
+			discordID, err := p.discordRegistry.GetDiscordIdByUserId(parentCtx, session.userID)
+			if err != nil {
+				return fmt.Errorf("failed to get discord id: %v", err)
+			}
+			if ok, _, err := p.discordRegistry.isModerator(parentCtx, guild.ID, discordID); err != nil || !ok {
+				ml.TeamIndex = TeamIndex(evr.TeamSpectator)
+			}
+		}
+	}
+	if ml.TeamIndex == TeamIndex(evr.TeamSpectator) {
 		skipBackfillDelay = true
 		if ml.Mode != evr.ModeArenaPublic && ml.Mode != evr.ModeCombatPublic {
 			return fmt.Errorf("spectators are only allowed in arena and combat matches")
@@ -630,7 +633,7 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 		joinFn := func(matchID string, query string) error {
 			logger := logger.With(zap.String("mid", matchID))
 
-			err := p.JoinEvrMatch(ctx, logger, session, query, matchID, *ml.Channel, int(ml.TeamIndex))
+			err := p.JoinEvrMatch(ctx, logger, session, query, matchID, int(ml.TeamIndex))
 			switch status.Code(err) {
 			case codes.ResourceExhausted:
 				logger.Warn("Failed to join match (retrying): ", zap.Error(err))
@@ -658,7 +661,7 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 		}
 
 		// Join the match
-		err = p.JoinEvrMatch(msession.Ctx, logger, session, "", matchID, request.Channel, int(ml.TeamIndex))
+		err = p.JoinEvrMatch(msession.Ctx, logger, session, "", matchID, int(ml.TeamIndex))
 		if err != nil {
 			return result.SendErrorToSession(session, err)
 		}
@@ -697,6 +700,8 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 	case int(match.GetSize()) >= MatchMaxSize:
 		err = status.Errorf(codes.ResourceExhausted, "Match is full")
 	case ml.LobbyType == PublicLobby:
+
+		// Public matches may only be joined by spectators or moderators
 		if ml.TeamIndex != Spectator && ml.TeamIndex != Moderator {
 			err = status.Errorf(codes.InvalidArgument, "Match is a public match")
 		}
@@ -715,7 +720,7 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 	}
 
 	// Join the match
-	if err = p.JoinEvrMatch(ctx, logger, session, "", matchId, *ml.Channel, int(request.TeamIndex)); err != nil {
+	if err = p.JoinEvrMatch(ctx, logger, session, "", matchId, int(request.TeamIndex)); err != nil {
 		return NewMatchmakingResult(logger, 0xFFFFFFFFFFFFFFFF, request.LobbyId).SendErrorToSession(session, status.Errorf(codes.NotFound, err.Error()))
 	}
 	return nil

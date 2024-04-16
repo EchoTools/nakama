@@ -49,7 +49,7 @@ const (
 var (
 	ErrMatchmakingPingTimeout        = status.Errorf(codes.DeadlineExceeded, "Ping timeout")
 	ErrMatchmakingTimeout            = status.Errorf(codes.DeadlineExceeded, "Matchmaking timeout")
-	ErrMatchmakingNoAvailableServers = status.Errorf(codes.ResourceExhausted, "No available servers")
+	ErrMatchmakingNoAvailableServers = status.Errorf(codes.Unavailable, "No available servers")
 	ErrMatchmakingCanceled           = status.Errorf(codes.Canceled, "Matchmaking canceled")
 	ErrMatchmakingCanceledByPlayer   = status.Errorf(codes.Canceled, "Matchmaking canceled by player")
 	ErrMatchmakingRestarted          = status.Errorf(codes.Canceled, "matchmaking restarted")
