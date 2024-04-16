@@ -616,3 +616,47 @@ func setMatchmakingStatusRpc(ctx context.Context, logger runtime.Logger, db *sql
 
 	return string(statusJson), nil
 }
+
+type BanUserPayload struct {
+	UserId string `json:"userId"`
+}
+
+func BanUserRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	// Check the user calling the RPC has permissions depending on your criteria
+	hasPermission := true
+	if !hasPermission {
+		logger.Error("unprivileged user attempted to use the BanUser RPC")
+		return "", runtime.NewError("unauthorized", 7)
+	}
+
+	// Extract the payload
+	var data BanUserPayload
+	if err := json.Unmarshal([]byte(payload), &data); err != nil {
+		logger.Error("unable to deserialize payload")
+		return "", runtime.NewError("invalid payload", 3)
+	}
+
+	// Ban the user
+	if err := nk.UsersBanId(ctx, []string{data.UserId}); err != nil {
+		logger.Error("unable to ban user")
+		return "", runtime.NewError("unable to ban user", 13)
+	}
+
+	// Log the user out
+	if err := nk.SessionLogout(data.UserId, "", ""); err != nil {
+		logger.Error("unable to logout user")
+		return "", runtime.NewError("unable to logout user", 13)
+	}
+
+	// Get any existing connections by inspecting the notifications stream
+	if presences, err := nk.StreamUserList(0, data.UserId, "", "", true, true); err != nil {
+		logger.Debug("no active connections found for user")
+	} else {
+		// For each active connection, disconnect them
+		for _, presence := range presences {
+			nk.SessionDisconnect(ctx, presence.GetSessionId(), runtime.PresenceReasonDisconnect)
+		}
+	}
+
+	return "{}", nil
+}
