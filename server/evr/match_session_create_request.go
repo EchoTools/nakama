@@ -48,6 +48,7 @@ func (m *LobbyCreateSessionRequest) Stream(s *EasyStream) error {
 		func() error { return s.StreamStruct(&m.EvrId) },
 		func() error {
 			if s.Mode == DecodeMode && s.Len() < 2 || s.Mode == EncodeMode && m.TeamIndex == -1 {
+				m.TeamIndex = -1
 				return nil
 			}
 			return s.StreamNumber(binary.LittleEndian, &m.TeamIndex)

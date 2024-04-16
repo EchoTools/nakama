@@ -7,11 +7,6 @@ import (
 	"github.com/gofrs/uuid/v5"
 )
 
-const (
-	Unk1_Flag0 = 1
-	Unk1_Flag1 = 768
-)
-
 // LobbyFindSessionRequest is a message from client to server requesting finding of an existing game session that
 // matches the message's underlying arguments.
 type LobbyFindSessionRequest struct {
@@ -52,6 +47,7 @@ func (m *LobbyFindSessionRequest) Stream(s *EasyStream) error {
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.EvrId.AccountId) },
 		func() error {
 			if s.Mode == DecodeMode && s.Len() < 2 || s.Mode == EncodeMode && m.TeamIndex == -1 {
+				m.TeamIndex = -1
 				return nil
 			}
 			return s.StreamNumber(binary.LittleEndian, &m.TeamIndex)
