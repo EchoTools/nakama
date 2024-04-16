@@ -178,79 +178,30 @@ var (
 				},
 			},
 		},
-		/*
-			{
-				Name:        "badges",
-				Description: "manage badge entitlements",
-				Options: []*discordgo.ApplicationCommandOption{
-					{
-						Name:        "request",
-						Description: "request badge(s)",
-						Type:        discordgo.ApplicationCommandOptionSubCommand,
-						Options: []*discordgo.ApplicationCommandOption{
-							// Also, subcommand groups aren't capable of
-							// containing options, by the name of them, you can see
-							// they can only contain subcommands
-							{
-								Type:        discordgo.ApplicationCommandOptionString,
-								Name:        "title",
-								Description: "Badge to request",
-								Required:    true,
-								Choices:     vrmlGroupChoices,
-							},
-						},
-					},
-					{
-						Name:        "manage",
-						Description: "manage badge(s)",
-						Type:        discordgo.ApplicationCommandOptionSubCommand,
-						Options: []*discordgo.ApplicationCommandOption{
-							{
-								Type:        discordgo.ApplicationCommandOptionString,
-								Name:        "action",
-								Description: "Action to perform",
-								Required:    true,
-								Choices: []*discordgo.ApplicationCommandOptionChoice{
-									{
-										Name:  "add user(s)",
-										Value: "add",
-									},
-									{
-										Name:  "remove user(s)",
-										Value: "remove",
-									},
-									{
-										Name:  "ban user(s) (from requesting)",
-										Value: "ban",
-									},
-								},
-							},
-							{
-								Type:        discordgo.ApplicationCommandOptionUser,
-								Name:        "user",
-								Description: "user to add or remove",
-								Required:    true,
-							},
-							{
-								Type:        discordgo.ApplicationCommandOptionString,
-								Name:        "group",
-								Description: "Group to manage",
-								Required:    true,
-								Choices:     vrmlGroupChoices,
-							},
-							{
-								Type:        discordgo.ApplicationCommandOptionString,
-								Name:        "group2",
-								Description: "Group to manage",
-								Required:    false,
-								Choices:     vrmlGroupChoices,
-							},
+
+		{
+			Name:        "badges",
+			Description: "manage badge entitlements",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Name:        "request",
+					Description: "request badge(s)",
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Options: []*discordgo.ApplicationCommandOption{
+						// Also, subcommand groups aren't capable of
+						// containing options, by the name of them, you can see
+						// they can only contain subcommands
+						{
+							Type:        discordgo.ApplicationCommandOptionString,
+							Name:        "title",
+							Description: "Badge to request",
+							Required:    true,
+							Choices:     vrmlGroupChoices,
 						},
 					},
 				},
 			},
-		*/
-
+		},
 		{
 			Name:        "party",
 			Description: "Manage EchoVR parties.",
@@ -380,7 +331,7 @@ var (
 
 // InitializeDiscordBot initializes the discord bot and synchronizes the guilds with nakama groups. It also registers the bot's handlers.
 func (d *DiscordAppBot) InitializeDiscordBot() error {
-	var err error
+
 	bot := d.dg
 	if bot == nil {
 		return nil
@@ -600,12 +551,6 @@ func (d *DiscordAppBot) InitializeDiscordBot() error {
 			logger.Error("Failed to register slash commands: %w", err)
 		}
 	})
-
-	if err = bot.Open(); err != nil {
-		logger.Error("Failed to open discord bot connection: %w", err)
-	}
-
-	logger.Info("Discord bot started: %s", bot.State.User.String())
 	return nil
 }
 func (d *DiscordAppBot) UnregisterCommandsAll(ctx context.Context, logger runtime.Logger, dg *discordgo.Session) {

@@ -425,7 +425,7 @@ func ServiceStatusRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	  }`
 
 	objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
-		&runtime.StorageRead{
+		{
 			Collection: "serviceStatus",
 			Key:        "services",
 			UserID:     uuid.Nil.String(),

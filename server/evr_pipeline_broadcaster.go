@@ -300,13 +300,13 @@ func (p *EvrPipeline) getBroadcasterHostInfo(ctx context.Context, logger *zap.Lo
 
 		// Create a slice of user's guild group IDs
 		for _, g := range groups {
-			guildId, ok := p.discordRegistry.Get(g.GetId())
-			if !ok {
-				logger.Warn("Guild not found", zap.String("groupId", g.GetId()))
+			md, err := p.discordRegistry.GetGuildGroupMetadata(ctx, g.GetId())
+			if err != nil {
+				logger.Warn("Failed to get guild group metadata", zap.String("groupId", g.GetId()), zap.Error(err))
 				continue
 			}
 
-			guildIDs = append(guildIDs, guildId)
+			guildIDs = append(guildIDs, md.GuildId)
 		}
 	}
 

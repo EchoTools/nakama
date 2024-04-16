@@ -111,8 +111,19 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 
 	appBot := NewDiscordAppBot(nk, runtimeLogger, metrics, pipeline, config, discordRegistry, dg)
 
-	if err := appBot.InitializeDiscordBot(); err != nil {
-		logger.Error("Failed to initialize app bot", zap.Error(err))
+	if disable, ok := vars["DISABLE_DISCORD_BOT"]; ok && disable == "true" {
+		logger.Info("Discord bot is disabled")
+	} else {
+		if err := appBot.InitializeDiscordBot(); err != nil {
+			logger.Error("Failed to initialize app bot", zap.Error(err))
+		}
+
+		if err = appBot.dg.Open(); err != nil {
+			logger.Error("Failed to open discord bot connection: %w", zap.Error(err))
+		}
+
+		logger.Info("Discord bot started", zap.String("user", dg.State.User.String()))
+		return nil
 	}
 
 	/*

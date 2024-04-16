@@ -60,6 +60,7 @@ type DiscordRegistry interface {
 	// GetUser looks up the Discord user by the user ID. Potentially using the state cache.
 	GetUser(ctx context.Context, discordId string) (*discordgo.User, error)
 	UpdateGuildGroup(ctx context.Context, logger runtime.Logger, userID uuid.UUID, guildID, discordID string) error
+	isModerator(ctx context.Context, guildID, discordID string) (isModerator bool, isGlobal bool, err error)
 }
 
 // The discord registry is a storage-backed lookup table for discord user ids to nakama user ids.
@@ -871,4 +872,33 @@ func (r *LocalDiscordRegistry) GetAllSuspensions(ctx context.Context, userId uui
 		}
 	}
 	return suspensions, nil
+}
+
+func (r *LocalDiscordRegistry) isModerator(ctx context.Context, guildID, discordID string) (isModerator bool, isGlobal bool, err error) {
+	// Get the guild group metadata
+	if guildID == "" {
+		// Check if they are a member of the Global Moderators group
+		groups, _, err := r.nk.UserGroupsList(ctx, SystemUserId, 100, nil, "")
+		if err != nil {
+			return false, false, fmt.Errorf("error getting user groups: %w", err)
+		}
+		for _, g := range groups {
+			if g.Group.LangTag != "guild" && g.Group.Name == "Global Moderators" {
+				return true, true, nil
+			}
+		}
+	}
+	md, err := r.GetGuildGroupMetadata(ctx, guildID)
+	if err != nil {
+		return false, false, fmt.Errorf("error getting guild group metadata: %w", err)
+	}
+
+	// Get the member
+	member, err := r.GetGuildMember(ctx, guildID, discordID)
+	if err != nil {
+		return false, false, fmt.Errorf("error getting guild member: %w", err)
+	}
+
+	// Check if the member has the moderator role
+	return slices.Contains(member.Roles, md.ModeratorRole), false, nil
 }
