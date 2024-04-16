@@ -230,6 +230,7 @@ type EvrMatchState struct {
 	Players                 []PlayerInfo                 `json:"players,omitempty"` // The displayNames of the players (by team name) in the match.
 	EvrIDs                  []evr.EvrId                  `json:"evrids,omitempty"`  // The evr ids of the players in the match.
 	UserIDs                 []string                     `json:"userids,omitempty"` // The user ids of the players in the match.
+	teamPresets             map[evr.EvrId]int            // [evrID]TeamIndex
 	presences               map[string]*EvrMatchPresence // [sessionId]EvrMatchPresence
 	broadcaster             runtime.Presence             // The broadcaster's presence
 	presenceByEvrId         map[string]*EvrMatchPresence // lookup table for EchoVR ID
@@ -340,6 +341,7 @@ func NewEvrMatchState(endpoint evr.Endpoint, config *MatchBroadcaster, sessionId
 		presenceByEvrId:         make(map[string]*EvrMatchPresence, MatchMaxSize),
 		presenceByPlayerSession: make(map[string]*EvrMatchPresence, MatchMaxSize),
 		presenceCache:           make(map[string]*EvrMatchPresence, MatchMaxSize),
+		teamPresets:             make(map[evr.EvrId]int, MatchMaxSize),
 		UserIDs:                 make([]string, 0, MatchMaxSize),
 		emptyTicks:              0,
 		tickRate:                10,
@@ -552,9 +554,14 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		}
 	}
 
-	if mp.TeamIndex, ok = selectTeamForPlayer(logger, mp, state); !ok {
-		// The lobby is full, reject the player.
-		return state, false, ErrJoinRejectedLobbyFull
+	// If the match has been running for less than 15 seconds, check the presets for the team
+	if teamIndex, ok := state.teamPresets[mp.EvrId]; ok && time.Since(state.Started) < 15*time.Second {
+		mp.TeamIndex = teamIndex
+	} else {
+		if mp.TeamIndex, ok = selectTeamForPlayer(logger, mp, state); !ok {
+			// The lobby is full, reject the player.
+			return state, false, ErrJoinRejectedLobbyFull
+		}
 	}
 
 	// Reserve this player's spot in the match.
@@ -928,7 +935,11 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 			// The level is not set, set it to zero
 			state.Level = 0
 		}
-
+		if newState.Players != nil {
+			for _, player := range newState.Players {
+				state.teamPresets[player.EvrID] = int(player.Team)
+			}
+		}
 		// Tell the broadcaster to start the session.
 		channel := uuid.Nil
 		if state.Channel != nil {

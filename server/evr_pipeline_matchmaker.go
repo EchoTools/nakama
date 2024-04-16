@@ -269,6 +269,11 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 	if skipDelay {
 		backfillDelay = 0 * time.Second
 	}
+	if msession.Party != nil && !msession.Party.ID.IsNil() {
+		// Add extra delay for backfill when a user is in a party
+		backfillDelay += 45 * time.Second
+	}
+
 	// Check for a backfill match on a regular basis
 	backfilInterval := time.Duration(10) * time.Second
 
@@ -276,11 +281,12 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 	backfillTicker := time.NewTimer(backfilInterval)
 	backfillDelayTimer := time.NewTimer(backfillDelay)
 
+	<-backfillDelayTimer.C
+
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-backfillDelayTimer.C:
 		case <-backfillTicker.C:
 		}
 
@@ -303,7 +309,7 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 			// Stage 1: Check if there is an available broadcaster
 			matchID, err := p.MatchCreate(ctx, session, msession, msession.Label)
 			if err != nil || matchID == "" {
-				logger.Warn("Failed to create match", zap.Any("state", msession.Label), zap.Error(err))
+				logger.Warn("MatchCreate failed, continuing...", zap.Any("state", msession.Label), zap.Error(err))
 				continue
 			}
 			foundMatch = FoundMatch{
