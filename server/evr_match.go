@@ -720,18 +720,19 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 	for _, p := range presences {
 		delete(state.presences, p.GetSessionId())
 	}
+	if len(rejects) > 0 {
 
-	go func(rejects []uuid.UUID) {
-		// Inform players (if they are still in the match) that the broadcaster has disconnected.
-		messages := []evr.Message{
-			evr.NewBroadcasterPlayersRejected(evr.PlayerRejectionReasonDisconnected, rejects...),
-		}
-		err := m.dispatchMessages(ctx, logger, dispatcher, messages, []runtime.Presence{state.broadcaster}, nil)
-		if err != nil {
-			logger.Error("failed to dispatch broadcaster disconnected message: %v", err)
-		}
-	}(rejects)
-
+		go func(rejects []uuid.UUID) {
+			// Inform players (if they are still in the match) that the broadcaster has disconnected.
+			messages := []evr.Message{
+				evr.NewBroadcasterPlayersRejected(evr.PlayerRejectionReasonDisconnected, rejects...),
+			}
+			err := m.dispatchMessages(ctx, logger, dispatcher, messages, []runtime.Presence{state.broadcaster}, nil)
+			if err != nil {
+				logger.Error("failed to dispatch broadcaster disconnected message: %v", err)
+			}
+		}(rejects)
+	}
 	state.rebuildCache()
 	// Update the label that includes the new player list.
 	err := m.updateLabel(dispatcher, state)

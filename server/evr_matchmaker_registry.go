@@ -982,7 +982,7 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, logger *zap.Logger, se
 
 		Logger:        logger,
 		UserId:        session.UserID(),
-		MatchJoinCh:   make(chan FoundMatch, 1),
+		MatchJoinCh:   make(chan FoundMatch, 5),
 		PingResultsCh: make(chan []evr.EndpointPingResult),
 		Expiry:        time.Now().UTC().Add(findAttemptsExpiry),
 		Label:         ml,
