@@ -33,5 +33,5 @@ func (m *BroadcasterPlayerRemoved) Stream(s *EasyStream) error {
 }
 func (m *BroadcasterPlayerRemoved) String() string {
 
-	return fmt.Sprintf("%s(session=%s)", m.Token(), m.PlayerSession.String())
+	return fmt.Sprintf("BroadcasterPlayerRemoved(player_session=%s)", m.PlayerSession.String())
 }
