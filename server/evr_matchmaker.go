@@ -42,6 +42,7 @@ func (p *EvrPipeline) ListUnassignedLobbies(ctx context.Context, session *sessio
 		// Add the channels to the query
 		qparts = append(qparts, HostedChannels(ml.Broadcaster.Channels).Query(Must, 0))
 	}
+
 	// Add each hosted channel as a SHOULD, with decreasing boost
 
 	for i, channel := range ml.Broadcaster.Channels {
