@@ -1165,7 +1165,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				if err != nil {
 					logger.Error("Failed to read matchmaking config", zap.Error(err))
 				}
-				matchmakingConfig := &MatchmakingConfig{}
+				matchmakingConfig := &MatchmakingSettings{}
 				if len(objs) != 0 {
 					if err := json.Unmarshal([]byte(objs[0].Value), matchmakingConfig); err != nil {
 						logger.Error("Failed to unmarshal matchmaking config", zap.Error(err))
@@ -1272,7 +1272,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				if err != nil {
 					logger.Error("Failed to read matchmaking config", zap.Error(err))
 				}
-				matchmakingConfig := &MatchmakingConfig{}
+				matchmakingConfig := &MatchmakingSettings{}
 				if len(objs) != 0 {
 					if err := json.Unmarshal([]byte(objs[0].Value), matchmakingConfig); err != nil {
 						logger.Error("Failed to unmarshal matchmaking config", zap.Error(err))

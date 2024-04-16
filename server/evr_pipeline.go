@@ -117,20 +117,11 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		if err := appBot.InitializeDiscordBot(); err != nil {
 			logger.Error("Failed to initialize app bot", zap.Error(err))
 		}
-
-		if err = appBot.dg.Open(); err != nil {
-			logger.Error("Failed to open discord bot connection: %w", zap.Error(err))
-		}
-
-		logger.Info("Discord bot started", zap.String("user", dg.State.User.String()))
-		return nil
 	}
 
-	/*
-		if err = discordRegistry.InitializePartyBot(ctx, pipeline); err != nil {
-			logger.Error("Failed to initialize party bot", zap.Error(err))
-		}
-	*/
+	if err = appBot.dg.Open(); err != nil {
+		logger.Error("Failed to open discord bot connection: %w", zap.Error(err))
+	}
 
 	// Every 5 minutes, store the cache.
 

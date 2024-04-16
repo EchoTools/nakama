@@ -412,6 +412,50 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 		return err
 	}
 
+	// Load the user's matchmaking config
+
+	config, err := p.matchmakingRegistry.LoadMatchmakingSettings(msession.Ctx, session.userID.String())
+	if err != nil {
+		logger.Error("Failed to load matchmaking config", zap.Error(err))
+	}
+
+	matchID := ""
+	// Check for a direct match first
+	if config.NextMatchID != "" {
+		matchID = config.NextMatchID
+	}
+
+	config.NextMatchID = ""
+	err = p.matchmakingRegistry.storeMatchmakingConfig(msession.Ctx, config, session.userID.String())
+	if err != nil {
+		logger.Error("Failed to save matchmaking config", zap.Error(err))
+	}
+
+	if matchID != "" {
+		logger.Debug("Attempting to join match from settings", zap.String("mid", matchID))
+		match, _, err := p.matchRegistry.GetMatch(msession.Ctx, matchID)
+		if err != nil {
+			logger.Error("Failed to get match", zap.Error(err))
+		} else {
+			if match == nil {
+				logger.Warn("Match not found", zap.String("mid", matchID))
+			} else {
+				p.metrics.CustomCounter("matchmaking_direct_match", map[string]string{}, 1)
+				// Join the match
+				msession.MatchJoinCh <- FoundMatch{
+					MatchID:   matchID,
+					Query:     "",
+					TeamIndex: TeamIndex(evr.TeamUnassigned),
+				}
+				<-time.After(3 * time.Second)
+				select {
+				case <-msession.Ctx.Done():
+					return nil
+				default:
+				}
+			}
+		}
+	}
 	logger = msession.Logger
 
 	skipBackfillDelay := false
@@ -478,7 +522,7 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 func (p *EvrPipeline) lobbyPingResponse(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	response := in.(*evr.LobbyPingResponse)
 
-	userID := session.UserID()
+	userID := session.userID
 	// Validate the connection.
 	if userID == uuid.Nil {
 		return fmt.Errorf("session not authenticated")
