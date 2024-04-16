@@ -762,7 +762,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 	if int(tick)%(30*state.tickRate) == 0 {
 
 		// If the match was started more than 60 seconds ago, and there are no players, shut down the match.
-		if state.Started.Before(time.Now().Add(-60*time.Second)) && state.LobbyType != UnassignedLobby && state.Size == 0 {
+		if state.Started.Before(time.Now().Add(-60*time.Second)) && state.LobbyType != UnassignedLobby && len(state.presences) == 0 {
 			// If the match is not a parking match, and there are no players, shut down the match.
 			logger.Error("Match is empty. Shutting down.")
 			return nil

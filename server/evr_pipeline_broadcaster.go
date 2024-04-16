@@ -377,7 +377,7 @@ func (p *EvrPipeline) newParkingMatch(logger *zap.Logger, session *sessionWS, co
 	if err != nil {
 		return fmt.Errorf("failed to create parking match: %v", err)
 	}
-
+	p.matchBySessionID.Store(session.ID().String(), matchId)
 	// (Attempt to) join the match
 	joinmsg := &rtapi.Envelope{
 		Message: &rtapi.Envelope_MatchJoin{
@@ -393,8 +393,6 @@ func (p *EvrPipeline) newParkingMatch(logger *zap.Logger, session *sessionWS, co
 		return fmt.Errorf("failed process join request")
 	}
 	logger.Debug("New parking match", zap.String("matchId", matchId))
-
-	p.matchBySessionID.Store(session.ID().String(), matchId)
 
 	return nil
 }

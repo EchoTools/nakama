@@ -328,7 +328,7 @@ func NewMatchmakingRegistry(logger *zap.Logger, matchRegistry MatchRegistry, mat
 	return c
 }
 
-type MatchmakingConfig struct {
+type MatchmakingSettings struct {
 	MinCount             int      `json:"min_count"`             // Minimum number of matches to create
 	MaxCount             int      `json:"max_count"`             // Maximum number of matches to create
 	CountMultiple        int      `json:"count_multiple"`        // Count multiple of the party size
@@ -336,9 +336,12 @@ type MatchmakingConfig struct {
 	GroupID              string   `json:"group_id"`              // Group ID to matchmake with
 	PriorityPlayers      []string `json:"priority_players"`      // Prioritize these players
 	PriorityBroadcasters []string `json:"priority_broadcasters"` // Prioritize these broadcasters
+	DisableBackfill      bool     `json:"disable_backfill"`      // Backfill matches
+	NextMatchID          string   `json:"next_match_id"`         // Try to join this match immediately when finding a match
 }
 
-func (r *MatchmakingRegistry) LoadMatchmakingConfig(ctx context.Context, userID string) (*MatchmakingConfig, error) {
+func (r *MatchmakingRegistry) LoadMatchmakingSettings(ctx context.Context, userID string) (config MatchmakingSettings, err error) {
+
 	objs, err := r.nk.StorageRead(ctx, []*runtime.StorageRead{
 		{
 			Collection: MatchmakingConfigStorageCollection,
@@ -348,31 +351,26 @@ func (r *MatchmakingRegistry) LoadMatchmakingConfig(ctx context.Context, userID 
 	})
 	if err != nil {
 		r.logger.Error("Failed to read matchmaking config", zap.Error(err))
-		return nil, err
+		return
 	}
 
 	if len(objs) == 0 {
 		r.logger.Warn("No matchmaking config found, writing new one")
-		config := &MatchmakingConfig{
-			CountMultiple: 2,
-			MinCount:      2,
-			MaxCount:      8,
-		}
-		err := r.storeMatchmakingConfig(ctx, *config, userID)
+		err = r.storeMatchmakingConfig(ctx, config, userID)
 		if err != nil {
 			r.logger.Error("Failed to write matchmaking config", zap.Error(err))
 		}
-		return config, err
+		return
 	}
-	config := &MatchmakingConfig{}
-	if err := json.Unmarshal([]byte(objs[0].Value), config); err != nil {
+
+	if err = json.Unmarshal([]byte(objs[0].Value), &config); err != nil {
 		r.logger.Error("Failed to unmarshal matchmaking config", zap.Error(err))
-		return nil, err
+		return
 	}
-	return config, nil
+	return
 }
 
-func (r *MatchmakingRegistry) storeMatchmakingConfig(ctx context.Context, config MatchmakingConfig, userID string) error {
+func (r *MatchmakingRegistry) storeMatchmakingConfig(ctx context.Context, config MatchmakingSettings, userID string) error {
 	data, err := json.Marshal(config)
 	if err != nil {
 		r.logger.Error("Failed to marshal matchmaking config", zap.Error(err))
@@ -404,7 +402,7 @@ func keyToIP(key string) net.IP {
 
 func (mr *MatchmakingRegistry) matchedEntriesFn(entries [][]*MatchmakerEntry) {
 	// Get the matchmaking config from the storage
-	config, err := mr.LoadMatchmakingConfig(mr.ctx, SystemUserId)
+	config, err := mr.LoadMatchmakingSettings(mr.ctx, SystemUserId)
 	if err != nil {
 		mr.logger.Error("Failed to load matchmaking config", zap.Error(err))
 		return
@@ -415,7 +413,7 @@ func (mr *MatchmakingRegistry) matchedEntriesFn(entries [][]*MatchmakerEntry) {
 	}
 }
 
-func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config *MatchmakingConfig) {
+func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config MatchmakingSettings) {
 	logger := mr.logger
 	// Use the properties from the first entrant to get the channel
 	stringProperties := entrants[0].StringProperties
@@ -626,7 +624,7 @@ func distributeParties(parties [][]*MatchmakerEntry) [][]*MatchmakerEntry {
 	return teams
 }
 
-func (mr *MatchmakingRegistry) allocateBroadcaster(channel uuid.UUID, config *MatchmakingConfig, sorted []string, label *EvrMatchState) (string, error) {
+func (mr *MatchmakingRegistry) allocateBroadcaster(channel uuid.UUID, config MatchmakingSettings, sorted []string, label *EvrMatchState) (string, error) {
 	// Lock the broadcasters so that they aren't double allocated
 	mr.Lock()
 	defer mr.Unlock()
