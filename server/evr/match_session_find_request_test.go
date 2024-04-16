@@ -116,7 +116,7 @@ func TestLobbyFindSessionRequest_Unpack(t *testing.T) {
 			Level: nil,
 		},
 		EvrId:     *lo.Must(ParseEvrId("DMO-8582873777389537089")),
-		TeamIndex: 2,
+		TeamIndex: 4,
 	}
 
 	if *got != want {
