@@ -213,10 +213,10 @@ func (p *EvrPipeline) MatchSpectateStreamLoop(session *sessionWS, msession *Matc
 	// Create a ticker to spectate
 	spectateInterval := time.Duration(10) * time.Second
 
-	limit := 10
+	limit := 100
 	minSize := 3
 	maxSize := MatchMaxSize - 1
-	query := "+label.open:T +label.lobby_type:public +label.mode:echo_arena +label.size:>=2"
+	query := fmt.Sprintf("+label.open:T +label.lobby_type:public +label.mode:%s +label.size:>=2", msession.Label.Mode.Token())
 	for {
 		select {
 		case <-ctx.Done():
