@@ -9,6 +9,7 @@ import (
 	"net"
 	"regexp"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -65,7 +66,7 @@ type WhoAmI struct {
 	CreateTime   string        `json:"create_time,omitempty"`
 	DisableTime  string        `json:"disable_time,omitempty"`
 	VerifyTime   string        `json:"verify_time,omitempty"`
-	DisplayName  string        `json:"display_name"`
+	DisplayNames []string      `json:"display_names"`
 	DevicesCount int           `json:"device_count"`
 	DiscordLink  bool          `json:"discord_link,omitempty"`
 	DeviceLinks  []string      `json:"device_links,omitempty"`
@@ -1913,6 +1914,21 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		return err
 	}
 
+	displayNameObjs, err := GetDisplayNameRecords(ctx, logger, nk, userId.String())
+	if err != nil {
+		return err
+	}
+	// Sort displayNames by age
+	sort.SliceStable(displayNameObjs, func(i, j int) bool {
+		return displayNameObjs[i].GetUpdateTime().AsTime().After(displayNameObjs[j].GetUpdateTime().AsTime())
+	})
+	displayNames := make([]string, 0, len(displayNameObjs))
+	displayNames = append(displayNames, account.GetUser().GetDisplayName())
+
+	for _, dn := range displayNameObjs {
+		displayNames = append(displayNames, dn.Key)
+	}
+	// insert the current username at the beginning
 	// Extract the evrUserInfo
 	// extract a mapping of the evr ids and hte alst time they were logged into
 	evrIdMap := make([]EvrIdLogins, 0, len(evrUserIds))
@@ -1973,7 +1989,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		NakamaId:     userId.String(),
 		Username:     account.GetUser().GetUsername(),
 		DiscordId:    discordId,
-		DisplayName:  account.GetUser().GetDisplayName(),
+		DisplayNames: displayNames,
 		CreateTime:   tsZeroAsBlank(account.GetUser().GetCreateTime()),
 		DisableTime:  tsZeroAsBlank(account.DisableTime),
 		DevicesCount: len(account.GetDevices()),
@@ -2001,7 +2017,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		{Name: "Online", Value: fmt.Sprintf("%v", whoami.Online), Inline: true},
 		{Name: "Create Time", Value: whoami.CreateTime, Inline: false},
 		{Name: "Username", Value: whoami.Username, Inline: true},
-		{Name: "Display Name", Value: whoami.DisplayName, Inline: true},
+		{Name: "Display Name", Value: whoami.DisplayNames[0], Inline: true},
 		{Name: "Discord ID", Value: whoami.DiscordId, Inline: true},
 		{Name: "Has Password", Value: fmt.Sprintf("%v", whoami.HasPassword), Inline: true},
 		{Name: "Device Count", Value: fmt.Sprintf("%d", whoami.DevicesCount), Inline: true},
@@ -2010,6 +2026,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		{Name: "Evr Logins", Value: strings.Join(lo.Map(whoami.EvrLogins, func(l EvrIdLogins, index int) string {
 			return fmt.Sprintf("%16s (%16s) - %16s", l.LastLoginTime, l.EvrId, l.DisplayName)
 		}), "\n"), Inline: false},
+		{Name: "Previous Display Names", Value: strings.Join(whoami.DisplayNames[1:], "\n"), Inline: false},
 		{Name: "Groups", Value: strings.Join(whoami.Groups, "\n"), Inline: false},
 	}
 

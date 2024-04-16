@@ -456,6 +456,15 @@ func GetEvrRecords(ctx context.Context, logger runtime.Logger, nk runtime.Nakama
 	return listRecords, nil
 }
 
+func GetDisplayNameRecords(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, userId string) ([]*api.StorageObject, error) {
+	listRecords, _, err := nk.StorageList(ctx, SystemUserId, userId, DisplayNameCollection, 150, "")
+	if err != nil {
+		logger.WithField("err", err).Error("Storage list error.")
+		return nil, fmt.Errorf("storage list error: %v", err)
+	}
+	return listRecords, nil
+}
+
 func GetAddressRecords(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, userId string) ([]*api.StorageObject, error) {
 	listRecords, _, err := nk.StorageList(ctx, SystemUserId, userId, ClientAddrStorageCollection, 100, "")
 	if err != nil {
