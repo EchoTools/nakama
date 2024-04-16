@@ -1060,7 +1060,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			default:
 				return
 			}
-			if err := d.handleProfileRequest(ctx, logger, nk, s, discordRegistry, i, user.ID, user.Username); err != nil {
+
+			if err := d.handleProfileRequest(ctx, logger, nk, s, discordRegistry, i, user.ID, user.Username, true); err != nil {
 				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 					Type: discordgo.InteractionResponseChannelMessageWithSource,
 					Data: &discordgo.InteractionResponseData{
@@ -1073,11 +1074,32 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 		},
 		"lookup": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
-			// Verify the user is part of the Global Moderators group
-			return
+			if i.Type != discordgo.InteractionApplicationCommand {
+				return
+			}
+			user := getScopedUser(i)
+
+			// Check if the user is part of the Global Moderators group
+			isModerator, isGlobal, err := d.discordRegistry.isModerator(ctx, i.GuildID, user.ID)
+			if err != nil {
+				logger.Error("Failed to check if user is a moderator", zap.Error(err))
+				return
+			}
+
+			if !isModerator && !isGlobal {
+				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+					Type: discordgo.InteractionResponseChannelMessageWithSource,
+					Data: &discordgo.InteractionResponseData{
+						Flags:   discordgo.MessageFlagsEphemeral,
+						Content: "You do not have permission to use this command.",
+					},
+				})
+				return
+			}
+
 			options := i.ApplicationCommandData().Options
-			user := options[0].UserValue(s)
-			if err := d.handleProfileRequest(ctx, logger, nk, s, discordRegistry, i, user.ID, user.Username); err != nil {
+			target := options[0].UserValue(s)
+			if err := d.handleProfileRequest(ctx, logger, nk, s, discordRegistry, i, target.ID, target.Username, isGlobal); err != nil {
 				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 					Type: discordgo.InteractionResponseChannelMessageWithSource,
 					Data: &discordgo.InteractionResponseData{
@@ -1184,7 +1206,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					content = "Members in your party group:\n" + strings.Join(discordIds, ", ")
 				}
 
-				// Send the messge to the user
+				// Send the message to the user
 				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 					Type: discordgo.InteractionResponseChannelMessageWithSource,
 					Data: &discordgo.InteractionResponseData{
@@ -1855,7 +1877,10 @@ func (d *DiscordAppBot) ManageUserGroups(ctx context.Context, logger runtime.Log
 	return nil
 }
 
-func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, s *discordgo.Session, discordRegistry DiscordRegistry, i *discordgo.InteractionCreate, discordId string, username string) error {
+func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, s *discordgo.Session, discordRegistry DiscordRegistry, i *discordgo.InteractionCreate, discordId string, username string, fullProfile bool) error {
+	if i.GuildID == "" {
+		return fmt.Errorf("guild id is required")
+	}
 	userId, err := discordRegistry.GetUserIdByDiscordId(ctx, discordId, true)
 	if err != nil {
 		return fmt.Errorf("failed to authenticate (or create) user %s: %w", discordId, err)
@@ -1962,6 +1987,12 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		EvrLogins: evrIdMap,
 		Addresses: addresses,
 		Online:    account.GetUser().GetOnline(),
+	}
+	if !fullProfile {
+		whoami.Addresses = nil
+		whoami.DeviceLinks = nil
+		whoami.EvrLogins = nil
+		whoami.Groups = nil
 	}
 
 	fields := []*discordgo.MessageEmbedField{
