@@ -657,8 +657,23 @@ func (r *ProfileRegistry) ValidateSocialGroup(ctx context.Context, userID uuid.U
 		return groupID, fmt.Errorf("failed to get guild groups: %w", err)
 	}
 
+	// Get the user's discord ID
+	discordID, err := r.discordRegistry.GetDiscordIdByUserId(ctx, userID)
+	if err != nil {
+		return groupID, fmt.Errorf("failed to get discord ID: %w", err)
+	}
+
 	if len(groups) == 0 {
-		return groupID, fmt.Errorf("user is not in any groups")
+		// Update the groups for the user
+		err := r.discordRegistry.UpdateAllGuildGroupsForUser(ctx, r.logger, userID, discordID)
+		if err != nil {
+			r.logger.Warn("Failed to update guild groups for user", zap.Error(err))
+		}
+		// Try again
+		groups, _, err = r.nk.UserGroupsList(ctx, userID.String(), 100, nil, "")
+		if err != nil {
+			return groupID, fmt.Errorf("failed to get guild groups: %w", err)
+		}
 	}
 
 	groupIds := lo.Map(groups, func(g *api.UserGroupList_UserGroup, _ int) string { return g.GetGroup().GetId() })
