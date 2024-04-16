@@ -327,7 +327,7 @@ func NewEvrMatchState(endpoint evr.Endpoint, config *MatchBroadcaster, sessionId
 	// the players. It would have to join first though.  - @thesprockee
 	initState := &EvrMatchState{
 		Node:                    node,
-		Started:                 time.Now().UTC(),
+		Started:                 time.Now(),
 		Broadcaster:             *config,
 		SpawnedBy:               config.OperatorID,
 		Open:                    false,
@@ -537,7 +537,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	if mp.TeamIndex == evr.TeamModerator {
 		found, err := checkIfModerator(ctx, nk, presence.GetUserId(), state.Channel.String())
 		if err != nil {
-			return state, false, fmt.Sprintf("failed to check if moderator: %q", err)
+			return state, false, fmt.Sprintf("failed to check if moderator: %v", err)
 		}
 		if !found {
 			return state, false, ErrJoinRejectedNotModerator
@@ -578,7 +578,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	if err != nil {
 		return state, false, fmt.Sprintf("failed to update label: %q", err)
 	}
-	logger.Debug("Accepting player into match: %s", presence.GetUsername())
+	logger.Debug("Accepting player into match: %s (%s)", presence.GetUsername(), mp.GetPlayerSession())
 	return state, true, ""
 }
 
@@ -611,7 +611,7 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 			messages := []evr.Message{
 				evr.NewBroadcasterStartSession(state.MatchID, *state.Channel, state.MaxSize, uint8(state.LobbyType), state.Broadcaster.AppId, state.Mode, state.Level, []evr.EvrId{}),
 			}
-			state.Started = time.Now().UTC()
+			state.Started = time.Now()
 			// Dispatch the message for delivery.
 			if err := m.dispatchMessages(ctx, logger, dispatcher, messages, []runtime.Presence{state.broadcaster}, nil); err != nil {
 				logger.Error("failed to dispatch load message to broadcaster: %v", err)
@@ -945,7 +945,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		if state.Channel != nil {
 			channel = *state.Channel
 		}
-		state.Started = time.Now().UTC()
+		state.Started = time.Now()
 		entrants := make([]evr.EvrId, 0)
 		message := evr.NewBroadcasterStartSession(state.MatchID, channel, state.MaxSize, uint8(state.LobbyType), state.Broadcaster.AppId, state.Mode, state.Level, entrants)
 		messages := []evr.Message{
