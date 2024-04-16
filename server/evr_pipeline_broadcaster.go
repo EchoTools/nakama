@@ -342,8 +342,8 @@ func (p *EvrPipeline) getBroadcasterHostInfo(ctx context.Context, logger *zap.Lo
 
 		// Verify the user has the broadcaster role
 		if !lo.Contains(member.Roles, md.BroadcasterHostRole) {
-			logger.Warn("User does not have the broadcaster role, allowing anyway", zap.String("guildId", guildID))
-			continue
+			logger.Warn("User does not have the broadcaster role", zap.String("discordID", member.User.ID), zap.String("guildId", guildID))
+			//continue
 		}
 
 		// Add the channel to the list of hosting channels

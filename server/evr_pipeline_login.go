@@ -721,7 +721,7 @@ func (p *EvrPipeline) documentRequest(ctx context.Context, logger *zap.Logger, s
 			if len(suspensions) > 0 {
 				// Inject it into the document
 				eula.Text = generateSuspensionNotice(suspensions)
-				eula.Version = time.Now().Unix()
+				eula.Version = time.Now().UTC().Unix()
 				document = eula
 			}
 		}
@@ -867,7 +867,7 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 	// Lookup the the profile
 	data, found := p.profileRegistry.GetProfileByEvrID(request.EvrId)
 	if !found {
-		return fmt.Errorf("failed to find profile for %s", request.EvrId.Token())
+		return fmt.Errorf("failed to find profile for %s by matchID: %s", request.EvrId.Token())
 	}
 
 	// Construct the response

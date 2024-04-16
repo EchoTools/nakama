@@ -597,11 +597,11 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 		// Look up the group by name
 		groups, _, err := nk.GroupsList(ctx, group.Name, "", nil, nil, 1, "")
 		if err != nil {
-			logger.Error("Error looking up group", zap.Error(err))
+			logger.Error("Error looking up group: %s", err.Error())
 			continue
 		}
 		if len(groups) == 0 {
-			logger.Error("Group not found", zap.String("name", group.Name))
+			logger.Error("Group not found: %s", group.Name)
 			continue
 		}
 		vrmlGroups[group.Name] = groups[0].Id
