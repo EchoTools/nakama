@@ -1282,16 +1282,21 @@ func (t *LocalTracker) processEvent(e *PresenceEvent) {
 			var err error
 			switch session.Format() {
 			case SessionFormatEvr:
-				t.logger.Debug("Could not deliver presence event, session is using unsupported format", zap.Any("message", envelope))
-				// Evr does not support presence events.
-				return
+				if s, ok := session.(*sessionWS); ok {
+					// Send the event to the session.
+					var messages []evr.Message
+					messages, err = ProcessOutgoing(s.logger, s, envelope)
+					if err == nil {
+						err = s.SendEvr(messages...)
+					}
+				}
 			case SessionFormatProtobuf:
 				if payloadProtobuf == nil {
 					// Marshal the payload now that we know this format is needed.
 					payloadProtobuf, err = proto.Marshal(envelope)
 					if err != nil {
 						t.logger.Error("Could not marshal presence event", zap.Error(err))
-						return
+						continue
 					}
 				}
 				err = session.SendBytes(payloadProtobuf, true)
@@ -1304,7 +1309,7 @@ func (t *LocalTracker) processEvent(e *PresenceEvent) {
 						payloadJSON = buf
 					} else {
 						t.logger.Error("Could not marshal presence event", zap.Error(err))
-						return
+						continue
 					}
 				}
 				err = session.SendBytes(payloadJSON, true)
