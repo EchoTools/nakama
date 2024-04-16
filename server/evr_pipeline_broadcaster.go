@@ -60,24 +60,20 @@ func (p *EvrPipeline) broadcasterSessionEnded(ctx context.Context, logger *zap.L
 		return fmt.Errorf("broadcaster session not found")
 	}
 
-	matchId, found := p.matchBySessionID.Load(session.ID().String())
-	if !found {
-		return fmt.Errorf("match not found")
-	}
-
-	// Leave the old match
-	leavemsg := &rtapi.Envelope{
-		Message: &rtapi.Envelope_MatchLeave{
-			MatchLeave: &rtapi.MatchLeave{
-				MatchId: matchId,
+	if matchId, found := p.matchBySessionID.Load(session.ID().String()); found {
+		// Leave the old match
+		leavemsg := &rtapi.Envelope{
+			Message: &rtapi.Envelope_MatchLeave{
+				MatchLeave: &rtapi.MatchLeave{
+					MatchId: matchId,
+				},
 			},
-		},
-	}
+		}
 
-	if ok := session.pipeline.ProcessRequest(logger, session, leavemsg); !ok {
-		return fmt.Errorf("failed process leave request")
+		if ok := session.pipeline.ProcessRequest(logger, session, leavemsg); !ok {
+			return fmt.Errorf("failed process leave request")
+		}
 	}
-
 	err := p.newParkingMatch(logger, session, config)
 	if err != nil {
 		return fmt.Errorf("failed to create new parking match: %v", err)

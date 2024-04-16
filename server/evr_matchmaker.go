@@ -217,13 +217,13 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 		},
 	}
 	// Load the global matchmaking config
-	gconfig, err := p.matchmakingRegistry.LoadMatchmakingConfig(ctx, SystemUserId)
+	gconfig, err := p.matchmakingRegistry.LoadMatchmakingSettings(ctx, SystemUserId)
 	if err != nil {
 		return "", status.Errorf(codes.Internal, "Failed to load global matchmaking config: %v", err)
 	}
 
 	// Load the user's matchmaking config
-	config, err := p.matchmakingRegistry.LoadMatchmakingConfig(ctx, userID)
+	config, err := p.matchmakingRegistry.LoadMatchmakingSettings(ctx, userID)
 	if err != nil {
 		return "", status.Errorf(codes.Internal, "Failed to load matchmaking config: %v", err)
 	}
@@ -259,7 +259,7 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 	ok := session.tracker.TrackMulti(ctx, session.id, []*TrackerOp{
 		// EVR packet data stream for the login session by user ID, and service ID, with EVR ID
 		{
-			Stream: PresenceStream{Mode: StreamModeEvr, Subject: session.userID, Subcontext: subcontext, Label: query},
+			Stream: PresenceStream{Mode: StreamModeEvr, Subject: session.id, Subcontext: subcontext, Label: query},
 			Meta:   PresenceMeta{Format: session.format, Username: session.Username(), Hidden: true},
 		},
 	}, session.userID)
@@ -560,7 +560,7 @@ func (p *EvrPipeline) MatchCreate(ctx context.Context, session *sessionWS, msess
 }
 
 // JoinEvrMatch allows a player to join a match.
-func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, session *sessionWS, query string, matchIDStr string, channel uuid.UUID, teamIndex int) error {
+func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, session *sessionWS, query string, matchIDStr string, teamIndex int) error {
 	// Append the node to the matchID if it doesn't already contain one.
 	if !strings.Contains(matchIDStr, ".") {
 		matchIDStr = fmt.Sprintf("%s.%s", matchIDStr, p.node)
@@ -642,7 +642,7 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 	}
 
 	// Add the user's profile to the cache
-	err = p.profileRegistry.SetProfileByMatchIDByEvrID(matchIDStr, evrID, profile.GetServer())
+	err = p.profileRegistry.SetProfileByEvrID(evrID, profile.GetServer())
 	if err != nil {
 		logger.Warn("Failed to set profile by match id", zap.Error(err))
 	}
