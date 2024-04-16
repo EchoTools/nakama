@@ -587,14 +587,31 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 		return errors.New("evr id not found in context")
 	}
 
-	// Fetch the account details.
-	account, err := GetAccount(ctx, logger, p.db, p.statusRegistry, session.UserID())
+	// Get the match label
+	match, _, err := p.matchRegistry.GetMatch(ctx, matchIDStr)
 	if err != nil {
-		return fmt.Errorf("failed to get account: %w", err)
+		return fmt.Errorf("failed to get match: %w", err)
+	}
+	if match == nil {
+		return fmt.Errorf("match not found: %s", matchIDStr)
 	}
 
-	// Extract the display name.
-	displayName := account.GetUser().GetDisplayName()
+	label := &EvrMatchState{}
+	if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), label); err != nil {
+		return fmt.Errorf("failed to unmarshal match label: %w", err)
+	}
+
+	groupID := uuid.Nil
+	// Get the channel
+	if label.Channel != nil {
+		groupID = uuid.FromStringOrNil((*label.Channel).String())
+	}
+
+	// Determine the display name
+	displayName, err := SetDisplayNameByChannelBySession(ctx, p.runtimeModule, logger, p.discordRegistry, session, groupID.String())
+	if err != nil {
+		logger.Error("Failed to set display name.", zap.Error(err))
+	}
 
 	// If this is a NoVR user, give the profile's displayName a bot suffix
 	// Get the NoVR key from context
