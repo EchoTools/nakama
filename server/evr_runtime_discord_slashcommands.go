@@ -590,6 +590,22 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 	dg := d.dg
 	discordRegistry := d.discordRegistry
 
+	// Build a map of VRML group names to their group IDs
+	vrmlGroups := make(map[string]string)
+	for _, group := range vrmlGroupChoices {
+		// Look up the group by name
+		groups, _, err := nk.GroupsList(ctx, group.Name, "", nil, nil, 1, "")
+		if err != nil {
+			logger.Error("Error looking up group", zap.Error(err))
+			continue
+		}
+		if len(groups) == 0 {
+			logger.Error("Group not found", zap.String("name", group.Name))
+			continue
+		}
+		vrmlGroups[group.Name] = groups[0].Id
+	}
+
 	commandHandlers := map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate){
 		"evrsymbol": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			options := i.ApplicationCommandData().Options
@@ -962,55 +978,68 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				})
 			}
 		},
-		"subcommands": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+		"badgesoff": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			options := i.ApplicationCommandData().Options
 			content := ""
 			switch options[0].Name {
-			case "group":
-				options := options[0].Options
-				switch options[0].Name {
-				case "link":
-					role := options[1].StringValue()
-					group := options[2].StringValue()
-					_, _ = role, group
-				case "unlink":
-					role := options[1].StringValue()
-					group := options[2].StringValue()
-					_, _ = role, group
-				}
-			case "badges":
-				// Send "Coming this week. Stay tuned!" message
-				content = "Coming soon. Stay tuned!"
-
-				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-					Type: discordgo.InteractionResponseChannelMessageWithSource,
-					Data: &discordgo.InteractionResponseData{
-						Flags:   discordgo.MessageFlagsEphemeral,
-						Content: content,
-					},
-				})
-				return
+			case "request":
 				options = options[0].Options
-				switch options[0].Name {
-				case "request":
-					badges := make([]string, len(options[1:]))
-					for _, v := range options[1:] {
-						badges = append(badges, v.StringValue())
-					}
-					content = "Requesting badges:" + strings.Join(badges, ", ")
-
-				case "manage":
-					action := options[1].StringValue()
-					user := options[2].UserValue(s).ID
-					groups := make([]string, len(options[3:]))
-					for _, v := range options[3:] {
-						groups = append(groups, v.StringValue())
-					}
-					content = fmt.Sprintf("Action: %s\nUser: %s\nGroups: %s", action, user, strings.Join(groups, ", "))
-				default:
-					content = "Oops, something went wrong.\n" +
-						"Hol' up, you aren't supposed to see this message."
+				badgeNames := make([]string, len(options[1:]))
+				for _, v := range options[1:] {
+					badgeNames = append(badgeNames, v.StringValue())
 				}
+
+				// Get the user's discord ID
+				user := getScopedUser(i)
+				if user == nil {
+					return
+				}
+
+				rows := make([]discordgo.MessageComponent, 0, len(badgeNames))
+
+				for _, badgeName := range badgeNames {
+					groupID, ok := vrmlGroups[badgeName]
+					if !ok {
+						continue
+					}
+
+					fdadd := strings.Join([]string{"fd_badge_add", user.ID, groupID}, ":")
+					fdremove := strings.Join([]string{"fd_badge_remove", user.ID, groupID}, ":")
+
+					row := discordgo.ActionsRow{
+						Components: []discordgo.MessageComponent{
+							discordgo.Button{
+								Label:    badgeName,
+								Style:    discordgo.SuccessButton,
+								CustomID: fdadd,
+							},
+							discordgo.Button{
+								Label:    "Remove",
+								Style:    discordgo.DangerButton,
+								CustomID: fdremove,
+							},
+						},
+					}
+
+					rows = append(rows, row)
+				}
+
+				badgeChannel := "1228721641375138018"
+				s.ChannelMessageSendComplex(badgeChannel, &discordgo.MessageSend{
+					Content:    fmt.Sprintf("<@%s> (`%s`) is requesting the following badges:", user.ID, user.Username),
+					Components: rows,
+				})
+
+				// Message the User
+				content = "Requesting badges for:" + strings.Join(badgeNames, ", ")
+				// Respond to the user
+
+			default:
+				content = "Oops, something went wrong.\n" +
+					"Hol' up, you aren't supposed to see this message."
+			}
+			if content == "" {
+				return
 			}
 
 			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
