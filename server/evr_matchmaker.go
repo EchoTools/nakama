@@ -640,7 +640,11 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 			return status.Errorf(codes.Internal, "join not allowed: %s", reason)
 		}
 	}
-
+	// If this is a NoVR user, give the profile's displayName a bot suffix
+	botsuffix := "d[ o_0 ]b"
+	// right align the bot suffix to 30 characters
+	displayName = fmt.Sprintf("%s%30s", profile.Server.DisplayName, botsuffix)
+	profile.UpdateDisplayName(displayName)
 	// Add the user's profile to the cache
 	err = p.profileRegistry.SetProfileByEvrID(evrID, profile.GetServer())
 	if err != nil {
