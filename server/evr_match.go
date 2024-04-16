@@ -230,11 +230,11 @@ type EvrMatchState struct {
 	Players                 []PlayerInfo                 `json:"players,omitempty"` // The displayNames of the players (by team name) in the match.
 	EvrIDs                  []evr.EvrId                  `json:"evrids,omitempty"`  // The evr ids of the players in the match.
 	UserIDs                 []string                     `json:"userids,omitempty"` // The user ids of the players in the match.
-	presences               map[string]*EvrMatchPresence // [userId]EvrMatchPresence
+	presences               map[string]*EvrMatchPresence // [sessionId]EvrMatchPresence
 	broadcaster             runtime.Presence             // The broadcaster's presence
 	presenceByEvrId         map[string]*EvrMatchPresence // lookup table for EchoVR ID
 	presenceByPlayerSession map[string]*EvrMatchPresence // lookup table for match-scoped session id
-	presenceCache           map[string]*EvrMatchPresence // [userId]PlayerMeta cache for all players that have attempted to join the match.
+	presenceCache           map[string]*EvrMatchPresence // [sessionId]PlayerMeta cache for all players that have attempted to join the match.
 	emptyTicks              int                          // The number of ticks the match has been empty.
 	tickRate                int                          // The number of ticks per second.
 }
@@ -245,6 +245,10 @@ func (s *EvrMatchState) String() string {
 		return ""
 	}
 	return string(b)
+}
+
+func (s *EvrMatchState) ID() string {
+	return fmt.Sprintf("%s.%s", s.MatchID.String(), s.Node)
 }
 
 func (s *EvrMatchState) GetLabel() string {
@@ -316,11 +320,12 @@ func NewEvrMatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runt
 }
 
 // NewEvrMatchState is a helper function to create a new match state. It returns the state, params, label json, and err.
-func NewEvrMatchState(endpoint evr.Endpoint, config *MatchBroadcaster, sessionId string) (state *EvrMatchState, params map[string]interface{}, configPayload string, err error) {
+func NewEvrMatchState(endpoint evr.Endpoint, config *MatchBroadcaster, sessionId string, node string) (state *EvrMatchState, params map[string]interface{}, configPayload string, err error) {
 	// TODO It might be better to have the broadcaster just waiting on a stream, and be constantly matchmaking along with users,
 	// Then when the matchmaker decides spawning a new server is nominal approach, the broadcaster joins the match along with
 	// the players. It would have to join first though.  - @thesprockee
 	initState := &EvrMatchState{
+		Node:                    node,
 		Started:                 time.Now().UTC(),
 		Broadcaster:             *config,
 		SpawnedBy:               config.OperatorID,
@@ -516,7 +521,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	}
 
 	// Verify this isn't a duplicate. It will crash the server if they are allowed to join.
-	if _, ok := state.presences[presence.GetUserId()]; ok {
+	if _, ok := state.presences[presence.GetSessionId()]; ok {
 		logger.Warn("Duplicate join attempt.")
 		//return state, false, ErrJoinRejectedDuplicateJoin
 	}
@@ -541,7 +546,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	if mp.TeamIndex != evr.TeamSpectator && mp.TeamIndex != evr.TeamModerator {
 
 		// If this is the player rejoining, prefer the same team.
-		matchPresence, ok := state.presenceCache[presence.GetUserId()]
+		matchPresence, ok := state.presenceCache[presence.GetSessionId()]
 		if ok {
 			mp.TeamIndex = matchPresence.TeamIndex
 		}
@@ -553,12 +558,12 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	}
 
 	// Reserve this player's spot in the match.
-	state.presences[mp.GetUserId()] = mp
+	state.presences[mp.GetSessionId()] = mp
 	state.presenceByPlayerSession[mp.GetPlayerSession()] = mp
 	state.presenceByEvrId[mp.GetEvrId()] = mp
 
 	// The player data will reused if the player rejoins the match.
-	state.presenceCache[mp.GetUserId()] = mp
+	state.presenceCache[mp.GetSessionId()] = mp
 	// Accept the player(s) into the session.
 
 	state.rebuildCache()
@@ -620,7 +625,7 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 		// This is a player joining
 
 		// the cache entry is kept even after a player leaves. This helps put them back on the same team.
-		matchPresence, ok := state.presences[p.GetUserId()]
+		matchPresence, ok := state.presences[p.GetSessionId()]
 		if !ok {
 			// TODO FIXME Kick the player from the match.
 			logger.Error("Player not in cache. This shouldn't happen.")
@@ -690,7 +695,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 	// Create a list of sessions to remove
 	rejects := lo.Map(presences, func(p runtime.Presence, _ int) uuid.UUID {
 		// Get the match presence for this user
-		matchPresence, ok := state.presenceCache[p.GetUserId()]
+		matchPresence, ok := state.presenceCache[p.GetSessionId()]
 		if !ok {
 			// This player is not in the match.
 			logger.Warn("Player not in match.")
@@ -706,7 +711,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 
 	// Delete the each user from the match.
 	for _, p := range presences {
-		delete(state.presences, p.GetUserId())
+		delete(state.presences, p.GetSessionId())
 	}
 
 	go func(rejects []uuid.UUID) {
@@ -787,7 +792,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 				continue
 			}
 
-			logger.Debug("Received match message %T(%s) from %v", typ, string(in.GetData()), in.GetUserId())
+			logger.Debug("Received match message %T(%s) from %s (%s)", typ, string(in.GetData()), in.GetUsername(), in.GetSessionId())
 			// Unmarshal the message into an interface, then switch on the type.
 			msg := reflect.New(reflect.TypeOf(typ).Elem()).Interface().(evr.Message)
 			if err := json.Unmarshal(in.GetData(), &msg); err != nil {
@@ -899,7 +904,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		}
 
 		// Start a new session by loading a level
-		newState, _, _, err := NewEvrMatchState(state.Broadcaster.Endpoint, &state.Broadcaster, state.MatchID.String())
+		newState, _, _, err := NewEvrMatchState(state.Broadcaster.Endpoint, &state.Broadcaster, state.MatchID.String(), state.Node)
 		if err != nil {
 			return state, fmt.Sprintf("failed to create new match state: %v", err)
 		}
@@ -1073,12 +1078,12 @@ func (m *EvrMatch) lobbyPlayerSessionsRequest(ctx context.Context, logger runtim
 	teamIndex := evr.TeamUnassigned
 
 	// Get the playerSession of the sender
-	sender, ok := state.presences[in.GetUserId()]
+	sender, ok := state.presences[in.GetSessionId()]
 	if ok {
 		playerSession = sender.PlayerSession
 		teamIndex = sender.TeamIndex
 	} else {
-		logger.Warn("lobbyPlayerSessionsRequest: %s not found in match", in.GetUserId())
+		logger.Warn("lobbyPlayerSessionsRequest: session ID %s not found in match", in.GetSessionId())
 
 	}
 

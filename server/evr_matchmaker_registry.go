@@ -50,8 +50,8 @@ var (
 	ErrMatchmakingPingTimeout        = status.Errorf(codes.DeadlineExceeded, "Ping timeout")
 	ErrMatchmakingTimeout            = status.Errorf(codes.DeadlineExceeded, "Matchmaking timeout")
 	ErrMatchmakingNoAvailableServers = status.Errorf(codes.ResourceExhausted, "No available servers")
-	ErrMatchmakingCancelled          = status.Errorf(codes.Canceled, "Matchmaking cancelled")
-	ErrMatchmakingCancelledByPlayer  = status.Errorf(codes.Canceled, "Matchmaking cancelled by player")
+	ErrMatchmakingCanceled           = status.Errorf(codes.Canceled, "Matchmaking canceled")
+	ErrMatchmakingCanceledByPlayer   = status.Errorf(codes.Canceled, "Matchmaking canceled by player")
 	ErrMatchmakingRestarted          = status.Errorf(codes.Canceled, "matchmaking restarted")
 	ErrMatchmakingMigrationRequired  = status.Errorf(codes.FailedPrecondition, "Server upgraded, migration")
 	MatchmakingStreamSubject         = uuid.NewV5(uuid.Nil, "matchmaking").String()
@@ -275,6 +275,11 @@ func (mr *MatchmakingResult) SendErrorToSession(s *sessionWS, err error) error {
 	if result == nil {
 		return nil
 	}
+	// If it was cancelled by the user, don't send and error
+	if result.err == ErrMatchmakingCanceledByPlayer {
+		return nil
+	}
+
 	mr.Logger.Warn("Matchmaking error", zap.String("message", result.Message), zap.Error(result.err))
 	return s.SendEvr(evr.NewLobbySessionFailure(result.Mode, result.Channel, result.Code, result.Message).Version4())
 }

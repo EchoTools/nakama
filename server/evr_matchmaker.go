@@ -8,6 +8,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gofrs/uuid/v5"
@@ -115,20 +116,57 @@ func (p *EvrPipeline) Backfill(ctx context.Context, session *sessionWS, msession
 	}
 
 	var selected *EvrMatchState
-	if msession.Label.Mode == evr.ModeArenaPublic || msession.Label.Mode == evr.ModeCombatPublic {
+	// Select the first match
+	for _, label := range labels {
+		// Check that the match is not full
+		logger = logger.With(zap.String("match_id", label.MatchID.String()))
 
-		// Find a backfill that hasn't been backfilled in the past 5 seconds.
-		for _, label := range labels {
-			matchID := label.MatchID.String()
-			actual, loaded := p.backfillQueue.LoadOrStore(matchID, time.Now())
-			if loaded && time.Since(actual) < 3*time.Second {
-				continue
-			}
-			selected = label
+		mu, _ := p.backfillQueue.LoadOrStore(label.ID(), &sync.Mutex{})
+		mu.Lock()
+
+		match, _, err := p.matchRegistry.GetMatch(ctx, label.ID())
+		if match == nil {
+			logger.Warn("Match not found")
+			mu.Unlock()
+			continue
 		}
-	} else {
-		// Select the first match
-		selected = labels[0]
+
+		// Extract the latest label
+		if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), label); err != nil {
+			logger.Warn("Failed to get match label")
+			mu.Unlock()
+			continue
+		}
+
+		if err != nil {
+			logger.Warn("Failed to get match label")
+			mu.Unlock()
+			continue
+		}
+
+		if match.GetSize() > int32(label.MaxSize)+1 { // +1 for the broadcaster
+			logger.Warn("Match is full")
+			mu.Unlock()
+			continue
+		}
+
+		if msession.Label.TeamIndex != Spectator && msession.Label.TeamIndex != Moderator {
+			// Check if there is space for the player(s)
+			if (label.TeamSize*2)-len(label.Players) < 1 {
+				logger.Warn("Match is full")
+				mu.Unlock()
+				continue
+
+			}
+		}
+
+		go func() {
+			// Delay unlock to prevent join overflows
+			<-time.After(MatchJoinGracePeriod)
+			mu.Unlock()
+		}()
+		selected = label
+		break
 	}
 
 	return selected, query, nil
@@ -221,7 +259,7 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 	ok := session.tracker.TrackMulti(ctx, session.id, []*TrackerOp{
 		// EVR packet data stream for the login session by user ID, and service ID, with EVR ID
 		{
-			Stream: PresenceStream{Mode: StreamModeEvr, Subject: session.userID, Subcontext: subcontext},
+			Stream: PresenceStream{Mode: StreamModeEvr, Subject: session.userID, Subcontext: subcontext, Label: query},
 			Meta:   PresenceMeta{Format: session.format, Username: session.Username(), Hidden: true},
 		},
 	}, session.userID)
@@ -608,7 +646,6 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 	if err != nil {
 		logger.Warn("Failed to set profile by match id", zap.Error(err))
 	}
-
 	if isNew {
 		// Trigger the MatchJoin event.
 		stream := PresenceStream{Mode: StreamModeMatchAuthoritative, Subject: matchID, Label: p.node}
@@ -620,13 +657,12 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 		if success, _ := p.tracker.Track(session.Context(), session.ID(), stream, session.UserID(), m); success {
 			// Kick the user from any other matches they may be part of.
 			// WARNING this cannot be used when joining a broadcaster to a match
-			//p.tracker.UntrackLocalByModes(session.ID(), matchStreamModes, stream)
+			p.tracker.UntrackLocalByModes(session.ID(), matchStreamModes, stream)
 		}
 	}
 
 	p.matchBySessionID.Store(session.ID().String(), matchIDStr)
-	p.matchByUserId.Store(session.UserID().String(), matchIDStr)
-	p.matchByEvrId.Store(evrID.Token(), matchIDStr)
+	p.matchByEvrID.Store(evrID.Token(), matchIDStr)
 
 	return nil
 }
@@ -648,7 +684,7 @@ func (p *EvrPipeline) PingEndpoints(ctx context.Context, session *sessionWS, mse
 
 		select {
 		case <-msession.Ctx.Done():
-			return nil, ErrMatchmakingCancelled
+			return nil, ErrMatchmakingCanceled
 		case <-time.After(5 * time.Second):
 			return nil, ErrMatchmakingPingTimeout
 		case results := <-msession.PingResultsCh:

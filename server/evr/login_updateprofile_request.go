@@ -22,7 +22,7 @@ func (m *UpdateProfile) Symbol() Symbol {
 }
 
 func (lr *UpdateProfile) String() string {
-	return fmt.Sprintf("%s(session=%s, evr_id=%s, client_profile=%s)", lr.Token(), lr.Session.String(), lr.EvrId.String(), lr.ClientProfile.String())
+	return fmt.Sprintf("UpdateProfile(session=%s, evr_id=%s)", lr.Session.String(), lr.EvrId.String(), lr.ClientProfile.String())
 }
 
 func (m *UpdateProfile) Stream(s *EasyStream) error {

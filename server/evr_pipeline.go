@@ -66,12 +66,11 @@ type EvrPipeline struct {
 
 	broadcasterRegistrationBySession *MapOf[string, *MatchBroadcaster] // sessionID -> MatchBroadcaster
 	matchBySessionID                 *MapOf[string, string]            // sessionID -> matchID
-	matchByUserId                    *MapOf[string, string]            // userID -> matchID
 	loginSessionByEvrID              *MapOf[string, *sessionWS]
-	matchByEvrId                     *MapOf[string, string]    // full match string by evrId token
-	backfillQueue                    *MapOf[string, time.Time] // A queue of backfills to avoid double backfill
+	matchByEvrID                     *MapOf[string, string]      // full match string by evrId token
+	backfillQueue                    *MapOf[string, *sync.Mutex] // A queue of backfills to avoid double backfill
 	placeholderEmail                 string
-	linkDeviceUrl                    string
+	linkDeviceURL                    string
 }
 
 type ctxDiscordBotTokenKey struct{}
@@ -175,13 +174,12 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 
 		broadcasterRegistrationBySession: &MapOf[string, *MatchBroadcaster]{},
 		matchBySessionID:                 &MapOf[string, string]{},
-		matchByUserId:                    &MapOf[string, string]{},
 		loginSessionByEvrID:              &MapOf[string, *sessionWS]{},
-		matchByEvrId:                     &MapOf[string, string]{},
-		backfillQueue:                    &MapOf[string, time.Time]{},
+		matchByEvrID:                     &MapOf[string, string]{},
+		backfillQueue:                    &MapOf[string, *sync.Mutex]{},
 
 		placeholderEmail: config.GetRuntime().Environment["PLACEHOLDER_EMAIL_DOMAIN"],
-		linkDeviceUrl:    config.GetRuntime().Environment["LINK_DEVICE_URL"],
+		linkDeviceURL:    config.GetRuntime().Environment["LINK_DEVICE_URL"],
 	}
 	evrPipeline.profileRegistry.checkDefaultProfile()
 	runtime.MatchmakerMatched()
@@ -192,10 +190,15 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		ticker := time.NewTicker(interval)
 		for {
 			select {
+			case <-evrPipeline.ctx.Done():
+				ticker.Stop()
+				return
+
 			case <-ticker.C:
-				evrPipeline.backfillQueue.Range(func(key string, value time.Time) bool {
-					if time.Since(value) > interval {
+				evrPipeline.backfillQueue.Range(func(key string, value *sync.Mutex) bool {
+					if value.TryLock() {
 						evrPipeline.backfillQueue.Delete(key)
+						value.Unlock()
 					}
 					return true
 				})
@@ -365,11 +368,14 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 				// This is not this user
 				continue
 			}
-			if evrId, ok := session.Context().Value(ctxEvrIDKey{}).(evr.EvrId); ok {
-				p.matchByEvrId.Delete(evrId.Token())
+			if _, ok := p.broadcasterRegistrationBySession.Load(session.ID().String()); !ok {
+				// This is a player connection
+				if evrId, ok := session.Context().Value(ctxEvrIDKey{}).(evr.EvrId); ok {
+					p.matchByEvrID.Delete(evrId.Token())
+				}
 			}
+
 			p.matchBySessionID.Delete(session.ID().String())
-			p.matchByUserId.Delete(session.UserID().String())
 		}
 
 		for _, join := range envelope.GetJoins() {
@@ -378,17 +384,13 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 				continue
 			}
 
-			if evrId, ok := session.Context().Value(ctxEvrIDKey{}).(evr.EvrId); ok {
-				p.matchByEvrId.Store(evrId.Token(), matchID)
-			}
-			if strings.HasPrefix(session.Username(), "broadcaster:") {
-				// Broadcaster connections are matched by session.
-				p.matchBySessionID.Store(session.ID().String(), matchID)
-			} else {
+			p.matchBySessionID.Store(session.ID().String(), matchID)
+
+			if _, ok := p.broadcasterRegistrationBySession.Load(session.ID().String()); !ok {
+				// This is a player connection
 				if evrId, ok := session.Context().Value(ctxEvrIDKey{}).(evr.EvrId); ok {
-					p.matchByEvrId.Store(evrId.Token(), matchID)
+					p.matchByEvrID.Store(evrId.Token(), matchID)
 				}
-				p.matchByUserId.Store(session.UserID().String(), matchID)
 			}
 		}
 
@@ -408,34 +410,27 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 
 // relayMatchData relays the data to the match by determining the match id from the session or user id.
 func (p *EvrPipeline) relayMatchData(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	var matchIdStr string
+	var matchIDStr string
 	var found bool
-	// Based on the type of message, the match is looked up differently.
-	switch in := in.(type) {
-	case *evr.OtherUserProfileRequest: // Broadcaster only
-		// Figure out the match id and send the data into the match.
-		matchIdStr, found = p.matchByEvrId.Load(in.EvrId.String())
-		if !found {
-			return fmt.Errorf("match not found for evrId: %s", in.EvrId.String())
+
+	// Try to load the match ID from the session ID (this is how broadcasters can be found)
+	matchIDStr, found = p.matchBySessionID.Load(session.ID().String())
+	if !found {
+		// Try to load the match ID from the presence stream
+		sessionIDs := session.tracker.ListLocalSessionIDByStream(PresenceStream{Mode: StreamModeEvr, Subject: session.id, Subcontext: svcMatchID})
+		if len(sessionIDs) == 0 {
+			return fmt.Errorf("no matchmaking session for user %s session: %s", session.UserID(), session.ID())
 		}
-	case *evr.UserServerProfileUpdateRequest: // Broadcaster only
-		// Figure out the match id and send the data into the match.
-		matchIdStr, found = p.matchByEvrId.Load(in.EvrId.String())
+		sessionID := sessionIDs[0]
+
+		matchIDStr, found = p.matchBySessionID.Load(sessionID.String())
+
 		if !found {
-			return fmt.Errorf("match not found for evrId: %s", in.EvrId.String())
-		}
-	default:
-		// broadcasters will match by session.
-		matchIdStr, found = p.matchBySessionID.Load(session.ID().String())
-		if !found {
-			// If the match is not found by session, try to find it by user id.
-			matchIdStr, found = p.matchByUserId.Load(session.UserID().String())
-			if !found {
-				return fmt.Errorf("no match found for user %s or session: %s", session.UserID(), session.ID())
-			}
+			return fmt.Errorf("no match found for user %s session: %s", session.UserID(), session.ID())
 		}
 	}
-	err := sendMatchData(p.matchRegistry, matchIdStr, session, in)
+
+	err := sendMatchData(p.matchRegistry, matchIDStr, session, in)
 	if err != nil {
 		return fmt.Errorf("failed to send match data: %w", err)
 	}
@@ -506,20 +501,20 @@ func (p *EvrPipeline) attemptOutOfBandAuthentication(session *sessionWS) error {
 	// Get the account for this discordId
 	uid, err := p.discordRegistry.GetUserIdByDiscordId(ctx, discordId, false)
 	if err != nil {
-		return fmt.Errorf("Out of band for discord ID %s: %v", discordId, err)
+		return fmt.Errorf("out of band for discord ID %s: %v", discordId, err)
 	}
 	userId := uid.String()
 
 	// The account was found.
 	account, err := GetAccount(ctx, session.logger, session.pipeline.db, session.statusRegistry, uuid.FromStringOrNil(userId))
 	if err != nil {
-		return fmt.Errorf("Out of band Auth: %s: %v", discordId, err)
+		return fmt.Errorf("out of band Auth: %s: %v", discordId, err)
 	}
 
 	// Do email authentication
 	userId, username, _, err := AuthenticateEmail(ctx, session.logger, session.pipeline.db, account.Email, userPassword, "", false)
 	if err != nil {
-		return fmt.Errorf("Out of band Auth: %s: %v", discordId, err)
+		return fmt.Errorf("out of band Auth: %s: %v", discordId, err)
 	}
 
 	return session.BroadcasterSession(userId, "broadcaster:"+username)

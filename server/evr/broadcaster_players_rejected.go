@@ -73,5 +73,5 @@ func (m *BroadcasterPlayersRejected) String() string {
 	for i, session := range m.PlayerSessions {
 		sessions[i] = session.String()
 	}
-	return fmt.Sprintf("%s(error_code=%v, player_sessions=[%s])", m.Token(), m.ErrorCode, strings.Join(sessions, ", "))
+	return fmt.Sprintf("BroadcasterPlayersRejected(error_code=%v, player_sessions=[%s])", m.ErrorCode, strings.Join(sessions, ", "))
 }
