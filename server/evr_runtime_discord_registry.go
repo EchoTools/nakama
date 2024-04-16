@@ -900,7 +900,13 @@ func (r *LocalDiscordRegistry) isModerator(ctx context.Context, guildID, discord
 			}
 		}
 	}
-	md, err := r.GetGuildGroupMetadata(ctx, guildID)
+
+	groupID, found := r.Get(guildID)
+	if !found {
+		return false, false, fmt.Errorf("group not found for guild %s", guildID)
+	}
+
+	md, err := r.GetGuildGroupMetadata(ctx, groupID)
 	if err != nil {
 		return false, false, fmt.Errorf("error getting guild group metadata: %w", err)
 	}

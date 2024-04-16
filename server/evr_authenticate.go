@@ -54,7 +54,7 @@ const (
 )
 
 var (
-	DisplayNameFilterRegex = regexp.MustCompile(`[^-0-9A-Za-z_\[\]]`)
+	DisplayNameFilterRegex = regexp.MustCompile(`[^-0-9A-Za-z_\[\] ]`)
 	DisplayNameMatchRegex  = regexp.MustCompile(`[A-Za-z0-9]{2}`)
 )
 
@@ -594,11 +594,12 @@ func sanitizeDisplayName(displayName string) string {
 
 	// Filter the string using the regular expression
 	filteredUsername := DisplayNameFilterRegex.ReplaceAllLiteralString(displayName, "")
-	if !DisplayNameMatchRegex.MatchString(filteredUsername) {
-		return ""
-	}
-	// two characters minimum
 
+	/*
+		if !DisplayNameMatchRegex.MatchString(filteredUsername) {
+			return ""
+		}
+	*/
 	// twenty characters maximum
 	if len(filteredUsername) > 20 {
 		filteredUsername = filteredUsername[:20]
