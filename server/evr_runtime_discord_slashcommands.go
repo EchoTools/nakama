@@ -980,14 +980,14 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				})
 			}
 		},
-		"badgesoff": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+		"badges": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			options := i.ApplicationCommandData().Options
 			content := ""
 			switch options[0].Name {
 			case "request":
 				options = options[0].Options
-				badgeNames := make([]string, len(options[1:]))
-				for _, v := range options[1:] {
+				badgeNames := make([]string, 0, len(options))
+				for _, v := range options {
 					badgeNames = append(badgeNames, v.StringValue())
 				}
 
@@ -996,7 +996,23 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				if user == nil {
 					return
 				}
+				badgeChannel := "1228721641375138018"
 
+				basicMessage := fmt.Sprintf("<@%s> (`%s`) is requesting the following badges: %s", user.ID, user.Username, strings.Join(badgeNames, ", "))
+				// Send it to the channel
+				s.ChannelMessageSend(badgeChannel, basicMessage)
+
+				// Tell teh user
+				content = "Requesting badges for:" + strings.Join(badgeNames, ", ")
+				// Send a message to the user
+				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+					Type: discordgo.InteractionResponseChannelMessageWithSource,
+					Data: &discordgo.InteractionResponseData{
+						Flags:   discordgo.MessageFlagsEphemeral,
+						Content: content,
+					},
+				})
+				return
 				rows := make([]discordgo.MessageComponent, 0, len(badgeNames))
 
 				for _, badgeName := range badgeNames {
@@ -1014,11 +1030,13 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 								Label:    badgeName,
 								Style:    discordgo.SuccessButton,
 								CustomID: fdadd,
+								Disabled: false,
 							},
 							discordgo.Button{
 								Label:    "Remove",
 								Style:    discordgo.DangerButton,
 								CustomID: fdremove,
+								Disabled: false,
 							},
 						},
 					}
@@ -1026,9 +1044,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					rows = append(rows, row)
 				}
 
-				badgeChannel := "1228721641375138018"
 				s.ChannelMessageSendComplex(badgeChannel, &discordgo.MessageSend{
-					Content:    fmt.Sprintf("<@%s> (`%s`) is requesting the following badges:", user.ID, user.Username),
+					Content:    fmt.Sprintf("<@%s> (`%s`) is requesting the following badges: %s", user.ID, user.Username),
 					Components: rows,
 				})
 
