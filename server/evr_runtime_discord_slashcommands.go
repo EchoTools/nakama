@@ -607,6 +607,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 	}
 
 	commandHandlers := map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate){
+
 		"evrsymbol": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			options := i.ApplicationCommandData().Options
 			token := options[0].StringValue()

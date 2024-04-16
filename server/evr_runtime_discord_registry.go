@@ -60,6 +60,7 @@ type DiscordRegistry interface {
 	// GetUser looks up the Discord user by the user ID. Potentially using the state cache.
 	GetUser(ctx context.Context, discordId string) (*discordgo.User, error)
 	UpdateGuildGroup(ctx context.Context, logger runtime.Logger, userID uuid.UUID, guildID, discordID string) error
+	UpdateAllGuildGroupsForUser(ctx context.Context, logger runtime.Logger, userID uuid.UUID, discordID string) error
 	isModerator(ctx context.Context, guildID, discordID string) (isModerator bool, isGlobal bool, err error)
 }
 
@@ -561,6 +562,16 @@ func (r *LocalDiscordRegistry) UpdateGuildGroup(ctx context.Context, logger runt
 		defer r.nk.GroupUsersAdd(ctx, SystemUserId, groupId, []string{userID.String()})
 	}
 
+	return nil
+}
+
+func (r *LocalDiscordRegistry) UpdateAllGuildGroupsForUser(ctx context.Context, logger runtime.Logger, userID uuid.UUID, discordID string) error {
+	// Check every guild the bot is in for this user.
+	for _, guild := range r.bot.State.Guilds {
+		if err := r.UpdateGuildGroup(ctx, logger, userID, guild.ID, discordID); err != nil {
+			continue
+		}
+	}
 	return nil
 }
 
