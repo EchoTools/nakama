@@ -287,10 +287,10 @@ func broadcasterConfig(userId, sessionId string, serverId uint64, internalIP, ex
 	return config
 }
 
-func (p *EvrPipeline) getBroadcasterHostInfo(ctx context.Context, logger *zap.Logger, session *sessionWS, userId, discordId string, guildIds []string) (channels []uuid.UUID, err error) {
+func (p *EvrPipeline) getBroadcasterHostInfo(ctx context.Context, logger *zap.Logger, session *sessionWS, userId, discordID string, guildIDs []string) (channels []uuid.UUID, err error) {
 
-	// If the list of guilds is empty, get the user's guild groups
-	if len(guildIds) == 0 {
+	// If the list of guilds is empty, get all of the user's guild groups
+	if len(guildIDs) == 0 {
 
 		// Get the user's guild groups
 		groups, err := p.discordRegistry.GetGuildGroups(ctx, uuid.FromStringOrNil(userId))
@@ -371,7 +371,7 @@ func (p *EvrPipeline) getBroadcasterHostInfo(ctx context.Context, logger *zap.Lo
 func (p *EvrPipeline) newParkingMatch(logger *zap.Logger, session *sessionWS, config *MatchBroadcaster) error {
 
 	// Create the match state from the config
-	_, params, _, err := NewEvrMatchState(config.Endpoint, config, session.id.String())
+	_, params, _, err := NewEvrMatchState(config.Endpoint, config, session.id.String(), p.node)
 	if err != nil {
 		return fmt.Errorf("failed to create match state: %v", err)
 	}
@@ -379,7 +379,7 @@ func (p *EvrPipeline) newParkingMatch(logger *zap.Logger, session *sessionWS, co
 	// Create the match
 	matchId, err := p.matchRegistry.CreateMatch(context.Background(), p.runtime.matchCreateFunction, EvrMatchmakerModule, params)
 	if err != nil {
-		return fmt.Errorf("failed to create match: %v", err)
+		return fmt.Errorf("failed to create parking match: %v", err)
 	}
 
 	// (Attempt to) join the match

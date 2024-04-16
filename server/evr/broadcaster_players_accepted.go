@@ -37,5 +37,5 @@ func (m *BroadcasterPlayersAccepted) String() string {
 	for i, session := range m.PlayerSessions {
 		sessions[i] = session.String()
 	}
-	return fmt.Sprintf("%s(player_sessions=[%s])", m.Token(), strings.Join(sessions, ", "))
+	return fmt.Sprintf("BroadcasterPlayersAccepted(player_sessions=[%s])", strings.Join(sessions, ", "))
 }

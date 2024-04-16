@@ -30,14 +30,14 @@ func (p *EvrPipeline) lobbyMatchmakerStatusRequest(ctx context.Context, logger *
 }
 
 // authorizeMatchmaking checks if the user is allowed to join a public match or spawn a new match
-func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logger, session *sessionWS, channel uuid.UUID) (bool, error) {
+func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logger, session *sessionWS, loginSessionID uuid.UUID, channel uuid.UUID) (bool, error) {
 
 	// Get the EvrID from the context
-	evrId, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
+	evrID, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
 	if !ok {
 		return false, fmt.Errorf("failed to get evrID from context")
 	}
-	if !evrId.Valid() {
+	if !evrID.Valid() {
 		return false, fmt.Errorf("evrID is invalid")
 	}
 
@@ -45,11 +45,9 @@ func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logg
 	if session.userID == uuid.Nil {
 		return false, status.Errorf(codes.PermissionDenied, "User not authenticated")
 	}
-	//evrModes := map[uint8]struct{}{StreamModeEvr: {}, StreamModeMatchAuthoritative: {}}
-	//stream := PresenceStream{Mode: StreamModeEvr, Subject: session.userID, Subcontext: svcMatchID, Label: p.node}
 
-	// Disconnect the player from other matches
-	sessionIDs := session.tracker.ListLocalSessionIDByStream(PresenceStream{Mode: StreamModeEvr, Subject: session.userID, Subcontext: svcMatchID})
+	// Disconnect this EVRID from other matches
+	sessionIDs := session.tracker.ListLocalSessionIDByStream(PresenceStream{Mode: StreamModeEvr, Subject: evrID.UUID(), Subcontext: svcMatchID})
 	for _, foundSessionID := range sessionIDs {
 		if foundSessionID == session.id {
 			// Allow the current session, only disconnect any older ones.
@@ -69,16 +67,21 @@ func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logg
 	// Track this session as a matchmaking session.
 	s := session
 	s.tracker.TrackMulti(s.ctx, s.id, []*TrackerOp{
-		// EVR packet data stream for the match session by EvrID
 		{
-			Stream: PresenceStream{Mode: StreamModeEvr, Subject: evrId.UUID()},
+			Stream: PresenceStream{Mode: StreamModeEvr, Subject: session.id, Subcontext: svcMatchID},
+			Meta:   PresenceMeta{Format: s.format, Hidden: true},
+		},
+		// By login sessionID and match service ID
+		{
+			Stream: PresenceStream{Mode: StreamModeEvr, Subject: loginSessionID, Subcontext: svcMatchID},
+			Meta:   PresenceMeta{Format: s.format, Hidden: true},
+		},
+		// By EVRID and match service ID
+		{
+			Stream: PresenceStream{Mode: StreamModeEvr, Subject: evrID.UUID(), Subcontext: svcMatchID},
 			Meta:   PresenceMeta{Format: s.format, Hidden: true},
 		},
 		// EVR packet data stream for the match session by Session ID and service ID
-		{
-			Stream: PresenceStream{Mode: StreamModeEvr, Subject: s.id, Subcontext: svcMatchID},
-			Meta:   PresenceMeta{Format: s.format, Hidden: true},
-		},
 	}, s.userID)
 
 	if channel == uuid.Nil {
@@ -125,7 +128,7 @@ func (p *EvrPipeline) matchmakingLabelFromFindRequest(ctx context.Context, sessi
 	return &EvrMatchState{
 		Channel: &channel,
 
-		MatchID: request.MatchingSession, // The existing lobby/match that the player is in (if any)
+		MatchID: request.CurrentMatch, // The existing lobby/match that the player is in (if any)
 		Mode:    request.Mode,
 		Level:   request.Level,
 		Open:    true,
@@ -143,7 +146,7 @@ func (p *EvrPipeline) matchmakingLabelFromFindRequest(ctx context.Context, sessi
 // lobbyFindSessionRequest is a message requesting to find a public session to join.
 func (p *EvrPipeline) lobbyFindSessionRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) (err error) {
 	request := in.(*evr.LobbyFindSessionRequest)
-
+	loginSessionID := request.LoginSessionID
 	groups, priorities, err := p.GetGuildPriorityList(ctx, session.userID)
 	if err != nil {
 		logger.Warn("Failed to get guild priority list", zap.Error(err))
@@ -163,6 +166,7 @@ func (p *EvrPipeline) lobbyFindSessionRequest(ctx context.Context, logger *zap.L
 		}
 	}
 
+	// Prepare the response message
 	response := NewMatchmakingResult(logger, request.Mode, request.Channel)
 
 	// Build the matchmaking label using the request parameters
@@ -174,7 +178,7 @@ func (p *EvrPipeline) lobbyFindSessionRequest(ctx context.Context, logger *zap.L
 	// TODO Check if the user is in a party.
 
 	// Check for suspensions on this channel, if this is a request for a public match.
-	if authorized, err := p.authorizeMatchmaking(ctx, logger, session, *ml.Channel); !authorized {
+	if authorized, err := p.authorizeMatchmaking(ctx, logger, session, loginSessionID, *ml.Channel); !authorized {
 		return response.SendErrorToSession(session, err)
 	} else if err != nil {
 		logger.Warn("Failed to authorize matchmaking, allowing player to continue. ", zap.Error(err))
@@ -299,7 +303,7 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 			// Stage 1: Check if there is an available broadcaster
 			matchID, err := p.MatchCreate(ctx, session, msession, msession.Label)
 			if err != nil || matchID == "" {
-				logger.Warn("Failed to create match", zap.Error(err))
+				logger.Warn("Failed to create match", zap.Any("state", msession.Label), zap.Error(err))
 				continue
 			}
 			foundMatch = FoundMatch{
@@ -317,8 +321,14 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 		select {
 		case <-ctx.Done():
 			return nil
-		case msession.MatchJoinCh <- foundMatch:
-			logger.Debug("Backfilling match", zap.String("mid", foundMatch.MatchID))
+		default:
+		}
+		logger.Debug("Attempting to backfill match", zap.String("mid", foundMatch.MatchID))
+		msession.MatchJoinCh <- foundMatch
+
+		select {
+		case <-ctx.Done():
+			return nil
 		case <-time.After(3 * time.Second):
 			logger.Warn("Failed to backfill match", zap.String("mid", foundMatch.MatchID))
 		}
@@ -390,7 +400,6 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 		// Replace the session
 		logger.Warn("Matchmaking session already exists", zap.Any("tickets", s.Tickets))
 	}
-
 	joinFn := func(matchID string, query string) error {
 		err := p.JoinEvrMatch(parentCtx, logger, session, query, matchID, *ml.Channel, int(ml.TeamIndex))
 		if err != nil {
@@ -545,7 +554,7 @@ func (p *EvrPipeline) GetGuildPriorityList(ctx context.Context, userID uuid.UUID
 // lobbyCreateSessionRequest is a request to create a new session.
 func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.LobbyCreateSessionRequest)
-
+	loginSessionID := request.LoginSessionID
 	groups, priorities, err := p.GetGuildPriorityList(ctx, session.userID)
 	if err != nil {
 		logger.Warn("Failed to get guild priority list", zap.Error(err))
@@ -569,7 +578,7 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 	}
 
 	// Check for suspensions on this channel. The user will not be allowed to create lobby's
-	if authorized, err := p.authorizeMatchmaking(ctx, logger, session, request.Channel); !authorized {
+	if authorized, err := p.authorizeMatchmaking(ctx, logger, session, loginSessionID, request.Channel); !authorized {
 		return result.SendErrorToSession(session, err)
 	} else if err != nil {
 		logger.Warn("Failed to authorize matchmaking, allowing player to continue. ", zap.Error(err))
@@ -648,6 +657,7 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 			return result.SendErrorToSession(session, err)
 		}
 
+		// Join the match
 		err = p.JoinEvrMatch(msession.Ctx, logger, session, "", matchID, request.Channel, int(ml.TeamIndex))
 		if err != nil {
 			return result.SendErrorToSession(session, err)
@@ -661,7 +671,7 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 // lobbyJoinSessionRequest is a request to join a specific existing session.
 func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.LobbyJoinSessionRequest)
-
+	loginSessionID := request.LoginSessionID
 	// Make sure the match exists
 	matchId := request.LobbyId.String() + "." + p.node
 	match, _, err := p.matchRegistry.GetMatch(ctx, matchId)
@@ -690,7 +700,7 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 		if ml.TeamIndex != Spectator && ml.TeamIndex != Moderator {
 			err = status.Errorf(codes.InvalidArgument, "Match is a public match")
 		}
-		authorized, err2 := p.authorizeMatchmaking(ctx, logger, session, *ml.Channel)
+		authorized, err2 := p.authorizeMatchmaking(ctx, logger, session, loginSessionID, *ml.Channel)
 		if err2 != nil {
 			if authorized {
 				logger.Warn("Failed to authorize matchmaking, allowing player to continue. ", zap.Error(err2))
@@ -715,7 +725,7 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 func (p *EvrPipeline) lobbyPendingSessionCancel(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	// Look up the matching session.
 	if matchingSession, ok := p.matchmakingRegistry.GetMatchingBySessionId(session.id); ok {
-		matchingSession.Cancel(ErrMatchmakingCancelledByPlayer)
+		matchingSession.Cancel(ErrMatchmakingCanceledByPlayer)
 	}
 	return nil
 }

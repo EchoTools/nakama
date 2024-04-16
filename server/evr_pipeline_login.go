@@ -841,15 +841,41 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.OtherUserProfileRequest)
 
+	// Pull the profile for the other user
+	loginSession, found := p.loginSessionByEvrID.Load(request.EvrId.Token())
+	if !found {
+		return fmt.Errorf("failed to find user by EvrID: %s", request.EvrId.Token())
+	}
+
+	userID := loginSession.userID
+
+	profile := p.profileRegistry.GetProfile(userID)
+	if profile == nil {
+		return fmt.Errorf("failed to load game profiles")
+	}
+
+	// Send the profile to the client
+	if err := session.SendEvr(
+		evr.NewOtherUserProfileSuccess(request.EvrId, profile.GetServer()),
+	); err != nil {
+		return fmt.Errorf("failed to send OtherUserProfileSuccess: %w", err)
+	}
+	return nil
+
 	// Check the presences for this user in a match
 
 	subject := request.EvrId.UUID()
 	if subject == uuid.Nil {
 		return fmt.Errorf("invalid EvrID")
 	}
-
+	// Get this users match connection ID
+	sessionIDs := session.tracker.ListLocalSessionIDByStream(PresenceStream{Mode: StreamModeEvr, Subject: session.userID, Subcontext: svcMatchID})
+	if len(sessionIDs) == 0 {
+		return fmt.Errorf("failed to find sessionID for user: %s", session.userID)
+	}
+	matchSessionID := sessionIDs[0]
 	// Get this users matchID
-	matchID, found := p.matchBySessionID.Load(session.id.String())
+	matchID, found := p.matchBySessionID.Load(matchSessionID.String())
 	if !found {
 		return fmt.Errorf("failed to find match by sessionID: %s", session.id)
 	}
