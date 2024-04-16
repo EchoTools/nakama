@@ -666,7 +666,8 @@ func (s *sessionWS) SendEvr(messages ...evr.Message) error {
 	}
 
 	// Send the EVR messages one at a time.
-	for _, message := range messages {
+	var message evr.Message
+	for _, message = range messages {
 		if message == nil {
 			continue
 		}
@@ -680,6 +681,12 @@ func (s *sessionWS) SendEvr(messages ...evr.Message) error {
 			return err
 		}
 	}
+
+	// If the last message is a STcpConnectionUnrequireEvent, return early.
+	if _, ok := message.(*evr.STcpConnectionUnrequireEvent); !ok {
+		return nil
+	}
+
 	return nil
 }
 
