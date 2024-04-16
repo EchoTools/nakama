@@ -302,19 +302,9 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 				TeamIndex: TeamIndex(evr.TeamUnassigned),
 			}
 		} else if create {
-			// No backfill match found
-			// Try to create a match
-			// Stage 1: Check if there is an available broadcaster
-			matchID, err := p.MatchCreate(ctx, session, msession, msession.Label)
-			if err != nil || matchID == "" {
-				logger.Warn("MatchCreate failed, continuing...", zap.Any("state", msession.Label), zap.Error(err))
-				continue
-			}
-			foundMatch = FoundMatch{
-				MatchID:   matchID,
-				Query:     "",
-				TeamIndex: TeamIndex(evr.TeamUnassigned),
-			}
+			create = false
+			// Start the create loop too
+			go p.MatchCreateLoop(session, msession, 5*time.Minute)
 		}
 
 		if foundMatch.MatchID == "" {
@@ -702,14 +692,7 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 			return result.SendErrorToSession(session, status.Errorf(codes.Internal, "Failed to create matchmaking session: %v", err))
 		}
 
-		// Create a new match
-		matchID, err := p.MatchCreate(ctx, session, msession, ml)
-		if err != nil {
-			return result.SendErrorToSession(session, err)
-		}
-
-		// Join the match
-		err = p.JoinEvrMatch(msession.Ctx, logger, session, "", matchID, int(ml.TeamIndex))
+		err = p.MatchCreateLoop(session, msession, 5*time.Minute)
 		if err != nil {
 			return result.SendErrorToSession(session, err)
 		}
