@@ -19,7 +19,7 @@ func (m BroadcasterSessionEnded) Symbol() Symbol {
 }
 
 func (m BroadcasterSessionEnded) String() string {
-	return fmt.Sprintf("%s(unused=%d)", m.Token(), m.Unused)
+	return fmt.Sprintf("BroadcasterSessionEnded(unused=%d)", m.Unused)
 }
 
 func (m *BroadcasterSessionEnded) Stream(s *EasyStream) error {
