@@ -135,10 +135,11 @@ func (c *LatencyCache) SelectPingCandidates(endpoints ...evr.Endpoint) []evr.End
 
 // FoundMatch represents the match found and send over the match join channel
 type FoundMatch struct {
-	MatchID   string
-	Ticket    string // matchmaking ticket if any
-	Query     string
-	TeamIndex TeamIndex
+	MatchID       string
+	Ticket        string // matchmaking ticket if any
+	Query         string
+	TeamIndex     TeamIndex
+	KeepTeamIndex bool
 }
 
 type TicketMeta struct {
@@ -159,6 +160,7 @@ type MatchmakingSession struct {
 	Expiry        time.Time
 	Label         *EvrMatchState
 	Tickets       map[string]TicketMeta // map[ticketId]TicketMeta
+	Party         *PartyHandler
 	LatencyCache  *LatencyCache
 }
 
@@ -483,6 +485,27 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 	}
 
 	teams := distributeParties(lo.Values(parties))
+	if len(teams) != 2 {
+		logger.Error("Invalid number of teams", zap.Int("teams", len(teams)))
+		return
+	}
+
+	ml.Players = make([]PlayerInfo, 0, len(entrants))
+	for i, players := range teams {
+		for _, p := range players {
+			// Update the label with the teams
+			evrID, err := evr.ParseEvrId(p.StringProperties["evr_id"])
+			if err != nil {
+				logger.Error("Failed to parse evr id", zap.Error(err))
+				continue
+			}
+			pi := PlayerInfo{
+				Team:  TeamIndex(i),
+				EvrID: *evrID,
+			}
+			ml.Players = append(ml.Players, pi)
+		}
+	}
 
 	// Find a valid participant to get the label from
 
@@ -533,18 +556,11 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 	// Assign the teams to the match, taking one from each team at a time
 	// and sending the join instruction to the server
 
-	if len(teams) != 2 {
-		logger.Error("Invalid number of teams", zap.Int("teams", len(teams)))
-		return
-	}
 	if matchID == "" {
 		logger.Error("No match ID found")
 		return
 	}
 
-	// Send players to the match alternating between teams for each join instruction
-
-	teamIndex := 0
 	for i, players := range teams {
 		// Assign each player in the team to the match
 		for _, entry := range players {
@@ -562,10 +578,11 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 			}
 
 			foundMatch := FoundMatch{
-				MatchID:   matchID,
-				Ticket:    ticketMeta.TicketID,
-				Query:     ticketMeta.Query,
-				TeamIndex: TeamIndex(i),
+				MatchID:       matchID,
+				Ticket:        ticketMeta.TicketID,
+				Query:         ticketMeta.Query,
+				TeamIndex:     TeamIndex(i),
+				KeepTeamIndex: true,
 			}
 			// Send the join instruction
 			select {
@@ -577,9 +594,6 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 			case <-time.After(2 * time.Second):
 				logger.Warn("Failed to send match join instruction", zap.String("sessionID", entry.Presence.SessionID.String()))
 			}
-
-			// Alternate between teams
-			teamIndex = (teamIndex + 1) % 2
 		}
 	}
 }

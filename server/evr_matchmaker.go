@@ -239,14 +239,22 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 		if err != nil {
 			logger.Warn("Failed to join party group", zap.String("group_id", config.GroupID), zap.Error(err))
 		} else {
+
 			logger.Debug("Joined party", zap.String("party_id", partyID.String()), zap.Any("members", ph.members.List()))
 		}
 		partyID = ph.ID
+		msession.Party = ph
 		// Add the user's group to the string properties
 		stringProps["party_group"] = config.GroupID
 		// Add the user's group to the query string
 		query = fmt.Sprintf("%s properties.party_group:%s^5", query, config.GroupID)
 	}
+	// Get the EVR ID from the context
+	evrID, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
+	if !ok {
+		return "", status.Errorf(codes.Internal, "EVR ID not found in context")
+	}
+	stringProps["evr_id"] = evrID.Token()
 
 	minCount := gconfig.MinCount
 	maxCount := gconfig.MaxCount
@@ -257,7 +265,7 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 	}
 	subcontext := uuid.NewV5(uuid.Nil, "matchmaking")
 	// Create a status presence for the user
-	ok := session.tracker.TrackMulti(ctx, session.id, []*TrackerOp{
+	ok = session.tracker.TrackMulti(ctx, session.id, []*TrackerOp{
 		// EVR packet data stream for the login session by user ID, and service ID, with EVR ID
 		{
 			Stream: PresenceStream{Mode: StreamModeEvr, Subject: session.id, Subcontext: subcontext, Label: query},
