@@ -9,10 +9,12 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	anyascii "github.com/anyascii/go"
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
@@ -54,8 +56,9 @@ const (
 )
 
 var (
-	DisplayNameFilterRegex = regexp.MustCompile(`[^-0-9A-Za-z_\[\] ]`)
-	DisplayNameMatchRegex  = regexp.MustCompile(`[A-Za-z0-9]{2}`)
+	DisplayNameFilterRegex       = regexp.MustCompile(`[^-0-9A-Za-z_\[\] ]`)
+	DisplayNameMatchRegex        = regexp.MustCompile(`[A-Za-z]`)
+	DisplayNameFilterScoreSuffix = regexp.MustCompile(`\s\(\d+\)\s\[\d+\.\d+%]`)
 )
 
 // The data used to generate the Device ID authentication string.
@@ -483,28 +486,40 @@ func GetUserIpAddresses(ctx context.Context, logger runtime.Logger, nk runtime.N
 	return listRecords, nil
 }
 
-// SetDisplayNameByPriority sets the displayName for the account based on the priority of the options.
-func SetDisplayNameByPriority(ctx context.Context, nk runtime.NakamaModule, userId, username string, options []string) (displayName string, err error) {
+type DisplayNameHistory struct {
+	DisplayName string `json:"display_name"`
+	Timestamp   int64  `json:"timestamp"`
+}
+
+// SelectDisplayNameByPriority sets the displayName for the account based on the priority of the options.
+func SelectDisplayNameByPriority(ctx context.Context, nk runtime.NakamaModule, userId, username string, options []string) (displayName string, err error) {
 
 	// Sanitize the options
 	options = lo.Map(options, func(s string, _ int) string { return sanitizeDisplayName(s) })
 
-	// Filter empty strings
-	options = lo.Filter(options, func(s string, _ int) bool { return s != "" })
+	filter := make([]string, 0, len(options))
 
-	// Filter existing usernames
+	// Filter usernames of other players
 	users, err := nk.UsersGetUsername(ctx, options)
 	if err != nil {
 		return "", fmt.Errorf("error getting users by username: %w", err)
 	}
-	existingUsernames := lo.Map(users, func(u *api.User, _ int) string { return u.Username })
+	for _, u := range users {
+		if u.Id == userId {
+			continue
+		}
+		filter = append(filter, u.Username)
+	}
 
-	// Lookup any existing displayNames
+	// Filter displayNames of other players
 	ops := make([]*runtime.StorageRead, len(options))
 	for i, option := range options {
+		if option == "" {
+			continue
+		}
 		ops[i] = &runtime.StorageRead{
 			Collection: DisplayNameCollection,
-			Key:        option,
+			Key:        strings.ToLower(option),
 		}
 	}
 	result, err := nk.StorageRead(ctx, ops)
@@ -512,100 +527,22 @@ func SetDisplayNameByPriority(ctx context.Context, nk runtime.NakamaModule, user
 		return "", fmt.Errorf("error reading displayNames: %w", err)
 	}
 
-	// Filter against all the results
-	options = lo.Filter(options, func(s string, _ int) bool {
-		// Filter empty strings
-		if s == "" {
-			return false
+	for _, o := range result {
+		if o.UserId == userId {
+			continue
 		}
-
-		// do all comparisons in lowercase
-		l := strings.ToLower(s)
-
-		// select the user's username
-		if l == strings.ToLower(username) {
-			return true
-		}
-
-		// Lowercase all the usernames
-		existingUsernames = lo.Map(existingUsernames, func(s string, _ int) string { return strings.ToLower(s) })
-
-		// Remove any existingUsernames that match this user's username
-		existingUsernames = lo.Filter(existingUsernames, func(s string, _ int) bool { return s != l })
-
-		// Check if this option is already in use as a username
-		if lo.Contains(existingUsernames, l) {
-			return false
-		}
-		// Lowercase all the displayNames, and ignore this user's displayNames
-		result = lo.Map(result, func(o *api.StorageObject, _ int) *api.StorageObject {
-			if o.UserId == userId {
-				return nil
-			}
-			o.Key = strings.ToLower(o.Key)
-			return o
-		})
-
-		// Filter out any displayNames that are already in use
-		for _, r := range result {
-			if r.Key == s && r.UserId != userId {
-				return false
-			}
-		}
-		// Keep this option
-		return true
-	})
-
-	// Use the top option, otherwise fallback.
-	if len(options) > 0 {
-		displayName = options[0]
-	} else {
-		displayName = username
+		filter = append(filter, o.Key)
 	}
 
-	// Update the account
-	accountUpdates := []*runtime.AccountUpdate{
-		{
-			UserID:      userId,
-			DisplayName: displayName,
-		},
-	}
-	storageWrites := []*runtime.StorageWrite{
-		{
-			Collection: DisplayNameCollection,
-			Key:        displayName,
-			UserID:     userId,
-			Value:      "{}",
-			Version:    "",
-		},
-	}
-
-	walletUpdates := []*runtime.WalletUpdate{}
-	storageDeletes := []*runtime.StorageDelete{}
-	updateLedger := true
-	if _, _, err = nk.MultiUpdate(ctx, accountUpdates, storageWrites, storageDeletes, walletUpdates, updateLedger); err != nil {
-		return "", fmt.Errorf("error updating account: %w", err)
-	}
-	return displayName, nil
-}
-
-// sanitizeDisplayName filters the provided displayName to ensure it is valid.
-func sanitizeDisplayName(displayName string) string {
-
-	// Filter the string using the regular expression
-	filteredUsername := DisplayNameFilterRegex.ReplaceAllLiteralString(displayName, "")
-
-	/*
-		if !DisplayNameMatchRegex.MatchString(filteredUsername) {
-			return ""
+	// Filter the options
+	for i, o := range options {
+		if lo.Contains(filter, strings.ToLower(o)) {
+			continue
 		}
-	*/
-	// twenty characters maximum
-	if len(filteredUsername) > 20 {
-		filteredUsername = filteredUsername[:20]
+		return options[i], nil
 	}
-
-	return filteredUsername
+	// No options available
+	return username, nil
 }
 
 type GroupMetadata struct {
@@ -619,7 +556,8 @@ type GroupMetadata struct {
 }
 
 type AccountUserMetadata struct {
-	Suspensions map[string]SuspensionStatus `json:"suspension_reason"` // The reason for the suspension
+	DisplayNameOverride string `json:"display_name_override"` // The display name override
+	GlobalBanReason     string `json:"global_ban_reason"`     // The global ban reason
 }
 
 func (a *AccountUserMetadata) MarshalToMap() (map[string]interface{}, error) {
@@ -724,28 +662,32 @@ func (md *RoleGroupMetadata) MarshalToMap() (map[string]interface{}, error) {
 	return guildGroupMap, nil
 }
 
-func SetDisplayNameByChannelBySession(ctx context.Context, nk runtime.NakamaModule, logger *zap.Logger, discordRegistry DiscordRegistry, session *sessionWS, groupId string) (displayName string, err error) {
+func SetDisplayNameByChannelBySession(ctx context.Context, nk runtime.NakamaModule, logger *zap.Logger, discordRegistry DiscordRegistry, session *sessionWS, groupID string) (displayName string, err error) {
 
 	// Priority order from least to most preferred
 	options := make([]string, 0, 6)
+	userID := session.UserID().String()
 
 	var account *api.Account
 	// Get the account
-	if account, err = nk.AccountGetId(ctx, session.UserID().String()); err != nil {
+	if account, err = nk.AccountGetId(ctx, userID); err != nil {
 		return "", fmt.Errorf("error getting account: %w", err)
-	} else {
-		username := account.GetUser().GetUsername()
-		// set the fallback
-		displayName = username
-		// Add the option
-		options = append(options, username)
 	}
+	user := account.GetUser()
+	username := account.GetUser().GetUsername()
+	displayName = user.GetDisplayName()
 
-	// set the fallback
-	if dn := account.GetUser().GetDisplayName(); dn != "" {
-		options = append(options, dn)
-		// set the fallback
-		displayName = dn
+	// If the account has an override, use that
+	md := AccountUserMetadata{}
+	if err = json.Unmarshal([]byte(user.GetMetadata()), &md); err != nil {
+		return displayName, fmt.Errorf("error unmarshalling account metadata: %w", err)
+	}
+	if md.DisplayNameOverride != "" {
+		displayName = md.DisplayNameOverride
+		if err = nk.AccountUpdateId(ctx, userID, "", nil, md.DisplayNameOverride, "", "", "", ""); err != nil {
+			return displayName, fmt.Errorf("error updating account: %w", err)
+		}
+		return displayName, nil
 	}
 
 	// Get the discordID from the account's customID
@@ -759,15 +701,16 @@ func SetDisplayNameByChannelBySession(ctx context.Context, nk runtime.NakamaModu
 	if err != nil {
 		return displayName, fmt.Errorf("error getting discord user: %w", err)
 	}
+
 	options = append(options, discordUser.Username)
 	options = append(options, discordUser.GlobalName)
 
 	// Get the guild
-	if uuid.FromStringOrNil(groupId) != uuid.Nil {
+	if uuid.FromStringOrNil(groupID) != uuid.Nil {
 		// Get the guild by the user's primary guild
-		guild, err := discordRegistry.GetGuildByGroupId(ctx, groupId)
+		guild, err := discordRegistry.GetGuildByGroupId(ctx, groupID)
 		if err != nil {
-			session.logger.Warn("Error getting guild by group id.", zap.String("group_id", groupId), zap.Error(err))
+			session.logger.Warn("Error getting guild by group id.", zap.String("group_id", groupID), zap.Error(err))
 			return displayName, nil
 		}
 		if guild != nil {
@@ -783,5 +726,88 @@ func SetDisplayNameByChannelBySession(ctx context.Context, nk runtime.NakamaModu
 	// Reverse the options
 	options = lo.Reverse(options)
 	logger.Debug("SetDisplayNameByChannelBySession", zap.String("options", strings.Join(options, ",")))
-	return SetDisplayNameByPriority(ctx, nk, account.GetUser().GetId(), account.GetUser().GetUsername(), options)
+	displayName, err = SelectDisplayNameByPriority(ctx, nk, account.GetUser().GetId(), account.GetUser().GetUsername(), options)
+	if err != nil {
+		return "", fmt.Errorf("error selecting display name by priority: %w", err)
+	}
+
+	// Only update the account if something has changed
+	if displayName == user.GetDisplayName() && discordUser.Username == user.GetUsername() {
+		return displayName, nil
+	}
+
+	// Purge old display names
+	records, err := GetDisplayNameRecords(ctx, NewRuntimeGoLogger(logger), nk, userID)
+	if err != nil {
+		return "", fmt.Errorf("error getting display names: %w", err)
+	}
+	storageDeletes := []*runtime.StorageDelete{}
+	if len(records) > 2 {
+		// Sort the records by create time
+		sort.SliceStable(records, func(i, j int) bool {
+			return records[i].CreateTime.Seconds > records[j].CreateTime.Seconds
+		})
+		// Delete all but the first two
+		for i := 2; i < len(records); i++ {
+			storageDeletes = append(storageDeletes, &runtime.StorageDelete{
+				Collection: DisplayNameCollection,
+				Key:        records[i].Key,
+				UserID:     userID,
+			})
+		}
+	}
+
+	// Update the account
+	accountUpdates := []*runtime.AccountUpdate{
+		{
+			UserID:      userID,
+			Username:    username,
+			DisplayName: displayName,
+		},
+	}
+	storageWrites := []*runtime.StorageWrite{
+		{
+			Collection: DisplayNameCollection,
+			Key:        displayName,
+			UserID:     userID,
+			Value:      "{}",
+			Version:    "",
+		},
+	}
+
+	walletUpdates := []*runtime.WalletUpdate{}
+	updateLedger := true
+	if _, _, err = nk.MultiUpdate(ctx, accountUpdates, storageWrites, storageDeletes, walletUpdates, updateLedger); err != nil {
+		return "", fmt.Errorf("error updating account: %w", err)
+	}
+
+	return displayName, nil
+}
+
+// sanitizeDisplayName filters the provided displayName to ensure it is valid.
+func sanitizeDisplayName(displayName string) string {
+
+	// Removes the discord score (i.e. ` (71) [62.95%]`) suffix from display names
+	displayName = DisplayNameFilterScoreSuffix.ReplaceAllLiteralString(displayName, "")
+
+	// Treat the unicode NBSP as a terminator
+	displayName, _, _ = strings.Cut(displayName, "\u00a0")
+
+	// Convert unicode characters to their closest ascii representation
+	displayName = anyascii.Transliterate(displayName)
+
+	// Filter the string using the regular expression
+	displayName = DisplayNameFilterRegex.ReplaceAllLiteralString(displayName, "")
+
+	// twenty characters maximum
+	if len(displayName) > 20 {
+		displayName = displayName[:20]
+	}
+
+	if !DisplayNameMatchRegex.MatchString(displayName) {
+		return ""
+	}
+	// Trim spaces from both ends
+	displayName = strings.TrimSpace(displayName)
+	return displayName
 }

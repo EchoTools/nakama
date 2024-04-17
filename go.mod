@@ -61,6 +61,7 @@ require (
 	cloud.google.com/go/compute v1.23.3 // indirect
 	cloud.google.com/go/compute/metadata v0.2.3 // indirect
 	github.com/RoaringBitmap/roaring v1.7.0 // indirect
+	github.com/anyascii/go v0.3.2
 	github.com/axiomhq/hyperloglog v0.0.0-20230201085229-3ddf4bad03dc // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/blevesearch/go-porterstemmer v1.0.3 // indirect

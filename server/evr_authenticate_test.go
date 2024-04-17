@@ -100,7 +100,7 @@ func TestSetDisplayNameByPriority(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := SetDisplayNameByPriority(tt.args.ctx, tt.args.nk, tt.args.userId, tt.args.username, tt.args.options)
+			got, err := SelectDisplayNameByPriority(tt.args.ctx, tt.args.nk, tt.args.userId, tt.args.username, tt.args.options)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("SetDisplayNameByPriority() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -113,40 +113,61 @@ func TestSetDisplayNameByPriority(t *testing.T) {
 }
 
 func Test_sanitizeDisplayName(t *testing.T) {
-	type args struct {
-		displayName string
-	}
+
 	tests := []struct {
-		name string
-		args args
-		want string
+		name        string
+		displayName string
+		want        string
 	}{
 		{
-			"Test DisplayName with special characters",
-			args{
-				"!@#$%^&*()_+",
-			},
+			"special characters",
+			"!@#$%^&*()_+",
 			"",
 		},
 		{
-			"Test DisplayName with numbers",
-			args{
-				"1234567890",
-			},
+			"numbers",
+			"1234567890",
 			"",
 		},
 		{
-			"Test DisplayName with numbers and letters",
-			args{
-				"015A",
-			},
+			"numbers and letters",
 			"015A",
+			"015A",
+		},
+		{
+			"hyphen and letters",
+			"L-A-",
+			"L-A-",
+		},
+		{
+			"single letter",
+			"X",
+			"X",
+		},
+		{
+			"discord bot scoring suffix",
+			"KingNerf Crumbcake (71) [62.95%]",
+			"KingNerf Crumbcake",
+		},
+		{
+			"NBSP as a terminator",
+			"mother\u00a0୨ৎ", // Use a NBSP as a terminator
+			"mother",
+		},
+		{
+			"Unicode latin characters",
+			"ℚ𝕨𝔼ℤ𝕚",
+			"QwEZi",
+		},
+		{"Icons with spaces",
+			"🗕 🗗 🗙",
+			"X",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := sanitizeDisplayName(tt.args.displayName); got != tt.want {
-				t.Errorf("sanitizeDisplayName() = %v, want %v", got, tt.want)
+			if got := sanitizeDisplayName(tt.displayName); got != tt.want {
+				t.Errorf("sanitizeDisplayName() = `%v`, want `%v`", got, tt.want)
 			}
 		})
 	}
