@@ -843,33 +843,10 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.OtherUserProfileRequest)
 
-	/*
-		// Pull the profile for the other user
-		loginSession, found := p.loginSessionByEvrID.Load(request.EvrId.Token())
-		if !found {
-			return fmt.Errorf("failed to find user by EvrID: %s", request.EvrId.Token())
-		}
-
-		userID := loginSession.userID
-
-		profile := p.profileRegistry.GetProfile(userID)
-		if profile == nil {
-			return fmt.Errorf("failed to load game profiles")
-		}
-
-		// Send the profile to the client
-		if err := session.SendEvr(
-			evr.NewOtherUserProfileSuccess(request.EvrId, profile.GetServer()),
-		); err != nil {
-			return fmt.Errorf("failed to send OtherUserProfileSuccess: %w", err)
-		}
-		return nil
-	*/
-
 	// Lookup the the profile
 	data, found := p.profileRegistry.GetProfileByEvrID(request.EvrId)
 	if !found {
-		return fmt.Errorf("failed to find profile for %s by matchID: %s", request.EvrId.Token())
+		return fmt.Errorf("failed to find profile for %s", request.EvrId.Token())
 	}
 
 	// Construct the response

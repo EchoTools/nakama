@@ -4,9 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 
 	"github.com/heroiclabs/nakama-common/runtime"
-	"go.uber.org/zap"
 
 	_ "google.golang.org/protobuf/proto"
 )
