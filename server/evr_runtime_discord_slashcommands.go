@@ -1002,8 +1002,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				// Send it to the channel
 				s.ChannelMessageSend(badgeChannel, basicMessage)
 
-				// Tell teh user
-				content = "Requesting badges for:" + strings.Join(badgeNames, ", ")
+				// Tell the user
+				content = "Requesting badges for:" + strings.Join(badgeNames, ", "+". Please be patient as it may take some time.")
 				// Send a message to the user
 				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 					Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -1045,7 +1045,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 
 				s.ChannelMessageSendComplex(badgeChannel, &discordgo.MessageSend{
-					Content:    fmt.Sprintf("<@%s> (`%s`) is requesting the following badges: %s", user.ID, user.Username),
+					Content:    fmt.Sprintf("<@%s> (`%s`) is requesting the following badges: %s", user.ID, user.Username, strings.Join(badgeNames, ", ")),
 					Components: rows,
 				})
 

@@ -155,7 +155,7 @@ func NewProfileRegistry(nk runtime.NakamaModule, db *sql.DB, logger runtime.Logg
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if err := registry.removeStaleProfiles(ctx); err != nil {
+				if err := registry.removeStaleProfiles(); err != nil {
 					registry.logger.Error("failed to remove stale profiles", zap.Error(err))
 				}
 			}
@@ -165,7 +165,7 @@ func NewProfileRegistry(nk runtime.NakamaModule, db *sql.DB, logger runtime.Logg
 	return registry
 }
 
-func (r *ProfileRegistry) removeStaleProfiles(ctx context.Context) error {
+func (r *ProfileRegistry) removeStaleProfiles() error {
 	r.Lock()
 	defer r.Unlock()
 	for evrID := range r.profileByEvrID {
@@ -473,11 +473,6 @@ func (r *ProfileRegistry) UpdateEquippedItem(profile *GameProfileData, category 
 
 // Set the user's profile based on their groups
 func (r *ProfileRegistry) UpdateEntitledCosmetics(ctx context.Context, userID uuid.UUID, profile *GameProfileData) error {
-	// Disable Restricted Cosmetics
-	err := SetCosmeticDefaults(profile.Server)
-	if err != nil {
-		return fmt.Errorf("failed to disable restricted cosmetics: %w", err)
-	}
 
 	// Get the user's groups
 	// Check if the user has any groups that would grant them cosmetics
@@ -487,13 +482,35 @@ func (r *ProfileRegistry) UpdateEntitledCosmetics(ctx context.Context, userID uu
 	}
 
 	for i, group := range userGroups {
-		// If the user is not a member of the group, remove it
+		// If the user is not a member of the group, don't include it.
 		if group.GetState().GetValue() > int32(api.GroupUserList_GroupUser_MEMBER) {
 			// Remove the group
 			userGroups = append(userGroups[:i], userGroups[i+1:]...)
 		}
 	}
 
+	isDeveloper := false
+
+	groupNames := make([]string, 0, len(userGroups))
+	for _, userGroup := range userGroups {
+		group := userGroup.GetGroup()
+		name := group.GetName()
+		groupNames = append(groupNames, name)
+	}
+
+	for _, name := range groupNames {
+		switch name {
+		case GroupGlobalDevelopers:
+			isDeveloper = true
+		}
+	}
+
+	// Disable Restricted Cosmetics
+	enableAll := isDeveloper
+	err = SetCosmeticDefaults(profile.Server, enableAll)
+	if err != nil {
+		return fmt.Errorf("failed to disable restricted cosmetics: %w", err)
+	}
 	// Set the user's developer features
 	profile.Server.DeveloperFeatures = nil
 
@@ -501,20 +518,20 @@ func (r *ProfileRegistry) UpdateEntitledCosmetics(ctx context.Context, userID uu
 	unlocks := profile.Server.UnlockedCosmetics.Arena
 
 	// Set the user's unlocked cosmetics based on their groups
-	for _, group := range userGroups {
-		name := group.GetGroup().GetName()
-		if len(name) > 5 && name[:5] == "VRML" {
+	for _, userGroup := range userGroups {
+		group := userGroup.GetGroup()
+
+		if group.LangTag != "entitlement" {
+			continue
+		}
+
+		name := group.GetName()
+		if strings.HasPrefix(name, "VRML ") {
 			unlocks.DecalVRML = true
 			unlocks.EmoteVRMLA = true
 		}
 
-		// Set VRML tags and medals based on the user's groups
-		unlocks.DecalVRML = true
-		unlocks.EmoteVRMLA = true
 		switch name {
-		default:
-			unlocks.DecalVRML = false
-			unlocks.EmoteVRMLA = false
 		case "VRML Season Preseason":
 			unlocks.TagVrmlPreseason = true
 			unlocks.MedalVrmlPreseason = true
@@ -596,16 +613,17 @@ func (r *ProfileRegistry) UpdateEntitledCosmetics(ctx context.Context, userID uu
 		// Other group-based unlocks
 		switch name {
 
-		case "Global Developers":
+		case GroupGlobalDevelopers:
 			unlocks.TagDeveloper = true
 			profile.Server.DeveloperFeatures = &evr.DeveloperFeatures{
 				DisableAfkTimeout: true,
 			}
+
 			fallthrough
-		case "Global Moderators":
+		case GroupGlobalModerators:
 			unlocks.TagGameAdmin = true
-			fallthrough
-		case "Global Testers":
+
+		case GroupGlobalTesters:
 			unlocks.DecalOneYearA = true
 			unlocks.RWDEmoteGhost = true
 		}
@@ -616,9 +634,10 @@ func (r *ProfileRegistry) UpdateEntitledCosmetics(ctx context.Context, userID uu
 		if strings.Contains(profile.Login.SystemInfo.HeadsetType, "Quest") {
 			unlocks.DecalQuestLaunchA = true
 			unlocks.PatternQuestA = true
-			unlocks.PatternQuestA = true
 		}
 	}
+
+	profile.Server.UnlockedCosmetics.Arena = unlocks
 
 	return nil
 }
@@ -837,7 +856,7 @@ func updateUnlocks(dst, src interface{}) {
 }
 
 // SetCosmeticDefaults sets all the restricted cosmetics to false.
-func SetCosmeticDefaults(s *evr.ServerProfile) error {
+func SetCosmeticDefaults(s *evr.ServerProfile, enableAll bool) error {
 	// Set all the VRML cosmetics to false
 
 	structs := []interface{}{&s.UnlockedCosmetics.Arena, &s.UnlockedCosmetics.Combat}
@@ -848,10 +867,14 @@ func SetCosmeticDefaults(s *evr.ServerProfile) error {
 		}
 
 		for i := 0; i < v.NumField(); i++ {
-			tag := v.Type().Field(i).Tag.Get("validate")
-			disabled := strings.Contains(tag, "restricted") || strings.Contains(tag, "blocked")
-			if v.Field(i).CanSet() {
-				v.Field(i).Set(reflect.ValueOf(!disabled))
+			if enableAll {
+				v.Field(i).Set(reflect.ValueOf(true))
+			} else {
+				tag := v.Type().Field(i).Tag.Get("validate")
+				disabled := strings.Contains(tag, "restricted") || strings.Contains(tag, "blocked")
+				if v.Field(i).CanSet() {
+					v.Field(i).Set(reflect.ValueOf(!disabled))
+				}
 			}
 		}
 	}
