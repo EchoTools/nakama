@@ -191,7 +191,7 @@ func (e *EchoTaxi) Stop() {
 }
 
 func (e *EchoTaxi) UpdateStatus() error {
-	status := fmt.Sprintf("🚕 %d", e.meta.RideCount)
+	status := "🚕"
 	err := e.dg.UpdateGameStatus(0, status)
 	if err != nil {
 		e.logger.Warn("Error setting status: %v", err)
@@ -328,8 +328,8 @@ func EchoTaxiRuntimeModule(ctx context.Context, logger runtime.Logger, db *sql.D
 	})
 
 	//bot.Identify.Intents |= discordgo.IntentAutoModerationExecution
-	bot.Identify.Intents |= discordgo.IntentGuilds
-	bot.Identify.Intents |= discordgo.IntentGuildMembers
+	//bot.Identify.Intents |= discordgo.IntentGuilds
+	//bot.Identify.Intents |= discordgo.IntentGuildMembers
 	//bot.Identify.Intents |= discordgo.IntentGuildBans
 	//bot.Identify.Intents |= discordgo.IntentGuildEmojis
 	//bot.Identify.Intents |= discordgo.IntentGuildWebhooks
@@ -353,7 +353,7 @@ func EchoTaxiRuntimeModule(ctx context.Context, logger runtime.Logger, db *sql.D
 	respond := true
 
 	if s, ok := env["DISABLE_DISCORD_BOT"]; ok && s == "true" {
-		//	respond = false
+		respond = false
 	}
 
 	bot.AddHandler(func(s *discordgo.Session, m *discordgo.MessageReactionAdd) {
@@ -376,7 +376,7 @@ func EchoTaxiRuntimeModule(ctx context.Context, logger runtime.Logger, db *sql.D
 
 	err = bot.Open()
 	if err != nil {
-		return err
+		return fmt.Errorf("Error opening EchoTaxi connection to Discord: %v", err)
 	}
 
 	logger.Info("Initialized EchoTaxi runtime module.")
