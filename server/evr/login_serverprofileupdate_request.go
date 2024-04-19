@@ -5,8 +5,8 @@ import (
 )
 
 type UserServerProfileUpdateRequest struct {
-	EvrId      EvrId
-	UpdateInfo any
+	EvrID   EvrId
+	Payload UpdatePayload
 }
 
 func (m UserServerProfileUpdateRequest) Token() string {
@@ -23,22 +23,17 @@ func (m UserServerProfileUpdateRequest) String() string {
 
 func (m *UserServerProfileUpdateRequest) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.EvrId) },
-		func() error { return s.StreamJson(&m.UpdateInfo, true, NoCompression) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.EvrID) },
+		func() error { return s.StreamJson(&m.Payload, true, NoCompression) },
 	})
 }
 
-type UpdateInfo struct {
-	Sessionid string `json:"sessionid"`
-	Matchtype int64  `json:"matchtype"`
-	Update    Update `json:"update"`
+type UpdatePayload struct {
+	Matchtype float64     `json:"matchtype"`
+	Sessionid string      `json:"sessionid"`
+	Update    StatsUpdate `json:"update"`
 }
 
-type Update struct {
-	Unlocks Unlocks `json:"unlocks"`
-}
-
-type Unlocks struct {
-	Arena  ArenaUnlocks  `json:"arena"`
-	Combat CombatUnlocks `json:"combat"`
+type StatsUpdate struct {
+	StatsGroups map[string]ArenaStatistics `json:"stats"`
 }
