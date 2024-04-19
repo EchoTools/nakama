@@ -420,7 +420,7 @@ func (r *ProfileRegistry) UpdateEquippedItem(profile *GameProfileData, category 
 	case "emote":
 		s.Emote = name
 		s.SecondEmote = name
-	case "decal":
+	case "decal", "decalback":
 		s.Decal = name
 		s.DecalBody = name
 	case "tint":
@@ -455,8 +455,8 @@ func (r *ProfileRegistry) UpdateEquippedItem(profile *GameProfileData, category 
 		s.GoalFx = name
 	case "emissive":
 		s.Emissive = name
-	case "decalback":
-		fallthrough
+	//case "decalback":
+	//	fallthrough
 	case "pip":
 		s.Pip = name
 	default:
@@ -502,7 +502,16 @@ func (r *ProfileRegistry) UpdateEntitledCosmetics(ctx context.Context, userID uu
 		switch name {
 		case GroupGlobalDevelopers:
 			isDeveloper = true
+
 		}
+	}
+
+	if isDeveloper {
+		profile.Server.DeveloperFeatures = &evr.DeveloperFeatures{
+			DisableAfkTimeout: true,
+		}
+	} else {
+		profile.Server.DeveloperFeatures = nil
 	}
 
 	// Disable Restricted Cosmetics
@@ -511,8 +520,6 @@ func (r *ProfileRegistry) UpdateEntitledCosmetics(ctx context.Context, userID uu
 	if err != nil {
 		return fmt.Errorf("failed to disable restricted cosmetics: %w", err)
 	}
-	// Set the user's developer features
-	profile.Server.DeveloperFeatures = nil
 
 	// Set the user's unlocked cosmetics based on their groups
 	unlocks := profile.Server.UnlockedCosmetics.Arena
@@ -608,17 +615,9 @@ func (r *ProfileRegistry) UpdateEntitledCosmetics(ctx context.Context, userID uu
 			fallthrough
 		case "VRML Season 7":
 			unlocks.TagVrmlS7 = true
-		}
-
-		// Other group-based unlocks
-		switch name {
 
 		case GroupGlobalDevelopers:
 			unlocks.TagDeveloper = true
-			profile.Server.DeveloperFeatures = &evr.DeveloperFeatures{
-				DisableAfkTimeout: true,
-			}
-
 			fallthrough
 		case GroupGlobalModerators:
 			unlocks.TagGameAdmin = true
