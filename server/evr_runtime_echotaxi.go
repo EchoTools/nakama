@@ -18,12 +18,13 @@ import (
 )
 
 const (
-	echoTaxiPrefix      = "https://echo.taxi/spark://c/"
-	sprockLinkPrefix    = "https://sprock.io/spark://c/"
+	echoTaxiPrefix      = "https://echo.taxi/"
+	sprockLinkPrefix    = "https://sprock.io/"
 	sprockLinkDiscordId = "1102051447597707294"
 
 	EchoTaxiStorageCollection = "EchoTaxi"
 	EchoTaxiStorageKey        = "Hail"
+	TaxiEmoji                 = "🚕"
 )
 
 var (
@@ -32,11 +33,11 @@ var (
 		//regexp.MustCompile(`.*(spark:\/\/[jsc]\/[-0-9A-Fa-f]{36}).*`),
 		//regexp.MustCompile(`.*([Aa]ether:\/\/[-0-9A-Fa-f]{36}).*`),
 	}
-	reactionRegexs = []*regexp.Regexp{
+	replacementPatterns = []*regexp.Regexp{
 		regexp.MustCompile(`.*(echo\.taxi\/|sprock\.io\/)spark:\/\/([jsc]\/[-0-9A-Fa-f]{36}).*`),
 		regexp.MustCompile(`.*(echo\.taxi\/|sprock\.io\/)[Aa]ether:\/\/([-0-9A-Fa-f]{36}).*`),
 	}
-	matchIdRegex = regexp.MustCompile(`([-0-9A-Fa-f]{36})`)
+	matchIDPattern = regexp.MustCompile(`([-0-9A-Fa-f]{36})`)
 )
 
 type EchoTaxiHail struct {
@@ -60,10 +61,9 @@ type EchoTaxiMessage struct {
 	hails     []string // UserID
 }
 
-func (t *EchoTaxiMessage) ClearReactions(dg *discordgo.Session, all bool) error {
-
+func clearTaxiReactions(dg *discordgo.Session, channelID, messageID string, all bool) error {
 	// Remove other users reactions
-	users, err := dg.MessageReactions(t.channelID, t.messageID, "🚕", 100, "", "")
+	users, err := dg.MessageReactions(channelID, messageID, TaxiEmoji, 100, "", "")
 	if err != nil {
 		return err
 	}
@@ -75,12 +75,16 @@ func (t *EchoTaxiMessage) ClearReactions(dg *discordgo.Session, all bool) error 
 		if !all && user.Bot {
 			continue
 		}
-		err = dg.MessageReactionRemove(t.channelID, t.messageID, "🚕", user.ID)
+		err = dg.MessageReactionRemove(channelID, messageID, TaxiEmoji, user.ID)
 		if err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (t *EchoTaxiMessage) ClearTaxiReactions(dg *discordgo.Session, all bool) error {
+	return clearTaxiReactions(dg, t.channelID, t.messageID, all)
 }
 
 type EchoTaxi struct {
@@ -94,10 +98,9 @@ type EchoTaxi struct {
 	logger runtime.Logger
 	dg     *discordgo.Session
 
-	meta EchoTaxiMeta
+	taxiMessages *MapOf[string, *EchoTaxiMessage] // Message ID -> EchoTaxiMessage
 
-	taxiMessages      *MapOf[string, *EchoTaxiMessage] // Message ID -> EchoTaxiMessage
-	userChannels      *MapOf[string, string]           // User ID -> Channel ID
+	userChannels      *MapOf[string, string] // User ID -> Channel ID
 	linkReplyChannels *MapOf[string, bool]
 
 	HailCount int
@@ -123,20 +126,16 @@ func NewEchoTaxi(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runt
 		linkReplyChannels: &MapOf[string, bool]{},
 	}
 
-	err := taxi.LoadMeta()
-	if err != nil {
-		logger.Warn("Error loading hail count: %s", err.Error())
-	}
-
-	// Every 60 seconds prune the links
+	// do housekeeping on a tickdo housekeeping
 	go func() {
 		defer cancel()
+		ticker := time.NewTicker(30 * time.Second)
 		for {
 			select {
-			case <-time.After(30 * time.Second):
-				taxi.Prune()
+			case <-ticker.C:
+				_, cnt := taxi.Prune()
 				taxi.SaveConfiguration()
-				taxi.UpdateStatus()
+				taxi.UpdateStatus(cnt)
 			case <-ctx.Done():
 				return
 			}
@@ -144,28 +143,6 @@ func NewEchoTaxi(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runt
 	}()
 
 	return taxi
-}
-
-type EchoTaxiMeta struct {
-	RideCount int `json:"ride_count"`
-}
-
-func (e *EchoTaxi) LoadMeta() (err error) {
-
-	objects, err := e.nk.StorageRead(e.ctx, []*runtime.StorageRead{
-		{
-			Collection: EchoTaxiStorageCollection,
-			Key:        "count",
-			UserID:     SystemUserId,
-		},
-	})
-	if err != nil || len(objects) == 0 {
-		return
-	}
-
-	err = json.Unmarshal([]byte(objects[0].Value), &e.meta)
-	return
-
 }
 
 func (e *EchoTaxi) SaveConfiguration() error {
@@ -190,8 +167,8 @@ func (e *EchoTaxi) Stop() {
 	e.ctxCancelFn()
 }
 
-func (e *EchoTaxi) UpdateStatus() error {
-	status := "🚕"
+func (e *EchoTaxi) UpdateStatus(count int) error {
+	status := fmt.Sprintf("%s x %d", TaxiEmoji, count)
 	err := e.dg.UpdateGameStatus(0, status)
 	if err != nil {
 		e.logger.Warn("Error setting status: %v", err)
@@ -199,8 +176,10 @@ func (e *EchoTaxi) UpdateStatus() error {
 	return nil
 }
 
-func (e *EchoTaxi) Add(userID, matchID string) error {
-	// Load (or create) the user's Matchmaking Config
+func (e *EchoTaxi) SetNextMatch(userID, matchID string) error {
+	if matchID != "" {
+		e.HailCount++
+	}
 	settings := MatchmakingSettings{}
 	objs, err := e.nk.StorageRead(e.ctx, []*runtime.StorageRead{
 		{
@@ -240,68 +219,40 @@ func (e *EchoTaxi) Add(userID, matchID string) error {
 	return nil
 }
 
-func (e *EchoTaxi) Remove(userID string) error {
-	// Delete the storage object for the user
-	err := e.nk.StorageDelete(e.ctx, []*runtime.StorageDelete{
-		{
-			Collection: EchoTaxiStorageCollection,
-			Key:        EchoTaxiStorageKey,
-			UserID:     userID,
-		},
-	})
-	if err != nil {
-		e.logger.Warn("Error deleting hail: %s", err.Error())
-	}
-	return err
-
-}
-
-func (e *EchoTaxi) Get(userID string) (*EchoTaxiHail, error) {
-	// Read the storage object for the user
-	objects, err := e.nk.StorageRead(e.ctx, []*runtime.StorageRead{
-		{
-			Collection: EchoTaxiStorageCollection,
-			Key:        EchoTaxiStorageKey,
-			UserID:     userID,
-		},
-	})
-	if err != nil {
-		e.logger.Warn("Error reading hail: %s", err.Error())
-		return nil, err
-	}
-
-	if len(objects) == 0 {
-		return nil, nil
-	}
-
-	hail := &EchoTaxiHail{}
-	err = json.Unmarshal([]byte(objects[0].Value), hail)
-	if err != nil {
-		e.logger.Warn("Error unmarshalling hail: %s", err.Error())
-		return nil, err
-	}
-
-	return hail, nil
-}
-
 func (e *EchoTaxi) CheckMatch(matchID string) (found bool) {
+	// Ensure the matchID is in the correct format
+	matchComponents := strings.SplitN(matchID, ".", 2)
+	if len(matchComponents) == 1 {
+		matchID = matchID + "." + e.node
+	}
 	// Check if the match is in progress
 	match, _ := e.nk.MatchGet(e.ctx, matchID)
 	return match != nil
 }
 
-func (e *EchoTaxi) Prune() error {
+func (e *EchoTaxi) Prune() (pruned int, remain int) {
 	// Get all the hails
+
 	e.taxiMessages.Range(func(matchID string, m *EchoTaxiMessage) bool {
 		// Get the match
 		found := e.CheckMatch(matchID)
 		if !found {
+			pruned++
 			// Remove the message
-			m.ClearReactions(e.dg, true)
+			m.ClearTaxiReactions(e.dg, true)
 		}
+		remain++
 		return true
 	})
-	return nil
+	return
+}
+
+func (e *EchoTaxi) Count() (cnt int) {
+	e.taxiMessages.Range(func(matchID string, m *EchoTaxiMessage) bool {
+		cnt++
+		return true
+	})
+	return
 }
 
 func EchoTaxiRuntimeModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) (err error) {
@@ -385,68 +336,38 @@ func EchoTaxiRuntimeModule(ctx context.Context, logger runtime.Logger, db *sql.D
 
 // handleMessageCreate_EchoTaxi_React adds a taxi emoji to spark link messages
 func (e *EchoTaxi) handleMessageCreate_EchoTaxi_React(s *discordgo.Session, m *discordgo.MessageCreate) {
-	ctx := e.ctx
-	logger := e.logger
-	nk := e.nk
-
-	for _, regex := range reactionRegexs {
-		if regex.MatchString(m.Content) {
-			results := regex.FindString(m.Content)
-
-			node := ctx.Value(runtime.RUNTIME_CTX_NODE).(string)
-			if node == "" {
-				logger.Warn("Node not found in context")
-				return
-			}
-			matchId := matchIdRegex.FindString(results) + "." + node
-
-			// If the message contains an in-process match ID, then add a taxi reaction
-			match, err := nk.MatchGet(ctx, matchId)
-			if err != nil {
-				logger.Warn("Error getting match: %s", err.Error())
-				return
-			}
-			if match == nil {
-				return
-			}
-
-			err = s.MessageReactionAdd(m.ChannelID, m.ID, "🚕")
+	// Check if the message contains an already prefixed link
+	for _, prefix := range []string{echoTaxiPrefix, sprockLinkPrefix} {
+		if !strings.Contains(m.Content, prefix) {
+			continue
+		}
+		// If the message contains a match id, then add a taxi reaction
+		matchID := extractMatchIDFromMessage(m.Content)
+		if matchID == "" {
+			return
+		}
+		// Check if the match is in progress
+		if e.CheckMatch(matchID) {
+			err := s.MessageReactionAdd(m.ChannelID, m.ID, TaxiEmoji)
 			if err != nil {
 				e.logger.Warn("Error adding reaction:", err)
 			}
-			return
 		}
+		return
 	}
 }
 
 // handleMessageReactionAdd handles the reaction add event
 // It checks if the reaction is a taxi, and if so, it arms the taxi redirect
 func (e *EchoTaxi) handleMessageReactionAdd(s *discordgo.Session, reaction *discordgo.MessageReactionAdd) {
-	// ignore own reactions
-	if reaction.UserID == s.State.User.ID {
+	// ignore own reactions, and non-taxi reactions
+	if reaction.UserID == s.State.User.ID || reaction.Emoji.Name != TaxiEmoji {
 		return
 	}
 
 	ctx := e.ctx
 	logger := e.logger
 	nk := e.nk
-
-	node, found := ctx.Value(runtime.RUNTIME_CTX_NODE).(string)
-
-	if !found {
-		logger.Warn("Node not found in context")
-		return
-	}
-
-	if reaction.UserID == s.State.User.ID {
-		// reactions from the bot
-		return
-	}
-
-	if reaction.Emoji.Name != "🚕" {
-		// ignore non-taxi reactions
-		return
-	}
 
 	// Get the message that the reaction was added to
 	message, err := s.ChannelMessage(reaction.ChannelID, reaction.MessageID)
@@ -454,45 +375,37 @@ func (e *EchoTaxi) handleMessageReactionAdd(s *discordgo.Session, reaction *disc
 		e.logger.Error("Error getting message: %v", err)
 		return
 	}
-
-	if !strings.Contains(message.Content, echoTaxiPrefix) && !strings.Contains(message.Content, sprockLinkPrefix) {
-		return
-	}
-
-	// Check that the message only contains one link
-	if strings.Count(message.Content, echoTaxiPrefix) > 1 || strings.Count(message.Content, sprockLinkPrefix) > 1 {
-		// Remove the user's reaction
-		err := s.MessageReactionRemove(reaction.ChannelID, reaction.MessageID, "🚕", reaction.UserID)
-		if err != nil {
-			logger.Warn("Error removing reaction: %v", err)
+	matchID := ""
+	for _, prefix := range []string{echoTaxiPrefix, sprockLinkPrefix} {
+		// Only accept one prefix
+		if strings.Count(message.Content, prefix) != 1 {
+			continue
 		}
-	}
-
-	// Extract the matchId from the message
-	mid := matchIdRegex.FindString(message.Content)
-	if mid == "" {
-		return
-	}
-
-	// Remove the user's reaction
-	err = s.MessageReactionRemove(reaction.ChannelID, reaction.MessageID, "🚕", reaction.UserID)
-	if err != nil {
-		logger.Warn("Error removing reaction: %v", err)
-	}
-
-	matchID := strings.ToLower(fmt.Sprintf("%s.%s", mid, node))
-	// Verify that the match is in progress
-	if match, err := nk.MatchGet(ctx, matchID); err != nil {
-		logger.Warn("Error getting match: %s", err.Error())
-		// Remove all the taxi reactions from the message
-		matchID = ""
-
-	} else if match == nil {
-		if m, found := e.taxiMessages.Load(matchID); found {
-			m.ClearReactions(s, true)
+		// If the message contains a match id, then add a taxi reaction
+		matchID = extractMatchIDFromMessage(message.Content)
+		if matchID == "" {
+			return
 		}
-		return
+		// Check if the match is in progress
+		if !e.CheckMatch(matchID) {
+			if m, found := e.taxiMessages.LoadAndDelete(matchID); found {
+				m.ClearTaxiReactions(s, true)
+				return
+			}
+			if err := s.MessageReactionRemove(reaction.ChannelID, reaction.MessageID, TaxiEmoji, reaction.UserID); err != nil {
+				logger.Warn("Error removing reaction: %v", err)
+			}
+			return
+		}
+		// Clear just the users reactions
+		if err := clearTaxiReactions(s, reaction.ChannelID, reaction.MessageID, false); err != nil {
+			logger.Warn("Error clearing taxi reactions: %v", err)
+		}
+		break
 	}
+
+	matchID = strings.ToLower(fmt.Sprintf("%s.%s", matchID, e.node))
+
 	// Get the nakama user id from the discord user id
 	userID, username, _, err := nk.AuthenticateCustom(ctx, reaction.UserID, "", true)
 	if err != nil {
@@ -500,7 +413,7 @@ func (e *EchoTaxi) handleMessageReactionAdd(s *discordgo.Session, reaction *disc
 		return
 	}
 
-	err = e.Add(userID, matchID)
+	err = e.SetNextMatch(userID, matchID)
 	if err != nil {
 		logger.Warn("Error adding hail: %s", err.Error())
 		return
@@ -533,36 +446,27 @@ func (e *EchoTaxi) handleMessageReactionAdd(s *discordgo.Session, reaction *disc
 		logger.Warn("Error sending message: %v", err)
 	}
 
-	// Remove the reaction
-	err = s.MessageReactionRemove(reaction.ChannelID, reaction.MessageID, "🚕", reaction.UserID)
-	if err != nil {
-		logger.Warn("Error removing reaction: %v", err)
-	}
-
 	logger.Debug("%s hailed a taxi to %s", username, matchID)
 }
 
 func (e *EchoTaxi) handleMessageReactionRemove(s *discordgo.Session, reaction *discordgo.MessageReactionRemove) {
-	if reaction.UserID == s.State.User.ID {
+	if reaction.UserID == s.State.User.ID || reaction.Emoji.Name != TaxiEmoji {
 		// ignore dm reactions and reactions from the bot
 		return
 	}
 
 	// If the reaction is a taxi, remove the hail for the user
-	if reaction.Emoji.Name == "🚕" {
-		userID, _, _, err := e.nk.AuthenticateCustom(e.ctx, reaction.UserID, "", true)
-		if err != nil {
-			e.logger.Warn("Error removing hail: %s", err.Error())
-			return
-		}
+	userID, _, _, err := e.nk.AuthenticateCustom(e.ctx, reaction.UserID, "", true)
+	if err != nil {
+		e.logger.Warn("Error removing hail: %s", err.Error())
+		return
+	}
+	// Remove the hail
+	e.SetNextMatch(userID, "")
 
-		e.Remove(userID)
-
-		// Remove the user's reaction
-		err = s.MessageReactionRemove(reaction.ChannelID, reaction.MessageID, "🚕", reaction.UserID)
-		if err != nil {
-			e.logger.Warn("Error removing reaction: %v", err)
-		}
+	// Clear any non-bot taxi reactions
+	if err := clearTaxiReactions(s, reaction.ChannelID, reaction.MessageID, false); err != nil {
+		e.logger.Warn("Error clearing taxi reactions: %v", err)
 	}
 }
 
@@ -573,64 +477,55 @@ func (e *EchoTaxi) checkForSparkLink(s *discordgo.Session, m *discordgo.MessageC
 		return
 	}
 
-	message := m.ContentWithMentionsReplaced()
-	channel, err := s.Channel(m.ChannelID)
-	if err != nil {
-		e.logger.Warn("Error getting channel: %v", err)
-		return
-	}
-
 	// If it already has a prefix, then ignore the message.
-	if strings.Contains(m.Content, echoTaxiPrefix) || strings.Contains(message, sprockLinkPrefix) {
-		return
-	}
-	if strings.Contains(m.Content, echoTaxiPrefix) || strings.Contains(message, sprockLinkPrefix) {
-		return
-	}
-
-	for _, regex := range targetRegexs {
-		if regex.MatchString(message) {
-			// If the message contains a match id, then replace the match id with the echo.taxi link
-			// upper case the match id
-
-			message = regex.ReplaceAllString(m.Content, "<"+echoTaxiPrefix+"$1>")
-			// Uppercase the UUID
-			i := strings.LastIndex(message, "/")
-			if i > 0 {
-				message = message[:i+1] + strings.ToUpper(message[i+1:])
-			}
-			if message != m.ContentWithMentionsReplaced() {
-				// If the message was changed, then send the new message
-
-				// Check if this channel has already been replied to
-				reply, found := e.linkReplyChannels.LoadAndDelete(channel.ID)
-				if found && !reply {
-					// Just return. If sprocklink replies, then it will save the state again
-					return
-				} else if !found {
-					// If this is a new channel, then sleep for 1 second to give time for sprocklink to reply
-					time.Sleep(time.Second)
-					// If sprocklink replied in the same time, then this will have loaded as true
-					reply, loaded := e.linkReplyChannels.LoadOrStore(channel.ID, true)
-					if loaded && !reply {
-						// Sprocklink replied, so don't send the message
-						return
-					}
-					// If sprocklink didn't reply, then send the message
-					message, err := s.ChannelMessageSend(channel.ID, message)
-					if err != nil {
-						e.logger.Warn("Error sending message: %v", err)
-					}
-					// ADd the taxi to the message
-					err = s.MessageReactionAdd(channel.ID, message.ID, "🚕")
-					if err != nil {
-						e.logger.Warn("Error adding reaction:", err)
-					}
-
-				}
-			}
+	for _, prefix := range []string{echoTaxiPrefix, sprockLinkPrefix} {
+		if strings.Contains(m.Content, prefix) {
+			return
 		}
 	}
+	response := ""
+	// Use a replacement pattern on the message
+	for _, p := range replacementPatterns {
+		if p.MatchString(m.Content) {
+			response = p.ReplaceAllString(m.Content, fmt.Sprintf("<%s$1>", echoTaxiPrefix))
+			break
+		}
+	}
+	if response == "" {
+		return
+	}
+	// Check if this channel has already been replied to
+	shouldReply, found := e.linkReplyChannels.LoadAndDelete(m.ChannelID)
+	// If this is a new channel, wait to see if sprocklink replies
+	if !found {
+		time.Sleep(time.Second)
+		// If sprocklink replied in the same time, then this will have loaded as false
+		shouldReply, _ = e.linkReplyChannels.LoadOrStore(m.ChannelID, true)
+	}
+	if !shouldReply {
+		// Sprocklink replied, so don't send the message
+		return
+	}
+
+	// If sprocklink didn't reply, then send the message
+	message, err := s.ChannelMessageSend(m.ChannelID, response)
+	if err != nil {
+		e.logger.Warn("Error sending message: %v", err)
+	}
+	// Add the taxi to the message
+	err = s.MessageReactionAdd(m.ChannelID, message.ID, TaxiEmoji)
+	if err != nil {
+		e.logger.Warn("Error adding reaction:", err)
+	}
+}
+
+func extractMatchIDFromMessage(message string) string {
+	for _, p := range targetRegexs {
+		if p.MatchString(message) {
+			return p.FindString(message)
+		}
+	}
+	return ""
 }
 
 type EchoTaxiHailRPCRequest struct {
@@ -666,7 +561,7 @@ func (e *EchoTaxi) EchoTaxiHailRpc(ctx context.Context, logger runtime.Logger, d
 	// If the MatchID is blank, remove the hail
 	if request.MatchID == "" {
 		// Delete the hail
-		err = e.Remove(request.UserID)
+		err = e.SetNextMatch(request.UserID, "")
 		if err != nil {
 			return "", runtime.NewError(fmt.Sprintf("Error removing hail: %s", err.Error()), StatusInternalError)
 		}
@@ -702,7 +597,7 @@ func (e *EchoTaxi) EchoTaxiHailRpc(ctx context.Context, logger runtime.Logger, d
 		return "", runtime.NewError(fmt.Sprintf("Error unmarshalling label: %s", err.Error()), StatusInternalError)
 	}
 
-	err = e.Add(request.UserID, request.MatchID)
+	err = e.SetNextMatch(request.UserID, request.MatchID)
 	if err != nil {
 		return "", runtime.NewError(fmt.Sprintf("Error adding hail: %s", err.Error()), StatusInternalError)
 	}
@@ -862,7 +757,7 @@ func matchStatusEmbed(ctx context.Context, s *discordgo.Session, nk runtime.Naka
 					Label:    "EchoTaxi",
 					CustomID: "row_0_button_1",
 					Emoji: &discordgo.ComponentEmoji{
-						Name: "🚕",
+						Name: TaxiEmoji,
 					},
 				},
 				discordgo.SelectMenu{
