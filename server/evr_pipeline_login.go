@@ -777,69 +777,103 @@ func generateSuspensionNotice(statuses []*SuspensionStatus) string {
 }
 
 func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	message := in.(*evr.UserServerProfileUpdateRequest)
+	request := in.(*evr.UserServerProfileUpdateRequest)
+	// Always send the same response
 
 	if session.userID == uuid.Nil {
 		logger.Warn("UserServerProfileUpdateRequest: user not logged in")
+		return nil
 	}
 
-	logger.Debug("UserServerProfileUpdateRequest", zap.String("evrid", message.EvrId.Token()), zap.Any("update", message.UpdateInfo))
+	defer func() {
+		if err := session.SendEvr(evr.NewUserServerProfileUpdateSuccess(request.EvrID)); err != nil {
+			logger.Warn("Failed to send UserServerProfileUpdateSuccess", zap.Error(err))
+		}
+	}()
 
-	// These messages are just ignored.
-	// Check that this is the broadcaster for that match
+	// Get the target user's match
+	matchID, ok := p.matchByEvrID.Load(request.EvrID.String())
+	if !ok {
+		logger.Warn("UserServerProfileUpdateRequest: user not in a match")
+		return nil
+	}
+	logger = logger.With(zap.String("matchID", matchID))
 
+	matchComponents := strings.Split(matchID, ".")
+
+	// Check if the requester is a broadcaster in that match
+	_, _, statejson, err := p.matchRegistry.GetState(ctx, uuid.FromStringOrNil(matchComponents[0]), matchComponents[1])
+	if err != nil {
+		logger.Warn("UserServerProfileUpdateRequest: failed to get match", zap.Error(err))
+		return nil
+	}
+
+	// Check the label for the broadcaster
+	state := &EvrMatchState{}
+	if err := json.Unmarshal([]byte(statejson), state); err != nil {
+		logger.Warn("UserServerProfileUpdateRequest: failed to unmarshal match state", zap.Error(err))
+		return nil
+	}
+
+	if state.Broadcaster.OperatorID != session.userID.String() {
+		logger.Warn("UserServerProfileUpdateRequest: user not broadcaster for match")
+		return nil
+	}
+
+	// Get the user id for the target
+	targetSession, found := p.loginSessionByEvrID.Load(request.EvrID.String())
+	if !found {
+		logger.Warn("UserServerProfileUpdateRequest: user not found", zap.String("evrId", request.EvrID.Token()))
+		return nil
+	}
+	userID := targetSession.userID
+
+	// Get the profile
+	profile := p.profileRegistry.GetProfile(userID)
+	if profile == nil {
+		return fmt.Errorf("failed to load game profiles")
+	}
+
+	update := request.Payload
+
+	group, ok := update.Update.StatsGroups["arena"]
+	if !ok {
+		return fmt.Errorf("missing arena stats group")
+	}
+	_ = group
 	/*
-		match, err := p.runtimeModule.MatchGet(ctx, matchId+"."+p.node)
+		profile, err = mergeStats(&profile.Server.Statistics.Arena, &group)
 		if err != nil {
-			return fmt.Errorf("failed to get match: %w", err)
+			return fmt.Errorf("failed to update profile: %w", err)
 		}
-
-		session, found := p.loginSessionByEvrID.Load(message.EvrId.Token())
-		if !found {
-			return fmt.Errorf("failed to find user by EvrID: %s", message.EvrId.Token())
-		}
-		matchId, found := p.matchByEvrId.Load(message.EvrId.Token())
-		if !found {
-			return fmt.Errorf("failed to find match by EvrID: %s", message.EvrId.Token())
-		}
-		// Get the label for match
-		match, err := p.runtimeModule.MatchGet(ctx, matchId)
-		if err != nil {
-			return fmt.Errorf("failed to get match: %w", err)
-		}
-		// unmarshal the label
-		var state EvrMatchState
-		if err := json.Unmarshal([]byte(match.GetLabel().String()), &state); err != nil {
-			return fmt.Errorf("failed to unmarshal match label: %w", err)
-		}
-
-		// check that the update request is coming from the broadcaster of the match that the user is in
-		if state.Broadcaster.UserID != session.userID.String() {
-			return fmt.Errorf("requestor is not the broadcaster of the match")
-		}
-
-		profile := p.profileRegistry.GetProfile(session.userID)
-		if profile == nil {
-			return fmt.Errorf("failed to load game profiles")
-		}
-
-		// TODO FIXME put this into the session registry.
-
-		p.profileRegistry.SetProfile(session.userID, profile)
-		if err := sendMessagesToStream(ctx, nk, in.GetSessionId(), svcLoginID.String(), evr.NewUserServerProfileUpdateSuccess(message.EvrId)); err != nil {
-			return state, fmt.Errorf("failed to send message: %w", err)
-		}
-		return state, nil
 	*/
-
-	if err := session.SendEvr(
-		evr.NewUserServerProfileUpdateSuccess(message.EvrId),
-	); err != nil {
-		return fmt.Errorf("failed to send UserServerProfileUpdateSuccess: %w", err)
-	}
 	return nil
 }
 
+/*
+	func mergeStats(a *evr.ArenaStatistics, b *evr.ArenaStatistics) {
+		aVal := reflect.ValueOf(a).Elem()
+		bVal := reflect.ValueOf(b).Elem()
+
+		for i := 0; i < aVal.NumField(); i++ {
+			aField := aVal.Field(i)
+			bField := bVal.Field(i)
+			if bField.Op != "" { // Only apply operation if there's an Op defined
+				switch bField.Op {
+				case "add":
+					newVal := aField.Float() + bField.Value
+					aField.SetFloat(newVal)
+				case "rep":
+					aField.SetFloat(bField.Value)
+				case "max":
+					if bField.Value > aField.Float() {
+						aField.SetFloat(bField.Value)
+					}
+				}
+			}
+		}
+	}
+*/
 func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.OtherUserProfileRequest)
 
