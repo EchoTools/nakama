@@ -368,14 +368,6 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 				// This is not this user
 				continue
 			}
-			if _, ok := p.broadcasterRegistrationBySession.Load(session.ID().String()); !ok {
-				// This is a player connection
-				if evrId, ok := session.Context().Value(ctxEvrIDKey{}).(evr.EvrId); ok {
-					p.matchByEvrID.Delete(evrId.Token())
-				}
-			}
-
-			p.matchBySessionID.Delete(session.ID().String())
 		}
 
 		for _, join := range envelope.GetJoins() {
@@ -392,6 +384,18 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 					p.matchByEvrID.Store(evrId.Token(), matchID)
 				}
 			}
+
+			go func() {
+				// Remove the match lookup entries when the session is closed.
+				<-session.Context().Done()
+				if _, isBroadcaster := p.broadcasterRegistrationBySession.Load(session.ID().String()); !isBroadcaster {
+					// This is a player connection
+					if evrId, ok := session.Context().Value(ctxEvrIDKey{}).(evr.EvrId); ok {
+						p.matchByEvrID.Delete(evrId.Token())
+					}
+				}
+				p.matchBySessionID.Delete(session.ID().String())
+			}()
 		}
 
 		pipelineFn = func(_ *zap.Logger, _ *sessionWS, _ *rtapi.Envelope) ([]evr.Message, error) {

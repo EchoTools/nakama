@@ -54,31 +54,47 @@ func errFailedRegistration(session *sessionWS, err error, code evr.BroadcasterRe
 func (p *EvrPipeline) broadcasterSessionEnded(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	// The broadcaster has ended the session.
 	// shutdown the match. A new parking match will be created in response to the match leave message.
-
-	config, found := p.broadcasterRegistrationBySession.Load(session.ID().String())
-	if !found {
-		return fmt.Errorf("broadcaster session not found")
+	matchID, ok := p.matchBySessionID.Load(session.ID().String())
+	if ok {
+		logger = logger.With(zap.String("mid", matchID))
 	}
 
-	if matchId, found := p.matchBySessionID.Load(session.ID().String()); found {
+	go func() {
+		select {
+		case <-session.Context().Done():
+			return
+		case <-time.After(3 * time.Second):
+		}
+
+		// Leave the old match
+		matchID, found := p.matchBySessionID.Load(session.ID().String())
+		if !found {
+			logger.Warn("Broadcaster session ended, but no match found")
+			return
+		}
 		// Leave the old match
 		leavemsg := &rtapi.Envelope{
 			Message: &rtapi.Envelope_MatchLeave{
 				MatchLeave: &rtapi.MatchLeave{
-					MatchId: matchId,
+					MatchId: matchID,
 				},
 			},
 		}
 
 		if ok := session.pipeline.ProcessRequest(logger, session, leavemsg); !ok {
-			return fmt.Errorf("failed process leave request")
+			logger.Error("Failed to process leave request")
 		}
-	}
-	err := p.newParkingMatch(logger, session, config)
-	if err != nil {
-		return fmt.Errorf("failed to create new parking match: %v", err)
-	}
+		//
+		config, found := p.broadcasterRegistrationBySession.Load(session.ID().String())
+		if !found {
+			logger.Error("broadcaster session not found")
+		}
 
+		err := p.newParkingMatch(logger, session, config)
+		if err != nil {
+			logger.Error("Failed to create new parking match", zap.Error(err))
+		}
+	}()
 	return nil
 }
 
