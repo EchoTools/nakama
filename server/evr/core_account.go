@@ -486,8 +486,8 @@ type ArenaUnlocks struct {
 	Banner0023                  bool `json:"rwd_banner_0023,omitempty"`
 	Banner0024                  bool `json:"rwd_banner_0024,omitempty"`
 	Banner0025                  bool `json:"rwd_banner_0025,omitempty"`
-	Banner0030                  bool `json:"rwd_banner_0030,omitempty" validate:"blocked"`
-	Banner0031                  bool `json:"rwd_banner_0031,omitempty" validate:"blocked"`
+	BannerStub1                 bool `json:"rwd_banner_0030,omitempty" validate:"blocked"`
+	BannerStub2                 bool `json:"rwd_banner_0031,omitempty" validate:"blocked"`
 	BannerLoneEcho2_A           bool `json:"rwd_banner_lone_echo_2_a,omitempty"`
 	BannerS1Basic               bool `json:"rwd_banner_s1_basic,omitempty"`
 	BannerS1BoldStripe          bool `json:"rwd_banner_s1_bold_stripe,omitempty"`
@@ -644,8 +644,8 @@ type ArenaUnlocks struct {
 	Decal0018                   bool `json:"rwd_decal_0018,omitempty"`
 	Decal0019                   bool `json:"rwd_decal_0019,omitempty"`
 	Decal0020                   bool `json:"rwd_decal_0020,omitempty"`
-	Decal0023                   bool `json:"rwd_decal_0023,omitempty" validate:"blocked"`
-	Decal0024                   bool `json:"rwd_decal_0024,omitempty" validate:"blocked"`
+	DecalStub1                  bool `json:"rwd_decal_0023,omitempty" validate:"blocked"`
+	DecalStub2                  bool `json:"rwd_decal_0024,omitempty" validate:"blocked"`
 	DecalAlienHeadA             bool `json:"decal_alien_head_a,omitempty"`
 	DecalAnniversaryCupcakeA    bool `json:"decal_anniversary_cupcake_a,omitempty"`
 	DecalAxolotlS2A             bool `json:"rwd_decal_axolotl_s2_a,omitempty"`
@@ -754,22 +754,22 @@ type ArenaUnlocks struct {
 	Emissive0013                bool `json:"rwd_emissive_0013,omitempty"`
 	Emissive0014                bool `json:"rwd_emissive_0014,omitempty"`
 	Emissive0016                bool `json:"rwd_emissive_0016,omitempty"`
-	Emissive0017                bool `json:"rwd_emissive_0017,omitempty" validate:"blocked"`
+	EmissiveUnreleasedLancer    bool `json:"rwd_emissive_0017,omitempty" validate:"restricted"`
 	Emissive0023                bool `json:"rwd_emissive_0023,omitempty"`
 	Emissive0024                bool `json:"rwd_emissive_0024,omitempty"`
 	Emissive0025                bool `json:"rwd_emissive_0025,omitempty"`
 	Emissive0026                bool `json:"rwd_emissive_0026,omitempty"`
-	Emissive0027                bool `json:"rwd_emissive_0027,omitempty" validate:"blocked"`
+	EmissiveMoonlight           bool `json:"rwd_emissive_0027,omitempty" validate:"restricted"`
 	Emissive0028                bool `json:"rwd_emissive_0028,omitempty"`
 	Emissive0029                bool `json:"rwd_emissive_0029,omitempty"`
-	Emissive0031                bool `json:"rwd_emissive_0031,omitempty" validate:"blocked"`
-	Emissive0033                bool `json:"rwd_emissive_0033,omitempty" validate:"blocked"`
-	Emissive0034                bool `json:"rwd_emissive_0034,omitempty" validate:"blocked"`
-	Emissive0035                bool `json:"rwd_emissive_0035,omitempty" validate:"blocked"`
-	Emissive0036                bool `json:"rwd_emissive_0036,omitempty" validate:"blocked"`
-	Emissive0037                bool `json:"rwd_emissive_0037,omitempty" validate:"blocked"`
-	Emissive0038                bool `json:"rwd_emissive_0038,omitempty" validate:"blocked"`
-	Emissive0040                bool `json:"rwd_emissive_0040,omitempty" validate:"blocked"`
+	EmissiveHalloween           bool `json:"rwd_emissive_0031,omitempty" validate:"restricted"`
+	EmissiveVroom               bool `json:"rwd_emissive_0033,omitempty" validate:"restricted"`
+	EmissiveDayDream            bool `json:"rwd_emissive_0034,omitempty" validate:"restricted"`
+	EmissivePaladin             bool `json:"rwd_emissive_0035,omitempty" validate:"restricted"`
+	EmissiveFume                bool `json:"rwd_emissive_0036,omitempty" validate:"restricted"`
+	EmissiveCircadian           bool `json:"rwd_emissive_0037,omitempty" validate:"restricted"`
+	EmissiveSpringtime          bool `json:"rwd_emissive_0038,omitempty" validate:"restricted"`
+	EmissiveValor               bool `json:"rwd_emissive_0040,omitempty" validate:"restricted"`
 	EmissiveDefault             bool `json:"emissive_default,omitempty"`
 	Emote0000                   bool `json:"rwd_emote_0000,omitempty"`
 	Emote0001                   bool `json:"rwd_emote_0001,omitempty"`
@@ -863,9 +863,6 @@ type ArenaUnlocks struct {
 	Medal0003                   bool `json:"rwd_medal_0003,omitempty"`
 	Medal0004                   bool `json:"rwd_medal_0004,omitempty"`
 	Medal0005                   bool `json:"rwd_medal_0005,omitempty"`
-	Medal0006                   bool `json:"rwd_medal_0006,omitempty" validate:"blocked"`
-	Medal0007                   bool `json:"rwd_medal_0007,omitempty" validate:"blocked"`
-	Medal0008                   bool `json:"rwd_medal_0008,omitempty" validate:"blocked"`
 	Medal0009                   bool `json:"rwd_medal_0009,omitempty"`
 	Medal0010                   bool `json:"rwd_medal_0010,omitempty"`
 	Medal0011                   bool `json:"rwd_medal_0011,omitempty"`
@@ -900,6 +897,9 @@ type ArenaUnlocks struct {
 	MedalVrmlS3                 bool `json:"rwd_medal_s1_vrml_s3,omitempty" validate:"restricted"`
 	MedalVrmlS3Champion         bool `json:"rwd_medal_s1_vrml_s3_champion,omitempty" validate:"restricted"`
 	MedalVrmlS3Finalist         bool `json:"rwd_medal_s1_vrml_s3_finalist,omitempty" validate:"restricted"`
+	MedalVRMLS4                 bool `json:"rwd_medal_0006,omitempty"  validate:"restricted"`
+	MedalVRMLS4Finalist         bool `json:"rwd_medal_0007,omitempty"  validate:"restricted"`
+	MedalVRMLS4Champion         bool `json:"rwd_medal_0008,omitempty"  validate:"restricted"`
 	Pattern0000                 bool `json:"rwd_pattern_0000,omitempty"`
 	Pattern0001                 bool `json:"rwd_pattern_0001,omitempty"`
 	Pattern0002                 bool `json:"rwd_pattern_0002,omitempty"`
@@ -1237,15 +1237,15 @@ type ArenaUnlocks struct {
 	Tint0013                    bool `json:"rwd_tint_0013,omitempty"`
 	Tint0014                    bool `json:"rwd_tint_0014,omitempty"`
 	Tint0015                    bool `json:"rwd_tint_0015,omitempty"`
-	Tint0019                    bool `json:"rwd_tint_0019,omitempty" validate:"blocked"`
+	TintMesopalgic              bool `json:"rwd_tint_0019,omitempty"  validate:"restricted"`
 	Tint0020                    bool `json:"rwd_tint_0020,omitempty"`
 	Tint0021                    bool `json:"rwd_tint_0021,omitempty"`
 	Tint0022                    bool `json:"rwd_tint_0022,omitempty"`
 	Tint0023                    bool `json:"rwd_tint_0023,omitempty"`
 	Tint0024                    bool `json:"rwd_tint_0024,omitempty"`
 	Tint0025                    bool `json:"rwd_tint_0025,omitempty"`
-	Tint0026                    bool `json:"rwd_tint_0026,omitempty" validate:"blocked"`
-	Tint0027                    bool `json:"rwd_tint_0027,omitempty" validate:"blocked"`
+	TintStub1                   bool `json:"rwd_tint_0026,omitempty"  validate:"restricted"`
+	TintStub2                   bool `json:"rwd_tint_0027,omitempty"  validate:"restricted"`
 	TintBlueADefault            bool `json:"tint_blue_a_default,omitempty"`
 	TintBlueBDefault            bool `json:"tint_blue_b_default,omitempty"`
 	TintBlueCDefault            bool `json:"tint_blue_c_default,omitempty"`
