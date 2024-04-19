@@ -497,6 +497,9 @@ func SelectDisplayNameByPriority(ctx context.Context, nk runtime.NakamaModule, u
 	// Sanitize the options
 	options = lo.Map(options, func(s string, _ int) string { return sanitizeDisplayName(s) })
 
+	// Remove blanks
+	options = lo.Filter(options, func(s string, _ int) bool { return s != "" })
+
 	filter := make([]string, 0, len(options))
 
 	// Filter usernames of other players
