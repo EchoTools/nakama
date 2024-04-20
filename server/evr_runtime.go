@@ -72,7 +72,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 
 func createCoreGroups(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) error {
 	// Create user for use by the discord bot (and core group ownership)
-	userId, _, _, err := nk.AuthenticateDevice(ctx, SystemUserId, "discordbot", true)
+	userId, _, _, err := nk.AuthenticateDevice(ctx, SystemUserID, "discordbot", true)
 	if err != nil {
 		logger.WithField("err", err).Error("Error creating discordbot user: %v", err)
 	}

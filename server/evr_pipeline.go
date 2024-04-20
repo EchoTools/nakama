@@ -253,8 +253,8 @@ func (p *EvrPipeline) ProcessRequestEvr(logger *zap.Logger, session *sessionWS, 
 		pipelineFn = p.loggedInUserProfileRequest
 	case *evr.ChannelInfoRequest:
 		pipelineFn = p.channelInfoRequest
-	case *evr.UpdateProfile:
-		pipelineFn = p.updateProfile
+	case *evr.UpdateClientProfile:
+		pipelineFn = p.updateClientProfileRequest
 	case *evr.OtherUserProfileRequest: // Broadcaster only via it's login connection
 		pipelineFn = p.otherUserProfileRequest
 	case *evr.UserServerProfileUpdateRequest: // Broadcaster only via it's login connection

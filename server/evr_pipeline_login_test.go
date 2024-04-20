@@ -374,12 +374,12 @@ func Test_updateProfileStats(t *testing.T) {
 			args{
 				logger: zap.NewNop(),
 				profile: &GameProfileData{
-					Server: &evr.ServerProfile{},
+					Server: evr.ServerProfile{},
 				},
 				update: update,
 			},
 			&GameProfileData{
-				Server: &evr.ServerProfile{},
+				Server: evr.ServerProfile{},
 			},
 			false,
 		},

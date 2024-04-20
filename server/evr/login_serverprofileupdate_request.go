@@ -35,5 +35,5 @@ type UpdatePayload struct {
 }
 
 type StatsUpdate struct {
-	StatsGroups map[string]ArenaStatistics `json:"stats"`
+	StatsGroups map[string]any `json:"stats"`
 }

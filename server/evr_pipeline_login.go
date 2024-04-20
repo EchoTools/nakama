@@ -162,8 +162,8 @@ func (p *EvrPipeline) processLogin(ctx context.Context, session *sessionWS, evrI
 	}()
 
 	// Load the user's profile
-	profile, err := p.profileRegistry.GetSessionProfile(ctx, session, loginProfile)
-	if err != nil || profile == nil {
+	_, err = p.profileRegistry.GetSessionProfile(ctx, session, loginProfile, evrId)
+	if err != nil {
 		session.logger.Error("failed to load game profiles", zap.Error(err))
 		return evr.DefaultGameSettingsSettings, fmt.Errorf("failed to load game profiles")
 	}
@@ -406,29 +406,24 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 		evrID = request.EvrId
 	}
 
-	profile := p.profileRegistry.GetProfile(session.userID)
-	if profile == nil {
+	profile, found := p.profileRegistry.Load(session.userID, evrID)
+	if !found {
 		return session.SendEvr(evr.NewLoggedInUserProfileFailure(request.EvrId, 400, "failed to load game profiles"))
 	}
-	gameProfiles := &evr.GameProfiles{
-		Client: profile.Client,
-		Server: profile.Server,
-	}
-
-	return session.SendEvr(evr.NewLoggedInUserProfileSuccess(evrID, gameProfiles))
+	return session.SendEvr(evr.NewLoggedInUserProfileSuccess(evrID, profile.Client, profile.Server))
 }
 
-func (p *EvrPipeline) updateProfile(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	request := in.(*evr.UpdateProfile)
-	// Ignore the request and use what was authenticated with
+func (p *EvrPipeline) updateClientProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
+	request := in.(*evr.UpdateClientProfile)
+	// Ignore the EvrID in the request and use what was authenticated with
 	evrId, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
 	if !ok {
 		return fmt.Errorf("evrId not found in context")
 	}
 	// Set the EVR ID from the context
-	request.ClientProfile.EchoUserIdToken = evrId.Token()
+	request.ClientProfile.EvrID = evrId
 
-	if _, err := p.profileRegistry.UpdateSessionProfile(ctx, logger, session, request.ClientProfile); err != nil {
+	if _, err := p.profileRegistry.UpdateClientProfile(ctx, logger, session, request.ClientProfile); err != nil {
 		code := 400
 		if err := session.SendEvr(evr.NewUpdateProfileFailure(evrId, uint64(code), err.Error())); err != nil {
 			return fmt.Errorf("send UpdateProfileFailure: %w", err)
@@ -436,21 +431,28 @@ func (p *EvrPipeline) updateProfile(ctx context.Context, logger *zap.Logger, ses
 		return fmt.Errorf("UpdateProfile: %w", err)
 	}
 
-	go func() {
-		// Send the profile update to the client
-		if err := session.SendEvr(
-			evr.NewSNSUpdateProfileSuccess(&evrId),
-			evr.NewSTcpConnectionUnrequireEvent(),
-		); err != nil {
-			logger.Warn("Failed to send UpdateProfileSuccess", zap.Error(err))
-		}
-	}()
+	// Send the profile update to the client
+	if err := session.SendEvr(
+		evr.NewSNSUpdateProfileSuccess(&evrId),
+		evr.NewSTcpConnectionUnrequireEvent(),
+	); err != nil {
+		logger.Warn("Failed to send UpdateProfileSuccess", zap.Error(err))
+	}
 
 	return nil
 }
 
 func (p *EvrPipeline) remoteLogSetv3(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.RemoteLogSet)
+	if session.userID == uuid.Nil {
+		return fmt.Errorf("session is not authenticated.")
+	}
+
+	evrID, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
+	if !ok {
+		return fmt.Errorf("evrId not found in context")
+	}
+
 	for _, l := range request.Logs {
 		// Unmarshal the top-level to check the message type.
 
@@ -550,9 +552,18 @@ func (p *EvrPipeline) remoteLogSetv3(ctx context.Context, logger *zap.Logger, se
 				logger.Error("Equipped customization is empty")
 			}
 
-			profile := p.profileRegistry.GetProfile(session.userID)
-			p.profileRegistry.UpdateEquippedItem(profile, category, name)
-			p.profileRegistry.SetProfile(session.userID, profile)
+			profile, found := p.profileRegistry.Load(session.userID, evrID)
+			if !found {
+				return status.Errorf(codes.Internal, "Failed to get player's profile")
+			}
+
+			p.profileRegistry.UpdateEquippedItem(&profile, category, name)
+
+			err = p.profileRegistry.Store(session.userID, profile)
+			if err != nil {
+				return status.Errorf(codes.Internal, "Failed to store player's profile")
+			}
+
 		default:
 			if logger.Core().Enabled(zap.DebugLevel) {
 				// Write the remoteLog to storage.
@@ -578,6 +589,7 @@ func (p *EvrPipeline) remoteLogSetv3(ctx context.Context, logger *zap.Logger, se
 			}
 		}
 	}
+
 	return nil
 }
 
@@ -595,7 +607,7 @@ func (p *EvrPipeline) documentRequest(ctx context.Context, logger *zap.Logger, s
 		return fmt.Errorf("unknown document: %s", key)
 	}
 
-	// If this is a NoVR user, then use hte original EULA with version 1.
+	// If this is a NoVR user, then use the original EULA with version 1.
 	// Get the NoVR from the ctx
 
 	noVr, ok := ctx.Value(ctxNoVRKey{}).(bool)
@@ -691,12 +703,20 @@ func (p *EvrPipeline) documentRequest(ctx context.Context, logger *zap.Logger, s
 			}
 			eula.Version = 1
 
+			// Get the evrID from the context
+			evrID, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
+			if !ok {
+				return fmt.Errorf("evrId not found in context")
+			}
+
 			// Get the players current channel
-			profile := p.profileRegistry.GetProfile(session.userID)
-			if profile == nil {
+			profile, found := p.profileRegistry.Load(session.userID, evrID)
+			if !found {
 				return status.Errorf(codes.Internal, "Failed to get player's profile")
 			}
+
 			channel := profile.GetChannel()
+
 			// FIXME make sure the use a valid channel so the user's channelInfo comes through.
 			suspensions := make([]*SuspensionStatus, 0)
 			if channel != uuid.Nil {
@@ -829,8 +849,8 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 	userID := targetSession.userID
 
 	// Get the profile
-	profile := p.profileRegistry.GetProfile(userID)
-	if profile == nil {
+	profile, found := p.profileRegistry.Load(userID, request.EvrID)
+	if !found {
 		return fmt.Errorf("failed to load game profiles")
 	}
 
@@ -841,6 +861,9 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 		return fmt.Errorf("missing arena stats group")
 	}
 	_ = group
+	_ = profile
+	// Convert the stats update to a map
+
 	/*
 		profile, err = mergeStats(&profile.Server.Statistics.Arena, &group)
 		if err != nil {
@@ -878,7 +901,7 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 	request := in.(*evr.OtherUserProfileRequest)
 
 	// Lookup the the profile
-	data, found := p.profileRegistry.GetProfileByEvrID(request.EvrId)
+	data, found := p.profileRegistry.GetServerProfileByEvrID(request.EvrId)
 	if !found {
 		return fmt.Errorf("failed to find profile for %s", request.EvrId.Token())
 	}

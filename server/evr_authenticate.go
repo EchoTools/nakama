@@ -27,7 +27,7 @@ import (
 )
 
 const (
-	SystemUserId = "00000000-0000-0000-0000-000000000000"
+	SystemUserID = "00000000-0000-0000-0000-000000000000"
 
 	LinkTicketCollection         = "LinkTickets"
 	LinkTicketIndex              = "Index_" + LinkTicketCollection
@@ -270,7 +270,7 @@ func ExchangeLinkCode(ctx context.Context, nk runtime.NakamaModule, logger runti
 		{
 			Collection: LinkTicketCollection,
 			Key:        linkCode,
-			UserID:     SystemUserId,
+			UserID:     SystemUserID,
 		},
 	}
 
@@ -297,7 +297,7 @@ func ExchangeLinkCode(ctx context.Context, nk runtime.NakamaModule, logger runti
 			{
 				Collection: LinkTicketCollection,
 				Key:        linkCode,
-				UserID:     SystemUserId,
+				UserID:     SystemUserID,
 			},
 		}
 		if err := nk.StorageDelete(ctx, deleteReq); err != nil {
@@ -451,7 +451,7 @@ func ReadAccessTokenFromStorage(ctx context.Context, logger runtime.Logger, nk r
 }
 
 func GetEvrRecords(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, userId string) ([]*api.StorageObject, error) {
-	listRecords, _, err := nk.StorageList(ctx, SystemUserId, userId, EvrLoginStorageCollection, 100, "")
+	listRecords, _, err := nk.StorageList(ctx, SystemUserID, userId, EvrLoginStorageCollection, 100, "")
 	if err != nil {
 		logger.WithField("err", err).Error("Storage list error.")
 		return nil, fmt.Errorf("storage list error: %v", err)
@@ -460,7 +460,7 @@ func GetEvrRecords(ctx context.Context, logger runtime.Logger, nk runtime.Nakama
 }
 
 func GetDisplayNameRecords(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, userId string) ([]*api.StorageObject, error) {
-	listRecords, _, err := nk.StorageList(ctx, SystemUserId, userId, DisplayNameCollection, 150, "")
+	listRecords, _, err := nk.StorageList(ctx, SystemUserID, userId, DisplayNameCollection, 150, "")
 	if err != nil {
 		logger.WithField("err", err).Error("Storage list error.")
 		return nil, fmt.Errorf("storage list error: %v", err)
@@ -469,7 +469,7 @@ func GetDisplayNameRecords(ctx context.Context, logger runtime.Logger, nk runtim
 }
 
 func GetAddressRecords(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, userId string) ([]*api.StorageObject, error) {
-	listRecords, _, err := nk.StorageList(ctx, SystemUserId, userId, ClientAddrStorageCollection, 100, "")
+	listRecords, _, err := nk.StorageList(ctx, SystemUserID, userId, ClientAddrStorageCollection, 100, "")
 	if err != nil {
 		logger.WithField("err", err).Error("Storage list error.")
 		return nil, fmt.Errorf("storage list error: %v", err)
@@ -478,7 +478,7 @@ func GetAddressRecords(ctx context.Context, logger runtime.Logger, nk runtime.Na
 }
 
 func GetUserIpAddresses(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, userId string) ([]*api.StorageObject, error) {
-	listRecords, _, err := nk.StorageList(ctx, SystemUserId, userId, IpAddressIndex, 100, "")
+	listRecords, _, err := nk.StorageList(ctx, SystemUserID, userId, IpAddressIndex, 100, "")
 	if err != nil {
 		logger.WithField("err", err).Error("Storage list error.")
 		return nil, fmt.Errorf("storage list error: %v", err)

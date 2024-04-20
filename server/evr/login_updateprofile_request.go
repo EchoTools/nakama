@@ -7,25 +7,25 @@ import (
 	"github.com/gofrs/uuid/v5"
 )
 
-type UpdateProfile struct {
+type UpdateClientProfile struct {
 	Session       uuid.UUID
 	EvrId         EvrId
 	ClientProfile ClientProfile
 }
 
-func (m *UpdateProfile) Token() string {
+func (m *UpdateClientProfile) Token() string {
 	return "SNSUpdateProfile"
 }
 
-func (m *UpdateProfile) Symbol() Symbol {
+func (m *UpdateClientProfile) Symbol() Symbol {
 	return ToSymbol(m.Token())
 }
 
-func (lr *UpdateProfile) String() string {
+func (lr *UpdateClientProfile) String() string {
 	return fmt.Sprintf("UpdateProfile(session=%s, evr_id=%s)", lr.Session.String(), lr.EvrId.String())
 }
 
-func (m *UpdateProfile) Stream(s *EasyStream) error {
+func (m *UpdateClientProfile) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
 		func() error { return s.StreamGuid(&m.Session) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.EvrId.PlatformCode) },

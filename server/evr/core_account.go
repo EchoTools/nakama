@@ -90,8 +90,8 @@ func forceFalse(fl validator.FieldLevel) bool {
 
 // Profiles represents the 'profile' field in the JSON data
 type GameProfiles struct {
-	Client *ClientProfile `json:"client"`
-	Server *ServerProfile `json:"server"`
+	Client ClientProfile `json:"client"`
+	Server ServerProfile `json:"server"`
 }
 
 func UnmarshalGameProfiles(data []byte) (GameProfiles, error) {
@@ -106,8 +106,8 @@ func (r *GameProfiles) Marshal() ([]byte, error) {
 
 type ClientProfile struct {
 	// WARNING: EchoVR dictates this struct/schema.
-	DisplayName     string `json:"displayname,omitempty"` // Ignored and set by nakama
-	EchoUserIdToken string `json:"xplatformid,omitempty"` // Ignored and set by nakama
+	DisplayName string `json:"displayname,omitempty"` // Ignored and set by nakama
+	EvrID       EvrId  `json:"xplatformid,omitempty"` // Ignored and set by nakama
 
 	// The team name shown on the spectator scoreboard overlay
 	TeamName           string            `json:"teamname,omitempty" validate:"omitempty,ascii"`
@@ -152,7 +152,7 @@ func (c *ClientProfile) SetDefaults() error {
 
 func (c *ClientProfile) String() string {
 	return fmt.Sprintf("ClientProfile{DisplayName: %s, EchoUserIdToken: %s, TeamName: %s, CombatWeapon: %s, CombatGrenade: %s, CombatDominantHand: %d, ModifyTime: %d, CombatAbility: %s, LegalConsents: %v, MutedPlayers: %v, GhostedPlayers: %v, NewPlayerProgress: %v, Customization: %v, Social: %v, NewUnlocks: %v}",
-		c.DisplayName, c.EchoUserIdToken, c.TeamName, c.CombatWeapon, c.CombatGrenade, c.CombatDominantHand, c.ModifyTime, c.CombatAbility, c.LegalConsents, c.MutedPlayers, c.GhostedPlayers, c.NewPlayerProgress, c.Customization, c.Social, c.NewUnlocks)
+		c.DisplayName, c.EvrID.Token(), c.TeamName, c.CombatWeapon, c.CombatGrenade, c.CombatDominantHand, c.ModifyTime, c.CombatAbility, c.LegalConsents, c.MutedPlayers, c.GhostedPlayers, c.NewPlayerProgress, c.Customization, c.Social, c.NewUnlocks)
 }
 
 type Customization struct {
@@ -210,29 +210,45 @@ type Social struct {
 type ServerProfile struct {
 	// WARNING: EchoVR dictates this struct/schema.
 	// TODO Add comments for what these are
-	DisplayName       string             `json:"displayname"`                                    // Overridden by nakama
-	EchoUserIdToken   string             `json:"xplatformid"`                                    // Overridden by nakama
-	SchemaVersion     int16              `json:"_version,omitempty" validate:"gte=0"`            // Version of the schema(?)
-	PublisherLock     string             `json:"publisher_lock,omitempty"`                       // unused atm
-	PurchasedCombat   int8               `json:"purchasedcombat,omitempty" validate:"eq=0|eq=1"` // unused (combat was made free)
-	LobbyVersion      uint64             `json:"lobbyversion" validate:"gte=0"`                  // set from the login request
-	LoginTime         int64              `json:"logintime" validate:"gte=0"`                     // When the player logged in
-	UpdateTime        int64              `json:"updatetime" validate:"gte=0"`                    // When the profile was last stored.
-	CreateTime        int64              `json:"createtime" validate:"gte=0"`                    // When the player's nakama account was created.
-	Statistics        PlayerStatistics   `json:"stats,omitempty"`                                // Player statistics
-	MaybeStale        *bool              `json:"maybestale,omitempty" validate:"boolean"`        // If the profile is stale
-	UnlockedCosmetics UnlockedCosmetics  `json:"unlocks,omitempty"`                              // Unlocked cosmetics
-	EquippedCosmetics EquippedCosmetics  `json:"loadout,omitempty"`                              // Equipped cosmetics
-	Social            Social             `json:"social,omitempty"`                               // Social settings
-	Achievements      interface{}        `json:"achievements,omitempty"`                         // Achievements
-	RewardState       interface{}        `json:"reward_state,omitempty"`                         // Reward state?
-	DeveloperFeatures *DeveloperFeatures `json:"dev,omitempty"`                                  // Developer features
+	DisplayName       string            `json:"displayname"`                                    // Overridden by nakama
+	EvrID             EvrId             `json:"xplatformid"`                                    // Overridden by nakama
+	SchemaVersion     int16             `json:"_version,omitempty" validate:"gte=0"`            // Version of the schema(?)
+	PublisherLock     string            `json:"publisher_lock,omitempty"`                       // unused atm
+	PurchasedCombat   int8              `json:"purchasedcombat,omitempty" validate:"eq=0|eq=1"` // unused (combat was made free)
+	LobbyVersion      uint64            `json:"lobbyversion" validate:"gte=0"`                  // set from the login request
+	LoginTime         int64             `json:"logintime" validate:"gte=0"`                     // When the player logged in
+	UpdateTime        int64             `json:"updatetime" validate:"gte=0"`                    // When the profile was last stored.
+	CreateTime        int64             `json:"createtime" validate:"gte=0"`                    // When the player's nakama account was created.
+	Statistics        PlayerStatistics  `json:"stats,omitempty"`                                // Player statistics
+	MaybeStale        bool              `json:"maybestale,omitempty" validate:"boolean"`        // If the profile is stale
+	UnlockedCosmetics UnlockedCosmetics `json:"unlocks,omitempty"`                              // Unlocked cosmetics
+	EquippedCosmetics EquippedCosmetics `json:"loadout,omitempty"`                              // Equipped cosmetics
+	Social            Social            `json:"social,omitempty"`                               // Social settings
+	Achievements      interface{}       `json:"achievements,omitempty"`                         // Achievements
+	RewardState       interface{}       `json:"reward_state,omitempty"`                         // Reward state?
+	DeveloperFeatures DeveloperFeatures `json:"dev,omitempty"`                                  // Developer features
 }
 
 type DeveloperFeatures struct {
 	// WARNING: EchoVR dictates this struct/schema.
-	DisableAfkTimeout bool   `json:"disable_afk_timeout,omitempty"`
-	EchoUserIdToken   string `json:"xplatformid,omitempty"`
+	DisableAfkTimeout bool  `json:"disable_afk_timeout,omitempty"`
+	EvrIDOverride     EvrId `json:"xplatformid,omitempty"`
+}
+
+// Return nil if DeveloperFeatures is empty
+func (f *DeveloperFeatures) MarshalJSON() ([]byte, error) {
+	if !f.DisableAfkTimeout && f.EvrIDOverride.Equals(&EvrIdNil) {
+		return []byte("{}"), nil
+	}
+	devmap := make(map[string]interface{})
+	if f.DisableAfkTimeout {
+		devmap["disable_afk_timeout"] = f.DisableAfkTimeout
+	}
+	if !f.EvrIDOverride.Equals(&EvrIdNil) {
+		devmap["xplatformid"] = f.EvrIDOverride
+	}
+
+	return json.Marshal(devmap)
 }
 
 type PlayerStatistics struct {
@@ -241,84 +257,85 @@ type PlayerStatistics struct {
 }
 
 type ArenaStatistics struct {
-	Level                        LevelStatistic       `json:"Level"`
-	Stuns                        *DiscreteStatistic   `json:"Stuns,omitempty"`
-	TopSpeedsTotal               *ContinuousStatistic `json:"TopSpeedsTotal,omitempty"`
-	HighestArenaWinStreak        *DiscreteStatistic   `json:"HighestArenaWinStreak,omitempty"`
-	ArenaWinPercentage           *ContinuousStatistic `json:"ArenaWinPercentage,omitempty"`
-	ArenaWins                    *DiscreteStatistic   `json:"ArenaWins,omitempty"`
-	ShotsOnGoalAgainst           *DiscreteStatistic   `json:"ShotsOnGoalAgainst,omitempty"`
-	Clears                       *DiscreteStatistic   `json:"Clears,omitempty"`
-	AssistsPerGame               *ContinuousStatistic `json:"AssistsPerGame,omitempty"`
-	Passes                       *DiscreteStatistic   `json:"Passes,omitempty"`
-	AveragePossessionTimePerGame *ContinuousStatistic `json:"AveragePossessionTimePerGame,omitempty"`
-	Catches                      *DiscreteStatistic   `json:"Catches,omitempty"`
-	PossessionTime               *ContinuousStatistic `json:"PossessionTime,omitempty"`
-	StunsPerGame                 *ContinuousStatistic `json:"StunsPerGame,omitempty"`
-	ShotsOnGoal                  *DiscreteStatistic   `json:"ShotsOnGoal,omitempty"`
-	PunchesReceived              *DiscreteStatistic   `json:"PunchesReceived,omitempty"`
-	CurrentArenaWinStreak        *DiscreteStatistic   `json:"CurrentArenaWinStreak,omitempty"`
-	Assists                      *DiscreteStatistic   `json:"Assists,omitempty"`
-	Interceptions                *DiscreteStatistic   `json:"Interceptions,omitempty"`
-	HighestStuns                 *DiscreteStatistic   `json:"HighestStuns,omitempty"`
-	AverageTopSpeedPerGame       *ContinuousStatistic `json:"AverageTopSpeedPerGame,omitempty"`
-	XP                           *DiscreteStatistic   `json:"XP,omitempty"`
-	ArenaLosses                  *DiscreteStatistic   `json:"ArenaLosses,omitempty"`
-	SavesPerGame                 *ContinuousStatistic `json:"SavesPerGame,omitempty"`
-	Blocks                       *DiscreteStatistic   `json:"Blocks,omitempty"`
-	Saves                        *DiscreteStatistic   `json:"Saves,omitempty"`
-	HighestSaves                 *DiscreteStatistic   `json:"HighestSaves,omitempty"`
-	GoalSavePercentage           *ContinuousStatistic `json:"GoalSavePercentage,omitempty"`
-	BlockPercentage              *ContinuousStatistic `json:"BlockPercentage,omitempty"`
-	GoalsPerGame                 *ContinuousStatistic `json:"GoalsPerGame,omitempty"`
-	Points                       *DiscreteStatistic   `json:"Points,omitempty"`
-	Goals                        *DiscreteStatistic   `json:"Goals,omitempty"`
-	Steals                       *DiscreteStatistic   `json:"Steals,omitempty"`
-	TwoPointGoals                *DiscreteStatistic   `json:"TwoPointGoals,omitempty"`
-	HighestPoints                *DiscreteStatistic   `json:"HighestPoints,omitempty"`
-	GoalScorePercentage          *ContinuousStatistic `json:"GoalScorePercentage,omitempty"`
-	AveragePointsPerGame         *ContinuousStatistic `json:"AveragePointsPerGame,omitempty"`
-	ThreePointGoals              *DiscreteStatistic   `json:"ThreePointGoals,omitempty"`
-	BounceGoals                  *DiscreteStatistic   `json:"BounceGoals,omitempty"`
-	ArenaMVPPercentage           *ContinuousStatistic `json:"ArenaMVPPercentage,omitempty"`
-	ArenaMVPS                    *DiscreteStatistic   `json:"ArenaMVPs,omitempty"`
-	CurrentArenaMVPStreak        *DiscreteStatistic   `json:"CurrentArenaMVPStreak,omitempty"`
-	HighestArenaMVPStreak        *DiscreteStatistic   `json:"HighestArenaMVPStreak,omitempty"`
-	HeadbuttGoals                *DiscreteStatistic   `json:"HeadbuttGoals,omitempty"`
-	HatTricks                    *DiscreteStatistic   `json:"HatTricks,omitempty"`
+	Level                        LevelStatistic      `json:"Level"`
+	Stuns                        DiscreteStatistic   `json:"Stuns,omitempty"`
+	TopSpeedsTotal               ContinuousStatistic `json:"TopSpeedsTotal,omitempty"`
+	HighestArenaWinStreak        DiscreteStatistic   `json:"HighestArenaWinStreak,omitempty"`
+	ArenaWinPercentage           ContinuousStatistic `json:"ArenaWinPercentage,omitempty"`
+	ArenaWins                    DiscreteStatistic   `json:"ArenaWins,omitempty"`
+	ShotsOnGoalAgainst           DiscreteStatistic   `json:"ShotsOnGoalAgainst,omitempty"`
+	Clears                       DiscreteStatistic   `json:"Clears,omitempty"`
+	AssistsPerGame               ContinuousStatistic `json:"AssistsPerGame,omitempty"`
+	Passes                       DiscreteStatistic   `json:"Passes,omitempty"`
+	AveragePossessionTimePerGame ContinuousStatistic `json:"AveragePossessionTimePerGame,omitempty"`
+	Catches                      DiscreteStatistic   `json:"Catches,omitempty"`
+	PossessionTime               ContinuousStatistic `json:"PossessionTime,omitempty"`
+	StunsPerGame                 ContinuousStatistic `json:"StunsPerGame,omitempty"`
+	ShotsOnGoal                  DiscreteStatistic   `json:"ShotsOnGoal,omitempty"`
+	PunchesReceived              DiscreteStatistic   `json:"PunchesReceived,omitempty"`
+	CurrentArenaWinStreak        DiscreteStatistic   `json:"CurrentArenaWinStreak,omitempty"`
+	Assists                      DiscreteStatistic   `json:"Assists,omitempty"`
+	Interceptions                DiscreteStatistic   `json:"Interceptions,omitempty"`
+	HighestStuns                 DiscreteStatistic   `json:"HighestStuns,omitempty"`
+	AverageTopSpeedPerGame       ContinuousStatistic `json:"AverageTopSpeedPerGame,omitempty"`
+	XP                           DiscreteStatistic   `json:"XP,omitempty"`
+	ArenaLosses                  DiscreteStatistic   `json:"ArenaLosses,omitempty"`
+	SavesPerGame                 ContinuousStatistic `json:"SavesPerGame,omitempty"`
+	Blocks                       DiscreteStatistic   `json:"Blocks,omitempty"`
+	Saves                        DiscreteStatistic   `json:"Saves,omitempty"`
+	HighestSaves                 DiscreteStatistic   `json:"HighestSaves,omitempty"`
+	GoalSavePercentage           ContinuousStatistic `json:"GoalSavePercentage,omitempty"`
+	BlockPercentage              ContinuousStatistic `json:"BlockPercentage,omitempty"`
+	GoalsPerGame                 ContinuousStatistic `json:"GoalsPerGame,omitempty"`
+	Points                       DiscreteStatistic   `json:"Points,omitempty"`
+	Goals                        DiscreteStatistic   `json:"Goals,omitempty"`
+	Steals                       DiscreteStatistic   `json:"Steals,omitempty"`
+	TwoPointGoals                DiscreteStatistic   `json:"TwoPointGoals,omitempty"`
+	HighestPoints                DiscreteStatistic   `json:"HighestPoints,omitempty"`
+	GoalScorePercentage          ContinuousStatistic `json:"GoalScorePercentage,omitempty"`
+	AveragePointsPerGame         ContinuousStatistic `json:"AveragePointsPerGame,omitempty"`
+	ThreePointGoals              DiscreteStatistic   `json:"ThreePointGoals,omitempty"`
+	BounceGoals                  DiscreteStatistic   `json:"BounceGoals,omitempty"`
+	ArenaMVPPercentage           ContinuousStatistic `json:"ArenaMVPPercentage,omitempty"`
+	ArenaMVPS                    DiscreteStatistic   `json:"ArenaMVPs,omitempty"`
+	CurrentArenaMVPStreak        DiscreteStatistic   `json:"CurrentArenaMVPStreak,omitempty"`
+	HighestArenaMVPStreak        DiscreteStatistic   `json:"HighestArenaMVPStreak,omitempty"`
+	HeadbuttGoals                DiscreteStatistic   `json:"HeadbuttGoals,omitempty"`
+	HatTricks                    DiscreteStatistic   `json:"HatTricks,omitempty"`
 }
+
 type CombatStatistics struct {
-	Level                              LevelStatistic              `json:"Level"`
-	CombatAssists                      *CountedDiscreteStatistic   `json:"CombatAssists,omitempty"`
-	CombatObjectiveDamage              *CountedContinuousStatistic `json:"CombatObjectiveDamage,omitempty"`
-	CombatEliminations                 *CountedDiscreteStatistic   `json:"CombatEliminations,omitempty"`
-	CombatDamageAbsorbed               *ContinuousStatistic        `json:"CombatDamageAbsorbed,omitempty"`
-	CombatWINS                         *CountedDiscreteStatistic   `json:"CombatWins,omitempty"`
-	CombatDamageTaken                  *CountedContinuousStatistic `json:"CombatDamageTaken,omitempty"`
-	CombatWinPercentage                *CountedDiscreteStatistic   `json:"CombatWinPercentage,omitempty"`
-	CombatStuns                        *CountedDiscreteStatistic   `json:"CombatStuns,omitempty"`
-	CombatKills                        *CountedDiscreteStatistic   `json:"CombatKills,omitempty"`
-	CombatPointCaptureGamesPlayed      *DiscreteStatistic          `json:"CombatPointCaptureGamesPlayed,omitempty"`
-	CombatPointCaptureWINS             *DiscreteStatistic          `json:"CombatPointCaptureWins,omitempty"`
-	CombatObjectiveTime                *CountedContinuousStatistic `json:"CombatObjectiveTime,omitempty"`
-	CombatAverageEliminationDeathRatio *CountedContinuousStatistic `json:"CombatAverageEliminationDeathRatio,omitempty"`
-	CombatPointCaptureWinPercentage    *ContinuousStatistic        `json:"CombatPointCaptureWinPercentage,omitempty"`
-	CombatDeaths                       *CountedDiscreteStatistic   `json:"CombatDeaths,omitempty"`
-	CombatDamage                       *CountedContinuousStatistic `json:"CombatDamage,omitempty"`
-	CombatObjectiveEliminations        *CountedDiscreteStatistic   `json:"CombatObjectiveEliminations,omitempty"`
-	CombatBestEliminationStreak        *CountedDiscreteStatistic   `json:"CombatBestEliminationStreak,omitempty"`
-	CombatSoloKills                    *CountedDiscreteStatistic   `json:"CombatSoloKills,omitempty"`
-	CombatHeadshotKills                *CountedDiscreteStatistic   `json:"CombatHeadshotKills,omitempty"`
-	XP                                 *CountedDiscreteStatistic   `json:"XP,omitempty"`
-	CombatMVPS                         *DiscreteStatistic          `json:"CombatMVPs,omitempty"`
-	CombatHillDefends                  *DiscreteStatistic          `json:"CombatHillDefends,omitempty"`
-	CombatPayloadWINS                  *CountedDiscreteStatistic   `json:"CombatPayloadWins,omitempty"`
-	CombatPayloadGamesPlayed           *CountedDiscreteStatistic   `json:"CombatPayloadGamesPlayed,omitempty"`
-	CombatPayloadWinPercentage         *CountedDiscreteStatistic   `json:"CombatPayloadWinPercentage,omitempty"`
-	CombatHillCaptures                 *DiscreteStatistic          `json:"CombatHillCaptures,omitempty"`
-	CombatHealing                      *CountedContinuousStatistic `json:"CombatHealing,omitempty"`
-	CombatTeammateHealing              *CountedContinuousStatistic `json:"CombatTeammateHealing,omitempty"`
-	CombatLosses                       *CountedDiscreteStatistic   `json:"CombatLosses,omitempty"`
+	Level                              LevelStatistic             `json:"Level"`
+	CombatAssists                      CountedDiscreteStatistic   `json:"CombatAssists,omitempty"`
+	CombatObjectiveDamage              CountedContinuousStatistic `json:"CombatObjectiveDamage,omitempty"`
+	CombatEliminations                 CountedDiscreteStatistic   `json:"CombatEliminations,omitempty"`
+	CombatDamageAbsorbed               ContinuousStatistic        `json:"CombatDamageAbsorbed,omitempty"`
+	CombatWINS                         CountedDiscreteStatistic   `json:"CombatWins,omitempty"`
+	CombatDamageTaken                  CountedContinuousStatistic `json:"CombatDamageTaken,omitempty"`
+	CombatWinPercentage                CountedDiscreteStatistic   `json:"CombatWinPercentage,omitempty"`
+	CombatStuns                        CountedDiscreteStatistic   `json:"CombatStuns,omitempty"`
+	CombatKills                        CountedDiscreteStatistic   `json:"CombatKills,omitempty"`
+	CombatPointCaptureGamesPlayed      DiscreteStatistic          `json:"CombatPointCaptureGamesPlayed,omitempty"`
+	CombatPointCaptureWINS             DiscreteStatistic          `json:"CombatPointCaptureWins,omitempty"`
+	CombatObjectiveTime                CountedContinuousStatistic `json:"CombatObjectiveTime,omitempty"`
+	CombatAverageEliminationDeathRatio CountedContinuousStatistic `json:"CombatAverageEliminationDeathRatio,omitempty"`
+	CombatPointCaptureWinPercentage    ContinuousStatistic        `json:"CombatPointCaptureWinPercentage,omitempty"`
+	CombatDeaths                       CountedDiscreteStatistic   `json:"CombatDeaths,omitempty"`
+	CombatDamage                       CountedContinuousStatistic `json:"CombatDamage,omitempty"`
+	CombatObjectiveEliminations        CountedDiscreteStatistic   `json:"CombatObjectiveEliminations,omitempty"`
+	CombatBestEliminationStreak        CountedDiscreteStatistic   `json:"CombatBestEliminationStreak,omitempty"`
+	CombatSoloKills                    CountedDiscreteStatistic   `json:"CombatSoloKills,omitempty"`
+	CombatHeadshotKills                CountedDiscreteStatistic   `json:"CombatHeadshotKills,omitempty"`
+	XP                                 CountedDiscreteStatistic   `json:"XP,omitempty"`
+	CombatMVPS                         DiscreteStatistic          `json:"CombatMVPs,omitempty"`
+	CombatHillDefends                  DiscreteStatistic          `json:"CombatHillDefends,omitempty"`
+	CombatPayloadWINS                  CountedDiscreteStatistic   `json:"CombatPayloadWins,omitempty"`
+	CombatPayloadGamesPlayed           CountedDiscreteStatistic   `json:"CombatPayloadGamesPlayed,omitempty"`
+	CombatPayloadWinPercentage         CountedDiscreteStatistic   `json:"CombatPayloadWinPercentage,omitempty"`
+	CombatHillCaptures                 DiscreteStatistic          `json:"CombatHillCaptures,omitempty"`
+	CombatHealing                      CountedContinuousStatistic `json:"CombatHealing,omitempty"`
+	CombatTeammateHealing              CountedContinuousStatistic `json:"CombatTeammateHealing,omitempty"`
+	CombatLosses                       CountedDiscreteStatistic   `json:"CombatLosses,omitempty"`
 }
 
 type CountedDiscreteStatistic struct {
@@ -350,73 +367,73 @@ type LevelStatistic struct {
 }
 
 type DailyStats struct {
-	Stuns                        *DiscreteStatistic   `json:"Stuns,omitempty"`
-	XP                           *DiscreteStatistic   `json:"XP,omitempty"`
-	TopSpeedsTotal               *ContinuousStatistic `json:"TopSpeedsTotal,omitempty"`
-	HighestArenaWinStreak        *DiscreteStatistic   `json:"HighestArenaWinStreak,omitempty"`
-	ArenaWinPercentage           *DiscreteStatistic   `json:"ArenaWinPercentage,omitempty"`
-	ArenaWins                    *DiscreteStatistic   `json:"ArenaWins,omitempty"`
-	ShotsOnGoalAgainst           *DiscreteStatistic   `json:"ShotsOnGoalAgainst,omitempty"`
-	Clears                       *DiscreteStatistic   `json:"Clears,omitempty"`
-	AssistsPerGame               *ContinuousStatistic `json:"AssistsPerGame,omitempty"`
-	Passes                       *DiscreteStatistic   `json:"Passes,omitempty"`
-	AveragePossessionTimePerGame *ContinuousStatistic `json:"AveragePossessionTimePerGame,omitempty"`
-	Catches                      *DiscreteStatistic   `json:"Catches,omitempty"`
-	PossessionTime               *ContinuousStatistic `json:"PossessionTime,omitempty"`
-	StunsPerGame                 *DiscreteStatistic   `json:"StunsPerGame,omitempty"`
-	ShotsOnGoal                  *DiscreteStatistic   `json:"ShotsOnGoal,omitempty"`
-	PunchesReceived              *DiscreteStatistic   `json:"PunchesReceived,omitempty"`
-	CurrentArenaWinStreak        *DiscreteStatistic   `json:"CurrentArenaWinStreak,omitempty"`
-	Assists                      *DiscreteStatistic   `json:"Assists,omitempty"`
-	Interceptions                *DiscreteStatistic   `json:"Interceptions,omitempty"`
-	HighestStuns                 *DiscreteStatistic   `json:"HighestStuns,omitempty"`
-	AverageTopSpeedPerGame       *ContinuousStatistic `json:"AverageTopSpeedPerGame,omitempty"`
-	ArenaLosses                  *DiscreteStatistic   `json:"ArenaLosses,omitempty"`
-	SavesPerGame                 *ContinuousStatistic `json:"SavesPerGame,omitempty"`
-	Blocks                       *DiscreteStatistic   `json:"Blocks,omitempty"`
-	Saves                        *DiscreteStatistic   `json:"Saves,omitempty"`
-	HighestSaves                 *DiscreteStatistic   `json:"HighestSaves,omitempty"`
-	GoalSavePercentage           *ContinuousStatistic `json:"GoalSavePercentage,omitempty"`
-	BlockPercentage              *ContinuousStatistic `json:"BlockPercentage,omitempty"`
+	Stuns                        DiscreteStatistic   `json:"Stuns,omitempty"`
+	XP                           DiscreteStatistic   `json:"XP,omitempty"`
+	TopSpeedsTotal               ContinuousStatistic `json:"TopSpeedsTotal,omitempty"`
+	HighestArenaWinStreak        DiscreteStatistic   `json:"HighestArenaWinStreak,omitempty"`
+	ArenaWinPercentage           DiscreteStatistic   `json:"ArenaWinPercentage,omitempty"`
+	ArenaWins                    DiscreteStatistic   `json:"ArenaWins,omitempty"`
+	ShotsOnGoalAgainst           DiscreteStatistic   `json:"ShotsOnGoalAgainst,omitempty"`
+	Clears                       DiscreteStatistic   `json:"Clears,omitempty"`
+	AssistsPerGame               ContinuousStatistic `json:"AssistsPerGame,omitempty"`
+	Passes                       DiscreteStatistic   `json:"Passes,omitempty"`
+	AveragePossessionTimePerGame ContinuousStatistic `json:"AveragePossessionTimePerGame,omitempty"`
+	Catches                      DiscreteStatistic   `json:"Catches,omitempty"`
+	PossessionTime               ContinuousStatistic `json:"PossessionTime,omitempty"`
+	StunsPerGame                 DiscreteStatistic   `json:"StunsPerGame,omitempty"`
+	ShotsOnGoal                  DiscreteStatistic   `json:"ShotsOnGoal,omitempty"`
+	PunchesReceived              DiscreteStatistic   `json:"PunchesReceived,omitempty"`
+	CurrentArenaWinStreak        DiscreteStatistic   `json:"CurrentArenaWinStreak,omitempty"`
+	Assists                      DiscreteStatistic   `json:"Assists,omitempty"`
+	Interceptions                DiscreteStatistic   `json:"Interceptions,omitempty"`
+	HighestStuns                 DiscreteStatistic   `json:"HighestStuns,omitempty"`
+	AverageTopSpeedPerGame       ContinuousStatistic `json:"AverageTopSpeedPerGame,omitempty"`
+	ArenaLosses                  DiscreteStatistic   `json:"ArenaLosses,omitempty"`
+	SavesPerGame                 ContinuousStatistic `json:"SavesPerGame,omitempty"`
+	Blocks                       DiscreteStatistic   `json:"Blocks,omitempty"`
+	Saves                        DiscreteStatistic   `json:"Saves,omitempty"`
+	HighestSaves                 DiscreteStatistic   `json:"HighestSaves,omitempty"`
+	GoalSavePercentage           ContinuousStatistic `json:"GoalSavePercentage,omitempty"`
+	BlockPercentage              ContinuousStatistic `json:"BlockPercentage,omitempty"`
 }
 
 type WeelkyStats struct {
-	Stuns                        *DiscreteStatistic   `json:"Stuns,omitempty"`
-	XP                           *DiscreteStatistic   `json:"XP,omitempty"`
-	TopSpeedsTotal               *ContinuousStatistic `json:"TopSpeedsTotal,omitempty"`
-	HighestArenaWinStreak        *DiscreteStatistic   `json:"HighestArenaWinStreak,omitempty"`
-	ArenaWinPercentage           *DiscreteStatistic   `json:"ArenaWinPercentage,omitempty"`
-	ArenaWINS                    *DiscreteStatistic   `json:"ArenaWins,omitempty"`
-	ShotsOnGoalAgainst           *DiscreteStatistic   `json:"ShotsOnGoalAgainst,omitempty"`
-	Clears                       *DiscreteStatistic   `json:"Clears,omitempty"`
-	AssistsPerGame               *ContinuousStatistic `json:"AssistsPerGame,omitempty"`
-	Passes                       *DiscreteStatistic   `json:"Passes,omitempty"`
-	AveragePossessionTimePerGame *ContinuousStatistic `json:"AveragePossessionTimePerGame,omitempty"`
-	Catches                      *DiscreteStatistic   `json:"Catches,omitempty"`
-	PossessionTime               *ContinuousStatistic `json:"PossessionTime,omitempty"`
-	StunsPerGame                 *ContinuousStatistic `json:"StunsPerGame,omitempty"`
-	ShotsOnGoal                  *DiscreteStatistic   `json:"ShotsOnGoal,omitempty"`
-	PunchesReceived              *DiscreteStatistic   `json:"PunchesReceived,omitempty"`
-	CurrentArenaWinStreak        *DiscreteStatistic   `json:"CurrentArenaWinStreak,omitempty"`
-	Assists                      *DiscreteStatistic   `json:"Assists,omitempty"`
-	Interceptions                *DiscreteStatistic   `json:"Interceptions,omitempty"`
-	HighestStuns                 *DiscreteStatistic   `json:"HighestStuns,omitempty"`
-	AverageTopSpeedPerGame       *ContinuousStatistic `json:"AverageTopSpeedPerGame,omitempty"`
-	ArenaLosses                  *DiscreteStatistic   `json:"ArenaLosses,omitempty"`
-	SavesPerGame                 *ContinuousStatistic `json:"SavesPerGame,omitempty"`
-	Blocks                       *DiscreteStatistic   `json:"Blocks,omitempty"`
-	Saves                        *DiscreteStatistic   `json:"Saves,omitempty"`
-	HighestSaves                 *DiscreteStatistic   `json:"HighestSaves,omitempty"`
-	GoalSavePercentage           *ContinuousStatistic `json:"GoalSavePercentage,omitempty"`
-	BlockPercentage              *ContinuousStatistic `json:"BlockPercentage,omitempty"`
-	GoalsPerGame                 *ContinuousStatistic `json:"GoalsPerGame,omitempty"`
-	Points                       *DiscreteStatistic   `json:"Points,omitempty"`
-	Goals                        *DiscreteStatistic   `json:"Goals,omitempty"`
-	Steals                       *DiscreteStatistic   `json:"Steals,omitempty"`
-	TwoPointGoals                *DiscreteStatistic   `json:"TwoPointGoals,omitempty"`
-	HighestPoints                *DiscreteStatistic   `json:"HighestPoints,omitempty"`
-	GoalScorePercentage          *ContinuousStatistic `json:"GoalScorePercentage,omitempty"`
-	AveragePointsPerGame         *ContinuousStatistic `json:"AveragePointsPerGame,omitempty"`
+	Stuns                        DiscreteStatistic   `json:"Stuns,omitempty"`
+	XP                           DiscreteStatistic   `json:"XP,omitempty"`
+	TopSpeedsTotal               ContinuousStatistic `json:"TopSpeedsTotal,omitempty"`
+	HighestArenaWinStreak        DiscreteStatistic   `json:"HighestArenaWinStreak,omitempty"`
+	ArenaWinPercentage           DiscreteStatistic   `json:"ArenaWinPercentage,omitempty"`
+	ArenaWINS                    DiscreteStatistic   `json:"ArenaWins,omitempty"`
+	ShotsOnGoalAgainst           DiscreteStatistic   `json:"ShotsOnGoalAgainst,omitempty"`
+	Clears                       DiscreteStatistic   `json:"Clears,omitempty"`
+	AssistsPerGame               ContinuousStatistic `json:"AssistsPerGame,omitempty"`
+	Passes                       DiscreteStatistic   `json:"Passes,omitempty"`
+	AveragePossessionTimePerGame ContinuousStatistic `json:"AveragePossessionTimePerGame,omitempty"`
+	Catches                      DiscreteStatistic   `json:"Catches,omitempty"`
+	PossessionTime               ContinuousStatistic `json:"PossessionTime,omitempty"`
+	StunsPerGame                 ContinuousStatistic `json:"StunsPerGame,omitempty"`
+	ShotsOnGoal                  DiscreteStatistic   `json:"ShotsOnGoal,omitempty"`
+	PunchesReceived              DiscreteStatistic   `json:"PunchesReceived,omitempty"`
+	CurrentArenaWinStreak        DiscreteStatistic   `json:"CurrentArenaWinStreak,omitempty"`
+	Assists                      DiscreteStatistic   `json:"Assists,omitempty"`
+	Interceptions                DiscreteStatistic   `json:"Interceptions,omitempty"`
+	HighestStuns                 DiscreteStatistic   `json:"HighestStuns,omitempty"`
+	AverageTopSpeedPerGame       ContinuousStatistic `json:"AverageTopSpeedPerGame,omitempty"`
+	ArenaLosses                  DiscreteStatistic   `json:"ArenaLosses,omitempty"`
+	SavesPerGame                 ContinuousStatistic `json:"SavesPerGame,omitempty"`
+	Blocks                       DiscreteStatistic   `json:"Blocks,omitempty"`
+	Saves                        DiscreteStatistic   `json:"Saves,omitempty"`
+	HighestSaves                 DiscreteStatistic   `json:"HighestSaves,omitempty"`
+	GoalSavePercentage           ContinuousStatistic `json:"GoalSavePercentage,omitempty"`
+	BlockPercentage              ContinuousStatistic `json:"BlockPercentage,omitempty"`
+	GoalsPerGame                 ContinuousStatistic `json:"GoalsPerGame,omitempty"`
+	Points                       DiscreteStatistic   `json:"Points,omitempty"`
+	Goals                        DiscreteStatistic   `json:"Goals,omitempty"`
+	Steals                       DiscreteStatistic   `json:"Steals,omitempty"`
+	TwoPointGoals                DiscreteStatistic   `json:"TwoPointGoals,omitempty"`
+	HighestPoints                DiscreteStatistic   `json:"HighestPoints,omitempty"`
+	GoalScorePercentage          ContinuousStatistic `json:"GoalScorePercentage,omitempty"`
+	AveragePointsPerGame         ContinuousStatistic `json:"AveragePointsPerGame,omitempty"`
 }
 
 type EquippedCosmetics struct {
@@ -455,9 +472,74 @@ type CosmeticLoadout struct {
 	Emissive       string `json:"emissive"`
 }
 
+func DefaultCosmeticLoadout() CosmeticLoadout {
+	return CosmeticLoadout{
+		Emote:          "emote_blink_smiley_a",
+		Decal:          "decal_default",
+		Tint:           "tint_neutral_a_default",
+		TintAlignmentA: "tint_blue_a_default",
+		TintAlignmentB: "tint_orange_a_default",
+		Pattern:        "pattern_default",
+		Pip:            "rwd_decalback_default",
+		Chassis:        "rwd_chassis_body_s11_a",
+		Bracer:         "rwd_bracer_default",
+		Booster:        "rwd_booster_default",
+		Title:          "rwd_title_title_default",
+		Tag:            "rwd_tag_s1_a_secondary",
+		Banner:         "rwd_banner_s1_default",
+		Medal:          "rwd_medal_default",
+		GoalFx:         "rwd_goal_fx_default",
+		SecondEmote:    "emote_blink_smiley_a",
+		Emissive:       "emissive_default",
+		TintBody:       "tint_neutral_a_default",
+		PatternBody:    "pattern_default",
+		DecalBody:      "decal_default",
+	}
+}
+
+func (c CosmeticLoadout) ToMap() map[string]string {
+	m := make(map[string]string)
+	v := reflect.ValueOf(c)
+	t := v.Type()
+	for i := 0; i < v.NumField(); i++ {
+		m[t.Field(i).Tag.Get("json")] = v.Field(i).String()
+	}
+	return m
+}
+
+func (c *CosmeticLoadout) FromMap(m map[string]string) {
+	v := reflect.ValueOf(c).Elem()
+	t := v.Type()
+	for i := 0; i < v.NumField(); i++ {
+		if val, ok := m[t.Field(i).Tag.Get("json")]; ok {
+			v.Field(i).SetString(val)
+		}
+	}
+}
+
 type UnlockedCosmetics struct {
 	Arena  ArenaUnlocks  `json:"arena"`
 	Combat CombatUnlocks `json:"combat"`
+}
+
+func (u *UnlockedCosmetics) ToMap() map[string]map[string]bool {
+	m := make(map[string]map[string]bool)
+	m["arena"] = make(map[string]bool)
+	m["combat"] = make(map[string]bool)
+
+	arena := reflect.ValueOf(u.Arena)
+	arenaType := arena.Type()
+	for i := 0; i < arena.NumField(); i++ {
+		m["arena"][arenaType.Field(i).Tag.Get("json")] = arena.Field(i).Bool()
+	}
+
+	combat := reflect.ValueOf(u.Combat)
+	combatType := combat.Type()
+	for i := 0; i < combat.NumField(); i++ {
+		m["combat"][combatType.Field(i).Tag.Get("json")] = combat.Field(i).Bool()
+	}
+
+	return m
 }
 
 type ArenaUnlocks struct {
@@ -887,16 +969,16 @@ type ArenaUnlocks struct {
 	MedalS3EchoPassBronzeA      bool `json:"rwd_medal_s3_echo_pass_bronze_a,omitempty" `
 	MedalS3EchoPassGoldA        bool `json:"rwd_medal_s3_echo_pass_gold_a,omitempty" `
 	MedalS3EchoPassSilverA      bool `json:"rwd_medal_s3_echo_pass_silver_a,omitempty" `
-	MedalVrmlPreseason          bool `json:"rwd_medal_s1_vrml_preseason,omitempty" validate:"restricted"`
-	MedalVrmlS1                 bool `json:"rwd_medal_s1_vrml_s1_user,omitempty" validate:"restricted"`
-	MedalVrmlS1Champion         bool `json:"rwd_medal_s1_vrml_s1_champion,omitempty" validate:"restricted"`
-	MedalVrmlS1Finalist         bool `json:"rwd_medal_s1_vrml_s1_finalist,omitempty" validate:"restricted"`
-	MedalVrmlS2                 bool `json:"rwd_medal_s1_vrml_s2,omitempty" validate:"restricted"`
-	MedalVrmlS2Champion         bool `json:"rwd_medal_s1_vrml_s2_champion,omitempty" validate:"restricted"`
-	MedalVrmlS2Finalist         bool `json:"rwd_medal_s1_vrml_s2_finalist,omitempty" validate:"restricted"`
-	MedalVrmlS3                 bool `json:"rwd_medal_s1_vrml_s3,omitempty" validate:"restricted"`
-	MedalVrmlS3Champion         bool `json:"rwd_medal_s1_vrml_s3_champion,omitempty" validate:"restricted"`
-	MedalVrmlS3Finalist         bool `json:"rwd_medal_s1_vrml_s3_finalist,omitempty" validate:"restricted"`
+	MedalVRMLPreseason          bool `json:"rwd_medal_s1_vrml_preseason,omitempty" validate:"restricted"`
+	MedalVRMLS1                 bool `json:"rwd_medal_s1_vrml_s1_user,omitempty" validate:"restricted"`
+	MedalVRMLS1Champion         bool `json:"rwd_medal_s1_vrml_s1_champion,omitempty" validate:"restricted"`
+	MedalVRMLS1Finalist         bool `json:"rwd_medal_s1_vrml_s1_finalist,omitempty" validate:"restricted"`
+	MedalVRMLS2                 bool `json:"rwd_medal_s1_vrml_s2,omitempty" validate:"restricted"`
+	MedalVRMLS2Champion         bool `json:"rwd_medal_s1_vrml_s2_champion,omitempty" validate:"restricted"`
+	MedalVRMLS2Finalist         bool `json:"rwd_medal_s1_vrml_s2_finalist,omitempty" validate:"restricted"`
+	MedalVRMLS3                 bool `json:"rwd_medal_s1_vrml_s3,omitempty" validate:"restricted"`
+	MedalVRMLS3Champion         bool `json:"rwd_medal_s1_vrml_s3_champion,omitempty" validate:"restricted"`
+	MedalVRMLS3Finalist         bool `json:"rwd_medal_s1_vrml_s3_finalist,omitempty" validate:"restricted"`
 	MedalVRMLS4                 bool `json:"rwd_medal_0006,omitempty"  validate:"restricted"`
 	MedalVRMLS4Finalist         bool `json:"rwd_medal_0007,omitempty"  validate:"restricted"`
 	MedalVRMLS4Champion         bool `json:"rwd_medal_0008,omitempty"  validate:"restricted"`
@@ -1206,28 +1288,28 @@ type ArenaUnlocks struct {
 	TagTagUnreleased0024        bool `json:"rwd_tag_0024,omitempty" validate:"blocked"`
 	TagToriA                    bool `json:"rwd_tag_tori_a,omitempty"`
 	TagUnreleased0022           bool `json:"rwd_tag_0022,omitempty" validate:"blocked"`
-	TagVrmlPreseason            bool `json:"rwd_tag_s1_vrml_preseason,omitempty" validate:"restricted"`
-	TagVrmlS1                   bool `json:"rwd_tag_s1_vrml_s1,omitempty" validate:"restricted"`
-	TagVrmlS1Champion           bool `json:"rwd_tag_s1_vrml_s1_champion,omitempty" validate:"restricted"`
-	TagVrmlS1Finalist           bool `json:"rwd_tag_s1_vrml_s1_finalist,omitempty" validate:"restricted"`
-	TagVrmlS2                   bool `json:"rwd_tag_s1_vrml_s2,omitempty" validate:"restricted"`
-	TagVrmlS2Champion           bool `json:"rwd_tag_s1_vrml_s2_champion,omitempty" validate:"restricted"`
-	TagVrmlS2Finalist           bool `json:"rwd_tag_s1_vrml_s2_finalist,omitempty" validate:"restricted"`
-	TagVrmlS3                   bool `json:"rwd_tag_s1_vrml_s3,omitempty" validate:"restricted"`
-	TagVrmlS3Champion           bool `json:"rwd_tag_s1_vrml_s3_champion,omitempty" validate:"restricted"`
-	TagVrmlS3Finalist           bool `json:"rwd_tag_s1_vrml_s3_finalist,omitempty" validate:"restricted"`
-	TagVrmlS4                   bool `json:"rwd_tag_0008,omitempty" validate:"restricted"`
-	TagVrmlS4Champion           bool `json:"rwd_tag_0010,omitempty" validate:"restricted"`
-	TagVrmlS4Finalist           bool `json:"rwd_tag_0009,omitempty" validate:"restricted"`
-	TagVrmlS5                   bool `json:"rwd_tag_0035,omitempty" validate:"restricted"`
-	TagVrmlS5Champion           bool `json:"rwd_tag_0037,omitempty" validate:"restricted"`
-	TagVrmlS5Finalist           bool `json:"rwd_tag_0036,omitempty" validate:"restricted"`
-	TagVrmlS6                   bool `json:"rwd_tag_0040,omitempty" validate:"restricted"`
-	TagVrmlS6Champion           bool `json:"rwd_tag_0042,omitempty" validate:"restricted"`
-	TagVrmlS6Finalist           bool `json:"rwd_tag_0041,omitempty" validate:"restricted"`
-	TagVrmlS7                   bool `json:"rwd_tag_0043,omitempty" validate:"restricted"`
-	TagVrmlS7Champion           bool `json:"rwd_tag_0045,omitempty" validate:"restricted"`
-	TagVrmlS7Finalist           bool `json:"rwd_tag_0044,omitempty" validate:"restricted"`
+	TagVRMLPreseason            bool `json:"rwd_tag_s1_vrml_preseason,omitempty" validate:"restricted"`
+	TagVRMLS1                   bool `json:"rwd_tag_s1_vrml_s1,omitempty" validate:"restricted"`
+	TagVRMLS1Champion           bool `json:"rwd_tag_s1_vrml_s1_champion,omitempty" validate:"restricted"`
+	TagVRMLS1Finalist           bool `json:"rwd_tag_s1_vrml_s1_finalist,omitempty" validate:"restricted"`
+	TagVRMLS2                   bool `json:"rwd_tag_s1_vrml_s2,omitempty" validate:"restricted"`
+	TagVRMLS2Champion           bool `json:"rwd_tag_s1_vrml_s2_champion,omitempty" validate:"restricted"`
+	TagVRMLS2Finalist           bool `json:"rwd_tag_s1_vrml_s2_finalist,omitempty" validate:"restricted"`
+	TagVRMLS3                   bool `json:"rwd_tag_s1_vrml_s3,omitempty" validate:"restricted"`
+	TagVRMLS3Champion           bool `json:"rwd_tag_s1_vrml_s3_champion,omitempty" validate:"restricted"`
+	TagVRMLS3Finalist           bool `json:"rwd_tag_s1_vrml_s3_finalist,omitempty" validate:"restricted"`
+	TagVRMLS4                   bool `json:"rwd_tag_0008,omitempty" validate:"restricted"`
+	TagVRMLS4Champion           bool `json:"rwd_tag_0010,omitempty" validate:"restricted"`
+	TagVRMLS4Finalist           bool `json:"rwd_tag_0009,omitempty" validate:"restricted"`
+	TagVRMLS5                   bool `json:"rwd_tag_0035,omitempty" validate:"restricted"`
+	TagVRMLS5Champion           bool `json:"rwd_tag_0037,omitempty" validate:"restricted"`
+	TagVRMLS5Finalist           bool `json:"rwd_tag_0036,omitempty" validate:"restricted"`
+	TagVRMLS6                   bool `json:"rwd_tag_0040,omitempty" validate:"restricted"`
+	TagVRMLS6Champion           bool `json:"rwd_tag_0042,omitempty" validate:"restricted"`
+	TagVRMLS6Finalist           bool `json:"rwd_tag_0041,omitempty" validate:"restricted"`
+	TagVRMLS7                   bool `json:"rwd_tag_0043,omitempty" validate:"restricted"`
+	TagVRMLS7Champion           bool `json:"rwd_tag_0045,omitempty" validate:"restricted"`
+	TagVRMLS7Finalist           bool `json:"rwd_tag_0044,omitempty" validate:"restricted"`
 	Tint0000                    bool `json:"rwd_tint_0000,omitempty"`
 	Tint0001                    bool `json:"rwd_tint_0001,omitempty"`
 	Tint0002                    bool `json:"rwd_tint_0002,omitempty"`
@@ -1419,36 +1501,15 @@ type CombatUnlocks struct {
 	TitleTitleB          bool `json:"rwd_title_title_b,omitempty"`
 }
 
-func NewServerProfile() *ServerProfile {
+func NewServerProfile() ServerProfile {
 	// This is the default server profile that EchoVR shipped with.
-	return &ServerProfile{
+	return ServerProfile{
 		PurchasedCombat: 1,
 		SchemaVersion:   4,
 		EquippedCosmetics: EquippedCosmetics{
 			Instances: CosmeticInstances{
 				Unified: UnifiedCosmeticInstance{
-					Slots: CosmeticLoadout{
-						Emote:          "emote_blink_smiley_a",
-						Decal:          "decal_default",
-						Tint:           "tint_neutral_a_default",
-						TintAlignmentA: "tint_blue_a_default",
-						TintAlignmentB: "tint_orange_a_default",
-						Pattern:        "pattern_default",
-						Pip:            "rwd_decalback_default",
-						Chassis:        "rwd_chassis_body_s11_a",
-						Bracer:         "rwd_bracer_default",
-						Booster:        "rwd_booster_default",
-						Title:          "rwd_title_title_default",
-						Tag:            "rwd_tag_s1_a_secondary",
-						Banner:         "rwd_banner_s1_default",
-						Medal:          "rwd_medal_default",
-						GoalFx:         "rwd_goal_fx_default",
-						SecondEmote:    "emote_blink_smiley_a",
-						Emissive:       "emissive_default",
-						TintBody:       "tint_neutral_a_default",
-						PatternBody:    "pattern_default",
-						DecalBody:      "decal_default",
-					},
+					Slots: DefaultCosmeticLoadout(),
 				},
 			},
 			Number: 1,
@@ -1503,7 +1564,7 @@ func NewServerProfile() *ServerProfile {
 				ChassisBodyS10A: true,
 			},
 		},
-		EchoUserIdToken: "default_battlepass",
+		EvrID: EvrIdNil,
 	}
 }
 
@@ -1525,8 +1586,9 @@ func (s *ServerProfile) DisableRestrictedCosmetics() error {
 	return nil
 }
 
-func NewClientProfile() *ClientProfile {
-	return &ClientProfile{
+func NewClientProfile() ClientProfile {
+
+	return ClientProfile{
 
 		CombatWeapon:       "assault",
 		CombatGrenade:      "det",
@@ -1564,11 +1626,11 @@ func NewClientProfile() *ClientProfile {
 	}
 }
 
-func DefaultGameProfiles(xplatformid *EvrId, displayname string) (GameProfiles, error) {
+func DefaultGameProfiles(evrID EvrId, displayname string) (GameProfiles, error) {
 	client := NewClientProfile()
 	server := NewServerProfile()
-	client.EchoUserIdToken = xplatformid.String()
-	server.EchoUserIdToken = xplatformid.String()
+	client.EvrID = evrID
+	server.EvrID = evrID
 	client.DisplayName = displayname
 	server.DisplayName = displayname
 

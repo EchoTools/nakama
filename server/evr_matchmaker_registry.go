@@ -404,7 +404,7 @@ func keyToIP(key string) net.IP {
 
 func (mr *MatchmakingRegistry) matchedEntriesFn(entries [][]*MatchmakerEntry) {
 	// Get the matchmaking config from the storage
-	config, err := mr.LoadMatchmakingSettings(mr.ctx, SystemUserId)
+	config, err := mr.LoadMatchmakingSettings(mr.ctx, SystemUserID)
 	if err != nil {
 		mr.logger.Error("Failed to load matchmaking config", zap.Error(err))
 		return
