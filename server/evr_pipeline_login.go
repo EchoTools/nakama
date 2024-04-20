@@ -445,12 +445,13 @@ func (p *EvrPipeline) updateClientProfileRequest(ctx context.Context, logger *za
 func (p *EvrPipeline) remoteLogSetv3(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.RemoteLogSet)
 	if session.userID == uuid.Nil {
-		return fmt.Errorf("session is not authenticated.")
+		return fmt.Errorf("session is not authenticated")
 	}
 
 	evrID, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
 	if !ok {
-		return fmt.Errorf("evrId not found in context")
+		logger.Debug("evrId not found in context")
+
 	}
 
 	for _, l := range request.Logs {

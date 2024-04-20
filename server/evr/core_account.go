@@ -238,7 +238,7 @@ type DeveloperFeatures struct {
 // Return nil if DeveloperFeatures is empty
 func (f *DeveloperFeatures) MarshalJSON() ([]byte, error) {
 	if !f.DisableAfkTimeout && f.EvrIDOverride.Equals(&EvrIdNil) {
-		return []byte("{}"), nil
+		return []byte("null"), nil
 	}
 	devmap := make(map[string]interface{})
 	if f.DisableAfkTimeout {
@@ -502,7 +502,9 @@ func (c CosmeticLoadout) ToMap() map[string]string {
 	v := reflect.ValueOf(c)
 	t := v.Type()
 	for i := 0; i < v.NumField(); i++ {
-		m[t.Field(i).Tag.Get("json")] = v.Field(i).String()
+		tag := t.Field(i).Tag.Get("json")
+		s := strings.SplitN(tag, ",", 2)[0]
+		m[s] = v.Field(i).String()
 	}
 	return m
 }
@@ -511,7 +513,9 @@ func (c *CosmeticLoadout) FromMap(m map[string]string) {
 	v := reflect.ValueOf(c).Elem()
 	t := v.Type()
 	for i := 0; i < v.NumField(); i++ {
-		if val, ok := m[t.Field(i).Tag.Get("json")]; ok {
+		tag := t.Field(i).Tag.Get("json")
+		s := strings.SplitN(tag, ",", 2)[0]
+		if val, ok := m[s]; ok {
 			v.Field(i).SetString(val)
 		}
 	}
@@ -530,13 +534,17 @@ func (u *UnlockedCosmetics) ToMap() map[string]map[string]bool {
 	arena := reflect.ValueOf(u.Arena)
 	arenaType := arena.Type()
 	for i := 0; i < arena.NumField(); i++ {
-		m["arena"][arenaType.Field(i).Tag.Get("json")] = arena.Field(i).Bool()
+		tag := arenaType.Field(i).Tag.Get("json")
+		s := strings.SplitN(tag, ",", 2)[0]
+		m["arena"][s] = arena.Field(i).Bool()
 	}
 
 	combat := reflect.ValueOf(u.Combat)
-	combatType := combat.Type()
+	t := combat.Type()
 	for i := 0; i < combat.NumField(); i++ {
-		m["combat"][combatType.Field(i).Tag.Get("json")] = combat.Field(i).Bool()
+		tag := t.Field(i).Tag.Get("json")
+		s := strings.SplitN(tag, ",", 2)[0]
+		m["combat"][s] = combat.Field(i).Bool()
 	}
 
 	return m

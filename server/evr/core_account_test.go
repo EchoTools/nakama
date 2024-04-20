@@ -123,7 +123,7 @@ func TestDeveloperFeatures_MarshalJSON(t *testing.T) {
 				DisableAfkTimeout: false,
 				EvrIDOverride:     EvrId{PlatformCode: 0, AccountId: 0},
 			},
-			want:    []byte(`{}`),
+			want:    []byte(`null`),
 			wantErr: false,
 		},
 	}
@@ -134,6 +134,7 @@ func TestDeveloperFeatures_MarshalJSON(t *testing.T) {
 				EvrIDOverride:     tt.fields.EvrIDOverride,
 			}
 			got, err := f.MarshalJSON()
+
 			if (err != nil) != tt.wantErr {
 				t.Errorf("DeveloperFeatures.MarshalJSON() error = %v, wantErr %v", err, tt.wantErr)
 				return
