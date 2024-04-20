@@ -54,3 +54,103 @@ func TestEvrId_UUID(t *testing.T) {
 		})
 	}
 }
+
+func TestEvrId_Equal(t *testing.T) {
+
+	evrID1 := EvrId{
+		PlatformCode: 1,
+		AccountId:    1,
+	}
+	evrID2 := EvrId{
+		PlatformCode: 1,
+		AccountId:    1,
+	}
+
+	if evrID1 != evrID2 {
+		t.Errorf("EvrId.Equal() = %v, want %v", evrID1, evrID2)
+	}
+}
+
+func TestEvrId_Equals(t *testing.T) {
+	type fields struct {
+		PlatformCode PlatformCode
+		AccountId    uint64
+	}
+	type args struct {
+		other *EvrId
+	}
+	tests := []struct {
+		name   string
+		fields fields
+		args   args
+		want   bool
+	}{
+		{
+			name: "valid",
+			fields: fields{
+				PlatformCode: 1,
+				AccountId:    1,
+			},
+			args: args{
+				&EvrId{
+					PlatformCode: 1,
+					AccountId:    1,
+				},
+			},
+			want: true,
+		},
+		{
+			name: "invalid PlatformCode",
+			fields: fields{
+				PlatformCode: 0,
+				AccountId:    1,
+			},
+			args: args{
+				&EvrId{
+					PlatformCode: 1,
+					AccountId:    1,
+				},
+			},
+			want: false,
+		},
+		{
+			name: "invalid AccountId",
+			fields: fields{
+				PlatformCode: 1,
+				AccountId:    0,
+			},
+			args: args{
+				&EvrId{
+					PlatformCode: 1,
+					AccountId:    1,
+				},
+			},
+			want: false,
+		},
+		{
+			name: "invalid",
+			fields: fields{
+				PlatformCode: 1,
+				AccountId:    1,
+			},
+			args: args{
+				&EvrId{
+					PlatformCode: 2,
+					AccountId:    2,
+				},
+			},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			xpi := &EvrId{
+				PlatformCode: tt.fields.PlatformCode,
+				AccountId:    tt.fields.AccountId,
+			}
+			if got := xpi.Equals(tt.args.other); got != tt.want {
+				t.Errorf("EvrId.Equals() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

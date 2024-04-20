@@ -20,7 +20,7 @@ const (
 )
 
 type RemoteLogSet struct {
-	UserId   EvrId
+	EvrID    EvrId
 	Unk0     uint64
 	Unk1     uint64
 	Unk2     uint64
@@ -38,13 +38,13 @@ func (m RemoteLogSet) Symbol() Symbol {
 }
 
 func (m RemoteLogSet) String() string {
-	return fmt.Sprintf("SNSRemoteLogSetv3 {EvrId=%s,LogLevel=%d, Logs=%d}", m.UserId.String(), m.LogLevel, len(m.Logs))
+	return fmt.Sprintf("SNSRemoteLogSetv3 {EvrId=%s,LogLevel=%d, Logs=%d}", m.EvrID.String(), m.LogLevel, len(m.Logs))
 }
 
 func (m *RemoteLogSet) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.UserId.PlatformCode) },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.UserId.AccountId) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.EvrID.PlatformCode) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.EvrID.AccountId) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Unk0) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Unk1) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Unk2) },

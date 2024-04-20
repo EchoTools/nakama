@@ -615,21 +615,22 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 
 	// If this is a NoVR user, give the profile's displayName a bot suffix
 	// Get the NoVR key from context
-	novr, ok := ctx.Value(ctxNoVRKey{}).(bool)
-	if !ok {
-		novr = false
-	}
-	if novr {
-		botsuffix := " d[ o_0 ]b"
-		// Extend the display name with the bot suffix
-		displayName = fmt.Sprintf("%s%21s", displayName, botsuffix)
+	if novr, ok := ctx.Value(ctxNoVRKey{}).(bool); ok && novr {
+		displayName = "d[o_0]b " + displayName
 	}
 
-	// right align the bot suffix to 30 characters
 	// Set the profile's display name.
-	profile := p.profileRegistry.GetProfile(session.UserID())
-	if profile != nil {
-		profile.UpdateDisplayName(displayName)
+	profile, found := p.profileRegistry.Load(session.UserID(), evrID)
+	if !found {
+		defer session.Close("profile not found", runtime.PresenceReasonUnknown)
+		return fmt.Errorf("profile not found: %s", session.UserID())
+	}
+
+	profile.UpdateDisplayName(displayName)
+	// Add the user's profile to the cache (by EvrID)
+	err = p.profileRegistry.Cache(profile.GetServer())
+	if err != nil {
+		logger.Warn("Failed to add profile to cache", zap.Error(err))
 	}
 
 	// TODO FIXME Get the party id if the player is in a party
@@ -647,7 +648,7 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 		SessionID:     session.id,
 		Username:      session.Username(),
 		DisplayName:   displayName,
-		EvrId:         evrID,
+		EvrID:         evrID,
 		PlayerSession: uuid.Must(uuid.NewV4()),
 		TeamIndex:     int(teamIndex),
 		DiscordID:     discordID,
@@ -680,11 +681,6 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 		}
 	}
 
-	// Add the user's profile to the cache
-	err = p.profileRegistry.SetProfileByEvrID(evrID, profile.GetServer())
-	if err != nil {
-		logger.Warn("Failed to set profile by match id", zap.Error(err))
-	}
 	if isNew {
 		// Trigger the MatchJoin event.
 		stream := PresenceStream{Mode: StreamModeMatchAuthoritative, Subject: matchID, Label: p.node}

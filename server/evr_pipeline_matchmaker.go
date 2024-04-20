@@ -61,6 +61,7 @@ func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logg
 			logger.Warn("Failed to find older session to disconnect", zap.String("other_sid", foundSessionID.String()))
 			continue
 		}
+		// Send an error
 		fs.Close("New session started", runtime.PresenceReasonDisconnect)
 	}
 
@@ -102,16 +103,20 @@ func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logg
 	return true, nil
 }
 func (p *EvrPipeline) matchmakingLabelFromFindRequest(ctx context.Context, session *sessionWS, request *evr.LobbyFindSessionRequest) (*EvrMatchState, error) {
+	// Get the EvrID from the context (ignoring the request)
+	evrID, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
+	if !ok {
+		return nil, fmt.Errorf("failed to get evrID from context")
+	}
+
 	// If the channel is nil, use the players profile channel
 	channel := request.Channel
 	if channel == uuid.Nil {
-		profile := p.profileRegistry.GetProfile(session.userID)
-		if profile == nil {
+		profile, ok := p.profileRegistry.Load(session.userID, evrID)
+		if !ok {
 			return nil, status.Errorf(codes.Internal, "Failed to get players profile")
 		}
-		profile.RLock()
 		channel = profile.GetChannel()
-		profile.RUnlock()
 	}
 
 	// Set the channels this player is allowed to matchmake/create a match on.
@@ -539,14 +544,17 @@ func (p *EvrPipeline) lobbyPingResponse(ctx context.Context, logger *zap.Logger,
 }
 
 func (p *EvrPipeline) GetGuildPriorityList(ctx context.Context, userID uuid.UUID) (all []uuid.UUID, selected []uuid.UUID, err error) {
+	evrID, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
+	if !ok {
+		return nil, nil, fmt.Errorf("failed to get evrID from context")
+	}
 
-	profile := p.profileRegistry.GetProfile(userID)
-	if profile == nil {
+	profile, ok := p.profileRegistry.Load(userID, evrID)
+	if !ok {
 		return nil, nil, status.Errorf(codes.Internal, "Failed to get players profile")
 	}
-	profile.RLock()
+
 	currentChannel := profile.GetChannel()
-	profile.RUnlock()
 
 	// Get the guild priority from the context
 	groups, err := p.discordRegistry.GetGuildGroups(ctx, userID)

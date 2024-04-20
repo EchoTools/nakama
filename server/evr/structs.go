@@ -36,7 +36,7 @@ type Chunk struct {
 		ChannelInfoResponse                *ChannelInfoResponse               `struct-case:"0x6c8f16cd9f8964c5" json:",omitempty"`
 		LobbySessionSuccessv4              *LobbySessionSuccessv4             `struct-case:"0x6d4de3650ee3110e" json:",omitempty"`
 		LobbySessionSuccessv5              *LobbySessionSuccessv5             `struct-case:"0x6d4de3650ee3110f" json:",omitempty"`
-		UpdateProfile                      *UpdateProfile                     `struct-case:"0x6d54a19a3ff24415" json:",omitempty"`
+		UpdateProfile                      *UpdateClientProfile               `struct-case:"0x6d54a19a3ff24415" json:",omitempty"`
 		BroadcasterStartSession            *BroadcasterStartSession           `struct-case:"0x7777777777770000" json:",omitempty"`
 		GameServerSessionStarted           *BroadcasterSessionStarted         `struct-case:"0x7777777777770100" json:",omitempty"`
 		BroadcasterSessionEnded            *BroadcasterSessionEnded           `struct-case:"0x7777777777770200" json:",omitempty"`

@@ -135,7 +135,7 @@ func (p *EvrMatchPresence) String() string {
 		DisplayName string `json:"displayname,omitempty"`
 		EvrId       string `json:"evrid,omitempty"`
 		TeamIndex   int    `json:"team,omitempty"`
-	}{p.UserID.String(), p.DisplayName, p.EvrId.Token(), p.TeamIndex})
+	}{p.UserID.String(), p.DisplayName, p.EvrID.Token(), p.TeamIndex})
 	if err != nil {
 		return ""
 	}
@@ -167,7 +167,7 @@ func (p *EvrMatchPresence) GetReason() runtime.PresenceReason {
 	return p.Reason
 }
 func (p *EvrMatchPresence) GetEvrId() string {
-	return p.EvrId.Token()
+	return p.EvrID.Token()
 }
 
 func (p *EvrMatchPresence) GetPlayerSession() string {

@@ -32,8 +32,8 @@ type EvrId struct {
 	AccountId    uint64
 }
 
-func (e EvrId) MarshalJSON() ([]byte, error) {
-	return json.Marshal(e.Token())
+func (e EvrId) MarshalText() ([]byte, error) {
+	return []byte(e.Token()), nil
 }
 
 func (e *EvrId) UnmarshalJSON(b []byte) error {
