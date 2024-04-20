@@ -41,6 +41,8 @@ type DiscordAppBot struct {
 
 	discordRegistry DiscordRegistry
 	dg              *discordgo.Session
+
+	userID string // Nakama UserID of the bot
 }
 
 func NewDiscordAppBot(nk runtime.NakamaModule, logger runtime.Logger, metrics Metrics, pipeline *Pipeline, config Config, discordRegistry DiscordRegistry, dg *discordgo.Session) *DiscordAppBot {
@@ -365,11 +367,11 @@ func (d *DiscordAppBot) InitializeDiscordBot() error {
 
 	bot.AddHandler(func(s *discordgo.Session, m *discordgo.Ready) {
 		// Create a user for the bot based on it's discord profile
-		_, _, _, err := nk.AuthenticateCustom(ctx, m.User.ID, s.State.User.Username, true)
+		userID, _, _, err := nk.AuthenticateCustom(ctx, m.User.ID, s.State.User.Username, true)
 		if err != nil {
 			logger.Error("Error creating discordbot user: %s", err)
 		}
-
+		d.userID = userID
 		// Synchronize the guilds with nakama groups
 		logger.Info("Bot is in %d guilds", len(s.State.Guilds))
 		for _, g := range m.Guilds {
@@ -380,7 +382,7 @@ func (d *DiscordAppBot) InitializeDiscordBot() error {
 			}
 
 			if err := d.discordRegistry.SynchronizeGroup(ctx, g); err != nil {
-				logger.Error("Error synchronizing group: %w", err)
+				logger.Error("Error synchronizing group: %s", err.Error())
 				return
 			}
 		}
