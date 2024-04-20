@@ -596,7 +596,7 @@ func (p *EvrPipeline) GetGuildPriorityList(ctx context.Context, userID uuid.UUID
 			}
 		}
 	}
-
+	p.logger.Debug("guild priorites", zap.Any("prioritized", guildPriority), zap.Any("all", groupIDs))
 	return groupIDs, selected, nil
 }
 

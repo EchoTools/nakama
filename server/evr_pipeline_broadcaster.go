@@ -180,7 +180,7 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 	go func() {
 		// Every 10 seconds, check that this broadcaster is a member of a match
 		// If not, disconnect the broadcaster
-		ticker := time.NewTicker(10 * time.Second)
+		ticker := time.NewTicker(60 * time.Second)
 		defer ticker.Stop()
 
 		for {

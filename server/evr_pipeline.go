@@ -186,7 +186,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 
 	// Create a timer to periodically clear the backfill queue
 	go func() {
-		interval := 5 * time.Minute
+		interval := 3 * time.Minute
 		ticker := time.NewTicker(interval)
 		for {
 			select {
@@ -199,6 +199,38 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 					if value.TryLock() {
 						evrPipeline.backfillQueue.Delete(key)
 						value.Unlock()
+					}
+					return true
+				})
+
+				evrPipeline.broadcasterRegistrationBySession.Range(func(key string, value *MatchBroadcaster) bool {
+					if sessionRegistry.Get(uuid.FromStringOrNil(value.SessionID)) == nil {
+						logger.Debug("Housekeeping: Session not found for broadcaster", zap.String("sessionID", value.SessionID))
+						evrPipeline.broadcasterRegistrationBySession.Delete(key)
+					}
+					return true
+				})
+
+				evrPipeline.loginSessionByEvrID.Range(func(key string, value *sessionWS) bool {
+					if sessionRegistry.Get(value.ID()) == nil {
+						logger.Debug("Housekeeping: Session not found for evrID", zap.String("evrID", key))
+						evrPipeline.loginSessionByEvrID.Delete(key)
+					}
+					return true
+				})
+
+				evrPipeline.matchBySessionID.Range(func(key string, value string) bool {
+					if sessionRegistry.Get(uuid.FromStringOrNil(key)) == nil {
+						logger.Debug("Housekeeping: Session not found for matchID", zap.String("matchID", value))
+						evrPipeline.matchBySessionID.Delete(key)
+					}
+					return true
+				})
+
+				evrPipeline.matchByEvrID.Range(func(key string, value string) bool {
+					if match, _, _ := matchRegistry.GetMatch(ctx, value); match == nil {
+						logger.Debug("Housekeeping: Match not found for evrID", zap.String("evrID", key), zap.String("matchID", value))
+						evrPipeline.matchByEvrID.Delete(key)
 					}
 					return true
 				})
