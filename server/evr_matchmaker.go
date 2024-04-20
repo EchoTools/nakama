@@ -218,7 +218,7 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 		},
 	}
 	// Load the global matchmaking config
-	gconfig, err := p.matchmakingRegistry.LoadMatchmakingSettings(ctx, SystemUserId)
+	gconfig, err := p.matchmakingRegistry.LoadMatchmakingSettings(ctx, SystemUserID)
 	if err != nil {
 		return "", status.Errorf(codes.Internal, "Failed to load global matchmaking config: %v", err)
 	}
@@ -559,6 +559,13 @@ func (p *EvrPipeline) MatchCreate(ctx context.Context, session *sessionWS, msess
 	parkingMatchId := fmt.Sprintf("%s.%s", match.MatchID, p.node)
 
 	label.SpawnedBy = session.UserID().String()
+
+	// Prepare the match
+	_, err = SignalMatch(ctx, p.matchRegistry, parkingMatchId, SignalPrepareSession, label)
+	if err != nil {
+		return "", fmt.Errorf("failed to load level: %v", err)
+	}
+
 	// Instruct the server to load the level
 	_, err = SignalMatch(ctx, p.matchRegistry, parkingMatchId, SignalStartSession, label)
 	if err != nil {

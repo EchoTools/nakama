@@ -418,31 +418,31 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 		logger.Error("Failed to load matchmaking config", zap.Error(err))
 	}
 
-	matchID := ""
+	matchToken := ""
 	// Check for a direct match first
-	if config.NextMatchID != "" {
-		matchID = config.NextMatchID
+	if config.NextMatchToken != "" {
+		matchToken = config.NextMatchToken.String()
 	}
 
-	config.NextMatchID = ""
+	config.NextMatchToken = ""
 	err = p.matchmakingRegistry.storeMatchmakingConfig(msession.Ctx, config, session.userID.String())
 	if err != nil {
 		logger.Error("Failed to save matchmaking config", zap.Error(err))
 	}
 
-	if matchID != "" {
-		logger.Debug("Attempting to join match from settings", zap.String("mid", matchID))
-		match, _, err := p.matchRegistry.GetMatch(msession.Ctx, matchID)
+	if matchToken != "" {
+		logger.Debug("Attempting to join match from settings", zap.String("mid", matchToken))
+		match, _, err := p.matchRegistry.GetMatch(msession.Ctx, matchToken)
 		if err != nil {
 			logger.Error("Failed to get match", zap.Error(err))
 		} else {
 			if match == nil {
-				logger.Warn("Match not found", zap.String("mid", matchID))
+				logger.Warn("Match not found", zap.String("mid", matchToken))
 			} else {
 				p.metrics.CustomCounter("matchmaking_direct_match", map[string]string{}, 1)
 				// Join the match
 				msession.MatchJoinCh <- FoundMatch{
-					MatchID:   matchID,
+					MatchID:   matchToken,
 					Query:     "",
 					TeamIndex: TeamIndex(evr.TeamUnassigned),
 				}

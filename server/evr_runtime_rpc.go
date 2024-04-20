@@ -660,3 +660,104 @@ func BanUserRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runti
 
 	return "{}", nil
 }
+
+type PrepareMatchRPCRequest struct {
+	MatchToken      MatchToken           `json:"match_token"`      // Parking match to signal
+	LobbyType       LobbyType            `json:"lobby_type"`       // Lobby type to set the match to
+	Mode            evr.SymbolToken      `json:"mode"`             // Mode to set the match to
+	TeamSize        int                  `json:"team_size"`        // Team size to set the match to
+	Level           evr.SymbolToken      `json:"level"`            // Level to set the match to
+	SessionSettings evr.SessionSettings  `json:"session_settings"` // Session settings to set the match to
+	Players         map[string]TeamIndex `json:"team_alignments"`  // Team alignments to set the match to (discord username -> team index))
+	SignalPayload   string               `json:"signal_payload"`   // A signal payload to send to the match unmodified
+}
+
+type PrepareMatchRPCResponse struct {
+	MatchToken    MatchToken    `json:"match_token"`
+	Signal        EvrSignal     `json:"signal,omitempty"`
+	SignalPayload string        `json:"signal_payload,omitempty"`
+	Success       bool          `json:"success"`
+	Message       string        `json:"message"`
+	MatchLabel    EvrMatchState `json:"match_label"`
+}
+
+func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	// Get the UserID from the context
+	userID := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+
+	request := &PrepareMatchRPCRequest{}
+	if err := json.Unmarshal([]byte(payload), request); err != nil {
+		return "", err
+	}
+	matchToken := request.MatchToken
+
+	response := PrepareMatchRPCResponse{
+		MatchToken:    matchToken,
+		SignalPayload: request.SignalPayload,
+	}
+
+	signalPayload := request.SignalPayload
+	if signalPayload == "" {
+		state := &EvrMatchState{}
+
+		state.LobbyType = request.LobbyType
+		state.Mode = request.Mode.Symbol()
+		state.TeamSize = request.TeamSize
+		state.Level = request.Level.Symbol()
+		state.SessionSettings = &request.SessionSettings
+		state.SpawnedBy = userID
+		state.MaxSize = MatchMaxSize
+
+		// Prepare the session for the match.
+		data, err := json.MarshalIndent(state, "", "  ")
+		if err != nil {
+			return "", err
+		}
+
+		signal := EvrSignal{
+			Signal: SignalPrepareSession,
+			Data:   data,
+		}
+		data, err = json.MarshalIndent(signal, "", "  ")
+		if err != nil {
+			return "", fmt.Errorf("failed to marshal match signal: %v", err)
+		}
+		signalPayload = string(data)
+	}
+
+	errResponse := func(err error) (string, error) {
+		response.Success = false
+		response.Message = err.Error()
+		data, _ := json.MarshalIndent(response, "", "  ")
+		return string(data), err
+	}
+
+	response.SignalPayload = signalPayload
+	// Send the signal
+	signalResponse, err := nk.MatchSignal(ctx, matchToken.String(), signalPayload)
+	if err != nil {
+		return errResponse(err)
+	}
+	response.Message = signalResponse
+
+	// Get the match label
+	match, err := nk.MatchGet(ctx, matchToken.String())
+	if err != nil {
+		return errResponse(err)
+	}
+
+	if match.Label == nil {
+		return errResponse(fmt.Errorf("match label is nil"))
+	}
+
+	state := EvrMatchState{}
+	if err := json.Unmarshal([]byte(match.Label.GetValue()), &state); err != nil {
+		return errResponse(err)
+	}
+
+	response.MatchLabel = state
+
+	response.Success = true
+	data, _ := json.MarshalIndent(response, "", "  ")
+	return string(data), nil
+}

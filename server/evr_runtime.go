@@ -33,6 +33,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		"link/usernamedevice":  LinkUserIdDeviceRpc,
 		"signin/discord":       DiscordSignInRpc,
 		"match":                MatchRpc,
+		"match/prepare":        PrepareMatchRPC,
 		"link":                 LinkingAppRpc,
 		"evr/servicestatus":    ServiceStatusRpc,
 		"importloadouts":       ImportLoadoutsRpc,
