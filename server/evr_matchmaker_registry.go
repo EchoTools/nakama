@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -162,6 +163,15 @@ type MatchmakingSession struct {
 	Tickets       map[string]TicketMeta // map[ticketId]TicketMeta
 	Party         *PartyHandler
 	LatencyCache  *LatencyCache
+}
+
+func (s *MatchmakingSession) metricsTags() map[string]string {
+	return map[string]string{
+		"type":  s.Label.LobbyType.String(),
+		"mode":  s.Label.Mode.String(),
+		"level": s.Label.Level.String(),
+		"team":  strconv.FormatInt(int64(s.Label.TeamIndex), 10),
+	}
 }
 
 // Cancel cancels the matchmaking session with a given reason, and returns the reason.
@@ -506,7 +516,14 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 			ml.Players = append(ml.Players, pi)
 		}
 	}
-
+	metricsTags := map[string]string{
+		"type":     strconv.FormatInt(int64(ml.LobbyType), 10),
+		"mode":     ml.Mode.String(),
+		"channel":  ml.Channel.String(),
+		"level":    ml.Level.String(),
+		"team_idx": strconv.FormatInt(int64(ml.TeamIndex), 10),
+	}
+	mr.metrics.CustomCounter("matchmaking_matched_participant", metricsTags, int64(len(entrants)))
 	// Find a valid participant to get the label from
 
 	ml.SpawnedBy = uuid.Nil.String()

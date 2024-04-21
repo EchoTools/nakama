@@ -227,7 +227,7 @@ type ServerProfile struct {
 	Achievements      interface{}       `json:"achievements,omitempty"`                         // Achievements
 	RewardState       interface{}       `json:"reward_state,omitempty"`                         // Reward state?
 	// If DeveloperFeatures is not null, the player will have a gold name
-	DeveloperFeatures DeveloperFeatures `json:"dev,omitempty"` // Developer features
+	//DeveloperFeatures DeveloperFeatures `json:"dev,omitempty"` // Developer features
 }
 
 type DeveloperFeatures struct {

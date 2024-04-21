@@ -556,15 +556,24 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		}
 	}
 
+	if mp.TeamIndex, ok = selectTeamForPlayer(logger, mp, state); !ok {
+		// The lobby is full, reject the player.
+		return state, false, ErrJoinRejectedLobbyFull
+	}
+
 	// If the match has been running for less than 15 seconds, or it's a private, check the presets for the team
 	if state.LobbyType == PrivateLobby || time.Since(state.StartedAt) < 15*time.Second {
 		if teamIndex, ok := state.teamAlignments[mp.EvrID]; ok {
-			mp.TeamIndex = teamIndex
-		}
-	} else {
-		if mp.TeamIndex, ok = selectTeamForPlayer(logger, mp, state); !ok {
-			// The lobby is full, reject the player.
-			return state, false, ErrJoinRejectedLobbyFull
+			// Make sure the team isn't already full
+			if mp.TeamIndex == evr.TeamOrange || mp.TeamIndex == evr.TeamBlue {
+				teams := lo.GroupBy(lo.Values(state.presences), func(p *EvrMatchPresence) int { return p.TeamIndex })
+				if len(teams[teamIndex]) <= state.TeamSize {
+					// Only change it if it here is room on the team.
+					if len(teams[teamIndex]) < state.TeamSize {
+						mp.TeamIndex = teamIndex
+					}
+				}
+			}
 		}
 	}
 	// Reserve this player's spot in the match.

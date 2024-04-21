@@ -97,10 +97,11 @@ func (p *GameProfileData) UpdateDisplayName(displayName string) {
 
 }
 
-func (p *GameProfileData) SetAFKTimeout(enable bool) {
-	p.Server.DeveloperFeatures.DisableAfkTimeout = enable
-}
-
+/*
+	func (p *GameProfileData) SetAFKTimeout(enable bool) {
+		p.Server.DeveloperFeatures.DisableAfkTimeout = enable
+	}
+*/
 func (r *GameProfileData) UpdateUnlocks(unlocks evr.UnlockedCosmetics) error {
 	// Validate the unlocks
 	/*
@@ -290,7 +291,7 @@ func (r *ProfileRegistry) Store(userID uuid.UUID, p GameProfileData) error {
 // Save the profile from memory (and store it)
 func (r *ProfileRegistry) Save(userID uuid.UUID) {
 	// Lock to avoid a read while the profile is being stored
-	profile, loaded := r.store.Load(userID.String())
+	profile, loaded := r.store.LoadAndDelete(userID.String())
 	if !loaded {
 		r.logger.Warn("Profile not loaded", zap.String("user_id", userID.String()))
 		return
@@ -348,15 +349,15 @@ func (r *ProfileRegistry) save(ctx context.Context, userID uuid.UUID, profile *G
 		return err
 	}
 
-	if _, err := r.nk.StorageWrite(ctx, []*runtime.StorageWrite{
+	_, err = r.nk.StorageWrite(ctx, []*runtime.StorageWrite{
 		{
 			Collection: GameProfileStorageCollection,
 			Key:        GameProfileStorageKey,
 			UserID:     userID.String(),
 			Value:      string(b),
-			Version:    profile.version,
 		},
-	}); err != nil {
+	})
+	if err != nil {
 		return err
 	}
 
@@ -656,11 +657,11 @@ func (r *ProfileRegistry) UpdateEntitledCosmetics(ctx context.Context, userID uu
 	if err != nil {
 		return fmt.Errorf("failed to update unlocks: %w", err)
 	}
-
-	if err := enforceLoadoutEntitlements(r.logger, &profile.Server.EquippedCosmetics.Instances.Unified.Slots, &profile.Server.UnlockedCosmetics, r.defaults); err != nil {
-		return fmt.Errorf("failed to set loadout entitlement: %w", err)
-	}
-
+	/*
+		if err := enforceLoadoutEntitlements(r.logger, &profile.Server.EquippedCosmetics.Instances.Unified.Slots, &profile.Server.UnlockedCosmetics, r.defaults); err != nil {
+			return fmt.Errorf("failed to set loadout entitlement: %w", err)
+		}
+	*/
 	return nil
 }
 

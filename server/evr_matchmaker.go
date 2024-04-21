@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	MatchJoinGracePeriod = 5 * time.Second
+	MatchJoinGracePeriod = 3 * time.Second
 )
 
 var (
@@ -235,7 +235,7 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 
 	if config.GroupID != "" {
 		partyRegistry := session.pipeline.partyRegistry
-		ph, err := joinPartyGroup(logger, partyRegistry, userID, sessionID.String(), session.Username(), p.node, config.GroupID)
+		ph, err := p.joinPartyGroup(logger, partyRegistry, userID, sessionID.String(), session.Username(), p.node, config.GroupID)
 		if err != nil {
 			logger.Warn("Failed to join party group", zap.String("group_id", config.GroupID), zap.Error(err))
 		} else {
@@ -275,6 +275,13 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 	if !ok {
 		return "", status.Errorf(codes.Internal, "Failed to track user: %v", err)
 	}
+	tags := map[string]string{
+		"type":  msession.Label.LobbyType.String(),
+		"mode":  msession.Label.Mode.String(),
+		"level": msession.Label.Level.String(),
+	}
+
+	p.metrics.CustomCounter("matchmaker_tickets", tags, 1)
 	// Add the user to the matchmaker
 	ticket, _, err = session.matchmaker.Add(ctx, presences, sessionID.String(), pID, query, minCount, maxCount, countMultiple, stringProps, numericProps)
 	if err != nil {
@@ -284,7 +291,7 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 	return ticket, nil
 }
 
-func joinPartyGroup(logger *zap.Logger, partyRegistry PartyRegistry, userID, sessionID, username, node, groupID string) (*PartyHandler, error) {
+func (p *EvrPipeline) joinPartyGroup(logger *zap.Logger, partyRegistry PartyRegistry, userID, sessionID, username, node, groupID string) (*PartyHandler, error) {
 	// Attempt to join the party
 	userPresence := &rtapi.UserPresence{
 		UserId:    userID,
@@ -316,11 +323,13 @@ func joinPartyGroup(logger *zap.Logger, partyRegistry PartyRegistry, userID, ses
 			partyRegistry.Join(partyID, presence)
 			return ph, nil
 		} else {
+			p.metrics.CustomCounter("partyregistry_error_party_full", nil, 1)
 			logger.Warn("Party is full", zap.String("party_id", partyID.String()))
 			return ph, status.Errorf(codes.ResourceExhausted, "Party is full")
 		}
 	} else {
 		// Create the party
+		p.metrics.CustomCounter("partyregistry_create", nil, 1)
 		ph = partyRegistry.Create(true, 8, userPresence)
 		return ph, nil
 	}

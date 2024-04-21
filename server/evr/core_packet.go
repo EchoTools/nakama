@@ -259,7 +259,7 @@ func ParsePacket(data []byte) ([]Message, error) {
 		buf := bytes.NewBuffer(b)
 		// Verify packet length.
 		if buf.Len() < 16 {
-			return nil, errors.Join(ErrInvalidPacket, fmt.Errorf("invalid packet"))
+			return nil, errors.Join(ErrInvalidPacket, ErrInvalidPacket)
 		}
 		// Read the message type and data length.
 		sym := dUint64(buf.Next(8))
