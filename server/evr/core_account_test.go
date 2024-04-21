@@ -7,6 +7,7 @@
 package evr
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 
@@ -97,6 +98,44 @@ func TestGUID_MarshalJSON(t *testing.T) {
 	}
 }
 
+func TestDeveloperFeatures_Omitted_When_Empty(t *testing.T) {
+
+	type testProfile struct {
+		BeforeDev         string            `json:"before_dev,omitempty"`
+		DeveloperFeatures DeveloperFeatures `json:"dev,omitempty"`
+		AfterDev          string            `json:"after_dev,omitempty"`
+	}
+
+	profile := testProfile{
+		BeforeDev: "before",
+		DeveloperFeatures: DeveloperFeatures{
+			DisableAfkTimeout: false,
+			EvrIDOverride: EvrId{
+				PlatformCode: 0,
+				AccountId:    0,
+			},
+		},
+		AfterDev: "after",
+	}
+
+	got, err := json.Marshal(profile)
+	if err != nil {
+		t.Errorf("DeveloperFeatures.MarshalJSON() error = %v", err)
+		return
+	}
+
+	want := `{"before_dev":"before","after_dev":"after"}`
+	var wantErr error = nil
+	if err != wantErr {
+		t.Errorf("DeveloperFeatures.MarshalJSON() error = %v, wantErr %v", err, wantErr)
+		return
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("DeveloperFeatures.MarshalJSON() = `%v`, want `%v`", string(got), string(want))
+	}
+
+}
+
 func TestDeveloperFeatures_MarshalJSON(t *testing.T) {
 	type fields struct {
 		DisableAfkTimeout bool
@@ -109,21 +148,39 @@ func TestDeveloperFeatures_MarshalJSON(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "valid",
+			name: "valid DeveloperFeatures",
 			fields: fields{
-				DisableAfkTimeout: true,
-				EvrIDOverride:     EvrId{PlatformCode: 4, AccountId: 2},
+				DisableAfkTimeout: false,
+				EvrIDOverride: EvrId{
+					PlatformCode: 0,
+					AccountId:    0,
+				},
 			},
-			want:    []byte(`{"disable_afk_timeout":true,"xplatformid":"OVR_ORG-2"}`),
+			want:    []byte(`null`),
 			wantErr: false,
 		},
 		{
-			name: "empty",
+			name: "valid DeveloperFeatures with afk timeout disabled",
 			fields: fields{
-				DisableAfkTimeout: false,
-				EvrIDOverride:     EvrId{PlatformCode: 0, AccountId: 0},
+				DisableAfkTimeout: true,
+				EvrIDOverride: EvrId{
+					PlatformCode: 0,
+					AccountId:    0,
+				},
 			},
-			want:    []byte(`null`),
+			want:    []byte(`{"disable_afk_timeout":true}`),
+			wantErr: false,
+		},
+		{
+			name: "valid DeveloperFeatures with afk timeout disabled and an evr id",
+			fields: fields{
+				DisableAfkTimeout: true,
+				EvrIDOverride: EvrId{
+					PlatformCode: 1,
+					AccountId:    2,
+				},
+			},
+			want:    []byte(`{"disable_afk_timeout":true,"xplatformid":"STM-2"}`),
 			wantErr: false,
 		},
 	}
@@ -134,7 +191,6 @@ func TestDeveloperFeatures_MarshalJSON(t *testing.T) {
 				EvrIDOverride:     tt.fields.EvrIDOverride,
 			}
 			got, err := f.MarshalJSON()
-
 			if (err != nil) != tt.wantErr {
 				t.Errorf("DeveloperFeatures.MarshalJSON() error = %v, wantErr %v", err, tt.wantErr)
 				return

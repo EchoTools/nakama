@@ -33,9 +33,18 @@ type EvrId struct {
 }
 
 func (e EvrId) MarshalText() ([]byte, error) {
+	if e.PlatformCode == 0 && e.AccountId == 0 {
+		return []byte{}, nil
+	}
 	return []byte(e.Token()), nil
 }
 
+func (e EvrId) MarshalJSON() ([]byte, error) {
+	if e.IsNil() {
+		return []byte(`null`), nil
+	}
+	return json.Marshal(e.Token())
+}
 func (e *EvrId) UnmarshalJSON(b []byte) error {
 	var s string
 	if err := json.Unmarshal(b, &s); err != nil {

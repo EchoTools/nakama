@@ -226,29 +226,29 @@ type ServerProfile struct {
 	Social            Social            `json:"social,omitempty"`                               // Social settings
 	Achievements      interface{}       `json:"achievements,omitempty"`                         // Achievements
 	RewardState       interface{}       `json:"reward_state,omitempty"`                         // Reward state?
-	DeveloperFeatures DeveloperFeatures `json:"dev,omitempty"`                                  // Developer features
+	// If DeveloperFeatures is not null, the player will have a gold name
+	DeveloperFeatures DeveloperFeatures `json:"dev,omitempty"` // Developer features
 }
 
 type DeveloperFeatures struct {
-	// WARNING: EchoVR dictates this struct/schema.
 	DisableAfkTimeout bool  `json:"disable_afk_timeout,omitempty"`
 	EvrIDOverride     EvrId `json:"xplatformid,omitempty"`
 }
 
 // Return nil if DeveloperFeatures is empty
-func (f *DeveloperFeatures) MarshalJSON() ([]byte, error) {
-	if !f.DisableAfkTimeout && f.EvrIDOverride.Equals(&EvrIdNil) {
-		return []byte("null"), nil
-	}
-	devmap := make(map[string]interface{})
+func (f DeveloperFeatures) MarshalJSON() ([]byte, error) {
+	// If this doesn't return null, it mark the player as a dev
+	m := make(map[string]interface{}, 2)
 	if f.DisableAfkTimeout {
-		devmap["disable_afk_timeout"] = f.DisableAfkTimeout
+		m["disable_afk_timeout"] = true
 	}
-	if !f.EvrIDOverride.Equals(&EvrIdNil) {
-		devmap["xplatformid"] = f.EvrIDOverride
+	if !f.EvrIDOverride.IsNil() {
+		m["xplatformid"] = f.EvrIDOverride
 	}
-
-	return json.Marshal(devmap)
+	if len(m) == 0 {
+		return []byte(`null`), nil
+	}
+	return json.Marshal(m)
 }
 
 type PlayerStatistics struct {
