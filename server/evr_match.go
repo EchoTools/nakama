@@ -124,6 +124,7 @@ type EvrMatchPresence struct {
 	TeamIndex     int       // the team index the player prefers/has been assigned to.
 	PartyID       uuid.UUID // The party id the player is in.
 	DiscordID     string
+	ClientIP      string
 	Query         string // Matchmaking query used to find this match.
 }
 
@@ -184,6 +185,7 @@ type PlayerInfo struct {
 	DisplayName string    `json:"display_name,omitempty"`
 	EvrID       evr.EvrId `json:"evr_id,omitempty"`
 	Team        TeamIndex `json:"team"`
+	ClientIP    string    `json:"client_ip,omitempty"`
 }
 
 type MatchBroadcaster struct {
@@ -289,6 +291,7 @@ func (s *EvrMatchState) rebuildCache() {
 			DisplayName: presence.DisplayName,
 			EvrID:       presence.EvrID,
 			Team:        TeamIndex(presence.TeamIndex),
+			ClientIP:    presence.ClientIP,
 		}
 
 		s.Players = append(s.Players, playerinfo)
