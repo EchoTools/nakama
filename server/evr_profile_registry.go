@@ -38,7 +38,6 @@ type GameProfileData struct {
 	Client    evr.ClientProfile `json:"client"`
 	Server    evr.ServerProfile `json:"server"`
 	timestamp time.Time         // The time when the profile was last retrieved
-	version   string            // Used to ensure that an updated profile is not overwritten by an older one
 
 }
 
@@ -134,8 +133,6 @@ func (r *GameProfileData) UpdateUnlocks(unlocks evr.UnlockedCosmetics) error {
 
 // ProfileRegistry is a registry of user evr profiles.
 type ProfileRegistry struct {
-	sync.RWMutex
-
 	ctx         context.Context
 	ctxCancelFn context.CancelFunc
 	logger      runtime.Logger
@@ -148,8 +145,8 @@ type ProfileRegistry struct {
 	unlocksByItemName map[string]string
 
 	// Profiles by user ID
-	storeMu sync.RWMutex
-	store   map[string]GameProfileData // map[userID]GameProfileData
+	storeMu  sync.Mutex
+	profiles map[string]GameProfileData // map[userID]GameProfileData
 
 	cacheMu sync.RWMutex
 	// Fast lookup of profiles for players already in matches
@@ -170,8 +167,8 @@ func NewProfileRegistry(nk runtime.NakamaModule, db *sql.DB, logger runtime.Logg
 		nk:              nk,
 		discordRegistry: discordRegistry,
 
-		store: make(map[string]GameProfileData),
-		cache: make(map[evr.EvrId][]byte, 200),
+		profiles: make(map[string]GameProfileData, 200),
+		cache:    make(map[evr.EvrId][]byte, 200),
 
 		unlocksByItemName: unlocksByFieldName,
 		defaults:          generateDefaultLoadoutMap(),
@@ -204,14 +201,28 @@ func (r *ProfileRegistry) Stop() {
 		r.ctxCancelFn()
 	}
 }
-func generateDefaultLoadoutMap() map[string]string {
-	return evr.DefaultCosmeticLoadout().ToMap()
+
+func (r *ProfileRegistry) load(userID uuid.UUID) (GameProfileData, bool) {
+	r.storeMu.Lock()
+	p, ok := r.profiles[userID.String()]
+	r.storeMu.Unlock()
+	return p, ok
 
 }
 
+func (r *ProfileRegistry) store(userID uuid.UUID, profile GameProfileData) {
+	r.storeMu.Lock()
+	r.profiles[userID.String()] = profile
+	r.storeMu.Unlock()
+}
+
+func generateDefaultLoadoutMap() map[string]string {
+	return evr.DefaultCosmeticLoadout().ToMap()
+}
+
 func (r *ProfileRegistry) removeStaleProfiles() error {
-	r.Lock()
-	defer r.Unlock()
+	r.cacheMu.Lock()
+	defer r.cacheMu.Unlock()
 	for evrID := range r.cache {
 		count, err := r.nk.StreamCount(StreamModeEvr, evrID.UUID().String(), svcMatchID.String(), "")
 		if err != nil {
@@ -227,9 +238,9 @@ func (r *ProfileRegistry) removeStaleProfiles() error {
 
 // Fast lookup of profiles for players already in matches
 func (r *ProfileRegistry) GetServerProfileByEvrID(evrID evr.EvrId) (data []byte, found bool) {
-	r.RLock()
+	r.cacheMu.RLock()
 	p, ok := r.cache[evrID]
-	r.RUnlock()
+	r.cacheMu.RUnlock()
 	return p, ok
 }
 
@@ -239,9 +250,9 @@ func (r *ProfileRegistry) Cache(profile evr.ServerProfile) error {
 	if err != nil {
 		return err
 	}
-	r.Lock()
+	r.cacheMu.Lock()
 	r.cache[profile.EvrID] = data
-	r.Unlock()
+	r.cacheMu.Unlock()
 	return nil
 }
 
@@ -256,26 +267,24 @@ func (r *ProfileRegistry) checkDefaultProfile() GameProfileData {
 			Server: evr.NewServerProfile(),
 		}
 	}
-	r.storeMu.Lock()
-	r.store[userID.String()] = profile
-	r.storeMu.Unlock()
+	r.Store(userID, profile)
 	return profile
 }
 
 // Load the user's profile from memory (or storage if not found)
-func (r *ProfileRegistry) Load(userID uuid.UUID, evrID evr.EvrId) (profile GameProfileData, found bool) {
+func (r *ProfileRegistry) Load(userID uuid.UUID, evrID evr.EvrId) (profile GameProfileData, created bool) {
+	var found bool
 	var err error
-	r.storeMu.Lock()
-	profile, found = r.store[userID.String()]
-	defer r.storeMu.Unlock()
+
 	if !found {
 		// (Attempt) to load the profile from storage
 		profile, err = r.retrieve(context.Background(), userID)
 		if err != nil {
-			r.logger.Error("failed to load profile", zap.Error(err))
-			return
+			profile.Client = evr.NewClientProfile()
+			profile.Server = evr.NewServerProfile()
+			return profile, false
 		}
-		r.store[userID.String()] = profile
+		r.store(userID, profile)
 	}
 	profile.SetEvrID(evrID)
 
@@ -291,50 +300,18 @@ var (
 // Set the user's profile in memory
 func (r *ProfileRegistry) Store(userID uuid.UUID, p GameProfileData) error {
 	p.timestamp = time.Now()
-	r.storeMu.Lock()
-	r.store[userID.String()] = p
-	r.storeMu.Unlock()
+	r.store(userID, p)
 	return nil
 }
 
 // Save the profile from memory (and store it)
 func (r *ProfileRegistry) Save(userID uuid.UUID) {
-	// Lock to avoid a read while the profile is being stored
-	u := userID.String()
-	r.storeMu.Lock()
-	defer r.storeMu.Unlock()
-	profile, loaded := r.store[u]
+	profile, loaded := r.load(userID)
 	if !loaded {
-		r.logger.Warn("Profile not in store for %s", userID.String())
-		return
+		r.logger.Warn("Profile not in store for %s, it must have already been saved", userID.String())
 	}
-	delete(r.store, u)
+
 	r.save(context.Background(), userID, &profile)
-}
-
-func (r *ProfileRegistry) LoadOrNew(userID uuid.UUID, evrID evr.EvrId) (profile GameProfileData, created bool) {
-	profile, found := r.Load(userID, evrID)
-	if !found {
-		r.storeMu.Lock()
-		defer r.storeMu.Unlock()
-		defaultprofile, err := r.retrieve(r.ctx, uuid.Nil)
-		if err != nil {
-			panic("failed to load default profile")
-		}
-		profile.Server = defaultprofile.Server
-		profile.Client = defaultprofile.Client
-		// Apply a community "designed" loadout to the new user
-		loadout, err := r.retrieveStarterLoadout(r.ctx)
-		if err != nil || loadout == nil {
-			r.logger.Warn("Failed to retrieve starter loadout", zap.Error(err))
-		} else {
-			profile.Server.EquippedCosmetics.Instances.Unified.Slots = *loadout
-		}
-
-	}
-	profile.SetEvrID(evrID)
-
-	return profile, created
 }
 
 // Retrieve the user's profile from storage
@@ -349,12 +326,11 @@ func (r *ProfileRegistry) retrieve(ctx context.Context, userID uuid.UUID) (profi
 	})
 
 	if err != nil || len(objs) == 0 {
-		return
+		return profile, ErrProfileNotFound
 	}
 	if err = json.Unmarshal([]byte(objs[0].Value), &profile); err != nil {
 		return
 	}
-	profile.version = objs[0].Version
 
 	return
 }
@@ -398,6 +374,20 @@ func (r *ProfileRegistry) GetFieldByJSONProperty(i interface{}, itemName string)
 	}
 
 	return false, fmt.Errorf("unknown unlock field name: %s", fieldName)
+}
+
+func (r *ProfileRegistry) NewGameProfile() GameProfileData {
+	profile, err := r.retrieve(r.ctx, uuid.Nil)
+	if err != nil {
+		panic("failed to load default profile")
+	}
+	// Apply a community "designed" loadout to the new user
+	loadout, err := r.retrieveStarterLoadout(r.ctx)
+	if err != nil {
+		r.logger.Warn("Failed to retrieve starter loadout: %s", err.Error())
+		profile.Server.EquippedCosmetics.Instances.Unified.Slots = loadout
+	}
+	return profile
 }
 
 func (r *ProfileRegistry) UpdateEquippedItem(profile *GameProfileData, category string, name string) error {
@@ -500,7 +490,7 @@ func (r *ProfileRegistry) UpdateEquippedItem(profile *GameProfileData, category 
 	case "pip":
 		s.Pip = name
 	default:
-		r.logger.Warn("Unknown cosmetic category", zap.String("category", category))
+		r.logger.Warn("Unknown cosmetic category `%s`", category)
 		return nil
 	}
 
@@ -701,33 +691,34 @@ func enforceLoadoutEntitlements(logger runtime.Logger, loadout *evr.CosmeticLoad
 }
 
 type StoredCosmeticLoadout struct {
-	LoadoutID string               `json:"loadout_id"`
-	Loadout   *evr.CosmeticLoadout `json:"loadout"`
-	UserID    string               `json:"user_id"` // the creator
+	LoadoutID string              `json:"loadout_id"`
+	Loadout   evr.CosmeticLoadout `json:"loadout"`
+	UserID    string              `json:"user_id"` // the creator
 }
 
-func (r *ProfileRegistry) retrieveStarterLoadout(ctx context.Context) (*evr.CosmeticLoadout, error) {
+func (r *ProfileRegistry) retrieveStarterLoadout(ctx context.Context) (evr.CosmeticLoadout, error) {
+	defaultLoadout := evr.DefaultCosmeticLoadout()
 	// Retrieve a random starter loadout from storage
 	ids, _, err := r.nk.StorageList(ctx, uuid.Nil.String(), uuid.Nil.String(), CosmeticLoadoutCollection, 100, "")
 	if err != nil {
-		return nil, fmt.Errorf("failed to list objects: %w", err)
+		return defaultLoadout, fmt.Errorf("failed to list objects: %w", err)
 	}
 	if len(ids) == 0 {
-		return nil, nil
+		return defaultLoadout, nil
 	}
 
 	// Pick a random id
 	obj := ids[rand.Intn(len(ids))]
-	loadout := &StoredCosmeticLoadout{}
-	if err = json.Unmarshal([]byte(obj.Value), loadout); err != nil {
-		return nil, fmt.Errorf("error unmarshalling client profile: %w", err)
+	loadout := StoredCosmeticLoadout{}
+	if err = json.Unmarshal([]byte(obj.Value), &loadout); err != nil {
+		return defaultLoadout, fmt.Errorf("error unmarshalling client profile: %w", err)
 	}
 
 	return loadout.Loadout, nil
 }
 
 func (r *ProfileRegistry) ValidateSocialGroup(ctx context.Context, userID uuid.UUID, groupID evr.GUID) (evr.GUID, error) {
-
+	logger := r.logger.WithField("user_id", userID.String())
 	// Get the user's active groups
 	groups, _, err := r.nk.UserGroupsList(ctx, userID.String(), 100, nil, "")
 	if err != nil {
@@ -744,7 +735,7 @@ func (r *ProfileRegistry) ValidateSocialGroup(ctx context.Context, userID uuid.U
 		// Update the groups for the user
 		err := r.discordRegistry.UpdateAllGuildGroupsForUser(ctx, r.logger, userID, discordID)
 		if err != nil {
-			r.logger.Warn("Failed to update guild groups for user", zap.Error(err))
+			logger.Warn("Failed to update guild groups for user: %w", err)
 		}
 		// Try again
 		groups, _, err = r.nk.UserGroupsList(ctx, userID.String(), 100, nil, "")
@@ -789,9 +780,12 @@ func (r *ProfileRegistry) ValidateArenaUnlockByName(i interface{}, itemName stri
 }
 
 func (r *ProfileRegistry) GetSessionProfile(ctx context.Context, session *sessionWS, loginProfile evr.LoginProfile, evrID evr.EvrId) (GameProfileData, error) {
-	p, created := r.LoadOrNew(session.userID, evrID)
-	if !created {
-		session.logger.Info("Created new game profile")
+	logger := session.logger.With(zap.String("evr_id", evrID.String()))
+
+	p, ok := r.Load(session.userID, evrID)
+	if !ok {
+		// Create a new profile
+		p = r.NewGameProfile()
 	}
 	p.Login = loginProfile
 	p.Server.PublisherLock = p.Login.PublisherLock
@@ -799,7 +793,7 @@ func (r *ProfileRegistry) GetSessionProfile(ctx context.Context, session *sessio
 
 	// Update the account
 	if err := r.discordRegistry.UpdateAccount(ctx, session.userID); err != nil {
-		session.logger.Warn("Failed to update account", zap.Error(err))
+		logger.Warn("Failed to update account", zap.Error(err))
 	}
 
 	if groupID, err := r.ValidateSocialGroup(r.ctx, session.userID, p.Client.Social.Channel); err != nil {
