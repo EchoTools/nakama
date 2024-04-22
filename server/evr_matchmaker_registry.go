@@ -523,7 +523,7 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 		"level":    ml.Level.String(),
 		"team_idx": strconv.FormatInt(int64(ml.TeamIndex), 10),
 	}
-	mr.metrics.CustomCounter("matchmaking_matched_participant", metricsTags, int64(len(entrants)))
+	mr.metrics.CustomCounter("matchmaking_matched_participant_count", metricsTags, int64(len(entrants)))
 	// Find a valid participant to get the label from
 
 	ml.SpawnedBy = uuid.Nil.String()
@@ -974,7 +974,6 @@ func (c *MatchmakingRegistry) Delete(sessionId uuid.UUID) {
 
 // Add adds a matching session to the registry
 func (c *MatchmakingRegistry) Create(ctx context.Context, logger *zap.Logger, session *sessionWS, ml *EvrMatchState, partySize int, timeout time.Duration, errorFn func(err error) error, joinFn func(matchId string, query string) error) (*MatchmakingSession, error) {
-	// Check if a matching session exists
 
 	// Set defaults for the matching label
 	ml.Open = true // Open for joining
@@ -1020,6 +1019,19 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, logger *zap.Logger, se
 
 	// listen for a match ID to join
 	go func() {
+		// Create a timer for this session
+		startedAt := time.Now().UTC()
+		metricsTags := map[string]string{
+			"mode":    ml.Mode.String(),
+			"channel": ml.Channel.String(),
+			"level":   ml.Level.String(),
+			"team":    strconv.FormatInt(int64(ml.TeamIndex), 10),
+			"result":  "success",
+		}
+		defer func() {
+			c.metrics.CustomTimer("matchmaking_session_duration_ms", metricsTags, time.Since(startedAt)*time.Millisecond)
+		}()
+
 		defer cancel(nil)
 		var err error
 		select {
@@ -1030,12 +1042,19 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, logger *zap.Logger, se
 		case <-time.After(timeout):
 			// Timeout
 			err = ErrMatchmakingTimeout
+			c.metrics.CustomCounter("matchmaking_session_timeout_count", metricsTags, 1)
 		case matchFound := <-msession.MatchJoinCh:
 			// join the match
 			err = joinFn(matchFound.MatchID, matchFound.Query)
+
+			c.metrics.CustomCounter("matchmaking_session_success_count", metricsTags, 1)
+
 		}
 		if err != nil {
+			metricsTags["result"] = "error"
 			defer errorFn(err)
+		} else {
+
 		}
 		c.StoreLatencyCache(session)
 		c.Delete(session.id)

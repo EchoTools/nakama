@@ -281,7 +281,7 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 		"level": msession.Label.Level.String(),
 	}
 
-	p.metrics.CustomCounter("matchmaker_tickets", tags, 1)
+	p.metrics.CustomCounter("matchmaker_tickets_count", tags, 1)
 	// Add the user to the matchmaker
 	ticket, _, err = session.matchmaker.Add(ctx, presences, sessionID.String(), pID, query, minCount, maxCount, countMultiple, stringProps, numericProps)
 	if err != nil {
@@ -323,13 +323,13 @@ func (p *EvrPipeline) joinPartyGroup(logger *zap.Logger, partyRegistry PartyRegi
 			partyRegistry.Join(partyID, presence)
 			return ph, nil
 		} else {
-			p.metrics.CustomCounter("partyregistry_error_party_full", nil, 1)
+			p.metrics.CustomCounter("partyregistry_error_party_full_count", nil, 1)
 			logger.Warn("Party is full", zap.String("party_id", partyID.String()))
 			return ph, status.Errorf(codes.ResourceExhausted, "Party is full")
 		}
 	} else {
 		// Create the party
-		p.metrics.CustomCounter("partyregistry_create", nil, 1)
+		p.metrics.CustomCounter("partyregistry_create_count", nil, 1)
 		ph = partyRegistry.Create(true, 8, userPresence)
 		return ph, nil
 	}
