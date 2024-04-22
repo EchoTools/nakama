@@ -780,9 +780,8 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 		isDeveloper, _ := checkIfGlobalDeveloper(ctx, p.runtimeModule, session.userID)
 
 		// Let developers and moderators join public matches
-		if ml.TeamIndex != Spectator && !isDeveloper && !isModerator {
+		if request.TeamIndex != int16(Spectator) && !isDeveloper && !isModerator {
 			err = status.Errorf(codes.InvalidArgument, "Match is a public match")
-			return NewMatchmakingResult(logger, 0xFFFFFFFFFFFFFFFF, request.MatchID).SendErrorToSession(session, err)
 		}
 
 		authorized, err := p.authorizeMatchmaking(ctx, logger, session, loginSessionID, *ml.Channel)
@@ -794,6 +793,9 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 				return NewMatchmakingResult(logger, 0xFFFFFFFFFFFFFFFF, request.MatchID).SendErrorToSession(session, err)
 			}
 		}
+	}
+	if err != nil {
+		return NewMatchmakingResult(logger, 0xFFFFFFFFFFFFFFFF, request.MatchID).SendErrorToSession(session, err)
 	}
 
 	// Join the match
