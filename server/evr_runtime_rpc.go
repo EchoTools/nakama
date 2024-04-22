@@ -443,7 +443,7 @@ func ServiceStatusRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 }
 
 type ImportLoadoutRpcRequest struct {
-	Loadouts []*evr.CosmeticLoadout `json:"loadouts"`
+	Loadouts []evr.CosmeticLoadout `json:"loadouts"`
 }
 
 type ImportLoadoutRpcResponse struct {
