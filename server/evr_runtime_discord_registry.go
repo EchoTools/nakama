@@ -885,10 +885,16 @@ func (r *LocalDiscordRegistry) GetAllSuspensions(ctx context.Context, userId uui
 }
 
 func (r *LocalDiscordRegistry) isModerator(ctx context.Context, guildID, discordID string) (isModerator bool, isGlobal bool, err error) {
+
+	userID, err := r.GetUserIdByDiscordId(ctx, discordID, false)
+	if userID == uuid.Nil {
+		return false, false, fmt.Errorf("error getting user id: %w", err)
+	}
+
 	// Get the guild group metadata
 	if guildID == "" {
 		// Check if they are a member of the Global Moderators group
-		groups, _, err := r.nk.UserGroupsList(ctx, SystemUserID, 100, nil, "")
+		groups, _, err := r.nk.UserGroupsList(ctx, userID.String(), 100, nil, "")
 		if err != nil {
 			return false, false, fmt.Errorf("error getting user groups: %w", err)
 		}
