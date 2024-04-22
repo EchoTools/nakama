@@ -930,7 +930,7 @@ type ArenaUnlocks struct {
 	EmoteStinkyPoopA            bool `json:"emote_stinky_poop_a,omitempty"`
 	EmoteTearDropA              bool `json:"emote_tear_drop_a,omitempty"`
 	EmoteUwuS2A                 bool `json:"emote_uwu_s2_a,omitempty"`
-	EmoteVRMLA                  bool `json:"rwd_emote_vrml_a,omitempty" validate:"restricted"`
+	EmoteVRMLA                  bool `json:"emote_vrml_a,omitempty" validate:"restricted"`
 	EmoteWifiSymbolA            bool `json:"emote_wifi_symbol_a,omitempty"`
 	EmoteWinkyTongueA           bool `json:"emote_winky_tongue_a,omitempty"`
 	GoalFx0002                  bool `json:"rwd_goal_fx_0002,omitempty"`
