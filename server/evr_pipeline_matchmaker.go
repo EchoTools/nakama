@@ -739,26 +739,29 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 
 	loginSessionID := request.LoginSessionID
 	// Make sure the match exists
-	matchId := request.LobbyId.String() + "." + p.node
-	match, _, err := p.matchRegistry.GetMatch(ctx, matchId)
+	matchToken, err := NewMatchToken(request.MatchID, p.node)
+	if err != nil {
+		return NewMatchmakingResult(logger, 0xFFFFFFFFFFFFFFFF, request.MatchID).SendErrorToSession(session, status.Errorf(codes.InvalidArgument, "Invalid match ID"))
+	}
+	match, _, err := p.matchRegistry.GetMatch(ctx, matchToken.String())
 	if err != nil || match == nil {
-		return NewMatchmakingResult(logger, 0xFFFFFFFFFFFFFFFF, request.LobbyId).SendErrorToSession(session, status.Errorf(codes.NotFound, "Match not found"))
+		return NewMatchmakingResult(logger, 0xFFFFFFFFFFFFFFFF, request.MatchID).SendErrorToSession(session, status.Errorf(codes.NotFound, "Match not found"))
 	}
 
 	// Extract the label
 	ml := &EvrMatchState{}
 	if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), ml); err != nil {
-		return NewMatchmakingResult(logger, 0xFFFFFFFFFFFFFFFF, request.LobbyId).SendErrorToSession(session, status.Errorf(codes.NotFound, err.Error()))
+		return NewMatchmakingResult(logger, 0xFFFFFFFFFFFFFFFF, request.MatchID).SendErrorToSession(session, status.Errorf(codes.NotFound, err.Error()))
 	}
 	if ml.Channel == nil {
 		ml.Channel = &uuid.Nil
 	}
 
 	metricsTags := map[string]string{
-		"team_idx": strconv.FormatInt(int64(request.TeamIndex), 10),
-		"mode":     ml.Mode.String(),
-		"channel":  ml.Channel.String(),
-		"level":    ml.Level.String(),
+		"team":    TeamIndex(request.TeamIndex).String(),
+		"mode":    ml.Mode.String(),
+		"channel": ml.Channel.String(),
+		"level":   ml.Level.String(),
 	}
 	p.metrics.CustomCounter("lobbyjoinsession_active_count", metricsTags, 1)
 
@@ -772,28 +775,31 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 		err = status.Errorf(codes.ResourceExhausted, "Match is full")
 	case ml.LobbyType == PublicLobby:
 
-		// Public matches may only be joined by spectators or moderators
-		if ml.TeamIndex != Spectator && ml.TeamIndex != Moderator {
+		// Check if this player is a global moderator or developer
+		isModerator, _ := checkIfGlobalModerator(ctx, p.runtimeModule, session.userID)
+		isDeveloper, _ := checkIfGlobalDeveloper(ctx, p.runtimeModule, session.userID)
+
+		// Let developers and moderators join public matches
+		if ml.TeamIndex != Spectator && !isDeveloper && !isModerator {
 			err = status.Errorf(codes.InvalidArgument, "Match is a public match")
+			return NewMatchmakingResult(logger, 0xFFFFFFFFFFFFFFFF, request.MatchID).SendErrorToSession(session, err)
 		}
-		authorized, err2 := p.authorizeMatchmaking(ctx, logger, session, loginSessionID, *ml.Channel)
-		if err2 != nil {
+
+		authorized, err := p.authorizeMatchmaking(ctx, logger, session, loginSessionID, *ml.Channel)
+		if err != nil {
 			if authorized {
-				logger.Warn("Failed to authorize matchmaking, allowing player to continue. ", zap.Error(err2))
-				err = nil
+				logger.Warn("Failed to authorize matchmaking, allowing player to continue. ", zap.Error(err))
 			} else {
-				err = status.Errorf(codes.PermissionDenied, err2.Error())
+				err = status.Errorf(codes.PermissionDenied, err.Error())
+				return NewMatchmakingResult(logger, 0xFFFFFFFFFFFFFFFF, request.MatchID).SendErrorToSession(session, err)
 			}
 		}
-	}
-	if err != nil {
-		return NewMatchmakingResult(logger, 0xFFFFFFFFFFFFFFFF, request.LobbyId).SendErrorToSession(session, err)
 	}
 
 	// Join the match
 
-	if err = p.JoinEvrMatch(ctx, logger, session, "", matchId, int(request.TeamIndex)); err != nil {
-		return NewMatchmakingResult(logger, 0xFFFFFFFFFFFFFFFF, request.LobbyId).SendErrorToSession(session, status.Errorf(codes.NotFound, err.Error()))
+	if err = p.JoinEvrMatch(ctx, logger, session, "", matchToken.String(), int(request.TeamIndex)); err != nil {
+		return NewMatchmakingResult(logger, 0xFFFFFFFFFFFFFFFF, request.MatchID).SendErrorToSession(session, status.Errorf(codes.NotFound, err.Error()))
 	}
 	return nil
 }

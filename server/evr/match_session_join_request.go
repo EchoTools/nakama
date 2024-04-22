@@ -50,7 +50,7 @@ const (
 // LobbyJoinSessionRequest is a message from client to server requesting joining of a specified game session that
 // matches the message's underlying arguments.
 type LobbyJoinSessionRequest struct {
-	LobbyId         uuid.UUID
+	MatchID         uuid.UUID
 	VersionLock     int64
 	Platform        Symbol
 	LoginSessionID  uuid.UUID
@@ -72,7 +72,7 @@ func (m LobbyJoinSessionRequest) Symbol() Symbol {
 
 func (m *LobbyJoinSessionRequest) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
-		func() error { return s.StreamGuid(&m.LobbyId) },
+		func() error { return s.StreamGuid(&m.MatchID) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.VersionLock) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Platform) },
 		func() error { return s.StreamGuid(&m.LoginSessionID) },
@@ -89,9 +89,9 @@ func (m *LobbyJoinSessionRequest) Stream(s *EasyStream) error {
 				// Take the last 8 bytes of the lobbyID and set it as the account ID
 				// Set the lobbyID to 0
 				// REad the bytes
-				m.OtherEvrID.PlatformCode = PlatformCode(uint64(m.LobbyId[3]))
-				m.OtherEvrID.AccountId = uint64(binary.LittleEndian.Uint64(m.LobbyId[8:]))
-				m.LobbyId = uuid.Nil
+				m.OtherEvrID.PlatformCode = PlatformCode(uint64(m.MatchID[3]))
+				m.OtherEvrID.AccountId = uint64(binary.LittleEndian.Uint64(m.MatchID[8:]))
+				m.MatchID = uuid.Nil
 			}
 			return nil
 		},
@@ -114,7 +114,7 @@ func (m *LobbyJoinSessionRequest) Stream(s *EasyStream) error {
 }
 
 func (m LobbyJoinSessionRequest) String() string {
-	return fmt.Sprintf("%s(lobby_id=%s, version_lock=%d, platform=%s, login_session=%s, unk1=%d, unk2=%d, session_settings=%v, evr_id=%s, team_index=%d, other_evr_id=%s)", m.Token(), m.LobbyId, m.VersionLock, m.Platform.String(), m.LoginSessionID, m.Unk1, m.Unk2, m.SessionSettings.String(), m.EvrId.Token(), m.TeamIndex, m.OtherEvrID.Token())
+	return fmt.Sprintf("%s(lobby_id=%s, version_lock=%d, platform=%s, login_session=%s, unk1=%d, unk2=%d, session_settings=%v, evr_id=%s, team_index=%d, other_evr_id=%s)", m.Token(), m.MatchID, m.VersionLock, m.Platform.String(), m.LoginSessionID, m.Unk1, m.Unk2, m.SessionSettings.String(), m.EvrId.Token(), m.TeamIndex, m.OtherEvrID.Token())
 }
 
 func (m *LobbyJoinSessionRequest) SessionID() uuid.UUID {

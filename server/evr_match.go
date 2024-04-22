@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/gofrs/uuid/v5"
-	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/ipinfo/go/v2/ipinfo"
@@ -537,7 +536,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 
 	// Check if they are a moderator
 	if mp.TeamIndex == evr.TeamModerator {
-		found, err := checkIfModerator(ctx, nk, presence.GetUserId(), state.Channel.String())
+		found, err := checkIfGlobalModerator(ctx, nk, uuid.FromStringOrNil(presence.GetUserId()))
 		if err != nil {
 			return state, false, fmt.Sprintf("failed to check if moderator: %v", err)
 		}
@@ -1048,64 +1047,33 @@ func (m *EvrMatch) updateLabel(dispatcher runtime.MatchDispatcher, state *EvrMat
 	return nil
 }
 
-func checkIfModerator(ctx context.Context, nk runtime.NakamaModule, userId string, channelId string) (bool, error) {
+func checkIfGlobalDeveloper(ctx context.Context, nk runtime.NakamaModule, userID uuid.UUID) (bool, error) {
+	return checkGroupMembershipByName(ctx, nk, userID, GroupGlobalDevelopers, "system")
+}
 
-	// Get the user's groups
-	groups, _, err := nk.UserGroupsList(ctx, userId, 1, nil, "")
+func checkIfGlobalModerator(ctx context.Context, nk runtime.NakamaModule, userID uuid.UUID) (bool, error) {
+	// Developers are moderators
+	ok, err := checkGroupMembershipByName(ctx, nk, userID, GroupGlobalDevelopers, "system")
 	if err != nil {
-		return false, fmt.Errorf("failed to list user groups: %q", err)
+		return false, fmt.Errorf("error getting user groups: %w", err)
 	}
+	if ok {
+		return true, nil
+	}
+	return checkGroupMembershipByName(ctx, nk, userID, GroupGlobalModerators, "system")
+}
 
-	for _, group := range groups {
-
-		if group.GetGroup().GetId() == "Global Moderators" {
-			if group.GetState().Value <= int32(api.GroupUserList_GroupUser_MEMBER) {
-				return true, nil
-			}
+func checkGroupMembershipByName(ctx context.Context, nk runtime.NakamaModule, userID uuid.UUID, groupName, langtag string) (bool, error) {
+	groups, _, err := nk.UserGroupsList(ctx, userID.String(), 100, nil, "")
+	if err != nil {
+		return false, fmt.Errorf("error getting user groups: %w", err)
+	}
+	for _, g := range groups {
+		if g.Group.LangTag != langtag && g.Group.Name == groupName {
+			return true, nil
 		}
 	}
-
 	return false, nil
-	/*
-		modgroups := []string{}
-		for _, group := range result {
-			modgroups = append(modgroups, group.GetId())
-		}
-		// Pull the channel's group
-		result, err = nk.GroupsGetId(ctx, []string{channelId})
-		if err != nil {
-			return false, fmt.Errorf("failed to get group: %q", err)
-		}
-		if len(result) == 0 {
-			// No group found for this channel.
-			return false, fmt.Errorf("no group found for channel: %q", channelId)
-		}
-		cgroup := result[0]
-		// Extract the metadata from the group
-		metadata := GroupMetadata{}
-		if err := json.Unmarshal([]byte(cgroup.GetMetadata()), &metadata); err != nil {
-			return false, fmt.Errorf("failed to unmarshal group metadata: %q", err)
-		}
-
-		// Get the moderator group from the channel's metadata.
-		moderatorGroup := metadata.ModeratorGroupId
-		if moderatorGroup == "" {
-			return false, fmt.Errorf("no moderator group found for channel: %q", channelId)
-		} else {
-			modgroups = append(modgroups, moderatorGroup)
-		}
-
-		groups, _, err := nk.UserGroupsList(ctx, userId, 1, lo.ToPtr(2), "")
-		if err != nil {
-			return false, fmt.Errorf("failed to list user groups: %q", err)
-		}
-		for _, group := range groups {
-			if lo.Contains(modgroups, group.GetGroup().GetId()) {
-				return true, nil
-			}
-		}
-		return false, nil
-	*/
 }
 
 // lobbyPlayerSessionsRequest is called when a client requests the player sessions for a list of EchoVR IDs.

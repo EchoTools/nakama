@@ -41,7 +41,7 @@ func TestLobbyJoinSessionRequest_LobbyID(t *testing.T) {
 	}
 
 	want := LobbyJoinSessionRequest{
-		LobbyId:        uuid.FromStringOrNil("e7c16fb6-fbb7-11ee-b192-66d3ff8a653b"),
+		MatchID:        uuid.FromStringOrNil("e7c16fb6-fbb7-11ee-b192-66d3ff8a653b"),
 		VersionLock:    -4166109104957845235,
 		Platform:       ToSymbol("OVR"),
 		LoginSessionID: uuid.Must(uuid.FromString("648e6301-fbb9-11ee-ad13-66d3ff8a653b")),
@@ -96,7 +96,7 @@ func TestLobbyJoinSessionRequest_Moderator(t *testing.T) {
 	}
 
 	want := LobbyJoinSessionRequest{
-		LobbyId:        uuid.FromStringOrNil("e7c16fb6-fbb7-11ee-b192-66d3ff8a653b"),
+		MatchID:        uuid.FromStringOrNil("e7c16fb6-fbb7-11ee-b192-66d3ff8a653b"),
 		VersionLock:    -4166109104957845235,
 		Platform:       ToSymbol("OVR"),
 		LoginSessionID: uuid.Must(uuid.FromString("e8f83121-fbb8-11ee-9182-66d3ff8a653b")),
@@ -151,7 +151,7 @@ func TestLobbyJoinSessionRequest_ModerateUser(t *testing.T) {
 	}
 
 	want := LobbyJoinSessionRequest{
-		LobbyId:        uuid.FromStringOrNil("00000000-0000-0000-0000-000000000000"),
+		MatchID:        uuid.FromStringOrNil("00000000-0000-0000-0000-000000000000"),
 		VersionLock:    -4166109104957845235,
 		Platform:       ToSymbol("OVR"),
 		LoginSessionID: uuid.Must(uuid.FromString("e7c16fb6-fbb7-11ee-b192-66d3ff8a653b")),
