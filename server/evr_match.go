@@ -123,7 +123,6 @@ type EvrMatchPresence struct {
 	PlayerSession uuid.UUID // Match-scoped session id.
 	TeamIndex     int       // the team index the player prefers/has been assigned to.
 	PartyID       uuid.UUID // The party id the player is in.
-	IPinfo        *ipinfo.Core
 	DiscordID     string
 	Query         string // Matchmaking query used to find this match.
 }
@@ -228,17 +227,15 @@ type EvrMatchState struct {
 	TeamSize  int       `json:"team_size,omitempty"` // The size of each team in arena/combat (either 4 or 5)
 	TeamIndex TeamIndex `json:"team,omitempty"`      // What team index a player prefers (Used by Matching only)
 
-	Players                 []PlayerInfo                 `json:"players,omitempty"` // The displayNames of the players (by team name) in the match.
-	EvrIDs                  []evr.EvrId                  `json:"evrids,omitempty"`  // The evr ids of the players in the match.
-	UserIDs                 []string                     `json:"userids,omitempty"` // The user ids of the players in the match.
-	teamAlignments          map[evr.EvrId]int            // [evrID]TeamIndex
-	presences               map[string]*EvrMatchPresence // [sessionId]EvrMatchPresence
-	broadcaster             runtime.Presence             // The broadcaster's presence
-	presenceByEvrId         map[string]*EvrMatchPresence // lookup table for EchoVR ID
-	presenceByPlayerSession map[string]*EvrMatchPresence // lookup table for match-scoped session id
-	presenceCache           map[string]*EvrMatchPresence // [sessionId]PlayerMeta cache for all players that have attempted to join the match.
-	emptyTicks              int                          // The number of ticks the match has been empty.
-	tickRate                int                          // The number of ticks per second.
+	Players        []PlayerInfo                    `json:"players,omitempty"` // The displayNames of the players (by team name) in the match.
+	EvrIDs         []evr.EvrId                     `json:"evrids,omitempty"`  // The evr ids of the players in the match.
+	UserIDs        []string                        `json:"userids,omitempty"` // The user ids of the players in the match.
+	teamAlignments map[evr.EvrId]int               // [evrID]TeamIndex
+	presences      map[uuid.UUID]*EvrMatchPresence // [sessionId]EvrMatchPresence
+	broadcaster    runtime.Presence                // The broadcaster's presence
+	presenceCache  map[uuid.UUID]*EvrMatchPresence // [sessionId]PlayerMeta cache for all players that have attempted to join the match.
+	emptyTicks     int                             // The number of ticks the match has been empty.
+	tickRate       int                             // The number of ticks per second.
 }
 
 func (s *EvrMatchState) String() string {
@@ -327,25 +324,23 @@ func NewEvrMatchState(endpoint evr.Endpoint, config *MatchBroadcaster, sessionId
 	// Then when the matchmaker decides spawning a new server is nominal approach, the broadcaster joins the match along with
 	// the players. It would have to join first though.  - @thesprockee
 	initState := &EvrMatchState{
-		Node:                    node,
-		StartedAt:               time.Now(),
-		Broadcaster:             *config,
-		SpawnedBy:               config.OperatorID,
-		Open:                    false,
-		LobbyType:               UnassignedLobby,
-		Mode:                    evr.ModeUnloaded,
-		Level:                   evr.LevelUnloaded,
-		Levels:                  make([]Level, 0),
-		Players:                 make([]PlayerInfo, 0, MatchMaxSize),
-		EvrIDs:                  make([]evr.EvrId, 0, MatchMaxSize),
-		presences:               make(map[string]*EvrMatchPresence, MatchMaxSize),
-		presenceByEvrId:         make(map[string]*EvrMatchPresence, MatchMaxSize),
-		presenceByPlayerSession: make(map[string]*EvrMatchPresence, MatchMaxSize),
-		presenceCache:           make(map[string]*EvrMatchPresence, MatchMaxSize),
-		teamAlignments:          make(map[evr.EvrId]int, MatchMaxSize),
-		UserIDs:                 make([]string, 0, MatchMaxSize),
-		emptyTicks:              0,
-		tickRate:                10,
+		Node:           node,
+		StartedAt:      time.Now(),
+		Broadcaster:    *config,
+		SpawnedBy:      config.OperatorID,
+		Open:           false,
+		LobbyType:      UnassignedLobby,
+		Mode:           evr.ModeUnloaded,
+		Level:          evr.LevelUnloaded,
+		Levels:         make([]Level, 0),
+		Players:        make([]PlayerInfo, 0, MatchMaxSize),
+		EvrIDs:         make([]evr.EvrId, 0, MatchMaxSize),
+		presences:      make(map[uuid.UUID]*EvrMatchPresence, MatchMaxSize),
+		presenceCache:  make(map[uuid.UUID]*EvrMatchPresence, MatchMaxSize),
+		teamAlignments: make(map[evr.EvrId]int, MatchMaxSize),
+		UserIDs:        make([]string, 0, MatchMaxSize),
+		emptyTicks:     0,
+		tickRate:       10,
 	}
 
 	evrMatchConfig := evrMatchConfig{
@@ -401,10 +396,8 @@ func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql
 	state := config.InitialState
 	state.MatchID = matchId
 	state.Broadcaster.Endpoint = config.Endpoint
-	state.presenceCache = make(map[string]*EvrMatchPresence)
-	state.presences = make(map[string]*EvrMatchPresence)
-	state.presenceByEvrId = make(map[string]*EvrMatchPresence)
-	state.presenceByPlayerSession = make(map[string]*EvrMatchPresence)
+	state.presenceCache = make(map[uuid.UUID]*EvrMatchPresence)
+	state.presences = make(map[uuid.UUID]*EvrMatchPresence)
 
 	state.rebuildCache()
 
@@ -524,7 +517,8 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	}
 
 	// Verify this isn't a duplicate. It will crash the server if they are allowed to join.
-	if _, ok := state.presences[presence.GetSessionId()]; ok {
+	sessionID := uuid.FromStringOrNil(presence.GetSessionId())
+	if _, ok := state.presences[sessionID]; ok {
 		logger.Warn("Duplicate join attempt.")
 		//return state, false, ErrJoinRejectedDuplicateJoin
 	}
@@ -549,8 +543,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	if mp.TeamIndex != evr.TeamSpectator && mp.TeamIndex != evr.TeamModerator {
 
 		// If this is the player rejoining, prefer the same team.
-		matchPresence, ok := state.presenceCache[presence.GetSessionId()]
-		if ok {
+		if matchPresence, ok := state.presenceCache[sessionID]; ok {
 			mp.TeamIndex = matchPresence.TeamIndex
 		}
 	}
@@ -576,12 +569,10 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		}
 	}
 	// Reserve this player's spot in the match.
-	state.presences[mp.GetSessionId()] = mp
-	state.presenceByPlayerSession[mp.GetPlayerSession()] = mp
-	state.presenceByEvrId[mp.GetEvrId()] = mp
+	state.presences[sessionID] = mp
 
 	// The player data will reused if the player rejoins the match.
-	state.presenceCache[mp.GetSessionId()] = mp
+	state.presenceCache[sessionID] = mp
 	// Accept the player(s) into the session.
 
 	state.rebuildCache()
@@ -641,9 +632,9 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 		}
 
 		// This is a player joining
-
+		sessionID := uuid.FromStringOrNil(p.GetSessionId())
 		// the cache entry is kept even after a player leaves. This helps put them back on the same team.
-		matchPresence, ok := state.presences[p.GetSessionId()]
+		matchPresence, ok := state.presences[sessionID]
 		if !ok {
 			// TODO FIXME Kick the player from the match.
 			logger.Error("Player not in cache. This shouldn't happen.")
@@ -712,11 +703,10 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 
 	// Create a list of sessions to remove
 	rejects := lo.Map(presences, func(p runtime.Presence, _ int) uuid.UUID {
+		sessionID := uuid.FromStringOrNil(p.GetSessionId())
 		// Get the match presence for this user
-		matchPresence, ok := state.presenceCache[p.GetSessionId()]
-		if !ok {
-			// This player is not in the match.
-			logger.Warn("Player not in match.")
+		matchPresence, ok := state.presences[sessionID]
+		if !ok || matchPresence == nil {
 			return uuid.Nil
 		}
 		return uuid.FromStringOrNil(matchPresence.GetPlayerSession())
@@ -727,10 +717,15 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 		return u != uuid.Nil
 	})
 
-	// Delete the each user from the match.
 	for _, p := range presences {
-		delete(state.presences, p.GetSessionId())
+		sessionID := uuid.FromStringOrNil(p.GetSessionId())
+		matchPresence, ok := state.presences[sessionID]
+		if !ok || matchPresence == nil {
+			continue
+		}
+		delete(state.presences, sessionID)
 	}
+	// Delete the each user from the match.
 	if len(rejects) > 0 {
 
 		go func(rejects []uuid.UUID) {
@@ -1088,7 +1083,8 @@ func (m *EvrMatch) lobbyPlayerSessionsRequest(ctx context.Context, logger runtim
 	teamIndex := evr.TeamUnassigned
 
 	// Get the playerSession of the sender
-	sender, ok := state.presences[in.GetSessionId()]
+	sessionID := uuid.FromStringOrNil(in.GetSessionId())
+	sender, ok := state.presences[sessionID]
 	if ok {
 		playerSession = sender.PlayerSession
 		teamIndex = sender.TeamIndex
@@ -1098,14 +1094,17 @@ func (m *EvrMatch) lobbyPlayerSessionsRequest(ctx context.Context, logger runtim
 	}
 
 	playerSessions := make([]uuid.UUID, 0)
-	for _, e := range message.PlayerEvrIds {
-		if p, ok := state.presenceByEvrId[e.Token()]; ok {
-			playerSessions = append(playerSessions, p.PlayerSession)
-		} else {
-			// Generate a random session
-			logger.Warn("lobbyPlayerSessionsRequest: %s requested a player not in match: %s, generating a random UUID", in.GetUserId(), e.Token())
-			playerSessions = append(playerSessions, uuid.Must(uuid.NewV4()))
+	for _, e := range message.PlayerEvrIDs {
+		for _, p := range state.presences {
+			if p.GetEvrId() == e.String() {
+				playerSessions = append(playerSessions, p.PlayerSession)
+				break
+			}
 		}
+	}
+
+	if len(playerSessions) == 0 {
+		logger.Warn("lobbyPlayerSessionsRequest: no player sessions found for %v", message.PlayerEvrIDs)
 	}
 
 	success := evr.NewLobbyPlayerSessionsSuccess(message.EvrID(), state.MatchID, playerSession, playerSessions, int16(teamIndex))
@@ -1125,25 +1124,22 @@ func (m *EvrMatch) lobbyPlayerSessionsRequest(ctx context.Context, logger runtim
 func (m *EvrMatch) broadcasterPlayersAccept(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, state *EvrMatchState, in runtime.MatchData, msg evr.Message) (*EvrMatchState, error) {
 	message := msg.(*evr.BroadcasterPlayersAccept)
 	// validate the player sessions.
+
 	accepted := make([]uuid.UUID, 0)
 	rejected := make([]uuid.UUID, 0)
-	for _, playerSession := range message.PlayerSessions {
-		_, ok := state.presenceByPlayerSession[playerSession.String()]
-		if !ok {
-			logger.Warn("rejecting %v: player not in this match.", playerSession)
-			rejected = append(rejected, playerSession)
-			continue
-		}
-		/*
-			_, err := nk.StreamUserJoin(StreamModeMatchAuthoritative, state.MatchID.String(), "", state.Node, mp.UserID.String(), mp.SessionID.String(), false, false, mp.Query)
-			if err != nil {
-				logger.Error("failed to join user to stream: %v", err)
-				rejected = append(rejected, playerSession)
-				continue
-			}
-		*/
 
-		accepted = append(accepted, playerSession)
+	for _, p := range message.PlayerSessions {
+		found := false
+		for _, presence := range state.presences {
+			if presence.PlayerSession == p {
+				accepted = append(accepted, p)
+				found = true
+				break
+			}
+		}
+		if !found {
+			rejected = append(rejected, p)
+		}
 	}
 
 	// Only include the message if there are players to accept or reject.
@@ -1168,15 +1164,18 @@ func (m *EvrMatch) broadcasterPlayerRemoved(ctx context.Context, logger runtime.
 	message := msg.(*evr.BroadcasterPlayerRemoved)
 	// Remove the player from the match.
 	matchId, node := MatchIdFromContext(ctx)
-	presence, found := state.presenceByPlayerSession[message.PlayerSession.String()]
-	if !found {
-		logger.Debug("broadcasterPlayerRemoved: player not in match: %v", message.PlayerSession)
-		return state, nil
+
+	for _, presence := range state.presences {
+		if presence.PlayerSession == message.PlayerSession {
+			delete(state.presences, presence.SessionID)
+			// Kick the presence from the match. This will trigger the MatchLeave function.
+			nk.StreamUserKick(StreamModeMatchAuthoritative, matchId.String(), "", node, presence)
+			logger.Debug("broadcasterPlayerRemoved: removing player presence from match: %v", message.PlayerSession)
+			break
+		}
 	}
 
-	logger.Debug("broadcasterPlayerRemoved: kicking player presence from match: %v", message.PlayerSession)
-	// Kick the presence from the match. This will trigger the MatchLeave function.
-	nk.StreamUserKick(StreamModeMatchAuthoritative, matchId.String(), "", node, presence)
+	// Remove the player from the internal presences to avoid the handler sending a message to the player
 	return state, nil
 }
 

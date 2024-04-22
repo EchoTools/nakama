@@ -123,23 +123,22 @@ func (p *EvrPipeline) Backfill(ctx context.Context, session *sessionWS, msession
 		logger = logger.With(zap.String("match_id", label.MatchID.String()))
 
 		mu, _ := p.backfillQueue.LoadOrStore(label.ID(), &sync.Mutex{})
-		mu.Lock()
 
+		// Lock this backfill match
+		mu.Lock()
 		match, _, err := p.matchRegistry.GetMatch(ctx, label.ID())
-		if match == nil {
+		if match == nil || err != nil {
 			logger.Warn("Match not found")
 			mu.Unlock()
 			continue
 		}
-
-		// Extract the latest label
-		if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), label); err != nil {
+		if err != nil {
 			logger.Warn("Failed to get match label")
 			mu.Unlock()
 			continue
 		}
-
-		if err != nil {
+		// Extract the latest label
+		if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), label); err != nil {
 			logger.Warn("Failed to get match label")
 			mu.Unlock()
 			continue
@@ -157,7 +156,6 @@ func (p *EvrPipeline) Backfill(ctx context.Context, session *sessionWS, msession
 				logger.Warn("Match is full")
 				mu.Unlock()
 				continue
-
 			}
 		}
 
