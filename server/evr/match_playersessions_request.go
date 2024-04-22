@@ -15,7 +15,7 @@ type LobbyPlayerSessionsRequest struct {
 	EvrId        EvrId
 	MatchSession uuid.UUID
 	Platform     Symbol
-	PlayerEvrIds []EvrId
+	PlayerEvrIDs []EvrId
 }
 
 func (m LobbyPlayerSessionsRequest) Token() string {
@@ -27,7 +27,7 @@ func (m LobbyPlayerSessionsRequest) Symbol() Symbol {
 }
 
 func (m *LobbyPlayerSessionsRequest) Stream(s *EasyStream) error {
-	playerCount := uint64(len(m.PlayerEvrIds))
+	playerCount := uint64(len(m.PlayerEvrIDs))
 	return RunErrorFunctions([]func() error{
 		func() error { return s.StreamGuid(&m.Session) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.EvrId.PlatformCode) },
@@ -37,10 +37,10 @@ func (m *LobbyPlayerSessionsRequest) Stream(s *EasyStream) error {
 		func() error { return s.StreamNumber(binary.LittleEndian, &playerCount) },
 		func() error {
 			if s.Mode == DecodeMode {
-				m.PlayerEvrIds = make([]EvrId, playerCount)
+				m.PlayerEvrIDs = make([]EvrId, playerCount)
 			}
-			for i := range m.PlayerEvrIds {
-				if err := s.StreamStruct(&m.PlayerEvrIds[i]); err != nil {
+			for i := range m.PlayerEvrIDs {
+				if err := s.StreamStruct(&m.PlayerEvrIDs[i]); err != nil {
 					return err
 				}
 			}
@@ -56,7 +56,7 @@ func (m *LobbyPlayerSessionsRequest) String() string {
 		m.EvrId.String(),
 		m.MatchSession,
 		m.Platform,
-		strings.Join(lo.Map(m.PlayerEvrIds, func(id EvrId, i int) string { return id.Token() }), ", "),
+		strings.Join(lo.Map(m.PlayerEvrIDs, func(id EvrId, i int) string { return id.Token() }), ", "),
 	)
 }
 
