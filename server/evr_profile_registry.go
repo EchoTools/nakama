@@ -379,7 +379,10 @@ func (r *ProfileRegistry) GetFieldByJSONProperty(i interface{}, itemName string)
 func (r *ProfileRegistry) NewGameProfile() GameProfileData {
 	profile, err := r.retrieve(r.ctx, uuid.Nil)
 	if err != nil {
-		panic("failed to load default profile")
+		profile = GameProfileData{
+			Client: evr.NewClientProfile(),
+			Server: evr.NewServerProfile(),
+		}
 	}
 	// Apply a community "designed" loadout to the new user
 	loadout, err := r.retrieveStarterLoadout(r.ctx)

@@ -288,7 +288,7 @@ func (mr *MatchmakingResult) SendErrorToSession(s *sessionWS, err error) error {
 		return nil
 	}
 	// If it was cancelled by the user, don't send and error
-	if result.err == ErrMatchmakingCanceledByPlayer {
+	if result.err == ErrMatchmakingCanceledByPlayer || result.err.Error() == "context canceled" {
 		return nil
 	}
 
@@ -974,6 +974,11 @@ func (c *MatchmakingRegistry) Delete(sessionId uuid.UUID) {
 
 // Add adds a matching session to the registry
 func (c *MatchmakingRegistry) Create(ctx context.Context, logger *zap.Logger, session *sessionWS, ml *EvrMatchState, partySize int, timeout time.Duration, errorFn func(err error) error, joinFn func(matchId string, query string) error) (*MatchmakingSession, error) {
+	// Check if there is an existing session
+	if _, ok := c.GetMatchingBySessionId(session.ID()); ok {
+		// Cancel it
+		c.Cancel(session.ID(), ErrMatchmakingCanceledByPlayer)
+	}
 
 	// Set defaults for the matching label
 	ml.Open = true // Open for joining
@@ -1051,10 +1056,12 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, logger *zap.Logger, se
 
 		}
 		if err != nil {
-			metricsTags["result"] = "error"
-			defer errorFn(err)
-		} else {
-
+			if err == ErrMatchmakingCanceledByPlayer {
+				metricsTags["result"] = "canceled"
+			} else {
+				metricsTags["result"] = "error"
+				defer errorFn(err)
+			}
 		}
 		c.StoreLatencyCache(session)
 		c.Delete(session.id)
