@@ -12,13 +12,13 @@ import (
 	"database/sql"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/gofrs/uuid/v5"
 
 	"github.com/heroiclabs/nakama-common/runtime"
 )
 
 const (
-	echoTaxiPrefix      = "https://echo.taxi/"
-	sprockLinkPrefix    = "https://sprock.io/"
+	EchoTaxiPrefix      = "https://echo.taxi/"
 	sprockLinkDiscordId = "1102051447597707294"
 
 	EchoTaxiStorageCollection = "EchoTaxi"
@@ -30,7 +30,7 @@ var (
 	matchIDPattern = regexp.MustCompile(`([-0-9A-Fa-f]{36})`)
 )
 
-type TaxiLinkMessage struct {
+type TrackedMessage struct {
 	ChannelID string
 	MessageID string
 }
@@ -44,9 +44,28 @@ type TaxiLinkRegistry struct {
 	dg          *discordgo.Session
 
 	node    string
-	tracked map[MatchToken][]TaxiLinkMessage
+	tracked map[TrackedMessage]MatchToken
 
 	reactOnlyChannels sync.Map
+}
+
+func (r *TaxiLinkRegistry) load(t TrackedMessage) (MatchToken, bool) {
+	r.Lock()
+	defer r.Unlock()
+	m, found := r.tracked[t]
+	return m, found
+}
+
+func (r *TaxiLinkRegistry) store(t TrackedMessage, m MatchToken) {
+	r.Lock()
+	defer r.Unlock()
+	r.tracked[t] = m
+}
+
+func (r *TaxiLinkRegistry) delete(t TrackedMessage) {
+	r.Lock()
+	defer r.Unlock()
+	delete(r.tracked, t)
 }
 
 func NewTaxiLinkRegistry(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, dg *discordgo.Session) *TaxiLinkRegistry {
@@ -60,7 +79,7 @@ func NewTaxiLinkRegistry(ctx context.Context, logger runtime.Logger, nk runtime.
 		nk:          nk,
 		logger:      logger,
 		dg:          dg,
-		tracked:     make(map[MatchToken][]TaxiLinkMessage),
+		tracked:     make(map[TrackedMessage]MatchToken),
 	}
 
 	// do housekeeping on a tick to remove inactive matches
@@ -101,36 +120,26 @@ func (e *TaxiLinkRegistry) React(channelID, messageID string) error {
 // Track adds a message to the tracker
 func (e *TaxiLinkRegistry) Track(matchToken MatchToken, channelID, messageID string) {
 
-	t := TaxiLinkMessage{
+	t := TrackedMessage{
 		ChannelID: channelID,
 		MessageID: messageID,
 	}
 
-	e.Lock()
-	existing, found := e.tracked[matchToken]
-	if !found {
-		e.tracked[matchToken] = []TaxiLinkMessage{t}
-	}
-	existing = append(existing, t)
-	e.Unlock()
+	e.store(t, matchToken)
 }
 
-func (e *TaxiLinkRegistry) Remove(matchToken MatchToken) error {
-	e.Lock()
-	defer e.Unlock()
+func (e *TaxiLinkRegistry) Remove(t TrackedMessage) error {
 
-	tracks, found := e.tracked[matchToken]
+	_, found := e.load(t)
 	if !found {
 		return nil
 	}
 
-	for _, t := range tracks {
-		if err := e.Clear(t.ChannelID, t.MessageID, true); err != nil {
-			return err
-		}
+	if err := e.Clear(t.ChannelID, t.MessageID, true); err != nil {
+		return err
 	}
 
-	delete(e.tracked, matchToken)
+	e.delete(t)
 	return nil
 }
 
@@ -148,7 +157,7 @@ func (e *TaxiLinkRegistry) Clear(channelID, messageID string, all bool) error {
 		if !all && user.ID == e.dg.State.User.ID {
 			continue
 		}
-
+		e.logger.Debug("Removing reaction from %s", user.ID)
 		// Remove the reaction
 		if err = e.dg.MessageReactionRemove(channelID, messageID, TaxiEmoji, user.ID); err != nil {
 			return err
@@ -177,8 +186,7 @@ func (e *TaxiLinkRegistry) FindAppLink(content string) string {
 		for _, word := range strings.Fields(content) {
 
 			// Check if the word has a known prefix, and a match ID suffix
-			if strings.HasPrefix(word, prefix) && strings.HasSuffix(word, prefix) {
-
+			if strings.HasPrefix(word, prefix) {
 				return word
 			}
 		}
@@ -187,23 +195,25 @@ func (e *TaxiLinkRegistry) FindAppLink(content string) string {
 	return ""
 }
 
+func findMatchID(content string) string {
+	return matchIDPattern.FindString(content)
+}
+
 // Process processes a message for taxi reactions and link responses
-func (e *TaxiLinkRegistry) Process(channelID, messageID, content string, httpOnly bool) (err error) {
+func (e *TaxiLinkRegistry) Process(channelID, messageID, content string, reactOnly bool) (err error) {
 	// ignore dm reactions and reactions from the bot
 
-	// The Echo Taxi prefix
-	const EchoTaxiPrefix = "https://echo.taxi/"
-
 	// Detect a matchID in the message
-	var matchID string
-	if matchID = matchIDPattern.FindString(content); matchID == "" {
+
+	matchID := findMatchID(content)
+	if matchID == "" {
 		return
 	}
 
 	// Construct a match token
-	matchToken := MatchTokenFromStringOrNil(matchID)
-	if matchToken == "" {
-		return
+	matchToken, err := NewMatchToken(uuid.FromStringOrNil(matchID), e.node)
+	if err != nil {
+		return err
 	}
 
 	// Check if the match is in progress
@@ -212,7 +222,7 @@ func (e *TaxiLinkRegistry) Process(channelID, messageID, content string, httpOnl
 	}
 
 	// Check if the link is clickable (i.e. HTTP(s))
-	if !httpOnly && !strings.HasPrefix(content, "http") {
+	if !reactOnly && !strings.HasPrefix(content, "http") {
 
 		// If the link is not clickable, extract the app link
 		applink := e.FindAppLink(content)
@@ -222,23 +232,26 @@ func (e *TaxiLinkRegistry) Process(channelID, messageID, content string, httpOnl
 			return
 		}
 
+		// Replace the matchID with the uppercased one
+		applink = strings.Replace(applink, matchID, strings.ToUpper(matchID), 1)
+
 		// Try to respond in the channel with a "clickable" link
-		if r, err := e.dg.ChannelMessageSend(channelID, echoTaxiPrefix+applink); err == nil {
+		if r, err := e.dg.ChannelMessageSend(channelID, EchoTaxiPrefix+applink); err == nil {
 
 			// If the response was successful, then react and track the new message
 			messageID = r.ID
 		}
 	}
 
-	// Track the message/response
-	if err = e.React(channelID, messageID); err == nil {
-
-		// Track the message
-		e.Track(matchToken, channelID, messageID)
-
-		return nil
+	// React, and track the message
+	if err = e.React(channelID, messageID); err != nil {
+		return err
 	}
-	return
+
+	// Track the message
+	e.Track(matchToken, channelID, messageID)
+
+	return nil
 }
 
 // Status updates the status of the bot
@@ -257,32 +270,33 @@ func (e *TaxiLinkRegistry) Status(count int) error {
 
 // Prune removes all inactive matches, and their reactions
 func (e *TaxiLinkRegistry) Prune() (pruned int, err error) {
-
+	e.Lock()
+	defer e.Unlock()
 	// Check all the tracked matches
-	for m, tracks := range e.tracked {
+	for t, m := range e.tracked {
 
 		// Check if the match is still active
-		if _, err := e.nk.MatchGet(e.ctx, m.String()); err != nil {
+		match, err := e.nk.MatchGet(e.ctx, m.String())
+		if err == nil && match != nil {
 			continue
 		}
 
 		// If the match is not active, then remove the match from the tracker
-		delete(e.tracked, m)
+		delete(e.tracked, t)
 
 		// Remove all the taxi reactions from the channel messages
-		for _, t := range tracks {
-			// Clear the taxi reactions
-			if err := e.Clear(t.ChannelID, t.MessageID, true); err != nil {
-				e.logger.Warn("Error clearing taxi reactions: %v", err)
-			}
-			pruned++
+		if err := e.Clear(t.ChannelID, t.MessageID, true); err != nil {
+			e.logger.Warn("Error clearing taxi reactions: %v", err)
 		}
+		pruned++
 	}
 	return pruned, nil
 }
 
 // Count returns the number of actively tracked URLs
 func (e *TaxiLinkRegistry) Count() (cnt int) {
+	e.Lock()
+	defer e.Unlock()
 	for _, tracks := range e.tracked {
 		cnt += len(tracks)
 	}
@@ -315,9 +329,6 @@ func EchoTaxiRuntimeModule(ctx context.Context, logger runtime.Logger, db *sql.D
 
 	// Initialize the taxi bot
 	taxi := NewTaxiBot(ctx, logger, nk, node, linkRegistry, dg)
-	if err != nil {
-		return err
-	}
 
 	err = taxi.Initialize(dg)
 	if err != nil {
@@ -369,6 +380,9 @@ func (e *TaxiBot) Initialize(dg *discordgo.Session) error {
 
 	dg.StateEnabled = true
 
+	dg.AddHandler(e.handleMessageCreate)
+	dg.AddHandler(e.handleMessageReactionAdd)
+
 	err := dg.Open()
 	if err != nil {
 		return fmt.Errorf("Error opening EchoTaxi connection to Discord: %v", err)
@@ -384,14 +398,11 @@ func (e *TaxiBot) handleMessageCreate(s *discordgo.Session, m *discordgo.Message
 		return
 	}
 
-	httpOnly := false
 	// Deconflict avoids double messages from SprockLink
-	if reactOnly := e.Deconflict(m); reactOnly {
-		httpOnly = true // only react to http links (like echo.taxi or sprock.io)
-	}
+	reactOnly := e.Deconflict(m)
 
 	// Process the message
-	if err := e.linkRegistry.Process(m.ChannelID, m.ID, m.Content, httpOnly); err != nil {
+	if err := e.linkRegistry.Process(m.ChannelID, m.ID, m.Content, reactOnly); err != nil {
 		e.logger.Warn("Error processing message: %v", err)
 	}
 }
@@ -521,26 +532,26 @@ func (e *TaxiBot) handleMessageReactionAdd(s *discordgo.Session, reaction *disco
 	}
 
 	// Search for a match token in the tracked messages
-	matchID := matchIDPattern.FindString(reaction.MessageID)
-	if matchID == "" {
-		return
+	// See if this is a tracked message
+	t := TrackedMessage{
+		ChannelID: reaction.ChannelID,
+		MessageID: reaction.MessageID,
 	}
 
-	matchToken := MatchTokenFromStringOrNil(matchID + "." + e.node)
+	matchToken, found := e.linkRegistry.load(t)
+	if !found {
+		return
+	}
 
 	// Check if the match is live
 	if _, err = e.nk.MatchGet(e.ctx, matchToken.String()); err != nil {
 		logger.Warn("Error getting match: %s", err.Error())
-
-		err := e.linkRegistry.Remove(matchToken)
-
+		err := e.linkRegistry.Remove(t)
 		if err != nil {
 			logger.Warn("Error clearing match: %s", err.Error())
 		}
 		return
 	}
-
-	e.linkRegistry.Lock()
 
 	// Ensure the match is tracked
 	e.linkRegistry.Track(matchToken, reaction.ChannelID, reaction.MessageID)
@@ -571,9 +582,8 @@ func (e *TaxiBot) handleMessageReactionAdd(s *discordgo.Session, reaction *disco
 
 	// Message the user
 	// Create an echo taxi link for the message
-	matchComponents := strings.SplitN(matchID, ".", 2)
-	matchStr := fmt.Sprintf("<https://echo.taxi/spark://c/%s>", strings.ToUpper(matchComponents[0]))
-	dmMessage, err := s.ChannelMessageSend(dmChannelID, fmt.Sprintf("You have hailed a taxi to %s. Go into the game and click 'Play' on the main menu, or 'Find Match' on the lobby terminal. ", matchStr))
+	applink := fmt.Sprintf("<%sspark://c/%s>", EchoTaxiPrefix, strings.ToUpper(matchToken.ID().String()))
+	dmMessage, err := s.ChannelMessageSend(dmChannelID, fmt.Sprintf("You have hailed a taxi to %s.\n\nGo into the game and click 'Play' on the main menu, or 'Find Match' on the lobby terminal. ", applink))
 	if err != nil {
 		logger.Warn("Error sending message: %v", err)
 	}
@@ -584,7 +594,7 @@ func (e *TaxiBot) handleMessageReactionAdd(s *discordgo.Session, reaction *disco
 	// track the DM message
 	e.linkRegistry.Track(matchToken, dmChannelID, dmMessage.ID)
 
-	logger.Debug("%s hailed a taxi to %s", reaction.UserID, matchID)
+	logger.Debug("%s hailed a taxi to %s", reaction.UserID, matchToken.String())
 }
 
 func (e *TaxiBot) handleMessageReactionRemove(s *discordgo.Session, reaction *discordgo.MessageReactionRemove) {
