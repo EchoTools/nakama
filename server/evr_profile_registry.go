@@ -148,7 +148,10 @@ type ProfileRegistry struct {
 	unlocksByItemName map[string]string
 
 	// Profiles by user ID
-	store *MapOf[string, GameProfileData]
+	storeMu sync.RWMutex
+	store   map[string]GameProfileData // map[userID]GameProfileData
+
+	cacheMu sync.RWMutex
 	// Fast lookup of profiles for players already in matches
 	cache map[evr.EvrId][]byte
 	// Load out default items
@@ -167,7 +170,7 @@ func NewProfileRegistry(nk runtime.NakamaModule, db *sql.DB, logger runtime.Logg
 		nk:              nk,
 		discordRegistry: discordRegistry,
 
-		store: &MapOf[string, GameProfileData]{},
+		store: make(map[string]GameProfileData),
 		cache: make(map[evr.EvrId][]byte, 200),
 
 		unlocksByItemName: unlocksByFieldName,
@@ -253,16 +256,18 @@ func (r *ProfileRegistry) checkDefaultProfile() GameProfileData {
 			Server: evr.NewServerProfile(),
 		}
 	}
-
-	r.Store(userID, profile)
+	r.storeMu.Lock()
+	r.store[userID.String()] = profile
+	r.storeMu.Unlock()
 	return profile
 }
 
 // Load the user's profile from memory (or storage if not found)
 func (r *ProfileRegistry) Load(userID uuid.UUID, evrID evr.EvrId) (profile GameProfileData, found bool) {
 	var err error
-
-	profile, found = r.store.Load(userID.String())
+	r.storeMu.Lock()
+	profile, found = r.store[userID.String()]
+	defer r.storeMu.Unlock()
 	if !found {
 		// (Attempt) to load the profile from storage
 		profile, err = r.retrieve(context.Background(), userID)
@@ -270,8 +275,10 @@ func (r *ProfileRegistry) Load(userID uuid.UUID, evrID evr.EvrId) (profile GameP
 			r.logger.Error("failed to load profile", zap.Error(err))
 			return
 		}
+		r.store[userID.String()] = profile
 	}
 	profile.SetEvrID(evrID)
+
 	return profile, true
 }
 
@@ -284,24 +291,32 @@ var (
 // Set the user's profile in memory
 func (r *ProfileRegistry) Store(userID uuid.UUID, p GameProfileData) error {
 	p.timestamp = time.Now()
-	r.store.Store(userID.String(), p)
+	r.storeMu.Lock()
+	r.store[userID.String()] = p
+	r.storeMu.Unlock()
 	return nil
 }
 
 // Save the profile from memory (and store it)
 func (r *ProfileRegistry) Save(userID uuid.UUID) {
 	// Lock to avoid a read while the profile is being stored
-	profile, loaded := r.store.LoadAndDelete(userID.String())
+	u := userID.String()
+	r.storeMu.Lock()
+	defer r.storeMu.Unlock()
+	profile, loaded := r.store[u]
 	if !loaded {
-		r.logger.Warn("Profile not loaded", zap.String("user_id", userID.String()))
+		r.logger.Warn("Profile not in store for %s", userID.String())
 		return
 	}
+	delete(r.store, u)
 	r.save(context.Background(), userID, &profile)
 }
 
 func (r *ProfileRegistry) LoadOrNew(userID uuid.UUID, evrID evr.EvrId) (profile GameProfileData, created bool) {
 	profile, found := r.Load(userID, evrID)
 	if !found {
+		r.storeMu.Lock()
+		defer r.storeMu.Unlock()
 		defaultprofile, err := r.retrieve(r.ctx, uuid.Nil)
 		if err != nil {
 			panic("failed to load default profile")
@@ -315,6 +330,7 @@ func (r *ProfileRegistry) LoadOrNew(userID uuid.UUID, evrID evr.EvrId) (profile 
 		} else {
 			profile.Server.EquippedCosmetics.Instances.Unified.Slots = *loadout
 		}
+
 	}
 	profile.SetEvrID(evrID)
 
@@ -773,8 +789,10 @@ func (r *ProfileRegistry) ValidateArenaUnlockByName(i interface{}, itemName stri
 }
 
 func (r *ProfileRegistry) GetSessionProfile(ctx context.Context, session *sessionWS, loginProfile evr.LoginProfile, evrID evr.EvrId) (GameProfileData, error) {
-	p, _ := r.LoadOrNew(session.userID, evrID)
-
+	p, created := r.LoadOrNew(session.userID, evrID)
+	if !created {
+		session.logger.Info("Created new game profile")
+	}
 	p.Login = loginProfile
 	p.Server.PublisherLock = p.Login.PublisherLock
 	p.Server.LobbyVersion = p.Login.LobbyVersion
@@ -842,7 +860,7 @@ func (r *ProfileRegistry) UpdateClientProfile(ctx context.Context, logger *zap.L
 			p.Server.UpdateTime = time.Now().UTC().Unix()
 		}
 	}
-	defer r.Store(session.userID, p)
+	r.Store(session.userID, p)
 	return p, nil
 }
 

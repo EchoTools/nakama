@@ -552,7 +552,7 @@ func (p *EvrPipeline) remoteLogSetv3(ctx context.Context, logger *zap.Logger, se
 			if category == "" || name == "" {
 				logger.Error("Equipped customization is empty")
 			}
-
+			p.profileRegistry.storeMu.Lock()
 			profile, found := p.profileRegistry.Load(session.userID, evrID)
 			if !found {
 				return status.Errorf(codes.Internal, "Failed to get player's profile")
