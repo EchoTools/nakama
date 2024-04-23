@@ -57,6 +57,19 @@ func (p *EvrPipeline) ListUnassignedLobbies(ctx context.Context, session *sessio
 	// TODO FIXME Add version lock and appid
 	query := strings.Join(qparts, " ")
 
+	// Load the matchmaking config and add the user's config to the query
+
+	gconfig, err := p.matchmakingRegistry.LoadMatchmakingSettings(ctx, SystemUserID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to load global matchmaking config: %v", err)
+	}
+
+	config, err := p.matchmakingRegistry.LoadMatchmakingSettings(ctx, session.UserID().String())
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to load matchmaking config: %v", err)
+	}
+	query = fmt.Sprintf("%s %s %s", query, gconfig.CreateQueryAddon, config.CreateQueryAddon)
+
 	limit := 100
 	minSize, maxSize := 1, 1 // Only the 1 broadcaster should be there.
 	session.logger.Debug("Listing unassigned lobbies", zap.String("query", query))
@@ -227,7 +240,7 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 		return "", status.Errorf(codes.Internal, "Failed to load matchmaking config: %v", err)
 	}
 	// Merge the user's config with the global config
-	query = fmt.Sprintf("%s %s %s", query, gconfig.QueryAddon, config.QueryAddon)
+	query = fmt.Sprintf("%s %s %s", query, gconfig.BackfillQueryAddon, config.BackfillQueryAddon)
 
 	partyID := uuid.Nil
 
