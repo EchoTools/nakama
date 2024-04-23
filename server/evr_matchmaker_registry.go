@@ -341,15 +341,17 @@ func NewMatchmakingRegistry(logger *zap.Logger, matchRegistry MatchRegistry, mat
 }
 
 type MatchmakingSettings struct {
-	MinCount             int        `json:"min_count"`             // Minimum number of matches to create
-	MaxCount             int        `json:"max_count"`             // Maximum number of matches to create
-	CountMultiple        int        `json:"count_multiple"`        // Count multiple of the party size
-	QueryAddon           string     `json:"query_addon"`           // Additional query to add to the matchmaking query
-	GroupID              string     `json:"group_id"`              // Group ID to matchmake with
-	PriorityPlayers      []string   `json:"priority_players"`      // Prioritize these players
-	PriorityBroadcasters []string   `json:"priority_broadcasters"` // Prioritize these broadcasters
-	DisableBackfill      bool       `json:"disable_backfill"`      // Backfill matches
-	NextMatchToken       MatchToken `json:"next_match_id"`         // Try to join this match immediately when finding a match
+	MinCount              int        `json:"min_count"`               // Minimum number of matches to create
+	MaxCount              int        `json:"max_count"`               // Maximum number of matches to create
+	CountMultiple         int        `json:"count_multiple"`          // Count multiple of the party size
+	BackfillQueryAddon    string     `json:"backfill_query_addon"`    // Additional query to add to the matchmaking query
+	MatchmakingQueryAddon string     `json:"matchmaking_query_addon"` // Additional query to add to the matchmaking query
+	CreateQueryAddon      string     `json:"create_query_addon"`      // Additional query to add to the matchmaking query
+	GroupID               string     `json:"group_id"`                // Group ID to matchmake with
+	PriorityPlayers       []string   `json:"priority_players"`        // Prioritize these players
+	PriorityBroadcasters  []string   `json:"priority_broadcasters"`   // Prioritize these broadcasters
+	DisableBackfill       bool       `json:"disable_backfill"`        // Backfill matches
+	NextMatchToken        MatchToken `json:"next_match_id"`           // Try to join this match immediately when finding a match
 }
 
 func (r *MatchmakingRegistry) LoadMatchmakingSettings(ctx context.Context, userID string) (config MatchmakingSettings, err error) {
