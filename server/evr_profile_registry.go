@@ -256,36 +256,36 @@ func (r *ProfileRegistry) Cache(profile evr.ServerProfile) error {
 	return nil
 }
 
-func (r *ProfileRegistry) checkDefaultProfile() GameProfileData {
-	// Create default profiles under the system user
-	userID := uuid.Nil
-
-	profile, ok := r.Load(userID, evr.EvrIdNil)
-	if !ok {
-		profile = GameProfileData{
-			Client: evr.NewClientProfile(),
-			Server: evr.NewServerProfile(),
-		}
-	}
-	r.Store(userID, profile)
-	return profile
-}
-
 // Load the user's profile from memory (or storage if not found)
 func (r *ProfileRegistry) Load(userID uuid.UUID, evrID evr.EvrId) (profile GameProfileData, created bool) {
 	var found bool
 	var err error
+	ctx, cancel := context.WithTimeout(r.ctx, 2*time.Second)
+	defer cancel()
 
+	profile, found = r.load(userID)
 	if !found {
-		// (Attempt) to load the profile from storage
-		profile, err = r.retrieve(context.Background(), userID)
+		// try to load the profile from storage
+		profile, err = r.retrieve(ctx, userID)
 		if err != nil {
-			profile.Client = evr.NewClientProfile()
-			profile.Server = evr.NewServerProfile()
-			return profile, false
+			r.logger.Warn("failed to load profile for %s: %s", userID.String(), err.Error())
+			// try the system profile
+			profile, err = r.retrieve(ctx, uuid.Nil)
+			if err != nil {
+				r.logger.Error("failed to load system profile for %s: %s", userID.String(), err.Error())
+				// the profile is missing, just use a default
+				profile = GameProfileData{
+					Client: evr.NewClientProfile(),
+					Server: evr.NewServerProfile(),
+				}
+				err := r.save(ctx, uuid.Nil, &profile)
+				if err != nil {
+					r.logger.Warn("failed to save default profile: %s", err.Error())
+				}
+			}
 		}
-		r.store(userID, profile)
 	}
+	r.store(userID, profile)
 	profile.SetEvrID(evrID)
 
 	return profile, true

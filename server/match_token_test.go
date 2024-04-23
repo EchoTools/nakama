@@ -283,3 +283,20 @@ func TestMatchTokenFromStringOrNil(t *testing.T) {
 		})
 	}
 }
+
+func TestMatchToken_Nil(t *testing.T) {
+	tests := []struct {
+		name string
+		m    MatchToken
+		want MatchToken
+	}{
+		// TODO: Add test cases.
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.m.Nil(); got != tt.want {
+				t.Errorf("MatchToken.Nil() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

@@ -31,6 +31,7 @@ var (
 )
 
 func (p *EvrPipeline) ListUnassignedLobbies(ctx context.Context, session *sessionWS, ml *EvrMatchState) ([]*EvrMatchState, error) {
+
 	// TODO Move this into the matchmaking registry
 	qparts := make([]string, 0, 10)
 

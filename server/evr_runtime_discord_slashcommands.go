@@ -557,8 +557,9 @@ func (d *DiscordAppBot) InitializeDiscordBot() error {
 	})
 	return nil
 }
+
 func (d *DiscordAppBot) UnregisterCommandsAll(ctx context.Context, logger runtime.Logger, dg *discordgo.Session) {
-	guilds, err := dg.UserGuilds(100, "", "")
+	guilds, err := dg.UserGuilds(100, "", "", false)
 	if err != nil {
 		logger.Error("Error fetching guilds,", zap.Error(err))
 		return

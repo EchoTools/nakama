@@ -1,6 +1,7 @@
 package evr
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 
@@ -272,6 +273,78 @@ func TestEvrId_MarshalText(t *testing.T) {
 			}
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("EvrId.MarshalText() = `%v`, want `%v`", string(got), string(tt.want))
+			}
+		})
+	}
+}
+
+func TestEvrId_UnmarshalJSON(t *testing.T) {
+	type fields struct {
+		PlatformCode PlatformCode
+		AccountId    uint64
+	}
+	type args struct {
+		b []byte
+	}
+	tests := []struct {
+		name    string
+		fields  fields
+		args    args
+		wantErr bool
+	}{
+		{
+			name: "valid",
+			fields: fields{
+				PlatformCode: 1,
+				AccountId:    1,
+			},
+			args: args{
+				b: []byte(`"STM-1"`),
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid PlatformCode",
+			fields: fields{
+				PlatformCode: 0,
+				AccountId:    1,
+			},
+			args: args{
+				b: []byte(`"UNK-1"`),
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid AccountId",
+			fields: fields{
+				PlatformCode: 1,
+				AccountId:    0,
+			},
+			args: args{
+				b: []byte(`"STM-0"`),
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid",
+			fields: fields{
+				PlatformCode: 0,
+				AccountId:    0,
+			},
+			args: args{
+				b: []byte(`""`),
+			},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := &EvrId{
+				PlatformCode: tt.fields.PlatformCode,
+				AccountId:    tt.fields.AccountId,
+			}
+			if err := json.Unmarshal(tt.args.b, e); (err != nil) != tt.wantErr {
+				t.Errorf("EvrId.UnmarshalJSON() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
