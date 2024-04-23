@@ -247,3 +247,12 @@ func TestGameProfileData_UpdateUnlocks(t *testing.T) {
 		})
 	}
 }
+
+type testProfileRegistry struct {
+	ProfileRegistry
+	mockLoadFn func(userID uuid.UUID) (*GameProfileData, bool)
+}
+
+func (r *testProfileRegistry) Load(userID uuid.UUID) (*GameProfileData, bool) {
+	return r.mockLoadFn(userID)
+}

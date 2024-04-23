@@ -19,6 +19,10 @@ var (
 // MatchToken represents a unique identifier for a match, consisting of a uuid.UUID and a node name.
 type MatchToken string
 
+func (MatchToken) Nil() MatchToken {
+	return MatchToken("")
+}
+
 func NewMatchToken(id uuid.UUID, node string) (MatchToken, error) {
 	if id == uuid.Nil || node == "" {
 		return "", ErrInvalidMatchToken
@@ -77,6 +81,10 @@ func MatchTokenFromString(s string) (t MatchToken, err error) {
 	return
 }
 
+// FromStringOrNil returns a UUID parsed from the input string. Same behavior as FromString(), but returns uuid.Nil instead of an error.
+
+// FromStringOrNil returns a UUID parsed from the input string.
+// Same behavior as FromString(), but returns uuid.Nil instead of an error.
 func MatchTokenFromStringOrNil(s string) MatchToken {
 	t, err := MatchTokenFromString(s)
 	if err != nil {

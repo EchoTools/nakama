@@ -181,7 +181,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		placeholderEmail: config.GetRuntime().Environment["PLACEHOLDER_EMAIL_DOMAIN"],
 		linkDeviceURL:    config.GetRuntime().Environment["LINK_DEVICE_URL"],
 	}
-	evrPipeline.profileRegistry.checkDefaultProfile()
+
 	runtime.MatchmakerMatched()
 
 	// Create a timer to periodically clear the backfill queue
