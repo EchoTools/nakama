@@ -71,7 +71,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	}
 
 	// Update the metrics with match data
-	go metricsUpdateLoop(ctx, logger, db, nk.(*RuntimeGoNakamaModule))
+	go metricsUpdateLoop(ctx, logger, nk.(*RuntimeGoNakamaModule))
 
 	logger.Info("Initialized runtime module.")
 	return nil
@@ -116,7 +116,7 @@ func listMatchStates(ctx context.Context, nk runtime.NakamaModule, query string)
 	return matchStates, nil
 }
 
-func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, db *sql.DB, nk *RuntimeGoNakamaModule) {
+func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGoNakamaModule) {
 
 	// Create a ticker to update the metrics every 5 minutes
 	ticker := time.NewTicker(60 * time.Second)
@@ -129,8 +129,8 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 				logger.Error("Error listing match states: %v", err)
 				continue
 			}
+			logger.Info("Match states: %d", len(matchStates))
 			playercounts := make(map[string]int)
-			totalplayers := 0
 			// Log the match states
 			for _, state := range matchStates {
 				// calculate the team sizes
@@ -145,14 +145,9 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 					"tickRate": fmt.Sprintf("%d", state.TickRate),
 				}
 				playercounts[state.State.Mode.String()] += len(state.State.Players)
-				totalplayers += len(state.State.Players)
-				nk.metrics.CustomCounter("match", tags, 1)
+
+				nk.metrics.CustomCounter("match_gauge", tags, 1)
 			}
-			// Set the player count by mode
-			for mode, playercount := range playercounts {
-				nk.metrics.CustomGauge("playercount_gauge", map[string]string{"mode": mode}, float64(playercount))
-			}
-			nk.metrics.CustomGauge("playercount_total_gauge", map[string]string{}, float64(totalplayers))
 
 		case <-ctx.Done():
 			// Context has been cancelled, return
