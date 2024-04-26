@@ -49,6 +49,7 @@ var (
 	LevelCombustion   Symbol = ToSymbol("mpl_combat_combustion") // Echo Combat
 	LevelDyson        Symbol = ToSymbol("mpl_combat_dyson")      // Echo Combat
 	LevelGauss        Symbol = ToSymbol("mpl_combat_gauss")      // Echo Combat
+	LevelPebbles      Symbol = ToSymbol("mpl_combat_pebbles")    // Echo Combat
 )
 
 type BroadcasterStartSession struct {

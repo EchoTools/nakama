@@ -665,9 +665,9 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 		evr.ModeSocialPublic:         {evr.LevelSocial},
 		evr.ModeSocialPrivate:        {evr.LevelSocial},
 		evr.ModeSocialNPE:            {evr.LevelSocial},
-		evr.ModeCombatPublic:         {evr.LevelCombustion, evr.LevelDyson, evr.LevelFission, evr.LevelGauss},
-		evr.ModeCombatPrivate:        {evr.LevelCombustion, evr.LevelDyson, evr.LevelFission, evr.LevelGauss},
-		evr.ModeEchoCombatTournament: {evr.LevelCombustion, evr.LevelDyson, evr.LevelFission, evr.LevelGauss},
+		evr.ModeCombatPublic:         {evr.LevelCombustion, evr.LevelDyson, evr.LevelFission, evr.LevelGauss, evr.LevelPebbles},
+		evr.ModeCombatPrivate:        {evr.LevelCombustion, evr.LevelDyson, evr.LevelFission, evr.LevelGauss, evr.LevelPebbles},
+		evr.ModeEchoCombatTournament: {evr.LevelCombustion, evr.LevelDyson, evr.LevelFission, evr.LevelGauss, evr.LevelPebbles},
 	}
 
 	if levels, ok := validLevels[request.Mode]; ok {
