@@ -619,18 +619,16 @@ func (p *EvrPipeline) documentRequest(ctx context.Context, logger *zap.Logger, s
 		return fmt.Errorf("unknown document: %s", key)
 	}
 
-	// If this is a NoVR user, then use the original EULA with version 1.
-	// Get the NoVR from the ctx
-
-	noVr, ok := ctx.Value(ctxNoVRKey{}).(bool)
-	if ok && noVr {
-		document = evr.NewEulaDocument(1, 1, "")
+	// If this is a NoVR user, then use the original EULA with version 1 to avoid soft-locking the client.
+	if flags, ok := ctx.Value(ctxFlagsKey{}).(int); ok {
+		if flags&FlagNoVR != 0 {
+			document = evr.NewEulaDocument(1, 1, "")
 
 		session.SendEvr(
 			evr.NewSNSDocumentSuccess(document),
 			evr.NewSTcpConnectionUnrequireEvent(),
 		)
-
+		return nil
 	}
 
 	// Then always return a default document with a version of 1.
