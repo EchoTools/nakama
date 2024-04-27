@@ -643,8 +643,10 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 
 	// If this is a NoVR user, give the profile's displayName a bot suffix
 	// Get the NoVR key from context
-	if novr, ok := ctx.Value(ctxNoVRKey{}).(bool); ok && novr {
-		displayName = "d[o_0]b " + displayName
+	if flags, ok := ctx.Value(ctxFlagsKey{}).(int); ok {
+		if flags&FlagNoVR != 0 {
+			displayName = fmt.Sprintf("%s [BOT]", displayName)
+		}
 	}
 
 	// Set the profile's display name.
