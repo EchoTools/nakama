@@ -146,10 +146,22 @@ func (p *EvrPipeline) processLogin(ctx context.Context, session *sessionWS, evrI
 		}
 	}
 
-	noVR := loginProfile.SystemInfo.HeadsetType == "No VR"
+	flags := 0
+	if loginProfile.SystemInfo.HeadsetType == "No VR" {
+		flags |= FlagNoVR
+	}
+
+	uid := uuid.FromStringOrNil(userId)
+	for name, flag := range groupFlagMap {
+		if ok, err := checkGroupMembershipByName(ctx, p.runtimeModule, uid, name, userId); err != nil {
+			return settings, fmt.Errorf("failed to check group membership: %w", err)
+		} else if ok {
+			flags |= flag
+		}
+	}
 
 	// Initialize the full session
-	if err := session.LoginSession(userId, user.GetUsername(), evrId, deviceId, noVR); err != nil {
+	if err := session.LoginSession(userId, user.GetUsername(), evrId, deviceId, flags); err != nil {
 		return settings, fmt.Errorf("failed to login: %w", err)
 	}
 	ctx = session.Context()

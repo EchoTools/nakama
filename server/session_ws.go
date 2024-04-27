@@ -102,6 +102,7 @@ type (
 	ctxPasswordKey          struct{} // The Password from the urlparam(used to authenticate login/broadcaster connections)
 	ctxUrlParamsKey         struct{} // The URL parameters from the request
 	ctxIPinfoTokenKey       struct{} // The IPinfo token from the config
+	ctxFlagsKey             struct{} // The group flags from the urlparam
 	//ctxMatchmakingQueryKey         struct{} // The Matchmaking query from the urlparam
 	//ctxMatchmakingGuildPriorityKey struct{} // The Matchmaking guild priority from the urlparam
 )
@@ -206,7 +207,7 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 	}
 }
 
-func (s *sessionWS) LoginSession(userID string, username string, evrID evr.EvrId, deviceId *DeviceId, noVR bool) error {
+func (s *sessionWS) LoginSession(userID string, username string, evrID evr.EvrId, deviceId *DeviceId, flags int) error {
 	// Each player has a single login connection, which will act as the core session.
 	// When this connection is terminated, all other connections should be terminated.
 
@@ -225,7 +226,7 @@ func (s *sessionWS) LoginSession(userID string, username string, evrID evr.EvrId
 	ctx = context.WithValue(ctx, ctxEvrIDKey{}, evrID)
 	ctx = context.WithValue(ctx, ctxUserIDKey{}, uuid.FromStringOrNil(userID)) // apiServer compatibility
 	ctx = context.WithValue(ctx, ctxUsernameKey{}, username)                   // apiServer compatibility
-	ctx = context.WithValue(ctx, ctxNoVRKey{}, noVR)
+	ctx = context.WithValue(ctx, ctxFlagsKey{}, flags)
 
 	s.Lock()
 	s.ctx = ctx
@@ -359,6 +360,11 @@ func (s *sessionWS) ValidateSession(loginSessionID uuid.UUID, evrID evr.EvrId) e
 			return fmt.Errorf("login session does not have a username")
 		}
 
+		flags, ok := loginCtx.Value(ctxFlagsKey{}).(int)
+		if !ok {
+			return fmt.Errorf("login session does not have system group flags")
+		}
+
 		// Require the login session to be authenticated.
 		if userID == uuid.Nil {
 			return fmt.Errorf("login session not authenticated")
@@ -369,6 +375,7 @@ func (s *sessionWS) ValidateSession(loginSessionID uuid.UUID, evrID evr.EvrId) e
 		ctx = context.WithValue(ctx, ctxEvrIDKey{}, evrID)
 		ctx = context.WithValue(ctx, ctxUserIDKey{}, userID)     // apiServer compatibility
 		ctx = context.WithValue(ctx, ctxUsernameKey{}, username) // apiServer compatibility
+		ctx = context.WithValue(ctx, ctxFlagsKey{}, flags)
 
 		// Set the session information
 		s.Lock()
