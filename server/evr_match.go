@@ -426,18 +426,29 @@ func selectTeamForPlayer(logger runtime.Logger, presence *EvrMatchPresence, stat
 	teamsFull := playerpop >= state.TeamSize*2
 	specsFull := spectators >= int(state.MaxSize)-state.TeamSize*2
 
-	if len(state.presences) >= MatchMaxSize {
-		// Lobby full, reject.
+	// If the lobby is full, reject
+	if len(state.presences) >= int(state.MaxSize) {
 		return evr.TeamUnassigned, false
 	}
 
-	// Force the player to be on the spectator team if the match is in social mode.
+	// If the player is a moderator and the spectators are not full, return
+	if t == evr.TeamModerator && !specsFull {
+		return t, true
+	}
+
+	// If the match has been running for less than 15 seconds check the presets for the team
+	if time.Since(state.StartedAt) < 15*time.Second || state.LobbyType == PrivateLobby {
+		if teamIndex, ok := state.teamAlignments[presence.EvrID]; ok {
+			// Make sure the team isn't already full
+			if len(teams[teamIndex]) < state.TeamSize {
+				return teamIndex, true
+			}
+		}
+	}
+
+	// If this is a social lobby, put the player on the social team.
 	if state.Mode == evr.ModeSocialPublic || state.Mode == evr.ModeSocialPrivate {
-		// Social mode, put them on the spectator team.
 		return evr.TeamSocial, true
-	} else if t == evr.TeamSocial {
-		// Disallow social team outside of social lobbies
-		t = evr.TeamUnassigned
 	}
 
 	// If the player is unassigned, assign them to a team.
@@ -445,43 +456,37 @@ func selectTeamForPlayer(logger runtime.Logger, presence *EvrMatchPresence, stat
 		t = evr.TeamBlue
 	}
 
-	// If the teams are full
-	if (t == evr.TeamBlue || t == evr.TeamOrange) && teamsFull {
-		// If it's a private, put the player on spectator.
+	// If this is a private lobby, and the teams are full, put them on spectator
+	if t != evr.TeamSpectator && teamsFull {
 		if state.LobbyType == PrivateLobby {
 			t = evr.TeamSpectator
 		} else {
-			// Reject the player.
-			logger.Debug("Teams are full")
+			// The lobby is full, reject the player.
 			return evr.TeamUnassigned, false
 		}
 	}
 
-	// If the player is a spectator or moderator, assign them to the spectator team.
-	if t == evr.TeamSpectator || t == evr.TeamModerator {
+	// If this is a spectator, and the spectators are not full, return
+	if t == evr.TeamSpectator {
 		if specsFull {
-			// Spectator or Moderator
-			logger.Debug("Spectators full.")
-			// Spectator population is full, reject.
 			return evr.TeamUnassigned, false
 		}
 		return t, true
 	}
+	// If this is a private lobby, and their team is not full,  put the player on the team they requested
+	if state.LobbyType == PrivateLobby && len(teams[t]) < state.TeamSize {
+		return t, true
+	}
 
-	if state.LobbyType == PrivateLobby {
-		// If the player's team has room, assign them to it.
-		if len(teams[t]) < state.TeamSize {
-			logger.Debug("Private has room.")
-			return t, true
+	// If the players team is unbalanced, put them on the other team
+	if len(teams[evr.TeamBlue]) != len(teams[evr.TeamOrange]) {
+		if len(teams[evr.TeamBlue]) < len(teams[evr.TeamOrange]) {
+			t = evr.TeamBlue
+		} else {
+			t = evr.TeamOrange
 		}
 	}
 
-	// Assign them to the lowest population team
-	if len(blueTeam) < len(orangeTeam) {
-		t = evr.TeamBlue
-	} else {
-		t = evr.TeamOrange
-	}
 	logger.Debug("picked team", zap.Int("team", t))
 	return t, true
 }
@@ -514,24 +519,31 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	}
 
 	// This is a player joining.
-	if state.LobbyType == UnassignedLobby {
-		// This is a parking match. reject the player.
-		return state, false, ErrJoinRejectedUnassignedLobby
-	}
-
-	// Verify this isn't a duplicate. It will crash the server if they are allowed to join.
-	sessionID := uuid.FromStringOrNil(presence.GetSessionId())
-	if _, ok := state.presences[sessionID]; ok {
-		logger.Warn("Duplicate join attempt.")
-		//return state, false, ErrJoinRejectedDuplicateJoin
-	}
-
 	mp := &EvrMatchPresence{}
 	if err := json.Unmarshal([]byte(metadata["playermeta"]), &mp); err != nil {
 		return state, false, fmt.Sprintf("failed to unmarshal metadata: %q", err)
 	}
 
-	// Check if they are a moderator
+	// If this is a parking match, reject the player
+	if state.LobbyType == UnassignedLobby {
+		return state, false, ErrJoinRejectedUnassignedLobby
+	}
+
+	// If this session is already in the match, reject the player
+	sessionID := uuid.FromStringOrNil(presence.GetSessionId())
+	if _, ok := state.presences[sessionID]; ok {
+		logger.Warn("Rejecting duplicate join attempt.")
+		return state, false, ErrJoinRejectedDuplicateJoin
+	}
+	// If this EvrID is already in the match, reject the player
+	for _, p := range state.presences {
+		if p.EvrID == evr.EvrId(mp.EvrID) {
+			logger.Warn("Rejecting join from existing EVR-ID: %s", metadata["evrid"])
+			return state, false, ErrJoinRejectedDuplicateJoin
+		}
+	}
+
+	// If the player is not allowed to be a moderator, reject them.
 	if mp.TeamIndex == evr.TeamModerator {
 		found, err := checkIfGlobalModerator(ctx, nk, uuid.FromStringOrNil(presence.GetUserId()))
 		if err != nil {
@@ -540,6 +552,11 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		if !found {
 			return state, false, ErrJoinRejectedNotModerator
 		}
+	}
+
+	// If the lobby is full, reject them
+	if len(state.presences) >= MatchMaxSize {
+		return state, false, ErrJoinRejectedLobbyFull
 	}
 
 	// If the entrant is joining as a spectator, do not look up their previous team.
@@ -556,21 +573,6 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		return state, false, ErrJoinRejectedLobbyFull
 	}
 
-	// If the match has been running for less than 15 seconds, or it's a private, check the presets for the team
-	if state.LobbyType == PrivateLobby || time.Since(state.StartedAt) < 15*time.Second {
-		if teamIndex, ok := state.teamAlignments[mp.EvrID]; ok {
-			// Make sure the team isn't already full
-			if mp.TeamIndex == evr.TeamOrange || mp.TeamIndex == evr.TeamBlue {
-				teams := lo.GroupBy(lo.Values(state.presences), func(p *EvrMatchPresence) int { return p.TeamIndex })
-				if len(teams[teamIndex]) <= state.TeamSize {
-					// Only change it if it here is room on the team.
-					if len(teams[teamIndex]) < state.TeamSize {
-						mp.TeamIndex = teamIndex
-					}
-				}
-			}
-		}
-	}
 	// Reserve this player's spot in the match.
 	state.presences[sessionID] = mp
 
@@ -984,6 +986,7 @@ func (m *EvrMatch) StartSession(ctx context.Context, logger runtime.Logger, nk r
 	state.StartedAt = time.Now()
 	entrants := make([]evr.EvrId, 0)
 	message := evr.NewBroadcasterStartSession(state.MatchID, channel, state.MaxSize, uint8(state.LobbyType), state.Broadcaster.AppId, state.Mode, state.Level, entrants)
+	logger.Info("Starting session. %v", message)
 	messages := []evr.Message{
 		message,
 	}

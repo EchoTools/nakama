@@ -40,16 +40,17 @@ var (
 	ModeCombatPublic         Symbol = ToSymbol("echo_combat")            // Echo Combat
 	ModeCombatPrivate        Symbol = ToSymbol("echo_combat_private")    // Private Echo Combat
 
-	LevelUnloaded     Symbol = Symbol(0)                         // Unloaded Lobby
-	LevelSocial       Symbol = ToSymbol("mpl_lobby_b2")          // Social Lobby
-	LevelUnspecified  Symbol = Symbol(0xffffffffffffffff)        // Unspecified Level
-	LevelArena        Symbol = ToSymbol("mpl_arena_a")           // Echo Arena
-	ModeArenaTutorial Symbol = ToSymbol("mpl_tutorial_arena")    // Echo Arena Tutorial
-	LevelFission      Symbol = ToSymbol("mpl_combat_fission")    // Echo Combat
-	LevelCombustion   Symbol = ToSymbol("mpl_combat_combustion") // Echo Combat
-	LevelDyson        Symbol = ToSymbol("mpl_combat_dyson")      // Echo Combat
-	LevelGauss        Symbol = ToSymbol("mpl_combat_gauss")      // Echo Combat
-	LevelPebbles      Symbol = ToSymbol("mpl_combat_pebbles")    // Echo Combat
+	LevelUnloaded     Symbol = Symbol(0)                          // Unloaded Lobby
+	LevelSocial       Symbol = ToSymbol("mpl_lobby_b2")           // Social Lobby
+	LevelUnspecified  Symbol = Symbol(0xffffffffffffffff)         // Unspecified Level
+	LevelArena        Symbol = ToSymbol("mpl_arena_a")            // Echo Arena
+	ModeArenaTutorial Symbol = ToSymbol("mpl_tutorial_arena")     // Echo Arena Tutorial
+	LevelFission      Symbol = ToSymbol("mpl_combat_fission")     // Echo Combat
+	LevelCombustion   Symbol = ToSymbol("mpl_combat_combustion")  // Echo Combat
+	LevelDyson        Symbol = ToSymbol("mpl_combat_dyson")       // Echo Combat
+	LevelGauss        Symbol = ToSymbol("mpl_combat_gauss")       // Echo Combat
+	LevelPebbles      Symbol = ToSymbol("mpl_combat_pebbles")     // Echo Combat
+	LevelPtyPebbles   Symbol = ToSymbol("pty_mpl_combat_pebbles") // Echo Combat
 )
 
 type BroadcasterStartSession struct {
@@ -69,29 +70,18 @@ func (s *BroadcasterStartSession) String() string {
 		s.MatchID, s.PlayerLimit, s.LobbyType, s.Settings.String(), s.Entrants)
 }
 
-func NewBroadcasterStartSession(sessionId uuid.UUID, channel uuid.UUID, playerLimit uint8, lobbyType uint8, appId string, mode Symbol, level Symbol, entrants []EvrId) *BroadcasterStartSession {
+func NewBroadcasterStartSession(sessionID uuid.UUID, channel uuid.UUID, playerLimit uint8, lobbyType uint8, appID string, mode Symbol, level Symbol, entrants []EvrId) *BroadcasterStartSession {
 	descriptors := make([]EntrantDescriptor, len(entrants))
 	for i, entrant := range entrants {
 		descriptors[i] = *NewEntrantDescriptor(entrant)
 	}
 
-	settings := SessionSettings{
-		AppId: appId,
-		Mode:  int64(mode),
-		Level: nil,
-	}
-
-	if level != 0 {
-		l := int64(level)
-		settings.Level = &l
-	}
-
 	return &BroadcasterStartSession{
-		MatchID:     sessionId,
+		MatchID:     sessionID,
 		Channel:     channel,
 		PlayerLimit: byte(playerLimit),
 		LobbyType:   byte(lobbyType),
-		Settings:    settings,
+		Settings:    NewSessionSettings(appID, mode, level),
 		Entrants:    descriptors,
 	}
 }
@@ -102,10 +92,10 @@ type SessionSettings struct {
 	Level *int64 `json:"level"`
 }
 
-func NewSessionSettings(appId string, mode Symbol, level Symbol) SessionSettings {
+func NewSessionSettings(appID string, mode Symbol, level Symbol) SessionSettings {
 
 	settings := SessionSettings{
-		AppId: appId,
+		AppId: appID,
 		Mode:  int64(mode),
 		Level: nil,
 	}
