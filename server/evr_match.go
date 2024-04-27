@@ -1052,6 +1052,10 @@ func checkIfGlobalDeveloper(ctx context.Context, nk runtime.NakamaModule, userID
 	return checkGroupMembershipByName(ctx, nk, userID, GroupGlobalDevelopers, "system")
 }
 
+func checkIfGlobalBot(ctx context.Context, nk runtime.NakamaModule, userID uuid.UUID) (bool, error) {
+	return checkGroupMembershipByName(ctx, nk, userID, GroupGlobalBots, "system")
+}
+
 func checkIfGlobalModerator(ctx context.Context, nk runtime.NakamaModule, userID uuid.UUID) (bool, error) {
 	// Developers are moderators
 	ok, err := checkGroupMembershipByName(ctx, nk, userID, GroupGlobalDevelopers, "system")
