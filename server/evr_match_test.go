@@ -7,6 +7,7 @@ import (
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"github.com/samber/lo"
 )
 
 func TestEvrMatch_EvrMatchState(t *testing.T) {
@@ -273,6 +274,26 @@ func TestSelectTeamForPlayer(t *testing.T) {
 			expectedTeam:   evr.TeamUnassigned,
 			expectedResult: false,
 		},
+		{
+			name:      "social lobby, moderator, allow",
+			lobbyType: PublicLobby,
+			preferred: evr.TeamModerator,
+			presences: map[string]*EvrMatchPresence{
+				"player1":  {TeamIndex: evr.TeamSocial},
+				"player2":  {TeamIndex: evr.TeamSocial},
+				"player3":  {TeamIndex: evr.TeamSocial},
+				"player4":  {TeamIndex: evr.TeamSocial},
+				"player5":  {TeamIndex: evr.TeamSocial},
+				"player6":  {TeamIndex: evr.TeamSocial},
+				"player7":  {TeamIndex: evr.TeamSocial},
+				"player8":  {TeamIndex: evr.TeamSocial},
+				"player9":  {TeamIndex: evr.TeamSocial},
+				"player10": {TeamIndex: evr.TeamSocial},
+				"player11": {TeamIndex: evr.TeamSocial},
+			},
+			expectedTeam:   evr.TeamModerator,
+			expectedResult: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -303,6 +324,111 @@ func TestSelectTeamForPlayer(t *testing.T) {
 
 			if result != tt.expectedResult {
 				t.Errorf("selectTeamForPlayer() returned incorrect result, got: %t, want: %t", result, tt.expectedResult)
+			}
+		})
+	}
+}
+
+func TestSelectTeamForPlayer_With_Alighment(t *testing.T) {
+	const (
+		DMO_1  = "DMO-1"
+		DMO_2  = "DMO-2"
+		DMO_3  = "DMO-3"
+		DMO_4  = "DMO-4"
+		DMO_5  = "DMO-5"
+		DMO_6  = "DMO-6"
+		DMO_7  = "DMO-7"
+		DMO_8  = "DMO-8"
+		DMO_9  = "DMO-9"
+		DMO_10 = "DMO-10"
+		DMO_11 = "DMO-11"
+		DMO_12 = "DMO-12"
+		DMO_13 = "DMO-13"
+
+		Blue       = evr.TeamBlue
+		Orange     = evr.TeamOrange
+		Spectator  = evr.TeamSpectator
+		Unassigned = evr.TeamUnassigned
+	)
+	alignments := map[string]int{
+		DMO_1:  Blue,
+		DMO_2:  Blue,
+		DMO_3:  Blue,
+		DMO_4:  Blue,
+		DMO_5:  Orange,
+		DMO_6:  Orange,
+		DMO_7:  Orange,
+		DMO_8:  Orange,
+		DMO_9:  Spectator,
+		DMO_10: Spectator,
+		DMO_11: Spectator,
+		DMO_12: Spectator,
+		DMO_13: Spectator,
+	}
+
+	tests := []struct {
+		name          string
+		lobbyType     LobbyType
+		players       []string
+		newPlayer     string
+		preferredTeam int
+		expectedTeam  int
+		allowed       bool
+	}{
+		{
+			name:      "Follows alignment even when unbalanced",
+			lobbyType: PublicLobby,
+			players: []string{
+				DMO_1,
+				DMO_2,
+				DMO_3,
+			},
+			newPlayer:     DMO_4,
+			preferredTeam: evr.TeamOrange,
+			expectedTeam:  evr.TeamBlue,
+			allowed:       true,
+		},
+	}
+
+	for _, tt := range tests {
+		// Existing players
+		presences := make(map[uuid.UUID]*EvrMatchPresence)
+		for _, player := range tt.players {
+			u := uuid.NewV5(uuid.NamespaceOID, player)
+			presences[u] = &EvrMatchPresence{
+				TeamIndex: alignments[player],
+			}
+		}
+
+		// New Player
+		presence := &EvrMatchPresence{
+			EvrID:     *lo.Must(evr.ParseEvrId(tt.newPlayer)),
+			TeamIndex: tt.preferredTeam,
+		}
+
+		// Match State
+		state := &EvrMatchState{
+			presences: presences,
+			MaxSize:   MatchMaxSize,
+			LobbyType: tt.lobbyType,
+			TeamSize: func() int {
+				if tt.lobbyType == PublicLobby {
+					return 4
+				} else {
+					return 5
+				}
+			}(),
+		}
+
+		t.Run(tt.name, func(t *testing.T) {
+			team, result := selectTeamForPlayer(NewRuntimeGoLogger(logger), presence, state)
+
+			if team != tt.expectedTeam {
+				t.Errorf("selectTeamForPlayer() returned incorrect team, got: %d, want: %d", team, tt.expectedTeam)
+			}
+
+			if result != tt.allowed {
+				t.Errorf("selectTeamForPlayer() returned incorrect result, got: %t, want: %t", result, tt.allowed)
 			}
 		})
 	}
