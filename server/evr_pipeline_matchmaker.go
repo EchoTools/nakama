@@ -665,17 +665,23 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 		evr.ModeSocialPublic:         {evr.LevelSocial},
 		evr.ModeSocialPrivate:        {evr.LevelSocial},
 		evr.ModeSocialNPE:            {evr.LevelSocial},
-		evr.ModeCombatPublic:         {evr.LevelCombustion, evr.LevelDyson, evr.LevelFission, evr.LevelGauss, evr.LevelPebbles},
-		evr.ModeCombatPrivate:        {evr.LevelCombustion, evr.LevelDyson, evr.LevelFission, evr.LevelGauss, evr.LevelPebbles},
-		evr.ModeEchoCombatTournament: {evr.LevelCombustion, evr.LevelDyson, evr.LevelFission, evr.LevelGauss, evr.LevelPebbles},
+		evr.ModeCombatPublic:         {evr.LevelCombustion, evr.LevelDyson, evr.LevelFission, evr.LevelGauss},
+		evr.ModeCombatPrivate:        {evr.LevelCombustion, evr.LevelDyson, evr.LevelFission, evr.LevelGauss},
+		evr.ModeEchoCombatTournament: {evr.LevelCombustion, evr.LevelDyson, evr.LevelFission, evr.LevelGauss},
 	}
-
-	if levels, ok := validLevels[request.Mode]; ok {
-		if request.Level != evr.LevelUnspecified && !lo.Contains(levels, request.Level) {
-			return result.SendErrorToSession(session, status.Errorf(codes.InvalidArgument, "Invalid level %v for game mode %v", request.Level, request.Mode))
+	isDeveloper, err := checkIfGlobalDeveloper(ctx, p.runtimeModule, session.userID)
+	logger.Info("User is developer", zap.Bool("isDeveloper", isDeveloper))
+	if err != nil {
+		return result.SendErrorToSession(session, status.Errorf(codes.Internal, "Failed to check if user is a developer: %v", err))
+	}
+	if !isDeveloper {
+		if levels, ok := validLevels[request.Mode]; ok {
+			if request.Level != evr.LevelUnspecified && !lo.Contains(levels, request.Level) {
+				return result.SendErrorToSession(session, status.Errorf(codes.InvalidArgument, "Invalid level %v for game mode %v", request.Level, request.Mode))
+			}
+		} else {
+			return result.SendErrorToSession(session, status.Errorf(codes.InvalidArgument, "Failed to create matchmaking session: Tried to create a match with an unknown level or gamemode: %v", request.Mode))
 		}
-	} else {
-		return result.SendErrorToSession(session, status.Errorf(codes.InvalidArgument, "Failed to create matchmaking session: Tried to create a match with an unknown level or gamemode: %v", request.Mode))
 	}
 
 	ml := &EvrMatchState{
