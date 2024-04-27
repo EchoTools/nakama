@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
@@ -43,14 +44,22 @@ func TestEvrMatch_EvrMatchState(t *testing.T) {
 }
 
 func TestSelectTeamForPlayer(t *testing.T) {
+	presencesstr := map[string]*EvrMatchPresence{
+		"player1": {TeamIndex: evr.TeamBlue},
+		"player2": {TeamIndex: evr.TeamOrange},
+		"player3": {TeamIndex: evr.TeamSpectator},
+		"player4": {TeamIndex: evr.TeamOrange},
+		"player5": {TeamIndex: evr.TeamOrange},
+	}
+
+	presences := make(map[uuid.UUID]*EvrMatchPresence)
+	for k, v := range presencesstr {
+		u := uuid.NewV5(uuid.NamespaceOID, k)
+		presences[u] = v
+	}
+
 	state := &EvrMatchState{
-		presences: map[string]*EvrMatchPresence{
-			"player1": {TeamIndex: evr.TeamBlue},
-			"player2": {TeamIndex: evr.TeamOrange},
-			"player3": {TeamIndex: evr.TeamSpectator},
-			"player4": {TeamIndex: evr.TeamOrange},
-			"player5": {TeamIndex: evr.TeamOrange},
-		},
+		presences: presences,
 	}
 
 	tests := []struct {
@@ -270,7 +279,13 @@ func TestSelectTeamForPlayer(t *testing.T) {
 		presence := &EvrMatchPresence{
 			TeamIndex: tt.preferred,
 		}
-		state.presences = tt.presences
+		presencestr := make(map[uuid.UUID]*EvrMatchPresence)
+		for k, v := range tt.presences {
+			u := uuid.NewV5(uuid.NamespaceOID, k)
+			presencestr[u] = v
+		}
+
+		state.presences = presencestr
 		state.MaxSize = MatchMaxSize
 		state.LobbyType = tt.lobbyType
 		if state.LobbyType == PublicLobby {
