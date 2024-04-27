@@ -31,7 +31,7 @@ func (p *EvrPipeline) lobbyMatchmakerStatusRequest(ctx context.Context, logger *
 }
 
 // authorizeMatchmaking checks if the user is allowed to join a public match or spawn a new match
-func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logger, session *sessionWS, loginSessionID uuid.UUID, channel uuid.UUID, singleMatch bool) (bool, error) {
+func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logger, session *sessionWS, loginSessionID uuid.UUID, channel uuid.UUID) (bool, error) {
 
 	// Get the EvrID from the context
 	evrID, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
@@ -47,6 +47,13 @@ func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logg
 		return false, status.Errorf(codes.PermissionDenied, "User not authenticated")
 	}
 
+	// Only bots may join multiple matches
+	singleMatch := true
+	if flags, ok := ctx.Value(ctxFlagsKey{}).(int); ok {
+		if flags&FlagGlobalBots != 0 || flags&FlagGlobalDevelopers != 0 {
+			singleMatch = false
+		}
+	}
 	if singleMatch {
 		// Disconnect this EVRID from other matches
 		sessionIDs := session.tracker.ListLocalSessionIDByStream(PresenceStream{Mode: StreamModeEvr, Subject: evrID.UUID(), Subcontext: svcMatchID})
@@ -189,16 +196,8 @@ func (p *EvrPipeline) lobbyFindSessionRequest(ctx context.Context, logger *zap.L
 		return response.SendErrorToSession(session, err)
 	}
 
-	// Get the context flags
-	singleMatch := true
-	if flags, ok := ctx.Value(ctxFlagsKey{}).(int); ok {
-		if flags&FlagGlobalBots != 0 || flags&FlagGlobalDevelopers != 0 {
-			singleMatch = false
-		}
-	}
-
 	// Check for suspensions on this channel, if this is a request for a public match.
-	if authorized, err := p.authorizeMatchmaking(ctx, logger, session, loginSessionID, *ml.Channel, singleMatch); !authorized {
+	if authorized, err := p.authorizeMatchmaking(ctx, logger, session, loginSessionID, *ml.Channel); !authorized {
 		return response.SendErrorToSession(session, err)
 	} else if err != nil {
 		logger.Warn("Failed to authorize matchmaking, allowing player to continue. ", zap.Error(err))
