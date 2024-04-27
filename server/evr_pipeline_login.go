@@ -620,20 +620,16 @@ func (p *EvrPipeline) documentRequest(ctx context.Context, logger *zap.Logger, s
 	}
 
 	// If this is a NoVR user, then use the original EULA with version 1 to avoid soft-locking the client.
-	if flags, ok := ctx.Value(ctxFlagsKey{}).(int); ok {
-		if flags&FlagNoVR != 0 {
-			document = evr.NewEulaDocument(1, 1, "")
-
+	// Then always return a default document with a version of 1.
+	// This is to prevent headless clients from hanging waiting for the
+	// button interaction to get past the EULA dialog.
+	if flags, ok := ctx.Value(ctxFlagsKey{}).(int); ok && flags&FlagNoVR != 0 {
 		session.SendEvr(
-			evr.NewSNSDocumentSuccess(document),
+			evr.NewSNSDocumentSuccess(evr.NewEulaDocument(1, 1, "")),
 			evr.NewSTcpConnectionUnrequireEvent(),
 		)
 		return nil
 	}
-
-	// Then always return a default document with a version of 1.
-	// This is to prevent headless clients from hanging waiting for the
-	// button interaction to get past the EULA dialog.
 
 	// retrieve the document from storage
 	objs, err := StorageReadObjects(ctx, logger, session.pipeline.db, uuid.Nil, []*api.ReadStorageObjectId{
