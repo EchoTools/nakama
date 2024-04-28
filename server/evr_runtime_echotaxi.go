@@ -493,35 +493,20 @@ func (e *TaxiBot) Hail(logger runtime.Logger, discordID string, matchToken Match
 		},
 	}
 
-	if e.HailCount == 1 {
-		// If this is the first hail, get the hail count from storage.
-		ops = append(ops, &runtime.StorageRead{
-			Collection: EchoTaxiStorageCollection,
-			Key:        EchoTaxiStorageKey,
-			UserID:     SystemUserID,
-		})
-	}
-
 	objs, err := e.nk.StorageRead(e.ctx, ops)
-
-	if err != nil || len(objs) == 0 {
+	if err != nil {
 		return fmt.Errorf("Error reading matchmaking config: %s", err.Error())
 	}
+	if len(objs) == 0 {
+		return fmt.Errorf("No matchmaking config found for user: %s", userID)
+	}
+
 	settings := MatchmakingSettings{}
 	if err = json.Unmarshal([]byte(objs[0].Value), &settings); err != nil {
 		return fmt.Errorf("Error unmarshalling matchmaking config: %s", err.Error())
 	}
 	for _, obj := range objs {
 		switch obj.Collection {
-		case EchoTaxiStorageCollection:
-
-			// Get the echo taxi hail count
-			echoTaxi := TaxiBot{}
-			if err = json.Unmarshal([]byte(obj.Value), &echoTaxi); err != nil {
-				return fmt.Errorf("Error unmarshalling echo taxi hail count: %s", err.Error())
-			}
-			e.HailCount = echoTaxi.HailCount
-
 		case MatchmakingConfigStorageCollection:
 
 			// Get the user's matchmaking settings
