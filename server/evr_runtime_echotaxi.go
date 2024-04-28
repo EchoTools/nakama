@@ -483,65 +483,20 @@ func (e *TaxiBot) Hail(logger runtime.Logger, discordID string, matchToken Match
 	if matchToken != "" {
 		e.HailCount++
 	}
-
-	// Get the user's current matchmaking settings
-	ops := []*runtime.StorageRead{
-		{
-			Collection: MatchmakingConfigStorageCollection,
-			Key:        MatchmakingConfigStorageKey,
-			UserID:     userID,
-		},
-	}
-
-	objs, err := e.nk.StorageRead(e.ctx, ops)
+	ctx, cancel := context.WithTimeout(e.ctx, 2*time.Second)
+	defer cancel()
+	settings, err := LoadMatchmakingSettings(ctx, logger, e.nk, userID)
 	if err != nil {
-		return fmt.Errorf("Error reading matchmaking config: %s", err.Error())
-	}
-	if len(objs) == 0 {
-		return fmt.Errorf("No matchmaking config found for user: %s", userID)
-	}
-
-	settings := MatchmakingSettings{}
-	if err = json.Unmarshal([]byte(objs[0].Value), &settings); err != nil {
-		return fmt.Errorf("Error unmarshalling matchmaking config: %s", err.Error())
-	}
-	for _, obj := range objs {
-		switch obj.Collection {
-		case MatchmakingConfigStorageCollection:
-
-			// Get the user's matchmaking settings
-			if err = json.Unmarshal([]byte(obj.Value), &settings); err != nil {
-				return fmt.Errorf("Error unmarshalling matchmaking config: %s", err.Error())
-			}
-
-		}
+		return fmt.Errorf("Error loading matchmaking config: %s", err.Error())
 	}
 
 	// Update the NextMatchID
 	settings.NextMatchToken = matchToken
 
-	// Save the user's matchmaking settings, and the echo taxi hail count
-	payload, err := json.Marshal(settings)
-	if err != nil {
-		return fmt.Errorf("Error marshalling matchmaking config: %s", err.Error())
+	if err := StoreMatchmakingSettings(ctx, logger, e.nk, settings, userID); err != nil {
+		return fmt.Errorf("Error storing matchmaking config: %s", err.Error())
 	}
 
-	if _, err = e.nk.StorageWrite(e.ctx, []*runtime.StorageWrite{
-		{
-			Collection: MatchmakingConfigStorageCollection,
-			Key:        MatchmakingConfigStorageKey,
-			UserID:     userID,
-			Value:      string(payload),
-		},
-		{
-			Collection: EchoTaxiStorageCollection,
-			Key:        EchoTaxiStorageKey,
-			UserID:     SystemUserID,
-			Value:      fmt.Sprintf(`{"HailCount": %d}`, e.HailCount),
-		},
-	}); err != nil {
-		return fmt.Errorf("Error writing matchmaking config: %s", err.Error())
-	}
 	return nil
 }
 
