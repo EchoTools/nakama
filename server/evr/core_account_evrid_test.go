@@ -78,7 +78,7 @@ func TestEvrId_Equals(t *testing.T) {
 		AccountId    uint64
 	}
 	type args struct {
-		other *EvrId
+		other EvrId
 	}
 	tests := []struct {
 		name   string
@@ -93,7 +93,7 @@ func TestEvrId_Equals(t *testing.T) {
 				AccountId:    1,
 			},
 			args: args{
-				&EvrId{
+				EvrId{
 					PlatformCode: 1,
 					AccountId:    1,
 				},
@@ -107,7 +107,7 @@ func TestEvrId_Equals(t *testing.T) {
 				AccountId:    1,
 			},
 			args: args{
-				&EvrId{
+				EvrId{
 					PlatformCode: 1,
 					AccountId:    1,
 				},
@@ -121,7 +121,7 @@ func TestEvrId_Equals(t *testing.T) {
 				AccountId:    0,
 			},
 			args: args{
-				&EvrId{
+				EvrId{
 					PlatformCode: 1,
 					AccountId:    1,
 				},
@@ -135,7 +135,7 @@ func TestEvrId_Equals(t *testing.T) {
 				AccountId:    1,
 			},
 			args: args{
-				&EvrId{
+				EvrId{
 					PlatformCode: 2,
 					AccountId:    2,
 				},
