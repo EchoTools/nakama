@@ -30,7 +30,7 @@ type GameProfile interface {
 	GetChannel() uuid.UUID
 	SetChannel(c evr.GUID)
 	UpdateDisplayName(displayName string)
-	UpdateUnlocks(unlocks any) error
+	UpdateUnlocks(unlocks evr.UnlockedCosmetics) error
 }
 
 type GameProfileData struct {
@@ -286,7 +286,9 @@ func (r *ProfileRegistry) Load(userID uuid.UUID, evrID evr.EvrId) (profile GameP
 		}
 	}
 	r.store(userID, profile)
-	profile.SetEvrID(evrID)
+	if evrID != evr.EvrIdNil {
+		profile.SetEvrID(evrID)
+	}
 
 	return profile, true
 }
@@ -334,7 +336,7 @@ func (r *ProfileRegistry) retrieve(ctx context.Context, userID uuid.UUID) (profi
 
 	return
 }
-func (r *ProfileRegistry) save(ctx context.Context, userID uuid.UUID, profile *GameProfileData) error {
+func (r *ProfileRegistry) save(ctx context.Context, userID uuid.UUID, profile GameProfile) error {
 
 	b, err := json.Marshal(profile)
 	if err != nil {

@@ -599,7 +599,11 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 	}
 
 	for _, p := range presences {
-		logger.Debug("Joined a new player: %s", presences[0].GetUsername())
+		logger = logger.WithFields(map[string]interface{}{
+			"username": p.GetUsername(),
+			"uid":      p.GetUserId(),
+		})
+		logger.Debug("Joined a new player")
 
 		if p.GetSessionId() == state.Broadcaster.SessionID {
 			logger.Debug("Broadcaster joined the match.")
