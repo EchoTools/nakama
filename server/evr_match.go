@@ -535,9 +535,10 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		logger.Warn("Rejecting duplicate join attempt.")
 		return state, false, ErrJoinRejectedDuplicateJoin
 	}
+
 	// If this EvrID is already in the match, reject the player
 	for _, p := range state.presences {
-		if p.EvrID == evr.EvrId(mp.EvrID) {
+		if p.EvrID.Equals(mp.EvrID) {
 			logger.Warn("Rejecting join from existing EVR-ID: %s", metadata["evrid"])
 			return state, false, ErrJoinRejectedDuplicateJoin
 		}

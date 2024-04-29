@@ -104,7 +104,7 @@ func (xpi *EvrId) Token() string {
 	return fmt.Sprintf("%s-%d", xpi.PlatformCode.String(), xpi.AccountId)
 }
 
-func (xpi *EvrId) Equals(other *EvrId) bool {
+func (xpi EvrId) Equals(other EvrId) bool {
 	return xpi.PlatformCode == other.PlatformCode && xpi.AccountId == other.AccountId
 }
 

@@ -315,7 +315,7 @@ func (s *sessionWS) ValidateSession(loginSessionID uuid.UUID, evrID evr.EvrId) e
 		return fmt.Errorf("login session ID is nil")
 	}
 
-	if evrID.Equals(&evr.EvrIdNil) {
+	if evrID.Equals(evr.EvrIdNil) {
 		return fmt.Errorf("evr ID is nil")
 	}
 
@@ -345,7 +345,7 @@ func (s *sessionWS) ValidateSession(loginSessionID uuid.UUID, evrID evr.EvrId) e
 		if !ok {
 			return fmt.Errorf("login session does not have an EVR ID")
 		}
-		if !loginEvrID.Equals(&evrID) {
+		if !loginEvrID.Equals(evrID) {
 			return fmt.Errorf("echovr id mismatch (login/request): %s != %s", loginEvrID.String(), evrID.String())
 		}
 

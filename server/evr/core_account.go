@@ -76,7 +76,7 @@ func init() {
 	validate.RegisterValidation("blocked", forceFalse)
 	validate.RegisterValidation("evrid", func(fl validator.FieldLevel) bool {
 		evrId, err := ParseEvrId(fl.Field().String())
-		if err != nil || evrId.Equals(&EvrIdNil) {
+		if err != nil || evrId.Equals(EvrIdNil) {
 			return false
 		}
 		return true
