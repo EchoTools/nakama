@@ -1001,8 +1001,12 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, logger *zap.Logger, se
 		ml.TeamSize = MatchMaxSize
 		ml.Size = MatchMaxSize - partySize
 
-	case ml.Mode == evr.ModeArenaPublic || ml.Mode == evr.ModeCombatPublic:
+	case ml.Mode == evr.ModeArenaPublic:
 		ml.TeamSize = 4
+		ml.Size = ml.TeamSize*2 - partySize // Both teams, minus the party size
+
+	case ml.Mode == evr.ModeCombatPublic:
+		ml.TeamSize = 5
 		ml.Size = ml.TeamSize*2 - partySize // Both teams, minus the party size
 
 	default: // Privates
