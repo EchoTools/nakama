@@ -566,6 +566,9 @@ func (e *TaxiBot) handleMessageReactionAdd(s *discordgo.Session, reaction *disco
 	if err != nil {
 		logger.Warn("Error sending message: %v", err)
 	}
+	if dmMessage == nil || dmMessage.ID == "" {
+		return
+	}
 	// React to the message
 	if err = s.MessageReactionAdd(dmChannelID, dmMessage.ID, TaxiEmoji); err != nil {
 		logger.Warn("Error reacting to message: %v", err)
