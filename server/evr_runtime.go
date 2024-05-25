@@ -137,36 +137,36 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 	for {
 		select {
 		case <-ticker.C:
-			// Get the match states
-			matchStates, err := listMatchStates(ctx, nk, "")
-			if err != nil {
-				logger.Error("Error listing match states: %v", err)
-				continue
-			}
-			logger.Info("Match states: %d", len(matchStates))
-			playercounts := make(map[string]int)
-			// Log the match states
-			for _, state := range matchStates {
-				// calculate the team sizes
-				tags := map[string]string{
-					"mode":     state.State.Mode.String(),
-					"level":    state.State.Level.String(),
-					"type":     state.State.LobbyType.String(),
-					"size":     fmt.Sprintf("%d", len(state.Presences)),
-					"operator": state.State.Broadcaster.OperatorID,
-					"started":  strconv.FormatBool(state.State.Started),
-					"region":   state.State.Broadcaster.Region.String(),
-					"tickRate": fmt.Sprintf("%d", state.TickRate),
-				}
-				playercounts[state.State.Mode.String()] += len(state.State.Players)
-
-				nk.metrics.CustomCounter("match_gauge", tags, 1)
-			}
-
 		case <-ctx.Done():
 			// Context has been cancelled, return
 			return
 		}
+		// Get the match states
+		matchStates, err := listMatchStates(ctx, nk, "")
+		if err != nil {
+			logger.Error("Error listing match states: %v", err)
+			continue
+		}
+		logger.Info("Match states: %d", len(matchStates))
+		playercounts := make(map[string]int)
+		// Log the match states
+		for _, state := range matchStates {
+			// calculate the team sizes
+			tags := map[string]string{
+				"mode":     state.State.Mode.String(),
+				"level":    state.State.Level.String(),
+				"type":     state.State.LobbyType.String(),
+				"size":     fmt.Sprintf("%d", len(state.Presences)),
+				"operator": state.State.Broadcaster.OperatorID,
+				"started":  strconv.FormatBool(state.State.Started),
+				"region":   state.State.Broadcaster.Region.String(),
+				"tickRate": fmt.Sprintf("%d", state.TickRate),
+			}
+			playercounts[state.State.Mode.String()] += len(state.State.Players)
+
+			nk.metrics.CustomCounter("match_gauge", tags, 1)
+		}
+
 	}
 }
 
