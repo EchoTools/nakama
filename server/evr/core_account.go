@@ -227,28 +227,12 @@ type ServerProfile struct {
 	Achievements      interface{}       `json:"achievements,omitempty"`                         // Achievements
 	RewardState       interface{}       `json:"reward_state,omitempty"`                         // Reward state?
 	// If DeveloperFeatures is not null, the player will have a gold name
-	//DeveloperFeatures DeveloperFeatures `json:"dev,omitempty"` // Developer features
+	DeveloperFeatures *DeveloperFeatures `json:"dev,omitempty"` // Developer features
 }
 
 type DeveloperFeatures struct {
 	DisableAfkTimeout bool  `json:"disable_afk_timeout,omitempty"`
 	EvrIDOverride     EvrId `json:"xplatformid,omitempty"`
-}
-
-// Return nil if DeveloperFeatures is empty
-func (f DeveloperFeatures) MarshalJSON() ([]byte, error) {
-	// If this doesn't return null, it mark the player as a dev
-	m := make(map[string]interface{}, 2)
-	if f.DisableAfkTimeout {
-		m["disable_afk_timeout"] = true
-	}
-	if !f.EvrIDOverride.IsNil() {
-		m["xplatformid"] = f.EvrIDOverride
-	}
-	if len(m) == 0 {
-		return []byte(`null`), nil
-	}
-	return json.Marshal(m)
 }
 
 type PlayerStatistics struct {
