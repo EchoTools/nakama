@@ -96,11 +96,18 @@ func (p *GameProfileData) UpdateDisplayName(displayName string) {
 
 }
 
-/*
-	func (p *GameProfileData) SetAFKTimeout(enable bool) {
-		p.Server.DeveloperFeatures.DisableAfkTimeout = enable
+func (p *GameProfileData) DisableAFKTimeout(enable bool) {
+	if enable {
+		if p.Server.DeveloperFeatures == nil {
+			p.Server.DeveloperFeatures = &evr.DeveloperFeatures{
+				DisableAfkTimeout: true,
+			}
+		}
+	} else {
+		p.Server.DeveloperFeatures = nil
 	}
-*/
+}
+
 func (r *GameProfileData) UpdateUnlocks(unlocks evr.UnlockedCosmetics) error {
 	// Validate the unlocks
 	/*
@@ -668,6 +675,8 @@ func (r *ProfileRegistry) UpdateEntitledCosmetics(ctx context.Context, userID uu
 	if err != nil {
 		return fmt.Errorf("failed to update unlocks: %w", err)
 	}
+	profile.DisableAFKTimeout(isDeveloper)
+
 	/*
 		if err := enforceLoadoutEntitlements(r.logger, &profile.Server.EquippedCosmetics.Instances.Unified.Slots, &profile.Server.UnlockedCosmetics, r.defaults); err != nil {
 			return fmt.Errorf("failed to set loadout entitlement: %w", err)
