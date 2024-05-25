@@ -169,8 +169,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		externalIP:        externalIP,
 		broadcasterUserID: broadcasterUserID,
 
-		matchmakingRegistry: NewMatchmakingRegistry(logger, matchRegistry, matchmaker, metrics, db, nk, config),
-		profileRegistry:     NewProfileRegistry(nk, db, runtimeLogger, discordRegistry),
+		profileRegistry: NewProfileRegistry(nk, db, runtimeLogger, discordRegistry),
 
 		broadcasterRegistrationBySession: &MapOf[string, *MatchBroadcaster]{},
 		matchBySessionID:                 &MapOf[string, string]{},
@@ -181,6 +180,8 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		placeholderEmail: config.GetRuntime().Environment["PLACEHOLDER_EMAIL_DOMAIN"],
 		linkDeviceURL:    config.GetRuntime().Environment["LINK_DEVICE_URL"],
 	}
+
+	evrPipeline.matchmakingRegistry = NewMatchmakingRegistry(logger, matchRegistry, matchmaker, metrics, db, nk, config, evrPipeline)
 
 	runtime.MatchmakerMatched()
 

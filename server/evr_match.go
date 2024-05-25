@@ -224,10 +224,11 @@ type EvrMatchState struct {
 	LevelSelection  MatchLevelSelection  `json:"level_selection,omitempty"`  // The level selection method (EVR).
 	SessionSettings *evr.SessionSettings `json:"session_settings,omitempty"` // The session settings for the match (EVR).
 
-	MaxSize   uint8     `json:"limit,omitempty"`     // The total lobby size limit (players + specs)
-	Size      int       `json:"size"`                // The number of players (not including spectators) in the match.
-	TeamSize  int       `json:"team_size,omitempty"` // The size of each team in arena/combat (either 4 or 5)
-	TeamIndex TeamIndex `json:"team,omitempty"`      // What team index a player prefers (Used by Matching only)
+	MaxSize     uint8     `json:"limit,omitempty"`     // The total lobby size limit (players + specs)
+	Size        int       `json:"size"`                // The number of players (not including spectators) in the match.
+	PlayerLimit int       `json:"player_limit"`        // The number of players in the match (not including spectators).
+	TeamSize    int       `json:"team_size,omitempty"` // The size of each team in arena/combat (either 4 or 5)
+	TeamIndex   TeamIndex `json:"team,omitempty"`      // What team index a player prefers (Used by Matching only)
 
 	Players        []PlayerInfo                    `json:"players,omitempty"` // The displayNames of the players (by team name) in the match.
 	EvrIDs         []evr.EvrId                     `json:"evrids,omitempty"`  // The evr ids of the players in the match.
@@ -277,7 +278,11 @@ func (s *EvrMatchState) rebuildCache() {
 	s.EvrIDs = make([]evr.EvrId, 0, len(s.presences))
 	s.UserIDs = make([]string, 0, len(s.presences))
 	s.Size = 0
-
+	if s.Mode == evr.ModeSocialPrivate || s.Mode == evr.ModeSocialPublic {
+		s.PlayerLimit = int(s.MaxSize)
+	} else {
+		s.PlayerLimit = s.TeamSize * 2
+	}
 	// Construct Player list
 	for _, presence := range s.presences {
 		// Do not include spectators or moderators in player count

@@ -97,18 +97,10 @@ func (p *EvrPipeline) ListUnassignedLobbies(ctx context.Context, session *sessio
 	return labels, nil
 }
 
-// Backfill returns a match that the player can backfill
-func (p *EvrPipeline) Backfill(ctx context.Context, session *sessionWS, msession *MatchmakingSession) (*EvrMatchState, string, error) { // Create a new matching session
-	// TODO Move this into the matchmaking registry
-	// TODO Add a goroutine to look for matches that:
-	// Are short 1 or more players
-	// Have been short a player for X amount of time (~30 seconds?)
-	// afterwhich, the match is considered a backfill candidate and the goroutine
-	// Will open a matchmaking ticket. Any players that have a (backfill) ticket that matches
-
+func (p *EvrPipeline) ListUnfilledLobbies(ctx context.Context, logger *zap.Logger, session *sessionWS, msession *MatchmakingSession) ([]*EvrMatchState, string, error) {
 	var err error
 	var query string
-	logger := session.logger
+
 	var labels []*EvrMatchState
 
 	if msession.Label.LobbyType != PublicLobby {
@@ -128,6 +120,22 @@ func (p *EvrPipeline) Backfill(ctx context.Context, session *sessionWS, msession
 
 	if len(labels) == 0 {
 		return nil, query, nil
+	}
+	return labels, query, nil
+}
+
+// Backfill returns a match that the player can backfill
+func (p *EvrPipeline) Backfill(ctx context.Context, session *sessionWS, msession *MatchmakingSession, minCount int) (*EvrMatchState, string, error) {
+	// TODO Move this into the matchmaking registry
+	// TODO Add a goroutine to look for matches that:
+	// Are short 1 or more players
+	// Have been short a player for X amount of time (~30 seconds?)
+	// afterwhich, the match is considered a backfill candidate and the goroutine
+	// Will open a matchmaking ticket. Any players that have a (backfill) ticket that matches
+	logger := msession.Logger
+	labels, query, err := p.ListUnfilledLobbies(ctx, logger, session, msession)
+	if err != nil {
+		return nil, query, err
 	}
 
 	var selected *EvrMatchState
@@ -158,16 +166,25 @@ func (p *EvrPipeline) Backfill(ctx context.Context, session *sessionWS, msession
 			continue
 		}
 
-		if match.GetSize() > int32(label.MaxSize)+1 { // +1 for the broadcaster
+		if match.GetSize() > int32(label.MaxSize) { // +1 for the broadcaster
 			logger.Warn("Match is full")
 			mu.Unlock()
 			continue
 		}
 
 		if msession.Label.TeamIndex != Spectator && msession.Label.TeamIndex != Moderator {
+
+			availablePlayerSlots := (label.PlayerLimit - label.Size)
 			// Check if there is space for the player(s)
-			if (label.TeamSize*2)-len(label.Players) < 1 {
-				logger.Warn("Match is full")
+			if availablePlayerSlots < minCount {
+				logger.Warn("Match does not have enough open slots.")
+				mu.Unlock()
+				continue
+				// Ensure that adding the minCount to the match would balance the match
+			}
+
+			if msession.Label.Mode == evr.ModeCombatPublic && (label.Size+minCount)%2 != 0 {
+				logger.Warn("Combat match does not have the right multiple of open slots.")
 				mu.Unlock()
 				continue
 			}
@@ -638,7 +655,7 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 	// Determine the display name
 	displayName, err := SetDisplayNameByChannelBySession(ctx, p.runtimeModule, logger, p.discordRegistry, session, groupID.String())
 	if err != nil {
-		logger.Error("Failed to set display name.", zap.Error(err))
+		logger.Warn("Failed to set display name.", zap.Error(err))
 	}
 
 	// If this is a NoVR user, give the profile's displayName a bot suffix
