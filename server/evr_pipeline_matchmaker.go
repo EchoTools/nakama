@@ -758,22 +758,22 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 // lobbyJoinSessionRequest is a request to join a specific existing session.
 func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.LobbyJoinSessionRequest)
-
+	response := NewMatchmakingResult(logger, 0xFFFFFFFFFFFFFFFF, request.MatchID)
 	loginSessionID := request.LoginSessionID
 	// Make sure the match exists
 	matchToken, err := NewMatchToken(request.MatchID, p.node)
 	if err != nil {
-		return NewMatchmakingResult(logger, 0xFFFFFFFFFFFFFFFF, request.MatchID).SendErrorToSession(session, status.Errorf(codes.InvalidArgument, "Invalid match ID"))
+		return response.SendErrorToSession(session, status.Errorf(codes.InvalidArgument, "Invalid match ID"))
 	}
 	match, _, err := p.matchRegistry.GetMatch(ctx, matchToken.String())
 	if err != nil || match == nil {
-		return NewMatchmakingResult(logger, 0xFFFFFFFFFFFFFFFF, request.MatchID).SendErrorToSession(session, status.Errorf(codes.NotFound, "Match not found"))
+		return response.SendErrorToSession(session, status.Errorf(codes.NotFound, "Match not found"))
 	}
 
 	// Extract the label
 	ml := &EvrMatchState{}
 	if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), ml); err != nil {
-		return NewMatchmakingResult(logger, 0xFFFFFFFFFFFFFFFF, request.MatchID).SendErrorToSession(session, status.Errorf(codes.NotFound, err.Error()))
+		return response.SendErrorToSession(session, status.Errorf(codes.NotFound, err.Error()))
 	}
 	if ml.Channel == nil {
 		ml.Channel = &uuid.Nil
@@ -802,28 +802,29 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 		isDeveloper, _ := checkIfGlobalDeveloper(ctx, p.runtimeModule, session.userID)
 
 		// Let developers and moderators join public matches
-		if request.TeamIndex != int16(Spectator) && !isDeveloper && !isModerator {
-			err = status.Errorf(codes.InvalidArgument, "Match is a public match")
-		}
-
-		authorized, err := p.authorizeMatchmaking(ctx, logger, session, loginSessionID, *ml.Channel)
-		if err != nil {
-			if authorized {
-				logger.Warn("Failed to authorize matchmaking, allowing player to continue. ", zap.Error(err))
-			} else {
-				err = status.Errorf(codes.PermissionDenied, err.Error())
-				return NewMatchmakingResult(logger, 0xFFFFFFFFFFFFFFFF, request.MatchID).SendErrorToSession(session, err)
-			}
+		if request.TeamIndex != int16(Spectator) && !isDeveloper && !isModerator && time.Since(ml.StartedAt) < time.Second*15 {
+			// Allow if the match is over 15 seconds old, to allow matchmaking to properly populate the match
+			err = status.Errorf(codes.InvalidArgument, "Match is a newly started public match")
 		}
 	}
+
 	if err != nil {
-		return NewMatchmakingResult(logger, 0xFFFFFFFFFFFFFFFF, request.MatchID).SendErrorToSession(session, err)
+		return response.SendErrorToSession(session, err)
 	}
 
+	authorized, err := p.authorizeMatchmaking(ctx, logger, session, loginSessionID, *ml.Channel)
+	if err != nil {
+		if authorized {
+			logger.Warn("Failed to authorize matchmaking, allowing player to continue. ", zap.Error(err))
+		} else {
+			err = status.Errorf(codes.PermissionDenied, err.Error())
+			return response.SendErrorToSession(session, err)
+		}
+	}
 	// Join the match
 
 	if err = p.JoinEvrMatch(ctx, logger, session, "", matchToken.String(), int(request.TeamIndex)); err != nil {
-		return NewMatchmakingResult(logger, 0xFFFFFFFFFFFFFFFF, request.MatchID).SendErrorToSession(session, status.Errorf(codes.NotFound, err.Error()))
+		return response.SendErrorToSession(session, status.Errorf(codes.NotFound, err.Error()))
 	}
 	return nil
 }
