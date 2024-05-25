@@ -285,9 +285,14 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 	}
 	stringProps["evr_id"] = evrID.Token()
 
-	minCount := gconfig.MinCount
-	maxCount := gconfig.MaxCount
-	countMultiple := gconfig.CountMultiple
+	minCount := 2
+	maxCount := 8
+	if msession.Label.Mode == evr.ModeCombatPublic {
+		maxCount = 10
+	} else {
+		maxCount = 8
+	}
+	countMultiple := 2
 	pID := ""
 	if partyID != uuid.Nil {
 		pID = partyID.String()
