@@ -249,37 +249,35 @@ func (p *EvrPipeline) MatchSpectateStreamLoop(session *sessionWS, msession *Matc
 			return msession.Cancel(fmt.Errorf("failed to find spectate match: %w", err))
 		}
 
-		if len(matches) == 0 {
-			continue
-		}
+		if len(matches) != 0 {
+			// sort matches by population
+			sort.SliceStable(matches, func(i, j int) bool {
+				// Sort by newer matches
+				return matches[i].Size > matches[j].Size
+			})
 
-		// sort matches by population
-		sort.SliceStable(matches, func(i, j int) bool {
-			// Sort by newer matches
-			return matches[i].Size > matches[j].Size
-		})
-
-		// Found a backfill match
-		foundMatch := FoundMatch{
-			MatchID:   matches[0].GetMatchId(),
-			Query:     query,
-			TeamIndex: TeamIndex(evr.TeamSpectator),
-		}
-		select {
-		case <-ctx.Done():
-			return nil
-		case msession.MatchJoinCh <- foundMatch:
-			p.metrics.CustomCounter("spectatestream_found_count", msession.metricsTags(), 1)
-			logger.Debug("Spectating match", zap.String("mid", foundMatch.MatchID))
-		case <-time.After(3 * time.Second):
-			p.metrics.CustomCounter("spectatestream_join_timeout_count", msession.metricsTags(), 1)
-			logger.Warn("Failed to spectate match", zap.String("mid", foundMatch.MatchID))
+			// Found a backfill match
+			foundMatch := FoundMatch{
+				MatchID:   matches[0].GetMatchId(),
+				Query:     query,
+				TeamIndex: TeamIndex(evr.TeamSpectator),
+			}
+			select {
+			case <-ctx.Done():
+				return nil
+			case msession.MatchJoinCh <- foundMatch:
+				p.metrics.CustomCounter("spectatestream_found_count", msession.metricsTags(), 1)
+				logger.Debug("Spectating match", zap.String("mid", foundMatch.MatchID))
+			case <-time.After(3 * time.Second):
+				p.metrics.CustomCounter("spectatestream_join_timeout_count", msession.metricsTags(), 1)
+				logger.Warn("Failed to spectate match", zap.String("mid", foundMatch.MatchID))
+			}
 		}
 		<-time.After(spectateInterval)
 	}
 }
 
-func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *MatchmakingSession, skipDelay bool, create bool) error {
+func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *MatchmakingSession, skipDelay bool, create bool, minCount int, countMultiple int) error {
 	interval := p.config.GetMatchmaker().IntervalSec
 	idealMatchIntervals := p.config.GetMatchmaker().RevThreshold
 	logger := msession.Logger
@@ -308,13 +306,18 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 		case <-backfillDelayTimer.C:
 		case <-backfillTicker.C:
 		}
+		if msession.Party != nil && msession.Party.members.Size() > 1 {
+			// Don't backfill party members, let the matchmaker handle it.
+			continue
+		}
 
 		foundMatch := FoundMatch{}
 		// Backfill any existing matches
-		label, query, err := p.Backfill(ctx, session, msession)
+		label, query, err := p.Backfill(ctx, session, msession, minCount)
 		if err != nil {
 			return msession.Cancel(fmt.Errorf("failed to find backfill match: %w", err))
 		}
+
 		if label != nil {
 			// Found a backfill match
 			foundMatch = FoundMatch{
@@ -513,18 +516,25 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 	case evr.ModeSocialPublic:
 		// Continue to try to backfill
 		skipBackfillDelay = true
-		go p.MatchBackfillLoop(session, msession, skipBackfillDelay, true)
+		go p.MatchBackfillLoop(session, msession, skipBackfillDelay, true, 1, 1)
 
 		// For public arena/combat matches, backfill while matchmaking
 	case evr.ModeCombatPublic:
 		// Join any on-going combat match without delay
 		skipBackfillDelay = false
+		go p.MatchBackfillLoop(session, msession, skipBackfillDelay, false, 1, 2)
 		// For Arena and combat matches try to backfill while matchmaking
-		fallthrough
+
+		// Put a ticket in for matching
+		_, err := p.MatchMake(session, msession)
+		if err != nil {
+			return err
+		}
+
 	case evr.ModeArenaPublic:
 
 		// Start the backfill loop
-		go p.MatchBackfillLoop(session, msession, skipBackfillDelay, false)
+		go p.MatchBackfillLoop(session, msession, skipBackfillDelay, false, 1, 1)
 
 		// Put a ticket in for matching
 		_, err := p.MatchMake(session, msession)
