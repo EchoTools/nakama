@@ -100,7 +100,7 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 	discordId, _ := ctx.Value(ctxDiscordIdKey{}).(string)
 
 	// Authenticate the connection
-	loginSettings, err := p.processLogin(ctx, session, request.EvrId, deviceId, discordId, userPassword, payload)
+	loginSettings, err := p.processLogin(ctx, logger, session, request.EvrId, deviceId, discordId, userPassword, payload)
 	if err != nil {
 		st := status.Convert(err)
 		return msgFailedLoginFn(session, request.EvrId, errors.New(st.Message()))
@@ -116,9 +116,9 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 }
 
 // processLogin handles the authentication of the login connection.
-func (p *EvrPipeline) processLogin(ctx context.Context, session *sessionWS, evrId evr.EvrId, deviceId *DeviceId, discordId string, userPassword string, loginProfile evr.LoginProfile) (settings evr.EchoClientSettings, err error) {
+func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, session *sessionWS, evrId evr.EvrId, deviceId *DeviceId, discordId string, userPassword string, loginProfile evr.LoginProfile) (settings evr.EchoClientSettings, err error) {
 	// Authenticate the account.
-	account, err := p.authenticateAccount(ctx, session, deviceId, discordId, userPassword, loginProfile)
+	account, err := p.authenticateAccount(ctx, logger, session, deviceId, discordId, userPassword, loginProfile)
 	if err != nil {
 		return settings, err
 	}
@@ -216,7 +216,7 @@ func (p *EvrPipeline) checkEvrIDOwner(ctx context.Context, evrId evr.EvrId) ([]E
 
 	return history, nil
 }
-func (p *EvrPipeline) authenticateAccount(ctx context.Context, session *sessionWS, deviceId *DeviceId, discordId string, userPassword string, payload evr.LoginProfile) (*api.Account, error) {
+func (p *EvrPipeline) authenticateAccount(ctx context.Context, logger *zap.Logger, session *sessionWS, deviceId *DeviceId, discordId string, userPassword string, payload evr.LoginProfile) (*api.Account, error) {
 	var err error
 	var userId string
 	var account *api.Account
