@@ -306,7 +306,7 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 		case <-backfillDelayTimer.C:
 		case <-backfillTicker.C:
 		}
-		if msession.Party != nil && msession.Party.members.Size() > 1 {
+		if msession.Label.Mode != evr.ModeSocialPublic && msession.Party != nil && msession.Party.members.Size() > 1 {
 			// Don't backfill party members, let the matchmaker handle it.
 			continue
 		}
