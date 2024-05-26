@@ -278,11 +278,7 @@ func (s *EvrMatchState) rebuildCache() {
 	s.EvrIDs = make([]evr.EvrId, 0, len(s.presences))
 	s.UserIDs = make([]string, 0, len(s.presences))
 	s.Size = 0
-	if s.Mode == evr.ModeSocialPrivate || s.Mode == evr.ModeSocialPublic {
-		s.PlayerLimit = int(s.MaxSize)
-	} else {
-		s.PlayerLimit = s.TeamSize * 2
-	}
+
 	// Construct Player list
 	for _, presence := range s.presences {
 		// Do not include spectators or moderators in player count
@@ -960,6 +956,11 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		if state.Level == 0xffffffffffffffff {
 			// The level is not set, set it to zero
 			state.Level = 0
+		}
+		if state.Mode == evr.ModeSocialPrivate || state.Mode == evr.ModeSocialPublic {
+			state.PlayerLimit = int(state.MaxSize)
+		} else {
+			state.PlayerLimit = state.TeamSize * 2
 		}
 		if newState.Players != nil {
 			for _, player := range newState.Players {

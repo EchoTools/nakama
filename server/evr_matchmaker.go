@@ -268,7 +268,6 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 		if err != nil {
 			logger.Warn("Failed to join party group", zap.String("group_id", config.GroupID), zap.Error(err))
 		} else {
-
 			logger.Debug("Joined party", zap.String("party_id", partyID.String()), zap.Any("members", ph.members.List()))
 		}
 		partyID = ph.ID
