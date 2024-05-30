@@ -31,20 +31,20 @@ func (p *EvrPipeline) lobbyMatchmakerStatusRequest(ctx context.Context, logger *
 }
 
 // authorizeMatchmaking checks if the user is allowed to join a public match or spawn a new match
-func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logger, session *sessionWS, loginSessionID uuid.UUID, channel uuid.UUID) (bool, error) {
+func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logger, session *sessionWS, loginSessionID uuid.UUID, channel uuid.UUID) error {
 
 	// Get the EvrID from the context
 	evrID, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
 	if !ok {
-		return false, fmt.Errorf("failed to get evrID from context")
+		return status.Errorf(codes.InvalidArgument, "Failed to get EVR ID")
 	}
 	if !evrID.Valid() {
-		return false, fmt.Errorf("evrID is invalid")
+		return status.Errorf(codes.InvalidArgument, "Invalid EVR ID")
 	}
 
 	// Send a match leave if this user is in another match
 	if session.userID == uuid.Nil {
-		return false, status.Errorf(codes.PermissionDenied, "User not authenticated")
+		return status.Errorf(codes.Unauthenticated, "User not authenticated")
 	}
 
 	// Only bots may join multiple matches
@@ -95,21 +95,37 @@ func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logg
 	}, s.userID)
 
 	if channel == uuid.Nil {
-		logger.Warn("Channel is nil")
-		return true, nil
+		return status.Errorf(codes.InvalidArgument, "Channel is nil")
+	}
+
+	// Check if th user is a member of this guild
+	guild, err := p.discordRegistry.GetGuildByGroupId(ctx, channel.String())
+	if err != nil || guild == nil {
+		return status.Errorf(codes.Internal, "Failed to get guild: %v", err)
+	}
+
+	discordID, err := p.discordRegistry.GetDiscordIdByUserId(ctx, session.userID)
+	if err != nil {
+		return status.Errorf(codes.Internal, "Failed to get discord id: %v", err)
+	}
+
+	// Check if the user is a member of this guild
+	member, err := p.discordRegistry.GetGuildMember(ctx, guild.ID, discordID)
+	if err != nil || member == nil || member.User == nil {
+		return status.Errorf(codes.NotFound, "User is not a member of this guild")
 	}
 
 	// Check for suspensions on this channel.
 	suspensions, err := p.checkSuspensionStatus(ctx, logger, session.UserID().String(), channel)
 	if err != nil {
-		return true, status.Errorf(codes.Internal, "Failed to check suspension status: %v", err)
+		return status.Errorf(codes.Internal, "Failed to check suspension status: %v", err)
 	}
 	if len(suspensions) != 0 {
 		msg := suspensions[0].Reason
 
-		return false, status.Errorf(codes.PermissionDenied, msg)
+		return status.Errorf(codes.PermissionDenied, msg)
 	}
-	return true, nil
+	return nil
 }
 func (p *EvrPipeline) matchmakingLabelFromFindRequest(ctx context.Context, session *sessionWS, request *evr.LobbyFindSessionRequest) (*EvrMatchState, error) {
 	// Get the EvrID from the context (ignoring the request)
@@ -197,10 +213,13 @@ func (p *EvrPipeline) lobbyFindSessionRequest(ctx context.Context, logger *zap.L
 	}
 
 	// Check for suspensions on this channel, if this is a request for a public match.
-	if authorized, err := p.authorizeMatchmaking(ctx, logger, session, loginSessionID, *ml.Channel); !authorized {
-		return response.SendErrorToSession(session, err)
-	} else if err != nil {
-		logger.Warn("Failed to authorize matchmaking, allowing player to continue. ", zap.Error(err))
+	if err := p.authorizeMatchmaking(ctx, logger, session, loginSessionID, *ml.Channel); err != nil {
+		switch status.Code(err) {
+		case codes.Internal:
+			logger.Warn("Failed to authorize matchmaking, allowing player to continue. ", zap.Error(err))
+		default:
+			return response.SendErrorToSession(session, err)
+		}
 	}
 
 	// Wait for a graceperiod Unless this is a social lobby, wait for a grace period before starting the matchmaker
@@ -287,9 +306,6 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 	backfillDelay := time.Duration(interval*idealMatchIntervals) * time.Second
 	if skipDelay {
 		backfillDelay = 0 * time.Second
-	} else if msession.Party != nil && !msession.Party.ID.IsNil() {
-		// Add extra delay for backfill when a user is in a party
-		backfillDelay += 45 * time.Second
 	}
 
 	// Check for a backfill match on a regular basis
@@ -648,7 +664,7 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 		logger.Warn("Failed to get guild priority list", zap.Error(err))
 	}
 
-	result := NewMatchmakingResult(logger, request.Mode, request.Channel)
+	response := NewMatchmakingResult(logger, request.Mode, request.Channel)
 
 	// Validate that the channel is in the user's guilds
 	if request.Channel == uuid.Nil || !lo.Contains(groups, request.Channel) {
@@ -665,11 +681,14 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 
 	}
 
-	// Check for suspensions on this channel. The user will not be allowed to create lobby's
-	if authorized, err := p.authorizeMatchmaking(ctx, logger, session, loginSessionID, request.Channel); !authorized {
-		return result.SendErrorToSession(session, err)
-	} else if err != nil {
-		logger.Warn("Failed to authorize matchmaking, allowing player to continue. ", zap.Error(err))
+	// Check for membership and suspensions on this channel. The user will not be allowed to create lobby's
+	if err := p.authorizeMatchmaking(ctx, logger, session, loginSessionID, request.Channel); err != nil {
+		switch status.Code(err) {
+		case codes.Internal:
+			logger.Warn("Failed to authorize matchmaking, allowing player to continue. ", zap.Error(err))
+		default:
+			return response.SendErrorToSession(session, err)
+		}
 	}
 	// Validating the level against the game mode
 	validLevels := map[evr.Symbol][]evr.Symbol{
@@ -688,15 +707,15 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 	isDeveloper, err := checkIfGlobalDeveloper(ctx, p.runtimeModule, session.userID)
 	logger.Info("User is developer", zap.Bool("isDeveloper", isDeveloper))
 	if err != nil {
-		return result.SendErrorToSession(session, status.Errorf(codes.Internal, "Failed to check if user is a developer: %v", err))
+		return response.SendErrorToSession(session, status.Errorf(codes.Internal, "Failed to check if user is a developer: %v", err))
 	}
 	if !isDeveloper {
 		if levels, ok := validLevels[request.Mode]; ok {
 			if request.Level != evr.LevelUnspecified && !lo.Contains(levels, request.Level) {
-				return result.SendErrorToSession(session, status.Errorf(codes.InvalidArgument, "Invalid level %v for game mode %v", request.Level, request.Mode))
+				return response.SendErrorToSession(session, status.Errorf(codes.InvalidArgument, "Invalid level %v for game mode %v", request.Level, request.Mode))
 			}
 		} else {
-			return result.SendErrorToSession(session, status.Errorf(codes.InvalidArgument, "Failed to create matchmaking session: Tried to create a match with an unknown level or gamemode: %v", request.Mode))
+			return response.SendErrorToSession(session, status.Errorf(codes.InvalidArgument, "Failed to create matchmaking session: Tried to create a match with an unknown level or gamemode: %v", request.Mode))
 		}
 	}
 
@@ -742,12 +761,12 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 		timeout := 15 * time.Minute
 		msession, err := p.matchmakingRegistry.Create(ctx, logger, session, ml, partySize, timeout, errorFn, joinFn)
 		if err != nil {
-			return result.SendErrorToSession(session, status.Errorf(codes.Internal, "Failed to create matchmaking session: %v", err))
+			return response.SendErrorToSession(session, status.Errorf(codes.Internal, "Failed to create matchmaking session: %v", err))
 		}
 		p.metrics.CustomCounter("create_active_count", map[string]string{}, 1)
 		err = p.MatchCreateLoop(session, msession, 5*time.Minute)
 		if err != nil {
-			return result.SendErrorToSession(session, err)
+			return response.SendErrorToSession(session, err)
 		}
 		return nil
 	}()
@@ -812,16 +831,16 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 		return response.SendErrorToSession(session, err)
 	}
 
-	authorized, err := p.authorizeMatchmaking(ctx, logger, session, loginSessionID, *ml.Channel)
-	if err != nil {
-		if authorized {
+	if err := p.authorizeMatchmaking(ctx, logger, session, loginSessionID, *ml.Channel); err != nil {
+		switch status.Code(err) {
+		case codes.Internal:
 			logger.Warn("Failed to authorize matchmaking, allowing player to continue. ", zap.Error(err))
-		} else {
-			err = status.Errorf(codes.PermissionDenied, err.Error())
+		case codes.NotFound:
+			// Allow the player to join the match even though they are not a member.
+		default:
 			return response.SendErrorToSession(session, err)
 		}
 	}
-	// Join the match
 
 	if err = p.JoinEvrMatch(ctx, logger, session, "", matchToken.String(), int(request.TeamIndex)); err != nil {
 		return response.SendErrorToSession(session, status.Errorf(codes.NotFound, err.Error()))
