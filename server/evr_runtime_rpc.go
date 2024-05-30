@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"strings"
 	"sync"
 	"time"
 
@@ -64,7 +65,7 @@ var matchRpcCache = struct {
 	expiry:   time.Now(),
 }
 
-func MatchRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+func MatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 	request := &MatchRpcRequest{}
 
 	response := &MatchRpcResponse{
@@ -519,7 +520,7 @@ type terminateMatchResponse struct {
 }
 
 func terminateMatchRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
-
+	node := ctx.Value(runtime.RUNTIME_CTX_NODE).(string)
 	request := &terminateMatchRequest{}
 	if err := json.Unmarshal([]byte(payload), request); err != nil {
 		return "", err
@@ -532,6 +533,12 @@ func terminateMatchRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 
 	responses := make([]string, 0)
 	for _, matchId := range request.MatchIds {
+		if matchId == "" {
+			continue
+		}
+		if !strings.Contains(matchId, ".") {
+			matchId = fmt.Sprintf("%s.%s", matchId, node)
+		}
 		response, err := nk.MatchSignal(ctx, matchId, signalJson)
 		if err != nil {
 			responses = append(responses, err.Error())
