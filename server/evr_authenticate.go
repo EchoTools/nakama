@@ -710,13 +710,13 @@ func SetDisplayNameByChannelBySession(ctx context.Context, nk runtime.NakamaModu
 
 	options = append(options, discordUser.Username)
 	options = append(options, discordUser.GlobalName)
-
+	gid := uuid.FromStringOrNil(groupID)
 	// Get the guild
 	if uuid.FromStringOrNil(groupID) != uuid.Nil {
 		// Get the guild by the user's primary guild
-		guild, err := discordRegistry.GetGuildByGroupId(ctx, groupID)
+		guild, err := discordRegistry.GetGuildByGroupId(ctx, gid.String())
 		if err != nil {
-			session.logger.Warn("Error getting guild by group id.", zap.String("group_id", groupID), zap.Error(err))
+			logger.Warn("Error getting guild by group id.", zap.String("group_id", groupID), zap.Error(err))
 			return displayName, nil
 		}
 		if guild != nil {

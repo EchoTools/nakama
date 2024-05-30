@@ -533,7 +533,7 @@ func (d *DiscordAppBot) InitializeDiscordBot() error {
 			logger.Error("Error getting user id: %w", err)
 			return
 		}
-		err = d.discordRegistry.UpdateGuildGroup(ctx, logger, userID, e.GuildID, discordID)
+		err = d.discordRegistry.UpdateGuildGroup(ctx, logger, userID, e.GuildID)
 		if err != nil {
 			logger.Error("Error updating guild group: %w", err)
 			return
@@ -1912,7 +1912,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		return fmt.Errorf("failed to get or create an account for %s (%s)", discordId, username)
 	}
 	// Synchronize the user's guilds with nakama groups
-	err = d.discordRegistry.UpdateGuildGroup(ctx, logger, userId, i.GuildID, discordId)
+	err = d.discordRegistry.UpdateGuildGroup(ctx, logger, userId, i.GuildID)
 	if err != nil {
 		return fmt.Errorf("error updating guild groups: %v", err)
 	}
@@ -1987,6 +1987,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		return err
 	}
 	matchId := ""
+
 	if len(presences) != 0 {
 		p := presences[0]
 		matchId = p.GetStatus()

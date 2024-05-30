@@ -59,8 +59,8 @@ type DiscordRegistry interface {
 	GetGuildGroups(ctx context.Context, userId uuid.UUID) ([]*api.Group, error)
 	// GetUser looks up the Discord user by the user ID. Potentially using the state cache.
 	GetUser(ctx context.Context, discordId string) (*discordgo.User, error)
-	UpdateGuildGroup(ctx context.Context, logger runtime.Logger, userID uuid.UUID, guildID, discordID string) error
-	UpdateAllGuildGroupsForUser(ctx context.Context, logger runtime.Logger, userID uuid.UUID, discordID string) error
+	UpdateGuildGroup(ctx context.Context, logger runtime.Logger, userID uuid.UUID, guildID string) error
+	UpdateAllGuildGroupsForUser(ctx context.Context, logger runtime.Logger, userID uuid.UUID) error
 	isModerator(ctx context.Context, guildID, discordID string) (isModerator bool, isGlobal bool, err error)
 }
 
@@ -440,10 +440,16 @@ func (r *LocalDiscordRegistry) UpdateAccount(ctx context.Context, userID uuid.UU
 	return nil
 }
 
-func (r *LocalDiscordRegistry) UpdateGuildGroup(ctx context.Context, logger runtime.Logger, userID uuid.UUID, guildID, discordID string) error {
+func (r *LocalDiscordRegistry) UpdateGuildGroup(ctx context.Context, logger runtime.Logger, userID uuid.UUID, guildID string) error {
 	// If discord bot is not responding, return
 	if r.bot == nil {
 		return fmt.Errorf("discord bot is not responding")
+	}
+
+	// Get teh user's discordID
+	discordID, err := r.GetDiscordIdByUserId(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("error getting discord id: %v", err)
 	}
 
 	// Get all of the user's groups
@@ -567,10 +573,10 @@ func (r *LocalDiscordRegistry) UpdateGuildGroup(ctx context.Context, logger runt
 	return nil
 }
 
-func (r *LocalDiscordRegistry) UpdateAllGuildGroupsForUser(ctx context.Context, logger runtime.Logger, userID uuid.UUID, discordID string) error {
+func (r *LocalDiscordRegistry) UpdateAllGuildGroupsForUser(ctx context.Context, logger runtime.Logger, userID uuid.UUID) error {
 	// Check every guild the bot is in for this user.
 	for _, guild := range r.bot.State.Guilds {
-		if err := r.UpdateGuildGroup(ctx, logger, userID, guild.ID, discordID); err != nil {
+		if err := r.UpdateGuildGroup(ctx, logger, userID, guild.ID); err != nil {
 			continue
 		}
 	}
