@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"math/rand"
 	"reflect"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -734,42 +734,34 @@ func (r *ProfileRegistry) retrieveStarterLoadout(ctx context.Context) (evr.Cosme
 func (r *ProfileRegistry) ValidateSocialGroup(ctx context.Context, userID uuid.UUID, groupID evr.GUID) (evr.GUID, error) {
 	logger := r.logger.WithField("user_id", userID.String())
 	// Get the user's active groups
-	groups, _, err := r.nk.UserGroupsList(ctx, userID.String(), 100, nil, "")
+	groups, err := r.discordRegistry.GetGuildGroups(ctx, userID)
 	if err != nil {
 		return groupID, fmt.Errorf("failed to get guild groups: %w", err)
 	}
 
-	// Get the user's discord ID
-	discordID, err := r.discordRegistry.GetDiscordIdByUserId(ctx, userID)
-	if err != nil {
-		return groupID, fmt.Errorf("failed to get discord ID: %w", err)
-	}
-
 	if len(groups) == 0 {
 		// Update the groups for the user
-		err := r.discordRegistry.UpdateAllGuildGroupsForUser(ctx, r.logger, userID, discordID)
+		err := r.discordRegistry.UpdateAllGuildGroupsForUser(ctx, r.logger, userID)
 		if err != nil {
 			logger.Warn("Failed to update guild groups for user: %w", err)
 		}
 		// Try again
-		groups, _, err = r.nk.UserGroupsList(ctx, userID.String(), 100, nil, "")
+		groups, err = r.discordRegistry.GetGuildGroups(ctx, userID)
 		if err != nil {
 			return groupID, fmt.Errorf("failed to get guild groups: %w", err)
 		}
 	}
 
-	groupIds := lo.Map(groups, func(g *api.UserGroupList_UserGroup, _ int) string { return g.GetGroup().GetId() })
-	if lo.Contains(groupIds, groupID.String()) {
-		// User is in the group
-		return groupID, nil
+	if len(groups) == 0 {
+		return evr.GUID(uuid.Nil), nil
 	}
 
 	// If the user is not in the group, find the group with the most members
-	sort.Slice(groups, func(i, j int) bool {
-		return groups[i].Group.EdgeCount > groups[j].Group.EdgeCount
+	slices.SortStableFunc(groups, func(a, b *api.Group) int {
+		return int(a.EdgeCount) - int(b.EdgeCount)
 	})
 
-	return evr.GUID(uuid.FromStringOrNil(groups[0].GetGroup().GetId())), nil
+	return evr.GUID(uuid.FromStringOrNil(groups[0].Id)), nil
 
 }
 
@@ -865,7 +857,6 @@ func (r *ProfileRegistry) UpdateClientProfile(ctx context.Context, logger *zap.L
 			logger.Error("Failed to set display name.", zap.Error(err))
 		} else {
 			p.UpdateDisplayName(displayName)
-			p.Server.UpdateTime = time.Now().UTC().Unix()
 		}
 	}
 	r.Store(session.userID, p)

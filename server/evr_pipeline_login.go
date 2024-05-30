@@ -180,6 +180,23 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		return evr.DefaultGameSettingsSettings, fmt.Errorf("failed to load game profiles")
 	}
 
+	discordId, err = p.discordRegistry.GetDiscordIdByUserId(ctx, uid)
+	if err != nil {
+		return settings, fmt.Errorf("failed to get discord ID: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, time.Second*3)
+	go func() {
+		defer cancel()
+		err = p.discordRegistry.UpdateAllGuildGroupsForUser(ctx, NewRuntimeGoLogger(logger), uid)
+		if err != nil {
+			logger.Warn("Failed to update guild groups", zap.Error(err))
+		}
+	}()
+
+	// Wait for the context to be done, or the timeout
+	<-ctx.Done()
+
 	// TODO Add the settings to the user profile
 	settings = evr.DefaultGameSettingsSettings
 	return settings, nil
@@ -422,6 +439,18 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 	if !found {
 		return session.SendEvr(evr.NewLoggedInUserProfileFailure(request.EvrId, 400, "failed to load game profiles"))
 	}
+
+	// Set the display name for the selected channel
+	channel := profile.GetChannel()
+	if channel != uuid.Nil {
+		displayName, err := SetDisplayNameByChannelBySession(ctx, p.runtimeModule, logger, p.discordRegistry, session, channel.String())
+		if err != nil {
+			return session.SendEvr(evr.NewLoggedInUserProfileFailure(request.EvrId, 400, "failed to set display name"))
+		}
+		profile.UpdateDisplayName(displayName)
+		p.profileRegistry.Store(session.userID, profile)
+	}
+
 	return session.SendEvr(evr.NewLoggedInUserProfileSuccess(evrID, profile.Client, profile.Server))
 }
 
