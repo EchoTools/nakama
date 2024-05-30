@@ -1200,23 +1200,18 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 				logger = logger.WithField("group_id", matchmakingConfig.GroupID)
 
-				// Query the storage index
-				query := "+group_id:" + matchmakingConfig.GroupID
-				var members []string
-
-				idxobjs, err := nk.StorageIndexList(ctx, SystemUserID, ActivePartyGroupIndex, query, 1000)
+				// Look for presences
+				partyID := uuid.NewV5(uuid.Nil, matchmakingConfig.GroupID).String()
+				streamUsers, err := nk.StreamUserList(StreamModeParty, partyID, "", d.pipeline.node, true, true)
 				if err != nil {
 					logger.Error("Failed to list party members", zap.Error(err))
 					return
 				}
-				for _, obj := range idxobjs.GetObjects() {
-					members = append(members, obj.UserId)
-				}
 
 				// Convert the members to discord user IDs
-				discordIds := make([]string, 0, len(members))
-				for _, member := range members {
-					discordId, err := d.discordRegistry.GetDiscordIdByUserId(ctx, uuid.FromStringOrNil(member))
+				discordIds := make([]string, 0, len(streamUsers))
+				for _, streamUser := range streamUsers {
+					discordId, err := d.discordRegistry.GetDiscordIdByUserId(ctx, uuid.FromStringOrNil(streamUser.GetUserId()))
 					if err != nil {
 						logger.Error("Failed to get discord ID", zap.Error(err))
 						return
