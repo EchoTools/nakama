@@ -1,19 +1,11 @@
 package server
 
 import (
-	"errors"
 	"fmt"
 
 	"strings"
 
 	"github.com/gofrs/uuid/v5"
-)
-
-var (
-	ErrInvalidMatchTokenFormat = errors.New("invalid match token format")
-	ErrInvalidMatchID          = errors.New("invalid match ID")
-	ErrInvalidMatchNode        = errors.New("invalid match node")
-	ErrInvalidMatchToken       = errors.New("invalid match token")
 )
 
 // MatchToken represents a unique identifier for a match, consisting of a uuid.UUID and a node name.
@@ -25,7 +17,7 @@ func (MatchToken) Nil() MatchToken {
 
 func NewMatchToken(id uuid.UUID, node string) (MatchToken, error) {
 	if id == uuid.Nil || node == "" {
-		return "", ErrInvalidMatchToken
+		return "", ErrInvalidMatchID
 	}
 	return MatchToken(fmt.Sprintf("%s.%s", id, node)), nil
 }
@@ -71,7 +63,7 @@ func MatchTokenFromString(s string) (t MatchToken, err error) {
 	case len(parts) != 2:
 		err = ErrInvalidMatchTokenFormat
 	case parts[0] == "" || uuid.FromStringOrNil(parts[0]) == uuid.Nil:
-		err = ErrInvalidMatchID
+		err = ErrInvalidMatchUUID
 	case parts[1] == "":
 		err = ErrInvalidMatchNode
 	}
@@ -81,10 +73,7 @@ func MatchTokenFromString(s string) (t MatchToken, err error) {
 	return
 }
 
-// FromStringOrNil returns a UUID parsed from the input string. Same behavior as FromString(), but returns uuid.Nil instead of an error.
-
-// FromStringOrNil returns a UUID parsed from the input string.
-// Same behavior as FromString(), but returns uuid.Nil instead of an error.
+// Same behavior as FromString(), but returns MatchToken instead of an error.
 func MatchTokenFromStringOrNil(s string) MatchToken {
 	t, err := MatchTokenFromString(s)
 	if err != nil {

@@ -761,7 +761,7 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 	response := NewMatchmakingResult(logger, 0xFFFFFFFFFFFFFFFF, request.MatchID)
 	loginSessionID := request.LoginSessionID
 	// Make sure the match exists
-	matchToken, err := NewMatchToken(request.MatchID, p.node)
+	matchToken, err := NewMatchID(request.MatchID, p.node)
 	if err != nil {
 		return response.SendErrorToSession(session, status.Errorf(codes.InvalidArgument, "Invalid match ID"))
 	}
