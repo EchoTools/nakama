@@ -186,6 +186,8 @@ type PlayerInfo struct {
 	EvrID       evr.EvrId `json:"evr_id,omitempty"`
 	Team        TeamIndex `json:"team"`
 	ClientIP    string    `json:"client_ip,omitempty"`
+	DiscordID   string    `json:"discord_id,omitempty"`
+	PartyID     string    `json:"party_id,omitempty"`
 }
 
 type MatchBroadcaster struct {
@@ -293,6 +295,8 @@ func (s *EvrMatchState) rebuildCache() {
 			EvrID:       presence.EvrID,
 			Team:        TeamIndex(presence.TeamIndex),
 			ClientIP:    presence.ClientIP,
+			DiscordID:   presence.DiscordID,
+			PartyID:     presence.PartyID.String(),
 		}
 
 		s.Players = append(s.Players, playerinfo)

@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/heroiclabs/nakama-common/rtapi"
@@ -49,7 +48,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		"link/device":          LinkDeviceRpc,
 		"link/usernamedevice":  LinkUserIdDeviceRpc,
 		"signin/discord":       DiscordSignInRpc,
-		"match":                MatchRpc,
+		"match":                MatchRPC,
 		"match/prepare":        PrepareMatchRPC,
 		"link":                 LinkingAppRpc,
 		"evr/servicestatus":    ServiceStatusRpc,
@@ -130,6 +129,22 @@ func listMatchStates(ctx context.Context, nk runtime.NakamaModule, query string)
 	return matchStates, nil
 }
 
+type MatchStateTags struct {
+	Mode     string
+	Level    string
+	Operator string
+	Region   string
+}
+
+func (t MatchStateTags) AsMap() map[string]string {
+	return map[string]string{
+		"mode":     t.Mode,
+		"level":    t.Level,
+		"operator": t.Operator,
+		"region":   t.Region,
+	}
+}
+
 func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGoNakamaModule) {
 
 	// Create a ticker to update the metrics every 5 minutes
@@ -148,25 +163,21 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 			continue
 		}
 		logger.Info("Match states: %d", len(matchStates))
-		playercounts := make(map[string]int)
+		playercounts := make(map[MatchStateTags]int)
 		// Log the match states
 		for _, state := range matchStates {
-			// calculate the team sizes
-			tags := map[string]string{
-				"mode":     state.State.Mode.String(),
-				"level":    state.State.Level.String(),
-				"type":     state.State.LobbyType.String(),
-				"size":     fmt.Sprintf("%d", len(state.Presences)),
-				"operator": state.State.Broadcaster.OperatorID,
-				"started":  strconv.FormatBool(state.State.Started),
-				"region":   state.State.Broadcaster.Region.String(),
-				"tickRate": fmt.Sprintf("%d", state.TickRate),
+			stateTags := MatchStateTags{
+				Mode:     state.State.Mode.String(),
+				Level:    state.State.Level.String(),
+				Operator: state.State.Broadcaster.OperatorID,
+				Region:   state.State.Broadcaster.Region.String(),
 			}
-			playercounts[state.State.Mode.String()] += len(state.State.Players)
 
-			nk.metrics.CustomCounter("match_gauge", tags, 1)
+			playercounts[stateTags] += len(state.State.Players)
 		}
-
+		for tags, count := range playercounts {
+			nk.metrics.CustomCounter("match_gauge", tags.AsMap(), int64(count))
+		}
 	}
 }
 
