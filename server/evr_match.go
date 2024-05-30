@@ -864,8 +864,13 @@ func (m *EvrMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, db
 	}
 	logger.Info("MatchTerminate called. %v", state)
 	if state.broadcaster != nil {
+		// Disconnect the players
+		for _, presence := range state.presences {
+			nk.SessionDisconnect(ctx, presence.GetPlayerSession(), runtime.PresenceReasonDisconnect)
+		}
 		// Disconnect the broadcasters session
-		//nk.SessionDisconnect(ctx, state.broadcaster.GetSessionId(), runtime.PresenceReasonDisconnect)
+		nk.SessionDisconnect(ctx, state.broadcaster.GetSessionId(), runtime.PresenceReasonDisconnect)
+
 	}
 
 	return state
@@ -888,7 +893,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 
 	switch signal.Signal {
 	case SignalTerminate:
-		return nil, "terminating match"
+		return m.MatchTerminate(ctx, logger, db, nk, dispatcher, tick, state, 10), "terminating match"
 
 	case SignalPruneUnderutilized:
 		// Prune this match if it's utilization is low.
