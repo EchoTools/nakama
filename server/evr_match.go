@@ -222,19 +222,16 @@ type EvrMatchState struct {
 
 	Mode            evr.Symbol           `json:"mode,omitempty"`             // The mode of the lobby (Arena, Combat, Social, etc.) (EVR)
 	Level           evr.Symbol           `json:"level,omitempty"`            // The level to play on (EVR).
-	Levels          []Level              `json:"levels,omitempty"`           // The levels to choose from (EVR).
 	LevelSelection  MatchLevelSelection  `json:"level_selection,omitempty"`  // The level selection method (EVR).
 	SessionSettings *evr.SessionSettings `json:"session_settings,omitempty"` // The session settings for the match (EVR).
 
 	MaxSize     uint8     `json:"limit,omitempty"`     // The total lobby size limit (players + specs)
-	Size        int       `json:"size"`                // The number of players (not including spectators) in the match.
+	Size        int       `json:"size"`                // The number of players (including spectators) in the match.
 	PlayerLimit int       `json:"player_limit"`        // The number of players in the match (not including spectators).
 	TeamSize    int       `json:"team_size,omitempty"` // The size of each team in arena/combat (either 4 or 5)
 	TeamIndex   TeamIndex `json:"team,omitempty"`      // What team index a player prefers (Used by Matching only)
 
 	Players        []PlayerInfo                    `json:"players,omitempty"` // The displayNames of the players (by team name) in the match.
-	EvrIDs         []evr.EvrId                     `json:"evrids,omitempty"`  // The evr ids of the players in the match.
-	UserIDs        []string                        `json:"userids,omitempty"` // The user ids of the players in the match.
 	teamAlignments map[evr.EvrId]int               // [evrID]TeamIndex
 	presences      map[uuid.UUID]*EvrMatchPresence // [sessionId]EvrMatchPresence
 	broadcaster    runtime.Presence                // The broadcaster's presence
@@ -277,16 +274,11 @@ func (s *EvrMatchState) rebuildCache() {
 	// Rebuild the lookup tables.
 
 	s.Players = make([]PlayerInfo, 0, len(s.presences))
-	s.EvrIDs = make([]evr.EvrId, 0, len(s.presences))
-	s.UserIDs = make([]string, 0, len(s.presences))
-	s.Size = 0
+	s.Size = len(s.presences)
 
 	// Construct Player list
 	for _, presence := range s.presences {
 		// Do not include spectators or moderators in player count
-		if presence.TeamIndex != evr.TeamSpectator && presence.TeamIndex != evr.TeamModerator {
-			s.Size += 1
-		}
 
 		playerinfo := PlayerInfo{
 			UserID:      presence.UserID.String(),
@@ -300,8 +292,6 @@ func (s *EvrMatchState) rebuildCache() {
 		}
 
 		s.Players = append(s.Players, playerinfo)
-		s.EvrIDs = append(s.EvrIDs, presence.EvrID)
-		s.UserIDs = append(s.UserIDs, presence.GetUserId())
 	}
 
 	sort.SliceStable(s.Players, func(i, j int) bool {
@@ -340,13 +330,10 @@ func NewEvrMatchState(endpoint evr.Endpoint, config *MatchBroadcaster, sessionId
 		LobbyType:      UnassignedLobby,
 		Mode:           evr.ModeUnloaded,
 		Level:          evr.LevelUnloaded,
-		Levels:         make([]Level, 0),
 		Players:        make([]PlayerInfo, 0, MatchMaxSize),
-		EvrIDs:         make([]evr.EvrId, 0, MatchMaxSize),
 		presences:      make(map[uuid.UUID]*EvrMatchPresence, MatchMaxSize),
 		presenceCache:  make(map[uuid.UUID]*EvrMatchPresence, MatchMaxSize),
 		teamAlignments: make(map[evr.EvrId]int, MatchMaxSize),
-		UserIDs:        make([]string, 0, MatchMaxSize),
 		emptyTicks:     0,
 		tickRate:       10,
 	}
