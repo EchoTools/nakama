@@ -47,8 +47,9 @@ const (
 )
 
 var (
-	displayNameRegex = regexp.MustCompile(`"displayname": "(\\"|[^"])*"`)
-	updatetimeRegex  = regexp.MustCompile(`"updatetime": \d*`)
+	displayNameRegex   = regexp.MustCompile(`"displayname": "(\\"|[^"])*"`)
+	updatetimeRegex    = regexp.MustCompile(`"updatetime": \d*`)
+	StreamContextMatch = uuid.NewV5(uuid.Nil, "match")
 )
 
 type MatchStatGroup string
@@ -643,6 +644,11 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 			return errors.New("player not in cache")
 		}
 
+		// Update the player's status to include the match ID
+		if err := nk.StreamUserUpdate(StreamModeEvr, p.GetUserId(), StreamContextMatch.String(), "", p.GetUserId(), p.GetSessionId(), false, false, state.ID()); err != nil {
+			logger.Warn("Failed to update user status: %v", err)
+		}
+
 		// Send this after the function returns to ensure the match is ready to receive the player.
 		err := m.sendPlayerStart(ctx, logger, dispatcher, state, matchPresence)
 		if err != nil {
@@ -720,6 +726,10 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 	})
 
 	for _, p := range presences {
+		// Update the player's status to remove the match ID
+		if err := nk.StreamUserUpdate(StreamModeEvr, p.GetUserId(), StreamContextMatch.String(), "", p.GetUserId(), p.GetSessionId(), false, false, ""); err != nil {
+			logger.Warn("Failed to update user status for %v: %v", p, err)
+		}
 		sessionID := uuid.FromStringOrNil(p.GetSessionId())
 		matchPresence, ok := state.presences[sessionID]
 		if !ok || matchPresence == nil {

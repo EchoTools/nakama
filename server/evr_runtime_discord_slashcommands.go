@@ -1982,7 +1982,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	}
 
 	// Get the MatchId for the user from it's presence
-	presences, err := nk.StreamUserList(StreamModeStatus, userId.String(), "", "", true, true)
+	presences, err := nk.StreamUserList(StreamModeEvr, userId.String(), StreamContextMatch.String(), "", true, true)
 	if err != nil {
 		return err
 	}
@@ -1990,7 +1990,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 
 	if len(presences) != 0 {
 		p := presences[0]
-		matchId = p.GetStatus()
+		matchId = strings.ToUpper(p.GetStatus())
 	}
 
 	// Get the suspensions
@@ -2233,7 +2233,7 @@ func (d *DiscordAppBot) getOrCreateParty(ctx context.Context, pipeline *Pipeline
 			partyID := presence.Stream.Subject
 			ph, found := partyRegistry.parties.Load(partyID)
 			if !found {
-				return nil, fmt.Errorf("failed to find party.")
+				return nil, fmt.Errorf("failed to find party")
 			}
 			// Party found
 			return ph, nil
