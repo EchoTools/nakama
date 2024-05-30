@@ -495,6 +495,10 @@ func (r *LocalDiscordRegistry) UpdateGuildGroup(ctx context.Context, logger runt
 		if ctx.Err() != nil {
 			return fmt.Errorf("context cancelled: %w", err)
 		}
+		if strings.Contains(err.Error(), "10007") {
+			// The user doesn't exist in the guld
+			return nil
+		}
 		logger.Warn("Error getting guild member %s in guild %s: %v, removing", discordID, guildID, err)
 		account, err := r.nk.AccountGetId(ctx, userID.String())
 		for _, groupID := range guildRoleGroups {
