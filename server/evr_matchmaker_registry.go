@@ -479,8 +479,24 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 
 	logger.Debug("Building match", zap.Any("entrants", entrants))
 	// Use the properties from the first entrant to get the channel
-	stringProperties := entrants[0].StringProperties
-	channel := uuid.FromStringOrNil(stringProperties["channel"])
+
+	channelMap := make(map[uuid.UUID]int, len(entrants))
+	for _, e := range entrants {
+		channel := uuid.FromStringOrNil(e.StringProperties["channel"])
+		if channel == uuid.Nil {
+			continue
+		}
+		channelMap[channel]++
+	}
+
+	channels := make([]uuid.UUID, 0, len(channelMap))
+	for k := range channelMap {
+		channels = append(channels, k)
+	}
+
+	sort.SliceStable(channels, func(i, j int) bool {
+		return channelMap[channels[i]] > channelMap[channels[j]]
+	})
 
 	// Get a map of all broadcasters by their key
 	broadcastersByExtIP := make(map[string]evr.Endpoint, 100)
@@ -644,7 +660,7 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 
 	for {
 		var err error
-		matchID, err = mr.allocateBroadcaster(channel, config, sorted, ml)
+		matchID, err = mr.allocateBroadcaster(channels, config, sorted, ml)
 		if err != nil {
 			mr.logger.Warn("Error allocating broadcaster", zap.Error(err))
 		}
@@ -778,11 +794,11 @@ func distributeParties(parties [][]*MatchmakerEntry) [][]*MatchmakerEntry {
 	return teams
 }
 
-func (mr *MatchmakingRegistry) allocateBroadcaster(channel uuid.UUID, config MatchmakingSettings, sorted []string, label *EvrMatchState) (string, error) {
+func (mr *MatchmakingRegistry) allocateBroadcaster(channels []uuid.UUID, config MatchmakingSettings, sorted []string, label *EvrMatchState) (string, error) {
 	// Lock the broadcasters so that they aren't double allocated
 	mr.Lock()
 	defer mr.Unlock()
-	available, err := mr.ListUnassignedLobbies(mr.ctx, channel)
+	available, err := mr.ListUnassignedLobbies(mr.ctx, channels)
 	if err != nil {
 		return "", err
 	}
@@ -863,19 +879,17 @@ func (c *MatchmakingRegistry) updateBroadcasters() {
 	}
 }
 
-func (c *MatchmakingRegistry) ListUnassignedLobbies(ctx context.Context, channel uuid.UUID) ([]*EvrMatchState, error) {
+func (c *MatchmakingRegistry) ListUnassignedLobbies(ctx context.Context, channels []uuid.UUID) ([]*EvrMatchState, error) {
 
 	qparts := make([]string, 0, 10)
 
 	// MUST be an unassigned lobby
 	qparts = append(qparts, LobbyType(evr.UnassignedLobby).Query(Must, 0))
 
-	/*
-		if channel != uuid.Nil {
-			// MUST be hosting for this channel
-			qparts = append(qparts, HostedChannels([]uuid.UUID{channel}).Query(Must, 0))
-		}
-	*/
+	if len(channels) > 0 {
+		// MUST be hosting for this channel
+		qparts = append(qparts, HostedChannels(channels).Query(Must, 0))
+	}
 
 	// TODO FIXME Add version lock and appid
 	query := strings.Join(qparts, " ")
