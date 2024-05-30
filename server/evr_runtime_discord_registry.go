@@ -490,9 +490,12 @@ func (r *LocalDiscordRegistry) UpdateGuildGroup(ctx context.Context, logger runt
 			return fmt.Errorf("context cancelled: %w", err)
 		}
 		logger.Warn("Error getting guild member %s in guild %s: %v, removing", discordID, guildID, err)
-		for _, groupId := range guildRoleGroups {
-			_ = groupId
-			defer r.nk.GroupUsersKick(ctx, SystemUserID, groupId, []string{userID.String()})
+		account, err := r.nk.AccountGetId(ctx, userID.String())
+		for _, groupID := range guildRoleGroups {
+			err := r.nk.GroupUserLeave(ctx, groupID, userID.String(), account.GetUser().GetUsername())
+			if err != nil {
+				logger.Warn("Error leaving user %s from group %s: %v", userID, groupID, err)
+			}
 		}
 		return fmt.Errorf("error getting guild member: %w", err)
 	}
