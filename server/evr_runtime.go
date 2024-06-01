@@ -165,12 +165,12 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 		logger.Info("Match states: %d", len(matchStates))
 		playercounts := make(map[MatchStateTags]int)
 		// Log the match states
+
 		for _, state := range matchStates {
 			stateTags := MatchStateTags{
 				Mode:     state.State.Mode.String(),
 				Level:    state.State.Level.String(),
 				Operator: state.State.Broadcaster.OperatorID,
-				Region:   state.State.Broadcaster.Region.String(),
 			}
 
 			playercounts[stateTags] += len(state.State.Players)

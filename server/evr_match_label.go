@@ -281,10 +281,33 @@ type Region evr.Symbol
 func (r Region) Query(o QueryOperator, b int) string {
 	return Label{
 		Op:    rune(o),
-		Name:  "broadcaster.region",
+		Name:  "broadcaster.regions",
 		Value: evr.Symbol(r).Token().String(),
 		boost: b,
 	}.Escaped()
+}
+
+// The Match Channel is the channel from which the that the match was spawned. (e.g. Playground, etc.)
+type Regions []evr.Symbol // uuid.UUID
+
+func (c Regions) Query(o QueryOperator, b int) string {
+	// Create a regular expression
+	// The regular expression is a list of UUIDs separated by a pipe character
+	// The UUIDs are escaped to be used in a regular expression
+
+	ids := make([]string, len(c))
+	for i, id := range c {
+		ids[i] = evr.Symbol(id).Token().String()
+	}
+	// Join the UUIDs with a pipe character
+	s := strings.Join(ids, "|")
+	s = fmt.Sprintf("/(%s)/", s)
+	return Label{
+		Op:    rune(o),
+		Name:  "broadcaster.regions",
+		Value: s,
+		boost: b,
+	}.Unescaped()
 }
 
 // The Player Count is the number of players competing in the match (on orange or blue)

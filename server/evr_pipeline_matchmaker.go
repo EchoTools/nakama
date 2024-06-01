@@ -222,6 +222,8 @@ func (p *EvrPipeline) lobbyFindSessionRequest(ctx context.Context, logger *zap.L
 		}
 	}
 
+	ml.Broadcaster.Regions = []evr.Symbol{evr.DefaultRegion}
+
 	// Wait for a graceperiod Unless this is a social lobby, wait for a grace period before starting the matchmaker
 	matchmakingDelay := MatchJoinGracePeriod
 	if ml.Mode == evr.ModeSocialPublic {
@@ -634,7 +636,8 @@ func (p *EvrPipeline) GetGuildPriorityList(ctx context.Context, userID uuid.UUID
 				}
 			}
 		}
-	} else {
+	}
+	if len(guildPriority) == 0 {
 		// If the params are not set, use the user's guilds
 		guildPriority = []uuid.UUID{currentChannel}
 		for _, groupID := range groupIDs {
@@ -644,7 +647,7 @@ func (p *EvrPipeline) GetGuildPriorityList(ctx context.Context, userID uuid.UUID
 		}
 	}
 	p.logger.Debug("guild priorites", zap.Any("prioritized", guildPriority), zap.Any("all", groupIDs))
-	return groupIDs, selected, nil
+	return groupIDs, guildPriority, nil
 }
 
 // lobbyCreateSessionRequest is a request to create a new session.
@@ -719,6 +722,12 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 		}
 	}
 
+	regions := make([]evr.Symbol, 0)
+	if request.Region != evr.DefaultRegion {
+		regions = append(regions, request.Region)
+	}
+	regions = append(regions, evr.DefaultRegion)
+
 	ml := &EvrMatchState{
 
 		Level:           request.Level,
@@ -730,7 +739,7 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 		Channel:         &request.Channel,
 		Broadcaster: MatchBroadcaster{
 			VersionLock: uint64(request.VersionLock),
-			Region:      request.Region,
+			Regions:     regions,
 			Channels:    priorities,
 		},
 	}
