@@ -7,6 +7,10 @@ import (
 	"github.com/gofrs/uuid/v5"
 )
 
+var (
+	DefaultRegion = ToSymbol("default")
+)
+
 // LobbyCreateSessionRequest represents a request from the client to the server for creating a new game session.
 type LobbyCreateSessionRequest struct {
 	Region          Symbol          // Symbol representing the region

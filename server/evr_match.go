@@ -198,7 +198,7 @@ type MatchBroadcaster struct {
 	Endpoint      evr.Endpoint `json:"endpoint,omitempty"`       // The endpoint data used for connections.
 	VersionLock   uint64       `json:"version_lock,omitempty"`   // The game build version. (EVR)
 	AppId         string       `json:"app_id,omitempty"`         // The game app id. (EVR)
-	Region        evr.Symbol   `json:"region,omitempty"`         // The region the match is hosted in. (Matching Only) (EVR)
+	Regions       []evr.Symbol `json:"regions,omitempty"`        // The region the match is hosted in. (Matching Only) (EVR)
 	IPinfo        *ipinfo.Core `json:"ip_info,omitempty"`        // The IPinfo of the broadcaster.
 	ServerID      uint64       `json:"server_id,omitempty"`      // The server id of the broadcaster. (EVR)
 	PublisherLock bool         `json:"publisher_lock,omitempty"` // Publisher lock (EVR)

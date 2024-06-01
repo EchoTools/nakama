@@ -106,9 +106,18 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 	// server connections are authenticated by discord ID and password.
 	// Get the discordId and password from the context
 	// Get the tags and guilds from the url params
-	discordId, password, tags, guildIds, err := extractAuthenticationDetailsFromContext(ctx)
+	discordId, password, tags, guildIds, regions, err := extractAuthenticationDetailsFromContext(ctx)
 	if err != nil {
 		return errFailedRegistration(session, err, evr.BroadcasterRegistration_Failure)
+	}
+
+	// Assume that the regions provided are the ONLY regions the broadcaster wants to host in
+	if len(regions) == 0 {
+		regions = append(regions, evr.DefaultRegion)
+	}
+
+	if request.Region != evr.DefaultRegion {
+		regions = append(regions, request.Region)
 	}
 
 	// Authenticate the broadcaster
@@ -125,7 +134,7 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 	}
 
 	// Create the broadcaster config
-	config := broadcasterConfig(userId, session.id.String(), request.ServerId, request.InternalIP, externalIP, request.Port, request.Region, request.VersionLock, tags)
+	config := broadcasterConfig(userId, session.id.String(), request.ServerId, request.InternalIP, externalIP, request.Port, regions, request.VersionLock, tags)
 
 	// Get the hosted channels
 	channels, err := p.getBroadcasterHostInfo(ctx, logger, session, userId, discordId, guildIds)
@@ -201,25 +210,25 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 	return nil
 }
 
-func extractAuthenticationDetailsFromContext(ctx context.Context) (discordId, password string, tags []string, guildIds []string, err error) {
+func extractAuthenticationDetailsFromContext(ctx context.Context) (discordId, password string, tags, guildIds []string, regions []evr.Symbol, err error) {
 	var ok bool
 
 	// Get the discord id from the context
 	discordId, ok = ctx.Value(ctxDiscordIdKey{}).(string)
 	if !ok || discordId == "" {
-		return "", "", nil, nil, fmt.Errorf("no url params provided")
+		return "", "", nil, nil, nil, fmt.Errorf("no url params provided")
 	}
 
 	// Get the password from the context
 	password, ok = ctx.Value(ctxPasswordKey{}).(string)
 	if !ok || password == "" {
-		return "", "", nil, nil, fmt.Errorf("no url params provided")
+		return "", "", nil, nil, nil, fmt.Errorf("no url params provided")
 	}
 
 	// Get the url params
 	params, ok := ctx.Value(ctxUrlParamsKey{}).(map[string][]string)
 	if !ok {
-		return "", "", nil, nil, fmt.Errorf("no url params provided")
+		return "", "", nil, nil, nil, fmt.Errorf("no url params provided")
 	}
 
 	// Get the tags from the url params
@@ -227,6 +236,18 @@ func extractAuthenticationDetailsFromContext(ctx context.Context) (discordId, pa
 	if tagsets, ok := params["tags"]; ok {
 		for _, tagstr := range tagsets {
 			tags = append(tags, strings.Split(tagstr, ",")...)
+		}
+	}
+
+	regions = make([]evr.Symbol, 0)
+	if regionstr, ok := params["regions"]; ok {
+		for _, regionstr := range regionstr {
+			for _, region := range strings.Split(regionstr, ",") {
+				s := strings.Trim(region, " ")
+				if s != "" {
+					regions = append(regions, evr.ToSymbol(s))
+				}
+			}
 		}
 	}
 
@@ -248,7 +269,7 @@ func extractAuthenticationDetailsFromContext(ctx context.Context) (discordId, pa
 		guildIds = make([]string, 0)
 	}
 
-	return discordId, password, tags, guildIds, nil
+	return discordId, password, tags, guildIds, regions, nil
 }
 
 func (p *EvrPipeline) authenticateBroadcaster(ctx context.Context, logger *zap.Logger, session *sessionWS, discordId, password string, guildIds []string, tags []string) (string, string, error) {
@@ -275,7 +296,7 @@ func (p *EvrPipeline) authenticateBroadcaster(ctx context.Context, logger *zap.L
 	return userId, username, nil
 }
 
-func broadcasterConfig(userId, sessionId string, serverId uint64, internalIP, externalIP net.IP, port uint16, region evr.Symbol, versionLock uint64, tags []string) *MatchBroadcaster {
+func broadcasterConfig(userId, sessionId string, serverId uint64, internalIP, externalIP net.IP, port uint16, regions []evr.Symbol, versionLock uint64, tags []string) *MatchBroadcaster {
 
 	config := &MatchBroadcaster{
 		SessionID:  sessionId,
@@ -286,7 +307,7 @@ func broadcasterConfig(userId, sessionId string, serverId uint64, internalIP, ex
 			ExternalIP: externalIP,
 			Port:       port,
 		},
-		Region:      region,
+		Regions:     regions,
 		VersionLock: versionLock,
 		Channels:    make([]uuid.UUID, 0),
 

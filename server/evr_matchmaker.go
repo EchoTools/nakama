@@ -50,10 +50,12 @@ func (p *EvrPipeline) ListUnassignedLobbies(ctx context.Context, session *sessio
 		qparts = append(qparts, Channel(channel).Query(Should, len(ml.Broadcaster.Channels)-i))
 	}
 
-	// SHOULD match the region (if specified)
-	if ml.Broadcaster.Region != evr.Symbol(0) {
-		qparts = append(qparts, Region(ml.Broadcaster.Region).Query(Should, 3))
+	// Add the regions in descending order of priority
+	for i, region := range ml.Broadcaster.Regions {
+		qparts = append(qparts, Region(region).Query(Should, len(ml.Broadcaster.Regions)-i))
 	}
+
+	qparts = append(qparts, Regions(ml.Broadcaster.Regions).Query(Must, 0))
 
 	// TODO FIXME Add version lock and appid
 	query := strings.Join(qparts, " ")
@@ -405,9 +407,23 @@ func buildMatchQueryFromLabel(ml *EvrMatchState) string {
 		qparts = append(qparts, Channel(*ml.Channel).Query(Should, 3))
 	}
 
-	// Add the region as a SHOULD
-	if ml.Broadcaster.Region != evr.Symbol(0) {
-		qparts = append(qparts, Region(ml.Broadcaster.Region).Query(Should, 2))
+	switch len(ml.Broadcaster.Regions) {
+	case 0:
+		// If no regions are specified, use default
+		qparts = append(qparts, Region(evr.Symbol(0)).Query(Must, 2))
+	case 1:
+		// If only one region is specified, use it as a MUST
+		qparts = append(qparts, Region(ml.Broadcaster.Regions[0]).Query(Must, 2))
+	default:
+		// If multiple regions are specified, use the first as a MUST and the rest as SHOULD
+		qparts = append(qparts, Region(ml.Broadcaster.Regions[0]).Query(Must, 2))
+		for _, r := range ml.Broadcaster.Regions[1:] {
+			qparts = append(qparts, Region(r).Query(Should, 2))
+		}
+	}
+
+	for _, r := range ml.Broadcaster.Regions {
+		qparts = append(qparts, Region(r).Query(Should, 2))
 	}
 
 	// Setup the query and logger
