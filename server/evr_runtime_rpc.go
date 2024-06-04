@@ -610,7 +610,7 @@ func matchmakingStatusRpc(ctx context.Context, logger runtime.Logger, db *sql.DB
 			return "", err
 		}
 	}
-	subcontext := uuid.NewV5(uuid.NamespaceOID, "matchmakingStatus").String()
+	subcontext := uuid.NewV5(uuid.Nil, "matchmaking").String()
 	presences, err := nk.StreamUserList(StreamModeEvr, "", subcontext, "", true, true)
 	if err != nil {
 		return "", err
