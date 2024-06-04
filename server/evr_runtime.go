@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
 
@@ -134,6 +135,7 @@ type MatchStateTags struct {
 	Level    string
 	Operator string
 	Region   string
+	Group    string
 }
 
 func (t MatchStateTags) AsMap() map[string]string {
@@ -162,21 +164,25 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 			logger.Error("Error listing match states: %v", err)
 			continue
 		}
-		logger.Info("Match states: %d", len(matchStates))
 		playercounts := make(map[MatchStateTags]int)
 		// Log the match states
 
 		for _, state := range matchStates {
+			groupID := state.State.Channel
+			if groupID == nil {
+				groupID = &uuid.Nil
+			}
 			stateTags := MatchStateTags{
 				Mode:     state.State.Mode.String(),
 				Level:    state.State.Level.String(),
 				Operator: state.State.Broadcaster.OperatorID,
+				Group:    groupID.String(),
 			}
 
 			playercounts[stateTags] += len(state.State.Players)
 		}
 		for tags, count := range playercounts {
-			nk.metrics.CustomCounter("match_gauge", tags.AsMap(), int64(count))
+			nk.metrics.CustomGauge("match_player_counts_gauge", tags.AsMap(), float64(count))
 		}
 	}
 }
