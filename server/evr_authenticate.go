@@ -555,6 +555,7 @@ type GroupMetadata struct {
 	GuildId                string   `json:"guild_id" validate:"required,uuid"`                  // The guild ID
 	RulesText              string   `json:"rules_text" validate:"required,ascii"`               // The rules text displayed on the main menu
 	SuspensionRoles        []string `json:"suspension_roles" validate:"dive,numeric"`           // The roles that have users suspended
+	MembershipRole         string   `json:"membership_role" validate:"required,numeric"`        // The role that has access to create lobbies/matches and join social lobbies
 	ModeratorRole          string   `json:"moderator_role" validate:"required,numeric"`         // The rules that have access to moderation tools
 	BroadcasterHostRole    string   `json:"broadcaster_group_role" validate:"required,numeric"` // The rules that have access to serverdb
 	ModeratorGroupId       string   `json:"moderator_group_id" validate:"required,uuid"`        // The group UUID that has access to moderation tools
