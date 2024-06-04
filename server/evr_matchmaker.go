@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -586,6 +587,21 @@ func (p *EvrPipeline) MatchSort(ctx context.Context, session *sessionWS, msessio
 			}
 		}
 	}
+
+	// Sort the matches by region, putting the user's region first
+
+	if len(msession.Label.Broadcaster.Regions) == 0 {
+		return filtered, rtts, nil
+	}
+
+	region := msession.Label.Broadcaster.Regions[0]
+	sort.SliceStable(filtered, func(i, j int) bool {
+		// Sort by the user's region first
+		if slices.Contains(filtered[i].Broadcaster.Regions, region) {
+			return true
+		}
+		return false
+	})
 
 	return filtered, rtts, nil
 }
