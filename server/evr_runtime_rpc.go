@@ -512,11 +512,13 @@ func ImportLoadoutsRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 }
 
 type terminateMatchRequest struct {
-	MatchIds []string `json:"match_ids"`
+	Mode     string   `json:"mode"` // One of "social", "arena", "combat", "all"
+	MatchIds []string `json:"ids"`
+	Query    string   `json:"query"`
 }
 
 type terminateMatchResponse struct {
-	Results []string `json:"results"`
+	Results map[string]string `json:"results"`
 }
 
 func terminateMatchRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
@@ -526,24 +528,60 @@ func terminateMatchRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 		return "", err
 	}
 
+	matchIDs := request.MatchIds
+
+	switch {
+	case request.Query != "":
+		matches, err := nk.MatchList(ctx, 1000, true, "", nil, nil, request.Query)
+		if err != nil {
+			return "", err
+		}
+		for _, match := range matches {
+			matchIDs = append(matchIDs, match.MatchId)
+		}
+	case request.Mode != "":
+		modeMap := map[string]string{
+			"social_2.0": "+label.mode:social_2.0",
+			"social":     "+label.mode:social_2.0",
+			"echo_arena": "+label.mode:echo_arena",
+			"arena":      "+label.mode:echo_arena",
+			"all":        "",
+		}
+
+		query, ok := modeMap[request.Mode]
+		if !ok {
+			return "", fmt.Errorf("invalid mode: %s", request.Mode)
+		}
+		minSize := 2
+		// Get all matches
+		matches, err := nk.MatchList(ctx, 1000, true, "", &minSize, nil, query)
+		if err != nil {
+			return "", err
+		}
+
+		for _, match := range matches {
+			matchIDs = append(matchIDs, match.MatchId)
+		}
+	}
+
 	signal := EvrSignal{
 		Signal: SignalTerminate,
 	}
 	signalJson := signal.String()
 
-	responses := make([]string, 0)
-	for _, matchId := range request.MatchIds {
-		if matchId == "" {
+	responses := make(map[string]string, len(matchIDs))
+	for _, matchID := range matchIDs {
+		if matchID == "" {
 			continue
 		}
-		if !strings.Contains(matchId, ".") {
-			matchId = fmt.Sprintf("%s.%s", matchId, node)
+		if !strings.Contains(matchID, ".") {
+			matchID = fmt.Sprintf("%s.%s", matchID, node)
 		}
-		response, err := nk.MatchSignal(ctx, matchId, signalJson)
+		response, err := nk.MatchSignal(ctx, matchID, signalJson)
 		if err != nil {
-			responses = append(responses, err.Error())
+			responses[matchID] = "Error: " + err.Error()
 		}
-		responses = append(responses, response)
+		responses[matchID] = response
 	}
 
 	response := &terminateMatchResponse{
