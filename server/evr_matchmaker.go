@@ -818,7 +818,8 @@ func (p *EvrPipeline) PingEndpoints(ctx context.Context, session *sessionWS, mse
 		case <-msession.Ctx.Done():
 			return nil, ErrMatchmakingCanceled
 		case <-time.After(5 * time.Second):
-			return nil, ErrMatchmakingPingTimeout
+			// Just ignore the ping results if the ping times out
+			logger.Warn("Ping request timed out")
 		case results := <-msession.PingResultsCh:
 			cache := msession.LatencyCache
 			// Look up the endpoint in the cache and update the latency
