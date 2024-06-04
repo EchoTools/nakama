@@ -123,6 +123,7 @@ func listMatchStates(ctx context.Context, nk runtime.NakamaModule, query string)
 		}
 
 		matchStates = append(matchStates, &MatchState{
+			State:     state,
 			TickRate:  int(tickRate),
 			Presences: presences,
 		})
@@ -144,6 +145,7 @@ func (t MatchStateTags) AsMap() map[string]string {
 		"level":    t.Level,
 		"operator": t.Operator,
 		"region":   t.Region,
+		"group":    t.Group,
 	}
 }
 
@@ -166,7 +168,7 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 		}
 		playercounts := make(map[MatchStateTags]int)
 		// Log the match states
-
+		matchcounts := make(map[MatchStateTags]int)
 		for _, state := range matchStates {
 			groupID := state.State.Channel
 			if groupID == nil {
@@ -178,11 +180,15 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 				Operator: state.State.Broadcaster.OperatorID,
 				Group:    groupID.String(),
 			}
-
+			matchcounts[stateTags] += 1
 			playercounts[stateTags] += len(state.State.Players)
 		}
+		// Update the metrics
 		for tags, count := range playercounts {
 			nk.metrics.CustomGauge("match_player_counts_gauge", tags.AsMap(), float64(count))
+		}
+		for tags, count := range matchcounts {
+			nk.metrics.CustomGauge("match_count_gauge", tags.AsMap(), float64(count))
 		}
 	}
 }
