@@ -5,12 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"reflect"
 	"slices"
 	"strconv"
-
-	"go.uber.org/zap"
 )
 
 var (
@@ -179,8 +176,7 @@ func ToSymbol(v any) Symbol {
 		}
 		return Symbol(symbol)
 	default:
-		log.Println("failed to convert to symbol", zap.Any("value", v))
-		return Symbol(0)
+		panic(fmt.Errorf("invalid type: %T", v))
 	}
 }
 
