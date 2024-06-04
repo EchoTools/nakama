@@ -180,11 +180,6 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		return evr.DefaultGameSettingsSettings, fmt.Errorf("failed to load game profiles")
 	}
 
-	discordId, err = p.discordRegistry.GetDiscordIdByUserId(ctx, uid)
-	if err != nil {
-		return settings, fmt.Errorf("failed to get discord ID: %w", err)
-	}
-
 	ctx, cancel := context.WithTimeout(ctx, time.Second*3)
 	go func() {
 		defer cancel()
@@ -637,63 +632,108 @@ func (p *EvrPipeline) remoteLogSetv3(ctx context.Context, logger *zap.Logger, se
 func (p *EvrPipeline) documentRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.DocumentRequest)
 	var document evr.Document
+	var err error
+	switch request.Type {
+	case "eula":
 
-	key := request.Language + "," + request.Name
+		if flags, ok := ctx.Value(ctxFlagsKey{}).(int); ok && flags&FlagNoVR != 0 {
+			document = evr.NewEULADocument(1, 1, request.Language, "https://github.com/EchoTools", "Blank EULA for NoVR clients.")
+			break
+		}
 
-	userId := session.UserID()
-	switch key {
-	case "en,eula":
-		document = &evr.EulaDocument{}
+		document, err = p.generateEULA(ctx, logger, request.Language)
+		if err != nil {
+			return fmt.Errorf("failed to get eula document: %w", err)
+		}
 	default:
-		return fmt.Errorf("unknown document: %s", key)
+		return fmt.Errorf("unknown document: %s,%s", request.Language, request.Type)
 	}
 
-	// If this is a NoVR user, then use the original EULA with version 1 to avoid soft-locking the client.
-	// Then always return a default document with a version of 1.
-	// This is to prevent headless clients from hanging waiting for the
-	// button interaction to get past the EULA dialog.
-	if flags, ok := ctx.Value(ctxFlagsKey{}).(int); ok && flags&FlagNoVR != 0 {
-		session.SendEvr(
-			evr.NewSNSDocumentSuccess(evr.NewEulaDocument(1, 1, "")),
-			evr.NewSTcpConnectionUnrequireEvent(),
-		)
-		return nil
+	session.SendEvr(
+		evr.NewDocumentSuccess(document),
+		evr.NewSTcpConnectionUnrequireEvent(),
+	)
+	return nil
+}
+
+func (p *EvrPipeline) generateEULA(ctx context.Context, logger *zap.Logger, language string) (evr.EULADocument, error) {
+	// Retrieve the contents from storage
+	key := fmt.Sprintf("eula,%s", language)
+	document := evr.DefaultEULADocument(language)
+	ts, err := p.StorageLoadOrStore(ctx, logger, uuid.Nil, DocumentStorageCollection, key, &document)
+	if err != nil {
+		return document, fmt.Errorf("failed to load or store EULA: %w", err)
 	}
 
-	// retrieve the document from storage
-	objs, err := StorageReadObjects(ctx, logger, session.pipeline.db, uuid.Nil, []*api.ReadStorageObjectId{
+	msg := document.Text
+	maxLineCount := 7
+	maxLineLength := 28
+	// Split the message by newlines
+
+	// trim the final newline
+	msg = strings.TrimRight(msg, "\n")
+
+	// Limit the EULA to 7 lines, and add '...' to the end of any line that is too long.
+	lines := strings.Split(msg, "\n")
+	if len(lines) > maxLineCount {
+		logger.Warn("EULA too long", zap.Int("lineCount", len(lines)))
+		lines = lines[:maxLineCount]
+		lines = append(lines, "...")
+	}
+
+	// Cut lines at 18 characters
+	for i, line := range lines {
+		if len(line) > maxLineLength {
+			logger.Warn("EULA line too long", zap.String("line", line), zap.Int("length", len(line)))
+			lines[i] = line[:maxLineLength-3] + "..."
+		}
+	}
+	msg = strings.Join(lines, "\n") + "\n"
+
+	document.Version = ts.Unix()
+	document.VersionGameAdmin = ts.Unix()
+
+	document.Text = msg
+	return document, nil
+}
+
+// StorageLoadOrDefault loads an object from storage or store the given object if it doesn't exist.
+func (p *EvrPipeline) StorageLoadOrStore(ctx context.Context, logger *zap.Logger, userID uuid.UUID, collection, key string, dst any) (time.Time, error) {
+	ts := time.Now().UTC()
+	objs, err := StorageReadObjects(ctx, logger, p.db, uuid.Nil, []*api.ReadStorageObjectId{
 		{
-			Collection: DocumentStorageCollection,
+			Collection: collection,
 			Key:        key,
-			UserId:     userId.String(),
-		},
-		{
-			Collection: DocumentStorageCollection,
-			Key:        key,
-			UserId:     uuid.Nil.String(),
+			UserId:     userID.String(),
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("SNSDocumentRequest: failed to read objects: %w", err)
+		return ts, fmt.Errorf("SNSDocumentRequest: failed to read objects: %w", err)
 	}
 
-	if (len(objs.Objects)) == 0 {
-		// if the document doesn't exist, try to get the default document
-		switch key {
-		case "en,eula":
-			document = evr.NewEulaDocument(1, 1, "")
+	if len(objs.Objects) > 0 {
 
+		// unmarshal the document
+		if err := json.Unmarshal([]byte(objs.Objects[0].Value), dst); err != nil {
+			return ts, fmt.Errorf("error unmarshalling document %s: %w", key, err)
 		}
-		jsonBytes, err := json.Marshal(document)
+
+		ts = objs.Objects[0].UpdateTime.AsTime()
+
+	} else {
+
+		// If the document doesn't exist, store the object
+		jsonBytes, err := json.Marshal(dst)
 		if err != nil {
-			return fmt.Errorf("error marshalling document: %w", err)
+			return ts, fmt.Errorf("error marshalling document: %w", err)
 		}
+
 		// write the document to storage
 		ops := StorageOpWrites{
 			{
-				OwnerID: uuid.Nil.String(),
+				OwnerID: userID.String(),
 				Object: &api.WriteStorageObject{
-					Collection:      DocumentStorageCollection,
+					Collection:      collection,
 					Key:             key,
 					Value:           string(jsonBytes),
 					PermissionRead:  &wrapperspb.Int32Value{Value: int32(0)},
@@ -701,94 +741,12 @@ func (p *EvrPipeline) documentRequest(ctx context.Context, logger *zap.Logger, s
 				},
 			},
 		}
-		if _, _, err = StorageWriteObjects(ctx, session.logger, session.pipeline.db, session.metrics, session.storageIndex, false, ops); err != nil {
-			return fmt.Errorf("failed to write objects: %w", err)
-		}
-
-		logger.Error("document not found", zap.String("collection", DocumentStorageCollection), zap.String("key", key))
-
-	} else {
-		// Select the one owned by the user over the system
-		var data string
-
-		if len(objs.Objects) > 1 {
-			for _, obj := range objs.Objects {
-				if obj.UserId == userId.String() {
-					data = obj.Value
-					break
-				}
-			}
-		}
-		if data == "" {
-			data = objs.Objects[0].Value
-		}
-		// unmarshal the document
-		if err := json.Unmarshal([]byte(data), &document); err != nil {
-			return fmt.Errorf("error unmarshalling document %s: %w: %s", key, err, data)
-		}
-		// Set the version to 1
-
-		// If the channel is nil, then check everything.
-
-		// Get the players current suspensions
-		if key == "en,eula" {
-			eula, ok := document.(*evr.EulaDocument)
-			if !ok {
-				return fmt.Errorf("failed to cast document to EulaDocument")
-			}
-			eula.Version = 1
-
-			// Get the evrID from the context
-			evrID, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
-			if !ok {
-				return fmt.Errorf("evrId not found in context")
-			}
-
-			// Get the players current channel
-			profile, found := p.profileRegistry.Load(session.userID, evrID)
-			if !found {
-				return status.Errorf(codes.Internal, "Failed to get player's profile")
-			}
-
-			channel := profile.GetChannel()
-
-			// FIXME make sure the use a valid channel so the user's channelInfo comes through.
-			suspensions := make([]*SuspensionStatus, 0)
-			if channel != uuid.Nil {
-				// Check the suspension status for this channel (and if they are suspended, check the other guilds)
-				suspensions, err = p.checkSuspensionStatus(ctx, logger, session.UserID().String(), channel)
-				if err != nil {
-					return fmt.Errorf("failed to check suspension status: %w", err)
-				}
-
-			} else {
-				// The user is not in a channel, so check all of their guilds.
-				groups, err := p.discordRegistry.GetGuildGroups(ctx, session.userID)
-				if err != nil {
-					return fmt.Errorf("error getting guild groups: %w", err)
-				}
-				for _, g := range groups {
-					suspensions, err = p.checkSuspensionStatus(ctx, logger, session.UserID().String(), uuid.FromStringOrNil(g.GetId()))
-					if err != nil {
-						return fmt.Errorf("failed to check suspension status: %w", err)
-					}
-				}
-			}
-
-			if len(suspensions) > 0 {
-				// Inject it into the document
-				eula.Text = generateSuspensionNotice(suspensions)
-				eula.Version = time.Now().UTC().Unix()
-				document = eula
-			}
+		if _, _, err = StorageWriteObjects(ctx, logger, p.db, p.metrics, p.storageIndex, false, ops); err != nil {
+			return ts, fmt.Errorf("failed to write objects: %w", err)
 		}
 	}
-	// send the document to the client
-	session.SendEvr(
-		evr.NewSNSDocumentSuccess(document),
-		evr.NewSTcpConnectionUnrequireEvent(),
-	)
-	return nil
+
+	return ts, nil
 }
 
 func (p *EvrPipeline) genericMessage(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
