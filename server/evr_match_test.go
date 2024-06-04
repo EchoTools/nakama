@@ -55,7 +55,7 @@ func TestSelectTeamForPlayer(t *testing.T) {
 
 	presences := make(map[uuid.UUID]*EvrMatchPresence)
 	for k, v := range presencesstr {
-		u := uuid.NewV5(uuid.NamespaceOID, k)
+		u := uuid.NewV5(uuid.Nil, k)
 		presences[u] = v
 	}
 
@@ -302,7 +302,7 @@ func TestSelectTeamForPlayer(t *testing.T) {
 		}
 		presencestr := make(map[uuid.UUID]*EvrMatchPresence)
 		for k, v := range tt.presences {
-			u := uuid.NewV5(uuid.NamespaceOID, k)
+			u := uuid.NewV5(uuid.Nil, k)
 			presencestr[u] = v
 		}
 
@@ -394,7 +394,7 @@ func TestSelectTeamForPlayer_With_Alighment(t *testing.T) {
 		// Existing players
 		presences := make(map[uuid.UUID]*EvrMatchPresence)
 		for _, player := range tt.players {
-			u := uuid.NewV5(uuid.NamespaceOID, player)
+			u := uuid.NewV5(uuid.Nil, player)
 			presences[u] = &EvrMatchPresence{
 				TeamIndex: alignments[player],
 			}

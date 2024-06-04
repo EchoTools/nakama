@@ -640,6 +640,14 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 		matchIDStr = fmt.Sprintf("%s.%s", matchIDStr, p.node)
 	}
 
+	partyID := uuid.Nil
+
+	if msession, ok := p.matchmakingRegistry.GetMatchingBySessionId(session.ID()); ok {
+		if msession != nil && msession.Party != nil {
+			partyID = msession.Party.ID
+		}
+	}
+
 	s := strings.Split(matchIDStr, ".")[0]
 	matchID := uuid.FromStringOrNil(s)
 	if matchID == uuid.Nil {
@@ -717,6 +725,7 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 		DisplayName:   displayName,
 		EvrID:         evrID,
 		PlayerSession: uuid.Must(uuid.NewV4()),
+		PartyID:       partyID,
 		TeamIndex:     int(teamIndex),
 		DiscordID:     discordID,
 		Query:         query,
