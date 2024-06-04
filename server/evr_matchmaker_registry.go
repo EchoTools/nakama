@@ -451,7 +451,7 @@ func (mr *MatchmakingRegistry) listUnfilledLobbies(ctx context.Context, logger *
 		limit   = 50
 	)
 
-	logger = logger.With(zap.String("query", query), zap.Any("label", searchLabel))
+	logger = logger.With(zap.String("query", query))
 
 	// Search for possible matches
 	logger.Debug("Searching for matches")
