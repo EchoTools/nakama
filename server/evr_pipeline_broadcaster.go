@@ -90,6 +90,8 @@ func (p *EvrPipeline) broadcasterSessionEnded(ctx context.Context, logger *zap.L
 			logger.Error("broadcaster session not found")
 		}
 
+		<-time.After(5 * time.Second)
+
 		err := p.newParkingMatch(logger, session, config)
 		if err != nil {
 			logger.Error("Failed to create new parking match", zap.Error(err))
