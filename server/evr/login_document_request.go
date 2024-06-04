@@ -5,8 +5,8 @@ import (
 )
 
 type DocumentRequest struct {
-	Language string `json:"language"`
-	Name     string `json:"name"`
+	Language string
+	Type     string
 }
 
 func (m *DocumentRequest) Token() string {
@@ -18,12 +18,19 @@ func (m *DocumentRequest) Symbol() Symbol {
 }
 
 func (m DocumentRequest) String() string {
-	return fmt.Sprintf("%s(lang=%v, name=%v)", m.Token(), m.Language, m.Name)
+	return fmt.Sprintf("%s(lang=%v, t=%v)", m.Token(), m.Language, m.Type)
 }
 
 func (m *DocumentRequest) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
 		func() error { return s.StreamNullTerminatedString(&m.Language) },
-		func() error { return s.StreamNullTerminatedString(&m.Name) },
+		func() error { return s.StreamNullTerminatedString(&m.Type) },
 	})
+}
+
+func NewDocumentRequest(t, language string) *DocumentRequest {
+	return &DocumentRequest{
+		Language: string(language),
+		Type:     string(t),
+	}
 }

@@ -1,41 +1,18 @@
 package evr
 
 import (
-	"encoding/binary"
 	"fmt"
-)
 
-type DocumentSuccess struct {
-	DocumentNameSymbol Symbol
-	Document           interface{}
-}
+	"github.com/muesli/reflow/wordwrap"
+)
 
 type Document interface {
 	Symbol() Symbol
-	Token() string
-	String() string
 }
 
-func (m *DocumentSuccess) Token() string {
-	return "SNSDocumentSuccess"
-}
+var _ = Document(&EULADocument{})
 
-func (m *DocumentSuccess) Symbol() Symbol {
-	return SymbolOf(m)
-}
-
-func (m *DocumentSuccess) Stream(s *EasyStream) error {
-	return RunErrorFunctions([]func() error{
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.DocumentNameSymbol) },
-		func() error { return s.StreamJson(&m.Document, true, ZstdCompression) },
-	})
-}
-
-func (m *DocumentSuccess) String() string {
-	return fmt.Sprintf("DocumentSuccess(DocumentNameSymbol=%s", m.DocumentNameSymbol.Token())
-}
-
-type EulaDocument struct {
+type EULADocument struct {
 	Type                          string `json:"type"`
 	Lang                          string `json:"lang"`
 	Version                       int64  `json:"version"`
@@ -54,35 +31,26 @@ type EulaDocument struct {
 	LinkTc                        string `json:"link_tc"`
 }
 
-func (d EulaDocument) Symbol() Symbol {
-	return ToSymbol(d.Type)
+func (d EULADocument) Symbol() Symbol {
+	return ToSymbol(string(d.Type))
 }
 
-func (d EulaDocument) Token() string {
-	return d.Type
-}
-func (d EulaDocument) String() string {
-	return fmt.Sprintf("%s(lang=%v, type=%v)", d.Token(), d.Lang, d.Type)
+func (d EULADocument) String() string {
+	return fmt.Sprintf("%T(lang=%v, type=%v)", d, d.Lang, d.Type)
 }
 
-func NewSNSDocumentSuccess(document Document) *DocumentSuccess {
-	return &DocumentSuccess{
-		DocumentNameSymbol: document.Symbol(),
-		Document:           document,
-	}
+func DefaultEULADocument(language string) EULADocument {
+	return NewEULADocument(0, 0, language, "https://github.com/EchoTools", wordwrap.String("Welcome to EchoVRCE!\nThis network, weaving through basements, is a work of fiction. Uptime guarantees are comically optimistic, so we advise against relying on this service.", 28))
 }
 
-func NewEulaDocument(version, versionGa int, linkURL string) *EulaDocument {
-	if linkURL == "" {
-		linkURL = "https://github.com/EchoTools"
-	}
-	return &EulaDocument{
+func NewEULADocument(version, versionGa int, language, linkURL, text string) EULADocument {
+	return EULADocument{
 		Type:                          "eula",
-		Lang:                          "en",
+		Lang:                          language,
 		Version:                       int64(version),
 		VersionGameAdmin:              int64(versionGa),
-		Text:                          "Welcome to EchoVRCE!\nThis network, weaving through basements, is a work of fiction. Uptime guarantees are comically optimistic; reliance on this service is advised against for anyone.",
-		TextGameAdmin:                 "Welcome to EchoVRCE!\n\nThis network, weaving through basements, is a work of fiction. Uptime guarantees are comically optimistic; reliance on this service is advised against for anyone.",
+		Text:                          text,
+		TextGameAdmin:                 text,
 		MarkAsReadProfileKey:          "legal|eula_version",
 		MarkAsReadProfileKeyGameAdmin: "legal|game_admin_version",
 		LinkCc:                        linkURL,
@@ -94,4 +62,37 @@ func NewEulaDocument(version, versionGa int, linkURL string) *EulaDocument {
 		LinkGa:                        linkURL,
 		LinkTc:                        linkURL,
 	}
+}
+
+type DocumentSuccess struct {
+	Document Document
+}
+
+func NewDocumentSuccess(document Document) *DocumentSuccess {
+	return &DocumentSuccess{
+		Document: document,
+	}
+}
+
+func (m *DocumentSuccess) Stream(s *EasyStream) error {
+	documentSymbol := m.Document.Symbol()
+	return RunErrorFunctions([]func() error{
+		func() error { return s.StreamSymbol(&documentSymbol) },
+		func() error {
+			// Set the document type based on the symbol
+			if s.Mode == DecodeMode {
+				switch documentSymbol {
+				case 0xc8c33e483f6612b1: // eula
+					m.Document = &EULADocument{}
+				default:
+					return fmt.Errorf("unknown document type: `%s`", documentSymbol.Token())
+				}
+			}
+			return s.StreamJson(m.Document, true, ZstdCompression)
+		},
+	})
+}
+
+func (m *DocumentSuccess) String() string {
+	return fmt.Sprintf("DocumentSuccess(type=%T)", m.Document)
 }
