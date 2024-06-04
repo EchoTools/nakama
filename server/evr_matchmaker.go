@@ -55,6 +55,10 @@ func (p *EvrPipeline) ListUnassignedLobbies(ctx context.Context, session *sessio
 		qparts = append(qparts, Region(region).Query(Should, len(ml.Broadcaster.Regions)-i))
 	}
 
+	// Add tag query for prioritizing certain modes to specific hosts
+	qparts = append(qparts, "label.broadcaster.tags:priority_mode_"+ml.Mode.String()+"^10")
+
+	// Add the user's region request to the query
 	qparts = append(qparts, Regions(ml.Broadcaster.Regions).Query(Must, 0))
 
 	// TODO FIXME Add version lock and appid
