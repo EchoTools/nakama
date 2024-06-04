@@ -67,7 +67,7 @@ func (xpi *EvrId) UUID() uuid.UUID {
 	if xpi.PlatformCode == 0 || xpi.AccountId == 0 {
 		return uuid.Nil
 	}
-	return uuid.NewV5(uuid.NamespaceOID, xpi.Token())
+	return uuid.NewV5(uuid.Nil, xpi.Token())
 }
 
 // Parse parses a string into a given platform identifier.
