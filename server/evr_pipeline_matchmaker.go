@@ -747,6 +747,16 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 	}
 	regions = append(regions, evr.DefaultRegion)
 
+	// Make the regions unique without resorting it
+	uniqueRegions := make([]evr.Symbol, 0, len(regions))
+	seen := make(map[evr.Symbol]struct{}, len(regions))
+	for _, region := range regions {
+		if _, ok := seen[region]; !ok {
+			uniqueRegions = append(uniqueRegions, region)
+			seen[region] = struct{}{}
+		}
+	}
+
 	ml := &EvrMatchState{
 
 		Level:           request.Level,
@@ -758,7 +768,7 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 		Channel:         &request.Channel,
 		Broadcaster: MatchBroadcaster{
 			VersionLock: uint64(request.VersionLock),
-			Regions:     regions,
+			Regions:     uniqueRegions,
 			Channels:    priorities,
 		},
 	}
