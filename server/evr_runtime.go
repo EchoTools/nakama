@@ -166,18 +166,25 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 			logger.Error("Error listing match states: %v", err)
 			continue
 		}
-		playercounts := make(map[MatchStateTags]int)
+		playercounts := make(map[MatchStateTags]int, len(matchStates))
 		// Log the match states
-		matchcounts := make(map[MatchStateTags]int)
+		matchcounts := make(map[MatchStateTags]int, len(matchStates))
 		for _, state := range matchStates {
 			groupID := state.State.Channel
 			if groupID == nil {
 				groupID = &uuid.Nil
 			}
+
+			region := "default"
+			if len(state.State.Broadcaster.Regions) > 0 {
+				region = state.State.Broadcaster.Regions[0].String()
+			}
+
 			stateTags := MatchStateTags{
 				Mode:     state.State.Mode.String(),
 				Level:    state.State.Level.String(),
 				Operator: state.State.Broadcaster.OperatorID,
+				Region:   region,
 				Group:    groupID.String(),
 			}
 			matchcounts[stateTags] += 1
