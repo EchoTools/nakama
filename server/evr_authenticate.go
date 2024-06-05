@@ -314,13 +314,13 @@ func ExchangeLinkCode(ctx context.Context, nk runtime.NakamaModule, logger runti
 // verifyJWT parses and verifies a JWT token using the provided key function.
 // It returns the parsed token if it is valid, otherwise it returns an error.
 // Nakama JWT's are signed by the `session.session_encryption_key` in the Nakama config.
-func verifySignedJwt(tokenString string, hmacSampleSecret []byte) (*jwt.Token, error) {
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+func verifySignedJWT(rawToken string, secret string) (*jwt.Token, error) {
+	token, err := jwt.Parse(rawToken, func(token *jwt.Token) (interface{}, error) {
 		// Don't forget to validate the alg is what you expect:
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
-		return hmacSampleSecret, nil
+		return []byte(secret), nil
 	})
 	if err != nil {
 		return nil, err

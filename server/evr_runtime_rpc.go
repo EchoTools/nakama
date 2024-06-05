@@ -307,8 +307,7 @@ func LinkDeviceRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk ru
 	}
 
 	// Verify the session token and extract the user ID
-	logger.WithField("sessionToken", request.SessionToken).Info("Verifying session token")
-	token, err := verifySignedJwt(request.SessionToken, []byte(vars["SESSION_ENCRYPTION_KEY"]))
+	token, err := verifySignedJWT(request.SessionToken, vars["SESSION_ENCRYPTION_KEY"])
 	if err != nil {
 		logger.WithField("err", err).Error("Unable to verify session token")
 		return "", runtime.NewError("Unable to verify session token", StatusInternalError)
