@@ -707,6 +707,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 				return nk.LinkDevice(ctx, userId.String(), token)
 			}(); err != nil {
+				logger.Error("Failed to link headset to %s with deviceID `%s`", discordId, linkCode, err)
 				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 					Type: discordgo.InteractionResponseChannelMessageWithSource,
 					Data: &discordgo.InteractionResponseData{
