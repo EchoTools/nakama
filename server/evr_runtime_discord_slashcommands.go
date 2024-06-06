@@ -41,12 +41,13 @@ type DiscordAppBot struct {
 	config   Config
 
 	discordRegistry DiscordRegistry
+	profileRegistry *ProfileRegistry
 	dg              *discordgo.Session
 
 	userID string // Nakama UserID of the bot
 }
 
-func NewDiscordAppBot(nk runtime.NakamaModule, logger runtime.Logger, metrics Metrics, pipeline *Pipeline, config Config, discordRegistry DiscordRegistry, dg *discordgo.Session) *DiscordAppBot {
+func NewDiscordAppBot(nk runtime.NakamaModule, logger runtime.Logger, metrics Metrics, pipeline *Pipeline, config Config, discordRegistry DiscordRegistry, profileRegistry *ProfileRegistry, dg *discordgo.Session) *DiscordAppBot {
 	ctx, cancelFn := context.WithCancel(context.Background())
 	return &DiscordAppBot{
 		ctx:      ctx,
@@ -58,6 +59,7 @@ func NewDiscordAppBot(nk runtime.NakamaModule, logger runtime.Logger, metrics Me
 		metrics:  metrics,
 
 		discordRegistry: discordRegistry,
+		profileRegistry: profileRegistry,
 		dg:              dg,
 	}
 }
@@ -169,6 +171,10 @@ var (
 		{
 			Name:        "whoami",
 			Description: "Receive your echo account information (privately).",
+		},
+		{
+			Name:        "set-lobby",
+			Description: "Set your EchoVR lobby to this Discord server/guild.",
 		},
 		{
 			Name:        "lookup",
@@ -1098,6 +1104,66 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				})
 
 			}
+		},
+		"set-lobby": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+			if i.Type != discordgo.InteractionApplicationCommand {
+				return
+			}
+			if i.Member == nil {
+				return
+			}
+
+			errFn := func(err error) {
+				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+					Type: discordgo.InteractionResponseChannelMessageWithSource,
+					Data: &discordgo.InteractionResponseData{
+						Flags:   discordgo.MessageFlagsEphemeral,
+						Content: fmt.Sprintf("set failed: %v", err.Error()),
+					},
+				})
+			}
+
+			userID, err := d.discordRegistry.GetUserIdByDiscordId(ctx, i.Member.User.ID, true)
+			if err != nil {
+				logger.Error("Failed to get user ID", zap.Error(err))
+				errFn(err)
+				return
+			}
+
+			groupID, found := d.discordRegistry.Get(i.Member.GuildID)
+			if !found {
+				errFn(errors.New("guild not found"))
+				return
+			}
+
+			profile, _ := d.profileRegistry.Load(userID, evr.EvrIdNil)
+			gid := uuid.FromStringOrNil(groupID)
+			if gid == uuid.Nil {
+				errFn(errors.New("invalid group ID"))
+			}
+			profile.SetChannel(evr.GUID(gid))
+			err = d.profileRegistry.Store(userID, profile)
+			if err != nil {
+				logger.Error("Failed to store profile", zap.Error(err))
+				errFn(err)
+				return
+			}
+
+			guild, err := s.Guild(i.Member.GuildID)
+			if err != nil {
+				logger.Error("Failed to get guild", zap.Error(err))
+				errFn(err)
+				return
+			}
+
+			d.profileRegistry.Save(userID)
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Flags:   discordgo.MessageFlagsEphemeral,
+					Content: fmt.Sprintf("Set EchoVR guild to **%s**. Your matchmaking will prioritize **%s** members, social lobbies will be exclusively **%s**, and created matches will be using *%s* broadcasters/servers.", guild.Name, guild.Name),
+				},
+			})
 		},
 		"lookup": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 

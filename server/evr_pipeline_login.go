@@ -122,9 +122,30 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	if err != nil {
 		return settings, err
 	}
-
+	if account == nil {
+		return settings, fmt.Errorf("account not found")
+	}
 	user := account.GetUser()
 	userId := user.GetId()
+	uid := uuid.FromStringOrNil(user.GetId())
+
+	updateCtx, cancel := context.WithTimeout(ctx, time.Second*3)
+	go func() {
+		defer cancel()
+		err = p.discordRegistry.UpdateAllGuildGroupsForUser(ctx, NewRuntimeGoLogger(logger), uid)
+		if err != nil {
+			logger.Warn("Failed to update guild groups", zap.Error(err))
+		}
+	}()
+
+	// Wait for the context to be done, or the timeout
+	<-updateCtx.Done()
+
+	// Get the user's metadata
+	var metadata AccountUserMetadata
+	if err := json.Unmarshal([]byte(account.User.GetMetadata()), &metadata); err != nil {
+		return settings, fmt.Errorf("failed to unmarshal account metadata: %w", err)
+	}
 
 	// Check that this EVR-ID is only used by this userID
 	otherLogins, err := p.checkEvrIDOwner(ctx, evrId)
@@ -151,7 +172,6 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		flags |= FlagNoVR
 	}
 
-	uid := uuid.FromStringOrNil(userId)
 	for name, flag := range groupFlagMap {
 		if ok, err := checkGroupMembershipByName(ctx, p.runtimeModule, uid, name, userId); err != nil {
 			return settings, fmt.Errorf("failed to check group membership: %w", err)
@@ -160,8 +180,27 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		}
 	}
 
+	// Get the GroupID from the user's metadata
+	groupID := metadata.GetActiveGroupID()
+	// Validate that the user is in the group
+	if groupID == uuid.Nil {
+		// Get a list of the user's guild groups and set to the largest one
+		groups, err := p.discordRegistry.GetGuildGroups(ctx, uid)
+		if err != nil {
+			return settings, fmt.Errorf("failed to get guild groups: %w", err)
+		}
+		if len(groups) == 0 {
+			return settings, fmt.Errorf("user is not in any guild groups")
+		}
+		// Sort the groups by the edgecount
+		sort.SliceStable(groups, func(i, j int) bool {
+			return groups[i].EdgeCount > groups[j].EdgeCount
+		})
+		groupID = uuid.FromStringOrNil(groups[0].GetId())
+	}
+
 	// Initialize the full session
-	if err := session.LoginSession(userId, user.GetUsername(), evrId, deviceId, flags); err != nil {
+	if err := session.LoginSession(userId, user.GetUsername(), evrId, deviceId, groupID, flags); err != nil {
 		return settings, fmt.Errorf("failed to login: %w", err)
 	}
 	ctx = session.Context()
@@ -170,27 +209,25 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		p.loginSessionByEvrID.Store(evrId.Token(), session)
 		// Create a goroutine to clear the session info when the login session is closed.
 		<-session.Context().Done()
-		session.evrPipeline.loginSessionByEvrID.Delete(evrId.String())
+		p.loginSessionByEvrID.Delete(evrId.String())
 	}()
 
 	// Load the user's profile
-	_, err = p.profileRegistry.GetSessionProfile(ctx, session, loginProfile, evrId)
+	profile, err := p.profileRegistry.GetSessionProfile(ctx, session, loginProfile, evrId)
 	if err != nil {
 		session.logger.Error("failed to load game profiles", zap.Error(err))
 		return evr.DefaultGameSettingsSettings, fmt.Errorf("failed to load game profiles")
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, time.Second*3)
-	go func() {
-		defer cancel()
-		err = p.discordRegistry.UpdateAllGuildGroupsForUser(ctx, NewRuntimeGoLogger(logger), uid)
-		if err != nil {
-			logger.Warn("Failed to update guild groups", zap.Error(err))
-		}
-	}()
+	// Set the display name once.
+	displayName, err := SetDisplayNameByChannelBySession(ctx, p.runtimeModule, logger, p.discordRegistry, session, groupID.String())
+	if err != nil {
+		logger.Warn("Failed to set display name", zap.Error(err))
+	}
 
-	// Wait for the context to be done, or the timeout
-	<-ctx.Done()
+	profile.SetChannel(evr.GUID(groupID))
+	profile.UpdateDisplayName(displayName)
+	p.profileRegistry.Store(session.userID, profile)
 
 	// TODO Add the settings to the user profile
 	settings = evr.DefaultGameSettingsSettings
@@ -301,7 +338,6 @@ func (p *EvrPipeline) authenticateAccount(ctx context.Context, logger *zap.Logge
 	if err != nil {
 		return account, status.Error(codes.Internal, fmt.Errorf("error creating link ticket: %w", err).Error())
 	}
-	// Get the user's channels
 	msg := fmt.Sprintf("\nEnter this code:\n  \n>>> %s <<<\nusing '/link-headset %s' in the Echo VR Lounge Discord.", linkTicket.Code, linkTicket.Code)
 	return account, errors.New(msg)
 }
@@ -348,7 +384,7 @@ func writeAuditObjects(ctx context.Context, session *sessionWS, userId string, e
 func (p *EvrPipeline) channelInfoRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	_ = in.(*evr.ChannelInfoRequest)
 
-	resource, err := p.buildChannelInfo(ctx, logger, session)
+	resource, err := p.buildChannelInfo(ctx, logger)
 	if err != nil {
 		logger.Warn("Error building channel info", zap.Error(err))
 	}
@@ -367,42 +403,32 @@ func (p *EvrPipeline) channelInfoRequest(ctx context.Context, logger *zap.Logger
 	return nil
 }
 
-func (p *EvrPipeline) buildChannelInfo(ctx context.Context, logger *zap.Logger, session *sessionWS) (*evr.ChannelInfoResource, error) {
+func (p *EvrPipeline) buildChannelInfo(ctx context.Context, logger *zap.Logger) (*evr.ChannelInfoResource, error) {
 	resource := evr.NewChannelInfoResource()
 
-	// Get the user's groups
-	groups, err := p.discordRegistry.GetGuildGroups(ctx, session.userID)
+	//  Get the current guild Group ID from the Context
+	groupID, ok := ctx.Value(ctxGroupIDKey{}).(uuid.UUID)
+	if !ok {
+		return nil, fmt.Errorf("groupID not found in context")
+	}
+	md, err := p.discordRegistry.GetGuildGroupMetadata(ctx, groupID.String())
 	if err != nil {
-		logger.Warn("Failed to get guild groups", zap.Error(err))
+		return nil, fmt.Errorf("failed to get guild group metadata: %w", err)
 	}
-
+	groups, err := GetGroups(ctx, logger, p.db, []string{groupID.String()})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get groups: %w", err)
+	}
 	if len(groups) == 0 {
-		// TODO FIXME Handle a user that doesn't have access to any guild groups
-		return nil, fmt.Errorf("user is not in any guild groups")
+		return nil, fmt.Errorf("group not found")
 	}
 
-	// TODO Allow players to set what is listed for their lobbies
+	g := groups[0]
 
-	// Sort the groups by the edgecount
-	sort.SliceStable(groups, func(i, j int) bool {
-		return groups[i].EdgeCount > groups[j].EdgeCount
-	})
-
-	// Limit to 4 results
-	if len(groups) > 4 {
-		groups = groups[:4]
-	}
-
-	// Overwrite the existing channel info
-	for i, g := range groups {
-		// Get the group metadata
-		md := &GroupMetadata{}
-		if err := json.Unmarshal([]byte(g.Metadata), md); err != nil {
-			return resource, fmt.Errorf("error unmarshalling group metadata: %w", err)
-		}
-
+	resource.Groups = make([]evr.ChannelGroup, 4)
+	for i := range resource.Groups {
 		resource.Groups[i] = evr.ChannelGroup{
-			ChannelUuid:  strings.ToUpper(g.GetId()),
+			ChannelUuid:  strings.ToUpper(groupID.String()),
 			Name:         g.Name,
 			Description:  g.Description,
 			Rules:        g.Name + "\n" + md.RulesText,
@@ -433,17 +459,6 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 	profile, found := p.profileRegistry.Load(session.userID, evrID)
 	if !found {
 		return session.SendEvr(evr.NewLoggedInUserProfileFailure(request.EvrId, 400, "failed to load game profiles"))
-	}
-
-	// Set the display name for the selected channel
-	channel := profile.GetChannel()
-	if channel != uuid.Nil {
-		displayName, err := SetDisplayNameByChannelBySession(ctx, p.runtimeModule, logger, p.discordRegistry, session, channel.String())
-		if err != nil {
-			return session.SendEvr(evr.NewLoggedInUserProfileFailure(request.EvrId, 400, "failed to set display name"))
-		}
-		profile.UpdateDisplayName(displayName)
-		p.profileRegistry.Store(session.userID, profile)
 	}
 
 	return session.SendEvr(evr.NewLoggedInUserProfileSuccess(evrID, profile.Client, profile.Server))
