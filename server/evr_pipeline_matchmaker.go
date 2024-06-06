@@ -34,6 +34,14 @@ func (p *EvrPipeline) lobbyMatchmakerStatusRequest(ctx context.Context, logger *
 // authorizeMatchmaking checks if the user is allowed to join a public match or spawn a new match
 func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logger, session *sessionWS, loginSessionID uuid.UUID, groupID uuid.UUID, requireMembership bool) error {
 
+	if groupID == uuid.Nil {
+		var ok bool
+		groupID, ok = ctx.Value(ctxGroupIDKey{}).(uuid.UUID)
+		if !ok {
+			return status.Errorf(codes.InvalidArgument, "Failed to get group ID from context")
+		}
+	}
+
 	// Get the EvrID from the context
 	evrID, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
 	if !ok {
@@ -95,10 +103,6 @@ func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logg
 		},
 		// EVR packet data stream for the match session by Session ID and service ID
 	}, s.userID)
-
-	if groupID == uuid.Nil {
-		return status.Errorf(codes.InvalidArgument, "Channel is nil")
-	}
 
 	// Check if th user is a member of this guild
 	guild, err := p.discordRegistry.GetGuildByGroupId(ctx, groupID.String())
