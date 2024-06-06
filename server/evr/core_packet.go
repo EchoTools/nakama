@@ -274,9 +274,7 @@ func ParsePacket(data []byte) ([]Message, error) {
 		b = buf.Next(l)
 		// Unmarshal the message.
 		typ, ok := SymbolTypes[sym]
-		if !ok {
-			return nil, errors.Join(ErrSymbolNotFound, fmt.Errorf("Symbol not found: symbol=0x%x", sym))
-		} else if typ == nil {
+		if !ok || typ == nil {
 			// Skip unimplemented message types.
 			continue
 		}
