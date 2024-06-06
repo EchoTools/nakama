@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gofrs/uuid/v5"
+	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/samber/lo"
@@ -169,9 +170,14 @@ func (p *EvrPipeline) matchmakingLabelFromFindRequest(ctx context.Context, sessi
 		return nil, status.Errorf(codes.Internal, "Failed to get guild groups: %v", err)
 	}
 
-	allowedChannels := make([]uuid.UUID, 0, len(groups))
-	for _, group := range groups {
-		allowedChannels = append(allowedChannels, uuid.FromStringOrNil(group.Id))
+	if request.Mode == evr.ModeArenaPublicAI {
+		request.Mode = evr.ModeCombatPublic
+		request.Level = evr.LevelUnspecified
+		request.TeamIndex = int16(evr.TeamUnassigned)
+		request.SessionSettings = evr.SessionSettings{
+			AppID: request.SessionSettings.AppID,
+			Mode:  int64(evr.ModeCombatPublic),
+		}
 	}
 
 	return &EvrMatchState{

@@ -52,7 +52,7 @@ func TestLobbyFindSessionRequest_Unmarshal(t *testing.T) {
 		LoginSessionID: uuid.Must(uuid.FromString("0a223cf0-8b73-3dfa-2ee8-7774c3b28097")),
 		Unk1:           769,
 		SessionSettings: SessionSettings{
-			AppId: "1369078409873402",
+			AppID: "1369078409873402",
 			Mode:  -3791849610740453517,
 			Level: nil,
 		},
@@ -111,7 +111,7 @@ func TestLobbyFindSessionRequest_Unpack(t *testing.T) {
 		LoginSessionID: uuid.Must(uuid.FromString("0a223cf0-8b73-3dfa-2ee8-7774c3b28097")),
 		Unk1:           769,
 		SessionSettings: SessionSettings{
-			AppId: "1369078409873402",
+			AppID: "1369078409873402",
 			Mode:  -3791849610740453517,
 			Level: nil,
 		},

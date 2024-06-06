@@ -48,7 +48,7 @@ func TestLobbyJoinSessionRequest_LobbyID(t *testing.T) {
 		Unk1:           1,
 		Unk2:           3,
 		SessionSettings: SessionSettings{
-			AppId: "1369078409873402",
+			AppID: "1369078409873402",
 			Mode:  0,
 			Level: nil,
 		},
@@ -103,7 +103,7 @@ func TestLobbyJoinSessionRequest_Moderator(t *testing.T) {
 		Unk1:           1,
 		Unk2:           3,
 		SessionSettings: SessionSettings{
-			AppId: "1369078409873402",
+			AppID: "1369078409873402",
 			Mode:  0,
 			Level: nil,
 		},
@@ -158,7 +158,7 @@ func TestLobbyJoinSessionRequest_ModerateUser(t *testing.T) {
 		Unk1:           1,
 		Unk2:           11,
 		SessionSettings: SessionSettings{
-			AppId: "1369078409873402",
+			AppID: "1369078409873402",
 			Mode:  0,
 			Level: nil,
 		},

@@ -59,7 +59,7 @@ func TestLobbyCreateSessionRequest_Unmarshal(t *testing.T) {
 		Unk1:           1,
 		Unk2:           11,
 		SessionSettings: SessionSettings{
-			AppId: "1369078409873402",
+			AppID: "1369078409873402",
 			Mode:  691594351282457603,
 			Level: nil,
 		},
@@ -128,7 +128,7 @@ func TestLobbyCreateSessionRequest_GameType(t *testing.T) {
 		Unk1:           1,
 		Unk2:           11,
 		SessionSettings: SessionSettings{
-			AppId: "1369078409873402",
+			AppID: "1369078409873402",
 			Mode:  691594351282457603,
 			Level: nil,
 		},
