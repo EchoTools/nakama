@@ -106,9 +106,11 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 			logger.Error("Unable to create bot")
 		}
 	}
-	discordRegistry := NewLocalDiscordRegistry(ctx, nk, runtimeLogger, metrics, config, pipeline, dg)
 
-	appBot := NewDiscordAppBot(nk, runtimeLogger, metrics, pipeline, config, discordRegistry, dg)
+	discordRegistry := NewLocalDiscordRegistry(ctx, nk, runtimeLogger, metrics, config, pipeline, dg)
+	profileRegistry := NewProfileRegistry(nk, db, runtimeLogger, discordRegistry)
+
+	appBot := NewDiscordAppBot(nk, runtimeLogger, metrics, pipeline, config, discordRegistry, profileRegistry, dg)
 
 	if disable, ok := vars["DISABLE_DISCORD_BOT"]; ok && disable == "true" {
 		logger.Info("Discord bot is disabled")
@@ -169,7 +171,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		externalIP:        externalIP,
 		broadcasterUserID: broadcasterUserID,
 
-		profileRegistry: NewProfileRegistry(nk, db, runtimeLogger, discordRegistry),
+		profileRegistry: profileRegistry,
 
 		broadcasterRegistrationBySession: &MapOf[string, *MatchBroadcaster]{},
 		matchBySessionID:                 &MapOf[string, string]{},

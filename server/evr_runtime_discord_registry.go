@@ -491,31 +491,25 @@ func (r *LocalDiscordRegistry) UpdateGuildGroup(ctx context.Context, logger runt
 	// Get the member
 	member, err := r.GetGuildMember(ctx, guildID, discordID)
 	// return if the context is cancelled
-	if err != nil {
+	if err != nil || member == nil {
 		if ctx.Err() != nil {
 			return fmt.Errorf("context cancelled: %w", err)
 		}
-		if strings.Contains(err.Error(), "10007") {
-			// The user doesn't exist in the guld
-			return nil
-		}
-		logger.Warn("Error getting guild member %s in guild %s: %v, removing", discordID, guildID, err)
+
+		// If the user is in any of the groups, remove them
 		account, err := r.nk.AccountGetId(ctx, userID.String())
+		if err != nil {
+			return fmt.Errorf("error getting account: %w", err)
+		}
 		for _, groupID := range guildRoleGroups {
-			err := r.nk.GroupUserLeave(ctx, groupID, userID.String(), account.GetUser().GetUsername())
-			if err != nil {
-				logger.Warn("Error leaving user %s from group %s: %v", userID, groupID, err)
+			if slices.Contains(userGroupIDs, groupID) {
+				err := r.nk.GroupUserLeave(ctx, groupID, userID.String(), account.GetUser().GetUsername())
+				if err != nil {
+					logger.Warn("Error leaving user %s from group %s: %v", userID, groupID, err)
+				}
 			}
 		}
-		return fmt.Errorf("error getting guild member: %w", err)
-	}
-
-	if member == nil {
-		logger.Warn("Could not find member %s in guild %s, kicking...", discordID, guildID)
-		for _, groupId := range guildRoleGroups {
-			defer r.nk.GroupUsersKick(ctx, SystemUserID, groupId, []string{userID.String()})
-		}
-		return fmt.Errorf("member is nil")
+		return nil
 	}
 
 	currentRoles := member.Roles

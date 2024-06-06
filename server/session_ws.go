@@ -95,6 +95,7 @@ type (
 	// Keys used for storing/retrieving user information in the context of a request after authentication.
 	ctxNodeKey              struct{} // The node name
 	ctxEvrIDKey             struct{} // The EchoVR ID
+	ctxGroupIDKey           struct{} // The guild group ID the user has selected
 	ctxLoginSessionKey      struct{} // The Session ID of the login connection
 	ctxSessionIDKey         struct{} // The Session ID
 	ctxHMDSerialOverrideKey struct{} // The HMD Serial Override
@@ -207,7 +208,7 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 	}
 }
 
-func (s *sessionWS) LoginSession(userID string, username string, evrID evr.EvrId, deviceId *DeviceId, flags int) error {
+func (s *sessionWS) LoginSession(userID string, username string, evrID evr.EvrId, deviceId *DeviceId, groupID uuid.UUID, flags int) error {
 	// Each player has a single login connection, which will act as the core session.
 	// When this connection is terminated, all other connections should be terminated.
 
@@ -227,6 +228,7 @@ func (s *sessionWS) LoginSession(userID string, username string, evrID evr.EvrId
 	ctx = context.WithValue(ctx, ctxUserIDKey{}, uuid.FromStringOrNil(userID)) // apiServer compatibility
 	ctx = context.WithValue(ctx, ctxUsernameKey{}, username)                   // apiServer compatibility
 	ctx = context.WithValue(ctx, ctxFlagsKey{}, flags)
+	ctx = context.WithValue(ctx, ctxGroupIDKey{}, groupID)
 
 	s.Lock()
 	s.ctx = ctx
@@ -365,6 +367,11 @@ func (s *sessionWS) ValidateSession(loginSessionID uuid.UUID, evrID evr.EvrId) e
 			return fmt.Errorf("login session does not have system group flags")
 		}
 
+		groupID, ok := loginCtx.Value(ctxGroupIDKey{}).(uuid.UUID)
+		if !ok {
+			return fmt.Errorf("login session does not have a group ID")
+		}
+
 		// Require the login session to be authenticated.
 		if userID == uuid.Nil {
 			return fmt.Errorf("login session not authenticated")
@@ -376,6 +383,7 @@ func (s *sessionWS) ValidateSession(loginSessionID uuid.UUID, evrID evr.EvrId) e
 		ctx = context.WithValue(ctx, ctxUserIDKey{}, userID)     // apiServer compatibility
 		ctx = context.WithValue(ctx, ctxUsernameKey{}, username) // apiServer compatibility
 		ctx = context.WithValue(ctx, ctxFlagsKey{}, flags)
+		ctx = context.WithValue(ctx, ctxGroupIDKey{}, groupID)
 
 		// Set the session information
 		s.Lock()

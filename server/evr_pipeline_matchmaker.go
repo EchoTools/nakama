@@ -147,27 +147,22 @@ func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logg
 	}
 	return nil
 }
+
 func (p *EvrPipeline) matchmakingLabelFromFindRequest(ctx context.Context, session *sessionWS, request *evr.LobbyFindSessionRequest) (*EvrMatchState, error) {
-	// Get the EvrID from the context (ignoring the request)
-	evrID, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
-	if !ok {
-		return nil, fmt.Errorf("failed to get evrID from context")
-	}
 
 	// If the channel is nil, use the players profile channel
-	channel := request.Channel
-	if channel == uuid.Nil {
-		profile, ok := p.profileRegistry.Load(session.userID, evrID)
+	groupID := request.Channel
+	if groupID == uuid.Nil {
+		var ok bool
+		groupID, ok = ctx.Value(ctxGroupIDKey{}).(uuid.UUID)
 		if !ok {
-			return nil, status.Errorf(codes.Internal, "Failed to get players profile")
+			return nil, status.Errorf(codes.InvalidArgument, "Failed to get group ID from context")
 		}
-		channel = profile.GetChannel()
 	}
 
-	// Set the channels this player is allowed to matchmake/create a match on.
-	groups, err := p.discordRegistry.GetGuildGroups(ctx, session.UserID())
+	_, guildPriority, err := p.GetGuildPriorityList(ctx, session.userID)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "Failed to get guild groups: %v", err)
+		return nil, status.Errorf(codes.Internal, "Failed to get guild priority list: %v", err)
 	}
 
 	if request.Mode == evr.ModeArenaPublicAI {
@@ -181,7 +176,7 @@ func (p *EvrPipeline) matchmakingLabelFromFindRequest(ctx context.Context, sessi
 	}
 
 	return &EvrMatchState{
-		Channel: &channel,
+		Channel: &groupID,
 
 		MatchID: request.CurrentMatch, // The existing lobby/match that the player is in (if any)
 		Mode:    request.Mode,
@@ -193,7 +188,7 @@ func (p *EvrPipeline) matchmakingLabelFromFindRequest(ctx context.Context, sessi
 
 		Broadcaster: MatchBroadcaster{
 			VersionLock: request.VersionLock,
-			Channels:    allowedChannels,
+			Channels:    guildPriority,
 		},
 	}, nil
 }
@@ -201,32 +196,6 @@ func (p *EvrPipeline) matchmakingLabelFromFindRequest(ctx context.Context, sessi
 // lobbyFindSessionRequest is a message requesting to find a public session to join.
 func (p *EvrPipeline) lobbyFindSessionRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) (err error) {
 	request := in.(*evr.LobbyFindSessionRequest)
-	metricsTags := map[string]string{
-		"mode":     request.Mode.String(),
-		"channel":  request.Channel.String(),
-		"level":    request.Level.String(),
-		"team_idx": strconv.FormatInt(int64(request.TeamIndex), 10),
-	}
-	p.metrics.CustomCounter("lobbyfindsession_active_count", metricsTags, 1)
-	loginSessionID := request.LoginSessionID
-	groups, priorities, err := p.GetGuildPriorityList(ctx, session.userID)
-	if err != nil {
-		logger.Warn("Failed to get guild priority list", zap.Error(err))
-	}
-
-	// Validate that the channel is in the user's guilds
-	if request.Channel == uuid.Nil || !lo.Contains(groups, request.Channel) {
-		if len(priorities) > 0 {
-			// If the channel is nil, use the players primary channel
-			request.Channel = priorities[0]
-		} else if len(groups) > 0 {
-			// If the player has no guilds, use the first guild
-			request.Channel = groups[0]
-		} else {
-			// If the player has no guilds
-			return NewMatchmakingResult(logger, request.Mode, uuid.Nil).SendErrorToSession(session, status.Errorf(codes.PermissionDenied, "No guilds available"))
-		}
-	}
 
 	// Prepare the response message
 	response := NewMatchmakingResult(logger, request.Mode, request.Channel)
@@ -236,6 +205,15 @@ func (p *EvrPipeline) lobbyFindSessionRequest(ctx context.Context, logger *zap.L
 	if err != nil {
 		return response.SendErrorToSession(session, err)
 	}
+
+	metricsTags := map[string]string{
+		"mode":     request.Mode.String(),
+		"channel":  ml.Channel.String(),
+		"level":    request.Level.String(),
+		"team_idx": strconv.FormatInt(int64(request.TeamIndex), 10),
+	}
+	p.metrics.CustomCounter("lobbyfindsession_active_count", metricsTags, 1)
+	loginSessionID := request.LoginSessionID
 
 	// Check for suspensions on this channel, if this is a request for a public match.
 	if err := p.authorizeMatchmaking(ctx, logger, session, loginSessionID, *ml.Channel, true); err != nil {
@@ -618,23 +596,22 @@ func (p *EvrPipeline) lobbyPingResponse(ctx context.Context, logger *zap.Logger,
 }
 
 func (p *EvrPipeline) GetGuildPriorityList(ctx context.Context, userID uuid.UUID) (all []uuid.UUID, selected []uuid.UUID, err error) {
-	evrID, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
-	if !ok {
-		return nil, nil, fmt.Errorf("failed to get evrID from context")
-	}
 
-	profile, ok := p.profileRegistry.Load(userID, evrID)
+	currentGroupID, ok := ctx.Value(ctxGroupIDKey{}).(uuid.UUID)
 	if !ok {
-		return nil, nil, status.Errorf(codes.Internal, "Failed to get players profile")
+		return nil, nil, status.Errorf(codes.InvalidArgument, "Failed to get group ID from context")
 	}
-
-	currentChannel := profile.GetChannel()
 
 	// Get the guild priority from the context
 	groups, err := p.discordRegistry.GetGuildGroups(ctx, userID)
 	if err != nil {
 		return nil, nil, status.Errorf(codes.Internal, "Failed to get guilds: %v", err)
 	}
+
+	// Sort teh groups by size descending
+	sort.Slice(groups, func(i, j int) bool {
+		return groups[i].EdgeCount > groups[j].EdgeCount
+	})
 
 	groupIDs := make([]uuid.UUID, 0)
 	for _, group := range groups {
@@ -662,15 +639,17 @@ func (p *EvrPipeline) GetGuildPriorityList(ctx context.Context, userID uuid.UUID
 			}
 		}
 	}
+
 	if len(guildPriority) == 0 {
 		// If the params are not set, use the user's guilds
-		guildPriority = []uuid.UUID{currentChannel}
+		guildPriority = []uuid.UUID{currentGroupID}
 		for _, groupID := range groupIDs {
-			if groupID != currentChannel {
+			if groupID != currentGroupID {
 				guildPriority = append(guildPriority, groupID)
 			}
 		}
 	}
+
 	p.logger.Debug("guild priorites", zap.Any("prioritized", guildPriority), zap.Any("all", groupIDs))
 	return groupIDs, guildPriority, nil
 }
@@ -678,6 +657,33 @@ func (p *EvrPipeline) GetGuildPriorityList(ctx context.Context, userID uuid.UUID
 // lobbyCreateSessionRequest is a request to create a new session.
 func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.LobbyCreateSessionRequest)
+	response := NewMatchmakingResult(logger, request.Mode, request.Channel)
+
+	// Get the GroupID from the context
+	groupID := request.Channel
+	if groupID != uuid.Nil {
+		groups, _, err := p.runtimeModule.UserGroupsList(ctx, session.userID.String(), 200, nil, "")
+		if err != nil {
+			return status.Errorf(codes.Internal, "Failed to get user groups: %v", err)
+		}
+
+		groupStr := groupID.String()
+		isMember := lo.ContainsBy(groups, func(g *api.UserGroupList_UserGroup) bool {
+			return g.Group.Id == groupStr && g.State.GetValue() <= int32(api.UserGroupList_UserGroup_MEMBER)
+		})
+		if !isMember {
+			groupID = uuid.Nil
+		}
+	}
+
+	if groupID == uuid.Nil {
+		var ok bool
+		groupID, ok = ctx.Value(ctxGroupIDKey{}).(uuid.UUID)
+		if !ok {
+			return status.Errorf(codes.InvalidArgument, "Failed to get group ID from context")
+		}
+	}
+
 	metricsTags := map[string]string{
 		"type":     strconv.FormatInt(int64(request.LobbyType), 10),
 		"mode":     request.Mode.String(),
@@ -687,30 +693,9 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 	}
 	p.metrics.CustomCounter("lobbycreatesession_active_count", metricsTags, 1)
 	loginSessionID := request.LoginSessionID
-	groups, priorities, err := p.GetGuildPriorityList(ctx, session.userID)
-	if err != nil {
-		logger.Warn("Failed to get guild priority list", zap.Error(err))
-	}
-
-	response := NewMatchmakingResult(logger, request.Mode, request.Channel)
-
-	// Validate that the channel is in the user's guilds
-	if request.Channel == uuid.Nil || !lo.Contains(groups, request.Channel) {
-		if len(priorities) > 0 {
-			// If the channel is nil, use the players primary channel
-			request.Channel = priorities[0]
-		} else if len(groups) > 0 {
-			// If the player has no guilds, use the first guild
-			request.Channel = groups[0]
-		} else {
-			// If the player has no guilds,
-			return NewMatchmakingResult(logger, request.Mode, uuid.Nil).SendErrorToSession(session, status.Errorf(codes.PermissionDenied, "No guilds available"))
-		}
-
-	}
 
 	// Check for membership and suspensions on this channel. The user will not be allowed to create lobby's
-	if err := p.authorizeMatchmaking(ctx, logger, session, loginSessionID, request.Channel, true); err != nil {
+	if err := p.authorizeMatchmaking(ctx, logger, session, loginSessionID, groupID, true); err != nil {
 		switch status.Code(err) {
 		case codes.Internal:
 			logger.Warn("Failed to authorize matchmaking, allowing player to continue. ", zap.Error(err))
@@ -763,8 +748,12 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 		}
 	}
 
-	ml := &EvrMatchState{
+	_, priorities, err := p.GetGuildPriorityList(ctx, session.userID)
+	if err != nil {
+		logger.Warn("Failed to get guild priority list", zap.Error(err))
+	}
 
+	ml := &EvrMatchState{
 		Level:           request.Level,
 		LobbyType:       LobbyType(request.LobbyType),
 		Mode:            request.Mode,

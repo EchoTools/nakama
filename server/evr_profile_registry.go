@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math/rand"
 	"reflect"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -731,40 +730,6 @@ func (r *ProfileRegistry) retrieveStarterLoadout(ctx context.Context) (evr.Cosme
 	return loadout.Loadout, nil
 }
 
-func (r *ProfileRegistry) ValidateSocialGroup(ctx context.Context, userID uuid.UUID, groupID evr.GUID) (evr.GUID, error) {
-	logger := r.logger.WithField("user_id", userID.String())
-	// Get the user's active groups
-	groups, err := r.discordRegistry.GetGuildGroups(ctx, userID)
-	if err != nil {
-		return groupID, fmt.Errorf("failed to get guild groups: %w", err)
-	}
-
-	if len(groups) == 0 {
-		// Update the groups for the user
-		err := r.discordRegistry.UpdateAllGuildGroupsForUser(ctx, r.logger, userID)
-		if err != nil {
-			logger.Warn("Failed to update guild groups for user: %w", err)
-		}
-		// Try again
-		groups, err = r.discordRegistry.GetGuildGroups(ctx, userID)
-		if err != nil {
-			return groupID, fmt.Errorf("failed to get guild groups: %w", err)
-		}
-	}
-
-	if len(groups) == 0 {
-		return evr.GUID(uuid.Nil), nil
-	}
-
-	// If the user is not in the group, find the group with the most members
-	slices.SortStableFunc(groups, func(a, b *api.Group) int {
-		return int(a.EdgeCount) - int(b.EdgeCount)
-	})
-
-	return evr.GUID(uuid.FromStringOrNil(groups[0].Id)), nil
-
-}
-
 func (r *ProfileRegistry) ValidateArenaUnlockByName(i interface{}, itemName string) (bool, error) {
 	// Lookup the field name by it's item name (json key)
 	fieldName, found := r.unlocksByItemName[itemName]
@@ -802,13 +767,6 @@ func (r *ProfileRegistry) GetSessionProfile(ctx context.Context, session *sessio
 		logger.Warn("Failed to update account", zap.Error(err))
 	}
 
-	if groupID, err := r.ValidateSocialGroup(r.ctx, session.userID, p.Client.Social.Channel); err != nil {
-		return p, fmt.Errorf("failed to validate social group: %w", err)
-		// try to continue
-	} else {
-		p.SetChannel(groupID)
-	}
-
 	// Apply any unlocks based on the user's groups
 	if err := r.UpdateEntitledCosmetics(ctx, session.userID, &p); err != nil {
 		return p, fmt.Errorf("failed to update entitled cosmetics: %w", err)
@@ -842,23 +800,6 @@ func (r *ProfileRegistry) UpdateClientProfile(ctx context.Context, logger *zap.L
 
 	p.Client = update
 
-	groupID, err := r.ValidateSocialGroup(r.ctx, session.userID, p.Client.Social.Channel)
-	if err != nil {
-		return p, fmt.Errorf("failed to validate social group: %w", err)
-		// try to continue
-	} else {
-		p.SetChannel(groupID)
-	}
-	// Update the displayname based on the user's selected channel.
-
-	if groupID != evr.GUID(uuid.Nil) {
-		displayName, err := SetDisplayNameByChannelBySession(ctx, r.nk, logger, r.discordRegistry, session, groupID.String())
-		if err != nil {
-			logger.Error("Failed to set display name.", zap.Error(err))
-		} else {
-			p.UpdateDisplayName(displayName)
-		}
-	}
 	r.Store(session.userID, p)
 	return p, nil
 }
