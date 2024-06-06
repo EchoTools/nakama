@@ -87,7 +87,7 @@ func NewBroadcasterStartSession(sessionID uuid.UUID, channel uuid.UUID, playerLi
 }
 
 type SessionSettings struct {
-	AppId string `json:"appid"`
+	AppID string `json:"appid"`
 	Mode  int64  `json:"gametype"`
 	Level *int64 `json:"level"`
 }
@@ -95,7 +95,7 @@ type SessionSettings struct {
 func NewSessionSettings(appID string, mode Symbol, level Symbol) SessionSettings {
 
 	settings := SessionSettings{
-		AppId: appID,
+		AppID: appID,
 		Mode:  int64(mode),
 		Level: nil,
 	}
