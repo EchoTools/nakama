@@ -145,12 +145,12 @@ func (r *LocalDiscordRegistry) PopulateCache() (cnt int, err error) {
 				r.logger.Warn(fmt.Sprintf("Error unmarshalling group metadata for group %s:  %s", group.Id, err))
 			}
 
-			if metadata.GuildId != "" {
-				r.Store(metadata.GuildId, group.Id)
-				r.Store(group.Id, metadata.GuildId)
-				guild, err := r.GetGuild(r.ctx, metadata.GuildId)
+			if metadata.GuildID != "" {
+				r.Store(metadata.GuildID, group.Id)
+				r.Store(group.Id, metadata.GuildID)
+				guild, err := r.GetGuild(r.ctx, metadata.GuildID)
 				if err != nil {
-					r.logger.Warn(fmt.Sprintf("Error getting guild %s: %s", metadata.GuildId, err))
+					r.logger.Warn(fmt.Sprintf("Error getting guild %s: %s", metadata.GuildID, err))
 					continue
 				}
 				r.bot.State.GuildAdd(guild)
@@ -177,9 +177,9 @@ func (r *LocalDiscordRegistry) PopulateCache() (cnt int, err error) {
 					}
 
 					// Verify that the role exists on the guild
-					_, err := r.bot.State.Role(metadata.GuildId, roleId)
+					_, err := r.bot.State.Role(metadata.GuildID, roleId)
 					if err != nil {
-						r.logger.Warn(fmt.Sprintf("Error getting role %s for guild %s: %s", roleId, metadata.GuildId, err))
+						r.logger.Warn(fmt.Sprintf("Error getting role %s for guild %s: %s", roleId, metadata.GuildID, err))
 						continue
 					}
 
@@ -199,8 +199,8 @@ func (r *LocalDiscordRegistry) PopulateCache() (cnt int, err error) {
 						r.logger.Warn(fmt.Sprintf("Error unmarshalling group metadata for group %s:  %s", group.Id, err))
 						continue
 					}
-					if md.GuildId != metadata.GuildId {
-						r.logger.Warn(fmt.Sprintf("Role group %s does not belong to guild %s", groupId, metadata.GuildId))
+					if md.GuildID != metadata.GuildID {
+						r.logger.Warn(fmt.Sprintf("Role group %s does not belong to guild %s", groupId, metadata.GuildID))
 						continue
 					}
 					r.Store(roleId, groupId)
@@ -285,7 +285,7 @@ func (r *LocalDiscordRegistry) GetGuildByGroupId(ctx context.Context, groupId st
 	if err != nil {
 		return nil, fmt.Errorf("error getting guild group metadata: %w", err)
 	}
-	return r.GetGuild(ctx, md.GuildId)
+	return r.GetGuild(ctx, md.GuildID)
 
 }
 
@@ -362,8 +362,8 @@ func (r *LocalDiscordRegistry) GetGuildGroupMetadata(ctx context.Context, groupI
 	}
 
 	// Update the cache
-	r.Store(groupId, guildGroup.GuildId)
-	r.Store(guildGroup.GuildId, groupId)
+	r.Store(groupId, guildGroup.GuildID)
+	r.Store(guildGroup.GuildID, groupId)
 	// Return the unmarshalled GroupMetadata
 	return guildGroup, nil
 }
@@ -767,7 +767,7 @@ func (r *LocalDiscordRegistry) SynchronizeGroup(ctx context.Context, guild *disc
 	}
 
 	// Set the group Id in the metadata so it can be found during an error.
-	guildMetadata.GuildId = guild.ID
+	guildMetadata.GuildID = guild.ID
 
 	// Find or create the moderator role group
 	moderatorGroup, err := r.findOrCreateGroup(ctx, guildMetadata.ModeratorGroupId, guild.Name+" Moderators", guild.Name+" Moderators", ownerId, "role", guild)
@@ -864,7 +864,7 @@ func (r *LocalDiscordRegistry) GetAllSuspensions(ctx context.Context, userId uui
 			return nil, fmt.Errorf("error unmarshalling group metadata: %w", err)
 		}
 		// Get the guild member's roles
-		member, err := r.GetGuildMember(ctx, md.GuildId, discordId)
+		member, err := r.GetGuildMember(ctx, md.GuildID, discordId)
 		if err != nil {
 			return nil, fmt.Errorf("error getting guild member: %w", err)
 		}
@@ -872,7 +872,7 @@ func (r *LocalDiscordRegistry) GetAllSuspensions(ctx context.Context, userId uui
 		intersections := lo.Intersect(member.Roles, md.SuspensionRoles)
 		for _, roleId := range intersections {
 			// Get the role's name
-			role, err := r.bot.State.Role(md.GuildId, roleId)
+			role, err := r.bot.State.Role(md.GuildID, roleId)
 			if err != nil {
 				return nil, fmt.Errorf("error getting guild role: %w", err)
 			}

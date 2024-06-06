@@ -341,7 +341,7 @@ func (p *EvrPipeline) getBroadcasterHostInfo(ctx context.Context, logger *zap.Lo
 				continue
 			}
 
-			guildIDs = append(guildIDs, md.GuildId)
+			guildIDs = append(guildIDs, md.GuildID)
 		}
 	}
 
