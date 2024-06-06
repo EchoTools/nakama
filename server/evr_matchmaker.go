@@ -879,7 +879,7 @@ func (p *EvrPipeline) getEndpointLatencies(session *sessionWS, endpoints []evr.E
 // checkSuspensionStatus checks if the user is suspended from the channel and returns the suspension status.
 func (p *EvrPipeline) checkSuspensionStatus(ctx context.Context, logger *zap.Logger, userID string, channel uuid.UUID) (statuses []*SuspensionStatus, err error) {
 	if channel == uuid.Nil {
-		return nil, fmt.Errorf("channel is nil")
+		return nil, nil
 	}
 
 	// Get the guild group metadata
