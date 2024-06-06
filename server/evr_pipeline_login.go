@@ -646,19 +646,30 @@ func (p *EvrPipeline) remoteLogSetv3(ctx context.Context, logger *zap.Logger, se
 
 func (p *EvrPipeline) documentRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.DocumentRequest)
+	evrID, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
+	if !ok {
+		return fmt.Errorf("evrId not found in context")
+	}
+
 	var document evr.Document
 	var err error
 	switch request.Type {
 	case "eula":
 
 		if flags, ok := ctx.Value(ctxFlagsKey{}).(int); ok && flags&FlagNoVR != 0 {
-			document = evr.NewEULADocument(1, 1, request.Language, "https://github.com/EchoTools", "Blank EULA for NoVR clients.")
-			break
-		}
+			// Get the version of the EULA from the profile
+			profile, found := p.profileRegistry.Load(session.userID, evrID)
+			if !found {
+				return fmt.Errorf("failed to load game profiles")
+			}
+			document = evr.NewEULADocument(int(profile.Client.LegalConsents.EulaVersion), int(profile.Client.LegalConsents.GameAdminVersion), request.Language, "https://github.com/EchoTools", "Blank EULA for NoVR clients.")
 
-		document, err = p.generateEULA(ctx, logger, request.Language)
-		if err != nil {
-			return fmt.Errorf("failed to get eula document: %w", err)
+		} else {
+
+			document, err = p.generateEULA(ctx, logger, request.Language)
+			if err != nil {
+				return fmt.Errorf("failed to get eula document: %w", err)
+			}
 		}
 	default:
 		return fmt.Errorf("unknown document: %s,%s", request.Language, request.Type)
