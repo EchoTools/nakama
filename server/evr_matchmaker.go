@@ -905,7 +905,7 @@ func (p *EvrPipeline) checkSuspensionStatus(ctx context.Context, logger *zap.Log
 	}
 
 	// Get the guild member
-	member, err := p.discordRegistry.GetGuildMember(ctx, md.GuildId, discordId)
+	member, err := p.discordRegistry.GetGuildMember(ctx, md.GuildID, discordId)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Failed to get guild member: %v", err)
 	}
@@ -926,7 +926,7 @@ func (p *EvrPipeline) checkSuspensionStatus(ctx context.Context, logger *zap.Log
 	}
 	if len(ids) == 0 {
 		// Get the guild name and Id
-		guild, err := p.discordRegistry.GetGuild(ctx, md.GuildId)
+		guild, err := p.discordRegistry.GetGuild(ctx, md.GuildID)
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "Failed to get guild: %v", err)
 		}
@@ -962,7 +962,7 @@ func (p *EvrPipeline) checkSuspensionStatus(ctx context.Context, logger *zap.Log
 	// If no suspension status was found, return the basic suspension status
 	if len(objs) == 0 {
 		// Get the guild name and Id
-		guild, err := p.discordRegistry.GetGuild(ctx, md.GuildId)
+		guild, err := p.discordRegistry.GetGuild(ctx, md.GuildID)
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "Failed to get guild: %v", err)
 		}

@@ -552,7 +552,7 @@ func SelectDisplayNameByPriority(ctx context.Context, nk runtime.NakamaModule, u
 }
 
 type GroupMetadata struct {
-	GuildId                string   `json:"guild_id" validate:"required,uuid"`                  // The guild ID
+	GuildID                string   `json:"guild_id" validate:"required,uuid"`                  // The guild ID
 	RulesText              string   `json:"rules_text" validate:"required,ascii"`               // The rules text displayed on the main menu
 	SuspensionRoles        []string `json:"suspension_roles" validate:"dive,numeric"`           // The roles that have users suspended
 	MembershipRole         string   `json:"membership_role" validate:"required,numeric"`        // The role that has access to create lobbies/matches and join social lobbies
@@ -612,7 +612,7 @@ func (s *SuspensionStatus) Valid() bool {
 
 func NewGuildGroupMetadata(guildId string, rulesText string, modId string, serverId string) *GroupMetadata {
 	return &GroupMetadata{
-		GuildId:                guildId,
+		GuildID:                guildId,
 		RulesText:              rulesText,
 		SuspensionRoles:        make([]string, 0),
 		ModeratorRole:          "",

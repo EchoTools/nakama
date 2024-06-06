@@ -1132,6 +1132,26 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			groupID, found := d.discordRegistry.Get(i.Member.GuildID)
 			if !found {
+				// Try to find it by searchign
+				groups, err := d.discordRegistry.GetGuildGroups(ctx, userID)
+				if err != nil {
+					logger.Error("Failed to get guild groups", zap.Error(err))
+				}
+				if len(groups) == 0 {
+					errFn(errors.New("guild groups not found"))
+				}
+				for _, group := range groups {
+					md, err := d.discordRegistry.GetGuildGroupMetadata(ctx, group.Id)
+					if err != nil {
+						errFn(err)
+						return
+					}
+					if md.GuildID == i.Member.GuildID {
+						groupID = group.Id
+						break
+					}
+				}
+
 				errFn(errors.New("guild not found"))
 				return
 			}
