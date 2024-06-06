@@ -565,6 +565,15 @@ type GroupMetadata struct {
 type AccountUserMetadata struct {
 	DisplayNameOverride string `json:"display_name_override"` // The display name override
 	GlobalBanReason     string `json:"global_ban_reason"`     // The global ban reason
+	ActiveGroupID       string `json:"active_group_id"`       // The active group ID
+}
+
+func (a *AccountUserMetadata) GetActiveGroupID() uuid.UUID {
+	return uuid.FromStringOrNil(a.ActiveGroupID)
+}
+
+func (a *AccountUserMetadata) SetActiveGroupID(id uuid.UUID) {
+	a.ActiveGroupID = id.String()
 }
 
 func (a *AccountUserMetadata) MarshalToMap() (map[string]interface{}, error) {

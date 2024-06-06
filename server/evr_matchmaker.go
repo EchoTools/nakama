@@ -649,6 +649,7 @@ func (p *EvrPipeline) MatchCreate(ctx context.Context, session *sessionWS, msess
 	if err != nil {
 		return "", fmt.Errorf("failed to load level: %v", err)
 	}
+	<-time.After(5 * time.Second)
 	// Return the newly active match.
 	return parkingMatchId, nil
 }
@@ -722,13 +723,12 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 	}
 
 	profile.UpdateDisplayName(displayName)
+
 	// Add the user's profile to the cache (by EvrID)
 	err = p.profileRegistry.Cache(profile.GetServer())
 	if err != nil {
 		logger.Warn("Failed to add profile to cache", zap.Error(err))
 	}
-
-	// TODO FIXME Get the party id if the player is in a party
 
 	// Prepare the player session metadata.
 
