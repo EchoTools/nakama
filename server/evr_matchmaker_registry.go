@@ -841,6 +841,9 @@ func (mr *MatchmakingRegistry) allocateBroadcaster(channels []uuid.UUID, config 
 	if err != nil {
 		return "", fmt.Errorf("error signaling match: %s: %v", response, err)
 	}
+
+	<-time.After(5 * time.Second)
+
 	if response != "session started" {
 		return "", fmt.Errorf("error signaling match: %s", response)
 	}
