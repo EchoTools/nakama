@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bwmarrin/discordgo"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -545,13 +546,72 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 
 		// For public arena/combat matches, backfill while matchmaking
 	case evr.ModeCombatPublic:
+
+		env := p.config.GetRuntime().Environment
+		channelID, ok := env["COMBAT_MATCHMAKING_CHANNEL_ID"]
+		if ok {
+
+			bot := p.discordRegistry.GetBot()
+			if bot != nil {
+				// Count how many players are matchmaking for this mode right now
+				sessionsByMode := p.matchmakingRegistry.SessionsByMode()
+
+				userIDs := make([]uuid.UUID, 0)
+				for _, s := range sessionsByMode[ml.Mode] {
+					userIDs = append(userIDs, s.Session.userID)
+				}
+
+				currentLobby, _ := p.matchBySessionID.Load(session.id.String())
+
+				// Translate the userID's to discord ID's
+				discordIDs := make([]string, 0, len(userIDs))
+				for _, userID := range userIDs {
+					if userID == session.userID {
+						continue
+					}
+					did, err := p.discordRegistry.GetDiscordIdByUserId(parentCtx, userID)
+					if err != nil {
+						logger.Warn("Failed to get discord ID", zap.Error(err))
+						continue
+					}
+					discordIDs = append(discordIDs, fmt.Sprintf("<@%s>", did))
+				}
+
+				discordID, err := p.discordRegistry.GetDiscordIdByUserId(parentCtx, session.userID)
+				if err != nil {
+					logger.Warn("Failed to get discord ID", zap.Error(err))
+				}
+
+				msg := fmt.Sprintf("<@%s> is matchmaking...", discordID)
+				if len(discordIDs) > 0 {
+					msg = fmt.Sprintf("%s along with %s...", msg, strings.Join(discordIDs, ", "))
+				}
+
+				embed := discordgo.MessageEmbed{
+					Title:       "Matchmaking",
+					Description: msg,
+					Color:       0x00cc00,
+				}
+
+				if currentLobby != "" {
+					embed.Description = fmt.Sprintf("%s Use the %s to join them!", embed.Description, TaxiEmoji)
+					embed.Footer = &discordgo.MessageEmbedFooter{
+						Text: currentLobby,
+					}
+				}
+
+				// Notify the channel that this person started queuing
+				bot.ChannelMessageSendEmbed(channelID, &embed)
+			}
+		}
+
 		// Join any on-going combat match without delay
 		skipBackfillDelay = false
 		go p.MatchBackfillLoop(session, msession, skipBackfillDelay, false, 1)
 		// For Arena and combat matches try to backfill while matchmaking
 
 		// Put a ticket in for matching
-		_, err := p.MatchMake(session, msession)
+		_, err = p.MatchMake(session, msession)
 		if err != nil {
 			return err
 		}
