@@ -727,15 +727,21 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 
 	for _, p := range presences {
 		// Update the player's status to remove the match ID
-		if err := nk.StreamUserUpdate(StreamModeEvr, p.GetUserId(), StreamContextMatch.String(), "", p.GetUserId(), p.GetSessionId(), false, false, ""); err != nil {
-			logger.Warn("Failed to update user status for %v: %v", p, err)
-		}
+		// Check if the session exists.
+
 		sessionID := uuid.FromStringOrNil(p.GetSessionId())
 		matchPresence, ok := state.presences[sessionID]
 		if !ok || matchPresence == nil {
 			continue
 		}
 		delete(state.presences, sessionID)
+
+		if _, err := nk.StreamUserGet(StreamModeEvr, p.GetUserId(), StreamContextMatch.String(), "", p.GetUserId(), p.GetSessionId()); err != nil {
+			continue
+		}
+		if err := nk.StreamUserUpdate(StreamModeEvr, p.GetUserId(), StreamContextMatch.String(), "", p.GetUserId(), p.GetSessionId(), false, false, ""); err != nil {
+			logger.Debug("Failed to update user status for %v: %v", p, err)
+		}
 	}
 	// Delete the each user from the match.
 	if len(rejects) > 0 {
