@@ -392,8 +392,19 @@ func (e *TaxiBot) pruneRateLimiters() {
 
 func (e *TaxiBot) handleMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	if m.Author.ID == s.State.User.ID {
-		return
+		if m.Embeds != nil { // If the message has embeds, check the footer for a lobbyid
+			// Use the footer as the content
+			for _, embed := range m.Embeds {
+				if embed.Footer != nil {
+					m.Content = embed.Footer.Text
+					break
+				}
+			}
+		} else {
+			return // Ignore messages from the bot
+		}
 	}
+
 	logger := e.logger.WithFields(map[string]interface{}{
 		"func": "handleMessageCreate",
 		"msg":  m,
