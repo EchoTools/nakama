@@ -561,6 +561,40 @@ func (d *DiscordAppBot) InitializeDiscordBot() error {
 			logger.Error("Failed to register slash commands: %w", err)
 		}
 	})
+
+	// Update the status with the number of matches and players
+	go func() {
+		updateTicker := time.NewTicker(1 * time.Minute)
+		for {
+			select {
+			case <-updateTicker.C:
+				// Get all the matches
+				minSize := 2
+				maxSize := MatchMaxSize + 1
+				matches, err := nk.MatchList(ctx, 1000, true, "", &minSize, &maxSize, "")
+				if err != nil {
+					logger.Error("Error fetching matches: %w", err)
+					continue
+				}
+				playerCount := 0
+				matchCount := 0
+				for _, match := range matches {
+					playerCount += int(match.Size) - 1
+					matchCount++
+
+				}
+				status := fmt.Sprintf("with %d players in %d matches", playerCount, matchCount)
+				if err := bot.UpdateGameStatus(0, status); err != nil {
+					logger.Error("Error updating status: %w", err)
+				}
+
+			case <-ctx.Done():
+				updateTicker.Stop()
+				return
+			}
+		}
+	}()
+
 	return nil
 }
 
