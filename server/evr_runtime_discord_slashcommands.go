@@ -1132,7 +1132,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			groupID, found := d.discordRegistry.Get(i.Member.GuildID)
 			if !found {
-				// Try to find it by searchign
+				// Try to find it by searching
 				groups, err := d.discordRegistry.GetGuildGroups(ctx, userID)
 				if err != nil {
 					logger.Error("Failed to get guild groups", zap.Error(err))
@@ -1151,9 +1151,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						break
 					}
 				}
-
-				errFn(errors.New("guild not found"))
-				return
 			}
 
 			profile, _ := d.profileRegistry.Load(userID, evr.EvrIdNil)
@@ -1181,7 +1178,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
 					Flags:   discordgo.MessageFlagsEphemeral,
-					Content: fmt.Sprintf("Set EchoVR guild to **%s**. Your matchmaking will prioritize **%s** members, social lobbies will be exclusively **%s**, and created matches will be using *%s* broadcasters/servers.", guild.Name, guild.Name),
+					Content: fmt.Sprintf("Set EchoVR guild to **%s**. Your matchmaking will prioritize **%s** members, social lobbies will be exclusively **%s**, and created matches will be using *%s* broadcasters/servers.", guild.Name, guild.Name, guild.Name, guild.Name),
 				},
 			})
 		},
