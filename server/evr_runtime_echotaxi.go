@@ -359,6 +359,10 @@ func (e *TaxiBot) Initialize(dg *discordgo.Session) error {
 	dg.AddHandler(e.handleMessageCreate)
 	dg.AddHandler(e.handleMessageReactionAdd)
 
+	dg.AddHandler(func(s *discordgo.Session, r *discordgo.RateLimit) {
+		e.logger.Warn("Rate limited: %s", r)
+	})
+
 	err := dg.Open()
 	if err != nil {
 		return fmt.Errorf("Error opening EchoTaxi connection to Discord: %v", err)
