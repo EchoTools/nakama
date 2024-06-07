@@ -163,6 +163,7 @@ type MatchmakingSession struct {
 	Tickets       map[string]TicketMeta // map[ticketId]TicketMeta
 	Party         *PartyHandler
 	LatencyCache  *LatencyCache
+	Session       *sessionWS
 }
 
 func (s *MatchmakingSession) metricsTags() map[string]string {
@@ -1159,6 +1160,7 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, logger *zap.Logger, se
 		Expiry:        time.Now().UTC().Add(findAttemptsExpiry),
 		Label:         ml,
 		Tickets:       make(map[string]TicketMeta),
+		Session:       session,
 	}
 
 	// Load the latency cache
@@ -1338,4 +1340,19 @@ func (ms *MatchmakingSession) BuildQuery(latencies []LatencyMetric) (query strin
 	ms.Logger.Debug("Matchmaking query", zap.String("query", query), zap.Any("stringProps", stringProps), zap.Any("numericProps", numericProps))
 	// TODO Avoid ghosted
 	return query, stringProps, numericProps, nil
+}
+
+func (c *MatchmakingRegistry) SessionsByMode() map[evr.Symbol]map[uuid.UUID]*MatchmakingSession {
+
+	sessionByMode := make(map[evr.Symbol]map[uuid.UUID]*MatchmakingSession)
+
+	c.matchingBySession.Range(func(sid uuid.UUID, ms *MatchmakingSession) bool {
+		if sessionByMode[ms.Label.Mode] == nil {
+			sessionByMode[ms.Label.Mode] = make(map[uuid.UUID]*MatchmakingSession)
+		}
+
+		sessionByMode[ms.Label.Mode][sid] = ms
+		return true
+	})
+	return sessionByMode
 }
