@@ -551,13 +551,17 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 		channelID, ok := env["COMBAT_MATCHMAKING_CHANNEL_ID"]
 		if ok {
 
-			bot := p.discordRegistry.GetBot()
-			if bot != nil {
+			if bot := p.discordRegistry.GetBot(); bot != nil && ml.TeamIndex != TeamIndex(evr.TeamSpectator) {
 				// Count how many players are matchmaking for this mode right now
 				sessionsByMode := p.matchmakingRegistry.SessionsByMode()
 
 				userIDs := make([]uuid.UUID, 0)
 				for _, s := range sessionsByMode[ml.Mode] {
+
+					if s.Session.userID == session.userID || s.Label.TeamIndex == TeamIndex(evr.TeamSpectator) {
+						continue
+					}
+
 					userIDs = append(userIDs, s.Session.userID)
 				}
 
@@ -566,9 +570,7 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 				// Translate the userID's to discord ID's
 				discordIDs := make([]string, 0, len(userIDs))
 				for _, userID := range userIDs {
-					if userID == session.userID {
-						continue
-					}
+
 					did, err := p.discordRegistry.GetDiscordIdByUserId(parentCtx, userID)
 					if err != nil {
 						logger.Warn("Failed to get discord ID", zap.Error(err))
@@ -594,7 +596,6 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 				}
 
 				if currentLobby != "" {
-					embed.Description = fmt.Sprintf("%s Use the %s to join them!", embed.Description, TaxiEmoji)
 					embed.Footer = &discordgo.MessageEmbedFooter{
 						Text: currentLobby,
 					}
@@ -608,7 +609,6 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 		// Join any on-going combat match without delay
 		skipBackfillDelay = false
 		go p.MatchBackfillLoop(session, msession, skipBackfillDelay, false, 1)
-		// For Arena and combat matches try to backfill while matchmaking
 
 		// Put a ticket in for matching
 		_, err = p.MatchMake(session, msession)
