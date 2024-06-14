@@ -256,6 +256,38 @@ var (
 							Required:    true,
 						},
 					},
+						},
+					},
+				},
+			},
+		},
+		{
+			Name:        "set-roles",
+			Description: "link roles to Echo VR features. Non-members can only join private matches.",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionRole,
+					Name:        "member",
+					Description: "If defined, this role allows joining social lobbies, matchmaking, or creating private matches.",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionRole,
+					Name:        "moderator",
+					Description: "Allowed access to more detailed `/lookup`information and moderation tools.",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionRole,
+					Name:        "serverhost",
+					Description: "Allowed to host an Echo VR Game Server for the guild.",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionRole,
+					Name:        "suspension",
+					Description: "Disallowed from joining any guild matches.",
+					Required:    true,
 				},
 			},
 		},
@@ -437,6 +469,61 @@ func (d *DiscordAppBot) InitializeDiscordBot() error {
 
 			if err := d.discordRegistry.SynchronizeGroup(ctx, g); err != nil {
 				logger.Error("Error synchronizing group: %s", err.Error())
+				return
+			}
+		}
+	})
+
+	bot.AddHandler(func(s *discordgo.Session, m *discordgo.GuildMemberAdd) {
+		if s == nil || m == nil {
+			return
+		}
+		if m.Member == nil || m.Member.User == nil {
+			return
+		}
+		if m.Member.User.ID == s.State.User.ID {
+			guild, err := s.Guild(m.GuildID)
+			if err != nil {
+				logger.Error("Error getting guild: %w", err)
+			}
+
+			if err := d.discordRegistry.SynchronizeGroup(ctx, guild); err != nil {
+				logger.Error("Error synchronizing group: %s", err.Error())
+				return
+			}
+		}
+	})
+
+	bot.AddHandler(func(s *discordgo.Session, m *discordgo.GuildMemberRemove) {
+		if s == nil || m == nil {
+			return
+		}
+		if m.Member == nil || m.Member.User == nil {
+			return
+		}
+		if m.Member.User.ID == s.State.User.ID {
+			guild, err := s.Guild(m.GuildID)
+			if err != nil {
+				if err, ok := err.(*discordgo.RESTError); ok {
+					switch err.Message.Code {
+					case discordgo.ErrCodeUnknownGuild:
+						logger.Info("Guild not found, removing group")
+						if guild == nil {
+							groupID, found := d.discordRegistry.Get(m.GuildID)
+							if !found {
+								return
+							}
+							// Remove the guild group from the system.
+							err := d.nk.GroupDelete(ctx, groupID)
+							if err != nil {
+								logger.Error("Error deleting group: %w", err)
+							}
+						}
+						return
+					default:
+						logger.Error("Error getting guild: %w", err)
+					}
+				}
 				return
 			}
 		}
@@ -678,7 +765,7 @@ func (d *DiscordAppBot) UnregisterCommands(ctx context.Context, logger runtime.L
 func (d *DiscordAppBot) RegisterSlashCommands() error {
 	ctx := d.ctx
 	nk := d.nk
-	logger := d.logger
+
 	dg := d.dg
 	discordRegistry := d.discordRegistry
 
@@ -1162,7 +1249,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 				// Check the vlaue against vrmlIDPattern
 				if !vrmlIDPattern.MatchString(vrmlUsername) {
-					content = "Invalid VRML username"
+					errFn(fmt.Errorf("Invalid VRML username: `%s`", vrmlUsername))
+					return
 				}
 
 				// Access the VRML HTTP API
@@ -1378,8 +1466,111 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					},
 				})
 			}
+			userID, err := d.discordRegistry.GetUserIdByDiscordId(ctx, user.ID, false)
+			if err != nil {
+				errFn(errors.New("failed to get user ID"), err)
+			}
+
+			// Require the user to be a global moderator
+			isGlobalModerator, err := d.discordRegistry.IsGlobalModerator(ctx, userID)
+			if err != nil {
+				errFn(errors.New("failed to check global moderator status"), err)
+			}
+			if !isGlobalModerator {
+				err := simpleInteractionResponse(s, i, "You must be a global moderator to use this command.")
+				if err != nil {
+					logger.Warn("Failed to send interaction response", zap.Error(err))
+				}
+			}
+
+			target := options[0].UserValue(s)
+			targetUserID, err := d.discordRegistry.GetUserIdByDiscordId(ctx, target.ID, false)
+			if err != nil {
+				errFn(errors.New("failed to get user ID"), err)
+			}
+
+			profile, _ := d.profileRegistry.Load(targetUserID, evr.EvrIdNil)
+			profile.TriggerCommunityValues()
+			if err = d.profileRegistry.Store(targetUserID, profile); err != nil {
+				errFn(err)
+				return
+			}
+
+			presences, err := d.nk.StreamUserList(StreamModeEvr, userID.String(), svcLoginID.String(), "", true, true)
+			if err != nil {
+				errFn(err)
+				return
+			}
+			for _, presence := range presences {
+				if err = d.nk.SessionDisconnect(ctx, presence.GetSessionId(), runtime.PresenceReasonDisconnect); err != nil {
+					errFn(err)
+					return
+				}
+			}
 		},
-		"party": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+		"set-roles": func(s *discordgo.Session, i *discordgo.InteractionCreate, logger runtime.Logger) {
+			options := i.ApplicationCommandData().Options
+			user := getScopedUser(i)
+			if user == nil {
+				return
+			}
+			// Ensure the user is the owner of the guild
+			if i.Member == nil || i.Member.User.ID == "" || i.GuildID == "" {
+				return
+			}
+
+			errFn := func(err error) {
+				simpleInteractionResponse(s, i, err.Error())
+			}
+
+			guild, err := s.Guild(i.GuildID)
+			if err != nil {
+				errFn(errors.New("failed to get guild"))
+			}
+
+			if guild == nil {
+				errFn(errors.New("failed to get guild"))
+				return
+			}
+
+			if guild.OwnerID != user.ID {
+				errFn(errors.New("you must be the owner of the guild to use this command"))
+				return
+			}
+			groupID, found := d.discordRegistry.Get(i.GuildID)
+			if !found {
+				errFn(errors.New("guild group not found"))
+				return
+			}
+			// Get the metadata
+			metadata, err := d.discordRegistry.GetGuildGroupMetadata(ctx, groupID)
+			if err != nil {
+				errFn(errors.New("failed to get guild group metadata"))
+				return
+			}
+
+			for _, o := range options {
+				roleID := o.RoleValue(s, guild.ID).ID
+				switch o.Name {
+				case "moderator":
+					metadata.ModeratorRole = roleID
+				case "serverhost":
+					metadata.ServerHostRole = roleID
+				case "suspension":
+					metadata.SuspensionRole = roleID
+				case "member":
+					metadata.MemberRole = roleID
+				}
+			}
+
+			// Write the metadata to the group
+			if err = d.discordRegistry.SetGuildGroupMetadata(ctx, groupID, metadata); err != nil {
+				errFn(errors.New("failed to set guild group metadata"))
+				return
+			}
+			simpleInteractionResponse(s, i, "roles set!")
+		},
+		"party": func(s *discordgo.Session, i *discordgo.InteractionCreate, logger runtime.Logger) {
 
 			if i.Type != discordgo.InteractionApplicationCommand {
 				return
@@ -2281,31 +2472,41 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		{Name: "Online", Value: fmt.Sprintf("%v", whoami.Online), Inline: true},
 		{Name: "Create Time", Value: whoami.CreateTime, Inline: false},
 		{Name: "Username", Value: whoami.Username, Inline: true},
-		{Name: "Display Name", Value: whoami.DisplayNames[0], Inline: true},
-		{Name: "Discord ID", Value: whoami.DiscordId, Inline: true},
-		{Name: "Has Password", Value: fmt.Sprintf("%v", whoami.HasPassword), Inline: true},
-		{Name: "Device Count", Value: fmt.Sprintf("%d", whoami.DevicesCount), Inline: true},
-		{Name: "IP Addresses", Value: strings.Join(whoami.Addresses, "\n"), Inline: false},
-		{Name: "Device Links", Value: strings.Join(whoami.DeviceLinks, "\n"), Inline: false},
-		{Name: "Evr Logins", Value: strings.Join(lo.Map(whoami.EvrLogins, func(l EvrIdLogins, index int) string {
-			return fmt.Sprintf("%16s (%16s) - %16s", l.LastLoginTime, l.EvrId, l.DisplayName)
+		{Name: "Display Names", Value: strings.Join(whoami.DisplayNames, "\n"), Inline: false},
+		{Name: "IP Addresses", Value: strings.Join(whoami.ClientAddresses, "\n"), Inline: false},
+		{Name: "Linked Devices", Value: strings.Join(whoami.DeviceLinks, "\n"), Inline: false},
+		{Name: "Logins", Value: func() string {
+			lines := lo.MapToSlice(whoami.EVRIDLogins, func(k string, v time.Time) string {
+				return fmt.Sprintf("<t:%d:R> - %s", v.Unix(), k)
+			})
+			slices.Sort(lines)
+			slices.Reverse(lines)
+			return strings.Join(lines, "\n")
+		}(), Inline: false},
+		{Name: "Guild Memberships", Value: strings.Join(lo.Map(whoami.GuildGroupMemberships, func(m GuildGroupMembership, index int) string {
+			s := m.GuildGroup.Name()
+			roles := make([]string, 0)
+			if m.isModerator {
+				roles = append(roles, "Moderator")
+			}
+			if m.isServerHost {
+				roles = append(roles, "Server Host")
+			}
+			if len(roles) > 0 {
+				s += fmt.Sprintf(" (%s)", strings.Join(roles, ", "))
+			}
+			return s
 		}), "\n"), Inline: false},
-		{Name: "Previous Display Names", Value: strings.Join(whoami.DisplayNames[1:], "\n"), Inline: false},
-		{Name: "Groups", Value: strings.Join(whoami.Groups, "\n"), Inline: false},
+		{Name: "Suspensions", Value: strings.Join(suspensionLines, "\n"), Inline: false},
+		{Name: "Current Match(es)", Value: strings.Join(lo.Map(matchIDs, func(m string, index int) string {
+			return fmt.Sprintf("https://echo.taxi/spark://c/%s", strings.ToUpper(m))
+		}), "\n"), Inline: false},
 	}
 
-	if whoami.DisableTime != "" {
-		fields = append(fields, &discordgo.MessageEmbedField{Name: "Disable Time", Value: whoami.DisableTime, Inline: true})
-	}
-
-	if len(suspensionLines) > 0 {
-		fields = append(fields, &discordgo.MessageEmbedField{Name: "Suspensions", Value: strings.Join(suspensionLines, "\n"), Inline: false})
-	}
-
-	if matchId != "" {
-		m, _, _ := strings.Cut(matchId, ".")
-		fields = append(fields, &discordgo.MessageEmbedField{Name: "Current Match", Value: fmt.Sprintf("https://echo.taxi/spark://c/%s", m), Inline: true})
-	}
+	// Remove any blank fields
+	fields = lo.Filter(fields, func(f *discordgo.MessageEmbedField, _ int) bool {
+		return f.Value != ""
+	})
 
 	// Send the response
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{

@@ -85,8 +85,8 @@ func (p *GameProfileData) GetChannel() uuid.UUID {
 func (p *GameProfileData) SetChannel(c evr.GUID) {
 	p.Server.Social.Channel = c
 	p.Client.Social.Channel = p.Server.Social.Channel
-
 }
+
 func (p *GameProfileData) UpdateDisplayName(displayName string) {
 	p.Server.DisplayName = displayName
 	p.Client.DisplayName = displayName
