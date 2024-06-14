@@ -66,22 +66,20 @@ func NewDiscordAppBot(nk runtime.NakamaModule, logger runtime.Logger, metrics Me
 }
 
 type WhoAmI struct {
-	Username     string        `json:"username"`
-	NakamaId     string        `json:"nakama_id"`
-	DiscordId    string        `json:"discord_id"`
-	CreateTime   string        `json:"create_time,omitempty"`
-	DisableTime  string        `json:"disable_time,omitempty"`
-	VerifyTime   string        `json:"verify_time,omitempty"`
-	DisplayNames []string      `json:"display_names"`
-	DevicesCount int           `json:"device_count"`
-	DiscordLink  bool          `json:"discord_link,omitempty"`
-	DeviceLinks  []string      `json:"device_links,omitempty"`
-	HasPassword  bool          `json:"has_password"`
-	EvrLogins    []EvrIdLogins `json:"last_logins"`
-	Groups       []string      `json:"groups"`
-	Online       bool          `json:"online"`
-	Addresses    []string      `json:"addresses,omitempty"`
+	NakamaID              uuid.UUID              `json:"nakama_id"`
+	Username              string                 `json:"username"`
+	DiscordID             string                 `json:"discord_id"`
+	CreateTime            time.Time              `json:"create_time,omitempty"`
+	DisplayNames          []string               `json:"display_names"`
+	DeviceLinks           []string               `json:"device_links,omitempty"`
+	HasPassword           bool                   `json:"has_password"`
+	EVRIDLogins           map[string]time.Time   `json:"evr_id_logins"`
+	GuildGroupMemberships []GuildGroupMembership `json:"guild_memberships"`
+	VRMLSeasons           []string               `json:"vrml_seasons"`
+
+	ClientAddresses []string `json:"addresses,omitempty"`
 }
+
 type EvrIdLogins struct {
 	EvrId         string `json:"evr_id"`
 	LastLoginTime string `json:"login_time"`
@@ -1424,24 +1422,20 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 				err = simpleInteractionResponse(s, i, content)
 				if err != nil {
-					err = status.Error(codes.Internal, "failed to send response: "+err.Error())
+					errFn(status.Error(codes.Internal, "failed to send response: "+err.Error()))
 					break
 				}
 
 			}
 		},
 		"whoami": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-			var user *discordgo.User
-			switch {
-			case i.User != nil:
-				user = i.User
-			case i.Member.User != nil:
-				user = i.Member.User
-			default:
+
+			user, _ := getScopedUserMember(i)
+			if user == nil {
 				return
 			}
 
-			if err := d.handleProfileRequest(ctx, logger, nk, s, discordRegistry, i, user.ID, user.Username, true); err != nil {
+			if err := d.handleProfileRequest(ctx, logger, nk, s, discordRegistry, i, user.ID, user.Username, "", true); err != nil {
 				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 					Type: discordgo.InteractionResponseChannelMessageWithSource,
 					Data: &discordgo.InteractionResponseData{
@@ -1456,11 +1450,15 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			if i.Type != discordgo.InteractionApplicationCommand {
 				return
 			}
-			if i.Member == nil {
+
+			if i.Member == nil || i.Member.User.ID == "" || i.GuildID == "" {
 				return
 			}
 
+			guildID := i.GuildID
+
 			errFn := func(err error) {
+				logger.Debug("set-lobby failed: %s", err.Error())
 				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 					Type: discordgo.InteractionResponseChannelMessageWithSource,
 					Data: &discordgo.InteractionResponseData{
@@ -1477,43 +1475,36 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return
 			}
 
-			groupID, found := d.discordRegistry.Get(i.Member.GuildID)
+			groupID, found := d.discordRegistry.Get(guildID)
 			if !found {
-				// Try to find it by searching
-				groups, err := d.discordRegistry.GetGuildGroups(ctx, userID)
-				if err != nil {
-					logger.Error("Failed to get guild groups", zap.Error(err))
-				}
-				if len(groups) == 0 {
-					errFn(errors.New("guild groups not found"))
-				}
-				for _, group := range groups {
-					md, err := d.discordRegistry.GetGuildGroupMetadata(ctx, group.Id)
-					if err != nil {
-						errFn(err)
-						return
-					}
-					if md.GuildID == i.Member.GuildID {
-						groupID = group.Id
-						break
-					}
-				}
+				errFn(errors.New("guild group not found"))
+				return
 			}
 
-			profile, _ := d.profileRegistry.Load(userID, evr.EvrIdNil)
-			gid := uuid.FromStringOrNil(groupID)
-			if gid == uuid.Nil {
-				errFn(errors.New("invalid group ID"))
-			}
-			profile.SetChannel(evr.GUID(gid))
-			err = d.profileRegistry.Store(userID, profile)
+			// Try to find it by searching
+			memberships, err := d.discordRegistry.GetGuildGroupMemberships(ctx, userID, []uuid.UUID{uuid.FromStringOrNil(groupID)})
 			if err != nil {
-				logger.Error("Failed to store profile", zap.Error(err))
+				errFn(err)
+				return
+			}
+			if len(memberships) == 0 {
+				err := d.discordRegistry.UpdateGuildGroup(ctx, logger, userID, guildID)
+				if err != nil {
+					errFn(err)
+				}
+				errFn(errors.New("guild data stale, please try again in a few seconds"))
+				return
+			}
+			membership := memberships[0]
+
+			profile, _ := d.profileRegistry.Load(userID, evr.EvrIdNil)
+			profile.SetChannel(evr.GUID(membership.GuildGroup.ID()))
+			if err = d.profileRegistry.Store(userID, profile); err != nil {
 				errFn(err)
 				return
 			}
 
-			guild, err := s.Guild(i.Member.GuildID)
+			guild, err := s.Guild(i.GuildID)
 			if err != nil {
 				logger.Error("Failed to get guild", zap.Error(err))
 				errFn(err)
@@ -1524,8 +1515,13 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
-					Flags:   discordgo.MessageFlagsEphemeral,
-					Content: fmt.Sprintf("Set EchoVR guild to **%s**. Your matchmaking will prioritize **%s** members, social lobbies will be exclusively **%s**, and created matches will be using *%s* broadcasters/servers.", guild.Name, guild.Name, guild.Name, guild.Name),
+					Flags: discordgo.MessageFlagsEphemeral,
+					Content: strings.Join([]string{
+						fmt.Sprintf("EchoVR lobby changed to **%s**.", guild.Name),
+						"- Matchmaking will prioritize members",
+						"- Social lobbies will contain only members",
+						"- Private matches that you create will prioritize guild's broadcasters/servers.",
+					}, "\n"),
 				},
 			})
 		},
@@ -1534,23 +1530,66 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			if i.Type != discordgo.InteractionApplicationCommand {
 				return
 			}
-			user := getScopedUser(i)
-
-			// Check if the user is part of the Global Moderators group
-			isModerator, isGlobal, err := d.discordRegistry.isModerator(ctx, i.GuildID, user.ID)
-			if err != nil {
-				logger.Error("Failed to check if user is a moderator", zap.Error(err))
+			if i.GuildID == "" {
 				return
 			}
 
-			if !isModerator && !isGlobal {
-				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-					Type: discordgo.InteractionResponseChannelMessageWithSource,
-					Data: &discordgo.InteractionResponseData{
-						Flags:   discordgo.MessageFlagsEphemeral,
-						Content: "You do not have permission to use this command.",
-					},
-				})
+			// Determine if the call is from a guild.
+			user, member := getScopedUserMember(i)
+
+			if user == nil {
+				return
+			}
+
+			errFn := func(errs ...error) {
+				err := errors.Join(errs...)
+				if err := simpleInteractionResponse(s, i, err.Error()); err != nil {
+					logger.Warn("Failed to send interaction response", zap.Error(err))
+				}
+			}
+
+			// Get the caller's nakama user ID
+			userID, err := d.discordRegistry.GetUserIdByDiscordId(ctx, user.ID, false)
+			if err != nil {
+				errFn(errors.New("failed to get user ID"), err)
+				return
+			}
+
+			guildID := ""
+			if member != nil {
+				memberships, err := d.discordRegistry.GetGuildGroupMemberships(ctx, userID, nil)
+				if err != nil {
+					errFn(errors.New("failed to get user ID"), err)
+					return
+				}
+
+				var membership *GuildGroupMembership
+
+				// Get the caller's nakama guild group membership
+				for _, m := range memberships {
+					if m.GuildGroup.GuildID() == i.GuildID {
+						membership = &m
+						break
+					}
+				}
+
+				if membership == nil {
+					err := d.discordRegistry.UpdateGuildGroup(ctx, logger, userID, i.GuildID)
+					if err != nil {
+						errFn(errors.New("Error updating guild group data"), err)
+						return
+					}
+					errFn(errors.New("guild data stale, please try again in a few seconds"))
+					return
+				}
+				if membership.isModerator {
+					guildID = i.GuildID
+				}
+			}
+
+			isGlobalModerator, err := d.discordRegistry.IsGlobalModerator(ctx, userID)
+			if err != nil {
+				errFn(errors.New("Error checking global moderator status"), err)
 				return
 			}
 
@@ -2492,42 +2531,88 @@ func (d *DiscordAppBot) ManageUserGroups(ctx context.Context, logger runtime.Log
 	return nil
 }
 
-func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, s *discordgo.Session, discordRegistry DiscordRegistry, i *discordgo.InteractionCreate, discordId string, username string, fullProfile bool) error {
-	if i.GuildID == "" {
-		return fmt.Errorf("guild id is required")
+func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, s *discordgo.Session, discordRegistry DiscordRegistry, i *discordgo.InteractionCreate, discordID string, username string, guildID string, includePrivate bool) error {
+	whoami := &WhoAmI{
+		DiscordID:             discordID,
+		EVRIDLogins:           make(map[string]time.Time),
+		DisplayNames:          make([]string, 0),
+		ClientAddresses:       make([]string, 0),
+		DeviceLinks:           make([]string, 0),
+		GuildGroupMemberships: make([]GuildGroupMembership, 0),
 	}
-	userId, err := discordRegistry.GetUserIdByDiscordId(ctx, discordId, true)
+	// Get the user's ID
+	userID, err := discordRegistry.GetUserIdByDiscordId(ctx, discordID, true)
 	if err != nil {
-		return fmt.Errorf("failed to authenticate (or create) user %s: %w", discordId, err)
+		return fmt.Errorf("failed to authenticate (or create) user %s: %w", discordID, err)
 	}
 
-	if userId == uuid.Nil { // assertion
+	if userID == uuid.Nil { // assertion
 		logger.Error("Failed to get or create an account.")
-		return fmt.Errorf("failed to get or create an account for %s (%s)", discordId, username)
+		return fmt.Errorf("failed to get or create an account for %s (%s)", discordID, username)
 	}
-	// Synchronize the user's guilds with nakama groups
-	err = d.discordRegistry.UpdateGuildGroup(ctx, logger, userId, i.GuildID)
-	if err != nil {
-		return fmt.Errorf("error updating guild groups: %v", err)
+
+	if includePrivate {
+		// Do some profile checks and cleanups
+
+		// Remove the cache entries for this user
+		discordRegistry.ClearCache(discordID)
+
+		// Synchronize the user's guilds with nakama groups
+		err = d.discordRegistry.UpdateGuildGroup(ctx, logger, userID, i.GuildID)
+		if err != nil {
+			return fmt.Errorf("error updating guild groups: %v", err)
+		}
 	}
-	// Get the account.
-	account, err := nk.AccountGetId(ctx, userId.String())
-	if err != nil {
-		return err
-	}
-	// Get the nakama groups
-	groups, _, err := nk.UserGroupsList(ctx, userId.String(), 100, nil, "")
+
+	// Basic account details
+	whoami.NakamaID = userID
+
+	account, err := nk.AccountGetId(ctx, whoami.NakamaID.String())
 	if err != nil {
 		return err
 	}
 
-	// Get the EvrUserId
-	evrUserIds, err := GetEvrRecords(ctx, logger, nk, userId.String())
+	whoami.Username = account.GetUser().GetUsername()
+
+	if account.GetUser().GetCreateTime() != nil {
+		whoami.CreateTime = account.GetUser().GetCreateTime().AsTime().UTC()
+	}
+
+	whoami.HasPassword = account.GetEmail() != ""
+
+	var groupIDs []uuid.UUID
+	if guildID != "" {
+		groupID, found := d.discordRegistry.Get(guildID)
+		if !found {
+			return fmt.Errorf("guild group not found")
+		}
+		groupIDs = []uuid.UUID{uuid.FromStringOrNil(groupID)}
+	}
+
+	whoami.GuildGroupMemberships, err = d.discordRegistry.GetGuildGroupMemberships(ctx, userID, groupIDs)
 	if err != nil {
 		return err
 	}
 
-	displayNameObjs, err := GetDisplayNameRecords(ctx, logger, nk, userId.String())
+	evrIDs, err := GetEvrRecords(ctx, logger, nk, userID.String())
+	if err != nil {
+		return err
+	}
+
+	whoami.EVRIDLogins = make(map[string]time.Time, len(evrIDs))
+
+	for _, evrUserId := range evrIDs {
+
+		loginData := &evr.LoginProfile{}
+		if err := json.Unmarshal([]byte(evrUserId.Value), loginData); err != nil {
+			logger.WithField("err", err).Error("Failed to unmarshal login data.")
+			continue
+		}
+		whoami.EVRIDLogins[evrUserId.GetKey()] = evrUserId.GetUpdateTime().AsTime().UTC()
+	}
+
+	// Get the past displayNames
+	displayNameObjs, err := GetDisplayNameRecords(ctx, logger, nk, userID.String())
 	if err != nil {
 		return err
 	}
@@ -2535,61 +2620,48 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	sort.SliceStable(displayNameObjs, func(i, j int) bool {
 		return displayNameObjs[i].GetUpdateTime().AsTime().After(displayNameObjs[j].GetUpdateTime().AsTime())
 	})
-	displayNames := make([]string, 0, len(displayNameObjs))
-	displayNames = append(displayNames, account.GetUser().GetDisplayName())
 
+	whoami.DisplayNames = make([]string, 0, len(displayNameObjs))
+	whoami.DisplayNames = append(whoami.DisplayNames, account.GetUser().GetDisplayName())
 	for _, dn := range displayNameObjs {
-		displayNames = append(displayNames, dn.Key)
-	}
-	// insert the current username at the beginning
-	// Extract the evrUserInfo
-	// extract a mapping of the evr ids and hte alst time they were logged into
-	evrIdMap := make([]EvrIdLogins, 0, len(evrUserIds))
-	for _, evrUserId := range evrUserIds {
-		loginData := &evr.LoginProfile{}
-		if err := json.Unmarshal([]byte(evrUserId.Value), loginData); err != nil {
-			logger.WithField("err", err).Error("Failed to unmarshal login data.")
-			continue
-		}
-		evrIdMap = append(evrIdMap, EvrIdLogins{
-			EvrId:         evrUserId.GetKey(),
-			LastLoginTime: evrUserId.GetUpdateTime().AsTime().Format(time.RFC3339),
-			DisplayName:   loginData.DisplayName,
-		})
+		whoami.DisplayNames = append(whoami.DisplayNames, dn.Key)
 	}
 
-	// Get the EvrUserId
-	result, err := GetAddressRecords(ctx, logger, nk, userId.String())
+	result, err := GetAddressRecords(ctx, logger, nk, userID.String())
 	if err != nil {
 		return err
 	}
-	addresses := lo.Map(result, func(a *api.StorageObject, index int) string {
-		return a.GetKey()
+
+	whoami.ClientAddresses = make([]string, 0, len(result))
+	for _, a := range result {
+		whoami.ClientAddresses = append(whoami.ClientAddresses, a.GetKey())
+	}
+
+	// Sort by age
+	sort.SliceStable(whoami.ClientAddresses, func(i, j int) bool {
+		return result[i].GetUpdateTime().AsTime().After(result[j].GetUpdateTime().AsTime())
 	})
 
-	tsZeroAsBlank := func(t *timestamppb.Timestamp) string {
-		if t == nil {
-			return ""
-		} else {
-			return t.AsTime().Format(time.RFC3339)
-		}
-	}
-
-	// Get the MatchId for the user from it's presence
-	presences, err := nk.StreamUserList(StreamModeEvr, userId.String(), StreamContextMatch.String(), "", true, true)
+	// Get the MatchIDs for the user from it's presence
+	presences, err := nk.StreamUserList(StreamModeEvr, userID.String(), StreamContextMatch.String(), "", true, true)
 	if err != nil {
 		return err
 	}
-	matchId := ""
-
-	if len(presences) != 0 {
-		p := presences[0]
-		matchId = strings.ToUpper(p.GetStatus())
+	matchIDs := make([]string, 0, len(presences))
+	for _, p := range presences {
+		if p.GetStatus() != "" {
+			m := p.GetStatus()
+			mid := MatchIDFromStringOrNil(m)
+			if mid.IsNil() {
+				continue
+			}
+			matchIDs = append(matchIDs, mid.UUID().String())
+		}
 	}
 
 	// Get the suspensions
 	dr := d.discordRegistry.(*LocalDiscordRegistry)
-	suspensions, err := dr.GetAllSuspensions(ctx, userId)
+	suspensions, err := dr.GetAllSuspensions(ctx, userID)
 	if err != nil {
 		return err
 	}
@@ -2598,38 +2670,25 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	for _, suspension := range suspensions {
 		suspensionLines = append(suspensionLines, fmt.Sprintf("%s: %s", suspension.GuildName, suspension.RoleName))
 	}
-
-	whoami := &WhoAmI{
-		NakamaId:     userId.String(),
-		Username:     account.GetUser().GetUsername(),
-		DiscordId:    discordId,
-		DisplayNames: displayNames,
-		CreateTime:   tsZeroAsBlank(account.GetUser().GetCreateTime()),
-		DisableTime:  tsZeroAsBlank(account.DisableTime),
-		DevicesCount: len(account.GetDevices()),
-		DiscordLink:  account.GetCustomId() != "",
-		HasPassword:  account.GetEmail() != "",
-		Groups: lo.Map(groups, func(g *api.UserGroupList_UserGroup, index int) string {
-			return g.GetGroup().GetName()
-		}),
-		DeviceLinks: lo.Map(account.GetDevices(), func(d *api.AccountDevice, index int) string {
-			return d.GetId()
-		}),
-		EvrLogins: evrIdMap,
-		Addresses: addresses,
-		Online:    account.GetUser().GetOnline(),
-	}
-	if !fullProfile {
-		whoami.Addresses = nil
+	if !includePrivate {
+		whoami.HasPassword = false
+		whoami.ClientAddresses = nil
 		whoami.DeviceLinks = nil
-		whoami.EvrLogins = nil
-		whoami.Groups = nil
+		whoami.EVRIDLogins = nil
+		if guildID == "" {
+			whoami.GuildGroupMemberships = nil
+		}
 	}
-
 	fields := []*discordgo.MessageEmbedField{
-		{Name: "Nakama ID", Value: whoami.NakamaId, Inline: true},
-		{Name: "Online", Value: fmt.Sprintf("%v", whoami.Online), Inline: true},
-		{Name: "Create Time", Value: whoami.CreateTime, Inline: false},
+		{Name: "Nakama ID", Value: whoami.NakamaID.String(), Inline: true},
+		{Name: "Create Time", Value: fmt.Sprintf("<t:%d:R>", whoami.CreateTime.Unix()), Inline: false},
+		{Name: "Password Protected", Value: func() string {
+			if whoami.HasPassword {
+				return "Yes"
+			}
+			return ""
+		}(), Inline: true},
+		{Name: "Discord ID", Value: whoami.DiscordID, Inline: false},
 		{Name: "Username", Value: whoami.Username, Inline: true},
 		{Name: "Display Names", Value: strings.Join(whoami.DisplayNames, "\n"), Inline: false},
 		{Name: "IP Addresses", Value: strings.Join(whoami.ClientAddresses, "\n"), Inline: false},
@@ -2674,7 +2733,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 			Flags: discordgo.MessageFlagsEphemeral,
 			Embeds: []*discordgo.MessageEmbed{
 				{
-					Title:  "Your Echo VR Account",
+					Title:  "EchoVRCE Account",
 					Color:  0xCCCCCC,
 					Fields: fields,
 				},
@@ -2864,6 +2923,21 @@ func getScopedUser(i *discordgo.InteractionCreate) *discordgo.User {
 		return nil
 	}
 }
+
+func getScopedUserMember(i *discordgo.InteractionCreate) (user *discordgo.User, member *discordgo.Member) {
+	if i.User != nil {
+		user = i.User
+	}
+
+	if i.Member != nil {
+		member = i.Member
+		if i.Member.User != nil {
+			user = i.Member.User
+		}
+	}
+	return user, member
+}
+
 func simpleInteractionResponse(s *discordgo.Session, i *discordgo.InteractionCreate, content string) error {
 	return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
