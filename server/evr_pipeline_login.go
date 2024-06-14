@@ -184,19 +184,19 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	groupID := metadata.GetActiveGroupID()
 	// Validate that the user is in the group
 	if groupID == uuid.Nil {
-		// Get a list of the user's guild groups and set to the largest one
-		groups, err := p.discordRegistry.GetGuildGroups(ctx, uid)
+		// Get a list of the user's guild memberships and set to the largest one
+		memberships, err := p.discordRegistry.GetGuildGroupMemberships(ctx, uid, nil)
 		if err != nil {
 			return settings, fmt.Errorf("failed to get guild groups: %w", err)
 		}
-		if len(groups) == 0 {
+		if len(memberships) == 0 {
 			return settings, fmt.Errorf("user is not in any guild groups")
 		}
 		// Sort the groups by the edgecount
-		sort.SliceStable(groups, func(i, j int) bool {
-			return groups[i].EdgeCount > groups[j].EdgeCount
+		sort.SliceStable(memberships, func(i, j int) bool {
+			return memberships[i].GuildGroup.Size() > memberships[j].GuildGroup.Size()
 		})
-		groupID = uuid.FromStringOrNil(groups[0].GetId())
+		groupID = memberships[0].GuildGroup.ID()
 	}
 
 	// Initialize the full session

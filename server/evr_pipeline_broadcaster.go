@@ -146,12 +146,12 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 	// Create the broadcaster config
 	config := broadcasterConfig(userId, session.id.String(), request.ServerId, request.InternalIP, externalIP, request.Port, regions, request.VersionLock, tags)
 
-	// Get the hosted channels
-	channels, err := p.getBroadcasterHostInfo(ctx, logger, session, userId, discordId, guildIds)
+	// Get the hosted groupIDs
+	groupIDs, err := p.getBroadcasterHostGroups(ctx, logger, session, userId, discordId, guildIds)
 	if err != nil {
 		return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_Unknown)
 	}
-	config.Channels = channels
+	config.Channels = groupIDs
 
 	logger = logger.With(zap.String("internalIP", request.InternalIP.String()), zap.String("externalIP", externalIP.String()), zap.Uint16("port", request.Port))
 	// Validate connectivity to the broadcaster.
@@ -331,85 +331,73 @@ func broadcasterConfig(userId, sessionId string, serverId uint64, internalIP, ex
 	return config
 }
 
-func (p *EvrPipeline) getBroadcasterHostInfo(ctx context.Context, logger *zap.Logger, session *sessionWS, userId, discordID string, guildIDs []string) (channels []uuid.UUID, err error) {
-
-	// If the list of guilds is empty, get all of the user's guild groups
-	if len(guildIDs) == 0 {
-
-		// Get the user's guild groups
-		groups, err := p.discordRegistry.GetGuildGroups(ctx, uuid.FromStringOrNil(userId))
+func (p *EvrPipeline) getUserGroups(ctx context.Context, userID uuid.UUID, minState api.GroupUserList_GroupUser_State) ([]*api.UserGroupList_UserGroup, error) {
+	cursor := ""
+	groups := make([]*api.UserGroupList_UserGroup, 0)
+	for {
+		usergroups, cursor, err := p.runtimeModule.UserGroupsList(ctx, userID.String(), 100, nil, cursor)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get user's guild groups: %v", err)
+			return nil, fmt.Errorf("failed to get user groups: %v", err)
 		}
-
-		// Create a slice of user's guild group IDs
-		for _, g := range groups {
-			md, err := p.discordRegistry.GetGuildGroupMetadata(ctx, g.GetId())
-			if err != nil {
-				logger.Warn("Failed to get guild group metadata", zap.String("groupId", g.GetId()), zap.Error(err))
-				continue
+		for _, g := range usergroups {
+			if api.GroupUserList_GroupUser_State(g.State.GetValue()) <= api.GroupUserList_GroupUser_MEMBER {
+				groups = append(groups, g)
 			}
+		}
+		if cursor == "" {
+			break
+		}
+	}
+	return groups, nil
+}
 
-			guildIDs = append(guildIDs, md.GuildID)
+func (p *EvrPipeline) getBroadcasterHostGroups(ctx context.Context, logger *zap.Logger, session *sessionWS, userId, discordID string, guildIDs []string) (groupIDs []uuid.UUID, err error) {
+
+	// Get the user's guild memberships
+	memberships, err := p.discordRegistry.GetGuildGroupMemberships(ctx, uuid.FromStringOrNil(userId), nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user's guild groups: %v", err)
+	}
+
+	if len(memberships) == 0 {
+		return nil, fmt.Errorf("user is not a member of any guilds")
+	}
+	if len(guildIDs) == 0 {
+		// User all of the user's guilds
+		for _, g := range memberships {
+			guildIDs = append(guildIDs, g.GuildGroup.GuildID())
 		}
 	}
 
-	allowed := make([]string, 0)
-	// Validate the group memberships
+	desired := make([]GuildGroupMembership, 0, len(guildIDs))
 	for _, guildID := range guildIDs {
-		if guildID == "" {
-			continue
+		for _, m := range memberships {
+			if m.GuildGroup.GuildID() == guildID {
+				desired = append(desired, m)
+				break
+			}
 		}
-
-		// Get the guild member
-		member, err := p.discordRegistry.GetGuildMember(ctx, guildID, discordID)
-		if err != nil {
-			logger.Warn("User not a member of the guild", zap.String("guildId", guildID))
-			continue
-		}
-
-		// Get the group id for the guild
-		groupID, found := p.discordRegistry.Get(guildID)
-		if !found {
-			logger.Warn("Guild not found", zap.String("guildId", guildID))
-			continue
-		}
-
-		// Get the guild's metadata
-		md, err := p.discordRegistry.GetGuildGroupMetadata(ctx, groupID)
-		if err != nil {
-			logger.Warn("Failed to get guild group metadata", zap.String("groupId", groupID), zap.Error(err))
-			continue
-		}
-
-		// If the broadcaster role is blank, add it to the channels
-		if md.BroadcasterHostRole == "" {
-			allowed = append(allowed, guildID)
-			continue
-		}
-
-		// Verify the user has the broadcaster role
-		if !lo.Contains(member.Roles, md.BroadcasterHostRole) {
-			logger.Warn("User does not have the broadcaster role", zap.String("discordID", member.User.ID), zap.String("guildId", guildID))
-			//continue
-		}
-
-		// Add the channel to the list of hosting channels
-		allowed = append(allowed, guildID)
 	}
 
-	// Get the groupId for each guildId
-	groupIds := make([]uuid.UUID, 0)
-	for _, guildId := range allowed {
-		groupId, found := p.discordRegistry.Get(guildId)
-		if !found {
-			logger.Warn("Guild not found", zap.String("guildId", guildId))
-			continue
-		}
-		groupIds = append(groupIds, uuid.FromStringOrNil(groupId))
+	userGroups, err := p.getUserGroups(ctx, uuid.FromStringOrNil(userId), api.GroupUserList_GroupUser_MEMBER)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user groups: %v", err)
 	}
 
-	return groupIds, nil
+	userGroupIDs := make([]string, len(userGroups))
+	for i, g := range userGroups {
+		userGroupIDs[i] = g.GetGroup().GetId()
+	}
+
+	groupIDs = make([]uuid.UUID, 0, len(desired))
+	for _, m := range desired {
+		if m.isServerHost {
+			groupIDs = append(groupIDs, m.GuildGroup.ID())
+		}
+
+	}
+
+	return groupIDs, nil
 }
 
 func (p *EvrPipeline) newParkingMatch(logger *zap.Logger, session *sessionWS, config *MatchBroadcaster) error {

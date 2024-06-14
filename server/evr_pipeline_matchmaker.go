@@ -132,9 +132,9 @@ func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logg
 		if err != nil {
 			return status.Errorf(codes.Internal, "Failed to get guild metadata: %v", err)
 		}
-		if metadata.MembershipRole != "" {
+		if metadata.MemberRole != "" {
 			// Check if the user has the membership role
-			if !lo.Contains(member.Roles, metadata.MembershipRole) {
+			if !lo.Contains(member.Roles, metadata.MemberRole) {
 				return status.Errorf(codes.PermissionDenied, "User does not have the required role to join this guild")
 			}
 		}
@@ -667,19 +667,19 @@ func (p *EvrPipeline) GetGuildPriorityList(ctx context.Context, userID uuid.UUID
 	}
 
 	// Get the guild priority from the context
-	groups, err := p.discordRegistry.GetGuildGroups(ctx, userID)
+	memberships, err := p.discordRegistry.GetGuildGroupMemberships(ctx, userID, nil)
 	if err != nil {
 		return nil, nil, status.Errorf(codes.Internal, "Failed to get guilds: %v", err)
 	}
 
 	// Sort teh groups by size descending
-	sort.Slice(groups, func(i, j int) bool {
-		return groups[i].EdgeCount > groups[j].EdgeCount
+	sort.Slice(memberships, func(i, j int) bool {
+		return memberships[i].GuildGroup.Size() > memberships[j].GuildGroup.Size()
 	})
 
 	groupIDs := make([]uuid.UUID, 0)
-	for _, group := range groups {
-		groupIDs = append(groupIDs, uuid.FromStringOrNil(group.Id))
+	for _, group := range memberships {
+		groupIDs = append(groupIDs, group.GuildGroup.ID())
 	}
 
 	guildPriority := make([]uuid.UUID, 0)

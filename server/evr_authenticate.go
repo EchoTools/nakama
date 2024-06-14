@@ -553,20 +553,21 @@ func SelectDisplayNameByPriority(ctx context.Context, nk runtime.NakamaModule, u
 }
 
 type GroupMetadata struct {
-	GuildID                string   `json:"guild_id" validate:"required,uuid"`                  // The guild ID
-	RulesText              string   `json:"rules_text" validate:"required,ascii"`               // The rules text displayed on the main menu
-	SuspensionRoles        []string `json:"suspension_roles" validate:"dive,numeric"`           // The roles that have users suspended
-	MembershipRole         string   `json:"membership_role" validate:"required,numeric"`        // The role that has access to create lobbies/matches and join social lobbies
-	ModeratorRole          string   `json:"moderator_role" validate:"required,numeric"`         // The rules that have access to moderation tools
-	BroadcasterHostRole    string   `json:"broadcaster_group_role" validate:"required,numeric"` // The rules that have access to serverdb
-	ModeratorGroupId       string   `json:"moderator_group_id" validate:"required,uuid"`        // The group UUID that has access to moderation tools
-	BroadcasterHostGroupId string   `json:"broadcaster_group_id" validate:"required,uuid"`      // The group UUID that has access to serverdb
+	GuildID           string                 `json:"guild_id"`            // The guild ID
+	RulesText         string                 `json:"rules_text"`          // The rules text displayed on the main menu
+	MemberRole        string                 `json:"member_role"`         // The role that has access to create lobbies/matches and join social lobbies
+	ModeratorRole     string                 `json:"moderator_role"`      // The rules that have access to moderation tools
+	ServerHostRole    string                 `json:"serverhost_role"`     // The rules that have access to serverdb
+	SuspensionRole    string                 `json:"suspension_role"`     // The roles that have users suspended
+	ServerHostUserIDs []string               `json:"serverhost_user_ids"` // The broadcaster hosts
+	Unhandled         map[string]interface{} `json:"-"`
 }
 
 type AccountUserMetadata struct {
-	DisplayNameOverride string `json:"display_name_override"` // The display name override
-	GlobalBanReason     string `json:"global_ban_reason"`     // The global ban reason
-	ActiveGroupID       string `json:"active_group_id"`       // The active group ID
+	DisplayNameOverride string                 `json:"display_name_override"` // The display name override
+	GlobalBanReason     string                 `json:"global_ban_reason"`     // The global ban reason
+	ActiveGroupID       string                 `json:"active_group_id"`       // The active group ID
+	Unhandled           map[string]interface{} `json:"-"`
 }
 
 func (a *AccountUserMetadata) GetActiveGroupID() uuid.UUID {
@@ -609,18 +610,6 @@ func (s *SuspensionStatus) Valid() bool {
 		return false
 	}
 	return true
-}
-
-func NewGuildGroupMetadata(guildId string, rulesText string, modId string, serverId string) *GroupMetadata {
-	return &GroupMetadata{
-		GuildID:                guildId,
-		RulesText:              rulesText,
-		SuspensionRoles:        make([]string, 0),
-		ModeratorRole:          "",
-		BroadcasterHostRole:    "",
-		ModeratorGroupId:       modId,
-		BroadcasterHostGroupId: serverId,
-	}
 }
 
 func (g *GroupMetadata) MarshalToMap() (map[string]interface{}, error) {

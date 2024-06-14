@@ -891,9 +891,7 @@ func (p *EvrPipeline) checkSuspensionStatus(ctx context.Context, logger *zap.Log
 		return nil, status.Errorf(codes.Internal, "Metadata is nil for channel: %s", channel)
 	}
 
-	// Check if the channel has suspension roles
-	if len(md.SuspensionRoles) == 0 {
-		// The channel has no suspension roles
+	if md.SuspensionRole == "" {
 		return nil, nil
 	}
 
@@ -910,9 +908,11 @@ func (p *EvrPipeline) checkSuspensionStatus(ctx context.Context, logger *zap.Log
 		return nil, status.Errorf(codes.Internal, "Failed to get guild member: %v", err)
 	}
 
-	// Check if the members roles contain any of the suspension roles
-	if len(lo.Intersect(member.Roles, md.SuspensionRoles)) == 0 {
-		// The user is not suspended from this channel
+	if member == nil {
+		return nil, status.Errorf(codes.Internal, "Member is nil for discordId: %s", discordId)
+	}
+
+	if !slices.Contains(member.Roles, md.SuspensionRole) {
 		return nil, nil
 	}
 
