@@ -121,7 +121,7 @@ type ClientProfile struct {
 	GhostedPlayers     Players           `json:"ghost,omitempty"`
 	NewPlayerProgress  NewPlayerProgress `json:"npe,omitempty"`
 	Customization      Customization     `json:"customization,omitempty"`
-	Social             Social            `json:"social,omitempty"`
+	Social             ClientSocial      `json:"social,omitempty"`
 	NewUnlocks         []int64           `json:"newunlocks,omitempty"`
 }
 
@@ -200,11 +200,15 @@ type Versioned struct {
 	Version int `json:"version,omitempty" validate:"gte=0"` // A version number, 1 is seen, 0 is not seen ?
 }
 
-type Social struct {
+type ClientSocial struct {
 	// WARNING: EchoVR dictates this struct/schema.
 	CommunityValuesVersion int64 `json:"community_values_version,omitempty" validate:"gte=0"`
 	SetupVersion           int64 `json:"setup_version,omitempty" validate:"gte=0"`
 	Channel                GUID  `json:"group,omitempty" validate:"uuid_rfc4122"` // The channel. It is a GUID, uppercase.
+}
+
+type ServerSocial struct {
+	Channel GUID `json:"group,omitempty" validate:"uuid_rfc4122"` // The channel. It is a GUID, uppercase.
 }
 
 type ServerProfile struct {
@@ -223,7 +227,7 @@ type ServerProfile struct {
 	MaybeStale        bool              `json:"maybestale,omitempty" validate:"boolean"`        // If the profile is stale
 	UnlockedCosmetics UnlockedCosmetics `json:"unlocks,omitempty"`                              // Unlocked cosmetics
 	EquippedCosmetics EquippedCosmetics `json:"loadout,omitempty"`                              // Equipped cosmetics
-	Social            Social            `json:"social,omitempty"`                               // Social settings
+	Social            ServerSocial      `json:"social,omitempty"`                               // Social settings
 	Achievements      interface{}       `json:"achievements,omitempty"`                         // Achievements
 	RewardState       interface{}       `json:"reward_state,omitempty"`                         // Reward state?
 	// If DeveloperFeatures is not null, the player will have a gold name
@@ -1610,7 +1614,7 @@ func NewClientProfile() ClientProfile {
 			StoreEntryPoiVersion:       0,
 			ClearNewUnlocksVersion:     1,
 		},
-		Social: Social{
+		Social: ClientSocial{
 			CommunityValuesVersion: 1,
 			SetupVersion:           1,
 		},

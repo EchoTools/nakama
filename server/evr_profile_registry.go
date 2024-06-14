@@ -137,6 +137,11 @@ func (r *GameProfileData) UpdateUnlocks(unlocks evr.UnlockedCosmetics) error {
 	return nil
 }
 
+func (r *GameProfileData) TriggerCommunityValues() {
+	r.Client.Social.CommunityValuesVersion = 0
+	r.Client.ModifyTime = time.Now().UTC().Unix()
+}
+
 // ProfileRegistry is a registry of user evr profiles.
 type ProfileRegistry struct {
 	ctx         context.Context
