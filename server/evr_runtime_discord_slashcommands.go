@@ -514,6 +514,53 @@ func (d *DiscordAppBot) InitializeDiscordBot() error {
 		if m.Member.User.ID == s.State.User.ID {
 			guild, err := s.Guild(m.GuildID)
 			if err != nil {
+				logger.Error("Error getting guild: %w", err)
+			}
+
+			if guild == nil {
+				groupID, found := d.discordRegistry.Get(m.GuildID)
+				if !found {
+					return
+				}
+				// Remove the guild group from the system.
+				err := d.nk.GroupDelete(ctx, groupID)
+				if err != nil {
+					logger.Error("Error deleting group: %w", err)
+				}
+			}
+		}
+	})
+
+	bot.AddHandler(func(s *discordgo.Session, m *discordgo.GuildMemberAdd) {
+		if s == nil || m == nil {
+			return
+		}
+		if m.Member == nil || m.Member.User == nil {
+			return
+		}
+		if m.Member.User.ID == s.State.User.ID {
+			guild, err := s.Guild(m.GuildID)
+			if err != nil {
+				logger.Error("Error getting guild: %w", err)
+			}
+
+			if err := d.discordRegistry.SynchronizeGroup(ctx, guild); err != nil {
+				logger.Error("Error synchronizing group: %s", err.Error())
+				return
+			}
+		}
+	})
+
+	bot.AddHandler(func(s *discordgo.Session, m *discordgo.GuildMemberRemove) {
+		if s == nil || m == nil {
+			return
+		}
+		if m.Member == nil || m.Member.User == nil {
+			return
+		}
+		if m.Member.User.ID == s.State.User.ID {
+			guild, err := s.Guild(m.GuildID)
+			if err != nil {
 				if err, ok := err.(*discordgo.RESTError); ok {
 					switch err.Message.Code {
 					case discordgo.ErrCodeUnknownGuild:
