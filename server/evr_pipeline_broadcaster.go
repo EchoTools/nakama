@@ -15,6 +15,7 @@ import (
 	"fmt"
 
 	"github.com/gofrs/uuid/v5"
+	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
@@ -39,7 +40,8 @@ func sendDiscordError(e error, discordId string, logger *zap.Logger, discordRegi
 }
 
 // errFailedRegistration sends a failure message to the broadcaster and closes the session
-func errFailedRegistration(session *sessionWS, err error, code evr.BroadcasterRegistrationFailureCode) error {
+func errFailedRegistration(session *sessionWS, logger *zap.Logger, err error, code evr.BroadcasterRegistrationFailureCode) error {
+	logger.Warn("Failed to register game server", zap.Error(err))
 	if err := session.SendEvr(
 		evr.NewBroadcasterRegistrationFailure(code),
 	); err != nil {
@@ -110,8 +112,10 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 	// Get the tags and guilds from the url params
 	discordId, password, tags, guildIds, regions, err := extractAuthenticationDetailsFromContext(ctx)
 	if err != nil {
-		return errFailedRegistration(session, err, evr.BroadcasterRegistration_Failure)
+		return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_Unknown)
 	}
+
+	logger = logger.With(zap.String("discordId", discordId), zap.Strings("guildIds", guildIds), zap.Strings("tags", tags), zap.Strings("regions", lo.Map(regions, func(v evr.Symbol, _ int) string { return v.String() })))
 
 	// Assume that the regions provided are the ONLY regions the broadcaster wants to host in
 	if len(regions) == 0 {
@@ -125,8 +129,10 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 	// Authenticate the broadcaster
 	userId, _, err := p.authenticateBroadcaster(ctx, logger, session, discordId, password, guildIds, tags)
 	if err != nil {
-		return errFailedRegistration(session, err, evr.BroadcasterRegistration_Failure)
+		return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_AccountDoesNotExist)
 	}
+
+	logger = logger.With(zap.String("userId", userId))
 
 	// Set the external address in the request (to use for the registration cache).
 	externalIP := net.ParseIP(session.ClientIP())
@@ -135,16 +141,19 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 		externalIP = p.externalIP
 	}
 
+	logger = logger.With(zap.String("externalIP", externalIP.String()))
+
 	// Create the broadcaster config
 	config := broadcasterConfig(userId, session.id.String(), request.ServerId, request.InternalIP, externalIP, request.Port, regions, request.VersionLock, tags)
 
 	// Get the hosted channels
 	channels, err := p.getBroadcasterHostInfo(ctx, logger, session, userId, discordId, guildIds)
 	if err != nil {
-		return errFailedRegistration(session, err, evr.BroadcasterRegistration_Failure)
+		return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_Unknown)
 	}
 	config.Channels = channels
 
+	logger = logger.With(zap.String("internalIP", request.InternalIP.String()), zap.String("externalIP", externalIP.String()), zap.Uint16("port", request.Port))
 	// Validate connectivity to the broadcaster.
 	// Wait 2 seconds, then check
 
@@ -171,21 +180,21 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 		// If the broadcaster is not available, send an error message to the user on discord
 		errorMessage := fmt.Sprintf("Broadcaster (Endpoint ID: %s, Server ID: %d) could not be reached. Error: %v", config.Endpoint.ID(), config.ServerID, err)
 		go sendDiscordError(errors.New(errorMessage), discordId, logger, p.discordRegistry)
-		return errFailedRegistration(session, errors.New(errorMessage), evr.BroadcasterRegistration_Failure)
+		return errFailedRegistration(session, logger, errors.New(errorMessage), evr.BroadcasterRegistration_Failure)
 	}
 
 	p.broadcasterRegistrationBySession.Store(session.ID().String(), config)
 	p.matchmakingRegistry.broadcasters.Store(config.Endpoint.ID(), config.Endpoint)
 	// Create a new parking match
 	if err := p.newParkingMatch(logger, session, config); err != nil {
-		return errFailedRegistration(session, err, evr.BroadcasterRegistration_Failure)
+		return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_Failure)
 	}
 	// Send the registration success message
 	if err := session.SendEvr(
 		evr.NewBroadcasterRegistrationSuccess(config.ServerID, config.Endpoint.ExternalIP),
 		evr.NewSTcpConnectionUnrequireEvent(),
 	); err != nil {
-		return errFailedRegistration(session, fmt.Errorf("failed to send lobby registration failure: %v", err), evr.BroadcasterRegistration_Failure)
+		return errFailedRegistration(session, logger, fmt.Errorf("failed to send lobby registration failure: %v", err), evr.BroadcasterRegistration_Failure)
 	}
 
 	go func() {
