@@ -20,7 +20,6 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/gofrs/uuid/v5"
 	"github.com/google/go-cmp/cmp"
-	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
@@ -28,7 +27,6 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type DiscordAppBot struct {
@@ -213,6 +211,18 @@ var (
 					Type:        discordgo.ApplicationCommandOptionUser,
 					Name:        "user",
 					Description: "User to lookup",
+					Required:    true,
+				},
+			},
+		},
+		{
+			Name:        "trigger-cv",
+			Description: "Force user to go through community values in social lobby.",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionUser,
+					Name:        "user",
+					Description: "Target user",
 					Required:    true,
 				},
 			},
@@ -1457,12 +1467,28 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			options := i.ApplicationCommandData().Options
 			target := options[0].UserValue(s)
-			if err := d.handleProfileRequest(ctx, logger, nk, s, discordRegistry, i, target.ID, target.Username, isGlobal); err != nil {
+
+			if err := d.handleProfileRequest(ctx, logger, nk, s, discordRegistry, i, target.ID, target.Username, guildID, isGlobalModerator); err != nil {
+				errFn(errors.New("Error handling profile request"), err)
+			}
+			return
+		},
+		"trigger-cv": func(s *discordgo.Session, i *discordgo.InteractionCreate, logger runtime.Logger) {
+
+			options := i.ApplicationCommandData().Options
+
+			user := getScopedUser(i)
+			if user == nil {
+				return
+			}
+			errFn := func(errs ...error) {
+				err := errors.Join(errs...)
+				logger.Debug("trigger-cv failed: %s", err.Error())
 				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 					Type: discordgo.InteractionResponseChannelMessageWithSource,
 					Data: &discordgo.InteractionResponseData{
 						Flags:   discordgo.MessageFlagsEphemeral,
-						Content: err.Error(),
+						Content: fmt.Sprintf("error setting community values:\n%v", err.Error()),
 					},
 				})
 			}
@@ -1571,6 +1597,50 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			simpleInteractionResponse(s, i, "roles set!")
 		},
 		"party": func(s *discordgo.Session, i *discordgo.InteractionCreate, logger runtime.Logger) {
+			userID, err := d.discordRegistry.GetUserIdByDiscordId(ctx, user.ID, false)
+			if err != nil {
+				errFn(errors.New("failed to get user ID"), err)
+			}
+
+			// Require the user to be a global moderator
+			isGlobalModerator, err := d.discordRegistry.IsGlobalModerator(ctx, userID)
+			if err != nil {
+				errFn(errors.New("failed to check global moderator status"), err)
+			}
+			if !isGlobalModerator {
+				err := simpleInteractionResponse(s, i, "You must be a global moderator to use this command.")
+				if err != nil {
+					logger.Warn("Failed to send interaction response", zap.Error(err))
+				}
+			}
+
+			target := options[0].UserValue(s)
+			targetUserID, err := d.discordRegistry.GetUserIdByDiscordId(ctx, target.ID, false)
+			if err != nil {
+				errFn(errors.New("failed to get user ID"), err)
+			}
+
+			profile, _ := d.profileRegistry.Load(targetUserID, evr.EvrIdNil)
+			profile.TriggerCommunityValues()
+			if err = d.profileRegistry.Store(targetUserID, profile); err != nil {
+				errFn(err)
+				return
+			}
+
+			presences, err := d.nk.StreamUserList(StreamModeEvr, userID.String(), svcLoginID.String(), "", true, true)
+			if err != nil {
+				errFn(err)
+				return
+			}
+			for _, presence := range presences {
+				if err = d.nk.SessionDisconnect(ctx, presence.GetSessionId(), runtime.PresenceReasonDisconnect); err != nil {
+					errFn(err)
+					return
+				}
+			}
+		},
+
+		"party": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 			if i.Type != discordgo.InteractionApplicationCommand {
 				return

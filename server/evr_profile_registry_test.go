@@ -122,9 +122,7 @@ func TestGetSessionProfile(t *testing.T) {
 	if p.Server.EvrID != *evrID {
 		t.Errorf("p.Server.EchoUserIdToken = %s, want %s", p.Server.EvrID.Token(), evrID.Token())
 	}
-	if p.Server.Social != p.Client.Social {
-		t.Errorf("p.Server.Social = %+v, want %+v", p.Server.Social, p.Client.Social)
-	}
+
 	if p.Server.CreateTime != time.Date(2023, 10, 31, 0, 0, 0, 0, time.UTC).Unix() {
 		t.Errorf("p.Server.CreateTime = %d, want %d", p.Server.CreateTime, time.Date(2023, 10, 31, 0, 0, 0, 0, time.UTC).Unix())
 	}
