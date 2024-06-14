@@ -302,6 +302,36 @@ var (
 			},
 		},
 		{
+			Name:        "set-roles",
+			Description: "link roles to Echo VR features. Non-members can only join private matches.",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionRole,
+					Name:        "Moderator Role",
+					Description: "Allowed access to more detailed `/lookup`information and moderation tools.",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionRole,
+					Name:        "Server Host Role",
+					Description: "Allowed to host an Echo VR Game Server for the guild.",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionRole,
+					Name:        "Suspension Role",
+					Description: "Disallowed from joining any guild matches.",
+					Required:    false,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionRole,
+					Name:        "Membership Role",
+					Description: "If defined, this role allows joining social lobbies, matchmaking, or creating private matches.",
+					Required:    false,
+				},
+			},
+		},
+		{
 			Name:        "party",
 			Description: "Manage EchoVR parties.",
 			Options: []*discordgo.ApplicationCommandOption{
