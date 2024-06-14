@@ -1176,38 +1176,50 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			options := i.ApplicationCommandData().Options
 			content := ""
 			var err error
+
+			user := getScopedUser(i)
+			if user == nil {
+				return
+			}
+
+			errFn := func(err error) {
+				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+					Type: discordgo.InteractionResponseChannelMessageWithSource,
+					Data: &discordgo.InteractionResponseData{
+						Flags:   discordgo.MessageFlagsEphemeral,
+						Content: err.Error(),
+					},
+				})
+			}
+
 			switch options[0].Name {
 			case "assign":
 				options = options[0].Options
 				// Check that the user is a developer
-				user := getScopedUser(i)
-				if user == nil {
-					return
-				}
 
 				var userID uuid.UUID
 				userID, err = discordRegistry.GetUserIdByDiscordId(ctx, user.ID, false)
 				if err != nil {
-					err = status.Error(codes.PermissionDenied, "you do not have permission to use this command")
+					errFn(status.Error(codes.PermissionDenied, "you do not have permission to use this command"))
 					break
 				}
 				var member bool
 				member, err = checkGroupMembershipByName(ctx, nk, userID, GroupGlobalBadgeAdmins, "system")
 				if err != nil {
-					err = status.Error(codes.Internal, "failed to check group membership")
+					errFn(status.Error(codes.Internal, "failed to check group membership"))
 					break
 				}
 				if !member {
-					err = status.Error(codes.PermissionDenied, "you do not have permission to use this command")
+					errFn(status.Error(codes.PermissionDenied, "you do not have permission to use this command"))
 					break
 				}
 				if len(options) < 2 {
-					err = status.Error(codes.InvalidArgument, "you must specify a user and a badge")
+					errFn(status.Error(codes.InvalidArgument, "you must specify a user and a badge"))
 				}
 				// Get the target user's discord ID
 				target := options[0].UserValue(s)
 				if target == nil {
-					err = status.Error(codes.InvalidArgument, "you must specify a user")
+					errFn(status.Error(codes.InvalidArgument, "you must specify a user"))
 					break
 				}
 
@@ -1229,7 +1241,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 					groupID, ok := vrmlGroups[groupName]
 					if !ok {
-						err = status.Error(codes.Internal, fmt.Sprintf("badge `%s` not found (this shouldn't happen)", c))
+						errFn(status.Error(codes.Internal, fmt.Sprintf("badge `%s` not found (this shouldn't happen)", c)))
 						break // This shouldn't happen
 					}
 					badgeGroups = append(badgeGroups, groupID)
@@ -1238,7 +1250,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				for _, groupID := range badgeGroups {
 					// Add the user to the group
 					if err = nk.GroupUsersAdd(ctx, SystemUserID, groupID, []string{target.ID}); err != nil {
-						err = status.Error(codes.Internal, fmt.Errorf("failed to assign badge `%s` to user `%s`: %w", groupID, target.Username, err).Error())
+						errFn(status.Error(codes.Internal, fmt.Errorf("failed to assign badge `%s` to user `%s`: %w", groupID, target.Username, err).Error()))
 						continue
 					}
 				}
@@ -1268,7 +1280,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				var req *http.Request
 				req, err = http.NewRequest("GET", url, nil)
 				if err != nil {
-					err = status.Error(codes.Internal, "failed to create request")
+					errFn(status.Error(codes.Internal, "failed to create request"))
 					break
 				}
 
@@ -1278,7 +1290,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				var resp *http.Response
 				resp, err = http.DefaultClient.Do(req)
 				if err != nil {
-					err = status.Error(codes.Internal, "failed to make request")
+					errFn(status.Error(codes.Internal, "failed to make request"))
 					break
 				}
 
@@ -1290,19 +1302,19 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 
 				if err = json.NewDecoder(resp.Body).Decode(&players); err != nil {
-					err = status.Error(codes.Internal, "failed to decode response: "+err.Error())
+					errFn(status.Error(codes.Internal, "failed to decode response: "+err.Error()))
 					break
 				}
 
 				// Check if the player was found
 				if len(players) == 0 {
-					err = status.Error(codes.NotFound, "player not found")
+					errFn(status.Error(codes.NotFound, "player not found"))
 					break
 				}
 
 				// Ensure that only one was returned
 				if len(players) > 1 {
-					err = status.Error(codes.Internal, "multiple players found")
+					errFn(status.Error(codes.Internal, "multiple players found"))
 					break
 				}
 
@@ -1311,7 +1323,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 				jsonData, err := json.Marshal(players[0])
 				if err != nil {
-					err = status.Error(codes.Internal, "failed to marshal player data: "+err.Error())
+					errFn(status.Error(codes.Internal, "failed to marshal player data: "+err.Error()))
 					break
 				}
 
@@ -1325,7 +1337,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					},
 				})
 				if err != nil {
-					err = status.Error(codes.Internal, "failed to set VRML ID: "+err.Error())
+					errFn(status.Error(codes.Internal, "failed to set VRML ID: "+err.Error()))
 					break
 				}
 
