@@ -23,23 +23,26 @@ var (
 )
 
 const (
-	GroupGlobalDevelopers = "Global Developers"
-	GroupGlobalModerators = "Global Moderators"
-	GroupGlobalTesters    = "Global Testers"
-	GroupGlobalBots       = "Global Bots"
+	GroupGlobalDevelopers  = "Global Developers"
+	GroupGlobalModerators  = "Global Moderators"
+	GroupGlobalTesters     = "Global Testers"
+	GroupGlobalBots        = "Global Bots"
+	GroupGlobalBadgeAdmins = "Global Badge Admins"
 
 	FlagGlobalDevelopers = 1 << iota
 	FlagGlobalModerators
 	FlagGlobalTesters
 	FlagGlobalBots
+	FlagGlobalBadgeAdmins
 	FlagNoVR
 )
 
 var groupFlagMap = map[string]int{
-	GroupGlobalDevelopers: FlagGlobalDevelopers,
-	GroupGlobalModerators: FlagGlobalModerators,
-	GroupGlobalTesters:    FlagGlobalTesters,
-	GroupGlobalBots:       FlagGlobalBots,
+	GroupGlobalDevelopers:  FlagGlobalDevelopers,
+	GroupGlobalModerators:  FlagGlobalModerators,
+	GroupGlobalTesters:     FlagGlobalTesters,
+	GroupGlobalBots:        FlagGlobalBots,
+	GroupGlobalBadgeAdmins: FlagGlobalBadgeAdmins,
 }
 
 func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) (err error) {

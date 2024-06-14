@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"regexp"
 	"slices"
 	"sort"
@@ -25,6 +26,8 @@ import (
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -113,7 +116,33 @@ var (
 		{Name: "VRML S7 Champion", Value: "VRML Season 7 Champion"},
 	}
 
-	groupRegex = regexp.MustCompile("^[a-z0-9]+$")
+	vrmlGroupShortMap = map[string]string{
+		"p":  "VRML Preseason",
+		"1":  "VRML Season 1",
+		"1f": "VRML Season 1 Finalist",
+		"1c": "VRML Season 1 Champion",
+		"2":  "VRML Season 2",
+		"2f": "VRML Season 2 Finalist",
+		"2c": "VRML Season 2 Champion",
+		"3":  "VRML Season 3",
+		"3f": "VRML Season 3 Finalist",
+		"3c": "VRML Season 3 Champion",
+		"4":  "VRML Season 4",
+		"4f": "VRML Season 4 Finalist",
+		"4c": "VRML Season 4 Champion",
+		"5":  "VRML Season 5",
+		"5f": "VRML Season 5 Finalist",
+		"5c": "VRML Season 5 Champion",
+		"6":  "VRML Season 6",
+		"6f": "VRML Season 6 Finalist",
+		"6c": "VRML Season 6 Champion",
+		"7":  "VRML Season 7",
+		"7f": "VRML Season 7 Finalist",
+		"7c": "VRML Season 7 Champion",
+	}
+
+	partyGroupIDPattern = regexp.MustCompile("^[a-z0-9]+$")
+	vrmlIDPattern       = regexp.MustCompile("^[-a-zA-Z0-9]{24}$")
 
 	mainSlashCommands = []*discordgo.ApplicationCommand{
 		{
@@ -188,7 +217,6 @@ var (
 				},
 			},
 		},
-
 		{
 			Name:        "badges",
 			Description: "manage badge entitlements",
@@ -207,6 +235,25 @@ var (
 							Description: "Badge to request",
 							Required:    true,
 							Choices:     vrmlGroupChoices,
+						},
+					},
+				},
+				{
+					Name:        "assign",
+					Description: "assign badges to a player",
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Options: []*discordgo.ApplicationCommandOption{
+						{
+							Type:        discordgo.ApplicationCommandOptionUser,
+							Name:        "user",
+							Description: "target user",
+							Required:    true,
+						},
+						{
+							Type:        discordgo.ApplicationCommandOptionString,
+							Name:        "badges",
+							Description: "comma seperated list of badges (i.e p,1,2,5c,6f)",
+							Required:    true,
 						},
 					},
 				},
@@ -1031,91 +1078,170 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 		"badges": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			options := i.ApplicationCommandData().Options
 			content := ""
+			var err error
 			switch options[0].Name {
-			case "request":
+			case "assign":
 				options = options[0].Options
-				badgeNames := make([]string, 0, len(options))
-				for _, v := range options {
-					badgeNames = append(badgeNames, v.StringValue())
+				// Check that the user is a developer
+				user := getScopedUser(i)
+				if user == nil {
+					return
 				}
 
+				var userID uuid.UUID
+				userID, err = discordRegistry.GetUserIdByDiscordId(ctx, user.ID, false)
+				if err != nil {
+					err = status.Error(codes.PermissionDenied, "you do not have permission to use this command")
+					break
+				}
+				var member bool
+				member, err = checkGroupMembershipByName(ctx, nk, userID, GroupGlobalBadgeAdmins, "system")
+				if err != nil {
+					err = status.Error(codes.Internal, "failed to check group membership")
+					break
+				}
+				if !member {
+					err = status.Error(codes.PermissionDenied, "you do not have permission to use this command")
+					break
+				}
+				if len(options) < 2 {
+					err = status.Error(codes.InvalidArgument, "you must specify a user and a badge")
+				}
+				// Get the target user's discord ID
+				target := options[0].UserValue(s)
+				if target == nil {
+					err = status.Error(codes.InvalidArgument, "you must specify a user")
+					break
+				}
+
+				// Get the badge name
+				badgeCodestr := options[1].StringValue()
+				badgeCodes := strings.Split(strings.ToLower(badgeCodestr), ",")
+				badgeGroups := make([]string, 0, len(badgeCodes))
+				for _, c := range badgeCodes {
+
+					c := strings.TrimSpace(c)
+					if c == "" {
+						continue
+					}
+					groupName, ok := vrmlGroupShortMap[c]
+					if !ok {
+						err = status.Errorf(codes.InvalidArgument, fmt.Sprintf("badge `%s` not found", c))
+						break
+					}
+
+					groupID, ok := vrmlGroups[groupName]
+					if !ok {
+						err = status.Error(codes.Internal, fmt.Sprintf("badge `%s` not found (this shouldn't happen)", c))
+						break // This shouldn't happen
+					}
+					badgeGroups = append(badgeGroups, groupID)
+				}
+
+				for _, groupID := range badgeGroups {
+					// Add the user to the group
+					if err = nk.GroupUsersAdd(ctx, SystemUserID, groupID, []string{target.ID}); err != nil {
+						err = status.Error(codes.Internal, fmt.Errorf("failed to assign badge `%s` to user `%s`: %w", groupID, target.Username, err).Error())
+						continue
+					}
+				}
+
+				// Log the action
+				logger.Info("assign badges", zap.String("badges", badgeCodestr), zap.String("user", target.Username), zap.String("discord_id", target.ID), zap.String("assigner", user.ID))
+
+				simpleInteractionResponse(s, i, fmt.Sprintf("assigned badges `%s` to user `%s`", badgeCodestr, target.Username))
+
+			case "set-vrml-username":
+				options = options[0].Options
 				// Get the user's discord ID
 				user := getScopedUser(i)
 				if user == nil {
 					return
 				}
-				badgeChannel := "1228721641375138018"
+				vrmlUsername := options[0].StringValue()
 
-				basicMessage := fmt.Sprintf("<@%s> (`%s`) is requesting the following badges: %s", user.ID, user.Username, strings.Join(badgeNames, ", "))
-				// Send it to the channel
-				s.ChannelMessageSend(badgeChannel, basicMessage)
-
-				// Tell the user
-				content = "Requesting badges for:" + strings.Join(badgeNames, ", "+". Please be patient as it may take some time.")
-				// Send a message to the user
-				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-					Type: discordgo.InteractionResponseChannelMessageWithSource,
-					Data: &discordgo.InteractionResponseData{
-						Flags:   discordgo.MessageFlagsEphemeral,
-						Content: content,
-					},
-				})
-				return
-				rows := make([]discordgo.MessageComponent, 0, len(badgeNames))
-
-				for _, badgeName := range badgeNames {
-					groupID, ok := vrmlGroups[badgeName]
-					if !ok {
-						continue
-					}
-
-					fdadd := strings.Join([]string{"fd_badge_add", user.ID, groupID}, ":")
-					fdremove := strings.Join([]string{"fd_badge_remove", user.ID, groupID}, ":")
-
-					row := discordgo.ActionsRow{
-						Components: []discordgo.MessageComponent{
-							discordgo.Button{
-								Label:    badgeName,
-								Style:    discordgo.SuccessButton,
-								CustomID: fdadd,
-								Disabled: false,
-							},
-							discordgo.Button{
-								Label:    "Remove",
-								Style:    discordgo.DangerButton,
-								CustomID: fdremove,
-								Disabled: false,
-							},
-						},
-					}
-
-					rows = append(rows, row)
+				// Check the vlaue against vrmlIDPattern
+				if !vrmlIDPattern.MatchString(vrmlUsername) {
+					content = "Invalid VRML username"
 				}
 
-				s.ChannelMessageSendComplex(badgeChannel, &discordgo.MessageSend{
-					Content:    fmt.Sprintf("<@%s> (`%s`) is requesting the following badges: %s", user.ID, user.Username, strings.Join(badgeNames, ", ")),
-					Components: rows,
+				// Access the VRML HTTP API
+				url := fmt.Sprintf("https://api.vrmasterleague.com/EchoArena/Players/Search?name=%s", vrmlUsername)
+				var req *http.Request
+				req, err = http.NewRequest("GET", url, nil)
+				if err != nil {
+					err = status.Error(codes.Internal, "failed to create request")
+					break
+				}
+
+				req.Header.Set("User-Agent", "EchoVRCE Discord Bot (contact: @sprockee)")
+
+				// Make the request
+				var resp *http.Response
+				resp, err = http.DefaultClient.Do(req)
+				if err != nil {
+					err = status.Error(codes.Internal, "failed to make request")
+					break
+				}
+
+				// Parse the response as JSON...
+				// [{"id":"4rPCIjBhKhGpG4uDnfHlfg2","name":"sprockee","image":"/images/logos/users/25d45af7-f6a8-40ef-a035-879a61869c8f.png"}]
+				var players []struct {
+					ID   string `json:"id"`
+					Name string `json:"name"`
+				}
+
+				if err = json.NewDecoder(resp.Body).Decode(&players); err != nil {
+					err = status.Error(codes.Internal, "failed to decode response: "+err.Error())
+					break
+				}
+
+				// Check if the player was found
+				if len(players) == 0 {
+					err = status.Error(codes.NotFound, "player not found")
+					break
+				}
+
+				// Ensure that only one was returned
+				if len(players) > 1 {
+					err = status.Error(codes.Internal, "multiple players found")
+					break
+				}
+
+				// Get the player's ID
+				playerID := players[0].ID
+
+				jsonData, err := json.Marshal(players[0])
+				if err != nil {
+					err = status.Error(codes.Internal, "failed to marshal player data: "+err.Error())
+					break
+				}
+
+				// Set the VRML ID for the user in their profile as a storage object
+				_, err = nk.StorageWrite(ctx, []*runtime.StorageWrite{
+					{
+						Collection: VRMLStorageCollection,
+						Key:        playerID,
+						UserID:     user.ID,
+						Value:      string(jsonData),
+					},
 				})
+				if err != nil {
+					err = status.Error(codes.Internal, "failed to set VRML ID: "+err.Error())
+					break
+				}
 
-				// Message the User
-				content = "Requesting badges for:" + strings.Join(badgeNames, ", ")
-				// Respond to the user
+				logger.Info("set vrml id", zap.String("discord_id", user.ID), zap.String("discord_username", user.Username), zap.String("vrml_id", playerID))
 
-			default:
-				content = "Oops, something went wrong.\n" +
-					"Hol' up, you aren't supposed to see this message."
+				content = fmt.Sprintf("set VRML username `%s` for user `%s`", vrmlUsername, user.Username)
+
+				err = simpleInteractionResponse(s, i, content)
+				if err != nil {
+					err = status.Error(codes.Internal, "failed to send response: "+err.Error())
+					break
+				}
+
 			}
-			if content == "" {
-				return
-			}
-
-			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-				Type: discordgo.InteractionResponseChannelMessageWithSource,
-				Data: &discordgo.InteractionResponseData{
-					Flags:   discordgo.MessageFlagsEphemeral,
-					Content: content,
-				},
-			})
 		},
 		"whoami": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			var user *discordgo.User
@@ -2377,4 +2503,13 @@ func getScopedUser(i *discordgo.InteractionCreate) *discordgo.User {
 	default:
 		return nil
 	}
+}
+func simpleInteractionResponse(s *discordgo.Session, i *discordgo.InteractionCreate, content string) error {
+	return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Flags:   discordgo.MessageFlagsEphemeral,
+			Content: content,
+		},
+	})
 }
