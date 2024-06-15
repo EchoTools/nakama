@@ -1659,11 +1659,17 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				errFn(err)
 				return
 			}
+
+			cnt := 0
 			for _, presence := range presences {
 				if err = d.nk.SessionDisconnect(ctx, presence.GetSessionId(), runtime.PresenceReasonDisconnect); err != nil {
 					errFn(err)
-					return
+					continue
 				}
+				cnt++
+			}
+			if err := simpleInteractionResponse(s, i, fmt.Sprintf("Disconnected %d sessions. Player is required to complete *Community Values* when entering the next social lobby.", cnt)); err != nil {
+				logger.Warn("Failed to send interaction response", zap.Error(err))
 			}
 		},
 		"set-roles": func(s *discordgo.Session, i *discordgo.InteractionCreate, logger runtime.Logger) {
