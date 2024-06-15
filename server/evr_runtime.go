@@ -190,8 +190,8 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 				Region:   region,
 				Group:    groupID.String(),
 			}
-			matchcounts[stateTags] += 1
-			playercounts[stateTags] += len(state.State.Players)
+			matchcounts[stateTags] = matchcounts[stateTags] + 1
+			playercounts[stateTags] = playercounts[stateTags] + len(state.State.Players)
 		}
 		// Update the metrics
 		for tags, count := range playercounts {
