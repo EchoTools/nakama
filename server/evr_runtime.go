@@ -158,10 +158,10 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 	ticker := time.NewTicker(60 * time.Second)
 	for {
 		select {
-		case <-ticker.C:
 		case <-ctx.Done():
 			// Context has been cancelled, return
 			return
+		case <-ticker.C:
 		}
 		// Get the match states
 		matchStates, err := listMatchStates(ctx, nk, "")
@@ -195,9 +195,15 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 		}
 		// Update the metrics
 		for tags, count := range playercounts {
+			if count == 0 {
+				continue
+			}
 			nk.metrics.CustomGauge("match_player_counts_gauge", tags.AsMap(), float64(count))
 		}
 		for tags, count := range matchcounts {
+			if count == 0 {
+				continue
+			}
 			nk.metrics.CustomGauge("match_count_gauge", tags.AsMap(), float64(count))
 		}
 	}
