@@ -1329,9 +1329,16 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					badgeGroups = append(badgeGroups, groupID)
 				}
 
+				userID, err := discordRegistry.GetUserIdByDiscordId(ctx, target.ID, false)
+				if err != nil {
+					errFn(status.Error(codes.Internal, fmt.Errorf("failed to get user `%s`: %w", target.Username, err).Error()))
+					return
+				}
+
 				for _, groupID := range badgeGroups {
 					// Add the user to the group
-					if err = nk.GroupUsersAdd(ctx, SystemUserID, groupID, []string{target.ID}); err != nil {
+
+					if err = nk.GroupUsersAdd(ctx, SystemUserID, groupID, []string{userID.String()}); err != nil {
 						errFn(status.Error(codes.Internal, fmt.Errorf("failed to assign badge `%s` to user `%s`: %w", groupID, target.Username, err).Error()))
 						continue
 					}
