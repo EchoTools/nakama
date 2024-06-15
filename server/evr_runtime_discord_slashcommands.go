@@ -445,6 +445,7 @@ func (d *DiscordAppBot) InitializeDiscordBot() error {
 	if bot == nil {
 		return nil
 	}
+	//bot.LogLevel = discordgo.LogDebug
 
 	ctx := d.ctx
 	logger := d.logger
@@ -469,6 +470,10 @@ func (d *DiscordAppBot) InitializeDiscordBot() error {
 
 	bot.AddHandler(func(session *discordgo.Session, ready *discordgo.Ready) {
 		logger.Info("Discord bot is ready.")
+	})
+
+	bot.AddHandler(func(s *discordgo.Session, m *discordgo.RateLimit) {
+		logger.WithField("rate_limit", m).Warn("Discord rate limit")
 	})
 
 	bot.AddHandler(func(s *discordgo.Session, m *discordgo.Ready) {
@@ -504,7 +509,7 @@ func (d *DiscordAppBot) InitializeDiscordBot() error {
 		if m.Member.User.ID == s.State.User.ID {
 			guild, err := s.Guild(m.GuildID)
 			if err != nil {
-				logger.Error("Error getting guild: %w", err)
+				logger.Error("Error getting guild: %s", err.Error())
 			}
 
 			if err := d.discordRegistry.SynchronizeGroup(ctx, guild); err != nil {
@@ -734,15 +739,14 @@ func (d *DiscordAppBot) InitializeDiscordBot() error {
 
 		// Update the user's guild group
 
-		// TODO FIXME Make this only update what changed.
 		userID, err := d.discordRegistry.GetUserIdByDiscordId(ctx, discordID, true)
 		if err != nil {
-			logger.Error("Error getting user id: %w", err)
+			logger.Error("Error getting user id: %s", err.Error())
 			return
 		}
 		err = d.discordRegistry.UpdateGuildGroup(ctx, logger, userID, e.GuildID)
 		if err != nil {
-			logger.Error("Error updating guild group: %w", err)
+			logger.Error("Error updating guild group: %s", err.Error())
 			return
 		}
 
@@ -1751,15 +1755,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			if i.Type != discordgo.InteractionApplicationCommand {
 				return
 			}
-			user := i.User
-			if user == nil {
-				if i.Member != nil && i.Member.User != nil {
-					user = i.Member.User
-				} else {
-					return
-				}
-
-			}
+			user, _ := getScopedUserMember(i)
 
 			options := i.ApplicationCommandData().Options
 			switch options[0].Name {
@@ -1969,7 +1965,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 		},
 	}
 
-	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate, logger runtime.Logger) {
+	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		user, _ := getScopedUserMember(i)
 		logFields := make(map[string]any, 0)
 		if i.GuildID != "" {
@@ -1982,16 +1978,19 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			logFields["discord_id"] = user.ID
 		}
 
+		appCommandName := i.ApplicationCommandData().Name
+		logger := d.logger
+
 		if len(logFields) > 0 {
 			logger = logger.WithFields(logFields)
 		}
 
 		switch i.Type {
 		case discordgo.InteractionApplicationCommand:
-			if h, ok := commandHandlers[i.ApplicationCommandData().Name]; ok {
+			if h, ok := commandHandlers[appCommandName]; ok {
 				h(s, i, logger)
 			} else {
-				logger.Info("Unhandled command: %v", i.ApplicationCommandData().Name)
+				logger.Info("Unhandled command: %v", appCommandName)
 			}
 		}
 	})
