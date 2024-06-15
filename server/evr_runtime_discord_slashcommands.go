@@ -1706,51 +1706,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 			simpleInteractionResponse(s, i, "roles set!")
 		},
+
 		"party": func(s *discordgo.Session, i *discordgo.InteractionCreate, logger runtime.Logger) {
-			userID, err := d.discordRegistry.GetUserIdByDiscordId(ctx, user.ID, false)
-			if err != nil {
-				errFn(errors.New("failed to get user ID"), err)
-			}
-
-			// Require the user to be a global moderator
-			isGlobalModerator, err := d.discordRegistry.IsGlobalModerator(ctx, userID)
-			if err != nil {
-				errFn(errors.New("failed to check global moderator status"), err)
-			}
-			if !isGlobalModerator {
-				err := simpleInteractionResponse(s, i, "You must be a global moderator to use this command.")
-				if err != nil {
-					logger.Warn("Failed to send interaction response", zap.Error(err))
-				}
-			}
-
-			target := options[0].UserValue(s)
-			targetUserID, err := d.discordRegistry.GetUserIdByDiscordId(ctx, target.ID, false)
-			if err != nil {
-				errFn(errors.New("failed to get user ID"), err)
-			}
-
-			profile, _ := d.profileRegistry.Load(targetUserID, evr.EvrIdNil)
-			profile.TriggerCommunityValues()
-			if err = d.profileRegistry.Store(targetUserID, profile); err != nil {
-				errFn(err)
-				return
-			}
-
-			presences, err := d.nk.StreamUserList(StreamModeEvr, userID.String(), svcLoginID.String(), "", true, true)
-			if err != nil {
-				errFn(err)
-				return
-			}
-			for _, presence := range presences {
-				if err = d.nk.SessionDisconnect(ctx, presence.GetSessionId(), runtime.PresenceReasonDisconnect); err != nil {
-					errFn(err)
-					return
-				}
-			}
-		},
-
-		"party": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 			if i.Type != discordgo.InteractionApplicationCommand {
 				return
