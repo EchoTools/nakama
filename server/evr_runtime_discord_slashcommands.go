@@ -231,23 +231,6 @@ var (
 			Description: "manage badge entitlements",
 			Options: []*discordgo.ApplicationCommandOption{
 				{
-					Name:        "request",
-					Description: "request badge(s)",
-					Type:        discordgo.ApplicationCommandOptionSubCommand,
-					Options: []*discordgo.ApplicationCommandOption{
-						// Also, subcommand groups aren't capable of
-						// containing options, by the name of them, you can see
-						// they can only contain subcommands
-						{
-							Type:        discordgo.ApplicationCommandOptionString,
-							Name:        "title",
-							Description: "Badge to request",
-							Required:    true,
-							Choices:     vrmlGroupChoices,
-						},
-					},
-				},
-				{
 					Name:        "assign",
 					Description: "assign badges to a player",
 					Type:        discordgo.ApplicationCommandOptionSubCommand,
@@ -263,8 +246,6 @@ var (
 							Name:        "badges",
 							Description: "comma seperated list of badges (i.e p,1,2,5c,6f)",
 							Required:    true,
-						},
-					},
 						},
 					},
 				},
