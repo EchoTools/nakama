@@ -1705,9 +1705,23 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			if guild.OwnerID != user.ID {
-				errFn(errors.New("you must be the owner of the guild to use this command"))
-				return
+				// Check if the user is a global developer
+				userID, err := d.discordRegistry.GetUserIdByDiscordId(ctx, user.ID, false)
+				if err != nil {
+					errFn(errors.New("failed to get user ID"))
+					return
+				}
+				member, err := checkGroupMembershipByName(ctx, nk, userID, GroupGlobalDevelopers, "system")
+				if err != nil {
+					errFn(errors.New("failed to check group membership"))
+					return
+				}
+				if !member {
+					errFn(errors.New("you do not have permission to use this command"))
+					return
+				}
 			}
+
 			groupID, found := d.discordRegistry.Get(i.GuildID)
 			if !found {
 				errFn(errors.New("guild group not found"))
