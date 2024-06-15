@@ -430,7 +430,7 @@ func selectTeamForPlayer(logger runtime.Logger, presence *EvrMatchPresence, stat
 	}
 
 	// If the match has been running for less than 15 seconds check the presets for the team
-	if time.Since(state.StartedAt) < 30*time.Second {
+	if time.Since(state.StartedAt) < 15*time.Second {
 		if teamIndex, ok := state.teamAlignments[presence.EvrID]; ok {
 			// Make sure the team isn't already full
 			if len(teams[teamIndex]) < state.TeamSize {
