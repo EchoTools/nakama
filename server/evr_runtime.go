@@ -226,10 +226,17 @@ func createCoreGroups(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 
 	for _, name := range coreGroups {
 		// Search for group first
-		groups, _, err := nk.GroupsList(ctx, name, "system", nil, nil, 1, "")
+		groups, _, err := nk.GroupsList(ctx, name, "", nil, nil, 1, "")
 		if err != nil {
 			logger.WithField("err", err).Error("Group list error: %v", err)
 		}
+		// remove groups that are not lang tag of 'system'
+		for i, group := range groups {
+			if group.LangTag != "system" {
+				groups = append(groups[:i], groups[i+1:]...)
+			}
+		}
+
 		if len(groups) == 0 {
 			// Create a nakama core group
 			_, err = nk.GroupCreate(ctx, userId, name, userId, "system", name, "", false, map[string]interface{}{}, 1000)
