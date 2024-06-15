@@ -1556,6 +1556,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				err := errors.Join(errs...)
 				if err := simpleInteractionResponse(s, i, err.Error()); err != nil {
 					logger.Warn("Failed to send interaction response", zap.Error(err))
+					return
 				}
 			}
 
@@ -1610,7 +1611,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			if err := d.handleProfileRequest(ctx, logger, nk, s, discordRegistry, i, target.ID, target.Username, guildID, isGlobalModerator); err != nil {
 				errFn(errors.New("Error handling profile request"), err)
 			}
-			return
 		},
 		"trigger-cv": func(s *discordgo.Session, i *discordgo.InteractionCreate, logger runtime.Logger) {
 
@@ -1634,24 +1634,25 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			userID, err := d.discordRegistry.GetUserIdByDiscordId(ctx, user.ID, false)
 			if err != nil {
 				errFn(errors.New("failed to get user ID"), err)
+				return
 			}
 
 			// Require the user to be a global moderator
-			isGlobalModerator, err := d.discordRegistry.IsGlobalModerator(ctx, userID)
-			if err != nil {
+			if isGlobalModerator, err := d.discordRegistry.IsGlobalModerator(ctx, userID); err != nil {
 				errFn(errors.New("failed to check global moderator status"), err)
-			}
-			if !isGlobalModerator {
-				err := simpleInteractionResponse(s, i, "You must be a global moderator to use this command.")
-				if err != nil {
+				return
+			} else if !isGlobalModerator {
+				if err := simpleInteractionResponse(s, i, "You must be a global moderator to use this command."); err != nil {
 					logger.Warn("Failed to send interaction response", zap.Error(err))
 				}
+				return
 			}
 
 			target := options[0].UserValue(s)
 			targetUserID, err := d.discordRegistry.GetUserIdByDiscordId(ctx, target.ID, false)
 			if err != nil {
 				errFn(errors.New("failed to get user ID"), err)
+				return
 			}
 
 			profile, _ := d.profileRegistry.Load(targetUserID, evr.EvrIdNil)
