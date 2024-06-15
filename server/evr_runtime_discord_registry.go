@@ -459,9 +459,9 @@ func (r *LocalDiscordRegistry) UpdateAccount(ctx context.Context, userID uuid.UU
 	timer := time.Now()
 	if r.metrics != nil {
 
-		defer func() { logger.Debug("UpdateAccount took %dms", time.Since(timer)*time.Millisecond) }()
+		defer func() { logger.Debug("UpdateAccount took %dms", time.Since(timer)/time.Millisecond) }()
 		defer func() {
-			r.metrics.CustomTimer("UpdateAccountFn_duration_timer", nil, time.Since(timer)*time.Millisecond)
+			r.metrics.CustomTimer("UpdateAccountFn_duration_ms_timer", nil, time.Since(timer)/time.Millisecond)
 		}()
 	}
 

@@ -50,6 +50,7 @@ type DiscordAppBot struct {
 
 func NewDiscordAppBot(nk runtime.NakamaModule, logger runtime.Logger, metrics Metrics, pipeline *Pipeline, config Config, discordRegistry DiscordRegistry, profileRegistry *ProfileRegistry, dg *discordgo.Session) *DiscordAppBot {
 	ctx, cancelFn := context.WithCancel(context.Background())
+	logger = logger.WithField("system", "discordAppBot")
 	return &DiscordAppBot{
 		ctx:      ctx,
 		cancelFn: cancelFn,
@@ -861,19 +862,19 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 		groupName := choice.Value.(string)
 		groups, _, err := nk.GroupsList(ctx, groupName, "", nil, nil, 1, "")
 		if err != nil {
-			logger.Error("Error looking up group: %s", err.Error())
+			d.logger.Error("Error looking up group: %s", err.Error())
 			continue
 		}
 		if len(groups) == 0 {
-			logger.Error("Group not found: %s", groupName)
+			d.logger.Error("Group not found: %s", groupName)
 			continue
 		}
 		vrmlGroups[groupName] = groups[0].Id
 	}
 
-	commandHandlers := map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate){
+	commandHandlers := map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate, logger runtime.Logger){
 
-		"evrsymbol": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+		"evrsymbol": func(s *discordgo.Session, i *discordgo.InteractionCreate, logger runtime.Logger) {
 			options := i.ApplicationCommandData().Options
 			token := options[0].StringValue()
 			symbol := evr.ToSymbol(token)
@@ -920,7 +921,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			})
 		},
 
-		"link-headset": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+		"link-headset": func(s *discordgo.Session, i *discordgo.InteractionCreate, logger runtime.Logger) {
 			options := i.ApplicationCommandData().Options
 			linkCode := options[0].StringValue()
 			// Validate the link code as a 4 character string
@@ -985,7 +986,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				},
 			})
 		},
-		"unlink-headset": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+		"unlink-headset": func(s *discordgo.Session, i *discordgo.InteractionCreate, logger runtime.Logger) {
 			options := i.ApplicationCommandData().Options
 			deviceId := options[0].StringValue()
 			// Validate the link code as a 4 character string
@@ -1027,7 +1028,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				},
 			})
 		},
-		"check-broadcaster": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+		"check-broadcaster": func(s *discordgo.Session, i *discordgo.InteractionCreate, logger runtime.Logger) {
 			errFn := func(err error) {
 				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 					Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -1205,7 +1206,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return
 			}
 		},
-		"reset-password": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+		"reset-password": func(s *discordgo.Session, i *discordgo.InteractionCreate, logger runtime.Logger) {
 			var user *discordgo.User
 			switch {
 			case i.User != nil:
@@ -1247,9 +1248,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				})
 			}
 		},
-		"badges": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+		"badges": func(s *discordgo.Session, i *discordgo.InteractionCreate, logger runtime.Logger) {
 			options := i.ApplicationCommandData().Options
-			content := ""
 			var err error
 
 			user := getScopedUser(i)
@@ -1310,7 +1310,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					}
 					groupName, ok := vrmlGroupShortMap[c]
 					if !ok {
-						err = status.Errorf(codes.InvalidArgument, fmt.Sprintf("badge `%s` not found", c))
+						errFn(status.Errorf(codes.InvalidArgument, fmt.Sprintf("badge `%s` not found", c)))
 						break
 					}
 
@@ -1418,17 +1418,14 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 				logger.Info("set vrml id", zap.String("discord_id", user.ID), zap.String("discord_username", user.Username), zap.String("vrml_id", playerID))
 
-				content = fmt.Sprintf("set VRML username `%s` for user `%s`", vrmlUsername, user.Username)
-
-				err = simpleInteractionResponse(s, i, content)
+				err = simpleInteractionResponse(s, i, fmt.Sprintf("set VRML username `%s` for user `%s`", vrmlUsername, user.Username))
 				if err != nil {
 					errFn(status.Error(codes.Internal, "failed to send response: "+err.Error()))
 					break
 				}
-
 			}
 		},
-		"whoami": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+		"whoami": func(s *discordgo.Session, i *discordgo.InteractionCreate, logger runtime.Logger) {
 
 			user, _ := getScopedUserMember(i)
 			if user == nil {
@@ -1446,7 +1443,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			}
 		},
-		"set-lobby": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+		"set-lobby": func(s *discordgo.Session, i *discordgo.InteractionCreate, logger runtime.Logger) {
 			if i.Type != discordgo.InteractionApplicationCommand {
 				return
 			}
@@ -1525,7 +1522,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				},
 			})
 		},
-		"lookup": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+		"lookup": func(s *discordgo.Session, i *discordgo.InteractionCreate, logger runtime.Logger) {
 
 			if i.Type != discordgo.InteractionApplicationCommand {
 				return
@@ -1968,22 +1965,37 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 		},
 	}
 
-	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-		logger.Info("Received interaction: %s", i.ApplicationCommandData().Name)
+	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate, logger runtime.Logger) {
+		user, _ := getScopedUserMember(i)
+		logFields := make(map[string]any, 0)
+		if i.GuildID != "" {
+			logFields["guild_id"] = i.GuildID
+		}
+		if i.ChannelID != "" {
+			logFields["channel_id"] = i.ChannelID
+		}
+		if user != nil && user.ID != "" {
+			logFields["discord_id"] = user.ID
+		}
+
+		if len(logFields) > 0 {
+			logger = logger.WithFields(logFields)
+		}
+
 		switch i.Type {
 		case discordgo.InteractionApplicationCommand:
 			if h, ok := commandHandlers[i.ApplicationCommandData().Name]; ok {
-				h(s, i)
+				h(s, i, logger)
 			} else {
 				logger.Info("Unhandled command: %v", i.ApplicationCommandData().Name)
 			}
 		}
 	})
 
-	logger.Info("Registering slash commands.")
+	d.logger.Info("Registering slash commands.")
 	// Register global guild commands
-	d.updateSlashCommands(dg, logger, "")
-	logger.Info("%d Slash commands registered/updated in %d guilds.", len(mainSlashCommands), len(dg.State.Guilds))
+	d.updateSlashCommands(dg, d.logger, "")
+	d.logger.Info("%d Slash commands registered/updated in %d guilds.", len(mainSlashCommands), len(dg.State.Guilds))
 
 	return nil
 }
@@ -2024,7 +2036,7 @@ func (d *DiscordAppBot) updateSlashCommands(s *discordgo.Session, logger runtime
 		command := currentCommands[name]
 		logger.Debug("Creating %s command: %s", guildID, command.Name)
 		if _, err := s.ApplicationCommandCreate(s.State.Application.ID, guildID, command); err != nil {
-			logger.WithField("err", err).Error("Failed to create application command.")
+			logger.WithField("err", err).Error("Failed to create application command: %s", command.Name)
 		}
 	}
 
