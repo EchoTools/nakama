@@ -430,7 +430,7 @@ func selectTeamForPlayer(logger runtime.Logger, presence *EvrMatchPresence, stat
 	}
 
 	// If the match has been running for less than 15 seconds check the presets for the team
-	if time.Since(state.StartedAt) < 15*time.Second || state.LobbyType == PrivateLobby {
+	if time.Since(state.StartedAt) < 30*time.Second {
 		if teamIndex, ok := state.teamAlignments[presence.EvrID]; ok {
 			// Make sure the team isn't already full
 			if len(teams[teamIndex]) < state.TeamSize {
@@ -553,18 +553,19 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		return state, false, ErrJoinRejectedLobbyFull
 	}
 
-	// If the entrant is joining as a spectator, do not look up their previous team.
-	if mp.TeamIndex != evr.TeamSpectator && mp.TeamIndex != evr.TeamModerator {
-
-		// If this is the player rejoining, prefer the same team.
-		if matchPresence, ok := state.presenceCache[sessionID]; ok {
-			mp.TeamIndex = matchPresence.TeamIndex
+	// Only pick teams for public matches.
+	if state.Mode == evr.ModeArenaPublic || state.Mode == evr.ModeCombatPublic {
+		// If the entrant is joining as a spectator, do not look up their previous team.
+		if mp.TeamIndex != evr.TeamSpectator && mp.TeamIndex != evr.TeamModerator {
+			// If this is the player rejoining, prefer the same team.
+			if matchPresence, ok := state.presenceCache[sessionID]; ok {
+				mp.TeamIndex = matchPresence.TeamIndex
+			}
 		}
-	}
-
-	if mp.TeamIndex, ok = selectTeamForPlayer(logger, mp, state); !ok {
-		// The lobby is full, reject the player.
-		return state, false, ErrJoinRejectedLobbyFull
+		if mp.TeamIndex, ok = selectTeamForPlayer(logger, mp, state); !ok {
+			// The lobby is full, reject the player.
+			return state, false, ErrJoinRejectedLobbyFull
+		}
 	}
 
 	// Reserve this player's spot in the match.

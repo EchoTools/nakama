@@ -672,7 +672,7 @@ func (p *EvrPipeline) GetGuildPriorityList(ctx context.Context, userID uuid.UUID
 		return nil, nil, status.Errorf(codes.Internal, "Failed to get guilds: %v", err)
 	}
 
-	// Sort teh groups by size descending
+	// Sort the groups by size descending
 	sort.Slice(memberships, func(i, j int) bool {
 		return memberships[i].GuildGroup.Size() > memberships[j].GuildGroup.Size()
 	})
