@@ -2179,6 +2179,12 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		whoami.CreateTime = account.GetUser().GetCreateTime().AsTime().UTC()
 	}
 
+	// Get the device links from the account
+	whoami.DeviceLinks = make([]string, 0, len(account.GetDevices()))
+	for _, device := range account.GetDevices() {
+		whoami.DeviceLinks = append(whoami.DeviceLinks, fmt.Sprintf("`%s`", device.GetId()))
+	}
+
 	whoami.HasPassword = account.GetEmail() != ""
 
 	var groupIDs []uuid.UUID
