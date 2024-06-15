@@ -287,27 +287,27 @@ var (
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Type:        discordgo.ApplicationCommandOptionRole,
-					Name:        "Moderator Role",
+					Name:        "member",
+					Description: "If defined, this role allows joining social lobbies, matchmaking, or creating private matches.",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionRole,
+					Name:        "moderator",
 					Description: "Allowed access to more detailed `/lookup`information and moderation tools.",
 					Required:    true,
 				},
 				{
 					Type:        discordgo.ApplicationCommandOptionRole,
-					Name:        "Server Host Role",
+					Name:        "serverhost",
 					Description: "Allowed to host an Echo VR Game Server for the guild.",
 					Required:    true,
 				},
 				{
 					Type:        discordgo.ApplicationCommandOptionRole,
-					Name:        "Suspension Role",
+					Name:        "suspension",
 					Description: "Disallowed from joining any guild matches.",
-					Required:    false,
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionRole,
-					Name:        "Membership Role",
-					Description: "If defined, this role allows joining social lobbies, matchmaking, or creating private matches.",
-					Required:    false,
+					Required:    true,
 				},
 			},
 		},
