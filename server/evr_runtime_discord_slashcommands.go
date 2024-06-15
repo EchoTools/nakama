@@ -737,7 +737,29 @@ func (d *DiscordAppBot) InitializeDiscordBot() error {
 
 		discordID := e.User.ID
 
-		// Update the user's guild group
+		// Get the guild group, or sync the group
+		_, found := d.discordRegistry.Get(e.GuildID)
+		if !found {
+			// Update the user's guild group
+			guild, err := s.State.Guild(e.GuildID)
+			if err != nil {
+				logger.Error("Error getting guild: %w", err)
+				return
+			}
+			if guild == nil {
+				logger.Error("Guild not found")
+				return
+			}
+			if err := d.discordRegistry.SynchronizeGroup(ctx, guild); err != nil {
+				logger.Error("Error synchronizing group: %s", err.Error())
+				return
+			}
+			_, found = d.discordRegistry.Get(e.GuildID)
+			if !found {
+				logger.Error("Group not found after synchronization")
+				return
+			}
+		}
 
 		userID, err := d.discordRegistry.GetUserIdByDiscordId(ctx, discordID, true)
 		if err != nil {
