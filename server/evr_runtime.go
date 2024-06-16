@@ -125,6 +125,10 @@ func listMatchStates(ctx context.Context, nk runtime.NakamaModule, query string)
 			return nil, err
 		}
 
+		if state.LobbyType == UnassignedLobby {
+			continue
+		}
+
 		matchStates = append(matchStates, &MatchState{
 			State:     state,
 			TickRate:  int(tickRate),
@@ -156,6 +160,7 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 
 	// Create a ticker to update the metrics every 5 minutes
 	ticker := time.NewTicker(60 * time.Second)
+	playercounts := make(map[MatchStateTags][]int)
 	for {
 		select {
 		case <-ctx.Done():
@@ -163,15 +168,29 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 			return
 		case <-ticker.C:
 		}
+
+		// Remove zero'd out entries
+		for tags, matches := range playercounts {
+			// sum the slices
+			count := 0
+			for _, c := range matches {
+				if c == 0 {
+					matches = append(matches[:c], matches[c+1:]...)
+				}
+				count += c
+			}
+			if count == 0 {
+				delete(playercounts, tags)
+			}
+		}
+
 		// Get the match states
 		matchStates, err := listMatchStates(ctx, nk, "")
 		if err != nil {
 			logger.Error("Error listing match states: %v", err)
 			continue
 		}
-		playercounts := make(map[MatchStateTags]int, len(matchStates))
-		// Log the match states
-		matchcounts := make(map[MatchStateTags]int, len(matchStates))
+
 		for _, state := range matchStates {
 			groupID := state.State.Channel
 			if groupID == nil {
@@ -190,21 +209,19 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 				Region:   region,
 				Group:    groupID.String(),
 			}
-			matchcounts[stateTags] = matchcounts[stateTags] + 1
-			playercounts[stateTags] = playercounts[stateTags] + len(state.State.Players)
+
+			playercounts[stateTags] = append(playercounts[stateTags], len(state.State.Players))
 		}
 		// Update the metrics
-		for tags, count := range playercounts {
-			if count == 0 {
-				continue
+
+		for tags, matches := range playercounts {
+			playerCount := 0
+			for _, match := range matches {
+				playerCount += match
 			}
-			nk.metrics.CustomGauge("match_player_counts_gauge", tags.AsMap(), float64(count))
-		}
-		for tags, count := range matchcounts {
-			if count == 0 {
-				continue
-			}
-			nk.metrics.CustomGauge("match_count_gauge", tags.AsMap(), float64(count))
+			tagMap := tags.AsMap()
+			nk.metrics.CustomGauge("match_count_gauge", tagMap, float64(len(matches)))
+			nk.metrics.CustomGauge("match_player_counts_gauge", tagMap, float64(playerCount))
 		}
 	}
 }
