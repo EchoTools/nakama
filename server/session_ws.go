@@ -466,6 +466,8 @@ func (s *sessionWS) Consume() {
 	var reason string
 	var data []byte
 
+	isDebug := s.logger.Core().Enabled(zap.DebugLevel)
+
 IncomingLoop:
 	for {
 
@@ -518,8 +520,14 @@ IncomingLoop:
 				break
 			}
 			// Send to the Evr pipeline for routing/processing.
+
 			for _, request := range requests {
-				if !s.evrPipeline.ProcessRequestEvr(s.logger, s, request) {
+				logger := s.logger.With(zap.String("request_type", fmt.Sprintf("%T", request)))
+				if isDebug { // remove extra heavy reflection processing
+					logger := logger.With(zap.String("request", fmt.Sprintf("%s", request)))
+					logger.Debug(fmt.Sprintf("Received %T message", request))
+				}
+				if !s.evrPipeline.ProcessRequestEvr(logger, s, request) {
 					reason = "error processing message"
 					break IncomingLoop
 				}
@@ -674,17 +682,16 @@ func (s *sessionWS) Format() SessionFormat {
 // SendEvr sends a message to the client in the EchoVR format.
 // TODO Transition to using streamsend for all messages.
 func (s *sessionWS) SendEvr(messages ...evr.Message) error {
-	if s.logger.Core().Enabled(zap.DebugLevel) {
-		for _, message := range messages {
-			s.logger.Debug("Sending Message.", zap.Any("message", message))
-		}
-	}
 
+	isDebug := s.logger.Core().Enabled(zap.DebugLevel)
 	// Send the EVR messages one at a time.
 	var message evr.Message
 	for _, message = range messages {
 		if message == nil {
 			continue
+		}
+		if isDebug {
+			s.logger.Debug(fmt.Sprintf("Sending %T message", message), zap.String("message", fmt.Sprintf("%s", message)))
 		}
 		// Marshal the message.
 		payload, err := evr.Marshal(message)
