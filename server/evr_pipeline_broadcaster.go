@@ -143,8 +143,10 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 
 	logger = logger.With(zap.String("externalIP", externalIP.String()))
 
+	features := ctx.Value(ctxFeaturesKey{}).([]string)
+
 	// Create the broadcaster config
-	config := broadcasterConfig(userId, session.id.String(), request.ServerId, request.InternalIP, externalIP, request.Port, regions, request.VersionLock, tags)
+	config := broadcasterConfig(userId, session.id.String(), request.ServerId, request.InternalIP, externalIP, request.Port, regions, request.VersionLock, tags, features)
 
 	// Get the hosted groupIDs
 	groupIDs, err := p.getBroadcasterHostGroups(ctx, logger, session, userId, discordId, guildIds)
@@ -307,7 +309,7 @@ func (p *EvrPipeline) authenticateBroadcaster(ctx context.Context, logger *zap.L
 	return userId, username, nil
 }
 
-func broadcasterConfig(userId, sessionId string, serverId uint64, internalIP, externalIP net.IP, port uint16, regions []evr.Symbol, versionLock uint64, tags []string) *MatchBroadcaster {
+func broadcasterConfig(userId, sessionId string, serverId uint64, internalIP, externalIP net.IP, port uint16, regions []evr.Symbol, versionLock uint64, tags, features []string) *MatchBroadcaster {
 
 	config := &MatchBroadcaster{
 		SessionID:  sessionId,
@@ -321,6 +323,7 @@ func broadcasterConfig(userId, sessionId string, serverId uint64, internalIP, ex
 		Regions:     regions,
 		VersionLock: versionLock,
 		Channels:    make([]uuid.UUID, 0),
+		Features:    features,
 
 		Tags: make([]string, 0),
 	}
@@ -340,7 +343,7 @@ func (p *EvrPipeline) getUserGroups(ctx context.Context, userID uuid.UUID, minSt
 			return nil, fmt.Errorf("failed to get user groups: %v", err)
 		}
 		for _, g := range usergroups {
-			if api.GroupUserList_GroupUser_State(g.State.GetValue()) <= api.GroupUserList_GroupUser_MEMBER {
+			if api.GroupUserList_GroupUser_State(g.State.GetValue()) <= minState {
 				groups = append(groups, g)
 			}
 		}

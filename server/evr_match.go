@@ -202,6 +202,7 @@ type MatchBroadcaster struct {
 	IPinfo        *ipinfo.Core `json:"ip_info,omitempty"`        // The IPinfo of the broadcaster.
 	ServerID      uint64       `json:"server_id,omitempty"`      // The server id of the broadcaster. (EVR)
 	PublisherLock bool         `json:"publisher_lock,omitempty"` // Publisher lock (EVR)
+	Features      []string     `json:"features,omitempty"`       // The features of the broadcaster.
 	Tags          []string     `json:"tags,omitempty"`           // The tags given on the urlparam for the match.
 }
 
@@ -221,10 +222,11 @@ type EvrMatchState struct {
 	GuildID     string           `json:"guild_id,omitempty"`    // The guild id of the broadcaster. (EVR)
 	GuildName   string           `json:"guild_name,omitempty"`  // The guild name of the broadcaster. (EVR)
 
-	Mode            evr.Symbol           `json:"mode,omitempty"`             // The mode of the lobby (Arena, Combat, Social, etc.) (EVR)
-	Level           evr.Symbol           `json:"level,omitempty"`            // The level to play on (EVR).
-	LevelSelection  MatchLevelSelection  `json:"level_selection,omitempty"`  // The level selection method (EVR).
-	SessionSettings *evr.SessionSettings `json:"session_settings,omitempty"` // The session settings for the match (EVR).
+	Mode             evr.Symbol           `json:"mode,omitempty"`              // The mode of the lobby (Arena, Combat, Social, etc.) (EVR)
+	Level            evr.Symbol           `json:"level,omitempty"`             // The level to play on (EVR).
+	LevelSelection   MatchLevelSelection  `json:"level_selection,omitempty"`   // The level selection method (EVR).
+	SessionSettings  *evr.SessionSettings `json:"session_settings,omitempty"`  // The session settings for the match (EVR).
+	RequiredFeatures []string             `json:"required_features,omitempty"` // The required features for the match.
 
 	MaxSize     uint8     `json:"limit,omitempty"`     // The total lobby size limit (players + specs)
 	Size        int       `json:"size"`                // The number of players (including spectators) in the match.
@@ -323,20 +325,22 @@ func NewEvrMatchState(endpoint evr.Endpoint, config *MatchBroadcaster, sessionId
 	// Then when the matchmaker decides spawning a new server is nominal approach, the broadcaster joins the match along with
 	// the players. It would have to join first though.  - @thesprockee
 	initState := &EvrMatchState{
-		Node:           node,
-		StartedAt:      time.Now(),
-		Broadcaster:    *config,
-		SpawnedBy:      config.OperatorID,
-		Open:           false,
-		LobbyType:      UnassignedLobby,
-		Mode:           evr.ModeUnloaded,
-		Level:          evr.LevelUnloaded,
-		Players:        make([]PlayerInfo, 0, MatchMaxSize),
-		presences:      make(map[uuid.UUID]*EvrMatchPresence, MatchMaxSize),
-		presenceCache:  make(map[uuid.UUID]*EvrMatchPresence, MatchMaxSize),
-		teamAlignments: make(map[evr.EvrId]int, MatchMaxSize),
-		emptyTicks:     0,
-		tickRate:       10,
+		Node:             node,
+		StartedAt:        time.Now(),
+		Broadcaster:      *config,
+		SpawnedBy:        config.OperatorID,
+		Open:             false,
+		LobbyType:        UnassignedLobby,
+		Mode:             evr.ModeUnloaded,
+		Level:            evr.LevelUnloaded,
+		RequiredFeatures: make([]string, 0),
+		Players:          make([]PlayerInfo, 0, MatchMaxSize),
+		presences:        make(map[uuid.UUID]*EvrMatchPresence, MatchMaxSize),
+		presenceCache:    make(map[uuid.UUID]*EvrMatchPresence, MatchMaxSize),
+		teamAlignments:   make(map[evr.EvrId]int, MatchMaxSize),
+
+		emptyTicks: 0,
+		tickRate:   10,
 	}
 
 	evrMatchConfig := evrMatchConfig{
@@ -615,7 +619,7 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 			}
 			// Tell the broadcaster to load the level.
 			messages := []evr.Message{
-				evr.NewBroadcasterStartSession(state.MatchID, *state.Channel, state.MaxSize, uint8(state.LobbyType), state.Broadcaster.AppId, state.Mode, state.Level, []evr.EvrId{}),
+				evr.NewBroadcasterStartSession(state.MatchID, *state.Channel, state.MaxSize, uint8(state.LobbyType), state.Broadcaster.AppId, state.Mode, state.Level, []string{}, []evr.EvrId{}),
 			}
 			state.StartedAt = time.Now()
 			// Dispatch the message for delivery.
@@ -963,6 +967,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		state.TeamSize = newState.TeamSize
 		state.Level = newState.Level
 		state.Open = newState.Open
+		state.RequiredFeatures = newState.RequiredFeatures
 		state.SessionSettings = newState.SessionSettings
 		state.LevelSelection = newState.LevelSelection
 		state.teamAlignments = make(map[evr.EvrId]int, MatchMaxSize)
@@ -1009,7 +1014,7 @@ func (m *EvrMatch) StartSession(ctx context.Context, logger runtime.Logger, nk r
 	state.Started = true
 	state.StartedAt = time.Now()
 	entrants := make([]evr.EvrId, 0)
-	message := evr.NewBroadcasterStartSession(state.MatchID, channel, state.MaxSize, uint8(state.LobbyType), state.Broadcaster.AppId, state.Mode, state.Level, entrants)
+	message := evr.NewBroadcasterStartSession(state.MatchID, channel, state.MaxSize, uint8(state.LobbyType), state.Broadcaster.AppId, state.Mode, state.Level, state.RequiredFeatures, entrants)
 	logger.Info("Starting session. %v", message)
 	messages := []evr.Message{
 		message,

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/gofrs/uuid/v5"
+	"github.com/google/go-cmp/cmp"
 	"github.com/samber/lo"
 )
 
@@ -60,8 +61,8 @@ func TestLobbyFindSessionRequest_Unmarshal(t *testing.T) {
 		TeamIndex: 2,
 	}
 
-	if *got != want {
-		t.Error(got, want)
+	if cmp.Equal(got, want) {
+		t.Errorf("\ngot  %s\nwant %s", got.String(), want.String())
 	}
 
 }
@@ -119,8 +120,8 @@ func TestLobbyFindSessionRequest_Unpack(t *testing.T) {
 		TeamIndex: 4,
 	}
 
-	if *got != want {
-		t.Error(got, want)
+	if cmp.Equal(got, want) {
+		t.Errorf("\ngot  %s\nwant %s", got.String(), want.String())
 	}
 
 }

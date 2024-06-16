@@ -62,6 +62,15 @@ func (p *EvrPipeline) ListUnassignedLobbies(ctx context.Context, session *sessio
 	// Add the user's region request to the query
 	qparts = append(qparts, Regions(ml.Broadcaster.Regions).Query(Must, 0))
 
+	// SHOULD/MUST have the same features
+	for _, f := range ml.RequiredFeatures {
+		qparts = append(qparts, "+label.broadcaster.features:"+f)
+	}
+
+	for _, f := range ml.Broadcaster.Features {
+		qparts = append(qparts, "label.broadcaster.features:"+f)
+	}
+
 	// TODO FIXME Add version lock and appid
 	query := strings.Join(qparts, " ")
 

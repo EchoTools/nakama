@@ -180,6 +180,8 @@ func (p *EvrPipeline) matchmakingLabelFromFindRequest(ctx context.Context, sessi
 		}
 	}
 
+	features := ctx.Value(ctxFeaturesKey{}).([]string)
+
 	return &EvrMatchState{
 		Channel: &groupID,
 
@@ -194,6 +196,7 @@ func (p *EvrPipeline) matchmakingLabelFromFindRequest(ctx context.Context, sessi
 		Broadcaster: MatchBroadcaster{
 			VersionLock: request.VersionLock,
 			Channels:    guildPriority,
+			Features:    features,
 		},
 	}, nil
 }
@@ -723,6 +726,9 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 	request := in.(*evr.LobbyCreateSessionRequest)
 	response := NewMatchmakingResult(logger, request.Mode, request.Channel)
 
+	features := ctx.Value(ctxFeaturesKey{}).([]string)
+	requiredFeatures := ctx.Value(ctxRequiredFeaturesKey{}).([]string)
+
 	// Get the GroupID from the context
 	groupID := request.Channel
 	if groupID != uuid.Nil {
@@ -755,6 +761,12 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 		"level":    request.Level.String(),
 		"team_idx": strconv.FormatInt(int64(request.TeamIndex), 10),
 	}
+
+	// Add the features to teh metrics tags as feature_<featurename>
+	for _, feature := range features {
+		metricsTags[fmt.Sprintf("feature_%s", feature)] = "1"
+	}
+
 	p.metrics.CustomCounter("lobbycreatesession_active_count", metricsTags, 1)
 	loginSessionID := request.LoginSessionID
 
@@ -818,17 +830,19 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 	}
 
 	ml := &EvrMatchState{
-		Level:           request.Level,
-		LobbyType:       LobbyType(request.LobbyType),
-		Mode:            request.Mode,
-		Open:            true,
-		SessionSettings: &request.SessionSettings,
-		TeamIndex:       TeamIndex(request.TeamIndex),
-		Channel:         &request.Channel,
+		Level:            request.Level,
+		LobbyType:        LobbyType(request.LobbyType),
+		Mode:             request.Mode,
+		Open:             true,
+		SessionSettings:  &request.SessionSettings,
+		TeamIndex:        TeamIndex(request.TeamIndex),
+		Channel:          &request.Channel,
+		RequiredFeatures: requiredFeatures,
 		Broadcaster: MatchBroadcaster{
 			VersionLock: uint64(request.VersionLock),
 			Regions:     uniqueRegions,
 			Channels:    priorities,
+			Features:    features,
 		},
 	}
 
@@ -928,6 +942,18 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 		return response.SendErrorToSession(session, err)
 	}
 
+	// Ensure the client has the required features
+	if len(ml.RequiredFeatures) > 0 {
+		features, ok := ctx.Value(ctxFeaturesKey{}).([]string)
+		if !ok {
+			features = make([]string, 0)
+		}
+		for _, f := range ml.RequiredFeatures {
+			if !lo.Contains(features, f) {
+				return response.SendErrorToSession(session, status.Errorf(codes.FailedPrecondition, "Missing required feature: %v", f))
+			}
+		}
+	}
 	if err := p.authorizeMatchmaking(ctx, logger, session, loginSessionID, *ml.Channel, false); err != nil {
 		switch status.Code(err) {
 		case codes.Internal:

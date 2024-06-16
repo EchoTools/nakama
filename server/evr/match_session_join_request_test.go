@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/gofrs/uuid/v5"
+	"github.com/google/go-cmp/cmp"
 	"github.com/samber/lo"
 )
 
@@ -56,8 +57,8 @@ func TestLobbyJoinSessionRequest_LobbyID(t *testing.T) {
 		TeamIndex: -1,
 	}
 
-	if *got != want {
-		t.Error(got, want)
+	if cmp.Equal(got, want) {
+		t.Errorf("\ngot  %s\nwant %s", got.String(), want.String())
 	}
 
 }
@@ -111,8 +112,8 @@ func TestLobbyJoinSessionRequest_Moderator(t *testing.T) {
 		TeamIndex: 4,
 	}
 
-	if *got != want {
-		t.Error(got, want)
+	if cmp.Equal(got, want) {
+		t.Errorf("\ngot  %s\nwant %s", got.String(), want.String())
 	}
 
 }
@@ -167,8 +168,8 @@ func TestLobbyJoinSessionRequest_ModerateUser(t *testing.T) {
 		TeamIndex:  4,
 	}
 
-	if *got != want {
-		t.Error(got, want)
+	if cmp.Equal(got, want) {
+		t.Errorf("\ngot  %s\nwant %s", got.String(), want.String())
 	}
 
 }
