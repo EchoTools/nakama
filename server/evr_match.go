@@ -1098,7 +1098,7 @@ func checkGroupMembershipByName(ctx context.Context, nk runtime.NakamaModule, us
 		return false, fmt.Errorf("error getting user groups: %w", err)
 	}
 	for _, g := range groups {
-		if g.Group.LangTag != langtag && g.Group.Name == groupName {
+		if g.Group.LangTag == langtag && g.Group.Name == groupName {
 			return true, nil
 		}
 	}
