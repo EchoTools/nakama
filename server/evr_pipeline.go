@@ -256,11 +256,6 @@ func (p *EvrPipeline) ProcessRequestEvr(logger *zap.Logger, session *sessionWS, 
 		return false
 	}
 
-	if logger.Core().Enabled(zap.DebugLevel) { // remove extra heavy reflection processing
-		logger.Debug(fmt.Sprintf("Received message: %T", in))
-		logger = logger.With(zap.String("request", fmt.Sprintf("%s", in)))
-	}
-
 	var pipelineFn func(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error
 
 	requireAuthed := true
