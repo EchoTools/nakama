@@ -1347,7 +1347,14 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				// Log the action
 				logger.Info("assign badges", zap.String("badges", badgeCodestr), zap.String("user", target.Username), zap.String("discord_id", target.ID), zap.String("assigner", user.ID))
 
-				simpleInteractionResponse(s, i, fmt.Sprintf("assigned badges `%s` to user `%s`", badgeCodestr, target.Username))
+				// Send a message to the channel
+				channel := "1232462244797874247"
+				_, err = s.ChannelMessageSend(channel, fmt.Sprintf("Assigned VRML cosmetics `%s` to user `%s`", badgeCodestr, target.Username))
+				if err != nil {
+					logger.Warn("failed to send message", zap.Error(err))
+					break
+				}
+				simpleInteractionResponse(s, i, fmt.Sprintf("Assigned VRML cosmetics `%s` to user `%s`", badgeCodestr, target.Username))
 
 			case "set-vrml-username":
 				options = options[0].Options
