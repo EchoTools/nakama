@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/gofrs/uuid/v5"
+	"github.com/google/go-cmp/cmp"
 	"github.com/samber/lo"
 )
 
@@ -43,11 +44,12 @@ func TestLobbyCreateSessionRequest_Unmarshal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, ok := packet[0].(*LobbyCreateSessionRequest)
+	message, ok := packet[0].(*LobbyCreateSessionRequest)
 	if !ok {
 		t.Fatal("failed to cast")
 	}
 
+	got := *message
 	want := LobbyCreateSessionRequest{
 		LobbyType:      uint32(PrivateLobby),
 		Region:         4998968863399059514,
@@ -66,8 +68,7 @@ func TestLobbyCreateSessionRequest_Unmarshal(t *testing.T) {
 		EvrId:     *lo.Must(ParseEvrId("OVR_ORG-3963667097037078")),
 		TeamIndex: 2,
 	}
-
-	if *got != want {
+	if cmp.Equal(got, want) {
 		t.Errorf("\ngot  %s\nwant %s", got.String(), want.String())
 	}
 
@@ -135,8 +136,7 @@ func TestLobbyCreateSessionRequest_GameType(t *testing.T) {
 		EvrId:     *lo.Must(ParseEvrId("OVR_ORG-3963667097037078")),
 		TeamIndex: 2,
 	}
-
-	if *got != want {
+	if cmp.Equal(got, want) {
 		t.Errorf("\ngot  %s\nwant %s", got.String(), want.String())
 	}
 

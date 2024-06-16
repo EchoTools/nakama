@@ -28,6 +28,8 @@ const (
 	EvrIdOverrideUrlParam                 = "evrid"
 	BroadcasterEncryptionDisabledUrlParam = "disable_encryption"
 	BroadcasterHMACDisabledUrlParam       = "disable_hmac"
+	FeaturesURLParam                      = "features"
+	RequiredFeaturesURLParam              = "required_features"
 
 	EvrIDStorageIndex            = "EvrIDs_Index"
 	GameClientSettingsStorageKey = "clientSettings"

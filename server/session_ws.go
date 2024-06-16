@@ -20,6 +20,9 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"regexp"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -44,6 +47,7 @@ var (
 	svcLoginID       = uuid.FromStringOrNil("00000000-0000-0000-0000-000000000001")
 	svcMatchID       = uuid.FromStringOrNil("00000000-0000-0000-0000-000000000002")
 	svcBroadcasterID = uuid.FromStringOrNil("00000000-0000-0000-0000-000000000003")
+	featurePattern   = regexp.MustCompile(`^[a-z0-9_]+$`)
 )
 
 type (
@@ -104,6 +108,9 @@ type (
 	ctxUrlParamsKey         struct{} // The URL parameters from the request
 	ctxIPinfoTokenKey       struct{} // The IPinfo token from the config
 	ctxFlagsKey             struct{} // The group flags from the urlparam
+	ctxFeaturesKey          struct{} // The features from the urlparam
+	ctxRequiredFeaturesKey  struct{} // The features from the urlparam
+
 	//ctxMatchmakingQueryKey         struct{} // The Matchmaking query from the urlparam
 	//ctxMatchmakingGuildPriorityKey struct{} // The Matchmaking guild priority from the urlparam
 )
@@ -148,6 +155,42 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 		}
 		ctx = context.WithValue(ctx, ctxPasswordKey{}, v)
 	}
+
+	// Add the features list to the urlparam, sanitizing it
+	features := make([]string, 0)
+	if v := request.URL.Query().Get(FeaturesURLParam); v != "" {
+		s := strings.Split(v, ",")
+		for _, f := range s {
+			// Sanatize the feature name to all lowercase and only A-Z, a-z, 0-9, and _
+			f = strings.ToLower(f)
+			if !featurePattern.MatchString(f) {
+				continue
+			}
+			features = append(features, f)
+		}
+		if len(features) > 0 {
+			slices.Sort(features)
+		}
+	}
+	ctx = context.WithValue(ctx, ctxFeaturesKey{}, features)
+
+	requiredFeatures := make([]string, 0)
+	if v := request.URL.Query().Get(RequiredFeaturesURLParam); v != "" {
+		s := strings.Split(v, ",")
+		for _, f := range s {
+			// Sanatize the feature name to all lowercase and only A-Z, a-z, 0-9, and _
+			f = strings.ToLower(f)
+			if !featurePattern.MatchString(f) {
+				continue
+			}
+			requiredFeatures = append(requiredFeatures, f)
+		}
+		if len(requiredFeatures) > 0 {
+			slices.Sort(requiredFeatures)
+		}
+	}
+
+	ctx = context.WithValue(ctx, ctxRequiredFeaturesKey{}, requiredFeatures)
 
 	// Add the URL parameters to the context
 	p := make(map[string][]string, 0)

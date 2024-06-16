@@ -48,15 +48,14 @@ const (
 )
 
 var (
-	ErrMatchmakingPingTimeout        = status.Errorf(codes.DeadlineExceeded, "Ping timeout")
-	ErrMatchmakingTimeout            = status.Errorf(codes.DeadlineExceeded, "Matchmaking timeout")
-	ErrMatchmakingNoAvailableServers = status.Errorf(codes.Unavailable, "No available servers")
-	ErrMatchmakingCanceled           = status.Errorf(codes.Canceled, "Matchmaking canceled")
-	ErrMatchmakingCanceledByPlayer   = status.Errorf(codes.Canceled, "Matchmaking canceled by player")
-	ErrMatchmakingRestarted          = status.Errorf(codes.Canceled, "matchmaking restarted")
-	ErrMatchmakingMigrationRequired  = status.Errorf(codes.FailedPrecondition, "Server upgraded, migration")
-	MatchmakingStreamSubject         = uuid.NewV5(uuid.Nil, "matchmaking").String()
-
+	ErrMatchmakingPingTimeout          = status.Errorf(codes.DeadlineExceeded, "Ping timeout")
+	ErrMatchmakingTimeout              = status.Errorf(codes.DeadlineExceeded, "Matchmaking timeout")
+	ErrMatchmakingNoAvailableServers   = status.Errorf(codes.Unavailable, "No available servers")
+	ErrMatchmakingCanceled             = status.Errorf(codes.Canceled, "Matchmaking canceled")
+	ErrMatchmakingCanceledByPlayer     = status.Errorf(codes.Canceled, "Matchmaking canceled by player")
+	ErrMatchmakingRestarted            = status.Errorf(codes.Canceled, "matchmaking restarted")
+	ErrMatchmakingMigrationRequired    = status.Errorf(codes.FailedPrecondition, "Server upgraded, migration")
+	MatchmakingStreamSubject           = uuid.NewV5(uuid.Nil, "matchmaking").String()
 	MatchmakingConfigStorageCollection = "Matchmaker"
 	MatchmakingConfigStorageKey        = "config"
 )
@@ -275,7 +274,7 @@ func determineErrorCode(code codes.Code) evr.LobbySessionFailureErrorCode {
 	case codes.PermissionDenied, codes.Unauthenticated:
 		return evr.LobbySessionFailure_KickedFromLobbyGroup
 	case codes.FailedPrecondition:
-		return evr.LobbySessionFailure_UpdateRequired
+		return evr.LobbySessionFailure_ServerIsIncompatible
 
 	default:
 		return evr.LobbySessionFailure_InternalError

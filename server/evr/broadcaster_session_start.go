@@ -62,15 +62,12 @@ type BroadcasterStartSession struct {
 	Entrants    []EntrantDescriptor // Information regarding entrants (e.g. including offline/local player ids, or AI bot platform ids).
 }
 
-func (m *BroadcasterStartSession) Symbol() Symbol { return 0x7777777777770000 }
-func (m *BroadcasterStartSession) Token() string  { return "ERBroadcasterSessionStart" } // similar to "NSLobbyStartSessionv4"
-
 func (s *BroadcasterStartSession) String() string {
 	return fmt.Sprintf("BroadcasterStartSession(session_id=%s, player_limit=%d, lobby_type=%d, settings=%s, entrant_descriptors=%v)",
 		s.MatchID, s.PlayerLimit, s.LobbyType, s.Settings.String(), s.Entrants)
 }
 
-func NewBroadcasterStartSession(sessionID uuid.UUID, channel uuid.UUID, playerLimit uint8, lobbyType uint8, appID string, mode Symbol, level Symbol, entrants []EvrId) *BroadcasterStartSession {
+func NewBroadcasterStartSession(sessionID uuid.UUID, channel uuid.UUID, playerLimit uint8, lobbyType uint8, appID string, mode Symbol, level Symbol, features []string, entrants []EvrId) *BroadcasterStartSession {
 	descriptors := make([]EntrantDescriptor, len(entrants))
 	for i, entrant := range entrants {
 		descriptors[i] = *NewEntrantDescriptor(entrant)
@@ -81,23 +78,25 @@ func NewBroadcasterStartSession(sessionID uuid.UUID, channel uuid.UUID, playerLi
 		Channel:     channel,
 		PlayerLimit: byte(playerLimit),
 		LobbyType:   byte(lobbyType),
-		Settings:    NewSessionSettings(appID, mode, level),
+		Settings:    NewSessionSettings(appID, mode, level, features),
 		Entrants:    descriptors,
 	}
 }
 
 type SessionSettings struct {
-	AppID string `json:"appid"`
-	Mode  int64  `json:"gametype"`
-	Level *int64 `json:"level"`
+	AppID    string   `json:"appid"`
+	Mode     int64    `json:"gametype"`
+	Level    *int64   `json:"level"`
+	Features []string `json:"features,omitempty"`
 }
 
-func NewSessionSettings(appID string, mode Symbol, level Symbol) SessionSettings {
+func NewSessionSettings(appID string, mode Symbol, level Symbol, features []string) SessionSettings {
 
 	settings := SessionSettings{
-		AppID: appID,
-		Mode:  int64(mode),
-		Level: nil,
+		AppID:    appID,
+		Mode:     int64(mode),
+		Level:    nil,
+		Features: features,
 	}
 	if level != 0 {
 		l := int64(level)
@@ -120,8 +119,6 @@ type EntrantDescriptor struct {
 	Flags    uint64
 }
 
-func (m *EntrantDescriptor) Symbol() Symbol { return 0x7777777777770001 }
-func (m *EntrantDescriptor) Token() string  { return "EREntrantDescriptor" }
 func (m *EntrantDescriptor) String() string {
 	return fmt.Sprintf("EREntrantDescriptor(unk0=%s, player_id=%s, flags=%d)", m.Unk0, m.PlayerId.String(), m.Flags)
 }
@@ -161,8 +158,7 @@ func (m *BroadcasterStartSession) Stream(s *EasyStream) error {
 			for _, entrant := range m.Entrants {
 				err := RunErrorFunctions([]func() error{
 					func() error { return s.StreamGuid(&entrant.Unk0) },
-					func() error { return s.StreamNumber(binary.LittleEndian, &entrant.PlayerId.PlatformCode) },
-					func() error { return s.StreamNumber(binary.LittleEndian, &entrant.PlayerId.AccountId) },
+					func() error { return s.StreamStruct(&entrant.PlayerId) },
 					func() error { return s.StreamNumber(binary.LittleEndian, &entrant.Flags) },
 				})
 				if err != nil {
