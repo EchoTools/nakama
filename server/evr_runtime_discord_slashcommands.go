@@ -1669,7 +1669,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return
 			}
 
-			presences, err := d.nk.StreamUserList(StreamModeEvr, userID.String(), svcLoginID.String(), "", true, true)
+			presences, err := d.nk.StreamUserList(StreamModeEvr, targetUserID.String(), svcMatchID.String(), "", true, true)
 			if err != nil {
 				errFn(err)
 				return
