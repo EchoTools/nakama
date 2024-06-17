@@ -230,6 +230,7 @@ type EvrMatchState struct {
 
 	MaxSize     uint8     `json:"limit,omitempty"`     // The total lobby size limit (players + specs)
 	Size        int       `json:"size"`                // The number of players (including spectators) in the match.
+	PlayerCount int       `json:"player_count"`        // The number of participants (not including spectators) in the match.
 	PlayerLimit int       `json:"player_limit"`        // The number of players in the match (not including spectators).
 	TeamSize    int       `json:"team_size,omitempty"` // The size of each team in arena/combat (either 4 or 5)
 	TeamIndex   TeamIndex `json:"team,omitempty"`      // What team index a player prefers (Used by Matching only)
@@ -278,11 +279,13 @@ func (s *EvrMatchState) rebuildCache() {
 
 	s.Players = make([]PlayerInfo, 0, len(s.presences))
 	s.Size = len(s.presences)
-
+	s.PlayerCount = 0
 	// Construct Player list
 	for _, presence := range s.presences {
 		// Do not include spectators or moderators in player count
-
+		if presence.TeamIndex != evr.TeamSpectator && presence.TeamIndex != evr.TeamModerator {
+			s.PlayerCount++
+		}
 		playerinfo := PlayerInfo{
 			UserID:      presence.UserID.String(),
 			Username:    presence.Username,
