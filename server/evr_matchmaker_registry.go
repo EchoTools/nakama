@@ -576,11 +576,11 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 		}
 
 		for i, m := range backfillMatches {
-			if m.PlayerLimit-m.Size < partySize {
+			if m.PlayerLimit-m.PlayerCount < partySize {
 				continue
 			}
 			// Make sure adding these players makes the teams the same size
-			if (m.Size+partySize)%2 != 0 {
+			if (m.PlayerCount+partySize)%2 != 0 {
 				continue
 			}
 			logger.Info("Backfilling match", zap.String("matchID", m.MatchID.String()), zap.String("partyID", partyID), zap.Any("party", party))
@@ -609,7 +609,7 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 			// Remove the party from the party list
 			delete(parties, partyID)
 			// Set the backfill match size to the new size
-			backfillMatches[i].Size += partySize
+			backfillMatches[i].PlayerCount += partySize
 
 		}
 	}
@@ -1131,18 +1131,18 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, logger *zap.Logger, se
 	case ml.Mode == evr.ModeSocialPrivate || ml.Mode == evr.ModeSocialPublic:
 		ml.Level = evr.LevelSocial // Include the level in the search
 		ml.TeamSize = MatchMaxSize
-		ml.Size = MatchMaxSize - partySize
+		ml.PlayerCount = MatchMaxSize - partySize
 
 	case ml.Mode == evr.ModeArenaPublic:
 		ml.TeamSize = 4
-		ml.Size = ml.TeamSize*2 - partySize // Both teams, minus the party size
+		ml.PlayerCount = ml.TeamSize*2 - partySize // Both teams, minus the party size
 
 	case ml.Mode == evr.ModeCombatPublic:
 		ml.TeamSize = 5
-		ml.Size = ml.TeamSize*2 - partySize // Both teams, minus the party size
+		ml.PlayerCount = ml.TeamSize*2 - partySize // Both teams, minus the party size
 
 	default: // Privates
-		ml.Size = MatchMaxSize - partySize
+		ml.PlayerCount = MatchMaxSize - partySize
 		ml.TeamSize = 5
 	}
 

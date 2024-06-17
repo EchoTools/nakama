@@ -190,7 +190,7 @@ func (p *EvrPipeline) Backfill(ctx context.Context, session *sessionWS, msession
 
 		if msession.Label.TeamIndex != Spectator && msession.Label.TeamIndex != Moderator {
 
-			availablePlayerSlots := (label.PlayerLimit - label.Size)
+			availablePlayerSlots := (label.PlayerLimit - label.PlayerCount)
 			// Check if there is space for the player(s)
 			if availablePlayerSlots < minCount {
 				logger.Warn("Match does not have enough open slots.")
@@ -199,7 +199,7 @@ func (p *EvrPipeline) Backfill(ctx context.Context, session *sessionWS, msession
 				// Ensure that adding the minCount to the match would balance the match
 			}
 
-			if msession.Label.Mode == evr.ModeCombatPublic && (label.Size+minCount)%2 != 0 {
+			if msession.Label.Mode == evr.ModeCombatPublic && (label.PlayerCount+minCount)%2 != 0 {
 				logger.Warn("Combat match does not have the right multiple of open slots.")
 				mu.Unlock()
 				continue
@@ -403,7 +403,7 @@ func buildMatchQueryFromLabel(ml *EvrMatchState) string {
 
 	if ml.TeamIndex != Spectator && ml.TeamIndex != Moderator {
 		// MUST have room for this party on the teams
-		qparts = append(qparts, fmt.Sprintf("+label.size:<=%d", ml.Size))
+		qparts = append(qparts, fmt.Sprintf("+label.player_count:<=%d", ml.PlayerCount))
 	}
 
 	// MUST NOT much into the same lobby
@@ -547,9 +547,9 @@ func (p *EvrPipeline) MatchSort(ctx context.Context, session *sessionWS, msessio
 	}
 
 	type labelData struct {
-		Id   string
-		Size int
-		RTT  time.Duration
+		Id          string
+		PlayerCount int
+		RTT         time.Duration
 	}
 	// Create a map of endpoint Ids to sizes and latencies
 	datas := make([]labelData, 0, len(labels))
@@ -560,7 +560,7 @@ func (p *EvrPipeline) MatchSort(ctx context.Context, session *sessionWS, msessio
 		if rtt == 0 || rtt > 270*time.Millisecond {
 			continue
 		}
-		datas = append(datas, labelData{id, label.Size, rtt})
+		datas = append(datas, labelData{id, label.PlayerCount, rtt})
 	}
 
 	// Sort the matches
@@ -569,7 +569,7 @@ func (p *EvrPipeline) MatchSort(ctx context.Context, session *sessionWS, msessio
 		// Split Arena matches into two groups: over and under 90ms
 		// Sort by if over or under 90ms, then population, then latency
 		sort.SliceStable(datas, func(i, j int) bool {
-			return RTTweightedPopulationCmp(datas[i].RTT, datas[j].RTT, datas[i].Size, datas[j].Size)
+			return RTTweightedPopulationCmp(datas[i].RTT, datas[j].RTT, datas[i].PlayerCount, datas[j].PlayerCount)
 		})
 
 	case evr.ModeCombatPublic:
@@ -581,7 +581,7 @@ func (p *EvrPipeline) MatchSort(ctx context.Context, session *sessionWS, msessio
 
 	default:
 		sort.SliceStable(datas, func(i, j int) bool {
-			return PopulationCmp(datas[i].Size, datas[j].Size, datas[i].RTT, datas[j].RTT)
+			return PopulationCmp(datas[i].PlayerCount, datas[j].PlayerCount, datas[i].RTT, datas[j].RTT)
 		})
 	}
 
