@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -276,10 +277,10 @@ func (r *LocalDiscordRegistry) GetGuildMember(ctx context.Context, guildId, memb
 
 	// If member is not found in the cache, get it from the API
 	member, err := r.bot.GuildMember(guildId, memberId)
-	if err != nil {
-		if restErr, ok := err.(*discordgo.RESTError); ok && restErr.Message.Code == discordgo.ErrCodeUnknownMember {
-			return nil, nil
-		}
+	var restError *discordgo.RESTError
+	if errors.As(err, &restError) && restError.Message != nil && restError.Message.Code == discordgo.ErrCodeUnknownMember {
+		return nil, nil
+	} else if err != nil {
 		return nil, fmt.Errorf("error getting member %s in guild %s: %w", memberId, guildId, err)
 	}
 	r.bot.State.MemberAdd(member)
@@ -525,6 +526,9 @@ func (r *LocalDiscordRegistry) UpdateGuildGroup(ctx context.Context, logger runt
 		if ctx.Err() != nil || member == nil {
 			return fmt.Errorf("context cancelled: %w", err)
 		}
+	}
+	if member == nil {
+		return fmt.Errorf("member not found: %s", discordID)
 	}
 
 	// Get all of the user's memberships
@@ -941,7 +945,9 @@ func (r *LocalDiscordRegistry) GetAllSuspensions(ctx context.Context, userId uui
 		if err != nil {
 			return nil, fmt.Errorf("error getting guild member: %w", err)
 		}
-
+		if member == nil {
+			continue
+		}
 		// Look for an intersection between suspension roles and the member's roles
 		if slices.Contains(member.Roles, md.SuspensionRole) {
 			// Get the role's name
@@ -986,7 +992,9 @@ func (r *LocalDiscordRegistry) isModerator(ctx context.Context, guildID, discord
 	if err != nil {
 		return false, false, fmt.Errorf("error getting guild member: %w", err)
 	}
-
+	if member == nil {
+		return false, false, fmt.Errorf("member not found: %s", discordID)
+	}
 	// Check if the member has the moderator role
 	return slices.Contains(member.Roles, md.ModeratorRole), false, nil
 }

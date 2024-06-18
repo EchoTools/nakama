@@ -725,7 +725,9 @@ func SetDisplayNameByChannelBySession(ctx context.Context, nk runtime.NakamaModu
 			if err != nil {
 				return displayName, fmt.Errorf("error getting guild member %s for guild %s: %w", discordID, guild.ID, err)
 			}
-			options = append(options, guildMember.Nick)
+			if guildMember != nil {
+				options = append(options, guildMember.Nick)
+			}
 		}
 	}
 
