@@ -16,6 +16,7 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/heroiclabs/nakama/v3/server/evr"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -64,10 +65,9 @@ type DiscordRegistry interface {
 	UpdateAllGuildGroupsForUser(ctx context.Context, logger runtime.Logger, userID uuid.UUID) error
 	isModerator(ctx context.Context, guildID, discordID string) (isModerator bool, isGlobal bool, err error)
 	IsGlobalModerator(ctx context.Context, userID uuid.UUID) (ok bool, err error)
+	ProcessRequest(ctx context.Context, session *sessionWS, in evr.Message) error
 }
 
-// The discord registry is a storage-backed lookup table for discord user ids to nakama user ids.
-// It also carries the bot session and a cache for the lookup table.
 type LocalDiscordRegistry struct {
 	sync.RWMutex
 	ctx      context.Context
@@ -79,7 +79,8 @@ type LocalDiscordRegistry struct {
 	bot       *discordgo.Session // The bot
 	botUserID uuid.UUID
 
-	cache sync.Map // Generic cache for map[discordId]nakamaId lookup
+	cache         sync.Map // Generic cache for map[discordId]nakamaId lookup
+	expiringCache *Cache
 }
 
 func NewLocalDiscordRegistry(ctx context.Context, nk runtime.NakamaModule, logger runtime.Logger, metrics Metrics, config Config, pipeline *Pipeline, dg *discordgo.Session) (r *LocalDiscordRegistry) {
@@ -87,13 +88,14 @@ func NewLocalDiscordRegistry(ctx context.Context, nk runtime.NakamaModule, logge
 	dg.StateEnabled = true
 
 	discordRegistry := &LocalDiscordRegistry{
-		ctx:      ctx,
-		nk:       nk,
-		logger:   logger,
-		metrics:  metrics,
-		pipeline: pipeline,
-		bot:      dg,
-		cache:    sync.Map{},
+		ctx:           ctx,
+		nk:            nk,
+		logger:        logger,
+		metrics:       metrics,
+		pipeline:      pipeline,
+		bot:           dg,
+		cache:         sync.Map{},
+		expiringCache: NewCache(),
 	}
 
 	dg.AddHandler(func(s *discordgo.Session, m *discordgo.Ready) {
@@ -294,7 +296,7 @@ func (r *LocalDiscordRegistry) GetGuildGroupMetadata(ctx context.Context, groupI
 		return nil, fmt.Errorf("groupId is required")
 	}
 
-	// Fetch the group using the provided groupId
+	// Fetch the group using the provided groupID
 	groups, err := r.nk.GroupsGetId(ctx, []string{groupId})
 	if err != nil {
 		return nil, fmt.Errorf("error getting group (%s): %w", groupId, err)
@@ -320,6 +322,10 @@ func (r *LocalDiscordRegistry) GetGuildGroupMetadata(ctx context.Context, groupI
 	// Update the cache
 	r.Store(groupId, guildGroup.GuildID)
 	r.Store(guildGroup.GuildID, groupId)
+
+	key := groupId + ":debug-channel"
+	r.expiringCache.Set(key, guildGroup.DebugChannel, 10*time.Minute)
+
 	// Return the unmarshalled GroupMetadata
 	return guildGroup, nil
 }
@@ -1016,4 +1022,28 @@ func (r *LocalDiscordRegistry) isSystemGroupMember(ctx context.Context, userID u
 		}
 	}
 	return false, nil
+}
+
+func (d *LocalDiscordRegistry) ProcessRequest(ctx context.Context, session *sessionWS, in evr.Message) error {
+
+	groupID, ok := ctx.Value(ctxGroupIDKey{}).(uuid.UUID)
+	if !ok {
+		return nil
+	}
+
+	// Check the cache for the "<groupID>:#echovrce-debug" value that will provide the channelID
+	channelID, found := d.Get(groupID.String() + ":#echovrce-debug")
+	if !found {
+		return nil
+	}
+
+	switch in := in.(type) {
+	case *evr.LobbyCreateSessionRequest, *evr.LobbyFindSessionRequest, *evr.LobbyJoinSessionRequest:
+		// Message the channel with the request info
+		request := fmt.Sprintf("%T: %v", in, in)
+		if _, err := d.bot.ChannelMessageSend(channelID, request); err != nil {
+			return fmt.Errorf("error sending message: %w", err)
+		}
+	}
+	return nil
 }

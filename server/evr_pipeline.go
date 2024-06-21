@@ -250,11 +250,7 @@ func (p *EvrPipeline) SetApiServer(apiServer *ApiServer) {
 
 func (p *EvrPipeline) Stop() {}
 
-func (p *EvrPipeline) ProcessRequestEvr(logger *zap.Logger, session *sessionWS, in evr.Message) bool {
-	if in == nil {
-		logger.Error("Received nil message, disconnecting client.")
-		return false
-	}
+func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, in evr.Message) bool {
 
 	var pipelineFn func(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error
 
@@ -345,14 +341,17 @@ func (p *EvrPipeline) ProcessRequestEvr(logger *zap.Logger, session *sessionWS, 
 		}
 	}
 
+	if err := p.discordRegistry.ProcessRequest(session.Context(), session, in); err != nil {
+		logger.Warn("Discord Bot logger error", zap.Error(err))
+	}
+
 	// If the message requires authentication, check if the session is authenticated.
 	if requireAuthed {
 		// If the session is not authenticated, log the error and return.
 		if session != nil && session.UserID() == uuid.Nil {
 			logger.Error("Session not authenticated")
 			// As a work around to the serverdb connection getting lost and needing to reauthenticate
-			err := p.attemptOutOfBandAuthentication(session)
-			if err != nil {
+			if err := p.attemptOutOfBandAuthentication(session); err != nil {
 				// If the session is now authenticated, continue processing the request.
 				logger.Error("Failed to authenticate session with discordId and password", zap.Error(err))
 				return false
@@ -360,8 +359,7 @@ func (p *EvrPipeline) ProcessRequestEvr(logger *zap.Logger, session *sessionWS, 
 		}
 	}
 
-	err := pipelineFn(session.Context(), logger, session, in)
-	if err != nil {
+	if err := pipelineFn(session.Context(), logger, session, in); err != nil {
 		// Unwrap the error
 		logger.Error("Pipeline error", zap.Error(err))
 		// TODO: Handle errors and close the connection

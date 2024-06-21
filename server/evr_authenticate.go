@@ -560,6 +560,7 @@ type GroupMetadata struct {
 	ServerHostRole    string                 `json:"serverhost_role"`     // The rules that have access to serverdb
 	SuspensionRole    string                 `json:"suspension_role"`     // The roles that have users suspended
 	ServerHostUserIDs []string               `json:"serverhost_user_ids"` // The broadcaster hosts
+	DebugChannel      string                 `json:"debug_channel_id"`    // The debug channel
 	Unhandled         map[string]interface{} `json:"-"`
 }
 

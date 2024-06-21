@@ -45,7 +45,8 @@ type DiscordAppBot struct {
 	profileRegistry *ProfileRegistry
 	dg              *discordgo.Session
 
-	userID string // Nakama UserID of the bot
+	debugChannels map[string]string // map[groupID]channelID
+	userID        string            // Nakama UserID of the bot
 }
 
 func NewDiscordAppBot(nk runtime.NakamaModule, logger runtime.Logger, metrics Metrics, pipeline *Pipeline, config Config, discordRegistry DiscordRegistry, profileRegistry *ProfileRegistry, dg *discordgo.Session) *DiscordAppBot {
