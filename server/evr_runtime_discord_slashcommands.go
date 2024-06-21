@@ -2297,7 +2297,6 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	})
 
 	whoami.DisplayNames = make([]string, 0, len(displayNameObjs))
-	whoami.DisplayNames = append(whoami.DisplayNames, account.GetUser().GetDisplayName())
 	for _, dn := range displayNameObjs {
 		whoami.DisplayNames = append(whoami.DisplayNames, dn.Key)
 	}
