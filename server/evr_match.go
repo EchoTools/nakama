@@ -55,42 +55,6 @@ var (
 type MatchStatGroup string
 type MatchLevelSelection string
 
-/*
-		func NewMatchParams(logger *zap.Logger, session *sessionWS, serverId uint64, internalAddress net.IP, externalAddress net.IP, port uint16, regionSymbol uint64, versionLock uint64, public bool, open bool) (uuid.UUID, error) {
-
-			matchId, err := r.runtimeModule.MatchCreate(ctx, EvrMatchModule, params)
-			if err != nil {
-				return "", fmt.Errorf("failed to create new lobby: %v", err)
-			}
-
-
-		// The actual matches "live" in a separate runtime.
-		// We use the rpc to create the match in the other runtime.
-
-			rpcFn := session.pipeline.runtime.Rpc("create_match_rpc")
-
-			paramsJson, err := json.Marshal(params)
-			if err != nil {
-				return uuid.Nil, fmt.Errorf("failed to create new lobby: %v", err)
-			}
-
-			matchNode, err, _ := rpcFn(session.Context(), nil, nil, uuid.Nil.String(), "", nil, session.Expiry(), session.ID().String(), session.clientIP, session.clientPort, "", string(paramsJson))
-			if err != nil {
-				return uuid.Nil, fmt.Errorf("failed to create new lobby: %v", err)
-			}
-
-		matchNode, err := r.matchRegistry.CreateMatch(context.Background(), r.runtime.matchCreateFunction, "match", params)
-		if err != nil {
-			return uuid.Nil, fmt.Errorf("failed to create new lobby: %v", err)
-		}
-		logger.Debug("Created new lobby.", zap.String("result", matchNode))
-
-		s := strings.Split(matchNode, ".")
-		matchId, _ := s[0], s[1]
-		return uuid.FromStringOrNil(matchId), nil
-	}
-*/
-
 type EvrSignal struct {
 	UserId string
 	Signal int64
