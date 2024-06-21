@@ -333,6 +333,18 @@ var (
 			},
 		},
 		{
+			Name:        "region-status",
+			Description: "Get the status of game servers in a specific region",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "region",
+					Description: "Region to check the status of",
+					Required:    true,
+				},
+			},
+		},
+		{
 			Name:        "party",
 			Description: "Manage EchoVR parties.",
 			Options: []*discordgo.ApplicationCommandOption{
@@ -1810,6 +1822,27 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			simpleInteractionResponse(s, i, "roles set!")
 		},
 
+		"region-status": func(s *discordgo.Session, i *discordgo.InteractionCreate, logger runtime.Logger) {
+			options := i.ApplicationCommandData().Options
+
+			user := getScopedUser(i)
+			if user == nil {
+				return
+			}
+			errFn := func(err error) {
+				simpleInteractionResponse(s, i, err.Error())
+			}
+
+			regionStr := options[0].StringValue()
+			if regionStr == "" {
+				errFn(errors.New("no region provided"))
+			}
+
+			if err := d.createRegionStatusEmbed(ctx, logger, regionStr, i.Interaction.ChannelID, nil); err != nil {
+				errFn(err)
+			}
+
+		},
 		"party": func(s *discordgo.Session, i *discordgo.InteractionCreate, logger runtime.Logger) {
 
 			if i.Type != discordgo.InteractionApplicationCommand {
@@ -2725,4 +2758,109 @@ func parseTime(s string) (time.Time, error) {
 	}
 	time := parsed.Time
 	return time, nil
+}
+
+func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runtime.Logger, regionStr string, channelID string, existingMessage *discordgo.Message) error {
+	// list all the matches
+
+	matches, err := d.nk.MatchList(ctx, 100, true, "", nil, nil, "")
+	if err != nil {
+		return err
+	}
+
+	regionSymbol := evr.ToSymbol(regionStr)
+
+	tracked := make([]*EvrMatchState, 0, len(matches))
+
+	for _, match := range matches {
+
+		state := &EvrMatchState{}
+		if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), state); err != nil {
+			logger.Error("Failed to unmarshal match label", zap.Error(err))
+			continue
+		}
+
+		for _, r := range state.Broadcaster.Regions {
+			if regionSymbol == r {
+				tracked = append(tracked, state)
+			}
+			continue
+		}
+	}
+	if len(tracked) == 0 {
+		return fmt.Errorf("no matches found in region %s", regionStr)
+	}
+	expires := time.Now().Add(24 * time.Hour).UTC().Unix()
+
+	// Create a message embed that contains a table of the server, the creation time, the number of players, and the spark link
+	embed := &discordgo.MessageEmbed{
+		Title:       fmt.Sprintf("Region %s", regionStr),
+		Description: fmt.Sprintf("updated <t:%d:f>, (expires <t:%d:f>)", time.Now().UTC().Unix(), expires),
+		Fields:      make([]*discordgo.MessageEmbedField, 0),
+	}
+
+	for _, state := range tracked {
+		var status string
+
+		if state.Size == 0 {
+			status = "-"
+		} else {
+			players := make([]string, 0, state.Size)
+			for _, player := range state.Players {
+				players = append(players, fmt.Sprintf("<@%s>", player.DiscordID))
+			}
+			status = fmt.Sprintf("%s: %s", state.Mode.String(), strings.Join(players, ", "))
+
+		}
+
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name:   strconv.FormatUint(state.Broadcaster.ServerID, 10),
+			Value:  status,
+			Inline: false,
+		})
+	}
+
+	if existingMessage != nil {
+		// Update the message for the given region
+		_, err := d.dg.ChannelMessageEditEmbed(channelID, existingMessage.ID, embed)
+		if err != nil {
+			return err
+		}
+
+		return nil
+	} else {
+		// Create the message and update it regularly
+		msg, err := d.dg.ChannelMessageSendEmbed(channelID, embed)
+		if err != nil {
+			return err
+		}
+
+		go func() {
+			timer := time.NewTimer(24 * time.Hour)
+			defer timer.Stop()
+			ticker := time.NewTicker(30 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-d.ctx.Done():
+					// Delete the message
+					if err := d.dg.ChannelMessageDelete(channelID, msg.ID); err != nil {
+						logger.Error("Failed to delete region status message", zap.Error(err))
+					}
+				case <-timer.C:
+					// Delete the message
+					if err := d.dg.ChannelMessageDelete(channelID, msg.ID); err != nil {
+						logger.Error("Failed to delete region status message", zap.Error(err))
+					}
+				case <-ticker.C:
+					// Update the message
+					err := d.createRegionStatusEmbed(ctx, logger, regionStr, channelID, msg)
+					if err != nil {
+						logger.Error("Failed to update region status message", zap.Error(err))
+					}
+				}
+			}
+		}()
+	}
+	return nil
 }
