@@ -216,7 +216,7 @@ func (p *EvrPipeline) lobbyFindSessionRequest(ctx context.Context, logger *zap.L
 
 	metricsTags := map[string]string{
 		"mode":     request.Mode.String(),
-		"channel":  ml.Channel.String(),
+		"channel":  ml.GroupID.String(),
 		"level":    request.Level.String(),
 		"team_idx": strconv.FormatInt(int64(request.TeamIndex), 10),
 	}
@@ -224,7 +224,7 @@ func (p *EvrPipeline) lobbyFindSessionRequest(ctx context.Context, logger *zap.L
 	loginSessionID := request.LoginSessionID
 
 	// Check for suspensions on this channel, if this is a request for a public match.
-	if err := p.authorizeMatchmaking(ctx, logger, session, loginSessionID, *ml.Channel, true); err != nil {
+	if err := p.authorizeMatchmaking(ctx, logger, session, loginSessionID, *ml.GroupID, true); err != nil {
 		switch status.Code(err) {
 		case codes.Internal:
 			logger.Warn("Failed to authorize matchmaking, allowing player to continue. ", zap.Error(err))
@@ -438,15 +438,15 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 		// Replace the session
 		logger.Warn("Matchmaking session already exists", zap.Any("tickets", s.Tickets))
 	}
-	joinFn := func(matchID string, query string) error {
+	joinFn := func(matchID MatchID, query string) error {
 		err := p.JoinEvrMatch(parentCtx, logger, session, query, matchID, int(ml.TeamIndex))
 		if err != nil {
-			return NewMatchmakingResult(logger, ml.Mode, *ml.Channel).SendErrorToSession(session, err)
+			return NewMatchmakingResult(logger, ml.Mode, *ml.GroupID).SendErrorToSession(session, err)
 		}
 		return nil
 	}
 	errorFn := func(err error) error {
-		return NewMatchmakingResult(logger, ml.Mode, *ml.Channel).SendErrorToSession(session, err)
+		return NewMatchmakingResult(logger, ml.Mode, *ml.GroupID).SendErrorToSession(session, err)
 	}
 
 	// Create a new matching session
@@ -473,11 +473,11 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 
 	var matchID MatchID
 	// Check for a direct match first
-	if config.NextMatchToken.IsNil() {
-		matchID = config.NextMatchToken
+	if config.NextMatchID.IsNil() {
+		matchID = config.NextMatchID
 	}
 
-	config.NextMatchToken = MatchID{}
+	config.NextMatchID = MatchID{}
 	err = p.matchmakingRegistry.StoreMatchmakingSettings(msession.Ctx, session.logger, config, session.userID.String())
 	if err != nil {
 		logger.Error("Failed to save matchmaking config", zap.Error(err))
@@ -514,7 +514,7 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 	if ml.TeamIndex == TeamIndex(evr.TeamModerator) {
 		skipBackfillDelay = true
 		// Check that the user is a moderator for this channel, or globally
-		guild, err := p.discordRegistry.GetGuildByGroupId(parentCtx, ml.Channel.String())
+		guild, err := p.discordRegistry.GetGuildByGroupId(parentCtx, ml.GroupID.String())
 		if err != nil || guild == nil {
 			logger.Warn("failed to get guild: %v", zap.Error(err))
 			ml.TeamIndex = TeamIndex(evr.TeamSpectator)
@@ -823,7 +823,7 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 		Open:             true,
 		SessionSettings:  &request.SessionSettings,
 		TeamIndex:        TeamIndex(request.TeamIndex),
-		Channel:          &request.Channel,
+		GroupID:          &request.Channel,
 		RequiredFeatures: requiredFeatures,
 		Broadcaster: MatchBroadcaster{
 			VersionLock: uint64(request.VersionLock),
@@ -852,7 +852,7 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 		}
 
 		errorFn := func(err error) error {
-			return NewMatchmakingResult(logger, ml.Mode, *ml.Channel).SendErrorToSession(session, err)
+			return NewMatchmakingResult(logger, ml.Mode, *ml.GroupID).SendErrorToSession(session, err)
 		}
 
 		// Create a matching session
@@ -892,14 +892,14 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 	if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), ml); err != nil {
 		return response.SendErrorToSession(session, status.Errorf(codes.NotFound, err.Error()))
 	}
-	if ml.Channel == nil {
-		ml.Channel = &uuid.Nil
+	if ml.GroupID == nil {
+		ml.GroupID = &uuid.Nil
 	}
 
 	metricsTags := map[string]string{
 		"team":    TeamIndex(request.TeamIndex).String(),
 		"mode":    ml.Mode.String(),
-		"channel": ml.Channel.String(),
+		"channel": ml.GroupID.String(),
 		"level":   ml.Level.String(),
 	}
 	p.metrics.CustomCounter("lobbyjoinsession_active_count", metricsTags, 1)
@@ -919,7 +919,7 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 		isDeveloper, _ := checkIfGlobalDeveloper(ctx, p.runtimeModule, session.userID)
 
 		// Let developers and moderators join public matches
-		if request.TeamIndex != int16(Spectator) && !isDeveloper && !isModerator && time.Since(ml.StartedAt) < time.Second*15 {
+		if request.TeamIndex != int16(Spectator) && !isDeveloper && !isModerator && time.Since(ml.StartedTime) < time.Second*15 {
 			// Allow if the match is over 15 seconds old, to allow matchmaking to properly populate the match
 			err = status.Errorf(codes.InvalidArgument, "Match is a newly started public match")
 		}
@@ -941,7 +941,7 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 			}
 		}
 	}
-	if err := p.authorizeMatchmaking(ctx, logger, session, loginSessionID, *ml.Channel, false); err != nil {
+	if err := p.authorizeMatchmaking(ctx, logger, session, loginSessionID, *ml.GroupID, false); err != nil {
 		switch status.Code(err) {
 		case codes.Internal:
 			logger.Warn("Failed to authorize matchmaking, allowing player to continue. ", zap.Error(err))

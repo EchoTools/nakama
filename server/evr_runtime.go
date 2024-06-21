@@ -23,11 +23,12 @@ var (
 )
 
 const (
-	GroupGlobalDevelopers  = "Global Developers"
-	GroupGlobalModerators  = "Global Moderators"
-	GroupGlobalTesters     = "Global Testers"
-	GroupGlobalBots        = "Global Bots"
-	GroupGlobalBadgeAdmins = "Global Badge Admins"
+	GroupGlobalDevelopers        = "Global Developers"
+	GroupGlobalModerators        = "Global Moderators"
+	GroupGlobalTesters           = "Global Testers"
+	GroupGlobalBots              = "Global Bots"
+	GroupGlobalBadgeAdmins       = "Global Badge Admins"
+	GroupGlobalPrivateDataAccess = "Global Private Data Access"
 
 	FlagGlobalDevelopers = 1 << iota
 	FlagGlobalModerators
@@ -192,7 +193,7 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 		}
 
 		for _, state := range matchStates {
-			groupID := state.State.Channel
+			groupID := state.State.GroupID
 			if groupID == nil {
 				groupID = &uuid.Nil
 			}
