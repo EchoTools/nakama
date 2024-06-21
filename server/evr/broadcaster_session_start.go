@@ -51,6 +51,20 @@ var (
 	LevelGauss        Symbol = ToSymbol("mpl_combat_gauss")       // Echo Combat
 	LevelPebbles      Symbol = ToSymbol("mpl_combat_pebbles")     // Echo Combat
 	LevelPtyPebbles   Symbol = ToSymbol("pty_mpl_combat_pebbles") // Echo Combat
+	// Validating the level against the game mode
+	LevelsByMode = map[Symbol][]Symbol{
+		ModeArenaPublic:          {LevelArena},
+		ModeArenaPrivate:         {LevelArena},
+		ModeArenaTournment:       {LevelArena},
+		ModeArenaPublicAI:        {LevelArena},
+		ModeArenaTutorial:        {LevelArena},
+		ModeSocialPublic:         {LevelSocial},
+		ModeSocialPrivate:        {LevelSocial},
+		ModeSocialNPE:            {LevelSocial},
+		ModeCombatPublic:         {LevelCombustion, LevelDyson, LevelFission, LevelGauss},
+		ModeCombatPrivate:        {LevelCombustion, LevelDyson, LevelFission, LevelGauss},
+		ModeEchoCombatTournament: {LevelCombustion, LevelDyson, LevelFission, LevelGauss},
+	}
 )
 
 type BroadcasterStartSession struct {

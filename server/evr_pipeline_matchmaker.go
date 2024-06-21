@@ -779,27 +779,14 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 			return response.SendErrorToSession(session, err)
 		}
 	}
-	// Validating the level against the game mode
-	validLevels := map[evr.Symbol][]evr.Symbol{
-		evr.ModeArenaPublic:          {evr.LevelArena},
-		evr.ModeArenaPrivate:         {evr.LevelArena},
-		evr.ModeArenaTournment:       {evr.LevelArena},
-		evr.ModeArenaPublicAI:        {evr.LevelArena},
-		evr.ModeArenaTutorial:        {evr.LevelArena},
-		evr.ModeSocialPublic:         {evr.LevelSocial},
-		evr.ModeSocialPrivate:        {evr.LevelSocial},
-		evr.ModeSocialNPE:            {evr.LevelSocial},
-		evr.ModeCombatPublic:         {evr.LevelCombustion, evr.LevelDyson, evr.LevelFission, evr.LevelGauss},
-		evr.ModeCombatPrivate:        {evr.LevelCombustion, evr.LevelDyson, evr.LevelFission, evr.LevelGauss},
-		evr.ModeEchoCombatTournament: {evr.LevelCombustion, evr.LevelDyson, evr.LevelFission, evr.LevelGauss},
-	}
+
 	isDeveloper, err := checkIfGlobalDeveloper(ctx, p.runtimeModule, session.userID)
 	logger.Info("User is developer", zap.Bool("isDeveloper", isDeveloper))
 	if err != nil {
 		return response.SendErrorToSession(session, status.Errorf(codes.Internal, "Failed to check if user is a developer: %v", err))
 	}
 	if !isDeveloper {
-		if levels, ok := validLevels[request.Mode]; ok {
+		if levels, ok := evr.LevelsByMode[request.Mode]; ok {
 			if request.Level != evr.LevelUnspecified && !lo.Contains(levels, request.Level) {
 				return response.SendErrorToSession(session, status.Errorf(codes.InvalidArgument, "Invalid level %v for game mode %v", request.Level, request.Mode))
 			}
