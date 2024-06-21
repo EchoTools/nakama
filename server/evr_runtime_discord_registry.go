@@ -1020,7 +1020,7 @@ func (r *LocalDiscordRegistry) isSystemGroupMember(ctx context.Context, userID u
 	}
 
 	for _, g := range groups {
-		if g.Group.LangTag == "system" && g.Group.Name == groupName {
+		if g.Group.LangTag == SystemGroupLangTag && g.Group.Name == groupName {
 			return true, nil
 		}
 	}
