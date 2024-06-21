@@ -195,7 +195,7 @@ func (p *EvrPipeline) matchmakingLabelFromFindRequest(ctx context.Context, sessi
 
 		Broadcaster: MatchBroadcaster{
 			VersionLock: request.VersionLock,
-			Channels:    guildPriority,
+			GroupIDs:    guildPriority,
 			Features:    features,
 		},
 	}, nil
@@ -854,7 +854,7 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 		Broadcaster: MatchBroadcaster{
 			VersionLock: uint64(request.VersionLock),
 			Regions:     uniqueRegions,
-			Channels:    priorities,
+			GroupIDs:    priorities,
 			Features:    features,
 		},
 	}

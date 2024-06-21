@@ -40,15 +40,15 @@ func (p *EvrPipeline) ListUnassignedLobbies(ctx context.Context, session *sessio
 	qparts = append(qparts, LobbyType(evr.UnassignedLobby).Query(Must, 0))
 
 	// MUST be one of the accessible channels (if provided)
-	if len(ml.Broadcaster.Channels) > 0 {
+	if len(ml.Broadcaster.GroupIDs) > 0 {
 		// Add the channels to the query
-		qparts = append(qparts, HostedChannels(ml.Broadcaster.Channels).Query(Must, 0))
+		qparts = append(qparts, HostedChannels(ml.Broadcaster.GroupIDs).Query(Must, 0))
 	}
 
 	// Add each hosted channel as a SHOULD, with decreasing boost
 
-	for i, channel := range ml.Broadcaster.Channels {
-		qparts = append(qparts, Channel(channel).Query(Should, len(ml.Broadcaster.Channels)-i))
+	for i, channel := range ml.Broadcaster.GroupIDs {
+		qparts = append(qparts, Channel(channel).Query(Should, len(ml.Broadcaster.GroupIDs)-i))
 	}
 
 	// Add the regions in descending order of priority
@@ -167,10 +167,13 @@ func (p *EvrPipeline) Backfill(ctx context.Context, session *sessionWS, msession
 		// Lock this backfill match
 		mu.Lock()
 		match, _, err := p.matchRegistry.GetMatch(ctx, label.GetID())
-		if match == nil || err != nil {
-			logger.Warn("Match not found")
+		if err != nil {
+			logger.Warn("Failed to get match: %s", zap.Error(err))
 			mu.Unlock()
 			continue
+		}
+		if match == nil {
+			logger.Warn("Match is nil")
 		}
 		if err != nil {
 			logger.Warn("Failed to get match label")
@@ -414,8 +417,8 @@ func buildMatchQueryFromLabel(ml *EvrMatchState) string {
 	}
 
 	// MUST be a broadcaster on a channel the user has access to
-	if len(ml.Broadcaster.Channels) != 0 {
-		qparts = append(qparts, Channels(ml.Broadcaster.Channels).Query(Must, 0))
+	if len(ml.Broadcaster.GroupIDs) != 0 {
+		qparts = append(qparts, Channels(ml.Broadcaster.GroupIDs).Query(Must, 0))
 	}
 
 	// SHOULD Add the current channel as a high boost SHOULD

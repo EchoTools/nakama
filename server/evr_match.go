@@ -159,7 +159,7 @@ type PlayerInfo struct {
 type MatchBroadcaster struct {
 	SessionID     string       `json:"sid,omitempty"`            // The broadcaster's Session ID
 	OperatorID    string       `json:"oper,omitempty"`           // The user id of the broadcaster.
-	Channels      []uuid.UUID  `json:"channels,omitempty"`       // The channels this broadcaster will host matches for.
+	GroupIDs      []uuid.UUID  `json:"group_ids,omitempty"`      // The channels this broadcaster will host matches for.
 	Endpoint      evr.Endpoint `json:"endpoint,omitempty"`       // The endpoint data used for connections.
 	VersionLock   uint64       `json:"version_lock,omitempty"`   // The game build version. (EVR)
 	AppId         string       `json:"app_id,omitempty"`         // The game app id. (EVR)
