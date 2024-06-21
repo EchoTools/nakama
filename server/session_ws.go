@@ -570,7 +570,11 @@ IncomingLoop:
 					logger := logger.With(zap.String("request", fmt.Sprintf("%s", request)))
 					logger.Debug(fmt.Sprintf("Received %T message", request))
 				}
-				if !s.evrPipeline.ProcessRequestEvr(logger, s, request) {
+				if request == nil {
+					continue
+				}
+
+				if !s.evrPipeline.ProcessRequestEVR(logger, s, request) {
 					reason = "error processing message"
 					break IncomingLoop
 				}
