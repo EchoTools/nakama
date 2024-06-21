@@ -132,6 +132,12 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 		return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_AccountDoesNotExist)
 	}
 
+	// Add the hash of the operator's ID as a region
+	regions = append(regions, evr.ToSymbol(userId))
+
+	// Add the server id as a region
+	regions = append(regions, evr.ToSymbol(request.ServerId))
+
 	logger = logger.With(zap.String("userId", userId))
 
 	// Set the external address in the request (to use for the registration cache).

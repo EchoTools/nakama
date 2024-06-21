@@ -606,10 +606,7 @@ func (p *EvrPipeline) MatchSort(ctx context.Context, session *sessionWS, msessio
 	region := msession.Label.Broadcaster.Regions[0]
 	sort.SliceStable(filtered, func(i, j int) bool {
 		// Sort by the user's region first
-		if slices.Contains(filtered[i].Broadcaster.Regions, region) {
-			return true
-		}
-		return false
+		return slices.Contains(filtered[i].Broadcaster.Regions, region)
 	})
 
 	return filtered, rtts, nil
