@@ -93,15 +93,15 @@ type EvrIdLogins struct {
 var (
 	vrmlGroupChoices = []*discordgo.ApplicationCommandOptionChoice{
 		{Name: "VRML Preseason", Value: "VRML Season Preseason"},
+		{Name: "VRML S1", Value: "VRML Season 1"},
 		{Name: "VRML S1 Champion", Value: "VRML Season 1 Champion"},
 		{Name: "VRML S1 Finalist", Value: "VRML Season 1 Finalist"},
-		{Name: "VRML S1", Value: "VRML Season 1"},
+		{Name: "VRML S2", Value: "VRML Season 2"},
 		{Name: "VRML S2 Champion", Value: "VRML Season 2 Champion"},
 		{Name: "VRML S2 Finalist", Value: "VRML Season 2 Finalist"},
-		{Name: "VRML S2", Value: "VRML Season 2"},
+		{Name: "VRML S3", Value: "VRML Season 3"},
 		{Name: "VRML S3 Champion", Value: "VRML Season 3 Champion"},
 		{Name: "VRML S3 Finalist", Value: "VRML Season 3 Finalist"},
-		{Name: "VRML S3", Value: "VRML Season 3"},
 		{Name: "VRML S4", Value: "VRML Season 4"},
 		{Name: "VRML S4 Finalist", Value: "VRML Season 4 Finalist"},
 		{Name: "VRML S4 Champion", Value: "VRML Season 4 Champion"},
@@ -117,7 +117,7 @@ var (
 	}
 
 	vrmlGroupShortMap = map[string]string{
-		"p":  "VRML Preseason",
+		"p":  "VRML Season Preseason",
 		"1":  "VRML Season 1",
 		"1f": "VRML Season 1 Finalist",
 		"1c": "VRML Season 1 Champion",
