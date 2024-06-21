@@ -183,12 +183,12 @@ func (p *EvrPipeline) matchmakingLabelFromFindRequest(ctx context.Context, sessi
 	features := ctx.Value(ctxFeaturesKey{}).([]string)
 
 	return &EvrMatchState{
-		Channel: &groupID,
+		GroupID: &groupID,
 
-		MatchID: request.CurrentMatch, // The existing lobby/match that the player is in (if any)
-		Mode:    request.Mode,
-		Level:   request.Level,
-		Open:    true,
+		ID:    MatchID{request.CurrentMatch, p.node}, // The existing lobby/match that the player is in (if any)
+		Mode:  request.Mode,
+		Level: request.Level,
+		Open:  true,
 
 		SessionSettings: &request.SessionSettings,
 		TeamIndex:       TeamIndex(request.TeamIndex),
@@ -290,7 +290,7 @@ func (p *EvrPipeline) MatchSpectateStreamLoop(session *sessionWS, msession *Matc
 
 			// Found a backfill match
 			foundMatch := FoundMatch{
-				MatchID:   matches[0].GetMatchId(),
+				MatchID:   MatchIDFromStringOrNil(matches[0].GetMatchId()),
 				Query:     query,
 				TeamIndex: TeamIndex(evr.TeamSpectator),
 			}
@@ -299,10 +299,10 @@ func (p *EvrPipeline) MatchSpectateStreamLoop(session *sessionWS, msession *Matc
 				return nil
 			case msession.MatchJoinCh <- foundMatch:
 				p.metrics.CustomCounter("spectatestream_found_count", msession.metricsTags(), 1)
-				logger.Debug("Spectating match", zap.String("mid", foundMatch.MatchID))
+				logger.Debug("Spectating match", zap.String("mid", foundMatch.MatchID.String()))
 			case <-time.After(3 * time.Second):
 				p.metrics.CustomCounter("spectatestream_join_timeout_count", msession.metricsTags(), 1)
-				logger.Warn("Failed to spectate match", zap.String("mid", foundMatch.MatchID))
+				logger.Warn("Failed to spectate match", zap.String("mid", foundMatch.MatchID.String()))
 			}
 		}
 		<-time.After(spectateInterval)
@@ -350,7 +350,7 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 		if label != nil {
 			// Found a backfill match
 			foundMatch = FoundMatch{
-				MatchID:   label.MatchID.String(),
+				MatchID:   label.ID,
 				Query:     query,
 				TeamIndex: TeamIndex(evr.TeamUnassigned),
 			}
@@ -360,7 +360,7 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 			go p.MatchCreateLoop(session, msession, 5*time.Minute)
 		}
 
-		if foundMatch.MatchID == "" {
+		if foundMatch.MatchID.IsNil() {
 			// No match found
 			continue
 		}
@@ -370,7 +370,7 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 			return nil
 		default:
 		}
-		logger.Debug("Attempting to backfill match", zap.String("mid", foundMatch.MatchID))
+		logger.Debug("Attempting to backfill match", zap.String("mid", foundMatch.MatchID.String()))
 		p.metrics.CustomCounter("match_backfill_found_count", msession.metricsTags(), 1)
 		msession.MatchJoinCh <- foundMatch
 
@@ -379,7 +379,7 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 			return nil
 		case <-time.After(3 * time.Second):
 			p.metrics.CustomCounter("match_backfill_join_timeout_count", msession.metricsTags(), 1)
-			logger.Warn("Failed to backfill match", zap.String("mid", foundMatch.MatchID))
+			logger.Warn("Failed to backfill match", zap.String("mid", foundMatch.MatchID.String()))
 		}
 		// Continue to loop until the context is done
 
@@ -405,7 +405,7 @@ func (p *EvrPipeline) MatchCreateLoop(session *sessionWS, msession *MatchmakingS
 		switch status.Code(err) {
 
 		case codes.OK:
-			if matchID == "" {
+			if matchID.IsNil() {
 				return msession.Cancel(fmt.Errorf("match is nil"))
 			}
 			foundMatch := FoundMatch{
@@ -418,7 +418,7 @@ func (p *EvrPipeline) MatchCreateLoop(session *sessionWS, msession *MatchmakingS
 				return nil
 			case msession.MatchJoinCh <- foundMatch:
 				p.metrics.CustomCounter("match_create_join_active_count", msession.metricsTags(), 1)
-				logger.Debug("Joining match", zap.String("mid", foundMatch.MatchID))
+				logger.Debug("Joining match", zap.String("mid", foundMatch.MatchID.String()))
 			case <-time.After(3 * time.Second):
 				p.metrics.CustomCounter("make_create_create_join_timeout_count", msession.metricsTags(), 1)
 				msession.Cancel(fmt.Errorf("failed to join match"))
@@ -471,31 +471,31 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 		logger.Error("Failed to load matchmaking config", zap.Error(err))
 	}
 
-	matchToken := ""
+	var matchID MatchID
 	// Check for a direct match first
-	if config.NextMatchToken != "" {
-		matchToken = config.NextMatchToken.String()
+	if config.NextMatchToken.IsNil() {
+		matchID = config.NextMatchToken
 	}
 
-	config.NextMatchToken = ""
+	config.NextMatchToken = MatchID{}
 	err = p.matchmakingRegistry.StoreMatchmakingSettings(msession.Ctx, session.logger, config, session.userID.String())
 	if err != nil {
 		logger.Error("Failed to save matchmaking config", zap.Error(err))
 	}
 
-	if matchToken != "" {
-		logger.Debug("Attempting to join match from settings", zap.String("mid", matchToken))
-		match, _, err := p.matchRegistry.GetMatch(msession.Ctx, matchToken)
+	if !matchID.IsNil() {
+		logger.Debug("Attempting to join match from settings", zap.String("mid", matchID.String()))
+		match, _, err := p.matchRegistry.GetMatch(msession.Ctx, matchID.String())
 		if err != nil {
 			logger.Error("Failed to get match", zap.Error(err))
 		} else {
 			if match == nil {
-				logger.Warn("Match not found", zap.String("mid", matchToken))
+				logger.Warn("Match not found", zap.String("mid", matchID.String()))
 			} else {
 				p.metrics.CustomCounter("match_next_join_count", map[string]string{}, 1)
 				// Join the match
 				msession.MatchJoinCh <- FoundMatch{
-					MatchID:   matchToken,
+					MatchID:   matchID,
 					Query:     "",
 					TeamIndex: TeamIndex(evr.TeamUnassigned),
 				}
@@ -851,8 +851,8 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 		// Set some defaults
 		partySize := 1 // TODO FIXME this should include the party size
 
-		joinFn := func(matchID string, query string) error {
-			logger := logger.With(zap.String("mid", matchID))
+		joinFn := func(matchID MatchID, query string) error {
+			logger := logger.With(zap.String("mid", matchID.String()))
 
 			err := p.JoinEvrMatch(ctx, logger, session, query, matchID, int(ml.TeamIndex))
 			switch status.Code(err) {
@@ -965,7 +965,7 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 		}
 	}
 
-	if err = p.JoinEvrMatch(ctx, logger, session, "", matchToken.String(), int(request.TeamIndex)); err != nil {
+	if err = p.JoinEvrMatch(ctx, logger, session, "", matchToken, int(request.TeamIndex)); err != nil {
 		return response.SendErrorToSession(session, status.Errorf(codes.NotFound, err.Error()))
 	}
 	return nil
@@ -989,7 +989,7 @@ func (p *EvrPipeline) pruneMatches(ctx context.Context, session *sessionWS) erro
 	}
 
 	for _, match := range matches {
-		_, err := SignalMatch(ctx, p.matchRegistry, match.MatchId, SignalPruneUnderutilized, nil)
+		_, err := SignalMatch(ctx, p.matchRegistry, MatchIDFromStringOrNil(match.MatchId), SignalPruneUnderutilized, nil)
 		if err != nil {
 			return err
 
