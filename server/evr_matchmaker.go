@@ -614,14 +614,14 @@ func (p *EvrPipeline) MatchSort(ctx context.Context, session *sessionWS, msessio
 
 // TODO FIXME This need to use allocateBroadcaster instad.
 // MatchCreate creates a match on an available unassigned broadcaster using the given label
-func (p *EvrPipeline) MatchCreate(ctx context.Context, session *sessionWS, msession *MatchmakingSession, label *EvrMatchState) (matchID MatchID, err error) {
-	label.MaxSize = MatchMaxSize
+func (p *EvrPipeline) MatchCreate(ctx context.Context, session *sessionWS, msession *MatchmakingSession, ml *EvrMatchState) (matchID MatchID, err error) {
+	ml.MaxSize = MatchMaxSize
 	// Lock the broadcaster's until the match is created
 	p.matchmakingRegistry.Lock()
 	defer p.matchmakingRegistry.Unlock()
 	// TODO Move this into the matchmaking registry
 	// Create a new match
-	labels, err := p.ListUnassignedLobbies(ctx, session, label)
+	labels, err := p.ListUnassignedLobbies(ctx, session, ml)
 	if err != nil {
 		return MatchID{}, err
 	}
@@ -638,13 +638,13 @@ func (p *EvrPipeline) MatchCreate(ctx context.Context, session *sessionWS, msess
 
 	// Join the lowest rtt match
 
-	matchID = label.ID
+	matchID = labels[0].ID
 	// Load the level.
 
-	label.SpawnedBy = session.UserID().String()
+	ml.SpawnedBy = session.UserID().String()
 
 	// Prepare the match
-	_, err = SignalMatch(ctx, p.matchRegistry, matchID, SignalPrepareSession, label)
+	_, err = SignalMatch(ctx, p.matchRegistry, matchID, SignalPrepareSession, ml)
 	if err != nil {
 		return MatchID{}, fmt.Errorf("failed to send prepare session: %v", err)
 	}
