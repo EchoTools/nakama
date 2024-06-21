@@ -796,7 +796,11 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 	}
 
 	regions := make([]evr.Symbol, 0)
-	if request.Region != evr.DefaultRegion && request.Region != 0xffffffffffffffff {
+	if request.Region == 0xffffffffffffffff {
+		request.Region = evr.DefaultRegion
+	}
+
+	if request.Region != evr.DefaultRegion {
 		regions = append(regions, request.Region)
 	}
 	regions = append(regions, evr.DefaultRegion)
