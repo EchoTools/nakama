@@ -158,13 +158,13 @@ func (p *EvrPipeline) Backfill(ctx context.Context, session *sessionWS, msession
 	// Select the first match
 	for _, label := range labels {
 		// Check that the match is not full
-		logger = logger.With(zap.String("match_id", label.MatchID.String()))
+		logger = logger.With(zap.String("match_id", label.ID.String()))
 
-		mu, _ := p.backfillQueue.LoadOrStore(label.ID(), &sync.Mutex{})
+		mu, _ := p.backfillQueue.LoadOrStore(label.GetID(), &sync.Mutex{})
 
 		// Lock this backfill match
 		mu.Lock()
-		match, _, err := p.matchRegistry.GetMatch(ctx, label.ID())
+		match, _, err := p.matchRegistry.GetMatch(ctx, label.GetID())
 		if match == nil || err != nil {
 			logger.Warn("Match not found")
 			mu.Unlock()
@@ -407,8 +407,8 @@ func buildMatchQueryFromLabel(ml *EvrMatchState) string {
 	}
 
 	// MUST NOT much into the same lobby
-	if ml.MatchID != uuid.Nil {
-		qparts = append(qparts, MatchId(ml.MatchID).Query(MustNot, boost))
+	if ml.ID.UUID() != uuid.Nil {
+		qparts = append(qparts, MatchId(ml.ID.UUID()).Query(MustNot, boost))
 	}
 
 	// MUST be a broadcaster on a channel the user has access to
@@ -617,58 +617,48 @@ func (p *EvrPipeline) MatchSort(ctx context.Context, session *sessionWS, msessio
 
 // TODO FIXME This need to use allocateBroadcaster instad.
 // MatchCreate creates a match on an available unassigned broadcaster using the given label
-func (p *EvrPipeline) MatchCreate(ctx context.Context, session *sessionWS, msession *MatchmakingSession, label *EvrMatchState) (matchId string, err error) {
+func (p *EvrPipeline) MatchCreate(ctx context.Context, session *sessionWS, msession *MatchmakingSession, label *EvrMatchState) (matchID MatchID, err error) {
 	label.MaxSize = MatchMaxSize
 	// Lock the broadcaster's until the match is created
 	p.matchmakingRegistry.Lock()
 	defer p.matchmakingRegistry.Unlock()
 	// TODO Move this into the matchmaking registry
 	// Create a new match
-	matches, err := p.ListUnassignedLobbies(ctx, session, label)
+	labels, err := p.ListUnassignedLobbies(ctx, session, label)
 	if err != nil {
-		return "", err
+		return MatchID{}, err
 	}
 
 	// Filter/sort the results
-	matches, _, err = p.MatchSort(ctx, session, msession, matches)
+	labels, _, err = p.MatchSort(ctx, session, msession, labels)
 	if err != nil {
-		return "", fmt.Errorf("failed to filter matches: %v", err)
+		return MatchID{}, fmt.Errorf("failed to filter matches: %v", err)
 	}
 
-	if len(matches) == 0 {
-		return "", ErrMatchmakingNoAvailableServers
+	if len(labels) == 0 {
+		return MatchID{}, ErrMatchmakingNoAvailableServers
 	}
 
 	// Join the lowest rtt match
-	match := matches[0]
 
+	matchID = label.ID
 	// Load the level.
-	parkingMatchId := fmt.Sprintf("%s.%s", match.MatchID, p.node)
 
 	label.SpawnedBy = session.UserID().String()
 
 	// Prepare the match
-	_, err = SignalMatch(ctx, p.matchRegistry, parkingMatchId, SignalPrepareSession, label)
+	_, err = SignalMatch(ctx, p.matchRegistry, matchID, SignalPrepareSession, label)
 	if err != nil {
-		return "", fmt.Errorf("failed to load level: %v", err)
+		return MatchID{}, fmt.Errorf("failed to send prepare session: %v", err)
 	}
 
-	// Instruct the server to load the level
-	_, err = SignalMatch(ctx, p.matchRegistry, parkingMatchId, SignalStartSession, label)
-	if err != nil {
-		return "", fmt.Errorf("failed to load level: %v", err)
-	}
-	<-time.After(5 * time.Second)
-	// Return the newly active match.
-	return parkingMatchId, nil
+	// Return the prepared session
+	return matchID, nil
 }
 
 // JoinEvrMatch allows a player to join a match.
-func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, session *sessionWS, query string, matchIDStr string, teamIndex int) error {
+func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, session *sessionWS, query string, matchID MatchID, teamIndex int) error {
 	// Append the node to the matchID if it doesn't already contain one.
-	if !strings.Contains(matchIDStr, ".") {
-		matchIDStr = fmt.Sprintf("%s.%s", matchIDStr, p.node)
-	}
 
 	partyID := uuid.Nil
 
@@ -678,12 +668,6 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 		}
 	}
 
-	s := strings.Split(matchIDStr, ".")[0]
-	matchID := uuid.FromStringOrNil(s)
-	if matchID == uuid.Nil {
-		return fmt.Errorf("invalid match id: %s", matchIDStr)
-	}
-
 	// Retrieve the evrID from the context.
 	evrID, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
 	if !ok {
@@ -691,12 +675,12 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 	}
 
 	// Get the match label
-	match, _, err := p.matchRegistry.GetMatch(ctx, matchIDStr)
+	match, _, err := p.matchRegistry.GetMatch(ctx, matchID.String())
 	if err != nil {
 		return fmt.Errorf("failed to get match: %w", err)
 	}
 	if match == nil {
-		return fmt.Errorf("match not found: %s", matchIDStr)
+		return fmt.Errorf("match not found: %s", matchID.String())
 	}
 
 	label := &EvrMatchState{}
@@ -706,8 +690,8 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 
 	groupID := uuid.Nil
 	// Get the channel
-	if label.Channel != nil {
-		groupID = uuid.FromStringOrNil((*label.Channel).String())
+	if label.GroupID != nil {
+		groupID = uuid.FromStringOrNil((*label.GroupID).String())
 	}
 
 	// Determine the display name
@@ -768,9 +752,9 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 	}
 	metadata := map[string]string{"playermeta": string(jsonMeta)}
 	// Do the join attempt to avoid race conditions
-	found, allowed, isNew, reason, _, _ := p.matchRegistry.JoinAttempt(ctx, matchID, p.node, session.UserID(), session.ID(), session.Username(), session.Expiry(), session.Vars(), session.clientIP, session.clientPort, p.node, metadata)
+	found, allowed, isNew, reason, _, _ := p.matchRegistry.JoinAttempt(ctx, matchID.UUID(), matchID.Node(), session.UserID(), session.ID(), session.Username(), session.Expiry(), session.Vars(), session.clientIP, session.clientPort, p.node, metadata)
 	if !found {
-		return fmt.Errorf("match not found: %s", matchIDStr)
+		return fmt.Errorf("match not found: %s", matchID.String())
 	}
 	if !allowed {
 		switch reason {
@@ -789,7 +773,7 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 
 	if isNew {
 		// Trigger the MatchJoin event.
-		stream := PresenceStream{Mode: StreamModeMatchAuthoritative, Subject: matchID, Label: p.node}
+		stream := PresenceStream{Mode: StreamModeMatchAuthoritative, Subject: matchID.UUID(), Label: matchID.Node()}
 		m := PresenceMeta{
 			Username: session.Username(),
 			Format:   session.Format(),
@@ -802,8 +786,8 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 		}
 	}
 
-	p.matchBySessionID.Store(session.ID().String(), matchIDStr)
-	p.matchByEvrID.Store(evrID.Token(), matchIDStr)
+	p.matchBySessionID.Store(session.ID().String(), matchID.String())
+	p.matchByEvrID.Store(evrID.Token(), matchID.String())
 
 	return nil
 }

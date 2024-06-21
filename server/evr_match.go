@@ -210,8 +210,8 @@ type MatchBroadcaster struct {
 // Any changes to the lobby state should be reflected in the match label.
 // This also makes it easier to update the match label, and query against it.
 type EvrMatchState struct {
-	MatchID     uuid.UUID        `json:"id,omitempty"`          // The Session Id used by EVR (the same as match id)
-	Open        bool             `json:"open,omitempty"`        // Whether the lobby is open to new players (Matching Only)
+	ID          MatchID          `json:"id,omitempty"`          // The Session Id used by EVR (the same as match id)
+	UUID        uuid.UUID        `json:"uuid,omitempty"`        // The UUID of the match.
 	Node        string           `json:"node,omitempty"`        // The node the match is running on.
 	LobbyType   LobbyType        `json:"lobby_type"`            // The type of lobby (Public, Private, Unassigned) (EVR)
 	Broadcaster MatchBroadcaster `json:"broadcaster,omitempty"` // The broadcaster's data
