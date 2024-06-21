@@ -36,31 +36,35 @@ const (
 	FlagGlobalBots
 	FlagGlobalBadgeAdmins
 	FlagNoVR
+	FlagGlobalPrivateDataAccess
 )
 
 var groupFlagMap = map[string]int{
-	GroupGlobalDevelopers:  FlagGlobalDevelopers,
-	GroupGlobalModerators:  FlagGlobalModerators,
-	GroupGlobalTesters:     FlagGlobalTesters,
-	GroupGlobalBots:        FlagGlobalBots,
-	GroupGlobalBadgeAdmins: FlagGlobalBadgeAdmins,
+	GroupGlobalDevelopers:        FlagGlobalDevelopers,
+	GroupGlobalModerators:        FlagGlobalModerators,
+	GroupGlobalTesters:           FlagGlobalTesters,
+	GroupGlobalBots:              FlagGlobalBots,
+	GroupGlobalBadgeAdmins:       FlagGlobalBadgeAdmins,
+	GroupGlobalPrivateDataAccess: FlagGlobalPrivateDataAccess,
 }
 
 func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) (err error) {
 
 	// Register RPC's for device linking
 	rpcs := map[string]func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error){
-		"link/device":          LinkDeviceRpc,
-		"link/usernamedevice":  LinkUserIdDeviceRpc,
-		"signin/discord":       DiscordSignInRpc,
-		"match":                MatchRPC,
-		"match/prepare":        PrepareMatchRPC,
-		"link":                 LinkingAppRpc,
-		"evr/servicestatus":    ServiceStatusRpc,
-		"importloadouts":       ImportLoadoutsRpc,
-		"terminateMatch":       terminateMatchRpc,
-		"matchmaker":           matchmakingStatusRpc,
-		"setmatchamakerstatus": setMatchmakingStatusRpc,
+		"account/lookup":                AccountLookupRPC,
+		"account/authenticate/password": AuthenticatePasswordRPC,
+		"link/device":                   LinkDeviceRpc,
+		"link/usernamedevice":           LinkUserIdDeviceRpc,
+		"signin/discord":                DiscordSignInRpc,
+		"match":                         MatchRPC,
+		"match/prepare":                 PrepareMatchRPC,
+		"link":                          LinkingAppRpc,
+		"evr/servicestatus":             ServiceStatusRpc,
+		"importloadouts":                ImportLoadoutsRpc,
+		"terminateMatch":                terminateMatchRpc,
+		"matchmaker":                    matchmakingStatusRpc,
+		"setmatchamakerstatus":          setMatchmakingStatusRpc,
 	}
 
 	for name, rpc := range rpcs {
@@ -240,6 +244,7 @@ func createCoreGroups(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		GroupGlobalTesters,
 		GroupGlobalBadgeAdmins,
 		GroupGlobalBots,
+		GroupGlobalPrivateDataAccess,
 	}
 
 	for _, name := range coreGroups {
@@ -259,7 +264,7 @@ func createCoreGroups(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 			// Create a nakama core group
 			_, err = nk.GroupCreate(ctx, userId, name, userId, "system", name, "", false, map[string]interface{}{}, 1000)
 			if err != nil {
-				logger.WithField("err", err).Error("Group create error: %v", err)
+				logger.WithField("err", err).Warn("Group `%s` create error: %v", name, err)
 			}
 		}
 	}

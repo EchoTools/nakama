@@ -61,7 +61,7 @@ func createTestTaxiBot(t *testing.T, logger *zap.Logger) (*TaxiBot, error) {
 	node := config.GetName()
 	nk := NewRuntimeGoNakamaModule(logger, db, nil, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	linkRegistry := NewTaxiLinkRegistry(context.Background(), runtimeLogger, nk, config, dg)
-	taxi := NewTaxiBot(ctx, runtimeLogger, nk, node, linkRegistry, dg)
+	taxi := NewTaxiBot(ctx, runtimeLogger, nk, db, node, linkRegistry, dg)
 
 	return taxi, nil
 }

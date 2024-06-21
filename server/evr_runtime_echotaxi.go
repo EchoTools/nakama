@@ -251,7 +251,7 @@ func EchoTaxiRuntimeModule(ctx context.Context, logger runtime.Logger, db *sql.D
 	linkRegistry := NewTaxiLinkRegistry(ctx, logger, nk, nkgo.config, dg)
 
 	// Initialize the taxi bot
-	taxi := NewTaxiBot(ctx, logger, nk, node, linkRegistry, dg)
+	taxi := NewTaxiBot(ctx, logger, nk, db, node, linkRegistry, dg)
 
 	err = taxi.Initialize(dg)
 	if err != nil {
@@ -267,6 +267,7 @@ type TaxiBot struct {
 	ctx    context.Context
 	logger runtime.Logger
 	nk     runtime.NakamaModule
+	db     *sql.DB
 	dg     *discordgo.Session
 
 	HailCount    int
@@ -281,13 +282,14 @@ type TaxiBot struct {
 	messageBurst         int
 }
 
-func NewTaxiBot(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, node string, linkRegistry *TaxiLinkRegistry, dg *discordgo.Session) *TaxiBot {
+func NewTaxiBot(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, node string, linkRegistry *TaxiLinkRegistry, dg *discordgo.Session) *TaxiBot {
 	taxi := &TaxiBot{
 		node:   node,
 		ctx:    ctx,
 		logger: logger,
 		nk:     nk,
 		dg:     dg,
+		db:     db,
 
 		linkRegistry:         linkRegistry,
 		HailCount:            0,
@@ -591,9 +593,11 @@ func (e *TaxiBot) getMatchFromLink(content string) (httpPrefix, appLinkPrefix st
 
 // Hail sets the next match for a user
 func (e *TaxiBot) Hail(logger runtime.Logger, discordID string, matchID MatchID) error {
+	ctx, cancel := context.WithTimeout(e.ctx, 2*time.Second)
+	defer cancel()
 
 	// Get the nakama user id from the discord user id
-	userID, _, _, err := e.nk.AuthenticateCustom(e.ctx, discordID, "", true)
+	userID, _, err := GetUserbyCustomID(ctx, logger, e.db, discordID)
 	if err != nil {
 		return fmt.Errorf("Error getting user id from discord id: %s", err.Error())
 	}
@@ -706,12 +710,14 @@ func (e *TaxiBot) handleMessageReactionRemove(s *discordgo.Session, reaction *di
 		return
 	}
 
-	// If the reaction is a taxi, remove the hail for the user
-	userID, _, _, err := e.nk.AuthenticateCustom(e.ctx, reaction.UserID, "", true)
+	ctx, cancel := context.WithTimeout(e.ctx, 2*time.Second)
+	defer cancel()
+	// Get the nakama user id from the discord user id
+	userID, _, err := GetUserbyCustomID(ctx, e.logger, e.db, reaction.UserID)
 	if err != nil {
-		e.logger.Warn("Error removing hail: %s", err.Error())
 		return
 	}
+
 	// Remove the hail
 	e.Hail(e.logger, userID, NilMatchID)
 

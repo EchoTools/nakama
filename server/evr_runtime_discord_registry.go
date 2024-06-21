@@ -682,18 +682,21 @@ func (r *LocalDiscordRegistry) GetUserIdByDiscordId(ctx context.Context, discord
 		return userID, nil
 	}
 
-	username := ""
-	if create {
+	userIDstr, _, err := GetUserbyCustomID(ctx, r.logger, r.pipeline.db, discordID)
+	if err != nil {
 		// Get the user from discord
 		discordUser, err := r.GetUser(ctx, discordID)
 		if err != nil {
 			return uuid.Nil, fmt.Errorf("error getting discord user %s: %w", discordID, err)
 		}
-		username = discordUser.Username
-	}
-	userIDstr, _, _, err := r.nk.AuthenticateCustom(ctx, discordID, username, create)
-	if err != nil {
-		return uuid.Nil, fmt.Errorf("error authenticating user %s: %w", discordID, err)
+		if discordUser == nil {
+			return uuid.Nil, fmt.Errorf("discord user not found: %s", discordID)
+		}
+		username := discordUser.Username
+		userIDstr, _, _, err = r.nk.AuthenticateCustom(ctx, discordID, username, create)
+		if err != nil {
+			return uuid.Nil, fmt.Errorf("error authenticating user %s: %w", discordID, err)
+		}
 	}
 
 	userID = uuid.FromStringOrNil(userIDstr)

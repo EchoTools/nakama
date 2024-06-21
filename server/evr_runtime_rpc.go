@@ -13,8 +13,13 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/gofrs/uuid/v5"
 	jwt "github.com/golang-jwt/jwt/v4"
+	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"github.com/jackc/pgtype"
+	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -38,17 +43,95 @@ const (
 	StatusUnauthenticated    = 16 // StatusUnauthenticated indicates the request lacks valid authentication credentials.
 )
 
+type Cache struct {
+	sync.RWMutex
+	Store map[string]*CacheEntry
+}
+
+type CacheEntry struct {
+	Value     any
+	Timestamp time.Time
+}
+
+func NewCache() *Cache {
+	return &Cache{
+		Store: make(map[string]*CacheEntry),
+	}
+}
+
+func (c *Cache) Set(key string, value any, ttl time.Duration) {
+	c.Lock()
+	defer c.Unlock()
+	c.Store[key] = &CacheEntry{
+		Value:     value,
+		Timestamp: time.Now(),
+	}
+
+	time.AfterFunc(ttl, func() { c.Remove(key) })
+}
+
+func (c *Cache) Get(key string) (value any, timestamp time.Time, found bool) {
+	c.RLock()
+	defer c.RUnlock()
+	if entry, found := c.Store[key]; found {
+		return entry.Value, entry.Timestamp, true
+	}
+	return
+}
+
+// get if the timestamp is not expired
+func (c *Cache) GetIfNotExpired(key string, expiry time.Time) (value any, found bool) {
+	value, timestamp, found := c.Get(key)
+	if !found || timestamp.After(expiry) {
+		return nil, false
+	}
+	return value, true
+}
+
+func (c *Cache) Count() int {
+	c.RLock()
+	defer c.RUnlock()
+	return len(c.Store)
+}
+
+func (c *Cache) Clear() {
+	c.Lock()
+	defer c.Unlock()
+	c.Store = make(map[string]*CacheEntry)
+}
+
+func (c *Cache) Remove(key string) {
+	c.Lock()
+	defer c.Unlock()
+	delete(c.Store, key)
+}
+
+func (c *Cache) Range(f func(key string, value any, timestamp time.Time) bool) {
+	c.Lock()
+	defer c.Unlock()
+	for k, v := range c.Store {
+		if !f(k, v.Value, v.Timestamp) {
+			break
+		}
+	}
+}
+
+var rpcResponseCache *Cache
+
+func init() {
+	rpcResponseCache = NewCache()
+}
+
 type MatchRpcRequest struct {
-	Id    string `json:"id"`
-	Query string `json:"query"`
-	Limit int    `json:"limit"`
+	MatchIDs []MatchID `json:"match_ids"`
+	Query    string    `json:"query"`
 }
 
 type MatchRpcResponse struct {
-	Matches []*EvrMatchState `json:"matches"`
+	Labels []any `json:"matches"`
 }
 
-func (r *MatchRpcResponse) String() string {
+func (r MatchRpcResponse) String() string {
 	data, err := json.MarshalIndent(r, "", "  ")
 	if err != nil {
 		return ""
@@ -56,84 +139,102 @@ func (r *MatchRpcResponse) String() string {
 	return string(data)
 }
 
-var matchRpcCache = struct {
-	sync.RWMutex
-	response string
-	expiry   time.Time
-}{
-	response: "",
-	expiry:   time.Now(),
-}
-
 func MatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	var err error
+	publicView := true
+
+	if u, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string); ok {
+		if ok, err := checkGroupMembershipByName(ctx, nk, uuid.FromStringOrNil(u), GroupGlobalPrivateDataAccess, "system"); err != nil {
+			return "", runtime.NewError("failed to check group membership", StatusInternalError)
+		} else if !ok {
+			return "", runtime.NewError("unauthorized", StatusPermissionDenied)
+		}
+
+		publicView = false
+	}
+
 	request := &MatchRpcRequest{}
-
-	response := &MatchRpcResponse{
-		Matches: make([]*EvrMatchState, 0),
+	if payload != "" {
+		if err := json.Unmarshal([]byte(payload), request); err != nil {
+			return "", runtime.NewError("Failed to unmarshal match list request", StatusInternalError)
+		}
+	}
+	if request.Query == "" {
+		request.Query = "*"
 	}
 
-	if payload == "" {
-		payload = "{}"
-	}
-	// And the payload
-	if err := json.Unmarshal([]byte(payload), request); err != nil {
-		return "", runtime.NewError("Failed to unmarshal match list request", StatusInternalError)
+	response := MatchRpcResponse{
+		Labels: make([]any, 0, len(request.MatchIDs)),
 	}
 
-	if request.Id != "" {
-		// Get a specific match
-		match, err := nk.MatchGet(ctx, request.Id)
-		if err != nil {
-			return "", err
+	if publicView {
+
+		// The public view is cached for 5 seconds.
+		if request.MatchIDs == nil {
+			cachedResponse, _, found := rpcResponseCache.Get("match:public")
+			if found {
+				return cachedResponse.(string), nil
+			}
 		}
 
-		state := &EvrMatchState{}
-		if err := json.Unmarshal([]byte(match.Label.GetValue()), state); err != nil {
-			return "", err
+		// Lst all matches
+		query := "*"
+		if request.Query != "" {
+			query = request.Query
 		}
-
-		response.Matches = append(response.Matches, state)
-
-		// TODO Query the match state from the API, if available.
-		return response.String(), nil
-	} else {
-
-		// If the cache is not expired, use it
-		matchRpcCache.RLock()
-
-		if time.Now().Before(matchRpcCache.expiry) {
-			defer matchRpcCache.RUnlock()
-			return matchRpcCache.response, nil
-		}
-		matchRpcCache.RUnlock()
-
-		// If the cache is expired, update it
-
-		// List all matches
-		if request.Limit == 0 {
-			request.Limit = 1000
-		}
-		// List all matches
-		matches, err := nk.MatchList(ctx, 1000, true, "", nil, nil, request.Query)
+		matches, err := nk.MatchList(ctx, 1000, true, "", nil, nil, query)
 		if err != nil {
 			return "", runtime.NewError("Failed to list matches", StatusInternalError)
 		}
-		for _, match := range matches {
-			state := &EvrMatchState{}
-			if err := json.Unmarshal([]byte(match.Label.GetValue()), state); err != nil {
-				return "", err
+
+		for _, m := range matches {
+			label := &EvrMatchState{}
+			if err := json.Unmarshal([]byte(m.GetLabel().GetValue()), label); err != nil {
+				return "", runtime.NewError("Failed to unmarshal match label", StatusInternalError)
 			}
-			response.Matches = append(response.Matches, state)
+			// Remove private data
+			label = label.PublicView()
+			response.Labels = append(response.Labels, label)
 		}
 
 		// Update the cache
-		matchRpcCache.Lock()
-		defer matchRpcCache.Unlock()
-		matchRpcCache.response = response.String()
-		matchRpcCache.expiry = time.Now().Add(5 * time.Second)
+		rpcResponseCache.Set("match:public", response.String(), 5*time.Second)
 
-		return response.String(), nil
+	} else {
+
+		matches := make([]*api.Match, 0, len(request.MatchIDs))
+		// Private view
+		if request.MatchIDs != nil {
+
+			// Get specific match(es)
+			for _, id := range request.MatchIDs {
+				match, err := nk.MatchGet(ctx, id.String())
+				if err != nil {
+					return "", runtime.NewError("Failed to get match", StatusInternalError)
+				}
+				matches = append(matches, match)
+			}
+
+		} else {
+
+			// Get all the matches
+			matches, err = nk.MatchList(ctx, 1000, true, "", nil, nil, request.Query)
+			if err != nil {
+				return "", runtime.NewError("Failed to list matches", StatusInternalError)
+			}
+		}
+
+		for _, match := range matches {
+			label := map[string]any{}
+			if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), &label); err != nil {
+				return "", runtime.NewError("Failed to unmarshal match label", StatusInternalError)
+			}
+
+			response.Labels = append(response.Labels, label)
+		}
 	}
+
+	return response.String(), nil
 }
 
 /*
@@ -706,51 +807,72 @@ func BanUserRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runti
 }
 
 type PrepareMatchRPCRequest struct {
-	MatchToken      MatchToken           `json:"match_token"`      // Parking match to signal
-	LobbyType       LobbyType            `json:"lobby_type"`       // Lobby type to set the match to
-	Mode            evr.SymbolToken      `json:"mode"`             // Mode to set the match to
-	TeamSize        int                  `json:"team_size"`        // Team size to set the match to
-	Level           evr.SymbolToken      `json:"level"`            // Level to set the match to
-	SessionSettings evr.SessionSettings  `json:"session_settings"` // Session settings to set the match to
-	Players         map[string]TeamIndex `json:"team_alignments"`  // Team alignments to set the match to (discord username -> team index))
-	SignalPayload   string               `json:"signal_payload"`   // A signal payload to send to the match unmodified
+	MatchID          MatchID              `json:"match_id"`                    // Parking match to signal
+	Mode             evr.SymbolToken      `json:"mode"`                        // Mode to set the match to
+	TeamSize         int                  `json:"team_size,omitempty"`         // Team size to set the match to
+	Level            evr.SymbolToken      `json:"level,omitempty"`             // Level to set the match to
+	SessionSettings  evr.SessionSettings  `json:"session_settings,omitempty"`  // Session settings to set the match to
+	Alignments       map[string]TeamIndex `json:"role_alignments,omitempty"`   // Team alignments to set the match to (discord username -> team index))
+	RequiredFeatures []string             `json:"required_features,omitempty"` // Required features of the broadcaster/clients
+	SignalPayload    string               `json:"signal_payload,omitempty"`    // A signal payload to send to the match unmodified
+	StartTime        time.Time            `json:"start_time,omitempty"`        // The time to start the match
 }
 
 type PrepareMatchRPCResponse struct {
-	MatchToken    MatchToken    `json:"match_token"`
-	Signal        EvrSignal     `json:"signal,omitempty"`
-	SignalPayload string        `json:"signal_payload,omitempty"`
-	Success       bool          `json:"success"`
-	Message       string        `json:"message"`
+	MatchID       MatchID       `json:"match_id"`
+	SignalPayload string        `json:"signal_payload"`
 	MatchLabel    EvrMatchState `json:"match_label"`
 }
 
+// PrepareMatchRPC is a function that prepares a match from a given match ID.
 func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
-	// Get the UserID from the context
-	userID := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+
+	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if !ok {
+		return "", runtime.NewError("authentication required", StatusUnauthenticated)
+	}
+
+	if ok, err := checkGroupMembershipByName(ctx, nk, uuid.FromStringOrNil(userID), GroupGlobalBots, "system"); err != nil {
+		return "", runtime.NewError("failed to check group membership", StatusInternalError)
+	} else if !ok {
+		return "", runtime.NewError("unauthorized", StatusPermissionDenied)
+	}
 
 	request := &PrepareMatchRPCRequest{}
 	if err := json.Unmarshal([]byte(payload), request); err != nil {
-		return "", err
+		return "", runtime.NewError("Failed to unmarshal match request", StatusInternalError)
 	}
-	matchToken := request.MatchToken
+	matchID := request.MatchID
 
 	response := PrepareMatchRPCResponse{
-		MatchToken:    matchToken,
+		MatchID:       matchID,
 		SignalPayload: request.SignalPayload,
 	}
+
+	// Translate the alignments to a map of nakama id -> team index
 
 	signalPayload := request.SignalPayload
 	if signalPayload == "" {
 		state := &EvrMatchState{}
 
-		state.LobbyType = request.LobbyType
 		state.Mode = request.Mode.Symbol()
 		state.TeamSize = request.TeamSize
 		state.Level = request.Level.Symbol()
 		state.SessionSettings = &request.SessionSettings
 		state.SpawnedBy = userID
 		state.MaxSize = MatchMaxSize
+		state.StartedTime = request.StartTime
+
+		// Translate the discord ID to the nakama ID for the team Alignments
+		state.TeamAlignments = make(map[uuid.UUID]int, len(request.Alignments))
+		for discordID, teamIndex := range request.Alignments {
+			// Get the nakama ID from the discord ID
+			userID, _, err := GetUserbyCustomID(ctx, logger, db, discordID)
+			if err != nil {
+				return "", runtime.NewError(err.Error(), StatusInternalError)
+			}
+			state.TeamAlignments[uuid.FromStringOrNil(userID)] = int(teamIndex)
+		}
 
 		// Prepare the session for the match.
 		data, err := json.MarshalIndent(state, "", "  ")
@@ -770,22 +892,23 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 	}
 
 	errResponse := func(err error) (string, error) {
-		response.Success = false
-		response.Message = err.Error()
 		data, _ := json.MarshalIndent(response, "", "  ")
 		return string(data), err
 	}
 
 	response.SignalPayload = signalPayload
 	// Send the signal
-	signalResponse, err := nk.MatchSignal(ctx, matchToken.String(), signalPayload)
+	signalResponse, err := nk.MatchSignal(ctx, matchID.String(), signalPayload)
 	if err != nil {
 		return errResponse(err)
 	}
-	response.Message = signalResponse
+
+	if err := json.Unmarshal([]byte(signalResponse), &response.MatchLabel); err != nil {
+		return errResponse(err)
+	}
 
 	// Get the match label
-	match, err := nk.MatchGet(ctx, matchToken.String())
+	match, err := nk.MatchGet(ctx, matchID.String())
 	if err != nil {
 		return errResponse(err)
 	}
@@ -794,14 +917,191 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		return errResponse(fmt.Errorf("match label is nil"))
 	}
 
-	state := EvrMatchState{}
-	if err := json.Unmarshal([]byte(match.Label.GetValue()), &state); err != nil {
-		return errResponse(err)
+	data, err := json.MarshalIndent(response, "", "  ")
+	if err != nil {
+		return "", err
 	}
 
-	response.MatchLabel = state
-
-	response.Success = true
-	data, _ := json.MarshalIndent(response, "", "  ")
 	return string(data), nil
+}
+
+func GetUserbyCustomID(ctx context.Context, logger runtime.Logger, db *sql.DB, customID string) (userID string, username string, err error) {
+	// Look for an existing account.
+	query := "SELECT id, username, disable_time FROM users WHERE custom_id = $1"
+	var dbUserID uuid.UUID
+	var dbUsername string
+	var dbDisableTime pgtype.Timestamptz
+	var found = true
+	err = db.QueryRowContext(ctx, query, customID).Scan(&dbUserID, &dbUsername, &dbDisableTime)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			found = false
+		} else {
+			logger.Error("Error looking up user by custom ID.", zap.Error(err), zap.String("customID", customID), zap.String("username", ""))
+			return uuid.Nil.String(), "", status.Error(codes.Internal, "Error finding user account.")
+		}
+	}
+	if !found {
+		return uuid.Nil.String(), "", status.Error(codes.NotFound, "User account not found.")
+	}
+
+	// Check if it's disabled.
+	if dbDisableTime.Status == pgtype.Present && dbDisableTime.Time.Unix() != 0 {
+		logger.Info("User account is disabled.", zap.String("customID", customID), zap.String("username", dbUsername))
+		return dbUserID.String(), dbUsername, status.Error(codes.PermissionDenied, "User account banned.")
+	}
+
+	return dbUserID.String(), dbUsername, nil
+}
+
+type AuthenticatePasswordRequest struct {
+	UserID       string `json:"user_id"`
+	DiscordID    string `json:"discord_id"`
+	Username     string `json:"username"`
+	Password     string `json:"password"`
+	RefreshToken string `json:"refresh_token"`
+}
+
+var ErrAuthenticateFailed = runtime.NewError("authentication failed", StatusUnauthenticated)
+var RPCErrInvalidRequest = runtime.NewError("invalid request", StatusInvalidArgument)
+
+func AuthenticatePasswordRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, _nk runtime.NakamaModule, payload string) (string, error) {
+	nk := _nk.(*RuntimeGoNakamaModule)
+
+	request := AuthenticatePasswordRequest{}
+	if err := json.Unmarshal([]byte(payload), &request); err != nil {
+		return "", err
+	}
+
+	var err error
+	var userID, username, tokenID string
+	var vars map[string]string
+
+	switch {
+
+	case request.RefreshToken != "":
+		var userUUID uuid.UUID
+		userUUID, username, vars, tokenID, err = SessionRefresh(ctx, nk.logger, db, nk.config, nk.sessionCache, request.RefreshToken)
+		if err != nil {
+			return "", err
+		}
+		userID = userUUID.String()
+
+	case request.UserID != "":
+		userID = request.UserID
+
+	case request.DiscordID != "":
+		userID, _, err = GetUserbyCustomID(ctx, logger, db, request.DiscordID)
+		if err != nil {
+			return "", err
+		}
+	case request.Username != "":
+		users, err := nk.UsersGetUsername(ctx, []string{request.Username})
+		if err != nil {
+			return "", err
+		}
+		if len(users) != 1 {
+			return "", ErrAuthenticateFailed
+		}
+		userID = users[0].Id
+
+	default:
+		return "", RPCErrInvalidRequest
+	}
+
+	account, err := nk.AccountGetId(ctx, userID)
+	if err != nil {
+		return "", ErrAccountNotFound
+	}
+	if account == nil {
+		return "", ErrAuthenticateFailed
+	}
+	if tokenID == "" {
+		// Authenticate the user
+		userID, username, _, err = nk.AuthenticateEmail(ctx, account.Email, request.Password, "", false)
+		if err != nil {
+			return "", err
+		}
+		if tokenID != "" {
+			tokenID = uuid.Must(uuid.NewV4()).String()
+		}
+	}
+	// Get the account
+
+	token, exp := generateToken(nk.config, tokenID, userID, username, vars)
+	refreshToken, refreshExp := generateRefreshToken(nk.config, tokenID, userID, username, vars)
+	nk.sessionCache.Add(uuid.FromStringOrNil(userID), exp, tokenID, refreshExp, tokenID)
+	session := &api.Session{Token: token, RefreshToken: refreshToken}
+
+	response, err := json.Marshal(session)
+	if err != nil {
+		return "", runtime.NewError(fmt.Errorf("error marshalling response: %v", err).Error(), StatusInvalidArgument)
+	}
+	return string(response), nil
+}
+
+func AccountLookupRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	request := struct {
+		Username  string `json:"username"`
+		UserID    string `json:"user_id"`
+		DiscordID string `json:"discord_id"`
+	}{}
+
+	if err := json.Unmarshal([]byte(payload), &request); err != nil {
+		return "", err
+	}
+
+	var err error
+	userID := ""
+	switch {
+	case request.UserID != "":
+		uid, err := uuid.FromString(request.UserID)
+		if err != nil {
+			return "", runtime.NewError("invalid user id", StatusInvalidArgument)
+		}
+		userID = uid.String()
+	case request.Username != "":
+		users, err := nk.UsersGetUsername(ctx, []string{request.Username})
+		if err != nil {
+			return "", err
+		}
+		if len(users) != 1 {
+			return "", nil
+		}
+		userID = users[0].Id
+
+	case request.DiscordID != "":
+		userID, _, err = GetUserbyCustomID(ctx, logger, db, request.DiscordID)
+		if err != nil {
+			return "", err
+		}
+	}
+
+	// Get the user's account data.
+	account, err := nk.AccountGetId(ctx, userID)
+	if err != nil {
+		return "", err
+	}
+
+	response := struct {
+		ID          string `json:"id"`
+		DiscordID   string `json:"discord_id"`
+		Username    string `json:"username"`
+		DisplayName string `json:"display_name"`
+		AvatarURL   string `json:"avatar_url"`
+	}{
+		ID:          account.User.Id,
+		Username:    account.User.Username,
+		DiscordID:   account.CustomId,
+		DisplayName: account.User.DisplayName,
+		AvatarURL:   account.User.AvatarUrl,
+	}
+
+	// Convert the account data to a json object.
+	jsonResponse, err := json.Marshal(response)
+	if err != nil {
+		return "", err
+	}
+
+	return string(jsonResponse), nil
 }

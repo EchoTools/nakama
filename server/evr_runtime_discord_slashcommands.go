@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand"
 	"net"
 	"net/http"
 	"regexp"
@@ -23,6 +24,7 @@ import (
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	dps "github.com/markusmobius/go-dateparser"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -308,6 +310,24 @@ var (
 					Type:        discordgo.ApplicationCommandOptionRole,
 					Name:        "suspension",
 					Description: "Disallowed from joining any guild matches.",
+					Required:    true,
+				},
+			},
+		},
+		{
+			Name:        "allocate",
+			Description: "Allocate a session on a game server in a specific region",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "mode",
+					Description: "Game mode (one of `echo_arena_private`, `echo_combat_private[:level]`)",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "region",
+					Description: "Region to allocate the session in",
 					Required:    true,
 				},
 			},
@@ -1620,6 +1640,31 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				errFn(errors.New("Error handling profile request"), err)
 			}
 		},
+		"allocate": func(s *discordgo.Session, i *discordgo.InteractionCreate, logger runtime.Logger) {
+			options := i.ApplicationCommandData().Options
+			user, member := getScopedUserMember(i)
+			if user == nil {
+				return
+			}
+			if member == nil {
+				return
+			}
+
+			mode := options[0].StringValue()
+			region := options[1].StringValue()
+			startTime := time.Now()
+			if len(options) >= 3 {
+				//startTimeStr = options[2].StringValue()
+
+			}
+			label, err := d.handlePrepareMatch(ctx, logger, member.User.ID, i.GuildID, mode, region, startTime)
+			if err != nil {
+				simpleInteractionResponse(s, i, err.Error())
+				return
+			}
+
+			simpleInteractionResponse(s, i, fmt.Sprintf("Match prepared with label `%s`", label.String()))
+		},
 		"trigger-cv": func(s *discordgo.Session, i *discordgo.InteractionCreate, logger runtime.Logger) {
 
 			options := i.ApplicationCommandData().Options
@@ -2576,4 +2621,109 @@ func simpleInteractionResponse(s *discordgo.Session, i *discordgo.InteractionCre
 			Content: content,
 		},
 	})
+}
+
+func (d *DiscordAppBot) handlePrepareMatch(ctx context.Context, logger runtime.Logger, discordID string, guildID string, mode string, region string, startTime time.Time) (*EvrMatchState, error) {
+	userID, err := d.discordRegistry.GetUserIdByDiscordId(ctx, discordID, false)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user id: %w", err)
+	}
+
+	state := &EvrMatchState{}
+
+	state.SpawnedBy = userID.String()
+	state.StartedTime = startTime
+	state.MaxSize = MatchMaxSize
+
+	s := strings.SplitN(mode, ":", 2)
+
+	modestr := s[0]
+
+	switch modestr {
+	case "arena_private":
+		state.Mode = evr.ModeArenaPrivate
+	case "combat_private":
+		state.Mode = evr.ModeCombatPrivate
+		if len(s) == 2 {
+			state.Level = evr.ToSymbol(s[1])
+			validLevels := evr.LevelsByMode[evr.ModeCombatPrivate]
+			if !lo.Contains(validLevels, state.Level) {
+				return nil, fmt.Errorf("invalid level for mode: %s", s[1])
+			}
+		}
+	}
+
+	// Find a parking match to prepare
+	minSize := 1
+	maxSize := 1
+
+	channel, found := d.discordRegistry.Get(guildID)
+	if !found {
+		return nil, fmt.Errorf("guild group not found")
+	}
+
+	if region == "" {
+		region = "default"
+	}
+
+	region = evr.ToSymbol(region).String()
+
+	query := fmt.Sprintf("+label.lobby_type:unassigned +label.channel:%s +label.broadcaster.regions:%s", channel, region)
+	matches, err := d.nk.MatchList(ctx, 100, true, "", &minSize, &maxSize, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list matches: %w", err)
+	}
+
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("no available game servers in region `%s`, try `default`", region)
+	}
+
+	// Pick a random result
+	match := matches[rand.Intn(len(matches))]
+	matchID := match.GetMatchId()
+	// Prepare the session for the match.
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+
+	signal := EvrSignal{
+		Signal: SignalPrepareSession,
+		Data:   data,
+	}
+	data, err = json.MarshalIndent(signal, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal match signal: %v", err)
+	}
+	signalPayload := string(data)
+
+	// Send the signal
+	signalResponse, err := d.nk.MatchSignal(ctx, matchID, signalPayload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send signal: %v", err)
+	}
+
+	if signalResponse == "" {
+		return nil, fmt.Errorf("failed to prepare match: %v", signalResponse)
+	}
+
+	label := EvrMatchState{}
+	if err := json.Unmarshal([]byte(signalResponse), &label); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal match label: %v", err)
+	}
+
+	return &label, nil
+
+}
+
+func parseTime(s string) (time.Time, error) {
+	cfg := &dps.Configuration{
+		CurrentTime: time.Date(2015, 6, 1, 0, 0, 0, 0, time.UTC),
+	}
+	parsed, err := dps.Parse(cfg, s)
+	if err != nil {
+		return time.Now(), err
+	}
+	time := parsed.Time
+	return time, nil
 }
