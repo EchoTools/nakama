@@ -127,6 +127,10 @@ func (s Symbol) String() string {
 	return s.Token().String()
 }
 
+func (s Symbol) IsNil() bool {
+	return s == 0
+}
+
 // A symbol token is a symbol converted to a string.
 // It either uses the cache to convert back to a string,
 // or returns the hex string representation of the token.

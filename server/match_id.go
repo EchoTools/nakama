@@ -40,7 +40,10 @@ func (t MatchID) Equals(other MatchID) bool {
 
 // IsNil returns true if the match ID is nil.
 func (t MatchID) IsNil() bool {
-	return NilMatchID == t
+	if t.uuid == uuid.Nil || t.node == "" {
+		return true
+	}
+	return false
 }
 
 // NewMatchID creates a new match ID.

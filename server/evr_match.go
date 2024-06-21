@@ -232,8 +232,10 @@ func (s *EvrMatchState) GetLabel() string {
 func (s *EvrMatchState) PublicView() *EvrMatchState {
 	ps := *s
 	ps.Broadcaster.SessionID = ""
-	if ps.LobbyType == PrivateLobby {
+	if ps.LobbyType == PrivateLobby || ps.LobbyType == UnassignedLobby {
 		ps.ID = MatchID{}
+		ps.UUID = uuid.Nil
+		ps.Node = ""
 		ps.SpawnedBy = ""
 		ps.TeamAlignments = nil
 		ps.Players = nil
@@ -459,7 +461,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		return nil, false, ""
 	}
 
-	logger = logger.WithField("mid", state.ID.String()+"."+state.Node)
+	logger = logger.WithField("mid", state.ID.String())
 	logger = logger.WithField("username", presence.GetUsername())
 
 	switch {
@@ -877,37 +879,52 @@ func (m *EvrMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, db
 	return state
 }
 
+type SignalResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Payload string `json:"payload"`
+}
+
+func (r SignalResponse) String() string {
+	b, err := json.Marshal(r)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
 // MatchSignal is called when a signal is sent into the match.
 func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ interface{}, data string) (interface{}, string) {
 	state, ok := state_.(*EvrMatchState)
 	if !ok {
 		logger.Error("state not a valid lobby state object")
-		return nil, "state not a valid lobby state object"
+		return nil, SignalResponse{Message: "invalid match state"}.String()
 	}
 
 	// TODO protobuf's would be nice here.
 	signal := &EvrSignal{}
 	err := json.Unmarshal([]byte(data), signal)
 	if err != nil {
-		return state, fmt.Sprintf("failed to unmarshal signal: %v", err)
+		return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal signal: %v", err)}.String()
 	}
 
 	switch signal.Signal {
 	case SignalTerminate:
-		return m.MatchTerminate(ctx, logger, db, nk, dispatcher, tick, state, 10), "terminating match"
+
+		return m.MatchTerminate(ctx, logger, db, nk, dispatcher, tick, state, 10), SignalResponse{Success: true}.String()
 
 	case SignalPruneUnderutilized:
 		// Prune this match if it's utilization is low.
 		if len(state.presences) <= 3 {
 			// Free the resources.
-			return nil, "pruned"
+			return nil, SignalResponse{Success: true}.String()
 		}
 	case SignalGetEndpoint:
 		jsonData, err := json.Marshal(state.Broadcaster.Endpoint)
 		if err != nil {
 			return state, fmt.Sprintf("failed to marshal endpoint: %v", err)
 		}
-		return state, string(jsonData)
+		return state, SignalResponse{Success: true, Payload: string(jsonData)}.String()
 
 	case SignalGetPresences:
 		// Return the presences in the match.
@@ -916,39 +933,53 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		if err != nil {
 			return state, fmt.Sprintf("failed to marshal presences: %v", err)
 		}
-		return state, string(jsonData)
+		return state, SignalResponse{Success: true, Payload: string(jsonData)}.String()
 
 	case SignalPrepareSession:
 
 		// if the match is already started, return an error.
 		if state.LobbyType != UnassignedLobby {
-			logger.Error("Failed to start session: session already started")
-			return state, "session already started"
+			logger.Error("Failed to prepare session: session already prepared")
+			return state, SignalResponse{Message: "session already prepared"}.String()
 		}
 
 		newState, _, _, err := NewEvrMatchState(state.Broadcaster.Endpoint, &state.Broadcaster)
 		if err != nil {
-			return state, fmt.Sprintf("failed to create new match state: %v", err)
+			return state, SignalResponse{Message: fmt.Sprintf("failed to create new match state: %v", err)}.String()
 		}
 		err = json.Unmarshal(signal.Data, newState)
 		if err != nil {
-			return state, fmt.Sprintf("failed to unmarshal match label: %v", err)
+			return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal match label: %v", err)}.String()
 		}
 		state.Started = false
+		state.Open = newState.Open
+		state.Mode = newState.Mode
+		state.Level = newState.Level
 		state.SpawnedBy = newState.SpawnedBy
-
 		state.GroupID = newState.GroupID
 		state.MaxSize = newState.MaxSize
+		state.SessionSettings = newState.SessionSettings
+		state.RequiredFeatures = newState.RequiredFeatures
+		state.TeamSize = newState.TeamSize
+		state.StartedTime = newState.StartedTime
+		state.TeamAlignments = make(map[uuid.UUID]int, MatchMaxSize)
 
-		switch state.Mode {
+		switch newState.Mode {
 		case evr.ModeArenaPublic, evr.ModeSocialPublic, evr.ModeCombatPublic:
 			state.LobbyType = PublicLobby
 		default:
 			state.LobbyType = PrivateLobby
 		}
 
-		state.Mode = newState.Mode
-		state.Level = newState.Level
+		if state.TeamSize == 0 {
+			state.TeamSize = 5
+		}
+
+		if state.Mode == evr.ModeSocialPrivate || state.Mode == evr.ModeSocialPublic {
+			state.PlayerLimit = int(state.MaxSize)
+		} else {
+			state.PlayerLimit = state.TeamSize * 2
+		}
 
 		if state.Level == 0xffffffffffffffff || state.Level == 0 {
 			// The level is not set, set it to a random value
@@ -957,57 +988,41 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 			}
 		}
 
-		state.TeamSize = newState.TeamSize
-
-		if state.TeamSize == 0 {
-			state.TeamSize = 5
-		}
-
-		state.RequiredFeatures = newState.RequiredFeatures
-		state.SessionSettings = newState.SessionSettings
-
 		if state.SessionSettings == nil {
 			settings := evr.NewSessionSettings(strconv.FormatUint(PcvrAppId, 10), state.Mode, state.Level, state.RequiredFeatures)
 			state.SessionSettings = &settings
 		}
 
-		state.Open = newState.Open
-
-		state.TeamAlignments = make(map[uuid.UUID]int, MatchMaxSize)
-
-		if state.Mode == evr.ModeSocialPrivate || state.Mode == evr.ModeSocialPublic {
-			state.PlayerLimit = int(state.MaxSize)
-		} else {
-			state.PlayerLimit = state.TeamSize * 2
-		}
 		if newState.Players != nil {
 			for _, player := range newState.Players {
 				state.TeamAlignments[uuid.FromStringOrNil(player.UserID)] = int(player.Team)
 			}
 		}
-		state.StartedTime = newState.StartedTime
+
+		state.rebuildCache()
+
+		if err := m.updateLabel(dispatcher, state); err != nil {
+			logger.Error("failed to update label: %v", err)
+			return state, SignalResponse{Message: fmt.Sprintf("failed to update label: %v", err)}.String()
+		}
+
+		return state, SignalResponse{Success: true, Payload: state.String()}.String()
 
 	case SignalStartSession:
 
-		// Tell the broadcaster to start the session.
 		state, err := m.StartSession(ctx, logger, nk, dispatcher, state)
 		if err != nil {
-			return state, fmt.Sprintf("failed to start session: %v", err)
+			return state, SignalResponse{Message: fmt.Sprintf("failed to start session: %v", err)}.String()
 		}
 		logger.Debug("Session started. %v", state)
-		return state, "session started"
+		return state, SignalResponse{Success: true}.String()
 
 	default:
 		logger.Warn("Unknown signal: %v", signal.Signal)
-		return state, "unknown signal"
+		return state, SignalResponse{Success: false, Message: "unknown signal"}.String()
 	}
 
-	state.rebuildCache()
-
-	if err := m.updateLabel(dispatcher, state); err != nil {
-		logger.Error("failed to update label: %v", err)
-	}
-	return state, state.String()
+	return state, SignalResponse{Success: true, Payload: state.String()}.String()
 
 }
 
@@ -1024,6 +1039,8 @@ func (m *EvrMatch) StartSession(ctx context.Context, logger runtime.Logger, nk r
 	messages := []evr.Message{
 		message,
 	}
+
+	state.rebuildCache()
 
 	if err := m.updateLabel(dispatcher, state); err != nil {
 		logger.Error("failed to update label: %v", err)
@@ -1050,7 +1067,18 @@ func SignalMatch(ctx context.Context, matchRegistry MatchRegistry, matchID Match
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal match signal: %v", err)
 	}
-	return matchRegistry.Signal(ctx, matchID.String(), string(signalJson))
+	responseJSON, err := matchRegistry.Signal(ctx, matchID.String(), string(signalJson))
+	if err != nil {
+		return "", fmt.Errorf("failed to signal match: %v", err)
+	}
+	response := SignalResponse{}
+	if err := json.Unmarshal([]byte(responseJSON), &response); err != nil {
+		return "", fmt.Errorf("failed to unmarshal response: %v", err)
+	}
+	if !response.Success {
+		return "", fmt.Errorf("match signal response: %v", response.Message)
+	}
+	return response.Payload, nil
 }
 
 func (m *EvrMatch) dispatchMessages(_ context.Context, logger runtime.Logger, dispatcher runtime.MatchDispatcher, messages []evr.Message, presences []runtime.Presence, sender runtime.Presence) error {
@@ -1071,12 +1099,8 @@ func (m *EvrMatch) dispatchMessages(_ context.Context, logger runtime.Logger, di
 }
 
 func (m *EvrMatch) updateLabel(dispatcher runtime.MatchDispatcher, state *EvrMatchState) error {
-	labelJson, err := json.MarshalIndent(state, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal match label: %v", err)
-	}
 
-	if err := dispatcher.MatchLabelUpdate(string(labelJson)); err != nil {
+	if err := dispatcher.MatchLabelUpdate(state.GetLabel()); err != nil {
 		return fmt.Errorf("could not update label: %v", err)
 	}
 	return nil

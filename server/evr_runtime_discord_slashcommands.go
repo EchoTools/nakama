@@ -320,15 +320,43 @@ var (
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "mode",
-					Description: "Game mode (one of `echo_arena_private`, `echo_combat_private[:level]`)",
+					Name:        "region",
+					Description: "Region to allocate the session in",
 					Required:    true,
 				},
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "region",
-					Description: "Region to allocate the session in",
+					Name:        "mode",
+					Description: "Game mode",
 					Required:    true,
+					Choices: []*discordgo.ApplicationCommandOptionChoice{
+						{
+							Name:  "Echo Arena Private",
+							Value: "echo_arena_private",
+						},
+						{
+							Name:  "Echo Combat Private",
+							Value: "echo_combat_private",
+						},
+					},
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "level",
+					Description: "Level to allocate the session in",
+					Required:    false,
+					Choices: func() []*discordgo.ApplicationCommandOptionChoice {
+						choices := make([]*discordgo.ApplicationCommandOptionChoice, 0)
+						for _, levels := range evr.LevelsByMode {
+							for _, level := range levels {
+								choices = append(choices, &discordgo.ApplicationCommandOptionChoice{
+									Name:  level.Token().String(),
+									Value: level,
+								})
+							}
+						}
+						return choices
+					}(),
 				},
 			},
 		},
@@ -1662,20 +1690,37 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return
 			}
 
-			mode := options[0].StringValue()
-			region := options[1].StringValue()
-			startTime := time.Now()
-			if len(options) >= 3 {
-				//startTimeStr = options[2].StringValue()
+			region := evr.ToSymbol(options[0].StringValue())
+			mode := evr.ToSymbol(options[1].StringValue())
 
+			// validate the mode
+			if _, ok := evr.LevelsByMode[mode]; !ok {
+				err := fmt.Errorf("invalid mode `%s`", mode)
+				simpleInteractionResponse(s, i, err.Error())
+				return
 			}
-			label, err := d.handlePrepareMatch(ctx, logger, member.User.ID, i.GuildID, mode, region, startTime)
+
+			var level evr.Symbol
+			if len(options) >= 3 {
+				level = evr.ToSymbol(options[2].StringValue())
+
+				// validate the level
+				if !slices.Contains(evr.LevelsByMode[mode], level) {
+					err := fmt.Errorf("invalid level `%s` for mode `%s`", level, mode)
+					simpleInteractionResponse(s, i, err.Error())
+					return
+				}
+			}
+
+			startTime := time.Now()
+
+			label, err := d.handlePrepareMatch(ctx, logger, member.User.ID, i.GuildID, region, mode, level, startTime)
 			if err != nil {
 				simpleInteractionResponse(s, i, err.Error())
 				return
 			}
 
-			simpleInteractionResponse(s, i, fmt.Sprintf("Match prepared with label `%s`", label.String()))
+			simpleInteractionResponse(s, i, fmt.Sprintf("Match prepared with label ```json\n%s\n```\nhttps://echo.taxi/spark://c/%s", label.String(), strings.ToUpper(label.ID.UUID().String())))
 		},
 		"trigger-cv": func(s *discordgo.Session, i *discordgo.InteractionCreate, logger runtime.Logger) {
 
@@ -2655,93 +2700,59 @@ func simpleInteractionResponse(s *discordgo.Session, i *discordgo.InteractionCre
 	})
 }
 
-func (d *DiscordAppBot) handlePrepareMatch(ctx context.Context, logger runtime.Logger, discordID string, guildID string, mode string, region string, startTime time.Time) (*EvrMatchState, error) {
+func (d *DiscordAppBot) handlePrepareMatch(ctx context.Context, logger runtime.Logger, discordID, guildID string, region, mode, level evr.Symbol, startTime time.Time) (*EvrMatchState, error) {
 	userID, err := d.discordRegistry.GetUserIdByDiscordId(ctx, discordID, false)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get user id: %w", err)
-	}
-
-	state := &EvrMatchState{}
-
-	state.SpawnedBy = userID.String()
-	state.StartedTime = startTime
-	state.MaxSize = MatchMaxSize
-
-	s := strings.SplitN(mode, ":", 2)
-
-	modestr := s[0]
-
-	switch modestr {
-	case "arena_private":
-		state.Mode = evr.ModeArenaPrivate
-	case "combat_private":
-		state.Mode = evr.ModeCombatPrivate
-		if len(s) == 2 {
-			state.Level = evr.ToSymbol(s[1])
-			validLevels := evr.LevelsByMode[evr.ModeCombatPrivate]
-			if !lo.Contains(validLevels, state.Level) {
-				return nil, fmt.Errorf("invalid level for mode: %s", s[1])
-			}
-		}
+		return nil, status.Errorf(codes.NotFound, "user not found: %s", discordID)
 	}
 
 	// Find a parking match to prepare
 	minSize := 1
 	maxSize := 1
 
-	channel, found := d.discordRegistry.Get(guildID)
+	groupID, found := d.discordRegistry.Get(guildID)
 	if !found {
-		return nil, fmt.Errorf("guild group not found")
+		return nil, status.Errorf(codes.NotFound, "guild not found: %s", guildID)
 	}
 
-	if region == "" {
-		region = "default"
+	if region.IsNil() {
+		region = evr.ToSymbol("default")
 	}
 
-	region = evr.ToSymbol(region).String()
-
-	query := fmt.Sprintf("+label.lobby_type:unassigned +label.channel:%s +label.broadcaster.regions:%s", channel, region)
+	query := fmt.Sprintf("+label.lobby_type:unassigned +label.broadcaster.channels:%s +label.broadcaster.regions:%s", groupID, region.Token().String())
 	matches, err := d.nk.MatchList(ctx, 100, true, "", &minSize, &maxSize, query)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list matches: %w", err)
+		return nil, status.Errorf(codes.Internal, "failed to list matches: %v", err)
 	}
 
 	if len(matches) == 0 {
-		return nil, fmt.Errorf("no available game servers in region `%s`, try `default`", region)
+		return nil, status.Error(codes.NotFound, "no matches found")
 	}
 
 	// Pick a random result
 	match := matches[rand.Intn(len(matches))]
-	matchID := match.GetMatchId()
+	matchID := MatchIDFromStringOrNil(match.GetMatchId())
+	gid := uuid.FromStringOrNil(groupID)
 	// Prepare the session for the match.
-	data, err := json.MarshalIndent(state, "", "  ")
+	state := &EvrMatchState{}
+	state.SpawnedBy = userID.String()
+	state.StartedTime = startTime
+	state.MaxSize = MatchMaxSize
+	state.Mode = mode
+	state.Open = true
+	state.GroupID = &gid
+	if !level.IsNil() {
+		state.Level = level
+	}
+	nk_ := d.nk.(*RuntimeGoNakamaModule)
+	response, err := SignalMatch(ctx, nk_.matchRegistry, matchID, SignalPrepareSession, state)
 	if err != nil {
-		return nil, err
-	}
-
-	signal := EvrSignal{
-		Signal: SignalPrepareSession,
-		Data:   data,
-	}
-	data, err = json.MarshalIndent(signal, "", "  ")
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal match signal: %v", err)
-	}
-	signalPayload := string(data)
-
-	// Send the signal
-	signalResponse, err := d.nk.MatchSignal(ctx, matchID, signalPayload)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send signal: %v", err)
-	}
-
-	if signalResponse == "" {
-		return nil, fmt.Errorf("failed to prepare match: %v", signalResponse)
+		return nil, status.Errorf(codes.Internal, "failed to signal match: %v", err)
 	}
 
 	label := EvrMatchState{}
-	if err := json.Unmarshal([]byte(signalResponse), &label); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal match label: %v", err)
+	if err := json.Unmarshal([]byte(response), &label); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to unmarshal match label: %v", err)
 	}
 
 	return &label, nil
@@ -2803,7 +2814,7 @@ func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runt
 		var status string
 
 		if state.Size == 0 {
-			status = "-"
+			status = "Unassigned"
 		} else {
 			players := make([]string, 0, state.Size)
 			for _, player := range state.Players {
