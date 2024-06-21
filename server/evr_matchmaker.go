@@ -644,10 +644,12 @@ func (p *EvrPipeline) MatchCreate(ctx context.Context, session *sessionWS, msess
 	ml.SpawnedBy = session.UserID().String()
 
 	// Prepare the match
-	_, err = SignalMatch(ctx, p.matchRegistry, matchID, SignalPrepareSession, ml)
+	label, err := SignalMatch(ctx, p.matchRegistry, matchID, SignalPrepareSession, ml)
 	if err != nil {
 		return MatchID{}, fmt.Errorf("failed to send prepare session: %v", err)
 	}
+
+	msession.Logger.Info("Match created", zap.String("match_id", matchID.String()), zap.String("label", label))
 
 	// Return the prepared session
 	return matchID, nil
@@ -756,7 +758,7 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 	if !allowed {
 		switch reason {
 		case ErrJoinRejectedUnassignedLobby:
-			return status.Errorf(codes.FailedPrecondition, "join not allowed: %s", reason)
+			return status.Errorf(codes.NotFound, "join not allowed: %s", reason)
 		case ErrJoinRejectedDuplicateJoin:
 			return status.Errorf(codes.AlreadyExists, "join not allowed: %s", reason)
 		case ErrJoinRejectedNotModerator:

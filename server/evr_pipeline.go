@@ -470,29 +470,6 @@ func (p *EvrPipeline) relayMatchData(ctx context.Context, logger *zap.Logger, se
 	return nil
 }
 
-// An Alternative way to get the data into the match. This is used when the match is not yet joined.
-func (p *EvrPipeline) MatchSignalData(logger *zap.Logger, session *sessionWS, matchId string, in evr.Message) error {
-	requestJson, err := json.Marshal(in)
-	if err != nil {
-		return fmt.Errorf("failed to marshal request: %w", err)
-	}
-	signal := &EvrSignal{
-		UserId: session.UserID().String(),
-		Signal: int64(evr.SymbolOf(in)),
-		Data:   requestJson,
-	}
-	b, err := json.Marshal(signal)
-	if err != nil {
-		return fmt.Errorf("failed to marshal signal: %w", err)
-	}
-
-	_, err = p.matchRegistry.Signal(session.Context(), matchId, string(b))
-	if err != nil {
-		return fmt.Errorf("failed to signal match: %w", err)
-	}
-	return nil
-}
-
 // sendMatchData sends the data to the match.
 func sendMatchData(matchRegistry MatchRegistry, matchIdStr string, session *sessionWS, in evr.Message) error {
 	matchIDComponents := strings.SplitN(matchIdStr, ".", 2)

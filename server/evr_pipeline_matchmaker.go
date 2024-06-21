@@ -1005,7 +1005,6 @@ func (p *EvrPipeline) pruneMatches(ctx context.Context, session *sessionWS) erro
 		_, err := SignalMatch(ctx, p.matchRegistry, MatchIDFromStringOrNil(match.MatchId), SignalPruneUnderutilized, nil)
 		if err != nil {
 			return err
-
 		}
 	}
 	return nil

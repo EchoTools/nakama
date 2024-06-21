@@ -155,7 +155,7 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 	config := broadcasterConfig(userId, session.id.String(), request.ServerId, request.InternalIP, externalIP, request.Port, regions, request.VersionLock, tags, features)
 
 	// Get the hosted groupIDs
-	groupIDs, err := p.getBroadcasterHostGroups(ctx, logger, session, userId, discordId, guildIds)
+	groupIDs, err := p.getBroadcasterHostGroups(ctx, userId, guildIds)
 	if err != nil {
 		return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_Unknown)
 	}
@@ -360,7 +360,7 @@ func (p *EvrPipeline) getUserGroups(ctx context.Context, userID uuid.UUID, minSt
 	return groups, nil
 }
 
-func (p *EvrPipeline) getBroadcasterHostGroups(ctx context.Context, logger *zap.Logger, session *sessionWS, userId, discordID string, guildIDs []string) (groupIDs []uuid.UUID, err error) {
+func (p *EvrPipeline) getBroadcasterHostGroups(ctx context.Context, userId string, guildIDs []string) (groupIDs []uuid.UUID, err error) {
 
 	// Get the user's guild memberships
 	memberships, err := p.discordRegistry.GetGuildGroupMemberships(ctx, uuid.FromStringOrNil(userId), nil)
