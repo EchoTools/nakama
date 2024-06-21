@@ -605,7 +605,29 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 				}
 
 				// Notify the channel that this person started queuing
-				bot.ChannelMessageSendEmbed(channelID, &embed)
+				message, err := bot.ChannelMessageSendEmbed(channelID, &embed)
+				if err != nil {
+					logger.Warn("Failed to send message", zap.Error(err))
+				}
+				go func() {
+					// Delete the message when the player stops matchmaking
+					select {
+					case <-msession.Ctx.Done():
+						if message != nil {
+							err := bot.ChannelMessageDelete(channelID, message.ID)
+							if err != nil {
+								logger.Warn("Failed to delete message", zap.Error(err))
+							}
+						}
+					case <-time.After(15 * time.Minute):
+						if message != nil {
+							err := bot.ChannelMessageDelete(channelID, message.ID)
+							if err != nil {
+								logger.Warn("Failed to delete message", zap.Error(err))
+							}
+						}
+					}
+				}()
 			}
 		}
 
