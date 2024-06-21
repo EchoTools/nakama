@@ -595,7 +595,7 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 	metricsTags := map[string]string{
 		"type":     strconv.FormatInt(int64(ml.LobbyType), 10),
 		"mode":     ml.Mode.String(),
-		"channel":  ml.Channel.String(),
+		"channel":  ml.GroupID.String(),
 		"level":    ml.Level.String(),
 		"team_idx": strconv.FormatInt(int64(ml.TeamIndex), 10),
 	}
@@ -1120,7 +1120,7 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, logger *zap.Logger, se
 		startedAt := time.Now().UTC()
 		metricsTags := map[string]string{
 			"mode":    ml.Mode.String(),
-			"channel": ml.Channel.String(),
+			"channel": ml.GroupID.String(),
 			"level":   ml.Level.String(),
 			"team":    strconv.FormatInt(int64(ml.TeamIndex), 10),
 			"result":  "success",
@@ -1225,7 +1225,7 @@ func (ms *MatchmakingSession) BuildQuery(latencies []LatencyMetric) (query strin
 	qparts := make([]string, 0, 10)
 	ml := ms.Label
 	// SHOULD match this channel
-	chstr := strings.Replace(ms.Label.Channel.String(), "-", "", -1)
+	chstr := strings.Replace(ms.Label.GroupID.String(), "-", "", -1)
 	qparts = append(qparts, fmt.Sprintf("properties.channel:%s^3", chstr))
 	stringProps["channel"] = chstr
 
@@ -1272,7 +1272,7 @@ func (ms *MatchmakingSession) BuildQuery(latencies []LatencyMetric) (query strin
 		stringProps[s] = "T"
 
 		// If this is the user's current channel, then give it a +3 boost
-		if groupId == *ms.Label.Channel {
+		if groupId == *ms.Label.GroupID {
 			qparts = append(qparts, fmt.Sprintf("properties.%s:T^3", s))
 		} else {
 			qparts = append(qparts, fmt.Sprintf("properties.%s:T", s))

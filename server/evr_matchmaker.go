@@ -417,8 +417,8 @@ func buildMatchQueryFromLabel(ml *EvrMatchState) string {
 	}
 
 	// SHOULD Add the current channel as a high boost SHOULD
-	if *ml.Channel != uuid.Nil {
-		qparts = append(qparts, Channel(*ml.Channel).Query(Should, 3))
+	if *ml.GroupID != uuid.Nil {
+		qparts = append(qparts, Channel(*ml.GroupID).Query(Should, 3))
 	}
 
 	switch len(ml.Broadcaster.Regions) {
