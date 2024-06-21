@@ -144,7 +144,7 @@ func MatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime
 	publicView := true
 
 	if u, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string); ok {
-		if ok, err := checkGroupMembershipByName(ctx, nk, uuid.FromStringOrNil(u), GroupGlobalPrivateDataAccess, "system"); err != nil {
+		if ok, err := checkGroupMembershipByName(ctx, nk, uuid.FromStringOrNil(u), GroupGlobalPrivateDataAccess, SystemGroupLangTag); err != nil {
 			return "", runtime.NewError("failed to check group membership", StatusInternalError)
 		} else if !ok {
 			return "", runtime.NewError("unauthorized", StatusPermissionDenied)
@@ -832,7 +832,7 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		return "", runtime.NewError("authentication required", StatusUnauthenticated)
 	}
 
-	if ok, err := checkGroupMembershipByName(ctx, nk, uuid.FromStringOrNil(userID), GroupGlobalBots, "system"); err != nil {
+	if ok, err := checkGroupMembershipByName(ctx, nk, uuid.FromStringOrNil(userID), GroupGlobalBots, SystemGroupLangTag); err != nil {
 		return "", runtime.NewError("failed to check group membership", StatusInternalError)
 	} else if !ok {
 		return "", runtime.NewError("unauthorized", StatusPermissionDenied)

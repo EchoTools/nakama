@@ -1083,23 +1083,23 @@ func (m *EvrMatch) updateLabel(dispatcher runtime.MatchDispatcher, state *EvrMat
 }
 
 func checkIfGlobalDeveloper(ctx context.Context, nk runtime.NakamaModule, userID uuid.UUID) (bool, error) {
-	return checkGroupMembershipByName(ctx, nk, userID, GroupGlobalDevelopers, "system")
+	return checkGroupMembershipByName(ctx, nk, userID, GroupGlobalDevelopers, SystemGroupLangTag)
 }
 
 func checkIfGlobalBot(ctx context.Context, nk runtime.NakamaModule, userID uuid.UUID) (bool, error) {
-	return checkGroupMembershipByName(ctx, nk, userID, GroupGlobalBots, "system")
+	return checkGroupMembershipByName(ctx, nk, userID, GroupGlobalBots, SystemGroupLangTag)
 }
 
 func checkIfGlobalModerator(ctx context.Context, nk runtime.NakamaModule, userID uuid.UUID) (bool, error) {
 	// Developers are moderators
-	ok, err := checkGroupMembershipByName(ctx, nk, userID, GroupGlobalDevelopers, "system")
+	ok, err := checkGroupMembershipByName(ctx, nk, userID, GroupGlobalDevelopers, SystemGroupLangTag)
 	if err != nil {
 		return false, fmt.Errorf("error getting user groups: %w", err)
 	}
 	if ok {
 		return true, nil
 	}
-	return checkGroupMembershipByName(ctx, nk, userID, GroupGlobalModerators, "system")
+	return checkGroupMembershipByName(ctx, nk, userID, GroupGlobalModerators, SystemGroupLangTag)
 }
 
 func checkGroupMembershipByName(ctx context.Context, nk runtime.NakamaModule, userID uuid.UUID, groupName, langtag string) (bool, error) {
