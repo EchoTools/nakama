@@ -346,66 +346,23 @@ type MatchmakingSettings struct {
 	CreateQueryAddon     string   `json:"create_query_addon"`    // Additional query to add to the matchmaking query
 	GroupID              string   `json:"group_id"`              // Group ID to matchmake with
 	PriorityBroadcasters []string `json:"priority_broadcasters"` // Prioritize these broadcasters
-	NextMatchToken       MatchID  `json:"next_match_id"`         // Try to join this match immediately when finding a match
+	NextMatchID          MatchID  `json:"next_match_id"`         // Try to join this match immediately when finding a match
 }
 
-func (mr *MatchmakingRegistry) LoadMatchmakingSettings(ctx context.Context, logger *zap.Logger, userID string) (config MatchmakingSettings, err error) {
-	return LoadMatchmakingSettings(ctx, NewRuntimeGoLogger(logger), mr.nk, userID)
+func (MatchmakingSettings) GetStorageID() StorageID {
+	return StorageID{
+		Collection: MatchmakingConfigStorageCollection,
+		Key:        MatchmakingConfigStorageKey,
+	}
 }
 
-func (mr *MatchmakingRegistry) StoreMatchmakingSettings(ctx context.Context, logger *zap.Logger, config MatchmakingSettings, userID string) error {
-	return StoreMatchmakingSettings(mr.ctx, NewRuntimeGoLogger(logger), mr.nk, config, userID)
-}
-
-func LoadMatchmakingSettings(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, userID string) (config MatchmakingSettings, err error) {
-
-	objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
-		{
-			Collection: MatchmakingConfigStorageCollection,
-			Key:        MatchmakingConfigStorageKey,
-			UserID:     userID,
-		},
-	})
-	if err != nil {
-		logger.Error("Failed to read matchmaking config", zap.Error(err))
-		return
-	}
-
-	if len(objs) == 0 {
-		logger.Warn("No matchmaking config found, writing new one")
-		err = StoreMatchmakingSettings(ctx, logger, nk, config, userID)
-		if err != nil {
-			logger.Error("Failed to write matchmaking config", zap.Error(err))
-		}
-		return
-	}
-
-	if err = json.Unmarshal([]byte(objs[0].Value), &config); err != nil {
-		logger.Error("Failed to unmarshal matchmaking config", zap.Error(err))
-		return
-	}
+func (mr *MatchmakingRegistry) LoadMatchmakingSettings(ctx context.Context, logger *zap.Logger, userID string) (settings MatchmakingSettings, err error) {
+	err = LoadFromStorage(ctx, mr.nk, userID, &settings, true)
 	return
 }
 
-func StoreMatchmakingSettings(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, config MatchmakingSettings, userID string) error {
-	data, err := json.Marshal(config)
-	if err != nil {
-		logger.Error("Failed to marshal matchmaking config", zap.Error(err))
-	}
-	_, err = nk.StorageWrite(ctx, []*runtime.StorageWrite{
-		{
-			UserID:          userID,
-			Collection:      MatchmakingConfigStorageCollection,
-			Key:             MatchmakingConfigStorageKey,
-			Value:           string(data),
-			PermissionRead:  0,
-			PermissionWrite: 0,
-		},
-	})
-	if err != nil {
-		logger.Error("Failed to write matchmaking config", zap.Error(err))
-	}
-	return err
+func (mr *MatchmakingRegistry) StoreMatchmakingSettings(ctx context.Context, logger *zap.Logger, config MatchmakingSettings, userID string) error {
+	return StoreToStorage(ctx, mr.nk, userID, config)
 }
 
 func ipToKey(ip net.IP) string {
