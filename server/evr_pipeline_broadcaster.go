@@ -235,19 +235,19 @@ func extractAuthenticationDetailsFromContext(ctx context.Context) (discordId, pa
 	// Get the discord id from the context
 	discordId, ok = ctx.Value(ctxDiscordIdKey{}).(string)
 	if !ok || discordId == "" {
-		return "", "", nil, nil, nil, fmt.Errorf("no url params provided")
+		return "", "", nil, nil, nil, fmt.Errorf("`discordID` url param missing")
 	}
 
 	// Get the password from the context
 	password, ok = ctx.Value(ctxPasswordKey{}).(string)
 	if !ok || password == "" {
-		return "", "", nil, nil, nil, fmt.Errorf("no url params provided")
+		return "", "", nil, nil, nil, fmt.Errorf("`password` url param missing")
 	}
 
 	// Get the url params
 	params, ok := ctx.Value(ctxUrlParamsKey{}).(map[string][]string)
 	if !ok {
-		return "", "", nil, nil, nil, fmt.Errorf("no url params provided")
+		return "", "", nil, nil, nil, fmt.Errorf("params not provided")
 	}
 
 	// Get the tags from the url params
