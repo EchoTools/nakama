@@ -2719,7 +2719,7 @@ func (d *DiscordAppBot) handlePrepareMatch(ctx context.Context, logger runtime.L
 		region = evr.ToSymbol("default")
 	}
 
-	query := fmt.Sprintf("+label.lobby_type:unassigned +label.broadcaster.channels:%s +label.broadcaster.regions:%s", groupID, region.Token().String())
+	query := fmt.Sprintf("+label.lobby_type:unassigned +label.broadcaster.group_ids:%s +label.broadcaster.regions:%s", groupID, region.Token().String())
 	matches, err := d.nk.MatchList(ctx, 100, true, "", &minSize, &maxSize, query)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to list matches: %v", err)

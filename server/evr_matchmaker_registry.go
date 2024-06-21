@@ -1265,7 +1265,7 @@ func (ms *MatchmakingSession) BuildQuery(latencies []LatencyMetric) (query strin
 	qparts = append(qparts, GameMode(ml.Mode).Label(Must, 0).Property())
 	stringProps["mode"] = ml.Mode.Token().String()
 
-	for _, groupId := range ml.Broadcaster.Channels {
+	for _, groupId := range ml.Broadcaster.GroupIDs {
 		// Add the properties
 		// Strip out the hyphens from the group ID
 		s := strings.ReplaceAll(groupId.String(), "-", "")

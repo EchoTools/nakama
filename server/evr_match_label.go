@@ -328,7 +328,7 @@ type Channel uuid.UUID // uuid.UUID
 func (c Channel) Query(o QueryOperator, b int) string {
 	return Label{
 		Op:    rune(o),
-		Name:  "channel",
+		Name:  "group_id",
 		Value: c.String(),
 		boost: b,
 	}.Unescaped()
@@ -355,7 +355,7 @@ func (c Channels) Query(o QueryOperator, b int) string {
 	s = fmt.Sprintf("/(%s)/", s)
 	return Label{
 		Op:    rune(o),
-		Name:  "channel",
+		Name:  "group_id",
 		Value: s,
 		boost: b,
 	}.Unescaped()
@@ -378,7 +378,7 @@ func (c HostedChannels) Query(o QueryOperator, b int) string {
 	s = fmt.Sprintf("/(%s)/", s)
 	return Label{
 		Op:    rune(o),
-		Name:  "broadcaster.channels",
+		Name:  "broadcaster.group_ids",
 		Value: s,
 		boost: b,
 	}.Unescaped()

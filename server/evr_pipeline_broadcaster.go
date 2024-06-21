@@ -159,7 +159,7 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 	if err != nil {
 		return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_Unknown)
 	}
-	config.Channels = groupIDs
+	config.GroupIDs = groupIDs
 
 	logger = logger.With(zap.String("internalIP", request.InternalIP.String()), zap.String("externalIP", externalIP.String()), zap.Uint16("port", request.Port))
 	// Validate connectivity to the broadcaster.
@@ -328,7 +328,7 @@ func broadcasterConfig(userId, sessionId string, serverId uint64, internalIP, ex
 		},
 		Regions:     regions,
 		VersionLock: versionLock,
-		Channels:    make([]uuid.UUID, 0),
+		GroupIDs:    make([]uuid.UUID, 0),
 		Features:    features,
 
 		Tags: make([]string, 0),
