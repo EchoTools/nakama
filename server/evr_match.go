@@ -654,10 +654,7 @@ func (m *EvrMatch) sendPlayerStart(ctx context.Context, logger runtime.Logger, d
 		// Delay to allow everything to be ready for the user to join.
 		<-time.After(1 * time.Second)
 		// Wait until 5 seconds after the match has started to send the player start message.
-
-		if time.Now().Before(state.StartedTime.Add(5 * time.Second)) {
-			<-time.After(state.StartedTime.Add(5 * time.Second).Sub(time.Now()))
-		}
+		<-time.After(time.Until(state.StartedTime.Add(5 * time.Second)))
 
 		// Dispatch the message for delivery.
 		if err := m.dispatchMessages(ctx, logger, dispatcher, messages, []runtime.Presence{state.broadcaster, p}, nil); err != nil {
