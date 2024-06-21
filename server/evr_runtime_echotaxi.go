@@ -603,15 +603,14 @@ func (e *TaxiBot) Hail(logger runtime.Logger, discordID string, matchID MatchID)
 		e.HailCount++
 	}
 
-	settings, err := LoadMatchmakingSettings(ctx, logger, e.nk, userID)
-	if err != nil {
+	settings := MatchmakingSettings{}
+	if err := LoadFromStorage(ctx, e.nk, userID, &settings, true); err != nil {
 		return fmt.Errorf("Error loading matchmaking config: %s", err.Error())
 	}
-
 	// Update the NextMatchID
-	settings.NextMatchToken = matchID
+	settings.NextMatchID = matchID
 
-	if err := StoreMatchmakingSettings(ctx, logger, e.nk, settings, userID); err != nil {
+	if err := StoreToStorage(ctx, e.nk, userID, &settings); err != nil {
 		return fmt.Errorf("Error storing matchmaking config: %s", err.Error())
 	}
 
