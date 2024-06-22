@@ -520,6 +520,14 @@ func PopulationCmp(o, p int, i, j time.Duration) bool {
 	return o > p
 }
 
+// LatencyCmp compares by latency, round to the nearest 10ms
+func LatencyCmp(i, j time.Duration) bool {
+	// Round to the closest 10ms
+	i = mroundRTT(i, 10*time.Millisecond)
+	j = mroundRTT(j, 10*time.Millisecond)
+	return i < j
+}
+
 // MatchSort pings the matches and filters the matches by the user's cached latencies.
 func (p *EvrPipeline) MatchSort(ctx context.Context, session *sessionWS, msession *MatchmakingSession, labels []*EvrMatchState) (filtered []*EvrMatchState, rtts []time.Duration, err error) {
 	// TODO Move this into the matchmaking registry
@@ -570,6 +578,11 @@ func (p *EvrPipeline) MatchSort(ctx context.Context, session *sessionWS, msessio
 
 	// Sort the matches
 	switch msession.Label.Mode {
+	case evr.ModeArenaPrivate, evr.ModeCombatPrivate:
+		// Sort by latency only
+		sort.SliceStable(datas, func(i, j int) bool {
+			return LatencyCmp(datas[i].RTT, datas[j].RTT)
+		})
 	case evr.ModeArenaPublic:
 		// Split Arena matches into two groups: over and under 90ms
 		// Sort by if over or under 90ms, then population, then latency
