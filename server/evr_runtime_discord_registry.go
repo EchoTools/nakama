@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -277,11 +278,12 @@ func (r *LocalDiscordRegistry) GetGuildMember(ctx context.Context, guildId, memb
 	// If member is not found in the cache, get it from the API
 	member, err := r.bot.GuildMember(guildId, memberId)
 	if err != nil {
-		if restErr, ok := err.(*discordgo.RESTError); ok && restErr.Message.Code == discordgo.ErrCodeUnknownMember {
+		if restError, _ := err.(*discordgo.RESTError); errors.As(err, &restError) && restError.Message != nil && restError.Message.Code == discordgo.ErrCodeUnknownMember {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("error getting member %s in guild %s: %w", memberId, guildId, err)
+		return nil, fmt.Errorf("error getting guild member: %w", err)
 	}
+
 	r.bot.State.MemberAdd(member)
 
 	return member, nil
