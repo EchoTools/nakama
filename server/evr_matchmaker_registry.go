@@ -621,7 +621,7 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 		if err != nil {
 			mr.logger.Warn("Error allocating broadcaster", zap.Error(err))
 		}
-		if matchID.IsNil() {
+		if !matchID.IsNil() {
 			break
 		}
 
@@ -635,7 +635,7 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 			for _, e := range entrants {
 				s, ok := mr.GetMatchingBySessionId(e.Presence.SessionID)
 				if !ok {
-					logger.Warn("Could not find matching session for user", zap.String("sessionID", e.Presence.SessionID.String()))
+					logger.Debug("Could not find matching session for user", zap.String("sessionID", e.Presence.SessionID.String()))
 					continue
 				}
 				s.CtxCancelFn(ErrMatchmakingNoAvailableServers)
@@ -650,7 +650,7 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 	// and sending the join instruction to the server
 
 	if matchID.IsNil() {
-		logger.Error("No match ID found")
+		logger.Error("matchID is nil")
 		return
 	}
 
