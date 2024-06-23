@@ -182,10 +182,9 @@ func (p *EvrPipeline) matchmakingLabelFromFindRequest(ctx context.Context, sessi
 
 	features := ctx.Value(ctxFeaturesKey{}).([]string)
 
-	return &EvrMatchState{
+	ml := &EvrMatchState{
 		GroupID: &groupID,
 
-		ID:    MatchID{request.CurrentMatch, p.node}, // The existing lobby/match that the player is in (if any)
 		Mode:  request.Mode,
 		Level: request.Level,
 		Open:  true,
@@ -198,7 +197,13 @@ func (p *EvrPipeline) matchmakingLabelFromFindRequest(ctx context.Context, sessi
 			GroupIDs:    guildPriority,
 			Features:    features,
 		},
-	}, nil
+	}
+	if !request.CurrentMatch.IsNil() {
+		ml.ID = MatchID{request.CurrentMatch, p.node} // The existing lobby/match that the player is in (if any)
+	}
+
+	return ml, nil
+
 }
 
 // lobbyFindSessionRequest is a message requesting to find a public session to join.
@@ -945,7 +950,7 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 		isDeveloper, _ := checkIfGlobalDeveloper(ctx, p.runtimeModule, session.userID)
 
 		// Let developers and moderators join public matches
-		if request.TeamIndex != int16(Spectator) && !isDeveloper && !isModerator && time.Since(ml.StartedTime) < time.Second*15 {
+		if request.TeamIndex != int16(Spectator) && !isDeveloper && !isModerator && time.Since(ml.StartTime) < time.Second*15 {
 			// Allow if the match is over 15 seconds old, to allow matchmaking to properly populate the match
 			err = status.Errorf(codes.InvalidArgument, "Match is a newly started public match")
 		}

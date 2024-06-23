@@ -176,13 +176,11 @@ type MatchBroadcaster struct {
 // This also makes it easier to update the match label, and query against it.
 type EvrMatchState struct {
 	ID          MatchID          `json:"id,omitempty"`          // The Session Id used by EVR (the same as match id)
-	UUID        uuid.UUID        `json:"uuid,omitempty"`        // The UUID of the match.
-	Node        string           `json:"node,omitempty"`        // The node the match is running on.
 	Open        bool             `json:"open,omitempty"`        // Whether the lobby is open to new players (Matching Only)
 	LobbyType   LobbyType        `json:"lobby_type"`            // The type of lobby (Public, Private, Unassigned) (EVR)
 	Broadcaster MatchBroadcaster `json:"broadcaster,omitempty"` // The broadcaster's data
 	Started     bool             `json:"started"`               // Whether the match has started.
-	StartedTime time.Time        `json:"start_time,omitempty"`  // The time the match was started.
+	StartTime   time.Time        `json:"start_time,omitempty"`  // The time the match was started.
 	SpawnedBy   string           `json:"spawned_by,omitempty"`  // The userId of the player that spawned this match.
 	GroupID     *uuid.UUID       `json:"group_id,omitempty"`    // The channel id of the broadcaster. (EVR)
 	GuildID     string           `json:"guild_id,omitempty"`    // The guild id of the broadcaster. (EVR)
@@ -210,15 +208,7 @@ type EvrMatchState struct {
 }
 
 func (s *EvrMatchState) String() string {
-	b, err := json.MarshalIndent(s, "", "  ")
-	if err != nil {
-		return ""
-	}
-	return string(b)
-}
-
-func (s *EvrMatchState) GetID() string {
-	return fmt.Sprintf("%s.%s", s.ID.String(), s.Node)
+	return s.GetLabel()
 }
 
 func (s *EvrMatchState) GetLabel() string {
@@ -234,8 +224,6 @@ func (s *EvrMatchState) PublicView() *EvrMatchState {
 	ps.Broadcaster.SessionID = ""
 	if ps.LobbyType == PrivateLobby || ps.LobbyType == UnassignedLobby {
 		ps.ID = MatchID{}
-		ps.UUID = uuid.Nil
-		ps.Node = ""
 		ps.SpawnedBy = ""
 		ps.TeamAlignments = nil
 		ps.Players = nil
@@ -351,8 +339,6 @@ func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql
 	}
 
 	state.ID = MatchIDFromContext(ctx)
-	state.UUID = state.ID.UUID()
-	state.Node = state.ID.Node()
 	state.presenceCache = make(map[uuid.UUID]*EvrMatchPresence)
 	state.presences = make(map[uuid.UUID]*EvrMatchPresence)
 	state.tickRate = 10
@@ -392,7 +378,7 @@ func selectTeamForPlayer(logger runtime.Logger, presence *EvrMatchPresence, stat
 	}
 
 	// If the match has been running for less than 15 seconds check the presets for the team
-	if time.Since(state.StartedTime) < 15*time.Second {
+	if time.Since(state.StartTime) < 15*time.Second {
 		if teamIndex, ok := state.TeamAlignments[presence.UserID]; ok {
 			// Make sure the team isn't already full
 			if len(teams[teamIndex]) < state.TeamSize {
@@ -614,7 +600,7 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 		}
 
 		// Update the player's status to include the match ID
-		if err := nk.StreamUserUpdate(StreamModeEvr, p.GetUserId(), StreamContextMatch.String(), "", p.GetUserId(), p.GetSessionId(), false, false, state.GetID()); err != nil {
+		if err := nk.StreamUserUpdate(StreamModeEvr, p.GetUserId(), StreamContextMatch.String(), "", p.GetUserId(), p.GetSessionId(), false, false, state.ID.String()); err != nil {
 			logger.Warn("Failed to update user status: %v", err)
 		}
 
@@ -654,7 +640,7 @@ func (m *EvrMatch) sendPlayerStart(ctx context.Context, logger runtime.Logger, d
 		// Delay to allow everything to be ready for the user to join.
 		<-time.After(1 * time.Second)
 		// Wait until 5 seconds after the match has started to send the player start message.
-		<-time.After(time.Until(state.StartedTime.Add(5 * time.Second)))
+		<-time.After(time.Until(state.StartTime.Add(5 * time.Second)))
 
 		// Dispatch the message for delivery.
 		if err := m.dispatchMessages(ctx, logger, dispatcher, messages, []runtime.Presence{state.broadcaster, p}, nil); err != nil {
@@ -765,18 +751,18 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 	// If there are any missing or stale presences, shut down the match.
 	if int(tick)%(30*state.tickRate) == 0 {
 
-		if len(state.presences) == 0 && !state.StartedTime.IsZero() {
+		if len(state.presences) == 0 && !state.StartTime.IsZero() {
 			// Match has not started and has no players
-			logger := logger.WithField("started_at", state.StartedTime)
+			logger := logger.WithField("started_at", state.StartTime)
 			if state.Started {
 				// Match has started and has no players, shut down the match.
-				if state.StartedTime.Before(time.Now().Add(-60 * time.Second)) {
+				if state.StartTime.Before(time.Now().Add(-60 * time.Second)) {
 					logger.Error("Match is empty. Shutting down.")
 					return nil
 				}
 			} else {
 				// Match has not started on time.
-				if state.StartedTime.Before(time.Now().Add(-10 * time.Minute)) {
+				if state.StartTime.Before(time.Now().Add(-10 * time.Minute)) {
 					logger.Error("Match has not started on time. Shutting down.")
 					return nil
 				}
@@ -944,8 +930,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		if err != nil {
 			return state, SignalResponse{Message: fmt.Sprintf("failed to create new match state: %v", err)}.String()
 		}
-		err = json.Unmarshal(signal.Data, newState)
-		if err != nil {
+		if err := json.Unmarshal(signal.Data, newState); err != nil {
 			return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal match label: %v", err)}.String()
 		}
 		state.Started = false
@@ -958,7 +943,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		state.SessionSettings = newState.SessionSettings
 		state.RequiredFeatures = newState.RequiredFeatures
 		state.TeamSize = newState.TeamSize
-		state.StartedTime = newState.StartedTime
+		state.StartTime = newState.StartTime
 		state.TeamAlignments = make(map[uuid.UUID]int, MatchMaxSize)
 
 		switch newState.Mode {
@@ -1029,7 +1014,7 @@ func (m *EvrMatch) StartSession(ctx context.Context, logger runtime.Logger, nk r
 		channel = *state.GroupID
 	}
 	state.Started = true
-	state.StartedTime = time.Now()
+	state.StartTime = time.Now()
 	entrants := make([]evr.EvrId, 0)
 	message := evr.NewBroadcasterStartSession(state.ID.UUID(), channel, state.MaxSize, uint8(state.LobbyType), state.Broadcaster.AppId, state.Mode, state.Level, state.RequiredFeatures, entrants)
 	logger.Info("Starting session. %v", message)
@@ -1227,9 +1212,10 @@ func (m *EvrMatch) broadcasterPlayersAccept(ctx context.Context, logger runtime.
 // broadcasterPlayerRemoved is called when a player has been removed from the match.
 func (m *EvrMatch) broadcasterPlayerRemoved(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, state *EvrMatchState, in runtime.MatchData, msg evr.Message) (*EvrMatchState, error) {
 	message := msg.(*evr.BroadcasterPlayerRemoved)
-	// Remove the player from the match.
+
 	matchID := MatchIDFromContext(ctx)
 
+	// Remove the player from the match.
 	for _, presence := range state.presences {
 		if presence.PlayerSession == message.PlayerSession {
 			delete(state.presences, presence.SessionID)

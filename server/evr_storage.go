@@ -62,7 +62,7 @@ func StoreToStorage(ctx context.Context, nk runtime.NakamaModule, userID string,
 	storageID := src.GetStorageID()
 	data, err := json.Marshal(src)
 	if err != nil {
-		return status.Errorf(codes.Internal, "failed to marshal %s/%s: %w", userID, storageID.String(), err)
+		return status.Errorf(codes.Internal, "failed to marshal %s/%s: %s", userID, storageID.String(), err.Error())
 	}
 
 	_, err = nk.StorageWrite(ctx, []*runtime.StorageWrite{
@@ -76,7 +76,7 @@ func StoreToStorage(ctx context.Context, nk runtime.NakamaModule, userID string,
 		},
 	})
 	if err != nil {
-		return status.Errorf(codes.Internal, "failed to write %s/%s: %w", userID, storageID.String(), err)
+		return status.Errorf(codes.Internal, "failed to write %s/%s: %s", userID, storageID.String(), err.Error())
 	}
 	return nil
 }

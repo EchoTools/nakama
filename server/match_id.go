@@ -40,10 +40,7 @@ func (t MatchID) Equals(other MatchID) bool {
 
 // IsNil returns true if the match ID is nil.
 func (t MatchID) IsNil() bool {
-	if t.uuid == uuid.Nil || t.node == "" {
-		return true
-	}
-	return false
+	return NilMatchID == t
 }
 
 // NewMatchID creates a new match ID.
@@ -75,17 +72,11 @@ func (t MatchID) IsValid() bool {
 
 // MarshalText returns the text representation of the match ID.
 func (t MatchID) MarshalText() ([]byte, error) {
-	if t.IsNil() {
-		return []byte(""), nil
-	}
 	return []byte(t.String()), nil
 }
 
 // UnmarshalText sets the match ID to the value represented by the text.
 func (t *MatchID) UnmarshalText(data []byte) error {
-	if len(data) == 0 {
-		*t = NilMatchID
-	}
 	id, err := MatchIDFromString(string(data))
 	if err != nil {
 		return err
@@ -96,10 +87,9 @@ func (t *MatchID) UnmarshalText(data []byte) error {
 
 // MatchIDFromString creates a match ID from a string (splitting the UUID and node).
 func MatchIDFromString(s string) (t MatchID, err error) {
-	if s == "" {
-		return NilMatchID, nil
+	if len(s) == 0 {
+		return t, nil
 	}
-
 	if len(s) < 38 || s[36] != '.' {
 		return t, ErrInvalidMatchID
 	}
@@ -120,7 +110,7 @@ func MatchIDFromString(s string) (t MatchID, err error) {
 // MatchIDFromStringOrNil creates a match ID from a string, returning a nil match ID if the string is empty.
 func MatchIDFromStringOrNil(s string) (t MatchID) {
 	if s == "" {
-		return
+		return NilMatchID
 	}
 	t, err := MatchIDFromString(s)
 	if err != nil {
