@@ -183,7 +183,7 @@ func (p *EvrPipeline) Backfill(ctx context.Context, session *sessionWS, msession
 			continue
 		}
 
-		if match.GetSize() > int32(label.MaxSize) { // +1 for the broadcaster
+		if match.GetSize() >= int32(label.MaxSize)+1 { // +1 for the broadcaster
 			logger.Warn("Match is full")
 			mu.Unlock()
 			continue
@@ -454,7 +454,7 @@ func (p *EvrPipeline) MatchSearch(ctx context.Context, logger *zap.Logger, sessi
 	// Basic search defaults
 	const (
 		minSize = 1
-		maxSize = MatchMaxSize - 1 // the broadcaster is included, so this has one free spot
+		maxSize = MatchMaxSize - 2 // the broadcaster is included, so this has one free spot
 		limit   = 50
 	)
 
