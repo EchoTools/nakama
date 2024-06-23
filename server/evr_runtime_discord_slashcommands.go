@@ -2797,8 +2797,8 @@ func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runt
 		for _, r := range state.Broadcaster.Regions {
 			if regionSymbol == r {
 				tracked = append(tracked, state)
+				continue
 			}
-			continue
 		}
 	}
 	if len(tracked) == 0 {
