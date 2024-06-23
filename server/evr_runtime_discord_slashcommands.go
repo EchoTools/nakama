@@ -80,6 +80,7 @@ type WhoAmI struct {
 	EVRIDLogins           map[string]time.Time   `json:"evr_id_logins"`
 	GuildGroupMemberships []GuildGroupMembership `json:"guild_memberships"`
 	VRMLSeasons           []string               `json:"vrml_seasons"`
+	MatchIDs              []string               `json:"match_ids"`
 
 	ClientAddresses []string `json:"addresses,omitempty"`
 }
@@ -2286,6 +2287,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		ClientAddresses:       make([]string, 0),
 		DeviceLinks:           make([]string, 0),
 		GuildGroupMemberships: make([]GuildGroupMembership, 0),
+		MatchIDs:              make([]string, 0),
 	}
 	// Get the user's ID
 	userID, err := discordRegistry.GetUserIdByDiscordId(ctx, discordID, true)
@@ -2399,7 +2401,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	if err != nil {
 		return err
 	}
-	matchIDs := make([]string, 0, len(presences))
+	whoami.MatchIDs = make([]string, 0, len(presences))
 	for _, p := range presences {
 		if p.GetStatus() != "" {
 			m := p.GetStatus()
@@ -2407,7 +2409,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 			if mid.IsNil() {
 				continue
 			}
-			matchIDs = append(matchIDs, mid.UUID().String())
+			whoami.MatchIDs = append(whoami.MatchIDs, mid.UUID().String())
 		}
 	}
 
@@ -2430,6 +2432,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		if guildID == "" {
 			whoami.GuildGroupMemberships = nil
 		}
+		whoami.MatchIDs = nil
 	}
 	fields := []*discordgo.MessageEmbedField{
 		{Name: "Nakama ID", Value: whoami.NakamaID.String(), Inline: true},
@@ -2468,7 +2471,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 			return s
 		}), "\n"), Inline: false},
 		{Name: "Suspensions", Value: strings.Join(suspensionLines, "\n"), Inline: false},
-		{Name: "Current Match(es)", Value: strings.Join(lo.Map(matchIDs, func(m string, index int) string {
+		{Name: "Current Match(es)", Value: strings.Join(lo.Map(whoami.MatchIDs, func(m string, index int) string {
 			return fmt.Sprintf("https://echo.taxi/spark://c/%s", strings.ToUpper(m))
 		}), "\n"), Inline: false},
 	}
