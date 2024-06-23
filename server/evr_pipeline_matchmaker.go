@@ -441,7 +441,7 @@ func (p *EvrPipeline) MatchCreateLoop(session *sessionWS, msession *MatchmakingS
 func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, session *sessionWS, ml *EvrMatchState) error {
 	if s, found := p.matchmakingRegistry.GetMatchingBySessionId(session.id); found {
 		// Replace the session
-		logger.Warn("Matchmaking session already exists", zap.Any("tickets", s.Tickets))
+		logger.Debug("Matchmaking session already exists", zap.Any("tickets", s.Tickets))
 	}
 	joinFn := func(matchID MatchID, query string) error {
 		err := p.JoinEvrMatch(parentCtx, logger, session, query, matchID, int(ml.TeamIndex))
