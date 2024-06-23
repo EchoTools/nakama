@@ -194,14 +194,14 @@ func (p *EvrPipeline) Backfill(ctx context.Context, session *sessionWS, msession
 			availablePlayerSlots := (label.PlayerLimit - label.PlayerCount)
 			// Check if there is space for the player(s)
 			if availablePlayerSlots < minCount {
-				logger.Warn("Match does not have enough open slots.")
+				logger.Debug("Match does not have enough open slots.")
 				mu.Unlock()
 				continue
 				// Ensure that adding the minCount to the match would balance the match
 			}
 
 			if msession.Label.Mode == evr.ModeCombatPublic && (label.PlayerCount+minCount)%2 != 0 {
-				logger.Warn("Combat match does not have the right multiple of open slots.")
+				logger.Debug("Combat match does not have the right multiple of open slots.")
 				mu.Unlock()
 				continue
 			}

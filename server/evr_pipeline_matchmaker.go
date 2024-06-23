@@ -667,16 +667,11 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 func (p *EvrPipeline) lobbyPingResponse(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	response := in.(*evr.LobbyPingResponse)
 
-	userID := session.userID
-	// Validate the connection.
-	if userID == uuid.Nil {
-		return fmt.Errorf("session not authenticated")
-	}
-
 	// Look up the matching session.
 	msession, ok := p.matchmakingRegistry.GetMatchingBySessionId(session.id)
 	if !ok {
-		return fmt.Errorf("matching session not found")
+		logger.Debug("Matching session not found")
+		return nil
 	}
 	select {
 	case <-msession.Ctx.Done():
