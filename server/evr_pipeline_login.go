@@ -876,7 +876,8 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 
 	group, ok := update.Update.StatsGroups["arena"]
 	if !ok {
-		return fmt.Errorf("missing arena stats group")
+		logger.Debug("missing arena stats group")
+		return nil
 	}
 	_ = group
 	_ = profile
