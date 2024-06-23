@@ -478,7 +478,7 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 
 	var matchID MatchID
 	// Check for a direct match first
-	if config.NextMatchID.IsNil() {
+	if !config.NextMatchID.IsNil() {
 		matchID = config.NextMatchID
 	}
 
