@@ -14,29 +14,6 @@ import (
 func (p *EvrPipeline) configRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	message := in.(*evr.ConfigRequest)
 
-	// Check if the object requires authentication.
-	switch message.ConfigInfo.Id {
-	case "active_store_featured_entry":
-		fallthrough
-	case "active_battle_pass_season":
-		fallthrough
-	case "active_store_entry":
-		fallthrough
-	case "main_menu":
-		// No authentication is required.
-	default:
-		if session.userID.IsNil() {
-			errorInfo := evr.ConfigErrorInfo{
-				Type:       message.ConfigInfo.Type,
-				Identifier: message.ConfigInfo.Id,
-				ErrorCode:  0x00000001,
-				Error:      "user not authenticated",
-			}
-			session.SendEvr(evr.NewSNSConfigFailure(errorInfo))
-			return fmt.Errorf("session not authenticated")
-		}
-	}
-
 	// Retrieve the requested object.
 	objs, err := StorageReadObjects(ctx, logger, session.pipeline.db, uuid.Nil, []*api.ReadStorageObjectId{
 		{

@@ -349,11 +349,11 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 	if requireAuthed {
 		// If the session is not authenticated, log the error and return.
 		if session != nil && session.UserID() == uuid.Nil {
-			logger.Error("Session not authenticated")
+			logger.Debug("Session not authenticated")
 			// As a work around to the serverdb connection getting lost and needing to reauthenticate
 			if err := p.attemptOutOfBandAuthentication(session); err != nil {
 				// If the session is now authenticated, continue processing the request.
-				logger.Error("Failed to authenticate session with discordId and password", zap.Error(err))
+				logger.Debug("Failed to authenticate session with discordId and password", zap.Error(err))
 				return false
 			}
 		}

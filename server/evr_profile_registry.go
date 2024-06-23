@@ -279,7 +279,7 @@ func (r *ProfileRegistry) Load(userID uuid.UUID, evrID evr.EvrId) (profile GameP
 		// try to load the profile from storage
 		profile, err = r.retrieve(ctx, userID)
 		if err != nil {
-			r.logger.Warn("failed to load profile for %s: %s", userID.String(), err.Error())
+			r.logger.Debug("failed to load profile for %s: %s", userID.String(), err.Error())
 			// try the system profile
 			profile, err = r.retrieve(ctx, uuid.Nil)
 			if err != nil {
