@@ -162,11 +162,11 @@ func (p *EvrPipeline) Backfill(ctx context.Context, session *sessionWS, msession
 		// Check that the match is not full
 		logger = logger.With(zap.String("match_id", label.ID.String()))
 
-		mu, _ := p.backfillQueue.LoadOrStore(label.GetID(), &sync.Mutex{})
+		mu, _ := p.backfillQueue.LoadOrStore(label.ID.String(), &sync.Mutex{})
 
 		// Lock this backfill match
 		mu.Lock()
-		match, _, err := p.matchRegistry.GetMatch(ctx, label.GetID())
+		match, _, err := p.matchRegistry.GetMatch(ctx, label.ID.String())
 		if err != nil {
 			logger.Warn("Failed to get match: %s", zap.Error(err))
 			mu.Unlock()
@@ -175,11 +175,7 @@ func (p *EvrPipeline) Backfill(ctx context.Context, session *sessionWS, msession
 		if match == nil {
 			logger.Warn("Match is nil")
 		}
-		if err != nil {
-			logger.Warn("Failed to get match label")
-			mu.Unlock()
-			continue
-		}
+
 		// Extract the latest label
 		if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), label); err != nil {
 			logger.Warn("Failed to get match label")
@@ -662,12 +658,12 @@ func (p *EvrPipeline) MatchCreate(ctx context.Context, session *sessionWS, msess
 	ml.SpawnedBy = session.UserID().String()
 
 	// Prepare the match
-	label, err := SignalMatch(ctx, p.matchRegistry, matchID, SignalPrepareSession, ml)
+	response, err := SignalMatch(ctx, p.matchRegistry, matchID, SignalPrepareSession, ml)
 	if err != nil {
 		return MatchID{}, fmt.Errorf("failed to send prepare session: %v", err)
 	}
 
-	msession.Logger.Info("Match created", zap.String("match_id", matchID.String()), zap.String("label", label))
+	msession.Logger.Info("Match created", zap.String("match_id", matchID.String()), zap.String("label", response))
 
 	// Return the prepared session
 	return matchID, nil

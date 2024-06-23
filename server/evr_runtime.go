@@ -120,8 +120,8 @@ func listMatchStates(ctx context.Context, nk runtime.NakamaModule, query string)
 
 	var matchStates []*MatchState
 	for _, match := range matches {
-		mt := MatchToken(match.MatchId)
-		presences, tickRate, data, err := nk.(*RuntimeGoNakamaModule).matchRegistry.GetState(ctx, mt.ID(), mt.Node())
+		mt := MatchIDFromStringOrNil(match.MatchId)
+		presences, tickRate, data, err := nk.(*RuntimeGoNakamaModule).matchRegistry.GetState(ctx, mt.UUID(), mt.Node())
 		if err != nil {
 			return nil, err
 		}

@@ -7,7 +7,7 @@ import (
 	"github.com/gofrs/uuid/v5"
 )
 
-func TestNewMatchToken(t *testing.T) {
+func TestNewMatchID(t *testing.T) {
 	type args struct {
 		id   uuid.UUID
 		node string
@@ -15,17 +15,29 @@ func TestNewMatchToken(t *testing.T) {
 	tests := []struct {
 		name    string
 		args    args
-		want    MatchToken
+		want    MatchID
 		wantErr bool
 	}{
 		{
 			name: "Match token created successfully",
 			args: args{
-				id:   uuid.FromStringOrNil("a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e"),
+				id:   uuid.FromStringOrNil("575430a6-06b6-4b11-b754-b241840691f3"),
 				node: "node",
 			},
-			want:    "a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e.node",
+			want: MatchID{
+				uuid: uuid.FromStringOrNil("575430a6-06b6-4b11-b754-b241840691f3"),
+				node: "node",
+			},
 			wantErr: false,
+		},
+		{
+			name: "Blank match token",
+			args: args{
+				id:   uuid.Nil,
+				node: "",
+			},
+			want:    MatchID{},
+			wantErr: true,
 		},
 		{
 			name: "Match token creation failed due to invalid ID",
@@ -33,156 +45,188 @@ func TestNewMatchToken(t *testing.T) {
 				id:   uuid.Nil,
 				node: "node",
 			},
-			want:    "",
+			want:    MatchID{},
 			wantErr: true,
 		},
 		{
 			name: "Match token creation failed due to empty node",
 			args: args{
-				id:   uuid.Must(uuid.NewV4()),
+				id:   uuid.FromStringOrNil("a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e"),
 				node: "",
 			},
-			want:    "",
+			want:    MatchID{},
 			wantErr: true,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := NewMatchToken(tt.args.id, tt.args.node)
+			got, err := NewMatchID(tt.args.id, tt.args.node)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("NewMatchToken() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("NewMatchID() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if got != tt.want {
-				t.Errorf("NewMatchToken() = %v, want %v", got, tt.want)
+				t.Errorf("NewMatchID() = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestMatchToken_String(t *testing.T) {
+func TestMatchID_String(t *testing.T) {
 	tests := []struct {
 		name string
-		m    MatchToken
+		m    MatchID
 		want string
 	}{
 		{
 			name: "Match token stringified successfully",
-			m:    "a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e.node",
+			m: MatchID{
+				uuid: uuid.FromStringOrNil("a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e"),
+				node: "node",
+			},
 			want: "a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e.node",
+		},
+		{
+			name: "Match token blank",
+			m:    MatchID{},
+			want: "",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := tt.m.String(); got != tt.want {
-				t.Errorf("MatchToken.String() = %v, want %v", got, tt.want)
+				t.Errorf("MatchID.String() = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestMatchToken_ID(t *testing.T) {
+func TestMatchID_ID(t *testing.T) {
 	tests := []struct {
 		name string
-		tr   MatchToken
+		tr   MatchID
 		want uuid.UUID
 	}{
 		{
 			name: "Match token ID extracted successfully",
-			tr:   "a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e.node",
+			tr: MatchID{
+				uuid: uuid.FromStringOrNil("a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e"),
+				node: "node",
+			},
 			want: uuid.FromStringOrNil("a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e"),
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.tr.ID(); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("MatchToken.ID() = %v, want %v", got, tt.want)
+			if got := tt.tr.uuid; !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("MatchID.ID() = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestMatchToken_Node(t *testing.T) {
+func TestMatchID_Node(t *testing.T) {
 	tests := []struct {
 		name string
-		tr   MatchToken
+		tr   MatchID
 		want string
 	}{
 		{
 			name: "Match token node extracted successfully",
-			tr:   "a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e.node",
+			tr: MatchID{
+				uuid: uuid.FromStringOrNil("a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e"),
+				node: "node",
+			},
 			want: "node",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.tr.Node(); got != tt.want {
-				t.Errorf("MatchToken.Node() = %v, want %v", got, tt.want)
+			if got := tt.tr.node; got != tt.want {
+				t.Errorf("MatchID.Node() = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestMatchToken_IsValid(t *testing.T) {
+func TestMatchID_IsValid(t *testing.T) {
 	tests := []struct {
 		name string
-		tr   MatchToken
+		tr   MatchID
 		want bool
 	}{
 		{
 			name: "Match token is valid",
-			tr:   "a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e.node",
+			tr: MatchID{
+				uuid: uuid.FromStringOrNil("a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e"),
+				node: "node",
+			},
 			want: true,
 		},
 		{
 			name: "empty token is invalid",
-			tr:   "",
+			tr:   MatchID{},
 			want: false,
 		},
-		{
-			name: "Match token without seperator is invalid",
-			tr:   "a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e",
-			want: false,
-		},
+
 		{
 			name: "Match token without empty node is invalid",
-			tr:   "a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e.",
+			tr: MatchID{
+				uuid: uuid.FromStringOrNil("a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e"),
+			},
 			want: false,
 		},
 		{
 			name: "Match token with empty id is invalid",
-			tr:   ".node",
+			tr: MatchID{
+				node: "node",
+			},
 			want: false,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := tt.tr.IsValid(); got != tt.want {
-				t.Errorf("MatchToken.IsValid() = %v, want %v", got, tt.want)
+				t.Errorf("MatchID.IsValid() = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestMatchToken_UnmarshalText(t *testing.T) {
+func TestMatchID_UnmarshalText(t *testing.T) {
 	type args struct {
 		data []byte
 	}
 	tests := []struct {
 		name    string
-		tr      MatchToken
+		tr      MatchID
 		args    args
 		wantErr bool
 	}{
 		{
-			name:    "Match token unmarshalled successfully",
-			tr:      MatchToken(""),
+			name: "Match token unmarshalled successfully",
+			tr: MatchID{
+				uuid: uuid.Nil,
+				node: "",
+			},
 			args:    args{data: []byte(`a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e.node`)},
 			wantErr: false,
 		},
 		{
-			name:    "Match token unmarshalling failed",
-			tr:      MatchToken(""),
+			name: "Match token blank unmarshalled successfully",
+			tr: MatchID{
+				uuid: uuid.Nil,
+				node: "",
+			},
+			args:    args{data: []byte(``)},
+			wantErr: false,
+		},
+		{
+			name: "Match token unmarshalling failed",
+			tr: MatchID{
+				uuid: uuid.Nil,
+				node: "",
+			},
 			args:    args{data: []byte(`a3d5f9e4-6a3ddd-4b8e-9d98-2d0e8e9f5a3e.node`)},
 			wantErr: true,
 		},
@@ -190,112 +234,118 @@ func TestMatchToken_UnmarshalText(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if err := tt.tr.UnmarshalText(tt.args.data); (err != nil) != tt.wantErr {
-				t.Errorf("MatchToken.UnmarshalText() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("MatchID.UnmarshalText() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
 }
 
-func TestMatchTokenFromString(t *testing.T) {
+func TestMatchIDFromString(t *testing.T) {
 	type args struct {
 		s string
 	}
 	tests := []struct {
 		name    string
 		args    args
-		wantT   MatchToken
+		wantT   MatchID
 		wantErr bool
 	}{
 		{
-			name:    "valid match token is successful",
-			args:    args{s: "a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e.node"},
-			wantT:   "a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e.node",
+			name: "valid match token is successful",
+			args: args{s: "a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e.node"},
+			wantT: MatchID{
+				uuid: uuid.FromStringOrNil("a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e"),
+				node: "node",
+			},
 			wantErr: false,
 		},
 		{
 			name:    "empty string is successful",
 			args:    args{s: ""},
-			wantT:   "",
+			wantT:   MatchID{},
 			wantErr: false,
 		},
 		{
 			name:    "failed due to empty node",
 			args:    args{s: "a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e."},
-			wantT:   "",
+			wantT:   MatchID{},
 			wantErr: true,
 		},
 		{
 			name:    "failed due to empty id",
 			args:    args{s: ".node"},
-			wantT:   "",
+			wantT:   MatchID{},
 			wantErr: true,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotT, err := MatchTokenFromString(tt.args.s)
+			gotT, err := MatchIDFromString(tt.args.s)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("MatchTokenFromString() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("MatchIDFromString() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if gotT != tt.wantT {
-				t.Errorf("MatchTokenFromString() = %v, want %v", gotT, tt.wantT)
+				t.Errorf("MatchIDFromString() = %v, want %v", gotT, tt.wantT)
 			}
 		})
 	}
 }
 
-func TestMatchTokenFromStringOrNil(t *testing.T) {
+func TestMatchIDFromStringOrNil(t *testing.T) {
 	type args struct {
 		s string
 	}
 	tests := []struct {
 		name string
 		args args
-		want MatchToken
+		want MatchID
 	}{
 		{
 			name: "Match token created successfully",
 			args: args{s: "a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e.node"},
-			want: "a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e.node",
+			want: MatchID{
+				uuid: uuid.FromStringOrNil("a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e"),
+				node: "node",
+			},
 		},
 		{
 			name: "Match token creation failed due to invalid token",
 			args: args{s: "a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e."},
-			want: "",
+			want: MatchID{},
 		},
 		{
 			name: "Match token creation failed due to invalid token",
 			args: args{s: ".node"},
-			want: "",
+			want: MatchID{},
 		},
 		{
 			name: "Match token creation failed due to invalid token",
 			args: args{s: ""},
-			want: "",
+			want: MatchID{},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := MatchTokenFromStringOrNil(tt.args.s); got != tt.want {
-				t.Errorf("MatchTokenFromStringOrNil() = %v, want %v", got, tt.want)
+			if got := MatchIDFromStringOrNil(tt.args.s); got != tt.want {
+				t.Errorf("MatchIDFromStringOrNil() = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestMatchToken_Nil(t *testing.T) {
+func TestMatchID_Nil(t *testing.T) {
 	tests := []struct {
 		name string
-		m    MatchToken
-		want MatchToken
+		m    MatchID
+		want MatchID
 	}{
 		// TODO: Add test cases.
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.m.Nil(); got != tt.want {
-				t.Errorf("MatchToken.Nil() = %v, want %v", got, tt.want)
+			if got := tt.m; got != tt.want {
+				t.Errorf("MatchID.Nil() = %v, want %v", got, tt.want)
 			}
 		})
 	}

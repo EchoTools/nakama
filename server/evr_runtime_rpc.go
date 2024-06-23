@@ -861,7 +861,7 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		state.SessionSettings = &request.SessionSettings
 		state.SpawnedBy = userID
 		state.MaxSize = MatchMaxSize
-		state.StartedTime = request.StartTime
+		state.StartTime = request.StartTime
 
 		// Translate the discord ID to the nakama ID for the team Alignments
 		state.TeamAlignments = make(map[uuid.UUID]int, len(request.Alignments))
