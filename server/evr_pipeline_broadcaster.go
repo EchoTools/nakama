@@ -138,6 +138,17 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 	// Add the server id as a region
 	regions = append(regions, evr.ToSymbol(request.ServerId))
 
+	// Remove any duplicates from the regions
+	seenRegions := make(map[evr.Symbol]struct{})
+	uniqueRegions := make([]evr.Symbol, 0)
+	for _, r := range regions {
+		if _, seen := seenRegions[r]; !seen {
+			uniqueRegions = append(uniqueRegions, r)
+			seenRegions[r] = struct{}{}
+		}
+	}
+	regions = uniqueRegions
+
 	logger = logger.With(zap.String("userId", userId))
 
 	// Set the external address in the request (to use for the registration cache).
