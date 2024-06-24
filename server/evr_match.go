@@ -203,8 +203,11 @@ type EvrMatchState struct {
 	presences      map[uuid.UUID]*EvrMatchPresence // [sessionId]EvrMatchPresence
 	broadcaster    runtime.Presence                // The broadcaster's presence
 	presenceCache  map[uuid.UUID]*EvrMatchPresence // [sessionId]PlayerMeta cache for all players that have attempted to join the match.
-	emptyTicks     int                             // The number of ticks the match has been empty.
-	tickRate       int                             // The number of ticks per second.
+
+	emptyTicks            int64 // The number of ticks the match has been empty.
+	sessionStartExpiry    int64 // The tick count at which the match will be shut down if it has not started.
+	broadcasterJoinExpiry int64 // The tick count at which the match will be shut down if the broadcaster has not joined.
+	tickRate              int64 // The number of ticks per second.
 }
 
 func (s *EvrMatchState) String() string {
@@ -290,10 +293,10 @@ func NewEvrMatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runt
 
 // NewEvrMatchState is a helper function to create a new match state. It returns the state, params, label json, and err.
 func NewEvrMatchState(endpoint evr.Endpoint, config *MatchBroadcaster) (state *EvrMatchState, params map[string]interface{}, configPayload string, err error) {
-	// TODO It might be better to have the broadcaster just waiting on a stream, and be constantly matchmaking along with users,
-	// Then when the matchmaker decides spawning a new server is nominal approach, the broadcaster joins the match along with
-	// the players. It would have to join first though.  - @thesprockee
-	initialState := &EvrMatchState{
+
+	var tickRate int64 = 10 // 10 ticks per second
+
+	initialState := EvrMatchState{
 		Broadcaster:      *config,
 		Open:             false,
 		LobbyType:        UnassignedLobby,
@@ -306,7 +309,7 @@ func NewEvrMatchState(endpoint evr.Endpoint, config *MatchBroadcaster) (state *E
 		TeamAlignments:   make(map[uuid.UUID]int, MatchMaxSize),
 
 		emptyTicks: 0,
-		tickRate:   10,
+		tickRate:   tickRate,
 	}
 
 	stateJson, err := json.Marshal(initialState)
@@ -318,7 +321,7 @@ func NewEvrMatchState(endpoint evr.Endpoint, config *MatchBroadcaster) (state *E
 		"initialState": stateJson,
 	}
 
-	return initialState, params, string(stateJson), nil
+	return &initialState, params, string(stateJson), nil
 }
 
 // MatchIDFromContext is a helper function to extract the match id from the context.
@@ -333,15 +336,19 @@ func MatchIDFromContext(ctx context.Context) MatchID {
 
 // MatchInit is called when the match is created.
 func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, params map[string]interface{}) (interface{}, int, string) {
-	state := &EvrMatchState{}
-	if err := json.Unmarshal(params["initialState"].([]byte), state); err != nil {
+	state := EvrMatchState{}
+	if err := json.Unmarshal(params["initialState"].([]byte), &state); err != nil {
 		logger.Error("Failed to unmarshal match config. %s", err)
 	}
+	const (
+		BroadcasterJoinTimeoutSecs = 45
+	)
 
 	state.ID = MatchIDFromContext(ctx)
 	state.presenceCache = make(map[uuid.UUID]*EvrMatchPresence)
 	state.presences = make(map[uuid.UUID]*EvrMatchPresence)
-	state.tickRate = 10
+
+	state.broadcasterJoinExpiry = state.tickRate * BroadcasterJoinTimeoutSecs
 
 	state.rebuildCache()
 
@@ -351,7 +358,7 @@ func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql
 		return nil, 0, ""
 	}
 
-	return state, state.tickRate, string(labelJson)
+	return &state, int(state.tickRate), string(labelJson)
 }
 
 // selectTeamForPlayer decides which team to assign a player to.
@@ -709,8 +716,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 			messages := []evr.Message{
 				evr.NewBroadcasterPlayersRejected(evr.PlayerRejectionReasonDisconnected, rejects...),
 			}
-			err := m.dispatchMessages(ctx, logger, dispatcher, messages, []runtime.Presence{state.broadcaster}, nil)
-			if err != nil {
+			if err := m.dispatchMessages(ctx, logger, dispatcher, messages, []runtime.Presence{state.broadcaster}, nil); err != nil {
 				logger.Error("failed to dispatch broadcaster disconnected message: %v", err)
 			}
 		}(rejects)
@@ -735,53 +741,23 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 
 	var err error
 
-	const (
-		BroadcasterJoinTimeoutSecs = 45
-	)
-
-	// Keep track of how many ticks the match has been empty.
-	if len(state.presences) == 0 {
+	switch {
+	case state.broadcaster == nil && tick > state.broadcasterJoinExpiry:
+		// If the broadcaster has not joined within the timeout, shut down the match.
+		logger.Debug("Broadcaster did not join before the expiry time. Shutting down.")
+		return nil
+	case !state.Started && tick > state.sessionStartExpiry:
+		logger.Debug("Match did not start before the expiry time. Shutting down.")
+		return nil
+	case len(state.presences) == 0:
+		// If the match is empty, check if it has been empty for too long.
 		state.emptyTicks++
-	} else {
+		if state.emptyTicks > 20*state.tickRate {
+			logger.Debug("Match has been empty for too long. Shutting down.")
+			return nil
+		}
+	default:
 		state.emptyTicks = 0
-	}
-	emptySecs := state.emptyTicks / state.tickRate
-
-	// Every 5 seconds, check the match state.
-	// If there are any missing or stale presences, shut down the match.
-	if int(tick)%(30*state.tickRate) == 0 {
-
-		if len(state.presences) == 0 && !state.StartTime.IsZero() {
-			// Match has not started and has no players
-			logger := logger.WithField("started_at", state.StartTime)
-			if state.Started {
-				// Match has started and has no players, shut down the match.
-				if state.StartTime.Before(time.Now().Add(-60 * time.Second)) {
-					logger.Error("Match is empty. Shutting down.")
-					return nil
-				}
-			} else {
-				// Match has not started on time.
-				if state.StartTime.Before(time.Now().Add(-10 * time.Minute)) {
-					logger.Error("Match has not started on time. Shutting down.")
-					return nil
-				}
-			}
-		}
-
-		if state.broadcaster == nil {
-			// If the join timeout has expired, shut down the match.
-			if emptySecs > BroadcasterJoinTimeoutSecs {
-				logger.Error("Parking match join timeout expired. Shutting down.")
-				return nil
-			}
-			// if the match is not a parking match, and there is no broadcaster, shut down the match.
-			if state.LobbyType != UnassignedLobby {
-				logger.Error("Parking match has a lobby type. Shutting down.")
-				return nil
-			}
-		}
-
 	}
 
 	// Handle the messages, one by one
@@ -926,13 +902,11 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 			return state, SignalResponse{Message: "session already prepared"}.String()
 		}
 
-		newState, _, _, err := NewEvrMatchState(state.Broadcaster.Endpoint, &state.Broadcaster)
-		if err != nil {
-			return state, SignalResponse{Message: fmt.Sprintf("failed to create new match state: %v", err)}.String()
-		}
-		if err := json.Unmarshal(signal.Data, newState); err != nil {
+		var newState = EvrMatchState{}
+		if err := json.Unmarshal(signal.Data, &newState); err != nil {
 			return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal match label: %v", err)}.String()
 		}
+
 		state.Started = false
 		state.Open = newState.Open
 		state.Mode = newState.Mode
@@ -944,6 +918,12 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		state.RequiredFeatures = newState.RequiredFeatures
 		state.TeamSize = newState.TeamSize
 		state.StartTime = newState.StartTime
+
+		if state.StartTime.IsZero() || state.StartTime.Before(time.Now()) {
+			state.StartTime = time.Now()
+		}
+		state.sessionStartExpiry = tick + (15 * 60 * state.tickRate)
+
 		state.TeamAlignments = make(map[uuid.UUID]int, MatchMaxSize)
 
 		switch newState.Mode {

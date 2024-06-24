@@ -1,13 +1,20 @@
 package server
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
+	"os"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/gofrs/uuid/v5"
+	"github.com/google/go-cmp/cmp"
+	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/samber/lo"
+	"go.uber.org/zap/zapcore"
 )
 
 func TestEvrMatch_EvrMatchState(t *testing.T) {
@@ -429,6 +436,140 @@ func TestSelectTeamForPlayer_With_Alighment(t *testing.T) {
 
 			if result != tt.allowed {
 				t.Errorf("selectTeamForPlayer() returned incorrect result, got: %t, want: %t", result, tt.allowed)
+			}
+		})
+	}
+}
+
+func TestEvrMatch_MatchLoop(t *testing.T) {
+	type args struct {
+		tick     int64
+		state_   interface{}
+		messages []runtime.MatchData
+	}
+
+	consoleLogger := NewJSONLogger(os.Stdout, zapcore.ErrorLevel, JSONFormat)
+	logger := NewRuntimeGoLogger(consoleLogger)
+	var err error
+	var state *EvrMatchState
+
+	tests := []struct {
+		name string
+		m    *EvrMatch
+		args args
+		want interface{}
+	}{
+		{
+			name: "Match did not start on time.",
+			m:    &EvrMatch{},
+			args: args{
+				tick: 15 * 60 * 10 * 2,
+				state_: func() *EvrMatchState {
+					state, _, _, err = NewEvrMatchState(evr.Endpoint{}, &MatchBroadcaster{})
+					if err != nil {
+						t.Fatalf("error creating new match state: %v", err)
+					}
+					state.sessionStartExpiry = 10 * 10
+					state.broadcaster = &Presence{}
+					return state
+				}(),
+
+				messages: []runtime.MatchData{},
+			},
+			want: nil,
+		},
+		{
+			name: "MatchLoop returns state.",
+			m:    &EvrMatch{},
+			args: args{
+				tick: 500,
+				state_: func() *EvrMatchState {
+					state, _, _, err = NewEvrMatchState(evr.Endpoint{}, &MatchBroadcaster{})
+					if err != nil {
+						t.Fatalf("error creating new match state: %v", err)
+					}
+					state.sessionStartExpiry = 10 * 10
+					state.broadcaster = &Presence{}
+					state.Started = true
+
+					return state
+				}(),
+
+				messages: []runtime.MatchData{},
+			},
+			want: func() *EvrMatchState {
+				return state
+			}(),
+		},
+		{
+			name: "MatchLoop exits if empty for more than 20 seconds",
+			m:    &EvrMatch{},
+			args: args{
+				tick: 0,
+				state_: &EvrMatchState{
+					Started:     true,
+					StartTime:   time.Now().Add(-30 * time.Minute),
+					broadcaster: &Presence{},
+					emptyTicks:  10 * 30,
+					tickRate:    10,
+				},
+				messages: []runtime.MatchData{},
+			},
+			want: nil,
+		},
+		{
+			name: "MatchLoop exits if no broadcaster after 15 seconds.",
+			m:    &EvrMatch{},
+			args: args{
+				tick: 30 * 10,
+				state_: &EvrMatchState{
+					emptyTicks: 0,
+					tickRate:   10,
+					presences: map[uuid.UUID]*EvrMatchPresence{
+						uuid.Must(uuid.NewV4()): {},
+					},
+					broadcasterJoinExpiry: 15 * 10,
+				},
+				messages: []runtime.MatchData{},
+			},
+			want: nil,
+		},
+		{
+			name: "MatchLoop tolerates being without broadcaster for 5 seconds.",
+			m:    &EvrMatch{},
+			args: args{
+				tick: 5 * 10,
+				state_: func() *EvrMatchState {
+					state, _, _, err = NewEvrMatchState(evr.Endpoint{}, &MatchBroadcaster{})
+					if err != nil {
+						t.Fatalf("error creating new match state: %v", err)
+					}
+					state.sessionStartExpiry = 10 * 10
+					state.Started = false
+					state.presences = map[uuid.UUID]*EvrMatchPresence{
+						uuid.Must(uuid.NewV4()): {},
+					}
+					state.broadcasterJoinExpiry = 15 * 10
+
+					return state
+				}(),
+				messages: []runtime.MatchData{},
+			},
+			want: func() *EvrMatchState {
+				return state
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &EvrMatch{}
+			ctx := context.Background()
+			var db *sql.DB
+			var nk runtime.NakamaModule
+			var dispatcher runtime.MatchDispatcher
+
+			if got := m.MatchLoop(ctx, logger, db, nk, dispatcher, tt.args.tick, tt.args.state_, tt.args.messages); !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("- want / + got = %s", cmp.Diff(tt.want, got))
 			}
 		})
 	}
