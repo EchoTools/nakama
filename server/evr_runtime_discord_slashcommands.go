@@ -24,7 +24,6 @@ import (
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
-	dps "github.com/markusmobius/go-dateparser"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -1411,7 +1410,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 				// Send a message to the channel
 				channel := "1232462244797874247"
-				_, err = s.ChannelMessageSend(channel, fmt.Sprintf("Assigned VRML cosmetics `%s` to user `%s`", badgeCodestr, target.Username))
+				_, err = s.ChannelMessageSend(channel, fmt.Sprintf("`%s` assigned VRML cosmetics `%s` to user `%s`", user.ID, badgeCodestr, target.Username))
 				if err != nil {
 					logger.Warn("failed to send message", zap.Error(err))
 					break
@@ -2762,16 +2761,20 @@ func (d *DiscordAppBot) handlePrepareMatch(ctx context.Context, logger runtime.L
 
 }
 
-func parseTime(s string) (time.Time, error) {
-	cfg := &dps.Configuration{
-		CurrentTime: time.Date(2015, 6, 1, 0, 0, 0, 0, time.UTC),
-	}
-	parsed, err := dps.Parse(cfg, s)
+// Function to extract the timestamp from a Discord snowflake ID
+func getTimestampFromID(snowflakeID string) (time.Time, error) {
+	// Convert the snowflake ID to an integer
+	id, err := strconv.ParseInt(snowflakeID, 10, 64)
 	if err != nil {
-		return time.Now(), err
+		return time.Time{}, err
 	}
-	time := parsed.Time
-	return time, nil
+
+	// Extract the timestamp part of the snowflake ID
+	// Discord epoch in milliseconds (January 1, 2015 00:00:00 UTC)
+	timestamp := (id >> 22) + 1420070400000
+
+	// Convert the timestamp to time.Time
+	return time.Unix(0, timestamp*int64(time.Millisecond)), nil
 }
 
 func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runtime.Logger, regionStr string, channelID string, existingMessage *discordgo.Message) error {
@@ -2804,12 +2807,11 @@ func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runt
 	if len(tracked) == 0 {
 		return fmt.Errorf("no matches found in region %s", regionStr)
 	}
-	expires := time.Now().Add(24 * time.Hour).UTC().Unix()
 
 	// Create a message embed that contains a table of the server, the creation time, the number of players, and the spark link
 	embed := &discordgo.MessageEmbed{
 		Title:       fmt.Sprintf("Region %s", regionStr),
-		Description: fmt.Sprintf("updated <t:%d:f>, (expires <t:%d:f>)", time.Now().UTC().Unix(), expires),
+		Description: fmt.Sprintf("updated <t:%d:f>", time.Now().UTC().Unix()),
 		Fields:      make([]*discordgo.MessageEmbedField, 0),
 	}
 
@@ -2835,8 +2837,13 @@ func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runt
 	}
 
 	if existingMessage != nil {
+		ts, err := getTimestampFromID(existingMessage.ID)
+		if err != nil {
+			return err
+		}
+		embed.Footer.Text = fmt.Sprintf("Expires  <t:%d:f>", ts.Add(24*time.Hour).Unix())
 		// Update the message for the given region
-		_, err := d.dg.ChannelMessageEditEmbed(channelID, existingMessage.ID, embed)
+		_, err = d.dg.ChannelMessageEditEmbed(channelID, existingMessage.ID, embed)
 		if err != nil {
 			return err
 		}
@@ -2860,17 +2867,21 @@ func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runt
 					// Delete the message
 					if err := d.dg.ChannelMessageDelete(channelID, msg.ID); err != nil {
 						logger.Error("Failed to delete region status message", zap.Error(err))
+
 					}
+					return
 				case <-timer.C:
 					// Delete the message
 					if err := d.dg.ChannelMessageDelete(channelID, msg.ID); err != nil {
 						logger.Error("Failed to delete region status message", zap.Error(err))
 					}
+					return
 				case <-ticker.C:
 					// Update the message
 					err := d.createRegionStatusEmbed(ctx, logger, regionStr, channelID, msg)
 					if err != nil {
-						logger.Error("Failed to update region status message", zap.Error(err))
+						logger.Error("Failed to update region status message: %s", err.Error())
+						return
 					}
 				}
 			}
