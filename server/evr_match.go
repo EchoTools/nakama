@@ -10,6 +10,7 @@ import (
 	"math/rand"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"time"
@@ -744,23 +745,33 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 
 	var err error
 
-	switch {
-	case state.broadcaster == nil && tick > state.broadcasterJoinExpiry:
+	if state.broadcaster == nil && tick > state.broadcasterJoinExpiry {
 		// If the broadcaster has not joined within the timeout, shut down the match.
-		logger.Debug("Broadcaster did not join before the expiry time. Shutting down.")
+		logger.Warn("Broadcaster did not join before the expiry time. Shutting down.")
 		return nil
-	case state.LobbyType != UnassignedLobby && !state.Started && tick > state.sessionStartExpiry:
-		logger.Debug("Match did not start before the expiry time. Shutting down.")
-		return nil
-	case state.LobbyType != UnassignedLobby && len(state.presences) == 0:
-		// If the match is empty, check if it has been empty for too long.
-		state.emptyTicks++
-		if state.emptyTicks > 20*state.tickRate {
-			logger.Debug("Match has been empty for too long. Shutting down.")
-			return nil
+	}
+
+	if state.LobbyType != UnassignedLobby {
+		if state.Started {
+			if len(state.presences) == 0 {
+				state.emptyTicks++
+
+				if state.emptyTicks > 60*state.tickRate {
+					logger.Warn("Match has been empty for too long. Shutting down.")
+					return nil
+				}
+
+			} else {
+				state.emptyTicks = 0
+			}
+		} else if tick > state.sessionStartExpiry {
+			// Start the session to allow the broadcaster to load the level, it will just exit like normal if no one joins
+			state, err = m.StartSession(ctx, logger, nk, dispatcher, state)
+			if err != nil {
+				logger.Error("failed to start session: %v", err)
+				return nil
+			}
 		}
-	default:
-		state.emptyTicks = 0
 	}
 
 	// Handle the messages, one by one
