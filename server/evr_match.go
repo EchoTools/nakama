@@ -357,6 +357,9 @@ func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql
 		logger.WithField("err", err).Error("Match label marshal error.")
 		return nil, 0, ""
 	}
+	if state.tickRate == 0 {
+		state.tickRate = 10
+	}
 
 	return &state, int(state.tickRate), string(labelJson)
 }
@@ -746,10 +749,10 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		// If the broadcaster has not joined within the timeout, shut down the match.
 		logger.Debug("Broadcaster did not join before the expiry time. Shutting down.")
 		return nil
-	case !state.Started && tick > state.sessionStartExpiry:
+	case state.LobbyType != UnassignedLobby && !state.Started && tick > state.sessionStartExpiry:
 		logger.Debug("Match did not start before the expiry time. Shutting down.")
 		return nil
-	case len(state.presences) == 0:
+	case state.LobbyType != UnassignedLobby && len(state.presences) == 0:
 		// If the match is empty, check if it has been empty for too long.
 		state.emptyTicks++
 		if state.emptyTicks > 20*state.tickRate {
