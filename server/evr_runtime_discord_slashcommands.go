@@ -2823,7 +2823,7 @@ func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runt
 		} else {
 			players := make([]string, 0, state.Size)
 			for _, player := range state.Players {
-				players = append(players, fmt.Sprintf("<@%s>", player.DiscordID))
+				players = append(players, fmt.Sprintf("`%s` (`%s`)", player.DisplayName, player.Username))
 			}
 			status = fmt.Sprintf("%s: %s", state.Mode.String(), strings.Join(players, ", "))
 
@@ -2866,14 +2866,14 @@ func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runt
 				case <-d.ctx.Done():
 					// Delete the message
 					if err := d.dg.ChannelMessageDelete(channelID, msg.ID); err != nil {
-						logger.Error("Failed to delete region status message", zap.Error(err))
+						logger.Error("Failed to delete region status message: %s", err.Error())
 
 					}
 					return
 				case <-timer.C:
 					// Delete the message
 					if err := d.dg.ChannelMessageDelete(channelID, msg.ID); err != nil {
-						logger.Error("Failed to delete region status message", zap.Error(err))
+						logger.Error("Failed to delete region status message: %s", err.Error())
 					}
 					return
 				case <-ticker.C:
