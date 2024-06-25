@@ -922,24 +922,9 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		}
 
 		state.Started = false
-		state.Open = newState.Open
+		state.Open = true
+
 		state.Mode = newState.Mode
-		state.Level = newState.Level
-		state.SpawnedBy = newState.SpawnedBy
-		state.GroupID = newState.GroupID
-		state.MaxSize = newState.MaxSize
-		state.SessionSettings = newState.SessionSettings
-		state.RequiredFeatures = newState.RequiredFeatures
-		state.TeamSize = newState.TeamSize
-		state.StartTime = newState.StartTime
-
-		if state.StartTime.IsZero() || state.StartTime.Before(time.Now()) {
-			state.StartTime = time.Now()
-		}
-		state.sessionStartExpiry = tick + (15 * 60 * state.tickRate)
-
-		state.TeamAlignments = make(map[uuid.UUID]int, MatchMaxSize)
-
 		switch newState.Mode {
 		case evr.ModeArenaPublic, evr.ModeSocialPublic, evr.ModeCombatPublic:
 			state.LobbyType = PublicLobby
@@ -947,9 +932,48 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 			state.LobbyType = PrivateLobby
 		}
 
-		if state.TeamSize == 0 {
+		state.Level = newState.Level
+		// validate the mode
+		if levels, ok := evr.LevelsByMode[state.Mode]; !ok {
+			return state, SignalResponse{Message: fmt.Sprintf("invalid mode: %v", state.Mode)}.String()
+		} else {
+			if state.Level == 0xffffffffffffffff || state.Level == 0 {
+				state.Level = levels[rand.Intn(len(levels))]
+			}
+		}
+
+		state.SpawnedBy = newState.SpawnedBy
+
+		state.GroupID = newState.GroupID
+		if state.GroupID == nil {
+			state.GroupID = &uuid.Nil
+		}
+
+		state.RequiredFeatures = newState.RequiredFeatures
+		for _, f := range state.RequiredFeatures {
+			if !slices.Contains(state.Broadcaster.Features, f) {
+				return state, SignalResponse{Message: fmt.Sprintf("feature not supported: %v", f)}.String()
+			}
+		}
+
+		settings := evr.NewSessionSettings(strconv.FormatUint(PcvrAppId, 10), state.Mode, state.Level, state.RequiredFeatures)
+		state.SessionSettings = &settings
+
+		state.MaxSize = newState.MaxSize
+		if state.MaxSize < 2 || state.MaxSize > MatchMaxSize {
+			state.MaxSize = MatchMaxSize
+		}
+
+		state.TeamSize = newState.TeamSize
+		if state.TeamSize <= 0 || state.TeamSize > 5 {
 			state.TeamSize = 5
 		}
+
+		state.StartTime = newState.StartTime
+		if state.StartTime.IsZero() || state.StartTime.Before(time.Now()) {
+			state.StartTime = time.Now()
+		}
+		state.sessionStartExpiry = tick + (15 * 60 * state.tickRate)
 
 		if state.Mode == evr.ModeSocialPrivate || state.Mode == evr.ModeSocialPublic {
 			state.PlayerLimit = int(state.MaxSize)
@@ -957,18 +981,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 			state.PlayerLimit = state.TeamSize * 2
 		}
 
-		if state.Level == 0xffffffffffffffff || state.Level == 0 {
-			// The level is not set, set it to a random value
-			if levels, ok := evr.LevelsByMode[state.Mode]; ok {
-				state.Level = levels[rand.Intn(len(levels))]
-			}
-		}
-
-		if state.SessionSettings == nil {
-			settings := evr.NewSessionSettings(strconv.FormatUint(PcvrAppId, 10), state.Mode, state.Level, state.RequiredFeatures)
-			state.SessionSettings = &settings
-		}
-
+		state.TeamAlignments = make(map[uuid.UUID]int, MatchMaxSize)
 		if newState.Players != nil {
 			for _, player := range newState.Players {
 				state.TeamAlignments[uuid.FromStringOrNil(player.UserID)] = int(player.Team)
@@ -982,7 +995,8 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 			return state, SignalResponse{Message: fmt.Sprintf("failed to update label: %v", err)}.String()
 		}
 
-		return state, SignalResponse{Success: true, Payload: state.String()}.String()
+		ss := state.String()
+		return state, SignalResponse{Success: true, Payload: ss}.String()
 
 	case SignalStartSession:
 
