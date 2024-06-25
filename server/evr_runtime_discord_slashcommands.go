@@ -2841,7 +2841,10 @@ func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runt
 		if err != nil {
 			return err
 		}
-		embed.Footer.Text = fmt.Sprintf("Expires  <t:%d:f>", ts.Add(24*time.Hour).Unix())
+
+		embed.Footer = &discordgo.MessageEmbedFooter{
+			Text: fmt.Sprintf("Expires  <t:%d:f>", ts.Add(24*time.Hour).Unix()),
+		}
 		// Update the message for the given region
 		_, err = d.dg.ChannelMessageEditEmbed(channelID, existingMessage.ID, embed)
 		if err != nil {
