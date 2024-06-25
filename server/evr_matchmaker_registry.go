@@ -785,12 +785,15 @@ func (mr *MatchmakingRegistry) allocateBroadcaster(channels []uuid.UUID, config 
 		}
 		break
 	}
+	if matchID.IsNil() {
+		return MatchID{}, ErrMatchmakingNoAvailableServers
+	}
 	// Found a match
 	label.SpawnedBy = SystemUserID
 	// Instruct the server to prepare the level
 	response, err := SignalMatch(mr.ctx, mr.matchRegistry, matchID, SignalPrepareSession, label)
 	if err != nil {
-		return MatchID{}, fmt.Errorf("error signaling match: %s: %v", response, err)
+		return MatchID{}, fmt.Errorf("error signaling match `%s`: %s: %v", matchID.String(), response, err)
 	}
 
 	return matchID, nil
