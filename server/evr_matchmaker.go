@@ -335,7 +335,7 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 	// Add the user to the matchmaker
 	ticket, _, err = session.matchmaker.Add(ctx, presences, sessionID.String(), pID, query, minCount, maxCount, countMultiple, stringProps, numericProps)
 	if err != nil {
-		return "", fmt.Errorf("failed to add to matchmaker: %v", err)
+		return "", fmt.Errorf("failed to add to matchmaker with query `%s`: %v", query, err)
 	}
 	msession.AddTicket(ticket, query)
 	return ticket, nil
