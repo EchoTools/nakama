@@ -807,21 +807,21 @@ func BanUserRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runti
 }
 
 type PrepareMatchRPCRequest struct {
-	MatchID          MatchID              `json:"match_id"`                    // Parking match to signal
+	MatchID          MatchID              `json:"id"`                          // Parking match to signal
 	Mode             evr.SymbolToken      `json:"mode"`                        // Mode to set the match to
-	TeamSize         int                  `json:"team_size,omitempty"`         // Team size to set the match to
 	Level            evr.SymbolToken      `json:"level,omitempty"`             // Level to set the match to
-	SessionSettings  evr.SessionSettings  `json:"session_settings,omitempty"`  // Session settings to set the match to
-	Alignments       map[string]TeamIndex `json:"role_alignments,omitempty"`   // Team alignments to set the match to (discord username -> team index))
 	RequiredFeatures []string             `json:"required_features,omitempty"` // Required features of the broadcaster/clients
+	TeamSize         int                  `json:"team_size,omitempty"`         // Team size to set the match to
+	Alignments       map[string]TeamIndex `json:"role_alignments,omitempty"`   // Team alignments to set the match to (discord username -> team index))
+	GroupID          string               `json:"group_id,omitempty"`          // Group ID to set the match to
 	SignalPayload    string               `json:"signal_payload,omitempty"`    // A signal payload to send to the match unmodified
 	StartTime        time.Time            `json:"start_time,omitempty"`        // The time to start the match
 }
 
 type PrepareMatchRPCResponse struct {
-	MatchID       MatchID       `json:"match_id"`
+	MatchID       MatchID       `json:"id"`
+	MatchLabel    EvrMatchState `json:"label"`
 	SignalPayload string        `json:"signal_payload"`
-	MatchLabel    EvrMatchState `json:"match_label"`
 }
 
 // PrepareMatchRPC is a function that prepares a match from a given match ID.
@@ -854,13 +854,14 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 	signalPayload := request.SignalPayload
 	if signalPayload == "" {
 		state := &EvrMatchState{}
-
+		groupID := uuid.FromStringOrNil(request.GroupID)
 		state.Mode = request.Mode.Symbol()
 		state.TeamSize = request.TeamSize
 		state.Level = request.Level.Symbol()
-		state.SessionSettings = &request.SessionSettings
+		state.RequiredFeatures = request.RequiredFeatures
 		state.SpawnedBy = userID
 		state.MaxSize = MatchMaxSize
+		state.GroupID = &groupID
 		state.StartTime = request.StartTime
 
 		// Translate the discord ID to the nakama ID for the team Alignments
@@ -898,12 +899,19 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 
 	response.SignalPayload = signalPayload
 	// Send the signal
-	signalResponse, err := nk.MatchSignal(ctx, matchID.String(), signalPayload)
+	signalResponsePayload, err := nk.MatchSignal(ctx, matchID.String(), signalPayload)
 	if err != nil {
 		return errResponse(err)
 	}
+	signalResponse := SignalResponse{}
+	if err := json.Unmarshal([]byte(signalResponsePayload), &signalResponse); err != nil {
+		return errResponse(err)
+	}
+	if !signalResponse.Success {
+		return errResponse(fmt.Errorf("failed to signal match: %s", signalResponse.Message))
+	}
 
-	if err := json.Unmarshal([]byte(signalResponse), &response.MatchLabel); err != nil {
+	if err := json.Unmarshal([]byte(signalResponse.Payload), &response.MatchLabel); err != nil {
 		return errResponse(err)
 	}
 
