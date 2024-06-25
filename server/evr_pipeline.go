@@ -62,6 +62,7 @@ type EvrPipeline struct {
 	profileRegistry     *ProfileRegistry
 	discordRegistry     DiscordRegistry
 	appBot              *DiscordAppBot
+	leaderboardRegistry *LeaderboardRegistry
 
 	broadcasterRegistrationBySession *MapOf[string, *MatchBroadcaster] // sessionID -> MatchBroadcaster
 	matchBySessionID                 *MapOf[string, string]            // sessionID -> matchID
@@ -108,6 +109,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	}
 
 	discordRegistry := NewLocalDiscordRegistry(ctx, nk, runtimeLogger, metrics, config, pipeline, dg)
+	leaderboardRegistry := NewLeaderboardRegistry(NewRuntimeGoLogger(logger), nk, config.GetName())
 	profileRegistry := NewProfileRegistry(nk, db, runtimeLogger, discordRegistry)
 
 	appBot := NewDiscordAppBot(nk, runtimeLogger, metrics, pipeline, config, discordRegistry, profileRegistry, dg)
@@ -171,7 +173,8 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		externalIP:        externalIP,
 		broadcasterUserID: broadcasterUserID,
 
-		profileRegistry: profileRegistry,
+		profileRegistry:     profileRegistry,
+		leaderboardRegistry: leaderboardRegistry,
 
 		broadcasterRegistrationBySession: &MapOf[string, *MatchBroadcaster]{},
 		matchBySessionID:                 &MapOf[string, string]{},

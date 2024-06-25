@@ -864,58 +864,64 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 		logger.Warn("UserServerProfileUpdateRequest: user not found", zap.String("evrId", request.EvrID.Token()))
 		return nil
 	}
-	userID := targetSession.userID
 
-	// Get the profile
+	userID := targetSession.UserID()
+	username := targetSession.Username()
+
 	profile, found := p.profileRegistry.Load(userID, request.EvrID)
 	if !found {
-		return fmt.Errorf("failed to load game profiles")
-	}
-
-	update := request.Payload
-
-	group, ok := update.Update.StatsGroups["arena"]
-	if !ok {
-		logger.Debug("missing arena stats group")
+		logger.Warn("UserServerProfileUpdateRequest: failed to load game profiles")
 		return nil
 	}
-	_ = group
-	_ = profile
-	// Convert the stats update to a map
+	serverProfile := profile.GetServer()
+	matchTypeMap := map[int64]string{
+		-3791849610740453400: "echo_arena",
+	}
 
-	/*
-		profile, err = mergeStats(&profile.Server.Statistics.Arena, &group)
-		if err != nil {
-			return fmt.Errorf("failed to update profile: %w", err)
-		}
-	*/
-	return nil
-}
+	matchType, ok := matchTypeMap[int64(request.Payload.MatchType)]
+	if !ok {
+		logger.Warn("UserServerProfileUpdateRequest: unknown match type", zap.String("matchType", matchComponents[1]))
+	}
 
-/*
-	func mergeStats(a *evr.ArenaStatistics, b *evr.ArenaStatistics) {
-		aVal := reflect.ValueOf(a).Elem()
-		bVal := reflect.ValueOf(b).Elem()
+	for groupName, stats := range request.Payload.Update.StatsGroups {
 
-		for i := 0; i < aVal.NumField(); i++ {
-			aField := aVal.Field(i)
-			bField := bVal.Field(i)
-			if bField.Op != "" { // Only apply operation if there's an Op defined
-				switch bField.Op {
-				case "add":
-					newVal := aField.Float() + bField.Value
-					aField.SetFloat(newVal)
-				case "rep":
-					aField.SetFloat(bField.Value)
-				case "max":
-					if bField.Value > aField.Float() {
-						aField.SetFloat(bField.Value)
-					}
+		for statName, stat := range stats {
+			record, err := p.leaderboardRegistry.Submission(ctx, userID.String(), request.EvrID.String(), username, request.Payload.SessionID.String(), matchType, groupName, statName, stat.Operand, stat.Value)
+			if err != nil {
+				logger.Warn("Failed to submit leaderboard", zap.Error(err))
+			}
+			if record != nil {
+				matchStat := evr.MatchStatistic{
+					Operand: stat.Operand,
 				}
+				if stat.Count != nil {
+					matchStat.Count = stat.Count
+				}
+				if stat.IsFloat64() {
+					// Combine the record score and the subscore as the decimal value
+					matchStat.Value = float64(record.Score) + float64(record.Subscore)/10000
+				} else {
+					matchStat.Value = record.Score
+				}
+
+				// Update the profile
+				s, ok := serverProfile.Statistics[groupName]
+				if !ok {
+					s = make(map[string]evr.MatchStatistic)
+					serverProfile.Statistics[groupName] = s
+				}
+				s[statName] = matchStat
 			}
 		}
 	}
-*/
+
+	// Store the profile
+	if err := p.profileRegistry.Store(userID, profile); err != nil {
+		logger.Warn("UserServerProfileUpdateRequest: failed to store game profiles", zap.Error(err))
+	}
+	return nil
+}
+
 func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.OtherUserProfileRequest)
 
