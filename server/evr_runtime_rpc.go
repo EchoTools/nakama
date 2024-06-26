@@ -814,8 +814,8 @@ type PrepareMatchRPCRequest struct {
 	TeamSize         int                  `json:"team_size,omitempty"`         // Team size to set the match to
 	Alignments       map[string]TeamIndex `json:"role_alignments,omitempty"`   // Team alignments to set the match to (discord username -> team index))
 	GroupID          string               `json:"group_id,omitempty"`          // Group ID to set the match to
-	SignalPayload    string               `json:"signal_payload,omitempty"`    // A signal payload to send to the match unmodified
 	StartTime        time.Time            `json:"start_time,omitempty"`        // The time to start the match
+	SignalPayload    string               `json:"signal_payload,omitempty"`    // A signal payload to send to the match unmodified
 }
 
 type PrepareMatchRPCResponse struct {
