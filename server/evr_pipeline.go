@@ -76,11 +76,6 @@ type EvrPipeline struct {
 type ctxDiscordBotTokenKey struct{}
 
 func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, config Config, version string, socialClient *social.Client, storageIndex StorageIndex, leaderboardScheduler LeaderboardScheduler, leaderboardCache LeaderboardCache, leaderboardRankCache LeaderboardRankCache, sessionRegistry SessionRegistry, sessionCache SessionCache, statusRegistry StatusRegistry, matchRegistry MatchRegistry, matchmaker Matchmaker, tracker Tracker, router MessageRouter, streamManager StreamManager, metrics Metrics, pipeline *Pipeline, runtime *Runtime) *EvrPipeline {
-	// The Evr pipeline is going to be a bit "different".
-	// It's going to get access to most components, because
-	// of the way EVR works, it's going to need to be able
-	// to access the API server, and the runtime.
-	// TODO find a cleaner way to do this
 
 	// Add the bot token to the context
 
