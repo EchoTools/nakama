@@ -11,7 +11,7 @@ type UserServerProfileUpdateRequest struct {
 }
 
 func (m UserServerProfileUpdateRequest) String() string {
-	return fmt.Sprintf("%T{EVRID:%s, MatchType:%s, SessionID:%s}", m, m.EvrID.String(), m.Payload.MatchType.Token().String(), m.Payload.SessionID.String())
+	return fmt.Sprintf("%T{EVRID:%s, MatchType:%s, SessionID:%s}", m, m.EvrID.String(), Symbol(m.Payload.MatchType).Token().String(), m.Payload.SessionID.String())
 }
 
 func (m *UserServerProfileUpdateRequest) Stream(s *EasyStream) error {
@@ -22,7 +22,7 @@ func (m *UserServerProfileUpdateRequest) Stream(s *EasyStream) error {
 }
 
 type UpdatePayload struct {
-	MatchType Symbol      `json:"matchtype"`
+	MatchType int64       `json:"matchtype"`
 	SessionID GUID        `json:"sessionid"`
 	Update    StatsUpdate `json:"update"`
 }
