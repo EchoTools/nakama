@@ -170,7 +170,7 @@ func Test_updateProfileStats(t *testing.T) {
 	type args struct {
 		logger  *zap.Logger
 		profile *GameProfileData
-		update  evr.StatsUpdate
+		update  evr.UpdatePayload
 	}
 
 	jsonData := `{
@@ -359,12 +359,21 @@ func Test_updateProfileStats(t *testing.T) {
 			}
 		}
 	}`
-	var update evr.StatsUpdate
+	var update evr.UpdatePayload
 	err := json.Unmarshal([]byte(jsonData), &update)
 	if err != nil {
 		t.Fatalf("Failed to unmarshal JSON: %v", err)
 	}
-
+	data, err := json.Marshal(update.Update.StatsGroups)
+	if err != nil {
+		t.Fatalf("Failed to marshal JSON: %v", err)
+	}
+	profile := evr.ServerProfile{}
+	err = json.Unmarshal([]byte(data), &profile.Statistics)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal JSON: %v", err)
+	}
+	t.Errorf("%v", profile.Statistics)
 	tests := []struct {
 		name    string
 		args    args
