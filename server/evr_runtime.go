@@ -74,7 +74,28 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		}
 	}
 
-	RegisterIndexes(initializer)
+	if err := RegisterIndexes(initializer); err != nil {
+		return fmt.Errorf("unable to register indexes: %v", err)
+	}
+
+	// Remove all LinkTickets
+	objs, _, err := nk.StorageList(ctx, SystemUserID, SystemUserID, LinkTicketCollection, 1000, "")
+	if err != nil {
+		return fmt.Errorf("unable to list LinkTickets: %v", err)
+	}
+
+	deletes := make([]*runtime.StorageDelete, 0, len(objs))
+	for _, obj := range objs {
+		deletes = append(deletes, &runtime.StorageDelete{
+			Collection: LinkTicketCollection,
+			Key:        obj.Key,
+			Version:    obj.Version,
+		})
+	}
+
+	if err := nk.StorageDelete(ctx, deletes); err != nil {
+		return fmt.Errorf("unable to delete LinkTickets: %v", err)
+	}
 
 	// Create the core groups
 	if err := createCoreGroups(ctx, logger, db, nk, initializer); err != nil {
