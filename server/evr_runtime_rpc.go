@@ -946,17 +946,17 @@ func GetUserbyCustomID(ctx context.Context, logger runtime.Logger, db *sql.DB, c
 			found = false
 		} else {
 			logger.Error("Error looking up user by custom ID.", zap.Error(err), zap.String("customID", customID), zap.String("username", ""))
-			return uuid.Nil.String(), "", status.Error(codes.Internal, "Error finding user account.")
+			return uuid.Nil.String(), "", status.Error(codes.Internal, "error finding user account")
 		}
 	}
 	if !found {
-		return uuid.Nil.String(), "", status.Error(codes.NotFound, "User account not found.")
+		return uuid.Nil.String(), "", status.Error(codes.NotFound, "user account not found")
 	}
 
 	// Check if it's disabled.
 	if dbDisableTime.Status == pgtype.Present && dbDisableTime.Time.Unix() != 0 {
 		logger.Info("User account is disabled.", zap.String("customID", customID), zap.String("username", dbUsername))
-		return dbUserID.String(), dbUsername, status.Error(codes.PermissionDenied, "User account banned.")
+		return dbUserID.String(), dbUsername, status.Error(codes.PermissionDenied, "account banned")
 	}
 
 	return dbUserID.String(), dbUsername, nil
