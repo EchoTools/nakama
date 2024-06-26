@@ -824,6 +824,9 @@ func (d *DiscordAppBot) InitializeDiscordBot() error {
 
 		userID, err := d.discordRegistry.GetUserIdByDiscordId(ctx, discordID, true)
 		if err != nil {
+			if status.Code(err) == codes.NotFound {
+				return
+			}
 			logger.Error("Error getting user id: %s", err.Error())
 			return
 		}
