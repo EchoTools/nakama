@@ -8,34 +8,45 @@ import (
 func TestMroundRTT(t *testing.T) {
 	tests := []struct {
 		name     string
-		duration time.Duration
+		rtt      time.Duration
 		modulus  time.Duration
 		expected time.Duration
 	}{
 		{
 			name:     "Test Case 1",
-			duration: 12 * time.Millisecond,
+			rtt:      12 * time.Millisecond,
 			modulus:  5 * time.Millisecond,
 			expected: 10 * time.Millisecond,
 		},
 		{
 			name:     "Test Case 2",
-			duration: 27 * time.Millisecond,
+			rtt:      27 * time.Millisecond,
 			modulus:  15 * time.Millisecond,
 			expected: 30 * time.Millisecond,
 		},
 		{
 			name:     "Test Case 3",
-			duration: 25 * time.Millisecond,
+			rtt:      25 * time.Millisecond,
 			modulus:  15 * time.Millisecond,
 			expected: 30 * time.Millisecond,
 		},
-		// Add more test cases as needed
+		{
+			name:     "zero returns zero",
+			rtt:      0 * time.Millisecond,
+			modulus:  15 * time.Millisecond,
+			expected: 0 * time.Millisecond,
+		},
+		{
+			name:     ">modulus returns modulus",
+			rtt:      1 * time.Millisecond,
+			modulus:  15 * time.Millisecond,
+			expected: 15 * time.Millisecond,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := mroundRTT(tt.duration, tt.modulus)
+			result := mroundRTT(tt.rtt, tt.modulus)
 			if result != tt.expected {
 				t.Errorf("Expected %v, but got %v", tt.expected, result)
 			}

@@ -73,7 +73,7 @@ func (e *LatencyMetric) String() string {
 
 // ID returns a unique identifier for the endpoint
 func (e *LatencyMetric) ID() string {
-	return fmt.Sprintf("%s:%s", e.Endpoint.InternalIP.String(), e.Endpoint.ExternalIP.String())
+	return e.Endpoint.GetExternalIP()
 }
 
 // The key used for matchmaking properties
@@ -98,7 +98,7 @@ func (c *LatencyCache) SelectPingCandidates(endpoints ...evr.Endpoint) []evr.End
 	// Initialize candidates with a capacity of 16
 	metrics := make([]LatencyMetric, 0, len(endpoints))
 	for _, endpoint := range endpoints {
-		id := endpoint.ID()
+		id := endpoint.GetExternalIP()
 		e, ok := c.Load(id)
 		if !ok {
 			e = LatencyMetric{
@@ -412,7 +412,7 @@ func (mr *MatchmakingRegistry) listUnfilledLobbies(ctx context.Context, logger *
 
 	// Search for possible matches
 	logger.Debug("Searching for matches")
-	matches, err := mr.listMatches(ctx, limit, minSize, maxSize, query)
+	matches, err := mr.listMatches(ctx, limit, minSize+1, maxSize+1, query)
 	if err != nil {
 		return nil, "", status.Errorf(codes.Internal, "Failed to find matches: %v", err)
 	}
@@ -825,7 +825,7 @@ func (c *MatchmakingRegistry) updateBroadcasters() {
 			c.logger.Error("Error unmarshalling match label", zap.Error(err))
 			continue
 		}
-		id := s.Broadcaster.Endpoint.ID()
+		id := s.Broadcaster.Endpoint.GetExternalIP()
 		c.broadcasters.Store(id, s.Broadcaster.Endpoint)
 	}
 }
@@ -882,6 +882,17 @@ func (m *MatchmakingSession) GetPingCandidates(endpoints ...evr.Endpoint) (candi
 	if len(endpoints) == 0 {
 		return candidates
 	}
+	endpoints = endpoints[:]
+
+	// Unique the endpoints
+	seen := make(map[string]struct{}, len(endpoints))
+	for i, e := range endpoints {
+		id := e.GetExternalIP()
+		if _, ok := seen[id]; ok {
+			endpoints = append(endpoints[:i], endpoints[i+1:]...)
+		}
+		seen[id] = struct{}{}
+	}
 
 	// Retrieve the user's cache and lock it for use
 	cache := m.LatencyCache
@@ -891,7 +902,7 @@ func (m *MatchmakingSession) GetPingCandidates(endpoints ...evr.Endpoint) (candi
 
 	// Iterate over the endpoints, and load/create their cache entry
 	for _, endpoint := range endpoints {
-		id := endpoint.ID()
+		id := endpoint.GetExternalIP()
 
 		e, ok := cache.Load(id)
 		if !ok {
@@ -946,7 +957,7 @@ func (r *MatchmakingRegistry) GetCache(userId uuid.UUID) *LatencyCache {
 // UpdateBroadcasters updates the broadcasters map
 func (r *MatchmakingRegistry) UpdateBroadcasters(endpoints []evr.Endpoint) {
 	for _, e := range endpoints {
-		r.broadcasters.Store(e.ID(), e)
+		r.broadcasters.Store(e.GetExternalIP(), e)
 	}
 }
 
@@ -1181,44 +1192,43 @@ func (c *MatchmakingRegistry) Add(id uuid.UUID, s *MatchmakingSession) {
 }
 
 // GetLatencies returns the cached latencies for a user
-func (c *MatchmakingRegistry) GetLatencies(userId uuid.UUID, endpoints []evr.Endpoint) map[string]LatencyMetric {
-
-	// If the user ID is nil or there are no endpoints, return nil
-	if userId == uuid.Nil {
-		return nil
-	}
-	// Create endpoint id slice
-	endpointIds := make([]string, 0, len(endpoints))
-	for _, e := range endpoints {
-		endpointIds = append(endpointIds, e.ID())
-	}
+func (c *MatchmakingRegistry) GetLatencies(userId uuid.UUID, endpoints []evr.Endpoint) []LatencyMetric {
 
 	cache := c.GetCache(userId)
 
-	// If no endpoints are provided, get all the latencies from the cache
-	// build a new map to avoid locking the cache for too long
-	if len(endpointIds) == 0 {
-		results := make(map[string]LatencyMetric, 100)
+	if cache == nil {
+		return nil
+	}
+
+	result := make([]LatencyMetric, 0, len(endpoints))
+
+	if len(endpoints) == 0 {
+
+		// Return all the latencies
 		cache.Range(func(k string, v LatencyMetric) bool {
-			results[k] = v
+			result = append(result, v)
 			return true
 		})
-		return results
-	}
-	// Return just the endpoints requested
-	results := make(map[string]LatencyMetric, len(endpointIds))
-	for _, id := range endpointIds {
-		endpoint := evr.FromEndpointID(id)
-		// Create the endpoint and add it to the cache
-		e := LatencyMetric{
-			Endpoint:  endpoint,
-			RTT:       0,
-			Timestamp: time.Now(),
+
+	} else {
+
+		// Get the latencies for the endpoints
+		for _, e := range endpoints {
+			id := e.GetExternalIP()
+			r, ok := cache.Load(id)
+			if !ok {
+				// Create the endpoint and add it to the cache
+				r = LatencyMetric{
+					Endpoint:  e,
+					RTT:       0,
+					Timestamp: time.Now(),
+				}
+				cache.Store(id, r)
+			}
+			result = append(result, r)
 		}
-		r, _ := cache.LoadOrStore(id, e)
-		results[id] = r
 	}
-	return results
+	return result
 }
 
 func (ms *MatchmakingSession) BuildQuery(latencies []LatencyMetric) (query string, stringProps map[string]string, numericProps map[string]float64, err error) {
