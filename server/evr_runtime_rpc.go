@@ -985,56 +985,48 @@ func AuthenticatePasswordRPC(ctx context.Context, logger runtime.Logger, db *sql
 	var userID, username, tokenID string
 	var vars map[string]string
 
-	switch {
-
-	case request.RefreshToken != "":
+	if request.RefreshToken != "" {
 		var userUUID uuid.UUID
 		userUUID, username, vars, tokenID, err = SessionRefresh(ctx, nk.logger, db, nk.config, nk.sessionCache, request.RefreshToken)
 		if err != nil {
 			return "", err
 		}
 		userID = userUUID.String()
+	} else {
 
-	case request.UserID != "":
-		userID = request.UserID
+		switch {
 
-	case request.DiscordID != "":
-		userID, _, err = GetUserbyCustomID(ctx, logger, db, request.DiscordID)
-		if err != nil {
+		case request.UserID != "":
+			userID = request.UserID
+
+		case request.DiscordID != "":
+			userID, _, err = GetUserbyCustomID(ctx, logger, db, request.DiscordID)
+			if err != nil {
+				return "", err
+			}
+		case request.Username != "":
+			users, err := nk.UsersGetUsername(ctx, []string{request.Username})
+			if err != nil {
+				return "", err
+			}
+			if len(users) != 1 {
+				return "", ErrAuthenticateFailed
+			}
+			userID = users[0].Id
+
+		default:
+			return "", RPCErrInvalidRequest
+		}
+
+		var account *api.Account
+		if account, err = nk.AccountGetId(ctx, userID); err != nil || account == nil {
+			return "", ErrAccountNotFound
+		}
+		if userID, username, _, err = nk.AuthenticateEmail(ctx, account.Email, request.Password, "", false); err != nil {
 			return "", err
 		}
-	case request.Username != "":
-		users, err := nk.UsersGetUsername(ctx, []string{request.Username})
-		if err != nil {
-			return "", err
-		}
-		if len(users) != 1 {
-			return "", ErrAuthenticateFailed
-		}
-		userID = users[0].Id
-
-	default:
-		return "", RPCErrInvalidRequest
+		tokenID = uuid.Must(uuid.NewV4()).String()
 	}
-
-	account, err := nk.AccountGetId(ctx, userID)
-	if err != nil {
-		return "", ErrAccountNotFound
-	}
-	if account == nil {
-		return "", ErrAuthenticateFailed
-	}
-	if tokenID == "" {
-		// Authenticate the user
-		userID, username, _, err = nk.AuthenticateEmail(ctx, account.Email, request.Password, "", false)
-		if err != nil {
-			return "", err
-		}
-		if tokenID != "" {
-			tokenID = uuid.Must(uuid.NewV4()).String()
-		}
-	}
-	// Get the account
 
 	token, exp := generateToken(nk.config, tokenID, userID, username, vars)
 	refreshToken, refreshExp := generateRefreshToken(nk.config, tokenID, userID, username, vars)
