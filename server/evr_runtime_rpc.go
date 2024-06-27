@@ -840,7 +840,7 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 
 	request := &PrepareMatchRPCRequest{}
 	if err := json.Unmarshal([]byte(payload), request); err != nil {
-		return "", runtime.NewError("Failed to unmarshal match request", StatusInternalError)
+		return "", runtime.NewError("Failed to unmarshal match request", StatusInvalidArgument)
 	}
 	matchID := request.MatchID
 
@@ -870,7 +870,7 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 			// Get the nakama ID from the discord ID
 			userID, _, err := GetUserbyCustomID(ctx, logger, db, discordID)
 			if err != nil {
-				return "", runtime.NewError(err.Error(), StatusInternalError)
+				return "", runtime.NewError(err.Error(), StatusNotFound)
 			}
 			state.TeamAlignments[uuid.FromStringOrNil(userID)] = int(teamIndex)
 		}
@@ -878,7 +878,7 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		// Prepare the session for the match.
 		data, err := json.MarshalIndent(state, "", "  ")
 		if err != nil {
-			return "", err
+			return "", runtime.NewError("Failed to marshal match state", StatusInternalError)
 		}
 
 		signal := EvrSignal{
@@ -887,14 +887,14 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		}
 		data, err = json.MarshalIndent(signal, "", "  ")
 		if err != nil {
-			return "", fmt.Errorf("failed to marshal match signal: %v", err)
+			return "", runtime.NewError("Failed to marshal signal", StatusInternalError)
 		}
 		signalPayload = string(data)
 	}
 
 	errResponse := func(err error) (string, error) {
 		data, _ := json.MarshalIndent(response, "", "  ")
-		return string(data), err
+		return string(data), runtime.NewError(err.Error(), StatusInvalidArgument)
 	}
 
 	response.SignalPayload = signalPayload
@@ -927,7 +927,7 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 
 	data, err := json.MarshalIndent(response, "", "  ")
 	if err != nil {
-		return "", err
+		return errResponse(err)
 	}
 
 	return string(data), nil
