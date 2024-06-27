@@ -90,6 +90,14 @@ func (d DeviceAuth) WildcardToken() string {
 	}, ":")
 }
 
+func (d DeviceAuth) LegacyToken() string {
+	return strings.Join([]string{
+		strconv.FormatUint(d.AppID, 10),
+		strings.Replace(d.EvrID.Token(), "OVR-ORG", "OVR_ORG", 1),
+		d.HMDSerialNumber,
+	}, ":")
+}
+
 // ParseDeviceAuthToken parses a device ID token into its components.
 func ParseDeviceAuthToken(token string) (*DeviceAuth, error) {
 	const minTokenLength = 8
