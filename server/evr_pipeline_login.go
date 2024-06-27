@@ -880,7 +880,7 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 
 	matchType, ok := matchTypeMap[request.Payload.MatchType]
 	if !ok {
-		logger.Warn("UserServerProfileUpdateRequest: unknown match type", zap.String("matchType", matchComponents[1]))
+		logger.Warn("UserServerProfileUpdateRequest: unknown match type", zap.Int64("matchType", request.Payload.MatchType))
 	}
 
 	for groupName, stats := range request.Payload.Update.StatsGroups {
@@ -908,9 +908,9 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 				s, ok := serverProfile.Statistics[groupName]
 				if !ok {
 					s = make(map[string]evr.MatchStatistic)
-					serverProfile.Statistics[groupName] = s
+					serverProfile.Statistics[groupName] = make(map[string]evr.MatchStatistic)
 				}
-				s[statName] = matchStat
+				serverProfile.Statistics[groupName][statName] = matchStat
 			}
 		}
 	}
@@ -919,6 +919,8 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 	if err := p.profileRegistry.Store(userID, profile); err != nil {
 		logger.Warn("UserServerProfileUpdateRequest: failed to store game profiles", zap.Error(err))
 	}
+	p.profileRegistry.Save(userID)
+
 	return nil
 }
 
