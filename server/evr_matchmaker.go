@@ -183,8 +183,8 @@ func (p *EvrPipeline) Backfill(ctx context.Context, session *sessionWS, msession
 			continue
 		}
 
-		if match.GetSize() >= int32(label.MaxSize)+1 { // +1 for the broadcaster
-			logger.Warn("Match is full")
+		if match.GetSize()-1 >= int32(label.MaxSize) { // -1 for the broadcaster
+			logger.Debug("Match is full")
 			mu.Unlock()
 			continue
 		}
@@ -454,7 +454,7 @@ func (p *EvrPipeline) MatchSearch(ctx context.Context, logger *zap.Logger, sessi
 	// Basic search defaults
 	const (
 		minSize = 1
-		maxSize = MatchMaxSize - 2 // the broadcaster is included, so this has one free spot
+		maxSize = MatchMaxSize - 1 // the broadcaster is included, so this has one free spot
 		limit   = 50
 	)
 
@@ -462,7 +462,7 @@ func (p *EvrPipeline) MatchSearch(ctx context.Context, logger *zap.Logger, sessi
 
 	// Search for possible matches
 	logger.Debug("Searching for matches")
-	matches, err := listMatches(ctx, p, limit, minSize, maxSize, query)
+	matches, err := listMatches(ctx, p, limit, minSize+1, maxSize+1, query)
 	if err != nil {
 		return nil, "", status.Errorf(codes.Internal, "Failed to find matches: %v", err)
 	}
