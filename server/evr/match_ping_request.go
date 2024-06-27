@@ -142,17 +142,8 @@ func (e Endpoint) ExternalAddress() string {
 	return fmt.Sprintf("%s:%d", e.ExternalIP.String(), e.Port)
 }
 
-// StringIps returns a string of "internalIP:externalIP"
-func (e Endpoint) ID() string {
-	intIP := e.InternalIP
-	if intIP == nil {
-		intIP = net.IPv4zero
-	}
-	extIP := e.ExternalIP
-	if e.ExternalIP == nil {
-		extIP = net.IPv4zero
-	}
-	return fmt.Sprintf("%s:%s", intIP.String(), extIP.String())
+func (e Endpoint) GetExternalIP() string {
+	return e.ExternalIP.String()
 }
 
 // String returns a string of "internalIP:externalIP:port"

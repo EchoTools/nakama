@@ -17,7 +17,6 @@ import (
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
-	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -115,45 +114,58 @@ func (p *EvrPipeline) ListUnassignedLobbies(ctx context.Context, session *sessio
 	return labels, nil
 }
 
-func (p *EvrPipeline) ListUnfilledLobbies(ctx context.Context, logger *zap.Logger, session *sessionWS, msession *MatchmakingSession) ([]*EvrMatchState, string, error) {
-	var err error
-	var query string
-
-	var labels []*EvrMatchState
-
-	if msession.Label.LobbyType != PublicLobby {
-		// Do not backfill for private lobbies
-		return nil, "", status.Errorf(codes.InvalidArgument, "Cannot backfill private lobbies")
-	}
-
-	// Search for existing matches
-	if labels, query, err = p.MatchSearch(ctx, logger, session, msession.Label); err != nil {
-		return nil, query, status.Errorf(codes.Internal, "Failed to search for matches: %v", err)
-	}
-
-	// Filter/sort the results
-	if labels, _, err = p.MatchSort(ctx, session, msession, labels); err != nil {
-		return nil, query, status.Errorf(codes.Internal, "Failed to filter matches: %v", err)
-	}
-
-	if len(labels) == 0 {
-		return nil, query, nil
-	}
-	return labels, query, nil
+type LabelLatencies struct {
+	label   *EvrMatchState
+	latency *LatencyMetric
 }
 
 // Backfill returns a match that the player can backfill
 func (p *EvrPipeline) Backfill(ctx context.Context, session *sessionWS, msession *MatchmakingSession, minCount int) (*EvrMatchState, string, error) {
-	// TODO Move this into the matchmaking registry
-	// TODO Add a goroutine to look for matches that:
-	// Are short 1 or more players
-	// Have been short a player for X amount of time (~30 seconds?)
-	// afterwhich, the match is considered a backfill candidate and the goroutine
-	// Will open a matchmaking ticket. Any players that have a (backfill) ticket that matches
+
 	logger := msession.Logger
-	labels, query, err := p.ListUnfilledLobbies(ctx, logger, session, msession)
+	labels, query, err := p.matchmakingRegistry.listUnfilledLobbies(ctx, logger, msession.Label)
 	if err != nil {
 		return nil, query, err
+	}
+	if len(labels) == 0 {
+		return nil, query, nil
+	}
+
+	endpoints := make([]evr.Endpoint, 0, len(labels))
+	for _, label := range labels {
+		endpoints = append(endpoints, label.Broadcaster.Endpoint)
+	}
+
+	// Ping the endpoints
+	latencies, err := p.GetLatencyMetricByEndpoint(ctx, msession, endpoints, true)
+	if err != nil {
+		return nil, query, err
+	}
+
+	labelLatencies := make([]LabelLatencies, 0, len(labels))
+	for _, label := range labels {
+		for _, latency := range latencies {
+			if label.Broadcaster.Endpoint.GetExternalIP() == latency.Endpoint.GetExternalIP() {
+				labelLatencies = append(labelLatencies, LabelLatencies{label, &latency})
+				break
+			}
+		}
+	}
+
+	var sortFn func(i, j time.Duration, o, p int) bool
+	switch msession.Label.Mode {
+	case evr.ModeArenaPublic:
+		sortFn = RTTweightedPopulationCmp
+	default:
+		sortFn = PopulationCmp
+	}
+
+	sort.SliceStable(labelLatencies, func(i, j int) bool {
+		return sortFn(labelLatencies[i].latency.RTT, labelLatencies[j].latency.RTT, labelLatencies[i].label.PlayerCount, labelLatencies[j].label.PlayerCount)
+	})
+
+	if len(labels) == 0 {
+		return nil, query, nil
 	}
 
 	var selected *EvrMatchState
@@ -240,7 +252,7 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 		return true
 	})
 
-	allRTTs, err := p.PingEndpoints(ctx, session, msession, endpoints)
+	allRTTs, err := p.GetLatencyMetricByEndpoint(ctx, msession, endpoints, true)
 	if err != nil {
 		return "", err
 	}
@@ -445,57 +457,31 @@ func buildMatchQueryFromLabel(ml *EvrMatchState) string {
 	return strings.Join(qparts, " ")
 }
 
-// MatchSearch attempts to find/create a match for the user.
-func (p *EvrPipeline) MatchSearch(ctx context.Context, logger *zap.Logger, session *sessionWS, ml *EvrMatchState) ([]*EvrMatchState, string, error) {
-
-	// TODO Move this into the matchmaking registry
-	query := buildMatchQueryFromLabel(ml)
-
-	// Basic search defaults
-	const (
-		minSize = 1
-		maxSize = MatchMaxSize - 1 // the broadcaster is included, so this has one free spot
-		limit   = 50
-	)
-
-	logger = logger.With(zap.String("query", query), zap.Any("label", ml))
-
-	// Search for possible matches
-	logger.Debug("Searching for matches")
-	matches, err := listMatches(ctx, p, limit, minSize+1, maxSize+1, query)
-	if err != nil {
-		return nil, "", status.Errorf(codes.Internal, "Failed to find matches: %v", err)
-	}
-
-	// Create a label slice of the matches
-	labels := make([]*EvrMatchState, len(matches))
-	for i, match := range matches {
-		label := &EvrMatchState{}
-		if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), label); err != nil {
-			logger.Error("Error unmarshalling match label", zap.Error(err))
-			continue
-		}
-		labels[i] = label
-	}
-
-	return labels, query, nil
-}
-
 // mroundRTT rounds the rtt to the nearest modulus
 func mroundRTT(rtt time.Duration, modulus time.Duration) time.Duration {
+	if rtt == 0 {
+		return 0
+	}
+	if rtt < modulus {
+		return rtt
+	}
 	r := float64(rtt) / float64(modulus)
 	return time.Duration(math.Round(r)) * modulus
 }
 
 // RTTweightedPopulationCmp compares two RTTs and populations
 func RTTweightedPopulationCmp(i, j time.Duration, o, p int) bool {
-	// Sort by if over or under 90ms
-	if i > 90*time.Millisecond && j < 90*time.Millisecond {
-		return true
-	}
-	if i < 90*time.Millisecond && j > 90*time.Millisecond {
+	if i == 0 && j != 0 {
 		return false
 	}
+	// Sort by if over or under 90ms
+	if i < 90*time.Millisecond && j > 90*time.Millisecond {
+		return true
+	}
+	if i > 90*time.Millisecond && j < 90*time.Millisecond {
+		return false
+	}
+
 	// Sort by Population
 	if o > p {
 		return true
@@ -508,10 +494,10 @@ func RTTweightedPopulationCmp(i, j time.Duration, o, p int) bool {
 }
 
 // PopulationCmp compares two populations
-func PopulationCmp(o, p int, i, j time.Duration) bool {
+func PopulationCmp(i, j time.Duration, o, p int) bool {
 	if o == p {
 		// If all else equal, sort by rtt
-		return i < j
+		return i != 0 && i < j
 	}
 	return o > p
 }
@@ -522,108 +508,6 @@ func LatencyCmp(i, j time.Duration) bool {
 	i = mroundRTT(i, 10*time.Millisecond)
 	j = mroundRTT(j, 10*time.Millisecond)
 	return i < j
-}
-
-// MatchSort pings the matches and filters the matches by the user's cached latencies.
-func (p *EvrPipeline) MatchSort(ctx context.Context, session *sessionWS, msession *MatchmakingSession, labels []*EvrMatchState) (filtered []*EvrMatchState, rtts []time.Duration, err error) {
-	// TODO Move this into the matchmaking registry
-
-	// Create a slice for the rtts of the filtered matches
-	rtts = make([]time.Duration, 0, len(labels))
-
-	// If there are no matches, return
-	if len(labels) == 0 {
-		return labels, rtts, nil
-	}
-
-	// Only ping the unique endpoints
-	endpoints := make(map[string]evr.Endpoint, len(labels))
-	for _, label := range labels {
-		endpoints[label.Broadcaster.Endpoint.ID()] = label.Broadcaster.Endpoint
-	}
-
-	// Ping the endpoints
-	result, err := p.PingEndpoints(ctx, session, msession, lo.Values(endpoints))
-	if err != nil {
-		return nil, nil, err
-	}
-
-	modulus := 10 * time.Millisecond
-	// Create a map of endpoint Ids to endpointRTTs, rounding the endpointRTTs to the nearest 10ms
-	endpointRTTs := make(map[string]time.Duration, len(result))
-	for _, r := range result {
-		endpointRTTs[r.Endpoint.ID()] = mroundRTT(r.RTT, modulus)
-	}
-
-	type labelData struct {
-		Id          string
-		PlayerCount int
-		RTT         time.Duration
-	}
-	// Create a map of endpoint Ids to sizes and latencies
-	datas := make([]labelData, 0, len(labels))
-	for _, label := range labels {
-		id := label.Broadcaster.Endpoint.ID()
-		rtt := endpointRTTs[id]
-		// If the rtt is 0 or over 270ms, skip the match
-		if rtt == 0 || rtt > 270*time.Millisecond {
-			continue
-		}
-		datas = append(datas, labelData{id, label.PlayerCount, rtt})
-	}
-
-	// Sort the matches
-	switch msession.Label.Mode {
-	case evr.ModeArenaPrivate, evr.ModeCombatPrivate:
-		// Sort by latency only
-		sort.SliceStable(datas, func(i, j int) bool {
-			return LatencyCmp(datas[i].RTT, datas[j].RTT)
-		})
-	case evr.ModeArenaPublic:
-		// Split Arena matches into two groups: over and under 90ms
-		// Sort by if over or under 90ms, then population, then latency
-		sort.SliceStable(datas, func(i, j int) bool {
-			return RTTweightedPopulationCmp(datas[i].RTT, datas[j].RTT, datas[i].PlayerCount, datas[j].PlayerCount)
-		})
-
-	case evr.ModeCombatPublic:
-		// Sort Combat matches by population, then latency
-		fallthrough
-
-	case evr.ModeSocialPublic:
-		fallthrough
-
-	default:
-		sort.SliceStable(datas, func(i, j int) bool {
-			return PopulationCmp(datas[i].PlayerCount, datas[j].PlayerCount, datas[i].RTT, datas[j].RTT)
-		})
-	}
-
-	// Create a slice of the filtered matches
-	filtered = make([]*EvrMatchState, 0, len(datas))
-	for _, data := range datas {
-		for _, label := range labels {
-			if label.Broadcaster.Endpoint.ID() == data.Id {
-				filtered = append(filtered, label)
-				rtts = append(rtts, data.RTT)
-				break
-			}
-		}
-	}
-
-	// Sort the matches by region, putting the user's region first
-
-	if len(msession.Label.Broadcaster.Regions) == 0 {
-		return filtered, rtts, nil
-	}
-
-	region := msession.Label.Broadcaster.Regions[0]
-	sort.SliceStable(filtered, func(i, j int) bool {
-		// Sort by the user's region first
-		return slices.Contains(filtered[i].Broadcaster.Regions, region)
-	})
-
-	return filtered, rtts, nil
 }
 
 // TODO FIXME This need to use allocateBroadcaster instad.
@@ -640,20 +524,49 @@ func (p *EvrPipeline) MatchCreate(ctx context.Context, session *sessionWS, msess
 		return MatchID{}, err
 	}
 
-	// Filter/sort the results
-	labels, _, err = p.MatchSort(ctx, session, msession, labels)
-	if err != nil {
-		return MatchID{}, fmt.Errorf("failed to filter matches: %v", err)
-	}
-
 	if len(labels) == 0 {
 		return MatchID{}, ErrMatchmakingNoAvailableServers
 	}
 
-	// Join the lowest rtt match
+	endpoints := make([]evr.Endpoint, 0, len(labels))
+	for _, label := range labels {
+		endpoints = append(endpoints, label.Broadcaster.Endpoint)
+	}
 
-	matchID = labels[0].ID
-	// Load the level.
+	// Ping the endpoints
+	latencies, err := p.GetLatencyMetricByEndpoint(ctx, msession, endpoints, true)
+	if err != nil {
+		return MatchID{}, err
+	}
+
+	labelLatencies := make([]LabelLatencies, 0, len(labels))
+	for _, label := range labels {
+		for _, latency := range latencies {
+			if label.Broadcaster.Endpoint.GetExternalIP() == latency.Endpoint.GetExternalIP() {
+				labelLatencies = append(labelLatencies, LabelLatencies{label, &latency})
+				break
+			}
+		}
+	}
+	region := ml.Broadcaster.Regions[0]
+	sort.SliceStable(labelLatencies, func(i, j int) bool {
+		// Sort by region, then by latency (zero'd RTTs at the end)
+		if labelLatencies[i].label.Broadcaster.Regions[0] == region && labelLatencies[j].label.Broadcaster.Regions[0] != region {
+			return true
+		}
+		if labelLatencies[i].label.Broadcaster.Regions[0] != region && labelLatencies[j].label.Broadcaster.Regions[0] == region {
+			return false
+		}
+		if labelLatencies[i].latency.RTT == 0 && labelLatencies[j].latency.RTT != 0 {
+			return false
+		}
+		if labelLatencies[i].latency.RTT != 0 && labelLatencies[j].latency.RTT == 0 {
+			return true
+		}
+		return LatencyCmp(labelLatencies[i].latency.RTT, labelLatencies[j].latency.RTT)
+	})
+
+	matchID = labelLatencies[0].label.ID
 
 	ml.SpawnedBy = session.UserID().String()
 
@@ -806,52 +719,55 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 }
 
 // PingEndpoints pings the endpoints and returns the latencies.
-func (p *EvrPipeline) PingEndpoints(ctx context.Context, session *sessionWS, msession *MatchmakingSession, endpoints []evr.Endpoint) ([]LatencyMetric, error) {
+func (p *EvrPipeline) GetLatencyMetricByEndpoint(ctx context.Context, msession *MatchmakingSession, endpoints []evr.Endpoint, update bool) ([]LatencyMetric, error) {
 	if len(endpoints) == 0 {
 		return nil, nil
 	}
 	logger := msession.Logger
 	p.matchmakingRegistry.UpdateBroadcasters(endpoints)
 
-	// Get the candidates for pinging
-	candidates := msession.GetPingCandidates(endpoints...)
-	if len(candidates) > 0 {
-		if err := p.sendPingRequest(logger, session, candidates); err != nil {
-			return nil, err
-		}
-
-		select {
-		case <-msession.Ctx.Done():
-			return nil, ErrMatchmakingCanceled
-		case <-time.After(5 * time.Second):
-			// Just ignore the ping results if the ping times out
-			logger.Warn("Ping request timed out")
-		case results := <-msession.PingResultsCh:
-			cache := msession.LatencyCache
-			// Look up the endpoint in the cache and update the latency
-
-			// Add the latencies to the cache
-			for _, response := range results {
-
-				broadcaster, ok := p.matchmakingRegistry.broadcasters.Load(response.EndpointID())
-				if !ok {
-					logger.Warn("Endpoint not found in cache", zap.String("endpoint", response.EndpointID()))
-					continue
-				}
-
-				r := LatencyMetric{
-					Endpoint:  broadcaster,
-					RTT:       response.RTT(),
-					Timestamp: time.Now(),
-				}
-
-				cache.Store(r.ID(), r)
+	if update {
+		// Get the candidates for pinging
+		candidates := msession.GetPingCandidates(endpoints...)
+		if len(candidates) > 0 {
+			if err := p.sendPingRequest(logger, msession.Session, candidates); err != nil {
+				return nil, err
 			}
 
+			select {
+			case <-msession.Ctx.Done():
+				return nil, ErrMatchmakingCanceled
+			case <-time.After(5 * time.Second):
+				// Just ignore the ping results if the ping times out
+				logger.Warn("Ping request timed out")
+			case results := <-msession.PingResultsCh:
+				cache := msession.LatencyCache
+				// Look up the endpoint in the cache and update the latency
+
+				// Add the latencies to the cache
+				for _, response := range results {
+
+					broadcaster, ok := p.matchmakingRegistry.broadcasters.Load(response.EndpointID())
+					if !ok {
+						logger.Warn("Endpoint not found in cache", zap.String("endpoint", response.EndpointID()))
+						continue
+					}
+
+					r := LatencyMetric{
+						Endpoint:  broadcaster,
+						RTT:       response.RTT(),
+						Timestamp: time.Now(),
+					}
+
+					cache.Store(r.ID(), r)
+				}
+
+			}
 		}
 	}
 
-	return p.getEndpointLatencies(session, endpoints), nil
+	results := p.matchmakingRegistry.GetLatencies(msession.UserId, endpoints)
+	return results, nil
 }
 
 // sendPingRequest sends a ping request to the given candidates.
@@ -866,20 +782,6 @@ func (p *EvrPipeline) sendPingRequest(logger *zap.Logger, session *sessionWS, ca
 
 	logger.Debug("Sent ping request", zap.Any("candidates", candidates))
 	return nil
-}
-
-// getEndpointLatencies returns the latencies for the given endpoints.
-func (p *EvrPipeline) getEndpointLatencies(session *sessionWS, endpoints []evr.Endpoint) []LatencyMetric {
-	endpointRTTs := p.matchmakingRegistry.GetLatencies(session.UserID(), endpoints)
-
-	results := make([]LatencyMetric, 0, len(endpoints))
-	for _, e := range endpoints {
-		if l, ok := endpointRTTs[e.ID()]; ok {
-			results = append(results, l)
-		}
-	}
-
-	return results
 }
 
 // checkSuspensionStatus checks if the user is suspended from the channel and returns the suspension status.

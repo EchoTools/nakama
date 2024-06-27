@@ -133,7 +133,7 @@ func (r *LeaderboardRegistry) Submission(ctx context.Context, ownerID, evrID, us
 	if err != nil {
 		r.logger.WithField("err", err).Error("Leaderboard record write error.")
 	}
-	r.logger.WithField("record", record).Debug("Leaderboard record write success.")
+	//r.logger.WithField("record", record).Debug("Leaderboard record write success.")
 
 	return record, err
 }
