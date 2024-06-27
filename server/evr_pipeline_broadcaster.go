@@ -195,13 +195,13 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 	}
 	if !alive {
 		// If the broadcaster is not available, send an error message to the user on discord
-		errorMessage := fmt.Sprintf("Broadcaster (Endpoint ID: %s, Server ID: %d) could not be reached. Error: %v", config.Endpoint.ID(), config.ServerID, err)
+		errorMessage := fmt.Sprintf("Broadcaster (Endpoint ID: %s, Server ID: %d) could not be reached. Error: %v", config.Endpoint.ExternalAddress(), config.ServerID, err)
 		go sendDiscordError(errors.New(errorMessage), discordId, logger, p.discordRegistry)
 		return errFailedRegistration(session, logger, errors.New(errorMessage), evr.BroadcasterRegistration_Failure)
 	}
 
 	p.broadcasterRegistrationBySession.Store(session.ID().String(), config)
-	p.matchmakingRegistry.broadcasters.Store(config.Endpoint.ID(), config.Endpoint)
+
 	// Create a new parking match
 	if err := p.newParkingMatch(logger, session, config); err != nil {
 		return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_Failure)

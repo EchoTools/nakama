@@ -313,8 +313,6 @@ type MatchmakingRegistry struct {
 
 	matchingBySession *MapOf[uuid.UUID, *MatchmakingSession]
 	cacheByUserId     *MapOf[uuid.UUID, *LatencyCache]
-	broadcasters      *MapOf[string, evr.Endpoint] // EndpointID -> Endpoint
-
 }
 
 func NewMatchmakingRegistry(logger *zap.Logger, matchRegistry MatchRegistry, matchmaker Matchmaker, metrics Metrics, db *sql.DB, nk runtime.NakamaModule, config Config, evrPipeline *EvrPipeline) *MatchmakingRegistry {
@@ -332,11 +330,9 @@ func NewMatchmakingRegistry(logger *zap.Logger, matchRegistry MatchRegistry, mat
 
 		matchingBySession: &MapOf[uuid.UUID, *MatchmakingSession]{},
 		cacheByUserId:     &MapOf[uuid.UUID, *LatencyCache]{},
-		broadcasters:      &MapOf[string, evr.Endpoint]{},
 	}
 	// Set the matchmaker's OnMatchedEntries callback
 	matchmaker.OnMatchedEntries(c.matchedEntriesFn)
-	go c.rebuildBroadcasters()
 
 	return c
 }
@@ -457,8 +453,8 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 
 	// Get a map of all broadcasters by their key
 	broadcastersByExtIP := make(map[string]evr.Endpoint, 100)
-	mr.broadcasters.Range(func(k string, v evr.Endpoint) bool {
-		broadcastersByExtIP[k] = v
+	mr.evrPipeline.broadcasterRegistrationBySession.Range(func(_ string, v *MatchBroadcaster) bool {
+		broadcastersByExtIP[v.Endpoint.GetExternalIP()] = v.Endpoint
 		return true
 	})
 
@@ -799,37 +795,6 @@ func (mr *MatchmakingRegistry) allocateBroadcaster(channels []uuid.UUID, config 
 	return matchID, nil
 }
 
-func (c *MatchmakingRegistry) rebuildBroadcasters() {
-	ticker := time.NewTicker(20 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-c.ctx.Done():
-			return
-		case <-ticker.C:
-			c.updateBroadcasters()
-		}
-	}
-}
-
-func (c *MatchmakingRegistry) updateBroadcasters() {
-	matches, err := c.listMatches(c.ctx, 1000, 1, MatchMaxSize, "")
-	if err != nil {
-		c.logger.Error("Error listing matches", zap.Error(err))
-	}
-	// Get the endpoints from the match labels
-	for _, match := range matches {
-		l := match.GetLabel().GetValue()
-		s := &EvrMatchState{}
-		if err := json.Unmarshal([]byte(l), s); err != nil {
-			c.logger.Error("Error unmarshalling match label", zap.Error(err))
-			continue
-		}
-		id := s.Broadcaster.Endpoint.GetExternalIP()
-		c.broadcasters.Store(id, s.Broadcaster.Endpoint)
-	}
-}
-
 func (c *MatchmakingRegistry) ListUnassignedLobbies(ctx context.Context, channels []uuid.UUID) ([]*EvrMatchState, error) {
 
 	qparts := make([]string, 0, 10)
@@ -952,13 +917,6 @@ func (m *MatchmakingSession) GetPingCandidates(endpoints ...evr.Endpoint) (candi
 func (r *MatchmakingRegistry) GetCache(userId uuid.UUID) *LatencyCache {
 	cache, _ := r.cacheByUserId.LoadOrStore(userId, &LatencyCache{})
 	return cache
-}
-
-// UpdateBroadcasters updates the broadcasters map
-func (r *MatchmakingRegistry) UpdateBroadcasters(endpoints []evr.Endpoint) {
-	for _, e := range endpoints {
-		r.broadcasters.Store(e.GetExternalIP(), e)
-	}
 }
 
 // listMatches returns a list of matches
