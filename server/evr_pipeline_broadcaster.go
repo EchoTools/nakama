@@ -65,7 +65,7 @@ func (p *EvrPipeline) broadcasterSessionEnded(ctx context.Context, logger *zap.L
 		select {
 		case <-session.Context().Done():
 			return
-		case <-time.After(3 * time.Second):
+		case <-time.After(10 * time.Second):
 		}
 
 		// Leave the old match
@@ -91,8 +91,6 @@ func (p *EvrPipeline) broadcasterSessionEnded(ctx context.Context, logger *zap.L
 		if !found {
 			logger.Error("broadcaster session not found")
 		}
-
-		<-time.After(5 * time.Second)
 
 		err := p.newParkingMatch(logger, session, config)
 		if err != nil {
