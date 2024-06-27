@@ -192,7 +192,7 @@ func (code PlatformCode) Abbrevation() string {
 	case XBX:
 		return "XBX"
 	case OVR_ORG:
-		return "OVR_ORG"
+		return "OVR-ORG"
 	case OVR:
 		return "OVR"
 	case BOT:
@@ -216,6 +216,8 @@ func platformCodeFromString(s string) (PlatformCode, bool) {
 	case "XBX":
 		return XBX, true
 	case "OVR_ORG":
+		return OVR_ORG, true
+	case "OVR-ORG":
 		return OVR_ORG, true
 	case "OVR":
 		return OVR, true

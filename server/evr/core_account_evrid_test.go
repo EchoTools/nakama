@@ -349,3 +349,83 @@ func TestEvrId_UnmarshalJSON(t *testing.T) {
 		})
 	}
 }
+
+func TestParseEvrId(t *testing.T) {
+	type args struct {
+		s string
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    *EvrId
+		wantErr bool
+	}{
+		{
+			name: "valid",
+			args: args{
+				s: "STM-1",
+			},
+			want: &EvrId{
+				PlatformCode: 1,
+				AccountId:    1,
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid PlatformCode",
+			args: args{
+				s: "UNK-1",
+			},
+			want: &EvrId{
+				PlatformCode: 0,
+				AccountId:    1,
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid AccountId",
+			args: args{
+				s: "STM-0",
+			},
+			want: &EvrId{
+				PlatformCode: 1,
+				AccountId:    0,
+			},
+			wantErr: false,
+		},
+		{
+			name: "OVR_ORG-3963667097037078",
+			args: args{
+				s: "OVR_ORG-3963667097037078",
+			},
+			want: &EvrId{
+				PlatformCode: 4,
+				AccountId:    3963667097037078,
+			},
+			wantErr: false,
+		},
+		{
+			name: "OVR-ORG-3963667097037078",
+			args: args{
+				s: "OVR-ORG-3963667097037078",
+			},
+			want: &EvrId{
+				PlatformCode: 4,
+				AccountId:    3963667097037078,
+			},
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseEvrId(tt.args.s)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ParseEvrId() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("ParseEvrId() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
