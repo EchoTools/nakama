@@ -63,22 +63,37 @@ var (
 )
 
 // The data used to generate the Device ID authentication string.
-type DeviceId struct {
-	AppId           uint64    // The application ID for the game
-	EvrId           evr.EvrId // The xplatform ID string
-	HmdSerialNumber string    // The HMD serial number
+type DeviceAuth struct {
+	AppID           uint64    // The application ID for the game
+	EvrID           evr.EvrId // The xplatform ID string
+	HMDSerialNumber string    // The HMD serial number
+	ClientAddr      string    // The client address
 }
 
 // Generate the string used for device authentication.
 // WARNING: If this is changed, then device "links" will be invalidated.
-func (d *DeviceId) Token() string {
-	return fmt.Sprintf("%d:%s:%s", d.AppId, d.EvrId.String(), d.HmdSerialNumber)
+func (d DeviceAuth) Token() string {
+	return strings.Join([]string{
+		strconv.FormatUint(d.AppID, 10),
+		d.EvrID.String(),
+		d.HMDSerialNumber,
+		d.ClientAddr,
+	}, ":")
 }
 
-// ParseDeviceId parses a device ID token into its components.
-func ParseDeviceId(token string) (*DeviceId, error) {
+func (d DeviceAuth) WildcardToken() string {
+	return strings.Join([]string{
+		strconv.FormatUint(d.AppID, 10),
+		d.EvrID.Token(),
+		d.HMDSerialNumber,
+		"*",
+	}, ":")
+}
+
+// ParseDeviceAuthToken parses a device ID token into its components.
+func ParseDeviceAuthToken(token string) (*DeviceAuth, error) {
 	const minTokenLength = 8
-	const expectedParts = 3
+	const expectedParts = 4
 
 	if token == "" {
 		return nil, errors.New("empty device ID token")
@@ -91,20 +106,27 @@ func ParseDeviceId(token string) (*DeviceId, error) {
 		return nil, fmt.Errorf("invalid device ID token: %s", token)
 	}
 
-	appId, err := strconv.ParseUint(parts[0], 10, 64)
+	appID, err := strconv.ParseUint(parts[0], 10, 64)
 	if err != nil {
 		return nil, fmt.Errorf("invalid app ID in device ID token: %s", token)
 	}
 
-	evrId, err := evr.ParseEvrId(parts[1])
+	evrID, err := evr.ParseEvrId(parts[1])
 	if err != nil {
 		return nil, fmt.Errorf("invalid xplatform ID in device ID token: %s", token)
 	}
+	hmdsn := parts[2]
+	if strings.Contains(":", hmdsn) {
+		return nil, fmt.Errorf("invalid HMD serial number in device ID token: %s", token)
+	}
 
-	return &DeviceId{
-		AppId:           appId,
-		EvrId:           *evrId,
-		HmdSerialNumber: parts[2],
+	clientAddr := parts[3]
+
+	return &DeviceAuth{
+		AppID:           appID,
+		EvrID:           *evrID,
+		HMDSerialNumber: hmdsn,
+		ClientAddr:      clientAddr,
 	}, nil
 }
 
@@ -123,13 +145,15 @@ type LinkTicket struct {
 
 // TODO Move this to the evrbackend runtime module
 // linkTicket generates a link ticket for the provided xplatformId and hmdSerialNumber.
-func (p *EvrPipeline) linkTicket(session *sessionWS, logger *zap.Logger, deviceId *DeviceId, loginData *evr.LoginProfile) (*LinkTicket, error) {
+func (p *EvrPipeline) linkTicket(session *sessionWS, logger *zap.Logger, deviceID *DeviceAuth, loginData *evr.LoginProfile) (*LinkTicket, error) {
 	ctx := session.Context()
 
 	// Check if a link ticket already exists for the provided xplatformId and hmdSerialNumber
-	objectIds, err := session.storageIndex.List(ctx, uuid.Nil, LinkTicketIndex, fmt.Sprintf("+value.evrid_token:%s", deviceId.EvrId.String()), 1)
+	// Escape dots
+
+	objectIds, err := session.storageIndex.List(ctx, uuid.Nil, LinkTicketIndex, fmt.Sprintf("+value.evrid_token:%s", deviceID.EvrID.Token()), 1)
 	if err != nil {
-		return nil, fmt.Errorf(fmt.Sprintf("error listing link tickets: `%q`  %v", deviceId.EvrId.String(), err))
+		return nil, fmt.Errorf("error listing link tickets: `%q`  %v", deviceID.Token(), err)
 	}
 	// Link ticket was found. Return the link ticket.
 	if objectIds != nil {
@@ -152,8 +176,8 @@ func (p *EvrPipeline) linkTicket(session *sessionWS, logger *zap.Logger, deviceI
 		// loop until we have a unique link code
 		linkTicket := &LinkTicket{
 			Code:            generateLinkCode(),
-			DeviceAuthToken: deviceId.Token(),
-			UserIDToken:     deviceId.EvrId.String(),
+			DeviceAuthToken: deviceID.Token(),
+			UserIDToken:     deviceID.EvrID.String(),
 			LoginRequest:    loginData,
 		}
 		linkTicketJson, err := json.Marshal(linkTicket)
@@ -265,7 +289,7 @@ func (p *EvrPipeline) evrStorageObjectDefault(session *sessionWS, collection str
 // and returns the device auth token from the link ticket.
 // If any error occurs during these operations, it logs the error and returns it.
 // Regardless of the outcome, it deletes the used link ticket from storage.
-func ExchangeLinkCode(ctx context.Context, nk runtime.NakamaModule, logger runtime.Logger, linkCode string) (string, error) {
+func ExchangeLinkCode(ctx context.Context, nk runtime.NakamaModule, logger runtime.Logger, linkCode string) (*DeviceAuth, error) {
 	// Normalize the link code to uppercase.
 	linkCode = strings.ToUpper(linkCode)
 
@@ -281,18 +305,18 @@ func ExchangeLinkCode(ctx context.Context, nk runtime.NakamaModule, logger runti
 	// Retrieve the link ticket from storage.
 	objects, err := nk.StorageRead(ctx, readReq)
 	if err != nil {
-		return "", runtime.NewError("failed to read link ticket from storage", StatusInternalError)
+		return nil, runtime.NewError("failed to read link ticket from storage", StatusInternalError)
 	}
 
 	// Check if the link ticket was found.
 	if len(objects) == 0 {
-		return "", runtime.NewError("link ticket not found", StatusNotFound)
+		return nil, runtime.NewError("link ticket not found", StatusNotFound)
 	}
 
 	// Parse the link ticket.
 	var linkTicket LinkTicket
 	if err := json.Unmarshal([]byte(objects[0].Value), &linkTicket); err != nil {
-		return "", runtime.NewError("failed to unmarshal link ticket", StatusInternalError)
+		return nil, runtime.NewError("failed to unmarshal link ticket", StatusInternalError)
 	}
 
 	// Delete the used link ticket from storage.
@@ -308,8 +332,11 @@ func ExchangeLinkCode(ctx context.Context, nk runtime.NakamaModule, logger runti
 			logger.WithField("error", err).WithField("linkTicket", linkCode).Error("Unable to delete link ticket")
 		}
 	}()
-
-	return linkTicket.DeviceAuthToken, nil
+	token, err := ParseDeviceAuthToken(linkTicket.DeviceAuthToken)
+	if err != nil {
+		return nil, runtime.NewError("failed to parse device auth token", StatusInternalError)
+	}
+	return token, nil
 }
 
 // verifyJWT parses and verifies a JWT token using the provided key function.

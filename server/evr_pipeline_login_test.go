@@ -21,21 +21,21 @@ func TestParseDeviceId(t *testing.T) {
 	tests := []struct {
 		name    string
 		args    args
-		want    *DeviceId
+		want    *DeviceAuth
 		wantErr bool
 	}{
 		{
 			"valid token",
 			args{
-				token: "1343218412343402:OVR_ORG-3961234097123078:N/A",
+				token: "1343218412343402:OVR_ORG-3961234097123078:N/A:127.0.0.1",
 			},
-			&DeviceId{
-				AppId: 1343218412343402,
-				EvrId: evr.EvrId{
+			&DeviceAuth{
+				AppID: 1343218412343402,
+				EvrID: evr.EvrId{
 					PlatformCode: 4,
 					AccountId:    3961234097123078,
 				},
-				HmdSerialNumber: "N/A",
+				HMDSerialNumber: "N/A",
 			},
 			false,
 		},
@@ -60,20 +60,20 @@ func TestParseDeviceId(t *testing.T) {
 			args{
 				token: "1343218412343402:OVR_ORG-3961234097123078:!@#!$##::@1203:\n!!!",
 			},
-			&DeviceId{
-				AppId: 1343218412343402,
-				EvrId: evr.EvrId{
+			&DeviceAuth{
+				AppID: 1343218412343402,
+				EvrID: evr.EvrId{
 					PlatformCode: 4,
 					AccountId:    3961234097123078,
 				},
-				HmdSerialNumber: "!@#!$##::@1203:\n!!!",
+				HMDSerialNumber: "!@#!$##::@1203:\n!!!",
 			},
 			false,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := ParseDeviceId(tt.args.token)
+			got, err := ParseDeviceAuthToken(tt.args.token)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParseDeviceId() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -103,7 +103,7 @@ func TestEvrPipeline_authenticateAccount(t *testing.T) {
 	type args struct {
 		ctx          context.Context
 		session      *sessionWS
-		deviceId     *DeviceId
+		deviceId     *DeviceAuth
 		discordId    string
 		userPassword string
 		payload      evr.LoginProfile
@@ -124,7 +124,7 @@ func TestEvrPipeline_authenticateAccount(t *testing.T) {
 			args{
 				ctx:          context.Background(),
 				session:      &sessionWS{},
-				deviceId:     &DeviceId{},
+				deviceId:     &DeviceAuth{},
 				discordId:    "1234567890",
 				userPassword: "",
 				payload:      evr.LoginProfile{},
@@ -141,7 +141,7 @@ func TestEvrPipeline_authenticateAccount(t *testing.T) {
 			args{
 				ctx:          context.Background(),
 				session:      &sessionWS{},
-				deviceId:     &DeviceId{},
+				deviceId:     &DeviceAuth{},
 				discordId:    "1234567890",
 				userPassword: "",
 				payload:      evr.LoginProfile{},

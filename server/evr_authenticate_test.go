@@ -7,6 +7,7 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
 type MockNakamaModule struct {
@@ -168,6 +169,88 @@ func Test_sanitizeDisplayName(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := sanitizeDisplayName(tt.displayName); got != tt.want {
 				t.Errorf("sanitizeDisplayName() = `%v`, want `%v`", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDeviceAuth_Token(t *testing.T) {
+	type fields struct {
+		AppID           uint64
+		EvrID           evr.EvrId
+		HMDSerialNumber string
+		ClientAddr      string
+	}
+	tests := []struct {
+		name   string
+		fields fields
+		want   string
+	}{
+		{
+			"valid",
+			fields{
+				AppID: 4321432143214321,
+				EvrID: evr.EvrId{
+					PlatformCode: 4,
+					AccountId:    1234123412341234,
+				},
+				HMDSerialNumber: "WMD123412341234",
+				ClientAddr:      "127.0.0.1",
+			},
+			"4321432143214321:OVR-ORG-1234123412341234:WMD123412341234:127.0.0.1",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := DeviceAuth{
+				AppID:           tt.fields.AppID,
+				EvrID:           tt.fields.EvrID,
+				HMDSerialNumber: tt.fields.HMDSerialNumber,
+				ClientAddr:      tt.fields.ClientAddr,
+			}
+			if got := d.Token(); got != tt.want {
+				t.Errorf("DeviceAuth.Token() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDeviceAuth_WildcardToken(t *testing.T) {
+	type fields struct {
+		AppID           uint64
+		EvrID           evr.EvrId
+		HMDSerialNumber string
+		ClientAddr      string
+	}
+	tests := []struct {
+		name   string
+		fields fields
+		want   string
+	}{
+		{
+			"valid",
+			fields{
+				AppID: 4321432143214321,
+				EvrID: evr.EvrId{
+					PlatformCode: 4,
+					AccountId:    1234123412341234,
+				},
+				HMDSerialNumber: "WMD123412341234",
+				ClientAddr:      "127.0.0.1",
+			},
+			"4321432143214321:OVR-ORG-1234123412341234:WMD123412341234:*",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := DeviceAuth{
+				AppID:           tt.fields.AppID,
+				EvrID:           tt.fields.EvrID,
+				HMDSerialNumber: tt.fields.HMDSerialNumber,
+				ClientAddr:      tt.fields.ClientAddr,
+			}
+			if got := d.WildcardToken(); got != tt.want {
+				t.Errorf("DeviceAuth.Token() = %v, want %v", got, tt.want)
 			}
 		})
 	}

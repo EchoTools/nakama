@@ -167,6 +167,12 @@ var (
 					Description: "Your four character link code.",
 					Required:    true,
 				},
+				{
+					Type:        discordgo.ApplicationCommandOptionBoolean,
+					Name:        "disable-ip-verification",
+					Description: "Disable IP verification",
+					Required:    false,
+				},
 			},
 		},
 		{
@@ -1005,6 +1011,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					},
 				})
 			}
+			disableIPVerification := false
+			if len(options) > 1 {
+				disableIPVerification = options[1].BoolValue()
+			}
 
 			discordId := ""
 			switch {
@@ -1036,7 +1046,12 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				if err != nil {
 					return err
 				}
-				return nk.LinkDevice(ctx, userId.String(), token)
+
+				if disableIPVerification {
+					token.ClientAddr = "*"
+				}
+
+				return nk.LinkDevice(ctx, userId.String(), token.Token())
 			}(); err != nil {
 				logger.WithFields(map[string]interface{}{
 					"discord_id": discordId,
