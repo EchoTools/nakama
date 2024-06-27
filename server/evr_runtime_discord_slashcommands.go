@@ -1038,7 +1038,11 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 				return nk.LinkDevice(ctx, userId.String(), token)
 			}(); err != nil {
-				logger.Error("Failed to link headset to %s with deviceID `%s`", discordId, linkCode, err)
+				logger.WithFields(map[string]interface{}{
+					"discord_id": discordId,
+					"link_code":  linkCode,
+					"error":      err,
+				}).Error("Failed to link headset")
 				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 					Type: discordgo.InteractionResponseChannelMessageWithSource,
 					Data: &discordgo.InteractionResponseData{
@@ -1431,7 +1435,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 				// Check the vlaue against vrmlIDPattern
 				if !vrmlIDPattern.MatchString(vrmlUsername) {
-					errFn(fmt.Errorf("Invalid VRML username: `%s`", vrmlUsername))
+					errFn(fmt.Errorf("invalid VRML username: `%s`", vrmlUsername))
 					return
 				}
 
