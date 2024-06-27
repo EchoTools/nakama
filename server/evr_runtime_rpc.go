@@ -422,7 +422,7 @@ func LinkDeviceRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk ru
 	}
 
 	// Link the device to the user account
-	if err := nk.LinkDevice(ctx, uid, authToken); err != nil {
+	if err := nk.LinkDevice(ctx, uid, authToken.Token()); err != nil {
 		logger.WithField("err", err).Error("Unable to link device")
 		return "", runtime.NewError("Unable to link device", StatusInternalError)
 	}
@@ -474,7 +474,7 @@ func LinkUserIdDeviceRpc(ctx context.Context, logger runtime.Logger, db *sql.DB,
 	}
 
 	// Link the device to the user account
-	if err := nk.LinkDevice(ctx, userId, authToken); err != nil {
+	if err := nk.LinkDevice(ctx, userId, authToken.Token()); err != nil {
 		logger.WithField("err", err).Error("Unable to link device")
 		return "", runtime.NewError("Unable to link device", StatusInternalError)
 	}

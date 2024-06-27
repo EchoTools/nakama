@@ -90,10 +90,11 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 	payload := request.LoginData
 
 	// Construct the device auth token from the login payload
-	deviceId := &DeviceId{
-		AppId:           payload.AppId,
-		EvrId:           request.EvrId,
-		HmdSerialNumber: payload.HmdSerialNumber,
+	deviceId := &DeviceAuth{
+		AppID:           payload.AppId,
+		EvrID:           request.EvrId,
+		HMDSerialNumber: payload.HmdSerialNumber,
+		ClientAddr:      session.clientIP,
 	}
 
 	// Providing a discord ID and password avoids the need to link the device to the account.
@@ -118,7 +119,7 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 }
 
 // processLogin handles the authentication of the login connection.
-func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, session *sessionWS, evrId evr.EvrId, deviceId *DeviceId, discordId string, userPassword string, loginProfile evr.LoginProfile) (settings evr.EchoClientSettings, err error) {
+func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, session *sessionWS, evrId evr.EvrId, deviceId *DeviceAuth, discordId string, userPassword string, loginProfile evr.LoginProfile) (settings evr.EchoClientSettings, err error) {
 	// Authenticate the account.
 	account, err := p.authenticateAccount(ctx, logger, session, deviceId, discordId, userPassword, loginProfile)
 	if err != nil {
@@ -267,7 +268,7 @@ func (p *EvrPipeline) checkEvrIDOwner(ctx context.Context, evrId evr.EvrId) ([]E
 
 	return history, nil
 }
-func (p *EvrPipeline) authenticateAccount(ctx context.Context, logger *zap.Logger, session *sessionWS, deviceId *DeviceId, discordId string, userPassword string, payload evr.LoginProfile) (*api.Account, error) {
+func (p *EvrPipeline) authenticateAccount(ctx context.Context, logger *zap.Logger, session *sessionWS, deviceId *DeviceAuth, discordId string, userPassword string, payload evr.LoginProfile) (*api.Account, error) {
 	var err error
 	var userId string
 	var account *api.Account
@@ -299,6 +300,10 @@ func (p *EvrPipeline) authenticateAccount(ctx context.Context, logger *zap.Logge
 
 	// Device Authentication
 	userId, _, _, err = AuthenticateDevice(ctx, session.logger, session.pipeline.db, deviceId.Token(), "", false)
+	if err != nil && status.Code(err) == codes.NotFound {
+		// Try to authenticate the device with a wildcard address.
+		userId, _, _, err = AuthenticateDevice(ctx, session.logger, session.pipeline.db, deviceId.WildcardToken(), "", false)
+	}
 	if err != nil && status.Code(err) != codes.NotFound {
 		// Possibly banned or other error.
 		return account, err
