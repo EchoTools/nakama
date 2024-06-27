@@ -247,8 +247,8 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 	logger := msession.Logger
 	// Ping endpoints
 	endpoints := make([]evr.Endpoint, 0, 100)
-	p.matchmakingRegistry.broadcasters.Range(func(key string, value evr.Endpoint) bool {
-		endpoints = append(endpoints, value)
+	p.broadcasterRegistrationBySession.Range(func(_ string, b *MatchBroadcaster) bool {
+		endpoints = append(endpoints, b.Endpoint)
 		return true
 	})
 
@@ -724,7 +724,6 @@ func (p *EvrPipeline) GetLatencyMetricByEndpoint(ctx context.Context, msession *
 		return nil, nil
 	}
 	logger := msession.Logger
-	p.matchmakingRegistry.UpdateBroadcasters(endpoints)
 
 	if update {
 		// Get the candidates for pinging
@@ -744,23 +743,20 @@ func (p *EvrPipeline) GetLatencyMetricByEndpoint(ctx context.Context, msession *
 				cache := msession.LatencyCache
 				// Look up the endpoint in the cache and update the latency
 
-				// Add the latencies to the cache
-				for _, response := range results {
+				p.broadcasterRegistrationBySession.Range(func(_ string, b *MatchBroadcaster) bool {
+					for _, response := range results {
+						if b.Endpoint.ExternalIP.Equal(response.ExternalIP) && b.Endpoint.InternalIP.Equal(response.InternalIP) {
+							r := LatencyMetric{
+								Endpoint:  b.Endpoint,
+								RTT:       response.RTT(),
+								Timestamp: time.Now(),
+							}
 
-					broadcaster, ok := p.matchmakingRegistry.broadcasters.Load(response.EndpointID())
-					if !ok {
-						logger.Warn("Endpoint not found in cache", zap.String("endpoint", response.EndpointID()))
-						continue
+							cache.Store(b.Endpoint.GetExternalIP(), r)
+						}
 					}
-
-					r := LatencyMetric{
-						Endpoint:  broadcaster,
-						RTT:       response.RTT(),
-						Timestamp: time.Now(),
-					}
-
-					cache.Store(r.ID(), r)
-				}
+					return true
+				})
 
 			}
 		}
