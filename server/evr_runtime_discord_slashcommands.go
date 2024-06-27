@@ -2840,8 +2840,21 @@ func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runt
 	for _, state := range tracked {
 		var status string
 
-		if state.Size == 0 {
+		if state.LobbyType == UnassignedLobby {
 			status = "Unassigned"
+		} else if state.Size == 0 {
+			if !state.Started {
+				spawnedBy := "unknown"
+				if state.SpawnedBy != "" {
+					spawnedBy, err = d.discordRegistry.GetDiscordIdByUserId(ctx, uuid.FromStringOrNil(state.SpawnedBy))
+					if err != nil {
+						logger.Error("Failed to get discord ID", zap.Error(err))
+					}
+				}
+				status = fmt.Sprintf("Reserved by <%s> <t:%d:R>", spawnedBy, state.StartTime.UTC().Unix())
+			} else {
+				status = "Empty"
+			}
 		} else {
 			players := make([]string, 0, state.Size)
 			for _, player := range state.Players {
