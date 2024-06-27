@@ -910,9 +910,8 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 				}
 
 				// Update the profile
-				s, ok := serverProfile.Statistics[groupName]
+				_, ok := serverProfile.Statistics[groupName]
 				if !ok {
-					s = make(map[string]evr.MatchStatistic)
 					serverProfile.Statistics[groupName] = make(map[string]evr.MatchStatistic)
 				}
 				serverProfile.Statistics[groupName][statName] = matchStat
@@ -927,6 +926,32 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 	p.profileRegistry.Save(userID)
 
 	return nil
+}
+
+func updateStats(profile *GameProfileData, stats evr.StatsUpdate) {
+	serverProfile := profile.GetServer()
+
+	for groupName, stats := range stats.StatsGroups {
+
+		for statName, stat := range stats {
+
+			matchStat := evr.MatchStatistic{
+				Operand: stat.Operand,
+			}
+			if stat.Count != nil {
+				matchStat.Count = stat.Count
+				matchStat.Value = stat.Value
+			}
+
+			_, ok := serverProfile.Statistics[groupName]
+			if !ok {
+				serverProfile.Statistics[groupName] = make(map[string]evr.MatchStatistic)
+			}
+			serverProfile.Statistics[groupName][statName] = matchStat
+		}
+	}
+
+	profile.SetServer(serverProfile)
 }
 
 func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
