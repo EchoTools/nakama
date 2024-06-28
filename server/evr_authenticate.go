@@ -124,7 +124,7 @@ func ParseDeviceAuthToken(token string) (*DeviceAuth, error) {
 		return nil, fmt.Errorf("invalid xplatform ID in device ID token: %s", token)
 	}
 	hmdsn := parts[2]
-	if strings.Contains(":", hmdsn) {
+	if strings.Contains(hmdsn, ":") {
 		return nil, fmt.Errorf("invalid HMD serial number in device ID token: %s", token)
 	}
 
