@@ -325,7 +325,7 @@ func (p *EvrPipeline) authenticateAccount(ctx context.Context, logger *zap.Logge
 				logger.Warn(fmt.Errorf("failed to create user DM channel: %w", err).Error())
 				return
 			}
-			_, err = bot.ChannelMessageSend(channel.ID, "Your EchoVRCE authentication has been updated. You will only get this message once. If you did not login, please contact EchoVRCE staff (e.g. <@695081603180789771>).")
+			_, err = bot.ChannelMessageSend(channel.ID, "Your EchoVRCE authentication has been updated. If it was not you that opened EchoVR when you received this message, please contact EchoVRCE staff (e.g. <@695081603180789771>). Note: This is a one time message.")
 			if err != nil {
 				logger.Warn(fmt.Errorf("failed to send message: %w", err).Error())
 			}
