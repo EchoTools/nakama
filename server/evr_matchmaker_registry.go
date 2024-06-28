@@ -327,6 +327,7 @@ func NewMatchmakingRegistry(logger *zap.Logger, matchRegistry MatchRegistry, mat
 		matchRegistry: matchRegistry,
 		metrics:       metrics,
 		config:        config,
+		evrPipeline:   evrPipeline,
 
 		matchingBySession: &MapOf[uuid.UUID, *MatchmakingSession]{},
 		cacheByUserId:     &MapOf[uuid.UUID, *LatencyCache]{},
@@ -849,15 +850,17 @@ func (m *MatchmakingSession) GetPingCandidates(endpoints ...evr.Endpoint) (candi
 	}
 	endpoints = endpoints[:]
 
-	// Unique the endpoints
+	uniqued := make([]evr.Endpoint, 0, len(endpoints))
 	seen := make(map[string]struct{}, len(endpoints))
-	for i, e := range endpoints {
+	for _, e := range endpoints {
 		id := e.GetExternalIP()
 		if _, ok := seen[id]; ok {
-			endpoints = append(endpoints[:i], endpoints[i+1:]...)
+			continue
 		}
 		seen[id] = struct{}{}
+		uniqued = append(uniqued, e)
 	}
+	endpoints = uniqued
 
 	// Retrieve the user's cache and lock it for use
 	cache := m.LatencyCache
