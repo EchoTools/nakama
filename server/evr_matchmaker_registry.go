@@ -353,13 +353,13 @@ func (MatchmakingSettings) GetStorageID() StorageID {
 	}
 }
 
-func (mr *MatchmakingRegistry) LoadMatchmakingSettings(ctx context.Context, logger *zap.Logger, userID string) (settings MatchmakingSettings, err error) {
-	err = LoadFromStorage(ctx, mr.nk, userID, &settings, true)
+func LoadMatchmakingSettings(ctx context.Context, nk runtime.NakamaModule, userID string) (settings MatchmakingSettings, err error) {
+	err = LoadFromStorage(ctx, nk, userID, &settings, true)
 	return
 }
 
-func (mr *MatchmakingRegistry) StoreMatchmakingSettings(ctx context.Context, logger *zap.Logger, config MatchmakingSettings, userID string) error {
-	return StoreToStorage(ctx, mr.nk, userID, config)
+func StoreMatchmakingSettings(ctx context.Context, nk runtime.NakamaModule, userID string, settings MatchmakingSettings) error {
+	return StoreToStorage(ctx, nk, userID, settings)
 }
 
 func ipToKey(ip net.IP) string {
@@ -373,7 +373,7 @@ func keyToIP(key string) net.IP {
 
 func (mr *MatchmakingRegistry) matchedEntriesFn(entries [][]*MatchmakerEntry) {
 	// Get the matchmaking config from the storage
-	config, err := mr.LoadMatchmakingSettings(mr.ctx, mr.logger, SystemUserID)
+	config, err := LoadMatchmakingSettings(mr.ctx, mr.nk, SystemUserID)
 	if err != nil {
 		mr.logger.Error("Failed to load matchmaking config", zap.Error(err))
 		return

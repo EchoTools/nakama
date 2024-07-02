@@ -471,7 +471,7 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 	p.metrics.CustomCounter("match_find_active_count", msession.metricsTags(), 1)
 	// Load the user's matchmaking config
 
-	config, err := p.matchmakingRegistry.LoadMatchmakingSettings(msession.Ctx, session.logger, session.userID.String())
+	config, err := LoadMatchmakingSettings(msession.Ctx, p.runtimeModule, session.userID.String())
 	if err != nil {
 		logger.Error("Failed to load matchmaking config", zap.Error(err))
 	}
@@ -483,7 +483,7 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 	}
 
 	config.NextMatchID = MatchID{}
-	err = p.matchmakingRegistry.StoreMatchmakingSettings(msession.Ctx, session.logger, config, session.userID.String())
+	err = StoreMatchmakingSettings(msession.Ctx, p.runtimeModule, session.userID.String(), config)
 	if err != nil {
 		logger.Error("Failed to save matchmaking config", zap.Error(err))
 	}
