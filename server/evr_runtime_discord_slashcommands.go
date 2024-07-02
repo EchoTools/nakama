@@ -2495,11 +2495,17 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		{Name: "Guild Memberships", Value: strings.Join(lo.Map(whoami.GuildGroupMemberships, func(m GuildGroupMembership, index int) string {
 			s := m.GuildGroup.Name()
 			roles := make([]string, 0)
+			if m.isMember {
+				roles = append(roles, "Member")
+			}
 			if m.isModerator {
 				roles = append(roles, "Moderator")
 			}
 			if m.isServerHost {
 				roles = append(roles, "Server Host")
+			}
+			if m.canAllocate {
+				roles = append(roles, "Allocator")
 			}
 			if len(roles) > 0 {
 				s += fmt.Sprintf(" (%s)", strings.Join(roles, ", "))
