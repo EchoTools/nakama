@@ -1105,3 +1105,72 @@ func AccountLookupRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 
 	return string(jsonResponse), nil
 }
+
+type SetNextMatchRPCRequestPayload struct {
+	UserID  string  `json:"user_id"`
+	MatchID MatchID `json:"match_id"`
+}
+
+type SetNextMatchRPCResponsePayload struct {
+	UserID  string        `json:"user_id"`
+	MatchID MatchID       `json:"match_id"`
+	Label   EvrMatchState `json:"label"`
+}
+
+func (r *SetNextMatchRPCResponsePayload) String() string {
+	data, err := json.MarshalIndent(r, "", "  ")
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+func SetNextMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	request := &SetNextMatchRPCRequestPayload{}
+	err := json.Unmarshal([]byte(payload), request)
+	if err != nil {
+		return "", runtime.NewError(fmt.Sprintf("Error unmarshalling payload: %s", err.Error()), StatusInvalidArgument)
+	}
+
+	matchID := request.MatchID
+	userID := request.UserID
+
+	response := &SetNextMatchRPCResponsePayload{
+		UserID:  userID,
+		MatchID: matchID,
+	}
+	settings, err := LoadMatchmakingSettings(ctx, nk, userID)
+	if err != nil {
+		return "", runtime.NewError(fmt.Sprintf("Error loading matchmaking settings: %s", err.Error()), StatusInternalError)
+	}
+
+	if !matchID.IsValid() {
+		return "", runtime.NewError(fmt.Sprintf("Invalid MatchID: %s", matchID), StatusInvalidArgument)
+	}
+
+	if matchID.IsNil() {
+		// Delete the next match
+		settings.NextMatchID = matchID
+		response.MatchID = matchID
+
+	} else {
+
+		match, err := nk.MatchGet(ctx, matchID.String())
+		if err != nil || match == nil {
+			return "", runtime.NewError(fmt.Sprintf("Error getting match: %s", err.Error()), StatusInternalError)
+		}
+
+		if err = json.Unmarshal([]byte(match.GetLabel().Value), &response.Label); err != nil {
+			return "", runtime.NewError(fmt.Sprintf("Error unmarshalling label: %s", err.Error()), StatusInternalError)
+		}
+
+		settings.NextMatchID = matchID
+	}
+
+	// Save the settings
+	if err = StoreMatchmakingSettings(ctx, nk, userID, settings); err != nil {
+		return "", runtime.NewError(fmt.Sprintf("Error saving matchmaking settings: %s", err.Error()), StatusInternalError)
+	}
+
+	return response.String(), nil
+}

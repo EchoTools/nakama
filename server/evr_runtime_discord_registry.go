@@ -152,13 +152,23 @@ func (r *LocalDiscordRegistry) PopulateCache() (cnt int, err error) {
 			}
 
 			if metadata.GuildID != "" {
-				r.Store(metadata.GuildID, group.Id)
-				r.Store(group.Id, metadata.GuildID)
 				guild, err := r.GetGuild(r.ctx, metadata.GuildID)
 				if err != nil {
-					r.logger.Warn(fmt.Sprintf("Error getting guild %s: %s", metadata.GuildID, err))
+					if code := discordError(err); code == discordgo.ErrCodeUnknownGuild {
+						r.logger.Warn(fmt.Sprintf("Bot is no longer member of guild `%s`. removing.", group.Name))
+						err := r.nk.GroupDelete(ctx, group.Id)
+						if err != nil {
+							r.logger.Error(fmt.Sprintf("Error deleting group %s: %s", group.Id, err))
+						}
+						r.ClearCache(metadata.GuildID)
+						r.ClearCache(group.Id)
+					} else {
+						r.logger.Error(fmt.Sprintf("Error getting guild `%s`: %s", metadata.GuildID, err))
+					}
 					continue
 				}
+				r.Store(metadata.GuildID, group.Id)
+				r.Store(group.Id, metadata.GuildID)
 				r.bot.State.GuildAdd(guild)
 				cnt++
 			}
@@ -1072,4 +1082,11 @@ func (d *LocalDiscordRegistry) ProcessRequest(ctx context.Context, session *sess
 		}
 	}
 	return nil
+}
+
+func discordError(err error) int {
+	if restError, _ := err.(*discordgo.RESTError); errors.As(err, &restError) && restError.Message != nil {
+		return restError.Message.Code
+	}
+	return -1
 }
