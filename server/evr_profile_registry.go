@@ -40,6 +40,98 @@ type GameProfileData struct {
 
 }
 
+type AccountProfile struct {
+	account  *api.Account
+	metadata *AccountUserMetadata
+	evrID    evr.EvrId
+}
+
+func GetEVRAccount(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, userID uuid.UUID, evrID *evr.EvrId) (*AccountProfile, error) {
+	account, err := nk.AccountGetId(ctx, userID.String())
+	if err != nil || account == nil {
+		return nil, fmt.Errorf("failed to get account: %w", err)
+	}
+
+	if evrID == nil {
+		// Get the Latest EVR-ID from the storage objects
+		records, err := GetEVRRecords(ctx, logger, nk, account.GetUser().GetId())
+		if err != nil {
+			return nil, fmt.Errorf("failed to get evr records: %w", err)
+		}
+		if len(records) == 0 {
+			return nil, fmt.Errorf("no evr records found")
+		}
+		// Get the latest record
+		var latest EVRLoginRecord
+		for _, record := range records {
+			if record.CreateTime.After(latest.CreateTime) {
+				latest = record
+			}
+		}
+		if latest.EvrID == evr.EvrIdNil {
+			return nil, fmt.Errorf("no evr id found")
+		}
+		evrID = &latest.EvrID
+	}
+
+	return NewAccountProfile(ctx, account, *evrID), nil
+
+}
+func NewAccountProfile(ctx context.Context, account *api.Account, evrID evr.EvrId) *AccountProfile {
+	metadata := &AccountUserMetadata{}
+	if err := json.Unmarshal([]byte(account.User.GetMetadata()), metadata); err != nil {
+		metadata = &AccountUserMetadata{}
+	}
+
+	return &AccountProfile{
+		account:  account,
+		metadata: metadata,
+	}
+}
+
+func (p *AccountProfile) GetAccount() *api.Account {
+	return p.account
+}
+
+func (p *AccountProfile) GetCreateTime() time.Time {
+	return p.account.GetUser().GetCreateTime().AsTime()
+}
+
+func (p *AccountProfile) GetDisplayName() string {
+	if p.metadata.DisplayNameOverride != "" {
+		return p.metadata.DisplayNameOverride
+	}
+	return p.account.User.GetDisplayName()
+}
+
+func (p *AccountProfile) GetEvrID() evr.EvrId {
+	return p.evrID
+}
+
+func (p *AccountProfile) GetCosmeticLoadout() evr.CosmeticLoadout {
+	return p.metadata.Cosmetics.Loadout
+}
+
+func (p *AccountProfile) GetJerseyNumber() int64 {
+	return p.metadata.Cosmetics.JerseyNumber
+}
+
+func (p *AccountProfile) GetServerProfile() evr.ServerProfile {
+	return evr.ServerProfile{
+		SchemaVersion: 4,
+		CreateTime:    p.GetCreateTime().UTC().Unix(),
+		DisplayName:   p.GetDisplayName(),
+		EquippedCosmetics: evr.EquippedCosmetics{
+			Number: p.GetJerseyNumber(),
+			Instances: evr.CosmeticInstances{
+				Unified: evr.UnifiedCosmeticInstance{
+					Slots: p.GetCosmeticLoadout(),
+				},
+			},
+		},
+	}
+}
+
 func NewGameProfile(login evr.LoginProfile, client evr.ClientProfile, server evr.ServerProfile) GameProfileData {
 	return GameProfileData{
 		Login:  login,
