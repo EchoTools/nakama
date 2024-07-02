@@ -2385,21 +2385,15 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		return err
 	}
 
-	evrIDs, err := GetEvrRecords(ctx, logger, nk, userID.String())
+	evrIDRecords, err := GetEVRRecords(ctx, logger, nk, userID.String())
 	if err != nil {
 		return err
 	}
 
-	whoami.EVRIDLogins = make(map[string]time.Time, len(evrIDs))
+	whoami.EVRIDLogins = make(map[string]time.Time, len(evrIDRecords))
 
-	for _, evrUserId := range evrIDs {
-
-		loginData := &evr.LoginProfile{}
-		if err := json.Unmarshal([]byte(evrUserId.Value), loginData); err != nil {
-			logger.WithField("err", err).Error("Failed to unmarshal login data.")
-			continue
-		}
-		whoami.EVRIDLogins[evrUserId.GetKey()] = evrUserId.GetUpdateTime().AsTime().UTC()
+	for evrID, record := range evrIDRecords {
+		whoami.EVRIDLogins[evrID.String()] = record.UpdateTime.UTC()
 	}
 
 	// Get the past displayNames
@@ -2496,16 +2490,16 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 			s := m.GuildGroup.Name()
 			roles := make([]string, 0)
 			if m.isMember {
-				roles = append(roles, "Member")
+				roles = append(roles, "member")
 			}
 			if m.isModerator {
-				roles = append(roles, "Moderator")
+				roles = append(roles, "moderator")
 			}
 			if m.isServerHost {
-				roles = append(roles, "Server Host")
+				roles = append(roles, "server-host")
 			}
 			if m.canAllocate {
-				roles = append(roles, "Allocator")
+				roles = append(roles, "allocator")
 			}
 			if len(roles) > 0 {
 				s += fmt.Sprintf(" (%s)", strings.Join(roles, ", "))
