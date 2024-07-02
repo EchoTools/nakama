@@ -593,8 +593,10 @@ type GroupMetadata struct {
 	MemberRole        string                 `json:"member_role"`         // The role that has access to create lobbies/matches and join social lobbies
 	ModeratorRole     string                 `json:"moderator_role"`      // The rules that have access to moderation tools
 	ServerHostRole    string                 `json:"serverhost_role"`     // The rules that have access to serverdb
+	AllocatorRole     string                 `json:"allocator_role"`      // The rules that have access to reserve servers
 	SuspensionRole    string                 `json:"suspension_role"`     // The roles that have users suspended
 	ServerHostUserIDs []string               `json:"serverhost_user_ids"` // The broadcaster hosts
+	AllocatorUserIDs  []string               `json:"allocator_user_ids"`  // The allocator hosts
 	DebugChannel      string                 `json:"debug_channel_id"`    // The debug channel
 	Unhandled         map[string]interface{} `json:"-"`
 }

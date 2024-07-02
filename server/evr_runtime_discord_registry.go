@@ -57,7 +57,7 @@ type DiscordRegistry interface {
 	GetGuildMember(ctx context.Context, guildId, memberId string) (*discordgo.Member, error)
 	SynchronizeGroup(ctx context.Context, guild *discordgo.Guild) error
 	GetGuild(ctx context.Context, guildId string) (*discordgo.Guild, error)
-	// GetGuildGroupMemberships looks up the guild groups by the user ID
+	// GetGuildGroupMemberships looks up the guild groups by the user ID (and optionally by group IDs)
 	GetGuildGroupMemberships(ctx context.Context, userId uuid.UUID, groupIDs []uuid.UUID) ([]GuildGroupMembership, error)
 	// GetUser looks up the Discord user by the user ID. Potentially using the state cache.
 	GetUser(ctx context.Context, discordId string) (*discordgo.User, error)
@@ -387,6 +387,9 @@ func (g *GuildGroup) ServerHostUserIDs() []string {
 	return g.Metadata.ServerHostUserIDs
 }
 
+func (g *GuildGroup) AllocatorUserIDs() []string {
+	return g.Metadata.AllocatorUserIDs
+}
 func NewGuildGroup(group *api.Group) *GuildGroup {
 
 	md := &GroupMetadata{}
@@ -405,6 +408,7 @@ type GuildGroupMembership struct {
 	isMember     bool
 	isModerator  bool // Admin
 	isServerHost bool // Broadcaster Host
+	canAllocate  bool // Can allocate servers with slash command
 }
 
 func NewGuildGroupMembership(group *api.Group, userID uuid.UUID, state api.UserGroupList_UserGroup_State) GuildGroupMembership {
@@ -415,6 +419,7 @@ func NewGuildGroupMembership(group *api.Group, userID uuid.UUID, state api.UserG
 		isMember:     state <= api.UserGroupList_UserGroup_MEMBER,
 		isModerator:  state <= api.UserGroupList_UserGroup_ADMIN,
 		isServerHost: slices.Contains(gg.ServerHostUserIDs(), userID.String()),
+		canAllocate:  slices.Contains(gg.AllocatorUserIDs(), userID.String()),
 	}
 }
 

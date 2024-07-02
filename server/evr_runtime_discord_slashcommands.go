@@ -314,6 +314,12 @@ var (
 				},
 				{
 					Type:        discordgo.ApplicationCommandOptionRole,
+					Name:        "allocator",
+					Description: "Allowed to reserve game servers.",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionRole,
 					Name:        "suspension",
 					Description: "Disallowed from joining any guild matches.",
 					Required:    true,
@@ -344,12 +350,16 @@ var (
 							Name:  "Echo Combat Private",
 							Value: "echo_combat_private",
 						},
+						{
+							Name:  "Social Private",
+							Value: "social_2.0_private",
+						},
 					},
 				},
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
 					Name:        "level",
-					Description: "Level to allocate the session in",
+					Description: "Level for the the session",
 					Required:    false,
 					Choices: func() []*discordgo.ApplicationCommandOptionChoice {
 						choices := make([]*discordgo.ApplicationCommandOptionChoice, 0)
@@ -1881,6 +1891,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					metadata.SuspensionRole = roleID
 				case "member":
 					metadata.MemberRole = roleID
+				case "allocator":
+					metadata.AllocatorRole = roleID
 				}
 			}
 
@@ -2745,8 +2757,21 @@ func (d *DiscordAppBot) handlePrepareMatch(ctx context.Context, logger runtime.L
 	if region.IsNil() {
 		region = evr.ToSymbol("default")
 	}
+	// Get a list of the groups that this user has moderator access to
+	memberships, err := d.discordRegistry.GetGuildGroupMemberships(ctx, userID, nil)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get guild group memberships: %v", err)
+	}
 
-	query := fmt.Sprintf("+label.lobby_type:unassigned +label.broadcaster.group_ids:%s +label.broadcaster.regions:%s", groupID, region.Token().String())
+	groupIDs := make([]string, 0, len(memberships))
+	for _, membership := range memberships {
+		if !membership.canAllocate {
+			continue
+		}
+		groupIDs = append(groupIDs, membership.GuildGroup.ID().String())
+	}
+
+	query := fmt.Sprintf("+label.lobby_type:unassigned label.broadcaster.group_ids:/(%s)/^10 +label.broadcaster.group_ids:/(%s)/ +label.broadcaster.regions:%s", groupID, strings.Join(groupIDs, "|"), region.Token().String())
 	matches, err := d.nk.MatchList(ctx, 100, true, "", &minSize, &maxSize, query)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to list matches: %v", err)
