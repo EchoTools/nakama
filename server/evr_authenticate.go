@@ -746,6 +746,8 @@ func SetDisplayNameByChannelBySession(ctx context.Context, nk runtime.NakamaModu
 
 	options = append(options, discordUser.Username)
 	options = append(options, discordUser.GlobalName)
+	options = append(options, displayName)
+
 	gid := uuid.FromStringOrNil(groupID)
 	// Get the guild
 	if uuid.FromStringOrNil(groupID) != uuid.Nil {
