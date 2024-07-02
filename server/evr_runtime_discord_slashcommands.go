@@ -857,6 +857,7 @@ func (d *DiscordAppBot) InitializeDiscordBot() error {
 		if err := d.RegisterSlashCommands(); err != nil {
 			logger.Error("Failed to register slash commands: %w", err)
 		}
+		logger.Info("Registered slash commands")
 	})
 
 	// Update the status with the number of matches and players
@@ -1711,7 +1712,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			if member == nil {
 				return
 			}
-
+			if member.User == nil {
+				return
+			}
 			region := evr.ToSymbol(options[0].StringValue())
 			mode := evr.ToSymbol(options[1].StringValue())
 
