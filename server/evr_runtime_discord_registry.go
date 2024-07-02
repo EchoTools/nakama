@@ -539,9 +539,6 @@ func (r *LocalDiscordRegistry) UpdateGuildGroup(ctx context.Context, logger runt
 			return fmt.Errorf("context cancelled: %w", err)
 		}
 	}
-	if member == nil {
-		return fmt.Errorf("member not found: %s", discordID)
-	}
 
 	// Get all of the user's memberships
 	memberships, err := r.GetGuildGroupMemberships(ctx, userID, []uuid.UUID{groupID})
@@ -582,7 +579,7 @@ func (r *LocalDiscordRegistry) UpdateGuildGroup(ctx context.Context, logger runt
 	}
 
 	if len(memberships) == 0 {
-		return fmt.Errorf("Unexpected: no memberships found for user %s", userID)
+		return fmt.Errorf("unexpected: no memberships found for user %s", userID)
 	}
 	membership = &memberships[0]
 
@@ -604,6 +601,7 @@ func (r *LocalDiscordRegistry) UpdateGuildGroup(ctx context.Context, logger runt
 	}
 	userIDStr := userID.String()
 
+	needsUpdate := false
 	if md.ServerHostRole != "" && slices.Contains(currentRoles, md.ServerHostRole) != slices.Contains(md.ServerHostUserIDs, userIDStr) {
 		// Needs updating. If the userID is in, remove it. If it's missing, add it.
 
@@ -616,6 +614,26 @@ func (r *LocalDiscordRegistry) UpdateGuildGroup(ctx context.Context, logger runt
 		} else {
 			md.ServerHostUserIDs = append(md.ServerHostUserIDs, userID.String())
 		}
+
+		needsUpdate = true
+	}
+
+	if md.AllocatorRole != "" && slices.Contains(currentRoles, md.AllocatorRole) != slices.Contains(md.AllocatorUserIDs, userIDStr) {
+		// Needs updating. If the userID is in, remove it. If it's missing, add it.
+
+		if slices.Contains(md.AllocatorUserIDs, userIDStr) {
+			for i, v := range md.AllocatorUserIDs {
+				if v == userIDStr {
+					md.AllocatorUserIDs = append(md.AllocatorUserIDs[:i], md.AllocatorUserIDs[i+1:]...)
+				}
+			}
+		} else {
+			md.AllocatorUserIDs = append(md.AllocatorUserIDs, userID.String())
+		}
+		needsUpdate = true
+	}
+
+	if needsUpdate {
 		mdMap, err := md.MarshalToMap()
 		if err != nil {
 			return fmt.Errorf("error marshalling group metadata: %w", err)
@@ -631,7 +649,6 @@ func (r *LocalDiscordRegistry) UpdateGuildGroup(ctx context.Context, logger runt
 			return fmt.Errorf("error updating group: %w", err)
 		}
 	}
-
 	if isSuspended {
 
 		// If the player has a match connection, disconnect it.
