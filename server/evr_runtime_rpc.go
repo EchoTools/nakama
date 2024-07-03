@@ -813,7 +813,7 @@ type PrepareMatchRPCRequest struct {
 	RequiredFeatures []string             `json:"required_features,omitempty"` // Required features of the broadcaster/clients
 	TeamSize         int                  `json:"team_size,omitempty"`         // Team size to set the match to
 	Alignments       map[string]TeamIndex `json:"role_alignments,omitempty"`   // Team alignments to set the match to (discord username -> team index))
-	GroupID          string               `json:"group_id,omitempty"`          // Group ID to set the match to
+	GuildID          string               `json:"guild_id,omitempty"`          // Guild ID to set the match to
 	StartTime        time.Time            `json:"start_time,omitempty"`        // The time to start the match
 	SignalPayload    string               `json:"signal_payload,omitempty"`    // A signal payload to send to the match unmodified
 }
@@ -848,13 +848,25 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		MatchID:       matchID,
 		SignalPayload: request.SignalPayload,
 	}
+	var groupID string
 
+	if request.GuildID != "" {
+		var err error
+		groupID, err = GetGroupIDByGuildID(ctx, db, request.GuildID)
+		if err != nil {
+			return "", runtime.NewError(err.Error(), StatusInternalError)
+		}
+	}
+
+	if groupID == "" {
+		return "", runtime.NewError("guild group not found", StatusNotFound)
+	}
 	// Translate the alignments to a map of nakama id -> team index
 
 	signalPayload := request.SignalPayload
 	if signalPayload == "" {
 		state := &EvrMatchState{}
-		groupID := uuid.FromStringOrNil(request.GroupID)
+		groupID := uuid.FromStringOrNil(groupID)
 		state.Mode = request.Mode.Symbol()
 		state.TeamSize = request.TeamSize
 		state.Level = request.Level.Symbol()
