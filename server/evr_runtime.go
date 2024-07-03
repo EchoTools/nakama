@@ -8,9 +8,13 @@ import (
 	"time"
 
 	"github.com/gofrs/uuid/v5"
+	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/jackc/pgtype"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	_ "google.golang.org/protobuf/proto"
 )
 
@@ -427,4 +431,213 @@ func EvrApiHttpHandler(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 	}
 
 	return string(response), nil
+}
+func GetUserIDByDiscordID(ctx context.Context, db *sql.DB, customID string) (userID string, err error) {
+	// Look for an existing account.
+	query := "SELECT id, username, disable_time FROM users WHERE custom_id = $1"
+	var dbUserID string
+	var dbDisableTime pgtype.Timestamptz
+	var found = true
+	err = db.QueryRowContext(ctx, query, customID).Scan(&dbUserID, &dbDisableTime)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			found = false
+		} else {
+			return uuid.Nil.String(), status.Error(codes.Internal, "error finding user account")
+		}
+	}
+	if !found {
+		return uuid.Nil.String(), status.Error(codes.NotFound, "user account not found")
+	}
+
+	// Check if it's disabled.
+	if dbDisableTime.Status == pgtype.Present && dbDisableTime.Time.Unix() != 0 {
+		return dbUserID, status.Error(codes.PermissionDenied, "account banned")
+	}
+
+	return dbUserID, nil
+}
+
+func GetGroupIDByGuildID(ctx context.Context, db *sql.DB, guildID string) (groupID string, err error) {
+	// Look for an existing account.
+	query := "SELECT id FROM groups WHERE lang_tag = 'guild' AND metadata->>'guild_id' = '$1'"
+	var dbGroupID string
+	var found = true
+	if err = db.QueryRowContext(ctx, query, guildID).Scan(&dbGroupID); err != nil {
+		if err == sql.ErrNoRows {
+			found = false
+		} else {
+			return uuid.Nil.String(), status.Error(codes.Internal, "error finding group by guild ID")
+		}
+	}
+	if !found {
+		return uuid.Nil.String(), status.Error(codes.NotFound, "guild ID not found")
+	}
+
+	return dbGroupID, nil
+}
+
+func GetDiscordIDByUserID(ctx context.Context, db *sql.DB, userID string) (discordID string, err error) {
+	// Look for an existing account.
+	query := "SELECT custom_id FROM users WHERE id = $1"
+	var dbUserID string
+	var found = true
+	if err = db.QueryRowContext(ctx, query, userID).Scan(&dbUserID); err != nil {
+		if err == sql.ErrNoRows {
+			found = false
+		} else {
+			return "", status.Error(codes.Internal, "error finding discord ID by user ID")
+		}
+	}
+	if !found {
+		return "", status.Error(codes.NotFound, "discord ID not found")
+	}
+
+	return dbUserID, nil
+}
+
+func GetGuildIDByGroupID(ctx context.Context, db *sql.DB, groupID string) (guildID string, err error) {
+	// Look for an existing account.
+	query := "SELECT metadata->>'guild_id' FROM groups WHERE id = $1"
+	var dbGuildID string
+	var found = true
+	if err = db.QueryRowContext(ctx, query, groupID).Scan(&dbGuildID); err != nil {
+		if err == sql.ErrNoRows {
+			found = false
+		} else {
+			return "", status.Error(codes.Internal, "error finding guild ID by group ID")
+		}
+	}
+	if !found {
+		return "", status.Error(codes.NotFound, "guild ID not found")
+	}
+
+	return dbGuildID, nil
+}
+
+/*
+// GetGuildGroupMemberships looks up the guild groups by the user ID
+func GetGuildGroupMemberships(ctx context.Context, nk runtime.NakamaModule, db *sql.DB, discordRegistry DiscordRegistry, userID uuid.UUID, groupIDs []uuid.UUID) ([]GuildGroupMembership, error) {
+	// Check if userId is provided
+
+	account, err := nk.AccountGetId(ctx, userID.String())
+	if err != nil {
+		return nil, fmt.Errorf("error getting account: %w", err)
+	}
+	displayName := account.User.GetDisplayName()
+	username := account.User.GetUsername()
+	// Get the override if it exists
+	amd := AccountUserMetadata{}
+	if err = json.Unmarshal([]byte(account.User.GetMetadata()), &amd); err != nil {
+		return nil, fmt.Errorf("error unmarshalling account metadata: %w", err)
+	}
+	displayNameOverride := amd.DisplayNameOverride
+	if amd.DisplayNameOverride != "" && account.User.GetDisplayName() != amd.DisplayNameOverride {
+		if err = nk.AccountUpdateId(ctx, account.User.Id, "", nil, displayNameOverride, "", "", "", ""); err != nil {
+			return nil, fmt.Errorf("error updating account: %w", err)
+		}
+	}
+
+	memberships := make([]GuildGroupMembership, 0)
+	cursor := ""
+	for {
+		// Fetch the groups using the provided userId
+		userGroups, _, err := nk.UserGroupsList(ctx, userID.String(), 100, nil, cursor)
+		if err != nil {
+			return nil, fmt.Errorf("error getting user groups: %w", err)
+		}
+		for _, ug := range userGroups {
+			g := ug.GetGroup()
+			if g.GetLangTag() != "guild" {
+				continue
+			}
+			if len(groupIDs) > 0 && !slices.Contains(groupIDs, uuid.FromStringOrNil(g.GetId())) {
+				continue
+			}
+			_, md, err := GetGuildGroupMetadata(ctx, nk, g.GetId())
+			if err != nil {
+				return nil, fmt.Errorf("error getting guild group metadata: %w", err)
+			}
+
+			membership := NewGuildGroupMembership(g, userID, api.UserGroupList_UserGroup_State(ug.GetState().GetValue()))
+
+			if lo.Contains(md.SuspendedUserIDs, userID.String()) {
+				membership.isMember = false
+				membership.isSuspended = true
+			}
+
+			// If the account has an override, use that
+			if displayNameOverride != "" {
+				membership.DisplayName = displayNameOverride
+			} else {
+				// Determine the display name
+				var err error
+				membership.DisplayName, err = SetDisplayNameByChannelBySession(ctx, nk, db, discordRegistry, displayName, username, membership.GuildGroup.ID().String())
+				if err != nil {
+					return nil, fmt.Errorf("error setting display name: %w", err)
+				}
+			}
+
+			memberships = append(memberships, membership)
+		}
+		if cursor == "" {
+			break
+		}
+	}
+	return memberships, nil
+}
+*/
+
+func GetGuildGroupMetadata(ctx context.Context, nk runtime.NakamaModule, groupId string) (*api.Group, *GroupMetadata, error) {
+
+	groups, err := nk.GroupsGetId(ctx, []string{groupId})
+	if err != nil {
+		return nil, nil, status.Error(codes.Internal, fmt.Sprintf("error getting group: %v", err))
+	}
+
+	if len(groups) == 0 {
+		return nil, nil, status.Error(codes.NotFound, fmt.Sprintf("group not found: %v", groupId))
+	}
+	group := groups[0]
+	if group.LangTag != "guild" {
+		return nil, nil, ErrGroupIsNotaGuild
+	}
+
+	// Extract the metadata from the group
+	data := groups[0].GetMetadata()
+
+	// Unmarshal the metadata into a GroupMetadata struct
+	md := &GroupMetadata{}
+	if err := json.Unmarshal([]byte(data), md); err != nil {
+		return nil, nil, status.Error(codes.Internal, fmt.Sprintf("error unmarshalling group metadata: %v", err))
+	}
+
+	return group, md, nil
+}
+
+func SetGuildGroupMetadata(ctx context.Context, nk runtime.NakamaModule, groupId string, metadata *GroupMetadata) error {
+	// Check if groupId is provided
+	if groupId == "" {
+		return fmt.Errorf("groupId is required")
+	}
+
+	// Marshal the metadata
+	mdMap, err := metadata.MarshalToMap()
+	if err != nil {
+		return fmt.Errorf("error marshalling group metadata: %w", err)
+	}
+
+	// Get the group
+	groups, err := nk.GroupsGetId(ctx, []string{groupId})
+	if err != nil {
+		return fmt.Errorf("error getting group: %w", err)
+	}
+	g := groups[0]
+
+	// Update the group
+	if err := nk.GroupUpdate(ctx, g.Id, SystemUserID, g.Name, g.CreatorId, g.LangTag, g.Description, g.AvatarUrl, g.Open.Value, mdMap, int(g.MaxCount)); err != nil {
+		return fmt.Errorf("error updating group: %w", err)
+	}
+
+	return nil
 }
