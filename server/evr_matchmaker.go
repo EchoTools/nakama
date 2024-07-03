@@ -77,12 +77,12 @@ func (p *EvrPipeline) ListUnassignedLobbies(ctx context.Context, session *sessio
 
 	// Load the matchmaking config and add the user's config to the query
 
-	gconfig, err := p.matchmakingRegistry.LoadMatchmakingSettings(ctx, session.logger, SystemUserID)
+	gconfig, err := LoadMatchmakingSettings(ctx, p.runtimeModule, SystemUserID)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Failed to load global matchmaking config: %v", err)
 	}
 
-	config, err := p.matchmakingRegistry.LoadMatchmakingSettings(ctx, session.logger, session.UserID().String())
+	config, err := LoadMatchmakingSettings(ctx, p.runtimeModule, session.UserID().String())
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Failed to load matchmaking config: %v", err)
 	}
@@ -276,13 +276,13 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 		},
 	}
 	// Load the global matchmaking config
-	gconfig, err := p.matchmakingRegistry.LoadMatchmakingSettings(ctx, session.logger, SystemUserID)
+	gconfig, err := LoadMatchmakingSettings(ctx, p.runtimeModule, SystemUserID)
 	if err != nil {
 		return "", status.Errorf(codes.Internal, "Failed to load global matchmaking config: %v", err)
 	}
 
 	// Load the user's matchmaking config
-	config, err := p.matchmakingRegistry.LoadMatchmakingSettings(ctx, session.logger, userID)
+	config, err := LoadMatchmakingSettings(ctx, p.runtimeModule, userID)
 	if err != nil {
 		return "", status.Errorf(codes.Internal, "Failed to load matchmaking config: %v", err)
 	}
