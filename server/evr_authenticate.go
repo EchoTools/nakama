@@ -489,13 +489,40 @@ func ReadAccessTokenFromStorage(ctx context.Context, logger runtime.Logger, nk r
 	return accessToken, nil
 }
 
-func GetEvrRecords(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, userId string) ([]*api.StorageObject, error) {
+type EVRLoginRecord struct {
+	EvrID        evr.EvrId
+	LoginProfile *evr.LoginProfile
+	CreateTime   time.Time
+	UpdateTime   time.Time
+}
+
+func GetEVRRecords(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, userId string) (map[evr.EvrId]EVRLoginRecord, error) {
 	listRecords, _, err := nk.StorageList(ctx, SystemUserID, userId, EvrLoginStorageCollection, 100, "")
 	if err != nil {
 		logger.WithField("err", err).Error("Storage list error.")
 		return nil, fmt.Errorf("storage list error: %v", err)
 	}
-	return listRecords, nil
+
+	records := make(map[evr.EvrId]EVRLoginRecord, len(listRecords))
+
+	for _, record := range listRecords {
+		var loginProfile evr.LoginProfile
+		if err := json.Unmarshal([]byte(record.Value), &loginProfile); err != nil {
+			return nil, fmt.Errorf("error unmarshalling login profile for %s: %v", record.GetKey(), err)
+		}
+		evrID, err := evr.ParseEvrId(record.Key)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing evrID: %v", err)
+		}
+		records[*evrID] = EVRLoginRecord{
+			EvrID:        *evrID,
+			LoginProfile: &loginProfile,
+			CreateTime:   record.CreateTime.AsTime(),
+			UpdateTime:   record.UpdateTime.AsTime(),
+		}
+	}
+
+	return records, nil
 }
 
 func GetDisplayNameRecords(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, userId string) ([]*api.StorageObject, error) {
@@ -602,10 +629,10 @@ type GroupMetadata struct {
 }
 
 type AccountUserMetadata struct {
-	DisplayNameOverride string                 `json:"display_name_override"` // The display name override
-	GlobalBanReason     string                 `json:"global_ban_reason"`     // The global ban reason
-	ActiveGroupID       string                 `json:"active_group_id"`       // The active group ID
-	Unhandled           map[string]interface{} `json:"-"`
+	DisplayNameOverride string           `json:"display_name_override"` // The display name override
+	GlobalBanReason     string           `json:"global_ban_reason"`     // The global ban reason
+	ActiveGroupID       string           `json:"active_group_id"`       // The active group ID
+	Cosmetics           AccountCosmetics `json:"cosmetics"`             // The loadout
 }
 
 func (a *AccountUserMetadata) GetActiveGroupID() uuid.UUID {
@@ -627,6 +654,11 @@ func (a *AccountUserMetadata) MarshalToMap() (map[string]interface{}, error) {
 		return nil, err
 	}
 	return m, nil
+}
+
+type AccountCosmetics struct {
+	JerseyNumber int64               `json:"number"`           // The loadout number (jersey number)
+	Loadout      evr.CosmeticLoadout `json:"cosmetic_loadout"` // The loadout
 }
 
 type SuspensionStatus struct {
