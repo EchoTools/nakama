@@ -16,10 +16,6 @@ import (
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
-	"github.com/jackc/pgtype"
-	"go.uber.org/zap"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 const (
@@ -880,7 +876,7 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		state.TeamAlignments = make(map[uuid.UUID]int, len(request.Alignments))
 		for discordID, teamIndex := range request.Alignments {
 			// Get the nakama ID from the discord ID
-			userID, _, err := GetUserbyCustomID(ctx, logger, db, discordID)
+			userID, err := GetUserIDByDiscordID(ctx, db, discordID)
 			if err != nil {
 				return "", runtime.NewError(err.Error(), StatusNotFound)
 			}
@@ -945,35 +941,6 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 	return string(data), nil
 }
 
-func GetUserbyCustomID(ctx context.Context, logger runtime.Logger, db *sql.DB, customID string) (userID string, username string, err error) {
-	// Look for an existing account.
-	query := "SELECT id, username, disable_time FROM users WHERE custom_id = $1"
-	var dbUserID uuid.UUID
-	var dbUsername string
-	var dbDisableTime pgtype.Timestamptz
-	var found = true
-	err = db.QueryRowContext(ctx, query, customID).Scan(&dbUserID, &dbUsername, &dbDisableTime)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			found = false
-		} else {
-			logger.Error("Error looking up user by custom ID.", zap.Error(err), zap.String("customID", customID), zap.String("username", ""))
-			return uuid.Nil.String(), "", status.Error(codes.Internal, "error finding user account")
-		}
-	}
-	if !found {
-		return uuid.Nil.String(), "", status.Error(codes.NotFound, "user account not found")
-	}
-
-	// Check if it's disabled.
-	if dbDisableTime.Status == pgtype.Present && dbDisableTime.Time.Unix() != 0 {
-		logger.Info("User account is disabled.", zap.String("customID", customID), zap.String("username", dbUsername))
-		return dbUserID.String(), dbUsername, status.Error(codes.PermissionDenied, "account banned")
-	}
-
-	return dbUserID.String(), dbUsername, nil
-}
-
 type AuthenticatePasswordRequest struct {
 	UserID       string `json:"user_id"`
 	DiscordID    string `json:"discord_id"`
@@ -1012,7 +979,7 @@ func AuthenticatePasswordRPC(ctx context.Context, logger runtime.Logger, db *sql
 			userID = request.UserID
 
 		case request.DiscordID != "":
-			userID, _, err = GetUserbyCustomID(ctx, logger, db, request.DiscordID)
+			userID, err = GetUserIDByDiscordID(ctx, db, request.DiscordID)
 			if err != nil {
 				return "", err
 			}
@@ -1083,7 +1050,7 @@ func AccountLookupRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		userID = users[0].Id
 
 	case request.DiscordID != "":
-		userID, _, err = GetUserbyCustomID(ctx, logger, db, request.DiscordID)
+		userID, err = GetUserIDByDiscordID(ctx, db, request.DiscordID)
 		if err != nil {
 			return "", err
 		}
@@ -1119,14 +1086,13 @@ func AccountLookupRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 }
 
 type SetNextMatchRPCRequestPayload struct {
-	UserID  string  `json:"user_id"`
-	MatchID MatchID `json:"match_id"`
+	UserID    string   `json:"user_id"`
+	DiscordID string   `json:"discord_id"`
+	MatchID   *MatchID `json:"match_id"`
 }
 
 type SetNextMatchRPCResponsePayload struct {
-	UserID  string        `json:"user_id"`
-	MatchID MatchID       `json:"match_id"`
-	Label   EvrMatchState `json:"label"`
+	Label *EvrMatchState `json:"label,omitempty"`
 }
 
 func (r *SetNextMatchRPCResponsePayload) String() string {
@@ -1147,36 +1113,38 @@ func SetNextMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 	matchID := request.MatchID
 	userID := request.UserID
 
-	response := &SetNextMatchRPCResponsePayload{
-		UserID:  userID,
-		MatchID: matchID,
+	if request.DiscordID != "" {
+		userID, err = GetUserIDByDiscordID(ctx, db, request.DiscordID)
+		if err != nil {
+			return "", runtime.NewError(fmt.Sprintf("Error getting user ID using Discord ID: %s", err.Error()), StatusInternalError)
+		}
 	}
+
+	response := &SetNextMatchRPCResponsePayload{}
 	settings, err := LoadMatchmakingSettings(ctx, nk, userID)
 	if err != nil {
 		return "", runtime.NewError(fmt.Sprintf("Error loading matchmaking settings: %s", err.Error()), StatusInternalError)
 	}
 
-	if !matchID.IsValid() {
-		return "", runtime.NewError(fmt.Sprintf("Invalid MatchID: %s", matchID), StatusInvalidArgument)
-	}
-
-	if matchID.IsNil() {
+	if matchID == nil || matchID.IsNil() {
 		// Delete the next match
-		settings.NextMatchID = matchID
-		response.MatchID = matchID
-
+		settings.NextMatchID = MatchID{}
 	} else {
+
+		if !matchID.IsValid() {
+			return "", runtime.NewError(fmt.Sprintf("Invalid MatchID: %s", matchID), StatusInvalidArgument)
+		}
 
 		match, err := nk.MatchGet(ctx, matchID.String())
 		if err != nil || match == nil {
 			return "", runtime.NewError(fmt.Sprintf("Error getting match: %s", err.Error()), StatusInternalError)
 		}
 
-		if err = json.Unmarshal([]byte(match.GetLabel().Value), &response.Label); err != nil {
+		if err = json.Unmarshal([]byte(match.GetLabel().Value), response.Label); err != nil {
 			return "", runtime.NewError(fmt.Sprintf("Error unmarshalling label: %s", err.Error()), StatusInternalError)
 		}
 
-		settings.NextMatchID = matchID
+		settings.NextMatchID = *matchID
 	}
 
 	// Save the settings
