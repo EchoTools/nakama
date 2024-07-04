@@ -585,7 +585,7 @@ func (p *EvrPipeline) MatchCreate(ctx context.Context, session *sessionWS, msess
 	// Prepare the match
 	response, err := SignalMatch(ctx, p.matchRegistry, matchID, SignalPrepareSession, ml)
 	if err != nil {
-		return MatchID{}, fmt.Errorf("failed to send prepare session: %v", err)
+		return MatchID{}, ErrMatchmakingUnknownError
 	}
 
 	msession.Logger.Info("Match created", zap.String("match_id", matchID.String()), zap.String("label", response))

@@ -431,6 +431,8 @@ func (p *EvrPipeline) MatchCreateLoop(session *sessionWS, msession *MatchmakingS
 			// Keep trying until the context is done
 		case codes.NotFound, codes.ResourceExhausted, codes.Unavailable:
 			p.metrics.CustomCounter("create_unavailable_count", msession.metricsTags(), 1)
+		case codes.Unknown, codes.Internal:
+			logger.Warn("Failed to create match", zap.Error(err))
 		default:
 			return msession.Cancel(err)
 		}
