@@ -91,11 +91,13 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 
 	deletes := make([]*runtime.StorageDelete, 0, len(objs))
 	for _, obj := range objs {
-		deletes = append(deletes, &runtime.StorageDelete{
-			Collection: LinkTicketCollection,
-			Key:        obj.Key,
-			Version:    obj.Version,
-		})
+		if obj.GetCreateTime().AsTime().Before(time.Now().Add(-time.Hour * 24)) {
+			deletes = append(deletes, &runtime.StorageDelete{
+				Collection: LinkTicketCollection,
+				Key:        obj.Key,
+				Version:    obj.Version,
+			})
+		}
 	}
 
 	if err := nk.StorageDelete(ctx, deletes); err != nil {
