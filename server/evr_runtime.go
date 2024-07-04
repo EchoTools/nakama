@@ -434,7 +434,7 @@ func EvrApiHttpHandler(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 }
 func GetUserIDByDiscordID(ctx context.Context, db *sql.DB, customID string) (userID string, err error) {
 	// Look for an existing account.
-	query := "SELECT id, username, disable_time FROM users WHERE custom_id = $1"
+	query := "SELECT id, disable_time FROM users WHERE custom_id = $1"
 	var dbUserID string
 	var dbDisableTime pgtype.Timestamptz
 	var found = true
@@ -460,7 +460,7 @@ func GetUserIDByDiscordID(ctx context.Context, db *sql.DB, customID string) (use
 
 func GetGroupIDByGuildID(ctx context.Context, db *sql.DB, guildID string) (groupID string, err error) {
 	// Look for an existing account.
-	query := "SELECT id FROM groups WHERE lang_tag = 'guild' AND metadata->>'guild_id' = '$1'"
+	query := "SELECT id FROM groups WHERE lang_tag = 'guild' AND metadata->>'guild_id' = $1"
 	var dbGroupID string
 	var found = true
 	if err = db.QueryRowContext(ctx, query, guildID).Scan(&dbGroupID); err != nil {
@@ -480,9 +480,9 @@ func GetGroupIDByGuildID(ctx context.Context, db *sql.DB, guildID string) (group
 func GetDiscordIDByUserID(ctx context.Context, db *sql.DB, userID string) (discordID string, err error) {
 	// Look for an existing account.
 	query := "SELECT custom_id FROM users WHERE id = $1"
-	var dbUserID string
+	var dbCustomID string
 	var found = true
-	if err = db.QueryRowContext(ctx, query, userID).Scan(&dbUserID); err != nil {
+	if err = db.QueryRowContext(ctx, query, userID).Scan(&dbCustomID); err != nil {
 		if err == sql.ErrNoRows {
 			found = false
 		} else {
@@ -493,7 +493,7 @@ func GetDiscordIDByUserID(ctx context.Context, db *sql.DB, userID string) (disco
 		return "", status.Error(codes.NotFound, "discord ID not found")
 	}
 
-	return dbUserID, nil
+	return dbCustomID, nil
 }
 
 func GetGuildIDByGroupID(ctx context.Context, db *sql.DB, groupID string) (guildID string, err error) {
