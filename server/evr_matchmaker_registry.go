@@ -55,6 +55,7 @@ var (
 	ErrMatchmakingCanceledByPlayer     = status.Errorf(codes.Canceled, "Matchmaking canceled by player")
 	ErrMatchmakingRestarted            = status.Errorf(codes.Canceled, "matchmaking restarted")
 	ErrMatchmakingMigrationRequired    = status.Errorf(codes.FailedPrecondition, "Server upgraded, migration")
+	ErrMatchmakingUnknownError         = status.Errorf(codes.Unknown, "Unknown error")
 	MatchmakingStreamSubject           = uuid.NewV5(uuid.Nil, "matchmaking").String()
 	MatchmakingConfigStorageCollection = "Matchmaker"
 	MatchmakingConfigStorageKey        = "config"
