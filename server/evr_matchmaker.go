@@ -516,7 +516,19 @@ func (p *EvrPipeline) MatchCreate(ctx context.Context, session *sessionWS, msess
 	ml.MaxSize = MatchMaxSize
 	// Lock the broadcaster's until the match is created
 	p.matchmakingRegistry.Lock()
-	defer p.matchmakingRegistry.Unlock()
+
+	defer func() {
+		// Hold onto the lock for one extra second
+		<-time.After(1 * time.Second)
+		p.matchmakingRegistry.Unlock()
+	}()
+
+	select {
+	case <-msession.Ctx.Done():
+		return MatchID{}, nil
+	default:
+	}
+
 	// TODO Move this into the matchmaking registry
 	// Create a new match
 	labels, err := p.ListUnassignedLobbies(ctx, session, ml)
