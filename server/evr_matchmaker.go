@@ -123,7 +123,7 @@ type LabelLatencies struct {
 func (p *EvrPipeline) Backfill(ctx context.Context, session *sessionWS, msession *MatchmakingSession, minCount int) (*EvrMatchState, string, error) {
 
 	logger := msession.Logger
-	labels, query, err := p.matchmakingRegistry.listUnfilledLobbies(ctx, logger, msession.Label)
+	labels, query, err := p.matchmakingRegistry.listUnfilledLobbies(ctx, logger, msession.Label, minCount)
 	if err != nil {
 		return nil, query, err
 	}

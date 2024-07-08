@@ -385,7 +385,7 @@ func (mr *MatchmakingRegistry) matchedEntriesFn(entries [][]*MatchmakerEntry) {
 	}
 }
 
-func (mr *MatchmakingRegistry) listUnfilledLobbies(ctx context.Context, logger *zap.Logger, searchLabel *EvrMatchState) ([]*EvrMatchState, string, error) {
+func (mr *MatchmakingRegistry) listUnfilledLobbies(ctx context.Context, logger *zap.Logger, searchLabel *EvrMatchState, minCount int) ([]*EvrMatchState, string, error) {
 	var err error
 	var query string
 
@@ -402,10 +402,9 @@ func (mr *MatchmakingRegistry) listUnfilledLobbies(ctx context.Context, logger *
 	// Basic search defaults
 	const (
 		minSize = 1
-		maxSize = MatchMaxSize - 1 // the broadcaster is included, so this has one free spot
 		limit   = 50
 	)
-
+	maxSize := MatchMaxSize - minCount
 	logger = logger.With(zap.String("query", query))
 
 	// Search for possible matches
@@ -518,7 +517,7 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 
 	// Try to backfill matches with parties
 	var backfillMatches []*EvrMatchState
-	backfillMatches, _, err := mr.listUnfilledLobbies(mr.ctx, logger, ml)
+	backfillMatches, _, err := mr.listUnfilledLobbies(mr.ctx, logger, ml, 2)
 	if err != nil {
 		logger.Error("Failed to list unfilled lobbies", zap.Error(err))
 		return
@@ -534,10 +533,12 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 			if m.PlayerLimit-m.PlayerCount < partySize {
 				continue
 			}
-			// Make sure adding these players makes the teams the same size
-			if (m.PlayerCount+partySize)%2 != 0 {
-				continue
-			}
+			/*
+				// Make sure adding these players makes the teams the same size
+				if (m.PlayerCount+partySize)%2 != 0 {
+					continue
+				}
+			*/
 			logger.Info("Backfilling match", zap.String("matchID", m.ID.String()), zap.String("partyID", partyID), zap.Any("party", party))
 			// Add the party to the match
 			for _, e := range party {

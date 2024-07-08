@@ -266,13 +266,11 @@ func (p *EvrPipeline) MatchSpectateStreamLoop(session *sessionWS, msession *Matc
 	logger := msession.Logger
 	ctx := msession.Context()
 	p.metrics.CustomCounter("spectatestream_active_count", msession.metricsTags(), 1)
-	// Create a ticker to spectate
-	spectateInterval := time.Duration(10) * time.Second
 
 	limit := 100
-	minSize := 3
+	minSize := 2
 	maxSize := MatchMaxSize - 1
-	query := fmt.Sprintf("+label.open:T +label.lobby_type:public +label.mode:%s +label.size:>=2", msession.Label.Mode.Token())
+	query := fmt.Sprintf("+label.open:T +label.lobby_type:public +label.mode:%s +label.size:>=%d +label.size<=%d", msession.Label.Mode.Token(), minSize, maxSize)
 	for {
 		select {
 		case <-ctx.Done():
@@ -281,7 +279,7 @@ func (p *EvrPipeline) MatchSpectateStreamLoop(session *sessionWS, msession *Matc
 		}
 
 		// list existing matches
-		matches, err := listMatches(ctx, p, limit, minSize, maxSize, query)
+		matches, err := listMatches(ctx, p, limit, minSize+1, maxSize+1, query)
 		if err != nil {
 			return msession.Cancel(fmt.Errorf("failed to find spectate match: %w", err))
 		}
@@ -938,7 +936,7 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 		err = status.Errorf(codes.NotFound, "Match is not a lobby")
 	case !ml.Open:
 		err = status.Errorf(codes.InvalidArgument, "Match is not open")
-	case int(match.GetSize()) >= MatchMaxSize:
+	case int(ml.Size) >= int(ml.MaxSize):
 		err = status.Errorf(codes.ResourceExhausted, "Match is full")
 	case ml.LobbyType == PublicLobby:
 
