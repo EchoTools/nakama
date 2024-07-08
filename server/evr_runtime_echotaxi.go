@@ -597,7 +597,7 @@ func (e *TaxiBot) Hail(logger runtime.Logger, discordID string, matchID MatchID)
 	defer cancel()
 
 	// Get the nakama user id from the discord user id
-	userID, _, err := GetUserbyCustomID(ctx, logger, e.db, discordID)
+	userID, err := GetUserIDByDiscordID(ctx, e.db, discordID)
 	if err != nil {
 		return fmt.Errorf("Error getting user id from discord id: %s", err.Error())
 	}
@@ -713,7 +713,7 @@ func (e *TaxiBot) handleMessageReactionRemove(s *discordgo.Session, reaction *di
 	ctx, cancel := context.WithTimeout(e.ctx, 2*time.Second)
 	defer cancel()
 	// Get the nakama user id from the discord user id
-	userID, _, err := GetUserbyCustomID(ctx, e.logger, e.db, reaction.UserID)
+	userID, err := GetUserIDByDiscordID(ctx, e.db, reaction.UserID)
 	if err != nil {
 		return
 	}
