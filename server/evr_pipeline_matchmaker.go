@@ -368,23 +368,22 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 			}
 		}
 
-		if foundMatch.MatchID.IsNil() {
-			// No match found
-			continue
+		if !foundMatch.MatchID.IsNil() {
+
+			logger.Debug("Attempting to backfill match", zap.String("mid", foundMatch.MatchID.String()))
+			p.metrics.CustomCounter("match_backfill_found_count", msession.metricsTags(), 1)
+
+			msession.MatchJoinCh <- foundMatch
+
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-time.After(3 * time.Second):
+				p.metrics.CustomCounter("match_backfill_join_timeout_count", msession.metricsTags(), 1)
+				logger.Warn("Failed to backfill match", zap.String("mid", foundMatch.MatchID.String()))
+			}
 		}
 
-		logger.Debug("Attempting to backfill match", zap.String("mid", foundMatch.MatchID.String()))
-		p.metrics.CustomCounter("match_backfill_found_count", msession.metricsTags(), 1)
-
-		msession.MatchJoinCh <- foundMatch
-
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-time.After(3 * time.Second):
-			p.metrics.CustomCounter("match_backfill_join_timeout_count", msession.metricsTags(), 1)
-			logger.Warn("Failed to backfill match", zap.String("mid", foundMatch.MatchID.String()))
-		}
 		// Continue to loop until the context is done
 		<-time.After(10 * time.Second)
 	}
