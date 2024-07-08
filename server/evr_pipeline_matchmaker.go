@@ -270,7 +270,7 @@ func (p *EvrPipeline) MatchSpectateStreamLoop(session *sessionWS, msession *Matc
 	limit := 100
 	minSize := 2
 	maxSize := MatchMaxSize - 1
-	query := fmt.Sprintf("+label.open:T +label.lobby_type:public +label.mode:%s +label.size:>=%d +label.size<=%d", msession.Label.Mode.Token(), minSize, maxSize)
+	query := fmt.Sprintf("+label.open:T +label.lobby_type:public +label.mode:%s +label.size:>=%d +label.size:<=%d", msession.Label.Mode.Token(), minSize, maxSize)
 	for {
 		select {
 		case <-ctx.Done():
@@ -297,50 +297,48 @@ func (p *EvrPipeline) MatchSpectateStreamLoop(session *sessionWS, msession *Matc
 				Query:     query,
 				TeamIndex: TeamIndex(evr.TeamSpectator),
 			}
+			logger = logger.With(zap.String("mid", foundMatch.MatchID.String()))
+
 			select {
 			case <-ctx.Done():
 				return nil
 			case msession.MatchJoinCh <- foundMatch:
 				p.metrics.CustomCounter("spectatestream_found_count", msession.metricsTags(), 1)
-				logger.Debug("Spectating match", zap.String("mid", foundMatch.MatchID.String()))
+				logger.Debug("Spectating match")
 			case <-time.After(3 * time.Second):
 				p.metrics.CustomCounter("spectatestream_join_timeout_count", msession.metricsTags(), 1)
-				logger.Warn("Failed to spectate match", zap.String("mid", foundMatch.MatchID.String()))
+				logger.Warn("Failed to spectate match")
 			}
 		}
-		<-time.After(spectateInterval)
+		<-time.After(10 * time.Second)
 	}
 }
 
 func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *MatchmakingSession, skipDelay bool, create bool, minCount int) error {
-	interval := p.config.GetMatchmaker().IntervalSec
-	idealMatchIntervals := p.config.GetMatchmaker().RevThreshold
 	logger := msession.Logger
 	ctx := msession.Context()
+
 	// Wait for at least 1 interval before starting to look for a backfill.
 	// This gives the matchmaker a chance to find a full ideal match
+	interval := p.config.GetMatchmaker().IntervalSec
+	idealMatchIntervals := p.config.GetMatchmaker().RevThreshold
 	backfillDelay := time.Duration(interval*idealMatchIntervals) * time.Second
-	if skipDelay {
-		backfillDelay = 0 * time.Second
+
+	if !skipDelay {
+		<-time.After(1 * time.Second)
+	} else {
+		<-time.After(backfillDelay)
 	}
-
-	// Check for a backfill match on a regular basis
-	backfilInterval := time.Duration(10) * time.Second
-
-	// Create a ticker to check for backfill matches
-	backfillTicker := time.NewTimer(backfilInterval)
-	backfillDelayTimer := time.NewTimer(backfillDelay)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-backfillDelayTimer.C:
-		case <-backfillTicker.C:
+		default:
 		}
 		if msession.Label.Mode != evr.ModeSocialPublic && msession.Party != nil && msession.Party.members.Size() > 1 {
 			// Don't backfill party members, let the matchmaker handle it.
-			continue
+			break
 		}
 
 		foundMatch := FoundMatch{}
@@ -358,9 +356,16 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 				TeamIndex: TeamIndex(evr.TeamUnassigned),
 			}
 		} else if create {
-			create = false
-			// Start the create loop too
-			go p.MatchCreateLoop(session, msession, 5*time.Minute)
+			// Stage 1: Check if there is an available broadcaster
+			matchID, err := p.MatchCreate(ctx, session, msession, msession.Label)
+			if err != nil {
+				logger.Warn("Failed to create match", zap.Error(err))
+			}
+			foundMatch = FoundMatch{
+				MatchID:   matchID,
+				Query:     query,
+				TeamIndex: TeamIndex(evr.TeamUnassigned),
+			}
 		}
 
 		if foundMatch.MatchID.IsNil() {
@@ -368,13 +373,9 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 			continue
 		}
 
-		select {
-		case <-ctx.Done():
-			return nil
-		default:
-		}
 		logger.Debug("Attempting to backfill match", zap.String("mid", foundMatch.MatchID.String()))
 		p.metrics.CustomCounter("match_backfill_found_count", msession.metricsTags(), 1)
+
 		msession.MatchJoinCh <- foundMatch
 
 		select {
@@ -385,8 +386,9 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 			logger.Warn("Failed to backfill match", zap.String("mid", foundMatch.MatchID.String()))
 		}
 		// Continue to loop until the context is done
-
+		<-time.After(10 * time.Second)
 	}
+	return nil
 }
 
 func (p *EvrPipeline) MatchCreateLoop(session *sessionWS, msession *MatchmakingSession, pruneDelay time.Duration) error {
