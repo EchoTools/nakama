@@ -95,16 +95,20 @@ var (
 
 type Symbol uint64
 
+func (s Symbol) HexString() string {
+	str := strconv.FormatUint(uint64(s), 16)
+	return fmt.Sprintf("0x%016s", str)
+}
+
 // A symbol token is a symbol converted to a string.
 // It either uses the cache to convert back to a string,
 // or returns the hex string representation of the token.
 // ToSymbol will detect 0x prefixed hex strings.
 func (s Symbol) Token() SymbolToken {
-	t, ok := SymbolCache[uint64(s)]
+	t, ok := SymbolCache[s]
 	if !ok {
 		// If it's not found, just return the number as a hex string
-		str := strconv.FormatUint(uint64(s), 16)
-		t = SymbolToken(fmt.Sprintf("0x%016s", str))
+		t = SymbolToken(s.HexString())
 	}
 	return t
 }
