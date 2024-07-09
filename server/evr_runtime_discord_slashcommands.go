@@ -989,12 +989,12 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 								},
 								{
 									Name:   "hex",
-									Value:  symbol.Token().String(),
+									Value:  symbol.HexString(),
 									Inline: false,
 								},
 								{
 									Name:   "cached?",
-									Value:  strconv.FormatBool(lo.Contains(lo.Keys(evr.SymbolCache), uint64(evr.Symbol(symbol)))),
+									Value:  strconv.FormatBool(lo.Contains(lo.Keys(evr.SymbolCache), symbol)),
 									Inline: false,
 								},
 								{
