@@ -1,11 +1,15 @@
 package server
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -38,6 +42,23 @@ const (
 	StatusDataLoss           = 15 // StatusDataLoss indicates a loss of data occurred.
 	StatusUnauthenticated    = 16 // StatusUnauthenticated indicates the request lacks valid authentication credentials.
 )
+
+type (
+	TimeRFC3339 time.Time
+)
+
+func (t TimeRFC3339) MarshalText() ([]byte, error) {
+	return []byte(time.Time(t).Format(time.RFC3339)), nil
+}
+
+func (t *TimeRFC3339) UnmarshalText(data []byte) error {
+	parsed, err := time.Parse(time.RFC3339, string(data))
+	if err != nil {
+		return err
+	}
+	*t = TimeRFC3339(parsed)
+	return nil
+}
 
 type Cache struct {
 	sync.RWMutex
@@ -118,13 +139,64 @@ func init() {
 	rpcResponseCache = NewCache()
 }
 
+func MatchListPublicRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	// The public view is cached for 5 seconds.
+	cachedResponse, _, found := rpcResponseCache.Get("match:public")
+	if found {
+		return cachedResponse.(string), nil
+	}
+
+	minSize := 1
+	query := "-label.mode:unassigned"
+	matches, err := nk.MatchList(ctx, 1000, true, "", &minSize, nil, query)
+	if err != nil {
+		return "", runtime.NewError("Failed to list matches", StatusInternalError)
+	}
+	data, err := json.Marshal(matches)
+	if err != nil {
+		return "", runtime.NewError("Failed to marshal matches", StatusInternalError)
+	}
+	_ = data
+	labels := make([]any, 0, len(matches))
+	for _, m := range matches {
+		label := &EvrMatchState{}
+		if err := json.Unmarshal([]byte(m.GetLabel().GetValue()), label); err != nil {
+			return "", runtime.NewError("Failed to unmarshal match label", StatusInternalError)
+		}
+		// Remove private data
+		labels = append(labels, label.PublicView())
+	}
+
+	response := struct {
+		UpdateTime TimeRFC3339 `json:"update_time"`
+		Labels     []any       `json:"matches"`
+	}{
+		UpdateTime: TimeRFC3339(time.Now().UTC()),
+		Labels:     labels,
+	}
+
+	data, err = json.MarshalIndent(response, "", "  ")
+	if err != nil {
+		return "", runtime.NewError("Failed to marshal response", StatusInternalError)
+	}
+
+	payload = string(data)
+
+	// Update the cache
+	rpcResponseCache.Set("match:public", payload, 5*time.Second)
+
+	return payload, nil
+
+}
+
 type MatchRpcRequest struct {
 	MatchIDs []MatchID `json:"match_ids"`
 	Query    string    `json:"query"`
 }
 
 type MatchRpcResponse struct {
-	Labels []any `json:"matches"`
+	Timestamp TimeRFC3339
+	Labels    []any
 }
 
 func (r MatchRpcResponse) String() string {
