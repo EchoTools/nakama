@@ -643,3 +643,17 @@ func SetGuildGroupMetadata(ctx context.Context, nk runtime.NakamaModule, groupId
 
 	return nil
 }
+
+func MatchLabelByID(ctx context.Context, nk runtime.NakamaModule, matchID MatchID) (*EvrMatchState, error) {
+	match, err := nk.MatchGet(ctx, matchID.String())
+	if err != nil || match == nil {
+		return nil, err
+	}
+
+	label := EvrMatchState{}
+	if err = json.Unmarshal([]byte(match.GetLabel().GetValue()), &label); err != nil {
+		return nil, err
+	}
+
+	return &label, nil
+}
