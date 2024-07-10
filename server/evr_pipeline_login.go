@@ -913,7 +913,8 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 	}
 	serverProfile := profile.GetServer()
 	matchTypeMap := map[int64]string{
-		-3791849610740453400: "echo_arena",
+		-3791849610740453517: "echo_arena",
+		4421472114608583194:  "echo_combat",
 	}
 
 	matchType, ok := matchTypeMap[request.Payload.MatchType]
