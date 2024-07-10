@@ -461,6 +461,7 @@ func RTTweightedPopulationCmp(i, j time.Duration, o, p int) bool {
 	if i == 0 && j != 0 {
 		return false
 	}
+
 	// Sort by if over or under 90ms
 	if i < 90*time.Millisecond && j > 90*time.Millisecond {
 		return true
@@ -470,12 +471,10 @@ func RTTweightedPopulationCmp(i, j time.Duration, o, p int) bool {
 	}
 
 	// Sort by Population
-	if o > p {
-		return true
+	if o != p {
+		return o > p
 	}
-	if o < p {
-		return false
-	}
+
 	// If all else equal, sort by rtt
 	return i < j
 }
