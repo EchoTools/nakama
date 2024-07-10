@@ -863,7 +863,7 @@ func (d *DiscordAppBot) InitializeDiscordBot() error {
 		})
 	*/
 
-	bot.AddHandler(func(s *discordgo.Session, e *discordgo.Ready) {
+	bot.AddHandlerOnce(func(s *discordgo.Session, e *discordgo.Ready) {
 		if err := d.RegisterSlashCommands(); err != nil {
 			logger.Error("Failed to register slash commands: %w", err)
 		}
