@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/gofrs/uuid/v5"
+	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/ipinfo/go/v2/ipinfo"
@@ -224,7 +225,13 @@ func (s *EvrMatchState) GetLabel() string {
 
 func (s *EvrMatchState) PublicView() *EvrMatchState {
 	ps := *s
-	ps.Broadcaster.SessionID = ""
+	ps.Broadcaster = MatchBroadcaster{
+		SessionID:   s.Broadcaster.SessionID,
+		OperatorID:  s.Broadcaster.OperatorID,
+		GroupIDs:    s.Broadcaster.GroupIDs,
+		VersionLock: s.Broadcaster.VersionLock,
+		AppId:       s.Broadcaster.AppId,
+	}
 	if ps.LobbyType == PrivateLobby || ps.LobbyType == UnassignedLobby {
 		ps.ID = MatchID{}
 		ps.SpawnedBy = ""
@@ -233,8 +240,14 @@ func (s *EvrMatchState) PublicView() *EvrMatchState {
 	}
 
 	for i := range ps.Players {
-		ps.Players[i].ClientIP = ""
-		ps.Players[i].PartyID = ""
+		ps.Players[i] = PlayerInfo{
+			UserID:      ps.Players[i].UserID,
+			Username:    ps.Players[i].Username,
+			DisplayName: ps.Players[i].DisplayName,
+			EvrID:       ps.Players[i].EvrID,
+			Team:        ps.Players[i].Team,
+			DiscordID:   ps.Players[i].DiscordID,
+		}
 	}
 	return &ps
 }
