@@ -1318,6 +1318,23 @@ type CombatUnlocks struct {
 	TitleTitleB          bool `json:"rwd_title_title_b,omitempty"`
 }
 
+func NewStatistics() map[string]map[string]MatchStatistic {
+	return map[string]map[string]MatchStatistic{
+		"arena": {
+			"Level": MatchStatistic{
+				Operand: "add",
+				Value:   1,
+			},
+		},
+		"combat": {
+			"Level": MatchStatistic{
+				Operand: "add",
+				Value:   1,
+			},
+		},
+	}
+}
+
 func NewServerProfile() ServerProfile {
 	// This is the default server profile that EchoVR shipped with.
 	return ServerProfile{
@@ -1331,7 +1348,20 @@ func NewServerProfile() ServerProfile {
 			},
 			Number: 1,
 		},
-		Statistics: make(map[string]map[string]MatchStatistic),
+		Statistics: map[string]map[string]MatchStatistic{
+			"arena": {
+				"Level": MatchStatistic{
+					Operand: "add",
+					Value:   1,
+				},
+			},
+			"combat": {
+				"Level": MatchStatistic{
+					Operand: "add",
+					Value:   1,
+				},
+			},
+		},
 		UnlockedCosmetics: UnlockedCosmetics{
 			Arena: ArenaUnlocks{
 				DecalCombatFlamingoA:   true,

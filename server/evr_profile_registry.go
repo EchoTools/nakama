@@ -859,6 +859,10 @@ func (r *ProfileRegistry) GetSessionProfile(ctx context.Context, session *sessio
 	p.Server.PublisherLock = p.Login.PublisherLock
 	p.Server.LobbyVersion = p.Login.LobbyVersion
 
+	if p.Server.Statistics == nil || p.Server.Statistics["arena"] == nil || p.Server.Statistics["combat"] == nil {
+		p.Server.Statistics = evr.NewStatistics()
+	}
+
 	// Update the account
 	if err := r.discordRegistry.UpdateAccount(ctx, session.userID); err != nil {
 		logger.Warn("Failed to update account", zap.Error(err))
