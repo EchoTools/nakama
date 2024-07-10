@@ -1107,33 +1107,40 @@ func (m *EvrMatch) updateLabel(dispatcher runtime.MatchDispatcher, state *EvrMat
 }
 
 func checkIfGlobalDeveloper(ctx context.Context, nk runtime.NakamaModule, userID uuid.UUID) (bool, error) {
-	return checkGroupMembershipByName(ctx, nk, userID, GroupGlobalDevelopers, SystemGroupLangTag)
+	return checkGroupMembershipByName(ctx, nk, userID.String(), GroupGlobalDevelopers, SystemGroupLangTag)
 }
 
 func checkIfGlobalBot(ctx context.Context, nk runtime.NakamaModule, userID uuid.UUID) (bool, error) {
-	return checkGroupMembershipByName(ctx, nk, userID, GroupGlobalBots, SystemGroupLangTag)
+	return checkGroupMembershipByName(ctx, nk, userID.String(), GroupGlobalBots, SystemGroupLangTag)
 }
 
 func checkIfGlobalModerator(ctx context.Context, nk runtime.NakamaModule, userID uuid.UUID) (bool, error) {
 	// Developers are moderators
-	ok, err := checkGroupMembershipByName(ctx, nk, userID, GroupGlobalDevelopers, SystemGroupLangTag)
+	ok, err := checkGroupMembershipByName(ctx, nk, userID.String(), GroupGlobalDevelopers, SystemGroupLangTag)
 	if err != nil {
 		return false, fmt.Errorf("error getting user groups: %w", err)
 	}
 	if ok {
 		return true, nil
 	}
-	return checkGroupMembershipByName(ctx, nk, userID, GroupGlobalModerators, SystemGroupLangTag)
+	return checkGroupMembershipByName(ctx, nk, userID.String(), GroupGlobalModerators, SystemGroupLangTag)
 }
 
-func checkGroupMembershipByName(ctx context.Context, nk runtime.NakamaModule, userID uuid.UUID, groupName, langtag string) (bool, error) {
-	groups, _, err := nk.UserGroupsList(ctx, userID.String(), 100, nil, "")
-	if err != nil {
-		return false, fmt.Errorf("error getting user groups: %w", err)
-	}
-	for _, g := range groups {
-		if g.Group.LangTag == langtag && g.Group.Name == groupName {
-			return true, nil
+func checkGroupMembershipByName(ctx context.Context, nk runtime.NakamaModule, userID, groupName, langtag string) (bool, error) {
+	var err error
+	var groups []*api.UserGroupList_UserGroup
+	var cursor string
+	for {
+		if groups, cursor, err = nk.UserGroupsList(ctx, userID, 100, nil, cursor); err != nil {
+			return false, fmt.Errorf("error getting user groups: %w", err)
+		}
+		for _, g := range groups {
+			if g.Group.Name == groupName && g.State.GetValue() <= int32(api.UserGroupList_UserGroup_MEMBER) && g.Group.LangTag == langtag {
+				return true, nil
+			}
+		}
+		if cursor == "" {
+			break
 		}
 	}
 	return false, nil
