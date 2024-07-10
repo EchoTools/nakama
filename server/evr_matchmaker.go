@@ -9,7 +9,6 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gofrs/uuid/v5"
@@ -164,71 +163,59 @@ func (p *EvrPipeline) Backfill(ctx context.Context, session *sessionWS, msession
 		return sortFn(labelLatencies[i].latency.RTT, labelLatencies[j].latency.RTT, labelLatencies[i].label.PlayerCount, labelLatencies[j].label.PlayerCount)
 	})
 
-	if len(labels) == 0 {
-		return nil, query, nil
-	}
-
-	var selected *EvrMatchState
 	// Select the first match
 	for _, label := range labels {
 		// Check that the match is not full
-		logger = logger.With(zap.String("match_id", label.ID.String()))
+		logger = logger.With(zap.String("mid", label.ID.String()))
 
-		mu, _ := p.backfillQueue.LoadOrStore(label.ID.String(), &sync.Mutex{})
-
-		// Lock this backfill match
-		mu.Lock()
 		match, _, err := p.matchRegistry.GetMatch(ctx, label.ID.String())
 		if err != nil {
-			logger.Warn("Failed to get match: %s", zap.Error(err))
-			mu.Unlock()
-			continue
-		}
-		if match == nil {
-			logger.Warn("Match is nil")
-		}
-
-		// Extract the latest label
-		if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), label); err != nil {
-			logger.Warn("Failed to get match label")
-			mu.Unlock()
+			logger.Debug("Failed to get match: %s", zap.Error(err))
 			continue
 		}
 
-		if match.GetSize()-1 >= int32(label.MaxSize) { // -1 for the broadcaster
-			logger.Debug("Match is full")
-			mu.Unlock()
+		isPlayer := msession.Label.TeamIndex != Spectator && msession.Label.TeamIndex != Moderator
+		if ok, err := checkMatchForBackfill(match, minCount, isPlayer); err != nil {
+			logger.Debug("Failed to check match for backfill", zap.Error(err))
+			continue
+		} else if !ok {
 			continue
 		}
 
-		if msession.Label.TeamIndex != Spectator && msession.Label.TeamIndex != Moderator {
-
-			availablePlayerSlots := (label.PlayerLimit - label.PlayerCount)
-			// Check if there is space for the player(s)
-			if availablePlayerSlots < minCount {
-				logger.Debug("Match does not have enough open slots.")
-				mu.Unlock()
-				continue
-				// Ensure that adding the minCount to the match would balance the match
-			}
-
-			if msession.Label.Mode == evr.ModeCombatPublic && (label.PlayerCount+minCount)%2 != 0 {
-				logger.Debug("Combat match does not have the right multiple of open slots.")
-				mu.Unlock()
-				continue
-			}
-		}
-
-		go func() {
-			// Delay unlock to prevent join overflows
-			<-time.After(MatchJoinGracePeriod)
-			mu.Unlock()
-		}()
-		selected = label
-		break
+		return label, query, nil
 	}
 
-	return selected, query, nil
+	return nil, query, nil
+}
+
+func checkMatchForBackfill(match *api.Match, minCount int, isPlayer bool) (ok bool, err error) {
+
+	if match == nil {
+		return false, fmt.Errorf("match is nil")
+	}
+
+	label := &EvrMatchState{}
+	// Extract the latest label
+	if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), label); err != nil {
+		return false, fmt.Errorf("failed to get match label: %w", err)
+	}
+
+	if match.GetSize()-1 >= int32(label.MaxSize) { // -1 for the broadcaster
+		return false, nil
+	}
+
+	if !isPlayer {
+		return true, nil
+	}
+
+	if (label.PlayerLimit - label.PlayerCount) < minCount {
+		return false, nil
+	}
+
+	if label.Mode == evr.ModeCombatPublic && (label.PlayerCount+minCount)%2 != 0 {
+		return false, nil
+	}
+	return true, nil
 }
 
 // TODO FIXME Create a broadcaster registry
