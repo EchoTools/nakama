@@ -62,6 +62,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		"link/device":                   LinkDeviceRpc,
 		"link/usernamedevice":           LinkUserIdDeviceRpc,
 		"signin/discord":                DiscordSignInRpc,
+		"match/public":                  MatchListPublicRPC,
 		"match":                         MatchRPC,
 		"match/prepare":                 PrepareMatchRPC,
 		"match/setnext":                 RESTfulRPCHandlerFactory[SetNextMatchRPCRequest](SetNextMatchRPC),
