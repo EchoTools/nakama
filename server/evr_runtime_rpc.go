@@ -1,15 +1,11 @@
 package server
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
-	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -231,75 +227,40 @@ func MatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime
 		request.Query = "*"
 	}
 
-	response := MatchRpcResponse{
-		Labels: make([]any, 0, len(request.MatchIDs)),
-	}
+	matches := make([]*api.Match, 0, len(request.MatchIDs))
 
-	if publicView {
+	if request.MatchIDs != nil {
 
-		// The public view is cached for 5 seconds.
-		if request.MatchIDs == nil {
-			cachedResponse, _, found := rpcResponseCache.Get("match:public")
-			if found {
-				return cachedResponse.(string), nil
+		// Get specific match(es)
+		for _, id := range request.MatchIDs {
+			match, err := nk.MatchGet(ctx, id.String())
+			if err != nil {
+				return "", runtime.NewError("Failed to get match", StatusInternalError)
 			}
+			matches = append(matches, match)
 		}
-
-		// Lst all matches
-		query := "*"
-		if request.Query != "" {
-			query = request.Query
-		}
-		matches, err := nk.MatchList(ctx, 1000, true, "", nil, nil, query)
-		if err != nil {
-			return "", runtime.NewError("Failed to list matches", StatusInternalError)
-		}
-
-		for _, m := range matches {
-			label := &EvrMatchState{}
-			if err := json.Unmarshal([]byte(m.GetLabel().GetValue()), label); err != nil {
-				return "", runtime.NewError("Failed to unmarshal match label", StatusInternalError)
-			}
-			// Remove private data
-			label = label.PublicView()
-			response.Labels = append(response.Labels, label)
-		}
-
-		// Update the cache
-		rpcResponseCache.Set("match:public", response.String(), 5*time.Second)
 
 	} else {
 
-		matches := make([]*api.Match, 0, len(request.MatchIDs))
-		// Private view
-		if request.MatchIDs != nil {
-
-			// Get specific match(es)
-			for _, id := range request.MatchIDs {
-				match, err := nk.MatchGet(ctx, id.String())
-				if err != nil {
-					return "", runtime.NewError("Failed to get match", StatusInternalError)
-				}
-				matches = append(matches, match)
-			}
-
-		} else {
-
-			// Get all the matches
-			matches, err = nk.MatchList(ctx, 1000, true, "", nil, nil, request.Query)
-			if err != nil {
-				return "", runtime.NewError("Failed to list matches", StatusInternalError)
-			}
+		// Get all the matches
+		matches, err = nk.MatchList(ctx, 1000, true, "", nil, nil, request.Query)
+		if err != nil {
+			return "", runtime.NewError("Failed to list matches", StatusInternalError)
 		}
+	}
 
-		for _, match := range matches {
-			label := map[string]any{}
-			if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), &label); err != nil {
-				return "", runtime.NewError("Failed to unmarshal match label", StatusInternalError)
-			}
-
-			response.Labels = append(response.Labels, label)
+	labels := make([]any, 0, len(matches))
+	for _, match := range matches {
+		// "any" avoids some reflection overhead
+		label := map[string]any{}
+		if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), &label); err != nil {
+			return "", runtime.NewError("Failed to unmarshal match label", StatusInternalError)
 		}
+	}
+
+	response := MatchRpcResponse{
+		Timestamp: TimeRFC3339(time.Now().UTC()),
+		Labels:    labels,
 	}
 
 	return response.String(), nil
@@ -691,6 +652,7 @@ type terminateMatchResponse struct {
 
 func terminateMatchRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 	node := ctx.Value(runtime.RUNTIME_CTX_NODE).(string)
+
 	request := &terminateMatchRequest{}
 	if err := json.Unmarshal([]byte(payload), request); err != nil {
 		return "", err
