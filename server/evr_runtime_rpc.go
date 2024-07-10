@@ -137,16 +137,16 @@ func (r MatchRpcResponse) String() string {
 
 func MatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 	var err error
-	publicView := true
 
-	if u, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string); ok {
-		if ok, err := checkGroupMembershipByName(ctx, nk, uuid.FromStringOrNil(u), GroupGlobalPrivateDataAccess, SystemGroupLangTag); err != nil {
-			return "", runtime.NewError("failed to check group membership", StatusInternalError)
-		} else if !ok {
-			return "", runtime.NewError("unauthorized", StatusPermissionDenied)
-		}
+	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if !ok {
+		return "", runtime.NewError("authentication required", StatusUnauthenticated)
+	}
 
-		publicView = false
+	if ok, err := checkGroupMembershipByName(ctx, nk, userID, GroupGlobalPrivateDataAccess, SystemGroupLangTag); err != nil {
+		return "", runtime.NewError("failed to check group membership", StatusInternalError)
+	} else if !ok {
+		return "", runtime.NewError("unauthorized", StatusPermissionDenied)
 	}
 
 	request := &MatchRpcRequest{}
@@ -828,7 +828,7 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		return "", runtime.NewError("authentication required", StatusUnauthenticated)
 	}
 
-	if ok, err := checkGroupMembershipByName(ctx, nk, uuid.FromStringOrNil(userID), GroupGlobalBots, SystemGroupLangTag); err != nil {
+	if ok, err := checkGroupMembershipByName(ctx, nk, userID, GroupGlobalBots, SystemGroupLangTag); err != nil {
 		return "", runtime.NewError("failed to check group membership", StatusInternalError)
 	} else if !ok {
 		return "", runtime.NewError("unauthorized", StatusPermissionDenied)

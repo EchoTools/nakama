@@ -1380,7 +1380,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					break
 				}
 				var member bool
-				member, err = checkGroupMembershipByName(ctx, nk, userID, GroupGlobalBadgeAdmins, SystemGroupLangTag)
+				member, err = checkGroupMembershipByName(ctx, nk, userID.String(), GroupGlobalBadgeAdmins, SystemGroupLangTag)
 				if err != nil {
 					errFn(status.Error(codes.Internal, "failed to check group membership"))
 					break
@@ -1857,7 +1857,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					errFn(errors.New("failed to get user ID"))
 					return
 				}
-				member, err := checkGroupMembershipByName(ctx, nk, userID, GroupGlobalDevelopers, SystemGroupLangTag)
+				member, err := checkGroupMembershipByName(ctx, nk, userID.String(), GroupGlobalDevelopers, SystemGroupLangTag)
 				if err != nil {
 					errFn(errors.New("failed to check group membership"))
 					return
