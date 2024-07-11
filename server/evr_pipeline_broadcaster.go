@@ -220,6 +220,8 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 		ticker := time.NewTicker(60 * time.Second)
 		defer ticker.Stop()
 
+		defer p.matchBySessionID.Delete(session.ID().String())
+
 		for {
 			select {
 			case <-session.Context().Done():

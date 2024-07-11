@@ -561,7 +561,17 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 			return state, false, ""
 		}
 	}
+	contexts := []string{
+		mp.GetUserId(),
+		mp.GetSessionId(),
+		mp.GetEvrId(),
+	}
 
+	for _, context := range contexts {
+		if _, err := nk.StreamUserJoin(StreamModeEvr, context, StreamContextMatch.String(), "", mp.GetUserId(), mp.GetSessionId(), false, false, state.ID.String()); err != nil {
+			logger.Warn("Failed to update user status: %v", err)
+		}
+	}
 	logger.Debug("Accepting player into match: %s (%s)", presence.GetUsername(), mp.GetPlayerSession())
 	return state, true, ""
 }
@@ -620,11 +630,6 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 			// TODO FIXME Kick the player from the match.
 			logger.Error("Player not in cache. This shouldn't happen.")
 			return errors.New("player not in cache")
-		}
-
-		// Update the player's status to include the match ID
-		if err := nk.StreamUserUpdate(StreamModeEvr, p.GetUserId(), StreamContextMatch.String(), "", p.GetUserId(), p.GetSessionId(), false, false, state.ID.String()); err != nil {
-			logger.Warn("Failed to update user status: %v", err)
 		}
 
 		// Send this after the function returns to ensure the match is ready to receive the player.
@@ -705,8 +710,6 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 	})
 
 	for _, p := range presences {
-		// Update the player's status to remove the match ID
-		// Check if the session exists.
 
 		sessionID := uuid.FromStringOrNil(p.GetSessionId())
 		matchPresence, ok := state.presences[sessionID]
@@ -714,13 +717,6 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 			continue
 		}
 		delete(state.presences, sessionID)
-
-		if _, err := nk.StreamUserGet(StreamModeEvr, p.GetUserId(), StreamContextMatch.String(), "", p.GetUserId(), p.GetSessionId()); err != nil {
-			continue
-		}
-		if err := nk.StreamUserUpdate(StreamModeEvr, p.GetUserId(), StreamContextMatch.String(), "", p.GetUserId(), p.GetSessionId(), false, false, ""); err != nil {
-			logger.Debug("Failed to update user status for %v: %v", p, err)
-		}
 	}
 	// Delete the each user from the match.
 	if len(rejects) > 0 {
