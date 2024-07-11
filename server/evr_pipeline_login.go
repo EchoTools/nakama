@@ -855,12 +855,6 @@ func generateSuspensionNotice(statuses []*SuspensionStatus) string {
 
 func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.UserServerProfileUpdateRequest)
-	// Always send the same response
-
-	if session.userID == uuid.Nil {
-		logger.Warn("UserServerProfileUpdateRequest: user not logged in")
-		return nil
-	}
 
 	defer func() {
 		if err := session.SendEvr(evr.NewUserServerProfileUpdateSuccess(request.EvrID)); err != nil {
