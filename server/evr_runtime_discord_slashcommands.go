@@ -2413,21 +2413,6 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		whoami.DisplayNames = append(whoami.DisplayNames, dn.Key)
 	}
 
-	result, err := GetAddressRecords(ctx, logger, nk, userID.String())
-	if err != nil {
-		return err
-	}
-
-	whoami.ClientAddresses = make([]string, 0, len(result))
-	for _, a := range result {
-		whoami.ClientAddresses = append(whoami.ClientAddresses, a.GetKey())
-	}
-
-	// Sort by age
-	sort.SliceStable(whoami.ClientAddresses, func(i, j int) bool {
-		return result[i].GetUpdateTime().AsTime().After(result[j].GetUpdateTime().AsTime())
-	})
-
 	// Get the MatchIDs for the user from it's presence
 	presences, err := nk.StreamUserList(StreamModeEvr, userID.String(), StreamContextMatch.String(), "", true, true)
 	if err != nil {
@@ -2484,7 +2469,6 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		{Name: "Discord ID", Value: whoami.DiscordID, Inline: false},
 		{Name: "Username", Value: whoami.Username, Inline: true},
 		{Name: "Display Names", Value: strings.Join(whoami.DisplayNames, "\n"), Inline: false},
-		{Name: "IP Addresses", Value: strings.Join(whoami.ClientAddresses, "\n"), Inline: false},
 		{Name: "Linked Devices", Value: strings.Join(whoami.DeviceLinks, "\n"), Inline: false},
 		{Name: "Logins", Value: func() string {
 			lines := lo.MapToSlice(whoami.EVRIDLogins, func(k string, v time.Time) string {
