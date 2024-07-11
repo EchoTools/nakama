@@ -2,7 +2,6 @@ package evr
 
 import (
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 )
 
@@ -10,21 +9,14 @@ import (
 type ConfigSuccess struct {
 	Type     Symbol
 	Id       Symbol
-	Resource interface{}
+	Resource any
 }
-
-func (m ConfigSuccess) Token() string   { return "SNSConfigSuccessv2" }
-func (m *ConfigSuccess) Symbol() Symbol { return SymbolOf(m) }
 
 func (m ConfigSuccess) String() string {
-	b, err := json.MarshalIndent(m.Resource, "", "  ")
-	if err != nil {
-		panic("failed to marshal resource")
-	}
-	return fmt.Sprintf(`ConfigSuccess(type="%v", id="%v", payload=<%d bytes>)`, m.Type, m.Id, len(b))
+	return fmt.Sprintf("%T(type=%v, id=%v)", m, m.Type, m.Id)
 }
 
-func NewConfigSuccess(_type string, id string, resource interface{}) *ConfigSuccess {
+func NewConfigSuccess(_type string, id string, resource any) *ConfigSuccess {
 	return &ConfigSuccess{
 		Type:     ToSymbol(_type),
 		Id:       ToSymbol(id),
@@ -38,6 +30,21 @@ func (m *ConfigSuccess) Stream(s *EasyStream) error {
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Id) },
 		func() error { return s.StreamJson(&m.Resource, true, ZstdCompression) },
 	})
+}
+
+func GetDefaultConfigResource(_type string, id string) string {
+	switch _type + ":" + id {
+	case "main_menu:main_menu":
+		return DefaultMainMenuConfigResource
+	case "active_battle_pass_season:active_battle_pass_season":
+		return DefaultActiveBattlePassSeasonConfigResource
+	case "active_store_entry:active_store_entry":
+		return DefaultActiveStoreEntryConfigResource
+	case "active_store_featured_entry:active_store_featured_entry":
+		return DefaultActiveStoreFeaturedEntryConfigResource
+	default:
+		return ""
+	}
 }
 
 const (
@@ -271,18 +278,3 @@ const (
 		"id": "active_store_featured_entry"
 	}`
 )
-
-func GetDefaultConfigResource(_type string, id string) string {
-	switch _type + ":" + id {
-	case "main_menu:main_menu":
-		return DefaultMainMenuConfigResource
-	case "active_battle_pass_season:active_battle_pass_season":
-		return DefaultActiveBattlePassSeasonConfigResource
-	case "active_store_entry:active_store_entry":
-		return DefaultActiveStoreEntryConfigResource
-	case "active_store_featured_entry:active_store_featured_entry":
-		return DefaultActiveStoreFeaturedEntryConfigResource
-	default:
-		return ""
-	}
-}

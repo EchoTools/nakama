@@ -1,38 +1,20 @@
 package evr
 
-type LoginSettings struct {
-	LoginSettings EchoClientSettings `json:"Resource"`
-}
+import (
+	"encoding/json"
+	"fmt"
+	"time"
+)
 
-func (m LoginSettings) Token() string {
-	return "SNSLoginSettings"
-}
+var (
+	NakamaEVRLaunchDay = time.Date(2024, 03, 27, 0, 0, 0, 0, time.UTC)
+	// Lone Echo Day is Thursday, August 1, 2537
+	// This is the date that the Lone Echo game takes place in.
+	LoneEchoDay = time.Date(2537, 8, 1, 8, 0, 0, 0, time.UTC)
+)
 
-func (m *LoginSettings) Symbol() Symbol {
-	return SymbolOf(m)
-}
-
-func (m LoginSettings) String() string {
-	return "SNSLoginSettings{...}"
-}
-
-func NewSNSLoginSettings(settings EchoClientSettings) *LoginSettings {
-	return &LoginSettings{
-		LoginSettings: settings,
-	}
-}
-
-func (m *LoginSettings) Stream(s *EasyStream) error {
-	return RunErrorFunctions([]func() error{
-		func() error { return s.StreamJson(&m.LoginSettings, false, ZlibCompression) },
-	})
-}
-
-// Represents the settings for an EchoVR client.
-// This is the data that is sent to the client right after it's been authenticated.
-type EchoClientSettings struct {
-	// WARNING: EchoVR dictates this schema.
-	ConfigData          ConfigData `json:"config_data"`           // ConfigData is a map that stores configuration data for the EchoVR client.
+type GameSettings struct {
+	ConfigData          ConfigData `json:"config_data"`           // SeasonPassConfigs is a map that stores configuration data for the EchoVR client.
 	Env                 string     `json:"env"`                   // Env represents the environment in which the EchoVR client is running.
 	IapUnlocked         bool       `json:"iap_unlocked"`          // IapUnlocked indicates whether in-app purchases are unlocked for the EchoVR client.
 	MatchmakerQueueMode string     `json:"matchmaker_queue_mode"` // MatchmakerQueueMode specifies the queue mode for the EchoVR client's matchmaker.
@@ -43,23 +25,99 @@ type EchoClientSettings struct {
 	RemoteLogSocial       bool `json:"remote_log_social"`        // send remote logs for social events
 	RemoteLogWarnings     bool `json:"remote_log_warnings"`      // send remote logs for warnings
 }
+
+func NewGameSettings(configData ConfigData, env string, iapUnlocked bool, matchmakerQueueMode string, remoteLogErrors bool, remoteLogMetrics bool, remoteLogRichPresence bool, remoteLogSocial bool, remoteLogWarnings bool) *GameSettings {
+	return &GameSettings{
+		ConfigData:            configData,
+		Env:                   env,
+		IapUnlocked:           iapUnlocked,
+		MatchmakerQueueMode:   matchmakerQueueMode,
+		RemoteLogErrors:       remoteLogErrors,
+		RemoteLogMetrics:      remoteLogMetrics,
+		RemoteLogRichPresence: remoteLogRichPresence,
+		RemoteLogSocial:       remoteLogSocial,
+		RemoteLogWarnings:     remoteLogWarnings,
+	}
+}
+
+func (m *GameSettings) String() string {
+	return fmt.Sprintf("%T()", m)
+}
+
+func (m *GameSettings) Stream(s *EasyStream) error {
+	return RunErrorFunctions([]func() error{
+		func() error { return s.StreamJson(&m, false, ZlibCompression) },
+	})
+}
+
 type ConfigData struct {
-	ActiveBattlePassSeason   Active `json:"active_battle_pass_season"`
-	ActiveStoreEntry         Active `json:"active_store_entry"`
-	ActiveStoreFeaturedEntry Active `json:"active_store_featured_entry"`
-}
-type Active struct {
-	ID        string `json:"id"`
-	Starttime int64  `json:"starttime"`
-	Endtime   int64  `json:"endtime"`
+	Schedules []SeasonPassSchedule
 }
 
-const (
-	LoneEchoDay = 17911198800
-)
+func NewConfigData(schedules ...SeasonPassSchedule) ConfigData {
+	return ConfigData{Schedules: schedules}
+}
 
-var (
-	DefaultGameSettingsSettings = EchoClientSettings{
+func (m ConfigData) MarshalJSON() ([]byte, error) {
+	cd := map[string]struct {
+		ID    string `json:"id"`
+		Start int64  `json:"starttime"`
+		End   int64  `json:"endtime"`
+	}{}
+
+	for _, s := range m.Schedules {
+		cd[s.ID] = struct {
+			ID    string `json:"id"`
+			Start int64  `json:"starttime"`
+			End   int64  `json:"endtime"`
+		}{
+			ID:    s.ID,
+			Start: s.Start.UTC().Unix(),
+			End:   s.End.UTC().Unix(),
+		}
+	}
+
+	return json.Marshal(cd)
+}
+
+func (m *ConfigData) UnmarshalJSON(data []byte) error {
+	cd := map[string]struct {
+		ID    string `json:"id"`
+		Start int64  `json:"starttime"`
+		End   int64  `json:"endtime"`
+	}{}
+
+	if err := json.Unmarshal(data, &cd); err != nil {
+		return err
+	}
+
+	for _, v := range cd {
+		m.Schedules = append(m.Schedules, SeasonPassSchedule{
+			ID:    v.ID,
+			Start: time.Unix(v.Start, 0).UTC(),
+			End:   time.Unix(v.End, 0).UTC(),
+		})
+	}
+
+	return nil
+}
+
+type SeasonPassSchedule struct {
+	ID    string
+	Start time.Time
+	End   time.Time
+}
+
+func NewSeasonPassSchedule(id string, start, end time.Time) SeasonPassSchedule {
+	return SeasonPassSchedule{
+		ID:    id,
+		Start: start,
+		End:   end,
+	}
+}
+
+func NewDefaultGameSettings() *GameSettings {
+	return &GameSettings{
 		IapUnlocked:           true,
 		RemoteLogSocial:       false,
 		RemoteLogWarnings:     false,
@@ -68,22 +126,10 @@ var (
 		RemoteLogMetrics:      true,
 		Env:                   "live",
 		MatchmakerQueueMode:   "disabled",
-		ConfigData: ConfigData{
-			ActiveBattlePassSeason: Active{
-				ID:        "active_battle_pass_season",
-				Starttime: 0,
-				Endtime:   LoneEchoDay,
-			},
-			ActiveStoreEntry: Active{
-				ID:        "active_store_entry",
-				Starttime: 0,
-				Endtime:   LoneEchoDay,
-			},
-			ActiveStoreFeaturedEntry: Active{
-				ID:        "active_store_featured_entry",
-				Starttime: 0,
-				Endtime:   LoneEchoDay,
-			},
-		},
+		ConfigData: NewConfigData(
+			NewSeasonPassSchedule("active_battle_pass_season", NakamaEVRLaunchDay, LoneEchoDay),
+			NewSeasonPassSchedule("active_store_entry", NakamaEVRLaunchDay, LoneEchoDay),
+			NewSeasonPassSchedule("active_store_featured_entry", NakamaEVRLaunchDay, LoneEchoDay),
+		),
 	}
-)
+}

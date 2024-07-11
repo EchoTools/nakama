@@ -104,7 +104,7 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 	discordId, _ := ctx.Value(ctxDiscordIdKey{}).(string)
 
 	// Authenticate the connection
-	loginSettings, err := p.processLogin(ctx, logger, session, request.EvrId, deviceId, discordId, userPassword, payload)
+	gameSettings, err := p.processLogin(ctx, logger, session, request.EvrId, deviceId, discordId, userPassword, payload)
 	if err != nil {
 		st := status.Convert(err)
 		return msgFailedLoginFn(session, request.EvrId, errors.New(st.Message()))
@@ -115,12 +115,12 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 	return session.SendEvr(
 		evr.NewLoginSuccess(session.id, request.EvrId),
 		evr.NewSTcpConnectionUnrequireEvent(),
-		evr.NewSNSLoginSettings(loginSettings),
+		gameSettings,
 	)
 }
 
 // processLogin handles the authentication of the login connection.
-func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, session *sessionWS, evrId evr.EvrId, deviceId *DeviceAuth, discordId string, userPassword string, loginProfile evr.LoginProfile) (settings evr.EchoClientSettings, err error) {
+func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, session *sessionWS, evrId evr.EvrId, deviceId *DeviceAuth, discordId string, userPassword string, loginProfile evr.LoginProfile) (settings *evr.GameSettings, err error) {
 	// Authenticate the account.
 	account, err := p.authenticateAccount(ctx, logger, session, deviceId, discordId, userPassword, loginProfile)
 	if err != nil {
@@ -226,7 +226,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	profile, err := p.profileRegistry.GetSessionProfile(ctx, session, loginProfile, evrId)
 	if err != nil {
 		session.logger.Error("failed to load game profiles", zap.Error(err))
-		return evr.DefaultGameSettingsSettings, fmt.Errorf("failed to load game profiles")
+		return evr.NewDefaultGameSettings(), fmt.Errorf("failed to load game profiles")
 	}
 
 	// Set the display name once.
@@ -240,7 +240,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	p.profileRegistry.Store(session.userID, profile)
 
 	// TODO Add the settings to the user profile
-	settings = evr.DefaultGameSettingsSettings
+	settings = evr.NewDefaultGameSettings()
 	return settings, nil
 
 }
