@@ -232,7 +232,7 @@ func TestDeviceAuth_Token(t *testing.T) {
 				AppID:           tt.fields.AppID,
 				EvrID:           tt.fields.EvrID,
 				HMDSerialNumber: tt.fields.HMDSerialNumber,
-				ClientAddr:      tt.fields.ClientAddr,
+				ClientIP:        tt.fields.ClientAddr,
 			}
 			if got := d.Token(); got != tt.want {
 				t.Errorf("DeviceAuth.Token() = %v, want %v", got, tt.want)
@@ -273,7 +273,7 @@ func TestDeviceAuth_WildcardToken(t *testing.T) {
 				AppID:           tt.fields.AppID,
 				EvrID:           tt.fields.EvrID,
 				HMDSerialNumber: tt.fields.HMDSerialNumber,
-				ClientAddr:      tt.fields.ClientAddr,
+				ClientIP:        tt.fields.ClientAddr,
 			}
 			if got := d.WildcardToken(); got != tt.want {
 				t.Errorf("DeviceAuth.Token() = %v, want %v", got, tt.want)
