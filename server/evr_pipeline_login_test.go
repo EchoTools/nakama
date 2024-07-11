@@ -36,6 +36,23 @@ func TestParseDeviceId(t *testing.T) {
 					AccountId:    3961234097123078,
 				},
 				HMDSerialNumber: "N/A",
+				ClientAddr:      "127.0.0.1",
+			},
+			false,
+		},
+		{
+			"valid token, empty headset ID",
+			args{
+				token: "0:DMO-463990143344164620::104.8.177.198",
+			},
+			&DeviceAuth{
+				AppID: 0,
+				EvrID: evr.EvrId{
+					PlatformCode: 3,
+					AccountId:    463990143344164620,
+				},
+				HMDSerialNumber: "",
+				ClientAddr:      "104.8.177.198",
 			},
 			false,
 		},
