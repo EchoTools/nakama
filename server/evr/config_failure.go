@@ -5,31 +5,22 @@ import (
 	"fmt"
 )
 
-var Symbol_SNSConfigFailure Symbol = ConfigFailure{}.Symbol()
-
 type ConfigFailure struct {
-	Unk0      uint64 // EchoRelay uses a UInt128 here.
+	Unk0      uint64
 	Unk1      uint64
 	ErrorInfo ConfigErrorInfo
 }
 
-func (m ConfigFailure) Token() string  { return "SNSConfigFailurev2" }
-func (m ConfigFailure) Symbol() Symbol { return ToSymbol(m.Token()) }
-
 func (m ConfigFailure) String() string {
 	e := m.ErrorInfo
-	return fmt.Sprintf(`ConfigErrorInfo{Type: "%v" Identifier: "%v" ErrorCode: 0x%08x Error: "%v"}`, e.Type, e.Identifier, e.ErrorCode, e.Error)
+	return fmt.Sprintf(`%T(type="%s", id="%s", code=%d, error="%s")`, m, e.Type, e.Identifier, e.ErrorCode, e.Error)
 }
 
 type ConfigErrorInfo struct {
-	Type       string `json:"type" validate:"required,notblank"`
-	Identifier string `json:"identifier" validate:"required,notblank"`
-	ErrorCode  uint64 `json:"errorCode" validate:"required,notblank"`
-	Error      string `json:"error" validate:"required,notblank"`
-}
-
-func (configErrorInfo ConfigErrorInfo) Verify() bool {
-	return ValidateStruct(configErrorInfo) == nil
+	Type       string `json:"type"`
+	Identifier string `json:"identifier"`
+	ErrorCode  uint64 `json:"errorCode"`
+	Error      string `json:"error"`
 }
 
 func (m *ConfigFailure) Stream(s *EasyStream) error {
@@ -40,9 +31,14 @@ func (m *ConfigFailure) Stream(s *EasyStream) error {
 	})
 }
 
-func NewSNSConfigFailure(errorInfo ConfigErrorInfo) *ConfigFailure {
+func NewConfigFailure(typ, id string) *ConfigFailure {
 	return &ConfigFailure{
-		Unk0:      0,
-		ErrorInfo: errorInfo,
+		Unk0: 0,
+		ErrorInfo: ConfigErrorInfo{
+			Type:       typ,
+			Identifier: id,
+			ErrorCode:  0x00000001,
+			Error:      "resource not found",
+		},
 	}
 }

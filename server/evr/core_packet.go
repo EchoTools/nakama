@@ -79,7 +79,7 @@ var (
 		0xd2986849b36b9c72: (*UserServerProfileUpdateRequest)(nil),
 		0xd299785ba56b9c75: (*UserServerProfileUpdateSuccess)(nil),
 		0xe4b9b1cab57e8988: (*LobbyStatusNotify)(nil),
-		0xed5be2c3632155f1: (*LoginSettings)(nil),
+		0xed5be2c3632155f1: (*GameSettings)(nil),
 		0xf24185da0edef641: (*UpdateProfileFailure)(nil),
 		0xf25491d001cef757: (*UpdateProfileSuccess)(nil),
 		0xfb632e5a38ec8c61: (*LoggedInUserProfileFailure)(nil),

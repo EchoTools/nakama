@@ -69,7 +69,7 @@ type Chunk struct {
 		UserServerProfileUpdateRequest     *UserServerProfileUpdateRequest    `struct-case:"0xd2986849b36b9c72" json:",omitempty"`
 		UserServerProfileUpdateSuccess     *UserServerProfileUpdateSuccess    `struct-case:"0xd299785ba56b9c75" json:",omitempty"`
 		LobbyStatusNotify                  *LobbyStatusNotify                 `struct-case:"0xe4b9b1cab57e8988" json:",omitempty"`
-		LoginSettings                      *LoginSettings                     `struct-case:"0xed5be2c3632155f1" json:",omitempty"`
+		LoginSettings                      *GameSettings                      `struct-case:"0xed5be2c3632155f1" json:",omitempty"`
 		UpdateProfileFailure               *UpdateProfileFailure              `struct-case:"0xf24185da0edef641" json:",omitempty"`
 		UpdateProfileSuccess               *UpdateProfileSuccess              `struct-case:"0xf25491d001cef757" json:",omitempty"`
 		LobbyPingRequest                   *LobbyPingRequest                  `struct-case:"0xfabf5f8719bfebf3" json:",omitempty"`
