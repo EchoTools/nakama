@@ -13,14 +13,13 @@ import (
 )
 
 type leaderboard struct {
-	node      string
-	matchType string // -3791849610740453400
-	group     string // arena, daily, weekly
-	statName  string // ArenaLosses
+	node     string
+	group    string // arena, daily, weekly
+	statName string // ArenaLosses
 }
 
 func (b leaderboard) ID() string {
-	name := fmt.Sprintf("%s.leaderboard:%s:%s:%s", b.node, b.matchType, b.group, b.statName)
+	name := fmt.Sprintf("%s.leaderboard:%s:%s", b.node, b.group, b.statName)
 	return uuid.NewV5(uuid.NamespaceDNS, name).String()
 }
 
@@ -55,16 +54,15 @@ func (r *LeaderboardRegistry) set(id string) {
 	r.cache[id] = struct{}{}
 }
 
-func (r *LeaderboardRegistry) Submission(ctx context.Context, ownerID, evrID, username, matchSessionID, matchType, group, statName, operator string, value any) (*api.LeaderboardRecord, error) {
+func (r *LeaderboardRegistry) Submission(ctx context.Context, ownerID, evrID, username, matchSessionID, group, statName, operator string, value any) (*api.LeaderboardRecord, error) {
 
 	s := strings.SplitN(group, "_", 2)
 	group = s[0]
 
 	leaderboard := leaderboard{
-		node:      r.node,
-		matchType: matchType,
-		group:     group,
-		statName:  statName,
+		node:     r.node,
+		group:    group,
+		statName: statName,
 	}
 
 	id := leaderboard.ID()
@@ -101,11 +99,10 @@ func (r *LeaderboardRegistry) Submission(ctx context.Context, ownerID, evrID, us
 		}
 
 		metadata := map[string]interface{}{
-			"node":       r.node,
-			"match_type": matchType,
-			"group":      group,
-			"stat_name":  statName,
-			"operator":   operator,
+			"node":      r.node,
+			"group":     group,
+			"stat_name": statName,
+			"operator":  operator,
 		}
 
 		if err := r.nk.LeaderboardCreate(ctx, id, authoritative, sortOrder, operator, resetSchedule, metadata); err != nil {
@@ -138,12 +135,11 @@ func (r *LeaderboardRegistry) Submission(ctx context.Context, ownerID, evrID, us
 	return record, err
 }
 
-func (r *LeaderboardRegistry) List(ctx context.Context, ownerID, matchType, group, statName string) ([]*api.LeaderboardRecord, error) {
+func (r *LeaderboardRegistry) List(ctx context.Context, ownerID, group, statName string) ([]*api.LeaderboardRecord, error) {
 	leaderboard := leaderboard{
-		node:      r.node,
-		matchType: matchType,
-		group:     group,
-		statName:  statName,
+		node:     r.node,
+		group:    group,
+		statName: statName,
 	}
 
 	id := leaderboard.ID()

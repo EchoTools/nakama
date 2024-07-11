@@ -840,65 +840,38 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 		}
 	}()
 
-	// Get the target user's match
-	matchID, ok := p.matchByEvrID.Load(request.EvrID.String())
-	if !ok {
-		logger.Warn("UserServerProfileUpdateRequest: user not in a match")
-		return nil
+	matchID, presence, err := GetMatchByEvrID(p.runtimeModule, request.EvrID)
+	if err != nil || matchID == nil || presence == nil {
+		return fmt.Errorf("failed to get match by evrID: %w", err)
 	}
-	logger = logger.With(zap.String("matchID", matchID))
+	userID := uuid.FromStringOrNil(presence.GetUserId())
+	username := presence.GetUsername()
 
-	matchComponents := strings.Split(matchID, ".")
-
-	// Check if the requester is a broadcaster in that match
-	_, _, statejson, err := p.matchRegistry.GetState(ctx, uuid.FromStringOrNil(matchComponents[0]), matchComponents[1])
+	presences, err := p.runtimeModule.StreamUserList(StreamModeEvr, matchID.UUID().String(), "", matchID.Node(), true, true)
 	if err != nil {
-		logger.Warn("UserServerProfileUpdateRequest: failed to get match", zap.Error(err))
-		return nil
+		return fmt.Errorf("failed to get stream presences for match: %w", err)
 	}
 
-	// Check the label for the broadcaster
-	state := &EvrMatchState{}
-	if err := json.Unmarshal([]byte(statejson), state); err != nil {
-		logger.Warn("UserServerProfileUpdateRequest: failed to unmarshal match state", zap.Error(err))
-		return nil
+	found := false
+	for _, p := range presences {
+		if p.GetUserId() == session.userID.String() {
+			found = true
+		}
 	}
 
-	if state.Broadcaster.OperatorID != session.userID.String() {
-		logger.Warn("UserServerProfileUpdateRequest: user not broadcaster for match")
-		return nil
-	}
-
-	// Get the user id for the target
-	targetSession, found := p.loginSessionByEvrID.Load(request.EvrID.String())
+	profile, found := p.profileRegistry.Load(uuid.FromStringOrNil(presence.GetUserId()), request.EvrID)
 	if !found {
-		logger.Warn("UserServerProfileUpdateRequest: user not found", zap.String("evrId", request.EvrID.Token()))
-		return nil
+		return fmt.Errorf("failed to load game profiles")
 	}
 
-	userID := targetSession.UserID()
-	username := targetSession.Username()
-
-	profile, found := p.profileRegistry.Load(userID, request.EvrID)
-	if !found {
-		logger.Warn("UserServerProfileUpdateRequest: failed to load game profiles")
-		return nil
-	}
 	serverProfile := profile.GetServer()
-	matchTypeMap := map[int64]string{
-		-3791849610740453517: "echo_arena",
-		4421472114608583194:  "echo_combat",
-	}
 
-	matchType, ok := matchTypeMap[request.Payload.MatchType]
-	if !ok {
-		logger.Warn("UserServerProfileUpdateRequest: unknown match type", zap.Int64("matchType", request.Payload.MatchType))
-	}
-
+	matchType := evr.ToSymbol(request.Payload.MatchType).Token().String()
+	_ = matchType
 	for groupName, stats := range request.Payload.Update.StatsGroups {
 
 		for statName, stat := range stats {
-			record, err := p.leaderboardRegistry.Submission(ctx, userID.String(), request.EvrID.String(), username, request.Payload.SessionID.String(), matchType, groupName, statName, stat.Operand, stat.Value)
+			record, err := p.leaderboardRegistry.Submission(ctx, userID.String(), request.EvrID.String(), username, request.Payload.SessionID.String(), groupName, statName, stat.Operand, stat.Value)
 			if err != nil {
 				logger.Warn("Failed to submit leaderboard", zap.Error(err))
 			}
