@@ -751,27 +751,29 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 
 	var err error
 
-	if state.broadcaster == nil && tick > state.broadcasterJoinExpiry {
-		// If the broadcaster has not joined within the timeout, shut down the match.
-		logger.Warn("Broadcaster did not join before the expiry time. Shutting down.")
-		return nil
+	if state.broadcaster == nil {
+		if state.LobbyType != UnassignedLobby {
+			logger.Error("Parking match has a lobby type. Shutting down.")
+			return nil
+		}
+		if tick > 15*state.tickRate {
+			logger.Error("Parking match join timeout expired. Shutting down.")
+			return nil
+		}
 	}
+	if state.Started {
+		if len(state.presences) == 0 {
+			state.emptyTicks++
 
-	if state.LobbyType != UnassignedLobby {
-		if state.Started {
-			if len(state.presences) == 0 {
-				state.emptyTicks++
-
-				if state.emptyTicks > 60*state.tickRate {
-					logger.Warn("Match has been empty for too long. Shutting down.")
-					return nil
-				}
-
-			} else {
-				state.emptyTicks = 0
+			if state.emptyTicks > 60*state.tickRate {
+				logger.Warn("Match has been empty for too long. Shutting down.")
+				return nil
 			}
-		} else if tick > state.sessionStartExpiry {
-			// Start the session to allow the broadcaster to load the level, it will just exit like normal if no one joins
+		}
+	} else if state.StartTime.Before(time.Now().Add(-10 * time.Minute)) {
+		if state.LobbyType != UnassignedLobby {
+			logger.Error("Match has not started on time. Shutting down.")
+			// Tell the broadcaster to load the level
 			state, err = m.StartSession(ctx, logger, nk, dispatcher, state)
 			if err != nil {
 				logger.Error("failed to start session: %v", err)
