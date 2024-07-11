@@ -67,7 +67,7 @@ func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logg
 
 	if singleMatch {
 		// Disconnect this EVRID from other matches
-		sessionIDs := session.tracker.ListLocalSessionIDByStream(PresenceStream{Mode: StreamModeEvr, Subject: evrID.UUID(), Subcontext: svcMatchID})
+		sessionIDs := session.tracker.ListLocalSessionIDByStream(PresenceStream{Mode: StreamModeEvr, Subject: evrID.UUID(), Subcontext: matchContext})
 		for _, foundSessionID := range sessionIDs {
 			if foundSessionID == session.id {
 				// Allow the current session, only disconnect any older ones.
@@ -89,17 +89,17 @@ func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logg
 	s := session
 	s.tracker.TrackMulti(s.ctx, s.id, []*TrackerOp{
 		{
-			Stream: PresenceStream{Mode: StreamModeEvr, Subject: session.id, Subcontext: svcMatchID},
+			Stream: PresenceStream{Mode: StreamModeEvr, Subject: session.id, Subcontext: matchContext},
 			Meta:   PresenceMeta{Format: s.format, Hidden: true},
 		},
 		// By login sessionID and match service ID
 		{
-			Stream: PresenceStream{Mode: StreamModeEvr, Subject: loginSessionID, Subcontext: svcMatchID},
+			Stream: PresenceStream{Mode: StreamModeEvr, Subject: loginSessionID, Subcontext: matchContext},
 			Meta:   PresenceMeta{Format: s.format, Hidden: true},
 		},
 		// By EVRID and match service ID
 		{
-			Stream: PresenceStream{Mode: StreamModeEvr, Subject: evrID.UUID(), Subcontext: svcMatchID},
+			Stream: PresenceStream{Mode: StreamModeEvr, Subject: evrID.UUID(), Subcontext: matchContext},
 			Meta:   PresenceMeta{Format: s.format, Hidden: true},
 		},
 		// EVR packet data stream for the match session by Session ID and service ID

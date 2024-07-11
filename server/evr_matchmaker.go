@@ -711,7 +711,6 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 	}
 
 	p.matchBySessionID.Store(session.ID().String(), matchID.String())
-	p.matchByEvrID.Store(evrID.Token(), matchID.String())
 
 	return nil
 }

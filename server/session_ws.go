@@ -45,7 +45,7 @@ var (
 	ErrSessionQueueFull = errors.New("session outgoing queue full")
 
 	svcLoginID       = uuid.FromStringOrNil("00000000-0000-0000-0000-000000000001")
-	svcMatchID       = uuid.FromStringOrNil("00000000-0000-0000-0000-000000000002")
+	matchContext     = uuid.FromStringOrNil("00000000-0000-0000-0000-000000000002")
 	svcBroadcasterID = uuid.FromStringOrNil("00000000-0000-0000-0000-000000000003")
 	featurePattern   = regexp.MustCompile(`^[a-z0-9_]+$`)
 )
