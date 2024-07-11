@@ -110,19 +110,29 @@ type ClientProfile struct {
 	EvrID       EvrId  `json:"xplatformid,omitempty"` // Ignored and set by nakama
 
 	// The team name shown on the spectator scoreboard overlay
-	TeamName           string            `json:"teamname,omitempty" validate:"omitempty,ascii"`
-	CombatWeapon       string            `json:"weapon" validate:"omitnil,oneof=assault blaster rocket scout magnum smg chain rifle"`
-	CombatGrenade      string            `json:"grenade" validate:"omitnil,oneof=arc burst det stun loc"`
-	CombatDominantHand uint8             `json:"weaponarm" validate:"eq=0|eq=1"`
-	ModifyTime         int64             `json:"modifytime" validate:"gte=0"` // Ignored and set by nakama
-	CombatAbility      string            `json:"ability" validate:"oneof=buff heal sensor shield wraith"`
-	LegalConsents      LegalConsents     `json:"legal" validate:"required"`
-	MutedPlayers       Players           `json:"mute,omitempty"`
-	GhostedPlayers     Players           `json:"ghost,omitempty"`
-	NewPlayerProgress  NewPlayerProgress `json:"npe,omitempty"`
-	Customization      Customization     `json:"customization,omitempty"`
-	Social             ClientSocial      `json:"social,omitempty"`
-	NewUnlocks         []int64           `json:"newunlocks,omitempty"`
+	TeamName           string             `json:"teamname,omitempty" validate:"omitempty,ascii"`
+	CombatWeapon       string             `json:"weapon" validate:"omitnil,oneof=assault blaster rocket scout magnum smg chain rifle"`
+	CombatGrenade      string             `json:"grenade" validate:"omitnil,oneof=arc burst det stun loc"`
+	CombatDominantHand uint8              `json:"weaponarm" validate:"eq=0|eq=1"`
+	ModifyTime         int64              `json:"modifytime" validate:"gte=0"` // Ignored and set by nakama
+	CombatAbility      string             `json:"ability" validate:"oneof=buff heal sensor shield wraith"`
+	LegalConsents      LegalConsents      `json:"legal" validate:"required"`
+	MutedPlayers       Players            `json:"mute,omitempty"`
+	GhostedPlayers     Players            `json:"ghost,omitempty"`
+	NewPlayerProgress  NewPlayerProgress  `json:"npe,omitempty"`
+	Customization      Customization      `json:"customization,omitempty"`
+	Social             ClientSocial       `json:"social,omitempty"`
+	NewUnlocks         []int64            `json:"newunlocks,omitempty"`
+	EarlyQuitFeatures  *EarlyQuitFeatures `json:"earlyquit,omitempty"` // Early quit features
+}
+
+type EarlyQuitFeatures struct {
+	PenaltyTimestamp    int64 `json:"penaltyts,omitempty"`
+	NumEarlyQuits       int   `json:"numearlyquits,omitempty"`
+	NumSteadyMatches    int   `json:"numsteadymatches,omitempty"`
+	NumSteadyEarlyQuits int   `json:"numsteadyearlyquits,omitempty"`
+	PenaltyLevel        int   `json:"penaltylevel,omitempty"`
+	SteadyPlayerLevel   int   `json:"steadyplayerlevel,omitempty"`
 }
 
 // MergePlayerData merges a partial PlayerData with a template PlayerData.
