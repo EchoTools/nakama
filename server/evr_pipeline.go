@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"strings"
 	"sync"
 	"time"
 
@@ -68,7 +67,6 @@ type EvrPipeline struct {
 	broadcasterRegistrationBySession *MapOf[string, *MatchBroadcaster] // sessionID -> MatchBroadcaster
 	matchBySessionID                 *MapOf[string, string]            // sessionID -> matchID
 	loginSessionByEvrID              *MapOf[string, *sessionWS]
-	matchByEvrID                     *MapOf[string, string]      // full match string by evrId token
 	backfillQueue                    *MapOf[string, *sync.Mutex] // A queue of backfills to avoid double backfill
 	placeholderEmail                 string
 	linkDeviceURL                    string
@@ -175,7 +173,6 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		broadcasterRegistrationBySession: &MapOf[string, *MatchBroadcaster]{},
 		matchBySessionID:                 &MapOf[string, string]{},
 		loginSessionByEvrID:              &MapOf[string, *sessionWS]{},
-		matchByEvrID:                     &MapOf[string, string]{},
 		backfillQueue:                    &MapOf[string, *sync.Mutex]{},
 
 		placeholderEmail: config.GetRuntime().Environment["PLACEHOLDER_EMAIL_DOMAIN"],
@@ -229,13 +226,6 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 					return true
 				})
 
-				evrPipeline.matchByEvrID.Range(func(key string, value string) bool {
-					if match, _, _ := matchRegistry.GetMatch(ctx, value); match == nil {
-						logger.Debug("Housekeeping: Match not found for evrID", zap.String("evrID", key), zap.String("matchID", value))
-						evrPipeline.matchByEvrID.Delete(key)
-					}
-					return true
-				})
 			}
 		}
 	}()
@@ -410,24 +400,6 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 
 			p.matchBySessionID.Store(session.ID().String(), matchID)
 
-			if _, ok := p.broadcasterRegistrationBySession.Load(session.ID().String()); !ok {
-				// This is a player connection
-				if evrId, ok := session.Context().Value(ctxEvrIDKey{}).(evr.EvrId); ok {
-					p.matchByEvrID.Store(evrId.Token(), matchID)
-				}
-			}
-
-			go func() {
-				// Remove the match lookup entries when the session is closed.
-				<-session.Context().Done()
-				if _, isBroadcaster := p.broadcasterRegistrationBySession.Load(session.ID().String()); !isBroadcaster {
-					// This is a player connection
-					if evrId, ok := session.Context().Value(ctxEvrIDKey{}).(evr.EvrId); ok {
-						p.matchByEvrID.Delete(evrId.Token())
-					}
-				}
-				p.matchBySessionID.Delete(session.ID().String())
-			}()
 		}
 
 	}
@@ -527,27 +499,16 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 
 // relayMatchData relays the data to the match by determining the match id from the session or user id.
 func (p *EvrPipeline) relayMatchData(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	var matchIDStr string
-	var found bool
 
-	// Try to load the match ID from the session ID (this is how broadcasters can be found)
-	matchIDStr, found = p.matchBySessionID.Load(session.ID().String())
-	if !found {
-		// Try to load the match ID from the presence stream
-		sessionIDs := session.tracker.ListLocalSessionIDByStream(PresenceStream{Mode: StreamModeEvr, Subject: session.id, Subcontext: svcMatchID})
-		if len(sessionIDs) == 0 {
-			return fmt.Errorf("no matchmaking session for user %s session: %s", session.UserID(), session.ID())
-		}
-		sessionID := sessionIDs[0]
-
-		matchIDStr, found = p.matchBySessionID.Load(sessionID.String())
-
-		if !found {
-			return fmt.Errorf("no match found for user %s session: %s", session.UserID(), session.ID())
-		}
+	matchID, _, err := GetMatchBySessionID(p.runtimeModule, session.id)
+	if err != nil {
+		return fmt.Errorf("failed to get match by session ID: %w", err)
+	}
+	if matchID == nil {
+		return fmt.Errorf("no match found for session ID: %s", session.id)
 	}
 
-	err := sendMatchData(p.matchRegistry, matchIDStr, session, in)
+	err = sendMatchData(p.matchRegistry, *matchID, session, in)
 	if err != nil {
 		return fmt.Errorf("failed to send match data: %w", err)
 	}
@@ -556,13 +517,8 @@ func (p *EvrPipeline) relayMatchData(ctx context.Context, logger *zap.Logger, se
 }
 
 // sendMatchData sends the data to the match.
-func sendMatchData(matchRegistry MatchRegistry, matchIdStr string, session *sessionWS, in evr.Message) error {
-	matchIDComponents := strings.SplitN(matchIdStr, ".", 2)
-	if len(matchIDComponents) != 2 {
-		return fmt.Errorf("invalid match id: %s", matchIdStr)
-	}
-	matchId := uuid.FromStringOrNil(matchIDComponents[0])
-	matchNode := matchIDComponents[1]
+func sendMatchData(matchRegistry MatchRegistry, matchID MatchID, session *sessionWS, in evr.Message) error {
+
 	requestJson, err := json.Marshal(in)
 	if err != nil {
 		return fmt.Errorf("failed to marshal request: %w", err)
@@ -570,7 +526,7 @@ func sendMatchData(matchRegistry MatchRegistry, matchIdStr string, session *sess
 	// Set the OpCode to the symbol of the message.
 	opCode := int64(evr.SymbolOf(in))
 	// Send the data to the match.
-	matchRegistry.SendData(matchId, matchNode, session.UserID(), session.ID(), session.Username(), matchNode, opCode, requestJson, true, time.Now().UTC().UnixNano()/int64(time.Millisecond))
+	matchRegistry.SendData(matchID.UUID(), matchID.Node(), session.UserID(), session.ID(), session.Username(), matchID.Node(), opCode, requestJson, true, time.Now().UTC().UnixNano()/int64(time.Millisecond))
 
 	return nil
 }

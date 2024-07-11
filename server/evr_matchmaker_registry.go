@@ -852,8 +852,8 @@ func (m *MatchmakingSession) GetPingCandidates(endpoints ...evr.Endpoint) (candi
 		return candidates
 	}
 	endpoints = endpoints[:]
-
 	uniqued := make([]evr.Endpoint, 0, len(endpoints))
+
 	seen := make(map[string]struct{}, len(endpoints))
 	for _, e := range endpoints {
 		id := e.GetExternalIP()
