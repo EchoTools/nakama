@@ -20,6 +20,7 @@ import (
 
 const (
 	EchoTaxiPrefix      = "https://echo.taxi/"
+	SprockLinkPrefix    = "https://sprock.io/"
 	sprockLinkDiscordID = "1102051447597707294"
 
 	EchoTaxiStorageCollection = "EchoTaxi"
@@ -32,6 +33,12 @@ const (
 var (
 	LinkRegex = regexp.MustCompile(LinkPattern)
 )
+
+type LinkMeta struct {
+	MatchID   MatchID
+	ChannelID string
+	MessageID string
+}
 
 type TrackID struct {
 	ChannelID string
@@ -152,48 +159,6 @@ func (e *TaxiLinkRegistry) Clear(channelID, messageID string, all bool) error {
 	return nil
 }
 
-func extractMatchComponents(content string) (httpPrefix, applinkPrefix, matchIDStr string) {
-	match := LinkRegex.FindStringSubmatch(content)
-	result := make(map[string]string, 2)
-	if len(match) == 0 {
-		return "", "", ""
-	}
-	for i, name := range LinkRegex.SubexpNames() {
-		result[name] = match[i]
-	}
-	return result["httpPrefix"], result["appLinkPrefix"], strings.ToLower(result["matchID"])
-}
-
-// Process processes a message for taxi reactions and link responses
-func (e *TaxiLinkRegistry) Process(channelID, messageID, content string, reactOnly bool) (err error) {
-
-	// Detect a MatchID in the message
-	_, _, matchIDStr := extractMatchComponents(content)
-
-	if matchIDStr == "" {
-		return nil
-	}
-	if !strings.Contains(matchIDStr, ".") {
-		matchIDStr = matchIDStr + "." + e.node
-	}
-
-	matchID := MatchIDFromStringOrNil(matchIDStr)
-
-	if matchID.IsNil() {
-		return nil
-	}
-
-	// React, and track the message
-	if err = e.React(channelID, messageID); err != nil {
-		return err
-	}
-
-	// Track the message
-	e.Track(matchID, channelID, messageID)
-
-	return nil
-}
-
 // Prune removes all inactive matches, and their reactions
 func (e *TaxiLinkRegistry) Prune() (active, pruned int, err error) {
 	e.Lock()
@@ -261,6 +226,29 @@ func EchoTaxiRuntimeModule(ctx context.Context, logger runtime.Logger, db *sql.D
 	return nil
 }
 
+type MatchLink struct {
+	HTTPPrefix    string
+	AppLinkPrefix string
+	MatchID       MatchID
+}
+
+func (l MatchLink) AppLink() string {
+	prefix := l.AppLinkPrefix
+	if prefix == "" {
+		prefix = "spark://c/"
+	}
+	id := strings.ToUpper(l.MatchID.UUID().String())
+	return prefix + id
+}
+
+func (l MatchLink) EchoTaxiLink() string {
+	return EchoTaxiPrefix + l.AppLink()
+}
+
+func (l MatchLink) SprockLink() string {
+	return SprockLinkPrefix + l.AppLink()
+}
+
 type TaxiBot struct {
 	sync.Mutex
 	node   string
@@ -273,7 +261,7 @@ type TaxiBot struct {
 	HailCount    int
 	linkRegistry *TaxiLinkRegistry
 
-	queueCh      chan TrackID
+	queueCh      chan LinkMeta
 	deconflict   *MapOf[string, bool]
 	userChannels *MapOf[string, string]
 
@@ -295,7 +283,7 @@ func NewTaxiBot(ctx context.Context, logger runtime.Logger, nk runtime.NakamaMod
 		HailCount:            0,
 		deconflict:           &MapOf[string, bool]{},   // sprockLinkChannels maps discord channel ids to boolean
 		userChannels:         &MapOf[string, string]{}, // userChannels maps discord user ids to channel ids
-		queueCh:              make(chan TrackID, 5),
+		queueCh:              make(chan LinkMeta, 5),
 		rateLimiters:         &MapOf[string, *rate.Limiter]{},
 		messageRatePerSecond: 0.1,
 		messageBurst:         3,
@@ -322,8 +310,12 @@ func NewTaxiBot(ctx context.Context, logger runtime.Logger, nk runtime.NakamaMod
 				if m == nil || err != nil {
 					continue
 				}
-				// Process the message
-				linkRegistry.Process(t.ChannelID, t.MessageID, m.Content, false)
+				// React, and track the message
+				if err = linkRegistry.React(t.ChannelID, t.MessageID); err != nil {
+					continue
+				}
+				// Track the message
+				linkRegistry.Track(t.MatchID, t.ChannelID, t.MessageID)
 			case <-statusTicker.C:
 				// Update the status
 				if err := linkRegistry.setStatus(taxi.HailCount, taxi.linkRegistry.Count()); err != nil {
@@ -383,6 +375,14 @@ func (e *TaxiBot) loadLimiter(channelID string) *rate.Limiter {
 	return limiter
 }
 
+func (e *TaxiBot) Queue(matchID MatchID, channelID, messageID string) {
+	e.queueCh <- LinkMeta{
+		MatchID:   matchID,
+		ChannelID: channelID,
+		MessageID: messageID,
+	}
+}
+
 func (e *TaxiBot) pruneRateLimiters() {
 	e.rateLimiters.Range(func(key string, value *rate.Limiter) bool {
 		if value.Tokens() >= float64(e.messageBurst) {
@@ -412,13 +412,15 @@ func (e *TaxiBot) handleMessageCreate(s *discordgo.Session, m *discordgo.Message
 		"msg":  m,
 	})
 
-	httpPrefix, applinkPrefix, matchID, label, err := e.getMatchFromLink(m.Content)
-	if err != nil {
-		logger.Warn("Error checking content: %s", err.Error())
+	matchLink := e.matchLinkFromStringOrNil(m.Content)
+	if matchLink == nil {
 		return
 	}
 
-	if matchID.IsNil() || label == nil {
+	// Validate that the match exists
+	_, err := MatchLabelByID(e.ctx, e.nk, matchLink.MatchID)
+	if err != nil {
+		logger.Debug("Error getting match label for `%s`: %s", matchLink.MatchID.String(), err.Error())
 		return
 	}
 
@@ -429,16 +431,10 @@ func (e *TaxiBot) handleMessageCreate(s *discordgo.Session, m *discordgo.Message
 		return
 	}
 
-	trackID := TrackID{
-		ChannelID: m.ChannelID,
-		MessageID: m.ID,
-	}
-
 	if m.Author.ID == sprockLinkDiscordID {
 		// If the message is from SprockLink, then deconflict
 		e.deconflict.Store(m.ChannelID, true)
 		// Send this trackID to the queue
-		e.queueCh <- trackID
 	} else {
 		reactOnly, isDeconflicted := e.deconflict.LoadOrStore(m.ChannelID, false)
 		if isDeconflicted && reactOnly {
@@ -452,40 +448,23 @@ func (e *TaxiBot) handleMessageCreate(s *discordgo.Session, m *discordgo.Message
 			if isDeconflicted && reactOnly {
 				// Delete the deconfliction
 				e.deconflict.Delete(m.ChannelID)
-				return
+				return // There will be another message from sprocklink that will be processed
+			}
+		}
+
+		if matchLink.HTTPPrefix == "" {
+			// Reply with a clickable link
+			if r, err := e.dg.ChannelMessageSend(m.ChannelID, matchLink.EchoTaxiLink()); err == nil {
+				// Track the response message
+				m.ID = r.ID
+			} else {
+				logger.Warn("Error sending message: %v", err)
 			}
 		}
 	}
 
-	// Find the app link
-	// If the link is not clickable, extract the app link
-	if httpPrefix != "" {
-		// Just react and track this message
-		e.queueCh <- trackID
-		return
-	}
-
-	if applinkPrefix == "" {
-		// If the app link is not present, then add spark
-		applinkPrefix = "spark://c/"
-	}
-
-	// Replace the MatchID with the uppercased one
-	matchIDStr := strings.ToUpper(matchID.UUID().String())
-
-	appURL := fmt.Sprintf("%s%s", applinkPrefix, matchIDStr)
-	// Try to respond in the channel with a "clickable" link
-
-	r, err := e.dg.ChannelMessageSend(m.ChannelID, EchoTaxiPrefix+appURL)
-	if err == nil {
-		// Track the response message
-		trackID.MessageID = r.ID
-	} else {
-		logger.Warn("Error sending message: %v", err)
-	}
-	// Send it for reaction
-	e.queueCh <- trackID
-
+	// Track it for reactions
+	e.Queue(matchLink.MatchID, m.ChannelID, m.ID)
 }
 
 // setStatus updates the status of the bot
@@ -557,38 +536,32 @@ func (e *TaxiBot) loadCount() error {
 	return nil
 }
 
-// Check a message for a MatchID
-func (e *TaxiBot) getMatchFromLink(content string) (httpPrefix, appLinkPrefix string, matchID MatchID, label *EvrMatchState, err error) {
-
-	httpPrefix, appLinkPrefix, matchIDStr := extractMatchComponents(content)
-
-	if !strings.Contains(matchIDStr, ".") {
-		matchIDStr = matchIDStr + "." + e.node
+func (e *TaxiBot) matchLinkFromStringOrNil(content string) *MatchLink {
+	match := LinkRegex.FindStringSubmatch(content)
+	if len(match) == 0 {
+		return nil
 	}
 
-	matchID = MatchIDFromStringOrNil(matchIDStr)
-
-	if matchID.IsNil() {
-		return "", "", NilMatchID, nil, nil
+	matchLink := &MatchLink{}
+	for i, name := range LinkRegex.SubexpNames() {
+		v := match[i]
+		switch name {
+		case "httpPrefix":
+			matchLink.HTTPPrefix = v
+		case "appLinkPrefix":
+			matchLink.AppLinkPrefix = v
+		case "matchID":
+			if !strings.Contains(v, ".") {
+				v = v + "." + e.node
+			}
+			matchLink.MatchID = MatchIDFromStringOrNil(v)
+			if matchLink.MatchID.IsNil() {
+				return nil
+			}
+		}
 	}
 
-	// Check if the match is in progress
-	match, err := e.nk.MatchGet(e.ctx, matchID.String())
-	if err != nil {
-		return "", "", NilMatchID, nil, err
-	}
-	if match == nil {
-		return "", "", NilMatchID, nil, nil
-	}
-
-	// Unmarshal the label
-	label = &EvrMatchState{}
-	err = json.Unmarshal([]byte(match.GetLabel().Value), label)
-	if err != nil {
-		return "", "", NilMatchID, nil, err
-	}
-
-	return httpPrefix, appLinkPrefix, matchID, label, nil
+	return matchLink
 }
 
 // Hail sets the next match for a user
