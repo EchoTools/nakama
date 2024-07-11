@@ -62,12 +62,59 @@ var (
 	DisplayNameFilterScoreSuffix = regexp.MustCompile(`\s\(\d+\)\s\[\d+\.\d+%]`)
 )
 
+type SessionVars struct {
+	AppID           string `json:"app_id"`
+	EvrID           string `json:"evr_id"`
+	ClientIP        string `json:"client_ip"`
+	HeadsetType     string `json:"headset_type"`
+	HMDSerialNumber string `json:"hmd_serial_number"`
+}
+
+func NewSessionVars(appID uint64, evrID evr.EvrId, clientIP, headsetType, hmdSerialNumber string) *SessionVars {
+	return &SessionVars{
+		AppID:           strconv.FormatUint(appID, 10),
+		EvrID:           evrID.Token(),
+		ClientIP:        clientIP,
+		HeadsetType:     headsetType,
+		HMDSerialNumber: hmdSerialNumber,
+	}
+}
+
+func (s *SessionVars) Vars() map[string]string {
+	var m map[string]string
+	b, _ := json.Marshal(s)
+	_ = json.Unmarshal(b, &m)
+	return m
+}
+
+func SessionVarsFromMap(m map[string]string) *SessionVars {
+	b, _ := json.Marshal(m)
+	var s SessionVars
+	_ = json.Unmarshal(b, &s)
+	return &s
+}
+
+func (s *SessionVars) DeviceID() *DeviceAuth {
+	appID, _ := strconv.ParseUint(s.AppID, 10, 64)
+	evrID, _ := evr.ParseEvrId(s.EvrID)
+	return NewDeviceAuth(appID, *evrID, s.HMDSerialNumber, s.ClientIP)
+}
+
 // The data used to generate the Device ID authentication string.
 type DeviceAuth struct {
 	AppID           uint64    // The application ID for the game
 	EvrID           evr.EvrId // The xplatform ID string
 	HMDSerialNumber string    // The HMD serial number
-	ClientAddr      string    // The client address
+	ClientIP        string    // The client address
+}
+
+func NewDeviceAuth(appID uint64, evrID evr.EvrId, hmdSerialNumber, clientAddr string) *DeviceAuth {
+	return &DeviceAuth{
+		AppID:           appID,
+		EvrID:           evrID,
+		HMDSerialNumber: hmdSerialNumber,
+		ClientIP:        clientAddr,
+	}
 }
 
 // Generate the string used for device authentication.
@@ -77,7 +124,7 @@ func (d DeviceAuth) Token() string {
 		strconv.FormatUint(d.AppID, 10),
 		d.EvrID.String(),
 		d.HMDSerialNumber,
-		d.ClientAddr,
+		d.ClientIP,
 	}, ":")
 }
 
@@ -134,7 +181,7 @@ func ParseDeviceAuthToken(token string) (*DeviceAuth, error) {
 		AppID:           appID,
 		EvrID:           *evrID,
 		HMDSerialNumber: hmdsn,
-		ClientAddr:      clientAddr,
+		ClientIP:        clientAddr,
 	}, nil
 }
 

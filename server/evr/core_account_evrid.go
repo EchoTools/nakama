@@ -51,19 +51,19 @@ func (e *EvrId) UnmarshalText(b []byte) error {
 	return nil
 }
 
-func (xpi *EvrId) Valid() bool {
+func (xpi EvrId) Valid() bool {
 	return xpi.PlatformCode > STM && xpi.PlatformCode < TEN && xpi.AccountId > 0
 }
 
-func (xpi *EvrId) Nil() bool {
+func (xpi EvrId) Nil() bool {
 	return xpi.PlatformCode == 0 && xpi.AccountId == 0
 }
 
-func (xpi *EvrId) NotNil() bool {
+func (xpi EvrId) NotNil() bool {
 	return xpi.PlatformCode != 0 && xpi.AccountId != 0
 }
 
-func (xpi *EvrId) UUID() uuid.UUID {
+func (xpi EvrId) UUID() uuid.UUID {
 	if xpi.PlatformCode == 0 || xpi.AccountId == 0 {
 		return uuid.Nil
 	}
@@ -96,11 +96,11 @@ func ParseEvrId(s string) (*EvrId, error) {
 	return platformId, nil
 }
 
-func (xpi *EvrId) String() string {
+func (xpi EvrId) String() string {
 	return xpi.Token()
 }
 
-func (xpi *EvrId) Token() string {
+func (xpi EvrId) Token() string {
 	return fmt.Sprintf("%s-%d", xpi.PlatformCode.String(), xpi.AccountId)
 }
 
@@ -108,11 +108,11 @@ func (xpi EvrId) Equals(other EvrId) bool {
 	return xpi.PlatformCode == other.PlatformCode && xpi.AccountId == other.AccountId
 }
 
-func (xpi *EvrId) IsNil() bool {
+func (xpi EvrId) IsNil() bool {
 	return xpi.PlatformCode == 0 && xpi.AccountId == 0
 }
 
-func (xpi *EvrId) IsNotNil() bool {
+func (xpi EvrId) IsNotNil() bool {
 	return xpi.PlatformCode != 0 && xpi.AccountId != 0
 }
 
