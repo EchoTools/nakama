@@ -1511,6 +1511,44 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				// Get the player's ID
 				playerID := players[0].ID
 
+				type VRMLUser struct {
+					UserID        string      `json:"userID"`
+					UserName      string      `json:"userName"`
+					UserLogo      string      `json:"userLogo"`
+					Country       string      `json:"country"`
+					Nationality   string      `json:"nationality"`
+					DateJoinedUTC string      `json:"dateJoinedUTC"`
+					StreamURL     interface{} `json:"streamUrl"`
+					DiscordID     float64     `json:"discordID"`
+					DiscordTag    string      `json:"discordTag"`
+					SteamID       interface{} `json:"steamID"`
+					IsTerminated  bool        `json:"isTerminated"`
+				}
+				type Game struct {
+					GameID         string `json:"gameID"`
+					GameName       string `json:"gameName"`
+					TeamMode       string `json:"teamMode"`
+					MatchMode      string `json:"matchMode"`
+					URL            string `json:"url"`
+					URLShort       string `json:"urlShort"`
+					URLComplete    string `json:"urlComplete"`
+					HasSubstitutes bool   `json:"hasSubstitutes"`
+					HasTies        bool   `json:"hasTies"`
+					HasCasters     bool   `json:"hasCasters"`
+					HasCameraman   bool   `json:"hasCameraman"`
+				}
+
+				type ThisGame struct {
+					PlayerID   string `json:"playerID"`
+					PlayerName string `json:"playerName"`
+					UserLogo   string `json:"userLogo"`
+					Game       Game   `json:"game"`
+				}
+
+				type playerDetailed struct {
+					User     VRMLUser `json:"user"`
+					ThisGame ThisGame `json:"thisGame"`
+				}
 				jsonData, err := json.Marshal(players[0])
 				if err != nil {
 					errFn(status.Error(codes.Internal, "failed to marshal player data: "+err.Error()))
@@ -1524,6 +1562,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						Key:        playerID,
 						UserID:     user.ID,
 						Value:      string(jsonData),
+						Version:    "*",
 					},
 				})
 				if err != nil {
