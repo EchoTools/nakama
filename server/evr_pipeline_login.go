@@ -95,7 +95,7 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 		AppID:           payload.AppId,
 		EvrID:           request.EvrId,
 		HMDSerialNumber: payload.HmdSerialNumber,
-		ClientAddr:      session.clientIP,
+		ClientIP:        session.clientIP,
 	}
 
 	// Providing a discord ID and password avoids the need to link the device to the account.

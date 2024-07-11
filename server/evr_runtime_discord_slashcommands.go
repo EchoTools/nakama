@@ -1059,7 +1059,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 
 				if disableIPVerification {
-					token.ClientAddr = "*"
+					token.ClientIP = "*"
 				}
 
 				return nk.LinkDevice(ctx, userId.String(), token.Token())
