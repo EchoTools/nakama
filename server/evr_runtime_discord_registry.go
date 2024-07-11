@@ -663,7 +663,7 @@ func (r *LocalDiscordRegistry) UpdateGuildGroup(ctx context.Context, logger runt
 
 		// If the player has a match connection, disconnect it.
 		subject := userID.String()
-		subcontext := svcMatchID.String()
+		subcontext := matchContext.String()
 		users, err := r.nk.StreamUserList(StreamModeEvr, subject, subcontext, "", true, true)
 		if err != nil {
 			r.logger.Error("Error getting stream users: %w", err)

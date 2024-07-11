@@ -11,6 +11,7 @@ import (
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
+	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 
 	"github.com/muesli/reflow/wordwrap"
@@ -954,4 +955,38 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 		return fmt.Errorf("failed to send OtherUserProfileSuccess: %w", err)
 	}
 	return nil
+}
+
+func GetMatchByEvrID(nk runtime.NakamaModule, evrID evr.EvrId) (matchID *MatchID, presence runtime.Presence, err error) {
+
+	presences, err := nk.StreamUserList(StreamModeEvr, evrID.UUID().String(), matchContext.String(), "", true, true)
+	if err != nil {
+		return nil, nil, fmt.Errorf("UserServerProfileUpdateRequest: failed to get stream presences: %w", err)
+	}
+
+	for _, presence := range presences {
+		matchID := MatchIDFromStringOrNil(presence.GetStatus())
+		if !matchID.IsNil() {
+			return &matchID, presence, nil
+		}
+	}
+
+	return nil, nil, nil
+}
+
+func GetMatchBySessionID(nk runtime.NakamaModule, sessionID uuid.UUID) (matchID *MatchID, presence runtime.Presence, err error) {
+
+	presences, err := nk.StreamUserList(StreamModeEvr, sessionID.String(), matchContext.String(), "", true, true)
+	if err != nil {
+		return nil, nil, fmt.Errorf("UserServerProfileUpdateRequest: failed to get stream presences: %w", err)
+	}
+
+	for _, presence := range presences {
+		matchID := MatchIDFromStringOrNil(presence.GetStatus())
+		if !matchID.IsNil() {
+			return &matchID, presence, nil
+		}
+	}
+
+	return nil, nil, nil
 }
