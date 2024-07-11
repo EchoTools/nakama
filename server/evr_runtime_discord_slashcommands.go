@@ -2876,7 +2876,7 @@ func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runt
 						logger.Error("Failed to get discord ID", zap.Error(err))
 					}
 				}
-				status = fmt.Sprintf("Reserved by <%s> <t:%d:R>", spawnedBy, state.StartTime.UTC().Unix())
+				status = fmt.Sprintf("Reserved by <@%s> <t:%d:R>", spawnedBy, state.StartTime.UTC().Unix())
 			} else {
 				status = "Empty"
 			}
