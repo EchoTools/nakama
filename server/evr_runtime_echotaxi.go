@@ -587,7 +587,7 @@ func (e *TaxiBot) Hail(logger runtime.Logger, discordID string, matchID MatchID)
 	// Update the NextMatchID
 	settings.NextMatchID = matchID
 
-	if err := StoreToStorage(ctx, e.nk, userID, &settings); err != nil {
+	if err := SaveToStorage(ctx, e.nk, userID, &settings); err != nil {
 		return fmt.Errorf("Error storing matchmaking config: %s", err.Error())
 	}
 

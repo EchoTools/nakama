@@ -47,7 +47,7 @@ func LoadFromStorage(ctx context.Context, nk runtime.NakamaModule, userID string
 		}
 	} else {
 		if create {
-			if err := StoreToStorage(ctx, nk, userID, dst); err != nil {
+			if err := SaveToStorage(ctx, nk, userID, dst); err != nil {
 				return status.Errorf(codes.Internal, "failed to create %s/%s: %s", userID, storageID.String(), err)
 			}
 		} else {
@@ -58,7 +58,7 @@ func LoadFromStorage(ctx context.Context, nk runtime.NakamaModule, userID string
 	return nil
 }
 
-func StoreToStorage(ctx context.Context, nk runtime.NakamaModule, userID string, src Storable) error {
+func SaveToStorage(ctx context.Context, nk runtime.NakamaModule, userID string, src Storable) error {
 	storageID := src.GetStorageID()
 	data, err := json.Marshal(src)
 	if err != nil {
