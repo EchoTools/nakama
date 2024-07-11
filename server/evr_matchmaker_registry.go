@@ -362,7 +362,7 @@ func LoadMatchmakingSettings(ctx context.Context, nk runtime.NakamaModule, userI
 }
 
 func StoreMatchmakingSettings(ctx context.Context, nk runtime.NakamaModule, userID string, settings MatchmakingSettings) error {
-	return StoreToStorage(ctx, nk, userID, settings)
+	return SaveToStorage(ctx, nk, userID, settings)
 }
 
 func ipToKey(ip net.IP) string {
