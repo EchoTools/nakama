@@ -17,22 +17,16 @@ func (p *EvrPipeline) configRequest(ctx context.Context, logger *zap.Logger, ses
 	// Retrieve the requested object.
 	objs, err := StorageReadObjects(ctx, logger, session.pipeline.db, uuid.Nil, []*api.ReadStorageObjectId{
 		{
-			Collection: "Config:" + message.ConfigInfo.Type,
-			Key:        message.ConfigInfo.Type,
+			Collection: "Config:" + message.Type,
+			Key:        message.Type,
 			UserId:     uuid.Nil.String(),
 		},
 	})
 
 	// Send an error if the object could not be retrieved.
 	if err != nil {
-		logger.Warn("SNSConfigRequestHandler: failed to read objects", zap.Error(err))
-		errorInfo := evr.ConfigErrorInfo{
-			Type:       message.ConfigInfo.Type,
-			Identifier: message.ConfigInfo.Id,
-			ErrorCode:  0x00000001,
-			Error:      "failed to read objects",
-		}
-		session.SendEvr(evr.NewSNSConfigFailure(errorInfo))
+		logger.Warn("failed to read objects", zap.Error(err))
+		session.SendEvr(evr.NewConfigFailure(message.Type, message.ID))
 		return fmt.Errorf("failed to read objects: %w", err)
 	}
 
@@ -42,37 +36,25 @@ func (p *EvrPipeline) configRequest(ctx context.Context, logger *zap.Logger, ses
 		jsonResource = objs.Objects[0].Value
 	} else {
 		// Attempt to pull a default config resource.
-		jsonResource = evr.GetDefaultConfigResource(message.ConfigInfo.Type, message.ConfigInfo.Id)
+		jsonResource = evr.GetDefaultConfigResource(message.Type, message.ID)
 	}
 	if jsonResource == "" {
-		logger.Warn("SNSConfigRequestHandler: resource not found")
-		errorInfo := evr.ConfigErrorInfo{
-			Type:       message.ConfigInfo.Type,
-			Identifier: message.ConfigInfo.Id,
-			ErrorCode:  0x00000001,
-			Error:      "resource not found",
-		}
-		session.SendEvr(evr.NewSNSConfigFailure(errorInfo))
-		return fmt.Errorf("resource not found: %s", message.ConfigInfo.Id)
+		logger.Warn("resource not found")
+		session.SendEvr(evr.NewConfigFailure(message.Type, message.ID))
+		return fmt.Errorf("resource not found: %s", message.ID)
 	}
 
 	// Parse the JSON resource
 	resource := make(map[string]interface{})
 	if err := json.Unmarshal([]byte(jsonResource), &resource); err != nil {
 
-		errorInfo := evr.ConfigErrorInfo{
-			Type:       message.ConfigInfo.Type,
-			Identifier: message.ConfigInfo.Id,
-			ErrorCode:  0x00000001,
-			Error:      "failed to parse json",
-		}
-		session.SendEvr(evr.NewSNSConfigFailure(errorInfo))
-		return fmt.Errorf("failed to parse %s json: %w", message.ConfigInfo.Id, err)
+		session.SendEvr(evr.NewConfigFailure(message.Type, message.ID))
+		return fmt.Errorf("failed to parse %s json: %w", message.ID, err)
 	}
 
 	// Send the resource to the client.
 	if err := session.SendEvr(
-		evr.NewConfigSuccess(message.ConfigInfo.Type, message.ConfigInfo.Id, resource),
+		evr.NewConfigSuccess(message.Type, message.ID, resource),
 		evr.NewSTcpConnectionUnrequireEvent(),
 	); err != nil {
 		return fmt.Errorf("failed to send SNSConfigSuccess: %w", err)
