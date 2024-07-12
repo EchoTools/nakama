@@ -27,7 +27,7 @@ type HTTPResponse struct {
 }
 
 func NewHTTPResponse(requestID string, data any, err error) *HTTPResponse {
-	resp := HTTPResponse{
+	return &HTTPResponse{
 		Meta: Meta{
 			Timestamp: time.Now().String(),
 			RequestID: requestID,
@@ -35,13 +35,19 @@ func NewHTTPResponse(requestID string, data any, err error) *HTTPResponse {
 		Data:  data,
 		Error: err,
 	}
-	return &resp
 }
 
 func (r *HTTPResponse) Payload() (string, *runtime.Error) {
-	rpcErr, ok := r.Error.(*runtime.Error)
-	if !ok {
-		rpcErr = runtime.NewError(r.Error.Error(), StatusInternalError)
+	if r == nil {
+		return "", nil
+	}
+	var rpcErr *runtime.Error
+	var ok bool
+	if r.Error != nil {
+		rpcErr, ok = r.Error.(*runtime.Error)
+		if !ok {
+			rpcErr = runtime.NewError(r.Error.Error(), StatusInternalError)
+		}
 	}
 	data, err := json.MarshalIndent(r, "", "  ")
 	if err != nil {
