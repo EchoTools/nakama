@@ -256,12 +256,12 @@ func (s *EvrMatchState) PublicView() *EvrMatchState {
 	} else {
 		for i := range s.Players {
 			ps.Players[i] = PlayerInfo{
-				UserID:      ps.Players[i].UserID,
-				Username:    ps.Players[i].Username,
-				DisplayName: ps.Players[i].DisplayName,
-				EvrID:       ps.Players[i].EvrID,
-				Team:        ps.Players[i].Team,
-				DiscordID:   ps.Players[i].DiscordID,
+				UserID:      s.Players[i].UserID,
+				Username:    s.Players[i].Username,
+				DisplayName: s.Players[i].DisplayName,
+				EvrID:       s.Players[i].EvrID,
+				Team:        s.Players[i].Team,
+				DiscordID:   s.Players[i].DiscordID,
 			}
 		}
 	}
