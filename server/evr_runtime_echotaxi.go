@@ -657,9 +657,15 @@ func (e *TaxiBot) handleMessageReactionAdd(s *discordgo.Session, reaction *disco
 	// Ensure the match is tracked
 	e.linkRegistry.Track(matchID, reaction.ChannelID, reaction.MessageID)
 
-	// Clear the reactions (except for the bot)
-	if err = e.linkRegistry.Clear(reaction.ChannelID, reaction.MessageID, false); err != nil {
-		logger.Warn("Error clearing taxi reactions: %v", err)
+	// Clear user reactions except on DMs
+	channel, err := s.Channel(reaction.ChannelID)
+	if err != nil {
+		logger.Warn("Error getting channel: %s", err.Error())
+	}
+	if !isDMChannel(channel) {
+		if err = e.linkRegistry.Clear(reaction.ChannelID, reaction.MessageID, false); err != nil {
+			logger.Warn("Error clearing taxi reactions: %v", err)
+		}
 	}
 
 	// Hail the taxi
@@ -725,6 +731,10 @@ func (e *TaxiBot) handleMessageReactionRemove(s *discordgo.Session, reaction *di
 	if err := e.linkRegistry.Clear(reaction.ChannelID, reaction.MessageID, false); err != nil {
 		e.logger.Warn("Error clearing taxi reactions: %v", err)
 	}
+}
+
+func isDMChannel(channel *discordgo.Channel) bool {
+	return channel.Type == discordgo.ChannelTypeDM || channel.Type == discordgo.ChannelTypeGroupDM
 }
 
 /*
