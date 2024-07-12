@@ -268,7 +268,7 @@ func (p *EvrPipeline) MatchSpectateStreamLoop(session *sessionWS, msession *Matc
 	p.metrics.CustomCounter("spectatestream_active_count", msession.metricsTags(), 1)
 
 	limit := 100
-	minSize := 2
+	minSize := 1
 	maxSize := MatchMaxSize - 1
 	query := fmt.Sprintf("+label.open:T +label.lobby_type:public +label.mode:%s +label.size:>=%d +label.size:<=%d", msession.Label.Mode.Token(), minSize, maxSize)
 	for {
@@ -324,70 +324,45 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 	idealMatchIntervals := p.config.GetMatchmaker().RevThreshold
 	backfillDelay := time.Duration(interval*idealMatchIntervals) * time.Second
 
-	if skipDelay {
-		<-time.After(100 * time.Millisecond)
-	} else {
+	if !skipDelay {
 		<-time.After(backfillDelay)
 	}
+	limit := 5
+	delayStartTimer := time.NewTimer(100 * time.Millisecond)
+	retryTicker := time.NewTicker(3 * time.Second)
+	createTicker := time.NewTicker(5 * time.Second)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
-		default:
-		}
-		if msession.Label.Mode != evr.ModeSocialPublic && msession.Party != nil && msession.Party.members.Size() > 1 {
-			// Don't backfill party members, let the matchmaker handle it.
-			break
+		case <-delayStartTimer.C:
+		case <-createTicker.C:
+			if create && p.createLobbyMu.TryLock() {
+				defer p.createLobbyMu.Unlock()
+				if _, err := p.MatchCreate(ctx, session, msession, msession.Label); err != nil {
+					logger.Warn("Failed to create match", zap.Error(err))
+				}
+			}
+		case <-retryTicker.C:
 		}
 
-		foundMatch := FoundMatch{}
 		// Backfill any existing matches
-		label, query, err := p.Backfill(ctx, session, msession, minCount)
+		labels, query, err := p.Backfill(ctx, session, msession, minCount, limit)
 		if err != nil {
 			return msession.Cancel(fmt.Errorf("failed to find backfill match: %w", err))
 		}
 
-		if label != nil {
-			// Found a backfill match
-			foundMatch = FoundMatch{
+		for _, label := range labels {
+			logger.Debug("Attempting to backfill match", zap.String("mid", label.ID.UUID().String()))
+			p.metrics.CustomCounter("match_backfill_found_count", msession.metricsTags(), 1)
+			msession.MatchJoinCh <- FoundMatch{
 				MatchID:   label.ID,
 				Query:     query,
 				TeamIndex: TeamIndex(evr.TeamUnassigned),
 			}
-		} else if create {
-			// Stage 1: Check if there is an available broadcaster
-			matchID, err := p.MatchCreate(ctx, session, msession, msession.Label)
-			if err != nil {
-				logger.Warn("Failed to create match", zap.Error(err))
-			}
-			foundMatch = FoundMatch{
-				MatchID:   matchID,
-				Query:     query,
-				TeamIndex: TeamIndex(evr.TeamUnassigned),
-			}
 		}
-
-		if !foundMatch.MatchID.IsNil() {
-
-			logger.Debug("Attempting to backfill match", zap.String("mid", foundMatch.MatchID.String()))
-			p.metrics.CustomCounter("match_backfill_found_count", msession.metricsTags(), 1)
-
-			msession.MatchJoinCh <- foundMatch
-
-			select {
-			case <-ctx.Done():
-				return nil
-			case <-time.After(3 * time.Second):
-				p.metrics.CustomCounter("match_backfill_join_timeout_count", msession.metricsTags(), 1)
-				logger.Warn("Failed to backfill match", zap.String("mid", foundMatch.MatchID.String()))
-			}
-		}
-
-		// Continue to loop until the context is done
-		<-time.After(10 * time.Second)
 	}
-	return nil
 }
 
 func (p *EvrPipeline) MatchCreateLoop(session *sessionWS, msession *MatchmakingSession, pruneDelay time.Duration) error {
@@ -639,8 +614,10 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 
 		// Join any on-going combat match without delay
 		skipBackfillDelay = false
-		go p.MatchBackfillLoop(session, msession, skipBackfillDelay, false, 1)
-
+		// Start the backfill loop, if the player is not in a party.
+		if msession.Party == nil || msession.Party.members.Size() == 1 {
+			go p.MatchBackfillLoop(session, msession, skipBackfillDelay, false, 1)
+		}
 		// Put a ticket in for matching
 		_, err = p.MatchMake(session, msession)
 		if err != nil {
@@ -649,8 +626,11 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 
 	case evr.ModeArenaPublic:
 
-		// Start the backfill loop
-		go p.MatchBackfillLoop(session, msession, skipBackfillDelay, false, 1)
+		// Start the backfill loop, if the player is not in a party.
+		if msession.Party == nil || msession.Party.members.Size() == 1 {
+			// Don't backfill party members, let the matchmaker handle it.
+			go p.MatchBackfillLoop(session, msession, skipBackfillDelay, false, 1)
+		}
 
 		// Put a ticket in for matching
 		_, err := p.MatchMake(session, msession)

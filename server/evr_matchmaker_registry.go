@@ -400,10 +400,9 @@ func (mr *MatchmakingRegistry) listUnfilledLobbies(ctx context.Context, logger *
 	query = buildMatchQueryFromLabel(searchLabel)
 
 	// Basic search defaults
-	const (
-		minSize = 1
-		limit   = 50
-	)
+
+	minSize := 0
+	limit := 100
 	maxSize := MatchMaxSize - minCount
 	logger = logger.With(zap.String("query", query))
 
