@@ -49,9 +49,8 @@ const (
 )
 
 var (
-	displayNameRegex   = regexp.MustCompile(`"displayname": "(\\"|[^"])*"`)
-	updatetimeRegex    = regexp.MustCompile(`"updatetime": \d*`)
-	StreamContextMatch = uuid.NewV5(uuid.Nil, "match")
+	displayNameRegex = regexp.MustCompile(`"displayname": "(\\"|[^"])*"`)
+	updatetimeRegex  = regexp.MustCompile(`"updatetime": \d*`)
 )
 
 type MatchStatGroup string
@@ -561,17 +560,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 			return state, false, ""
 		}
 	}
-	contexts := []string{
-		mp.GetUserId(),
-		mp.GetSessionId(),
-		mp.GetEvrId(),
-	}
 
-	for _, context := range contexts {
-		if _, err := nk.StreamUserJoin(StreamModeEvr, context, StreamContextMatch.String(), "", mp.GetUserId(), mp.GetSessionId(), false, false, state.ID.String()); err != nil {
-			logger.Warn("Failed to update user status: %v", err)
-		}
-	}
 	logger.Debug("Accepting player into match: %s (%s)", presence.GetUsername(), mp.GetPlayerSession())
 	return state, true, ""
 }

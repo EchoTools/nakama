@@ -327,7 +327,7 @@ func (r *ProfileRegistry) removeStaleProfiles() error {
 	r.cacheMu.Lock()
 	defer r.cacheMu.Unlock()
 	for evrID := range r.cache {
-		count, err := r.nk.StreamCount(StreamModeEvr, evrID.UUID().String(), matchContext.String(), "")
+		count, err := r.nk.StreamCount(StreamModeEvr, evrID.UUID().String(), StreamContextMatch.String(), "")
 		if err != nil {
 			return err
 		}
