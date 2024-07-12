@@ -245,12 +245,13 @@ func (s *EvrMatchState) PublicView() *EvrMatchState {
 			GroupIDs:    s.Broadcaster.GroupIDs,
 			VersionLock: s.Broadcaster.VersionLock,
 		},
+		Players: make([]PlayerInfo, len(s.Players)),
 	}
 	if ps.LobbyType == PrivateLobby || ps.LobbyType == UnassignedLobby {
 		ps.ID = MatchID{}
 		ps.SpawnedBy = ""
 	} else {
-		for i := range ps.Players {
+		for i := range s.Players {
 			ps.Players[i] = PlayerInfo{
 				UserID:      ps.Players[i].UserID,
 				Username:    ps.Players[i].Username,
