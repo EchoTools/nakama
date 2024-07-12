@@ -143,7 +143,7 @@ func MatchListPublicRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 	}
 
 	minSize := 1
-	query := "-label.mode:unassigned"
+	query := "-label.lobby_type:unassigned"
 	matches, err := nk.MatchList(ctx, 1000, true, "", &minSize, nil, query)
 	if err != nil {
 		return "", runtime.NewError("Failed to list matches", StatusInternalError)
