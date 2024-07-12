@@ -433,16 +433,16 @@ func (p *EvrPipeline) newParkingMatch(logger *zap.Logger, session *sessionWS, co
 	}
 
 	// Create the match
-	matchId, err := p.matchRegistry.CreateMatch(context.Background(), p.runtime.matchCreateFunction, EvrMatchmakerModule, params)
+	matchID, err := p.matchRegistry.CreateMatch(context.Background(), p.runtime.matchCreateFunction, EvrMatchmakerModule, params)
 	if err != nil {
 		return fmt.Errorf("failed to create parking match: %v", err)
 	}
-	p.matchBySessionID.Store(session.ID().String(), matchId)
+	p.matchBySessionID.Store(session.ID().String(), matchID)
 	// (Attempt to) join the match
 	joinmsg := &rtapi.Envelope{
 		Message: &rtapi.Envelope_MatchJoin{
 			MatchJoin: &rtapi.MatchJoin{
-				Id:       &rtapi.MatchJoin_MatchId{MatchId: matchId},
+				Id:       &rtapi.MatchJoin_MatchId{MatchId: matchID},
 				Metadata: map[string]string{},
 			},
 		},
@@ -452,8 +452,15 @@ func (p *EvrPipeline) newParkingMatch(logger *zap.Logger, session *sessionWS, co
 	if ok := session.pipeline.ProcessRequest(logger, session, joinmsg); !ok {
 		return fmt.Errorf("failed process join request")
 	}
-	logger.Debug("New parking match", zap.String("matchId", matchId))
-
+	logger.Debug("New parking match", zap.String("matchId", matchID))
+	s := session
+	s.tracker.TrackMulti(s.ctx, s.id, []*TrackerOp{
+		{
+			Stream: PresenceStream{Mode: StreamModeEvr, Subject: session.id, Subcontext: StreamContextMatch},
+			Meta:   PresenceMeta{Format: s.format, Hidden: true, Status: matchID},
+		},
+		// EVR packet data stream for the match session by Session ID and service ID
+	}, s.userID)
 	return nil
 }
 
