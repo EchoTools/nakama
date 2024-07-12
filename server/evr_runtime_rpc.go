@@ -191,8 +191,8 @@ type MatchRpcRequest struct {
 }
 
 type MatchRpcResponse struct {
-	Timestamp TimeRFC3339
-	Labels    []any
+	Timestamp string `json:"timestamp"`
+	Labels    []any  `json:"labels"`
 }
 
 func (r MatchRpcResponse) String() string {
@@ -256,10 +256,11 @@ func MatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime
 		if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), &label); err != nil {
 			return "", runtime.NewError("Failed to unmarshal match label", StatusInternalError)
 		}
+		labels = append(labels, label)
 	}
 
 	response := MatchRpcResponse{
-		Timestamp: TimeRFC3339(time.Now().UTC()),
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Labels:    labels,
 	}
 
