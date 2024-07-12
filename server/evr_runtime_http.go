@@ -106,7 +106,7 @@ func RESTfulRPCHandlerFactory[T any](rpcFn restfulRPCHandler) runtimeRPCHandler 
 
 		data, err := rpcFn(ctx, logger, db, nk, request)
 		if err != nil {
-			return NewErrorPayload(request.ID(), err)
+			return "", runtime.NewError(fmt.Sprintf("Error processing request: %s", err.Error()), StatusInternalError)
 		}
 
 		response := NewHTTPResponse(request.ID(), data, nil)
