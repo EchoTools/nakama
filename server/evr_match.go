@@ -175,9 +175,9 @@ type MatchBroadcaster struct {
 // Any changes to the lobby state should be reflected in the match label.
 // This also makes it easier to update the match label, and query against it.
 type EvrMatchState struct {
-	ID          MatchID          `json:"id,omitempty"`          // The Session Id used by EVR (the same as match id)
+	ID          MatchID          `json:"id"`                    // The Session Id used by EVR (the same as match id)
 	Open        bool             `json:"open,omitempty"`        // Whether the lobby is open to new players (Matching Only)
-	LobbyType   LobbyType        `json:"lobby_type"`            // The type of lobby (Public, Private, Unassigned) (EVR)
+	LobbyType   LobbyType        `json:"lobby_type,omitempty"`  // The type of lobby (Public, Private, Unassigned) (EVR)
 	Broadcaster MatchBroadcaster `json:"broadcaster,omitempty"` // The broadcaster's data
 	Started     bool             `json:"started"`               // Whether the match has started.
 	StartTime   time.Time        `json:"start_time,omitempty"`  // The time the match was started.
@@ -223,29 +223,42 @@ func (s *EvrMatchState) GetLabel() string {
 }
 
 func (s *EvrMatchState) PublicView() *EvrMatchState {
-	ps := *s
-	ps.Broadcaster = MatchBroadcaster{
-		SessionID:   s.Broadcaster.SessionID,
-		OperatorID:  s.Broadcaster.OperatorID,
-		GroupIDs:    s.Broadcaster.GroupIDs,
-		VersionLock: s.Broadcaster.VersionLock,
-		AppId:       s.Broadcaster.AppId,
+	ps := EvrMatchState{
+		LobbyType:        s.LobbyType,
+		ID:               s.ID,
+		Open:             s.Open,
+		Started:          s.Started,
+		StartTime:        s.StartTime,
+		GroupID:          s.GroupID,
+		GuildID:          s.GuildID,
+		SpawnedBy:        s.SpawnedBy,
+		Mode:             s.Mode,
+		Level:            s.Level,
+		RequiredFeatures: s.RequiredFeatures,
+		MaxSize:          s.MaxSize,
+		Size:             s.Size,
+		PlayerCount:      s.PlayerCount,
+		PlayerLimit:      s.PlayerLimit,
+		TeamSize:         s.TeamSize,
+		Broadcaster: MatchBroadcaster{
+			OperatorID:  s.Broadcaster.OperatorID,
+			GroupIDs:    s.Broadcaster.GroupIDs,
+			VersionLock: s.Broadcaster.VersionLock,
+		},
 	}
 	if ps.LobbyType == PrivateLobby || ps.LobbyType == UnassignedLobby {
 		ps.ID = MatchID{}
 		ps.SpawnedBy = ""
-		ps.TeamAlignments = nil
-		ps.Players = nil
-	}
-
-	for i := range ps.Players {
-		ps.Players[i] = PlayerInfo{
-			UserID:      ps.Players[i].UserID,
-			Username:    ps.Players[i].Username,
-			DisplayName: ps.Players[i].DisplayName,
-			EvrID:       ps.Players[i].EvrID,
-			Team:        ps.Players[i].Team,
-			DiscordID:   ps.Players[i].DiscordID,
+	} else {
+		for i := range ps.Players {
+			ps.Players[i] = PlayerInfo{
+				UserID:      ps.Players[i].UserID,
+				Username:    ps.Players[i].Username,
+				DisplayName: ps.Players[i].DisplayName,
+				EvrID:       ps.Players[i].EvrID,
+				Team:        ps.Players[i].Team,
+				DiscordID:   ps.Players[i].DiscordID,
+			}
 		}
 	}
 	return &ps
