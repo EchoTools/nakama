@@ -177,11 +177,11 @@ type MatchBroadcaster struct {
 // This also makes it easier to update the match label, and query against it.
 type EvrMatchState struct {
 	ID          MatchID          `json:"id"`                    // The Session Id used by EVR (the same as match id)
-	Open        bool             `json:"open,omitempty"`        // Whether the lobby is open to new players (Matching Only)
-	LobbyType   LobbyType        `json:"lobby_type,omitempty"`  // The type of lobby (Public, Private, Unassigned) (EVR)
+	Open        bool             `json:"open"`                  // Whether the lobby is open to new players (Matching Only)
+	LobbyType   LobbyType        `json:"lobby_type"`            // The type of lobby (Public, Private, Unassigned) (EVR)
 	Broadcaster MatchBroadcaster `json:"broadcaster,omitempty"` // The broadcaster's data
 	Started     bool             `json:"started"`               // Whether the match has started.
-	StartTime   time.Time        `json:"start_time,omitempty"`  // The time the match was started.
+	StartTime   time.Time        `json:"start_time"`            // The time the match was started.
 	SpawnedBy   string           `json:"spawned_by,omitempty"`  // The userId of the player that spawned this match.
 	GroupID     *uuid.UUID       `json:"group_id,omitempty"`    // The channel id of the broadcaster. (EVR)
 	GuildID     string           `json:"guild_id,omitempty"`    // The guild id of the broadcaster. (EVR)
@@ -193,8 +193,8 @@ type EvrMatchState struct {
 	RequiredFeatures []string             `json:"required_features,omitempty"` // The required features for the match.
 
 	MaxSize     uint8     `json:"limit,omitempty"`        // The total lobby size limit (players + specs)
-	Size        int       `json:"size,omitempty"`         // The number of players (including spectators) in the match.
-	PlayerCount int       `json:"player_count,omitempty"` // The number of participants (not including spectators) in the match.
+	Size        int       `json:"size"`                   // The number of players (including spectators) in the match.
+	PlayerCount int       `json:"player_count"`           // The number of participants (not including spectators) in the match.
 	PlayerLimit int       `json:"player_limit,omitempty"` // The number of players in the match (not including spectators).
 	TeamSize    int       `json:"team_size,omitempty"`    // The size of each team in arena/combat (either 4 or 5)
 	TeamIndex   TeamIndex `json:"team,omitempty"`         // What team index a player prefers (Used by Matching only)
@@ -245,6 +245,8 @@ func (s *EvrMatchState) PublicView() *EvrMatchState {
 			OperatorID:  s.Broadcaster.OperatorID,
 			GroupIDs:    s.Broadcaster.GroupIDs,
 			VersionLock: s.Broadcaster.VersionLock,
+			Regions:     s.Broadcaster.Regions,
+			Tags:        s.Broadcaster.Tags,
 		},
 		Players: make([]PlayerInfo, len(s.Players)),
 	}

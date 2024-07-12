@@ -64,6 +64,7 @@ type EvrPipeline struct {
 	appBot              *DiscordAppBot
 	leaderboardRegistry *LeaderboardRegistry
 
+	createLobbyMu                    sync.Mutex
 	broadcasterRegistrationBySession *MapOf[string, *MatchBroadcaster] // sessionID -> MatchBroadcaster
 	matchBySessionID                 *MapOf[string, string]            // sessionID -> matchID
 	loginSessionByEvrID              *MapOf[string, *sessionWS]

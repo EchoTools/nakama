@@ -119,19 +119,19 @@ type LabelLatencies struct {
 }
 
 // Backfill returns a match that the player can backfill
-func (p *EvrPipeline) Backfill(ctx context.Context, session *sessionWS, msession *MatchmakingSession, minCount int) (*EvrMatchState, string, error) {
+func (p *EvrPipeline) Backfill(ctx context.Context, session *sessionWS, msession *MatchmakingSession, minCount int, limit int) ([]*EvrMatchState, string, error) {
 
 	logger := msession.Logger
-	labels, query, err := p.matchmakingRegistry.listUnfilledLobbies(ctx, logger, msession.Label, minCount)
+	candidates, query, err := p.matchmakingRegistry.listUnfilledLobbies(ctx, logger, msession.Label, minCount)
 	if err != nil {
 		return nil, query, err
 	}
-	if len(labels) == 0 {
+	if len(candidates) == 0 {
 		return nil, query, nil
 	}
 
-	endpoints := make([]evr.Endpoint, 0, len(labels))
-	for _, label := range labels {
+	endpoints := make([]evr.Endpoint, 0, len(candidates))
+	for _, label := range candidates {
 		endpoints = append(endpoints, label.Broadcaster.Endpoint)
 	}
 
@@ -141,8 +141,8 @@ func (p *EvrPipeline) Backfill(ctx context.Context, session *sessionWS, msession
 		return nil, query, err
 	}
 
-	labelLatencies := make([]LabelLatencies, 0, len(labels))
-	for _, label := range labels {
+	labelLatencies := make([]LabelLatencies, 0, len(candidates))
+	for _, label := range candidates {
 		for _, latency := range latencies {
 			if label.Broadcaster.Endpoint.GetExternalIP() == latency.Endpoint.GetExternalIP() {
 				labelLatencies = append(labelLatencies, LabelLatencies{label, &latency})
@@ -163,8 +163,9 @@ func (p *EvrPipeline) Backfill(ctx context.Context, session *sessionWS, msession
 		return sortFn(labelLatencies[i].latency.RTT, labelLatencies[j].latency.RTT, labelLatencies[i].label.PlayerCount, labelLatencies[j].label.PlayerCount)
 	})
 
+	options := make([]*EvrMatchState, 0, limit)
 	// Select the first match
-	for _, label := range labels {
+	for _, label := range candidates {
 		// Check that the match is not full
 		logger = logger.With(zap.String("mid", label.ID.String()))
 
@@ -181,11 +182,13 @@ func (p *EvrPipeline) Backfill(ctx context.Context, session *sessionWS, msession
 		} else if !ok {
 			continue
 		}
-
-		return label, query, nil
+		options = append(options, label)
+		if len(options) >= limit {
+			break
+		}
 	}
 
-	return nil, query, nil
+	return options, query, nil
 }
 
 func checkMatchForBackfill(match *api.Match, minCount int, isPlayer bool) (ok bool, err error) {
