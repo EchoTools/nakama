@@ -324,8 +324,8 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 	idealMatchIntervals := p.config.GetMatchmaker().RevThreshold
 	backfillDelay := time.Duration(interval*idealMatchIntervals) * time.Second
 
-	if !skipDelay {
-		<-time.After(1 * time.Second)
+	if skipDelay {
+		<-time.After(100 * time.Millisecond)
 	} else {
 		<-time.After(backfillDelay)
 	}
