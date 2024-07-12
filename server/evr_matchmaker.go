@@ -283,7 +283,7 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 
 	if config.GroupID != "" {
 		partyRegistry := session.pipeline.partyRegistry
-		ph, err := p.joinPartyGroup(logger, partyRegistry, userID, sessionID.String(), session.Username(), p.node, config.GroupID)
+		ph, err := p.joinPartyGroup(logger, partyRegistry, session*sessionWS, config.GroupID)
 		if err != nil {
 			logger.Warn("Failed to join party group", zap.String("group_id", config.GroupID), zap.Error(err))
 		} else {
@@ -343,31 +343,31 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 	return ticket, nil
 }
 
-func (p *EvrPipeline) joinPartyGroup(logger *zap.Logger, partyRegistry PartyRegistry, userID, sessionID, username, node, groupID string) (*PartyHandler, error) {
+func (p *EvrPipeline) joinPartyGroup(logger *zap.Logger, session *sessionWS, partyRegistry PartyRegistry, groupID string) (*PartyHandler, error) {
 	// Attempt to join the party
 	userPresence := &rtapi.UserPresence{
-		UserId:    userID,
-		SessionId: sessionID,
-		Username:  username,
+		UserId:    session.UserID().String(),
+		SessionId: session.ID().String(),
+		Username:  session.Username(),
 	}
 	presence := []*Presence{
 		{
 			ID: PresenceID{
-				Node:      node,
-				SessionID: uuid.FromStringOrNil(sessionID),
+				Node:      session.pipeline.node,
+				SessionID: session.id,
 			},
 			// Presence stream not needed.
-			UserID: uuid.FromStringOrNil(userID),
+			UserID: session.UserID(),
 			Meta: PresenceMeta{
-				Username: username,
+				Username: session.Username(),
 				// Other meta fields not needed.
 			},
 		}}
 
 	partyID := uuid.NewV5(uuid.Nil, groupID)
-
+	pr := partyRegistry.(*LocalPartyRegistry)
 	// Try to join the party group
-	ph, found := partyRegistry.(*LocalPartyRegistry).parties.Load(partyID)
+	ph, found := pr.parties.Load(partyID)
 	if found {
 		ph.Lock()
 		defer ph.Unlock()
@@ -382,7 +382,11 @@ func (p *EvrPipeline) joinPartyGroup(logger *zap.Logger, partyRegistry PartyRegi
 	} else {
 		// Create the party
 		p.metrics.CustomCounter("partyregistry_create_count", nil, 1)
-		ph = partyRegistry.Create(true, 8, userPresence)
+		maxSize := 8
+		open := true
+		ph := NewPartyHandler(p.logger, partyRegistry, session.matchmaker, p.tracker, p.streamManager, p.router, partyID, p.node, open, maxSize, userPresence)
+		pr.parties.Store(partyID, ph)
+		partyRegistry.Join(partyID, presence)
 		return ph, nil
 	}
 }
