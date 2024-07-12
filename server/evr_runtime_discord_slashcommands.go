@@ -1846,7 +1846,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return
 			}
 
-			presences, err := d.nk.StreamUserList(StreamModeEvr, targetUserID.String(), matchContext.String(), "", true, true)
+			presences, err := d.nk.StreamUserList(StreamModeEvr, targetUserID.String(), StreamContextMatch.String(), "", true, true)
 			if err != nil {
 				errFn(err)
 				return
@@ -2682,7 +2682,7 @@ func (d *DiscordAppBot) getLoginSessionForUser(ctx context.Context, discordId st
 	presenceIDs := pipeline.tracker.ListPresenceIDByStream(PresenceStream{
 		Mode:       StreamModeEvr,
 		Subject:    uid,
-		Subcontext: svcLoginID,
+		Subcontext: StreamContextLogin,
 	})
 	if len(presenceIDs) == 0 {
 		return uid, uuid.Nil, fmt.Errorf("<@%s> must be logged into EchoVR to party up", discordId)
