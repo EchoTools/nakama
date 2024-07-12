@@ -926,7 +926,7 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 		isDeveloper, _ := checkIfGlobalDeveloper(ctx, p.runtimeModule, session.userID)
 
 		// Let developers and moderators join public matches
-		if request.TeamIndex != int16(Spectator) && !isDeveloper && !isModerator && time.Since(ml.StartTime) < time.Second*15 {
+		if request.TeamIndex != int16(Spectator) && !isDeveloper && !isModerator && time.Since(ml.StartTime) < time.Second*10 {
 			// Allow if the match is over 15 seconds old, to allow matchmaking to properly populate the match
 			err = status.Errorf(codes.InvalidArgument, "Match is a newly started public match")
 		}
