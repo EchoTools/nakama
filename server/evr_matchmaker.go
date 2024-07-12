@@ -641,6 +641,26 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 		}
 	}
 
+	loginSession := ctx.Value(ctxLoginSessionKey{}).(*sessionWS)
+	s := session
+	s.tracker.TrackMulti(s.ctx, s.id, []*TrackerOp{
+		{
+			Stream: PresenceStream{Mode: StreamModeEvr, Subject: session.id, Subcontext: StreamContextMatch},
+			Meta:   PresenceMeta{Format: s.format, Hidden: true, Status: matchID.String()},
+		},
+		// By login sessionID and match service ID
+		{
+			Stream: PresenceStream{Mode: StreamModeEvr, Subject: loginSession.id, Subcontext: StreamContextMatch},
+			Meta:   PresenceMeta{Format: s.format, Hidden: true, Status: matchID.String()},
+		},
+		// By EVRID and match service ID
+		{
+			Stream: PresenceStream{Mode: StreamModeEvr, Subject: evrID.UUID(), Subcontext: StreamContextMatch},
+			Meta:   PresenceMeta{Format: s.format, Hidden: true, Status: matchID.String()},
+		},
+		// EVR packet data stream for the match session by Session ID and service ID
+	}, s.userID)
+
 	if isNew {
 		// Trigger the MatchJoin event.
 		stream := PresenceStream{Mode: StreamModeMatchAuthoritative, Subject: matchID.UUID(), Label: matchID.Node()}
@@ -655,6 +675,20 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 			//p.tracker.UntrackLocalByModes(session.ID(), matchStreamModes, stream)
 		}
 	}
+
+	/*
+		contexts := []string{
+			mp.GetUserId(),
+			mp.GetSessionId(),
+			mp.EvrID.UUID().String(),
+		}
+
+		for _, context := range contexts {
+			if _, err := p.runtimeModule.StreamUserJoin(StreamModeEvr, context, StreamContextMatch.String(), "", mp.GetUserId(), mp.GetSessionId(), false, false, matchID.String()); err != nil {
+				logger.Warn("Failed to update user status: %v", zap.Error(err))
+			}
+		}
+	*/
 
 	p.matchBySessionID.Store(session.ID().String(), matchID.String())
 

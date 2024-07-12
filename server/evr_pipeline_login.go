@@ -953,7 +953,7 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 
 func GetMatchByEvrID(nk runtime.NakamaModule, evrID evr.EvrId) (matchID *MatchID, presence runtime.Presence, err error) {
 
-	presences, err := nk.StreamUserList(StreamModeEvr, evrID.UUID().String(), matchContext.String(), "", true, true)
+	presences, err := nk.StreamUserList(StreamModeEvr, evrID.UUID().String(), StreamContextMatch.String(), "", true, true)
 	if err != nil {
 		return nil, nil, fmt.Errorf("UserServerProfileUpdateRequest: failed to get stream presences: %w", err)
 	}
@@ -970,7 +970,7 @@ func GetMatchByEvrID(nk runtime.NakamaModule, evrID evr.EvrId) (matchID *MatchID
 
 func GetMatchBySessionID(nk runtime.NakamaModule, sessionID uuid.UUID) (matchID *MatchID, presence runtime.Presence, err error) {
 
-	presences, err := nk.StreamUserList(StreamModeEvr, sessionID.String(), matchContext.String(), "", true, true)
+	presences, err := nk.StreamUserList(StreamModeEvr, sessionID.String(), StreamContextMatch.String(), "", true, true)
 	if err != nil {
 		return nil, nil, fmt.Errorf("UserServerProfileUpdateRequest: failed to get stream presences: %w", err)
 	}
