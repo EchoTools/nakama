@@ -73,6 +73,9 @@ type DeviceAuth struct {
 // Generate the string used for device authentication.
 // WARNING: If this is changed, then device "links" will be invalidated.
 func (d DeviceAuth) Token() string {
+	if d.HMDSerialNumber == "N/A" {
+		d.HMDSerialNumber = "NA"
+	}
 	return strings.Join([]string{
 		strconv.FormatUint(d.AppID, 10),
 		d.EvrID.String(),
