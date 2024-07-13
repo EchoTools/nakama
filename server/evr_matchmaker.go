@@ -215,9 +215,11 @@ func checkMatchForBackfill(match *api.Match, minCount int, isPlayer bool) (ok bo
 		return false, nil
 	}
 
-	if label.Mode == evr.ModeCombatPublic && (label.PlayerCount+minCount)%2 != 0 {
-		return false, nil
-	}
+	/*
+		if label.Mode == evr.ModeCombatPublic && (label.PlayerCount+minCount)%2 != 0 {
+			return false, nil
+		}
+	*/
 	return true, nil
 }
 
