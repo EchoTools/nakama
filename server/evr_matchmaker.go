@@ -387,8 +387,8 @@ func (p *EvrPipeline) joinPartyGroup(logger *zap.Logger, session *sessionWS, par
 		maxSize := 8
 		open := true
 		ph := NewPartyHandler(p.logger, partyRegistry, session.matchmaker, p.tracker, p.streamManager, p.router, partyID, p.node, open, maxSize, userPresence)
+		ph.Join(presence)
 		pr.parties.Store(partyID, ph)
-		partyRegistry.Join(partyID, presence)
 		return ph, nil
 	}
 }
