@@ -299,40 +299,6 @@ func (p *EvrPipeline) authenticateAccount(ctx context.Context, logger *zap.Logge
 		discordId = ""
 	}
 
-	// Device Authentication
-	if userId, _, _, err := AuthenticateDevice(ctx, session.logger, session.pipeline.db, deviceId.LegacyToken(), "", false); err == nil {
-		// Relink this device to the new token.
-		if err := UnlinkDevice(ctx, logger, p.db, uuid.FromStringOrNil(userId), deviceId.LegacyToken()); err != nil {
-			return account, status.Error(codes.Internal, fmt.Sprintf("failed to unlink legacy device: %s", err))
-		}
-		if err := LinkDevice(ctx, logger, p.db, uuid.FromStringOrNil(userId), deviceId.Token()); err != nil {
-			return account, status.Error(codes.Internal, fmt.Sprintf("failed to relink legacy device: %s", err))
-		}
-		logger.Debug("Updated Device Auth token", zap.String("userId", userId), zap.String("deviceId", deviceId.Token()))
-		// Message the user
-		go func() {
-			discordID, err := p.discordRegistry.GetDiscordIdByUserId(ctx, uuid.FromStringOrNil(userId))
-			if err != nil {
-				logger.Warn("Failed to get discord ID", zap.Error(err))
-				return
-			}
-			bot := p.discordRegistry.GetBot()
-			if bot == nil {
-				logger.Warn("Discord bot not found")
-				return
-			}
-			channel, err := bot.UserChannelCreate(discordID)
-			if err != nil {
-				logger.Warn(fmt.Errorf("failed to create user DM channel: %w", err).Error())
-				return
-			}
-			_, err = bot.ChannelMessageSend(channel.ID, "Your EchoVRCE authentication has been updated. If it was not you that opened EchoVR when you received this message, please contact EchoVRCE staff (e.g. <@695081603180789771>). Note: This is a one time message.")
-			if err != nil {
-				logger.Warn(fmt.Errorf("failed to send message: %w", err).Error())
-			}
-		}()
-	}
-
 	userId, _, _, err = AuthenticateDevice(ctx, session.logger, session.pipeline.db, deviceId.Token(), "", false)
 	if err != nil && status.Code(err) == codes.NotFound {
 		// Try to authenticate the device with a wildcard address.
