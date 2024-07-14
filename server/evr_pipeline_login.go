@@ -89,13 +89,14 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 
 	payload := request.LoginData
 
-	// Construct the device auth token from the login payload
-	deviceId := &DeviceAuth{
-		AppID:           payload.AppId,
-		EvrID:           request.EvrId,
-		HMDSerialNumber: payload.HmdSerialNumber,
-		ClientAddr:      session.clientIP,
+	// Check for an HMD serial override
+	hmdsn, ok := ctx.Value(ctxHMDSerialOverrideKey{}).(string)
+	if !ok {
+		hmdsn = payload.HmdSerialNumber
 	}
+
+	// Construct the device auth token from the login payload
+	deviceId := NewDeviceAuth(payload.AppId, request.EvrId, hmdsn, session.clientIP)
 
 	// Providing a discord ID and password avoids the need to link the device to the account.
 	// Server Hosts use this method to authenticate.
