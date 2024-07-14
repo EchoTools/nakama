@@ -199,6 +199,32 @@ func TestDeviceAuth_Token(t *testing.T) {
 			},
 			"4321432143214321:OVR-ORG-1234123412341234:WMD123412341234:127.0.0.1",
 		},
+		{
+			"Shadow PC",
+			fields{
+				AppID: 1369078409873402,
+				EvrID: evr.EvrId{
+					PlatformCode: 4,
+					AccountId:    3620870844675088,
+				},
+				HMDSerialNumber: "Oculus Quest HMD",
+				ClientAddr:      "127.0.0.1",
+			},
+			"1369078409873402:OVR-ORG-3620870844675088:OculusQuestHMD:127.0.0.1",
+		},
+		{
+			"N/A HMD Serial Number",
+			fields{
+				AppID: 1369078409873402,
+				EvrID: evr.EvrId{
+					PlatformCode: 4,
+					AccountId:    3620870844675088,
+				},
+				HMDSerialNumber: "N/A",
+				ClientAddr:      "127.0.0.1",
+			},
+			"1369078409873402:OVR-ORG-3620870844675088:N/A:127.0.0.1",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
