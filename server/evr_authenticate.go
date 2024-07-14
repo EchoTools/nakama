@@ -70,35 +70,30 @@ type DeviceAuth struct {
 	ClientAddr      string    // The client address
 }
 
+func NewDeviceAuth(appID uint64, evrID evr.EvrId, hmdSerialNumber, clientAddr string) *DeviceAuth {
+	return &DeviceAuth{
+		AppID:           appID,
+		EvrID:           evrID,
+		HMDSerialNumber: hmdSerialNumber,
+		ClientAddr:      clientAddr,
+	}
+}
+
 // Generate the string used for device authentication.
 // WARNING: If this is changed, then device "links" will be invalidated.
 func (d DeviceAuth) Token() string {
-	if d.HMDSerialNumber == "N/A" {
-		d.HMDSerialNumber = "NA"
-	}
-	return strings.Join([]string{
-		strconv.FormatUint(d.AppID, 10),
-		d.EvrID.String(),
-		d.HMDSerialNumber,
-		d.ClientAddr,
-	}, ":")
-}
-
-func (d DeviceAuth) WildcardToken() string {
-	return strings.Join([]string{
+	components := []string{
 		strconv.FormatUint(d.AppID, 10),
 		d.EvrID.Token(),
 		d.HMDSerialNumber,
-		"*",
-	}, ":")
+		d.ClientAddr,
+	}
+	return invalidCharsRegex.ReplaceAllString(strings.Join(components, ":"), "")
 }
 
-func (d DeviceAuth) LegacyToken() string {
-	return strings.Join([]string{
-		strconv.FormatUint(d.AppID, 10),
-		strings.Replace(d.EvrID.Token(), "OVR-ORG", "OVR_ORG", 1),
-		d.HMDSerialNumber,
-	}, ":")
+func (d DeviceAuth) WildcardToken() string {
+	d.ClientAddr = "*"
+	return d.Token()
 }
 
 // ParseDeviceAuthToken parses a device ID token into its components.
