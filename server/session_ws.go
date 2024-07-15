@@ -110,6 +110,7 @@ type (
 	ctxFlagsKey             struct{} // The group flags from the urlparam
 	ctxFeaturesKey          struct{} // The features from the urlparam
 	ctxRequiredFeaturesKey  struct{} // The features from the urlparam
+	ctxVerboseKey           struct{} // The verbosity flag from matchmaking config
 
 	//ctxMatchmakingQueryKey         struct{} // The Matchmaking query from the urlparam
 	//ctxMatchmakingGuildPriorityKey struct{} // The Matchmaking guild priority from the urlparam
@@ -251,7 +252,7 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 	}
 }
 
-func (s *sessionWS) LoginSession(userID string, username string, evrID evr.EvrId, deviceId *DeviceAuth, groupID uuid.UUID, flags int) error {
+func (s *sessionWS) LoginSession(userID string, username string, evrID evr.EvrId, deviceId *DeviceAuth, groupID uuid.UUID, flags int, verbose bool) error {
 	// Each player has a single login connection, which will act as the core session.
 	// When this connection is terminated, all other connections should be terminated.
 
@@ -272,6 +273,7 @@ func (s *sessionWS) LoginSession(userID string, username string, evrID evr.EvrId
 	ctx = context.WithValue(ctx, ctxUsernameKey{}, username)                   // apiServer compatibility
 	ctx = context.WithValue(ctx, ctxFlagsKey{}, flags)
 	ctx = context.WithValue(ctx, ctxGroupIDKey{}, groupID)
+	ctx = context.WithValue(ctx, ctxVerboseKey{}, verbose)
 
 	s.Lock()
 	s.ctx = ctx
@@ -415,6 +417,10 @@ func (s *sessionWS) ValidateSession(loginSessionID uuid.UUID, evrID evr.EvrId) e
 			return fmt.Errorf("login session does not have a group ID")
 		}
 
+		verbose, ok := loginCtx.Value(ctxVerboseKey{}).(bool)
+		if !ok {
+			return fmt.Errorf("login session does not have verbose flag")
+		}
 		// Require the login session to be authenticated.
 		if userID == uuid.Nil {
 			return fmt.Errorf("login session not authenticated")
@@ -427,6 +433,7 @@ func (s *sessionWS) ValidateSession(loginSessionID uuid.UUID, evrID evr.EvrId) e
 		ctx = context.WithValue(ctx, ctxUsernameKey{}, username) // apiServer compatibility
 		ctx = context.WithValue(ctx, ctxFlagsKey{}, flags)
 		ctx = context.WithValue(ctx, ctxGroupIDKey{}, groupID)
+		ctx = context.WithValue(ctx, ctxVerboseKey{}, verbose)
 
 		// Set the session information
 		s.Lock()

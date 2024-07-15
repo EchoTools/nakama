@@ -346,6 +346,7 @@ type MatchmakingSettings struct {
 	GroupID              string   `json:"group_id"`              // Group ID to matchmake with
 	PriorityBroadcasters []string `json:"priority_broadcasters"` // Prioritize these broadcasters
 	NextMatchID          MatchID  `json:"next_match_id"`         // Try to join this match immediately when finding a match
+	Verbose              bool     `json:"verbose"`               // Send the user verbose messages via discord
 }
 
 func (MatchmakingSettings) GetStorageID() StorageID {
