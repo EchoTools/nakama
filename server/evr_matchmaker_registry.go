@@ -29,6 +29,7 @@ import (
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
+	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/samber/lo"
@@ -161,7 +162,7 @@ type MatchmakingSession struct {
 	Expiry        time.Time
 	Label         *EvrMatchState
 	Tickets       map[string]TicketMeta // map[ticketId]TicketMeta
-	Party         *PartyHandler
+	Party         *PartyGroup
 	LatencyCache  *LatencyCache
 	Session       *sessionWS
 }
@@ -915,6 +916,87 @@ func (m *MatchmakingSession) GetPingCandidates(endpoints ...evr.Endpoint) (candi
 	*/
 
 	return candidates
+}
+func (ms *MatchmakingSession) JoinPartyGroup(groupID string) (*PartyGroup, error) {
+	session := ms.Session
+	partyID := uuid.NewV5(uuid.Nil, groupID)
+	partyRegistry := session.pipeline.partyRegistry.(*LocalPartyRegistry)
+	node := session.pipeline.node
+	ph, ok := partyRegistry.parties.Load(partyID)
+	if ok {
+		// Party already exists
+		_, err := partyRegistry.PartyJoinRequest(session.Context(), partyID, session.pipeline.node, &Presence{
+			ID: PresenceID{
+				Node:      session.pipeline.node,
+				SessionID: session.ID(),
+			},
+			// Presence stream not needed.
+			UserID: session.UserID(),
+			Meta: PresenceMeta{
+				Username: session.Username(),
+				// Other meta fields not needed.
+			},
+		})
+		switch err {
+		case runtime.ErrPartyFull, runtime.ErrPartyJoinRequestsFull:
+			return nil, status.Errorf(codes.ResourceExhausted, "Party is full")
+		case runtime.ErrPartyJoinRequestDuplicate:
+			return nil, status.Errorf(codes.AlreadyExists, "Duplicate join request")
+		case runtime.ErrPartyJoinRequestAlreadyMember:
+			// This is not an error, just a no-op.
+		}
+	} else {
+		// Create the party
+		maxSize := 8
+		open := false
+		presence := &rtapi.UserPresence{
+			UserId:    session.UserID().String(),
+			SessionId: session.ID().String(),
+			Username:  session.Username(),
+		}
+		ph = NewPartyHandler(partyRegistry.logger, partyRegistry, partyRegistry.matchmaker, partyRegistry.tracker, partyRegistry.streamManager, partyRegistry.router, partyID, partyRegistry.node, open, maxSize, presence)
+		partyRegistry.parties.Store(partyID, ph)
+
+		// If successful, the creator becomes the first user to join the party.
+		success, _ := session.pipeline.tracker.Track(session.Context(), session.ID(), ph.Stream, session.UserID(), PresenceMeta{
+			Format:   session.Format(),
+			Username: session.Username(),
+			Status:   "",
+		})
+		if !success {
+			_ = session.Send(&rtapi.Envelope{Message: &rtapi.Envelope_Error{Error: &rtapi.Error{
+				Code:    int32(rtapi.Error_RUNTIME_EXCEPTION),
+				Message: "Error tracking party creation",
+			}}}, true)
+			return nil, status.Errorf(codes.Internal, "Failed to track party creation")
+		}
+
+		out := &rtapi.Envelope{Message: &rtapi.Envelope_Party{Party: &rtapi.Party{
+			PartyId:   ph.IDStr,
+			Open:      open,
+			MaxSize:   int32(maxSize),
+			Self:      presence,
+			Leader:    presence,
+			Presences: []*rtapi.UserPresence{presence},
+		}}}
+		_ = session.Send(out, true)
+
+	}
+
+	// Track the party stream
+	success, _ := session.pipeline.tracker.Track(session.Context(), session.ID(), PresenceStream{Mode: StreamModeParty, Subject: partyID, Label: node}, session.UserID(), PresenceMeta{
+		Format:   session.Format(),
+		Username: session.Username(),
+		Status:   "",
+	})
+	if !success {
+		return nil, status.Errorf(codes.Internal, "Failed to track party join")
+	}
+	ms.Party = &PartyGroup{
+		name: groupID,
+		ph:   ph,
+	}
+	return ms.Party, nil
 }
 
 // GetCache returns the latency cache for a user

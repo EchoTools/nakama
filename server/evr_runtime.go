@@ -658,3 +658,16 @@ func MatchLabelByID(ctx context.Context, nk runtime.NakamaModule, matchID MatchI
 
 	return &label, nil
 }
+
+func PartyMemberList(ctx context.Context, nk runtime.NakamaModule, partyID uuid.UUID) ([]runtime.Presence, error) {
+	node, ok := ctx.Value(runtime.RUNTIME_CTX_NODE).(string)
+	if !ok {
+		return nil, status.Error(codes.Internal, "error getting node from context")
+	}
+	// Get the MatchIDs for the user from it's presence
+	presences, err := nk.StreamUserList(StreamModeParty, partyID.String(), "", node, true, true)
+	if err != nil {
+		return nil, err
+	}
+	return presences, nil
+}
