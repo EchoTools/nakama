@@ -2460,7 +2460,13 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		whoami.HasPassword = false
 		whoami.ClientAddresses = nil
 		whoami.DeviceLinks = nil
-		whoami.EVRIDLogins = nil
+		if len(whoami.EVRIDLogins) > 0 {
+			// Set the timestamp to zero
+			for k := range whoami.EVRIDLogins {
+				whoami.EVRIDLogins[k] = time.Time{}
+			}
+		}
+
 		if guildID == "" {
 			whoami.GuildGroupMemberships = nil
 		}
@@ -2482,7 +2488,12 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		{Name: "Linked Devices", Value: strings.Join(whoami.DeviceLinks, "\n"), Inline: false},
 		{Name: "Logins", Value: func() string {
 			lines := lo.MapToSlice(whoami.EVRIDLogins, func(k string, v time.Time) string {
-				return fmt.Sprintf("<t:%d:R> - %s", v.Unix(), k)
+				if v.IsZero() {
+					// Don't use the timestamp
+					return k
+				} else {
+					return fmt.Sprintf("<t:%d:R> - %s", v.Unix(), k)
+				}
 			})
 			slices.Sort(lines)
 			slices.Reverse(lines)
