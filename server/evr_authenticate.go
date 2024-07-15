@@ -803,7 +803,7 @@ func SetDisplayNameByChannelBySession(ctx context.Context, nk runtime.NakamaModu
 
 	// Reverse the options
 	options = lo.Reverse(options)
-	logger.Debug("SetDisplayNameByChannelBySession", zap.String("options", strings.Join(options, ",")))
+	logger.Debug("SetDisplayNameByChannelBySession", zap.String("gid", gid.String()), zap.String("options", strings.Join(options, ",")))
 	displayName, err = SelectDisplayNameByPriority(ctx, nk, account.GetUser().GetId(), account.GetUser().GetUsername(), options)
 	if err != nil {
 		return "", fmt.Errorf("error selecting display name by priority: %w", err)
