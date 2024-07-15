@@ -441,7 +441,64 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 	if !strings.HasPrefix(session.Username(), "broadcaster:") && verbose {
 		content := ""
 		switch in.Message.(type) {
+		case *rtapi.Envelope_StatusPresenceEvent, *rtapi.Envelope_MatchPresenceEvent, *rtapi.Envelope_StreamPresenceEvent:
+		case *rtapi.Envelope_Party:
+			discordIDs := make([]string, 0)
+			leader := in.GetParty().GetLeader()
+			userIDs := make([]string, 0)
+
+			// Put leader first
+			if leader != nil {
+				userIDs = append(userIDs, leader.GetUserId())
+			}
+			for _, m := range in.GetParty().GetPresences() {
+				if m.GetUserId() == leader.GetUserId() {
+					continue
+				}
+				userIDs = append(userIDs, m.GetUserId())
+			}
+
+			for _, userID := range userIDs {
+				if discordID, err := GetDiscordIDByUserID(session.Context(), session.pipeline.db, userID); err != nil {
+					logger.Warn("Failed to get discord ID", zap.Error(err))
+					discordIDs = append(discordIDs, userID)
+				} else {
+					discordIDs = append(discordIDs, fmt.Sprintf("<@%s>", discordID))
+				}
+			}
+			content = fmt.Sprintf("Joined party: %s", strings.Join(discordIDs, ", "))
+		case *rtapi.Envelope_PartyJoinRequest:
+
 		case *rtapi.Envelope_PartyPresenceEvent:
+			event := in.GetPartyPresenceEvent()
+			joins := make([]string, 0)
+
+			for _, join := range event.GetJoins() {
+				if join.GetUserId() != session.UserID().String() {
+					if discordID, err := GetDiscordIDByUserID(session.Context(), session.pipeline.db, join.GetUserId()); err != nil {
+						logger.Warn("Failed to get discord ID", zap.Error(err))
+						joins = append(joins, join.GetUsername())
+					} else {
+						joins = append(joins, fmt.Sprintf("<@%s>", discordID))
+					}
+				}
+			}
+			leaves := make([]string, 0)
+			for _, leave := range event.GetLeaves() {
+				if discordID, err := GetDiscordIDByUserID(session.Context(), session.pipeline.db, leave.GetUserId()); err != nil {
+					logger.Warn("Failed to get discord ID", zap.Error(err))
+					leaves = append(leaves, leave.GetUsername())
+				} else {
+					leaves = append(leaves, fmt.Sprintf("<@%s>", discordID))
+				}
+			}
+
+			if len(joins) > 0 {
+				content += fmt.Sprintf("Party join: %s\n", strings.Join(joins, ", "))
+			}
+			if len(leaves) > 0 {
+				content += fmt.Sprintf("Party leave: %s\n", strings.Join(leaves, ", "))
+			}
 
 		default:
 			if data, err := json.MarshalIndent(in.GetMessage(), "", "  "); err != nil {
