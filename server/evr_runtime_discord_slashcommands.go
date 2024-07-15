@@ -1963,18 +1963,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					return
 				}
 
-				// Make sure the user is online
-				count, err := nk.StreamCount(StreamModeEvr, userID.String(), StreamContextMatch.String(), "")
-				if err != nil {
-					logger.Error("Failed to get user presence", zap.Error(err))
-					return
-				}
-				if count == 0 {
-					if err := simpleInteractionResponse(s, i, "You must be online (in a social lobby or match) to use this command."); err != nil {
-						logger.Warn("Failed to send interaction response", zap.Error(err))
-					}
-				}
-
 				objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
 					{
 						Collection: MatchmakingConfigStorageCollection,
@@ -2011,6 +1999,20 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				if err != nil {
 					logger.Error("Failed to list party members", zap.Error(err))
 					return
+				}
+				// Make sure the user is in the list
+				found := false
+				for _, streamUser := range streamUsers {
+					if streamUser.GetUserId() == userID.String() {
+						found = true
+						break
+					}
+				}
+
+				if !found {
+					if err := simpleInteractionResponse(s, i, "You are not online, or not in a party."); err != nil {
+						logger.Warn("Failed to send interaction response", zap.Error(err))
+					}
 				}
 
 				// Convert the members to discord user IDs
