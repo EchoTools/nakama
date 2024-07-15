@@ -201,6 +201,10 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 	}
 
 	p.broadcasterRegistrationBySession.Store(session.ID().String(), config)
+	go func() {
+		<-session.Context().Done()
+		p.broadcasterRegistrationBySession.Delete(session.ID().String())
+	}()
 
 	// Create a new parking match
 	if err := p.newParkingMatch(logger, session, config); err != nil {
