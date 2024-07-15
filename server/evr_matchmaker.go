@@ -13,7 +13,6 @@ import (
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
-	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
@@ -236,7 +235,7 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 	ctx := msession.Context()
 	// TODO FIXME Add a custom matcher for broadcaster matching
 	// Get a list of all the broadcasters
-	logger := msession.Logger
+
 	// Ping endpoints
 	endpoints := make([]evr.Endpoint, 0, 100)
 	p.broadcasterRegistrationBySession.Range(func(_ string, b *MatchBroadcaster) bool {
@@ -281,23 +280,6 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 	// Merge the user's config with the global config
 	query = fmt.Sprintf("%s %s %s", query, gconfig.BackfillQueryAddon, config.BackfillQueryAddon)
 
-	partyID := uuid.Nil
-
-	if config.GroupID != "" {
-		partyRegistry := session.pipeline.partyRegistry
-		ph, err := p.joinPartyGroup(logger, session, partyRegistry, config.GroupID)
-		if err != nil {
-			logger.Warn("Failed to join party group", zap.String("group_id", config.GroupID), zap.Error(err))
-		} else {
-			logger.Debug("Joined party", zap.String("party_id", partyID.String()), zap.Any("members", ph.members.List()))
-		}
-		partyID = ph.ID
-		msession.Party = ph
-		// Add the user's group to the string properties
-		stringProps["party_group"] = config.GroupID
-		// Add the user's group to the query string
-		query = fmt.Sprintf("%s properties.party_group:%s^5", query, config.GroupID)
-	}
 	// Get the EVR ID from the context
 	evrID, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
 	if !ok {
@@ -313,10 +295,7 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 		maxCount = 8
 	}
 	countMultiple := 2
-	pID := ""
-	if partyID != uuid.Nil {
-		pID = partyID.String()
-	}
+
 	subcontext := uuid.NewV5(uuid.Nil, "matchmaking")
 	// Create a status presence for the user
 	ok = session.tracker.TrackMulti(ctx, session.id, []*TrackerOp{
@@ -337,60 +316,18 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 
 	p.metrics.CustomCounter("matchmaker_tickets_count", tags, 1)
 	// Add the user to the matchmaker
+	pID := ""
+	if msession.Party != nil {
+		pID = msession.Party.ID().String()
+		stringProps["party_group"] = config.GroupID
+		query = fmt.Sprintf("%s properties.party_group:%s^5", query, config.GroupID)
+	}
 	ticket, _, err = session.matchmaker.Add(ctx, presences, sessionID.String(), pID, query, minCount, maxCount, countMultiple, stringProps, numericProps)
 	if err != nil {
 		return "", fmt.Errorf("failed to add to matchmaker with query `%s`: %v", query, err)
 	}
 	msession.AddTicket(ticket, query)
 	return ticket, nil
-}
-
-func (p *EvrPipeline) joinPartyGroup(logger *zap.Logger, session *sessionWS, partyRegistry PartyRegistry, groupID string) (*PartyHandler, error) {
-	// Attempt to join the party
-	userPresence := &rtapi.UserPresence{
-		UserId:    session.UserID().String(),
-		SessionId: session.ID().String(),
-		Username:  session.Username(),
-	}
-	presence := []*Presence{
-		{
-			ID: PresenceID{
-				Node:      session.pipeline.node,
-				SessionID: session.id,
-			},
-			// Presence stream not needed.
-			UserID: session.UserID(),
-			Meta: PresenceMeta{
-				Username: session.Username(),
-				// Other meta fields not needed.
-			},
-		}}
-
-	partyID := uuid.NewV5(uuid.Nil, groupID)
-	pr := partyRegistry.(*LocalPartyRegistry)
-	// Try to join the party group
-	ph, found := pr.parties.Load(partyID)
-	if found {
-		ph.Lock()
-		defer ph.Unlock()
-		if ph.members.Size() < ph.members.maxSize {
-			partyRegistry.Join(partyID, presence)
-			return ph, nil
-		} else {
-			p.metrics.CustomCounter("partyregistry_error_party_full_count", nil, 1)
-			logger.Warn("Party is full", zap.String("party_id", partyID.String()))
-			return ph, status.Errorf(codes.ResourceExhausted, "Party is full")
-		}
-	} else {
-		// Create the party
-		p.metrics.CustomCounter("partyregistry_create_count", nil, 1)
-		maxSize := 8
-		open := true
-		ph := NewPartyHandler(p.logger, partyRegistry, session.matchmaker, p.tracker, p.streamManager, p.router, partyID, p.node, open, maxSize, userPresence)
-		ph.Join(presence)
-		pr.parties.Store(partyID, ph)
-		return ph, nil
-	}
 }
 
 // Wrapper for the matchRegistry.ListMatches function.
@@ -597,7 +534,7 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 
 	if msession, ok := p.matchmakingRegistry.GetMatchingBySessionId(session.ID()); ok {
 		if msession != nil && msession.Party != nil {
-			partyID = msession.Party.ID
+			partyID = msession.Party.ID()
 		}
 	}
 

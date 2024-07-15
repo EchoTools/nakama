@@ -452,6 +452,22 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 		logger.Error("Failed to load matchmaking config", zap.Error(err))
 	}
 
+	// Join party
+	if config.GroupID != "" {
+		msession.Party, err = msession.JoinPartyGroup(config.GroupID)
+		if err != nil {
+			logger.Warn("Failed to join party group", zap.String("group_id", config.GroupID), zap.Error(err))
+		} else {
+
+			logger.Debug("Joined party", zap.String("party_id", msession.Party.ID().String()), zap.Any("members", msession.Party.GetMembers()))
+
+			if leader := msession.Party.GetLeader(); leader != nil && leader.SessionId != session.id.String() {
+				// Delay to allow the leader to end up in a social lobby
+				<-time.After(3 * time.Second)
+			}
+		}
+	}
+
 	var matchID MatchID
 	// Check for a direct match first
 	if !config.NextMatchID.IsNil() {
@@ -615,7 +631,7 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 		// Join any on-going combat match without delay
 		skipBackfillDelay = false
 		// Start the backfill loop, if the player is not in a party.
-		if msession.Party == nil || msession.Party.members.Size() == 1 {
+		if msession.Party == nil || len(msession.Party.GetMembers()) == 1 {
 			go p.MatchBackfillLoop(session, msession, skipBackfillDelay, false, 1)
 		}
 		// Put a ticket in for matching
@@ -627,7 +643,7 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 	case evr.ModeArenaPublic:
 
 		// Start the backfill loop, if the player is not in a party.
-		if msession.Party == nil || msession.Party.members.Size() == 1 {
+		if msession.Party == nil || len(msession.Party.GetMembers()) == 1 {
 			// Don't backfill party members, let the matchmaker handle it.
 			go p.MatchBackfillLoop(session, msession, skipBackfillDelay, false, 1)
 		}
