@@ -437,7 +437,35 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 		verbose = false
 	}
 
-	return pipelineFn(logger, session, in)
+	// DM the user on discord
+	if !strings.HasPrefix(session.Username(), "broadcaster:") && verbose {
+		content := ""
+		switch in.Message.(type) {
+		case *rtapi.Envelope_PartyPresenceEvent:
+
+		default:
+			if data, err := json.MarshalIndent(in.GetMessage(), "", "  "); err != nil {
+				logger.Error("Failed to marshal message", zap.Error(err))
+			} else if len(data) > 2000 {
+				content = "Message too long to display"
+			} else if len(data) > 0 {
+				content = string("```json\n" + string(data) + "\n```")
+			}
+		}
+
+		if content != "" {
+			if dg := p.discordRegistry.GetBot(); dg == nil {
+				// No discord bot
+			} else if discordID, err := GetDiscordIDByUserID(session.Context(), session.pipeline.db, session.UserID().String()); err != nil {
+				logger.Warn("Failed to get discord ID", zap.Error(err))
+			} else if channel, err := dg.UserChannelCreate(discordID); err != nil {
+				logger.Warn("Failed to create DM channel", zap.Error(err))
+			} else if _, err = dg.ChannelMessageSend(channel.ID, content); err != nil {
+				logger.Warn("Failed to send message to user", zap.Error(err))
+			}
+		}
+	}
+	return nil, nil
 }
 
 // relayMatchData relays the data to the match by determining the match id from the session or user id.
