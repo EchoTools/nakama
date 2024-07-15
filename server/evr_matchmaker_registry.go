@@ -923,6 +923,13 @@ func (ms *MatchmakingSession) JoinPartyGroup(groupID string) (*PartyGroup, error
 	partyID := uuid.NewV5(uuid.Nil, groupID)
 	partyRegistry := session.pipeline.partyRegistry.(*LocalPartyRegistry)
 	node := session.pipeline.node
+
+	presence := &rtapi.UserPresence{
+		UserId:    session.UserID().String(),
+		SessionId: session.ID().String(),
+		Username:  session.Username(),
+	}
+
 	ph, ok := partyRegistry.parties.Load(partyID)
 	if ok {
 		// Party already exists
@@ -939,6 +946,8 @@ func (ms *MatchmakingSession) JoinPartyGroup(groupID string) (*PartyGroup, error
 			},
 		})
 		switch err {
+		case nil:
+
 		case runtime.ErrPartyFull, runtime.ErrPartyJoinRequestsFull:
 			return nil, status.Errorf(codes.ResourceExhausted, "Party is full")
 		case runtime.ErrPartyJoinRequestDuplicate:
@@ -949,12 +958,8 @@ func (ms *MatchmakingSession) JoinPartyGroup(groupID string) (*PartyGroup, error
 	} else {
 		// Create the party
 		maxSize := 8
-		open := false
-		presence := &rtapi.UserPresence{
-			UserId:    session.UserID().String(),
-			SessionId: session.ID().String(),
-			Username:  session.Username(),
-		}
+		open := true
+
 		ph = NewPartyHandler(partyRegistry.logger, partyRegistry, partyRegistry.matchmaker, partyRegistry.tracker, partyRegistry.streamManager, partyRegistry.router, partyID, partyRegistry.node, open, maxSize, presence)
 		partyRegistry.parties.Store(partyID, ph)
 
