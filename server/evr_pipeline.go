@@ -373,18 +373,23 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 	// TODO FIXME Catch the match leave message and translate it to an evr message
 	p := session.evrPipeline
 
-	pipelineFn := func(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope) ([]evr.Message, error) {
-		if logger.Core().Enabled(zap.DebugLevel) {
-			logger.Debug(fmt.Sprintf("Unhandled protobuf message: %T", in.Message))
+	switch in.Message.(type) {
+	case *rtapi.Envelope_StreamData:
+		payloadEvr := []byte(in.GetStreamData().GetData())
+		if err := session.SendBytes(payloadEvr, true); err != nil {
+			logger.Error("Failed to send match data", zap.Error(err))
+		}
+		return nil, nil
+	case *rtapi.Envelope_MatchData:
+		if in.GetMatchData().GetOpCode() == OpCodeEvrPacketData {
+			if err := session.SendBytes(in.GetMatchData().GetData(), true); err != nil {
+				logger.Error("Failed to send match data", zap.Error(err))
+			}
 		}
 		return nil, nil
 	}
 
 	switch in.Message.(type) {
-	case *rtapi.Envelope_Error:
-		envelope := in.GetError()
-		logger.Error("Envelope_Error", zap.Int32("code", envelope.Code), zap.String("message", envelope.Message))
-
 	case *rtapi.Envelope_MatchPresenceEvent:
 		envelope := in.GetMatchPresenceEvent()
 		userID := session.UserID().String()
@@ -425,15 +430,11 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 			}()
 		}
 
-		pipelineFn = func(_ *zap.Logger, _ *sessionWS, _ *rtapi.Envelope) ([]evr.Message, error) {
-			return nil, nil
-		}
-	default:
-		// No translation needed.
 	}
 
-	if logger.Core().Enabled(zap.DebugLevel) && in.Message != nil {
-		logger.Debug(fmt.Sprintf("outgoing protobuf message: %T", in.Message))
+	verbose, ok := session.Context().Value(ctxVerboseKey{}).(bool)
+	if !ok {
+		verbose = false
 	}
 
 	return pipelineFn(logger, session, in)
