@@ -24,7 +24,6 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
-	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -1139,14 +1138,7 @@ func (t *LocalTracker) processEvent(e *PresenceEvent) {
 			var err error
 			switch session.Format() {
 			case SessionFormatEvr:
-				if s, ok := session.(*sessionWS); ok {
-					// Send the event to the session.
-					var messages []evr.Message
-					messages, err = ProcessOutgoing(s.logger, s, envelope)
-					if err == nil {
-						err = s.SendEvr(messages...)
-					}
-				}
+				err = session.Send(envelope, true)
 			case SessionFormatProtobuf:
 				if payloadProtobuf == nil {
 					// Marshal the payload now that we know this format is needed.
@@ -1282,14 +1274,7 @@ func (t *LocalTracker) processEvent(e *PresenceEvent) {
 			var err error
 			switch session.Format() {
 			case SessionFormatEvr:
-				if s, ok := session.(*sessionWS); ok {
-					// Send the event to the session.
-					var messages []evr.Message
-					messages, err = ProcessOutgoing(s.logger, s, envelope)
-					if err == nil {
-						err = s.SendEvr(messages...)
-					}
-				}
+				err = session.Send(envelope, true)
 			case SessionFormatProtobuf:
 				if payloadProtobuf == nil {
 					// Marshal the payload now that we know this format is needed.

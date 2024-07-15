@@ -143,8 +143,7 @@ func NewLocalStatusRegistry(logger *zap.Logger, config Config, sessionRegistry S
 					var err error
 					switch session.Format() {
 					case SessionFormatEvr:
-						// Evr does not support status events.
-						continue
+						err = session.Send(envelope, true)
 					case SessionFormatProtobuf:
 						if payloadProtobuf == nil {
 							// Marshal the payload now that we know this format is needed.
