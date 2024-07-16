@@ -332,15 +332,7 @@ func (s *sessionWS) BroadcasterSession(userID string, username string) error {
 	s.logger = s.logger.With(zap.String("username", username), zap.String("uid", userID))
 	s.Unlock()
 
-	// Register initial status tracking and presence(s) for this session.
-	s.statusRegistry.Follow(s.id, map[uuid.UUID]struct{}{s.userID: {}})
-
 	s.tracker.TrackMulti(ctx, s.id, []*TrackerOp{
-		// EVR packet data stream for the login session by userID, and service ID
-		{
-			Stream: PresenceStream{Mode: StreamModeEvr, Subject: s.userID},
-			Meta:   PresenceMeta{Format: s.format, Username: s.username.String(), Hidden: true},
-		},
 		// EVR packet data stream for the login session by Session ID and broadcaster ID
 		{
 			Stream: PresenceStream{Mode: StreamModeEvr, Subject: s.userID, Subcontext: StreamContextGameServer},

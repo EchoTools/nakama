@@ -67,3 +67,7 @@ func (m *LobbyPlayerSessionsRequest) SessionID() uuid.UUID {
 func (m *LobbyPlayerSessionsRequest) EvrID() EvrId {
 	return m.EvrId
 }
+
+func (m *LobbyPlayerSessionsRequest) MatchSessionID() uuid.UUID {
+	return m.MatchSession
+}

@@ -8,6 +8,10 @@ type IdentifyingMessage interface {
 	EvrID() EvrId
 }
 
+type MatchSessionMessage interface {
+	MatchSessionID() uuid.UUID
+}
+
 /*
 
 SNSActivityDailyListRequest
