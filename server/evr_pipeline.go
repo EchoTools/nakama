@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -499,25 +500,17 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 
 // relayMatchData relays the data to the match by determining the match id from the session or user id.
 func (p *EvrPipeline) relayMatchData(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-
-	matchID, _, err := GetMatchBySessionID(p.runtimeModule, session.id)
-	if err != nil {
+	var matchID MatchID
+	var err error
+	if message, ok := in.(evr.MatchSessionMessage); ok {
+		if matchID, err = NewMatchID(message.MatchSessionID(), p.node); err != nil {
+			return fmt.Errorf("failed to create match ID: %w", err)
+		}
+	} else if matchID, _, err = GetMatchBySessionID(p.runtimeModule, session.id); err != nil {
 		return fmt.Errorf("failed to get match by session ID: %w", err)
-	}
-	if matchID == nil {
+	} else if matchID.IsNil() {
 		return fmt.Errorf("no match found for session ID: %s", session.id)
 	}
-
-	err = sendMatchData(p.matchRegistry, *matchID, session, in)
-	if err != nil {
-		return fmt.Errorf("failed to send match data: %w", err)
-	}
-
-	return nil
-}
-
-// sendMatchData sends the data to the match.
-func sendMatchData(matchRegistry MatchRegistry, matchID MatchID, session *sessionWS, in evr.Message) error {
 
 	requestJson, err := json.Marshal(in)
 	if err != nil {
@@ -526,7 +519,7 @@ func sendMatchData(matchRegistry MatchRegistry, matchID MatchID, session *sessio
 	// Set the OpCode to the symbol of the message.
 	opCode := int64(evr.SymbolOf(in))
 	// Send the data to the match.
-	matchRegistry.SendData(matchID.UUID(), matchID.Node(), session.UserID(), session.ID(), session.Username(), matchID.Node(), opCode, requestJson, true, time.Now().UTC().UnixNano()/int64(time.Millisecond))
+	p.matchRegistry.SendData(matchID.UUID(), matchID.Node(), session.UserID(), session.ID(), session.Username(), matchID.Node(), opCode, requestJson, true, time.Now().UTC().UnixNano()/int64(time.Millisecond))
 
 	return nil
 }

@@ -968,19 +968,19 @@ func GetMatchByEvrID(nk runtime.NakamaModule, evrID evr.EvrId) (matchID *MatchID
 	return nil, nil, nil
 }
 
-func GetMatchBySessionID(nk runtime.NakamaModule, sessionID uuid.UUID) (matchID *MatchID, presence runtime.Presence, err error) {
+func GetMatchBySessionID(nk runtime.NakamaModule, sessionID uuid.UUID) (matchID MatchID, presence runtime.Presence, err error) {
 
 	presences, err := nk.StreamUserList(StreamModeEvr, sessionID.String(), StreamContextMatch.String(), "", true, true)
 	if err != nil {
-		return nil, nil, fmt.Errorf("UserServerProfileUpdateRequest: failed to get stream presences: %w", err)
+		return MatchID{}, nil, fmt.Errorf("UserServerProfileUpdateRequest: failed to get stream presences: %w", err)
 	}
 
 	for _, presence := range presences {
 		matchID := MatchIDFromStringOrNil(presence.GetStatus())
 		if !matchID.IsNil() {
-			return &matchID, presence, nil
+			return matchID, presence, nil
 		}
 	}
 
-	return nil, nil, nil
+	return MatchID{}, nil, nil
 }
