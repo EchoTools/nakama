@@ -897,6 +897,13 @@ func SetDisplayNameByChannelBySession(ctx context.Context, nk runtime.NakamaModu
 		return "", fmt.Errorf("error updating account: %w", err)
 	}
 
+	// Add [BOT] to the display name if the user is a bot
+	if flags, ok := ctx.Value(ctxFlagsKey{}).(int); ok {
+		if flags&FlagNoVR != 0 {
+			displayName = fmt.Sprintf("%s [BOT]", displayName)
+		}
+	}
+
 	return displayName, nil
 }
 

@@ -10,7 +10,7 @@ import (
 // Game Server -> Nakama: player sessions that the server intends to accept.
 
 type BroadcasterPlayersAccept struct {
-	PlayerSessions []uuid.UUID
+	PlayerSessionIDs []uuid.UUID
 }
 
 func (m BroadcasterPlayersAccept) Symbol() Symbol {
@@ -21,9 +21,9 @@ func (m BroadcasterPlayersAccept) Token() string {
 }
 
 // NewERGameServerAcceptPlayersWithSessions initializes a new ERGameServerAcceptPlayers with the provided arguments.
-func NewBroadcasterPlayersAccept(playerSessions []uuid.UUID) *BroadcasterPlayersAccept {
+func NewBroadcasterPlayersAccept(playerSessionIDs []uuid.UUID) *BroadcasterPlayersAccept {
 	return &BroadcasterPlayersAccept{
-		PlayerSessions: playerSessions,
+		PlayerSessionIDs: playerSessionIDs,
 	}
 }
 
@@ -31,16 +31,16 @@ func (m *BroadcasterPlayersAccept) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
 		func() error {
 			if s.Mode == DecodeMode {
-				m.PlayerSessions = make([]uuid.UUID, s.Len()/16)
+				m.PlayerSessionIDs = make([]uuid.UUID, s.Len()/16)
 			}
-			return s.StreamGuids(&m.PlayerSessions)
+			return s.StreamGuids(&m.PlayerSessionIDs)
 		},
 	})
 }
 
 func (m *BroadcasterPlayersAccept) String() string {
-	sessions := make([]string, len(m.PlayerSessions))
-	for i, session := range m.PlayerSessions {
+	sessions := make([]string, len(m.PlayerSessionIDs))
+	for i, session := range m.PlayerSessionIDs {
 		sessions[i] = session.String()
 	}
 	return fmt.Sprintf("%s(player_sessions=[%s])", m.Token(), strings.Join(sessions, ", "))

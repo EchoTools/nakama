@@ -85,7 +85,7 @@ func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logg
 			fs.Close("New session started", runtime.PresenceReasonDisconnect)
 		}
 	}
-	// Track this session as a matchmaking session.
+	// Track this session as a matchmaking session. (This is a track and not an update, because if user is in a match, that data should remain)
 	s := session
 	s.tracker.TrackMulti(s.ctx, s.id, []*TrackerOp{
 		{
@@ -201,6 +201,17 @@ func (p *EvrPipeline) matchmakingLabelFromFindRequest(ctx context.Context, sessi
 		ml.ID = MatchID{request.CurrentMatch, p.node} // The existing lobby/match that the player is in (if any)
 	}
 
+	switch ml.Mode {
+	case evr.ModeCombatPublic, evr.ModeArenaPublic:
+		if ml.TeamIndex != TeamIndex(evr.TeamSpectator) || ml.TeamIndex != TeamIndex(evr.TeamModerator) {
+			ml.TeamIndex = TeamIndex(evr.TeamUnassigned)
+		}
+	case evr.ModeSocialPublic:
+		if ml.TeamIndex != TeamIndex(evr.TeamModerator) || ml.TeamIndex != TeamIndex(evr.TeamSpectator) {
+			ml.TeamIndex = TeamIndex(evr.TeamUnassigned)
+		}
+	}
+
 	return ml, nil
 
 }
@@ -240,7 +251,7 @@ func (p *EvrPipeline) lobbyFindSessionRequest(ctx context.Context, logger *zap.L
 	ml.Broadcaster.Regions = []evr.Symbol{evr.DefaultRegion}
 
 	// Wait for a graceperiod Unless this is a social lobby, wait for a grace period before starting the matchmaker
-	matchmakingDelay := MatchJoinGracePeriod
+	matchmakingDelay := MatchmakingStartGracePeriod
 	if ml.Mode == evr.ModeSocialPublic {
 		matchmakingDelay = 0
 	}
@@ -331,21 +342,14 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 	retryTicker := time.NewTicker(3 * time.Second)
 	createTicker := time.NewTicker(5 * time.Second)
 
+OuterLoop:
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-delayStartTimer.C:
-		case <-createTicker.C:
-			if create && p.createLobbyMu.TryLock() {
-				defer p.createLobbyMu.Unlock()
-				if _, err := p.MatchCreate(ctx, session, msession, msession.Label); err != nil {
-					logger.Warn("Failed to create match", zap.Error(err))
-				}
-			}
 		case <-retryTicker.C:
 		}
-
 		// Backfill any existing matches
 		labels, query, err := p.Backfill(ctx, session, msession, minCount, limit)
 		if err != nil {
@@ -353,14 +357,26 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 		}
 
 		for _, label := range labels {
-			logger.Debug("Attempting to backfill match", zap.String("mid", label.ID.UUID().String()))
 			p.metrics.CustomCounter("match_backfill_found_count", msession.metricsTags(), 1)
-			msession.MatchJoinCh <- FoundMatch{
-				MatchID:   label.ID,
-				Query:     query,
-				TeamIndex: TeamIndex(evr.TeamUnassigned),
+			logger.Debug("Attempting to backfill match", zap.String("mid", label.ID.UUID().String()))
+			if err := p.JoinEvrMatch(ctx, logger, session, query, label.ID, evr.TeamUnassigned); err != nil {
+				logger.Warn("Failed to backfill match", zap.Error(err))
+				continue
 			}
+			continue OuterLoop
 		}
+		// After trying to backfill, try to create a match on an interval
+		select {
+		case <-createTicker.C:
+			if create && p.createLobbyMu.TryLock() {
+				if _, err := p.MatchCreate(ctx, session, msession, msession.Label); err != nil {
+					logger.Warn("Failed to create match", zap.Error(err))
+				}
+				p.createLobbyMu.Unlock()
+			}
+		default:
+		}
+
 	}
 }
 
@@ -490,6 +506,7 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 			} else {
 				p.metrics.CustomCounter("match_next_join_count", map[string]string{}, 1)
 				// Join the match
+
 				msession.MatchJoinCh <- FoundMatch{
 					MatchID:   matchID,
 					Query:     "",

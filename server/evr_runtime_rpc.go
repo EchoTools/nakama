@@ -908,14 +908,14 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		state.StartTime = request.StartTime
 
 		// Translate the discord ID to the nakama ID for the team Alignments
-		state.TeamAlignments = make(map[uuid.UUID]int, len(request.Alignments))
+		state.TeamAlignments = make(map[string]int, len(request.Alignments))
 		for discordID, teamIndex := range request.Alignments {
 			// Get the nakama ID from the discord ID
 			userID, err := GetUserIDByDiscordID(ctx, db, discordID)
 			if err != nil {
 				return "", runtime.NewError(err.Error(), StatusNotFound)
 			}
-			state.TeamAlignments[uuid.FromStringOrNil(userID)] = int(teamIndex)
+			state.TeamAlignments[userID] = int(teamIndex)
 		}
 
 		// Prepare the session for the match.

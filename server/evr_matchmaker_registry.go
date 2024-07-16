@@ -964,7 +964,7 @@ func (ms *MatchmakingSession) JoinPartyGroup(groupID string) (*PartyGroup, error
 		partyRegistry.parties.Store(partyID, ph)
 
 		// If successful, the creator becomes the first user to join the party.
-		success, _ := session.pipeline.tracker.Track(session.Context(), session.ID(), ph.Stream, session.UserID(), PresenceMeta{
+		success := session.pipeline.tracker.Update(session.Context(), session.ID(), ph.Stream, session.UserID(), PresenceMeta{
 			Format:   session.Format(),
 			Username: session.Username(),
 			Status:   "",
@@ -990,7 +990,7 @@ func (ms *MatchmakingSession) JoinPartyGroup(groupID string) (*PartyGroup, error
 	}
 
 	// Track the party stream
-	success, _ := session.pipeline.tracker.Track(session.Context(), session.ID(), PresenceStream{Mode: StreamModeParty, Subject: partyID, Label: node}, session.UserID(), PresenceMeta{
+	success := session.pipeline.tracker.Update(session.Context(), session.ID(), PresenceStream{Mode: StreamModeParty, Subject: partyID, Label: node}, session.UserID(), PresenceMeta{
 		Format:   session.Format(),
 		Username: session.Username(),
 		Status:   "",

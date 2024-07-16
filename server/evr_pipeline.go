@@ -221,7 +221,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 
 				evrPipeline.matchBySessionID.Range(func(key string, value string) bool {
 					if sessionRegistry.Get(uuid.FromStringOrNil(key)) == nil {
-						logger.Debug("Housekeeping: Session not found for matchID", zap.String("matchID", value))
+						logger.Debug("Housekeeping: Match not found for session ID", zap.String("matchID", value))
 						evrPipeline.matchBySessionID.Delete(key)
 					}
 					return true
@@ -290,7 +290,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 	case *evr.LobbyPingResponse:
 		pipelineFn = p.lobbyPingResponse
 	case *evr.LobbyPlayerSessionsRequest:
-		pipelineFn = p.relayMatchData
+		pipelineFn = p.lobbyPlayerSessionsRequest
 	case *evr.LobbyPendingSessionCancel:
 		pipelineFn = p.lobbyPendingSessionCancel
 
@@ -298,22 +298,18 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 	case *evr.BroadcasterRegistrationRequest:
 		requireAuthed = false
 		pipelineFn = p.broadcasterRegistrationRequest
-	case *evr.BroadcasterSessionEnded:
-		pipelineFn = p.broadcasterSessionEnded
-	case *evr.BroadcasterPlayersAccept:
-		pipelineFn = p.relayMatchData
 	case *evr.BroadcasterSessionStarted:
 		pipelineFn = p.relayMatchData
-	case *evr.BroadcasterChallengeRequest:
-		pipelineFn = p.relayMatchData
-	case *evr.BroadcasterPlayersRejected:
-		pipelineFn = p.relayMatchData
+	case *evr.BroadcasterPlayersAccept:
+		pipelineFn = p.broadcasterPlayerAccept
+	case *evr.BroadcasterPlayerRemoved:
+		pipelineFn = p.broadcasterPlayerRemoved
 	case *evr.BroadcasterPlayerSessionsLocked:
 		pipelineFn = p.relayMatchData
 	case *evr.BroadcasterPlayerSessionsUnlocked:
 		pipelineFn = p.relayMatchData
-	case *evr.BroadcasterPlayerRemoved:
-		pipelineFn = p.relayMatchData
+	case *evr.BroadcasterSessionEnded:
+		pipelineFn = p.broadcasterSessionEnded
 
 	default:
 		pipelineFn = func(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
