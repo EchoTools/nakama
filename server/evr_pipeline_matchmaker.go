@@ -106,18 +106,17 @@ func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logg
 	}, s.userID)
 
 	// Check if th user is a member of this guild
-	guild, err := p.discordRegistry.GetGuildByGroupId(ctx, groupID.String())
-	if err != nil || guild == nil {
-		return status.Errorf(codes.Internal, "Failed to get guild: %v", err)
+	guildID, err := GetGuildIDByGroupID(ctx, p.db, groupID.String())
+	if err != nil {
+		return status.Errorf(codes.Internal, "Failed to get guild ID: %v", err)
 	}
-
-	discordID, err := p.discordRegistry.GetDiscordIdByUserId(ctx, session.userID)
+	discordID, err := GetDiscordIDByUserID(ctx, p.db, session.userID.String())
 	if err != nil {
 		return status.Errorf(codes.Internal, "Failed to get discord id: %v", err)
 	}
 
 	// Check if the user is a member of this guild
-	member, err := p.discordRegistry.GetGuildMember(ctx, guild.ID, discordID)
+	member, err := p.discordRegistry.GetGuildMember(ctx, guildID, discordID)
 	if err != nil || member == nil || member.User == nil {
 		if requireMembership {
 			return status.Errorf(codes.PermissionDenied, "User is not a member of this guild")
