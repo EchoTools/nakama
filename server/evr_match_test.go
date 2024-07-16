@@ -60,9 +60,9 @@ func TestSelectTeamForPlayer(t *testing.T) {
 		"player5": {TeamIndex: evr.TeamOrange},
 	}
 
-	presences := make(map[uuid.UUID]*EvrMatchPresence)
+	presences := make(map[string]*EvrMatchPresence)
 	for k, v := range presencesstr {
-		u := uuid.NewV5(uuid.Nil, k)
+		u := uuid.NewV5(uuid.Nil, k).String()
 		presences[u] = v
 	}
 
@@ -307,9 +307,9 @@ func TestSelectTeamForPlayer(t *testing.T) {
 		presence := &EvrMatchPresence{
 			TeamIndex: tt.preferred,
 		}
-		presencestr := make(map[uuid.UUID]*EvrMatchPresence)
+		presencestr := make(map[string]*EvrMatchPresence)
 		for k, v := range tt.presences {
-			u := uuid.NewV5(uuid.Nil, k)
+			u := uuid.NewV5(uuid.Nil, k).String()
 			presencestr[u] = v
 		}
 
@@ -399,9 +399,9 @@ func TestSelectTeamForPlayer_With_Alighment(t *testing.T) {
 
 	for _, tt := range tests {
 		// Existing players
-		presences := make(map[uuid.UUID]*EvrMatchPresence)
+		presences := make(map[string]*EvrMatchPresence)
 		for _, player := range tt.players {
-			u := uuid.NewV5(uuid.Nil, player)
+			u := uuid.NewV5(uuid.Nil, player).String()
 			presences[u] = &EvrMatchPresence{
 				TeamIndex: alignments[player],
 			}
@@ -525,8 +525,8 @@ func TestEvrMatch_MatchLoop(t *testing.T) {
 				state_: &EvrMatchState{
 					emptyTicks: 0,
 					tickRate:   10,
-					presences: map[uuid.UUID]*EvrMatchPresence{
-						uuid.Must(uuid.NewV4()): {},
+					presences: map[string]*EvrMatchPresence{
+						uuid.Must(uuid.NewV4()).String(): {},
 					},
 					broadcasterJoinExpiry: 15 * 10,
 				},
@@ -546,8 +546,8 @@ func TestEvrMatch_MatchLoop(t *testing.T) {
 					}
 					state.sessionStartExpiry = 10 * 10
 					state.Started = false
-					state.presences = map[uuid.UUID]*EvrMatchPresence{
-						uuid.Must(uuid.NewV4()): {},
+					state.presences = map[string]*EvrMatchPresence{
+						uuid.Must(uuid.NewV4()).String(): {},
 					}
 					state.broadcasterJoinExpiry = 15 * 10
 

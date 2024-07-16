@@ -15,13 +15,15 @@ import (
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
 const (
-	MatchJoinGracePeriod = 3 * time.Second
+	MatchJoinGracePeriod        = 10 * time.Second
+	MatchmakingStartGracePeriod = 3 * time.Second
 )
 
 var (
@@ -298,13 +300,9 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 
 	subcontext := uuid.NewV5(uuid.Nil, "matchmaking")
 	// Create a status presence for the user
-	ok = session.tracker.TrackMulti(ctx, session.id, []*TrackerOp{
-		// EVR packet data stream for the login session by user ID, and service ID, with EVR ID
-		{
-			Stream: PresenceStream{Mode: StreamModeEvr, Subject: session.id, Subcontext: subcontext, Label: query},
-			Meta:   PresenceMeta{Format: session.format, Username: session.Username(), Hidden: true},
-		},
-	}, session.userID)
+	stream := PresenceStream{Mode: StreamModeEvr, Subject: session.id, Subcontext: subcontext, Label: query}
+	meta := PresenceMeta{Format: session.format, Username: session.Username(), Hidden: true}
+	ok = session.tracker.Update(ctx, session.id, stream, session.userID, meta)
 	if !ok {
 		return "", status.Errorf(codes.Internal, "Failed to track user: %v", err)
 	}
@@ -530,55 +528,35 @@ func (p *EvrPipeline) MatchCreate(ctx context.Context, session *sessionWS, msess
 func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, session *sessionWS, query string, matchID MatchID, teamIndex int) error {
 	// Append the node to the matchID if it doesn't already contain one.
 
+	label, err := MatchLabelByID(ctx, p.runtimeModule, matchID)
+	if err != nil {
+		return fmt.Errorf("failed to get match label: %w", err)
+	}
 	partyID := uuid.Nil
-
-	if msession, ok := p.matchmakingRegistry.GetMatchingBySessionId(session.ID()); ok {
+	msession, ok := p.matchmakingRegistry.GetMatchingBySessionId(session.ID())
+	if !ok {
 		if msession != nil && msession.Party != nil {
 			partyID = msession.Party.ID()
 		}
 	}
 
-	// Retrieve the evrID from the context.
-	evrID, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
-	if !ok {
-		return errors.New("evr id not found in context")
-	}
-
-	// Get the match label
-	match, _, err := p.matchRegistry.GetMatch(ctx, matchID.String())
-	if err != nil {
-		return fmt.Errorf("failed to get match: %w", err)
-	}
-	if match == nil {
-		return fmt.Errorf("match not found: %s", matchID.String())
-	}
-
-	label := &EvrMatchState{}
-	if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), label); err != nil {
-		return fmt.Errorf("failed to unmarshal match label: %w", err)
-	}
-
-	groupID := uuid.Nil
-	// Get the channel
-	if label.GroupID != nil {
-		groupID = uuid.FromStringOrNil((*label.GroupID).String())
-	}
-
 	// Determine the display name
-	displayName, err := SetDisplayNameByChannelBySession(ctx, p.runtimeModule, logger, p.discordRegistry, session, groupID.String())
+	displayName, err := SetDisplayNameByChannelBySession(ctx, p.runtimeModule, logger, p.discordRegistry, session, label.GetGroupID().String())
 	if err != nil {
 		logger.Warn("Failed to set display name.", zap.Error(err))
 	}
 
-	// If this is a NoVR user, give the profile's displayName a bot suffix
-	// Get the NoVR key from context
-	if flags, ok := ctx.Value(ctxFlagsKey{}).(int); ok {
-		if flags&FlagNoVR != 0 {
-			displayName = fmt.Sprintf("%s [BOT]", displayName)
-		}
+	// Set the profile's display name.
+	evrID, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
+	if !ok {
+		return fmt.Errorf("failed to get evrID from session context")
 	}
 
-	// Set the profile's display name.
+	loginSession, ok := ctx.Value(ctxLoginSessionKey{}).(*sessionWS)
+	if !ok {
+		return fmt.Errorf("failed to get login session from session context")
+	}
+
 	profile, found := p.profileRegistry.Load(session.UserID(), evrID)
 	if !found {
 		defer session.Close("profile not found", runtime.PresenceReasonUnknown)
@@ -593,106 +571,79 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 		logger.Warn("Failed to add profile to cache", zap.Error(err))
 	}
 
-	// Prepare the player session metadata.
+	// Select the players team
 
-	discordID, err := p.discordRegistry.GetDiscordIdByUserId(ctx, session.UserID())
+	// Prepare the player session metadata.
+	discordID, err := GetDiscordIDByUserID(ctx, p.db, session.userID.String())
 	if err != nil {
 		logger.Error("Failed to get discord id", zap.Error(err))
 	}
 
-	mp := EvrMatchPresence{
-		Node:          p.node,
-		UserID:        session.userID,
-		SessionID:     session.id,
-		Username:      session.Username(),
-		DisplayName:   displayName,
-		EvrID:         evrID,
-		PlayerSession: uuid.Must(uuid.NewV4()),
-		PartyID:       partyID,
-		TeamIndex:     int(teamIndex),
-		DiscordID:     discordID,
-		Query:         query,
-		ClientIP:      session.clientIP,
+	mp := &EvrMatchPresence{
+		Node:            p.node,
+		UserID:          session.userID,
+		SessionID:       session.id,
+		LoginSessionID:  loginSession.id,
+		Username:        session.Username(),
+		DisplayName:     displayName,
+		EvrID:           evrID,
+		PlayerSessionID: uuid.NewV5(matchID.UUID(), evrID.String()),
+		PartyID:         partyID,
+		TeamIndex:       int(teamIndex),
+		DiscordID:       discordID,
+		Query:           query,
+		ClientIP:        session.clientIP,
+		ClientPort:      session.clientPort,
 	}
 
-	// Marshal the player metadata into JSON.
-	jsonMeta, err := json.Marshal(mp)
-	if err != nil {
-		return fmt.Errorf("failed to marshal player meta: %w", err)
+	if label.LobbyType == PublicLobby && mp.TeamIndex == evr.TeamUnassigned {
+		var allow bool
+		mp.TeamIndex, allow = selectTeamForPlayer(NewRuntimeGoLogger(logger), mp, label)
+		if !allow {
+			return fmt.Errorf("failed to join lobby: lobby full")
+		}
 	}
-	metadata := map[string]string{"playermeta": string(jsonMeta)}
-	// Do the join attempt to avoid race conditions
-	found, allowed, isNew, reason, _, _ := p.matchRegistry.JoinAttempt(ctx, matchID.UUID(), matchID.Node(), session.UserID(), session.ID(), session.Username(), session.Expiry(), session.Vars(), session.clientIP, session.clientPort, p.node, metadata)
+
+	data, err := json.Marshal(mp)
+	if err != nil {
+		return fmt.Errorf("failed to marshal match presence: %w", err)
+	}
+
+	metadata := map[string]string{"playermeta": string(data)}
+
+	found, allowed, _, reason, _, _ := p.matchRegistry.JoinAttempt(ctx, matchID.UUID(), matchID.Node(), session.UserID(), session.ID(), session.Username(), session.Expiry(), session.Vars(), session.ClientIP(), session.ClientPort(), p.node, metadata)
 	if !found {
 		return fmt.Errorf("match not found: %s", matchID.String())
 	}
 	if !allowed {
-		switch reason {
-		case ErrJoinRejectedUnassignedLobby:
-			return status.Errorf(codes.NotFound, "join not allowed: %s", reason)
-		case ErrJoinRejectedDuplicateJoin:
-			return status.Errorf(codes.AlreadyExists, "join not allowed: %s", reason)
-		case ErrJoinRejectedNotModerator:
-			return status.Errorf(codes.PermissionDenied, "join not allowed: %s", reason)
-		case ErrJoinRejectedLobbyFull:
-			return status.Errorf(codes.ResourceExhausted, "join not allowed: %s", reason)
-		default:
-			return status.Errorf(codes.Internal, "join not allowed: %s", reason)
-		}
+		return fmt.Errorf("join not allowed: %s", reason)
+	}
+	sessionstr := mp.PlayerSessionID.String()
+	_ = sessionstr
+
+	if err := p.runtimeModule.StreamUserUpdate(StreamModeEvr, matchID.UUID().String(), mp.PlayerSessionID.String(), "", mp.GetUserId(), mp.GetSessionId(), false, false, string(data)); err != nil {
+		return fmt.Errorf("failed to update match player session stream: %w", err)
 	}
 
-	loginSession := ctx.Value(ctxLoginSessionKey{}).(*sessionWS)
-	s := session
-	s.tracker.TrackMulti(s.ctx, s.id, []*TrackerOp{
-		{
-			Stream: PresenceStream{Mode: StreamModeEvr, Subject: session.id, Subcontext: StreamContextMatch},
-			Meta:   PresenceMeta{Format: s.format, Hidden: true, Status: matchID.String()},
-		},
-		// By login sessionID and match service ID
-		{
-			Stream: PresenceStream{Mode: StreamModeEvr, Subject: loginSession.id, Subcontext: StreamContextMatch},
-			Meta:   PresenceMeta{Format: s.format, Hidden: true, Status: matchID.String()},
-		},
-		// By EVRID and match service ID
-		{
-			Stream: PresenceStream{Mode: StreamModeEvr, Subject: evrID.UUID(), Subcontext: StreamContextMatch},
-			Meta:   PresenceMeta{Format: s.format, Hidden: true, Status: matchID.String()},
-		},
-		// EVR packet data stream for the match session by Session ID and service ID
-	}, s.userID)
-
-	if isNew {
-		// Trigger the MatchJoin event.
-		stream := PresenceStream{Mode: StreamModeMatchAuthoritative, Subject: matchID.UUID(), Label: matchID.Node()}
-		m := PresenceMeta{
-			Username: session.Username(),
-			Format:   session.Format(),
-			Status:   mp.Query,
-		}
-		if success, _ := p.tracker.Track(session.Context(), session.ID(), stream, session.UserID(), m); success {
-			// Kick the user from any other matches they may be part of.
-			// WARNING This cannot be used during transition. It will kick the player from their current match.
-			//p.tracker.UntrackLocalByModes(session.ID(), matchStreamModes, stream)
-		}
+	// Get the broadcasters session
+	bsession := p.sessionRegistry.Get(uuid.FromStringOrNil(label.Broadcaster.SessionID)).(*sessionWS)
+	if bsession == nil {
+		return fmt.Errorf("broadcaster session not found: %s", label.Broadcaster.SessionID)
 	}
 
-	/*
-		contexts := []string{
-			mp.GetUserId(),
-			mp.GetSessionId(),
-			mp.EvrID.UUID().String(),
-		}
+	// Send the lobbysessionSuccess, this will trigger the broadcaster to send a lobbysessionplayeraccept once the player connects to the broadcaster.
+	msg := evr.NewLobbySessionSuccess(label.Mode, label.ID.UUID(), label.GetGroupID(), label.GetEndpoint(), int16(mp.TeamIndex))
 
-		for _, context := range contexts {
-			if _, err := p.runtimeModule.StreamUserJoin(StreamModeEvr, context, StreamContextMatch.String(), "", mp.GetUserId(), mp.GetSessionId(), false, false, matchID.String()); err != nil {
-				logger.Warn("Failed to update user status: %v", zap.Error(err))
-			}
-		}
-	*/
+	if err := bsession.SendEvr(msg.Version4(), msg.Version5(), evr.NewSTcpConnectionUnrequireEvent()); err != nil {
+		return fmt.Errorf("failed to send messages to broadcaster: %w", err)
+	}
 
-	p.matchBySessionID.Store(session.ID().String(), matchID.String())
-
-	return nil
+	if err := session.SendEvr(msg.Version4(), msg.Version5(), evr.NewSTcpConnectionUnrequireEvent()); err != nil {
+		err = fmt.Errorf("failed to send messages to player: %w", err)
+		msession.Cancel(err)
+		return err
+	}
+	return msession.Cancel(nil)
 }
 
 // PingEndpoints pings the endpoints and returns the latencies.
@@ -887,4 +838,82 @@ func (p *EvrPipeline) checkSuspensionStatus(ctx context.Context, logger *zap.Log
 		}
 	}
 	return suspensions, nil
+}
+
+// selectTeamForPlayer decides which team to assign a player to.
+func selectTeamForPlayer(logger runtime.Logger, presence *EvrMatchPresence, state *EvrMatchState) (int, bool) {
+	t := presence.TeamIndex
+
+	teams := lo.GroupBy(lo.Values(state.presences), func(p *EvrMatchPresence) int { return p.TeamIndex })
+
+	blueTeam := teams[evr.TeamBlue]
+	orangeTeam := teams[evr.TeamOrange]
+	playerpop := len(blueTeam) + len(orangeTeam)
+	spectators := len(teams[evr.TeamSpectator]) + len(teams[evr.TeamModerator])
+	teamsFull := playerpop >= state.TeamSize*2
+	specsFull := spectators >= int(state.MaxSize)-state.TeamSize*2
+
+	// If the lobby is full, reject
+	if len(state.presences) >= int(state.MaxSize) {
+		return evr.TeamUnassigned, false
+	}
+
+	// If the player is a moderator and the spectators are not full, return
+	if t == evr.TeamModerator && !specsFull {
+		return t, true
+	}
+
+	// If the match has been running for less than 15 seconds check the presets for the team
+	if time.Since(state.StartTime) < 15*time.Second {
+		if teamIndex, ok := state.TeamAlignments[presence.GetUserId()]; ok {
+			// Make sure the team isn't already full
+			if len(teams[teamIndex]) < state.TeamSize {
+				return teamIndex, true
+			}
+		}
+	}
+
+	// If this is a social lobby, put the player on the social team.
+	if state.Mode == evr.ModeSocialPublic || state.Mode == evr.ModeSocialPrivate {
+		return evr.TeamSocial, true
+	}
+
+	// If the player is unassigned, assign them to a team.
+	if t == evr.TeamUnassigned {
+		t = evr.TeamBlue
+	}
+
+	// If this is a private lobby, and the teams are full, put them on spectator
+	if t != evr.TeamSpectator && teamsFull {
+		if state.LobbyType == PrivateLobby {
+			t = evr.TeamSpectator
+		} else {
+			// The lobby is full, reject the player.
+			return evr.TeamUnassigned, false
+		}
+	}
+
+	// If this is a spectator, and the spectators are not full, return
+	if t == evr.TeamSpectator {
+		if specsFull {
+			return evr.TeamUnassigned, false
+		}
+		return t, true
+	}
+	// If this is a private lobby, and their team is not full,  put the player on the team they requested
+	if state.LobbyType == PrivateLobby && len(teams[t]) < state.TeamSize {
+		return t, true
+	}
+
+	// If the players team is unbalanced, put them on the other team
+	if len(teams[evr.TeamBlue]) != len(teams[evr.TeamOrange]) {
+		if len(teams[evr.TeamBlue]) < len(teams[evr.TeamOrange]) {
+			t = evr.TeamBlue
+		} else {
+			t = evr.TeamOrange
+		}
+	}
+
+	logger.Debug("picked team", zap.Int("team", t))
+	return t, true
 }

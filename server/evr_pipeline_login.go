@@ -842,7 +842,7 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 	userID := uuid.FromStringOrNil(presence.GetUserId())
 	username := presence.GetUsername()
 
-	presences, err := p.runtimeModule.StreamUserList(StreamModeEvr, matchID.UUID().String(), "", matchID.Node(), true, true)
+	presences, err := p.runtimeModule.StreamUserList(StreamModeMatchAuthoritative, matchID.UUID().String(), "", matchID.Node(), true, true)
 	if err != nil {
 		return fmt.Errorf("failed to get stream presences for match: %w", err)
 	}
@@ -951,11 +951,30 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 	return nil
 }
 
+// lobbyPlayerSessionsRequest is called when a client requests the player sessions for a list of EchoVR IDs.
+// Player Sessions are UUIDv5 of the MatchID and EVR-ID
+func (p *EvrPipeline) lobbyPlayerSessionsRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
+	message := in.(*evr.LobbyPlayerSessionsRequest)
+
+	playerSession := uuid.NewV5(message.LobbySessionID, message.EvrID().String())
+
+	otherSessions := make([]uuid.UUID, len(message.PlayerEvrIDs))
+	for _, e := range message.PlayerEvrIDs {
+		otherSessions = append(otherSessions, uuid.NewV5(message.LobbySessionID, e.String()))
+	}
+
+	teamIndex := int16(AnyTeam)
+
+	success := evr.NewLobbyPlayerSessionsSuccess(message.EvrId, message.LobbySessionID, playerSession, otherSessions, teamIndex)
+
+	return session.SendEvr(success.VersionU(), success.Version2(), success.Version3())
+}
+
 func GetMatchByEvrID(nk runtime.NakamaModule, evrID evr.EvrId) (matchID *MatchID, presence runtime.Presence, err error) {
 
 	presences, err := nk.StreamUserList(StreamModeEvr, evrID.UUID().String(), StreamContextMatch.String(), "", true, true)
 	if err != nil {
-		return nil, nil, fmt.Errorf("UserServerProfileUpdateRequest: failed to get stream presences: %w", err)
+		return nil, nil, fmt.Errorf("failed to get stream presences: %w", err)
 	}
 
 	for _, presence := range presences {
@@ -972,7 +991,7 @@ func GetMatchBySessionID(nk runtime.NakamaModule, sessionID uuid.UUID) (matchID 
 
 	presences, err := nk.StreamUserList(StreamModeEvr, sessionID.String(), StreamContextMatch.String(), "", true, true)
 	if err != nil {
-		return MatchID{}, nil, fmt.Errorf("UserServerProfileUpdateRequest: failed to get stream presences: %w", err)
+		return MatchID{}, nil, fmt.Errorf("failed to get stream presences: %w", err)
 	}
 
 	for _, presence := range presences {
@@ -983,4 +1002,22 @@ func GetMatchBySessionID(nk runtime.NakamaModule, sessionID uuid.UUID) (matchID 
 	}
 
 	return MatchID{}, nil, nil
+}
+
+func LobbyPresenceByEntrantID(nk runtime.NakamaModule, matchID MatchID, sessionID uuid.UUID) (presence runtime.Presence, err error) {
+
+	presences, err := nk.StreamUserList(StreamModeEvr, matchID.UUID().String(), sessionID.String(), "", true, true)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get stream presences: %w", err)
+	}
+
+	if len(presences) == 0 {
+		return nil, nil
+	}
+
+	if len(presences) > 1 {
+		return nil, fmt.Errorf("multiple presences found for session ID")
+	}
+
+	return presences[0], nil
 }
