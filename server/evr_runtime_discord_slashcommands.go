@@ -1846,7 +1846,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return
 			}
 
-			presences, err := d.nk.StreamUserList(StreamModeService, targetUserID.String(), StreamContextMatch.String(), "", true, true)
+			presences, err := d.nk.StreamUserList(StreamModeService, targetUserID.String(), "", StreamLabelMatchService, true, true)
 			if err != nil {
 				errFn(err)
 				return
@@ -2453,10 +2453,11 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	}
 
 	// Get the MatchIDs for the user from it's presence
-	presences, err := nk.StreamUserList(StreamModeService, userID.String(), StreamContextMatch.String(), "", true, true)
+	presences, err := d.nk.StreamUserList(StreamModeService, userID.String(), "", StreamLabelMatchService, true, true)
 	if err != nil {
 		return err
 	}
+
 	whoami.MatchIDs = make([]string, 0, len(presences))
 	for _, p := range presences {
 		if p.GetStatus() != "" {

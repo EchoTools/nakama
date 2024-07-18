@@ -697,6 +697,10 @@ func EVRMatchJoinAttempt(ctx context.Context, logger *zap.Logger, matchID MatchI
 			Stream: PresenceStream{Mode: StreamModeService, Subject: presence.LoginSessionID, Label: StreamLabelMatchService},
 			Meta:   PresenceMeta{Format: SessionFormatEvr, Username: presence.Username, Status: matchIDStr, Hidden: true},
 		},
+		{
+			Stream: PresenceStream{Mode: StreamModeService, Subject: presence.UserID, Label: StreamLabelMatchService},
+			Meta:   PresenceMeta{Format: SessionFormatEvr, Username: presence.Username, Status: matchIDStr, Hidden: true},
+		},
 	}
 
 	// Update the statuses
