@@ -8,58 +8,40 @@ import (
 )
 
 const (
-	Unk1_Flag0 uint64 = 1 << iota // -mp
-	Unk1_Flag1
-	Unk1_Flag2
-	Unk1_Flag3
-	Unk1_Flag4
-	Unk1_Flag5
-	Unk1_Flag6
-	Unk1_Flag7
-	Unk1_Flag8 // -moderator
-	Unk1_Flag9 // -mp -noovr
-	Unk1_Flag10
-	Unk1_Flag11
-	Unk1_Flag12
-	Unk1_Flag13
-	Unk1_Flag14
-	Unk1_Flag15
-	Unk1_Flag16
+	Flags_Flag0 uint64 = 1 << iota // -mp
+	Flags_Flag1
+	Flags_Flag2
+	Flags_ModerateUser // -moderateuser
+	Flags_Flag4
+	Flags_Flag5
+	Flags_Flag6
+	Flags_Flag7
+	Flags_Moderator
+	Flags_CrossPlayEnabled
+	Flags_Flag10
+	Flags_Flag11
+	Flags_Flag12
+	Flags_Flag13
+	Flags_Flag14
+	Flags_Flag15
+	Flags_Flag16
 )
 
-const (
-	Unk2_Flag0 uint64 = 1 << iota // -mp
-	Unk2_Flag1
-	Unk2_Flag2
-	Unk2_ModerateUser // -moderateuser
-	Unk2_Flag4
-	Unk2_Flag5
-	Unk2_Flag6
-	Unk2_Flag7
-	Unk2_Flag8 // -moderator
-	Unk2_Flag9 // -mp -noovr
-	Unk2_Flag10
-	Unk2_Flag11
-	Unk2_Flag12
-	Unk2_Flag13
-	Unk2_Flag14
-	Unk2_Flag15
-	Unk2_Flag16
-)
+var _ = IdentifyingMessage(&LobbyJoinSessionRequest{})
+var _ = LobbySessionRequest(&LobbyJoinSessionRequest{})
 
 // LobbyJoinSessionRequest is a message from client to server requesting joining of a specified game session that
 // matches the message's underlying arguments.
 type LobbyJoinSessionRequest struct {
-	MatchID         uuid.UUID
-	VersionLock     int64
-	Platform        Symbol
-	LoginSessionID  uuid.UUID
-	Unk1            uint64
-	Unk2            uint64
-	SessionSettings SessionSettings
-	EvrId           EvrId
-	TeamIndex       int16
-	OtherEvrID      EvrId
+	MatchID          uuid.UUID
+	VersionLock      int64
+	Platform         Symbol
+	LoginSessionID   uuid.UUID
+	Flags            uint64
+	CrossPlayEnabled bool
+	SessionSettings  SessionSettings
+	OtherEvrID       EvrId
+	Entrants         []Entrant
 }
 
 func (m LobbyJoinSessionRequest) Token() string {
@@ -71,24 +53,54 @@ func (m LobbyJoinSessionRequest) Symbol() Symbol {
 }
 
 func (m *LobbyJoinSessionRequest) Stream(s *EasyStream) error {
+	flags := uint32(0)
 	return RunErrorFunctions([]func() error{
 		func() error { return s.StreamGuid(&m.MatchID) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.VersionLock) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Platform) },
 		func() error { return s.StreamGuid(&m.LoginSessionID) },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.Unk1) },
+		func() error {
+			switch s.Mode {
+			case DecodeMode:
+
+				if err := s.StreamNumber(binary.LittleEndian, &flags); err != nil {
+					return err
+				}
+
+				m.CrossPlayEnabled = flags&SessionFlag_EnableCrossPlay != 0
+
+				m.Entrants = make([]Entrant, flags&0xFF)
+
+				// Set all of the Roles to -1 (unspecified) by default
+				for i := range m.Entrants {
+					m.Entrants[i].Role = -1
+				}
+			case EncodeMode:
+				if m.CrossPlayEnabled {
+					flags |= SessionFlag_EnableCrossPlay
+				}
+
+				flags = (flags & 0xFFFFFF00) | uint32(len(m.Entrants))
+
+				// TeamIndexes are only sent if there are entrants with team indexes > -1
+				for _, entrant := range m.Entrants {
+					if entrant.Role > -1 {
+						flags |= SessionFlag_TeamIndexes
+						break
+					}
+				}
+				return s.StreamNumber(binary.LittleEndian, &flags)
+			}
+			return s.Skip(4)
+		},
 		func() error {
 
-			err := s.StreamNumber(binary.LittleEndian, &m.Unk2)
+			err := s.StreamNumber(binary.LittleEndian, &m.Flags)
 			if err != nil {
 				return err
 			}
-			if m.Unk2&Unk2_ModerateUser != 0 {
+			if m.Flags&Flags_ModerateUser != 0 {
 				// Parse the lobbyID as the OtherEvrID
-				// Take the first 8 bytes of the lobbyID and set it as the platform code
-				// Take the last 8 bytes of the lobbyID and set it as the account ID
-				// Set the lobbyID to 0
-				// REad the bytes
 				m.OtherEvrID.PlatformCode = PlatformCode(uint64(m.MatchID[3]))
 				m.OtherEvrID.AccountId = uint64(binary.LittleEndian.Uint64(m.MatchID[8:]))
 				m.MatchID = uuid.Nil
@@ -96,25 +108,31 @@ func (m *LobbyJoinSessionRequest) Stream(s *EasyStream) error {
 			return nil
 		},
 		func() error { return s.StreamJson(&m.SessionSettings, true, NoCompression) },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.EvrId.PlatformCode) },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.EvrId.AccountId) },
 		func() error {
-			if s.Mode == DecodeMode && s.Len() < 2 || s.Mode == EncodeMode && m.TeamIndex == -1 {
-				m.TeamIndex = -1
-				return nil
+			// Stream the entrants
+			for i := range m.Entrants {
+				if err := s.StreamStruct(&m.Entrants[i].EvrID); err != nil {
+					return err
+				}
 			}
-			err := s.StreamNumber(binary.LittleEndian, &m.TeamIndex)
-			if err != nil {
-				return err
+			return nil
+		},
+		func() error {
+			// Stream the team indexes
+			if flags&SessionFlag_TeamIndexes != 0 {
+				for i := range m.Entrants {
+					if err := s.StreamNumber(binary.LittleEndian, &m.Entrants[i].Role); err != nil {
+						return err
+					}
+				}
 			}
-			// If the moderator flag is set,
 			return nil
 		},
 	})
 }
 
 func (m LobbyJoinSessionRequest) String() string {
-	return fmt.Sprintf("%s(lobby_id=%s, version_lock=%d, platform=%s, login_session=%s, unk1=%d, unk2=%d, session_settings=%v, evr_id=%s, team_index=%d, other_evr_id=%s)", m.Token(), m.MatchID, m.VersionLock, m.Platform.String(), m.LoginSessionID, m.Unk1, m.Unk2, m.SessionSettings.String(), m.EvrId.Token(), m.TeamIndex, m.OtherEvrID.Token())
+	return fmt.Sprintf("LobbyJoinSessionRequest(match=%s)", m.MatchID)
 }
 
 func (m *LobbyJoinSessionRequest) GetSessionID() uuid.UUID {
@@ -122,5 +140,23 @@ func (m *LobbyJoinSessionRequest) GetSessionID() uuid.UUID {
 }
 
 func (m *LobbyJoinSessionRequest) GetEvrID() EvrId {
-	return m.EvrId
+	if len(m.Entrants) == 0 {
+		return EvrId{}
+	}
+	return m.Entrants[0].EvrID
+}
+
+func (m *LobbyJoinSessionRequest) GetChannel() uuid.UUID {
+	return uuid.Nil
+}
+
+func (m *LobbyJoinSessionRequest) GetMode() Symbol {
+	return Symbol(0)
+}
+
+func (m *LobbyJoinSessionRequest) GetAlignment() int8 {
+	if len(m.Entrants) == 0 {
+		return int8(TeamUnassigned)
+	}
+	return m.Entrants[0].Role
 }
