@@ -250,10 +250,7 @@ type ProfileRegistry struct {
 	// Profiles by user ID
 	storeMu  sync.Mutex
 	profiles map[string]GameProfileData // map[userID]GameProfileData
-
-	cacheMu sync.RWMutex
-	// Fast lookup of profiles for players already in matches
-	cache map[evr.EvrId][]byte
+	cache    *LocalProfileCache
 	// Load out default items
 	defaults map[string]string
 }
@@ -271,27 +268,10 @@ func NewProfileRegistry(nk runtime.NakamaModule, db *sql.DB, logger runtime.Logg
 		discordRegistry: discordRegistry,
 
 		profiles: make(map[string]GameProfileData, 200),
-		cache:    make(map[evr.EvrId][]byte, 200),
 
 		unlocksByItemName: unlocksByFieldName,
 		defaults:          generateDefaultLoadoutMap(),
 	}
-
-	// Every 5 minutes, remove cached profiles for matches that do not exist
-	go func() {
-		ticker := time.NewTicker(5 * time.Minute)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if err := registry.removeStaleProfiles(); err != nil {
-					registry.logger.Error("failed to remove stale profiles", zap.Error(err))
-				}
-			}
-		}
-	}()
 
 	return registry
 }
@@ -321,42 +301,6 @@ func (r *ProfileRegistry) store(userID uuid.UUID, profile GameProfileData) {
 
 func generateDefaultLoadoutMap() map[string]string {
 	return evr.DefaultCosmeticLoadout().ToMap()
-}
-
-func (r *ProfileRegistry) removeStaleProfiles() error {
-	r.cacheMu.Lock()
-	defer r.cacheMu.Unlock()
-	for evrID := range r.cache {
-		count, err := r.nk.StreamCount(StreamModeEvr, evrID.UUID().String(), StreamContextMatch.String(), "")
-		if err != nil {
-			return err
-		}
-		if count == 0 {
-			r.logger.Debug("unloaded cached profile for %s", evrID.String())
-			delete(r.cache, evrID)
-		}
-	}
-	return nil
-}
-
-// Fast lookup of profiles for players already in matches
-func (r *ProfileRegistry) GetServerProfileByEvrID(evrID evr.EvrId) (data []byte, found bool) {
-	r.cacheMu.RLock()
-	p, ok := r.cache[evrID]
-	r.cacheMu.RUnlock()
-	return p, ok
-}
-
-// Fast lookup of profiles for players already in matches
-func (r *ProfileRegistry) Cache(profile evr.ServerProfile) error {
-	data, err := json.Marshal(profile)
-	if err != nil {
-		return err
-	}
-	r.cacheMu.Lock()
-	r.cache[profile.EvrID] = data
-	r.cacheMu.Unlock()
-	return nil
 }
 
 // Load the user's profile from memory (or storage if not found)
