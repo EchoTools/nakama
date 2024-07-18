@@ -299,7 +299,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 		requireAuthed = false
 		pipelineFn = p.broadcasterRegistrationRequest
 	case *evr.BroadcasterSessionStarted:
-		pipelineFn = p.relayMatchData
+		pipelineFn = p.broadcasterSessionStarted
 	case *evr.BroadcasterPlayersAccept:
 		pipelineFn = p.broadcasterPlayerAccept
 	case *evr.BroadcasterPlayerRemoved:
