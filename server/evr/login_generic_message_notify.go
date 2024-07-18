@@ -46,6 +46,6 @@ func (m *GenericMessageNotify) String() string {
 	return fmt.Sprintf("GenericMessageNotify{MessageType: %d, Session: %s, RoomId: %d, PartyData: %v}", m.MessageType, m.Session, m.RoomId, m.PartyData)
 }
 
-func (m *GenericMessageNotify) SessionID() uuid.UUID {
+func (m *GenericMessageNotify) GetSessionID() uuid.UUID {
 	return m.Session
 }

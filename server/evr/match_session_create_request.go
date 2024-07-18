@@ -80,10 +80,10 @@ func (m *LobbyCreateSessionRequest) String() string {
 	)
 }
 
-func (m *LobbyCreateSessionRequest) SessionID() uuid.UUID {
+func (m *LobbyCreateSessionRequest) GetSessionID() uuid.UUID {
 	return m.LoginSessionID
 }
 
-func (m *LobbyCreateSessionRequest) EvrID() EvrId {
+func (m *LobbyCreateSessionRequest) GetEvrID() EvrId {
 	return m.EvrId
 }

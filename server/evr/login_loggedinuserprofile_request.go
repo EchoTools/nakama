@@ -42,11 +42,11 @@ func NewLoggedInUserProfileRequest(session uuid.UUID, evrId EvrId, profileReques
 		ProfileRequestData: profileRequestData,
 	}
 }
-func (m *LoggedInUserProfileRequest) SessionID() uuid.UUID {
+func (m *LoggedInUserProfileRequest) GetSessionID() uuid.UUID {
 	return m.Session
 }
 
-func (m *LoggedInUserProfileRequest) EvrID() EvrId {
+func (m *LoggedInUserProfileRequest) GetEvrID() EvrId {
 	return m.EvrId
 }
 

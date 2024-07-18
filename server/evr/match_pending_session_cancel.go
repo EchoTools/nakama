@@ -37,6 +37,6 @@ func (m *LobbyPendingSessionCancel) Stream(s *EasyStream) error {
 	})
 }
 
-func (m *LobbyPendingSessionCancel) SessionID() uuid.UUID {
+func (m *LobbyPendingSessionCancel) GetSessionID() uuid.UUID {
 	return m.Session
 }
