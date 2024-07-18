@@ -51,7 +51,7 @@ func (m *GenericMessage) Stream(s *EasyStream) error {
 	})
 }
 
-func (m *GenericMessage) SessionID() uuid.UUID {
+func (m *GenericMessage) GetSessionID() uuid.UUID {
 	return m.Session
 }
 

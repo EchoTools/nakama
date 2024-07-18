@@ -117,10 +117,10 @@ func (m LobbyJoinSessionRequest) String() string {
 	return fmt.Sprintf("%s(lobby_id=%s, version_lock=%d, platform=%s, login_session=%s, unk1=%d, unk2=%d, session_settings=%v, evr_id=%s, team_index=%d, other_evr_id=%s)", m.Token(), m.MatchID, m.VersionLock, m.Platform.String(), m.LoginSessionID, m.Unk1, m.Unk2, m.SessionSettings.String(), m.EvrId.Token(), m.TeamIndex, m.OtherEvrID.Token())
 }
 
-func (m *LobbyJoinSessionRequest) SessionID() uuid.UUID {
+func (m *LobbyJoinSessionRequest) GetSessionID() uuid.UUID {
 	return m.LoginSessionID
 }
 
-func (m *LobbyJoinSessionRequest) EvrID() EvrId {
+func (m *LobbyJoinSessionRequest) GetEvrID() EvrId {
 	return m.EvrId
 }

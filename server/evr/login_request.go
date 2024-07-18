@@ -41,7 +41,7 @@ func NewLoginRequest(session uuid.UUID, userId EvrId, loginData LoginProfile) (*
 	}, nil
 }
 
-func (m *LoginRequest) EvrID() EvrId {
+func (m *LoginRequest) GetEvrID() EvrId {
 	return m.EvrId
 }
 
