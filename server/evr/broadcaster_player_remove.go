@@ -9,7 +9,7 @@ import (
 // BroadcasterPlayerRemoved is a message from broadcaster to nakama, indicating a player was removed by the game server.
 // NOTE: This is an unofficial message created for Echo Relay.
 type BroadcasterPlayerRemoved struct {
-	PlayerSession uuid.UUID
+	EntrantID uuid.UUID
 }
 
 func (m *BroadcasterPlayerRemoved) Symbol() Symbol {
@@ -22,16 +22,16 @@ func (m BroadcasterPlayerRemoved) Token() string {
 // NewERGameServerRemovePlayer initializes a new ERGameServerRemovePlayer message.
 func NewBroadcasterRemovePlayer(sid uuid.UUID) *BroadcasterPlayerRemoved {
 	return &BroadcasterPlayerRemoved{
-		PlayerSession: sid,
+		EntrantID: sid,
 	}
 }
 
 func (m *BroadcasterPlayerRemoved) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
-		func() error { return s.StreamGuid(&m.PlayerSession) },
+		func() error { return s.StreamGuid(&m.EntrantID) },
 	})
 }
 func (m *BroadcasterPlayerRemoved) String() string {
 
-	return fmt.Sprintf("BroadcasterPlayerRemoved(player_session=%s)", m.PlayerSession.String())
+	return fmt.Sprintf("BroadcasterPlayerRemoved(player_session=%s)", m.EntrantID.String())
 }

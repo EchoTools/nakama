@@ -44,8 +44,9 @@ const (
 )
 
 const (
-	StreamLabelMatchService = "matchservice"
-	StreamLabelLoginService = "loginservice"
+	StreamLabelMatchService      = "matchservice"
+	StreamLabelLoginService      = "loginservice"
+	StreamLabelGameServerService = "serverservice"
 )
 
 var (

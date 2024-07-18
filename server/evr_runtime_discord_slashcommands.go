@@ -2461,8 +2461,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	whoami.MatchIDs = make([]string, 0, len(presences))
 	for _, p := range presences {
 		if p.GetStatus() != "" {
-			m := p.GetStatus()
-			mid := MatchIDFromStringOrNil(m)
+			mid := MatchIDFromStringOrNil(p.GetStatus())
 			if mid.IsNil() {
 				continue
 			}

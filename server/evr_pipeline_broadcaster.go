@@ -156,7 +156,7 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 		return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_Failure)
 	}
 
-	if err := p.runtimeModule.StreamUserUpdate(StreamModeGameServer, session.ID().String(), "", "", userId, session.ID().String(), true, false, string(configJson)); err != nil {
+	if err := p.runtimeModule.StreamUserUpdate(StreamModeGameServer, session.ID().String(), "", StreamLabelGameServerService, userId, session.ID().String(), true, false, string(configJson)); err != nil {
 		return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_Failure)
 	}
 
@@ -177,28 +177,6 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 	); err != nil {
 		return errFailedRegistration(session, logger, fmt.Errorf("failed to send lobby registration failure: %v", err), evr.BroadcasterRegistration_Failure)
 	}
-
-	go func() {
-		// Every 10 seconds, check that this broadcaster is a member of a match
-		// If not, disconnect the broadcaster
-		ticker := time.NewTicker(60 * time.Second)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-session.Context().Done():
-				return
-			case <-ticker.C:
-				matchID, _, err := GetMatchBySessionID(p.runtimeModule, session.ID())
-				if err != nil || matchID.IsNil() {
-					logger.Warn("Broadcaster is not in a match, disconnecting")
-					session.Close("", runtime.PresenceReasonDisconnect)
-					return
-				}
-			}
-		}
-
-	}()
 
 	return nil
 }
@@ -396,7 +374,7 @@ func (p *EvrPipeline) newParkingMatch(logger *zap.Logger, session *sessionWS, co
 	if err != nil {
 		return fmt.Errorf("failed to create parking match: %v", err)
 	}
-	if err := p.runtimeModule.StreamUserUpdate(StreamModeService, session.ID().String(), StreamContextMatch.String(), "", session.UserID().String(), session.ID().String(), true, false, matchIDStr); err != nil {
+	if err := p.runtimeModule.StreamUserUpdate(StreamModeGameServer, session.ID().String(), "", StreamLabelMatchService, session.UserID().String(), session.ID().String(), true, false, matchIDStr); err != nil {
 		return fmt.Errorf("failed to update broadcaster presence: %v", err)
 	}
 
@@ -609,9 +587,9 @@ func (p *EvrPipeline) broadcasterSessionStarted(_ context.Context, logger *zap.L
 
 // broadcasterSessionEnded is called when the broadcaster has ended the session.
 func (p *EvrPipeline) broadcasterSessionEnded(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	matchID, presence, err := GetMatchBySessionID(p.runtimeModule, session.ID())
+	matchID, presence, err := GameServerBySessionID(p.runtimeModule, session.ID())
 	if err != nil {
-		return fmt.Errorf("failed to get broadcaster's match by session ID: %v", err)
+		logger.Warn("Failed to get broadcaster's match by session ID", zap.Error(err))
 	}
 
 	if err := p.runtimeModule.StreamUserLeave(StreamModeMatchAuthoritative, matchID.UUID().String(), "", p.node, presence.GetUserId(), presence.GetSessionId()); err != nil {
@@ -626,17 +604,20 @@ func (p *EvrPipeline) broadcasterSessionEnded(ctx context.Context, logger *zap.L
 		}
 
 		// Get the broadcaster registration from the stream.
-		presence, err := p.runtimeModule.StreamUserGet(StreamModeGameServer, session.ID().String(), "", "", session.UserID().String(), session.ID().String())
+		presence, err := p.runtimeModule.StreamUserGet(StreamModeGameServer, session.ID().String(), "", StreamLabelGameServerService, session.UserID().String(), session.ID().String())
 		if err != nil {
-			logger.Warn("Failed to get broadcaster presence", zap.Error(err))
+			logger.Error("Failed to get broadcaster presence", zap.Error(err))
+			session.Close("Failed to get broadcaster presence", runtime.PresenceReasonUnknown)
 		}
 		config := &MatchBroadcaster{}
 		if err := json.Unmarshal([]byte(presence.GetStatus()), config); err != nil {
-			logger.Warn("Failed to unmarshal broadcaster presence", zap.Error(err))
+			logger.Error("Failed to unmarshal broadcaster presence", zap.Error(err))
+			session.Close("Failed to get broadcaster presence", runtime.PresenceReasonUnknown)
 		}
 
 		if err := p.newParkingMatch(logger, session, config); err != nil {
 			logger.Error("Failed to create new parking match", zap.Error(err))
+			session.Close("Failed to get broadcaster presence", runtime.PresenceReasonUnknown)
 		}
 	}()
 	return nil
@@ -645,9 +626,9 @@ func (p *EvrPipeline) broadcasterSessionEnded(ctx context.Context, logger *zap.L
 func (p *EvrPipeline) broadcasterPlayerAccept(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.GameServerJoinAttempt)
 
-	matchID, _, err := GetMatchBySessionID(p.runtimeModule, session.ID())
+	matchID, _, err := GameServerBySessionID(p.runtimeModule, session.ID())
 	if err != nil {
-		return fmt.Errorf("failed to get broadcaster's match by session ID: %v", err)
+		logger.Warn("Failed to get broadcaster's match by session ID", zap.Error(err))
 	}
 
 	accepted := make([]uuid.UUID, 0, len(request.EntrantIDs))
@@ -673,8 +654,8 @@ func (p *EvrPipeline) broadcasterPlayerAccept(ctx context.Context, logger *zap.L
 		}
 
 		ctx := s.Context()
-		for _, subject := range []uuid.UUID{s.ID(), presence.EvrID.UUID()} {
-			session.tracker.Update(ctx, s.ID(), PresenceStream{Mode: StreamModeService, Subject: subject, Subcontext: StreamContextMatch}, s.UserID(), PresenceMeta{Format: s.Format(), Hidden: true, Status: matchID.String()})
+		for _, subject := range []uuid.UUID{presence.SessionID, presence.UserID, presence.EvrID.UUID()} {
+			session.tracker.Update(ctx, s.ID(), PresenceStream{Mode: StreamModeService, Subject: subject, Label: StreamLabelMatchService}, s.UserID(), PresenceMeta{Format: s.Format(), Hidden: true, Status: matchID.String()})
 		}
 
 		// Trigger the MatchJoin event.
@@ -710,31 +691,44 @@ func (p *EvrPipeline) broadcasterPlayerAccept(ctx context.Context, logger *zap.L
 // broadcasterPlayerRemoved is called when a player has been removed from the match.
 func (p *EvrPipeline) broadcasterPlayerRemoved(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	message := in.(*evr.BroadcasterPlayerRemoved)
-
-	matchID, _, err := GetMatchBySessionID(p.runtimeModule, session.ID())
+	matchID, _, err := GameServerBySessionID(p.runtimeModule, session.ID())
 	if err != nil {
 		logger.Warn("Failed to get broadcaster's match by session ID", zap.Error(err))
-		return nil
-	}
-	if matchID.IsNil() {
-		logger.Warn("Broadcaster is not in a match")
-		return nil
 	}
 
-	presence, err := PresenceByEntrantID(p.runtimeModule, matchID, message.PlayerSession)
+	presence, err := PresenceByEntrantID(p.runtimeModule, matchID, message.EntrantID)
 	if err != nil {
-		logger.Warn("Failed to get player session by ID", zap.Error(err))
+		if err != ErrorEntrantNotFound {
+			logger.Warn("Failed to get player session by ID", zap.Error(err))
+		}
 		return nil
 	}
 	if presence != nil {
 		// Trigger MatchLeave.
-		if err := p.runtimeModule.StreamUserLeave(StreamModeMatchAuthoritative, matchID.UUID().String(), "", p.node, presence.GetUserId(), presence.GetSessionId()); err != nil {
+		if err := p.runtimeModule.StreamUserLeave(StreamModeMatchAuthoritative, matchID.UUID().String(), "", matchID.Node(), presence.GetUserId(), presence.GetSessionId()); err != nil {
 			logger.Warn("Failed to leave match stream", zap.Error(err))
 		}
-		if err := p.runtimeModule.StreamUserLeave(StreamModeService, matchID.UUID().String(), "", "", presence.GetUserId(), presence.GetSessionId()); err != nil {
+
+		if err := p.runtimeModule.StreamUserLeave(StreamModeEntrant, matchID.UUID().String(), message.EntrantID.String(), matchID.Node(), presence.GetUserId(), presence.GetSessionId()); err != nil {
 			logger.Warn("Failed to leave entrant session stream", zap.Error(err))
 		}
 	}
 
 	return nil
+}
+
+func GameServerBySessionID(nk runtime.NakamaModule, sessionID uuid.UUID) (MatchID, runtime.Presence, error) {
+
+	presences, err := nk.StreamUserList(StreamModeGameServer, sessionID.String(), "", StreamLabelMatchService, true, true)
+	if err != nil {
+		return MatchID{}, nil, err
+	}
+
+	presence := presences[0]
+
+	matchID, err := MatchIDFromString(presence.GetStatus())
+	if err != nil {
+		return MatchID{}, nil, err
+	}
+	return matchID, presence, nil
 }
