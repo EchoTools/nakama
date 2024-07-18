@@ -948,7 +948,8 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 		if err != nil {
 			continue
 		}
-		if label.Broadcaster.SessionID == session.ID().String() {
+		// Restrict the profile updates to the match game server
+		if label.Broadcaster.OperatorID == session.UserID().String() {
 			found = true
 			break
 		}

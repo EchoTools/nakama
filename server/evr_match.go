@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
 	"math/rand"
 	"reflect"
 	"regexp"
@@ -923,24 +922,6 @@ func checkGroupMembershipByName(ctx context.Context, nk runtime.NakamaModule, us
 		}
 	}
 	return false, nil
-}
-
-func sendMessagesToStream(_ context.Context, nk runtime.NakamaModule, sessionId string, serviceId string, messages ...evr.Message) error {
-	data, err := evr.Marshal(messages...)
-	if err != nil {
-		return fmt.Errorf("failed to marshal message: %w", err)
-	}
-	presences, err := nk.StreamUserList(StreamModeService, sessionId, serviceId, "", true, true)
-	if err != nil {
-		return fmt.Errorf("failed to list users: %w", err)
-	}
-	for _, presence := range presences {
-		log.Printf("Sending message to %s on session ID %s", presence.GetUserId(), presence.GetSessionId())
-	}
-	if err := nk.StreamSend(StreamModeService, sessionId, serviceId, "", string(data), nil, true); err != nil {
-		return fmt.Errorf("failed to send message: %w", err)
-	}
-	return nil
 }
 
 func (m *EvrMatch) broadcasterPlayerSessionsLocked(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, state *EvrMatchState, in runtime.MatchData, msg evr.Message) (*EvrMatchState, error) {
