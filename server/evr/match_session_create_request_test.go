@@ -1,28 +1,36 @@
 package evr
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/gofrs/uuid/v5"
-	"github.com/google/go-cmp/cmp"
 	"github.com/samber/lo"
 )
 
 func TestLobbyCreateSessionRequest_Unmarshal(t *testing.T) {
 	var err error
+	// Unmarshal test packet
 
-	data, err := WrapBytes(SymbolOf(&LobbyCreateSessionRequest{}), []byte{
+	chunk, err := WrapBytes(SymbolOf(&LobbyCreateSessionRequest{}), []byte{
 		0x3a, 0xa0, 0x23, 0x12, 0xb2, 0xe7, 0x5f, 0x45,
 		0x0d, 0x91, 0x77, 0x8f, 0xd7, 0x01, 0x2f, 0xc6,
 		0x03, 0x8c, 0xdb, 0xf4, 0x65, 0x09, 0x99, 0x09,
 		0x4b, 0xbc, 0x8e, 0x42, 0xf8, 0xd3, 0x6e, 0x57,
 		0xf8, 0xf4, 0x9f, 0xa8, 0xb1, 0xd0, 0xe8, 0xc8,
+		// Login Session ID
 		0xab, 0xed, 0x0c, 0x32, 0x50, 0xfb, 0xee, 0x11,
 		0x8e, 0x45, 0x66, 0xd3, 0xff, 0x8a, 0x65, 0x3b,
+		// Number of entrants
 		0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		0x01, 0x00, 0x00, 0x00, 0x0b, 0x00, 0x00, 0x00,
+		// Lobby Type
+		0x01, 0x00, 0x00, 0x00,
+		// Flags
+		0x0b, 0x00, 0x00, 0x00,
+		// Channel ID
 		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		// Session Settings
 		0x7b, 0x22, 0x67, 0x61, 0x6d, 0x65, 0x74, 0x79,
 		0x70, 0x65, 0x22, 0x3a, 0x36, 0x39, 0x31, 0x35,
 		0x39, 0x34, 0x33, 0x35, 0x31, 0x32, 0x38, 0x32,
@@ -38,37 +46,39 @@ func TestLobbyCreateSessionRequest_Unmarshal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Add the header to the payload
-
-	packet, err := ParsePacket(data)
+	messages, err := ParsePacket(chunk)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("Unmarshal returned an error: %v", err)
 	}
-	message, ok := packet[0].(*LobbyCreateSessionRequest)
+	got, ok := messages[0].(*LobbyCreateSessionRequest)
 	if !ok {
 		t.Fatal("failed to cast")
 	}
 
-	got := *message
 	want := LobbyCreateSessionRequest{
-		LobbyType:      uint32(PrivateLobby),
+		LobbyType:      PrivateLobby,
 		Region:         4998968863399059514,
-		VersionLock:    -4166109104957845235,
+		VersionLock:    66109104957845235,
 		Mode:           ModeArenaPrivate,
 		Level:          6300205991959903307,
 		Platform:       14477050463639303416,
 		LoginSessionID: uuid.Must(uuid.FromString("320cedab-fb50-11ee-8e45-66d3ff8a653b")),
-		Unk1:           1,
-		Unk2:           11,
+
+		Unk2: 11,
 		SessionSettings: SessionSettings{
 			AppID: "1369078409873402",
 			Mode:  691594351282457603,
-			Level: nil,
+			Level: lo.ToPtr(int64(0)),
 		},
-		EvrId:     *lo.Must(ParseEvrId("OVR_ORG-3963667097037078")),
-		TeamIndex: 2,
+		Entrants: []Entrant{
+			{
+				EvrID: *lo.Must(ParseEvrId("OVR_ORG-3963667097037078")),
+				Role:  2,
+			},
+		},
 	}
-	if cmp.Equal(got, want) {
+
+	if reflect.DeepEqual(got, want) {
 		t.Errorf("\ngot  %s\nwant %s", got.String(), want.String())
 	}
 
@@ -80,7 +90,7 @@ func TestLobbyCreateSessionRequest_GameType(t *testing.T) {
 
 	// It's setting the server region to the same value as the level
 
-	data, err := WrapBytes(SymbolOf(&LobbyCreateSessionRequest{}), []byte{
+	chunk, err := WrapBytes(SymbolOf(&LobbyCreateSessionRequest{}), []byte{
 		0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
 		0x0d, 0x91, 0x77, 0x8f, 0xd7, 0x01, 0x2f, 0xc6,
 		0x03, 0x8c, 0xdb, 0xf4, 0x65, 0x09, 0x99, 0x09,
@@ -107,36 +117,95 @@ func TestLobbyCreateSessionRequest_GameType(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Add the header to the payload
-
-	packet, err := ParsePacket(data)
+	messages, err := ParsePacket(chunk)
 	if err != nil {
-		t.Fatal(err)
+		t.Errorf("Unmarshal returned an error: %v", err)
 	}
-	got, ok := packet[0].(*LobbyCreateSessionRequest)
+	got, ok := messages[0].(*LobbyCreateSessionRequest)
 	if !ok {
 		t.Fatal("failed to cast")
 	}
-
 	want := LobbyCreateSessionRequest{
-		LobbyType:      uint32(PrivateLobby),
+		LobbyType:      PrivateLobby,
 		Region:         4998968863399059514,
-		VersionLock:    -4166109104957845235,
+		VersionLock:    66109104957845235,
 		Mode:           ModeArenaPrivate,
 		Level:          6300205991959903307,
 		Platform:       14477050463639303416,
 		LoginSessionID: uuid.Must(uuid.FromString("320cedab-fb50-11ee-8e45-66d3ff8a653b")),
-		Unk1:           1,
-		Unk2:           11,
+
+		Unk2: 11,
 		SessionSettings: SessionSettings{
 			AppID: "1369078409873402",
 			Mode:  691594351282457603,
-			Level: nil,
+			Level: lo.ToPtr(int64(0)),
 		},
-		EvrId:     *lo.Must(ParseEvrId("OVR_ORG-3963667097037078")),
-		TeamIndex: 2,
+		Entrants: []Entrant{
+			{
+				EvrID: *lo.Must(ParseEvrId("OVR_ORG-3963667097037078")),
+				Role:  2,
+			},
+		},
 	}
-	if cmp.Equal(got, want) {
+
+	if reflect.DeepEqual(got, want) {
+		t.Errorf("\ngot  %s\nwant %s", got.String(), want.String())
+	}
+
+}
+
+func TestLobbyCreateSessionRequest_Spectator(t *testing.T) {
+	var err error
+
+	/* args were "-noovr -novr -gametype echo_arena_private  -lobbyteam 2 -mp" */
+
+	// It's setting the server region to the same value as the level
+
+	chunk := []byte{
+		0xf6, 0x40, 0xbb, 0x78, 0xa2, 0xe7, 0x8c, 0xbb, 0x13, 0xcc, 0xa3, 0xbd, 0x1b, 0x6b, 0x9a, 0x59,
+		0xa3, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+		0x0d, 0x91, 0x77, 0x8f, 0xd7, 0x01, 0x2f, 0xc6, 0x03, 0x8c, 0xdb, 0xf4, 0x65, 0x09, 0x99, 0x09,
+		0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xf8, 0xf4, 0x9f, 0xa8, 0xb1, 0xd0, 0xe8, 0xc8,
+		0x51, 0x7a, 0xdb, 0xe6, 0x00, 0x45, 0xef, 0x11, 0xab, 0xbe, 0x66, 0xd3, 0xff, 0x8a, 0x65, 0x3b,
+		0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x7b, 0x22, 0x67, 0x61, 0x6d, 0x65, 0x74, 0x79, 0x70, 0x65, 0x22, 0x3a, 0x36, 0x39, 0x31, 0x35,
+		0x39, 0x34, 0x33, 0x35, 0x31, 0x32, 0x38, 0x32, 0x34, 0x35, 0x37, 0x36, 0x30, 0x33, 0x2c, 0x22,
+		0x61, 0x70, 0x70, 0x69, 0x64, 0x22, 0x3a, 0x22, 0x31, 0x33, 0x36, 0x39, 0x30, 0x37, 0x38, 0x34,
+		0x30, 0x39, 0x38, 0x37, 0x33, 0x34, 0x30, 0x32, 0x22, 0x7d,
+		0x00, 0x04, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x16, 0xa9, 0x53, 0x29, 0xef, 0x14, 0x0e, 0x00,
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	messages, err := ParsePacket(chunk)
+	if err != nil {
+		t.Errorf("Unmarshal returned an error: %v", err)
+	}
+	got, ok := messages[0].(*LobbyCreateSessionRequest)
+	if !ok {
+		t.Fatal("failed to cast")
+	}
+	want := LobbyCreateSessionRequest{
+		LobbyType:      PrivateLobby,
+		Region:         4998968863399059514,
+		VersionLock:    66109104957845235,
+		Mode:           ModeArenaPrivate,
+		Level:          6300205991959903307,
+		Platform:       14477050463639303416,
+		LoginSessionID: uuid.Must(uuid.FromString("320cedab-fb50-11ee-8e45-66d3ff8a653b")),
+
+		Unk2: 11,
+		SessionSettings: SessionSettings{
+			AppID: "1369078409873402",
+			Mode:  691594351282457603,
+			Level: lo.ToPtr(int64(0)),
+		},
+	}
+
+	if reflect.DeepEqual(got, want) {
 		t.Errorf("\ngot  %s\nwant %s", got.String(), want.String())
 	}
 

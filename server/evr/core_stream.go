@@ -542,15 +542,11 @@ func GetRandomBytes(l int) []byte {
 	return b
 }
 
-func (s *EasyStream) Skip(count int) error {
+func (s *EasyStream) Skip(count int) (err error) {
 	if s.Mode == DecodeMode {
-		_, err := s.r.Seek(int64(count), io.SeekCurrent)
-		return err
+		_, err = s.r.Seek(int64(count), io.SeekCurrent)
 	} else {
-		b := make([]byte, count)
-		if _, err := s.w.Write(b); err != nil {
-			return err
-		}
+		_, err = s.w.Write(make([]byte, count))
 	}
-	return nil
+	return
 }

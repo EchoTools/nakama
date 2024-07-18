@@ -163,7 +163,7 @@ func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logg
 func (p *EvrPipeline) matchmakingLabelFromFindRequest(ctx context.Context, session *sessionWS, request *evr.LobbyFindSessionRequest) (*EvrMatchState, error) {
 
 	// If the channel is nil, use the players profile channel
-	groupID := request.Channel
+	groupID := request.GroupID
 	if groupID == uuid.Nil {
 		var ok bool
 		groupID, ok = ctx.Value(ctxGroupIDKey{}).(uuid.UUID)
@@ -180,7 +180,7 @@ func (p *EvrPipeline) matchmakingLabelFromFindRequest(ctx context.Context, sessi
 	if request.Mode == evr.ModeArenaPublicAI {
 		request.Mode = evr.ModeCombatPublic
 		request.Level = evr.LevelUnspecified
-		request.TeamIndex = int16(AnyTeam)
+		request.Entrants[0].Role = int8(AnyTeam)
 		request.SessionSettings = evr.SessionSettings{
 			AppID: request.SessionSettings.AppID,
 			Mode:  int64(evr.ModeCombatPublic),
@@ -197,16 +197,16 @@ func (p *EvrPipeline) matchmakingLabelFromFindRequest(ctx context.Context, sessi
 		Open:  true,
 
 		SessionSettings: &request.SessionSettings,
-		TeamIndex:       TeamIndex(request.TeamIndex),
+		TeamIndex:       TeamIndex(request.Entrants[0].Role),
 
 		Broadcaster: MatchBroadcaster{
-			VersionLock: request.VersionLock,
+			VersionLock: uint64(request.VersionLock),
 			GroupIDs:    guildPriority,
 			Features:    features,
 		},
 	}
-	if !request.CurrentMatch.IsNil() {
-		ml.ID = MatchID{request.CurrentMatch, p.node} // The existing lobby/match that the player is in (if any)
+	if !request.CurrentLobbySessionID.IsNil() {
+		ml.ID = MatchID{request.CurrentLobbySessionID, p.node} // The existing lobby/match that the player is in (if any)
 	}
 
 	// Check if the team index is valid for the mode
@@ -222,8 +222,11 @@ func (p *EvrPipeline) matchmakingLabelFromFindRequest(ctx context.Context, sessi
 func (p *EvrPipeline) lobbyFindSessionRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) (err error) {
 	request := in.(*evr.LobbyFindSessionRequest)
 
+	if len(request.Entrants) == 0 {
+		return fmt.Errorf("request is missing entrants")
+	}
 	// Prepare the response message
-	response := NewMatchmakingResult(logger, request.Mode, request.Channel)
+	response := NewMatchmakingResult(logger, request.Mode, request.GroupID)
 
 	// Build the matchmaking label using the request parameters
 	ml, err := p.matchmakingLabelFromFindRequest(ctx, session, request)
@@ -235,7 +238,7 @@ func (p *EvrPipeline) lobbyFindSessionRequest(ctx context.Context, logger *zap.L
 		"mode":     request.Mode.String(),
 		"channel":  ml.GroupID.String(),
 		"level":    request.Level.String(),
-		"team_idx": strconv.FormatInt(int64(request.TeamIndex), 10),
+		"team_idx": strconv.FormatInt(int64(request.Entrants[0].Role), 10),
 	}
 	p.metrics.CustomCounter("lobbyfindsession_active_count", metricsTags, 1)
 	loginSessionID := request.LoginSessionID
@@ -764,13 +767,13 @@ func (p *EvrPipeline) GetGuildPriorityList(ctx context.Context, userID uuid.UUID
 // lobbyCreateSessionRequest is a request to create a new session.
 func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.LobbyCreateSessionRequest)
-	response := NewMatchmakingResult(logger, request.Mode, request.Channel)
+	response := NewMatchmakingResult(logger, request.Mode, request.GroupID)
 
 	features := ctx.Value(ctxFeaturesKey{}).([]string)
 	requiredFeatures := ctx.Value(ctxRequiredFeaturesKey{}).([]string)
 
 	// Get the GroupID from the context
-	groupID := request.Channel
+	groupID := request.GroupID
 	if groupID != uuid.Nil {
 		groups, _, err := p.runtimeModule.UserGroupsList(ctx, session.userID.String(), 200, nil, "")
 		if err != nil {
@@ -797,9 +800,9 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 	metricsTags := map[string]string{
 		"type":     strconv.FormatInt(int64(request.LobbyType), 10),
 		"mode":     request.Mode.String(),
-		"channel":  request.Channel.String(),
+		"channel":  request.GroupID.String(),
 		"level":    request.Level.String(),
-		"team_idx": strconv.FormatInt(int64(request.TeamIndex), 10),
+		"team_idx": strconv.FormatInt(int64(request.Entrants[0].Role), 10),
 	}
 
 	// Add the features to teh metrics tags as feature_<featurename>
@@ -864,8 +867,8 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 		Mode:             request.Mode,
 		Open:             true,
 		SessionSettings:  &request.SessionSettings,
-		TeamIndex:        TeamIndex(request.TeamIndex),
-		GroupID:          &request.Channel,
+		TeamIndex:        TeamIndex(request.GetAlignment()),
+		GroupID:          &request.GroupID,
 		RequiredFeatures: requiredFeatures,
 		Broadcaster: MatchBroadcaster{
 			VersionLock: uint64(request.VersionLock),
@@ -939,7 +942,7 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 	}
 
 	metricsTags := map[string]string{
-		"team":    TeamIndex(request.TeamIndex).String(),
+		"team":    TeamIndex(request.GetAlignment()).String(),
 		"mode":    ml.Mode.String(),
 		"channel": ml.GroupID.String(),
 		"level":   ml.Level.String(),
@@ -961,7 +964,7 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 		isDeveloper, _ := checkIfGlobalDeveloper(ctx, p.runtimeModule, session.userID)
 
 		// Let developers and moderators join public matches
-		if request.TeamIndex != int16(Spectator) && !isDeveloper && !isModerator && time.Since(ml.StartTime) < time.Second*10 {
+		if request.GetAlignment() != int8(Spectator) && !isDeveloper && !isModerator && time.Since(ml.StartTime) < time.Second*10 {
 			// Allow if the match is over 15 seconds old, to allow matchmaking to properly populate the match
 			err = status.Errorf(codes.InvalidArgument, "Match is a newly started public match")
 		}
@@ -994,7 +997,7 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 		}
 	}
 
-	if err = p.JoinEvrMatch(ctx, logger, session, "", matchToken, int(request.TeamIndex)); err != nil {
+	if err = p.JoinEvrMatch(ctx, logger, session, "", matchToken, int(request.GetAlignment())); err != nil {
 		return response.SendErrorToSession(session, status.Errorf(codes.NotFound, err.Error()))
 	}
 	return nil
@@ -1018,7 +1021,7 @@ func (p *EvrPipeline) lobbyPlayerSessionsRequest(ctx context.Context, logger *za
 	if err != nil {
 		return fmt.Errorf("failed to create match ID: %w", err)
 	}
-	entrantID := uuid.NewV5(message.LobbyID, message.EvrID().String())
+	entrantID := uuid.NewV5(message.LobbyID, message.GetEvrID().String())
 
 	presence, err := PresenceByEntrantID(p.runtimeModule, matchID, entrantID)
 	if err != nil {
