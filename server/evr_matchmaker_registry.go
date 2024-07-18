@@ -540,9 +540,12 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 					continue
 				}
 			*/
-			logger.Info("Backfilling match", zap.String("matchID", m.ID.String()), zap.String("partyID", partyID), zap.Any("party", party))
+			logger.Info("Backfilling party into match", zap.String("matchID", m.ID.String()), zap.String("partyID", partyID), zap.Any("party", party))
+
+			logger.Info("Backfilling match")
 			// Add the party to the match
 			for _, e := range party {
+				logger = logger.With(zap.String("sessionID", e.Presence.SessionID.String()), zap.String("partyID", partyID), zap.String("matchID", m.ID.String()), zap.String("uid", e.Presence.GetUserId()))
 				// Remove the player from the entrants list
 				for j, e2 := range entrants {
 					if e2.Presence.SessionID == e.Presence.SessionID {
@@ -551,14 +554,14 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 					}
 				}
 
-				msession, ok := mr.GetMatchingBySessionId(e.Presence.SessionID)
+				s, ok := mr.GetMatchingBySessionId(e.Presence.SessionID)
 				if !ok {
 					logger.Warn("Could not find matching session for user", zap.String("sessionID", e.Presence.SessionID.String()))
 					continue
 				}
 
-				err := joinPlayerToMatch(logger, msession, m.ID)
-				if err != nil {
+				// Join the players to the match
+				if err := mr.evrPipeline.JoinEvrMatch(s.Ctx, s.Logger, s.Session, "", m.ID, int(AnyTeam)); err != nil {
 					logger.Error("Error joining player to match", zap.Error(err))
 				}
 			}
@@ -669,43 +672,12 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 				logger.Warn("Could not find ticket metadata for user", zap.String("sessionID", entry.Presence.SessionID.String()), zap.String("ticket", ticket))
 				continue
 			}
-
-			foundMatch := FoundMatch{
-				MatchID:       matchID,
-				Ticket:        ticketMeta.TicketID,
-				Query:         ticketMeta.Query,
-				TeamIndex:     TeamIndex(i),
-				KeepTeamIndex: true,
-			}
-			// Send the join instruction
-			select {
-			case <-s.Ctx.Done():
-				logger.Warn("Matchmaking session cancelled", zap.String("sessionID", entry.Presence.SessionID.String()))
-				continue
-			case s.MatchJoinCh <- foundMatch:
-				logger.Info("Sent match join instruction", zap.String("sessionID", entry.Presence.SessionID.String()))
-			case <-time.After(2 * time.Second):
-				logger.Warn("Failed to send match join instruction", zap.String("sessionID", entry.Presence.SessionID.String()))
+			// Join the players to the match
+			if err := mr.evrPipeline.JoinEvrMatch(s.Ctx, s.Logger, s.Session, ticketMeta.Query, matchID, i); err != nil {
+				logger.Error("Error joining player to match", zap.Error(err))
 			}
 		}
 	}
-}
-
-func joinPlayerToMatch(logger *zap.Logger, msession *MatchmakingSession, matchID MatchID) error {
-	foundMatch := FoundMatch{
-		MatchID:   matchID,
-		TeamIndex: TeamIndex(-1),
-	}
-	// Send the join instruction
-	select {
-	case <-msession.Ctx.Done():
-		return ErrMatchmakingCanceled
-	case msession.MatchJoinCh <- foundMatch:
-		return nil
-	case <-time.After(2 * time.Second):
-		return status.Errorf(codes.DeadlineExceeded, "Failed to send match join instruction")
-	}
-	return nil
 }
 
 func distributeParties(parties [][]*MatchmakerEntry) [][]*MatchmakerEntry {

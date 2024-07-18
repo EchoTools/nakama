@@ -65,7 +65,7 @@ func NewLocalProfileCache(tracker Tracker, profileExpirySec int64) *LocalProfile
 				return
 			case <-ticker.C:
 				s.Lock()
-				for stream, _ := range s.cache {
+				for stream := range s.cache {
 					if tracker.CountByStream(PresenceStream{
 						Mode:    StreamModeMatchAuthoritative,
 						Subject: stream.Subject,
@@ -92,13 +92,13 @@ func (s *LocalProfileCache) IsValidProfile(matchID MatchID, evrID evr.EvrId) boo
 		Mode:       StreamModeService,
 		Subject:    matchID.UUID(),
 		Subcontext: evrID.UUID(),
+		Label:      matchID.Node(),
 	}
 
 	profile, found := s.cache[stream]
 	if !found {
 		return false
 	}
-
 	s.RUnlock()
 	return profile != ""
 }
@@ -125,6 +125,7 @@ func (s *LocalProfileCache) Remove(matchID MatchID, evrID evr.EvrId) {
 		Mode:       StreamModeService,
 		Subject:    matchID.UUID(),
 		Subcontext: evrID.UUID(),
+		Label:      matchID.Node(),
 	}
 
 	s.Lock()
@@ -154,4 +155,15 @@ func (s *LocalProfileCache) GetByMatchIDByEvrID(matchID MatchID, evrID evr.EvrId
 	p, ok := s.cache[stream]
 	s.RUnlock()
 	return p, ok
+}
+
+func (s *LocalProfileCache) GetByEvrID(evrID evr.EvrId) (data string, found bool) {
+	s.RLock()
+	for s, p := range s.cache {
+		if s.Subcontext == evrID.UUID() {
+			return p, true
+		}
+	}
+	s.RUnlock()
+	return "", false
 }

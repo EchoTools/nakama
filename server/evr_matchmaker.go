@@ -569,7 +569,7 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 	// Get the most recent past thursday
 	serverProfile := profile.GetServer()
 
-	for t, _ := range serverProfile.Statistics {
+	for t := range serverProfile.Statistics {
 		if t == "arena" || t == "combat" {
 			continue
 		}
