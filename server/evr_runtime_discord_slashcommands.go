@@ -1846,7 +1846,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return
 			}
 
-			presences, err := d.nk.StreamUserList(StreamModeEvr, targetUserID.String(), StreamContextMatch.String(), "", true, true)
+			presences, err := d.nk.StreamUserList(StreamModeService, targetUserID.String(), StreamContextMatch.String(), "", true, true)
 			if err != nil {
 				errFn(err)
 				return
@@ -2453,7 +2453,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	}
 
 	// Get the MatchIDs for the user from it's presence
-	presences, err := nk.StreamUserList(StreamModeEvr, userID.String(), StreamContextMatch.String(), "", true, true)
+	presences, err := nk.StreamUserList(StreamModeService, userID.String(), StreamContextMatch.String(), "", true, true)
 	if err != nil {
 		return err
 	}
@@ -2693,7 +2693,7 @@ func (d *DiscordAppBot) getLoginSessionForUser(ctx context.Context, discordId st
 
 	// Get existing login session for the user
 	presenceIDs := pipeline.tracker.ListPresenceIDByStream(PresenceStream{
-		Mode:       StreamModeEvr,
+		Mode:       StreamModeService,
 		Subject:    uid,
 		Subcontext: StreamContextLogin,
 	})

@@ -742,7 +742,7 @@ func matchmakingStatusRpc(ctx context.Context, logger runtime.Logger, db *sql.DB
 		}
 	}
 	subcontext := uuid.NewV5(uuid.Nil, "matchmaking").String()
-	presences, err := nk.StreamUserList(StreamModeEvr, "", subcontext, "", true, true)
+	presences, err := nk.StreamUserList(StreamModeService, "", subcontext, "", true, true)
 	if err != nil {
 		return "", err
 	}

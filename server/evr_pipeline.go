@@ -60,17 +60,16 @@ type EvrPipeline struct {
 
 	matchmakingRegistry *MatchmakingRegistry
 	profileRegistry     *ProfileRegistry
+	profileCache        *LocalProfileCache
 	discordRegistry     DiscordRegistry
 	appBot              *DiscordAppBot
 	leaderboardRegistry *LeaderboardRegistry
 
 	createLobbyMu                    sync.Mutex
 	broadcasterRegistrationBySession *MapOf[string, *MatchBroadcaster] // sessionID -> MatchBroadcaster
-	matchBySessionID                 *MapOf[string, string]            // sessionID -> matchID
-	loginSessionByEvrID              *MapOf[string, *sessionWS]
-	backfillQueue                    *MapOf[string, *sync.Mutex] // A queue of backfills to avoid double backfill
-	placeholderEmail                 string
-	linkDeviceURL                    string
+
+	placeholderEmail string
+	linkDeviceURL    string
 }
 
 type ctxDiscordBotTokenKey struct{}
@@ -105,6 +104,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 
 	discordRegistry := NewLocalDiscordRegistry(ctx, nk, runtimeLogger, metrics, config, pipeline, dg)
 	leaderboardRegistry := NewLeaderboardRegistry(NewRuntimeGoLogger(logger), nk, config.GetName())
+	profileCache := NewLocalProfileCache(tracker, 60*10)
 	profileRegistry := NewProfileRegistry(nk, db, runtimeLogger, discordRegistry)
 
 	appBot := NewDiscordAppBot(nk, runtimeLogger, metrics, pipeline, config, discordRegistry, profileRegistry, dg)
@@ -169,12 +169,10 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		broadcasterUserID: broadcasterUserID,
 
 		profileRegistry:     profileRegistry,
+		profileCache:        profileCache,
 		leaderboardRegistry: leaderboardRegistry,
 
 		broadcasterRegistrationBySession: &MapOf[string, *MatchBroadcaster]{},
-		matchBySessionID:                 &MapOf[string, string]{},
-		loginSessionByEvrID:              &MapOf[string, *sessionWS]{},
-		backfillQueue:                    &MapOf[string, *sync.Mutex]{},
 
 		placeholderEmail: config.GetRuntime().Environment["PLACEHOLDER_EMAIL_DOMAIN"],
 		linkDeviceURL:    config.GetRuntime().Environment["LINK_DEVICE_URL"],
@@ -195,34 +193,11 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 				return
 
 			case <-ticker.C:
-				evrPipeline.backfillQueue.Range(func(key string, value *sync.Mutex) bool {
-					if value.TryLock() {
-						evrPipeline.backfillQueue.Delete(key)
-						value.Unlock()
-					}
-					return true
-				})
 
 				evrPipeline.broadcasterRegistrationBySession.Range(func(key string, value *MatchBroadcaster) bool {
 					if sessionRegistry.Get(uuid.FromStringOrNil(value.SessionID)) == nil {
 						logger.Debug("Housekeeping: Session not found for broadcaster", zap.String("sessionID", value.SessionID))
 						evrPipeline.broadcasterRegistrationBySession.Delete(key)
-					}
-					return true
-				})
-
-				evrPipeline.loginSessionByEvrID.Range(func(key string, value *sessionWS) bool {
-					if sessionRegistry.Get(value.ID()) == nil {
-						logger.Debug("Housekeeping: Session not found for evrID", zap.String("evrID", key))
-						evrPipeline.loginSessionByEvrID.Delete(key)
-					}
-					return true
-				})
-
-				evrPipeline.matchBySessionID.Range(func(key string, value string) bool {
-					if sessionRegistry.Get(uuid.FromStringOrNil(key)) == nil {
-						logger.Debug("Housekeeping: Match not found for session ID", zap.String("matchID", value))
-						evrPipeline.matchBySessionID.Delete(key)
 					}
 					return true
 				})
@@ -300,7 +275,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 		pipelineFn = p.broadcasterRegistrationRequest
 	case *evr.BroadcasterSessionStarted:
 		pipelineFn = p.broadcasterSessionStarted
-	case *evr.BroadcasterPlayersAccept:
+	case *evr.GameServerJoinAttempt:
 		pipelineFn = p.broadcasterPlayerAccept
 	case *evr.BroadcasterPlayerRemoved:
 		pipelineFn = p.broadcasterPlayerRemoved
@@ -362,43 +337,11 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 
 	switch in.Message.(type) {
 	case *rtapi.Envelope_StreamData:
-		payloadEvr := []byte(in.GetStreamData().GetData())
-		if err := session.SendBytes(payloadEvr, true); err != nil {
-			logger.Error("Failed to send match data", zap.Error(err))
-		}
-		return nil, nil
+		return nil, session.SendBytes([]byte(in.GetStreamData().GetData()), true)
 	case *rtapi.Envelope_MatchData:
-		if in.GetMatchData().GetOpCode() == OpCodeEvrPacketData {
-			if err := session.SendBytes(in.GetMatchData().GetData(), true); err != nil {
-				logger.Error("Failed to send match data", zap.Error(err))
-			}
+		if in.GetMatchData().GetOpCode() == OpCodeEVRPacketData {
+			return nil, session.SendBytes(in.GetMatchData().GetData(), true)
 		}
-		return nil, nil
-	}
-
-	switch in.Message.(type) {
-	case *rtapi.Envelope_MatchPresenceEvent:
-		envelope := in.GetMatchPresenceEvent()
-		userID := session.UserID().String()
-		matchID := envelope.GetMatchId()
-
-		for _, leave := range envelope.GetLeaves() {
-			if leave.GetUserId() != userID {
-				// This is not this user
-				continue
-			}
-		}
-
-		for _, join := range envelope.GetJoins() {
-			if join.GetUserId() != userID {
-				// This is not this user.
-				continue
-			}
-
-			p.matchBySessionID.Store(session.ID().String(), matchID)
-
-		}
-
 	}
 
 	verbose, ok := session.Context().Value(ctxVerboseKey{}).(bool)
