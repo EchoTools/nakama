@@ -378,7 +378,16 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 					discordIDs = append(discordIDs, fmt.Sprintf("<@%s>", discordID))
 				}
 			}
-			content = fmt.Sprintf("Joined party: %s", strings.Join(discordIDs, ", "))
+
+			content = fmt.Sprintf("Active party: %s", strings.Join(discordIDs, ", "))
+		case *rtapi.Envelope_PartyLeader:
+			if discordID, err := GetDiscordIDByUserID(session.Context(), session.pipeline.db, in.GetPartyLeader().GetPresence().GetUserId()); err != nil {
+				logger.Warn("Failed to get discord ID", zap.Error(err))
+				content = fmt.Sprintf("Party leader: %s", in.GetPartyLeader().GetPresence().GetUsername())
+			} else {
+				content = fmt.Sprintf("New party leader: <@%s>", discordID)
+			}
+
 		case *rtapi.Envelope_PartyJoinRequest:
 
 		case *rtapi.Envelope_PartyPresenceEvent:
