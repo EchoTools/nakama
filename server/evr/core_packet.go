@@ -154,6 +154,8 @@ func ToSymbol(v any) Symbol {
 	switch t := v.(type) {
 	case Symbol:
 		return t
+	case int:
+		return Symbol(t)
 	case int64:
 		return Symbol(t)
 	case uint64:
