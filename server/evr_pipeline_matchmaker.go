@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -172,7 +173,7 @@ func (p *EvrPipeline) matchmakingLabelFromFindRequest(ctx context.Context, sessi
 	if request.Mode == evr.ModeArenaPublicAI {
 		request.Mode = evr.ModeCombatPublic
 		request.Level = evr.LevelUnspecified
-		request.TeamIndex = int16(evr.TeamUnassigned)
+		request.TeamIndex = int16(AnyTeam)
 		request.SessionSettings = evr.SessionSettings{
 			AppID: request.SessionSettings.AppID,
 			Mode:  int64(evr.ModeCombatPublic),
@@ -201,15 +202,9 @@ func (p *EvrPipeline) matchmakingLabelFromFindRequest(ctx context.Context, sessi
 		ml.ID = MatchID{request.CurrentMatch, p.node} // The existing lobby/match that the player is in (if any)
 	}
 
-	switch ml.Mode {
-	case evr.ModeCombatPublic, evr.ModeArenaPublic:
-		if ml.TeamIndex != TeamIndex(evr.TeamSpectator) || ml.TeamIndex != TeamIndex(evr.TeamModerator) {
-			ml.TeamIndex = TeamIndex(evr.TeamUnassigned)
-		}
-	case evr.ModeSocialPublic:
-		if ml.TeamIndex != TeamIndex(evr.TeamModerator) || ml.TeamIndex != TeamIndex(evr.TeamSpectator) {
-			ml.TeamIndex = TeamIndex(evr.TeamUnassigned)
-		}
+	// Check if the team index is valid for the mode
+	if !slices.Contains(evr.AlignmentsByMode[ml.Mode], int(ml.TeamIndex)) {
+		ml.TeamIndex = AnyTeam
 	}
 
 	return ml, nil
@@ -831,11 +826,9 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 	}
 
 	regions := make([]evr.Symbol, 0)
-	if request.Region == 0xffffffffffffffff {
+	if request.Region == evr.UnspecifiedRegion {
 		request.Region = evr.DefaultRegion
-	}
-
-	if request.Region != evr.DefaultRegion {
+	} else if request.Region != evr.DefaultRegion {
 		regions = append(regions, request.Region)
 	}
 	regions = append(regions, evr.DefaultRegion)

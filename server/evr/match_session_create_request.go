@@ -8,7 +8,8 @@ import (
 )
 
 var (
-	DefaultRegion = ToSymbol("default")
+	UnspecifiedRegion = Symbol(0xffffffffffffffff)
+	DefaultRegion     = ToSymbol("default")
 )
 
 // LobbyCreateSessionRequest represents a request from the client to the server for creating a new game session.

@@ -51,7 +51,8 @@ var (
 	LevelGauss        Symbol = ToSymbol("mpl_combat_gauss")       // Echo Combat
 	LevelPebbles      Symbol = ToSymbol("mpl_combat_pebbles")     // Echo Combat
 	LevelPtyPebbles   Symbol = ToSymbol("pty_mpl_combat_pebbles") // Echo Combat
-	// Validating the level against the game mode
+
+	// Valid levels by game mode
 	LevelsByMode = map[Symbol][]Symbol{
 		ModeArenaPublic:          {LevelArena},
 		ModeArenaPrivate:         {LevelArena},
@@ -64,6 +65,26 @@ var (
 		ModeCombatPublic:         {LevelCombustion, LevelDyson, LevelFission, LevelGauss},
 		ModeCombatPrivate:        {LevelCombustion, LevelDyson, LevelFission, LevelGauss},
 		ModeEchoCombatTournament: {LevelCombustion, LevelDyson, LevelFission, LevelGauss},
+	}
+
+	// Valid roles for the game mode
+	RolesByMode = map[Symbol][]int{
+		ModeCombatPublic:  {TeamBlue, TeamOrange, TeamSpectator},
+		ModeArenaPublic:   {TeamBlue, TeamOrange, TeamSpectator},
+		ModeCombatPrivate: {TeamBlue, TeamOrange, TeamSpectator},
+		ModeArenaPrivate:  {TeamBlue, TeamOrange, TeamSpectator},
+		ModeSocialPublic:  {TeamSocial, TeamModerator},
+		ModeSocialPrivate: {TeamSocial, TeamModerator},
+	}
+
+	// Roles that may be specified by the player when finding/joining a lobby session.
+	AlignmentsByMode = map[Symbol][]int{
+		ModeCombatPublic:  {TeamUnassigned, TeamSpectator},
+		ModeArenaPublic:   {TeamUnassigned, TeamSpectator},
+		ModeCombatPrivate: {TeamUnassigned, TeamSpectator, TeamBlue, TeamOrange},
+		ModeArenaPrivate:  {TeamUnassigned, TeamSpectator, TeamBlue, TeamOrange},
+		ModeSocialPublic:  {TeamUnassigned, TeamModerator, TeamSocial},
+		ModeSocialPrivate: {TeamUnassigned, TeamModerator, TeamSocial},
 	}
 )
 
