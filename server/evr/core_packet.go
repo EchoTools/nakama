@@ -52,9 +52,9 @@ var (
 		0x7777777777770200: (*BroadcasterSessionEnded)(nil),
 		0x7777777777770300: (*BroadcasterPlayerSessionsLocked)(nil),
 		0x7777777777770400: (*BroadcasterPlayerSessionsUnlocked)(nil),
-		0x7777777777770500: (*BroadcasterPlayersAccept)(nil),
-		0x7777777777770600: (*BroadcasterPlayersAccepted)(nil),
-		0x7777777777770700: (*BroadcasterPlayersRejected)(nil),
+		0x7777777777770500: (*GameServerJoinAttempt)(nil),
+		0x7777777777770600: (*GameServerJoinAllowed)(nil),
+		0x7777777777770700: (*GameServerJoinRejected)(nil),
 		0x7777777777770800: (*BroadcasterPlayerRemoved)(nil),
 		0x7777777777770900: (*BroadcasterChallengeRequest)(nil),
 		0x7777777777770a00: (*GameServerChallengeResponse)(nil),
@@ -67,8 +67,8 @@ var (
 		0x8f28cf33dabfbecb: (*LobbyMatchmakerStatus)(nil),
 		0x90758e58515724e0: (*ChannelInfoRequest)(nil),
 		0x9af2fab2a0c81a05: (*LobbyPlayerSessionsRequest)(nil),
-		0xa1b9cae1f8588968: (*LobbyPlayerSessionsSuccessv2)(nil),
-		0xa1b9cae1f8588969: (*LobbyPlayerSessionsSuccessv3)(nil),
+		0xa1b9cae1f8588968: (*LobbyEntrantsV2)(nil),
+		0xa1b9cae1f8588969: (*LobbyEntrantsV3)(nil),
 		0xbdb41ea9e67b200a: (*LoginRequest)(nil),
 		0xa5acc1a90d0cce47: (*LoginSuccess)(nil),
 		0xa5b9d5a3021ccf51: (*LoginFailure)(nil),
@@ -86,7 +86,7 @@ var (
 		0xfb763a5037fc8d77: (*LoggedInUserProfileSuccess)(nil),
 		0xfb772a4221fc8d70: (*LoggedInUserProfileRequest)(nil),
 		0xfcced6f169822bb8: (*DocumentRequest)(nil),
-		0xff71856af7e0fbd9: (*LobbyPlayerSessionsSuccessUnk1)(nil),
+		0xff71856af7e0fbd9: (*LobbyEntrantsV0)(nil),
 	}
 
 	// Create a reverse lookup map for the symbol types.

@@ -13,7 +13,7 @@ import (
 type LobbyPlayerSessionsRequest struct {
 	LoginSessionID uuid.UUID
 	EvrId          EvrId
-	LobbySessionID uuid.UUID
+	LobbyID        uuid.UUID
 	Platform       Symbol
 	PlayerEvrIDs   []EvrId
 }
@@ -32,7 +32,7 @@ func (m *LobbyPlayerSessionsRequest) Stream(s *EasyStream) error {
 		func() error { return s.StreamGuid(&m.LoginSessionID) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.EvrId.PlatformCode) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.EvrId.AccountId) },
-		func() error { return s.StreamGuid(&m.LobbySessionID) },
+		func() error { return s.StreamGuid(&m.LobbyID) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Platform) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &playerCount) },
 		func() error {
@@ -50,14 +50,8 @@ func (m *LobbyPlayerSessionsRequest) Stream(s *EasyStream) error {
 }
 
 func (m *LobbyPlayerSessionsRequest) String() string {
-	return fmt.Sprintf("%s(session=%s, user_id=%s, matching_session=%s, platform=%d, player_user_ids=[%s])",
-		m.Token(),
-		m.LoginSessionID,
-		m.EvrId.String(),
-		m.LobbySessionID,
-		m.Platform,
-		strings.Join(lo.Map(m.PlayerEvrIDs, func(id EvrId, i int) string { return id.Token() }), ", "),
-	)
+	evrIDstrs := strings.Join(lo.Map(m.PlayerEvrIDs, func(id EvrId, i int) string { return id.Token() }), ", ")
+	return fmt.Sprintf("%T(login_session_id=%s, evr_id=%s, lobby_id=%s, evr_ids=%s)", m, m.LoginSessionID, m.EvrId, m.LobbyID, evrIDstrs)
 }
 
 func (m *LobbyPlayerSessionsRequest) SessionID() uuid.UUID {
@@ -69,5 +63,5 @@ func (m *LobbyPlayerSessionsRequest) EvrID() EvrId {
 }
 
 func (m *LobbyPlayerSessionsRequest) MatchSessionID() uuid.UUID {
-	return m.LobbySessionID
+	return m.LobbyID
 }

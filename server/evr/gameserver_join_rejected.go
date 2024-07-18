@@ -8,17 +8,9 @@ import (
 )
 
 // Nakama -> Game Server: player sessions that are to be kicked/rejected.
-type BroadcasterPlayersRejected struct {
-	ErrorCode      PlayerRejectionReason
-	PlayerSessions []uuid.UUID
-}
-
-func (m *BroadcasterPlayersRejected) Token() string {
-	return "ERGameServerPlayersRejected"
-}
-
-func (m *BroadcasterPlayersRejected) Symbol() Symbol {
-	return 0x7777777777770700
+type GameServerJoinRejected struct {
+	ErrorCode  PlayerRejectionReason
+	EntrantIDs []uuid.UUID
 }
 
 // PlayerRejectionReason represents the reason for player rejection.
@@ -38,39 +30,36 @@ const (
 )
 
 // NewGameServerPlayersRejected initializes a new GameServerPlayersRejected message with the provided arguments.
-func NewBroadcasterPlayersRejected(errorCode PlayerRejectionReason, playerSessions ...uuid.UUID) *BroadcasterPlayersRejected {
-	return &BroadcasterPlayersRejected{
-		ErrorCode:      errorCode,
-		PlayerSessions: playerSessions,
+func NewBroadcasterPlayersRejected(errorCode PlayerRejectionReason, playerSessions ...uuid.UUID) *GameServerJoinRejected {
+	return &GameServerJoinRejected{
+		ErrorCode:  errorCode,
+		EntrantIDs: playerSessions,
 	}
 }
 
 // Stream encodes or decodes the GameServerPlayersRejected message.
-func (m *BroadcasterPlayersRejected) Stream(s *EasyStream) error {
+func (m *GameServerJoinRejected) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
 		func() error {
 			errorCode := byte(m.ErrorCode)
-			return s.StreamByte(&errorCode)
+			if err := s.StreamByte(&errorCode); err != nil {
+				return err
+			}
+			m.ErrorCode = PlayerRejectionReason(errorCode)
+			return nil
 		},
 		func() error {
-			// Consume/Produce all UUIDs until the end of the packet.
 			if s.Mode == DecodeMode {
-				endpointCount := (s.r.Len() - s.Position()) / 16
-				m.PlayerSessions = make([]uuid.UUID, endpointCount)
+				m.EntrantIDs = make([]uuid.UUID, (s.r.Len()-s.Position())/16)
 			}
-			for i := 0; i < len(m.PlayerSessions); i++ {
-				if err := s.StreamGuid(&m.PlayerSessions[i]); err != nil {
-					return err
-				}
-			}
-			return nil
+			return s.StreamGuids(&m.EntrantIDs)
 		},
 	})
 }
 
-func (m *BroadcasterPlayersRejected) String() string {
-	sessions := make([]string, len(m.PlayerSessions))
-	for i, session := range m.PlayerSessions {
+func (m *GameServerJoinRejected) String() string {
+	sessions := make([]string, len(m.EntrantIDs))
+	for i, session := range m.EntrantIDs {
 		sessions[i] = session.String()
 	}
 	return fmt.Sprintf("BroadcasterPlayersRejected(error_code=%v, player_sessions=[%s])", m.ErrorCode, strings.Join(sessions, ", "))
