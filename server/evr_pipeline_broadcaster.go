@@ -746,3 +746,11 @@ func (p *EvrPipeline) broadcasterPlayerAccept(ctx context.Context, logger *zap.L
 
 	return session.SendEvr(messages...)
 }
+
+func (p *EvrPipeline) broadcasterSessionStarted(_ context.Context, logger *zap.Logger, _ *sessionWS, in evr.Message) error {
+	request := in.(*evr.BroadcasterSessionStarted)
+
+	logger.Info("Game session started", zap.String("mid", request.LobbySessionID.String()))
+
+	return nil
+}
