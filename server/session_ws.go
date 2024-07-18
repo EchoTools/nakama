@@ -38,7 +38,8 @@ import (
 )
 
 const (
-	StreamModeEvr = 0x10
+	StreamModeEvr = 0x10 + iota
+	StreamModeGameServer
 )
 
 var (
