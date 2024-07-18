@@ -300,7 +300,7 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 
 	subcontext := uuid.NewV5(uuid.Nil, "matchmaking")
 	// Create a status presence for the user
-	stream := PresenceStream{Mode: StreamModeEvr, Subject: session.id, Subcontext: subcontext, Label: query}
+	stream := PresenceStream{Mode: StreamModeService, Subject: session.id, Subcontext: subcontext, Label: query}
 	meta := PresenceMeta{Format: session.format, Username: session.Username(), Hidden: true}
 	ok = session.tracker.Update(ctx, session.id, stream, session.userID, meta)
 	if !ok {
@@ -564,14 +564,38 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 	}
 
 	profile.UpdateDisplayName(displayName)
+	profile.SetEvrID(evrID)
+
+	// Get the most recent past thursday
+	serverProfile := profile.GetServer()
+
+	for t, _ := range serverProfile.Statistics {
+		if t == "arena" || t == "combat" {
+			continue
+		}
+		if strings.HasPrefix(t, "daily_") {
+			// Parse the date
+			date, err := time.Parse("2006_01_02", strings.TrimPrefix(t, "daily_"))
+			// Keep anything less than 48 hours old
+			if err == nil && time.Since(date) < 48*time.Hour {
+				continue
+			}
+		} else if strings.HasPrefix(t, "weekly_") {
+			// Parse the date
+			date, err := time.Parse("2006_01_02", strings.TrimPrefix(t, "weekly_"))
+			// Keep anything less than 2 weeks old
+			if err == nil && time.Since(date) < 14*24*time.Hour {
+				continue
+			}
+		}
+		delete(serverProfile.Statistics, t)
+	}
 
 	// Add the user's profile to the cache (by EvrID)
-	err = p.profileRegistry.Cache(profile.GetServer())
+	err = p.profileCache.Add(matchID, evrID, profile.GetServer())
 	if err != nil {
 		logger.Warn("Failed to add profile to cache", zap.Error(err))
 	}
-
-	// Select the players team
 
 	// Prepare the player session metadata.
 	discordID, err := GetDiscordIDByUserID(ctx, p.db, session.userID.String())
@@ -579,50 +603,34 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 		logger.Error("Failed to get discord id", zap.Error(err))
 	}
 
-	mp := &EvrMatchPresence{
-		Node:            p.node,
-		UserID:          session.userID,
-		SessionID:       session.id,
-		LoginSessionID:  loginSession.id,
-		Username:        session.Username(),
-		DisplayName:     displayName,
-		EvrID:           evrID,
-		PlayerSessionID: uuid.NewV5(matchID.UUID(), evrID.String()),
-		PartyID:         partyID,
-		TeamIndex:       int(teamIndex),
-		DiscordID:       discordID,
-		Query:           query,
-		ClientIP:        session.clientIP,
-		ClientPort:      session.clientPort,
+	mp := EvrMatchPresence{
+		EntrantID:      uuid.NewV5(matchID.UUID(), evrID.String()),
+		Node:           p.node,
+		UserID:         session.userID,
+		SessionID:      session.id,
+		LoginSessionID: loginSession.id,
+		Username:       session.Username(),
+		DisplayName:    displayName,
+		EvrID:          evrID,
+		PartyID:        partyID,
+		TeamIndex:      int(teamIndex),
+		DiscordID:      discordID,
+		Query:          query,
+		ClientIP:       session.clientIP,
+		ClientPort:     session.clientPort,
 	}
 
 	if label.LobbyType == PublicLobby && mp.TeamIndex == evr.TeamUnassigned {
 		var allow bool
-		mp.TeamIndex, allow = selectTeamForPlayer(NewRuntimeGoLogger(logger), mp, label)
+		mp.TeamIndex, allow = selectTeamForPlayer(NewRuntimeGoLogger(logger), &mp, label)
 		if !allow {
 			return fmt.Errorf("failed to join lobby: lobby full")
 		}
 	}
 
-	data, err := json.Marshal(mp)
+	label, _, err = EVRMatchJoinAttempt(ctx, logger, matchID, p.sessionRegistry, p.matchRegistry, p.tracker, mp)
 	if err != nil {
-		return fmt.Errorf("failed to marshal match presence: %w", err)
-	}
-
-	metadata := map[string]string{"playermeta": string(data)}
-
-	found, allowed, _, reason, _, _ := p.matchRegistry.JoinAttempt(ctx, matchID.UUID(), matchID.Node(), session.UserID(), session.ID(), session.Username(), session.Expiry(), session.Vars(), session.ClientIP(), session.ClientPort(), p.node, metadata)
-	if !found {
-		return fmt.Errorf("match not found: %s", matchID.String())
-	}
-	if !allowed {
-		return fmt.Errorf("join not allowed: %s", reason)
-	}
-	sessionstr := mp.PlayerSessionID.String()
-	_ = sessionstr
-
-	if err := p.runtimeModule.StreamUserUpdate(StreamModeEvr, matchID.UUID().String(), mp.PlayerSessionID.String(), "", mp.GetUserId(), mp.GetSessionId(), false, false, string(data)); err != nil {
-		return fmt.Errorf("failed to update match player session stream: %w", err)
+		return fmt.Errorf("failed to join match: %w", err)
 	}
 
 	// Get the broadcasters session
@@ -633,17 +641,72 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 
 	// Send the lobbysessionSuccess, this will trigger the broadcaster to send a lobbysessionplayeraccept once the player connects to the broadcaster.
 	msg := evr.NewLobbySessionSuccess(label.Mode, label.ID.UUID(), label.GetGroupID(), label.GetEndpoint(), int16(mp.TeamIndex))
+	messages := []evr.Message{msg.Version4(), msg.Version5(), evr.NewSTcpConnectionUnrequireEvent()}
 
-	if err := bsession.SendEvr(msg.Version4(), msg.Version5(), evr.NewSTcpConnectionUnrequireEvent()); err != nil {
+	if err = bsession.SendEvr(messages...); err != nil {
 		return fmt.Errorf("failed to send messages to broadcaster: %w", err)
 	}
 
-	if err := session.SendEvr(msg.Version4(), msg.Version5(), evr.NewSTcpConnectionUnrequireEvent()); err != nil {
+	if err = session.SendEvr(messages...); err != nil {
 		err = fmt.Errorf("failed to send messages to player: %w", err)
-		msession.Cancel(err)
-		return err
 	}
-	return msession.Cancel(nil)
+	if msession != nil {
+		msession.Cancel(err)
+	}
+	return err
+}
+
+func EVRMatchJoinAttempt(ctx context.Context, logger *zap.Logger, matchID MatchID, sessionRegistry SessionRegistry, matchRegistry MatchRegistry, tracker Tracker, presence EvrMatchPresence) (*EvrMatchState, []*MatchPresence, error) {
+	// Append the node to the matchID if it doesn't already contain one.
+
+	data, err := json.Marshal(presence)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to marshal match presence: %w", err)
+	}
+	matchIDStr := matchID.String()
+	metadata := map[string]string{"playermeta": string(data)}
+
+	found, allowed, isNew, reason, labelStr, presences := matchRegistry.JoinAttempt(ctx, matchID.UUID(), matchID.Node(), presence.UserID, presence.SessionID, presence.Username, presence.SessionExpiry, nil, presence.ClientIP, presence.ClientPort, matchID.Node(), metadata)
+	if !found {
+		return nil, nil, fmt.Errorf("match not found: %s", matchIDStr)
+	} else if labelStr == "" {
+		return nil, nil, fmt.Errorf("match label not found: %s", matchIDStr)
+	}
+
+	label := &EvrMatchState{}
+	if err := json.Unmarshal([]byte(labelStr), label); err != nil {
+		return nil, presences, fmt.Errorf("failed to unmarshal match label: %w", err)
+	}
+
+	if !allowed {
+		return label, presences, fmt.Errorf("join not allowed: %s", reason)
+	} else if !isNew {
+		return label, presences, fmt.Errorf("player already in match: %s", matchIDStr)
+	}
+
+	ops := []*TrackerOp{
+		{
+			PresenceStream{Mode: StreamModeEntrant, Subject: matchID.uuid, Subcontext: presence.EntrantID, Label: matchID.node},
+			PresenceMeta{Format: SessionFormatEvr, Username: presence.Username, Status: string(data), Hidden: true},
+		},
+		{
+			Stream: PresenceStream{Mode: StreamModeService, Subject: presence.SessionID, Label: StreamLabelMatchService},
+			Meta:   PresenceMeta{Format: SessionFormatEvr, Username: presence.Username, Status: matchIDStr, Hidden: true},
+		},
+		{
+			Stream: PresenceStream{Mode: StreamModeService, Subject: presence.LoginSessionID, Label: StreamLabelMatchService},
+			Meta:   PresenceMeta{Format: SessionFormatEvr, Username: presence.Username, Status: matchIDStr, Hidden: true},
+		},
+	}
+
+	// Update the statuses
+	for _, op := range ops {
+		if ok := tracker.Update(ctx, presence.SessionID, op.Stream, presence.UserID, op.Meta); !ok {
+			return label, presences, fmt.Errorf("failed to track user: %w", err)
+		}
+	}
+
+	return label, presences, nil
 }
 
 // PingEndpoints pings the endpoints and returns the latencies.

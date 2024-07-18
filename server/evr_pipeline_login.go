@@ -11,7 +11,6 @@ import (
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
-	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 
 	"github.com/muesli/reflow/wordwrap"
@@ -216,13 +215,6 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	}
 	ctx = session.Context()
 
-	go func() {
-		p.loginSessionByEvrID.Store(evrId.Token(), session)
-		// Create a goroutine to clear the session info when the login session is closed.
-		<-session.Context().Done()
-		p.loginSessionByEvrID.Delete(evrId.String())
-	}()
-
 	// Load the user's profile
 	profile, err := p.profileRegistry.GetSessionProfile(ctx, session, loginProfile, evrId)
 	if err != nil {
@@ -328,6 +320,7 @@ func (p *EvrPipeline) authenticateAccount(ctx context.Context, logger *zap.Logge
 			userId = ""
 
 		} else if account.GetEmail() != "" {
+
 			// The account has a password, authenticate the password.
 			_, _, _, err := AuthenticateEmail(ctx, session.logger, session.pipeline.db, account.Email, userPassword, "", false)
 			return account, err
@@ -790,22 +783,19 @@ func (p *EvrPipeline) genericMessage(ctx context.Context, logger *zap.Logger, se
 	request := in.(*evr.GenericMessage)
 	logger.Debug("Received generic message", zap.Any("message", request))
 
-	// Find online user with EvrId of request.OtherEvrId
-	otherSession, found := p.loginSessionByEvrID.Load(request.OtherEvrID.Token())
-	if !found {
-		return fmt.Errorf("failure to find user by EvrID: %s", request.OtherEvrID.Token())
-	}
+	/*
 
-	msg := evr.NewGenericMessageNotify(request.MessageType, request.Session, request.RoomID, request.PartyData)
+		msg := evr.NewGenericMessageNotify(request.MessageType, request.Session, request.RoomID, request.PartyData)
 
-	if err := otherSession.SendEvr(msg); err != nil {
-		return fmt.Errorf("failed to send generic message: %w", err)
-	}
+		if err := otherSession.SendEvr(msg); err != nil {
+			return fmt.Errorf("failed to send generic message: %w", err)
+		}
 
-	if err := session.SendEvr(msg); err != nil {
-		return fmt.Errorf("failed to send generic message success: %w", err)
-	}
+		if err := session.SendEvr(msg); err != nil {
+			return fmt.Errorf("failed to send generic message success: %w", err)
+		}
 
+	*/
 	return nil
 }
 
@@ -835,26 +825,30 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 		}
 	}()
 
-	matchID, presence, err := GetMatchByEvrID(p.runtimeModule, request.EvrID)
-	if err != nil || matchID == nil || presence == nil {
-		return fmt.Errorf("failed to get match by evrID: %w", err)
-	}
-	userID := uuid.FromStringOrNil(presence.GetUserId())
-	username := presence.GetUsername()
-
-	presences, err := p.runtimeModule.StreamUserList(StreamModeMatchAuthoritative, matchID.UUID().String(), "", matchID.Node(), true, true)
+	matchID, err := NewMatchID(uuid.UUID(request.Payload.SessionID), p.node)
 	if err != nil {
-		return fmt.Errorf("failed to get stream presences for match: %w", err)
+		return fmt.Errorf("failed to generate matchID: %w", err)
 	}
 
-	found := false
-	for _, p := range presences {
-		if p.GetUserId() == session.userID.String() {
-			found = true
+	// Verify the player is a member of this match
+	label, err := MatchLabelByID(ctx, p.runtimeModule, matchID)
+	if err != nil {
+		return fmt.Errorf("failed to get match label: %w", err)
+	}
+
+	userID := uuid.Nil
+	username := ""
+	for _, p := range label.Players {
+		if p.EvrID == request.EvrID {
+			userID = uuid.FromStringOrNil(p.UserID)
+			username = p.Username
 		}
 	}
+	if userID == uuid.Nil {
+		return fmt.Errorf("failed to find player in match")
+	}
 
-	profile, found := p.profileRegistry.Load(uuid.FromStringOrNil(presence.GetUserId()), request.EvrID)
+	profile, found := p.profileRegistry.Load(userID, request.EvrID)
 	if !found {
 		return fmt.Errorf("failed to load game profiles")
 	}
@@ -932,16 +926,41 @@ func updateStats(profile *GameProfileData, stats evr.StatsUpdate) {
 func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.OtherUserProfileRequest)
 
-	// Lookup the the profile
-	data, found := p.profileRegistry.GetServerProfileByEvrID(request.EvrId)
+	// Get the match service connection session ID
+	stream := PresenceStream{
+		Mode:       StreamModeService,
+		Subject:    session.id,
+		Subcontext: StreamContextMatch,
+	}
+
+	presences := session.tracker.ListByStream(stream, true, true)
+	var presence *Presence
+	for _, p := range presences {
+		if p.GetSessionId() == session.ID().String() {
+			presence = p
+			break
+		}
+	}
+
+	if presence == nil {
+		return fmt.Errorf("failed to find match presence")
+	}
+
+	matchID := MatchIDFromStringOrNil(presences[0].GetStatus())
+
+	if matchID.IsNil() {
+		return fmt.Errorf("matchID is nil")
+	}
+
+	data, found := p.profileCache.GetByMatchIDByEvrID(matchID, request.EvrId)
 	if !found {
-		return fmt.Errorf("failed to find profile for %s", request.EvrId.Token())
+		return fmt.Errorf("failed to find profile")
 	}
 
 	// Construct the response
 	response := &evr.OtherUserProfileSuccess{
 		EvrId:             request.EvrId,
-		ServerProfileJSON: data,
+		ServerProfileJSON: []byte(data),
 	}
 
 	// Send the profile to the client
@@ -949,75 +968,4 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 		return fmt.Errorf("failed to send OtherUserProfileSuccess: %w", err)
 	}
 	return nil
-}
-
-// lobbyPlayerSessionsRequest is called when a client requests the player sessions for a list of EchoVR IDs.
-// Player Sessions are UUIDv5 of the MatchID and EVR-ID
-func (p *EvrPipeline) lobbyPlayerSessionsRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	message := in.(*evr.LobbyPlayerSessionsRequest)
-
-	playerSession := uuid.NewV5(message.LobbySessionID, message.EvrID().String())
-
-	otherSessions := make([]uuid.UUID, len(message.PlayerEvrIDs))
-	for _, e := range message.PlayerEvrIDs {
-		otherSessions = append(otherSessions, uuid.NewV5(message.LobbySessionID, e.String()))
-	}
-
-	teamIndex := int16(AnyTeam)
-
-	success := evr.NewLobbyPlayerSessionsSuccess(message.EvrId, message.LobbySessionID, playerSession, otherSessions, teamIndex)
-
-	return session.SendEvr(success.VersionU(), success.Version2(), success.Version3())
-}
-
-func GetMatchByEvrID(nk runtime.NakamaModule, evrID evr.EvrId) (matchID *MatchID, presence runtime.Presence, err error) {
-
-	presences, err := nk.StreamUserList(StreamModeEvr, evrID.UUID().String(), StreamContextMatch.String(), "", true, true)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get stream presences: %w", err)
-	}
-
-	for _, presence := range presences {
-		matchID := MatchIDFromStringOrNil(presence.GetStatus())
-		if !matchID.IsNil() {
-			return &matchID, presence, nil
-		}
-	}
-
-	return nil, nil, nil
-}
-
-func GetMatchBySessionID(nk runtime.NakamaModule, sessionID uuid.UUID) (matchID MatchID, presence runtime.Presence, err error) {
-
-	presences, err := nk.StreamUserList(StreamModeEvr, sessionID.String(), StreamContextMatch.String(), "", true, true)
-	if err != nil {
-		return MatchID{}, nil, fmt.Errorf("failed to get stream presences: %w", err)
-	}
-
-	for _, presence := range presences {
-		matchID := MatchIDFromStringOrNil(presence.GetStatus())
-		if !matchID.IsNil() {
-			return matchID, presence, nil
-		}
-	}
-
-	return MatchID{}, nil, nil
-}
-
-func LobbyPresenceByEntrantID(nk runtime.NakamaModule, matchID MatchID, sessionID uuid.UUID) (presence runtime.Presence, err error) {
-
-	presences, err := nk.StreamUserList(StreamModeEvr, matchID.UUID().String(), sessionID.String(), "", true, true)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get stream presences: %w", err)
-	}
-
-	if len(presences) == 0 {
-		return nil, nil
-	}
-
-	if len(presences) > 1 {
-		return nil, fmt.Errorf("multiple presences found for session ID")
-	}
-
-	return presences[0], nil
 }

@@ -79,22 +79,22 @@ var _ runtime.Presence = &EvrMatchPresence{}
 
 // Represents identity information for a single match participant.
 type EvrMatchPresence struct {
-	Node            string
-	UserID          uuid.UUID
-	Username        string
-	SessionID       uuid.UUID
-	LoginSessionID  uuid.UUID
-	EvrID           evr.EvrId // The player's evr id.
-	PlayerSessionID uuid.UUID // Match-scoped session id.
-	DisplayName     string
-	Reason          runtime.PresenceReason
-	TeamIndex       int       // the team index the player prefers/has been assigned to.
-	PartyID         uuid.UUID // The party id the player is in.
-	DiscordID       string
-	ClientIP        string
-	ClientPort      string
-	SessionExpiry   int64
-	Query           string // Matchmaking query used to find this match.
+	Node           string
+	UserID         uuid.UUID
+	Username       string
+	SessionID      uuid.UUID
+	LoginSessionID uuid.UUID
+	EvrID          evr.EvrId // The player's evr id.
+	EntrantID      uuid.UUID // Match-scoped session id.
+	DisplayName    string
+	Reason         runtime.PresenceReason
+	TeamIndex      int       // the team index the player prefers/has been assigned to.
+	PartyID        uuid.UUID // The party id the player is in.
+	DiscordID      string
+	ClientIP       string
+	ClientPort     string
+	SessionExpiry  int64
+	Query          string // Matchmaking query used to find this match.
 }
 
 func (p *EvrMatchPresence) String() string {
@@ -130,7 +130,8 @@ func (p *EvrMatchPresence) GetUsername() string {
 	return p.Username
 }
 func (p *EvrMatchPresence) GetStatus() string {
-	return ""
+	data, _ := json.Marshal(p)
+	return string(data)
 }
 func (p *EvrMatchPresence) GetReason() runtime.PresenceReason {
 	return p.Reason
@@ -140,7 +141,7 @@ func (p *EvrMatchPresence) GetEvrId() string {
 }
 
 func (p *EvrMatchPresence) GetPlayerSession() string {
-	return p.PlayerSessionID.String()
+	return p.EntrantID.String()
 }
 
 type EvrMatchMeta struct {
@@ -468,7 +469,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 			"team":        mp.TeamIndex,
 			"sid":         mp.GetSessionId(),
 			"uid":         mp.GetUserId(),
-			"entrant_sid": mp.PlayerSessionID.String()}).Debug("Player joining the match.")
+			"entrant_sid": mp.EntrantID.String()}).Debug("Player joining the match.")
 
 	}
 
@@ -929,14 +930,14 @@ func sendMessagesToStream(_ context.Context, nk runtime.NakamaModule, sessionId 
 	if err != nil {
 		return fmt.Errorf("failed to marshal message: %w", err)
 	}
-	presences, err := nk.StreamUserList(StreamModeEvr, sessionId, serviceId, "", true, true)
+	presences, err := nk.StreamUserList(StreamModeService, sessionId, serviceId, "", true, true)
 	if err != nil {
 		return fmt.Errorf("failed to list users: %w", err)
 	}
 	for _, presence := range presences {
 		log.Printf("Sending message to %s on session ID %s", presence.GetUserId(), presence.GetSessionId())
 	}
-	if err := nk.StreamSend(StreamModeEvr, sessionId, serviceId, "", string(data), nil, true); err != nil {
+	if err := nk.StreamSend(StreamModeService, sessionId, serviceId, "", string(data), nil, true); err != nil {
 		return fmt.Errorf("failed to send message: %w", err)
 	}
 	return nil

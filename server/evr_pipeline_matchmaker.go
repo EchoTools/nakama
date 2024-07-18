@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -19,6 +20,12 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+)
+
+var (
+	ErrorEntrantNotFound       = errors.New("entrant not found")
+	ErrorMultipleEntrantsFound = errors.New("multiple entrants found")
+	ErrorMatchNotFound         = errors.New("match not found")
 )
 
 // lobbyMatchmakerStatusRequest is a message requesting the status of the matchmaker.
@@ -68,7 +75,7 @@ func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logg
 
 	if singleMatch {
 		// Disconnect this EVRID from other matches
-		sessionIDs := session.tracker.ListLocalSessionIDByStream(PresenceStream{Mode: StreamModeEvr, Subject: evrID.UUID(), Subcontext: StreamContextMatch})
+		sessionIDs := session.tracker.ListLocalSessionIDByStream(PresenceStream{Mode: StreamModeService, Subject: evrID.UUID(), Subcontext: StreamContextMatch})
 		for _, foundSessionID := range sessionIDs {
 			if foundSessionID == session.id {
 				// Allow the current session, only disconnect any older ones.
@@ -90,17 +97,17 @@ func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logg
 	s := session
 	s.tracker.TrackMulti(s.ctx, s.id, []*TrackerOp{
 		{
-			Stream: PresenceStream{Mode: StreamModeEvr, Subject: session.id, Subcontext: StreamContextMatch},
+			Stream: PresenceStream{Mode: StreamModeService, Subject: session.id, Subcontext: StreamContextMatch},
 			Meta:   PresenceMeta{Format: s.format, Hidden: true},
 		},
 		// By login sessionID and match service ID
 		{
-			Stream: PresenceStream{Mode: StreamModeEvr, Subject: loginSessionID, Subcontext: StreamContextMatch},
+			Stream: PresenceStream{Mode: StreamModeService, Subject: loginSessionID, Subcontext: StreamContextMatch},
 			Meta:   PresenceMeta{Format: s.format, Hidden: true},
 		},
 		// By EVRID and match service ID
 		{
-			Stream: PresenceStream{Mode: StreamModeEvr, Subject: evrID.UUID(), Subcontext: StreamContextMatch},
+			Stream: PresenceStream{Mode: StreamModeService, Subject: evrID.UUID(), Subcontext: StreamContextMatch},
 			Meta:   PresenceMeta{Format: s.format, Hidden: true},
 		},
 		// EVR packet data stream for the match session by Session ID and service ID
@@ -576,7 +583,10 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 					userIDs = append(userIDs, s.Session.userID)
 				}
 
-				currentLobby, _ := p.matchBySessionID.Load(session.id.String())
+				matchID, _, err := GetMatchBySessionID(p.runtimeModule, session.id)
+				if err != nil {
+					logger.Warn("Failed to get match by session ID", zap.Error(err))
+				}
 
 				// Translate the userID's to discord ID's
 				discordIDs := make([]string, 0, len(userIDs))
@@ -606,9 +616,9 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 					Color:       0x00cc00,
 				}
 
-				if currentLobby != "" {
+				if !matchID.IsNil() {
 					embed.Footer = &discordgo.MessageEmbedFooter{
-						Text: currentLobby,
+						Text: fmt.Sprintf("https://echo.taxi/spark://j/%s", strings.ToUpper(matchID.UUID().String())),
 					}
 				}
 
@@ -999,19 +1009,68 @@ func (p *EvrPipeline) lobbyPendingSessionCancel(ctx context.Context, logger *zap
 	return nil
 }
 
-// pruneMatches prunes matches that are underutilized
-func (p *EvrPipeline) pruneMatches(ctx context.Context, session *sessionWS) error {
-	session.logger.Warn("Pruning matches")
-	matches, err := p.matchmakingRegistry.listMatches(ctx, 1000, 2, 3, "*")
+// lobbyPlayerSessionsRequest is called when a client requests the player sessions for a list of EchoVR IDs.
+// Player Sessions are UUIDv5 of the MatchID and EVR-ID
+func (p *EvrPipeline) lobbyPlayerSessionsRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
+	message := in.(*evr.LobbyPlayerSessionsRequest)
+
+	matchID, err := NewMatchID(message.LobbyID, p.node)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create match ID: %w", err)
+	}
+	entrantID := uuid.NewV5(message.LobbyID, message.EvrID().String())
+
+	presence, err := PresenceByEntrantID(p.runtimeModule, matchID, entrantID)
+	if err != nil {
+		return fmt.Errorf("failed to get lobby presence for entrant `%s`: %w", entrantID.String(), err)
 	}
 
-	for _, match := range matches {
-		_, err := SignalMatch(ctx, p.matchRegistry, MatchIDFromStringOrNil(match.MatchId), SignalPruneUnderutilized, nil)
-		if err != nil {
-			return err
+	entrantIDs := make([]uuid.UUID, len(message.PlayerEvrIDs))
+	for _, e := range message.PlayerEvrIDs {
+		entrantIDs = append(entrantIDs, uuid.NewV5(message.LobbyID, e.String()))
+	}
+
+	entrant := evr.NewLobbyEntrant(message.EvrId, message.LobbyID, entrantID, entrantIDs, int16(presence.TeamIndex))
+
+	return session.SendEvr(entrant.VersionU(), entrant.Version2(), entrant.Version3())
+}
+
+func GetMatchBySessionID(nk runtime.NakamaModule, sessionID uuid.UUID) (matchID MatchID, presence runtime.Presence, err error) {
+
+	presences, err := nk.StreamUserList(StreamModeService, sessionID.String(), StreamContextMatch.String(), "", true, true)
+	if err != nil {
+		return MatchID{}, nil, fmt.Errorf("failed to get stream presences: %w", err)
+	}
+
+	for _, presence := range presences {
+		matchID := MatchIDFromStringOrNil(presence.GetStatus())
+		if !matchID.IsNil() {
+			return matchID, presence, nil
 		}
 	}
-	return nil
+
+	return MatchID{}, nil, ErrorMatchNotFound
+}
+
+func PresenceByEntrantID(nk runtime.NakamaModule, matchID MatchID, entrantID uuid.UUID) (presence *EvrMatchPresence, err error) {
+
+	presences, err := nk.StreamUserList(StreamModeEntrant, matchID.UUID().String(), entrantID.String(), matchID.Node(), true, true)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get stream presences for entrant %s: %w", entrantID.String(), err)
+	}
+
+	if len(presences) == 0 {
+		return nil, ErrorEntrantNotFound
+	}
+
+	if len(presences) > 1 {
+		return nil, ErrorMultipleEntrantsFound
+	}
+
+	mp := &EvrMatchPresence{}
+	if err := json.Unmarshal([]byte(presences[0].GetStatus()), mp); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal presence: %w", err)
+	}
+
+	return mp, nil
 }
