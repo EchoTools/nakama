@@ -926,42 +926,37 @@ func updateStats(profile *GameProfileData, stats evr.StatsUpdate) {
 func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.OtherUserProfileRequest)
 
-	// Get the target user's match
-
+	// get this users match
 	stream := PresenceStream{
 		Mode:    StreamModeService,
-		Subject: request.EvrId.UUID(),
+		Subject: session.id,
 		Label:   StreamLabelMatchService,
 	}
-
+	// Get the target user's match
 	presences := session.tracker.ListByStream(stream, true, true)
-	var presence *Presence
-	var found bool
+
 	var matchID MatchID
-	for _, presence = range presences {
+	for _, presence := range presences {
 		matchID = MatchIDFromStringOrNil(presence.GetStatus())
 		if matchID.IsNil() {
 			continue
 		}
-		// Get the match
-		label, err := MatchLabelByID(ctx, p.runtimeModule, matchID)
-		if err != nil {
-			continue
-		}
-		// Restrict the profile updates to the match game server
-		if label.Broadcaster.OperatorID == session.UserID().String() {
-			found = true
-			break
-		}
+		break
 	}
 
-	if !found || presence == nil {
-		return fmt.Errorf("failed to find match presence for `%s`", request.EvrId.String())
-	}
-
-	data, found := p.profileCache.GetByMatchIDByEvrID(matchID, request.EvrId)
-	if !found {
-		return fmt.Errorf("failed to find profile")
+	var data string
+	var found bool
+	if !matchID.IsNil() {
+		// This is probably a broadcaster connection. pull any profile for this EvrID from the cache.
+		data, found = p.profileCache.GetByMatchIDByEvrID(matchID, request.EvrId)
+		if !found {
+			return fmt.Errorf("failed to find profile for `%s` in match `%s`", request.EvrId.String(), matchID.String())
+		}
+	} else {
+		data, found = p.profileCache.GetByEvrID(request.EvrId)
+		if !found {
+			return fmt.Errorf("failed to find profile for `%s`", request.EvrId.String())
+		}
 	}
 
 	// Construct the response
