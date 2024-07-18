@@ -42,9 +42,9 @@ type Chunk struct {
 		BroadcasterSessionEnded            *BroadcasterSessionEnded           `struct-case:"0x7777777777770200" json:",omitempty"`
 		GameServerPlayerSessionsLocked     *BroadcasterPlayerSessionsLocked   `struct-case:"0x7777777777770300" json:",omitempty"`
 		ERGameServerPlayerSessionsUnlocked *BroadcasterPlayerSessionsUnlocked `struct-case:"0x7777777777770400" json:",omitempty"`
-		BroadcasterPlayersAccept           *BroadcasterPlayersAccept          `struct-case:"0x7777777777770500" json:",omitempty"`
-		BroadcasterPlayersAccepted         *BroadcasterPlayersAccepted        `struct-case:"0x7777777777770600" json:",omitempty"`
-		BroadcasterPlayersRejected         *BroadcasterPlayersRejected        `struct-case:"0x7777777777770700" json:",omitempty"`
+		BroadcasterPlayersAccept           *GameServerJoinAttempt             `struct-case:"0x7777777777770500" json:",omitempty"`
+		BroadcasterPlayersAccepted         *GameServerJoinAllowed             `struct-case:"0x7777777777770600" json:",omitempty"`
+		BroadcasterPlayersRejected         *GameServerJoinRejected            `struct-case:"0x7777777777770700" json:",omitempty"`
 		BroadcasterPlayerRemoved           *BroadcasterPlayerRemoved          `struct-case:"0x7777777777770800" json:",omitempty"`
 		GameServerChallengeRequest         *BroadcasterChallengeRequest       `struct-case:"0x7777777777770900" json:",omitempty"`
 		GameServerChallengeResponse        *GameServerChallengeResponse       `struct-case:"0x7777777777770a00" json:",omitempty"`
@@ -57,8 +57,8 @@ type Chunk struct {
 		LobbyMatchmakerStatus              *LobbyMatchmakerStatus             `struct-case:"0x8f28cf33dabfbecb" json:",omitempty"`
 		ChannelInfoRequest                 *ChannelInfoRequest                `struct-case:"0x90758e58515724e0" json:",omitempty"`
 		LobbyPlayerSessionsRequest         *LobbyPlayerSessionsRequest        `struct-case:"0x9af2fab2a0c81a05" json:",omitempty"`
-		LobbyPlayerSessionsSuccessv2       *LobbyPlayerSessionsSuccessv2      `struct-case:"0xa1b9cae1f8588968" json:",omitempty"`
-		LobbyPlayerSessionsSuccessv3       *LobbyPlayerSessionsSuccessv3      `struct-case:"0xa1b9cae1f8588969" json:",omitempty"`
+		LobbyPlayerSessionsSuccessv2       *LobbyEntrantsV2                   `struct-case:"0xa1b9cae1f8588968" json:",omitempty"`
+		LobbyPlayerSessionsSuccessv3       *LobbyEntrantsV3                   `struct-case:"0xa1b9cae1f8588969" json:",omitempty"`
 		LoginRequest                       *LoginRequest                      `struct-case:"0xbdb41ea9e67b200a" json:",omitempty"`
 		LoginSuccess                       *LoginSuccess                      `struct-case:"0xa5acc1a90d0cce47" json:",omitempty"`
 		LoginFailure                       *LoginFailure                      `struct-case:"0xa5b9d5a3021ccf51" json:",omitempty"`
@@ -77,7 +77,7 @@ type Chunk struct {
 		LoggedInUserProfileSuccess         *LoggedInUserProfileSuccess        `struct-case:"0xfb763a5037fc8d77" json:",omitempty"`
 		LoggedInUserProfileRequest         *LoggedInUserProfileRequest        `struct-case:"0xfb772a4221fc8d70" json:",omitempty"`
 		DocumentRequest                    *DocumentRequest                   `struct-case:"0xfcced6f169822bb8" json:",omitempty"`
-		LobbyPlayerSessionsSuccessUnk1     *LobbyPlayerSessionsSuccessUnk1    `struct-case:"0xff71856af7e0fbd9" json:",omitempty"`
+		LobbyPlayerSessionsSuccessUnk1     *LobbyEntrantsV0                   `struct-case:"0xff71856af7e0fbd9" json:",omitempty"`
 		Raw                                *RawMessage                        `struct:"default" json:",omitempty"`
 	} `struct-switch:"Type"`
 }
