@@ -77,7 +77,7 @@ func (p *EvrPipeline) broadcasterSessionEnded(ctx context.Context, logger *zap.L
 		}
 
 		// Get the broadcaster registration from the stream.
-		presence, err := p.runtimeModule.StreamUserGet(StreamModeEvr, session.ID().String(), StreamContextGameServer.String(), "", session.UserID().String(), session.ID().String())
+		presence, err := p.runtimeModule.StreamUserGet(StreamModeGameServer, session.ID().String(), "", "", session.UserID().String(), session.ID().String())
 		if err != nil {
 			logger.Warn("Failed to get broadcaster presence", zap.Error(err))
 		}
@@ -197,7 +197,7 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 		return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_Failure)
 	}
 
-	if err := p.runtimeModule.StreamUserUpdate(StreamModeEvr, session.ID().String(), StreamContextGameServer.String(), "", userId, session.ID().String(), true, false, string(configJson)); err != nil {
+	if err := p.runtimeModule.StreamUserUpdate(StreamModeGameServer, session.ID().String(), "", "", userId, session.ID().String(), true, false, string(configJson)); err != nil {
 		return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_Failure)
 	}
 

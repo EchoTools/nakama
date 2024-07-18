@@ -35,7 +35,7 @@ const (
 
 const (
 	OpCodeBroadcasterDisconnected int64 = iota
-	OpCodeEvrPacketData
+	OpCodeEVRPacketData
 
 	SignalPrepareSession
 	SignalStartSession
@@ -870,7 +870,7 @@ func (m *EvrMatch) dispatchMessages(_ context.Context, logger runtime.Logger, di
 		}
 		bytes = append(bytes, payload...)
 	}
-	if err := dispatcher.BroadcastMessageDeferred(OpCodeEvrPacketData, bytes, presences, sender, true); err != nil {
+	if err := dispatcher.BroadcastMessageDeferred(OpCodeEVRPacketData, bytes, presences, sender, true); err != nil {
 		return fmt.Errorf("could not broadcast message: %v", err)
 	}
 	return nil
