@@ -407,7 +407,7 @@ func (p *EvrPipeline) MatchCreateLoop(session *sessionWS, msession *MatchmakingS
 			foundMatch := FoundMatch{
 				MatchID:   matchID,
 				Query:     "",
-				TeamIndex: TeamIndex(evr.TeamUnassigned),
+				TeamIndex: msession.Label.TeamIndex,
 			}
 			select {
 			case <-ctx.Done():
