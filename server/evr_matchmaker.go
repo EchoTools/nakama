@@ -528,6 +528,7 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 	if err != nil {
 		return fmt.Errorf("failed to get match label: %w", err)
 	}
+
 	partyID := uuid.Nil
 	msession, ok := p.matchmakingRegistry.GetMatchingBySessionId(session.ID())
 	if !ok {
@@ -616,15 +617,9 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 		ClientPort:     session.clientPort,
 	}
 
-	if label.LobbyType == PublicLobby && mp.TeamIndex == evr.TeamUnassigned {
-		var allow bool
-		mp.TeamIndex, allow = selectTeamForPlayer(NewRuntimeGoLogger(logger), &mp, label)
-		if !allow {
-			return fmt.Errorf("failed to join lobby: lobby full")
-		}
-	}
-
-	label, _, err = EVRMatchJoinAttempt(ctx, logger, matchID, p.sessionRegistry, p.matchRegistry, p.tracker, mp)
+	var presence *EvrMatchPresence
+	logger.Debug("Joining match", zap.String("mid", matchID.UUID().String()))
+	label, presence, _, err = EVRMatchJoinAttempt(ctx, logger, matchID, p.sessionRegistry, p.matchRegistry, p.tracker, mp)
 	if err != nil {
 		return fmt.Errorf("failed to join match: %w", err)
 	}
@@ -636,7 +631,7 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 	}
 
 	// Send the lobbysessionSuccess, this will trigger the broadcaster to send a lobbysessionplayeraccept once the player connects to the broadcaster.
-	msg := evr.NewLobbySessionSuccess(label.Mode, label.ID.UUID(), label.GetGroupID(), label.GetEndpoint(), int16(mp.TeamIndex))
+	msg := evr.NewLobbySessionSuccess(label.Mode, label.ID.UUID(), label.GetGroupID(), label.GetEndpoint(), int16(presence.TeamIndex))
 	messages := []evr.Message{msg.Version4(), msg.Version5(), evr.NewSTcpConnectionUnrequireEvent()}
 
 	if err = bsession.SendEvr(messages...); err != nil {
@@ -652,32 +647,42 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 	return err
 }
 
-func EVRMatchJoinAttempt(ctx context.Context, logger *zap.Logger, matchID MatchID, sessionRegistry SessionRegistry, matchRegistry MatchRegistry, tracker Tracker, presence EvrMatchPresence) (*EvrMatchState, []*MatchPresence, error) {
+func EVRMatchJoinAttempt(ctx context.Context, logger *zap.Logger, matchID MatchID, sessionRegistry SessionRegistry, matchRegistry MatchRegistry, tracker Tracker, presence EvrMatchPresence) (*EvrMatchState, *EvrMatchPresence, []*MatchPresence, error) {
 	// Append the node to the matchID if it doesn't already contain one.
 
 	data, err := json.Marshal(presence)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to marshal match presence: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed to marshal match presence: %w", err)
 	}
 	matchIDStr := matchID.String()
 	metadata := map[string]string{"playermeta": string(data)}
 
 	found, allowed, isNew, reason, labelStr, presences := matchRegistry.JoinAttempt(ctx, matchID.UUID(), matchID.Node(), presence.UserID, presence.SessionID, presence.Username, presence.SessionExpiry, nil, presence.ClientIP, presence.ClientPort, matchID.Node(), metadata)
 	if !found {
-		return nil, nil, fmt.Errorf("match not found: %s", matchIDStr)
+		return nil, nil, nil, fmt.Errorf("match not found: %s", matchIDStr)
 	} else if labelStr == "" {
-		return nil, nil, fmt.Errorf("match label not found: %s", matchIDStr)
+		return nil, nil, nil, fmt.Errorf("match label not found: %s", matchIDStr)
 	}
 
 	label := &EvrMatchState{}
 	if err := json.Unmarshal([]byte(labelStr), label); err != nil {
-		return nil, presences, fmt.Errorf("failed to unmarshal match label: %w", err)
+		return nil, nil, presences, fmt.Errorf("failed to unmarshal match label: %w", err)
 	}
 
 	if !allowed {
-		return label, presences, fmt.Errorf("join not allowed: %s", reason)
+		return label, nil, presences, fmt.Errorf("join not allowed: %s", reason)
 	} else if !isNew {
-		return label, presences, fmt.Errorf("player already in match: %s", matchIDStr)
+		return label, nil, presences, fmt.Errorf("player already in match: %s", matchIDStr)
+	}
+
+	resp := JoinAttemptResponse{}
+	if err := json.Unmarshal([]byte(reason), &resp); err != nil {
+		return label, nil, presences, fmt.Errorf("failed to unmarshal match presence: %w", err)
+	}
+	presence = resp.Presence
+
+	if data, err = json.Marshal(presence); err != nil {
+		return label, nil, presences, fmt.Errorf("failed to marshal match presence: %w", err)
 	}
 
 	ops := []*TrackerOp{
@@ -706,11 +711,11 @@ func EVRMatchJoinAttempt(ctx context.Context, logger *zap.Logger, matchID MatchI
 	// Update the statuses
 	for _, op := range ops {
 		if ok := tracker.Update(ctx, presence.SessionID, op.Stream, presence.UserID, op.Meta); !ok {
-			return label, presences, fmt.Errorf("failed to track user: %w", err)
+			return label, nil, presences, fmt.Errorf("failed to track user: %w", err)
 		}
 	}
 
-	return label, presences, nil
+	return label, &presence, presences, nil
 }
 
 // PingEndpoints pings the endpoints and returns the latencies.
