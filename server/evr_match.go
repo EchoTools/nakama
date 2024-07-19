@@ -468,8 +468,26 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 			return state, false, ErrJoinRejectedLobbyFull.Error()
 		}
 
-		if mp.isPlayer() && len(state.Players) >= state.PlayerLimit {
-			return state, false, ErrJoinRejectedLobbyFull.Error()
+		if state.LobbyType == PublicLobby {
+			switch mp.TeamIndex {
+			case evr.TeamUnassigned:
+				// Assign the player to a team.
+				var allowed bool
+				mp.TeamIndex, allowed = selectTeamForPlayer(logger, &mp, state)
+				if !allowed {
+					return state, false, "failed to assign team"
+				}
+			case evr.TeamModerator, evr.TeamSpectator:
+				nonPlayerSlots := int(state.MaxSize) - state.PlayerLimit
+				nonPlayerCount := state.Size - state.PlayerCount
+				if nonPlayerCount >= nonPlayerSlots {
+					return state, false, ErrJoinRejectedLobbyFull.Error()
+				}
+			case evr.TeamBlue, evr.TeamOrange, evr.TeamSocial:
+				if len(state.Players) >= state.PlayerLimit {
+					return state, false, ErrJoinRejectedLobbyFull.Error()
+				}
+			}
 		}
 
 		sessionID := presence.GetSessionId()
