@@ -64,7 +64,7 @@ func GetEVRAccount(ctx context.Context, logger runtime.Logger, nk runtime.Nakama
 		// Get the latest record
 		var latest EVRLoginRecord
 		for _, record := range records {
-			if record.CreateTime.After(latest.CreateTime) {
+			if record.UpdateTime.After(latest.UpdateTime) {
 				latest = record
 			}
 		}
