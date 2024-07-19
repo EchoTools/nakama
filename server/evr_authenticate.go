@@ -15,8 +15,8 @@ import (
 	"time"
 
 	anyascii "github.com/anyascii/go"
-	"github.com/dgrijalva/jwt-go"
 	"github.com/gofrs/uuid/v5"
+	jwt "github.com/golang-jwt/jwt/v4"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"

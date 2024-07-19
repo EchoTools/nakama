@@ -41,6 +41,7 @@ const (
 	StreamModeService = 0x10 + iota
 	StreamModeEntrant
 	StreamModeGameServer
+	StreamModeMatchmaking
 )
 
 const (
