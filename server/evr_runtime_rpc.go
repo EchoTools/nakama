@@ -1137,3 +1137,18 @@ func (r *SetNextMatchRPCResponsePayload) String() string {
 	}
 	return string(data)
 }
+
+func StreamListMatchmakingRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+
+	presences, err := nk.StreamUserList(StreamModeMatchmaking, uuid.NewV5(uuid.Nil, "matchmaking").String(), "", "", true, true)
+	if err != nil {
+		return "", err
+	}
+
+	data, err := json.MarshalIndent(presences, "", "  ")
+	if err != nil {
+		return "", err
+	}
+
+	return string(data), nil
+}

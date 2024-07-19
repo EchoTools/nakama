@@ -72,6 +72,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		"terminateMatch":                terminateMatchRpc,
 		"matchmaker":                    matchmakingStatusRpc,
 		"setmatchamakerstatus":          setMatchmakingStatusRpc,
+		"matchmaking/list":              StreamListMatchmakingRPC,
 	}
 
 	for name, rpc := range rpcs {
