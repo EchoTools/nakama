@@ -608,7 +608,7 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 		DisplayName:    displayName,
 		EvrID:          evrID,
 		PartyID:        partyID,
-		TeamIndex:      int(teamIndex),
+		RoleAlignment:  int(teamIndex),
 		DiscordID:      discordID,
 		Query:          query,
 		ClientIP:       session.clientIP,
@@ -637,7 +637,7 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 	}
 
 	// Send the lobbysessionSuccess, this will trigger the broadcaster to send a lobbysessionplayeraccept once the player connects to the broadcaster.
-	msg := evr.NewLobbySessionSuccess(label.Mode, label.ID.UUID(), label.GetGroupID(), label.GetEndpoint(), int16(presence.TeamIndex))
+	msg := evr.NewLobbySessionSuccess(label.Mode, label.ID.UUID(), label.GetGroupID(), label.GetEndpoint(), int16(presence.RoleAlignment))
 	messages := []evr.Message{msg.Version4(), msg.Version5(), evr.NewSTcpConnectionUnrequireEvent()}
 
 	if err = bsession.SendEvr(messages...); err != nil {
@@ -920,9 +920,9 @@ func (p *EvrPipeline) checkSuspensionStatus(ctx context.Context, logger *zap.Log
 
 // selectTeamForPlayer decides which team to assign a player to.
 func selectTeamForPlayer(logger runtime.Logger, presence *EvrMatchPresence, state *EvrMatchState) (int, bool) {
-	t := presence.TeamIndex
+	t := presence.RoleAlignment
 
-	teams := lo.GroupBy(lo.Values(state.presences), func(p *EvrMatchPresence) int { return p.TeamIndex })
+	teams := lo.GroupBy(lo.Values(state.presences), func(p *EvrMatchPresence) int { return p.RoleAlignment })
 
 	blueTeam := teams[evr.TeamBlue]
 	orangeTeam := teams[evr.TeamOrange]
