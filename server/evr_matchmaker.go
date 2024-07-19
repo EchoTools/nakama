@@ -619,7 +619,15 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 	logger.Debug("Joining match", zap.String("mid", matchID.UUID().String()))
 	label, presence, _, err = EVRMatchJoinAttempt(ctx, logger, matchID, p.sessionRegistry, p.matchRegistry, p.tracker, mp)
 	if err != nil {
-		return fmt.Errorf("failed to join match: %w", err)
+		if err == ErrJoinRejectedDuplicateJoin {
+			logger.Warn("Player already in match. Ignoring join attempt.", zap.String("mid", matchID.UUID().String()), zap.Error(err))
+			if msession != nil {
+				msession.Cancel(err)
+			}
+			return nil
+		} else {
+			return fmt.Errorf("failed to join match: %w", err)
+		}
 	}
 
 	// Get the broadcasters session
@@ -670,7 +678,7 @@ func EVRMatchJoinAttempt(ctx context.Context, logger *zap.Logger, matchID MatchI
 	if !allowed {
 		return label, nil, presences, fmt.Errorf("join not allowed: %s", reason)
 	} else if !isNew {
-		return label, nil, presences, fmt.Errorf("player already in match: %s", matchIDStr)
+		return label, nil, presences, ErrJoinRejectedDuplicateJoin
 	}
 
 	resp := JoinAttemptResponse{}
