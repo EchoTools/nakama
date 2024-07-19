@@ -55,9 +55,13 @@ func TestSelectTeamForPlayer(t *testing.T) {
 	presencesstr := map[string]*EvrMatchPresence{
 		"player1": {TeamIndex: evr.TeamBlue},
 		"player2": {TeamIndex: evr.TeamOrange},
-		"player3": {TeamIndex: evr.TeamSpectator},
+		"spec1":   {TeamIndex: evr.TeamSpectator},
 		"player4": {TeamIndex: evr.TeamOrange},
 		"player5": {TeamIndex: evr.TeamOrange},
+		"player6": {TeamIndex: evr.TeamOrange},
+		"player7": {TeamIndex: evr.TeamOrange},
+		"player8": {TeamIndex: evr.TeamOrange},
+		"spec2":   {TeamIndex: evr.TeamSpectator},
 	}
 
 	presences := make(map[string]*EvrMatchPresence)

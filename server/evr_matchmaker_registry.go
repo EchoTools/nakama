@@ -400,7 +400,7 @@ func (mr *MatchmakingRegistry) listUnfilledLobbies(ctx context.Context, logger *
 	logger = logger.With(zap.String("query", query))
 
 	// Search for possible matches
-	logger.Debug("Searching for matches")
+	logger.Debug("Searching for matches", zap.String("query", query))
 	matches, err := mr.listMatches(ctx, limit, minSize+1, maxSize+1, query)
 	if err != nil {
 		return nil, "", status.Errorf(codes.Internal, "Failed to find matches: %v", err)
@@ -584,7 +584,7 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 
 	// Try to backfill matches with parties
 	var backfillMatches []*EvrMatchState
-	backfillMatches, _, err := mr.listUnfilledLobbies(mr.ctx, logger, ml, 2)
+	backfillMatches, _, err := mr.listUnfilledLobbies(mr.ctx, logger, ml, 1)
 	if err != nil {
 		logger.Error("Failed to list unfilled lobbies", zap.Error(err))
 		return
@@ -592,11 +592,8 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 
 	for partyID, party := range parties {
 		partySize := len(party)
-		if partySize == 1 {
-			continue
-		}
 
-		for i, m := range backfillMatches {
+		for _, m := range backfillMatches {
 			if m.PlayerLimit-m.PlayerCount < partySize {
 				continue
 			}
@@ -634,7 +631,7 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 			// Remove the party from the party list
 			delete(parties, partyID)
 			// Set the backfill match size to the new size
-			backfillMatches[i].PlayerCount += partySize
+			m.PlayerCount += partySize
 
 		}
 	}
