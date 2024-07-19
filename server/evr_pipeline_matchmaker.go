@@ -1018,7 +1018,7 @@ func (p *EvrPipeline) lobbyPlayerSessionsRequest(ctx context.Context, logger *za
 		entrantIDs = append(entrantIDs, uuid.NewV5(message.LobbyID, e.String()))
 	}
 
-	entrant := evr.NewLobbyEntrant(message.EvrId, message.LobbyID, entrantID, entrantIDs, int16(presence.TeamIndex))
+	entrant := evr.NewLobbyEntrant(message.EvrId, message.LobbyID, entrantID, entrantIDs, int16(presence.RoleAlignment))
 
 	return session.SendEvr(entrant.VersionU(), entrant.Version2(), entrant.Version3())
 }

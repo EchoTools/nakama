@@ -79,36 +79,21 @@ var _ runtime.Presence = &EvrMatchPresence{}
 
 // Represents identity information for a single match participant.
 type EvrMatchPresence struct {
-	Node           string
-	UserID         uuid.UUID
-	Username       string
-	SessionID      uuid.UUID
-	LoginSessionID uuid.UUID
-	EvrID          evr.EvrId // The player's evr id.
-	EntrantID      uuid.UUID // Match-scoped session id.
-	DisplayName    string
-	Reason         runtime.PresenceReason
-	TeamIndex      int       // the team index the player prefers/has been assigned to.
-	PartyID        uuid.UUID // The party id the player is in.
-	DiscordID      string
-	ClientIP       string
-	ClientPort     string
-	SessionExpiry  int64
-	Query          string // Matchmaking query used to find this match.
-}
-
-func (p *EvrMatchPresence) String() string {
-
-	data, err := json.Marshal(struct {
-		UserID      string `json:"userid,omitempty"`
-		DisplayName string `json:"displayname,omitempty"`
-		EvrId       string `json:"evrid,omitempty"`
-		TeamIndex   int    `json:"team,omitempty"`
-	}{p.UserID.String(), p.DisplayName, p.EvrID.Token(), p.TeamIndex})
-	if err != nil {
-		return ""
-	}
-	return string(data)
+	Node           string    `json:"node,omitempty"`
+	SessionID      uuid.UUID `json:"session_id,omitempty"`
+	LoginSessionID uuid.UUID `json:"login_session_id,omitempty"`
+	EntrantID      uuid.UUID `json:"entrant_id,omitempty"`
+	UserID         uuid.UUID `json:"user_id,omitempty"`
+	EvrID          evr.EvrId `json:"evr_id,omitempty"`
+	DiscordID      string    `json:"discord_id,omitempty"`
+	ClientIP       string    `json:"client_ip,omitempty"`
+	ClientPort     string    `json:"client_port,omitempty"`
+	Username       string    `json:"username,omitempty"`
+	DisplayName    string    `json:"display_name,omitempty"`
+	PartyID        uuid.UUID `json:"party_id,omitempty"`
+	RoleAlignment  int       `json:"role,omitempty"`
+	Query          string    `json:"query,omitempty"`
+	SessionExpiry  int64     `json:"session_expiry,omitempty"`
 }
 
 func (p *EvrMatchPresence) GetUserId() string {
@@ -134,7 +119,7 @@ func (p *EvrMatchPresence) GetStatus() string {
 	return string(data)
 }
 func (p *EvrMatchPresence) GetReason() runtime.PresenceReason {
-	return p.Reason
+	return runtime.PresenceReasonUnknown
 }
 func (p *EvrMatchPresence) GetEvrId() string {
 	return p.EvrID.Token()
@@ -145,19 +130,19 @@ func (p *EvrMatchPresence) GetPlayerSession() string {
 }
 
 func (p *EvrMatchPresence) isPlayer() bool {
-	return p.TeamIndex != evr.TeamModerator && p.TeamIndex != evr.TeamSpectator
+	return p.RoleAlignment != evr.TeamModerator && p.RoleAlignment != evr.TeamSpectator
 }
 
 func (p *EvrMatchPresence) isModerator() bool {
-	return p.TeamIndex == evr.TeamModerator
+	return p.RoleAlignment == evr.TeamModerator
 }
 
 func (p *EvrMatchPresence) isSpectator() bool {
-	return p.TeamIndex == evr.TeamSpectator
+	return p.RoleAlignment == evr.TeamSpectator
 }
 
 func (p *EvrMatchPresence) isSocial() bool {
-	return p.TeamIndex == evr.TeamSocial
+	return p.RoleAlignment == evr.TeamSocial
 }
 
 type EvrMatchMeta struct {
@@ -316,7 +301,7 @@ func (s *EvrMatchState) rebuildCache() {
 	// Construct Player list
 	for _, presence := range s.presences {
 		// Do not include spectators or moderators in player count
-		if presence.TeamIndex != evr.TeamSpectator && presence.TeamIndex != evr.TeamModerator {
+		if presence.RoleAlignment != evr.TeamSpectator && presence.RoleAlignment != evr.TeamModerator {
 			s.PlayerCount++
 		}
 		playerinfo := PlayerInfo{
@@ -324,7 +309,7 @@ func (s *EvrMatchState) rebuildCache() {
 			Username:    presence.Username,
 			DisplayName: presence.DisplayName,
 			EvrID:       presence.EvrID,
-			Team:        TeamIndex(presence.TeamIndex),
+			Team:        TeamIndex(presence.RoleAlignment),
 			ClientIP:    presence.ClientIP,
 			DiscordID:   presence.DiscordID,
 			PartyID:     presence.PartyID.String(),
@@ -469,11 +454,11 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		}
 
 		if state.LobbyType == PublicLobby {
-			switch mp.TeamIndex {
+			switch mp.RoleAlignment {
 			case evr.TeamUnassigned:
 				// Assign the player to a team.
 				var allowed bool
-				mp.TeamIndex, allowed = selectTeamForPlayer(logger, &mp, state)
+				mp.RoleAlignment, allowed = selectTeamForPlayer(logger, &mp, state)
 				if !allowed {
 					return state, false, "failed to assign team"
 				}
@@ -498,10 +483,10 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 			}
 		}
 
-		if mp.TeamIndex == int(AnyTeam) && state.LobbyType == PublicLobby {
+		if mp.RoleAlignment == int(AnyTeam) && state.LobbyType == PublicLobby {
 			// Assign the player to a team.
 			var allowed bool
-			mp.TeamIndex, allowed = selectTeamForPlayer(logger, &mp, state)
+			mp.RoleAlignment, allowed = selectTeamForPlayer(logger, &mp, state)
 			if !allowed {
 				return state, false, "failed to assign team"
 			}
@@ -520,7 +505,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 
 		logger.WithFields(map[string]interface{}{
 			"evr_id":      mp.EvrID.Token(),
-			"team":        mp.TeamIndex,
+			"team":        mp.RoleAlignment,
 			"sid":         mp.GetSessionId(),
 			"uid":         mp.GetUserId(),
 			"entrant_sid": mp.EntrantID.String()}).Debug("Player joining the match.")
