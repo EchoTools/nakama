@@ -109,10 +109,7 @@ func (m *LobbyCreateSessionRequest) Stream(s *EasyStream) error {
 		},
 		func() error {
 			// Stream the team indexes
-			if s.Len() < len(m.Entrants) {
-				return fmt.Errorf("not enough data to stream team indexes")
-			}
-			if flags&SessionFlag_TeamIndexes != 0 {
+			if flags&SessionFlag_TeamIndexes != 0 && s.Len() >= len(m.Entrants) {
 				for i := range m.Entrants {
 					if err := s.StreamNumber(binary.LittleEndian, &m.Entrants[i].Role); err != nil {
 						return err
