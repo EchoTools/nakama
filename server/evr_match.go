@@ -410,9 +410,16 @@ const (
 	ErrJoinRejectedNotModerator    = "not a moderator"
 )
 
+type JoinAttemptResponse struct {
+	Presence EvrMatchPresence `json:"presence"`
+}
+
 // MatchJoinAttempt decides whether to accept or deny the player session.
 func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ interface{}, presence runtime.Presence, metadata map[string]string) (interface{}, bool, string) {
 	state, ok := state_.(*EvrMatchState)
+
+	mp := EvrMatchPresence{}
+
 	if !ok {
 		logger.Error("state not a valid lobby state object")
 		return nil, false, ""
@@ -429,7 +436,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	} else {
 
 		// This is a player joining.
-		mp := &EvrMatchPresence{}
+
 		if err := json.Unmarshal([]byte(metadata["playermeta"]), &mp); err != nil {
 			return state, false, fmt.Sprintf("failed to unmarshal metadata: %q", err)
 		}
@@ -456,8 +463,17 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 			}
 		}
 
+		if mp.TeamIndex == int(AnyTeam) && state.LobbyType == PublicLobby {
+			// Assign the player to a team.
+			var allowed bool
+			mp.TeamIndex, allowed = selectTeamForPlayer(logger, &mp, state)
+			if !allowed {
+				return state, false, "failed to assign team"
+			}
+		}
+
 		// Reserve this player's spot in the match.
-		state.presences[sessionID] = mp
+		state.presences[sessionID] = &mp
 
 		// Tell the broadcaster to load the match if it's not already started
 		if !state.Started {
@@ -480,7 +496,13 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		return state, false, fmt.Sprintf("failed to update label: %q", err)
 	}
 
-	return state, true, ""
+	response := JoinAttemptResponse{Presence: mp}
+	responseJson, err := json.Marshal(response)
+	if err != nil {
+		return state, false, fmt.Sprintf("failed to marshal response: %q", err)
+	}
+
+	return state, true, string(responseJson)
 }
 
 // MatchJoin is called after the join attempt.
