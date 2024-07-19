@@ -355,7 +355,6 @@ func (p *EvrPipeline) getBroadcasterHostGroups(ctx context.Context, userId strin
 		if m.isServerHost {
 			groupIDs = append(groupIDs, m.GuildGroup.ID())
 		}
-
 	}
 
 	return groupIDs, nil

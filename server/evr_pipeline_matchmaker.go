@@ -333,8 +333,8 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 	}
 	limit := 5
 	delayStartTimer := time.NewTimer(100 * time.Millisecond)
-	retryTicker := time.NewTicker(3 * time.Second)
-	createTicker := time.NewTicker(5 * time.Second)
+	retryTicker := time.NewTicker(4 * time.Second)
+	createTicker := time.NewTicker(6 * time.Second)
 
 OuterLoop:
 	for {

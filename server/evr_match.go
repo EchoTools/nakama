@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
 	"reflect"
@@ -141,6 +142,22 @@ func (p *EvrMatchPresence) GetEvrId() string {
 
 func (p *EvrMatchPresence) GetPlayerSession() string {
 	return p.EntrantID.String()
+}
+
+func (p *EvrMatchPresence) isPlayer() bool {
+	return p.TeamIndex != evr.TeamModerator && p.TeamIndex != evr.TeamSpectator
+}
+
+func (p *EvrMatchPresence) isModerator() bool {
+	return p.TeamIndex == evr.TeamModerator
+}
+
+func (p *EvrMatchPresence) isSpectator() bool {
+	return p.TeamIndex == evr.TeamSpectator
+}
+
+func (p *EvrMatchPresence) isSocial() bool {
+	return p.TeamIndex == evr.TeamSocial
 }
 
 type EvrMatchMeta struct {
@@ -403,11 +420,11 @@ func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql
 	return &state, int(state.tickRate), string(labelJson)
 }
 
-const (
-	ErrJoinRejectedUnassignedLobby = "unassigned lobby"
-	ErrJoinRejectedDuplicateJoin   = "duplicate join"
-	ErrJoinRejectedLobbyFull       = "lobby full"
-	ErrJoinRejectedNotModerator    = "not a moderator"
+var (
+	ErrJoinRejectedUnassignedLobby = errors.New("unassigned lobby")
+	ErrJoinRejectedDuplicateJoin   = errors.New("duplicate join")
+	ErrJoinRejectedLobbyFull       = errors.New("lobby full")
+	ErrJoinRejectedNotModerator    = errors.New("not a moderator")
 )
 
 type JoinAttemptResponse struct {
@@ -443,23 +460,23 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 
 		// If this is a parking match, reject the player
 		if state.LobbyType == UnassignedLobby {
-			return state, false, ErrJoinRejectedUnassignedLobby
+			return state, false, ErrJoinRejectedUnassignedLobby.Error()
 		}
 
 		// If the lobby is full, reject them
 		if len(state.presences) >= MatchMaxSize {
-			return state, false, ErrJoinRejectedLobbyFull
+			return state, false, ErrJoinRejectedLobbyFull.Error()
 		}
 
-		if len(state.Players) >= state.PlayerLimit {
-			return state, false, ErrJoinRejectedLobbyFull
+		if mp.isPlayer() && len(state.Players) >= state.PlayerLimit {
+			return state, false, ErrJoinRejectedLobbyFull.Error()
 		}
 
 		sessionID := presence.GetSessionId()
 		// If this EvrID is already in the match, reject the player
 		for _, p := range state.presences {
 			if p.GetSessionId() == sessionID || p.EvrID.Equals(mp.EvrID) {
-				return state, false, ErrJoinRejectedDuplicateJoin
+				return state, false, ErrJoinRejectedDuplicateJoin.Error()
 			}
 		}
 
