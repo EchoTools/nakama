@@ -276,6 +276,7 @@ func (s *EvrMatchState) PublicView() *EvrMatchState {
 				EvrID:       s.Players[i].EvrID,
 				Team:        s.Players[i].Team,
 				DiscordID:   s.Players[i].DiscordID,
+				PartyID:     s.Players[i].PartyID,
 			}
 		}
 	}
