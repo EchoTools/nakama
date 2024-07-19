@@ -617,8 +617,6 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 				}
 			*/
 			logger.Info("Backfilling party into match", zap.String("matchID", m.ID.String()), zap.String("partyID", partyID), zap.Any("party", party))
-
-			logger.Info("Backfilling match")
 			// Add the party to the match
 			for _, e := range party {
 				logger = logger.With(zap.String("sessionID", e.Presence.SessionID.String()), zap.String("partyID", partyID), zap.String("matchID", m.ID.String()), zap.String("uid", e.Presence.GetUserId()))
@@ -1341,7 +1339,7 @@ func (ms *MatchmakingSession) BuildQuery(latencies []LatencyMetric, evrID evr.Ev
 	chstr := strings.Replace(ms.Label.GroupID.String(), "-", "", -1)
 	qparts = append(qparts, fmt.Sprintf("properties.channel:%s^3", chstr))
 	stringProps["channel"] = chstr
-	stringProps["evrid"] = evrID.String()
+	stringProps["evr_id"] = evrID.String()
 	// Add this user's ID to the string props
 	stringProps["userid"] = strings.Replace(ms.UserId.String(), "-", "", -1)
 

@@ -444,6 +444,10 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 			return state, false, ErrJoinRejectedLobbyFull
 		}
 
+		if len(state.Players) >= state.PlayerLimit {
+			return state, false, ErrJoinRejectedLobbyFull
+		}
+
 		sessionID := presence.GetSessionId()
 		// If this EvrID is already in the match, reject the player
 		for _, p := range state.presences {
