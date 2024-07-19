@@ -506,16 +506,19 @@ func (r *ProfileRegistry) UpdateEquippedItem(profile *GameProfileData, category 
 		s.Decal = name
 		s.DecalBody = name
 	case "tint":
+		// Assigning a tint to the alignment will also assign it to the body
 		if lo.Contains(alignmentTints["tint_alignment_a"], name) {
 			s.TintAlignmentA = name
 		} else if lo.Contains(alignmentTints["tint_alignment_b"], name) {
 			s.TintAlignmentB = name
-		} else {
-			if name != "tint_chassis_default" {
-				s.Tint = name
-			}
-			s.TintBody = name
 		}
+		if name != "tint_chassis_default" {
+			// Equipping "tint_chassis_default" to heraldry tint causes every heraldry equipped to be pitch black.
+			// It seems that the tint being pulled from doesn't exist on heraldry equippables.
+			s.Tint = name
+		}
+		s.TintBody = name
+
 	case "pattern":
 		s.Pattern = name
 		s.PatternBody = name
