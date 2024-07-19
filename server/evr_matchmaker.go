@@ -531,10 +531,8 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 
 	partyID := uuid.Nil
 	msession, ok := p.matchmakingRegistry.GetMatchingBySessionId(session.ID())
-	if !ok {
-		if msession != nil && msession.Party != nil {
-			partyID = msession.Party.ID()
-		}
+	if ok && msession != nil && msession.Party != nil {
+		partyID = msession.Party.ID()
 	}
 
 	// Determine the display name
