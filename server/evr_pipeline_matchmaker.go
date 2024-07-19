@@ -286,11 +286,15 @@ func (p *EvrPipeline) MatchSpectateStreamLoop(session *sessionWS, msession *Matc
 	minSize := 1
 	maxSize := MatchMaxSize - 1
 	query := fmt.Sprintf("+label.open:T +label.lobby_type:public +label.mode:%s +label.size:>=%d +label.size:<=%d", msession.Label.Mode.Token(), minSize, maxSize)
+	// creeate a delay timer
+	timer := time.NewTimer(0 * time.Second)
+	ticker := time.NewTicker(5 * time.Second)
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
-		default:
+		case <-timer.C:
+		case <-ticker.C:
 		}
 
 		// list existing matches
@@ -306,26 +310,11 @@ func (p *EvrPipeline) MatchSpectateStreamLoop(session *sessionWS, msession *Matc
 				return matches[i].Size > matches[j].Size
 			})
 
-			// Found a backfill match
-			foundMatch := FoundMatch{
-				MatchID:   MatchIDFromStringOrNil(matches[0].GetMatchId()),
-				Query:     query,
-				TeamIndex: TeamIndex(evr.TeamSpectator),
-			}
-			logger = logger.With(zap.String("mid", foundMatch.MatchID.String()))
-
-			select {
-			case <-ctx.Done():
-				return nil
-			case msession.MatchJoinCh <- foundMatch:
-				p.metrics.CustomCounter("spectatestream_found_count", msession.metricsTags(), 1)
-				logger.Debug("Spectating match")
-			case <-time.After(3 * time.Second):
-				p.metrics.CustomCounter("spectatestream_join_timeout_count", msession.metricsTags(), 1)
-				logger.Warn("Failed to spectate match")
+			if err := p.JoinEvrMatch(msession.Ctx, msession.Logger, msession.Session, "", MatchIDFromStringOrNil(matches[0].GetMatchId()), int(evr.TeamSpectator)); err != nil {
+				logger.Error("Error joining player to match", zap.Error(err))
 			}
 		}
-		<-time.After(10 * time.Second)
+
 	}
 }
 
@@ -364,6 +353,7 @@ OuterLoop:
 		for _, label := range labels {
 			p.metrics.CustomCounter("match_backfill_found_count", msession.metricsTags(), 1)
 			logger.Debug("Attempting to backfill match", zap.String("mid", label.ID.UUID().String()))
+
 			if err := p.JoinEvrMatch(ctx, logger, session, query, label.ID, evr.TeamUnassigned); err != nil {
 				logger.Warn("Failed to backfill match", zap.Error(err))
 				continue
@@ -407,21 +397,18 @@ func (p *EvrPipeline) MatchCreateLoop(session *sessionWS, msession *MatchmakingS
 			if matchID.IsNil() {
 				return msession.Cancel(fmt.Errorf("match is nil"))
 			}
-			foundMatch := FoundMatch{
-				MatchID:   matchID,
-				Query:     "",
-				TeamIndex: msession.Label.TeamIndex,
+			p.metrics.CustomCounter("match_create_join_active_count", msession.metricsTags(), 1)
+			if err := p.JoinEvrMatch(msession.Ctx, msession.Logger, msession.Session, "", matchID, int(msession.Label.TeamIndex)); err != nil {
+				logger.Warn("Error joining player to match", zap.Error(err))
 			}
+
 			select {
 			case <-ctx.Done():
 				return nil
-			case msession.MatchJoinCh <- foundMatch:
-				p.metrics.CustomCounter("match_create_join_active_count", msession.metricsTags(), 1)
-				logger.Debug("Joining match", zap.String("mid", foundMatch.MatchID.String()))
 			case <-time.After(3 * time.Second):
 				p.metrics.CustomCounter("make_create_create_join_timeout_count", msession.metricsTags(), 1)
-				msession.Cancel(fmt.Errorf("failed to join match"))
 			}
+
 			// Keep trying until the context is done
 		case codes.NotFound, codes.ResourceExhausted, codes.Unavailable:
 			p.metrics.CustomCounter("create_unavailable_count", msession.metricsTags(), 1)
@@ -512,16 +499,14 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 				p.metrics.CustomCounter("match_next_join_count", map[string]string{}, 1)
 				// Join the match
 
-				msession.MatchJoinCh <- FoundMatch{
-					MatchID:   matchID,
-					Query:     "",
-					TeamIndex: TeamIndex(evr.TeamUnassigned),
+				if err := p.JoinEvrMatch(msession.Ctx, msession.Logger, msession.Session, "", matchID, int(evr.TeamUnassigned)); err != nil {
+					logger.Warn("Error joining player to match", zap.Error(err))
 				}
-				<-time.After(3 * time.Second)
+
 				select {
 				case <-msession.Ctx.Done():
 					return nil
-				default:
+				case <-time.After(3 * time.Second):
 				}
 			}
 		}

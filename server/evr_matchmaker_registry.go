@@ -136,15 +136,6 @@ func (c *LatencyCache) SelectPingCandidates(endpoints ...evr.Endpoint) []evr.End
 	return endpoints
 }
 
-// FoundMatch represents the match found and send over the match join channel
-type FoundMatch struct {
-	MatchID       MatchID
-	Ticket        string // matchmaking ticket if any
-	Query         string
-	TeamIndex     TeamIndex
-	KeepTeamIndex bool
-}
-
 type TicketMeta struct {
 	TicketID  string
 	Query     string
@@ -158,7 +149,6 @@ type MatchmakingSession struct {
 	CtxCancelFn   context.CancelCauseFunc
 	Logger        *zap.Logger
 	UserId        uuid.UUID
-	MatchJoinCh   chan FoundMatch               // Channel for MatchId to join.
 	PingResultsCh chan []evr.EndpointPingResult // Channel for ping completion.
 	Expiry        time.Time
 	Label         *EvrMatchState
@@ -617,6 +607,7 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 				}
 			*/
 			logger.Info("Backfilling party into match", zap.String("matchID", m.ID.String()), zap.String("partyID", partyID), zap.Any("party", party))
+
 			// Add the party to the match
 			for _, e := range party {
 				logger = logger.With(zap.String("sessionID", e.Presence.SessionID.String()), zap.String("partyID", partyID), zap.String("matchID", m.ID.String()), zap.String("uid", e.Presence.GetUserId()))
@@ -1211,7 +1202,6 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, logger *zap.Logger, se
 
 		Logger:        logger,
 		UserId:        session.UserID(),
-		MatchJoinCh:   make(chan FoundMatch, 5),
 		PingResultsCh: make(chan []evr.EndpointPingResult),
 		Expiry:        time.Now().UTC().Add(findAttemptsExpiry),
 		Label:         ml,
@@ -1252,12 +1242,6 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, logger *zap.Logger, se
 			// Timeout
 			err = ErrMatchmakingTimeout
 			c.metrics.CustomCounter("matchmaking_session_timeout_count", metricsTags, 1)
-		case matchFound := <-msession.MatchJoinCh:
-			// join the match
-			err = joinFn(matchFound.MatchID, matchFound.Query)
-
-			c.metrics.CustomCounter("matchmaking_session_success_count", metricsTags, 1)
-
 		}
 		if err != nil {
 			if err == ErrMatchmakingCanceledByPlayer {
