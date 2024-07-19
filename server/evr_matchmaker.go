@@ -315,6 +315,7 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 		stringProps["party_group"] = config.GroupID
 		query = fmt.Sprintf("%s properties.party_group:%s^5", query, config.GroupID)
 	}
+	msession.Logger.Debug("Adding matchmaking ticket", zap.String("query", query), zap.String("party_id", pID))
 	ticket, _, err = session.matchmaker.Add(ctx, presences, sessionID.String(), pID, query, minCount, maxCount, countMultiple, stringProps, numericProps)
 	if err != nil {
 		return "", fmt.Errorf("failed to add to matchmaker with query `%s`: %v", query, err)
@@ -587,7 +588,7 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 	}
 
 	// Add the user's profile to the cache (by EvrID)
-	err = p.profileCache.Add(matchID, evrID, profile.GetServer())
+	err = p.profileCache.Add(matchID, evrID, serverProfile)
 	if err != nil {
 		logger.Warn("Failed to add profile to cache", zap.Error(err))
 	}

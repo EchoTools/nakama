@@ -575,7 +575,7 @@ IncomingLoop:
 			for _, request := range requests {
 				logger := s.logger.With(zap.String("request_type", fmt.Sprintf("%T", request)))
 				if isDebug { // remove extra heavy reflection processing
-					logger := logger.With(zap.String("request", fmt.Sprintf("%s", request)))
+					logger = logger.With(zap.String("request", fmt.Sprintf("%s", request)))
 					logger.Debug(fmt.Sprintf("Received %T message", request))
 				}
 				if request == nil {

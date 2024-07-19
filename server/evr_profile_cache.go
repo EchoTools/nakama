@@ -23,12 +23,6 @@ import (
 	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
-type ProfileCacheUser struct {
-	lastInvalidation int64
-	sessionTokens    map[string]int64
-	refreshTokens    map[string]int64
-}
-
 type LocalProfileCache struct {
 	sync.RWMutex
 
@@ -88,6 +82,7 @@ func (s *LocalProfileCache) Stop() {
 
 func (s *LocalProfileCache) IsValidProfile(matchID MatchID, evrID evr.EvrId) bool {
 	s.RLock()
+	defer s.RUnlock()
 	stream := PresenceStream{
 		Mode:       StreamModeService,
 		Subject:    matchID.UUID(),
@@ -99,7 +94,7 @@ func (s *LocalProfileCache) IsValidProfile(matchID MatchID, evrID evr.EvrId) boo
 	if !found {
 		return false
 	}
-	s.RUnlock()
+
 	return profile != ""
 }
 
@@ -159,6 +154,7 @@ func (s *LocalProfileCache) GetByMatchIDByEvrID(matchID MatchID, evrID evr.EvrId
 
 func (s *LocalProfileCache) GetByEvrID(evrID evr.EvrId) (data string, found bool) {
 	s.RLock()
+	defer s.RUnlock()
 	for s, p := range s.cache {
 		if s.Subcontext == evrID.UUID() {
 			return p, true

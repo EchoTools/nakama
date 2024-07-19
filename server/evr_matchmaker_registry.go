@@ -518,7 +518,6 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 	logger.Debug("Building match", zap.Any("entrants", entrants))
 
 	// Use the properties from the first entrant to get the channel
-	channelMap := make(map[uuid.UUID]int, len(entrants))
 	channels := make([]uuid.UUID, 0, len(entrants))
 	for _, e := range entrants {
 		channel := uuid.FromStringOrNil(e.StringProperties["channel"])
