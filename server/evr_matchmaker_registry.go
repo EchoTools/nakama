@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -429,29 +430,105 @@ func (mr *MatchmakingRegistry) listUnfilledLobbies(ctx context.Context, logger *
 	return labels, query, nil
 }
 
+func CompactedFrequencySort[T comparable](s []T, desc bool) []T {
+	s = s[:]
+	// Create a map of the frequency of each item
+	frequency := make(map[T]int, len(s))
+	for _, item := range s {
+		frequency[item]++
+	}
+	// Sort the items by frequency
+	slices.SortStableFunc(s, func(a, b T) int {
+		return frequency[a] - frequency[b]
+	})
+	if desc {
+		slices.Reverse(s)
+	}
+	return slices.Compact(s)
+}
+
+/*
+func selectGameServer() {
+
+		channelMap := make(map[uuid.UUID]int, len(entrants))
+		for _, e := range entrants {
+			channel := uuid.FromStringOrNil(e.StringProperties["channel"])
+			if channel == uuid.Nil {
+				continue
+			}
+			channelMap[channel]++
+		}
+
+		channels := make([]uuid.UUID, 0, len(channelMap))
+		for k := range channelMap {
+			channels = append(channels, k)
+		}
+
+		sort.SliceStable(channels, func(i, j int) bool {
+			return channelMap[channels[i]] > channelMap[channels[j]]
+		})
+
+		// Get a map of all broadcasters by their key
+		broadcastersByExtIP := make(map[string]evr.Endpoint, 100)
+		mr.evrPipeline.broadcasterRegistrationBySession.Range(func(_ string, v *MatchBroadcaster) bool {
+			broadcastersByExtIP[v.Endpoint.GetExternalIP()] = v.Endpoint
+			return true
+		})
+
+		// Create a map of each endpoint and it's latencies to each entrant
+		latencies := make(map[string][]int, 100)
+		for _, e := range entrants {
+			nprops := e.NumericProperties
+			//sprops := e.StringProperties
+
+			// loop over the number props and get the latencies
+			for k, v := range nprops {
+				if strings.HasPrefix(k, "rtt") {
+					latencies[k] = append(latencies[k], int(v))
+				}
+			}
+		}
+
+		// Score each endpoint based on the latencies
+		scored := make(map[string]int, len(latencies))
+		for k, v := range latencies {
+			// Sort the latencies
+			sort.Ints(v)
+			// Get the average
+			average := 0
+			for _, i := range v {
+				average += i
+			}
+			average /= len(v)
+			scored[k] = average
+		}
+		// Sort the scored endpoints
+		sorted := make([]string, 0, len(scored))
+		for k := range scored {
+			sorted = append(sorted, k)
+		}
+		sort.SliceStable(sorted, func(i, j int) bool {
+			return scored[sorted[i]] < scored[sorted[j]]
+		})
+	}
+*/
 func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config MatchmakingSettings) {
 	logger := mr.logger.With(zap.Int("entrants", len(entrants)))
 
 	logger.Debug("Building match", zap.Any("entrants", entrants))
-	// Use the properties from the first entrant to get the channel
 
+	// Use the properties from the first entrant to get the channel
 	channelMap := make(map[uuid.UUID]int, len(entrants))
+	channels := make([]uuid.UUID, 0, len(entrants))
 	for _, e := range entrants {
 		channel := uuid.FromStringOrNil(e.StringProperties["channel"])
 		if channel == uuid.Nil {
 			continue
 		}
-		channelMap[channel]++
+		channels = append(channels, channel)
 	}
 
-	channels := make([]uuid.UUID, 0, len(channelMap))
-	for k := range channelMap {
-		channels = append(channels, k)
-	}
-
-	sort.SliceStable(channels, func(i, j int) bool {
-		return channelMap[channels[i]] > channelMap[channels[j]]
-	})
+	channels = CompactedFrequencySort(channels, true)
 
 	// Get a map of all broadcasters by their key
 	broadcastersByExtIP := make(map[string]evr.Endpoint, 100)
@@ -501,7 +578,7 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 		id := e.GetPartyId()
 		parties[id] = append(parties[id], e)
 	}
-
+	logger.Debug("Parties", zap.Any("parties", parties))
 	// Get the ml from the first participant
 	var ml *EvrMatchState
 
@@ -673,9 +750,11 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 				continue
 			}
 			// Join the players to the match
+			logger.Info("Joining player to match", zap.Any("presence", entry.Presence), zap.String("matchID", matchID.String()), zap.String("ticket", ticket))
 			if err := mr.evrPipeline.JoinEvrMatch(s.Ctx, s.Logger, s.Session, ticketMeta.Query, matchID, i); err != nil {
 				logger.Error("Error joining player to match", zap.Error(err))
 			}
+
 		}
 	}
 }
@@ -1253,7 +1332,7 @@ func (c *MatchmakingRegistry) GetLatencies(userId uuid.UUID, endpoints []evr.End
 	return result
 }
 
-func (ms *MatchmakingSession) BuildQuery(latencies []LatencyMetric) (query string, stringProps map[string]string, numericProps map[string]float64, err error) {
+func (ms *MatchmakingSession) BuildQuery(latencies []LatencyMetric, evrID evr.EvrId) (query string, stringProps map[string]string, numericProps map[string]float64, err error) {
 	// Create the properties maps
 	stringProps = make(map[string]string)
 	numericProps = make(map[string]float64, len(latencies))
@@ -1263,7 +1342,7 @@ func (ms *MatchmakingSession) BuildQuery(latencies []LatencyMetric) (query strin
 	chstr := strings.Replace(ms.Label.GroupID.String(), "-", "", -1)
 	qparts = append(qparts, fmt.Sprintf("properties.channel:%s^3", chstr))
 	stringProps["channel"] = chstr
-
+	stringProps["evrid"] = evrID.String()
 	// Add this user's ID to the string props
 	stringProps["userid"] = strings.Replace(ms.UserId.String(), "-", "", -1)
 

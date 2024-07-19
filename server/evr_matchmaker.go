@@ -237,8 +237,6 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 	ctx := msession.Context()
 	// TODO FIXME Add a custom matcher for broadcaster matching
 	// Get a list of all the broadcasters
-
-	// Ping endpoints
 	endpoints := make([]evr.Endpoint, 0, 100)
 	p.broadcasterRegistrationBySession.Range(func(_ string, b *MatchBroadcaster) bool {
 		endpoints = append(endpoints, b.Endpoint)
@@ -249,8 +247,13 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 	if err != nil {
 		return "", err
 	}
+	// Get the EVR ID from the context
+	evrID, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
+	if !ok {
+		return "", status.Errorf(codes.Internal, "EVR ID not found in context")
+	}
 
-	query, stringProps, numericProps, err := msession.BuildQuery(allRTTs)
+	query, stringProps, numericProps, err := msession.BuildQuery(allRTTs, evrID)
 	if err != nil {
 		return "", status.Errorf(codes.Internal, "Failed to build matchmaking query: %v", err)
 	}
@@ -282,13 +285,6 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 	// Merge the user's config with the global config
 	query = fmt.Sprintf("%s %s %s", query, gconfig.BackfillQueryAddon, config.BackfillQueryAddon)
 
-	// Get the EVR ID from the context
-	evrID, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
-	if !ok {
-		return "", status.Errorf(codes.Internal, "EVR ID not found in context")
-	}
-	stringProps["evr_id"] = evrID.Token()
-
 	minCount := 2
 	maxCount := 8
 	if msession.Label.Mode == evr.ModeCombatPublic {
@@ -298,10 +294,9 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 	}
 	countMultiple := 2
 
-	subcontext := uuid.NewV5(uuid.Nil, "matchmaking")
 	// Create a status presence for the user
-	stream := PresenceStream{Mode: StreamModeService, Subject: session.id, Subcontext: subcontext, Label: query}
-	meta := PresenceMeta{Format: session.format, Username: session.Username(), Hidden: true}
+	stream := PresenceStream{Mode: StreamModeMatchmaking, Subject: uuid.NewV5(uuid.Nil, "matchmaking")}
+	meta := PresenceMeta{Format: session.format, Username: session.Username(), Status: query, Hidden: true}
 	ok = session.tracker.Update(ctx, session.id, stream, session.userID, meta)
 	if !ok {
 		return "", status.Errorf(codes.Internal, "Failed to track user: %v", err)
