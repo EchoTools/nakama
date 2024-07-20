@@ -339,6 +339,7 @@ func buildMatchQueryFromLabel(ml *EvrMatchState) string {
 		LobbyType(ml.LobbyType).Query(Must, boost),
 		// MUST be the same mode
 		GameMode(ml.Mode).Query(Must, boost),
+		"+label.open:T",
 	}
 
 	if ml.TeamIndex != Spectator && ml.TeamIndex != Moderator {
