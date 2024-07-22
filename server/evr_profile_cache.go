@@ -122,7 +122,6 @@ func (s *LocalProfileCache) Remove(matchID MatchID, evrID evr.EvrId) {
 		Subcontext: evrID.UUID(),
 		Label:      matchID.Node(),
 	}
-
 	s.Lock()
 	delete(s.cache, stream)
 	s.Unlock()

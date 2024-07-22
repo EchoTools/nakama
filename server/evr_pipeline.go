@@ -454,7 +454,7 @@ func (p *EvrPipeline) relayMatchData(ctx context.Context, logger *zap.Logger, se
 		if matchID, err = NewMatchID(message.MatchSessionID(), p.node); err != nil {
 			return fmt.Errorf("failed to create match ID: %w", err)
 		}
-	} else if matchID, _, err = GetMatchBySessionID(p.runtimeModule, session.id); err != nil {
+	} else if matchID, _, err = GameServerBySessionID(p.runtimeModule, session.id); err != nil {
 		return fmt.Errorf("failed to get match by session ID: %w", err)
 	} else if matchID.IsNil() {
 		return fmt.Errorf("no match found for session ID: %s", session.id)
