@@ -498,18 +498,29 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 
 		sessionID := presence.GetSessionId()
 		// If this EvrID is already in the match, reject the player
+
 		for _, p := range state.presences {
 			if p.GetSessionId() == sessionID || p.EvrID.Equals(mp.EvrID) {
 				return state, false, ErrJoinRejectedDuplicateJoin.Error()
 			}
 		}
 
-		if mp.RoleAlignment == int(AnyTeam) && state.LobbyType == PublicLobby {
-			// Assign the player to a team.
-			var allowed bool
-			mp.RoleAlignment, allowed = selectTeamForPlayer(logger, &mp, state)
-			if !allowed {
-				return state, false, "failed to assign team"
+		if state.LobbyType == PublicLobby {
+
+			if mp.RoleAlignment == int(AnyTeam) {
+				// Assign the player to a team.
+				var allowed bool
+				mp.RoleAlignment, allowed = selectTeamForPlayer(logger, &mp, state)
+				if !allowed {
+					return state, false, "failed to assign team"
+				}
+			}
+
+			// Final sanity check to make sure that this isn't adding a player to a 4v4 public match.
+			if mp.RoleAlignment == evr.TeamBlue || mp.RoleAlignment == Evr.TeamOrange {
+				if len(state.Players) >= state.PlayerLimit {
+					return state, false, ErrJoinRejectedLobbyFull.Error()
+				}
 			}
 		}
 
