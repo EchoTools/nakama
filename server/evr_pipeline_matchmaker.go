@@ -341,6 +341,8 @@ OuterLoop:
 		select {
 		case <-ctx.Done():
 			return nil
+		case <-msession.Ctx.Done():
+			return nil
 		case <-delayStartTimer.C:
 		case <-retryTicker.C:
 		}
@@ -351,6 +353,15 @@ OuterLoop:
 		}
 
 		for _, label := range labels {
+
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-msession.Ctx.Done():
+				return nil
+			default:
+			}
+
 			p.metrics.CustomCounter("match_backfill_found_count", msession.metricsTags(), 1)
 			logger.Debug("Attempting to backfill match", zap.String("mid", label.ID.UUID().String()))
 
