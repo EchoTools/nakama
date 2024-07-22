@@ -604,8 +604,9 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 	}
 
 	if len(state.presences) == 0 {
-		logger.Debug("Match is empty. Shutting down.")
-		return nil
+		// Lock the match
+		state.Open = false
+		logger.Debug("Match is empty. Closing it.")
 	}
 
 	// Update the label that includes the new player list.
@@ -640,7 +641,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		if len(state.presences) == 0 {
 			state.emptyTicks++
 
-			if state.emptyTicks > 30*state.tickRate {
+			if state.emptyTicks > 20*state.tickRate {
 				if state.Open {
 					logger.Warn("Started match has been empty for too long. Shutting down.")
 				}
