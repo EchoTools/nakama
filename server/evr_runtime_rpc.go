@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -846,7 +847,8 @@ type PrepareMatchRPCRequest struct {
 	Alignments       map[string]TeamIndex `json:"role_alignments,omitempty"`   // Team alignments to set the match to (discord username -> team index))
 	GuildID          string               `json:"guild_id,omitempty"`          // Guild ID to set the match to
 	StartTime        time.Time            `json:"start_time,omitempty"`        // The time to start the match
-	SignalPayload    string               `json:"signal_payload,omitempty"`    // A signal payload to send to the match unmodified
+	SpawnedBy        string               `json:"spawned_by,omitempty"`        // The user who spawned the match
+	MatchLabel       *EvrMatchState       `json:"label,omitempty"`             // A match label to send to the match unmodified
 }
 
 type PrepareMatchRPCResponse struct {
@@ -856,17 +858,12 @@ type PrepareMatchRPCResponse struct {
 }
 
 // PrepareMatchRPC is a function that prepares a match from a given match ID.
+// Global Developers, the operator of the target server, allocators of the target server's specified guilds can prepare matches.
 func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 
 	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
 	if !ok {
 		return "", runtime.NewError("authentication required", StatusUnauthenticated)
-	}
-
-	if ok, err := checkGroupMembershipByName(ctx, nk, userID, GroupGlobalBots, SystemGroupLangTag); err != nil {
-		return "", runtime.NewError("failed to check group membership", StatusInternalError)
-	} else if !ok {
-		return "", runtime.NewError("unauthorized", StatusPermissionDenied)
 	}
 
 	request := &PrepareMatchRPCRequest{}
@@ -875,72 +872,89 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 	}
 	matchID := request.MatchID
 
-	response := PrepareMatchRPCResponse{
-		MatchID:       matchID,
-		SignalPayload: request.SignalPayload,
+	label, err := MatchLabelByID(ctx, nk, matchID)
+	if err != nil {
+		return "", runtime.NewError("Failed to get match label", StatusNotFound)
 	}
-	var groupID string
 
-	if request.GuildID != "" {
-		var err error
-		groupID, err = GetGroupIDByGuildID(ctx, db, request.GuildID)
-		if err != nil {
-			return "", runtime.NewError(err.Error(), StatusInternalError)
+	// Validate that this userID has permission to signal this match
+	allowed := false
+
+	if ok, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalDevelopers); err != nil {
+		return "", runtime.NewError("Failed to check group membership", StatusInternalError)
+	} else if ok {
+		allowed = true
+	} else if label.Broadcaster.OperatorID == userID {
+		allowed = true
+	} else {
+		for _, groupID := range label.Broadcaster.GroupIDs {
+			if _, md, err := GetGuildGroupMetadata(ctx, nk, groupID.String()); err != nil {
+				return "", runtime.NewError("Failed to get group metadata", StatusInternalError)
+			} else if slices.Contains(md.AllocatorUserIDs, userID) {
+				allowed = true
+				break
+			}
 		}
 	}
 
-	if groupID == "" {
-		return "", runtime.NewError("guild group not found", StatusNotFound)
+	if !allowed {
+		return "", runtime.NewError("unauthorized to signal match", StatusPermissionDenied)
 	}
-	// Translate the alignments to a map of nakama id -> team index
 
-	signalPayload := request.SignalPayload
-	if signalPayload == "" {
-		state := &EvrMatchState{}
-		groupID := uuid.FromStringOrNil(groupID)
-		state.Mode = request.Mode.Symbol()
-		state.TeamSize = request.TeamSize
-		state.Level = request.Level.Symbol()
-		state.RequiredFeatures = request.RequiredFeatures
-		state.SpawnedBy = userID
-		state.MaxSize = MatchMaxSize
-		state.GroupID = &groupID
-		state.StartTime = request.StartTime
+	var groupID string
+	if request.GuildID != "" {
+		if groupID, err = GetGroupIDByGuildID(ctx, db, request.GuildID); err != nil {
+			return "", runtime.NewError(err.Error(), StatusInternalError)
+		} else if groupID == "" {
+			return "", runtime.NewError("guild group not found", StatusNotFound)
+		}
+	}
+
+	// Validate that the user has permission to allocate to the target guild
+	_, md, err := GetGuildGroupMetadata(ctx, nk, groupID)
+	if err != nil {
+		return "", runtime.NewError("Failed to get group metadata", StatusInternalError)
+	}
+
+	if !slices.Contains(md.AllocatorUserIDs, userID) {
+		return "", runtime.NewError("unauthorized to allocate to guild", StatusPermissionDenied)
+	}
+	gid := uuid.FromStringOrNil(groupID)
+	label = request.MatchLabel
+	if label == nil {
+		label = &EvrMatchState{
+			Mode:             request.Mode.Symbol(),
+			TeamSize:         request.TeamSize,
+			Level:            request.Level.Symbol(),
+			RequiredFeatures: request.RequiredFeatures,
+			StartTime:        request.StartTime,
+			SpawnedBy:        request.SpawnedBy,
+			MaxSize:          MatchMaxSize,
+			GroupID:          &gid,
+		}
 
 		// Translate the discord ID to the nakama ID for the team Alignments
-		state.TeamAlignments = make(map[string]int, len(request.Alignments))
+		label.TeamAlignments = make(map[string]int, len(request.Alignments))
 		for discordID, teamIndex := range request.Alignments {
 			// Get the nakama ID from the discord ID
 			userID, err := GetUserIDByDiscordID(ctx, db, discordID)
 			if err != nil {
 				return "", runtime.NewError(err.Error(), StatusNotFound)
 			}
-			state.TeamAlignments[userID] = int(teamIndex)
+			label.TeamAlignments[userID] = int(teamIndex)
 		}
 
-		// Prepare the session for the match.
-		data, err := json.MarshalIndent(state, "", "  ")
-		if err != nil {
-			return "", runtime.NewError("Failed to marshal match state", StatusInternalError)
-		}
-
-		signal := EvrSignal{
-			Signal: SignalPrepareSession,
-			Data:   data,
-		}
-		data, err = json.MarshalIndent(signal, "", "  ")
-		if err != nil {
-			return "", runtime.NewError("Failed to marshal signal", StatusInternalError)
-		}
-		signalPayload = string(data)
 	}
-
+	signalPayload := NewEvrSignal(userID, SignalPrepareSession, label).String()
 	errResponse := func(err error) (string, error) {
+		response := PrepareMatchRPCResponse{
+			MatchID:       matchID,
+			SignalPayload: signalPayload,
+		}
 		data, _ := json.MarshalIndent(response, "", "  ")
 		return string(data), runtime.NewError(err.Error(), StatusInvalidArgument)
 	}
 
-	response.SignalPayload = signalPayload
 	// Send the signal
 	signalResponsePayload, err := nk.MatchSignal(ctx, matchID.String(), signalPayload)
 	if err != nil {
@@ -954,21 +968,18 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		return errResponse(fmt.Errorf("failed to signal match: %s", signalResponse.Message))
 	}
 
-	if err := json.Unmarshal([]byte(signalResponse.Payload), &response.MatchLabel); err != nil {
-		return errResponse(err)
-	}
-
 	// Get the match label
 	match, err := nk.MatchGet(ctx, matchID.String())
 	if err != nil {
 		return errResponse(err)
 	}
 
-	if match.Label == nil {
-		return errResponse(fmt.Errorf("match label is nil"))
+	state := &EvrMatchState{}
+	if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), state); err != nil {
+		return errResponse(err)
 	}
 
-	data, err := json.MarshalIndent(response, "", "  ")
+	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return errResponse(err)
 	}
