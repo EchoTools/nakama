@@ -160,6 +160,5 @@ func (s *LocalProfileCache) GetByEvrID(evrID evr.EvrId) (data string, found bool
 			return p, true
 		}
 	}
-	s.RUnlock()
 	return "", false
 }
