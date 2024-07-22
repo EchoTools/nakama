@@ -57,9 +57,29 @@ type MatchStatGroup string
 type MatchLevelSelection string
 
 type EvrSignal struct {
-	UserId string
-	Signal int64
-	Data   []byte
+	UserId  string
+	Signal  int64
+	Payload []byte
+}
+
+func NewEvrSignal(userId string, signal int64, data any) *EvrSignal {
+	payload, err := json.Marshal(data)
+	if err != nil {
+		return nil
+	}
+	return &EvrSignal{
+		UserId:  userId,
+		Signal:  signal,
+		Payload: payload,
+	}
+}
+
+func (s EvrSignal) GetOpCode() int64 {
+	return s.Signal
+}
+
+func (s EvrSignal) GetData() []byte {
+	return s.Payload
 }
 
 func (s EvrSignal) String() string {
@@ -762,7 +782,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		}
 
 		var newState = EvrMatchState{}
-		if err := json.Unmarshal(signal.Data, &newState); err != nil {
+		if err := json.Unmarshal(signal.Payload, &newState); err != nil {
 			return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal match label: %v", err)}.String()
 		}
 
@@ -885,8 +905,8 @@ func SignalMatch(ctx context.Context, matchRegistry MatchRegistry, matchID Match
 		return "", fmt.Errorf("failed to marshal match label: %v", err)
 	}
 	signal := EvrSignal{
-		Signal: signalID,
-		Data:   dataJson,
+		Signal:  signalID,
+		Payload: dataJson,
 	}
 	signalJson, err := json.Marshal(signal)
 	if err != nil {
