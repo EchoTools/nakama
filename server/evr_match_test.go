@@ -578,3 +578,116 @@ func TestEvrMatch_MatchLoop(t *testing.T) {
 		})
 	}
 }
+
+func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
+
+	presences := make(map[string]*EvrMatchPresence)
+	for i := 0; i < 10; i++ {
+		lobbySessionID := 
+
+		
+		presence := &EvrMatchPresence{
+			Node:           "testnode",
+			SessionID:      uuid.Must(uuid.NewV4()),
+			LoginSessionID: uuid.Must(uuid.NewV4()),
+			EntrantID:      uuid.Must(uuid.NewV4()),
+			UserID:         uuid.Must(uuid.NewV4()),
+			EvrID:          evr.EvrId{PlatformCode: 4, AccountId: 0000000001},
+			DiscordID:      "0000000001",
+			ClientIP:       "127.0.0.1",
+			ClientPort:     "1234",
+			Username:       "testuser",
+			DisplayName:    "Test User",
+			PartyID:        uuid.Must(uuid.NewV4()),
+			RoleAlignment:  evr.TeamBlue,
+			Query:          "testquery",
+			SessionExpiry:  1234567890,
+		}
+		presences[uuid.Must(uuid.NewV4()).String()] = presence
+	}
+	
+	presence2 := &EvrMatchPresence{
+		Node:           "testnode",
+		SessionID:      uuid.Must(uuid.NewV4()),
+		LoginSessionID: uuid.Must(uuid.NewV4()),
+		EntrantID:      uuid.Must(uuid.NewV4()),
+		UserID:         uuid.Must(uuid.NewV4()),
+		EvrID:          evr.EvrId{PlatformCode: 4, AccountId: 0000000002},
+		DiscordID:      "432143214321",
+		ClientIP:       "127.0.0.2",
+		ClientPort:     "1234",
+		Username:       "testuser",
+		DisplayName:    "Test User",
+		PartyID:        uuid.Must(uuid.NewV4()),
+		RoleAlignment:  evr.TeamBlue,
+		Query:          "testquery",
+		SessionExpiry:  1234567890,
+	}
+	type args struct {
+		ctx        context.Context
+		logger     runtime.Logger
+		db         *sql.DB
+		nk         runtime.NakamaModule
+		dispatcher runtime.MatchDispatcher
+		tick       int64
+		state_     interface{}
+		presence   runtime.Presence
+		metadata   map[string]string
+	}
+	tests := []struct {
+		name  string
+		m     *EvrMatch
+		args  args
+		want  interface{}
+		want1 bool
+		want2 string
+	}{
+		{
+			name: "MatchJoinAttempt returns nil if match is full.",
+			m:    &EvrMatch{},
+			args: args{
+				ctx: context.Background(),
+				logger: func() runtime.Logger {
+					logger := NewRuntimeGoLogger(NewJSONLogger(os.Stdout, zapcore.ErrorLevel, JSONFormat))
+					return logger
+				}(),
+				db:         nil,
+				nk:         nil,
+				dispatcher: nil,
+				tick:       0,
+				state_: func() *EvrMatchState {
+					state, _, _, err := NewEvrMatchState(evr.Endpoint{}, &MatchBroadcaster{})
+					if err != nil {
+						t.Fatalf("error creating new match state: %v", err)
+					}
+					state.MaxSize = 2
+					state.Size = 1
+					state.presences = map[string]*EvrMatchPresence{
+						presence,
+					},
+
+					return state
+				},
+				presence: presence,
+				metadata: nil,
+			},
+			want:  nil,
+			want1: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &EvrMatch{}
+			got, got1, got2 := m.MatchJoinAttempt(tt.args.ctx, tt.args.logger, tt.args.db, tt.args.nk, tt.args.dispatcher, tt.args.tick, tt.args.state_, tt.args.presence, tt.args.metadata)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("EvrMatch.MatchJoinAttempt() got = %v, want %v", got, tt.want)
+			}
+			if got1 != tt.want1 {
+				t.Errorf("EvrMatch.MatchJoinAttempt() got1 = %v, want %v", got1, tt.want1)
+			}
+			if got2 != tt.want2 {
+				t.Errorf("EvrMatch.MatchJoinAttempt() got2 = %v, want %v", got2, tt.want2)
+			}
+		})
+	}
+}
