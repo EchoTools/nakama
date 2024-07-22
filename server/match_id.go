@@ -6,13 +6,13 @@ import (
 	"strings"
 
 	"github.com/gofrs/uuid/v5"
+	"github.com/heroiclabs/nakama-common/runtime"
 )
 
 var (
 	ErrInvalidMatchTokenFormat = errors.New("invalid match token format")
 	ErrInvalidMatchUUID        = errors.New("invalid match ID")
 	ErrInvalidMatchNode        = errors.New("invalid match node")
-	ErrInvalidMatchID          = errors.New("invalid match token")
 )
 
 // MatchID represents a unique identifier for a match, consisting of a uuid.UUID and a node name.
@@ -47,9 +47,9 @@ func (t MatchID) IsNil() bool {
 func NewMatchID(id uuid.UUID, node string) (t MatchID, err error) {
 	switch {
 	case id == uuid.Nil:
-		err = ErrInvalidMatchUUID
+		err = errors.Join(runtime.ErrMatchIdInvalid, ErrInvalidMatchUUID)
 	case node == "":
-		err = ErrInvalidMatchNode
+		err = errors.Join(runtime.ErrMatchIdInvalid, ErrInvalidMatchNode)
 	default:
 		t.uuid = id
 		t.node = node
@@ -91,18 +91,15 @@ func MatchIDFromString(s string) (t MatchID, err error) {
 		return t, nil
 	}
 	if len(s) < 38 || s[36] != '.' {
-		return t, ErrInvalidMatchID
+		return t, runtime.ErrMatchIdInvalid
 	}
 
 	components := strings.SplitN(s, ".", 2)
 	t.uuid = uuid.FromStringOrNil(components[0])
 	t.node = components[1]
 
-	switch {
-	case t.uuid == uuid.Nil:
-		err = ErrInvalidMatchUUID
-	case t.node == "":
-		err = ErrInvalidMatchNode
+	if !t.IsValid() {
+		return t, runtime.ErrMatchIdInvalid
 	}
 	return
 }
