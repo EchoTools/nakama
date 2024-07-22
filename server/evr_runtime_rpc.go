@@ -881,7 +881,7 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 	allowed := false
 
 	if ok, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalDevelopers); err != nil {
-		return "", runtime.NewError("Failed to check group membership", StatusInternalError)
+		return "", runtime.NewError("Failed to check group membership: "+err.Error(), StatusInternalError)
 	} else if ok {
 		allowed = true
 	} else if label.Broadcaster.OperatorID == userID {
@@ -889,7 +889,7 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 	} else {
 		for _, groupID := range label.Broadcaster.GroupIDs {
 			if _, md, err := GetGuildGroupMetadata(ctx, nk, groupID.String()); err != nil {
-				return "", runtime.NewError("Failed to get group metadata", StatusInternalError)
+				return "", runtime.NewError("Failed to get group metadata: "+err.Error(), StatusInternalError)
 			} else if slices.Contains(md.AllocatorUserIDs, userID) {
 				allowed = true
 				break
@@ -919,6 +919,7 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 	if !slices.Contains(md.AllocatorUserIDs, userID) {
 		return "", runtime.NewError("unauthorized to allocate to guild", StatusPermissionDenied)
 	}
+
 	gid := uuid.FromStringOrNil(groupID)
 	label = request.MatchLabel
 	if label == nil {
@@ -943,8 +944,8 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 			}
 			label.TeamAlignments[userID] = int(teamIndex)
 		}
-
 	}
+
 	signalPayload := NewEvrSignal(userID, SignalPrepareSession, label).String()
 	errResponse := func(err error) (string, error) {
 		response := PrepareMatchRPCResponse{

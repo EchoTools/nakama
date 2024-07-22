@@ -672,3 +672,97 @@ func PartyMemberList(ctx context.Context, nk runtime.NakamaModule, partyID uuid.
 	}
 	return presences, nil
 }
+
+/*
+func CheckAllocationPermission(ctx context.Context, db *sql.DB, userID, groupID string) error {
+	var err error
+	var allowed bool
+	// Validate that this userID has permission to signal this match
+
+	if ok, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalDevelopers); err != nil {
+		return runtime.NewError("Failed to check group membership", StatusInternalError)
+	} else if ok {
+		allowed = true
+	} else if label.Broadcaster.OperatorID == userID {
+		allowed = true
+	} else {
+		for _, groupID := range label.Broadcaster.GroupIDs {
+			if _, md, err := GetGuildGroupMetadata(ctx, nk, groupID.String()); err != nil {
+				returnruntime.NewError("Failed to get group metadata", StatusInternalError)
+			} else if slices.Contains(md.AllocatorUserIDs, userID) {
+				allowed = true
+				break
+			}
+		}
+	}
+
+	if !allowed {
+		return runtime.NewError("unauthorized to signal match", StatusPermissionDenied)
+	}
+
+	var groupID string
+	if request.GuildID != "" {
+		if groupID, err = GetGroupIDByGuildID(ctx, db, request.GuildID); err != nil {
+			return runtime.NewError(err.Error(), StatusInternalError)
+		} else if groupID == "" {
+			return runtime.NewError("guild group not found", StatusNotFound)
+		}
+	}
+
+}
+*/
+
+func CheckSystemGroupMembership(ctx context.Context, db *sql.DB, userID, groupName string) (bool, error) {
+	return CheckGroupMembershipByName(ctx, db, userID, groupName, SystemGroupLangTag)
+}
+
+func CheckGroupMembershipByName(ctx context.Context, db *sql.DB, userID, groupName, groupType string) (bool, error) {
+	query := `
+SELECT ge.state FROM groups g, group_edge ge WHERE g.id = ge.destination_id AND g.lang_tag = $1 AND g.name = $2 
+AND ge.source_id = $3 AND ge.state >= 0 AND ge.state <= $4;
+`
+
+	params := make([]interface{}, 0, 4)
+	params = append(params, groupType)
+	params = append(params, groupName)
+	params = append(params, userID)
+	params = append(params, int32(api.UserGroupList_UserGroup_MEMBER))
+	rows, err := db.QueryContext(ctx, query, params...)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return false, nil
+	}
+	return true, nil
+}
+
+func CheckGroupMembershipByID(ctx context.Context, db *sql.DB, userID, groupID, groupType string) (bool, error) {
+	query := `
+SELECT ge.state FROM groups g, group_edge ge WHERE g.id = ge.destination_id AND g.lang_tag = $1 AND g.id = $2
+AND ge.source_id = $3 AND ge.state >= 0 AND ge.state <= $4;
+`
+
+	params := make([]interface{}, 0, 4)
+	params = append(params, groupType)
+	params = append(params, groupID)
+	params = append(params, userID)
+	params = append(params, int32(api.UserGroupList_UserGroup_MEMBER))
+
+	rows, err := db.QueryContext(ctx, query, params...)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return false, nil
+	}
+	return true, nil
+}

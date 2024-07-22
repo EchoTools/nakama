@@ -995,50 +995,6 @@ func checkGroupMembershipByName(ctx context.Context, nk runtime.NakamaModule, us
 	return false, nil
 }
 
-func CheckSystemGroupMembership(ctx context.Context, db *sql.DB, userID, groupName string) (bool, error) {
-	return CheckGroupMembershipByName(ctx, db, userID, groupName, SystemGroupLangTag)
-}
-
-func CheckGroupMembershipByName(ctx context.Context, db *sql.DB, userID, groupName, groupType string) (bool, error) {
-	query := `SELECT ge.state FROM groups g, group_edge ge WHERE g.id = ge.destination_id AND g.lang_tag = $1 AND g.name = '$2' 
-	AND ge.source_id = '$3' AND ge.state >= 0 AND ge.state <= $4;`
-
-	params := make([]interface{}, 0, 4)
-	params = append(params, groupType)
-	params = append(params, groupName)
-	params = append(params, userID)
-	params = append(params, int32(api.UserGroupList_UserGroup_MEMBER))
-	rows, err := db.QueryContext(ctx, query, params...)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return false, nil
-		}
-		return false, err
-	}
-	defer rows.Close()
-	return true, nil
-}
-
-func CheckGroupMembershipByID(ctx context.Context, db *sql.DB, userID, groupID, groupType string) (bool, error) {
-	query := `SELECT ge.state FROM groups g, group_edge ge WHERE g.id = ge.destination_id AND g.lang_tag = $1 AND g.id = '$2' 
-	AND ge.source_id = '$3' AND ge.state >= 0 AND ge.state <= $4;`
-
-	params := make([]interface{}, 0, 4)
-	params = append(params, groupType)
-	params = append(params, groupID)
-	params = append(params, userID)
-	params = append(params, int32(api.UserGroupList_UserGroup_MEMBER))
-	rows, err := db.QueryContext(ctx, query, params...)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return false, nil
-		}
-		return false, err
-	}
-	defer rows.Close()
-	return true, nil
-}
-
 func (m *EvrMatch) broadcasterPlayerSessionsLocked(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, state *EvrMatchState, in runtime.MatchData, msg evr.Message) (*EvrMatchState, error) {
 	_ = msg.(*evr.BroadcasterPlayerSessionsLocked)
 	// Verify that the update is coming from the broadcaster.
