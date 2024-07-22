@@ -807,7 +807,11 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 			}
 		}
 
-		state.SpawnedBy = newState.SpawnedBy
+		if newState.SpawnedBy != "" {
+			state.SpawnedBy = newState.SpawnedBy
+		} else {
+			state.SpawnedBy = signal.UserId
+		}
 
 		state.GroupID = newState.GroupID
 		if state.GroupID == nil {
