@@ -517,7 +517,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 			}
 
 			// Final sanity check to make sure that this isn't adding a player to a 4v4 public match.
-			if mp.RoleAlignment == evr.TeamBlue || mp.RoleAlignment == Evr.TeamOrange {
+			if mp.RoleAlignment == evr.TeamBlue || mp.RoleAlignment == evr.TeamOrange {
 				if len(state.Players) >= state.PlayerLimit {
 					return state, false, ErrJoinRejectedLobbyFull.Error()
 				}
@@ -683,12 +683,6 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 
 			// Switch on the message type. This is where the match logic is handled.
 			switch msg := msg.(type) {
-			case *evr.BroadcasterPlayerSessionsLocked:
-				// The server has locked the player sessions.
-				messageFn = m.broadcasterPlayerSessionsLocked
-			case *evr.BroadcasterPlayerSessionsUnlocked:
-				// The server has locked the player sessions.
-				messageFn = m.broadcasterPlayerSessionsUnlocked
 			default:
 				logger.Warn("Unknown message type: %T", msg)
 			}
@@ -878,6 +872,13 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 	case SignalEndSession:
 		state.Open = false
 
+	case SignalLockSession:
+		state.Open = false
+
+	case SignalUnlockSession:
+		logger.Debug("ignoring unlock session request")
+		//state.Open = true
+
 	default:
 		logger.Warn("Unknown signal: %v", signal.Signal)
 		return state, SignalResponse{Success: false, Message: "unknown signal"}.String()
@@ -1004,18 +1005,4 @@ func checkGroupMembershipByName(ctx context.Context, nk runtime.NakamaModule, us
 		}
 	}
 	return false, nil
-}
-
-func (m *EvrMatch) broadcasterPlayerSessionsLocked(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, state *EvrMatchState, in runtime.MatchData, msg evr.Message) (*EvrMatchState, error) {
-	_ = msg.(*evr.BroadcasterPlayerSessionsLocked)
-	// Verify that the update is coming from the broadcaster.
-	state.Open = false
-	return state, nil
-}
-
-func (m *EvrMatch) broadcasterPlayerSessionsUnlocked(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, state *EvrMatchState, in runtime.MatchData, msg evr.Message) (*EvrMatchState, error) {
-	_ = msg.(*evr.BroadcasterPlayerSessionsUnlocked)
-	// Verify that the update is coming from the broadcaster.
-	state.Open = true
-	return state, nil
 }
