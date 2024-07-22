@@ -878,6 +878,13 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 	case SignalEndSession:
 		state.Open = false
 
+	case SignalLockSession:
+		state.Open = false
+
+	case SignalUnlockSession:
+		logger.Debug("ignoring unlock session request")
+		//state.Open = true
+
 	default:
 		logger.Warn("Unknown signal: %v", signal.Signal)
 		return state, SignalResponse{Success: false, Message: "unknown signal"}.String()

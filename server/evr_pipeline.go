@@ -280,9 +280,9 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 	case *evr.BroadcasterPlayerRemoved:
 		pipelineFn = p.broadcasterPlayerRemoved
 	case *evr.BroadcasterPlayerSessionsLocked:
-		pipelineFn = p.relayMatchData
+		pipelineFn = p.broadcasterPlayerSessionsLocked
 	case *evr.BroadcasterPlayerSessionsUnlocked:
-		pipelineFn = p.relayMatchData
+		pipelineFn = p.broadcasterPlayerSessionsUnlocked
 	case *evr.BroadcasterSessionEnded:
 		pipelineFn = p.broadcasterSessionEnded
 

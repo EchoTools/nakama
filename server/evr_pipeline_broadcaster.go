@@ -716,6 +716,30 @@ func (p *EvrPipeline) broadcasterPlayerRemoved(ctx context.Context, logger *zap.
 	return nil
 }
 
+func (p *EvrPipeline) broadcasterPlayerSessionsLocked(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
+	matchID, _, err := GameServerBySessionID(p.runtimeModule, session.ID())
+	if err != nil {
+		logger.Warn("Failed to get broadcaster's match by session ID", zap.Error(err))
+	}
+	signal := NewEvrSignal(session.userID.String(), SignalLockSession, nil)
+	if _, err := p.matchRegistry.Signal(ctx, matchID.String(), signal.String()); err != nil {
+		logger.Warn("Failed to signal match", zap.Error(err))
+	}
+	return nil
+}
+
+func (p *EvrPipeline) broadcasterPlayerSessionsUnlocked(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
+	matchID, _, err := GameServerBySessionID(p.runtimeModule, session.ID())
+	if err != nil {
+		logger.Warn("Failed to get broadcaster's match by session ID", zap.Error(err))
+	}
+	signal := NewEvrSignal(session.userID.String(), SignalUnlockSession, nil)
+	if _, err := p.matchRegistry.Signal(ctx, matchID.String(), signal.String()); err != nil {
+		logger.Warn("Failed to signal match", zap.Error(err))
+	}
+	return nil
+}
+
 func GameServerBySessionID(nk runtime.NakamaModule, sessionID uuid.UUID) (MatchID, runtime.Presence, error) {
 
 	presences, err := nk.StreamUserList(StreamModeGameServer, sessionID.String(), "", StreamLabelMatchService, true, true)
