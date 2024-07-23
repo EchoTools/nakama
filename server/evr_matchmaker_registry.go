@@ -954,8 +954,8 @@ func (m *MatchmakingSession) GetPingCandidates(endpoints ...evr.Endpoint) (candi
 
 	return candidates
 }
-func (ms *MatchmakingSession) JoinPartyGroup(groupID string) (*PartyGroup, error) {
-	session := ms.Session
+func JoinPartyGroup(session *sessionWS, groupID string) (*PartyGroup, error) {
+
 	partyID := uuid.NewV5(uuid.Nil, groupID)
 	partyRegistry := session.pipeline.partyRegistry.(*LocalPartyRegistry)
 	node := session.pipeline.node
@@ -1034,11 +1034,11 @@ func (ms *MatchmakingSession) JoinPartyGroup(groupID string) (*PartyGroup, error
 	if !success {
 		return nil, status.Errorf(codes.Internal, "Failed to track party join")
 	}
-	ms.Party = &PartyGroup{
+	pg := &PartyGroup{
 		name: groupID,
 		ph:   ph,
 	}
-	return ms.Party, nil
+	return pg, nil
 }
 
 // GetCache returns the latency cache for a user
