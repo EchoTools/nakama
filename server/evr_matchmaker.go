@@ -620,7 +620,7 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 	logger.Debug("Joining match", zap.String("mid", matchID.UUID().String()))
 	label, presence, _, err = EVRMatchJoinAttempt(ctx, logger, matchID, p.sessionRegistry, p.matchRegistry, p.tracker, mp)
 	if err != nil {
-		if err == ErrJoinRejectedDuplicateJoin {
+		if err == ErrDuplicateJoin {
 			logger.Warn("Player already in match. Ignoring join attempt.", zap.String("mid", matchID.UUID().String()), zap.Error(err))
 			if msession != nil {
 				msession.Cancel(err)
@@ -654,15 +654,12 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 	return err
 }
 
-func EVRMatchJoinAttempt(ctx context.Context, logger *zap.Logger, matchID MatchID, sessionRegistry SessionRegistry, matchRegistry MatchRegistry, tracker Tracker, presence EvrMatchPresence) (*EvrMatchState, *EvrMatchPresence, []*MatchPresence, error) {
-	// Append the node to the matchID if it doesn't already contain one.
+var ErrDuplicateJoin = errors.New(JoinRejectReasonDuplicateJoin)
 
-	data, err := json.Marshal(presence)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to marshal match presence: %w", err)
-	}
+func EVRMatchJoinAttempt(ctx context.Context, logger *zap.Logger, matchID MatchID, sessionRegistry SessionRegistry, matchRegistry MatchRegistry, tracker Tracker, presence EvrMatchPresence) (*EvrMatchState, *EvrMatchPresence, []*MatchPresence, error) {
+
 	matchIDStr := matchID.String()
-	metadata := map[string]string{"playermeta": string(data)}
+	metadata := JoinMetadata{Presence: presence}.MarshalMap()
 
 	found, allowed, isNew, reason, labelStr, presences := matchRegistry.JoinAttempt(ctx, matchID.UUID(), matchID.Node(), presence.UserID, presence.SessionID, presence.Username, presence.SessionExpiry, nil, presence.ClientIP, presence.ClientPort, matchID.Node(), metadata)
 	if !found {
@@ -679,23 +676,18 @@ func EVRMatchJoinAttempt(ctx context.Context, logger *zap.Logger, matchID MatchI
 	if !allowed {
 		return label, nil, presences, fmt.Errorf("join not allowed: %s", reason)
 	} else if !isNew {
-		return label, nil, presences, ErrJoinRejectedDuplicateJoin
+		return label, nil, presences, ErrDuplicateJoin
 	}
 
-	resp := JoinAttemptResponse{}
-	if err := json.Unmarshal([]byte(reason), &resp); err != nil {
-		return label, nil, presences, fmt.Errorf("failed to unmarshal match presence: %w", err)
-	}
-	presence = resp.Presence
-
-	if data, err = json.Marshal(presence); err != nil {
-		return label, nil, presences, fmt.Errorf("failed to marshal match presence: %w", err)
+	presence = EvrMatchPresence{}
+	if err := json.Unmarshal([]byte(reason), &presence); err != nil {
+		return label, nil, presences, fmt.Errorf("failed to unmarshal attempt response: %w", err)
 	}
 
 	ops := []*TrackerOp{
 		{
 			PresenceStream{Mode: StreamModeEntrant, Subject: matchID.uuid, Subcontext: presence.EntrantID, Label: matchID.node},
-			PresenceMeta{Format: SessionFormatEvr, Username: presence.Username, Status: string(data), Hidden: true},
+			PresenceMeta{Format: SessionFormatEvr, Username: presence.Username, Status: presence.String(), Hidden: true},
 		},
 		{
 			PresenceStream{Mode: StreamModeService, Subject: presence.SessionID, Label: StreamLabelMatchService},
@@ -718,7 +710,7 @@ func EVRMatchJoinAttempt(ctx context.Context, logger *zap.Logger, matchID MatchI
 	// Update the statuses
 	for _, op := range ops {
 		if ok := tracker.Update(ctx, presence.SessionID, op.Stream, presence.UserID, op.Meta); !ok {
-			return label, nil, presences, fmt.Errorf("failed to track user: %w", err)
+			return label, nil, presences, fmt.Errorf("failed to track session ID: %s", presence.SessionID)
 		}
 	}
 
@@ -919,8 +911,8 @@ func (p *EvrPipeline) checkSuspensionStatus(ctx context.Context, logger *zap.Log
 	return suspensions, nil
 }
 
-// selectTeamForPlayer decides which team to assign a player to.
-func selectTeamForPlayer(logger runtime.Logger, presence *EvrMatchPresence, state *EvrMatchState) (int, bool) {
+// selectTeamForPlayer decides which team27 to assign a player to.
+func selectTeamForPlayer(presence *EvrMatchPresence, state *EvrMatchState) (int, bool) {
 	t := presence.RoleAlignment
 
 	teams := lo.GroupBy(lo.Values(state.presences), func(p *EvrMatchPresence) int { return p.RoleAlignment })
@@ -993,6 +985,5 @@ func selectTeamForPlayer(logger runtime.Logger, presence *EvrMatchPresence, stat
 		}
 	}
 
-	logger.Debug("picked team", zap.Int("team", t))
 	return t, true
 }

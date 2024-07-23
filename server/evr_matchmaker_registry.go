@@ -1213,7 +1213,7 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, logger *zap.Logger, se
 	}
 	msession.LatencyCache = cache
 
-	// listen for a match ID to join
+	// Start the matchmaking session
 	go func() {
 		// Create a timer for this session
 		startedAt := time.Now().UTC()
