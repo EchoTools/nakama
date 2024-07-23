@@ -766,3 +766,43 @@ AND ge.source_id = $3 AND ge.state >= 0 AND ge.state <= $4;
 	}
 	return true, nil
 }
+
+func PresenceByEntrantID(nk runtime.NakamaModule, matchID MatchID, entrantID uuid.UUID) (presence *EvrMatchPresence, err error) {
+
+	presences, err := nk.StreamUserList(StreamModeEntrant, matchID.UUID().String(), entrantID.String(), matchID.Node(), true, true)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get stream presences for entrant %s: %w", entrantID.String(), err)
+	}
+
+	if len(presences) == 0 {
+		return nil, ErrorEntrantNotFound
+	}
+
+	if len(presences) > 1 {
+		return nil, ErrorMultipleEntrantsFound
+	}
+
+	mp := &EvrMatchPresence{}
+	if err := json.Unmarshal([]byte(presences[0].GetStatus()), mp); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal presence: %w", err)
+	}
+
+	return mp, nil
+}
+
+func GetMatchBySessionID(nk runtime.NakamaModule, sessionID uuid.UUID) (matchID MatchID, presence runtime.Presence, err error) {
+
+	presences, err := nk.StreamUserList(StreamModeService, sessionID.String(), StreamContextMatch.String(), "", true, true)
+	if err != nil {
+		return MatchID{}, nil, fmt.Errorf("failed to get stream presences: %w", err)
+	}
+
+	for _, presence := range presences {
+		matchID := MatchIDFromStringOrNil(presence.GetStatus())
+		if !matchID.IsNil() {
+			return matchID, presence, nil
+		}
+	}
+
+	return MatchID{}, nil, ErrorMatchNotFound
+}

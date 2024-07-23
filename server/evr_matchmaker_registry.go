@@ -1160,7 +1160,7 @@ func (c *MatchmakingRegistry) Delete(sessionId uuid.UUID) {
 }
 
 // Add adds a matching session to the registry
-func (c *MatchmakingRegistry) Create(ctx context.Context, logger *zap.Logger, session *sessionWS, ml *EvrMatchState, partySize int, timeout time.Duration, errorFn func(err error) error, joinFn func(matchId MatchID, query string) error) (*MatchmakingSession, error) {
+func (c *MatchmakingRegistry) Create(ctx context.Context, logger *zap.Logger, session *sessionWS, ml *EvrMatchState, partySize int, timeout time.Duration) (*MatchmakingSession, error) {
 	// Check if there is an existing session
 	if _, ok := c.GetMatchingBySessionId(session.ID()); ok {
 		// Cancel it
@@ -1247,9 +1247,10 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, logger *zap.Logger, se
 			metricsTags["result"] = "canceled"
 		case ErrMatchmakingTimeout:
 			metricsTags["result"] = "timeout"
+			NewMatchmakingResult(logger, ml.Mode, *ml.GroupID).SendErrorToSession(session, err)
 		default:
 			metricsTags["result"] = "error"
-			defer errorFn(err)
+			defer NewMatchmakingResult(logger, ml.Mode, *ml.GroupID).SendErrorToSession(session, err)
 		}
 
 		c.StoreLatencyCache(session)
