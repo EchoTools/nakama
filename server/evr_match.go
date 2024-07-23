@@ -881,9 +881,11 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		}
 
 		state.TeamAlignments = make(map[string]int, MatchMaxSize)
-		if newState.Players != nil {
-			for _, player := range newState.Players {
-				state.TeamAlignments[player.UserID] = int(player.Team)
+		if newState.TeamAlignments != nil {
+			for userID, role := range newState.TeamAlignments {
+				if userID != "" {
+					state.TeamAlignments[userID] = int(role)
+				}
 			}
 		}
 
