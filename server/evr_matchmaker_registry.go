@@ -1224,6 +1224,7 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, logger *zap.Logger, se
 			"team":    strconv.FormatInt(int64(ml.TeamIndex), 10),
 			"result":  "success",
 		}
+
 		defer func() {
 			c.metrics.CustomTimer("matchmaking_session_duration_ms", metricsTags, time.Since(startedAt)*time.Millisecond)
 		}()
@@ -1238,16 +1239,19 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, logger *zap.Logger, se
 		case <-time.After(timeout):
 			// Timeout
 			err = ErrMatchmakingTimeout
-			c.metrics.CustomCounter("matchmaking_session_timeout_count", metricsTags, 1)
 		}
-		if err != nil {
-			if err == ErrMatchmakingCanceledByPlayer {
-				metricsTags["result"] = "canceled"
-			} else {
-				metricsTags["result"] = "error"
-				defer errorFn(err)
-			}
+		switch err {
+		case nil:
+			metricsTags["result"] = "success"
+		case ErrMatchmakingCanceledByPlayer:
+			metricsTags["result"] = "canceled"
+		case ErrMatchmakingTimeout:
+			metricsTags["result"] = "timeout"
+		default:
+			metricsTags["result"] = "error"
+			defer errorFn(err)
 		}
+
 		c.StoreLatencyCache(session)
 		c.Delete(session.id)
 		if err := session.matchmaker.RemoveSessionAll(session.id.String()); err != nil {
