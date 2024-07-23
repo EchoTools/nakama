@@ -34,6 +34,7 @@ const (
 	GroupGlobalBadgeAdmins       = "Global Badge Admins"
 	GroupGlobalPrivateDataAccess = "Global Private Data Access"
 	SystemGroupLangTag           = "system"
+	GuildGroupLangTag            = "guild"
 
 	FlagGlobalDevelopers = 1 << iota
 	FlagGlobalModerators
