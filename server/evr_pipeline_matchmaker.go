@@ -472,7 +472,7 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 
 	// Join party
 	if config.GroupID != "" {
-		msession.Party, err = msession.JoinPartyGroup(config.GroupID)
+		_, err = msession.JoinPartyGroup(config.GroupID)
 		if err != nil {
 			logger.Warn("Failed to join party group", zap.String("group_id", config.GroupID), zap.Error(err))
 		} else {
