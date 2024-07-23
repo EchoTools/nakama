@@ -116,53 +116,88 @@ type EvrMatchPresence struct {
 	SessionExpiry  int64     `json:"session_expiry,omitempty"`
 }
 
-func (p *EvrMatchPresence) GetUserId() string {
+func (p EvrMatchPresence) String() string {
+	data, err := json.Marshal(p)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+func (p EvrMatchPresence) GetUserId() string {
 	return p.UserID.String()
 }
-func (p *EvrMatchPresence) GetSessionId() string {
+func (p EvrMatchPresence) GetSessionId() string {
 	return p.SessionID.String()
 }
-func (p *EvrMatchPresence) GetNodeId() string {
+func (p EvrMatchPresence) GetNodeId() string {
 	return p.Node
 }
-func (p *EvrMatchPresence) GetHidden() bool {
+func (p EvrMatchPresence) GetHidden() bool {
 	return false
 }
-func (p *EvrMatchPresence) GetPersistence() bool {
+func (p EvrMatchPresence) GetPersistence() bool {
 	return false
 }
-func (p *EvrMatchPresence) GetUsername() string {
+func (p EvrMatchPresence) GetUsername() string {
 	return p.Username
 }
-func (p *EvrMatchPresence) GetStatus() string {
+func (p EvrMatchPresence) GetStatus() string {
 	data, _ := json.Marshal(p)
 	return string(data)
 }
 func (p *EvrMatchPresence) GetReason() runtime.PresenceReason {
 	return runtime.PresenceReasonUnknown
 }
-func (p *EvrMatchPresence) GetEvrId() string {
+func (p EvrMatchPresence) GetEvrId() string {
 	return p.EvrID.Token()
 }
 
-func (p *EvrMatchPresence) GetPlayerSession() string {
+func (p EvrMatchPresence) GetPlayerSession() string {
 	return p.EntrantID.String()
 }
 
-func (p *EvrMatchPresence) isPlayer() bool {
+func (p EvrMatchPresence) IsPlayer() bool {
 	return p.RoleAlignment != evr.TeamModerator && p.RoleAlignment != evr.TeamSpectator
 }
 
-func (p *EvrMatchPresence) isModerator() bool {
+func (p EvrMatchPresence) IsModerator() bool {
 	return p.RoleAlignment == evr.TeamModerator
 }
 
-func (p *EvrMatchPresence) isSpectator() bool {
+func (p EvrMatchPresence) IsSpectator() bool {
 	return p.RoleAlignment == evr.TeamSpectator
 }
 
-func (p *EvrMatchPresence) isSocial() bool {
+func (p EvrMatchPresence) IsSocial() bool {
 	return p.RoleAlignment == evr.TeamSocial
+}
+
+type JoinMetadata struct {
+	Presence EvrMatchPresence
+}
+
+func NewJoinMetadata(p EvrMatchPresence) *JoinMetadata {
+	return &JoinMetadata{Presence: p}
+}
+
+func (m JoinMetadata) MarshalMap() map[string]string {
+	data, err := json.Marshal(m.Presence)
+	if err != nil {
+		return nil
+	}
+	return map[string]string{"presence": string(data)}
+}
+
+func (m *JoinMetadata) UnmarshalMap(md map[string]string) error {
+	data, ok := md["presence"]
+	if !ok {
+		return errors.New("no presence")
+	}
+	if err := json.Unmarshal([]byte(data), &m.Presence); err != nil {
+		return err
+	}
+	return nil
 }
 
 type EvrMatchMeta struct {
@@ -427,21 +462,15 @@ func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql
 }
 
 var (
-	ErrJoinRejectedUnassignedLobby = errors.New("unassigned lobby")
-	ErrJoinRejectedDuplicateJoin   = errors.New("duplicate join")
-	ErrJoinRejectedLobbyFull       = errors.New("lobby full")
-	ErrJoinRejectedNotModerator    = errors.New("not a moderator")
+	JoinRejectReasonUnassignedLobby    = "unassigned lobby"
+	JoinRejectReasonDuplicateJoin      = "duplicate join"
+	JoinRejectReasonLobbyFull          = "lobby full"
+	JoinRejectReasonFailedToAssignTeam = "failed to assign team"
 )
-
-type JoinAttemptResponse struct {
-	Presence EvrMatchPresence `json:"presence"`
-}
 
 // MatchJoinAttempt decides whether to accept or deny the player session.
 func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ interface{}, presence runtime.Presence, metadata map[string]string) (interface{}, bool, string) {
 	state, ok := state_.(*EvrMatchState)
-
-	mp := EvrMatchPresence{}
 
 	if !ok {
 		logger.Error("state not a valid lobby state object")
@@ -452,109 +481,104 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	logger = logger.WithField("username", presence.GetUsername())
 
 	if presence.GetSessionId() == state.Broadcaster.SessionID {
+
 		logger.Debug("Broadcaster joining the match.")
 		state.broadcaster = presence
 		state.Open = true // Available
 
-	} else {
-
-		// This is a player joining.
-
-		if err := json.Unmarshal([]byte(metadata["playermeta"]), &mp); err != nil {
-			return state, false, fmt.Sprintf("failed to unmarshal metadata: %q", err)
+		if err := m.updateLabel(dispatcher, state); err != nil {
+			return state, false, fmt.Sprintf("failed to update label: %q", err)
 		}
 
-		// If this is a parking match, reject the player
-		if state.LobbyType == UnassignedLobby {
-			return state, false, ErrJoinRejectedUnassignedLobby.Error()
+		return state, true, ""
+	}
+
+	// This is a player joining.
+	md := JoinMetadata{}
+	if err := md.UnmarshalMap(metadata); err != nil {
+		return state, false, fmt.Sprintf("failed to unmarshal metadata: %v", err)
+	}
+
+	mp, reason := m.playerJoinAttempt(state, md.Presence)
+	if reason != "" {
+		return state, false, reason
+	}
+
+	state.presences[mp.GetSessionId()] = mp
+
+	logger.WithFields(map[string]interface{}{
+		"evr_id":      mp.EvrID.Token(),
+		"team":        mp.RoleAlignment,
+		"sid":         mp.GetSessionId(),
+		"uid":         mp.GetUserId(),
+		"entrant_sid": mp.EntrantID.String()}).Debug("Player joining the match.")
+
+	// Tell the broadcaster to load the match if it's not already started
+	if !state.Started {
+		var err error
+		if state, err = m.StartSession(ctx, logger, nk, dispatcher, state); err != nil {
+			return state, false, fmt.Sprintf("failed to start session: %v", err)
 		}
-
-		// If the lobby is full, reject them
-		if len(state.presences) >= MatchMaxSize {
-			return state, false, ErrJoinRejectedLobbyFull.Error()
-		}
-
-		if state.LobbyType == PublicLobby {
-			switch mp.RoleAlignment {
-			case evr.TeamUnassigned:
-				// Assign the player to a team.
-				var allowed bool
-				mp.RoleAlignment, allowed = selectTeamForPlayer(logger, &mp, state)
-				if !allowed {
-					return state, false, "failed to assign team"
-				}
-			case evr.TeamModerator, evr.TeamSpectator:
-				nonPlayerSlots := int(state.MaxSize) - state.PlayerLimit
-				nonPlayerCount := state.Size - state.PlayerCount
-				if nonPlayerCount >= nonPlayerSlots {
-					return state, false, ErrJoinRejectedLobbyFull.Error()
-				}
-			case evr.TeamBlue, evr.TeamOrange, evr.TeamSocial:
-				if len(state.Players) >= state.PlayerLimit {
-					return state, false, ErrJoinRejectedLobbyFull.Error()
-				}
-			}
-		}
-
-		sessionID := presence.GetSessionId()
-		// If this EvrID is already in the match, reject the player
-
-		for _, p := range state.presences {
-			if p.GetSessionId() == sessionID || p.EvrID.Equals(mp.EvrID) {
-				return state, false, ErrJoinRejectedDuplicateJoin.Error()
-			}
-		}
-
-		if state.LobbyType == PublicLobby {
-
-			if mp.RoleAlignment == int(AnyTeam) {
-				// Assign the player to a team.
-				var allowed bool
-				mp.RoleAlignment, allowed = selectTeamForPlayer(logger, &mp, state)
-				if !allowed {
-					return state, false, "failed to assign team"
-				}
-			}
-
-			// Final sanity check to make sure that this isn't adding a player to a 4v4 public match.
-			if mp.RoleAlignment == evr.TeamBlue || mp.RoleAlignment == evr.TeamOrange {
-				if len(state.Players) >= state.PlayerLimit {
-					return state, false, ErrJoinRejectedLobbyFull.Error()
-				}
-			}
-		}
-
-		// Reserve this player's spot in the match.
-		state.presences[sessionID] = &mp
-
-		// Tell the broadcaster to load the match if it's not already started
-		if !state.Started {
-			var err error
-			if state, err = m.StartSession(ctx, logger, nk, dispatcher, state); err != nil {
-				return state, false, "failed to start session"
-			}
-		}
-
-		logger.WithFields(map[string]interface{}{
-			"evr_id":      mp.EvrID.Token(),
-			"team":        mp.RoleAlignment,
-			"sid":         mp.GetSessionId(),
-			"uid":         mp.GetUserId(),
-			"entrant_sid": mp.EntrantID.String()}).Debug("Player joining the match.")
-
 	}
 
 	if err := m.updateLabel(dispatcher, state); err != nil {
-		return state, false, fmt.Sprintf("failed to update label: %q", err)
+		return state, false, fmt.Sprintf("failed to update label: %v", err)
 	}
 
-	response := JoinAttemptResponse{Presence: mp}
-	responseJson, err := json.Marshal(response)
-	if err != nil {
-		return state, false, fmt.Sprintf("failed to marshal response: %q", err)
+	return state, true, mp.String()
+}
+
+func (m *EvrMatch) playerJoinAttempt(state *EvrMatchState, mp EvrMatchPresence) (*EvrMatchPresence, string) {
+
+	// If this is a parking match, reject the player
+	if state.LobbyType == UnassignedLobby {
+		return &mp, JoinRejectReasonUnassignedLobby
 	}
 
-	return state, true, string(responseJson)
+	// If this EvrID is already in the match, reject the player
+	for _, p := range state.presences {
+		if p.GetSessionId() == mp.GetSessionId() || p.EvrID.Equals(mp.EvrID) {
+			return &mp, JoinRejectReasonDuplicateJoin
+		}
+	}
+
+	// If the lobby is full, reject them
+	if len(state.presences) >= MatchMaxSize {
+		return &mp, JoinRejectReasonLobbyFull
+	}
+
+	// Only public matches need to assign teams.
+	if state.LobbyType != PublicLobby {
+		return &mp, ""
+	}
+
+	switch mp.RoleAlignment {
+	case evr.TeamUnassigned:
+		// Assign the player to a team.
+		var allowed bool
+		if mp.RoleAlignment, allowed = selectTeamForPlayer(&mp, state); !allowed {
+			return &mp, JoinRejectReasonFailedToAssignTeam
+		}
+	case evr.TeamModerator, evr.TeamSpectator:
+		nonPlayerSlots := int(state.MaxSize) - state.PlayerLimit
+		nonPlayerCount := state.Size - state.PlayerCount
+		if nonPlayerCount >= nonPlayerSlots {
+			return &mp, JoinRejectReasonLobbyFull
+		}
+	case evr.TeamBlue, evr.TeamOrange, evr.TeamSocial:
+		if len(state.Players) >= state.PlayerLimit {
+			return &mp, JoinRejectReasonLobbyFull
+		}
+	}
+
+	// Final sanity check to make sure that this isn't adding a player to a 4v4 public match.
+	if mp.RoleAlignment == evr.TeamBlue || mp.RoleAlignment == evr.TeamOrange {
+		if len(state.Players) >= state.PlayerLimit {
+			return &mp, JoinRejectReasonLobbyFull
+		}
+	}
+
+	return &mp, ""
 }
 
 // MatchJoin is called after the join attempt.
