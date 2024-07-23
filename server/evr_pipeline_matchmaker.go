@@ -336,7 +336,6 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 	retryTicker := time.NewTicker(4 * time.Second)
 	createTicker := time.NewTicker(6 * time.Second)
 
-OuterLoop:
 	for {
 		select {
 		case <-ctx.Done():
@@ -369,7 +368,8 @@ OuterLoop:
 				logger.Warn("Failed to backfill match", zap.Error(err))
 				continue
 			}
-			continue OuterLoop
+			// If the backfill was successful, stop the backfill loop
+			return nil
 		}
 		// After trying to backfill, try to create a match on an interval
 		select {
