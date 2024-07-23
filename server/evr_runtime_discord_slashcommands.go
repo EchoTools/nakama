@@ -35,22 +35,23 @@ type DiscordAppBot struct {
 
 	ctx      context.Context
 	cancelFn context.CancelFunc
-
-	nk       runtime.NakamaModule
 	logger   runtime.Logger
-	metrics  Metrics
-	pipeline *Pipeline
-	config   Config
 
+	config          Config
+	metrics         Metrics
+	pipeline        *Pipeline
 	discordRegistry DiscordRegistry
 	profileRegistry *ProfileRegistry
-	dg              *discordgo.Session
+
+	nk runtime.NakamaModule
+	db *sql.DB
+	dg *discordgo.Session
 
 	debugChannels map[string]string // map[groupID]channelID
 	userID        string            // Nakama UserID of the bot
 }
 
-func NewDiscordAppBot(nk runtime.NakamaModule, logger runtime.Logger, metrics Metrics, pipeline *Pipeline, config Config, discordRegistry DiscordRegistry, profileRegistry *ProfileRegistry, dg *discordgo.Session) *DiscordAppBot {
+func NewDiscordAppBot(logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, metrics Metrics, pipeline *Pipeline, config Config, discordRegistry DiscordRegistry, profileRegistry *ProfileRegistry, dg *discordgo.Session) *DiscordAppBot {
 	ctx, cancelFn := context.WithCancel(context.Background())
 	logger = logger.WithField("system", "discordAppBot")
 	return &DiscordAppBot{
@@ -59,6 +60,7 @@ func NewDiscordAppBot(nk runtime.NakamaModule, logger runtime.Logger, metrics Me
 
 		logger:   logger,
 		nk:       nk,
+		db:       db,
 		pipeline: pipeline,
 		metrics:  metrics,
 
@@ -257,6 +259,80 @@ var (
 							Required:    true,
 						},
 					},
+				},
+			},
+		},
+		{
+			Name:        "stream-list",
+			Description: "list presences for a stream",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "mode",
+					Description: "the stream mode",
+					Required:    true,
+					Choices: []*discordgo.ApplicationCommandOptionChoice{
+						{
+							Name:  "Party",
+							Value: StreamModeParty,
+						},
+						{
+							Name:  "Match",
+							Value: StreamModeMatchAuthoritative,
+						},
+						{
+							Name:  "GameServer",
+							Value: StreamModeGameServer,
+						},
+						{
+							Name:  "Service",
+							Value: StreamModeService,
+						},
+						{
+							Name:  "Entrant",
+							Value: StreamModeEntrant,
+						},
+						{
+							Name:  "Matchmaking",
+							Value: StreamModeMatchmaking,
+						},
+						{
+							Name:  "Channel",
+							Value: StreamModeChannel,
+						},
+						{
+							Name:  "Group",
+							Value: StreamModeGroup,
+						},
+						{
+							Name:  "DM",
+							Value: StreamModeDM,
+						},
+					},
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "subject",
+					Description: "stream subject",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "subcontext",
+					Description: "stream subcontext",
+					Required:    false,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "label",
+					Description: "stream label",
+					Required:    false,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "limit",
+					Description: "limit the number of results",
+					Required:    false,
 				},
 			},
 		},
@@ -939,6 +1015,7 @@ func (d *DiscordAppBot) UnregisterCommands(ctx context.Context, logger runtime.L
 func (d *DiscordAppBot) RegisterSlashCommands() error {
 	ctx := d.ctx
 	nk := d.nk
+	db := d.db
 
 	dg := d.dg
 	discordRegistry := d.discordRegistry
@@ -1962,13 +2039,125 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			if err := d.createRegionStatusEmbed(ctx, logger, regionStr, i.Interaction.ChannelID, nil); err != nil {
 				errFn(err)
 			}
-
 		},
-		"party": func(s *discordgo.Session, i *discordgo.InteractionCreate, logger runtime.Logger) {
-
-			if i.Type != discordgo.InteractionApplicationCommand {
+		"stream-list": func(s *discordgo.Session, i *discordgo.InteractionCreate, logger runtime.Logger) {
+			options := i.ApplicationCommandData().Options
+			user, _ := getScopedUserMember(i)
+			if user == nil {
 				return
 			}
+
+			errFn := func(err error) {
+				simpleInteractionResponse(s, i, err.Error())
+			}
+
+			// Limit access to global developers
+			userID, err := d.discordRegistry.GetUserIdByDiscordId(ctx, user.ID, false)
+			if err != nil {
+				errFn(errors.New("failed to get user ID"))
+				return
+			}
+			member, err := CheckGroupMembershipByName(ctx, db, userID.String(), GroupGlobalDevelopers, SystemGroupLangTag)
+			if err != nil {
+				errFn(errors.New("failed to check group membership"))
+			}
+			if !member {
+				errFn(errors.New("you do not have permission to use this command"))
+			}
+
+			var subject, subcontext, label string
+			var mode, limit int64
+			for _, o := range options {
+				switch o.Name {
+				case "mode":
+					mode = o.IntValue()
+				case "subject":
+					subject = o.StringValue()
+				case "subcontext":
+					subcontext = o.StringValue()
+				case "label":
+					label = o.StringValue()
+				case "limit":
+					limit = o.IntValue()
+				}
+			}
+
+			includeHidden := true
+			includeOffline := true
+
+			presences, err := nk.StreamUserList(uint8(mode), subject, subcontext, label, includeHidden, includeOffline)
+			if err != nil {
+				errFn(errors.New("failed to list stream users"))
+				return
+			}
+			if len(presences) == 0 {
+				errFn(errors.New("no stream users found"))
+			}
+			channel, err := s.UserChannelCreate(user.ID)
+			if err != nil {
+				errFn(errors.New("failed to create user channel"))
+			}
+			if err := simpleInteractionResponse(s, i, "Sending stream list to your DMs"); err != nil {
+				errFn(errors.New("failed to send interaction response"))
+			}
+			if limit == 0 {
+				limit = 10
+			}
+
+			var b strings.Builder
+			if len(presences) > int(limit) {
+				presences = presences[:limit]
+			}
+
+			type presenceMessage struct {
+				UserID    string
+				Username  string
+				SessionID string
+				Status    any
+			}
+
+			messages := make([]string, 0)
+			for _, presence := range presences {
+				m := presenceMessage{
+					UserID:    presence.GetUserId(),
+					Username:  presence.GetUsername(),
+					SessionID: presence.GetSessionId(),
+				}
+				// Try to unmarshal the status
+				status := make(map[string]any, 0)
+				if err := json.Unmarshal([]byte(presence.GetStatus()), &status); err != nil {
+					m.Status = presence.GetStatus()
+				}
+				m.Status = status
+
+				data, err := json.MarshalIndent(m, "", "  ")
+				if err != nil {
+					errFn(errors.New("failed to marshal presence data"))
+				}
+				if b.Len()+len(data) > 1900 {
+					messages = append(messages, b.String())
+					b.Reset()
+				}
+				_, err = b.WriteString(fmt.Sprintf("```json\n%s\n```\n", data))
+				if err != nil {
+					errFn(errors.New("failed to write presence data"))
+				}
+			}
+			messages = append(messages, b.String())
+
+			go func() {
+				for _, m := range messages {
+					if _, err := s.ChannelMessageSend(channel.ID, m); err != nil {
+						errFn(errors.New("failed to send message"))
+					}
+					// Ensure it's stays below 25 messages per second
+					time.Sleep(time.Millisecond * 50)
+				}
+			}()
+		},
+
+		"party": func(s *discordgo.Session, i *discordgo.InteractionCreate, logger runtime.Logger) {
+
 			user, _ := getScopedUserMember(i)
 
 			options := i.ApplicationCommandData().Options

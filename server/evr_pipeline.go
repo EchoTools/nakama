@@ -107,7 +107,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	profileCache := NewLocalProfileCache(tracker, 60*10)
 	profileRegistry := NewProfileRegistry(nk, db, runtimeLogger, discordRegistry)
 
-	appBot := NewDiscordAppBot(nk, runtimeLogger, metrics, pipeline, config, discordRegistry, profileRegistry, dg)
+	appBot := NewDiscordAppBot(runtimeLogger, nk, db, metrics, pipeline, config, discordRegistry, profileRegistry, dg)
 
 	if disable, ok := vars["DISABLE_DISCORD_BOT"]; ok && disable == "true" {
 		logger.Info("Discord bot is disabled")
