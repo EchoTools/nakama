@@ -847,8 +847,8 @@ type PrepareMatchRPCRequest struct {
 	Alignments       map[string]TeamIndex `json:"role_alignments,omitempty"`   // Team alignments to set the match to (discord username -> team index))
 	GuildID          string               `json:"guild_id,omitempty"`          // Guild ID to set the match to
 	StartTime        time.Time            `json:"start_time,omitempty"`        // The time to start the match
-	SpawnedBy        string               `json:"spawned_by,omitempty"`        // The user who spawned the match
-	MatchLabel       *EvrMatchState       `json:"label,omitempty"`             // A match label to send to the match unmodified
+	SpawnedBy        string               `json:"spawned_by,omitempty"`        // The discord ID of the user who spawned the match
+	MatchLabel       *EvrMatchState       `json:"label,omitempty"`             // an EvrMatchState to send (unmodified) as the signal payload
 }
 
 type PrepareMatchRPCResponse struct {
@@ -918,6 +918,14 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 
 	if !slices.Contains(md.AllocatorUserIDs, userID) {
 		return "", runtime.NewError("unauthorized to allocate to guild", StatusPermissionDenied)
+	}
+
+	if request.SpawnedBy != "" {
+		if userID, err := GetUserIDByDiscordID(ctx, db, request.SpawnedBy); err != nil {
+			return "", runtime.NewError("Failed to get spawned by userID: "+err.Error(), StatusNotFound)
+		} else {
+			request.SpawnedBy = userID
+		}
 	}
 
 	gid := uuid.FromStringOrNil(groupID)
