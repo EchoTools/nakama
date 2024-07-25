@@ -21,12 +21,13 @@ func createTestProfileRegistry(t *testing.T, logger *zap.Logger) (*ProfileRegist
 	runtimeLogger := NewRuntimeGoLogger(logger)
 	metrics := &testMetrics{}
 	config := NewConfig(logger)
+	tracker := &testTracker{}
 	dg := createTestDiscordGoSession(t, logger)
 	db := NewDB(t)
 	nk := NewRuntimeGoNakamaModule(logger, db, nil, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	discordRegistry := NewLocalDiscordRegistry(context.Background(), nk, runtimeLogger, metrics, config, nil, dg)
-	profileRegistry := NewProfileRegistry(nk, db, runtimeLogger, discordRegistry)
+	profileRegistry := NewProfileRegistry(nk, db, runtimeLogger, tracker, discordRegistry)
 
 	return profileRegistry, nil
 }
@@ -103,11 +104,11 @@ func TestGetSessionProfile(t *testing.T) {
 	}
 
 	// Store the profile
-	profileRegistry.Store(session.userID, profile)
+	profileRegistry.Save(ctx, session.userID, &profile)
 
 	// Call the GetSessionProfile method
 
-	p, err := profileRegistry.GetSessionProfile(ctx, session, loginProfile, *evrID)
+	p, err := profileRegistry.GameProfile(ctx, session, loginProfile, *evrID)
 	if err != nil {
 		t.Fatalf("GetSessionProfile returned an error: %v", err)
 	}

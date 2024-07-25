@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -216,7 +217,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	ctx = session.Context()
 
 	// Load the user's profile
-	profile, err := p.profileRegistry.GetSessionProfile(ctx, session, loginProfile, evrId)
+	profile, err := p.profileRegistry.GameProfile(ctx, session, loginProfile, evrId)
 	if err != nil {
 		session.logger.Error("failed to load game profiles", zap.Error(err))
 		return evr.NewDefaultGameSettings(), fmt.Errorf("failed to load game profiles")
@@ -228,9 +229,10 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		logger.Warn("Failed to set display name", zap.Error(err))
 	}
 
+	profile.SetEvrID(evrId)
 	profile.SetChannel(evr.GUID(groupID))
 	profile.UpdateDisplayName(displayName)
-	p.profileRegistry.Store(session.userID, profile)
+	p.profileRegistry.Save(ctx, session.userID, profile)
 
 	// TODO Add the settings to the user profile
 	settings = evr.NewDefaultGameSettings()
@@ -463,11 +465,11 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 		evrID = request.EvrId
 	}
 
-	profile, found := p.profileRegistry.Load(session.userID, evrID)
-	if !found {
+	profile, err := p.profileRegistry.Load(ctx, session.userID)
+	if err != nil {
 		return session.SendEvr(evr.NewLoggedInUserProfileFailure(request.EvrId, 400, "failed to load game profiles"))
 	}
-
+	profile.SetEvrID(evrID)
 	return session.SendEvr(evr.NewLoggedInUserProfileSuccess(evrID, profile.Client, profile.Server))
 }
 
@@ -607,14 +609,14 @@ func (p *EvrPipeline) remoteLogSetv3(ctx context.Context, logger *zap.Logger, se
 			if category == "" || name == "" {
 				logger.Error("Equipped customization is empty")
 			}
-			profile, found := p.profileRegistry.Load(session.userID, evrID)
-			if !found {
-				return status.Errorf(codes.Internal, "Failed to get player's profile")
+			profile, err := p.profileRegistry.Load(ctx, session.userID)
+			if err != nil {
+				return status.Errorf(codes.Internal, "Failed to load player's profile")
 			}
+			profile.SetEvrID(evrID)
+			p.profileRegistry.UpdateEquippedItem(profile, category, name)
 
-			p.profileRegistry.UpdateEquippedItem(&profile, category, name)
-
-			err = p.profileRegistry.Store(session.userID, profile)
+			err = p.profileRegistry.Save(ctx, session.userID, profile)
 			if err != nil {
 				return status.Errorf(codes.Internal, "Failed to store player's profile")
 			}
@@ -650,10 +652,6 @@ func (p *EvrPipeline) remoteLogSetv3(ctx context.Context, logger *zap.Logger, se
 
 func (p *EvrPipeline) documentRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.DocumentRequest)
-	evrID, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
-	if !ok {
-		return fmt.Errorf("evrId not found in context")
-	}
 
 	var document evr.Document
 	var err error
@@ -662,11 +660,13 @@ func (p *EvrPipeline) documentRequest(ctx context.Context, logger *zap.Logger, s
 
 		if flags, ok := ctx.Value(ctxFlagsKey{}).(int); ok && flags&FlagNoVR != 0 {
 			// Get the version of the EULA from the profile
-			profile, found := p.profileRegistry.Load(session.userID, evrID)
-			if !found {
-				return fmt.Errorf("failed to load game profiles")
+			eulaVersion, gaVersion, err := GetEULAVersion(ctx, p.db, session.userID.String())
+			if err != nil {
+				logger.Warn("Failed to get EULA version", zap.Error(err))
+				eulaVersion = 1
+				gaVersion = 1
 			}
-			document = evr.NewEULADocument(int(profile.Client.LegalConsents.EulaVersion), int(profile.Client.LegalConsents.GameAdminVersion), request.Language, "https://github.com/EchoTools", "Blank EULA for NoVR clients.")
+			document = evr.NewEULADocument(int(eulaVersion), int(gaVersion), request.Language, "https://github.com/EchoTools", "Blank EULA for NoVR clients.")
 
 		} else {
 
@@ -684,6 +684,26 @@ func (p *EvrPipeline) documentRequest(ctx context.Context, logger *zap.Logger, s
 		evr.NewSTcpConnectionUnrequireEvent(),
 	)
 	return nil
+}
+
+func GetEULAVersion(ctx context.Context, db *sql.DB, userID string) (int, int, error) {
+	query := `
+		SELECT (s.value->'client'->'legal'->>'eula_version')::int. (s.value->'client'->'legal'->>'game_admin_version')::int FROM storage s WHERE s.collection = $1 AND s.key = $2 AND s.user_id = $3 LIMIT 1;
+	`
+	var dbEULAVersion int
+	var dbGameAdminVersion int
+	var found = true
+	if err := db.QueryRowContext(ctx, query, query, GameProfileStorageCollection, GameProfileStorageKey, userID).Scan(&dbEULAVersion, &dbGameAdminVersion); err != nil {
+		if err == sql.ErrNoRows {
+			found = false
+		} else {
+			return 0, 0, status.Error(codes.Internal, "failed to get server profile")
+		}
+	}
+	if !found {
+		return 0, 0, status.Error(codes.NotFound, "server profile not found")
+	}
+	return dbEULAVersion, dbGameAdminVersion, nil
 }
 
 func (p *EvrPipeline) generateEULA(ctx context.Context, logger *zap.Logger, language string) (evr.EULADocument, error) {
@@ -848,10 +868,11 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 		return fmt.Errorf("failed to find player in match")
 	}
 
-	profile, found := p.profileRegistry.Load(userID, request.EvrID)
-	if !found {
-		return fmt.Errorf("failed to load game profiles")
+	profile, err := p.profileRegistry.Load(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("failed to load game profiles: %w", err)
 	}
+	profile.SetEvrID(request.EvrID)
 
 	serverProfile := profile.GetServer()
 
@@ -889,10 +910,7 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 	}
 	profile.SetServer(serverProfile)
 	// Store the profile
-	if err := p.profileRegistry.Store(userID, profile); err != nil {
-		logger.Warn("UserServerProfileUpdateRequest: failed to store game profiles", zap.Error(err))
-	}
-	p.profileRegistry.Save(userID)
+	p.profileRegistry.Save(ctx, userID, profile)
 
 	return nil
 }
@@ -926,43 +944,14 @@ func updateStats(profile *GameProfileData, stats evr.StatsUpdate) {
 func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.OtherUserProfileRequest)
 
-	// get this users match
-	stream := PresenceStream{
-		Mode:    StreamModeService,
-		Subject: session.id,
-		Label:   StreamLabelMatchService,
+	data, err := p.profileRegistry.GetCached(ctx, request.EvrId)
+	if err != nil {
+		return fmt.Errorf("failed to get cached profile: %w", err)
 	}
-	// Get the target user's match
-	presences := session.tracker.ListByStream(stream, true, true)
-
-	var matchID MatchID
-	for _, presence := range presences {
-		matchID = MatchIDFromStringOrNil(presence.GetStatus())
-		if matchID.IsNil() {
-			continue
-		}
-		break
-	}
-
-	var data string
-	var found bool
-	if !matchID.IsNil() {
-		// This is probably a broadcaster connection. pull any profile for this EvrID from the cache.
-		data, found = p.profileCache.GetByMatchIDByEvrID(matchID, request.EvrId)
-		if !found {
-			return fmt.Errorf("failed to find profile for `%s` in match `%s`", request.EvrId.String(), matchID.String())
-		}
-	} else {
-		data, found = p.profileCache.GetByEvrID(request.EvrId)
-		if !found {
-			return fmt.Errorf("failed to find profile for `%s`", request.EvrId.String())
-		}
-	}
-
 	// Construct the response
 	response := &evr.OtherUserProfileSuccess{
 		EvrId:             request.EvrId,
-		ServerProfileJSON: []byte(data),
+		ServerProfileJSON: data,
 	}
 
 	// Send the profile to the client
