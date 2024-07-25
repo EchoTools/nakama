@@ -418,9 +418,14 @@ func (e *TaxiBot) handleMessageCreate(s *discordgo.Session, m *discordgo.Message
 	}
 
 	// Validate that the match exists
-	_, err := MatchLabelByID(e.ctx, e.nk, matchLink.MatchID)
+	label, err := MatchLabelByID(e.ctx, e.nk, matchLink.MatchID)
 	if err != nil {
 		logger.Debug("Error getting match label for `%s`: %s", matchLink.MatchID.String(), err.Error())
+		return
+	}
+
+	if label == nil {
+		// If the match does not exist, then ignore the message
 		return
 	}
 
