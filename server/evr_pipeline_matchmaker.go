@@ -217,8 +217,12 @@ func (p *EvrPipeline) matchmakingLabelFromFindRequest(ctx context.Context, sessi
 
 // lobbyFindSessionRequest is a message requesting to find a public session to join.
 func (p *EvrPipeline) lobbyFindSessionRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) (err error) {
+	// Instantly return to avoid any hangs
+	go p.findSession(ctx, logger, session, in)
+	return nil
+}
+func (p *EvrPipeline) findSession(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) (err error) {
 	request := in.(*evr.LobbyFindSessionRequest)
-
 	if len(request.Entrants) == 0 {
 		return fmt.Errorf("request is missing entrants")
 	}

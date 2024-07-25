@@ -52,6 +52,7 @@ func NewLocalProfileCache(tracker Tracker, profileExpirySec int64) *LocalProfile
 
 	go func() {
 		ticker := time.NewTicker(2 * time.Duration(profileExpirySec) * time.Second)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-s.ctx.Done():

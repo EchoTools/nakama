@@ -197,6 +197,7 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 
 	// Create a ticker to update the metrics every 5 minutes
 	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
 	playercounts := make(map[MatchStateTags][]int)
 	for {
 		select {

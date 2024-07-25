@@ -55,6 +55,7 @@ var (
 	ErrMatchmakingNoAvailableServers   = status.Errorf(codes.Unavailable, "No available servers")
 	ErrMatchmakingCanceled             = status.Errorf(codes.Canceled, "Matchmaking canceled")
 	ErrMatchmakingCanceledByPlayer     = status.Errorf(codes.Canceled, "Matchmaking canceled by player")
+	ErrMatchmakingCanceledByParty      = status.Errorf(codes.Aborted, "Matchmaking canceled by party member")
 	ErrMatchmakingRestarted            = status.Errorf(codes.Canceled, "matchmaking restarted")
 	ErrMatchmakingMigrationRequired    = status.Errorf(codes.FailedPrecondition, "Server upgraded, migration")
 	ErrMatchmakingUnknownError         = status.Errorf(codes.Unknown, "Unknown error")
@@ -258,6 +259,8 @@ func determineErrorCode(code codes.Code) evr.LobbySessionFailureErrorCode {
 		return evr.LobbySessionFailure_Timeout0
 	case codes.InvalidArgument:
 		return evr.LobbySessionFailure_BadRequest
+	case codes.Aborted:
+		return evr.LobbySessionFailure_BadRequest
 	case codes.ResourceExhausted:
 		return evr.LobbySessionFailure_ServerIsFull
 	case codes.Unavailable:
@@ -332,12 +335,14 @@ func NewMatchmakingRegistry(logger *zap.Logger, matchRegistry MatchRegistry, mat
 }
 
 type MatchmakingSettings struct {
-	BackfillQueryAddon   string   `json:"backfill_query_addon"`  // Additional query to add to the matchmaking query
-	CreateQueryAddon     string   `json:"create_query_addon"`    // Additional query to add to the matchmaking query
-	GroupID              string   `json:"group_id"`              // Group ID to matchmake with
-	PriorityBroadcasters []string `json:"priority_broadcasters"` // Prioritize these broadcasters
-	NextMatchID          MatchID  `json:"next_match_id"`         // Try to join this match immediately when finding a match
-	Verbose              bool     `json:"verbose"`               // Send the user verbose messages via discord
+	DisableArenaBackfill  bool     `json:"disable_arena_backfill,omitempty"` // Disable backfilling for arena matches
+	BackfillQueryAddon    string   `json:"backfill_query_addon"`             // Additional query to add to the matchmaking query
+	MatchmakingQueryAddon string   `json:"matchmaking_query_addon"`          // Additional query to add to the matchmaking query
+	CreateQueryAddon      string   `json:"create_query_addon"`               // Additional query to add to the matchmaking query
+	GroupID               string   `json:"group_id"`                         // Group ID to matchmake with
+	PriorityBroadcasters  []string `json:"priority_broadcasters"`            // Prioritize these broadcasters
+	NextMatchID           MatchID  `json:"next_match_id"`                    // Try to join this match immediately when finding a match
+	Verbose               bool     `json:"verbose"`                          // Send the user verbose messages via discord
 }
 
 func (MatchmakingSettings) GetStorageID() StorageID {
@@ -672,7 +677,7 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 	// Loop until a server becomes available or matchmaking times out.
 	timeout := time.After(10 * time.Minute)
 	interval := time.NewTicker(10 * time.Second)
-
+	defer interval.Stop()
 	select {
 	case <-mr.ctx.Done(): // Context cancelled
 		return
@@ -718,7 +723,7 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 		logger.Error("matchID is nil")
 		return
 	}
-
+	logger.Info("Match made", zap.String("matchID", matchID.String()), zap.Any("teams", teams))
 	for i, players := range teams {
 		// Assign each player in the team to the match
 		for _, entry := range players {
@@ -955,85 +960,76 @@ func (m *MatchmakingSession) GetPingCandidates(endpoints ...evr.Endpoint) (candi
 	return candidates
 }
 func JoinPartyGroup(session *sessionWS, groupID string) (*PartyGroup, error) {
+	maxSize := 8
+	open := true
 
-	partyID := uuid.NewV5(uuid.Nil, groupID)
-	partyRegistry := session.pipeline.partyRegistry.(*LocalPartyRegistry)
-	node := session.pipeline.node
-
-	presence := &rtapi.UserPresence{
+	userPresence := &rtapi.UserPresence{
 		UserId:    session.UserID().String(),
 		SessionId: session.ID().String(),
 		Username:  session.Username(),
 	}
 
-	ph, ok := partyRegistry.parties.Load(partyID)
-	if ok {
-		// Party already exists
-		_, err := partyRegistry.PartyJoinRequest(session.Context(), partyID, session.pipeline.node, &Presence{
-			ID: PresenceID{
-				Node:      session.pipeline.node,
-				SessionID: session.ID(),
-			},
-			// Presence stream not needed.
-			UserID: session.UserID(),
-			Meta: PresenceMeta{
-				Username: session.Username(),
-				// Other meta fields not needed.
-			},
-		})
-		switch err {
-		case nil:
-
-		case runtime.ErrPartyFull, runtime.ErrPartyJoinRequestsFull:
-			return nil, status.Errorf(codes.ResourceExhausted, "Party is full")
-		case runtime.ErrPartyJoinRequestDuplicate:
-			return nil, status.Errorf(codes.AlreadyExists, "Duplicate join request")
-		case runtime.ErrPartyJoinRequestAlreadyMember:
-			// This is not an error, just a no-op.
-		}
-	} else {
-		// Create the party
-		maxSize := 8
-		open := true
-
-		ph = NewPartyHandler(partyRegistry.logger, partyRegistry, partyRegistry.matchmaker, partyRegistry.tracker, partyRegistry.streamManager, partyRegistry.router, partyID, partyRegistry.node, open, maxSize, presence)
-		partyRegistry.parties.Store(partyID, ph)
-
-		// If successful, the creator becomes the first user to join the party.
-		success := session.pipeline.tracker.Update(session.Context(), session.ID(), ph.Stream, session.UserID(), PresenceMeta{
-			Format:   session.Format(),
+	presence := Presence{
+		ID: PresenceID{
+			Node:      session.pipeline.node,
+			SessionID: session.ID(),
+		},
+		// Presence stream not needed.
+		UserID: session.UserID(),
+		Meta: PresenceMeta{
 			Username: session.Username(),
-			Status:   "",
-		})
-		if !success {
-			_ = session.Send(&rtapi.Envelope{Message: &rtapi.Envelope_Error{Error: &rtapi.Error{
-				Code:    int32(rtapi.Error_RUNTIME_EXCEPTION),
-				Message: "Error tracking party creation",
-			}}}, true)
-			return nil, status.Errorf(codes.Internal, "Failed to track party creation")
-		}
+			// Other meta fields not needed.
+		},
+	}
+	presenceMeta := PresenceMeta{
+		Format:   session.Format(),
+		Username: session.Username(),
+		Status:   "",
+	}
 
+	partyID := uuid.NewV5(uuid.Nil, groupID)
+	partyRegistry := session.pipeline.partyRegistry.(*LocalPartyRegistry)
+	// Check if the party already exists
+	ph, ok := partyRegistry.parties.Load(partyID)
+	if !ok {
+
+		ph = NewPartyHandler(partyRegistry.logger, partyRegistry, partyRegistry.matchmaker, partyRegistry.tracker, partyRegistry.streamManager, partyRegistry.router, partyID, partyRegistry.node, open, maxSize, userPresence)
+		partyRegistry.parties.Store(partyID, ph)
+	}
+
+	success, err := partyRegistry.PartyJoinRequest(session.Context(), partyID, session.pipeline.node, &presence)
+	session.logger.Debug("Join party request", zap.String("partyID", partyID.String()), zap.String("sessionID", session.ID().String()), zap.String("userID", session.UserID().String()), zap.Bool("success", success), zap.Error(err))
+	switch err {
+	case nil:
+
+	case runtime.ErrPartyFull, runtime.ErrPartyJoinRequestsFull:
+		return nil, status.Errorf(codes.ResourceExhausted, "Party is full")
+	case runtime.ErrPartyJoinRequestDuplicate:
+		return nil, status.Errorf(codes.AlreadyExists, "Duplicate join request")
+	case runtime.ErrPartyJoinRequestAlreadyMember:
+		session.logger.Debug("User is already a member of the party")
+		// This is not an error, just a no-op.
+	}
+
+	// If successful, the creator becomes the first user to join the party.
+	if success, isNew := session.pipeline.tracker.Track(session.Context(), session.ID(), ph.Stream, session.UserID(), presenceMeta); !success {
+		_ = session.Send(&rtapi.Envelope{Message: &rtapi.Envelope_Error{Error: &rtapi.Error{
+			Code:    int32(rtapi.Error_RUNTIME_EXCEPTION),
+			Message: "Error tracking party creation",
+		}}}, true)
+		return nil, status.Errorf(codes.Internal, "Failed to track party creation")
+	} else if isNew {
 		out := &rtapi.Envelope{Message: &rtapi.Envelope_Party{Party: &rtapi.Party{
 			PartyId:   ph.IDStr,
 			Open:      open,
 			MaxSize:   int32(maxSize),
-			Self:      presence,
-			Leader:    presence,
-			Presences: []*rtapi.UserPresence{presence},
+			Self:      userPresence,
+			Leader:    userPresence,
+			Presences: []*rtapi.UserPresence{userPresence},
 		}}}
 		_ = session.Send(out, true)
-
 	}
 
-	// Track the party stream
-	success := session.pipeline.tracker.Update(session.Context(), session.ID(), PresenceStream{Mode: StreamModeParty, Subject: partyID, Label: node}, session.UserID(), PresenceMeta{
-		Format:   session.Format(),
-		Username: session.Username(),
-		Status:   "",
-	})
-	if !success {
-		return nil, status.Errorf(codes.Internal, "Failed to track party join")
-	}
 	pg := &PartyGroup{
 		name: groupID,
 		ph:   ph,
@@ -1236,6 +1232,7 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, logger *zap.Logger, se
 			if ctx.Err() != nil {
 				err = context.Cause(ctx)
 			}
+
 		case <-time.After(timeout):
 			// Timeout
 			err = ErrMatchmakingTimeout
@@ -1243,7 +1240,7 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, logger *zap.Logger, se
 		switch err {
 		case nil:
 			metricsTags["result"] = "success"
-		case ErrMatchmakingCanceledByPlayer:
+		case ErrMatchmakingCanceledByPlayer, ErrMatchmakingCanceledByParty:
 			metricsTags["result"] = "canceled"
 		case ErrMatchmakingTimeout:
 			metricsTags["result"] = "timeout"
