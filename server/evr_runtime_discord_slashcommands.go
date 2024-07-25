@@ -1726,9 +1726,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 			membership := memberships[0]
 
-			profile, _ := d.profileRegistry.Load(userID, evr.EvrIdNil)
+			profile, _ := d.profileRegistry.Load(ctx, userID)
 			profile.SetChannel(evr.GUID(membership.GuildGroup.ID()))
-			if err = d.profileRegistry.Store(userID, profile); err != nil {
+
+			if err = d.profileRegistry.Save(ctx, userID, profile); err != nil {
 				errFn(err)
 				return
 			}
@@ -1740,7 +1741,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return
 			}
 
-			d.profileRegistry.Save(userID)
+			d.profileRegistry.Save(ctx, userID, profile)
 			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
@@ -1917,9 +1918,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return
 			}
 
-			profile, _ := d.profileRegistry.Load(targetUserID, evr.EvrIdNil)
+			profile, _ := d.profileRegistry.Load(ctx, targetUserID)
 			profile.TriggerCommunityValues()
-			if err = d.profileRegistry.Store(targetUserID, profile); err != nil {
+			if err = d.profileRegistry.Save(ctx, targetUserID, profile); err != nil {
 				errFn(err)
 				return
 			}

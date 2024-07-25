@@ -60,7 +60,6 @@ type EvrPipeline struct {
 
 	matchmakingRegistry *MatchmakingRegistry
 	profileRegistry     *ProfileRegistry
-	profileCache        *LocalProfileCache
 	discordRegistry     DiscordRegistry
 	appBot              *DiscordAppBot
 	leaderboardRegistry *LeaderboardRegistry
@@ -104,8 +103,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 
 	discordRegistry := NewLocalDiscordRegistry(ctx, nk, runtimeLogger, metrics, config, pipeline, dg)
 	leaderboardRegistry := NewLeaderboardRegistry(NewRuntimeGoLogger(logger), nk, config.GetName())
-	profileCache := NewLocalProfileCache(tracker, 60*10)
-	profileRegistry := NewProfileRegistry(nk, db, runtimeLogger, discordRegistry)
+	profileRegistry := NewProfileRegistry(nk, db, runtimeLogger, tracker, discordRegistry)
 
 	appBot := NewDiscordAppBot(runtimeLogger, nk, db, metrics, pipeline, config, discordRegistry, profileRegistry, dg)
 
@@ -169,7 +167,6 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		broadcasterUserID: broadcasterUserID,
 
 		profileRegistry:     profileRegistry,
-		profileCache:        profileCache,
 		leaderboardRegistry: leaderboardRegistry,
 
 		broadcasterRegistrationBySession: &MapOf[string, *MatchBroadcaster]{},

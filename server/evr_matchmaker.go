@@ -715,10 +715,9 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 		return fmt.Errorf("failed to get login session from session context")
 	}
 
-	profile, found := p.profileRegistry.Load(session.UserID(), evrID)
-	if !found {
-		defer session.Close("profile not found", runtime.PresenceReasonUnknown)
-		return fmt.Errorf("profile not found: %s", session.UserID())
+	profile, err := p.profileRegistry.Load(ctx, session.UserID())
+	if err != nil {
+		return fmt.Errorf("failed to load profile: %w", err)
 	}
 
 	profile.UpdateDisplayName(displayName)
@@ -748,11 +747,9 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 		}
 		delete(serverProfile.Statistics, t)
 	}
-
-	// Add the user's profile to the cache (by EvrID)
-	err = p.profileCache.Add(matchID, evrID, serverProfile)
+	err = p.profileRegistry.Save(ctx, session.userID, profile)
 	if err != nil {
-		logger.Warn("Failed to add profile to cache", zap.Error(err))
+		return fmt.Errorf("failed to save profile: %w", err)
 	}
 
 	// Prepare the player session metadata.
