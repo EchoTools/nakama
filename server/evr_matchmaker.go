@@ -376,15 +376,23 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 						select {
 						case <-leaderCtx.Done():
 							ms.Logger.Debug("Leader is done, canceling session in 10 seconds.")
+							select {
+							case <-time.After(15 * time.Second):
+								ms.Cancel(ErrMatchmakingUnknownError)
+							case <-ctx.Done():
+								return
+							}
+
 						case <-ctx.Done():
 							ms.Logger.Debug("Player is done, canceling session in 10 seconds.")
+							select {
+							case <-time.After(15 * time.Second):
+								msession.Cancel(ErrMatchmakingUnknownError)
+							case <-leaderCtx.Done():
+								return
+							}
 						}
-						// Give 10 seconds to let the leader cancel on their own.
-						<-time.After(10 * time.Second)
-
-						leaderMs.Cancel(ErrMatchmakingUnknownError)
-						ms.Cancel(ErrMatchmakingUnknownError)
-
+						// Give 10 seconds to let the leader cancel on their own
 					}(ms.Ctx, msession.Ctx, ms, msession)
 				}
 
