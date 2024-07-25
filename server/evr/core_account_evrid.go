@@ -74,6 +74,9 @@ func (xpi EvrId) UUID() uuid.UUID {
 func ParseEvrId(s string) (*EvrId, error) {
 	// Obtain the position of the last dash.
 	dashIndex := strings.LastIndex(s, "-")
+	if len(s) == 0 {
+		return &EvrId{}, nil
+	}
 	if dashIndex < 0 {
 		return nil, fmt.Errorf("invalid format: %s", s)
 	}
