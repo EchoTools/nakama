@@ -949,6 +949,7 @@ func (d *DiscordAppBot) InitializeDiscordBot() error {
 	// Update the status with the number of matches and players
 	go func() {
 		updateTicker := time.NewTicker(1 * time.Minute)
+		defer updateTicker.Stop()
 		for {
 			select {
 			case <-updateTicker.C:
@@ -2185,17 +2186,13 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 				// Get the user's party group
 				// Get the userID
-				userID, err := d.discordRegistry.GetUserIdByDiscordId(ctx, user.ID, false)
-				if err != nil {
-					logger.Error("Failed to get user ID", zap.Error(err))
-					return
-				}
+				userID, err := GetUserIDByDiscordID(ctx, d.db, user.ID)
 
 				objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
 					{
 						Collection: MatchmakingConfigStorageCollection,
 						Key:        MatchmakingConfigStorageKey,
-						UserID:     userID.String(),
+						UserID:     userID,
 					},
 				})
 				if err != nil {
@@ -2231,7 +2228,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				// Make sure the user is in the list
 				found := false
 				for _, streamUser := range streamUsers {
-					if streamUser.GetUserId() == userID.String() {
+					if streamUser.GetUserId() == userID {
 						found = true
 						break
 					}
@@ -2241,6 +2238,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					if err := simpleInteractionResponse(s, i, "You are not online, or not in a party."); err != nil {
 						logger.Warn("Failed to send interaction response", zap.Error(err))
 					}
+					return
 				}
 
 				// Convert the members to discord user IDs

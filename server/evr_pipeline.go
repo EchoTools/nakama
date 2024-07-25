@@ -186,6 +186,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	go func() {
 		interval := 3 * time.Minute
 		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-evrPipeline.ctx.Done():

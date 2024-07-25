@@ -300,6 +300,11 @@ func NewTaxiBot(ctx context.Context, logger runtime.Logger, nk runtime.NakamaMod
 		storeHailCountTicker := time.NewTicker(5 * time.Minute)
 		messagePruneTicker := time.NewTicker(30 * time.Second)
 		limiterTicker := time.NewTicker(60 * time.Minute)
+		defer statusTicker.Stop()
+		defer storeHailCountTicker.Stop()
+		defer messagePruneTicker.Stop()
+		defer limiterTicker.Stop()
+
 		for {
 			select {
 			case <-ctx.Done():

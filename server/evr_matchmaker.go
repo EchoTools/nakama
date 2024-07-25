@@ -233,7 +233,7 @@ type BroadcasterLatencies struct {
 }
 
 // Matchmake attempts to find/create a match for the user using the nakama matchmaker
-func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession) (ticket string, err error) {
+func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession) (err error) {
 	// TODO Move this into the matchmaking registry
 	ctx := msession.Context()
 	// TODO FIXME Add a custom matcher for broadcaster matching
@@ -246,45 +246,37 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 
 	allRTTs, err := p.GetLatencyMetricByEndpoint(ctx, msession, endpoints, true)
 	if err != nil {
-		return "", err
+		return err
 	}
 	// Get the EVR ID from the context
 	evrID, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
 	if !ok {
-		return "", status.Errorf(codes.Internal, "EVR ID not found in context")
+		return status.Errorf(codes.Internal, "EVR ID not found in context")
 	}
 
 	query, stringProps, numericProps, err := msession.BuildQuery(allRTTs, evrID)
 	if err != nil {
-		return "", status.Errorf(codes.Internal, "Failed to build matchmaking query: %v", err)
+		return status.Errorf(codes.Internal, "Failed to build matchmaking query: %v", err)
 	}
 
 	// Add the user to the matchmaker
 	sessionID := session.ID()
 
 	userID := session.UserID().String()
-	presences := []*MatchmakerPresence{
-		{
-			UserId:    userID,
-			SessionId: session.ID().String(),
-			Username:  session.Username(),
-			Node:      p.node,
-			SessionID: sessionID,
-		},
-	}
+
 	// Load the global matchmaking config
 	gconfig, err := LoadMatchmakingSettings(ctx, p.runtimeModule, SystemUserID)
 	if err != nil {
-		return "", status.Errorf(codes.Internal, "Failed to load global matchmaking config: %v", err)
+		return status.Errorf(codes.Internal, "Failed to load global matchmaking config: %v", err)
 	}
 
 	// Load the user's matchmaking config
 	config, err := LoadMatchmakingSettings(ctx, p.runtimeModule, userID)
 	if err != nil {
-		return "", status.Errorf(codes.Internal, "Failed to load matchmaking config: %v", err)
+		return status.Errorf(codes.Internal, "Failed to load matchmaking config: %v", err)
 	}
 	// Merge the user's config with the global config
-	query = fmt.Sprintf("%s %s %s", query, gconfig.BackfillQueryAddon, config.BackfillQueryAddon)
+	query = fmt.Sprintf("%s %s %s", query, gconfig.MatchmakingQueryAddon, config.MatchmakingQueryAddon)
 
 	minCount := 2
 	maxCount := 8
@@ -300,7 +292,7 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 	meta := PresenceMeta{Format: session.format, Username: session.Username(), Status: query, Hidden: true}
 	ok = session.tracker.Update(ctx, session.id, stream, session.userID, meta)
 	if !ok {
-		return "", status.Errorf(codes.Internal, "Failed to track user: %v", err)
+		return status.Errorf(codes.Internal, "Failed to track user: %v", err)
 	}
 	tags := map[string]string{
 		"type":  msession.Label.LobbyType.String(),
@@ -310,19 +302,180 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 
 	p.metrics.CustomCounter("matchmaker_tickets_count", tags, 1)
 	// Add the user to the matchmaker
-	pID := ""
+	partyID := ""
 	if msession.Party != nil {
-		pID = msession.Party.ID().String()
+		partyID = msession.Party.ID().String()
 		stringProps["party_group"] = config.GroupID
-		query = fmt.Sprintf("%s properties.party_group:%s^5", query, config.GroupID)
 	}
-	msession.Logger.Debug("Adding matchmaking ticket", zap.String("query", query), zap.String("party_id", pID))
-	ticket, _, err = session.matchmaker.Add(ctx, presences, sessionID.String(), pID, query, minCount, maxCount, countMultiple, stringProps, numericProps)
-	if err != nil {
-		return "", fmt.Errorf("failed to add to matchmaker with query `%s`: %v", query, err)
+	presences := []*MatchmakerPresence{
+		{
+			UserId:    userID,
+			SessionId: session.ID().String(),
+			Username:  session.Username(),
+			Node:      p.node,
+			SessionID: sessionID,
+		},
 	}
-	msession.AddTicket(ticket, query)
-	return ticket, nil
+
+	go func() {
+		// If this is a party, then wait 30 seconds for everyone to start matchmaking, then only hte leader will put in a ticket
+		if partyID == "" {
+			// If the user is not in a party, then they can put in a ticket immediately
+			ticket, _, err := session.matchmaker.Add(ctx, presences, sessionID.String(), partyID, query, minCount, maxCount, countMultiple, stringProps, numericProps)
+			if err != nil {
+				msession.Logger.Error("Failed to add to solo matchmaker ticket", zap.String("query", query), zap.Error(err))
+			}
+			msession.AddTicket(ticket, query)
+			msession.Logger.Info("Added solo matchmaking ticket", zap.String("query", query), zap.String("ticket", ticket), zap.Any("presences", presences))
+		} else {
+			// If the user is in a party, then they will wait for the leader to put in a ticket (after 30 seconds)
+			if msession.Party.GetLeader().GetSessionId() != sessionID.String() {
+				// This is not the leader, just hold for up to 4 minutes
+				select {
+				case <-msession.Ctx.Done():
+				case <-time.After(4 * time.Minute):
+					err = ErrMatchmakingTimeout
+					msession.Cancel(err)
+				}
+			} else {
+
+				// This is the leader.
+				select {
+				case <-msession.Ctx.Done():
+					// Cancel any active matchmaking
+					for _, member := range msession.Party.GetMembers() {
+						ms, found := p.matchmakingRegistry.GetMatchingBySessionId(uuid.FromStringOrNil(member.Presence.GetSessionId()))
+						if !found || ms == nil {
+							continue
+						}
+						msession.Cancel(ErrMatchmakingCanceledByParty)
+					}
+					return
+				case <-time.After(15 * time.Second):
+				}
+
+				// Create a slice and map of who is matchmaking
+				msessions := make([]*MatchmakingSession, 0, len(msession.Party.GetMembers()))
+				msessionMap := make(map[string]*MatchmakingSession)
+				for _, member := range msession.Party.GetMembers() {
+					ms, found := p.matchmakingRegistry.GetMatchingBySessionId(uuid.FromStringOrNil(member.Presence.GetSessionId()))
+					if !found || ms == nil {
+						continue
+					}
+					msessions = append(msessions, ms)
+					msessionMap[member.Presence.GetSessionId()] = ms
+				}
+
+				// Monitor anybody stopping match making
+				for _, ms := range msessions {
+					if ms == msession {
+						continue
+					}
+
+					go func(ctx, leaderCtx context.Context, ms, leaderMs *MatchmakingSession) {
+						select {
+						case <-leaderCtx.Done():
+							ms.Logger.Debug("Leader is done, canceling session in 10 seconds.")
+						case <-ctx.Done():
+							ms.Logger.Debug("Player is done, canceling session in 10 seconds.")
+						}
+						// Give 10 seconds to let the leader cancel on their own.
+						<-time.After(10 * time.Second)
+
+						leaderMs.Cancel(ErrMatchmakingUnknownError)
+						ms.Cancel(ErrMatchmakingUnknownError)
+
+					}(ms.Ctx, msession.Ctx, ms, msession)
+				}
+
+				// Monitor for players in party who are not part of the party ticket.
+				go func(ctx context.Context, ms *MatchmakingSession) {
+					ticker := time.NewTicker(2 * time.Second)
+					defer ticker.Stop()
+					delay := time.After(0)
+					party := msession.Party
+					for {
+						select {
+						case <-ms.Ctx.Done():
+							return
+						case <-ticker.C:
+						case <-delay:
+						}
+						for _, m := range party.GetMembers() {
+							if _, found := msessionMap[m.Presence.GetSessionId()]; found {
+								continue
+							}
+							// Kick the player from the party
+							ms.Logger.Debug("Player is not matchmaking, kicking from party", zap.String("party_id", partyID), zap.String("user_id", m.Presence.GetUserId()))
+							_ = p.runtimeModule.StreamUserKick(StreamModeParty, partyID, "", p.node, m.Presence)
+							// Message the leader that the user was kicked
+							discordID, err := GetDiscordIDByUserID(ctx, p.db, m.Presence.GetUserId())
+							if err != nil {
+								ms.Logger.Error("Failed to get discord id", zap.Error(err))
+							} else if discordID == "" {
+								continue
+							}
+							dg := p.discordRegistry.GetBot()
+							if channel, err := dg.UserChannelCreate(discordID); err != nil {
+								ms.Logger.Error("Failed to create DM channel", zap.Error(err))
+							} else if _, err = dg.ChannelMessageSend(channel.ID, "You were removed from the party because you were not matchmaking."); err != nil {
+								ms.Logger.Error("Failed to send message", zap.Error(err))
+							}
+						}
+					}
+				}(msession.Ctx, msession)
+				<-time.After(2 * time.Second)
+
+				// Add the ticket through the party handler
+				ticket, presenceIDs, err := msession.Party.ph.MatchmakerAdd(session.id.String(), p.node, query, minCount, maxCount, countMultiple, stringProps, numericProps)
+				if err != nil {
+					msession.Logger.Error("Failed to add to matchmaker with query", zap.String("query", query), zap.Error(err))
+				}
+				msession.AddTicket(ticket, query)
+				msession.Logger.Info("Added party matchmaking ticket", zap.String("query", query), zap.String("ticket", ticket), zap.Any("presences", msession.Party.GetMembers()), zap.Any("presence_ids", presenceIDs))
+
+				// Send a message to everyone in the group that they are matchmaking with the leader and others
+				discordIDs := make([]string, 0, len(msession.Party.GetMembers()))
+
+				for _, member := range msession.Party.GetMembers() {
+					discordID, err := GetDiscordIDByUserID(ctx, p.db, member.Presence.GetUserId())
+					if err != nil {
+						msession.Logger.Error("Failed to get discord id", zap.Error(err))
+						continue
+					}
+
+					// If this is the leader, then put them first in the slice
+					if member.Presence.GetSessionId() == sessionID.String() {
+						discordIDs = append([]string{discordID}, discordIDs...)
+						continue
+					}
+					discordIDs = append(discordIDs, discordID)
+
+				}
+				mentions := make([]string, 0, len(msession.Party.GetMembers()))
+				for _, discordID := range discordIDs {
+					mentions = append(mentions, fmt.Sprintf("<@%s>", discordID))
+				}
+
+				dg := p.discordRegistry.GetBot()
+				// Send a DM to each user
+				if len(discordIDs) > 1 {
+					for _, discordID := range discordIDs {
+						channel, err := dg.UserChannelCreate(discordID)
+						if err != nil {
+							msession.Logger.Error("Failed to create DM channel", zap.Error(err))
+							continue
+						}
+						if _, err = dg.ChannelMessageSend(channel.ID, fmt.Sprintf(`%s's party (%s) is matchmaking...`, mentions[0], strings.Join(mentions[1:], ", "))); err != nil {
+							msession.Logger.Error("Failed to send message", zap.Error(err))
+							continue
+						}
+					}
+				}
+			}
+		}
+	}()
+	return nil
 }
 
 // Wrapper for the matchRegistry.ListMatches function.
@@ -640,7 +793,7 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 
 	// Send the lobbysessionSuccess, this will trigger the broadcaster to send a lobbysessionplayeraccept once the player connects to the broadcaster.
 	msg := evr.NewLobbySessionSuccess(label.Mode, label.ID.UUID(), label.GetGroupID(), label.GetEndpoint(), int16(presence.RoleAlignment))
-	messages := []evr.Message{msg.Version4(), msg.Version5(), evr.NewSTcpConnectionUnrequireEvent()}
+	messages := []evr.Message{msg.Version5()}
 
 	if err = bsession.SendEvr(messages...); err != nil {
 		return fmt.Errorf("failed to send messages to broadcaster: %w", err)
@@ -1001,6 +1154,7 @@ func (p *EvrPipeline) MatchSpectateStreamLoop(session *sessionWS, msession *Matc
 	// creeate a delay timer
 	timer := time.NewTimer(0 * time.Second)
 	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -1047,6 +1201,8 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 	delayStartTimer := time.NewTimer(100 * time.Millisecond)
 	retryTicker := time.NewTicker(4 * time.Second)
 	createTicker := time.NewTicker(6 * time.Second)
+	defer retryTicker.Stop()
+	defer createTicker.Stop()
 
 	for {
 		select {
@@ -1070,7 +1226,7 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 				return nil
 			case <-msession.Ctx.Done():
 				return nil
-			default:
+			case <-time.After(250 * time.Millisecond):
 			}
 
 			p.metrics.CustomCounter("match_backfill_found_count", msession.metricsTags(), 1)
@@ -1080,8 +1236,7 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 				logger.Warn("Failed to backfill match", zap.Error(err))
 				continue
 			}
-			// If the backfill was successful, stop the backfill loop
-			return nil
+
 		}
 		// After trying to backfill, try to create a match on an interval
 		select {
@@ -1153,7 +1308,7 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 	// Create a new matching session
 	logger.Debug("Creating a new matchmaking session")
 	partySize := 1
-	timeout := 60 * time.Minute
+	timeout := 5 * time.Minute
 
 	if ml.TeamIndex == TeamIndex(evr.TeamSpectator) {
 		timeout = 12 * time.Hour
@@ -1357,22 +1512,20 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 			go p.MatchBackfillLoop(session, msession, skipBackfillDelay, false, 1)
 		}
 		// Put a ticket in for matching
-		_, err = p.MatchMake(session, msession)
-		if err != nil {
+		if err = p.MatchMake(session, msession); err != nil {
 			return err
 		}
 
 	case evr.ModeArenaPublic:
 
 		// Start the backfill loop, if the player is not in a party.
-		if msession.Party == nil || len(msession.Party.GetMembers()) == 1 {
+		if msession.Party == nil && !config.DisableArenaBackfill {
 			// Don't backfill party members, let the matchmaker handle it.
 			go p.MatchBackfillLoop(session, msession, skipBackfillDelay, false, 1)
 		}
 
 		// Put a ticket in for matching
-		_, err := p.MatchMake(session, msession)
-		if err != nil {
+		if err := p.MatchMake(session, msession); err != nil {
 			return err
 		}
 	default:
