@@ -7,6 +7,7 @@ import (
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"go.uber.org/zap"
 )
 
 var (
@@ -50,7 +51,7 @@ func PartySyncMatchmaking(ctx context.Context, msessions []*MatchmakingSession, 
 	return nil
 }
 
-func FollowLeader(ctx context.Context, nk runtime.NakamaModule, session *sessionWS, pg *PartyGroup) {
+func FollowLeader(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, session *sessionWS, pg *PartyGroup) {
 	// Look up the leaders current match
 	for {
 		select {
@@ -63,14 +64,14 @@ func FollowLeader(ctx context.Context, nk runtime.NakamaModule, session *session
 		if leaderSessionID == session.id {
 			return
 		}
-		// Get the match that the leader is in
-		followerMatchID, _, err := GetMatchBySessionID(nk, session.id)
+
+		leaderMatchID, _, err := GetMatchBySessionID(nk, leaderSessionID)
 		if err != nil {
 			return
 		}
 
-		// Get this players current match
-		leaderMatchID, _, err := GetMatchBySessionID(nk, leaderSessionID)
+		// Get the match that the leader is in
+		followerMatchID, _, err := GetMatchBySessionID(nk, session.id)
 		if err != nil {
 			return
 		}
