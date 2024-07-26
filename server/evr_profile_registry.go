@@ -70,9 +70,9 @@ func NewProfileRegistry(nk runtime.NakamaModule, db *sql.DB, logger runtime.Logg
 				profileRegistry.cacheMu.Lock()
 				for evrId := range profileRegistry.cache {
 					if tracker.CountByStream(PresenceStream{
-						Mode:       StreamModeService,
-						Subject:    uuid.NewV5(uuid.Nil, evrId.String()),
-						Subcontext: StreamContextMatch,
+						Mode:    StreamModeService,
+						Subject: evrId.UUID(),
+						Label:   StreamLabelMatchService,
 					}) == 0 {
 						delete(profileRegistry.cache, evrId)
 					}

@@ -718,7 +718,7 @@ func GetEULAVersion(ctx context.Context, db *sql.DB, userID string) (int, int, e
 	var dbEULAVersion int
 	var dbGameAdminVersion int
 	var found = true
-	if err := db.QueryRowContext(ctx, query, query, GameProfileStorageCollection, GameProfileStorageKey, userID).Scan(&dbEULAVersion, &dbGameAdminVersion); err != nil {
+	if err := db.QueryRowContext(ctx, query, GameProfileStorageCollection, GameProfileStorageKey, userID).Scan(&dbEULAVersion, &dbGameAdminVersion); err != nil {
 		if err == sql.ErrNoRows {
 			found = false
 		} else {

@@ -797,7 +797,7 @@ func PresenceByEntrantID(nk runtime.NakamaModule, matchID MatchID, entrantID uui
 
 func GetMatchBySessionID(nk runtime.NakamaModule, sessionID uuid.UUID) (matchID MatchID, presence runtime.Presence, err error) {
 
-	presences, err := nk.StreamUserList(StreamModeService, sessionID.String(), StreamContextMatch.String(), "", true, true)
+	presences, err := nk.StreamUserList(StreamModeService, sessionID.String(), "", StreamLabelMatchService, true, true)
 	if err != nil {
 		return MatchID{}, nil, fmt.Errorf("failed to get stream presences: %w", err)
 	}

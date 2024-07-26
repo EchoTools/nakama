@@ -404,13 +404,13 @@ func (s BroadcasterSession) Query(o QueryOperator, b int) string {
 // The Match Session is the session id of the match.
 // The Match Session is used internally by the clients.
 // The Match Session is distinct from the Broadcaster Session/Match ID.
-type MatchId uuid.UUID // uuid.UUID
+type MatchId MatchID // uuid.UUID
 
 func (c MatchId) Query(o QueryOperator, b int) string {
 	return Label{
 		Op:    rune(o),
 		Name:  "id",
-		Value: uuid.UUID(c).String(),
+		Value: MatchID(c).String(),
 		boost: b,
 	}.Unescaped()
 }

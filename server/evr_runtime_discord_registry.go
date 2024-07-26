@@ -546,9 +546,7 @@ func (r *LocalDiscordRegistry) UpdateGuildGroup(ctx context.Context, logger runt
 	member, err := r.GetGuildMember(ctx, guildID, discordID)
 	// return if the context is cancelled
 	if err != nil {
-		if ctx.Err() != nil || member == nil {
-			return fmt.Errorf("context cancelled: %w", err)
-		}
+		return fmt.Errorf("error getting guild member: %v", err)
 	}
 
 	// Get all of the user's memberships
@@ -664,8 +662,7 @@ func (r *LocalDiscordRegistry) UpdateGuildGroup(ctx context.Context, logger runt
 
 		// If the player has a match connection, disconnect it.
 		subject := userID.String()
-		subcontext := StreamContextMatch.String()
-		users, err := r.nk.StreamUserList(StreamModeService, subject, subcontext, "", true, true)
+		users, err := r.nk.StreamUserList(StreamModeService, subject, "", StreamLabelMatchService, true, true)
 		if err != nil {
 			r.logger.Error("Error getting stream users: %w", err)
 		}

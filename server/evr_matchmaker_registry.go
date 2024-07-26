@@ -177,7 +177,6 @@ func (s *MatchmakingSession) Cancel(reason error) error {
 		return nil
 	default:
 	}
-
 	s.CtxCancelFn(reason)
 	return nil
 }
@@ -214,6 +213,13 @@ func (s *MatchmakingSession) Context() context.Context {
 	s.RLock()
 	defer s.RUnlock()
 	return s.Ctx
+}
+
+func (s *MatchmakingSession) Cause() error {
+	if s.Ctx.Err() != context.Cause(s.Ctx) {
+		return context.Cause(s.Ctx)
+	}
+	return nil
 }
 
 // MatchmakingResult represents the outcome of a matchmaking request
@@ -1229,8 +1235,10 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, logger *zap.Logger, se
 		var err error
 		select {
 		case <-ctx.Done():
-			if ctx.Err() != nil {
+			if ctx.Err() != context.Cause(ctx) {
 				err = context.Cause(ctx)
+			} else {
+				err = nil
 			}
 
 		case <-time.After(timeout):
