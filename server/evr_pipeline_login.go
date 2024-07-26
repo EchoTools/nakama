@@ -185,6 +185,31 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		}
 	}
 
+	// Check if this user is required to use 2FA
+	if found, err := CheckSystemGroupMembership(ctx, p.db, uid.String(), GroupGlobalRequire2FA); err != nil {
+		if found {
+			allowed := make(chan bool)
+			go func() {
+				ok, err := p.discordRegistry.CheckUser2FA(ctx, uid)
+				if err != nil {
+					logger.Warn("Failed to check 2FA", zap.Error(err))
+					allowed <- true
+				}
+				allowed <- ok
+			}()
+			// Check if this user has 2FA enabled
+			select {
+			case <-ctx.Done():
+				return settings, fmt.Errorf("context cancelled")
+			case ok := <-allowed:
+				if !ok {
+					return settings, fmt.Errorf("you must enable 2FA on your Discord account to play")
+				}
+			case <-time.After(time.Second * 2):
+			}
+		}
+	}
+
 	// Get the GroupID from the user's metadata
 	groupID := metadata.GetActiveGroupID()
 	// Validate that the user is in the group
