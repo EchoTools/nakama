@@ -9,9 +9,9 @@ import (
 
 // LobbySessionSuccess represents a message from server to client indicating that a request to create/join/find a game server session succeeded.
 type LobbySessionSuccess struct {
-	GameTypeSymbol     Symbol
-	MatchingSession    uuid.UUID
-	ChannelUUID        uuid.UUID // V5 only
+	GameMode           Symbol
+	LobbyID            uuid.UUID
+	GroupID            uuid.UUID // V5 only
 	Endpoint           Endpoint
 	TeamIndex          int16
 	Unk1               uint32
@@ -32,9 +32,9 @@ func NewLobbySessionSuccess(gameTypeSymbol Symbol, matchingSession uuid.UUID, ch
 	c := DefaultClientEncoderSettings()
 	s := DefaultServerEncoderSettings()
 	return &LobbySessionSuccess{
-		GameTypeSymbol:     gameTypeSymbol,
-		MatchingSession:    matchingSession,
-		ChannelUUID:        channelUUID,
+		GameMode:           gameTypeSymbol,
+		LobbyID:            matchingSession,
+		GroupID:            channelUUID,
 		Endpoint:           endpoint,
 		TeamIndex:          teamIndex,
 		Unk1:               0,
@@ -75,8 +75,8 @@ func (m *LobbySessionSuccessv4) Symbol() Symbol {
 func (m *LobbySessionSuccessv4) String() string {
 	return fmt.Sprintf("%s(game_type=%d, matching_session=%s, endpoint=%v, team_index=%d)",
 		m.Token(),
-		m.GameTypeSymbol,
-		m.MatchingSession,
+		m.GameMode,
+		m.LobbyID,
 		m.Endpoint,
 		m.TeamIndex,
 	)
@@ -87,8 +87,8 @@ func (m *LobbySessionSuccessv4) Stream(s *EasyStream) error {
 	var ce *PacketEncoderSettings
 
 	return RunErrorFunctions([]func() error{
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.GameTypeSymbol) },
-		func() error { return s.StreamGuid(&m.MatchingSession) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.GameMode) },
+		func() error { return s.StreamGuid(&m.LobbyID) },
 		func() error { return s.StreamStruct(&m.Endpoint) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.TeamIndex) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Unk1) },
@@ -121,9 +121,9 @@ func (m *LobbySessionSuccessv5) Symbol() Symbol {
 func (m *LobbySessionSuccessv5) String() string {
 	return fmt.Sprintf("%s(game_type=%d, matching_session=%s, channel=%s, endpoint=%v, team_index=%d)",
 		m.Token(),
-		m.GameTypeSymbol,
-		m.MatchingSession,
-		m.ChannelUUID,
+		m.GameMode,
+		m.LobbyID,
+		m.GroupID,
 		m.Endpoint,
 		m.TeamIndex,
 	)
@@ -132,9 +132,9 @@ func (m *LobbySessionSuccessv5) Stream(s *EasyStream) error {
 	var se *PacketEncoderSettings
 	var ce *PacketEncoderSettings
 	return RunErrorFunctions([]func() error{
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.GameTypeSymbol) },
-		func() error { return s.StreamGuid(&m.MatchingSession) },
-		func() error { return s.StreamGuid(&m.ChannelUUID) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.GameMode) },
+		func() error { return s.StreamGuid(&m.LobbyID) },
+		func() error { return s.StreamGuid(&m.GroupID) },
 		func() error { return s.StreamStruct(&m.Endpoint) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.TeamIndex) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Unk1) },
