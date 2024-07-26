@@ -634,7 +634,7 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 				}
 
 				// Join the players to the match
-				if err := mr.evrPipeline.JoinEvrMatch(s.Ctx, s.Logger, s.Session, "", m.ID, int(AnyTeam)); err != nil {
+				if err := mr.evrPipeline.JoinEvrMatch(s.Logger, s.Session, "", m.ID, int(AnyTeam)); err != nil {
 					logger.Error("Error joining player to match", zap.Error(err))
 				}
 			}
@@ -747,7 +747,7 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 			}
 			// Join the players to the match
 			logger.Info("Joining player to match", zap.Any("presence", entry.Presence), zap.String("matchID", matchID.String()), zap.String("ticket", ticket))
-			if err := mr.evrPipeline.JoinEvrMatch(s.Ctx, s.Logger, s.Session, ticketMeta.Query, matchID, i); err != nil {
+			if err := mr.evrPipeline.JoinEvrMatch(s.Logger, s.Session, ticketMeta.Query, matchID, i); err != nil {
 				logger.Error("Error joining player to match", zap.Error(err))
 			}
 

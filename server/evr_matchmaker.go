@@ -631,9 +631,9 @@ func (p *EvrPipeline) MatchCreate(ctx context.Context, session *sessionWS, msess
 }
 
 // JoinEvrMatch allows a player to join a match.
-func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, session *sessionWS, query string, matchID MatchID, teamIndex int) error {
+func (p *EvrPipeline) JoinEvrMatch(logger *zap.Logger, session *sessionWS, query string, matchID MatchID, teamIndex int) error {
 	// Append the node to the matchID if it doesn't already contain one.
-
+	ctx := session.Context()
 	label, err := MatchLabelByID(ctx, p.runtimeModule, matchID)
 	if err != nil {
 		return fmt.Errorf("failed to get match label: %w", err)
@@ -1127,7 +1127,7 @@ func (p *EvrPipeline) MatchSpectateStreamLoop(session *sessionWS, msession *Matc
 				return matches[i].Size > matches[j].Size
 			})
 
-			if err := p.JoinEvrMatch(msession.Ctx, msession.Logger, msession.Session, "", MatchIDFromStringOrNil(matches[0].GetMatchId()), int(evr.TeamSpectator)); err != nil {
+			if err := p.JoinEvrMatch(msession.Logger, msession.Session, "", MatchIDFromStringOrNil(matches[0].GetMatchId()), int(evr.TeamSpectator)); err != nil {
 				logger.Error("Error joining player to match", zap.Error(err))
 			}
 		}
@@ -1182,7 +1182,7 @@ func (p *EvrPipeline) MatchBackfillLoop(session *sessionWS, msession *Matchmakin
 			p.metrics.CustomCounter("match_backfill_found_count", msession.metricsTags(), 1)
 			logger.Debug("Attempting to backfill match", zap.String("mid", label.ID.UUID().String()))
 
-			if err := p.JoinEvrMatch(ctx, logger, session, query, label.ID, evr.TeamUnassigned); err != nil {
+			if err := p.JoinEvrMatch(logger, session, query, label.ID, evr.TeamUnassigned); err != nil {
 				logger.Warn("Failed to backfill match", zap.Error(err))
 				continue
 			}
@@ -1226,7 +1226,7 @@ func (p *EvrPipeline) MatchCreateLoop(session *sessionWS, msession *MatchmakingS
 				return msession.Cancel(fmt.Errorf("match is nil"))
 			}
 			p.metrics.CustomCounter("match_create_join_active_count", msession.metricsTags(), 1)
-			if err := p.JoinEvrMatch(msession.Ctx, msession.Logger, msession.Session, "", matchID, int(msession.Label.TeamIndex)); err != nil {
+			if err := p.JoinEvrMatch(msession.Logger, msession.Session, "", matchID, int(msession.Label.TeamIndex)); err != nil {
 				logger.Warn("Error joining player to match", zap.Error(err))
 			}
 
@@ -1317,7 +1317,7 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 				p.metrics.CustomCounter("match_next_join_count", map[string]string{}, 1)
 				// Join the match
 
-				if err := p.JoinEvrMatch(msession.Ctx, msession.Logger, msession.Session, "", matchID, int(evr.TeamUnassigned)); err != nil {
+				if err := p.JoinEvrMatch(msession.Logger, msession.Session, "", matchID, int(evr.TeamUnassigned)); err != nil {
 					logger.Warn("Error joining player to match", zap.Error(err))
 				}
 
@@ -1464,7 +1464,7 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 	// If this is not the leader, then wait for the leader.
 	if msession.Party != nil && msession.Party.GetLeader().GetSessionId() != session.id.String() {
 		// try to join the leaders lobby the entire time.
-		go FollowLeader(msession.Ctx, p.runtimeModule, session, msession.Party)
+		go FollowLeader(msession.Ctx, msession.Logger, p.runtimeModule, session, msession.Party)
 
 		// Hold for 4 minutes.
 		select {
