@@ -113,7 +113,7 @@ func (r *ProfileRegistry) Load(ctx context.Context, userID uuid.UUID) (profile *
 		return profile, nil
 	}
 
-	if err = json.Unmarshal([]byte(objs[0].Value), profile); err != nil {
+	if err = json.Unmarshal([]byte(objs[0].GetValue()), profile); err != nil {
 		return nil, err
 	}
 	return profile, nil
@@ -234,7 +234,7 @@ func (r *ProfileRegistry) GameProfile(ctx context.Context, session *sessionWS, l
 	if err != nil {
 		return p, fmt.Errorf("failed to load user profile: %w", err)
 	}
-
+	p.SetEvrID(evrID)
 	p.Login = loginProfile
 	p.Server.PublisherLock = p.Login.PublisherLock
 	p.Server.LobbyVersion = p.Login.LobbyVersion

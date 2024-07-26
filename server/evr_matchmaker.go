@@ -798,13 +798,12 @@ func (p *EvrPipeline) JoinEvrMatch(ctx context.Context, logger *zap.Logger, sess
 
 	// Send the lobbysessionSuccess, this will trigger the broadcaster to send a lobbysessionplayeraccept once the player connects to the broadcaster.
 	msg := evr.NewLobbySessionSuccess(label.Mode, label.ID.UUID(), label.GetGroupID(), label.GetEndpoint(), int16(presence.RoleAlignment))
-	messages := []evr.Message{msg.Version5()}
 
-	if err = bsession.SendEvr(messages...); err != nil {
+	if err = bsession.SendEvr(msg.Version5()); err != nil {
 		return fmt.Errorf("failed to send messages to broadcaster: %w", err)
 	}
 
-	if err = session.SendEvr(messages...); err != nil {
+	if err = session.SendEvr(msg.Version5()); err != nil {
 		err = fmt.Errorf("failed to send messages to player: %w", err)
 	}
 	if msession != nil {
