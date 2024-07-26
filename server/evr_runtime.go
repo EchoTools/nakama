@@ -33,6 +33,7 @@ const (
 	GroupGlobalBots              = "Global Bots"
 	GroupGlobalBadgeAdmins       = "Global Badge Admins"
 	GroupGlobalPrivateDataAccess = "Global Private Data Access"
+	GroupGlobalRequire2FA        = "Global Require 2FA"
 	SystemGroupLangTag           = "system"
 	GuildGroupLangTag            = "guild"
 
@@ -278,6 +279,7 @@ func createCoreGroups(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		GroupGlobalBadgeAdmins,
 		GroupGlobalBots,
 		GroupGlobalPrivateDataAccess,
+		GroupGlobalRequire2FA,
 	}
 
 	for _, name := range coreGroups {

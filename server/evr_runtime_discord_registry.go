@@ -66,6 +66,7 @@ type DiscordRegistry interface {
 	isModerator(ctx context.Context, guildID, discordID string) (isModerator bool, isGlobal bool, err error)
 	IsGlobalModerator(ctx context.Context, userID uuid.UUID) (ok bool, err error)
 	ProcessRequest(ctx context.Context, session *sessionWS, in evr.Message) error
+	CheckUser2FA(ctx context.Context, userID uuid.UUID) (bool, error)
 }
 
 type LocalDiscordRegistry struct {
@@ -1093,4 +1094,15 @@ func discordError(err error) int {
 		return restError.Message.Code
 	}
 	return -1
+}
+func (d *LocalDiscordRegistry) CheckUser2FA(ctx context.Context, userID uuid.UUID) (bool, error) {
+	discordID, err := GetDiscordIDByUserID(ctx, d.pipeline.db, userID.String())
+	if err != nil {
+		return false, fmt.Errorf("error getting discord id: %w", err)
+	}
+	user, err := d.bot.User(discordID)
+	if err != nil {
+		return false, fmt.Errorf("error getting discord user: %w", err)
+	}
+	return user.MFAEnabled, nil
 }
