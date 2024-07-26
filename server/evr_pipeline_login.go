@@ -241,6 +241,12 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	}
 	ctx = session.Context()
 
+	// Set the display name once.
+	displayName, err := SetDisplayNameByChannelBySession(ctx, p.runtimeModule, logger, p.discordRegistry, session, groupID.String())
+	if err != nil {
+		logger.Warn("Failed to set display name", zap.Error(err))
+	}
+
 	// Load the user's profile
 	profile, err := p.profileRegistry.GameProfile(ctx, session, loginProfile, evrId)
 	if err != nil {
@@ -248,15 +254,10 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		return evr.NewDefaultGameSettings(), fmt.Errorf("failed to load game profiles")
 	}
 
-	// Set the display name once.
-	displayName, err := SetDisplayNameByChannelBySession(ctx, p.runtimeModule, logger, p.discordRegistry, session, groupID.String())
-	if err != nil {
-		logger.Warn("Failed to set display name", zap.Error(err))
-	}
-
 	profile.SetEvrID(evrId)
 	profile.SetChannel(evr.GUID(groupID))
 	profile.UpdateDisplayName(displayName)
+
 	p.profileRegistry.Save(ctx, session.userID, profile)
 
 	// TODO Add the settings to the user profile

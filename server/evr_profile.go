@@ -26,6 +26,8 @@ type GameProfile interface {
 	SetChannel(c evr.GUID)
 	UpdateDisplayName(displayName string)
 	UpdateUnlocks(unlocks evr.UnlockedCosmetics) error
+	IsStale() bool
+	SetStale()
 }
 
 type GameProfileData struct {
@@ -33,6 +35,7 @@ type GameProfileData struct {
 	Client    evr.ClientProfile `json:"client"`
 	Server    evr.ServerProfile `json:"server"`
 	timestamp time.Time         // The time when the profile was last retrieved
+	Stale     bool              // Whether the profile is stale and needs to be updated
 
 }
 
@@ -138,15 +141,17 @@ func NewGameProfile(login evr.LoginProfile, client evr.ClientProfile, server evr
 
 func (p *GameProfileData) SetLogin(login evr.LoginProfile) {
 	p.Login = login
+	p.SetStale()
 }
 
 func (p *GameProfileData) SetClient(client evr.ClientProfile) {
 	p.Client = client
+	p.SetStale()
 }
 
 func (p *GameProfileData) SetServer(server evr.ServerProfile) {
 	p.Server = server
-	p.Server.UpdateTime = time.Now().UTC().Unix()
+	p.SetStale()
 }
 
 func (p *GameProfileData) GetServer() evr.ServerProfile {
@@ -162,8 +167,17 @@ func (p *GameProfileData) GetLogin() evr.LoginProfile {
 }
 
 func (p *GameProfileData) SetEvrID(evrID evr.EvrId) {
+	if p.Server.EvrID == evrID && p.Client.EvrID == evrID {
+		return
+	}
 	p.Server.EvrID = evrID
 	p.Client.EvrID = evrID
+	p.SetStale()
+
+}
+
+func (p *GameProfileData) GetEvrID() evr.EvrId {
+	return p.Server.EvrID
 }
 
 func (p *GameProfileData) GetChannel() uuid.UUID {
@@ -171,28 +185,86 @@ func (p *GameProfileData) GetChannel() uuid.UUID {
 }
 
 func (p *GameProfileData) SetChannel(c evr.GUID) {
+	if p.Server.Social.Channel == c && p.Client.Social.Channel == c {
+		return
+	}
 	p.Server.Social.Channel = c
 	p.Client.Social.Channel = p.Server.Social.Channel
+	p.SetStale()
 }
 
 func (p *GameProfileData) UpdateDisplayName(displayName string) {
+	if p.Server.DisplayName == displayName && p.Client.DisplayName == displayName {
+		return
+	}
 	p.Server.DisplayName = displayName
 	p.Client.DisplayName = displayName
-	p.Server.UpdateTime = time.Now().UTC().Unix()
-	p.Client.ModifyTime = time.Now().UTC().Unix()
-
+	p.SetStale()
 }
 
+func (p *GameProfileData) ExpireStatistics(dailyAge time.Duration, weeklyAge time.Duration) {
+	updated := false
+	for t := range p.Server.Statistics {
+		if t == "arena" || t == "combat" {
+			continue
+		}
+		if strings.HasPrefix(t, "daily_") {
+			// Parse the date
+			date, err := time.Parse("2006_01_02", strings.TrimPrefix(t, "daily_"))
+			// Keep anything less than 48 hours old
+			if err == nil && time.Since(date) < dailyAge {
+				continue
+			}
+		} else if strings.HasPrefix(t, "weekly_") {
+			// Parse the date
+			date, err := time.Parse("2006_01_02", strings.TrimPrefix(t, "weekly_"))
+			// Keep anything less than 2 weeks old
+			if err == nil && time.Since(date) < weeklyAge {
+				continue
+			}
+		}
+		delete(p.Server.Statistics, t)
+		updated = true
+	}
+	if updated {
+		p.SetStale()
+	}
+}
+
+func (p *GameProfileData) SetStale() {
+	p.Stale = true
+	p.Server.UpdateTime = time.Now().UTC().Unix()
+	p.Client.ModifyTime = time.Now().UTC().Unix()
+}
+
+func (p *GameProfileData) IsStale() bool {
+	return p.Stale
+}
 func (p *GameProfileData) DisableAFKTimeout(enable bool) {
+
 	if enable {
 		if p.Server.DeveloperFeatures == nil {
 			p.Server.DeveloperFeatures = &evr.DeveloperFeatures{
 				DisableAfkTimeout: true,
 			}
+			p.SetStale()
+			return
 		}
-	} else {
-		p.Server.DeveloperFeatures = nil
+		if p.Server.DeveloperFeatures.DisableAfkTimeout {
+			return
+		}
+		p.Server.DeveloperFeatures.DisableAfkTimeout = true
+		p.SetStale()
+		return
 	}
+	if p.Server.DeveloperFeatures == nil {
+		return
+	}
+	if !p.Server.DeveloperFeatures.DisableAfkTimeout {
+		return
+	}
+	p.Server.DeveloperFeatures.DisableAfkTimeout = false
+	p.SetStale()
 }
 
 func (r *GameProfileData) UpdateUnlocks(unlocks evr.UnlockedCosmetics) error {
@@ -216,18 +288,19 @@ func (r *GameProfileData) UpdateUnlocks(unlocks evr.UnlockedCosmetics) error {
 	}
 	if len(newUnlocks) > 0 {
 		r.Client.NewUnlocks = append(r.Client.NewUnlocks, newUnlocks...)
-		r.Client.ModifyTime = time.Now().UTC().Unix()
+		r.SetStale()
 		//r.Client.Customization.NewUnlocksPoiVersion += 1
 	}
-
-	r.Server.UnlockedCosmetics = unlocks
-	r.Server.UpdateTime = time.Now().UTC().Unix()
+	if r.Server.UnlockedCosmetics != unlocks {
+		r.Server.UnlockedCosmetics = unlocks
+		r.SetStale()
+	}
 	return nil
 }
 
 func (r *GameProfileData) TriggerCommunityValues() {
 	r.Client.Social.CommunityValuesVersion = 0
-	r.Client.ModifyTime = time.Now().UTC().Unix()
+	r.SetStale()
 }
 
 func generateDefaultLoadoutMap() map[string]string {
@@ -362,9 +435,7 @@ func (r *ProfileRegistry) UpdateEquippedItem(profile *GameProfileData, category 
 	}
 
 	// Update the timestamp
-	now := time.Now().UTC().Unix()
-	profile.Server.UpdateTime = now
-
+	profile.SetStale()
 	return nil
 }
 

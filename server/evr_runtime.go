@@ -495,7 +495,7 @@ func GetDiscordIDByUserID(ctx context.Context, db *sql.DB, userID string) (disco
 		if err == sql.ErrNoRows {
 			found = false
 		} else {
-			return "", status.Error(codes.Internal, "error finding discord ID by user ID")
+			return "", status.Error(codes.Internal, "error finding discord ID by user ID: "+err.Error())
 		}
 	}
 	if !found {
