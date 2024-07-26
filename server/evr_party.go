@@ -84,7 +84,7 @@ func FollowLeader(ctx context.Context, nk runtime.NakamaModule, session *session
 			continue // Already in the same match, but keep checking in case the leader leaves
 		}
 		// Try to join the leader's match
-		err = session.evrPipeline.JoinEvrMatch(ctx, session.logger, session, "", leaderMatchID, int(AnyTeam))
+		err = session.evrPipeline.JoinEvrMatch(session.logger, session, "", leaderMatchID, int(AnyTeam))
 		if err == nil {
 			return
 		}

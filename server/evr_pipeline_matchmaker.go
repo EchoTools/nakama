@@ -510,7 +510,7 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 		}
 	}
 
-	if err = p.JoinEvrMatch(ctx, logger, session, "", matchToken, int(request.GetAlignment())); err != nil {
+	if err = p.JoinEvrMatch(logger, session, "", matchToken, int(request.GetAlignment())); err != nil {
 		return response.SendErrorToSession(session, status.Errorf(codes.NotFound, err.Error()))
 	}
 	return nil
