@@ -667,33 +667,9 @@ func (p *EvrPipeline) JoinEvrMatch(logger *zap.Logger, session *sessionWS, query
 		return fmt.Errorf("failed to load profile: %w", err)
 	}
 
-	profile.UpdateDisplayName(displayName)
 	profile.SetEvrID(evrID)
+	profile.UpdateDisplayName(displayName)
 
-	// Get the most recent past thursday
-	serverProfile := profile.GetServer()
-
-	for t := range serverProfile.Statistics {
-		if t == "arena" || t == "combat" {
-			continue
-		}
-		if strings.HasPrefix(t, "daily_") {
-			// Parse the date
-			date, err := time.Parse("2006_01_02", strings.TrimPrefix(t, "daily_"))
-			// Keep anything less than 48 hours old
-			if err == nil && time.Since(date) < 48*time.Hour {
-				continue
-			}
-		} else if strings.HasPrefix(t, "weekly_") {
-			// Parse the date
-			date, err := time.Parse("2006_01_02", strings.TrimPrefix(t, "weekly_"))
-			// Keep anything less than 2 weeks old
-			if err == nil && time.Since(date) < 14*24*time.Hour {
-				continue
-			}
-		}
-		delete(serverProfile.Statistics, t)
-	}
 	err = p.profileRegistry.Save(ctx, session.userID, profile)
 	if err != nil {
 		return fmt.Errorf("failed to save profile: %w", err)

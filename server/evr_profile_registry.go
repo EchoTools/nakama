@@ -120,6 +120,10 @@ func (r *ProfileRegistry) Load(ctx context.Context, userID uuid.UUID) (profile *
 }
 
 func (r *ProfileRegistry) Save(ctx context.Context, userID uuid.UUID, profile GameProfile) error {
+	if !profile.IsStale() {
+		return nil
+	}
+
 	data, err := json.Marshal(profile)
 	if err != nil {
 		return err
@@ -132,7 +136,9 @@ func (r *ProfileRegistry) Save(ctx context.Context, userID uuid.UUID, profile Ga
 			Value:      string(data),
 		},
 	})
-
+	if err != nil {
+		return err
+	}
 	serverProfile := profile.GetServer()
 	data, err = json.Marshal(serverProfile)
 	if err != nil {
@@ -235,7 +241,7 @@ func (r *ProfileRegistry) GameProfile(ctx context.Context, session *sessionWS, l
 		return p, fmt.Errorf("failed to load user profile: %w", err)
 	}
 	p.SetEvrID(evrID)
-	p.Login = loginProfile
+	p.SetLogin(loginProfile)
 	p.Server.PublisherLock = p.Login.PublisherLock
 	p.Server.LobbyVersion = p.Login.LobbyVersion
 
@@ -254,8 +260,7 @@ func (r *ProfileRegistry) GameProfile(ctx context.Context, session *sessionWS, l
 	}
 
 	p.Server.CreateTime = time.Date(2023, 10, 31, 0, 0, 0, 0, time.UTC).Unix()
-	p.Server.LoginTime = time.Now().UTC().Unix()
-	p.Server.UpdateTime = time.Now().UTC().Unix()
+	p.SetStale()
 
 	r.Save(ctx, session.userID, p)
 
@@ -274,7 +279,7 @@ func (r *ProfileRegistry) UpdateClientProfile(ctx context.Context, logger *zap.L
 	//	return errFailure(fmt.Errorf("invalid client profile: %s", errs), 400)
 	//}
 
-	profile.Client = update
+	profile.SetClient(update)
 
 	r.Save(ctx, session.userID, profile)
 	return profile, nil

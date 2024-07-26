@@ -199,6 +199,7 @@ func EchoTaxiRuntimeModule(ctx context.Context, logger runtime.Logger, db *sql.D
 		logger.Warn("No database connection available, skipping EchoTaxi startup.")
 		return
 	}
+
 	if s, ok := env["DISABLE_DISCORD_RESPONSE_HANDLERS"]; ok && s == "true" {
 		return nil
 	}
