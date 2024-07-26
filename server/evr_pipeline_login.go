@@ -713,7 +713,7 @@ func (p *EvrPipeline) documentRequest(ctx context.Context, logger *zap.Logger, s
 
 func GetEULAVersion(ctx context.Context, db *sql.DB, userID string) (int, int, error) {
 	query := `
-		SELECT (s.value->'client'->'legal'->>'eula_version')::int. (s.value->'client'->'legal'->>'game_admin_version')::int FROM storage s WHERE s.collection = $1 AND s.key = $2 AND s.user_id = $3 LIMIT 1;
+		SELECT (s.value->'client'->'legal'->>'eula_version')::int, (s.value->'client'->'legal'->>'game_admin_version')::int FROM storage s WHERE s.collection = $1 AND s.key = $2 AND s.user_id = $3 LIMIT 1;
 	`
 	var dbEULAVersion int
 	var dbGameAdminVersion int
@@ -722,7 +722,7 @@ func GetEULAVersion(ctx context.Context, db *sql.DB, userID string) (int, int, e
 		if err == sql.ErrNoRows {
 			found = false
 		} else {
-			return 0, 0, status.Error(codes.Internal, "failed to get server profile")
+			return 0, 0, status.Error(codes.Internal, "failed to get EULA version")
 		}
 	}
 	if !found {
