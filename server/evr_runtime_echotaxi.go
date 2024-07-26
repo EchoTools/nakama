@@ -195,6 +195,10 @@ func (e *TaxiLinkRegistry) Count() (cnt int) {
 func EchoTaxiRuntimeModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) (err error) {
 	env := ctx.Value(runtime.RUNTIME_CTX_ENV).(map[string]string)
 
+	if db == nil {
+		logger.Warn("No database connection available, skipping EchoTaxi startup.")
+		return
+	}
 	if s, ok := env["DISABLE_DISCORD_RESPONSE_HANDLERS"]; ok && s == "true" {
 		return nil
 	}
