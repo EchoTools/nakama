@@ -72,7 +72,7 @@ func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logg
 
 	if singleMatch {
 		// Disconnect this EVRID from other matches
-		sessionIDs := session.tracker.ListLocalSessionIDByStream(PresenceStream{Mode: StreamModeService, Subject: evrID.UUID(), Subcontext: StreamContextMatch})
+		sessionIDs := session.tracker.ListLocalSessionIDByStream(PresenceStream{Mode: StreamModeService, Subject: evrID.UUID(), Label: StreamLabelMatchService})
 		for _, foundSessionID := range sessionIDs {
 			if foundSessionID == session.id {
 				// Allow the current session, only disconnect any older ones.
@@ -257,20 +257,18 @@ func (p *EvrPipeline) findSession(ctx context.Context, logger *zap.Logger, sessi
 
 	// Wait for a graceperiod Unless this is a social lobby, wait for a grace period before starting the matchmaker
 
-	go func() {
-		if ml.Mode != evr.ModeSocialPublic {
-			select {
-			case <-time.After(MatchmakingStartGracePeriod):
-			case <-ctx.Done():
-				return
-			}
+	if ml.Mode != evr.ModeSocialPublic {
+		select {
+		case <-time.After(MatchmakingStartGracePeriod):
+		case <-ctx.Done():
+			return
 		}
-		// Create the matchmaking session
-		err = p.MatchFind(ctx, logger, session, ml)
-		if err != nil {
-			response.SendErrorToSession(session, err)
-		}
-	}()
+	}
+	// Create the matchmaking session
+	err = p.MatchFind(ctx, logger, session, ml)
+	if err != nil {
+		response.SendErrorToSession(session, err)
+	}
 
 	return nil
 }

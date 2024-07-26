@@ -59,7 +59,7 @@ func TestPartySyncMatchmakingNilDoesNotCancelParty(t *testing.T) {
 		select {
 		case <-ctx.Done():
 			reason <- nil
-		case reason <- PartySyncMatchmaking(msessions, partyHandler, timeout):
+		case reason <- PartySyncMatchmaking(ctx, msessions, partyHandler, timeout):
 		}
 	}()
 
@@ -133,7 +133,7 @@ func TestPartySyncMatchmakingErrorWhenNonNil(t *testing.T) {
 		select {
 		case <-ctx.Done():
 			reason <- nil
-		case reason <- PartySyncMatchmaking(msessions, partyHandler, timeout):
+		case reason <- PartySyncMatchmaking(ctx, msessions, partyHandler, timeout):
 		}
 	}()
 
@@ -208,7 +208,7 @@ func TestPartySyncMatchmakingRespectsPartyTimeout(t *testing.T) {
 		select {
 		case <-ctx.Done():
 			reason <- nil
-		case reason <- PartySyncMatchmaking(msessions, partyHandler, timeout):
+		case reason <- PartySyncMatchmaking(ctx, msessions, partyHandler, timeout):
 		}
 	}()
 
