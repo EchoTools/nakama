@@ -146,10 +146,14 @@ type TicketMeta struct {
 // MatchmakingSession represents a user session looking for a match.
 type MatchmakingSession struct {
 	sync.RWMutex
-	Ctx           context.Context
-	CtxCancelFn   context.CancelCauseFunc
-	Logger        *zap.Logger
-	UserId        uuid.UUID
+	Ctx         context.Context
+	CtxCancelFn context.CancelCauseFunc
+
+	Logger   *zap.Logger
+	nk       runtime.NakamaModule
+	registry *MatchmakingRegistry
+
+	UserID        uuid.UUID
 	PingResultsCh chan []evr.EndpointPingResult // Channel for ping completion.
 	Expiry        time.Time
 	Label         *EvrMatchState
@@ -389,7 +393,7 @@ func (mr *MatchmakingRegistry) matchedEntriesFn(entries [][]*MatchmakerEntry) {
 	}
 }
 
-func (mr *MatchmakingRegistry) listUnfilledLobbies(ctx context.Context, logger *zap.Logger, searchLabel *EvrMatchState, minCount int) ([]*EvrMatchState, string, error) {
+func (mr *MatchmakingRegistry) listUnfilledLobbies(ctx context.Context, logger *zap.Logger, searchLabel *EvrMatchState, partySize int) ([]*EvrMatchState, string, error) {
 	var err error
 	var query string
 
@@ -1173,7 +1177,9 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, logger *zap.Logger, se
 		CtxCancelFn: cancel,
 
 		Logger:        logger,
-		UserId:        session.UserID(),
+		nk:            c.nk,
+		registry:      c,
+		UserID:        session.UserID(),
 		PingResultsCh: make(chan []evr.EndpointPingResult),
 		Expiry:        time.Now().UTC().Add(findAttemptsExpiry),
 		Label:         ml,
@@ -1305,7 +1311,7 @@ func (ms *MatchmakingSession) BuildQuery(latencies []LatencyMetric, evrID evr.Ev
 	stringProps["channel"] = chstr
 	stringProps["evr_id"] = evrID.String()
 	// Add this user's ID to the string props
-	stringProps["userid"] = strings.Replace(ms.UserId.String(), "-", "", -1)
+	stringProps["userid"] = strings.Replace(ms.UserID.String(), "-", "", -1)
 
 	// Add a property of the external IP's RTT
 	for _, b := range latencies {
