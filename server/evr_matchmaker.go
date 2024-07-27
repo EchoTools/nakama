@@ -462,7 +462,7 @@ func listMatches(ctx context.Context, p *EvrPipeline, limit int, minSize int, ma
 	return p.runtimeModule.MatchList(ctx, limit, true, "", &minSize, &maxSize, query)
 }
 
-func buildMatchQueryFromLabel(ml *EvrMatchState) string {
+func buildMatchQueryFromLabel(ml *EvrMatchState, partySize int) string {
 	var boost int = 0 // Default booster
 
 	qparts := []string{
@@ -482,7 +482,7 @@ func buildMatchQueryFromLabel(ml *EvrMatchState) string {
 
 	if ml.TeamIndex != Spectator && ml.TeamIndex != Moderator {
 		// MUST have room for this party on the teams
-		qparts = append(qparts, fmt.Sprintf("+label.player_count:<=%d", ml.PlayerCount))
+		qparts = append(qparts, fmt.Sprintf("+label.player_count:<=%d", ml.PlayerLimit-partySize))
 	}
 
 	// MUST be a broadcaster on a channel the user has access to
@@ -1120,14 +1120,14 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 
 	// Create a new matching session
 	logger.Debug("Creating a new matchmaking session")
-	partySize := 1
+
 	timeout := 5 * time.Minute
 
 	if ml.TeamIndex == TeamIndex(evr.TeamSpectator) {
 		timeout = 12 * time.Hour
 	}
 
-	msession, err := p.matchmakingRegistry.Create(parentCtx, logger, session, ml, partySize, timeout)
+	msession, err := p.matchmakingRegistry.Create(parentCtx, logger, session, ml, timeout)
 	if err != nil {
 		logger.Error("Failed to create matchmaking session", zap.Error(err))
 		return err

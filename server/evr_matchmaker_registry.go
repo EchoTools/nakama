@@ -405,13 +405,13 @@ func (mr *MatchmakingRegistry) listUnfilledLobbies(ctx context.Context, logger *
 	}
 
 	// TODO Move this into the matchmaking registry
-	query = buildMatchQueryFromLabel(searchLabel)
+	query = buildMatchQueryFromLabel(searchLabel, partySize)
 
 	// Basic search defaults
 
 	minSize := 0
 	limit := 100
-	maxSize := MatchMaxSize - minCount
+	maxSize := MatchMaxSize - partySize
 	logger = logger.With(zap.String("query", query))
 
 	// Search for possible matches
@@ -1139,7 +1139,7 @@ func (c *MatchmakingRegistry) Delete(sessionId uuid.UUID) {
 }
 
 // Add adds a matching session to the registry
-func (c *MatchmakingRegistry) Create(ctx context.Context, logger *zap.Logger, session *sessionWS, ml *EvrMatchState, partySize int, timeout time.Duration) (*MatchmakingSession, error) {
+func (c *MatchmakingRegistry) Create(ctx context.Context, logger *zap.Logger, session *sessionWS, ml *EvrMatchState, timeout time.Duration) (*MatchmakingSession, error) {
 	// Check if there is an existing session
 	if _, ok := c.GetMatchingBySessionId(session.ID()); ok {
 		// Cancel it
@@ -1155,18 +1155,14 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, logger *zap.Logger, se
 	case ml.Mode == evr.ModeSocialPrivate || ml.Mode == evr.ModeSocialPublic:
 		ml.Level = evr.LevelSocial // Include the level in the search
 		ml.TeamSize = MatchMaxSize
-		ml.PlayerCount = MatchMaxSize - partySize
 
 	case ml.Mode == evr.ModeArenaPublic:
 		ml.TeamSize = 4
-		ml.PlayerCount = ml.TeamSize*2 - partySize // Both teams, minus the party size
 
 	case ml.Mode == evr.ModeCombatPublic:
 		ml.TeamSize = 5
-		ml.PlayerCount = ml.TeamSize*2 - partySize // Both teams, minus the party size
 
 	default: // Privates
-		ml.PlayerCount = MatchMaxSize - partySize
 		ml.TeamSize = 5
 	}
 
