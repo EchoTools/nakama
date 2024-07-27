@@ -941,7 +941,10 @@ func (m *MatchmakingSession) GetPingCandidates(endpoints ...evr.Endpoint) (candi
 
 	return candidates
 }
-func JoinPartyGroup(session *sessionWS, groupID string) (*PartyGroup, error) {
+func JoinPartyGroup(ctx context.Context, logger *zap.Logger, session *sessionWS) (*PartyGroup, error) {
+
+	groupName, partyID, err := GetPartyGroupID(ctx, session.pipeline.db, session.UserID().String())
+
 	maxSize := 8
 	open := true
 
@@ -969,7 +972,6 @@ func JoinPartyGroup(session *sessionWS, groupID string) (*PartyGroup, error) {
 		Status:   "",
 	}
 
-	partyID := uuid.NewV5(uuid.Nil, groupID)
 	partyRegistry := session.pipeline.partyRegistry.(*LocalPartyRegistry)
 	// Check if the party already exists
 	ph, ok := partyRegistry.parties.Load(partyID)
@@ -1013,7 +1015,7 @@ func JoinPartyGroup(session *sessionWS, groupID string) (*PartyGroup, error) {
 	}
 
 	pg := &PartyGroup{
-		name: groupID,
+		name: groupName,
 		ph:   ph,
 	}
 	logger.Debug("Joined party", zap.String("party_id", partyID.String()), zap.String("party_group", groupName), zap.Any("members", pg.GetMembers()))

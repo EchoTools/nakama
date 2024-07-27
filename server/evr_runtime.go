@@ -814,3 +814,21 @@ func GetMatchBySessionID(nk runtime.NakamaModule, sessionID uuid.UUID) (matchID 
 
 	return MatchID{}, nil, ErrorMatchNotFound
 }
+
+func GetPartyGroupID(ctx context.Context, db *sql.DB, userID string) (string, uuid.UUID, error) {
+	query := "SELECT value->>'group_id' FROM storage WHERE collection = $1 AND key = $2 and user_id = $3"
+	var dbPartyGroupName string
+	var found = true
+	err := db.QueryRowContext(ctx, query, MatchmakingConfigStorageCollection, MatchmakingConfigStorageKey, userID).Scan(&dbPartyGroupName)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			found = false
+		} else {
+			return "", uuid.Nil, status.Error(codes.Internal, "error finding user account")
+		}
+	}
+	if !found {
+		return "", uuid.Nil, status.Error(codes.NotFound, "user account not found")
+	}
+	return dbPartyGroupName, uuid.NewV5(uuid.Nil, dbPartyGroupName), nil
+}
