@@ -644,7 +644,7 @@ func (p *EvrPipeline) MatchCreate(ctx context.Context, msession *MatchmakingSess
 		return MatchID{}, ErrMatchmakingUnknownError
 	}
 
-	msession.Logger.Info("Match created", zap.String("match_id", matchID.String()), zap.String("label", response))
+	msession.Logger.Info("Match created", zap.String("mid", matchID.UUID().String()), zap.Any("label", response))
 
 	// Return the prepared session
 	return matchID, nil
@@ -718,7 +718,7 @@ func (p *EvrPipeline) LobbyJoin(ctx context.Context, logger *zap.Logger, matchID
 	if err != nil || label == nil {
 		return fmt.Errorf("failed to get match label: %w", err)
 	}
-	logger = logger.With(zap.String("mid", matchID.String()), zap.String("label", label.String()))
+	logger = logger.With(zap.String("mid", matchID.UUID().String()), zap.Any("label", label))
 	// Prepare all of the presences
 	presences := make([]*EvrMatchPresence, 0, len(msessions))
 	for _, msession := range msessions {
@@ -737,7 +737,7 @@ func (p *EvrPipeline) LobbyJoin(ctx context.Context, logger *zap.Logger, matchID
 
 		_, presence, _, err = EVRMatchJoinAttempt(msessions[i].Context(), logger, matchID, p.sessionRegistry, p.matchRegistry, p.tracker, *presence)
 		if err != nil {
-			logger.Warn("Failed to join presences to match", zap.Any("presence", presence), zap.Any("presences", presences), zap.Error(err))
+			logger.Warn("Failed to join presences to match", zap.Any("presences", presences), zap.Error(err))
 			return err
 		}
 		matchPresences = append(matchPresences, presence)
