@@ -901,13 +901,16 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		return "", runtime.NewError("unauthorized to signal match", StatusPermissionDenied)
 	}
 
+	if request.GuildID == "" {
+		return "", runtime.NewError("guild ID must be specified", StatusInvalidArgument)
+	}
+
 	var groupID string
-	if request.GuildID != "" {
-		if groupID, err = GetGroupIDByGuildID(ctx, db, request.GuildID); err != nil {
-			return "", runtime.NewError(err.Error(), StatusInternalError)
-		} else if groupID == "" {
-			return "", runtime.NewError("guild group not found", StatusNotFound)
-		}
+
+	if groupID, err = GetGroupIDByGuildID(ctx, db, request.GuildID); err != nil {
+		return "", runtime.NewError(err.Error(), StatusInternalError)
+	} else if groupID == "" {
+		return "", runtime.NewError("guild group not found", StatusNotFound)
 	}
 
 	// Validate that the user has permission to allocate to the target guild
