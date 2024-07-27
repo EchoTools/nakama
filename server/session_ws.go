@@ -106,21 +106,23 @@ type (
 	}
 
 	// Keys used for storing/retrieving user information in the context of a request after authentication.
-	ctxNodeKey              struct{} // The node name
-	ctxEvrIDKey             struct{} // The EchoVR ID
-	ctxDiscordIDKey         struct{} // The Discord ID
-	ctxGroupIDKey           struct{} // The guild group ID the user has selected
-	ctxLoginSessionKey      struct{} // The Session ID of the login connection
-	ctxSessionIDKey         struct{} // The Session ID
-	ctxHMDSerialOverrideKey struct{} // The HMD Serial Override
-	ctxAuthDiscordIDKey     struct{} // The Discord ID from the urlparam (used to authenticate broadcaster connections)
-	ctxAuthPasswordKey      struct{} // The Password from the urlparam(used to authenticate login/broadcaster connections)
-	ctxUrlParamsKey         struct{} // The URL parameters from the request
-	ctxIPinfoTokenKey       struct{} // The IPinfo token from the config
-	ctxFlagsKey             struct{} // The group flags from the urlparam
-	ctxFeaturesKey          struct{} // The features from the urlparam
-	ctxRequiredFeaturesKey  struct{} // The features from the urlparam
-	ctxVerboseKey           struct{} // The verbosity flag from matchmaking config
+	ctxNodeKey                struct{} // The node name
+	ctxEvrIDKey               struct{} // The EchoVR ID
+	ctxDiscordIDKey           struct{} // The Discord ID
+	ctxDefaultDisplayNameKey  struct{} // The default display name
+	ctxDisplayNameOverrideKey struct{} // The display name override
+	ctxGroupIDKey             struct{} // The guild group ID the user has selected
+	ctxLoginSessionKey        struct{} // The Session ID of the login connection
+	ctxSessionIDKey           struct{} // The Session ID
+	ctxHMDSerialOverrideKey   struct{} // The HMD Serial Override
+	ctxAuthDiscordIDKey       struct{} // The Discord ID from the urlparam (used to authenticate broadcaster connections)
+	ctxAuthPasswordKey        struct{} // The Password from the urlparam(used to authenticate login/broadcaster connections)
+	ctxUrlParamsKey           struct{} // The URL parameters from the request
+	ctxIPinfoTokenKey         struct{} // The IPinfo token from the config
+	ctxFlagsKey               struct{} // The group flags from the urlparam
+	ctxFeaturesKey            struct{} // The features from the urlparam
+	ctxRequiredFeaturesKey    struct{} // The features from the urlparam
+	ctxVerboseKey             struct{} // The verbosity flag from matchmaking config
 
 	//ctxMatchmakingQueryKey         struct{} // The Matchmaking query from the urlparam
 	//ctxMatchmakingGuildPriorityKey struct{} // The Matchmaking guild priority from the urlparam
@@ -262,7 +264,7 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 	}
 }
 
-func (s *sessionWS) LoginSession(userID string, username string, discordID string, evrID evr.EvrId, deviceId *DeviceAuth, groupID uuid.UUID, flags int, verbose bool) error {
+func (s *sessionWS) LoginSession(userID, username, displayName, displayNameOverride, discordID string, evrID evr.EvrId, deviceId *DeviceAuth, groupID uuid.UUID, flags int, verbose bool) error {
 	// Each player has a single login connection, which will act as the core session.
 	// When this connection is terminated, all other connections should be terminated.
 
@@ -285,6 +287,10 @@ func (s *sessionWS) LoginSession(userID string, username string, discordID strin
 	ctx = context.WithValue(ctx, ctxGroupIDKey{}, groupID)
 	ctx = context.WithValue(ctx, ctxVerboseKey{}, verbose)
 	ctx = context.WithValue(ctx, ctxDiscordIDKey{}, discordID)
+	ctx = context.WithValue(ctx, ctxDefaultDisplayNameKey{}, displayName)
+	if displayNameOverride != "" {
+		ctx = context.WithValue(ctx, ctxDisplayNameOverrideKey{}, displayNameOverride)
+	}
 
 	s.Lock()
 	s.ctx = ctx
@@ -430,6 +436,16 @@ func (s *sessionWS) ValidateSession(loginSessionID uuid.UUID, evrID evr.EvrId) e
 			return fmt.Errorf("login session does not have a discord ID")
 		}
 
+		displayName, ok := loginCtx.Value(ctxDefaultDisplayNameKey{}).(string)
+		if !ok {
+			return fmt.Errorf("login session does not have a default display name")
+		}
+
+		displayNameOverride, ok := loginCtx.Value(ctxDisplayNameOverrideKey{}).(string)
+		if !ok {
+			displayNameOverride = ""
+		}
+
 		// Require the login session to be authenticated.
 		if userID == uuid.Nil {
 			return fmt.Errorf("login session not authenticated")
@@ -444,6 +460,10 @@ func (s *sessionWS) ValidateSession(loginSessionID uuid.UUID, evrID evr.EvrId) e
 		ctx = context.WithValue(ctx, ctxGroupIDKey{}, groupID)
 		ctx = context.WithValue(ctx, ctxVerboseKey{}, verbose)
 		ctx = context.WithValue(ctx, ctxDiscordIDKey{}, discordID)
+		ctx = context.WithValue(ctx, ctxDefaultDisplayNameKey{}, displayName)
+		if displayNameOverride != "" {
+			ctx = context.WithValue(ctx, ctxDisplayNameOverrideKey{}, displayNameOverride)
+		}
 
 		// Set the session information
 		s.Lock()

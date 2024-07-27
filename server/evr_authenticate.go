@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -774,82 +775,53 @@ func (md *RoleGroupMetadata) MarshalToMap() (map[string]interface{}, error) {
 	return guildGroupMap, nil
 }
 
-func SetDisplayNameByChannelBySession(ctx context.Context, nk runtime.NakamaModule, logger *zap.Logger, discordRegistry DiscordRegistry, session *sessionWS, groupID string) (displayName string, err error) {
+func GetDiscordDisplayNames(ctx context.Context, db *sql.DB, discordRegistry DiscordRegistry, userID, groupID string) (string, string, string, error) {
 
-	// Priority order from least to most preferred
-	options := make([]string, 0, 6)
+	discordID, err := GetDiscordIDByUserID(ctx, db, groupID)
+	if err != nil {
+		return "", "", "", fmt.Errorf("error getting discord ID by group ID: %w", err)
+	}
+
+	user, err := discordRegistry.GetUser(ctx, discordID)
+	if err != nil {
+		return "", "", "", fmt.Errorf("error getting discord user: %w", err)
+	}
+
+	guildID, err := GetGuildIDByGroupID(ctx, db, groupID)
+	if err != nil {
+		return "", "", "", fmt.Errorf("error getting guild ID by group ID: %w", err)
+	}
+
+	guildMember, err := discordRegistry.GetGuildMember(ctx, guildID, discordID)
+	if err != nil || guildMember == nil {
+		return user.Username, user.GlobalName, "", fmt.Errorf("error getting guild member: %w", err)
+	}
+	return user.Username, user.GlobalName, guildMember.Nick, nil
+}
+
+func SetDisplayNameByChannelBySession(ctx context.Context, nk runtime.NakamaModule, logger *zap.Logger, discordRegistry DiscordRegistry, session *sessionWS, groupID string) (string, error) {
+
 	userID := session.UserID().String()
 
-	var account *api.Account
-	// Get the account
-	if account, err = nk.AccountGetId(ctx, userID); err != nil {
-		return "", fmt.Errorf("error getting account: %w", err)
-	}
-	user := account.GetUser()
-	username := account.GetUser().GetUsername()
-	displayName = user.GetDisplayName()
-
-	// If the account has an override, use that
-	md := AccountUserMetadata{}
-	if err = json.Unmarshal([]byte(user.GetMetadata()), &md); err != nil {
-		return displayName, fmt.Errorf("error unmarshalling account metadata: %w", err)
-	}
-	if md.DisplayNameOverride != "" {
-		displayName = md.DisplayNameOverride
-		if err = nk.AccountUpdateId(ctx, userID, "", nil, md.DisplayNameOverride, "", "", "", ""); err != nil {
-			return displayName, fmt.Errorf("error updating account: %w", err)
-		}
-		return displayName, nil
+	if override, ok := ctx.Value(ctxDisplayNameOverrideKey{}).(string); ok {
+		return override, nil
 	}
 
-	// Get the discordID from the account's customID
-	discordID := account.GetCustomId()
-	if discordID == "" {
-		return displayName, nil
+	defaultDisplayName, ok := ctx.Value(ctxDefaultDisplayNameKey{}).(string)
+	if !ok {
+		defaultDisplayName = session.Username()
 	}
 
-	// Get the discord user
-	discordUser, err := discordRegistry.GetUser(ctx, discordID)
+	username, globalName, guildNick, err := GetDiscordDisplayNames(ctx, session.pipeline.db, discordRegistry, userID, groupID)
 	if err != nil {
-		return displayName, fmt.Errorf("error getting discord user: %w", err)
+		return defaultDisplayName, fmt.Errorf("error getting discord display names: %w", err)
 	}
+	options := []string{guildNick, defaultDisplayName, globalName, username}
 
-	options = append(options, discordUser.Username)
-	options = append(options, discordUser.GlobalName)
-	options = append(options, displayName)
-
-	gid := uuid.FromStringOrNil(groupID)
-	// Get the guild
-	if uuid.FromStringOrNil(groupID) != uuid.Nil {
-		// Get the guild by the user's primary guild
-		guild, err := discordRegistry.GetGuildByGroupId(ctx, gid.String())
-		if err != nil {
-			logger.Warn("Error getting guild by group id.", zap.String("group_id", groupID), zap.Error(err))
-			return displayName, nil
-		}
-		if guild != nil {
-			// Get the guild member
-			guildMember, err := discordRegistry.GetGuildMember(ctx, guild.ID, discordID)
-			if err != nil {
-				return displayName, fmt.Errorf("error getting guild member %s for guild %s: %w", discordID, guild.ID, err)
-			}
-			if guildMember != nil {
-				options = append(options, guildMember.Nick)
-			}
-		}
-	}
-
-	// Reverse the options
-	options = lo.Reverse(options)
-	logger.Debug("SetDisplayNameByChannelBySession", zap.String("gid", gid.String()), zap.String("options", strings.Join(options, ",")))
-	displayName, err = SelectDisplayNameByPriority(ctx, nk, account.GetUser().GetId(), account.GetUser().GetUsername(), options)
+	logger.Debug("SetDisplayNameByChannelBySession", zap.String("gid", groupID), zap.String("options", strings.Join(options, ",")))
+	displayName, err := SelectDisplayNameByPriority(ctx, nk, userID, username, options)
 	if err != nil {
 		return "", fmt.Errorf("error selecting display name by priority: %w", err)
-	}
-
-	// Only update the account if something has changed
-	if displayName == user.GetDisplayName() && discordUser.Username == user.GetUsername() {
-		return displayName, nil
 	}
 
 	// Purge old display names
@@ -876,9 +848,8 @@ func SetDisplayNameByChannelBySession(ctx context.Context, nk runtime.NakamaModu
 	// Update the account
 	accountUpdates := []*runtime.AccountUpdate{
 		{
-			UserID:      userID,
-			Username:    username,
-			DisplayName: displayName,
+			UserID:   userID,
+			Username: username,
 		},
 	}
 	storageWrites := []*runtime.StorageWrite{
