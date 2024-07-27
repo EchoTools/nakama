@@ -411,11 +411,10 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 	// Start the search in a goroutine.
 	go func() error {
 		// Set some defaults
-		partySize := 1 // TODO FIXME this should include the party size
 
 		// Create a matching session
 		timeout := 15 * time.Minute
-		msession, err := p.matchmakingRegistry.Create(ctx, logger, session, ml, partySize, timeout)
+		msession, err := p.matchmakingRegistry.Create(ctx, logger, session, ml, timeout)
 		if err != nil {
 			return response.SendErrorToSession(session, status.Errorf(codes.Internal, "Failed to create matchmaking session: %v", err))
 		}
@@ -529,7 +528,7 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 			return response.SendErrorToSession(session, err)
 		}
 	}
-	msession, err := p.matchmakingRegistry.Create(ctx, logger, session, ml, 1, 1*time.Minute)
+	msession, err := p.matchmakingRegistry.Create(ctx, logger, session, ml, 1*time.Minute)
 	if err != nil {
 		return response.SendErrorToSession(session, status.Errorf(codes.Internal, "Failed to create matchmaking session: %v", err))
 	}
