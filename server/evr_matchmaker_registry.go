@@ -680,7 +680,8 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 		logger.Error("matchID is nil")
 		return
 	}
-	logger.Info("Match made", zap.String("matchID", matchID.String()), zap.Any("teams", teams))
+
+	successful := make(map[string]struct{}, len(entrants))
 	for i, players := range teams {
 		// Assign each player in the team to the match
 		for _, entry := range players {
@@ -703,9 +704,27 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 			}
 
 			mr.metrics.CustomCounter("match_join_matched_count", metricsTags, 1)
-			mr.metrics.CustomTimer("matchmaking_match_time", metricsTags, time.Since(ticketMeta.Timestamp))
+			mr.metrics.CustomTimer("matchmaking_session_duration", metricsTags, time.Since(ticketMeta.Timestamp))
+
+			successful[entry.Presence.SessionID.String()] = struct{}{}
 		}
 	}
+	failures := make([]*MatchmakerPresence, 0, len(entrants)-len(successful))
+	for _, entry := range entrants {
+		if _, ok := successful[entry.Presence.SessionID.String()]; !ok {
+			failures = append(failures, entry.Presence)
+		}
+	}
+	_, labelStr, err := mr.matchRegistry.GetMatch(mr.ctx, matchID.String())
+	if err != nil {
+		logger.Error("Failed to get match", zap.Error(err))
+	}
+	label := &EvrMatchState{}
+	if err := json.Unmarshal([]byte(labelStr), label); err != nil {
+		logger.Error("Failed to unmarshal match label", zap.Error(err))
+	}
+
+	logger.Info("Match made", zap.Any("label", label), zap.String("mid", matchID.UUID().String()), zap.Any("teams", teams), zap.Any("errored", failures))
 }
 
 func distributeParties(parties [][]*MatchmakerEntry) [][]*MatchmakerEntry {
@@ -993,6 +1012,7 @@ func JoinPartyGroup(session *sessionWS, groupID string) (*PartyGroup, error) {
 		name: groupID,
 		ph:   ph,
 	}
+	logger.Debug("Joined party", zap.String("party_id", partyID.String()), zap.String("party_group", groupName), zap.Any("members", pg.GetMembers()))
 	return pg, nil
 }
 

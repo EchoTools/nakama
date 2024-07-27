@@ -499,7 +499,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		return nil, false, ""
 	}
 
-	logger = logger.WithField("mid", state.ID.String())
+	logger = logger.WithField("mid", state.ID.UUID().String())
 	logger = logger.WithField("username", presence.GetUsername())
 
 	if presence.GetSessionId() == state.Broadcaster.SessionID {
