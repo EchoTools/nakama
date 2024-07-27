@@ -593,59 +593,17 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 		return // No label found
 	}
 
-	// Try to backfill matches with parties
-	var backfillMatches []*EvrMatchState
-	backfillMatches, _, err := mr.listUnfilledLobbies(mr.ctx, logger, ml, 1)
-	if err != nil {
-		logger.Error("Failed to list unfilled lobbies", zap.Error(err))
-		return
+	entrants = make([]*MatchmakerEntry, 0, len(entrants))
+	for _, m := range parties {
+		entrants = append(entrants, m...)
 	}
-
-	for partyID, party := range parties {
-		partySize := len(party)
-
-		for _, m := range backfillMatches {
-			if m.PlayerLimit-m.PlayerCount < partySize {
-				continue
-			}
-			/*
-				// Make sure adding these players makes the teams the same size
-				if (m.PlayerCount+partySize)%2 != 0 {
-					continue
-				}
-			*/
-			logger.Info("Backfilling party into match", zap.String("matchID", m.ID.String()), zap.String("partyID", partyID), zap.Any("party", party))
-
-			// Add the party to the match
-			for _, e := range party {
-				logger = logger.With(zap.String("sessionID", e.Presence.SessionID.String()), zap.String("partyID", partyID), zap.String("matchID", m.ID.String()), zap.String("uid", e.Presence.GetUserId()))
-				// Remove the player from the entrants list
-				for j, e2 := range entrants {
-					if e2.Presence.SessionID == e.Presence.SessionID {
-						entrants = append(entrants[:j], entrants[j+1:]...)
-						break
-					}
-				}
-
-				s, ok := mr.GetMatchingBySessionId(e.Presence.SessionID)
-				if !ok {
-					logger.Warn("Could not find matching session for user", zap.String("sessionID", e.Presence.SessionID.String()))
-					continue
-				}
-
-				// Join the players to the match
-				if err := mr.evrPipeline.JoinEvrMatch(s.Logger, s.Session, "", m.ID, int(AnyTeam)); err != nil {
-					logger.Error("Error joining player to match", zap.Error(err))
-				}
-			}
-
-			// Remove the party from the party list
-			delete(parties, partyID)
-			// Set the backfill match size to the new size
-			m.PlayerCount += partySize
-
-		}
+	metricsTags := map[string]string{
+		"type":    strconv.FormatInt(int64(ml.LobbyType), 10),
+		"mode":    ml.Mode.String(),
+		"channel": ml.GroupID.String(),
+		"level":   ml.Level.String(),
 	}
+	mr.metrics.CustomCounter("matchmaking_matched_participant_count", metricsTags, int64(len(entrants)))
 
 	teams := distributeParties(lo.Values(parties))
 	if len(teams) != 2 {
@@ -668,14 +626,7 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 			ml.Players = append(ml.Players, pi)
 		}
 	}
-	metricsTags := map[string]string{
-		"type":     strconv.FormatInt(int64(ml.LobbyType), 10),
-		"mode":     ml.Mode.String(),
-		"channel":  ml.GroupID.String(),
-		"level":    ml.Level.String(),
-		"team_idx": strconv.FormatInt(int64(ml.TeamIndex), 10),
-	}
-	mr.metrics.CustomCounter("matchmaking_matched_participant_count", metricsTags, int64(len(entrants)))
+
 	// Find a valid participant to get the label from
 
 	ml.SpawnedBy = uuid.Nil.String()
@@ -745,12 +696,14 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 				logger.Warn("Could not find ticket metadata for user", zap.String("sessionID", entry.Presence.SessionID.String()), zap.String("ticket", ticket))
 				continue
 			}
-			// Join the players to the match
-			logger.Info("Joining player to match", zap.Any("presence", entry.Presence), zap.String("matchID", matchID.String()), zap.String("ticket", ticket))
-			if err := mr.evrPipeline.JoinEvrMatch(s.Logger, s.Session, ticketMeta.Query, matchID, i); err != nil {
-				logger.Error("Error joining player to match", zap.Error(err))
+
+			if err := mr.evrPipeline.LobbyJoin(context.Background(), logger, matchID, int(i), ticketMeta.Query, s); err != nil {
+				logger.Warn("Failed to join player to made match", zap.String("mid", matchID.UUID().String()), zap.String("uid", entry.Presence.UserId), zap.Error(err))
+				continue
 			}
 
+			mr.metrics.CustomCounter("match_join_matched_count", metricsTags, 1)
+			mr.metrics.CustomTimer("matchmaking_match_time", metricsTags, time.Since(ticketMeta.Timestamp))
 		}
 	}
 }

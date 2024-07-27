@@ -475,11 +475,31 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 		// Check if this player is a global moderator or developer
 		isModerator, _ := checkIfGlobalModerator(ctx, p.runtimeModule, session.userID)
 		isDeveloper, _ := checkIfGlobalDeveloper(ctx, p.runtimeModule, session.userID)
+		if !isDeveloper {
+			// Let developers join public matches
 
-		// Let developers and moderators join public matches
-		if request.GetAlignment() != int8(Spectator) && !isDeveloper && !isModerator && time.Since(ml.StartTime) < time.Second*10 {
-			// Allow if the match is over 15 seconds old, to allow matchmaking to properly populate the match
-			err = status.Errorf(codes.InvalidArgument, "Match is a newly started public match")
+			switch request.GetAlignment() {
+			case int8(Spectator):
+				if ml.Mode == evr.ModeSocialPublic || ml.Mode == evr.ModeSocialPrivate {
+					err = status.Errorf(codes.PermissionDenied, "social lobbies can only be joined by moderators and social participants.")
+				}
+				// Allow spectators to join public matches
+			case int8(Moderator):
+				if !isModerator || (ml.Mode != evr.ModeSocialPublic && ml.Mode != evr.ModeSocialPrivate) {
+					request.Entrants[0].Role = int8(AnyTeam)
+				}
+			case int8(SocialLobbyParticipant):
+				// Allow moderators to join social lobbies
+				if ml.Mode != evr.ModeSocialPublic && ml.Mode != evr.ModeSocialPrivate {
+					request.Entrants[0].Role = int8(AnyTeam)
+				}
+			default:
+				if time.Since(ml.StartTime) < time.Second*10 {
+					// Allow if the match is over 15 seconds old, to allow matchmaking to properly populate the match
+					err = status.Errorf(codes.InvalidArgument, "Match is a newly started public match")
+				}
+				request.Entrants[0].Role = int8(AnyTeam)
+			}
 		}
 	}
 
@@ -509,8 +529,11 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 			return response.SendErrorToSession(session, err)
 		}
 	}
-
-	if err = p.JoinEvrMatch(logger, session, "", matchToken, int(request.GetAlignment())); err != nil {
+	msession, err := p.matchmakingRegistry.Create(ctx, logger, session, ml, 1, 1*time.Minute)
+	if err != nil {
+		return response.SendErrorToSession(session, status.Errorf(codes.Internal, "Failed to create matchmaking session: %v", err))
+	}
+	if err = p.LobbyJoin(ctx, logger, matchToken, int(request.GetAlignment()), "", msession); err != nil {
 		return response.SendErrorToSession(session, status.Errorf(codes.NotFound, err.Error()))
 	}
 	return nil

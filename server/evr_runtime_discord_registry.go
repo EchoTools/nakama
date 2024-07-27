@@ -298,7 +298,6 @@ func (r *LocalDiscordRegistry) GetGuildMember(ctx context.Context, guildId, memb
 	}
 
 	r.bot.State.MemberAdd(member)
-
 	return member, nil
 }
 
