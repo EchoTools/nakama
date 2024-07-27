@@ -1137,57 +1137,16 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 	p.metrics.CustomCounter("match_find_active_count", msession.metricsTags(), 1)
 	// Load the user's matchmaking config
 
-	config, err := LoadMatchmakingSettings(msession.Ctx, p.runtimeModule, session.userID.String())
-	if err != nil {
-		logger.Error("Failed to load matchmaking config", zap.Error(err))
-	}
-
-	var matchID MatchID
 	// Check for a direct match first
-	if !config.NextMatchID.IsNil() {
-		matchID = config.NextMatchID
-	}
-
-	config.NextMatchID = MatchID{}
-	err = StoreMatchmakingSettings(msession.Ctx, p.runtimeModule, session.userID.String(), config)
+	found, err := p.LobbyJoinFromDB(parentCtx, logger, msession)
 	if err != nil {
-		logger.Error("Failed to save matchmaking config", zap.Error(err))
+		logger.Warn("Failed to join from DB", zap.Error(err))
+	} else if found {
+		// Join was successful
+		return nil
 	}
 
-	if !matchID.IsNil() {
-		logger.Debug("Attempting to join match from settings", zap.String("mid", matchID.String()))
-		match, _, err := p.matchRegistry.GetMatch(msession.Ctx, matchID.String())
-		if err != nil {
-			logger.Error("Failed to get match", zap.Error(err))
-		} else {
-			if match == nil {
-				logger.Warn("Match not found", zap.String("mid", matchID.String()))
-			} else {
-				// Join the match
-				if err := p.LobbyJoin(msession.Ctx, logger, matchID, int(AnyTeam), "", msession); err != nil {
-					logger.Warn("Error joining player to found match", zap.Error(err))
-					return err
-				}
-				p.metrics.CustomCounter("match_join_next_count", map[string]string{}, 1)
-				return nil
-			}
-		}
-	}
-
-	if config.GroupID != "" && ml.TeamIndex != TeamIndex(evr.TeamSpectator) {
-		msession.Party, err = JoinPartyGroup(session, config.GroupID)
-		if err != nil {
-			logger.Warn("Failed to join party group", zap.String("group_id", config.GroupID), zap.Error(err))
-		} else {
-
-			logger.Debug("Joined party", zap.String("party_id", msession.Party.ID().String()), zap.Any("members", msession.Party.GetMembers()))
-
-			if leader := msession.Party.GetLeader(); leader != nil && leader.SessionId != session.id.String() {
-				// Delay to allow the leader to end up in a social lobby
-				//<-time.After(3 * time.Second)
-			}
-		}
-	}
+	logger = msession.Logger
 
 	if ml.TeamIndex == TeamIndex(evr.TeamModerator) {
 		// Check that the user is a moderator for this channel, or globally
@@ -1214,14 +1173,30 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 		return p.MatchSpectateStreamLoop(msession)
 	}
 
+	msession.Party, err = JoinPartyGroup(parentCtx, logger, session)
+	if err != nil {
+		logger.Warn("Failed to join party group", zap.Error(err))
+	} else {
+		logger = logger.With(zap.String("group_id", msession.Party.name), zap.String("party_id", msession.Party.ID().String()))
+	}
+
+	<-time.After(1 * time.Second)
+
+	if leader := msession.Party.GetLeader(); leader != nil && leader.SessionId != session.id.String() {
+		// Try to join the leader
+		<-time.After(2 * time.Second)
+		go FollowLeader(logger, msession, p.runtimeModule)
+	}
+
 	// Start a ping to broadcaster endpoints
 	go p.PingGameServers(msession)
-
+	<-time.After(2 * time.Second)
 	switch ml.Mode {
 	// For public matches, backfill or matchmake
 	// If it's a social match, backfill or create immediately
 	case evr.ModeSocialPublic:
-		// Continue to try to backfill
+
+		// Social lobbies are backfill only
 		return p.MatchBackfill(msession)
 
 	case evr.ModeCombatPublic:
@@ -1338,6 +1313,36 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 
 	// Put a ticket in for matching
 	return p.MatchMake(session, msession)
+}
+
+func (p *EvrPipeline) LobbyJoinFromDB(ctx context.Context, logger *zap.Logger, msession *MatchmakingSession) (bool, error) {
+	config, err := LoadMatchmakingSettings(ctx, msession.nk, msession.UserID.String())
+	if err != nil {
+		return false, fmt.Errorf("failed to load matchmaking config: %w", err)
+	}
+
+	var matchID MatchID
+
+	if config.NextMatchID.IsNil() {
+		return false, nil
+	}
+	matchID = config.NextMatchID
+
+	config.NextMatchID = MatchID{}
+	err = StoreMatchmakingSettings(msession.Ctx, msession.nk, msession.UserID.String(), config)
+	if err != nil {
+		return false, fmt.Errorf("failed to store matchmaking config: %w", err)
+	}
+
+	if err := p.LobbyJoin(msession.Ctx, logger, matchID, int(AnyTeam), "", msession); err != nil {
+		logger.Warn("Error joining player to match from DB", zap.String("mid", matchID.UUID().String()), zap.Error(err))
+		return false, fmt.Errorf("failed to join match: %w", err)
+	}
+
+	logger.Info("Joined match from DB", zap.String("mid", matchID.UUID().String()))
+	p.metrics.CustomCounter("match_join_next_count", map[string]string{}, 1)
+
+	return true, nil
 }
 
 func (p *EvrPipeline) GetGuildPriorityList(ctx context.Context, userID uuid.UUID) (all []uuid.UUID, selected []uuid.UUID, err error) {
