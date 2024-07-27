@@ -381,59 +381,69 @@ func (r *ProfileRegistry) UpdateEquippedItem(profile *GameProfileData, category 
 		},
 	}
 
-	// Equip the item
 	s := &profile.Server.EquippedCosmetics.Instances.Unified.Slots
-	switch category {
-	case "emote":
-		s.Emote = name
-		s.SecondEmote = name
-	case "decal", "decalback":
-		s.Decal = name
-		s.DecalBody = name
-	case "tint":
-		// Assigning a tint to the alignment will also assign it to the body
-		if lo.Contains(alignmentTints["tint_alignment_a"], name) {
-			s.TintAlignmentA = name
-		} else if lo.Contains(alignmentTints["tint_alignment_b"], name) {
-			s.TintAlignmentB = name
-		}
-		if name != "tint_chassis_default" {
-			// Equipping "tint_chassis_default" to heraldry tint causes every heraldry equipped to be pitch black.
-			// It seems that the tint being pulled from doesn't exist on heraldry equippables.
-			s.Tint = name
-		}
-		s.TintBody = name
 
-	case "pattern":
-		s.Pattern = name
-		s.PatternBody = name
-	case "chassis":
-		s.Chassis = name
-	case "bracer":
-		s.Bracer = name
-	case "booster":
-		s.Booster = name
-	case "title":
-		s.Title = name
-	case "tag", "heraldry":
-		s.Tag = name
-	case "banner":
-		s.Banner = name
-	case "medal":
-		s.Medal = name
-	case "goal":
-		s.GoalFx = name
-	case "emissive":
-		s.Emissive = name
-	//case "decalback":
-	//	fallthrough
-	case "pip":
-		s.Pip = name
-	default:
-		r.logger.Warn("Unknown cosmetic category `%s`", category)
-		return nil
+	// Exact mappings
+	exactmap := map[string]*string{
+		"emissive_default":      &s.Emissive,
+		"rwd_decalback_default": &s.Pip,
 	}
 
+	if val, ok := exactmap[name]; ok {
+		*val = name
+	} else {
+
+		switch category {
+		case "emote":
+			s.Emote = name
+			s.SecondEmote = name
+		case "decal", "decalback":
+			s.Decal = name
+			s.DecalBody = name
+		case "tint":
+			// Assigning a tint to the alignment will also assign it to the body
+			if lo.Contains(alignmentTints["tint_alignment_a"], name) {
+				s.TintAlignmentA = name
+			} else if lo.Contains(alignmentTints["tint_alignment_b"], name) {
+				s.TintAlignmentB = name
+			}
+			if name != "tint_chassis_default" {
+				// Equipping "tint_chassis_default" to heraldry tint causes every heraldry equipped to be pitch black.
+				// It seems that the tint being pulled from doesn't exist on heraldry equippables.
+				s.Tint = name
+			}
+			s.TintBody = name
+
+		case "pattern":
+			s.Pattern = name
+			s.PatternBody = name
+		case "chassis":
+			s.Chassis = name
+		case "bracer":
+			s.Bracer = name
+		case "booster":
+			s.Booster = name
+		case "title":
+			s.Title = name
+		case "tag", "heraldry":
+			s.Tag = name
+		case "banner":
+			s.Banner = name
+		case "medal":
+			s.Medal = name
+		case "goal":
+			s.GoalFx = name
+		case "emissive":
+			s.Emissive = name
+		//case "decalback":
+		//	fallthrough
+		case "pip":
+			s.Pip = name
+		default:
+			r.logger.Warn("Unknown cosmetic category `%s`", category)
+			return nil
+		}
+	}
 	// Update the timestamp
 	profile.SetStale()
 	return nil
