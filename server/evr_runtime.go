@@ -661,6 +661,9 @@ func MatchLabelByID(ctx context.Context, nk runtime.NakamaModule, matchID MatchI
 	if err = json.Unmarshal([]byte(match.GetLabel().GetValue()), &label); err != nil {
 		return nil, err
 	}
+	if label.GroupID == nil {
+		label.GroupID = &uuid.Nil
+	}
 
 	return &label, nil
 }

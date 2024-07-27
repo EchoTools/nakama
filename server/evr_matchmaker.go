@@ -635,7 +635,7 @@ func (p *EvrPipeline) JoinEvrMatch(logger *zap.Logger, session *sessionWS, query
 	// Append the node to the matchID if it doesn't already contain one.
 	ctx := session.Context()
 	label, err := MatchLabelByID(ctx, p.runtimeModule, matchID)
-	if err != nil {
+	if err != nil || label == nil {
 		return fmt.Errorf("failed to get match label: %w", err)
 	}
 
