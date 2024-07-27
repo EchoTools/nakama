@@ -101,8 +101,8 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 
 	// Providing a discord ID and password avoids the need to link the device to the account.
 	// Server Hosts use this method to authenticate.
-	userPassword, _ := ctx.Value(ctxPasswordKey{}).(string)
-	discordId, _ := ctx.Value(ctxDiscordIdKey{}).(string)
+	userPassword, _ := ctx.Value(ctxAuthPasswordKey{}).(string)
+	discordId, _ := ctx.Value(ctxAuthDiscordIDKey{}).(string)
 
 	// Authenticate the connection
 	gameSettings, err := p.processLogin(ctx, logger, session, request.EvrId, deviceId, discordId, userPassword, payload)
@@ -236,7 +236,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	verbose := config.Verbose
 
 	// Initialize the full session
-	if err := session.LoginSession(userId, user.GetUsername(), evrId, deviceId, groupID, flags, verbose); err != nil {
+	if err := session.LoginSession(userId, user.GetUsername(), account.GetCustomId(), evrId, deviceId, groupID, flags, verbose); err != nil {
 		return settings, fmt.Errorf("failed to login: %w", err)
 	}
 	ctx = session.Context()

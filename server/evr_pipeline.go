@@ -477,12 +477,12 @@ func (p *EvrPipeline) attemptOutOfBandAuthentication(session *sessionWS) error {
 	if session.UserID() != uuid.Nil {
 		return nil
 	}
-	userPassword, ok := ctx.Value(ctxPasswordKey{}).(string)
+	userPassword, ok := ctx.Value(ctxAuthPasswordKey{}).(string)
 	if !ok {
 		return nil
 	}
 
-	discordId, ok := ctx.Value(ctxDiscordIdKey{}).(string)
+	discordId, ok := ctx.Value(ctxAuthDiscordIDKey{}).(string)
 	if !ok {
 		return nil
 	}

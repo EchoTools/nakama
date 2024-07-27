@@ -185,13 +185,13 @@ func extractAuthenticationDetailsFromContext(ctx context.Context) (discordId, pa
 	var ok bool
 
 	// Get the discord id from the context
-	discordId, ok = ctx.Value(ctxDiscordIdKey{}).(string)
+	discordId, ok = ctx.Value(ctxAuthDiscordIDKey{}).(string)
 	if !ok || discordId == "" {
 		return "", "", nil, nil, nil, fmt.Errorf("`discordID` url param missing")
 	}
 
 	// Get the password from the context
-	password, ok = ctx.Value(ctxPasswordKey{}).(string)
+	password, ok = ctx.Value(ctxAuthPasswordKey{}).(string)
 	if !ok || password == "" {
 		return "", "", nil, nil, nil, fmt.Errorf("`password` url param missing")
 	}
