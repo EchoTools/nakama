@@ -249,6 +249,7 @@ func (p *EvrPipeline) MatchBackfill(msession *MatchmakingSession) error {
 					p.createLobbyMu.Unlock()
 					return err
 				}
+				p.createLobbyMu.Unlock()
 				return nil
 			}
 		default:
