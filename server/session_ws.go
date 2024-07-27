@@ -108,12 +108,13 @@ type (
 	// Keys used for storing/retrieving user information in the context of a request after authentication.
 	ctxNodeKey              struct{} // The node name
 	ctxEvrIDKey             struct{} // The EchoVR ID
+	ctxDiscordIDKey         struct{} // The Discord ID
 	ctxGroupIDKey           struct{} // The guild group ID the user has selected
 	ctxLoginSessionKey      struct{} // The Session ID of the login connection
 	ctxSessionIDKey         struct{} // The Session ID
 	ctxHMDSerialOverrideKey struct{} // The HMD Serial Override
-	ctxDiscordIdKey         struct{} // The Discord ID from the urlparam (used to authenticate broadcaster connections)
-	ctxPasswordKey          struct{} // The Password from the urlparam(used to authenticate login/broadcaster connections)
+	ctxAuthDiscordIDKey     struct{} // The Discord ID from the urlparam (used to authenticate broadcaster connections)
+	ctxAuthPasswordKey      struct{} // The Password from the urlparam(used to authenticate login/broadcaster connections)
 	ctxUrlParamsKey         struct{} // The URL parameters from the request
 	ctxIPinfoTokenKey       struct{} // The IPinfo token from the config
 	ctxFlagsKey             struct{} // The group flags from the urlparam
@@ -155,7 +156,7 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 		if len(v) > 19 {
 			v = v[:19]
 		}
-		ctx = context.WithValue(ctx, ctxDiscordIdKey{}, v)
+		ctx = context.WithValue(ctx, ctxAuthDiscordIDKey{}, v)
 	}
 
 	// Add the Password to the context if it's present in the request URL
@@ -163,7 +164,7 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 		if len(v) > 32 {
 			v = v[:32]
 		}
-		ctx = context.WithValue(ctx, ctxPasswordKey{}, v)
+		ctx = context.WithValue(ctx, ctxAuthPasswordKey{}, v)
 	}
 
 	// Add the features list to the urlparam, sanitizing it
@@ -261,7 +262,7 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 	}
 }
 
-func (s *sessionWS) LoginSession(userID string, username string, evrID evr.EvrId, deviceId *DeviceAuth, groupID uuid.UUID, flags int, verbose bool) error {
+func (s *sessionWS) LoginSession(userID string, username string, discordID string, evrID evr.EvrId, deviceId *DeviceAuth, groupID uuid.UUID, flags int, verbose bool) error {
 	// Each player has a single login connection, which will act as the core session.
 	// When this connection is terminated, all other connections should be terminated.
 
@@ -283,6 +284,7 @@ func (s *sessionWS) LoginSession(userID string, username string, evrID evr.EvrId
 	ctx = context.WithValue(ctx, ctxFlagsKey{}, flags)
 	ctx = context.WithValue(ctx, ctxGroupIDKey{}, groupID)
 	ctx = context.WithValue(ctx, ctxVerboseKey{}, verbose)
+	ctx = context.WithValue(ctx, ctxDiscordIDKey{}, discordID)
 
 	s.Lock()
 	s.ctx = ctx
@@ -422,6 +424,12 @@ func (s *sessionWS) ValidateSession(loginSessionID uuid.UUID, evrID evr.EvrId) e
 		if !ok {
 			return fmt.Errorf("login session does not have verbose flag")
 		}
+
+		discordID, ok := loginCtx.Value(ctxDiscordIDKey{}).(string)
+		if !ok {
+			return fmt.Errorf("login session does not have a discord ID")
+		}
+
 		// Require the login session to be authenticated.
 		if userID == uuid.Nil {
 			return fmt.Errorf("login session not authenticated")
@@ -435,6 +443,7 @@ func (s *sessionWS) ValidateSession(loginSessionID uuid.UUID, evrID evr.EvrId) e
 		ctx = context.WithValue(ctx, ctxFlagsKey{}, flags)
 		ctx = context.WithValue(ctx, ctxGroupIDKey{}, groupID)
 		ctx = context.WithValue(ctx, ctxVerboseKey{}, verbose)
+		ctx = context.WithValue(ctx, ctxDiscordIDKey{}, discordID)
 
 		// Set the session information
 		s.Lock()
