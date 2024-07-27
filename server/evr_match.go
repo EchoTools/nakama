@@ -580,14 +580,14 @@ func (m *EvrMatch) playerJoinAttempt(state *EvrMatchState, mp EvrMatchPresence) 
 	switch mp.RoleAlignment {
 	case evr.TeamUnassigned:
 
+		if state.OpenPlayerSlots() < 1 {
+			return &mp, JoinRejectReasonLobbyFull
+		}
+
 		// If this is a social lobby, put the player on the social team.
 		if state.Mode == evr.ModeSocialPublic || state.Mode == evr.ModeSocialPrivate {
 			mp.RoleAlignment = evr.TeamSocial
 			return &mp, ""
-		}
-
-		if state.OpenPlayerSlots() < 1 {
-			return &mp, JoinRejectReasonLobbyFull
 		}
 
 		// If the players team is unbalanced, put them on the other team
@@ -607,6 +607,7 @@ func (m *EvrMatch) playerJoinAttempt(state *EvrMatchState, mp EvrMatchPresence) 
 		}
 
 	case evr.TeamBlue, evr.TeamOrange, evr.TeamSocial:
+
 		if state.OpenPlayerSlots() < 1 {
 			return &mp, JoinRejectReasonLobbyFull
 		}
