@@ -269,8 +269,30 @@ type EvrMatchState struct {
 	tickRate              int64 // The number of ticks per second.
 }
 
+func (s *EvrMatchState) OpenPlayerSlots() int {
+	return s.PlayerLimit - s.PlayerCount
+}
+
+func (s *EvrMatchState) OpenNonPlayerSlots() int {
+	return int(s.MaxSize) - s.PlayerLimit
+}
+
+func (s *EvrMatchState) OpenSlots() int {
+	return int(s.MaxSize) - s.Size
+}
+
 func (s *EvrMatchState) String() string {
 	return s.GetLabel()
+}
+
+func (s *EvrMatchState) RoleCount(role int) int {
+	count := 0
+	for _, p := range s.presences {
+		if p.RoleAlignment == role {
+			count++
+		}
+	}
+	return count
 }
 
 func (s *EvrMatchState) GetLabel() string {
@@ -542,42 +564,56 @@ func (m *EvrMatch) playerJoinAttempt(state *EvrMatchState, mp EvrMatchPresence) 
 		}
 	}
 
-	// If the lobby is full, reject them
-	if len(state.presences) >= MatchMaxSize {
+	// If the lobby is full, reject
+	if len(state.presences) >= int(state.MaxSize) {
 		return &mp, JoinRejectReasonLobbyFull
 	}
 
-	// Only public matches need to assign teams.
-	if state.LobbyType != PublicLobby {
+	// If it's a private match, do not assign teams.
+	if state.LobbyType == PrivateLobby {
+		if teamIndex, ok := state.TeamAlignments[mp.GetUserId()]; ok {
+			mp.RoleAlignment = teamIndex
+		}
 		return &mp, ""
 	}
 
 	switch mp.RoleAlignment {
 	case evr.TeamUnassigned:
-		// Assign the player to a team.
-		var allowed bool
-		if mp.RoleAlignment, allowed = selectTeamForPlayer(&mp, state); !allowed {
-			return &mp, JoinRejectReasonFailedToAssignTeam
+
+		// If this is a social lobby, put the player on the social team.
+		if state.Mode == evr.ModeSocialPublic || state.Mode == evr.ModeSocialPrivate {
+			mp.RoleAlignment = evr.TeamSocial
+			return &mp, ""
 		}
+
+		if state.OpenPlayerSlots() < 1 {
+			return &mp, JoinRejectReasonLobbyFull
+		}
+
+		// If the players team is unbalanced, put them on the other team
+		blue, orange := state.RoleCount(evr.TeamBlue), state.RoleCount(evr.TeamOrange)
+		if blue == orange {
+			mp.RoleAlignment = rand.Intn(2)
+		} else if blue < orange {
+			mp.RoleAlignment = evr.TeamBlue
+		} else {
+			mp.RoleAlignment = evr.TeamOrange
+		}
+
 	case evr.TeamModerator, evr.TeamSpectator:
-		nonPlayerSlots := int(state.MaxSize) - state.PlayerLimit
-		nonPlayerCount := state.Size - state.PlayerCount
-		if nonPlayerCount >= nonPlayerSlots {
+
+		if state.OpenNonPlayerSlots() < 1 {
 			return &mp, JoinRejectReasonLobbyFull
 		}
+
 	case evr.TeamBlue, evr.TeamOrange, evr.TeamSocial:
-		if len(state.Players) >= state.PlayerLimit {
+		if state.OpenPlayerSlots() < 1 {
 			return &mp, JoinRejectReasonLobbyFull
 		}
-	}
 
-	// Final sanity check to make sure that this isn't adding a player to a 4v4 public match.
-	if mp.RoleAlignment == evr.TeamBlue || mp.RoleAlignment == evr.TeamOrange {
-		if len(state.Players) >= state.PlayerLimit {
-			return &mp, JoinRejectReasonLobbyFull
-		}
+	default:
+		return &mp, JoinRejectReasonFailedToAssignTeam
 	}
-
 	return &mp, ""
 }
 
