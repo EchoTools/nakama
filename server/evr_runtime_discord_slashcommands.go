@@ -2565,6 +2565,20 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		return fmt.Errorf("failed to get or create an account for %s (%s)", discordID, username)
 	}
 
+	// Set the users default display name
+	// Get the user's active group ID
+	profile, err := d.profileRegistry.Load(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("failed to load profile: %v", err)
+	}
+
+	groupID := profile.Server.Social.Channel
+
+	_, err = SetDisplayNameByChannelBySession(ctx, logger, d.db, nk, d.discordRegistry, userID.String(), username, groupID.String())
+	if err != nil {
+		return fmt.Errorf("failed to set display name: %v", err)
+	}
+
 	if includePrivate {
 		// Do some profile checks and cleanups
 

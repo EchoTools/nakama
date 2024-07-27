@@ -696,7 +696,7 @@ func NewMatchPresenceFromSession(msession *MatchmakingSession, matchID MatchID, 
 func (p *EvrPipeline) LobbyJoinPrepare(ctx context.Context, logger *zap.Logger, msession *MatchmakingSession, matchID MatchID, query string, roleAlignment int) (*EvrMatchPresence, error) {
 	session := msession.Session
 	// Determine the display name
-	displayName, err := SetDisplayNameByChannelBySession(ctx, logger, p.db, p.runtimeModule, p.discordRegistry, session.userID.String(), session.Username(), msession.Label.GetGroupID().String())
+	displayName, err := SetDisplayNameByChannelBySession(ctx, NewRuntimeGoLogger(logger), p.db, p.runtimeModule, p.discordRegistry, session.userID.String(), session.Username(), msession.Label.GetGroupID().String())
 	if err != nil {
 		logger.Warn("Failed to set display name.", zap.Error(err))
 	}

@@ -236,7 +236,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	verbose := config.Verbose
 
 	// Set the display name once.
-	displayName, err := SetDisplayNameByChannelBySession(ctx, logger, p.db, p.runtimeModule, p.discordRegistry, userId, account.GetUser().GetUsername(), groupID.String())
+	displayName, err := SetDisplayNameByChannelBySession(ctx, NewRuntimeGoLogger(logger), p.db, p.runtimeModule, p.discordRegistry, userId, account.GetUser().GetUsername(), groupID.String())
 	if err != nil {
 		logger.Warn("Failed to set display name", zap.Error(err))
 	}

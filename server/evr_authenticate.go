@@ -798,7 +798,7 @@ func GetDiscordDisplayNames(ctx context.Context, db *sql.DB, discordRegistry Dis
 	return user.Username, user.GlobalName, guildMember.Nick, nil
 }
 
-func SetDisplayNameByChannelBySession(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, discordRegistry DiscordRegistry, userID, username, groupID string) (string, error) {
+func SetDisplayNameByChannelBySession(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, discordRegistry DiscordRegistry, userID, username, groupID string) (string, error) {
 
 	if override, ok := ctx.Value(ctxDisplayNameOverrideKey{}).(string); ok {
 		return override, nil
@@ -815,14 +815,13 @@ func SetDisplayNameByChannelBySession(ctx context.Context, logger *zap.Logger, d
 	}
 	options := []string{guildNick, defaultDisplayName, globalName, username}
 
-	logger.Debug("SetDisplayNameByChannelBySession", zap.String("gid", groupID), zap.String("options", strings.Join(options, ",")))
 	displayName, err := SelectDisplayNameByPriority(ctx, nk, userID, username, options)
 	if err != nil {
 		return "", fmt.Errorf("error selecting display name by priority: %w", err)
 	}
 
 	// Purge old display names
-	records, err := GetDisplayNameRecords(ctx, NewRuntimeGoLogger(logger), nk, userID)
+	records, err := GetDisplayNameRecords(ctx, logger, nk, userID)
 	if err != nil {
 		return "", fmt.Errorf("error getting display names: %w", err)
 	}
@@ -871,7 +870,7 @@ func SetDisplayNameByChannelBySession(ctx context.Context, logger *zap.Logger, d
 			displayName = fmt.Sprintf("%s [BOT]", displayName)
 		}
 	}
-
+	logger.Debug("SetDisplayNameByChannelBySession", zap.String("gid", groupID), zap.String("selected", displayName), zap.String("options", strings.Join(options, ",")))
 	return displayName, nil
 }
 
