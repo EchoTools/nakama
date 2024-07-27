@@ -142,7 +142,7 @@ func (p *EvrPipeline) GetBackfillCandidates(msession *MatchmakingSession) ([]*Ev
 		}
 		endpoints = append(endpoints, l.Broadcaster.Endpoint)
 	}
-	latencies := p.matchmakingRegistry.GetLatencies(msession.UserId, endpoints)
+	latencies := p.matchmakingRegistry.GetLatencies(msession.UserID, endpoints)
 
 	labelLatencies := make([]LabelLatencies, 0, len(labels))
 	for _, label := range labels {
@@ -270,7 +270,7 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 		return true
 	})
 
-	allRTTs := p.matchmakingRegistry.GetLatencies(msession.UserId, endpoints)
+	allRTTs := p.matchmakingRegistry.GetLatencies(msession.UserID, endpoints)
 
 	// Get the EVR ID from the context
 	evrID, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
@@ -605,7 +605,7 @@ func (p *EvrPipeline) MatchCreate(ctx context.Context, msession *MatchmakingSess
 		endpoints = append(endpoints, label.Broadcaster.Endpoint)
 	}
 
-	latencies := p.matchmakingRegistry.GetLatencies(msession.UserId, endpoints)
+	latencies := p.matchmakingRegistry.GetLatencies(msession.UserID, endpoints)
 
 	labelLatencies := make([]LabelLatencies, 0, len(labels))
 	for _, label := range labels {
@@ -636,7 +636,7 @@ func (p *EvrPipeline) MatchCreate(ctx context.Context, msession *MatchmakingSess
 
 	matchID = labelLatencies[0].label.ID
 
-	ml.SpawnedBy = msession.Session.UserID().String()
+	ml.SpawnedBy = msession.UserID.String()
 
 	// Prepare the match
 	response, err := SignalMatch(ctx, p.matchRegistry, matchID, SignalPrepareSession, ml)
@@ -706,7 +706,7 @@ func (p *EvrPipeline) LobbyJoinPrepare(ctx context.Context, logger *zap.Logger, 
 		return nil, fmt.Errorf("failed to get evrID from session context")
 	}
 
-	if err := p.profileRegistry.SetLobbyProfile(ctx, msession.Session.userID, evrID, displayName); err != nil {
+	if err := p.profileRegistry.SetLobbyProfile(ctx, msession.UserID, evrID, displayName); err != nil {
 		return nil, fmt.Errorf("failed to set lobby profile: %w", err)
 	}
 
