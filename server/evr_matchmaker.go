@@ -234,15 +234,22 @@ func (p *EvrPipeline) MatchBackfill(msession *MatchmakingSession) error {
 			}
 			p.metrics.CustomCounter("match_join_backfill_count", msession.metricsTags(), int64(len(msessions)))
 			logger.Debug("Backfilled match", zap.String("mid", label.ID.UUID().String()))
+			return nil
 		}
 		// After trying to backfill, try to create a match on an interval
 		select {
 		case <-createTicker.C:
 			if msession.Label.Mode == evr.ModeSocialPublic && p.createLobbyMu.TryLock() {
-				if _, err := p.MatchCreate(ctx, msession, msession.Label); err != nil {
+				if matchID, err := p.MatchCreate(ctx, msession, msession.Label); err != nil {
 					logger.Warn("Failed to create match", zap.Error(err))
+					p.createLobbyMu.Unlock()
+					continue
+				} else if err := p.LobbyJoin(msession.Session.Context(), logger, matchID, int(AnyTeam), query, msessions...); err != nil {
+					logger.Warn("Failed to join created match", zap.Error(err))
+					p.createLobbyMu.Unlock()
+					return err
 				}
-				p.createLobbyMu.Unlock()
+				return nil
 			}
 		default:
 		}
@@ -710,13 +717,13 @@ func (p *EvrPipeline) LobbyJoin(ctx context.Context, logger *zap.Logger, matchID
 	if err != nil || label == nil {
 		return fmt.Errorf("failed to get match label: %w", err)
 	}
-
+	logger = logger.With(zap.String("mid", matchID.String()), zap.String("label", label.String()))
 	// Prepare all of the presences
 	presences := make([]*EvrMatchPresence, 0, len(msessions))
 	for _, msession := range msessions {
 		presence, err := p.LobbyJoinPrepare(msession.Context(), logger, msession, matchID, query, teamIndex)
 		if err != nil {
-			logger.Warn("Failed to join presences to match", zap.Any("presence", presence), zap.Any("presences", presences), zap.Error(err))
+			logger.Warn("Failed to prepare presences for match", zap.Any("presence", presence), zap.Any("presences", presences), zap.Error(err))
 			return fmt.Errorf("failed to prepare lobby join: %w", err)
 		}
 		presences = append(presences, presence)
