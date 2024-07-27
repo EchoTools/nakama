@@ -749,20 +749,36 @@ func (p *EvrPipeline) LobbyJoin(ctx context.Context, logger *zap.Logger, matchID
 		return fmt.Errorf("broadcaster session not found: %s", label.Broadcaster.SessionID)
 	}
 
+	errorCh := make(chan error)
 	// If this part errors, the matchmaking session must be canceled.
+
 	for i, presence := range matchPresences {
 		session := msessions[i].Session
 		// Send the lobbysessionSuccess, this will trigger the broadcaster to send a lobbysessionplayeraccept once the player connects to the broadcaster.
-		msg := evr.NewLobbySessionSuccess(label.Mode, label.ID.UUID(), label.GetGroupID(), label.GetEndpoint(), int16(presence.RoleAlignment))
+		go func() {
+			msg := evr.NewLobbySessionSuccess(label.Mode, label.ID.UUID(), label.GetGroupID(), label.GetEndpoint(), int16(presence.RoleAlignment))
 
-		if err = bsession.SendEvr(msg.Version5()); err != nil {
-			err = fmt.Errorf("failed to send messages to broadcaster: %w", err)
-			break
-		}
+			if err = bsession.SendEvr(msg.Version5()); err != nil {
+				errorCh <- fmt.Errorf("failed to send messages to broadcaster: %w", err)
+				return
+			}
+			<-time.After(500 * time.Millisecond)
+			if err = session.SendEvr(msg.Version5()); err != nil {
+				errorCh <- fmt.Errorf("failed to send messages to player: %w", err)
+				return
+			}
+		}()
+	}
 
-		if err = session.SendEvr(msg.Version5()); err != nil {
-			err = fmt.Errorf("failed to send messages to player: %w", err)
-			break
+OuterLoop:
+	for range matchPresences {
+		select {
+		case <-time.After(5 * time.Second):
+			err = fmt.Errorf("timed out waiting for lobby session success")
+		case err = <-errorCh:
+			if err != nil {
+				break OuterLoop
+			}
 		}
 	}
 
@@ -770,7 +786,7 @@ func (p *EvrPipeline) LobbyJoin(ctx context.Context, logger *zap.Logger, matchID
 		msession.Cancel(err)
 	}
 
-	return nil
+	return err
 }
 
 var ErrDuplicateJoin = errors.New(JoinRejectReasonDuplicateJoin)
