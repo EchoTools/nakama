@@ -542,8 +542,8 @@ func (p *EvrPipeline) lobbyPlayerSessionsRequest(ctx context.Context, logger *za
 	}
 
 	entrantIDs := make([]uuid.UUID, len(message.PlayerEvrIDs))
-	for _, e := range message.PlayerEvrIDs {
-		entrantIDs = append(entrantIDs, uuid.NewV5(message.LobbyID, e.String()))
+	for i, e := range message.PlayerEvrIDs {
+		entrantIDs[i] = uuid.NewV5(message.LobbyID, e.String())
 	}
 
 	entrant := evr.NewLobbyEntrant(message.EvrId, message.LobbyID, entrantID, entrantIDs, int16(presence.RoleAlignment))
