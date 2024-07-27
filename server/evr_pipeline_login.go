@@ -235,17 +235,23 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	}
 	verbose := config.Verbose
 
-	// Initialize the full session
-	if err := session.LoginSession(userId, user.GetUsername(), account.GetCustomId(), evrId, deviceId, groupID, flags, verbose); err != nil {
-		return settings, fmt.Errorf("failed to login: %w", err)
-	}
-	ctx = session.Context()
-
 	// Set the display name once.
 	displayName, err := SetDisplayNameByChannelBySession(ctx, p.runtimeModule, logger, p.discordRegistry, session, groupID.String())
 	if err != nil {
 		logger.Warn("Failed to set display name", zap.Error(err))
 	}
+	if displayName != account.GetUser().GetDisplayName() {
+		// Update the user's display name
+		if err := p.runtimeModule.AccountUpdateId(ctx, userId, "", nil, displayName, "", "", "", ""); err != nil {
+			logger.Warn("Failed to update display name", zap.Error(err))
+		}
+	}
+
+	// Initialize the full session
+	if err := session.LoginSession(userId, user.GetUsername(), account.GetCustomId(), displayName, metadata.DisplayNameOverride, evrId, deviceId, groupID, flags, verbose); err != nil {
+		return settings, fmt.Errorf("failed to login: %w", err)
+	}
+	ctx = session.Context()
 
 	// Load the user's profile
 	profile, err := p.profileRegistry.GameProfile(ctx, session, loginProfile, evrId)
