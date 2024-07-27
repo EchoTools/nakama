@@ -136,7 +136,6 @@ func (p *EvrPipeline) GetBackfillCandidates(msession *MatchmakingSession) ([]*Ev
 	}
 
 	endpoints := make([]evr.Endpoint, 0, len(labels))
-	candidates := make([]*EvrMatchState, 0, len(labels))
 	for _, l := range labels {
 		if (l.PlayerLimit - l.PlayerCount) < partySize {
 			continue
@@ -145,8 +144,8 @@ func (p *EvrPipeline) GetBackfillCandidates(msession *MatchmakingSession) ([]*Ev
 	}
 	latencies := p.matchmakingRegistry.GetLatencies(msession.UserId, endpoints)
 
-	labelLatencies := make([]LabelLatencies, 0, len(candidates))
-	for _, label := range candidates {
+	labelLatencies := make([]LabelLatencies, 0, len(labels))
+	for _, label := range labels {
 		for _, latency := range latencies {
 			if label.Broadcaster.Endpoint.GetExternalIP() == latency.Endpoint.GetExternalIP() {
 				labelLatencies = append(labelLatencies, LabelLatencies{label, &latency})
@@ -167,7 +166,7 @@ func (p *EvrPipeline) GetBackfillCandidates(msession *MatchmakingSession) ([]*Ev
 		return sortFn(labelLatencies[i].latency.RTT, labelLatencies[j].latency.RTT, labelLatencies[i].label.PlayerCount, labelLatencies[j].label.PlayerCount)
 	})
 
-	candidates = make([]*EvrMatchState, 0, len(labelLatencies))
+	candidates := make([]*EvrMatchState, 0, len(labelLatencies))
 	for _, ll := range labelLatencies {
 		candidates = append(candidates, ll.label)
 	}
@@ -687,9 +686,9 @@ func NewMatchPresenceFromSession(msession *MatchmakingSession, matchID MatchID, 
 }
 
 func (p *EvrPipeline) LobbyJoinPrepare(ctx context.Context, logger *zap.Logger, msession *MatchmakingSession, matchID MatchID, query string, roleAlignment int) (*EvrMatchPresence, error) {
-
+	session := msession.Session
 	// Determine the display name
-	displayName, err := SetDisplayNameByChannelBySession(ctx, p.runtimeModule, logger, p.discordRegistry, msession.Session, msession.Label.GetGroupID().String())
+	displayName, err := SetDisplayNameByChannelBySession(ctx, logger, p.db, p.runtimeModule, p.discordRegistry, session.userID.String(), session.Username(), msession.Label.GetGroupID().String())
 	if err != nil {
 		logger.Warn("Failed to set display name.", zap.Error(err))
 	}

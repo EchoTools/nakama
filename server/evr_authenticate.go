@@ -777,19 +777,18 @@ func (md *RoleGroupMetadata) MarshalToMap() (map[string]interface{}, error) {
 
 func GetDiscordDisplayNames(ctx context.Context, db *sql.DB, discordRegistry DiscordRegistry, userID, groupID string) (string, string, string, error) {
 
-	discordID, err := GetDiscordIDByUserID(ctx, db, groupID)
+	discordID, err := GetDiscordIDByUserID(ctx, db, userID)
 	if err != nil {
-		return "", "", "", fmt.Errorf("error getting discord ID by group ID: %w", err)
+		return "", "", "", fmt.Errorf("error getting discord ID by user ID: %w", err)
+	}
+	guildID, err := GetGuildIDByGroupID(ctx, db, groupID)
+	if err != nil {
+		return "", "", "", fmt.Errorf("error getting guild ID by group ID: %w", err)
 	}
 
 	user, err := discordRegistry.GetUser(ctx, discordID)
 	if err != nil {
 		return "", "", "", fmt.Errorf("error getting discord user: %w", err)
-	}
-
-	guildID, err := GetGuildIDByGroupID(ctx, db, groupID)
-	if err != nil {
-		return "", "", "", fmt.Errorf("error getting guild ID by group ID: %w", err)
 	}
 
 	guildMember, err := discordRegistry.GetGuildMember(ctx, guildID, discordID)
@@ -799,20 +798,18 @@ func GetDiscordDisplayNames(ctx context.Context, db *sql.DB, discordRegistry Dis
 	return user.Username, user.GlobalName, guildMember.Nick, nil
 }
 
-func SetDisplayNameByChannelBySession(ctx context.Context, nk runtime.NakamaModule, logger *zap.Logger, discordRegistry DiscordRegistry, session *sessionWS, groupID string) (string, error) {
-
-	userID := session.UserID().String()
+func SetDisplayNameByChannelBySession(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, discordRegistry DiscordRegistry, userID, username, groupID string) (string, error) {
 
 	if override, ok := ctx.Value(ctxDisplayNameOverrideKey{}).(string); ok {
 		return override, nil
 	}
 
 	defaultDisplayName, ok := ctx.Value(ctxDefaultDisplayNameKey{}).(string)
-	if !ok {
-		defaultDisplayName = session.Username()
+	if !ok || defaultDisplayName == "" {
+		defaultDisplayName = username
 	}
 
-	username, globalName, guildNick, err := GetDiscordDisplayNames(ctx, session.pipeline.db, discordRegistry, userID, groupID)
+	username, globalName, guildNick, err := GetDiscordDisplayNames(ctx, db, discordRegistry, userID, groupID)
 	if err != nil {
 		return defaultDisplayName, fmt.Errorf("error getting discord display names: %w", err)
 	}

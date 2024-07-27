@@ -311,3 +311,19 @@ func StorageReadEVRProfileByXPI(ctx context.Context, db *sql.DB, evrID evr.EvrId
 	}
 	return dbUserID, []byte(dbServerProfile), nil
 }
+
+func (p *ProfileRegistry) SetLobbyProfile(ctx context.Context, userID uuid.UUID, evrID evr.EvrId, displayName string) error {
+	profile, err := p.Load(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("failed to load profile: %w", err)
+	}
+
+	profile.SetEvrID(evrID)
+	profile.UpdateDisplayName(displayName)
+
+	err = p.Save(ctx, userID, profile)
+	if err != nil {
+		return fmt.Errorf("failed to save profile: %w", err)
+	}
+	return nil
+}
