@@ -51,16 +51,21 @@ func PartySyncMatchmaking(ctx context.Context, msessions []*MatchmakingSession, 
 	return nil
 }
 
-func FollowLeader(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, session *sessionWS, pg *PartyGroup) {
+func FollowLeader(logger *zap.Logger, msession *MatchmakingSession, nk runtime.NakamaModule) {
 	// Look up the leaders current match
+	if msession.Party == nil {
+		return
+	}
+
+	session := msession.Session
 	for {
 		select {
-		case <-ctx.Done():
+		case <-msession.Ctx.Done():
 			return
 		case <-time.After(2 * time.Second):
 		}
 
-		leaderSessionID := uuid.FromStringOrNil(pg.GetLeader().SessionId)
+		leaderSessionID := uuid.FromStringOrNil(msession.Party.GetLeader().SessionId)
 		if leaderSessionID == session.id {
 			return
 		}
@@ -85,10 +90,9 @@ func FollowLeader(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModu
 			continue // Already in the same match, but keep checking in case the leader leaves
 		}
 		// Try to join the leader's match
-		err = session.evrPipeline.JoinEvrMatch(session.logger, session, "", leaderMatchID, int(AnyTeam))
+		err = session.evrPipeline.LobbyJoin(session.Context(), logger, leaderMatchID, int(AnyTeam), "", msession)
 		if err == nil {
 			return
 		}
-
 	}
 }
