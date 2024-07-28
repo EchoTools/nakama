@@ -75,23 +75,23 @@ func FollowLeader(logger *zap.Logger, msession *MatchmakingSession, nk runtime.N
 			return
 		}
 
-		// Get the match that the leader is in
+		// If the leader is not in a match, they might be soon.
+		if leaderMatchID.IsNil() {
+			continue
+		}
+
 		followerMatchID, _, err := GetMatchBySessionID(nk, session.id)
 		if err != nil {
 			return
 		}
 
-		if followerMatchID.IsNil() || leaderMatchID.IsNil() {
-			continue
-		}
-
 		if followerMatchID == leaderMatchID {
-			<-time.After(5 * time.Second)
-			continue // Already in the same match, but keep checking in case the leader leaves
+			return
 		}
 		// Try to join the leader's match
 		err = session.evrPipeline.LobbyJoin(session.Context(), logger, leaderMatchID, int(AnyTeam), "", msession)
 		if err == nil {
+			// Successful
 			return
 		}
 	}
