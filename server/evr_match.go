@@ -296,7 +296,7 @@ func (s *EvrMatchState) RoleCount(role int) int {
 }
 
 func (s *EvrMatchState) GetLabel() string {
-	labelJson, err := json.MarshalIndent(s, "", "  ")
+	labelJson, err := json.Marshal(s)
 	if err != nil {
 		return ""
 	}
