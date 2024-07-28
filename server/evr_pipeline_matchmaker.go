@@ -160,6 +160,7 @@ func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logg
 func (p *EvrPipeline) matchmakingLabelFromFindRequest(ctx context.Context, session *sessionWS, request *evr.LobbyFindSessionRequest) (*EvrMatchState, error) {
 
 	// If the channel is nil, use the players profile channel
+
 	groupID := request.GroupID
 	if groupID == uuid.Nil {
 		var ok bool
@@ -579,5 +580,5 @@ func (p *EvrPipeline) lobbyPlayerSessionsRequest(ctx context.Context, logger *za
 
 	entrant := evr.NewLobbyEntrant(message.EvrId, message.LobbyID, entrantID, entrantIDs, int16(presence.RoleAlignment))
 
-	return session.SendEvr(entrant.VersionU(), entrant.Version2(), entrant.Version3())
+	return session.SendEvr(entrant.Version3())
 }

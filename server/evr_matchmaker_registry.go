@@ -647,7 +647,7 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 	ml.SpawnedBy = uuid.Nil.String()
 
 	// Loop until a server becomes available or matchmaking times out.
-	timeout := time.After(10 * time.Minute)
+	timeout := time.After(2 * time.Minute)
 	interval := time.NewTicker(10 * time.Second)
 	defer interval.Stop()
 	select {
