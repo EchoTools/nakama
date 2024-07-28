@@ -1403,17 +1403,22 @@ func (*MatchmakingSession) BuildQuery(ctx context.Context, nk runtime.NakamaModu
 		return "", nil, nil, err
 	}
 
-	groupIDs := make([]string, 0)
+	allGroupIDs := make([]string, 0)
 
 	if partyGroup != nil {
 		// Create a list of groups that all party members have in common
 		userGroups := make([][]string, 0)
 
 		for _, p := range partyGroup.List() {
-			groupIDs, err := GetGuildGroupIDsByUser(ctx, db, p.Presence.GetUserId())
+			groupMap, err := GetGuildGroupIDsByUser(ctx, db, p.Presence.GetUserId())
 			if err != nil {
 				return "", nil, nil, err
 			}
+			groupIDs := make([]string, 0, len(groupMap))
+			for _, g := range groupMap {
+				groupIDs = append(groupIDs, g)
+			}
+
 			userGroups = append(userGroups, groupIDs)
 		}
 
@@ -1426,18 +1431,21 @@ func (*MatchmakingSession) BuildQuery(ctx context.Context, nk runtime.NakamaModu
 				}
 			}
 			if found {
-				groupIDs = append(groupIDs, g)
+				allGroupIDs = append(allGroupIDs, g)
 			}
 		}
 	} else {
-		groupIDs, err = GetGuildGroupIDsByUser(ctx, db, userID)
+		groupMap, err := GetGuildGroupIDsByUser(ctx, db, userID)
 		if err != nil {
 			return "", nil, nil, err
+		}
+		for _, g := range groupMap {
+			allGroupIDs = append(allGroupIDs, g)
 		}
 
 	}
 
-	for _, id := range groupIDs {
+	for _, id := range allGroupIDs {
 		// Add the properties
 		// Strip out the hyphens from the group ID
 		s := strings.ReplaceAll(id, "-", "")
