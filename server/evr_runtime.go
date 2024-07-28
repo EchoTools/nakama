@@ -834,32 +834,34 @@ func GetPartyGroupID(ctx context.Context, db *sql.DB, userID string) (string, uu
 	return dbPartyGroupName, uuid.NewV5(uuid.Nil, dbPartyGroupName), nil
 }
 
-func GetGuildGroupIDsByUser(ctx context.Context, db *sql.DB, userID string) ([]string, error) {
+// returns map[guildID]groupID
+func GetGuildGroupIDsByUser(ctx context.Context, db *sql.DB, userID string) (map[string]string, error) {
 	query := `
 	SELECT 
-		g.id 
+		g.id, g.metadata->>'guild_id'
 		FROM 
 			group_edge ge, 
 			groups g 
 		WHERE ge.source_id = $1 
 			AND ge.state <= 2 
 			AND g.lang_tag = 'guild' 
-		GROUP BY g.id;
+			AND g.metadata->>'guild_id' IS NOT NULL
+		GROUP BY g.id, g.metadata->>'guild_id';
 `
 	var dbGroupID string
-
-	rows, err := db.QueryContext(ctx, query, MatchmakingConfigStorageCollection, MatchmakingConfigStorageKey, userID)
+	var dbGuildID string
+	rows, err := db.QueryContext(ctx, query, userID)
 	if err != nil {
 		return nil, status.Error(codes.Internal, "An error occurred while trying to list group IDs.")
 	}
 
-	groups := make([]string, 0)
+	groups := make(map[string]string, 0)
 
 	for rows.Next() {
-		if err := rows.Scan(&dbGroupID); err != nil {
+		if err := rows.Scan(&dbGroupID, dbGuildID); err != nil {
 			return nil, err
 		}
-		groups = append(groups, dbGroupID)
+		groups[dbGuildID] = dbGroupID
 	}
 	_ = rows.Close()
 	return groups, nil

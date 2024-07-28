@@ -685,13 +685,26 @@ func (a *AccountMetadata) SetActiveGroupID(id uuid.UUID) {
 }
 
 func (a *AccountMetadata) GetGroupDisplayNameOrDefault(groupID string) string {
+	if a.GroupDisplayNames == nil {
+		a.GroupDisplayNames = make(map[string]string)
+	}
 	if dn, ok := a.GroupDisplayNames[groupID]; ok {
 		return dn
 	}
 	return a.GetActiveGroupDisplayName()
 }
 
+func (a *AccountMetadata) SetGroupDisplayName(groupID, displayName string) {
+	if a.GroupDisplayNames == nil {
+		a.GroupDisplayNames = make(map[string]string)
+	}
+	a.GroupDisplayNames[groupID] = displayName
+}
+
 func (a *AccountMetadata) GetActiveGroupDisplayName() string {
+	if a.GroupDisplayNames == nil {
+		a.GroupDisplayNames = make(map[string]string)
+	}
 	return a.GroupDisplayNames[a.ActiveGroupID]
 }
 
@@ -887,7 +900,7 @@ func UpdateDisplayNameByGroupID(ctx context.Context, logger runtime.Logger, db *
 		}
 	}
 
-	metadata.GroupDisplayNames[groupID] = displayName
+	metadata.SetGroupDisplayName(groupID, displayName)
 
 	// Update the account
 	accountUpdates := []*runtime.AccountUpdate{
