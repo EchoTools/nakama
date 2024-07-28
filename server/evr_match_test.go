@@ -72,7 +72,7 @@ func TestSelectTeamForPlayer(t *testing.T) {
 	}
 
 	state := &EvrMatchState{
-		presences: presences,
+		presenceMap: presences,
 	}
 
 	tests := []struct {
@@ -318,7 +318,7 @@ func TestSelectTeamForPlayer(t *testing.T) {
 			presencestr[u] = v
 		}
 
-		state.presences = presencestr
+		state.presenceMap = presencestr
 		state.MaxSize = MatchMaxSize
 		state.LobbyType = tt.lobbyType
 		if state.LobbyType == PublicLobby {
@@ -425,9 +425,9 @@ func TestSelectTeamForPlayer_With_Alighment(t *testing.T) {
 
 		// Match State
 		state := &EvrMatchState{
-			presences: presences,
-			MaxSize:   MatchMaxSize,
-			LobbyType: tt.lobbyType,
+			presenceMap: presences,
+			MaxSize:     MatchMaxSize,
+			LobbyType:   tt.lobbyType,
 			TeamSize: func() int {
 				if tt.lobbyType == PublicLobby {
 					return 4
@@ -539,7 +539,7 @@ func TestEvrMatch_MatchLoop(t *testing.T) {
 				state_: &EvrMatchState{
 					emptyTicks: 0,
 					tickRate:   10,
-					presences: map[string]*EvrMatchPresence{
+					presenceMap: map[string]*EvrMatchPresence{
 						uuid.Must(uuid.NewV4()).String(): {},
 					},
 					broadcasterJoinExpiry: 15 * 10,
@@ -560,7 +560,7 @@ func TestEvrMatch_MatchLoop(t *testing.T) {
 					}
 					state.sessionStartExpiry = 10 * 10
 					state.Started = false
-					state.presences = map[string]*EvrMatchPresence{
+					state.presenceMap = map[string]*EvrMatchPresence{
 						uuid.Must(uuid.NewV4()).String(): {},
 					}
 					state.broadcasterJoinExpiry = 15 * 10
@@ -691,7 +691,7 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 					state.Size = 2
 					state.PlayerLimit = 2
 					state.PlayerCount = 2
-					state.presences = func() map[string]*EvrMatchPresence {
+					state.presenceMap = func() map[string]*EvrMatchPresence {
 						m := make(map[string]*EvrMatchPresence)
 						for _, p := range presences[1:3] {
 							m[p.EntrantID.String()] = p
@@ -713,7 +713,7 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 				state.Size = 2
 				state.PlayerLimit = 2
 				state.PlayerCount = 2
-				state.presences = func() map[string]*EvrMatchPresence {
+				state.presenceMap = func() map[string]*EvrMatchPresence {
 					m := make(map[string]*EvrMatchPresence)
 					for _, p := range presences[1:3] {
 						m[p.EntrantID.String()] = p
