@@ -108,7 +108,7 @@ func TestGetSessionProfile(t *testing.T) {
 
 	// Call the GetSessionProfile method
 
-	p, err := profileRegistry.GameProfile(ctx, session, loginProfile, *evrID)
+	p, err := profileRegistry.GameProfile(ctx, logger, session.userID, loginProfile, *evrID)
 	if err != nil {
 		t.Fatalf("GetSessionProfile returned an error: %v", err)
 	}
