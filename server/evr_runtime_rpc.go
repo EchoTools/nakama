@@ -728,49 +728,50 @@ func terminateMatchRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 	return string(jsonData), nil
 }
 
+/*
 type matchmakingStatusRequest struct {
 }
 
-type matchmakingStatusResponse struct {
-	Tickets []TicketMeta `json:"tickets"`
-}
+	type matchmakingStatusResponse struct {
+		Tickets []TicketMeta `json:"tickets"`
+	}
 
-func matchmakingStatusRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
-	request := &matchmakingStatusRequest{}
-	if payload != "" {
-		if err := json.Unmarshal([]byte(payload), request); err != nil {
+	func matchmakingStatusRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+		request := &matchmakingStatusRequest{}
+		if payload != "" {
+			if err := json.Unmarshal([]byte(payload), request); err != nil {
+				return "", err
+			}
+		}
+		subcontext := uuid.NewV5(uuid.Nil, "matchmaking").String()
+		presences, err := nk.StreamUserList(StreamModeService, "", subcontext, "", true, true)
+		if err != nil {
 			return "", err
 		}
-	}
-	subcontext := uuid.NewV5(uuid.Nil, "matchmaking").String()
-	presences, err := nk.StreamUserList(StreamModeService, "", subcontext, "", true, true)
-	if err != nil {
-		return "", err
-	}
 
-	tickets := make([]TicketMeta, len(presences))
+		tickets := make([]TicketMeta, len(presences))
 
-	for _, presence := range presences {
-		status := presence.GetStatus()
-		ticketMeta := &TicketMeta{}
-		if err := json.Unmarshal([]byte(status), ticketMeta); err != nil {
+		for _, presence := range presences {
+			status := presence.GetStatus()
+			ticketMeta := &TicketMeta{}
+			if err := json.Unmarshal([]byte(status), ticketMeta); err != nil {
+				return "", err
+			}
+			tickets = append(tickets, *ticketMeta)
+		}
+
+		response := &matchmakingStatusResponse{
+			Tickets: tickets,
+		}
+
+		jsonData, err := json.Marshal(response)
+		if err != nil {
 			return "", err
 		}
-		tickets = append(tickets, *ticketMeta)
+
+		return string(jsonData), nil
 	}
-
-	response := &matchmakingStatusResponse{
-		Tickets: tickets,
-	}
-
-	jsonData, err := json.Marshal(response)
-	if err != nil {
-		return "", err
-	}
-
-	return string(jsonData), nil
-}
-
+*/
 type setMatchmakingStatusRequest struct {
 	Enabled bool `json:"enabled"`
 }

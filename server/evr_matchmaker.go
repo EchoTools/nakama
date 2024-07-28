@@ -354,6 +354,7 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 		if err != nil {
 			msession.Logger.Error("Failed to add to solo matchmaker ticket", zap.String("query", query), zap.Error(err))
 		}
+		msession.AddTicket(ticket, session.id.String(), presences, nil, "", query, minCount, maxCount, countMultiple, stringProps, numericProps)
 		p.metrics.CustomCounter("matchmaker_tickets_count", metricTags, 1)
 		msession.Logger.Info("Added solo matchmaking ticket", zap.String("query", query), zap.String("ticket", ticket), zap.Any("presences", presences))
 		go func() {
@@ -406,6 +407,7 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 	if err != nil {
 		msession.Logger.Error("Failed to add to matchmaker with query", zap.String("query", query), zap.Error(err))
 	}
+	msession.AddTicket(ticket, session.id.String(), nil, memberPresenceIDs, msession.Party.IDStr(), query, minCount, maxCount, countMultiple, stringProps, numericProps)
 
 	metricTags["party_size"] = fmt.Sprintf("%d", len(memberPresenceIDs)+1) // memberPresenceIDs excludes the leader
 	p.metrics.CustomCounter("matchmaker_tickets_count", metricTags, 1)

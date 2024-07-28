@@ -28,6 +28,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bwmarrin/discordgo"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/rtapi"
@@ -137,10 +138,19 @@ func (c *LatencyCache) SelectPingCandidates(endpoints ...evr.Endpoint) []evr.End
 	return endpoints
 }
 
-type TicketMeta struct {
-	TicketID  string
-	Query     string
-	Timestamp time.Time
+type MatchmakerTicket struct {
+	ID                string                `json:"id"`
+	Presences         []*MatchmakerPresence `json:"presences"`
+	SessionID         string                `json:"session_id"`
+	MemberPresenceIDs []*PresenceID         `json:"member_presence_ids"`
+	MinCount          int                   `json:"min_count"`
+	MaxCount          int                   `json:"max_count"`
+	CountMultiple     int                   `json:"count_multiple"`
+	Query             string                `json:"query"`
+	StringProps       map[string]string     `json:"string_properties"`
+	NumericProps      map[string]float64    `json:"numeric_properties"`
+	PartyID           string                `json:"party_id"`
+	CreatedAt         time.Time             `json:"created_at"`
 }
 
 // MatchmakingSession represents a user session looking for a match.
@@ -157,7 +167,7 @@ type MatchmakingSession struct {
 	PingResultsCh chan []evr.EndpointPingResult // Channel for ping completion.
 	Expiry        time.Time
 	Label         *EvrMatchState
-	Tickets       map[string]TicketMeta // map[ticketId]TicketMeta
+	Tickets       map[string]*MatchmakerTicket // map[ticketId]TicketMeta
 	Party         *PartyGroup
 	LatencyCache  *LatencyCache
 	Session       *sessionWS
@@ -193,15 +203,24 @@ func (s *MatchmakingSession) Cancel(reason error) error {
 	return nil
 }
 
-func (s *MatchmakingSession) AddTicket(ticket string, query string) {
+func (s *MatchmakingSession) AddTicket(id string, sessionID string, presences []*MatchmakerPresence, memberPresenceIDs []*PresenceID, partyID, query string, minCount, maxCount, countMultiple int, stringProperties map[string]string, numericProperties map[string]float64) {
 	s.Lock()
 	defer s.Unlock()
-	ticketMeta := TicketMeta{
-		TicketID:  ticket,
-		Query:     query,
-		Timestamp: time.Now(),
+
+	s.Tickets[id] = &MatchmakerTicket{
+		ID:                id,
+		Presences:         presences,
+		SessionID:         sessionID,
+		MemberPresenceIDs: memberPresenceIDs,
+		MinCount:          minCount,
+		MaxCount:          maxCount,
+		CountMultiple:     countMultiple,
+		Query:             query,
+		StringProps:       stringProperties,
+		NumericProps:      numericProperties,
+		PartyID:           partyID,
 	}
-	s.Tickets[ticket] = ticketMeta
+
 }
 
 func (s *MatchmakingSession) RemoveTicket(ticket string) {
@@ -317,9 +336,10 @@ type MatchmakingRegistry struct {
 	ctx         context.Context
 	ctxCancelFn context.CancelFunc
 
-	nk            runtime.NakamaModule
-	db            *sql.DB
-	logger        *zap.Logger
+	nk     runtime.NakamaModule
+	db     *sql.DB
+	logger *zap.Logger
+
 	matchRegistry MatchRegistry
 	metrics       Metrics
 	config        Config
@@ -739,8 +759,10 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 	if err := json.Unmarshal([]byte(labelStr), label); err != nil {
 		logger.Error("Failed to unmarshal match label", zap.Error(err))
 	}
-
 	logger.Info("Match made", zap.Any("label", label), zap.String("mid", matchID.UUID().String()), zap.Any("teams", teams), zap.Any("errored", failures))
+
+	go mr.SendMatchmakerMatchedNotification(label, teams, failures)
+
 }
 
 func distributeParties(parties [][]*MatchmakerEntry) [][]*MatchmakerEntry {
@@ -1217,7 +1239,7 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, logger *zap.Logger, se
 		PingResultsCh: make(chan []evr.EndpointPingResult),
 		Expiry:        time.Now().UTC().Add(findAttemptsExpiry),
 		Label:         ml,
-		Tickets:       make(map[string]TicketMeta),
+		Tickets:       make(map[string]*MatchmakerTicket),
 		Session:       session,
 	}
 
