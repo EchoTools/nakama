@@ -1215,89 +1215,8 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 
 	case evr.ModeCombatPublic:
 
-		env := p.config.GetRuntime().Environment
-		channelID, ok := env["COMBAT_MATCHMAKING_CHANNEL_ID"]
-		if ok {
+		go p.SendMatchmakingNotification(parentCtx, logger, p.db, p.runtimeModule, msession)
 
-			if bot := p.discordRegistry.GetBot(); bot != nil && ml.TeamIndex != TeamIndex(evr.TeamSpectator) {
-				// Count how many players are matchmaking for this mode right now
-				sessionsByMode := p.matchmakingRegistry.SessionsByMode()
-
-				userIDs := make([]uuid.UUID, 0)
-				for _, s := range sessionsByMode[ml.Mode] {
-
-					if s.Session.userID == session.userID || s.Label.TeamIndex == TeamIndex(evr.TeamSpectator) {
-						continue
-					}
-
-					userIDs = append(userIDs, s.Session.userID)
-				}
-
-				matchID, _, err := GetMatchBySessionID(p.runtimeModule, session.id)
-				if err != nil {
-					logger.Warn("Failed to get match by session ID", zap.Error(err))
-				}
-
-				// Translate the userID's to discord ID's
-				discordIDs := make([]string, 0, len(userIDs))
-				for _, userID := range userIDs {
-
-					did, err := p.discordRegistry.GetDiscordIdByUserId(parentCtx, userID)
-					if err != nil {
-						logger.Warn("Failed to get discord ID", zap.Error(err))
-						continue
-					}
-					discordIDs = append(discordIDs, fmt.Sprintf("<@%s>", did))
-				}
-
-				discordID, err := p.discordRegistry.GetDiscordIdByUserId(parentCtx, session.userID)
-				if err != nil {
-					logger.Warn("Failed to get discord ID", zap.Error(err))
-				}
-
-				msg := fmt.Sprintf("<@%s> is matchmaking...", discordID)
-				if len(discordIDs) > 0 {
-					msg = fmt.Sprintf("%s along with %s...", msg, strings.Join(discordIDs, ", "))
-				}
-
-				embed := discordgo.MessageEmbed{
-					Title:       "Matchmaking",
-					Description: msg,
-					Color:       0x00cc00,
-				}
-
-				if !matchID.IsNil() {
-					embed.Footer = &discordgo.MessageEmbedFooter{
-						Text: fmt.Sprintf("https://echo.taxi/spark://j/%s", strings.ToUpper(matchID.UUID().String())),
-					}
-				}
-
-				// Notify the channel that this person started queuing
-				message, err := bot.ChannelMessageSendEmbed(channelID, &embed)
-				if err != nil {
-					logger.Warn("Failed to send message", zap.Error(err))
-				}
-				go func() {
-					// Delete the message when the player stops matchmaking
-					select {
-					case <-msession.Ctx.Done():
-						if message != nil {
-							err := bot.ChannelMessageDelete(channelID, message.ID)
-							if err != nil {
-								logger.Warn("Failed to delete message", zap.Error(err))
-							}
-						}
-					case <-time.After(15 * time.Minute):
-						if message != nil {
-							err := bot.ChannelMessageDelete(channelID, message.ID)
-							if err != nil {
-								logger.Warn("Failed to delete message", zap.Error(err))
-							}
-						}
-					}
-				}()
-			}
-		}
 		// Join any on-going combat match without delay
 
 	case evr.ModeArenaPublic:
@@ -1413,4 +1332,110 @@ func (p *EvrPipeline) GetGuildPriorityList(ctx context.Context, userID uuid.UUID
 
 	p.logger.Debug("guild priorites", zap.Any("prioritized", guildPriority), zap.Any("all", groupIDs))
 	return groupIDs, guildPriority, nil
+}
+
+func escapeDiscordString(input string) string {
+	replacer := strings.NewReplacer(
+		"*", "\\*",
+		"_", "\\_",
+		"`", "\\`",
+		"~", "\\~",
+		"|", "\\|",
+	)
+	return replacer.Replace(input)
+}
+
+func (p *EvrPipeline) SendMatchmakingNotification(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, msession *MatchmakingSession) {
+
+	bot := p.discordRegistry.GetBot()
+	if bot == nil {
+		return
+	}
+
+	session := msession.Session
+
+	groupID := msession.Label.GetGroupID()
+	if groupID == uuid.Nil {
+		return
+	}
+	_, groupMetadata, err := GetGuildGroupMetadata(ctx, nk, groupID.String())
+	if err != nil {
+		logger.Warn("Failed to get guild group metadata", zap.Error(err))
+		return
+	}
+
+	channelID := ""
+	switch msession.Label.Mode {
+	case evr.ModeCombatPublic:
+		channelID = groupMetadata.CombatMatchmakingChannelID
+	case evr.ModeArenaPublic:
+		channelID = groupMetadata.ArenaMatchmakingChannelID
+	}
+	if channelID == "" {
+		return
+	}
+	// Count how many players are matchmaking for this mode right now
+	sessionsByMode := p.matchmakingRegistry.SessionsByMode()
+
+	userIDs := make([]uuid.UUID, 0)
+	for _, s := range sessionsByMode[evr.ModeCombatPublic] {
+
+		if s.Label.TeamIndex == TeamIndex(evr.TeamSpectator) {
+			continue
+		}
+
+		if s.Session.userID == session.userID {
+			// Put this at the beginning
+			userIDs = append([]uuid.UUID{s.Session.userID}, userIDs...)
+			continue
+		}
+		userIDs = append(userIDs, s.Session.userID)
+	}
+
+	names := make([]string, 0, len(userIDs))
+	for _, userID := range userIDs {
+		account, err := nk.AccountGetId(ctx, userID.String())
+		if err != nil {
+			logger.Warn("Failed to get account", zap.Error(err))
+			continue
+		}
+		names = append(names, escapeDiscordString(account.GetUser().GetDisplayName()))
+	}
+
+	msg := fmt.Sprintf("*%s* is matchmaking...", names[0])
+	if len(names) > 1 {
+		msg = fmt.Sprintf("%s along with *%s*...", msg, strings.Join(names[1:], ", "))
+	}
+
+	embed := discordgo.MessageEmbed{
+		Title:       "Matchmaking",
+		Description: msg,
+		Color:       0x00cc00,
+	}
+
+	// Notify the channel that this person started queuing
+	message, err := bot.ChannelMessageSendEmbed(channelID, &embed)
+	if err != nil {
+		logger.Warn("Failed to send message", zap.Error(err))
+	}
+	go func() {
+		// Delete the message when the player stops matchmaking
+		select {
+		case <-msession.Ctx.Done():
+			if message != nil {
+				err := bot.ChannelMessageDelete(channelID, message.ID)
+				if err != nil {
+					logger.Warn("Failed to delete message", zap.Error(err))
+				}
+			}
+		case <-time.After(15 * time.Minute):
+			if message != nil {
+				err := bot.ChannelMessageDelete(channelID, message.ID)
+				if err != nil {
+					logger.Warn("Failed to delete message", zap.Error(err))
+				}
+			}
+		}
+	}()
+
 }
