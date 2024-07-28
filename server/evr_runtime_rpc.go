@@ -269,6 +269,48 @@ func MatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime
 }
 
 /*
+func MatchmakingStatusRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk_ runtime.NakamaModule, payload string) (string, error) {
+	// The public view is cached for 5 seconds.
+	cachedResponse, _, found := rpcResponseCache.Get("matchmaking:status")
+	if found {
+		return cachedResponse.(string), nil
+	}
+
+	nk := nk_.(*RuntimeGoNakamaModule)
+
+	subcontext := uuid.NewV5(uuid.Nil, "matchmaking").String()
+	presences, err := nk.StreamUserList(StreamModeService, "", subcontext, "", true, true)
+	if err != nil {
+		return "", err
+	}
+
+	tickets := make([]Ticket, len(presences))
+
+	for _, presence := range presences {
+		status := presence.GetStatus()
+		ticketMeta := &TicketMeta{}
+		if err := json.Unmarshal([]byte(status), ticketMeta); err != nil {
+			return "", err
+		}
+		tickets = append(tickets, *ticketMeta)
+	}
+
+	response := &matchmakingStatusResponse{
+		Tickets: tickets,
+	}
+
+	jsonData, err := json.Marshal(response)
+	if err != nil {
+		return "", err
+	}
+
+	// Update the cache
+	rpcResponseCache.Set("matchmaking:status", string(jsonData), 5*time.Second)
+
+	return string(jsonData), nil
+}
+*/
+/*
 func ExportAccountData(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 
 		// get the user id from the payload or the urlparam
@@ -1160,19 +1202,4 @@ func (r *SetNextMatchRPCResponsePayload) String() string {
 		return ""
 	}
 	return string(data)
-}
-
-func StreamListMatchmakingRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
-
-	presences, err := nk.StreamUserList(StreamModeMatchmaking, uuid.NewV5(uuid.Nil, "matchmaking").String(), "", "", true, true)
-	if err != nil {
-		return "", err
-	}
-
-	data, err := json.MarshalIndent(presences, "", "  ")
-	if err != nil {
-		return "", err
-	}
-
-	return string(data), nil
 }

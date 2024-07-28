@@ -1478,3 +1478,77 @@ func (c *MatchmakingRegistry) SessionsByMode() map[evr.Symbol]map[uuid.UUID]*Mat
 	})
 	return sessionByMode
 }
+
+func (r *MatchmakingRegistry) SendMatchmakerMatchedNotification(label *EvrMatchState, teams [][]*MatchmakerEntry, errored []*MatchmakerPresence) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	logger := r.logger
+
+	bot := r.evrPipeline.discordRegistry.GetBot()
+	if bot == nil {
+		return
+	}
+
+	groupID := label.GetGroupID()
+	if groupID == uuid.Nil {
+		return
+	}
+
+	_, groupMetadata, err := GetGuildGroupMetadata(ctx, r.nk, groupID.String())
+	if err != nil {
+		r.logger.Warn("Failed to get guild group metadata", zap.Error(err))
+		return
+	}
+
+	channelID := ""
+	switch label.Mode {
+	case evr.ModeCombatPublic:
+		channelID = groupMetadata.CombatMatchmakingChannelID
+	case evr.ModeArenaPublic:
+		channelID = groupMetadata.ArenaMatchmakingChannelID
+	}
+	if channelID == "" {
+		return
+	}
+
+	teamstrs := make([]string, 0, len(teams))
+	for _, team := range teams {
+		names := make([]string, 0, len(team))
+		for _, p := range team {
+			account, err := r.nk.AccountGetId(ctx, p.Presence.GetUserId())
+			if err != nil {
+				logger.Warn("Failed to get account", zap.Error(err))
+				continue
+			}
+			names = append(names, escapeDiscordString(account.GetUser().GetDisplayName()))
+		}
+		teamstrs = append(teamstrs, strings.Join(names, ", "))
+	}
+
+	msg := fmt.Sprintf("Match made:\n%s vs %s", teamstrs[0], teamstrs[1])
+
+	embed := discordgo.MessageEmbed{
+		Title:       "Matchmaking",
+		Description: msg,
+		Color:       0x00cc00,
+	}
+
+	// Notify the channel that this person started queuing
+	message, err := bot.ChannelMessageSendEmbed(channelID, &embed)
+	if err != nil {
+		logger.Warn("Failed to send message", zap.Error(err))
+	}
+	go func() {
+		// Delete the message when the player stops matchmaking
+		select {
+		case <-time.After(15 * time.Minute):
+			if message != nil {
+				err := bot.ChannelMessageDelete(channelID, message.ID)
+				if err != nil {
+					logger.Warn("Failed to delete message", zap.Error(err))
+				}
+			}
+		}
+	}()
+}
