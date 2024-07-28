@@ -344,9 +344,9 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 	metricsTags := map[string]string{
 		"type":     strconv.FormatInt(int64(request.LobbyType), 10),
 		"mode":     request.Mode.String(),
-		"channel":  request.GroupID.String(),
+		"group_id": request.GroupID.String(),
 		"level":    request.Level.String(),
-		"team_idx": strconv.FormatInt(int64(request.Entrants[0].Role), 10),
+		"role":     strconv.FormatInt(int64(request.Entrants[0].Role), 10),
 	}
 
 	// Add the features to teh metrics tags as feature_<featurename>
@@ -475,10 +475,10 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 	p.PrepareLobbyProfile(ctx, logger, session, request.GetEvrID(), session.userID.String(), ml.GroupID.String())
 
 	metricsTags := map[string]string{
-		"team":    TeamIndex(request.GetAlignment()).String(),
-		"mode":    ml.Mode.String(),
-		"channel": ml.GroupID.String(),
-		"level":   ml.Level.String(),
+		"role":     TeamIndex(request.GetAlignment()).String(),
+		"mode":     ml.Mode.String(),
+		"group_id": ml.GroupID.String(),
+		"level":    ml.Level.String(),
 	}
 	p.metrics.CustomCounter("lobbyjoinsession_active_count", metricsTags, 1)
 

@@ -226,7 +226,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	verbose := config.Verbose
 
 	// Load the user's profile
-	profile, err := p.profileRegistry.GameProfile(ctx, session, loginProfile, evrId)
+	profile, err := p.profileRegistry.GameProfile(ctx, logger, uuid.FromStringOrNil(userId), loginProfile, evrId)
 	if err != nil {
 		session.logger.Error("failed to load game profiles", zap.Error(err))
 		return evr.NewDefaultGameSettings(), fmt.Errorf("failed to load game profiles")

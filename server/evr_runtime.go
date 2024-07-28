@@ -836,6 +836,9 @@ func GetPartyGroupID(ctx context.Context, db *sql.DB, userID string) (string, uu
 
 // returns map[guildID]groupID
 func GetGuildGroupIDsByUser(ctx context.Context, db *sql.DB, userID string) (map[string]string, error) {
+	if userID == "" {
+		return nil, status.Error(codes.InvalidArgument, "user ID is required")
+	}
 	query := `
 	SELECT 
 		g.id, g.metadata->>'guild_id'

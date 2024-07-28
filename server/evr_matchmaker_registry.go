@@ -421,31 +421,19 @@ func (mr *MatchmakingRegistry) matchedEntriesFn(entries [][]*MatchmakerEntry) {
 	}
 }
 
-func (mr *MatchmakingRegistry) listUnfilledLobbies(ctx context.Context, logger *zap.Logger, searchLabel *EvrMatchState, partySize int) ([]*EvrMatchState, string, error) {
+func (mr *MatchmakingRegistry) listUnfilledLobbies(ctx context.Context, partySize int, query string) ([]*EvrMatchState, error) {
 	var err error
-	var query string
 
 	var labels []*EvrMatchState
-
-	if searchLabel.LobbyType != PublicLobby {
-		// Do not backfill for private lobbies
-		return nil, "", status.Errorf(codes.InvalidArgument, "Cannot backfill private lobbies")
-	}
-
-	query = buildMatchQueryFromLabel(searchLabel, partySize)
-
-	// Basic search defaults
 
 	minSize := 0
 	limit := 100
 	maxSize := MatchMaxSize - partySize
-	logger = logger.With(zap.String("query", query))
 
 	// Search for possible matches
-	logger.Debug("Searching for matches", zap.String("query", query))
 	matches, err := mr.listMatches(ctx, limit, minSize+1, maxSize+1, query)
 	if err != nil {
-		return nil, "", status.Errorf(codes.Internal, "Failed to find matches: %v", err)
+		return nil, status.Errorf(codes.Internal, "Failed to find matches: %v", err)
 	}
 
 	// Create a label slice of the matches
@@ -453,13 +441,12 @@ func (mr *MatchmakingRegistry) listUnfilledLobbies(ctx context.Context, logger *
 	for _, match := range matches {
 		label := &EvrMatchState{}
 		if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), label); err != nil {
-			logger.Error("Error unmarshalling match label", zap.Error(err))
 			continue
 		}
 		labels = append(labels, label)
 	}
 
-	return labels, query, nil
+	return labels, nil
 }
 
 func CompactedFrequencySort[T comparable](s []T, desc bool) []T {
@@ -479,71 +466,6 @@ func CompactedFrequencySort[T comparable](s []T, desc bool) []T {
 	return slices.Compact(s)
 }
 
-/*
-func selectGameServer() {
-
-		channelMap := make(map[uuid.UUID]int, len(entrants))
-		for _, e := range entrants {
-			channel := uuid.FromStringOrNil(e.StringProperties["channel"])
-			if channel == uuid.Nil {
-				continue
-			}
-			channelMap[channel]++
-		}
-
-		channels := make([]uuid.UUID, 0, len(channelMap))
-		for k := range channelMap {
-			channels = append(channels, k)
-		}
-
-		sort.SliceStable(channels, func(i, j int) bool {
-			return channelMap[channels[i]] > channelMap[channels[j]]
-		})
-
-		// Get a map of all broadcasters by their key
-		broadcastersByExtIP := make(map[string]evr.Endpoint, 100)
-		mr.evrPipeline.broadcasterRegistrationBySession.Range(func(_ string, v *MatchBroadcaster) bool {
-			broadcastersByExtIP[v.Endpoint.GetExternalIP()] = v.Endpoint
-			return true
-		})
-
-		// Create a map of each endpoint and it's latencies to each entrant
-		latencies := make(map[string][]int, 100)
-		for _, e := range entrants {
-			nprops := e.NumericProperties
-			//sprops := e.StringProperties
-
-			// loop over the number props and get the latencies
-			for k, v := range nprops {
-				if strings.HasPrefix(k, "rtt") {
-					latencies[k] = append(latencies[k], int(v))
-				}
-			}
-		}
-
-		// Score each endpoint based on the latencies
-		scored := make(map[string]int, len(latencies))
-		for k, v := range latencies {
-			// Sort the latencies
-			sort.Ints(v)
-			// Get the average
-			average := 0
-			for _, i := range v {
-				average += i
-			}
-			average /= len(v)
-			scored[k] = average
-		}
-		// Sort the scored endpoints
-		sorted := make([]string, 0, len(scored))
-		for k := range scored {
-			sorted = append(sorted, k)
-		}
-		sort.SliceStable(sorted, func(i, j int) bool {
-			return scored[sorted[i]] < scored[sorted[j]]
-		})
-	}
-*/
 func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config MatchmakingSettings) {
 	logger := mr.logger.With(zap.Int("entrants", len(entrants)))
 
@@ -553,7 +475,7 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 
 	groupIDs := make([]uuid.UUID, 0, len(entrants))
 	for _, e := range entrants {
-		channel := uuid.FromStringOrNil(e.StringProperties["channel"])
+		channel := uuid.FromStringOrNil(e.StringProperties["group_id"])
 		if channel == uuid.Nil {
 			continue
 		}
@@ -612,6 +534,7 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 		id := e.GetPartyId()
 		parties[id] = append(parties[id], e)
 	}
+
 	logger.Debug("Parties", zap.Any("parties", parties))
 	// Get the ml from the first participant
 	var ml *EvrMatchState
@@ -757,7 +680,7 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 	}
 	label := &EvrMatchState{}
 	if err := json.Unmarshal([]byte(labelStr), label); err != nil {
-		logger.Error("Failed to unmarshal match label", zap.Error(err))
+		logger.Error("Failed to unmarshal match label", zap.Error(err), zap.String("labelStr", labelStr))
 	}
 	logger.Info("Match made", zap.Any("label", label), zap.String("mid", matchID.UUID().String()), zap.Any("teams", teams), zap.Any("errored", failures))
 
@@ -986,7 +909,8 @@ func (ms *MatchmakingSession) LeavePartyGroup() error {
 	if partyID == uuid.Nil {
 		return nil
 	}
-	ms.Session.pipeline.tracker.Untrack(s.ID(), PresenceStream{Mode: StreamModeParty, Subject: partyID}, s.UserID())
+	ms.Session.pipeline.tracker.Untrack(s.ID(), PresenceStream{Mode: StreamModeParty, Subject: partyID, Label: ms.registry.evrPipeline.node}, s.UserID())
+	ms.Party = nil
 	return nil
 }
 
@@ -995,6 +919,9 @@ func (ms *MatchmakingSession) JoinPartyGroup(ctx context.Context, logger *zap.Lo
 	groupName, partyID, err := GetPartyGroupID(ctx, session.pipeline.db, session.UserID().String())
 	if err != nil {
 		return status.Errorf(codes.Internal, "Failed to get party group ID: %v", err)
+	}
+	if partyID == uuid.Nil {
+		return nil
 	}
 
 	maxSize := 8
@@ -1255,11 +1182,11 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, logger *zap.Logger, se
 		// Create a timer for this session
 		startedAt := time.Now().UTC()
 		metricsTags := map[string]string{
-			"mode":    ml.Mode.String(),
-			"channel": ml.GroupID.String(),
-			"level":   ml.Level.String(),
-			"team":    strconv.FormatInt(int64(ml.TeamIndex), 10),
-			"result":  "success",
+			"mode":     ml.Mode.String(),
+			"group_id": ml.GroupID.String(),
+			"level":    ml.Level.String(),
+			"team":     strconv.FormatInt(int64(ml.TeamIndex), 10),
+			"result":   "success",
 		}
 
 		defer func() {
@@ -1403,49 +1330,53 @@ func (*MatchmakingSession) BuildQuery(ctx context.Context, nk runtime.NakamaModu
 		return "", nil, nil, err
 	}
 
-	allGroupIDs := make([]string, 0)
-
-	if partyGroup != nil {
-		// Create a list of groups that all party members have in common
-		userGroups := make([][]string, 0)
-
-		for _, p := range partyGroup.List() {
-			groupMap, err := GetGuildGroupIDsByUser(ctx, db, p.Presence.GetUserId())
-			if err != nil {
-				return "", nil, nil, err
-			}
-			groupIDs := make([]string, 0, len(groupMap))
-			for _, g := range groupMap {
-				groupIDs = append(groupIDs, g)
-			}
-
-			userGroups = append(userGroups, groupIDs)
-		}
-
-		for _, g := range userGroups[0] {
-			found := true
-			for _, u := range userGroups {
-				if !slices.Contains(u, g) {
-					found = false
-					break
-				}
-			}
-			if found {
-				allGroupIDs = append(allGroupIDs, g)
-			}
-		}
-	} else {
-		groupMap, err := GetGuildGroupIDsByUser(ctx, db, userID)
-		if err != nil {
-			return "", nil, nil, err
-		}
-		for _, g := range groupMap {
-			allGroupIDs = append(allGroupIDs, g)
-		}
-
+	groupIDs, err := GetGuildGroupIDsByUser(ctx, db, userID)
+	if err != nil {
+		return "", nil, nil, err
 	}
+	/*
+		allGroupIDs := make([]string, 0)
+			if partyGroup != nil {
+				// Create a list of groups that all party members have in common
+				userGroups := make([][]string, 0)
 
-	for _, id := range allGroupIDs {
+				for _, p := range partyGroup.List() {
+					groupMap, err := GetGuildGroupIDsByUser(ctx, db, p.Presence.GetUserId())
+					if err != nil {
+						return "", nil, nil, err
+					}
+					groupIDs := make([]string, 0, len(groupMap))
+					for _, g := range groupMap {
+						groupIDs = append(groupIDs, g)
+					}
+
+					userGroups = append(userGroups, groupIDs)
+				}
+
+				for _, g := range userGroups[0] {
+					found := true
+					for _, u := range userGroups {
+						if !slices.Contains(u, g) {
+							found = false
+							break
+						}
+					}
+					if found {
+						allGroupIDs = append(allGroupIDs, g)
+					}
+				}
+			} else {
+				groupMap, err := GetGuildGroupIDsByUser(ctx, db, userID)
+				if err != nil {
+					return "", nil, nil, err
+				}
+				for _, g := range groupMap {
+					allGroupIDs = append(allGroupIDs, g)
+				}
+
+			}
+	*/
+	for _, id := range groupIDs {
 		// Add the properties
 		// Strip out the hyphens from the group ID
 		s := strings.ReplaceAll(id, "-", "")

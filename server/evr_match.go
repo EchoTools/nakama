@@ -100,9 +100,9 @@ var _ runtime.Presence = &EvrMatchPresence{}
 // Represents identity information for a single match participant.
 type EvrMatchPresence struct {
 	Node           string    `json:"node,omitempty"`
-	SessionID      uuid.UUID `json:"session_id,omitempty"`
-	LoginSessionID uuid.UUID `json:"login_session_id,omitempty"`
-	EntrantID      uuid.UUID `json:"entrant_id,omitempty"`
+	SessionID      uuid.UUID `json:"session_id,omitempty"`       // The Player's "match" connection session ID
+	LoginSessionID uuid.UUID `json:"login_session_id,omitempty"` // The Player's "login" connection session ID
+	EntrantID      uuid.UUID `json:"entrant_id,omitempty"`       // The Player's game server session ID
 	UserID         uuid.UUID `json:"user_id,omitempty"`
 	EvrID          evr.EvrId `json:"evr_id,omitempty"`
 	DiscordID      string    `json:"discord_id,omitempty"`
@@ -111,9 +111,10 @@ type EvrMatchPresence struct {
 	Username       string    `json:"username,omitempty"`
 	DisplayName    string    `json:"display_name,omitempty"`
 	PartyID        uuid.UUID `json:"party_id,omitempty"`
-	RoleAlignment  int       `json:"role,omitempty"`
-	Query          string    `json:"query,omitempty"`
+	RoleAlignment  int       `json:"role,omitempty"`  // The team they want to be on
+	Query          string    `json:"query,omitempty"` // Their matchmaking query
 	SessionExpiry  int64     `json:"session_expiry,omitempty"`
+	HeadSetType    string    `json:"headset_type,omitempty"` // quest2, quest3, cv1, etc.
 }
 
 func (p EvrMatchPresence) String() string {
@@ -206,14 +207,15 @@ type EvrMatchMeta struct {
 	// Stats
 }
 type PlayerInfo struct {
-	UserID      string    `json:"user_id,omitempty"`
-	Username    string    `json:"username,omitempty"`
-	DisplayName string    `json:"display_name,omitempty"`
-	EvrID       evr.EvrId `json:"evr_id,omitempty"`
-	Team        TeamIndex `json:"team"`
-	ClientIP    string    `json:"client_ip,omitempty"`
-	DiscordID   string    `json:"discord_id,omitempty"`
-	PartyID     string    `json:"party_id,omitempty"`
+	UserID      string       `json:"user_id,omitempty"`
+	Username    string       `json:"username,omitempty"`
+	DisplayName string       `json:"display_name,omitempty"`
+	EvrID       evr.EvrId    `json:"evr_id,omitempty"`
+	Team        TeamIndex    `json:"team"`
+	ClientIP    string       `json:"client_ip,omitempty"`
+	DiscordID   string       `json:"discord_id,omitempty"`
+	PartyID     string       `json:"party_id,omitempty"`
+	IPinfo      *ipinfo.Core `json:"ip_info,omitempty"`
 }
 
 type MatchBroadcaster struct {
@@ -259,10 +261,8 @@ type EvrMatchState struct {
 	TeamIndex   TeamIndex `json:"team,omitempty"`         // What team index a player prefers (Used by Matching only)
 
 	Players        []PlayerInfo                 `json:"players,omitempty"`         // The displayNames of the players (by team name) in the match.
-	Reserved       []PlayerInfo                 `json:"reserved,omitempty"`        // The displayNames of the reserved players in the match.
 	TeamAlignments map[string]int               `json:"team_alignments,omitempty"` // map[userID]TeamIndex
 	presenceMap    map[string]*EvrMatchPresence // [sessionId]EvrMatchPresence
-	reserveMap     map[string]*EvrMatchPresence // [sessionId]EvrMatchPresence
 	broadcaster    runtime.Presence             // The broadcaster's presence
 
 	emptyTicks            int64 // The number of ticks the match has been empty.
@@ -272,7 +272,7 @@ type EvrMatchState struct {
 }
 
 func (s *EvrMatchState) GetPlayerCount() int {
-	return len(s.presenceMap) + len(s.reserveMap)
+	return len(s.presenceMap)
 }
 
 func (s *EvrMatchState) OpenPlayerSlots() int {
@@ -290,20 +290,10 @@ func (s *EvrMatchState) OpenSlots() int {
 func (s *EvrMatchState) String() string {
 	return s.GetLabel()
 }
-func (s *EvrMatchState) AllPresences() []*EvrMatchPresence {
-	all := make([]*EvrMatchPresence, 0, len(s.presenceMap)+len(s.reserveMap))
-	for _, p := range s.presenceMap {
-		all = append(all, p)
-	}
-	for _, p := range s.reserveMap {
-		all = append(all, p)
-	}
-	return all
-}
 
 func (s *EvrMatchState) RoleCount(role int) int {
 	count := 0
-	for _, p := range s.AllPresences() {
+	for _, p := range s.presenceMap {
 		if p.RoleAlignment == role {
 			count++
 		}
@@ -355,8 +345,7 @@ func (s *EvrMatchState) PublicView() *EvrMatchState {
 			Regions:     s.Broadcaster.Regions,
 			Tags:        s.Broadcaster.Tags,
 		},
-		Players:  make([]PlayerInfo, 0),
-		Reserved: make([]PlayerInfo, 0),
+		Players: make([]PlayerInfo, 0),
 	}
 	if ps.LobbyType == PrivateLobby || ps.LobbyType == UnassignedLobby {
 		ps.ID = MatchID{}
@@ -373,17 +362,7 @@ func (s *EvrMatchState) PublicView() *EvrMatchState {
 				PartyID:     s.Players[i].PartyID,
 			})
 		}
-		for i := range s.Reserved {
-			ps.Reserved = append(ps.Reserved, PlayerInfo{
-				UserID:      s.Reserved[i].UserID,
-				Username:    s.Reserved[i].Username,
-				DisplayName: s.Reserved[i].DisplayName,
-				EvrID:       s.Reserved[i].EvrID,
-				Team:        s.Reserved[i].Team,
-				DiscordID:   s.Reserved[i].DiscordID,
-				PartyID:     s.Reserved[i].PartyID,
-			})
-		}
+
 	}
 	return &ps
 }
@@ -402,7 +381,6 @@ func (s *EvrMatchState) rebuildCache() {
 	// Rebuild the lookup tables.
 
 	s.Players = make([]PlayerInfo, 0, len(s.presenceMap))
-	s.Reserved = make([]PlayerInfo, 0, len(s.reserveMap))
 	s.Size = s.GetPlayerCount()
 	s.PlayerCount = 0
 	// Construct Player list
@@ -425,24 +403,7 @@ func (s *EvrMatchState) rebuildCache() {
 
 		s.Players = append(s.Players, playerinfo)
 	}
-	for _, presence := range s.reserveMap {
-		// Do not include spectators or moderators in player count
-		if presence.RoleAlignment != evr.TeamSpectator && presence.RoleAlignment != evr.TeamModerator {
-			s.PlayerCount++
-		}
-		playerinfo := PlayerInfo{
-			UserID:      presence.UserID.String(),
-			Username:    presence.Username,
-			DisplayName: presence.DisplayName,
-			EvrID:       presence.EvrID,
-			Team:        TeamIndex(presence.RoleAlignment),
-			ClientIP:    presence.ClientIP,
-			DiscordID:   presence.DiscordID,
-			PartyID:     presence.PartyID.String(),
-		}
 
-		s.Reserved = append(s.Reserved, playerinfo)
-	}
 	sort.SliceStable(s.Players, func(i, j int) bool {
 		return s.Players[i].Team < s.Players[j].Team
 	})
@@ -472,10 +433,9 @@ func NewEvrMatchState(endpoint evr.Endpoint, config *MatchBroadcaster) (state *E
 		Level:            evr.LevelUnloaded,
 		RequiredFeatures: make([]string, 0),
 		Players:          make([]PlayerInfo, 0, MatchMaxSize),
-		Reserved:         make([]PlayerInfo, 0, MatchMaxSize),
 		presenceMap:      make(map[string]*EvrMatchPresence, MatchMaxSize),
-		reserveMap:       make(map[string]*EvrMatchPresence, MatchMaxSize),
-		TeamAlignments:   make(map[string]int, MatchMaxSize),
+
+		TeamAlignments: make(map[string]int, MatchMaxSize),
 
 		emptyTicks: 0,
 		tickRate:   tickRate,
@@ -515,7 +475,6 @@ func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql
 
 	state.ID = MatchIDFromContext(ctx)
 	state.presenceMap = make(map[string]*EvrMatchPresence)
-	state.reserveMap = make(map[string]*EvrMatchPresence)
 
 	state.broadcasterJoinExpiry = state.tickRate * BroadcasterJoinTimeoutSecs
 
@@ -572,13 +531,12 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		return state, false, fmt.Sprintf("failed to unmarshal metadata: %v", err)
 	}
 
-	mp, reason := m.playerJoinAttempt(state, md.Presence)
+	mp, reason := m.authorizePlayer(state, md.Presence)
 	if reason != "" {
 		return state, false, reason
 	}
 
 	state.presenceMap[mp.GetSessionId()] = mp
-	state.reserveMap[mp.GetSessionId()] = mp
 
 	logger.WithFields(map[string]interface{}{
 		"evrid": mp.EvrID.Token(),
@@ -602,11 +560,15 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	return state, true, mp.String()
 }
 
-func (m *EvrMatch) playerJoinAttempt(state *EvrMatchState, mp EvrMatchPresence) (*EvrMatchPresence, string) {
+func (m *EvrMatch) authorizePlayer(state *EvrMatchState, mp EvrMatchPresence) (*EvrMatchPresence, string) {
 
-	// If this is a parking match, reject the player
 	if state.LobbyType == UnassignedLobby {
 		return &mp, JoinRejectReasonUnassignedLobby
+	}
+
+	// If the lobby is full, reject
+	if state.OpenSlots() < 1 {
+		return &mp, JoinRejectReasonLobbyFull
 	}
 
 	// If this EvrID is already in the match, reject the player
@@ -616,57 +578,44 @@ func (m *EvrMatch) playerJoinAttempt(state *EvrMatchState, mp EvrMatchPresence) 
 		}
 	}
 
-	// If the lobby is full, reject
-	if state.Size >= int(state.MaxSize) {
-		return &mp, JoinRejectReasonLobbyFull
+	if teamIndex, ok := state.TeamAlignments[mp.GetUserId()]; ok {
+		if mp.RoleAlignment != evr.TeamModerator && mp.RoleAlignment != evr.TeamSpectator {
+			mp.RoleAlignment = teamIndex
+		}
 	}
 
-	// If it's a private match, do not assign teams.
+	// If it's a private match, do not assign teams or check for open slots.
 	if state.LobbyType == PrivateLobby {
-		if teamIndex, ok := state.TeamAlignments[mp.GetUserId()]; ok {
-			mp.RoleAlignment = teamIndex
+		return &mp, ""
+	}
+
+	if mp.RoleAlignment == evr.TeamModerator || mp.RoleAlignment == evr.TeamSpectator {
+		if state.OpenNonPlayerSlots() < 1 {
+			return &mp, JoinRejectReasonLobbyFull
 		}
 		return &mp, ""
 	}
 
-	switch mp.RoleAlignment {
-	case evr.TeamUnassigned:
-
-		if state.OpenPlayerSlots() < 1 {
-			return &mp, JoinRejectReasonLobbyFull
-		}
-
-		// If this is a social lobby, put the player on the social team.
-		if state.Mode == evr.ModeSocialPublic || state.Mode == evr.ModeSocialPrivate {
-			mp.RoleAlignment = evr.TeamSocial
-			return &mp, ""
-		}
-
-		// If the players team is unbalanced, put them on the other team
-		blue, orange := state.RoleCount(evr.TeamBlue), state.RoleCount(evr.TeamOrange)
-		if blue == orange {
-			mp.RoleAlignment = rand.Intn(2)
-		} else if blue < orange {
-			mp.RoleAlignment = evr.TeamBlue
-		} else {
-			mp.RoleAlignment = evr.TeamOrange
-		}
-
-	case evr.TeamModerator, evr.TeamSpectator:
-
-		if state.OpenNonPlayerSlots() < 1 {
-			return &mp, JoinRejectReasonLobbyFull
-		}
-
-	case evr.TeamBlue, evr.TeamOrange, evr.TeamSocial:
-
-		if state.OpenPlayerSlots() < 1 {
-			return &mp, JoinRejectReasonLobbyFull
-		}
-
-	default:
-		return &mp, JoinRejectReasonFailedToAssignTeam
+	if state.OpenPlayerSlots() < 1 {
+		return &mp, JoinRejectReasonLobbyFull
 	}
+
+	if state.Mode == evr.ModeSocialPublic || state.Mode == evr.ModeSocialPrivate {
+		mp.RoleAlignment = evr.TeamSocial
+		return &mp, ""
+	}
+
+	if state.RoleCount(evr.TeamBlue) == state.RoleCount(evr.TeamOrange) {
+		mp.RoleAlignment = evr.TeamOrange
+		return &mp, ""
+	}
+
+	if state.RoleCount(evr.TeamBlue) < state.RoleCount(evr.TeamOrange) {
+		mp.RoleAlignment = evr.TeamBlue
+		return &mp, ""
+	}
+
+	mp.RoleAlignment = evr.TeamOrange
 	return &mp, ""
 }
 
@@ -684,19 +633,17 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 			continue
 		}
 
-		if _, ok := state.reserveMap[p.GetSessionId()]; !ok {
+		if _, ok := state.presenceMap[p.GetSessionId()]; !ok {
 			logger.WithFields(map[string]interface{}{
 				"username": p.GetUsername(),
 				"uid":      p.GetUserId(),
 			}).Error("Presence not found. this should never happen.")
 			return nil
 		} else {
-			state.presenceMap[p.GetSessionId()] = state.reserveMap[p.GetSessionId()]
-			delete(state.reserveMap, p.GetSessionId())
 			logger.WithFields(map[string]interface{}{
 				"username": p.GetUsername(),
 				"uid":      p.GetUserId(),
-			}).Error("Join complete.")
+			}).Info("Join complete.")
 		}
 	}
 

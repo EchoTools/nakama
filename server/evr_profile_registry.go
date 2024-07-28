@@ -233,10 +233,10 @@ func (r *ProfileRegistry) ValidateArenaUnlockByName(i interface{}, itemName stri
 	return false, fmt.Errorf("unknown unlock field name: %s", fieldName)
 }
 
-func (r *ProfileRegistry) GameProfile(ctx context.Context, session *sessionWS, loginProfile evr.LoginProfile, evrID evr.EvrId) (*GameProfileData, error) {
-	logger := session.logger.With(zap.String("evrid", evrID.String()))
+func (r *ProfileRegistry) GameProfile(ctx context.Context, logger *zap.Logger, userID uuid.UUID, loginProfile evr.LoginProfile, evrID evr.EvrId) (*GameProfileData, error) {
+	logger = logger.With(zap.String("evrid", evrID.String()))
 
-	p, err := r.Load(ctx, session.userID)
+	p, err := r.Load(ctx, userID)
 	if err != nil {
 		return p, fmt.Errorf("failed to load user profile: %w", err)
 	}
@@ -250,19 +250,19 @@ func (r *ProfileRegistry) GameProfile(ctx context.Context, session *sessionWS, l
 	}
 
 	// Update the account
-	if err := r.discordRegistry.UpdateAccount(ctx, session.userID); err != nil {
+	if err := r.discordRegistry.UpdateAccount(ctx, userID); err != nil {
 		logger.Warn("Failed to update account", zap.Error(err))
 	}
 
 	// Apply any unlocks based on the user's groups
-	if err := r.UpdateEntitledCosmetics(ctx, session.userID, p); err != nil {
+	if err := r.UpdateEntitledCosmetics(ctx, userID, p); err != nil {
 		return p, fmt.Errorf("failed to update entitled cosmetics: %w", err)
 	}
 
 	p.Server.CreateTime = time.Date(2023, 10, 31, 0, 0, 0, 0, time.UTC).Unix()
 	p.SetStale()
 
-	r.Save(ctx, session.userID, p)
+	r.Save(ctx, userID, p)
 
 	return p, nil
 }
