@@ -318,6 +318,11 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 		}
 	}
 
+	evrId, ok := session.Context().Value(ctxEvrIDKey{}).(evr.EvrId)
+	if ok {
+		logger = logger.With(zap.String("uid", session.UserID().String()), zap.String("sid", session.ID().String()), zap.String("uname", session.Username()), zap.String("evrid", evrId.String()))
+	}
+
 	if err := pipelineFn(session.Context(), logger, session, in); err != nil {
 		// Unwrap the error
 		logger.Error("Pipeline error", zap.Error(err))

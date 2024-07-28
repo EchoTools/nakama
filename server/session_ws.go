@@ -296,7 +296,7 @@ func (s *sessionWS) LoginSession(userID, username, displayName, displayNameOverr
 	s.ctx = ctx
 	s.userID = uuid.FromStringOrNil(userID)
 	s.SetUsername(username)
-	s.logger = s.logger.With(zap.String("evrid", evrID.Token()), zap.String("username", username), zap.String("uid", userID))
+	s.logger = s.logger.With(zap.String("loginsid", s.id.String()), zap.String("uid", userID), zap.String("evrid", evrID.Token()), zap.String("username", username))
 	s.Unlock()
 
 	// Register initial status tracking and presence(s) for this session.
@@ -605,7 +605,7 @@ IncomingLoop:
 				logger := s.logger.With(zap.String("request_type", fmt.Sprintf("%T", request)))
 				if isDebug { // remove extra heavy reflection processing
 					logger = logger.With(zap.String("request", fmt.Sprintf("%s", request)))
-					logger.Debug(fmt.Sprintf("Received %T message", request))
+					logger.Debug("Received message")
 				}
 				if request == nil {
 					continue
@@ -649,7 +649,7 @@ IncomingLoop:
 		}
 		// Update incoming message metrics.
 		s.metrics.Message(int64(len(data)), false)
-		s.metrics.CustomTimer("socket_incoming_message_processing_time", nil, time.Since(start))
+		s.metrics.CustomTimer("socket_incoming_message_processing_time", nil, time.Millisecond*time.Since(start))
 	}
 
 	if reason != "" {
