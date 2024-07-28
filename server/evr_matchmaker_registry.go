@@ -659,7 +659,7 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 
 	for {
 		var err error
-		matchID, err = mr.allocateBroadcaster(channels, config, sorted, ml)
+		matchID, err = mr.allocateBroadcaster(groupIDs, config, sorted, ml)
 		if err != nil {
 			mr.logger.Warn("Error allocating broadcaster", zap.Error(err))
 		}
@@ -700,14 +700,15 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 	for i, players := range teams {
 		// Assign each player in the team to the match
 		for _, entry := range players {
-			s, ok := mr.GetMatchingBySessionId(entry.Presence.SessionID)
+			ms, ok := mr.GetMatchingBySessionId(entry.Presence.SessionID)
 			if !ok {
 				logger.Warn("Could not find matching session for user", zap.String("sessionID", entry.Presence.SessionID.String()))
 				continue
 			}
 			// Get the ticket metadata
+
 			ticket := entry.GetTicket()
-			ticketMeta, ok := s.Tickets[ticket]
+			ticketMeta, ok := ms.Tickets[ticket]
 			if !ok {
 				logger.Warn("Could not find ticket metadata for user", zap.String("sessionID", entry.Presence.SessionID.String()), zap.String("ticket", ticket))
 				continue

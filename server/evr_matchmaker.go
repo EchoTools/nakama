@@ -126,7 +126,7 @@ func (p *EvrPipeline) GetBackfillCandidates(msession *MatchmakingSession) ([]*Ev
 
 	partySize := 1
 	if msession.Party != nil {
-		partySize = len(msession.Party.GetMembers())
+		partySize = len(msession.Party.List())
 	}
 
 	logger := msession.Logger
@@ -191,14 +191,14 @@ func (p *EvrPipeline) MatchBackfill(msession *MatchmakingSession) error {
 
 	msessions := make([]*MatchmakingSession, 0)
 	if msession.Party != nil {
-		for _, member := range msession.Party.GetMembers() {
+		for _, member := range msession.Party.List() {
 			ms, found := p.matchmakingRegistry.GetMatchingBySessionId(uuid.FromStringOrNil(member.Presence.GetSessionId()))
 			if !found || ms == nil {
 				continue
 			}
 			msessions = append(msessions, ms)
 		}
-		logger = logger.With(zap.Any("party", msession.Party.GetMembers()))
+		logger = logger.With(zap.Any("party", msession.Party.List()))
 	} else {
 		msessions = append(msessions, msession)
 	}
@@ -370,7 +370,7 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 	case <-msession.Ctx.Done():
 		// The leader has canceled matchmaking before the grace period is over
 		// Cancel any active matchmaking
-		for _, member := range msession.Party.GetMembers() {
+		for _, member := range msession.Party.List() {
 			ms, found := p.matchmakingRegistry.GetMatchingBySessionId(uuid.FromStringOrNil(member.Presence.GetSessionId()))
 			if !found || ms == nil {
 				continue
@@ -382,9 +382,9 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 	}
 
 	// Create a slice and map of who is matchmaking
-	msessions := make([]*MatchmakingSession, 0, len(msession.Party.GetMembers()))
+	msessions := make([]*MatchmakingSession, 0, len(msession.Party.List()))
 	msessionMap := make(map[string]*MatchmakingSession)
-	for _, member := range msession.Party.GetMembers() {
+	for _, member := range msession.Party.List() {
 		ms, found := p.matchmakingRegistry.GetMatchingBySessionId(uuid.FromStringOrNil(member.Presence.GetSessionId()))
 		if !found || ms == nil {
 			continue
@@ -394,14 +394,14 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 	}
 
 	// Remove anyone who is not matchmaking
-	for _, member := range msession.Party.GetMembers() {
+	for _, member := range msession.Party.List() {
 		if _, found := msessionMap[member.Presence.GetSessionId()]; !found {
-			p.runtimeModule.StreamUserLeave(StreamModeParty, msession.Party.ph.IDStr, "", p.node, member.Presence.GetUserId(), member.Presence.GetSessionId())
+			p.runtimeModule.StreamUserLeave(StreamModeParty, msession.Party.IDStr(), "", p.node, member.Presence.GetUserId(), member.Presence.GetSessionId())
 		}
 	}
 
 	// Add the ticket through the party handler
-	ticket, presenceIDs, err := msession.Party.ph.MatchmakerAdd(session.id.String(), p.node, query, minCount, maxCount, countMultiple, stringProps, numericProps)
+	ticket, memberPresenceIDs, err := msession.Party.MatchmakerAdd(session.id.String(), p.node, query, minCount, maxCount, countMultiple, stringProps, numericProps)
 	if err != nil {
 		msession.Logger.Error("Failed to add to matchmaker with query", zap.String("query", query), zap.Error(err))
 	}
@@ -418,9 +418,9 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 	msession.Logger.Info("Added party matchmaking ticket", zap.String("query", query), zap.String("ticket", ticket), zap.Any("presences", msession.Party.List()), zap.Any("presence_ids", memberPresenceIDs))
 
 	// Send a message to everyone in the group that they are matchmaking with the leader and others
-	discordIDs := make([]string, 0, len(msession.Party.GetMembers()))
+	discordIDs := make([]string, 0, len(msession.Party.List()))
 
-	for _, pid := range presenceIDs {
+	for _, pid := range memberPresenceIDs {
 		ms, found := msessionMap[pid.SessionID.String()]
 		if !found || ms == nil {
 			continue
@@ -439,7 +439,7 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 		discordIDs = append(discordIDs, discordID)
 
 	}
-	mentions := make([]string, 0, len(presenceIDs))
+	mentions := make([]string, 0, len(memberPresenceIDs))
 	for _, discordID := range discordIDs {
 		mentions = append(mentions, fmt.Sprintf("<@%s>", discordID))
 	}
