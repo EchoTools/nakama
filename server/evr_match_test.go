@@ -328,15 +328,20 @@ func TestSelectTeamForPlayer(t *testing.T) {
 		}
 
 		t.Run(tt.name, func(t *testing.T) {
-			team, result := selectTeamForPlayer(presence, state)
+			_ = presence
+			t.Error("selectTeamForPlayer() not implemented")
+			/*
+				team, result := selectTeamForPlayer(presence, state)
 
-			if team != tt.expectedTeam {
-				t.Errorf("selectTeamForPlayer() returned incorrect team, got: %d, want: %d", team, tt.expectedTeam)
-			}
+				if team != tt.expectedTeam {
+					t.Errorf("selectTeamForPlayer() returned incorrect team, got: %d, want: %d", team, tt.expectedTeam)
+				}
 
-			if result != tt.expectedResult {
-				t.Errorf("selectTeamForPlayer() returned incorrect result, got: %t, want: %t", result, tt.expectedResult)
-			}
+				if result != tt.expectedResult {
+					t.Errorf("selectTeamForPlayer() returned incorrect result, got: %t, want: %t", result, tt.expectedResult)
+				}
+			*/
+
 		})
 	}
 }
@@ -433,15 +438,19 @@ func TestSelectTeamForPlayer_With_Alighment(t *testing.T) {
 		}
 
 		t.Run(tt.name, func(t *testing.T) {
-			team, result := selectTeamForPlayer(presence, state)
+			_, _ = presence, state
+			t.Error("selectTeamForPlayer() not implemented")
+			/*
+				team, result := selectTeamForPlayer(presence, state)
 
-			if team != tt.expectedTeam {
-				t.Errorf("selectTeamForPlayer() returned incorrect team, got: %d, want: %d", team, tt.expectedTeam)
-			}
+				if team != tt.expectedTeam {
+					t.Errorf("selectTeamForPlayer() returned incorrect team, got: %d, want: %d", team, tt.expectedTeam)
+				}
 
-			if result != tt.allowed {
-				t.Errorf("selectTeamForPlayer() returned incorrect result, got: %t, want: %t", result, tt.allowed)
-			}
+				if result != tt.allowed {
+					t.Errorf("selectTeamForPlayer() returned incorrect result, got: %t, want: %t", result, tt.allowed)
+				}
+			*/
 		})
 	}
 }
