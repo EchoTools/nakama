@@ -172,6 +172,15 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		}
 	}
 
+	// Check for the nonovr url param
+	params, ok := ctx.Value(ctxUrlParamsKey{}).(map[string]string)
+	if !ok {
+		params = make(map[string]string)
+	}
+	if _, ok := params["nonovr"]; ok {
+		loginProfile.SystemInfo.HeadsetType = "No No VR"
+	}
+
 	flags := 0
 	if loginProfile.SystemInfo.HeadsetType == "No VR" {
 		flags |= FlagNoVR
