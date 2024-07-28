@@ -500,6 +500,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	}
 
 	logger = logger.WithField("mid", state.ID.UUID().String())
+	logger = logger.WithField("uid", presence.GetUserId())
 	logger = logger.WithField("username", presence.GetUsername())
 
 	if presence.GetSessionId() == state.Broadcaster.SessionID {
@@ -529,11 +530,11 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	state.presences[mp.GetSessionId()] = mp
 
 	logger.WithFields(map[string]interface{}{
-		"evr_id":      mp.EvrID.Token(),
-		"team":        mp.RoleAlignment,
-		"sid":         mp.GetSessionId(),
-		"uid":         mp.GetUserId(),
-		"entrant_sid": mp.EntrantID.String()}).Debug("Player joining the match.")
+		"evrid": mp.EvrID.Token(),
+		"role":  mp.RoleAlignment,
+		"sid":   mp.GetSessionId(),
+		"uid":   mp.GetUserId(),
+		"eid":   mp.EntrantID.String()}).Debug("Player joining the match.")
 
 	// Tell the broadcaster to load the match if it's not already started
 	if !state.Started {

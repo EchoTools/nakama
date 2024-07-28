@@ -79,7 +79,7 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 
 	// Start a timer to add to the metrics
 	timer := time.Now()
-	defer func() { p.metrics.CustomTimer("login", nil, time.Since(timer)) }()
+	defer func() { p.metrics.CustomTimer("login_duration", nil, time.Since(timer)) }()
 
 	// TODO At some point EVR-ID's should be assigned, not accepted.
 

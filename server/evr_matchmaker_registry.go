@@ -164,11 +164,19 @@ type MatchmakingSession struct {
 }
 
 func (s *MatchmakingSession) metricsTags() map[string]string {
+
+	partySize := 1
+	if s.Party != nil {
+		partySize = s.Party.Size()
+	}
+
 	return map[string]string{
-		"type":  s.Label.LobbyType.String(),
-		"mode":  s.Label.Mode.String(),
-		"level": s.Label.Level.String(),
-		"team":  strconv.FormatInt(int64(s.Label.TeamIndex), 10),
+		"type":       s.Label.LobbyType.String(),
+		"mode":       s.Label.Mode.String(),
+		"level":      s.Label.Level.String(),
+		"role":       strconv.FormatInt(int64(s.Label.TeamIndex), 10),
+		"party_size": strconv.FormatInt(int64(partySize), 10),
+		"group_id":   s.Label.GetGroupID().String(),
 	}
 }
 
@@ -604,10 +612,11 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 		entrants = append(entrants, m...)
 	}
 	metricsTags := map[string]string{
-		"type":    strconv.FormatInt(int64(ml.LobbyType), 10),
-		"mode":    ml.Mode.String(),
-		"channel": ml.GroupID.String(),
-		"level":   ml.Level.String(),
+		"type":          strconv.FormatInt(int64(ml.LobbyType), 10),
+		"mode":          ml.Mode.String(),
+		"level":         ml.Level.String(),
+		"group_id":      ml.GetGroupID().String(),
+		"entrant_count": strconv.FormatInt(int64(len(entrants)), 10),
 	}
 	mr.metrics.CustomCounter("matchmaking_matched_participant_count", metricsTags, int64(len(entrants)))
 
@@ -620,7 +629,7 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 	for i, players := range teams {
 		for _, p := range players {
 			// Update the label with the teams
-			evrID, err := evr.ParseEvrId(p.StringProperties["evr_id"])
+			evrID, err := evr.ParseEvrId(p.StringProperties["evrid"])
 			if err != nil {
 				logger.Error("Failed to parse evr id", zap.Error(err))
 				continue
@@ -704,13 +713,13 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 				continue
 			}
 
-			if err := mr.evrPipeline.LobbyJoin(context.Background(), logger, matchID, int(i), ticketMeta.Query, s); err != nil {
-				logger.Warn("Failed to join player to made match", zap.String("mid", matchID.UUID().String()), zap.String("uid", entry.Presence.UserId), zap.Error(err))
+			if err := mr.evrPipeline.LobbyJoin(context.Background(), logger, matchID, int(i), ticketMeta.Query, ms); err != nil {
+				logger.Warn("Failed to join presence to matchmade session", zap.String("mid", matchID.UUID().String()), zap.String("uid", entry.Presence.UserId), zap.Error(err))
 				continue
 			}
 
 			mr.metrics.CustomCounter("match_join_matched_count", metricsTags, 1)
-			mr.metrics.CustomTimer("matchmaking_session_duration", metricsTags, time.Since(ticketMeta.Timestamp))
+			mr.metrics.CustomTimer("matchmaking_matched_duration", metricsTags, time.Since(ticketMeta.CreatedAt))
 
 			successful[entry.Presence.SessionID.String()] = struct{}{}
 		}
@@ -1016,12 +1025,18 @@ func JoinPartyGroup(ctx context.Context, logger *zap.Logger, session *sessionWS)
 		_ = session.Send(out, true)
 	}
 
-	pg := &PartyGroup{
+	ms.Party = &PartyGroup{
 		name: groupName,
 		ph:   ph,
 	}
-	logger.Debug("Joined party", zap.String("party_id", partyID.String()), zap.String("party_group", groupName), zap.Any("members", pg.GetMembers()))
-	return pg, nil
+	partyMembers := make([]string, 0)
+	for _, p := range ms.Party.List() {
+		partyMembers = append(partyMembers, p.UserPresence.GetUserId())
+	}
+
+	logger.Debug("Joined party", zap.String("party_id", partyID.String()), zap.String("party_group", groupName), zap.Any("members", partyMembers))
+
+	return nil
 }
 
 // GetCache returns the latency cache for a user
@@ -1207,7 +1222,7 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, logger *zap.Logger, se
 		}
 
 		defer func() {
-			c.metrics.CustomTimer("matchmaking_session_duration_ms", metricsTags, time.Since(startedAt)*time.Millisecond)
+			c.metrics.CustomTimer("matchmaking_session_duration", metricsTags, time.Since(startedAt))
 		}()
 
 		defer cancel(nil)
@@ -1305,9 +1320,9 @@ func (*MatchmakingSession) BuildQuery(ctx context.Context, nk runtime.NakamaModu
 	numericProps = make(map[string]float64, len(latencies))
 	qparts := make([]string, 0, 10)
 
-	stringProps["evr_id"] = evrID
+	stringProps["evrid"] = evrID
 	// Add this user's ID to the string props
-	stringProps["user_id"] = userID
+	stringProps["uid"] = userID
 
 	// Add a property of the external IP's RTT
 	for _, b := range latencies {

@@ -234,7 +234,7 @@ func (r *ProfileRegistry) ValidateArenaUnlockByName(i interface{}, itemName stri
 }
 
 func (r *ProfileRegistry) GameProfile(ctx context.Context, session *sessionWS, loginProfile evr.LoginProfile, evrID evr.EvrId) (*GameProfileData, error) {
-	logger := session.logger.With(zap.String("evr_id", evrID.String()))
+	logger := session.logger.With(zap.String("evrid", evrID.String()))
 
 	p, err := r.Load(ctx, session.userID)
 	if err != nil {

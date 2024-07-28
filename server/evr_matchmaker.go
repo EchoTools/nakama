@@ -230,6 +230,7 @@ func (p *EvrPipeline) MatchBackfill(msession *MatchmakingSession) error {
 
 			if err := p.LobbyJoin(msession.Session.Context(), logger, label.ID, int(AnyTeam), query, msessions...); err != nil {
 				logger.Warn("Failed to backfill match", zap.Error(err))
+				p.metrics.CustomCounter("match_join_backfill_errors_count", msession.metricsTags(), int64(len(msessions)))
 				continue
 			}
 			p.metrics.CustomCounter("match_join_backfill_count", msession.metricsTags(), int64(len(msessions)))
@@ -262,7 +263,7 @@ func (p *EvrPipeline) MatchBackfill(msession *MatchmakingSession) error {
 func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession) (err error) {
 	// TODO Move this into the matchmaking registry
 	ctx := msession.Context()
-	// TODO FIXME Add a custom matcher for broadcaster matching
+
 	// Get a list of all the broadcasters
 	endpoints := make([]evr.Endpoint, 0, 100)
 	p.broadcasterRegistrationBySession.Range(func(_ string, b *MatchBroadcaster) bool {
@@ -317,6 +318,14 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 	}
 	countMultiple := 2
 
+	metricTags := map[string]string{
+		"type":       msession.Label.LobbyType.String(),
+		"mode":       msession.Label.Mode.String(),
+		"level":      msession.Label.Level.String(),
+		"group_id":   groupID.String(),
+		"party_size": "1",
+	}
+
 	// Create a status presence for the user
 	stream := PresenceStream{Mode: StreamModeMatchmaking, Subject: uuid.NewV5(uuid.Nil, "matchmaking")}
 	meta := PresenceMeta{Format: session.format, Username: session.Username(), Status: query, Hidden: true}
@@ -324,17 +333,11 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 	if !ok {
 		return status.Errorf(codes.Internal, "Failed to track user: %v", err)
 	}
-	tags := map[string]string{
-		"type":       msession.Label.LobbyType.String(),
-		"mode":       msession.Label.Mode.String(),
-		"level":      msession.Label.Level.String(),
-		"party_size": "1",
-	}
 
-	// Add the user to the matchmaker
-
-	// If this is a party, then wait 30 seconds for everyone to start matchmaking, then only hte leader will put in a ticket
 	if msession.Party == nil {
+
+		// Solo matchmaking
+
 		presences := []*MatchmakerPresence{
 			{
 				UserId:    userID,
@@ -350,15 +353,13 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 		if err != nil {
 			msession.Logger.Error("Failed to add to solo matchmaker ticket", zap.String("query", query), zap.Error(err))
 		}
-		msession.AddTicket(ticket, query)
-		p.metrics.CustomCounter("matchmaker_tickets_count", tags, 1)
+		p.metrics.CustomCounter("matchmaker_tickets_count", metricTags, 1)
 		msession.Logger.Info("Added solo matchmaking ticket", zap.String("query", query), zap.String("ticket", ticket), zap.Any("presences", presences))
 		go func() {
 			<-msession.Ctx.Done()
 			session.pipeline.matchmaker.RemoveSessionAll(sessionID.String())
 		}()
 		return nil
-
 	}
 
 	partyID := msession.Party.ID().String()
@@ -404,16 +405,17 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 	if err != nil {
 		msession.Logger.Error("Failed to add to matchmaker with query", zap.String("query", query), zap.Error(err))
 	}
-	msession.AddTicket(ticket, query)
-	tags["party_size"] = fmt.Sprintf("%d", len(presenceIDs))
-	p.metrics.CustomCounter("matchmaker_tickets_count", tags, 1)
+
+	metricTags["party_size"] = fmt.Sprintf("%d", len(memberPresenceIDs)+1) // memberPresenceIDs excludes the leader
+	p.metrics.CustomCounter("matchmaker_tickets_count", metricTags, 1)
 	go func() {
 		err := PartySyncMatchmaking(ctx, msessions, msession.Party.ph, 4*time.Minute)
 		if err != nil {
+			p.metrics.CustomCounter("matchmaker_partysync_errors_count", metricTags, 1)
 			msession.Logger.Debug("PartySyncMatchmaking errored", zap.Error(err))
 		}
 	}()
-	msession.Logger.Info("Added party matchmaking ticket", zap.String("query", query), zap.String("ticket", ticket), zap.Any("presences", msession.Party.GetMembers()), zap.Any("presence_ids", presenceIDs))
+	msession.Logger.Info("Added party matchmaking ticket", zap.String("query", query), zap.String("ticket", ticket), zap.Any("presences", msession.Party.List()), zap.Any("presence_ids", memberPresenceIDs))
 
 	// Send a message to everyone in the group that they are matchmaking with the leader and others
 	discordIDs := make([]string, 0, len(msession.Party.GetMembers()))
@@ -701,6 +703,10 @@ func NewMatchPresenceFromSession(msession *MatchmakingSession, matchID MatchID, 
 
 func (p *EvrPipeline) LobbyJoinPrepare(ctx context.Context, logger *zap.Logger, msession *MatchmakingSession, matchID MatchID, query string, roleAlignment int) (*EvrMatchPresence, error) {
 	session := msession.Session
+	startTime := time.Now()
+	defer func() {
+		p.metrics.CustomTimer("lobby_join_prepare_duration", msession.metricsTags(), time.Since(startTime))
+	}()
 	// Determine the display name
 	displayName, err := SetDisplayNameByChannelBySession(ctx, NewRuntimeGoLogger(logger), p.db, p.runtimeModule, p.discordRegistry, session.userID.String(), session.Username(), msession.Label.GetGroupID().String())
 	if err != nil {
@@ -720,18 +726,21 @@ func (p *EvrPipeline) LobbyJoinPrepare(ctx context.Context, logger *zap.Logger, 
 }
 
 func (p *EvrPipeline) LobbyJoin(ctx context.Context, logger *zap.Logger, matchID MatchID, teamIndex int, query string, msessions ...*MatchmakingSession) error {
+	startTime := time.Now()
+	defer func() {
+		p.metrics.CustomTimer("lobby_join_duration", msessions[0].metricsTags(), time.Millisecond*time.Since(startTime))
+	}()
 	label, err := MatchLabelByID(ctx, p.runtimeModule, matchID)
 	if err != nil || label == nil {
 		return fmt.Errorf("failed to get match label: %w", err)
 	}
-	logger = logger.With(zap.String("mid", matchID.UUID().String()), zap.Any("label", label))
+	logger = logger.With(zap.String("mid", matchID.UUID().String()))
 	// Prepare all of the presences
 	presences := make([]*EvrMatchPresence, 0, len(msessions))
 	for _, msession := range msessions {
 		presence, err := p.LobbyJoinPrepare(msession.Context(), logger, msession, matchID, query, teamIndex)
 		if err != nil {
-			logger.Warn("Failed to prepare presences for match", zap.Any("presence", presence), zap.Any("presences", presences), zap.Error(err))
-			return fmt.Errorf("failed to prepare lobby join: %w", err)
+			logger.Warn("Failed to create match presence", zap.Error(err))
 		}
 		presences = append(presences, presence)
 	}
@@ -764,13 +773,15 @@ func (p *EvrPipeline) LobbyJoin(ctx context.Context, logger *zap.Logger, matchID
 		go func() {
 			msg := evr.NewLobbySessionSuccess(label.Mode, label.ID.UUID(), label.GetGroupID(), label.GetEndpoint(), int16(presence.RoleAlignment))
 
-			if err = bsession.SendEvr(msg.Version5()); err != nil {
-				errorCh <- fmt.Errorf("failed to send messages to broadcaster: %w", err)
+			if err = bs.SendEvr(msg.Version5()); err != nil {
+				logger.Error("Failed to send lobby session success to game server", zap.Error(err))
+				errorCh <- presence
 				return
 			}
 			<-time.After(500 * time.Millisecond)
-			if err = session.SendEvr(msg.Version5()); err != nil {
-				errorCh <- fmt.Errorf("failed to send messages to player: %w", err)
+			if err = ms.Session.SendEvr(msg.Version5()); err != nil {
+				logger.Error("Failed to send lobby session success to client", zap.Error(err))
+				errorCh <- presence
 				return
 			}
 		}()
@@ -779,19 +790,15 @@ func (p *EvrPipeline) LobbyJoin(ctx context.Context, logger *zap.Logger, matchID
 OuterLoop:
 	for range matchPresences {
 		select {
-		case <-time.After(5 * time.Second):
-			err = fmt.Errorf("timed out waiting for lobby session success")
-		case err = <-errorCh:
-			if err != nil {
-				break OuterLoop
+		case <-time.After(4 * time.Second):
+			err = fmt.Errorf("timed out waiting for all lobby session successes to complete")
+		case presence := <-errorCh:
+			if presence != nil {
+				failed = append(presences, presence)
 			}
 		}
 	}
-
-	for _, msession := range msessions {
-		msession.Cancel(err)
-	}
-
+	logger.Info("Lobby join completed", zap.Any("presences", presences), zap.Any("failed", failed))
 	return err
 }
 
@@ -1195,7 +1202,7 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 		return p.MatchSpectateStreamLoop(msession)
 	}
 
-	msession.Party, err = JoinPartyGroup(parentCtx, logger, session)
+	err = msession.JoinPartyGroup(parentCtx, logger)
 	if err != nil {
 		logger.Warn("Failed to join party group", zap.Error(err))
 	} else {
