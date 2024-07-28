@@ -224,7 +224,21 @@ func (r *LocalDiscordRegistry) GetUser(ctx context.Context, discordId string) (*
 		}
 	}
 
-	// Get it from the API
+	// Make requests for the known guilds of the user
+	guildMap, err := GetGuildGroupIDsByUser(ctx, r.pipeline.db, discordId)
+	if err != nil {
+		return nil, fmt.Errorf("error getting guilds by user: %w", err)
+	}
+
+	for _, guildID := range guildMap {
+		if member, err := r.bot.GuildMember(guildID, discordId); err == nil {
+			if member.User == nil || member.User.Username == "" || member.User.GlobalName == "" {
+				continue
+			}
+			return member.User, nil
+		}
+	}
+	// Make a request for the user from the API
 	return r.bot.User(discordId)
 }
 

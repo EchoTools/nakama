@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -701,31 +702,7 @@ func NewMatchPresenceFromSession(msession *MatchmakingSession, matchID MatchID, 
 
 }
 
-func (p *EvrPipeline) LobbyJoinPrepare(ctx context.Context, logger *zap.Logger, msession *MatchmakingSession, matchID MatchID, query string, roleAlignment int) (*EvrMatchPresence, error) {
-	session := msession.Session
-	startTime := time.Now()
-	defer func() {
-		p.metrics.CustomTimer("lobby_join_prepare_duration", msession.metricsTags(), time.Since(startTime))
-	}()
-	// Determine the display name
-	displayName, err := SetDisplayNameByChannelBySession(ctx, NewRuntimeGoLogger(logger), p.db, p.runtimeModule, p.discordRegistry, session.userID.String(), session.Username(), msession.Label.GetGroupID().String())
-	if err != nil {
-		logger.Warn("Failed to set display name.", zap.Error(err))
-	}
-	// Set the profile's display name.
-	evrID, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
-	if !ok {
-		return nil, fmt.Errorf("failed to get evrID from session context")
-	}
-
-	if err := p.profileRegistry.SetLobbyProfile(ctx, msession.UserID, evrID, displayName); err != nil {
-		return nil, fmt.Errorf("failed to set lobby profile: %w", err)
-	}
-
-	return NewMatchPresenceFromSession(msession, matchID, displayName, roleAlignment, query)
-}
-
-func (p *EvrPipeline) LobbyJoin(ctx context.Context, logger *zap.Logger, matchID MatchID, teamIndex int, query string, msessions ...*MatchmakingSession) error {
+func (p *EvrPipeline) LobbyJoin(ctx context.Context, logger *zap.Logger, matchID MatchID, roleAlignment int, query string, msessions ...*MatchmakingSession) error {
 	startTime := time.Now()
 	defer func() {
 		p.metrics.CustomTimer("lobby_join_duration", msessions[0].metricsTags(), time.Millisecond*time.Since(startTime))
@@ -738,7 +715,10 @@ func (p *EvrPipeline) LobbyJoin(ctx context.Context, logger *zap.Logger, matchID
 	// Prepare all of the presences
 	presences := make([]*EvrMatchPresence, 0, len(msessions))
 	for _, msession := range msessions {
-		presence, err := p.LobbyJoinPrepare(msession.Context(), logger, msession, matchID, query, teamIndex)
+		// Get the display name from the account
+		account, err := p.runtimeModule.AccountGetId(ctx, msession.Session.userID.String())
+
+		presence, err := NewMatchPresenceFromSession(msession, matchID, account.GetUser().GetDisplayName(), roleAlignment, query)
 		if err != nil {
 			logger.Warn("Failed to create match presence", zap.Error(err))
 		}

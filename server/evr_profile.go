@@ -41,7 +41,7 @@ type GameProfileData struct {
 
 type AccountProfile struct {
 	account  *api.Account
-	metadata *AccountUserMetadata
+	metadata *AccountMetadata
 	evrID    evr.EvrId
 }
 
@@ -77,9 +77,9 @@ func GetEVRAccount(ctx context.Context, logger runtime.Logger, nk runtime.Nakama
 }
 
 func NewAccountProfile(ctx context.Context, account *api.Account, evrID evr.EvrId) *AccountProfile {
-	metadata := &AccountUserMetadata{}
+	metadata := &AccountMetadata{}
 	if err := json.Unmarshal([]byte(account.User.GetMetadata()), metadata); err != nil {
-		metadata = &AccountUserMetadata{}
+		metadata = &AccountMetadata{}
 	}
 
 	return &AccountProfile{

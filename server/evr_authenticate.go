@@ -652,46 +652,54 @@ func SelectDisplayNameByPriority(ctx context.Context, nk runtime.NakamaModule, u
 }
 
 type GroupMetadata struct {
-	GuildID                string                 `json:"guild_id"`                 // The guild ID
-	RulesText              string                 `json:"rules_text"`               // The rules text displayed on the main menu
-	MemberRole             string                 `json:"member_role"`              // The role that has access to create lobbies/matches and join social lobbies
-	ModeratorRole          string                 `json:"moderator_role"`           // The rules that have access to moderation tools
-	ServerHostRole         string                 `json:"serverhost_role"`          // The rules that have access to serverdb
-	AllocatorRole          string                 `json:"allocator_role"`           // The rules that have access to reserve servers
-	SuspensionRole         string                 `json:"suspension_role"`          // The roles that have users suspended
-	ServerHostUserIDs      []string               `json:"serverhost_user_ids"`      // The broadcaster hosts
-	AllocatorUserIDs       []string               `json:"allocator_user_ids"`       // The allocator hosts
-	DebugChannel           string                 `json:"debug_channel_id"`         // The debug channel
-	MembersOnlyMatchmaking bool                   `json:"members_only_matchmaking"` // Restrict matchmaking to members only (when this group is the active one)
-	Unhandled              map[string]interface{} `json:"-"`
+	GuildID                    string                 `json:"guild_id"`                      // The guild ID
+	RulesText                  string                 `json:"rules_text"`                    // The rules text displayed on the main menu
+	MemberRole                 string                 `json:"member_role"`                   // The role that has access to create lobbies/matches and join social lobbies
+	ModeratorRole              string                 `json:"moderator_role"`                // The rules that have access to moderation tools
+	ServerHostRole             string                 `json:"serverhost_role"`               // The rules that have access to serverdb
+	AllocatorRole              string                 `json:"allocator_role"`                // The rules that have access to reserve servers
+	SuspensionRole             string                 `json:"suspension_role"`               // The roles that have users suspended
+	ServerHostUserIDs          []string               `json:"serverhost_user_ids"`           // The broadcaster hosts
+	AllocatorUserIDs           []string               `json:"allocator_user_ids"`            // The allocator hosts
+	ArenaMatchmakingChannelID  string                 `json:"arena_matchmaking_channel_id"`  // The matchmaking channel
+	CombatMatchmakingChannelID string                 `json:"combat_matchmaking_channel_id"` // The matchmaking channel
+	DebugChannel               string                 `json:"debug_channel_id"`              // The debug channel
+	MembersOnlyMatchmaking     bool                   `json:"members_only_matchmaking"`      // Restrict matchmaking to members only (when this group is the active one)
+	Unhandled                  map[string]interface{} `json:"-"`
 }
 
-type AccountUserMetadata struct {
-	DisplayNameOverride string           `json:"display_name_override"` // The display name override
-	GlobalBanReason     string           `json:"global_ban_reason"`     // The global ban reason
-	ActiveGroupID       string           `json:"active_group_id"`       // The active group ID
-	Cosmetics           AccountCosmetics `json:"cosmetics"`             // The loadout
+type AccountMetadata struct {
+	DisplayNameOverride string            `json:"display_name_override"` // The display name override
+	GlobalBanReason     string            `json:"global_ban_reason"`     // The global ban reason
+	ActiveGroupID       string            `json:"active_group_id"`       // The active group ID
+	Cosmetics           AccountCosmetics  `json:"cosmetics"`             // The loadout
+	GroupDisplayNames   map[string]string `json:"group_display_names"`   // The display names for each guild map[groupID]displayName
 }
 
-func (a *AccountUserMetadata) GetActiveGroupID() uuid.UUID {
+func (a *AccountMetadata) GetActiveGroupID() uuid.UUID {
 	return uuid.FromStringOrNil(a.ActiveGroupID)
 }
 
-func (a *AccountUserMetadata) SetActiveGroupID(id uuid.UUID) {
+func (a *AccountMetadata) SetActiveGroupID(id uuid.UUID) {
 	a.ActiveGroupID = id.String()
 }
 
-func (a *AccountUserMetadata) MarshalToMap() (map[string]interface{}, error) {
-	b, err := json.Marshal(a)
-	if err != nil {
-		return nil, err
+func (a *AccountMetadata) GetGroupDisplayNameOrDefault(groupID string) string {
+	if dn, ok := a.GroupDisplayNames[groupID]; ok {
+		return dn
 	}
+	return a.GetActiveGroupDisplayName()
+}
+
+func (a *AccountMetadata) GetActiveGroupDisplayName() string {
+	return a.GroupDisplayNames[a.ActiveGroupID]
+}
+
+func (a *AccountMetadata) MarshalToMap() map[string]interface{} {
+	b, _ := json.Marshal(a)
 	var m map[string]interface{}
-	err = json.Unmarshal(b, &m)
-	if err != nil {
-		return nil, err
-	}
-	return m, nil
+	_ = json.Unmarshal(b, &m)
+	return m
 }
 
 type AccountCosmetics struct {
@@ -782,49 +790,86 @@ func GetDiscordDisplayNames(ctx context.Context, db *sql.DB, discordRegistry Dis
 	if err != nil {
 		return "", "", "", fmt.Errorf("error getting discord ID by user ID: %w", err)
 	}
+
 	guildID, err := GetGuildIDByGroupID(ctx, db, groupID)
 	if err != nil {
 		return "", "", "", fmt.Errorf("error getting guild ID by group ID: %w", err)
 	}
 
-	user, err := discordRegistry.GetUser(ctx, discordID)
-	if err != nil {
-		return "", "", "", fmt.Errorf("error getting discord user: %w", err)
+	var username, globalName, guildNick string
+
+	if member, err := discordRegistry.GetGuildMember(ctx, guildID, discordID); err == nil && member != nil {
+		username = member.User.Username
+		globalName = member.User.Username
+		guildNick = member.Nick
+	} else {
+		user, err := discordRegistry.GetUser(ctx, discordID)
+		if err != nil {
+			return "", "", "", fmt.Errorf("error getting user by discord ID: %w", err)
+		}
+		username = user.Username
+		globalName = user.Username
 	}
 
-	guildMember, err := discordRegistry.GetGuildMember(ctx, guildID, discordID)
-	if err != nil || guildMember == nil {
-		return user.Username, user.GlobalName, "", fmt.Errorf("error getting guild member: %w", err)
-	}
-	return user.Username, user.GlobalName, guildMember.Nick, nil
+	return username, globalName, guildNick, nil
 }
 
-func SetDisplayNameByChannelBySession(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, discordRegistry DiscordRegistry, userID, username, groupID string) (string, error) {
+// Guild Nick, Nick of your Primary Guild,
 
-	if override, ok := ctx.Value(ctxDisplayNameOverrideKey{}).(string); ok {
-		return override, nil
+func GetDisplayNameByGroupID(ctx context.Context, nk runtime.NakamaModule, userID, groupID string) (string, error) {
+	account, err := nk.AccountGetId(ctx, userID)
+	if err != nil {
+		return "", fmt.Errorf("error getting account: %w", err)
+	}
+	md := AccountMetadata{}
+	err = json.Unmarshal([]byte(account.GetUser().GetMetadata()), &md)
+	if err != nil {
+		return account.GetUser().GetDisplayName(), fmt.Errorf("error unmarshalling account user metadata: %w", err)
+	}
+	if dn := md.DisplayNameOverride; dn != "" {
+		return dn, nil
+	} else if dn := md.GetGroupDisplayNameOrDefault(groupID); dn != "" {
+		return dn, nil
+	} else if dn := account.GetUser().GetDisplayName(); dn != "" {
+		return dn, nil
+	} else {
+		return account.GetUser().GetUsername(), nil
+	}
+}
+
+func UpdateDisplayNameByGroupID(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, discordRegistry DiscordRegistry, userID, groupID string) (string, error) {
+
+	account, err := nk.AccountGetId(ctx, userID)
+	if err != nil {
+		return "", fmt.Errorf("error getting account: %w", err)
 	}
 
-	defaultDisplayName, ok := ctx.Value(ctxDefaultDisplayNameKey{}).(string)
-	if !ok || defaultDisplayName == "" {
-		defaultDisplayName = username
+	// Get the displayname for the player's active group
+	defaultDisplayName := account.GetUser().GetDisplayName()
+
+	metadata := AccountMetadata{}
+	err = json.Unmarshal([]byte(account.GetUser().GetMetadata()), &metadata)
+	if err != nil {
+		return defaultDisplayName, fmt.Errorf("error unmarshalling account user metadata: %w", err)
 	}
 
+	// Check for a cached display name
 	username, globalName, guildNick, err := GetDiscordDisplayNames(ctx, db, discordRegistry, userID, groupID)
 	if err != nil {
 		return defaultDisplayName, fmt.Errorf("error getting discord display names: %w", err)
 	}
+
 	options := []string{guildNick, defaultDisplayName, globalName, username}
 
 	displayName, err := SelectDisplayNameByPriority(ctx, nk, userID, username, options)
 	if err != nil {
-		return "", fmt.Errorf("error selecting display name by priority: %w", err)
+		return defaultDisplayName, fmt.Errorf("error selecting display name by priority: %w", err)
 	}
 
 	// Purge old display names
 	records, err := GetDisplayNameRecords(ctx, logger, nk, userID)
 	if err != nil {
-		return "", fmt.Errorf("error getting display names: %w", err)
+		return displayName, fmt.Errorf("error getting display names: %w", err)
 	}
 	storageDeletes := []*runtime.StorageDelete{}
 	if len(records) > 2 {
@@ -842,13 +887,18 @@ func SetDisplayNameByChannelBySession(ctx context.Context, logger runtime.Logger
 		}
 	}
 
+	metadata.GroupDisplayNames[groupID] = displayName
+
 	// Update the account
 	accountUpdates := []*runtime.AccountUpdate{
 		{
-			UserID:   userID,
-			Username: username,
+			UserID:      userID,
+			Username:    username,
+			Metadata:    metadata.MarshalToMap(),
+			DisplayName: metadata.GetActiveGroupDisplayName(),
 		},
 	}
+
 	storageWrites := []*runtime.StorageWrite{
 		{
 			Collection: DisplayNameCollection,
@@ -862,7 +912,7 @@ func SetDisplayNameByChannelBySession(ctx context.Context, logger runtime.Logger
 	walletUpdates := []*runtime.WalletUpdate{}
 	updateLedger := true
 	if _, _, err = nk.MultiUpdate(ctx, accountUpdates, storageWrites, storageDeletes, walletUpdates, updateLedger); err != nil {
-		return "", fmt.Errorf("error updating account: %w", err)
+		return displayName, fmt.Errorf("error updating account: %w", err)
 	}
 
 	// Add [BOT] to the display name if the user is a bot
@@ -871,7 +921,12 @@ func SetDisplayNameByChannelBySession(ctx context.Context, logger runtime.Logger
 			displayName = fmt.Sprintf("%s [BOT]", displayName)
 		}
 	}
-	logger.Debug("SetDisplayNameByChannelBySession", zap.String("gid", groupID), zap.String("selected", displayName), zap.String("options", strings.Join(options, ",")))
+
+	logger.WithFields(map[string]any{
+		"gid":      groupID,
+		"selected": displayName,
+		"options":  strings.Join(options, ","),
+	}).Debug("SetDisplayNameByChannelBySession")
 	return displayName, nil
 }
 
