@@ -235,11 +235,20 @@ func (p *EvrPipeline) findSession(ctx context.Context, logger *zap.Logger, sessi
 		return response.SendErrorToSession(session, err)
 	}
 
+	_, groupMetadata, err := GetGuildGroupMetadata(ctx, p.runtimeModule, ml.GetGroupID().String())
+	if err != nil {
+		return nil
+	}
+	if groupMetadata.MembersOnlyMatchmaking {
+		// Exclude labels that are not in the user's group
+		ml.Broadcaster.GroupIDs = []uuid.UUID{ml.GetGroupID()}
+	}
+
 	metricsTags := map[string]string{
 		"mode":     request.Mode.String(),
-		"channel":  ml.GroupID.String(),
+		"group_id": ml.GroupID.String(),
 		"level":    request.Level.String(),
-		"team_idx": strconv.FormatInt(int64(request.GetAlignment()), 10),
+		"role":     strconv.FormatInt(int64(request.GetAlignment()), 10),
 	}
 	p.metrics.CustomCounter("lobbyfindsession_active_count", metricsTags, 1)
 

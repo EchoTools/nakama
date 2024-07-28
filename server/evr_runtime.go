@@ -832,3 +832,34 @@ func GetPartyGroupID(ctx context.Context, db *sql.DB, userID string) (string, uu
 	}
 	return dbPartyGroupName, uuid.NewV5(uuid.Nil, dbPartyGroupName), nil
 }
+
+func GetGuildGroupIDsByUser(ctx context.Context, db *sql.DB, userID string) ([]string, error) {
+	query := `
+	SELECT 
+		g.id 
+		FROM 
+			group_edge ge, 
+			groups g 
+		WHERE ge.source_id = $1 
+			AND ge.state <= 2 
+			AND g.lang_tag = 'guild' 
+		GROUP BY g.id;
+`
+	var dbGroupID string
+
+	rows, err := db.QueryContext(ctx, query, MatchmakingConfigStorageCollection, MatchmakingConfigStorageKey, userID)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "An error occurred while trying to list group IDs.")
+	}
+
+	groups := make([]string, 0)
+
+	for rows.Next() {
+		if err := rows.Scan(&dbGroupID); err != nil {
+			return nil, err
+		}
+		groups = append(groups, dbGroupID)
+	}
+	_ = rows.Close()
+	return groups, nil
+}

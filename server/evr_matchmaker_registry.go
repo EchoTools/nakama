@@ -404,7 +404,6 @@ func (mr *MatchmakingRegistry) listUnfilledLobbies(ctx context.Context, logger *
 		return nil, "", status.Errorf(codes.InvalidArgument, "Cannot backfill private lobbies")
 	}
 
-	// TODO Move this into the matchmaking registry
 	query = buildMatchQueryFromLabel(searchLabel, partySize)
 
 	// Basic search defaults
@@ -522,18 +521,21 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 
 	logger.Debug("Building match", zap.Any("entrants", entrants))
 
-	// Use the properties from the first entrant to get the channel
-	channels := make([]uuid.UUID, 0, len(entrants))
+	// Verify that all entrants have the same group_id
+
+	groupIDs := make([]uuid.UUID, 0, len(entrants))
 	for _, e := range entrants {
 		channel := uuid.FromStringOrNil(e.StringProperties["channel"])
 		if channel == uuid.Nil {
 			continue
 		}
-		channels = append(channels, channel)
+		groupIDs = append(groupIDs, channel)
 	}
 
-	channels = CompactedFrequencySort(channels, true)
-
+	groupIDs = CompactedFrequencySort(groupIDs, true)
+	if len(groupIDs) != 1 {
+		logger.Warn("Entrants are not in the same group", zap.Any("groupIDs", groupIDs))
+	}
 	// Get a map of all broadcasters by their key
 	broadcastersByExtIP := make(map[string]evr.Endpoint, 100)
 	mr.evrPipeline.broadcasterRegistrationBySession.Range(func(_ string, v *MatchBroadcaster) bool {
@@ -1297,19 +1299,15 @@ func (c *MatchmakingRegistry) GetLatencies(userId uuid.UUID, endpoints []evr.End
 	return result
 }
 
-func (ms *MatchmakingSession) BuildQuery(latencies []LatencyMetric, evrID evr.EvrId) (query string, stringProps map[string]string, numericProps map[string]float64, err error) {
+func (*MatchmakingSession) BuildQuery(ctx context.Context, nk runtime.NakamaModule, db *sql.DB, userID string, evrID string, groupID string, mode evr.Symbol, latencies []LatencyMetric, partyGroup *PartyGroup) (query string, stringProps map[string]string, numericProps map[string]float64, err error) {
 	// Create the properties maps
 	stringProps = make(map[string]string)
 	numericProps = make(map[string]float64, len(latencies))
 	qparts := make([]string, 0, 10)
-	ml := ms.Label
-	// SHOULD match this channel
-	chstr := strings.Replace(ms.Label.GroupID.String(), "-", "", -1)
-	qparts = append(qparts, fmt.Sprintf("properties.channel:%s^3", chstr))
-	stringProps["channel"] = chstr
-	stringProps["evr_id"] = evrID.String()
+
+	stringProps["evr_id"] = evrID
 	// Add this user's ID to the string props
-	stringProps["userid"] = strings.Replace(ms.UserID.String(), "-", "", -1)
+	stringProps["user_id"] = userID
 
 	// Add a property of the external IP's RTT
 	for _, b := range latencies {
@@ -1341,18 +1339,64 @@ func (ms *MatchmakingSession) BuildQuery(latencies []LatencyMetric, evrID evr.Ev
 		}
 	}
 	// MUST be the same mode
-	qparts = append(qparts, GameMode(ml.Mode).Label(Must, 0).Property())
-	stringProps["mode"] = ml.Mode.Token().String()
+	qparts = append(qparts, "+properties.mode:"+mode.String())
+	stringProps["mode"] = mode.String()
 
-	for _, groupId := range ml.Broadcaster.GroupIDs {
+	_, groupMetadata, err := GetGuildGroupMetadata(ctx, nk, groupID)
+	if err != nil {
+		return "", nil, nil, err
+	}
+
+	groupIDs := make([]string, 0)
+
+	if partyGroup != nil {
+		// Create a list of groups that all party members have in common
+		userGroups := make([][]string, 0)
+
+		for _, p := range partyGroup.List() {
+			groupIDs, err := GetGuildGroupIDsByUser(ctx, db, p.Presence.GetUserId())
+			if err != nil {
+				return "", nil, nil, err
+			}
+			userGroups = append(userGroups, groupIDs)
+		}
+
+		for _, g := range userGroups[0] {
+			found := true
+			for _, u := range userGroups {
+				if !slices.Contains(u, g) {
+					found = false
+					break
+				}
+			}
+			if found {
+				groupIDs = append(groupIDs, g)
+			}
+		}
+	} else {
+		groupIDs, err = GetGuildGroupIDsByUser(ctx, db, userID)
+		if err != nil {
+			return "", nil, nil, err
+		}
+
+	}
+
+	for _, id := range groupIDs {
 		// Add the properties
 		// Strip out the hyphens from the group ID
-		s := strings.ReplaceAll(groupId.String(), "-", "")
+		s := strings.ReplaceAll(id, "-", "")
 		stringProps[s] = "T"
 
+		qparts = append(qparts, fmt.Sprintf("properties.group_id:%s", groupID))
+		stringProps["group_id"] = groupID
+
 		// If this is the user's current channel, then give it a +3 boost
-		if groupId == *ms.Label.GroupID {
-			qparts = append(qparts, fmt.Sprintf("properties.%s:T^3", s))
+		if id == groupID {
+			if groupMetadata.MembersOnlyMatchmaking {
+				qparts = append(qparts, fmt.Sprintf("+properties.%s:T", s))
+			} else {
+				qparts = append(qparts, fmt.Sprintf("properties.%s:T^10", s))
+			}
 		} else {
 			qparts = append(qparts, fmt.Sprintf("properties.%s:T", s))
 		}
@@ -1360,7 +1404,6 @@ func (ms *MatchmakingSession) BuildQuery(latencies []LatencyMetric, evrID evr.Ev
 
 	query = strings.Join(qparts, " ")
 	// TODO Promote friends
-	ms.Logger.Debug("Matchmaking query", zap.String("query", query), zap.Any("stringProps", stringProps), zap.Any("numericProps", numericProps))
 	// TODO Avoid ghosted
 	return query, stringProps, numericProps, nil
 }
