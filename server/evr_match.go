@@ -259,14 +259,20 @@ type EvrMatchState struct {
 	TeamIndex   TeamIndex `json:"team,omitempty"`         // What team index a player prefers (Used by Matching only)
 
 	Players        []PlayerInfo                 `json:"players,omitempty"`         // The displayNames of the players (by team name) in the match.
+	Reserved       []PlayerInfo                 `json:"reserved,omitempty"`        // The displayNames of the reserved players in the match.
 	TeamAlignments map[string]int               `json:"team_alignments,omitempty"` // map[userID]TeamIndex
-	presences      map[string]*EvrMatchPresence // [sessionId]EvrMatchPresence
+	presenceMap    map[string]*EvrMatchPresence // [sessionId]EvrMatchPresence
+	reserveMap     map[string]*EvrMatchPresence // [sessionId]EvrMatchPresence
 	broadcaster    runtime.Presence             // The broadcaster's presence
 
 	emptyTicks            int64 // The number of ticks the match has been empty.
 	sessionStartExpiry    int64 // The tick count at which the match will be shut down if it has not started.
 	broadcasterJoinExpiry int64 // The tick count at which the match will be shut down if the broadcaster has not joined.
 	tickRate              int64 // The number of ticks per second.
+}
+
+func (s *EvrMatchState) GetPlayerCount() int {
+	return len(s.presenceMap) + len(s.reserveMap)
 }
 
 func (s *EvrMatchState) OpenPlayerSlots() int {
@@ -284,10 +290,20 @@ func (s *EvrMatchState) OpenSlots() int {
 func (s *EvrMatchState) String() string {
 	return s.GetLabel()
 }
+func (s *EvrMatchState) AllPresences() []*EvrMatchPresence {
+	all := make([]*EvrMatchPresence, 0, len(s.presenceMap)+len(s.reserveMap))
+	for _, p := range s.presenceMap {
+		all = append(all, p)
+	}
+	for _, p := range s.reserveMap {
+		all = append(all, p)
+	}
+	return all
+}
 
 func (s *EvrMatchState) RoleCount(role int) int {
 	count := 0
-	for _, p := range s.presences {
+	for _, p := range s.AllPresences() {
 		if p.RoleAlignment == role {
 			count++
 		}
@@ -339,14 +355,15 @@ func (s *EvrMatchState) PublicView() *EvrMatchState {
 			Regions:     s.Broadcaster.Regions,
 			Tags:        s.Broadcaster.Tags,
 		},
-		Players: make([]PlayerInfo, len(s.Players)),
+		Players:  make([]PlayerInfo, 0),
+		Reserved: make([]PlayerInfo, 0),
 	}
 	if ps.LobbyType == PrivateLobby || ps.LobbyType == UnassignedLobby {
 		ps.ID = MatchID{}
 		ps.SpawnedBy = ""
 	} else {
 		for i := range s.Players {
-			ps.Players[i] = PlayerInfo{
+			ps.Players = append(ps.Players, PlayerInfo{
 				UserID:      s.Players[i].UserID,
 				Username:    s.Players[i].Username,
 				DisplayName: s.Players[i].DisplayName,
@@ -354,7 +371,18 @@ func (s *EvrMatchState) PublicView() *EvrMatchState {
 				Team:        s.Players[i].Team,
 				DiscordID:   s.Players[i].DiscordID,
 				PartyID:     s.Players[i].PartyID,
-			}
+			})
+		}
+		for i := range s.Reserved {
+			ps.Reserved = append(ps.Reserved, PlayerInfo{
+				UserID:      s.Reserved[i].UserID,
+				Username:    s.Reserved[i].Username,
+				DisplayName: s.Reserved[i].DisplayName,
+				EvrID:       s.Reserved[i].EvrID,
+				Team:        s.Reserved[i].Team,
+				DiscordID:   s.Reserved[i].DiscordID,
+				PartyID:     s.Reserved[i].PartyID,
+			})
 		}
 	}
 	return &ps
@@ -373,11 +401,31 @@ func MatchStateFromLabel(label string) (*EvrMatchState, error) {
 func (s *EvrMatchState) rebuildCache() {
 	// Rebuild the lookup tables.
 
-	s.Players = make([]PlayerInfo, 0, len(s.presences))
-	s.Size = len(s.presences)
+	s.Players = make([]PlayerInfo, 0, len(s.presenceMap))
+	s.Reserved = make([]PlayerInfo, 0, len(s.reserveMap))
+	s.Size = s.GetPlayerCount()
 	s.PlayerCount = 0
 	// Construct Player list
-	for _, presence := range s.presences {
+	for _, presence := range s.presenceMap {
+		// Do not include spectators or moderators in player count
+		if presence.RoleAlignment != evr.TeamSpectator && presence.RoleAlignment != evr.TeamModerator {
+			s.PlayerCount++
+		}
+
+		playerinfo := PlayerInfo{
+			UserID:      presence.UserID.String(),
+			Username:    presence.Username,
+			DisplayName: presence.DisplayName,
+			EvrID:       presence.EvrID,
+			Team:        TeamIndex(presence.RoleAlignment),
+			ClientIP:    presence.ClientIP,
+			DiscordID:   presence.DiscordID,
+			PartyID:     presence.PartyID.String(),
+		}
+
+		s.Players = append(s.Players, playerinfo)
+	}
+	for _, presence := range s.reserveMap {
 		// Do not include spectators or moderators in player count
 		if presence.RoleAlignment != evr.TeamSpectator && presence.RoleAlignment != evr.TeamModerator {
 			s.PlayerCount++
@@ -393,9 +441,8 @@ func (s *EvrMatchState) rebuildCache() {
 			PartyID:     presence.PartyID.String(),
 		}
 
-		s.Players = append(s.Players, playerinfo)
+		s.Reserved = append(s.Reserved, playerinfo)
 	}
-
 	sort.SliceStable(s.Players, func(i, j int) bool {
 		return s.Players[i].Team < s.Players[j].Team
 	})
@@ -425,7 +472,9 @@ func NewEvrMatchState(endpoint evr.Endpoint, config *MatchBroadcaster) (state *E
 		Level:            evr.LevelUnloaded,
 		RequiredFeatures: make([]string, 0),
 		Players:          make([]PlayerInfo, 0, MatchMaxSize),
-		presences:        make(map[string]*EvrMatchPresence, MatchMaxSize),
+		Reserved:         make([]PlayerInfo, 0, MatchMaxSize),
+		presenceMap:      make(map[string]*EvrMatchPresence, MatchMaxSize),
+		reserveMap:       make(map[string]*EvrMatchPresence, MatchMaxSize),
 		TeamAlignments:   make(map[string]int, MatchMaxSize),
 
 		emptyTicks: 0,
@@ -465,7 +514,8 @@ func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql
 	)
 
 	state.ID = MatchIDFromContext(ctx)
-	state.presences = make(map[string]*EvrMatchPresence)
+	state.presenceMap = make(map[string]*EvrMatchPresence)
+	state.reserveMap = make(map[string]*EvrMatchPresence)
 
 	state.broadcasterJoinExpiry = state.tickRate * BroadcasterJoinTimeoutSecs
 
@@ -527,14 +577,15 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		return state, false, reason
 	}
 
-	state.presences[mp.GetSessionId()] = mp
+	state.presenceMap[mp.GetSessionId()] = mp
+	state.reserveMap[mp.GetSessionId()] = mp
 
 	logger.WithFields(map[string]interface{}{
 		"evrid": mp.EvrID.Token(),
 		"role":  mp.RoleAlignment,
 		"sid":   mp.GetSessionId(),
 		"uid":   mp.GetUserId(),
-		"eid":   mp.EntrantID.String()}).Debug("Player joining the match.")
+		"eid":   mp.EntrantID.String()}).Info("Player joining the match.")
 
 	// Tell the broadcaster to load the match if it's not already started
 	if !state.Started {
@@ -559,14 +610,14 @@ func (m *EvrMatch) playerJoinAttempt(state *EvrMatchState, mp EvrMatchPresence) 
 	}
 
 	// If this EvrID is already in the match, reject the player
-	for _, p := range state.presences {
+	for _, p := range state.presenceMap {
 		if p.GetSessionId() == mp.GetSessionId() || p.EvrID.Equals(mp.EvrID) {
 			return &mp, JoinRejectReasonDuplicateJoin
 		}
 	}
 
 	// If the lobby is full, reject
-	if len(state.presences) >= int(state.MaxSize) {
+	if state.Size >= int(state.MaxSize) {
 		return &mp, JoinRejectReasonLobbyFull
 	}
 
@@ -633,12 +684,19 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 			continue
 		}
 
-		if _, ok := state.presences[p.GetSessionId()]; !ok {
+		if _, ok := state.reserveMap[p.GetSessionId()]; !ok {
 			logger.WithFields(map[string]interface{}{
 				"username": p.GetUsername(),
 				"uid":      p.GetUserId(),
 			}).Error("Presence not found. this should never happen.")
 			return nil
+		} else {
+			state.presenceMap[p.GetSessionId()] = state.reserveMap[p.GetSessionId()]
+			delete(state.reserveMap, p.GetSessionId())
+			logger.WithFields(map[string]interface{}{
+				"username": p.GetUsername(),
+				"uid":      p.GetUserId(),
+			}).Error("Join complete.")
 		}
 	}
 
@@ -662,10 +720,10 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 	}
 
 	for _, p := range presences {
-		delete(state.presences, p.GetSessionId())
+		delete(state.presenceMap, p.GetSessionId())
 	}
 
-	if len(state.presences) == 0 {
+	if len(state.presenceMap) == 0 {
 		// Lock the match
 		state.Open = false
 		logger.Debug("Match is empty. Closing it.")
@@ -700,7 +758,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		}
 	}
 	if state.Started {
-		if len(state.presences) == 0 {
+		if len(state.presenceMap) == 0 {
 			state.emptyTicks++
 
 			if state.emptyTicks > 20*state.tickRate {
@@ -774,7 +832,7 @@ func (m *EvrMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, db
 	logger.Info("MatchTerminate called. %v", state)
 	if state.broadcaster != nil {
 		// Disconnect the players
-		for _, presence := range state.presences {
+		for _, presence := range state.presenceMap {
 			nk.SessionDisconnect(ctx, presence.GetPlayerSession(), runtime.PresenceReasonDisconnect)
 		}
 		// Disconnect the broadcasters session
@@ -821,7 +879,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 
 	case SignalPruneUnderutilized:
 		// Prune this match if it's utilization is low.
-		if len(state.presences) <= 3 {
+		if len(state.presenceMap) <= 3 {
 			// Free the resources.
 			return nil, SignalResponse{Success: true}.String()
 		}
@@ -835,7 +893,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 	case SignalGetPresences:
 		// Return the presences in the match.
 
-		jsonData, err := json.Marshal(state.presences)
+		jsonData, err := json.Marshal(state.presenceMap)
 		if err != nil {
 			return state, fmt.Sprintf("failed to marshal presences: %v", err)
 		}
@@ -967,7 +1025,7 @@ func (m *EvrMatch) StartSession(ctx context.Context, logger runtime.Logger, nk r
 	state.StartTime = time.Now()
 	entrants := make([]evr.EvrId, 0)
 	message := evr.NewBroadcasterStartSession(state.ID.UUID(), channel, state.MaxSize, uint8(state.LobbyType), state.Broadcaster.AppId, state.Mode, state.Level, state.RequiredFeatures, entrants)
-	logger.Info("Starting session. %v", message)
+	logger.WithField("message", message).Info("Starting session.")
 	messages := []evr.Message{
 		message,
 	}

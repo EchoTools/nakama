@@ -493,7 +493,15 @@ func buildMatchQueryFromLabel(ml *EvrMatchState, partySize int) string {
 
 	if ml.TeamIndex != Spectator && ml.TeamIndex != Moderator {
 		// MUST have room for this party on the teams
-		qparts = append(qparts, fmt.Sprintf("+label.player_count:<=%d", ml.PlayerLimit-partySize))
+		playerLimit := MatchMaxSize
+		switch ml.Mode {
+		case evr.ModeCombatPublic:
+			playerLimit = 10
+		case evr.ModeArenaPublic:
+			playerLimit = 8
+		}
+
+		qparts = append(qparts, fmt.Sprintf("+label.player_count:<=%d", playerLimit-partySize))
 	}
 
 	// MUST be a broadcaster on a channel the user has access to
@@ -797,7 +805,7 @@ func EVRMatchJoinAttempt(ctx context.Context, logger *zap.Logger, matchID MatchI
 	found, allowed, isNew, reason, labelStr, presences := matchRegistry.JoinAttempt(ctx, matchID.UUID(), matchID.Node(), presence.UserID, presence.SessionID, presence.Username, presence.SessionExpiry, nil, presence.ClientIP, presence.ClientPort, matchID.Node(), metadata)
 	if !found {
 		return "", nil, nil, fmt.Errorf("match not found: %s", matchIDStr)
-	} else if labelStr == "" {
+	} else if allowed && labelStr == "" {
 		return "", nil, nil, fmt.Errorf("match label not found: %s", matchIDStr)
 	}
 

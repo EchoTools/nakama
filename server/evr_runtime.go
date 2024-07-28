@@ -858,7 +858,7 @@ func GetGuildGroupIDsByUser(ctx context.Context, db *sql.DB, userID string) (map
 	groups := make(map[string]string, 0)
 
 	for rows.Next() {
-		if err := rows.Scan(&dbGroupID, dbGuildID); err != nil {
+		if err := rows.Scan(&dbGroupID, &dbGuildID); err != nil {
 			return nil, err
 		}
 		groups[dbGuildID] = dbGroupID
