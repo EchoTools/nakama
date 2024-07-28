@@ -1197,8 +1197,9 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 
 	if leader := msession.Party.GetLeader(); leader != nil && leader.SessionId != session.id.String() {
 		// Try to join the leader
-		<-time.After(2 * time.Second)
+		<-time.After(3 * time.Second)
 		go FollowLeader(logger, msession, p.runtimeModule)
+		<-time.After(3 * time.Second)
 	}
 
 	// Start a ping to broadcaster endpoints
@@ -1307,9 +1308,6 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 
 	// If this is not the leader, then wait for the leader.
 	if msession.Party != nil && msession.Party.GetLeader().GetSessionId() != session.id.String() {
-		// try to join the leaders lobby the entire time.
-		go FollowLeader(logger, msession, p.runtimeModule)
-
 		// Hold for 4 minutes.
 		select {
 		case <-msession.Ctx.Done():
