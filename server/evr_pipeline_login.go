@@ -147,7 +147,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	<-updateCtx.Done()
 
 	// Get the user's metadata
-	var metadata AccountUserMetadata
+	var metadata AccountMetadata
 	if err := json.Unmarshal([]byte(account.User.GetMetadata()), &metadata); err != nil {
 		return settings, fmt.Errorf("failed to unmarshal account metadata: %w", err)
 	}
@@ -219,10 +219,41 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		}
 	}
 
+	config, err := LoadMatchmakingSettings(ctx, p.runtimeModule, userId)
+	if err != nil {
+		logger.Warn("Failed to load matchmaking config", zap.Error(err))
+	}
+	verbose := config.Verbose
+
+	// Load the user's profile
+	profile, err := p.profileRegistry.GameProfile(ctx, session, loginProfile, evrId)
+	if err != nil {
+		session.logger.Error("failed to load game profiles", zap.Error(err))
+		return evr.NewDefaultGameSettings(), fmt.Errorf("failed to load game profiles")
+	}
+
 	// Get the GroupID from the user's metadata
 	groupID := metadata.GetActiveGroupID()
 	// Validate that the user is in the group
 	if groupID == uuid.Nil {
+		// Get it from the profile
+		groupID = profile.GetChannel()
+	}
+
+	groupMap, err := GetGuildGroupIDsByUser(ctx, p.db, userId)
+	if err != nil {
+		return settings, fmt.Errorf("user is not in any guild groups: %w", err)
+	}
+
+	found := false
+	for _, id := range groupMap {
+		if id == groupID.String() {
+			found = true
+			break
+		}
+	}
+
+	if !found {
 		// Get a list of the user's guild memberships and set to the largest one
 		memberships, err := p.discordRegistry.GetGuildGroupMemberships(ctx, uid, nil)
 		if err != nil {
@@ -231,29 +262,24 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		if len(memberships) == 0 {
 			return settings, fmt.Errorf("user is not in any guild groups")
 		}
+
 		// Sort the groups by the edgecount
 		sort.SliceStable(memberships, func(i, j int) bool {
 			return memberships[i].GuildGroup.Size() > memberships[j].GuildGroup.Size()
 		})
 		groupID = memberships[0].GuildGroup.ID()
+
+		metadata.SetActiveGroupID(groupID)
+		metadata.GetActiveGroupDisplayName()
+		if err := p.runtimeModule.AccountUpdateId(ctx, userId, "", metadata.MarshalToMap(), "", "", "", "", ""); err != nil {
+			return settings, fmt.Errorf("failed to update user metadata: %w", err)
+		}
 	}
 
-	config, err := LoadMatchmakingSettings(ctx, p.runtimeModule, userId)
-	if err != nil {
-		logger.Warn("Failed to load matchmaking config", zap.Error(err))
-	}
-	verbose := config.Verbose
-
-	// Set the display name once.
-	displayName, err := SetDisplayNameByChannelBySession(ctx, NewRuntimeGoLogger(logger), p.db, p.runtimeModule, p.discordRegistry, userId, account.GetUser().GetUsername(), groupID.String())
+	// Set the default display name once.
+	displayName, err := UpdateDisplayNameByGroupID(ctx, NewRuntimeGoLogger(logger), p.db, p.runtimeModule, p.discordRegistry, userId, groupID.String())
 	if err != nil {
 		logger.Warn("Failed to set display name", zap.Error(err))
-	}
-	if displayName != account.GetUser().GetDisplayName() {
-		// Update the user's display name
-		if err := p.runtimeModule.AccountUpdateId(ctx, userId, "", nil, displayName, "", "", "", ""); err != nil {
-			logger.Warn("Failed to update display name", zap.Error(err))
-		}
 	}
 
 	// Initialize the full session
@@ -261,13 +287,6 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		return settings, fmt.Errorf("failed to login: %w", err)
 	}
 	ctx = session.Context()
-
-	// Load the user's profile
-	profile, err := p.profileRegistry.GameProfile(ctx, session, loginProfile, evrId)
-	if err != nil {
-		session.logger.Error("failed to load game profiles", zap.Error(err))
-		return evr.NewDefaultGameSettings(), fmt.Errorf("failed to load game profiles")
-	}
 
 	profile.SetEvrID(evrId)
 	profile.SetChannel(evr.GUID(groupID))

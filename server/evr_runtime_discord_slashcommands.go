@@ -2565,20 +2565,6 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		return fmt.Errorf("failed to get or create an account for %s (%s)", discordID, username)
 	}
 
-	// Set the users default display name
-	// Get the user's active group ID
-	profile, err := d.profileRegistry.Load(ctx, userID)
-	if err != nil {
-		return fmt.Errorf("failed to load profile: %v", err)
-	}
-
-	groupID := profile.Server.Social.Channel
-
-	_, err = SetDisplayNameByChannelBySession(ctx, logger, d.db, nk, d.discordRegistry, userID.String(), username, groupID.String())
-	if err != nil {
-		return fmt.Errorf("failed to set display name: %v", err)
-	}
-
 	if includePrivate {
 		// Do some profile checks and cleanups
 
@@ -2616,10 +2602,14 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 
 	var groupIDs []uuid.UUID
 	if guildID != "" {
-		groupID, found := d.discordRegistry.Get(guildID)
-		if !found {
+		groupID, err := GetGroupIDByGuildID(ctx, d.db, guildID)
+		if err != nil {
 			return fmt.Errorf("guild group not found")
 		}
+		if _, err := UpdateDisplayNameByGroupID(ctx, logger, d.db, nk, d.discordRegistry, userID.String(), groupID); err != nil {
+			return err
+		}
+
 		groupIDs = []uuid.UUID{uuid.FromStringOrNil(groupID)}
 	}
 

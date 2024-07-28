@@ -262,6 +262,7 @@ func (p *EvrPipeline) findSession(ctx context.Context, logger *zap.Logger, sessi
 			return response.SendErrorToSession(session, err)
 		}
 	}
+	go p.PrepareLobbyProfile(ctx, logger, session, request.GetEvrID(), session.userID.String(), ml.GroupID.String())
 
 	ml.Broadcaster.Regions = []evr.Symbol{evr.DefaultRegion}
 
@@ -274,6 +275,9 @@ func (p *EvrPipeline) findSession(ctx context.Context, logger *zap.Logger, sessi
 			return
 		}
 	}
+
+	// Determine the display name
+
 	// Create the matchmaking session
 	err = p.MatchFind(ctx, logger, session, ml)
 	if err != nil {
@@ -417,6 +421,7 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 			Features:    features,
 		},
 	}
+	p.PrepareLobbyProfile(ctx, logger, session, request.GetEvrID(), session.userID.String(), ml.GroupID.String())
 
 	// Start the search in a goroutine.
 	go func() error {
@@ -466,6 +471,8 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 	if ml.GroupID == nil {
 		ml.GroupID = &uuid.Nil
 	}
+
+	p.PrepareLobbyProfile(ctx, logger, session, request.GetEvrID(), session.userID.String(), ml.GroupID.String())
 
 	metricsTags := map[string]string{
 		"team":    TeamIndex(request.GetAlignment()).String(),
@@ -588,4 +595,17 @@ func (p *EvrPipeline) lobbyPlayerSessionsRequest(ctx context.Context, logger *za
 	entrant := evr.NewLobbyEntrant(message.EvrId, message.LobbyID, entrantID, entrantIDs, int16(presence.RoleAlignment))
 
 	return session.SendEvr(entrant.Version3())
+}
+
+func (p *EvrPipeline) PrepareLobbyProfile(ctx context.Context, logger *zap.Logger, session *sessionWS, evrID evr.EvrId, userID, groupID string) {
+	// prepare the profile ahead of time
+	displayName, err := GetDisplayNameByGroupID(ctx, p.runtimeModule, userID, groupID)
+	if err != nil {
+		logger.Warn("Failed to set display name.", zap.Error(err))
+	}
+
+	if err := p.profileRegistry.SetLobbyProfile(ctx, session.userID, evrID, displayName); err != nil {
+		logger.Warn("Failed to set lobby profile", zap.Error(err))
+		return
+	}
 }
