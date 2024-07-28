@@ -409,7 +409,7 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 	metricTags["party_size"] = fmt.Sprintf("%d", len(memberPresenceIDs)+1) // memberPresenceIDs excludes the leader
 	p.metrics.CustomCounter("matchmaker_tickets_count", metricTags, 1)
 	go func() {
-		err := PartySyncMatchmaking(ctx, msessions, msession.Party.ph, 4*time.Minute)
+		err := PartySyncMatchmaking(ctx, msessions, 4*time.Minute)
 		if err != nil {
 			p.metrics.CustomCounter("matchmaker_partysync_errors_count", metricTags, 1)
 			msession.Logger.Debug("PartySyncMatchmaking errored", zap.Error(err))
@@ -764,14 +764,13 @@ func (p *EvrPipeline) LobbyJoin(ctx context.Context, logger *zap.Logger, matchID
 		return fmt.Errorf("broadcaster session not found: %s", label.Broadcaster.SessionID)
 	}
 
-	errorCh := make(chan error)
+	errorCh := make(chan *EvrMatchPresence)
 	// If this part errors, the matchmaking session must be canceled.
 
 	for i, presence := range matchPresences {
-		session := msessions[i].Session
 		// Send the lobbysessionSuccess, this will trigger the broadcaster to send a lobbysessionplayeraccept once the player connects to the broadcaster.
-		go func() {
-			msg := evr.NewLobbySessionSuccess(label.Mode, label.ID.UUID(), label.GetGroupID(), label.GetEndpoint(), int16(presence.RoleAlignment))
+		go func(ms *MatchmakingSession, bs *sessionWS, alignment int) {
+			msg := evr.NewLobbySessionSuccess(label.Mode, label.ID.UUID(), label.GetGroupID(), label.GetEndpoint(), int16(alignment))
 
 			if err = bs.SendEvr(msg.Version5()); err != nil {
 				logger.Error("Failed to send lobby session success to game server", zap.Error(err))
@@ -784,10 +783,13 @@ func (p *EvrPipeline) LobbyJoin(ctx context.Context, logger *zap.Logger, matchID
 				errorCh <- presence
 				return
 			}
-		}()
+			errorCh <- nil
+			ms.Cancel(nil)
+		}(msessions[i], bsession, presence.RoleAlignment)
 	}
 
-OuterLoop:
+	failed := make([]*EvrMatchPresence, 0, len(presences))
+
 	for range matchPresences {
 		select {
 		case <-time.After(4 * time.Second):

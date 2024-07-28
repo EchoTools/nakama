@@ -18,7 +18,7 @@ var (
 )
 
 // Syncronize the contexts of all party members
-func PartySyncMatchmaking(ctx context.Context, msessions []*MatchmakingSession, ph *PartyHandler, timeout time.Duration) error {
+func PartySyncMatchmaking(ctx context.Context, msessions []*MatchmakingSession, timeout time.Duration) error {
 	partyCtx, partyCancel := context.WithCancelCause(ctx)
 	defer partyCancel(nil)
 
