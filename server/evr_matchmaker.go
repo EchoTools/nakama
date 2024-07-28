@@ -278,11 +278,16 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 		return status.Errorf(codes.Internal, "EVR ID not found in context")
 	}
 
-	query, stringProps, numericProps, err := msession.BuildQuery(allRTTs, evrID)
+	groupID, ok := ctx.Value(ctxGroupIDKey{}).(uuid.UUID)
+	if !ok {
+		return status.Errorf(codes.Internal, "Group ID not found in context")
+	}
+
+	query, stringProps, numericProps, err := msession.BuildQuery(ctx, p.runtimeModule, p.db, session.userID.String(), evrID.String(), groupID.String(), msession.Label.Mode, allRTTs, msession.Party)
 	if err != nil {
 		return status.Errorf(codes.Internal, "Failed to build matchmaking query: %v", err)
 	}
-
+	msession.Logger.Debug("Matchmaking query", zap.String("query", query), zap.Any("stringProps", stringProps), zap.Any("numericProps", numericProps))
 	// Add the user to the matchmaker
 	sessionID := session.ID()
 
@@ -299,6 +304,7 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 	if err != nil {
 		return status.Errorf(codes.Internal, "Failed to load matchmaking config: %v", err)
 	}
+
 	// Merge the user's config with the global config
 	query = fmt.Sprintf("%s %s %s", query, gconfig.MatchmakingQueryAddon, config.MatchmakingQueryAddon)
 
