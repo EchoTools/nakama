@@ -428,6 +428,10 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 		if err != nil {
 			return response.SendErrorToSession(session, status.Errorf(codes.Internal, "Failed to create matchmaking session: %v", err))
 		}
+
+		// Leave any existing party group
+		msession.LeavePartyGroup()
+
 		p.metrics.CustomCounter("create_active_count", map[string]string{}, 1)
 		err = p.MatchCreateLoop(session, msession, 5*time.Minute)
 		if err != nil {
@@ -545,6 +549,9 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 	if err = p.LobbyJoin(ctx, logger, matchToken, int(request.GetAlignment()), "", msession); err != nil {
 		return response.SendErrorToSession(session, status.Errorf(codes.NotFound, err.Error()))
 	}
+
+	msession.LeavePartyGroup()
+
 	return nil
 }
 

@@ -953,9 +953,27 @@ func (m *MatchmakingSession) GetPingCandidates(endpoints ...evr.Endpoint) (candi
 
 	return candidates
 }
-func JoinPartyGroup(ctx context.Context, logger *zap.Logger, session *sessionWS) (*PartyGroup, error) {
 
+func (ms *MatchmakingSession) LeavePartyGroup() error {
+	s := ms.Session
+
+	_, partyID, err := GetPartyGroupID(ms.Ctx, s.pipeline.db, s.UserID().String())
+	if err != nil {
+		return status.Errorf(codes.Internal, "Failed to get party group ID: %v", err)
+	}
+	if partyID == uuid.Nil {
+		return nil
+	}
+	ms.Session.pipeline.tracker.Untrack(s.ID(), PresenceStream{Mode: StreamModeParty, Subject: partyID}, s.UserID())
+	return nil
+}
+
+func (ms *MatchmakingSession) JoinPartyGroup(ctx context.Context, logger *zap.Logger) error {
+	session := ms.Session
 	groupName, partyID, err := GetPartyGroupID(ctx, session.pipeline.db, session.UserID().String())
+	if err != nil {
+		return status.Errorf(codes.Internal, "Failed to get party group ID: %v", err)
+	}
 
 	maxSize := 8
 	open := true
@@ -999,9 +1017,9 @@ func JoinPartyGroup(ctx context.Context, logger *zap.Logger, session *sessionWS)
 	case nil:
 
 	case runtime.ErrPartyFull, runtime.ErrPartyJoinRequestsFull:
-		return nil, status.Errorf(codes.ResourceExhausted, "Party is full")
+		return status.Errorf(codes.ResourceExhausted, "Party is full")
 	case runtime.ErrPartyJoinRequestDuplicate:
-		return nil, status.Errorf(codes.AlreadyExists, "Duplicate join request")
+		return status.Errorf(codes.AlreadyExists, "Duplicate join request")
 	case runtime.ErrPartyJoinRequestAlreadyMember:
 		session.logger.Debug("User is already a member of the party")
 		// This is not an error, just a no-op.
@@ -1013,7 +1031,7 @@ func JoinPartyGroup(ctx context.Context, logger *zap.Logger, session *sessionWS)
 			Code:    int32(rtapi.Error_RUNTIME_EXCEPTION),
 			Message: "Error tracking party creation",
 		}}}, true)
-		return nil, status.Errorf(codes.Internal, "Failed to track party creation")
+		return status.Errorf(codes.Internal, "Failed to track party creation")
 	} else if isNew {
 		out := &rtapi.Envelope{Message: &rtapi.Envelope_Party{Party: &rtapi.Party{
 			PartyId:   ph.IDStr,

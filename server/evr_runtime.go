@@ -830,6 +830,9 @@ func GetPartyGroupID(ctx context.Context, db *sql.DB, userID string) (string, uu
 	if !found {
 		return "", uuid.Nil, status.Error(codes.NotFound, "user account not found")
 	}
+	if dbPartyGroupName == "" {
+		return "", uuid.Nil, nil
+	}
 	return dbPartyGroupName, uuid.NewV5(uuid.Nil, dbPartyGroupName), nil
 }
 
