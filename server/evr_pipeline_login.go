@@ -70,9 +70,6 @@ func msgFailedLoginFn(session *sessionWS, evrId evr.EvrId, err error) error {
 	return nil
 }
 
-// TODO FIXME This could use some optimization, or at least some benchmarking.
-// Since all of these messages for the login step happen predictably, it might be worth preloading the user's profile.
-
 // loginRequest handles the login request from the client.
 func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.LoginRequest)
