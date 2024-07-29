@@ -99,6 +99,8 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		if err != nil {
 			logger.Error("Unable to create bot")
 		}
+		dg.StateEnabled = true
+
 	}
 
 	discordRegistry := NewLocalDiscordRegistry(ctx, nk, runtimeLogger, metrics, config, pipeline, dg)
