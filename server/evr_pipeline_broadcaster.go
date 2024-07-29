@@ -245,11 +245,10 @@ func extractAuthenticationDetailsFromContext(ctx context.Context) (discordId, pa
 
 func (p *EvrPipeline) authenticateBroadcaster(ctx context.Context, logger *zap.Logger, session *sessionWS, discordId, password string, guildIds []string, tags []string) (string, string, error) {
 	// Get the user id from the discord id
-	uid, err := p.discordRegistry.GetUserIdByDiscordId(ctx, discordId, false)
+	userId, err := GetUserIDByDiscordID(ctx, p.db, discordId)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to find user for Discord ID: %v", err)
 	}
-	userId := uid.String()
 	// Authenticate the user
 	userId, username, _, err := AuthenticateEmail(ctx, logger, session.pipeline.db, userId+"@"+p.placeholderEmail, password, "", false)
 	if err != nil {

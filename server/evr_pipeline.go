@@ -495,11 +495,10 @@ func (p *EvrPipeline) attemptOutOfBandAuthentication(session *sessionWS) error {
 	}
 
 	// Get the account for this discordId
-	uid, err := p.discordRegistry.GetUserIdByDiscordId(ctx, discordId, false)
+	userId, err := GetUserIDByDiscordID(ctx, p.db, discordId)
 	if err != nil {
 		return fmt.Errorf("out of band for discord ID %s: %v", discordId, err)
 	}
-	userId := uid.String()
 
 	// The account was found.
 	account, err := GetAccount(ctx, session.logger, session.pipeline.db, session.statusRegistry, uuid.FromStringOrNil(userId))

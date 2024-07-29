@@ -38,33 +38,21 @@ type LookupTable struct {
 }
 
 type DiscordRegistry interface {
-	Get(discordId string) (nakamaId string, ok bool)
 	GetBot() *discordgo.Session
 	Logger() runtime.Logger
 	RuntimeModule() runtime.NakamaModule
-	Store(discordId string, nakamaId string)
-	ClearCache(discordId string)
-	GetDiscordIdByUserId(ctx context.Context, userId uuid.UUID) (discordId string, err error)
-	GetUserIdByUsername(ctx context.Context, username string, create bool) (userId uuid.UUID, err error)
 	UpdateAccount(ctx context.Context, userId uuid.UUID) error
-	GetUserIdByDiscordId(ctx context.Context, discordId string, create bool) (userId uuid.UUID, err error)
-	GetGuildByGroupId(ctx context.Context, groupId string) (*discordgo.Guild, error)
 	ReplaceMentions(guildID, s string) string
-	PopulateCache() (cnt int, err error)
 	GetGuildGroupMetadata(ctx context.Context, groupId string) (metadata *GroupMetadata, err error)
 	SetGuildGroupMetadata(ctx context.Context, groupId string, metadata *GroupMetadata) error
 	// GetGuildMember looks up the Discord member by the guild ID and member ID. Potentially using the state cache.
 	GetGuildMember(ctx context.Context, guildId, memberId string) (*discordgo.Member, error)
 	SynchronizeGroup(ctx context.Context, guild *discordgo.Guild) error
 	GetGuild(ctx context.Context, guildId string) (*discordgo.Guild, error)
-	// GetGuildGroupMemberships looks up the guild groups by the user ID (and optionally by group IDs)
 	GetGuildGroupMemberships(ctx context.Context, userId uuid.UUID, groupIDs []uuid.UUID) ([]GuildGroupMembership, error)
-	// GetUser looks up the Discord user by the user ID. Potentially using the state cache.
 	GetUser(ctx context.Context, discordId string) (*discordgo.User, error)
 	UpdateGuildGroup(ctx context.Context, logger runtime.Logger, userID uuid.UUID, guildID string) error
 	UpdateAllGuildGroupsForUser(ctx context.Context, logger runtime.Logger, userID uuid.UUID) error
-	isModerator(ctx context.Context, guildID, discordID string) (isModerator bool, isGlobal bool, err error)
-	IsGlobalModerator(ctx context.Context, userID uuid.UUID) (ok bool, err error)
 	ProcessRequest(ctx context.Context, session *sessionWS, in evr.Message) error
 	CheckUser2FA(ctx context.Context, userID uuid.UUID) (bool, error)
 }
@@ -391,71 +379,6 @@ func (r *LocalDiscordRegistry) SetGuildGroupMetadata(ctx context.Context, groupI
 	}
 
 	return nil
-}
-
-type GuildGroup struct {
-	Metadata GroupMetadata
-	Group    *api.Group
-}
-
-func (g *GuildGroup) GuildID() string {
-	return g.Metadata.GuildID
-}
-
-func (g *GuildGroup) Name() string {
-	return g.Group.Name
-}
-
-func (g *GuildGroup) Description() string {
-	return g.Group.Description
-}
-
-func (g *GuildGroup) ID() uuid.UUID {
-	return uuid.FromStringOrNil(g.Group.Id)
-}
-
-func (g *GuildGroup) Size() int {
-	return int(g.Group.EdgeCount)
-}
-
-func (g *GuildGroup) ServerHostUserIDs() []string {
-	return g.Metadata.ServerHostUserIDs
-}
-
-func (g *GuildGroup) AllocatorUserIDs() []string {
-	return g.Metadata.AllocatorUserIDs
-}
-func NewGuildGroup(group *api.Group) *GuildGroup {
-
-	md := &GroupMetadata{}
-	if err := json.Unmarshal([]byte(group.Metadata), md); err != nil {
-		return nil
-	}
-
-	return &GuildGroup{
-		Metadata: *md,
-		Group:    group,
-	}
-}
-
-type GuildGroupMembership struct {
-	GuildGroup   GuildGroup
-	isMember     bool
-	isModerator  bool // Admin
-	isServerHost bool // Broadcaster Host
-	canAllocate  bool // Can allocate servers with slash command
-}
-
-func NewGuildGroupMembership(group *api.Group, userID uuid.UUID, state api.UserGroupList_UserGroup_State) GuildGroupMembership {
-	gg := NewGuildGroup(group)
-
-	return GuildGroupMembership{
-		GuildGroup:   *gg,
-		isMember:     state <= api.UserGroupList_UserGroup_MEMBER,
-		isModerator:  state <= api.UserGroupList_UserGroup_ADMIN,
-		isServerHost: slices.Contains(gg.ServerHostUserIDs(), userID.String()),
-		canAllocate:  slices.Contains(gg.AllocatorUserIDs(), userID.String()),
-	}
 }
 
 // GetGuildGroupMemberships looks up the guild groups by the user ID

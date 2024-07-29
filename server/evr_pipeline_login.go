@@ -355,9 +355,8 @@ func (p *EvrPipeline) authenticateAccount(ctx context.Context, logger *zap.Logge
 			return nil, status.Error(codes.InvalidArgument, "password required")
 		}
 
-		uid, err := p.discordRegistry.GetUserIdByDiscordId(ctx, discordId, false)
+		userId, err := GetUserIDByDiscordID(ctx, p.db, discordId)
 		if err == nil {
-			userId = uid.String()
 			// Authenticate the password.
 			userId, _, _, err = AuthenticateEmail(ctx, session.logger, session.pipeline.db, userId+"@"+p.placeholderEmail, userPassword, "", false)
 			if err == nil {
