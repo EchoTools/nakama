@@ -1183,7 +1183,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				// Get the userid by username
 				userId, err := discordRegistry.GetUserIdByDiscordId(ctx, user.ID, false)
 				if err != nil {
-					return fmt.Errorf("failed to authenticate (or create) user %s: %w", user.ID, err)
+					return fmt.Errorf("failed to authenticate user %s: %w", user.ID, err)
 				}
 
 				return nk.UnlinkDevice(ctx, userId.String(), deviceId)
@@ -2561,15 +2561,15 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		MatchIDs:              make([]string, 0),
 	}
 	// Get the user's ID
-	userID, err := discordRegistry.GetUserIdByDiscordId(ctx, discordID, true)
-	if err != nil {
-		return fmt.Errorf("failed to authenticate (or create) user %s: %w", discordID, err)
-	}
 
-	if userID == uuid.Nil { // assertion
-		logger.Error("Failed to get or create an account.")
-		return fmt.Errorf("failed to get or create an account for %s (%s)", discordID, username)
+	userIDStr, err := GetUserIDByDiscordID(ctx, d.db, discordID)
+	if err != nil {
+		userIDStr, _, _, err = d.nk.AuthenticateCustom(ctx, discordID, i.Member.User.Username, true)
+		if err != nil {
+			return fmt.Errorf("failed to authenticate (or create) user %s: %w", discordID, err)
+		}
 	}
+	userID := uuid.FromStringOrNil(userIDStr)
 
 	if includePrivate {
 		// Do some profile checks and cleanups

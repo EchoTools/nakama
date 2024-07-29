@@ -216,17 +216,17 @@ func (r *LocalDiscordRegistry) GetUser(ctx context.Context, discordId string) (*
 
 	// Try to find the user in a guild state first.
 	for _, guild := range r.bot.State.Guilds {
-		if member, err := r.bot.State.Member(guild.ID, discordId); err == nil {
-			if member.User == nil || member.User.Username == "" || member.User.GlobalName == "" {
-				continue
-			}
-			return member.User, nil
+		member, err := r.bot.State.Member(guild.ID, discordId)
+		if err != nil || member.User == nil || member.User.Username == "" || member.User.GlobalName == "" {
+			continue
 		}
+		return member.User, nil
 	}
 	userID, err := GetUserIDByDiscordID(ctx, r.pipeline.db, discordId)
 	if err != nil {
 		return nil, fmt.Errorf("error getting user id: %w", err)
 	}
+
 	// Make requests for the known guilds of the user
 	guildMap, err := GetGuildGroupIDsByUser(ctx, r.pipeline.db, userID)
 	if err != nil {
