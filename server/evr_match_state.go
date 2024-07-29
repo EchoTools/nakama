@@ -26,10 +26,10 @@ type EvrMatchState struct {
 	GuildID     string           `json:"guild_id,omitempty"`    // The guild id of the broadcaster. (EVR)
 	GuildName   string           `json:"guild_name,omitempty"`  // The guild name of the broadcaster. (EVR)
 
-	Mode            evr.Symbol           `json:"mode,omitempty"`             // The mode of the lobby (Arena, Combat, Social, etc.) (EVR)
-	Level           evr.Symbol           `json:"level,omitempty"`            // The level to play on (EVR).
-	SessionSettings *evr.SessionSettings `json:"session_settings,omitempty"` // The session settings for the match (EVR).
-	Features        []string             `json:"features,omitempty"`         // The required features for the match. map[feature][hmdtype]isRequired
+	Mode             evr.Symbol           `json:"mode,omitempty"`             // The mode of the lobby (Arena, Combat, Social, etc.) (EVR)
+	Level            evr.Symbol           `json:"level,omitempty"`            // The level to play on (EVR).
+	SessionSettings  *evr.SessionSettings `json:"session_settings,omitempty"` // The session settings for the match (EVR).
+	RequiredFeatures []string             `json:"features,omitempty"`         // The required features for the match. map[feature][hmdtype]isRequired
 
 	MaxSize     uint8     `json:"limit,omitempty"`        // The total lobby size limit (players + specs)
 	Size        int       `json:"size"`                   // The number of players (including spectators) in the match.
@@ -111,22 +111,22 @@ func (s *EvrMatchState) IsPriorityForMode() bool {
 
 func (s *EvrMatchState) PublicView() *EvrMatchState {
 	ps := EvrMatchState{
-		LobbyType:   s.LobbyType,
-		ID:          s.ID,
-		Open:        s.Open,
-		Started:     s.Started,
-		StartTime:   s.StartTime,
-		GroupID:     s.GroupID,
-		GuildID:     s.GuildID,
-		SpawnedBy:   s.SpawnedBy,
-		Mode:        s.Mode,
-		Level:       s.Level,
-		Features:    s.Features,
-		MaxSize:     s.MaxSize,
-		Size:        s.Size,
-		PlayerCount: s.PlayerCount,
-		PlayerLimit: s.PlayerLimit,
-		TeamSize:    s.TeamSize,
+		LobbyType:        s.LobbyType,
+		ID:               s.ID,
+		Open:             s.Open,
+		Started:          s.Started,
+		StartTime:        s.StartTime,
+		GroupID:          s.GroupID,
+		GuildID:          s.GuildID,
+		SpawnedBy:        s.SpawnedBy,
+		Mode:             s.Mode,
+		Level:            s.Level,
+		RequiredFeatures: s.RequiredFeatures,
+		MaxSize:          s.MaxSize,
+		Size:             s.Size,
+		PlayerCount:      s.PlayerCount,
+		PlayerLimit:      s.PlayerLimit,
+		TeamSize:         s.TeamSize,
 		Broadcaster: MatchBroadcaster{
 			OperatorID:  s.Broadcaster.OperatorID,
 			GroupIDs:    s.Broadcaster.GroupIDs,
@@ -154,15 +154,6 @@ func (s *EvrMatchState) PublicView() *EvrMatchState {
 
 	}
 	return &ps
-}
-
-func MatchStateFromLabel(label string) (*EvrMatchState, error) {
-	state := &EvrMatchState{}
-	err := json.Unmarshal([]byte(label), state)
-	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal match label: %v", err)
-	}
-	return state, nil
 }
 
 // rebuildCache is called after the presences map is updated.
@@ -199,11 +190,11 @@ func (s *EvrMatchState) rebuildCache() {
 }
 
 // NewEvrMatchState is a helper function to create a new match state. It returns the state, params, label json, and err.
-func NewEvrMatchState(endpoint evr.Endpoint, config *MatchBroadcaster) (state *EvrMatchState, params map[string]interface{}, configPayload string, err error) {
+func NewEvrMatchState(endpoint evr.Endpoint, config *MatchBroadcaster) (state *MatchLabel, params map[string]interface{}, configPayload string, err error) {
 
 	var tickRate int64 = 10 // 10 ticks per second
 
-	initialState := EvrMatchState{
+	initialState := MatchLabel{
 		Broadcaster: *config,
 		Open:        false,
 		LobbyType:   UnassignedLobby,
