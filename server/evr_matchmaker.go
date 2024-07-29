@@ -128,6 +128,16 @@ func (p *EvrPipeline) GetBackfillCandidates(ctx context.Context, userID uuid.UUI
 	if err != nil || len(labels) == 0 {
 		return nil, err
 	}
+	open := make([]*MatchLabel, 0, len(labels))
+	for _, label := range labels {
+		if label.PlayerCount < label.PlayerLimit {
+			open = append(open, label)
+		}
+	}
+	if len(open) == 0 {
+		return open, nil
+	}
+	labels = open
 
 	endpoints := make([]evr.Endpoint, 0, len(labels))
 	for _, l := range labels {
