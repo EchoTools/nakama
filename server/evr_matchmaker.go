@@ -32,7 +32,7 @@ var (
 	ErrDiscordLinkNotFound = errors.New("discord link not found")
 )
 
-func (p *EvrPipeline) ListUnassignedLobbies(ctx context.Context, session *sessionWS, ml *EvrMatchState) ([]*EvrMatchState, error) {
+func (p *EvrPipeline) ListUnassignedLobbies(ctx context.Context, session *sessionWS, ml *MatchLabel) ([]*MatchLabel, error) {
 
 	// TODO Move this into the matchmaking registry
 	qparts := make([]string, 0, 10)
@@ -104,9 +104,9 @@ func (p *EvrPipeline) ListUnassignedLobbies(ctx context.Context, session *sessio
 	}
 
 	// Create a slice containing the matches' labels
-	labels := make([]*EvrMatchState, 0, len(matches))
+	labels := make([]*MatchLabel, 0, len(matches))
 	for _, match := range matches {
-		label := &EvrMatchState{}
+		label := &MatchLabel{}
 		if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), label); err != nil {
 			return nil, status.Errorf(codes.Internal, "Failed to unmarshal match label: %v", err)
 		}
@@ -117,12 +117,12 @@ func (p *EvrPipeline) ListUnassignedLobbies(ctx context.Context, session *sessio
 }
 
 type LabelLatencies struct {
-	label   *EvrMatchState
+	label   *MatchLabel
 	latency *LatencyMetric
 }
 
 // Backfill returns a match that the player can backfill
-func (p *EvrPipeline) GetBackfillCandidates(ctx context.Context, userID uuid.UUID, mode evr.Symbol, partySize int, query string) ([]*EvrMatchState, error) {
+func (p *EvrPipeline) GetBackfillCandidates(ctx context.Context, userID uuid.UUID, mode evr.Symbol, partySize int, query string) ([]*MatchLabel, error) {
 
 	labels, err := p.matchmakingRegistry.listUnfilledLobbies(ctx, partySize, query)
 	if err != nil || len(labels) == 0 {
@@ -160,7 +160,7 @@ func (p *EvrPipeline) GetBackfillCandidates(ctx context.Context, userID uuid.UUI
 		return sortFn(labelLatencies[i].latency.RTT, labelLatencies[j].latency.RTT, labelLatencies[i].label.PlayerCount, labelLatencies[j].label.PlayerCount)
 	})
 
-	candidates := make([]*EvrMatchState, 0, len(labelLatencies))
+	candidates := make([]*MatchLabel, 0, len(labelLatencies))
 	for _, ll := range labelLatencies {
 		candidates = append(candidates, ll.label)
 	}
@@ -488,7 +488,7 @@ func listMatches(ctx context.Context, p *EvrPipeline, limit int, minSize int, ma
 	return p.runtimeModule.MatchList(ctx, limit, true, "", &minSize, &maxSize, query)
 }
 
-func buildMatchQueryFromLabel(ml *EvrMatchState, partySize int) string {
+func buildMatchQueryFromLabel(ml *MatchLabel, partySize int) string {
 	var boost int = 0 // Default booster
 
 	qparts := []string{
@@ -497,7 +497,7 @@ func buildMatchQueryFromLabel(ml *EvrMatchState, partySize int) string {
 		// MUST be the same lobby type
 		LobbyType(ml.LobbyType).Query(Must, boost),
 		// MUST be the same mode
-		GameMode(ml.Mode).Query(Must, boost),
+		LabelGameMode(ml.Mode).Query(Must, boost),
 		"+label.open:T",
 		// Must not be the same lobby
 	}
@@ -606,7 +606,7 @@ func LatencyCmp(i, j time.Duration) bool {
 
 // TODO FIXME This need to use allocateBroadcaster instad.
 // MatchCreate creates a match on an available unassigned broadcaster using the given label
-func (p *EvrPipeline) MatchCreate(ctx context.Context, msession *MatchmakingSession, ml *EvrMatchState) (matchID MatchID, err error) {
+func (p *EvrPipeline) MatchCreate(ctx context.Context, msession *MatchmakingSession, ml *MatchLabel) (matchID MatchID, err error) {
 	ml.MaxSize = MatchMaxSize
 	// Lock the broadcaster's until the match is created
 	p.matchmakingRegistry.Lock()
@@ -846,7 +846,7 @@ func EVRMatchJoinAttempt(ctx context.Context, logger *zap.Logger, matchID MatchI
 		return "", nil, nil, fmt.Errorf("match label not found: %s", matchIDStr)
 	}
 
-	label := &EvrMatchState{}
+	label := &MatchLabel{}
 	if err := json.Unmarshal([]byte(labelStr), label); err != nil {
 		return "", nil, presences, fmt.Errorf("failed to unmarshal match label: %w", err)
 	}
@@ -1169,7 +1169,7 @@ func (p *EvrPipeline) MatchCreateLoop(session *sessionWS, msession *MatchmakingS
 	}
 }
 
-func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, session *sessionWS, ml *EvrMatchState) error {
+func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, session *sessionWS, ml *MatchLabel) error {
 	if s, found := p.matchmakingRegistry.GetMatchingBySessionId(session.id); found {
 		// Replace the session
 		logger.Debug("Matchmaking session already exists", zap.Any("tickets", s.Tickets))

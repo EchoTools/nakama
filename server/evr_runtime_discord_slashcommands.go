@@ -2931,8 +2931,8 @@ func (d *DiscordAppBot) handlePrepareMatch(ctx context.Context, logger runtime.L
 	matchID := MatchIDFromStringOrNil(match.GetMatchId())
 	gid := uuid.FromStringOrNil(groupID)
 	// Prepare the session for the match.
-	state := &EvrMatchState{}
-	state.SpawnedBy = userID
+	state := &MatchLabel{}
+	state.SpawnedBy = userID.String()
 	state.StartTime = startTime
 	state.MaxSize = MatchMaxSize
 	state.Mode = mode
@@ -2947,7 +2947,7 @@ func (d *DiscordAppBot) handlePrepareMatch(ctx context.Context, logger runtime.L
 		return nil, status.Errorf(codes.Internal, "failed to signal match: %v", err)
 	}
 
-	label := EvrMatchState{}
+	label := MatchLabel{}
 	if err := json.Unmarshal([]byte(response), &label); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to unmarshal match label: %v", err)
 	}
@@ -2982,11 +2982,11 @@ func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runt
 
 	regionSymbol := evr.ToSymbol(regionStr)
 
-	tracked := make([]*EvrMatchState, 0, len(matches))
+	tracked := make([]*MatchLabel, 0, len(matches))
 
 	for _, match := range matches {
 
-		state := &EvrMatchState{}
+		state := &MatchLabel{}
 		if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), state); err != nil {
 			logger.Error("Failed to unmarshal match label", zap.Error(err))
 			continue

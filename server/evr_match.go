@@ -181,7 +181,7 @@ func MatchIDFromContext(ctx context.Context) MatchID {
 
 // MatchInit is called when the match is created.
 func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, params map[string]interface{}) (interface{}, int, string) {
-	state := EvrMatchState{}
+	state := MatchLabel{}
 	if err := json.Unmarshal(params["initialState"].([]byte), &state); err != nil {
 		logger.Error("Failed to unmarshal match config. %s", err)
 	}
@@ -217,7 +217,7 @@ var (
 
 // MatchJoinAttempt decides whether to accept or deny the player session.
 func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ interface{}, presence runtime.Presence, metadata map[string]string) (interface{}, bool, string) {
-	state, ok := state_.(*EvrMatchState)
+	state, ok := state_.(*MatchLabel)
 
 	if !ok {
 		logger.Error("state not a valid lobby state object")
@@ -276,7 +276,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	return state, true, mp.String()
 }
 
-func (m *EvrMatch) authorizePlayer(state *EvrMatchState, mp EvrMatchPresence) (*EvrMatchPresence, string) {
+func (m *EvrMatch) playerJoinAttempt(state *MatchLabel, mp EvrMatchPresence) (*EvrMatchPresence, string) {
 
 	if state.LobbyType == UnassignedLobby {
 		return &mp, JoinRejectReasonUnassignedLobby
@@ -338,7 +338,7 @@ func (m *EvrMatch) authorizePlayer(state *EvrMatchState, mp EvrMatchPresence) (*
 // MatchJoin is called after the join attempt.
 // MatchJoin updates the match data, and should not have any decision logic.
 func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ interface{}, presences []runtime.Presence) interface{} {
-	state, ok := state_.(*EvrMatchState)
+	state, ok := state_.(*MatchLabel)
 	if !ok {
 		logger.Error("state not a valid lobby state object")
 		return nil
@@ -368,7 +368,7 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 
 // MatchLeave is called after a player leaves the match.
 func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ interface{}, presences []runtime.Presence) interface{} {
-	state, ok := state_.(*EvrMatchState)
+	state, ok := state_.(*MatchLabel)
 	if !ok {
 		logger.Error("state not a valid lobby state object")
 		return nil
@@ -402,7 +402,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 
 // MatchLoop is called every tick of the match and handles state, plus messages from the client.
 func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ interface{}, messages []runtime.MatchData) interface{} {
-	state, ok := state_.(*EvrMatchState)
+	state, ok := state_.(*MatchLabel)
 	if !ok {
 		logger.Error("state not a valid lobby state object")
 		return nil
@@ -463,7 +463,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 				logger.Error("Failed to unmarshal message: %v", err)
 			}
 
-			var messageFn func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, state *EvrMatchState, in runtime.MatchData, msg evr.Message) (*EvrMatchState, error)
+			var messageFn func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, state *MatchLabel, in runtime.MatchData, msg evr.Message) (*MatchLabel, error)
 
 			// Switch on the message type. This is where the match logic is handled.
 			switch msg := msg.(type) {
@@ -487,7 +487,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 
 // MatchTerminate is called when the match is being terminated.
 func (m *EvrMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ interface{}, graceSeconds int) interface{} {
-	state, ok := state_.(*EvrMatchState)
+	state, ok := state_.(*MatchLabel)
 	if !ok {
 		logger.Error("state not a valid lobby state object")
 		return nil
@@ -500,7 +500,6 @@ func (m *EvrMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, db
 		}
 		// Disconnect the broadcasters session
 		nk.SessionDisconnect(ctx, state.broadcaster.GetSessionId(), runtime.PresenceReasonDisconnect)
-
 	}
 
 	return state
@@ -522,7 +521,7 @@ func (r SignalResponse) String() string {
 
 // MatchSignal is called when a signal is sent into the match.
 func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ interface{}, data string) (interface{}, string) {
-	state, ok := state_.(*EvrMatchState)
+	state, ok := state_.(*MatchLabel)
 	if !ok {
 		logger.Error("state not a valid lobby state object")
 		return nil, SignalResponse{Message: "invalid match state"}.String()
@@ -570,7 +569,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 			return state, SignalResponse{Message: "session already prepared"}.String()
 		}
 
-		var newState = EvrMatchState{}
+		var newState = MatchLabel{}
 		if err := json.Unmarshal(signal.Payload, &newState); err != nil {
 			return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal match label: %v", err)}.String()
 		}
@@ -679,7 +678,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 
 }
 
-func (m *EvrMatch) StartSession(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, state *EvrMatchState) (*EvrMatchState, error) {
+func (m *EvrMatch) StartSession(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, state *MatchLabel) (*MatchLabel, error) {
 	channel := uuid.Nil
 	if state.GroupID != nil {
 		channel = *state.GroupID
@@ -745,7 +744,7 @@ func (m *EvrMatch) dispatchMessages(_ context.Context, logger runtime.Logger, di
 	return nil
 }
 
-func (m *EvrMatch) updateLabel(dispatcher runtime.MatchDispatcher, state *EvrMatchState) error {
+func (m *EvrMatch) updateLabel(dispatcher runtime.MatchDispatcher, state *MatchLabel) error {
 	state.rebuildCache()
 	if err := dispatcher.MatchLabelUpdate(state.GetLabel()); err != nil {
 		return fmt.Errorf("could not update label: %v", err)

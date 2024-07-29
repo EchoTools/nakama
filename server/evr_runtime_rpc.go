@@ -156,7 +156,7 @@ func MatchListPublicRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 	_ = data
 	labels := make([]any, 0, len(matches))
 	for _, m := range matches {
-		label := &EvrMatchState{}
+		label := &MatchLabel{}
 		if err := json.Unmarshal([]byte(m.GetLabel().GetValue()), label); err != nil {
 			return "", runtime.NewError("Failed to unmarshal match label", StatusInternalError)
 		}
@@ -891,13 +891,13 @@ type PrepareMatchRPCRequest struct {
 	GuildID          string               `json:"guild_id,omitempty"`          // Guild ID to set the match to
 	StartTime        time.Time            `json:"start_time,omitempty"`        // The time to start the match
 	SpawnedBy        string               `json:"spawned_by,omitempty"`        // The discord ID of the user who spawned the match
-	MatchLabel       *EvrMatchState       `json:"label,omitempty"`             // an EvrMatchState to send (unmodified) as the signal payload
+	MatchLabel       *MatchLabel          `json:"label,omitempty"`             // an EvrMatchState to send (unmodified) as the signal payload
 }
 
 type PrepareMatchRPCResponse struct {
-	MatchID       MatchID       `json:"id"`
-	MatchLabel    EvrMatchState `json:"label"`
-	SignalPayload string        `json:"signal_payload"`
+	MatchID       MatchID    `json:"id"`
+	MatchLabel    MatchLabel `json:"label"`
+	SignalPayload string     `json:"signal_payload"`
 }
 
 // PrepareMatchRPC is a function that prepares a match from a given match ID.
@@ -977,15 +977,15 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 	gid := uuid.FromStringOrNil(groupID)
 	label = request.MatchLabel
 	if label == nil {
-		label = &EvrMatchState{
-			Mode:             request.Mode.Symbol(),
-			TeamSize:         request.TeamSize,
-			Level:            request.Level.Symbol(),
-			RequiredFeatures: request.RequiredFeatures,
-			StartTime:        request.StartTime,
-			SpawnedBy:        request.SpawnedBy,
-			MaxSize:          MatchMaxSize,
-			GroupID:          &gid,
+		label = &MatchLabel{
+			Mode:      request.Mode.Symbol(),
+			TeamSize:  request.TeamSize,
+			Level:     request.Level.Symbol(),
+			Features:  request.RequiredFeatures,
+			StartTime: request.StartTime,
+			SpawnedBy: request.SpawnedBy,
+			MaxSize:   MatchMaxSize,
+			GroupID:   &gid,
 		}
 
 		// Translate the discord ID to the nakama ID for the team Alignments
@@ -1029,7 +1029,7 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		return errResponse(err)
 	}
 
-	state := &EvrMatchState{}
+	state := &MatchLabel{}
 	if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), state); err != nil {
 		return errResponse(err)
 	}
@@ -1197,7 +1197,7 @@ type SetNextMatchRPCRequestPayload struct {
 }
 
 type SetNextMatchRPCResponsePayload struct {
-	Label *EvrMatchState `json:"label,omitempty"`
+	Label *MatchLabel `json:"label,omitempty"`
 }
 
 func (r *SetNextMatchRPCResponsePayload) String() string {
