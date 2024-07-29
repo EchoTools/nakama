@@ -555,7 +555,7 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 	}
 
 	msession.LeavePartyGroup()
-
+	p.metrics.CustomCounter("match_join_direct_count", metricsTags, 1)
 	return nil
 }
 
