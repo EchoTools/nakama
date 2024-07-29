@@ -253,6 +253,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	}
 
 	state.presenceMap[mp.GetSessionId()] = mp
+	state.joinTimestamps[mp.GetSessionId()] = time.Now()
 
 	logger.WithFields(map[string]interface{}{
 		"evrid": mp.EvrID.Token(),
@@ -383,7 +384,24 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 	}
 
 	for _, p := range presences {
-		delete(state.presenceMap, p.GetSessionId())
+		if mp, ok := state.presenceMap[p.GetSessionId()]; ok {
+			logger.WithFields(map[string]interface{}{
+				"username": mp.GetUsername(),
+				"uid":      mp.GetUserId(),
+			}).Info("Player left the match.")
+
+			tags := map[string]string{
+				"mode":     state.Mode.String(),
+				"level":    state.Level.String(),
+				"type":     state.LobbyType.String(),
+				"role":     fmt.Sprintf("%d", mp.RoleAlignment),
+				"group_id": state.GetGroupID().String(),
+			}
+			ts := state.joinTimestamps[mp.GetSessionId()]
+			nk.MetricsTimerRecord("match_player_session_duration", tags, time.Since(ts))
+
+			delete(state.presenceMap, p.GetSessionId())
+		}
 	}
 
 	if len(state.presenceMap) == 0 {
