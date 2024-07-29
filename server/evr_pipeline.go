@@ -294,6 +294,11 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 	}
 
 	if idmessage, ok := in.(evr.IdentifyingMessage); ok {
+		// Validate the user identifier
+		if !idmessage.GetEvrID().Valid() {
+			logger.Error("Invalid evr id", zap.String("evr_id", idmessage.GetEvrID().String()))
+			return false
+		}
 		// If the message is an identifying message, validate the session and evr id.
 		if err := session.ValidateSession(idmessage.GetSessionID(), idmessage.GetEvrID()); err != nil {
 			logger.Error("Invalid session", zap.Error(err))

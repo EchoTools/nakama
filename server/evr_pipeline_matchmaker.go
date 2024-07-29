@@ -53,9 +53,6 @@ func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logg
 	if !ok {
 		return status.Errorf(codes.InvalidArgument, "Failed to get EVR ID")
 	}
-	if !evrID.Valid() {
-		return status.Errorf(codes.InvalidArgument, "Invalid EVR ID")
-	}
 
 	// Send a match leave if this user is in another match
 	if session.userID == uuid.Nil {
