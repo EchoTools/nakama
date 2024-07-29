@@ -198,28 +198,14 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 	// Create a ticker to update the metrics every 5 minutes
 	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
-	playercounts := make(map[MatchStateTags][]int)
+
 	for {
+
 		select {
 		case <-ctx.Done():
 			// Context has been cancelled, return
 			return
 		case <-ticker.C:
-		}
-
-		// Remove zero'd out entries
-		for tags, matches := range playercounts {
-			// sum the slices
-			count := 0
-			for _, c := range matches {
-				if c == 0 {
-					matches = append(matches[:c], matches[c+1:]...)
-				}
-				count += c
-			}
-			if count == 0 {
-				delete(playercounts, tags)
-			}
 		}
 
 		// Get the match states
@@ -228,7 +214,7 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 			logger.Error("Error listing match states: %v", err)
 			continue
 		}
-
+		playercounts := make(map[MatchStateTags][]int)
 		for _, state := range matchStates {
 			groupID := state.State.GroupID
 			if groupID == nil {
@@ -258,9 +244,11 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 				playerCount += match
 			}
 			tagMap := tags.AsMap()
-			nk.metrics.CustomGauge("match_count_gauge", tagMap, float64(len(matches)))
+
 			nk.metrics.CustomGauge("match_player_counts_gauge", tagMap, float64(playerCount))
+			nk.metrics.CustomGauge("match_count_gauge", tagMap, float64(len(matches)))
 		}
+
 	}
 }
 
