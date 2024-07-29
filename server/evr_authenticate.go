@@ -228,6 +228,7 @@ type GroupMetadata struct {
 	SuspensionRole             string                 `json:"suspension_role"`               // The roles that have users suspended
 	ServerHostUserIDs          []string               `json:"serverhost_user_ids"`           // The broadcaster hosts
 	AllocatorUserIDs           []string               `json:"allocator_user_ids"`            // The allocator hosts
+	ModeratorUserIDs           []string               `json:"moderator_user_ids"`            // The moderators
 	ArenaMatchmakingChannelID  string                 `json:"arena_matchmaking_channel_id"`  // The matchmaking channel
 	CombatMatchmakingChannelID string                 `json:"combat_matchmaking_channel_id"` // The matchmaking channel
 	DebugChannel               string                 `json:"debug_channel_id"`              // The debug channel
