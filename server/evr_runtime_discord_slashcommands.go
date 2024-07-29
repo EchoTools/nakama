@@ -2916,7 +2916,7 @@ func (d *DiscordAppBot) handlePrepareMatch(ctx context.Context, logger runtime.L
 		groupIDs = append(groupIDs, membership.GuildGroup.ID().String())
 	}
 
-	query := fmt.Sprintf("+label.lobby_type:unassigned label.broadcaster.group_ids:/(%s)/^10 +label.broadcaster.group_ids:/(%s)/ +label.broadcaster.regions:%s", groupID, strings.Join(groupIDs, "|"), region.Token().String())
+	query := fmt.Sprintf("+label.lobby_type:unassigned +label.broadcaster.group_ids:/(%s)/ +label.broadcaster.regions:%s", strings.Join(groupIDs, "|"), region.Token().String())
 	matches, err := d.nk.MatchList(ctx, 100, true, "", &minSize, &maxSize, query)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to list matches: %v", err)
