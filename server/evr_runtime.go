@@ -244,9 +244,8 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 				playerCount += match
 			}
 			tagMap := tags.AsMap()
-
-			nk.metrics.CustomGauge("match_player_counts_gauge", tagMap, float64(playerCount))
-			nk.metrics.CustomGauge("match_count_gauge", tagMap, float64(len(matches)))
+			nk.metrics.CustomGauge("match_active_gauge", tagMap, float64(len(matches)))
+			nk.metrics.CustomGauge("player_active_gauge", tagMap, float64(playerCount))
 		}
 
 	}
