@@ -975,20 +975,19 @@ func (p *EvrPipeline) checkSuspensionStatus(ctx context.Context, logger *zap.Log
 	}
 
 	// Get the user's discordId
-	discordId, err := p.discordRegistry.GetDiscordIdByUserId(ctx, uuid.FromStringOrNil(userID))
+	discordID, err := GetDiscordIDByUserID(ctx, p.db, userID)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Failed to get discord id: %v", err)
-
 	}
 
 	// Get the guild member
-	member, err := p.discordRegistry.GetGuildMember(ctx, md.GuildID, discordId)
+	member, err := p.discordRegistry.GetGuildMember(ctx, md.GuildID, discordID)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Failed to get guild member: %v", err)
 	}
 
 	if member == nil {
-		return nil, status.Errorf(codes.Internal, "Member is nil for discordId: %s", discordId)
+		return nil, status.Errorf(codes.Internal, "Member is nil for discordId: %s", discordID)
 	}
 
 	if !slices.Contains(member.Roles, md.SuspensionRole) {
@@ -1015,7 +1014,7 @@ func (p *EvrPipeline) checkSuspensionStatus(ctx context.Context, logger *zap.Log
 				GuildId:       guild.ID,
 				GuildName:     guild.Name,
 				UserId:        userID,
-				UserDiscordId: discordId,
+				UserDiscordId: discordID,
 				Reason:        fmt.Sprintf("You are currently suspended from %s.", guild.Name),
 			},
 		}, nil
@@ -1052,7 +1051,7 @@ func (p *EvrPipeline) checkSuspensionStatus(ctx context.Context, logger *zap.Log
 				GuildId:       guild.ID,
 				GuildName:     guild.Name,
 				UserId:        userID,
-				UserDiscordId: discordId,
+				UserDiscordId: discordID,
 				Reason:        "You are suspended from this channel.\nContact a moderator for more information.",
 			},
 		}, nil
@@ -1205,20 +1204,15 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 
 	if ml.TeamIndex == TeamIndex(evr.TeamModerator) {
 		// Check that the user is a moderator for this channel, or globally
-		guild, err := p.discordRegistry.GetGuildByGroupId(parentCtx, ml.GroupID.String())
-		if err != nil || guild == nil {
-			logger.Warn("failed to get guild: %v", zap.Error(err))
+		_, md, err := GetGuildGroupMetadata(parentCtx, p.runtimeModule, ml.GroupID.String())
+		if err != nil {
+			logger.Warn("failed to get guild metadata: %v", zap.Error(err))
+		}
+		if md == nil || md.ModeratorRole == "" || !slices.Contains(md.ModeratorUserIDs, session.userID.String()) {
 			ml.TeamIndex = TeamIndex(evr.TeamSpectator)
-		} else {
-			discordID, err := p.discordRegistry.GetDiscordIdByUserId(parentCtx, session.userID)
-			if err != nil {
-				return fmt.Errorf("failed to get discord id: %v", err)
-			}
-			if ok, _, err := p.discordRegistry.isModerator(parentCtx, guild.ID, discordID); err != nil || !ok {
-				ml.TeamIndex = TeamIndex(evr.TeamSpectator)
-			}
 		}
 	}
+
 	if ml.TeamIndex == TeamIndex(evr.TeamSpectator) {
 		if ml.Mode != evr.ModeArenaPublic && ml.Mode != evr.ModeCombatPublic {
 			return fmt.Errorf("spectators are only allowed in arena and combat matches")
@@ -1347,11 +1341,11 @@ func (p *EvrPipeline) GetGuildPriorityList(ctx context.Context, userID uuid.UUID
 				s := strings.Trim(guildId, " ")
 				if s != "" {
 					// Get the groupId for the guild
-					groupIDstr, found := p.discordRegistry.Get(s)
-					if !found {
+					groupIDStr, err := GetGroupIDByGuildID(ctx, p.db, s)
+					if err != nil {
 						continue
 					}
-					groupID := uuid.FromStringOrNil(groupIDstr)
+					groupID := uuid.FromStringOrNil(groupIDStr)
 					if groupID != uuid.Nil && lo.Contains(groupIDs, groupID) {
 						guildPriority = append(guildPriority, groupID)
 					}
