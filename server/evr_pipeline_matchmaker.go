@@ -154,7 +154,7 @@ func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logg
 	return nil
 }
 
-func (p *EvrPipeline) matchmakingLabelFromFindRequest(ctx context.Context, session *sessionWS, request *evr.LobbyFindSessionRequest) (*EvrMatchState, error) {
+func (p *EvrPipeline) matchmakingLabelFromFindRequest(ctx context.Context, session *sessionWS, request *evr.LobbyFindSessionRequest) (*MatchLabel, error) {
 
 	// If the channel is nil, use the players profile channel
 
@@ -184,7 +184,7 @@ func (p *EvrPipeline) matchmakingLabelFromFindRequest(ctx context.Context, sessi
 
 	features := ctx.Value(ctxFeaturesKey{}).([]string)
 
-	ml := &EvrMatchState{
+	ml := &MatchLabel{
 		GroupID: &groupID,
 
 		Mode:  request.Mode,
@@ -402,15 +402,15 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 		logger.Warn("Failed to get guild priority list", zap.Error(err))
 	}
 
-	ml := &EvrMatchState{
-		Level:            request.Level,
-		LobbyType:        LobbyType(request.LobbyType),
-		Mode:             request.Mode,
-		Open:             true,
-		SessionSettings:  &request.SessionSettings,
-		TeamIndex:        TeamIndex(request.GetAlignment()),
-		GroupID:          &request.GroupID,
-		RequiredFeatures: requiredFeatures,
+	ml := &MatchLabel{
+		Level:           request.Level,
+		LobbyType:       LobbyType(request.LobbyType),
+		Mode:            request.Mode,
+		Open:            true,
+		SessionSettings: &request.SessionSettings,
+		TeamIndex:       TeamIndex(request.GetAlignment()),
+		GroupID:         &request.GroupID,
+		Features:        requiredFeatures,
 		Broadcaster: MatchBroadcaster{
 			VersionLock: uint64(request.VersionLock),
 			Regions:     uniqueRegions,
@@ -461,7 +461,7 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 	}
 
 	// Extract the label
-	ml := &EvrMatchState{}
+	ml := &MatchLabel{}
 	if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), ml); err != nil {
 		return response.SendErrorToSession(session, status.Errorf(codes.NotFound, err.Error()))
 	}

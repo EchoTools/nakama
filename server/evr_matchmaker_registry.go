@@ -166,7 +166,7 @@ type MatchmakingSession struct {
 	UserID        uuid.UUID
 	PingResultsCh chan []evr.EndpointPingResult // Channel for ping completion.
 	Expiry        time.Time
-	Label         *EvrMatchState
+	Label         *MatchLabel
 	Tickets       map[string]*MatchmakerTicket // map[ticketId]TicketMeta
 	Party         *PartyGroup
 	LatencyCache  *LatencyCache
@@ -421,10 +421,10 @@ func (mr *MatchmakingRegistry) matchedEntriesFn(entries [][]*MatchmakerEntry) {
 	}
 }
 
-func (mr *MatchmakingRegistry) listUnfilledLobbies(ctx context.Context, partySize int, query string) ([]*EvrMatchState, error) {
+func (mr *MatchmakingRegistry) listUnfilledLobbies(ctx context.Context, partySize int, query string) ([]*MatchLabel, error) {
 	var err error
 
-	var labels []*EvrMatchState
+	var labels []*MatchLabel
 
 	minSize := 0
 	limit := 100
@@ -437,9 +437,9 @@ func (mr *MatchmakingRegistry) listUnfilledLobbies(ctx context.Context, partySiz
 	}
 
 	// Create a label slice of the matches
-	labels = make([]*EvrMatchState, 0, len(matches))
+	labels = make([]*MatchLabel, 0, len(matches))
 	for _, match := range matches {
-		label := &EvrMatchState{}
+		label := &MatchLabel{}
 		if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), label); err != nil {
 			continue
 		}
@@ -537,7 +537,7 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 
 	logger.Debug("Parties", zap.Any("parties", parties))
 	// Get the ml from the first participant
-	var ml *EvrMatchState
+	var ml *MatchLabel
 
 	for _, e := range entrants {
 		if s, ok := mr.GetMatchingBySessionId(e.Presence.SessionID); ok {
@@ -678,7 +678,7 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 	if err != nil {
 		logger.Error("Failed to get match", zap.Error(err))
 	}
-	label := &EvrMatchState{}
+	label := &MatchLabel{}
 	if err := json.Unmarshal([]byte(labelStr), label); err != nil {
 		logger.Error("Failed to unmarshal match label", zap.Error(err), zap.String("labelStr", labelStr))
 	}
@@ -731,7 +731,7 @@ func distributeParties(parties [][]*MatchmakerEntry) [][]*MatchmakerEntry {
 	return teams
 }
 
-func (mr *MatchmakingRegistry) allocateBroadcaster(channels []uuid.UUID, config MatchmakingSettings, sorted []string, label *EvrMatchState) (MatchID, error) {
+func (mr *MatchmakingRegistry) allocateBroadcaster(channels []uuid.UUID, config MatchmakingSettings, sorted []string, label *MatchLabel) (MatchID, error) {
 	// Lock the broadcasters so that they aren't double allocated
 	mr.Lock()
 	defer mr.Unlock()
@@ -779,7 +779,7 @@ func (mr *MatchmakingRegistry) allocateBroadcaster(channels []uuid.UUID, config 
 	return matchID, nil
 }
 
-func (c *MatchmakingRegistry) ListUnassignedLobbies(ctx context.Context, channels []uuid.UUID) ([]*EvrMatchState, error) {
+func (c *MatchmakingRegistry) ListUnassignedLobbies(ctx context.Context, channels []uuid.UUID) ([]*MatchLabel, error) {
 
 	qparts := make([]string, 0, 10)
 
@@ -807,9 +807,9 @@ func (c *MatchmakingRegistry) ListUnassignedLobbies(ctx context.Context, channel
 	}
 
 	// Create a slice containing the matches' labels
-	labels := make([]*EvrMatchState, 0, len(matches))
+	labels := make([]*MatchLabel, 0, len(matches))
 	for _, match := range matches {
-		label := &EvrMatchState{}
+		label := &MatchLabel{}
 		if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), label); err != nil {
 			return nil, status.Errorf(codes.Internal, "Failed to unmarshal match label: %v", err)
 		}
@@ -1126,7 +1126,7 @@ func (c *MatchmakingRegistry) Delete(sessionId uuid.UUID) {
 }
 
 // Add adds a matching session to the registry
-func (c *MatchmakingRegistry) Create(ctx context.Context, logger *zap.Logger, session *sessionWS, ml *EvrMatchState, timeout time.Duration) (*MatchmakingSession, error) {
+func (c *MatchmakingRegistry) Create(ctx context.Context, logger *zap.Logger, session *sessionWS, ml *MatchLabel, timeout time.Duration) (*MatchmakingSession, error) {
 	// Check if there is an existing session
 	if _, ok := c.GetMatchingBySessionId(session.ID()); ok {
 		// Cancel it
@@ -1418,7 +1418,7 @@ func (c *MatchmakingRegistry) SessionsByMode() map[evr.Symbol]map[uuid.UUID]*Mat
 	return sessionByMode
 }
 
-func (r *MatchmakingRegistry) SendMatchmakerMatchedNotification(label *EvrMatchState, teams [][]*MatchmakerEntry, errored []*MatchmakerPresence) {
+func (r *MatchmakingRegistry) SendMatchmakerMatchedNotification(label *MatchLabel, teams [][]*MatchmakerEntry, errored []*MatchmakerPresence) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 

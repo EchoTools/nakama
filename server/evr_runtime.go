@@ -131,13 +131,13 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	return nil
 }
 
-type MatchState struct {
+type MatchLabelMeta struct {
 	TickRate  int
 	Presences []*rtapi.UserPresence
-	State     EvrMatchState
+	State     MatchLabel
 }
 
-func listMatchStates(ctx context.Context, nk runtime.NakamaModule, query string) ([]*MatchState, error) {
+func listMatchStates(ctx context.Context, nk runtime.NakamaModule, query string) ([]*MatchLabelMeta, error) {
 	if query == "" {
 		query = "*"
 	}
@@ -149,7 +149,7 @@ func listMatchStates(ctx context.Context, nk runtime.NakamaModule, query string)
 		return nil, err
 	}
 
-	var matchStates []*MatchState
+	var matchStates []*MatchLabelMeta
 	for _, match := range matches {
 		mt := MatchIDFromStringOrNil(match.MatchId)
 		presences, tickRate, data, err := nk.(*RuntimeGoNakamaModule).matchRegistry.GetState(ctx, mt.UUID(), mt.Node())
@@ -157,7 +157,7 @@ func listMatchStates(ctx context.Context, nk runtime.NakamaModule, query string)
 			return nil, err
 		}
 
-		state := EvrMatchState{}
+		state := MatchLabel{}
 		if err := json.Unmarshal([]byte(data), &state); err != nil {
 			return nil, err
 		}
@@ -166,7 +166,7 @@ func listMatchStates(ctx context.Context, nk runtime.NakamaModule, query string)
 			continue
 		}
 
-		matchStates = append(matchStates, &MatchState{
+		matchStates = append(matchStates, &MatchLabelMeta{
 			State:     state,
 			TickRate:  int(tickRate),
 			Presences: presences,
@@ -637,13 +637,13 @@ func SetGuildGroupMetadata(ctx context.Context, nk runtime.NakamaModule, groupId
 	return nil
 }
 
-func MatchLabelByID(ctx context.Context, nk runtime.NakamaModule, matchID MatchID) (*EvrMatchState, error) {
+func MatchLabelByID(ctx context.Context, nk runtime.NakamaModule, matchID MatchID) (*MatchLabel, error) {
 	match, err := nk.MatchGet(ctx, matchID.String())
 	if err != nil || match == nil {
 		return nil, err
 	}
 
-	label := EvrMatchState{}
+	label := MatchLabel{}
 	if err = json.Unmarshal([]byte(match.GetLabel().GetValue()), &label); err != nil {
 		return nil, err
 	}

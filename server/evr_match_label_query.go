@@ -213,14 +213,14 @@ func (t TeamIndex) String() string {
 	}
 }
 
-// The Match GameMode specifies the type and class of match. (e.g. Echo Arena, Echo Combat, Social, etc.)
-// The Match GameMode is represented as a symbol in Evr messages.
-type GameMode evr.Symbol // Symbol
+// The Match LabelGameMode specifies the type and class of match. (e.g. Echo Arena, Echo Combat, Social, etc.)
+// The Match LabelGameMode is represented as a symbol in Evr messages.
+type LabelGameMode evr.Symbol // Symbol
 
-func (m GameMode) Query(o QueryOperator, b int) string {
+func (m LabelGameMode) Query(o QueryOperator, b int) string {
 	return m.Label(o, b).Escaped()
 }
-func (m GameMode) Label(o QueryOperator, b int) Label {
+func (m LabelGameMode) Label(o QueryOperator, b int) Label {
 	return Label{
 		Op:    rune(o),
 		Name:  "mode",
@@ -229,7 +229,7 @@ func (m GameMode) Label(o QueryOperator, b int) Label {
 	}
 }
 
-func (m GameMode) String() string {
+func (m LabelGameMode) String() string {
 	if uint64(m) == uint64(0) {
 		return ""
 	}

@@ -120,6 +120,8 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 	if err != nil {
 		return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_Unknown)
 	}
+
+	// Add the operators userID to the group ids. this allows any host to spawn on a server they operate.
 	config.GroupIDs = groupIDs
 
 	logger = logger.With(zap.String("internalIP", request.InternalIP.String()), zap.String("externalIP", externalIP.String()), zap.Uint16("port", request.Port))
