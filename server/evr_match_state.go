@@ -14,7 +14,7 @@ import (
 // The lobby state is used for the match label.
 // Any changes to the lobby state should be reflected in the match label.
 // This also makes it easier to update the match label, and query against it.
-type MatchLabel struct {
+type EvrMatchState struct {
 	ID          MatchID          `json:"id"`                    // The Session Id used by EVR (the same as match id)
 	Open        bool             `json:"open"`                  // Whether the lobby is open to new players (Matching Only)
 	LobbyType   LobbyType        `json:"lobby_type"`            // The type of lobby (Public, Private, Unassigned) (EVR)
@@ -50,27 +50,27 @@ type MatchLabel struct {
 	joinTimestamps        map[string]time.Time // The timestamps of when players joined the match. map[sessionId]time.Time
 }
 
-func (s *MatchLabel) GetPlayerCount() int {
+func (s *EvrMatchState) GetPlayerCount() int {
 	return len(s.presenceMap)
 }
 
-func (s *MatchLabel) OpenPlayerSlots() int {
+func (s *EvrMatchState) OpenPlayerSlots() int {
 	return s.PlayerLimit - s.PlayerCount
 }
 
-func (s *MatchLabel) OpenNonPlayerSlots() int {
+func (s *EvrMatchState) OpenNonPlayerSlots() int {
 	return int(s.MaxSize) - s.PlayerLimit
 }
 
-func (s *MatchLabel) OpenSlots() int {
+func (s *EvrMatchState) OpenSlots() int {
 	return int(s.MaxSize) - s.Size
 }
 
-func (s *MatchLabel) String() string {
+func (s *EvrMatchState) String() string {
 	return s.GetLabel()
 }
 
-func (s *MatchLabel) RoleCount(role int) int {
+func (s *EvrMatchState) RoleCount(role int) int {
 	count := 0
 	for _, p := range s.presenceMap {
 		if p.RoleAlignment == role {
@@ -80,7 +80,7 @@ func (s *MatchLabel) RoleCount(role int) int {
 	return count
 }
 
-func (s *MatchLabel) GetLabel() string {
+func (s *EvrMatchState) GetLabel() string {
 	labelJson, err := json.Marshal(s)
 	if err != nil {
 		return ""
@@ -88,19 +88,19 @@ func (s *MatchLabel) GetLabel() string {
 	return string(labelJson)
 }
 
-func (s *MatchLabel) GetGroupID() uuid.UUID {
+func (s *EvrMatchState) GetGroupID() uuid.UUID {
 	if s.GroupID == nil {
 		return uuid.Nil
 	}
 	return *s.GroupID
 }
 
-func (s *MatchLabel) GetEndpoint() evr.Endpoint {
+func (s *EvrMatchState) GetEndpoint() evr.Endpoint {
 	return s.Broadcaster.Endpoint
 }
 
-func (s *MatchLabel) PublicView() *MatchLabel {
-	ps := MatchLabel{
+func (s *EvrMatchState) PublicView() *EvrMatchState {
+	ps := EvrMatchState{
 		LobbyType:   s.LobbyType,
 		ID:          s.ID,
 		Open:        s.Open,
@@ -146,8 +146,8 @@ func (s *MatchLabel) PublicView() *MatchLabel {
 	return &ps
 }
 
-func MatchStateFromLabel(label string) (*MatchLabel, error) {
-	state := &MatchLabel{}
+func MatchStateFromLabel(label string) (*EvrMatchState, error) {
+	state := &EvrMatchState{}
 	err := json.Unmarshal([]byte(label), state)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal match label: %v", err)
@@ -156,7 +156,7 @@ func MatchStateFromLabel(label string) (*MatchLabel, error) {
 }
 
 // rebuildCache is called after the presences map is updated.
-func (s *MatchLabel) rebuildCache() {
+func (s *EvrMatchState) rebuildCache() {
 	// Rebuild the lookup tables.
 
 	s.Players = make([]PlayerInfo, 0, len(s.presenceMap))
@@ -186,4 +186,37 @@ func (s *MatchLabel) rebuildCache() {
 	sort.SliceStable(s.Players, func(i, j int) bool {
 		return s.Players[i].Team < s.Players[j].Team
 	})
+}
+
+// NewEvrMatchState is a helper function to create a new match state. It returns the state, params, label json, and err.
+func NewEvrMatchState(endpoint evr.Endpoint, config *MatchBroadcaster) (state *EvrMatchState, params map[string]interface{}, configPayload string, err error) {
+
+	var tickRate int64 = 10 // 10 ticks per second
+
+	initialState := EvrMatchState{
+		Broadcaster: *config,
+		Open:        false,
+		LobbyType:   UnassignedLobby,
+		Mode:        evr.ModeUnloaded,
+		Level:       evr.LevelUnloaded,
+		Features:    make([]string, 0),
+		Players:     make([]PlayerInfo, 0, MatchMaxSize),
+		presenceMap: make(map[string]*EvrMatchPresence, MatchMaxSize),
+
+		TeamAlignments: make(map[string]int, MatchMaxSize),
+
+		emptyTicks: 0,
+		tickRate:   tickRate,
+	}
+
+	stateJson, err := json.Marshal(initialState)
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("failed to marshal match config: %v", err)
+	}
+
+	params = map[string]interface{}{
+		"initialState": stateJson,
+	}
+
+	return &initialState, params, string(stateJson), nil
 }
