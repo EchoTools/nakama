@@ -652,6 +652,9 @@ func (p *EvrPipeline) MatchCreate(ctx context.Context, msession *MatchmakingSess
 	}
 	region := ml.Broadcaster.Regions[0]
 	sort.SliceStable(labelLatencies, func(i, j int) bool {
+		if labelLatencies[i].label.IsPriorityForMode() && !labelLatencies[j].label.IsPriorityForMode() {
+			return true
+		}
 		// Sort by region, then by latency (zero'd RTTs at the end)
 		if labelLatencies[i].label.Broadcaster.Regions[0] == region && labelLatencies[j].label.Broadcaster.Regions[0] != region {
 			return true

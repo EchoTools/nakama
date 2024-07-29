@@ -99,6 +99,16 @@ func (s *EvrMatchState) GetEndpoint() evr.Endpoint {
 	return s.Broadcaster.Endpoint
 }
 
+func (s *EvrMatchState) IsPriorityForMode() bool {
+	tag := "priority_mode_" + s.Mode.String()
+	for _, t := range s.Broadcaster.Tags {
+		if t == tag {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *EvrMatchState) PublicView() *EvrMatchState {
 	ps := EvrMatchState{
 		LobbyType:   s.LobbyType,
