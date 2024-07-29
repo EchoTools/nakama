@@ -1056,6 +1056,10 @@ var RPCErrInvalidRequest = runtime.NewError("invalid request", StatusInvalidArgu
 func AuthenticatePasswordRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, _nk runtime.NakamaModule, payload string) (string, error) {
 	nk := _nk.(*RuntimeGoNakamaModule)
 
+	if payload == "" {
+		return "", RPCErrInvalidRequest
+	}
+
 	request := AuthenticatePasswordRequest{}
 	if err := json.Unmarshal([]byte(payload), &request); err != nil {
 		return "", err
