@@ -486,8 +486,8 @@ func GetGroupIDByGuildID(ctx context.Context, db *sql.DB, guildID string) (group
 
 func GetDiscordIDByUserID(ctx context.Context, db *sql.DB, userID string) (discordID string, err error) {
 	// Look for an existing account.
-	query := "SELECT custom_id FROM users WHERE id = $1"
-	var dbCustomID string
+	query := "SELECT custom_id FROM users WHERE id = $1 "
+	var dbCustomID sql.NullString
 	var found = true
 	if err = db.QueryRowContext(ctx, query, userID).Scan(&dbCustomID); err != nil {
 		if err == sql.ErrNoRows {
@@ -500,7 +500,7 @@ func GetDiscordIDByUserID(ctx context.Context, db *sql.DB, userID string) (disco
 		return "", status.Error(codes.NotFound, "discord ID not found")
 	}
 
-	return dbCustomID, nil
+	return dbCustomID.String, nil
 }
 
 func GetGuildIDByGroupID(ctx context.Context, db *sql.DB, groupID string) (guildID string, err error) {

@@ -813,7 +813,7 @@ func GetDiscordDisplayNames(ctx context.Context, db *sql.DB, discordRegistry Dis
 
 	if member, err := discordRegistry.GetGuildMember(ctx, guildID, discordID); err == nil && member != nil {
 		username = member.User.Username
-		globalName = member.User.Username
+		globalName = member.User.GlobalName
 		guildNick = member.Nick
 	} else {
 		user, err := discordRegistry.GetUser(ctx, discordID)
@@ -821,7 +821,7 @@ func GetDiscordDisplayNames(ctx context.Context, db *sql.DB, discordRegistry Dis
 			return "", "", "", fmt.Errorf("error getting user by discord ID: %w", err)
 		}
 		username = user.Username
-		globalName = user.Username
+		globalName = user.GlobalName
 	}
 
 	return username, globalName, guildNick, nil

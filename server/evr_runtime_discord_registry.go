@@ -223,11 +223,22 @@ func (r *LocalDiscordRegistry) GetUser(ctx context.Context, discordId string) (*
 			return member.User, nil
 		}
 	}
-
-	// Make requests for the known guilds of the user
-	guildMap, err := GetGuildGroupIDsByUser(ctx, r.pipeline.db, discordId)
+	userID, err := GetUserIDByDiscordID(ctx, r.pipeline.db, discordId)
 	if err != nil {
-		return nil, fmt.Errorf("error getting guilds by user: %w", err)
+		return nil, fmt.Errorf("error getting user id: %w", err)
+	}
+	// Make requests for the known guilds of the user
+	guildMap, err := GetGuildGroupIDsByUser(ctx, r.pipeline.db, userID)
+	if err != nil {
+		// Get all of the bots guilds
+		guildMap := make(map[string]string)
+		for _, guild := range r.bot.State.Guilds {
+			groupID, err := GetGroupIDByGuildID(ctx, r.pipeline.db, guild.ID)
+			if err != nil {
+				continue
+			}
+			guildMap[guild.ID] = groupID
+		}
 	}
 
 	for _, guildID := range guildMap {
