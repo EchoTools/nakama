@@ -212,7 +212,7 @@ func MatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime
 		return "", runtime.NewError("authentication required", StatusUnauthenticated)
 	}
 
-	if ok, err := checkGroupMembershipByName(ctx, nk, userID, GroupGlobalPrivateDataAccess, SystemGroupLangTag); err != nil {
+	if ok, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalPrivateDataAccess); err != nil {
 		return "", runtime.NewError("failed to check group membership", StatusInternalError)
 	} else if !ok {
 		return "", runtime.NewError("unauthorized", StatusPermissionDenied)

@@ -364,7 +364,7 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 		}
 	}
 
-	isDeveloper, err := checkIfGlobalDeveloper(ctx, p.runtimeModule, session.userID)
+	isDeveloper, err := CheckSystemGroupMembership(ctx, p.db, session.userID.String(), GroupGlobalDevelopers)
 	logger.Info("User is developer", zap.Bool("isDeveloper", isDeveloper))
 	if err != nil {
 		return response.SendErrorToSession(session, status.Errorf(codes.Internal, "Failed to check if user is a developer: %v", err))
@@ -490,8 +490,9 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 	case ml.LobbyType == PublicLobby:
 
 		// Check if this player is a global moderator or developer
-		isModerator, _ := checkIfGlobalModerator(ctx, p.runtimeModule, session.userID)
-		isDeveloper, _ := checkIfGlobalDeveloper(ctx, p.runtimeModule, session.userID)
+		isModerator, _ := CheckSystemGroupMembership(ctx, p.db, session.userID.String(), GroupGlobalModerators)
+		isDeveloper, _ := CheckSystemGroupMembership(ctx, p.db, session.userID.String(), GroupGlobalDevelopers)
+
 		if !isDeveloper {
 			// Let developers join public matches
 
