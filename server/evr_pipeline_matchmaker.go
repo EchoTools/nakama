@@ -94,7 +94,7 @@ func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logg
 	s := session
 	s.tracker.TrackMulti(s.ctx, s.id, []*TrackerOp{
 		{
-			Stream: PresenceStream{Mode: StreamModeService, Subject: session.id, Subcontext: StreamContextMatch},
+			Stream: PresenceStream{Mode: StreamModeService, Subject: session.userID, Subcontext: StreamContextMatch},
 			Meta:   PresenceMeta{Format: s.format, Hidden: true},
 		},
 		// By login sessionID and match service ID
