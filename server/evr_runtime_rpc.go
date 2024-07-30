@@ -978,14 +978,14 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 	label = request.MatchLabel
 	if label == nil {
 		label = &MatchLabel{
-			Mode:      request.Mode.Symbol(),
-			TeamSize:  request.TeamSize,
-			Level:     request.Level.Symbol(),
-			Features:  request.RequiredFeatures,
-			StartTime: request.StartTime,
-			SpawnedBy: request.SpawnedBy,
-			MaxSize:   MatchMaxSize,
-			GroupID:   &gid,
+			Mode:             request.Mode.Symbol(),
+			TeamSize:         request.TeamSize,
+			Level:            request.Level.Symbol(),
+			RequiredFeatures: request.RequiredFeatures,
+			StartTime:        request.StartTime,
+			SpawnedBy:        request.SpawnedBy,
+			MaxSize:          MatchMaxSize,
+			GroupID:          &gid,
 		}
 
 		// Translate the discord ID to the nakama ID for the team Alignments

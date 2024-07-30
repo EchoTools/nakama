@@ -2884,7 +2884,7 @@ func simpleInteractionResponse(s *discordgo.Session, i *discordgo.InteractionCre
 	})
 }
 
-func (d *DiscordAppBot) handlePrepareMatch(ctx context.Context, logger runtime.Logger, discordID, guildID string, region, mode, level evr.Symbol, startTime time.Time) (*EvrMatchState, error) {
+func (d *DiscordAppBot) handlePrepareMatch(ctx context.Context, logger runtime.Logger, discordID, guildID string, region, mode, level evr.Symbol, startTime time.Time) (*MatchLabel, error) {
 	userID, err := GetUserIDByDiscordID(ctx, d.db, discordID)
 	if err != nil {
 		return nil, status.Errorf(codes.NotFound, "user not found: %s", discordID)
@@ -2932,7 +2932,7 @@ func (d *DiscordAppBot) handlePrepareMatch(ctx context.Context, logger runtime.L
 	gid := uuid.FromStringOrNil(groupID)
 	// Prepare the session for the match.
 	state := &MatchLabel{}
-	state.SpawnedBy = userID.String()
+	state.SpawnedBy = userID
 	state.StartTime = startTime
 	state.MaxSize = MatchMaxSize
 	state.Mode = mode

@@ -364,7 +364,7 @@ func (p *EvrPipeline) getBroadcasterHostGroups(ctx context.Context, userId strin
 func (p *EvrPipeline) newParkingMatch(logger *zap.Logger, session *sessionWS, config *MatchBroadcaster) error {
 
 	// Create the match state from the config
-	_, params, _, err := NewEvrMatchState(config.Endpoint, config)
+	_, params, _, err := NewMatchLabel(config.Endpoint, config)
 	if err != nil {
 		return fmt.Errorf("failed to create match state: %v", err)
 	}

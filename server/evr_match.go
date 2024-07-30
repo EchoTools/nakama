@@ -692,7 +692,7 @@ func (m *EvrMatch) StartSession(ctx context.Context, logger runtime.Logger, nk r
 	state.Started = true
 	state.StartTime = time.Now()
 	entrants := make([]evr.EvrId, 0)
-	message := evr.NewBroadcasterStartSession(state.ID.UUID(), channel, state.MaxSize, uint8(state.LobbyType), state.Broadcaster.AppId, state.Mode, state.Level, state.Features, entrants)
+	message := evr.NewBroadcasterStartSession(state.ID.UUID(), channel, state.MaxSize, uint8(state.LobbyType), state.Broadcaster.AppId, state.Mode, state.Level, state.RequiredFeatures, entrants)
 	logger.WithField("message", message).Info("Starting session.")
 	messages := []evr.Message{
 		message,

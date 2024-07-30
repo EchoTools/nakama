@@ -479,7 +479,7 @@ func TestEvrMatch_MatchLoop(t *testing.T) {
 			args: args{
 				tick: 15 * 60 * 10 * 2,
 				state_: func() *MatchLabel {
-					state, _, _, err = NewEvrMatchState(evr.Endpoint{}, &MatchBroadcaster{})
+					state, _, _, err = NewMatchLabel(evr.Endpoint{}, &MatchBroadcaster{})
 					if err != nil {
 						t.Fatalf("error creating new match state: %v", err)
 					}
@@ -498,7 +498,7 @@ func TestEvrMatch_MatchLoop(t *testing.T) {
 			args: args{
 				tick: 500,
 				state_: func() *MatchLabel {
-					state, _, _, err = NewEvrMatchState(evr.Endpoint{}, &MatchBroadcaster{})
+					state, _, _, err = NewMatchLabel(evr.Endpoint{}, &MatchBroadcaster{})
 					if err != nil {
 						t.Fatalf("error creating new match state: %v", err)
 					}
@@ -554,7 +554,7 @@ func TestEvrMatch_MatchLoop(t *testing.T) {
 			args: args{
 				tick: 5 * 10,
 				state_: func() *MatchLabel {
-					state, _, _, err = NewEvrMatchState(evr.Endpoint{}, &MatchBroadcaster{})
+					state, _, _, err = NewMatchLabel(evr.Endpoint{}, &MatchBroadcaster{})
 					if err != nil {
 						t.Fatalf("error creating new match state: %v", err)
 					}
@@ -647,7 +647,7 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 				dispatcher: nil,
 				tick:       0,
 				state_: func() *MatchLabel {
-					state, _, _, err := NewEvrMatchState(evr.Endpoint{}, &MatchBroadcaster{})
+					state, _, _, err := NewMatchLabel(evr.Endpoint{}, &MatchBroadcaster{})
 					if err != nil {
 						t.Fatalf("error creating new match state: %v", err)
 					}
@@ -658,7 +658,7 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 				metadata: JoinMetadata{*presences[0]}.MarshalMap(),
 			},
 			want: func() *MatchLabel {
-				state, _, _, err := NewEvrMatchState(evr.Endpoint{}, &MatchBroadcaster{})
+				state, _, _, err := NewMatchLabel(evr.Endpoint{}, &MatchBroadcaster{})
 				if err != nil {
 					t.Fatalf("error creating new match state: %v", err)
 				}
@@ -681,7 +681,7 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 				dispatcher: nil,
 				tick:       0,
 				state_: func() *MatchLabel {
-					state, _, _, err := NewEvrMatchState(evr.Endpoint{}, &MatchBroadcaster{})
+					state, _, _, err := NewMatchLabel(evr.Endpoint{}, &MatchBroadcaster{})
 					if err != nil {
 						t.Fatalf("error creating new match state: %v", err)
 					}
@@ -705,7 +705,7 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 				metadata: NewJoinMetadata(*presences[0]).MarshalMap(),
 			},
 			want: func() *MatchLabel {
-				state, _, _, err := NewEvrMatchState(evr.Endpoint{}, &MatchBroadcaster{})
+				state, _, _, err := NewMatchLabel(evr.Endpoint{}, &MatchBroadcaster{})
 				if err != nil {
 					t.Fatalf("error creating new match state: %v", err)
 				}
