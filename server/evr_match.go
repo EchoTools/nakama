@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/gofrs/uuid/v5"
-	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/ipinfo/go/v2/ipinfo"
@@ -97,17 +96,6 @@ type EvrMatchMeta struct {
 	MatchBroadcaster
 	Players []EvrMatchPresence `json:"players,omitempty"` // The displayNames of the players (by team name) in the match.
 	// Stats
-}
-type PlayerInfo struct {
-	UserID      string       `json:"user_id,omitempty"`
-	Username    string       `json:"username,omitempty"`
-	DisplayName string       `json:"display_name,omitempty"`
-	EvrID       evr.EvrId    `json:"evr_id,omitempty"`
-	Team        TeamIndex    `json:"team"`
-	ClientIP    string       `json:"client_ip,omitempty"`
-	DiscordID   string       `json:"discord_id,omitempty"`
-	PartyID     string       `json:"party_id,omitempty"`
-	IPinfo      *ipinfo.Core `json:"ip_info,omitempty"`
 }
 
 type MatchBroadcaster struct {
