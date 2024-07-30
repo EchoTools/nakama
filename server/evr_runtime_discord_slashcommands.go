@@ -1726,7 +1726,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 			membership := memberships[0]
 
-			profile, _ := d.profileRegistry.Load(ctx, userID)
+			profile, err := d.profileRegistry.Load(ctx, userID)
+			if err != nil {
+				return
+			}
 			profile.SetChannel(evr.GUID(membership.GuildGroup.ID()))
 
 			if err = d.profileRegistry.Save(ctx, userID, profile); err != nil {
@@ -1918,7 +1921,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return
 			}
 
-			profile, _ := d.profileRegistry.Load(ctx, targetUserID)
+			profile, err := d.profileRegistry.Load(ctx, targetUserID)
+			if err != nil {
+				errFn(errors.New("failed to load profile"), err)
+			}
 			profile.TriggerCommunityValues()
 			if err = d.profileRegistry.Save(ctx, targetUserID, profile); err != nil {
 				errFn(err)
