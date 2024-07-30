@@ -177,7 +177,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	}
 
 	for name, flag := range groupFlagMap {
-		if ok, err := checkGroupMembershipByName(ctx, p.runtimeModule, uid.String(), name, SystemGroupLangTag); err != nil {
+		if ok, err := CheckGroupMembershipByName(ctx, p.db, uid.String(), name, SystemGroupLangTag); err != nil {
 			return settings, fmt.Errorf("failed to check group membership: %w", err)
 		} else if ok {
 			flags |= flag
