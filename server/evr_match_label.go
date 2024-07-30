@@ -11,9 +11,6 @@ import (
 	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
-// The lobby state is used for the match label.
-// Any changes to the lobby state should be reflected in the match label.
-// This also makes it easier to update the match label, and query against it.
 type MatchLabel struct {
 	ID          MatchID          `json:"id"`                    // The Session Id used by EVR (the same as match id)
 	Open        bool             `json:"open"`                  // Whether the lobby is open to new players (Matching Only)
@@ -26,10 +23,10 @@ type MatchLabel struct {
 	GuildID     string           `json:"guild_id,omitempty"`    // The guild id of the broadcaster. (EVR)
 	GuildName   string           `json:"guild_name,omitempty"`  // The guild name of the broadcaster. (EVR)
 
-	Mode            evr.Symbol           `json:"mode,omitempty"`             // The mode of the lobby (Arena, Combat, Social, etc.) (EVR)
-	Level           evr.Symbol           `json:"level,omitempty"`            // The level to play on (EVR).
-	SessionSettings *evr.SessionSettings `json:"session_settings,omitempty"` // The session settings for the match (EVR).
-	Features        []string             `json:"features,omitempty"`         // The required features for the match. map[feature][hmdtype]isRequired
+	Mode             evr.Symbol           `json:"mode,omitempty"`             // The mode of the lobby (Arena, Combat, Social, etc.) (EVR)
+	Level            evr.Symbol           `json:"level,omitempty"`            // The level to play on (EVR).
+	SessionSettings  *evr.SessionSettings `json:"session_settings,omitempty"` // The session settings for the match (EVR).
+	RequiredFeatures []string             `json:"features,omitempty"`         // The required features for the match. map[feature][hmdtype]isRequired
 
 	MaxSize     uint8     `json:"limit,omitempty"`        // The total lobby size limit (players + specs)
 	Size        int       `json:"size"`                   // The number of players (including spectators) in the match.
@@ -48,6 +45,39 @@ type MatchLabel struct {
 	broadcasterJoinExpiry int64                // The tick count at which the match will be shut down if the broadcaster has not joined.
 	tickRate              int64                // The number of ticks per second.
 	joinTimestamps        map[string]time.Time // The timestamps of when players joined the match. map[sessionId]time.Time
+}
+
+// NewMatchLabel is a helper function to create a new match state. It returns the state, params, label json, and err.
+func NewMatchLabel(endpoint evr.Endpoint, config *MatchBroadcaster) (state *MatchLabel, params map[string]interface{}, configPayload string, err error) {
+
+	var tickRate int64 = 10 // 10 ticks per second
+
+	initialState := MatchLabel{
+		Broadcaster:      *config,
+		Open:             false,
+		LobbyType:        UnassignedLobby,
+		Mode:             evr.ModeUnloaded,
+		Level:            evr.LevelUnloaded,
+		RequiredFeatures: make([]string, 0),
+		Players:          make([]PlayerInfo, 0, MatchMaxSize),
+		presenceMap:      make(map[string]*EvrMatchPresence, MatchMaxSize),
+
+		TeamAlignments: make(map[string]int, MatchMaxSize),
+
+		emptyTicks: 0,
+		tickRate:   tickRate,
+	}
+
+	stateJson, err := json.Marshal(initialState)
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("failed to marshal match config: %v", err)
+	}
+
+	params = map[string]interface{}{
+		"initialState": stateJson,
+	}
+
+	return &initialState, params, string(stateJson), nil
 }
 
 func (s *MatchLabel) GetPlayerCount() int {
@@ -99,24 +129,34 @@ func (s *MatchLabel) GetEndpoint() evr.Endpoint {
 	return s.Broadcaster.Endpoint
 }
 
+func (s *MatchLabel) IsPriorityForMode() bool {
+	tag := "priority_mode_" + s.Mode.String()
+	for _, t := range s.Broadcaster.Tags {
+		if t == tag {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *MatchLabel) PublicView() *MatchLabel {
 	ps := MatchLabel{
-		LobbyType:   s.LobbyType,
-		ID:          s.ID,
-		Open:        s.Open,
-		Started:     s.Started,
-		StartTime:   s.StartTime,
-		GroupID:     s.GroupID,
-		GuildID:     s.GuildID,
-		SpawnedBy:   s.SpawnedBy,
-		Mode:        s.Mode,
-		Level:       s.Level,
-		Features:    s.Features,
-		MaxSize:     s.MaxSize,
-		Size:        s.Size,
-		PlayerCount: s.PlayerCount,
-		PlayerLimit: s.PlayerLimit,
-		TeamSize:    s.TeamSize,
+		LobbyType:        s.LobbyType,
+		ID:               s.ID,
+		Open:             s.Open,
+		Started:          s.Started,
+		StartTime:        s.StartTime,
+		GroupID:          s.GroupID,
+		GuildID:          s.GuildID,
+		SpawnedBy:        s.SpawnedBy,
+		Mode:             s.Mode,
+		Level:            s.Level,
+		RequiredFeatures: s.RequiredFeatures,
+		MaxSize:          s.MaxSize,
+		Size:             s.Size,
+		PlayerCount:      s.PlayerCount,
+		PlayerLimit:      s.PlayerLimit,
+		TeamSize:         s.TeamSize,
 		Broadcaster: MatchBroadcaster{
 			OperatorID:  s.Broadcaster.OperatorID,
 			GroupIDs:    s.Broadcaster.GroupIDs,
@@ -144,15 +184,6 @@ func (s *MatchLabel) PublicView() *MatchLabel {
 
 	}
 	return &ps
-}
-
-func MatchStateFromLabel(label string) (*MatchLabel, error) {
-	state := &MatchLabel{}
-	err := json.Unmarshal([]byte(label), state)
-	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal match label: %v", err)
-	}
-	return state, nil
 }
 
 // rebuildCache is called after the presences map is updated.

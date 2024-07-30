@@ -403,14 +403,14 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 	}
 
 	ml := &MatchLabel{
-		Level:           request.Level,
-		LobbyType:       LobbyType(request.LobbyType),
-		Mode:            request.Mode,
-		Open:            true,
-		SessionSettings: &request.SessionSettings,
-		TeamIndex:       TeamIndex(request.GetAlignment()),
-		GroupID:         &request.GroupID,
-		Features:        requiredFeatures,
+		Level:            request.Level,
+		LobbyType:        LobbyType(request.LobbyType),
+		Mode:             request.Mode,
+		Open:             true,
+		SessionSettings:  &request.SessionSettings,
+		TeamIndex:        TeamIndex(request.GetAlignment()),
+		GroupID:          &request.GroupID,
+		RequiredFeatures: requiredFeatures,
 		Broadcaster: MatchBroadcaster{
 			VersionLock: uint64(request.VersionLock),
 			Regions:     uniqueRegions,

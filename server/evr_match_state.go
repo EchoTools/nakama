@@ -53,6 +53,25 @@ type MatchMeta struct {
 	ServerIntIP string
 	ServerExtIP string
 	ServerPort  string
+	Tags        []string
+}
+
+func NewMatchMeta(visibility string, createdBy uuid.UUID, groupID uuid.UUID, guildID, guildName, mode, level string, features []string, serverIntIP, serverExtIP, serverPort string, tags []string) *MatchMeta {
+	return &MatchMeta{
+		Visibility:  visibility,
+		CreatedAt:   time.Now().UTC(),
+		CreatedBy:   createdBy,
+		GroupID:     groupID,
+		GuildID:     guildID,
+		GuildName:   guildName,
+		Mode:        mode,
+		Level:       level,
+		Features:    features,
+		ServerIntIP: serverIntIP,
+		ServerExtIP: serverExtIP,
+		ServerPort:  serverPort,
+		Tags:        tags,
+	}
 }
 
 func (m MatchMeta) IsPublic() bool {
@@ -114,6 +133,15 @@ type MatchState struct {
 	joinTimestamps map[string]time.Time // The timestamps of when players joined the match. map[sessionId]time.Time
 	broadcaster    *EvrMatchPresence    // The broadcaster's presence
 	alignments     map[string]int       // map[userID]TeamIndex
+}
+
+func NewMatchState(meta *MatchMeta) *MatchState {
+	return &MatchState{
+		meta:           meta,
+		presenceMap:    make(map[string]*EvrMatchPresence),
+		joinTimestamps: make(map[string]time.Time),
+		alignments:     make(map[string]int),
+	}
 }
 
 func (s *MatchState) Size() int {
