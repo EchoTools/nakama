@@ -170,18 +170,8 @@ func (s *MatchState) OpenPlayerSlots() int {
 }
 
 func (s *MatchState) IsPriorityForMode() bool {
-	tag := "priority_mode_" + s.Mode.String()
-	for _, t := range s.Broadcaster.Tags {
-		if t == tag {
-			return true
-		}
-	}
-	return false
-}
-
-func (s *EvrMatchState) IsPriorityForMode() bool {
-	tag := "priority_mode_" + s.Mode.String()
-	for _, t := range s.Broadcaster.Tags {
+	tag := "priority_mode_" + s.meta.Mode
+	for _, t := range s.meta.Tags {
 		if t == tag {
 			return true
 		}
