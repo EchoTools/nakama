@@ -98,19 +98,33 @@ type EvrMatchMeta struct {
 	// Stats
 }
 
+type MatchGameMode struct {
+	Mode       evr.Symbol `json:"mode"`
+	Visibility LobbyType  `json:"visibility"`
+}
+
 type MatchBroadcaster struct {
-	SessionID     string       `json:"sid,omitempty"`            // The broadcaster's Session ID
-	OperatorID    string       `json:"oper,omitempty"`           // The user id of the broadcaster.
-	GroupIDs      []uuid.UUID  `json:"group_ids,omitempty"`      // The channels this broadcaster will host matches for.
-	Endpoint      evr.Endpoint `json:"endpoint,omitempty"`       // The endpoint data used for connections.
-	VersionLock   uint64       `json:"version_lock,omitempty"`   // The game build version. (EVR)
-	AppId         string       `json:"app_id,omitempty"`         // The game app id. (EVR)
-	Regions       []evr.Symbol `json:"regions,omitempty"`        // The region the match is hosted in. (Matching Only) (EVR)
-	IPinfo        *ipinfo.Core `json:"ip_info,omitempty"`        // The IPinfo of the broadcaster.
-	ServerID      uint64       `json:"server_id,omitempty"`      // The server id of the broadcaster. (EVR)
-	PublisherLock bool         `json:"publisher_lock,omitempty"` // Publisher lock (EVR)
-	Features      []string     `json:"features,omitempty"`       // The features of the broadcaster.
-	Tags          []string     `json:"tags,omitempty"`           // The tags given on the urlparam for the match.
+	SessionID       string          `json:"sid,omitempty"`              // The broadcaster's Session ID
+	OperatorID      string          `json:"oper,omitempty"`             // The user id of the broadcaster.
+	GroupIDs        []uuid.UUID     `json:"group_ids,omitempty"`        // The channels this broadcaster will host matches for.
+	Endpoint        evr.Endpoint    `json:"endpoint,omitempty"`         // The endpoint data used for connections.
+	VersionLock     uint64          `json:"version_lock,omitempty"`     // The game build version. (EVR)
+	AppId           string          `json:"app_id,omitempty"`           // The game app id. (EVR)
+	Regions         []evr.Symbol    `json:"regions,omitempty"`          // The region the match is hosted in. (Matching Only) (EVR)
+	IPinfo          *ipinfo.Core    `json:"ip_info,omitempty"`          // The IPinfo of the broadcaster.
+	ServerID        uint64          `json:"server_id,omitempty"`        // The server id of the broadcaster. (EVR)
+	PublisherLock   bool            `json:"publisher_lock,omitempty"`   // Publisher lock (EVR)
+	Features        []string        `json:"features,omitempty"`         // The features of the broadcaster.
+	Tags            []string        `json:"tags,omitempty"`             // The tags given on the urlparam for the match.
+	DesignatedModes []MatchGameMode `json:"designated_modes,omitempty"` // The priority modes for the broadcaster.
+}
+
+func (g *MatchBroadcaster) IsPriorityFor(mode evr.Symbol, visibility LobbyType) bool {
+	v := MatchGameMode{
+		Mode:       mode,
+		Visibility: visibility,
+	}
+	return slices.Contains(g.DesignatedModes, v)
 }
 
 // This is the match handler for all matches.
