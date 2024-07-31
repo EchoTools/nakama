@@ -2074,7 +2074,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			// Limit access to global developers
-			member, err := CheckSystemGroupMembership(ctx, d.db, user.ID, GroupGlobalDevelopers)
+			member, err := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalDevelopers)
 			if err != nil {
 				errFn(errors.New("failed to check group membership"))
 			}
@@ -2200,9 +2200,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				if user == nil {
 					return
 				}
-				// Get the user's party group
-				// Get the userID
-				userID, err := GetUserIDByDiscordID(ctx, d.db, user.ID)
 
 				objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
 					{
@@ -2286,14 +2283,14 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				})
 
 			case "group":
-				user := i.User
+
 				if i.Member != nil && i.Member.User != nil {
 					user = i.Member.User
 				}
 				options := options[0].Options
-				groupID := options[0].StringValue()
+				groupName := options[0].StringValue()
 				// Validate the group is 1 to 12 characters long
-				if len(groupID) < 1 || len(groupID) > 12 {
+				if len(groupName) < 1 || len(groupName) > 12 {
 					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 						Type: discordgo.InteractionResponseChannelMessageWithSource,
 						Data: &discordgo.InteractionResponseData{
@@ -2303,7 +2300,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					})
 				}
 				// Validate the group is alphanumeric
-				if !partyGroupIDPattern.MatchString(groupID) {
+				if !partyGroupIDPattern.MatchString(groupName) {
 					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 						Type: discordgo.InteractionResponseChannelMessageWithSource,
 						Data: &discordgo.InteractionResponseData{
@@ -2313,7 +2310,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					})
 				}
 				// Validate the group is not a reserved group
-				if lo.Contains([]string{"admin", "moderator", "verified", "broadcaster"}, groupID) {
+				if lo.Contains([]string{"admin", "moderator", "verified", "broadcaster"}, groupName) {
 					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 						Type: discordgo.InteractionResponseChannelMessageWithSource,
 						Data: &discordgo.InteractionResponseData{
@@ -2323,14 +2320,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					})
 				}
 				// lowercase the group
-				groupID = strings.ToLower(groupID)
-
-				// Get the userID
-				userID, err := GetUserIDByDiscordID(ctx, d.db, user.ID)
-				if err != nil {
-					logger.Error("Failed to get user ID", zap.Error(err))
-					return
-				}
+				groupName = strings.ToLower(groupName)
 
 				objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
 					{
@@ -2349,7 +2339,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						return
 					}
 				}
-				matchmakingConfig.GroupID = groupID
+				matchmakingConfig.GroupID = groupName
 				// Store it back
 
 				data, err := json.Marshal(matchmakingConfig)
@@ -2377,7 +2367,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					Type: discordgo.InteractionResponseChannelMessageWithSource,
 					Data: &discordgo.InteractionResponseData{
 						Flags:   discordgo.MessageFlagsEphemeral,
-						Content: fmt.Sprintf("Your group ID has been set to `%s`. Everyone must matchmake at the same time (~15-30 seconds)", groupID),
+						Content: fmt.Sprintf("Your group ID has been set to `%s`. Everyone must matchmake at the same time (~15-30 seconds)", groupName),
 					},
 				})
 			}
