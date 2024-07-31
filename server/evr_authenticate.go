@@ -244,6 +244,7 @@ type AccountMetadata struct {
 	ActiveGroupID       string            `json:"active_group_id"`       // The active group ID
 	Cosmetics           AccountCosmetics  `json:"cosmetics"`             // The loadout
 	GroupDisplayNames   map[string]string `json:"group_display_names"`   // The display names for each guild map[groupID]displayName
+	DisableAFKTimeout   bool              `json:"disable_afk_timeout"`   // Disable AFK detection
 }
 
 func (a *AccountMetadata) GetActiveGroupID() uuid.UUID {
