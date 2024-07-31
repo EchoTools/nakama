@@ -138,39 +138,6 @@ func NewEvrMatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runt
 	return &EvrMatch{}, nil
 }
 
-// NewEvrMatchState is a helper function to create a new match state. It returns the state, params, label json, and err.
-func NewEvrMatchState(endpoint evr.Endpoint, config *MatchBroadcaster) (state *EvrMatchState, params map[string]interface{}, configPayload string, err error) {
-
-	var tickRate int64 = 10 // 10 ticks per second
-
-	initialState := EvrMatchState{
-		Broadcaster:      *config,
-		Open:             false,
-		LobbyType:        UnassignedLobby,
-		Mode:             evr.ModeUnloaded,
-		Level:            evr.LevelUnloaded,
-		RequiredFeatures: make([]string, 0),
-		Players:          make([]PlayerInfo, 0, MatchMaxSize),
-		presenceMap:      make(map[string]*EvrMatchPresence, MatchMaxSize),
-
-		TeamAlignments: make(map[string]int, MatchMaxSize),
-
-		emptyTicks: 0,
-		tickRate:   tickRate,
-	}
-
-	stateJson, err := json.Marshal(initialState)
-	if err != nil {
-		return nil, nil, "", fmt.Errorf("failed to marshal match config: %v", err)
-	}
-
-	params = map[string]interface{}{
-		"initialState": stateJson,
-	}
-
-	return &initialState, params, string(stateJson), nil
-}
-
 // MatchIDFromContext is a helper function to extract the match id from the context.
 func MatchIDFromContext(ctx context.Context) MatchID {
 	matchIDStr, ok := ctx.Value(runtime.RUNTIME_CTX_MATCH_ID).(string)
@@ -250,7 +217,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		return state, false, fmt.Sprintf("failed to unmarshal metadata: %v", err)
 	}
 
-	mp, reason := m.authorizePlayer(state, md.Presence)
+	mp, reason := m.playerJoinAttempt(state, md.Presence)
 	if reason != "" {
 		return state, false, reason
 	}
