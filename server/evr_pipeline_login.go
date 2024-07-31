@@ -554,7 +554,7 @@ func (p *EvrPipeline) updateClientProfileRequest(ctx context.Context, logger *za
 
 func (p *EvrPipeline) remoteLogSetv3(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.RemoteLogSet)
-
+	logger.Debug("Received remote log set", zap.Any("request", request))
 	evrID, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
 	if !ok {
 		logger.Debug("evrId not found in context")
