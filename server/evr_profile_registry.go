@@ -134,6 +134,7 @@ func (r *ProfileRegistry) Save(ctx context.Context, userID uuid.UUID, profile Ga
 			Key:        GameProfileStorageKey,
 			UserID:     userID.String(),
 			Value:      string(data),
+			Version:    profile.GetVersion(),
 		},
 	})
 	if err != nil {

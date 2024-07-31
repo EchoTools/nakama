@@ -16,6 +16,7 @@ import (
 )
 
 type GameProfile interface {
+	GetVersion() string
 	SetLogin(login evr.LoginProfile)
 	SetClient(client evr.ClientProfile)
 	SetServer(server evr.ServerProfile)
@@ -31,12 +32,11 @@ type GameProfile interface {
 }
 
 type GameProfileData struct {
-	Login     evr.LoginProfile  `json:"login"`
-	Client    evr.ClientProfile `json:"client"`
-	Server    evr.ServerProfile `json:"server"`
-	timestamp time.Time         // The time when the profile was last retrieved
-	Stale     bool              // Whether the profile is stale and needs to be updated
-
+	Login   evr.LoginProfile  `json:"login"`
+	Client  evr.ClientProfile `json:"client"`
+	Server  evr.ServerProfile `json:"server"`
+	Version string            // The version of the profile from the DB
+	Stale   bool              // Whether the profile is stale and needs to be updated
 }
 
 type AccountProfile struct {
@@ -131,12 +131,17 @@ func (p *AccountProfile) GetServerProfile() evr.ServerProfile {
 	}
 }
 
-func NewGameProfile(login evr.LoginProfile, client evr.ClientProfile, server evr.ServerProfile) GameProfileData {
+func NewGameProfile(login evr.LoginProfile, client evr.ClientProfile, server evr.ServerProfile, version string) GameProfileData {
 	return GameProfileData{
-		Login:  login,
-		Client: client,
-		Server: server,
+		Login:   login,
+		Client:  client,
+		Server:  server,
+		Version: version,
 	}
+}
+
+func (p *GameProfileData) GetVersion() string {
+	return p.Version
 }
 
 func (p *GameProfileData) SetLogin(login evr.LoginProfile) {
