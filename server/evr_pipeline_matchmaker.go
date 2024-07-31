@@ -450,6 +450,9 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 	request := in.(*evr.LobbyJoinSessionRequest)
 	response := NewMatchmakingResult(logger, 0xFFFFFFFFFFFFFFFF, request.MatchID)
 	loginSessionID := request.LoginSessionID
+
+	roleAlignment := int(request.GetAlignment())
+
 	// Make sure the match exists
 	matchToken, err := NewMatchID(request.MatchID, p.node)
 	if err != nil {
@@ -472,7 +475,7 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 	p.PrepareLobbyProfile(ctx, logger, session, request.GetEvrID(), session.userID.String(), ml.GroupID.String())
 
 	metricsTags := map[string]string{
-		"role":     TeamIndex(request.GetAlignment()).String(),
+		"role":     fmt.Sprintf("%d", roleAlignment),
 		"mode":     ml.Mode.String(),
 		"group_id": ml.GroupID.String(),
 		"level":    ml.Level.String(),
@@ -488,13 +491,12 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 	case int(ml.Size) >= int(ml.MaxSize):
 		err = status.Errorf(codes.ResourceExhausted, "Match is full")
 	case ml.LobbyType == PublicLobby:
-
 		// Check if this player is a global moderator or developer
 		isModerator, _ := CheckSystemGroupMembership(ctx, p.db, session.userID.String(), GroupGlobalModerators)
 		isDeveloper, _ := CheckSystemGroupMembership(ctx, p.db, session.userID.String(), GroupGlobalDevelopers)
 
 		if !isDeveloper {
-			// Let developers join public matches
+			// Let developers join public matches however they want
 
 			switch request.GetAlignment() {
 			case int8(Spectator):
@@ -503,20 +505,20 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 				}
 				// Allow spectators to join public matches
 			case int8(Moderator):
+				// Allow moderators to join social lobbies
 				if !isModerator || (ml.Mode != evr.ModeSocialPublic && ml.Mode != evr.ModeSocialPrivate) {
-					request.Entrants[0].Role = int8(AnyTeam)
+					request.SetAlignment(int(AnyTeam))
 				}
 			case int8(SocialLobbyParticipant):
-				// Allow moderators to join social lobbies
 				if ml.Mode != evr.ModeSocialPublic && ml.Mode != evr.ModeSocialPrivate {
-					request.Entrants[0].Role = int8(AnyTeam)
+					request.SetAlignment(int(AnyTeam))
 				}
 			default:
 				if time.Since(ml.StartTime) < time.Second*10 {
 					// Allow if the match is over 15 seconds old, to allow matchmaking to properly populate the match
 					err = status.Errorf(codes.InvalidArgument, "Match is a newly started public match")
 				}
-				request.Entrants[0].Role = int8(AnyTeam)
+				request.SetAlignment(int(AnyTeam))
 			}
 		}
 	}
@@ -551,6 +553,7 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 	if err != nil {
 		return response.SendErrorToSession(session, status.Errorf(codes.Internal, "Failed to create matchmaking session: %v", err))
 	}
+	logger.Info("Joining match", zap.String("mid", matchToken.String()), zap.Int("role", int(request.GetAlignment())), zap.String("session_id", session.id.String()))
 	if err = p.LobbyJoin(ctx, logger, matchToken, int(request.GetAlignment()), "", msession); err != nil {
 		return response.SendErrorToSession(session, status.Errorf(codes.NotFound, err.Error()))
 	}
