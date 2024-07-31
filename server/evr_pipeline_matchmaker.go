@@ -176,7 +176,7 @@ func (p *EvrPipeline) matchmakingLabelFromFindRequest(ctx context.Context, sessi
 		request.Mode = evr.ModeCombatPublic
 		request.Level = evr.LevelUnspecified
 		request.Entrants[0].Role = int8(AnyTeam)
-		request.SessionSettings = evr.SessionSettings{
+		request.SessionSettings = evr.LobbySessionSettings{
 			AppID: request.SessionSettings.AppID,
 			Mode:  int64(evr.ModeCombatPublic),
 		}
