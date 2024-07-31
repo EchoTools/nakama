@@ -23,10 +23,10 @@ type MatchLabel struct {
 	GuildID     string           `json:"guild_id,omitempty"`    // The guild id of the broadcaster. (EVR)
 	GuildName   string           `json:"guild_name,omitempty"`  // The guild name of the broadcaster. (EVR)
 
-	Mode             evr.Symbol           `json:"mode,omitempty"`             // The mode of the lobby (Arena, Combat, Social, etc.) (EVR)
-	Level            evr.Symbol           `json:"level,omitempty"`            // The level to play on (EVR).
-	SessionSettings  *evr.SessionSettings `json:"session_settings,omitempty"` // The session settings for the match (EVR).
-	RequiredFeatures []string             `json:"features,omitempty"`         // The required features for the match. map[feature][hmdtype]isRequired
+	Mode             evr.Symbol                `json:"mode,omitempty"`             // The mode of the lobby (Arena, Combat, Social, etc.) (EVR)
+	Level            evr.Symbol                `json:"level,omitempty"`            // The level to play on (EVR).
+	SessionSettings  *evr.LobbySessionSettings `json:"session_settings,omitempty"` // The session settings for the match (EVR).
+	RequiredFeatures []string                  `json:"features,omitempty"`         // The required features for the match. map[feature][hmdtype]isRequired
 
 	MaxSize     uint8     `json:"limit,omitempty"`        // The total lobby size limit (players + specs)
 	Size        int       `json:"size"`                   // The number of players (including spectators) in the match.
