@@ -354,6 +354,7 @@ func (s *sessionWS) BroadcasterSession(userID string, username string) error {
 	ctx = context.WithValue(ctx, ctxUsernameKey{}, username)                            // apiServer compatibility
 	ctx = context.WithValue(ctx, ctxVarsKey{}, s.vars)                                  // apiServer compatibility
 	ctx = context.WithValue(ctx, ctxExpiryKey{}, s.expiry)                              // apiServer compatibility
+	ctx = context.WithValue(ctx, ctxHeadsetTypeKey{}, int(0))
 
 	s.SetUsername(username)
 	s.Lock()

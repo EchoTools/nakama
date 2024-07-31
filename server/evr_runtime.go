@@ -853,17 +853,11 @@ func GetGuildGroupIDsByUser(ctx context.Context, db *sql.DB, userID string) (map
 		return nil, status.Error(codes.InvalidArgument, "user ID is required")
 	}
 	query := `
-	SELECT 
-		g.id, g.metadata->>'guild_id'
-		FROM 
-			group_edge ge, 
-			groups g 
-		WHERE ge.source_id = $1 
-			AND ge.state <= 2 
-			AND g.lang_tag = 'guild' 
-			AND g.metadata->>'guild_id' IS NOT NULL
-		GROUP BY g.id, g.metadata->>'guild_id';
-`
+	SELECT g.id, g.metadata->>'guild_id' 
+	FROM group_edge ge, groups g 
+	WHERE g.id = ge.source_id AND ge.destination_id = $1 AND g.lang_tag = 'guild' AND ge.state <= 2
+						  `
+
 	var dbGroupID string
 	var dbGuildID string
 	rows, err := db.QueryContext(ctx, query, userID)

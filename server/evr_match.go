@@ -423,10 +423,6 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		return m.MatchTerminate(ctx, logger, db, nk, dispatcher, tick, state, 0)
 	}
 
-	// Shutdown the match 60 seconds after it starts
-	if state.Started && time.Now().After(state.StartTime.Add(60*time.Second)) {
-		m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, 10)
-	}
 	var err error
 
 	if state.broadcaster == nil {
@@ -531,7 +527,7 @@ func (m *EvrMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, db
 		nk.SessionDisconnect(ctx, state.broadcaster.GetSessionId(), runtime.PresenceReasonDisconnect)
 	}
 
-	return state
+	return nil
 }
 
 func (m *EvrMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ interface{}, graceSeconds int) interface{} {
