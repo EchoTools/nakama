@@ -52,12 +52,18 @@ func (d *DiscordAppBot) handleInteractionCreate(logger runtime.Logger, s *discor
 		}
 
 	case "trigger-cv", "kick-player":
+
+		userID, err = GetUserIDByDiscordID(ctx, d.db, user.ID)
+		if err != nil {
+			return fmt.Errorf("a headsets must be linked to this Discord account to use slash commands")
+		}
 		if isGlobalModerator, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalModerators); err != nil {
 			return errors.New("failed to check global moderator status")
 		} else if !isGlobalModerator {
 			return simpleInteractionResponse(s, i, "You must be a global moderator to use this command.")
 
 		}
+
 	default:
 		userID, err = GetUserIDByDiscordID(ctx, d.db, user.ID)
 		if err != nil {

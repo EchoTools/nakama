@@ -223,6 +223,23 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		return settings, fmt.Errorf("user is not in any guild groups: %w", err)
 	}
 
+	// Update the user's guild groups
+	updateCtx, cancel := context.WithTimeout(ctx, time.Second*5)
+	go func() {
+		defer cancel()
+		err := p.discordRegistry.UpdateAllGuildGroupsForUser(updateCtx, NewRuntimeGoLogger(logger), uid)
+		if err != nil {
+			logger.Warn("Failed to update guild groups", zap.Error(err))
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return settings, fmt.Errorf("context cancelled")
+	case <-updateCtx.Done():
+	case <-time.After(time.Second * 3):
+	}
+
 	found := false
 	for _, id := range groupMap {
 		if id == groupID.String() {
@@ -273,6 +290,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 			break
 		}
 	}
+
 	// Initialize the full session
 	if err := session.LoginSession(userId, user.GetUsername(), displayName, metadata.DisplayNameOverride, account.GetCustomId(), evrId, deviceId, groupID, flags, verbose, headsetType); err != nil {
 		return settings, fmt.Errorf("failed to login: %w", err)
