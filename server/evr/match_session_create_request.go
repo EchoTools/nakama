@@ -20,17 +20,17 @@ var (
 
 // LobbyCreateSessionRequest represents a request from the client to the server for creating a new game session.
 type LobbyCreateSessionRequest struct {
-	Region           Symbol          // Symbol representing the region
-	VersionLock      Symbol          // Version lock
-	Mode             Symbol          // Symbol representing the game type
-	Level            Symbol          // Symbol representing the level
-	Platform         Symbol          // Symbol representing the platform
-	LoginSessionID   uuid.UUID       // Session identifier
-	CrossPlayEnabled bool            // Whether cross-play is enabled
-	LobbyType        LobbyType       // the visibility of the session to create.
-	Unk2             uint32          // Unknown field 2
-	GroupID          uuid.UUID       // Channel UUID
-	SessionSettings  SessionSettings // Session settings
+	Region           Symbol               // Symbol representing the region
+	VersionLock      Symbol               // Version lock
+	Mode             Symbol               // Symbol representing the game type
+	Level            Symbol               // Symbol representing the level
+	Platform         Symbol               // Symbol representing the platform
+	LoginSessionID   uuid.UUID            // Session identifier
+	CrossPlayEnabled bool                 // Whether cross-play is enabled
+	LobbyType        LobbyType            // the visibility of the session to create.
+	Unk2             uint32               // Unknown field 2
+	GroupID          uuid.UUID            // Channel UUID
+	SessionSettings  LobbySessionSettings // Session settings
 	Entrants         []Entrant
 }
 

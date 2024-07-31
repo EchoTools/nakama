@@ -39,7 +39,7 @@ type LobbyJoinSessionRequest struct {
 	LoginSessionID   uuid.UUID
 	Flags            uint64
 	CrossPlayEnabled bool
-	SessionSettings  SessionSettings
+	SessionSettings  LobbySessionSettings
 	OtherEvrID       EvrId
 	Entrants         []Entrant
 }

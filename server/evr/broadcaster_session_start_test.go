@@ -17,7 +17,7 @@ func TestNewSessionSettings(t *testing.T) {
 	tests := []struct {
 		name string
 		args args
-		want SessionSettings
+		want LobbySessionSettings
 	}{
 		{
 			name: "TestNewSessionSettings",
@@ -26,7 +26,7 @@ func TestNewSessionSettings(t *testing.T) {
 				mode:  1,
 				level: 1,
 			},
-			want: SessionSettings{
+			want: LobbySessionSettings{
 				AppID: "test",
 				Mode:  1,
 				Level: nil,
@@ -45,13 +45,13 @@ func TestNewSessionSettings(t *testing.T) {
 func TestSessionSettings_MarshalJSON(t *testing.T) {
 	tests := []struct {
 		name    string
-		s       SessionSettings
+		s       LobbySessionSettings
 		want    []byte
 		wantErr bool
 	}{
 		{
 			name: "TestSessionSettings_MarshalJSON",
-			s: SessionSettings{
+			s: LobbySessionSettings{
 				AppID: "test",
 				Mode:  1,
 				Level: nil,
@@ -62,7 +62,7 @@ func TestSessionSettings_MarshalJSON(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			decoded := SessionSettings{}
+			decoded := LobbySessionSettings{}
 			err := json.Unmarshal(tt.want, &decoded)
 			if err != nil {
 				t.Fatal(err)
