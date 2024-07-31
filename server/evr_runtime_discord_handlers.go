@@ -42,6 +42,7 @@ func (d *DiscordAppBot) handleInteractionCreate(logger runtime.Logger, s *discor
 
 	switch commandName {
 	case "whoami", "link-headset":
+
 		// Authenticate/create an account.
 		userID, err = GetUserIDByDiscordID(ctx, d.db, user.ID)
 		if err != nil {
