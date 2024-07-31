@@ -489,10 +489,11 @@ func (r *LocalDiscordRegistry) UpdateGuildGroup(ctx context.Context, logger runt
 	}
 
 	// Get the member
-	member, err := r.GetGuildMember(ctx, guildID, discordID)
-	// return if the context is cancelled
+	member, err := r.bot.GuildMember(guildID, discordID)
 	if err != nil {
-		return fmt.Errorf("error getting guild member: %v", err)
+		if restError, _ := err.(*discordgo.RESTError); errors.As(err, &restError) && restError.Message != nil && restError.Message.Code != discordgo.ErrCodeUnknownMember {
+			return fmt.Errorf("error getting guild member: %w", err)
+		}
 	}
 
 	// Get all of the user's memberships

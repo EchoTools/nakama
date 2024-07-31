@@ -616,7 +616,16 @@ func (r *ProfileRegistry) UpdateEntitledCosmetics(ctx context.Context, userID uu
 	if err != nil {
 		return fmt.Errorf("failed to update unlocks: %w", err)
 	}
-	profile.DisableAFKTimeout(isDeveloper)
+	account, err := r.nk.AccountGetId(ctx, userID.String())
+	if err != nil {
+		return fmt.Errorf("failed to get account: %w", err)
+	}
+	md := AccountMetadata{}
+	if err := json.Unmarshal([]byte(account.User.GetMetadata()), &md); err != nil {
+		return fmt.Errorf("failed to unmarshal metadata: %w", err)
+	}
+
+	profile.DisableAFKTimeout(md.DisableAFKTimeout)
 
 	/*
 		if err := enforceLoadoutEntitlements(r.logger, &profile.Server.EquippedCosmetics.Instances.Unified.Slots, &profile.Server.UnlockedCosmetics, r.defaults); err != nil {

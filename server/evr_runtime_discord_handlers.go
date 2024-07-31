@@ -50,13 +50,7 @@ func (d *DiscordAppBot) handleInteractionCreate(logger runtime.Logger, s *discor
 				return fmt.Errorf("failed to authenticate (or create) user %s: %w", user.ID, err)
 			}
 		}
-		auths, err := GetDeviceAuthsByUserID(ctx, db, userID)
-		if err != nil {
-			return fmt.Errorf("failed to get device auths: %w", err)
-		}
-		if len(auths) == 0 {
-			return fmt.Errorf("no headsets are linked to this account")
-		}
+
 	case "trigger-cv", "kick-player":
 		if isGlobalModerator, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalModerators); err != nil {
 			return errors.New("failed to check global moderator status")
@@ -67,7 +61,7 @@ func (d *DiscordAppBot) handleInteractionCreate(logger runtime.Logger, s *discor
 	default:
 		userID, err = GetUserIDByDiscordID(ctx, d.db, user.ID)
 		if err != nil {
-			return fmt.Errorf("No headsets are linked to this Discord account.")
+			return fmt.Errorf("a headsets must be linked to this Discord account to use slash commands")
 		}
 
 	}
