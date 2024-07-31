@@ -856,3 +856,22 @@ func GetGuildGroupIDsByUser(ctx context.Context, db *sql.DB, userID string) (map
 	_ = rows.Close()
 	return groups, nil
 }
+
+func DisconnectUserID(ctx context.Context, nk runtime.NakamaModule, userID string) (int, error) {
+	// Get the user's presences
+
+	presences, err := nk.StreamUserList(StreamModeService, userID, "", StreamLabelMatchService, true, true)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get stream presences: %w", err)
+	}
+
+	cnt := 0
+	for _, presence := range presences {
+		if err = nk.SessionDisconnect(ctx, presence.GetSessionId(), runtime.PresenceReasonDisconnect); err != nil {
+			return cnt, fmt.Errorf("failed to disconnect session `%s`: %w", presence.GetSessionId(), err)
+		}
+		cnt++
+	}
+
+	return cnt, nil
+}
