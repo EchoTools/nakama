@@ -124,18 +124,6 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	userId := user.GetId()
 	uid := uuid.FromStringOrNil(user.GetId())
 
-	updateCtx, cancel := context.WithTimeout(ctx, time.Second*3)
-	go func() {
-		defer cancel()
-		err = p.discordRegistry.UpdateAllGuildGroupsForUser(ctx, NewRuntimeGoLogger(logger), uid)
-		if err != nil {
-			logger.Warn("Failed to update guild groups", zap.Error(err))
-		}
-	}()
-
-	// Wait for the context to be done, or the timeout
-	<-updateCtx.Done()
-
 	// Get the user's metadata
 	var metadata AccountMetadata
 	if err := json.Unmarshal([]byte(account.User.GetMetadata()), &metadata); err != nil {
