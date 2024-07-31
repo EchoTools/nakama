@@ -434,26 +434,33 @@ func UpdateDisplayNameByGroupID(ctx context.Context, logger runtime.Logger, db *
 		return "", fmt.Errorf("error getting account: %w", err)
 	}
 
-	// Get the displayname for the player's active group
-	defaultDisplayName := account.GetUser().GetDisplayName()
-
 	metadata := AccountMetadata{}
 	err = json.Unmarshal([]byte(account.GetUser().GetMetadata()), &metadata)
 	if err != nil {
-		return defaultDisplayName, fmt.Errorf("error unmarshalling account user metadata: %w", err)
+		return account.GetUser().GetDisplayName(), fmt.Errorf("error unmarshalling account user metadata: %w", err)
 	}
+	// Get the displayname for the player's active group
+	primaryGuildDisplayName := metadata.GetActiveGroupDisplayName()
 
-	// Check for a cached display name
 	username, globalName, guildNick, err := GetDiscordDisplayNames(ctx, db, discordRegistry, userID, groupID)
 	if err != nil {
-		return defaultDisplayName, fmt.Errorf("error getting discord display names: %w", err)
+		return primaryGuildDisplayName, fmt.Errorf("error getting discord display names: %w", err)
 	}
 
-	options := []string{guildNick, defaultDisplayName, globalName, username}
+	if guildNick == "" {
+		if groupID == metadata.GetActiveGroupID().String() {
+			// If the player has no guild nick, then use their global nick for the active guild
+			guildNick = globalName
+		} else {
+			guildNick = metadata.GetActiveGroupDisplayName()
+		}
+	}
+
+	options := []string{guildNick, primaryGuildDisplayName, globalName, username}
 
 	displayName, err := SelectDisplayNameByPriority(ctx, nk, userID, username, options)
 	if err != nil {
-		return defaultDisplayName, fmt.Errorf("error selecting display name by priority: %w", err)
+		return primaryGuildDisplayName, fmt.Errorf("error selecting display name by priority: %w", err)
 	}
 
 	// Purge old display names
