@@ -807,7 +807,7 @@ func GetGuildGroupIDsByUser(ctx context.Context, db *sql.DB, userID string) (map
 func DisconnectUserID(ctx context.Context, nk runtime.NakamaModule, userID string) (int, error) {
 	// Get the user's presences
 
-	presences, err := nk.StreamUserList(StreamModeService, userID, "", StreamLabelMatchService, true, true)
+	presences, err := nk.StreamUserList(StreamModeService, userID, StreamContextLogin.String(), "", true, true)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get stream presences: %w", err)
 	}
