@@ -268,7 +268,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	// Tell the broadcaster to load the match if it's not already started
 	if !state.Started {
 		var err error
-		if state, err = m.StartSession(ctx, logger, nk, dispatcher, state); err != nil {
+		if state, err = m.MatchStart(ctx, logger, nk, dispatcher, state); err != nil {
 			return state, false, fmt.Sprintf("failed to start session: %v", err)
 		}
 	}
@@ -370,6 +370,8 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 	return state
 }
 
+var PresenceReasonKicked uint8 = 16
+
 // MatchLeave is called after a player leaves the match.
 func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ interface{}, presences []runtime.Presence) interface{} {
 	state, ok := state_.(*MatchLabel)
@@ -382,17 +384,16 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 	for _, p := range presences {
 		if p.GetSessionId() == state.Broadcaster.SessionID {
 			logger.Debug("Broadcaster left the match. Shutting down.")
-			return nil
+			m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, 10)
 		}
 	}
 
-	for _, p := range presences {
-		if mp, ok := state.presenceMap[p.GetSessionId()]; ok {
-			logger.WithFields(map[string]interface{}{
-				"username": mp.GetUsername(),
-				"uid":      mp.GetUserId(),
-			}).Info("Player left the match.")
+	rejects := make([]uuid.UUID, 0)
 
+	for _, p := range presences {
+		logger.WithField("presence", p).Debug("Player leaving the match.")
+
+		if mp, ok := state.presenceMap[p.GetSessionId()]; ok {
 			tags := map[string]string{
 				"mode":     state.Mode.String(),
 				"level":    state.Level.String(),
@@ -400,13 +401,34 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 				"role":     fmt.Sprintf("%d", mp.RoleAlignment),
 				"group_id": state.GetGroupID().String(),
 			}
+			msg := "Player removed from game server."
+			// If the presence still has the entrant stream, then this was from nakama, not the server. inform the server.
+			if userPresences, err := nk.StreamUserList(StreamModeEntrant, mp.EntrantID.String(), "", mp.GetNodeId(), true, true); err != nil {
+				logger.Error("Failed to list user streams: %v", err)
+			} else if len(userPresences) > 0 {
+				rejects = append(rejects, mp.EntrantID)
+				msg = "Removing player from game server."
+				nk.MetricsCounterAdd("match_entrant_kick_count", tags, 1)
+			}
+			nk.MetricsCounterAdd("match_entrant_leave_count", tags, 1)
+			logger.WithFields(map[string]interface{}{
+				"username": mp.GetUsername(),
+				"uid":      mp.GetUserId(),
+			}).Info(msg)
+
 			ts := state.joinTimestamps[mp.GetSessionId()]
 			nk.MetricsTimerRecord("match_player_session_duration", tags, time.Since(ts))
 
 			delete(state.presenceMap, p.GetSessionId())
+			delete(state.joinTimestamps, p.GetSessionId())
+
 		}
 	}
 
+	if len(rejects) > 0 {
+		msg := evr.NewBroadcasterPlayersRejected(evr.PlayerRejectionReasonLobbyEnding, rejects...)
+		m.dispatchMessages(ctx, logger, dispatcher, []evr.Message{msg}, []runtime.Presence{state.broadcaster}, nil)
+	}
 	if len(state.presenceMap) == 0 {
 		// Lock the match
 		state.Open = false
@@ -429,6 +451,15 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		return nil
 	}
 
+	if state.terminateTick > 0 && tick >= state.terminateTick {
+		logger.Debug("Match termination tick reached.")
+		return m.MatchTerminate(ctx, logger, db, nk, dispatcher, tick, state, 0)
+	}
+
+	// Shutdown the match 60 seconds after it starts
+	if state.Started && time.Now().After(state.StartTime.Add(60*time.Second)) {
+		m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, 10)
+	}
 	var err error
 
 	if state.broadcaster == nil {
@@ -456,7 +487,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		if state.LobbyType != UnassignedLobby {
 			logger.Error("Match has not started on time. Shutting down.")
 			// Tell the broadcaster to load the level, which it will immediately shut down.
-			if state, err = m.StartSession(ctx, logger, nk, dispatcher, state); err != nil {
+			if state, err = m.MatchStart(ctx, logger, nk, dispatcher, state); err != nil {
 				logger.Error("failed to start session: %v", err)
 				return nil
 			}
@@ -514,14 +545,59 @@ func (m *EvrMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, db
 		return nil
 	}
 	logger.Info("MatchTerminate called. %v", state)
+	nk.MetricsCounterAdd("match_terminate_count", state.MetricsTags(), 1)
 	if state.broadcaster != nil {
 		// Disconnect the players
 		for _, presence := range state.presenceMap {
+			logger.WithFields(map[string]any{
+				"uid": presence.GetUserId(),
+				"sid": presence.GetSessionId(),
+			}).Warn("Match terminating, disconnecting player.")
 			nk.SessionDisconnect(ctx, presence.GetPlayerSession(), runtime.PresenceReasonDisconnect)
 		}
 		// Disconnect the broadcasters session
+		logger.WithFields(map[string]any{
+			"uid": state.broadcaster.GetUserId(),
+			"sid": state.broadcaster.GetSessionId(),
+		}).Warn("Match terminating, disconnecting broadcaster.")
+
 		nk.SessionDisconnect(ctx, state.broadcaster.GetSessionId(), runtime.PresenceReasonDisconnect)
 	}
+
+	return state
+}
+
+func (m *EvrMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ interface{}, graceSeconds int) interface{} {
+	state, ok := state_.(*MatchLabel)
+	if !ok {
+		logger.Error("state not a valid lobby state object")
+		return nil
+	}
+	logger.Info("MatchShutdown called.")
+	nk.MetricsCounterAdd("match_shutdown_count", state.MetricsTags(), 1)
+
+	state.Open = false
+	if err := m.updateLabel(dispatcher, state); err != nil {
+		logger.Error("failed to update label: %v", err)
+		return nil
+	}
+
+	if state.broadcaster != nil {
+
+		for _, mp := range state.presenceMap {
+
+			if err := nk.StreamUserKick(StreamModeMatchAuthoritative, mp.EntrantID.String(), "", mp.GetNodeId(), mp); err != nil {
+				logger.WithFields(map[string]any{
+					"uid": mp.GetUserId(),
+					"sid": mp.GetSessionId(),
+				}).Error("Failed to kick user from stream.")
+			}
+
+		}
+
+	}
+
+	state.terminateTick = tick + int64(graceSeconds)*state.tickRate
 
 	return state
 }
@@ -670,7 +746,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 
 	case SignalStartSession:
 
-		state, err := m.StartSession(ctx, logger, nk, dispatcher, state)
+		state, err := m.MatchStart(ctx, logger, nk, dispatcher, state)
 		if err != nil {
 			return state, SignalResponse{Message: fmt.Sprintf("failed to start session: %v", err)}.String()
 		}
@@ -699,7 +775,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 
 }
 
-func (m *EvrMatch) StartSession(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, state *MatchLabel) (*MatchLabel, error) {
+func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, state *MatchLabel) (*MatchLabel, error) {
 	channel := uuid.Nil
 	if state.GroupID != nil {
 		channel = *state.GroupID
@@ -707,12 +783,12 @@ func (m *EvrMatch) StartSession(ctx context.Context, logger runtime.Logger, nk r
 	state.Started = true
 	state.StartTime = time.Now()
 	entrants := make([]evr.EvrId, 0)
-	message := evr.NewBroadcasterStartSession(state.ID.UUID(), channel, state.MaxSize, uint8(state.LobbyType), state.Broadcaster.AppId, state.Mode, state.Level, state.RequiredFeatures, entrants)
+	message := evr.NewGameServerSessionStart(state.ID.UUID(), channel, state.MaxSize, uint8(state.LobbyType), state.Broadcaster.AppId, state.Mode, state.Level, state.RequiredFeatures, entrants)
 	logger.WithField("message", message).Info("Starting session.")
 	messages := []evr.Message{
 		message,
 	}
-
+	nk.MetricsCounterAdd("match_start_count", state.MetricsTags(), 1)
 	// Dispatch the message for delivery.
 	if err := m.dispatchMessages(ctx, logger, dispatcher, messages, []runtime.Presence{state.broadcaster}, nil); err != nil {
 		return state, fmt.Errorf("failed to dispatch message: %v", err)

@@ -45,6 +45,7 @@ type MatchLabel struct {
 	broadcasterJoinExpiry int64                // The tick count at which the match will be shut down if the broadcaster has not joined.
 	tickRate              int64                // The number of ticks per second.
 	joinTimestamps        map[string]time.Time // The timestamps of when players joined the match. map[sessionId]time.Time
+	terminateTick         int64                // The tick count at which the match will be shut down.
 }
 
 // NewMatchLabel is a helper function to create a new match state. It returns the state, params, label json, and err.
@@ -184,6 +185,15 @@ func (s *MatchLabel) PublicView() *MatchLabel {
 
 	}
 	return &ps
+}
+
+func (s *MatchLabel) MetricsTags() map[string]string {
+	return map[string]string{
+		"mode":     s.Mode.String(),
+		"level":    s.Level.String(),
+		"type":     s.LobbyType.String(),
+		"group_id": s.GetGroupID().String(),
+	}
 }
 
 // rebuildCache is called after the presences map is updated.
