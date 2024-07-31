@@ -657,7 +657,7 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 				continue
 			}
 
-			if err := mr.evrPipeline.LobbyJoin(context.Background(), logger, matchID, int(i), ticketMeta.Query, ms); err != nil {
+			if err := mr.evrPipeline.LobbyJoin(ms.Session.Context(), logger, matchID, int(i), ticketMeta.Query, ms); err != nil {
 				logger.Warn("Failed to join presence to matchmade session", zap.String("mid", matchID.UUID().String()), zap.String("uid", entry.Presence.UserId), zap.Error(err))
 				continue
 			}
@@ -674,16 +674,12 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 			failures = append(failures, entry.Presence)
 		}
 	}
-	_, labelStr, err := mr.matchRegistry.GetMatch(mr.ctx, matchID.String())
+
+	label, err := MatchLabelByID(mr.ctx, mr.nk, matchID)
 	if err != nil {
-		logger.Error("Failed to get match", zap.Error(err))
-	}
-	label := &MatchLabel{}
-	if err := json.Unmarshal([]byte(labelStr), label); err != nil {
-		logger.Error("Failed to unmarshal match label", zap.Error(err), zap.String("labelStr", labelStr))
+		logger.Error("Failed to get label from matchID", zap.Error(err))
 	}
 	logger.Info("Match made", zap.Any("label", label), zap.String("mid", matchID.UUID().String()), zap.Any("teams", teams), zap.Any("errored", failures))
-
 	go mr.SendMatchmakerMatchedNotification(label, teams, failures)
 
 }

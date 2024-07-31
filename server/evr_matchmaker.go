@@ -786,7 +786,7 @@ func (p *EvrPipeline) LobbyJoin(ctx context.Context, logger *zap.Logger, matchID
 	// Trigger MatchJoinAttempt
 	for i, presence := range presences {
 
-		_, presence, _, err = EVRMatchJoinAttempt(msessions[i].Context(), logger, matchID, p.sessionRegistry, p.matchRegistry, p.tracker, *presence)
+		_, presence, _, err = EVRMatchJoinAttempt(msessions[i].Session.Context(), logger, matchID, p.sessionRegistry, p.matchRegistry, p.tracker, *presence)
 		if err != nil {
 			logger.Warn("Failed to join presences to match", zap.Any("presences", presences), zap.Error(err))
 			return err
@@ -806,7 +806,11 @@ func (p *EvrPipeline) LobbyJoin(ctx context.Context, logger *zap.Logger, matchID
 	for i, presence := range matchPresences {
 		// Send the lobbysessionSuccess, this will trigger the broadcaster to send a lobbysessionplayeraccept once the player connects to the broadcaster.
 		go func(ms *MatchmakingSession, bs *sessionWS, alignment int) {
-			headsetType := ctx.Value(ctxHeadsetTypeKey{}).(int)
+			headsetType := 0
+			ht := msessions[i].Session.Context().Value(ctxHeadsetTypeKey{})
+			if ht != nil {
+				headsetType = ht.(int)
+			}
 			msg := evr.NewLobbySessionSuccess(label.Mode, label.ID.UUID(), label.GetGroupID(), label.GetEndpoint(), int16(alignment), headsetType)
 
 			if err = bs.SendEvr(msg.Version5()); err != nil {
@@ -1133,7 +1137,7 @@ func (p *EvrPipeline) MatchSpectateStreamLoop(msession *MatchmakingSession) erro
 				return matches[i].Size > matches[j].Size
 			})
 
-			if err := p.LobbyJoin(ctx, logger, MatchIDFromStringOrNil(matches[0].GetMatchId()), evr.TeamSpectator, query, msession); err != nil {
+			if err := p.LobbyJoin(msession.Session.Context(), logger, MatchIDFromStringOrNil(matches[0].GetMatchId()), evr.TeamSpectator, query, msession); err != nil {
 				logger.Error("Error joining player to matchmaker match", zap.Error(err))
 			}
 			p.metrics.CustomCounter("match_join_spectatestream_count", msession.metricsTags(), 1)
@@ -1163,7 +1167,7 @@ func (p *EvrPipeline) MatchCreateLoop(session *sessionWS, msession *MatchmakingS
 			if matchID.IsNil() {
 				return msession.Cancel(fmt.Errorf("match is nil"))
 			}
-			if err := p.LobbyJoin(ctx, logger, matchID, int(msession.Label.TeamIndex), "", msession); err != nil {
+			if err := p.LobbyJoin(session.Context(), logger, matchID, int(msession.Label.TeamIndex), "", msession); err != nil {
 				logger.Warn("Error joining player to created match", zap.Error(err))
 			}
 			p.metrics.CustomCounter("match_join_created_count", msession.metricsTags(), 1)
@@ -1216,13 +1220,18 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 	logger = msession.Logger
 
 	if ml.TeamIndex == TeamIndex(evr.TeamModerator) {
-		// Check that the user is a moderator for this channel, or globally
-		_, md, err := GetGuildGroupMetadata(parentCtx, p.runtimeModule, ml.GroupID.String())
-		if err != nil {
-			logger.Warn("failed to get guild metadata: %v", zap.Error(err))
-		}
-		if md == nil || md.ModeratorRole == "" || !slices.Contains(md.ModeratorUserIDs, session.userID.String()) {
+		if ok, err := CheckSystemGroupMembership(parentCtx, p.db, session.userID.String(), GroupGlobalModerators); err != nil {
+			logger.Warn("Failed to check system group membership", zap.Error(err))
 			ml.TeamIndex = TeamIndex(evr.TeamSpectator)
+		} else if !ok {
+			// Check that the user is a moderator for this channel, or globally
+			_, md, err := GetGuildGroupMetadata(parentCtx, p.runtimeModule, ml.GroupID.String())
+			if err != nil {
+				logger.Warn("failed to get guild metadata: %v", zap.Error(err))
+			}
+			if md == nil || md.ModeratorRole == "" || !slices.Contains(md.ModeratorUserIDs, session.userID.String()) {
+				ml.TeamIndex = TeamIndex(evr.TeamSpectator)
+			}
 		}
 	}
 
@@ -1311,7 +1320,7 @@ func (p *EvrPipeline) LobbyJoinFromDB(ctx context.Context, logger *zap.Logger, m
 		return false, fmt.Errorf("failed to store matchmaking config: %w", err)
 	}
 
-	if err := p.LobbyJoin(msession.Ctx, logger, matchID, int(AnyTeam), "", msession); err != nil {
+	if err := p.LobbyJoin(msession.Session.Context(), logger, matchID, int(AnyTeam), "", msession); err != nil {
 		logger.Warn("Error joining player to match from DB", zap.String("mid", matchID.UUID().String()), zap.Error(err))
 		return false, fmt.Errorf("failed to join match: %w", err)
 	}
