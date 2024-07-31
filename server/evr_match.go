@@ -350,8 +350,9 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 	// if the broadcaster is in the presences, then shut down.
 	for _, p := range presences {
 		if p.GetSessionId() == state.Broadcaster.SessionID {
+			state.broadcaster = nil
 			logger.Debug("Broadcaster left the match. Shutting down.")
-			m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, 10)
+			m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, 20)
 		}
 	}
 
