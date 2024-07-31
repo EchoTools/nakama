@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	anyascii "github.com/anyascii/go"
+	"github.com/bwmarrin/discordgo"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -379,7 +381,13 @@ func GetDiscordDisplayNames(ctx context.Context, db *sql.DB, discordRegistry Dis
 
 	var username, globalName, guildNick string
 
-	if member, err := discordRegistry.GetGuildMember(ctx, guildID, discordID); err == nil && member != nil {
+	// If member is not found in the cache, get it from the API
+	member, err := discordRegistry.GetBot().GuildMember(guildID, discordID)
+	if err != nil {
+		if restError, _ := err.(*discordgo.RESTError); errors.As(err, &restError) && restError.Message != nil && restError.Message.Code != discordgo.ErrCodeUnknownMember {
+			return "", "", "", fmt.Errorf("error getting guild member: %w", err)
+		}
+	} else if member != nil && member.User != nil {
 		username = member.User.Username
 		globalName = member.User.GlobalName
 		guildNick = member.Nick
