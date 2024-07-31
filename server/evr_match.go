@@ -114,7 +114,7 @@ type EvrMatchPresence struct {
 	RoleAlignment  int       `json:"role,omitempty"`  // The team they want to be on
 	Query          string    `json:"query,omitempty"` // Their matchmaking query
 	SessionExpiry  int64     `json:"session_expiry,omitempty"`
-	HeadSetType    string    `json:"headset_type,omitempty"` // quest2, quest3, cv1, etc.
+	HeadsetType    string    `json:"headset_type,omitempty"` // PCVR or Standalone
 }
 
 func (p EvrMatchPresence) String() string {

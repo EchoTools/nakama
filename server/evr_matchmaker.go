@@ -703,6 +703,15 @@ func NewMatchPresenceFromSession(msession *MatchmakingSession, matchID MatchID, 
 		return nil, fmt.Errorf("failed to get login session from session context")
 	}
 
+	headsetTypeIndex, ok := ctx.Value(ctxHeadsetTypeKey{}).(int)
+	if !ok {
+		return nil, fmt.Errorf("failed to get headset type from session context")
+	}
+	headsetType := "pcvr"
+	if headsetTypeIndex == 1 {
+		headsetType = "standalone"
+	}
+
 	partyID := uuid.Nil
 	if msession.Party != nil {
 		partyID = msession.Party.ID()
@@ -723,6 +732,7 @@ func NewMatchPresenceFromSession(msession *MatchmakingSession, matchID MatchID, 
 		Query:          query,
 		ClientIP:       session.clientIP,
 		ClientPort:     session.clientPort,
+		HeadsetType:    headsetType,
 	}, nil
 
 }
@@ -783,7 +793,8 @@ func (p *EvrPipeline) LobbyJoin(ctx context.Context, logger *zap.Logger, matchID
 	for i, presence := range matchPresences {
 		// Send the lobbysessionSuccess, this will trigger the broadcaster to send a lobbysessionplayeraccept once the player connects to the broadcaster.
 		go func(ms *MatchmakingSession, bs *sessionWS, alignment int) {
-			msg := evr.NewLobbySessionSuccess(label.Mode, label.ID.UUID(), label.GetGroupID(), label.GetEndpoint(), int16(alignment))
+			headsetType := ctx.Value(ctxHeadsetTypeKey{}).(int)
+			msg := evr.NewLobbySessionSuccess(label.Mode, label.ID.UUID(), label.GetGroupID(), label.GetEndpoint(), int16(alignment), headsetType)
 
 			if err = bs.SendEvr(msg.Version5()); err != nil {
 				logger.Error("Failed to send lobby session success to game server", zap.Error(err))

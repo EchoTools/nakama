@@ -281,9 +281,22 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	if err != nil {
 		logger.Warn("Failed to set display name", zap.Error(err))
 	}
+	headsetType := 0
 
+	questTypes := []string{
+		"Quest",
+		"Quest 2",
+		"Quest 3",
+		"Quest Pro",
+	}
+	for _, t := range questTypes {
+		if strings.Contains(strings.ToLower(loginProfile.SystemInfo.HeadsetType), strings.ToLower(t)) {
+			headsetType = 1
+			break
+		}
+	}
 	// Initialize the full session
-	if err := session.LoginSession(userId, user.GetUsername(), displayName, metadata.DisplayNameOverride, account.GetCustomId(), evrId, deviceId, groupID, flags, verbose); err != nil {
+	if err := session.LoginSession(userId, user.GetUsername(), displayName, metadata.DisplayNameOverride, account.GetCustomId(), evrId, deviceId, groupID, flags, verbose, headsetType); err != nil {
 		return settings, fmt.Errorf("failed to login: %w", err)
 	}
 	ctx = session.Context()
