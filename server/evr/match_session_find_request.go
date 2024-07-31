@@ -30,11 +30,11 @@ type LobbyFindSessionRequest struct {
 
 	CurrentLobbySessionID uuid.UUID
 	GroupID               uuid.UUID
-	SessionSettings       SessionSettings
+	SessionSettings       LobbySessionSettings
 	Entrants              []Entrant
 }
 
-func NewLobbyFindSessionRequest(versionLock Symbol, mode Symbol, level Symbol, platform Symbol, loginSessionID uuid.UUID, crossPlayEnabled bool, currentMatch uuid.UUID, channel uuid.UUID, sessionSettings SessionSettings, entrants []Entrant) LobbyFindSessionRequest {
+func NewLobbyFindSessionRequest(versionLock Symbol, mode Symbol, level Symbol, platform Symbol, loginSessionID uuid.UUID, crossPlayEnabled bool, currentMatch uuid.UUID, channel uuid.UUID, sessionSettings LobbySessionSettings, entrants []Entrant) LobbyFindSessionRequest {
 	return LobbyFindSessionRequest{
 		VersionLock:           versionLock,
 		Mode:                  mode,

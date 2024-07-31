@@ -41,7 +41,7 @@ func TestLobbyFindSessionRequest_UnmarshalJSON(t *testing.T) {
 				CrossPlayEnabled: true,
 				LoginSessionID:   uuid.FromStringOrNil("1251ac1f11bc11ef931a66d3ff8a653b"),
 				GroupID:          uuid.UUID{0x2e, 0x74, 0x47, 0xd8, 0x4c, 0xe2, 0x48, 0x71, 0x9e, 0x4b, 0x13, 0xa4, 0x7a, 0x5a, 0x6f, 0xa6},
-				SessionSettings: SessionSettings{
+				SessionSettings: LobbySessionSettings{
 					AppID: "1369078409873402",
 					Mode:  int64(ModeSocialPublic),
 					Level: nil,
@@ -83,7 +83,7 @@ func TestLobbyFindSessionRequest_UnmarshalJSON(t *testing.T) {
 				CrossPlayEnabled: true,
 				LoginSessionID:   uuid.FromStringOrNil("553d4e3111b211ef931a66d3ff8a653b"),
 				GroupID:          uuid.UUID{0x2e, 0x74, 0x47, 0xd8, 0x4c, 0xe2, 0x48, 0x71, 0x9e, 0x4b, 0x13, 0xa4, 0x7a, 0x5a, 0x6f, 0xa6},
-				SessionSettings: SessionSettings{
+				SessionSettings: LobbySessionSettings{
 					AppID: "1369078409873402",
 					Mode:  301069346851901302,
 					Level: nil,
@@ -132,7 +132,7 @@ func TestLobbyFindSessionRequest_UnmarshalJSON(t *testing.T) {
 				CrossPlayEnabled: true,
 				LoginSessionID:   uuid.UUID{0x0a, 0x22, 0x3c, 0xf0, 0x8b, 0x73, 0x3d, 0xfa, 0x2e, 0xe8, 0x77, 0x74, 0xc3, 0xb2, 0x80, 0x97},
 				GroupID:          uuid.UUID{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
-				SessionSettings: SessionSettings{
+				SessionSettings: LobbySessionSettings{
 					AppID: "1369078409873402",
 					Mode:  -3791849610740453517,
 					Level: nil,

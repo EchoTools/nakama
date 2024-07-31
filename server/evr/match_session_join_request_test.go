@@ -39,7 +39,7 @@ func TestLobbyJoinSessionRequest(t *testing.T) {
 				LoginSessionID: uuid.Must(uuid.FromString("648e6301-fbb9-11ee-ad13-66d3ff8a653b")),
 
 				Flags: 3,
-				SessionSettings: SessionSettings{
+				SessionSettings: LobbySessionSettings{
 					AppID: "1369078409873402",
 					Mode:  0,
 					Level: nil,
@@ -79,7 +79,7 @@ func TestLobbyJoinSessionRequest(t *testing.T) {
 				LoginSessionID: uuid.Must(uuid.FromString("e8f83121-fbb8-11ee-9182-66d3ff8a653b")),
 
 				Flags: 3,
-				SessionSettings: SessionSettings{
+				SessionSettings: LobbySessionSettings{
 					AppID: "1369078409873402",
 					Mode:  0,
 					Level: nil,
@@ -117,7 +117,7 @@ func TestLobbyJoinSessionRequest(t *testing.T) {
 				LoginSessionID: uuid.Must(uuid.FromString("e7c16fb6-fbb7-11ee-b192-66d3ff8a653b")),
 				OtherEvrID:     *lo.Must(ParseEvrId("DMO-1")),
 				Flags:          11,
-				SessionSettings: SessionSettings{
+				SessionSettings: LobbySessionSettings{
 					AppID: "1369078409873402",
 					Mode:  0,
 					Level: nil,

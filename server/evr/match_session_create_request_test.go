@@ -65,7 +65,7 @@ func TestLobbyCreateSessionRequest_Unmarshal(t *testing.T) {
 		LoginSessionID: uuid.Must(uuid.FromString("320cedab-fb50-11ee-8e45-66d3ff8a653b")),
 
 		Unk2: 11,
-		SessionSettings: SessionSettings{
+		SessionSettings: LobbySessionSettings{
 			AppID: "1369078409873402",
 			Mode:  691594351282457603,
 			Level: lo.ToPtr(int64(0)),
@@ -136,7 +136,7 @@ func TestLobbyCreateSessionRequest_GameType(t *testing.T) {
 		LoginSessionID: uuid.Must(uuid.FromString("320cedab-fb50-11ee-8e45-66d3ff8a653b")),
 
 		Unk2: 11,
-		SessionSettings: SessionSettings{
+		SessionSettings: LobbySessionSettings{
 			AppID: "1369078409873402",
 			Mode:  691594351282457603,
 			Level: lo.ToPtr(int64(0)),
@@ -200,7 +200,7 @@ func TestLobbyCreateSessionRequest_Spectator(t *testing.T) {
 		LoginSessionID: uuid.Must(uuid.FromString("320cedab-fb50-11ee-8e45-66d3ff8a653b")),
 
 		Unk2: 11,
-		SessionSettings: SessionSettings{
+		SessionSettings: LobbySessionSettings{
 			AppID: "1369078409873402",
 			Mode:  691594351282457603,
 			Level: lo.ToPtr(int64(0)),

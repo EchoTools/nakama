@@ -47,7 +47,7 @@ var (
 		0x6d4de3650ee3110e: (*LobbySessionSuccessv4)(nil),
 		0x6d4de3650ee3110f: (*LobbySessionSuccessv5)(nil),
 		0x6d54a19a3ff24415: (*UpdateClientProfile)(nil),
-		0x7777777777770000: (*BroadcasterStartSession)(nil),
+		0x7777777777770000: (*GameServerSessionStart)(nil),
 		0x7777777777770100: (*BroadcasterSessionStarted)(nil),
 		0x7777777777770200: (*BroadcasterSessionEnded)(nil),
 		0x7777777777770300: (*BroadcasterPlayerSessionsLocked)(nil),
