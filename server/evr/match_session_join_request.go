@@ -160,3 +160,10 @@ func (m *LobbyJoinSessionRequest) GetAlignment() int8 {
 	}
 	return m.Entrants[0].Role
 }
+
+func (m *LobbyJoinSessionRequest) SetAlignment(role int) {
+	if len(m.Entrants) == 0 {
+		return
+	}
+	m.Entrants[0].Role = int8(role)
+}
