@@ -426,16 +426,6 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 
 	var err error
 
-	if state.broadcaster == nil {
-		if state.LobbyType != UnassignedLobby {
-			logger.Error("Parking match has a lobby type. Shutting down.")
-			return nil
-		}
-		if tick > 15*state.tickRate {
-			logger.Error("Parking match join timeout expired. Shutting down.")
-			return nil
-		}
-	}
 	if state.Started {
 		if len(state.presenceMap) == 0 {
 			state.emptyTicks++
@@ -547,7 +537,6 @@ func (m *EvrMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db 
 	}
 
 	if state.broadcaster != nil {
-
 		for _, mp := range state.presenceMap {
 
 			if err := nk.StreamUserKick(StreamModeMatchAuthoritative, mp.EntrantID.String(), "", mp.GetNodeId(), mp); err != nil {
@@ -556,9 +545,7 @@ func (m *EvrMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db 
 					"sid": mp.GetSessionId(),
 				}).Error("Failed to kick user from stream.")
 			}
-
 		}
-
 	}
 
 	state.terminateTick = tick + int64(graceSeconds)*state.tickRate
