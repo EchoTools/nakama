@@ -7,6 +7,11 @@ import (
 	"github.com/gofrs/uuid/v5"
 )
 
+const (
+	HeadsetTypePCVR       = 0
+	HeadsetTypeStandalone = 1
+)
+
 // LobbySessionSuccess represents a message from server to client indicating that a request to create/join/find a game server session succeeded.
 type LobbySessionSuccess struct {
 	GameMode           Symbol
@@ -15,6 +20,7 @@ type LobbySessionSuccess struct {
 	Endpoint           Endpoint
 	TeamIndex          int16
 	Unk1               uint32
+	HeadsetType        int
 	ServerEncoderFlags uint64
 	ClientEncoderFlags uint64
 	ServerSequenceId   uint64
@@ -28,9 +34,27 @@ type LobbySessionSuccess struct {
 }
 
 // NewLobbySessionSuccessv5 initializes a new LobbySessionSuccessv5 message.
-func NewLobbySessionSuccess(gameTypeSymbol Symbol, matchingSession uuid.UUID, channelUUID uuid.UUID, endpoint Endpoint, teamIndex int16) *LobbySessionSuccess {
-	c := DefaultClientEncoderSettings()
-	s := DefaultServerEncoderSettings()
+func NewLobbySessionSuccess(gameTypeSymbol Symbol, matchingSession uuid.UUID, channelUUID uuid.UUID, endpoint Endpoint, teamIndex int16, headsetType int) *LobbySessionSuccess {
+	c := &PacketEncoderSettings{
+		EncryptionEnabled:       true,
+		MacEnabled:              true,
+		MacDigestSize:           0x20,
+		MacPBKDF2IterationCount: 0x00,
+		MacKeySize:              0x20,
+		EncryptionKeySize:       0x20,
+		RandomKeySize:           0x20,
+		HeadsetType:             headsetType,
+	}
+	s := &PacketEncoderSettings{
+		EncryptionEnabled:       true,
+		MacEnabled:              true,
+		MacDigestSize:           0x20,
+		MacPBKDF2IterationCount: 0x00,
+		MacKeySize:              0x20,
+		EncryptionKeySize:       0x20,
+		RandomKeySize:           0x20,
+		HeadsetType:             headsetType,
+	}
 	return &LobbySessionSuccess{
 		GameMode:           gameTypeSymbol,
 		LobbyID:            matchingSession,
@@ -185,6 +209,7 @@ type PacketEncoderSettings struct {
 	MacKeySize              int  // The byte size of the HMAC-SHA512 key.
 	EncryptionKeySize       int  // The byte size of the AES-CBC key. (default: 32/AES-256-CBC)
 	RandomKeySize           int  // The byte size of the random key for the RNG.
+	HeadsetType             int  // The headset type of the client. (0: PCVR, 1: Standalone)
 }
 
 // NOTE on Keysize:
@@ -216,6 +241,7 @@ func PacketEncoderSettingsFromFlags(flags uint64) *PacketEncoderSettings {
 		MacKeySize:              int((flags >> 26) & 0xFFF),
 		EncryptionKeySize:       int((flags >> 38) & 0xFFF),
 		RandomKeySize:           int((flags >> 50) & 0xFFF),
+		HeadsetType:             int((flags >> 62) & 0x03),
 	}
 }
 
@@ -232,5 +258,6 @@ func (p *PacketEncoderSettings) ToFlags() uint64 {
 	flags |= uint64(p.MacKeySize&0xFFF) << 26
 	flags |= uint64(p.EncryptionKeySize&0xFFF) << 38
 	flags |= uint64(p.RandomKeySize&0xFFF) << 50
+	flags |= uint64(p.HeadsetType&0x03) << 62
 	return flags
 }

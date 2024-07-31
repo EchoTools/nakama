@@ -123,10 +123,24 @@ type (
 	ctxFeaturesKey            struct{} // The features from the urlparam
 	ctxRequiredFeaturesKey    struct{} // The features from the urlparam
 	ctxVerboseKey             struct{} // The verbosity flag from matchmaking config
+	ctxHeadsetTypeKey         struct{} // The headset type
 
 	//ctxMatchmakingQueryKey         struct{} // The Matchmaking query from the urlparam
 	//ctxMatchmakingGuildPriorityKey struct{} // The Matchmaking guild priority from the urlparam
 )
+
+var sharedCtxKeys = []struct{}{
+	ctxLoginSessionKey{},
+	ctxEvrIDKey{},
+	ctxUserIDKey{},
+	ctxUsernameKey{},
+	ctxFlagsKey{},
+	ctxGroupIDKey{},
+	ctxVerboseKey{},
+	ctxDiscordIDKey{},
+	ctxDefaultDisplayNameKey{},
+	ctxDisplayNameOverrideKey{},
+}
 
 func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessionID, userID uuid.UUID, username string, vars map[string]string, expiry int64, clientIP, clientPort, lang string, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, conn *websocket.Conn, sessionRegistry SessionRegistry, statusRegistry StatusRegistry, matchmaker Matchmaker, tracker Tracker, metrics Metrics, pipeline *Pipeline, evrPipeline *EvrPipeline, runtime *Runtime, request http.Request, storageIndex StorageIndex) Session {
 	sessionLogger := logger.With(zap.String("sid", sessionID.String()))
@@ -263,7 +277,7 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 	}
 }
 
-func (s *sessionWS) LoginSession(userID, username, displayName, displayNameOverride, discordID string, evrID evr.EvrId, deviceId *DeviceAuth, groupID uuid.UUID, flags int, verbose bool) error {
+func (s *sessionWS) LoginSession(userID, username, displayName, displayNameOverride, discordID string, evrID evr.EvrId, deviceId *DeviceAuth, groupID uuid.UUID, flags int, verbose bool, headsetType int) error {
 	// Each player has a single login connection, which will act as the core session.
 	// When this connection is terminated, all other connections should be terminated.
 
@@ -290,6 +304,7 @@ func (s *sessionWS) LoginSession(userID, username, displayName, displayNameOverr
 	if displayNameOverride != "" {
 		ctx = context.WithValue(ctx, ctxDisplayNameOverrideKey{}, displayNameOverride)
 	}
+	ctx = context.WithValue(ctx, ctxHeadsetTypeKey{}, headsetType)
 
 	s.Lock()
 	s.ctx = ctx
@@ -445,6 +460,11 @@ func (s *sessionWS) ValidateSession(loginSessionID uuid.UUID, evrID evr.EvrId) e
 			displayNameOverride = ""
 		}
 
+		headsetType, ok := loginCtx.Value(ctxHeadsetTypeKey{}).(int)
+		if !ok {
+			return fmt.Errorf("login session does not have a headset type")
+		}
+
 		// Require the login session to be authenticated.
 		if userID == uuid.Nil {
 			return fmt.Errorf("login session not authenticated")
@@ -463,6 +483,7 @@ func (s *sessionWS) ValidateSession(loginSessionID uuid.UUID, evrID evr.EvrId) e
 		if displayNameOverride != "" {
 			ctx = context.WithValue(ctx, ctxDisplayNameOverrideKey{}, displayNameOverride)
 		}
+		ctx = context.WithValue(ctx, ctxHeadsetTypeKey{}, headsetType)
 
 		// Set the session information
 		s.Lock()
