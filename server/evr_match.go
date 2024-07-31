@@ -193,6 +193,7 @@ func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql
 
 	state.ID = MatchIDFromContext(ctx)
 	state.presenceMap = make(map[string]*EvrMatchPresence)
+	state.joinTimestamps = make(map[string]time.Time)
 
 	state.broadcasterJoinExpiry = state.tickRate * BroadcasterJoinTimeoutSecs
 
