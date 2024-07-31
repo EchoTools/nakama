@@ -130,16 +130,6 @@ func (s *MatchLabel) GetEndpoint() evr.Endpoint {
 	return s.Broadcaster.Endpoint
 }
 
-func (s *MatchLabel) IsPriorityForMode() bool {
-	tag := "priority_mode_" + s.Mode.String()
-	for _, t := range s.Broadcaster.Tags {
-		if t == tag {
-			return true
-		}
-	}
-	return false
-}
-
 func (s *MatchLabel) PublicView() *MatchLabel {
 	ps := MatchLabel{
 		LobbyType:        s.LobbyType,
