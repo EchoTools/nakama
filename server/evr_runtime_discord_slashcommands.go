@@ -7,12 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/rand"
 	"net"
 	"net/http"
 	"regexp"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -146,18 +144,7 @@ var (
 	vrmlIDPattern       = regexp.MustCompile("^[-a-zA-Z0-9]{24}$")
 
 	mainSlashCommands = []*discordgo.ApplicationCommand{
-		{
-			Name:        "evrsymbol",
-			Description: "Generate the symbol value for a token.",
-			Options: []*discordgo.ApplicationCommandOption{
-				{
-					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "token",
-					Description: "String to convert to symbol.",
-					Required:    true,
-				},
-			},
-		},
+
 		{
 			Name:        "link-headset",
 			Description: "Link your device to your discord account.",
@@ -207,6 +194,10 @@ var (
 		{
 			Name:        "whoami",
 			Description: "Receive your echo account information (privately).",
+		},
+		{
+			Name:        "fixit",
+			Description: "Fix your echo account",
 		},
 		{
 			Name:        "set-lobby",
@@ -772,6 +763,7 @@ func (d *DiscordAppBot) InitializeDiscordBot() error {
 		if m.Author.ID == se.State.User.ID {
 			return
 		}
+
 		if m.Author.ID != "155149108183695360" { // Dyno bot
 			return
 		}
@@ -1017,7 +1009,7 @@ func (d *DiscordAppBot) UnregisterCommands(ctx context.Context, logger runtime.L
 	}
 }
 
-type CommandHandlerFn func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, userID string, groupID string)
+type DiscordCommandHandlerFn func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error
 
 func (d *DiscordAppBot) RegisterSlashCommands() error {
 	ctx := d.ctx
@@ -1044,9 +1036,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 		vrmlGroups[groupName] = groups[0].Id
 	}
 
-	commandHandlers := map[string]CommandHandlerFn{
+	commandHandlers := map[string]DiscordCommandHandlerFn{
 
-		"evrsymbol": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, userID string, groupID string) {
+		"evrsymbol": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			options := i.ApplicationCommandData().Options
 			token := options[0].StringValue()
 			symbol := evr.ToSymbol(token)
@@ -1091,11 +1083,16 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					},
 				},
 			})
+			return nil
 		},
 
-		"link-headset": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, userID string, groupID string) {
+		"link-headset": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			options := i.ApplicationCommandData().Options
 			linkCode := options[0].StringValue()
+
+			if user == nil {
+				return nil
+			}
 
 			// Validate the link code as a 4 character string
 			if len(linkCode) != 4 {
@@ -1112,24 +1109,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				disableIPVerification = options[1].BoolValue()
 			}
 
-			discordId := ""
-			switch {
-			case i.User != nil:
-				discordId = i.User.ID
-			case i.Member.User != nil:
-				discordId = i.Member.User.ID
-			default:
-				return
-			}
-
 			if err := func() error {
-
-				// Authenticate/create an account.
-				userID, err := GetUserIDByDiscordID(ctx, db, discordId)
-				if err != nil {
-					userID, _, _, err = nk.AuthenticateCustom(ctx, discordId, i.User.Username, true)
-					return fmt.Errorf("failed to authenticate (or create) user %s: %w", discordId, err)
-				}
 
 				// Update the accounts roles, etc.
 				go discordRegistry.UpdateAccount(context.Background(), uuid.FromStringOrNil(userID))
@@ -1151,7 +1131,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return nk.LinkDevice(ctx, userID, token.Token())
 			}(); err != nil {
 				logger.WithFields(map[string]interface{}{
-					"discord_id": discordId,
+					"discord_id": user.ID,
 					"link_code":  linkCode,
 					"error":      err,
 				}).Error("Failed to link headset")
@@ -1172,19 +1152,15 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					Content: "Your headset has been linked. Restart EchoVR.",
 				},
 			})
+			return nil
 		},
-		"unlink-headset": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, userID string, groupID string) {
+		"unlink-headset": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			options := i.ApplicationCommandData().Options
 			deviceId := options[0].StringValue()
 			// Validate the link code as a 4 character string
-			var user *discordgo.User
-			switch {
-			case i.User != nil:
-				user = i.User
-			case i.Member.User != nil:
-				user = i.Member.User
-			default:
-				return
+
+			if user == nil {
+				return nil
 			}
 
 			if err := func() error {
@@ -1214,34 +1190,26 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					Content: "Your headset has been unlinked. Restart EchoVR.",
 				},
 			})
+			return nil
 		},
-		"check-broadcaster": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, userID string, groupID string) {
-			errFn := func(err error) {
-				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-					Type: discordgo.InteractionResponseChannelMessageWithSource,
-					Data: &discordgo.InteractionResponseData{
-						Flags:   discordgo.MessageFlagsEphemeral,
-						Content: fmt.Sprintf("check failed: %v", err.Error()),
-					},
-				})
-			}
+		"check-broadcaster": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 
 			options := i.ApplicationCommandData().Options
 			if len(options) == 0 {
-				errFn(errors.New("no options provided"))
-				return
+				return errors.New("no options provided")
+
 			}
 			target := options[0].StringValue()
 
 			// 1.1.1.1[:6792[-6820]]
 			parts := strings.SplitN(target, ":", 2)
 			if len(parts) == 0 {
-				errFn(errors.New("no address provided"))
-				return
+				return errors.New("no address provided")
+
 			}
 			if parts[0] == "" {
-				errFn(errors.New("invalid address"))
-				return
+				return errors.New("invalid address")
+
 			}
 			// Parse the address
 			remoteIP := net.ParseIP(parts[0])
@@ -1249,8 +1217,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				// Try resolving the hostname
 				ips, err := net.LookupIP(parts[0])
 				if err != nil {
-					errFn(fmt.Errorf("failed to resolve address: %v", err))
-					return
+					return fmt.Errorf("failed to resolve address: %v", err)
 				}
 				// Select the ipv4 address
 				for _, remoteIP = range ips {
@@ -1259,8 +1226,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					}
 				}
 				if remoteIP == nil {
-					errFn(errors.New("failed to resolve address to an ipv4 address"))
-					return
+					return errors.New("failed to resolve address to an ipv4 address")
 
 				}
 			}
@@ -1272,8 +1238,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				// If a port range is specified, scan the specified range
 				portRange := strings.SplitN(parts[1], "-", 2)
 				if startPort, err = strconv.Atoi(portRange[0]); err != nil {
-					errFn(fmt.Errorf("invalid start port: %v", err))
-					return
+					return fmt.Errorf("invalid start port: %v", err)
 				}
 				if len(portRange) == 1 {
 					// If a single port is specified, do not scan
@@ -1281,8 +1246,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				} else {
 					// If a port range is specified, scan the specified range
 					if endPort, err = strconv.Atoi(portRange[1]); err != nil {
-						errFn(fmt.Errorf("invalid end port: %v", err))
-						return
+						return fmt.Errorf("invalid end port: %v", err)
 					}
 				}
 			} else {
@@ -1294,23 +1258,23 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			// Do some basic validation
 			switch {
 			case remoteIP == nil:
-				errFn(errors.New("invalid IP address"))
-				return
+				return errors.New("invalid IP address")
+
 			case startPort < 0:
-				errFn(errors.New("start port must be greater than or equal to 0"))
-				return
+				return errors.New("start port must be greater than or equal to 0")
+
 			case startPort > endPort:
-				errFn(errors.New("start port must be less than or equal to end port"))
-				return
+				return errors.New("start port must be less than or equal to end port")
+
 			case endPort-startPort > 100:
-				errFn(errors.New("port range must be less than or equal to 100"))
-				return
+				return errors.New("port range must be less than or equal to 100")
+
 			case startPort < 1024:
-				errFn(errors.New("start port must be greater than or equal to 1024"))
-				return
+				return errors.New("start port must be greater than or equal to 1024")
+
 			case endPort > 65535:
-				errFn(errors.New("end port must be less than or equal to 65535"))
-				return
+				return errors.New("end port must be less than or equal to 65535")
+
 			}
 			localIP, err := DetermineLocalIPAddress()
 			if startPort == endPort {
@@ -1319,15 +1283,13 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				timeout := 500 * time.Millisecond
 
 				if err != nil {
-					errFn(fmt.Errorf("failed to determine local IP address: %v", err))
-					return
+					return fmt.Errorf("failed to determine local IP address: %v", err)
 				}
 
 				// If a single port is specified, do not scan
 				rtts, err := BroadcasterRTTcheck(localIP, remoteIP, startPort, count, interval, timeout)
 				if err != nil {
-					errFn(fmt.Errorf("failed to healthcheck broadcaster: %v", err))
-					return
+					return fmt.Errorf("failed to healthcheck broadcaster: %v", err)
 				}
 				var sum time.Duration
 				// Craft a message that contains the comma-delimited list of the rtts. Use a * for any failed pings (rtt == -1)
@@ -1349,7 +1311,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				avgrtt := sum / time.Duration(count)
 
 				if avgrtt > 0 {
-					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+					return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 						Type: discordgo.InteractionResponseChannelMessageWithSource,
 
 						Data: &discordgo.InteractionResponseData{
@@ -1357,24 +1319,16 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 							Content: fmt.Sprintf("Broadcaster %s:%d RTTs (AVG: %.0f): %s", remoteIP, startPort, avgrtt.Seconds()*1000, rttMessage),
 						},
 					})
-					return
 				} else {
-					errFn(errors.New("no response from broadcaster"))
-					return
+					return errors.New("no response from broadcaster")
+
 				}
 			} else {
 
 				// Scan the address for responding broadcasters and then return the results as a newline-delimited list of ip:port
 				responses, _ := BroadcasterPortScan(localIP, remoteIP, 6792, 6820, 500*time.Millisecond)
 				if len(responses) == 0 {
-					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-						Type: discordgo.InteractionResponseChannelMessageWithSource,
-						Data: &discordgo.InteractionResponseData{
-							Flags:   discordgo.MessageFlagsEphemeral,
-							Content: "No broadcasters are responding.",
-						},
-					})
-					return
+					return errors.New("no broadcasters are responding")
 				}
 
 				// Craft a message that contains the newline-delimited list of the responding broadcasters
@@ -1383,26 +1337,22 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					b.WriteString(fmt.Sprintf("%s:%-5d %3.0fms\n", remoteIP, port, r.Seconds()*1000))
 				}
 
-				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 					Type: discordgo.InteractionResponseChannelMessageWithSource,
 					Data: &discordgo.InteractionResponseData{
 						Flags:   discordgo.MessageFlagsEphemeral,
 						Content: fmt.Sprintf("```%s```", b.String()),
 					},
 				})
-				return
+
 			}
 		},
-		"reset-password": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, userID string, groupID string) {
-			var user *discordgo.User
-			switch {
-			case i.User != nil:
-				user = i.User
-			case i.Member.User != nil:
-				user = i.Member.User
-			default:
-				return
+		"reset-password": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+
+			if user == nil {
+				return nil
 			}
+
 			if err := func() error {
 				userID, err := GetUserIDByDiscordID(ctx, d.db, user.ID)
 				if err != nil {
@@ -1417,7 +1367,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return nk.UnlinkEmail(ctx, userID, account.GetEmail())
 
 			}(); err != nil {
-				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 					Type: discordgo.InteractionResponseChannelMessageWithSource,
 					Data: &discordgo.InteractionResponseData{
 						Flags:   discordgo.MessageFlagsEphemeral,
@@ -1426,7 +1376,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				})
 			} else {
 				// Send the response
-				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 					Type: discordgo.InteractionResponseChannelMessageWithSource,
 					Data: &discordgo.InteractionResponseData{
 						Flags:   discordgo.MessageFlagsEphemeral,
@@ -1435,23 +1385,12 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				})
 			}
 		},
-		"badges": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, userID string, groupID string) {
+		"badges": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			options := i.ApplicationCommandData().Options
 			var err error
 
-			user := getScopedUser(i)
 			if user == nil {
-				return
-			}
-
-			errFn := func(err error) {
-				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-					Type: discordgo.InteractionResponseChannelMessageWithSource,
-					Data: &discordgo.InteractionResponseData{
-						Flags:   discordgo.MessageFlagsEphemeral,
-						Content: err.Error(),
-					},
-				})
+				return nil
 			}
 
 			switch options[0].Name {
@@ -1461,27 +1400,23 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 				userID, err := GetUserIDByDiscordID(ctx, db, user.ID)
 				if err != nil {
-					errFn(status.Error(codes.PermissionDenied, "you do not have permission to use this command"))
-					break
+					return status.Error(codes.PermissionDenied, "you do not have permission to use this command")
 				}
 				var member bool
 				member, err = CheckSystemGroupMembership(ctx, db, userID, GroupGlobalBadgeAdmins)
 				if err != nil {
-					errFn(status.Error(codes.Internal, "failed to check group membership"))
-					break
+					return status.Error(codes.Internal, "failed to check group membership")
 				}
 				if !member {
-					errFn(status.Error(codes.PermissionDenied, "you do not have permission to use this command"))
-					break
+					return status.Error(codes.PermissionDenied, "you do not have permission to use this command")
 				}
 				if len(options) < 2 {
-					errFn(status.Error(codes.InvalidArgument, "you must specify a user and a badge"))
+					return status.Error(codes.InvalidArgument, "you must specify a user and a badge")
 				}
 				// Get the target user's discord ID
 				target := options[0].UserValue(s)
 				if target == nil {
-					errFn(status.Error(codes.InvalidArgument, "you must specify a user"))
-					break
+					return status.Error(codes.InvalidArgument, "you must specify a user")
 				}
 
 				// Get the badge name
@@ -1496,30 +1431,26 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					}
 					groupName, ok := vrmlGroupShortMap[c]
 					if !ok {
-						errFn(status.Errorf(codes.InvalidArgument, fmt.Sprintf("badge `%s` not found", c)))
-						break
+						return status.Errorf(codes.InvalidArgument, fmt.Sprintf("badge `%s` not found", c))
 					}
 
 					groupID, ok := vrmlGroups[groupName]
 					if !ok {
-						errFn(status.Error(codes.Internal, fmt.Sprintf("badge `%s` not found (this shouldn't happen)", c)))
-						break // This shouldn't happen
+						return status.Error(codes.Internal, fmt.Sprintf("badge `%s` not found (this shouldn't happen)", c)) // This shouldn't happen
 					}
 					badgeGroups = append(badgeGroups, groupID)
 				}
 
 				userID, err = GetUserIDByDiscordID(ctx, db, user.ID)
 				if err != nil {
-					errFn(status.Error(codes.Internal, fmt.Errorf("failed to get user `%s`: %w", target.Username, err).Error()))
-					return
+					return status.Errorf(codes.Internal, "failed to get user `%s`: %w", target.Username, err)
 				}
 
 				for _, groupID := range badgeGroups {
 					// Add the user to the group
 
 					if err = nk.GroupUsersAdd(ctx, SystemUserID, groupID, []string{userID}); err != nil {
-						errFn(status.Error(codes.Internal, fmt.Errorf("failed to assign badge `%s` to user `%s`: %w", groupID, target.Username, err).Error()))
-						continue
+						return status.Error(codes.Internal, fmt.Errorf("failed to assign badge `%s` to user `%s`: %w", groupID, target.Username, err).Error())
 					}
 				}
 
@@ -1540,14 +1471,13 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				// Get the user's discord ID
 				user := getScopedUser(i)
 				if user == nil {
-					return
+					return nil
 				}
 				vrmlUsername := options[0].StringValue()
 
 				// Check the vlaue against vrmlIDPattern
 				if !vrmlIDPattern.MatchString(vrmlUsername) {
-					errFn(fmt.Errorf("invalid VRML username: `%s`", vrmlUsername))
-					return
+					return fmt.Errorf("invalid VRML username: `%s`", vrmlUsername)
 				}
 
 				// Access the VRML HTTP API
@@ -1555,8 +1485,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				var req *http.Request
 				req, err = http.NewRequest("GET", url, nil)
 				if err != nil {
-					errFn(status.Error(codes.Internal, "failed to create request"))
-					break
+					return status.Error(codes.Internal, "failed to create request")
 				}
 
 				req.Header.Set("User-Agent", "EchoVRCE Discord Bot (contact: @sprockee)")
@@ -1565,8 +1494,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				var resp *http.Response
 				resp, err = http.DefaultClient.Do(req)
 				if err != nil {
-					errFn(status.Error(codes.Internal, "failed to make request"))
-					break
+					return status.Error(codes.Internal, "failed to make request")
 				}
 
 				// Parse the response as JSON...
@@ -1577,20 +1505,17 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 
 				if err = json.NewDecoder(resp.Body).Decode(&players); err != nil {
-					errFn(status.Error(codes.Internal, "failed to decode response: "+err.Error()))
-					break
+					return status.Error(codes.Internal, "failed to decode response: "+err.Error())
 				}
 
 				// Check if the player was found
 				if len(players) == 0 {
-					errFn(status.Error(codes.NotFound, "player not found"))
-					break
+					return status.Error(codes.NotFound, "player not found")
 				}
 
 				// Ensure that only one was returned
 				if len(players) > 1 {
-					errFn(status.Error(codes.Internal, "multiple players found"))
-					break
+					return status.Error(codes.Internal, "multiple players found")
 				}
 
 				// Get the player's ID
@@ -1636,8 +1561,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 				jsonData, err := json.Marshal(players[0])
 				if err != nil {
-					errFn(status.Error(codes.Internal, "failed to marshal player data: "+err.Error()))
-					break
+					return status.Error(codes.Internal, "failed to marshal player data: "+err.Error())
 				}
 
 				// Set the VRML ID for the user in their profile as a storage object
@@ -1651,97 +1575,68 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					},
 				})
 				if err != nil {
-					errFn(status.Error(codes.Internal, "failed to set VRML ID: "+err.Error()))
-					break
+					return status.Error(codes.Internal, "failed to set VRML ID: "+err.Error())
 				}
 
 				logger.Info("set vrml id", zap.String("discord_id", user.ID), zap.String("discord_username", user.Username), zap.String("vrml_id", playerID))
 
-				err = simpleInteractionResponse(s, i, fmt.Sprintf("set VRML username `%s` for user `%s`", vrmlUsername, user.Username))
-				if err != nil {
-					errFn(status.Error(codes.Internal, "failed to send response: "+err.Error()))
-					break
-				}
+				return simpleInteractionResponse(s, i, fmt.Sprintf("set VRML username `%s` for user `%s`", vrmlUsername, user.Username))
 			}
+			return nil
 		},
-		"whoami": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, userID string, groupID string) {
+		"whoami": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 
-			user, _ := getScopedUserMember(i)
 			if user == nil {
-				return
+				return nil
 			}
 
-			if err := d.handleProfileRequest(ctx, logger, nk, s, discordRegistry, i, user.ID, user.Username, "", true); err != nil {
-				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-					Type: discordgo.InteractionResponseChannelMessageWithSource,
-					Data: &discordgo.InteractionResponseData{
-						Flags:   discordgo.MessageFlagsEphemeral,
-						Content: err.Error(),
-					},
-				})
-
-			}
+			return d.handleProfileRequest(ctx, logger, nk, s, discordRegistry, i, user.ID, user.Username, "", true)
 		},
-		"set-lobby": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, userIDStr string, groupID string) {
-			if i.Type != discordgo.InteractionApplicationCommand {
-				return
-			}
 
-			if i.Member == nil || i.Member.User.ID == "" || i.GuildID == "" {
-				return
+		"set-lobby": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userIDStr string, groupID string) error {
+
+			if member == nil {
+				return fmt.Errorf("this command must be used from a guild")
 			}
 
 			guildID := i.GuildID
-
-			errFn := func(err error) {
-				logger.Debug("set-lobby failed: %s", err.Error())
-				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-					Type: discordgo.InteractionResponseChannelMessageWithSource,
-					Data: &discordgo.InteractionResponseData{
-						Flags:   discordgo.MessageFlagsEphemeral,
-						Content: fmt.Sprintf("set failed: %v", err.Error()),
-					},
-				})
-			}
 
 			userID := uuid.FromStringOrNil(userIDStr)
 
 			// Try to find it by searching
 			memberships, err := d.discordRegistry.GetGuildGroupMemberships(ctx, userID, []uuid.UUID{uuid.FromStringOrNil(groupID)})
 			if err != nil {
-				errFn(err)
-				return
+				return err
 			}
+
 			if len(memberships) == 0 {
 				err := d.discordRegistry.UpdateGuildGroup(ctx, logger, userID, guildID)
 				if err != nil {
-					errFn(err)
+					return err
 				}
-				errFn(errors.New("guild data stale, please try again in a few seconds"))
-				return
+				return errors.New("guild data stale, please try again in a few seconds")
+
 			}
 			membership := memberships[0]
 
 			profile, err := d.profileRegistry.Load(ctx, userID)
 			if err != nil {
-				return
+				return err
 			}
 			profile.SetChannel(evr.GUID(membership.GuildGroup.ID()))
 
 			if err = d.profileRegistry.Save(ctx, userID, profile); err != nil {
-				errFn(err)
-				return
+				return err
 			}
 
 			guild, err := s.Guild(i.GuildID)
 			if err != nil {
 				logger.Error("Failed to get guild", zap.Error(err))
-				errFn(err)
-				return
+				return err
 			}
 
 			d.profileRegistry.Save(ctx, userID, profile)
-			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
 					Flags: discordgo.MessageFlagsEphemeral,
@@ -1754,28 +1649,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				},
 			})
 		},
-		"lookup": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, userIDStr string, groupID string) {
-
-			if i.Type != discordgo.InteractionApplicationCommand {
-				return
-			}
-			if i.GuildID == "" {
-				return
-			}
-
-			// Determine if the call is from a guild.
-			user, member := getScopedUserMember(i)
+		"lookup": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userIDStr string, groupID string) error {
 
 			if user == nil {
-				return
-			}
-
-			errFn := func(errs ...error) {
-				err := errors.Join(errs...)
-				if err := simpleInteractionResponse(s, i, err.Error()); err != nil {
-					logger.Warn("Failed to send interaction response", zap.Error(err))
-					return
-				}
+				return nil
 			}
 
 			// Get the caller's nakama user ID
@@ -1785,8 +1662,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			if member != nil {
 				memberships, err := d.discordRegistry.GetGuildGroupMemberships(ctx, userID, nil)
 				if err != nil {
-					errFn(errors.New("failed to get user ID"), err)
-					return
+					return errors.Join(errors.New("failed to get user ID"), err)
 				}
 
 				var membership *GuildGroupMembership
@@ -1802,11 +1678,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				if membership == nil {
 					err := d.discordRegistry.UpdateGuildGroup(ctx, logger, userID, i.GuildID)
 					if err != nil {
-						errFn(errors.New("Error updating guild group data"), err)
-						return
+						return errors.New("Error updating guild group data")
 					}
-					errFn(errors.New("guild data stale, please try again in a few seconds"))
-					return
+					return errors.New("guild data stale, please try again in a few seconds")
+
 				}
 				if membership.isModerator {
 					guildID = i.GuildID
@@ -1815,37 +1690,28 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			isGlobalModerator, err := CheckSystemGroupMembership(ctx, db, userIDStr, GroupGlobalModerators)
 			if err != nil {
-				errFn(errors.New("Error checking global moderator status"), err)
-				return
+				return errors.New("Error checking global moderator status")
 			}
 
 			options := i.ApplicationCommandData().Options
 			target := options[0].UserValue(s)
 
-			if err := d.handleProfileRequest(ctx, logger, nk, s, discordRegistry, i, target.ID, target.Username, guildID, isGlobalModerator); err != nil {
-				errFn(errors.New("Error handling profile request"), err)
-			}
+			return d.handleProfileRequest(ctx, logger, nk, s, discordRegistry, i, target.ID, target.Username, guildID, isGlobalModerator)
 		},
-		"allocate": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, userID string, groupID string) {
+		"allocate": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			options := i.ApplicationCommandData().Options
-			user, member := getScopedUserMember(i)
-			if user == nil {
-				return
-			}
+
 			if member == nil {
-				return
+				return simpleInteractionResponse(s, i, fmt.Sprintf("this command must be used from a guild"))
+
 			}
-			if member.User == nil {
-				return
-			}
+
 			region := evr.ToSymbol(options[0].StringValue())
 			mode := evr.ToSymbol(options[1].StringValue())
 
 			// validate the mode
 			if _, ok := evr.LevelsByMode[mode]; !ok {
-				err := fmt.Errorf("invalid mode `%s`", mode)
-				simpleInteractionResponse(s, i, err.Error())
-				return
+				return fmt.Errorf("invalid mode `%s`", mode)
 			}
 
 			var level evr.Symbol
@@ -1854,9 +1720,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 				// validate the level
 				if !slices.Contains(evr.LevelsByMode[mode], level) {
-					err := fmt.Errorf("invalid level `%s` for mode `%s`", level, mode)
-					simpleInteractionResponse(s, i, err.Error())
-					return
+					return fmt.Errorf("invalid level `%s` for mode `%s`", level, mode)
 				}
 			}
 
@@ -1864,158 +1728,94 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			label, err := d.handlePrepareMatch(ctx, logger, member.User.ID, i.GuildID, region, mode, level, startTime)
 			if err != nil {
-				simpleInteractionResponse(s, i, err.Error())
-				return
+				return err
 			}
 
-			simpleInteractionResponse(s, i, fmt.Sprintf("Match prepared with label ```json\n%s\n```\nhttps://echo.taxi/spark://c/%s", label.String(), strings.ToUpper(label.ID.UUID().String())))
+			return simpleInteractionResponse(s, i, fmt.Sprintf("Match prepared with label ```json\n%s\n```\nhttps://echo.taxi/spark://c/%s", label.String(), strings.ToUpper(label.ID.UUID().String())))
 		},
-		"trigger-cv": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, userID string, groupID string) {
+		"trigger-cv": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 
 			options := i.ApplicationCommandData().Options
 
-			user := getScopedUser(i)
 			if user == nil {
-				return
-			}
-			errFn := func(errs ...error) {
-				err := errors.Join(errs...)
-				logger.Debug("trigger-cv failed: %s", err.Error())
-				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-					Type: discordgo.InteractionResponseChannelMessageWithSource,
-					Data: &discordgo.InteractionResponseData{
-						Flags:   discordgo.MessageFlagsEphemeral,
-						Content: fmt.Sprintf("error setting community values:\n%v", err.Error()),
-					},
-				})
-			}
-			if isGlobalModerator, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalModerators); err != nil {
-				errFn(errors.New("failed to check global moderator status"), err)
-				return
-			} else if !isGlobalModerator {
-				if err := simpleInteractionResponse(s, i, "You must be a global moderator to use this command."); err != nil {
-					logger.Warn("Failed to send interaction response", zap.Error(err))
-				}
-				return
+				return nil
 			}
 
 			target := options[0].UserValue(s)
 			targetUserIDStr, err := GetUserIDByDiscordID(ctx, db, target.ID)
 			if err != nil {
-				errFn(errors.New("failed to get user ID"), err)
-				return
+				return errors.New("failed to get user ID")
 			}
 			targetUserID := uuid.FromStringOrNil(targetUserIDStr)
+
 			profile, _ := d.profileRegistry.Load(ctx, targetUserID)
+
 			profile.TriggerCommunityValues()
-			if err = d.profileRegistry.Save(ctx, targetUserID, profile); err != nil {
-				errFn(err)
-				return
+
+			if err := d.profileRegistry.Save(ctx, targetUserID, profile); err != nil {
+				return err
 			}
 
 			cnt, err := DisconnectUserID(ctx, d.nk, targetUserIDStr)
 			if err != nil {
-				errFn(err)
-				return
+				return err
 			}
 
-			if err := simpleInteractionResponse(s, i, fmt.Sprintf("Disconnected %d sessions.", cnt)); err != nil {
-				logger.Warn("Failed to send interaction response", zap.Error(err))
-			}
+			return simpleInteractionResponse(s, i, fmt.Sprintf("Disconnected %d sessions.", cnt))
 		},
-		"kick-player": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, userID string, groupID string) {
+		"kick-player": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			options := i.ApplicationCommandData().Options
 
-			user := getScopedUser(i)
 			if user == nil {
-				return
-			}
-			errFn := func(errs ...error) {
-				err := errors.Join(errs...)
-				logger.Debug("trigger-cv failed: %s", err.Error())
-				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-					Type: discordgo.InteractionResponseChannelMessageWithSource,
-					Data: &discordgo.InteractionResponseData{
-						Flags:   discordgo.MessageFlagsEphemeral,
-						Content: fmt.Sprintf("error setting community values:\n%v", err.Error()),
-					},
-				})
-			}
-			if isGlobalModerator, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalModerators); err != nil {
-				errFn(errors.New("failed to check global moderator status"), err)
-				return
-			} else if !isGlobalModerator {
-				if err := simpleInteractionResponse(s, i, "You must be a global moderator to use this command."); err != nil {
-					logger.Warn("Failed to send interaction response", zap.Error(err))
-				}
-				return
+				return nil
 			}
 
 			target := options[0].UserValue(s)
 			targetUserIDStr, err := GetUserIDByDiscordID(ctx, db, target.ID)
 			if err != nil {
-				errFn(errors.New("failed to get user ID"), err)
-				return
+				return errors.New("failed to get user ID")
 			}
 
 			cnt, err := DisconnectUserID(ctx, d.nk, targetUserIDStr)
 			if err != nil {
-				errFn(err)
+				return err
 			}
 
-			if err := simpleInteractionResponse(s, i, fmt.Sprintf("Disconnected %d sessions. Player is required to complete *Community Values* when entering the next social lobby.", cnt)); err != nil {
-				logger.Warn("Failed to send interaction response", zap.Error(err))
-			}
+			return simpleInteractionResponse(s, i, fmt.Sprintf("Disconnected %d sessions. Player is required to complete *Community Values* when entering the next social lobby.", cnt))
 		},
 
-		"set-roles": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, userID string, groupID string) {
+		"set-roles": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			options := i.ApplicationCommandData().Options
-			user := getScopedUser(i)
-			if user == nil {
-				return
-			}
-			// Ensure the user is the owner of the guild
-			if i.Member == nil || i.Member.User.ID == "" || i.GuildID == "" {
-				return
-			}
 
-			errFn := func(err error) {
-				simpleInteractionResponse(s, i, err.Error())
+			// Ensure the user is the owner of the guild
+			if user == nil || i.Member == nil || i.Member.User.ID == "" || i.GuildID == "" {
+				return nil
 			}
 
 			guild, err := s.Guild(i.GuildID)
-			if err != nil {
-				errFn(errors.New("failed to get guild"))
-			}
-
-			if guild == nil {
-				errFn(errors.New("failed to get guild"))
-				return
+			if err != nil || guild == nil {
+				return errors.New("failed to get guild")
 			}
 
 			if guild.OwnerID != user.ID {
 				// Check if the user is a global developer
 				userID, err := GetUserIDByDiscordID(ctx, db, user.ID)
 				if err != nil {
-					errFn(errors.New("failed to get user ID"))
-					return
+					return errors.New("failed to get user ID")
+
 				}
-				member, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalDevelopers)
-				if err != nil {
-					errFn(errors.New("failed to check group membership"))
-					return
-				}
-				if !member {
-					errFn(errors.New("you do not have permission to use this command"))
-					return
+				if ok, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalDevelopers); err != nil {
+					return errors.New("failed to check group membership")
+				} else if !ok {
+					return errors.New("you do not have permission to use this command")
 				}
 			}
 
 			// Get the metadata
 			metadata, err := d.discordRegistry.GetGuildGroupMetadata(ctx, groupID)
 			if err != nil {
-				errFn(errors.New("failed to get guild group metadata"))
-				return
+				return errors.New("failed to get guild group metadata")
+
 			}
 
 			for _, o := range options {
@@ -2036,50 +1836,38 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			// Write the metadata to the group
 			if err = d.discordRegistry.SetGuildGroupMetadata(ctx, groupID, metadata); err != nil {
-				errFn(errors.New("failed to set guild group metadata"))
-				return
+				return errors.New("failed to set guild group metadata")
+
 			}
-			simpleInteractionResponse(s, i, "roles set!")
+			return simpleInteractionResponse(s, i, "roles set!")
 		},
 
-		"region-status": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, userID string, groupID string) {
+		"region-status": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			options := i.ApplicationCommandData().Options
 
-			user := getScopedUser(i)
 			if user == nil {
-				return
-			}
-			errFn := func(err error) {
-				simpleInteractionResponse(s, i, err.Error())
+				return nil
 			}
 
 			regionStr := options[0].StringValue()
 			if regionStr == "" {
-				errFn(errors.New("no region provided"))
+				return errors.New("no region provided")
 			}
 
-			if err := d.createRegionStatusEmbed(ctx, logger, regionStr, i.Interaction.ChannelID, nil); err != nil {
-				errFn(err)
-			}
+			return d.createRegionStatusEmbed(ctx, logger, regionStr, i.Interaction.ChannelID, nil)
 		},
-		"stream-list": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, userID string, groupID string) {
+		"stream-list": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			options := i.ApplicationCommandData().Options
-			user, _ := getScopedUserMember(i)
-			if user == nil {
-				return
-			}
 
-			errFn := func(err error) {
-				simpleInteractionResponse(s, i, err.Error())
+			if user == nil {
+				return nil
 			}
 
 			// Limit access to global developers
-			member, err := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalDevelopers)
-			if err != nil {
-				errFn(errors.New("failed to check group membership"))
-			}
-			if !member {
-				errFn(errors.New("you do not have permission to use this command"))
+			if ok, err := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalDevelopers); err != nil {
+				return errors.New("failed to check group membership")
+			} else if !ok {
+				return errors.New("you do not have permission to use this command")
 			}
 
 			var subject, subcontext, label string
@@ -2104,18 +1892,18 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			presences, err := nk.StreamUserList(uint8(mode), subject, subcontext, label, includeHidden, includeOffline)
 			if err != nil {
-				errFn(errors.New("failed to list stream users"))
-				return
+				return errors.New("failed to list stream users")
+
 			}
 			if len(presences) == 0 {
-				errFn(errors.New("no stream users found"))
+				return errors.New("no stream users found")
 			}
 			channel, err := s.UserChannelCreate(user.ID)
 			if err != nil {
-				errFn(errors.New("failed to create user channel"))
+				return errors.New("failed to create user channel")
 			}
 			if err := simpleInteractionResponse(s, i, "Sending stream list to your DMs"); err != nil {
-				errFn(errors.New("failed to send interaction response"))
+				return errors.New("failed to send interaction response")
 			}
 			if limit == 0 {
 				limit = 10
@@ -2149,7 +1937,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 				data, err := json.MarshalIndent(m, "", "  ")
 				if err != nil {
-					errFn(errors.New("failed to marshal presence data"))
+					return errors.New("failed to marshal presence data")
 				}
 				if b.Len()+len(data) > 1900 {
 					messages = append(messages, b.String())
@@ -2157,7 +1945,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 				_, err = b.WriteString(fmt.Sprintf("```json\n%s\n```\n", data))
 				if err != nil {
-					errFn(errors.New("failed to write presence data"))
+					return errors.New("failed to write presence data")
 				}
 			}
 			messages = append(messages, b.String())
@@ -2165,17 +1953,21 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			go func() {
 				for _, m := range messages {
 					if _, err := s.ChannelMessageSend(channel.ID, m); err != nil {
-						errFn(errors.New("failed to send message"))
+						logger.Warn("Failed to send message", zap.Error(err))
+						return
 					}
 					// Ensure it's stays below 25 messages per second
 					time.Sleep(time.Millisecond * 50)
 				}
 			}()
+			return nil
 		},
 
-		"party": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, userID string, groupID string) {
+		"party": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 
-			user, _ := getScopedUserMember(i)
+			if user == nil {
+				return nil
+			}
 
 			options := i.ApplicationCommandData().Options
 			switch options[0].Name {
@@ -2185,21 +1977,11 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				invitee := options[0].UserValue(s)
 
 				if err := d.sendPartyInvite(ctx, s, i, inviter, invitee); err != nil {
-					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-						Type: discordgo.InteractionResponseChannelMessageWithSource,
-						Data: &discordgo.InteractionResponseData{
-							Flags:   discordgo.MessageFlagsEphemeral,
-							Content: err.Error(),
-						},
-					})
+					return err
 				}
 			case "members":
-				logger := logger.WithField("discord_id", user.ID)
+
 				// List the other players in this party group
-				user := getScopedUser(i)
-				if user == nil {
-					return
-				}
 
 				objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
 					{
@@ -2214,19 +1996,11 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				matchmakingConfig := &MatchmakingSettings{}
 				if len(objs) != 0 {
 					if err := json.Unmarshal([]byte(objs[0].Value), matchmakingConfig); err != nil {
-						logger.Error("Failed to unmarshal matchmaking config", zap.Error(err))
-						return
+						return fmt.Errorf("failed to unmarshal matchmaking config: %w", err)
 					}
 				}
 				if matchmakingConfig.GroupID == "" {
-					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-						Type: discordgo.InteractionResponseChannelMessageWithSource,
-						Data: &discordgo.InteractionResponseData{
-							Flags:   discordgo.MessageFlagsEphemeral,
-							Content: "You do not have a party groupID set.",
-						},
-					})
-					return
+					return errors.New("You do not have a party groupID set.")
 				}
 
 				logger = logger.WithField("group_id", matchmakingConfig.GroupID)
@@ -2235,8 +2009,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				partyID := uuid.NewV5(uuid.Nil, matchmakingConfig.GroupID).String()
 				streamUsers, err := nk.StreamUserList(StreamModeParty, partyID, "", d.pipeline.node, true, true)
 				if err != nil {
-					logger.Error("Failed to list party members", zap.Error(err))
-					return
+					return fmt.Errorf("failed to list stream users: %w", err)
 				}
 				// Make sure the user is in the list
 				found := false
@@ -2248,10 +2021,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 
 				if !found {
-					if err := simpleInteractionResponse(s, i, "You are not online, or not in a party."); err != nil {
-						logger.Warn("Failed to send interaction response", zap.Error(err))
-					}
-					return
+					return errors.New("You are not online, or not in a party.")
 				}
 
 				// Convert the members to discord user IDs
@@ -2259,8 +2029,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				for _, streamUser := range streamUsers {
 					discordID, err := GetDiscordIDByUserID(ctx, d.db, streamUser.GetUserId())
 					if err != nil {
-						logger.Error("Failed to get discord ID", zap.Error(err))
-						return
+						return fmt.Errorf("failed to get discord ID: %w", err)
 					}
 					discordIDs = append(discordIDs, fmt.Sprintf("<@%s>", discordID))
 				}
@@ -2274,7 +2043,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 
 				// Send the message to the user
-				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 					Type: discordgo.InteractionResponseChannelMessageWithSource,
 					Data: &discordgo.InteractionResponseData{
 						Flags:   discordgo.MessageFlagsEphemeral,
@@ -2291,33 +2060,15 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				groupName := options[0].StringValue()
 				// Validate the group is 1 to 12 characters long
 				if len(groupName) < 1 || len(groupName) > 12 {
-					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-						Type: discordgo.InteractionResponseChannelMessageWithSource,
-						Data: &discordgo.InteractionResponseData{
-							Flags:   discordgo.MessageFlagsEphemeral,
-							Content: "Invalid group ID. It must be between one (1) and eight (8) characters long.",
-						},
-					})
+					return errors.New("Invalid group ID. It must be between one (1) and eight (8) characters long.")
 				}
 				// Validate the group is alphanumeric
 				if !partyGroupIDPattern.MatchString(groupName) {
-					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-						Type: discordgo.InteractionResponseChannelMessageWithSource,
-						Data: &discordgo.InteractionResponseData{
-							Flags:   discordgo.MessageFlagsEphemeral,
-							Content: "Invalid group ID. It must be alphanumeric.",
-						},
-					})
+					return errors.New("Invalid group ID. It must be alphanumeric.")
 				}
 				// Validate the group is not a reserved group
 				if lo.Contains([]string{"admin", "moderator", "verified", "broadcaster"}, groupName) {
-					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-						Type: discordgo.InteractionResponseChannelMessageWithSource,
-						Data: &discordgo.InteractionResponseData{
-							Flags:   discordgo.MessageFlagsEphemeral,
-							Content: "Invalid group ID. It is a reserved group.",
-						},
-					})
+					return errors.New("Invalid group ID. It is a reserved group.")
 				}
 				// lowercase the group
 				groupName = strings.ToLower(groupName)
@@ -2335,8 +2086,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				matchmakingConfig := &MatchmakingSettings{}
 				if len(objs) != 0 {
 					if err := json.Unmarshal([]byte(objs[0].Value), matchmakingConfig); err != nil {
-						logger.Error("Failed to unmarshal matchmaking config", zap.Error(err))
-						return
+						return fmt.Errorf("failed to unmarshal matchmaking config: %w", err)
 					}
 				}
 				matchmakingConfig.GroupID = groupName
@@ -2344,8 +2094,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 				data, err := json.Marshal(matchmakingConfig)
 				if err != nil {
-					logger.Error("Failed to marshal matchmaking config", zap.Error(err))
-					return
+					return fmt.Errorf("failed to marshal matchmaking config: %w", err)
 				}
 
 				if _, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{
@@ -2358,12 +2107,11 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						PermissionWrite: 0,
 					},
 				}); err != nil {
-					logger.Error("Failed to write matchmaking config", zap.Error(err))
-					return
+					return fmt.Errorf("failed to write matchmaking config: %w", err)
 				}
 
 				// Inform the user of the groupid
-				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 					Type: discordgo.InteractionResponseChannelMessageWithSource,
 					Data: &discordgo.InteractionResponseData{
 						Flags:   discordgo.MessageFlagsEphemeral,
@@ -2371,46 +2119,32 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					},
 				})
 			}
+			return discordgo.ErrNilState
 		},
 	}
 
 	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		user, _ := getScopedUserMember(i)
-		logFields := make(map[string]any, 0)
-		if i.GuildID != "" {
-			logFields["guild_id"] = i.GuildID
-		}
-		if i.ChannelID != "" {
-			logFields["channel_id"] = i.ChannelID
-		}
-		if user != nil && user.ID != "" {
-			logFields["discord_id"] = user.ID
-		}
 
 		appCommandName := i.ApplicationCommandData().Name
-		logger := d.logger
 
-		if len(logFields) > 0 {
-			logger = logger.WithFields(logFields)
-		}
-
-		userID, err := GetUserIDByDiscordID(ctx, d.db, user.ID)
-		if err != nil {
-			logger.Error("Failed to get user ID", zap.Error(err))
-		}
-
-		groupID, err := GetGroupIDByGuildID(ctx, d.db, i.GuildID)
-		if err != nil {
-			logger.Error("Failed to get guild ID", zap.Error(err))
-		}
+		logger := d.logger.WithFields(map[string]any{
+			"discord_id":       user.ID,
+			"discord_username": user.Username,
+			"app_command":      appCommandName,
+			"guild_id":         i.GuildID,
+			"channel_id":       i.ChannelID,
+		})
 
 		switch i.Type {
 		case discordgo.InteractionApplicationCommand:
-			if h, ok := commandHandlers[appCommandName]; ok {
-				h(logger, s, i, userID, groupID)
+			if handler, ok := commandHandlers[appCommandName]; ok {
+				d.handleInteractionCreate(logger, s, i, appCommandName, handler)
 			} else {
 				logger.Info("Unhandled command: %v", appCommandName)
 			}
+		default:
+			logger.Info("Unhandled interaction type: %v", i.Type)
 		}
 	})
 
@@ -2556,221 +2290,6 @@ func (d *DiscordAppBot) ManageUserGroups(ctx context.Context, logger runtime.Log
 		}
 	}
 
-	return nil
-}
-
-func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, s *discordgo.Session, discordRegistry DiscordRegistry, i *discordgo.InteractionCreate, discordID string, username string, guildID string, includePrivate bool) error {
-	whoami := &WhoAmI{
-		DiscordID:             discordID,
-		EVRIDLogins:           make(map[string]time.Time),
-		DisplayNames:          make([]string, 0),
-		ClientAddresses:       make([]string, 0),
-		DeviceLinks:           make([]string, 0),
-		GuildGroupMemberships: make([]GuildGroupMembership, 0),
-		MatchIDs:              make([]string, 0),
-	}
-	// Get the user's ID
-
-	userIDStr, err := GetUserIDByDiscordID(ctx, d.db, discordID)
-	if err != nil {
-		userIDStr, _, _, err = d.nk.AuthenticateCustom(ctx, discordID, i.Member.User.Username, true)
-		if err != nil {
-			return fmt.Errorf("failed to authenticate (or create) user %s: %w", discordID, err)
-		}
-	}
-	userID := uuid.FromStringOrNil(userIDStr)
-
-	if includePrivate {
-		// Do some profile checks and cleanups
-
-		// Synchronize the user's guilds with nakama groups
-		err = d.discordRegistry.UpdateGuildGroup(ctx, logger, userID, i.GuildID)
-		if err != nil {
-			return fmt.Errorf("error updating guild groups: %v", err)
-		}
-	}
-
-	// Basic account details
-	whoami.NakamaID = userID
-
-	account, err := nk.AccountGetId(ctx, whoami.NakamaID.String())
-	if err != nil {
-		return err
-	}
-
-	whoami.Username = account.GetUser().GetUsername()
-
-	if account.GetUser().GetCreateTime() != nil {
-		whoami.CreateTime = account.GetUser().GetCreateTime().AsTime().UTC()
-	}
-
-	// Get the device links from the account
-	whoami.DeviceLinks = make([]string, 0, len(account.GetDevices()))
-	for _, device := range account.GetDevices() {
-		whoami.DeviceLinks = append(whoami.DeviceLinks, fmt.Sprintf("`%s`", device.GetId()))
-	}
-
-	whoami.HasPassword = account.GetEmail() != ""
-
-	var groupIDs []uuid.UUID
-	if guildID != "" {
-		groupID, err := GetGroupIDByGuildID(ctx, d.db, guildID)
-		if err != nil {
-			return fmt.Errorf("guild group not found")
-		}
-		if _, err := UpdateDisplayNameByGroupID(ctx, logger, d.db, nk, d.discordRegistry, userID.String(), groupID); err != nil {
-			return err
-		}
-
-		groupIDs = []uuid.UUID{uuid.FromStringOrNil(groupID)}
-	}
-
-	whoami.GuildGroupMemberships, err = d.discordRegistry.GetGuildGroupMemberships(ctx, userID, groupIDs)
-	if err != nil {
-		return err
-	}
-
-	evrIDRecords, err := GetEVRRecords(ctx, logger, nk, userID.String())
-	if err != nil {
-		return err
-	}
-
-	whoami.EVRIDLogins = make(map[string]time.Time, len(evrIDRecords))
-
-	for evrID, record := range evrIDRecords {
-		whoami.EVRIDLogins[evrID.String()] = record.UpdateTime.UTC()
-	}
-
-	// Get the past displayNames
-	displayNameObjs, err := GetDisplayNameRecords(ctx, logger, nk, userID.String())
-	if err != nil {
-		return err
-	}
-	// Sort displayNames by age
-	sort.SliceStable(displayNameObjs, func(i, j int) bool {
-		return displayNameObjs[i].GetUpdateTime().AsTime().After(displayNameObjs[j].GetUpdateTime().AsTime())
-	})
-
-	whoami.DisplayNames = make([]string, 0, len(displayNameObjs))
-	for _, dn := range displayNameObjs {
-		whoami.DisplayNames = append(whoami.DisplayNames, dn.Key)
-	}
-
-	// Get the MatchIDs for the user from it's presence
-	presences, err := d.nk.StreamUserList(StreamModeService, userID.String(), "", StreamLabelMatchService, true, true)
-	if err != nil {
-		return err
-	}
-
-	whoami.MatchIDs = make([]string, 0, len(presences))
-	for _, p := range presences {
-		if p.GetStatus() != "" {
-			mid := MatchIDFromStringOrNil(p.GetStatus())
-			if mid.IsNil() {
-				continue
-			}
-			whoami.MatchIDs = append(whoami.MatchIDs, mid.UUID().String())
-		}
-	}
-
-	// Get the suspensions
-	dr := d.discordRegistry.(*LocalDiscordRegistry)
-	suspensions, err := dr.GetAllSuspensions(ctx, userID)
-	if err != nil {
-		return err
-	}
-
-	suspensionLines := make([]string, 0, len(suspensions))
-	for _, suspension := range suspensions {
-		suspensionLines = append(suspensionLines, fmt.Sprintf("%s: %s", suspension.GuildName, suspension.RoleName))
-	}
-	if !includePrivate {
-		whoami.HasPassword = false
-		whoami.ClientAddresses = nil
-		whoami.DeviceLinks = nil
-		if len(whoami.EVRIDLogins) > 0 {
-			// Set the timestamp to zero
-			for k := range whoami.EVRIDLogins {
-				whoami.EVRIDLogins[k] = time.Time{}
-			}
-		}
-
-		if guildID == "" {
-			whoami.GuildGroupMemberships = nil
-		}
-		whoami.MatchIDs = nil
-	}
-	fields := []*discordgo.MessageEmbedField{
-		{Name: "Nakama ID", Value: whoami.NakamaID.String(), Inline: true},
-		{Name: "Create Time", Value: fmt.Sprintf("<t:%d:R>", whoami.CreateTime.Unix()), Inline: false},
-		{Name: "Password Protected", Value: func() string {
-			if whoami.HasPassword {
-				return "Yes"
-			}
-			return ""
-		}(), Inline: true},
-		{Name: "Discord ID", Value: whoami.DiscordID, Inline: false},
-		{Name: "Username", Value: whoami.Username, Inline: true},
-		{Name: "Display Names", Value: strings.Join(whoami.DisplayNames, "\n"), Inline: false},
-		{Name: "Linked Devices", Value: strings.Join(whoami.DeviceLinks, "\n"), Inline: false},
-		{Name: "Logins", Value: func() string {
-			lines := lo.MapToSlice(whoami.EVRIDLogins, func(k string, v time.Time) string {
-				if v.IsZero() {
-					// Don't use the timestamp
-					return k
-				} else {
-					return fmt.Sprintf("<t:%d:R> - %s", v.Unix(), k)
-				}
-			})
-			slices.Sort(lines)
-			slices.Reverse(lines)
-			return strings.Join(lines, "\n")
-		}(), Inline: false},
-		{Name: "Guild Memberships", Value: strings.Join(lo.Map(whoami.GuildGroupMemberships, func(m GuildGroupMembership, index int) string {
-			s := m.GuildGroup.Name()
-			roles := make([]string, 0)
-			if m.isMember {
-				roles = append(roles, "member")
-			}
-			if m.isModerator {
-				roles = append(roles, "moderator")
-			}
-			if m.isServerHost {
-				roles = append(roles, "server-host")
-			}
-			if m.canAllocate {
-				roles = append(roles, "allocator")
-			}
-			if len(roles) > 0 {
-				s += fmt.Sprintf(" (%s)", strings.Join(roles, ", "))
-			}
-			return s
-		}), "\n"), Inline: false},
-		{Name: "Suspensions", Value: strings.Join(suspensionLines, "\n"), Inline: false},
-		{Name: "Current Match(es)", Value: strings.Join(lo.Map(whoami.MatchIDs, func(m string, index int) string {
-			return fmt.Sprintf("https://echo.taxi/spark://c/%s", strings.ToUpper(m))
-		}), "\n"), Inline: false},
-	}
-
-	// Remove any blank fields
-	fields = lo.Filter(fields, func(f *discordgo.MessageEmbedField, _ int) bool {
-		return f.Value != ""
-	})
-
-	// Send the response
-	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Flags: discordgo.MessageFlagsEphemeral,
-			Embeds: []*discordgo.MessageEmbed{
-				{
-					Title:  "EchoVRCE Account",
-					Color:  0xCCCCCC,
-					Fields: fields,
-				},
-			},
-		},
-	})
 	return nil
 }
 
@@ -2921,78 +2440,6 @@ func simpleInteractionResponse(s *discordgo.Session, i *discordgo.InteractionCre
 			Content: content,
 		},
 	})
-}
-
-func (d *DiscordAppBot) handlePrepareMatch(ctx context.Context, logger runtime.Logger, discordID, guildID string, region, mode, level evr.Symbol, startTime time.Time) (*MatchLabel, error) {
-	userID, err := GetUserIDByDiscordID(ctx, d.db, discordID)
-	if err != nil {
-		return nil, status.Errorf(codes.NotFound, "user not found: %s", discordID)
-	}
-
-	// Find a parking match to prepare
-	minSize := 1
-	maxSize := 1
-
-	groupID, err := GetGroupIDByGuildID(ctx, d.db, guildID)
-	if err != nil {
-		return nil, status.Errorf(codes.NotFound, "guild not found: %s", guildID)
-	}
-
-	if region.IsNil() {
-		region = evr.ToSymbol("default")
-	}
-	// Get a list of the groups that this user has moderator access to
-	memberships, err := d.discordRegistry.GetGuildGroupMemberships(ctx, uuid.FromStringOrNil(userID), nil)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to get guild group memberships: %v", err)
-	}
-
-	groupIDs := make([]string, 0, len(memberships))
-	for _, membership := range memberships {
-		if !membership.canAllocate {
-			continue
-		}
-		groupIDs = append(groupIDs, membership.GuildGroup.ID().String())
-	}
-
-	query := fmt.Sprintf("+label.lobby_type:unassigned +label.broadcaster.group_ids:/(%s)/ +label.broadcaster.regions:%s", strings.Join(groupIDs, "|"), region.Token().String())
-	matches, err := d.nk.MatchList(ctx, 100, true, "", &minSize, &maxSize, query)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to list matches: %v", err)
-	}
-
-	if len(matches) == 0 {
-		return nil, status.Error(codes.NotFound, "no matches found")
-	}
-
-	// Pick a random result
-	match := matches[rand.Intn(len(matches))]
-	matchID := MatchIDFromStringOrNil(match.GetMatchId())
-	gid := uuid.FromStringOrNil(groupID)
-	// Prepare the session for the match.
-	state := &MatchLabel{}
-	state.SpawnedBy = userID
-	state.StartTime = startTime
-	state.MaxSize = MatchMaxSize
-	state.Mode = mode
-	state.Open = true
-	state.GroupID = &gid
-	if !level.IsNil() {
-		state.Level = level
-	}
-	nk_ := d.nk.(*RuntimeGoNakamaModule)
-	response, err := SignalMatch(ctx, nk_.matchRegistry, matchID, SignalPrepareSession, state)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to signal match: %v", err)
-	}
-
-	label := MatchLabel{}
-	if err := json.Unmarshal([]byte(response), &label); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to unmarshal match label: %v", err)
-	}
-
-	return &label, nil
-
 }
 
 // Function to extract the timestamp from a Discord snowflake ID
