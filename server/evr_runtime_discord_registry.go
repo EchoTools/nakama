@@ -607,27 +607,9 @@ func (r *LocalDiscordRegistry) UpdateGuildGroup(ctx context.Context, logger runt
 	}
 	if isSuspended {
 
-		// If the player has a match connection, disconnect it.
-		subject := userID.String()
-		users, err := r.nk.StreamUserList(StreamModeService, subject, "", StreamLabelMatchService, true, true)
+		_, err := DisconnectUserID(ctx, r.nk, userID.String())
 		if err != nil {
-			r.logger.Error("Error getting stream users: %w", err)
-		}
-
-		// Disconnect any matchmaking sessions (this will put them back to the login screen)
-		for _, user := range users {
-			// Disconnect the user
-			if user.GetUserId() == userID.String() {
-
-				go func(userID, sessionID string) {
-					r.logger.Debug("Disconnecting suspended user %s match session: %s", userID, sessionID)
-					// Add a wait time, otherwise the user will not see the suspension message
-					<-time.After(15 * time.Second)
-					if err := r.nk.SessionDisconnect(ctx, sessionID, runtime.PresenceReasonDisconnect); err != nil {
-						r.logger.Error("Error disconnecting suspended user: %w", err)
-					}
-				}(user.GetUserId(), user.GetSessionId())
-			}
+			r.logger.Warn("Error disconnecting suspended user: %v", err)
 		}
 	}
 

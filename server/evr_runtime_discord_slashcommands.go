@@ -237,6 +237,18 @@ var (
 			},
 		},
 		{
+			Name:        "kick-player",
+			Description: "Kick a player's sessions.",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionUser,
+					Name:        "user",
+					Description: "Target user",
+					Required:    true,
+				},
+			},
+		},
+		{
 			Name:        "badges",
 			Description: "manage badge entitlements",
 			Options: []*discordgo.ApplicationCommandOption{
@@ -1901,24 +1913,61 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return
 			}
 
-			presences, err := d.nk.StreamUserList(StreamModeService, targetUserID.String(), StreamContextLogin.String(), "", true, true)
+			cnt, err := DisconnectUserID(ctx, d.nk, targetUserIDStr)
 			if err != nil {
 				errFn(err)
 				return
 			}
 
-			cnt := 0
-			for _, presence := range presences {
-				if err = d.nk.SessionDisconnect(ctx, presence.GetSessionId(), runtime.PresenceReasonDisconnect); err != nil {
-					errFn(err)
-					continue
-				}
-				cnt++
+			if err := simpleInteractionResponse(s, i, fmt.Sprintf("Disconnected %d sessions.", cnt)); err != nil {
+				logger.Warn("Failed to send interaction response", zap.Error(err))
 			}
+		},
+		"kick-player": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, userID string, groupID string) {
+			options := i.ApplicationCommandData().Options
+
+			user := getScopedUser(i)
+			if user == nil {
+				return
+			}
+			errFn := func(errs ...error) {
+				err := errors.Join(errs...)
+				logger.Debug("trigger-cv failed: %s", err.Error())
+				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+					Type: discordgo.InteractionResponseChannelMessageWithSource,
+					Data: &discordgo.InteractionResponseData{
+						Flags:   discordgo.MessageFlagsEphemeral,
+						Content: fmt.Sprintf("error setting community values:\n%v", err.Error()),
+					},
+				})
+			}
+			if isGlobalModerator, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalModerators); err != nil {
+				errFn(errors.New("failed to check global moderator status"), err)
+				return
+			} else if !isGlobalModerator {
+				if err := simpleInteractionResponse(s, i, "You must be a global moderator to use this command."); err != nil {
+					logger.Warn("Failed to send interaction response", zap.Error(err))
+				}
+				return
+			}
+
+			target := options[0].UserValue(s)
+			targetUserIDStr, err := GetUserIDByDiscordID(ctx, db, target.ID)
+			if err != nil {
+				errFn(errors.New("failed to get user ID"), err)
+				return
+			}
+
+			cnt, err := DisconnectUserID(ctx, d.nk, targetUserIDStr)
+			if err != nil {
+				errFn(err)
+			}
+
 			if err := simpleInteractionResponse(s, i, fmt.Sprintf("Disconnected %d sessions. Player is required to complete *Community Values* when entering the next social lobby.", cnt)); err != nil {
 				logger.Warn("Failed to send interaction response", zap.Error(err))
 			}
 		},
+
 		"set-roles": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, userID string, groupID string) {
 			options := i.ApplicationCommandData().Options
 			user := getScopedUser(i)
