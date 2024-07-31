@@ -509,6 +509,32 @@ func GetGuildIDByGroupID(ctx context.Context, db *sql.DB, groupID string) (guild
 	return dbGuildID, nil
 }
 
+func GetDeviceAuthsByUserID(ctx context.Context, db *sql.DB, userID string) (deviceIDs []*DeviceAuth, err error) {
+	// Look for an existing account.
+	query := "SELECT id FROM user_device WHERE user_id = $1"
+	var dbDeviceID string
+
+	rows, err := db.QueryContext(ctx, query, userID)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "An error occurred while trying to list group IDs.")
+	}
+
+	auths := make([]*DeviceAuth, 0)
+	for rows.Next() {
+		if err := rows.Scan(&dbDeviceID); err != nil {
+			auth, err := ParseDeviceAuthToken(dbDeviceID)
+			if err != nil || auth == nil {
+				continue
+			}
+			auths = append(auths, auth)
+			return nil, err
+		}
+	}
+	_ = rows.Close()
+
+	return auths, nil
+}
+
 /*
 // GetGuildGroupMemberships looks up the guild groups by the user ID
 func GetGuildGroupMemberships(ctx context.Context, nk runtime.NakamaModule, db *sql.DB, discordRegistry DiscordRegistry, userID uuid.UUID, groupIDs []uuid.UUID) ([]GuildGroupMembership, error) {
