@@ -2144,7 +2144,13 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 		switch i.Type {
 		case discordgo.InteractionApplicationCommand:
 			if handler, ok := commandHandlers[appCommandName]; ok {
-				d.handleInteractionCreate(logger, s, i, appCommandName, handler)
+				err := d.handleInteractionCreate(logger, s, i, appCommandName, handler)
+				if err != nil {
+					logger.WithField("error", err).Error("Failed to handle interaction")
+					if err := simpleInteractionResponse(s, i, err.Error()); err != nil {
+						return
+					}
+				}
 			} else {
 				logger.Info("Unhandled command: %v", appCommandName)
 			}
