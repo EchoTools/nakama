@@ -478,13 +478,12 @@ func (r *LocalDiscordRegistry) UpdateGuildGroup(ctx context.Context, logger runt
 		return fmt.Errorf("error getting discord id: %v", err)
 	}
 
-	groupIDStr, found := r.Get(guildID)
-	if !found || groupIDStr == "" {
-		return fmt.Errorf("group not found: `%s`", guildID)
+	groupID, err := r.GetGroupIDbyGuildID(ctx, guildID)
+	if err != nil {
+		return fmt.Errorf("error getting group id: %v", err)
 	}
-	groupID := uuid.FromStringOrNil(groupIDStr)
 
-	md, err := r.GetGuildGroupMetadata(ctx, groupIDStr)
+	md, err := r.GetGuildGroupMetadata(ctx, groupID.String())
 	if err != nil {
 		return fmt.Errorf("error getting guild group metadata: %v", err)
 	}
@@ -511,7 +510,7 @@ func (r *LocalDiscordRegistry) UpdateGuildGroup(ctx context.Context, logger runt
 	// If the member is not found, the user is not in the guild
 	if member == nil {
 		if membership != nil {
-			if err := r.nk.GroupUsersKick(ctx, SystemUserID, groupIDStr, userIDStrs); err != nil {
+			if err := r.nk.GroupUsersKick(ctx, SystemUserID, groupID.String(), userIDStrs); err != nil {
 				return fmt.Errorf("error kicking user from group: %w", err)
 			}
 		}
@@ -522,7 +521,7 @@ func (r *LocalDiscordRegistry) UpdateGuildGroup(ctx context.Context, logger runt
 
 	if membership == nil {
 		if md.MemberRole == "" || slices.Contains(currentRoles, md.MemberRole) {
-			if err := r.nk.GroupUsersAdd(ctx, SystemUserID, groupIDStr, userIDStrs); err != nil {
+			if err := r.nk.GroupUsersAdd(ctx, SystemUserID, groupID.String(), userIDStrs); err != nil {
 				return fmt.Errorf("error adding user to group: %w", err)
 			}
 		}
@@ -545,15 +544,16 @@ func (r *LocalDiscordRegistry) UpdateGuildGroup(ctx context.Context, logger runt
 		// Make sure the user is an "admin" in the group
 		if slices.Contains(currentRoles, md.ModeratorRole) {
 			if !membership.isModerator {
-				if err := r.nk.GroupUsersPromote(ctx, SystemUserID, groupIDStr, userIDStrs); err != nil {
+				if err := r.nk.GroupUsersPromote(ctx, SystemUserID, groupID.String(), userIDStrs); err != nil {
 					return fmt.Errorf("error promoting user to moderator: %w", err)
 				}
 			}
 		} else if membership.isModerator {
-			if err := r.nk.GroupUsersDemote(ctx, SystemUserID, groupIDStr, userIDStrs); err != nil {
+			if err := r.nk.GroupUsersDemote(ctx, SystemUserID, groupID.String(), userIDStrs); err != nil {
 				return fmt.Errorf("error demoting user from moderator: %w", err)
 			}
 		}
+		md.ModeratorUserIDs = append(md.ModeratorUserIDs, userID.String())
 	}
 	userIDStr := userID.String()
 
@@ -595,7 +595,7 @@ func (r *LocalDiscordRegistry) UpdateGuildGroup(ctx context.Context, logger runt
 			return fmt.Errorf("error marshalling group metadata: %w", err)
 		}
 		// Get the group
-		groups, err := r.nk.GroupsGetId(ctx, []string{groupIDStr})
+		groups, err := r.nk.GroupsGetId(ctx, []string{groupID.String()})
 		if err != nil {
 			return fmt.Errorf("error getting group: %w", err)
 		}
@@ -637,6 +637,11 @@ func (r *LocalDiscordRegistry) UpdateGuildGroup(ctx context.Context, logger runt
 func (r *LocalDiscordRegistry) UpdateAllGuildGroupsForUser(ctx context.Context, logger runtime.Logger, userID uuid.UUID) error {
 	// Check every guild the bot is in for this user.
 	for _, guild := range r.bot.State.Guilds {
+		logger.WithFields(map[string]any{
+			"guild": guild.ID,
+			"user":  userID,
+		}).Debug("Checking guild for user")
+
 		if err := r.UpdateGuildGroup(ctx, logger, userID, guild.ID); err != nil {
 			continue
 		}
