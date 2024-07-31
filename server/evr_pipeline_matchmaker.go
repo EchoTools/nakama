@@ -600,9 +600,14 @@ func (p *EvrPipeline) lobbyPlayerSessionsRequest(ctx context.Context, logger *za
 
 func (p *EvrPipeline) PrepareLobbyProfile(ctx context.Context, logger *zap.Logger, session *sessionWS, evrID evr.EvrId, userID, groupID string) {
 	// prepare the profile ahead of time
-	displayName, err := GetDisplayNameByGroupID(ctx, p.runtimeModule, userID, groupID)
-	if err != nil {
-		logger.Warn("Failed to set display name.", zap.Error(err))
+	var err error
+	displayName, ok := ctx.Value(ctxDisplayNameOverrideKey{}).(string)
+	if !ok {
+		displayName, err = GetDisplayNameByGroupID(ctx, p.runtimeModule, userID, groupID)
+		if err != nil {
+			logger.Warn("Failed to set display name.", zap.Error(err))
+		}
+
 	}
 
 	if err := p.profileRegistry.SetLobbyProfile(ctx, session.userID, evrID, displayName); err != nil {

@@ -1143,7 +1143,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					},
 				})
 			}
-
+			if err := d.discordRegistry.UpdateAllGuildGroupsForUser(ctx, logger, uuid.FromStringOrNil(userID)); err != nil {
+				logger.Error("Error updating guild groups: %w", err)
+			}
 			// Send the response
 			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -1748,7 +1750,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 			targetUserID := uuid.FromStringOrNil(targetUserIDStr)
 
-			profile, _ := d.profileRegistry.Load(ctx, targetUserID)
+			profile, err := d.profileRegistry.Load(ctx, targetUserID)
+			if err != nil {
+				return err
+			}
 
 			profile.TriggerCommunityValues()
 
@@ -2060,15 +2065,15 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				groupName := options[0].StringValue()
 				// Validate the group is 1 to 12 characters long
 				if len(groupName) < 1 || len(groupName) > 12 {
-					return errors.New("Invalid group ID. It must be between one (1) and eight (8) characters long.")
+					return errors.New("invalid group ID. It must be between one (1) and eight (8) characters long.")
 				}
 				// Validate the group is alphanumeric
 				if !partyGroupIDPattern.MatchString(groupName) {
-					return errors.New("Invalid group ID. It must be alphanumeric.")
+					return errors.New("invalid group ID. It must be alphanumeric.")
 				}
 				// Validate the group is not a reserved group
 				if lo.Contains([]string{"admin", "moderator", "verified", "broadcaster"}, groupName) {
-					return errors.New("Invalid group ID. It is a reserved group.")
+					return errors.New("invalid group ID. It is a reserved group.")
 				}
 				// lowercase the group
 				groupName = strings.ToLower(groupName)
