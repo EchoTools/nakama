@@ -1096,13 +1096,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			// Validate the link code as a 4 character string
 			if len(linkCode) != 4 {
-				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-					Type: discordgo.InteractionResponseChannelMessageWithSource,
-					Data: &discordgo.InteractionResponseData{
-						Flags:   discordgo.MessageFlagsEphemeral,
-						Content: "Invalid link code. It must be four (4) characters long.",
-					},
-				})
+				return errors.New("Invalid link code. It must be four (4) characters long.")
 			}
 			disableIPVerification := false
 			if len(options) > 1 {
@@ -1135,26 +1129,19 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					"link_code":  linkCode,
 					"error":      err,
 				}).Error("Failed to link headset")
-				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-					Type: discordgo.InteractionResponseChannelMessageWithSource,
-					Data: &discordgo.InteractionResponseData{
-						Flags:   discordgo.MessageFlagsEphemeral,
-						Content: err.Error(),
-					},
-				})
+				return err
 			}
 			if err := d.discordRegistry.UpdateAllGuildGroupsForUser(ctx, logger, uuid.FromStringOrNil(userID)); err != nil {
 				logger.Error("Error updating guild groups: %w", err)
 			}
 			// Send the response
-			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
 					Flags:   discordgo.MessageFlagsEphemeral,
 					Content: "Your headset has been linked. Restart EchoVR.",
 				},
 			})
-			return nil
 		},
 		"unlink-headset": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			options := i.ApplicationCommandData().Options
