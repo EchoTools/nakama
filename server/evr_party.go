@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/gofrs/uuid/v5"
@@ -94,5 +95,50 @@ func FollowLeader(logger *zap.Logger, msession *MatchmakingSession, nk runtime.N
 			// Successful
 			return
 		}
+	}
+}
+
+func FollowUserID(logger *zap.Logger, msession *MatchmakingSession, nk runtime.NakamaModule, userID string) error {
+	// Look up the leaders current match
+
+	session := msession.Session
+	for {
+		select {
+		case <-msession.Ctx.Done():
+			return nil
+		case <-time.After(2 * time.Second):
+		}
+		presences, err := nk.StreamUserList(StreamModeService, userID, StreamContextMatch.String(), "", true, true)
+		if err != nil {
+			return fmt.Errorf("error listing user stream: %v", err)
+		}
+		if len(presences) == 0 {
+			return fmt.Errorf("no presences found for user %v", userID)
+		}
+		leaderSessionID := uuid.FromStringOrNil(presences[0].GetSessionId())
+		if leaderSessionID == session.id {
+			return fmt.Errorf("leader is the same as the follower")
+		}
+
+		leaderMatchID, _, err := GetMatchBySessionID(nk, leaderSessionID)
+		if err != nil {
+			return fmt.Errorf("error getting match by session id: %v", err)
+		}
+
+		// If the leader is not in a match, they might be soon.
+		if leaderMatchID.IsNil() {
+			continue
+		}
+
+		followerMatchID, _, err := GetMatchBySessionID(nk, session.id)
+		if err != nil {
+			return fmt.Errorf("error getting match by session id: %v", err)
+		}
+
+		if followerMatchID == leaderMatchID {
+			return fmt.Errorf("follower is already in the leader's match")
+		}
+		// Try to join the leader's match
+		return session.evrPipeline.LobbyJoin(session.Context(), logger, leaderMatchID, int(AnyTeam), "", msession)
 	}
 }

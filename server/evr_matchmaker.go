@@ -1253,6 +1253,15 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 
 	<-time.After(1 * time.Second)
 
+	metadata, err := GetAccountMetadata(parentCtx, p.db, session.userID.String())
+	if err != nil {
+		logger.Warn("Failed to get account metadata", zap.Error(err))
+	}
+
+	if metadata != nil && metadata.TargetUserID != "" {
+		return FollowUserID(logger, msession, p.runtimeModule, metadata.TargetUserID)
+	}
+
 	if msession.Party != nil {
 		if leader := msession.Party.GetLeader(); leader != nil && leader.SessionId != session.id.String() {
 			// Try to join the leader
