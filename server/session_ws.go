@@ -344,24 +344,23 @@ func (s *sessionWS) LoginSession(userID, username, displayName, displayNameOverr
 	return nil
 }
 
-func (s *sessionWS) BroadcasterSession(userID string, username string) error {
+func (s *sessionWS) BroadcasterSession(userID uuid.UUID, username string, serverID uint64) error {
 	// Broadcaster's are "partial" sessions, and aren't directly associated with the user.
 	// There's no information that directly links this connection to the login connection.
 
 	// This is the first time the session has been validated.
 
-	ctx := context.WithValue(s.Context(), ctxUserIDKey{}, uuid.FromStringOrNil(userID)) // apiServer compatibility
-	ctx = context.WithValue(ctx, ctxUsernameKey{}, username)                            // apiServer compatibility
-	ctx = context.WithValue(ctx, ctxVarsKey{}, s.vars)                                  // apiServer compatibility
-	ctx = context.WithValue(ctx, ctxExpiryKey{}, s.expiry)                              // apiServer compatibility
+	ctx := context.WithValue(s.Context(), ctxUserIDKey{}, userID) // apiServer compatibility
+	ctx = context.WithValue(ctx, ctxUsernameKey{}, username)      // apiServer compatibility
+	ctx = context.WithValue(ctx, ctxVarsKey{}, s.vars)            // apiServer compatibility
+	ctx = context.WithValue(ctx, ctxExpiryKey{}, s.expiry)        // apiServer compatibility
 	ctx = context.WithValue(ctx, ctxHeadsetTypeKey{}, int(0))
 
 	s.SetUsername(username)
 	s.Lock()
 	s.ctx = ctx
-	s.userID = uuid.FromStringOrNil(userID)
-	s.SetUsername(username)
-	s.logger = s.logger.With(zap.String("username", username), zap.String("uid", userID))
+	s.userID = userID
+	s.logger = s.logger.With(zap.String("operator_id", userID.String()), zap.String("server_id", fmt.Sprintf("%d", serverID)))
 	s.Unlock()
 
 	s.tracker.TrackMulti(ctx, s.id, []*TrackerOp{

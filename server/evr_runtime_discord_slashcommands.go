@@ -1096,7 +1096,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			// Validate the link code as a 4 character string
 			if len(linkCode) != 4 {
-				return errors.New("Invalid link code. It must be four (4) characters long.")
+				return errors.New("invalid link code: link code must be (4) characters long")
 			}
 			disableIPVerification := false
 			if len(options) > 1 {

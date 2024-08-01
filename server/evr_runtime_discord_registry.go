@@ -620,10 +620,10 @@ func (r *LocalDiscordRegistry) UpdateGuildGroup(ctx context.Context, logger runt
 func (r *LocalDiscordRegistry) UpdateAllGuildGroupsForUser(ctx context.Context, logger runtime.Logger, userID uuid.UUID) error {
 	// Check every guild the bot is in for this user.
 	for _, guild := range r.bot.State.Guilds {
-		logger.WithFields(map[string]any{
+		logger := logger.WithFields(map[string]any{
 			"guild": guild.ID,
 			"user":  userID,
-		}).Debug("Checking guild for user")
+		})
 
 		if err := r.UpdateGuildGroup(ctx, logger, userID, guild.ID); err != nil {
 			continue
