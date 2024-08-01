@@ -680,10 +680,13 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		}
 		state.sessionStartExpiry = tick + (15 * 60 * state.tickRate)
 
-		if state.Mode == evr.ModeSocialPrivate || state.Mode == evr.ModeSocialPublic {
-			state.PlayerLimit = int(state.MaxSize)
-		} else {
+		switch state.Mode {
+		case evr.ModeArenaPublic:
 			state.PlayerLimit = state.TeamSize * 2
+		case evr.ModeCombatPublic:
+			state.PlayerLimit = state.TeamSize * 2
+		default:
+			state.PlayerLimit = int(state.MaxSize)
 		}
 
 		state.TeamAlignments = make(map[string]int, MatchMaxSize)
