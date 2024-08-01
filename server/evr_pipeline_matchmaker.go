@@ -569,7 +569,7 @@ func (p *EvrPipeline) lobbyPendingSessionCancel(ctx context.Context, logger *zap
 	if matchingSession, ok := p.matchmakingRegistry.GetMatchingBySessionId(session.id); ok {
 		matchingSession.Cancel(ErrMatchmakingCanceledByPlayer)
 	}
-	return nil
+	return session.SendEvr(evr.NewSTcpConnectionUnrequireEvent())
 }
 
 // lobbyPlayerSessionsRequest is called when a client requests the player sessions for a list of EchoVR IDs.
@@ -595,7 +595,7 @@ func (p *EvrPipeline) lobbyPlayerSessionsRequest(ctx context.Context, logger *za
 
 	entrant := evr.NewLobbyEntrant(message.EvrId, message.LobbyID, entrantID, entrantIDs, int16(presence.RoleAlignment))
 
-	return session.SendEvr(entrant.Version3())
+	return session.SendEvr(entrant.VersionU(), entrant.Version2(), entrant.Version3())
 }
 
 func (p *EvrPipeline) PrepareLobbyProfile(ctx context.Context, logger *zap.Logger, session *sessionWS, evrID evr.EvrId, userID, groupID string) {
