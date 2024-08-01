@@ -795,10 +795,12 @@ func (p *EvrPipeline) LobbyJoin(ctx context.Context, logger *zap.Logger, matchID
 	}
 
 	// Get the broadcasters session
-	bsession := p.sessionRegistry.Get(uuid.FromStringOrNil(label.Broadcaster.SessionID)).(*sessionWS)
+	bsession := p.sessionRegistry.Get(uuid.FromStringOrNil(label.Broadcaster.SessionID))
 	if bsession == nil {
 		return fmt.Errorf("broadcaster session not found: %s", label.Broadcaster.SessionID)
 	}
+
+	bsessionWS := bsession.(*sessionWS)
 
 	errorCh := make(chan *EvrMatchPresence)
 	// If this part errors, the matchmaking session must be canceled.
@@ -826,7 +828,7 @@ func (p *EvrPipeline) LobbyJoin(ctx context.Context, logger *zap.Logger, matchID
 				return
 			}
 			errorCh <- nil
-		}(msessions[i].Session, bsession, label.ID.UUID(), label.GetGroupID(), label.GetEndpoint(), presence.RoleAlignment)
+		}(msessions[i].Session, bsessionWS, label.ID.UUID(), label.GetGroupID(), label.GetEndpoint(), presence.RoleAlignment)
 	}
 
 	failed := make([]*EvrMatchPresence, 0, len(presences))
