@@ -1433,15 +1433,15 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					badgeGroups = append(badgeGroups, groupID)
 				}
 
-				userID, err = GetUserIDByDiscordID(ctx, db, user.ID)
+				targetUserID, err := GetUserIDByDiscordID(ctx, db, user.ID)
 				if err != nil {
-					return status.Errorf(codes.Internal, "failed to get user `%s`: %w", target.Username, err)
+					return status.Errorf(codes.Internal, "failed to get user `%s`: %s", target.Username, err)
 				}
 
 				for _, groupID := range badgeGroups {
 					// Add the user to the group
 
-					if err = nk.GroupUsersAdd(ctx, SystemUserID, groupID, []string{userID}); err != nil {
+					if err = nk.GroupUsersAdd(ctx, SystemUserID, groupID, []string{targetUserID}); err != nil {
 						return status.Error(codes.Internal, fmt.Errorf("failed to assign badge `%s` to user `%s`: %w", groupID, target.Username, err).Error())
 					}
 				}
@@ -1451,7 +1451,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 				// Send a message to the channel
 				channel := "1232462244797874247"
-				_, err = s.ChannelMessageSend(channel, fmt.Sprintf("`%s` assigned VRML cosmetics `%s` to user `%s`", user.ID, badgeCodestr, target.Username))
+				_, err = s.ChannelMessageSend(channel, fmt.Sprintf("<@%s> assigned VRML cosmetics `%s` to user `%s`", user.ID, badgeCodestr, target.Username))
 				if err != nil {
 					logger.Warn("failed to send message", zap.Error(err))
 					break
