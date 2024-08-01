@@ -1105,9 +1105,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			if err := func() error {
 
-				// Update the accounts roles, etc.
-				go discordRegistry.UpdateAccount(context.Background(), uuid.FromStringOrNil(userID))
-
 				if linkCode == "0000" {
 					return errors.New("sychronized Discord<->Nakama")
 				}
@@ -1131,9 +1128,15 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}).Error("Failed to link headset")
 				return err
 			}
-			if err := d.discordRegistry.UpdateAllGuildGroupsForUser(ctx, logger, uuid.FromStringOrNil(userID)); err != nil {
-				logger.Error("Error updating guild groups: %w", err)
-			}
+			go func() {
+				// Update the accounts roles, etc.
+				if err := d.discordRegistry.UpdateGuildGroup(ctx, logger, uuid.FromStringOrNil(userID), i.GuildID); err != nil {
+					logger.Error("Error updating guild group: %s", err.Error())
+				}
+				if err := discordRegistry.UpdateAccount(context.Background(), uuid.FromStringOrNil(userID)); err != nil {
+					logger.Error("Error updating account: %w", err)
+				}
+			}()
 			// Send the response
 			return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
