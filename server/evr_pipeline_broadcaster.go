@@ -65,7 +65,7 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 		return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_Unknown)
 	}
 
-	logger = logger.With(zap.String("discordId", discordId), zap.Strings("guildIds", guildIds), zap.Strings("tags", tags), zap.Strings("regions", lo.Map(regions, func(v evr.Symbol, _ int) string { return v.String() })))
+	logger = logger.With(zap.String("discord_id", discordId), zap.Strings("guild_ids", guildIds), zap.Strings("tags", tags), zap.Strings("regions", lo.Map(regions, func(v evr.Symbol, _ int) string { return v.String() })))
 
 	// Assume that the regions provided are the ONLY regions the broadcaster wants to host in
 	if len(regions) == 0 {
@@ -77,7 +77,7 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 	}
 
 	// Authenticate the broadcaster
-	userId, _, err := p.authenticateBroadcaster(ctx, logger, session, discordId, password, guildIds, tags)
+	userId, _, err := p.authenticateBroadcaster(ctx, logger, session, discordId, password, guildIds, tags, request.ServerId)
 	if err != nil {
 		return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_AccountDoesNotExist)
 	}
@@ -245,27 +245,27 @@ func extractAuthenticationDetailsFromContext(ctx context.Context) (discordId, pa
 	return discordId, password, tags, guildIds, regions, nil
 }
 
-func (p *EvrPipeline) authenticateBroadcaster(ctx context.Context, logger *zap.Logger, session *sessionWS, discordId, password string, guildIds []string, tags []string) (string, string, error) {
+func (p *EvrPipeline) authenticateBroadcaster(ctx context.Context, logger *zap.Logger, session *sessionWS, discordId, password string, guildIds []string, tags []string, serverID uint64) (string, string, error) {
 	// Get the user id from the discord id
-	userId, err := GetUserIDByDiscordID(ctx, p.db, discordId)
+	userID, err := GetUserIDByDiscordID(ctx, p.db, discordId)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to find user for Discord ID: %v", err)
 	}
 	// Authenticate the user
-	userId, username, _, err := AuthenticateEmail(ctx, logger, session.pipeline.db, userId+"@"+p.placeholderEmail, password, "", false)
+	userID, username, _, err := AuthenticateEmail(ctx, logger, session.pipeline.db, userID+"@"+p.placeholderEmail, password, "", false)
 	if err != nil {
 		return "", "", fmt.Errorf("password authentication failure")
 	}
-	p.logger.Info("Authenticated broadcaster", zap.String("operator_userID", userId), zap.String("operator_username", username))
+	p.logger.Info("Authenticated broadcaster", zap.String("operator_userID", userID), zap.String("operator_username", username))
 
 	// The broadcaster is authenticated, set the userID as the broadcasterID and create a broadcaster session
 	// Broadcasters are not linked to the login session, they have a generic username and only use the serverdb path.
-	err = session.BroadcasterSession(userId, "broadcaster:"+username)
+	err = session.BroadcasterSession(uuid.FromStringOrNil(userID), "broadcaster:"+username, serverID)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to create broadcaster session: %v", err)
 	}
 
-	return userId, username, nil
+	return userID, username, nil
 }
 
 func broadcasterConfig(userId, sessionId string, serverId uint64, internalIP, externalIP net.IP, port uint16, regions []evr.Symbol, versionLock uint64, tags, features []string) *MatchBroadcaster {
@@ -400,7 +400,7 @@ func (p *EvrPipeline) newParkingMatch(logger *zap.Logger, session *sessionWS, co
 		//p.tracker.UntrackLocalByModes(session.ID(), matchStreamModes, stream)
 	}
 
-	logger.Debug("New parking match", zap.String("matchId", matchIDStr))
+	logger.Debug("New parking match", zap.String("mid", matchIDStr))
 
 	return nil
 }
@@ -630,12 +630,13 @@ func (p *EvrPipeline) broadcasterPlayerAccept(ctx context.Context, logger *zap.L
 	if err != nil {
 		logger.Warn("Failed to get broadcaster's match by session ID", zap.Error(err))
 	}
+	baseLogger := logger.With(zap.String("mid", matchID.String()))
 
 	accepted := make([]uuid.UUID, 0, len(request.EntrantIDs))
 	rejected := make([]uuid.UUID, 0)
 
 	for _, entrantID := range request.EntrantIDs {
-		logger = logger.With(zap.String("entrant_id", entrantID.String()))
+		logger = baseLogger.With(zap.String("entrant_id", entrantID.String()))
 
 		presence, err := PresenceByEntrantID(p.runtimeModule, matchID, entrantID)
 		if err != nil || presence == nil {

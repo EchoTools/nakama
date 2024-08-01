@@ -176,6 +176,7 @@ func listMatchStates(ctx context.Context, nk runtime.NakamaModule, query string)
 }
 
 type MatchStateTags struct {
+	Type     string
 	Mode     string
 	Level    string
 	Operator string
@@ -185,6 +186,7 @@ type MatchStateTags struct {
 
 func (t MatchStateTags) AsMap() map[string]string {
 	return map[string]string{
+		"type":     t.Type,
 		"mode":     t.Mode,
 		"level":    t.Level,
 		"operator": t.Operator,
@@ -227,6 +229,7 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 			}
 
 			stateTags := MatchStateTags{
+				Type:     state.State.LobbyType.String(),
 				Mode:     state.State.Mode.String(),
 				Level:    state.State.Level.String(),
 				Operator: state.State.Broadcaster.OperatorID,

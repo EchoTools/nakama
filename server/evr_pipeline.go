@@ -517,5 +517,5 @@ func (p *EvrPipeline) attemptOutOfBandAuthentication(session *sessionWS) error {
 		return fmt.Errorf("out of band Auth: %s: %v", discordId, err)
 	}
 
-	return session.BroadcasterSession(userId, "broadcaster:"+username)
+	return session.BroadcasterSession(uuid.FromStringOrNil(userId), "broadcaster:"+username, 0)
 }

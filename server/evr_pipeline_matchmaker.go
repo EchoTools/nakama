@@ -418,6 +418,7 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 			Features:    features,
 		},
 	}
+
 	p.PrepareLobbyProfile(ctx, logger, session, request.GetEvrID(), session.userID.String(), ml.GroupID.String())
 
 	// Start the search in a goroutine.
