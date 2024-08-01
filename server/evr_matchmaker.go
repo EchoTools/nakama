@@ -805,28 +805,27 @@ func (p *EvrPipeline) LobbyJoin(ctx context.Context, logger *zap.Logger, matchID
 
 	for i, presence := range matchPresences {
 		// Send the lobbysessionSuccess, this will trigger the broadcaster to send a lobbysessionplayeraccept once the player connects to the broadcaster.
-		go func(ms *MatchmakingSession, bs *sessionWS, alignment int) {
+		go func(s *sessionWS, bs *sessionWS, matchUUID, groupUUID uuid.UUID, endpoint evr.Endpoint, alignment int) {
 			headsetType := 0
-			ht := msessions[i].Session.Context().Value(ctxHeadsetTypeKey{})
+			ht := s.Context().Value(ctxHeadsetTypeKey{})
 			if ht != nil {
 				headsetType = ht.(int)
 			}
-			msg := evr.NewLobbySessionSuccess(label.Mode, label.ID.UUID(), label.GetGroupID(), label.GetEndpoint(), int16(alignment), headsetType)
+			msg := evr.NewLobbySessionSuccess(label.Mode, matchUUID, groupUUID, endpoint, int16(alignment), headsetType)
 
-			if err = bs.SendEvr(msg.Version5()); err != nil {
+			if err = bs.SendEvr(msg.Version4(), msg.Version5()); err != nil {
 				logger.Error("Failed to send lobby session success to game server", zap.Error(err))
 				errorCh <- presence
 				return
 			}
 			<-time.After(500 * time.Millisecond)
-			if err = ms.Session.SendEvr(msg.Version5()); err != nil {
+			if err = s.SendEvr(msg.Version4(), msg.Version5()); err != nil {
 				logger.Error("Failed to send lobby session success to client", zap.Error(err))
 				errorCh <- presence
 				return
 			}
 			errorCh <- nil
-			ms.Cancel(nil)
-		}(msessions[i], bsession, presence.RoleAlignment)
+		}(msessions[i].Session, bsession, label.ID.UUID(), label.GetGroupID(), label.GetEndpoint(), presence.RoleAlignment)
 	}
 
 	failed := make([]*EvrMatchPresence, 0, len(presences))
