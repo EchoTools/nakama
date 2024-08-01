@@ -804,6 +804,7 @@ func (p *EvrPipeline) LobbyJoin(ctx context.Context, logger *zap.Logger, matchID
 	// If this part errors, the matchmaking session must be canceled.
 
 	for i, presence := range matchPresences {
+		msessions[i].Cancel(nil)
 		// Send the lobbysessionSuccess, this will trigger the broadcaster to send a lobbysessionplayeraccept once the player connects to the broadcaster.
 		go func(s *sessionWS, bs *sessionWS, matchUUID, groupUUID uuid.UUID, endpoint evr.Endpoint, alignment int) {
 			headsetType := 0
