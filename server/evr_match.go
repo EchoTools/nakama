@@ -243,7 +243,14 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	if err := m.updateLabel(dispatcher, state); err != nil {
 		return state, false, fmt.Sprintf("failed to update label: %v", err)
 	}
-
+	tags := map[string]string{
+		"mode":     state.Mode.String(),
+		"level":    state.Level.String(),
+		"type":     state.LobbyType.String(),
+		"role":     fmt.Sprintf("%d", mp.RoleAlignment),
+		"group_id": state.GetGroupID().String(),
+	}
+	nk.MetricsCounterAdd("match_entrant_join_attempt_count", tags, 1)
 	return state, true, mp.String()
 }
 
@@ -320,7 +327,7 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 			continue
 		}
 
-		if _, ok := state.presenceMap[p.GetSessionId()]; !ok {
+		if mp, ok := state.presenceMap[p.GetSessionId()]; !ok {
 			logger.WithFields(map[string]interface{}{
 				"username": p.GetUsername(),
 				"uid":      p.GetUserId(),
@@ -331,6 +338,15 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 				"username": p.GetUsername(),
 				"uid":      p.GetUserId(),
 			}).Info("Join complete.")
+			tags := map[string]string{
+				"mode":     state.Mode.String(),
+				"level":    state.Level.String(),
+				"type":     state.LobbyType.String(),
+				"role":     fmt.Sprintf("%d", mp.RoleAlignment),
+				"group_id": state.GetGroupID().String(),
+			}
+			nk.MetricsCounterAdd("match_entrant_join_count", tags, 1)
+			nk.MetricsTimerRecord("match_player_join_duration", tags, time.Since(state.joinTimestamps[p.GetSessionId()]))
 		}
 	}
 
