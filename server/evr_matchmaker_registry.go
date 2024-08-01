@@ -602,7 +602,7 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 
 	for {
 		var err error
-		matchID, err = mr.allocateBroadcaster(groupIDs, config, sorted, ml)
+		matchID, err = mr.allocateBroadcaster(groupIDs, config, sorted, ml, true)
 		if err != nil {
 			mr.logger.Warn("Error allocating broadcaster", zap.Error(err))
 		}
@@ -631,6 +631,7 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 
 		}
 	}
+	<-time.After(3 * time.Second)
 	// Assign the teams to the match, taking one from each team at a time
 	// and sending the join instruction to the server
 
@@ -727,7 +728,7 @@ func distributeParties(parties [][]*MatchmakerEntry) [][]*MatchmakerEntry {
 	return teams
 }
 
-func (mr *MatchmakingRegistry) allocateBroadcaster(channels []uuid.UUID, config MatchmakingSettings, sorted []string, label *MatchLabel) (MatchID, error) {
+func (mr *MatchmakingRegistry) allocateBroadcaster(channels []uuid.UUID, config MatchmakingSettings, sorted []string, label *MatchLabel, start bool) (MatchID, error) {
 	// Lock the broadcasters so that they aren't double allocated
 	mr.Lock()
 	defer mr.Unlock()
@@ -771,7 +772,12 @@ func (mr *MatchmakingRegistry) allocateBroadcaster(channels []uuid.UUID, config 
 	if err != nil {
 		return MatchID{}, fmt.Errorf("error signaling match `%s`: %s: %v", matchID.String(), response, err)
 	}
-
+	if start {
+		response, err = SignalMatch(mr.ctx, mr.matchRegistry, matchID, SignalStartSession, nil)
+		if err != nil {
+			return MatchID{}, fmt.Errorf("error signaling match `%s`: %s: %v", matchID.String(), response, err)
+		}
+	}
 	return matchID, nil
 }
 

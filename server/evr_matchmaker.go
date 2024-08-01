@@ -833,6 +833,7 @@ func (p *EvrPipeline) LobbyJoin(ctx context.Context, logger *zap.Logger, matchID
 	for range matchPresences {
 		select {
 		case <-time.After(4 * time.Second):
+			logger.Warn("Timed out waiting for all lobby session successes to complete")
 			err = fmt.Errorf("timed out waiting for all lobby session successes to complete")
 		case presence := <-errorCh:
 			if presence != nil {
