@@ -1433,7 +1433,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					badgeGroups = append(badgeGroups, groupID)
 				}
 
-				targetUserID, err := GetUserIDByDiscordID(ctx, db, user.ID)
+				targetUserID, err := GetUserIDByDiscordID(ctx, db, target.ID)
 				if err != nil {
 					return status.Errorf(codes.Internal, "failed to get user `%s`: %s", target.Username, err)
 				}
