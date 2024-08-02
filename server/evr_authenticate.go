@@ -530,6 +530,16 @@ func UpdateDisplayNameByGroupID(ctx context.Context, logger runtime.Logger, db *
 
 // sanitizeDisplayName filters the provided displayName to ensure it is valid.
 func sanitizeDisplayName(displayName string) string {
+	mapping := map[string]string{
+		"๒": "b",
+		"ɭ": "l",
+		"ย": "u",
+		"є": "e",
+	}
+
+	for k, v := range mapping {
+		displayName = strings.ReplaceAll(displayName, k, v)
+	}
 
 	// Removes the discord score (i.e. ` (71) [62.95%]`) suffix from display names
 	displayName = DisplayNameFilterScoreSuffix.ReplaceAllLiteralString(displayName, "")
@@ -551,6 +561,7 @@ func sanitizeDisplayName(displayName string) string {
 	if !DisplayNameMatchRegex.MatchString(displayName) {
 		return ""
 	}
+
 	// Trim spaces from both ends
 	displayName = strings.TrimSpace(displayName)
 	return displayName
