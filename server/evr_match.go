@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math/rand"
 	"reflect"
-	"regexp"
 	"slices"
 	"strconv"
 	"time"
@@ -29,11 +28,22 @@ const (
 
 	StatGroupArena  MatchStatGroup = "arena"
 	StatGroupCombat MatchStatGroup = "combat"
+
+	// Defaults for public arena matches
+	RoundDuration              = 300
+	AfterGoalDuration          = 15
+	RespawnDuration            = 3
+	RoundCatapultDelayDuration = 5
+	CatapultDuration           = 15
+	RoundWaitDuration          = 59
+	PreMatchWaitTime           = 45
+	PublicMatchWaitTime        = PreMatchWaitTime + CatapultDuration + RoundCatapultDelayDuration
 )
 
 const (
 	OpCodeBroadcasterDisconnected int64 = iota
 	OpCodeEVRPacketData
+	OpCodeMatchGameStateUpdate
 
 	SignalPrepareSession
 	SignalStartSession
@@ -44,11 +54,6 @@ const (
 	SignalGetPresences
 	SignalPruneUnderutilized
 	SignalTerminate
-)
-
-var (
-	displayNameRegex = regexp.MustCompile(`"displayname": "(\\"|[^"])*"`)
-	updatetimeRegex  = regexp.MustCompile(`"updatetime": \d*`)
 )
 
 type MatchStatGroup string
@@ -163,6 +168,9 @@ func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql
 	state.presenceMap = make(map[string]*EvrMatchPresence)
 	state.joinTimestamps = make(map[string]time.Time)
 
+	if state.Mode == evr.ModeArenaPublic {
+		state.GameState = &GameState{}
+	}
 	state.broadcasterJoinExpiry = state.tickRate * BroadcasterJoinTimeoutSecs
 
 	state.rebuildCache()
@@ -247,8 +255,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 
 	// Set the start time to now, which will trigger MatchStart() to start the match.
 	if !state.Started() {
-		state.StartTime = time.Now()
-
+		state.StartTime = time.Now().UTC()
 	}
 
 	if err := m.updateLabel(dispatcher, state); err != nil {
@@ -482,9 +489,34 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		}
 	}
 
+	if tick%state.tickRate == 0 && state.GameState != nil {
+		// Update the game clock
+		if state.GameState.unpausingAt.Before(time.Now()) {
+			state.GameState.unpausingAt = time.Time{}
+			state.GameState.RoundClock = state.GameState.RoundClock + 1
+		}
+	}
+
 	// Handle the messages, one by one
 	for _, in := range messages {
 		switch in.GetOpCode() {
+		case OpCodeMatchGameStateUpdate:
+			update := MatchGameStateUpdate{}
+			if err := json.Unmarshal(in.GetData(), &update); err != nil {
+				logger.Error("Failed to unmarshal match update: %v", err)
+				continue
+			}
+			logger.Debug("Received match update message: %v", update)
+			gs := state.GameState
+			u := update
+			gs.RoundOver = u.RoundOver
+			gs.MatchOver = u.MatchOver
+			gs.RoundClock = u.RoundClock
+			if u.PauseDuration != 0 {
+				gs.Paused = true
+				gs.unpausingAt = time.Now().Add(u.PauseDuration)
+			}
+
 		default:
 			typ, found := evr.SymbolTypes[uint64(in.GetOpCode())]
 			if !found {
@@ -701,7 +733,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 			state.TeamSize = 5
 		}
 
-		state.StartTime = newState.StartTime
+		state.StartTime = newState.StartTime.UTC()
 
 		// If the start time is in the past, set it to now.
 		// If the start time is not set, set it to 10 minutes from now.
@@ -761,6 +793,17 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk run
 		groupID = *state.GroupID
 	}
 
+	switch state.Mode {
+	case evr.ModeArenaPublic:
+		state.GameState = &GameState{
+			RoundDuration: RoundDuration,
+			RoundClock:    0,
+			Paused:        true,
+			unpausingAt:   time.Now().Add(PublicMatchWaitTime * time.Second),
+		}
+	}
+
+	state.StartTime = time.Now().UTC()
 	entrants := make([]evr.EvrId, 0)
 	message := evr.NewGameServerSessionStart(state.ID.UUID(), groupID, state.MaxSize, uint8(state.LobbyType), state.Broadcaster.AppId, state.Mode, state.Level, state.RequiredFeatures, entrants)
 	logger.WithField("message", message).Info("Starting session.")
