@@ -164,6 +164,16 @@ func Test_sanitizeDisplayName(t *testing.T) {
 			"🗕 🗗 🗙",
 			"X",
 		},
+		{
+			"Non-English characters",
+			"๒ɭยє",
+			"blue",
+		},
+		{
+			"Over 20 characters are truncated",
+			"a123456789012345678901234567890",
+			"a1234567890123456789",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
