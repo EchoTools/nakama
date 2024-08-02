@@ -379,8 +379,15 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 				}
 				userIDs = append(userIDs, m.GetUserId())
 			}
-
+			partyGroupName := ""
+			var err error
 			for _, userID := range userIDs {
+				if partyGroupName == "" {
+					partyGroupName, _, err = GetPartyGroupID(session.Context(), session.pipeline.db, userID)
+					if err != nil {
+						logger.Warn("Failed to get party group ID", zap.Error(err))
+					}
+				}
 				if discordID, err := GetDiscordIDByUserID(session.Context(), session.pipeline.db, userID); err != nil {
 					logger.Warn("Failed to get discord ID", zap.Error(err))
 					discordIDs = append(discordIDs, userID)
@@ -389,7 +396,7 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 				}
 			}
 
-			content = fmt.Sprintf("Active party: %s", strings.Join(discordIDs, ", "))
+			content = fmt.Sprintf("Active party `%s`: %s", partyGroupName, strings.Join(discordIDs, ", "))
 		case *rtapi.Envelope_PartyLeader:
 			if discordID, err := GetDiscordIDByUserID(session.Context(), session.pipeline.db, in.GetPartyLeader().GetPresence().GetUserId()); err != nil {
 				logger.Warn("Failed to get discord ID", zap.Error(err))

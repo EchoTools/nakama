@@ -6,6 +6,8 @@ import (
 
 	"encoding/binary"
 	"encoding/json"
+
+	"github.com/gofrs/uuid/v5"
 )
 
 type LoggingLevel uint64
@@ -56,6 +58,10 @@ func (m *RemoteLogSet) Stream(s *EasyStream) error {
 
 type RemoteLogString string
 
+func (m RemoteLogString) String() string {
+	return string(m)
+}
+
 func (m RemoteLogString) GetGameSettings() (*RemoteLogGameSettings, error) {
 	var out RemoteLogGameSettings
 	err := json.Unmarshal([]byte(m), &out)
@@ -80,8 +86,42 @@ func (m RemoteLogString) GetInteractionEvent() (*RemoteLogInteractionEvent, erro
 	return &out, err
 }
 
-func (m RemoteLogString) String() string {
-	return string(m)
+func (m RemoteLogString) GetGhostUser() (*RemoteLogGhostUser, error) {
+	var out RemoteLogGhostUser
+	err := json.Unmarshal([]byte(m), &out)
+	return &out, err
+}
+
+func (m RemoteLogString) GetGoal() (*RemoteLogGoal, error) {
+	var out RemoteLogGoal
+	err := json.Unmarshal([]byte(m), &out)
+	return &out, err
+}
+
+func (m RemoteLogString) GetRepairMatrix() (*RemoteLogRepairMatrix, error) {
+	var out RemoteLogRepairMatrix
+	err := json.Unmarshal([]byte(m), &out)
+	return &out, err
+}
+
+func (m RemoteLogString) GetUserDisconnected() (*RemoteLogUserDisconnected, error) {
+	var out RemoteLogUserDisconnected
+	err := json.Unmarshal([]byte(m), &out)
+	return &out, err
+}
+
+func (m RemoteLogString) GetStoreMetricsPayload() (*RemoteLogStoreMetricsPayload, error) {
+	return GetRemoteLogType([]byte(m), RemoteLogStoreMetricsPayload{})
+}
+
+func (m RemoteLogString) GetGhostAll() (*RemoteLogGhostAll, error) {
+	return GetRemoteLogType([]byte(m), RemoteLogGhostAll{})
+}
+
+func GetRemoteLogType[T any](data []byte, typ T) (*T, error) {
+	var out T
+	err := json.Unmarshal(data, &out)
+	return &out, err
 }
 
 // GAME_SETTINGS
@@ -372,6 +412,10 @@ type RemoteLogGoal struct {
 	MessageType            string  `json:"message_type"`
 }
 
+func (m RemoteLogGoal) SessionID() uuid.UUID {
+	return uuid.FromStringOrNil(strings.Trim(m.SessionUUID, "{}"))
+}
+
 type RemoteLogLoadStats struct {
 	ClientLoadTime        float64 `json:"[client_load_time]"`
 	DestinationLevel      string  `json:"[destination][level]"`
@@ -399,4 +443,21 @@ type RemoteLogGhostUser struct {
 	SocialGroupID          string `json:"[social_group_id]"`
 	Message                string `json:"message"`
 	MessageType            string `json:"message_type"`
+}
+type RemoteLogUserDisconnected struct {
+	GameInfoGameTime       float64 `json:"[game_info][game_time]"`
+	GameInfoIsArena        bool    `json:"[game_info][is_arena]"`
+	GameInfoIsCapturePoint bool    `json:"[game_info][is_capture_point]"`
+	GameInfoIsCombat       bool    `json:"[game_info][is_combat]"`
+	GameInfoIsPayload      bool    `json:"[game_info][is_payload]"`
+	GameInfoIsPrivate      bool    `json:"[game_info][is_private]"`
+	GameInfoIsSocial       bool    `json:"[game_info][is_social]"`
+	GameInfoLevel          string  `json:"[game_info][level]"`
+	GameInfoMatchType      string  `json:"[game_info][match_type]"`
+	PlayerInfoDisplayname  string  `json:"[player_info][displayname]"`
+	PlayerInfoTeamid       int64   `json:"[player_info][teamid]"`
+	PlayerInfoUserid       string  `json:"[player_info][userid]"`
+	SessionUUID            string  `json:"[session][uuid]"`
+	Message                string  `json:"message"`
+	MessageType            string  `json:"message_type"`
 }

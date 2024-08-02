@@ -34,10 +34,13 @@ type MatchLabel struct {
 	TeamSize    int       `json:"team_size,omitempty"`    // The size of each team in arena/combat (either 4 or 5)
 	TeamIndex   TeamIndex `json:"team,omitempty"`         // What team index a player prefers (Used by Matching only)
 
-	Players        []PlayerInfo                 `json:"players,omitempty"`         // The displayNames of the players (by team name) in the match.
-	TeamAlignments map[string]int               `json:"team_alignments,omitempty"` // map[userID]TeamIndex
-	presenceMap    map[string]*EvrMatchPresence // [sessionId]EvrMatchPresence
-	server         runtime.Presence             // The broadcaster's presence
+	Players        []PlayerInfo   `json:"players,omitempty"`         // The displayNames of the players (by team name) in the match.
+	TeamAlignments map[string]int `json:"team_alignments,omitempty"` // map[userID]TeamIndex
+
+	GameState *GameState `json:"game_state,omitempty"` // The game state for the match.
+
+	presenceMap map[string]*EvrMatchPresence // [sessionId]EvrMatchPresence
+	server      runtime.Presence             // The broadcaster's presence
 
 	emptyTicks            int64                // The number of ticks the match has been empty.
 	sessionStartExpiry    int64                // The tick count at which the match will be shut down if it has not started.
@@ -140,6 +143,7 @@ func (s *MatchLabel) PublicView() *MatchLabel {
 		LobbyType:        s.LobbyType,
 		ID:               s.ID,
 		Open:             s.Open,
+		GameState:        s.GameState,
 		StartTime:        s.StartTime,
 		GroupID:          s.GroupID,
 		GuildID:          s.GuildID,
