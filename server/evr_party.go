@@ -93,7 +93,8 @@ func FollowLeader(logger *zap.Logger, msession *MatchmakingSession, nk runtime.N
 		if err != nil {
 			return
 		}
-		if !label.Open {
+
+		if label == nil || !label.Open {
 			continue
 		}
 
