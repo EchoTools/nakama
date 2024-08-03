@@ -759,6 +759,7 @@ func NewMatchPresenceFromSession(msession *MatchmakingSession, matchID MatchID, 
 }
 
 func (p *EvrPipeline) LobbyJoin(ctx context.Context, logger *zap.Logger, matchID MatchID, roleAlignment int, query string, msessions ...*MatchmakingSession) error {
+	// lock all the mathcmaking sessions
 	if len(msessions) == 0 {
 		return fmt.Errorf("no matchmaking sessions provided")
 	}

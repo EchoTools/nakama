@@ -742,6 +742,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		state.Open = false
 
 	case SignalLockSession:
+		logger.Debug("Locking session")
 		state.Open = false
 
 	case SignalUnlockSession:
