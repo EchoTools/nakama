@@ -46,6 +46,7 @@ type MatchLabel struct {
 	tickRate              int64                // The number of ticks per second.
 	joinTimestamps        map[string]time.Time // The timestamps of when players joined the match. map[sessionId]time.Time
 	terminateTick         int64                // The tick count at which the match will be shut down.
+	isTerminating         bool                 // Whether the match is shutting down.
 }
 
 // NewMatchLabel is a helper function to create a new match state. It returns the state, params, label json, and err.
