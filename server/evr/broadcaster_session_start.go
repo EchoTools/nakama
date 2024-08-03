@@ -98,8 +98,8 @@ type GameServerSessionStart struct {
 }
 
 func (s *GameServerSessionStart) String() string {
-	return fmt.Sprintf("BroadcasterStartSession(session_id=%s, player_limit=%d, lobby_type=%d, settings=%s, entrant_descriptors=%v)",
-		s.MatchID, s.PlayerLimit, s.LobbyType, s.Settings.String(), s.Entrants)
+	return fmt.Sprintf("%T(session_id=%s, player_limit=%d, mode=%s, level=%s)",
+		s, s.MatchID, s.PlayerLimit, ToSymbol(s.Settings.Mode).Token(), ToSymbol(s.Settings.Level).Token())
 }
 
 func NewGameServerSessionStart(sessionID uuid.UUID, channel uuid.UUID, playerLimit uint8, lobbyType uint8, appID string, mode Symbol, level Symbol, features []string, entrants []EvrId) *GameServerSessionStart {
