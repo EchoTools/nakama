@@ -463,6 +463,9 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		// Open the match 15 seconds after the start time.
 		if !state.Open && !state.isTerminating && time.Now().After(state.StartTime.Add(MatchOpenDelaySecs)) {
 			state.Open = true
+			if err := m.updateLabel(dispatcher, state); err != nil {
+				return nil
+			}
 		}
 
 	} else if state.StartTime.Before(time.Now().Add(-10 * time.Minute)) {
@@ -740,6 +743,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 
 	case SignalEndSession:
 		state.Open = false
+		state.isTerminating = true
 
 	case SignalLockSession:
 		logger.Debug("Locking session")
