@@ -486,11 +486,11 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 	switch {
 
 	case ml.LobbyType == UnassignedLobby:
-		err = status.Errorf(codes.NotFound, "Match is not a lobby")
+		err = status.Errorf(codes.NotFound, "match is not a lobby")
 	case !ml.Open:
-		err = status.Errorf(codes.InvalidArgument, "Match is not open")
+		err = status.Errorf(codes.InvalidArgument, "match is not open")
 	case int(ml.Size) >= int(ml.MaxSize):
-		err = status.Errorf(codes.ResourceExhausted, "Match is full")
+		err = status.Errorf(codes.ResourceExhausted, "match is full")
 	case ml.LobbyType == PublicLobby:
 		// Check if this player is a global moderator or developer
 		isModerator, _ := CheckSystemGroupMembership(ctx, p.db, session.userID.String(), GroupGlobalModerators)
@@ -502,7 +502,7 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 			switch request.GetAlignment() {
 			case int8(Spectator):
 				if ml.Mode == evr.ModeSocialPublic || ml.Mode == evr.ModeSocialPrivate {
-					err = status.Errorf(codes.PermissionDenied, "social lobbies can only be joined by moderators and social participants.")
+					err = status.Errorf(codes.PermissionDenied, "social lobbies can only be joined by moderators and social participants")
 				}
 				// Allow spectators to join public matches
 			case int8(Moderator):
@@ -515,10 +515,6 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 					request.SetAlignment(int(AnyTeam))
 				}
 			default:
-				if time.Since(ml.StartTime) < time.Second*10 {
-					// Allow if the match is over 15 seconds old, to allow matchmaking to properly populate the match
-					err = status.Errorf(codes.InvalidArgument, "Match is a newly started public match")
-				}
 				request.SetAlignment(int(AnyTeam))
 			}
 		}

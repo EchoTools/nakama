@@ -23,6 +23,7 @@ const (
 	MatchmakingModule        = "evr"              // The module used for matchmaking
 
 	MatchMaxSize                             = 12 // The total max players (not including the broadcaster) for a EVR lobby.
+	MatchOpenDelaySecs                       = 15 // The number of seconds to wait before opening the match.
 	LevelSelectionFirst  MatchLevelSelection = "first"
 	LevelSelectionRandom MatchLevelSelection = "random"
 
@@ -299,6 +300,11 @@ func (m *EvrMatch) playerJoinAttempt(state *MatchLabel, mp EvrMatchPresence) (*E
 		return &mp, ""
 	}
 
+	// If the match is closed and player has a role assigned, use it.
+	if !state.Open && mp.RoleAlignment != evr.TeamUnassigned {
+		return &mp, ""
+	}
+
 	if state.RoleCount(evr.TeamBlue) == state.RoleCount(evr.TeamOrange) {
 		mp.RoleAlignment = evr.TeamOrange
 		return &mp, ""
@@ -453,6 +459,12 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 				return nil
 			}
 		}
+
+		// Open the match 15 seconds after the start time.
+		if !state.Open && !state.isTerminating && time.Now().After(state.StartTime.Add(MatchOpenDelaySecs)) {
+			state.Open = true
+		}
+
 	} else if state.StartTime.Before(time.Now().Add(-10 * time.Minute)) {
 		if state.LobbyType != UnassignedLobby {
 			logger.Error("Match has not started on time. Shutting down.")
@@ -545,7 +557,7 @@ func (m *EvrMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db 
 	}
 	logger.Info("MatchShutdown called.")
 	nk.MetricsCounterAdd("match_shutdown_count", state.MetricsTags(), 1)
-
+	state.isTerminating = true
 	state.Open = false
 	if err := m.updateLabel(dispatcher, state); err != nil {
 		logger.Error("failed to update label: %v", err)
@@ -639,7 +651,12 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		}
 
 		state.Started = false
-		state.Open = true
+
+		if newState.Mode == evr.ModeArenaPublic || newState.Mode == evr.ModeCombatPublic {
+			state.Open = false
+		} else {
+			state.Open = true
+		}
 
 		state.Mode = newState.Mode
 		switch newState.Mode {

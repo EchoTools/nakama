@@ -24,7 +24,6 @@ import (
 )
 
 const (
-	MatchJoinGracePeriod        = 10 * time.Second
 	MatchmakingStartGracePeriod = 3 * time.Second
 )
 
@@ -211,7 +210,23 @@ func (p *EvrPipeline) MatchBackfill(msession *MatchmakingSession) error {
 	} else {
 		msessions = append(msessions, msession)
 	}
+
 	query := buildMatchQueryFromLabel(msession.Label, len(msessions))
+
+	// Load the global matchmaking config
+	gconfig, err := LoadMatchmakingSettings(ctx, p.runtimeModule, SystemUserID)
+	if err != nil {
+		return status.Errorf(codes.Internal, "Failed to load global matchmaking config: %v", err)
+	}
+
+	// Load the user's matchmaking config
+	config, err := LoadMatchmakingSettings(ctx, p.runtimeModule, msession.Session.userID.String())
+	if err != nil {
+		return status.Errorf(codes.Internal, "Failed to load matchmaking config: %v", err)
+	}
+
+	// Merge the user's config with the global config
+	query = fmt.Sprintf("%s %s %s", query, gconfig.BackfillQueryAddon, config.BackfillQueryAddon)
 
 	for {
 		select {
@@ -226,7 +241,7 @@ func (p *EvrPipeline) MatchBackfill(msession *MatchmakingSession) error {
 
 		partySize := 1
 		if msession.Party != nil {
-			partySize = len(msession.Party.List())
+			partySize = min(1, len(msession.Party.List()))
 		}
 
 		logger.Debug("Searching for unfilled lobbies.", zap.String("query", query))
@@ -499,17 +514,10 @@ func listMatches(ctx context.Context, p *EvrPipeline, limit int, minSize int, ma
 }
 
 func buildMatchQueryFromLabel(ml *MatchLabel, partySize int) string {
-	var boost int = 0 // Default booster
-
 	qparts := []string{
-		// MUST be an open lobby
-		OpenLobby.Query(Must, boost),
-		// MUST be the same lobby type
-		LobbyType(ml.LobbyType).Query(Must, boost),
-		// MUST be the same mode
-		LabelGameMode(ml.Mode).Query(Must, boost),
 		"+label.open:T",
-		// Must not be the same lobby
+		fmt.Sprintf("+label.lobby_type:%s", ml.LobbyType.String()),
+		fmt.Sprintf("+label.mode:%s", ml.Mode.String()),
 	}
 
 	if !ml.ID.IsNil() {
