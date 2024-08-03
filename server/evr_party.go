@@ -89,6 +89,14 @@ func FollowLeader(logger *zap.Logger, msession *MatchmakingSession, nk runtime.N
 		if followerMatchID == leaderMatchID {
 			return
 		}
+		label, err := MatchLabelByID(msession.Context(), nk, leaderMatchID)
+		if err != nil {
+			return
+		}
+		if !label.Open {
+			continue
+		}
+
 		// Try to join the leader's match
 		err = session.evrPipeline.LobbyJoin(session.Context(), logger, leaderMatchID, int(AnyTeam), "", msession)
 		if err == nil {
