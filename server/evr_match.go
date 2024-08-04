@@ -218,19 +218,25 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		return state, true, ""
 	}
 
-	if !state.Open {
-		logger.Warn("Match is closed. Rejecting player.")
-		return state, false, JoinRejectReasonMatchTerminating
-	}
 	// This is a player joining.
 	md := JoinMetadata{}
 	if err := md.UnmarshalMap(metadata); err != nil {
 		return state, false, fmt.Sprintf("failed to unmarshal metadata: %v", err)
 	}
+	if !state.Open {
+		return state, false, JoinRejectReasonMatchTerminating
+	}
 
 	mp, reason := m.playerJoinAttempt(state, md.Presence)
 	if reason != "" {
 		return state, false, reason
+	}
+	var err error
+	if !state.levelLoaded {
+		if state, err = m.MatchStart(ctx, logger, nk, dispatcher, state); err != nil {
+			logger.Error("failed to start session: %v", err)
+			return nil, false, ""
+		}
 	}
 
 	state.presenceMap[mp.GetSessionId()] = mp
@@ -506,15 +512,19 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 				logger.Error("Failed to unmarshal match update: %v", err)
 				continue
 			}
-			logger.Debug("Received match update message: %v", update)
-			gs := state.GameState
-			u := update
-			gs.RoundOver = u.RoundOver
-			gs.MatchOver = u.MatchOver
-			gs.RoundClock = u.RoundClock
-			if u.PauseDuration != 0 {
-				gs.Paused = true
-				gs.unpausingAt = time.Now().Add(u.PauseDuration)
+
+			if state.GameState != nil {
+				logger.Debug("Received match update message: %v", update)
+				gs := state.GameState
+				u := update
+
+				gs.RoundOver = u.RoundOver
+				gs.MatchOver = u.MatchOver
+				gs.RoundClock = u.RoundClock
+				if u.PauseDuration != 0 {
+					gs.Paused = true
+					gs.unpausingAt = time.Now().Add(u.PauseDuration)
+				}
 			}
 
 		default:
@@ -771,7 +781,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		state.Open = false
 
 	case SignalUnlockSession:
-		logger.Debug("ignoring unlock session request")
+		logger.Debug("Unlocking session")
 		state.Open = true
 	default:
 		logger.Warn("Unknown signal: %v", signal.Signal)
