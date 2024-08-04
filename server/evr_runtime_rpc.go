@@ -192,8 +192,9 @@ type MatchRpcRequest struct {
 }
 
 type MatchRpcResponse struct {
-	Timestamp string `json:"timestamp"`
-	Labels    []any  `json:"labels"`
+	SystemStartTime string `json:"system_start_time"`
+	Timestamp       string `json:"timestamp"`
+	Labels          []any  `json:"labels"`
 }
 
 func (r MatchRpcResponse) String() string {
@@ -261,8 +262,9 @@ func MatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime
 	}
 
 	response := MatchRpcResponse{
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-		Labels:    labels,
+		SystemStartTime: nakamaStartTime.UTC().Format(time.RFC3339),
+		Timestamp:       time.Now().UTC().Format(time.RFC3339),
+		Labels:          labels,
 	}
 
 	return response.String(), nil
