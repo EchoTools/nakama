@@ -44,7 +44,7 @@ func TestLobbyFindSessionRequest_UnmarshalJSON(t *testing.T) {
 				SessionSettings: LobbySessionSettings{
 					AppID: "1369078409873402",
 					Mode:  int64(ModeSocialPublic),
-					Level: nil,
+					Level: int64(LevelUnspecified),
 				},
 				Entrants: []Entrant{
 					{
@@ -86,7 +86,7 @@ func TestLobbyFindSessionRequest_UnmarshalJSON(t *testing.T) {
 				SessionSettings: LobbySessionSettings{
 					AppID: "1369078409873402",
 					Mode:  301069346851901302,
-					Level: nil,
+					Level: int64(LevelUnspecified),
 				},
 				Entrants: []Entrant{
 					{
@@ -135,7 +135,7 @@ func TestLobbyFindSessionRequest_UnmarshalJSON(t *testing.T) {
 				SessionSettings: LobbySessionSettings{
 					AppID: "1369078409873402",
 					Mode:  -3791849610740453517,
-					Level: nil,
+					Level: int64(LevelUnspecified),
 				},
 				Entrants: []Entrant{
 					{

@@ -29,7 +29,7 @@ func TestNewSessionSettings(t *testing.T) {
 			want: LobbySessionSettings{
 				AppID: "test",
 				Mode:  1,
-				Level: nil,
+				Level: int64(LevelUnspecified),
 			},
 		},
 	}
@@ -54,7 +54,7 @@ func TestSessionSettings_MarshalJSON(t *testing.T) {
 			s: LobbySessionSettings{
 				AppID: "test",
 				Mode:  1,
-				Level: nil,
+				Level: int64(LevelUnspecified),
 			},
 			want:    []byte(`{"appid":"test","gametype":1,"level":null, "features": ["my_feature"]}`),
 			wantErr: false,
