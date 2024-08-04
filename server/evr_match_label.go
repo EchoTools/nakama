@@ -166,8 +166,10 @@ func (s *MatchLabel) PublicView() *MatchLabel {
 		Players: make([]PlayerInfo, 0),
 	}
 	if ps.LobbyType == PrivateLobby || ps.LobbyType == UnassignedLobby {
-		ps.ID = MatchID{}
-		ps.SpawnedBy = ""
+		// Set teh last 4 bytes of the ID to 0
+		for i := 12; i < 16; i++ {
+			ps.ID.uuid[i] = 0xFF
+		}
 	} else {
 		for i := range s.Players {
 			ps.Players = append(ps.Players, PlayerInfo{
