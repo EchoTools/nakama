@@ -25,6 +25,7 @@ import (
 
 const (
 	MatchmakingStartGracePeriod = 3 * time.Second
+	MadeMatchBackfillDelay      = 15 * time.Second
 )
 
 var (
@@ -122,13 +123,15 @@ type LabelLatencies struct {
 
 // Backfill returns a match that the player can backfill
 func (p *EvrPipeline) GetBackfillCandidates(ctx context.Context, userID uuid.UUID, mode evr.Symbol, partySize int, query string) ([]*MatchLabel, error) {
-
 	labels, err := p.matchmakingRegistry.listUnfilledLobbies(ctx, partySize, query)
 	if err != nil || len(labels) == 0 {
 		return nil, err
 	}
 	open := make([]*MatchLabel, 0, len(labels))
 	for _, label := range labels {
+		if time.Since(label.StartTime) < MadeMatchBackfillDelay {
+			continue
+		}
 		if label.PlayerCount < label.PlayerLimit {
 			open = append(open, label)
 		}
@@ -227,7 +230,6 @@ func (p *EvrPipeline) MatchBackfill(msession *MatchmakingSession) error {
 
 	// Merge the user's config with the global config
 	query = fmt.Sprintf("%s %s %s", query, gconfig.BackfillQueryAddon, config.BackfillQueryAddon)
-
 	for {
 		select {
 		case <-ctx.Done():

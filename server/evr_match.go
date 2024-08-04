@@ -184,6 +184,7 @@ var (
 	JoinRejectReasonDuplicateJoin      = "duplicate join"
 	JoinRejectReasonLobbyFull          = "lobby full"
 	JoinRejectReasonFailedToAssignTeam = "failed to assign team"
+	JoinRejectReasonMatchTerminating   = "match terminating"
 )
 
 // MatchJoinAttempt decides whether to accept or deny the player session.
@@ -202,16 +203,18 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	if presence.GetSessionId() == state.Broadcaster.SessionID {
 
 		logger.Debug("Broadcaster joining the match.")
-		state.broadcaster = presence
-		state.Open = true // Available
-
+		state.server = presence
+		state.Open = true
 		if err := m.updateLabel(dispatcher, state); err != nil {
-			return state, false, fmt.Sprintf("failed to update label: %q", err)
+			return state, false, fmt.Sprintf("failed to update label: %v", err)
 		}
-
 		return state, true, ""
 	}
 
+	if !state.Open {
+		logger.Warn("Match is closed. Rejecting player.")
+		return state, false, JoinRejectReasonMatchTerminating
+	}
 	// This is a player joining.
 	md := JoinMetadata{}
 	if err := md.UnmarshalMap(metadata); err != nil {
@@ -233,17 +236,6 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		"uid":   mp.GetUserId(),
 		"eid":   mp.EntrantID.String()}).Info("Player joining the match.")
 
-	// Tell the broadcaster to load the match if it's not already started
-	if !state.Started {
-		var err error
-		if state, err = m.MatchStart(ctx, logger, nk, dispatcher, state); err != nil {
-			return state, false, fmt.Sprintf("failed to start session: %v", err)
-		}
-	}
-
-	if err := m.updateLabel(dispatcher, state); err != nil {
-		return state, false, fmt.Sprintf("failed to update label: %v", err)
-	}
 	tags := map[string]string{
 		"mode":     state.Mode.String(),
 		"level":    state.Level.String(),
@@ -252,6 +244,17 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		"group_id": state.GetGroupID().String(),
 	}
 	nk.MetricsCounterAdd("match_entrant_join_attempt_count", tags, 1)
+
+	// Set the start time to now, which will trigger MatchStart() to start the match.
+	if !state.Started() {
+		state.StartTime = time.Now()
+
+	}
+
+	if err := m.updateLabel(dispatcher, state); err != nil {
+		return state, false, fmt.Sprintf("failed to update label: %v", err)
+	}
+
 	return state, true, mp.String()
 }
 
@@ -301,7 +304,7 @@ func (m *EvrMatch) playerJoinAttempt(state *MatchLabel, mp EvrMatchPresence) (*E
 	}
 
 	// If the match is closed and player has a role assigned, use it.
-	if !state.Open && mp.RoleAlignment != evr.TeamUnassigned {
+	if mp.RoleAlignment != evr.TeamUnassigned {
 		return &mp, ""
 	}
 
@@ -368,13 +371,19 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 		logger.Error("state not a valid lobby state object")
 		return nil
 	}
+	if state.Started() && state.server == nil && len(state.presenceMap) == 0 {
+		// If the match is empty, and the broadcaster has left, then shut down.
+		logger.Debug("Match is empty. Shutting down.")
+		return nil
+	}
 
 	// if the broadcaster is in the presences, then shut down.
 	for _, p := range presences {
 		if p.GetSessionId() == state.Broadcaster.SessionID {
-			state.broadcaster = nil
+			state.server = nil
+
 			logger.Debug("Broadcaster left the match. Shutting down.")
-			m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, 20)
+			return m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, 20)
 		}
 	}
 
@@ -417,7 +426,9 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 
 	if len(rejects) > 0 {
 		msg := evr.NewBroadcasterPlayersRejected(evr.PlayerRejectionReasonLobbyEnding, rejects...)
-		m.dispatchMessages(ctx, logger, dispatcher, []evr.Message{msg}, []runtime.Presence{state.broadcaster}, nil)
+		if err := m.dispatchMessages(ctx, logger, dispatcher, []evr.Message{msg}, []runtime.Presence{state.server}, nil); err != nil {
+			logger.Warn("Failed to dispatch message: %v", err)
+		}
 	}
 	if len(state.presenceMap) == 0 {
 		// Lock the match
@@ -440,46 +451,34 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		logger.Error("state not a valid lobby state object")
 		return nil
 	}
+	var err error
 
-	if state.terminateTick > 0 && tick >= state.terminateTick {
+	// If the match is closed, and the termination tick has been reached, then terminate the match.
+	if !state.Open && state.terminateTick != 0 && tick >= state.terminateTick {
 		logger.Debug("Match termination tick reached.")
 		return m.MatchTerminate(ctx, logger, db, nk, dispatcher, tick, state, 0)
 	}
 
-	var err error
-
-	if state.Started {
-		if len(state.presenceMap) == 0 {
-			state.emptyTicks++
-
-			if state.emptyTicks > 20*state.tickRate {
-				if state.Open {
-					logger.Warn("Started match has been empty for too long. Shutting down.")
-				}
-				return nil
-			}
+	// If the match is empty, and the match has been empty for too long, then terminate the match.
+	if len(state.presenceMap) == 0 {
+		state.emptyTicks++
+		if state.Open && state.Started() && state.terminateTick == 0 && state.emptyTicks > 20*state.tickRate {
+			logger.Warn("Started match has been empty for too long. Shutting down.")
+			return m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, 20)
 		}
 
-		// Open the match 15 seconds after the start time.
-		if !state.Open && !state.isTerminating && time.Now().After(state.StartTime.Add(MatchOpenDelaySecs)) {
-			state.Open = true
-			if err := m.updateLabel(dispatcher, state); err != nil {
-				return nil
-			}
-		}
+	}
 
-	} else if state.StartTime.Before(time.Now().Add(-10 * time.Minute)) {
-		if state.LobbyType != UnassignedLobby {
-			logger.Error("Match has not started on time. Shutting down.")
-			// Tell the broadcaster to load the level, which it will immediately shut down.
+	// If the match is prepared and the start time has been reached, start it.
+	if state.LobbyType != UnassignedLobby {
+		if !state.levelLoaded && !state.StartTime.IsZero() && time.Now().After(state.StartTime) {
 			if state, err = m.MatchStart(ctx, logger, nk, dispatcher, state); err != nil {
 				logger.Error("failed to start session: %v", err)
 				return nil
 			}
-			if err := m.updateLabel(dispatcher, state); err != nil {
-				return nil
-			}
-
+		}
+		if err := m.updateLabel(dispatcher, state); err != nil {
+			return nil
 		}
 	}
 
@@ -529,9 +528,10 @@ func (m *EvrMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, db
 		logger.Error("state not a valid lobby state object")
 		return nil
 	}
-	logger.Info("MatchTerminate called. %v", state)
+	state.Open = false
+	logger.WithField("state", state).Info("MatchTerminate called.")
 	nk.MetricsCounterAdd("match_terminate_count", state.MetricsTags(), 1)
-	if state.broadcaster != nil {
+	if state.server != nil {
 		// Disconnect the players
 		for _, presence := range state.presenceMap {
 			logger.WithFields(map[string]any{
@@ -542,11 +542,11 @@ func (m *EvrMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, db
 		}
 		// Disconnect the broadcasters session
 		logger.WithFields(map[string]any{
-			"uid": state.broadcaster.GetUserId(),
-			"sid": state.broadcaster.GetSessionId(),
+			"uid": state.server.GetUserId(),
+			"sid": state.server.GetSessionId(),
 		}).Warn("Match terminating, disconnecting broadcaster.")
 
-		nk.SessionDisconnect(ctx, state.broadcaster.GetSessionId(), runtime.PresenceReasonDisconnect)
+		nk.SessionDisconnect(ctx, state.server.GetSessionId(), runtime.PresenceReasonDisconnect)
 	}
 
 	return nil
@@ -558,16 +558,17 @@ func (m *EvrMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db 
 		logger.Error("state not a valid lobby state object")
 		return nil
 	}
-	logger.Info("MatchShutdown called.")
+	logger.WithField("state", state).Info("MatchShutdown called.")
 	nk.MetricsCounterAdd("match_shutdown_count", state.MetricsTags(), 1)
-	state.isTerminating = true
 	state.Open = false
+	state.terminateTick = tick + int64(graceSeconds)*state.tickRate
+
 	if err := m.updateLabel(dispatcher, state); err != nil {
 		logger.Error("failed to update label: %v", err)
 		return nil
 	}
 
-	if state.broadcaster != nil {
+	if state.server != nil {
 		for _, mp := range state.presenceMap {
 
 			if err := nk.StreamUserKick(StreamModeMatchAuthoritative, mp.EntrantID.String(), "", mp.GetNodeId(), mp); err != nil {
@@ -578,8 +579,6 @@ func (m *EvrMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db 
 			}
 		}
 	}
-
-	state.terminateTick = tick + int64(graceSeconds)*state.tickRate
 
 	return state
 }
@@ -653,14 +652,6 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 			return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal match label: %v", err)}.String()
 		}
 
-		state.Started = false
-
-		if newState.Mode == evr.ModeArenaPublic || newState.Mode == evr.ModeCombatPublic {
-			state.Open = false
-		} else {
-			state.Open = true
-		}
-
 		state.Mode = newState.Mode
 		switch newState.Mode {
 		case evr.ModeArenaPublic, evr.ModeSocialPublic, evr.ModeCombatPublic:
@@ -711,15 +702,17 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		}
 
 		state.StartTime = newState.StartTime
-		if state.StartTime.IsZero() || state.StartTime.Before(time.Now()) {
-			state.StartTime = time.Now()
+
+		// If the start time is in the past, set it to now.
+		// If the start time is not set, set it to 10 minutes from now.
+		if state.StartTime.IsZero() {
+			state.StartTime = time.Now().UTC().Add(10 * time.Minute)
+		} else if state.StartTime.Before(time.Now()) {
+			state.StartTime = time.Now().UTC()
 		}
-		state.sessionStartExpiry = tick + (15 * 60 * state.tickRate)
 
 		switch state.Mode {
-		case evr.ModeArenaPublic:
-			state.PlayerLimit = state.TeamSize * 2
-		case evr.ModeCombatPublic:
+		case evr.ModeArenaPublic, evr.ModeCombatPublic:
 			state.PlayerLimit = state.TeamSize * 2
 		default:
 			state.PlayerLimit = int(state.MaxSize)
@@ -741,18 +734,13 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 			return state, SignalResponse{Message: fmt.Sprintf("failed to start session: %v", err)}.String()
 		}
 
-	case SignalEndSession:
-		state.Open = false
-		state.isTerminating = true
-
 	case SignalLockSession:
 		logger.Debug("Locking session")
 		state.Open = false
 
 	case SignalUnlockSession:
 		logger.Debug("ignoring unlock session request")
-		//state.Open = true
-
+		state.Open = true
 	default:
 		logger.Warn("Unknown signal: %v", signal.Signal)
 		return state, SignalResponse{Success: false, Message: "unknown signal"}.String()
@@ -768,23 +756,23 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 }
 
 func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, state *MatchLabel) (*MatchLabel, error) {
-	channel := uuid.Nil
+	groupID := uuid.Nil
 	if state.GroupID != nil {
-		channel = *state.GroupID
+		groupID = *state.GroupID
 	}
-	state.Started = true
-	state.StartTime = time.Now()
+
 	entrants := make([]evr.EvrId, 0)
-	message := evr.NewGameServerSessionStart(state.ID.UUID(), channel, state.MaxSize, uint8(state.LobbyType), state.Broadcaster.AppId, state.Mode, state.Level, state.RequiredFeatures, entrants)
+	message := evr.NewGameServerSessionStart(state.ID.UUID(), groupID, state.MaxSize, uint8(state.LobbyType), state.Broadcaster.AppId, state.Mode, state.Level, state.RequiredFeatures, entrants)
 	logger.WithField("message", message).Info("Starting session.")
 	messages := []evr.Message{
 		message,
 	}
 	nk.MetricsCounterAdd("match_start_count", state.MetricsTags(), 1)
 	// Dispatch the message for delivery.
-	if err := m.dispatchMessages(ctx, logger, dispatcher, messages, []runtime.Presence{state.broadcaster}, nil); err != nil {
+	if err := m.dispatchMessages(ctx, logger, dispatcher, messages, []runtime.Presence{state.server}, nil); err != nil {
 		return state, fmt.Errorf("failed to dispatch message: %v", err)
 	}
+	state.levelLoaded = true
 	return state, nil
 }
 

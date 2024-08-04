@@ -892,7 +892,7 @@ func (s *sessionWS) Close(msg string, reason runtime.PresenceReason, envelopes .
 
 	isDebug := s.logger.Core().Enabled(zap.DebugLevel)
 	if isDebug {
-		s.logger.Debug("Cleaning up closed client connection")
+		//s.logger.Debug("Cleaning up closed client connection")
 	}
 
 	// When connection close originates internally in the session, ensure cleanup of external resources and references.

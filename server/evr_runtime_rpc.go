@@ -982,7 +982,7 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 			TeamSize:         request.TeamSize,
 			Level:            request.Level.Symbol(),
 			RequiredFeatures: request.RequiredFeatures,
-			StartTime:        request.StartTime,
+			StartTime:        request.StartTime.UTC(),
 			SpawnedBy:        request.SpawnedBy,
 			MaxSize:          MatchMaxSize,
 			GroupID:          &gid,

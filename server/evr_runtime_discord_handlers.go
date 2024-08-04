@@ -344,7 +344,7 @@ func (d *DiscordAppBot) handlePrepareMatch(ctx context.Context, logger runtime.L
 	// Prepare the session for the match.
 	state := &MatchLabel{}
 	state.SpawnedBy = userID
-	state.StartTime = startTime
+	state.StartTime = startTime.UTC()
 	state.MaxSize = MatchMaxSize
 	state.Mode = mode
 	state.Open = true

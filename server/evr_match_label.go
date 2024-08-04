@@ -16,8 +16,7 @@ type MatchLabel struct {
 	Open        bool             `json:"open"`                  // Whether the lobby is open to new players (Matching Only)
 	LobbyType   LobbyType        `json:"lobby_type"`            // The type of lobby (Public, Private, Unassigned) (EVR)
 	Broadcaster MatchBroadcaster `json:"broadcaster,omitempty"` // The broadcaster's data
-	Started     bool             `json:"started"`               // Whether the match has started.
-	StartTime   time.Time        `json:"start_time"`            // The time the match was started.
+	StartTime   time.Time        `json:"start_time,omitempty"`  // The time the match was, or will be started.
 	SpawnedBy   string           `json:"spawned_by,omitempty"`  // The userId of the player that spawned this match.
 	GroupID     *uuid.UUID       `json:"group_id,omitempty"`    // The channel id of the broadcaster. (EVR)
 	GuildID     string           `json:"guild_id,omitempty"`    // The guild id of the broadcaster. (EVR)
@@ -38,7 +37,7 @@ type MatchLabel struct {
 	Players        []PlayerInfo                 `json:"players,omitempty"`         // The displayNames of the players (by team name) in the match.
 	TeamAlignments map[string]int               `json:"team_alignments,omitempty"` // map[userID]TeamIndex
 	presenceMap    map[string]*EvrMatchPresence // [sessionId]EvrMatchPresence
-	broadcaster    runtime.Presence             // The broadcaster's presence
+	server         runtime.Presence             // The broadcaster's presence
 
 	emptyTicks            int64                // The number of ticks the match has been empty.
 	sessionStartExpiry    int64                // The tick count at which the match will be shut down if it has not started.
@@ -46,7 +45,8 @@ type MatchLabel struct {
 	tickRate              int64                // The number of ticks per second.
 	joinTimestamps        map[string]time.Time // The timestamps of when players joined the match. map[sessionId]time.Time
 	terminateTick         int64                // The tick count at which the match will be shut down.
-	isTerminating         bool                 // Whether the match is shutting down.
+	updateLabel           bool                 // Whether the label needs to be updated.
+	levelLoaded           bool                 // Whether the server has been sent the start instruction.
 }
 
 // NewMatchLabel is a helper function to create a new match state. It returns the state, params, label json, and err.
@@ -112,6 +112,10 @@ func (s *MatchLabel) RoleCount(role int) int {
 	return count
 }
 
+func (s *MatchLabel) Started() bool {
+	return !s.StartTime.IsZero() && time.Now().After(s.StartTime)
+}
+
 func (s *MatchLabel) GetLabel() string {
 	labelJson, err := json.Marshal(s)
 	if err != nil {
@@ -136,7 +140,6 @@ func (s *MatchLabel) PublicView() *MatchLabel {
 		LobbyType:        s.LobbyType,
 		ID:               s.ID,
 		Open:             s.Open,
-		Started:          s.Started,
 		StartTime:        s.StartTime,
 		GroupID:          s.GroupID,
 		GuildID:          s.GuildID,

@@ -484,7 +484,7 @@ func TestEvrMatch_MatchLoop(t *testing.T) {
 						t.Fatalf("error creating new match state: %v", err)
 					}
 					state.sessionStartExpiry = 10 * 10
-					state.broadcaster = &Presence{}
+					state.server = &Presence{}
 					return state
 				}(),
 
@@ -503,8 +503,7 @@ func TestEvrMatch_MatchLoop(t *testing.T) {
 						t.Fatalf("error creating new match state: %v", err)
 					}
 					state.sessionStartExpiry = 10 * 10
-					state.broadcaster = &Presence{}
-					state.Started = true
+					state.server = &Presence{}
 
 					return state
 				}(),
@@ -521,11 +520,10 @@ func TestEvrMatch_MatchLoop(t *testing.T) {
 			args: args{
 				tick: 0,
 				state_: &MatchLabel{
-					Started:     true,
-					StartTime:   time.Now().Add(-30 * time.Minute),
-					broadcaster: &Presence{},
-					emptyTicks:  10 * 30,
-					tickRate:    10,
+					StartTime:  time.Now().Add(-30 * time.Minute),
+					server:     &Presence{},
+					emptyTicks: 10 * 30,
+					tickRate:   10,
 				},
 				messages: []runtime.MatchData{},
 			},
@@ -559,7 +557,6 @@ func TestEvrMatch_MatchLoop(t *testing.T) {
 						t.Fatalf("error creating new match state: %v", err)
 					}
 					state.sessionStartExpiry = 10 * 10
-					state.Started = false
 					state.presenceMap = map[string]*EvrMatchPresence{
 						uuid.Must(uuid.NewV4()).String(): {},
 					}
