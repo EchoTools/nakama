@@ -998,26 +998,6 @@ func (r *LocalDiscordRegistry) isSystemGroupMember(ctx context.Context, userID u
 }
 
 func (d *LocalDiscordRegistry) ProcessRequest(ctx context.Context, session *sessionWS, in evr.Message) error {
-
-	groupID, ok := ctx.Value(ctxGroupIDKey{}).(uuid.UUID)
-	if !ok {
-		return nil
-	}
-
-	// Check the cache for the "<groupID>:#echovrce-debug" value that will provide the channelID
-	channelID, found := d.Get(groupID.String() + ":#echovrce-debug")
-	if !found {
-		return nil
-	}
-
-	switch in := in.(type) {
-	case *evr.LobbyCreateSessionRequest, *evr.LobbyFindSessionRequest, *evr.LobbyJoinSessionRequest:
-		// Message the channel with the request info
-		request := fmt.Sprintf("%T: %v", in, in)
-		if _, err := d.bot.ChannelMessageSend(channelID, request); err != nil {
-			return fmt.Errorf("error sending message: %w", err)
-		}
-	}
 	return nil
 }
 
