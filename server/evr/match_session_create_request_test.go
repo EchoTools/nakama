@@ -68,7 +68,7 @@ func TestLobbyCreateSessionRequest_Unmarshal(t *testing.T) {
 		SessionSettings: LobbySessionSettings{
 			AppID: "1369078409873402",
 			Mode:  691594351282457603,
-			Level: lo.ToPtr(int64(0)),
+			Level: int64(LevelUnspecified),
 		},
 		Entrants: []Entrant{
 			{
@@ -139,7 +139,7 @@ func TestLobbyCreateSessionRequest_GameType(t *testing.T) {
 		SessionSettings: LobbySessionSettings{
 			AppID: "1369078409873402",
 			Mode:  691594351282457603,
-			Level: lo.ToPtr(int64(0)),
+			Level: int64(LevelUnspecified),
 		},
 		Entrants: []Entrant{
 			{
@@ -203,7 +203,7 @@ func TestLobbyCreateSessionRequest_Spectator(t *testing.T) {
 		SessionSettings: LobbySessionSettings{
 			AppID: "1369078409873402",
 			Mode:  691594351282457603,
-			Level: lo.ToPtr(int64(0)),
+			Level: int64(LevelUnspecified),
 		},
 	}
 

@@ -42,7 +42,7 @@ func TestLobbyJoinSessionRequest(t *testing.T) {
 				SessionSettings: LobbySessionSettings{
 					AppID: "1369078409873402",
 					Mode:  0,
-					Level: nil,
+					Level: int64(LevelUnspecified),
 				},
 				Entrants: []Entrant{
 					{
@@ -82,7 +82,7 @@ func TestLobbyJoinSessionRequest(t *testing.T) {
 				SessionSettings: LobbySessionSettings{
 					AppID: "1369078409873402",
 					Mode:  0,
-					Level: nil,
+					Level: int64(LevelUnspecified),
 				},
 				Entrants: []Entrant{
 					{
@@ -120,7 +120,7 @@ func TestLobbyJoinSessionRequest(t *testing.T) {
 				SessionSettings: LobbySessionSettings{
 					AppID: "1369078409873402",
 					Mode:  0,
-					Level: nil,
+					Level: int64(LevelUnspecified),
 				},
 				Entrants: []Entrant{
 					{
