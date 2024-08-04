@@ -350,7 +350,7 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 	} else {
 		maxCount = 8
 	}
-	countMultiple := 1
+	countMultiple := 2
 
 	metricTags := map[string]string{
 		"type":       msession.Label.LobbyType.String(),
