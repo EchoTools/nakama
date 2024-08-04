@@ -484,7 +484,6 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 	p.metrics.CustomCounter("lobbyjoinsession_active_count", metricsTags, 1)
 
 	switch {
-
 	case ml.LobbyType == UnassignedLobby:
 		err = status.Errorf(codes.NotFound, "match is not a lobby")
 	case !ml.Open:
@@ -498,7 +497,9 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 
 		if !isDeveloper {
 			// Let developers join public matches however they want
-
+			if time.Since(ml.StartTime) < MadeMatchBackfillDelay {
+				err = status.Errorf(codes.PermissionDenied, "match is newly started public match")
+			}
 			switch request.GetAlignment() {
 			case int8(Spectator):
 				if ml.Mode == evr.ModeSocialPublic || ml.Mode == evr.ModeSocialPrivate {

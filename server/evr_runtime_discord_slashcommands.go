@@ -2503,7 +2503,7 @@ func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runt
 		if state.LobbyType == UnassignedLobby {
 			status = "Unassigned"
 		} else if state.Size == 0 {
-			if !state.Started {
+			if !state.Started() {
 				spawnedBy := "unknown"
 				if state.SpawnedBy != "" {
 					spawnedBy, err = GetDiscordIDByUserID(ctx, d.db, state.SpawnedBy)
