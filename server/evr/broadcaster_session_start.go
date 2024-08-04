@@ -121,21 +121,54 @@ func NewGameServerSessionStart(sessionID uuid.UUID, channel uuid.UUID, playerLim
 type LobbySessionSettings struct {
 	AppID    string   `json:"appid"`
 	Mode     int64    `json:"gametype"`
-	Level    *int64   `json:"level"`
+	Level    int64    `json:"level"`
 	Features []string `json:"features,omitempty"`
 }
 
-func NewSessionSettings(appID string, mode Symbol, level Symbol, features []string) LobbySessionSettings {
+func (s *LobbySessionSettings) MarshalJSON() ([]byte, error) {
+	if s.Level == 0 {
+		s.Level = int64(LevelUnspecified)
+	}
+	type Alias LobbySessionSettings
+	return json.Marshal(&struct {
+		Level int64 `json:"level"`
+		*Alias
+	}{
+		Level: s.Level,
+		Alias: (*Alias)(s),
+	})
+}
 
+func (s *LobbySessionSettings) UnmarshalJSON(data []byte) error {
+	type Alias LobbySessionSettings
+	aux := &struct {
+		*Alias
+	}{
+		Alias: (*Alias)(s),
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	s.Level = aux.Level
+	s.Features = aux.Features
+	s.AppID = aux.AppID
+	s.Mode = aux.Mode
+	return nil
+}
+
+func NewSessionSettings(appID string, mode Symbol, level Symbol, features []string) LobbySessionSettings {
+	if level == 0 {
+		level = LevelUnspecified
+	}
 	settings := LobbySessionSettings{
 		AppID:    appID,
 		Mode:     int64(mode),
-		Level:    nil,
+		Level:    int64(level),
 		Features: features,
 	}
 	if level != 0 {
 		l := int64(level)
-		settings.Level = &l
+		settings.Level = l
 	}
 	return settings
 }
