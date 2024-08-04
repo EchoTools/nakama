@@ -374,11 +374,12 @@ func (p *EvrPipeline) newParkingMatch(logger *zap.Logger, session *sessionWS, co
 	if err != nil {
 		return fmt.Errorf("failed to create parking match: %v", err)
 	}
-	if err := p.runtimeModule.StreamUserUpdate(StreamModeGameServer, session.ID().String(), "", StreamLabelMatchService, session.UserID().String(), session.ID().String(), true, false, matchIDStr); err != nil {
-		return fmt.Errorf("failed to update broadcaster presence: %v", err)
-	}
 
 	matchID := MatchIDFromStringOrNil(matchIDStr)
+
+	if err := UpdateGameServerBySessionID(p.runtimeModule, session.userID, session.id, matchID); err != nil {
+		return fmt.Errorf("failed to update game server by session ID: %v", err)
+	}
 
 	found, allowed, _, reason, _, _ := p.matchRegistry.JoinAttempt(session.Context(), matchID.UUID(), matchID.Node(), session.UserID(), session.ID(), session.Username(), session.Expiry(), session.Vars(), session.ClientIP(), session.ClientPort(), p.node, nil)
 	if !found {
@@ -740,6 +741,10 @@ func (p *EvrPipeline) broadcasterPlayerSessionsUnlocked(ctx context.Context, log
 		logger.Warn("Failed to signal match", zap.Error(err))
 	}
 	return nil
+}
+
+func UpdateGameServerBySessionID(nk runtime.NakamaModule, userID uuid.UUID, sessionID uuid.UUID, matchID MatchID) error {
+	return nk.StreamUserUpdate(StreamModeGameServer, sessionID.String(), "", StreamLabelMatchService, userID.String(), sessionID.String(), true, false, matchID.String())
 }
 
 func GameServerBySessionID(nk runtime.NakamaModule, sessionID uuid.UUID) (MatchID, runtime.Presence, error) {
