@@ -20,14 +20,14 @@ type GenericRemoteLog struct {
 }
 
 func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logger, session *sessionWS, evrID evr.EvrId, request *evr.RemoteLogSet) error {
-	logger.Debug("Processing remote log set", zap.Any("logs", request.Logs))
+
 	updates := MapOf[uuid.UUID, *MatchGameStateUpdate]{}
 	for _, str := range request.Logs {
 		var update *MatchGameStateUpdate
 
 		// Unmarshal the top-level to check the message type.
 
-		entry := GenericRemoteLog{}
+		entry := map[string]interface{}{}
 
 		data := []byte(str)
 		if err := json.Unmarshal(data, &entry); err != nil {
@@ -35,8 +35,20 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				logger.Debug("Non-JSON log entry", zap.String("entry", str))
 			}
 		}
+		if _, ok := entry["message"]; !ok {
+			logger.Error("Remote log entry has no message type", zap.String("entry", str))
+			return nil
+		}
 
-		switch strings.ToLower(entry.MessageType) {
+		messageType, ok := entry["message"].(string)
+		if !ok {
+			logger.Error("Remote log entry has invalid message type", zap.String("entry", str))
+			return nil
+		}
+		messageType = strings.ToLower(messageType)
+
+		logger.Debug("Processing remote log set", zap.Any("logs", entry))
+		switch strings.ToLower(messageType) {
 		case "goal":
 			// This is a goal message.
 			goal := evr.RemoteLogGoal{}
@@ -153,7 +165,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 						OwnerID: session.userID.String(),
 						Object: &api.WriteStorageObject{
 							Collection:      RemoteLogStorageCollection,
-							Key:             entry.MessageType,
+							Key:             messageType,
 							Value:           str,
 							PermissionRead:  &wrapperspb.Int32Value{Value: int32(1)},
 							PermissionWrite: &wrapperspb.Int32Value{Value: int32(0)},
