@@ -420,6 +420,14 @@ var (
 							Value: "echo_arena_private",
 						},
 						{
+							Name:  "Echo Arena Public",
+							Value: "echo_arena",
+						},
+						{
+							Name:  "Echo Combat Public",
+							Value: "echo_combat",
+						},
+						{
 							Name:  "Echo Combat Private",
 							Value: "echo_combat_private",
 						},
@@ -1695,7 +1703,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			options := i.ApplicationCommandData().Options
 
 			if member == nil {
-				return simpleInteractionResponse(s, i, fmt.Sprintf("this command must be used from a guild"))
+				return simpleInteractionResponse(s, i, "this command must be used from a guild")
 
 			}
 			mode := evr.ModeArenaPrivate
@@ -1712,17 +1720,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 			}
 
-			// validate the mode
-			if _, ok := evr.LevelsByMode[mode]; !ok {
-				return fmt.Errorf("invalid mode `%s`", mode)
-			}
-
-			// Validate/Set the level
 			if level == evr.LevelUnspecified {
-				// Pick a random level of the mode
 				level = evr.LevelsByMode[mode][rand.Intn(len(evr.LevelsByMode[mode]))]
 			} else if _, ok := evr.LevelsByMode[mode]; !ok {
-				return fmt.Errorf("invalid level `%s`", level)
+				return fmt.Errorf("invalid mode `%s`", mode)
 			}
 
 			startTime := time.Now()
