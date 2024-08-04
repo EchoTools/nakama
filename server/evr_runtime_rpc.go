@@ -973,6 +973,9 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 			request.SpawnedBy = userID
 		}
 	}
+	if request.StartTime.Before(time.Now().Add(10 * time.Minute)) {
+		request.StartTime = time.Now().Add(10 * time.Minute)
+	}
 
 	gid := uuid.FromStringOrNil(groupID)
 	label = request.MatchLabel

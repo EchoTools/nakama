@@ -259,7 +259,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 			if m.isServerHost {
 				roles = append(roles, "server-host")
 			}
-			if m.canAllocate {
+			if m.canAllocateNonDefault {
 				roles = append(roles, "allocator")
 			}
 			if len(roles) > 0 {
@@ -300,6 +300,9 @@ func (d *DiscordAppBot) handlePrepareMatch(ctx context.Context, logger runtime.L
 	if err != nil {
 		return nil, status.Errorf(codes.NotFound, "user not found: %s", discordID)
 	}
+	qparts := []string{
+		"+label.lobby_type:unassigned",
+	}
 
 	// Find a parking match to prepare
 	minSize := 1
@@ -310,24 +313,29 @@ func (d *DiscordAppBot) handlePrepareMatch(ctx context.Context, logger runtime.L
 		return nil, status.Errorf(codes.NotFound, "guild not found: %s", guildID)
 	}
 
-	if region.IsNil() {
-		region = evr.ToSymbol("default")
-	}
-	// Get a list of the groups that this user has moderator access to
+	qparts = append(qparts, "+label.broadcaster.group_id:%s", groupID)
+
+	// Get a list of the groups that this user has allocate access to
 	memberships, err := d.discordRegistry.GetGuildGroupMemberships(ctx, uuid.FromStringOrNil(userID), nil)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to get guild group memberships: %v", err)
 	}
-
-	groupIDs := make([]string, 0, len(memberships))
+	requirePublic := true
 	for _, membership := range memberships {
-		if !membership.canAllocate {
-			continue
+		if membership.GuildGroup.ID() == uuid.FromStringOrNil(groupID) && membership.canAllocateNonDefault {
+			requirePublic = false
+			break
 		}
-		groupIDs = append(groupIDs, membership.GuildGroup.ID().String())
 	}
 
-	query := fmt.Sprintf("+label.lobby_type:unassigned +label.broadcaster.group_ids:/(%s)/ +label.broadcaster.regions:%s", strings.Join(groupIDs, "|"), region.Token().String())
+	if requirePublic {
+		qparts = append(qparts, "+label.broadcaster.regions:%s", evr.DefaultRegion.String())
+	}
+	if region != evr.DefaultRegion {
+		qparts = append(qparts, "+label.broadcaster.regions:%s", region.String())
+	}
+	query := strings.Join(qparts, " ")
+
 	matches, err := d.nk.MatchList(ctx, 100, true, "", &minSize, &maxSize, query)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to list matches: %v", err)
