@@ -221,6 +221,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		}
 		whoami.MatchIDs = nil
 	}
+
 	fields := []*discordgo.MessageEmbedField{
 		{Name: "Nakama ID", Value: whoami.NakamaID.String(), Inline: true},
 		{Name: "Create Time", Value: fmt.Sprintf("<t:%d:R>", whoami.CreateTime.Unix()), Inline: false},
@@ -313,7 +314,7 @@ func (d *DiscordAppBot) handlePrepareMatch(ctx context.Context, logger runtime.L
 		return nil, status.Errorf(codes.NotFound, "guild not found: %s", guildID)
 	}
 
-	qparts = append(qparts, "+label.broadcaster.group_id:%s", groupID)
+	qparts = append(qparts, fmt.Sprintf("+label.broadcaster.group_id:%s", groupID))
 
 	// Get a list of the groups that this user has allocate access to
 	memberships, err := d.discordRegistry.GetGuildGroupMemberships(ctx, uuid.FromStringOrNil(userID), nil)
@@ -331,6 +332,7 @@ func (d *DiscordAppBot) handlePrepareMatch(ctx context.Context, logger runtime.L
 	if requirePublic {
 		qparts = append(qparts, "+label.broadcaster.regions:%s", evr.DefaultRegion.String())
 	}
+
 	if region != evr.DefaultRegion {
 		qparts = append(qparts, "+label.broadcaster.regions:%s", region.String())
 	}
@@ -352,7 +354,13 @@ func (d *DiscordAppBot) handlePrepareMatch(ctx context.Context, logger runtime.L
 	// Prepare the session for the match.
 	state := &MatchLabel{}
 	state.SpawnedBy = userID
-	state.StartTime = startTime.UTC()
+
+	if requirePublic {
+		state.StartTime = startTime.UTC().Add(1 * time.Minute)
+	} else {
+		state.StartTime = startTime.UTC().Add(10 * time.Minute)
+	}
+
 	state.MaxSize = MatchMaxSize
 	state.Mode = mode
 	state.Open = true

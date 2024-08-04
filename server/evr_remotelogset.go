@@ -20,7 +20,7 @@ type GenericRemoteLog struct {
 }
 
 func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logger, session *sessionWS, evrID evr.EvrId, request *evr.RemoteLogSet) error {
-
+	logger.Debug("Processing remote log set", zap.Any("request", request))
 	updates := MapOf[uuid.UUID, *MatchGameStateUpdate]{}
 	for _, str := range request.Logs {
 		var update *MatchGameStateUpdate
