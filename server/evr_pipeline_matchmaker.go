@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/gofrs/uuid/v5"
-	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/samber/lo"
@@ -41,11 +40,11 @@ func (p *EvrPipeline) lobbyMatchmakerStatusRequest(ctx context.Context, logger *
 func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logger, session *sessionWS, loginSessionID uuid.UUID, groupID uuid.UUID, requireMembership bool) error {
 
 	if groupID == uuid.Nil {
-		var ok bool
-		groupID, ok = ctx.Value(ctxGroupIDKey{}).(uuid.UUID)
-		if !ok {
-			return status.Errorf(codes.InvalidArgument, "Failed to get group ID from context")
+		md, err := GetAccountMetadata(ctx, p.db, session.userID.String())
+		if err != nil {
+			return status.Errorf(codes.Internal, "Failed to get account metadata: %v", err)
 		}
+		groupID = md.GetActiveGroupID()
 	}
 
 	// Get the EvrID from the context
@@ -314,27 +313,20 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 	requiredFeatures := ctx.Value(ctxRequiredFeaturesKey{}).([]string)
 
 	// Get the GroupID from the context
-	groupID := request.GroupID
-	if groupID != uuid.Nil {
-		groups, _, err := p.runtimeModule.UserGroupsList(ctx, session.userID.String(), 200, nil, "")
+	if request.GroupID != uuid.Nil {
+		groupIDs, err := GetGuildGroupIDsByUser(ctx, p.db, session.userID.String())
 		if err != nil {
-			return status.Errorf(codes.Internal, "Failed to get user groups: %v", err)
+			return status.Errorf(codes.Internal, "Failed to get group IDs: %v", err)
 		}
-
-		groupStr := groupID.String()
-		isMember := lo.ContainsBy(groups, func(g *api.UserGroupList_UserGroup) bool {
-			return g.Group.Id == groupStr && g.State.GetValue() <= int32(api.UserGroupList_UserGroup_MEMBER)
-		})
-		if !isMember {
-			groupID = uuid.Nil
+		found := false
+		for _, gid := range groupIDs {
+			if gid == request.GroupID.String() {
+				found = true
+				break
+			}
 		}
-	}
-
-	if groupID == uuid.Nil {
-		var ok bool
-		groupID, ok = ctx.Value(ctxGroupIDKey{}).(uuid.UUID)
-		if !ok {
-			return status.Errorf(codes.InvalidArgument, "Failed to get group ID from context")
+		if !found {
+			request.GroupID = uuid.Nil
 		}
 	}
 
@@ -355,12 +347,20 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 	loginSessionID := request.LoginSessionID
 
 	// Check for membership and suspensions on this channel. The user will not be allowed to create lobby's
-	if err := p.authorizeMatchmaking(ctx, logger, session, loginSessionID, groupID, true); err != nil {
+	if err := p.authorizeMatchmaking(ctx, logger, session, loginSessionID, request.GroupID, true); err != nil {
 		switch status.Code(err) {
 		case codes.Internal:
 			logger.Warn("Failed to authorize matchmaking, allowing player to continue. ", zap.Error(err))
 		default:
 			return response.SendErrorToSession(session, err)
+		}
+	}
+
+	if request.GroupID == uuid.Nil {
+		var ok bool
+		request.GroupID, ok = ctx.Value(ctxGroupIDKey{}).(uuid.UUID)
+		if !ok {
+			return status.Errorf(codes.InvalidArgument, "Failed to get group ID from context")
 		}
 	}
 
