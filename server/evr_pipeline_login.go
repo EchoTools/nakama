@@ -830,6 +830,7 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 				if !ok {
 					serverProfile.Statistics[groupName] = make(map[string]evr.MatchStatistic)
 				}
+				matchStat.Operand = stat.Operand
 				serverProfile.Statistics[groupName][statName] = matchStat
 			}
 		}
