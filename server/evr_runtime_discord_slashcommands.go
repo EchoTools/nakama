@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand"
 	"net"
 	"net/http"
 	"regexp"
@@ -410,12 +411,6 @@ var (
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "region",
-					Description: "Region to allocate the session in",
-					Required:    true,
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionString,
 					Name:        "mode",
 					Description: "Game mode",
 					Required:    true,
@@ -433,6 +428,12 @@ var (
 							Value: "social_2.0_private",
 						},
 					},
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "region",
+					Description: "Region to allocate the session in",
+					Required:    false,
 				},
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
@@ -1697,23 +1698,31 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return simpleInteractionResponse(s, i, fmt.Sprintf("this command must be used from a guild"))
 
 			}
-
-			region := evr.ToSymbol(options[0].StringValue())
-			mode := evr.ToSymbol(options[1].StringValue())
+			mode := evr.ModeArenaPrivate
+			region := evr.DefaultRegion
+			level := evr.LevelUnspecified
+			for _, o := range options {
+				switch o.Name {
+				case "region":
+					region = evr.ToSymbol(o.StringValue())
+				case "mode":
+					mode = evr.ToSymbol(o.StringValue())
+				case "level":
+					level = evr.ToSymbol(o.StringValue())
+				}
+			}
 
 			// validate the mode
 			if _, ok := evr.LevelsByMode[mode]; !ok {
 				return fmt.Errorf("invalid mode `%s`", mode)
 			}
 
-			var level evr.Symbol
-			if len(options) >= 3 {
-				level = evr.ToSymbol(options[2].StringValue())
-
-				// validate the level
-				if !slices.Contains(evr.LevelsByMode[mode], level) {
-					return fmt.Errorf("invalid level `%s` for mode `%s`", level, mode)
-				}
+			// Validate/Set the level
+			if level == evr.LevelUnspecified {
+				// Pick a random level of the mode
+				level = evr.LevelsByMode[mode][rand.Intn(len(evr.LevelsByMode[mode]))]
+			} else if _, ok := evr.LevelsByMode[mode]; !ok {
+				return fmt.Errorf("invalid level `%s`", level)
 			}
 
 			startTime := time.Now()
