@@ -507,9 +507,9 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 				}
 				// Allow spectators to join public matches
 			case int8(Moderator):
-				// Allow moderators to join social lobbies
-				if !isModerator || (ml.Mode != evr.ModeSocialPublic && ml.Mode != evr.ModeSocialPrivate) {
-					request.SetAlignment(int(AnyTeam))
+				// Allow moderators to join lobbies
+				if !isModerator {
+					request.SetAlignment(int(Spectator))
 				}
 			case int8(SocialLobbyParticipant):
 				if ml.Mode != evr.ModeSocialPublic && ml.Mode != evr.ModeSocialPrivate {

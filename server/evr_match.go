@@ -22,7 +22,6 @@ const (
 	MatchmakingModule        = "evr"              // The module used for matchmaking
 
 	MatchMaxSize                             = 12 // The total max players (not including the broadcaster) for a EVR lobby.
-	MatchOpenDelaySecs                       = 15 // The number of seconds to wait before opening the match.
 	LevelSelectionFirst  MatchLevelSelection = "first"
 	LevelSelectionRandom MatchLevelSelection = "random"
 
@@ -283,15 +282,16 @@ func (m *EvrMatch) playerJoinAttempt(state *MatchLabel, mp EvrMatchPresence) (*E
 		}
 	}
 
-	if teamIndex, ok := state.TeamAlignments[mp.GetUserId()]; ok {
-		if mp.RoleAlignment != evr.TeamModerator && mp.RoleAlignment != evr.TeamSpectator {
-			mp.RoleAlignment = teamIndex
-		}
-	}
-
 	// If it's a private match, do not assign teams or check for open slots.
 	if state.LobbyType == PrivateLobby {
 		return &mp, ""
+	}
+
+	// If the entrant is NOT a spectator or moderator, use their preset team alignment
+	if mp.RoleAlignment != evr.TeamModerator && mp.RoleAlignment != evr.TeamSpectator {
+		if teamIndex, ok := state.TeamAlignments[mp.GetUserId()]; ok {
+			mp.RoleAlignment = teamIndex
+		}
 	}
 
 	if mp.RoleAlignment == evr.TeamModerator || mp.RoleAlignment == evr.TeamSpectator {
