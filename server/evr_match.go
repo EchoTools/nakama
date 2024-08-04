@@ -223,7 +223,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	if err := md.UnmarshalMap(metadata); err != nil {
 		return state, false, fmt.Sprintf("failed to unmarshal metadata: %v", err)
 	}
-	if !state.Open {
+	if state.Started() && !state.Open {
 		return state, false, JoinRejectReasonMatchTerminating
 	}
 
@@ -479,7 +479,8 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 			logger.Warn("Started match has been empty for too long. Shutting down.")
 			return m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, 20)
 		}
-
+	} else if state.emptyTicks != 0 {
+		state.emptyTicks = 0
 	}
 
 	// If the match is prepared and the start time has been reached, start it.

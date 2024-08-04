@@ -39,14 +39,6 @@ func (p *EvrPipeline) lobbyMatchmakerStatusRequest(ctx context.Context, logger *
 // authorizeMatchmaking checks if the user is allowed to join a public match or spawn a new match
 func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logger, session *sessionWS, loginSessionID uuid.UUID, groupID uuid.UUID, requireMembership bool) error {
 
-	if groupID == uuid.Nil {
-		md, err := GetAccountMetadata(ctx, p.db, session.userID.String())
-		if err != nil {
-			return status.Errorf(codes.Internal, "Failed to get account metadata: %v", err)
-		}
-		groupID = md.GetActiveGroupID()
-	}
-
 	// Get the EvrID from the context
 	evrID, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
 	if !ok {
@@ -106,11 +98,12 @@ func (p *EvrPipeline) authorizeMatchmaking(ctx context.Context, logger *zap.Logg
 		// EVR packet data stream for the match session by Session ID and service ID
 	}, s.userID)
 
-	// Check if th user is a member of this guild
+	// Check if the user is a member of this guild
 	guildID, err := GetGuildIDByGroupID(ctx, p.db, groupID.String())
 	if err != nil {
-		return status.Errorf(codes.Internal, "Failed to get guild ID: %v", err)
+		return status.Errorf(codes.Internal, "Failed to get guild ID for group ID `%s`: %v", groupID.String(), err)
 	}
+
 	discordID, err := GetDiscordIDByUserID(ctx, p.db, session.userID.String())
 	if err != nil {
 		return status.Errorf(codes.Internal, "Failed to get discord id: %v", err)
@@ -330,24 +323,16 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 		}
 	}
 
-	metricsTags := map[string]string{
-		"type":     strconv.FormatInt(int64(request.LobbyType), 10),
-		"mode":     request.Mode.String(),
-		"group_id": request.GroupID.String(),
-		"level":    request.Level.String(),
-		"role":     strconv.FormatInt(int64(request.Entrants[0].Role), 10),
+	if request.GroupID == uuid.Nil {
+		md, err := GetAccountMetadata(ctx, p.db, session.userID.String())
+		if err != nil {
+			return status.Errorf(codes.Internal, "Failed to get account metadata: %v", err)
+		}
+		request.GroupID = md.GetActiveGroupID()
 	}
-
-	// Add the features to teh metrics tags as feature_<featurename>
-	for _, feature := range features {
-		metricsTags[fmt.Sprintf("feature_%s", feature)] = "1"
-	}
-
-	p.metrics.CustomCounter("lobbycreatesession_active_count", metricsTags, 1)
-	loginSessionID := request.LoginSessionID
 
 	// Check for membership and suspensions on this channel. The user will not be allowed to create lobby's
-	if err := p.authorizeMatchmaking(ctx, logger, session, loginSessionID, request.GroupID, true); err != nil {
+	if err := p.authorizeMatchmaking(ctx, logger, session, request.LoginSessionID, request.GroupID, true); err != nil {
 		switch status.Code(err) {
 		case codes.Internal:
 			logger.Warn("Failed to authorize matchmaking, allowing player to continue. ", zap.Error(err))
@@ -355,6 +340,7 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 			return response.SendErrorToSession(session, err)
 		}
 	}
+	ctx = session.Context()
 
 	if request.GroupID == uuid.Nil {
 		var ok bool
@@ -401,6 +387,21 @@ func (p *EvrPipeline) lobbyCreateSessionRequest(ctx context.Context, logger *zap
 	if err != nil {
 		logger.Warn("Failed to get guild priority list", zap.Error(err))
 	}
+
+	metricsTags := map[string]string{
+		"type":     strconv.FormatInt(int64(request.LobbyType), 10),
+		"mode":     request.Mode.String(),
+		"group_id": request.GroupID.String(),
+		"level":    request.Level.String(),
+		"role":     strconv.FormatInt(int64(request.Entrants[0].Role), 10),
+	}
+
+	// Add the features to teh metrics tags as feature_<featurename>
+	for _, feature := range features {
+		metricsTags[fmt.Sprintf("feature_%s", feature)] = "1"
+	}
+
+	p.metrics.CustomCounter("lobbycreatesession_active_count", metricsTags, 1)
 
 	ml := &MatchLabel{
 		Level:            request.Level,
