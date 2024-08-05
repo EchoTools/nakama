@@ -127,6 +127,14 @@ func (s *MatchLabel) GetLabel() string {
 	return string(labelJson)
 }
 
+func (s *MatchLabel) GetLabelIndented() string {
+	labelJson, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
+		return ""
+	}
+	return string(labelJson)
+}
+
 func (s *MatchLabel) GetGroupID() uuid.UUID {
 	if s.GroupID == nil {
 		return uuid.Nil

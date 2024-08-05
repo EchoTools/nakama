@@ -316,6 +316,7 @@ func (d *DiscordAppBot) handlePrepareMatch(ctx context.Context, logger runtime.L
 			membership = &m
 		}
 	}
+
 	if membership == nil {
 		return nil, status.Error(codes.PermissionDenied, "user is not a member of the guild")
 	}

@@ -811,7 +811,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		return state, SignalResponse{Message: fmt.Sprintf("failed to update label: %v", err)}.String()
 	}
 
-	return state, SignalResponse{Success: true, Payload: state.String()}.String()
+	return state, SignalResponse{Success: true, Payload: state.GetLabel()}.String()
 
 }
 
