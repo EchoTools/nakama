@@ -293,6 +293,63 @@ func (p *EvrPipeline) MatchBackfill(msession *MatchmakingSession) error {
 	}
 }
 
+type MatchmakingStatus struct {
+	GroupID   uuid.UUID  `json:"group_id"`
+	LobbyType LobbyType  `json:"lobby_type"`
+	Mode      evr.Symbol `json:"mode"`
+	Level     evr.Symbol `json:"level"`
+	PartySize int        `json:"party_size"`
+	msession  *MatchmakingSession
+}
+
+func (s MatchmakingStatus) String() string {
+	b, _ := json.MarshalIndent(s, "", "  ")
+	return string(b)
+}
+
+func (s MatchmakingStatus) MetricsMap() map[string]string {
+
+	return map[string]string{
+		"type":       s.LobbyType.String(),
+		"mode":       s.Mode.String(),
+		"level":      s.Level.String(),
+		"group_id":   s.GroupID.String(),
+		"party_size": fmt.Sprintf("%d", s.PartySize),
+	}
+}
+
+func NewMatchmakingStatus(msession *MatchmakingSession) *MatchmakingStatus {
+	partySize := 1
+	if msession.Party != nil {
+		partySize = len(msession.Party.List())
+	}
+	groupID := uuid.Nil
+	if msession.Label.GroupID != nil {
+		groupID = *msession.Label.GroupID
+	}
+
+	return &MatchmakingStatus{
+		GroupID:   groupID,
+		LobbyType: msession.Label.LobbyType,
+		Mode:      msession.Label.Mode,
+		Level:     msession.Label.Level,
+		PartySize: partySize,
+		msession:  msession,
+	}
+}
+
+func (ms *MatchmakingStatus) Update() error {
+	ms.PartySize = len(ms.msession.Party.List())
+	s := ms.msession.Session
+	// Create a status presence for the user
+	stream := PresenceStream{Mode: StreamModeMatchmaking, Subject: uuid.NewV5(uuid.Nil, "matchmaking")}
+	meta := PresenceMeta{Format: s.format, Username: s.Username(), Status: ms.String(), Hidden: true}
+	if ok := s.tracker.Update(s.Context(), s.id, stream, s.userID, meta); !ok {
+		return fmt.Errorf("failed to update presence")
+	}
+	return nil
+}
+
 // Matchmake attempts to find/create a match for the user using the nakama matchmaker
 func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession) (err error) {
 	// TODO Move this into the matchmaking registry
@@ -352,22 +409,6 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 	}
 	countMultiple := 2
 
-	metricTags := map[string]string{
-		"type":       msession.Label.LobbyType.String(),
-		"mode":       msession.Label.Mode.String(),
-		"level":      msession.Label.Level.String(),
-		"group_id":   groupID.String(),
-		"party_size": "1",
-	}
-
-	// Create a status presence for the user
-	stream := PresenceStream{Mode: StreamModeMatchmaking, Subject: uuid.NewV5(uuid.Nil, "matchmaking")}
-	meta := PresenceMeta{Format: session.format, Username: session.Username(), Status: query, Hidden: true}
-	ok = session.tracker.Update(ctx, session.id, stream, session.userID, meta)
-	if !ok {
-		return status.Errorf(codes.Internal, "Failed to track user: %v", err)
-	}
-
 	if msession.Party != nil {
 
 		// This is the leader. Provide a grace period for players to start matchmaking
@@ -392,7 +433,7 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 			}
 		}
 	}
-
+	mmstatus := NewMatchmakingStatus(msession)
 	if msession.Party == nil {
 
 		// Solo matchmaking
@@ -412,13 +453,10 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 		if err != nil {
 			msession.Logger.Error("Failed to add to solo matchmaker ticket", zap.String("query", query), zap.Error(err))
 		}
+		mmstatus.Update()
+		p.metrics.CustomCounter("matchmaker_tickets_count", mmstatus.MetricsMap(), 1)
 		msession.AddTicket(ticket, session.id.String(), presences, nil, "", query, minCount, maxCount, countMultiple, stringProps, numericProps)
-		p.metrics.CustomCounter("matchmaker_tickets_count", metricTags, 1)
 		msession.Logger.Info("Added solo matchmaking ticket", zap.String("query", query), zap.String("ticket", ticket), zap.Any("presences", presences))
-		go func() {
-			<-msession.Ctx.Done()
-			session.pipeline.matchmaker.RemoveSessionAll(sessionID.String())
-		}()
 		return nil
 	}
 
@@ -450,13 +488,14 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 		msession.Logger.Error("Failed to add to matchmaker with query", zap.String("query", query), zap.Error(err))
 	}
 	msession.AddTicket(ticket, session.id.String(), nil, memberPresenceIDs, msession.Party.IDStr(), query, minCount, maxCount, countMultiple, stringProps, numericProps)
+	mmPartySize := len(memberPresenceIDs) + 1
 
-	metricTags["party_size"] = fmt.Sprintf("%d", len(memberPresenceIDs)+1) // memberPresenceIDs excludes the leader
-	p.metrics.CustomCounter("matchmaker_tickets_count", metricTags, 1)
+	mmstatus.Update()
+	p.metrics.CustomCounter("matchmaker_tickets_count", mmstatus.MetricsMap(), int64(mmPartySize))
 	go func() {
 		err := PartySyncMatchmaking(ctx, msessions, 4*time.Minute)
 		if err != nil {
-			p.metrics.CustomCounter("matchmaker_partysync_errors_count", metricTags, 1)
+			p.metrics.CustomCounter("matchmaker_partysync_errors_count", mmstatus.MetricsMap(), 1)
 			msession.Logger.Debug("PartySyncMatchmaking errored", zap.Error(err))
 		}
 	}()
