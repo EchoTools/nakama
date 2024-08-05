@@ -214,7 +214,13 @@ func (p *EvrPipeline) MatchBackfill(msession *MatchmakingSession) error {
 		msessions = append(msessions, msession)
 	}
 
-	query := buildMatchQueryFromLabel(msession.Label, len(msessions))
+	ml := msession.Label
+	isPlayer := true
+	if ml.TeamIndex == Spectator || ml.TeamIndex == Moderator {
+		isPlayer = false
+	}
+
+	query := backfillQuery(msession.Label.Mode, ml.Level, ml.Broadcaster.Regions[0], ml.ID, ml.Broadcaster.GroupIDs, isPlayer, len(msessions))
 
 	// Load the global matchmaking config
 	gconfig, err := LoadMatchmakingSettings(ctx, p.runtimeModule, SystemUserID)
@@ -554,60 +560,38 @@ func listMatches(ctx context.Context, p *EvrPipeline, limit int, minSize int, ma
 	return p.runtimeModule.MatchList(ctx, limit, true, "", &minSize, &maxSize, query)
 }
 
-func buildMatchQueryFromLabel(ml *MatchLabel, partySize int) string {
+func backfillQuery(mode, level evr.Symbol, region evr.Symbol, curMatch MatchID, groupIDs []uuid.UUID, isPlayer bool, partySize int) string {
+
+	groupIDStrs := make([]string, 0, len(groupIDs))
+	for _, g := range groupIDs {
+		groupIDStrs = append(groupIDStrs, g.String())
+	}
+
 	qparts := []string{
 		"+label.open:T",
-		fmt.Sprintf("+label.lobby_type:%s", ml.LobbyType.String()),
-		fmt.Sprintf("+label.mode:%s", ml.Mode.String()),
+		fmt.Sprintf("+label.mode:%s", mode.String()),
+		fmt.Sprintf("+label.group_id:%s", groupIDStrs[0]),
+		fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/", strings.Join(groupIDStrs, "|")),
+		fmt.Sprintf("-label.id:%s", curMatch.String()),
 	}
 
-	if !ml.ID.IsNil() {
-		qparts = append(qparts, "-label.id:"+ml.ID.String())
-	}
-
-	if ml.TeamIndex != Spectator && ml.TeamIndex != Moderator {
+	if isPlayer {
 		// MUST have room for this party on the teams
 		playerLimit := MatchMaxSize
-		switch ml.Mode {
+		switch mode {
 		case evr.ModeCombatPublic:
 			playerLimit = 10
 		case evr.ModeArenaPublic:
 			playerLimit = 8
 		}
-
 		qparts = append(qparts, fmt.Sprintf("+label.player_count:<=%d", playerLimit-partySize))
 	}
-
-	// MUST be a broadcaster on a channel the user has access to
-	if len(ml.Broadcaster.GroupIDs) != 0 {
-		qparts = append(qparts, Channels(ml.Broadcaster.GroupIDs).Query(Must, 0))
+	// All backfills are required to have the default region defined
+	qparts = append(qparts, fmt.Sprintf("+label.broadcaster.region:%s", evr.DefaultRegion.String()))
+	if region != evr.DefaultRegion {
+		qparts = append(qparts, fmt.Sprintf("+label.broadcaster.region:%s", region.String()))
 	}
 
-	// SHOULD Add the current channel as a high boost SHOULD
-	if *ml.GroupID != uuid.Nil {
-		qparts = append(qparts, Channel(*ml.GroupID).Query(Should, 3))
-	}
-
-	switch len(ml.Broadcaster.Regions) {
-	case 0:
-		// If no regions are specified, use default
-		qparts = append(qparts, Region(evr.Symbol(0)).Query(Must, 2))
-	case 1:
-		// If only one region is specified, use it as a MUST
-		qparts = append(qparts, Region(ml.Broadcaster.Regions[0]).Query(Must, 2))
-	default:
-		// If multiple regions are specified, use the first as a MUST and the rest as SHOULD
-		qparts = append(qparts, Region(ml.Broadcaster.Regions[0]).Query(Must, 2))
-		for _, r := range ml.Broadcaster.Regions[1:] {
-			qparts = append(qparts, Region(r).Query(Should, 2))
-		}
-	}
-
-	for _, r := range ml.Broadcaster.Regions {
-		qparts = append(qparts, Region(r).Query(Should, 2))
-	}
-
-	// Setup the query and logger
 	return strings.Join(qparts, " ")
 }
 
