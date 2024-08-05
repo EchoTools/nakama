@@ -421,14 +421,19 @@ func (mr *MatchmakingRegistry) matchedEntriesFn(entries [][]*MatchmakerEntry) {
 	}
 }
 
-func (mr *MatchmakingRegistry) listUnfilledLobbies(ctx context.Context, partySize int, query string) ([]*MatchLabel, error) {
+func (mr *MatchmakingRegistry) listUnfilledLobbies(ctx context.Context, partySize int, mode evr.Symbol, query string) ([]*MatchLabel, error) {
 	var err error
 
 	var labels []*MatchLabel
 
 	minSize := 0
 	limit := 100
-	maxSize := MatchMaxSize - partySize
+	lobbySize := SocialLobbyMaxSize
+	if l, ok := LobbySizeByMode[mode]; ok {
+		lobbySize = l
+	}
+
+	maxSize := lobbySize - partySize
 
 	// Search for possible matches
 	matches, err := mr.listMatches(ctx, limit, minSize+1, maxSize+1, query)
@@ -1137,13 +1142,15 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, logger *zap.Logger, se
 
 	// Set defaults for the matching label
 	ml.Open = true // Open for joining
-	ml.MaxSize = MatchMaxSize
+	ml.MaxSize = SocialLobbyMaxSize
+	if l, ok := LobbySizeByMode[ml.Mode]; ok {
+		ml.MaxSize = uint8(l)
+	}
 
 	// Set defaults for public matches
 	switch {
 	case ml.Mode == evr.ModeSocialPrivate || ml.Mode == evr.ModeSocialPublic:
 		ml.Level = evr.LevelSocial // Include the level in the search
-		ml.TeamSize = MatchMaxSize
 
 	case ml.Mode == evr.ModeArenaPublic:
 		ml.TeamSize = 4

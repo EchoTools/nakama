@@ -1070,7 +1070,7 @@ func (d *DiscordAppBot) InitializeDiscordBot() error {
 			case <-updateTicker.C:
 				// Get all the matches
 				minSize := 2
-				maxSize := MatchMaxSize + 1
+				maxSize := MatchLobbyMaxSize + 1
 				matches, err := nk.MatchList(ctx, 1000, true, "", &minSize, &maxSize, "")
 				if err != nil {
 					logger.Error("Error fetching matches: %w", err)

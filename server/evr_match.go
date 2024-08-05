@@ -21,7 +21,8 @@ const (
 	VersionLock       uint64 = 0xc62f01d78f77910d // The game build version.
 	MatchmakingModule        = "evr"              // The module used for matchmaking
 
-	MatchMaxSize                             = 12 // The total max players (not including the broadcaster) for a EVR lobby.
+	SocialLobbyMaxSize                       = 12 // The total max players (not including the broadcaster) for a EVR lobby.
+	MatchLobbyMaxSize                        = 16
 	LevelSelectionFirst  MatchLevelSelection = "first"
 	LevelSelectionRandom MatchLevelSelection = "random"
 
@@ -37,6 +38,17 @@ const (
 	RoundWaitDuration          = 59
 	PreMatchWaitTime           = 45
 	PublicMatchWaitTime        = PreMatchWaitTime + CatapultDuration + RoundCatapultDelayDuration
+)
+
+var (
+	LobbySizeByMode = map[evr.Symbol]int{
+		evr.ModeArenaPublic:   MatchLobbyMaxSize,
+		evr.ModeArenaPrivate:  MatchLobbyMaxSize,
+		evr.ModeCombatPublic:  MatchLobbyMaxSize,
+		evr.ModeCombatPrivate: MatchLobbyMaxSize,
+		evr.ModeSocialPublic:  SocialLobbyMaxSize,
+		evr.ModeSocialPrivate: SocialLobbyMaxSize,
+	}
 )
 
 const (
@@ -718,25 +730,26 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		default:
 			state.PlayerLimit = int(state.MaxSize)
 		}
+		state.MaxSize = SocialLobbyMaxSize
+		if l, ok := LobbySizeByMode[newState.Mode]; ok {
+			state.MaxSize = uint8(l)
+		}
+		state.TeamSize = int(state.MaxSize)
 
 		state.Mode = newState.Mode
 		switch newState.Mode {
 		case evr.ModeArenaPublic:
 			state.LobbyType = PublicLobby
 			state.TeamSize = 4
-			state.PlayerLimit = state.TeamSize * 2
 		case evr.ModeCombatPublic:
 			state.LobbyType = PublicLobby
 			state.TeamSize = 5
-			state.PlayerLimit = state.TeamSize * 2
-		case evr.ModeSocialPublic:
+		case evr.ModeSocialPublic, evr.ModeSocialPrivate:
 			state.LobbyType = PublicLobby
-			state.PlayerLimit = MatchMaxSize
 		default:
-			state.PlayerLimit = MatchMaxSize
 			state.LobbyType = PrivateLobby
 		}
-
+		state.PlayerLimit = min(state.TeamSize*2, int(state.MaxSize))
 		state.Level = newState.Level
 		// validate the mode
 		if levels, ok := evr.LevelsByMode[state.Mode]; !ok {
@@ -778,7 +791,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 			state.StartTime = time.Now().UTC()
 		}
 
-		state.TeamAlignments = make(map[string]int, MatchMaxSize)
+		state.TeamAlignments = make(map[string]int, SocialLobbyMaxSize)
 		if newState.TeamAlignments != nil {
 			for userID, role := range newState.TeamAlignments {
 				if userID != "" {

@@ -79,7 +79,7 @@ func (m MatchMeta) IsPublic() bool {
 }
 
 func (MatchMeta) SizeLimit() int {
-	return MatchMaxSize
+	return SocialLobbyMaxSize
 }
 
 func (m MatchMeta) PlayerLimit() int {

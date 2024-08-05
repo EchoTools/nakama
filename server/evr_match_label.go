@@ -64,10 +64,10 @@ func NewMatchLabel(endpoint evr.Endpoint, config *MatchBroadcaster) (state *Matc
 		Mode:             evr.ModeUnloaded,
 		Level:            evr.LevelUnloaded,
 		RequiredFeatures: make([]string, 0),
-		Players:          make([]PlayerInfo, 0, MatchMaxSize),
-		presenceMap:      make(map[string]*EvrMatchPresence, MatchMaxSize),
+		Players:          make([]PlayerInfo, 0, SocialLobbyMaxSize),
+		presenceMap:      make(map[string]*EvrMatchPresence, SocialLobbyMaxSize),
 
-		TeamAlignments: make(map[string]int, MatchMaxSize),
+		TeamAlignments: make(map[string]int, SocialLobbyMaxSize),
 
 		emptyTicks: 0,
 		tickRate:   tickRate,
