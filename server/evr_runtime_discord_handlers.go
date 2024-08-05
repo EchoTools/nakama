@@ -260,7 +260,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 			if m.isServerHost {
 				roles = append(roles, "server-host")
 			}
-			if m.canAllocateNonDefault {
+			if m.isAllocator {
 				roles = append(roles, "allocator")
 			}
 			if len(roles) > 0 {
@@ -296,48 +296,53 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	return nil
 }
 
-func (d *DiscordAppBot) handlePrepareMatch(ctx context.Context, logger runtime.Logger, discordID, guildID string, region, mode, level evr.Symbol, startTime time.Time) (*MatchLabel, error) {
-	userID, err := GetUserIDByDiscordID(ctx, d.db, discordID)
-	if err != nil {
-		return nil, status.Errorf(codes.NotFound, "user not found: %s", discordID)
-	}
-	qparts := []string{
-		"+label.lobby_type:unassigned",
-	}
+func (d *DiscordAppBot) handlePrepareMatch(ctx context.Context, logger runtime.Logger, userID, discordID, guildID string, region, mode, level evr.Symbol, startTime time.Time) (*MatchLabel, error) {
 
 	// Find a parking match to prepare
-	minSize := 1
-	maxSize := 1
 
 	groupID, err := GetGroupIDByGuildID(ctx, d.db, guildID)
 	if err != nil {
 		return nil, status.Errorf(codes.NotFound, "guild not found: %s", guildID)
 	}
 
-	qparts = append(qparts, fmt.Sprintf("+label.broadcaster.group_id:%s", groupID))
-
 	// Get a list of the groups that this user has allocate access to
 	memberships, err := d.discordRegistry.GetGuildGroupMemberships(ctx, uuid.FromStringOrNil(userID), nil)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to get guild group memberships: %v", err)
 	}
-	requirePublic := true
-	for _, membership := range memberships {
-		if membership.GuildGroup.ID() == uuid.FromStringOrNil(groupID) && membership.canAllocateNonDefault {
-			requirePublic = false
-			break
+	var membership *GuildGroupMembership
+	for _, m := range memberships {
+		if m.GuildGroup.ID() == uuid.FromStringOrNil(groupID) {
+			membership = &m
+		}
+	}
+	if membership == nil {
+		return nil, status.Error(codes.PermissionDenied, "user is not a member of the guild")
+	}
+
+	regions := []evr.Symbol{region}
+
+	if !membership.GuildGroup.IsAllocator(userID) {
+		if membership.GuildGroup.Metadata.DisablePublicAllocateCommand {
+			return nil, status.Error(codes.PermissionDenied, "guild does not allow public allocation")
+		} else {
+			regions = append(regions, evr.DefaultRegion)
+		}
+
+		limiter := d.loadPrepareMatchRateLimiter(userID, groupID)
+		if !limiter.Allow() {
+			return nil, status.Error(codes.ResourceExhausted, fmt.Sprintf("rate limit exceeded (%0.0f requests per minute)", limiter.Limit()*60))
 		}
 	}
 
-	if requirePublic {
-		qparts = append(qparts, "+label.broadcaster.regions:%s", evr.DefaultRegion.String())
+	query := fmt.Sprintf("+label.lobby_type:unassigned +label.broadcaster.group_ids:%s", groupID)
+
+	for _, r := range regions {
+		query = fmt.Sprintf("%s +label.broadcaster.regions:%s", query, r.String())
 	}
 
-	if region != evr.DefaultRegion {
-		qparts = append(qparts, "+label.broadcaster.regions:%s", region.String())
-	}
-	query := strings.Join(qparts, " ")
-
+	minSize := 1
+	maxSize := 1
 	matches, err := d.nk.MatchList(ctx, 100, true, "", &minSize, &maxSize, query)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to list matches: %v", err)
@@ -352,29 +357,26 @@ func (d *DiscordAppBot) handlePrepareMatch(ctx context.Context, logger runtime.L
 	matchID := MatchIDFromStringOrNil(match.GetMatchId())
 	gid := uuid.FromStringOrNil(groupID)
 	// Prepare the session for the match.
-	state := &MatchLabel{}
-	state.SpawnedBy = userID
+	label := MatchLabel{}
+	label.SpawnedBy = userID
 
-	if requirePublic {
-		state.StartTime = startTime.UTC().Add(1 * time.Minute)
-	} else {
-		state.StartTime = startTime.UTC().Add(10 * time.Minute)
+	label.StartTime = startTime.UTC().Add(1 * time.Minute)
+	if membership.GuildGroup.IsAllocator(userID) {
+		label.StartTime = startTime.UTC().Add(10 * time.Minute)
 	}
 
-	state.MaxSize = MatchMaxSize
-	state.Mode = mode
-	state.Open = true
-	state.GroupID = &gid
+	label.GroupID = &gid
+	label.Mode = mode
 	if !level.IsNil() {
-		state.Level = level
+		label.Level = level
 	}
 	nk_ := d.nk.(*RuntimeGoNakamaModule)
-	response, err := SignalMatch(ctx, nk_.matchRegistry, matchID, SignalPrepareSession, state)
+	response, err := SignalMatch(ctx, nk_.matchRegistry, matchID, SignalPrepareSession, label)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to signal match: %v", err)
 	}
 
-	label := MatchLabel{}
+	label = MatchLabel{}
 	if err := json.Unmarshal([]byte(response), &label); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to unmarshal match label: %v", err)
 	}
