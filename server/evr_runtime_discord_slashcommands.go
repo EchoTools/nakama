@@ -1756,7 +1756,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			logger.WithField("label", label).Info("Match prepared")
-			return simpleInteractionResponse(s, i, fmt.Sprintf("Match prepared with label ```json\n%s\n```\nhttps://echo.taxi/spark://c/%s", label.String(), strings.ToUpper(label.ID.UUID().String())))
+			return simpleInteractionResponse(s, i, fmt.Sprintf("Match prepared with label ```json\n%s\n```\nhttps://echo.taxi/spark://c/%s", label.GetLabelIndented(), strings.ToUpper(label.ID.UUID().String())))
 		},
 		"trigger-cv": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 
