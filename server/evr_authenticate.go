@@ -221,21 +221,22 @@ func SelectDisplayNameByPriority(ctx context.Context, nk runtime.NakamaModule, u
 }
 
 type GroupMetadata struct {
-	GuildID                    string                 `json:"guild_id"`                      // The guild ID
-	RulesText                  string                 `json:"rules_text"`                    // The rules text displayed on the main menu
-	MemberRole                 string                 `json:"member_role"`                   // The role that has access to create lobbies/matches and join social lobbies
-	ModeratorRole              string                 `json:"moderator_role"`                // The rules that have access to moderation tools
-	ServerHostRole             string                 `json:"serverhost_role"`               // The rules that have access to serverdb
-	AllocatorRole              string                 `json:"allocator_role"`                // The rules that have access to reserve servers
-	SuspensionRole             string                 `json:"suspension_role"`               // The roles that have users suspended
-	ServerHostUserIDs          []string               `json:"serverhost_user_ids"`           // The broadcaster hosts
-	AllocatorUserIDs           []string               `json:"allocator_user_ids"`            // The allocator hosts
-	ModeratorUserIDs           []string               `json:"moderator_user_ids"`            // The moderators
-	ArenaMatchmakingChannelID  string                 `json:"arena_matchmaking_channel_id"`  // The matchmaking channel
-	CombatMatchmakingChannelID string                 `json:"combat_matchmaking_channel_id"` // The matchmaking channel
-	DebugChannel               string                 `json:"debug_channel_id"`              // The debug channel
-	MembersOnlyMatchmaking     bool                   `json:"members_only_matchmaking"`      // Restrict matchmaking to members only (when this group is the active one)
-	Unhandled                  map[string]interface{} `json:"-"`
+	GuildID                      string                 `json:"guild_id"`                        // The guild ID
+	RulesText                    string                 `json:"rules_text"`                      // The rules text displayed on the main menu
+	MemberRole                   string                 `json:"member_role"`                     // The role that has access to create lobbies/matches and join social lobbies
+	ModeratorRole                string                 `json:"moderator_role"`                  // The rules that have access to moderation tools
+	ServerHostRole               string                 `json:"serverhost_role"`                 // The rules that have access to serverdb
+	AllocatorRole                string                 `json:"allocator_role"`                  // The rules that have access to reserve servers
+	SuspensionRole               string                 `json:"suspension_role"`                 // The roles that have users suspended
+	ServerHostUserIDs            []string               `json:"serverhost_user_ids"`             // The broadcaster hosts
+	AllocatorUserIDs             []string               `json:"allocator_user_ids"`              // The allocator hosts
+	ModeratorUserIDs             []string               `json:"moderator_user_ids"`              // The moderators
+	ArenaMatchmakingChannelID    string                 `json:"arena_matchmaking_channel_id"`    // The matchmaking channel
+	CombatMatchmakingChannelID   string                 `json:"combat_matchmaking_channel_id"`   // The matchmaking channel
+	DebugChannel                 string                 `json:"debug_channel_id"`                // The debug channel
+	MembersOnlyMatchmaking       bool                   `json:"members_only_matchmaking"`        // Restrict matchmaking to members only (when this group is the active one)
+	DisablePublicAllocateCommand bool                   `json:"disable_public_allocate_command"` // Disable the public allocate command
+	Unhandled                    map[string]interface{} `json:"-"`
 }
 
 type AccountMetadata struct {
