@@ -695,11 +695,28 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 			return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal match label: %v", err)}.String()
 		}
 
+		switch state.Mode {
+		case evr.ModeArenaPublic, evr.ModeCombatPublic:
+
+		default:
+			state.PlayerLimit = int(state.MaxSize)
+		}
+
 		state.Mode = newState.Mode
 		switch newState.Mode {
-		case evr.ModeArenaPublic, evr.ModeSocialPublic, evr.ModeCombatPublic:
+		case evr.ModeArenaPublic:
 			state.LobbyType = PublicLobby
+			state.TeamSize = 4
+			state.PlayerLimit = state.TeamSize * 2
+		case evr.ModeCombatPublic:
+			state.LobbyType = PublicLobby
+			state.TeamSize = 5
+			state.PlayerLimit = state.TeamSize * 2
+		case evr.ModeSocialPublic:
+			state.LobbyType = PublicLobby
+			state.PlayerLimit = MatchMaxSize
 		default:
+			state.PlayerLimit = MatchMaxSize
 			state.LobbyType = PrivateLobby
 		}
 
@@ -734,16 +751,6 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		settings := evr.NewSessionSettings(strconv.FormatUint(PcvrAppId, 10), state.Mode, state.Level, state.RequiredFeatures)
 		state.SessionSettings = &settings
 
-		state.MaxSize = newState.MaxSize
-		if state.MaxSize < 2 || state.MaxSize > MatchMaxSize {
-			state.MaxSize = MatchMaxSize
-		}
-
-		state.TeamSize = newState.TeamSize
-		if state.TeamSize <= 0 || state.TeamSize > 5 {
-			state.TeamSize = 5
-		}
-
 		state.StartTime = newState.StartTime.UTC()
 
 		// If the start time is in the past, set it to now.
@@ -752,13 +759,6 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 			state.StartTime = time.Now().UTC().Add(10 * time.Minute)
 		} else if state.StartTime.Before(time.Now()) {
 			state.StartTime = time.Now().UTC()
-		}
-
-		switch state.Mode {
-		case evr.ModeArenaPublic, evr.ModeCombatPublic:
-			state.PlayerLimit = state.TeamSize * 2
-		default:
-			state.PlayerLimit = int(state.MaxSize)
 		}
 
 		state.TeamAlignments = make(map[string]int, MatchMaxSize)
@@ -831,7 +831,7 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk run
 }
 
 // SignalMatch is a helper function to send a signal to a match.
-func SignalMatch(ctx context.Context, matchRegistry MatchRegistry, matchID MatchID, signalID int64, data interface{}) (string, error) {
+func SignalMatch(ctx context.Context, matchRegistry MatchRegistry, matchID MatchID, signalID int64, data any) (string, error) {
 	dataJson, err := json.Marshal(data)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal match label: %v", err)
