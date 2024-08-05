@@ -57,6 +57,19 @@ func generateSymbolSeed() [0x100]uint64 {
 var symbolSeed [0x100]uint64 = generateSymbolSeed()
 
 var SymbolCache = map[Symbol]SymbolToken{
+	0xc8c33e482f601dbe: "uscn",
+	0xf1e60114d33c122a: "us-central-2",
+	0xf1e60114d33c122b: "us-central-3",
+	0xc8e8d0b1a885f1ef: "use",
+	0xc8e8d0b1a885f1fd: "usw",
+	0x5d0a96433b6d9c96: "us-central-north",
+	0x5d0a965e3b6a9c96: "us-central-south",
+	0x2fc29cd25b75449e: "us-east",
+	0x2fc29cd24971449e: "us-west",
+	0x2fd29ad25b75449e: "eu-east",
+	0x2fd29ad24971449e: "eu-west",
+	0x313d0759bc6b863a: "jp",
+	0xc8e8d0b1a883ebe4: "sin",
 	0x8d5ad3c4f2166c6c: "SNSFindServerRegionInfo",            // Custom?
 	0xb57a31cdd0f6fedf: "SNSLobbyRegistrationSuccess",        // Custom
 	0xff71856af7e0fbd9: "ERLobbyPlayerSessionsSuccessUnk1",   // Custom
