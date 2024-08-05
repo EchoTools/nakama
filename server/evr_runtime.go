@@ -144,7 +144,8 @@ func listMatchStates(ctx context.Context, nk runtime.NakamaModule, query string)
 	}
 	// Get the list of active matches
 	minSize := 1
-	maxSize := MatchMaxSize
+	maxSize := MatchLobbyMaxSize
+
 	matches, err := nk.MatchList(ctx, 1000, true, "", &minSize, &maxSize, query)
 	if err != nil {
 		return nil, err

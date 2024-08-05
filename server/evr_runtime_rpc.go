@@ -1065,6 +1065,11 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 
 	gid := uuid.FromStringOrNil(groupID)
 	label = request.MatchLabel
+	maxSize := SocialLobbyMaxSize
+	if l, ok := LobbySizeByMode[request.Mode.Symbol()]; ok {
+		maxSize = l
+	}
+
 	if label == nil {
 		label = &MatchLabel{
 			Mode:             request.Mode.Symbol(),
@@ -1073,7 +1078,7 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 			RequiredFeatures: request.RequiredFeatures,
 			StartTime:        request.StartTime.UTC(),
 			SpawnedBy:        request.SpawnedBy,
-			MaxSize:          MatchMaxSize,
+			MaxSize:          uint8(maxSize),
 			GroupID:          &gid,
 		}
 

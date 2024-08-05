@@ -319,7 +319,7 @@ func TestSelectTeamForPlayer(t *testing.T) {
 		}
 
 		state.presenceMap = presencestr
-		state.MaxSize = MatchMaxSize
+		state.MaxSize = SocialLobbyMaxSize
 		state.LobbyType = tt.lobbyType
 		if state.LobbyType == PublicLobby {
 			state.TeamSize = 4
@@ -426,7 +426,7 @@ func TestSelectTeamForPlayer_With_Alighment(t *testing.T) {
 		// Match State
 		state := &MatchLabel{
 			presenceMap: presences,
-			MaxSize:     MatchMaxSize,
+			MaxSize:     SocialLobbyMaxSize,
 			LobbyType:   tt.lobbyType,
 			TeamSize: func() int {
 				if tt.lobbyType == PublicLobby {

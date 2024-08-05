@@ -123,7 +123,7 @@ type LabelLatencies struct {
 
 // Backfill returns a match that the player can backfill
 func (p *EvrPipeline) GetBackfillCandidates(ctx context.Context, userID uuid.UUID, mode evr.Symbol, partySize int, query string) ([]*MatchLabel, error) {
-	labels, err := p.matchmakingRegistry.listUnfilledLobbies(ctx, partySize, query)
+	labels, err := p.matchmakingRegistry.listUnfilledLobbies(ctx, partySize, mode, query)
 	if err != nil || len(labels) == 0 {
 		return nil, err
 	}
@@ -579,7 +579,11 @@ func backfillQuery(mode, level evr.Symbol, region evr.Symbol, curMatch MatchID, 
 
 	if isPlayer {
 		// MUST have room for this party on the teams
-		playerLimit := MatchMaxSize
+		playerLimit := SocialLobbyMaxSize
+		if l, ok := LobbySizeByMode[mode]; ok {
+			playerLimit = l
+		}
+
 		switch mode {
 		case evr.ModeCombatPublic:
 			playerLimit = 10
@@ -652,7 +656,8 @@ func LatencyCmp(i, j time.Duration) bool {
 // TODO FIXME This need to use allocateBroadcaster instad.
 // MatchCreate creates a match on an available unassigned broadcaster using the given label
 func (p *EvrPipeline) MatchCreate(ctx context.Context, msession *MatchmakingSession, ml *MatchLabel) (matchID MatchID, err error) {
-	ml.MaxSize = MatchMaxSize
+
+	ml.MaxSize = uint8(LobbySizeByMode[ml.Mode])
 	// Lock the broadcaster's until the match is created
 	p.matchmakingRegistry.Lock()
 
@@ -1149,7 +1154,7 @@ func (p *EvrPipeline) MatchSpectateStreamLoop(msession *MatchmakingSession) erro
 
 	limit := 100
 	minSize := 1
-	maxSize := MatchMaxSize - 1
+	maxSize := MatchLobbyMaxSize - 1
 	query := fmt.Sprintf("+label.open:T +label.lobby_type:public +label.mode:%s +label.size:>=%d +label.size:<=%d", msession.Label.Mode.Token(), minSize, maxSize)
 	// creeate a delay timer
 	timer := time.NewTimer(0 * time.Second)

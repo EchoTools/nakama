@@ -495,7 +495,7 @@ func TestMatchMeta_RoleLimit(t *testing.T) {
 			args: args{
 				r: SocialRole,
 			},
-			want: MatchMaxSize,
+			want: SocialLobbyMaxSize,
 		},
 		{
 			name: "Public Arena / Social",
