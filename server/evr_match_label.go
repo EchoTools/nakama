@@ -138,55 +138,6 @@ func (s *MatchLabel) GetEndpoint() evr.Endpoint {
 	return s.Broadcaster.Endpoint
 }
 
-func (s *MatchLabel) PublicView() *MatchLabel {
-	ps := MatchLabel{
-		LobbyType:        s.LobbyType,
-		ID:               s.ID,
-		Open:             s.Open,
-		GameState:        s.GameState,
-		StartTime:        s.StartTime,
-		GroupID:          s.GroupID,
-		GuildID:          s.GuildID,
-		SpawnedBy:        s.SpawnedBy,
-		Mode:             s.Mode,
-		Level:            s.Level,
-		RequiredFeatures: s.RequiredFeatures,
-		MaxSize:          s.MaxSize,
-		Size:             s.Size,
-		PlayerCount:      s.PlayerCount,
-		PlayerLimit:      s.PlayerLimit,
-		TeamSize:         s.TeamSize,
-		Broadcaster: MatchBroadcaster{
-			OperatorID:  s.Broadcaster.OperatorID,
-			GroupIDs:    s.Broadcaster.GroupIDs,
-			VersionLock: s.Broadcaster.VersionLock,
-			Regions:     s.Broadcaster.Regions,
-			Tags:        s.Broadcaster.Tags,
-		},
-		Players: make([]PlayerInfo, 0),
-	}
-	if ps.LobbyType == PrivateLobby || ps.LobbyType == UnassignedLobby {
-		// Set teh last 4 bytes of the ID to 0
-		for i := 12; i < 16; i++ {
-			ps.ID.uuid[i] = 0xFF
-		}
-	} else {
-		for i := range s.Players {
-			ps.Players = append(ps.Players, PlayerInfo{
-				UserID:      s.Players[i].UserID,
-				Username:    s.Players[i].Username,
-				DisplayName: s.Players[i].DisplayName,
-				EvrID:       s.Players[i].EvrID,
-				Team:        s.Players[i].Team,
-				DiscordID:   s.Players[i].DiscordID,
-				PartyID:     s.Players[i].PartyID,
-			})
-		}
-
-	}
-	return &ps
-}
-
 func (s *MatchLabel) MetricsTags() map[string]string {
 	return map[string]string{
 		"mode":     s.Mode.String(),
