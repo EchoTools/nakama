@@ -553,9 +553,9 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 	}
 
 	// If the match is empty, and the match has been empty for too long, then terminate the match.
-	if len(state.presenceMap) == 0 {
+	if state.Started() && len(state.presenceMap) == 0 {
 		state.emptyTicks++
-		if state.emptyTicks > 20*state.tickRate {
+		if state.emptyTicks > 60*state.tickRate {
 			logger.Warn("Started match has been empty for too long. Shutting down.")
 			return m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, 20)
 		}

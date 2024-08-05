@@ -1809,6 +1809,58 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			return d.handleProfileRequest(ctx, logger, nk, s, discordRegistry, i, target.ID, target.Username, guildID, isGlobalModerator)
 		},
+		"create": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+			options := i.ApplicationCommandData().Options
+
+			if member == nil {
+				return simpleInteractionResponse(s, i, "this command must be used from a guild")
+
+			}
+			mode := evr.ModeArenaPrivate
+			region := evr.DefaultRegion
+			level := evr.LevelUnspecified
+			for _, o := range options {
+				switch o.Name {
+				case "region":
+					region = evr.ToSymbol(o.StringValue())
+				case "mode":
+					mode = evr.ToSymbol(o.StringValue())
+				case "level":
+					level = evr.ToSymbol(o.StringValue())
+				}
+			}
+
+			if levels, ok := evr.LevelsByMode[mode]; !ok {
+				return fmt.Errorf("invalid mode `%s`", mode)
+			} else if level != evr.LevelUnspecified && !slices.Contains(levels, level) {
+				return fmt.Errorf("invalid level `%s`", level)
+			}
+
+			startTime := time.Now()
+
+			userID, err := GetUserIDByDiscordID(ctx, db, user.ID)
+			if err != nil {
+				return errors.New("failed to get user ID")
+			}
+
+			logger = logger.WithFields(map[string]interface{}{
+				"userID":    userID,
+				"guildID":   i.GuildID,
+				"region":    region.String(),
+				"mode":      mode.String(),
+				"level":     level.String(),
+				"startTime": startTime,
+			})
+
+			label, rtt, err := d.handlePrepareMatch(ctx, logger, userID, member.User.ID, i.GuildID, region, mode, level, startTime)
+			if err != nil {
+				return err
+			}
+			rttMs := int(rtt / 1000000)
+			logger.WithField("label", label).Info("Match prepared")
+			content := fmt.Sprintf("Created `%s` match on server with %dms ping\n\nhttps://echo.taxi/spark://c/%s", label.Mode.String(), rttMs, strings.ToUpper(label.ID.UUID().String()))
+			return simpleInteractionResponse(s, i, content)
+		},
 		"allocate": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			options := i.ApplicationCommandData().Options
 
@@ -1852,7 +1904,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				"startTime": startTime,
 			})
 
-			label, err := d.handlePrepareMatch(ctx, logger, userID, member.User.ID, i.GuildID, region, mode, level, startTime)
+			label, _, err := d.handlePrepareMatch(ctx, logger, userID, member.User.ID, i.GuildID, region, mode, level, startTime)
 			if err != nil {
 				return err
 			}
