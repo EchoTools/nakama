@@ -235,6 +235,18 @@ var (
 			},
 		},
 		{
+			Name:        "hash",
+			Description: "Convert a string into an EVR symbol hash.",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "token",
+					Description: "string to convert",
+					Required:    true,
+				},
+			},
+		},
+		{
 			Name:        "trigger-cv",
 			Description: "Force user to go through community values in social lobby.",
 			Options: []*discordgo.ApplicationCommandOption{
@@ -1055,7 +1067,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 	commandHandlers := map[string]DiscordCommandHandlerFn{
 
-		"evrsymbol": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+		"hash": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			options := i.ApplicationCommandData().Options
 			token := options[0].StringValue()
 			symbol := evr.ToSymbol(token)
