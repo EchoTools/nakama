@@ -71,21 +71,21 @@ func NewGuildGroup(group *api.Group) *GuildGroup {
 }
 
 type GuildGroupMembership struct {
-	GuildGroup            GuildGroup
-	isMember              bool
-	isModerator           bool // Admin
-	isServerHost          bool // Broadcaster Host
-	canAllocateNonDefault bool // Can allocate servers with slash command
+	GuildGroup   GuildGroup
+	isMember     bool
+	isModerator  bool // Admin
+	isServerHost bool // Broadcaster Host
+	isAllocator  bool // Can allocate servers with slash command
 }
 
 func NewGuildGroupMembership(group *api.Group, userID uuid.UUID, state api.UserGroupList_UserGroup_State) GuildGroupMembership {
 	gg := NewGuildGroup(group)
 
 	return GuildGroupMembership{
-		GuildGroup:            *gg,
-		isMember:              state <= api.UserGroupList_UserGroup_MEMBER,
-		isModerator:           state <= api.UserGroupList_UserGroup_ADMIN,
-		isServerHost:          slices.Contains(gg.ServerHostUserIDs(), userID.String()),
-		canAllocateNonDefault: slices.Contains(gg.AllocatorUserIDs(), userID.String()),
+		GuildGroup:   *gg,
+		isMember:     state <= api.UserGroupList_UserGroup_MEMBER,
+		isModerator:  state <= api.UserGroupList_UserGroup_ADMIN,
+		isServerHost: slices.Contains(gg.ServerHostUserIDs(), userID.String()),
+		isAllocator:  slices.Contains(gg.AllocatorUserIDs(), userID.String()),
 	}
 }

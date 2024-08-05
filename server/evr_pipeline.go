@@ -106,19 +106,22 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	discordRegistry := NewLocalDiscordRegistry(ctx, nk, runtimeLogger, metrics, config, pipeline, dg)
 	leaderboardRegistry := NewLeaderboardRegistry(NewRuntimeGoLogger(logger), nk, config.GetName())
 	profileRegistry := NewProfileRegistry(nk, db, runtimeLogger, tracker, discordRegistry)
-
-	appBot := NewDiscordAppBot(runtimeLogger, nk, db, metrics, pipeline, config, discordRegistry, profileRegistry, dg)
+	var appBot *DiscordAppBot
 
 	if disable, ok := vars["DISABLE_DISCORD_BOT"]; ok && disable == "true" {
 		logger.Info("Discord bot is disabled")
 	} else {
+		appBot, err = NewDiscordAppBot(runtimeLogger, nk, db, metrics, pipeline, config, discordRegistry, profileRegistry, dg)
+		if err != nil {
+			logger.Error("Failed to create app bot", zap.Error(err))
+
+		}
 		if err := appBot.InitializeDiscordBot(); err != nil {
 			logger.Error("Failed to initialize app bot", zap.Error(err))
 		}
-	}
-
-	if err = appBot.dg.Open(); err != nil {
-		logger.Error("Failed to open discord bot connection: %w", zap.Error(err))
+		if err = appBot.dg.Open(); err != nil {
+			logger.Error("Failed to open discord bot connection: %w", zap.Error(err))
+		}
 	}
 
 	// Every 5 minutes, store the cache.

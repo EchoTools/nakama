@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/rand"
 	"net"
 	"net/http"
 	"regexp"
@@ -24,6 +23,7 @@ import (
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -47,11 +47,16 @@ type DiscordAppBot struct {
 
 	debugChannels map[string]string // map[groupID]channelID
 	userID        string            // Nakama UserID of the bot
+
+	prepareMatchRatePerMinute rate.Limit
+	prepareMatchBurst         int
+	prepareMatchRateLimiters  *MapOf[string, *rate.Limiter]
 }
 
-func NewDiscordAppBot(logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, metrics Metrics, pipeline *Pipeline, config Config, discordRegistry DiscordRegistry, profileRegistry *ProfileRegistry, dg *discordgo.Session) *DiscordAppBot {
+func NewDiscordAppBot(logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, metrics Metrics, pipeline *Pipeline, config Config, discordRegistry DiscordRegistry, profileRegistry *ProfileRegistry, dg *discordgo.Session) (*DiscordAppBot, error) {
 	ctx, cancelFn := context.WithCancel(context.Background())
 	logger = logger.WithField("system", "discordAppBot")
+
 	return &DiscordAppBot{
 		ctx:      ctx,
 		cancelFn: cancelFn,
@@ -61,11 +66,24 @@ func NewDiscordAppBot(logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB
 		db:       db,
 		pipeline: pipeline,
 		metrics:  metrics,
+		config:   config,
+
+		dg: dg,
 
 		discordRegistry: discordRegistry,
 		profileRegistry: profileRegistry,
-		dg:              dg,
-	}
+
+		prepareMatchRatePerMinute: 1,
+		prepareMatchBurst:         1,
+		prepareMatchRateLimiters:  &MapOf[string, *rate.Limiter]{},
+		debugChannels:             make(map[string]string),
+	}, nil
+}
+
+func (e *DiscordAppBot) loadPrepareMatchRateLimiter(userID, groupID string) *rate.Limiter {
+	key := strings.Join([]string{userID, groupID}, ":")
+	limiter, _ := e.prepareMatchRateLimiters.LoadOrStore(key, rate.NewLimiter(e.prepareMatchRatePerMinute, e.prepareMatchBurst))
+	return limiter
 }
 
 type WhoAmI struct {
@@ -632,15 +650,8 @@ func (d *DiscordAppBot) InitializeDiscordBot() error {
 	bot.Identify.Intents |= discordgo.IntentAutoModerationConfiguration
 	bot.Identify.Intents |= discordgo.IntentAutoModerationExecution
 
-	bot.AddHandler(func(session *discordgo.Session, ready *discordgo.Ready) {
-		logger.Info("Discord bot is ready.")
-	})
-
-	bot.AddHandler(func(s *discordgo.Session, m *discordgo.RateLimit) {
-		logger.WithField("rate_limit", m).Warn("Discord rate limit")
-	})
-
 	bot.AddHandler(func(s *discordgo.Session, m *discordgo.Ready) {
+
 		// Create a user for the bot based on it's discord profile
 		userID, _, _, err := nk.AuthenticateCustom(ctx, m.User.ID, s.State.User.Username, true)
 		if err != nil {
@@ -648,19 +659,16 @@ func (d *DiscordAppBot) InitializeDiscordBot() error {
 		}
 		d.userID = userID
 		// Synchronize the guilds with nakama groups
-		logger.Info("Bot is in %d guilds", len(s.State.Guilds))
-		for _, g := range m.Guilds {
-			g, err := s.Guild(g.ID)
-			if err != nil {
-				logger.Error("Error getting guild: %w", err)
-				return
-			}
 
-			if err := d.discordRegistry.SynchronizeGroup(ctx, g); err != nil {
-				logger.Error("Error synchronizing group: %s", err.Error())
-				return
-			}
+		displayName := bot.State.User.GlobalName
+		if displayName == "" {
+			displayName = bot.State.User.Username
 		}
+		logger.Info("Bot `%s` ready in %d guilds", displayName, len(bot.State.Guilds))
+	})
+
+	bot.AddHandler(func(s *discordgo.Session, m *discordgo.RateLimit) {
+		logger.WithField("rate_limit", m).Warn("Discord rate limit")
 	})
 
 	bot.AddHandler(func(s *discordgo.Session, m *discordgo.GuildMemberAdd) {
@@ -1720,19 +1728,34 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 			}
 
-			if level == evr.LevelUnspecified {
-				level = evr.LevelsByMode[mode][rand.Intn(len(evr.LevelsByMode[mode]))]
-			} else if _, ok := evr.LevelsByMode[mode]; !ok {
+			if levels, ok := evr.LevelsByMode[mode]; !ok {
 				return fmt.Errorf("invalid mode `%s`", mode)
+			} else if level != evr.LevelUnspecified && !slices.Contains(levels, level) {
+				return fmt.Errorf("invalid level `%s`", level)
 			}
 
 			startTime := time.Now()
 
-			label, err := d.handlePrepareMatch(ctx, logger, member.User.ID, i.GuildID, region, mode, level, startTime)
+			userID, err := GetUserIDByDiscordID(ctx, db, user.ID)
+			if err != nil {
+				return errors.New("failed to get user ID")
+			}
+
+			logger = logger.WithFields(map[string]interface{}{
+				"userID":    userID,
+				"guildID":   i.GuildID,
+				"region":    region.String(),
+				"mode":      mode.String(),
+				"level":     level.String(),
+				"startTime": startTime,
+			})
+
+			label, err := d.handlePrepareMatch(ctx, logger, userID, member.User.ID, i.GuildID, region, mode, level, startTime)
 			if err != nil {
 				return err
 			}
 
+			logger.WithField("label", label).Info("Match prepared")
 			return simpleInteractionResponse(s, i, fmt.Sprintf("Match prepared with label ```json\n%s\n```\nhttps://echo.taxi/spark://c/%s", label.String(), strings.ToUpper(label.ID.UUID().String())))
 		},
 		"trigger-cv": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
@@ -1987,7 +2010,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			case "members":
 
 				// List the other players in this party group
-
 				objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
 					{
 						Collection: MatchmakingConfigStorageCollection,
