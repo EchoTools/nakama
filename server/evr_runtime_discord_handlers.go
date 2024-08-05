@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/rand"
 	"slices"
 	"sort"
 	"strings"
@@ -296,19 +295,19 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	return nil
 }
 
-func (d *DiscordAppBot) handlePrepareMatch(ctx context.Context, logger runtime.Logger, userID, discordID, guildID string, region, mode, level evr.Symbol, startTime time.Time) (*MatchLabel, error) {
+func (d *DiscordAppBot) handlePrepareMatch(ctx context.Context, logger runtime.Logger, userID, discordID, guildID string, region, mode, level evr.Symbol, startTime time.Time) (l *MatchLabel, rtt float64, err error) {
 
 	// Find a parking match to prepare
 
 	groupID, err := GetGroupIDByGuildID(ctx, d.db, guildID)
 	if err != nil {
-		return nil, status.Errorf(codes.NotFound, "guild not found: %s", guildID)
+		return nil, 0, status.Errorf(codes.NotFound, "guild not found: %s", guildID)
 	}
 
 	// Get a list of the groups that this user has allocate access to
 	memberships, err := d.discordRegistry.GetGuildGroupMemberships(ctx, uuid.FromStringOrNil(userID), nil)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to get guild group memberships: %v", err)
+		return nil, 0, status.Errorf(codes.Internal, "failed to get guild group memberships: %v", err)
 	}
 	var membership *GuildGroupMembership
 	for _, m := range memberships {
@@ -318,21 +317,21 @@ func (d *DiscordAppBot) handlePrepareMatch(ctx context.Context, logger runtime.L
 	}
 
 	if membership == nil {
-		return nil, status.Error(codes.PermissionDenied, "user is not a member of the guild")
+		return nil, 0, status.Error(codes.PermissionDenied, "user is not a member of the guild")
 	}
 
 	regions := []evr.Symbol{region}
 
 	if !membership.GuildGroup.IsAllocator(userID) {
 		if membership.GuildGroup.Metadata.DisablePublicAllocateCommand {
-			return nil, status.Error(codes.PermissionDenied, "guild does not allow public allocation")
+			return nil, 0, status.Error(codes.PermissionDenied, "guild does not allow public allocation")
 		} else {
 			regions = append(regions, evr.DefaultRegion)
 		}
 
 		limiter := d.loadPrepareMatchRateLimiter(userID, groupID)
 		if !limiter.Allow() {
-			return nil, status.Error(codes.ResourceExhausted, fmt.Sprintf("rate limit exceeded (%0.0f requests per minute)", limiter.Limit()*60))
+			return nil, 0, status.Error(codes.ResourceExhausted, fmt.Sprintf("rate limit exceeded (%0.0f requests per minute)", limiter.Limit()*60))
 		}
 	}
 
@@ -346,30 +345,30 @@ func (d *DiscordAppBot) handlePrepareMatch(ctx context.Context, logger runtime.L
 	maxSize := 1
 	matches, err := d.nk.MatchList(ctx, 100, true, "", &minSize, &maxSize, query)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to list matches: %v", err)
+		return nil, 0, status.Errorf(codes.Internal, "failed to list matches: %v", err)
 	}
 
 	if len(matches) == 0 {
-		return nil, status.Error(codes.NotFound, fmt.Sprintf("no game servers are available in region `%s`", region.String()))
+		return nil, 0, status.Error(codes.NotFound, fmt.Sprintf("no game servers are available in region `%s`", region.String()))
 	}
 
 	labels := make([]*MatchLabel, 0, len(matches))
 	for _, match := range matches {
 		label := MatchLabel{}
 		if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), &label); err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to unmarshal match label: %v", err)
+			return nil, 0, status.Errorf(codes.Internal, "failed to unmarshal match label: %v", err)
 		}
 		labels = append(labels, &label)
 	}
 
+	latencyMap := make(map[string]float64, len(matches))
 	if region == evr.DefaultRegion {
 		// Find the closest to the player.
 		cache, err := LoadLatencyCache(ctx, d.nk, userID)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 
-		latencyMap := make(map[string]float64, len(matches))
 		for _, e := range cache {
 			latencyMap[e.ID()] = float64(e.RTT)
 		}
@@ -382,9 +381,12 @@ func (d *DiscordAppBot) handlePrepareMatch(ctx context.Context, logger runtime.L
 			return latencyMap[labels[i].Broadcaster.Endpoint.ExternalIP.String()] < latencyMap[labels[j].Broadcaster.Endpoint.ExternalIP.String()]
 		})
 	}
+	if t, ok := latencyMap[labels[0].Broadcaster.Endpoint.ExternalIP.String()]; ok {
+		rtt = t
+	}
 
 	// Pick a random result
-	match := matches[rand.Intn(len(matches))]
+	match := matches[0]
 	matchID := MatchIDFromStringOrNil(match.GetMatchId())
 	gid := uuid.FromStringOrNil(groupID)
 	// Prepare the session for the match.
@@ -404,14 +406,14 @@ func (d *DiscordAppBot) handlePrepareMatch(ctx context.Context, logger runtime.L
 	nk_ := d.nk.(*RuntimeGoNakamaModule)
 	response, err := SignalMatch(ctx, nk_.matchRegistry, matchID, SignalPrepareSession, label)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to signal match: %v", err)
+		return nil, 0, status.Errorf(codes.Internal, "failed to signal match: %v", err)
 	}
 
 	label = MatchLabel{}
 	if err := json.Unmarshal([]byte(response), &label); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to unmarshal match label: %v", err)
+		return nil, 0, status.Errorf(codes.Internal, "failed to unmarshal match label: %v", err)
 	}
 
-	return &label, nil
+	return &label, rtt, nil
 
 }
