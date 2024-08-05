@@ -144,7 +144,7 @@ func MatchListPublicRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 	}
 
 	minSize := 1
-	query := "-label.lobby_type:unassigned"
+	query := "*"
 	matches, err := nk.MatchList(ctx, 1000, true, "", &minSize, nil, query)
 	if err != nil {
 		return "", runtime.NewError("Failed to list matches", StatusInternalError)
@@ -154,22 +154,106 @@ func MatchListPublicRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		return "", runtime.NewError("Failed to marshal matches", StatusInternalError)
 	}
 	_ = data
-	labels := make([]any, 0, len(matches))
+
+	matchmakerTicketCounts := map[string]int{
+		evr.ModeArenaPublic.String():  0,
+		evr.ModeCombatPublic.String(): 0,
+	}
+
+	presences, err := nk.StreamUserList(StreamModeMatchmaking, uuid.NewV5(uuid.Nil, "matchmaking").String(), "", "", true, true)
+	if err != nil {
+		return "", runtime.NewError("Failed to list matchmaker tickets", StatusInternalError)
+	}
+	for _, presence := range presences {
+		s := MatchmakingStatus{}
+		if err := json.Unmarshal([]byte(presence.GetStatus()), &s); err != nil {
+			return "", runtime.NewError("Failed to unmarshal matchmaker ticket", StatusInternalError)
+		}
+		if _, ok := matchmakerTicketCounts[s.Mode.String()]; ok {
+			matchmakerTicketCounts[s.Mode.String()] += s.PartySize
+		}
+	}
+
+	playerCount := 0
+	gameServers := make([]*MatchBroadcaster, 0, len(matches))
+	labels := make([]*MatchLabel, 0, len(matches))
 	for _, m := range matches {
-		label := &MatchLabel{}
-		if err := json.Unmarshal([]byte(m.GetLabel().GetValue()), label); err != nil {
+		l := &MatchLabel{}
+		if err := json.Unmarshal([]byte(m.GetLabel().GetValue()), l); err != nil {
 			return "", runtime.NewError("Failed to unmarshal match label", StatusInternalError)
 		}
+
 		// Remove private data
-		labels = append(labels, label.PublicView())
+		v := &MatchLabel{
+			LobbyType:        l.LobbyType,
+			ID:               l.ID,
+			Open:             l.Open,
+			GameState:        l.GameState,
+			StartTime:        l.StartTime,
+			GroupID:          l.GroupID,
+			GuildID:          l.GuildID,
+			SpawnedBy:        l.SpawnedBy,
+			Mode:             l.Mode,
+			Level:            l.Level,
+			RequiredFeatures: l.RequiredFeatures,
+			MaxSize:          l.MaxSize,
+			Size:             l.Size,
+			PlayerCount:      l.PlayerCount,
+			PlayerLimit:      l.PlayerLimit,
+			TeamSize:         l.TeamSize,
+			Broadcaster: MatchBroadcaster{
+				OperatorID:  l.Broadcaster.OperatorID,
+				GroupIDs:    l.Broadcaster.GroupIDs,
+				VersionLock: l.Broadcaster.VersionLock,
+				Regions:     l.Broadcaster.Regions,
+				Tags:        l.Broadcaster.Tags,
+				Features:    l.Broadcaster.Features,
+			},
+			Players: make([]PlayerInfo, 0),
+		}
+		if l.LobbyType == PrivateLobby || l.LobbyType == UnassignedLobby {
+			// Set teh last 4 bytes of the ID to 0
+			for i := 12; i < 16; i++ {
+				v.ID.uuid[i] = 0xFF
+			}
+		} else {
+			for i := range l.Players {
+				v.Players = append(v.Players, PlayerInfo{
+					UserID:      l.Players[i].UserID,
+					Username:    l.Players[i].Username,
+					DisplayName: l.Players[i].DisplayName,
+					EvrID:       l.Players[i].EvrID,
+					Team:        l.Players[i].Team,
+					DiscordID:   l.Players[i].DiscordID,
+					PartyID:     l.Players[i].PartyID,
+				})
+			}
+
+		}
+
+		playerCount += v.PlayerCount
+		gameServers = append(gameServers, &v.Broadcaster)
+		if v.LobbyType != UnassignedLobby {
+			labels = append(labels, v)
+		}
 	}
 
 	response := struct {
-		UpdateTime TimeRFC3339 `json:"update_time"`
-		Labels     []any       `json:"matches"`
+		UpdateTime         TimeRFC3339         `json:"update_time"`
+		LobbySessionCount  int                 `json:"lobby_session_count"`
+		GameServerCount    int                 `json:"gameserver_count"`
+		PlayerCount        int                 `json:"player_count"`
+		MatchmakingTickets map[string]int      `json:"active_matchmaking_counts"`
+		Labels             []*MatchLabel       `json:"labels"`
+		GameServers        []*MatchBroadcaster `json:"gameservers"`
 	}{
-		UpdateTime: TimeRFC3339(time.Now().UTC()),
-		Labels:     labels,
+		UpdateTime:         TimeRFC3339(time.Now().UTC()),
+		Labels:             labels,
+		LobbySessionCount:  len(labels),
+		GameServers:        gameServers,
+		GameServerCount:    len(gameServers),
+		PlayerCount:        playerCount,
+		MatchmakingTickets: matchmakerTicketCounts,
 	}
 
 	data, err = json.MarshalIndent(response, "", "  ")
