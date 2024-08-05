@@ -570,9 +570,11 @@ func backfillQuery(mode, level evr.Symbol, region evr.Symbol, curMatch MatchID, 
 	qparts := []string{
 		"+label.open:T",
 		fmt.Sprintf("+label.mode:%s", mode.String()),
-		fmt.Sprintf("+label.group_id:%s", groupIDStrs[0]),
+		fmt.Sprintf("+label.group_id:/(%s)/", groupIDStrs[0]),
 		fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/", strings.Join(groupIDStrs, "|")),
-		fmt.Sprintf("-label.id:%s", curMatch.String()),
+	}
+	if !curMatch.IsNil() {
+		qparts = append(qparts, fmt.Sprintf("-label.id:%s", curMatch.String()))
 	}
 
 	if isPlayer {
@@ -587,9 +589,9 @@ func backfillQuery(mode, level evr.Symbol, region evr.Symbol, curMatch MatchID, 
 		qparts = append(qparts, fmt.Sprintf("+label.player_count:<=%d", playerLimit-partySize))
 	}
 	// All backfills are required to have the default region defined
-	qparts = append(qparts, fmt.Sprintf("+label.broadcaster.region:%s", evr.DefaultRegion.String()))
+	qparts = append(qparts, fmt.Sprintf("+label.broadcaster.regions:%s", evr.DefaultRegion.String()))
 	if region != evr.DefaultRegion {
-		qparts = append(qparts, fmt.Sprintf("+label.broadcaster.region:%s", region.String()))
+		qparts = append(qparts, fmt.Sprintf("+label.broadcaster.regions:%s", region.String()))
 	}
 
 	return strings.Join(qparts, " ")

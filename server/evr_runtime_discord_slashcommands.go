@@ -494,6 +494,96 @@ var (
 			},
 		},
 		{
+			Name:        "create",
+			Description: "Create an EVR game session on a game server in a specific region",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "mode",
+					Description: "Game mode",
+					Required:    true,
+					Choices: []*discordgo.ApplicationCommandOptionChoice{
+						{
+							Name:  "Echo Arena Private",
+							Value: "echo_arena_private",
+						},
+						{
+							Name:  "Echo Combat Private",
+							Value: "echo_combat_private",
+						},
+						{
+							Name:  "Social Private",
+							Value: "social_2.0_private",
+						},
+						{
+							Name:  "Echo Arena Public",
+							Value: "echo_arena",
+						},
+						{
+							Name:  "Echo Combat Public",
+							Value: "echo_combat",
+						},
+					},
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "region",
+					Description: "Region to allocate the session in (leave blank to use the best server for you)",
+					Required:    false,
+					Choices: []*discordgo.ApplicationCommandOptionChoice{
+						{
+							Name:  "US Central North (Chicago)",
+							Value: "us-central-north",
+						},
+						{
+							Name:  "US Central South (Texas)",
+							Value: "us-central-south",
+						},
+						{
+							Name:  "US Central South",
+							Value: "us-east",
+						},
+						{
+							Name:  "US West",
+							Value: "us-west",
+						},
+						{
+							Name:  "EU West",
+							Value: "eu-west",
+						},
+						{
+							Name:  "Japan",
+							Value: "jp",
+						},
+						{
+							Name:  "Singapore",
+							Value: "sin",
+						},
+						{
+							Name:  "Vibinator",
+							Value: "82be4f8d-7504-4b67-8411-ce80c17bdf65",
+						},
+					},
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "level",
+					Description: "Level for the the session (combat only)",
+					Required:    false,
+					Choices: func() []*discordgo.ApplicationCommandOptionChoice {
+						choices := make([]*discordgo.ApplicationCommandOptionChoice, 0)
+						for _, level := range evr.LevelsByMode[evr.ModeCombatPublic] {
+							choices = append(choices, &discordgo.ApplicationCommandOptionChoice{
+								Name:  level.Token().String(),
+								Value: level,
+							})
+						}
+						return choices
+					}(),
+				},
+			},
+		},
+		{
 			Name:        "region-status",
 			Description: "Get the status of game servers in a specific region",
 			Options: []*discordgo.ApplicationCommandOption{
