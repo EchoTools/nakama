@@ -2027,10 +2027,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					}
 				}
 				if matchmakingConfig.GroupID == "" {
-					return errors.New("You do not have a party groupID set.")
+					return errors.New("set a group ID first with `/party group`")
 				}
 
-				logger = logger.WithField("group_id", matchmakingConfig.GroupID)
+				//logger = logger.WithField("group_id", matchmakingConfig.GroupID)
 
 				// Look for presences
 				partyID := uuid.NewV5(uuid.Nil, matchmakingConfig.GroupID).String()
@@ -2048,7 +2048,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 
 				if !found {
-					return errors.New("You are not online, or not in a party.")
+					return errors.New("not online, or not in a party")
 				}
 
 				// Convert the members to discord user IDs
