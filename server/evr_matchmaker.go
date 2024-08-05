@@ -129,8 +129,11 @@ func (p *EvrPipeline) GetBackfillCandidates(ctx context.Context, userID uuid.UUI
 	}
 	open := make([]*MatchLabel, 0, len(labels))
 	for _, label := range labels {
-		if time.Since(label.StartTime) < MadeMatchBackfillDelay {
-			continue
+		// If the match is a public match, and it has started, and it has been less than 15 seconds since it started, skip it.
+		if label.Mode == evr.ModeArenaPublic || label.Mode == evr.ModeCombatPublic {
+			if label.Started() && time.Since(label.StartTime) < MadeMatchBackfillDelay {
+				continue
+			}
 		}
 		if label.PlayerCount < label.PlayerLimit {
 			open = append(open, label)
@@ -345,7 +348,11 @@ func NewMatchmakingStatus(msession *MatchmakingSession) *MatchmakingStatus {
 }
 
 func (ms *MatchmakingStatus) Update() error {
-	ms.PartySize = len(ms.msession.Party.List())
+	if ms.msession.Party != nil {
+		ms.PartySize = len(ms.msession.Party.List())
+	} else {
+		ms.PartySize = 1
+	}
 	s := ms.msession.Session
 	// Create a status presence for the user
 	stream := PresenceStream{Mode: StreamModeMatchmaking, Subject: uuid.NewV5(uuid.Nil, "matchmaking")}

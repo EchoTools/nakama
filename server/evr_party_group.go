@@ -14,10 +14,16 @@ type PartyGroup struct {
 }
 
 func (g *PartyGroup) ID() uuid.UUID {
+	if g.ph == nil {
+		return uuid.Nil
+	}
 	return g.ph.ID
 }
 
 func (g *PartyGroup) IDStr() string {
+	if g.ph == nil {
+		return uuid.Nil.String()
+	}
 	return g.ph.IDStr
 }
 func (g *PartyGroup) GetLeader() *rtapi.UserPresence {
@@ -30,10 +36,16 @@ func (g *PartyGroup) GetLeader() *rtapi.UserPresence {
 }
 
 func (g *PartyGroup) List() []*PartyPresenceListItem {
+	if g.ph == nil {
+		return nil
+	}
 	return g.ph.members.List()
 }
 
 func (g *PartyGroup) Size() int {
+	if g.ph == nil {
+		return 1
+	}
 	return g.ph.members.Size()
 }
 

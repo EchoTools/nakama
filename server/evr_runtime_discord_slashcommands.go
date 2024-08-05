@@ -1857,8 +1857,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return err
 			}
 			rttMs := int(rtt / 1000000)
-			logger.WithField("label", label).Info("Match prepared")
-			content := fmt.Sprintf("Created `%s` match on server with %dms ping\n\nhttps://echo.taxi/spark://c/%s", label.Mode.String(), rttMs, strings.ToUpper(label.ID.UUID().String()))
+			logger.WithField("label", label).Info("Match created.")
+			content := fmt.Sprintf("Reserved server (%dms ping) for `%s` session. Reservation will timeout in %d minute.\n\nhttps://echo.taxi/spark://c/%s", rttMs, label.Mode.String(), 1, strings.ToUpper(label.ID.UUID().String()))
 			return simpleInteractionResponse(s, i, content)
 		},
 		"allocate": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
