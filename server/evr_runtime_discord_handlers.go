@@ -350,7 +350,37 @@ func (d *DiscordAppBot) handlePrepareMatch(ctx context.Context, logger runtime.L
 	}
 
 	if len(matches) == 0 {
-		return nil, status.Error(codes.NotFound, "no matches found")
+		return nil, status.Error(codes.NotFound, fmt.Sprintf("no game servers are available in region `%s`", region.String()))
+	}
+
+	labels := make([]*MatchLabel, 0, len(matches))
+	for _, match := range matches {
+		label := MatchLabel{}
+		if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), &label); err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to unmarshal match label: %v", err)
+		}
+		labels = append(labels, &label)
+	}
+
+	if region == evr.DefaultRegion {
+		// Find the closest to the player.
+		cache, err := LoadLatencyCache(ctx, d.nk, userID)
+		if err != nil {
+			return nil, err
+		}
+
+		latencyMap := make(map[string]float64, len(matches))
+		for _, e := range cache {
+			latencyMap[e.ID()] = float64(e.RTT)
+		}
+
+		// Sort the available servers by latency
+		sort.Slice(labels, func(i, j int) bool {
+			if latencyMap[labels[i].Broadcaster.Endpoint.ExternalIP.String()] == 0 {
+				return false
+			}
+			return latencyMap[labels[i].Broadcaster.Endpoint.ExternalIP.String()] < latencyMap[labels[j].Broadcaster.Endpoint.ExternalIP.String()]
+		})
 	}
 
 	// Pick a random result
