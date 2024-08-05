@@ -137,7 +137,7 @@ func init() {
 }
 
 func MatchListPublicRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
-	// The public view is cached for 5 seconds.
+	// The public view is cached.
 	cachedResponse, _, found := rpcResponseCache.Get("match:public")
 	if found {
 		return cachedResponse.(string), nil
@@ -264,7 +264,7 @@ func MatchListPublicRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 	payload = string(data)
 
 	// Update the cache
-	rpcResponseCache.Set("match:public", payload, 5*time.Second)
+	rpcResponseCache.Set("match:public", payload, 3*time.Second)
 
 	return payload, nil
 
