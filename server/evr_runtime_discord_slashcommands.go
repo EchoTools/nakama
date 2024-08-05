@@ -2721,3 +2721,26 @@ func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runt
 	}
 	return nil
 }
+
+func LoadLatencyCache(ctx context.Context, nk runtime.NakamaModule, userID string) (map[string]LatencyMetric, error) {
+	objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
+		{
+			Collection: MatchmakingStorageCollection,
+			Key:        LatencyCacheStorageKey,
+			UserID:     userID,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(objs) == 0 {
+		return nil, nil
+	}
+
+	store := &LatencyCacheStorageObject{}
+	if err := json.Unmarshal([]byte(objs[0].Value), store); err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to unmarshal latency cache: %v", err)
+	}
+
+	return store.Entries, nil
+}
