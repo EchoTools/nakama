@@ -464,45 +464,9 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		logger.Error("state not a valid lobby state object")
 		return nil
 	}
+
 	var err error
-
-	// If the match is closed, and the termination tick has been reached, then terminate the match.
-	if !state.Open && state.terminateTick != 0 && tick >= state.terminateTick {
-		logger.Debug("Match termination tick reached.")
-		return m.MatchTerminate(ctx, logger, db, nk, dispatcher, tick, state, 0)
-	}
-
-	// If the match is empty, and the match has been empty for too long, then terminate the match.
-	if len(state.presenceMap) == 0 {
-		state.emptyTicks++
-		if state.Open && state.Started() && state.terminateTick == 0 && state.emptyTicks > 20*state.tickRate {
-			logger.Warn("Started match has been empty for too long. Shutting down.")
-			return m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, 20)
-		}
-	} else if state.emptyTicks != 0 {
-		state.emptyTicks = 0
-	}
-
-	// If the match is prepared and the start time has been reached, start it.
-	if state.LobbyType != UnassignedLobby {
-		if !state.levelLoaded && !state.StartTime.IsZero() && time.Now().After(state.StartTime) {
-			if state, err = m.MatchStart(ctx, logger, nk, dispatcher, state); err != nil {
-				logger.Error("failed to start session: %v", err)
-				return nil
-			}
-		}
-		if err := m.updateLabel(dispatcher, state); err != nil {
-			return nil
-		}
-	}
-
-	if tick%state.tickRate == 0 && state.GameState != nil {
-		// Update the game clock
-		if state.GameState.unpausingAt.Before(time.Now()) {
-			state.GameState.unpausingAt = time.Time{}
-			state.GameState.RoundClock = state.GameState.RoundClock + 1
-		}
-	}
+	var updateLabel bool
 
 	// Handle the messages, one by one
 	for _, in := range messages {
@@ -527,7 +491,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 					gs.unpausingAt = time.Now().Add(u.PauseDuration)
 				}
 			}
-
+			updateLabel = true
 		default:
 			typ, found := evr.SymbolTypes[uint64(in.GetOpCode())]
 			if !found {
@@ -561,6 +525,59 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 			logger.Debug("Message %T took %dms", msg, time.Since(start)/time.Millisecond)
 		}
 	}
+
+	// If the match is prepared and the start time has been reached, start it.
+	if state.LobbyType == UnassignedLobby {
+		return state
+	}
+
+	// Start the match on time.
+	if !state.levelLoaded && state.Started() {
+		if state, err = m.MatchStart(ctx, logger, nk, dispatcher, state); err != nil {
+			logger.Error("failed to start session: %v", err)
+			return nil
+		}
+		if err := m.updateLabel(dispatcher, state); err != nil {
+			return nil
+		}
+		return state
+	}
+
+	// If the match is terminating, terminate on the tick.
+	if state.terminateTick != 0 {
+		if tick >= state.terminateTick {
+			logger.Debug("Match termination tick reached.")
+			return m.MatchTerminate(ctx, logger, db, nk, dispatcher, tick, state, 0)
+		}
+		return state
+	}
+
+	// If the match is empty, and the match has been empty for too long, then terminate the match.
+	if len(state.presenceMap) == 0 {
+		state.emptyTicks++
+		if state.emptyTicks > 20*state.tickRate {
+			logger.Warn("Started match has been empty for too long. Shutting down.")
+			return m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, 20)
+		}
+	} else {
+		state.emptyTicks = 0
+	}
+
+	// Update the game clock every second
+	if tick%state.tickRate == 0 && state.GameState != nil {
+		if state.GameState.unpausingAt.Before(time.Now()) {
+			state.GameState.unpausingAt = time.Time{}
+			state.GameState.RoundClock = state.GameState.RoundClock + 1
+		}
+		updateLabel = true
+	}
+
+	if updateLabel {
+		if err := m.updateLabel(dispatcher, state); err != nil {
+			return nil
+		}
+	}
+
 	return state
 }
 
