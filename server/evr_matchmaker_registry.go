@@ -34,7 +34,6 @@ import (
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
-	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -254,15 +253,17 @@ func (s *MatchmakingSession) Cause() error {
 }
 
 func (s *MatchmakingSession) GetPartyMatchmakingSessions() []*MatchmakingSession {
-	if s.Party == nil {
+	if s.Party == nil || s.Party.Size() <= 1 {
 		return []*MatchmakingSession{s}
 	}
 	msessions := make([]*MatchmakingSession, 0, s.Party.Size())
 	for _, member := range s.Party.List() {
 		msession, ok := s.registry.GetMatchingBySessionId(uuid.FromStringOrNil(member.Presence.GetSessionId()))
-		if ok {
-			msessions = append(msessions, msession)
+		if !ok {
+			s.Logger.Warn("Could not find matching session for user", zap.String("sessionID", member.Presence.GetSessionId()))
+			continue
 		}
+		msessions = append(msessions, msession)
 	}
 	return msessions
 }
@@ -569,29 +570,27 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 		return // No label found
 	}
 
-	entrants = make([]*MatchmakerEntry, 0, len(entrants))
-	for _, m := range parties {
-		entrants = append(entrants, m...)
+	rentrants := make([]runtime.MatchmakerEntry, 0, len(entrants))
+	for _, e := range entrants {
+		rentrants = append(rentrants, e)
 	}
+
+	team1, team2 := mr.evrPipeline.sbmm.BalancedMatchFromCandidate(rentrants)
+
 	metricsTags := map[string]string{
 		"type":          strconv.FormatInt(int64(ml.LobbyType), 10),
 		"mode":          ml.Mode.String(),
 		"level":         ml.Level.String(),
 		"group_id":      ml.GetGroupID().String(),
-		"entrant_count": strconv.FormatInt(int64(len(entrants)), 10),
+		"entrant_count": strconv.FormatInt(int64(len(team1)+len(team2)), 10),
 	}
 	mr.metrics.CustomCounter("matchmaking_matched_participant_count", metricsTags, int64(len(entrants)))
 
-	teams := distributeParties(lo.Values(parties))
-	if len(teams) != 2 {
-		logger.Error("Invalid number of teams", zap.Int("teams", len(teams)))
-		return
-	}
 	ml.Players = make([]PlayerInfo, 0, len(entrants))
-	for i, players := range teams {
+	for i, players := range []RatedTeam{team1, team2} {
 		for _, p := range players {
 			// Update the label with the teams
-			evrID, err := evr.ParseEvrId(p.StringProperties["evrid"])
+			evrID, err := evr.ParseEvrId(p.Entry.GetProperties()["evrid"].(string))
 			if err != nil {
 				logger.Error("Failed to parse evr id", zap.Error(err))
 				continue
@@ -660,23 +659,26 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 	}
 
 	presencesByTicket := make(map[string][]*EvrMatchPresence, len(parties))
-	for i, players := range teams {
+	for i, players := range []RatedTeam{team1, team2} {
 		// Assign each player in the team to the match
-		for _, entry := range players {
-			ms, ok := mr.GetMatchingBySessionId(entry.Presence.SessionID)
+		for _, rated := range players {
+			entry := rated.Entry
+			presence := entry.GetPresence()
+			ticket := entry.GetTicket()
+			logger := logger.With(zap.String("uid", presence.GetUserId()), zap.String("sid", presence.GetSessionId()), zap.String("ticket", ticket))
+			ms, ok := mr.GetMatchingBySessionId(uuid.FromStringOrNil(entry.GetPresence().GetSessionId()))
 			if !ok {
-				logger.Warn("Could not find matching session for user", zap.String("sessionID", entry.Presence.SessionID.String()))
+				logger.Warn("Could not find matching session for user")
 				continue
 			}
 			// Get the ticket metadata
 
-			ticket := entry.GetTicket()
 			ticketMeta, ok := ms.Tickets[ticket]
 			if !ok {
-				logger.Warn("Could not find ticket metadata for user", zap.String("sessionID", entry.Presence.SessionID.String()), zap.String("ticket", ticket))
+				logger.Warn("Could not find ticket metadata for user")
 				continue
 			}
-			presence, err := NewMatchPresenceFromSession(ms, matchID, int(i), ticketMeta.Query)
+			matchPresence, err := NewMatchPresenceFromSession(ms, matchID, int(i), ticketMeta.Query)
 			if err != nil {
 				logger.Warn("Failed to create match presence", zap.Error(err))
 				continue
@@ -684,19 +686,17 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 			if _, ok := presencesByTicket[ticket]; !ok {
 				presencesByTicket[ticket] = make([]*EvrMatchPresence, 0, len(players))
 			}
-			presencesByTicket[ticket] = append(presencesByTicket[ticket], presence)
+			presencesByTicket[ticket] = append(presencesByTicket[ticket], matchPresence)
 			mr.metrics.CustomTimer("matchmaking_matched_duration", metricsTags, time.Since(ticketMeta.CreatedAt))
 		}
 	}
-	ctx, cancel := context.WithCancel(mr.ctx)
-	defer cancel()
 
 	successful := make([]*EvrMatchPresence, 0, len(entrants))
 	errored := make([]*EvrMatchPresence, 0, len(entrants))
 	for _, presences := range presencesByTicket {
 		// Join the presence to the match
 
-		s, e, err := mr.evrPipeline.LobbyJoin(ctx, logger, matchID, presences...)
+		s, e, err := mr.evrPipeline.LobbyJoin(mr.ctx, logger, matchID, presences...)
 		if err != nil {
 			for _, p := range e {
 				logger.Warn("Failed to join presence to matchmade session", zap.String("mid", matchID.UUID().String()), zap.String("uid", p.GetUserId()), zap.Error(err))
@@ -712,6 +712,15 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 	label, err := MatchLabelByID(mr.ctx, mr.nk, matchID)
 	if err != nil {
 		logger.Error("Failed to get label from matchID", zap.Error(err))
+	}
+
+	teams := make([][]runtime.MatchmakerEntry, 0, len(successful))
+	for _, p := range []RatedTeam{team1, team2} {
+		team := make([]runtime.MatchmakerEntry, 0, len(p))
+		for _, rated := range p {
+			team = append(team, rated.Entry)
+		}
+		teams = append(teams, team)
 	}
 
 	logger.Info("Match made", zap.Any("label", label), zap.String("mid", matchID.UUID().String()), zap.Any("teams", teams), zap.Any("errored", errored))
@@ -1465,7 +1474,7 @@ func (c *MatchmakingRegistry) SessionsByMode() map[evr.Symbol]map[uuid.UUID]*Mat
 	return sessionByMode
 }
 
-func (r *MatchmakingRegistry) SendMatchmakerMatchedNotification(label *MatchLabel, teams [][]*MatchmakerEntry, errored []*EvrMatchPresence) {
+func (r *MatchmakingRegistry) SendMatchmakerMatchedNotification(label *MatchLabel, teams [][]runtime.MatchmakerEntry, errored []*EvrMatchPresence) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -1502,7 +1511,7 @@ func (r *MatchmakingRegistry) SendMatchmakerMatchedNotification(label *MatchLabe
 	for _, team := range teams {
 		names := make([]string, 0, len(team))
 		for _, p := range team {
-			account, err := r.nk.AccountGetId(ctx, p.Presence.GetUserId())
+			account, err := r.nk.AccountGetId(ctx, p.GetPresence().GetUserId())
 			if err != nil {
 				logger.Warn("Failed to get account", zap.Error(err))
 				continue

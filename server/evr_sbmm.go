@@ -10,6 +10,7 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/intinig/go-openskill/rating"
 	"github.com/intinig/go-openskill/types"
+	"github.com/samber/lo"
 	"go.uber.org/thriftrw/ptr"
 	"go.uber.org/zap"
 )
@@ -81,6 +82,7 @@ type MatchmakerMeta struct {
 	RatingSigma float64 `json:"rating_sigma"`
 }
 
+type RatedMatch []RatedTeam
 type RatedTeam []*RatedEntry
 
 func (t RatedTeam) Strength() float64 {
@@ -96,7 +98,16 @@ type RatedEntry struct {
 	Rating types.Rating
 }
 
-func PredictMatch(teams [][]*RatedEntry) []float64 {
+type PredictedMatch struct {
+	Team1 RatedTeam `json:"team1"`
+	Team2 RatedTeam `json:"team2"`
+	Draw  float64   `json:"draw"`
+}
+
+func (p PredictedMatch) Entrants() []*RatedEntry {
+	return append(p.Team1, p.Team2...)
+}
+func PredictDraw(teams []RatedTeam) float64 {
 	team1 := make(types.Team, 0, len(teams[0]))
 	team2 := make(types.Team, 0, len(teams[1]))
 	for _, e := range teams[0] {
@@ -105,7 +116,7 @@ func PredictMatch(teams [][]*RatedEntry) []float64 {
 	for _, e := range teams[1] {
 		team2 = append(team2, e.Rating)
 	}
-	return rating.PredictWin([]types.Team{team1, team2}, nil)
+	return rating.PredictDraw([]types.Team{team1, team2}, nil)
 }
 
 func NewRatedEntryFromMatchmakerEntry(e runtime.MatchmakerEntry) *RatedEntry {
@@ -127,10 +138,10 @@ func NewRatedEntryFromMatchmakerEntry(e runtime.MatchmakerEntry) *RatedEntry {
 	}
 }
 
-func createBalancedMatch(allParties [][]*RatedEntry, teamSize int) [][]*RatedEntry {
+func CreateBalancedMatch(groups [][]*RatedEntry, teamSize int) (RatedTeam, RatedTeam) {
 	// Split out the solo players
-	solos := make([]*RatedEntry, 0, len(allParties))
-	parties := make([][]*RatedEntry, 0, len(allParties))
+	solos := make([]*RatedEntry, 0, len(groups))
+	parties := make([][]*RatedEntry, 0, len(groups))
 	for _, party := range parties {
 		if len(party) == 1 {
 			solos = append(solos, party[0])
@@ -151,8 +162,8 @@ func createBalancedMatch(allParties [][]*RatedEntry, teamSize int) [][]*RatedEnt
 		solos[i], solos[j] = solos[j], solos[i]
 	}
 
-	team1 := make([]*RatedEntry, 0, teamSize)
-	team2 := make([]*RatedEntry, 0, teamSize)
+	team1 := make(RatedTeam, 0, teamSize)
+	team2 := make(RatedTeam, 0, teamSize)
 
 	for _, party := range parties {
 		if len(team1)+len(party) <= teamSize && (len(team2)+len(party) > teamSize || TeamStrength(team1) <= TeamStrength(team2)) {
@@ -170,46 +181,82 @@ func createBalancedMatch(allParties [][]*RatedEntry, teamSize int) [][]*RatedEnt
 		}
 	}
 
-	return [][]*RatedEntry{team1, team2}
+	return team1, team2
 }
 
-func EvrMatchmakerFn(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, candidateMatches [][]runtime.MatchmakerEntry) (results [][]runtime.MatchmakerEntry) {
-	//profileRegistry := &ProfileRegistry{nk: nk}
+func (*SkillBasedMatchmaker) BalancedMatchFromCandidate(candidate []runtime.MatchmakerEntry) (RatedTeam, RatedTeam) {
+	// Create a balanced match
+	ticketMap := lo.GroupBy(candidate, func(e runtime.MatchmakerEntry) string {
+		return e.GetTicket()
+	})
+	groups := make([][]*RatedEntry, 0)
+	for _, group := range ticketMap {
+		ratedGroup := make([]*RatedEntry, 0, len(group))
+		for _, e := range group {
+			ratedGroup = append(ratedGroup, NewRatedEntryFromMatchmakerEntry(e))
+		}
+		groups = append(groups, ratedGroup)
+	}
 
-	partyMap := make(map[string][]*RatedEntry)
-	teamSize := 4
+	team1, team2 := CreateBalancedMatch(groups, len(candidate)/2)
+	return team1, team2
+}
+
+func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, candidateMatches [][]runtime.MatchmakerEntry) (madeMatches [][]runtime.MatchmakerEntry) {
+	//profileRegistry := &ProfileRegistry{nk: nk}
+	logger.Debug("Match candidates.", zap.Any("matches", candidateMatches))
+
+	// TODO FIXME get the team size from the ticket properties
+
+	balancedMatches := make([]RatedMatch, 0, len(candidateMatches))
 
 	for _, match := range candidateMatches {
-		for _, e := range match {
-			partyMap[e.GetTicket()] = append(partyMap[e.GetTicket()], NewRatedEntryFromMatchmakerEntry(e))
+		if len(match)%2 != 0 {
+			logger.Warn("Match has odd number of players.", zap.Any("match", match))
+			continue
 		}
+		team1, team2 := m.BalancedMatchFromCandidate(match)
+		balancedMatches = append(balancedMatches, RatedMatch{team1, team2})
+
 	}
 
-	allParties := make([][]*RatedEntry, 0, len(partyMap))
-	for _, party := range partyMap {
-		allParties = append(allParties, party)
+	predictions := make([]PredictedMatch, 0, len(balancedMatches))
+	for _, match := range balancedMatches {
+		predictions = append(predictions, PredictedMatch{
+			Team1: match[0],
+			Team2: match[1],
+			Draw:  PredictDraw(match),
+		})
 	}
-
-	matches := make([][][]*RatedEntry, 0, len(candidateMatches))
-	matches = append(matches, createBalancedMatch(allParties, teamSize))
 
 	// Sort the matches by their balance
-	slices.SortStableFunc(matches, func(match1, match2 [][]*RatedEntry) int {
-		return int(10000 * (PredictMatch(match1)[0] - PredictMatch(match2)[0]))
+	slices.SortStableFunc(predictions, func(a, b PredictedMatch) int {
+		return int((a.Draw - b.Draw) * 1000)
 	})
 
-	logger.Debug("Match options", zap.Any("teams", matches))
+	// Sort so that highest draw probability is first
+	slices.Reverse(predictions)
 
-	results = make([][]runtime.MatchmakerEntry, 0, len(matches))
-	for _, match := range matches {
-		option := make([]runtime.MatchmakerEntry, 0, len(match))
-		for _, t := range match {
-			for _, e := range t {
-				option = append(option, e.Entry)
+	logger.Debug("Match options.", zap.Any("matches", predictions))
+
+	seen := make(map[string]struct{})
+	madeMatches = make([][]runtime.MatchmakerEntry, 0, len(predictions))
+OuterLoop:
+	for _, p := range predictions {
+		// The players are ordered by their team
+		match := make([]runtime.MatchmakerEntry, 0, 8)
+		for _, e := range p.Entrants() {
+
+			// Skip a match where any player of any ticket that has already been seen
+			if _, ok := seen[e.Entry.GetTicket()]; ok {
+				continue OuterLoop
 			}
+			match = append(match, e.Entry)
 		}
-		results = append(results, option)
+
+		madeMatches = append(madeMatches, match)
 	}
 
-	return results
+	logger.Debug("Made matches.", zap.Any("matches", madeMatches))
+	return madeMatches
 }

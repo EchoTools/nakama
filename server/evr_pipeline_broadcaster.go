@@ -661,7 +661,7 @@ func (p *EvrPipeline) broadcasterPlayerAccept(ctx context.Context, logger *zap.L
 
 		presence, err := PresenceByEntrantID(p.runtimeModule, matchID, entrantID)
 		if err != nil || presence == nil {
-			logger.Warn("Failed to get player session by ID", zap.Error(err))
+			logger.Warn("Failed to get player presence by entrant ID", zap.Error(err))
 			rejected = append(rejected, entrantID)
 			continue
 		}
