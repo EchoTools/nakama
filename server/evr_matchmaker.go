@@ -780,6 +780,14 @@ func NewMatchPresenceFromSession(msession *MatchmakingSession, matchID MatchID, 
 	if !ok {
 		return nil, fmt.Errorf("failed to get headset type from session context")
 	}
+
+	metadata, ok := ctx.Value(ctxAccountMetadataKey{}).(AccountMetadata)
+	if !ok {
+		return nil, fmt.Errorf("failed to get account metadata from session context")
+	}
+
+	displayName := metadata.GetGroupDisplayNameOrDefault(msession.Label.GroupID.String())
+
 	headsetType := "pcvr"
 	if headsetTypeIndex == 1 {
 		headsetType = "standalone"

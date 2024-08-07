@@ -109,7 +109,7 @@ type (
 	ctxNodeKey                struct{} // The node name
 	ctxEvrIDKey               struct{} // The EchoVR ID
 	ctxDiscordIDKey           struct{} // The Discord ID
-	ctxDefaultDisplayNameKey  struct{} // The default display name
+	ctxAccountMetadataKey     struct{} // The account metadata
 	ctxDisplayNameOverrideKey struct{} // The display name override
 	ctxGroupIDKey             struct{} // The guild group ID the user has selected
 	ctxLoginSessionKey        struct{} // The Session ID of the login connection
@@ -138,7 +138,7 @@ var sharedCtxKeys = []struct{}{
 	ctxGroupIDKey{},
 	ctxVerboseKey{},
 	ctxDiscordIDKey{},
-	ctxDefaultDisplayNameKey{},
+	ctxAccountMetadataKey{},
 	ctxDisplayNameOverrideKey{},
 }
 
@@ -277,7 +277,7 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 	}
 }
 
-func (s *sessionWS) LoginSession(userID, username, displayName, displayNameOverride, discordID string, evrID evr.EvrId, deviceId *DeviceAuth, groupID uuid.UUID, flags int, verbose bool, headsetType int) error {
+func (s *sessionWS) LoginSession(userID, username string, metadata AccountMetadata, displayNameOverride, discordID string, evrID evr.EvrId, deviceId *DeviceAuth, groupID uuid.UUID, flags int, verbose bool, headsetType int) error {
 	// Each player has a single login connection, which will act as the core session.
 	// When this connection is terminated, all other connections should be terminated.
 
@@ -300,7 +300,7 @@ func (s *sessionWS) LoginSession(userID, username, displayName, displayNameOverr
 	ctx = context.WithValue(ctx, ctxGroupIDKey{}, groupID)
 	ctx = context.WithValue(ctx, ctxVerboseKey{}, verbose)
 	ctx = context.WithValue(ctx, ctxDiscordIDKey{}, discordID)
-	ctx = context.WithValue(ctx, ctxDefaultDisplayNameKey{}, displayName)
+	ctx = context.WithValue(ctx, ctxAccountMetadataKey{}, metadata)
 	if displayNameOverride != "" {
 		ctx = context.WithValue(ctx, ctxDisplayNameOverrideKey{}, displayNameOverride)
 	}
@@ -450,9 +450,9 @@ func (s *sessionWS) ValidateSession(loginSessionID uuid.UUID, evrID evr.EvrId) e
 			return fmt.Errorf("login session does not have a discord ID")
 		}
 
-		displayName, ok := loginCtx.Value(ctxDefaultDisplayNameKey{}).(string)
+		metadata, ok := loginCtx.Value(ctxAccountMetadataKey{}).(AccountMetadata)
 		if !ok {
-			return fmt.Errorf("login session does not have a default display name")
+			return fmt.Errorf("login session does not have account metadata")
 		}
 
 		displayNameOverride, ok := loginCtx.Value(ctxDisplayNameOverrideKey{}).(string)
@@ -479,7 +479,7 @@ func (s *sessionWS) ValidateSession(loginSessionID uuid.UUID, evrID evr.EvrId) e
 		ctx = context.WithValue(ctx, ctxGroupIDKey{}, groupID)
 		ctx = context.WithValue(ctx, ctxVerboseKey{}, verbose)
 		ctx = context.WithValue(ctx, ctxDiscordIDKey{}, discordID)
-		ctx = context.WithValue(ctx, ctxDefaultDisplayNameKey{}, displayName)
+		ctx = context.WithValue(ctx, ctxAccountMetadataKey{}, metadata)
 		if displayNameOverride != "" {
 			ctx = context.WithValue(ctx, ctxDisplayNameOverrideKey{}, displayNameOverride)
 		}
