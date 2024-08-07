@@ -362,9 +362,13 @@ func (p *EvrPipeline) getBroadcasterHostGroups(ctx context.Context, userId strin
 }
 
 func (p *EvrPipeline) newParkingMatch(logger *zap.Logger, session *sessionWS, config *MatchBroadcaster) error {
+	data, err := json.Marshal(config)
+	if err != nil {
+		return fmt.Errorf("failed to marshal game server config: %v", err)
+	}
 
 	params := map[string]interface{}{
-		"gameserver": config,
+		"gameserver": string(data),
 	}
 
 	// Create the match
