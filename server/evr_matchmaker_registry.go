@@ -253,6 +253,20 @@ func (s *MatchmakingSession) Cause() error {
 	return nil
 }
 
+func (s *MatchmakingSession) GetPartyMatchmakingSessions() []*MatchmakingSession {
+	if s.Party == nil {
+		return []*MatchmakingSession{s}
+	}
+	msessions := make([]*MatchmakingSession, 0, s.Party.Size())
+	for _, member := range s.Party.List() {
+		msession, ok := s.registry.GetMatchingBySessionId(uuid.FromStringOrNil(member.Presence.GetSessionId()))
+		if ok {
+			msessions = append(msessions, msession)
+		}
+	}
+	return msessions
+}
+
 // MatchmakingResult represents the outcome of a matchmaking request
 type MatchmakingResult struct {
 	err     error
@@ -645,7 +659,7 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 		return
 	}
 
-	successful := make(map[string]struct{}, len(entrants))
+	presencesByTicket := make(map[string][]*EvrMatchPresence, len(parties))
 	for i, players := range teams {
 		// Assign each player in the team to the match
 		for _, entry := range players {
@@ -662,31 +676,45 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 				logger.Warn("Could not find ticket metadata for user", zap.String("sessionID", entry.Presence.SessionID.String()), zap.String("ticket", ticket))
 				continue
 			}
-
-			if err := mr.evrPipeline.LobbyJoin(ms.Session.Context(), logger, matchID, int(i), ticketMeta.Query, ms); err != nil {
-				logger.Warn("Failed to join presence to matchmade session", zap.String("mid", matchID.UUID().String()), zap.String("uid", entry.Presence.UserId), zap.Error(err))
+			presence, err := NewMatchPresenceFromSession(ms, matchID, int(i), ticketMeta.Query)
+			if err != nil {
+				logger.Warn("Failed to create match presence", zap.Error(err))
 				continue
 			}
-
-			mr.metrics.CustomCounter("match_join_matched_count", metricsTags, 1)
+			if _, ok := presencesByTicket[ticket]; !ok {
+				presencesByTicket[ticket] = make([]*EvrMatchPresence, 0, len(players))
+			}
+			presencesByTicket[ticket] = append(presencesByTicket[ticket], presence)
 			mr.metrics.CustomTimer("matchmaking_matched_duration", metricsTags, time.Since(ticketMeta.CreatedAt))
-
-			successful[entry.Presence.SessionID.String()] = struct{}{}
 		}
 	}
-	failures := make([]*MatchmakerPresence, 0, len(entrants)-len(successful))
-	for _, entry := range entrants {
-		if _, ok := successful[entry.Presence.SessionID.String()]; !ok {
-			failures = append(failures, entry.Presence)
+	ctx, cancel := context.WithCancel(mr.ctx)
+	defer cancel()
+
+	successful := make([]*EvrMatchPresence, 0, len(entrants))
+	errored := make([]*EvrMatchPresence, 0, len(entrants))
+	for _, presences := range presencesByTicket {
+		// Join the presence to the match
+
+		s, e, err := mr.evrPipeline.LobbyJoin(ctx, logger, matchID, presences...)
+		if err != nil {
+			for _, p := range e {
+				logger.Warn("Failed to join presence to matchmade session", zap.String("mid", matchID.UUID().String()), zap.String("uid", p.GetUserId()), zap.Error(err))
+			}
+			errored = append(errored, e...)
+			continue
 		}
+		successful = append(successful, s...)
+		mr.metrics.CustomCounter("match_join_matched_count", metricsTags, int64(len(successful)))
+
 	}
 
 	label, err := MatchLabelByID(mr.ctx, mr.nk, matchID)
 	if err != nil {
 		logger.Error("Failed to get label from matchID", zap.Error(err))
 	}
-	logger.Info("Match made", zap.Any("label", label), zap.String("mid", matchID.UUID().String()), zap.Any("teams", teams), zap.Any("errored", failures))
-	go mr.SendMatchmakerMatchedNotification(label, teams, failures)
+	logger.Info("Match made", zap.Any("label", label), zap.String("mid", matchID.UUID().String()), zap.Any("teams", teams), zap.Any("errored", errored))
+	go mr.SendMatchmakerMatchedNotification(label, teams, errored)
 
 }
 
@@ -1427,7 +1455,7 @@ func (c *MatchmakingRegistry) SessionsByMode() map[evr.Symbol]map[uuid.UUID]*Mat
 	return sessionByMode
 }
 
-func (r *MatchmakingRegistry) SendMatchmakerMatchedNotification(label *MatchLabel, teams [][]*MatchmakerEntry, errored []*MatchmakerPresence) {
+func (r *MatchmakingRegistry) SendMatchmakerMatchedNotification(label *MatchLabel, teams [][]*MatchmakerEntry, errored []*EvrMatchPresence) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
