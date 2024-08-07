@@ -12,7 +12,10 @@ import (
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"github.com/intinig/go-openskill/rating"
+	"github.com/intinig/go-openskill/types"
 	"github.com/samber/lo"
+	"go.uber.org/thriftrw/ptr"
 )
 
 type GameProfile interface {
@@ -29,11 +32,6 @@ type GameProfile interface {
 	UpdateUnlocks(unlocks evr.UnlockedCosmetics) error
 	IsStale() bool
 	SetStale()
-}
-
-type MatchmakerRating struct {
-	Mu    float64 `json:"mu"`
-	Sigma float64 `json:"sigma"`
 }
 
 type EarlyQuitStatistics struct {
@@ -65,7 +63,7 @@ type GameProfileData struct {
 	Login      evr.LoginProfile    `json:"login"`
 	Client     evr.ClientProfile   `json:"client"`
 	Server     evr.ServerProfile   `json:"server"`
-	Rating     MatchmakerRating    `json:"rating"`
+	Rating     types.Rating        `json:"rating"`
 	EarlyQuits EarlyQuitStatistics `json:"early_quit"`
 	Version    string              // The version of the profile from the DB
 	Stale      bool                // Whether the profile is stale and needs to be updated
@@ -212,11 +210,17 @@ func (p *GameProfileData) GetEarlyQuitStatistics() EarlyQuitStatistics {
 	return p.EarlyQuits
 }
 
-func (p *GameProfileData) GetRating() MatchmakerRating {
+func (p *GameProfileData) GetRating() types.Rating {
+	if p.Rating.Mu == 0 || p.Rating.Sigma == 0 {
+		return rating.NewWithOptions(&types.OpenSkillOptions{
+			Mu:    ptr.Float64(25.0),
+			Sigma: ptr.Float64(8.333),
+		})
+	}
 	return p.Rating
 }
 
-func (p *GameProfileData) SetRating(rating MatchmakerRating) {
+func (p *GameProfileData) SetRating(rating types.Rating) {
 	p.Rating = rating
 	p.SetStale()
 }

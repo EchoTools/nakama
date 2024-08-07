@@ -471,6 +471,15 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 				SessionID: sessionID,
 			},
 		}
+
+		profile, err := p.profileRegistry.Load(ctx, session.userID)
+		if err != nil {
+			return status.Errorf(codes.Internal, "Failed to load profile: %v", err)
+		}
+		rating := profile.GetRating()
+		numericProps["rating_mu"] = rating.Mu
+		numericProps["rating_sigma"] = rating.Sigma
+
 		// If the user is not in a party, then they can put in a ticket immediately
 		ticket, _, err := session.matchmaker.Add(ctx, presences, sessionID.String(), "", query, minCount, maxCount, countMultiple, stringProps, numericProps)
 		if err != nil {
@@ -512,6 +521,24 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 	}
 	// Ensure the match tries to put the party together by ensuring there is at least twice as many players in the match.
 	minCount = min(maxCount, len(memberPresenceIDs)*2)
+
+	// Get the rating for each player, calculate the party's teamstrength then average it
+	partyMu := 0.0
+	partySigma := 0.0
+	for _, ms := range msessions {
+		profile, err := p.profileRegistry.Load(ctx, ms.Session.userID)
+		if err != nil {
+			return status.Errorf(codes.Internal, "Failed to load profile: %v", err)
+		}
+		rating := profile.GetRating()
+		partyMu += rating.Mu
+		partySigma += rating.Sigma
+	}
+	partyMu /= float64(len(msessions))
+	partySigma /= float64(len(msessions))
+
+	numericProps["rating_mu"] = partyMu
+	numericProps["rating_sigma"] = partySigma
 
 	msession.AddTicket(ticket, session.id.String(), nil, memberPresenceIDs, msession.Party.IDStr(), query, minCount, maxCount, countMultiple, stringProps, numericProps)
 	mmPartySize := len(memberPresenceIDs) + 1

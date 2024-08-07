@@ -63,6 +63,7 @@ type EvrPipeline struct {
 	discordRegistry     DiscordRegistry
 	appBot              *DiscordAppBot
 	leaderboardRegistry *LeaderboardRegistry
+	sbmm                *SkillBasedMatchmaker
 
 	createLobbyMu                    sync.Mutex
 	broadcasterRegistrationBySession *MapOf[string, *MatchBroadcaster] // sessionID -> MatchBroadcaster
@@ -106,6 +107,8 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	discordRegistry := NewLocalDiscordRegistry(ctx, nk, runtimeLogger, metrics, config, pipeline, dg)
 	leaderboardRegistry := NewLeaderboardRegistry(NewRuntimeGoLogger(logger), nk, config.GetName())
 	profileRegistry := NewProfileRegistry(nk, db, runtimeLogger, tracker, discordRegistry)
+	broadcasterRegistrationBySession := MapOf[string, *MatchBroadcaster]{}
+	skillBasedMatchmaker := NewSkillBasedMatchmaker(logger, profileRegistry, nil, metrics, &broadcasterRegistrationBySession)
 	var appBot *DiscordAppBot
 
 	if disable, ok := vars["DISABLE_DISCORD_BOT"]; ok && disable == "true" {
@@ -171,17 +174,17 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		externalIP:        externalIP,
 		broadcasterUserID: broadcasterUserID,
 
-		profileRegistry:     profileRegistry,
-		leaderboardRegistry: leaderboardRegistry,
-
-		broadcasterRegistrationBySession: &MapOf[string, *MatchBroadcaster]{},
+		profileRegistry:                  profileRegistry,
+		leaderboardRegistry:              leaderboardRegistry,
+		sbmm:                             skillBasedMatchmaker,
+		broadcasterRegistrationBySession: &broadcasterRegistrationBySession,
 
 		placeholderEmail: config.GetRuntime().Environment["PLACEHOLDER_EMAIL_DOMAIN"],
 		linkDeviceURL:    config.GetRuntime().Environment["LINK_DEVICE_URL"],
 	}
 
 	evrPipeline.matchmakingRegistry = NewMatchmakingRegistry(logger, matchRegistry, matchmaker, metrics, db, nk, config, evrPipeline)
-
+	evrPipeline.sbmm.matchmakingRegistry = evrPipeline.matchmakingRegistry
 	runtime.MatchmakerMatched()
 
 	// Create a timer to periodically clear the backfill queue

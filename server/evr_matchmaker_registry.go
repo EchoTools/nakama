@@ -713,6 +713,7 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 	if err != nil {
 		logger.Error("Failed to get label from matchID", zap.Error(err))
 	}
+
 	logger.Info("Match made", zap.Any("label", label), zap.String("mid", matchID.UUID().String()), zap.Any("teams", teams), zap.Any("errored", errored))
 	go mr.SendMatchmakerMatchedNotification(label, teams, errored)
 
