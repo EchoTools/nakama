@@ -292,7 +292,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	}
 
 	// Initialize the full session
-	if err := session.LoginSession(userId, user.GetUsername(), displayName, metadata.DisplayNameOverride, account.GetCustomId(), evrId, deviceId, groupID, flags, verbose, headsetType); err != nil {
+	if err := session.LoginSession(userId, user.GetUsername(), metadata, metadata.DisplayNameOverride, account.GetCustomId(), evrId, deviceId, groupID, flags, verbose, headsetType); err != nil {
 		return settings, fmt.Errorf("failed to login: %w", err)
 	}
 	ctx = session.Context()
@@ -664,6 +664,7 @@ func (p *EvrPipeline) generateEULA(ctx context.Context, logger *zap.Logger, lang
 			lines[i] = line[:maxLineLength-3] + "..."
 		}
 	}
+
 	msg = strings.Join(lines, "\n") + "\n"
 
 	document.Version = ts.Unix()
