@@ -449,11 +449,19 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 			}
 		}
 	}
+
 	mmstatus := NewMatchmakingStatus(msession)
+
+	minCount := 2
+	maxCount := 8
+	if msession.Label.Mode == evr.ModeCombatPublic {
+		maxCount = 10
+	}
+	countMultiple := 2
+
 	if msession.Party == nil {
 
 		// Solo matchmaking
-
 		presences := []*MatchmakerPresence{
 			{
 				UserId:    userID,
@@ -502,6 +510,9 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 	if err != nil {
 		msession.Logger.Error("Failed to add to matchmaker with query", zap.String("query", query), zap.Error(err))
 	}
+	// Ensure the match tries to put the party together by ensuring there is at least twice as many players in the match.
+	minCount = min(maxCount, len(memberPresenceIDs)*2)
+
 	msession.AddTicket(ticket, session.id.String(), nil, memberPresenceIDs, msession.Party.IDStr(), query, minCount, maxCount, countMultiple, stringProps, numericProps)
 	mmPartySize := len(memberPresenceIDs) + 1
 
