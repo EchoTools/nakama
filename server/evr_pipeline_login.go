@@ -813,12 +813,25 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 		if groupName == "arena" {
 
 			eqStats.IncrementMatches()
+
 			// Check if the player won or lost
-			currentWins := serverProfile.Statistics["groupName"]["ArenaLosses"]
-			updatedWins := stats["ArenaLosses"]
-			if updatedWins.Int64() > currentWins.Value.(int64) {
-				// The player lost
-				p.sbmm.RecordResult(matchID, userID.String(), true)
+			if _, ok := serverProfile.Statistics[groupName]; !ok {
+				serverProfile.Statistics[groupName] = make(map[string]evr.MatchStatistic)
+			}
+			var updatedWins int64
+			if v, ok := stats["ArenaWins"]; ok {
+				updatedWins = v.Int64()
+			}
+			if updatedWins > 0 {
+				if v, ok := serverProfile.Statistics[groupName]["ArenaWins"]; ok {
+					if currentWins, ok := v.Value.(int64); ok {
+						if updatedWins > currentWins {
+							p.sbmm.RecordResult(matchID, userID.String(), true)
+						} else {
+							p.sbmm.RecordResult(matchID, userID.String(), false)
+						}
+					}
+				}
 			}
 		}
 
