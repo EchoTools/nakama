@@ -165,15 +165,32 @@ func MatchIDFromContext(ctx context.Context) MatchID {
 	return matchID
 }
 
+const (
+	BroadcasterJoinTimeoutSecs = 45
+)
+
 // MatchInit is called when the match is created.
 func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, params map[string]interface{}) (interface{}, int, string) {
-	state := MatchLabel{}
-	if err := json.Unmarshal(params["initialState"].([]byte), &state); err != nil {
-		logger.Error("Failed to unmarshal match config. %s", err)
+	gameserverConfig := params["gameserver"].(MatchBroadcaster)
+
+	tickRate := ctx.Value(runtime.RUNTIME_CTX_MATCH_TICK_RATE).(int64)
+
+	state := MatchLabel{
+		Broadcaster:      gameserverConfig,
+		Open:             false,
+		LobbyType:        UnassignedLobby,
+		Mode:             evr.ModeUnloaded,
+		Level:            evr.LevelUnloaded,
+		RequiredFeatures: make([]string, 0),
+		Players:          make([]PlayerInfo, 0, SocialLobbyMaxSize),
+		presenceMap:      make(map[string]*EvrMatchPresence, SocialLobbyMaxSize),
+
+		TeamAlignments: make(map[string]int, SocialLobbyMaxSize),
+		joinTimestamps: make(map[string]time.Time, SocialLobbyMaxSize),
+
+		emptyTicks: 0,
+		tickRate:   tickRate,
 	}
-	const (
-		BroadcasterJoinTimeoutSecs = 45
-	)
 
 	state.ID = MatchIDFromContext(ctx)
 	state.presenceMap = make(map[string]*EvrMatchPresence)
@@ -182,7 +199,6 @@ func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql
 	if state.Mode == evr.ModeArenaPublic {
 		state.GameState = &GameState{}
 	}
-	state.broadcasterJoinExpiry = state.tickRate * BroadcasterJoinTimeoutSecs
 
 	state.rebuildCache()
 
@@ -328,7 +344,7 @@ func (m *EvrMatch) playerJoinAttempt(state *MatchLabel, mp EvrMatchPresence) (*E
 		return &mp, ""
 	}
 
-	// If the match is closed and player has a role assigned, use it.
+	// If the player has a team alignment, use it.
 	if mp.RoleAlignment != evr.TeamUnassigned {
 		return &mp, ""
 	}
@@ -537,22 +553,14 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 			logger.Debug("Message %T took %dms", msg, time.Since(start)/time.Millisecond)
 		}
 	}
-
-	// If the match is prepared and the start time has been reached, start it.
-	if state.LobbyType == UnassignedLobby {
-		return state
-	}
-
-	// Start the match on time.
-	if !state.levelLoaded && state.Started() {
-		if state, err = m.MatchStart(ctx, logger, nk, dispatcher, state); err != nil {
-			logger.Error("failed to start session: %v", err)
-			return nil
+	if state.server == nil {
+		state.emptyTicks++
+		if state.emptyTicks > 60*state.tickRate {
+			logger.Warn("Match has been empty for too long. Shutting down.")
+			return m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, 20)
 		}
-		if err := m.updateLabel(dispatcher, state); err != nil {
-			return nil
-		}
-		return state
+	} else if state.emptyTicks > 0 {
+		state.emptyTicks = 0
 	}
 
 	// If the match is terminating, terminate on the tick.
@@ -560,6 +568,22 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		if tick >= state.terminateTick {
 			logger.Debug("Match termination tick reached.")
 			return m.MatchTerminate(ctx, logger, db, nk, dispatcher, tick, state, 0)
+		}
+		return state
+	}
+
+	if state.LobbyType == UnassignedLobby {
+		return state
+	}
+
+	// If the match is prepared and the start time has been reached, start it.
+	if !state.levelLoaded && state.Started() {
+		if state, err = m.MatchStart(ctx, logger, nk, dispatcher, state); err != nil {
+			logger.Error("failed to start session: %v", err)
+			return nil
+		}
+		if err := m.updateLabel(dispatcher, state); err != nil {
+			return nil
 		}
 		return state
 	}
