@@ -1331,6 +1331,11 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 	}
 
 	if ml.TeamIndex == TeamIndex(evr.TeamSpectator) {
+		// Leave the party if the user is in one
+		err = msession.LeavePartyGroup()
+		if err != nil {
+			logger.Warn("Failed to leave party group", zap.Error(err))
+		}
 		if ml.Mode != evr.ModeArenaPublic && ml.Mode != evr.ModeCombatPublic {
 			return fmt.Errorf("spectators are only allowed in arena and combat matches")
 		}
