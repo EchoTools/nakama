@@ -227,6 +227,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	updateCtx, cancel := context.WithTimeout(ctx, time.Second*5)
 	go func() {
 		defer cancel()
+		return
 		err := p.discordRegistry.UpdateAllGuildGroupsForUser(updateCtx, NewRuntimeGoLogger(logger), uid)
 		if err != nil {
 			logger.Warn("Failed to update guild groups", zap.Error(err))
