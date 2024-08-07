@@ -227,19 +227,32 @@ func (p *EvrPipeline) MatchBackfill(msession *MatchmakingSession) error {
 		case <-delayStartTimer.C:
 		case <-retryTicker.C:
 		}
+
+		//  !msession.Label.ID.IsNil() &&
 		// Backfill any existing matches
 		if msession.Party != nil {
 			if msession.Party.GetLeader().SessionId != msession.Session.id.String() {
 				// only the leader should ever be backfilling
-				ok := FollowLeader(logger, msession, p.runtimeModule)
-				if !ok {
-					continue
+				if err := FollowLeader(logger, msession, p.runtimeModule); err != nil {
+					switch err {
+					case ErrFollowerIsLeader, ErrNoParty:
+						// just continue
+					case ErrLeaderAndFollowerSameMatch:
+						return nil
+					case ErrJoinFailed, ErrLeaderMatchNotOpen, ErrLeaderNotInMatch:
+						continue
+					case ErrUnknownError:
+						return msession.Cancel(err)
+					default:
+					}
 				}
-				return nil
 			}
 		}
 		msessions := msession.GetPartyMatchmakingSessions()
-		partySize := min(1, len(msessions))
+		logger.Debug("Party matchmaking sessions", zap.Any("sessions", msessions))
+
+		partySize := len(msessions)
+
 		query := backfillQuery(msession.Label.Mode, ml.Broadcaster.Regions[0], ml.ID, ml.Broadcaster.GroupIDs, isPlayer, len(msessions))
 		query = strings.Trim(strings.Join([]string{query, gconfig.BackfillQueryAddon, config.BackfillQueryAddon}, " "), " ")
 
