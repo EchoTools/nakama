@@ -591,7 +591,7 @@ func backfillQuery(mode, region evr.Symbol, curMatch MatchID, groupIDs []uuid.UU
 		"+label.open:T",
 		fmt.Sprintf("+label.mode:%s", mode.String()),
 		fmt.Sprintf("+label.group_id:/(%s)/", groupIDStrs[0]),
-		fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/", strings.Join(groupIDStrs, "|")),
+		//fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/", strings.Join(groupIDStrs, "|")),
 	}
 	if !curMatch.IsNil() {
 		qparts = append(qparts, fmt.Sprintf("-label.id:%s", curMatch.String()))
