@@ -2,7 +2,6 @@ package server
 
 import (
 	"encoding/json"
-	"fmt"
 	"sort"
 	"time"
 
@@ -42,47 +41,13 @@ type MatchLabel struct {
 	presenceMap map[string]*EvrMatchPresence // [sessionId]EvrMatchPresence
 	server      runtime.Presence             // The broadcaster's presence
 
-	emptyTicks            int64                // The number of ticks the match has been empty.
-	sessionStartExpiry    int64                // The tick count at which the match will be shut down if it has not started.
-	broadcasterJoinExpiry int64                // The tick count at which the match will be shut down if the broadcaster has not joined.
-	tickRate              int64                // The number of ticks per second.
-	joinTimestamps        map[string]time.Time // The timestamps of when players joined the match. map[sessionId]time.Time
-	terminateTick         int64                // The tick count at which the match will be shut down.
-	updateLabel           bool                 // Whether the label needs to be updated.
-	levelLoaded           bool                 // Whether the server has been sent the start instruction.
-}
-
-// NewMatchLabel is a helper function to create a new match state. It returns the state, params, label json, and err.
-func NewMatchLabel(endpoint evr.Endpoint, config *MatchBroadcaster) (state *MatchLabel, params map[string]interface{}, configPayload string, err error) {
-
-	var tickRate int64 = 10 // 10 ticks per second
-
-	initialState := MatchLabel{
-		Broadcaster:      *config,
-		Open:             false,
-		LobbyType:        UnassignedLobby,
-		Mode:             evr.ModeUnloaded,
-		Level:            evr.LevelUnloaded,
-		RequiredFeatures: make([]string, 0),
-		Players:          make([]PlayerInfo, 0, SocialLobbyMaxSize),
-		presenceMap:      make(map[string]*EvrMatchPresence, SocialLobbyMaxSize),
-
-		TeamAlignments: make(map[string]int, SocialLobbyMaxSize),
-
-		emptyTicks: 0,
-		tickRate:   tickRate,
-	}
-
-	stateJson, err := json.Marshal(initialState)
-	if err != nil {
-		return nil, nil, "", fmt.Errorf("failed to marshal match config: %v", err)
-	}
-
-	params = map[string]interface{}{
-		"initialState": stateJson,
-	}
-
-	return &initialState, params, string(stateJson), nil
+	emptyTicks         int64                // The number of ticks the match has been empty.
+	sessionStartExpiry int64                // The tick count at which the match will be shut down if it has not started.
+	tickRate           int64                // The number of ticks per second.
+	joinTimestamps     map[string]time.Time // The timestamps of when players joined the match. map[sessionId]time.Time
+	terminateTick      int64                // The tick count at which the match will be shut down.
+	updateLabel        bool                 // Whether the label needs to be updated.
+	levelLoaded        bool                 // Whether the server has been sent the start instruction.
 }
 
 func (s *MatchLabel) GetPlayerCount() int {

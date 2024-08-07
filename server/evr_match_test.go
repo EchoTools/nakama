@@ -464,7 +464,7 @@ func TestEvrMatch_MatchLoop(t *testing.T) {
 
 	consoleLogger := NewJSONLogger(os.Stdout, zapcore.ErrorLevel, JSONFormat)
 	logger := NewRuntimeGoLogger(consoleLogger)
-	var err error
+
 	var state *MatchLabel
 
 	tests := []struct {
@@ -479,10 +479,7 @@ func TestEvrMatch_MatchLoop(t *testing.T) {
 			args: args{
 				tick: 15 * 60 * 10 * 2,
 				state_: func() *MatchLabel {
-					state, _, _, err = NewMatchLabel(evr.Endpoint{}, &MatchBroadcaster{})
-					if err != nil {
-						t.Fatalf("error creating new match state: %v", err)
-					}
+					state := &MatchLabel{}
 					state.sessionStartExpiry = 10 * 10
 					state.server = &Presence{}
 					return state
@@ -498,10 +495,7 @@ func TestEvrMatch_MatchLoop(t *testing.T) {
 			args: args{
 				tick: 500,
 				state_: func() *MatchLabel {
-					state, _, _, err = NewMatchLabel(evr.Endpoint{}, &MatchBroadcaster{})
-					if err != nil {
-						t.Fatalf("error creating new match state: %v", err)
-					}
+					state := &MatchLabel{}
 					state.sessionStartExpiry = 10 * 10
 					state.server = &Presence{}
 
@@ -540,7 +534,6 @@ func TestEvrMatch_MatchLoop(t *testing.T) {
 					presenceMap: map[string]*EvrMatchPresence{
 						uuid.Must(uuid.NewV4()).String(): {},
 					},
-					broadcasterJoinExpiry: 15 * 10,
 				},
 				messages: []runtime.MatchData{},
 			},
@@ -552,15 +545,11 @@ func TestEvrMatch_MatchLoop(t *testing.T) {
 			args: args{
 				tick: 5 * 10,
 				state_: func() *MatchLabel {
-					state, _, _, err = NewMatchLabel(evr.Endpoint{}, &MatchBroadcaster{})
-					if err != nil {
-						t.Fatalf("error creating new match state: %v", err)
-					}
+					state := &MatchLabel{}
 					state.sessionStartExpiry = 10 * 10
 					state.presenceMap = map[string]*EvrMatchPresence{
 						uuid.Must(uuid.NewV4()).String(): {},
 					}
-					state.broadcasterJoinExpiry = 15 * 10
 
 					return state
 				}(),
@@ -644,10 +633,7 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 				dispatcher: nil,
 				tick:       0,
 				state_: func() *MatchLabel {
-					state, _, _, err := NewMatchLabel(evr.Endpoint{}, &MatchBroadcaster{})
-					if err != nil {
-						t.Fatalf("error creating new match state: %v", err)
-					}
+					state := &MatchLabel{}
 
 					return state
 				}(),
@@ -655,10 +641,7 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 				metadata: JoinMetadata{*presences[0]}.MarshalMap(),
 			},
 			want: func() *MatchLabel {
-				state, _, _, err := NewMatchLabel(evr.Endpoint{}, &MatchBroadcaster{})
-				if err != nil {
-					t.Fatalf("error creating new match state: %v", err)
-				}
+				state := &MatchLabel{}
 				return state
 			}(),
 			want1: false,
@@ -678,10 +661,7 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 				dispatcher: nil,
 				tick:       0,
 				state_: func() *MatchLabel {
-					state, _, _, err := NewMatchLabel(evr.Endpoint{}, &MatchBroadcaster{})
-					if err != nil {
-						t.Fatalf("error creating new match state: %v", err)
-					}
+					state := &MatchLabel{}
 					state.LobbyType = PublicLobby
 					state.Mode = evr.ModeArenaPublic
 					state.MaxSize = 3
@@ -702,10 +682,7 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 				metadata: NewJoinMetadata(*presences[0]).MarshalMap(),
 			},
 			want: func() *MatchLabel {
-				state, _, _, err := NewMatchLabel(evr.Endpoint{}, &MatchBroadcaster{})
-				if err != nil {
-					t.Fatalf("error creating new match state: %v", err)
-				}
+				state := &MatchLabel{}
 				state.MaxSize = 3
 				state.Size = 2
 				state.PlayerLimit = 2
