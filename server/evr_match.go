@@ -171,9 +171,12 @@ const (
 
 // MatchInit is called when the match is created.
 func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, params map[string]interface{}) (interface{}, int, string) {
-	gameserverConfig := params["gameserver"].(MatchBroadcaster)
 
-	tickRate := ctx.Value(runtime.RUNTIME_CTX_MATCH_TICK_RATE).(int64)
+	gameserverConfig := MatchBroadcaster{}
+	if err := json.Unmarshal([]byte(params["gameserver"].(string)), &gameserverConfig); err != nil {
+		logger.Error("Failed to unmarshal gameserver config: %v", err)
+		return nil, 0, ""
+	}
 
 	state := MatchLabel{
 		Broadcaster:      gameserverConfig,
@@ -189,7 +192,7 @@ func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql
 		joinTimestamps: make(map[string]time.Time, SocialLobbyMaxSize),
 
 		emptyTicks: 0,
-		tickRate:   tickRate,
+		tickRate:   10,
 	}
 
 	state.ID = MatchIDFromContext(ctx)
