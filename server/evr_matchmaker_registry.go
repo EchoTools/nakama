@@ -1280,6 +1280,15 @@ func (c *MatchmakingRegistry) Add(id uuid.UUID, s *MatchmakingSession) {
 
 }
 
+func (r *MatchmakingRegistry) GetActiveGameServerEndpoints() []evr.Endpoint {
+	endpoints := make([]evr.Endpoint, 100)
+	r.evrPipeline.broadcasterRegistrationBySession.Range(func(_ string, b *MatchBroadcaster) bool {
+		endpoints = append(endpoints, b.Endpoint)
+		return true
+	})
+	return endpoints
+}
+
 // GetLatencies returns the cached latencies for a user
 func (c *MatchmakingRegistry) GetLatencies(userId uuid.UUID, endpoints []evr.Endpoint) []LatencyMetric {
 

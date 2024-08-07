@@ -394,11 +394,7 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 	ctx := msession.Context()
 
 	// Get a list of all the broadcasters
-	endpoints := make([]evr.Endpoint, 0, 100)
-	p.broadcasterRegistrationBySession.Range(func(_ string, b *MatchBroadcaster) bool {
-		endpoints = append(endpoints, b.Endpoint)
-		return true
-	})
+	endpoints := msession.registry.GetActiveGameServerEndpoints()
 
 	allRTTs := p.matchmakingRegistry.GetLatencies(msession.UserID, endpoints)
 
