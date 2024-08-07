@@ -251,6 +251,7 @@ func (p *EvrPipeline) findSession(ctx context.Context, logger *zap.Logger, sessi
 			return response.SendErrorToSession(session, err)
 		}
 	}
+
 	go p.PrepareLobbyProfile(ctx, logger, session, request.GetEvrID(), session.userID.String(), ml.GroupID.String())
 
 	ml.Broadcaster.Regions = []evr.Symbol{evr.DefaultRegion}

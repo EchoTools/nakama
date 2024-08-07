@@ -104,7 +104,7 @@ func TestGetSessionProfile(t *testing.T) {
 	}
 
 	// Store the profile
-	profileRegistry.Save(ctx, session.userID, &profile)
+	profileRegistry.SaveAndCache(ctx, session.userID, &profile)
 
 	// Call the GetSessionProfile method
 

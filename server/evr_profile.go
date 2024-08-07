@@ -31,12 +31,44 @@ type GameProfile interface {
 	SetStale()
 }
 
+type MatchmakerRating struct {
+	Mu    float64 `json:"mu"`
+	Sigma float64 `json:"sigma"`
+}
+
+type EarlyQuitStatistics struct {
+	NumCompletedMatches      int `json:"numcompletedmatches,omitempty"`
+	NumEarlyQuits            int `json:"numearlyquits,omitempty"`
+	NumConsecutiveMatches    int `json:"numsteadymatches,omitempty"`
+	NumConsecutiveEarlyQuits int `json:"numsteadyearlyquits,omitempty"`
+}
+
+func (s *EarlyQuitStatistics) Reset() {
+	s.NumEarlyQuits = 0
+	s.NumConsecutiveMatches = 0
+	s.NumConsecutiveEarlyQuits = 0
+}
+
+func (s *EarlyQuitStatistics) IncrementEarlyQuits() {
+	s.NumEarlyQuits++
+	s.NumConsecutiveMatches = 0
+	s.NumConsecutiveEarlyQuits++
+}
+
+func (s *EarlyQuitStatistics) IncrementMatches() {
+	s.NumConsecutiveMatches++
+	s.NumConsecutiveEarlyQuits = 0
+	s.NumCompletedMatches++
+}
+
 type GameProfileData struct {
-	Login   evr.LoginProfile  `json:"login"`
-	Client  evr.ClientProfile `json:"client"`
-	Server  evr.ServerProfile `json:"server"`
-	Version string            // The version of the profile from the DB
-	Stale   bool              // Whether the profile is stale and needs to be updated
+	Login      evr.LoginProfile    `json:"login"`
+	Client     evr.ClientProfile   `json:"client"`
+	Server     evr.ServerProfile   `json:"server"`
+	Rating     MatchmakerRating    `json:"rating"`
+	EarlyQuits EarlyQuitStatistics `json:"early_quit"`
+	Version    string              // The version of the profile from the DB
+	Stale      bool                // Whether the profile is stale and needs to be updated
 }
 
 type AccountProfile struct {
@@ -159,6 +191,11 @@ func (p *GameProfileData) SetServer(server evr.ServerProfile) {
 	p.SetStale()
 }
 
+func (p *GameProfileData) SetEarlyQuitStatistics(stats EarlyQuitStatistics) {
+	p.EarlyQuits = stats
+	p.SetStale()
+}
+
 func (p *GameProfileData) GetServer() evr.ServerProfile {
 	return p.Server
 }
@@ -169,6 +206,19 @@ func (p *GameProfileData) GetClient() evr.ClientProfile {
 
 func (p *GameProfileData) GetLogin() evr.LoginProfile {
 	return p.Login
+}
+
+func (p *GameProfileData) GetEarlyQuitStatistics() EarlyQuitStatistics {
+	return p.EarlyQuits
+}
+
+func (p *GameProfileData) GetRating() MatchmakerRating {
+	return p.Rating
+}
+
+func (p *GameProfileData) SetRating(rating MatchmakerRating) {
+	p.Rating = rating
+	p.SetStale()
 }
 
 func (p *GameProfileData) SetEvrID(evrID evr.EvrId) {

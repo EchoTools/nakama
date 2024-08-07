@@ -842,3 +842,24 @@ func GetAccountMetadata(ctx context.Context, db *sql.DB, userID string) (*Accoun
 
 	return md, nil
 }
+
+func GetUserIDByEvrID(ctx context.Context, db *sql.DB, evrID string) (string, error) {
+	query := "SELECT user_id FROM storage WHERE collection = $1 AND key = $2 ORDER BY update_time DESC LIMIT 1"
+	var dbUserID string
+	var found = true
+	err := db.QueryRowContext(ctx, query, EvrLoginStorageCollection, evrID).Scan(&dbUserID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			found = false
+		} else {
+			return "", status.Error(codes.Internal, "error finding user account")
+		}
+	}
+	if !found {
+		return "", status.Error(codes.NotFound, "user account not found")
+	}
+	if dbUserID == "" {
+		return "", nil
+	}
+	return dbUserID, nil
+}
