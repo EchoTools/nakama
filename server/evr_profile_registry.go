@@ -118,7 +118,6 @@ func (r *ProfileRegistry) Load(ctx context.Context, userID uuid.UUID) (profile *
 	}
 	return profile, nil
 }
-
 func (r *ProfileRegistry) Save(ctx context.Context, userID uuid.UUID, profile GameProfile) error {
 	if !profile.IsStale() {
 		return nil

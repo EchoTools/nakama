@@ -552,12 +552,20 @@ func (p *EvrPipeline) lobbyJoinSessionRequest(ctx context.Context, logger *zap.L
 	if err != nil {
 		return response.SendErrorToSession(session, status.Errorf(codes.Internal, "Failed to create matchmaking session: %v", err))
 	}
+	err = msession.LeavePartyGroup()
+	if err != nil {
+		logger.Warn("Failed to leave party group", zap.Error(err))
+	}
+
 	logger.Info("Joining match", zap.String("mid", matchToken.String()), zap.Int("role", int(request.GetAlignment())), zap.String("session_id", session.id.String()))
-	if err = p.LobbyJoin(ctx, logger, matchToken, int(request.GetAlignment()), "", msession); err != nil {
+	presence, err := NewMatchPresenceFromSession(msession, matchToken, roleAlignment, "")
+	if err != nil {
+		return response.SendErrorToSession(session, status.Errorf(codes.Internal, "Failed to create presence: %v", err))
+	}
+	if _, _, err = p.LobbyJoin(ctx, logger, matchToken, presence); err != nil {
 		return response.SendErrorToSession(session, status.Errorf(codes.NotFound, err.Error()))
 	}
 
-	msession.LeavePartyGroup()
 	p.metrics.CustomCounter("match_join_direct_count", metricsTags, 1)
 	return nil
 }
