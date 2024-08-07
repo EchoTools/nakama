@@ -901,6 +901,8 @@ func (p *EvrPipeline) LobbyJoin(ctx context.Context, logger *zap.Logger, matchID
 
 	errorCh := make(chan *EvrMatchPresence, len(matchPresences))
 
+	// delay to let tracker update
+	<-time.After(250 * time.Millisecond)
 	// If this part errors, the matchmaking session must be canceled.
 	for i, presence := range matchPresences {
 		// Send the lobbysessionSuccess, this will trigger the broadcaster to send a lobbysessionplayeraccept once the player connects to the broadcaster.
@@ -965,10 +967,6 @@ func SendSessionSuccessMessage(ms *MatchmakingSession, presence *EvrMatchPresenc
 	}
 
 	errorCh <- nil
-
-	<-time.After(250 * time.Millisecond)
-
-	ms.Cancel(nil)
 }
 
 var ErrDuplicateJoin = errors.New(JoinRejectReasonDuplicateJoin)
@@ -1031,6 +1029,7 @@ func EVRMatchJoinAttempt(ctx context.Context, logger *zap.Logger, matchID MatchI
 			return labelStr, &presence, presences, fmt.Errorf("failed to track session ID: %s", presence.SessionID)
 		}
 	}
+	// Give a 250ms delay for the tracker to update
 
 	return labelStr, &presence, presences, nil
 }
@@ -1299,7 +1298,7 @@ func (p *EvrPipeline) MatchCreateLoop(session *sessionWS, msession *MatchmakingS
 			presence, err := NewMatchPresenceFromSession(msession, matchID, evr.TeamModerator, "")
 			if err != nil {
 				logger.Error("Failed to create match presence", zap.Error(err))
-				return msession.Cancel(fmt.Errorf("Failed to create match presence"))
+				return msession.Cancel(fmt.Errorf("failed to create match presence"))
 			}
 			if _, _, err := p.LobbyJoin(session.Context(), logger, matchID, presence); err != nil {
 				logger.Warn("Error joining player to created match", zap.Error(err))
