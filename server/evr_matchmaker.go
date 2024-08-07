@@ -854,21 +854,24 @@ func NewMatchPresenceFromSession(msession *MatchmakingSession, matchID MatchID, 
 	}, nil
 }
 
-func (p *EvrPipeline) LobbyJoin(ctx context.Context, logger *zap.Logger, matchID MatchID, presences ...*EvrMatchPresence) (success []*EvrMatchPresence, failed []*EvrMatchPresence, err error) {
+func (p *EvrPipeline) LobbyJoin(ctx context.Context, logger *zap.Logger, matchID MatchID, entrants ...*EvrMatchPresence) (success []*EvrMatchPresence, failed []*EvrMatchPresence, err error) {
 	// lock all the mathcmaking sessions
-	if len(presences) == 0 {
-		return nil, nil, fmt.Errorf("no presences provided")
-	}
 
-	msessions := make([]*MatchmakingSession, 0, len(presences))
-	for i := len(presences); i >= 0; i-- {
-		ms, found := p.matchmakingRegistry.GetMatchingBySessionId(presences[0].SessionID)
+	// Remove any presences that don't have msessions
+	msessions := make([]*MatchmakingSession, 0, len(entrants))
+	presences := make([]*EvrMatchPresence, 0, len(entrants))
+	for _, presence := range entrants {
+		ms, found := p.matchmakingRegistry.GetMatchingBySessionId(presence.SessionID)
 		if !found || ms == nil {
-			// Remove the presence from the list
-			presences = append(presences[:i], presences[i+1:]...)
+			// Skip it
 			continue
 		}
 		msessions = append(msessions, ms)
+		presences = append(presences, presence)
+	}
+
+	if len(presences) == 0 {
+		return nil, nil, fmt.Errorf("no presences provided")
 	}
 
 	startTime := time.Now()
