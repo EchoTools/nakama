@@ -803,10 +803,24 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 	profile.SetEvrID(request.EvrID)
 
 	serverProfile := profile.GetServer()
+	eqStats := profile.GetEarlyQuitStatistics()
+
+	// Determine if this is a win or a loss
 
 	matchType := evr.ToSymbol(request.Payload.MatchType).Token().String()
 	_ = matchType
 	for groupName, stats := range request.Payload.Update.StatsGroups {
+		if groupName == "arena" {
+
+			eqStats.IncrementMatches()
+			// Check if the player won or lost
+			currentWins := serverProfile.Statistics["groupName"]["ArenaLosses"]
+			updatedWins := stats["ArenaLosses"]
+			if updatedWins.Int64() > currentWins.Value.(int64) {
+				// The player lost
+				p.sbmm.RecordResult(matchID, userID.String(), true)
+			}
+		}
 
 		for statName, stat := range stats {
 			record, err := p.leaderboardRegistry.Submission(ctx, userID.String(), request.EvrID.String(), username, request.Payload.SessionID.String(), groupName, statName, stat.Operand, stat.Value)
@@ -838,6 +852,7 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 		}
 	}
 	profile.SetServer(serverProfile)
+	profile.SetEarlyQuitStatistics(eqStats)
 	// Store the profile
 	p.profileRegistry.Save(ctx, userID, profile)
 

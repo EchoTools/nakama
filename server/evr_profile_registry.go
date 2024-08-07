@@ -139,8 +139,16 @@ func (r *ProfileRegistry) Save(ctx context.Context, userID uuid.UUID, profile Ga
 	if err != nil {
 		return err
 	}
+
+	return err
+}
+func (r *ProfileRegistry) SaveAndCache(ctx context.Context, userID uuid.UUID, profile GameProfile) error {
+	var err error
+	if err := r.Save(ctx, userID, profile); err != nil {
+		return err
+	}
 	serverProfile := profile.GetServer()
-	data, err = json.Marshal(serverProfile)
+	data, err := json.Marshal(serverProfile)
 	if err != nil {
 		return err
 	}
@@ -262,7 +270,7 @@ func (r *ProfileRegistry) GameProfile(ctx context.Context, logger *zap.Logger, u
 	p.Server.CreateTime = time.Date(2023, 10, 31, 0, 0, 0, 0, time.UTC).Unix()
 	p.SetStale()
 
-	r.Save(ctx, userID, p)
+	r.SaveAndCache(ctx, userID, p)
 
 	return p, nil
 }
@@ -281,7 +289,7 @@ func (r *ProfileRegistry) UpdateClientProfile(ctx context.Context, logger *zap.L
 
 	profile.SetClient(update)
 
-	r.Save(ctx, session.userID, profile)
+	r.SaveAndCache(ctx, session.userID, profile)
 	return profile, nil
 }
 
@@ -321,7 +329,7 @@ func (p *ProfileRegistry) SetLobbyProfile(ctx context.Context, userID uuid.UUID,
 	profile.SetEvrID(evrID)
 	profile.UpdateDisplayName(displayName)
 
-	err = p.Save(ctx, userID, profile)
+	err = p.SaveAndCache(ctx, userID, profile)
 	if err != nil {
 		return fmt.Errorf("failed to save profile: %w", err)
 	}

@@ -49,6 +49,32 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 
 		logger.Debug("Processing remote log set", zap.Any("logs", entry))
 		switch strings.ToLower(messageType) {
+		case "user_disconnect":
+			msg := &evr.RemoteLogUserDisconnected{}
+			if err := json.Unmarshal(data, msg); err != nil {
+				logger.Error("Failed to unmarshal user disconnect", zap.Error(err))
+			}
+			if msg.GameInfoIsPrivate || !msg.GameInfoIsArena {
+				// Don't process disconnects for private games, or non-arena games.
+				continue
+			}
+			userID, err := GetUserIDByEvrID(ctx, p.db, msg.PlayerInfoUserid)
+			if err != nil || userID == "" {
+				logger.Error("Failed to get user ID by evr ID", zap.Error(err))
+			}
+
+			profile, err := p.profileRegistry.Load(ctx, session.userID)
+			if err != nil {
+				logger.Error("Failed to load player's profile")
+			}
+			eq := profile.GetEarlyQuitStatistics()
+			eq.IncrementEarlyQuits()
+			profile.SetEarlyQuitStatistics(eq)
+			err = p.profileRegistry.SaveAndCache(ctx, session.userID, profile)
+			if err != nil {
+				logger.Error("Failed to save player's profile")
+			}
+
 		case "goal":
 			// This is a goal message.
 			goal := evr.RemoteLogGoal{}
@@ -152,7 +178,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 			profile.SetEvrID(evrID)
 			p.profileRegistry.UpdateEquippedItem(profile, category, name)
 
-			err = p.profileRegistry.Save(ctx, session.userID, profile)
+			err = p.profileRegistry.SaveAndCache(ctx, session.userID, profile)
 			if err != nil {
 				return status.Errorf(codes.Internal, "Failed to store player's profile")
 			}
