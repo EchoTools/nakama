@@ -591,6 +591,24 @@ func (p *EvrPipeline) broadcasterSessionEnded(ctx context.Context, logger *zap.L
 		logger.Warn("Failed to get broadcaster's match by session ID", zap.Error(err))
 	}
 
+	label, err := MatchLabelByID(ctx, p.runtimeModule, matchID)
+	if err != nil {
+		logger.Warn("Failed to get match label", zap.Error(err))
+	}
+
+	// Get the ending rosters
+	team1 := make([]string, 0)
+	team2 := make([]string, 0)
+
+	for _, p := range label.Players {
+		if p.Team == BlueTeam {
+			team1 = append(team1, p.UserID)
+		} else if p.Team == OrangeTeam {
+			team2 = append(team2, p.UserID)
+		}
+	}
+	p.sbmm.AddMatch(matchID, [][]string{team1, team2})
+
 	if err := p.runtimeModule.StreamUserLeave(StreamModeMatchAuthoritative, matchID.UUID().String(), "", p.node, presence.GetUserId(), presence.GetSessionId()); err != nil {
 		logger.Warn("Failed to leave match stream", zap.Error(err))
 	}
