@@ -53,59 +53,76 @@ func PartySyncMatchmaking(ctx context.Context, msessions []*MatchmakingSession, 
 	return nil
 }
 
-func FollowLeader(logger *zap.Logger, msession *MatchmakingSession, nk runtime.NakamaModule) bool {
+var (
+	ErrNoParty                    = errors.New("no party")
+	ErrLeaderAndFollowerSameMatch = errors.New("leader and follower are in the same match")
+	ErrLeaderNotInMatch           = errors.New("leader is not in a match")
+	ErrLeaderMatchNotPublic       = errors.New("leader's match is not public")
+	ErrLeaderMatchNotOpen         = errors.New("leader's match is not open")
+	ErrFollowerIsLeader           = errors.New("follower is the leader")
+	ErrFollowerNotInMatch         = errors.New("follower is not in a match")
+	ErrUnknownError               = errors.New("unknown error")
+	ErrJoinFailed                 = errors.New("join failed")
+)
+
+func FollowLeader(logger *zap.Logger, msession *MatchmakingSession, nk runtime.NakamaModule) error {
 	// Look up the leaders current match
 	if msession.Party == nil {
-		return false
+		return ErrNoParty
 	}
 
 	session := msession.Session
 
 	leaderSessionID := uuid.FromStringOrNil(msession.Party.GetLeader().SessionId)
 	if leaderSessionID == session.id {
-		return false
+		return ErrFollowerIsLeader
 	}
 
 	leaderMatchID, _, err := GetMatchBySessionID(nk, leaderSessionID)
 	if err != nil {
-		return false
+		return ErrLeaderNotInMatch
 	}
 
 	// If the leader is not in a match, they might be soon.
 	if leaderMatchID.IsNil() {
-		return false
+		return ErrLeaderNotInMatch
 	}
 
 	followerMatchID, _, err := GetMatchBySessionID(nk, session.id)
 	if err != nil {
-		return false
+		return ErrFollowerNotInMatch
 	}
 
 	if followerMatchID == leaderMatchID {
-		return false
-	}
-	label, err := MatchLabelByID(msession.Context(), nk, leaderMatchID)
-	if err != nil {
-		return false
+		return ErrLeaderAndFollowerSameMatch
 	}
 
-	if label == nil || !label.Open || label.LobbyType != PublicLobby {
-		return false
+	label, err := MatchLabelByID(msession.Context(), nk, leaderMatchID)
+	if err != nil || label == nil {
+		return ErrUnknownError
+	}
+
+	if !label.Open {
+		return ErrLeaderMatchNotOpen
+	}
+
+	if label.LobbyType != PublicLobby {
+		return ErrLeaderMatchNotPublic
 	}
 
 	presence, err := NewMatchPresenceFromSession(msession, leaderMatchID, int(AnyTeam), "")
 	if err != nil {
 		logger.Error("error creating match presence", zap.Error(err))
-		return false
+		return ErrUnknownError
 	}
 	// Try to join the leader's match
 	_, _, err = session.evrPipeline.LobbyJoin(session.Context(), logger, leaderMatchID, presence)
 	if err == nil {
 		// Successful
 		logger.Error("follower joined leader's match", zap.String("leader", leaderSessionID.String()), zap.String("follower", session.id.String()))
-		return true
+		return nil
 	}
-	return false
+	return ErrJoinFailed
 
 }
 
@@ -151,6 +168,9 @@ func FollowUserID(logger *zap.Logger, msession *MatchmakingSession, nk runtime.N
 			return fmt.Errorf("follower is already in the leader's match")
 		}
 		presence, err := NewMatchPresenceFromSession(msession, leaderMatchID, int(AnyTeam), "")
+		if err != nil {
+			return fmt.Errorf("error creating match presence: %v", err)
+		}
 		// Try to join the leader's match
 		_, _, err = session.evrPipeline.LobbyJoin(session.Context(), logger, leaderMatchID, presence)
 		if err == nil {
