@@ -262,6 +262,21 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	if reason != "" {
 		return state, false, reason
 	}
+
+	if state.Mode == evr.ModeArenaPublic {
+		// Ensure that no team is overfilled.
+		if state.RoleCount(mp.RoleAlignment) >= state.TeamSize {
+			logger.Warn("Picked team is full. Assigning to the other team.")
+			if state.RoleCount(evr.TeamBlue) < state.TeamSize {
+				mp.RoleAlignment = evr.TeamBlue
+			} else if state.RoleCount(evr.TeamOrange) < state.TeamSize {
+				mp.RoleAlignment = evr.TeamOrange
+			} else {
+				return state, false, JoinRejectReasonFailedToAssignTeam
+			}
+		}
+	}
+
 	var err error
 	if !state.levelLoaded {
 		if state, err = m.MatchStart(ctx, logger, nk, dispatcher, state); err != nil {
