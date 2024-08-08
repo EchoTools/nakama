@@ -250,7 +250,6 @@ func (p *EvrPipeline) MatchBackfill(msession *MatchmakingSession) error {
 			}
 		}
 		msessions := msession.GetPartyMatchmakingSessions()
-		logger.Debug("Party matchmaking sessions", zap.Any("sessions", msessions))
 
 		partySize := len(msessions)
 
@@ -390,9 +389,10 @@ func (ms *MatchmakingStatus) Update() error {
 }
 
 // Matchmake attempts to find/create a match for the user using the nakama matchmaker
-func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession) (err error) {
+func (p *EvrPipeline) MatchMake(msession *MatchmakingSession) (err error) {
 	// TODO Move this into the matchmaking registry
 	ctx := msession.Context()
+	session := msession.Session
 
 	// Get a list of all the broadcasters
 	endpoints := msession.registry.GetActiveGameServerEndpoints()
