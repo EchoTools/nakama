@@ -116,6 +116,8 @@ func (r *ProfileRegistry) Load(ctx context.Context, userID uuid.UUID) (profile *
 	if err = json.Unmarshal([]byte(objs[0].GetValue()), profile); err != nil {
 		return nil, err
 	}
+	profile.Stale = false
+
 	return profile, nil
 }
 func (r *ProfileRegistry) Save(ctx context.Context, userID uuid.UUID, profile GameProfile) error {

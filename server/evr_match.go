@@ -381,7 +381,7 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 		}
 
 		// If the round clock is being used, set the join clock time
-		if !state.GameState.UnpauseTime.IsZero() {
+		if state.GameState != nil && !state.GameState.UnpauseTime.IsZero() {
 			// Do not overwrite an existing value
 			if _, ok := state.joinTimeSecs[p.GetSessionId()]; !ok {
 				state.joinTimeSecs[p.GetSessionId()] = state.GameState.CurrentRoundClock
