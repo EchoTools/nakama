@@ -937,19 +937,22 @@ func updateStats(profile *GameProfileData, stats evr.StatsUpdate) {
 func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.OtherUserProfileRequest)
 
-	data, err := p.profileRegistry.GetCached(ctx, request.EvrId)
-	if err != nil {
-		return fmt.Errorf("failed to get cached profile: %w", err)
-	}
-	// Construct the response
-	response := &evr.OtherUserProfileSuccess{
-		EvrId:             request.EvrId,
-		ServerProfileJSON: data,
-	}
+	go func() {
+		data, err := p.profileRegistry.GetCached(ctx, request.EvrId)
+		if err != nil {
+			logger.Warn("Failed to get cached profile", zap.Error(err))
+			return
+		}
+		// Construct the response
+		response := &evr.OtherUserProfileSuccess{
+			EvrId:             request.EvrId,
+			ServerProfileJSON: data,
+		}
 
-	// Send the profile to the client
-	if err := session.SendEvr(response); err != nil {
-		return fmt.Errorf("failed to send OtherUserProfileSuccess: %w", err)
-	}
+		// Send the profile to the client
+		if err := session.SendEvr(response); err != nil {
+			logger.Warn("Failed to send OtherUserProfileSuccess", zap.Error(err))
+		}
+	}()
 	return nil
 }

@@ -1290,7 +1290,7 @@ func (c *MatchmakingRegistry) Add(id uuid.UUID, s *MatchmakingSession) {
 }
 
 func (r *MatchmakingRegistry) GetActiveGameServerEndpoints() []evr.Endpoint {
-	endpoints := make([]evr.Endpoint, 100)
+	endpoints := make([]evr.Endpoint, 0, 100)
 	r.evrPipeline.broadcasterRegistrationBySession.Range(func(_ string, b *MatchBroadcaster) bool {
 		endpoints = append(endpoints, b.Endpoint)
 		return true
@@ -1354,28 +1354,26 @@ func (*MatchmakingSession) BuildQuery(ctx context.Context, nk runtime.NakamaModu
 			continue
 		}
 
-		latency := mroundRTT(b.RTT, 10)
+		msecs := mroundRTT(b.RTT, 10).Milliseconds()
 		// Turn the IP into a hex string like 127.0.0.1 -> 7f000001
 		ip := ipToKey(b.Endpoint.ExternalIP)
 		// Add the property
-		numericProps[ip] = float64(latency.Milliseconds())
+		numericProps[ip] = float64(msecs)
 
 		// TODO FIXME Add second matchmaking ticket for over 150ms
 		n := 0
 		switch {
-		case latency < 25:
+		case msecs < 25:
 			n = 10
-		case latency < 40:
+		case msecs < 40:
 			n = 7
-		case latency < 60:
+		case msecs < 60:
 			n = 5
-		case latency < 80:
+		case msecs < 80:
 			n = 2
-
-			// Add a score for each endpoint
-			p := fmt.Sprintf("properties.%s:<=%d^%d", ip, latency+15, n)
-			qparts = append(qparts, p)
 		}
+		// Add a score for each endpoint
+		qparts = append(qparts, fmt.Sprintf("properties.%s:<=%d^%d", ip, msecs+15, n))
 	}
 	// MUST be the same mode
 	qparts = append(qparts, "+properties.mode:"+mode.String())
