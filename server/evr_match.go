@@ -853,9 +853,10 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 
 	case SignalStartSession:
 
-		state, err := m.MatchStart(ctx, logger, nk, dispatcher, state)
-		if err != nil {
-			return state, SignalResponse{Message: fmt.Sprintf("failed to start session: %v", err)}.String()
+		if !state.Started() {
+			state.StartTime = time.Now().UTC()
+		} else {
+			return state, SignalResponse{Message: "failed to start session: already started"}.String()
 		}
 
 	case SignalLockSession:
