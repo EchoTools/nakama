@@ -126,11 +126,11 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	}
 
 	// Register the matchmaking override
-	/*
-		if err := initializer.RegisterMatchmakerOverride(EvrMatchmakerFn); err != nil {
-			return fmt.Errorf("unable to register matchmaker override: %v", err)
-		}
-	*/
+	sbmm := &SkillBasedMatchmaker{}
+	if err := initializer.RegisterMatchmakerOverride(sbmm.EvrMatchmakerFn); err != nil {
+		return fmt.Errorf("unable to register matchmaker override: %v", err)
+	}
+
 	// Update the metrics with match data
 	go metricsUpdateLoop(ctx, logger, nk.(*RuntimeGoNakamaModule))
 
