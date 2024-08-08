@@ -108,7 +108,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	leaderboardRegistry := NewLeaderboardRegistry(NewRuntimeGoLogger(logger), nk, config.GetName())
 	profileRegistry := NewProfileRegistry(nk, db, runtimeLogger, tracker, discordRegistry)
 	broadcasterRegistrationBySession := MapOf[string, *MatchBroadcaster]{}
-	skillBasedMatchmaker := NewSkillBasedMatchmaker(logger, profileRegistry, nil, metrics, &broadcasterRegistrationBySession)
+	skillBasedMatchmaker := NewSkillBasedMatchmaker()
 	var appBot *DiscordAppBot
 
 	if disable, ok := vars["DISABLE_DISCORD_BOT"]; ok && disable == "true" {
@@ -184,8 +184,6 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	}
 
 	evrPipeline.matchmakingRegistry = NewMatchmakingRegistry(logger, matchRegistry, matchmaker, metrics, db, nk, config, evrPipeline)
-	evrPipeline.sbmm.matchmakingRegistry = evrPipeline.matchmakingRegistry
-	runtime.MatchmakerMatched()
 
 	// Create a timer to periodically clear the backfill queue
 	go func() {
