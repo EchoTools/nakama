@@ -263,8 +263,8 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		return state, false, reason
 	}
 
+	// Ensure that arena matches never have more than 4 players per team.
 	if state.Mode == evr.ModeArenaPublic {
-		// Ensure that no team is overfilled.
 		if state.RoleCount(mp.RoleAlignment) >= state.TeamSize {
 			logger.Warn("Picked team is full. Assigning to the other team.")
 			if state.RoleCount(evr.TeamBlue) < state.TeamSize {
@@ -277,15 +277,12 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		}
 	}
 
-	var err error
-	if !state.levelLoaded {
-		if state, err = m.MatchStart(ctx, logger, nk, dispatcher, state); err != nil {
-			logger.Error("failed to start session: %v", err)
-			return nil, false, ""
-		}
+	// Set the start time to now, which will trigger MatchStart() to start the match.
+	if !state.Started() {
+		state.StartTime = time.Now().UTC()
 	}
 
-	state.presenceMap[mp.GetSessionId()] = mp
+	state.presenceMap[mp.GetSessionId()] = &mp
 	state.joinTimestamps[mp.GetSessionId()] = time.Now()
 
 	logger.WithFields(map[string]interface{}{
@@ -304,11 +301,6 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	}
 	nk.MetricsCounterAdd("match_entrant_join_attempt_count", tags, 1)
 
-	// Set the start time to now, which will trigger MatchStart() to start the match.
-	if !state.Started() {
-		state.StartTime = time.Now().UTC()
-	}
-
 	if err := m.updateLabel(dispatcher, state); err != nil {
 		return state, false, fmt.Sprintf("failed to update label: %v", err)
 	}
@@ -316,27 +308,22 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	return state, true, mp.String()
 }
 
-func (m *EvrMatch) playerJoinAttempt(state *MatchLabel, mp EvrMatchPresence) (*EvrMatchPresence, string) {
+func (m *EvrMatch) playerJoinAttempt(state *MatchLabel, mp EvrMatchPresence) (EvrMatchPresence, string) {
 
 	if state.LobbyType == UnassignedLobby {
-		return &mp, JoinRejectReasonUnassignedLobby
+		return mp, JoinRejectReasonUnassignedLobby
 	}
 
 	// If the lobby is full, reject
 	if state.OpenSlots() < 1 {
-		return &mp, JoinRejectReasonLobbyFull
+		return mp, JoinRejectReasonLobbyFull
 	}
 
 	// If this EvrID is already in the match, reject the player
 	for _, p := range state.presenceMap {
 		if p.GetSessionId() == mp.GetSessionId() || p.EvrID.Equals(mp.EvrID) {
-			return &mp, JoinRejectReasonDuplicateJoin
+			return mp, JoinRejectReasonDuplicateJoin
 		}
-	}
-
-	// If it's a private match, do not assign teams or check for open slots.
-	if state.LobbyType == PrivateLobby {
-		return &mp, ""
 	}
 
 	// If the entrant is NOT a spectator or moderator, use their preset team alignment
@@ -346,39 +333,43 @@ func (m *EvrMatch) playerJoinAttempt(state *MatchLabel, mp EvrMatchPresence) (*E
 		}
 	}
 
+	// If it's a private match, do not assign teams or check for open slots.
+	if state.LobbyType == PrivateLobby {
+		return mp, ""
+	}
+
 	if mp.RoleAlignment == evr.TeamModerator || mp.RoleAlignment == evr.TeamSpectator {
 		if state.OpenNonPlayerSlots() < 1 {
-			return &mp, JoinRejectReasonLobbyFull
+			return mp, JoinRejectReasonLobbyFull
 		}
-		return &mp, ""
+		return mp, ""
 	}
 
 	if state.OpenPlayerSlots() < 1 {
-		return &mp, JoinRejectReasonLobbyFull
+		return mp, JoinRejectReasonLobbyFull
 	}
 
 	if state.Mode == evr.ModeSocialPublic || state.Mode == evr.ModeSocialPrivate {
 		mp.RoleAlignment = evr.TeamSocial
-		return &mp, ""
+		return mp, ""
 	}
 
-	// If the player has a team alignment, use it.
 	if mp.RoleAlignment != evr.TeamUnassigned {
-		return &mp, ""
+		return mp, ""
 	}
 
 	if state.RoleCount(evr.TeamBlue) == state.RoleCount(evr.TeamOrange) {
 		mp.RoleAlignment = evr.TeamOrange
-		return &mp, ""
+		return mp, ""
 	}
 
 	if state.RoleCount(evr.TeamBlue) < state.RoleCount(evr.TeamOrange) {
 		mp.RoleAlignment = evr.TeamBlue
-		return &mp, ""
+		return mp, ""
 	}
 
 	mp.RoleAlignment = evr.TeamOrange
-	return &mp, ""
+	return mp, ""
 }
 
 // MatchJoin is called after the join attempt.
