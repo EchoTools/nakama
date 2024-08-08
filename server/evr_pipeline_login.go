@@ -775,11 +775,9 @@ func generateSuspensionNotice(statuses []*SuspensionStatus) string {
 func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.UserServerProfileUpdateRequest)
 
-	defer func() {
-		if err := session.SendEvr(evr.NewUserServerProfileUpdateSuccess(request.EvrID)); err != nil {
-			logger.Warn("Failed to send UserServerProfileUpdateSuccess", zap.Error(err))
-		}
-	}()
+	if err := session.SendEvr(evr.NewUserServerProfileUpdateSuccess(request.EvrID)); err != nil {
+		logger.Warn("Failed to send UserServerProfileUpdateSuccess", zap.Error(err))
+	}
 
 	matchID, err := NewMatchID(uuid.UUID(request.Payload.SessionID), p.node)
 	if err != nil {
