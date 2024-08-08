@@ -969,7 +969,7 @@ func (ms *MatchmakingSession) JoinPartyGroup(ctx context.Context, logger *zap.Lo
 		return nil
 	}
 
-	maxSize := 8
+	maxSize := 4
 	open := true
 
 	userPresence := &rtapi.UserPresence{
@@ -1199,6 +1199,14 @@ func (c *MatchmakingRegistry) Create(ctx context.Context, logger *zap.Logger, se
 	default: // Privates
 		ml.TeamSize = 5
 	}
+
+	profile, err := c.evrPipeline.profileRegistry.Load(ctx, session.userID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to load user profile: %v", err)
+	}
+	rating := profile.GetRating()
+
+	ctx = context.WithValue(ctx, ctxRatingKey{}, rating)
 
 	logger = logger.With(zap.String("msid", session.ID().String()))
 	ctx, cancel := context.WithCancelCause(ctx)
