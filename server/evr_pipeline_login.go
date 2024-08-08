@@ -575,7 +575,12 @@ func (p *EvrPipeline) updateClientProfileRequest(ctx context.Context, logger *za
 func (p *EvrPipeline) remoteLogSetv3(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.RemoteLogSet)
 
-	return p.processRemoteLogSets(ctx, logger, session, request.EvrID, request)
+	go func() {
+		if err := p.processRemoteLogSets(ctx, logger, session, request.EvrID, request); err != nil {
+			logger.Error("Failed to process remote log set", zap.Error(err))
+		}
+	}()
+	return nil
 }
 
 func (p *EvrPipeline) documentRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
