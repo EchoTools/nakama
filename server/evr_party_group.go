@@ -39,6 +39,8 @@ func (g *PartyGroup) List() []*PartyPresenceListItem {
 	if g.ph == nil {
 		return nil
 	}
+	g.ph.Lock()
+	defer g.ph.Unlock()
 	return g.ph.members.List()
 }
 
