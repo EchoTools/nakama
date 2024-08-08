@@ -13,7 +13,8 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama/v3/server/evr"
-
+	"github.com/intinig/go-openskill/rating"
+	"github.com/intinig/go-openskill/types"
 	"github.com/muesli/reflow/wordwrap"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -764,6 +765,8 @@ func generateSuspensionNotice(statuses []*SuspensionStatus) string {
 	return strings.Join(msgs, "\n")
 }
 
+// A profile udpate request is sent from the game server's login connection.
+// It is sent 45 seconds before the sessionend is sent, right after the match ends.
 func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.UserServerProfileUpdateRequest)
 
@@ -792,6 +795,34 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 			username = p.Username
 		}
 	}
+
+	// Create a list of the teams and their ratings
+	team1ids := make([]string, 0, 4)
+	team2ids := make([]string, 0, 4)
+	team1 := make([]types.Rating, 0, 4)
+	team2 := make([]types.Rating, 0, 4)
+	isBackfill := false
+	var playerInfo *PlayerInfo
+	for _, p := range label.Players {
+		// Get all the players' rating
+		if p.EvrID == request.EvrID {
+			playerInfo = &p
+		}
+		// Ignore players that were backfilled
+		if p.JoinTime != 0.0 {
+			if p.EvrID == request.EvrID {
+				isBackfill = true
+			}
+			continue
+		} else if p.Team == 0 {
+			team1ids = append(team1ids, p.UserID)
+			team1 = append(team1, p.Rating)
+		} else if p.Team == 1 {
+			team2ids = append(team2ids, p.UserID)
+			team2 = append(team2, p.Rating)
+		}
+	}
+
 	if userID == uuid.Nil {
 		return fmt.Errorf("failed to find player in match")
 	}
@@ -805,32 +836,34 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 	serverProfile := profile.GetServer()
 	eqStats := profile.GetEarlyQuitStatistics()
 
-	// Determine if this is a win or a loss
-
 	matchType := evr.ToSymbol(request.Payload.MatchType).Token().String()
 	_ = matchType
 	for groupName, stats := range request.Payload.Update.StatsGroups {
 		if groupName == "arena" {
 
 			eqStats.IncrementMatches()
-
-			// Check if the player won or lost
-			if _, ok := serverProfile.Statistics[groupName]; !ok {
-				serverProfile.Statistics[groupName] = make(map[string]evr.MatchStatistic)
-			}
-			var updatedWins int64
+			playerWon := false
 			if v, ok := stats["ArenaWins"]; ok {
-				updatedWins = v.Int64()
+				if v.Value.(int64) > 0 {
+					playerWon = true
+				}
 			}
-			if updatedWins > 0 {
-				if v, ok := serverProfile.Statistics[groupName]["ArenaWins"]; ok {
-					if currentWins, ok := v.Value.(int64); ok {
-						if updatedWins > currentWins {
-							p.sbmm.RecordResult(matchID, userID.String(), true)
-						} else {
-							p.sbmm.RecordResult(matchID, userID.String(), false)
-						}
-					}
+
+			if playerInfo != nil && !isBackfill {
+				if playerWon && playerInfo.Team == 1 {
+					team1, team2 = team2, team1
+					team1ids, team2ids = team2ids, team1ids
+				}
+			}
+			// Get the new ratings for the teams
+			teams := []types.Team{team1, team2}
+			teams = rating.Rate(teams, &types.OpenSkillOptions{})
+			ratings := append(teams[0], teams[1]...)
+			ids := append(team1ids, team2ids...)
+			for i, id := range ids {
+				if id == userID.String() {
+					profile.SetRating(ratings[i])
+					break
 				}
 			}
 		}
