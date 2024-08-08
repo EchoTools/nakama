@@ -1336,14 +1336,7 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 		timeout = 12 * time.Hour
 	}
 
-	profile, err := p.profileRegistry.Load(parentCtx, session.userID)
-	if err != nil {
-		return status.Errorf(codes.Internal, "Failed to load profile: %v", err)
-	}
-	rating := profile.GetRating()
-
-	ctx := context.WithValue(parentCtx, ctxRatingKey{}, rating)
-	msession, err := p.matchmakingRegistry.Create(ctx, logger, session, ml, timeout)
+	msession, err := p.matchmakingRegistry.Create(parentCtx, logger, session, ml, timeout)
 	if err != nil {
 		logger.Error("Failed to create matchmaking session", zap.Error(err))
 		return err
@@ -1394,7 +1387,7 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 		return p.MatchSpectateStreamLoop(msession)
 	}
 
-	err = msession.JoinPartyGroup(parentCtx, logger)
+	err = msession.JoinPartyGroup(msession.Context(), logger)
 	if err != nil {
 		logger.Warn("Failed to join party group", zap.Error(err))
 	} else if msession.Party != nil {
