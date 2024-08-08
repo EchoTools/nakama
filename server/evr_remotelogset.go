@@ -231,21 +231,20 @@ func (u *MatchGameStateUpdate) Bytes() []byte {
 }
 
 func (u *MatchGameStateUpdate) FromGoal(goal evr.RemoteLogGoal) {
-
-	u.RoundClock = goal.GameInfoGameTime
-	u.Paused = true
+	u.CurrentRoundClock = goal.GameInfoGameTime
 	u.PauseDuration = time.Duration(AfterGoalDuration+RespawnDuration+CatapultDuration) * time.Second
-	if u.LastGoal == nil {
-		u.LastGoal = &LastGoal{
-			GoalTime:              goal.GameInfoGameTime,
-			GoalType:              goal.GoalType,
-			Displayname:           goal.PlayerInfoDisplayname,
-			Teamid:                goal.PlayerInfoTeamid,
-			EvrID:                 goal.PlayerInfoUserid,
-			PrevPlayerDisplayName: goal.PrevPlayerDisplayname,
-			PrevPlayerTeamID:      goal.PrevPlayerTeamid,
-			PrevPlayerEvrID:       goal.PrevPlayerUserid,
-			WasHeadbutt:           goal.WasHeadbutt,
-		}
+	if u.Goals == nil {
+		u.Goals = make([]LastGoal, 0, 1)
 	}
+	u.Goals = append(u.Goals, LastGoal{
+		GoalTime:              goal.GameInfoGameTime,
+		GoalType:              goal.GoalType,
+		Displayname:           goal.PlayerInfoDisplayname,
+		Teamid:                goal.PlayerInfoTeamid,
+		EvrID:                 goal.PlayerInfoUserid,
+		PrevPlayerDisplayName: goal.PrevPlayerDisplayname,
+		PrevPlayerTeamID:      goal.PrevPlayerTeamid,
+		PrevPlayerEvrID:       goal.PrevPlayerUserid,
+		WasHeadbutt:           goal.WasHeadbutt,
+	})
 }
