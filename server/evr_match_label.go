@@ -38,16 +38,15 @@ type MatchLabel struct {
 
 	GameState *GameState `json:"game_state,omitempty"` // The game state for the match.
 
-	presenceMap map[string]*EvrMatchPresence // [sessionId]EvrMatchPresence
-	server      runtime.Presence             // The broadcaster's presence
-
-	emptyTicks         int64                // The number of ticks the match has been empty.
-	sessionStartExpiry int64                // The tick count at which the match will be shut down if it has not started.
-	tickRate           int64                // The number of ticks per second.
-	joinTimestamps     map[string]time.Time // The timestamps of when players joined the match. map[sessionId]time.Time
-	terminateTick      int64                // The tick count at which the match will be shut down.
-	updateLabel        bool                 // Whether the label needs to be updated.
-	levelLoaded        bool                 // Whether the server has been sent the start instruction.
+	server             runtime.Presence             // The broadcaster's presence
+	levelLoaded        bool                         // Whether the server has been sent the start instruction.
+	presenceMap        map[string]*EvrMatchPresence // [sessionId]EvrMatchPresence
+	joinTimestamps     map[string]time.Time         // The timestamps of when players joined the match. map[sessionId]time.Time
+	joinTimeSecs       map[string]float64           // The round clock time of when players joined the match. map[sessionId]time.Time
+	sessionStartExpiry int64                        // The tick count at which the match will be shut down if it has not started.
+	tickRate           int64                        // The number of ticks per second.
+	emptyTicks         int64                        // The number of ticks the match has been empty.
+	terminateTick      int64                        // The tick count at which the match will be shut down.
 }
 
 func (s *MatchLabel) GetPlayerCount() int {
@@ -133,7 +132,7 @@ func (s *MatchLabel) rebuildCache() {
 		if presence.RoleAlignment != evr.TeamSpectator && presence.RoleAlignment != evr.TeamModerator {
 			s.PlayerCount++
 		}
-
+		joinTimeSecs := s.joinTimeSecs[presence.SessionID.String()]
 		playerinfo := PlayerInfo{
 			UserID:      presence.UserID.String(),
 			Username:    presence.Username,
@@ -143,6 +142,7 @@ func (s *MatchLabel) rebuildCache() {
 			ClientIP:    presence.ClientIP,
 			DiscordID:   presence.DiscordID,
 			PartyID:     presence.PartyID.String(),
+			JoinTime:    joinTimeSecs,
 		}
 
 		s.Players = append(s.Players, playerinfo)
