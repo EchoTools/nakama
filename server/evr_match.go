@@ -543,9 +543,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 				}
 
 				if len(u.Goals) > 0 {
-					for _, goal := range u.Goals {
-						gs.Goals = append(gs.Goals, goal)
-					}
+					gs.Goals = append(gs.Goals, u.Goals...)
 				}
 			}
 			updateLabel = true

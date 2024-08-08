@@ -461,3 +461,32 @@ type RemoteLogUserDisconnected struct {
 	Message                string  `json:"message"`
 	MessageType            string  `json:"message_type"`
 }
+
+func (m RemoteLogUserDisconnected) SessionID() uuid.UUID {
+	return uuid.FromStringOrNil(strings.Trim(m.SessionUUID, "{}"))
+}
+
+// VOIP LOUDNESS
+type RemoteLogVOIPLoudness struct {
+	GameInfoGameTime       float64 `json:"[game_info][game_time]"`
+	GameInfoIsArena        bool    `json:"[game_info][is_arena]"`
+	GameInfoIsCapturePoint bool    `json:"[game_info][is_capture_point]"`
+	GameInfoIsCombat       bool    `json:"[game_info][is_combat]"`
+	GameInfoIsPayload      bool    `json:"[game_info][is_payload]"`
+	GameInfoIsPrivate      bool    `json:"[game_info][is_private]"`
+	GameInfoIsSocial       bool    `json:"[game_info][is_social]"`
+	GameInfoLevel          string  `json:"[game_info][level]"`
+	GameInfoMatchType      string  `json:"[game_info][match_type]"`
+	PlayerInfoDisplayname  string  `json:"[player_info][displayname]"`
+	PlayerInfoTeamid       int64   `json:"[player_info][teamid]"`
+	PlayerInfoUserid       string  `json:"[player_info][userid]"`
+	SessionUUID            string  `json:"[session][uuid]"`
+	MaxLoudnessDB          float64 `json:"max_loudness_db"`
+	Message                string  `json:"message"`
+	MessageType            string  `json:"message_type"`
+	VoiceLoudnessDB        float64 `json:"voice_loudness_db"`
+}
+
+func (m RemoteLogVOIPLoudness) SessionID() uuid.UUID {
+	return uuid.FromStringOrNil(strings.Trim(m.SessionUUID, "{}"))
+}

@@ -74,6 +74,8 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 			if err != nil {
 				logger.Error("Failed to save player's profile")
 			}
+			update, _ = updates.LoadOrStore(msg.SessionID(), &MatchGameStateUpdate{})
+			update.CurrentRoundClock = msg.GameInfoGameTime
 
 		case "goal":
 			// This is a goal message.
@@ -102,7 +104,25 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				continue
 			}
 			_ = ghostUser
+		case "voip_loudness":
+			voipVolume := evr.RemoteLogVOIPLoudness{}
+			if err := json.Unmarshal(data, &voipVolume); err != nil {
+				logger.Error("Failed to unmarshal voip volume", zap.Error(err))
+				continue
+			}
 
+			sessionID := voipVolume.SessionID()
+
+			if voipVolume.SessionID() == uuid.Nil {
+				logger.Error("Goal message has no session ID")
+				continue
+			}
+			if voipVolume.GameInfoGameTime == 0 {
+				continue
+			}
+			update, _ = updates.LoadOrStore(sessionID, &MatchGameStateUpdate{})
+
+			update.FromVOIPLoudness(voipVolume)
 		case "game_settings":
 			gameSettings := &evr.RemoteLogGameSettings{}
 			if err := json.Unmarshal(data, gameSettings); err != nil {
@@ -247,4 +267,8 @@ func (u *MatchGameStateUpdate) FromGoal(goal evr.RemoteLogGoal) {
 		PrevPlayerEvrID:       goal.PrevPlayerUserid,
 		WasHeadbutt:           goal.WasHeadbutt,
 	})
+}
+
+func (u *MatchGameStateUpdate) FromVOIPLoudness(goal evr.RemoteLogVOIPLoudness) {
+	u.CurrentRoundClock = float64(goal.GameInfoGameTime)
 }
