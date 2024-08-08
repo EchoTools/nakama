@@ -232,7 +232,7 @@ func (p *EvrPipeline) MatchBackfill(msession *MatchmakingSession) error {
 		//  !msession.Label.ID.IsNil() &&
 		// Backfill any existing matches
 		if msession.Party != nil {
-			if msession.Party.GetLeader().SessionId != msession.Session.id.String() {
+			if msession.Party.GetLeader() != nil && msession.Party.GetLeader().SessionId != msession.Session.id.String() {
 				// only the leader should ever be backfilling
 				if err := FollowLeader(logger, msession, p.runtimeModule); err != nil {
 					switch err {
@@ -246,11 +246,17 @@ func (p *EvrPipeline) MatchBackfill(msession *MatchmakingSession) error {
 						return msession.Cancel(err)
 					default:
 					}
+				} else {
+					return nil
 				}
 			}
 		}
 		msessions := msession.GetPartyMatchmakingSessions()
-
+		msessionIDs := make([]string, 0, len(msessions))
+		for _, ms := range msessions {
+			msessionIDs = append(msessionIDs, ms.Session.id.String())
+		}
+		logger.Debug("Finding backfill match", zap.Strings("msession_ids", msessionIDs))
 		partySize := len(msessions)
 
 		query := backfillQuery(msession.Label.Mode, ml.Broadcaster.Regions[0], ml.ID, ml.Broadcaster.GroupIDs, isPlayer, len(msessions))
@@ -868,6 +874,7 @@ func (p *EvrPipeline) LobbyJoin(ctx context.Context, logger *zap.Logger, matchID
 	for _, presence := range entrants {
 		ms, found := p.matchmakingRegistry.GetMatchingBySessionId(presence.SessionID)
 		if !found || ms == nil {
+			logger.Warn("presence not found for session", zap.String("sid", presence.SessionID.String()))
 			// Skip it
 			continue
 		}

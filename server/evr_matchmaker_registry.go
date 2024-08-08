@@ -191,6 +191,7 @@ func (s *MatchmakingSession) metricsTags() map[string]string {
 
 // Cancel cancels the matchmaking session with a given reason, and returns the reason.
 func (s *MatchmakingSession) Cancel(reason error) error {
+	s.Logger.Debug("Canceling matchmaking session.", zap.Error(reason))
 	s.Lock()
 	defer s.Unlock()
 	select {

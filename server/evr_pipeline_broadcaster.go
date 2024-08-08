@@ -676,6 +676,14 @@ func (p *EvrPipeline) broadcasterPlayerAccept(ctx context.Context, logger *zap.L
 			//p.tracker.UntrackLocalByModes(session.ID(), matchStreamModes, stream)
 		}
 
+		// Cancel the matchmaking session
+		msession, found := p.matchmakingRegistry.GetMatchingBySessionId(s.ID())
+		if !found {
+			logger.Warn("Failed to get matchmaking session by session ID")
+		} else {
+			msession.Cancel(nil)
+		}
+
 		accepted = append(accepted, entrantID)
 	}
 
