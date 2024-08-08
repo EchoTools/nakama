@@ -7,28 +7,30 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"github.com/intinig/go-openskill/types"
 )
 
 var _ runtime.Presence = &EvrMatchPresence{}
 
 // Represents identity information for a single match participant.
 type EvrMatchPresence struct {
-	Node           string    `json:"node,omitempty"`
-	SessionID      uuid.UUID `json:"session_id,omitempty"`       // The Player's "match" connection session ID
-	LoginSessionID uuid.UUID `json:"login_session_id,omitempty"` // The Player's "login" connection session ID
-	EntrantID      uuid.UUID `json:"entrant_id,omitempty"`       // The Player's game server session ID
-	UserID         uuid.UUID `json:"user_id,omitempty"`
-	EvrID          evr.EvrId `json:"evr_id,omitempty"`
-	DiscordID      string    `json:"discord_id,omitempty"`
-	ClientIP       string    `json:"client_ip,omitempty"`
-	ClientPort     string    `json:"client_port,omitempty"`
-	Username       string    `json:"username,omitempty"`
-	DisplayName    string    `json:"display_name,omitempty"`
-	PartyID        uuid.UUID `json:"party_id,omitempty"`
-	RoleAlignment  int       `json:"role,omitempty"`  // The team they want to be on
-	Query          string    `json:"query,omitempty"` // Their matchmaking query
-	SessionExpiry  int64     `json:"session_expiry,omitempty"`
-	HeadsetType    string    `json:"headset_type,omitempty"` // PCVR or Standalone
+	Node           string       `json:"node,omitempty"`
+	SessionID      uuid.UUID    `json:"session_id,omitempty"`       // The Player's "match" connection session ID
+	LoginSessionID uuid.UUID    `json:"login_session_id,omitempty"` // The Player's "login" connection session ID
+	EntrantID      uuid.UUID    `json:"entrant_id,omitempty"`       // The Player's game server session ID
+	UserID         uuid.UUID    `json:"user_id,omitempty"`
+	EvrID          evr.EvrId    `json:"evr_id,omitempty"`
+	DiscordID      string       `json:"discord_id,omitempty"`
+	ClientIP       string       `json:"client_ip,omitempty"`
+	ClientPort     string       `json:"client_port,omitempty"`
+	Username       string       `json:"username,omitempty"`
+	DisplayName    string       `json:"display_name,omitempty"`
+	PartyID        uuid.UUID    `json:"party_id,omitempty"`
+	RoleAlignment  int          `json:"role,omitempty"`  // The team they want to be on
+	Query          string       `json:"query,omitempty"` // Their matchmaking query
+	SessionExpiry  int64        `json:"session_expiry,omitempty"`
+	HeadsetType    string       `json:"headset_type,omitempty"` // PCVR or Standalone
+	Rating         types.Rating `json:"rating,omitempty"`
 }
 
 func (p EvrMatchPresence) String() string {

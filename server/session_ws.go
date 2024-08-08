@@ -124,6 +124,7 @@ type (
 	ctxRequiredFeaturesKey    struct{} // The features from the urlparam
 	ctxVerboseKey             struct{} // The verbosity flag from matchmaking config
 	ctxHeadsetTypeKey         struct{} // The headset type
+	ctxRatingKey              struct{} // The user rating
 
 	//ctxMatchmakingQueryKey         struct{} // The Matchmaking query from the urlparam
 	//ctxMatchmakingGuildPriorityKey struct{} // The Matchmaking guild priority from the urlparam

@@ -33,6 +33,7 @@ type MatchLabel struct {
 	TeamSize    int       `json:"team_size,omitempty"`    // The size of each team in arena/combat (either 4 or 5)
 	TeamIndex   TeamIndex `json:"team,omitempty"`         // What team index a player prefers (Used by Matching only)
 
+	TeamOrdinals   []float64      `json:"team_rankings,omitempty"`   // The ratings of the teams in the match.
 	Players        []PlayerInfo   `json:"players,omitempty"`         // The displayNames of the players (by team name) in the match.
 	TeamAlignments map[string]int `json:"team_alignments,omitempty"` // map[userID]TeamIndex
 
@@ -127,6 +128,8 @@ func (s *MatchLabel) rebuildCache() {
 	s.Size = s.GetPlayerCount()
 	s.PlayerCount = 0
 	// Construct Player list
+	team1 := make(RatedTeam, 0, s.Size)
+	team2 := make(RatedTeam, 0, s.Size)
 	for _, presence := range s.presenceMap {
 		// Do not include spectators or moderators in player count
 		if presence.RoleAlignment != evr.TeamSpectator && presence.RoleAlignment != evr.TeamModerator {
@@ -146,6 +149,20 @@ func (s *MatchLabel) rebuildCache() {
 		}
 
 		s.Players = append(s.Players, playerinfo)
+
+		playerinfo.Rating = presence.Rating
+
+		if s.Mode == evr.ModeArenaPublic {
+			switch presence.RoleAlignment {
+			case BlueRole:
+				team1 = append(team1, presence.Rating)
+			case OrangeRole:
+				team2 = append(team2, presence.Rating)
+			}
+		}
+	}
+	if s.Mode == evr.ModeArenaPublic {
+		s.TeamOrdinals = []float64{team1.Ordinal(), team2.Ordinal()}
 	}
 
 	sort.SliceStable(s.Players, func(i, j int) bool {

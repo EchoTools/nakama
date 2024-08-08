@@ -17,6 +17,7 @@ import (
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"github.com/intinig/go-openskill/types"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -481,11 +482,11 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 			},
 		}
 
-		profile, err := p.profileRegistry.Load(ctx, session.userID)
-		if err != nil {
-			return status.Errorf(codes.Internal, "Failed to load profile: %v", err)
+		rating, ok := ctx.Value(ctxRatingKey{}).(types.Rating)
+		if !ok {
+			return status.Errorf(codes.Internal, "Rating not found in context")
 		}
-		rating := profile.GetRating()
+
 		numericProps["rating_mu"] = rating.Mu
 		numericProps["rating_sigma"] = rating.Sigma
 
@@ -532,22 +533,20 @@ func (p *EvrPipeline) MatchMake(session *sessionWS, msession *MatchmakingSession
 	minCount = min(maxCount, len(memberPresenceIDs)*2)
 
 	// Get the rating for each player, calculate the party's teamstrength then average it
-	partyMu := 0.0
-	partySigma := 0.0
-	for _, ms := range msessions {
-		profile, err := p.profileRegistry.Load(ctx, ms.Session.userID)
-		if err != nil {
-			return status.Errorf(codes.Internal, "Failed to load profile: %v", err)
-		}
-		rating := profile.GetRating()
-		partyMu += rating.Mu
-		partySigma += rating.Sigma
-	}
-	partyMu /= float64(len(msessions))
-	partySigma /= float64(len(msessions))
 
-	numericProps["rating_mu"] = partyMu
-	numericProps["rating_sigma"] = partySigma
+	ratings := make(RatedTeam, 0, len(msessions))
+	for _, ms := range msessions {
+
+		rating, ok := ms.Ctx.Value(ctxRatingKey{}).(types.Rating)
+		if !ok {
+			return status.Errorf(codes.Internal, "Rating not found in context")
+		}
+		ratings = append(ratings, rating)
+	}
+
+	rating := ratings.Rating()
+	numericProps["rating_mu"] = rating.Mu
+	numericProps["rating_sigma"] = rating.Sigma
 
 	msession.AddTicket(ticket, session.id.String(), nil, memberPresenceIDs, msession.Party.IDStr(), query, minCount, maxCount, countMultiple, stringProps, numericProps)
 	mmPartySize := len(memberPresenceIDs) + 1
@@ -795,7 +794,7 @@ func (p *EvrPipeline) MatchCreate(ctx context.Context, msession *MatchmakingSess
 
 func NewMatchPresenceFromSession(msession *MatchmakingSession, matchID MatchID, role int, query string) (*EvrMatchPresence, error) {
 	// Set the profile's display name.
-	ctx := msession.Session.Context()
+	ctx := msession.Context()
 
 	evrID, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
 	if !ok {
@@ -820,6 +819,11 @@ func NewMatchPresenceFromSession(msession *MatchmakingSession, matchID MatchID, 
 	metadata, ok := ctx.Value(ctxAccountMetadataKey{}).(AccountMetadata)
 	if !ok {
 		return nil, fmt.Errorf("failed to get account metadata from session context")
+	}
+
+	rating, ok := ctx.Value(ctxRatingKey{}).(types.Rating)
+	if !ok {
+		return nil, fmt.Errorf("failed to get rating from session context")
 	}
 
 	displayName := metadata.GetGroupDisplayNameOrDefault(msession.Label.GroupID.String())
@@ -851,6 +855,7 @@ func NewMatchPresenceFromSession(msession *MatchmakingSession, matchID MatchID, 
 		ClientIP:       session.clientIP,
 		ClientPort:     session.clientPort,
 		HeadsetType:    headsetType,
+		Rating:         rating,
 	}, nil
 }
 
@@ -1331,7 +1336,14 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 		timeout = 12 * time.Hour
 	}
 
-	msession, err := p.matchmakingRegistry.Create(parentCtx, logger, session, ml, timeout)
+	profile, err := p.profileRegistry.Load(parentCtx, session.userID)
+	if err != nil {
+		return status.Errorf(codes.Internal, "Failed to load profile: %v", err)
+	}
+	rating := profile.GetRating()
+
+	ctx := context.WithValue(parentCtx, ctxRatingKey{}, rating)
+	msession, err := p.matchmakingRegistry.Create(ctx, logger, session, ml, timeout)
 	if err != nil {
 		logger.Error("Failed to create matchmaking session", zap.Error(err))
 		return err
@@ -1435,7 +1447,7 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 	go p.MatchBackfill(msession)
 
 	// Put a ticket in for matching
-	return p.MatchMake(session, msession)
+	return p.MatchMake(msession)
 }
 
 func (p *EvrPipeline) LobbyJoinFromDB(ctx context.Context, logger *zap.Logger, msession *MatchmakingSession) (bool, error) {

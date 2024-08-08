@@ -209,7 +209,8 @@ func MatchListPublicRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 				Tags:        l.Broadcaster.Tags,
 				Features:    l.Broadcaster.Features,
 			},
-			Players: make([]PlayerInfo, 0),
+			Players:      make([]PlayerInfo, 0),
+			TeamOrdinals: l.TeamOrdinals,
 		}
 		if l.LobbyType == PrivateLobby || l.LobbyType == UnassignedLobby {
 			// Set teh last 4 bytes of the ID to 0
@@ -226,6 +227,8 @@ func MatchListPublicRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 					Team:        l.Players[i].Team,
 					DiscordID:   l.Players[i].DiscordID,
 					PartyID:     l.Players[i].PartyID,
+					JoinTime:    l.Players[i].JoinTime,
+					Rating:      l.Players[i].Rating,
 				})
 			}
 
