@@ -380,6 +380,13 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 			continue
 		}
 
+		// If the round clock is being used, set the join clock time
+		if !state.GameState.UnpauseTime.IsZero() {
+			// Do not overwrite an existing value
+			if _, ok := state.joinTimeSecs[p.GetSessionId()]; !ok {
+				state.joinTimeSecs[p.GetSessionId()] = state.GameState.CurrentRoundClock
+			}
+		}
 		if mp, ok := state.presenceMap[p.GetSessionId()]; !ok {
 			logger.WithFields(map[string]interface{}{
 				"username": p.GetUsername(),
@@ -514,12 +521,19 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 				gs := state.GameState
 				u := update
 
-				gs.RoundOver = u.RoundOver
-				gs.MatchOver = u.MatchOver
-				gs.RoundClock = u.RoundClock
+				gs.IsRoundOver = u.IsRoundOver
+				gs.CurrentRoundClock = u.CurrentRoundClock
+
 				if u.PauseDuration != 0 {
-					gs.Paused = true
-					gs.unpausingAt = time.Now().Add(u.PauseDuration)
+					gs.IsPaused = true
+					gs.UnpauseTime = time.Now().Add(u.PauseDuration)
+					gs.ClockPauseSecs = u.CurrentRoundClock
+				}
+
+				if len(u.Goals) > 0 {
+					for _, goal := range u.Goals {
+						gs.Goals = append(gs.Goals, goal)
+					}
 				}
 			}
 			updateLabel = true
@@ -604,10 +618,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 
 	// Update the game clock every second
 	if tick%state.tickRate == 0 && state.GameState != nil {
-		if state.GameState.unpausingAt.Before(time.Now()) {
-			state.GameState.unpausingAt = time.Time{}
-			state.GameState.RoundClock = state.GameState.RoundClock + 1
-		}
+		state.GameState.Update()
 		updateLabel = true
 	}
 
@@ -864,10 +875,10 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk run
 	switch state.Mode {
 	case evr.ModeArenaPublic:
 		state.GameState = &GameState{
-			RoundDuration: RoundDuration,
-			RoundClock:    0,
-			Paused:        true,
-			unpausingAt:   time.Now().Add(PublicMatchWaitTime * time.Second),
+			RoundDuration:     RoundDuration,
+			CurrentRoundClock: 0,
+			UnpauseTime:       time.Now().Add(PublicMatchWaitTime * time.Second),
+			Goals:             make([]LastGoal, 0),
 		}
 	}
 
