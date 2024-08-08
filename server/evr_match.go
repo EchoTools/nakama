@@ -434,7 +434,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 			state.server = nil
 
 			logger.Debug("Broadcaster left the match. Shutting down.")
-			return m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, 20)
+			return m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, 2)
 		}
 	}
 
@@ -680,12 +680,13 @@ func (m *EvrMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db 
 
 	if state.server != nil {
 		for _, mp := range state.presenceMap {
-
+			logger := logger.WithFields(map[string]any{
+				"uid": mp.GetUserId(),
+				"sid": mp.GetSessionId(),
+			})
+			logger.Warn("Match shutting down, disconnecting player.")
 			if err := nk.StreamUserKick(StreamModeMatchAuthoritative, mp.EntrantID.String(), "", mp.GetNodeId(), mp); err != nil {
-				logger.WithFields(map[string]any{
-					"uid": mp.GetUserId(),
-					"sid": mp.GetSessionId(),
-				}).Error("Failed to kick user from stream.")
+				logger.Error("Failed to kick user from stream.")
 			}
 		}
 	}
