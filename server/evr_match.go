@@ -386,6 +386,12 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 			continue
 		}
 
+		// Remove the player's team align map if they are joining a public match.
+		switch state.Mode {
+		case evr.ModeArenaPublic, evr.ModeCombatPublic:
+			delete(state.TeamAlignments, p.GetUserId())
+		}
+
 		// If the round clock is being used, set the join clock time
 		if state.GameState != nil && !state.GameState.UnpauseTime.IsZero() {
 			// Do not overwrite an existing value
