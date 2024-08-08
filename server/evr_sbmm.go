@@ -3,7 +3,7 @@ package server
 import (
 	"context"
 	"database/sql"
-	"errors"
+	"math"
 	"math/rand"
 	"slices"
 
@@ -15,108 +15,20 @@ import (
 	"go.uber.org/zap"
 )
 
-type BroadcasterRegistrationMap *MapOf[string, *MatchBroadcaster]
+type (
+	RatedMatch []RatedEntryTeam
+)
 
-type SkillBasedMatchmaker struct {
-	logger                           *zap.Logger
-	metrics                          Metrics
-	profileRegistry                  *ProfileRegistry
-	broadcasterRegistrationBySession *MapOf[string, *MatchBroadcaster]
-	matchmakingRegistry              *MatchmakingRegistry
-	activeMatches                    MapOf[MatchID, [][]string]
-}
-
-func NewSkillBasedMatchmaker(logger *zap.Logger, profileRegistry *ProfileRegistry, matchmakingRegistry *MatchmakingRegistry, metrics Metrics, broadcasterRegistrationBySession *MapOf[string, *MatchBroadcaster]) *SkillBasedMatchmaker {
-	return &SkillBasedMatchmaker{
-		logger:  logger,
-		metrics: metrics,
-
-		profileRegistry:                  profileRegistry,
-		activeMatches:                    MapOf[MatchID, [][]string]{},
-		matchmakingRegistry:              matchmakingRegistry,
-		broadcasterRegistrationBySession: broadcasterRegistrationBySession,
-	}
-}
-
-func (m *SkillBasedMatchmaker) AddMatch(matchID MatchID, teams [][]string) {
-	m.activeMatches.Store(matchID, teams)
-}
-
-func (m *SkillBasedMatchmaker) RecordResult(matchID MatchID, userID string, win bool) error {
-	teams, ok := m.activeMatches.LoadAndDelete(matchID)
-	if !ok {
-		return nil
-	}
-
-	result := teams[:]
-	// First team is the winner
-	if slices.Contains(teams[0], userID) {
-		if !win {
-			slices.Reverse(result)
-		}
-	} else if slices.Contains(teams[1], userID) {
-		if win {
-			slices.Reverse(result)
-		}
-	} else {
-		return errors.New("user not in match, they might have been a backfill")
-	}
-	return nil
-}
-
-func TeamStrength(team []*RatedEntry) float64 {
-	s := 0.0
-	for _, p := range team {
-		s += p.Rating.Mu
-	}
-	return s
-}
-
-type MatchHistory struct {
-	Teams [][]MatchmakerEntry `json:"teams"`
-}
-
-type MatchmakerMeta struct {
-	PartyID     string  `json:"party_id"`
-	RatingMu    float64 `json:"rating_mu"`
-	RatingSigma float64 `json:"rating_sigma"`
-}
-
-type RatedMatch []RatedTeam
-type RatedTeam []*RatedEntry
-
-func (t RatedTeam) Strength() float64 {
-	s := 0.0
-	for _, e := range t {
-		s += e.Rating.Mu
-	}
-	return s
+func NewDefaultRating() types.Rating {
+	return rating.NewWithOptions(&types.OpenSkillOptions{
+		Mu:    ptr.Float64(25.0),
+		Sigma: ptr.Float64(8.333),
+	})
 }
 
 type RatedEntry struct {
 	Entry  runtime.MatchmakerEntry
 	Rating types.Rating
-}
-
-type PredictedMatch struct {
-	Team1 RatedTeam `json:"team1"`
-	Team2 RatedTeam `json:"team2"`
-	Draw  float64   `json:"draw"`
-}
-
-func (p PredictedMatch) Entrants() []*RatedEntry {
-	return append(p.Team1, p.Team2...)
-}
-func PredictDraw(teams []RatedTeam) float64 {
-	team1 := make(types.Team, 0, len(teams[0]))
-	team2 := make(types.Team, 0, len(teams[1]))
-	for _, e := range teams[0] {
-		team1 = append(team1, e.Rating)
-	}
-	for _, e := range teams[1] {
-		team2 = append(team2, e.Rating)
-	}
-	return rating.PredictDraw([]types.Team{team1, team2}, nil)
 }
 
 func NewRatedEntryFromMatchmakerEntry(e runtime.MatchmakerEntry) *RatedEntry {
@@ -138,7 +50,89 @@ func NewRatedEntryFromMatchmakerEntry(e runtime.MatchmakerEntry) *RatedEntry {
 	}
 }
 
-func CreateBalancedMatch(groups [][]*RatedEntry, teamSize int) (RatedTeam, RatedTeam) {
+type RatedEntryTeam []*RatedEntry
+
+func (t RatedEntryTeam) Len() int {
+	return len(t)
+}
+
+func (t RatedEntryTeam) Strength() float64 {
+	s := 0.0
+	for _, p := range t {
+		s += p.Rating.Mu
+	}
+	return s
+}
+
+type RatedTeam []types.Rating
+
+func (t RatedTeam) Strength() float64 {
+	s := 0.0
+	for _, p := range t {
+		s += p.Mu
+	}
+	return s
+}
+
+func (t RatedTeam) Rating() types.Rating {
+	if len(t) == 0 {
+		return NewDefaultRating()
+	}
+	meanMu := t.Strength() / float64(len(t))
+	sumSigmaSquared := 0.0
+	for _, p := range t {
+		sumSigmaSquared += p.Sigma * p.Sigma
+	}
+	averageSigmaSquared := sumSigmaSquared / float64(len(t))
+	rmsSigma := math.Sqrt(averageSigmaSquared)
+
+	return rating.NewWithOptions(&types.OpenSkillOptions{
+		Mu:    ptr.Float64(meanMu),
+		Sigma: ptr.Float64(rmsSigma),
+	})
+}
+
+func (t RatedTeam) Ordinal() float64 {
+	return rating.Ordinal(t.Rating())
+}
+
+type PredictedMatch struct {
+	Team1 RatedEntryTeam `json:"team1"`
+	Team2 RatedEntryTeam `json:"team2"`
+	Draw  float64        `json:"draw"`
+}
+
+func (p PredictedMatch) Entrants() []*RatedEntry {
+	return append(p.Team1, p.Team2...)
+}
+
+type SkillBasedMatchmaker struct{}
+
+func NewSkillBasedMatchmaker() *SkillBasedMatchmaker {
+	return &SkillBasedMatchmaker{}
+}
+
+func (*SkillBasedMatchmaker) TeamStrength(team RatedEntryTeam) float64 {
+	s := 0.0
+	for _, p := range team {
+		s += p.Rating.Mu
+	}
+	return s
+}
+
+func (*SkillBasedMatchmaker) PredictDraw(teams []RatedEntryTeam) float64 {
+	team1 := make(types.Team, 0, len(teams[0]))
+	team2 := make(types.Team, 0, len(teams[1]))
+	for _, e := range teams[0] {
+		team1 = append(team1, e.Rating)
+	}
+	for _, e := range teams[1] {
+		team2 = append(team2, e.Rating)
+	}
+	return rating.PredictDraw([]types.Team{team1, team2}, nil)
+}
+
+func (m *SkillBasedMatchmaker) CreateBalancedMatch(groups [][]*RatedEntry, teamSize int) (RatedEntryTeam, RatedEntryTeam) {
 	// Split out the solo players
 	solos := make([]*RatedEntry, 0, len(groups))
 	parties := make([][]*RatedEntry, 0, len(groups))
@@ -162,11 +156,11 @@ func CreateBalancedMatch(groups [][]*RatedEntry, teamSize int) (RatedTeam, Rated
 		solos[i], solos[j] = solos[j], solos[i]
 	}
 
-	team1 := make(RatedTeam, 0, teamSize)
-	team2 := make(RatedTeam, 0, teamSize)
+	team1 := make(RatedEntryTeam, 0, teamSize)
+	team2 := make(RatedEntryTeam, 0, teamSize)
 
 	for _, party := range parties {
-		if len(team1)+len(party) <= teamSize && (len(team2)+len(party) > teamSize || TeamStrength(team1) <= TeamStrength(team2)) {
+		if len(team1)+len(party) <= teamSize && (len(team2)+len(party) > teamSize || m.TeamStrength(team1) <= m.TeamStrength(team2)) {
 			team1 = append(team1, party...)
 		} else if len(team2)+len(party) <= teamSize {
 			team2 = append(team2, party...)
@@ -174,7 +168,7 @@ func CreateBalancedMatch(groups [][]*RatedEntry, teamSize int) (RatedTeam, Rated
 	}
 
 	for _, player := range solos {
-		if len(team1) < teamSize && (len(team2) >= teamSize || TeamStrength(team1) <= TeamStrength(team2)) {
+		if len(team1) < teamSize && (len(team2) >= teamSize || m.TeamStrength(team1) <= m.TeamStrength(team2)) {
 			team1 = append(team1, player)
 		} else if len(team2) < teamSize {
 			team2 = append(team2, player)
@@ -184,7 +178,7 @@ func CreateBalancedMatch(groups [][]*RatedEntry, teamSize int) (RatedTeam, Rated
 	return team1, team2
 }
 
-func (*SkillBasedMatchmaker) BalancedMatchFromCandidate(candidate []runtime.MatchmakerEntry) (RatedTeam, RatedTeam) {
+func (m *SkillBasedMatchmaker) BalancedMatchFromCandidate(candidate []runtime.MatchmakerEntry) (RatedEntryTeam, RatedEntryTeam) {
 	// Create a balanced match
 	ticketMap := lo.GroupBy(candidate, func(e runtime.MatchmakerEntry) string {
 		return e.GetTicket()
@@ -198,7 +192,7 @@ func (*SkillBasedMatchmaker) BalancedMatchFromCandidate(candidate []runtime.Matc
 		groups = append(groups, ratedGroup)
 	}
 
-	team1, team2 := CreateBalancedMatch(groups, len(candidate)/2)
+	team1, team2 := m.CreateBalancedMatch(groups, len(candidate)/2)
 	return team1, team2
 }
 
@@ -225,7 +219,7 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 		predictions = append(predictions, PredictedMatch{
 			Team1: match[0],
 			Team2: match[1],
-			Draw:  PredictDraw(match),
+			Draw:  m.PredictDraw(match),
 		})
 	}
 

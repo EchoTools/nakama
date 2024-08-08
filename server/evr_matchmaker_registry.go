@@ -587,7 +587,7 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 	mr.metrics.CustomCounter("matchmaking_matched_participant_count", metricsTags, int64(len(entrants)))
 
 	ml.Players = make([]PlayerInfo, 0, len(entrants))
-	for i, players := range []RatedTeam{team1, team2} {
+	for i, players := range []RatedEntryTeam{team1, team2} {
 		for _, p := range players {
 			// Update the label with the teams
 			evrID, err := evr.ParseEvrId(p.Entry.GetProperties()["evrid"].(string))
@@ -659,7 +659,7 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 	}
 
 	presencesByTicket := make(map[string][]*EvrMatchPresence, len(parties))
-	for i, players := range []RatedTeam{team1, team2} {
+	for i, players := range []RatedEntryTeam{team1, team2} {
 		// Assign each player in the team to the match
 		for _, rated := range players {
 			entry := rated.Entry
@@ -715,7 +715,7 @@ func (mr *MatchmakingRegistry) buildMatch(entrants []*MatchmakerEntry, config Ma
 	}
 
 	teams := make([][]runtime.MatchmakerEntry, 0, len(successful))
-	for _, p := range []RatedTeam{team1, team2} {
+	for _, p := range []RatedEntryTeam{team1, team2} {
 		team := make([]runtime.MatchmakerEntry, 0, len(p))
 		for _, rated := range p {
 			team = append(team, rated.Entry)
