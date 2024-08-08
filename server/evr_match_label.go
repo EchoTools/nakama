@@ -152,13 +152,16 @@ func (s *MatchLabel) rebuildCache() {
 
 		playerinfo.Rating = presence.Rating
 
-		if s.Mode == evr.ModeArenaPublic {
+		switch s.Mode {
+		case evr.ModeArenaPublic:
 			switch presence.RoleAlignment {
 			case BlueRole:
 				team1 = append(team1, presence.Rating)
 			case OrangeRole:
 				team2 = append(team2, presence.Rating)
 			}
+		case evr.ModeArenaPrivate, evr.ModeCombatPrivate:
+			playerinfo.Team = TeamIndex(UnassignedRole)
 		}
 	}
 	if s.Mode == evr.ModeArenaPublic {
