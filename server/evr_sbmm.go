@@ -12,7 +12,6 @@ import (
 	"github.com/intinig/go-openskill/types"
 	"github.com/samber/lo"
 	"go.uber.org/thriftrw/ptr"
-	"go.uber.org/zap"
 )
 
 type (
@@ -198,7 +197,7 @@ func (m *SkillBasedMatchmaker) BalancedMatchFromCandidate(candidate []runtime.Ma
 
 func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, candidateMatches [][]runtime.MatchmakerEntry) (madeMatches [][]runtime.MatchmakerEntry) {
 	//profileRegistry := &ProfileRegistry{nk: nk}
-	logger.Debug("Match candidates.", zap.Any("matches", candidateMatches))
+	logger.WithField("matches", candidateMatches).Debug("Match candidates.")
 
 	// TODO FIXME get the team size from the ticket properties
 
@@ -206,7 +205,7 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 
 	for _, match := range candidateMatches {
 		if len(match)%2 != 0 {
-			logger.Warn("Match has odd number of players.", zap.Any("match", match))
+			logger.WithField("match", match).Warn("Match has odd number of players.")
 			continue
 		}
 		team1, team2 := m.BalancedMatchFromCandidate(match)
@@ -231,7 +230,7 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 	// Sort so that highest draw probability is first
 	slices.Reverse(predictions)
 
-	logger.Debug("Match options.", zap.Any("matches", predictions))
+	logger.WithField("matches", predictions).Debug("Match options.")
 
 	seen := make(map[string]struct{})
 	madeMatches = make([][]runtime.MatchmakerEntry, 0, len(predictions))
@@ -251,6 +250,6 @@ OuterLoop:
 		madeMatches = append(madeMatches, match)
 	}
 
-	logger.Debug("Made matches.", zap.Any("matches", madeMatches))
+	logger.WithField("matches", madeMatches).Debug("Made matches.")
 	return madeMatches
 }

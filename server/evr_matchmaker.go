@@ -498,7 +498,7 @@ func (p *EvrPipeline) MatchMake(msession *MatchmakingSession) (err error) {
 		mmstatus.Update()
 		p.metrics.CustomCounter("matchmaker_tickets_count", mmstatus.MetricsMap(), 1)
 		msession.AddTicket(ticket, session.id.String(), presences, nil, "", query, minCount, maxCount, countMultiple, stringProps, numericProps)
-		msession.Logger.Info("Added solo matchmaking ticket", zap.String("query", query), zap.String("ticket", ticket), zap.Any("presences", presences))
+		msession.Logger.Info("Added solo matchmaking ticket", zap.String("query", query), zap.Any("numericProps", numericProps), zap.Any("stringProps", stringProps), zap.String("ticket", ticket), zap.Any("presences", presences))
 		return nil
 	}
 
@@ -1438,7 +1438,7 @@ func (p *EvrPipeline) MatchFind(parentCtx context.Context, logger *zap.Logger, s
 		select {
 		case <-msession.Ctx.Done():
 			return msession.Cause()
-		case <-time.After(4 * time.Minute):
+		case <-time.After(8 * time.Minute):
 		}
 		return msession.Cancel(ErrMatchmakingTimeout)
 	}
