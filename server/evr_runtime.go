@@ -11,6 +11,7 @@ import (
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/jackc/pgtype"
 
 	"google.golang.org/grpc/codes"
@@ -69,6 +70,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		"match":                         MatchRPC,
 		"match/prepare":                 PrepareMatchRPC,
 		"match/setnext":                 RESTfulRPCHandlerFactory[SetNextMatchRPCRequest](SetNextMatchRPC),
+		"player/statistics":             PlayerStatisticsRPC,
 		"link":                          LinkingAppRpc,
 		"evr/servicestatus":             ServiceStatusRpc,
 		"importloadouts":                ImportLoadoutsRpc,
@@ -872,4 +874,31 @@ func GetUserIDByEvrID(ctx context.Context, db *sql.DB, evrID string) (string, er
 		return "", nil
 	}
 	return dbUserID, nil
+}
+
+func GetPlayerStats(ctx context.Context, db *sql.DB, userID string) (*evr.PlayerStatistics, error) {
+	query := "SELECT value->'server'->>'stats' FROM storage WHERE user_id = $1 AND collection = $2 AND key = $3"
+	var dbStatsJSON string
+	var found = true
+	err := db.QueryRowContext(ctx, query, userID, GameProfileStorageCollection, GameProfileStorageKey).Scan(&dbStatsJSON)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			found = false
+		} else {
+			return nil, status.Error(codes.Internal, "error finding user account")
+		}
+	}
+	if !found {
+		return nil, status.Error(codes.NotFound, "user account not found")
+	}
+	if dbStatsJSON == "" {
+		return nil, nil
+	}
+
+	playerStats := &evr.PlayerStatistics{}
+	if err := json.Unmarshal([]byte(dbStatsJSON), playerStats); err != nil {
+		return nil, status.Error(codes.Internal, "error unmarshalling player statistics")
+	}
+
+	return playerStats, nil
 }
