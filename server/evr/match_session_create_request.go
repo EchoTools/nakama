@@ -155,7 +155,7 @@ func (m *LobbyCreateSessionRequest) GetEvrID() EvrId {
 	return m.Entrants[0].EvrID
 }
 
-func (m *LobbyCreateSessionRequest) GetChannel() uuid.UUID {
+func (m *LobbyCreateSessionRequest) GetGroupID() uuid.UUID {
 	return m.GroupID
 }
 
@@ -168,4 +168,39 @@ func (m *LobbyCreateSessionRequest) GetAlignment() int8 {
 		return int8(TeamUnassigned)
 	}
 	return int8(m.Entrants[0].Role)
+}
+
+func (m *LobbyCreateSessionRequest) GetVersionLock() Symbol {
+	return Symbol(m.VersionLock)
+}
+
+func (m *LobbyCreateSessionRequest) GetAppID() Symbol {
+	return ToSymbol(m.SessionSettings.AppID)
+}
+
+func (m *LobbyCreateSessionRequest) GetLevel() Symbol {
+	return ToSymbol(m.SessionSettings.Level)
+}
+
+func (m *LobbyCreateSessionRequest) GetFeatures() []string {
+	return m.SessionSettings.Features
+}
+
+func (m *LobbyCreateSessionRequest) GetCurrentLobbyID() uuid.UUID {
+	return uuid.Nil
+}
+
+func (m *LobbyCreateSessionRequest) GetEntrants() []Entrant {
+	return m.Entrants
+}
+
+func (m *LobbyCreateSessionRequest) GetEntrantRole(idx int) int {
+	if idx < 0 || idx >= len(m.Entrants) {
+		return -1
+	}
+	return int(m.Entrants[idx].Role)
+}
+
+func (m *LobbyCreateSessionRequest) GetRegion() Symbol {
+	return m.Region
 }

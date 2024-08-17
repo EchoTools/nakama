@@ -221,25 +221,26 @@ type ServerSocial struct {
 	Channel GUID `json:"group,omitempty" validate:"uuid_rfc4122"` // The channel. It is a GUID, uppercase.
 }
 
+type PlayerStatistics map[string]map[string]MatchStatistic
+
 type ServerProfile struct {
 	// WARNING: EchoVR dictates this struct/schema.
-	// TODO Add comments for what these are
-	DisplayName       string                               `json:"displayname"`                                    // Overridden by nakama
-	EvrID             EvrId                                `json:"xplatformid"`                                    // Overridden by nakama
-	SchemaVersion     int16                                `json:"_version,omitempty" validate:"gte=0"`            // Version of the schema(?)
-	PublisherLock     string                               `json:"publisher_lock,omitempty"`                       // unused atm
-	PurchasedCombat   int8                                 `json:"purchasedcombat,omitempty" validate:"eq=0|eq=1"` // unused (combat was made free)
-	LobbyVersion      uint64                               `json:"lobbyversion" validate:"gte=0"`                  // set from the login request
-	LoginTime         int64                                `json:"logintime" validate:"gte=0"`                     // When the player logged in
-	UpdateTime        int64                                `json:"updatetime" validate:"gte=0"`                    // When the profile was last stored.
-	CreateTime        int64                                `json:"createtime" validate:"gte=0"`                    // When the player's nakama account was created.
-	Statistics        map[string]map[string]MatchStatistic `json:"stats,omitempty"`                                // Player statistics
-	MaybeStale        bool                                 `json:"maybestale,omitempty" validate:"boolean"`        // If the profile is stale
-	UnlockedCosmetics UnlockedCosmetics                    `json:"unlocks,omitempty"`                              // Unlocked cosmetics
-	EquippedCosmetics EquippedCosmetics                    `json:"loadout,omitempty"`                              // Equipped cosmetics
-	Social            ServerSocial                         `json:"social,omitempty"`                               // Social settings
-	Achievements      interface{}                          `json:"achievements,omitempty"`                         // Achievements
-	RewardState       interface{}                          `json:"reward_state,omitempty"`                         // Reward state?
+	DisplayName       string            `json:"displayname"`                                    // Overridden by nakama
+	EvrID             EvrId             `json:"xplatformid"`                                    // Overridden by nakama
+	SchemaVersion     int16             `json:"_version,omitempty" validate:"gte=0"`            // Version of the schema(?)
+	PublisherLock     string            `json:"publisher_lock,omitempty"`                       // unused atm
+	PurchasedCombat   int8              `json:"purchasedcombat,omitempty" validate:"eq=0|eq=1"` // unused (combat was made free)
+	LobbyVersion      uint64            `json:"lobbyversion" validate:"gte=0"`                  // set from the login request
+	LoginTime         int64             `json:"logintime" validate:"gte=0"`                     // When the player logged in
+	UpdateTime        int64             `json:"updatetime" validate:"gte=0"`                    // When the profile was last stored.
+	CreateTime        int64             `json:"createtime" validate:"gte=0"`                    // When the player's nakama account was created.
+	Statistics        PlayerStatistics  `json:"stats,omitempty"`                                // Player statistics
+	MaybeStale        bool              `json:"maybestale,omitempty" validate:"boolean"`        // If the profile is stale
+	UnlockedCosmetics UnlockedCosmetics `json:"unlocks,omitempty"`                              // Unlocked cosmetics
+	EquippedCosmetics EquippedCosmetics `json:"loadout,omitempty"`                              // Equipped cosmetics
+	Social            ServerSocial      `json:"social,omitempty"`                               // Social settings
+	Achievements      interface{}       `json:"achievements,omitempty"`                         // Achievements
+	RewardState       interface{}       `json:"reward_state,omitempty"`                         // Reward state?
 	// If DeveloperFeatures is not null, the player will have a gold name
 	DeveloperFeatures *DeveloperFeatures `json:"dev,omitempty"` // Developer features
 }

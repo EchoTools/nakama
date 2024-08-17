@@ -397,6 +397,12 @@ var (
 					Description: "Disallowed from joining any guild matches.",
 					Required:    true,
 				},
+				{
+					Type:        discordgo.ApplicationCommandOptionRole,
+					Name:        "is-linked",
+					Description: "Assigned/Removed by Nakama denoting if an account is linked to a headset.",
+					Required:    true,
+				},
 			},
 		},
 		{
@@ -1858,7 +1864,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 			rttMs := int(rtt / 1000000)
 			logger.WithField("label", label).Info("Match created.")
-			content := fmt.Sprintf("Reserved server (%dms ping) for `%s` session. Reservation will timeout in %d minute.\n\nhttps://echo.taxi/spark://c/%s", rttMs, label.Mode.String(), 1, strings.ToUpper(label.ID.UUID().String()))
+			content := fmt.Sprintf("Reserved server (%dms ping) for `%s` session. Reservation will timeout in %d minute.\n\nhttps://echo.taxi/spark://c/%s", rttMs, label.Mode.String(), 1, strings.ToUpper(label.ID.UUID.String()))
 			return simpleInteractionResponse(s, i, content)
 		},
 		"allocate": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
@@ -1910,7 +1916,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			logger.WithField("label", label).Info("Match prepared")
-			return simpleInteractionResponse(s, i, fmt.Sprintf("Match prepared with label ```json\n%s\n```\nhttps://echo.taxi/spark://c/%s", label.GetLabelIndented(), strings.ToUpper(label.ID.UUID().String())))
+			return simpleInteractionResponse(s, i, fmt.Sprintf("Match prepared with label ```json\n%s\n```\nhttps://echo.taxi/spark://c/%s", label.GetLabelIndented(), strings.ToUpper(label.ID.UUID.String())))
 		},
 		"trigger-cv": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 
@@ -2013,6 +2019,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					metadata.MemberRole = roleID
 				case "allocator":
 					metadata.AllocatorRole = roleID
+				case "is_linked":
+					metadata.IsLinkedRole = roleID
 				}
 			}
 
@@ -2180,34 +2188,25 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						return fmt.Errorf("failed to unmarshal matchmaking config: %w", err)
 					}
 				}
-				if matchmakingConfig.GroupID == "" {
+				if matchmakingConfig.LobbyGroupID == "" {
 					return errors.New("set a group ID first with `/party group`")
 				}
 
 				//logger = logger.WithField("group_id", matchmakingConfig.GroupID)
-
+				_, subject, err := GetLobbyGroupID(ctx, d.db, userID)
+				if err != nil {
+					return fmt.Errorf("failed to get party group ID: %w", err)
+				}
 				// Look for presences
-				partyID := uuid.NewV5(uuid.Nil, matchmakingConfig.GroupID).String()
-				streamUsers, err := nk.StreamUserList(StreamModeParty, partyID, "", d.pipeline.node, true, true)
+
+				partyMembers, err := nk.StreamUserList(StreamModeParty, subject.String(), "", d.pipeline.node, false, true)
 				if err != nil {
 					return fmt.Errorf("failed to list stream users: %w", err)
 				}
-				// Make sure the user is in the list
-				found := false
-				for _, streamUser := range streamUsers {
-					if streamUser.GetUserId() == userID {
-						found = true
-						break
-					}
-				}
-
-				if !found {
-					return errors.New("not online, or not in a party")
-				}
 
 				// Convert the members to discord user IDs
-				discordIDs := make([]string, 0, len(streamUsers))
-				for _, streamUser := range streamUsers {
+				discordIDs := make([]string, 0, len(partyMembers))
+				for _, streamUser := range partyMembers {
 					discordID, err := GetDiscordIDByUserID(ctx, d.db, streamUser.GetUserId())
 					if err != nil {
 						return fmt.Errorf("failed to get discord ID: %w", err)
@@ -2270,7 +2269,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						return fmt.Errorf("failed to unmarshal matchmaking config: %w", err)
 					}
 				}
-				matchmakingConfig.GroupID = groupName
+				matchmakingConfig.LobbyGroupID = groupName
 				// Store it back
 
 				data, err := json.Marshal(matchmakingConfig)
@@ -2772,27 +2771,4 @@ func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runt
 		}()
 	}
 	return nil
-}
-
-func LoadLatencyCache(ctx context.Context, nk runtime.NakamaModule, userID string) (map[string]LatencyMetric, error) {
-	objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
-		{
-			Collection: MatchmakingStorageCollection,
-			Key:        LatencyCacheStorageKey,
-			UserID:     userID,
-		},
-	})
-	if err != nil {
-		return nil, err
-	}
-	if len(objs) == 0 {
-		return nil, nil
-	}
-
-	store := &LatencyCacheStorageObject{}
-	if err := json.Unmarshal([]byte(objs[0].Value), store); err != nil {
-		return nil, status.Errorf(codes.Internal, "Failed to unmarshal latency cache: %v", err)
-	}
-
-	return store.Entries, nil
 }

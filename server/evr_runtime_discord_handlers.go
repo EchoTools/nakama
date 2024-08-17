@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -189,7 +190,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 			if mid.IsNil() {
 				continue
 			}
-			whoami.MatchIDs = append(whoami.MatchIDs, mid.UUID().String())
+			whoami.MatchIDs = append(whoami.MatchIDs, mid.UUID.String())
 		}
 	}
 
@@ -361,28 +362,34 @@ func (d *DiscordAppBot) handlePrepareMatch(ctx context.Context, logger runtime.L
 		labels = append(labels, &label)
 	}
 
-	latencyMap := make(map[string]float64, len(matches))
 	if region == evr.DefaultRegion {
 		// Find the closest to the player.
-		cache, err := LoadLatencyCache(ctx, d.nk, userID)
+		zapLogger := logger.(*RuntimeGoLogger).logger
+		latencyHistory, err := LoadLatencyHistory(ctx, zapLogger, d.db, uuid.FromStringOrNil(userID))
 		if err != nil {
-			return nil, 0, err
+			return nil, 0, fmt.Errorf("failed to load latency history: %v", err)
 		}
 
-		for _, e := range cache {
-			latencyMap[e.ID()] = float64(e.RTT)
-		}
-
-		// Sort the available servers by latency
-		sort.Slice(labels, func(i, j int) bool {
-			if latencyMap[labels[i].Broadcaster.Endpoint.ExternalIP.String()] == 0 {
-				return false
+		labelLatencies := make([]int, len(labels))
+		for _, label := range labels {
+			if history, ok := latencyHistory[label.Broadcaster.Endpoint.GetExternalIP()]; ok {
+				average := 0
+				for _, l := range history {
+					average += l
+				}
+				average /= len(history)
+				labelLatencies = append(labelLatencies, average)
+			} else {
+				labelLatencies = append(labelLatencies, 0)
 			}
-			return latencyMap[labels[i].Broadcaster.Endpoint.ExternalIP.String()] < latencyMap[labels[j].Broadcaster.Endpoint.ExternalIP.String()]
-		})
-	}
-	if t, ok := latencyMap[labels[0].Broadcaster.Endpoint.ExternalIP.String()]; ok {
-		rtt = t
+		}
+
+		params := SessionParameters{
+			Region: region,
+			Mode:   mode,
+		}
+		lobbyCreateSortOptions(labels, labelLatencies, params)
+
 	}
 
 	// Pick a random result
@@ -416,4 +423,17 @@ func (d *DiscordAppBot) handlePrepareMatch(ctx context.Context, logger runtime.L
 
 	return &label, rtt, nil
 
+}
+func SnowflakeToTime(snowflakeID string) time.Time {
+	// Discord snowflake epoch timestamp
+	const discordEpoch = 1420070400000
+
+	// Convert the ID to an integer
+	id, _ := strconv.ParseInt(snowflakeID, 10, 64)
+
+	// Extract the timestamp from the snowflake
+	timestamp := (id >> 22) + discordEpoch
+
+	// Return the time.Time object
+	return time.Unix(timestamp/1000, (timestamp%1000)*1000000).UTC()
 }

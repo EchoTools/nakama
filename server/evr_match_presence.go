@@ -2,7 +2,6 @@ package server
 
 import (
 	"encoding/json"
-	"errors"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -10,35 +9,37 @@ import (
 	"github.com/intinig/go-openskill/types"
 )
 
+var EntrantIDSalt string
+
+func init() {
+	EntrantIDSalt = uuid.Must(uuid.NewV4()).String()
+}
+
 var _ runtime.Presence = &EvrMatchPresence{}
 
 // Represents identity information for a single match participant.
 type EvrMatchPresence struct {
-	Node           string       `json:"node,omitempty"`
-	SessionID      uuid.UUID    `json:"session_id,omitempty"`       // The Player's "match" connection session ID
-	LoginSessionID uuid.UUID    `json:"login_session_id,omitempty"` // The Player's "login" connection session ID
-	EntrantID      uuid.UUID    `json:"entrant_id,omitempty"`       // The Player's game server session ID
-	UserID         uuid.UUID    `json:"user_id,omitempty"`
-	EvrID          evr.EvrId    `json:"evr_id,omitempty"`
-	DiscordID      string       `json:"discord_id,omitempty"`
-	ClientIP       string       `json:"client_ip,omitempty"`
-	ClientPort     string       `json:"client_port,omitempty"`
-	Username       string       `json:"username,omitempty"`
-	DisplayName    string       `json:"display_name,omitempty"`
-	PartyID        uuid.UUID    `json:"party_id,omitempty"`
-	RoleAlignment  int          `json:"role,omitempty"`  // The team they want to be on
-	Query          string       `json:"query,omitempty"` // Their matchmaking query
-	SessionExpiry  int64        `json:"session_expiry,omitempty"`
-	HeadsetType    string       `json:"headset_type,omitempty"` // PCVR or Standalone
-	Rating         types.Rating `json:"rating,omitempty"`
+	Node              string       `json:"node,omitempty"`
+	SessionID         uuid.UUID    `json:"session_id,omitempty"`       // The Player's "match" connection session ID
+	LoginSessionID    uuid.UUID    `json:"login_session_id,omitempty"` // The Player's "login" connection session ID
+	UserID            uuid.UUID    `json:"user_id,omitempty"`
+	EvrID             evr.EvrId    `json:"evr_id,omitempty"`
+	DiscordID         string       `json:"discord_id,omitempty"`
+	ClientIP          string       `json:"client_ip,omitempty"`
+	ClientPort        string       `json:"client_port,omitempty"`
+	Username          string       `json:"username,omitempty"`
+	DisplayName       string       `json:"display_name,omitempty"`
+	PartyID           uuid.UUID    `json:"party_id,omitempty"`
+	RoleAlignment     int          `json:"role,omitempty"` // The team they want to be on
+	SupportedFeatures []string     `json:"supported_features,omitempty"`
+	Query             string       `json:"query,omitempty"` // Their matchmaking query
+	SessionExpiry     int64        `json:"session_expiry,omitempty"`
+	IsPCVR            bool         `json:"is_pcvr,omitempty"` // PCVR or Standalone
+	Rating            types.Rating `json:"rating,omitempty"`
 }
 
-func (p EvrMatchPresence) String() string {
-	data, err := json.Marshal(p)
-	if err != nil {
-		return ""
-	}
-	return string(data)
+func (p EvrMatchPresence) EntrantID(matchID MatchID) uuid.UUID {
+	return NewEntrantID(matchID, p.EvrID)
 }
 
 func (p EvrMatchPresence) GetUserId() string {
@@ -66,12 +67,8 @@ func (p EvrMatchPresence) GetStatus() string {
 func (p *EvrMatchPresence) GetReason() runtime.PresenceReason {
 	return runtime.PresenceReasonUnknown
 }
-func (p EvrMatchPresence) GetEvrId() string {
+func (p EvrMatchPresence) GetEvrID() string {
 	return p.EvrID.Token()
-}
-
-func (p EvrMatchPresence) GetPlayerSession() string {
-	return p.EntrantID.String()
 }
 
 func (p EvrMatchPresence) IsPlayer() bool {
@@ -90,29 +87,14 @@ func (p EvrMatchPresence) IsSocial() bool {
 	return p.RoleAlignment == evr.TeamSocial
 }
 
-type JoinMetadata struct {
-	Presence EvrMatchPresence
-}
-
-func NewJoinMetadata(p EvrMatchPresence) *JoinMetadata {
-	return &JoinMetadata{Presence: p}
-}
-
-func (m JoinMetadata) MarshalMap() map[string]string {
-	data, err := json.Marshal(m.Presence)
+func (p EvrMatchPresence) String() string {
+	data, err := json.Marshal(p)
 	if err != nil {
-		return nil
+		return ""
 	}
-	return map[string]string{"presence": string(data)}
+	return string(data)
 }
 
-func (m *JoinMetadata) UnmarshalMap(md map[string]string) error {
-	data, ok := md["presence"]
-	if !ok {
-		return errors.New("no presence")
-	}
-	if err := json.Unmarshal([]byte(data), &m.Presence); err != nil {
-		return err
-	}
-	return nil
+func NewEntrantID(matchID MatchID, evrID evr.EvrId) uuid.UUID {
+	return uuid.NewV5(matchID.UUID, EntrantIDSalt+evrID.String())
 }

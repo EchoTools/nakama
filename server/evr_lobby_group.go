@@ -1,7 +1,9 @@
 package server
 
 import (
+	"encoding/json"
 	"sync"
+	"time"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/rtapi"
@@ -10,35 +12,46 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-type PartyGroup struct {
+type LobbyGroupMemberStatus struct {
+	StartedAt time.Time             `json:"timestamp"`
+	PartyID   uuid.UUID             `json:"party_id,omitempty"`
+	Label     MatchmakingGroupLabel `json:"label,omitempty"`
+}
+
+func (s LobbyGroupMemberStatus) String() string {
+	data, _ := json.Marshal(s)
+	return string(data)
+}
+
+type LobbyGroup struct {
 	sync.RWMutex
 	name string
 	ph   *PartyHandler
 }
 
-func (g *PartyGroup) ID() uuid.UUID {
+func (g *LobbyGroup) ID() uuid.UUID {
 	if g.ph == nil {
 		return uuid.Nil
 	}
 	return g.ph.ID
 }
 
-func (g *PartyGroup) IDStr() string {
+func (g *LobbyGroup) IDStr() string {
 	if g.ph == nil {
 		return uuid.Nil.String()
 	}
 	return g.ph.IDStr
 }
-func (g *PartyGroup) GetLeader() *rtapi.UserPresence {
+func (g *LobbyGroup) GetLeader() *rtapi.UserPresence {
 	g.ph.RLock()
 	defer g.ph.RUnlock()
 	if g.ph.leader == nil {
-		return nil
+		return g.ph.expectedInitialLeader
 	}
 	return g.ph.leader.UserPresence
 }
 
-func (g *PartyGroup) List() []*PartyPresenceListItem {
+func (g *LobbyGroup) List() []*PartyPresenceListItem {
 	if g.ph == nil {
 		return nil
 	}
@@ -47,38 +60,25 @@ func (g *PartyGroup) List() []*PartyPresenceListItem {
 	return g.ph.members.List()
 }
 
-func (g *PartyGroup) Size() int {
+func (g *LobbyGroup) Size() int {
 	if g.ph == nil {
 		return 1
 	}
 	return g.ph.members.Size()
 }
 
-func (g *PartyGroup) MatchmakerAdd(sessionID, node, query string, minCount, maxCount, countMultiple int, stringProperties map[string]string, numericProperties map[string]float64) (string, []*PresenceID, error) {
+func (g *LobbyGroup) MatchmakerAdd(sessionID, node, query string, minCount, maxCount, countMultiple int, stringProperties map[string]string, numericProperties map[string]float64) (string, []*PresenceID, error) {
 	return g.ph.MatchmakerAdd(sessionID, node, query, minCount, maxCount, countMultiple, stringProperties, numericProperties)
 }
 
-func LeavePartyGroup(s *sessionWS) error {
-	ctx := s.Context()
-	_, partyID, err := GetLobbyGroupID(ctx, s.pipeline.db, s.UserID().String())
-	if err != nil {
-		return status.Errorf(codes.Internal, "Failed to get party group ID: %v", err)
-	}
-	if partyID == uuid.Nil {
-		return nil
-	}
-	s.pipeline.tracker.Untrack(s.ID(), PresenceStream{Mode: StreamModeParty, Subject: partyID, Label: s.pipeline.node}, s.UserID())
-	return nil
-}
-
-func JoinPartyGroup(session *sessionWS) (*PartyGroup, error) {
+func JoinLobbyGroup(session *sessionWS) (*LobbyGroup, error) {
 	ctx := session.Context()
 	groupName, partyID, err := GetLobbyGroupID(ctx, session.pipeline.db, session.UserID().String())
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Failed to get party group ID: %v", err)
 	}
 	if partyID == uuid.Nil {
-		return nil, nil
+		partyID = uuid.NewV5(session.id, EntrantIDSalt)
 	}
 
 	maxSize := 4
@@ -146,10 +146,24 @@ func JoinPartyGroup(session *sessionWS) (*PartyGroup, error) {
 		}}}
 		_ = session.Send(out, true)
 	}
-
-	return &PartyGroup{
+	if ph == nil {
+		return nil, status.Errorf(codes.Internal, "Failed to get party handler")
+	}
+	return &LobbyGroup{
 		name: groupName,
 		ph:   ph,
 	}, nil
+}
 
+func LeaveLobbyGroup(s *sessionWS) error {
+	ctx := s.Context()
+	_, partyID, err := GetLobbyGroupID(ctx, s.pipeline.db, s.UserID().String())
+	if err != nil {
+		return status.Errorf(codes.Internal, "Failed to get party group ID: %v", err)
+	}
+	if partyID == uuid.Nil {
+		return nil
+	}
+	s.pipeline.tracker.Untrack(s.ID(), PresenceStream{Mode: StreamModeParty, Subject: partyID, Label: s.pipeline.node}, s.UserID())
+	return nil
 }

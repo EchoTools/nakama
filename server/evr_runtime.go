@@ -162,7 +162,7 @@ func listMatchStates(ctx context.Context, nk runtime.NakamaModule, query string)
 	var matchStates []*MatchLabelMeta
 	for _, match := range matches {
 		mt := MatchIDFromStringOrNil(match.MatchId)
-		presences, tickRate, data, err := nk.(*RuntimeGoNakamaModule).matchRegistry.GetState(ctx, mt.UUID(), mt.Node())
+		presences, tickRate, data, err := nk.(*RuntimeGoNakamaModule).matchRegistry.GetState(ctx, mt.UUID, mt.Node)
 		if err != nil {
 			return nil, err
 		}
@@ -548,31 +548,28 @@ func GetDeviceAuthsByUserID(ctx context.Context, db *sql.DB, userID string) (dev
 	return auths, nil
 }
 
-func GetGuildGroupMetadata(ctx context.Context, nk runtime.NakamaModule, groupId string) (*api.Group, *GroupMetadata, error) {
-
-	groups, err := nk.GroupsGetId(ctx, []string{groupId})
-	if err != nil {
-		return nil, nil, status.Error(codes.Internal, fmt.Sprintf("error getting group: %v", err))
+func GetGuildGroupMetadata(ctx context.Context, db *sql.DB, groupID string) (*GroupMetadata, error) {
+	// Look for an existing account.
+	query := "SELECT metadata FROM groups WHERE id = $1"
+	var dbGuildMetadataJSON string
+	var found = true
+	var err error
+	if err = db.QueryRowContext(ctx, query, groupID).Scan(&dbGuildMetadataJSON); err != nil {
+		if err == sql.ErrNoRows {
+			found = false
+		} else {
+			return nil, status.Error(codes.Internal, "error finding guild ID by group ID")
+		}
+	}
+	if !found {
+		return nil, status.Error(codes.NotFound, "guild ID not found")
 	}
 
-	if len(groups) == 0 {
-		return nil, nil, status.Error(codes.NotFound, fmt.Sprintf("group not found: %v", groupId))
+	metadata := &GroupMetadata{}
+	if err := json.Unmarshal([]byte(dbGuildMetadataJSON), metadata); err != nil {
+		return nil, status.Error(codes.Internal, "error unmarshalling guild metadata")
 	}
-	group := groups[0]
-	if group.LangTag != "guild" {
-		return nil, nil, ErrGroupIsNotaGuild
-	}
-
-	// Extract the metadata from the group
-	data := groups[0].GetMetadata()
-
-	// Unmarshal the metadata into a GroupMetadata struct
-	md := &GroupMetadata{}
-	if err := json.Unmarshal([]byte(data), md); err != nil {
-		return nil, nil, status.Error(codes.Internal, fmt.Sprintf("error unmarshalling group metadata: %v", err))
-	}
-
-	return group, md, nil
+	return metadata, nil
 }
 
 func SetGuildGroupMetadata(ctx context.Context, nk runtime.NakamaModule, groupId string, metadata *GroupMetadata) error {
@@ -728,7 +725,7 @@ AND ge.source_id = $3 AND ge.state >= 0 AND ge.state <= $4;
 
 func PresenceByEntrantID(nk runtime.NakamaModule, matchID MatchID, entrantID uuid.UUID) (presence *EvrMatchPresence, err error) {
 
-	presences, err := nk.StreamUserList(StreamModeEntrant, matchID.UUID().String(), entrantID.String(), matchID.Node(), true, true)
+	presences, err := nk.StreamUserList(StreamModeEntrant, entrantID.String(), "", matchID.Node, true, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get stream presences for entrant %s: %w", entrantID.String(), err)
 	}
@@ -760,7 +757,7 @@ func GetMatchBySessionID(nk runtime.NakamaModule, sessionID uuid.UUID) (matchID 
 		matchID := MatchIDFromStringOrNil(presence.GetStatus())
 		if !matchID.IsNil() {
 			// Verify that the user is actually in the match
-			if meta, err := nk.StreamUserGet(StreamModeMatchAuthoritative, matchID.UUID().String(), "", matchID.Node(), presence.GetUserId(), presence.GetSessionId()); err != nil || meta == nil {
+			if meta, err := nk.StreamUserGet(StreamModeMatchAuthoritative, matchID.UUID.String(), "", matchID.Node, presence.GetUserId(), presence.GetSessionId()); err != nil || meta == nil {
 				return MatchID{}, nil, ErrorMatchNotFound
 			}
 			return matchID, presence, nil
@@ -770,7 +767,7 @@ func GetMatchBySessionID(nk runtime.NakamaModule, sessionID uuid.UUID) (matchID 
 	return MatchID{}, nil, ErrorMatchNotFound
 }
 
-func GetPartyGroupID(ctx context.Context, db *sql.DB, userID string) (string, uuid.UUID, error) {
+func GetLobbyGroupID(ctx context.Context, db *sql.DB, userID string) (string, uuid.UUID, error) {
 	query := "SELECT value->>'group_id' FROM storage WHERE collection = $1 AND key = $2 and user_id = $3"
 	var dbPartyGroupName string
 	var found = true
@@ -881,6 +878,33 @@ func GetPlayerStats(ctx context.Context, db *sql.DB, userID string) (*evr.Player
 	var dbStatsJSON string
 	var found = true
 	err := db.QueryRowContext(ctx, query, userID, GameProfileStorageCollection, GameProfileStorageKey).Scan(&dbStatsJSON)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			found = false
+		} else {
+			return nil, status.Error(codes.Internal, "error finding user account")
+		}
+	}
+	if !found {
+		return nil, status.Error(codes.NotFound, "user account not found")
+	}
+	if dbStatsJSON == "" {
+		return nil, nil
+	}
+
+	playerStats := &evr.PlayerStatistics{}
+	if err := json.Unmarshal([]byte(dbStatsJSON), playerStats); err != nil {
+		return nil, status.Error(codes.Internal, "error unmarshalling player statistics")
+	}
+
+	return playerStats, nil
+}
+
+func GetPartyGroupMembers(ctx context.Context, db *sql.DB, userID string) (*evr.PlayerStatistics, error) {
+	query := "SELECT user_id FROM storage WHERE collection = $1 AND key = $2 AND value->>'group_id' = $3"
+	var dbStatsJSON string
+	var found = true
+	err := db.QueryRowContext(ctx, query, userID, MatchmakingConfigStorageCollection, MatchmakingConfigStorageKey).Scan(&dbStatsJSON)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			found = false

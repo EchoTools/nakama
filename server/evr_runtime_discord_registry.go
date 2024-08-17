@@ -496,6 +496,28 @@ func (r *LocalDiscordRegistry) UpdateGuildGroup(ctx context.Context, logger runt
 		}
 	}
 
+	account, err := r.nk.AccountGetId(ctx, userID.String())
+	if err != nil {
+		return fmt.Errorf("error getting account: %v", err)
+	}
+
+	if len(account.Devices) == 0 {
+		if md.IsLinkedRole != "" && slices.Contains(member.Roles, md.IsLinkedRole) {
+			// Remove the role
+			if err := r.bot.GuildMemberRoleRemove(guildID, discordID, md.IsLinkedRole); err != nil {
+				return fmt.Errorf("error adding role to member: %w", err)
+			}
+		}
+	} else {
+		// Ensure the member has the is_linked role for the guild
+		if md.IsLinkedRole != "" && !slices.Contains(member.Roles, md.IsLinkedRole) {
+			// Assign the role
+			if err := r.bot.GuildMemberRoleAdd(guildID, discordID, md.IsLinkedRole); err != nil {
+				return fmt.Errorf("error adding role to member: %w", err)
+			}
+		}
+	}
+
 	// Get all of the user's memberships
 	memberships, err := r.GetGuildGroupMemberships(ctx, userID, []uuid.UUID{groupID})
 	if err != nil {
@@ -538,57 +560,38 @@ func (r *LocalDiscordRegistry) UpdateGuildGroup(ctx context.Context, logger runt
 		return fmt.Errorf("unexpected: no memberships found for user %s", userID)
 	}
 	membership = &memberships[0]
-
-	isSuspended := slices.Contains(currentRoles, md.SuspensionRole)
-
+	userIDStr := userID.String()
+	groupIDStr := groupID.String()
 	if md.ModeratorRole != "" {
 		// Make sure the user is an "admin" in the group
 		if slices.Contains(currentRoles, md.ModeratorRole) {
 			if !membership.isModerator {
-				if err := r.nk.GroupUsersPromote(ctx, SystemUserID, groupID.String(), userIDStrs); err != nil {
+				if err := r.nk.GroupUsersPromote(ctx, SystemUserID, groupIDStr, userIDStrs); err != nil {
 					return fmt.Errorf("error promoting user to moderator: %w", err)
 				}
 			}
 		} else if membership.isModerator {
-			if err := r.nk.GroupUsersDemote(ctx, SystemUserID, groupID.String(), userIDStrs); err != nil {
+			if err := r.nk.GroupUsersDemote(ctx, SystemUserID, groupIDStr, userIDStrs); err != nil {
 				return fmt.Errorf("error demoting user from moderator: %w", err)
 			}
 		}
-		md.ModeratorUserIDs = append(md.ModeratorUserIDs, userID.String())
-	}
-	userIDStr := userID.String()
-
-	needsUpdate := false
-	if md.ServerHostRole != "" && slices.Contains(currentRoles, md.ServerHostRole) != slices.Contains(md.ServerHostUserIDs, userIDStr) {
-		// Needs updating. If the userID is in, remove it. If it's missing, add it.
-
-		if slices.Contains(md.ServerHostUserIDs, userIDStr) {
-			for i, v := range md.ServerHostUserIDs {
-				if v == userIDStr {
-					md.ServerHostUserIDs = append(md.ServerHostUserIDs[:i], md.ServerHostUserIDs[i+1:]...)
-				}
-			}
-		} else {
-			md.ServerHostUserIDs = append(md.ServerHostUserIDs, userID.String())
-		}
-
-		needsUpdate = true
+		md.ModeratorUserIDs = append(md.ModeratorUserIDs, userIDStr)
 	}
 
-	if md.AllocatorRole != "" && slices.Contains(currentRoles, md.AllocatorRole) != slices.Contains(md.AllocatorUserIDs, userIDStr) {
-		// Needs updating. If the userID is in, remove it. If it's missing, add it.
+	var updated bool
+	var needsUpdate bool
 
-		if slices.Contains(md.AllocatorUserIDs, userIDStr) {
-			for i, v := range md.AllocatorUserIDs {
-				if v == userIDStr {
-					md.AllocatorUserIDs = append(md.AllocatorUserIDs[:i], md.AllocatorUserIDs[i+1:]...)
-				}
-			}
-		} else {
-			md.AllocatorUserIDs = append(md.AllocatorUserIDs, userID.String())
-		}
-		needsUpdate = true
-	}
+	updated, md.ServerHostUserIDs = UpdateRoleCache(userIDStr, md.ServerHostRole, currentRoles, md.ServerHostUserIDs)
+	needsUpdate = needsUpdate || updated
+
+	updated, md.AllocatorUserIDs = UpdateRoleCache(userIDStr, md.AllocatorRole, currentRoles, md.AllocatorUserIDs)
+	needsUpdate = needsUpdate || updated
+
+	updated, md.SuspendedUserIDs = UpdateRoleCache(userIDStr, md.SuspensionRole, currentRoles, md.SuspendedUserIDs)
+	needsUpdate = needsUpdate || updated
+
+	updated, md.AccountAgeBypassUserIDs = UpdateRoleCache(userIDStr, md.AccountAgeBypassRole, currentRoles, md.AccountAgeBypassUserIDs)
+	needsUpdate = needsUpdate || updated
 
 	if needsUpdate {
 		mdMap, err := md.MarshalToMap()
@@ -606,15 +609,26 @@ func (r *LocalDiscordRegistry) UpdateGuildGroup(ctx context.Context, logger runt
 			return fmt.Errorf("error updating group: %w", err)
 		}
 	}
-	if isSuspended {
-
-		_, err := DisconnectUserID(ctx, r.nk, userID.String())
-		if err != nil {
-			r.logger.Warn("Error disconnecting suspended user: %v", err)
-		}
-	}
 
 	return nil
+}
+
+func UpdateRoleCache(userID, role string, currentRoles, cache []string) (bool, []string) {
+	updated := false
+	if role != "" && slices.Contains(currentRoles, role) != slices.Contains(cache, userID) {
+		if slices.Contains(cache, userID) {
+			for i, v := range cache {
+				if v == userID {
+					cache = append(cache[:i], cache[i+1:]...)
+					break
+				}
+			}
+		} else {
+			cache = append(cache, userID)
+		}
+		updated = true
+	}
+	return updated, cache
 }
 
 func (r *LocalDiscordRegistry) UpdateAllGuildGroupsForUser(ctx context.Context, logger runtime.Logger, userID uuid.UUID) error {

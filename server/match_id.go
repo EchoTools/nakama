@@ -17,25 +17,15 @@ var (
 
 // MatchID represents a unique identifier for a match, consisting of a uuid.UUID and a node name.
 type MatchID struct {
-	uuid uuid.UUID
-	node string
-}
-
-// UUID returns the UUID of the match.
-func (t MatchID) UUID() uuid.UUID {
-	return t.uuid
-}
-
-// Node returns the node name of the match.
-func (t MatchID) Node() string {
-	return t.node
+	UUID uuid.UUID
+	Node string
 }
 
 var NilMatchID = MatchID{}
 
 // Equals returns true if the match ID is equal to the other match ID.
 func (t MatchID) Equals(other MatchID) bool {
-	return t.uuid == other.uuid && t.node == other.node
+	return t.UUID == other.UUID && t.Node == other.Node
 }
 
 // IsNil returns true if the match ID is nil.
@@ -51,8 +41,8 @@ func NewMatchID(id uuid.UUID, node string) (t MatchID, err error) {
 	case node == "":
 		err = errors.Join(runtime.ErrMatchIdInvalid, ErrInvalidMatchNode)
 	default:
-		t.uuid = id
-		t.node = node
+		t.UUID = id
+		t.Node = node
 	}
 	return
 }
@@ -62,12 +52,12 @@ func (t MatchID) String() string {
 	if t.IsNil() {
 		return ""
 	}
-	return t.uuid.String() + "." + t.node
+	return t.UUID.String() + "." + t.Node
 }
 
 // IsValid returns true if the match ID is valid (has a node and a non-nil UUID)
 func (t MatchID) IsValid() bool {
-	return t.uuid != uuid.Nil && t.node != ""
+	return t.UUID != uuid.Nil && t.Node != ""
 }
 
 // MarshalText returns the text representation of the match ID.
@@ -95,8 +85,8 @@ func MatchIDFromString(s string) (t MatchID, err error) {
 	}
 
 	components := strings.SplitN(s, ".", 2)
-	t.uuid = uuid.FromStringOrNil(components[0])
-	t.node = components[1]
+	t.UUID = uuid.FromStringOrNil(components[0])
+	t.Node = components[1]
 
 	if !t.IsValid() {
 		return t, runtime.ErrMatchIdInvalid

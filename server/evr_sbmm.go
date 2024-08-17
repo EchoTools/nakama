@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"math"
 	"math/rand"
 	"slices"
@@ -12,6 +13,8 @@ import (
 	"github.com/intinig/go-openskill/types"
 	"github.com/samber/lo"
 	"go.uber.org/thriftrw/ptr"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type (
@@ -252,4 +255,25 @@ OuterLoop:
 
 	logger.WithField("matches", madeMatches).Debug("Made matches.")
 	return madeMatches
+}
+
+func GetRatinByUserID(ctx context.Context, db *sql.DB, userID string) (rating types.Rating, err error) {
+	// Look for an existing account.
+	query := "SELECT value->>'rating' FROM storage WHERE user_id = $1 AND collection = $2 and key = $3"
+	var ratingJSON string
+	var found = true
+	if err = db.QueryRowContext(ctx, query, userID, GameProfileStorageCollection, GameProfileStorageKey).Scan(&ratingJSON); err != nil {
+		if err == sql.ErrNoRows {
+			found = false
+		} else {
+			return rating, status.Error(codes.Internal, "error finding rating by user ID")
+		}
+	}
+	if !found {
+		return rating, status.Error(codes.NotFound, "rating not found")
+	}
+	if err = json.Unmarshal([]byte(ratingJSON), &rating); err != nil {
+		return rating, status.Error(codes.Internal, "error unmarshalling rating")
+	}
+	return rating, nil
 }

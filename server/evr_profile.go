@@ -12,10 +12,8 @@ import (
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
-	"github.com/intinig/go-openskill/rating"
 	"github.com/intinig/go-openskill/types"
 	"github.com/samber/lo"
-	"go.uber.org/thriftrw/ptr"
 )
 
 type GameProfile interface {
@@ -32,31 +30,6 @@ type GameProfile interface {
 	UpdateUnlocks(unlocks evr.UnlockedCosmetics) error
 	IsStale() bool
 	SetStale()
-}
-
-type EarlyQuitStatistics struct {
-	NumCompletedMatches      int `json:"numcompletedmatches,omitempty"`
-	NumEarlyQuits            int `json:"numearlyquits,omitempty"`
-	NumConsecutiveMatches    int `json:"numsteadymatches,omitempty"`
-	NumConsecutiveEarlyQuits int `json:"numsteadyearlyquits,omitempty"`
-}
-
-func (s *EarlyQuitStatistics) Reset() {
-	s.NumEarlyQuits = 0
-	s.NumConsecutiveMatches = 0
-	s.NumConsecutiveEarlyQuits = 0
-}
-
-func (s *EarlyQuitStatistics) IncrementEarlyQuits() {
-	s.NumEarlyQuits++
-	s.NumConsecutiveMatches = 0
-	s.NumConsecutiveEarlyQuits++
-}
-
-func (s *EarlyQuitStatistics) IncrementMatches() {
-	s.NumConsecutiveMatches++
-	s.NumConsecutiveEarlyQuits = 0
-	s.NumCompletedMatches++
 }
 
 type GameProfileData struct {
@@ -212,10 +185,7 @@ func (p *GameProfileData) GetEarlyQuitStatistics() EarlyQuitStatistics {
 
 func (p *GameProfileData) GetRating() types.Rating {
 	if p.Rating.Mu == 0 || p.Rating.Sigma == 0 {
-		return rating.NewWithOptions(&types.OpenSkillOptions{
-			Mu:    ptr.Float64(25.0),
-			Sigma: ptr.Float64(8.333),
-		})
+		return NewDefaultRating()
 	}
 	return p.Rating
 }

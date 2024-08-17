@@ -88,6 +88,14 @@ var (
 	}
 )
 
+func RandomLevelByMode(mode Symbol) Symbol {
+	levels, ok := LevelsByMode[mode]
+	if !ok {
+		return LevelUnspecified
+	}
+	return levels[rand.Intn(len(levels))]
+}
+
 type GameServerSessionStart struct {
 	MatchID     uuid.UUID            // The identifier for the game server session to start.
 	GroupID     uuid.UUID            // TODO: Unverified, suspected to be channel UUID.

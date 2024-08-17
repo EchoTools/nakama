@@ -28,24 +28,24 @@ type LobbyFindSessionRequest struct {
 	LoginSessionID   uuid.UUID
 	CrossPlayEnabled bool
 
-	CurrentLobbySessionID uuid.UUID
-	GroupID               uuid.UUID
-	SessionSettings       LobbySessionSettings
-	Entrants              []Entrant
+	CurrentLobbyID  uuid.UUID
+	GroupID         uuid.UUID
+	SessionSettings LobbySessionSettings
+	Entrants        []Entrant
 }
 
 func NewLobbyFindSessionRequest(versionLock Symbol, mode Symbol, level Symbol, platform Symbol, loginSessionID uuid.UUID, crossPlayEnabled bool, currentMatch uuid.UUID, channel uuid.UUID, sessionSettings LobbySessionSettings, entrants []Entrant) LobbyFindSessionRequest {
 	return LobbyFindSessionRequest{
-		VersionLock:           versionLock,
-		Mode:                  mode,
-		Level:                 level,
-		Platform:              platform,
-		LoginSessionID:        loginSessionID,
-		CrossPlayEnabled:      crossPlayEnabled,
-		CurrentLobbySessionID: currentMatch,
-		GroupID:               channel,
-		SessionSettings:       sessionSettings,
-		Entrants:              entrants,
+		VersionLock:      versionLock,
+		Mode:             mode,
+		Level:            level,
+		Platform:         platform,
+		LoginSessionID:   loginSessionID,
+		CrossPlayEnabled: crossPlayEnabled,
+		CurrentLobbyID:   currentMatch,
+		GroupID:          channel,
+		SessionSettings:  sessionSettings,
+		Entrants:         entrants,
 	}
 }
 
@@ -105,7 +105,7 @@ func (m *LobbyFindSessionRequest) Stream(s *EasyStream) error {
 			}
 			return s.Skip(3) // Skip 3 bytes for alignment
 		},
-		func() error { return s.StreamGuid(&m.CurrentLobbySessionID) },
+		func() error { return s.StreamGuid(&m.CurrentLobbyID) },
 		func() error { return s.StreamGuid(&m.GroupID) },
 		func() error { return s.StreamJson(&m.SessionSettings, true, NoCompression) },
 		func() error {
@@ -136,6 +136,8 @@ func (m *LobbyFindSessionRequest) GetChannel() uuid.UUID { return m.GroupID }
 
 func (m *LobbyFindSessionRequest) GetMode() Symbol { return m.Mode }
 
+func (m *LobbyFindSessionRequest) GetGroupID() uuid.UUID { return m.GroupID }
+
 func (m LobbyFindSessionRequest) GetSessionID() uuid.UUID { return m.LoginSessionID }
 
 func (m LobbyFindSessionRequest) GetEvrID() (evrID EvrId) {
@@ -150,4 +152,38 @@ func (m *LobbyFindSessionRequest) GetAlignment() int8 {
 		return int8(TeamUnassigned)
 	}
 	return m.Entrants[0].Role
+}
+func (m *LobbyFindSessionRequest) GetVersionLock() Symbol {
+	return Symbol(m.VersionLock)
+}
+
+func (m *LobbyFindSessionRequest) GetAppID() Symbol {
+	return ToSymbol(m.SessionSettings.AppID)
+}
+
+func (m *LobbyFindSessionRequest) GetLevel() Symbol {
+	return ToSymbol(m.SessionSettings.Level)
+}
+
+func (m *LobbyFindSessionRequest) GetFeatures() []string {
+	return m.SessionSettings.Features
+}
+
+func (m *LobbyFindSessionRequest) GetCurrentLobbyID() uuid.UUID {
+	return m.CurrentLobbyID
+}
+
+func (m *LobbyFindSessionRequest) GetEntrants() []Entrant {
+	return m.Entrants
+}
+
+func (m *LobbyFindSessionRequest) GetEntrantRole(idx int) int {
+	if idx < 0 || idx >= len(m.Entrants) {
+		return -1
+	}
+	return int(m.Entrants[idx].Role)
+}
+
+func (m *LobbyFindSessionRequest) GetRegion() Symbol {
+	return DefaultRegion
 }

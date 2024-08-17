@@ -160,19 +160,21 @@ func MatchListPublicRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		evr.ModeCombatPublic.String(): 0,
 	}
 
-	presences, err := nk.StreamUserList(StreamModeMatchmaking, uuid.NewV5(uuid.Nil, "matchmaking").String(), "", "", true, true)
-	if err != nil {
-		return "", runtime.NewError("Failed to list matchmaker tickets", StatusInternalError)
-	}
-	for _, presence := range presences {
-		s := MatchmakingStatus{}
-		if err := json.Unmarshal([]byte(presence.GetStatus()), &s); err != nil {
-			return "", runtime.NewError("Failed to unmarshal matchmaker ticket", StatusInternalError)
+	/*
+		presences, err := nk.StreamUserList(StreamModeMatchmaking, uuid.NewV5(uuid.Nil, "matchmaking").String(), "", "", true, true)
+		if err != nil {
+			return "", runtime.NewError("Failed to list matchmaker tickets", StatusInternalError)
 		}
-		if _, ok := matchmakerTicketCounts[s.Mode.String()]; ok {
-			matchmakerTicketCounts[s.Mode.String()] += s.PartySize
+		for _, presence := range presences {
+			s := MatchmakingStatus{}
+			if err := json.Unmarshal([]byte(presence.GetStatus()), &s); err != nil {
+				return "", runtime.NewError("Failed to unmarshal matchmaker ticket", StatusInternalError)
+			}
+			if _, ok := matchmakerTicketCounts[s.Mode.String()]; ok {
+				matchmakerTicketCounts[s.Mode.String()] += s.PartySize
+			}
 		}
-	}
+	*/
 
 	playerCount := 0
 	gameServers := make([]*MatchBroadcaster, 0, len(matches))
@@ -213,9 +215,9 @@ func MatchListPublicRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 			TeamOrdinals: l.TeamOrdinals,
 		}
 		if l.LobbyType == PrivateLobby || l.LobbyType == UnassignedLobby {
-			// Set teh last 4 bytes of the ID to 0
+			// Set the last bytes to FF to hide the ID
 			for i := 12; i < 16; i++ {
-				v.ID.uuid[i] = 0xFF
+				v.ID.UUID[i] = 0xFF
 			}
 		} else {
 			for i := range l.Players {
@@ -1005,7 +1007,7 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 	matchID := request.MatchID
 
 	label, err := MatchLabelByID(ctx, nk, matchID)
-	if err != nil {
+	if err != nil || label == nil {
 		return "", runtime.NewError("Failed to get match label", StatusNotFound)
 	}
 
@@ -1020,7 +1022,7 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		allowed = true
 	} else {
 		for _, groupID := range label.Broadcaster.GroupIDs {
-			if _, md, err := GetGuildGroupMetadata(ctx, nk, groupID.String()); err != nil {
+			if md, err := GetGuildGroupMetadata(ctx, db, groupID.String()); err != nil {
 				return "", runtime.NewError("Failed to get group metadata: "+err.Error(), StatusInternalError)
 			} else if slices.Contains(md.AllocatorUserIDs, userID) {
 				allowed = true
@@ -1046,7 +1048,7 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 	}
 
 	// Validate that the user has permission to allocate to the target guild
-	_, md, err := GetGuildGroupMetadata(ctx, nk, groupID)
+	md, err := GetGuildGroupMetadata(ctx, db, groupID)
 	if err != nil {
 		return "", runtime.NewError("Failed to get group metadata", StatusInternalError)
 	}
@@ -1303,4 +1305,59 @@ func (r *SetNextMatchRPCResponsePayload) String() string {
 		return ""
 	}
 	return string(data)
+}
+
+type PlayerStatsRPCRequest struct {
+	UserID    string `json:"user_id"`
+	DiscordID string `json:"discord_id"`
+	EvrID     string `json:"evr_id"`
+}
+
+type PlayerStatsRPCResponse struct {
+	Stats *evr.PlayerStatistics `json:"stats"`
+}
+
+func (r *PlayerStatsRPCResponse) String() string {
+	data, err := json.MarshalIndent(r, "", "  ")
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+func PlayerStatisticsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	request := &PlayerStatsRPCRequest{}
+	if err := json.Unmarshal([]byte(payload), request); err != nil {
+		return "", err
+	}
+
+	var userID string
+	if request.UserID != "" {
+		userID = request.UserID
+	} else if request.DiscordID != "" {
+		var err error
+		if userID, err = GetUserIDByDiscordID(ctx, db, request.DiscordID); err != nil {
+			return "", err
+		}
+	} else if request.EvrID != "" {
+		var err error
+		if userID, err = GetUserIDByEvrID(ctx, db, request.EvrID); err != nil {
+			return "", err
+		}
+	}
+
+	if userID == "" {
+		return "", runtime.NewError("user not found", StatusNotFound)
+	}
+
+	stats, err := GetPlayerStats(ctx, db, userID)
+	if err != nil {
+		return "", err
+	}
+
+	response := &PlayerStatsRPCResponse{
+		Stats: stats,
+	}
+
+	return response.String(), nil
 }

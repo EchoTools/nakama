@@ -218,6 +218,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		// Get it from the profile
 		groupID = profile.GetChannel()
 	}
+	metadata.SetActiveGroupID(groupID)
 
 	groupMap, err := GetGuildGroupIDsByUser(ctx, p.db, userId)
 	if err != nil {
@@ -242,6 +243,17 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	case <-time.After(time.Second * 3):
 	}
 
+	// Get a list of the user's guild memberships and set to the largest one
+	memberships, err := p.discordRegistry.GetGuildGroupMemberships(ctx, uid, nil)
+	if err != nil {
+		return settings, fmt.Errorf("failed to get guild groups: %w", err)
+	}
+	if len(memberships) == 0 {
+		return settings, fmt.Errorf("user is not in any guild groups")
+	}
+
+	// If the user is not in the group, set the largest group as the active group
+
 	found := false
 	for _, id := range groupMap {
 		if id == groupID.String() {
@@ -249,28 +261,18 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 			break
 		}
 	}
-
 	if !found {
-		// Get a list of the user's guild memberships and set to the largest one
-		memberships, err := p.discordRegistry.GetGuildGroupMemberships(ctx, uid, nil)
-		if err != nil {
-			return settings, fmt.Errorf("failed to get guild groups: %w", err)
-		}
-		if len(memberships) == 0 {
-			return settings, fmt.Errorf("user is not in any guild groups")
-		}
-
 		// Sort the groups by the edgecount
 		sort.SliceStable(memberships, func(i, j int) bool {
 			return memberships[i].GuildGroup.Size() > memberships[j].GuildGroup.Size()
 		})
 		groupID = memberships[0].GuildGroup.ID()
-
 		metadata.SetActiveGroupID(groupID)
 		metadata.GetActiveGroupDisplayName()
-		if err := p.runtimeModule.AccountUpdateId(ctx, userId, "", metadata.MarshalToMap(), "", "", "", "", ""); err != nil {
-			return settings, fmt.Errorf("failed to update user metadata: %w", err)
-		}
+	}
+
+	if err := p.runtimeModule.AccountUpdateId(ctx, userId, "", metadata.MarshalToMap(), "", "", "", "", ""); err != nil {
+		return settings, fmt.Errorf("failed to update user metadata: %w", err)
 	}
 
 	// Set the default display name once.
@@ -278,7 +280,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	if err != nil {
 		logger.Warn("Failed to set display name", zap.Error(err))
 	}
-	headsetType := 0
+	isPCVR := true
 
 	questTypes := []string{
 		"Quest",
@@ -288,13 +290,15 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	}
 	for _, t := range questTypes {
 		if strings.Contains(strings.ToLower(loginProfile.SystemInfo.HeadsetType), strings.ToLower(t)) {
-			headsetType = 1
+			isPCVR = false
 			break
 		}
 	}
-
+	if err := p.runtimeModule.AccountUpdateId(ctx, userId, "", metadata.MarshalToMap(), "", "", "", "", ""); err != nil {
+		return settings, fmt.Errorf("failed to update user metadata: %w", err)
+	}
 	// Initialize the full session
-	if err := session.LoginSession(userId, user.GetUsername(), metadata, metadata.DisplayNameOverride, account.GetCustomId(), evrId, deviceId, groupID, flags, verbose, headsetType); err != nil {
+	if err := session.LoginSession(userId, user.GetUsername(), metadata, metadata.DisplayNameOverride, account.GetCustomId(), evrId, deviceId, groupID, flags, verbose, isPCVR); err != nil {
 		return settings, fmt.Errorf("failed to login: %w", err)
 	}
 	ctx = session.Context()
@@ -786,7 +790,7 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 
 	// Verify the player is a member of this match
 	label, err := MatchLabelByID(ctx, p.runtimeModule, matchID)
-	if err != nil {
+	if err != nil || label == nil {
 		return fmt.Errorf("failed to get match label: %w", err)
 	}
 
@@ -826,6 +830,14 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 		}
 	}
 
+	// Pad both teams to 4 players with a default rating
+	for i := len(team1); i < 4; i++ {
+		team1 = append(team1, NewDefaultRating())
+	}
+	for i := len(team2); i < 4; i++ {
+		team2 = append(team2, NewDefaultRating())
+	}
+
 	if userID == uuid.Nil {
 		return fmt.Errorf("failed to find player in match")
 	}
@@ -844,10 +856,10 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 	for groupName, stats := range request.Payload.Update.StatsGroups {
 		if groupName == "arena" {
 
-			eqStats.IncrementMatches()
+			eqStats.IncrementCompletedMatches()
 			playerWon := false
 			if v, ok := stats["ArenaWins"]; ok {
-				if v.Value.(int64) > 0 {
+				if v.Value.(float64) > 0 {
 					playerWon = true
 				}
 			}
@@ -860,7 +872,7 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 			}
 			// Get the new ratings for the teams
 			teams := []types.Team{team1, team2}
-			teams = rating.Rate(teams, &types.OpenSkillOptions{})
+			teams = rating.Rate(teams, nil)
 			ratings := append(teams[0], teams[1]...)
 			ids := append(team1ids, team2ids...)
 			for i, id := range ids {

@@ -33,7 +33,7 @@ var _ = LobbySessionRequest(&LobbyJoinSessionRequest{})
 // LobbyJoinSessionRequest is a message from client to server requesting joining of a specified game session that
 // matches the message's underlying arguments.
 type LobbyJoinSessionRequest struct {
-	MatchID          uuid.UUID
+	LobbyID          uuid.UUID
 	VersionLock      int64
 	Platform         Symbol
 	LoginSessionID   uuid.UUID
@@ -55,7 +55,7 @@ func (m LobbyJoinSessionRequest) Symbol() Symbol {
 func (m *LobbyJoinSessionRequest) Stream(s *EasyStream) error {
 	flags := uint32(0)
 	return RunErrorFunctions([]func() error{
-		func() error { return s.StreamGuid(&m.MatchID) },
+		func() error { return s.StreamGuid(&m.LobbyID) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.VersionLock) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Platform) },
 		func() error { return s.StreamGuid(&m.LoginSessionID) },
@@ -101,9 +101,9 @@ func (m *LobbyJoinSessionRequest) Stream(s *EasyStream) error {
 			}
 			if m.Flags&Flags_ModerateUser != 0 {
 				// Parse the lobbyID as the OtherEvrID
-				m.OtherEvrID.PlatformCode = PlatformCode(uint64(m.MatchID[3]))
-				m.OtherEvrID.AccountId = uint64(binary.LittleEndian.Uint64(m.MatchID[8:]))
-				m.MatchID = uuid.Nil
+				m.OtherEvrID.PlatformCode = PlatformCode(uint64(m.LobbyID[3]))
+				m.OtherEvrID.AccountId = uint64(binary.LittleEndian.Uint64(m.LobbyID[8:]))
+				m.LobbyID = uuid.Nil
 			}
 			return nil
 		},
@@ -132,7 +132,7 @@ func (m *LobbyJoinSessionRequest) Stream(s *EasyStream) error {
 }
 
 func (m LobbyJoinSessionRequest) String() string {
-	return fmt.Sprintf("LobbyJoinSessionRequest(match=%s)", m.MatchID)
+	return fmt.Sprintf("LobbyJoinSessionRequest(match=%s)", m.LobbyID)
 }
 
 func (m *LobbyJoinSessionRequest) GetSessionID() uuid.UUID {
@@ -146,7 +146,7 @@ func (m *LobbyJoinSessionRequest) GetEvrID() EvrId {
 	return m.Entrants[0].EvrID
 }
 
-func (m *LobbyJoinSessionRequest) GetChannel() uuid.UUID {
+func (m *LobbyJoinSessionRequest) GetGroupID() uuid.UUID {
 	return uuid.Nil
 }
 
@@ -166,4 +166,39 @@ func (m *LobbyJoinSessionRequest) SetAlignment(role int) {
 		return
 	}
 	m.Entrants[0].Role = int8(role)
+}
+
+func (m *LobbyJoinSessionRequest) GetVersionLock() Symbol {
+	return Symbol(m.VersionLock)
+}
+
+func (m *LobbyJoinSessionRequest) GetAppID() Symbol {
+	return ToSymbol(m.SessionSettings.AppID)
+}
+
+func (m *LobbyJoinSessionRequest) GetLevel() Symbol {
+	return ToSymbol(m.SessionSettings.Level)
+}
+
+func (m *LobbyJoinSessionRequest) GetFeatures() []string {
+	return m.SessionSettings.Features
+}
+
+func (m *LobbyJoinSessionRequest) GetCurrentLobbyID() uuid.UUID {
+	return m.LobbyID
+}
+
+func (m *LobbyJoinSessionRequest) GetEntrants() []Entrant {
+	return m.Entrants
+}
+
+func (m *LobbyJoinSessionRequest) GetEntrantRole(idx int) int {
+	if idx < 0 || idx >= len(m.Entrants) {
+		return -1
+	}
+	return int(m.Entrants[idx].Role)
+}
+
+func (m *LobbyJoinSessionRequest) GetRegion() Symbol {
+	return DefaultRegion
 }

@@ -25,8 +25,8 @@ func TestNewMatchID(t *testing.T) {
 				node: "node",
 			},
 			want: MatchID{
-				uuid: uuid.FromStringOrNil("575430a6-06b6-4b11-b754-b241840691f3"),
-				node: "node",
+				UUID: uuid.FromStringOrNil("575430a6-06b6-4b11-b754-b241840691f3"),
+				Node: "node",
 			},
 			wantErr: false,
 		},
@@ -81,8 +81,8 @@ func TestMatchID_String(t *testing.T) {
 		{
 			name: "Match token stringified successfully",
 			m: MatchID{
-				uuid: uuid.FromStringOrNil("a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e"),
-				node: "node",
+				UUID: uuid.FromStringOrNil("a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e"),
+				Node: "node",
 			},
 			want: "a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e.node",
 		},
@@ -110,15 +110,15 @@ func TestMatchID_ID(t *testing.T) {
 		{
 			name: "Match token ID extracted successfully",
 			tr: MatchID{
-				uuid: uuid.FromStringOrNil("a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e"),
-				node: "node",
+				UUID: uuid.FromStringOrNil("a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e"),
+				Node: "node",
 			},
 			want: uuid.FromStringOrNil("a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e"),
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.tr.uuid; !reflect.DeepEqual(got, tt.want) {
+			if got := tt.tr.UUID; !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("MatchID.ID() = %v, want %v", got, tt.want)
 			}
 		})
@@ -134,15 +134,15 @@ func TestMatchID_Node(t *testing.T) {
 		{
 			name: "Match token node extracted successfully",
 			tr: MatchID{
-				uuid: uuid.FromStringOrNil("a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e"),
-				node: "node",
+				UUID: uuid.FromStringOrNil("a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e"),
+				Node: "node",
 			},
 			want: "node",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.tr.node; got != tt.want {
+			if got := tt.tr.Node; got != tt.want {
 				t.Errorf("MatchID.Node() = %v, want %v", got, tt.want)
 			}
 		})
@@ -158,8 +158,8 @@ func TestMatchID_IsValid(t *testing.T) {
 		{
 			name: "Match token is valid",
 			tr: MatchID{
-				uuid: uuid.FromStringOrNil("a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e"),
-				node: "node",
+				UUID: uuid.FromStringOrNil("a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e"),
+				Node: "node",
 			},
 			want: true,
 		},
@@ -172,14 +172,14 @@ func TestMatchID_IsValid(t *testing.T) {
 		{
 			name: "Match token without empty node is invalid",
 			tr: MatchID{
-				uuid: uuid.FromStringOrNil("a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e"),
+				UUID: uuid.FromStringOrNil("a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e"),
 			},
 			want: false,
 		},
 		{
 			name: "Match token with empty id is invalid",
 			tr: MatchID{
-				node: "node",
+				Node: "node",
 			},
 			want: false,
 		},
@@ -206,8 +206,8 @@ func TestMatchID_UnmarshalText(t *testing.T) {
 		{
 			name: "Match token unmarshalled successfully",
 			tr: MatchID{
-				uuid: uuid.Nil,
-				node: "",
+				UUID: uuid.Nil,
+				Node: "",
 			},
 			args:    args{data: []byte(`a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e.node`)},
 			wantErr: false,
@@ -215,8 +215,8 @@ func TestMatchID_UnmarshalText(t *testing.T) {
 		{
 			name: "Match token blank unmarshalled successfully",
 			tr: MatchID{
-				uuid: uuid.Nil,
-				node: "",
+				UUID: uuid.Nil,
+				Node: "",
 			},
 			args:    args{data: []byte(``)},
 			wantErr: false,
@@ -224,8 +224,8 @@ func TestMatchID_UnmarshalText(t *testing.T) {
 		{
 			name: "Match token unmarshalling failed",
 			tr: MatchID{
-				uuid: uuid.Nil,
-				node: "",
+				UUID: uuid.Nil,
+				Node: "",
 			},
 			args:    args{data: []byte(`a3d5f9e4-6a3ddd-4b8e-9d98-2d0e8e9f5a3e.node`)},
 			wantErr: true,
@@ -254,8 +254,8 @@ func TestMatchIDFromString(t *testing.T) {
 			name: "valid match token is successful",
 			args: args{s: "a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e.node"},
 			wantT: MatchID{
-				uuid: uuid.FromStringOrNil("a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e"),
-				node: "node",
+				UUID: uuid.FromStringOrNil("a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e"),
+				Node: "node",
 			},
 			wantErr: false,
 		},
@@ -305,8 +305,8 @@ func TestMatchIDFromStringOrNil(t *testing.T) {
 			name: "Match token created successfully",
 			args: args{s: "a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e.node"},
 			want: MatchID{
-				uuid: uuid.FromStringOrNil("a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e"),
-				node: "node",
+				UUID: uuid.FromStringOrNil("a3d5f9e4-6a3d-4b8e-9d98-2d0e8e9f5a3e"),
+				Node: "node",
 			},
 		},
 		{

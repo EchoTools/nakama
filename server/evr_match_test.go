@@ -584,7 +584,6 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 			Node:           "testnode",
 			SessionID:      uuid.Must(uuid.NewV4()),
 			LoginSessionID: uuid.Must(uuid.NewV4()),
-			EntrantID:      uuid.Must(uuid.NewV4()),
 			UserID:         uuid.Must(uuid.NewV4()),
 			EvrID:          evr.EvrId{PlatformCode: 4, AccountId: uint64(i)},
 			DiscordID:      "10000" + s,
@@ -638,7 +637,7 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 					return state
 				}(),
 				presence: presences[0],
-				metadata: JoinMetadata{*presences[0]}.MarshalMap(),
+				metadata: EntrantMetadata{*presences[0]}.MarshalMap(),
 			},
 			want: func() *MatchLabel {
 				state := &MatchLabel{}
@@ -671,7 +670,7 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 					state.presenceMap = func() map[string]*EvrMatchPresence {
 						m := make(map[string]*EvrMatchPresence)
 						for _, p := range presences[1:3] {
-							m[p.EntrantID.String()] = p
+							m[p.EntrantID(state.ID).String()] = p
 						}
 						return m
 					}()
@@ -690,7 +689,7 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 				state.presenceMap = func() map[string]*EvrMatchPresence {
 					m := make(map[string]*EvrMatchPresence)
 					for _, p := range presences[1:3] {
-						m[p.EntrantID.String()] = p
+						m[p.EntrantID(state.ID).String()] = p
 					}
 					return m
 				}()

@@ -58,7 +58,6 @@ type EvrPipeline struct {
 	runtimeModule        *RuntimeGoNakamaModule
 	runtimeLogger        runtime.Logger
 
-	matchmakingRegistry *MatchmakingRegistry
 	profileRegistry     *ProfileRegistry
 	discordRegistry     DiscordRegistry
 	appBot              *DiscordAppBot
@@ -109,6 +108,8 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	profileRegistry := NewProfileRegistry(nk, db, runtimeLogger, tracker, discordRegistry)
 	broadcasterRegistrationBySession := MapOf[string, *MatchBroadcaster]{}
 	skillBasedMatchmaker := NewSkillBasedMatchmaker()
+	lobbyBuilder := NewLobbyBuilder(logger, sessionRegistry, matchRegistry, tracker, profileRegistry)
+	matchmaker.OnMatchedEntries(lobbyBuilder.handleMatchedEntries)
 	var appBot *DiscordAppBot
 
 	if disable, ok := vars["DISABLE_DISCORD_BOT"]; ok && disable == "true" {
@@ -140,11 +141,6 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		logger.Fatal("Failed to determine external IP address", zap.Error(err))
 	}
 
-	broadcasterUserID, _, _, err := nk.AuthenticateCustom(ctx, "000000000000000000", "broadcasthost", true)
-	if err != nil {
-		logger.Fatal("Failed to authenticate broadcaster", zap.Error(err))
-	}
-
 	evrPipeline := &EvrPipeline{
 		ctx:                  ctx,
 		node:                 config.GetName(),
@@ -168,11 +164,10 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		runtimeModule:        nk,
 		runtimeLogger:        runtimeLogger,
 
-		discordRegistry:   discordRegistry,
-		appBot:            appBot,
-		localIP:           localIP,
-		externalIP:        externalIP,
-		broadcasterUserID: broadcasterUserID,
+		discordRegistry: discordRegistry,
+		appBot:          appBot,
+		localIP:         localIP,
+		externalIP:      externalIP,
 
 		profileRegistry:                  profileRegistry,
 		leaderboardRegistry:              leaderboardRegistry,
@@ -182,8 +177,6 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		placeholderEmail: config.GetRuntime().Environment["PLACEHOLDER_EMAIL_DOMAIN"],
 		linkDeviceURL:    config.GetRuntime().Environment["LINK_DEVICE_URL"],
 	}
-
-	evrPipeline.matchmakingRegistry = NewMatchmakingRegistry(logger, matchRegistry, matchmaker, metrics, db, nk, config, evrPipeline)
 
 	// Create a timer to periodically clear the backfill queue
 	go func() {
@@ -259,11 +252,11 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 
 	// Match service
 	case *evr.LobbyFindSessionRequest:
-		pipelineFn = p.lobbyFindSessionRequest
+		pipelineFn = p.lobbySessionRequest
 	case *evr.LobbyCreateSessionRequest:
-		pipelineFn = p.lobbyCreateSessionRequest
+		pipelineFn = p.lobbySessionRequest
 	case *evr.LobbyJoinSessionRequest:
-		pipelineFn = p.lobbyJoinSessionRequest
+		pipelineFn = p.lobbySessionRequest
 	case *evr.LobbyMatchmakerStatusRequest:
 		pipelineFn = p.lobbyMatchmakerStatusRequest
 	case *evr.LobbyPingResponse:
@@ -387,7 +380,7 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 			var err error
 			for _, userID := range userIDs {
 				if partyGroupName == "" {
-					partyGroupName, _, err = GetPartyGroupID(session.Context(), session.pipeline.db, userID)
+					partyGroupName, _, err = GetLobbyGroupID(session.Context(), session.pipeline.db, userID)
 					if err != nil {
 						logger.Warn("Failed to get party group ID", zap.Error(err))
 					}
@@ -471,8 +464,8 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 func (p *EvrPipeline) relayMatchData(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	var matchID MatchID
 	var err error
-	if message, ok := in.(evr.MatchSessionMessage); ok {
-		if matchID, err = NewMatchID(message.MatchSessionID(), p.node); err != nil {
+	if message, ok := in.(evr.LobbySessionMessage); ok {
+		if matchID, err = NewMatchID(message.LobbyID(), p.node); err != nil {
 			return fmt.Errorf("failed to create match ID: %w", err)
 		}
 	} else if matchID, _, err = GameServerBySessionID(p.runtimeModule, session.id); err != nil {
@@ -488,7 +481,7 @@ func (p *EvrPipeline) relayMatchData(ctx context.Context, logger *zap.Logger, se
 	// Set the OpCode to the symbol of the message.
 	opCode := int64(evr.SymbolOf(in))
 	// Send the data to the match.
-	p.matchRegistry.SendData(matchID.UUID(), matchID.Node(), session.UserID(), session.ID(), session.Username(), matchID.Node(), opCode, requestJson, true, time.Now().UTC().UnixNano()/int64(time.Millisecond))
+	p.matchRegistry.SendData(matchID.UUID, matchID.Node, session.UserID(), session.ID(), session.Username(), matchID.Node, opCode, requestJson, true, time.Now().UTC().UnixNano()/int64(time.Millisecond))
 
 	return nil
 }

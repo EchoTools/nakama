@@ -153,7 +153,7 @@ func SetNextMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 	} else {
 
 		label, err := MatchLabelByID(ctx, nk, request.MatchID)
-		if err != nil {
+		if err != nil || label == nil {
 			return nil, runtime.NewError(fmt.Sprintf("Error getting match label: %s", err.Error()), StatusInternalError)
 		}
 

@@ -1,125 +1,121 @@
 package server
 
 import (
+	"context"
+	"database/sql"
+	"encoding/json"
 	"slices"
 	"time"
+
+	"github.com/gofrs/uuid/v5"
+	"github.com/heroiclabs/nakama-common/api"
+	"go.uber.org/zap"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
-type LatencyHistoryData struct {
-	History []map[string]time.Duration // []map[externalIP]rtt
+type LabelWithLatency struct {
+	Label *MatchLabel
+	RTT   int
 }
 
-func (l *LatencyHistoryData) AddRecord(record map[string]time.Duration, limit int) {
-	if l.History == nil {
-		l.History = make([]map[string]time.Duration, 0)
-	}
-
-	l.History = append(l.History, record)
-	if len(l.History) > limit {
-		l.History = l.History[1:]
-	}
+func (l LabelWithLatency) AsDuration() time.Duration {
+	return time.Duration(l.RTT) * time.Millisecond
 }
 
-func (l *LatencyHistoryData) GetAveragesByIP(ips []string) []time.Duration {
+// map[externalIP]map[timestamp]latency
+type LatencyHistory map[string]map[int64]int // map[externalIP]map[timestamp]latency
 
-	rtts := make(map[string][]time.Duration, 0)
-
-	for _, record := range l.History {
-		for ip, rtt := range record {
-			if _, ok := rtts[ip]; !ok {
-				rtts[ip] = make([]time.Duration, 0)
-			}
-
-			rtts[ip] = append(rtts[ip], rtt)
-		}
-	}
-
-	averages := make([]time.Duration, 0)
-	for _, ip := range ips {
-		if rtts, ok := rtts[ip]; ok {
-			var sum time.Duration
-			for _, rtt := range rtts {
-				sum += rtt
-			}
-
-			averages = append(averages, sum/time.Duration(len(rtts)))
-		}
-	}
-
-	return averages
+func NewLatencyHistory() LatencyHistory {
+	return make(LatencyHistory)
 }
 
-func (l *LatencyHistoryData) SortByAverageRTT(ips []string) []string {
-	rtts := make(map[string][]time.Duration, 0)
+func (h LatencyHistory) String() string {
+	data, err := json.Marshal(h)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
 
-	for _, record := range l.History {
-		for ip, rtt := range record {
-			if _, ok := rtts[ip]; !ok {
-				rtts[ip] = make([]time.Duration, 0)
+func (h LatencyHistory) Add(extIP string, rtt int) {
+	if _, ok := h[extIP]; !ok {
+		h[extIP] = make(map[int64]int)
+	}
+	h[extIP][time.Now().UTC().Unix()] = rtt
+}
+
+func (h LatencyHistory) LabelsByAverageRTT(labels []*MatchLabel) []LabelWithLatency {
+
+	labelRTTs := make([]LabelWithLatency, 0, len(labels))
+	for _, label := range labels {
+		if history, ok := h[label.Broadcaster.Endpoint.GetExternalIP()]; ok {
+			average := 0
+			for _, l := range history {
+				average += l
 			}
-
-			rtts[ip] = append(rtts[ip], rtt)
+			average /= len(history)
+			labelRTTs = append(labelRTTs, LabelWithLatency{Label: label, RTT: average})
+		} else {
+			labelRTTs = append(labelRTTs, LabelWithLatency{Label: label, RTT: 0})
 		}
 	}
-	averages := make(map[string]time.Duration, 0)
-	for ip, rtt := range rtts {
-		var sum time.Duration
-		for _, rtt := range rtt {
-			sum += rtt
-		}
-		averages[ip] = sum / time.Duration(len(rtt))
-	}
 
-	slices.SortStableFunc(ips, func(a, b string) int {
-		return int(averages[a] - averages[b])
+	slices.SortStableFunc(labelRTTs, func(a, b LabelWithLatency) int {
+		if a.RTT == 0 {
+			return 500
+		}
+		return a.RTT - b.RTT
 	})
-
-	return ips
+	return labelRTTs
 }
 
-func (l *LatencyHistoryData) GetLeastFrequent() []string {
-	frequencies := make(map[string]int, 0)
-
-	for _, record := range l.History {
-		for ip := range record {
-			if _, ok := frequencies[ip]; !ok {
-				frequencies[ip] = 0
-			}
-
-			frequencies[ip]++
-		}
-	}
-
-	leastFrequent := make([]string, 0)
-	min := 0
-	for ip, frequency := range frequencies {
-		if frequency < min {
-			min = frequency
-			leastFrequent = []string{ip}
-		} else if frequency == min {
-			leastFrequent = append(leastFrequent, ip)
-		}
-	}
-
-	return leastFrequent
-
-}
-
-func (l *LatencyHistoryData) SortLeastFrequentIP(ips []string) []string {
-	frequencies := make(map[string]int, len(ips))
-
-	for _, record := range l.History {
-		for ip := range record {
-			if _, ok := frequencies[ip]; !ok {
-				frequencies[ip] = 0
-			}
-
-			frequencies[ip]++
-		}
-	}
-
-	slices.SortStableFunc(ips, func(a, b string) int {
-		return frequencies[a] - frequencies[b]
+// map[externalIP]map[timestamp]latency
+func LoadLatencyHistory(ctx context.Context, logger *zap.Logger, db *sql.DB, userID uuid.UUID) (LatencyHistory, error) {
+	result, err := StorageReadObjects(ctx, logger, db, userID, []*api.ReadStorageObjectId{
+		{
+			Collection: LatencyHistoryStorageCollection,
+			Key:        LatencyHistoryStorageKey,
+			UserId:     userID.String(),
+		},
 	})
-	return ips
+	if err != nil {
+		return nil, err
+	}
+	objs := result.GetObjects()
+	if len(objs) == 0 {
+		return make(LatencyHistory), nil
+	}
+	var latencyHistory LatencyHistory
+	if err := json.Unmarshal([]byte(objs[0].GetValue()), &latencyHistory); err != nil {
+		return nil, err
+	}
+
+	return latencyHistory, nil
+}
+
+func StoreLatencyHistory(ctx context.Context, logger *zap.Logger, db *sql.DB, metrics Metrics, storageIndex StorageIndex, userID uuid.UUID, latencyHistory LatencyHistory) error {
+	// Delete any records older than 1 week
+	twoWeeksAgo := time.Now().AddDate(0, 0, -7).Unix()
+	for _, history := range latencyHistory {
+		for ts := range history {
+			if ts < twoWeeksAgo {
+				delete(history, ts)
+			}
+		}
+	}
+
+	ops := StorageOpWrites{&StorageOpWrite{
+		OwnerID: userID.String(),
+		Object: &api.WriteStorageObject{
+			Collection:      LatencyHistoryStorageCollection,
+			Key:             LatencyHistoryStorageKey,
+			Value:           latencyHistory.String(),
+			PermissionRead:  &wrapperspb.Int32Value{Value: int32(1)},
+			PermissionWrite: &wrapperspb.Int32Value{Value: int32(0)},
+		},
+	}}
+	if _, _, err := StorageWriteObjects(ctx, logger, db, metrics, storageIndex, true, ops); err != nil {
+		return err
+	}
+	return nil
 }
