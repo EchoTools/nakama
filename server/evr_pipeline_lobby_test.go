@@ -1,0 +1,80 @@
+package server
+
+import (
+	"context"
+	"reflect"
+	"testing"
+
+	"github.com/gofrs/uuid/v5"
+	"github.com/google/go-cmp/cmp"
+	"github.com/heroiclabs/nakama/v3/server/evr"
+)
+
+func TestNewSessionParametersFromLobbySessionRequest(t *testing.T) {
+
+	matchID := MatchID{UUID: uuid.FromStringOrNil("c252375b-5401-4980-be60-e2fb5996b11f"), Node: "default"}
+
+	request := &evr.LobbyFindSessionRequest{
+		CurrentLobbyID:   matchID.UUID,
+		VersionLock:      0xc62f01d78f77910d,
+		Mode:             evr.ModeSocialPublic,
+		Level:            evr.LevelUnspecified,
+		Platform:         evr.ToSymbol("OVR"),
+		CrossPlayEnabled: true,
+		LoginSessionID:   uuid.FromStringOrNil("1251ac1f11bc11ef931a66d3ff8a653b"),
+		GroupID:          uuid.FromStringOrNil("1234123411bc11ef931a66d3ff8a653b"),
+		SessionSettings: evr.LobbySessionSettings{
+			AppID: "1369078409873402",
+			Mode:  int64(evr.ModeSocialPublic),
+			Level: int64(evr.LevelUnspecified),
+			Features: []string{
+				"testfeature",
+			},
+		},
+		Entrants: []evr.Entrant{
+			{
+				EvrID: evr.EvrId{
+					PlatformCode: 4,
+					AccountId:    3963667097037078,
+				},
+				Role: int8(evr.TeamUnassigned),
+			},
+		},
+	}
+
+	ctx := context.Background()
+	ctx = context.WithValue(ctx, ctxNodeKey{}, "default")
+
+	type args struct {
+		r *evr.LobbyFindSessionRequest
+	}
+	tests := []struct {
+		name string
+		args args
+		want SessionParameters
+	}{
+		{
+			name: "Test sets basic values",
+			args: args{
+				r: request,
+			},
+			want: SessionParameters{
+				VersionLock:       request.VersionLock,
+				AppID:             evr.ToSymbol(request.SessionSettings.AppID),
+				GroupID:           request.GroupID,
+				Mode:              request.Mode,
+				Level:             request.Level,
+				SupportedFeatures: request.SessionSettings.Features,
+				CurrentMatchID:    matchID,
+				Role:              evr.TeamUnassigned,
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := NewLobbyParametersFromRequest(ctx, tt.args.r, MatchmakingSettings{}, MatchmakingSettings{}); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("(- want / + got) %s", cmp.Diff(tt.want, got))
+			}
+		})
+	}
+}

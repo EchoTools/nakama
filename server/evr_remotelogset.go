@@ -22,6 +22,7 @@ type GenericRemoteLog struct {
 func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logger, session *sessionWS, evrID evr.EvrId, request *evr.RemoteLogSet) error {
 	logger.Debug("Processing remote log set", zap.Any("request", request))
 	updates := MapOf[uuid.UUID, *MatchGameStateUpdate]{}
+OuterLoop:
 	for _, str := range request.Logs {
 		var update *MatchGameStateUpdate
 
@@ -45,7 +46,26 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 			logger.Error("Remote log entry has invalid message type", zap.String("entry", str))
 			return nil
 		}
+
 		messageType = strings.ToLower(messageType)
+
+		if strings.HasPrefix("ovr_iap", messageType) {
+			// Ignore IAP logs.
+			continue
+		}
+
+		if category, ok := entry["category"].(string); ok {
+			ignoredCategories := []string{
+				"iap",
+				"rich_presence",
+				"social",
+			}
+			for _, ignored := range ignoredCategories {
+				if category == ignored {
+					continue OuterLoop
+				}
+			}
+		}
 
 		logger.Debug("Processing remote log set", zap.Any("logs", entry))
 		switch strings.ToLower(messageType) {
@@ -240,6 +260,14 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 type MatchGameStateUpdate struct {
 	GameState
 	PauseDuration time.Duration `json:"pause_duration,omitempty"`
+}
+
+func (u *MatchGameStateUpdate) String() string {
+	b, err := json.Marshal(u)
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }
 
 func (u *MatchGameStateUpdate) Bytes() []byte {

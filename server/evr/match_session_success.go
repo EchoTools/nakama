@@ -34,8 +34,9 @@ type LobbySessionSuccess struct {
 }
 
 // NewLobbySessionSuccessv5 initializes a new LobbySessionSuccessv5 message.
-func NewLobbySessionSuccess(gameTypeSymbol Symbol, matchingSession uuid.UUID, channelUUID uuid.UUID, endpoint Endpoint, teamIndex int16, headsetType int) *LobbySessionSuccess {
+func NewLobbySessionSuccess(gameTypeSymbol Symbol, matchingSession uuid.UUID, channelUUID uuid.UUID, endpoint Endpoint, role int16, isPCVR bool) *LobbySessionSuccess {
 	c := &PacketEncoderSettings{
+		isPCVR:                  isPCVR,
 		EncryptionEnabled:       true,
 		MacEnabled:              true,
 		MacDigestSize:           0x20,
@@ -43,9 +44,9 @@ func NewLobbySessionSuccess(gameTypeSymbol Symbol, matchingSession uuid.UUID, ch
 		MacKeySize:              0x20,
 		EncryptionKeySize:       0x20,
 		RandomKeySize:           0x20,
-		HeadsetType:             headsetType,
 	}
 	s := &PacketEncoderSettings{
+		isPCVR:                  isPCVR,
 		EncryptionEnabled:       true,
 		MacEnabled:              true,
 		MacDigestSize:           0x20,
@@ -53,14 +54,13 @@ func NewLobbySessionSuccess(gameTypeSymbol Symbol, matchingSession uuid.UUID, ch
 		MacKeySize:              0x20,
 		EncryptionKeySize:       0x20,
 		RandomKeySize:           0x20,
-		HeadsetType:             headsetType,
 	}
 	return &LobbySessionSuccess{
 		GameMode:           gameTypeSymbol,
 		LobbyID:            matchingSession,
 		GroupID:            channelUUID,
 		Endpoint:           endpoint,
-		TeamIndex:          teamIndex,
+		TeamIndex:          role,
 		Unk1:               0,
 		ServerEncoderFlags: s.ToFlags(),
 		ClientEncoderFlags: c.ToFlags(),
@@ -202,6 +202,7 @@ func DefaultServerEncoderSettings() *PacketEncoderSettings {
 
 // PacketEncoderSettings describes packet encoding settings for one party in a game server <-> client connection.
 type PacketEncoderSettings struct {
+	isPCVR                  bool // The headset type of the client. (0: PCVR, 1: Standalone)
 	EncryptionEnabled       bool // Indicates whether encryption should be used for each packet.
 	MacEnabled              bool // Indicates whether MACs should be attached to each packet.
 	MacDigestSize           int  // The byte size (<= 512bit) of the MAC output packets should use. (cut from the front of the HMAC-SHA512)
@@ -209,7 +210,6 @@ type PacketEncoderSettings struct {
 	MacKeySize              int  // The byte size of the HMAC-SHA512 key.
 	EncryptionKeySize       int  // The byte size of the AES-CBC key. (default: 32/AES-256-CBC)
 	RandomKeySize           int  // The byte size of the random key for the RNG.
-	HeadsetType             int  // The headset type of the client. (0: PCVR, 1: Standalone)
 }
 
 // NOTE on Keysize:
@@ -241,7 +241,7 @@ func PacketEncoderSettingsFromFlags(flags uint64) *PacketEncoderSettings {
 		MacKeySize:              int((flags >> 26) & 0xFFF),
 		EncryptionKeySize:       int((flags >> 38) & 0xFFF),
 		RandomKeySize:           int((flags >> 50) & 0xFFF),
-		HeadsetType:             int((flags >> 62) & 0x03),
+		isPCVR:                  int((flags>>62)&0x03) == 0,
 	}
 }
 
@@ -253,11 +253,15 @@ func (p *PacketEncoderSettings) ToFlags() uint64 {
 	if p.MacEnabled {
 		flags |= 2
 	}
+	if p.isPCVR {
+		flags |= uint64(0&0x03) << 62
+	} else {
+		flags |= uint64(1&0x03) << 62
+	}
 	flags |= uint64(p.MacDigestSize&0xFFF) << 2
 	flags |= uint64(p.MacPBKDF2IterationCount&0xFFF) << 14
 	flags |= uint64(p.MacKeySize&0xFFF) << 26
 	flags |= uint64(p.EncryptionKeySize&0xFFF) << 38
 	flags |= uint64(p.RandomKeySize&0xFFF) << 50
-	flags |= uint64(p.HeadsetType&0x03) << 62
 	return flags
 }

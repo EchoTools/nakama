@@ -242,7 +242,7 @@ func (l MatchLink) AppLink() string {
 	if prefix == "" {
 		prefix = "spark://c/"
 	}
-	id := strings.ToUpper(l.MatchID.UUID().String())
+	id := strings.ToUpper(l.MatchID.UUID.String())
 	return prefix + id
 }
 
@@ -680,7 +680,7 @@ func (e *TaxiBot) handleMessageReactionAdd(s *discordgo.Session, reaction *disco
 
 	// Message the user
 	// Create an echo taxi link for the message
-	applink := fmt.Sprintf("<%sspark://c/%s>", EchoTaxiPrefix, strings.ToUpper(matchID.UUID().String()))
+	applink := fmt.Sprintf("<%sspark://c/%s>", EchoTaxiPrefix, strings.ToUpper(matchID.UUID.String()))
 	dmMessage, err := s.ChannelMessageSend(dmChannelID, fmt.Sprintf("You have hailed a taxi to %s.\n\nGo into the game and click 'Play' on the main menu, or 'Find Match' on the lobby terminal. ", applink))
 	if err != nil {
 		logger.Warn("Error sending message: %v", err)

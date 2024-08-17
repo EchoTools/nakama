@@ -110,7 +110,7 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 
 	logger = logger.With(zap.String("externalIP", externalIP.String()))
 
-	features := ctx.Value(ctxFeaturesKey{}).([]string)
+	features := ctx.Value(ctxSupportedFeaturesKey{}).([]string)
 
 	// Create the broadcaster config
 	config := broadcasterConfig(userId, session.id.String(), request.ServerId, request.InternalIP, externalIP, request.Port, regions, request.VersionLock, tags, features)
@@ -280,7 +280,7 @@ func broadcasterConfig(userId, sessionId string, serverId uint64, internalIP, ex
 			Port:       port,
 		},
 		Regions:     regions,
-		VersionLock: versionLock,
+		VersionLock: evr.ToSymbol(versionLock),
 		GroupIDs:    make([]uuid.UUID, 0),
 		Features:    features,
 
@@ -383,7 +383,7 @@ func (p *EvrPipeline) newParkingMatch(logger *zap.Logger, session *sessionWS, co
 		return fmt.Errorf("failed to update game server by session ID: %v", err)
 	}
 
-	found, allowed, _, reason, _, _ := p.matchRegistry.JoinAttempt(session.Context(), matchID.UUID(), matchID.Node(), session.UserID(), session.ID(), session.Username(), session.Expiry(), session.Vars(), session.ClientIP(), session.ClientPort(), p.node, nil)
+	found, allowed, _, reason, _, _ := p.matchRegistry.JoinAttempt(session.Context(), matchID.UUID, matchID.Node, session.UserID(), session.ID(), session.Username(), session.Expiry(), session.Vars(), session.ClientIP(), session.ClientPort(), p.node, nil)
 	if !found {
 		return fmt.Errorf("match not found: %s", matchID.String())
 	}
@@ -392,7 +392,7 @@ func (p *EvrPipeline) newParkingMatch(logger *zap.Logger, session *sessionWS, co
 	}
 
 	// Trigger the MatchJoin event.
-	stream := PresenceStream{Mode: StreamModeMatchAuthoritative, Subject: matchID.UUID(), Label: matchID.Node()}
+	stream := PresenceStream{Mode: StreamModeMatchAuthoritative, Subject: matchID.UUID, Label: matchID.Node}
 	m := PresenceMeta{
 		Username: session.Username(),
 		Format:   session.Format(),
@@ -595,7 +595,7 @@ func (p *EvrPipeline) broadcasterSessionEnded(ctx context.Context, logger *zap.L
 		logger.Warn("Failed to get broadcaster's match by session ID", zap.Error(err))
 	}
 
-	if err := p.runtimeModule.StreamUserLeave(StreamModeMatchAuthoritative, matchID.UUID().String(), "", p.node, presence.GetUserId(), presence.GetSessionId()); err != nil {
+	if err := p.runtimeModule.StreamUserLeave(StreamModeMatchAuthoritative, matchID.UUID.String(), "", p.node, presence.GetUserId(), presence.GetSessionId()); err != nil {
 		logger.Warn("Failed to leave match stream", zap.Error(err))
 	}
 
@@ -639,7 +639,7 @@ func (p *EvrPipeline) broadcasterPlayerAccept(ctx context.Context, logger *zap.L
 	rejected := make([]uuid.UUID, 0)
 
 	for _, entrantID := range request.EntrantIDs {
-		logger = baseLogger.With(zap.String("entrant_id", entrantID.String()))
+		logger := baseLogger.With(zap.String("entrant_id", entrantID.String()))
 
 		presence, err := PresenceByEntrantID(p.runtimeModule, matchID, entrantID)
 		if err != nil || presence == nil {
@@ -663,7 +663,7 @@ func (p *EvrPipeline) broadcasterPlayerAccept(ctx context.Context, logger *zap.L
 		}
 
 		// Trigger the MatchJoin event.
-		stream := PresenceStream{Mode: StreamModeMatchAuthoritative, Subject: matchID.UUID(), Label: matchID.Node()}
+		stream := PresenceStream{Mode: StreamModeMatchAuthoritative, Subject: matchID.UUID, Label: matchID.Node}
 		m := PresenceMeta{
 			Username: s.Username(),
 			Format:   s.Format(),
@@ -674,14 +674,6 @@ func (p *EvrPipeline) broadcasterPlayerAccept(ctx context.Context, logger *zap.L
 			// Kick the user from any other matches they may be part of.
 			// WARNING This cannot be used during transition. It will kick the player from their current match.
 			//p.tracker.UntrackLocalByModes(session.ID(), matchStreamModes, stream)
-		}
-
-		// Cancel the matchmaking session
-		msession, found := p.matchmakingRegistry.GetMatchingBySessionId(s.ID())
-		if !found {
-			logger.Warn("Failed to get matchmaking session by session ID")
-		} else {
-			msession.Cancel(nil)
 		}
 
 		accepted = append(accepted, entrantID)
@@ -717,11 +709,11 @@ func (p *EvrPipeline) broadcasterPlayerRemoved(ctx context.Context, logger *zap.
 	}
 	if presence != nil {
 		// Trigger MatchLeave.
-		if err := p.runtimeModule.StreamUserLeave(StreamModeMatchAuthoritative, matchID.UUID().String(), "", matchID.Node(), presence.GetUserId(), presence.GetSessionId()); err != nil {
+		if err := p.runtimeModule.StreamUserLeave(StreamModeMatchAuthoritative, matchID.UUID.String(), "", matchID.Node, presence.GetUserId(), presence.GetSessionId()); err != nil {
 			logger.Warn("Failed to leave match stream", zap.Error(err))
 		}
 
-		if err := p.runtimeModule.StreamUserLeave(StreamModeEntrant, matchID.UUID().String(), message.EntrantID.String(), matchID.Node(), presence.GetUserId(), presence.GetSessionId()); err != nil {
+		if err := p.runtimeModule.StreamUserLeave(StreamModeEntrant, message.EntrantID.String(), "", matchID.Node, presence.GetUserId(), presence.GetSessionId()); err != nil {
 			logger.Warn("Failed to leave entrant session stream", zap.Error(err))
 		}
 	}
@@ -762,6 +754,10 @@ func GameServerBySessionID(nk runtime.NakamaModule, sessionID uuid.UUID) (MatchI
 	presences, err := nk.StreamUserList(StreamModeGameServer, sessionID.String(), "", StreamLabelMatchService, true, true)
 	if err != nil {
 		return MatchID{}, nil, err
+	}
+
+	if len(presences) == 0 {
+		return MatchID{}, nil, fmt.Errorf("no game server presence found")
 	}
 
 	presence := presences[0]

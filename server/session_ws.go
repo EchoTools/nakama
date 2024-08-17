@@ -42,6 +42,7 @@ const (
 	StreamModeEntrant
 	StreamModeGameServer
 	StreamModeMatchmaking
+	StreamModeLobbyGroup
 )
 
 const (
@@ -120,10 +121,10 @@ type (
 	ctxUrlParamsKey           struct{} // The URL parameters from the request
 	ctxIPinfoTokenKey         struct{} // The IPinfo token from the config
 	ctxFlagsKey               struct{} // The group flags from the urlparam
-	ctxFeaturesKey            struct{} // The features from the urlparam
-	ctxRequiredFeaturesKey    struct{} // The features from the urlparam
+	ctxSupportedFeaturesKey   struct{} // The features from the urlparam
+	ctxRequiredFeaturesKey    struct{} // The required_features from the urlparam
 	ctxVerboseKey             struct{} // The verbosity flag from matchmaking config
-	ctxHeadsetTypeKey         struct{} // The headset type
+	ctxIsPCVRKey              struct{} // The headset type
 	ctxRatingKey              struct{} // The user rating
 
 	//ctxMatchmakingQueryKey         struct{} // The Matchmaking query from the urlparam
@@ -199,7 +200,7 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 			slices.Sort(features)
 		}
 	}
-	ctx = context.WithValue(ctx, ctxFeaturesKey{}, features)
+	ctx = context.WithValue(ctx, ctxSupportedFeaturesKey{}, features)
 
 	requiredFeatures := make([]string, 0)
 	if v := request.URL.Query().Get(RequiredFeaturesURLParam); v != "" {
@@ -278,7 +279,7 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 	}
 }
 
-func (s *sessionWS) LoginSession(userID, username string, metadata AccountMetadata, displayNameOverride, discordID string, evrID evr.EvrId, deviceId *DeviceAuth, groupID uuid.UUID, flags int, verbose bool, headsetType int) error {
+func (s *sessionWS) LoginSession(userID, username string, metadata AccountMetadata, displayNameOverride, discordID string, evrID evr.EvrId, deviceId *DeviceAuth, groupID uuid.UUID, flags int, verbose bool, isPCVR bool) error {
 	// Each player has a single login connection, which will act as the core session.
 	// When this connection is terminated, all other connections should be terminated.
 
@@ -302,10 +303,12 @@ func (s *sessionWS) LoginSession(userID, username string, metadata AccountMetada
 	ctx = context.WithValue(ctx, ctxVerboseKey{}, verbose)
 	ctx = context.WithValue(ctx, ctxDiscordIDKey{}, discordID)
 	ctx = context.WithValue(ctx, ctxAccountMetadataKey{}, metadata)
+	ctx = context.WithValue(ctx, ctxNodeKey{}, s.config.GetName())
+
 	if displayNameOverride != "" {
 		ctx = context.WithValue(ctx, ctxDisplayNameOverrideKey{}, displayNameOverride)
 	}
-	ctx = context.WithValue(ctx, ctxHeadsetTypeKey{}, headsetType)
+	ctx = context.WithValue(ctx, ctxIsPCVRKey{}, isPCVR)
 
 	s.Lock()
 	s.ctx = ctx
@@ -355,7 +358,7 @@ func (s *sessionWS) BroadcasterSession(userID uuid.UUID, username string, server
 	ctx = context.WithValue(ctx, ctxUsernameKey{}, username)      // apiServer compatibility
 	ctx = context.WithValue(ctx, ctxVarsKey{}, s.vars)            // apiServer compatibility
 	ctx = context.WithValue(ctx, ctxExpiryKey{}, s.expiry)        // apiServer compatibility
-	ctx = context.WithValue(ctx, ctxHeadsetTypeKey{}, int(0))
+	ctx = context.WithValue(ctx, ctxIsPCVRKey{}, true)
 
 	s.SetUsername(username)
 	s.Lock()
@@ -461,7 +464,7 @@ func (s *sessionWS) ValidateSession(loginSessionID uuid.UUID, evrID evr.EvrId) e
 			displayNameOverride = ""
 		}
 
-		headsetType, ok := loginCtx.Value(ctxHeadsetTypeKey{}).(int)
+		IsPCVR, ok := loginCtx.Value(ctxIsPCVRKey{}).(bool)
 		if !ok {
 			return fmt.Errorf("login session does not have a headset type")
 		}
@@ -473,6 +476,7 @@ func (s *sessionWS) ValidateSession(loginSessionID uuid.UUID, evrID evr.EvrId) e
 
 		// Create a derived context for this session.
 		ctx := context.WithValue(s.Context(), ctxLoginSessionKey{}, loginSession)
+		ctx = context.WithValue(ctx, ctxNodeKey{}, s.config.GetName())
 		ctx = context.WithValue(ctx, ctxEvrIDKey{}, evrID)
 		ctx = context.WithValue(ctx, ctxUserIDKey{}, userID)     // apiServer compatibility
 		ctx = context.WithValue(ctx, ctxUsernameKey{}, username) // apiServer compatibility
@@ -484,7 +488,7 @@ func (s *sessionWS) ValidateSession(loginSessionID uuid.UUID, evrID evr.EvrId) e
 		if displayNameOverride != "" {
 			ctx = context.WithValue(ctx, ctxDisplayNameOverrideKey{}, displayNameOverride)
 		}
-		ctx = context.WithValue(ctx, ctxHeadsetTypeKey{}, headsetType)
+		ctx = context.WithValue(ctx, ctxIsPCVRKey{}, IsPCVR)
 
 		// Set the session information
 		s.Lock()

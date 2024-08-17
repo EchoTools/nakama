@@ -1,0 +1,240 @@
+package server
+
+import (
+	"encoding/json"
+	"fmt"
+	"time"
+
+	"github.com/gofrs/uuid/v5"
+	"github.com/heroiclabs/nakama-common/rtapi"
+	"go.uber.org/zap"
+)
+
+var (
+	LobbyPartyStreamModes = map[uint8]struct{}{StreamModeLobbyGroup: {}, StreamModeParty: {}}
+)
+
+type LobbyParty struct {
+	ph *PartyHandler
+}
+
+func NewLobbyParty(ph *PartyHandler) *LobbyParty {
+	return &LobbyParty{ph: ph}
+}
+
+func (g *LobbyParty) GetLeader() *rtapi.UserPresence {
+	g.ph.RLock()
+	defer g.ph.RUnlock()
+	if g.ph.leader == nil {
+		return nil
+	}
+	return g.ph.leader.UserPresence
+}
+
+func (g *LobbyParty) List() []*PartyPresenceListItem {
+	if g.ph == nil {
+		return nil
+	}
+	g.ph.Lock()
+	defer g.ph.Unlock()
+	return g.ph.members.List()
+}
+
+func (g *LobbyParty) Size() int {
+	if g.ph == nil {
+		return 1
+	}
+	return g.ph.members.Size()
+}
+
+func (g *LobbyParty) MatchmakerAdd(sessionID, node, query string, minCount, maxCount, countMultiple int, stringProperties map[string]string, numericProperties map[string]float64) (string, []*PresenceID, error) {
+	return g.ph.MatchmakerAdd(sessionID, node, query, minCount, maxCount, countMultiple, stringProperties, numericProperties)
+}
+
+// The basic matchmaking parameters that must match.
+type MatchmakingGroupLabel struct {
+	Mode        string `json:"mode"`
+	GroupID     string `json:"group_id"`
+	VersionLock string `json:"version_lock"`
+}
+
+func (l MatchmakingGroupLabel) String() string {
+	data, _ := json.Marshal(l)
+	return string(data)
+}
+
+type LobbyGroupMemberStatus struct {
+	StartedAt time.Time             `json:"timestamp"`
+	PartyID   uuid.UUID             `json:"party_id,omitempty"`
+	Label     MatchmakingGroupLabel `json:"label,omitempty"`
+}
+
+func (s LobbyGroupMemberStatus) String() string {
+	data, _ := json.Marshal(s)
+	return string(data)
+}
+
+func CreateLobbyParty(s *sessionWS) *PartyHandler {
+	// Leave any current party.
+	s.tracker.UntrackLocalByModes(s.id, map[uint8]struct{}{StreamModeParty: {}}, PresenceStream{})
+	open := true
+	maxSize := 4
+	userPresence := &rtapi.UserPresence{
+		UserId:    s.UserID().String(),
+		SessionId: s.ID().String(),
+		Username:  s.Username(),
+	}
+	ph := s.pipeline.partyRegistry.Create(open, maxSize, userPresence)
+
+	return ph
+}
+
+func JoinLobbyParty(s *sessionWS, partyID uuid.UUID) (*PartyHandler, error) {
+	presence := Presence{
+		ID: PresenceID{
+			Node:      s.pipeline.node,
+			SessionID: s.ID(),
+		},
+		// Presence stream not needed.
+		UserID: s.UserID(),
+		Meta: PresenceMeta{
+			Username: s.Username(),
+			// Other meta fields not needed.
+		},
+	}
+	presenceMeta := PresenceMeta{
+		Format:   s.Format(),
+		Username: s.Username(),
+		Status:   "",
+	}
+	userPresence := &rtapi.UserPresence{
+		UserId:    s.UserID().String(),
+		SessionId: s.ID().String(),
+		Username:  s.Username(),
+	}
+	stream := PresenceStream{Mode: StreamModeParty, Subject: partyID, Label: s.pipeline.node}
+	success, err := s.pipeline.partyRegistry.PartyJoinRequest(s.Context(), partyID, s.pipeline.node, &presence)
+	if err != nil {
+		return nil, fmt.Errorf("failed to join party: %v", err)
+	}
+	if !success {
+		return nil, fmt.Errorf("failed to join party")
+	}
+
+	if success, isNew := s.pipeline.tracker.Track(s.Context(), s.ID(), stream, s.UserID(), presenceMeta); !success {
+		_ = s.Send(&rtapi.Envelope{Message: &rtapi.Envelope_Error{Error: &rtapi.Error{
+			Code:    int32(rtapi.Error_RUNTIME_EXCEPTION),
+			Message: "Error tracking party creation",
+		}}}, true)
+		return nil, fmt.Errorf("failed to track party creation")
+	} else if isNew {
+		open := true
+		maxSize := 4
+		out := &rtapi.Envelope{Message: &rtapi.Envelope_Party{Party: &rtapi.Party{
+			PartyId:   partyID.String(),
+			Open:      open,
+			MaxSize:   int32(maxSize),
+			Self:      userPresence,
+			Leader:    userPresence,
+			Presences: []*rtapi.UserPresence{userPresence},
+		}}}
+		_ = s.Send(out, true)
+	}
+
+	ph, found := s.pipeline.partyRegistry.(*LocalPartyRegistry).parties.Load(partyID)
+	if !found {
+		return nil, fmt.Errorf("party not found")
+	}
+	return ph, nil
+}
+
+// This will join or create the lobby group party for the user.
+func JoinLobbyGroupParty(logger *zap.Logger, s *sessionWS, partyID uuid.UUID) (*PartyHandler, error) {
+	partyRegistry := s.pipeline.partyRegistry.(*LocalPartyRegistry)
+	partyStream := PresenceStream{Mode: StreamModeParty, Subject: partyID}
+	var partyHandler *PartyHandler
+	var found bool
+
+	partyHandler, found = partyRegistry.parties.Load(partyStream.Subject)
+	if !found {
+		// Create the party
+
+	}
+
+	// Check if the users is already in the party.
+	found := false
+	sessionID := s.id.String()
+	for _, presence := range s.tracker.ListByStream(partyStream, true, true) {
+		if presence.GetSessionId() == sessionID {
+			return partyHandler, nil
+			break
+		}
+	}
+
+	if found {
+		return partyHandler, nil
+
+	}
+
+}
+func FindLobbyGroupParty(logger *zap.Logger, s *sessionWS, stream PresenceStream, label MatchmakingGroupLabel) (*PartyHandler, error) {
+	// Check for any existing presence in the lobby group stream.
+	presences := s.tracker.ListByStream(stream, false, true)
+	var err error
+	var ph *PartyHandler
+
+	statuses := make([]LobbyGroupMemberStatus, 0, len(presences))
+	if len(presences) > 0 {
+
+		for _, presence := range s.tracker.ListByStream(stream, false, true) {
+			if presence.UserID == s.userID {
+				logger.Warn("User is already in the lobby group stream", zap.String("uid", s.userID.String()))
+				continue
+			}
+			logger.Debug("Presence status", zap.String("status", presence.GetStatus()))
+			status := LobbyGroupMemberStatus{}
+			if err := json.Unmarshal([]byte(presence.GetStatus()), &status); err != nil {
+				return nil, fmt.Errorf("failed to parse lobby group status: %v", err)
+			}
+			statuses[presence.UserID] = status
+		}
+
+		for _, status := range statuses {
+			ph, err = JoinLobbyParty(s, status.PartyID)
+			if err != nil {
+				logger.Warn("failed to join party", zap.Error(err))
+				continue
+			}
+			break
+		}
+	}
+	if ph == nil {
+		// If there are no presences in the stream, create a party and join it.
+		ph = CreateLobbyParty(s)
+		ph, err = JoinLobbyParty(s, ph.ID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to join created party: %v", err)
+		}
+
+	}
+
+	// Join the stream as a party leader/member
+	status := LobbyGroupMemberStatus{
+		StartedAt: time.Now().UTC(),
+		PartyID:   ph.ID,
+		Label:     label,
+	}.String()
+
+	meta := PresenceMeta{Format: s.format, Username: s.Username(), Status: status, Hidden: false}
+	logger.Debug("Updating stream tracker as leader", zap.Any("stream", stream))
+	if ok := s.tracker.Update(s.Context(), s.id, stream, s.userID, meta); !ok {
+		return nil, fmt.Errorf("user has no presence")
+	}
+
+	// Also track a stream for the whole party group ID. This is how to find all users in the same party group.
+	wholeGroupStream := PresenceStream{Mode: StreamModeLobbyGroup, Subject: stream.Subject}
+	if success := s.tracker.Update(s.Context(), s.id, wholeGroupStream, s.userID, meta); !success {
+		return nil, fmt.Errorf("failed to track greater lobby group stream")
+	}
+	return ph, nil
+}

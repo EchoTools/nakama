@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
 	"reflect"
@@ -15,6 +16,7 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/ipinfo/go/v2/ipinfo"
+	"github.com/samber/lo"
 )
 
 const (
@@ -121,27 +123,23 @@ type MatchGameMode struct {
 }
 
 type MatchBroadcaster struct {
-	SessionID       string          `json:"sid,omitempty"`              // The broadcaster's Session ID
-	OperatorID      string          `json:"oper,omitempty"`             // The user id of the broadcaster.
-	GroupIDs        []uuid.UUID     `json:"group_ids,omitempty"`        // The channels this broadcaster will host matches for.
-	Endpoint        evr.Endpoint    `json:"endpoint,omitempty"`         // The endpoint data used for connections.
-	VersionLock     uint64          `json:"version_lock,omitempty"`     // The game build version. (EVR)
-	AppId           string          `json:"app_id,omitempty"`           // The game app id. (EVR)
-	Regions         []evr.Symbol    `json:"regions,omitempty"`          // The region the match is hosted in. (Matching Only) (EVR)
-	IPinfo          *ipinfo.Core    `json:"ip_info,omitempty"`          // The IPinfo of the broadcaster.
-	ServerID        uint64          `json:"server_id,omitempty"`        // The server id of the broadcaster. (EVR)
-	PublisherLock   bool            `json:"publisher_lock,omitempty"`   // Publisher lock (EVR)
-	Features        []string        `json:"features,omitempty"`         // The features of the broadcaster.
-	Tags            []string        `json:"tags,omitempty"`             // The tags given on the urlparam for the match.
-	DesignatedModes []MatchGameMode `json:"designated_modes,omitempty"` // The priority modes for the broadcaster.
+	SessionID       string       `json:"sid,omitempty"`              // The broadcaster's Session ID
+	OperatorID      string       `json:"oper,omitempty"`             // The user id of the broadcaster.
+	GroupIDs        []uuid.UUID  `json:"group_ids,omitempty"`        // The channels this broadcaster will host matches for.
+	Endpoint        evr.Endpoint `json:"endpoint,omitempty"`         // The endpoint data used for connections.
+	VersionLock     evr.Symbol   `json:"version_lock,omitempty"`     // The game build version. (EVR)
+	AppId           string       `json:"app_id,omitempty"`           // The game app id. (EVR)
+	Regions         []evr.Symbol `json:"regions,omitempty"`          // The region the match is hosted in. (Matching Only) (EVR)
+	IPinfo          *ipinfo.Core `json:"ip_info,omitempty"`          // The IPinfo of the broadcaster.
+	ServerID        uint64       `json:"server_id,omitempty"`        // The server id of the broadcaster. (EVR)
+	PublisherLock   bool         `json:"publisher_lock,omitempty"`   // Publisher lock (EVR)
+	Features        []string     `json:"features,omitempty"`         // The features of the broadcaster.
+	Tags            []string     `json:"tags,omitempty"`             // The tags given on the urlparam for the match.
+	DesignatedModes []evr.Symbol `json:"designated_modes,omitempty"` // The priority modes for the broadcaster.
 }
 
-func (g *MatchBroadcaster) IsPriorityFor(mode evr.Symbol, visibility LobbyType) bool {
-	v := MatchGameMode{
-		Mode:       mode,
-		Visibility: visibility,
-	}
-	return slices.Contains(g.DesignatedModes, v)
+func (g *MatchBroadcaster) IsPriorityFor(mode evr.Symbol) bool {
+	return slices.Contains(g.DesignatedModes, mode)
 }
 
 // This is the match handler for all matches.
@@ -223,7 +221,35 @@ var (
 	JoinRejectReasonLobbyFull          = "lobby full"
 	JoinRejectReasonFailedToAssignTeam = "failed to assign team"
 	JoinRejectReasonMatchTerminating   = "match terminating"
+	JoinRejectReasonFeatureMismatch    = "feature mismatch"
 )
+
+type EntrantMetadata struct {
+	Presence EvrMatchPresence
+}
+
+func NewJoinMetadata(p EvrMatchPresence) *EntrantMetadata {
+	return &EntrantMetadata{Presence: p}
+}
+
+func (m EntrantMetadata) MarshalMap() map[string]string {
+	data, err := json.Marshal(m.Presence)
+	if err != nil {
+		return nil
+	}
+	return map[string]string{"presence": string(data)}
+}
+
+func (m *EntrantMetadata) UnmarshalMap(md map[string]string) error {
+	data, ok := md["presence"]
+	if !ok {
+		return errors.New("no presence")
+	}
+	if err := json.Unmarshal([]byte(data), &m.Presence); err != nil {
+		return err
+	}
+	return nil
+}
 
 // MatchJoinAttempt decides whether to accept or deny the player session.
 func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ interface{}, presence runtime.Presence, metadata map[string]string) (interface{}, bool, string) {
@@ -234,9 +260,10 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		return nil, false, ""
 	}
 
-	logger = logger.WithField("mid", state.ID.UUID().String())
-	logger = logger.WithField("uid", presence.GetUserId())
-	logger = logger.WithField("username", presence.GetUsername())
+	logger = logger.WithFields(map[string]any{
+		"mid":      state.ID.UUID.String(),
+		"uid":      presence.GetUserId(),
+		"username": presence.GetUsername()})
 
 	if presence.GetSessionId() == state.Broadcaster.SessionID {
 
@@ -250,7 +277,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	}
 
 	// This is a player joining.
-	md := JoinMetadata{}
+	md := EntrantMetadata{}
 	if err := md.UnmarshalMap(metadata); err != nil {
 		return state, false, fmt.Sprintf("failed to unmarshal metadata: %v", err)
 	}
@@ -290,7 +317,8 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		"role":  mp.RoleAlignment,
 		"sid":   mp.GetSessionId(),
 		"uid":   mp.GetUserId(),
-		"eid":   mp.EntrantID.String()}).Info("Player joining the match.")
+		"eid":   mp.EntrantID(state.ID).String(),
+	}).Info("Player joining the match.")
 
 	tags := map[string]string{
 		"mode":     state.Mode.String(),
@@ -323,6 +351,12 @@ func (m *EvrMatch) playerJoinAttempt(state *MatchLabel, mp EvrMatchPresence) (Ev
 	for _, p := range state.presenceMap {
 		if p.GetSessionId() == mp.GetSessionId() || p.EvrID.Equals(mp.EvrID) {
 			return mp, JoinRejectReasonDuplicateJoin
+		}
+	}
+
+	for _, f := range state.RequiredFeatures {
+		if !lo.Contains(mp.SupportedFeatures, f) {
+			return mp, JoinRejectReasonFeatureMismatch
 		}
 	}
 
@@ -465,10 +499,10 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 			}
 			msg := "Player removed from game server."
 			// If the presence still has the entrant stream, then this was from nakama, not the server. inform the server.
-			if userPresences, err := nk.StreamUserList(StreamModeEntrant, mp.EntrantID.String(), "", mp.GetNodeId(), true, true); err != nil {
+			if userPresences, err := nk.StreamUserList(StreamModeEntrant, mp.EntrantID(state.ID).String(), "", mp.GetNodeId(), true, true); err != nil {
 				logger.Error("Failed to list user streams: %v", err)
 			} else if len(userPresences) > 0 {
-				rejects = append(rejects, mp.EntrantID)
+				rejects = append(rejects, mp.EntrantID(state.ID))
 				msg = "Removing player from game server."
 				nk.MetricsCounterAdd("match_entrant_kick_count", tags, 1)
 			}
@@ -529,7 +563,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 			}
 
 			if state.GameState != nil {
-				logger.Debug("Received match update message: %v", update)
+				logger.WithField("update", update).Debug("Received match update message.")
 				gs := state.GameState
 				u := update
 
@@ -543,7 +577,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 				}
 
 				if len(u.Goals) > 0 {
-					gs.Goals = append(gs.Goals, u.Goals...)
+					//gs.Goals = append(gs.Goals, u.Goals...)
 				}
 			}
 			updateLabel = true
@@ -658,7 +692,7 @@ func (m *EvrMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, db
 				"uid": presence.GetUserId(),
 				"sid": presence.GetSessionId(),
 			}).Warn("Match terminating, disconnecting player.")
-			nk.SessionDisconnect(ctx, presence.GetPlayerSession(), runtime.PresenceReasonDisconnect)
+			nk.SessionDisconnect(ctx, presence.EntrantID(state.ID).String(), runtime.PresenceReasonDisconnect)
 		}
 		// Disconnect the broadcasters session
 		logger.WithFields(map[string]any{
@@ -695,7 +729,7 @@ func (m *EvrMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db 
 				"sid": mp.GetSessionId(),
 			})
 			logger.Warn("Match shutting down, disconnecting player.")
-			if err := nk.StreamUserKick(StreamModeMatchAuthoritative, mp.EntrantID.String(), "", mp.GetNodeId(), mp); err != nil {
+			if err := nk.StreamUserKick(StreamModeMatchAuthoritative, mp.EntrantID(state.ID).String(), "", mp.GetNodeId(), mp); err != nil {
 				logger.Error("Failed to kick user from stream.")
 			}
 		}
@@ -716,6 +750,14 @@ func (r SignalResponse) String() string {
 		return ""
 	}
 	return string(b)
+}
+
+func SignalResponseFromString(data string) SignalResponse {
+	r := SignalResponse{}
+	if err := json.Unmarshal([]byte(data), &r); err != nil {
+		return SignalResponse{}
+	}
+	return r
 }
 
 // MatchSignal is called when a signal is sent into the match.
@@ -896,7 +938,7 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk run
 
 	state.StartTime = time.Now().UTC()
 	entrants := make([]evr.EvrId, 0)
-	message := evr.NewGameServerSessionStart(state.ID.UUID(), groupID, state.MaxSize, uint8(state.LobbyType), state.Broadcaster.AppId, state.Mode, state.Level, state.RequiredFeatures, entrants)
+	message := evr.NewGameServerSessionStart(state.ID.UUID, groupID, state.MaxSize, uint8(state.LobbyType), state.Broadcaster.AppId, state.Mode, state.Level, state.RequiredFeatures, entrants)
 	logger.WithField("message", message).Info("Starting session.")
 	messages := []evr.Message{
 		message,
