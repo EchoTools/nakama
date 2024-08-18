@@ -290,7 +290,7 @@ func NewTaxiBot(ctx context.Context, logger runtime.Logger, nk runtime.NakamaMod
 		userChannels:         &MapOf[string, string]{}, // userChannels maps discord user ids to channel ids
 		queueCh:              make(chan LinkMeta, 5),
 		rateLimiters:         &MapOf[string, *rate.Limiter]{},
-		messageRatePerSecond: 0.1,
+		messageRatePerSecond: 1 / 10.0,
 		messageBurst:         3,
 	}
 
@@ -677,23 +677,27 @@ func (e *TaxiBot) handleMessageReactionAdd(s *discordgo.Session, reaction *disco
 		dmChannelID = st.ID
 		e.userChannels.Store(reaction.UserID, dmChannelID)
 	}
-
-	// Message the user
-	// Create an echo taxi link for the message
-	applink := fmt.Sprintf("<%sspark://c/%s>", EchoTaxiPrefix, strings.ToUpper(matchID.UUID.String()))
-	dmMessage, err := s.ChannelMessageSend(dmChannelID, fmt.Sprintf("You have hailed a taxi to %s.\n\nGo into the game and click 'Play' on the main menu, or 'Find Match' on the lobby terminal. ", applink))
-	if err != nil {
-		logger.Warn("Error sending message: %v", err)
+	limiter := e.loadLimiter(dmChannelID)
+	if !limiter.Allow() {
+		logger.WithField("discord_id", reaction.UserID).Warn("Rate limited hail DM message")
+	} else {
+		// Message the user
+		// Create an echo taxi link for the message
+		applink := fmt.Sprintf("<%sspark://c/%s>", EchoTaxiPrefix, strings.ToUpper(matchID.UUID.String()))
+		dmMessage, err := s.ChannelMessageSend(dmChannelID, fmt.Sprintf("You have hailed a taxi to %s.\n\nGo into the game and click 'Play' on the main menu, or 'Find Match' on the lobby terminal. ", applink))
+		if err != nil {
+			logger.Warn("Error sending message: %v", err)
+		}
+		if dmMessage == nil {
+			return
+		}
+		// React to the message
+		if err = s.MessageReactionAdd(dmChannelID, dmMessage.ID, TaxiEmoji); err != nil {
+			logger.Warn("Error reacting to message: %v", err)
+		}
+		// track the DM message
+		e.linkRegistry.Track(matchID, dmChannelID, dmMessage.ID)
 	}
-	if dmMessage == nil {
-		return
-	}
-	// React to the message
-	if err = s.MessageReactionAdd(dmChannelID, dmMessage.ID, TaxiEmoji); err != nil {
-		logger.Warn("Error reacting to message: %v", err)
-	}
-	// track the DM message
-	e.linkRegistry.Track(matchID, dmChannelID, dmMessage.ID)
 
 	e.logger.Debug("%s hailed a taxi to %s", reaction.UserID, matchID.String())
 }
