@@ -35,14 +35,21 @@ OuterLoop:
 				continue
 			}
 		}
-		if _, ok := entry["message"]; !ok {
-			logger.Error("Remote log entry has no message type", zap.String("entry", str))
+
+		if message, ok := entry["message"]; ok {
+			if message == "CUSTOMIZATION_METRICS_PAYLOAD" {
+				entry["message_type"] = "customization_metrics_payload"
+			}
+		}
+
+		if _, ok := entry["message_type"]; !ok {
+			//logger.Debug("Remote log entry has no message type", zap.String("entry", str))
 			continue
 		}
 
-		messageType, ok := entry["message"].(string)
+		messageType, ok := entry["message_type"].(string)
 		if !ok {
-			logger.Error("Remote log entry has invalid message type", zap.String("entry", str))
+			logger.Debug("Remote log entry has invalid message type", zap.String("entry", str))
 			continue
 		}
 
@@ -80,7 +87,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 	entries := parseRemoteLogMessageEntries(logger, request.Logs)
 
 	// Add them to the journal first.
-	if isNew := p.userRemoteLogJournalRegistry.AddEntries(session.id, entries); isNew {
+	if found := p.userRemoteLogJournalRegistry.AddEntries(session.id, entries); !found {
 		// This is a new session, so we need to start a goroutine to remove/store the session's journal entries when the session is closed.
 		go func() {
 			<-session.Context().Done()
@@ -105,10 +112,14 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 					},
 				},
 			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+			defer cancel()
 			_, _, err = StorageWriteObjects(ctx, logger, session.pipeline.db, session.metrics, session.storageIndex, true, ops)
 			if err != nil {
-				logger.Error("Failed to write remote log", zap.Error(err))
+				logger.Error("Failed to write remote log journal.", zap.Error(err))
 			}
+			logger.Debug("Wrote remote log journal to storage.")
 		}()
 	}
 
@@ -129,19 +140,31 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				// Don't process disconnects for private games, or non-arena games.
 				continue
 			}
+
+			// Do not process disconnects for games that have not started.
+			if msg.GameInfoGameTime == 0 {
+				continue
+			}
+
 			userID, err := GetUserIDByEvrID(ctx, p.db, msg.PlayerInfoUserid)
 			if err != nil || userID == "" {
 				logger.Error("Failed to get user ID by evr ID", zap.Error(err))
 			}
 
-			profile, err := p.profileRegistry.Load(ctx, session.userID)
+			profile, err := p.profileRegistry.Load(ctx, uuid.FromStringOrNil(userID))
 			if err != nil {
 				logger.Error("Failed to load player's profile")
 			}
+
 			eq := profile.GetEarlyQuitStatistics()
 			eq.IncrementEarlyQuits()
 			profile.SetEarlyQuitStatistics(eq)
-			err = p.profileRegistry.SaveAndCache(ctx, session.userID, profile)
+			stats := profile.Server.Statistics
+			if stats != nil {
+				eq.ApplyEarlyQuitPenalty(logger, stats, evr.ModeArenaPublic, 0.01)
+			}
+
+			err = p.profileRegistry.SaveAndCache(ctx, uuid.FromStringOrNil(userID), profile)
 			if err != nil {
 				logger.Error("Failed to save player's profile")
 			}
@@ -192,8 +215,8 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				continue
 			}
 			update, _ = updates.LoadOrStore(sessionID, &MatchGameStateUpdate{})
-
 			update.FromVOIPLoudness(voipVolume)
+
 		case "game_settings":
 			fallthrough
 		case "session_started":

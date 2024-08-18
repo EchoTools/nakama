@@ -258,6 +258,10 @@ func (r *ProfileRegistry) GameProfile(ctx context.Context, logger *zap.Logger, u
 	if p.Server.Statistics == nil || p.Server.Statistics["arena"] == nil || p.Server.Statistics["combat"] == nil {
 		p.Server.Statistics = evr.NewStatistics()
 	}
+	count := p.Server.Statistics["arena"]["ArenaTies"].Count
+	if count == 0 {
+		p.Server.Statistics["arena"] = r.FixArenaStatistics(p.Server.Statistics["arena"])
+	}
 
 	// Update the account
 	if err := r.discordRegistry.UpdateAccount(ctx, userID); err != nil {
@@ -336,4 +340,27 @@ func (p *ProfileRegistry) SetLobbyProfile(ctx context.Context, userID uuid.UUID,
 		return fmt.Errorf("failed to save profile: %w", err)
 	}
 	return nil
+}
+
+func (p *ProfileRegistry) FixArenaStatistics(modeStats map[string]evr.MatchStatistic) map[string]evr.MatchStatistic {
+
+	data, err := json.Marshal(modeStats)
+	if err != nil {
+		return modeStats
+	}
+
+	newStats := ArenaStats{}
+	if err := json.Unmarshal(data, &newStats); err != nil {
+		return modeStats
+	}
+
+	data, err = json.Marshal(newStats)
+	if err != nil {
+		return modeStats
+	}
+
+	if err := json.Unmarshal(data, &modeStats); err != nil {
+		return modeStats
+	}
+	return modeStats
 }

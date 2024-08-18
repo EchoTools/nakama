@@ -126,6 +126,7 @@ type (
 	ctxVerboseKey             struct{} // The verbosity flag from matchmaking config
 	ctxIsPCVRKey              struct{} // The headset type
 	ctxRatingKey              struct{} // The user rating
+	ctxExternalServerAddrKey  struct{} // The external server address (IP:port)
 
 	//ctxMatchmakingQueryKey         struct{} // The Matchmaking query from the urlparam
 	//ctxMatchmakingGuildPriorityKey struct{} // The Matchmaking guild priority from the urlparam
@@ -182,6 +183,11 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 			v = v[:32]
 		}
 		ctx = context.WithValue(ctx, ctxAuthPasswordKey{}, v)
+	}
+
+	// Add the Password to the context if it's present in the request URL
+	if v := request.URL.Query().Get(ExternalServerIPURLParam); v != "" {
+		ctx = context.WithValue(ctx, ctxExternalServerAddrKey{}, v)
 	}
 
 	// Add the features list to the urlparam, sanitizing it
