@@ -74,10 +74,14 @@ func (p *EvrPipeline) lobbySessionRequest(ctx context.Context, logger *zap.Logge
 			if err != nil {
 				err = status.Errorf(codes.Internal, "failed to load next match from DB: %v", err)
 			} else if !matchID.IsNil() {
-				LeavePartyStream(session)
 				// If a match ID is found, join it.
 				params.CurrentMatchID = matchID
-				err = p.lobbyJoin(ctx, logger, session, params)
+				if _, _, err := p.matchRegistry.GetMatch(ctx, matchID.String()); err == nil {
+					LeavePartyStream(session)
+					if err = p.lobbyJoin(ctx, logger, session, params); err == nil {
+						return
+					}
+				}
 			} else if params.Role == evr.TeamSpectator {
 				// Leave the party if the user is in one
 				LeavePartyStream(session)

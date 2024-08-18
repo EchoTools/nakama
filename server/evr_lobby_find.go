@@ -99,7 +99,6 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 				case <-ctx.Done():
 					return nil
 				case <-time.After(5 * time.Second):
-				default:
 				}
 				leader := lobbyGroup.GetLeader()
 				// Check if the leader has changed to this player.
