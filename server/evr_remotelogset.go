@@ -16,16 +16,14 @@ import (
 )
 
 type GenericRemoteLog struct {
-	MessageType string `json:"message"`
+	MessageType string `json:"messageType"`
+	Message     string `json:"message"`
 }
 
-func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logger, session *sessionWS, evrID evr.EvrId, request *evr.RemoteLogSet) error {
-	logger.Debug("Processing remote log set", zap.Any("request", request))
-	updates := MapOf[uuid.UUID, *MatchGameStateUpdate]{}
+func parseRemoteLogMessageEntries(logger *zap.Logger, logs []string) []GenericRemoteLog {
+	entries := make([]GenericRemoteLog, 0, len(logs))
 OuterLoop:
-	for _, str := range request.Logs {
-		var update *MatchGameStateUpdate
-
+	for _, str := range logs {
 		// Unmarshal the top-level to check the message type.
 
 		entry := map[string]interface{}{}
@@ -34,17 +32,18 @@ OuterLoop:
 		if err := json.Unmarshal(data, &entry); err != nil {
 			if logger.Core().Enabled(zap.DebugLevel) {
 				logger.Debug("Non-JSON log entry", zap.String("entry", str))
+				continue
 			}
 		}
 		if _, ok := entry["message"]; !ok {
 			logger.Error("Remote log entry has no message type", zap.String("entry", str))
-			return nil
+			continue
 		}
 
 		messageType, ok := entry["message"].(string)
 		if !ok {
 			logger.Error("Remote log entry has invalid message type", zap.String("entry", str))
-			return nil
+			continue
 		}
 
 		messageType = strings.ToLower(messageType)
@@ -59,7 +58,6 @@ OuterLoop:
 				"iap",
 				"rich_presence",
 				"social",
-				"voip_loudness",
 			}
 			for _, ignored := range ignoredCategories {
 				if category == ignored {
@@ -67,12 +65,64 @@ OuterLoop:
 				}
 			}
 		}
+		entries = append(entries, GenericRemoteLog{
+			MessageType: messageType,
+			Message:     str,
+		})
+	}
 
-		logger.Debug("Processing remote log set", zap.Any("logs", entry))
-		switch strings.ToLower(messageType) {
+	return entries
+}
+
+func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logger, session *sessionWS, evrID evr.EvrId, request *evr.RemoteLogSet) error {
+
+	// Parse the useful remote logs from the set.
+	entries := parseRemoteLogMessageEntries(logger, request.Logs)
+
+	// Add them to the journal first.
+	if isNew := p.userRemoteLogJournalRegistry.AddEntries(session.id, entries); isNew {
+		// This is a new session, so we need to start a goroutine to remove/store the session's journal entries when the session is closed.
+		go func() {
+			<-session.Context().Done()
+			messages := p.userRemoteLogJournalRegistry.RemoveSessionAll(session.id)
+
+			data, err := json.Marshal(messages)
+			if err != nil {
+				logger.Error("Failed to marshal remote log messages", zap.Error(err))
+				return
+			}
+			// Write the remoteLog to storage.
+			ops := StorageOpWrites{
+				{
+					OwnerID: session.userID.String(),
+					Object: &api.WriteStorageObject{
+						Collection:      RemoteLogStorageCollection,
+						Key:             RemoteLogStorageJournalKey,
+						Value:           string(data),
+						PermissionRead:  &wrapperspb.Int32Value{Value: int32(1)},
+						PermissionWrite: &wrapperspb.Int32Value{Value: int32(0)},
+						Version:         "",
+					},
+				},
+			}
+			_, _, err = StorageWriteObjects(ctx, logger, session.pipeline.db, session.metrics, session.storageIndex, true, ops)
+			if err != nil {
+				logger.Error("Failed to write remote log", zap.Error(err))
+			}
+		}()
+	}
+
+	updates := MapOf[uuid.UUID, *MatchGameStateUpdate]{}
+
+	for _, e := range entries {
+		var update *MatchGameStateUpdate
+
+		// Unmarshal the top-level to check the message type.
+
+		switch strings.ToLower(e.MessageType) {
 		case "user_disconnect":
 			msg := &evr.RemoteLogUserDisconnected{}
-			if err := json.Unmarshal(data, msg); err != nil {
+			if err := json.Unmarshal([]byte(e.Message), msg); err != nil {
 				logger.Error("Failed to unmarshal user disconnect", zap.Error(err))
 			}
 			if msg.GameInfoIsPrivate || !msg.GameInfoIsArena {
@@ -101,7 +151,7 @@ OuterLoop:
 		case "goal":
 			// This is a goal message.
 			goal := evr.RemoteLogGoal{}
-			if err := json.Unmarshal(data, &goal); err != nil {
+			if err := json.Unmarshal([]byte(e.Message), &goal); err != nil {
 				logger.Error("Failed to unmarshal goal", zap.Error(err))
 				continue
 			}
@@ -120,14 +170,14 @@ OuterLoop:
 		case "ghost_user":
 			// This is a ghost user message.
 			ghostUser := &evr.RemoteLogGhostUser{}
-			if err := json.Unmarshal(data, ghostUser); err != nil {
+			if err := json.Unmarshal([]byte(e.Message), ghostUser); err != nil {
 				logger.Error("Failed to unmarshal ghost user", zap.Error(err))
 				continue
 			}
 			_ = ghostUser
 		case "voip_loudness":
 			voipVolume := evr.RemoteLogVOIPLoudness{}
-			if err := json.Unmarshal(data, &voipVolume); err != nil {
+			if err := json.Unmarshal([]byte(e.Message), &voipVolume); err != nil {
 				logger.Error("Failed to unmarshal voip volume", zap.Error(err))
 				continue
 			}
@@ -145,38 +195,9 @@ OuterLoop:
 
 			update.FromVOIPLoudness(voipVolume)
 		case "game_settings":
-			gameSettings := &evr.RemoteLogGameSettings{}
-			if err := json.Unmarshal(data, gameSettings); err != nil {
-				logger.Error("Failed to unmarshal game settings", zap.Error(err))
-				continue
-			}
-
-			// Store the game settings (this isn't really used)
-			ops := StorageOpWrites{
-				{
-					OwnerID: session.userID.String(),
-					Object: &api.WriteStorageObject{
-						Collection:      RemoteLogStorageCollection,
-						Key:             GamePlayerSettingsStorageKey,
-						Value:           string(data),
-						PermissionRead:  &wrapperspb.Int32Value{Value: int32(1)},
-						PermissionWrite: &wrapperspb.Int32Value{Value: int32(0)},
-						Version:         "",
-					},
-				},
-			}
-			if _, _, err := StorageWriteObjects(ctx, logger, session.pipeline.db, session.metrics, session.storageIndex, true, ops); err != nil {
-				logger.Error("Failed to write game settings", zap.Error(err))
-				continue
-			}
-
+			fallthrough
 		case "session_started":
-			// TODO let the match know the server loaded the session?
-			sessionStarted := &evr.RemoteLogSessionStarted{}
-			if err := json.Unmarshal(data, sessionStarted); err != nil {
-				logger.Error("Failed to unmarshal session started", zap.Error(err))
-				continue
-			}
+			fallthrough
 		case "customization item preview":
 			fallthrough
 		case "customization item equip":
@@ -184,19 +205,11 @@ OuterLoop:
 		case "podium interaction":
 			fallthrough
 		case "interaction_event":
-			// Avoid spamming the logs with interaction events.
-			if !logger.Core().Enabled(zap.DebugLevel) {
-				continue
-			}
-			event := &evr.RemoteLogInteractionEvent{}
-			if err := json.Unmarshal(data, &event); err != nil {
-				logger.Error("Failed to unmarshal interaction event", zap.Error(err))
-				continue
-			}
+			fallthrough
 		case "customization_metrics_payload":
 			// Update the server profile with the equipped cosmetic item.
 			c := &evr.RemoteLogCustomizationMetricsPayload{}
-			if err := json.Unmarshal(data, &c); err != nil {
+			if err := json.Unmarshal([]byte(e.Message), &c); err != nil {
 				logger.Error("Failed to unmarshal customization metrics", zap.Error(err))
 				continue
 			}
@@ -225,28 +238,6 @@ OuterLoop:
 			}
 
 		default:
-			if logger.Core().Enabled(zap.DebugLevel) {
-				// Write the remoteLog to storage.
-				ops := StorageOpWrites{
-					{
-						OwnerID: session.userID.String(),
-						Object: &api.WriteStorageObject{
-							Collection:      RemoteLogStorageCollection,
-							Key:             messageType,
-							Value:           str,
-							PermissionRead:  &wrapperspb.Int32Value{Value: int32(1)},
-							PermissionWrite: &wrapperspb.Int32Value{Value: int32(0)},
-							Version:         "",
-						},
-					},
-				}
-				_, _, err := StorageWriteObjects(ctx, logger, session.pipeline.db, session.metrics, session.storageIndex, true, ops)
-				if err != nil {
-					logger.Error("Failed to write remote log", zap.Error(err))
-				}
-			} else {
-				//logger.Debug("Received unknown remote log", zap.Any("entry", entry))
-			}
 		}
 	}
 
