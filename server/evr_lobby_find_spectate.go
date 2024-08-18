@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"slices"
@@ -52,6 +53,15 @@ func (p *EvrPipeline) lobbyFindSpectate(ctx context.Context, logger *zap.Logger,
 			for _, match := range matches {
 				matchID := MatchIDFromStringOrNil(match.GetMatchId())
 				if matchID.IsNil() {
+					continue
+				}
+				label := MatchLabel{}
+				if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), &label); err != nil {
+					logger.Debug("Failed to parse match label", zap.Error(err))
+					continue
+				}
+				// If there are already spectators in the match, skip it.
+				if label.RoleCount(SpectatorRole) > 0 {
 					continue
 				}
 

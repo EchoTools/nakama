@@ -132,6 +132,8 @@ func (e *TaxiBot) Initialize(dg *discordgo.Session) error {
 	dg.Identify.Intents |= discordgo.IntentDirectMessageReactions
 	dg.Identify.Intents |= discordgo.IntentMessageContent
 
+	//dg.LogLevel = discordgo.LogDebug
+
 	dg.StateEnabled = true
 	dg.AddHandler(e.handleMessageCreate)
 	dg.AddHandler(e.handleMessageReactionAdd)
