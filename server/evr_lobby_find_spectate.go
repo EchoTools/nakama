@@ -21,14 +21,14 @@ func (p *EvrPipeline) lobbyFindSpectate(ctx context.Context, logger *zap.Logger,
 	maxSize := MatchLobbyMaxSize - 1
 	query := fmt.Sprintf("+label.open:T +label.lobby_type:public +label.mode:%s +label.size:>=%d +label.size:<=%d", params.Mode.Token(), minSize, maxSize)
 	// creeate a delay timer
-	listIntervalDelay := 0 * time.Second
+	listIntervalDelay := time.NewTimer(250 * time.Millisecond)
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-time.After(listIntervalDelay):
+		case <-listIntervalDelay.C:
+		case <-time.After(3 * time.Second):
 		}
-		listIntervalDelay = 5 * time.Second
 
 		// list existing matches
 		matches, err := listMatches(ctx, p.runtimeModule, limit, minSize+1, maxSize+1, query)
