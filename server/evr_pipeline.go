@@ -58,11 +58,12 @@ type EvrPipeline struct {
 	runtimeModule        *RuntimeGoNakamaModule
 	runtimeLogger        runtime.Logger
 
-	profileRegistry     *ProfileRegistry
-	discordRegistry     DiscordRegistry
-	appBot              *DiscordAppBot
-	leaderboardRegistry *LeaderboardRegistry
-	sbmm                *SkillBasedMatchmaker
+	profileRegistry              *ProfileRegistry
+	discordRegistry              DiscordRegistry
+	appBot                       *DiscordAppBot
+	leaderboardRegistry          *LeaderboardRegistry
+	sbmm                         *SkillBasedMatchmaker
+	userRemoteLogJournalRegistry *UserLogJouralRegistry
 
 	createLobbyMu                    sync.Mutex
 	broadcasterRegistrationBySession *MapOf[string, *MatchBroadcaster] // sessionID -> MatchBroadcaster
@@ -110,6 +111,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	skillBasedMatchmaker := NewSkillBasedMatchmaker()
 	lobbyBuilder := NewLobbyBuilder(logger, sessionRegistry, matchRegistry, tracker, profileRegistry)
 	matchmaker.OnMatchedEntries(lobbyBuilder.handleMatchedEntries)
+	userRemoteLogJournalRegistry := NewUserRemoteLogJournalRegistry(sessionRegistry)
 	var appBot *DiscordAppBot
 
 	if disable, ok := vars["DISABLE_DISCORD_BOT"]; ok && disable == "true" {
@@ -173,9 +175,9 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		leaderboardRegistry:              leaderboardRegistry,
 		sbmm:                             skillBasedMatchmaker,
 		broadcasterRegistrationBySession: &broadcasterRegistrationBySession,
-
-		placeholderEmail: config.GetRuntime().Environment["PLACEHOLDER_EMAIL_DOMAIN"],
-		linkDeviceURL:    config.GetRuntime().Environment["LINK_DEVICE_URL"],
+		userRemoteLogJournalRegistry:     userRemoteLogJournalRegistry,
+		placeholderEmail:                 config.GetRuntime().Environment["PLACEHOLDER_EMAIL_DOMAIN"],
+		linkDeviceURL:                    config.GetRuntime().Environment["LINK_DEVICE_URL"],
 	}
 
 	// Create a timer to periodically clear the backfill queue
