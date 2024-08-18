@@ -59,6 +59,7 @@ OuterLoop:
 				"iap",
 				"rich_presence",
 				"social",
+				"voip_loudness",
 			}
 			for _, ignored := range ignoredCategories {
 				if category == ignored {
