@@ -32,6 +32,7 @@ const (
 	BroadcasterHMACDisabledUrlParam       = "disable_hmac"
 	FeaturesURLParam                      = "features"
 	RequiredFeaturesURLParam              = "required_features"
+	ExternalServerIPURLParam              = "server_address"
 
 	EvrIDStorageIndex            = "EvrIDs_Index"
 	GameClientSettingsStorageKey = "clientSettings"
@@ -891,11 +892,12 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 			}
 			if record != nil {
 				matchStat := evr.MatchStatistic{
-					Operand: stat.Operand,
+					Operation: stat.Operand,
 				}
-				if stat.Count != nil {
+				if matchStat.Count != 0 {
 					matchStat.Count = stat.Count
 				}
+
 				if stat.IsFloat64() {
 					// Combine the record score and the subscore as the decimal value
 					matchStat.Value = float64(record.Score) + float64(record.Subscore)/10000
@@ -908,7 +910,7 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 				if !ok {
 					serverProfile.Statistics[groupName] = make(map[string]evr.MatchStatistic)
 				}
-				matchStat.Operand = stat.Operand
+				matchStat.Operation = stat.Operand
 				serverProfile.Statistics[groupName][statName] = matchStat
 			}
 		}
@@ -929,9 +931,9 @@ func updateStats(profile *GameProfileData, stats evr.StatsUpdate) {
 		for statName, stat := range stats {
 
 			matchStat := evr.MatchStatistic{
-				Operand: stat.Operand,
+				Operation: stat.Operand,
 			}
-			if stat.Count != nil {
+			if stat.Count != 0 {
 				matchStat.Count = stat.Count
 				matchStat.Value = stat.Value
 			}

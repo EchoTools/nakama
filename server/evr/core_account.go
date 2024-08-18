@@ -251,9 +251,9 @@ type DeveloperFeatures struct {
 }
 
 type MatchStatistic struct {
-	Operand string `json:"op"`
-	Value   any    `json:"val"`
-	Count   *int64 `json:"cnt,omitempty"`
+	Operation string `json:"op"`
+	Value     any    `json:"val"`
+	Count     int64  `json:"cnt,omitempty"`
 }
 
 type EquippedCosmetics struct {
@@ -1333,14 +1333,14 @@ func NewStatistics() map[string]map[string]MatchStatistic {
 	return map[string]map[string]MatchStatistic{
 		"arena": {
 			"Level": MatchStatistic{
-				Operand: "add",
-				Value:   1,
+				Operation: "add",
+				Value:     1,
 			},
 		},
 		"combat": {
 			"Level": MatchStatistic{
-				Operand: "add",
-				Value:   1,
+				Operation: "add",
+				Value:     1,
 			},
 		},
 	}
@@ -1362,14 +1362,14 @@ func NewServerProfile() ServerProfile {
 		Statistics: map[string]map[string]MatchStatistic{
 			"arena": {
 				"Level": MatchStatistic{
-					Operand: "add",
-					Value:   1,
+					Operation: "add",
+					Value:     1,
 				},
 			},
 			"combat": {
 				"Level": MatchStatistic{
-					Operand: "add",
-					Value:   1,
+					Operation: "add",
+					Value:     1,
 				},
 			},
 		},

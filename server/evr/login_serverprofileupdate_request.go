@@ -34,7 +34,7 @@ type StatsUpdate struct {
 type StatUpdate struct {
 	Operand string `json:"op"`
 	Value   any    `json:"val"`
-	Count   *int64 `json:"cnt,omitempty"`
+	Count   int64  `json:"cnt"`
 }
 
 func (u StatUpdate) IsFloat64() bool {

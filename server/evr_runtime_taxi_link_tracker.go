@@ -81,20 +81,36 @@ func NewTaxiLinkRegistry(ctx context.Context, logger runtime.Logger, nk runtime.
 					if remove {
 						defer registry.delete(t)
 					}
-
-					reactions, err := dg.MessageReactions(t.ChannelID, t.MessageID, TaxiEmoji, 100, "", "")
-					if err != nil {
-						registry.logger.Warn("Failed to get reactions", "error", err)
-						continue
+					removeReactions := true
+					if channel, err := dg.Channel(t.ChannelID); err == nil {
+						removeReactions = !isDMChannel(channel)
 					}
-					for _, r := range reactions {
-						if !remove && r.ID == dg.State.User.ID {
+
+					if removeReactions {
+						reactions, err := dg.MessageReactions(t.ChannelID, t.MessageID, TaxiEmoji, 100, "", "")
+						if err != nil {
+							registry.logger.WithFields(map[string]any{
+								"error": err,
+							}).Warn("Failed to get reactions")
+							registry.delete(t)
 							continue
 						}
-						err = dg.MessageReactionRemove(t.ChannelID, t.MessageID, TaxiEmoji, r.ID)
-						if err != nil {
-							registry.logger.Warn("Failed to remove reaction", "error", err)
-							continue
+						for _, r := range reactions {
+							if !remove && r.ID == dg.State.User.ID {
+								continue
+							}
+
+							err = dg.MessageReactionRemove(t.ChannelID, t.MessageID, TaxiEmoji, r.ID)
+							if err != nil {
+								registry.logger.WithFields(map[string]any{
+									"error":      err,
+									"discord_id": r.ID,
+									"username":   r.Username,
+									"channel_id": t.ChannelID,
+									"message_id": t.MessageID,
+								}).Warn("Failed to remove reaction")
+								continue
+							}
 						}
 					}
 				}

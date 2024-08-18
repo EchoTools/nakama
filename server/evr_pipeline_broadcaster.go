@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -103,8 +104,31 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 
 	// Set the external address in the request (to use for the registration cache).
 	externalIP := net.ParseIP(session.ClientIP())
+	externalPort := request.Port
+
+	if extAddr, ok := ctx.Value(ctxExternalServerAddrKey{}).(string); ok {
+		parts := strings.Split(":", extAddr)
+		if len(parts) != 2 {
+			return errFailedRegistration(session, logger, fmt.Errorf("invalid external IP address: %s. it must be `ip:port`", extAddr), evr.BroadcasterRegistration_Unknown)
+		}
+		externalIP = net.ParseIP(parts[0])
+		if externalIP == nil {
+			// Try to resolve it as a hostname
+			ips, err := net.LookupIP(parts[0])
+			if err != nil {
+				return errFailedRegistration(session, logger, fmt.Errorf("invalid address `%s`: %v", err), evr.BroadcasterRegistration_Unknown)
+			}
+			externalIP = ips[0]
+		}
+		if p, err := strconv.Atoi(parts[1]); err != nil {
+			return errFailedRegistration(session, logger, fmt.Errorf("invalid external port: %s", parts[1]), evr.BroadcasterRegistration_Unknown)
+		} else {
+			externalPort = uint16(p)
+		}
+	}
+
 	if isPrivateIP(externalIP) {
-		logger.Warn("Broadcaster is on a private IP, using this systems external IP", zap.String("privateIP", externalIP.String()), zap.String("externalIP", p.externalIP.String()))
+		logger.Warn("Broadcaster is on a private IP, using this systems external IP", zap.String("privateIP", externalIP.String()), zap.String("externalIP", p.externalIP.String()), zap.String("Port", fmt.Sprintf("%d", externalPort)))
 		externalIP = p.externalIP
 	}
 
