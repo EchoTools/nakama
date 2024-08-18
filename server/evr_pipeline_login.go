@@ -40,6 +40,7 @@ const (
 	GameProfileStorageCollection = "GameProfiles"
 	GameProfileStorageKey        = "gameProfile"
 	RemoteLogStorageCollection   = "RemoteLogs"
+	RemoteLogStorageJournalKey   = "journal"
 )
 
 // errWithEvrIdFn prefixes an error with the EchoVR Id.
