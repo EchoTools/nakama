@@ -24,7 +24,6 @@ var (
 	// This is a list of functions that are called to initialize the runtime module from runtime_go.go
 	EvrRuntimeModuleFns = []func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) error{
 		InitializeEvrRuntimeModule,
-		EchoTaxiRuntimeModule,
 	}
 )
 
