@@ -69,7 +69,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		"match/public":                  MatchListPublicRPC,
 		"match":                         MatchRPC,
 		"match/prepare":                 PrepareMatchRPC,
-		"match/setnext":                 RESTfulRPCHandlerFactory[SetNextMatchRPCRequest](SetNextMatchRPC),
+		"player/setnextmatch":           SetNextMatchRPC,
 		"player/statistics":             PlayerStatisticsRPC,
 		"link":                          LinkingAppRpc,
 		"evr/servicestatus":             ServiceStatusRpc,
