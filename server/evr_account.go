@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/gofrs/uuid/v5"
@@ -58,6 +59,8 @@ func (p *GroupProfile) UpdateUnlockedItems(updated []evr.Symbol) {
 }
 
 type AccountMetadata struct {
+	account *api.Account
+
 	DisplayNameOverride        string            `json:"display_name_override"` // The display name override
 	GlobalBanReason            string            `json:"global_ban_reason"`     // The global ban reason
 	ActiveGroupID              string            `json:"active_group_id"`       // The active group ID
@@ -66,6 +69,36 @@ type AccountMetadata struct {
 	DisableAFKTimeout          bool              `json:"disable_afk_timeout"`   // Disable AFK detection
 	TargetUserID               string            `json:"target_user_id"`        // The target user ID to follow in public spaces
 	DiscordAccountCreationTime time.Time         `json:"discord_create_time"`
+	modified                   bool
+}
+
+func (a *AccountMetadata) ID() string {
+	return a.account.User.Id
+}
+
+func (a *AccountMetadata) Username() string {
+	return a.account.User.Username
+}
+
+func (a *AccountMetadata) DisplayName() string {
+	return a.account.User.DisplayName
+}
+
+func (a *AccountMetadata) LangTag() string {
+	return a.account.User.LangTag
+}
+
+func (a *AccountMetadata) AvatarURL() string {
+	return a.account.User.AvatarUrl
+}
+func EVRAccountFromAccount(account *api.Account) *AccountMetadata {
+	md := &AccountMetadata{
+		account: account,
+	}
+	if err := json.Unmarshal([]byte(account.User.Metadata), md); err != nil {
+		return nil
+	}
+	return md
 }
 
 func (a *AccountMetadata) GetActiveGroupID() uuid.UUID {
@@ -73,7 +106,21 @@ func (a *AccountMetadata) GetActiveGroupID() uuid.UUID {
 }
 
 func (a *AccountMetadata) SetActiveGroupID(id uuid.UUID) {
+	if a.ActiveGroupID == id.String() {
+		return
+	}
 	a.ActiveGroupID = id.String()
+	a.modified = true
+}
+
+func (a *AccountMetadata) GetDisplayName(groupID string) string {
+	if a.GroupDisplayNames == nil {
+		a.GroupDisplayNames = make(map[string]string)
+	}
+	if dn, ok := a.GroupDisplayNames[groupID]; ok {
+		return dn
+	}
+	return ""
 }
 
 func (a *AccountMetadata) GetGroupDisplayNameOrDefault(groupID string) string {
@@ -86,11 +133,15 @@ func (a *AccountMetadata) GetGroupDisplayNameOrDefault(groupID string) string {
 	return a.GetActiveGroupDisplayName()
 }
 
-func (a *AccountMetadata) SetGroupDisplayName(groupID, displayName string) {
+func (a *AccountMetadata) SetGroupDisplayName(groupID, displayName string) bool {
 	if a.GroupDisplayNames == nil {
 		a.GroupDisplayNames = make(map[string]string)
 	}
+	if a.GroupDisplayNames[groupID] == displayName {
+		return false
+	}
 	a.GroupDisplayNames[groupID] = displayName
+	return true
 }
 
 func (a *AccountMetadata) GetActiveGroupDisplayName() string {
@@ -100,11 +151,15 @@ func (a *AccountMetadata) GetActiveGroupDisplayName() string {
 	return a.GroupDisplayNames[a.ActiveGroupID]
 }
 
-func (a *AccountMetadata) MarshalToMap() map[string]interface{} {
+func (a *AccountMetadata) MarshalMap() map[string]interface{} {
 	b, _ := json.Marshal(a)
 	var m map[string]interface{}
 	_ = json.Unmarshal(b, &m)
 	return m
+}
+
+func (a *AccountMetadata) NeedsUpdate() bool {
+	return a.modified
 }
 
 type AccountCosmetics struct {
@@ -193,4 +248,34 @@ func GetDisplayNameByGroupID(ctx context.Context, nk runtime.NakamaModule, userI
 	} else {
 		return account.GetUser().GetUsername(), nil
 	}
+}
+
+func GetGuildGroupMemberships(ctx context.Context, nk runtime.NakamaModule, userID string, groupIDs []string) ([]GuildGroupMembership, error) {
+
+	memberships := make([]GuildGroupMembership, 0)
+	cursor := ""
+	for {
+		// Fetch the groups using the provided userId
+		userGroups, _, err := nk.UserGroupsList(ctx, userID, 100, nil, cursor)
+		if err != nil {
+			return nil, fmt.Errorf("error getting user groups: %w", err)
+		}
+		for _, ug := range userGroups {
+			g := ug.GetGroup()
+			if g.GetLangTag() != "guild" {
+				continue
+			}
+			if len(groupIDs) > 0 && !slices.Contains(groupIDs, g.GetId()) {
+				continue
+			}
+
+			membership := NewGuildGroupMembership(g, uuid.FromStringOrNil(userID), api.UserGroupList_UserGroup_State(ug.GetState().GetValue()))
+
+			memberships = append(memberships, membership)
+		}
+		if cursor == "" {
+			break
+		}
+	}
+	return memberships, nil
 }

@@ -48,7 +48,7 @@ type AccountProfile struct {
 	evrID    evr.EvrId
 }
 
-func GetEVRAccount(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, userID uuid.UUID, evrID *evr.EvrId) (*AccountProfile, error) {
+func GetEVRAccountProfile(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, userID uuid.UUID, evrID *evr.EvrId) (*AccountProfile, error) {
 	account, err := nk.AccountGetId(ctx, userID.String())
 	if err != nil || account == nil {
 		return nil, fmt.Errorf("failed to get account: %w", err)

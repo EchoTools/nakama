@@ -41,18 +41,14 @@ type DiscordRegistry interface {
 	GetBot() *discordgo.Session
 	Logger() runtime.Logger
 	RuntimeModule() runtime.NakamaModule
-	UpdateAccount(ctx context.Context, userId uuid.UUID) error
 	ReplaceMentions(guildID, s string) string
 	GetGuildGroupMetadata(ctx context.Context, groupId string) (metadata *GroupMetadata, err error)
 	SetGuildGroupMetadata(ctx context.Context, groupId string, metadata *GroupMetadata) error
 	// GetGuildMember looks up the Discord member by the guild ID and member ID. Potentially using the state cache.
 	GetGuildMember(ctx context.Context, guildId, memberId string) (*discordgo.Member, error)
-	SynchronizeGroup(ctx context.Context, guild *discordgo.Guild) error
 	GetGuild(ctx context.Context, guildId string) (*discordgo.Guild, error)
 	GetGuildGroupMemberships(ctx context.Context, userId uuid.UUID, groupIDs []uuid.UUID) ([]GuildGroupMembership, error)
 	GetUser(ctx context.Context, discordId string) (*discordgo.User, error)
-	UpdateGuildGroup(ctx context.Context, logger runtime.Logger, userID uuid.UUID, guildID string) error
-	UpdateAllGuildGroupsForUser(ctx context.Context, logger runtime.Logger, userID uuid.UUID) error
 	ProcessRequest(ctx context.Context, session *sessionWS, in evr.Message) error
 	CheckUser2FA(ctx context.Context, userID uuid.UUID) (bool, error)
 }
@@ -416,203 +412,6 @@ func (r *LocalDiscordRegistry) GetGuildGroupMemberships(ctx context.Context, use
 	return memberships, nil
 }
 
-// UpdateAccount updates the Nakama account with the Discord user data
-func (r *LocalDiscordRegistry) UpdateAccount(ctx context.Context, userID uuid.UUID) error {
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-
-	logger := r.logger.WithField("function", "UpdateAccount")
-	discordId, err := r.GetDiscordIdByUserId(ctx, userID)
-	if err != nil {
-		return fmt.Errorf("error getting discord id: %v", err)
-	}
-
-	timer := time.Now()
-	if r.metrics != nil {
-
-		defer func() { logger.Debug("UpdateAccount took %dms", time.Since(timer)/time.Millisecond) }()
-		defer func() {
-			r.metrics.CustomTimer("UpdateAccountFn_duration", nil, time.Since(timer))
-		}()
-	}
-
-	// Get the discord User
-	u, err := r.GetUser(ctx, discordId)
-	if err != nil {
-		return fmt.Errorf("error getting discord user: %v", err)
-	}
-
-	// Get the nakama account for this discord user
-	userId, err := r.GetUserIdByDiscordId(ctx, discordId, true)
-	if err != nil {
-		return fmt.Errorf("error getting nakama user: %v", err)
-	}
-
-	// Map Discord user data onto Nakama account data
-	username := u.Username
-	s := strings.SplitN(u.Locale, "-", 2)
-	langTag := s[0]
-	avatar := u.AvatarURL("512")
-
-	// Update the basic account details
-
-	if err := r.nk.AccountUpdateId(ctx, userId.String(), username, nil, "", "", "", langTag, avatar); err != nil {
-		r.logger.Error("Error updating account %s: %v", username, err)
-	}
-
-	r.Store(discordId, userId.String())
-	r.Store(userId.String(), discordId)
-
-	return nil
-}
-
-func (r *LocalDiscordRegistry) UpdateGuildGroup(ctx context.Context, logger runtime.Logger, userID uuid.UUID, guildID string) error {
-	// If discord bot is not responding, return
-	if r.bot == nil {
-		return fmt.Errorf("discord bot is not responding")
-	}
-	userIDStrs := []string{userID.String()}
-	// Get teh user's discordID
-	discordID, err := r.GetDiscordIdByUserId(ctx, userID)
-	if err != nil {
-		return fmt.Errorf("error getting discord id: %v", err)
-	}
-
-	groupID, err := r.GetGroupIDbyGuildID(ctx, guildID)
-	if err != nil {
-		return fmt.Errorf("error getting group id: %v", err)
-	}
-
-	md, err := r.GetGuildGroupMetadata(ctx, groupID.String())
-	if err != nil {
-		return fmt.Errorf("error getting guild group metadata: %v", err)
-	}
-
-	// Get the member
-	member, err := r.bot.GuildMember(guildID, discordID)
-	if err != nil {
-		if restError, _ := err.(*discordgo.RESTError); errors.As(err, &restError) && restError.Message != nil && restError.Message.Code != discordgo.ErrCodeUnknownMember {
-			return fmt.Errorf("error getting guild member: %w", err)
-		}
-	}
-
-	account, err := r.nk.AccountGetId(ctx, userID.String())
-	if err != nil {
-		return fmt.Errorf("error getting account: %v", err)
-	}
-
-	if len(account.Devices) == 0 {
-		if md.IsLinkedRole != "" && slices.Contains(member.Roles, md.IsLinkedRole) {
-			// Remove the role
-			if err := r.bot.GuildMemberRoleRemove(guildID, discordID, md.IsLinkedRole); err != nil {
-				return fmt.Errorf("error adding role to member: %w", err)
-			}
-		}
-	} else {
-		// Ensure the member has the is_linked role for the guild
-		if md.IsLinkedRole != "" && !slices.Contains(member.Roles, md.IsLinkedRole) {
-			// Assign the role
-			if err := r.bot.GuildMemberRoleAdd(guildID, discordID, md.IsLinkedRole); err != nil {
-				return fmt.Errorf("error adding role to member: %w", err)
-			}
-		}
-	}
-
-	// Get all of the user's memberships
-	memberships, err := r.GetGuildGroupMemberships(ctx, userID, []uuid.UUID{groupID})
-	if err != nil {
-		return fmt.Errorf("error getting guild group memberships: %v", err)
-	}
-	var membership *GuildGroupMembership
-	for _, m := range memberships {
-		if m.GuildGroup.GuildID() == guildID {
-			membership = &m
-			break
-		}
-	}
-	// If the member is not found, the user is not in the guild
-	if member == nil {
-		if membership != nil {
-			if err := r.nk.GroupUsersKick(ctx, SystemUserID, groupID.String(), userIDStrs); err != nil {
-				return fmt.Errorf("error kicking user from group: %w", err)
-			}
-		}
-		return nil
-	}
-
-	currentRoles := member.Roles
-
-	if membership == nil {
-		if md.MemberRole == "" || slices.Contains(currentRoles, md.MemberRole) {
-			if err := r.nk.GroupUsersAdd(ctx, SystemUserID, groupID.String(), userIDStrs); err != nil {
-				return fmt.Errorf("error adding user to group: %w", err)
-			}
-		}
-	}
-
-	// Get the current membership state of the user
-	memberships, err = r.GetGuildGroupMemberships(ctx, userID, []uuid.UUID{groupID})
-	if err != nil {
-		return fmt.Errorf("error getting guild group memberships: %v", err)
-	}
-
-	if len(memberships) == 0 {
-		return fmt.Errorf("unexpected: no memberships found for user %s", userID)
-	}
-	membership = &memberships[0]
-	userIDStr := userID.String()
-	groupIDStr := groupID.String()
-	if md.ModeratorRole != "" {
-		// Make sure the user is an "admin" in the group
-		if slices.Contains(currentRoles, md.ModeratorRole) {
-			if !membership.isModerator {
-				if err := r.nk.GroupUsersPromote(ctx, SystemUserID, groupIDStr, userIDStrs); err != nil {
-					return fmt.Errorf("error promoting user to moderator: %w", err)
-				}
-			}
-		} else if membership.isModerator {
-			if err := r.nk.GroupUsersDemote(ctx, SystemUserID, groupIDStr, userIDStrs); err != nil {
-				return fmt.Errorf("error demoting user from moderator: %w", err)
-			}
-		}
-		md.ModeratorUserIDs = append(md.ModeratorUserIDs, userIDStr)
-	}
-
-	var updated bool
-	var needsUpdate bool
-
-	updated, md.ServerHostUserIDs = UpdateRoleCache(userIDStr, md.ServerHostRole, currentRoles, md.ServerHostUserIDs)
-	needsUpdate = needsUpdate || updated
-
-	updated, md.AllocatorUserIDs = UpdateRoleCache(userIDStr, md.AllocatorRole, currentRoles, md.AllocatorUserIDs)
-	needsUpdate = needsUpdate || updated
-
-	updated, md.SuspendedUserIDs = UpdateRoleCache(userIDStr, md.SuspensionRole, currentRoles, md.SuspendedUserIDs)
-	needsUpdate = needsUpdate || updated
-
-	updated, md.AccountAgeBypassUserIDs = UpdateRoleCache(userIDStr, md.AccountAgeBypassRole, currentRoles, md.AccountAgeBypassUserIDs)
-	needsUpdate = needsUpdate || updated
-
-	if needsUpdate {
-		mdMap, err := md.MarshalToMap()
-		if err != nil {
-			return fmt.Errorf("error marshalling group metadata: %w", err)
-		}
-		// Get the group
-		groups, err := r.nk.GroupsGetId(ctx, []string{groupID.String()})
-		if err != nil {
-			return fmt.Errorf("error getting group: %w", err)
-		}
-		g := groups[0]
-
-		if err := r.nk.GroupUpdate(ctx, g.Id, SystemUserID, g.Name, g.CreatorId, g.LangTag, g.Description, g.AvatarUrl, g.Open.Value, mdMap, int(g.MaxCount)); err != nil {
-			return fmt.Errorf("error updating group: %w", err)
-		}
-	}
-
-	return nil
-}
-
 func UpdateRoleCache(userID, role string, currentRoles, cache []string) (bool, []string) {
 	updated := false
 	if role != "" && slices.Contains(currentRoles, role) != slices.Contains(cache, userID) {
@@ -629,21 +428,6 @@ func UpdateRoleCache(userID, role string, currentRoles, cache []string) (bool, [
 		updated = true
 	}
 	return updated, cache
-}
-
-func (r *LocalDiscordRegistry) UpdateAllGuildGroupsForUser(ctx context.Context, logger runtime.Logger, userID uuid.UUID) error {
-	// Check every guild the bot is in for this user.
-	for _, guild := range r.bot.State.Guilds {
-		logger := logger.WithFields(map[string]any{
-			"guild": guild.ID,
-			"user":  userID,
-		})
-
-		if err := r.UpdateGuildGroup(ctx, logger, userID, guild.ID); err != nil {
-			continue
-		}
-	}
-	return nil
 }
 
 // GetUserIdByDiscordId looks up, or creates, the Nakama user ID by the Discord user ID; potentially using the cache.
@@ -825,63 +609,6 @@ func (r *LocalDiscordRegistry) findOrCreateGroup(ctx context.Context, groupId, n
 	return group, nil
 }
 
-func (r *LocalDiscordRegistry) SynchronizeGroup(ctx context.Context, guild *discordgo.Guild) error {
-	var err error
-
-	// Get the owner's nakama user
-	uid, err := r.GetUserIdByDiscordId(ctx, guild.OwnerID, true)
-	if err != nil {
-		return fmt.Errorf("error getting guild owner id: %w", err)
-	}
-	ownerId := uid.String()
-	// Check the lookup table for the guild group
-	groupId, found := r.Get(guild.ID)
-	if !found {
-		groupId = ""
-	}
-
-	// Find or create the guild group
-	guildGroup, err := r.findOrCreateGroup(ctx, groupId, guild.Name, guild.Description, ownerId, "guild", guild)
-	if err != nil {
-		return fmt.Errorf("error finding/creating guild group: %w", err)
-	}
-
-	// Unmarshal the guild group's metadata for updating.
-	guildMetadata := &GroupMetadata{}
-	if err := json.Unmarshal([]byte(guildGroup.GetMetadata()), guildMetadata); err != nil {
-		return fmt.Errorf("error unmarshalling group metadata: %w", err)
-	}
-
-	// Set the group Id in the metadata so it can be found during an error.
-	guildMetadata.GuildID = guild.ID
-
-	// Set a default rules, or get the rules from the channel topic
-	guildMetadata.RulesText = "No #rules channel found. Please create the channel and set the topic to the rules."
-	channels, err := r.bot.GuildChannels(guild.ID)
-	if err != nil {
-		return fmt.Errorf("error getting guild channels: %w", err)
-	}
-	for _, channel := range channels {
-		if channel.Type == discordgo.ChannelTypeGuildText && channel.Name == "rules" {
-			guildMetadata.RulesText = channel.Topic
-			break
-		}
-	}
-
-	// Rewrite the guild groups metadata
-	md, err := guildMetadata.MarshalToMap()
-	if err != nil {
-		return fmt.Errorf("error marshalling group metadata: %w", err)
-	}
-
-	// Update the guild group
-	if err := r.nk.GroupUpdate(ctx, guildGroup.GetId(), r.botUserID.String(), guild.Name, ownerId, "guild", guild.Description, guild.IconURL("512"), false, md, 100000); err != nil {
-		return fmt.Errorf("error updating guild group: %w", err)
-	}
-
-	return nil
-}
-
 func (r *LocalDiscordRegistry) OnGuildMembersChunk(ctx context.Context, b *discordgo.Session, e *discordgo.GuildMembersChunk, logger runtime.Logger, nk runtime.NakamaModule, initializer runtime.Initializer) error {
 	// Get the nakama group for the guild
 
@@ -913,56 +640,6 @@ func (r *LocalDiscordRegistry) OnGuildMembersChunk(ctx context.Context, b *disco
 	return nil
 }
 
-func (r *LocalDiscordRegistry) GetAllSuspensions(ctx context.Context, userId uuid.UUID) ([]*SuspensionStatus, error) {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	// Get the discordId for the userId
-	discordId, err := r.GetDiscordIdByUserId(ctx, userId)
-	if err != nil {
-		return nil, err
-	}
-
-	// Get a list of the bot's guilds
-	groups, err := r.GetGuildGroupMemberships(ctx, userId, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	// Get the metadata for each guild and it's suspension roles
-	suspensions := make([]*SuspensionStatus, 0)
-	for _, gm := range groups {
-		group := gm.GuildGroup
-		md := group.Metadata
-		// Get the guild member's roles
-		member, err := r.GetGuildMember(ctx, md.GuildID, discordId)
-		if err != nil {
-			return nil, fmt.Errorf("error getting guild member: %w", err)
-		}
-		if member == nil {
-			continue
-		}
-		// Look for an intersection between suspension roles and the member's roles
-		if slices.Contains(member.Roles, md.SuspensionRole) {
-			// Get the role's name
-			role, err := r.bot.State.Role(md.GuildID, md.SuspensionRole)
-			if err != nil {
-				return nil, fmt.Errorf("error getting guild role: %w", err)
-			}
-			status := &SuspensionStatus{
-				GuildId:       group.GuildID(),
-				GuildName:     group.Name(),
-				UserDiscordId: discordId,
-				UserId:        userId.String(),
-				RoleId:        md.SuspensionRole,
-				RoleName:      role.Name,
-			}
-			// Apppend the suspension status to the list
-			suspensions = append(suspensions, status)
-		}
-	}
-	return suspensions, nil
-}
-
 func (r *LocalDiscordRegistry) isModerator(ctx context.Context, guildID, discordID string) (isModerator bool, isGlobal bool, err error) {
 
 	userID, err := r.GetUserIdByDiscordId(ctx, discordID, false)
@@ -989,7 +666,7 @@ func (r *LocalDiscordRegistry) isModerator(ctx context.Context, guildID, discord
 		return false, false, fmt.Errorf("member not found: %s", discordID)
 	}
 	// Check if the member has the moderator role
-	return slices.Contains(member.Roles, md.ModeratorRole), false, nil
+	return slices.Contains(member.Roles, md.Roles.Moderator), false, nil
 }
 
 func (r *LocalDiscordRegistry) IsGlobalModerator(ctx context.Context, userID uuid.UUID) (bool, error) {

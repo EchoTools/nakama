@@ -30,7 +30,7 @@ const (
 )
 
 // NewGameServerPlayersRejected initializes a new GameServerPlayersRejected message with the provided arguments.
-func NewBroadcasterPlayersRejected(errorCode PlayerRejectionReason, playerSessions ...uuid.UUID) *GameServerJoinRejected {
+func NewGameServerEntrantRejected(errorCode PlayerRejectionReason, playerSessions ...uuid.UUID) *GameServerJoinRejected {
 	return &GameServerJoinRejected{
 		ErrorCode:  errorCode,
 		EntrantIDs: playerSessions,

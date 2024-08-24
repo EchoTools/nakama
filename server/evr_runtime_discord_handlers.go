@@ -21,6 +21,338 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+func (d *DiscordAppBot) checkDisplayName(ctx context.Context, nk runtime.NakamaModule, userID string, displayName string) (string, error) {
+
+	// Filter usernames of other players
+	users, err := nk.UsersGetUsername(ctx, []string{displayName})
+	if err != nil {
+		return "", fmt.Errorf("error getting users by username: %w", err)
+	}
+	for _, u := range users {
+		if u.Id == userID {
+			continue
+		}
+		return "", status.Errorf(codes.AlreadyExists, "username `%s` is already taken", displayName)
+	}
+
+	result, err := nk.StorageRead(ctx, []*runtime.StorageRead{
+		{
+			Collection: DisplayNameCollection,
+			Key:        strings.ToLower(displayName),
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("error reading displayNames: %w", err)
+	}
+
+	for _, o := range result {
+		if o.UserId == userID {
+			continue
+		}
+		return "", status.Errorf(codes.AlreadyExists, "display name `%s` is already taken", displayName)
+	}
+
+	return displayName, nil
+}
+
+func (d *DiscordAppBot) recordDisplayName(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, groupID string, userID string, displayName string) error {
+
+	// Purge old display names
+	records, err := GetDisplayNameRecords(ctx, logger, nk, userID)
+	if err != nil {
+		return fmt.Errorf("error getting display names: %w", err)
+	}
+	storageDeletes := []*runtime.StorageDelete{}
+	if len(records) > 2 {
+		// Sort the records by create time
+		sort.SliceStable(records, func(i, j int) bool {
+			return records[i].CreateTime.Seconds > records[j].CreateTime.Seconds
+		})
+		// Delete all but the first two
+		for i := 2; i < len(records); i++ {
+			storageDeletes = append(storageDeletes, &runtime.StorageDelete{
+				Collection: DisplayNameCollection,
+				Key:        records[i].Key,
+				UserID:     userID,
+			})
+		}
+	}
+
+	content := map[string]string{
+		"displayName": displayName,
+	}
+	data, _ := json.Marshal(content)
+
+	// Update the account
+	accountUpdates := []*runtime.AccountUpdate{}
+
+	storageWrites := []*runtime.StorageWrite{
+		{
+			Collection: DisplayNameCollection,
+			Key:        strings.ToLower(displayName),
+			UserID:     userID,
+			Value:      string(data),
+			Version:    "",
+		},
+	}
+
+	walletUpdates := []*runtime.WalletUpdate{}
+	updateLedger := true
+	if _, _, err = nk.MultiUpdate(ctx, accountUpdates, storageWrites, storageDeletes, walletUpdates, updateLedger); err != nil {
+		return fmt.Errorf("error updating account: %w", err)
+	}
+	return nil
+}
+
+func (d *DiscordAppBot) updateAccount(ctx context.Context, member *discordgo.Member) error {
+
+	account, membership, err := d.GuildUser(ctx, member.GuildID, member.User.ID)
+	if err != nil {
+		return fmt.Errorf("failed to get guild user: %w", err)
+	}
+	update := false
+
+	displayName := sanitizeDisplayName(member.DisplayName())
+	if account.GetDisplayName(membership.GuildGroup.ID().String()) != displayName {
+
+		if displayName, err := d.checkDisplayName(ctx, d.nk, account.ID(), displayName); err == nil {
+			if err := d.recordDisplayName(ctx, d.logger, d.nk, membership.GuildGroup.ID().String(), account.ID(), displayName); err != nil {
+				return fmt.Errorf("error setting display name: %w", err)
+			}
+			groupID := d.GuildIDToGroupID(member.GuildID)
+			account.SetGroupDisplayName(groupID, displayName)
+		}
+	}
+
+	if account.Username() != member.User.Username {
+		update = true
+	}
+
+	langTag := strings.SplitN(member.User.Locale, "-", 2)[0]
+	if account.LangTag() != langTag {
+		update = true
+	}
+
+	if account.AvatarURL() != member.User.AvatarURL("512") {
+		update = true
+	}
+
+	if update {
+		if err := d.nk.AccountUpdateId(ctx, account.ID(), member.User.Username, account.MarshalMap(), displayName, "", "", langTag, member.User.AvatarURL("512")); err != nil {
+			return fmt.Errorf("failed to update account: %w", err)
+		}
+	}
+
+	if membership.GuildGroup.UpdateRoleCache(account.ID(), member.Roles) {
+		g := membership.GuildGroup.Group
+		mdMap := membership.GuildGroup.Metadata.MarshalMap()
+		if err := d.nk.GroupUpdate(ctx, g.Id, SystemUserID, g.Name, g.CreatorId, g.LangTag, g.Description, g.AvatarUrl, g.Open.Value, mdMap, int(g.MaxCount)); err != nil {
+			return fmt.Errorf("error updating group: %w", err)
+		}
+	}
+
+	accountLinkedRole := membership.GuildGroup.Metadata.Roles.AccountLinked
+	if accountLinkedRole != "" {
+		if len(account.account.Devices) == 0 {
+			if slices.Contains(member.Roles, accountLinkedRole) {
+				// Remove the role
+				if err := d.dg.GuildMemberRoleRemove(member.GuildID, member.User.ID, accountLinkedRole); err != nil {
+					return fmt.Errorf("error adding role to member: %w", err)
+				}
+			}
+		} else {
+			if !slices.Contains(member.Roles, accountLinkedRole) {
+				// Assign the role
+				if err := d.dg.GuildMemberRoleAdd(member.GuildID, member.User.ID, accountLinkedRole); err != nil {
+					return fmt.Errorf("error adding role to member: %w", err)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+func (d *DiscordAppBot) syncLinkedRoles(ctx context.Context, userID string) error {
+
+	memberships, err := GetGuildGroupMemberships(ctx, d.nk, userID, nil)
+	if err != nil {
+		return fmt.Errorf("failed to get guild group memberships: %w", err)
+	}
+	for _, membership := range memberships {
+		if membership.GuildGroup.Metadata.Roles.AccountLinked != "" {
+			if membership.GuildGroup.IsAccountLinked(userID) {
+				if err := d.dg.GuildMemberRoleAdd(membership.GuildGroup.ID().String(), userID, membership.GuildGroup.Metadata.Roles.AccountLinked); err != nil {
+					return fmt.Errorf("error adding role to member: %w", err)
+				}
+			} else {
+				if err := d.dg.GuildMemberRoleRemove(membership.GuildGroup.ID().String(), userID, membership.GuildGroup.Metadata.Roles.AccountLinked); err != nil {
+					return fmt.Errorf("error removing role from member: %w", err)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (d *DiscordAppBot) updateGuild(ctx context.Context, logger *zap.Logger, guild *discordgo.Guild) error {
+
+	var err error
+	botUserID := d.DiscordIDToUserID(d.dg.State.User.ID)
+	if botUserID == "" {
+		botUserID, _, _, err = d.nk.AuthenticateCustom(ctx, d.dg.State.User.ID, d.dg.State.User.Username, true)
+		if err != nil {
+			return fmt.Errorf("failed to authenticate (or create) bot user %s: %w", d.dg.State.User.ID, err)
+		}
+	}
+
+	ownerUserID := d.DiscordIDToUserID(guild.OwnerID)
+	if ownerUserID == "" {
+		ownerMember, err := d.dg.GuildMember(guild.ID, guild.OwnerID)
+		if err != nil {
+			return fmt.Errorf("failed to get guild owner: %w", err)
+		}
+		ownerUserID, _, _, err = d.nk.AuthenticateCustom(ctx, guild.OwnerID, ownerMember.User.Username, true)
+		if err != nil {
+			return fmt.Errorf("failed to authenticate (or create) guild owner %s: %w", guild.OwnerID, err)
+		}
+	}
+
+	groupID := d.GuildIDToGroupID(guild.ID)
+	if groupID == "" {
+
+		gm, err := NewGuildGroupMetadata(guild.ID).MarshalToMap()
+		if err != nil {
+			return fmt.Errorf("error marshalling group metadata: %w", err)
+		}
+
+		_, err = d.nk.GroupCreate(ctx, ownerUserID, guild.Name, botUserID, GuildGroupLangTag, guild.Description, guild.IconURL("512"), false, gm, 100000)
+		if err != nil {
+			return fmt.Errorf("error creating group: %w", err)
+		}
+	} else {
+
+		md, err := GetGuildGroupMetadata(ctx, d.db, groupID)
+		if err != nil {
+			return fmt.Errorf("error getting guild group metadata: %w", err)
+		}
+
+		md.RoleCache = make(map[string][]string, len(guild.Roles))
+
+		for _, role := range md.Roles.Slice() {
+			md.RoleCache[role] = make([]string, 0)
+		}
+
+		// Update the group
+		md.RulesText = "No #rules channel found. Please create the channel and set the topic to the rules."
+
+		for _, channel := range guild.Channels {
+			if channel.Type == discordgo.ChannelTypeGuildText && channel.Name == "rules" {
+				md.RulesText = channel.Topic
+				break
+			}
+		}
+
+		if err := d.nk.GroupUpdate(ctx, groupID, ownerUserID, guild.Name, botUserID, GuildGroupLangTag, guild.Description, guild.IconURL("512"), true, md.MarshalMap(), 100000); err != nil {
+			return fmt.Errorf("error updating group: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func (d *DiscordAppBot) handleGuildCreate(logger *zap.Logger, s *discordgo.Session, e *discordgo.GuildCreate) error {
+	ctx, cancel := context.WithTimeout(d.ctx, time.Second*5)
+	defer cancel()
+	logger.Info("Guild Create", zap.Any("guild", e.Guild))
+	if err := d.updateGuild(ctx, logger, e.Guild); err != nil {
+		return fmt.Errorf("failed to update guild: %w", err)
+	}
+	return nil
+}
+
+func (d *DiscordAppBot) handleGuildUpdate(logger *zap.Logger, s *discordgo.Session, e *discordgo.GuildUpdate) error {
+	ctx, cancel := context.WithTimeout(d.ctx, time.Second*5)
+	defer cancel()
+	logger.Info("Guild Update", zap.Any("guild", e.Guild))
+	if err := d.updateGuild(ctx, logger, e.Guild); err != nil {
+		return fmt.Errorf("failed to update guild: %w", err)
+	}
+	return nil
+}
+
+func (d *DiscordAppBot) handleGuildDelete(logger *zap.Logger, s *discordgo.Session, e *discordgo.GuildDelete) error {
+	ctx, cancel := context.WithTimeout(d.ctx, time.Second*5)
+	defer cancel()
+	logger.Info("Guild Delete", zap.Any("guild", e.Guild))
+	groupID := d.GuildIDToGroupID(e.Guild.ID)
+	if groupID == "" {
+		return nil
+	}
+
+	if err := d.nk.GroupDelete(ctx, groupID); err != nil {
+		return fmt.Errorf("error deleting group: %w", err)
+	}
+	return nil
+}
+
+func (d *DiscordAppBot) handleMemberAdd(logger *zap.Logger, s *discordgo.Session, e *discordgo.GuildMemberAdd) error {
+	ctx, cancel := context.WithTimeout(d.ctx, time.Second*5)
+	defer cancel()
+	logger.Info("Member Add", zap.Any("member", e))
+
+	if err := d.updateAccount(ctx, e.Member); err != nil {
+		return fmt.Errorf("failed to update account: %w", err)
+	}
+
+	return nil
+}
+
+func (d *DiscordAppBot) handleMemberUpdate(logger *zap.Logger, s *discordgo.Session, e *discordgo.GuildMemberUpdate) error {
+	if e.Member == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(d.ctx, time.Second*5)
+	defer cancel()
+	logger.Info("Member Update", zap.Any("member", e))
+	if err := d.updateAccount(ctx, e.Member); err != nil {
+		return fmt.Errorf("failed to update account: %w", err)
+	}
+	return nil
+}
+
+func (d *DiscordAppBot) handleMemberRemove(logger *zap.Logger, s *discordgo.Session, e *discordgo.GuildMemberRemove) error {
+
+	ctx, cancel := context.WithTimeout(d.ctx, time.Second*5)
+	defer cancel()
+	logger.Info("Member Remove", zap.Any("member", e))
+	userID := d.DiscordIDToUserID(e.Member.User.ID)
+	if userID == "" {
+		return nil
+	}
+
+	// Remove the user from the guild group
+	groupID := d.GuildIDToGroupID(e.GuildID)
+	if groupID == "" {
+		return nil
+	}
+
+	account, err := GetEVRAccountID(ctx, d.nk, userID)
+	if err != nil {
+		return fmt.Errorf("failed to get account ID: %w", err)
+	}
+
+	if err := d.nk.GroupUserLeave(ctx, groupID, userID, account.Username()); err != nil {
+		return fmt.Errorf("error removing user from group: %w", err)
+	}
+
+	delete(account.GroupDisplayNames, groupID)
+	if account.GetActiveGroupID().String() == groupID {
+		account.SetActiveGroupID(uuid.Nil)
+	}
+	return nil
+}
+
 func (d *DiscordAppBot) handleInteractionCreate(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, commandName string, commandFn DiscordCommandHandlerFn) error {
 	ctx := d.ctx
 	db := d.db
@@ -101,13 +433,12 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	}
 	userID := uuid.FromStringOrNil(userIDStr)
 
+	i.Member.GuildID = i.GuildID
+
 	if includePrivate {
 		// Do some profile checks and cleanups
-
-		// Synchronize the user's guilds with nakama groups
-		err = d.discordRegistry.UpdateGuildGroup(ctx, logger, userID, i.GuildID)
-		if err != nil {
-			return fmt.Errorf("error updating guild groups: %v", err)
+		if err := d.updateAccount(ctx, i.Member); err != nil {
+			return fmt.Errorf("failed to update account: %w", err)
 		}
 	}
 
@@ -138,9 +469,6 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		groupID, err := GetGroupIDByGuildID(ctx, d.db, guildID)
 		if err != nil {
 			return fmt.Errorf("guild group not found")
-		}
-		if _, err := UpdateDisplayNameByGroupID(ctx, logger, d.db, nk, d.discordRegistry, userID.String(), groupID); err != nil {
-			return err
 		}
 
 		groupIDs = []uuid.UUID{uuid.FromStringOrNil(groupID)}
@@ -174,7 +502,11 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 
 	whoami.DisplayNames = make([]string, 0, len(displayNameObjs))
 	for _, dn := range displayNameObjs {
-		whoami.DisplayNames = append(whoami.DisplayNames, dn.Key)
+		m := map[string]string{}
+		if err := json.Unmarshal([]byte(dn.GetValue()), &m); err != nil {
+			return err
+		}
+		whoami.DisplayNames = append(whoami.DisplayNames, m["displayName"])
 	}
 
 	// Get the MatchIDs for the user from it's presence
@@ -194,17 +526,6 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		}
 	}
 
-	// Get the suspensions
-	dr := d.discordRegistry.(*LocalDiscordRegistry)
-	suspensions, err := dr.GetAllSuspensions(ctx, userID)
-	if err != nil {
-		return err
-	}
-
-	suspensionLines := make([]string, 0, len(suspensions))
-	for _, suspension := range suspensions {
-		suspensionLines = append(suspensionLines, fmt.Sprintf("%s: %s", suspension.GuildName, suspension.RoleName))
-	}
 	if !includePrivate {
 		whoami.HasPassword = false
 		whoami.ClientAddresses = nil
@@ -223,19 +544,25 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	}
 
 	fields := []*discordgo.MessageEmbedField{
-		{Name: "Nakama ID", Value: whoami.NakamaID.String(), Inline: true},
+		{Name: "Nakama ID", Value: whoami.NakamaID.String(), Inline: false},
+		{Name: "Online", Value: func() string {
+			if len(presences) > 0 {
+				return "Yes"
+			}
+			return "No"
+		}(), Inline: true},
 		{Name: "Create Time", Value: fmt.Sprintf("<t:%d:R>", whoami.CreateTime.Unix()), Inline: false},
-		{Name: "Password Protected", Value: func() string {
+		{Name: "Username", Value: whoami.Username, Inline: true},
+		{Name: "Discord ID", Value: whoami.DiscordID, Inline: true},
+		{Name: "Password Set", Value: func() string {
 			if whoami.HasPassword {
 				return "Yes"
 			}
 			return ""
 		}(), Inline: true},
-		{Name: "Discord ID", Value: whoami.DiscordID, Inline: false},
-		{Name: "Username", Value: whoami.Username, Inline: true},
-		{Name: "Display Names", Value: strings.Join(whoami.DisplayNames, "\n"), Inline: false},
 		{Name: "Linked Devices", Value: strings.Join(whoami.DeviceLinks, "\n"), Inline: false},
-		{Name: "Logins", Value: func() string {
+		{Name: "Display Names", Value: strings.Join(whoami.DisplayNames, "\n"), Inline: false},
+		{Name: "Recent Logins", Value: func() string {
 			lines := lo.MapToSlice(whoami.EVRIDLogins, func(k string, v time.Time) string {
 				if v.IsZero() {
 					// Don't use the timestamp
@@ -268,7 +595,6 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 			}
 			return s
 		}), "\n"), Inline: false},
-		{Name: "Suspensions", Value: strings.Join(suspensionLines, "\n"), Inline: false},
 		{Name: "Current Match(es)", Value: strings.Join(lo.Map(whoami.MatchIDs, func(m string, index int) string {
 			return fmt.Sprintf("https://echo.taxi/spark://c/%s", strings.ToUpper(m))
 		}), "\n"), Inline: false},
@@ -311,7 +637,11 @@ func (d *DiscordAppBot) handlePrepareMatch(ctx context.Context, logger runtime.L
 		return nil, 0, status.Errorf(codes.Internal, "failed to get guild group memberships: %v", err)
 	}
 	var membership *GuildGroupMembership
+	allocatorGroupIDs := make([]string, 0, len(memberships))
 	for _, m := range memberships {
+		if m.GuildGroup.IsAllocator(userID) {
+			allocatorGroupIDs = append(allocatorGroupIDs, m.GuildGroup.ID().String())
+		}
 		if m.GuildGroup.ID() == uuid.FromStringOrNil(groupID) {
 			membership = &m
 		}
@@ -336,7 +666,7 @@ func (d *DiscordAppBot) handlePrepareMatch(ctx context.Context, logger runtime.L
 		}
 	}
 
-	query := fmt.Sprintf("+label.lobby_type:unassigned +label.broadcaster.group_ids:%s", groupID)
+	query := fmt.Sprintf("+label.lobby_type:unassigned +label.broadcaster.group_ids:/(%s)/", strings.Join(allocatorGroupIDs, "|"))
 
 	for _, r := range regions {
 		query = fmt.Sprintf("%s +label.broadcaster.regions:%s", query, r.String())

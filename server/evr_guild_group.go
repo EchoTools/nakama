@@ -1,41 +1,139 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"slices"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
+	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/heroiclabs/nakama/v3/server/evr"
 )
+
+type GuildGroupRoles struct {
+	Member           string `json:"member"`
+	Moderator        string `json:"moderator"`
+	ServerHost       string `json:"server_host"`
+	Allocator        string `json:"allocator"`
+	Suspended        string `json:"suspended"`
+	APIAccess        string `json:"api_access"`
+	AccountAgeBypass string `json:"account_age_bypass"`
+	AccountLinked    string `json:"headset_linked"`
+}
+
+// Roles returns a slice of role IDs
+func (r *GuildGroupRoles) Slice() []string {
+	return []string{
+		r.Member,
+		r.Moderator,
+		r.ServerHost,
+		r.Allocator,
+		r.Suspended,
+		r.APIAccess,
+		r.AccountAgeBypass,
+		r.AccountLinked,
+	}
+}
+
+func MigrateGroupRoles(nk runtime.NakamaModule, group *api.Group) error {
+	metamap := make(map[string]interface{})
+	if err := json.Unmarshal([]byte(group.Metadata), &metamap); err != nil {
+		return err
+	}
+
+	if metamap["roles"] != nil {
+		return nil
+	}
+
+	metadata := &GroupMetadata{}
+	if err := json.Unmarshal([]byte(group.Metadata), metadata); err != nil {
+		return err
+	}
+
+	memberRole, ok := metamap["member_role"].(string)
+	if !ok {
+		memberRole = ""
+	}
+	moderatorRole, ok := metamap["moderator_role"].(string)
+	if !ok {
+		moderatorRole = ""
+	}
+	serverHostRole, ok := metamap["serverhost_role"].(string)
+	if !ok {
+		serverHostRole = ""
+	}
+	allocatorRole, ok := metamap["allocator_role"].(string)
+	if !ok {
+		allocatorRole = ""
+	}
+	suspendedRole, ok := metamap["suspension_role"].(string)
+	if !ok {
+		suspendedRole = ""
+	}
+	apiAccessRole, ok := metamap["api_access_role"].(string)
+	if !ok {
+		apiAccessRole = ""
+	}
+	accountAgeBypassRole, ok := metamap["minimum_account_age_bypass_role"].(string)
+	if !ok {
+		accountAgeBypassRole = ""
+	}
+	accountLinkedRole, ok := metamap["account_linked_role"].(string)
+	if !ok {
+		accountLinkedRole = ""
+	}
+
+	metadata.Roles = &GuildGroupRoles{
+		Member:           memberRole,
+		Moderator:        moderatorRole,
+		ServerHost:       serverHostRole,
+		Allocator:        allocatorRole,
+		Suspended:        suspendedRole,
+		APIAccess:        apiAccessRole,
+		AccountAgeBypass: accountAgeBypassRole,
+		AccountLinked:    accountLinkedRole,
+	}
+
+	err := nk.GroupUpdate(context.Background(), group.Id, "", group.Name, group.CreatorId, group.LangTag, group.Description, group.AvatarUrl, false, metadata.MarshalMap(), int(group.MaxCount))
+	if err != nil {
+		return err
+	}
+	return nil
+}
 
 type GuildGroupMemberships []GuildGroupMembership
 
 type GroupMetadata struct {
 	GuildID                      string                 `json:"guild_id"`                        // The guild ID
 	RulesText                    string                 `json:"rules_text"`                      // The rules text displayed on the main menu
-	MemberRole                   string                 `json:"member_role"`                     // The role that has access to create lobbies/matches and join social lobbies
-	ModeratorRole                string                 `json:"moderator_role"`                  // The rules that have access to moderation tools
-	ServerHostRole               string                 `json:"serverhost_role"`                 // The rules that have access to serverdb
-	AccountAgeBypassRole         string                 `json:"minimum_account_age_bypass_role"` // The role that bypasses the minimum account age
-	AllocatorRole                string                 `json:"allocator_role"`                  // The rules that have access to reserve servers
-	SuspensionRole               string                 `json:"suspension_role"`                 // The roles that have users suspended
-	IsLinkedRole                 string                 `json:"is_linked_role"`                  // The role that denotes if an account currently has a linked headset
 	MinimumAccountAgeDays        int                    `json:"minimum_account_age_days"`        // The minimum account age in days to be able to play echo on this guild's sessions
-	ServerHostUserIDs            []string               `json:"serverhost_user_ids"`             // The broadcaster hosts
-	AllocatorUserIDs             []string               `json:"allocator_user_ids"`              // The allocator hosts
-	ModeratorUserIDs             []string               `json:"moderator_user_ids"`              // The moderators
-	SuspendedUserIDs             []string               `json:"suspended_user_ids"`              // The suspended users
-	AccountAgeBypassUserIDs      []string               `json:"account_age_bypass_user_ids"`     // The users that bypass the minimum account age
-	ArenaMatchmakingChannelID    string                 `json:"arena_matchmaking_channel_id"`    // The matchmaking channel
-	CombatMatchmakingChannelID   string                 `json:"combat_matchmaking_channel_id"`   // The matchmaking channel
-	DebugChannel                 string                 `json:"debug_channel_id"`                // The debug channel
 	MembersOnlyMatchmaking       bool                   `json:"members_only_matchmaking"`        // Restrict matchmaking to members only (when this group is the active one)
 	DisablePublicAllocateCommand bool                   `json:"disable_public_allocate_command"` // Disable the public allocate command
+	Roles                        *GuildGroupRoles       `json:"roles"`                           // The roles text displayed on the main menu
+	RoleCache                    map[string][]string    `json:"role_cache"`                      // The role cache
+	MatchmakingChannelIDs        map[evr.Symbol]string  `json:"matchmaking_channel_ids"`         // The matchmaking channel IDs
+	DebugChannel                 string                 `json:"debug_channel_id"`                // The debug channel
 	Unhandled                    map[string]interface{} `json:"-"`
 }
 
+func NewGuildGroupMetadata(guildID string) *GroupMetadata {
+	return &GroupMetadata{
+		GuildID:               guildID,
+		RoleCache:             make(map[string][]string),
+		Roles:                 &GuildGroupRoles{},
+		MatchmakingChannelIDs: make(map[evr.Symbol]string),
+	}
+}
+func (g *GroupMetadata) MarshalMap() map[string]any {
+	m := make(map[string]any)
+	data, _ := json.Marshal(g)
+	_ = json.Unmarshal(data, &m)
+	return m
+}
+
 type GuildGroup struct {
-	Metadata GroupMetadata
+	Metadata *GroupMetadata
 	Group    *api.Group
 }
 
@@ -60,19 +158,19 @@ func (g *GuildGroup) Size() int {
 }
 
 func (g *GuildGroup) ServerHostUserIDs() []string {
-	return g.Metadata.ServerHostUserIDs
+	return g.Metadata.RoleCache[g.Metadata.Roles.ServerHost]
 }
 
 func (g *GuildGroup) AllocatorUserIDs() []string {
-	return g.Metadata.AllocatorUserIDs
+	return g.Metadata.RoleCache[g.Metadata.Roles.Allocator]
 }
 
 func (g *GuildGroup) ModeratorUserIDs() []string {
-	return g.Metadata.ModeratorUserIDs
+	return g.Metadata.RoleCache[g.Metadata.Roles.Moderator]
 }
 
 func (g *GuildGroup) SuspendedUserIDs() []string {
-	return g.Metadata.SuspendedUserIDs
+	return g.Metadata.RoleCache[g.Metadata.Roles.Suspended]
 }
 
 func (g *GuildGroup) IsServerHost(userID string) bool {
@@ -91,6 +189,41 @@ func (g *GuildGroup) IsSuspended(userID string) bool {
 	return slices.Contains(g.SuspendedUserIDs(), userID)
 }
 
+func (g *GuildGroup) IsAPIAccess(userID string) bool {
+	return slices.Contains(g.Metadata.RoleCache[g.Metadata.Roles.APIAccess], userID)
+}
+
+func (g *GuildGroup) IsAccountAgeBypass(userID string) bool {
+	return slices.Contains(g.Metadata.RoleCache[g.Metadata.Roles.AccountAgeBypass], userID)
+}
+func (g *GuildGroup) IsAccountLinked(userID string) bool {
+	return slices.Contains(g.Metadata.RoleCache[g.Metadata.Roles.AccountLinked], userID)
+}
+
+func (g *GuildGroup) UpdateRoleCache(userID string, roles []string) bool {
+	roleCacheUpdated := false
+	roleCache := g.Metadata.RoleCache
+	for role, userIDs := range roleCache {
+		if slices.Contains(roles, role) {
+			if !slices.Contains(userIDs, userID) {
+				g.Metadata.RoleCache[role] = append(userIDs, userID)
+				roleCacheUpdated = true
+			}
+		} else {
+			if slices.Contains(userIDs, userID) {
+				g.Metadata.RoleCache[role] = slices.DeleteFunc(userIDs, func(s string) bool {
+					return s == userID
+				})
+				roleCacheUpdated = true
+			}
+		}
+	}
+	if roleCacheUpdated {
+		g.Metadata.RoleCache = roleCache
+	}
+	return roleCacheUpdated
+}
+
 func NewGuildGroup(group *api.Group) *GuildGroup {
 
 	md := &GroupMetadata{}
@@ -98,8 +231,13 @@ func NewGuildGroup(group *api.Group) *GuildGroup {
 		return nil
 	}
 
+	// Ensure the matchmaking channel IDs have been initialized
+	if md.MatchmakingChannelIDs == nil {
+		md.MatchmakingChannelIDs = make(map[evr.Symbol]string)
+	}
+
 	return &GuildGroup{
-		Metadata: *md,
+		Metadata: md,
 		Group:    group,
 	}
 }

@@ -259,11 +259,6 @@ func (r *ProfileRegistry) GameProfile(ctx context.Context, logger *zap.Logger, u
 		p.Server.Statistics = evr.NewStatistics()
 	}
 
-	// Update the account
-	if err := r.discordRegistry.UpdateAccount(ctx, userID); err != nil {
-		logger.Warn("Failed to update account", zap.Error(err))
-	}
-
 	// Apply any unlocks based on the user's groups
 	if err := r.UpdateEntitledCosmetics(ctx, userID, p); err != nil {
 		return p, fmt.Errorf("failed to update entitled cosmetics: %w", err)

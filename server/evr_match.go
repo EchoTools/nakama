@@ -66,7 +66,7 @@ const (
 	SignalGetEndpoint
 	SignalGetPresences
 	SignalPruneUnderutilized
-	SignalTerminate
+	SignalShutdown
 )
 
 type MatchStatGroup string
@@ -522,7 +522,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 	}
 
 	if len(rejects) > 0 {
-		msg := evr.NewBroadcasterPlayersRejected(evr.PlayerRejectionReasonLobbyEnding, rejects...)
+		msg := evr.NewGameServerEntrantRejected(evr.PlayerRejectionReasonLobbyEnding, rejects...)
 		if err := m.dispatchMessages(ctx, logger, dispatcher, []evr.Message{msg}, []runtime.Presence{state.server}, nil); err != nil {
 			logger.Warn("Failed to dispatch message: %v", err)
 		}
@@ -760,6 +760,12 @@ func SignalResponseFromString(data string) SignalResponse {
 	return r
 }
 
+type SignalShutdownPayload struct {
+	GraceSeconds         int  `json:"grace_seconds"`
+	DisconnectGameServer bool `json:"disconnect_game_server"`
+	DisconnectUsers      bool `json:"disconnect_users"`
+}
+
 // MatchSignal is called when a signal is sent into the match.
 func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ interface{}, data string) (interface{}, string) {
 	state, ok := state_.(*MatchLabel)
@@ -776,9 +782,35 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 	}
 
 	switch signal.Signal {
-	case SignalTerminate:
+	case SignalShutdown:
 
-		return m.MatchTerminate(ctx, logger, db, nk, dispatcher, tick, state, 10), SignalResponse{Success: true}.String()
+		var data SignalShutdownPayload
+
+		if err := json.Unmarshal(signal.Payload, &data); err != nil {
+			return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal shutdown payload: %v", err)}.String()
+		}
+
+		if data.DisconnectGameServer {
+			logger.Warn("Match shutting down, disconnecting game server.")
+			if state.server != nil {
+				nk.SessionDisconnect(ctx, state.server.GetSessionId(), runtime.PresenceReasonDisconnect)
+			}
+		}
+
+		if data.DisconnectUsers {
+			for _, mp := range state.presenceMap {
+				logger := logger.WithFields(map[string]any{
+					"uid": mp.GetUserId(),
+					"sid": mp.GetSessionId(),
+				})
+				logger.Warn("Match shutting down, disconnecting player.")
+				if err := nk.StreamUserKick(StreamModeMatchAuthoritative, mp.EntrantID(state.ID).String(), "", mp.GetNodeId(), mp); err != nil {
+					logger.Error("Failed to kick user from stream.")
+				}
+			}
+		}
+
+		return m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, data.GraceSeconds), SignalResponse{Success: true}.String()
 
 	case SignalPruneUnderutilized:
 		// Prune this match if it's utilization is low.
