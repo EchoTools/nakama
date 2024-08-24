@@ -349,9 +349,24 @@ func (p *EvrPipeline) getBroadcasterHostGroups(ctx context.Context, userId strin
 		return nil, fmt.Errorf("user is not a member of any guilds")
 	}
 	if len(guildIDs) == 0 {
-		// User all of the user's guilds
+		// Use all of the user's guilds
 		for _, g := range memberships {
 			guildIDs = append(guildIDs, g.GuildGroup.GuildID())
+		}
+	}
+	discordID, err := GetDiscordIDByUserID(ctx, p.db, userId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get discord ID: %v", err)
+	}
+	for _, guildID := range guildIDs {
+
+		member, err := p.appBot.dg.GuildMember(guildID, discordID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get member: %v", err)
+		}
+		if err := p.appBot.updateAccount(ctx, member); err != nil {
+			p.logger.Warn("Failed to update account", zap.Error(err))
+			continue
 		}
 	}
 

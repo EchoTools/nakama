@@ -253,7 +253,7 @@ func (d *DiscordAppBot) updateGuild(ctx context.Context, logger *zap.Logger, gui
 			}
 		}
 
-		if err := d.nk.GroupUpdate(ctx, groupID, ownerUserID, guild.Name, botUserID, GuildGroupLangTag, guild.Description, guild.IconURL("512"), true, md.MarshalMap(), 100000); err != nil {
+		if err := d.nk.GroupUpdate(ctx, groupID, SystemUserID, guild.Name, botUserID, GuildGroupLangTag, guild.Description, guild.IconURL("512"), true, md.MarshalMap(), 100000); err != nil {
 			return fmt.Errorf("error updating group: %w", err)
 		}
 	}
