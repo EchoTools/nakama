@@ -128,11 +128,10 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	uid := uuid.FromStringOrNil(user.GetId())
 
 	// Get the user's metadata
-	var metadata AccountMetadata
-	if err := json.Unmarshal([]byte(account.User.GetMetadata()), &metadata); err != nil {
-		return settings, fmt.Errorf("failed to unmarshal account metadata: %w", err)
+	metadata, err := GetAccountMetadata(ctx, p.db, userId)
+	if err != nil {
+		return settings, fmt.Errorf("failed to get user metadata: %w", err)
 	}
-
 	// Check that this EVR-ID is only used by this userID
 	otherLogins, err := p.checkEvrIDOwner(ctx, evrId)
 	if err != nil {
@@ -224,15 +223,43 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 
 	groupMap, err := GetGuildGroupIDsByUser(ctx, p.db, userId)
 	if err != nil {
-		return settings, fmt.Errorf("user is not in any guild groups: %w", err)
+		guildID, err := GetGuildIDByGroupID(ctx, p.db, groupID.String())
+		if err != nil {
+			return settings, fmt.Errorf("failed to get guild ID: %w", err)
+		}
+		// check if the user is in the activ group
+		groupID := metadata.GetActiveGroupID()
+		member, err := p.appBot.dg.GuildMember(groupID.String(), userId)
+		if err != nil {
+			return settings, fmt.Errorf("failed to get member: %w", err)
+		}
+		if err := p.appBot.updateAccount(ctx, guildID, member); err != nil {
+			return settings, fmt.Errorf("failed to update account: %w", err)
+		}
 	}
+	groupID = metadata.GetActiveGroupID()
 
 	// Get a list of the user's guild memberships and set to the largest one
-	memberships, err := p.discordRegistry.GetGuildGroupMemberships(ctx, uid, nil)
+	memberships, err := GetGuildGroupMemberships(ctx, p.runtimeModule, userId, nil)
 	if err != nil {
 		return settings, fmt.Errorf("failed to get guild groups: %w", err)
 	}
 	if len(memberships) == 0 {
+		discordID, err := GetDiscordIDByUserID(ctx, p.db, userId)
+		if err != nil {
+			return settings, fmt.Errorf("failed to get discord ID: %w", err)
+		}
+
+		for _, guild := range p.appBot.dg.State.Guilds {
+			member, err := p.appBot.dg.GuildMember(guild.ID, discordID)
+			if err != nil {
+				return settings, fmt.Errorf("failed to get member: %w", err)
+			}
+			if err := p.appBot.updateAccount(ctx, guild.ID, member); err != nil {
+				return settings, fmt.Errorf("failed to update account: %w", err)
+			}
+		}
+
 		return settings, fmt.Errorf("user is not in any guild groups")
 	}
 
@@ -273,7 +300,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		return settings, fmt.Errorf("failed to update user metadata: %w", err)
 	}
 	// Initialize the full session
-	if err := session.LoginSession(userId, user.GetUsername(), metadata, metadata.DisplayNameOverride, account.GetCustomId(), evrId, deviceId, groupID, flags, verbose, isPCVR); err != nil {
+	if err := session.LoginSession(userId, user.GetUsername(), *metadata, metadata.DisplayNameOverride, account.GetCustomId(), evrId, deviceId, groupID, flags, verbose, isPCVR); err != nil {
 		return settings, fmt.Errorf("failed to login: %w", err)
 	}
 	ctx = session.Context()
