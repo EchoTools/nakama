@@ -181,11 +181,11 @@ func authorizeUserForGuildGroup(ctx context.Context, db *sql.DB, userID string, 
 		return status.Errorf(codes.Internal, "failed to get group metadata: %v", err)
 	}
 
-	if slices.Contains(groupMetadata.SuspendedUserIDs, userID) {
+	if slices.Contains(groupMetadata.RoleCache[groupMetadata.Roles.Suspended], userID) {
 		return status.Errorf(codes.PermissionDenied, "user is suspended from the guild")
 	}
 
-	if groupMetadata.MinimumAccountAgeDays > 0 && !slices.Contains(groupMetadata.AccountAgeBypassUserIDs, userID) {
+	if groupMetadata.MinimumAccountAgeDays > 0 && !slices.Contains(groupMetadata.RoleCache[groupMetadata.Roles.AccountAgeBypass], userID) {
 		// Check the account creation date.
 		discordID, err := GetDiscordIDByUserID(ctx, db, userID)
 		if err != nil {

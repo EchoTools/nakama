@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"hash/fnv"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -1024,7 +1023,7 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		for _, groupID := range label.Broadcaster.GroupIDs {
 			if md, err := GetGuildGroupMetadata(ctx, db, groupID.String()); err != nil {
 				return "", runtime.NewError("Failed to get group metadata: "+err.Error(), StatusInternalError)
-			} else if slices.Contains(md.AllocatorUserIDs, userID) {
+			} else if slices.Contains(md.RoleCache[md.Roles.Allocator], userID) {
 				allowed = true
 				break
 			}
@@ -1053,7 +1052,7 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		return "", runtime.NewError("Failed to get group metadata", StatusInternalError)
 	}
 
-	if !slices.Contains(md.AllocatorUserIDs, userID) {
+	if !slices.Contains(md.RoleCache[md.Roles.Allocator], userID) {
 		return "", runtime.NewError("unauthorized to allocate to guild", StatusPermissionDenied)
 	}
 

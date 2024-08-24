@@ -13,6 +13,7 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/jackc/pgtype"
+	"go.uber.org/zap"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -73,8 +74,10 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		"link":                          LinkingAppRpc,
 		"evr/servicestatus":             ServiceStatusRpc,
 		"importloadouts":                ImportLoadoutsRpc,
-		"terminateMatch":                terminateMatchRpc,
+		"terminateMatch":                shutdownMatchRpc,
 		"setmatchamakerstatus":          setMatchmakingStatusRpc,
+
+		"/v1/storage/game/sourcedb/rad15/json/r14/loading_tips.json": StorageLoadingTipsRPC,
 	}
 
 	for name, rpc := range rpcs {
@@ -924,4 +927,8 @@ func GetPartyGroupMembers(ctx context.Context, db *sql.DB, userID string) (*evr.
 	}
 
 	return playerStats, nil
+}
+
+func RuntimeLoggerToZapLogger(logger runtime.Logger) *zap.Logger {
+	return logger.(*RuntimeGoLogger).logger
 }

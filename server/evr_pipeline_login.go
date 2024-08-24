@@ -227,24 +227,6 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		return settings, fmt.Errorf("user is not in any guild groups: %w", err)
 	}
 
-	// Update the user's guild groups
-	updateCtx, cancel := context.WithTimeout(ctx, time.Second*5)
-	go func() {
-		defer cancel()
-		return
-		err := p.discordRegistry.UpdateAllGuildGroupsForUser(updateCtx, NewRuntimeGoLogger(logger), uid)
-		if err != nil {
-			logger.Warn("Failed to update guild groups", zap.Error(err))
-		}
-	}()
-
-	select {
-	case <-ctx.Done():
-		return settings, fmt.Errorf("context cancelled")
-	case <-updateCtx.Done():
-	case <-time.After(time.Second * 3):
-	}
-
 	// Get a list of the user's guild memberships and set to the largest one
 	memberships, err := p.discordRegistry.GetGuildGroupMemberships(ctx, uid, nil)
 	if err != nil {
@@ -273,15 +255,6 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		metadata.GetActiveGroupDisplayName()
 	}
 
-	if err := p.runtimeModule.AccountUpdateId(ctx, userId, "", metadata.MarshalToMap(), "", "", "", "", ""); err != nil {
-		return settings, fmt.Errorf("failed to update user metadata: %w", err)
-	}
-
-	// Set the default display name once.
-	displayName, err := UpdateDisplayNameByGroupID(ctx, NewRuntimeGoLogger(logger), p.db, p.runtimeModule, p.discordRegistry, userId, groupID.String())
-	if err != nil {
-		logger.Warn("Failed to set display name", zap.Error(err))
-	}
 	isPCVR := true
 
 	questTypes := []string{
@@ -296,7 +269,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 			break
 		}
 	}
-	if err := p.runtimeModule.AccountUpdateId(ctx, userId, "", metadata.MarshalToMap(), "", "", "", "", ""); err != nil {
+	if err := p.runtimeModule.AccountUpdateId(ctx, userId, "", metadata.MarshalMap(), "", "", "", "", ""); err != nil {
 		return settings, fmt.Errorf("failed to update user metadata: %w", err)
 	}
 	// Initialize the full session
@@ -306,15 +279,14 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	ctx = session.Context()
 
 	profile.SetEvrID(evrId)
-	profile.SetChannel(evr.GUID(groupID))
-	profile.UpdateDisplayName(displayName)
+	profile.SetChannel(evr.GUID(metadata.GetActiveGroupID()))
+	profile.UpdateDisplayName(metadata.GetActiveGroupDisplayName())
 
 	p.profileRegistry.Save(ctx, session.userID, profile)
 
 	// TODO Add the settings to the user profile
 	settings = evr.NewDefaultGameSettings()
 	return settings, nil
-
 }
 
 type EvrIDHistory struct {

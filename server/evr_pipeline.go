@@ -12,6 +12,7 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/gofrs/uuid/v5"
+	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
@@ -101,7 +102,6 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 			logger.Error("Unable to create bot")
 		}
 		dg.StateEnabled = true
-
 	}
 
 	discordRegistry := NewLocalDiscordRegistry(ctx, nk, runtimeLogger, metrics, config, pipeline, dg)
@@ -130,7 +130,27 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		}
 	}
 
-	// Every 5 minutes, store the cache.
+	// Migrate all groups to the new format
+	cursor := ""
+	for {
+		var groups []*api.Group
+		var err error
+
+		groups, cursor, err = nk.GroupsList(ctx, "", "guild", nil, nil, 100, cursor)
+		if err != nil {
+			logger.Error("Failed to list groups", zap.Error(err))
+			break
+		}
+		for _, g := range groups {
+			err := MigrateGroupRoles(nk, g)
+			if err != nil {
+				logger.Error("Failed to migrate group roles", zap.Error(err))
+			}
+		}
+		if cursor == "" {
+			break
+		}
+	}
 
 	localIP, err := DetermineLocalIPAddress()
 	if err != nil {

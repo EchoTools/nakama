@@ -116,7 +116,7 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 			// Try to resolve it as a hostname
 			ips, err := net.LookupIP(parts[0])
 			if err != nil {
-				return errFailedRegistration(session, logger, fmt.Errorf("invalid address `%s`: %v", err), evr.BroadcasterRegistration_Unknown)
+				return errFailedRegistration(session, logger, fmt.Errorf("invalid address `%s`: %v", parts[0], err), evr.BroadcasterRegistration_Unknown)
 			}
 			externalIP = ips[0]
 		}
@@ -710,7 +710,7 @@ func (p *EvrPipeline) broadcasterPlayerAccept(ctx context.Context, logger *zap.L
 	}
 
 	if len(rejected) > 0 {
-		messages = append(messages, evr.NewBroadcasterPlayersRejected(evr.PlayerRejectionReasonBadRequest, rejected...))
+		messages = append(messages, evr.NewGameServerEntrantRejected(evr.PlayerRejectionReasonBadRequest, rejected...))
 	}
 
 	return session.SendEvr(messages...)
