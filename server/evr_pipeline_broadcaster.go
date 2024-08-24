@@ -364,7 +364,7 @@ func (p *EvrPipeline) getBroadcasterHostGroups(ctx context.Context, userId strin
 		if err != nil {
 			return nil, fmt.Errorf("failed to get member: %v", err)
 		}
-		if err := p.appBot.updateAccount(ctx, member); err != nil {
+		if err := p.appBot.updateAccount(ctx, guildID, member); err != nil {
 			p.logger.Warn("Failed to update account", zap.Error(err))
 			continue
 		}

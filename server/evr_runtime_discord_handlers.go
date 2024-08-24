@@ -104,8 +104,10 @@ func (d *DiscordAppBot) recordDisplayName(ctx context.Context, logger runtime.Lo
 	return nil
 }
 
-func (d *DiscordAppBot) updateAccount(ctx context.Context, member *discordgo.Member) error {
-
+func (d *DiscordAppBot) updateAccount(ctx context.Context, guildID string, member *discordgo.Member) error {
+	groupID := d.GuildIDToGroupID(guildID)
+	userID := d.DiscordIDToUserID(member.User.ID)
+	_ = d.nk.GroupUsersAdd(ctx, SystemUserID, groupID, []string{userID})
 	account, membership, err := d.GuildUser(ctx, member.GuildID, member.User.ID)
 	if err != nil {
 		return fmt.Errorf("failed to get guild user: %w", err)
@@ -301,7 +303,7 @@ func (d *DiscordAppBot) handleMemberAdd(logger *zap.Logger, s *discordgo.Session
 	defer cancel()
 	logger.Info("Member Add", zap.Any("member", e))
 
-	if err := d.updateAccount(ctx, e.Member); err != nil {
+	if err := d.updateAccount(ctx, e.GuildID, e.Member); err != nil {
 		return fmt.Errorf("failed to update account: %w", err)
 	}
 
@@ -315,7 +317,7 @@ func (d *DiscordAppBot) handleMemberUpdate(logger *zap.Logger, s *discordgo.Sess
 	ctx, cancel := context.WithTimeout(d.ctx, time.Second*5)
 	defer cancel()
 	logger.Info("Member Update", zap.Any("member", e))
-	if err := d.updateAccount(ctx, e.Member); err != nil {
+	if err := d.updateAccount(ctx, e.GuildID, e.Member); err != nil {
 		return fmt.Errorf("failed to update account: %w", err)
 	}
 	return nil
@@ -437,7 +439,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 
 	if includePrivate {
 		// Do some profile checks and cleanups
-		if err := d.updateAccount(ctx, i.Member); err != nil {
+		if err := d.updateAccount(ctx, i.GuildID, i.Member); err != nil {
 			return fmt.Errorf("failed to update account: %w", err)
 		}
 	}

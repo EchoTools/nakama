@@ -1063,7 +1063,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			content := "Your headset has been linked. Restart EchoVR."
 
-			if err := d.updateAccount(ctx, i.Member); err != nil {
+			if err := d.updateAccount(ctx, i.GuildID, i.Member); err != nil {
 				content = fmt.Sprintf("Failed to link headset to account: %v", err)
 			} else if err := d.syncLinkedRoles(ctx, userID); err != nil {
 				content = fmt.Sprintf("Failed to sync roles: %v", err)
@@ -1105,7 +1105,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				})
 			}
 			content := "Your headset has been unlinked. Restart EchoVR."
-			if err := d.updateAccount(ctx, i.Member); err != nil {
+			if err := d.updateAccount(ctx, i.GuildID, i.Member); err != nil {
 				content = fmt.Sprintf("Failed to link headset to account: %v", err)
 			} else if err := d.syncLinkedRoles(ctx, userID); err != nil {
 				content = fmt.Sprintf("Failed to sync roles: %v", err)
@@ -1537,7 +1537,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			if len(memberships) == 0 {
-				if err := d.updateAccount(ctx, i.Member); err != nil {
+				if err := d.updateAccount(ctx, i.GuildID, i.Member); err != nil {
 					return err
 				}
 
@@ -1603,7 +1603,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 
 				if membership == nil {
-					if err := d.updateAccount(ctx, i.Member); err != nil {
+					if err := d.updateAccount(ctx, i.GuildID, i.Member); err != nil {
 						return errors.New("guild data stale, please try again in a few seconds")
 					}
 					return errors.New("guild data stale, please try again in a few seconds")
