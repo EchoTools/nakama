@@ -668,11 +668,12 @@ func (d *DiscordAppBot) handlePrepareMatch(ctx context.Context, logger runtime.L
 		}
 	}
 
-	query := fmt.Sprintf("+label.lobby_type:unassigned +label.broadcaster.group_ids:/(%s)/", strings.Join(allocatorGroupIDs, "|"))
-
+	regionstrs := make([]string, 0, len(regions))
 	for _, r := range regions {
-		query = fmt.Sprintf("%s +label.broadcaster.regions:%s", query, r.String())
+		regionstrs = append(regionstrs, r.String())
 	}
+
+	query := fmt.Sprintf("+label.lobby_type:unassigned +label.broadcaster.group_ids:/(%s)/ +label.broadcaster.regions:/(%s)/", strings.Join(allocatorGroupIDs, "|"), strings.Join(regionstrs, "|"))
 
 	minSize := 1
 	maxSize := 1
