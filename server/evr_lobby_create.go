@@ -102,13 +102,13 @@ func lobbyCreateQuery(ctx context.Context, logger *zap.Logger, db *sql.DB, nk ru
 		"+label.open:T",
 		"+label.lobby_type:unassigned",
 		fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/", params.GroupID.String()),
-		fmt.Sprintf("+label.broadcaster.regions:%s", params.Region.String()),
+		fmt.Sprintf("+label.broadcaster.regions:/(%s)/", params.Region.String()),
 		fmt.Sprintf("+label.broadcaster.version_lock:%s", params.VersionLock),
 	}
 
 	if len(params.RequiredFeatures) > 0 {
 		for _, f := range params.RequiredFeatures {
-			qparts = append(qparts, fmt.Sprintf("+label.broadcaster.features:%s", f))
+			qparts = append(qparts, fmt.Sprintf("+label.broadcaster.features:/(%s)/", f))
 		}
 	}
 

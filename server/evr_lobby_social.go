@@ -22,7 +22,7 @@ func lobbyCreateSocial(ctx context.Context, logger *zap.Logger, db *sql.DB, nk r
 	qparts := []string{
 		"+label.open:T",
 		"+label.lobby_type:unassigned",
-		fmt.Sprintf("+label.broadcaster.group_ids:%s", params.GroupID.String()),
+		fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/", params.GroupID.String()),
 		fmt.Sprintf("+label.broadcaster.version_lock:%s", params.VersionLock),
 	}
 
