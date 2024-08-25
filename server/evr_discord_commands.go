@@ -204,8 +204,9 @@ var (
 		"7c": "VRML Season 7 Champion",
 	}
 
-	partyGroupIDPattern = regexp.MustCompile("^[a-z0-9]+$")
-	vrmlIDPattern       = regexp.MustCompile("^[-a-zA-Z0-9]{24}$")
+	partyGroupIDPattern   = regexp.MustCompile("^[a-z0-9]+$")
+	vrmlIDPattern         = regexp.MustCompile("^[-a-zA-Z0-9]{24}$")
+	cosmeticPresetPattern = regexp.MustCompile("^[a-zA-Z0-9-_]+$")
 
 	mainSlashCommands = []*discordgo.ApplicationCommand{
 
@@ -835,6 +836,51 @@ var (
 				},
 			},
 		*/
+
+		{
+			Name:        "cosmetic-loadout",
+			Description: "Manage user-defined cosmetic loadouts.",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Name:        "manage",
+					Description: "Manage user-defined cosmetic loadouts.",
+					Options: []*discordgo.ApplicationCommandOption{
+						{
+							Type:        discordgo.ApplicationCommandOptionString,
+							Name:        "action",
+							Description: "Action to perform on the specified loadout.",
+							Required:    true,
+							Choices: []*discordgo.ApplicationCommandOptionChoice{
+								{
+									Name:  "Save Loadout",
+									Value: "save",
+								},
+								{
+									Name:  "Apply Loadout",
+									Value: "load",
+								},
+								{
+									Name:  "Delete Loadout",
+									Value: "delete",
+								},
+							},
+						},
+						{
+							Type:        discordgo.ApplicationCommandOptionString,
+							Name:        "name",
+							Description: "Name of the loadout.",
+							Required:    true,
+						},
+					},
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Name:        "list",
+					Description: "List all of user's cosmetic loadouts.",
+				},
+			},
+		},
 	}
 )
 
@@ -2610,6 +2656,99 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						Content: fmt.Sprintf("Your group ID has been set to `%s`. Everyone must matchmake at the same time (~15-30 seconds)", groupName),
 					},
 				})
+			}
+			return discordgo.ErrNilState
+		},
+		"cosmetic-loadout": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+			if user == nil {
+				return nil
+			}
+
+			options := i.ApplicationCommandData().Options
+
+			if len(options) == 0 {
+				return nil
+			}
+
+			profile, err := d.profileRegistry.Load(ctx, uuid.FromStringOrNil(userID))
+			if err != nil {
+				return err
+			}
+
+			switch options[0].Name {
+			case "manage":
+				profileName := options[0].Options[1].StringValue()
+				if len(profileName) < 3 || len(profileName) > 32 {
+					simpleInteractionResponse(s, i, "Invalid profile name. It must be between three (3) and thirty two (32) characters long.")
+					return nil
+				}
+				if !cosmeticPresetPattern.MatchString(profileName) {
+					simpleInteractionResponse(s, i, "Invalid profile name. It must contain only characters a-z, A-Z, 0-9, underscores, and hyphens.")
+					return nil
+				}
+
+				switch options[0].Options[0].StringValue() {
+				case "save":
+					// limit set arbitrarily
+					if len(profile.CosmeticPresets) >= 5 {
+						simpleInteractionResponse(s, i, "Cannot save more than 5 loadouts.")
+						return nil
+					}
+
+					profile.saveCosmeticPreset(profileName)
+
+					if err := d.profileRegistry.SaveAndCache(ctx, uuid.FromStringOrNil(userID), profile); err != nil {
+						return err
+					}
+
+					simpleInteractionResponse(s, i, fmt.Sprintf("Saved current loadout to profile `%s`", profileName))
+					return nil
+
+				case "load":
+					if _, ok := profile.CosmeticPresets[profileName]; !ok {
+						simpleInteractionResponse(s, i, fmt.Sprintf("Profile `%s` does not exist.", profileName))
+						return nil
+					}
+
+					profile.loadCosmeticPreset(profileName)
+
+					if err := d.profileRegistry.SaveAndCache(ctx, uuid.FromStringOrNil(userID), profile); err != nil {
+						return err
+					}
+
+					simpleInteractionResponse(s, i, fmt.Sprintf("Applied loadout from profile `%s`. Please relog for changes to take effect.", profileName))
+					return nil
+
+				case "delete":
+					if _, ok := profile.CosmeticPresets[profileName]; !ok {
+						simpleInteractionResponse(s, i, fmt.Sprintf("Profile `%s` does not exist.", profileName))
+						return nil
+					}
+
+					profile.deleteCosmeticPreset(profileName)
+
+					if err := d.profileRegistry.SaveAndCache(ctx, uuid.FromStringOrNil(userID), profile); err != nil {
+						return err
+					}
+
+					simpleInteractionResponse(s, i, fmt.Sprintf("Deleted loadout profile `%s`", profileName))
+					return nil
+				}
+
+			case "list":
+				if len(profile.CosmeticPresets) == 0 {
+					simpleInteractionResponse(s, i, "No saved profiles.")
+					return nil
+				}
+
+				responseString := "Available profiles: "
+
+				for k := range profile.CosmeticPresets {
+					responseString += fmt.Sprintf("`%s`, ", k)
+				}
+				responseString = responseString[:len(responseString)-2]
+				simpleInteractionResponse(s, i, responseString)
+				return nil
 			}
 			return discordgo.ErrNilState
 		},
