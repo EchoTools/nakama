@@ -33,13 +33,14 @@ type GameProfile interface {
 }
 
 type GameProfileData struct {
-	Login      evr.LoginProfile    `json:"login"`
-	Client     evr.ClientProfile   `json:"client"`
-	Server     evr.ServerProfile   `json:"server"`
-	Rating     types.Rating        `json:"rating"`
-	EarlyQuits EarlyQuitStatistics `json:"early_quit"`
-	Version    string              // The version of the profile from the DB
-	Stale      bool                // Whether the profile is stale and needs to be updated
+	Login           evr.LoginProfile               `json:"login"`
+	Client          evr.ClientProfile              `json:"client"`
+	Server          evr.ServerProfile              `json:"server"`
+	Rating          types.Rating                   `json:"rating"`
+	EarlyQuits      EarlyQuitStatistics            `json:"early_quit"`
+	CosmeticPresets map[string]evr.CosmeticLoadout `json:"cosmetic_presets"`
+	Version         string                         // The version of the profile from the DB
+	Stale           bool                           // Whether the profile is stale and needs to be updated
 }
 
 type AccountProfile struct {
@@ -724,4 +725,22 @@ func SetCosmeticDefaults(s *evr.ServerProfile, enableAll bool) error {
 		}
 	}
 	return nil
+}
+
+func (p *GameProfileData) saveCosmeticPreset(profileName string) {
+	if p.CosmeticPresets == nil {
+		p.CosmeticPresets = make(map[string]evr.CosmeticLoadout)
+	}
+	p.CosmeticPresets[profileName] = p.Server.EquippedCosmetics.Instances.Unified.Slots
+	p.SetStale()
+}
+
+func (p *GameProfileData) loadCosmeticPreset(profileName string) {
+	p.Server.EquippedCosmetics.Instances.Unified.Slots = p.CosmeticPresets[profileName]
+	p.SetStale()
+}
+
+func (p *GameProfileData) deleteCosmeticPreset(profileName string) {
+	delete(p.CosmeticPresets, profileName)
+	p.SetStale()
 }
