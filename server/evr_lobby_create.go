@@ -23,6 +23,7 @@ func (p *EvrPipeline) lobbyCreate(ctx context.Context, logger *zap.Logger, sessi
 	if err != nil {
 		return MatchID{}, fmt.Errorf("failed to build matchmaking query: %v", err)
 	}
+	logger.Debug("Matchmaking query", zap.String("query", query))
 	labels, err := lobbyListGameServers(ctx, logger, db, nk, session, query)
 	if err != nil {
 		return MatchID{}, err
@@ -100,7 +101,7 @@ func lobbyCreateQuery(ctx context.Context, logger *zap.Logger, db *sql.DB, nk ru
 	qparts := []string{
 		"+label.open:T",
 		"+label.lobby_type:unassigned",
-		fmt.Sprintf("+label.broadcaster.group_ids:%s", params.GroupID.String()),
+		fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/", params.GroupID.String()),
 		fmt.Sprintf("+label.broadcaster.regions:%s", params.Region.String()),
 		fmt.Sprintf("+label.broadcaster.version_lock:%s", params.VersionLock),
 	}

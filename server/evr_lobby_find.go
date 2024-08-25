@@ -332,7 +332,7 @@ func lobbyBackfillQuery(p SessionParameters) (string, error) {
 	qparts := []string{
 		"+label.open:T",
 		fmt.Sprintf("+label.mode:%s", p.Mode.String()),
-		fmt.Sprintf("+label.group_id:%s", p.GroupID.String()),
+		fmt.Sprintf("+label.group_id:/(%s)/", p.GroupID.String()),
 		p.BackfillQueryAddon,
 	}
 
