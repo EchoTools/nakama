@@ -69,6 +69,9 @@ func (mr *LobbyBuilder) SortGameServerIPs(entrants []*MatchmakerEntry) []string 
 	// Score each endpoint based on the latencies
 	scored := make(map[string]int, len(latencies))
 	for k, v := range latencies {
+		if len(v) == 0 {
+			scored[k] = 0
+		}
 		// Sort the latencies
 		sort.Ints(v)
 		// Get the average

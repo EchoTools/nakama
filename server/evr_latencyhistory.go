@@ -45,10 +45,17 @@ func (h LatencyHistory) Add(extIP string, rtt int) {
 }
 
 func (h LatencyHistory) LabelsByAverageRTT(labels []*MatchLabel) []LabelWithLatency {
+	if len(labels) == 0 {
+		return make([]LabelWithLatency, 0)
+	}
 
 	labelRTTs := make([]LabelWithLatency, 0, len(labels))
 	for _, label := range labels {
 		if history, ok := h[label.Broadcaster.Endpoint.GetExternalIP()]; ok {
+			if len(history) == 0 {
+				labelRTTs = append(labelRTTs, LabelWithLatency{Label: label, RTT: 0})
+				continue
+			}
 			average := 0
 			for _, l := range history {
 				average += l

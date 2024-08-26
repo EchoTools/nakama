@@ -706,6 +706,11 @@ func (d *DiscordAppBot) handlePrepareMatch(ctx context.Context, logger runtime.L
 		labelLatencies := make([]int, len(labels))
 		for _, label := range labels {
 			if history, ok := latencyHistory[label.Broadcaster.Endpoint.GetExternalIP()]; ok {
+				if len(history) == 0 {
+					labelLatencies = append(labelLatencies, 0)
+					continue
+				}
+
 				average := 0
 				for _, l := range history {
 					average += l
