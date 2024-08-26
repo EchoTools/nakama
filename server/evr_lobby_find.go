@@ -202,10 +202,12 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		}
 	}()
 
-	if params.Mode == evr.ModeArenaPublic || params.Mode == evr.ModeCombatPublic {
+	switch params.Mode {
+	case evr.ModeSocialPublic:
+		// Join a social lobby
+	case evr.ModeArenaPublic, evr.ModeCombatPublic {
 		// Matchmake a new lobby session
 		logger.Debug("matchmaking", zap.Any("members", lobbyGroup.List()))
-
 		if err := p.lobbyMatchMake(ctx, logger, session, params, lobbyGroup); err != nil {
 			return fmt.Errorf("failed to matchmake: %w", err)
 		}

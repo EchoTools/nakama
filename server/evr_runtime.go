@@ -524,32 +524,6 @@ func GetGuildIDByGroupID(ctx context.Context, db *sql.DB, groupID string) (guild
 	return dbGuildID, nil
 }
 
-func GetDeviceAuthsByUserID(ctx context.Context, db *sql.DB, userID string) (deviceIDs []*DeviceAuth, err error) {
-	// Look for an existing account.
-	query := "SELECT id FROM user_device WHERE user_id = $1"
-	var dbDeviceID string
-
-	rows, err := db.QueryContext(ctx, query, userID)
-	if err != nil {
-		return nil, status.Error(codes.Internal, "An error occurred while trying to list group IDs.")
-	}
-
-	auths := make([]*DeviceAuth, 0)
-	for rows.Next() {
-		if err := rows.Scan(&dbDeviceID); err != nil {
-			auth, err := ParseDeviceAuthToken(dbDeviceID)
-			if err != nil || auth == nil {
-				continue
-			}
-			auths = append(auths, auth)
-			return nil, err
-		}
-	}
-	_ = rows.Close()
-
-	return auths, nil
-}
-
 func GetGuildGroupMetadata(ctx context.Context, db *sql.DB, groupID string) (*GroupMetadata, error) {
 	// Look for an existing account.
 	query := "SELECT metadata FROM groups WHERE id = $1"
