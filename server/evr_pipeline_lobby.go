@@ -62,7 +62,13 @@ func (p *EvrPipeline) lobbySessionRequest(ctx context.Context, logger *zap.Logge
 			return
 		}
 
-		params := NewLobbyParametersFromRequest(ctx, in.(evr.LobbySessionRequest), gconfig, config)
+		latencyHistory, err := LoadLatencyHistory(ctx, logger, p.db, session.userID)
+		if err != nil {
+			logger.Error("Failed to load latency history", zap.Error(err))
+			return
+		}
+
+		params := NewLobbyParametersFromRequest(ctx, in.(evr.LobbySessionRequest), gconfig, config, latencyHistory)
 
 		ctx = context.WithValue(ctx, ctxLobbyParametersKey{}, params)
 
@@ -78,6 +84,7 @@ func (p *EvrPipeline) lobbySessionRequest(ctx context.Context, logger *zap.Logge
 				params.CurrentMatchID = matchID
 				if _, _, err := p.matchRegistry.GetMatch(ctx, matchID.String()); err == nil {
 					LeavePartyStream(session)
+					p.metrics.CustomCounter("lobby_join_next_match", params.MetricsTags(), 1)
 					if err = p.lobbyJoin(ctx, logger, session, params); err == nil {
 						return
 					}
@@ -91,11 +98,13 @@ func (p *EvrPipeline) lobbySessionRequest(ctx context.Context, logger *zap.Logge
 				} else {
 					// Spectators don't matchmake, and they don't have a delay for backfill.
 					// Spectators also don't time out.
+					p.metrics.CustomCounter("lobby_find_spectate", params.MetricsTags(), 1)
 					err = p.lobbyFindSpectate(ctx, logger, session, params)
 				}
 			} else {
 				// Otherwise, find a match via the matchmaker or backfill.
 				// This is also responsible for creation of social lobbies.
+				p.metrics.CustomCounter("lobby_find_match", params.MetricsTags(), int64(params.PartySize))
 				err = p.lobbyFind(ctx, logger, session, params)
 				if err != nil {
 					// On error, leave any party the user might be a member of.
@@ -105,10 +114,12 @@ func (p *EvrPipeline) lobbySessionRequest(ctx context.Context, logger *zap.Logge
 
 		case *evr.LobbyJoinSessionRequest:
 			LeavePartyStream(session)
+			p.metrics.CustomCounter("lobby_create_session", params.MetricsTags(), 1)
 			err = p.lobbyJoin(ctx, logger, session, params)
 
 		case *evr.LobbyCreateSessionRequest:
 			LeavePartyStream(session)
+			p.metrics.CustomCounter("lobby_create_session", params.MetricsTags(), 1)
 			matchID, err = p.lobbyCreate(ctx, logger, session, params)
 			if err == nil {
 				params.CurrentMatchID = matchID
@@ -118,6 +129,7 @@ func (p *EvrPipeline) lobbySessionRequest(ctx context.Context, logger *zap.Logge
 
 		// Return the error to the client.
 		if err != nil {
+			p.metrics.CustomCounter("lobby_error", params.MetricsTags(), 1)
 			logger.Error("Failed to process lobby session request", zap.Error(err))
 			session.SendEvr(params.ResponseFromError(err))
 		}

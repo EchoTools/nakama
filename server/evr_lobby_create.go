@@ -33,11 +33,7 @@ func (p *EvrPipeline) lobbyCreate(ctx context.Context, logger *zap.Logger, sessi
 		return MatchID{}, ErrMatchmakingNoAvailableServers
 	}
 
-	latencyHistory, err := LoadLatencyHistory(ctx, logger, db, session.UserID())
-	if err != nil {
-		return MatchID{}, fmt.Errorf("failed to load latency history: %v", err)
-	}
-	labelRTTs := latencyHistory.LabelsByAverageRTT(labels)
+	labelRTTs := params.latencyHistory.LabelsByAverageRTT(labels)
 	labelLatencies := make([]int, len(labels))
 	for i, l := range labelRTTs {
 		labelLatencies[i] = l.RTT

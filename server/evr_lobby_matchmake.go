@@ -145,11 +145,6 @@ func (p *EvrPipeline) lobbyMatchMake(ctx context.Context, logger *zap.Logger, se
 
 func lobbyMatchmakeQuery(ctx context.Context, logger *zap.Logger, db *sql.DB, session Session, rating types.Rating, params SessionParameters) (query string, stringProps map[string]string, numericProps map[string]float64, err error) {
 
-	latencyHistory, err := LoadLatencyHistory(ctx, logger, db, session.UserID())
-	if err != nil {
-		return "", nil, nil, err
-	}
-
 	stringProps = map[string]string{
 		"mode":         params.Mode.String(),
 		"group_id":     params.GroupID.String(),
@@ -170,7 +165,7 @@ func lobbyMatchmakeQuery(ctx context.Context, logger *zap.Logger, db *sql.DB, se
 	}
 
 	// Add a property of the external IP's RTT
-	for ip, history := range latencyHistory {
+	for ip, history := range params.latencyHistory {
 		// Average the RTT
 		rtt := 0
 
