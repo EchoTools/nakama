@@ -919,55 +919,37 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 	}
 	matchID := request.MatchID
 
+	if request.GuildID == "" {
+		return "", runtime.NewError("guild ID must be specified", StatusInvalidArgument)
+	}
+
+	groupID, err := GetGroupIDByGuildID(ctx, db, request.GuildID)
+	if err != nil {
+		return "", runtime.NewError(err.Error(), StatusInternalError)
+	} else if groupID == "" {
+		return "", runtime.NewError("guild group not found", StatusNotFound)
+	}
+
 	label, err := MatchLabelByID(ctx, nk, matchID)
 	if err != nil || label == nil {
 		return "", runtime.NewError("Failed to get match label", StatusNotFound)
 	}
 
 	// Validate that this userID has permission to signal this match
-	allowed := false
-
-	if ok, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalDevelopers); err != nil {
-		return "", runtime.NewError("Failed to check group membership: "+err.Error(), StatusInternalError)
-	} else if ok {
-		allowed = true
-	} else if label.Broadcaster.OperatorID == userID {
-		allowed = true
-	} else {
-		for _, groupID := range label.Broadcaster.GroupIDs {
-			if md, err := GetGuildGroupMetadata(ctx, db, groupID.String()); err != nil {
-				return "", runtime.NewError("Failed to get group metadata: "+err.Error(), StatusInternalError)
-			} else if slices.Contains(md.RoleCache[md.Roles.Allocator], userID) {
-				allowed = true
-				break
-			}
-		}
-	}
-
-	if !allowed {
-		return "", runtime.NewError("unauthorized to signal match", StatusPermissionDenied)
-	}
-
-	if request.GuildID == "" {
-		return "", runtime.NewError("guild ID must be specified", StatusInvalidArgument)
-	}
-
-	var groupID string
-
-	if groupID, err = GetGroupIDByGuildID(ctx, db, request.GuildID); err != nil {
-		return "", runtime.NewError(err.Error(), StatusInternalError)
-	} else if groupID == "" {
-		return "", runtime.NewError("guild group not found", StatusNotFound)
-	}
-
-	// Validate that the user has permission to allocate to the target guild
 	md, err := GetGuildGroupMetadata(ctx, db, groupID)
 	if err != nil {
-		return "", runtime.NewError("Failed to get group metadata", StatusInternalError)
+		return "", runtime.NewError("Failed to get group metadata: "+err.Error(), StatusInternalError)
 	}
 
+	// Operators may signal their own game servers.
+	// Otherwise, the game server must host for the guild.
+	if label.Broadcaster.OperatorID != userID && !slices.Contains(label.Broadcaster.GroupIDs, uuid.FromStringOrNil(groupID)) {
+		return "", runtime.NewError("game server does not host for that guild.", StatusPermissionDenied)
+	}
+
+	// Validate that the user has permission to signal the match
 	if !slices.Contains(md.RoleCache[md.Roles.Allocator], userID) {
-		return "", runtime.NewError("unauthorized to allocate to guild", StatusPermissionDenied)
+		return "", runtime.NewError("user must have the `allocator` in the guild.", StatusPermissionDenied)
 	}
 
 	if request.SpawnedBy != "" {
