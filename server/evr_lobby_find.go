@@ -128,6 +128,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 					// This player is in the same match as the leader. continue to wait.
 					continue
 				} else {
+
 					// If the leader is in a different social lobby, join it.
 					label, err := MatchLabelByID(ctx, p.runtimeModule, leaderMatchID)
 					if err != nil || label == nil {
@@ -202,12 +203,10 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		}
 	}()
 
-	switch params.Mode {
-	case evr.ModeSocialPublic:
-		// Join a social lobby
-	case evr.ModeArenaPublic, evr.ModeCombatPublic {
+	if params.Mode == evr.ModeArenaPublic || params.Mode == evr.ModeCombatPublic {
 		// Matchmake a new lobby session
 		logger.Debug("matchmaking", zap.Any("members", lobbyGroup.List()))
+
 		if err := p.lobbyMatchMake(ctx, logger, session, params, lobbyGroup); err != nil {
 			return fmt.Errorf("failed to matchmake: %w", err)
 		}
@@ -290,6 +289,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 				logger := logger.With(zap.String("mid", matchID.UUID.String()))
 
 				logger.Debug("Joining backfill match.")
+				p.metrics.CustomCounter("lobby_join_backfill", params.MetricsTags(), int64(params.PartySize))
 				if err := LobbyJoinEntrants(ctx, logger, p.matchRegistry, p.sessionRegistry, p.tracker, p.profileRegistry, matchID, params.Role, entrants); err != nil {
 					logger.Debug("Failed to join match", zap.Error(err))
 					continue
@@ -299,7 +299,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 				return nil
 			}
 		case <-createTicker.C:
-
+			p.metrics.CustomCounter("lobby_create_social", params.MetricsTags(), 1)
 			// Only create public social lobbies.
 			if params.Mode != evr.ModeSocialPublic || !p.createLobbyMu.TryLock() {
 				continue
@@ -317,6 +317,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 			}
 
 			logger.Debug("Joining newly created social lobby.")
+			p.metrics.CustomCounter("lobby_join_created_social", params.MetricsTags(), 1)
 			if err := LobbyJoinEntrants(ctx, logger, p.matchRegistry, p.sessionRegistry, p.tracker, p.profileRegistry, matchID, params.Role, presences); err != nil {
 				logger.Debug("Failed to join newly created social lobby.", zap.String("mid", matchID.UUID.String()), zap.Error(err))
 				p.createLobbyMu.Unlock()
@@ -430,12 +431,7 @@ func (p *EvrPipeline) GetBackfillCandidates(ctx context.Context, logger *zap.Log
 	}
 	labels = available
 
-	latencyHistory, err := LoadLatencyHistory(ctx, logger, p.db, userID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load latency history: %v", err)
-	}
-
-	labelRTTs := latencyHistory.LabelsByAverageRTT(labels)
+	labelRTTs := params.latencyHistory.LabelsByAverageRTT(labels)
 
 	var cmpFn func(i, j time.Duration, o, p int) bool
 	switch params.Mode {

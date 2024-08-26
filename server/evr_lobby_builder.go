@@ -30,14 +30,16 @@ type LobbyBuilder struct {
 	matchRegistry   MatchRegistry
 	tracker         Tracker
 	profileRegistry *ProfileRegistry
+	metrics         Metrics
 }
 
-func NewLobbyBuilder(logger *zap.Logger, sessionRegistry SessionRegistry, matchRegistry MatchRegistry, tracker Tracker, profileRegistry *ProfileRegistry) *LobbyBuilder {
+func NewLobbyBuilder(logger *zap.Logger, sessionRegistry SessionRegistry, matchRegistry MatchRegistry, tracker Tracker, metrics Metrics, profileRegistry *ProfileRegistry) *LobbyBuilder {
 	return &LobbyBuilder{
 		logger:          logger,
 		sessionRegistry: sessionRegistry,
 		matchRegistry:   matchRegistry,
 		tracker:         tracker,
+		metrics:         metrics,
 		profileRegistry: profileRegistry,
 	}
 }
@@ -232,6 +234,11 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 			entrantPresences = append(entrantPresences, presence)
 		}
 	}
+	tags := map[string]string{
+		"mode":    mode.String(),
+		"level":   level.String(),
+		"groupID": groupID.String(),
+	}
 
 	successful := make([]*EvrMatchPresence, 0, len(entrants))
 	errored := make([]*EvrMatchPresence, 0, len(entrants))
@@ -255,6 +262,8 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 	if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), &label); err != nil {
 		logger.Error("Failed to unmarshal match label", zap.String("mid", matchID.UUID.String()), zap.Error(err))
 	}
+	b.metrics.CustomCounter("lobby_join_match_made", tags, int64(len(successful)))
+	b.metrics.CustomCounter("lobby_error_match_made", tags, int64(len(errored)))
 
 	logger.Info("Match made", zap.Any("label", label), zap.String("mid", matchID.UUID.String()), zap.Any("teams", teams), zap.Any("successful", successful), zap.Any("errored", errored))
 	return nil

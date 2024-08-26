@@ -34,6 +34,7 @@ type SessionParameters struct {
 	MatchmakingQueryAddon string     `json:"matchmaking_query_addon"`
 	CreateQueryAddon      string     `json:"create_query_addon"`
 	Verbose               bool       `json:"verbose"`
+	latencyHistory        LatencyHistory
 }
 
 func (s SessionParameters) ResponseFromError(err error) *evr.LobbySessionFailurev4 {
@@ -63,7 +64,17 @@ func (s SessionParameters) ResponseFromError(err error) *evr.LobbySessionFailure
 	return evr.NewLobbySessionFailure(s.Mode, s.GroupID, respCode, message).Version4()
 }
 
-func NewLobbyParametersFromRequest(ctx context.Context, r evr.LobbySessionRequest, gconfig MatchmakingSettings, config MatchmakingSettings) SessionParameters {
+func (s SessionParameters) MetricsTags() map[string]string {
+	return map[string]string{
+		"mode":         s.Mode.String(),
+		"level":        s.Level.String(),
+		"region":       s.Region.String(),
+		"version_lock": s.VersionLock.String(),
+		"group_id":     s.GroupID.String(),
+	}
+}
+
+func NewLobbyParametersFromRequest(ctx context.Context, r evr.LobbySessionRequest, gconfig MatchmakingSettings, config MatchmakingSettings, latencyHistory LatencyHistory) SessionParameters {
 	node := ctx.Value(ctxNodeKey{}).(string)
 	requiredFeatures, ok := ctx.Value(ctxRequiredFeaturesKey{}).([]string)
 	if !ok {
@@ -119,5 +130,6 @@ func NewLobbyParametersFromRequest(ctx context.Context, r evr.LobbySessionReques
 		NextMatchID:           config.NextMatchID,
 		Verbose:               gconfig.Verbose || config.Verbose,
 		Node:                  node,
+		latencyHistory:        latencyHistory,
 	}
 }
