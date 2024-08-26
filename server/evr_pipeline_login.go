@@ -263,6 +263,41 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		return settings, fmt.Errorf("user is not in any guild groups")
 	}
 
+	// Ensure that the player has a display name defined for each guild group
+	discordID := account.CustomId
+	for _, membership := range memberships {
+
+		guildID := membership.GuildGroup.GuildID()
+		groupID := membership.GuildGroup.ID()
+		if metadata.GetDisplayName(groupID.String()) == "" {
+			go func() {
+				bot := p.discordRegistry.GetBot()
+				if bot == nil {
+					return
+				}
+				var err error
+
+				member, err := bot.State.Member(guildID, discordID)
+				if err != nil {
+					member, err = bot.GuildMember(guildID, discordID)
+					if err != nil {
+						logger.Debug("Failed to get member", zap.Error(err))
+						return
+					}
+				}
+				if member == nil {
+					return
+				}
+				if err := bot.State.MemberAdd(member); err != nil {
+					logger.Debug("Failed to add member to state", zap.Error(err))
+				}
+
+				logger.Debug("Updating display name", zap.String("guildID", guildID), zap.String("displayName", member.DisplayName()))
+				metadata.SetGroupDisplayName(groupID.String(), member.DisplayName())
+			}()
+		}
+	}
+
 	// If the user is not in the group, set the largest group as the active group
 
 	found := false
