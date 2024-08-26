@@ -74,10 +74,10 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		"link":                          LinkingAppRpc,
 		"evr/servicestatus":             ServiceStatusRpc,
 		"importloadouts":                ImportLoadoutsRpc,
-		"terminateMatch":                shutdownMatchRpc,
-		"setmatchamakerstatus":          setMatchmakingStatusRpc,
+		//"terminateMatch":                shutdownMatchRpc,
+		"setmatchamakerstatus": setMatchmakingStatusRpc,
 
-		"/v1/storage/game/sourcedb/rad15/json/r14/loading_tips.json": StorageLoadingTipsRPC,
+		//"/v1/storage/game/sourcedb/rad15/json/r14/loading_tips.json": StorageLoadingTipsRPC,
 	}
 
 	for name, rpc := range rpcs {
