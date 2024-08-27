@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"slices"
+	"sort"
 	"sync"
 	"time"
 
@@ -241,6 +242,16 @@ func MatchListPublicRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 			labels = append(labels, v)
 		}
 	}
+
+	// Sort matches by the latest pubs first, then the latest privates
+	sort.SliceStable(labels, func(i, j int) bool {
+		if labels[i].LobbyType == PublicLobby && labels[j].LobbyType != PublicLobby {
+			return true
+		} else if labels[i].LobbyType != PublicLobby && labels[j].LobbyType == PublicLobby {
+			return false
+		}
+		return labels[i].StartTime.After(labels[j].StartTime)
+	})
 
 	response := struct {
 		UpdateTime         TimeRFC3339         `json:"update_time"`
