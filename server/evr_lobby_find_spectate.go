@@ -70,7 +70,7 @@ func (p *EvrPipeline) lobbyFindSpectate(ctx context.Context, logger *zap.Logger,
 					return status.Errorf(codes.Internal, "failed to create entrant presences: %v", err)
 				}
 
-				if err := LobbyJoinEntrants(ctx, logger, p.matchRegistry, p.sessionRegistry, p.tracker, p.profileRegistry, matchID, params.Role, entrants); err != nil {
+				if err := p.LobbyJoinEntrants(ctx, logger, matchID, params.Role, entrants); err != nil {
 					logger.Debug("Failed to join match", zap.Error(err))
 					continue
 				}
