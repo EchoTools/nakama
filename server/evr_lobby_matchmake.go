@@ -156,7 +156,13 @@ func lobbyMatchmakeQuery(ctx context.Context, logger *zap.Logger, db *sql.DB, se
 		"rating_mu":    rating.Mu,
 		"rating_sigma": rating.Sigma,
 	}
+	for i, v := range params.NumericProperties {
+		numericProps[i] = v
+	}
 
+	for i, v := range params.StringProperties {
+		stringProps[i] = v
+	}
 	qparts := []string{
 		"+properties.mode:" + params.Mode.String(),
 		"+properties.version_lock:" + params.VersionLock.String(),

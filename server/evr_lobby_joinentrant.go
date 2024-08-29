@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -15,141 +16,79 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-func LobbyJoinEntrants(ctx context.Context, logger *zap.Logger, matchRegistry MatchRegistry, sessionRegistry SessionRegistry, tracker Tracker, profileRegistry *ProfileRegistry, matchID MatchID, role int, entrants []*EvrMatchPresence) error {
-	logger = logger.With(zap.String("mid", matchID.UUID.String()), zap.Int("role", role))
+func (p *EvrPipeline) LobbyJoinEntrants(ctx context.Context, logger *zap.Logger, matchID MatchID, role int, entrants []*EvrMatchPresence) error {
+	return LobbyJoinEntrants(ctx, logger, p.db, p.matchRegistry, p.sessionRegistry, p.tracker, p.profileRegistry, matchID, role, entrants)
+}
+
+func LobbyJoinEntrants(ctx context.Context, logger *zap.Logger, db *sql.DB, matchRegistry MatchRegistry, sessionRegistry SessionRegistry, tracker Tracker, profileRegistry *ProfileRegistry, matchID MatchID, role int, entrants []*EvrMatchPresence) error {
+
 	match, _, err := matchRegistry.GetMatch(ctx, matchID.String())
 	if err != nil || match == nil {
-		return status.Error(codes.NotFound, "Match not found")
+		return errors.Join(NewLobbyErrorf(InternalError, "failed to get match"), err)
+	} else if match == nil {
+		return ErrMatchNotFound
 	}
 
 	label := MatchLabel{}
 	if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), &label); err != nil {
-		return fmt.Errorf("failed to unmarshal match label: %w", err)
+		return errors.Join(NewLobbyError(InternalError, "failed to unmarshal match label"), err)
 	}
+	groupID := label.GetGroupID()
+	groupIDStr := groupID.String()
 
 	// Ensure this player is authorized to join this lobby/match.
 	session := sessionRegistry.Get(entrants[0].SessionID)
 	if session == nil {
-		return status.Error(codes.Internal, "Session not found")
+		return NewLobbyError(InternalError, "session not found")
 	}
-	s := session.(*sessionWS)
 
-	if err := authorizeUserForGuildGroup(ctx, s.pipeline.db, s.userID.String(), label.GetGroupID().String()); err != nil {
-		return err
+	metadataCache, ok := ctx.Value(ctxGuildGroupMetadataCacheKey{}).(*MapOf[uuid.UUID, *GroupMetadata])
+	if !ok {
+		return NewLobbyError(InternalError, "failed to get metadata cache from context")
+	}
+
+	groupMetadata, ok := metadataCache.Load(groupID)
+	if !ok {
+		groupMetadata, err = GetGuildGroupMetadata(ctx, db, groupIDStr)
+		if err != nil {
+			return errors.Join(NewLobbyError(InternalError, "failed to get guild group metadata"), err)
+		}
+		metadataCache.Store(groupID, groupMetadata)
 	}
 
 	// The lobbysessionsuccess message is sent to both the game server and the game client.
-	serverSession := sessionRegistry.Get(uuid.FromStringOrNil(label.Broadcaster.SessionID))
-	if serverSession == nil {
-		logger.Error("game server session not found", zap.String("sessionID", label.Broadcaster.SessionID))
-		return status.Error(codes.Internal, "game server session not found")
-	}
-
-	var labelStr string
 
 	// The final messages happen in a goroutine so this can wait for all of them to complete.
 	errorCh := make(chan error, len(entrants))
-
 	presences := make([]*EvrMatchPresence, 0, len(entrants))
+	logger = logger.With(zap.String("mid", matchID.UUID.String()), zap.Int("role", role))
+
+	serverSession := sessionRegistry.Get(uuid.FromStringOrNil(label.Server.SessionID))
+	if serverSession == nil {
+		return NewLobbyError(InternalError, "game server session not found")
+	}
 
 	for _, e := range entrants {
-		logger := logger.With(zap.String("uid", e.UserID.String()), zap.String("sid", e.SessionID.String()))
-
-		metadata := EntrantMetadata{Presence: *e}.MarshalMap()
-
-		var err error
-		var found, allowed, isNew bool
-		var reason string
-
-		// Trigger MatchJoinAttempt
-		found, allowed, isNew, reason, labelStr, _ = matchRegistry.JoinAttempt(ctx, matchID.UUID, matchID.Node, e.UserID, e.SessionID, e.Username, e.SessionExpiry, nil, e.ClientIP, e.ClientPort, matchID.Node, metadata)
-		if !found || labelStr == "" {
-			err = status.Error(codes.NotFound, "Match not found")
-		} else if !allowed {
-			err = status.Error(codes.PermissionDenied, reason)
-		} else if !isNew {
-			err = status.Error(codes.AlreadyExists, "Already joined match")
-		}
-
-		if err != nil {
-			logger.Warn("Failed to join match", zap.Error(err))
-			continue
-		}
-
-		e = &EvrMatchPresence{}
-		if err := json.Unmarshal([]byte(reason), &e); err != nil {
-			return fmt.Errorf("failed to unmarshal attempt response: %w", err)
-		}
-
-		matchIDStr := matchID.String()
-		ops := []*TrackerOp{
-			{
-				PresenceStream{Mode: StreamModeEntrant, Subject: e.EntrantID(matchID), Label: matchID.Node},
-				PresenceMeta{Format: SessionFormatEvr, Username: e.Username, Status: e.String(), Hidden: true},
-			},
-			{
-				PresenceStream{Mode: StreamModeService, Subject: e.SessionID, Label: StreamLabelMatchService},
-				PresenceMeta{Format: SessionFormatEvr, Username: e.Username, Status: matchIDStr, Hidden: true},
-			},
-			{
-				PresenceStream{Mode: StreamModeService, Subject: e.LoginSessionID, Label: StreamLabelMatchService},
-				PresenceMeta{Format: SessionFormatEvr, Username: e.Username, Status: matchIDStr, Hidden: true},
-			},
-			{
-				PresenceStream{Mode: StreamModeService, Subject: e.UserID, Label: StreamLabelMatchService},
-				PresenceMeta{Format: SessionFormatEvr, Username: e.Username, Status: matchIDStr, Hidden: true},
-			},
-			{
-				PresenceStream{Mode: StreamModeService, Subject: e.EvrID.UUID(), Label: StreamLabelMatchService},
-				PresenceMeta{Format: SessionFormatEvr, Username: e.Username, Status: matchIDStr, Hidden: true},
-			},
-		}
-
-		// Update the statuses. This is looked up by the pipeline when the game server sends the new entrant message.
-		for _, op := range ops {
-			if ok := tracker.Update(ctx, e.SessionID, op.Stream, e.UserID, op.Meta); !ok {
-				return fmt.Errorf("failed to track session ID: %s", e.SessionID)
-			}
-		}
-
-		// Get the client's session
 		session := sessionRegistry.Get(e.SessionID)
 		if session == nil {
-			logger.Warn("Session not found", zap.String("sid", e.SessionID.String()))
+			logger.Warn("failed to find session", zap.String("sid", e.GetSessionId()))
 			continue
 		}
-		sessionCtx := session.Context()
 
-		// Prepare the cached profile for the lobby.
-		displayName, ok := sessionCtx.Value(ctxDisplayNameOverrideKey{}).(string)
-		if !ok {
-			metadata, ok := sessionCtx.Value(ctxAccountMetadataKey{}).(AccountMetadata)
-			if !ok {
-				return status.Error(codes.Internal, "Failed to get account metadata from session context")
+		if err := authorizeGuildGroupSession(ctx, e.GetUserId(), groupIDStr, groupMetadata); err != nil {
+			return err
+		}
+
+		if err := profileRegistry.SetLobbyProfile(ctx, e.UserID, groupID, e.EvrID); err != nil {
+			return errors.Join(NewLobbyErrorf(InternalError, "failed to set lobby profile"), err)
+		}
+
+		if err := LobbyJoinEntrant(logger, matchRegistry, tracker, session, serverSession, &label, e, matchID, role, errorCh); err != nil {
+			if err := SendEVRMessages(session, LobbySessionFailureFromError(label.Mode, groupID, err)); err != nil {
+				logger.Error("failed to send lobby session failure to game client", zap.Error(err))
 			}
-			displayName = metadata.GetGroupDisplayNameOrDefault(label.GroupID.String())
-		}
-		evrID, ok := sessionCtx.Value(ctxEvrIDKey{}).(evr.EvrId)
-		if !ok {
-			return status.Error(codes.Internal, "Failed to get evrID from session context")
-		}
-		if err := profileRegistry.SetLobbyProfile(ctx, session.UserID(), evrID, displayName); err != nil {
-			logger.Warn("Failed to set lobby profile", zap.Error(err))
 			continue
 		}
-
-		connectionSettings := label.GetEntrantConnectMessage(role, e.IsPCVR)
-		if err := SendEVRMessages(serverSession, connectionSettings); err != nil {
-			logger.Error("Failed to send lobby session success to game server", zap.Error(err))
-		}
-
-		LeaveMatchmakingStream(logger, session.(*sessionWS))
-		// Send the lobby session success message to the game client.
-		go func(session Session, msg *evr.LobbySessionSuccessv5) {
-			<-time.After(250 * time.Millisecond)
-			errorCh <- SendEVRMessages(session, connectionSettings)
-		}(session, connectionSettings)
-
 		presences = append(presences, e)
 	}
 
@@ -163,7 +102,7 @@ func LobbyJoinEntrants(ctx context.Context, logger *zap.Logger, matchRegistry Ma
 			err = fmt.Errorf("timed out waiting for all lobby session successes to complete")
 		case err := <-errorCh:
 			if err != nil {
-				logger.Warn("Failed to send lobby session success to game client", zap.Any("presence", presence), zap.Error(err))
+				logger.Warn("failed to send lobby session success to game client", zap.Any("presence", presence), zap.Error(err))
 				failed = append(failed, presence)
 			} else {
 				success = append(success, presence)
@@ -175,14 +114,96 @@ func LobbyJoinEntrants(ctx context.Context, logger *zap.Logger, matchRegistry Ma
 	return nil
 }
 
-func authorizeUserForGuildGroup(ctx context.Context, db *sql.DB, userID string, groupID string) error {
-	groupMetadata, err := GetGuildGroupMetadata(ctx, db, groupID)
+func LobbyJoinEntrant(logger *zap.Logger, matchRegistry MatchRegistry, tracker Tracker, session Session, serverSession Session, label *MatchLabel, e *EvrMatchPresence, matchID MatchID, role int, errorCh chan error) error {
+	logger = logger.With(zap.String("uid", e.UserID.String()), zap.String("sid", e.SessionID.String()))
+
+	sessionCtx := session.Context()
+	metadata := EntrantMetadata{Presence: *e}.MarshalMap()
+
+	var err error
+	var found, allowed, isNew bool
+	var reason string
+	var labelStr string
+	// Trigger MatchJoinAttempt
+	found, allowed, isNew, reason, labelStr, _ = matchRegistry.JoinAttempt(sessionCtx, matchID.UUID, matchID.Node, e.UserID, e.SessionID, e.Username, e.SessionExpiry, nil, e.ClientIP, e.ClientPort, matchID.Node, metadata)
+	if !found {
+		err = NewLobbyErrorf(ServerDoesNotExist, "joinattempt failed: match not found")
+	} else if labelStr == "" {
+		err = NewLobbyErrorf(ServerDoesNotExist, "joinattempt failed: match label not found")
+	} else if !allowed {
+		err = NewLobbyErrorf(ServerIsFull, "joinattempt failed: %s", reason)
+	} else if !isNew {
+		err = NewLobbyError(ServerIsFull, "joinattempt failed: User already in match")
+	}
+
 	if err != nil {
-		return status.Errorf(codes.Internal, "failed to get group metadata: %v", err)
+		logger.Warn("failed to join match", zap.Error(err))
+		return err
+	}
+
+	e = &EvrMatchPresence{}
+	if err := json.Unmarshal([]byte(reason), &e); err != nil {
+		return errors.Join(NewLobbyErrorf(InternalError, "failed to unmarshal match presence"), err)
+	}
+
+	matchIDStr := matchID.String()
+	ops := []*TrackerOp{
+		{
+			PresenceStream{Mode: StreamModeEntrant, Subject: e.EntrantID(matchID), Label: matchID.Node},
+			PresenceMeta{Format: SessionFormatEVR, Username: e.Username, Status: e.String(), Hidden: true},
+		},
+		{
+			PresenceStream{Mode: StreamModeService, Subject: e.SessionID, Label: StreamLabelMatchService},
+			PresenceMeta{Format: SessionFormatEVR, Username: e.Username, Status: matchIDStr, Hidden: true},
+		},
+		{
+			PresenceStream{Mode: StreamModeService, Subject: e.LoginSessionID, Label: StreamLabelMatchService},
+			PresenceMeta{Format: SessionFormatEVR, Username: e.Username, Status: matchIDStr, Hidden: true},
+		},
+		{
+			PresenceStream{Mode: StreamModeService, Subject: e.UserID, Label: StreamLabelMatchService},
+			PresenceMeta{Format: SessionFormatEVR, Username: e.Username, Status: matchIDStr, Hidden: true},
+		},
+		{
+			PresenceStream{Mode: StreamModeService, Subject: e.EvrID.UUID(), Label: StreamLabelMatchService},
+			PresenceMeta{Format: SessionFormatEVR, Username: e.Username, Status: matchIDStr, Hidden: true},
+		},
+	}
+	// Update the statuses. This is looked up by the pipeline when the game server sends the new entrant message.
+	for _, op := range ops {
+		if ok := tracker.Update(sessionCtx, e.SessionID, op.Stream, e.UserID, op.Meta); !ok {
+			return NewLobbyError(InternalError, "failed to track session ID")
+		}
+	}
+
+	connectionSettings := label.GetEntrantConnectMessage(role, e.IsPCVR)
+	if err := SendEVRMessages(serverSession, connectionSettings); err != nil {
+		logger.Error("failed to send lobby session success to game server", zap.Error(err))
+		return NewLobbyError(InternalError, "failed to send lobby session success to game server")
+	}
+
+	if err := LeaveMatchmakingStream(logger, session.(*sessionWS)); err != nil {
+		logger.Error("failed to leave matchmaking stream", zap.Error(err))
+	}
+
+	// Send the lobby session success message to the game client.
+	go func(session Session, msg *evr.LobbySessionSuccessv5) {
+		<-time.After(250 * time.Millisecond)
+		errorCh <- SendEVRMessages(session, connectionSettings)
+	}(session, connectionSettings)
+
+	return nil
+}
+
+func authorizeGuildGroupSession(ctx context.Context, userID string, groupID string, groupMetadata *GroupMetadata) error {
+
+	accountMetadata, ok := ctx.Value(ctxAccountMetadataKey{}).(AccountMetadata)
+	if !ok {
+		return NewLobbyError(InternalError, "failed to get account metadata from context")
 	}
 
 	if slices.Contains(groupMetadata.RoleCache[groupMetadata.Roles.Suspended], userID) {
-		return status.Errorf(codes.PermissionDenied, "user is suspended from the guild")
+		return ErrSuspended
 	}
 
 	if groupMetadata.MinimumAccountAgeDays > 0 && !slices.Contains(groupMetadata.RoleCache[groupMetadata.Roles.AccountAgeBypass], userID) {
@@ -197,20 +218,12 @@ func authorizeUserForGuildGroup(ctx context.Context, db *sql.DB, userID string, 
 		}
 	}
 	if groupMetadata.MembersOnlyMatchmaking {
-		groupIDs, err := GetGuildGroupIDsByUser(ctx, db, userID)
-		if err != nil {
-			return status.Errorf(codes.Internal, "failed to get group ID by guild ID: %v", err)
+		memberships, ok := ctx.Value(ctxGuildGroupsKey{}).(GuildGroupMemberships)
+		if !ok {
+			return NewLobbyError(KickedFromLobbyGroup, "failed to get guild group memberships")
 		}
-
-		found := false
-		for _, id := range groupIDs {
-			if id == groupID {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return status.Error(codes.PermissionDenied, "user is not a member of the members-only guild")
+		if !memberships.IsMember(groupID) {
+			return NewLobbyError(KickedFromLobbyGroup, "User is not a member of this guild")
 		}
 	}
 	return nil

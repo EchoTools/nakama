@@ -7,16 +7,22 @@ import (
 	"time"
 
 	"github.com/gofrs/uuid/v5"
+	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
-var (
-	ErrorEntrantNotFound       = errors.New("entrant not found")
-	ErrorMultipleEntrantsFound = errors.New("multiple entrants found")
-	ErrorMatchNotFound         = errors.New("match not found")
+const (
+	FriendStateFriends = iota
+	FriendInvitationSent
+	FriendInvitationReceived
+	FriendStateBlocked
+)
+
+type (
+	ctxGuildGroupMetadataCacheKey struct{}
 )
 
 // lobbyMatchmakerStatusRequest is a message requesting the status of the matchmaker.
@@ -32,109 +38,126 @@ func (p *EvrPipeline) lobbyMatchmakerStatusRequest(ctx context.Context, logger *
 }
 
 func (p *EvrPipeline) lobbySessionRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-
-	// Start a goroutine to handle the request.
+	request := in.(evr.LobbySessionRequest)
 	go func() {
-		ctx, cancel := context.WithCancel(ctx)
-		defer cancel()
-		ctx = context.WithValue(ctx, ctxNodeKey{}, p.node)
-
-		profile, err := p.profileRegistry.Load(ctx, session.userID)
-		if err != nil {
-			logger.Error("Failed to load profile", zap.Error(err))
-			return
-		}
-
-		rating := profile.GetRating()
-		ctx = context.WithValue(ctx, ctxRatingKey{}, rating)
-
-		// Load the global matchmaking config
-		gconfig, err := LoadMatchmakingSettings(ctx, p.runtimeModule, SystemUserID)
-		if err != nil {
-			logger.Error("Failed to load global matchmaking config", zap.Error(err))
-			return
-		}
-
-		// Load the user's matchmaking config
-		config, err := LoadMatchmakingSettings(ctx, p.runtimeModule, session.UserID().String())
-		if err != nil {
-			logger.Error("Failed to load matchmaking config", zap.Error(err))
-			return
-		}
-
-		latencyHistory, err := LoadLatencyHistory(ctx, logger, p.db, session.userID)
-		if err != nil {
-			logger.Error("Failed to load latency history", zap.Error(err))
-			return
-		}
-
-		params := NewLobbyParametersFromRequest(ctx, in.(evr.LobbySessionRequest), &gconfig, &config, profile, latencyHistory, friends)
-
-		ctx = context.WithValue(ctx, ctxLobbyParametersKey{}, params)
-
-		var matchID MatchID
-		switch in.(type) {
-		case *evr.LobbyFindSessionRequest:
-			// Load the next match from the DB. (e.g. EchoTaxi hails)
-			matchID, err = p.loadNextMatchFromDB(ctx, logger, session)
-			if err != nil {
-				err = status.Errorf(codes.Internal, "failed to load next match from DB: %v", err)
-			} else if !matchID.IsNil() {
-				// If a match ID is found, join it.
-				params.CurrentMatchID = matchID
-				if _, _, err := p.matchRegistry.GetMatch(ctx, matchID.String()); err == nil {
-					LeavePartyStream(session)
-					p.metrics.CustomCounter("lobby_join_next_match", params.MetricsTags(), 1)
-					if err = p.lobbyJoin(ctx, logger, session, params); err == nil {
-						return
-					}
-				}
-			} else if params.Role == evr.TeamSpectator {
-				// Leave the party if the user is in one
-				LeavePartyStream(session)
-				// Spectators are only allowed in arena and combat matches.
-				if params.Mode != evr.ModeArenaPublic && params.Mode != evr.ModeCombatPublic {
-					err = fmt.Errorf("spectators are only allowed in arena and combat matches")
-				} else {
-					// Spectators don't matchmake, and they don't have a delay for backfill.
-					// Spectators also don't time out.
-					p.metrics.CustomCounter("lobby_find_spectate", params.MetricsTags(), 1)
-					err = p.lobbyFindSpectate(ctx, logger, session, params)
-				}
-			} else {
-				// Otherwise, find a match via the matchmaker or backfill.
-				// This is also responsible for creation of social lobbies.
-				p.metrics.CustomCounter("lobby_find_match", params.MetricsTags(), int64(params.PartySize))
-				err = p.lobbyFind(ctx, logger, session, params)
-				if err != nil {
-					// On error, leave any party the user might be a member of.
-					LeavePartyStream(session)
-				}
-			}
-
-		case *evr.LobbyJoinSessionRequest:
-			LeavePartyStream(session)
-			p.metrics.CustomCounter("lobby_create_session", params.MetricsTags(), 1)
-			err = p.lobbyJoin(ctx, logger, session, params)
-
-		case *evr.LobbyCreateSessionRequest:
-			LeavePartyStream(session)
-			p.metrics.CustomCounter("lobby_create_session", params.MetricsTags(), 1)
-			matchID, err = p.lobbyCreate(ctx, logger, session, params)
-			if err == nil {
-				params.CurrentMatchID = matchID
-				err = p.lobbyJoin(ctx, logger, session, params)
-			}
-		}
-
-		// Return the error to the client.
-		if err != nil {
-			p.metrics.CustomCounter("lobby_error", params.MetricsTags(), 1)
+		if err := p.handleLobbySessionRequest(ctx, logger, session, request); err != nil {
 			logger.Error("Failed to process lobby session request", zap.Error(err))
-			session.SendEvr(params.ResponseFromError(err))
+			session.SendEvr(LobbySessionFailureFromError(request.GetMode(), request.GetGroupID(), err))
+		}
+	}()
+	return nil
+}
+
+func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.LobbySessionRequest) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	ctx = context.WithValue(ctx, ctxNodeKey{}, p.node)
+
+	// Add a cache for guild group metadata
+	ctx = context.WithValue(ctx, ctxGuildGroupMetadataCacheKey{}, &MapOf[uuid.UUID, *GroupMetadata]{})
+
+	profile, err := p.profileRegistry.Load(ctx, session.userID)
+	if err != nil {
+		logger.Error("Failed to load profile", zap.Error(err))
+		return NewLobbyErrorf(InternalError, "failed to load user profile")
+	}
+
+	rating := profile.GetRating()
+	ctx = context.WithValue(ctx, ctxRatingKey{}, rating)
+
+	// Load the global matchmaking config
+	gconfig, err := LoadMatchmakingSettings(ctx, p.runtimeModule, SystemUserID)
+	if err != nil {
+		return NewLobbyErrorf(InternalError, "failed to load global matchmaking settings")
+	}
+
+	// Load the user's matchmaking config
+	config, err := LoadMatchmakingSettings(ctx, p.runtimeModule, session.UserID().String())
+	if err != nil {
+		return NewLobbyErrorf(InternalError, "failed to load user matchmaking settings")
+	}
+	// Load friends to get blocked (ghosted) players
+	cursor := ""
+	friends := make([]*api.Friend, 0)
+	for {
+		users, err := ListFriends(ctx, logger, p.db, p.statusRegistry, session.userID, 100, nil, cursor)
+		if err != nil {
+			return NewLobbyErrorf(InternalError, "failed to list blocked players")
 		}
 
-	}()
+		friends = append(friends, users.Friends...)
+
+		cursor = users.Cursor
+		if users.Cursor == "" {
+			break
+		}
+	}
+
+	latencyHistory, err := LoadLatencyHistory(ctx, logger, p.db, session.userID)
+	if err != nil {
+		return NewLobbyErrorf(InternalError, "Failed to load latency history", zap.Error(err))
+	}
+
+	params := NewLobbyParametersFromRequest(ctx, in.(evr.LobbySessionRequest), &gconfig, &config, profile, latencyHistory, friends)
+
+	ctx = context.WithValue(ctx, ctxLobbyParametersKey{}, params)
+
+	var matchID MatchID
+	switch in.(type) {
+	case *evr.LobbyFindSessionRequest:
+		// Load the next match from the DB. (e.g. EchoTaxi hails)
+		matchID, err = p.loadNextMatchFromDB(ctx, logger, session)
+		if err != nil {
+			return NewLobbyError(InternalError, "failed to load next match from DB")
+		} else if !matchID.IsNil() {
+			// If a match ID is found, join it.
+			params.CurrentMatchID = matchID
+			if _, _, err := p.matchRegistry.GetMatch(ctx, matchID.String()); err == nil {
+				LeavePartyStream(session)
+				p.metrics.CustomCounter("lobby_join_next_match", params.MetricsTags(), 1)
+				return p.lobbyJoin(ctx, logger, session, params)
+			}
+		} else if params.Role == evr.TeamSpectator {
+			// Leave the party if the user is in one
+			LeavePartyStream(session)
+			// Spectators are only allowed in arena and combat matches.
+			if params.Mode != evr.ModeArenaPublic && params.Mode != evr.ModeCombatPublic {
+				err = NewLobbyErrorf(BadRequest, "spectators are only allowed in arena and combat matches")
+			} else {
+				// Spectators don't matchmake, and they don't have a delay for backfill.
+				// Spectators also don't time out.
+				p.metrics.CustomCounter("lobby_find_spectate", params.MetricsTags(), 1)
+				return p.lobbyFindSpectate(ctx, logger, session, params)
+			}
+		} else {
+			// Otherwise, find a match via the matchmaker or backfill.
+			// This is also responsible for creation of social lobbies.
+			p.metrics.CustomCounter("lobby_find_match", params.MetricsTags(), int64(params.PartySize))
+			err = p.lobbyFind(ctx, logger, session, params)
+			if err != nil {
+				// On error, leave any party the user might be a member of.
+				LeavePartyStream(session)
+				return err
+			}
+		}
+		return nil
+	case *evr.LobbyJoinSessionRequest:
+		LeavePartyStream(session)
+		p.metrics.CustomCounter("lobby_create_session", params.MetricsTags(), 1)
+		return p.lobbyJoin(ctx, logger, session, params)
+
+	case *evr.LobbyCreateSessionRequest:
+		LeavePartyStream(session)
+		p.metrics.CustomCounter("lobby_create_session", params.MetricsTags(), 1)
+		matchID, err = p.lobbyCreate(ctx, logger, session, params)
+		if err == nil {
+			params.CurrentMatchID = matchID
+			return p.lobbyJoin(ctx, logger, session, params)
+		} else {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -167,16 +190,27 @@ func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session
 
 	label, err := MatchLabelByID(ctx, p.runtimeModule, matchID)
 	if err != nil || label == nil {
-		return status.Errorf(codes.Internal, "failed to get match label: %v", err)
+		return errors.Join(NewLobbyErrorf(InternalError, "failed to load match label"), err)
+	} else if label == nil {
+		return ErrMatchNotFound
 	}
 
 	presences, err := EntrantPresencesFromSessionIDs(logger, p.sessionRegistry, params.PartyID, params.GroupID, nil, params.Role, session.id)
 	if err != nil {
-		return status.Errorf(codes.Internal, "failed to create presences: %v", err)
+		return errors.Join(NewLobbyErrorf(InternalError, "failed to create presences"), err)
 	}
 
-	if err := LobbyJoinEntrants(ctx, logger, p.matchRegistry, p.sessionRegistry, p.tracker, p.profileRegistry, matchID, params.Role, presences); err != nil {
-		return status.Errorf(codes.Internal, "failed to join match: %v", err)
+	evrID, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
+	if !ok {
+		return NewLobbyError(InternalError, "failed to get evr ID from session context")
+	}
+
+	if err := p.profileRegistry.SetLobbyProfile(ctx, session.UserID(), label.GetGroupID(), evrID); err != nil {
+		return errors.Join(NewLobbyErrorf(InternalError, "failed to set lobby profile"), err)
+	}
+
+	if err := p.LobbyJoinEntrants(ctx, logger, matchID, params.Role, presences); err != nil {
+		return err
 	}
 
 	return nil

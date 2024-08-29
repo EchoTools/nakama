@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"math/rand"
@@ -26,6 +27,7 @@ import (
 type LobbyBuilder struct {
 	sync.Mutex
 	logger          *zap.Logger
+	db              *sql.DB
 	sessionRegistry SessionRegistry
 	matchRegistry   MatchRegistry
 	tracker         Tracker
@@ -33,9 +35,10 @@ type LobbyBuilder struct {
 	metrics         Metrics
 }
 
-func NewLobbyBuilder(logger *zap.Logger, sessionRegistry SessionRegistry, matchRegistry MatchRegistry, tracker Tracker, metrics Metrics, profileRegistry *ProfileRegistry) *LobbyBuilder {
+func NewLobbyBuilder(logger *zap.Logger, db *sql.DB, sessionRegistry SessionRegistry, matchRegistry MatchRegistry, tracker Tracker, metrics Metrics, profileRegistry *ProfileRegistry) *LobbyBuilder {
 	return &LobbyBuilder{
 		logger:          logger,
+		db:              db,
 		sessionRegistry: sessionRegistry,
 		matchRegistry:   matchRegistry,
 		tracker:         tracker,
@@ -167,9 +170,9 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 			return ErrMatchmakingNoAvailableServers
 		default:
 		}
-		matchID, err = b.allocateBroadcaster(ctx, logger, groupID, gameServers, mode, level, teamAlignments, start)
+		matchID, err = b.allocateGameServer(ctx, logger, groupID, gameServers, mode, level, teamAlignments, start)
 		if err != nil {
-			logger.Error("Failed to allocate broadcaster", zap.Error(err))
+			logger.Error("Failed to allocate game server.", zap.Error(err))
 			<-time.After(5 * time.Second)
 			continue
 		}
@@ -244,7 +247,7 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 	errored := make([]*EvrMatchPresence, 0, len(entrants))
 	for _, p := range entrantPresences {
 
-		if err := LobbyJoinEntrants(ctx, logger, b.matchRegistry, b.sessionRegistry, b.tracker, b.profileRegistry, matchID, p.RoleAlignment, []*EvrMatchPresence{p}); err != nil {
+		if err := LobbyJoinEntrants(ctx, b.db, logger, b.matchRegistry, b.sessionRegistry, b.tracker, b.profileRegistry, matchID, p.RoleAlignment, []*EvrMatchPresence{p}); err != nil {
 			logger.Error("Failed to join entrant to match", zap.String("mid", matchID.UUID.String()), zap.String("uid", p.GetUserId()), zap.Error(err))
 			errored = append(errored, p)
 			continue
@@ -311,8 +314,8 @@ func (b *LobbyBuilder) distributeParties(parties [][]*MatchmakerEntry) [][]*Matc
 
 	return teams
 }
-func (b *LobbyBuilder) allocateBroadcaster(ctx context.Context, logger *zap.Logger, groupID uuid.UUID, sorted []string, mode, level evr.Symbol, teamAlignments TeamAlignments, start bool) (MatchID, error) {
-	// Lock the broadcasters so that they aren't double allocated
+func (b *LobbyBuilder) allocateGameServer(ctx context.Context, logger *zap.Logger, groupID uuid.UUID, sorted []string, mode, level evr.Symbol, teamAlignments TeamAlignments, start bool) (MatchID, error) {
+	// Lock the game servers so that they aren't double allocated
 	b.Lock()
 	defer b.Unlock()
 	available, err := b.listUnassignedLobbies(ctx, logger, []uuid.UUID{groupID})
@@ -339,7 +342,7 @@ func (b *LobbyBuilder) allocateBroadcaster(ctx context.Context, logger *zap.Logg
 		}
 		break
 	}
-	// shuffle the available broadcasters and pick one
+	// shuffle the available game servers and pick one
 
 	if matchID.IsNil() {
 		matchID = available[rand.Intn(len(available))].ID
@@ -378,7 +381,7 @@ func (b *LobbyBuilder) listUnassignedLobbies(ctx context.Context, logger *zap.Lo
 	query := strings.Join(qparts, " ")
 	logger.Debug("Listing unassigned lobbies", zap.String("query", query))
 	limit := 200
-	minSize, maxSize := 1, 1 // Only the 1 broadcaster should be in the match handler
+	minSize, maxSize := 1, 1 // Only the 1game server should be in the match handler
 	matches, err := b.listMatches(ctx, limit, minSize, maxSize, query)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Failed to find matches: %v", err)
