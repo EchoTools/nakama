@@ -68,7 +68,7 @@ func (p *EvrPipeline) lobbySessionRequest(ctx context.Context, logger *zap.Logge
 			return
 		}
 
-		params := NewLobbyParametersFromRequest(ctx, in.(evr.LobbySessionRequest), gconfig, config, latencyHistory)
+		params := NewLobbyParametersFromRequest(ctx, in.(evr.LobbySessionRequest), &gconfig, &config, profile, latencyHistory, friends)
 
 		ctx = context.WithValue(ctx, ctxLobbyParametersKey{}, params)
 
