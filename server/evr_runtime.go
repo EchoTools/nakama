@@ -707,11 +707,11 @@ func PresenceByEntrantID(nk runtime.NakamaModule, matchID MatchID, entrantID uui
 	}
 
 	if len(presences) == 0 {
-		return nil, ErrorEntrantNotFound
+		return nil, ErrEntrantNotFound
 	}
 
 	if len(presences) > 1 {
-		return nil, ErrorMultipleEntrantsFound
+		return nil, ErrMultipleEntrantsFound
 	}
 
 	mp := &EvrMatchPresence{}
