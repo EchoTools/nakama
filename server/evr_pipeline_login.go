@@ -293,7 +293,11 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 				}
 
 				logger.Debug("Updating display name", zap.String("guildID", guildID), zap.String("displayName", member.DisplayName()))
-				metadata.SetGroupDisplayName(groupID.String(), member.DisplayName())
+				displayName := sanitizeDisplayName(member.DisplayName())
+				if displayName == "" {
+					displayName = member.User.Username
+				}
+				metadata.SetGroupDisplayName(groupID.String(), displayName)
 			}()
 		}
 	}
