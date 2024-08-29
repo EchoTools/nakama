@@ -741,7 +741,7 @@ func (p *EvrPipeline) broadcasterPlayerRemoved(ctx context.Context, logger *zap.
 
 	presence, err := PresenceByEntrantID(p.runtimeModule, matchID, message.EntrantID)
 	if err != nil {
-		if err != ErrorEntrantNotFound {
+		if err != ErrEntrantNotFound {
 			logger.Warn("Failed to get player session by ID", zap.Error(err))
 		}
 		return nil
