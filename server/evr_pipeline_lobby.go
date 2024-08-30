@@ -192,6 +192,7 @@ func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session
 	if err != nil {
 		return errors.Join(NewLobbyErrorf(InternalError, "failed to load match label"), err)
 	} else if label == nil {
+		logger.Warn("Match not found", zap.String("mid", matchID.UUID.String()))
 		return ErrMatchNotFound
 	}
 

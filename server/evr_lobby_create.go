@@ -20,19 +20,23 @@ func (p *EvrPipeline) lobbyCreate(ctx context.Context, logger *zap.Logger, sessi
 	matchRegistry := p.matchRegistry
 	// Do authorization checks related to the guild.
 	if err := p.authorizeGuildGroupSession(ctx, session.UserID().String(), params.GroupID.String()); err != nil {
+		logger.Warn("Failed to authorize create session request", zap.Error(err))
 		return MatchID{}, err
 	}
 	query, err := lobbyCreateQuery(ctx, logger, db, nk, session, params)
 	if err != nil {
+		logger.Warn("Failed to build create matchmaking query", zap.Error(err))
 		return MatchID{}, fmt.Errorf("failed to build matchmaking query: %v", err)
 	}
 	logger.Debug("Matchmaking query", zap.String("query", query))
 	labels, err := lobbyListGameServers(ctx, logger, db, nk, session, query)
 	if err != nil {
+		logger.Warn("Failed to list game servers", zap.Error(err))
 		return MatchID{}, err
 	}
 
 	if len(labels) == 0 {
+		logger.Warn("No available servers for creation", zap.String("query", query))
 		return MatchID{}, ErrMatchmakingNoAvailableServers
 	}
 

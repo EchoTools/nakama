@@ -26,6 +26,7 @@ func LobbyJoinEntrants(ctx context.Context, logger *zap.Logger, db *sql.DB, matc
 	if err != nil {
 		return errors.Join(NewLobbyErrorf(InternalError, "failed to get match"), err)
 	} else if match == nil {
+		logger.Warn("Match not found", zap.String("mid", matchID.UUID.String()))
 		return ErrMatchNotFound
 	}
 
@@ -44,9 +45,9 @@ func LobbyJoinEntrants(ctx context.Context, logger *zap.Logger, db *sql.DB, matc
 
 	metadataCache, ok := ctx.Value(ctxGuildGroupMetadataCacheKey{}).(*MapOf[uuid.UUID, *GroupMetadata])
 	if ok {
-		groupMetadata, ok := metadataCache.Load(groupID)
+		_, ok := metadataCache.Load(groupID)
 		if !ok {
-			groupMetadata, err = GetGuildGroupMetadata(ctx, db, groupIDStr)
+			groupMetadata, err := GetGuildGroupMetadata(ctx, db, groupIDStr)
 			if err != nil {
 				return errors.Join(NewLobbyError(InternalError, "failed to get guild group metadata"), err)
 			}
@@ -117,13 +118,13 @@ func LobbyJoinEntrant(logger *zap.Logger, matchRegistry MatchRegistry, tracker T
 	// Trigger MatchJoinAttempt
 	found, allowed, isNew, reason, labelStr, _ = matchRegistry.JoinAttempt(sessionCtx, matchID.UUID, matchID.Node, e.UserID, e.SessionID, e.Username, e.SessionExpiry, nil, e.ClientIP, e.ClientPort, matchID.Node, metadata)
 	if !found {
-		err = NewLobbyErrorf(ServerDoesNotExist, "joinattempt failed: match not found")
+		err = NewLobbyErrorf(ServerDoesNotExist, "join attempt failed: match not found")
 	} else if labelStr == "" {
-		err = NewLobbyErrorf(ServerDoesNotExist, "joinattempt failed: match label not found")
+		err = NewLobbyErrorf(ServerDoesNotExist, "join attempt failed: match label not found")
 	} else if !allowed {
-		err = NewLobbyErrorf(ServerIsFull, "joinattempt failed: %s", reason)
+		err = NewLobbyErrorf(ServerIsFull, "join attempt failed: %s", reason)
 	} else if !isNew {
-		err = NewLobbyError(ServerIsFull, "joinattempt failed: User already in match")
+		err = NewLobbyError(ServerIsFull, "join attempt failed: User already in match")
 	}
 
 	if err != nil {
