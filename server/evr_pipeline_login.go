@@ -232,7 +232,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		return settings, fmt.Errorf("failed to get guild groups: %w", err)
 	}
 	if len(memberships) == 0 {
-		return settings, fmt.Errorf("user is not in any guild groups. try again in a few minutes.")
+		return settings, fmt.Errorf("user is not in any guild groups")
 	}
 
 	found := false
@@ -252,6 +252,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 			return memberships[i].GuildGroup.Size() > memberships[j].GuildGroup.Size()
 		})
 		groupID = memberships[0].GuildGroup.ID()
+		logger.Debug("Setting active group", zap.String("groupID", groupID.String()))
 		metadata.SetActiveGroupID(groupID)
 		metadata.GetActiveGroupDisplayName()
 	}
