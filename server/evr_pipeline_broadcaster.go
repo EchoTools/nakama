@@ -16,6 +16,7 @@ import (
 
 	"fmt"
 
+	"github.com/bwmarrin/discordgo"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -25,9 +26,9 @@ import (
 )
 
 // sendDiscordError sends an error message to the user on discord
-func sendDiscordError(e error, discordId string, logger *zap.Logger, discordRegistry DiscordRegistry) {
+func sendDiscordError(e error, discordId string, logger *zap.Logger, bot *discordgo.Session) {
 	// Message the user on discord
-	bot := discordRegistry.GetBot()
+
 	if bot != nil && discordId != "" {
 		channel, err := bot.UserChannelCreate(discordId)
 		if err != nil {
@@ -174,7 +175,7 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 	if !alive {
 		// If the broadcaster is not available, send an error message to the user on discord
 		errorMessage := fmt.Sprintf("Broadcaster (Endpoint ID: %s, Server ID: %d) could not be reached. Error: %v", config.Endpoint.ExternalAddress(), config.ServerID, err)
-		go sendDiscordError(errors.New(errorMessage), discordId, logger, p.discordRegistry)
+		go sendDiscordError(errors.New(errorMessage), discordId, logger, p.discordCache.dg)
 		return errFailedRegistration(session, logger, errors.New(errorMessage), evr.BroadcasterRegistration_Failure)
 	}
 	configJson, err := json.Marshal(config)
@@ -338,9 +339,9 @@ func (p *EvrPipeline) getUserGroups(ctx context.Context, userID uuid.UUID, minSt
 }
 
 func (p *EvrPipeline) getBroadcasterHostGroups(ctx context.Context, userId string, guildIDs []string) (groupIDs []uuid.UUID, err error) {
-
+	go p.discordCache.Queue(userId, "")
 	// Get the user's guild memberships
-	memberships, err := p.discordRegistry.GetGuildGroupMemberships(ctx, uuid.FromStringOrNil(userId), nil)
+	memberships, err := GetGuildGroupMemberships(ctx, p.runtimeModule, userId, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user's guild groups: %v", err)
 	}
@@ -352,21 +353,6 @@ func (p *EvrPipeline) getBroadcasterHostGroups(ctx context.Context, userId strin
 		// Use all of the user's guilds
 		for _, g := range memberships {
 			guildIDs = append(guildIDs, g.GuildGroup.GuildID())
-		}
-	}
-	discordID, err := GetDiscordIDByUserID(ctx, p.db, userId)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get discord ID: %v", err)
-	}
-	for _, guildID := range guildIDs {
-
-		member, err := p.appBot.dg.GuildMember(guildID, discordID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get member: %v", err)
-		}
-		if err := p.appBot.updateAccount(ctx, guildID, member); err != nil {
-			p.logger.Warn("Failed to update account", zap.Error(err))
-			continue
 		}
 	}
 

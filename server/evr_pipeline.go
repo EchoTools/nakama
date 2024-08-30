@@ -60,7 +60,7 @@ type EvrPipeline struct {
 	runtimeLogger        runtime.Logger
 
 	profileRegistry              *ProfileRegistry
-	discordRegistry              DiscordRegistry
+	discordCache                 *DiscordCache
 	appBot                       *DiscordAppBot
 	leaderboardRegistry          *LeaderboardRegistry
 	sbmm                         *SkillBasedMatchmaker
@@ -104,20 +104,22 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		dg.StateEnabled = true
 	}
 
-	discordRegistry := NewLocalDiscordRegistry(ctx, nk, runtimeLogger, metrics, config, pipeline, dg)
 	leaderboardRegistry := NewLeaderboardRegistry(NewRuntimeGoLogger(logger), nk, config.GetName())
-	profileRegistry := NewProfileRegistry(nk, db, runtimeLogger, tracker, discordRegistry)
+	profileRegistry := NewProfileRegistry(nk, db, runtimeLogger, tracker)
 	broadcasterRegistrationBySession := MapOf[string, *MatchBroadcaster]{}
 	skillBasedMatchmaker := NewSkillBasedMatchmaker()
 	lobbyBuilder := NewLobbyBuilder(logger, db, sessionRegistry, matchRegistry, tracker, metrics, profileRegistry)
 	matchmaker.OnMatchedEntries(lobbyBuilder.handleMatchedEntries)
 	userRemoteLogJournalRegistry := NewUserRemoteLogJournalRegistry(sessionRegistry)
 	var appBot *DiscordAppBot
-
+	var discordCache *DiscordCache
 	if disable, ok := vars["DISABLE_DISCORD_BOT"]; ok && disable == "true" {
 		logger.Info("Discord bot is disabled")
 	} else {
-		appBot, err = NewDiscordAppBot(runtimeLogger, nk, db, metrics, pipeline, config, discordRegistry, profileRegistry, statusRegistry, dg)
+		discordCache = NewDiscordCache(ctx, logger, config, metrics, pipeline, profileRegistry, statusRegistry, nk, db, dg)
+		discordCache.Start()
+
+		appBot, err = NewDiscordAppBot(runtimeLogger, nk, db, metrics, pipeline, config, discordCache, profileRegistry, statusRegistry, dg)
 		if err != nil {
 			logger.Error("Failed to create app bot", zap.Error(err))
 
@@ -186,10 +188,10 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		runtimeModule:        nk,
 		runtimeLogger:        runtimeLogger,
 
-		discordRegistry: discordRegistry,
-		appBot:          appBot,
-		localIP:         localIP,
-		externalIP:      externalIP,
+		discordCache: discordCache,
+		appBot:       appBot,
+		localIP:      localIP,
+		externalIP:   externalIP,
 
 		profileRegistry:                  profileRegistry,
 		leaderboardRegistry:              leaderboardRegistry,
@@ -326,9 +328,11 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 		}
 	}
 
-	if err := p.discordRegistry.ProcessRequest(session.Context(), session, in); err != nil {
-		logger.Warn("Discord Bot logger error", zap.Error(err))
-	}
+	/*
+		if err := p.discordRegistry.ProcessRequest(session.Context(), session, in); err != nil {
+			logger.Warn("Discord Bot logger error", zap.Error(err))
+		}
+	*/
 
 	// If the message requires authentication, check if the session is authenticated.
 	if requireAuthed {
@@ -468,7 +472,7 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 		}
 
 		if content != "" {
-			if dg := p.discordRegistry.GetBot(); dg == nil {
+			if dg := p.discordCache.dg; dg == nil {
 				// No discord bot
 			} else if discordID, err := GetDiscordIDByUserID(session.Context(), session.pipeline.db, session.UserID().String()); err != nil {
 				logger.Warn("Failed to get discord ID", zap.Error(err))

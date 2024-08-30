@@ -813,18 +813,17 @@ func DisconnectUserID(ctx context.Context, nk runtime.NakamaModule, userID strin
 	return cnt, nil
 }
 
-func GetAccountMetadata(ctx context.Context, db *sql.DB, userID string) (*AccountMetadata, error) {
-	query := "SELECT metadata FROM users WHERE id = $1"
-	var metadata string
-	if err := db.QueryRowContext(ctx, query, userID).Scan(&metadata); err != nil {
+func GetAccountMetadata(ctx context.Context, nk runtime.NakamaModule, userID string) (*AccountMetadata, error) {
+	account, err := nk.AccountGetId(ctx, userID)
+	if err != nil {
 		return nil, err
 	}
 
 	md := &AccountMetadata{}
-	if err := json.Unmarshal([]byte(metadata), md); err != nil {
+	if err := json.Unmarshal([]byte(account.GetUser().GetMetadata()), md); err != nil {
 		return nil, err
 	}
-
+	md.account = account
 	return md, nil
 }
 
