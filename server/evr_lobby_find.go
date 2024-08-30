@@ -117,13 +117,12 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 				}
 				// Check if the party leader has joined a match.
 				leaderMatchID, _, err := GetMatchBySessionID(p.runtimeModule, uuid.FromStringOrNil(leader.SessionId))
-				if err != nil {
-					return errors.Join(NewLobbyError(InternalError, "failed to get match by session id"), err)
-				}
-				if leaderMatchID.IsNil() {
-					// Leader is not in a match.
+				if errors.Is(err, ErrMatchNotFound) {
 					continue
+				} else if err != nil {
+					return errors.Join(NewLobbyError(InternalError, "failed to get leader's match by session id"), err)
 				}
+
 				// Wait 5 seconds, then check if this player is in the match as well.
 				select {
 				case <-ctx.Done():
@@ -131,11 +130,13 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 				case <-time.After(5 * time.Second):
 				}
 				matchID, _, err := GetMatchBySessionID(p.runtimeModule, session.id)
-				if err != nil {
-					return errors.Join(NewLobbyError(InternalError, "failed to get match by session id"), err)
+				if errors.Is(err, ErrMatchNotFound) {
+					continue
+				} else if err != nil {
+					return errors.Join(NewLobbyError(InternalError, "failed to get player's match by session id"), err)
 				}
-				if matchID.IsNil() || matchID == leaderMatchID {
-					// This player is in the same match as the leader. continue to wait.
+
+				if matchID == leaderMatchID {
 					continue
 				} else {
 
