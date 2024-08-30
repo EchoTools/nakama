@@ -40,10 +40,10 @@ type DiscordAppBot struct {
 	pipeline        *Pipeline
 	discordRegistry DiscordRegistry
 	profileRegistry *ProfileRegistry
-
-	nk runtime.NakamaModule
-	db *sql.DB
-	dg *discordgo.Session
+	statusRegistry  StatusRegistry
+	nk              runtime.NakamaModule
+	db              *sql.DB
+	dg              *discordgo.Session
 
 	debugChannels map[string]string // map[groupID]channelID
 	userID        string            // Nakama UserID of the bot
@@ -55,7 +55,7 @@ type DiscordAppBot struct {
 	prepareMatchRateLimiters  *MapOf[string, *rate.Limiter]
 }
 
-func NewDiscordAppBot(logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, metrics Metrics, pipeline *Pipeline, config Config, discordRegistry DiscordRegistry, profileRegistry *ProfileRegistry, dg *discordgo.Session) (*DiscordAppBot, error) {
+func NewDiscordAppBot(logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, metrics Metrics, pipeline *Pipeline, config Config, discordRegistry DiscordRegistry, profileRegistry *ProfileRegistry, statusRegistry StatusRegistry, dg *discordgo.Session) (*DiscordAppBot, error) {
 	ctx, cancelFn := context.WithCancel(context.Background())
 	logger = logger.WithField("system", "discordAppBot")
 	zapLogger := RuntimeLoggerToZapLogger(logger)
@@ -63,17 +63,18 @@ func NewDiscordAppBot(logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB
 		ctx:      ctx,
 		cancelFn: cancelFn,
 
-		logger:   logger,
-		nk:       nk,
-		db:       db,
-		pipeline: pipeline,
-		metrics:  metrics,
-		config:   config,
+		logger:          logger,
+		nk:              nk,
+		db:              db,
+		pipeline:        pipeline,
+		metrics:         metrics,
+		config:          config,
+		discordRegistry: discordRegistry,
+		profileRegistry: profileRegistry,
+		statusRegistry:  statusRegistry,
 
 		dg: dg,
 
-		discordRegistry:           discordRegistry,
-		profileRegistry:           profileRegistry,
 		idcache:                   &MapOf[string, string]{},
 		prepareMatchRatePerMinute: 1,
 		prepareMatchBurst:         1,
@@ -200,6 +201,21 @@ func NewDiscordAppBot(logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB
 	return &appbot, nil
 }
 
+func (d *DiscordAppBot) UserIDToDiscordID(userID string) string {
+	discordID, ok := d.idcache.Load(userID)
+	if !ok {
+		var err error
+		discordID, err = GetDiscordIDByUserID(context.Background(), d.db, userID)
+		if err != nil {
+			return ""
+		}
+		d.idcache.Store(userID, discordID)
+		d.idcache.Store(discordID, userID)
+	}
+	return discordID
+}
+
+// Discord ID to Nakama UserID, with a lookup cache
 func (d *DiscordAppBot) DiscordIDToUserID(discordID string) string {
 	userID, ok := d.idcache.Load(discordID)
 	if !ok {
@@ -209,10 +225,12 @@ func (d *DiscordAppBot) DiscordIDToUserID(discordID string) string {
 			return ""
 		}
 		d.idcache.Store(discordID, userID)
+		d.idcache.Store(userID, discordID)
 	}
 	return userID
 }
 
+// Guild ID to Nakama Group ID, with a lookup cache
 func (d *DiscordAppBot) GuildIDToGroupID(guildID string) string {
 	groupID, ok := d.idcache.Load(guildID)
 	if !ok {
@@ -222,6 +240,7 @@ func (d *DiscordAppBot) GuildIDToGroupID(guildID string) string {
 			return ""
 		}
 		d.idcache.Store(guildID, groupID)
+		d.idcache.Store(groupID, guildID)
 	}
 	return groupID
 }
@@ -256,28 +275,6 @@ func (e *DiscordAppBot) loadPrepareMatchRateLimiter(userID, groupID string) *rat
 	key := strings.Join([]string{userID, groupID}, ":")
 	limiter, _ := e.prepareMatchRateLimiters.LoadOrStore(key, rate.NewLimiter(e.prepareMatchRatePerMinute, e.prepareMatchBurst))
 	return limiter
-}
-
-type WhoAmI struct {
-	NakamaID              uuid.UUID              `json:"nakama_id"`
-	Username              string                 `json:"username"`
-	DiscordID             string                 `json:"discord_id"`
-	CreateTime            time.Time              `json:"create_time,omitempty"`
-	DisplayNames          []string               `json:"display_names"`
-	DeviceLinks           []string               `json:"device_links,omitempty"`
-	HasPassword           bool                   `json:"has_password"`
-	EVRIDLogins           map[string]time.Time   `json:"evr_id_logins"`
-	GuildGroupMemberships []GuildGroupMembership `json:"guild_memberships"`
-	VRMLSeasons           []string               `json:"vrml_seasons"`
-	MatchIDs              []string               `json:"match_ids"`
-
-	ClientAddresses []string `json:"addresses,omitempty"`
-}
-
-type EvrIdLogins struct {
-	EvrId         string `json:"evr_id"`
-	LastLoginTime string `json:"login_time"`
-	DisplayName   string `json:"display_name,omitempty"`
 }
 
 var (
@@ -385,6 +382,14 @@ var (
 		{
 			Name:        "whoami",
 			Description: "Receive your echo account information (privately).",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionBoolean,
+					Name:        "include-detail",
+					Description: "Include extra details",
+					Required:    false,
+				},
+			},
 		},
 		{
 			Name:        "fixit",
@@ -1518,8 +1523,15 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			if user == nil {
 				return nil
 			}
+			// check for the with-detail boolean option
+			options := i.ApplicationCommandData().Options
+			withDetail := false
+			if len(options) > 0 {
+				withDetail = options[0].BoolValue()
+			}
+			includePrivate := true
 
-			return d.handleProfileRequest(ctx, logger, nk, s, discordRegistry, i, user.ID, user.Username, "", true)
+			return d.handleProfileRequest(ctx, logger, nk, s, discordRegistry, i, user.ID, user.Username, "", includePrivate, withDetail)
 		},
 
 		"set-lobby": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userIDStr string, groupID string) error {
@@ -1622,7 +1634,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			options := i.ApplicationCommandData().Options
 			target := options[0].UserValue(s)
 
-			return d.handleProfileRequest(ctx, logger, nk, s, discordRegistry, i, target.ID, target.Username, guildID, isGlobalModerator)
+			return d.handleProfileRequest(ctx, logger, nk, s, discordRegistry, i, target.ID, target.Username, guildID, isGlobalModerator, isGlobalModerator)
 		},
 		"create": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			options := i.ApplicationCommandData().Options
