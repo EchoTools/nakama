@@ -640,12 +640,9 @@ func (r *ProfileRegistry) UpdateEntitledCosmetics(ctx context.Context, userID uu
 	if err != nil {
 		return fmt.Errorf("failed to update unlocks: %w", err)
 	}
-	account, err := r.nk.AccountGetId(ctx, userID.String())
+
+	md, err := GetAccountMetadata(ctx, r.nk, userID.String())
 	if err != nil {
-		return fmt.Errorf("failed to get account: %w", err)
-	}
-	md := AccountMetadata{}
-	if err := json.Unmarshal([]byte(account.User.GetMetadata()), &md); err != nil {
 		return fmt.Errorf("failed to unmarshal metadata: %w", err)
 	}
 
