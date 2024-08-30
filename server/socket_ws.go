@@ -48,7 +48,7 @@ func NewSocketWsAcceptor(logger *zap.Logger, config Config, sessionRegistry Sess
 		case "json":
 			format = SessionFormatJson
 		case "evr":
-			format = SessionFormatEvr
+			format = SessionFormatEVR
 		default:
 			// Invalid values are rejected.
 			http.Error(w, "Invalid format parameter", 400)
@@ -81,7 +81,7 @@ func NewSocketWsAcceptor(logger *zap.Logger, config Config, sessionRegistry Sess
 			expiry   int64             = 0
 		)
 		switch format {
-		case SessionFormatEvr:
+		case SessionFormatEVR:
 			if token != config.GetSocket().ServerKey {
 				http.Error(w, "Missing or invalid token", 401)
 				return
@@ -126,7 +126,7 @@ func NewSocketWsAcceptor(logger *zap.Logger, config Config, sessionRegistry Sess
 
 		// Register initial status tracking and presence(s) for this session.
 		statusRegistry.Follow(sessionID, map[uuid.UUID]struct{}{userID: {}})
-		if format != SessionFormatEvr { // Evr sessions are authenticated in-band.
+		if format != SessionFormatEVR { // Evr sessions are authenticated in-band.
 
 			if status {
 				// Both notification and status presence.

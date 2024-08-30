@@ -234,7 +234,7 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 	ctx = context.WithValue(ctx, ctxUrlParamsKey{}, p)
 
 	wsMessageType := websocket.TextMessage
-	if format == SessionFormatProtobuf || format == SessionFormatEvr {
+	if format == SessionFormatProtobuf || format == SessionFormatEVR {
 		wsMessageType = websocket.BinaryMessage
 	}
 
@@ -588,7 +588,7 @@ IncomingLoop:
 			if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseNoStatusReceived) {
 				// Ignore underlying connection being shut down while read is waiting for data.
 				if e, ok := err.(*net.OpError); !ok || e.Err.Error() != "use of closed network connection" {
-					if s.format != SessionFormatEvr {
+					if s.format != SessionFormatEVR {
 						// EchoVR does not cleanly close connections.
 						s.logger.Debug("Error reading message from client", zap.Error(err))
 					}
@@ -616,7 +616,7 @@ IncomingLoop:
 			}
 		}
 
-		if s.format == SessionFormatEvr {
+		if s.format == SessionFormatEVR {
 			// EchoVR messages do not map directly onto nakama messages.
 
 			requests, err := evr.ParsePacket(data)
@@ -831,7 +831,7 @@ func (s *sessionWS) Send(envelope *rtapi.Envelope, reliable bool) error {
 	var payload []byte
 	var err error
 	switch s.format {
-	case SessionFormatEvr:
+	case SessionFormatEVR:
 		messages, err := ProcessOutgoing(s.logger, s, envelope)
 		if err != nil {
 			return fmt.Errorf("could not process outgoing message: %w", err)
@@ -933,7 +933,7 @@ func (s *sessionWS) Close(msg string, reason runtime.PresenceReason, envelopes .
 		var payload []byte
 		var err error
 		switch s.format {
-		case SessionFormatEvr:
+		case SessionFormatEVR:
 			if s.logger.Core().Enabled(zap.DebugLevel) {
 				s.logger.Warn("Blocked attempt to send protobuf message to EVR client.", zap.Any("envelope", envelope))
 			}

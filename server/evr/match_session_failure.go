@@ -13,7 +13,7 @@ const (
 	LobbySessionFailure_Timeout0 LobbySessionFailureErrorCode = iota
 	LobbySessionFailure_UpdateRequired
 	LobbySessionFailure_BadRequest
-	LobbySessionFailure_Timeout3
+	LobbySessionFailure_Timeout_ServerFindFailed
 	LobbySessionFailure_ServerDoesNotExist
 	LobbySessionFailure_ServerIsIncompatible
 	LobbySessionFailure_ServerFindFailed
