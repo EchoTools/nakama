@@ -11,6 +11,8 @@ import (
 	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
+type ctxGuildGroupMembershipsKey struct{}
+
 type GuildGroupRoles struct {
 	Member           string `json:"member"`
 	Moderator        string `json:"moderator"`
@@ -104,6 +106,15 @@ func MigrateGroupRoles(nk runtime.NakamaModule, group *api.Group) error {
 
 type GuildGroupMemberships []GuildGroupMembership
 
+func (g GuildGroupMemberships) IsMember(groupID string) bool {
+	for _, m := range g {
+		if m.GuildGroup.ID().String() == groupID {
+			return m.isMember
+		}
+	}
+	return false
+}
+
 type GroupMetadata struct {
 	GuildID                      string                 `json:"guild_id"`                        // The guild ID
 	RulesText                    string                 `json:"rules_text"`                      // The rules text displayed on the main menu
@@ -125,6 +136,7 @@ func NewGuildGroupMetadata(guildID string) *GroupMetadata {
 		MatchmakingChannelIDs: make(map[evr.Symbol]string),
 	}
 }
+
 func (g *GroupMetadata) MarshalMap() map[string]any {
 	m := make(map[string]any)
 	data, _ := json.Marshal(g)

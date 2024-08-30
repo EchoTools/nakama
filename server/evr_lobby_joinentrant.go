@@ -63,7 +63,7 @@ func LobbyJoinEntrants(ctx context.Context, logger *zap.Logger, db *sql.DB, matc
 	presences := make([]*EvrMatchPresence, 0, len(entrants))
 	logger = logger.With(zap.String("mid", matchID.UUID.String()), zap.Int("role", role))
 
-	serverSession := sessionRegistry.Get(uuid.FromStringOrNil(label.Server.SessionID))
+	serverSession := sessionRegistry.Get(uuid.FromStringOrNil(label.Broadcaster.SessionID))
 	if serverSession == nil {
 		return NewLobbyError(InternalError, "game server session not found")
 	}
@@ -73,14 +73,6 @@ func LobbyJoinEntrants(ctx context.Context, logger *zap.Logger, db *sql.DB, matc
 		if session == nil {
 			logger.Warn("failed to find session", zap.String("sid", e.GetSessionId()))
 			continue
-		}
-
-		if err := authorizeGuildGroupSession(ctx, e.GetUserId(), groupIDStr, groupMetadata); err != nil {
-			return err
-		}
-
-		if err := profileRegistry.SetLobbyProfile(ctx, e.UserID, groupID, e.EvrID); err != nil {
-			return errors.Join(NewLobbyErrorf(InternalError, "failed to set lobby profile"), err)
 		}
 
 		if err := LobbyJoinEntrant(logger, matchRegistry, tracker, session, serverSession, &label, e, matchID, role, errorCh); err != nil {
@@ -195,11 +187,11 @@ func LobbyJoinEntrant(logger *zap.Logger, matchRegistry MatchRegistry, tracker T
 	return nil
 }
 
-func authorizeGuildGroupSession(ctx context.Context, userID string, groupID string, groupMetadata *GroupMetadata) error {
+func (p *EvrPipeline) authorizeGuildGroupSession(ctx context.Context, userID string, groupID string) error {
 
-	accountMetadata, ok := ctx.Value(ctxAccountMetadataKey{}).(AccountMetadata)
-	if !ok {
-		return NewLobbyError(InternalError, "failed to get account metadata from context")
+	groupMetadata, err := GetGuildGroupMetadata(ctx, p.db, groupID)
+	if err != nil {
+		return errors.Join(NewLobbyError(InternalError, "failed to get guild group metadata"), err)
 	}
 
 	if slices.Contains(groupMetadata.RoleCache[groupMetadata.Roles.Suspended], userID) {
@@ -208,7 +200,7 @@ func authorizeGuildGroupSession(ctx context.Context, userID string, groupID stri
 
 	if groupMetadata.MinimumAccountAgeDays > 0 && !slices.Contains(groupMetadata.RoleCache[groupMetadata.Roles.AccountAgeBypass], userID) {
 		// Check the account creation date.
-		discordID, err := GetDiscordIDByUserID(ctx, db, userID)
+		discordID, err := GetDiscordIDByUserID(ctx, p.db, userID)
 		if err != nil {
 			return status.Errorf(codes.Internal, "failed to get discord ID by user ID: %v", err)
 		}
@@ -218,7 +210,7 @@ func authorizeGuildGroupSession(ctx context.Context, userID string, groupID stri
 		}
 	}
 	if groupMetadata.MembersOnlyMatchmaking {
-		memberships, ok := ctx.Value(ctxGuildGroupsKey{}).(GuildGroupMemberships)
+		memberships, ok := ctx.Value(ctxGuildGroupMembershipsKey{}).(GuildGroupMemberships)
 		if !ok {
 			return NewLobbyError(KickedFromLobbyGroup, "failed to get guild group memberships")
 		}
@@ -226,5 +218,21 @@ func authorizeGuildGroupSession(ctx context.Context, userID string, groupID stri
 			return NewLobbyError(KickedFromLobbyGroup, "User is not a member of this guild")
 		}
 	}
+
+	evrID, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
+	if !ok {
+		return NewLobbyError(InternalError, "failed to get evr ID from session context")
+	}
+
+	metadata, ok := ctx.Value(ctxAccountMetadataKey{}).(AccountMetadata)
+	if !ok {
+		return NewLobbyError(InternalError, "failed to get account metadata from session context")
+	}
+	displayName := metadata.GetGroupDisplayNameOrDefault(groupID)
+
+	if err := p.profileRegistry.SetLobbyProfile(ctx, uuid.FromStringOrNil(userID), evrID, displayName); err != nil {
+		return errors.Join(NewLobbyErrorf(InternalError, "failed to set lobby profile"), err)
+	}
+
 	return nil
 }

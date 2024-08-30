@@ -72,7 +72,7 @@ func TestNewSessionParametersFromLobbySessionRequest(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := NewLobbyParametersFromRequest(ctx, tt.args.r, MatchmakingSettings{}, MatchmakingSettings{}, nil); !reflect.DeepEqual(got, tt.want) {
+			if got := NewLobbyParametersFromRequest(ctx, tt.args.r, &MatchmakingSettings{}, &MatchmakingSettings{}, nil, NewLatencyHistory(), nil); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("(- want / + got) %s", cmp.Diff(tt.want, got))
 			}
 		})

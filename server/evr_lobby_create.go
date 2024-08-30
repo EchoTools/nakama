@@ -18,7 +18,10 @@ func (p *EvrPipeline) lobbyCreate(ctx context.Context, logger *zap.Logger, sessi
 	nk := p.runtimeModule
 	db := p.db
 	matchRegistry := p.matchRegistry
-
+	// Do authorization checks related to the guild.
+	if err := p.authorizeGuildGroupSession(ctx, session.UserID().String(), params.GroupID.String()); err != nil {
+		return MatchID{}, err
+	}
 	query, err := lobbyCreateQuery(ctx, logger, db, nk, session, params)
 	if err != nil {
 		return MatchID{}, fmt.Errorf("failed to build matchmaking query: %v", err)
