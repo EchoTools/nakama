@@ -95,7 +95,7 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 
 	latencyHistory, err := LoadLatencyHistory(ctx, logger, p.db, session.userID)
 	if err != nil {
-		return NewLobbyErrorf(InternalError, "Failed to load latency history", zap.Error(err))
+		return NewLobbyErrorf(InternalError, "Failed to load latency history: %s", err)
 	}
 
 	params := NewLobbyParametersFromRequest(ctx, in.(evr.LobbySessionRequest), &gconfig, &config, profile, latencyHistory, friends)
@@ -189,7 +189,7 @@ func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session
 	matchID, _ := NewMatchID(params.CurrentMatchID.UUID, p.node)
 
 	label, err := MatchLabelByID(ctx, p.runtimeModule, matchID)
-	if err != nil || label == nil {
+	if err != nil {
 		return errors.Join(NewLobbyErrorf(InternalError, "failed to load match label"), err)
 	} else if label == nil {
 		return ErrMatchNotFound

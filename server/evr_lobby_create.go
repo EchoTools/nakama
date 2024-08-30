@@ -38,7 +38,10 @@ func (p *EvrPipeline) lobbyCreate(ctx context.Context, logger *zap.Logger, sessi
 
 	labelRTTs := params.latencyHistory.LabelsByAverageRTT(labels)
 	labelLatencies := make([]int, len(labels))
+
+	labels = make([]*MatchLabel, len(labelRTTs))
 	for i, l := range labelRTTs {
+		labels[i] = l.Label
 		labelLatencies[i] = l.RTT
 	}
 

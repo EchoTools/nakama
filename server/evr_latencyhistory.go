@@ -69,7 +69,7 @@ func (h LatencyHistory) LabelsByAverageRTT(labels []*MatchLabel) []LabelWithLate
 
 	slices.SortStableFunc(labelRTTs, func(a, b LabelWithLatency) int {
 		if a.RTT == 0 || a.RTT > 250 {
-			return 250
+			return 999
 		}
 		return a.RTT - b.RTT
 	})

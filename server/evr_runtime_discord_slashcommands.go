@@ -1679,7 +1679,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				"startTime": startTime,
 			})
 
-			label, rtt, err := d.handlePrepareMatch(ctx, logger, userID, member.User.ID, i.GuildID, region, mode, level, startTime)
+			label, rtt, err := d.handleCreateMatch(ctx, logger, userID, i.GuildID, region, mode, level, startTime)
 			if err != nil {
 				return err
 			}
@@ -1731,7 +1731,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				"startTime": startTime,
 			})
 
-			label, _, err := d.handlePrepareMatch(ctx, logger, userID, member.User.ID, i.GuildID, region, mode, level, startTime)
+			label, _, err := d.handleAllocateMatch(ctx, logger, userID, i.GuildID, region, mode, level, startTime)
 			if err != nil {
 				return err
 			}
