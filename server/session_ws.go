@@ -107,26 +107,25 @@ type (
 	}
 
 	// Keys used for storing/retrieving user information in the context of a request after authentication.
-	ctxNodeKey                struct{} // The node name
-	ctxEvrIDKey               struct{} // The EchoVR ID
-	ctxDiscordIDKey           struct{} // The Discord ID
-	ctxAccountMetadataKey     struct{} // The account metadata
-	ctxDisplayNameOverrideKey struct{} // The display name override
-	ctxGroupIDKey             struct{} // The guild group ID the user has selected
-	ctxLoginSessionKey        struct{} // The Session ID of the login connection
-	ctxSessionIDKey           struct{} // The Session ID
-	ctxHMDSerialOverrideKey   struct{} // The HMD Serial Override
-	ctxAuthDiscordIDKey       struct{} // The Discord ID from the urlparam (used to authenticate broadcaster connections)
-	ctxAuthPasswordKey        struct{} // The Password from the urlparam(used to authenticate login/broadcaster connections)
-	ctxUrlParamsKey           struct{} // The URL parameters from the request
-	ctxIPinfoTokenKey         struct{} // The IPinfo token from the config
-	ctxFlagsKey               struct{} // The group flags from the urlparam
-	ctxSupportedFeaturesKey   struct{} // The features from the urlparam
-	ctxRequiredFeaturesKey    struct{} // The required_features from the urlparam
-	ctxVerboseKey             struct{} // The verbosity flag from matchmaking config
-	ctxIsPCVRKey              struct{} // The headset type
-	ctxRatingKey              struct{} // The user rating
-	ctxExternalServerAddrKey  struct{} // The external server address (IP:port)
+	ctxNodeKey               struct{} // The node name
+	ctxEvrIDKey              struct{} // The EchoVR ID
+	ctxDiscordIDKey          struct{} // The Discord ID
+	ctxAccountMetadataKey    struct{} // The account metadata
+	ctxGroupIDKey            struct{} // The guild group ID the user has selected
+	ctxLoginSessionKey       struct{} // The Session ID of the login connection
+	ctxSessionIDKey          struct{} // The Session ID
+	ctxHMDSerialOverrideKey  struct{} // The HMD Serial Override
+	ctxAuthDiscordIDKey      struct{} // The Discord ID from the urlparam (used to authenticate broadcaster connections)
+	ctxAuthPasswordKey       struct{} // The Password from the urlparam(used to authenticate login/broadcaster connections)
+	ctxUrlParamsKey          struct{} // The URL parameters from the request
+	ctxIPinfoTokenKey        struct{} // The IPinfo token from the config
+	ctxFlagsKey              struct{} // The group flags from the urlparam
+	ctxSupportedFeaturesKey  struct{} // The features from the urlparam
+	ctxRequiredFeaturesKey   struct{} // The required_features from the urlparam
+	ctxVerboseKey            struct{} // The verbosity flag from matchmaking config
+	ctxIsPCVRKey             struct{} // The headset type
+	ctxRatingKey             struct{} // The user rating
+	ctxExternalServerAddrKey struct{} // The external server address (IP:port)
 
 	//ctxMatchmakingQueryKey         struct{} // The Matchmaking query from the urlparam
 	//ctxMatchmakingGuildPriorityKey struct{} // The Matchmaking guild priority from the urlparam
@@ -142,7 +141,6 @@ var sharedCtxKeys = []struct{}{
 	ctxVerboseKey{},
 	ctxDiscordIDKey{},
 	ctxAccountMetadataKey{},
-	ctxDisplayNameOverrideKey{},
 }
 
 func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessionID, userID uuid.UUID, username string, vars map[string]string, expiry int64, clientIP, clientPort, lang string, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, conn *websocket.Conn, sessionRegistry SessionRegistry, statusRegistry StatusRegistry, matchmaker Matchmaker, tracker Tracker, metrics Metrics, pipeline *Pipeline, evrPipeline *EvrPipeline, runtime *Runtime, request http.Request, storageIndex StorageIndex) Session {
@@ -285,7 +283,7 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 	}
 }
 
-func (s *sessionWS) LoginSession(userID, username string, metadata AccountMetadata, displayNameOverride, discordID string, evrID evr.EvrId, deviceId *DeviceAuth, groupID uuid.UUID, flags int, verbose bool, isPCVR bool) error {
+func (s *sessionWS) LoginSession(userID, username string, metadata AccountMetadata, discordID string, evrID evr.EvrId, deviceId *DeviceAuth, groupID uuid.UUID, flags int, verbose bool, isPCVR bool) error {
 	// Each player has a single login connection, which will act as the core session.
 	// When this connection is terminated, all other connections should be terminated.
 
@@ -311,9 +309,6 @@ func (s *sessionWS) LoginSession(userID, username string, metadata AccountMetada
 	ctx = context.WithValue(ctx, ctxAccountMetadataKey{}, metadata)
 	ctx = context.WithValue(ctx, ctxNodeKey{}, s.config.GetName())
 
-	if displayNameOverride != "" {
-		ctx = context.WithValue(ctx, ctxDisplayNameOverrideKey{}, displayNameOverride)
-	}
 	ctx = context.WithValue(ctx, ctxIsPCVRKey{}, isPCVR)
 
 	s.Lock()
@@ -465,11 +460,6 @@ func (s *sessionWS) ValidateSession(loginSessionID uuid.UUID, evrID evr.EvrId) e
 			return fmt.Errorf("login session does not have account metadata")
 		}
 
-		displayNameOverride, ok := loginCtx.Value(ctxDisplayNameOverrideKey{}).(string)
-		if !ok {
-			displayNameOverride = ""
-		}
-
 		IsPCVR, ok := loginCtx.Value(ctxIsPCVRKey{}).(bool)
 		if !ok {
 			return fmt.Errorf("login session does not have a headset type")
@@ -491,9 +481,7 @@ func (s *sessionWS) ValidateSession(loginSessionID uuid.UUID, evrID evr.EvrId) e
 		ctx = context.WithValue(ctx, ctxVerboseKey{}, verbose)
 		ctx = context.WithValue(ctx, ctxDiscordIDKey{}, discordID)
 		ctx = context.WithValue(ctx, ctxAccountMetadataKey{}, metadata)
-		if displayNameOverride != "" {
-			ctx = context.WithValue(ctx, ctxDisplayNameOverrideKey{}, displayNameOverride)
-		}
+
 		ctx = context.WithValue(ctx, ctxIsPCVRKey{}, IsPCVR)
 
 		// Set the session information

@@ -127,10 +127,17 @@ func (a *AccountMetadata) GetGroupDisplayNameOrDefault(groupID string) string {
 	if a.GroupDisplayNames == nil {
 		a.GroupDisplayNames = make(map[string]string)
 	}
-	if dn, ok := a.GroupDisplayNames[groupID]; ok {
+	if a.DisplayNameOverride != "" {
+		return a.DisplayNameOverride
+	}
+	if dn, ok := a.GroupDisplayNames[groupID]; ok && dn != "" {
 		return dn
 	}
-	return a.GetActiveGroupDisplayName()
+	if dn, ok := a.GroupDisplayNames[a.ActiveGroupID]; ok && dn != "" {
+		return dn
+	} else {
+		return a.account.User.Username
+	}
 }
 
 func (a *AccountMetadata) SetGroupDisplayName(groupID, displayName string) bool {
@@ -145,10 +152,7 @@ func (a *AccountMetadata) SetGroupDisplayName(groupID, displayName string) bool 
 }
 
 func (a *AccountMetadata) GetActiveGroupDisplayName() string {
-	if a.GroupDisplayNames == nil {
-		a.GroupDisplayNames = make(map[string]string)
-	}
-	return a.GroupDisplayNames[a.ActiveGroupID]
+	return a.GetGroupDisplayNameOrDefault(a.ActiveGroupID)
 }
 
 func (a *AccountMetadata) MarshalMap() map[string]interface{} {
@@ -227,23 +231,18 @@ func GetUserIpAddresses(ctx context.Context, nk runtime.NakamaModule, userId str
 }
 
 func GetDisplayNameByGroupID(ctx context.Context, nk runtime.NakamaModule, userID, groupID string) (string, error) {
-	account, err := nk.AccountGetId(ctx, userID)
+	md, err := GetAccountMetadata(ctx, nk, userID)
 	if err != nil {
-		return "", fmt.Errorf("error getting account: %w", err)
+		return md.account.GetUser().GetDisplayName(), fmt.Errorf("error unmarshalling account user metadata: %w", err)
 	}
-	md := AccountMetadata{}
-	err = json.Unmarshal([]byte(account.GetUser().GetMetadata()), &md)
-	if err != nil {
-		return account.GetUser().GetDisplayName(), fmt.Errorf("error unmarshalling account user metadata: %w", err)
+
+	if dn := md.GetGroupDisplayNameOrDefault(groupID); dn != "" {
+		return dn, nil
 	}
-	if dn := md.DisplayNameOverride; dn != "" {
-		return dn, nil
-	} else if dn := md.GetGroupDisplayNameOrDefault(groupID); dn != "" {
-		return dn, nil
-	} else if dn := account.GetUser().GetDisplayName(); dn != "" {
+	if dn := md.account.GetUser().GetDisplayName(); dn != "" {
 		return dn, nil
 	} else {
-		return account.GetUser().GetUsername(), nil
+		return md.account.GetUser().GetUsername(), nil
 	}
 }
 

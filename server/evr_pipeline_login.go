@@ -274,7 +274,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		return settings, fmt.Errorf("failed to update user metadata: %w", err)
 	}
 	// Initialize the full session
-	if err := session.LoginSession(userId, user.GetUsername(), *metadata, metadata.DisplayNameOverride, account.GetCustomId(), evrId, deviceId, groupID, flags, verbose, isPCVR); err != nil {
+	if err := session.LoginSession(userId, user.GetUsername(), *metadata, account.GetCustomId(), evrId, deviceId, groupID, flags, verbose, isPCVR); err != nil {
 		return settings, fmt.Errorf("failed to login: %w", err)
 	}
 	ctx = session.Context()

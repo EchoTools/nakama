@@ -228,21 +228,13 @@ func (c *DiscordCache) GroupIDToGuildID(groupID string) string {
 // Sync's a user to all of their guilds.
 func (c *DiscordCache) SyncUser(ctx context.Context, userID string) error {
 	logger := c.logger
-	// Get the nakama account and groups.
-	nkaccount, err := c.nk.AccountGetId(ctx, userID)
+
+	md, err := GetAccountMetadata(ctx, c.nk, userID)
 	if err != nil {
-		return fmt.Errorf("error getting account: %w", err)
-	}
-
-	discordID := nkaccount.GetCustomId()
-
-	logger = logger.With(zap.String("uid", userID), zap.String("discord_id", discordID))
-
-	md := &AccountMetadata{}
-	if err := json.Unmarshal([]byte(nkaccount.User.Metadata), md); err != nil {
 		return nil
 	}
-	md.account = nkaccount
+	discordID := md.account.GetCustomId()
+	logger = logger.With(zap.String("uid", userID), zap.String("discord_id", discordID))
 
 	memberships, err := GetGuildGroupMemberships(ctx, c.nk, userID, nil)
 	if err != nil {
@@ -345,7 +337,7 @@ func (c *DiscordCache) SyncGuildGroupMember(ctx context.Context, userID, groupID
 		}
 	}
 	if len(memberships) == 0 {
-		return fmt.Errorf("user not in guild group. unexpected.")
+		return fmt.Errorf("user not in guild group after update")
 	}
 	membership := memberships[0]
 
@@ -354,10 +346,11 @@ func (c *DiscordCache) SyncGuildGroupMember(ctx context.Context, userID, groupID
 		return fmt.Errorf("error getting account metadata: %w", err)
 	}
 
-	displayName := sanitizeDisplayName(member.DisplayName())
-	if accountMetadata.GetDisplayName(membership.GuildGroup.ID().String()) != displayName {
+	prevDisplayName := accountMetadata.GetDisplayName(membership.GuildGroup.ID().String())
+	curDisplayName := sanitizeDisplayName(member.DisplayName())
+	if prevDisplayName != "" && curDisplayName != "" && prevDisplayName != curDisplayName {
 
-		if displayName, err := c.checkDisplayName(ctx, c.nk, accountMetadata.ID(), displayName); err == nil {
+		if displayName, err := c.checkDisplayName(ctx, c.nk, accountMetadata.ID(), curDisplayName); err == nil {
 			if err := c.recordDisplayName(ctx, c.nk, membership.GuildGroup.ID().String(), accountMetadata.ID(), displayName); err != nil {
 				return fmt.Errorf("error setting display name: %w", err)
 			}
@@ -569,15 +562,10 @@ func (d *DiscordCache) GuildGroupMemberRemove(ctx context.Context, guildID, disc
 
 	d.logger.Info("Member Remove", zap.Any("member", discordID))
 
-	nkaccount, err := d.nk.AccountGetId(ctx, userID)
+	md, err := GetAccountMetadata(ctx, d.nk, userID)
 	if err != nil {
-		return fmt.Errorf("error getting account: %w", err)
+		return fmt.Errorf("error getting account metadata: %w", err)
 	}
-	md := &AccountMetadata{}
-	if err := json.Unmarshal([]byte(nkaccount.User.Metadata), md); err != nil {
-		return nil
-	}
-
 	if err := d.nk.GroupUserLeave(ctx, groupID, userID, md.Username()); err != nil {
 		return fmt.Errorf("error removing user from group: %w", err)
 	}
