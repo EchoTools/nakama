@@ -43,17 +43,15 @@ func LobbyJoinEntrants(ctx context.Context, logger *zap.Logger, db *sql.DB, matc
 	}
 
 	metadataCache, ok := ctx.Value(ctxGuildGroupMetadataCacheKey{}).(*MapOf[uuid.UUID, *GroupMetadata])
-	if !ok {
-		return NewLobbyError(InternalError, "failed to get metadata cache from context")
-	}
-
-	groupMetadata, ok := metadataCache.Load(groupID)
-	if !ok {
-		groupMetadata, err = GetGuildGroupMetadata(ctx, db, groupIDStr)
-		if err != nil {
-			return errors.Join(NewLobbyError(InternalError, "failed to get guild group metadata"), err)
+	if ok {
+		groupMetadata, ok := metadataCache.Load(groupID)
+		if !ok {
+			groupMetadata, err = GetGuildGroupMetadata(ctx, db, groupIDStr)
+			if err != nil {
+				return errors.Join(NewLobbyError(InternalError, "failed to get guild group metadata"), err)
+			}
+			metadataCache.Store(groupID, groupMetadata)
 		}
-		metadataCache.Store(groupID, groupMetadata)
 	}
 
 	// The lobbysessionsuccess message is sent to both the game server and the game client.
