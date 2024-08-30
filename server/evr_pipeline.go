@@ -117,7 +117,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	if disable, ok := vars["DISABLE_DISCORD_BOT"]; ok && disable == "true" {
 		logger.Info("Discord bot is disabled")
 	} else {
-		appBot, err = NewDiscordAppBot(runtimeLogger, nk, db, metrics, pipeline, config, discordRegistry, profileRegistry, dg)
+		appBot, err = NewDiscordAppBot(runtimeLogger, nk, db, metrics, pipeline, config, discordRegistry, profileRegistry, statusRegistry, dg)
 		if err != nil {
 			logger.Error("Failed to create app bot", zap.Error(err))
 
