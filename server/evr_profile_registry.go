@@ -26,8 +26,7 @@ type ProfileRegistry struct {
 	db          *sql.DB
 	nk          runtime.NakamaModule
 
-	tracker         Tracker
-	discordRegistry DiscordRegistry
+	tracker Tracker
 
 	// Unlocks by item name
 	unlocksByItemName map[string]string
@@ -38,19 +37,18 @@ type ProfileRegistry struct {
 	defaults map[string]string
 }
 
-func NewProfileRegistry(nk runtime.NakamaModule, db *sql.DB, logger runtime.Logger, tracker Tracker, discordRegistry DiscordRegistry) *ProfileRegistry {
+func NewProfileRegistry(nk runtime.NakamaModule, db *sql.DB, logger runtime.Logger, tracker Tracker) *ProfileRegistry {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	unlocksByFieldName := createUnlocksFieldByKey()
 
 	profileRegistry := &ProfileRegistry{
-		ctx:             ctx,
-		ctxCancelFn:     cancel,
-		logger:          logger,
-		db:              db,
-		nk:              nk,
-		tracker:         tracker,
-		discordRegistry: discordRegistry,
+		ctx:         ctx,
+		ctxCancelFn: cancel,
+		logger:      logger,
+		db:          db,
+		nk:          nk,
+		tracker:     tracker,
 
 		cache: make(map[evr.EvrId][]byte),
 

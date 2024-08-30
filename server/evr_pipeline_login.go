@@ -127,8 +127,11 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	userId := user.GetId()
 	uid := uuid.FromStringOrNil(user.GetId())
 
+	// Queue a full account sync.
+	p.discordCache.Queue(userId, "")
+
 	// Get the user's metadata
-	metadata, err := GetAccountMetadata(ctx, p.db, userId)
+	metadata, err := GetAccountMetadata(ctx, p.runtimeModule, userId)
 	if err != nil {
 		return settings, fmt.Errorf("failed to get user metadata: %w", err)
 	}
@@ -179,7 +182,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		if found {
 			allowed := make(chan bool)
 			go func() {
-				ok, err := p.discordRegistry.CheckUser2FA(ctx, uid)
+				ok, err := p.discordCache.CheckUser2FA(ctx, uid)
 				if err != nil {
 					logger.Warn("Failed to check 2FA", zap.Error(err))
 					allowed <- true
@@ -221,22 +224,6 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	}
 	metadata.SetActiveGroupID(groupID)
 
-	groupMap, err := GetGuildGroupIDsByUser(ctx, p.db, userId)
-	if err != nil {
-		guildID, err := GetGuildIDByGroupID(ctx, p.db, groupID.String())
-		if err != nil {
-			return settings, fmt.Errorf("failed to get guild ID: %w", err)
-		}
-		// check if the user is in the activ group
-		groupID := metadata.GetActiveGroupID()
-		member, err := p.appBot.dg.GuildMember(groupID.String(), userId)
-		if err != nil {
-			return settings, fmt.Errorf("failed to get member: %w", err)
-		}
-		if err := p.appBot.updateAccount(ctx, guildID, member); err != nil {
-			return settings, fmt.Errorf("failed to update account: %w", err)
-		}
-	}
 	groupID = metadata.GetActiveGroupID()
 
 	// Get a list of the user's guild memberships and set to the largest one
@@ -245,73 +232,21 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		return settings, fmt.Errorf("failed to get guild groups: %w", err)
 	}
 	if len(memberships) == 0 {
-		discordID, err := GetDiscordIDByUserID(ctx, p.db, userId)
-		if err != nil {
-			return settings, fmt.Errorf("failed to get discord ID: %w", err)
-		}
-
-		for _, guild := range p.appBot.dg.State.Guilds {
-			member, err := p.appBot.dg.GuildMember(guild.ID, discordID)
-			if err != nil {
-				return settings, fmt.Errorf("failed to get member: %w", err)
-			}
-			if err := p.appBot.updateAccount(ctx, guild.ID, member); err != nil {
-				return settings, fmt.Errorf("failed to update account: %w", err)
-			}
-		}
-
-		return settings, fmt.Errorf("user is not in any guild groups")
+		return settings, fmt.Errorf("user is not in any guild groups. try again in a few minutes.")
 	}
-
-	// Ensure that the player has a display name defined for each guild group
-	discordID := account.CustomId
-	for _, membership := range memberships {
-
-		guildID := membership.GuildGroup.GuildID()
-		groupID := membership.GuildGroup.ID()
-		if metadata.GetDisplayName(groupID.String()) == "" {
-			go func() {
-				bot := p.discordRegistry.GetBot()
-				if bot == nil {
-					return
-				}
-				var err error
-
-				member, err := bot.State.Member(guildID, discordID)
-				if err != nil {
-					member, err = bot.GuildMember(guildID, discordID)
-					if err != nil {
-						logger.Debug("Failed to get member", zap.Error(err))
-						return
-					}
-				}
-				if member == nil {
-					return
-				}
-				if err := bot.State.MemberAdd(member); err != nil {
-					logger.Debug("Failed to add member to state", zap.Error(err))
-				}
-
-				logger.Debug("Updating display name", zap.String("guildID", guildID), zap.String("displayName", member.DisplayName()))
-				displayName := sanitizeDisplayName(member.DisplayName())
-				if displayName == "" {
-					displayName = member.User.Username
-				}
-				metadata.SetGroupDisplayName(groupID.String(), displayName)
-			}()
-		}
-	}
-
-	// If the user is not in the group, set the largest group as the active group
 
 	found := false
-	for _, id := range groupMap {
-		if id == groupID.String() {
+	for _, m := range memberships {
+		if m.GuildGroup.ID() == groupID {
+			metadata.SetActiveGroupID(groupID)
 			found = true
 			break
 		}
 	}
+
 	if !found {
+		logger.Warn("User is not in the active group", zap.String("userId", userId), zap.String("groupID", groupID.String()))
+
 		// Sort the groups by the edgecount
 		sort.SliceStable(memberships, func(i, j int) bool {
 			return memberships[i].GuildGroup.Size() > memberships[j].GuildGroup.Size()
@@ -534,7 +469,7 @@ func (p *EvrPipeline) buildChannelInfo(ctx context.Context, logger *zap.Logger) 
 	if !ok {
 		return nil, fmt.Errorf("groupID not found in context")
 	}
-	md, err := p.discordRegistry.GetGuildGroupMetadata(ctx, groupID.String())
+	md, err := GetGuildGroupMetadata(ctx, p.db, groupID.String())
 	if err != nil {
 		return nil, fmt.Errorf("failed to get guild group metadata: %w", err)
 	}
