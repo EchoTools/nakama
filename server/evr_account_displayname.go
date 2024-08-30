@@ -1,17 +1,11 @@
 package server
 
 import (
-	"context"
-	"database/sql"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"strings"
 	"time"
 
 	anyascii "github.com/anyascii/go"
-	"github.com/bwmarrin/discordgo"
-	"github.com/heroiclabs/nakama-common/runtime"
 )
 
 type DisplayNameHistory struct {
@@ -68,50 +62,6 @@ func UnmarshalGuildGroupMetadataFromMap(guildGroupMap map[string]interface{}) (*
 	}
 
 	return &g, nil
-}
-
-func GetDiscordDisplayNames(ctx context.Context, db *sql.DB, discordRegistry DiscordRegistry, userID, groupID string) (string, string, string, error) {
-
-	discordID, err := GetDiscordIDByUserID(ctx, db, userID)
-	if err != nil {
-		return "", "", "", fmt.Errorf("error getting discord ID by user ID: %w", err)
-	}
-
-	guildID, err := GetGuildIDByGroupID(ctx, db, groupID)
-	if err != nil {
-		return "", "", "", fmt.Errorf("error getting guild ID by group ID: %w", err)
-	}
-
-	var username, globalName, guildNick string
-
-	// If member is not found in the cache, get it from the API
-	member, err := discordRegistry.GetBot().GuildMember(guildID, discordID)
-	if err != nil {
-		if restError, _ := err.(*discordgo.RESTError); errors.As(err, &restError) && restError.Message != nil && restError.Message.Code != discordgo.ErrCodeUnknownMember {
-			return "", "", "", fmt.Errorf("error getting guild member: %w", err)
-		}
-	} else if member != nil && member.User != nil {
-		username = member.User.Username
-		globalName = member.User.GlobalName
-		guildNick = member.Nick
-	} else {
-		user, err := discordRegistry.GetUser(ctx, discordID)
-		if err != nil {
-			return "", "", "", fmt.Errorf("error getting user by discord ID: %w", err)
-		}
-		username = user.Username
-		globalName = user.GlobalName
-	}
-
-	return username, globalName, guildNick, nil
-}
-
-func GetEVRAccountID(ctx context.Context, nk runtime.NakamaModule, userID string) (*AccountMetadata, error) {
-	nkaccount, err := nk.AccountGetId(ctx, userID)
-	if err != nil {
-		return nil, fmt.Errorf("error getting account: %w", err)
-	}
-	return EVRAccountFromAccount(nkaccount), nil
 }
 
 // sanitizeDisplayName filters the provided displayName to ensure it is valid.
