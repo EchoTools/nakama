@@ -11,10 +11,10 @@ import (
 )
 
 var (
-	ErrorEntrantNotFound       = errors.New("entrant not found")
-	ErrorMultipleEntrantsFound = errors.New("multiple entrants found")
-	ErrMatchNotFound           = NewLobbyError(ServerDoesNotExist, "match not found")
-	ErrSuspended               = NewLobbyError(KickedFromLobbyGroup, "User is suspended from this guild")
+	ErrEntrantNotFound       = errors.New("entrant not found")
+	ErrMultipleEntrantsFound = errors.New("multiple entrants found")
+	ErrMatchNotFound         = NewLobbyError(ServerDoesNotExist, "match not found")
+	ErrSuspended             = NewLobbyError(KickedFromLobbyGroup, "User is suspended from this guild")
 )
 
 // LobbyErrorCode defines the type for lobby error codes.
