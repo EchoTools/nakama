@@ -200,15 +200,6 @@ func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session
 		return errors.Join(NewLobbyErrorf(InternalError, "failed to create presences"), err)
 	}
 
-	evrID, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
-	if !ok {
-		return NewLobbyError(InternalError, "failed to get evr ID from session context")
-	}
-
-	if err := p.profileRegistry.SetLobbyProfile(ctx, session.UserID(), label.GetGroupID(), evrID); err != nil {
-		return errors.Join(NewLobbyErrorf(InternalError, "failed to set lobby profile"), err)
-	}
-
 	if err := p.LobbyJoinEntrants(ctx, logger, matchID, params.Role, presences); err != nil {
 		return err
 	}
@@ -322,7 +313,6 @@ func (p *EvrPipeline) PrepareLobbyProfile(ctx context.Context, logger *zap.Logge
 		if err != nil {
 			logger.Warn("Failed to set display name.", zap.Error(err))
 		}
-
 	}
 
 	if err := p.profileRegistry.SetLobbyProfile(ctx, session.userID, evrID, displayName); err != nil {

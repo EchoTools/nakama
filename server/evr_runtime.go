@@ -734,13 +734,13 @@ func GetMatchBySessionID(nk runtime.NakamaModule, sessionID uuid.UUID) (matchID 
 		if !matchID.IsNil() {
 			// Verify that the user is actually in the match
 			if meta, err := nk.StreamUserGet(StreamModeMatchAuthoritative, matchID.UUID.String(), "", matchID.Node, presence.GetUserId(), presence.GetSessionId()); err != nil || meta == nil {
-				return MatchID{}, nil, ErrorMatchNotFound
+				return MatchID{}, nil, ErrMatchNotFound
 			}
 			return matchID, presence, nil
 		}
 	}
 
-	return MatchID{}, nil, ErrorMatchNotFound
+	return MatchID{}, nil, ErrMatchNotFound
 }
 
 func GetLobbyGroupID(ctx context.Context, db *sql.DB, userID string) (string, uuid.UUID, error) {

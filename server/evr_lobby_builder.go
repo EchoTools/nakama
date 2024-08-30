@@ -247,7 +247,7 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 	errored := make([]*EvrMatchPresence, 0, len(entrants))
 	for _, p := range entrantPresences {
 
-		if err := LobbyJoinEntrants(ctx, b.db, logger, b.matchRegistry, b.sessionRegistry, b.tracker, b.profileRegistry, matchID, p.RoleAlignment, []*EvrMatchPresence{p}); err != nil {
+		if err := LobbyJoinEntrants(ctx, logger, b.db, b.matchRegistry, b.sessionRegistry, b.tracker, b.profileRegistry, matchID, p.RoleAlignment, []*EvrMatchPresence{p}); err != nil {
 			logger.Error("Failed to join entrant to match", zap.String("mid", matchID.UUID.String()), zap.String("uid", p.GetUserId()), zap.Error(err))
 			errored = append(errored, p)
 			continue

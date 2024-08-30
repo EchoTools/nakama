@@ -27,16 +27,12 @@ var MatchmakingTimeout = 30 * time.Second
 
 // lobbyJoinSessionRequest is a request to join a specific existing session.
 func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session *sessionWS, params SessionParameters) error {
-	groupMetadata, err := GetGuildGroupMetadata(ctx, p.db, params.GroupID.String())
-	if err != nil {
-		return errors.Join(NewLobbyError(InternalError, "failed to get guild group metadata"), err)
-	}
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	// Do authorization checks related to the guild.
-	if err := authorizeGuildGroupSession(ctx, session.userID.String(), params.GroupID.String(), groupMetadata); err != nil {
+	if err := p.authorizeGuildGroupSession(ctx, session.userID.String(), params.GroupID.String()); err != nil {
 		return err
 	}
 
