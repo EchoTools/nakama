@@ -119,8 +119,6 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 				leaderMatchID, _, err := GetMatchBySessionID(p.runtimeModule, uuid.FromStringOrNil(leader.SessionId))
 				if err != nil {
 					return errors.Join(NewLobbyError(InternalError, "failed to get match by session id"), err)
-				} else if err != ErrMatchNotFound {
-					return ErrMatchNotFound
 				}
 				if leaderMatchID.IsNil() {
 					// Leader is not in a match.
@@ -135,10 +133,8 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 				matchID, _, err := GetMatchBySessionID(p.runtimeModule, session.id)
 				if err != nil {
 					return errors.Join(NewLobbyError(InternalError, "failed to get match by session id"), err)
-				} else if err != ErrMatchNotFound {
-					return ErrMatchNotFound
 				}
-				if matchID == leaderMatchID {
+				if matchID.IsNil() || matchID == leaderMatchID {
 					// This player is in the same match as the leader. continue to wait.
 					continue
 				} else {
@@ -147,8 +143,8 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 					label, err := MatchLabelByID(ctx, p.runtimeModule, leaderMatchID)
 					if err != nil {
 						return errors.Join(NewLobbyError(InternalError, "failed to get match by session id"), err)
-					} else if err != ErrMatchNotFound {
-						return ErrMatchNotFound
+					} else if label == nil {
+						continue
 					}
 
 					switch label.Mode {
