@@ -1137,7 +1137,7 @@ func (t *LocalTracker) processEvent(e *PresenceEvent) {
 
 			var err error
 			switch session.Format() {
-			case SessionFormatEvr:
+			case SessionFormatEVR:
 				err = session.Send(envelope, true)
 			case SessionFormatProtobuf:
 				if payloadProtobuf == nil {
@@ -1273,7 +1273,7 @@ func (t *LocalTracker) processEvent(e *PresenceEvent) {
 
 			var err error
 			switch session.Format() {
-			case SessionFormatEvr:
+			case SessionFormatEVR:
 				err = session.Send(envelope, true)
 			case SessionFormatProtobuf:
 				if payloadProtobuf == nil {
