@@ -22,8 +22,9 @@ import (
 
 var LobbyTestCounter = 0
 
-// var MatchmakingTimeout = 4 * time.Minute
-var MatchmakingTimeout = 30 * time.Second
+var MatchmakingTimeout = 4 * time.Minute
+
+//var MatchmakingTimeout = 30 * time.Second
 
 // lobbyJoinSessionRequest is a request to join a specific existing session.
 func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session *sessionWS, params SessionParameters) error {

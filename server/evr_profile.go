@@ -692,14 +692,6 @@ func createUnlocksFieldByKey() map[string]string {
 	return unlocks
 }
 
-func ValidateUnlocks(unlocks any) error {
-	err := validate.Struct(unlocks)
-	if err == nil {
-		return nil
-	}
-	return err
-}
-
 // SetCosmeticDefaults sets all the restricted cosmetics to false.
 func SetCosmeticDefaults(s *evr.ServerProfile, enableAll bool) error {
 	// Set all the VRML cosmetics to false

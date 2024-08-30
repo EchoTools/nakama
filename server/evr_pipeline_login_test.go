@@ -106,12 +106,6 @@ type MockEvrPipeline struct {
 	EvrPipeline
 }
 
-var _ = DiscordRegistry(testDiscordRegistry{})
-
-type testDiscordRegistry struct {
-	DiscordRegistry
-}
-
 func TestEvrPipeline_authenticateAccount(t *testing.T) {
 	type fields struct {
 		placeholderEmail string

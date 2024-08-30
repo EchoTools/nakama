@@ -19,15 +19,12 @@ func createTestDiscordGoSession(t *testing.T, logger *zap.Logger) *discordgo.Ses
 
 func createTestProfileRegistry(t *testing.T, logger *zap.Logger) (*ProfileRegistry, error) {
 	runtimeLogger := NewRuntimeGoLogger(logger)
-	metrics := &testMetrics{}
-	config := NewConfig(logger)
+
 	tracker := &testTracker{}
-	dg := createTestDiscordGoSession(t, logger)
 	db := NewDB(t)
 	nk := NewRuntimeGoNakamaModule(logger, db, nil, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
-	discordRegistry := NewLocalDiscordRegistry(context.Background(), nk, runtimeLogger, metrics, config, nil, dg)
-	profileRegistry := NewProfileRegistry(nk, db, runtimeLogger, tracker, discordRegistry)
+	profileRegistry := NewProfileRegistry(nk, db, runtimeLogger, tracker)
 
 	return profileRegistry, nil
 }

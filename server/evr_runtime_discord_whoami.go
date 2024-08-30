@@ -39,7 +39,7 @@ type EvrIdLogins struct {
 	DisplayName   string `json:"display_name,omitempty"`
 }
 
-func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, s *discordgo.Session, discordRegistry DiscordRegistry, i *discordgo.InteractionCreate, discordID string, username string, guildID string, includePrivate bool, includeDetail bool) error {
+func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, s *discordgo.Session, i *discordgo.InteractionCreate, discordID string, username string, guildID string, includePrivate bool, includeDetail bool) error {
 	whoami := &WhoAmI{
 		DiscordID:             discordID,
 		EVRIDLogins:           make(map[string]time.Time),
@@ -64,9 +64,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 
 	if includePrivate {
 		// Do some profile checks and cleanups
-		if err := d.updateAccount(ctx, i.GuildID, i.Member); err != nil {
-			return fmt.Errorf("failed to update account: %w", err)
-		}
+		go d.cache.Queue(userIDStr, "")
 	}
 
 	// Basic account details
@@ -100,8 +98,10 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 
 		groupIDs = []uuid.UUID{uuid.FromStringOrNil(groupID)}
 	}
-
-	whoami.GuildGroupMemberships, err = d.discordRegistry.GetGuildGroupMemberships(ctx, userID, groupIDs)
+	groupIDStrs := lo.Map(groupIDs, func(g uuid.UUID, _ int) string {
+		return g.String()
+	})
+	whoami.GuildGroupMemberships, err = GetGuildGroupMemberships(ctx, d.nk, userID.String(), groupIDStrs)
 	if err != nil {
 		return err
 	}
@@ -118,7 +118,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	}
 
 	// Get the past displayNames
-	displayNameObjs, err := GetDisplayNameRecords(ctx, logger, nk, userID.String())
+	displayNameObjs, err := GetDisplayNameRecords(ctx, nk, userID.String())
 	if err != nil {
 		return err
 	}
@@ -160,7 +160,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	ghostedDiscordIDs := make([]string, 0)
 	for _, f := range friends {
 		if api.Friend_State(f.GetState().Value) == api.Friend_BLOCKED {
-			discordID := d.UserIDToDiscordID(f.GetUser().GetId())
+			discordID := d.cache.UserIDToDiscordID(f.GetUser().GetId())
 			ghostedDiscordIDs = append(ghostedDiscordIDs, discordID)
 		}
 	}
