@@ -44,7 +44,7 @@ type LobbyError struct {
 }
 
 // Error implements the error interface.
-func (e *LobbyError) Error() string {
+func (e LobbyError) Error() string {
 	message := e.Message
 	switch e.Code {
 	case TimeoutServerFindFailed:
@@ -81,7 +81,7 @@ func (e *LobbyError) Error() string {
 func NewLobbyError(code LobbyErrorCode, message string) *LobbyError {
 	return &LobbyError{
 		Code:    code,
-		Message: fmt.Sprintf(message),
+		Message: message,
 	}
 }
 
@@ -149,7 +149,7 @@ func LobbySessionFailureFromError(mode evr.Symbol, groupID uuid.UUID, err error)
 }
 
 func LobbyErrorIs(err error, code LobbyErrorCode) bool {
-	var lobbyError *LobbyError
+	lobbyError := &LobbyError{}
 	found := errors.As(err, lobbyError)
 	if !found {
 		return false
