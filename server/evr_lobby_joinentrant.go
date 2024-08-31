@@ -9,11 +9,10 @@ import (
 	"slices"
 	"time"
 
+	"github.com/bwmarrin/discordgo"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 func (p *EvrPipeline) LobbyJoinEntrants(ctx context.Context, logger *zap.Logger, matchID MatchID, role int, entrants []*EvrMatchPresence) error {
@@ -52,6 +51,16 @@ func LobbyJoinEntrants(ctx context.Context, logger *zap.Logger, db *sql.DB, matc
 				return errors.Join(NewLobbyError(InternalError, "failed to get guild group metadata"), err)
 			}
 			metadataCache.Store(groupID, groupMetadata)
+		}
+	}
+
+	// Ensure the player supports the required features.
+	for _, e := range entrants {
+		for _, feature := range label.RequiredFeatures {
+			if !slices.Contains(e.SupportedFeatures, feature) {
+				logger.Warn("Player does not support required feature", zap.String("feature", feature), zap.String("mid", matchID.UUID.String()), zap.String("uid", e.UserID.String()))
+				return NewLobbyErrorf(MissingEntitlement, "player does not support required feature: %s", feature)
+			}
 		}
 	}
 
@@ -188,24 +197,30 @@ func LobbyJoinEntrant(logger *zap.Logger, matchRegistry MatchRegistry, tracker T
 
 func (p *EvrPipeline) authorizeGuildGroupSession(ctx context.Context, userID string, groupID string) error {
 
-	groupMetadata, err := GetGuildGroupMetadata(ctx, p.db, groupID)
+	membership, err := GetGuildGroupMembership(ctx, p.runtimeModule, userID, groupID)
 	if err != nil {
-		return errors.Join(NewLobbyError(InternalError, "failed to get guild group metadata"), err)
+		return errors.Join(NewLobbyError(InternalError, "failed to get guild group membership"), err)
 	}
 
-	if slices.Contains(groupMetadata.RoleCache[groupMetadata.Roles.Suspended], userID) {
+	if membership.isSuspended {
 		return ErrSuspended
 	}
 
+	groupMetadata := membership.GuildGroup.Metadata
 	if groupMetadata.MinimumAccountAgeDays > 0 && !slices.Contains(groupMetadata.RoleCache[groupMetadata.Roles.AccountAgeBypass], userID) {
 		// Check the account creation date.
 		discordID, err := GetDiscordIDByUserID(ctx, p.db, userID)
 		if err != nil {
-			return status.Errorf(codes.Internal, "failed to get discord ID by user ID: %v", err)
+			return NewLobbyErrorf(InternalError, "failed to get discord ID by user ID: %v", err)
 		}
 
-		if SnowflakeToTime(discordID).After(time.Now().AddDate(0, 0, -groupMetadata.MinimumAccountAgeDays)) {
-			return status.Error(codes.PermissionDenied, "Account is too new to join this guild's sessions")
+		t, err := discordgo.SnowflakeTimestamp(discordID)
+		if err != nil {
+			return NewLobbyErrorf(InternalError, "failed to get discord snowflake timestamp: %v", err)
+		}
+
+		if t.After(time.Now().AddDate(0, 0, -groupMetadata.MinimumAccountAgeDays)) {
+			return NewLobbyErrorf(KickedFromLobbyGroup, "account is too young to join this guild")
 		}
 	}
 	if groupMetadata.MembersOnlyMatchmaking {

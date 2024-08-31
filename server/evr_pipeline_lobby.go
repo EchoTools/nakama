@@ -105,6 +105,12 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 	var matchID MatchID
 	switch in.(type) {
 	case *evr.LobbyFindSessionRequest:
+
+		if len(params.RequiredFeatures) > 0 {
+			// reject matchmaking with required features
+			return NewLobbyErrorf(MissingEntitlement, "required features not supported")
+		}
+
 		// Load the next match from the DB. (e.g. EchoTaxi hails)
 		matchID, err = p.loadNextMatchFromDB(ctx, logger, session)
 		if err != nil {
@@ -147,6 +153,14 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 		return p.lobbyJoin(ctx, logger, session, params)
 
 	case *evr.LobbyCreateSessionRequest:
+
+		if len(params.RequiredFeatures) > 0 {
+			// Reject public creation
+			if params.Mode == evr.ModeArenaPublic || params.Mode == evr.ModeCombatPublic || params.Mode == evr.ModeSocialPublic {
+				return NewLobbyErrorf(MissingEntitlement, "required features not supported")
+			}
+		}
+
 		LeavePartyStream(session)
 		p.metrics.CustomCounter("lobby_create_session", params.MetricsTags(), 1)
 		matchID, err = p.lobbyCreate(ctx, logger, session, params)

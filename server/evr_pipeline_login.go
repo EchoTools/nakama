@@ -127,9 +127,6 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	userId := user.GetId()
 	uid := uuid.FromStringOrNil(user.GetId())
 
-	// Queue a full account sync.
-	p.discordCache.Queue(userId, "")
-
 	// Get the user's metadata
 	metadata, err := GetAccountMetadata(ctx, p.runtimeModule, userId)
 	if err != nil {
@@ -202,11 +199,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		}
 	}
 
-	config, err := LoadMatchmakingSettings(ctx, p.runtimeModule, userId)
-	if err != nil {
-		logger.Warn("Failed to load matchmaking config", zap.Error(err))
-	}
-	verbose := config.Verbose
+	verbose := metadata.DiscordDebugMessages
 
 	// Load the user's profile
 	profile, err := p.profileRegistry.GameProfile(ctx, logger, uuid.FromStringOrNil(userId), loginProfile, evrId)
@@ -225,6 +218,10 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	metadata.SetActiveGroupID(groupID)
 
 	groupID = metadata.GetActiveGroupID()
+
+	// Queue a full account sync.
+	p.discordCache.Queue(userId, groupID.String())
+	p.discordCache.Queue(userId, "")
 
 	// Get a list of the user's guild memberships and set to the largest one
 	memberships, err := GetGuildGroupMemberships(ctx, p.runtimeModule, userId, nil)

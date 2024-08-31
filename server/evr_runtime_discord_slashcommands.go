@@ -1500,7 +1500,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 				if membership == nil {
 					go d.cache.SyncGuildGroupMember(ctx, userIDStr, d.cache.GuildIDToGroupID(member.GuildID))
-					return errors.New("No membership found. please try again in a few minutes.")
+					return errors.New("no membership found")
 				}
 
 				if membership.isModerator {
@@ -1510,7 +1510,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			isGlobalModerator, err := CheckSystemGroupMembership(ctx, db, userIDStr, GroupGlobalModerators)
 			if err != nil {
-				return errors.New("Error checking global moderator status")
+				return errors.New("error checking global moderator status")
 			}
 
 			options := i.ApplicationCommandData().Options
@@ -2022,6 +2022,12 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				err := d.handleInteractionCreate(logger, s, i, appCommandName, handler)
 				if err != nil {
 					logger.WithField("error", err).Error("Failed to handle interaction")
+					// Queue the user to be updated in the cache
+					userID := d.cache.DiscordIDToUserID(user.ID)
+					groupID := d.cache.GuildIDToGroupID(i.GuildID)
+					if userID != "" && groupID != "" {
+						d.cache.Queue(userID, groupID)
+					}
 					if err := simpleInteractionResponse(s, i, err.Error()); err != nil {
 						return
 					}
@@ -2400,10 +2406,13 @@ func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runt
 	}
 
 	if existingMessage != nil {
-		ts := SnowflakeToTime(existingMessage.ID)
+		t, err := discordgo.SnowflakeTimestamp(existingMessage.ID)
+		if err != nil {
+			return err
+		}
 
 		embed.Footer = &discordgo.MessageEmbedFooter{
-			Text: fmt.Sprintf("Expires %s", ts.Format(time.RFC1123)),
+			Text: fmt.Sprintf("Expires %s", t.Format(time.RFC1123)),
 		}
 		// Update the message for the given region
 		_, err = d.dg.ChannelMessageEditEmbed(channelID, existingMessage.ID, embed)

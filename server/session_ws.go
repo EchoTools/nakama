@@ -149,7 +149,7 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 	if userID != uuid.Nil {
 		sessionLogger = sessionLogger.With(zap.String("uid", userID.String()))
 	}
-	sessionLogger.Info("New WebSocket session connected", zap.String("requestUri", request.URL.Path), zap.Uint8("format", uint8(format)))
+	sessionLogger.Info("New WebSocket session connected", zap.String("requestUri", request.URL.Path), zap.String("query", request.URL.RawQuery), zap.Uint8("format", uint8(format)))
 
 	ctx, ctxCancelFn := context.WithCancel(context.Background())
 
