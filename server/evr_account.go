@@ -7,6 +7,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/bwmarrin/discordgo"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -61,19 +62,22 @@ func (p *GroupProfile) UpdateUnlockedItems(updated []evr.Symbol) {
 type AccountMetadata struct {
 	account *api.Account
 
-	DisplayNameOverride        string            `json:"display_name_override"` // The display name override
-	GlobalBanReason            string            `json:"global_ban_reason"`     // The global ban reason
-	ActiveGroupID              string            `json:"active_group_id"`       // The active group ID
-	Cosmetics                  AccountCosmetics  `json:"cosmetics"`             // The loadout
-	GroupDisplayNames          map[string]string `json:"group_display_names"`   // The display names for each guild map[groupID]displayName
-	DisableAFKTimeout          bool              `json:"disable_afk_timeout"`   // Disable AFK detection
-	TargetUserID               string            `json:"target_user_id"`        // The target user ID to follow in public spaces
-	DiscordAccountCreationTime time.Time         `json:"discord_create_time"`
-	modified                   bool
+	DisplayNameOverride  string            `json:"display_name_override"`  // The display name override
+	GlobalBanReason      string            `json:"global_ban_reason"`      // The global ban reason
+	ActiveGroupID        string            `json:"active_group_id"`        // The active group ID
+	GroupDisplayNames    map[string]string `json:"group_display_names"`    // The display names for each guild map[groupID]displayName
+	DisableAFKTimeout    bool              `json:"disable_afk_timeout"`    // Disable AFK detection
+	TargetUserID         string            `json:"target_user_id"`         // The target user ID to follow in public spaces
+	DiscordDebugMessages bool              `json:"discord_debug_messages"` // Enable debug messages in Discord
+	modified             bool
 }
 
 func (a *AccountMetadata) ID() string {
 	return a.account.User.Id
+}
+
+func (a *AccountMetadata) DiscordID() string {
+	return a.account.CustomId
 }
 
 func (a *AccountMetadata) Username() string {
@@ -91,14 +95,10 @@ func (a *AccountMetadata) LangTag() string {
 func (a *AccountMetadata) AvatarURL() string {
 	return a.account.User.AvatarUrl
 }
-func EVRAccountFromAccount(account *api.Account) *AccountMetadata {
-	md := &AccountMetadata{
-		account: account,
-	}
-	if err := json.Unmarshal([]byte(account.User.Metadata), md); err != nil {
-		return nil
-	}
-	return md
+
+func (a *AccountMetadata) DiscordAccountCreationTime() time.Time {
+	t, _ := discordgo.SnowflakeTimestamp(a.DiscordID())
+	return t
 }
 
 func (a *AccountMetadata) GetActiveGroupID() uuid.UUID {
@@ -246,6 +246,17 @@ func GetDisplayNameByGroupID(ctx context.Context, nk runtime.NakamaModule, userI
 	}
 }
 
+func GetGuildGroupMembership(ctx context.Context, nk runtime.NakamaModule, userID, groupID string) (GuildGroupMembership, error) {
+	memberships, err := GetGuildGroupMemberships(ctx, nk, userID, []string{groupID})
+	if err != nil {
+		return GuildGroupMembership{}, fmt.Errorf("error getting guild group memberships: %w", err)
+	}
+	if len(memberships) == 0 {
+		return GuildGroupMembership{}, ErrMemberNotFound
+	}
+	return memberships[0], nil
+}
+
 func GetGuildGroupMemberships(ctx context.Context, nk runtime.NakamaModule, userID string, groupIDs []string) ([]GuildGroupMembership, error) {
 
 	memberships := make([]GuildGroupMembership, 0)
@@ -265,9 +276,12 @@ func GetGuildGroupMemberships(ctx context.Context, nk runtime.NakamaModule, user
 				continue
 			}
 
-			membership := NewGuildGroupMembership(g, uuid.FromStringOrNil(userID), api.UserGroupList_UserGroup_State(ug.GetState().GetValue()))
+			membership, err := NewGuildGroupMembership(g, uuid.FromStringOrNil(userID), api.UserGroupList_UserGroup_State(ug.GetState().GetValue()))
+			if err != nil {
+				return nil, fmt.Errorf("error creating guild group membership: %w", err)
+			}
 
-			memberships = append(memberships, membership)
+			memberships = append(memberships, *membership)
 		}
 		if cursor == "" {
 			break

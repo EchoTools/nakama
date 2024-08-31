@@ -62,11 +62,6 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 
 	i.Member.GuildID = i.GuildID
 
-	if includePrivate {
-		// Do some profile checks and cleanups
-		go d.cache.Queue(userIDStr, "")
-	}
-
 	// Basic account details
 	whoami.NakamaID = userID
 

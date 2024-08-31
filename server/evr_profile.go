@@ -110,29 +110,23 @@ func (p *AccountProfile) GetEvrID() evr.EvrId {
 	return p.evrID
 }
 
-func (p *AccountProfile) GetCosmeticLoadout() evr.CosmeticLoadout {
-	return p.metadata.Cosmetics.Loadout
-}
-
-func (p *AccountProfile) GetJerseyNumber() int64 {
-	return p.metadata.Cosmetics.JerseyNumber
-}
-
-func (p *AccountProfile) GetServerProfile() evr.ServerProfile {
-	return evr.ServerProfile{
-		SchemaVersion: 4,
-		CreateTime:    p.GetCreateTime().UTC().Unix(),
-		DisplayName:   p.GetDisplayName(),
-		EquippedCosmetics: evr.EquippedCosmetics{
-			Number: p.GetJerseyNumber(),
-			Instances: evr.CosmeticInstances{
-				Unified: evr.UnifiedCosmeticInstance{
-					Slots: p.GetCosmeticLoadout(),
+/*
+	func (p *AccountProfile) GetServerProfile() evr.ServerProfile {
+		return evr.ServerProfile{
+			SchemaVersion: 4,
+			CreateTime:    p.GetCreateTime().UTC().Unix(),
+			DisplayName:   p.GetDisplayName(),
+			EquippedCosmetics: evr.EquippedCosmetics{
+				Number: p.GetJerseyNumber(),
+				Instances: evr.CosmeticInstances{
+					Unified: evr.UnifiedCosmeticInstance{
+						Slots: p.GetCosmeticLoadout(),
+					},
 				},
 			},
-		},
+		}
 	}
-}
+*/
 
 func NewGameProfile(login evr.LoginProfile, client evr.ClientProfile, server evr.ServerProfile, version string) GameProfileData {
 	return GameProfileData{

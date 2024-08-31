@@ -265,7 +265,6 @@ type MatchmakingSettings struct {
 	PriorityBroadcasters  []string `json:"priority_broadcasters"`            // Prioritize these broadcasters
 	NextMatchID           MatchID  `json:"next_match_id"`                    // Try to join this match immediately when finding a match
 	NextMatchRole         string   `json:"next_match_role"`                  // The role to join the next match as
-	Verbose               bool     `json:"verbose"`                          // Send the user verbose messages via discord
 }
 
 func (MatchmakingSettings) GetStorageID() StorageID {

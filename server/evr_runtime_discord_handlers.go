@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -13,7 +12,6 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
-	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -26,7 +24,7 @@ func (d *DiscordAppBot) syncLinkedRoles(ctx context.Context, userID string) erro
 	}
 	for _, membership := range memberships {
 		if membership.GuildGroup.Metadata.Roles.AccountLinked != "" {
-			if membership.GuildGroup.IsAccountLinked(userID) {
+			if membership.GuildGroup.Metadata.IsAccountLinked(userID) {
 				if err := d.dg.GuildMemberRoleAdd(membership.GuildGroup.ID().String(), userID, membership.GuildGroup.Metadata.Roles.AccountLinked); err != nil {
 					return fmt.Errorf("error adding role to member: %w", err)
 				}
@@ -56,46 +54,55 @@ func (d *DiscordAppBot) handleInteractionCreate(logger runtime.Logger, s *discor
 		return nil
 	}
 
-	var userID string
 	var err error
+	userID := d.cache.DiscordIDToUserID(user.ID)
 
 	switch commandName {
 	case "whoami", "link-headset":
 
 		// Authenticate/create an account.
-		userID, err = GetUserIDByDiscordID(ctx, d.db, user.ID)
-		if err != nil {
+		userID := d.cache.DiscordIDToUserID(user.ID)
+		if userID == "" {
 			userID, _, _, err = d.nk.AuthenticateCustom(ctx, user.ID, user.Username, true)
 			if err != nil {
 				return fmt.Errorf("failed to authenticate (or create) user %s: %w", user.ID, err)
 			}
 		}
 
+		groupID := d.cache.GuildIDToGroupID(i.GuildID)
+		// Do some profile checks and cleanups
+		// The user must be in a guild for the empty groupID to be valid
+		d.cache.Queue(userID, groupID)
+		d.cache.Queue(userID, "")
+	default:
+		if userID == "" {
+			return simpleInteractionResponse(s, i, "a headsets must be linked to this Discord account to use slash commands")
+		}
+	}
+
+	// Global security check
+	switch commandName {
+	case "allocate", "create":
+
+		groupID := d.cache.GuildIDToGroupID(i.GuildID)
+		if groupID == "" {
+			return simpleInteractionResponse(s, i, "This command can only be used in a guild.")
+		}
+
 	case "trigger-cv", "kick-player":
 
-		userID, err = GetUserIDByDiscordID(ctx, d.db, user.ID)
-		if err != nil {
-			return fmt.Errorf("a headsets must be linked to this Discord account to use slash commands")
-		}
 		if isGlobalModerator, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalModerators); err != nil {
 			return errors.New("failed to check global moderator status")
 		} else if !isGlobalModerator {
 			return simpleInteractionResponse(s, i, "You must be a global moderator to use this command.")
-
 		}
-
-	default:
-		userID, err = GetUserIDByDiscordID(ctx, d.db, user.ID)
-		if err != nil {
-			return fmt.Errorf("a headsets must be linked to this Discord account to use slash commands")
-		}
-
 	}
 
-	groupID, err := GetGroupIDByGuildID(ctx, d.db, i.GuildID)
-	if err != nil {
-		logger.Error("Failed to get guild ID", zap.Error(err))
+	groupID := d.cache.GuildIDToGroupID(i.GuildID)
+	if groupID == "" {
+		return simpleInteractionResponse(s, i, "This command can only be used in a guild.")
 	}
+
 	return commandFn(logger, s, i, user, member, userID, groupID)
 }
 
@@ -103,10 +110,7 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 
 	// Find a parking match to prepare
 
-	groupID, err := GetGroupIDByGuildID(ctx, d.db, guildID)
-	if err != nil {
-		return nil, 0, status.Errorf(codes.NotFound, "guild not found: %s", guildID)
-	}
+	groupID := d.cache.GuildIDToGroupID(guildID)
 
 	// Get a list of the groups that this user has allocate access to
 	memberships, err := GetGuildGroupMemberships(ctx, d.nk, userID, nil)
@@ -117,7 +121,7 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 
 	allocatorGroupIDs := make([]string, 0, len(memberships))
 	for _, m := range memberships {
-		if m.GuildGroup.IsAllocator(userID) {
+		if m.GuildGroup.Metadata.IsAllocator(userID) {
 			allocatorGroupIDs = append(allocatorGroupIDs, m.GuildGroup.ID().String())
 		}
 		if m.GuildGroup.ID() == uuid.FromStringOrNil(groupID) {
@@ -129,7 +133,7 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 		return nil, 0, status.Error(codes.PermissionDenied, "user is not a member of the guild")
 	}
 
-	if !membership.GuildGroup.IsAllocator(userID) {
+	if !membership.GuildGroup.Metadata.IsAllocator(userID) {
 		return nil, 0, status.Error(codes.PermissionDenied, "user does not have the allocator role in this guild.")
 	}
 
@@ -201,7 +205,7 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 	label.SpawnedBy = userID
 
 	label.StartTime = startTime.UTC().Add(1 * time.Minute)
-	if membership.GuildGroup.IsAllocator(userID) {
+	if membership.GuildGroup.Metadata.IsAllocator(userID) {
 		label.StartTime = startTime.UTC().Add(10 * time.Minute)
 	}
 
@@ -228,10 +232,7 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 
 	// Find a parking match to prepare
 
-	groupID, err := GetGroupIDByGuildID(ctx, d.db, guildID)
-	if err != nil {
-		return nil, 0, status.Errorf(codes.NotFound, "guild not found: %s", guildID)
-	}
+	groupID := d.cache.GuildIDToGroupID(guildID)
 
 	// Get a list of the groups that this user has allocate access to
 	memberships, err := GetGuildGroupMemberships(ctx, d.nk, userID, nil)
@@ -336,18 +337,4 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 	}
 
 	return &label, rtt, nil
-}
-
-func SnowflakeToTime(snowflakeID string) time.Time {
-	// Discord snowflake epoch timestamp
-	const discordEpoch = 1420070400000
-
-	// Convert the ID to an integer
-	id, _ := strconv.ParseInt(snowflakeID, 10, 64)
-
-	// Extract the timestamp from the snowflake
-	timestamp := (id >> 22) + discordEpoch
-
-	// Return the time.Time object
-	return time.Unix(timestamp/1000, (timestamp%1000)*1000000).UTC()
 }

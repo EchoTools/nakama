@@ -133,6 +133,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, r evr.LobbySessionReques
 		globalSettings.BackfillQueryAddon,
 		userSettings.BackfillQueryAddon,
 	}
+
 	// Add each blocked user that is online to the backfill query addon
 	for _, f := range friends {
 		if api.Friend_State(f.GetState().Value) == api.Friend_BLOCKED && f.GetUser().GetOnline() {
@@ -159,7 +160,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, r evr.LobbySessionReques
 		PartyGroupID:          lobbyGroupID,
 		PartyID:               uuid.NewV5(uuid.Nil, lobbyGroupID),
 		NextMatchID:           userSettings.NextMatchID,
-		Verbose:               globalSettings.Verbose || userSettings.Verbose,
+		Verbose:               metadata.DiscordDebugMessages,
 		Node:                  node,
 		latencyHistory:        latencyHistory,
 	}
