@@ -48,12 +48,14 @@ func (e LobbyError) Error() string {
 	message := e.Message
 	switch e.Code {
 	case TimeoutServerFindFailed:
-		message = "server find failed: " + message
+		message = "timeout: server find failed: " + message
 	case UpdateRequired:
 		message = "update required: " + message
 	case BadRequest:
 		message = "bad request: " + message
 	case Timeout:
+		message = "timeout: " + message
+	case ServerDoesNotExist:
 		message = "server does not exist: " + message
 	case ServerIncompatible:
 		message = "server is incompatible: " + message
