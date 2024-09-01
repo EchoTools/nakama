@@ -43,8 +43,8 @@ func MatchmakingStream(ctx context.Context, logger *zap.Logger, s *sessionWS, pa
 
 func JoinMatchmakingStream(logger *zap.Logger, s *sessionWS, stream PresenceStream) error {
 
-	logger.Debug("Joining lobby group matchmaking stream")
-	s.tracker.UntrackLocalByModes(s.id, map[uint8]struct{}{StreamModeMatchmaking: {}}, PresenceStream{})
+	logger.Debug("Joining lobby group matchmaking stream", zap.Any("stream", stream))
+	s.tracker.UntrackLocalByModes(s.id, map[uint8]struct{}{stream.Mode: {}}, stream)
 	// Leave any existing lobby group stream.
 
 	ctx := s.Context()

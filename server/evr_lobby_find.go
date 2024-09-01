@@ -22,7 +22,7 @@ import (
 
 var LobbyTestCounter = 0
 
-var MatchmakingTimeout = 4 * time.Minute
+var MatchmakingTimeout = 5 * time.Minute
 
 //var MatchmakingTimeout = 30 * time.Second
 
