@@ -41,14 +41,6 @@ type SessionParameters struct {
 	latencyHistory        LatencyHistory
 }
 
-func QueryEscapeUUID(userID uuid.UUID) string {
-	return strings.ReplaceAll(userID.String(), "-", "\\-")
-}
-
-func QueryEscapeUUIDStr(userID string) string {
-	return strings.ReplaceAll(userID, "-", "\\-")
-}
-
 func (s SessionParameters) MetricsTags() map[string]string {
 	return map[string]string{
 		"mode":         s.Mode.String(),
@@ -107,26 +99,21 @@ func NewLobbyParametersFromRequest(ctx context.Context, r evr.LobbySessionReques
 	if userSettings == nil {
 		userSettings = &MatchmakingSettings{}
 	}
-	// Add blocked players who are online to the backfillQueryAddon
+	// Add blocked players who are online to the Matchmaking Query Addon
 	stringProperties := make(map[string]string)
 
-	blockedFriendIDs := make([]string, 0)
+	blockedIDs := make([]string, 0)
 	for _, f := range friends {
 		if api.Friend_State(f.GetState().Value) == api.Friend_BLOCKED {
-			blockedFriendIDs = append(blockedFriendIDs, f.GetUser().GetId())
+			if f.GetUser().GetOnline() {
+				blockedIDs = append(blockedIDs, f.GetUser().GetId())
+			}
 		}
 	}
-	if len(blockedFriendIDs) > 0 {
-		stringProperties["blocked_friend_ids"] = strings.Join(blockedFriendIDs, " ")
-	}
-
-	// Escape -'s in the user id
-	userIDStr := QueryEscapeUUID(userID)
 
 	matchmakingQueryAddons := []string{
 		globalSettings.MatchmakingQueryAddon,
 		userSettings.MatchmakingQueryAddon,
-		fmt.Sprintf(`-properties.blocked:/%s/`, userIDStr),
 	}
 
 	backfillQueryAddons := []string{
@@ -135,11 +122,14 @@ func NewLobbyParametersFromRequest(ctx context.Context, r evr.LobbySessionReques
 	}
 
 	// Add each blocked user that is online to the backfill query addon
-	for _, f := range friends {
-		if api.Friend_State(f.GetState().Value) == api.Friend_BLOCKED && f.GetUser().GetOnline() {
-			userIDStr := QueryEscapeUUIDStr(f.GetUser().GetId())
-			backfillQueryAddons = append(backfillQueryAddons, fmt.Sprintf(`-label.players.user_id:/%s/`, userIDStr))
-		}
+	if len(blockedIDs) > 0 {
+
+		// Avoid players that are blocking this player.
+		stringProperties["blocked"] = strings.Join(blockedIDs, " ")
+		matchmakingQueryAddons = append(matchmakingQueryAddons, fmt.Sprintf(`-properties.blocked:/.*%s.*/`, Query.Escape(userID)))
+
+		// Avoid backfilling matches with players that this player blocks.
+		backfillQueryAddons = append(backfillQueryAddons, fmt.Sprintf(`-label.players.user_id:/(%s)/`, Query.Join(blockedIDs, "|")))
 	}
 
 	return SessionParameters{
