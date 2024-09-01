@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 
@@ -39,7 +38,6 @@ func (d *DiscordAppBot) syncLinkedRoles(ctx context.Context, userID string) erro
 
 func (d *DiscordAppBot) handleInteractionCreate(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, commandName string, commandFn DiscordCommandHandlerFn) error {
 	ctx := d.ctx
-	db := d.db
 
 	user, member := getScopedUserMember(i)
 
@@ -55,6 +53,7 @@ func (d *DiscordAppBot) handleInteractionCreate(logger runtime.Logger, s *discor
 
 	var err error
 	userID := d.cache.DiscordIDToUserID(user.ID)
+	groupID := d.cache.GuildIDToGroupID(i.GuildID)
 
 	switch commandName {
 	case "whoami", "link-headset":
@@ -68,38 +67,56 @@ func (d *DiscordAppBot) handleInteractionCreate(logger runtime.Logger, s *discor
 			}
 		}
 
-		groupID := d.cache.GuildIDToGroupID(i.GuildID)
 		// Do some profile checks and cleanups
 		// The user must be in a guild for the empty groupID to be valid
 		d.cache.Queue(userID, groupID)
 		d.cache.Queue(userID, "")
 	default:
 		if userID == "" {
-			return simpleInteractionResponse(s, i, "a headsets must be linked to this Discord account to use slash commands")
+			return simpleInteractionResponse(s, i, "a headset must be linked to this Discord account to use slash commands")
 		}
 	}
 
+	if groupID == "" {
+		return simpleInteractionResponse(s, i, "This command can only be used in a guild.")
+	}
+
+	// Require guild moderator
+	membership, err := GetGuildGroupMembership(ctx, d.nk, userID, groupID)
+	if err != nil {
+		return fmt.Errorf("failed to get guild group membership: %w", err)
+	}
+
+	md, err := GetGuildGroupMetadata(ctx, d.db, groupID)
+	if err != nil {
+		return fmt.Errorf("failed to get guild group metadata: %w", err)
+	}
 	// Global security check
 	switch commandName {
-	case "allocate", "create":
+	case "create":
 
-		groupID := d.cache.GuildIDToGroupID(i.GuildID)
-		if groupID == "" {
-			return simpleInteractionResponse(s, i, "This command can only be used in a guild.")
+		if md.DisableCreateCommand {
+			return simpleInteractionResponse(s, i, "This guild does not allow public allocation.")
+		}
+
+	case "allocate":
+
+		if !membership.isAllocator {
+			return simpleInteractionResponse(s, i, "You must be a guild allocator to use this command.")
 		}
 
 	case "trigger-cv", "kick-player":
 
-		if isGlobalModerator, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalModerators); err != nil {
-			return errors.New("failed to check global moderator status")
-		} else if !isGlobalModerator {
-			return simpleInteractionResponse(s, i, "You must be a global moderator to use this command.")
+		if md.AuditChannelID != "" {
+			if err := d.LogInteractionToChannel(i, md.AuditChannelID); err != nil {
+				logger.Warn("Failed to log interaction to channel")
+			}
 		}
-	}
 
-	groupID := d.cache.GuildIDToGroupID(i.GuildID)
-	if groupID == "" {
-		return simpleInteractionResponse(s, i, "This command can only be used in a guild.")
+		if !membership.isModerator {
+			return simpleInteractionResponse(s, i, "You must be a guild moderator to use this command.")
+		}
+
 	}
 
 	return commandFn(logger, s, i, user, member, userID, groupID)
@@ -250,7 +267,7 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		return nil, 0, status.Error(codes.PermissionDenied, "user is not a member of the guild")
 	}
 
-	if membership.GuildGroup.Metadata.DisablePublicAllocateCommand {
+	if membership.GuildGroup.Metadata.DisableCreateCommand {
 		return nil, 0, status.Error(codes.PermissionDenied, "guild does not allow public allocation")
 	}
 

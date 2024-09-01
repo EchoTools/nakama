@@ -1630,29 +1630,38 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			target := options[0].UserValue(s)
-			targetUserIDStr, err := GetUserIDByDiscordID(ctx, db, target.ID)
+			targetUserID, err := GetUserIDByDiscordID(ctx, db, target.ID)
 			if err != nil {
 				return errors.New("failed to get user ID")
 			}
-			targetUserID := uuid.FromStringOrNil(targetUserIDStr)
 
-			profile, err := d.profileRegistry.Load(ctx, targetUserID)
+			metadata, err := GetGuildGroupMetadata(ctx, d.db, groupID)
 			if err != nil {
-				return err
+				return errors.New("failed to get guild group metadata")
+			}
+			metadata.CommunityValuesUserIDsAdd(targetUserID)
+
+			if err := SetGuildGroupMetadata(ctx, nk, groupID, metadata); err != nil {
+				return errors.New("failed to set guild group metadata")
 			}
 
-			profile.TriggerCommunityValues()
-
-			if err := d.profileRegistry.SaveAndCache(ctx, targetUserID, profile); err != nil {
-				return err
-			}
-
-			cnt, err := DisconnectUserID(ctx, d.nk, targetUserIDStr)
+			// Check if the player is currently in a lobby for this guild and disconnect them if they are
+			presences, err := d.nk.StreamUserList(StreamModeLobbyGroup, groupID, "", "", true, true)
 			if err != nil {
-				return err
+				return errors.New("failed to get user list")
 			}
 
-			return simpleInteractionResponse(s, i, fmt.Sprintf("Disconnected %d sessions.", cnt))
+			cnt := 0
+			for _, presence := range presences {
+				if presence.GetUserId() == targetUserID {
+					cnt, err = DisconnectUserID(ctx, d.nk, targetUserID)
+					if err != nil {
+						return fmt.Errorf("failed to disconnect user: %w", err)
+					}
+				}
+			}
+
+			return simpleInteractionResponse(s, i, fmt.Sprintf("<@%s> is required to complete *Community Values* when entering the next social lobby. (Disconnected %d sessions)", target.ID, cnt))
 		},
 		"kick-player": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			options := i.ApplicationCommandData().Options
@@ -2009,12 +2018,17 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 		appCommandName := i.ApplicationCommandData().Name
 
 		logger := d.logger.WithFields(map[string]any{
-			"discord_id":       user.ID,
-			"discord_username": user.Username,
-			"app_command":      appCommandName,
-			"guild_id":         i.GuildID,
-			"channel_id":       i.ChannelID,
+			"discord_id":  user.ID,
+			"username":    user.Username,
+			"app_command": appCommandName,
+			"guild_id":    i.GuildID,
+			"channel_id":  i.ChannelID,
+			"user_id":     d.cache.DiscordIDToUserID(user.ID),
+			"group_id":    d.cache.GuildIDToGroupID(i.GuildID),
+			"options":     i.ApplicationCommandData().Options,
 		})
+
+		logger.Info("Handling interaction.")
 
 		switch i.Type {
 		case discordgo.InteractionApplicationCommand:

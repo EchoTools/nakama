@@ -13,16 +13,8 @@ type UpdateClientProfile struct {
 	ClientProfile ClientProfile
 }
 
-func (m *UpdateClientProfile) Token() string {
-	return "SNSUpdateProfile"
-}
-
-func (m *UpdateClientProfile) Symbol() Symbol {
-	return ToSymbol(m.Token())
-}
-
 func (lr *UpdateClientProfile) String() string {
-	return fmt.Sprintf("UpdateProfile(session=%s, evr_id=%s)", lr.Session.String(), lr.EvrId.String())
+	return fmt.Sprintf("%T(session=%s, evr_id=%s)", lr, lr.Session.String(), lr.EvrId.String())
 }
 
 func (m *UpdateClientProfile) Stream(s *EasyStream) error {

@@ -159,8 +159,13 @@ func (c *DiscordCache) Start() {
 // Queue a user for caching/updating.
 func (c *DiscordCache) Queue(userID string, groupID string) {
 	queueEntry := QueueEntry{userID, groupID}
+	every := time.Second * 60
 
-	limiter, _ := c.queueLimiters.LoadOrStore(queueEntry, rate.NewLimiter(rate.Every(time.Second*10), 1))
+	if groupID == "" {
+		every = every * 10
+	}
+
+	limiter, _ := c.queueLimiters.LoadOrStore(queueEntry, rate.NewLimiter(rate.Every(every), 1))
 	if !limiter.Allow() {
 		c.logger.Debug("Rate limited queue entry", zap.String("user_id", userID), zap.String("group_id", groupID))
 		return
@@ -244,7 +249,7 @@ func (c *DiscordCache) SyncUser(ctx context.Context, userID string) error {
 		return fmt.Errorf("user not in guild group")
 	}
 
-	// Check if the user is missing nay groups for any guilds.
+	// Check if the user is missing group memberships for any guilds.
 	currentGuildIDs := make(map[string]struct{}, len(memberships))
 	for _, membership := range memberships {
 		currentGuildIDs[membership.GuildGroup.GuildID()] = struct{}{}
