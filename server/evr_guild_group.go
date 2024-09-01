@@ -122,16 +122,21 @@ func (g GuildGroupMemberships) IsMember(groupID string) bool {
 }
 
 type GroupMetadata struct {
-	GuildID                      string                 `json:"guild_id"`                        // The guild ID
-	RulesText                    string                 `json:"rules_text"`                      // The rules text displayed on the main menu
-	MinimumAccountAgeDays        int                    `json:"minimum_account_age_days"`        // The minimum account age in days to be able to play echo on this guild's sessions
-	MembersOnlyMatchmaking       bool                   `json:"members_only_matchmaking"`        // Restrict matchmaking to members only (when this group is the active one)
-	DisablePublicAllocateCommand bool                   `json:"disable_public_allocate_command"` // Disable the public allocate command
-	Roles                        *GuildGroupRoles       `json:"roles"`                           // The roles text displayed on the main menu
-	RoleCache                    map[string][]string    `json:"role_cache"`                      // The role cache
-	MatchmakingChannelIDs        map[string]string      `json:"matchmaking_channel_ids"`         // The matchmaking channel IDs
-	DebugChannel                 string                 `json:"debug_channel_id"`                // The debug channel
-	Unhandled                    map[string]interface{} `json:"-"`
+	GuildID                string              `json:"guild_id"`                 // The guild ID
+	RulesText              string              `json:"rules_text"`               // The rules text displayed on the main menu
+	MinimumAccountAgeDays  int                 `json:"minimum_account_age_days"` // The minimum account age in days to be able to play echo on this guild's sessions
+	MembersOnlyMatchmaking bool                `json:"members_only_matchmaking"` // Restrict matchmaking to members only (when this group is the active one)
+	DisableCreateCommand   bool                `json:"disable_create_command"`   // Disable the public allocate command
+	Roles                  *GuildGroupRoles    `json:"roles"`                    // The roles text displayed on the main menu
+	RoleCache              map[string][]string `json:"role_cache"`               // The role cache
+	MatchmakingChannelIDs  map[string]string   `json:"matchmaking_channel_ids"`  // The matchmaking channel IDs
+	DebugChannelID         string              `json:"debug_channel_id"`         // The debug channel
+	AuditChannelID         string              `json:"audit_channel_id"`         // The audit channel
+
+	// UserIDs that are required to go to community values when the first join the social lobby
+	CommunityValuesUserIDs []string `json:"community_values_user_ids"`
+
+	Unhandled map[string]interface{} `json:"-"`
 }
 
 func NewGuildGroupMetadata(guildID string) *GroupMetadata {
@@ -195,6 +200,33 @@ func (m *GroupMetadata) IsAccountAgeBypass(userID string) bool {
 func (m *GroupMetadata) IsAccountLinked(userID string) bool {
 	if userIDs, ok := m.RoleCache[m.Roles.AccountLinked]; ok {
 		return slices.Contains(userIDs, userID)
+	}
+	return false
+}
+
+func (m *GroupMetadata) hasCompletedCommunityValues(userID string) bool {
+	return !slices.Contains(m.CommunityValuesUserIDs, userID)
+}
+
+func (m *GroupMetadata) CommunityValuesUserIDsAdd(userID string) {
+	if m.CommunityValuesUserIDs == nil {
+		m.CommunityValuesUserIDs = make([]string, 0)
+	}
+	if slices.Contains(m.CommunityValuesUserIDs, userID) {
+		return
+	}
+	m.CommunityValuesUserIDs = append(m.CommunityValuesUserIDs, userID)
+}
+
+func (m *GroupMetadata) CommunityValuesUserIDsRemove(userID string) bool {
+	if !slices.Contains(m.CommunityValuesUserIDs, userID) {
+		return false
+	}
+	for i, id := range m.CommunityValuesUserIDs {
+		if id == userID {
+			m.CommunityValuesUserIDs = append(m.CommunityValuesUserIDs[:i], m.CommunityValuesUserIDs[i+1:]...)
+			return true
+		}
 	}
 	return false
 }
@@ -303,7 +335,7 @@ func NewGuildGroupMembership(group *api.Group, userID uuid.UUID, state api.UserG
 	return &GuildGroupMembership{
 		GuildGroup:   *gg,
 		isMember:     state <= api.UserGroupList_UserGroup_MEMBER,
-		isModerator:  state <= api.UserGroupList_UserGroup_ADMIN,
+		isModerator:  gg.Metadata.IsModerator(userIDStr),
 		isServerHost: gg.Metadata.IsServerHost(userIDStr),
 		isAllocator:  gg.Metadata.IsAllocator(userIDStr),
 		isSuspended:  gg.Metadata.IsSuspended(userIDStr),

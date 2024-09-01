@@ -16,16 +16,16 @@ type query struct{}
 
 func (query) Join(elems []string, sep string) string {
 	strs := make([]string, len(elems))
-	for _, elem := range elems {
-		strs = append(strs, Query.Escape(elem))
+	for i, elem := range elems {
+		strs[i] = Query.Escape(elem)
 	}
 	return strings.Join(strs, sep)
 }
 
 func (query) JoinUUIDs(elems []uuid.UUID, sep string) string {
 	strs := make([]string, len(elems))
-	for _, elem := range elems {
-		strs = append(strs, Query.Escape(elem))
+	for i, elem := range elems {
+		strs[i] = Query.Escape(elem)
 	}
 	return strings.Join(strs, sep)
 }

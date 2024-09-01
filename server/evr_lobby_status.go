@@ -9,6 +9,10 @@ import (
 	"go.uber.org/zap"
 )
 
+type GuildLobbyLabel struct {
+	GroupID string `json:"group_id"`
+}
+
 type MatchmakingGroupLabel struct {
 	Mode        string `json:"mode"`
 	GroupID     string `json:"group_id"`

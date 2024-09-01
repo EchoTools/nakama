@@ -146,8 +146,23 @@ func LobbyJoinEntrant(logger *zap.Logger, matchRegistry MatchRegistry, tracker T
 		return errors.Join(NewLobbyErrorf(InternalError, "failed to unmarshal match presence"), err)
 	}
 
+	// Leave any other lobby group stream.
+	lobbyGroupStream := PresenceStream{Mode: StreamModeLobbyGroup, Subject: label.GetGroupID()}
+
+	untrackModes := map[uint8]struct{}{
+		StreamModeLobbyGroup: {},
+		StreamModeEntrant:    {},
+	}
+
+	tracker.UntrackLocalByModes(session.ID(), untrackModes, lobbyGroupStream)
+
 	matchIDStr := matchID.String()
+
 	ops := []*TrackerOp{
+		{
+			lobbyGroupStream,
+			PresenceMeta{Format: SessionFormatEVR, Username: e.Username, Status: matchIDStr, Hidden: true},
+		},
 		{
 			PresenceStream{Mode: StreamModeEntrant, Subject: e.EntrantID(matchID), Label: matchID.Node},
 			PresenceMeta{Format: SessionFormatEVR, Username: e.Username, Status: e.String(), Hidden: true},

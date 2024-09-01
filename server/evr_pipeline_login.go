@@ -517,33 +517,81 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 		return session.SendEvr(evr.NewLoggedInUserProfileFailure(request.EvrId, 400, "failed to load game profiles"))
 	}
 	profile.SetEvrID(evrID)
+
+	md, err := GetGuildGroupMetadata(ctx, p.db, profile.GetChannel().String())
+	if err != nil {
+		logger.Warn("Failed to get guild group metadata", zap.Error(err))
+	} else {
+		// Check if the user is required to go through community values
+		if !md.hasCompletedCommunityValues(session.userID.String()) {
+			profile.Client.Social.CommunityValuesVersion = 0
+		}
+	}
+
 	return session.SendEvr(evr.NewLoggedInUserProfileSuccess(evrID, profile.Client, profile.Server))
 }
 
 func (p *EvrPipeline) updateClientProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.UpdateClientProfile)
 	// Ignore the EvrID in the request and use what was authenticated with
-	evrId, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
+	evrID, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
 	if !ok {
 		return fmt.Errorf("evrId not found in context")
 	}
-	// Set the EVR ID from the context
-	request.ClientProfile.EvrID = evrId
 
-	if _, err := p.profileRegistry.UpdateClientProfile(ctx, logger, session, request.ClientProfile); err != nil {
-		code := 400
-		if err := session.SendEvr(evr.NewUpdateProfileFailure(evrId, uint64(code), err.Error())); err != nil {
-			return fmt.Errorf("send UpdateProfileFailure: %w", err)
+	go func() {
+		if err := p.handleClientProfileUpdate(ctx, logger, session, evrID, request.ClientProfile); err != nil {
+			if err := session.SendEvr(evr.NewUpdateProfileFailure(evrID, uint64(400), err.Error())); err != nil {
+				logger.Error("Failed to send UpdateProfileFailure", zap.Error(err))
+			}
 		}
-		return fmt.Errorf("UpdateProfile: %w", err)
-	}
+	}()
 
 	// Send the profile update to the client
 	if err := session.SendEvr(
-		evr.NewSNSUpdateProfileSuccess(&evrId),
+		evr.NewSNSUpdateProfileSuccess(&evrID),
 		evr.NewSTcpConnectionUnrequireEvent(),
 	); err != nil {
 		logger.Warn("Failed to send UpdateProfileSuccess", zap.Error(err))
+	}
+
+	return nil
+}
+
+func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap.Logger, session *sessionWS, evrID evr.EvrId, update evr.ClientProfile) error {
+	// Set the EVR ID from the context
+	update.EvrID = evrID
+
+	memberships, err := GetGuildGroupMemberships(ctx, p.runtimeModule, session.userID.String(), nil)
+	if err != nil {
+		return fmt.Errorf("failed to get guild groups: %w", err)
+	}
+	if len(memberships) == 0 {
+		return fmt.Errorf("user is not in any guild groups")
+	}
+	userID := session.userID.String()
+	for _, m := range memberships {
+		md := m.GuildGroup.Metadata
+		if !md.hasCompletedCommunityValues(userID) {
+			groupID := m.GuildGroup.ID()
+
+			hasCompleted := update.Social.CommunityValuesVersion != 0
+
+			if hasCompleted {
+
+				md.CommunityValuesUserIDsRemove(session.userID.String())
+				if err := SetGuildGroupMetadata(ctx, p.runtimeModule, groupID.String(), md); err != nil {
+					return fmt.Errorf("failed to set guild group metadata: %w", err)
+				}
+
+				discordID := p.discordCache.UserIDToDiscordID(session.userID.String())
+				p.appBot.LogMessageToChannel(fmt.Sprintf("User <@%s> has accepted the community values.", discordID), md.AuditChannelID)
+			}
+		}
+	}
+
+	if _, err := p.profileRegistry.UpdateClientProfile(ctx, logger, session, update); err != nil {
+		return fmt.Errorf("UpdateProfile: %w", err)
 	}
 
 	return nil
@@ -557,6 +605,11 @@ func (p *EvrPipeline) remoteLogSetv3(ctx context.Context, logger *zap.Logger, se
 			logger.Error("Failed to process remote log set", zap.Error(err))
 		}
 	}()
+
+	if err := session.SendEvr(evr.NewSTcpConnectionUnrequireEvent()); err != nil {
+		return fmt.Errorf("failed to send STcpConnectionUnrequireEvent: %w", err)
+	}
+
 	return nil
 }
 
