@@ -63,8 +63,6 @@ func (b *LobbyBuilder) handleMatchedEntries(entries [][]*MatchmakerEntry) {
 		<-time.After(100 * time.Millisecond)
 	}
 
-	b.Lock()
-	defer b.Unlock()
 	for _, entrants := range entries {
 		if err := b.buildMatch(b.logger, entrants); err != nil {
 			logger.Error("Failed to build match", zap.Error(err))

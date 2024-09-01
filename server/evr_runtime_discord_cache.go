@@ -129,19 +129,19 @@ func (c *DiscordCache) Start() {
 
 	dg.AddHandler(func(s *discordgo.Session, m *discordgo.GuildDelete) {
 		if err := c.handleGuildDelete(logger, s, m); err != nil {
-			logger.Error("Error handling guild delete", zap.Error(err))
+			logger.Error("Error handling guild delete", zap.Any("guildDelete", m), zap.Error(err))
 		}
 	})
 
 	dg.AddHandler(func(s *discordgo.Session, m *discordgo.GuildMemberAdd) {
 		if err := c.handleMemberAdd(logger, s, m); err != nil {
-			logger.Error("Error handling member add", zap.Error(err))
+			logger.Error("Error handling member add", zap.Any("guildMemberAdd", m), zap.Error(err))
 		}
 	})
 
 	dg.AddHandler(func(s *discordgo.Session, m *discordgo.GuildMemberUpdate) {
 		if err := c.handleMemberUpdate(logger, s, m); err != nil {
-			logger.Error("Error handling member update", zap.Error(err))
+			logger.Error("Error handling member update", zap.Any("guildMemberUpdate", m), zap.Error(err))
 		}
 	})
 
@@ -150,7 +150,7 @@ func (c *DiscordCache) Start() {
 		defer cancel()
 		logger.Info("Member Remove", zap.Any("member", m.Member.User.ID))
 		if err := c.GuildGroupMemberRemove(ctx, m.GuildID, m.Member.User.ID); err != nil {
-			logger.Warn("Error removing guild group member", zap.Error(err))
+			logger.Warn("Error removing guild group member", zap.Any("guildMemberRemove", m), zap.Error(err))
 		}
 	})
 	c.logger.Info("Starting Discord cache")
