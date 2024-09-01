@@ -606,10 +606,6 @@ func (p *EvrPipeline) remoteLogSetv3(ctx context.Context, logger *zap.Logger, se
 		}
 	}()
 
-	if err := session.SendEvr(evr.NewSTcpConnectionUnrequireEvent()); err != nil {
-		return fmt.Errorf("failed to send STcpConnectionUnrequireEvent: %w", err)
-	}
-
 	return nil
 }
 
