@@ -817,6 +817,7 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 	// Verify the player is a member of this match
 	label, err := MatchLabelByID(ctx, p.runtimeModule, matchID)
 	if err != nil || label == nil {
+		logger.Warn("Failed to get match label", zap.Error(err), zap.String("mid", matchID.String()))
 		return fmt.Errorf("failed to get match label: %w", err)
 	}
 

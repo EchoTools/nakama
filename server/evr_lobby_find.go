@@ -256,10 +256,11 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 			if err != nil {
 				return errors.Join(NewLobbyError(InternalError, "failed to create backfill query"), err)
 			}
-
-			logger.Debug("Searching for unfilled lobbies.", zap.String("query", query))
+			logger := logger.With(zap.String("query", query))
+			logger.Debug("Searching for unfilled lobbies.")
 			labels, err := p.GetBackfillCandidates(ctx, logger, session.userID, params, query)
 			if err != nil {
+				logger.Error("Failed to get backfill candidates", zap.Error(err))
 				return errors.Join(NewLobbyError(InternalError, "failed to get backfill candidates"), err)
 			}
 			sessionIDs := []uuid.UUID{session.id}
