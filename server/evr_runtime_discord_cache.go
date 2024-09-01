@@ -342,16 +342,30 @@ func (c *DiscordCache) SyncGuildGroupMember(ctx context.Context, userID, groupID
 		return fmt.Errorf("error getting account metadata: %w", err)
 	}
 
-	prevDisplayName := accountMetadata.GetDisplayName(membership.GuildGroup.ID().String())
-	curDisplayName := sanitizeDisplayName(member.DisplayName())
-	if prevDisplayName != "" && curDisplayName != "" && prevDisplayName != curDisplayName {
+	displayName := sanitizeDisplayName(member.DisplayName())
+	if displayName == "" {
+		displayName = sanitizeDisplayName(member.User.GlobalName)
+	}
+	if displayName == "" {
+		displayName = sanitizeDisplayName(member.User.Username)
+	}
 
-		if displayName, err := c.checkDisplayName(ctx, c.nk, accountMetadata.ID(), curDisplayName); err == nil {
+	prevDisplayName := accountMetadata.GetDisplayName(membership.GuildGroup.ID().String())
+
+	if prevDisplayName != displayName {
+		logger = logger.With(zap.String("display_name", displayName), zap.String("prev_display_name", prevDisplayName))
+		displayName, err := c.checkDisplayName(ctx, c.nk, accountMetadata.ID(), displayName)
+		if err != nil {
+			logger.Warn("Error checking display name", zap.Error(err))
+		} else {
 			if err := c.recordDisplayName(ctx, c.nk, membership.GuildGroup.ID().String(), accountMetadata.ID(), displayName); err != nil {
 				return fmt.Errorf("error setting display name: %w", err)
 			}
-			groupID := c.GuildIDToGroupID(member.GuildID)
 			accountMetadata.SetGroupDisplayName(groupID, displayName)
+
+			if err := c.nk.AccountUpdateId(ctx, userID, member.User.Username, accountMetadata.MarshalMap(), accountMetadata.GetActiveGroupDisplayName(), "", "", "", ""); err != nil {
+				return fmt.Errorf("failed to update account: %w", err)
+			}
 		}
 	}
 
