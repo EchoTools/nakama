@@ -55,13 +55,6 @@ func (b *LobbyBuilder) handleMatchedEntries(entries [][]*MatchmakerEntry) {
 	// build matches one at a time.
 	logger := b.logger.With(zap.Any("entries", entries))
 	logger.Debug("Handling matched entries")
-	for {
-		if b.TryLock() {
-			break
-		}
-		logger.Debug("Failed to acquire lock, retrying")
-		<-time.After(100 * time.Millisecond)
-	}
 
 	for _, entrants := range entries {
 		if err := b.buildMatch(b.logger, entrants); err != nil {
