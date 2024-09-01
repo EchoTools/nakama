@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/gofrs/uuid/v5"
@@ -20,8 +21,14 @@ func (p *EvrPipeline) lobbyFindSpectate(ctx context.Context, logger *zap.Logger,
 	limit := 100
 	minSize := 1
 	maxSize := MatchLobbyMaxSize - 1
-	query := fmt.Sprintf("+label.open:T +label.lobby_type:public +label.mode:%s +label.size:>=%d +label.size:<=%d", params.Mode.Token(), minSize, maxSize)
-	// creeate a delay timer
+	qparts := []string{
+		"+label.open:T",
+		"+label.lobby_type:public",
+		"+label.mode:%s",
+		fmt.Sprintf("+label.size:>=%d +label.size:<=%d", minSize, maxSize),
+	}
+	query := strings.Join(qparts, " ")
+	// create a delay timer
 	listIntervalDelay := time.NewTimer(250 * time.Millisecond)
 	for {
 		select {

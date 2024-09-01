@@ -354,12 +354,12 @@ func lobbyBackfillQuery(p SessionParameters) (string, error) {
 	qparts := []string{
 		"+label.open:T",
 		fmt.Sprintf("+label.mode:%s", p.Mode.String()),
-		fmt.Sprintf("+label.group_id:/(%s)/", p.GroupID.String()),
+		fmt.Sprintf("+label.group_id:/(%s)/", Query.Escape(p.GroupID.String())),
 		p.BackfillQueryAddon,
 	}
 
 	if !p.CurrentMatchID.IsNil() {
-		qparts = append(qparts, fmt.Sprintf("-label.id:%s", p.CurrentMatchID.String()))
+		qparts = append(qparts, fmt.Sprintf("-label.id:/(%s)/", Query.Escape(p.CurrentMatchID.String())))
 	}
 
 	playerLimit := MatchLobbyMaxSize
