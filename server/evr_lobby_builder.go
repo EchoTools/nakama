@@ -50,6 +50,9 @@ func NewLobbyBuilder(logger *zap.Logger, db *sql.DB, sessionRegistry SessionRegi
 }
 
 func (b *LobbyBuilder) handleMatchedEntries(entries [][]*MatchmakerEntry) {
+	// build matches one at a time.
+	b.Lock()
+	defer b.Unlock()
 	for _, entrants := range entries {
 		if err := b.buildMatch(b.logger, entrants); err != nil {
 			b.logger.Error("Failed to build match", zap.Error(err))
@@ -114,6 +117,8 @@ func (b *LobbyBuilder) GroupByTicket(entrants []*MatchmakerEntry) [][]*Matchmake
 }
 
 func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntry) (err error) {
+	// Build matches one at a time.
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -318,8 +323,7 @@ func (b *LobbyBuilder) distributeParties(parties [][]*MatchmakerEntry) [][]*Matc
 }
 func (b *LobbyBuilder) allocateGameServer(ctx context.Context, logger *zap.Logger, groupID uuid.UUID, sorted []string, mode, level evr.Symbol, teamAlignments TeamAlignments, start bool) (MatchID, error) {
 	// Lock the game servers so that they aren't double allocated
-	b.Lock()
-	defer b.Unlock()
+
 	available, err := b.listUnassignedLobbies(ctx, logger, []uuid.UUID{groupID})
 	if err != nil {
 		return MatchID{}, err
