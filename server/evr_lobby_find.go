@@ -156,6 +156,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 						params.CurrentMatchID = leaderMatchID
 						if err := p.lobbyJoin(ctx, logger, session, params); err != nil {
 							if LobbyErrorIs(err, ServerIsFull) || LobbyErrorIs(err, ServerIsLocked) {
+								<-time.After(5 * time.Second)
 								continue
 							}
 							return errors.Join(NewLobbyError(InternalError, "failed to join leader's social lobby"), err)
@@ -233,8 +234,12 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 
 	// Maintain a simple cache of ratings to avoid repeated session lookups.
 	ratingCache := make(map[string]types.Rating)
-	initialDelay := time.After(1 * time.Second)
-	createTicker := time.NewTicker(6 * time.Second)
+
+	initialDelay := 1 * time.Second
+	backfillInterval := 6 * time.Second
+
+	initialTimer := time.NewTimer(initialDelay)
+
 	for {
 		var err error
 		select {
@@ -247,107 +252,118 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 			return NewLobbyError(Timeout, "matchmaking timeout")
 		case err = <-errCh:
 			return err
-		case <-initialDelay:
-		case <-time.After(10 * time.Second):
+		case <-initialTimer.C:
+			logger.Debug("initial timer")
+		case <-time.After(backfillInterval):
+		}
 
-			if params.DisableArenaBackfill && params.Mode == evr.ModeArenaPublic {
+		if params.DisableArenaBackfill && params.Mode == evr.ModeArenaPublic {
+			continue
+		}
+		query, err := lobbyBackfillQuery(params)
+		if err != nil {
+			return errors.Join(NewLobbyError(InternalError, "failed to create backfill query"), err)
+		}
+		logger := logger.With(zap.String("query", query))
+		logger.Debug("Searching for unfilled lobbies.")
+		labels, err := p.GetBackfillCandidates(ctx, logger, session.userID, params, query)
+		if err != nil {
+			logger.Error("Failed to get backfill candidates", zap.Error(err))
+			return errors.Join(NewLobbyError(InternalError, "failed to get backfill candidates"), err)
+		}
+		sessionIDs := []uuid.UUID{session.id}
+		// Prepare all of the presences
+		presences := lobbyGroup.List()
+
+		ratedTeam := make(RatedTeam, 0, len(presences))
+
+		for _, presence := range presences {
+
+			rating, ok := ratingCache[presence.Presence.GetUserId()]
+			if !ok {
+				rating, err := GetRatinByUserID(ctx, p.db, presence.Presence.GetUserId())
+				if err != nil || rating.Mu == 0 || rating.Sigma == 0 || rating.Z == 0 {
+					rating = NewDefaultRating()
+				}
+				ratingCache[presence.Presence.GetUserId()] = rating
+			}
+			ratedTeam = append(ratedTeam, rating)
+
+			if presence.Presence.GetSessionId() == session.id.String() {
 				continue
 			}
-			query, err := lobbyBackfillQuery(params)
-			if err != nil {
-				return errors.Join(NewLobbyError(InternalError, "failed to create backfill query"), err)
-			}
-			logger := logger.With(zap.String("query", query))
-			logger.Debug("Searching for unfilled lobbies.")
-			labels, err := p.GetBackfillCandidates(ctx, logger, session.userID, params, query)
-			if err != nil {
-				logger.Error("Failed to get backfill candidates", zap.Error(err))
-				return errors.Join(NewLobbyError(InternalError, "failed to get backfill candidates"), err)
-			}
-			sessionIDs := []uuid.UUID{session.id}
-			// Prepare all of the presences
-			presences := lobbyGroup.List()
 
-			ratedTeam := make(RatedTeam, 0, len(presences))
+			sessionIDs = append(sessionIDs, uuid.FromStringOrNil(presence.Presence.GetSessionId()))
+		}
+		teamRating := ratedTeam.Rating()
 
-			for _, presence := range presences {
+		entrants, err := EntrantPresencesFromSessionIDs(logger, p.sessionRegistry, params.PartyID, params.GroupID, &teamRating, params.Role, sessionIDs...)
+		if err != nil {
+			return NewLobbyError(InternalError, "failed to create entrant presences")
+		}
 
-				rating, ok := ratingCache[presence.Presence.GetUserId()]
-				if !ok {
-					rating, err := GetRatinByUserID(ctx, p.db, presence.Presence.GetUserId())
-					if err != nil || rating.Mu == 0 || rating.Sigma == 0 || rating.Z == 0 {
-						rating = NewDefaultRating()
-					}
-					ratingCache[presence.Presence.GetUserId()] = rating
-				}
-				ratedTeam = append(ratedTeam, rating)
-
-				if presence.Presence.GetSessionId() == session.id.String() {
-					continue
-				}
-
-				sessionIDs = append(sessionIDs, uuid.FromStringOrNil(presence.Presence.GetSessionId()))
-			}
-			teamRating := ratedTeam.Rating()
-
-			entrants, err := EntrantPresencesFromSessionIDs(logger, p.sessionRegistry, params.PartyID, params.GroupID, &teamRating, params.Role, sessionIDs...)
-			if err != nil {
-				return NewLobbyError(InternalError, "failed to create entrant presences")
-			}
-
-			for _, label := range labels {
-				select {
-				case <-ctx.Done():
-					return nil
-				case <-time.After(500 * time.Millisecond):
-				}
-
-				matchID, _ := NewMatchID(label.ID.UUID, p.node)
-				logger := logger.With(zap.String("mid", matchID.UUID.String()))
-
-				logger.Debug("Joining backfill match.")
-				p.metrics.CustomCounter("lobby_join_backfill", params.MetricsTags(), int64(params.PartySize))
-				if err := p.LobbyJoinEntrants(ctx, logger, matchID, params.Role, entrants); err != nil {
-					if LobbyErrorIs(err, ServerIsFull) {
-						continue
-					}
-					logger.Debug("Failed to join match", zap.Error(err))
-					continue
-				}
-
-				logger.Debug("Joined match")
+		for _, label := range labels {
+			select {
+			case <-ctx.Done():
 				return nil
+			case <-time.After(500 * time.Millisecond):
 			}
-		case <-createTicker.C:
-			p.metrics.CustomCounter("lobby_create_social", params.MetricsTags(), 1)
-			// Only create public social lobbies.
-			if params.Mode != evr.ModeSocialPublic || !p.createLobbyMu.TryLock() {
+
+			matchID, _ := NewMatchID(label.ID.UUID, p.node)
+			logger := logger.With(zap.String("mid", matchID.UUID.String()))
+
+			logger.Debug("Joining backfill match.")
+			p.metrics.CustomCounter("lobby_join_backfill", params.MetricsTags(), int64(params.PartySize))
+			if err := p.LobbyJoinEntrants(ctx, logger, matchID, params.Role, entrants); err != nil {
+				if LobbyErrorIs(err, ServerIsFull) {
+					continue
+				}
+				logger.Debug("Failed to join match", zap.Error(err))
 				continue
 			}
 
-			matchID, err := lobbyCreateSocial(ctx, logger, p.db, p.runtimeModule, session, p.matchRegistry, params)
-			if err != nil {
-				p.createLobbyMu.Unlock()
-				return errors.Join(NewLobbyError(InternalError, "failed to create social lobby"), err)
-			}
-
-			presences, err := EntrantPresencesFromSessionIDs(logger, p.sessionRegistry, params.PartyID, params.GroupID, nil, params.Role, session.id)
-			if err != nil {
-				return errors.Join(NewLobbyError(InternalError, "failed to create entrant presences"), err)
-			}
-
-			logger.Debug("Joining newly created social lobby.")
-			p.metrics.CustomCounter("lobby_join_created_social", params.MetricsTags(), 1)
-			if err := p.LobbyJoinEntrants(ctx, logger, matchID, params.Role, presences); err != nil {
-				logger.Debug("Failed to join newly created social lobby.", zap.String("mid", matchID.UUID.String()), zap.Error(err))
-				p.createLobbyMu.Unlock()
-				return errors.Join(NewLobbyError(InternalError, "failed to join social lobby"), err)
-			}
-
-			p.createLobbyMu.Unlock()
+			logger.Debug("Joined match")
 			return nil
 		}
+
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(5 * time.Second):
+		}
+
+		p.metrics.CustomCounter("lobby_create_social", params.MetricsTags(), 1)
+		// Only create public social lobbies.
+		if params.Mode != evr.ModeSocialPublic {
+			continue
+		}
+		if !p.createLobbyMu.TryLock() {
+			<-time.After(5 * time.Second)
+			continue
+		}
+		matchID, err := lobbyCreateSocial(ctx, logger, p.db, p.runtimeModule, session, p.matchRegistry, params)
+		if err != nil {
+			p.createLobbyMu.Unlock()
+			return errors.Join(NewLobbyError(InternalError, "failed to create social lobby"), err)
+		}
+
+		createPresences, err := EntrantPresencesFromSessionIDs(logger, p.sessionRegistry, params.PartyID, params.GroupID, nil, params.Role, session.id)
+		if err != nil {
+			return errors.Join(NewLobbyError(InternalError, "failed to create entrant presences"), err)
+		}
+
+		logger.Debug("Joining newly created social lobby.")
+		p.metrics.CustomCounter("lobby_join_created_social", params.MetricsTags(), 1)
+		if err := p.LobbyJoinEntrants(ctx, logger, matchID, params.Role, createPresences); err != nil {
+			logger.Debug("Failed to join newly created social lobby.", zap.String("mid", matchID.UUID.String()), zap.Error(err))
+			p.createLobbyMu.Unlock()
+			return errors.Join(NewLobbyError(InternalError, "failed to join social lobby"), err)
+		}
+
+		p.createLobbyMu.Unlock()
+		return nil
 	}
+
 }
 
 func lobbyBackfillQuery(p SessionParameters) (string, error) {
