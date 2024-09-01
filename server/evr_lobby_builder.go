@@ -327,7 +327,7 @@ func (b *LobbyBuilder) distributeParties(parties [][]*MatchmakerEntry) [][]*Matc
 func (b *LobbyBuilder) allocateGameServer(ctx context.Context, logger *zap.Logger, groupID uuid.UUID, sorted []string, mode, level evr.Symbol, teamAlignments TeamAlignments, start bool) (MatchID, error) {
 	// Lock the game servers so that they aren't double allocated
 
-	available, err := b.listUnassignedLobbies(ctx, logger, []uuid.UUID{groupID})
+	available, err := b.listUnassignedLobbies(ctx, logger, groupID)
 	if err != nil {
 		return MatchID{}, err
 	}
@@ -374,20 +374,16 @@ func (b *LobbyBuilder) allocateGameServer(ctx context.Context, logger *zap.Logge
 	return matchID, nil
 }
 
-func (b *LobbyBuilder) listUnassignedLobbies(ctx context.Context, logger *zap.Logger, channels []uuid.UUID) ([]*MatchLabel, error) {
+func (b *LobbyBuilder) listUnassignedLobbies(ctx context.Context, logger *zap.Logger, groupID uuid.UUID) ([]*MatchLabel, error) {
 
-	qparts := make([]string, 0, 10)
-
-	// MUST be an unassigned lobby
-	qparts = append(qparts, LobbyType(evr.UnassignedLobby).Query(Must, 0))
-
-	if len(channels) > 0 {
-		// MUST be hosting for this channel
-		qparts = append(qparts, HostedChannels(channels).Query(Must, 0))
+	qparts := []string{
+		"+label.open:T",
+		"+label.lobby_type:unassigned",
+		fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/", Query.Escape(groupID.String())),
 	}
-
-	// TODO FIXME Add version lock and appid
 	query := strings.Join(qparts, " ")
+	// TODO FIXME Add version lock and appid
+
 	logger.Debug("Listing unassigned lobbies", zap.String("query", query))
 	limit := 200
 	minSize, maxSize := 1, 1 // Only the 1game server should be in the match handler
