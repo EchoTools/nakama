@@ -37,6 +37,8 @@ type LobbyBuilder struct {
 }
 
 func NewLobbyBuilder(logger *zap.Logger, db *sql.DB, sessionRegistry SessionRegistry, matchRegistry MatchRegistry, tracker Tracker, metrics Metrics, profileRegistry *ProfileRegistry) *LobbyBuilder {
+	logger = logger.With(zap.String("module", "lobby_builder"))
+
 	return &LobbyBuilder{
 		logger:          logger,
 		db:              db,
@@ -51,11 +53,21 @@ func NewLobbyBuilder(logger *zap.Logger, db *sql.DB, sessionRegistry SessionRegi
 
 func (b *LobbyBuilder) handleMatchedEntries(entries [][]*MatchmakerEntry) {
 	// build matches one at a time.
+	logger := b.logger.With(zap.Any("entries", entries))
+	logger.Debug("Handling matched entries")
+	for {
+		if b.TryLock() {
+			break
+		}
+		logger.Debug("Failed to acquire lock, retrying")
+		<-time.After(100 * time.Millisecond)
+	}
+
 	b.Lock()
 	defer b.Unlock()
 	for _, entrants := range entries {
 		if err := b.buildMatch(b.logger, entrants); err != nil {
-			b.logger.Error("Failed to build match", zap.Error(err))
+			logger.Error("Failed to build match", zap.Error(err))
 			return
 		}
 	}
