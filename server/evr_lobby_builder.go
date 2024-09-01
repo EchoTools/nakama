@@ -440,6 +440,12 @@ func (b *LobbyBuilder) listMatches(ctx context.Context, limit int, minSize, maxS
 func (b *LobbyBuilder) selectNextMap(mode evr.Symbol) evr.Symbol {
 	queue := b.mapQueue[mode]
 
+	if levels, ok := b.mapQueue[mode]; !ok || len(levels) == 0 {
+		return evr.LevelUnspecified
+	} else if len(evr.LevelsByMode[mode]) == 1 {
+		return evr.LevelsByMode[mode][0]
+	}
+
 	if len(queue) <= 1 {
 		// Fill the queue with the available levels and shuffle.
 		queue = append(queue, evr.LevelsByMode[mode]...)
