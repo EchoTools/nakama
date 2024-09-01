@@ -31,7 +31,7 @@ func (p *EvrPipeline) lobbyCreate(ctx context.Context, logger *zap.Logger, sessi
 	logger.Debug("Matchmaking query", zap.String("query", query))
 	labels, err := lobbyListGameServers(ctx, logger, db, nk, session, query)
 	if err != nil {
-		logger.Warn("Failed to list game servers", zap.Error(err))
+		logger.Warn("Failed to list game servers", zap.Any("query", query), zap.Error(err))
 		return MatchID{}, err
 	}
 
