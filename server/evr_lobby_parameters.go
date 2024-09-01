@@ -52,6 +52,22 @@ func (s SessionParameters) MetricsTags() map[string]string {
 }
 
 func NewLobbyParametersFromRequest(ctx context.Context, r evr.LobbySessionRequest, globalSettings *MatchmakingSettings, userSettings *MatchmakingSettings, profile *GameProfileData, latencyHistory LatencyHistory, friends []*api.Friend) SessionParameters {
+	if userSettings == nil {
+		userSettings = &MatchmakingSettings{}
+	}
+
+	if globalSettings == nil {
+		globalSettings = &MatchmakingSettings{}
+	}
+
+	var lobbyGroupID string
+	if userSettings != nil {
+		lobbyGroupID = userSettings.LobbyGroupID
+	}
+	if lobbyGroupID == "" {
+		lobbyGroupID = uuid.Must(uuid.NewV4()).String()
+	}
+
 	node := ctx.Value(ctxNodeKey{}).(string)
 	requiredFeatures, ok := ctx.Value(ctxRequiredFeaturesKey{}).([]string)
 	if !ok {
@@ -82,10 +98,6 @@ func NewLobbyParametersFromRequest(ctx context.Context, r evr.LobbySessionReques
 	if r.GetCurrentLobbyID() != uuid.Nil {
 		currentMatchID = MatchID{UUID: r.GetCurrentLobbyID(), Node: node}
 	}
-	lobbyGroupID := userSettings.LobbyGroupID
-	if lobbyGroupID == "" {
-		lobbyGroupID = uuid.Must(uuid.NewV4()).String()
-	}
 
 	userID, ok := ctx.Value(ctxUserIDKey{}).(uuid.UUID)
 	if !ok {
@@ -99,6 +111,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, r evr.LobbySessionReques
 	if userSettings == nil {
 		userSettings = &MatchmakingSettings{}
 	}
+
 	// Add blocked players who are online to the Matchmaking Query Addon
 	stringProperties := make(map[string]string)
 
