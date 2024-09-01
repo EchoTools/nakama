@@ -33,6 +33,7 @@ type LobbyBuilder struct {
 	tracker         Tracker
 	profileRegistry *ProfileRegistry
 	metrics         Metrics
+	mapQueue        map[evr.Symbol][]evr.Symbol // map[mode][]level
 }
 
 func NewLobbyBuilder(logger *zap.Logger, db *sql.DB, sessionRegistry SessionRegistry, matchRegistry MatchRegistry, tracker Tracker, metrics Metrics, profileRegistry *ProfileRegistry) *LobbyBuilder {
@@ -44,6 +45,7 @@ func NewLobbyBuilder(logger *zap.Logger, db *sql.DB, sessionRegistry SessionRegi
 		tracker:         tracker,
 		metrics:         metrics,
 		profileRegistry: profileRegistry,
+		mapQueue:        make(map[evr.Symbol][]evr.Symbol),
 	}
 }
 
@@ -157,8 +159,8 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 	gameServers := b.SortGameServerIPs(entrants)
 
 	mode := evr.ToSymbol(entrants[0].StringProperties["mode"])
-	// Pick a random level
-	level := evr.RandomLevelByMode(mode)
+
+	level := b.selectNextMap(mode)
 	start := true
 	timeout := time.After(60 * time.Second)
 	var matchID MatchID
@@ -417,4 +419,31 @@ func (b *LobbyBuilder) listMatches(ctx context.Context, limit int, minSize, maxS
 
 	matches, _, err := b.matchRegistry.ListMatches(ctx, limit, authoritativeWrapper, labelWrapper, minSizeWrapper, maxSizeWrapper, queryWrapper, nil)
 	return matches, err
+}
+
+func (b *LobbyBuilder) selectNextMap(mode evr.Symbol) evr.Symbol {
+	queue := b.mapQueue[mode]
+
+	if len(queue) <= 1 {
+		// Fill the queue with the available levels and shuffle.
+		queue = append(queue, evr.LevelsByMode[mode]...)
+
+		rand.Shuffle(len(queue), func(i, j int) {
+			// leave the first (next) level in place
+			if i == 0 || j == 0 {
+				return
+			}
+			queue[i], queue[j] = queue[j], queue[i]
+		})
+
+		// If the first two levels are the same, move the first level to the end of the queue.
+		if queue[0] == queue[1] {
+			queue = append(queue[1:], queue[0])
+		}
+	}
+
+	// Pop the first level from the queue
+	b.mapQueue[mode] = queue[1:]
+
+	return queue[0]
 }
