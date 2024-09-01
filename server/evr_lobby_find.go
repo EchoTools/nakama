@@ -233,7 +233,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 
 	// Maintain a simple cache of ratings to avoid repeated session lookups.
 	ratingCache := make(map[string]types.Rating)
-
+	initialDelay := time.After(1 * time.Second)
 	createTicker := time.NewTicker(6 * time.Second)
 	for {
 		var err error
@@ -247,7 +247,8 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 			return NewLobbyError(Timeout, "matchmaking timeout")
 		case err = <-errCh:
 			return err
-		case <-time.After(5 * time.Second):
+		case <-initialDelay:
+		case <-time.After(10 * time.Second):
 
 			if params.DisableArenaBackfill && params.Mode == evr.ModeArenaPublic {
 				continue
@@ -298,7 +299,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 				select {
 				case <-ctx.Done():
 					return nil
-				case <-time.After(150 * time.Millisecond):
+				case <-time.After(500 * time.Millisecond):
 				}
 
 				matchID, _ := NewMatchID(label.ID.UUID, p.node)
