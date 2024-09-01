@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -61,7 +60,7 @@ func (d *DiscordAppBot) handleInteractionCreate(logger runtime.Logger, s *discor
 	case "whoami", "link-headset":
 
 		// Authenticate/create an account.
-		userID := d.cache.DiscordIDToUserID(user.ID)
+		userID = d.cache.DiscordIDToUserID(user.ID)
 		if userID == "" {
 			userID, _, _, err = d.nk.AuthenticateCustom(ctx, user.ID, user.Username, true)
 			if err != nil {
