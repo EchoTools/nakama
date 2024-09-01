@@ -166,7 +166,7 @@ func lobbyMatchmakeQuery(ctx context.Context, logger *zap.Logger, db *sql.DB, se
 	qparts := []string{
 		"+properties.mode:" + params.Mode.String(),
 		"+properties.version_lock:" + params.VersionLock.String(),
-		"+properties.group_id:" + params.GroupID.String(),
+		fmt.Sprintf("+properties.group_id:/(%s)/", params.GroupID.String()),
 		params.MatchmakingQueryAddon,
 	}
 
