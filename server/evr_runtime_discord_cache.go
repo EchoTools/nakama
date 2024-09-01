@@ -312,6 +312,7 @@ func (c *DiscordCache) SyncGuildGroupMember(ctx context.Context, userID, groupID
 	}
 	discordID := c.UserIDToDiscordID(userID)
 	guildID := c.GroupIDToGuildID(groupID)
+	logger := c.logger.With(zap.String("uid", userID), zap.String("discord_id", discordID), zap.String("group_id", groupID), zap.String("guild_id", guildID))
 	member, _, err := c.GuildMember(guildID, discordID)
 	if err != nil {
 		// Remove the user from the guild group.
