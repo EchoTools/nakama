@@ -49,7 +49,7 @@ func TestEvrId_UUID(t *testing.T) {
 				PlatformCode: tt.fields.PlatformCode,
 				AccountId:    tt.fields.AccountId,
 			}
-			if got := xpi.UUID; !reflect.DeepEqual(got, tt.want) {
+			if got := xpi.UUID(); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("EvrId.UUID = %v, want %v", got, tt.want)
 			}
 		})
