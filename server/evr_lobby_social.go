@@ -30,6 +30,7 @@ func lobbyCreateSocial(ctx context.Context, logger *zap.Logger, db *sql.DB, nk r
 
 	labels, err := lobbyListGameServers(ctx, logger, db, nk, session, query)
 	if err != nil {
+		logger.Warn("Failed to list game servers", zap.Any("query", query), zap.Error(err))
 		return MatchID{}, err
 	}
 
