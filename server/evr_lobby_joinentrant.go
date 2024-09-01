@@ -20,7 +20,9 @@ func (p *EvrPipeline) LobbyJoinEntrants(ctx context.Context, logger *zap.Logger,
 }
 
 func LobbyJoinEntrants(ctx context.Context, logger *zap.Logger, db *sql.DB, matchRegistry MatchRegistry, sessionRegistry SessionRegistry, tracker Tracker, profileRegistry *ProfileRegistry, matchID MatchID, role int, entrants []*EvrMatchPresence) error {
-
+	if len(entrants) == 0 {
+		return NewLobbyError(InternalError, "no entrants provided")
+	}
 	match, _, err := matchRegistry.GetMatch(ctx, matchID.String())
 	if err != nil {
 		return errors.Join(NewLobbyErrorf(InternalError, "failed to get match"), err)
