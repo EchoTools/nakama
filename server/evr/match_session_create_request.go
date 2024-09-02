@@ -179,7 +179,7 @@ func (m *LobbyCreateSessionRequest) GetAppID() Symbol {
 }
 
 func (m *LobbyCreateSessionRequest) GetLevel() Symbol {
-	return ToSymbol(m.SessionSettings.Level)
+	return ToSymbol(m.Level)
 }
 
 func (m *LobbyCreateSessionRequest) GetFeatures() []string {
