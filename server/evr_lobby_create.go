@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
 )
 
@@ -25,10 +26,10 @@ func (p *EvrPipeline) lobbyCreate(ctx context.Context, logger *zap.Logger, sessi
 	}
 	query, err := lobbyCreateQuery(ctx, logger, db, nk, session, params)
 	if err != nil {
-		logger.Warn("Failed to build create matchmaking query", zap.Error(err))
-		return MatchID{}, fmt.Errorf("failed to build matchmaking query: %v", err)
+		logger.Warn("Failed to build create query", zap.Error(err))
+		return MatchID{}, fmt.Errorf("failed to build query: %v", err)
 	}
-	logger.Debug("Matchmaking query", zap.String("query", query))
+	logger.Debug("Create query", zap.String("query", query))
 	labels, err := lobbyListGameServers(ctx, logger, db, nk, session, query)
 	if err != nil {
 		logger.Warn("Failed to list game servers", zap.Any("query", query), zap.Error(err))
@@ -104,17 +105,18 @@ func lobbyListGameServers(ctx context.Context, logger *zap.Logger, db *sql.DB, n
 
 func lobbyCreateQuery(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, session Session, params SessionParameters) (string, error) {
 
+	regions := []string{params.Region.String(), evr.DefaultRegion.String()}
 	qparts := []string{
 		"+label.open:T",
 		"+label.lobby_type:unassigned",
 		fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/", Query.Escape(params.GroupID.String())),
-		fmt.Sprintf("+label.broadcaster.regions:/(%s)/", Query.Escape(params.Region.String())),
+		fmt.Sprintf("+label.broadcaster.regions:/(%s)/", Query.Join(regions, "|")),
 		fmt.Sprintf("+label.broadcaster.version_lock:%s", params.VersionLock),
 	}
 
 	if len(params.RequiredFeatures) > 0 {
 		for _, f := range params.RequiredFeatures {
-			qparts = append(qparts, fmt.Sprintf("+label.broadcaster.features:/(%s)/", f))
+			qparts = append(qparts, fmt.Sprintf("+label.broadcaster.features:/(%s)/", Query.Escape(f)))
 		}
 	}
 
