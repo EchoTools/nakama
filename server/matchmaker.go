@@ -254,12 +254,25 @@ func NewLocalMatchmaker(logger, startupLogger *zap.Logger, config Config, router
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+				DumpMatchmakerData(m)
 				m.Process()
 			}
 		}
 	}()
 
 	return m
+}
+
+func DumpMatchmakerData(m *LocalMatchmaker) {
+	m.Lock()
+	defer m.Unlock()
+
+	m.logger.Info("Matchmaker data",
+		zap.Int("active_indexes", len(m.activeIndexes)),
+		zap.Int("indexes", len(m.indexes)),
+		zap.Int("session_tickets", len(m.sessionTickets)),
+		zap.Int("party_tickets", len(m.partyTickets)),
+	)
 }
 
 func (m *LocalMatchmaker) Pause() {
