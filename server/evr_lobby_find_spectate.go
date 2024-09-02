@@ -11,6 +11,7 @@ import (
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
+	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -24,7 +25,7 @@ func (p *EvrPipeline) lobbyFindSpectate(ctx context.Context, logger *zap.Logger,
 	qparts := []string{
 		"+label.open:T",
 		"+label.lobby_type:public",
-		"+label.mode:%s",
+		fmt.Sprintf("+label.mode:%s", params.Mode.String()),
 		fmt.Sprintf("+label.size:>=%d +label.size:<=%d", minSize, maxSize),
 	}
 	query := strings.Join(qparts, " ")
