@@ -162,7 +162,7 @@ func LobbyJoinEntrant(logger *zap.Logger, matchRegistry MatchRegistry, tracker T
 
 	ops := []*TrackerOp{
 		{
-			lobbyGroupStream,
+			PresenceStream{Mode: StreamModeLobbyGroup, Subject: label.GetGroupID()},
 			PresenceMeta{Format: SessionFormatEVR, Username: e.Username, Status: matchIDStr, Hidden: true},
 		},
 		{
