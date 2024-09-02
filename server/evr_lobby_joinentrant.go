@@ -289,6 +289,24 @@ func (p *EvrPipeline) authorizeGuildGroupSession(ctx context.Context, session Se
 		}
 	}
 
+	if groupMetadata.BlockVPNUsers {
+		isVPN, ok := ctx.Value(ctxIsVPNUserKey{}).(bool)
+		if !ok {
+			return NewLobbyError(InternalError, "failed to get VPN status")
+		}
+		if isVPN {
+
+			if sendAuditMessage {
+
+				if _, err := p.appBot.dg.ChannelMessageSend(groupMetadata.AuditChannelID, fmt.Sprintf("Rejected VPN user <@%s> from %s", discordID, session.ClientIP)); err != nil {
+					p.logger.Warn("Failed to send audit message", zap.String("channel_id", groupMetadata.AuditChannelID), zap.Error(err))
+				}
+			}
+
+			return NewLobbyError(KickedFromLobbyGroup, "this guild does not allow VPN users")
+		}
+	}
+
 	evrID, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
 	if !ok {
 		return NewLobbyError(InternalError, "failed to get evr ID from session context")
