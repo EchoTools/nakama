@@ -33,7 +33,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	defer cancel()
 
 	// Do authorization checks related to the guild.
-	if err := p.authorizeGuildGroupSession(ctx, session.userID.String(), params.GroupID.String()); err != nil {
+	if err := p.authorizeGuildGroupSession(ctx, session, params.GroupID.String()); err != nil {
 		return err
 	}
 
