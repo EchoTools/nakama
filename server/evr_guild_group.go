@@ -64,6 +64,7 @@ type GroupMetadata struct {
 	MatchmakingChannelIDs  map[string]string   `json:"matchmaking_channel_ids"`  // The matchmaking channel IDs
 	DebugChannelID         string              `json:"debug_channel_id"`         // The debug channel
 	AuditChannelID         string              `json:"audit_channel_id"`         // The audit channel
+	BlockVPNUsers          bool                `json:"block_vpn_users"`          // Block VPN users
 
 	// UserIDs that are required to go to community values when the first join the social lobby
 	CommunityValuesUserIDs []string `json:"community_values_user_ids"`

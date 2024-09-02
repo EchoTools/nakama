@@ -126,6 +126,7 @@ type (
 	ctxIsPCVRKey             struct{} // The headset type
 	ctxRatingKey             struct{} // The user rating
 	ctxExternalServerAddrKey struct{} // The external server address (IP:port)
+	ctxIsVPNUserKey          struct{} // The user is using a VPN
 
 	//ctxMatchmakingQueryKey         struct{} // The Matchmaking query from the urlparam
 	//ctxMatchmakingGuildPriorityKey struct{} // The Matchmaking guild priority from the urlparam
@@ -223,6 +224,10 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 	}
 
 	ctx = context.WithValue(ctx, ctxRequiredFeaturesKey{}, requiredFeatures)
+
+	isVPN := evrPipeline.ipqsClient.IsVPN(clientIP)
+
+	ctx = context.WithValue(ctx, ctxIsVPNUserKey{}, isVPN)
 
 	// Add the URL parameters to the context
 	p := make(map[string][]string, 0)
