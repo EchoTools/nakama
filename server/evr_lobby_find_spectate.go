@@ -28,6 +28,10 @@ func (p *EvrPipeline) lobbyFindSpectate(ctx context.Context, logger *zap.Logger,
 		fmt.Sprintf("+label.mode:%s", params.Mode.String()),
 		fmt.Sprintf("+label.size:>=%d +label.size:<=%d", minSize, maxSize),
 	}
+	if params.Level != evr.LevelUnspecified {
+		qparts = append(qparts, fmt.Sprintf("+label.level:%s", params.Level.String()))
+	}
+
 	query := strings.Join(qparts, " ")
 	// create a delay timer
 	listIntervalDelay := time.NewTimer(250 * time.Millisecond)
