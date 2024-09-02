@@ -875,31 +875,29 @@ func GetPlayerStats(ctx context.Context, db *sql.DB, userID string) (*evr.Player
 	return playerStats, nil
 }
 
-func GetPartyGroupMembers(ctx context.Context, db *sql.DB, userID string) (*evr.PlayerStatistics, error) {
+func GetPartyGroupUserIDs(ctx context.Context, db *sql.DB, groupName string) ([]string, error) {
+	if groupName == "" {
+		return nil, status.Error(codes.InvalidArgument, "user ID is required")
+	}
 	query := "SELECT user_id FROM storage WHERE collection = $1 AND key = $2 AND value->>'group_id' = $3"
-	var dbStatsJSON string
-	var found = true
-	err := db.QueryRowContext(ctx, query, userID, MatchmakingConfigStorageCollection, MatchmakingConfigStorageKey).Scan(&dbStatsJSON)
+
+	var dbUserID string
+
+	rows, err := db.QueryContext(ctx, query, MatchmakingStorageCollection, MatchmakingConfigStorageKey, groupName)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			found = false
-		} else {
-			return nil, status.Error(codes.Internal, "error finding user account")
+		return nil, status.Error(codes.Internal, "An error occurred while trying to list group IDs.")
+	}
+
+	userIDs := make([]string, 0, 10)
+
+	for rows.Next() {
+		if err := rows.Scan(&dbUserID); err != nil {
+			return nil, err
 		}
+		userIDs = append(userIDs, dbUserID)
 	}
-	if !found {
-		return nil, status.Error(codes.NotFound, "user account not found")
-	}
-	if dbStatsJSON == "" {
-		return nil, nil
-	}
-
-	playerStats := &evr.PlayerStatistics{}
-	if err := json.Unmarshal([]byte(dbStatsJSON), playerStats); err != nil {
-		return nil, status.Error(codes.Internal, "error unmarshalling player statistics")
-	}
-
-	return playerStats, nil
+	_ = rows.Close()
+	return userIDs, nil
 }
 
 func RuntimeLoggerToZapLogger(logger runtime.Logger) *zap.Logger {
