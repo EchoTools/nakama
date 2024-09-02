@@ -1916,22 +1916,53 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					return fmt.Errorf("failed to list stream users: %w", err)
 				}
 
-				// Convert the members to discord user IDs
-				discordIDs := make([]string, 0, len(partyMembers))
-				for _, streamUser := range partyMembers {
-					discordID, err := GetDiscordIDByUserID(ctx, d.db, streamUser.GetUserId())
-					if err != nil {
-						return fmt.Errorf("failed to get discord ID: %w", err)
+				activeIDs := make([]string, 0, len(partyMembers))
+				for _, partyMember := range partyMembers {
+					activeIDs = append(activeIDs, d.cache.UserIDToDiscordID(partyMember.GetUserId()))
+				}
+
+				// Get a list of the all the inactive users in the party group
+				userIDs, err := GetPartyGroupUserIDs(ctx, d.db, subject.String())
+				if err != nil {
+					return fmt.Errorf("failed to get party group user IDs: %w", err)
+				}
+
+				// remove the partymembers from the inactive list
+				inactiveIDs := make([]string, 0, len(userIDs))
+
+			OuterLoop:
+				for _, u := range userIDs {
+					for _, partyMember := range partyMembers {
+						if partyMember.GetUserId() == u {
+							continue OuterLoop
+						}
 					}
-					discordIDs = append(discordIDs, fmt.Sprintf("<@%s>", discordID))
+					inactiveIDs = append(inactiveIDs, d.cache.UserIDToDiscordID(u))
 				}
 
 				// Create a list of the members
 				var content string
-				if len(discordIDs) == 0 {
+				if len(activeIDs) == 0 && len(inactiveIDs) == 0 {
 					content = "No members in your party group."
 				} else {
-					content = "Members in your party group:\n" + strings.Join(discordIDs, ", ")
+					b := strings.Builder{}
+					b.WriteString("Members in your party group:\n")
+					for i, discordID := range activeIDs {
+						if i > 0 {
+							b.WriteString(", ")
+						}
+						b.WriteString("<@" + discordID + ">")
+					}
+					if len(inactiveIDs) > 0 {
+						b.WriteString("\n\nInactive members:\n")
+						for i, discordID := range inactiveIDs {
+							if i > 0 {
+								b.WriteString(", ")
+							}
+							b.WriteString("<@" + discordID + ">")
+						}
+					}
+					content = b.String()
 				}
 
 				// Send the message to the user
