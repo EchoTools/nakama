@@ -220,18 +220,30 @@ func LobbyJoinEntrant(logger *zap.Logger, matchRegistry MatchRegistry, tracker T
 	return nil
 }
 
-func (p *EvrPipeline) authorizeGuildGroupSession(ctx context.Context, userID string, groupID string) error {
+func (p *EvrPipeline) authorizeGuildGroupSession(ctx context.Context, session Session, groupID string) error {
+	userID := session.UserID().String()
 
 	membership, err := GetGuildGroupMembership(ctx, p.runtimeModule, userID, groupID)
 	if err != nil {
 		return errors.Join(NewLobbyError(InternalError, "failed to get guild group membership"), err)
 	}
 
+	groupMetadata := membership.GuildGroup.Metadata
+
+	sendAuditMessage := groupMetadata.AuditChannelID != ""
+	discordID := p.discordCache.UserIDToDiscordID(userID)
+
 	if membership.isSuspended {
+
+		if sendAuditMessage {
+			if _, err := p.appBot.dg.ChannelMessageSend(groupMetadata.AuditChannelID, fmt.Sprintf("Rejected suspended user <@%s>.", discordID)); err != nil {
+				p.logger.Warn("Failed to send audit message", zap.String("channel_id", groupMetadata.AuditChannelID), zap.Error(err))
+			}
+		}
+
 		return ErrSuspended
 	}
 
-	groupMetadata := membership.GuildGroup.Metadata
 	if groupMetadata.MinimumAccountAgeDays > 0 && !slices.Contains(groupMetadata.RoleCache[groupMetadata.Roles.AccountAgeBypass], userID) {
 		// Check the account creation date.
 		discordID, err := GetDiscordIDByUserID(ctx, p.db, userID)
@@ -245,15 +257,34 @@ func (p *EvrPipeline) authorizeGuildGroupSession(ctx context.Context, userID str
 		}
 
 		if t.After(time.Now().AddDate(0, 0, -groupMetadata.MinimumAccountAgeDays)) {
+
+			if sendAuditMessage {
+
+				accountAge := time.Now().Sub(t).Hours() / 24
+
+				if _, err := p.appBot.dg.ChannelMessageSend(groupMetadata.AuditChannelID, fmt.Sprintf("Rejected user <@%s> because of account age (%d days).", discordID, accountAge)); err != nil {
+					p.logger.Warn("Failed to send audit message", zap.String("channel_id", groupMetadata.AuditChannelID), zap.Error(err))
+				}
+			}
+
 			return NewLobbyErrorf(KickedFromLobbyGroup, "account is too young to join this guild")
 		}
 	}
+
 	if groupMetadata.MembersOnlyMatchmaking {
 		memberships, ok := ctx.Value(ctxGuildGroupMembershipsKey{}).(GuildGroupMemberships)
 		if !ok {
 			return NewLobbyError(KickedFromLobbyGroup, "failed to get guild group memberships")
 		}
 		if !memberships.IsMember(groupID) {
+
+			if sendAuditMessage {
+
+				if _, err := p.appBot.dg.ChannelMessageSend(groupMetadata.AuditChannelID, fmt.Sprintf("Rejected non-member <@%s>", discordID)); err != nil {
+					p.logger.Warn("Failed to send audit message", zap.String("channel_id", groupMetadata.AuditChannelID), zap.Error(err))
+				}
+			}
+
 			return NewLobbyError(KickedFromLobbyGroup, "User is not a member of this guild")
 		}
 	}
