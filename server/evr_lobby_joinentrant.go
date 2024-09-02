@@ -111,8 +111,16 @@ func LobbyJoinEntrants(ctx context.Context, logger *zap.Logger, db *sql.DB, matc
 			}
 		}
 	}
-
-	logger.Info("Lobby join completed.", zap.Any("presences", presences), zap.Any("success", success), zap.Any("failed", failed), zap.Error(err))
+	logger.Debug("Joined entrants", zap.Any("success", success), zap.Any("failed", failed), zap.Error(err))
+	successUsernames := make([]string, 0, len(success))
+	for _, e := range success {
+		successUsernames = append(successUsernames, e.Username)
+	}
+	failedUsernames := make([]string, 0, len(failed))
+	for _, e := range failed {
+		failedUsernames = append(failedUsernames, e.Username)
+	}
+	logger.Info("Lobby join completed.", zap.Strings("success_usernames", successUsernames), zap.Strings("failed_usernames", failedUsernames), zap.Error(err))
 	return nil
 }
 

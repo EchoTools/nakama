@@ -121,6 +121,7 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 			if _, _, err := p.matchRegistry.GetMatch(ctx, matchID.String()); err == nil {
 				LeavePartyStream(session)
 				p.metrics.CustomCounter("lobby_join_next_match", params.MetricsTags(), 1)
+				logger.Info("Joining next match", zap.String("mid", matchID.String()))
 				return p.lobbyJoin(ctx, logger, session, params)
 			}
 		} else if params.Role == evr.TeamSpectator {
@@ -133,12 +134,14 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 				// Spectators don't matchmake, and they don't have a delay for backfill.
 				// Spectators also don't time out.
 				p.metrics.CustomCounter("lobby_find_spectate", params.MetricsTags(), 1)
+				logger.Info("Finding spectate match")
 				return p.lobbyFindSpectate(ctx, logger, session, params)
 			}
 		} else {
 			// Otherwise, find a match via the matchmaker or backfill.
 			// This is also responsible for creation of social lobbies.
 			p.metrics.CustomCounter("lobby_find_match", params.MetricsTags(), int64(params.PartySize))
+			logger.Info("Finding match", zap.String("mode", params.Mode.String()), zap.Any("party_size", params.PartySize))
 			err = p.lobbyFind(ctx, logger, session, params)
 			if err != nil {
 				// On error, leave any party the user might be a member of.
@@ -150,6 +153,7 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 	case *evr.LobbyJoinSessionRequest:
 		LeavePartyStream(session)
 		p.metrics.CustomCounter("lobby_create_session", params.MetricsTags(), 1)
+		logger.Info("Joining session", zap.String("mid", params.CurrentMatchID.String()))
 		return p.lobbyJoin(ctx, logger, session, params)
 
 	case *evr.LobbyCreateSessionRequest:
@@ -163,6 +167,7 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 
 		LeavePartyStream(session)
 		p.metrics.CustomCounter("lobby_create_session", params.MetricsTags(), 1)
+		logger.Info("Creating session", zap.String("mode", params.Mode.String()), zap.String("level", params.Level.String()), zap.String("region", params.Region.String()))
 		matchID, err = p.lobbyCreate(ctx, logger, session, params)
 		if err == nil {
 			params.CurrentMatchID = matchID
