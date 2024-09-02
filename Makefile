@@ -23,12 +23,12 @@ dev: $(SRC_FILES)
 	docker build -t echotools/nakama:dev . -f build/Dockerfile.local
 
 build: $(SRC_FILES)
-	docker build -t echotools/nakama:latest . -f build/Dockerfile.local
-	docker tag echotools/nakama:latest echotools/nakama:$(TAG)
+	docker build -t echotools/nakama:$(TAG) . -f build/Dockerfile.local
+	docker tag echotools/nakama:$(TAG) echotools/nakama:latest
 
 push: build
+	docker push echotools/nakama:$(TAG)
 	docker push echotools/nakama:latest
-	docker push echotools/nakama:$(GIT_DESCRIBE)
 
 
 release: $(SRC_FILES)
