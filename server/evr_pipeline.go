@@ -138,28 +138,6 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		}
 	}
 
-	// Migrate all groups to the new format
-	cursor := ""
-	for {
-		var groups []*api.Group
-		var err error
-
-		groups, cursor, err = nk.GroupsList(ctx, "", "guild", nil, nil, 100, cursor)
-		if err != nil {
-			logger.Error("Failed to list groups", zap.Error(err))
-			break
-		}
-		for _, g := range groups {
-			err := MigrateGroupRoles(nk, g)
-			if err != nil {
-				logger.Error("Failed to migrate group roles", zap.Error(err))
-			}
-		}
-		if cursor == "" {
-			break
-		}
-	}
-
 	localIP, err := DetermineLocalIPAddress()
 	if err != nil {
 		logger.Fatal("Failed to determine local IP address", zap.Error(err))
