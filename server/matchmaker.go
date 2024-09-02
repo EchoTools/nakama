@@ -27,6 +27,7 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 type MatchmakerPresence struct {
@@ -267,12 +268,14 @@ func DumpMatchmakerData(m *LocalMatchmaker) {
 	m.Lock()
 	defer m.Unlock()
 
-	m.logger.Info("Matchmaker data",
-		zap.Int("active_indexes", len(m.activeIndexes)),
-		zap.Int("indexes", len(m.indexes)),
-		zap.Int("session_tickets", len(m.sessionTickets)),
-		zap.Int("party_tickets", len(m.partyTickets)),
-	)
+	if m.logger.Core().Enabled(zapcore.DebugLevel) {
+		m.logger.Debug("Matchmaker data",
+			zap.Int("active_indexes", len(m.activeIndexes)),
+			zap.Int("indexes", len(m.indexes)),
+			zap.Int("session_tickets", len(m.sessionTickets)),
+			zap.Int("party_tickets", len(m.partyTickets)),
+		)
+	}
 }
 
 func (m *LocalMatchmaker) Pause() {
