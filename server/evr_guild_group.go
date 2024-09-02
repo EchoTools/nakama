@@ -1,13 +1,11 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
 	"slices"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
-	"github.com/heroiclabs/nakama-common/runtime"
 )
 
 type ctxGuildGroupMembershipsKey struct{}
@@ -42,72 +40,6 @@ func (r *GuildGroupRoles) Slice() []string {
 	}
 	slices.Sort(roles)
 	return slices.Compact(roles)
-}
-
-func MigrateGroupRoles(nk runtime.NakamaModule, group *api.Group) error {
-	metamap := make(map[string]interface{})
-	if err := json.Unmarshal([]byte(group.Metadata), &metamap); err != nil {
-		return err
-	}
-
-	if metamap["roles"] != nil {
-		return nil
-	}
-
-	metadata := &GroupMetadata{}
-	if err := json.Unmarshal([]byte(group.Metadata), metadata); err != nil {
-		return err
-	}
-
-	memberRole, ok := metamap["member_role"].(string)
-	if !ok {
-		memberRole = ""
-	}
-	moderatorRole, ok := metamap["moderator_role"].(string)
-	if !ok {
-		moderatorRole = ""
-	}
-	serverHostRole, ok := metamap["serverhost_role"].(string)
-	if !ok {
-		serverHostRole = ""
-	}
-	allocatorRole, ok := metamap["allocator_role"].(string)
-	if !ok {
-		allocatorRole = ""
-	}
-	suspendedRole, ok := metamap["suspension_role"].(string)
-	if !ok {
-		suspendedRole = ""
-	}
-	apiAccessRole, ok := metamap["api_access_role"].(string)
-	if !ok {
-		apiAccessRole = ""
-	}
-	accountAgeBypassRole, ok := metamap["minimum_account_age_bypass_role"].(string)
-	if !ok {
-		accountAgeBypassRole = ""
-	}
-	accountLinkedRole, ok := metamap["account_linked_role"].(string)
-	if !ok {
-		accountLinkedRole = ""
-	}
-
-	metadata.Roles = &GuildGroupRoles{
-		Member:           memberRole,
-		Moderator:        moderatorRole,
-		ServerHost:       serverHostRole,
-		Allocator:        allocatorRole,
-		Suspended:        suspendedRole,
-		APIAccess:        apiAccessRole,
-		AccountAgeBypass: accountAgeBypassRole,
-		AccountLinked:    accountLinkedRole,
-	}
-
-	err := nk.GroupUpdate(context.Background(), group.Id, "", group.Name, group.CreatorId, group.LangTag, group.Description, group.AvatarUrl, false, metadata.MarshalMap(), int(group.MaxCount))
-	if err != nil {
-		return err
-	}
-	return nil
 }
 
 type GuildGroupMemberships []GuildGroupMembership
