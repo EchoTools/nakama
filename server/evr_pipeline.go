@@ -12,7 +12,6 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/gofrs/uuid/v5"
-	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
@@ -65,6 +64,7 @@ type EvrPipeline struct {
 	leaderboardRegistry          *LeaderboardRegistry
 	sbmm                         *SkillBasedMatchmaker
 	userRemoteLogJournalRegistry *UserLogJouralRegistry
+	ipqsClient                   *IPQSClient
 
 	createLobbyMu                    sync.Mutex
 	broadcasterRegistrationBySession *MapOf[string, *MatchBroadcaster] // sessionID -> MatchBroadcaster
@@ -111,6 +111,12 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	lobbyBuilder := NewLobbyBuilder(logger, db, sessionRegistry, matchRegistry, tracker, metrics, profileRegistry)
 	matchmaker.OnMatchedEntries(lobbyBuilder.handleMatchedEntries)
 	userRemoteLogJournalRegistry := NewUserRemoteLogJournalRegistry(sessionRegistry)
+
+	ipqsClient, err := NewIPQS(logger, db, metrics, storageIndex, vars["IPQS_API_KEY"])
+	if err != nil {
+		logger.Fatal("Failed to create IPQS client", zap.Error(err))
+	}
+
 	var appBot *DiscordAppBot
 	var discordCache *DiscordCache
 	if disable, ok := vars["DISABLE_DISCORD_BOT"]; ok && disable == "true" {
@@ -198,6 +204,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		sbmm:                             skillBasedMatchmaker,
 		broadcasterRegistrationBySession: &broadcasterRegistrationBySession,
 		userRemoteLogJournalRegistry:     userRemoteLogJournalRegistry,
+		ipqsClient:                       ipqsClient,
 		placeholderEmail:                 config.GetRuntime().Environment["PLACEHOLDER_EMAIL_DOMAIN"],
 		linkDeviceURL:                    config.GetRuntime().Environment["LINK_DEVICE_URL"],
 	}
