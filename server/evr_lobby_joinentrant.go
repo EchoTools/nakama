@@ -143,7 +143,8 @@ func LobbyJoinEntrant(logger *zap.Logger, matchRegistry MatchRegistry, tracker T
 	} else if !allowed {
 		err = NewLobbyErrorf(ServerIsFull, "join attempt failed: %s", reason)
 	} else if !isNew {
-		err = NewLobbyError(ServerIsFull, "join attempt failed: User already in match")
+		logger.Warn("Player is already in the match. ignoring.", zap.String("mid", matchID.UUID.String()), zap.String("uid", e.UserID.String()))
+		return nil
 	}
 
 	if err != nil {
@@ -216,7 +217,7 @@ func LobbyJoinEntrant(logger *zap.Logger, matchRegistry MatchRegistry, tracker T
 		<-time.After(250 * time.Millisecond)
 		errorCh <- SendEVRMessages(session, connectionSettings)
 	}(session, connectionSettings)
-
+	logger.Info("Joined entrant.", zap.String("mid", matchID.UUID.String()), zap.String("uid", e.UserID.String()), zap.String("sid", e.SessionID.String()))
 	return nil
 }
 
