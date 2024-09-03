@@ -8,10 +8,12 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/gofrs/uuid/v5"
+	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
@@ -27,6 +29,8 @@ var GlobalConfig = &struct {
 }{
 	rejectMatchmaking: true,
 }
+
+var unrequireMessage = evr.NewSTcpConnectionUnrequireEvent()
 
 type EvrPipeline struct {
 	sync.RWMutex
@@ -72,8 +76,9 @@ type EvrPipeline struct {
 	placeholderEmail string
 	linkDeviceURL    string
 
-	guildGroups  *MapOf[string, *GuildGroup]
-	messageCache *MapOf[string, evr.Message]
+	cacheMu      sync.Mutex // Writers only
+	guildGroups  *atomic.Value
+	messageCache *atomic.Value // map[string]evr.Message
 }
 
 type ctxDiscordBotTokenKey struct{}
@@ -85,7 +90,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	vars := config.GetRuntime().Environment
 
 	ctx := context.WithValue(context.Background(), ctxDiscordBotTokenKey{}, vars["DISCORD_BOT_TOKEN"])
-	ctx = context.WithValue(ctx, ctxNodeKey{}, config.GetName())
+
 	nk := NewRuntimeGoNakamaModule(logger, db, protojsonMarshaler, config, socialClient, leaderboardCache, leaderboardRankCache, leaderboardScheduler, sessionRegistry, sessionCache, statusRegistry, matchRegistry, tracker, metrics, streamManager, router, storageIndex)
 
 	// TODO Add a symbol cache that gets populated and stored back occasionally
@@ -120,12 +125,18 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		logger.Fatal("Failed to create IPQS client", zap.Error(err))
 	}
 
+	guildGroups := &atomic.Value{}
+	guildGroups.Store(make(map[string]*GuildGroup))
+
+	messageCache := &atomic.Value{}
+	messageCache.Store(make(map[string]evr.Message))
+
 	var appBot *DiscordAppBot
 	var discordCache *DiscordCache
 	if disable, ok := vars["DISABLE_DISCORD_BOT"]; ok && disable == "true" {
 		logger.Info("Discord bot is disabled")
 	} else {
-		discordCache = NewDiscordCache(ctx, logger, config, metrics, pipeline, profileRegistry, statusRegistry, nk, db, dg)
+		discordCache = NewDiscordCache(ctx, logger, config, metrics, pipeline, profileRegistry, statusRegistry, nk, db, dg, guildGroups)
 		discordCache.Start()
 
 		appBot, err = NewDiscordAppBot(runtimeLogger, nk, db, metrics, pipeline, config, discordCache, profileRegistry, statusRegistry, dg)
@@ -188,16 +199,17 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		ipqsClient:                       ipqsClient,
 		placeholderEmail:                 config.GetRuntime().Environment["PLACEHOLDER_EMAIL_DOMAIN"],
 		linkDeviceURL:                    config.GetRuntime().Environment["LINK_DEVICE_URL"],
+
+		guildGroups:  guildGroups,
+		messageCache: messageCache,
 	}
 
 	// Reload the guild groups
-	guildGroups, err := evrPipeline.loadGuildGroups()
+	guildGroupItems, err := evrPipeline.loadGuildGroups()
 	if err != nil {
-		logger.Error("Failed to load guild groups", zap.Error(err))
+		logger.Fatal("Failed to load guild groups", zap.Error(err))
 	} else {
-		for _, gg := range guildGroups {
-			evrPipeline.guildGroups.Store(gg.Group.Id, gg)
-		}
+		evrPipeline.guildGroups.Store(guildGroupItems)
 	}
 
 	// Create a timer to periodically clear the backfill queue
@@ -225,24 +237,16 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 				if err != nil {
 					logger.Error("Failed to load guild groups", zap.Error(err))
 				} else {
-					for _, gg := range guildGroups {
-						evrPipeline.guildGroups.Store(gg.Group.Id, gg)
-					}
+					evrPipeline.cacheMu.Lock()
+					evrPipeline.guildGroups.Store(guildGroups)
+					evrPipeline.cacheMu.Unlock()
 				}
-
-				evrPipeline.guildGroups.Range(func(key string, value *GuildGroup) bool {
-					if guildGroups[value.Group.Id] == nil {
-						evrPipeline.guildGroups.Delete(key)
-					}
-					return true
-				})
 
 			case <-messageCacheTicker.C:
 
-				evrPipeline.messageCache.Range(func(key string, value evr.Message) bool {
-					evrPipeline.messageCache.Delete(key)
-					return true
-				})
+				evrPipeline.cacheMu.Lock()
+				evrPipeline.messageCache.Store(make(map[string]evr.Message))
+				evrPipeline.cacheMu.Unlock()
 
 			case <-ticker.C:
 
@@ -295,6 +299,51 @@ func (p *EvrPipeline) loadGuildGroups() (map[string]*GuildGroup, error) {
 	}
 
 	return guildGroups, nil
+}
+
+func (p *EvrPipeline) GuildGroups() map[string]*GuildGroup {
+	return p.guildGroups.Load().(map[string]*GuildGroup)
+}
+
+func (p *EvrPipeline) GuildGroup(guildID string) *GuildGroup {
+	return p.GuildGroups()[guildID]
+}
+
+func (p *EvrPipeline) UpdateGuildGroup(guildGroup *GuildGroup) error {
+	groupID := guildGroup.ID().String()
+	if err := SetGuildGroupMetadata(p.ctx, p.runtimeModule, groupID, guildGroup.Metadata); err != nil {
+		return err
+	}
+
+	guildGroups := p.GuildGroups()
+	newMap := make(map[string]*GuildGroup, len(guildGroups))
+	for k, v := range guildGroups {
+		newMap[k] = v
+	}
+
+	newMap[groupID] = guildGroup
+	p.guildGroups.Store(newMap)
+
+	return nil
+}
+
+func (p *EvrPipeline) CacheMessage(key string, message evr.Message) {
+	p.cacheMu.Lock()
+	defer p.cacheMu.Unlock()
+
+	newCache := make(map[string]evr.Message)
+	for k, v := range p.messageCache.Load().(map[string]evr.Message) {
+		newCache[k] = v
+	}
+	newCache[key] = message
+	p.messageCache.Store(newCache)
+}
+
+func (p *EvrPipeline) GetCachedMessage(key string) evr.Message {
+	p.cacheMu.Lock()
+	defer p.cacheMu.Unlock()
+
+	return p.messageCache.Load().(map[string]evr.Message)[key]
 }
 
 func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, in evr.Message) bool {
@@ -382,18 +431,12 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 			return false
 		}
 		// If the message is an identifying message, validate the session and evr id.
-		if err := session.ValidateSession(idmessage.GetSessionID(), idmessage.GetEvrID()); err != nil {
+		if err := session.ValidateSession(idmessage.GetSessionID()); err != nil {
 			logger.Error("Invalid session", zap.Error(err))
 			// Disconnect the client if the session is invalid.
 			return false
 		}
 	}
-
-	/*
-		if err := p.discordRegistry.ProcessRequest(session.Context(), session, in); err != nil {
-			logger.Warn("Discord Bot logger error", zap.Error(err))
-		}
-	*/
 
 	// If the message requires authentication, check if the session is authenticated.
 	if requireAuthed {
@@ -409,9 +452,11 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 		}
 	}
 
-	evrId, ok := session.Context().Value(ctxEvrIDKey{}).(evr.EvrId)
-	if ok {
-		logger = logger.With(zap.String("uid", session.UserID().String()), zap.String("sid", session.ID().String()), zap.String("uname", session.Username()), zap.String("evrid", evrId.String()))
+	if params, ok := session.Context().Value(ctxSessionParametersKey{}).(*SessionParameters); ok {
+		evrID := params.EvrID()
+		if !evrID.IsNil() {
+			logger = logger.With(zap.String("uid", session.UserID().String()), zap.String("sid", session.ID().String()), zap.String("uname", session.Username()), zap.String("evrid", evrID.String()))
+		}
 	}
 
 	if err := pipelineFn(session.Context(), logger, session, in); err != nil {
@@ -438,13 +483,14 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 		}
 	}
 
-	verbose, ok := session.Context().Value(ctxVerboseKey{}).(bool)
+	params, ok := session.Context().Value(ctxSessionParametersKey{}).(*SessionParameters)
 	if !ok {
-		verbose = false
+		logger.Error("Failed to get lobby parameters")
+		return nil, nil
 	}
 
 	// DM the user on discord
-	if !strings.HasPrefix(session.Username(), "broadcaster:") && verbose {
+	if !strings.HasPrefix(session.Username(), "broadcaster:") && params.RelayOutgoing() {
 		content := ""
 		switch in.Message.(type) {
 		case *rtapi.Envelope_StatusPresenceEvent, *rtapi.Envelope_MatchPresenceEvent, *rtapi.Envelope_StreamPresenceEvent:
@@ -580,32 +626,34 @@ func (p *EvrPipeline) attemptOutOfBandAuthentication(session *sessionWS) error {
 	if session.UserID() != uuid.Nil {
 		return nil
 	}
-	userPassword, ok := ctx.Value(ctxAuthPasswordKey{}).(string)
-	if !ok {
-		return nil
+
+	params := session.Context().Value(ctxSessionParametersKey{}).(*SessionParameters)
+	if params == nil {
+		return fmt.Errorf("session parameters not found")
 	}
 
-	discordId, ok := ctx.Value(ctxAuthDiscordIDKey{}).(string)
-	if !ok {
+	discordID := params.authDiscordID
+	authPassword := params.authPassword
+	if discordID == "" || authPassword == "" {
 		return nil
 	}
 
 	// Get the account for this discordId
-	userId, err := GetUserIDByDiscordID(ctx, p.db, discordId)
+	userId, err := GetUserIDByDiscordID(ctx, p.db, discordID)
 	if err != nil {
-		return fmt.Errorf("out of band for discord ID %s: %v", discordId, err)
+		return fmt.Errorf("out of band for discord ID %s: %v", discordID, err)
 	}
 
 	// The account was found.
-	account, err := GetAccount(ctx, session.logger, session.pipeline.db, session.statusRegistry, uuid.FromStringOrNil(userId))
+	account, err := GetAccount(ctx, session.logger, session.pipeline.db, session.statusRegistry, uuid.FromStringOrNil(discordID))
 	if err != nil {
-		return fmt.Errorf("out of band Auth: %s: %v", discordId, err)
+		return fmt.Errorf("out of band Auth: %s: %v", discordID, err)
 	}
 
 	// Do email authentication
-	userId, username, _, err := AuthenticateEmail(ctx, session.logger, session.pipeline.db, account.Email, userPassword, "", false)
+	userId, username, _, err := AuthenticateEmail(ctx, session.logger, session.pipeline.db, account.Email, authPassword, "", false)
 	if err != nil {
-		return fmt.Errorf("out of band Auth: %s: %v", discordId, err)
+		return fmt.Errorf("out of band Auth: %s: %v", discordID, err)
 	}
 
 	return session.BroadcasterSession(uuid.FromStringOrNil(userId), "broadcaster:"+username, 0)

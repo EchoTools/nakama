@@ -17,17 +17,17 @@ import (
 )
 
 type WhoAmI struct {
-	NakamaID              uuid.UUID              `json:"nakama_id"`
-	Username              string                 `json:"username"`
-	DiscordID             string                 `json:"discord_id"`
-	CreateTime            time.Time              `json:"create_time,omitempty"`
-	DisplayNames          []string               `json:"display_names"`
-	DeviceLinks           []string               `json:"device_links,omitempty"`
-	HasPassword           bool                   `json:"has_password"`
-	EVRIDLogins           map[string]time.Time   `json:"evr_id_logins"`
-	GuildGroupMemberships []GuildGroupMembership `json:"guild_memberships"`
-	VRMLSeasons           []string               `json:"vrml_seasons"`
-	MatchIDs              []string               `json:"match_ids"`
+	NakamaID              uuid.UUID                       `json:"nakama_id"`
+	Username              string                          `json:"username"`
+	DiscordID             string                          `json:"discord_id"`
+	CreateTime            time.Time                       `json:"create_time,omitempty"`
+	DisplayNames          []string                        `json:"display_names"`
+	DeviceLinks           []string                        `json:"device_links,omitempty"`
+	HasPassword           bool                            `json:"has_password"`
+	EVRIDLogins           map[string]time.Time            `json:"evr_id_logins"`
+	GuildGroupMemberships map[string]GuildGroupMembership `json:"guild_memberships"`
+	VRMLSeasons           []string                        `json:"vrml_seasons"`
+	MatchIDs              []string                        `json:"match_ids"`
 
 	ClientAddresses []string `json:"addresses,omitempty"`
 	GhostedPlayers  []string `json:"ghosted_discord_ids,omitempty"`
@@ -46,7 +46,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		DisplayNames:          make([]string, 0),
 		ClientAddresses:       make([]string, 0),
 		DeviceLinks:           make([]string, 0),
-		GuildGroupMemberships: make([]GuildGroupMembership, 0),
+		GuildGroupMemberships: make(map[string]GuildGroupMembership, 0),
 		MatchIDs:              make([]string, 0),
 	}
 	// Get the user's ID
@@ -84,21 +84,16 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 
 	whoami.HasPassword = account.GetEmail() != ""
 
-	var groupIDs []uuid.UUID
-	if guildID != "" {
-		groupID, err := GetGroupIDByGuildID(ctx, d.db, guildID)
-		if err != nil {
-			return fmt.Errorf("guild group not found")
-		}
-
-		groupIDs = []uuid.UUID{uuid.FromStringOrNil(groupID)}
-	}
-	groupIDStrs := lo.Map(groupIDs, func(g uuid.UUID, _ int) string {
-		return g.String()
-	})
-	whoami.GuildGroupMemberships, err = GetGuildGroupMemberships(ctx, d.nk, userID.String(), groupIDStrs)
+	memberships, err := GetGuildGroupMemberships(ctx, d.nk, userID.String())
 	if err != nil {
 		return err
+	}
+
+	for gid, m := range memberships {
+		if guildID != "" && gid != guildID {
+			continue
+		}
+		whoami.GuildGroupMemberships[gid] = m
 	}
 
 	evrIDRecords, err := GetEVRRecords(ctx, logger, nk, userID.String())
@@ -152,6 +147,9 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	if err != nil {
 		return err
 	}
+
+	guildGroups := d.cache.guildGroups.Load().(map[string]*GuildGroup)
+
 	ghostedDiscordIDs := make([]string, 0)
 	for _, f := range friends {
 		if api.Friend_State(f.GetState().Value) == api.Friend_BLOCKED {
@@ -211,26 +209,30 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 			slices.Reverse(lines)
 			return strings.Join(lines, "\n")
 		}(), Inline: false},
-		{Name: "Guild Memberships", Value: strings.Join(lo.Map(whoami.GuildGroupMemberships, func(m GuildGroupMembership, index int) string {
-			s := m.GuildGroup.Name()
-			roles := make([]string, 0)
-			if m.isMember {
-				roles = append(roles, "member")
+		{Name: "Guild Memberships", Value: strings.Join(func() []string {
+			output := make([]string, 0, len(whoami.GuildGroupMemberships))
+			for gid, m := range whoami.GuildGroupMemberships {
+				s := guildGroups[gid].Name()
+				roles := make([]string, 0)
+				if m.isMember {
+					roles = append(roles, "member")
+				}
+				if m.isModerator {
+					roles = append(roles, "moderator")
+				}
+				if m.isServerHost {
+					roles = append(roles, "server-host")
+				}
+				if m.isAllocator {
+					roles = append(roles, "allocator")
+				}
+				if len(roles) > 0 {
+					s += fmt.Sprintf(" (%s)", strings.Join(roles, ", "))
+				}
+				output = append(output, s)
 			}
-			if m.isModerator {
-				roles = append(roles, "moderator")
-			}
-			if m.isServerHost {
-				roles = append(roles, "server-host")
-			}
-			if m.isAllocator {
-				roles = append(roles, "allocator")
-			}
-			if len(roles) > 0 {
-				s += fmt.Sprintf(" (%s)", strings.Join(roles, ", "))
-			}
-			return s
-		}), "\n"), Inline: false},
+			return output
+		}(), "\n"), Inline: false},
 		{Name: "Current Match(es)", Value: strings.Join(lo.Map(whoami.MatchIDs, func(m string, index int) string {
 			return fmt.Sprintf("https://echo.taxi/spark://c/%s", strings.ToUpper(m))
 		}), "\n"), Inline: false},

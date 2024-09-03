@@ -27,7 +27,7 @@ var MatchmakingTimeout = 5 * time.Minute
 //var MatchmakingTimeout = 30 * time.Second
 
 // lobbyJoinSessionRequest is a request to join a specific existing session.
-func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session *sessionWS, params SessionParameters) error {
+func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session *sessionWS, params *LobbySessionParameters) error {
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -366,7 +366,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 
 }
 
-func lobbyBackfillQuery(p SessionParameters) (string, error) {
+func lobbyBackfillQuery(p *LobbySessionParameters) (string, error) {
 
 	qparts := []string{
 		"+label.open:T",
@@ -445,7 +445,7 @@ func CompactedFrequencySort[T comparable](s []T, desc bool) []T {
 }
 
 // Backfill returns a match that the player can backfill
-func (p *EvrPipeline) GetBackfillCandidates(ctx context.Context, logger *zap.Logger, userID uuid.UUID, params SessionParameters, query string) ([]*MatchLabel, error) {
+func (p *EvrPipeline) GetBackfillCandidates(ctx context.Context, logger *zap.Logger, userID uuid.UUID, params *LobbySessionParameters, query string) ([]*MatchLabel, error) {
 	labels, err := listUnfilledLobbies(ctx, p.runtimeModule, params.PartySize, params.Mode, query)
 	if err != nil || len(labels) == 0 {
 		return nil, err

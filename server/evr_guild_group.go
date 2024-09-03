@@ -44,15 +44,11 @@ func (r *GuildGroupRoles) Slice() []string {
 	return slices.Compact(roles)
 }
 
-type GuildGroupMemberships []GuildGroupMembership
+type GuildGroupMemberships map[string]GuildGroupMembership
 
 func (g GuildGroupMemberships) IsMember(groupID string) bool {
-	for _, m := range g {
-		if m.GuildGroup.ID().String() == groupID {
-			return m.isMember
-		}
-	}
-	return false
+	_, ok := g[groupID]
+	return ok
 }
 
 type GroupMetadata struct {
@@ -221,6 +217,35 @@ func (g *GroupMetadata) UpdateRoleCache(userID string, userRoles []string) bool 
 
 	return roleCacheUpdated
 }
+func (g *GroupMetadata) MarshalToMap() (map[string]interface{}, error) {
+	guildGroupBytes, err := json.Marshal(g)
+	if err != nil {
+		return nil, err
+	}
+
+	var guildGroupMap map[string]interface{}
+	err = json.Unmarshal(guildGroupBytes, &guildGroupMap)
+	if err != nil {
+		return nil, err
+	}
+
+	return guildGroupMap, nil
+}
+
+func UnmarshalGuildGroupMetadataFromMap(guildGroupMap map[string]interface{}) (*GroupMetadata, error) {
+	guildGroupBytes, err := json.Marshal(guildGroupMap)
+	if err != nil {
+		return nil, err
+	}
+
+	var g GroupMetadata
+	err = json.Unmarshal(guildGroupBytes, &g)
+	if err != nil {
+		return nil, err
+	}
+
+	return &g, nil
+}
 
 type GuildGroup struct {
 	Metadata *GroupMetadata
@@ -266,7 +291,6 @@ func NewGuildGroup(group *api.Group) (*GuildGroup, error) {
 }
 
 type GuildGroupMembership struct {
-	GuildGroup   GuildGroup
 	isMember     bool
 	isModerator  bool // Admin
 	isServerHost bool // Broadcaster Host
@@ -281,7 +305,6 @@ func NewGuildGroupMembership(group *api.Group, userID uuid.UUID, state api.UserG
 	}
 	userIDStr := userID.String()
 	return &GuildGroupMembership{
-		GuildGroup:   *gg,
 		isMember:     state <= api.UserGroupList_UserGroup_MEMBER,
 		isModerator:  gg.Metadata.IsModerator(userIDStr),
 		isServerHost: gg.Metadata.IsServerHost(userIDStr),

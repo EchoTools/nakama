@@ -36,24 +36,11 @@ func LobbyJoinEntrants(ctx context.Context, logger *zap.Logger, db *sql.DB, matc
 		return errors.Join(NewLobbyError(InternalError, "failed to unmarshal match label"), err)
 	}
 	groupID := label.GetGroupID()
-	groupIDStr := groupID.String()
 
 	// Ensure this player is authorized to join this lobby/match.
 	session := sessionRegistry.Get(entrants[0].SessionID)
 	if session == nil {
 		return NewLobbyError(InternalError, "session not found")
-	}
-
-	metadataCache, ok := ctx.Value(ctxGuildGroupMetadataCacheKey{}).(*MapOf[uuid.UUID, *GroupMetadata])
-	if ok {
-		_, ok := metadataCache.Load(groupID)
-		if !ok {
-			groupMetadata, err := GetGuildGroupMetadata(ctx, db, groupIDStr)
-			if err != nil {
-				return errors.Join(NewLobbyError(InternalError, "failed to get guild group metadata"), err)
-			}
-			metadataCache.Store(groupID, groupMetadata)
-		}
 	}
 
 	// Ensure the player supports the required features.
@@ -234,15 +221,21 @@ func LobbyJoinEntrant(logger *zap.Logger, matchRegistry MatchRegistry, tracker T
 func (p *EvrPipeline) authorizeGuildGroupSession(ctx context.Context, session Session, groupID string) error {
 	userID := session.UserID().String()
 
-	membership, err := GetGuildGroupMembership(ctx, p.runtimeModule, userID, groupID)
-	if err != nil {
-		return errors.Join(NewLobbyError(InternalError, "failed to get guild group membership"), err)
+	params, ok := ctx.Value(ctxSessionParametersKey{}).(*SessionParameters)
+	if !ok {
+		return NewLobbyError(InternalError, "failed to get session parameters")
 	}
 
-	groupMetadata := membership.GuildGroup.Metadata
+	membership := params.Memberships()[groupID]
 
+	guildGroups := p.GuildGroups()
+	gg, ok := guildGroups[groupID]
+	if !ok {
+		return NewLobbyErrorf(InternalError, "failed to get guild group metadata for %s", groupID)
+	}
+	groupMetadata := gg.Metadata
 	sendAuditMessage := groupMetadata.AuditChannelID != ""
-	discordID := p.discordCache.UserIDToDiscordID(userID)
+	discordID := params.DiscordID()
 
 	if membership.isSuspended {
 
@@ -300,51 +293,21 @@ func (p *EvrPipeline) authorizeGuildGroupSession(ctx context.Context, session Se
 		}
 	}
 
-	if groupMetadata.BlockVPNUsers && !groupMetadata.IsVPNBypass(userID) {
-		isVPN, ok := ctx.Value(ctxIsVPNUserKey{}).(bool)
-		if !ok {
-			return NewLobbyError(InternalError, "failed to get VPN status")
-		}
+	if groupMetadata.BlockVPNUsers && params.isVPN {
 
-		if isVPN {
-			score := p.ipqsClient.Score(session.ClientIP())
-			if score >= groupMetadata.FraudScoreThreshold {
+		if sendAuditMessage {
 
-				if sendAuditMessage {
-
-					if _, err := p.appBot.dg.ChannelMessageSend(groupMetadata.AuditChannelID, fmt.Sprintf("Rejected VPN user <@%s> (score: %d) from %s", discordID, score, session.ClientIP())); err != nil {
-						p.logger.Warn("Failed to send audit message", zap.String("channel_id", groupMetadata.AuditChannelID), zap.Error(err))
-					}
-				}
-
-				return NewLobbyError(KickedFromLobbyGroup, "This guild does not allow VPN access, Disable your VPN and try again.")
+			if _, err := p.appBot.dg.ChannelMessageSend(groupMetadata.AuditChannelID, fmt.Sprintf("Rejected VPN user <@%s> (score: %d) from %s", discordID, score, session.ClientIP())); err != nil {
+				p.logger.Warn("Failed to send audit message", zap.String("channel_id", groupMetadata.AuditChannelID), zap.Error(err))
 			}
 		}
+
+		return NewLobbyError(KickedFromLobbyGroup, "this guild does not allow VPN users")
 	}
 
-	features, ok := session.Context().Value(ctxSupportedFeaturesKey{}).([]string)
-	if ok {
-		if len(features) > 0 {
-			allowedFeatures := groupMetadata.AllowedFeatures
-			for _, feature := range features {
-				if !slices.Contains(allowedFeatures, feature) {
-					return NewLobbyError(KickedFromLobbyGroup, "This guild does not allow clients with `feature DLLs``.")
-				}
-			}
-		}
-	}
-	evrID, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
-	if !ok {
-		return NewLobbyError(InternalError, "failed to get evr ID from session context")
-	}
+	displayName := params.AccountMetadata().GetGroupDisplayNameOrDefault(groupID)
 
-	metadata, ok := ctx.Value(ctxAccountMetadataKey{}).(AccountMetadata)
-	if !ok {
-		return NewLobbyError(InternalError, "failed to get account metadata from session context")
-	}
-	displayName := metadata.GetGroupDisplayNameOrDefault(groupID)
-
-	if err := p.profileRegistry.SetLobbyProfile(ctx, uuid.FromStringOrNil(userID), evrID, displayName); err != nil {
+	if err := p.profileRegistry.SetLobbyProfile(ctx, uuid.FromStringOrNil(userID), params.EvrID(), displayName); err != nil {
 		return errors.Join(NewLobbyErrorf(InternalError, "failed to set lobby profile"), err)
 	}
 

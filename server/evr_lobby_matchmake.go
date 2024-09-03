@@ -68,7 +68,7 @@ var DefaultMatchmakerTicketConfigs = map[evr.Symbol]MatchmakerTicketConfig{
 }
 
 // Matchmake attempts to find/create a match for the user using the nakama matchmaker
-func (p *EvrPipeline) lobbyMatchMake(ctx context.Context, logger *zap.Logger, session *sessionWS, params SessionParameters, lobbyGroup *LobbyGroup) (err error) {
+func (p *EvrPipeline) lobbyMatchMake(ctx context.Context, logger *zap.Logger, session *sessionWS, params *LobbySessionParameters, lobbyGroup *LobbyGroup) (err error) {
 
 	partyList := lobbyGroup.List()
 	ratedTeam := make(RatedTeam, 0, len(partyList))
@@ -143,7 +143,7 @@ func (p *EvrPipeline) lobbyMatchMake(ctx context.Context, logger *zap.Logger, se
 	return nil
 }
 
-func lobbyMatchmakeQuery(ctx context.Context, logger *zap.Logger, db *sql.DB, session Session, rating types.Rating, params SessionParameters) (query string, stringProps map[string]string, numericProps map[string]float64, err error) {
+func lobbyMatchmakeQuery(ctx context.Context, logger *zap.Logger, db *sql.DB, session Session, rating types.Rating, params *LobbySessionParameters) (query string, stringProps map[string]string, numericProps map[string]float64, err error) {
 
 	stringProps = map[string]string{
 		"mode":         params.Mode.String(),
@@ -261,7 +261,7 @@ type MatchmakingSettings struct {
 	BackfillQueryAddon    string   `json:"backfill_query_addon"`             // Additional query to add to the matchmaking query
 	MatchmakingQueryAddon string   `json:"matchmaking_query_addon"`          // Additional query to add to the matchmaking query
 	CreateQueryAddon      string   `json:"create_query_addon"`               // Additional query to add to the matchmaking query
-	LobbyGroupID          string   `json:"group_id"`                         // Group ID to matchmake with
+	LobbyGroupName        string   `json:"group_id"`                         // Group ID to matchmake with
 	PriorityBroadcasters  []string `json:"priority_broadcasters"`            // Prioritize these broadcasters
 	NextMatchID           MatchID  `json:"next_match_id"`                    // Try to join this match immediately when finding a match
 	NextMatchRole         string   `json:"next_match_role"`                  // The role to join the next match as

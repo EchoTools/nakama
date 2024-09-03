@@ -292,14 +292,18 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 
 	// Ensure that arena matches never have more than 4 players per team.
 	if state.Mode == evr.ModeArenaPublic {
-		if state.RoleCount(mp.RoleAlignment) >= state.TeamSize {
-			logger.Warn("Picked team is full. Assigning to the other team.")
-			if state.RoleCount(evr.TeamBlue) < state.TeamSize {
-				mp.RoleAlignment = evr.TeamBlue
-			} else if state.RoleCount(evr.TeamOrange) < state.TeamSize {
-				mp.RoleAlignment = evr.TeamOrange
-			} else {
-				return state, false, JoinRejectReasonFailedToAssignTeam
+		if mp.RoleAlignment == evr.TeamModerator && mp.RoleAlignment == evr.TeamSpectator && state.OpenNonPlayerSlots() < 1 {
+			return state, false, JoinRejectReasonLobbyFull
+		} else {
+			if state.RoleCount(mp.RoleAlignment) >= state.TeamSize {
+				logger.Warn("Picked team is full. Assigning to the other team.")
+				if state.RoleCount(evr.TeamBlue) < state.TeamSize {
+					mp.RoleAlignment = evr.TeamBlue
+				} else if state.RoleCount(evr.TeamOrange) < state.TeamSize {
+					mp.RoleAlignment = evr.TeamOrange
+				} else {
+					return state, false, JoinRejectReasonFailedToAssignTeam
+				}
 			}
 		}
 	}

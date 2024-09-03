@@ -10,6 +10,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -47,13 +48,14 @@ type DiscordCache struct {
 	db              *sql.DB
 	dg              *discordgo.Session
 
+	guildGroups   *atomic.Value // map[string]*GuildGroup
 	queueCh       chan QueueEntry
 	queueLimiters MapOf[QueueEntry, *rate.Limiter]
 
 	idcache *MapOf[string, string]
 }
 
-func NewDiscordCache(ctx context.Context, logger *zap.Logger, config Config, metrics Metrics, pipeline *Pipeline, profileRegistry *ProfileRegistry, statusRegistry StatusRegistry, nk runtime.NakamaModule, db *sql.DB, dg *discordgo.Session) *DiscordCache {
+func NewDiscordCache(ctx context.Context, logger *zap.Logger, config Config, metrics Metrics, pipeline *Pipeline, profileRegistry *ProfileRegistry, statusRegistry StatusRegistry, nk runtime.NakamaModule, db *sql.DB, dg *discordgo.Session, guildGroups *atomic.Value) *DiscordCache {
 	ctx, cancelFn := context.WithCancel(ctx)
 	return &DiscordCache{
 		ctx:      ctx,
@@ -69,6 +71,7 @@ func NewDiscordCache(ctx context.Context, logger *zap.Logger, config Config, met
 		db:              db,
 		dg:              dg,
 
+		guildGroups:   guildGroups,
 		idcache:       &MapOf[string, string]{},
 		queueCh:       make(chan QueueEntry, 150),
 		queueLimiters: MapOf[QueueEntry, *rate.Limiter]{},
@@ -176,6 +179,16 @@ func (c *DiscordCache) Queue(userID string, groupID string) {
 	c.queueCh <- queueEntry
 }
 
+// Purge removes both the reference and the reverse from the cache.
+func (d *DiscordCache) Purge(id string) bool {
+	value, loaded := d.idcache.LoadAndDelete(id)
+	if !loaded {
+		return false
+	}
+	d.idcache.Delete(value)
+	return true
+}
+
 // Discord ID to Nakama UserID, with a lookup cache
 func (d *DiscordCache) DiscordIDToUserID(discordID string) string {
 	userID, ok := d.idcache.Load(discordID)
@@ -245,7 +258,7 @@ func (c *DiscordCache) SyncUser(ctx context.Context, userID string) error {
 
 	logger = logger.With(zap.String("uid", userID), zap.String("discord_id", md.DiscordID()))
 
-	memberships, err := GetGuildGroupMemberships(ctx, c.nk, userID, nil)
+	memberships, err := GetGuildGroupMemberships(ctx, c.nk, userID)
 	if err != nil {
 		return fmt.Errorf("error getting guild group memberships: %w", err)
 	} else if len(memberships) == 0 {
@@ -254,16 +267,17 @@ func (c *DiscordCache) SyncUser(ctx context.Context, userID string) error {
 
 	// Check if the user is missing group memberships for any guilds.
 	currentGuildIDs := make(map[string]struct{}, len(memberships))
-	for _, membership := range memberships {
-		currentGuildIDs[membership.GuildGroup.GuildID()] = struct{}{}
+	for groupID, _ := range memberships {
+		guildID := c.GroupIDToGuildID(groupID)
+		currentGuildIDs[guildID] = struct{}{}
 	}
 
 	// Update the user's existing membership to the groups.
 
-	for _, membership := range memberships {
-		logger := logger.With(zap.String("group_id", membership.GuildGroup.ID().String()))
+	for groupID, _ := range memberships {
+		logger := logger.With(zap.String("group_id", groupID))
 
-		err := c.SyncGuildGroupMember(ctx, userID, membership.GuildGroup.ID().String())
+		err := c.SyncGuildGroupMember(ctx, userID, groupID)
 		if err != nil {
 			if errors.Is(err, ErrMemberNotFound) {
 				logger.Warn("Member not found in guild group")
@@ -277,10 +291,16 @@ func (c *DiscordCache) SyncUser(ctx context.Context, userID string) error {
 	if len(memberships) == 0 {
 		return nil
 	}
+	guildID := ""
+	for groupID, _ := range memberships {
+		guildID = c.GroupIDToGuildID(groupID)
+		if guildID != "" {
+			return nil
+		}
+		break
+	}
 
 	update := false
-	guildID := memberships[0].GuildGroup.GuildID()
-
 	member, _, err := c.GuildMember(guildID, md.DiscordID())
 	if err != nil {
 		return fmt.Errorf("error getting guild member: %w", err)
@@ -332,16 +352,24 @@ func (c *DiscordCache) SyncGuildGroupMember(ctx context.Context, userID, groupID
 	}
 
 	// If they are not a member add them.
-	membership, err := GetGuildGroupMembership(ctx, c.nk, userID, groupID)
+	memberships, err := GetGuildGroupMemberships(ctx, c.nk, userID)
+	if err != nil {
+		return fmt.Errorf("error getting guild group memberships: %w", err)
+	}
 
-	if err == ErrMemberNotFound {
+	if _, ok := memberships[groupID]; !ok {
 		// Add the user to the guild group.
 		if err := c.nk.GroupUserJoin(ctx, groupID, userID, member.User.Username); err != nil {
 			return fmt.Errorf("error adding user to group: %w", err)
 		}
-		if membership, err = GetGuildGroupMembership(ctx, c.nk, userID, groupID); err != nil {
-			return err
+		memberships, err := GetGuildGroupMemberships(ctx, c.nk, userID)
+		if err != nil {
+			return fmt.Errorf("error getting guild group memberships: %w", err)
 		}
+		if _, ok := memberships[groupID]; !ok {
+			return fmt.Errorf("error adding user to group")
+		}
+
 	} else if err != nil {
 		return fmt.Errorf("error getting guild group membership: %w", err)
 	}
@@ -359,7 +387,7 @@ func (c *DiscordCache) SyncGuildGroupMember(ctx context.Context, userID, groupID
 		displayName = sanitizeDisplayName(member.User.Username)
 	}
 
-	prevDisplayName := accountMetadata.GetDisplayName(membership.GuildGroup.ID().String())
+	prevDisplayName := accountMetadata.GetDisplayName(groupID)
 
 	if prevDisplayName != displayName {
 		logger = logger.With(zap.String("display_name", displayName), zap.String("prev_display_name", prevDisplayName))
@@ -367,7 +395,7 @@ func (c *DiscordCache) SyncGuildGroupMember(ctx context.Context, userID, groupID
 		if err != nil {
 			logger.Warn("Error checking display name", zap.Error(err))
 		} else {
-			if err := c.recordDisplayName(ctx, c.nk, membership.GuildGroup.ID().String(), accountMetadata.ID(), displayName); err != nil {
+			if err := c.recordDisplayName(ctx, c.nk, groupID, accountMetadata.ID(), displayName); err != nil {
 				return fmt.Errorf("error setting display name: %w", err)
 			}
 			accountMetadata.SetGroupDisplayName(groupID, displayName)
@@ -378,10 +406,19 @@ func (c *DiscordCache) SyncGuildGroupMember(ctx context.Context, userID, groupID
 		}
 	}
 
+	guildGroups, ok := c.guildGroups.Load().(map[string]*GuildGroup)
+	if !ok {
+		return fmt.Errorf("error loading guild groups")
+	}
+	guildGroup, ok := guildGroups[groupID]
+	if !ok {
+		return fmt.Errorf("error getting guild group")
+	}
+
 	// Update the Guild Group's role cache if necessary.
-	if membership.GuildGroup.Metadata.UpdateRoleCache(userID, member.Roles) {
-		g := membership.GuildGroup.Group
-		mdMap := membership.GuildGroup.Metadata.MarshalMap()
+	if guildGroup.Metadata.UpdateRoleCache(userID, member.Roles) {
+		g := guildGroup.Group
+		mdMap := guildGroup.Metadata.MarshalMap()
 		if err := c.nk.GroupUpdate(ctx, g.Id, SystemUserID, g.Name, g.CreatorId, g.LangTag, g.Description, g.AvatarUrl, g.Open.Value, mdMap, int(g.MaxCount)); err != nil {
 			return fmt.Errorf("error updating group: %w", err)
 		}
@@ -392,7 +429,7 @@ func (c *DiscordCache) SyncGuildGroupMember(ctx context.Context, userID, groupID
 		return fmt.Errorf("error getting account: %w", err)
 	}
 	// Add the linked role if necessary.
-	accountLinkedRole := membership.GuildGroup.Metadata.Roles.AccountLinked
+	accountLinkedRole := guildGroup.Metadata.Roles.AccountLinked
 	if accountLinkedRole != "" {
 		if len(account.Devices) == 0 {
 			if slices.Contains(member.Roles, accountLinkedRole) {

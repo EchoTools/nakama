@@ -19,10 +19,6 @@ const (
 	FriendStateBlocked
 )
 
-type (
-	ctxGuildGroupMetadataCacheKey struct{}
-)
-
 // lobbyMatchmakerStatusRequest is a message requesting the status of the matchmaker.
 func (p *EvrPipeline) lobbyMatchmakerStatusRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	_ = in.(*evr.LobbyMatchmakerStatusRequest)
@@ -141,24 +137,4 @@ func (p *EvrPipeline) lobbyPlayerSessionsRequest(ctx context.Context, logger *za
 	entrant := evr.NewLobbyEntrant(message.EvrId, message.LobbyID, entrantID, entrantIDs, int16(presence.RoleAlignment))
 
 	return session.SendEvr(entrant.VersionU(), entrant.Version2(), entrant.Version3())
-}
-
-func (p *EvrPipeline) PrepareLobbyProfile(ctx context.Context, logger *zap.Logger, session *sessionWS, evrID evr.EvrId, userID, groupID string) {
-	// prepare the profile ahead of time
-
-	md, ok := ctx.Value(ctxAccountMetadataKey{}).(AccountMetadata)
-	if !ok {
-		metadata, err := GetAccountMetadata(ctx, p.runtimeModule, userID)
-		if err != nil {
-			logger.Warn("Failed to get account metadata.", zap.Error(err))
-		}
-		md = *metadata
-	}
-
-	displayName := md.GetGroupDisplayNameOrDefault(groupID)
-
-	if err := p.profileRegistry.SetLobbyProfile(ctx, session.userID, evrID, displayName); err != nil {
-		logger.Warn("Failed to set lobby profile", zap.Error(err))
-		return
-	}
 }

@@ -8,13 +8,15 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"github.com/intinig/go-openskill/types"
+	"go.uber.org/zap"
 )
 
 type (
 	ctxLobbyParametersKey struct{}
 )
 
-type SessionParameters struct {
+type LobbySessionParameters struct {
 	Node                  string             `json:"node"`
 	VersionLock           evr.Symbol         `json:"version_lock"`
 	AppID                 evr.Symbol         `json:"app_id"`
@@ -38,10 +40,11 @@ type SessionParameters struct {
 	CreateQueryAddon      string             `json:"create_query_addon"`
 	Verbose               bool               `json:"verbose"`
 	Friends               []*api.Friend      `json:"friends"`
+	Rating                *types.Rating      `json:"rating"`
 	latencyHistory        LatencyHistory
 }
 
-func (s SessionParameters) MetricsTags() map[string]string {
+func (s LobbySessionParameters) MetricsTags() map[string]string {
 	return map[string]string{
 		"mode":         s.Mode.String(),
 		"level":        s.Level.String(),
@@ -51,42 +54,67 @@ func (s SessionParameters) MetricsTags() map[string]string {
 	}
 }
 
-func NewLobbyParametersFromRequest(ctx context.Context, r evr.LobbySessionRequest, globalSettings *MatchmakingSettings, userSettings *MatchmakingSettings, profile *GameProfileData, latencyHistory LatencyHistory, friends []*api.Friend) SessionParameters {
-	if userSettings == nil {
-		userSettings = &MatchmakingSettings{}
+func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, r evr.LobbySessionRequest) (*LobbySessionParameters, error) {
+	p := session.evrPipeline
+
+	// Load the global matchmaking config
+	globalSettings, err := LoadMatchmakingSettings(ctx, p.runtimeModule, SystemUserID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load global matchmaking settings: %v", err)
 	}
 
-	if globalSettings == nil {
-		globalSettings = &MatchmakingSettings{}
+	// Load the user's matchmaking config
+	userSettings, err := LoadMatchmakingSettings(ctx, p.runtimeModule, session.UserID().String())
+	if err != nil {
+		return nil, fmt.Errorf("failed to load user matchmaking settings: %v", err)
+	}
+	// Load friends to get blocked (ghosted) players
+	cursor := ""
+	friends := make([]*api.Friend, 0)
+	for {
+		users, err := ListFriends(ctx, logger, p.db, p.statusRegistry, session.userID, 100, nil, cursor)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list friends: %v", err)
+		}
+
+		friends = append(friends, users.Friends...)
+
+		cursor = users.Cursor
+		if users.Cursor == "" {
+			break
+		}
 	}
 
-	var lobbyGroupID string
-	if userSettings != nil {
-		lobbyGroupID = userSettings.LobbyGroupID
-	}
-	if lobbyGroupID == "" {
-		lobbyGroupID = uuid.Must(uuid.NewV4()).String()
-	}
-
-	node := ctx.Value(ctxNodeKey{}).(string)
-	requiredFeatures, ok := ctx.Value(ctxRequiredFeaturesKey{}).([]string)
+	sessionParams, ok := ctx.Value(ctxSessionParametersKey{}).(*SessionParameters)
 	if !ok {
-		requiredFeatures = make([]string, 0)
+		return nil, fmt.Errorf("failed to load session parameters")
 	}
 
-	supportedFeatures, ok := ctx.Value(ctxSupportedFeaturesKey{}).([]string)
-	if !ok {
-		supportedFeatures = make([]string, 0)
+	latencyHistory, err := LoadLatencyHistory(ctx, logger, p.db, session.userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load latency history: %v", err)
 	}
+
+	var lobbyGroupName string
+	if userSettings.LobbyGroupName != uuid.Nil.String() {
+		lobbyGroupName = userSettings.LobbyGroupName
+	}
+	if lobbyGroupName == "" {
+		lobbyGroupName = uuid.Must(uuid.NewV4()).String()
+	}
+
+	node := session.pipeline.node
+
+	requiredFeatures := sessionParams.RequiredFeatures
+	supportedFeatures := sessionParams.SupportedFeatures
 
 	if r.GetFeatures() != nil {
 		supportedFeatures = append(supportedFeatures, r.GetFeatures()...)
 	}
 
-	metadata := ctx.Value(ctxAccountMetadataKey{}).(AccountMetadata)
 	groupID := r.GetGroupID()
 	if r.GetGroupID() == uuid.Nil {
-		groupID = metadata.GetActiveGroupID()
+		groupID = sessionParams.AccountMetadata().GetActiveGroupID()
 	}
 
 	region := r.GetRegion()
@@ -99,18 +127,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, r evr.LobbySessionReques
 		currentMatchID = MatchID{UUID: r.GetCurrentLobbyID(), Node: node}
 	}
 
-	userID, ok := ctx.Value(ctxUserIDKey{}).(uuid.UUID)
-	if !ok {
-		userID = uuid.Nil
-	}
-
-	if globalSettings == nil {
-		globalSettings = &MatchmakingSettings{}
-	}
-
-	if userSettings == nil {
-		userSettings = &MatchmakingSettings{}
-	}
+	userID := session.userID.String()
 
 	// Add blocked players who are online to the Matchmaking Query Addon
 	stringProperties := make(map[string]string)
@@ -145,7 +162,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, r evr.LobbySessionReques
 		backfillQueryAddons = append(backfillQueryAddons, fmt.Sprintf(`-label.players.user_id:/(%s)/`, Query.Join(blockedIDs, "|")))
 	}
 
-	return SessionParameters{
+	return &LobbySessionParameters{
 		CurrentMatchID:        currentMatchID,
 		VersionLock:           r.GetVersionLock(),
 		AppID:                 r.GetAppID(),
@@ -160,11 +177,11 @@ func NewLobbyParametersFromRequest(ctx context.Context, r evr.LobbySessionReques
 		BackfillQueryAddon:    strings.Join(backfillQueryAddons, " "),
 		MatchmakingQueryAddon: strings.Join(matchmakingQueryAddons, " "),
 		CreateQueryAddon:      globalSettings.CreateQueryAddon + " " + userSettings.CreateQueryAddon,
-		PartyGroupID:          lobbyGroupID,
-		PartyID:               uuid.NewV5(uuid.Nil, lobbyGroupID),
+		PartyGroupID:          lobbyGroupName,
+		PartyID:               uuid.NewV5(uuid.Nil, lobbyGroupName),
 		NextMatchID:           userSettings.NextMatchID,
-		Verbose:               metadata.DiscordDebugMessages,
+		Verbose:               sessionParams.AccountMetadata().DiscordDebugMessages,
 		Node:                  node,
 		latencyHistory:        latencyHistory,
-	}
+	}, nil
 }

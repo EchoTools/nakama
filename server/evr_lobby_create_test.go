@@ -33,7 +33,7 @@ func Test_lobbyCreateSortOptions(t *testing.T) {
 		labelLatencies[i] = l.RTT
 	}
 
-	params := SessionParameters{
+	params := LobbySessionParameters{
 		Mode:   evr.ModeArenaPrivate,
 		Region: evr.DefaultRegion,
 	}
@@ -42,5 +42,5 @@ func Test_lobbyCreateSortOptions(t *testing.T) {
 		t.Errorf("%3d %v", labelLatencies[i], labels[i].Broadcaster.Endpoint.GetExternalIP())
 	}
 
-	lobbyCreateSortOptions(labels, labelLatencies, params)
+	lobbyCreateSortOptions(labels, labelLatencies, &params)
 }

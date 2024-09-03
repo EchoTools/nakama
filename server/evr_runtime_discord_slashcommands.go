@@ -1431,7 +1431,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			go d.cache.SyncGuildGroupMember(ctx, userIDStr, d.cache.GuildIDToGroupID(member.GuildID))
 
 			// Try to find it by searching
-			memberships, err := GetGuildGroupMemberships(ctx, d.nk, userIDStr, []string{groupID})
+			memberships, err := GetGuildGroupMemberships(ctx, d.nk, userIDStr)
 			if err != nil {
 				return err
 			}
@@ -1441,13 +1441,17 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return errors.New("guild data stale, please try again in a few seconds")
 
 			}
-			membership := memberships[0]
+			_, ok := memberships[groupID]
+			if !ok {
+				return errors.New("no membership found")
+			}
 
 			profile, err := d.profileRegistry.Load(ctx, userID)
 			if err != nil {
 				return err
 			}
-			profile.SetChannel(evr.GUID(membership.GuildGroup.ID()))
+
+			profile.SetChannel(evr.GUID(uuid.FromStringOrNil(groupID)))
 
 			if err = d.profileRegistry.SaveAndCache(ctx, userID, profile); err != nil {
 				return err
@@ -1479,20 +1483,23 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return nil
 			}
 
+			// Clear the cache of the user
+			d.cache.Purge(user.ID)
+
 			// Get the caller's nakama user ID
 
 			guildID := ""
 			if member != nil {
-				memberships, err := GetGuildGroupMemberships(ctx, d.nk, userIDStr, nil)
+				memberships, err := GetGuildGroupMemberships(ctx, d.nk, userIDStr)
 				if err != nil {
 					return errors.Join(errors.New("failed to get user ID"), err)
 				}
 
 				var membership *GuildGroupMembership
-
+				groupID := d.cache.GuildIDToGroupID(member.GuildID)
 				// Get the caller's nakama guild group membership
-				for _, m := range memberships {
-					if m.GuildGroup.GuildID() == i.GuildID {
+				for id, m := range memberships {
+					if id == groupID {
 						membership = &m
 						break
 					}
@@ -1936,7 +1943,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						return fmt.Errorf("failed to unmarshal matchmaking config: %w", err)
 					}
 				}
-				if matchmakingConfig.LobbyGroupID == "" {
+				if matchmakingConfig.LobbyGroupName == "" {
 					return errors.New("set a group ID first with `/party group`")
 				}
 
@@ -2045,7 +2052,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						return fmt.Errorf("failed to unmarshal matchmaking config: %w", err)
 					}
 				}
-				matchmakingConfig.LobbyGroupID = groupName
+				matchmakingConfig.LobbyGroupName = groupName
 				// Store it back
 
 				data, err := json.Marshal(matchmakingConfig)

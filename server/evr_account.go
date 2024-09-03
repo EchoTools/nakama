@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"slices"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -62,14 +61,16 @@ func (p *GroupProfile) UpdateUnlockedItems(updated []evr.Symbol) {
 type AccountMetadata struct {
 	account *api.Account
 
-	DisplayNameOverride  string            `json:"display_name_override"`  // The display name override
-	GlobalBanReason      string            `json:"global_ban_reason"`      // The global ban reason
-	ActiveGroupID        string            `json:"active_group_id"`        // The active group ID
-	GroupDisplayNames    map[string]string `json:"group_display_names"`    // The display names for each guild map[groupID]displayName
-	DisableAFKTimeout    bool              `json:"disable_afk_timeout"`    // Disable AFK detection
-	TargetUserID         string            `json:"target_user_id"`         // The target user ID to follow in public spaces
-	DiscordDebugMessages bool              `json:"discord_debug_messages"` // Enable debug messages in Discord
-	modified             bool
+	DisplayNameOverride    string            `json:"display_name_override"`     // The display name override
+	GlobalBanReason        string            `json:"global_ban_reason"`         // The global ban reason
+	ActiveGroupID          string            `json:"active_group_id"`           // The active group ID
+	GroupDisplayNames      map[string]string `json:"group_display_names"`       // The display names for each guild map[groupID]displayName
+	DisableAFKTimeout      bool              `json:"disable_afk_timeout"`       // Disable AFK detection
+	TargetUserID           string            `json:"target_user_id"`            // The target user ID to follow in public spaces
+	DiscordDebugMessages   bool              `json:"discord_debug_messages"`    // Enable debug messages in Discord
+	RelayMessagesToDiscord bool              `json:"relay_messages_to_discord"` // Relay messages to Discord
+	isModified             bool              // Indicates whether the account metadata has been modified
+
 }
 
 func (a *AccountMetadata) ID() string {
@@ -110,7 +111,7 @@ func (a *AccountMetadata) SetActiveGroupID(id uuid.UUID) {
 		return
 	}
 	a.ActiveGroupID = id.String()
-	a.modified = true
+	a.isModified = true
 }
 
 func (a *AccountMetadata) GetDisplayName(groupID string) string {
@@ -163,7 +164,7 @@ func (a *AccountMetadata) MarshalMap() map[string]interface{} {
 }
 
 func (a *AccountMetadata) NeedsUpdate() bool {
-	return a.modified
+	return a.isModified
 }
 
 type AccountCosmetics struct {
@@ -246,20 +247,9 @@ func GetDisplayNameByGroupID(ctx context.Context, nk runtime.NakamaModule, userI
 	}
 }
 
-func GetGuildGroupMembership(ctx context.Context, nk runtime.NakamaModule, userID, groupID string) (GuildGroupMembership, error) {
-	memberships, err := GetGuildGroupMemberships(ctx, nk, userID, []string{groupID})
-	if err != nil {
-		return GuildGroupMembership{}, fmt.Errorf("error getting guild group memberships: %w", err)
-	}
-	if len(memberships) == 0 {
-		return GuildGroupMembership{}, ErrMemberNotFound
-	}
-	return memberships[0], nil
-}
+func GetGuildGroupMemberships(ctx context.Context, nk runtime.NakamaModule, userID string) (map[string]GuildGroupMembership, error) {
 
-func GetGuildGroupMemberships(ctx context.Context, nk runtime.NakamaModule, userID string, groupIDs []string) ([]GuildGroupMembership, error) {
-
-	memberships := make([]GuildGroupMembership, 0)
+	memberships := make(map[string]GuildGroupMembership, 0)
 	cursor := ""
 	for {
 		// Fetch the groups using the provided userId
@@ -272,16 +262,13 @@ func GetGuildGroupMemberships(ctx context.Context, nk runtime.NakamaModule, user
 			if g.GetLangTag() != "guild" {
 				continue
 			}
-			if len(groupIDs) > 0 && !slices.Contains(groupIDs, g.GetId()) {
-				continue
-			}
 
 			membership, err := NewGuildGroupMembership(g, uuid.FromStringOrNil(userID), api.UserGroupList_UserGroup_State(ug.GetState().GetValue()))
 			if err != nil {
 				return nil, fmt.Errorf("error creating guild group membership: %w", err)
 			}
 
-			memberships = append(memberships, *membership)
+			memberships[g.GetId()] = *membership
 		}
 		if cursor == "" {
 			break

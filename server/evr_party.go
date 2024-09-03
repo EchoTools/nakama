@@ -2,10 +2,8 @@ package server
 
 import (
 	"errors"
-	"fmt"
 
 	"github.com/gofrs/uuid/v5"
-	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/intinig/go-openskill/types"
 	"go.uber.org/zap"
 )
@@ -32,37 +30,9 @@ func EntrantPresencesFromSessionIDs(logger *zap.Logger, sessionRegistry SessionR
 		}
 
 		sessionCtx := session.Context()
-		node, ok := sessionCtx.Value(ctxNodeKey{}).(string)
-		if !ok {
-			return nil, fmt.Errorf("failed to get node from session context")
-		}
+		params := sessionCtx.Value(ctxSessionParametersKey{}).(*SessionParameters)
 
-		evrID, ok := sessionCtx.Value(ctxEvrIDKey{}).(evr.EvrId)
-		if !ok {
-			return nil, fmt.Errorf("failed to get evrID from session context")
-		}
-
-		discordID, ok := sessionCtx.Value(ctxDiscordIDKey{}).(string)
-		if !ok {
-			return nil, fmt.Errorf("failed to get discordID from session context")
-		}
-
-		loginSession, ok := sessionCtx.Value(ctxLoginSessionKey{}).(Session)
-		if !ok {
-			return nil, fmt.Errorf("failed to get login session from session context")
-		}
-
-		isPCVR, ok := sessionCtx.Value(ctxIsPCVRKey{}).(bool)
-		if !ok {
-			return nil, fmt.Errorf("failed to get headset type from session context")
-		}
-
-		metadata, ok := sessionCtx.Value(ctxAccountMetadataKey{}).(AccountMetadata)
-		if !ok {
-			return nil, fmt.Errorf("failed to get account metadata from session context")
-		}
-
-		displayName := metadata.GetGroupDisplayNameOrDefault(groupID.String())
+		displayName := params.AccountMetadata().GetGroupDisplayNameOrDefault(groupID.String())
 
 		r := types.Rating{}
 		if rating != nil {
@@ -71,19 +41,19 @@ func EntrantPresencesFromSessionIDs(logger *zap.Logger, sessionRegistry SessionR
 
 		entrant := &EvrMatchPresence{
 
-			Node:           node,
+			Node:           params.node,
 			UserID:         session.UserID(),
 			SessionID:      session.ID(),
-			LoginSessionID: loginSession.ID(),
+			LoginSessionID: params.LoginSession().ID(),
 			Username:       session.Username(),
 			DisplayName:    displayName,
-			EvrID:          evrID,
+			EvrID:          params.EvrID(),
 			PartyID:        partyID,
 			RoleAlignment:  role,
-			DiscordID:      discordID,
+			DiscordID:      params.DiscordID(),
 			ClientIP:       session.ClientIP(),
 			ClientPort:     session.ClientPort(),
-			IsPCVR:         isPCVR,
+			IsPCVR:         params.IsPCVR(),
 			Rating:         r,
 		}
 

@@ -269,11 +269,11 @@ func (r *ProfileRegistry) GameProfile(ctx context.Context, logger *zap.Logger, u
 
 	return p, nil
 }
-func (r *ProfileRegistry) UpdateClientProfile(ctx context.Context, logger *zap.Logger, session *sessionWS, update evr.ClientProfile) (profile *GameProfileData, err error) {
+func (r *ProfileRegistry) UpdateClientProfile(ctx context.Context, logger *zap.Logger, session *sessionWS, update evr.ClientProfile) (err error) {
 	// Get the user's profile
-	profile, err = r.Load(ctx, session.userID)
+	profile, err := r.Load(ctx, session.userID)
 	if err != nil {
-		return profile, fmt.Errorf("failed to load user profile: %w", err)
+		return fmt.Errorf("failed to load user profile: %w", err)
 	}
 
 	// Validate the client profile.
@@ -284,8 +284,7 @@ func (r *ProfileRegistry) UpdateClientProfile(ctx context.Context, logger *zap.L
 
 	profile.SetClient(update)
 
-	r.SaveAndCache(ctx, session.userID, profile)
-	return profile, nil
+	return r.SaveAndCache(ctx, session.userID, profile)
 }
 
 // A fast lookup of existing profile data

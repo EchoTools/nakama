@@ -16,18 +16,28 @@ import (
 
 func (d *DiscordAppBot) syncLinkedRoles(ctx context.Context, userID string) error {
 
-	memberships, err := GetGuildGroupMemberships(ctx, d.nk, userID, nil)
+	memberships, err := GetGuildGroupMemberships(ctx, d.nk, userID)
 	if err != nil {
 		return fmt.Errorf("failed to get guild group memberships: %w", err)
 	}
-	for _, membership := range memberships {
-		if membership.GuildGroup.Metadata.Roles.AccountLinked != "" {
-			if membership.GuildGroup.Metadata.IsAccountLinked(userID) {
-				if err := d.dg.GuildMemberRoleAdd(membership.GuildGroup.ID().String(), userID, membership.GuildGroup.Metadata.Roles.AccountLinked); err != nil {
+	guildGroups := d.cache.guildGroups.Load().(map[string]*GuildGroup)
+	if guildGroups == nil {
+		return fmt.Errorf("guild groups cache is nil")
+	}
+
+	for groupID, _ := range memberships {
+		guildGroup, ok := guildGroups[groupID]
+		if !ok {
+			continue
+		}
+
+		if guildGroup.Metadata.Roles.AccountLinked != "" {
+			if guildGroup.Metadata.IsAccountLinked(userID) {
+				if err := d.dg.GuildMemberRoleAdd(groupID, userID, guildGroup.Metadata.Roles.AccountLinked); err != nil {
 					return fmt.Errorf("error adding role to member: %w", err)
 				}
 			} else {
-				if err := d.dg.GuildMemberRoleRemove(membership.GuildGroup.ID().String(), userID, membership.GuildGroup.Metadata.Roles.AccountLinked); err != nil {
+				if err := d.dg.GuildMemberRoleRemove(groupID, userID, guildGroup.Metadata.Roles.AccountLinked); err != nil {
 					return fmt.Errorf("error removing role from member: %w", err)
 				}
 			}
@@ -82,15 +92,23 @@ func (d *DiscordAppBot) handleInteractionCreate(logger runtime.Logger, s *discor
 	}
 
 	// Require guild moderator
-	membership, err := GetGuildGroupMembership(ctx, d.nk, userID, groupID)
+	memberships, err := GetGuildGroupMemberships(ctx, d.nk, userID)
 	if err != nil {
 		return fmt.Errorf("failed to get guild group membership: %w", err)
 	}
-
-	md, err := GetGuildGroupMetadata(ctx, d.db, groupID)
-	if err != nil {
-		return fmt.Errorf("failed to get guild group metadata: %w", err)
+	guildGroups := d.cache.guildGroups.Load().(map[string]*GuildGroup)
+	if guildGroups == nil {
+		return fmt.Errorf("guild groups cache is nil")
 	}
+
+	membership := memberships[groupID]
+	gg, ok := guildGroups[groupID]
+
+	if !ok {
+		return simpleInteractionResponse(s, i, "This guild does not exist.")
+	}
+
+	md := gg.Metadata
 	// Global security check
 	switch commandName {
 
@@ -136,27 +154,22 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 	groupID := d.cache.GuildIDToGroupID(guildID)
 
 	// Get a list of the groups that this user has allocate access to
-	memberships, err := GetGuildGroupMemberships(ctx, d.nk, userID, nil)
+	memberships, err := GetGuildGroupMemberships(ctx, d.nk, userID)
 	if err != nil {
 		return nil, 0, status.Errorf(codes.Internal, "failed to get guild group memberships: %v", err)
 	}
-	var membership *GuildGroupMembership
-
-	allocatorGroupIDs := make([]string, 0, len(memberships))
-	for _, m := range memberships {
-		if m.GuildGroup.Metadata.IsAllocator(userID) {
-			allocatorGroupIDs = append(allocatorGroupIDs, m.GuildGroup.ID().String())
-		}
-		if m.GuildGroup.ID() == uuid.FromStringOrNil(groupID) {
-			membership = &m
-		}
-	}
-
-	if membership == nil {
+	membership, ok := memberships[groupID]
+	if !ok {
 		return nil, 0, status.Error(codes.PermissionDenied, "user is not a member of the guild")
 	}
+	allocatorGroupIDs := make([]string, 0, len(memberships))
+	for gid, _ := range memberships {
+		if membership.isAllocator {
+			allocatorGroupIDs = append(allocatorGroupIDs, gid)
+		}
+	}
 
-	if !membership.GuildGroup.Metadata.IsAllocator(userID) {
+	if !membership.isAllocator {
 		return nil, 0, status.Error(codes.PermissionDenied, "user does not have the allocator role in this guild.")
 	}
 
@@ -212,11 +225,11 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 			}
 		}
 
-		params := SessionParameters{
+		params := LobbySessionParameters{
 			Region: region,
 			Mode:   mode,
 		}
-		lobbyCreateSortOptions(labels, labelLatencies, params)
+		lobbyCreateSortOptions(labels, labelLatencies, &params)
 	}
 
 	// Pick a random result
@@ -228,7 +241,7 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 	label.SpawnedBy = userID
 
 	label.StartTime = startTime.UTC().Add(1 * time.Minute)
-	if membership.GuildGroup.Metadata.IsAllocator(userID) {
+	if membership.isAllocator {
 		label.StartTime = startTime.UTC().Add(10 * time.Minute)
 	}
 
@@ -258,23 +271,26 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 	groupID := d.cache.GuildIDToGroupID(guildID)
 
 	// Get a list of the groups that this user has allocate access to
-	memberships, err := GetGuildGroupMemberships(ctx, d.nk, userID, nil)
+	memberships, err := GetGuildGroupMemberships(ctx, d.nk, userID)
 	if err != nil {
 		return nil, 0, status.Errorf(codes.Internal, "failed to get guild group memberships: %v", err)
 	}
 
-	var membership *GuildGroupMembership
-	for _, m := range memberships {
-		if m.GuildGroup.ID() == uuid.FromStringOrNil(groupID) {
-			membership = &m
-		}
-	}
-
-	if membership == nil {
+	_, ok := memberships[groupID]
+	if !ok {
 		return nil, 0, status.Error(codes.PermissionDenied, "user is not a member of the guild")
 	}
 
-	if membership.GuildGroup.Metadata.DisableCreateCommand {
+	guildGroups := d.cache.guildGroups.Load().(map[string]*GuildGroup)
+	if guildGroups == nil {
+		return nil, 0, status.Error(codes.Internal, "guild groups cache is nil")
+	}
+	guildGroup, ok := guildGroups[groupID]
+	if !ok {
+		return nil, 0, status.Error(codes.Internal, "guild does not exist")
+	}
+
+	if guildGroup.Metadata.DisableCreateCommand {
 		return nil, 0, status.Error(codes.PermissionDenied, "guild does not allow public allocation")
 	}
 
@@ -328,11 +344,11 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		}
 	}
 
-	params := SessionParameters{
+	params := LobbySessionParameters{
 		Region: region,
 		Mode:   mode,
 	}
-	lobbyCreateSortOptions(labels, labelLatencies, params)
+	lobbyCreateSortOptions(labels, labelLatencies, &params)
 
 	match := matches[0]
 	matchID := MatchIDFromStringOrNil(match.GetMatchId())
