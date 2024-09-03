@@ -99,7 +99,7 @@ func LobbyJoinEntrants(ctx context.Context, logger *zap.Logger, db *sql.DB, matc
 
 	for _, presence := range presences {
 		select {
-		case <-time.After(4 * time.Second):
+		case <-time.After(5 * time.Second):
 			logger.Warn("Timed out waiting for all lobby session successes to complete")
 			err = fmt.Errorf("timed out waiting for all lobby session successes to complete")
 		case err := <-errorCh:
@@ -144,17 +144,20 @@ func LobbyJoinEntrant(logger *zap.Logger, matchRegistry MatchRegistry, tracker T
 		err = NewLobbyErrorf(ServerIsFull, "join attempt failed: %s", reason)
 	} else if !isNew {
 		logger.Warn("Player is already in the match. ignoring.", zap.String("mid", matchID.UUID.String()), zap.String("uid", e.UserID.String()))
-		return nil
+		err = nil
 	}
 
 	if err != nil {
 		logger.Warn("failed to join match", zap.Error(err))
+		errorCh <- fmt.Errorf("failed to join match: %w", err)
 		return err
 	}
 
 	e = &EvrMatchPresence{}
 	if err := json.Unmarshal([]byte(reason), &e); err != nil {
-		return errors.Join(NewLobbyErrorf(InternalError, "failed to unmarshal match presence"), err)
+		err = errors.Join(NewLobbyErrorf(InternalError, "failed to unmarshal match presence"), err)
+		errorCh <- err
+		return err
 	}
 
 	// Leave any other lobby group stream.
@@ -198,14 +201,19 @@ func LobbyJoinEntrant(logger *zap.Logger, matchRegistry MatchRegistry, tracker T
 	// Update the statuses. This is looked up by the pipeline when the game server sends the new entrant message.
 	for _, op := range ops {
 		if ok := tracker.Update(sessionCtx, e.SessionID, op.Stream, e.UserID, op.Meta); !ok {
-			return NewLobbyError(InternalError, "failed to track session ID")
+			err = NewLobbyError(InternalError, "failed to track session ID")
+			errorCh <- err
+			return err
 		}
 	}
 
 	connectionSettings := label.GetEntrantConnectMessage(role, e.IsPCVR)
 	if err := SendEVRMessages(serverSession, connectionSettings); err != nil {
 		logger.Error("failed to send lobby session success to game server", zap.Error(err))
-		return NewLobbyError(InternalError, "failed to send lobby session success to game server")
+
+		err = NewLobbyError(InternalError, "failed to send lobby session success to game server")
+		errorCh <- err
+		return err
 	}
 
 	if err := LeaveMatchmakingStream(logger, session.(*sessionWS)); err != nil {
@@ -217,6 +225,7 @@ func LobbyJoinEntrant(logger *zap.Logger, matchRegistry MatchRegistry, tracker T
 		<-time.After(250 * time.Millisecond)
 		errorCh <- SendEVRMessages(session, connectionSettings)
 	}(session, connectionSettings)
+
 	logger.Info("Joined entrant.", zap.String("mid", matchID.UUID.String()), zap.String("uid", e.UserID.String()), zap.String("sid", e.SessionID.String()))
 	return nil
 }
