@@ -440,56 +440,53 @@ func writeAuditObjects(ctx context.Context, session *sessionWS, userId string, e
 func (p *EvrPipeline) channelInfoRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	_ = in.(*evr.ChannelInfoRequest)
 
-	resource, err := p.buildChannelInfo(ctx, logger)
-	if err != nil {
-		logger.Warn("Error building channel info", zap.Error(err))
+	params, ok := ctx.Value(ctxSessionParametersKey{}).(*SessionParameters)
+	if !ok {
+		return errors.New("session parameters not found")
 	}
 
-	if resource == nil {
-		resource = evr.NewChannelInfoResource()
+	groupID := params.AccountMetadata().GetActiveGroupID()
+
+	key := fmt.Sprintf("channelInfo,%s", groupID.String())
+
+	// Check the cache first
+	message, found := p.messageCache.Load(key)
+	if !found {
+		guildGroup, found := p.guildGroups.Load(groupID.String())
+		if !found {
+			return fmt.Errorf("guild group not found: %s", groupID.String())
+		}
+		g := guildGroup.Group
+
+		resource, err := p.buildChannelInfo(groupID.String(), g.Name, g.Description, guildGroup.Metadata.RulesText)
+		if err != nil {
+			logger.Warn("Error building channel info", zap.Error(err))
+		}
+
+		if resource == nil {
+			resource = evr.NewChannelInfoResource()
+		}
+
+		message = evr.NewSNSChannelInfoResponse(resource)
+		p.messageCache.Store(key, message)
 	}
 
 	// send the document to the client
-	if err := session.SendEvr(
-		evr.NewSNSChannelInfoResponse(resource),
-		evr.NewSTcpConnectionUnrequireEvent(),
-	); err != nil {
-		return fmt.Errorf("failed to send ChannelInfoResponse: %w", err)
-	}
-	return nil
+	return session.SendEvrUnrequire(message)
 }
 
-func (p *EvrPipeline) buildChannelInfo(ctx context.Context, logger *zap.Logger) (*evr.ChannelInfoResource, error) {
+func (p *EvrPipeline) buildChannelInfo(groupID, name, description, rulesText string) (*evr.ChannelInfoResource, error) {
 	resource := evr.NewChannelInfoResource()
-
-	//  Get the current guild Group ID from the Context
-	groupID, ok := ctx.Value(ctxGroupIDKey{}).(uuid.UUID)
-	if !ok {
-		return nil, fmt.Errorf("groupID not found in context")
-	}
-	md, err := GetGuildGroupMetadata(ctx, p.db, groupID.String())
-	if err != nil {
-		return nil, fmt.Errorf("failed to get guild group metadata: %w", err)
-	}
-	groups, err := GetGroups(ctx, logger, p.db, []string{groupID.String()})
-	if err != nil {
-		return nil, fmt.Errorf("failed to get groups: %w", err)
-	}
-	if len(groups) == 0 {
-		return nil, fmt.Errorf("group not found")
-	}
-
-	g := groups[0]
 
 	resource.Groups = make([]evr.ChannelGroup, 4)
 	for i := range resource.Groups {
 		resource.Groups[i] = evr.ChannelGroup{
-			ChannelUuid:  strings.ToUpper(groupID.String()),
-			Name:         g.Name,
-			Description:  g.Description,
-			Rules:        g.Name + "\n" + md.RulesText,
+			ChannelUuid:  strings.ToUpper(groupID),
+			Name:         name,
+			Description:  description,
+			Rules:        rulesText + "\n" + rulesText,
 			RulesVersion: 1,
-			Link:         fmt.Sprintf("https://discord.gg/channel/%s", g.GetName()),
+			Link:         fmt.Sprintf("https://discord.gg/channel/%s", name),
 			Priority:     uint64(i),
 			RAD:          true,
 		}
