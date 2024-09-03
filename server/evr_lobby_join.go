@@ -31,7 +31,7 @@ func (p *EvrPipeline) loadNextMatchFromDB(ctx context.Context, logger *zap.Logge
 }
 
 // lobbyJoinSessionRequest is a request to join a specific existing session.
-func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session *sessionWS, params SessionParameters) error {
+func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session *sessionWS, params *LobbySessionParameters) error {
 
 	matchID, _ := NewMatchID(params.CurrentMatchID.UUID, p.node)
 

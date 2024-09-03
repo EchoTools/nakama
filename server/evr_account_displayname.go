@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"strings"
 	"time"
 
@@ -32,36 +31,6 @@ func (s *SuspensionStatus) Valid() bool {
 		return false
 	}
 	return true
-}
-
-func (g *GroupMetadata) MarshalToMap() (map[string]interface{}, error) {
-	guildGroupBytes, err := json.Marshal(g)
-	if err != nil {
-		return nil, err
-	}
-
-	var guildGroupMap map[string]interface{}
-	err = json.Unmarshal(guildGroupBytes, &guildGroupMap)
-	if err != nil {
-		return nil, err
-	}
-
-	return guildGroupMap, nil
-}
-
-func UnmarshalGuildGroupMetadataFromMap(guildGroupMap map[string]interface{}) (*GroupMetadata, error) {
-	guildGroupBytes, err := json.Marshal(guildGroupMap)
-	if err != nil {
-		return nil, err
-	}
-
-	var g GroupMetadata
-	err = json.Unmarshal(guildGroupBytes, &g)
-	if err != nil {
-		return nil, err
-	}
-
-	return &g, nil
 }
 
 // sanitizeDisplayName filters the provided displayName to ensure it is valid.

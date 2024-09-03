@@ -200,45 +200,27 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 				continue
 			}
 			sessionCtx := session.Context()
-			evrID, ok := sessionCtx.Value(ctxEvrIDKey{}).(evr.EvrId)
+			params, ok := sessionCtx.Value(ctxSessionParametersKey{}).(*SessionParameters)
 			if !ok {
-				logger.Warn("Failed to get evr_id from session context", zap.String("sid", entry.Presence.GetSessionId()))
+				logger.Warn("Failed to get session parameters from session context", zap.String("sid", entry.Presence.GetSessionId()))
 				continue
 			}
-			metadata, ok := sessionCtx.Value(ctxAccountMetadataKey{}).(AccountMetadata)
-			if !ok {
-				logger.Warn("Failed to get account metadata from session context", zap.String("sid", entry.Presence.GetSessionId()))
-			}
-			loginSession, ok := sessionCtx.Value(ctxLoginSessionKey{}).(*sessionWS)
-			if !ok {
-				logger.Warn("Failed to get login session id from session context", zap.String("sid", entry.Presence.GetSessionId()))
-			}
-			loginSessionID := loginSession.ID()
 
-			discordID, ok := sessionCtx.Value(ctxDiscordIDKey{}).(string)
-			if !ok {
-				logger.Warn("Failed to get discord_id from session context", zap.String("sid", entry.Presence.GetSessionId()))
-			}
-
-			isPCVR, ok := sessionCtx.Value(ctxIsPCVRKey{}).(bool)
-			if !ok {
-				logger.Warn("Failed to get is_pcvr from session context", zap.String("sid", entry.Presence.GetSessionId()))
-			}
-
+			metadata := params.AccountMetadata()
 			presence := &EvrMatchPresence{
-				Node:           entry.StringProperties["node"],
+				Node:           params.LoginSession().pipeline.node,
 				UserID:         session.UserID(),
 				SessionID:      session.ID(),
-				LoginSessionID: loginSessionID,
+				LoginSessionID: params.LoginSession().ID(),
 				Username:       session.Username(),
 				DisplayName:    metadata.GetGroupDisplayNameOrDefault(groupID.String()),
-				EvrID:          evrID,
+				EvrID:          params.EvrID(),
 				PartyID:        uuid.FromStringOrNil(entry.StringProperties["party_id"]),
 				RoleAlignment:  int(i),
-				DiscordID:      discordID,
+				DiscordID:      params.DiscordID(),
 				ClientIP:       session.ClientIP(),
 				ClientPort:     session.ClientPort(),
-				IsPCVR:         isPCVR,
+				IsPCVR:         params.IsPCVR(),
 				Rating: rating.NewWithOptions(&types.OpenSkillOptions{
 					Mu:    ptr.Float64(entry.NumericProperties["rating_mu"]),
 					Sigma: ptr.Float64(entry.NumericProperties["rating_sigma"]),

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -23,17 +24,6 @@ import (
 )
 
 const (
-	HMDSerialOverrideUrlParam             = "hmdserial"
-	DisplayNameOverrideUrlParam           = "displayname"
-	UserPasswordUrlParam                  = "password"
-	DiscordIdUrlParam                     = "discordid"
-	EvrIdOverrideUrlParam                 = "evrid"
-	BroadcasterEncryptionDisabledUrlParam = "disable_encryption"
-	BroadcasterHMACDisabledUrlParam       = "disable_hmac"
-	FeaturesURLParam                      = "features"
-	RequiredFeaturesURLParam              = "required_features"
-	ExternalServerIPURLParam              = "server_address"
-
 	EvrIDStorageIndex            = "EvrIDs_Index"
 	GameClientSettingsStorageKey = "clientSettings"
 	GamePlayerSettingsStorageKey = "playerSettings"
@@ -81,24 +71,10 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 	timer := time.Now()
 	defer func() { p.metrics.CustomTimer("login_duration", nil, time.Since(timer)) }()
 
-	payload := request.LoginData
-
 	// Check for an HMD serial override
-	hmdsn, ok := ctx.Value(ctxHMDSerialOverrideKey{}).(string)
-	if !ok {
-		hmdsn = payload.HmdSerialNumber
-	}
-
-	// Construct the device auth token from the login payload
-	deviceId := NewDeviceAuth(payload.AppId, request.EvrId, hmdsn, session.clientIP)
-
-	// Providing a discord ID and password avoids the need to link the device to the account.
-	// Server Hosts use this method to authenticate.
-	userPassword, _ := ctx.Value(ctxAuthPasswordKey{}).(string)
-	discordId, _ := ctx.Value(ctxAuthDiscordIDKey{}).(string)
 
 	// Authenticate the connection
-	gameSettings, err := p.processLogin(ctx, logger, session, request.EvrId, deviceId, discordId, userPassword, payload)
+	gameSettings, err := p.processLogin(ctx, logger, session, request)
 	if err != nil {
 		st := status.Convert(err)
 		return msgFailedLoginFn(session, request.EvrId, errors.New(st.Message()))
@@ -114,9 +90,31 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 }
 
 // processLogin handles the authentication of the login connection.
-func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, session *sessionWS, evrId evr.EvrId, deviceId *DeviceAuth, discordId string, userPassword string, loginProfile evr.LoginProfile) (settings *evr.GameSettings, err error) {
-	// Authenticate the account.
-	account, err := p.authenticateAccount(ctx, logger, session, deviceId, discordId, userPassword, loginProfile)
+func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, session *sessionWS, request *evr.LoginRequest) (settings *evr.GameSettings, err error) {
+
+	params, ok := session.Context().Value(ctxSessionParametersKey{}).(*SessionParameters)
+	if !ok {
+		return nil, errors.New("session parameters not found")
+	}
+
+	payload := request.LoginData
+
+	hmdsn := request.LoginData.HmdSerialNumber
+
+	if params.hmdSerialOverride != "" {
+		hmdsn = payload.HmdSerialNumber
+	}
+
+	// Providing a discord ID and password avoids the need to link the device to the account.
+	// Server Hosts use this method to authenticate.
+	evrID := request.GetEvrID()
+	params.SetLoginSession(session)
+	params.SetEvrID(evrID)
+
+	// Construct the device auth token from the login payload
+	deviceId := NewDeviceAuth(payload.AppId, request.EvrId, hmdsn, session.clientIP)
+
+	account, err := p.authenticateAccount(ctx, logger, session, deviceId, params.authDiscordID, params.authPassword, payload)
 	if err != nil {
 		return settings, err
 	}
@@ -124,55 +122,37 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		return settings, fmt.Errorf("account not found")
 	}
 	user := account.GetUser()
-	userId := user.GetId()
+	userID := user.GetId()
 	uid := uuid.FromStringOrNil(user.GetId())
 
 	// Get the user's metadata
-	metadata, err := GetAccountMetadata(ctx, p.runtimeModule, userId)
+	metadata, err := GetAccountMetadata(ctx, p.runtimeModule, userID)
 	if err != nil {
 		return settings, fmt.Errorf("failed to get user metadata: %w", err)
 	}
+	params.SetAccountMetadata(metadata)
+
 	// Check that this EVR-ID is only used by this userID
-	otherLogins, err := p.checkEvrIDOwner(ctx, evrId)
+	otherLogins, err := p.checkEvrIDOwner(ctx, evrID)
 	if err != nil {
 		return settings, fmt.Errorf("failed to check EVR-ID owner: %w", err)
 	}
 
 	if len(otherLogins) > 0 {
 		// Check if the user is the owner of the EVR-ID
-		if otherLogins[0].UserID != uuid.FromStringOrNil(userId) {
-			session.logger.Warn("EVR-ID is already in use", zap.String("evrId", evrId.Token()), zap.String("userId", userId))
+		if otherLogins[0].UserID != uuid.FromStringOrNil(userID) {
+			session.logger.Warn("EVR-ID is already in use", zap.String("evrId", evrID.Token()), zap.String("userId", userID))
 		}
 	}
 
 	// If user ID is not empty, write out the login payload to storage.
-	if userId != "" {
-		if err := writeAuditObjects(ctx, session, userId, evrId.Token(), loginProfile); err != nil {
+	if userID != "" {
+		if err := writeAuditObjects(ctx, session, userID, evrID.Token(), payload); err != nil {
 			session.logger.Warn("Failed to write audit objects", zap.Error(err))
 		}
 	}
 
-	// Check for the nonovr url param
-	params, ok := ctx.Value(ctxUrlParamsKey{}).(map[string]string)
-	if !ok {
-		params = make(map[string]string)
-	}
-	if _, ok := params["nonovr"]; ok {
-		loginProfile.SystemInfo.HeadsetType = "No No VR"
-	}
-
-	flags := 0
-	if loginProfile.SystemInfo.HeadsetType == "No VR" {
-		flags |= FlagNoVR
-	}
-
-	for name, flag := range groupFlagMap {
-		if ok, err := CheckGroupMembershipByName(ctx, p.db, uid.String(), name, SystemGroupLangTag); err != nil {
-			return settings, fmt.Errorf("failed to check group membership: %w", err)
-		} else if ok {
-			flags |= flag
-		}
-	}
+	params.SetIsVR(payload.SystemInfo.HeadsetType != "No VR")
 
 	// Check if this user is required to use 2FA
 	if found, err := CheckSystemGroupMembership(ctx, p.db, uid.String(), GroupGlobalRequire2FA); err != nil {
@@ -199,10 +179,8 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		}
 	}
 
-	verbose := metadata.DiscordDebugMessages
-
 	// Load the user's profile
-	profile, err := p.profileRegistry.GameProfile(ctx, logger, uuid.FromStringOrNil(userId), loginProfile, evrId)
+	profile, err := p.profileRegistry.GameProfile(ctx, logger, uuid.FromStringOrNil(userID), request.LoginData, evrID)
 	if err != nil {
 		session.logger.Error("failed to load game profiles", zap.Error(err))
 		return evr.NewDefaultGameSettings(), fmt.Errorf("failed to load game profiles")
@@ -217,14 +195,12 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	}
 	metadata.SetActiveGroupID(groupID)
 
-	groupID = metadata.GetActiveGroupID()
-
 	// Queue a full account sync.
-	p.discordCache.Queue(userId, groupID.String())
-	p.discordCache.Queue(userId, "")
+	p.discordCache.Queue(userID, groupID.String())
+	p.discordCache.Queue(userID, "")
 
 	// Get a list of the user's guild memberships and set to the largest one
-	memberships, err := GetGuildGroupMemberships(ctx, p.runtimeModule, userId, nil)
+	memberships, err := GetGuildGroupMemberships(ctx, p.runtimeModule, userID)
 	if err != nil {
 		return settings, fmt.Errorf("failed to get guild groups: %w", err)
 	}
@@ -232,29 +208,41 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		return settings, fmt.Errorf("user is not in any guild groups")
 	}
 
-	found := false
-	for _, m := range memberships {
-		if m.GuildGroup.ID() == groupID {
-			metadata.SetActiveGroupID(groupID)
+	var found bool
+
+	membershipMap := make(map[string]GuildGroupMembership)
+	for id, m := range memberships {
+		membershipMap[id] = m
+		if id == groupID.String() {
 			found = true
-			break
 		}
 	}
 
 	if !found {
-		logger.Warn("User is not in the active group", zap.String("userId", userId), zap.String("groupID", groupID.String()))
+
+		guildGroups := p.GuildGroups()
+		if guildGroups == nil {
+			return settings, fmt.Errorf("guild groups not found")
+		}
+
+		logger.Warn("User is not in the active group", zap.String("userId", userID), zap.String("groupID", groupID.String()))
+
+		groupIDs := make([]string, 0, len(membershipMap))
+		for id := range membershipMap {
+			groupIDs = append(groupIDs, id)
+		}
 
 		// Sort the groups by the edgecount
-		sort.SliceStable(memberships, func(i, j int) bool {
-			return memberships[i].GuildGroup.Size() > memberships[j].GuildGroup.Size()
+		slices.SortStableFunc(groupIDs, func(a, b string) int {
+			return int(guildGroups[a].Group.EdgeCount - guildGroups[b].Group.EdgeCount)
 		})
-		groupID = memberships[0].GuildGroup.ID()
+		slices.Reverse(groupIDs)
+		groupID = uuid.FromStringOrNil(groupIDs[0])
+
 		logger.Debug("Setting active group", zap.String("groupID", groupID.String()))
 		metadata.SetActiveGroupID(groupID)
-		metadata.GetActiveGroupDisplayName()
 	}
-
-	isPCVR := true
+	params.SetMemberships(membershipMap)
 
 	questTypes := []string{
 		"Quest",
@@ -262,27 +250,41 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		"Quest 3",
 		"Quest Pro",
 	}
+
+	isPCVR := true
+
 	for _, t := range questTypes {
-		if strings.Contains(strings.ToLower(loginProfile.SystemInfo.HeadsetType), strings.ToLower(t)) {
+		if strings.Contains(strings.ToLower(request.LoginData.SystemInfo.HeadsetType), strings.ToLower(t)) {
 			isPCVR = false
 			break
 		}
 	}
-	if err := p.runtimeModule.AccountUpdateId(ctx, userId, "", metadata.MarshalMap(), "", "", "", "", ""); err != nil {
+
+	params.SetIsPCVR(isPCVR)
+
+	if err := p.runtimeModule.AccountUpdateId(ctx, userID, "", metadata.MarshalMap(), "", "", "", "", ""); err != nil {
 		return settings, fmt.Errorf("failed to update user metadata: %w", err)
 	}
 	// Initialize the full session
-	if err := session.LoginSession(userId, user.GetUsername(), *metadata, account.GetCustomId(), evrId, deviceId, groupID, flags, verbose, isPCVR); err != nil {
+	if err := session.SetIdentity(uuid.FromStringOrNil(userID), evrID, user.GetUsername()); err != nil {
 		return settings, fmt.Errorf("failed to login: %w", err)
 	}
 	ctx = session.Context()
 
-	profile.SetEvrID(evrId)
+	profile.SetEvrID(evrID)
 	profile.SetChannel(evr.GUID(metadata.GetActiveGroupID()))
 	profile.UpdateDisplayName(metadata.GetActiveGroupDisplayName())
 
 	p.profileRegistry.Save(ctx, session.userID, profile)
-
+	/*
+		session.SendEvr(&evr.EarlyQuitConfig{
+			SteadyPlayerLevel: 1,
+			NumSteadyMatches:  1,
+			PenaltyLevel:      1,
+			PenaltyTs:         time.Now().Add(12 * time.Hour).Unix(),
+			NumEarlyQuits:     1,
+		})
+	*/
 	// TODO Add the settings to the user profile
 	settings = evr.NewDefaultGameSettings()
 	return settings, nil
@@ -450,17 +452,30 @@ func (p *EvrPipeline) channelInfoRequest(ctx context.Context, logger *zap.Logger
 	key := fmt.Sprintf("channelInfo,%s", groupID.String())
 
 	// Check the cache first
-	message, found := p.messageCache.Load(key)
-	if !found {
-		guildGroup, found := p.guildGroups.Load(groupID.String())
-		if !found {
+	message := p.GetCachedMessage(key)
+
+	if message == nil {
+
+		guildGroup := p.GuildGroup(groupID.String())
+		if guildGroup == nil {
 			return fmt.Errorf("guild group not found: %s", groupID.String())
 		}
 		g := guildGroup.Group
 
-		resource, err := p.buildChannelInfo(groupID.String(), g.Name, g.Description, guildGroup.Metadata.RulesText)
-		if err != nil {
-			logger.Warn("Error building channel info", zap.Error(err))
+		resource := evr.NewChannelInfoResource()
+
+		resource.Groups = make([]evr.ChannelGroup, 4)
+		for i := range resource.Groups {
+			resource.Groups[i] = evr.ChannelGroup{
+				ChannelUuid:  strings.ToUpper(g.Id),
+				Name:         g.Name,
+				Description:  g.Description,
+				Rules:        g.Description + "\n" + guildGroup.Metadata.RulesText,
+				RulesVersion: 1,
+				Link:         fmt.Sprintf("https://discord.gg/channel/%s", guildGroup.Metadata.GuildID),
+				Priority:     uint64(i),
+				RAD:          true,
+			}
 		}
 
 		if resource == nil {
@@ -468,31 +483,11 @@ func (p *EvrPipeline) channelInfoRequest(ctx context.Context, logger *zap.Logger
 		}
 
 		message = evr.NewSNSChannelInfoResponse(resource)
-		p.messageCache.Store(key, message)
+		p.CacheMessage(key, message)
 	}
 
 	// send the document to the client
 	return session.SendEvrUnrequire(message)
-}
-
-func (p *EvrPipeline) buildChannelInfo(groupID, name, description, rulesText string) (*evr.ChannelInfoResource, error) {
-	resource := evr.NewChannelInfoResource()
-
-	resource.Groups = make([]evr.ChannelGroup, 4)
-	for i := range resource.Groups {
-		resource.Groups[i] = evr.ChannelGroup{
-			ChannelUuid:  strings.ToUpper(groupID),
-			Name:         name,
-			Description:  description,
-			Rules:        rulesText + "\n" + rulesText,
-			RulesVersion: 1,
-			Link:         fmt.Sprintf("https://discord.gg/channel/%s", name),
-			Priority:     uint64(i),
-			RAD:          true,
-		}
-	}
-
-	return resource, nil
 }
 
 func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) (err error) {
@@ -501,39 +496,43 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 	timer := time.Now()
 	defer func() { p.metrics.CustomTimer("loggedInUserProfileRequest", nil, time.Since(timer)) }()
 
-	// Ignore the request and use what was authenticated with
-	evrID, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
+	params, ok := ctx.Value(ctxSessionParametersKey{}).(*SessionParameters)
 	if !ok {
-		logger.Error("evrId not found in context")
-		// Get it from the request
-		evrID = request.EvrId
+		return errors.New("session parameters not found")
+	}
+
+	if params.EvrID() != request.EvrID {
+		return fmt.Errorf("evrId mismatch: %s != %s", params.EvrID().Token(), request.EvrID.Token())
 	}
 
 	profile, err := p.profileRegistry.Load(ctx, session.userID)
 	if err != nil {
-		return session.SendEvr(evr.NewLoggedInUserProfileFailure(request.EvrId, 400, "failed to load game profiles"))
+		return session.SendEvr(evr.NewLoggedInUserProfileFailure(request.EvrID, 400, "failed to load game profiles"))
 	}
-	profile.SetEvrID(evrID)
+	profile.SetEvrID(request.EvrID)
 
-	md, err := GetGuildGroupMetadata(ctx, p.db, profile.GetChannel().String())
-	if err != nil {
-		logger.Warn("Failed to get guild group metadata", zap.Error(err))
-	} else {
-		// Check if the user is required to go through community values
-		if !md.hasCompletedCommunityValues(session.userID.String()) {
-			profile.Client.Social.CommunityValuesVersion = 0
-		}
+	gg := p.GuildGroup(params.AccountMetadata().GetActiveGroupID().String())
+
+	// Check if the user is required to go through community values
+	if !gg.Metadata.hasCompletedCommunityValues(session.userID.String()) {
+		profile.Client.Social.CommunityValuesVersion = 0
 	}
 
-	return session.SendEvr(evr.NewLoggedInUserProfileSuccess(evrID, profile.Client, profile.Server))
+	return session.SendEvr(evr.NewLoggedInUserProfileSuccess(request.EvrID, profile.Client, profile.Server))
 }
 
 func (p *EvrPipeline) updateClientProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.UpdateClientProfile)
-	// Ignore the EvrID in the request and use what was authenticated with
-	evrID, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
+
+	params, ok := ctx.Value(ctxSessionParametersKey{}).(*SessionParameters)
 	if !ok {
-		return fmt.Errorf("evrId not found in context")
+		return errors.New("session parameters not found")
+	}
+
+	evrID := request.ClientProfile.EvrID
+
+	if params.EvrID() != evrID {
+		return fmt.Errorf("evrId mismatch: %s != %s", params.EvrID().Token(), evrID.Token())
 	}
 
 	go func() {
@@ -545,53 +544,48 @@ func (p *EvrPipeline) updateClientProfileRequest(ctx context.Context, logger *za
 	}()
 
 	// Send the profile update to the client
-	if err := session.SendEvr(
-		evr.NewSNSUpdateProfileSuccess(&evrID),
-		evr.NewSTcpConnectionUnrequireEvent(),
-	); err != nil {
-		logger.Warn("Failed to send UpdateProfileSuccess", zap.Error(err))
-	}
-
-	return nil
+	return session.SendEvrUnrequire(evr.NewSNSUpdateProfileSuccess(&evrID))
 }
 
 func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap.Logger, session *sessionWS, evrID evr.EvrId, update evr.ClientProfile) error {
 	// Set the EVR ID from the context
 	update.EvrID = evrID
 
-	memberships, err := GetGuildGroupMemberships(ctx, p.runtimeModule, session.userID.String(), nil)
-	if err != nil {
-		return fmt.Errorf("failed to get guild groups: %w", err)
+	params, ok := ctx.Value(ctxSessionParametersKey{}).(*SessionParameters)
+	if !ok {
+		return errors.New("session parameters not found")
 	}
-	if len(memberships) == 0 {
-		return fmt.Errorf("user is not in any guild groups")
-	}
+
+	// Get the user's metadata
+	memberships := params.Memberships()
+
 	userID := session.userID.String()
-	for _, m := range memberships {
-		md := m.GuildGroup.Metadata
+	for groupID, _ := range memberships {
+		gg := p.GuildGroup(groupID)
+		if gg == nil {
+			return fmt.Errorf("guild group not found: %s", params.AccountMetadata().GetActiveGroupID().String())
+		}
+		md := gg.Metadata
+
 		if !md.hasCompletedCommunityValues(userID) {
-			groupID := m.GuildGroup.ID()
+			groupID := gg.ID()
 
 			hasCompleted := update.Social.CommunityValuesVersion != 0
 
 			if hasCompleted {
 
 				md.CommunityValuesUserIDsRemove(session.userID.String())
+
 				if err := SetGuildGroupMetadata(ctx, p.runtimeModule, groupID.String(), md); err != nil {
 					return fmt.Errorf("failed to set guild group metadata: %w", err)
 				}
-
-				discordID := p.discordCache.UserIDToDiscordID(session.userID.String())
-				p.appBot.LogMessageToChannel(fmt.Sprintf("User <@%s> has accepted the community values.", discordID), md.AuditChannelID)
+				params.DiscordID()
+				p.appBot.LogMessageToChannel(fmt.Sprintf("User <@%s> has accepted the community values.", params.DiscordID()), md.AuditChannelID)
 			}
 		}
 	}
 
-	if _, err := p.profileRegistry.UpdateClientProfile(ctx, logger, session, update); err != nil {
-		return fmt.Errorf("UpdateProfile: %w", err)
-	}
-
-	return nil
+	return p.profileRegistry.UpdateClientProfile(ctx, logger, session, update)
 }
 
 func (p *EvrPipeline) remoteLogSetv3(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
@@ -609,37 +603,54 @@ func (p *EvrPipeline) remoteLogSetv3(ctx context.Context, logger *zap.Logger, se
 func (p *EvrPipeline) documentRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.DocumentRequest)
 
+	params := ctx.Value(ctxSessionParametersKey{}).(*SessionParameters)
+	if params == nil {
+		return errors.New("session parameters not found")
+	}
+
 	var document evr.Document
 	var err error
 	switch request.Type {
 	case "eula":
 
-		if flags, ok := ctx.Value(ctxFlagsKey{}).(int); ok && flags&FlagNoVR != 0 {
-			// Get the version of the EULA from the profile
-			eulaVersion, gaVersion, err := GetEULAVersion(ctx, p.db, session.userID.String())
-			if err != nil {
-				logger.Warn("Failed to get EULA version", zap.Error(err))
-				eulaVersion = 1
-				gaVersion = 1
+		if !params.IsVR() {
+
+			message := p.GetCachedMessage("eula:novr")
+
+			if message == nil {
+
+				eulaVersion, gaVersion, err := GetEULAVersion(ctx, p.db, session.userID.String())
+				if err != nil {
+					logger.Warn("Failed to get EULA version", zap.Error(err))
+					eulaVersion = 1
+					gaVersion = 1
+				}
+				document = evr.NewEULADocument(int(eulaVersion), int(gaVersion), request.Language, "https://github.com/EchoTools", "Blank EULA for NoVR clients.")
+				message := evr.NewDocumentSuccess(document)
+				p.CacheMessage("eula:novr", message)
+
 			}
-			document = evr.NewEULADocument(int(eulaVersion), int(gaVersion), request.Language, "https://github.com/EchoTools", "Blank EULA for NoVR clients.")
 
-		} else {
+			return session.SendEvrUnrequire(message)
 
+		}
+
+		message := p.GetCachedMessage("eula:vr:" + request.Language)
+
+		if message == nil {
 			document, err = p.generateEULA(ctx, logger, request.Language)
 			if err != nil {
 				return fmt.Errorf("failed to get eula document: %w", err)
 			}
+
+			message = evr.NewDocumentSuccess(document)
 		}
+
+		return session.SendEvrUnrequire(message)
+
 	default:
 		return fmt.Errorf("unknown document: %s,%s", request.Language, request.Type)
 	}
-
-	session.SendEvr(
-		evr.NewDocumentSuccess(document),
-		evr.NewSTcpConnectionUnrequireEvent(),
-	)
-	return nil
 }
 
 func GetEULAVersion(ctx context.Context, db *sql.DB, userID string) (int, int, error) {

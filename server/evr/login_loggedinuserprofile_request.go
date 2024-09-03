@@ -10,7 +10,7 @@ import (
 // client -> nakama: request the user profile for their logged-in account.
 type LoggedInUserProfileRequest struct {
 	Session            uuid.UUID
-	EvrId              EvrId
+	EvrID              EvrId
 	ProfileRequestData ProfileRequestData
 }
 
@@ -23,14 +23,14 @@ func (m LoggedInUserProfileRequest) Symbol() Symbol {
 }
 
 func (r LoggedInUserProfileRequest) String() string {
-	return fmt.Sprintf("LoggedInUserProfileRequest(session=%v, user_id=%v, profile_request=%v)", r.Session, r.EvrId, r.ProfileRequestData)
+	return fmt.Sprintf("LoggedInUserProfileRequest(session=%v, user_id=%v, profile_request=%v)", r.Session, r.EvrID, r.ProfileRequestData)
 }
 
 func (m *LoggedInUserProfileRequest) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
 		func() error { return s.StreamGuid(&m.Session) },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.EvrId.PlatformCode) },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.EvrId.AccountId) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.EvrID.PlatformCode) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.EvrID.AccountId) },
 		func() error { return s.StreamJson(&m.ProfileRequestData, true, NoCompression) },
 	})
 }
@@ -38,7 +38,7 @@ func (m *LoggedInUserProfileRequest) Stream(s *EasyStream) error {
 func NewLoggedInUserProfileRequest(session uuid.UUID, evrId EvrId, profileRequestData ProfileRequestData) LoggedInUserProfileRequest {
 	return LoggedInUserProfileRequest{
 		Session:            session,
-		EvrId:              evrId,
+		EvrID:              evrId,
 		ProfileRequestData: profileRequestData,
 	}
 }
@@ -47,7 +47,7 @@ func (m *LoggedInUserProfileRequest) GetSessionID() uuid.UUID {
 }
 
 func (m *LoggedInUserProfileRequest) GetEvrID() EvrId {
-	return m.EvrId
+	return m.EvrID
 }
 
 type ProfileRequestData struct {

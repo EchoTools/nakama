@@ -15,7 +15,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func (p *EvrPipeline) lobbyCreate(ctx context.Context, logger *zap.Logger, session Session, params SessionParameters) (MatchID, error) {
+func (p *EvrPipeline) lobbyCreate(ctx context.Context, logger *zap.Logger, session Session, params *LobbySessionParameters) (MatchID, error) {
 	nk := p.runtimeModule
 	db := p.db
 	matchRegistry := p.matchRegistry
@@ -55,18 +55,13 @@ func (p *EvrPipeline) lobbyCreate(ctx context.Context, logger *zap.Logger, sessi
 
 	label := labels[0]
 
-	requiredFeatures, ok := ctx.Value(ctxRequiredFeaturesKey{}).([]string)
-	if !ok {
-		requiredFeatures = make([]string, 0)
-	}
-
 	label.Mode = params.Mode
 	label.Level = params.Level
 	label.SpawnedBy = session.UserID().String()
 	label.GroupID = &params.GroupID
 	label.TeamAlignments = map[string]int{session.UserID().String(): params.Role}
 
-	label.RequiredFeatures = requiredFeatures
+	label.RequiredFeatures = params.RequiredFeatures
 	label.StartTime = time.Now().UTC()
 
 	response, err := SignalMatch(ctx, matchRegistry, label.ID, SignalPrepareSession, label)
@@ -103,7 +98,7 @@ func lobbyListGameServers(ctx context.Context, logger *zap.Logger, db *sql.DB, n
 	return labels, nil
 }
 
-func lobbyCreateQuery(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, session Session, params SessionParameters) (string, error) {
+func lobbyCreateQuery(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, session Session, params *LobbySessionParameters) (string, error) {
 
 	regions := []string{params.Region.String(), evr.DefaultRegion.String()}
 	qparts := []string{
@@ -124,7 +119,7 @@ func lobbyCreateQuery(ctx context.Context, logger *zap.Logger, db *sql.DB, nk ru
 	return query, nil
 }
 
-func lobbyCreateSortOptions(labels []*MatchLabel, labelLatencies []int, params SessionParameters) {
+func lobbyCreateSortOptions(labels []*MatchLabel, labelLatencies []int, params *LobbySessionParameters) {
 	// Sort the labels by latency
 	sort.SliceStable(labels, func(i, j int) bool {
 		// Sort by region first

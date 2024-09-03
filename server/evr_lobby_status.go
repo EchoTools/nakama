@@ -24,7 +24,7 @@ func (l MatchmakingGroupLabel) String() string {
 	return string(data)
 }
 
-func MatchmakingStream(ctx context.Context, logger *zap.Logger, s *sessionWS, params SessionParameters) (PresenceStream, MatchmakingGroupLabel, error) {
+func MatchmakingStream(ctx context.Context, logger *zap.Logger, s *sessionWS, params *LobbySessionParameters) (PresenceStream, MatchmakingGroupLabel, error) {
 	_, subject, err := GetLobbyGroupID(ctx, s.pipeline.db, s.userID.String())
 	if err != nil {
 		return PresenceStream{}, MatchmakingGroupLabel{}, fmt.Errorf("failed to get party group ID: %v", err)

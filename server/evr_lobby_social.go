@@ -17,7 +17,7 @@ import (
 
 type TeamAlignments map[string]int // map[UserID]Role
 
-func lobbyCreateSocial(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, session Session, matchRegistry MatchRegistry, params SessionParameters) (MatchID, error) {
+func lobbyCreateSocial(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, session Session, matchRegistry MatchRegistry, params *LobbySessionParameters) (MatchID, error) {
 
 	qparts := []string{
 		"+label.open:T",

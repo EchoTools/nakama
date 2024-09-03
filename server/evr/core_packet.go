@@ -87,6 +87,7 @@ var (
 		0xfb772a4221fc8d70: (*LoggedInUserProfileRequest)(nil),
 		0xfcced6f169822bb8: (*DocumentRequest)(nil),
 		0xff71856af7e0fbd9: (*LobbyEntrantsV0)(nil),
+		//0x080495a43a6b7251: (*EarlyQuitConfig)(nil),
 	}
 
 	// Create a reverse lookup map for the symbol types.
