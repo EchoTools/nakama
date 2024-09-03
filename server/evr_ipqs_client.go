@@ -210,6 +210,9 @@ func (s *IPQSClient) IsVPN(ip string) bool {
 		s.logger.Warn("IPQS request timed out, failing open.")
 		return false
 	case result := <-resultCh:
+		if result == nil {
+			return false
+		}
 		return result.VPN
 	}
 }
@@ -237,7 +240,7 @@ func (s *IPQSClient) SaveCache() error {
 			PermissionWrite: &wrapperspb.Int32Value{Value: int32(0)},
 		},
 	}}
-	_, _, err = StorageWriteObjects(s.ctx, s.logger, s.db, s.metrics, s.storageIndex, false, ops)
+	_, _, err = StorageWriteObjects(s.ctx, s.logger, s.db, s.metrics, s.storageIndex, true, ops)
 	if err != nil {
 		return fmt.Errorf("failed to write cache: %v", err)
 	}
