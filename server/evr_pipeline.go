@@ -71,6 +71,9 @@ type EvrPipeline struct {
 
 	placeholderEmail string
 	linkDeviceURL    string
+
+	guildGroups  *MapOf[string, *GuildGroup]
+	messageCache *MapOf[string, evr.Message]
 }
 
 type ctxDiscordBotTokenKey struct{}
@@ -187,16 +190,59 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		linkDeviceURL:                    config.GetRuntime().Environment["LINK_DEVICE_URL"],
 	}
 
+	// Reload the guild groups
+	guildGroups, err := evrPipeline.loadGuildGroups()
+	if err != nil {
+		logger.Error("Failed to load guild groups", zap.Error(err))
+	} else {
+		for _, gg := range guildGroups {
+			evrPipeline.guildGroups.Store(gg.Group.Id, gg)
+		}
+	}
+
 	// Create a timer to periodically clear the backfill queue
 	go func() {
 		interval := 3 * time.Minute
+
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
+
+		guildGroupTicker := time.NewTicker(3 * time.Minute)
+		guildGroupTicker.Stop()
+
+		messageCacheTicker := time.NewTicker(3 * time.Minute)
+		messageCacheTicker.Stop()
+
 		for {
 			select {
 			case <-evrPipeline.ctx.Done():
 				ticker.Stop()
 				return
+			case <-guildGroupTicker.C:
+
+				// Reload the guild groups
+				guildGroups, err := evrPipeline.loadGuildGroups()
+				if err != nil {
+					logger.Error("Failed to load guild groups", zap.Error(err))
+				} else {
+					for _, gg := range guildGroups {
+						evrPipeline.guildGroups.Store(gg.Group.Id, gg)
+					}
+				}
+
+				evrPipeline.guildGroups.Range(func(key string, value *GuildGroup) bool {
+					if guildGroups[value.Group.Id] == nil {
+						evrPipeline.guildGroups.Delete(key)
+					}
+					return true
+				})
+
+			case <-messageCacheTicker.C:
+
+				evrPipeline.messageCache.Range(func(key string, value evr.Message) bool {
+					evrPipeline.messageCache.Delete(key)
+					return true
+				})
 
 			case <-ticker.C:
 
@@ -220,6 +266,36 @@ func (p *EvrPipeline) SetApiServer(apiServer *ApiServer) {
 }
 
 func (p *EvrPipeline) Stop() {}
+
+func (p *EvrPipeline) loadGuildGroups() (map[string]*GuildGroup, error) {
+	// Retrieve the guild groups
+	guildGroups := make(map[string]*GuildGroup, 100)
+
+	cursor := ""
+	var groups []*api.Group
+	var err error
+
+	for {
+		groups, cursor, err = p.runtimeModule.GroupsList(p.ctx, "", "guild", nil, nil, 100, "")
+		if err != nil {
+			return nil, err
+		}
+
+		for _, group := range groups {
+			gg, err := NewGuildGroup(group)
+			if err != nil {
+				return nil, err
+			}
+			guildGroups[gg.Group.Id] = gg
+		}
+
+		if cursor == "" {
+			break
+		}
+	}
+
+	return guildGroups, nil
+}
 
 func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, in evr.Message) bool {
 
