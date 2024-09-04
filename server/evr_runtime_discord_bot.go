@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -101,6 +102,25 @@ func (d *DiscordAppBot) LogMessageToChannel(message string, channelID string) er
 	_, err := d.dg.ChannelMessageSend(channelID, message)
 	if err != nil {
 		return fmt.Errorf("failed to send message: %w", err)
+	}
+	return nil
+}
+
+func (d *DiscordAppBot) LogAuditMessage(ctx context.Context, groupID string, message string, replaceMentions bool) error {
+	// replace all <@uuid> mentions with <@discordID>
+	if replaceMentions {
+		message = d.cache.ReplaceMentions(message)
+	}
+
+	groupMetadata, err := GetGuildGroupMetadata(ctx, d.db, groupID)
+	if err != nil {
+		return err
+	}
+
+	if groupMetadata.AuditChannelID != "" {
+		if _, err := d.dg.ChannelMessageSend(groupMetadata.AuditChannelID, message); err != nil {
+			return err
+		}
 	}
 	return nil
 }

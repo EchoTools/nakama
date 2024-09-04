@@ -459,7 +459,7 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 	return state
 }
 
-var PresenceReasonKicked uint8 = 16
+var PresenceReasonKicked runtime.PresenceReason = 16
 
 // MatchLeave is called after a player leaves the match.
 func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ interface{}, presences []runtime.Presence) interface{} {
@@ -468,6 +468,11 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 		logger.Error("state not a valid lobby state object")
 		return nil
 	}
+
+	for _, p := range presences {
+		logger.WithField("presence", p).Debug("Player leaving the match.")
+	}
+
 	if state.Started() && state.server == nil && len(state.presenceMap) == 0 {
 		// If the match is empty, and the broadcaster has left, then shut down.
 		logger.Debug("Match is empty. Shutting down.")
@@ -484,10 +489,14 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 		}
 	}
 
+	reason := runtime.PresenceReasonLeave
+
 	rejects := make([]uuid.UUID, 0)
 
 	for _, p := range presences {
 		logger.WithField("presence", p).Debug("Player leaving the match.")
+
+		reason = p.GetReason()
 
 		if mp, ok := state.presenceMap[p.GetSessionId()]; ok {
 			tags := map[string]string{
@@ -522,7 +531,11 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 	}
 
 	if len(rejects) > 0 {
-		msg := evr.NewGameServerEntrantRejected(evr.PlayerRejectionReasonLobbyEnding, rejects...)
+		code := evr.PlayerRejectionReasonLobbyEnding
+		if reason == PresenceReasonKicked {
+			code = evr.PlayerRejectionReasonKickedFromServer
+		}
+		msg := evr.NewGameServerEntrantRejected(code, rejects...)
 		if err := m.dispatchMessages(ctx, logger, dispatcher, []evr.Message{msg}, []runtime.Presence{state.server}, nil); err != nil {
 			logger.Warn("Failed to dispatch message: %v", err)
 		}
@@ -1033,6 +1046,18 @@ func (m *EvrMatch) updateLabel(dispatcher runtime.MatchDispatcher, state *MatchL
 	state.rebuildCache()
 	if err := dispatcher.MatchLabelUpdate(state.GetLabel()); err != nil {
 		return fmt.Errorf("could not update label: %v", err)
+	}
+	return nil
+}
+
+func (m *EvrMatch) kickEntrants(ctx context.Context, logger runtime.Logger, dispatcher runtime.MatchDispatcher, state *MatchLabel, entrantIDs ...uuid.UUID) error {
+	return m.sendEntrantReject(ctx, logger, dispatcher, state, evr.PlayerRejectionReasonKickedFromServer, entrantIDs...)
+}
+
+func (m *EvrMatch) sendEntrantReject(ctx context.Context, logger runtime.Logger, dispatcher runtime.MatchDispatcher, state *MatchLabel, reason evr.PlayerRejectionReason, entrantIDs ...uuid.UUID) error {
+	msg := evr.NewGameServerEntrantRejected(reason, entrantIDs...)
+	if err := m.dispatchMessages(ctx, logger, dispatcher, []evr.Message{msg}, []runtime.Presence{state.server}, nil); err != nil {
+		return fmt.Errorf("failed to dispatch message: %v", err)
 	}
 	return nil
 }

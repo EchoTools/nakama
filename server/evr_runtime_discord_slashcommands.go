@@ -1545,7 +1545,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return fmt.Errorf("invalid level `%s`", level)
 			}
 
-			startTime := time.Now()
+			timeoutMinutes := 1
+
+			startTime := time.Now().Add(time.Minute * time.Duration(timeoutMinutes))
 
 			userID, err := GetUserIDByDiscordID(ctx, db, user.ID)
 			if err != nil {
@@ -1567,7 +1569,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 			rttMs := int(rtt / 1000000)
 			logger.WithField("label", label).Info("Match created.")
-			content := fmt.Sprintf("Reserved server (%dms ping) for `%s` session. Reservation will timeout in %d minute.\n\nhttps://echo.taxi/spark://c/%s", rttMs, label.Mode.String(), 1, strings.ToUpper(label.ID.UUID.String()))
+			content := fmt.Sprintf("Reserved server (%dms ping) for `%s` session. Reservation will timeout in %d minute.\n\nhttps://echo.taxi/spark://c/%s", rttMs, label.Mode.String(), timeoutMinutes, strings.ToUpper(label.ID.UUID.String()))
 			return simpleInteractionResponse(s, i, content)
 		},
 		"allocate": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
@@ -1676,12 +1678,46 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return errors.New("failed to get user ID")
 			}
 
-			cnt, err := DisconnectUserID(ctx, d.nk, targetUserIDStr)
+			presences, err := d.nk.StreamUserList(StreamModeService, userID, "", StreamLabelMatchService, true, true)
 			if err != nil {
 				return err
 			}
+			callerID := user.ID
 
-			return simpleInteractionResponse(s, i, fmt.Sprintf("Disconnected %d sessions. Player is required to complete *Community Values* when entering the next social lobby.", cnt))
+			cnt := 0
+			for _, p := range presences {
+
+				if p.GetUserId() == targetUserIDStr {
+					mid := MatchIDFromStringOrNil(p.GetStatus())
+					var label *MatchLabel
+					var err error
+					if !mid.IsNil() {
+						label, err = MatchLabelByID(ctx, d.nk, mid)
+					}
+					if label == nil || err != nil {
+						// Just disconnect the user, wholesale
+						if n, err := DisconnectUserID(ctx, d.nk, targetUserIDStr); err != nil {
+							return fmt.Errorf("failed to disconnect user: %w", err)
+						} else {
+
+							_ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s disconnected player %s from match service.", callerID, target.ID), false)
+							cnt += n
+							continue
+
+						}
+					}
+
+					mode := label.Mode.String()
+					// Kick the player from the match
+					if err := KickPlayerFromMatch(ctx, d.nk, mid, targetUserIDStr); err != nil {
+						return err
+					}
+
+					_ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> kicked player <@%s> from [%s](https://echo.taxi/spark://c/%s) match.", callerID, target.ID, mode, strings.ToUpper(mid.UUID.String())), false)
+					cnt++
+				}
+			}
+			return simpleInteractionResponse(s, i, fmt.Sprintf("Disconnected %d sessions.", cnt))
 		},
 
 		"set-roles": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
