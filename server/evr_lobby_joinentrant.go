@@ -144,7 +144,8 @@ func LobbyJoinEntrant(logger *zap.Logger, matchRegistry MatchRegistry, tracker T
 		err = NewLobbyErrorf(ServerIsFull, "join attempt failed: %s", reason)
 	} else if !isNew {
 		logger.Warn("Player is already in the match. ignoring.", zap.String("mid", matchID.UUID.String()), zap.String("uid", e.UserID.String()))
-		err = nil
+		errorCh <- nil
+		return nil
 	}
 
 	if err != nil {
