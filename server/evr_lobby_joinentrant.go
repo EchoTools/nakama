@@ -300,21 +300,25 @@ func (p *EvrPipeline) authorizeGuildGroupSession(ctx context.Context, session Se
 		}
 	}
 
-	if groupMetadata.BlockVPNUsers && groupMetadata.IsVPNBypass(userID) {
+	if groupMetadata.BlockVPNUsers && !groupMetadata.IsVPNBypass(userID) {
 		isVPN, ok := ctx.Value(ctxIsVPNUserKey{}).(bool)
 		if !ok {
 			return NewLobbyError(InternalError, "failed to get VPN status")
 		}
+
 		if isVPN {
+			score := p.ipqsClient.Score(session.ClientIP())
+			if score >= groupMetadata.FraudScoreThreshold {
 
-			if sendAuditMessage {
+				if sendAuditMessage {
 
-				if _, err := p.appBot.dg.ChannelMessageSend(groupMetadata.AuditChannelID, fmt.Sprintf("Rejected VPN user <@%s> from %s", discordID, session.ClientIP())); err != nil {
-					p.logger.Warn("Failed to send audit message", zap.String("channel_id", groupMetadata.AuditChannelID), zap.Error(err))
+					if _, err := p.appBot.dg.ChannelMessageSend(groupMetadata.AuditChannelID, fmt.Sprintf("Rejected VPN user <@%s> (score: %d) from %s", discordID, score, session.ClientIP())); err != nil {
+						p.logger.Warn("Failed to send audit message", zap.String("channel_id", groupMetadata.AuditChannelID), zap.Error(err))
+					}
 				}
-			}
 
-			return NewLobbyError(KickedFromLobbyGroup, "This guild does not allow VPN access, Disable your VPN and try again.")
+				return NewLobbyError(KickedFromLobbyGroup, "This guild does not allow VPN access, Disable your VPN and try again.")
+			}
 		}
 	}
 
