@@ -18,6 +18,7 @@ type GuildGroupRoles struct {
 	Suspended        string `json:"suspended"`
 	APIAccess        string `json:"api_access"`
 	AccountAgeBypass string `json:"account_age_bypass"`
+	VPNBypass        string `json:"vpn_bypass"`
 	AccountLinked    string `json:"headset_linked"`
 }
 
@@ -32,6 +33,7 @@ func (r *GuildGroupRoles) Slice() []string {
 		r.Suspended,
 		r.APIAccess,
 		r.AccountAgeBypass,
+		r.VPNBypass,
 		r.AccountLinked,
 	} {
 		if r != "" {
@@ -126,6 +128,13 @@ func (m *GroupMetadata) IsAPIAccess(userID string) bool {
 
 func (m *GroupMetadata) IsAccountAgeBypass(userID string) bool {
 	if userIDs, ok := m.RoleCache[m.Roles.AccountAgeBypass]; ok {
+		return slices.Contains(userIDs, userID)
+	}
+	return false
+}
+
+func (m *GroupMetadata) IsVPNBypass(userID string) bool {
+	if userIDs, ok := m.RoleCache[m.Roles.VPNBypass]; ok {
 		return slices.Contains(userIDs, userID)
 	}
 	return false

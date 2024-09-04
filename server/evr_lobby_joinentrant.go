@@ -255,7 +255,7 @@ func (p *EvrPipeline) authorizeGuildGroupSession(ctx context.Context, session Se
 		return ErrSuspended
 	}
 
-	if groupMetadata.MinimumAccountAgeDays > 0 && !slices.Contains(groupMetadata.RoleCache[groupMetadata.Roles.AccountAgeBypass], userID) {
+	if groupMetadata.MinimumAccountAgeDays > 0 && groupMetadata.IsAccountAgeBypass(userID) {
 		// Check the account creation date.
 		discordID, err := GetDiscordIDByUserID(ctx, p.db, userID)
 		if err != nil {
@@ -300,7 +300,7 @@ func (p *EvrPipeline) authorizeGuildGroupSession(ctx context.Context, session Se
 		}
 	}
 
-	if groupMetadata.BlockVPNUsers {
+	if groupMetadata.BlockVPNUsers && groupMetadata.IsVPNBypass(userID) {
 		isVPN, ok := ctx.Value(ctxIsVPNUserKey{}).(bool)
 		if !ok {
 			return NewLobbyError(InternalError, "failed to get VPN status")
