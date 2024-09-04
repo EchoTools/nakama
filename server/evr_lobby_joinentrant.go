@@ -317,6 +317,17 @@ func (p *EvrPipeline) authorizeGuildGroupSession(ctx context.Context, session Se
 		}
 	}
 
+	features, ok := session.Context().Value(ctxSupportedFeaturesKey{}).([]string)
+	if ok {
+		if len(features) > 0 {
+			allowedFeatures := groupMetadata.AllowedFeatures
+			for _, feature := range features {
+				if !slices.Contains(allowedFeatures, feature) {
+					return NewLobbyError(KickedFromLobbyGroup, "This guild does not allow clients with `feature DLLs``.")
+				}
+			}
+		}
+	}
 	evrID, ok := ctx.Value(ctxEvrIDKey{}).(evr.EvrId)
 	if !ok {
 		return NewLobbyError(InternalError, "failed to get evr ID from session context")

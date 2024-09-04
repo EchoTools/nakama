@@ -65,6 +65,7 @@ type GroupMetadata struct {
 	DebugChannelID         string              `json:"debug_channel_id"`         // The debug channel
 	AuditChannelID         string              `json:"audit_channel_id"`         // The audit channel
 	BlockVPNUsers          bool                `json:"block_vpn_users"`          // Block VPN users
+	AllowedFeatures        []string            `json:"allowed_features"`         // Allowed features
 
 	// UserIDs that are required to go to community values when the first join the social lobby
 	CommunityValuesUserIDs []string `json:"community_values_user_ids"`
@@ -135,6 +136,10 @@ func (m *GroupMetadata) IsAccountLinked(userID string) bool {
 		return slices.Contains(userIDs, userID)
 	}
 	return false
+}
+
+func (m *GroupMetadata) IsAllowedFeature(feature string) bool {
+	return slices.Contains(m.AllowedFeatures, feature)
 }
 
 func (m *GroupMetadata) hasCompletedCommunityValues(userID string) bool {
