@@ -794,6 +794,33 @@ func GetGuildGroupIDsByUser(ctx context.Context, db *sql.DB, userID string) (map
 	return groups, nil
 }
 
+func KickPlayerFromMatch(ctx context.Context, nk runtime.NakamaModule, matchID MatchID, userID string) error {
+	// Get the user's presences
+
+	presences, err := nk.StreamUserList(StreamModeMatchAuthoritative, matchID.UUID.String(), "", matchID.Node, true, true)
+	if err != nil {
+		return fmt.Errorf("failed to get stream presences: %w", err)
+	}
+
+	for _, presence := range presences {
+		if presence.GetUserId() != userID {
+			continue
+		}
+		kickPresence := &MatchPresence{
+			Node:      presence.GetNodeId(),
+			UserID:    uuid.FromStringOrNil(presence.GetUserId()),
+			Username:  presence.GetUsername(),
+			SessionID: uuid.FromStringOrNil(presence.GetSessionId()),
+			Reason:    PresenceReasonKicked,
+		}
+		if err = nk.StreamUserKick(StreamModeMatchAuthoritative, matchID.UUID.String(), "", matchID.Node, kickPresence); err != nil {
+			return fmt.Errorf("failed to disconnect session `%s`: %w", presence.GetSessionId(), err)
+		}
+	}
+
+	return nil
+}
+
 func DisconnectUserID(ctx context.Context, nk runtime.NakamaModule, userID string) (int, error) {
 	// Get the user's presences
 

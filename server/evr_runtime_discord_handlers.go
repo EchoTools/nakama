@@ -93,7 +93,14 @@ func (d *DiscordAppBot) handleInteractionCreate(logger runtime.Logger, s *discor
 	}
 	// Global security check
 	switch commandName {
+
 	case "create":
+
+		if md.AuditChannelID != "" {
+			if err := d.LogInteractionToChannel(i, md.AuditChannelID); err != nil {
+				logger.Warn("Failed to log interaction to channel")
+			}
+		}
 
 		if md.DisableCreateCommand {
 			return simpleInteractionResponse(s, i, "This guild does not allow public allocation.")

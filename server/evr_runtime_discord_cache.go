@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -23,6 +24,8 @@ import (
 var (
 	ErrMemberNotFound = errors.New("member not found")
 )
+
+var mentionRegex = regexp.MustCompile(`<@([-0-9A-Fa-f]+?)>`)
 
 type QueueEntry struct {
 	UserID  string
@@ -680,4 +683,21 @@ func (d *DiscordCache) CheckUser2FA(ctx context.Context, userID uuid.UUID) (bool
 		return false, fmt.Errorf("error getting discord user: %w", err)
 	}
 	return user.MFAEnabled, nil
+}
+
+func (d *DiscordCache) ReplaceMentions(message string) string {
+
+	replacedMessage := mentionRegex.ReplaceAllStringFunc(message, func(mention string) string {
+		matches := mentionRegex.FindStringSubmatch(mention)
+		if len(matches) > 1 {
+			userID := matches[1]
+			if uuid.FromStringOrNil(userID).IsNil() {
+				return mention
+			}
+			discordID := d.UserIDToDiscordID(userID)
+			return "<@" + discordID + ">"
+		}
+		return mention
+	})
+	return replacedMessage
 }
