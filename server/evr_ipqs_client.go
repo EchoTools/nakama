@@ -192,6 +192,36 @@ func (s *IPQSClient) IPDetails(ip string, useCache bool) (*IPQSResponse, error) 
 	return &result, nil
 }
 
+func (s *IPQSClient) Score(ip string) int {
+	result := s.IPDetailsWithTimeout(ip)
+	if result == nil {
+		return 0
+	}
+	return result.FraudScore
+}
+
+func (s *IPQSClient) IPDetailsWithTimeout(ip string) *IPQSResponse {
+	ctx, cancelFn := context.WithTimeout(s.ctx, time.Second*1)
+	defer cancelFn()
+	resultCh := make(chan *IPQSResponse)
+
+	go func() {
+		result, err := s.IPDetails(ip, true)
+		if err != nil {
+			s.logger.Warn("Failed to get IPQS details, failing open.", zap.Error(err))
+		}
+		resultCh <- result
+	}()
+
+	select {
+	case <-ctx.Done():
+		s.logger.Warn("IPQS request timed out, failing open.")
+		return nil
+	case result := <-resultCh:
+		return result
+	}
+}
+
 func (s *IPQSClient) IsVPN(ip string) bool {
 	ctx, cancelFn := context.WithTimeout(s.ctx, time.Second*1)
 	defer cancelFn()
@@ -213,7 +243,11 @@ func (s *IPQSClient) IsVPN(ip string) bool {
 		if result == nil {
 			return false
 		}
-		return result.VPN
+
+		if result.VPN {
+			return true
+		}
+		return false
 	}
 }
 

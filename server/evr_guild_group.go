@@ -67,6 +67,7 @@ type GroupMetadata struct {
 	DebugChannelID         string              `json:"debug_channel_id"`         // The debug channel
 	AuditChannelID         string              `json:"audit_channel_id"`         // The audit channel
 	BlockVPNUsers          bool                `json:"block_vpn_users"`          // Block VPN users
+	FraudScoreThreshold    int                 `json:"fraud_score_threshold"`    // The fraud score threshold
 	AllowedFeatures        []string            `json:"allowed_features"`         // Allowed features
 
 	// UserIDs that are required to go to community values when the first join the social lobby
