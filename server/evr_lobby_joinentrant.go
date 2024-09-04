@@ -271,9 +271,9 @@ func (p *EvrPipeline) authorizeGuildGroupSession(ctx context.Context, session Se
 
 			if sendAuditMessage {
 
-				accountAge := time.Now().Sub(t).Hours() / 24
+				accountAge := time.Since(t).Hours() / 24
 
-				if _, err := p.appBot.dg.ChannelMessageSend(groupMetadata.AuditChannelID, fmt.Sprintf("Rejected user <@%s> because of account age (%d days).", discordID, accountAge)); err != nil {
+				if _, err := p.appBot.dg.ChannelMessageSend(groupMetadata.AuditChannelID, fmt.Sprintf("Rejected user <@%s> because of account age (%d days).", discordID, int(accountAge))); err != nil {
 					p.logger.Warn("Failed to send audit message", zap.String("channel_id", groupMetadata.AuditChannelID), zap.Error(err))
 				}
 			}
