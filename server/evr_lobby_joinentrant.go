@@ -309,12 +309,12 @@ func (p *EvrPipeline) authorizeGuildGroupSession(ctx context.Context, session Se
 
 			if sendAuditMessage {
 
-				if _, err := p.appBot.dg.ChannelMessageSend(groupMetadata.AuditChannelID, fmt.Sprintf("Rejected VPN user <@%s> from %s", discordID, session.ClientIP)); err != nil {
+				if _, err := p.appBot.dg.ChannelMessageSend(groupMetadata.AuditChannelID, fmt.Sprintf("Rejected VPN user <@%s> from %s", discordID, session.ClientIP())); err != nil {
 					p.logger.Warn("Failed to send audit message", zap.String("channel_id", groupMetadata.AuditChannelID), zap.Error(err))
 				}
 			}
 
-			return NewLobbyError(KickedFromLobbyGroup, "this guild does not allow VPN users")
+			return NewLobbyError(KickedFromLobbyGroup, "This guild does not allow VPN access, Disable your VPN and try again.")
 		}
 	}
 
