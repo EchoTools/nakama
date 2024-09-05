@@ -43,7 +43,6 @@ func TestNewSessionParametersFromLobbySessionRequest(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	ctx = context.WithValue(ctx, ctxNodeKey{}, "default")
 
 	type args struct {
 		r *evr.LobbyFindSessionRequest
@@ -72,7 +71,7 @@ func TestNewSessionParametersFromLobbySessionRequest(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got, _ := NewLobbyParametersFromRequest(ctx, tt.args.r, nil, NewLatencyHistory(), nil); !reflect.DeepEqual(got, tt.want) {
+			if got, _ := NewLobbyParametersFromRequest(ctx, logger, &sessionWS{}, tt.args.r); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("(- want / + got) %s", cmp.Diff(tt.want, got))
 			}
 		})
