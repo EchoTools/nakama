@@ -106,7 +106,7 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 	externalIP := net.ParseIP(session.ClientIP())
 	externalPort := request.Port
 
-	params, ok := ctx.Value(ctxSessionParametersKey{}).(*SessionParameters)
+	params, ok := LoadParams(ctx)
 	if !ok {
 		return errFailedRegistration(session, logger, errors.New("session parameters not provided"), evr.BroadcasterRegistration_Unknown)
 	}
@@ -213,75 +213,60 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 func (p *EvrPipeline) extractAuthenticationDetailsFromContext(ctx context.Context) (discordId, password string, tags, groupIDs []string, regions []evr.Symbol, err error) {
 	var ok bool
 
-	sessionParams, ok := ctx.Value(ctxSessionParametersKey{}).(*SessionParameters)
+	sessionParams, ok := LoadParams(ctx)
 	if !ok {
 		return "", "", nil, nil, nil, fmt.Errorf("session parameters not provided")
 	}
 
-	discordId = sessionParams.authDiscordID
-	password = sessionParams.authPassword
+	discordId = sessionParams.AuthDiscordID
+	password = sessionParams.AuthPassword
 
-	if sessionParams.authDiscordID == "" {
+	if sessionParams.AuthDiscordID == "" {
 		return "", "", nil, nil, nil, fmt.Errorf("`discordid` url param missing")
 	}
 
-	if sessionParams.authPassword == "" {
+	if sessionParams.AuthPassword == "" {
 		return "", "", nil, nil, nil, fmt.Errorf("`password` url param missing")
 	}
 
-	// Get the url params
-	urlParams := sessionParams.urlParameters
-
-	// Get the tags from the url params
-	tags = make([]string, 0)
-	if tagsets, ok := urlParams["tags"]; ok {
-		for _, tagstr := range tagsets {
-			tags = append(tags, strings.Split(tagstr, ",")...)
-		}
-	}
-
 	regions = make([]evr.Symbol, 0)
-	if regionstr, ok := urlParams["regions"]; ok {
-		for _, regionstr := range regionstr {
-			for _, region := range strings.Split(regionstr, ",") {
-				s := strings.Trim(region, " ")
-				if s != "" {
-					regions = append(regions, evr.ToSymbol(s))
-				}
-			}
-		}
+	for _, region := range sessionParams.ServerRegions {
+		regions = append(regions, evr.ToSymbol(region))
 	}
-	memberships := sessionParams.Memberships()
+
+	if len(regions) == 0 {
+		regions = append(regions, evr.DefaultRegion)
+	}
+
+	memberships := sessionParams.Memberships
+
 	// Get the guilds that the broadcaster wants to host for
 	groupIDs = make([]string, 0)
+	for _, guildID := range sessionParams.ServerGuilds {
+		if guildID == "" {
+			continue
+		}
+		groupID := p.discordCache.GuildIDToGroupID(guildID)
+		if groupID == "" {
+			continue
+		}
 
-	if guildparams, ok := urlParams["guilds"]; ok {
-	OuterLoop:
-		for _, guildstr := range guildparams {
-			for _, guildId := range strings.Split(guildstr, ",") {
-				s := strings.Trim(guildId, " ")
-				if s == "" {
-					continue
-				}
-				if s == "any" {
-					groupIDs = make([]string, 0)
-					break OuterLoop
-				}
-				groupID := p.discordCache.GuildIDToGroupID(s)
-				if groupID == "" {
-					continue
-				}
-				if m, ok := memberships[groupID]; ok && m.isServerHost {
-					groupIDs = append(groupIDs, groupID)
-				}
-			}
+		// Any will allow the broadcaster to host on any server they are a member of
+		if groupID == "any" {
+			groupIDs = make([]string, 0)
+			break
+		}
+
+		if m, ok := memberships[groupID]; ok && m.isServerHost {
+			groupIDs = append(groupIDs, groupID)
 		}
 	}
 
-	// If the list of guilds is empty or contains "any", use the user's groups
 	if len(groupIDs) == 0 {
-		for groupID := range memberships {
-			groupIDs = append(groupIDs, groupID)
+		for groupID, m := range memberships {
+			if m.isServerHost {
+				groupIDs = append(groupIDs, groupID)
+			}
 		}
 	}
 

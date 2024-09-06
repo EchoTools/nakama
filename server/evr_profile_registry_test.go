@@ -93,7 +93,6 @@ func TestGetSessionProfile(t *testing.T) {
 
 	// Create a test context with the EVR ID
 	ctx := context.Background()
-
 	// Create a test ProfileRegistry
 	profileRegistry, err := createTestProfileRegistry(t, loggerForTest(t))
 	if err != nil {

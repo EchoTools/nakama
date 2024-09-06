@@ -200,27 +200,27 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 				continue
 			}
 			sessionCtx := session.Context()
-			params, ok := sessionCtx.Value(ctxSessionParametersKey{}).(*SessionParameters)
+			params, ok := LoadParams(sessionCtx)
 			if !ok {
 				logger.Warn("Failed to get session parameters from session context", zap.String("sid", entry.Presence.GetSessionId()))
 				continue
 			}
 
-			metadata := params.AccountMetadata()
+			metadata := params.AccountMetadata
 			presence := &EvrMatchPresence{
-				Node:           params.LoginSession().pipeline.node,
+				Node:           params.LoginSession.pipeline.node,
 				UserID:         session.UserID(),
 				SessionID:      session.ID(),
-				LoginSessionID: params.LoginSession().ID(),
+				LoginSessionID: params.LoginSession.ID(),
 				Username:       session.Username(),
 				DisplayName:    metadata.GetGroupDisplayNameOrDefault(groupID.String()),
-				EvrID:          params.EvrID(),
+				EvrID:          params.EvrID,
 				PartyID:        uuid.FromStringOrNil(entry.StringProperties["party_id"]),
 				RoleAlignment:  int(i),
-				DiscordID:      params.DiscordID(),
+				DiscordID:      params.DiscordID,
 				ClientIP:       session.ClientIP(),
 				ClientPort:     session.ClientPort(),
-				IsPCVR:         params.IsPCVR(),
+				IsPCVR:         params.IsPCVR,
 				Rating: rating.NewWithOptions(&types.OpenSkillOptions{
 					Mu:    ptr.Float64(entry.NumericProperties["rating_mu"]),
 					Sigma: ptr.Float64(entry.NumericProperties["rating_sigma"]),

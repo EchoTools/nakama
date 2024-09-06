@@ -30,9 +30,12 @@ func EntrantPresencesFromSessionIDs(logger *zap.Logger, sessionRegistry SessionR
 		}
 
 		sessionCtx := session.Context()
-		params := sessionCtx.Value(ctxSessionParametersKey{}).(*SessionParameters)
+		params, ok := LoadParams(sessionCtx)
+		if !ok {
+			logger.Warn("Session parameters not found", zap.String("sid", sessionID.String()))
+		}
 
-		displayName := params.AccountMetadata().GetGroupDisplayNameOrDefault(groupID.String())
+		displayName := params.AccountMetadata.GetGroupDisplayNameOrDefault(groupID.String())
 
 		r := types.Rating{}
 		if rating != nil {
@@ -41,19 +44,19 @@ func EntrantPresencesFromSessionIDs(logger *zap.Logger, sessionRegistry SessionR
 
 		entrant := &EvrMatchPresence{
 
-			Node:           params.node,
+			Node:           params.Node,
 			UserID:         session.UserID(),
 			SessionID:      session.ID(),
-			LoginSessionID: params.LoginSession().ID(),
+			LoginSessionID: params.LoginSession.ID(),
 			Username:       session.Username(),
 			DisplayName:    displayName,
-			EvrID:          params.EvrID(),
+			EvrID:          params.EvrID,
 			PartyID:        partyID,
 			RoleAlignment:  role,
-			DiscordID:      params.DiscordID(),
+			DiscordID:      params.DiscordID,
 			ClientIP:       session.ClientIP(),
 			ClientPort:     session.ClientPort(),
-			IsPCVR:         params.IsPCVR(),
+			IsPCVR:         params.IsPCVR,
 			Rating:         r,
 		}
 

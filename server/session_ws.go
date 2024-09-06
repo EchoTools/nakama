@@ -61,6 +61,9 @@ var (
 	hmdOverridePattern = regexp.MustCompile(`^[-a-zA-Z0-9_]+$`)
 	featurePattern     = regexp.MustCompile(`^[a-z0-9_]+$`)
 	discordIDPattern   = regexp.MustCompile(`^[0-9]+$`)
+	regionPattern      = regexp.MustCompile(`^[-A-Za-z0-9_]+$`)
+	guildPattern       = regexp.MustCompile(`^[0-9]+$`)
+	tagsPattern        = regexp.MustCompile(`^[-.A-Za-z0-9_:]+$`)
 )
 
 type (
@@ -114,105 +117,46 @@ type (
 )
 
 type SessionParameters struct {
-	node         string                    // The node name
-	evrID        atomic.Value              // The EchoVR ID
-	discordID    atomic.String             // The Discord ID
-	loginSession atomic.Pointer[sessionWS] // The login session ID
-	lobbySession atomic.Pointer[sessionWS] // The match session ID
+	Node         string     // The node name
+	EvrID        evr.EvrId  // The EchoVR ID
+	DiscordID    string     // The Discord ID
+	LoginSession *sessionWS // The login session ID
+	LobbySession *sessionWS // The match session ID
 
-	hmdSerialOverride       string // The HMD Serial Override
-	authDiscordID           string // The Discord ID use for authentication
-	authPassword            string // The Password use for authentication
-	userDisplayNameOverride string // The display name override (user-defined)
+	HMDSerialOverride       string // The HMD Serial Override
+	AuthDiscordID           string // The Discord ID use for authentication
+	AuthPassword            string // The Password use for authentication
+	UserDisplayNameOverride string // The display name override (user-defined)
 
-	ExternalServerAddr string      // The external server address (IP:port)
-	isVPN              bool        // The user is using a VPN
-	SupportedFeatures  []string    // The features from the urlparam
-	RequiredFeatures   []string    // The required_features from the urlparam
-	isVR               atomic.Bool // The user is using a VR headset
-	isPCVR             atomic.Bool // The user is using a PCVR headset
-	relayOutgoing      atomic.Bool // The user is relaying outgoing messages
+	ExternalServerAddr string   // The external server address (IP:port)
+	IsVPN              bool     // The user is using a VPN
+	SupportedFeatures  []string // features from the urlparam
+	RequiredFeatures   []string // required_features from the urlparam
+	IsVR               bool     // The user is using a VR headset
+	IsPCVR             bool     // The user is using a PCVR headset
+	RelayOutgoing      bool     // The user is relaying outgoing messages
 
-	accountMetadata     atomic.Pointer[AccountMetadata] // The account metadata
-	guildGroupMetadatas atomic.Value                    // The guild group metadata (map[uuid.UUID]*GroupMetadata)
-	memberships         atomic.Value                    // The guild group memberships (map[string]*GuildGroupMembership)
+	ServerTags    []string // []string of the server tags
+	ServerGuilds  []string // []string of the server guilds
+	ServerRegions []string // []string of the server regions
 
-	urlParameters map[string][]string // The URL parameters
+	AccountMetadata     *AccountMetadata // The account metadata
+	GuildGroupMetadatas map[uuid.UUID]*GroupMetadata
+	Memberships         map[string]GuildGroupMembership
+
+	URLParameters map[string][]string // The URL parameters
 }
 
-func (p *SessionParameters) IsVR() bool {
-	return p.isVR.Load()
+func LoadParams(ctx context.Context) (*SessionParameters, bool) {
+	params, ok := ctx.Value(ctxSessionParametersKey{}).(*atomic.Pointer[SessionParameters])
+	if !ok {
+		return nil, false
+	}
+	return params.Load(), true
 }
 
-func (p *SessionParameters) SetIsVR(v bool) {
-	p.isVR.Store(v)
-}
-
-func (p *SessionParameters) SetIsPCVR(v bool) {
-	p.isPCVR.Store(v)
-}
-
-func (p *SessionParameters) IsPCVR() bool {
-	return p.isPCVR.Load()
-}
-
-func (p *SessionParameters) EvrID() evr.EvrId {
-	return p.evrID.Load().(evr.EvrId)
-}
-
-func (p *SessionParameters) SetEvrID(v evr.EvrId) {
-	p.evrID.Store(v)
-}
-
-func (p *SessionParameters) DiscordID() string {
-	return p.discordID.Load()
-}
-
-func (p *SessionParameters) SetDiscordID(v string) {
-	p.discordID.Store(v)
-}
-func (p *SessionParameters) AccountMetadata() *AccountMetadata {
-	return p.accountMetadata.Load()
-}
-
-func (p *SessionParameters) SetAccountMetadata(v *AccountMetadata) {
-	p.accountMetadata.Store(v)
-}
-
-func (p *SessionParameters) GuildGroupMetadatas() map[uuid.UUID]*GroupMetadata {
-	return p.guildGroupMetadatas.Load().(map[uuid.UUID]*GroupMetadata)
-}
-
-func (p *SessionParameters) LobbySession() *sessionWS {
-	return p.lobbySession.Load()
-}
-
-func (p *SessionParameters) SetLobbySession(v *sessionWS) {
-	p.lobbySession.Store(v)
-}
-
-func (p *SessionParameters) LoginSession() *sessionWS {
-	return p.loginSession.Load()
-}
-
-func (p *SessionParameters) SetLoginSession(v *sessionWS) {
-	p.loginSession.Store(v)
-}
-
-func (p *SessionParameters) RelayOutgoing() bool {
-	return p.relayOutgoing.Load()
-}
-
-func (p *SessionParameters) SetRelayOutgoing(v bool) {
-	p.relayOutgoing.Store(v)
-}
-
-func (p *SessionParameters) Memberships() map[string]GuildGroupMembership {
-	return p.memberships.Load().(map[string]GuildGroupMembership)
-}
-
-func (p *SessionParameters) SetMemberships(v map[string]GuildGroupMembership) {
-	p.memberships.Store(v)
+func UpdateParams(ctx context.Context, params *SessionParameters) {
+	ctx.Value(ctxSessionParametersKey{}).(*atomic.Pointer[SessionParameters]).Store(params)
 }
 
 func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessionID, userID uuid.UUID, username string, vars map[string]string, expiry int64, clientIP, clientPort, lang string, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, conn *websocket.Conn, sessionRegistry SessionRegistry, statusRegistry StatusRegistry, matchmaker Matchmaker, tracker Tracker, metrics Metrics, pipeline *Pipeline, evrPipeline *EvrPipeline, runtime *Runtime, request http.Request, storageIndex StorageIndex) Session {
@@ -235,19 +179,24 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 	}
 
 	params := SessionParameters{
-		node:                    pipeline.node,
-		hmdSerialOverride:       parseUserQueryFunc(&request, "hmdserial", 32, hmdOverridePattern),
-		authDiscordID:           parseUserQueryFunc(&request, "discordid", 20, discordIDPattern),
-		authPassword:            parseUserQueryFunc(&request, "password", 32, nil),
-		userDisplayNameOverride: parseUserQueryFunc(&request, "ign", 20, nil),
-		ExternalServerAddr:      parseUserQueryFunc(&request, "serveraddr", 64, nil),
-		SupportedFeatures:       parseUserQueryCommaDelimited(&request, "features", 32, featurePattern),
-		RequiredFeatures:        parseUserQueryCommaDelimited(&request, "requires", 32, featurePattern),
-		isVPN:                   evrPipeline.ipqsClient.IsVPN(clientIP),
-		urlParameters:           urlParams,
+		Node:                    pipeline.node,
+		HMDSerialOverride:       parseUserQueryFunc(&request, "hmdserial", 32, hmdOverridePattern),
+		AuthDiscordID:           parseUserQueryFunc(&request, "discordid", 20, discordIDPattern),
+		AuthPassword:            parseUserQueryFunc(&request, "password", 32, nil),
+		UserDisplayNameOverride: parseUserQueryFunc(&request, "ign", 20, nil),
+
+		ExternalServerAddr: parseUserQueryFunc(&request, "serveraddr", 64, nil),
+		IsVPN:              evrPipeline.ipqsClient.IsVPN(clientIP),
+		SupportedFeatures:  parseUserQueryCommaDelimited(&request, "features", 32, featurePattern),
+		RequiredFeatures:   parseUserQueryCommaDelimited(&request, "requires", 32, featurePattern),
+		ServerTags:         parseUserQueryCommaDelimited(&request, "tags", 32, tagsPattern),
+		ServerGuilds:       parseUserQueryCommaDelimited(&request, "tags", 32, tagsPattern),
+		ServerRegions:      parseUserQueryCommaDelimited(&request, "regions", 32, regionPattern),
+
+		URLParameters: urlParams,
 	}
 
-	ctx = context.WithValue(ctx, ctxSessionParametersKey{}, &params)
+	ctx = context.WithValue(ctx, ctxSessionParametersKey{}, atomic.NewPointer(&params))
 
 	for _, f := range params.RequiredFeatures {
 		if !slices.Contains(params.SupportedFeatures, f) {
@@ -305,17 +254,16 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 }
 
 func parseUserQueryFunc(request *http.Request, key string, maxLength int, pattern *regexp.Regexp) string {
-	if v := request.URL.Query().Get(key); v != "" {
+	v := request.URL.Query().Get(key)
+	if v != "" {
 		if len(v) > maxLength {
 			v = v[:maxLength]
 		}
 		if pattern != nil && !pattern.MatchString(v) {
 			return ""
 		}
-
 	}
-
-	return ""
+	return v
 }
 
 func parseUserQueryCommaDelimited(request *http.Request, key string, maxLength int, pattern *regexp.Regexp) []string {
@@ -428,8 +376,8 @@ func (s *sessionWS) BroadcasterSession(userID uuid.UUID, username string, server
 	return nil
 }
 
-// ValidateSession validates the session information provided by the client.
-func (s *sessionWS) ValidateSession(loginSessionID uuid.UUID) error {
+// LobbySession validates the session information provided by the client.
+func (s *sessionWS) LobbySession(loginSessionID uuid.UUID) error {
 	if loginSessionID == uuid.Nil {
 		return fmt.Errorf("login session ID is nil")
 	}
@@ -449,15 +397,28 @@ func (s *sessionWS) ValidateSession(loginSessionID uuid.UUID) error {
 		// Use the context to avoid any locking issues.
 		loginCtx := loginSession.Context()
 
-		params, ok := loginCtx.Value(ctxSessionParametersKey{}).(*SessionParameters)
+		loginParams, ok := LoadParams(loginCtx)
 		if !ok {
-			return fmt.Errorf("login session does not have session parameters")
+			return fmt.Errorf("login session parameters not found: %v", loginSessionID)
 		}
 
-		ctx := context.WithValue(s.Context(), ctxSessionParametersKey{}, params)
+		lobbyParams, ok := LoadParams(s.Context())
+		if !ok {
+			return fmt.Errorf("lobby session parameters not found: %v", s.id)
+		}
+		newParams := *loginParams
+		// Copy some of the lobby session parameters to the login session.
+		if len(newParams.SupportedFeatures) > 0 {
+			newParams.SupportedFeatures = lobbyParams.SupportedFeatures
+		}
+		if len(newParams.RequiredFeatures) > 0 {
+			newParams.RequiredFeatures = lobbyParams.RequiredFeatures
+		}
+
+		UpdateParams(loginCtx, &newParams)
+		UpdateParams(s.Context(), &newParams)
 
 		// Store this session as the lobby session.
-		params.lobbySession.Store(s)
 
 		// cancel/disconnect this session if the login session is cancelled.
 		go func() {
@@ -467,15 +428,15 @@ func (s *sessionWS) ValidateSession(loginSessionID uuid.UUID) error {
 
 		// Create a derived context for this session.
 
-		ctx = context.WithValue(s.Context(), ctxUserIDKey{}, loginSession.UserID()) // apiServer compatibility
-		ctx = context.WithValue(ctx, ctxUsernameKey{}, loginSession.Username())     // apiServer compatibility
+		ctx := context.WithValue(s.Context(), ctxUserIDKey{}, loginSession.UserID()) // apiServer compatibility
+		ctx = context.WithValue(ctx, ctxUsernameKey{}, loginSession.Username())      // apiServer compatibility
 
 		// Set the session information
 		s.Lock()
 		s.ctx = ctx
 		s.userID = loginSession.UserID()
 		s.SetUsername(loginSession.Username())
-		s.logger = s.logger.With(zap.String("loginsid", loginSessionID.String()), zap.String("uid", s.userID.String()), zap.String("evrid", params.EvrID().Token()), zap.String("username", s.Username()))
+		s.logger = s.logger.With(zap.String("loginsid", loginSessionID.String()), zap.String("uid", s.userID.String()), zap.String("evrid", newParams.EvrID.Token()), zap.String("username", s.Username()))
 		s.Unlock()
 
 	}
