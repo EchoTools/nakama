@@ -112,13 +112,22 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	params.LoginSession = session
 	params.EvrID = evrID
 
-	// Construct the device auth token from the login payload
-	deviceId := NewDeviceAuth(payload.AppId, request.EvrId, hmdsn, session.clientIP)
+	var account *api.Account
+	if session.userID.IsNil() {
+		// Construct the device auth token from the login payload
+		deviceId := NewDeviceAuth(payload.AppId, request.EvrId, hmdsn, session.clientIP)
 
-	account, err := p.authenticateAccount(ctx, logger, session, deviceId, params.AuthDiscordID, params.AuthPassword, payload)
-	if err != nil {
-		return settings, err
+		account, err = p.authenticateAccount(ctx, logger, session, deviceId, params.AuthDiscordID, params.AuthPassword, payload)
+		if err != nil {
+			return settings, err
+		}
+	} else {
+		account, err = GetAccount(ctx, logger, p.db, session.statusRegistry, session.userID)
+		if err != nil {
+			return settings, fmt.Errorf("failed to get account: %w", err)
+		}
 	}
+
 	if account == nil {
 		return settings, fmt.Errorf("account not found")
 	}
@@ -626,7 +635,7 @@ func (p *EvrPipeline) documentRequest(ctx context.Context, logger *zap.Logger, s
 					gaVersion = 1
 				}
 				document = evr.NewEULADocument(int(eulaVersion), int(gaVersion), request.Language, "https://github.com/EchoTools", "Blank EULA for NoVR clients.")
-				message := evr.NewDocumentSuccess(document)
+				message = evr.NewDocumentSuccess(document)
 				p.CacheMessage("eula:novr", message)
 
 			}

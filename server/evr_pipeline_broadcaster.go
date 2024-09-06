@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -58,17 +59,63 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 	request := in.(*evr.BroadcasterRegistrationRequest)
 	discordId := ""
 
-	// server connections are authenticated by discord ID and password.
-	// Get the discordId and password from the context
-	// Get the tags and guilds from the url params
-	discordId, password, tags, groupIDs, regions, err := p.extractAuthenticationDetailsFromContext(ctx)
-	if err != nil {
-		return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_Unknown)
+	if session.userID.IsNil() {
+		return errFailedRegistration(session, logger, errors.New("game servers must authenticate with discordID/password auth"), evr.BroadcasterRegistration_Unknown)
 	}
 
-	logger = logger.With(zap.String("discord_id", discordId), zap.Strings("group_ids", groupIDs), zap.Strings("tags", tags), zap.Strings("regions", lo.Map(regions, func(v evr.Symbol, _ int) string { return v.String() })))
+	sessionParams, ok := LoadParams(ctx)
+	if !ok {
+		return fmt.Errorf("session parameters not provided")
+	}
 
-	// Assume that the regions provided are the ONLY regions the broadcaster wants to host in
+	newParams := *sessionParams
+
+	// Get a list of the user's guild memberships and set to the largest one
+	memberships, err := GetGuildGroupMemberships(ctx, p.runtimeModule, session.UserID().String())
+	if err != nil {
+		return fmt.Errorf("failed to get guild groups: %w", err)
+	}
+	if len(memberships) == 0 {
+		return fmt.Errorf("user is not in any guild groups")
+	}
+
+	newParams.Memberships = memberships
+
+	// Get the guilds that the broadcaster wants to host for
+	groupIDs := make([]string, 0)
+	for _, guildID := range sessionParams.ServerGuilds {
+		if guildID == "" {
+			continue
+		}
+		groupID := p.discordCache.GuildIDToGroupID(guildID)
+		if groupID == "" {
+			continue
+		}
+
+		// Any will allow the broadcaster to host on any server they are a member of
+		if groupID == "any" {
+			groupIDs = make([]string, 0)
+			break
+		}
+
+		if m, ok := memberships[groupID]; ok && m.isServerHost {
+			groupIDs = append(groupIDs, groupID)
+		}
+	}
+
+	if len(groupIDs) == 0 {
+		for groupID, m := range memberships {
+			if m.isServerHost {
+				groupIDs = append(groupIDs, groupID)
+			}
+		}
+	}
+
+	regions := make([]evr.Symbol, 0)
+	for _, region := range sessionParams.ServerRegions {
+		regions = append(regions, evr.ToSymbol(region))
+	}
+
 	if len(regions) == 0 {
 		regions = append(regions, evr.DefaultRegion)
 	}
@@ -77,30 +124,25 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 		regions = append(regions, request.Region)
 	}
 
-	// Authenticate the broadcaster
-	userId, _, err := p.authenticateBroadcaster(ctx, logger, session, discordId, password, tags, request.ServerId)
-	if err != nil {
-		return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_AccountDoesNotExist)
-	}
+	logger = logger.With(zap.String("discord_id", discordId), zap.Strings("group_ids", groupIDs), zap.Strings("tags", newParams.ServerTags), zap.Strings("regions", lo.Map(regions, func(v evr.Symbol, _ int) string { return v.String() })))
 
 	// Add the hash of the operator's ID as a region
-	regions = append(regions, evr.ToSymbol(userId))
+	regions = append(regions, evr.ToSymbol(session.UserID().String()))
 
 	// Add the server id as a region
 	regions = append(regions, evr.ToSymbol(request.ServerId))
 
-	// Remove any duplicates from the regions
-	seenRegions := make(map[evr.Symbol]struct{})
-	uniqueRegions := make([]evr.Symbol, 0)
-	for _, r := range regions {
-		if _, seen := seenRegions[r]; !seen {
-			uniqueRegions = append(uniqueRegions, r)
-			seenRegions[r] = struct{}{}
-		}
-	}
-	regions = uniqueRegions
+	slices.Sort(regions)
+	regions = slices.Compact(regions)
 
-	logger = logger.With(zap.String("userId", userId))
+	UpdateParams(ctx, &newParams)
+
+	err = session.BroadcasterSession(session.userID, "broadcaster:"+session.Username(), request.ServerId)
+	if err != nil {
+		return fmt.Errorf("failed to create broadcaster session: %v", err)
+	}
+
+	logger = logger.With(zap.String("userId", session.UserID().String()))
 
 	// Set the external address in the request (to use for the registration cache).
 	externalIP := net.ParseIP(session.ClientIP())
@@ -139,10 +181,8 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 
 	logger = logger.With(zap.String("externalIP", externalIP.String()))
 
-	features := params.SupportedFeatures
-
 	// Create the broadcaster config
-	config := broadcasterConfig(userId, session.id.String(), request.ServerId, request.InternalIP, externalIP, request.Port, regions, request.VersionLock, tags, features)
+	config := broadcasterConfig(session.UserID().String(), session.id.String(), request.ServerId, request.InternalIP, externalIP, request.Port, regions, request.VersionLock, params.ServerTags, params.SupportedFeatures)
 
 	// Add the operators userID to the group ids. this allows any host to spawn on a server they operate.
 	groupUUIDs := make([]uuid.UUID, 0, len(groupIDs))
@@ -185,7 +225,7 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 		return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_Failure)
 	}
 
-	if err := p.runtimeModule.StreamUserUpdate(StreamModeGameServer, session.ID().String(), "", StreamLabelGameServerService, userId, session.ID().String(), true, false, string(configJson)); err != nil {
+	if err := p.runtimeModule.StreamUserUpdate(StreamModeGameServer, session.ID().String(), "", StreamLabelGameServerService, session.UserID().String(), session.ID().String(), true, false, string(configJson)); err != nil {
 		return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_Failure)
 	}
 
@@ -200,100 +240,7 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 		return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_Failure)
 	}
 	// Send the registration success message
-	if err := session.SendEvr(
-		evr.NewBroadcasterRegistrationSuccess(config.ServerID, config.Endpoint.ExternalIP),
-		evr.NewSTcpConnectionUnrequireEvent(),
-	); err != nil {
-		return errFailedRegistration(session, logger, fmt.Errorf("failed to send lobby registration failure: %v", err), evr.BroadcasterRegistration_Failure)
-	}
-
-	return nil
-}
-
-func (p *EvrPipeline) extractAuthenticationDetailsFromContext(ctx context.Context) (discordId, password string, tags, groupIDs []string, regions []evr.Symbol, err error) {
-	var ok bool
-
-	sessionParams, ok := LoadParams(ctx)
-	if !ok {
-		return "", "", nil, nil, nil, fmt.Errorf("session parameters not provided")
-	}
-
-	discordId = sessionParams.AuthDiscordID
-	password = sessionParams.AuthPassword
-
-	if sessionParams.AuthDiscordID == "" {
-		return "", "", nil, nil, nil, fmt.Errorf("`discordid` url param missing")
-	}
-
-	if sessionParams.AuthPassword == "" {
-		return "", "", nil, nil, nil, fmt.Errorf("`password` url param missing")
-	}
-
-	regions = make([]evr.Symbol, 0)
-	for _, region := range sessionParams.ServerRegions {
-		regions = append(regions, evr.ToSymbol(region))
-	}
-
-	if len(regions) == 0 {
-		regions = append(regions, evr.DefaultRegion)
-	}
-
-	memberships := sessionParams.Memberships
-
-	// Get the guilds that the broadcaster wants to host for
-	groupIDs = make([]string, 0)
-	for _, guildID := range sessionParams.ServerGuilds {
-		if guildID == "" {
-			continue
-		}
-		groupID := p.discordCache.GuildIDToGroupID(guildID)
-		if groupID == "" {
-			continue
-		}
-
-		// Any will allow the broadcaster to host on any server they are a member of
-		if groupID == "any" {
-			groupIDs = make([]string, 0)
-			break
-		}
-
-		if m, ok := memberships[groupID]; ok && m.isServerHost {
-			groupIDs = append(groupIDs, groupID)
-		}
-	}
-
-	if len(groupIDs) == 0 {
-		for groupID, m := range memberships {
-			if m.isServerHost {
-				groupIDs = append(groupIDs, groupID)
-			}
-		}
-	}
-
-	return discordId, password, tags, groupIDs, regions, nil
-}
-
-func (p *EvrPipeline) authenticateBroadcaster(ctx context.Context, logger *zap.Logger, session *sessionWS, discordId, password string, tags []string, serverID uint64) (string, string, error) {
-	// Get the user id from the discord id
-	userID, err := GetUserIDByDiscordID(ctx, p.db, discordId)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to find user for Discord ID: %v", err)
-	}
-	// Authenticate the user
-	userID, username, _, err := AuthenticateEmail(ctx, logger, session.pipeline.db, userID+"@"+p.placeholderEmail, password, "", false)
-	if err != nil {
-		return "", "", fmt.Errorf("password authentication failure")
-	}
-	p.logger.Info("Authenticated broadcaster", zap.String("operator_userID", userID), zap.String("operator_username", username))
-
-	// The broadcaster is authenticated, set the userID as the broadcasterID and create a broadcaster session
-	// Broadcasters are not linked to the login session, they have a generic username and only use the serverdb path.
-	err = session.BroadcasterSession(uuid.FromStringOrNil(userID), "broadcaster:"+username, serverID)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to create broadcaster session: %v", err)
-	}
-
-	return userID, username, nil
+	return session.SendEvrUnrequire(evr.NewBroadcasterRegistrationSuccess(config.ServerID, config.Endpoint.ExternalIP))
 }
 
 func broadcasterConfig(userId, sessionId string, serverId uint64, internalIP, externalIP net.IP, port uint16, regions []evr.Symbol, versionLock uint64, tags, features []string) *MatchBroadcaster {

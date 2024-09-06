@@ -190,7 +190,7 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 		SupportedFeatures:  parseUserQueryCommaDelimited(&request, "features", 32, featurePattern),
 		RequiredFeatures:   parseUserQueryCommaDelimited(&request, "requires", 32, featurePattern),
 		ServerTags:         parseUserQueryCommaDelimited(&request, "tags", 32, tagsPattern),
-		ServerGuilds:       parseUserQueryCommaDelimited(&request, "tags", 32, tagsPattern),
+		ServerGuilds:       parseUserQueryCommaDelimited(&request, "tags", 32, guildPattern),
 		ServerRegions:      parseUserQueryCommaDelimited(&request, "regions", 32, regionPattern),
 
 		URLParameters: urlParams,
@@ -208,6 +208,38 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 	wsMessageType := websocket.TextMessage
 	if format == SessionFormatProtobuf || format == SessionFormatEVR {
 		wsMessageType = websocket.BinaryMessage
+	}
+
+	// Add the Discord ID to the context if it's present in the request URL
+	if params.AuthDiscordID != "" {
+
+		if userIDStr := evrPipeline.discordCache.DiscordIDToUserID(params.AuthDiscordID); userIDStr == "" {
+			sessionLogger.Warn("Failed to get user ID by Discord ID", zap.String("discord_id", params.AuthDiscordID))
+		} else if passwd := params.AuthPassword; passwd != "" {
+			if len(passwd) > 32 {
+				passwd = passwd[:32]
+			}
+
+			account, err := GetAccount(ctx, logger, pipeline.db, statusRegistry, uuid.FromStringOrNil(userIDStr))
+			if err != nil {
+				sessionLogger.Warn("Failed to get account by Discord ID", zap.Error(err))
+			}
+			if account == nil {
+				sessionLogger.Warn("Account not found by Discord ID")
+			}
+
+			if userIDStr, err := AuthenticateUsername(ctx, logger, pipeline.db, account.User.Username, passwd); err != nil {
+				sessionLogger.Warn("Failed to authenticate user by Discord ID", zap.Error(err))
+
+			} else {
+				// Only include the password in the context if the user was unsuccessful in authenticating.
+				// Once the user has been authenticated with a deviceID, their password will be set.
+				params.AuthPassword = ""
+
+				username = account.User.Username
+				userID = uuid.FromStringOrNil(userIDStr)
+			}
+		}
 	}
 
 	return &sessionWS{
