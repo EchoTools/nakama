@@ -85,7 +85,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		}
 	}
 
-	sessionParams, ok := ctx.Value(ctxSessionParametersKey{}).(*SessionParameters)
+	sessionParams, ok := LoadParams(ctx)
 	if !ok {
 		return nil, fmt.Errorf("failed to load session parameters")
 	}
@@ -114,7 +114,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 
 	groupID := r.GetGroupID()
 	if r.GetGroupID() == uuid.Nil {
-		groupID = sessionParams.AccountMetadata().GetActiveGroupID()
+		groupID = sessionParams.AccountMetadata.GetActiveGroupID()
 	}
 
 	region := r.GetRegion()
@@ -180,7 +180,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		PartyGroupID:          lobbyGroupName,
 		PartyID:               uuid.NewV5(uuid.Nil, lobbyGroupName),
 		NextMatchID:           userSettings.NextMatchID,
-		Verbose:               sessionParams.AccountMetadata().DiscordDebugMessages,
+		Verbose:               sessionParams.AccountMetadata.DiscordDebugMessages,
 		Node:                  node,
 		latencyHistory:        latencyHistory,
 	}, nil

@@ -431,7 +431,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 			return false
 		}
 		// If the message is an identifying message, validate the session and evr id.
-		if err := session.ValidateSession(idmessage.GetSessionID()); err != nil {
+		if err := session.LobbySession(idmessage.GetSessionID()); err != nil {
 			logger.Error("Invalid session", zap.Error(err))
 			// Disconnect the client if the session is invalid.
 			return false
@@ -452,8 +452,8 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 		}
 	}
 
-	if params, ok := session.Context().Value(ctxSessionParametersKey{}).(*SessionParameters); ok {
-		evrID := params.EvrID()
+	if params, ok := LoadParams(session.Context()); ok {
+		evrID := params.EvrID
 		if !evrID.IsNil() {
 			logger = logger.With(zap.String("uid", session.UserID().String()), zap.String("sid", session.ID().String()), zap.String("uname", session.Username()), zap.String("evrid", evrID.String()))
 		}
@@ -483,14 +483,14 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 		}
 	}
 
-	params, ok := session.Context().Value(ctxSessionParametersKey{}).(*SessionParameters)
+	params, ok := LoadParams(session.Context())
 	if !ok {
 		logger.Error("Failed to get lobby parameters")
 		return nil, nil
 	}
 
 	// DM the user on discord
-	if !strings.HasPrefix(session.Username(), "broadcaster:") && params.RelayOutgoing() {
+	if !strings.HasPrefix(session.Username(), "broadcaster:") && params.RelayOutgoing {
 		content := ""
 		switch in.Message.(type) {
 		case *rtapi.Envelope_StatusPresenceEvent, *rtapi.Envelope_MatchPresenceEvent, *rtapi.Envelope_StreamPresenceEvent:
@@ -627,13 +627,13 @@ func (p *EvrPipeline) attemptOutOfBandAuthentication(session *sessionWS) error {
 		return nil
 	}
 
-	params := session.Context().Value(ctxSessionParametersKey{}).(*SessionParameters)
-	if params == nil {
+	params, ok := LoadParams(ctx)
+	if !ok {
 		return fmt.Errorf("session parameters not found")
 	}
 
-	discordID := params.authDiscordID
-	authPassword := params.authPassword
+	discordID := params.AuthDiscordID
+	authPassword := params.AuthPassword
 	if discordID == "" || authPassword == "" {
 		return nil
 	}

@@ -221,12 +221,12 @@ func LobbyJoinEntrant(logger *zap.Logger, matchRegistry MatchRegistry, tracker T
 func (p *EvrPipeline) authorizeGuildGroupSession(ctx context.Context, session Session, groupID string) error {
 	userID := session.UserID().String()
 
-	params, ok := ctx.Value(ctxSessionParametersKey{}).(*SessionParameters)
+	params, ok := LoadParams(ctx)
 	if !ok {
 		return NewLobbyError(InternalError, "failed to get session parameters")
 	}
 
-	membership := params.Memberships()[groupID]
+	membership := params.Memberships[groupID]
 
 	guildGroups := p.GuildGroups()
 	gg, ok := guildGroups[groupID]
@@ -235,7 +235,7 @@ func (p *EvrPipeline) authorizeGuildGroupSession(ctx context.Context, session Se
 	}
 	groupMetadata := gg.Metadata
 	sendAuditMessage := groupMetadata.AuditChannelID != ""
-	discordID := params.DiscordID()
+	discordID := params.DiscordID
 
 	if membership.isSuspended {
 
@@ -293,7 +293,7 @@ func (p *EvrPipeline) authorizeGuildGroupSession(ctx context.Context, session Se
 		}
 	}
 
-	if groupMetadata.BlockVPNUsers && params.isVPN {
+	if groupMetadata.BlockVPNUsers && params.IsVPN {
 
 		score := p.ipqsClient.Score(session.ClientIP())
 
@@ -320,9 +320,9 @@ func (p *EvrPipeline) authorizeGuildGroupSession(ctx context.Context, session Se
 		}
 	}
 
-	displayName := params.AccountMetadata().GetGroupDisplayNameOrDefault(groupID)
+	displayName := params.AccountMetadata.GetGroupDisplayNameOrDefault(groupID)
 
-	if err := p.profileRegistry.SetLobbyProfile(ctx, uuid.FromStringOrNil(userID), params.EvrID(), displayName); err != nil {
+	if err := p.profileRegistry.SetLobbyProfile(ctx, uuid.FromStringOrNil(userID), params.EvrID, displayName); err != nil {
 		return errors.Join(NewLobbyErrorf(InternalError, "failed to set lobby profile"), err)
 	}
 

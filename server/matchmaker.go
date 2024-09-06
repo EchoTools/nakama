@@ -255,7 +255,7 @@ func NewLocalMatchmaker(logger, startupLogger *zap.Logger, config Config, router
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				DumpMatchmakerData(m)
+				//DumpMatchmakerData(m)
 				m.Process()
 			}
 		}

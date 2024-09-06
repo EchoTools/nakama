@@ -92,29 +92,30 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 // processLogin handles the authentication of the login connection.
 func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, session *sessionWS, request *evr.LoginRequest) (settings *evr.GameSettings, err error) {
 
-	params, ok := session.Context().Value(ctxSessionParametersKey{}).(*SessionParameters)
+	paramsPtr, ok := LoadParams(ctx)
 	if !ok {
 		return nil, errors.New("session parameters not found")
 	}
+	params := *paramsPtr
 
 	payload := request.LoginData
 
 	hmdsn := request.LoginData.HmdSerialNumber
 
-	if params.hmdSerialOverride != "" {
+	if params.HMDSerialOverride != "" {
 		hmdsn = payload.HmdSerialNumber
 	}
 
 	// Providing a discord ID and password avoids the need to link the device to the account.
 	// Server Hosts use this method to authenticate.
 	evrID := request.GetEvrID()
-	params.SetLoginSession(session)
-	params.SetEvrID(evrID)
+	params.LoginSession = session
+	params.EvrID = evrID
 
 	// Construct the device auth token from the login payload
 	deviceId := NewDeviceAuth(payload.AppId, request.EvrId, hmdsn, session.clientIP)
 
-	account, err := p.authenticateAccount(ctx, logger, session, deviceId, params.authDiscordID, params.authPassword, payload)
+	account, err := p.authenticateAccount(ctx, logger, session, deviceId, params.AuthDiscordID, params.AuthPassword, payload)
 	if err != nil {
 		return settings, err
 	}
@@ -130,7 +131,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	if err != nil {
 		return settings, fmt.Errorf("failed to get user metadata: %w", err)
 	}
-	params.SetAccountMetadata(metadata)
+	params.AccountMetadata = metadata
 
 	// Check that this EVR-ID is only used by this userID
 	otherLogins, err := p.checkEvrIDOwner(ctx, evrID)
@@ -152,7 +153,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		}
 	}
 
-	params.SetIsVR(payload.SystemInfo.HeadsetType != "No VR")
+	params.IsVR = payload.SystemInfo.HeadsetType != "No VR"
 
 	// Check if this user is required to use 2FA
 	if found, err := CheckSystemGroupMembership(ctx, p.db, uid.String(), GroupGlobalRequire2FA); err != nil {
@@ -242,7 +243,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		logger.Debug("Setting active group", zap.String("groupID", groupID.String()))
 		metadata.SetActiveGroupID(groupID)
 	}
-	params.SetMemberships(membershipMap)
+	params.Memberships = membershipMap
 
 	questTypes := []string{
 		"Quest",
@@ -251,20 +252,20 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		"Quest Pro",
 	}
 
-	isPCVR := true
+	params.IsPCVR = true
 
 	for _, t := range questTypes {
 		if strings.Contains(strings.ToLower(request.LoginData.SystemInfo.HeadsetType), strings.ToLower(t)) {
-			isPCVR = false
+			params.IsPCVR = false
 			break
 		}
 	}
 
-	params.SetIsPCVR(isPCVR)
-
 	if err := p.runtimeModule.AccountUpdateId(ctx, userID, "", metadata.MarshalMap(), "", "", "", "", ""); err != nil {
 		return settings, fmt.Errorf("failed to update user metadata: %w", err)
 	}
+
+	UpdateParams(ctx, &params)
 	// Initialize the full session
 	if err := session.SetIdentity(uuid.FromStringOrNil(userID), evrID, user.GetUsername()); err != nil {
 		return settings, fmt.Errorf("failed to login: %w", err)
@@ -332,8 +333,8 @@ func (p *EvrPipeline) authenticateAccount(ctx context.Context, logger *zap.Logge
 			return nil, status.Error(codes.InvalidArgument, "password required")
 		}
 
-		userId, err := GetUserIDByDiscordID(ctx, p.db, discordId)
-		if err == nil {
+		userId = p.discordCache.DiscordIDToUserID(discordId)
+		if userId != "" {
 			// Authenticate the password.
 			userId, _, _, err = AuthenticateEmail(ctx, session.logger, session.pipeline.db, userId+"@"+p.placeholderEmail, userPassword, "", false)
 			if err == nil {
@@ -442,12 +443,12 @@ func writeAuditObjects(ctx context.Context, session *sessionWS, userId string, e
 func (p *EvrPipeline) channelInfoRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	_ = in.(*evr.ChannelInfoRequest)
 
-	params, ok := ctx.Value(ctxSessionParametersKey{}).(*SessionParameters)
+	params, ok := LoadParams(ctx)
 	if !ok {
 		return errors.New("session parameters not found")
 	}
 
-	groupID := params.AccountMetadata().GetActiveGroupID()
+	groupID := params.AccountMetadata.GetActiveGroupID()
 
 	key := fmt.Sprintf("channelInfo,%s", groupID.String())
 
@@ -496,13 +497,13 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 	timer := time.Now()
 	defer func() { p.metrics.CustomTimer("loggedInUserProfileRequest", nil, time.Since(timer)) }()
 
-	params, ok := ctx.Value(ctxSessionParametersKey{}).(*SessionParameters)
+	params, ok := LoadParams(ctx)
 	if !ok {
 		return errors.New("session parameters not found")
 	}
 
-	if params.EvrID() != request.EvrID {
-		return fmt.Errorf("evrId mismatch: %s != %s", params.EvrID().Token(), request.EvrID.Token())
+	if params.EvrID != request.EvrID {
+		return fmt.Errorf("evrId mismatch: %s != %s", params.EvrID.Token(), request.EvrID.Token())
 	}
 
 	profile, err := p.profileRegistry.Load(ctx, session.userID)
@@ -511,7 +512,7 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 	}
 	profile.SetEvrID(request.EvrID)
 
-	gg := p.GuildGroup(params.AccountMetadata().GetActiveGroupID().String())
+	gg := p.GuildGroup(params.AccountMetadata.GetActiveGroupID().String())
 
 	// Check if the user is required to go through community values
 	if !gg.Metadata.hasCompletedCommunityValues(session.userID.String()) {
@@ -524,15 +525,15 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 func (p *EvrPipeline) updateClientProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.UpdateClientProfile)
 
-	params, ok := ctx.Value(ctxSessionParametersKey{}).(*SessionParameters)
+	params, ok := LoadParams(ctx)
 	if !ok {
 		return errors.New("session parameters not found")
 	}
 
 	evrID := request.ClientProfile.EvrID
 
-	if params.EvrID() != evrID {
-		return fmt.Errorf("evrId mismatch: %s != %s", params.EvrID().Token(), evrID.Token())
+	if params.EvrID != evrID {
+		return fmt.Errorf("evrId mismatch: %s != %s", params.EvrID.Token(), evrID.Token())
 	}
 
 	go func() {
@@ -551,19 +552,19 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 	// Set the EVR ID from the context
 	update.EvrID = evrID
 
-	params, ok := ctx.Value(ctxSessionParametersKey{}).(*SessionParameters)
+	params, ok := LoadParams(ctx)
 	if !ok {
 		return errors.New("session parameters not found")
 	}
 
 	// Get the user's metadata
-	memberships := params.Memberships()
+	memberships := params.Memberships
 
 	userID := session.userID.String()
 	for groupID, _ := range memberships {
 		gg := p.GuildGroup(groupID)
 		if gg == nil {
-			return fmt.Errorf("guild group not found: %s", params.AccountMetadata().GetActiveGroupID().String())
+			return fmt.Errorf("guild group not found: %s", params.AccountMetadata.GetActiveGroupID().String())
 		}
 		md := gg.Metadata
 
@@ -579,8 +580,7 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 				if err := SetGuildGroupMetadata(ctx, p.runtimeModule, groupID.String(), md); err != nil {
 					return fmt.Errorf("failed to set guild group metadata: %w", err)
 				}
-				params.DiscordID()
-				p.appBot.LogMessageToChannel(fmt.Sprintf("User <@%s> has accepted the community values.", params.DiscordID()), md.AuditChannelID)
+				p.appBot.LogMessageToChannel(fmt.Sprintf("User <@%s> has accepted the community values.", params.DiscordID), md.AuditChannelID)
 			}
 		}
 	}
@@ -603,8 +603,8 @@ func (p *EvrPipeline) remoteLogSetv3(ctx context.Context, logger *zap.Logger, se
 func (p *EvrPipeline) documentRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.DocumentRequest)
 
-	params := ctx.Value(ctxSessionParametersKey{}).(*SessionParameters)
-	if params == nil {
+	params, ok := LoadParams(ctx)
+	if !ok {
 		return errors.New("session parameters not found")
 	}
 
@@ -613,7 +613,7 @@ func (p *EvrPipeline) documentRequest(ctx context.Context, logger *zap.Logger, s
 	switch request.Type {
 	case "eula":
 
-		if !params.IsVR() {
+		if !params.IsVR {
 
 			message := p.GetCachedMessage("eula:novr")
 
