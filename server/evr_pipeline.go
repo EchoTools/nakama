@@ -444,11 +444,6 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 		if session != nil && session.UserID() == uuid.Nil {
 			logger.Debug("Session not authenticated")
 			// As a work around to the serverdb connection getting lost and needing to reauthenticate
-			if err := p.attemptOutOfBandAuthentication(session); err != nil {
-				// If the session is now authenticated, continue processing the request.
-				logger.Debug("Failed to authenticate session with discordId and password", zap.Error(err))
-				return false
-			}
 		}
 	}
 
@@ -617,44 +612,4 @@ func (p *EvrPipeline) relayMatchData(ctx context.Context, logger *zap.Logger, se
 	p.matchRegistry.SendData(matchID.UUID, matchID.Node, session.UserID(), session.ID(), session.Username(), matchID.Node, opCode, requestJson, true, time.Now().UTC().UnixNano()/int64(time.Millisecond))
 
 	return nil
-}
-
-// configRequest handles the config request.
-func (p *EvrPipeline) attemptOutOfBandAuthentication(session *sessionWS) error {
-	ctx := session.Context()
-	// If the session is already authenticated, return.
-	if session.UserID() != uuid.Nil {
-		return nil
-	}
-
-	params, ok := LoadParams(ctx)
-	if !ok {
-		return fmt.Errorf("session parameters not found")
-	}
-
-	discordID := params.AuthDiscordID
-	authPassword := params.AuthPassword
-	if discordID == "" || authPassword == "" {
-		return nil
-	}
-
-	// Get the account for this discordId
-	userId, err := GetUserIDByDiscordID(ctx, p.db, discordID)
-	if err != nil {
-		return fmt.Errorf("out of band for discord ID %s: %v", discordID, err)
-	}
-
-	// The account was found.
-	account, err := GetAccount(ctx, session.logger, session.pipeline.db, session.statusRegistry, uuid.FromStringOrNil(discordID))
-	if err != nil {
-		return fmt.Errorf("out of band Auth: %s: %v", discordID, err)
-	}
-
-	// Do email authentication
-	userId, username, _, err := AuthenticateEmail(ctx, session.logger, session.pipeline.db, account.Email, authPassword, "", false)
-	if err != nil {
-		return fmt.Errorf("out of band Auth: %s: %v", discordID, err)
-	}
-
-	return session.BroadcasterSession(uuid.FromStringOrNil(userId), "broadcaster:"+username, 0)
 }
