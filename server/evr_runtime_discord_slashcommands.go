@@ -328,6 +328,12 @@ var (
 					Description: "Target user",
 					Required:    true,
 				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "reason",
+					Description: "Reason for the CV",
+					Required:    false,
+				},
 			},
 		},
 		{
@@ -339,6 +345,12 @@ var (
 					Name:        "user",
 					Description: "Target user",
 					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "reason",
+					Description: "Reason for the kick",
+					Required:    false,
 				},
 			},
 		},
@@ -1634,11 +1646,16 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			options := i.ApplicationCommandData().Options
 
+			if len(options) == 0 {
+				return errors.New("no options provided")
+			}
+
 			if user == nil {
 				return nil
 			}
 
 			target := options[0].UserValue(s)
+
 			targetUserID, err := GetUserIDByDiscordID(ctx, db, target.ID)
 			if err != nil {
 				return errors.New("failed to get user ID")
@@ -1677,6 +1694,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			if user == nil {
 				return nil
+			}
+			if len(options) == 0 {
+				return errors.New("no options provided")
 			}
 
 			target := options[0].UserValue(s)
