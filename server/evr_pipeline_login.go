@@ -624,21 +624,14 @@ func (p *EvrPipeline) documentRequest(ctx context.Context, logger *zap.Logger, s
 
 		if !params.IsVR {
 
-			message := p.GetCachedMessage("eula:novr")
-
-			if message == nil {
-
-				eulaVersion, gaVersion, err := GetEULAVersion(ctx, p.db, session.userID.String())
-				if err != nil {
-					logger.Warn("Failed to get EULA version", zap.Error(err))
-					eulaVersion = 1
-					gaVersion = 1
-				}
-				document = evr.NewEULADocument(int(eulaVersion), int(gaVersion), request.Language, "https://github.com/EchoTools", "Blank EULA for NoVR clients.")
-				message = evr.NewDocumentSuccess(document)
-				p.CacheMessage("eula:novr", message)
-
+			eulaVersion, gaVersion, err := GetEULAVersion(ctx, p.db, session.userID.String())
+			if err != nil {
+				logger.Warn("Failed to get EULA version", zap.Error(err))
+				eulaVersion = 1
+				gaVersion = 1
 			}
+			document = evr.NewEULADocument(int(eulaVersion), int(gaVersion), request.Language, "https://github.com/EchoTools", "Blank EULA for NoVR clients.")
+			message := evr.NewDocumentSuccess(document)
 
 			return session.SendEvrUnrequire(message)
 
