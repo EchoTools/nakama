@@ -369,6 +369,87 @@ func MatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime
 	return response.String(), nil
 }
 
+func KickPlayerRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+
+	request := struct {
+		UserID string `json:"user_id"`
+	}{}
+
+	if err := json.Unmarshal([]byte(payload), &request); err != nil {
+		return "", err
+	}
+
+	callerID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if !ok {
+		return "", runtime.NewError("authentication required", StatusUnauthenticated)
+	}
+
+	memberships, err := GetGuildGroupMemberships(ctx, nk, callerID)
+	if err != nil {
+		return "", err
+	}
+
+	// Get a slice of groupIDs that this user is a moderator for
+	var groupIDs []string
+	for groupID, m := range memberships {
+		if m.isModerator {
+			groupIDs = append(groupIDs, groupID)
+		}
+	}
+
+	if len(groupIDs) == 0 {
+		return "", runtime.NewError("unauthorized: not a moderator for any guilds.", StatusPermissionDenied)
+	}
+
+	// Get the match of the user
+	presences, err := nk.StreamUserList(StreamModeService, request.UserID, "", StreamLabelMatchService, true, true)
+	if err != nil {
+		return "", err
+	}
+
+	if len(presences) == 0 {
+		return "", fmt.Errorf("user not in a match")
+	}
+
+	sessionIDs := make([]string, 0, len(presences))
+	for _, p := range presences {
+		matchID := MatchIDFromStringOrNil(p.GetStatus())
+		if matchID.IsNil() {
+			continue
+		}
+		label, err := MatchLabelByID(ctx, nk, matchID)
+		if err != nil {
+			return "", err
+		}
+		if slices.Contains(groupIDs, label.GetGroupID().String()) {
+			sessionIDs = append(sessionIDs, p.GetSessionId())
+		}
+	}
+
+	if len(sessionIDs) == 0 {
+		return "", fmt.Errorf("user not in a match that the caller is a moderator for")
+	}
+
+	for _, sessionID := range sessionIDs {
+		if err := nk.SessionDisconnect(ctx, sessionID, runtime.PresenceReasonDisconnect); err != nil {
+			return "", err
+		}
+	}
+
+	response := struct {
+		SessionIDs []string `json:"session_ids"`
+	}{
+		SessionIDs: sessionIDs,
+	}
+
+	data, err := json.Marshal(response)
+	if err != nil {
+		return "", err
+	}
+
+	return string(data), nil
+}
+
 /*
 func MatchmakingStatusRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk_ runtime.NakamaModule, payload string) (string, error) {
 	// The public view is cached for 5 seconds.
