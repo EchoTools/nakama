@@ -201,8 +201,6 @@ func (p *EvrPipeline) authorizeGuildGroupSession(ctx context.Context, session Se
 		return NewLobbyError(InternalError, "failed to get session parameters")
 	}
 
-	membership := params.Memberships[groupID]
-
 	guildGroups := p.GuildGroups()
 	gg, ok := guildGroups[groupID]
 	if !ok {
@@ -211,6 +209,19 @@ func (p *EvrPipeline) authorizeGuildGroupSession(ctx context.Context, session Se
 	groupMetadata := gg.Metadata
 	sendAuditMessage := groupMetadata.AuditChannelID != ""
 	discordID := params.DiscordID
+
+	membership, ok := params.Memberships[groupID]
+	if !ok && groupMetadata.MembersOnlyMatchmaking {
+		if sendAuditMessage {
+
+			if _, err := p.appBot.dg.ChannelMessageSend(groupMetadata.AuditChannelID, fmt.Sprintf("Rejected non-member <@%s>", discordID)); err != nil {
+				p.logger.Warn("Failed to send audit message", zap.String("channel_id", groupMetadata.AuditChannelID), zap.Error(err))
+			}
+
+		}
+
+		return NewLobbyError(KickedFromLobbyGroup, "User is not a member of this guild")
+	}
 
 	if membership.isSuspended {
 
@@ -248,23 +259,6 @@ func (p *EvrPipeline) authorizeGuildGroupSession(ctx context.Context, session Se
 
 			return NewLobbyErrorf(KickedFromLobbyGroup, "account is too young to join this guild")
 		}
-	}
-
-	if groupMetadata.MembersOnlyMatchmaking {
-
-		if _, ok := params.Memberships[groupID]; !ok {
-
-			if sendAuditMessage {
-
-				if _, err := p.appBot.dg.ChannelMessageSend(groupMetadata.AuditChannelID, fmt.Sprintf("Rejected non-member <@%s>", discordID)); err != nil {
-					p.logger.Warn("Failed to send audit message", zap.String("channel_id", groupMetadata.AuditChannelID), zap.Error(err))
-				}
-
-			}
-
-			return NewLobbyError(KickedFromLobbyGroup, "User is not a member of this guild")
-		}
-
 	}
 
 	if groupMetadata.BlockVPNUsers && params.IsVPN {
