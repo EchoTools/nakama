@@ -314,12 +314,24 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 
 			logger.Debug("Joining backfill match.")
 			p.metrics.CustomCounter("lobby_join_backfill", params.MetricsTags(), int64(params.PartySize))
-			if err := p.LobbyJoinEntrants(ctx, logger, matchID, params.Role, entrants); err != nil {
-				if LobbyErrorIs(err, ServerIsFull) {
-					continue
-				}
-				logger.Debug("Failed to join match", zap.Error(err))
+
+			label, serverSession, err := p.LobbySessionGet(ctx, logger, matchID)
+			if err != nil {
+				logger.Debug("Failed to get match session", zap.Error(err))
 				continue
+			}
+			for _, e := range entrants {
+				go func(e *EvrMatchPresence) {
+
+					session := p.sessionRegistry.Get(e.SessionID)
+
+					if err := p.LobbyJoinEntrant(logger, serverSession, label, UnassignedRole, e); err != nil {
+						// Send the error to the client
+						if err := SendEVRMessages(session, LobbySessionFailureFromError(label.Mode, label.GetGroupID(), err)); err != nil {
+							logger.Debug("Failed to send error message", zap.Error(err))
+						}
+					}
+				}(e)
 			}
 
 			logger.Debug("Joined match")
@@ -341,7 +353,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 			<-time.After(5 * time.Second)
 			continue
 		}
-		matchID, err := lobbyCreateSocial(ctx, logger, p.db, p.runtimeModule, session, p.matchRegistry, params)
+		label, err := lobbyCreateSocial(ctx, logger, p.db, p.runtimeModule, session, p.matchRegistry, params)
 		if err != nil {
 			p.createLobbyMu.Unlock()
 			return errors.Join(NewLobbyError(InternalError, "failed to create social lobby"), err)
@@ -354,12 +366,19 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 
 		logger.Debug("Joining newly created social lobby.")
 		p.metrics.CustomCounter("lobby_join_created_social", params.MetricsTags(), 1)
-		if err := p.LobbyJoinEntrants(ctx, logger, matchID, params.Role, createPresences); err != nil {
-			logger.Debug("Failed to join newly created social lobby.", zap.String("mid", matchID.UUID.String()), zap.Error(err))
-			p.createLobbyMu.Unlock()
-			return errors.Join(NewLobbyError(InternalError, "failed to join social lobby"), err)
-		}
 
+		serverSession := p.sessionRegistry.Get(uuid.FromStringOrNil(label.Broadcaster.SessionID))
+
+		for _, e := range createPresences {
+			go func(e *EvrMatchPresence) {
+				if err := p.LobbyJoinEntrant(logger, serverSession, label, params.Role, e); err != nil {
+					// Send the error to the client
+					if err := SendEVRMessages(session, LobbySessionFailureFromError(label.Mode, label.GetGroupID(), err)); err != nil {
+						logger.Debug("Failed to send error message", zap.Error(err))
+					}
+				}
+			}(e)
+		}
 		p.createLobbyMu.Unlock()
 		return nil
 	}
