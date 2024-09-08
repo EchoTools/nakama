@@ -45,13 +45,9 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		return NewLobbyError(BadRequest, "invalid mode")
 	}
 
-	matchmakingStream, _, err := MatchmakingStream(ctx, logger, session, params)
-	if err != nil {
-		return errors.Join(NewLobbyError(InternalError, "failed to create matchmaking stream"), err)
-	}
 	// This stream tracks the user's matchmaking status.
 	// This stream is untracked when the user cancels matchmaking.
-	err = JoinMatchmakingStream(logger, session, matchmakingStream)
+	groupStream, err := JoinMatchmakingStream(logger, session, params)
 	if err != nil {
 		return errors.Join(NewLobbyError(InternalError, "failed to join matchmaking stream"), err)
 	}
@@ -73,7 +69,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 			case <-time.After(5 * time.Second):
 			}
 			// Check if this user's matchmaking stream is still active.
-			meta := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(session.id, matchmakingStream, session.userID)
+			meta := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(session.id, groupStream, session.userID)
 			if meta == nil {
 				logger.Debug("User presence on matchmaking stream not found")
 				return
@@ -192,7 +188,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 
 			sessionID := uuid.FromStringOrNil(member.Presence.GetSessionId())
 			userID := uuid.FromStringOrNil(member.Presence.GetUserId())
-			if session.tracker.GetLocalBySessionIDStreamUserID(sessionID, matchmakingStream, userID) == nil {
+			if session.tracker.GetLocalBySessionIDStreamUserID(sessionID, groupStream, userID) == nil {
 				// Kick the player from the party.
 				logger.Debug("Kicking player from party, because they are not matchmaking.", zap.String("uid", member.Presence.GetUserId()))
 				session.tracker.UntrackLocalByModes(sessionID, map[uint8]struct{}{StreamModeParty: {}}, PresenceStream{})

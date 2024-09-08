@@ -29,13 +29,13 @@ type LobbySessionParameters struct {
 	CurrentMatchID        MatchID            `json:"current_match_id"`
 	Role                  int                `json:"role"`
 	PartyID               uuid.UUID          `json:"party_id"`
-	PartyGroupID          string             `json:"party_group_id"`
+	PartyGroupName        string             `json:"party_group_name"`
 	PartySize             int                `json:"party_size"`
 	NextMatchID           MatchID            `json:"next_match_id"`
-	DisableArenaBackfill  bool               `json:"disable_arena_backfill"`
-	BackfillQueryAddon    string             `json:"backfill_query_addon"`
 	StringProperties      map[string]string  `json:"string_properties"`
 	NumericProperties     map[string]float64 `json:"numeric_properties"`
+	DisableArenaBackfill  bool               `json:"disable_arena_backfill"`
+	BackfillQueryAddon    string             `json:"backfill_query_addon"`
 	MatchmakingQueryAddon string             `json:"matchmaking_query_addon"`
 	CreateQueryAddon      string             `json:"create_query_addon"`
 	Verbose               bool               `json:"verbose"`
@@ -177,7 +177,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		BackfillQueryAddon:    strings.Join(backfillQueryAddons, " "),
 		MatchmakingQueryAddon: strings.Join(matchmakingQueryAddons, " "),
 		CreateQueryAddon:      globalSettings.CreateQueryAddon + " " + userSettings.CreateQueryAddon,
-		PartyGroupID:          lobbyGroupName,
+		PartyGroupName:        lobbyGroupName,
 		PartyID:               uuid.NewV5(uuid.Nil, lobbyGroupName),
 		NextMatchID:           userSettings.NextMatchID,
 		Verbose:               sessionParams.AccountMetadata.DiscordDebugMessages,
