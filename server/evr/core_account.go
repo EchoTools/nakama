@@ -208,8 +208,9 @@ type MatchStatistic struct {
 }
 
 type EquippedCosmetics struct {
-	Instances CosmeticInstances `json:"instances"`
-	Number    int64             `json:"number"`
+	Instances  CosmeticInstances `json:"instances"`
+	Number     int64             `json:"number"`
+	NumberBody int64             `json:"number_body"`
 }
 
 type CosmeticInstances struct {
@@ -217,30 +218,33 @@ type CosmeticInstances struct {
 }
 
 type UnifiedCosmeticInstance struct {
-	Slots CosmeticLoadout `json:"slots"`
+	Slots             CosmeticLoadout `json:"slots"`
+	ApplyHeraldryTint bool            `json:"apply_heraldry_tint"`
 }
 
 type CosmeticLoadout struct {
+	Banner         string `json:"banner"`
+	Booster        string `json:"booster"`
+	Bracer         string `json:"bracer"`
+	Chassis        string `json:"chassis"`
 	Decal          string `json:"decal"`
 	DecalBody      string `json:"decal_body"`
+	DecalBorder    string `json:"decal_border"`
+	DecalBack      string `json:"decal_back"`
+	Emissive       string `json:"emissive"`
 	Emote          string `json:"emote"`
-	SecondEmote    string `json:"secondemote"`
-	Tint           string `json:"tint"`
-	TintBody       string `json:"tint_body"`
-	TintAlignmentA string `json:"tint_alignment_a"`
-	TintAlignmentB string `json:"tint_alignment_b"`
+	GoalFX         string `json:"goal_fx"`
+	Medal          string `json:"medal"`
 	Pattern        string `json:"pattern"`
 	PatternBody    string `json:"pattern_body"`
-	Pip            string `json:"pip"`
-	Chassis        string `json:"chassis"`
-	Bracer         string `json:"bracer"`
-	Booster        string `json:"booster"`
-	Title          string `json:"title"`
+	PIP            string `json:"pip"`
+	SecondEmote    string `json:"secondemote"`
 	Tag            string `json:"tag"`
-	Banner         string `json:"banner"`
-	Medal          string `json:"medal"`
-	GoalFx         string `json:"goal_fx"`
-	Emissive       string `json:"emissive"`
+	Tint           string `json:"tint"`
+	TintAlignmentA string `json:"tint_alignment_a"`
+	TintAlignmentB string `json:"tint_alignment_b"`
+	TintBody       string `json:"tint_body"`
+	Title          string `json:"title"`
 }
 
 func DefaultCosmeticLoadout() CosmeticLoadout {
@@ -251,7 +255,7 @@ func DefaultCosmeticLoadout() CosmeticLoadout {
 		TintAlignmentA: "tint_blue_a_default",
 		TintAlignmentB: "tint_orange_a_default",
 		Pattern:        "pattern_default",
-		Pip:            "rwd_decalback_default",
+		PIP:            "rwd_decalback_default",
 		Chassis:        "rwd_chassis_body_s11_a",
 		Bracer:         "rwd_bracer_default",
 		Booster:        "rwd_booster_default",
@@ -259,7 +263,7 @@ func DefaultCosmeticLoadout() CosmeticLoadout {
 		Tag:            "rwd_tag_s1_a_secondary",
 		Banner:         "rwd_banner_s1_default",
 		Medal:          "rwd_medal_default",
-		GoalFx:         "rwd_goal_fx_default",
+		GoalFX:         "rwd_goal_fx_default",
 		SecondEmote:    "emote_blink_smiley_a",
 		Emissive:       "emissive_default",
 		TintBody:       "tint_neutral_a_default",
@@ -1308,7 +1312,8 @@ func NewServerProfile() ServerProfile {
 					Slots: DefaultCosmeticLoadout(),
 				},
 			},
-			Number: 1,
+			Number:     1,
+			NumberBody: 1,
 		},
 		Statistics: map[string]map[string]MatchStatistic{
 			"arena": {
