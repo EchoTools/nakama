@@ -1,11 +1,9 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 
-	"github.com/gofrs/uuid/v5"
 	"go.uber.org/zap"
 )
 
@@ -24,37 +22,45 @@ func (l MatchmakingGroupLabel) String() string {
 	return string(data)
 }
 
-func MatchmakingStream(ctx context.Context, logger *zap.Logger, s *sessionWS, params *LobbySessionParameters) (PresenceStream, MatchmakingGroupLabel, error) {
-	_, subject, err := GetLobbyGroupID(ctx, s.pipeline.db, s.userID.String())
-	if err != nil {
-		return PresenceStream{}, MatchmakingGroupLabel{}, fmt.Errorf("failed to get party group ID: %v", err)
-	}
-	if subject == uuid.Nil {
-		subject = s.id
-	}
+func JoinMatchmakingStream(logger *zap.Logger, s *sessionWS, params *LobbySessionParameters) (PresenceStream, error) {
+
 	label := MatchmakingGroupLabel{
 		Mode:        params.Mode.String(),
 		GroupID:     params.GroupID.String(),
 		VersionLock: params.VersionLock.String(),
 	}
-	stream := PresenceStream{Mode: StreamModeMatchmaking, Subject: subject, Label: label.String()}
-	return stream, label, nil
-}
 
-func JoinMatchmakingStream(logger *zap.Logger, s *sessionWS, stream PresenceStream) error {
+	labelStr := label.String()
+	_ = labelStr
 
-	logger.Debug("Joining lobby group matchmaking stream", zap.Any("stream", stream))
-	s.tracker.UntrackLocalByModes(s.id, map[uint8]struct{}{stream.Mode: {}}, stream)
+	groupStream := PresenceStream{Mode: StreamModeMatchmaking, Subject: params.GroupID, Label: label.String()}
+	logger.Debug("Joining lobby group matchmaking stream", zap.Any("stream", groupStream))
+
+	data, err := json.Marshal(params)
+	if err != nil {
+		return PresenceStream{}, fmt.Errorf("failed to marshal lobby group matchmaking stream data: %w", err)
+	}
+
+	presenceMeta := PresenceMeta{
+		Status: string(data),
+	}
+
 	// Leave any existing lobby group stream.
+	s.tracker.UntrackLocalByModes(s.id, map[uint8]struct{}{StreamModeMatchmaking: {}}, PresenceStream{})
 
 	ctx := s.Context()
 
-	if success, isNew := s.tracker.Track(ctx, s.id, stream, s.UserID(), PresenceMeta{}); !success {
-		return fmt.Errorf("failed to track lobby group matchmaking stream")
-	} else if isNew {
-		logger.Debug("Tracked lobby group matchmaking stream")
+	if success := s.tracker.TrackMulti(ctx, s.id, []*TrackerOp{
+		{Stream: groupStream, Meta: presenceMeta},
+	}, s.userID); !success {
+
+		return PresenceStream{}, fmt.Errorf("failed to track lobby group matchmaking stream")
+	} else {
+		logger.Debug("Tracked lobby group matchmaking stream", zap.Any("stream", groupStream), zap.Any("meta", presenceMeta))
 	}
-	return nil
+
+	// Track the groupID as well
+	return groupStream, nil
 }
 func LeaveMatchmakingStream(logger *zap.Logger, s *sessionWS) error {
 	logger.Debug("Leaving lobby group matchmaking stream")
