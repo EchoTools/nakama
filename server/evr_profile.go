@@ -351,8 +351,8 @@ func (r *ProfileRegistry) GetFieldByJSONProperty(i interface{}, itemName string)
 }
 
 func (r *ProfileRegistry) UpdateEquippedItem(profile *GameProfileData, category string, name string) error {
-	// Get the current profile.
 
+	// Get the current profile.
 	unlocksArena := profile.Server.UnlockedCosmetics.Arena
 	unlocksCombat := profile.Server.UnlockedCosmetics.Combat
 
@@ -406,10 +406,12 @@ func (r *ProfileRegistry) UpdateEquippedItem(profile *GameProfileData, category 
 
 	s := &profile.Server.EquippedCosmetics.Instances.Unified.Slots
 
+	s.DecalBody = "rwd_decalback_default"
+	s.DecalBack = "rwd_decalback_default"
 	// Exact mappings
 	exactmap := map[string]*string{
 		"emissive_default":      &s.Emissive,
-		"rwd_decalback_default": &s.Pip,
+		"rwd_decalback_default": &s.PIP,
 	}
 
 	if val, ok := exactmap[name]; ok {
@@ -455,13 +457,13 @@ func (r *ProfileRegistry) UpdateEquippedItem(profile *GameProfileData, category 
 		case "medal":
 			s.Medal = name
 		case "goal":
-			s.GoalFx = name
+			s.GoalFX = name
 		case "emissive":
 			s.Emissive = name
 		//case "decalback":
 		//	fallthrough
 		case "pip":
-			s.Pip = name
+			s.PIP = name
 		default:
 			r.logger.Warn("Unknown cosmetic category `%s`", category)
 			return nil
