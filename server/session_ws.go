@@ -190,7 +190,7 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 		SupportedFeatures:  parseUserQueryCommaDelimited(&request, "features", 32, featurePattern),
 		RequiredFeatures:   parseUserQueryCommaDelimited(&request, "requires", 32, featurePattern),
 		ServerTags:         parseUserQueryCommaDelimited(&request, "tags", 32, tagsPattern),
-		ServerGuilds:       parseUserQueryCommaDelimited(&request, "tags", 32, guildPattern),
+		ServerGuilds:       parseUserQueryCommaDelimited(&request, "guilds", 32, guildPattern),
 		ServerRegions:      parseUserQueryCommaDelimited(&request, "regions", 32, regionPattern),
 
 		URLParameters: urlParams,
