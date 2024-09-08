@@ -1129,6 +1129,15 @@ func AuthenticatePasswordRPC(ctx context.Context, logger runtime.Logger, db *sql
 	return string(response), nil
 }
 
+type AccountLookupRPCResponse struct {
+	ID          string        `json:"id"`
+	DiscordID   string        `json:"discord_id"`
+	Username    string        `json:"username"`
+	DisplayName string        `json:"display_name"`
+	AvatarURL   string        `json:"avatar_url"`
+	IPQSData    *IPQSResponse `json:"ipqs_data,omitempty"`
+}
+
 func AccountLookupRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 	request := struct {
 		Username  string `json:"username"`
@@ -1138,6 +1147,19 @@ func AccountLookupRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 
 	if err := json.Unmarshal([]byte(payload), &request); err != nil {
 		return "", err
+	}
+
+	includePrivate := false
+
+	callerID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if !ok {
+		return "", runtime.NewError("authentication required", StatusUnauthenticated)
+	}
+
+	if ok, err := CheckSystemGroupMembership(ctx, db, callerID, GroupGlobalPrivateDataAccess); err != nil {
+		includePrivate = false
+	} else {
+		includePrivate = ok
 	}
 
 	var err error
@@ -1172,18 +1194,27 @@ func AccountLookupRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		return "", err
 	}
 
-	response := struct {
-		ID          string `json:"id"`
-		DiscordID   string `json:"discord_id"`
-		Username    string `json:"username"`
-		DisplayName string `json:"display_name"`
-		AvatarURL   string `json:"avatar_url"`
-	}{
+	response := AccountLookupRPCResponse{
 		ID:          account.User.Id,
 		Username:    account.User.Username,
 		DiscordID:   account.CustomId,
 		DisplayName: account.User.DisplayName,
 		AvatarURL:   account.User.AvatarUrl,
+	}
+
+	if includePrivate {
+		// Check if the player is online
+		if presences, err := nk.StreamUserList(StreamModeNotifications, userID, "", "", true, true); err != nil {
+			logger.Error("Failed to get user presence: %v", err)
+		} else if len(presences) > 0 {
+
+			nkgo := nk.(*RuntimeGoNakamaModule)
+			sessionID := uuid.FromStringOrNil(presences[0].GetSessionId())
+			session := nkgo.sessionRegistry.Get(sessionID)
+			if session != nil {
+				response.IPQSData, _ = ipqsCache.Load(session.ClientIP())
+			}
+		}
 	}
 
 	// Convert the account data to a json object.
