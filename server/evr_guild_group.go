@@ -8,8 +8,6 @@ import (
 	"github.com/heroiclabs/nakama-common/api"
 )
 
-type ctxGuildGroupMembershipsKey struct{}
-
 type GuildGroupRoles struct {
 	Member           string `json:"member"`
 	Moderator        string `json:"moderator"`
