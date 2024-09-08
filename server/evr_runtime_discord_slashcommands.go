@@ -83,7 +83,7 @@ func NewDiscordAppBot(logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB
 	}
 
 	bot := dg
-	bot.LogLevel = discordgo.LogDebug
+	//bot.LogLevel = discordgo.LogDebug
 	dg.StateEnabled = true
 
 	bot.Identify.Intents |= discordgo.IntentAutoModerationExecution
