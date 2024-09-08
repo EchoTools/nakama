@@ -34,7 +34,6 @@ func LobbyJoinEntrants(ctx context.Context, logger *zap.Logger, db *sql.DB, matc
 	if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), &label); err != nil {
 		return errors.Join(NewLobbyError(InternalError, "failed to unmarshal match label"), err)
 	}
-	groupID := label.GetGroupID()
 
 	// Ensure this player is authorized to join this lobby/match.
 	session := sessionRegistry.Get(entrants[0].SessionID)
