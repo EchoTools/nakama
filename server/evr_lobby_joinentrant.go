@@ -274,11 +274,8 @@ func (p *EvrPipeline) authorizeGuildGroupSession(ctx context.Context, session Se
 	}
 
 	if groupMetadata.MembersOnlyMatchmaking {
-		memberships, ok := ctx.Value(ctxGuildGroupMembershipsKey{}).(GuildGroupMemberships)
-		if !ok {
-			return NewLobbyError(KickedFromLobbyGroup, "failed to get guild group memberships")
-		}
-		if !memberships.IsMember(groupID) {
+
+		if _, ok := params.Memberships[groupID]; !ok {
 
 			if sendAuditMessage {
 
@@ -289,6 +286,7 @@ func (p *EvrPipeline) authorizeGuildGroupSession(ctx context.Context, session Se
 
 			return NewLobbyError(KickedFromLobbyGroup, "User is not a member of this guild")
 		}
+
 	}
 
 	if groupMetadata.BlockVPNUsers && params.IsVPN {
