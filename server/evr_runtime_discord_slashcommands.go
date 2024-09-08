@@ -1695,32 +1695,29 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			for _, p := range presences {
 
 				if p.GetUserId() == targetUserIDStr {
-					mid := MatchIDFromStringOrNil(p.GetStatus())
-					var label *MatchLabel
-					var err error
-					if !mid.IsNil() {
-						label, err = MatchLabelByID(ctx, d.nk, mid)
-					}
-					if label == nil || err != nil {
+
+					if label, _ := MatchLabelByID(ctx, d.nk, MatchIDFromStringOrNil(p.GetStatus())); label != nil {
+						if label.GetGroupID().String() != groupID {
+							return errors.New("user's match is not from this guild")
+						}
+
+						// Kick the player from the match
+						if err := KickPlayerFromMatch(ctx, d.nk, label.ID, targetUserIDStr); err != nil {
+							return err
+						}
+						_ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> kicked player <@%s> from [%s](https://echo.taxi/spark://c/%s) match.", callerID, target.ID, label.Mode.String(), strings.ToUpper(label.ID.UUID.String())), false)
+					} else {
+
 						// Just disconnect the user, wholesale
 						if n, err := DisconnectUserID(ctx, d.nk, targetUserIDStr); err != nil {
 							return fmt.Errorf("failed to disconnect user: %w", err)
 						} else {
-
 							_ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s disconnected player %s from match service.", callerID, target.ID), false)
 							cnt += n
 							continue
-
 						}
 					}
 
-					mode := label.Mode.String()
-					// Kick the player from the match
-					if err := KickPlayerFromMatch(ctx, d.nk, mid, targetUserIDStr); err != nil {
-						return err
-					}
-
-					_ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> kicked player <@%s> from [%s](https://echo.taxi/spark://c/%s) match.", callerID, target.ID, mode, strings.ToUpper(mid.UUID.String())), false)
 					cnt++
 				}
 			}
