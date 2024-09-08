@@ -362,6 +362,7 @@ func (b *LobbyBuilder) listUnassignedLobbies(ctx context.Context, logger *zap.Lo
 	qparts := []string{
 		"+label.open:T",
 		"+label.lobby_type:unassigned",
+		"+label.broadcaster.regions:/(default)/",
 		fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/", Query.Escape(groupID.String())),
 	}
 	query := strings.Join(qparts, " ")
