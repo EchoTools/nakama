@@ -11,7 +11,6 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/gofrs/uuid/v5"
-	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
 )
 
@@ -66,18 +65,23 @@ func LobbyJoinEntrants(ctx context.Context, logger *zap.Logger, db *sql.DB, matc
 	}
 
 	for _, e := range entrants {
+
 		session := sessionRegistry.Get(e.SessionID)
 		if session == nil {
 			logger.Warn("failed to find session", zap.String("sid", e.GetSessionId()))
+			errorCh <- fmt.Errorf("failed to find session")
 			continue
 		}
 
-		if err := LobbyJoinEntrant(logger, matchRegistry, tracker, session, serverSession, &label, e, matchID, role, errorCh); err != nil {
-			if err := SendEVRMessages(session, LobbySessionFailureFromError(label.Mode, groupID, err)); err != nil {
-				logger.Error("failed to send lobby session failure to game client", zap.Error(err))
+		go func(session Session, entrant *EvrMatchPresence) {
+
+			if err := LobbyJoinEntrant(logger, matchRegistry, tracker, session, serverSession, &label, entrant, matchID, role); err != nil {
+				logger.Warn("failed to join entrant", zap.Any("entrant", e), zap.Error(err))
+				errorCh <- err
 			}
-			continue
-		}
+
+		}(session, e)
+
 		presences = append(presences, e)
 	}
 
@@ -111,7 +115,7 @@ func LobbyJoinEntrants(ctx context.Context, logger *zap.Logger, db *sql.DB, matc
 	return nil
 }
 
-func LobbyJoinEntrant(logger *zap.Logger, matchRegistry MatchRegistry, tracker Tracker, session Session, serverSession Session, label *MatchLabel, e *EvrMatchPresence, matchID MatchID, role int, errorCh chan error) error {
+func LobbyJoinEntrant(logger *zap.Logger, matchRegistry MatchRegistry, tracker Tracker, session Session, serverSession Session, label *MatchLabel, e *EvrMatchPresence, matchID MatchID, role int) error {
 	logger = logger.With(zap.String("uid", e.UserID.String()), zap.String("sid", e.SessionID.String()))
 
 	sessionCtx := session.Context()
@@ -128,23 +132,20 @@ func LobbyJoinEntrant(logger *zap.Logger, matchRegistry MatchRegistry, tracker T
 	} else if labelStr == "" {
 		err = NewLobbyErrorf(ServerDoesNotExist, "join attempt failed: match label not found")
 	} else if !allowed {
-		err = NewLobbyErrorf(ServerIsFull, "join attempt failed: %s", reason)
+		err = NewLobbyErrorf(ServerIsFull, "join attempt failed: not allowed: %s", reason)
 	} else if !isNew {
 		logger.Warn("Player is already in the match. ignoring.", zap.String("mid", matchID.UUID.String()), zap.String("uid", e.UserID.String()))
-		errorCh <- nil
 		return nil
 	}
 
 	if err != nil {
 		logger.Warn("failed to join match", zap.Error(err))
-		errorCh <- fmt.Errorf("failed to join match: %w", err)
-		return err
+		return fmt.Errorf("failed to join match: %w", err)
 	}
 
 	e = &EvrMatchPresence{}
 	if err := json.Unmarshal([]byte(reason), &e); err != nil {
 		err = errors.Join(NewLobbyErrorf(InternalError, "failed to unmarshal match presence"), err)
-		errorCh <- err
 		return err
 	}
 
@@ -189,9 +190,7 @@ func LobbyJoinEntrant(logger *zap.Logger, matchRegistry MatchRegistry, tracker T
 	// Update the statuses. This is looked up by the pipeline when the game server sends the new entrant message.
 	for _, op := range ops {
 		if ok := tracker.Update(sessionCtx, e.SessionID, op.Stream, e.UserID, op.Meta); !ok {
-			err = NewLobbyError(InternalError, "failed to track session ID")
-			errorCh <- err
-			return err
+			return NewLobbyError(InternalError, "failed to track session ID")
 		}
 	}
 
@@ -199,9 +198,7 @@ func LobbyJoinEntrant(logger *zap.Logger, matchRegistry MatchRegistry, tracker T
 	if err := SendEVRMessages(serverSession, connectionSettings); err != nil {
 		logger.Error("failed to send lobby session success to game server", zap.Error(err))
 
-		err = NewLobbyError(InternalError, "failed to send lobby session success to game server")
-		errorCh <- err
-		return err
+		return NewLobbyError(InternalError, "failed to send lobby session success to game server")
 	}
 
 	if err := LeaveMatchmakingStream(logger, session.(*sessionWS)); err != nil {
@@ -209,11 +206,13 @@ func LobbyJoinEntrant(logger *zap.Logger, matchRegistry MatchRegistry, tracker T
 	}
 
 	// Send the lobby session success message to the game client.
-	go func(session Session, msg *evr.LobbySessionSuccessv5) {
-		<-time.After(250 * time.Millisecond)
-		errorCh <- SendEVRMessages(session, connectionSettings)
-	}(session, connectionSettings)
+	<-time.After(250 * time.Millisecond)
 
+	err = SendEVRMessages(session, connectionSettings)
+	if err != nil {
+		logger.Error("failed to send lobby session success to game client", zap.Error(err))
+		return NewLobbyError(InternalError, "failed to send lobby session success to game client")
+	}
 	logger.Info("Joined entrant.", zap.String("mid", matchID.UUID.String()), zap.String("uid", e.UserID.String()), zap.String("sid", e.SessionID.String()))
 	return nil
 }
