@@ -235,11 +235,21 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 		"groupID": groupID.String(),
 	}
 
+	label, serverSession, err := LobbySessionGet(ctx, logger, b.db, b.matchRegistry, b.tracker, b.profileRegistry, b.sessionRegistry, matchID)
+
 	successful := make([]*EvrMatchPresence, 0, len(entrants))
 	errored := make([]*EvrMatchPresence, 0, len(entrants))
+
 	for _, p := range entrantPresences {
 
-		if err := LobbyJoinEntrants(ctx, logger, b.db, b.matchRegistry, b.sessionRegistry, b.tracker, b.profileRegistry, matchID, p.RoleAlignment, []*EvrMatchPresence{p}); err != nil {
+		session := b.sessionRegistry.Get(p.SessionID)
+		if session == nil {
+			logger.Warn("Failed to get session from session registry", zap.String("sid", p.SessionID.String()))
+			errored = append(errored, p)
+			continue
+		}
+
+		if err := LobbyJoinEntrant(logger, b.matchRegistry, b.tracker, session, serverSession, label, p, p.RoleAlignment); err != nil {
 			logger.Error("Failed to join entrant to match", zap.String("mid", matchID.UUID.String()), zap.String("uid", p.GetUserId()), zap.Error(err))
 			errored = append(errored, p)
 			continue
@@ -248,15 +258,6 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 		successful = append(successful, p)
 	}
 
-	match, _, err := b.matchRegistry.GetMatch(ctx, matchID.String())
-	if err != nil {
-		logger.Error("Failed to get match", zap.String("mid", matchID.UUID.String()), zap.Error(err))
-	}
-
-	label := MatchLabel{}
-	if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), &label); err != nil {
-		logger.Error("Failed to unmarshal match label", zap.String("mid", matchID.UUID.String()), zap.Error(err))
-	}
 	b.metrics.CustomCounter("lobby_join_match_made", tags, int64(len(successful)))
 	b.metrics.CustomCounter("lobby_error_match_made", tags, int64(len(errored)))
 
