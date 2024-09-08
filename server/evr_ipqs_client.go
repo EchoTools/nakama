@@ -15,6 +15,8 @@ import (
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
+var ipqsCache = &MapOf[string, *IPQSResponse]{}
+
 const (
 	IPQSStorageCollection = "IPQS"
 	IPQSCacheStorageKey   = "cache"
@@ -133,7 +135,7 @@ func NewIPQS(logger *zap.Logger, db *sql.DB, metrics Metrics, storageIndex Stora
 			"lighter_penalties":          "false",
 		},
 
-		cache: &MapOf[string, *IPQSResponse]{},
+		cache: ipqsCache,
 	}
 
 	if err := ipqs.LoadCache(); err != nil {

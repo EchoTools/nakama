@@ -38,24 +38,7 @@ const (
 	GroupGlobalRequire2FA        = "Global Require 2FA"
 	SystemGroupLangTag           = "system"
 	GuildGroupLangTag            = "guild"
-
-	FlagGlobalDevelopers = 1 << iota
-	FlagGlobalModerators
-	FlagGlobalTesters
-	FlagGlobalBots
-	FlagGlobalBadgeAdmins
-	FlagNoVR
-	FlagGlobalPrivateDataAccess
 )
-
-var groupFlagMap = map[string]int{
-	GroupGlobalDevelopers:        FlagGlobalDevelopers,
-	GroupGlobalModerators:        FlagGlobalModerators,
-	GroupGlobalTesters:           FlagGlobalTesters,
-	GroupGlobalBots:              FlagGlobalBots,
-	GroupGlobalBadgeAdmins:       FlagGlobalBadgeAdmins,
-	GroupGlobalPrivateDataAccess: FlagGlobalPrivateDataAccess,
-}
 
 func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) (err error) {
 
