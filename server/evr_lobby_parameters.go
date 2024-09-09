@@ -90,6 +90,10 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		return nil, fmt.Errorf("failed to load session parameters")
 	}
 
+	if sessionParams == nil || sessionParams.AccountMetadata == nil {
+		return nil, fmt.Errorf("failed to load session parameters")
+	}
+
 	latencyHistory, err := LoadLatencyHistory(ctx, logger, p.db, session.userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load latency history: %v", err)

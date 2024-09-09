@@ -408,6 +408,7 @@ func (r *ProfileRegistry) UpdateEquippedItem(profile *GameProfileData, category 
 
 	s.DecalBody = "rwd_decalback_default"
 	s.DecalBack = "rwd_decalback_default"
+
 	// Exact mappings
 	exactmap := map[string]*string{
 		"emissive_default":      &s.Emissive,

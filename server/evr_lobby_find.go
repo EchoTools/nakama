@@ -320,7 +320,10 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 				go func(e *EvrMatchPresence) {
 
 					session := p.sessionRegistry.Get(e.SessionID)
-
+					if session == nil {
+						logger.Debug("Session not found", zap.String("sid", e.SessionID.String()))
+						return
+					}
 					if err := p.LobbyJoinEntrant(logger, serverSession, label, UnassignedRole, e); err != nil {
 						// Send the error to the client
 						if err := SendEVRMessages(session, LobbySessionFailureFromError(label.Mode, label.GetGroupID(), err)); err != nil {
@@ -364,7 +367,10 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		p.metrics.CustomCounter("lobby_join_created_social", params.MetricsTags(), 1)
 
 		serverSession := p.sessionRegistry.Get(uuid.FromStringOrNil(label.Broadcaster.SessionID))
-
+		if serverSession == nil {
+			p.createLobbyMu.Unlock()
+			return NewLobbyError(InternalError, "server session not found")
+		}
 		for _, e := range createPresences {
 			go func(e *EvrMatchPresence) {
 				if err := p.LobbyJoinEntrant(logger, serverSession, label, params.Role, e); err != nil {

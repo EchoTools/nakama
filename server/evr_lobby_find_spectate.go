@@ -83,6 +83,11 @@ func (p *EvrPipeline) lobbyFindSpectate(ctx context.Context, logger *zap.Logger,
 				}
 
 				serverSession := p.sessionRegistry.Get(uuid.FromStringOrNil(label.Broadcaster.SessionID))
+				if serverSession == nil {
+					logger.Debug("Match broadcaster not found", zap.String("mid", match.GetMatchId()))
+					continue
+				}
+
 				if err := p.LobbyJoinEntrant(logger, serverSession, &label, params.Role, entrants[0]); err != nil {
 					// Send the error to the client
 					if err := SendEVRMessages(session, LobbySessionFailureFromError(label.Mode, label.GetGroupID(), err)); err != nil {
