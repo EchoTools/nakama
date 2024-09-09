@@ -70,6 +70,10 @@ func (p *EvrPipeline) lobbyPingResponse(ctx context.Context, logger *zap.Logger,
 }
 
 func SendEVRMessages(session Session, messages ...evr.Message) error {
+	if session == nil {
+		return fmt.Errorf("session is nil")
+	}
+
 	logger := session.Logger()
 	isDebug := logger.Core().Enabled(zap.DebugLevel)
 	if isDebug {
