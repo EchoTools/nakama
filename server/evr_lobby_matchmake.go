@@ -2,18 +2,15 @@ package server
 
 import (
 	"context"
-	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"math"
 	"net"
-	"strings"
 	"time"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
-	"github.com/intinig/go-openskill/types"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -80,12 +77,9 @@ func (p *EvrPipeline) lobbyMatchMake(ctx context.Context, logger *zap.Logger, se
 		ratedTeam = append(ratedTeam, rating)
 	}
 
-	query, stringProps, numericProps, err := lobbyMatchmakeQuery(ctx, logger, p.db, session, ratedTeam.Rating(), params)
-	if err != nil {
-		return status.Errorf(codes.Internal, "Failed to build matchmaking query: %v", err)
-	}
+	query, stringProps, numericProps := params.MatchmakingParameters()
 
-	logger.Debug("Matchmaking query", zap.String("query", query), zap.Any("stringProps", stringProps), zap.Any("numericProps", numericProps))
+	logger.Debug("Matchmaking query", zap.String("query", query), zap.Any("string_properties", stringProps), zap.Any("numeric_properties", numericProps))
 
 	ticketConfig, ok := DefaultMatchmakerTicketConfigs[params.Mode]
 	if !ok {
@@ -98,7 +92,7 @@ func (p *EvrPipeline) lobbyMatchMake(ctx context.Context, logger *zap.Logger, se
 
 	ticket := ""
 	otherPresences := []*PresenceID{}
-
+	sessionID := session.ID().String()
 	if len(partyList) == 1 {
 		// This is a solo matchmaker.
 		presences := []*MatchmakerPresence{
@@ -111,13 +105,13 @@ func (p *EvrPipeline) lobbyMatchMake(ctx context.Context, logger *zap.Logger, se
 			},
 		}
 		// If the user is not in a party, the must submit the ticket through the matchmaker instead of the party handler.
-		ticket, _, err = session.matchmaker.Add(ctx, presences, session.ID().String(), "", query, minCount, maxCount, countMultiple, stringProps, numericProps)
+		ticket, _, err = session.matchmaker.Add(ctx, presences, sessionID, "", query, minCount, maxCount, countMultiple, stringProps, numericProps)
 		if err != nil {
 			return status.Errorf(codes.Internal, "Failed to add matchmaker ticket: %v", err)
 		}
 	} else {
 		// Matchmake with the lobby group via the party handler.
-		ticket, otherPresences, err = lobbyGroup.MatchmakerAdd(session.id.String(), session.pipeline.node, query, minCount, maxCount, countMultiple, stringProps, numericProps)
+		ticket, otherPresences, err = lobbyGroup.MatchmakerAdd(sessionID, session.pipeline.node, query, minCount, maxCount, countMultiple, stringProps, numericProps)
 		if err != nil {
 			return status.Errorf(codes.Internal, "Failed to add matchmaker ticket: %v", err)
 		}
@@ -133,7 +127,7 @@ func (p *EvrPipeline) lobbyMatchMake(ctx context.Context, logger *zap.Logger, se
 			logger.Debug("Removed matchmaker ticket", zap.String("ticket", ticket))
 		}
 
-		err = session.pipeline.matchmaker.RemoveSessionAll(session.id.String())
+		err = session.pipeline.matchmaker.RemoveSessionAll(sessionID)
 		if err == nil {
 			logger.Debug("Removed matchmaker ticket", zap.String("ticket", ticket))
 		}
@@ -141,67 +135,6 @@ func (p *EvrPipeline) lobbyMatchMake(ctx context.Context, logger *zap.Logger, se
 	}()
 
 	return nil
-}
-
-func lobbyMatchmakeQuery(ctx context.Context, logger *zap.Logger, db *sql.DB, session Session, rating types.Rating, params *LobbySessionParameters) (query string, stringProps map[string]string, numericProps map[string]float64, err error) {
-
-	stringProps = map[string]string{
-		"mode":         params.Mode.String(),
-		"group_id":     params.GroupID.String(),
-		"party_id":     params.PartyID.String(),
-		"version_lock": params.VersionLock.String(),
-	}
-
-	numericProps = map[string]float64{
-		"rating_mu":    rating.Mu,
-		"rating_sigma": rating.Sigma,
-	}
-	for i, v := range params.NumericProperties {
-		numericProps[i] = v
-	}
-
-	for i, v := range params.StringProperties {
-		stringProps[i] = v
-	}
-	qparts := []string{
-		"+properties.mode:" + params.Mode.String(),
-		"+properties.version_lock:" + params.VersionLock.String(),
-		fmt.Sprintf("+properties.group_id:/(%s)/", Query.Escape(params.GroupID.String())),
-		params.MatchmakingQueryAddon,
-	}
-
-	// Add a property of the external IP's RTT
-	for ip, history := range params.latencyHistory {
-		// Average the RTT
-		rtt := 0
-
-		if len(history) == 0 {
-			continue
-		}
-		for _, v := range history {
-			rtt += v
-		}
-		rtt /= len(history)
-		if rtt == 0 {
-			continue
-		}
-
-		k := ipToKey(net.ParseIP(ip))
-		rtt = mroundRTT(rtt, 10)
-
-		numericProps[k] = float64(rtt)
-		if rtt > 100 {
-			continue
-		}
-
-		qparts = append(qparts,
-			fmt.Sprintf("properties.%s:<=%d", k, rtt+30),
-		)
-	}
-
-	query = strings.Join(qparts, " ")
-
-	return query, stringProps, numericProps, nil
 }
 
 // mroundRTT rounds the rtt to the nearest modulus
