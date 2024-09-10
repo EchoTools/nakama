@@ -35,9 +35,34 @@ func (p *EvrPipeline) lobbyMatchmakerStatusRequest(ctx context.Context, logger *
 func (p *EvrPipeline) lobbySessionRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(evr.LobbySessionRequest)
 	go func() {
-		if err := p.handleLobbySessionRequest(ctx, logger, session, request); err != nil {
+
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+
+		lobbyParams, err := NewLobbyParametersFromRequest(ctx, logger, session, in.(evr.LobbySessionRequest))
+		if err != nil {
+			if err := session.SendEvr(LobbySessionFailureFromError(request.GetMode(), request.GetGroupID(), err)); err != nil {
+				logger.Error("Failed to send lobby session failure message", zap.Error(err))
+			}
+		}
+
+		ctx = context.WithValue(ctx, ctxLobbyParametersKey{}, lobbyParams)
+
+		if err := p.handleLobbySessionRequest(ctx, logger, session, request, lobbyParams); err != nil {
+			if lobbyParams.Verbose {
+				session.Send(&rtapi.Envelope{
+					Message: &rtapi.Envelope_Error{
+						Error: &rtapi.Error{
+							Code:    int32(codes.Internal),
+							Message: err.Error(),
+						},
+					},
+				}, true)
+			}
 			logger.Error("Failed to process lobby session request", zap.Error(err))
-			session.SendEvr(LobbySessionFailureFromError(request.GetMode(), request.GetGroupID(), err))
+			if err := session.SendEvr(LobbySessionFailureFromError(request.GetMode(), request.GetGroupID(), err)); err != nil {
+				logger.Error("Failed to send lobby session failure message", zap.Error(err))
+			}
 		}
 	}()
 	return nil
