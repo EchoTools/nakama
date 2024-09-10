@@ -22,6 +22,7 @@ import (
 
 var LobbyTestCounter = 0
 
+var ErrCreateLock = errors.New("failed to acquire create lock")
 var MatchmakingTimeout = 5 * time.Minute
 
 //var MatchmakingTimeout = 30 * time.Second
@@ -57,50 +58,6 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	if err != nil {
 		return errors.Join(NewLobbyError(InternalError, "failed to join lobby group"), err)
 	}
-
-	// Monitor the lobby group stream. (i.e. player matchmaking status)
-	// This will remove the matchmaking tickets if the player leaves the matchmaking stream.
-	go func() {
-		defer cancel()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(5 * time.Second):
-			}
-			// Check if this user's matchmaking stream is still active.
-			meta := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(session.id, groupStream, session.userID)
-			if meta == nil {
-				logger.Debug("User presence on matchmaking stream not found")
-				<-time.After(5 * time.Second)
-				select {
-				case <-ctx.Done():
-					return
-				default:
-				}
-				if err := session.SendEvr(LobbySessionFailureFromError(params.Mode, params.GroupID, NewLobbyError(BadRequest, "user presence not found"))); err != nil {
-					logger.Debug("Failed to send error message", zap.Error(err))
-				}
-				return
-			}
-
-			/*
-				// If the leader's matchmaking is identical to the user's  if the party leader's matchmaking stream is still active.
-				leader := lobbyGroup.GetLeader()
-				if leader == nil {
-					logger.Warn("Party leader not found")
-					return
-				}
-				leaderSessionID := uuid.FromStringOrNil(leader.GetSessionId())
-				leaderUserID := uuid.FromStringOrNil(leader.GetUserId())
-				meta = session.pipeline.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, matchmakingStream, leaderUserID)
-				if meta == nil {
-					logger.Debug("Leader presence on matchmaking stream not found", zap.String("leader_uid", leader.GetUserId()))
-					return
-				}
-			*/
-		}
-	}()
 
 	// Only try to join the party leader if this player is currently in a match (i.e not joining from the main menu)
 	if !params.CurrentMatchID.IsNil() {
@@ -246,8 +203,6 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		}
 	}
 
-	// Create a channel to listen for matchmake errors
-	errCh := make(chan error, 1)
 	timeout := time.After(MatchmakingTimeout)
 
 	// Maintain a simple cache of ratings to avoid repeated session lookups.
@@ -268,8 +223,6 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 			return nil
 		case <-timeout:
 			return NewLobbyError(Timeout, "matchmaking timeout")
-		case err = <-errCh:
-			return err
 		case <-initialTimer.C:
 			logger.Debug("initial timer")
 		case <-time.After(backfillInterval):
@@ -278,17 +231,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		if params.DisableArenaBackfill && params.Mode == evr.ModeArenaPublic {
 			continue
 		}
-		query, err := lobbyBackfillQuery(params)
-		if err != nil {
-			return errors.Join(NewLobbyError(InternalError, "failed to create backfill query"), err)
-		}
-		logger := logger.With(zap.String("query", query))
-		logger.Debug("Searching for unfilled lobbies.")
-		labels, err := p.GetBackfillCandidates(ctx, logger, session.userID, params, query)
-		if err != nil {
-			logger.Error("Failed to get backfill candidates", zap.Error(err))
-			return errors.Join(NewLobbyError(InternalError, "failed to get backfill candidates"), err)
-		}
+
 		sessionIDs := []uuid.UUID{session.id}
 		// Prepare all of the presences
 		presences := lobbyGroup.List()
@@ -320,81 +263,42 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 			return NewLobbyError(InternalError, "failed to create entrant presences")
 		}
 
-		for _, label := range labels {
-			select {
-			case <-ctx.Done():
-				return nil
-			case <-time.After(500 * time.Millisecond):
+		label, err := p.lobbyQueue.GetUnfilledMatch(ctx, params)
+		if err == ErrNoUnfilledMatches {
+
+			if params.Mode == evr.ModeSocialPublic {
+
+				err := p.NewSocialLobby(ctx, logger, session, params)
+				if err == ErrCreateLock {
+					<-time.After(5 * time.Second)
+					continue
+				}
+				return err
 			}
-
-			matchID, _ := NewMatchID(label.ID.UUID, p.node)
-			logger := logger.With(zap.String("mid", matchID.UUID.String()))
-
-			logger.Debug("Joining backfill match.")
-			p.metrics.CustomCounter("lobby_join_backfill", params.MetricsTags(), int64(params.PartySize))
-
-			label, serverSession, err := p.LobbySessionGet(ctx, logger, matchID)
-			if err != nil {
-				logger.Debug("Failed to get match session", zap.Error(err))
-				continue
-			}
-			for _, e := range entrants {
-				go func(e *EvrMatchPresence) {
-					session := p.sessionRegistry.Get(e.SessionID)
-					if session == nil {
-						logger.Debug("Session not found", zap.String("sid", e.SessionID.String()))
-						return
-					}
-					if err := p.LobbyJoinEntrant(logger, serverSession, label, UnassignedRole, e); err != nil {
-						// Send the error to the client
-						if err := SendEVRMessages(session, LobbySessionFailureFromError(label.Mode, label.GetGroupID(), err)); err != nil {
-							logger.Debug("Failed to send error message", zap.Error(err))
-						}
-					}
-				}(e)
-			}
-
-			logger.Debug("Joined match")
-			return nil
+			continue
+		} else if err != nil {
+			return errors.Join(NewLobbyError(InternalError, "failed to get unfilled match"), err)
 		}
 
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-time.After(5 * time.Second):
-		}
+		logger := logger.With(zap.String("mid", label.ID.UUID.String()))
 
-		p.metrics.CustomCounter("lobby_create_social", params.MetricsTags(), 1)
-		// Only create public social lobbies.
-		if params.Mode != evr.ModeSocialPublic {
+		logger.Debug("Joining backfill match.")
+		p.metrics.CustomCounter("lobby_join_backfill", params.MetricsTags(), int64(params.PartySize))
+
+		label, serverSession, err := p.LobbySessionGet(ctx, logger, label.ID)
+		if err != nil {
+			logger.Debug("Failed to get match session", zap.Error(err))
 			continue
 		}
-		if !p.createLobbyMu.TryLock() {
-			<-time.After(5 * time.Second)
-			continue
-		}
-		label, err := lobbyCreateSocial(ctx, logger, p.db, p.runtimeModule, session, p.matchRegistry, params)
-		if err != nil {
-			p.createLobbyMu.Unlock()
-			return errors.Join(NewLobbyError(InternalError, "failed to create social lobby"), err)
-		}
 
-		createPresences, err := EntrantPresencesFromSessionIDs(logger, p.sessionRegistry, params.PartyID, params.GroupID, nil, params.Role, session.id)
-		if err != nil {
-			return errors.Join(NewLobbyError(InternalError, "failed to create entrant presences"), err)
-		}
-
-		logger.Debug("Joining newly created social lobby.")
-		p.metrics.CustomCounter("lobby_join_created_social", params.MetricsTags(), 1)
-
-		serverSession := p.sessionRegistry.Get(uuid.FromStringOrNil(label.Broadcaster.SessionID))
-		if serverSession == nil {
-			p.createLobbyMu.Unlock()
-			return NewLobbyError(InternalError, "server session not found")
-		}
-		for _, e := range createPresences {
+		for _, e := range entrants {
 			go func(e *EvrMatchPresence) {
-				if err := p.LobbyJoinEntrant(logger, serverSession, label, params.Role, e); err != nil {
+				session := p.sessionRegistry.Get(e.SessionID)
+				if session == nil {
+					logger.Debug("Session not found", zap.String("sid", e.SessionID.String()))
+					return
+				}
+				if err := p.LobbyJoinEntrant(logger, serverSession, label, UnassignedRole, e); err != nil {
 					// Send the error to the client
 					if err := SendEVRMessages(session, LobbySessionFailureFromError(label.Mode, label.GetGroupID(), err)); err != nil {
 						logger.Debug("Failed to send error message", zap.Error(err))
@@ -402,10 +306,11 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 				}
 			}(e)
 		}
-		p.createLobbyMu.Unlock()
+
+		logger.Debug("Joined match")
 		return nil
 	}
-
+	return nil
 }
 
 func lobbyBackfillQuery(p *LobbySessionParameters) (string, error) {
@@ -524,4 +429,43 @@ func (p *EvrPipeline) GetBackfillCandidates(ctx context.Context, logger *zap.Log
 	})
 
 	return labels, nil
+}
+
+func (p *EvrPipeline) NewSocialLobby(ctx context.Context, logger *zap.Logger, session *sessionWS, params *LobbySessionParameters) error {
+	p.metrics.CustomCounter("lobby_create_social", params.MetricsTags(), 1)
+
+	if !p.createLobbyMu.TryLock() {
+		return ErrCreateLock
+	}
+	label, err := lobbyCreateSocial(ctx, logger, p.db, p.runtimeModule, session, p.matchRegistry, params)
+	if err != nil {
+		p.createLobbyMu.Unlock()
+		return errors.Join(NewLobbyError(InternalError, "failed to create social lobby"), err)
+	}
+
+	createPresences, err := EntrantPresencesFromSessionIDs(logger, p.sessionRegistry, params.PartyID, params.GroupID, nil, params.Role, session.id)
+	if err != nil {
+		return errors.Join(NewLobbyError(InternalError, "failed to create entrant presences"), err)
+	}
+
+	logger.Debug("Joining newly created social lobby.")
+	p.metrics.CustomCounter("lobby_join_created_social", params.MetricsTags(), 1)
+
+	serverSession := p.sessionRegistry.Get(uuid.FromStringOrNil(label.Broadcaster.SessionID))
+	if serverSession == nil {
+		p.createLobbyMu.Unlock()
+		return NewLobbyError(InternalError, "server session not found")
+	}
+	for _, e := range createPresences {
+		go func(e *EvrMatchPresence) {
+			if err := p.LobbyJoinEntrant(logger, serverSession, label, params.Role, e); err != nil {
+				// Send the error to the client
+				if err := SendEVRMessages(session, LobbySessionFailureFromError(label.Mode, label.GetGroupID(), err)); err != nil {
+					logger.Debug("Failed to send error message", zap.Error(err))
+				}
+			}
+		}(e)
+	}
+	p.createLobbyMu.Unlock()
+	return nil
 }

@@ -65,6 +65,7 @@ type EvrPipeline struct {
 	profileRegistry              *ProfileRegistry
 	discordCache                 *DiscordCache
 	guildGroupCache              *GuildGroupCache
+	lobbyQueue                   *LobbyQueue
 	appBot                       *DiscordAppBot
 	leaderboardRegistry          *LeaderboardRegistry
 	sbmm                         *SkillBasedMatchmaker
@@ -120,6 +121,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	lobbyBuilder := NewLobbyBuilder(logger, db, sessionRegistry, matchRegistry, tracker, metrics, profileRegistry)
 	matchmaker.OnMatchedEntries(lobbyBuilder.handleMatchedEntries)
 	userRemoteLogJournalRegistry := NewUserRemoteLogJournalRegistry(sessionRegistry)
+	lobbyQueue := NewLobbyQueue(ctx, logger, nk, matchRegistry)
 	guildGroupCache := NewGuildGroupCache(ctx, runtimeLogger, nk)
 	guildGroupCache.Start()
 
@@ -188,6 +190,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 
 		discordCache:    discordCache,
 		guildGroupCache: guildGroupCache,
+		lobbyQueue:      lobbyQueue,
 		appBot:          appBot,
 		localIP:         localIP,
 		externalIP:      externalIP,
