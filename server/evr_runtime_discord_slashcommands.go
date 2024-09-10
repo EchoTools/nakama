@@ -1532,8 +1532,17 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return nil
 			}
 
+			options := i.ApplicationCommandData().Options
+
+			if len(options) == 0 {
+				return errors.New("no options provided")
+			}
+
+			caller := user
+			target := options[0].UserValue(s)
+
 			// Clear the cache of the user
-			d.cache.Purge(user.ID)
+			d.cache.Purge(caller.ID)
 
 			// Get the caller's nakama user ID
 
@@ -1545,7 +1554,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 
 				var membership *GuildGroupMembership
-				groupID := d.cache.GuildIDToGroupID(member.GuildID)
+
 				// Get the caller's nakama guild group membership
 				for id, m := range memberships {
 					if id == groupID {
@@ -1555,7 +1564,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 
 				if membership == nil {
-					go d.cache.SyncGuildGroupMember(ctx, userIDStr, d.cache.GuildIDToGroupID(member.GuildID))
+					go d.cache.SyncGuildGroupMember(ctx, userIDStr, groupID)
 					return errors.New("no membership found")
 				}
 
@@ -1569,8 +1578,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return errors.New("error checking global moderator status")
 			}
 
-			options := i.ApplicationCommandData().Options
-			target := options[0].UserValue(s)
+			d.cache.Purge(target.ID)
 
 			return d.handleProfileRequest(ctx, logger, nk, s, i, target.ID, target.Username, guildID, isGlobalModerator, isGlobalModerator)
 		},
