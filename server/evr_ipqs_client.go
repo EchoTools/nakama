@@ -153,7 +153,6 @@ func NewIPQS(logger *zap.Logger, db *sql.DB, metrics Metrics, storageIndex Stora
 			if err := ipqs.SaveCache(); err != nil {
 				logger.Error("Failed to save IPQS cache", zap.Error(err))
 			}
-
 		}
 	}()
 
@@ -258,7 +257,7 @@ func (s *IPQSClient) SaveCache() error {
 	cachemap := make(map[string]*IPQSResponse)
 	s.cache.Range(func(key string, value *IPQSResponse) bool {
 		cachemap[key] = value
-		return value.TrustedNetwork
+		return true
 	})
 
 	data, err := json.Marshal(cachemap)
@@ -266,16 +265,18 @@ func (s *IPQSClient) SaveCache() error {
 		return fmt.Errorf("failed to marshal cache: %v", err)
 	}
 
-	ops := StorageOpWrites{&StorageOpWrite{
-		OwnerID: SystemUserID,
-		Object: &api.WriteStorageObject{
-			Collection:      IPQSStorageCollection,
-			Key:             IPQSCacheStorageKey,
-			Value:           string(data),
-			PermissionRead:  &wrapperspb.Int32Value{Value: int32(0)},
-			PermissionWrite: &wrapperspb.Int32Value{Value: int32(0)},
+	ops := StorageOpWrites{
+		&StorageOpWrite{
+			OwnerID: SystemUserID,
+			Object: &api.WriteStorageObject{
+				Collection:      IPQSStorageCollection,
+				Key:             IPQSCacheStorageKey,
+				Value:           string(data),
+				PermissionRead:  &wrapperspb.Int32Value{Value: int32(0)},
+				PermissionWrite: &wrapperspb.Int32Value{Value: int32(0)},
+			},
 		},
-	}}
+	}
 	_, _, err = StorageWriteObjects(s.ctx, s.logger, s.db, s.metrics, s.storageIndex, true, ops)
 	if err != nil {
 		return fmt.Errorf("failed to write cache: %v", err)
@@ -290,7 +291,7 @@ func (s *IPQSClient) LoadCache() error {
 		{
 			Collection: IPQSStorageCollection,
 			Key:        IPQSCacheStorageKey,
-			UserId:     uuid.Nil.String(),
+			UserId:     SystemUserID,
 		},
 	})
 	if err != nil {
