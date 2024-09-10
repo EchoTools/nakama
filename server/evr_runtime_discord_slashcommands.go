@@ -355,6 +355,17 @@ var (
 			},
 		},
 		{
+			Name: "jersey-number",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "number",
+					Description: "Your jersey number, that will be displayed when you select loadout number as your decal.",
+					Required:    true,
+				},
+			},
+		},
+		{
 			Name:        "badges",
 			Description: "manage badge entitlements",
 			Options: []*discordgo.ApplicationCommandOption{
@@ -1217,6 +1228,44 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				})
 			}
 		},
+
+		"jersey-number": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+			options := i.ApplicationCommandData().Options
+			if len(options) == 0 {
+				return errors.New("no options provided")
+			}
+			number := int(options[0].IntValue())
+			if number < 0 || number > 99 {
+				return errors.New("invalid number. Must be between 0 and 99")
+			}
+			if userID == "" {
+				return errors.New("no user ID")
+			}
+			// Get the user's profile
+			uid := uuid.FromStringOrNil(userID)
+			profile, err := d.profileRegistry.Load(ctx, uid)
+			if err != nil {
+				return fmt.Errorf("failed to load profile: %w", err)
+			}
+
+			// Update the jersey number
+			profile.SetJerseyNumber(number)
+
+			// Save the profile
+			if err := d.profileRegistry.Save(ctx, uid, profile); err != nil {
+				return fmt.Errorf("failed to save profile: %w", err)
+			}
+
+			// Send the response
+			return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Flags:   discordgo.MessageFlagsEphemeral,
+					Content: fmt.Sprintf("Your jersey number has been set to %d", number),
+				},
+			})
+		},
+
 		"badges": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			options := i.ApplicationCommandData().Options
 			var err error

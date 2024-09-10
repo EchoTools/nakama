@@ -209,8 +209,8 @@ type MatchStatistic struct {
 
 type EquippedCosmetics struct {
 	Instances  CosmeticInstances `json:"instances"`
-	Number     int64             `json:"number"`
-	NumberBody int64             `json:"number_body"`
+	Number     int               `json:"number"`
+	NumberBody int               `json:"number_body"`
 }
 
 type CosmeticInstances struct {

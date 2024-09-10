@@ -207,6 +207,16 @@ func (p *GameProfileData) GetChannel() uuid.UUID {
 	return uuid.UUID(p.Server.Social.Channel)
 }
 
+func (p *GameProfileData) SetJerseyNumber(number int) {
+	if p.Server.EquippedCosmetics.Number == number && p.Server.EquippedCosmetics.NumberBody == number {
+		return
+	}
+
+	p.Server.EquippedCosmetics.Number = number
+	p.Server.EquippedCosmetics.NumberBody = number
+	p.SetStale()
+}
+
 func (p *GameProfileData) SetChannel(c evr.GUID) {
 	if p.Server.Social.Channel == c && p.Client.Social.Channel == c {
 		return

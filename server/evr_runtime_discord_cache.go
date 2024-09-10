@@ -416,9 +416,12 @@ func (c *DiscordCache) SyncGuildGroupMember(ctx context.Context, userID, groupID
 	}
 
 	// Update the Guild Group's role cache if necessary.
-	if guildGroup.Metadata.UpdateRoleCache(userID, member.Roles) {
+	cache, updated := guildGroup.Metadata.UpdateRoleCache(userID, member.Roles)
+	if updated {
 		g := guildGroup.Group
-		mdMap := guildGroup.Metadata.MarshalMap()
+		md := *guildGroup.Metadata
+		md.RoleCache = cache
+		mdMap := md.MarshalMap()
 		if err := c.nk.GroupUpdate(ctx, g.Id, SystemUserID, g.Name, g.CreatorId, g.LangTag, g.Description, g.AvatarUrl, g.Open.Value, mdMap, int(g.MaxCount)); err != nil {
 			return fmt.Errorf("error updating group: %w", err)
 		}
