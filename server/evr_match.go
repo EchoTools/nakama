@@ -493,14 +493,10 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 		}
 	}
 
-	reason := runtime.PresenceReasonLeave
-
 	rejects := make([]uuid.UUID, 0)
 
 	for _, p := range presences {
 		logger.WithField("presence", p).Debug("Player leaving the match.")
-
-		reason = p.GetReason()
 
 		if mp, ok := state.presenceMap[p.GetSessionId()]; ok {
 			tags := map[string]string{
@@ -535,10 +531,8 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 	}
 
 	if len(rejects) > 0 {
-		code := evr.PlayerRejectionReasonLobbyEnding
-		if reason == PresenceReasonKicked {
-			code = evr.PlayerRejectionReasonKickedFromServer
-		}
+
+		code := evr.PlayerRejectionReasonKickedFromServer
 		msg := evr.NewGameServerEntrantRejected(code, rejects...)
 		if err := m.dispatchMessages(ctx, logger, dispatcher, []evr.Message{msg}, []runtime.Presence{state.server}, nil); err != nil {
 			logger.Warn("Failed to dispatch message: %v", err)
