@@ -355,7 +355,8 @@ var (
 			},
 		},
 		{
-			Name: "jersey-number",
+			Name:        "jersey-number",
+			Description: "Set your in-game jersey number.",
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Type:        discordgo.ApplicationCommandOptionInteger,
@@ -1006,10 +1007,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			if err := func() error {
 				// Get the userid by username
-				userID, err := GetUserIDByDiscordID(ctx, db, user.ID)
-				if err != nil {
-					return fmt.Errorf("failed to authenticate user %s: %w", user.ID, err)
-				}
 
 				return nk.UnlinkDevice(ctx, userID, deviceId)
 
