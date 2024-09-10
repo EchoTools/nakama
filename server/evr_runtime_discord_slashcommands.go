@@ -1725,49 +1725,54 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			return simpleInteractionResponse(s, i, fmt.Sprintf("<@%s> is required to complete *Community Values* when entering the next social lobby. (Disconnected %d sessions)", target.ID, cnt))
 		},
 		"kick-player": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
-			options := i.ApplicationCommandData().Options
 
 			if user == nil {
 				return nil
 			}
+
+			options := i.ApplicationCommandData().Options
 			if len(options) == 0 {
 				return errors.New("no options provided")
 			}
 
 			target := options[0].UserValue(s)
-			targetUserIDStr := d.cache.DiscordIDToUserID(target.ID)
-			if targetUserIDStr == "" {
+			targetUserID := d.cache.DiscordIDToUserID(target.ID)
+			if targetUserID == "" {
 				return errors.New("failed to get target user ID")
 			}
 
-			presences, err := d.nk.StreamUserList(StreamModeService, userID, "", StreamLabelMatchService, true, true)
+			presences, err := d.nk.StreamUserList(StreamModeService, targetUserID, "", StreamLabelMatchService, true, true)
 			if err != nil {
 				return err
 			}
-			callerID := user.ID
 
 			cnt := 0
 			for _, p := range presences {
 
-				if p.GetUserId() == targetUserIDStr {
+				if p.GetUserId() == targetUserID {
 
 					if label, _ := MatchLabelByID(ctx, d.nk, MatchIDFromStringOrNil(p.GetStatus())); label != nil {
+
+						if label.Broadcaster.SessionID == p.GetSessionId() {
+							continue
+						}
+
 						if label.GetGroupID().String() != groupID {
 							return errors.New("user's match is not from this guild")
 						}
 
 						// Kick the player from the match
-						if err := KickPlayerFromMatch(ctx, d.nk, label.ID, targetUserIDStr); err != nil {
+						if err := KickPlayerFromMatch(ctx, d.nk, label.ID, targetUserID); err != nil {
 							return err
 						}
-						_ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> kicked player <@%s> from [%s](https://echo.taxi/spark://c/%s) match.", callerID, target.ID, label.Mode.String(), strings.ToUpper(label.ID.UUID.String())), false)
-					} else {
+						_ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> kicked player <@%s> from [%s](https://echo.taxi/spark://c/%s) match.", user.ID, target.ID, label.Mode.String(), strings.ToUpper(label.ID.UUID.String())), false)
 
+					} else {
 						// Just disconnect the user, wholesale
-						if n, err := DisconnectUserID(ctx, d.nk, targetUserIDStr); err != nil {
+						if n, err := DisconnectUserID(ctx, d.nk, targetUserID); err != nil {
 							return fmt.Errorf("failed to disconnect user: %w", err)
 						} else {
-							_ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s disconnected player %s from match service.", callerID, target.ID), false)
+							_ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> disconnected player <@%s> from match service.", user.ID, target.ID), false)
 							cnt += n
 							continue
 						}
