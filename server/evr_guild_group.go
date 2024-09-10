@@ -173,47 +173,38 @@ func (m *GroupMetadata) CommunityValuesUserIDsRemove(userID string) bool {
 	return false
 }
 
-func (g *GroupMetadata) UpdateRoleCache(userID string, userRoles []string) bool {
-	roleCacheUpdated := false
+// This will create a new cache, and return true if the cache was updated. Avoiding locking the group metadata
+func (g *GroupMetadata) UpdateRoleCache(userID string, userRoles []string) (map[string][]string, bool) {
+	updated := false
 
+	guildRoles := g.Roles.Slice()
+
+	// Ensure the guildRoles exist in the cache
+	newCache := make(map[string][]string)
 	if g.RoleCache == nil {
-		g.RoleCache = make(map[string][]string)
-		roleCacheUpdated = true
+		updated = true
 	}
 
-	roles := g.Roles.Slice()
-
-	for role, _ := range g.RoleCache {
-		if !slices.Contains(roles, role) {
-			delete(g.RoleCache, role)
-			roleCacheUpdated = true
-		}
-	}
-
-	for _, role := range roles {
+	for _, role := range guildRoles {
 		if _, ok := g.RoleCache[role]; !ok {
-			g.RoleCache[role] = make([]string, 0)
-			roleCacheUpdated = true
+			updated = true
+		}
+		isAssigned := slices.Contains(userRoles, role)
+		newCache[role] = make([]string, 0)
+		for _, id := range g.RoleCache[role] {
+			if !isAssigned && id == userID {
+				updated = true
+				continue
+			}
+			newCache[role] = append(newCache[role], id)
+		}
+		if isAssigned && !slices.Contains(newCache[role], userID) {
+			newCache[role] = append(newCache[role], userID)
+			updated = true
 		}
 	}
 
-	for role, userIDs := range g.RoleCache {
-		if slices.Contains(userRoles, role) {
-			if !slices.Contains(userIDs, userID) {
-				g.RoleCache[role] = append(userIDs, userID)
-				roleCacheUpdated = true
-			}
-		} else {
-			if slices.Contains(userIDs, userID) {
-				g.RoleCache[role] = slices.DeleteFunc(userIDs, func(s string) bool {
-					return s == userID
-				})
-				roleCacheUpdated = true
-			}
-		}
-	}
-
-	return roleCacheUpdated
+	return newCache, updated
 }
 func (g *GroupMetadata) MarshalToMap() (map[string]interface{}, error) {
 	guildGroupBytes, err := json.Marshal(g)
