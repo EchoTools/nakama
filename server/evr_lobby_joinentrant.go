@@ -139,8 +139,12 @@ func LobbyJoinEntrant(logger *zap.Logger, matchRegistry MatchRegistry, tracker T
 
 	ops := []*TrackerOp{
 		{
+			PresenceStream{Mode: StreamModeParty, Subject: e.PartyID, Label: label.ID.Node},
+			PresenceMeta{Format: SessionFormatEVR, Username: e.Username, Status: matchIDStr, Hidden: false},
+		},
+		{
 			PresenceStream{Mode: StreamModeLobbyGroup, Subject: label.GetGroupID()},
-			PresenceMeta{Format: SessionFormatEVR, Username: e.Username, Status: matchIDStr, Hidden: true},
+			PresenceMeta{Format: SessionFormatEVR, Username: e.Username, Status: matchIDStr, Hidden: false},
 		},
 		{
 			PresenceStream{Mode: StreamModeEntrant, Subject: e.EntrantID(label.ID), Label: label.ID.Node},

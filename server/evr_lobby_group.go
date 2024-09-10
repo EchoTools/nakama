@@ -1,9 +1,7 @@
 package server
 
 import (
-	"encoding/json"
 	"sync"
-	"time"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/rtapi"
@@ -11,17 +9,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
-
-type LobbyGroupMemberStatus struct {
-	StartedAt time.Time             `json:"timestamp"`
-	PartyID   uuid.UUID             `json:"party_id,omitempty"`
-	Label     MatchmakingGroupLabel `json:"label,omitempty"`
-}
-
-func (s LobbyGroupMemberStatus) String() string {
-	data, _ := json.Marshal(s)
-	return string(data)
-}
 
 type LobbyGroup struct {
 	sync.RWMutex
@@ -71,15 +58,16 @@ func (g *LobbyGroup) MatchmakerAdd(sessionID, node, query string, minCount, maxC
 	return g.ph.MatchmakerAdd(sessionID, node, query, minCount, maxCount, countMultiple, stringProperties, numericProperties)
 }
 
-func JoinLobbyGroup(session *sessionWS) (*LobbyGroup, error) {
-	ctx := session.Context()
-	groupName, partyID, err := GetLobbyGroupID(ctx, session.pipeline.db, session.UserID().String())
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "Failed to get party group ID: %v", err)
+func (g *LobbyGroup) PresenceStream() PresenceStream {
+	g.ph.RLock()
+	defer g.ph.RUnlock()
+	if g.ph == nil {
+		return PresenceStream{}
 	}
-	if partyID == uuid.Nil {
-		partyID = uuid.NewV5(session.id, EntrantIDSalt)
-	}
+	return g.ph.Stream
+}
+
+func JoinLobbyGroup(session *sessionWS, groupName string, partyID uuid.UUID) (*LobbyGroup, error) {
 
 	maxSize := 4
 	open := true
@@ -89,6 +77,13 @@ func JoinLobbyGroup(session *sessionWS) (*LobbyGroup, error) {
 		SessionId: session.ID().String(),
 		Username:  session.Username(),
 	}
+
+	presenceStream := PresenceStream{
+		Mode:    StreamModeMatchmaking,
+		Subject: partyID,
+		Label:   session.pipeline.node,
+	}
+	session.pipeline.tracker.UntrackLocalByModes(session.ID(), map[uint8]struct{}{StreamModeMatchmaking: {}}, presenceStream)
 
 	presence := Presence{
 		ID: PresenceID{
@@ -153,17 +148,4 @@ func JoinLobbyGroup(session *sessionWS) (*LobbyGroup, error) {
 		name: groupName,
 		ph:   ph,
 	}, nil
-}
-
-func LeaveLobbyGroup(s *sessionWS) error {
-	ctx := s.Context()
-	_, partyID, err := GetLobbyGroupID(ctx, s.pipeline.db, s.UserID().String())
-	if err != nil {
-		return status.Errorf(codes.Internal, "Failed to get party group ID: %v", err)
-	}
-	if partyID == uuid.Nil {
-		return nil
-	}
-	s.pipeline.tracker.Untrack(s.ID(), PresenceStream{Mode: StreamModeParty, Subject: partyID, Label: s.pipeline.node}, s.UserID())
-	return nil
 }

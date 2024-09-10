@@ -53,7 +53,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	}
 
 	// The lobby group is the party that the user is currently in.
-	lobbyGroup, err := JoinLobbyGroup(session)
+	lobbyGroup, err := JoinLobbyGroup(session, params.PartyGroupName, params.PartyID)
 	if err != nil {
 		return errors.Join(NewLobbyError(InternalError, "failed to join lobby group"), err)
 	}
@@ -72,6 +72,15 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 			meta := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(session.id, groupStream, session.userID)
 			if meta == nil {
 				logger.Debug("User presence on matchmaking stream not found")
+				<-time.After(5 * time.Second)
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+				if err := session.SendEvr(LobbySessionFailureFromError(params.Mode, params.GroupID, NewLobbyError(BadRequest, "user presence not found"))); err != nil {
+					logger.Debug("Failed to send error message", zap.Error(err))
+				}
 				return
 			}
 
@@ -97,7 +106,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	if !params.CurrentMatchID.IsNil() {
 
 		if lobbyGroup.GetLeader().SessionId != session.id.String() {
-
+			partyStream := lobbyGroup.PresenceStream()
 			logger.Debug("User is member of party", zap.String("leader", lobbyGroup.GetLeader().GetUsername()))
 			// This is a party member, wait for the party leader to join a match, or cancel matchmaking.
 			for {
@@ -112,31 +121,39 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 					return NewLobbyError(BadRequest, "party leader changed")
 				}
 				// Check if the party leader has joined a match.
-				leaderMatchID, _, err := GetMatchBySessionID(p.runtimeModule, uuid.FromStringOrNil(leader.SessionId))
-				if errors.Is(err, ErrMatchNotFound) {
-					continue
-				} else if err != nil {
-					return errors.Join(NewLobbyError(InternalError, "failed to get leader's match by session id"), err)
+				presence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(uuid.FromStringOrNil(leader.SessionId), partyStream, uuid.FromStringOrNil(leader.UserId))
+				if presence == nil {
+					return NewLobbyError(BadRequest, "party leader left the party")
 				}
 
-				// Wait 5 seconds, then check if this player is in the match as well.
+				// Check if the party leader is in a match.
+				leaderMatchID := MatchIDFromStringOrNil(presence.GetStatus())
+				if leaderMatchID.IsNil() {
+					continue
+				}
+
+				// Wait 3 seconds, then check if this player is in the match as well (i.e. the matchmaker sent them to a match)
 				select {
 				case <-ctx.Done():
 					return nil
-				case <-time.After(5 * time.Second):
-				}
-				matchID, _, err := GetMatchBySessionID(p.runtimeModule, session.id)
-				if errors.Is(err, ErrMatchNotFound) {
-					continue
-				} else if err != nil {
-					return errors.Join(NewLobbyError(InternalError, "failed to get player's match by session id"), err)
+				case <-time.After(3 * time.Second):
 				}
 
-				if matchID == leaderMatchID {
+				presence = session.pipeline.tracker.GetLocalBySessionIDStreamUserID(session.id, partyStream, session.userID)
+				if presence == nil {
+					return NewLobbyError(BadRequest, "party leader left the party")
+				}
+
+				memberMatchID := MatchIDFromStringOrNil(presence.GetStatus())
+				if memberMatchID.IsNil() {
+					continue
+				}
+
+				if memberMatchID == leaderMatchID {
+					// The leader is in a match, and this player is in the same match.
 					continue
 				} else {
-
-					// If the leader is in a different social lobby, join it.
+					// If the leader is in a different public lobby, try to join it.
 					label, err := MatchLabelByID(ctx, p.runtimeModule, leaderMatchID)
 					if err != nil {
 						return errors.Join(NewLobbyError(InternalError, "failed to get match by session id"), err)
@@ -144,11 +161,16 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 						continue
 					}
 
+					if !label.Open || label.PlayerCount >= label.PlayerLimit {
+						// The leader's match is full.
+						continue
+					}
+
 					switch label.Mode {
 
 					case evr.ModeSocialPublic, evr.ModeCombatPublic, evr.ModeArenaPublic:
 						// Join the leader's match.
-						logger.Debug("Joining leader's social lobby", zap.String("mid", leaderMatchID.String()))
+						logger.Debug("Joining leader's lobby", zap.String("mid", leaderMatchID.String()))
 						params.CurrentMatchID = leaderMatchID
 						if err := p.lobbyJoin(ctx, logger, session, params); err != nil {
 							if LobbyErrorIs(err, ServerIsFull) || LobbyErrorIs(err, ServerIsLocked) {
@@ -318,7 +340,6 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 			}
 			for _, e := range entrants {
 				go func(e *EvrMatchPresence) {
-
 					session := p.sessionRegistry.Get(e.SessionID)
 					if session == nil {
 						logger.Debug("Session not found", zap.String("sid", e.SessionID.String()))
