@@ -132,6 +132,141 @@ type MatchLabelMeta struct {
 	State     MatchLabel
 }
 
+func PurgeNonPlayers(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule) {
+
+	var err error
+	var groups []*api.Group
+	logger.Info("Purging non-player users")
+	groupCursor := ""
+	purgeCount := 0
+	for {
+		groups, groupCursor, err = nk.GroupsList(ctx, "", "guild", nil, nil, 100, groupCursor)
+		if err != nil {
+			logger.Error("Error listing guilds: %v", err)
+			return
+		}
+		logger.Debug("Found %d guilds", len(groups))
+		for _, group := range groups {
+			logger := logger.WithFields(map[string]any{
+				"group_id":   group.Id,
+				"group_name": group.Name,
+			})
+			memberCursor := ""
+			for {
+				var members []*api.GroupUserList_GroupUser
+				members, memberCursor, err = nk.GroupUsersList(ctx, group.Id, 100, nil, memberCursor)
+				if err != nil {
+					logger.Error("Error listing group members: %v", err)
+					continue
+				}
+
+				logger.Debug("Found %d members", len(members))
+				for _, member := range members {
+
+					if member.State.Value < int32(api.UserGroupList_UserGroup_MEMBER) {
+						continue
+					}
+
+					logger := logger.WithFields(map[string]any{
+						"user_id":  member.User.Id,
+						"username": member.User.Username,
+					})
+					if member.User == nil {
+						continue
+					}
+					if member.User.Id == SystemUserID {
+						continue
+					}
+					objs, _, err := nk.StorageList(ctx, SystemUserID, member.User.Id, DisplayNameCollection, 1, "")
+					if err != nil {
+						logger.Error("Error listing user objects: %v", err)
+						continue
+					}
+					if len(objs) > 0 {
+						// This is a real user.. leave it alone.
+						continue
+					}
+					account, err := nk.AccountGetId(ctx, member.User.Id)
+					if err != nil {
+						logger.Error("Error getting account: %v", err)
+						continue
+					}
+					if account.CustomId == "" {
+						logger.Warn("Found user without discord ID")
+						continue
+					}
+					// This is a non-player user, remove it from the system
+					logger.WithFields(map[string]any{
+						"discord_id": account.CustomId,
+					}).Info("Purging non-player user")
+
+					if err := nk.AccountDeleteId(ctx, member.User.Id, true); err != nil {
+						logger.Error("Error deleting account: %v", err)
+						continue
+					}
+					purgeCount++
+				}
+
+				if memberCursor == "" {
+					break
+				}
+			}
+
+		}
+
+		if groupCursor == "" {
+			break
+		}
+
+	}
+
+	// Delete users who are not members of any group.
+	query := "SELECT id FROM users WHERE id NOT IN (SELECT source_id FROM group_edge WHERE state >= 0 AND state <= 2)"
+	rows, err := db.QueryContext(ctx, query)
+	if err != nil {
+		logger.Error("Error listing users not in any group: %v", err)
+		return
+	}
+	defer rows.Close()
+	var users []string
+	for rows.Next() {
+		var userID string
+		if err := rows.Scan(&userID); err != nil {
+			logger.Error("Error scanning user ID: %v", err)
+			continue
+		}
+		users = append(users, userID)
+	}
+
+	logger.Info("Found %d users not in any group", len(users))
+
+	for _, userID := range users {
+		account, err := nk.AccountGetId(ctx, userID)
+		if err != nil {
+			logger.Error("Error getting account: %v", err)
+		}
+		if account.CustomId == "" {
+			continue
+		}
+
+		logger := logger.WithFields(map[string]any{
+			"user_id":    userID,
+			"username":   account.User.Username,
+			"discord_id": account.CustomId,
+		})
+		logger.Info("Purging non-player user")
+
+		if err := nk.AccountDeleteId(ctx, userID, true); err != nil {
+			logger.Error("Error deleting account: %v", err)
+		}
+		purgeCount++
+	}
+
+	logger.WithFields(map[string]any{
+		"purge_count": purgeCount,
+	}).Info("Purged non-player users")
+}
+
 func listMatchStates(ctx context.Context, nk runtime.NakamaModule, query string) ([]*MatchLabelMeta, error) {
 	if query == "" {
 		query = "*"
@@ -246,7 +381,6 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 			nk.metrics.CustomGauge("match_active_gauge", tagMap, float64(len(matches)))
 			nk.metrics.CustomGauge("player_active_gauge", tagMap, float64(playerCount))
 		}
-
 	}
 }
 
