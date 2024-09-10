@@ -7,17 +7,8 @@ import (
 	"go.uber.org/zap"
 )
 
-func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.LobbySessionRequest) error {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	lobbyParams, err := NewLobbyParametersFromRequest(ctx, logger, session, in.(evr.LobbySessionRequest))
-	if err != nil {
-		return NewLobbyError(InternalError, "failed to create lobby parameters")
-	}
-
-	ctx = context.WithValue(ctx, ctxLobbyParametersKey{}, lobbyParams)
-
+func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.LobbySessionRequest, lobbyParams *LobbySessionParameters) error {
+	var err error
 	var matchID MatchID
 	switch in.(type) {
 	case *evr.LobbyFindSessionRequest:
