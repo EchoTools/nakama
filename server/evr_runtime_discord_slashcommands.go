@@ -1197,10 +1197,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			if err := func() error {
-				userID, err := GetUserIDByDiscordID(ctx, d.db, user.ID)
-				if err != nil {
-					return err
-				}
 				// Get the account
 				account, err := nk.AccountGetId(ctx, userID)
 				if err != nil {
@@ -1279,16 +1275,12 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				options = options[0].Options
 				// Check that the user is a developer
 
-				userID, err := GetUserIDByDiscordID(ctx, db, user.ID)
-				if err != nil {
-					return status.Error(codes.PermissionDenied, "you do not have permission to use this command")
-				}
-				var member bool
-				member, err = CheckSystemGroupMembership(ctx, db, userID, GroupGlobalBadgeAdmins)
+				var isMember bool
+				isMember, err = CheckSystemGroupMembership(ctx, db, userID, GroupGlobalBadgeAdmins)
 				if err != nil {
 					return status.Error(codes.Internal, "failed to check group membership")
 				}
-				if !member {
+				if !isMember {
 					return status.Error(codes.PermissionDenied, "you do not have permission to use this command")
 				}
 				if len(options) < 2 {
@@ -1322,11 +1314,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					badgeGroups = append(badgeGroups, groupID)
 				}
 
-				targetUserID, err := GetUserIDByDiscordID(ctx, db, target.ID)
-				if err != nil {
-					return status.Errorf(codes.Internal, "failed to get user `%s`: %s", target.Username, err)
+				targetUserID := d.cache.DiscordIDToUserID(target.ID)
+				if targetUserID == "" {
+					return status.Error(codes.NotFound, "target user not found")
 				}
-
 				for _, groupID := range badgeGroups {
 					// Add the user to the group
 
@@ -1617,11 +1608,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			startTime := time.Now().Add(time.Minute * time.Duration(timeoutMinutes))
 
-			userID, err := GetUserIDByDiscordID(ctx, db, user.ID)
-			if err != nil {
-				return errors.New("failed to get user ID")
-			}
-
 			logger = logger.WithFields(map[string]interface{}{
 				"userID":    userID,
 				"guildID":   i.GuildID,
@@ -1669,11 +1655,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			startTime := time.Now()
 
-			userID, err := GetUserIDByDiscordID(ctx, db, user.ID)
-			if err != nil {
-				return errors.New("failed to get user ID")
-			}
-
 			logger = logger.WithFields(map[string]interface{}{
 				"userID":    userID,
 				"guildID":   i.GuildID,
@@ -1705,9 +1686,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			target := options[0].UserValue(s)
 
-			targetUserID, err := GetUserIDByDiscordID(ctx, db, target.ID)
-			if err != nil {
-				return errors.New("failed to get user ID")
+			targetUserID := d.cache.DiscordIDToUserID(target.ID)
+			if targetUserID == "" {
+				return errors.New("failed to get target user ID")
 			}
 
 			metadata, err := GetGuildGroupMetadata(ctx, d.db, groupID)
@@ -1749,9 +1730,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			target := options[0].UserValue(s)
-			targetUserIDStr, err := GetUserIDByDiscordID(ctx, db, target.ID)
-			if err != nil {
-				return errors.New("failed to get user ID")
+			targetUserIDStr := d.cache.DiscordIDToUserID(target.ID)
+			if targetUserIDStr == "" {
+				return errors.New("failed to get target user ID")
 			}
 
 			presences, err := d.nk.StreamUserList(StreamModeService, userID, "", StreamLabelMatchService, true, true)
@@ -1808,11 +1789,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			if guild.OwnerID != user.ID {
 				// Check if the user is a global developer
-				userID, err := GetUserIDByDiscordID(ctx, db, user.ID)
-				if err != nil {
-					return errors.New("failed to get user ID")
-
-				}
 				if ok, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalDevelopers); err != nil {
 					return errors.New("failed to check group membership")
 				} else if !ok {
