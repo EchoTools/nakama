@@ -469,9 +469,17 @@ func (d *DiscordCache) updateGuild(ctx context.Context, logger *zap.Logger, guil
 	var err error
 	botUserID := d.DiscordIDToUserID(d.dg.State.User.ID)
 	if botUserID == "" {
-		botUserID, _, _, err = d.nk.AuthenticateCustom(ctx, d.dg.State.User.ID, d.dg.State.User.Username, true)
+		var created bool
+		var username string
+		botUserID, username, created, err = d.nk.AuthenticateCustom(ctx, d.dg.State.User.ID, d.dg.State.User.Username, true)
 		if err != nil {
 			return fmt.Errorf("failed to authenticate (or create) bot user %s: %w", d.dg.State.User.ID, err)
+		}
+		if created {
+			// Add to teh global bots group
+			if err := d.nk.GroupUserJoin(ctx, GroupGlobalBots, botUserID, username); err != nil {
+				return fmt.Errorf("error adding bot to global bots group: %w", err)
+			}
 		}
 	}
 
