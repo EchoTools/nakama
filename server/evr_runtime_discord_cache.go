@@ -44,19 +44,25 @@ type DiscordCache struct {
 	pipeline        *Pipeline
 	profileRegistry *ProfileRegistry
 	statusRegistry  StatusRegistry
-	nk              runtime.NakamaModule
-	db              *sql.DB
-	dg              *discordgo.Session
 
-	guildGroups   *atomic.Value // map[string]*GuildGroup
+	guildGroupCache *GuildGroupCache
+
+	nk runtime.NakamaModule
+	db *sql.DB
+	dg *discordgo.Session
+
 	queueCh       chan QueueEntry
 	queueLimiters MapOf[QueueEntry, *rate.Limiter]
 
 	idcache *MapOf[string, string]
 }
 
-func NewDiscordCache(ctx context.Context, logger *zap.Logger, config Config, metrics Metrics, pipeline *Pipeline, profileRegistry *ProfileRegistry, statusRegistry StatusRegistry, nk runtime.NakamaModule, db *sql.DB, dg *discordgo.Session, guildGroups *atomic.Value) *DiscordCache {
+func NewDiscordCache(ctx context.Context, logger *zap.Logger, config Config, metrics Metrics, pipeline *Pipeline, profileRegistry *ProfileRegistry, statusRegistry StatusRegistry, guildGroupCache *GuildGroupCache, nk runtime.NakamaModule, db *sql.DB, dg *discordgo.Session) *DiscordCache {
 	ctx, cancelFn := context.WithCancel(ctx)
+
+	guildGroups := &atomic.Value{}
+	guildGroups.Store(make(map[string]*GuildGroup))
+
 	return &DiscordCache{
 		ctx:      ctx,
 		cancelFn: cancelFn,
@@ -67,11 +73,13 @@ func NewDiscordCache(ctx context.Context, logger *zap.Logger, config Config, met
 		pipeline:        pipeline,
 		profileRegistry: profileRegistry,
 		statusRegistry:  statusRegistry,
-		nk:              nk,
-		db:              db,
-		dg:              dg,
 
-		guildGroups:   guildGroups,
+		guildGroupCache: guildGroupCache,
+
+		nk: nk,
+		db: db,
+		dg: dg,
+
 		idcache:       &MapOf[string, string]{},
 		queueCh:       make(chan QueueEntry, 150),
 		queueLimiters: MapOf[QueueEntry, *rate.Limiter]{},
@@ -86,9 +94,10 @@ func (c *DiscordCache) Start() {
 	dg := c.dg
 	logger := c.logger.With(zap.String("module", "discord_cache"))
 
-	cleanupTicker := time.NewTicker(time.Minute * 1)
 	// Start the cache worker.
 	go func() {
+		cleanupTicker := time.NewTicker(time.Minute * 1)
+		defer cleanupTicker.Stop()
 		for {
 			select {
 			case <-c.ctx.Done():
@@ -267,14 +276,14 @@ func (c *DiscordCache) SyncUser(ctx context.Context, userID string) error {
 
 	// Check if the user is missing group memberships for any guilds.
 	currentGuildIDs := make(map[string]struct{}, len(memberships))
-	for groupID, _ := range memberships {
+	for groupID := range memberships {
 		guildID := c.GroupIDToGuildID(groupID)
 		currentGuildIDs[guildID] = struct{}{}
 	}
 
 	// Update the user's existing membership to the groups.
 
-	for groupID, _ := range memberships {
+	for groupID := range memberships {
 		logger := logger.With(zap.String("group_id", groupID))
 
 		err := c.SyncGuildGroupMember(ctx, userID, groupID)
@@ -292,7 +301,7 @@ func (c *DiscordCache) SyncUser(ctx context.Context, userID string) error {
 		return nil
 	}
 	guildID := ""
-	for groupID, _ := range memberships {
+	for groupID := range memberships {
 		guildID = c.GroupIDToGuildID(groupID)
 		if guildID != "" {
 			return nil
@@ -405,33 +414,18 @@ func (c *DiscordCache) SyncGuildGroupMember(ctx context.Context, userID, groupID
 			}
 		}
 	}
-
-	guildGroups, ok := c.guildGroups.Load().(map[string]*GuildGroup)
-	if !ok {
-		return fmt.Errorf("error loading guild groups")
-	}
-	guildGroup, ok := guildGroups[groupID]
-	if !ok {
-		return fmt.Errorf("error getting guild group")
-	}
-
-	// Update the Guild Group's role cache if necessary.
-	cache, updated := guildGroup.Metadata.UpdateRoleCache(userID, member.Roles)
-	if updated {
-		g := guildGroup.Group
-		md := *guildGroup.Metadata
-		md.RoleCache = cache
-		mdMap := md.MarshalMap()
-		if err := c.nk.GroupUpdate(ctx, g.Id, SystemUserID, g.Name, g.CreatorId, g.LangTag, g.Description, g.AvatarUrl, g.Open.Value, mdMap, int(g.MaxCount)); err != nil {
-			return fmt.Errorf("error updating group: %w", err)
-		}
-	}
+	// lock the cache since it might be updated.
 
 	account, err := c.nk.AccountGetId(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("error getting account: %w", err)
 	}
 	// Add the linked role if necessary.
+	guildGroup, found := c.guildGroupCache.GuildGroup(groupID)
+	if !found {
+		return fmt.Errorf("error getting guild group")
+	}
+
 	accountLinkedRole := guildGroup.Metadata.Roles.AccountLinked
 	if accountLinkedRole != "" {
 		if len(account.Devices) == 0 {

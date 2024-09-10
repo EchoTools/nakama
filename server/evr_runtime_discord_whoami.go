@@ -148,7 +148,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		return err
 	}
 
-	guildGroups := d.cache.guildGroups.Load().(map[string]*GuildGroup)
+	guildGroups := d.cache.guildGroupCache.GuildGroups()
 
 	ghostedDiscordIDs := make([]string, 0)
 	for _, f := range friends {

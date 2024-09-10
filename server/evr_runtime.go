@@ -532,33 +532,6 @@ func GetGuildGroupMetadata(ctx context.Context, db *sql.DB, groupID string) (*Gr
 	return metadata, nil
 }
 
-func SetGuildGroupMetadata(ctx context.Context, nk runtime.NakamaModule, groupId string, metadata *GroupMetadata) error {
-	// Check if groupId is provided
-	if groupId == "" {
-		return fmt.Errorf("groupId is required")
-	}
-
-	// Marshal the metadata
-	mdMap, err := metadata.MarshalToMap()
-	if err != nil {
-		return fmt.Errorf("error marshalling group metadata: %w", err)
-	}
-
-	// Get the group
-	groups, err := nk.GroupsGetId(ctx, []string{groupId})
-	if err != nil {
-		return fmt.Errorf("error getting group: %w", err)
-	}
-	g := groups[0]
-
-	// Update the group
-	if err := nk.GroupUpdate(ctx, g.Id, SystemUserID, g.Name, g.CreatorId, g.LangTag, g.Description, g.AvatarUrl, g.Open.Value, mdMap, int(g.MaxCount)); err != nil {
-		return fmt.Errorf("error updating group: %w", err)
-	}
-
-	return nil
-}
-
 func MatchLabelByID(ctx context.Context, nk runtime.NakamaModule, matchID MatchID) (*MatchLabel, error) {
 	match, err := nk.MatchGet(ctx, matchID.String())
 	if err != nil || match == nil {
@@ -736,11 +709,11 @@ func GetLobbyGroupID(ctx context.Context, db *sql.DB, userID string) (string, uu
 		if err == sql.ErrNoRows {
 			found = false
 		} else {
-			return "", uuid.Nil, status.Error(codes.Internal, "error finding user account")
+			return "", uuid.Nil, status.Error(codes.Internal, "error finding lobby group id")
 		}
 	}
 	if !found {
-		return "", uuid.Nil, status.Error(codes.NotFound, "user account not found")
+		return "", uuid.Nil, status.Error(codes.NotFound, "lobby group id not found")
 	}
 	if dbPartyGroupName == "" {
 		return "", uuid.Nil, nil

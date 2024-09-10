@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -13,7 +14,6 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/gofrs/uuid/v5"
-	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
@@ -64,6 +64,7 @@ type EvrPipeline struct {
 
 	profileRegistry              *ProfileRegistry
 	discordCache                 *DiscordCache
+	guildGroupCache              *GuildGroupCache
 	appBot                       *DiscordAppBot
 	leaderboardRegistry          *LeaderboardRegistry
 	sbmm                         *SkillBasedMatchmaker
@@ -76,8 +77,8 @@ type EvrPipeline struct {
 	placeholderEmail string
 	linkDeviceURL    string
 
-	cacheMu      sync.Mutex // Writers only
-	guildGroups  *atomic.Value
+	cacheMu sync.Mutex // Writers only
+
 	messageCache *atomic.Value // map[string]evr.Message
 }
 
@@ -112,21 +113,20 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		dg.StateEnabled = true
 	}
 
-	leaderboardRegistry := NewLeaderboardRegistry(NewRuntimeGoLogger(logger), nk, config.GetName())
+	leaderboardRegistry := NewLeaderboardRegistry(runtimeLogger, nk, config.GetName())
 	profileRegistry := NewProfileRegistry(nk, db, runtimeLogger, tracker)
 	broadcasterRegistrationBySession := MapOf[string, *MatchBroadcaster]{}
 	skillBasedMatchmaker := NewSkillBasedMatchmaker()
 	lobbyBuilder := NewLobbyBuilder(logger, db, sessionRegistry, matchRegistry, tracker, metrics, profileRegistry)
 	matchmaker.OnMatchedEntries(lobbyBuilder.handleMatchedEntries)
 	userRemoteLogJournalRegistry := NewUserRemoteLogJournalRegistry(sessionRegistry)
+	guildGroupCache := NewGuildGroupCache(ctx, runtimeLogger, nk)
+	guildGroupCache.Start()
 
 	ipqsClient, err := NewIPQS(logger, db, metrics, storageIndex, vars["IPQS_API_KEY"])
 	if err != nil {
 		logger.Fatal("Failed to create IPQS client", zap.Error(err))
 	}
-
-	guildGroups := &atomic.Value{}
-	guildGroups.Store(make(map[string]*GuildGroup))
 
 	messageCache := &atomic.Value{}
 	messageCache.Store(make(map[string]evr.Message))
@@ -136,7 +136,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	if disable, ok := vars["DISABLE_DISCORD_BOT"]; ok && disable == "true" {
 		logger.Info("Discord bot is disabled")
 	} else {
-		discordCache = NewDiscordCache(ctx, logger, config, metrics, pipeline, profileRegistry, statusRegistry, nk, db, dg, guildGroups)
+		discordCache = NewDiscordCache(ctx, logger, config, metrics, pipeline, profileRegistry, statusRegistry, guildGroupCache, nk, db, dg)
 		discordCache.Start()
 
 		appBot, err = NewDiscordAppBot(runtimeLogger, nk, db, metrics, pipeline, config, discordCache, profileRegistry, statusRegistry, dg)
@@ -186,10 +186,11 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		runtimeModule:        nk,
 		runtimeLogger:        runtimeLogger,
 
-		discordCache: discordCache,
-		appBot:       appBot,
-		localIP:      localIP,
-		externalIP:   externalIP,
+		discordCache:    discordCache,
+		guildGroupCache: guildGroupCache,
+		appBot:          appBot,
+		localIP:         localIP,
+		externalIP:      externalIP,
 
 		profileRegistry:                  profileRegistry,
 		leaderboardRegistry:              leaderboardRegistry,
@@ -200,16 +201,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		placeholderEmail:                 config.GetRuntime().Environment["PLACEHOLDER_EMAIL_DOMAIN"],
 		linkDeviceURL:                    config.GetRuntime().Environment["LINK_DEVICE_URL"],
 
-		guildGroups:  guildGroups,
 		messageCache: messageCache,
-	}
-
-	// Reload the guild groups
-	guildGroupItems, err := evrPipeline.loadGuildGroups()
-	if err != nil {
-		logger.Fatal("Failed to load guild groups", zap.Error(err))
-	} else {
-		evrPipeline.guildGroups.Store(guildGroupItems)
 	}
 
 	// Create a timer to periodically clear the backfill queue
@@ -219,28 +211,14 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
-		guildGroupTicker := time.NewTicker(3 * time.Minute)
-		guildGroupTicker.Stop()
-
 		messageCacheTicker := time.NewTicker(3 * time.Minute)
-		messageCacheTicker.Stop()
+		defer messageCacheTicker.Stop()
 
 		for {
 			select {
 			case <-evrPipeline.ctx.Done():
 				ticker.Stop()
 				return
-			case <-guildGroupTicker.C:
-
-				// Reload the guild groups
-				guildGroups, err := evrPipeline.loadGuildGroups()
-				if err != nil {
-					logger.Error("Failed to load guild groups", zap.Error(err))
-				} else {
-					evrPipeline.cacheMu.Lock()
-					evrPipeline.guildGroups.Store(guildGroups)
-					evrPipeline.cacheMu.Unlock()
-				}
 
 			case <-messageCacheTicker.C:
 
@@ -270,62 +248,6 @@ func (p *EvrPipeline) SetApiServer(apiServer *ApiServer) {
 }
 
 func (p *EvrPipeline) Stop() {}
-
-func (p *EvrPipeline) loadGuildGroups() (map[string]*GuildGroup, error) {
-	// Retrieve the guild groups
-	guildGroups := make(map[string]*GuildGroup, 100)
-
-	cursor := ""
-	var groups []*api.Group
-	var err error
-
-	for {
-		groups, cursor, err = p.runtimeModule.GroupsList(p.ctx, "", "guild", nil, nil, 100, "")
-		if err != nil {
-			return nil, err
-		}
-
-		for _, group := range groups {
-			gg, err := NewGuildGroup(group)
-			if err != nil {
-				return nil, err
-			}
-			guildGroups[gg.Group.Id] = gg
-		}
-
-		if cursor == "" {
-			break
-		}
-	}
-
-	return guildGroups, nil
-}
-
-func (p *EvrPipeline) GuildGroups() map[string]*GuildGroup {
-	return p.guildGroups.Load().(map[string]*GuildGroup)
-}
-
-func (p *EvrPipeline) GuildGroup(guildID string) *GuildGroup {
-	return p.GuildGroups()[guildID]
-}
-
-func (p *EvrPipeline) UpdateGuildGroup(guildGroup *GuildGroup) error {
-	groupID := guildGroup.ID().String()
-	if err := SetGuildGroupMetadata(p.ctx, p.runtimeModule, groupID, guildGroup.Metadata); err != nil {
-		return err
-	}
-
-	guildGroups := p.GuildGroups()
-	newMap := make(map[string]*GuildGroup, len(guildGroups))
-	for k, v := range guildGroups {
-		newMap[k] = v
-	}
-
-	newMap[groupID] = guildGroup
-	p.guildGroups.Store(newMap)
-
-	return nil
-}
 
 func (p *EvrPipeline) CacheMessage(key string, message evr.Message) {
 	p.cacheMu.Lock()
@@ -465,13 +387,14 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 
 // Process outgoing protobuf envelopes and translate them to Evr messages
 func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope) ([]evr.Message, error) {
-	// TODO FIXME Catch the match rejection message and translate it to an evr message
-	// TODO FIXME Catch the match leave message and translate it to an evr message
 	p := session.evrPipeline
 
 	switch in.Message.(type) {
 	case *rtapi.Envelope_StreamData:
-		return nil, session.SendBytes([]byte(in.GetStreamData().GetData()), true)
+		payload := []byte(in.GetStreamData().GetData())
+		if bytes.HasPrefix(payload, evr.MessageMarker) {
+			return nil, session.SendBytes(payload, true)
+		}
 	case *rtapi.Envelope_MatchData:
 		if in.GetMatchData().GetOpCode() == OpCodeEVRPacketData {
 			return nil, session.SendBytes(in.GetMatchData().GetData(), true)

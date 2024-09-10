@@ -712,6 +712,7 @@ OutgoingLoop:
 				s.Unlock()
 				break OutgoingLoop
 			}
+
 			// Process the outgoing message queue.
 			if err := s.conn.SetWriteDeadline(time.Now().Add(s.writeWaitDuration)); err != nil {
 				s.Unlock()

@@ -1716,8 +1716,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 			metadata.CommunityValuesUserIDsAdd(targetUserID)
 
-			if err := SetGuildGroupMetadata(ctx, nk, groupID, metadata); err != nil {
-				return errors.New("failed to set guild group metadata")
+			if err := d.cache.guildGroupCache.UpdateMetadata(ctx, groupID, metadata); err != nil {
+				return errors.New("failed to update guild group metadata")
 			}
 
 			// Check if the player is currently in a lobby for this guild and disconnect them if they are
@@ -1846,10 +1846,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			// Write the metadata to the group
-			if err = SetGuildGroupMetadata(ctx, nk, groupID, metadata); err != nil {
-				return errors.New("failed to set guild group metadata")
-
+			if err := d.cache.guildGroupCache.UpdateMetadata(ctx, groupID, metadata); err != nil {
+				return errors.New("failed to update guild group metadata")
 			}
+
 			return simpleInteractionResponse(s, i, "roles set!")
 		},
 

@@ -205,7 +205,7 @@ func (p *EvrPipeline) authorizeGuildGroupSession(ctx context.Context, session Se
 		return NewLobbyError(InternalError, "failed to get session parameters")
 	}
 
-	guildGroups := p.GuildGroups()
+	guildGroups := p.guildGroupCache.GuildGroups()
 	gg, ok := guildGroups[groupID]
 	if !ok {
 		return NewLobbyErrorf(InternalError, "failed to get guild group metadata for %s", groupID)
