@@ -20,7 +20,7 @@ func (d *DiscordAppBot) syncLinkedRoles(ctx context.Context, userID string) erro
 	if err != nil {
 		return fmt.Errorf("failed to get guild group memberships: %w", err)
 	}
-	guildGroups := d.cache.guildGroups.Load().(map[string]*GuildGroup)
+	guildGroups := d.cache.guildGroupCache.GuildGroups()
 	if guildGroups == nil {
 		return fmt.Errorf("guild groups cache is nil")
 	}
@@ -96,14 +96,10 @@ func (d *DiscordAppBot) handleInteractionCreate(logger runtime.Logger, s *discor
 	if err != nil {
 		return fmt.Errorf("failed to get guild group membership: %w", err)
 	}
-	guildGroups := d.cache.guildGroups.Load().(map[string]*GuildGroup)
-	if guildGroups == nil {
-		return fmt.Errorf("guild groups cache is nil")
-	}
 
 	membership := memberships[groupID]
-	gg, ok := guildGroups[groupID]
 
+	gg, ok := d.cache.guildGroupCache.GuildGroup(groupID)
 	if !ok {
 		return simpleInteractionResponse(s, i, "This guild does not exist.")
 	}
@@ -281,13 +277,9 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		return nil, 0, status.Error(codes.PermissionDenied, "user is not a member of the guild")
 	}
 
-	guildGroups := d.cache.guildGroups.Load().(map[string]*GuildGroup)
-	if guildGroups == nil {
+	guildGroup, found := d.cache.guildGroupCache.GuildGroup(groupID)
+	if !found {
 		return nil, 0, status.Error(codes.Internal, "guild groups cache is nil")
-	}
-	guildGroup, ok := guildGroups[groupID]
-	if !ok {
-		return nil, 0, status.Error(codes.Internal, "guild does not exist")
 	}
 
 	if guildGroup.Metadata.DisableCreateCommand {

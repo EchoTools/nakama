@@ -173,39 +173,6 @@ func (m *GroupMetadata) CommunityValuesUserIDsRemove(userID string) bool {
 	return false
 }
 
-// This will create a new cache, and return true if the cache was updated. Avoiding locking the group metadata
-func (g *GroupMetadata) UpdateRoleCache(userID string, userRoles []string) (map[string][]string, bool) {
-	updated := false
-
-	guildRoles := g.Roles.Slice()
-
-	// Ensure the guildRoles exist in the cache
-	newCache := make(map[string][]string)
-	if g.RoleCache == nil {
-		updated = true
-	}
-
-	for _, role := range guildRoles {
-		if _, ok := g.RoleCache[role]; !ok {
-			updated = true
-		}
-		isAssigned := slices.Contains(userRoles, role)
-		newCache[role] = make([]string, 0)
-		for _, id := range g.RoleCache[role] {
-			if !isAssigned && id == userID {
-				updated = true
-				continue
-			}
-			newCache[role] = append(newCache[role], id)
-		}
-		if isAssigned && !slices.Contains(newCache[role], userID) {
-			newCache[role] = append(newCache[role], userID)
-			updated = true
-		}
-	}
-
-	return newCache, updated
-}
 func (g *GroupMetadata) MarshalToMap() (map[string]interface{}, error) {
 	guildGroupBytes, err := json.Marshal(g)
 	if err != nil {

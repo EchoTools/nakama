@@ -230,7 +230,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 
 	if !found {
 
-		guildGroups := p.GuildGroups()
+		guildGroups := p.guildGroupCache.GuildGroups()
 		if guildGroups == nil {
 			return settings, fmt.Errorf("guild groups not found")
 		}
@@ -466,10 +466,11 @@ func (p *EvrPipeline) channelInfoRequest(ctx context.Context, logger *zap.Logger
 
 	if message == nil {
 
-		guildGroup := p.GuildGroup(groupID.String())
-		if guildGroup == nil {
+		guildGroup, found := p.guildGroupCache.GuildGroup(groupID.String())
+		if !found {
 			return fmt.Errorf("guild group not found: %s", groupID.String())
 		}
+
 		g := guildGroup.Group
 
 		resource := evr.NewChannelInfoResource()
@@ -521,7 +522,10 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 	}
 	profile.SetEvrID(request.EvrID)
 
-	gg := p.GuildGroup(params.AccountMetadata.GetActiveGroupID().String())
+	gg, found := p.guildGroupCache.GuildGroup(params.AccountMetadata.GetActiveGroupID().String())
+	if !found {
+		return fmt.Errorf("guild group not found: %s", params.AccountMetadata.GetActiveGroupID().String())
+	}
 
 	// Check if the user is required to go through community values
 	if !gg.Metadata.hasCompletedCommunityValues(session.userID.String()) {
@@ -571,8 +575,8 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 
 	userID := session.userID.String()
 	for groupID, _ := range memberships {
-		gg := p.GuildGroup(groupID)
-		if gg == nil {
+		gg, found := p.guildGroupCache.GuildGroup(groupID)
+		if !found {
 			return fmt.Errorf("guild group not found: %s", params.AccountMetadata.GetActiveGroupID().String())
 		}
 		md := gg.Metadata
@@ -586,9 +590,10 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 
 				md.CommunityValuesUserIDsRemove(session.userID.String())
 
-				if err := SetGuildGroupMetadata(ctx, p.runtimeModule, groupID.String(), md); err != nil {
-					return fmt.Errorf("failed to set guild group metadata: %w", err)
+				if err := p.guildGroupCache.UpdateMetadata(ctx, groupID.String(), md); err != nil {
+					logger.Error("Failed to update guild group", zap.Error(err))
 				}
+
 				p.appBot.LogMessageToChannel(fmt.Sprintf("User <@%s> has accepted the community values.", params.DiscordID), md.AuditChannelID)
 			}
 		}
