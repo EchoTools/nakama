@@ -20,7 +20,7 @@ func RestrictAPIFunctionAccess[T any](beforeFn func(fn func(ctx context.Context,
 	return nil
 }
 
-func registerGuard(initializer runtime.Initializer) error {
+func registerAPIGuards(initializer runtime.Initializer) error {
 	rtMessages := []string{
 		"ChannelJoin",
 		"ChannelLeave",

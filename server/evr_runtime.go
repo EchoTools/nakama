@@ -42,6 +42,12 @@ const (
 
 func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) (err error) {
 
+	/*
+		if err := registerAPIGuards(initializer); err != nil {
+			return fmt.Errorf("unable to register API guards: %v", err)
+		}
+	*/
+
 	// Register RPC's for device linking
 	rpcs := map[string]func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error){
 		"account/lookup":                AccountLookupRPC,
@@ -121,6 +127,8 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	*/
 	// Update the metrics with match data
 	go metricsUpdateLoop(ctx, logger, nk.(*RuntimeGoNakamaModule))
+
+	//go PurgeNonPlayers(ctx, logger, db, nk)
 
 	logger.Info("Initialized runtime module.")
 	return nil
