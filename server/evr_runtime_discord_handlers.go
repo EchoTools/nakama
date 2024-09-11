@@ -201,7 +201,7 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 		zapLogger := logger.(*RuntimeGoLogger).logger
 		latencyHistory, err := LoadLatencyHistory(ctx, zapLogger, d.db, uuid.FromStringOrNil(userID))
 		if err != nil {
-			return nil, 0, fmt.Errorf("failed to load latency history: %v", err)
+			return nil, 0, fmt.Errorf("failed to load latency history: %w", err)
 		}
 
 		labelLatencies := make([]int, len(labels))
@@ -316,7 +316,7 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 	zapLogger := logger.(*RuntimeGoLogger).logger
 	latencyHistory, err := LoadLatencyHistory(ctx, zapLogger, d.db, uuid.FromStringOrNil(userID))
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to load latency history: %v", err)
+		return nil, 0, fmt.Errorf("failed to load latency history: %w", err)
 	}
 
 	labelLatencies := make([]int, len(labels))

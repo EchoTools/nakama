@@ -1205,7 +1205,7 @@ func AuthenticatePasswordRPC(ctx context.Context, logger runtime.Logger, db *sql
 
 	response, err := json.Marshal(session)
 	if err != nil {
-		return "", runtime.NewError(fmt.Errorf("error marshalling response: %v", err).Error(), StatusInvalidArgument)
+		return "", runtime.NewError(fmt.Errorf("error marshalling response: %w", err).Error(), StatusInvalidArgument)
 	}
 	return string(response), nil
 }

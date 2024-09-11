@@ -91,7 +91,7 @@ func ParseEvrId(s string) (*EvrId, error) {
 	// Try to parse the account identifier
 	accountId, err := strconv.ParseUint(accountIdStr, 10, 64)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse account identifier: %v", err)
+		return nil, fmt.Errorf("failed to parse account identifier: %w", err)
 	}
 
 	// Create the identifier

@@ -74,13 +74,12 @@ func (p *EvrPipeline) lobbyCreate(ctx context.Context, logger *zap.Logger, sessi
 	return label.ID, nil
 }
 
-func lobbyListGameServers(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, session Session, query string) ([]*MatchLabel, error) {
-	logger.Debug("Listing unassigned lobbies", zap.String("query", query))
+func lobbyListGameServers(ctx context.Context, nk runtime.NakamaModule, query string) ([]*MatchLabel, error) {
 	limit := 200
 	minSize, maxSize := 1, 1 // the game server counts as one.
 	matches, err := listMatches(ctx, nk, limit, minSize, maxSize, query)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find matches: %v", err)
+		return nil, fmt.Errorf("failed to find matches: %w", err)
 	}
 
 	if len(matches) == 0 {
@@ -91,7 +90,7 @@ func lobbyListGameServers(ctx context.Context, logger *zap.Logger, db *sql.DB, n
 	for _, match := range matches {
 		label := &MatchLabel{}
 		if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), label); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal match label: %v", err)
+			return nil, fmt.Errorf("failed to unmarshal match label: %w", err)
 		}
 		labels = append(labels, label)
 	}

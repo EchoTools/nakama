@@ -169,7 +169,7 @@ func (s *IPQSClient) IPDetails(ip string, useCache bool) (*IPQSResponse, error) 
 
 	u, err := url.Parse(s.url + "/" + ip)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse URL: %v", err)
+		return nil, fmt.Errorf("failed to parse URL: %w", err)
 	}
 
 	q := u.Query()
@@ -180,14 +180,14 @@ func (s *IPQSClient) IPDetails(ip string, useCache bool) (*IPQSResponse, error) 
 
 	resp, err := http.Get(u.String())
 	if err != nil {
-		return nil, fmt.Errorf("failed to get response: %v", err)
+		return nil, fmt.Errorf("failed to get response: %w", err)
 	}
 	defer resp.Body.Close()
 
 	var result IPQSResponse
 	err = json.NewDecoder(resp.Body).Decode(&result)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode response: %v", err)
+		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
 	return &result, nil
@@ -262,7 +262,7 @@ func (s *IPQSClient) SaveCache() error {
 
 	data, err := json.Marshal(cachemap)
 	if err != nil {
-		return fmt.Errorf("failed to marshal cache: %v", err)
+		return fmt.Errorf("failed to marshal cache: %w", err)
 	}
 
 	ops := StorageOpWrites{
@@ -279,7 +279,7 @@ func (s *IPQSClient) SaveCache() error {
 	}
 	_, _, err = StorageWriteObjects(s.ctx, s.logger, s.db, s.metrics, s.storageIndex, true, ops)
 	if err != nil {
-		return fmt.Errorf("failed to write cache: %v", err)
+		return fmt.Errorf("failed to write cache: %w", err)
 	}
 
 	return nil
@@ -295,7 +295,7 @@ func (s *IPQSClient) LoadCache() error {
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("failed to read cache: %v", err)
+		return fmt.Errorf("failed to read cache: %w", err)
 	}
 
 	if result == nil || len(result.Objects) == 0 {
@@ -305,7 +305,7 @@ func (s *IPQSClient) LoadCache() error {
 	var cachemap map[string]*IPQSResponse
 	err = json.Unmarshal([]byte(result.Objects[0].Value), &cachemap)
 	if err != nil {
-		return fmt.Errorf("failed to unmarshal cache: %v", err)
+		return fmt.Errorf("failed to unmarshal cache: %w", err)
 	}
 
 	for key, value := range cachemap {

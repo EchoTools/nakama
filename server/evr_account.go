@@ -182,7 +182,7 @@ func GetEVRRecords(ctx context.Context, logger runtime.Logger, nk runtime.Nakama
 	listRecords, _, err := nk.StorageList(ctx, SystemUserID, userId, EvrLoginStorageCollection, 100, "")
 	if err != nil {
 		logger.WithField("err", err).Error("Storage list error.")
-		return nil, fmt.Errorf("storage list error: %v", err)
+		return nil, fmt.Errorf("storage list error: %w", err)
 	}
 
 	records := make(map[evr.EvrId]EVRLoginRecord, len(listRecords))
@@ -194,7 +194,7 @@ func GetEVRRecords(ctx context.Context, logger runtime.Logger, nk runtime.Nakama
 		}
 		evrID, err := evr.ParseEvrId(record.Key)
 		if err != nil {
-			return nil, fmt.Errorf("error parsing evrID: %v", err)
+			return nil, fmt.Errorf("error parsing evrID: %w", err)
 		}
 		records[*evrID] = EVRLoginRecord{
 			EvrID:        *evrID,
@@ -210,7 +210,7 @@ func GetEVRRecords(ctx context.Context, logger runtime.Logger, nk runtime.Nakama
 func GetDisplayNameRecords(ctx context.Context, nk runtime.NakamaModule, userId string) ([]*api.StorageObject, error) {
 	listRecords, _, err := nk.StorageList(ctx, SystemUserID, userId, DisplayNameCollection, 150, "")
 	if err != nil {
-		return nil, fmt.Errorf("storage list error: %v", err)
+		return nil, fmt.Errorf("storage list error: %w", err)
 	}
 	return listRecords, nil
 }
@@ -218,7 +218,7 @@ func GetDisplayNameRecords(ctx context.Context, nk runtime.NakamaModule, userId 
 func GetAddressRecords(ctx context.Context, nk runtime.NakamaModule, userId string) ([]*api.StorageObject, error) {
 	listRecords, _, err := nk.StorageList(ctx, SystemUserID, userId, ClientAddrStorageCollection, 100, "")
 	if err != nil {
-		return nil, fmt.Errorf("storage list error: %v", err)
+		return nil, fmt.Errorf("storage list error: %w", err)
 	}
 	return listRecords, nil
 }
@@ -226,7 +226,7 @@ func GetAddressRecords(ctx context.Context, nk runtime.NakamaModule, userId stri
 func GetUserIpAddresses(ctx context.Context, nk runtime.NakamaModule, userId string) ([]*api.StorageObject, error) {
 	listRecords, _, err := nk.StorageList(ctx, SystemUserID, userId, IpAddressIndex, 100, "")
 	if err != nil {
-		return nil, fmt.Errorf("storage list error: %v", err)
+		return nil, fmt.Errorf("storage list error: %w", err)
 	}
 	return listRecords, nil
 }

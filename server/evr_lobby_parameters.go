@@ -77,13 +77,13 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 	// Load the global matchmaking config
 	globalSettings, err := LoadMatchmakingSettings(ctx, p.runtimeModule, SystemUserID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load global matchmaking settings: %v", err)
+		return nil, fmt.Errorf("failed to load global matchmaking settings: %w", err)
 	}
 
 	// Load the user's matchmaking config
 	userSettings, err := LoadMatchmakingSettings(ctx, p.runtimeModule, userID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load user matchmaking settings: %v", err)
+		return nil, fmt.Errorf("failed to load user matchmaking settings: %w", err)
 	}
 
 	matchmakingQueryAddons := []string{
@@ -107,7 +107,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 	for {
 		users, err := ListFriends(ctx, logger, p.db, p.statusRegistry, session.userID, 100, nil, cursor)
 		if err != nil {
-			return nil, fmt.Errorf("failed to list friends: %v", err)
+			return nil, fmt.Errorf("failed to list friends: %w", err)
 		}
 
 		friends = append(friends, users.Friends...)
@@ -120,7 +120,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 
 	latencyHistory, err := LoadLatencyHistory(ctx, logger, p.db, session.userID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load latency history: %v", err)
+		return nil, fmt.Errorf("failed to load latency history: %w", err)
 	}
 
 	var lobbyGroupName string
@@ -157,7 +157,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 
 	profile, err := session.evrPipeline.profileRegistry.Load(ctx, session.userID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load profile: %v", err)
+		return nil, fmt.Errorf("failed to load profile: %w", err)
 	}
 
 	rating := profile.GetRating()
