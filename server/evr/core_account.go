@@ -1102,15 +1102,15 @@ type ArenaUnlocks struct {
 	Tint0013                    bool `json:"rwd_tint_0013,omitempty"`
 	Tint0014                    bool `json:"rwd_tint_0014,omitempty"`
 	Tint0015                    bool `json:"rwd_tint_0015,omitempty"`
-	TintMesopalgic              bool `json:"rwd_tint_0019,omitempty"  validate:"restricted"`
+	TintMesopalgic              bool `json:"rwd_tint_0019,omitempty"`
 	Tint0020                    bool `json:"rwd_tint_0020,omitempty"`
 	Tint0021                    bool `json:"rwd_tint_0021,omitempty"`
 	Tint0022                    bool `json:"rwd_tint_0022,omitempty"`
 	Tint0023                    bool `json:"rwd_tint_0023,omitempty"`
 	Tint0024                    bool `json:"rwd_tint_0024,omitempty"`
 	Tint0025                    bool `json:"rwd_tint_0025,omitempty"`
-	TintStub1                   bool `json:"rwd_tint_0026,omitempty"  validate:"restricted"`
-	TintStub2                   bool `json:"rwd_tint_0027,omitempty"  validate:"restricted"`
+	TintStub1                   bool `json:"rwd_tint_0026,omitempty"`
+	TintStub2                   bool `json:"rwd_tint_0027,omitempty"`
 	TintBlueADefault            bool `json:"tint_blue_a_default,omitempty"`
 	TintBlueBDefault            bool `json:"tint_blue_b_default,omitempty"`
 	TintBlueCDefault            bool `json:"tint_blue_c_default,omitempty"`
