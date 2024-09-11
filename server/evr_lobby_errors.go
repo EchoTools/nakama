@@ -151,8 +151,8 @@ func LobbySessionFailureFromError(mode evr.Symbol, groupID uuid.UUID, err error)
 }
 
 func LobbyErrorIs(err error, code LobbyErrorCode) bool {
-	lobbyError := &LobbyError{}
-	found := errors.As(err, lobbyError)
+	var lobbyError *LobbyError
+	found := errors.As(err, &lobbyError)
 	if !found {
 		return false
 	}
