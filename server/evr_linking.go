@@ -127,7 +127,7 @@ func (p *EvrPipeline) linkTicket(session *sessionWS, logger *zap.Logger, deviceI
 			linkTicket := &LinkTicket{}
 			err := json.Unmarshal([]byte(record.Value), &linkTicket)
 			if err != nil {
-				return nil, fmt.Errorf(fmt.Sprintf("error unmarshalling link ticket: %v", err))
+				return nil, fmt.Errorf(fmt.Sprintf("error unmarshalling link ticket: %w", err))
 			} else {
 				return linkTicket, nil
 			}
@@ -402,7 +402,7 @@ func WriteAccessTokenToStorage(ctx context.Context, logger runtime.Logger, nk ru
 	jsonData, err := json.Marshal(accessToken)
 	if err != nil {
 		logger.WithField("err", err).Error("error marshalling access token")
-		return fmt.Errorf("error marshalling access token: %v", err)
+		return fmt.Errorf("error marshalling access token: %w", err)
 	}
 	objectIDs := []*runtime.StorageWrite{
 		{

@@ -53,7 +53,7 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 			if err != nil {
 				// On error, leave any party the user might be a member of.
 				LeavePartyStream(session)
-				return err
+				return fmt.Errorf("failed to find match: %w", err)
 			}
 		}
 		return nil

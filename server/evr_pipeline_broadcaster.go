@@ -47,11 +47,11 @@ func errFailedRegistration(session *sessionWS, logger *zap.Logger, err error, co
 	if err := session.SendEvr(
 		evr.NewBroadcasterRegistrationFailure(code),
 	); err != nil {
-		return fmt.Errorf("failed to send lobby registration failure: %v", err)
+		return fmt.Errorf("failed to send lobby registration failure: %w", err)
 	}
 
 	session.Close(err.Error(), runtime.PresenceReasonDisconnect)
-	return fmt.Errorf("failed to register game server: %v", err)
+	return fmt.Errorf("failed to register game server: %w", err)
 }
 
 // broadcasterRegistrationRequest is called when the broadcaster has sent a registration request.
@@ -139,7 +139,7 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 
 	err = session.BroadcasterSession(session.userID, "broadcaster:"+session.Username(), request.ServerId)
 	if err != nil {
-		return fmt.Errorf("failed to create broadcaster session: %v", err)
+		return fmt.Errorf("failed to create broadcaster session: %w", err)
 	}
 
 	logger = logger.With(zap.String("userId", session.UserID().String()))
@@ -271,7 +271,7 @@ func broadcasterConfig(userId, sessionId string, serverId uint64, internalIP, ex
 func (p *EvrPipeline) newParkingMatch(logger *zap.Logger, session *sessionWS, config *MatchBroadcaster) error {
 	data, err := json.Marshal(config)
 	if err != nil {
-		return fmt.Errorf("failed to marshal game server config: %v", err)
+		return fmt.Errorf("failed to marshal game server config: %w", err)
 	}
 
 	params := map[string]interface{}{
@@ -281,13 +281,13 @@ func (p *EvrPipeline) newParkingMatch(logger *zap.Logger, session *sessionWS, co
 	// Create the match
 	matchIDStr, err := p.matchRegistry.CreateMatch(context.Background(), p.runtime.matchCreateFunction, EvrMatchmakerModule, params)
 	if err != nil {
-		return fmt.Errorf("failed to create parking match: %v", err)
+		return fmt.Errorf("failed to create parking match: %w", err)
 	}
 
 	matchID := MatchIDFromStringOrNil(matchIDStr)
 
 	if err := UpdateGameServerBySessionID(p.runtimeModule, session.userID, session.id, matchID); err != nil {
-		return fmt.Errorf("failed to update game server by session ID: %v", err)
+		return fmt.Errorf("failed to update game server by session ID: %w", err)
 	}
 
 	found, allowed, _, reason, _, _ := p.matchRegistry.JoinAttempt(session.Context(), matchID.UUID, matchID.Node, session.UserID(), session.ID(), session.Username(), session.Expiry(), session.Vars(), session.ClientIP(), session.ClientPort(), p.node, nil)
@@ -345,7 +345,7 @@ func BroadcasterHealthcheck(localIP net.IP, remoteIP net.IP, port int, timeout t
 	// Generate a random 8-byte number for the ping request
 	token := make([]byte, 8)
 	if _, err := rand.Read(token); err != nil {
-		return 0, fmt.Errorf("could not generate random number for ping request: %v", err)
+		return 0, fmt.Errorf("could not generate random number for ping request: %w", err)
 	}
 
 	// Construct the raw ping request message

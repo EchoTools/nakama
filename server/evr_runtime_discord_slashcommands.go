@@ -1057,7 +1057,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				// Try resolving the hostname
 				ips, err := net.LookupIP(parts[0])
 				if err != nil {
-					return fmt.Errorf("failed to resolve address: %v", err)
+					return fmt.Errorf("failed to resolve address: %w", err)
 				}
 				// Select the ipv4 address
 				for _, remoteIP = range ips {
@@ -1078,7 +1078,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				// If a port range is specified, scan the specified range
 				portRange := strings.SplitN(parts[1], "-", 2)
 				if startPort, err = strconv.Atoi(portRange[0]); err != nil {
-					return fmt.Errorf("invalid start port: %v", err)
+					return fmt.Errorf("invalid start port: %w", err)
 				}
 				if len(portRange) == 1 {
 					// If a single port is specified, do not scan
@@ -1086,7 +1086,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				} else {
 					// If a port range is specified, scan the specified range
 					if endPort, err = strconv.Atoi(portRange[1]); err != nil {
-						return fmt.Errorf("invalid end port: %v", err)
+						return fmt.Errorf("invalid end port: %w", err)
 					}
 				}
 			} else {
@@ -1123,13 +1123,13 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				timeout := 500 * time.Millisecond
 
 				if err != nil {
-					return fmt.Errorf("failed to determine local IP address: %v", err)
+					return fmt.Errorf("failed to determine local IP address: %w", err)
 				}
 
 				// If a single port is specified, do not scan
 				rtts, err := BroadcasterRTTcheck(localIP, remoteIP, startPort, count, interval, timeout)
 				if err != nil {
-					return fmt.Errorf("failed to healthcheck broadcaster: %v", err)
+					return fmt.Errorf("failed to healthcheck broadcaster: %w", err)
 				}
 				var sum time.Duration
 				// Craft a message that contains the comma-delimited list of the rtts. Use a * for any failed pings (rtt == -1)

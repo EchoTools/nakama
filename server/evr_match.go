@@ -989,7 +989,7 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk run
 	nk.MetricsCounterAdd("match_start_count", state.MetricsTags(), 1)
 	// Dispatch the message for delivery.
 	if err := m.dispatchMessages(ctx, logger, dispatcher, messages, []runtime.Presence{state.server}, nil); err != nil {
-		return state, fmt.Errorf("failed to dispatch message: %v", err)
+		return state, fmt.Errorf("failed to dispatch message: %w", err)
 	}
 	state.levelLoaded = true
 	return state, nil
@@ -999,7 +999,7 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk run
 func SignalMatch(ctx context.Context, matchRegistry MatchRegistry, matchID MatchID, signalID int64, data any) (string, error) {
 	dataJson, err := json.Marshal(data)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal match label: %v", err)
+		return "", fmt.Errorf("failed to marshal match label: %w", err)
 	}
 	signal := EvrSignal{
 		Signal:  signalID,
@@ -1007,15 +1007,15 @@ func SignalMatch(ctx context.Context, matchRegistry MatchRegistry, matchID Match
 	}
 	signalJson, err := json.Marshal(signal)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal match signal: %v", err)
+		return "", fmt.Errorf("failed to marshal match signal: %w", err)
 	}
 	responseJSON, err := matchRegistry.Signal(ctx, matchID.String(), string(signalJson))
 	if err != nil {
-		return "", fmt.Errorf("failed to signal match: %v", err)
+		return "", fmt.Errorf("failed to signal match: %w", err)
 	}
 	response := SignalResponse{}
 	if err := json.Unmarshal([]byte(responseJSON), &response); err != nil {
-		return "", fmt.Errorf("failed to unmarshal response: %v", err)
+		return "", fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 	if !response.Success {
 		return "", fmt.Errorf("match signal response: %v", response.Message)
@@ -1030,12 +1030,12 @@ func (m *EvrMatch) dispatchMessages(_ context.Context, logger runtime.Logger, di
 		logger.Debug("Sending message from match: %v", message)
 		payload, err := evr.Marshal(message)
 		if err != nil {
-			return fmt.Errorf("could not marshal message: %v", err)
+			return fmt.Errorf("could not marshal message: %w", err)
 		}
 		bytes = append(bytes, payload...)
 	}
 	if err := dispatcher.BroadcastMessageDeferred(OpCodeEVRPacketData, bytes, presences, sender, true); err != nil {
-		return fmt.Errorf("could not broadcast message: %v", err)
+		return fmt.Errorf("could not broadcast message: %w", err)
 	}
 	return nil
 }
@@ -1043,7 +1043,7 @@ func (m *EvrMatch) dispatchMessages(_ context.Context, logger runtime.Logger, di
 func (m *EvrMatch) updateLabel(dispatcher runtime.MatchDispatcher, state *MatchLabel) error {
 	state.rebuildCache()
 	if err := dispatcher.MatchLabelUpdate(state.GetLabel()); err != nil {
-		return fmt.Errorf("could not update label: %v", err)
+		return fmt.Errorf("could not update label: %w", err)
 	}
 	return nil
 }
@@ -1055,7 +1055,7 @@ func (m *EvrMatch) kickEntrants(ctx context.Context, logger runtime.Logger, disp
 func (m *EvrMatch) sendEntrantReject(ctx context.Context, logger runtime.Logger, dispatcher runtime.MatchDispatcher, state *MatchLabel, reason evr.PlayerRejectionReason, entrantIDs ...uuid.UUID) error {
 	msg := evr.NewGameServerEntrantRejected(reason, entrantIDs...)
 	if err := m.dispatchMessages(ctx, logger, dispatcher, []evr.Message{msg}, []runtime.Presence{state.server}, nil); err != nil {
-		return fmt.Errorf("failed to dispatch message: %v", err)
+		return fmt.Errorf("failed to dispatch message: %w", err)
 	}
 	return nil
 }

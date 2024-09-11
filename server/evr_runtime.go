@@ -44,7 +44,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 
 	/*
 		if err := registerAPIGuards(initializer); err != nil {
-			return fmt.Errorf("unable to register API guards: %v", err)
+			return fmt.Errorf("unable to register API guards: %w", err)
 		}
 	*/
 
@@ -78,13 +78,13 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 
 	if db != nil {
 		if err := RegisterIndexes(initializer); err != nil {
-			return fmt.Errorf("unable to register indexes: %v", err)
+			return fmt.Errorf("unable to register indexes: %w", err)
 		}
 
 		// Remove all LinkTickets
 		objs, _, err := nk.StorageList(ctx, SystemUserID, SystemUserID, LinkTicketCollection, 1000, "")
 		if err != nil {
-			return fmt.Errorf("unable to list LinkTickets: %v", err)
+			return fmt.Errorf("unable to list LinkTickets: %w", err)
 		}
 
 		deletes := make([]*runtime.StorageDelete, 0, len(objs))
@@ -99,12 +99,12 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		}
 
 		if err := nk.StorageDelete(ctx, deletes); err != nil {
-			return fmt.Errorf("unable to delete LinkTickets: %v", err)
+			return fmt.Errorf("unable to delete LinkTickets: %w", err)
 		}
 
 		// Create the core groups
 		if err := createCoreGroups(ctx, logger, db, nk, initializer); err != nil {
-			return fmt.Errorf("unable to create core groups: %v", err)
+			return fmt.Errorf("unable to create core groups: %w", err)
 		}
 	}
 	// Register the "matchmaking" handler
@@ -116,13 +116,13 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 
 	// Register RPC for /api service.
 	if err := initializer.RegisterRpc("evr/api", EvrApiHttpHandler); err != nil {
-		return fmt.Errorf("unable to register /evr/api service: %v", err)
+		return fmt.Errorf("unable to register /evr/api service: %w", err)
 	}
 	/*
 		// Register the matchmaking override
 		sbmm := &SkillBasedMatchmaker{}
 		if err := initializer.RegisterMatchmakerOverride(sbmm.EvrMatchmakerFn); err != nil {
-			return fmt.Errorf("unable to register matchmaker override: %v", err)
+			return fmt.Errorf("unable to register matchmaker override: %w", err)
 		}
 	*/
 	// Update the metrics with match data

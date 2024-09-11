@@ -91,12 +91,12 @@ func (base *ClientProfile) Merge(partial *ClientProfile) (*ClientProfile, error)
 
 	partialJSON, err := json.Marshal(partial)
 	if err != nil {
-		return nil, fmt.Errorf("error marshaling partial data: %v", err)
+		return nil, fmt.Errorf("error marshaling partial data: %w", err)
 	}
 
 	err = json.Unmarshal(partialJSON, &base)
 	if err != nil {
-		return nil, fmt.Errorf("error unmarshaling partial data: %v", err)
+		return nil, fmt.Errorf("error unmarshaling partial data: %w", err)
 	}
 
 	return base, nil
@@ -105,7 +105,7 @@ func (base *ClientProfile) Merge(partial *ClientProfile) (*ClientProfile, error)
 func (c *ClientProfile) SetDefaults() error {
 	err := validate.Struct(c)
 	if err != nil {
-		return fmt.Errorf("error validating profile: %v", err)
+		return fmt.Errorf("error validating profile: %w", err)
 	}
 
 	return nil
