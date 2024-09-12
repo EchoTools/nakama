@@ -139,10 +139,6 @@ func LobbyJoinEntrant(logger *zap.Logger, matchRegistry MatchRegistry, tracker T
 
 	ops := []*TrackerOp{
 		{
-			PresenceStream{Mode: StreamModeParty, Subject: e.PartyID, Label: label.ID.Node},
-			PresenceMeta{Format: SessionFormatEVR, Username: e.Username, Status: matchIDStr, Hidden: false},
-		},
-		{
 			PresenceStream{Mode: StreamModeLobbyGroup, Subject: label.GetGroupID()},
 			PresenceMeta{Format: SessionFormatEVR, Username: e.Username, Status: matchIDStr, Hidden: false},
 		},
@@ -181,10 +177,6 @@ func LobbyJoinEntrant(logger *zap.Logger, matchRegistry MatchRegistry, tracker T
 		return NewLobbyError(InternalError, "failed to send lobby session success to game server")
 	}
 
-	if err := LeaveMatchmakingStream(logger, session.(*sessionWS)); err != nil {
-		logger.Error("failed to leave matchmaking stream", zap.Error(err))
-	}
-
 	// Send the lobby session success message to the game client.
 	<-time.After(250 * time.Millisecond)
 
@@ -193,6 +185,11 @@ func LobbyJoinEntrant(logger *zap.Logger, matchRegistry MatchRegistry, tracker T
 		logger.Error("failed to send lobby session success to game client", zap.Error(err))
 		return NewLobbyError(InternalError, "failed to send lobby session success to game client")
 	}
+
+	if err := LeaveMatchmakingStream(logger, session.(*sessionWS)); err != nil {
+		logger.Error("failed to leave matchmaking stream", zap.Error(err))
+	}
+
 	logger.Info("Joined entrant.", zap.String("mid", label.ID.UUID.String()), zap.String("uid", e.UserID.String()), zap.String("sid", e.SessionID.String()))
 	return nil
 }

@@ -27,19 +27,12 @@ type GuildLobbyLabel struct {
 	GroupID string `json:"group_id"`
 }
 
-func JoinMatchmakingStream(logger *zap.Logger, s *sessionWS, params *LobbySessionParameters) (PresenceStream, error) {
+func JoinMatchmakingStream(logger *zap.Logger, s *sessionWS, params *LobbySessionParameters) error {
 
-	groupStream := PresenceStream{Mode: StreamModeMatchmaking, Subject: params.GroupID}
+	groupStream := params.GroupStream()
 	logger.Debug("Joining lobby group matchmaking stream", zap.Any("stream", groupStream))
 
-	data, err := json.Marshal(params)
-	if err != nil {
-		return PresenceStream{}, fmt.Errorf("failed to marshal lobby group matchmaking stream data: %w", err)
-	}
-
-	presenceMeta := PresenceMeta{
-		Status: string(data),
-	}
+	presenceMeta := params.PresenceMeta()
 
 	// Leave any existing lobby group stream.
 	s.tracker.UntrackLocalByModes(s.id, map[uint8]struct{}{StreamModeMatchmaking: {}}, groupStream)
@@ -47,7 +40,7 @@ func JoinMatchmakingStream(logger *zap.Logger, s *sessionWS, params *LobbySessio
 	ctx := s.Context()
 
 	if success := s.tracker.Update(ctx, s.id, groupStream, s.userID, presenceMeta); !success {
-		return PresenceStream{}, fmt.Errorf("failed to track lobby group matchmaking stream")
+		return fmt.Errorf("failed to track lobby group matchmaking stream")
 	} else {
 		logger.Debug("Tracked lobby group matchmaking stream", zap.Any("stream", groupStream), zap.Any("meta", presenceMeta))
 	}
@@ -70,7 +63,7 @@ func JoinMatchmakingStream(logger *zap.Logger, s *sessionWS, params *LobbySessio
 	}, true)
 
 	// Track the groupID as well
-	return groupStream, nil
+	return nil
 }
 func LeaveMatchmakingStream(logger *zap.Logger, s *sessionWS) error {
 	logger.Debug("Leaving lobby group matchmaking stream")

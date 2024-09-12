@@ -3,7 +3,12 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"math/rand"
+	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,25 +35,27 @@ type LobbyQueue struct {
 	ctx           context.Context
 	logger        *zap.Logger
 	matchRegistry MatchRegistry
+	metrics       Metrics
 
 	nk runtime.NakamaModule
 
-	unfilledLobbies map[LobbyQueuePresence][]*MatchLabel
+	cache map[LobbyQueuePresence]map[MatchID]*MatchLabel
 }
 
-func NewLobbyQueue(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, matchRegistry MatchRegistry) *LobbyQueue {
+func NewLobbyQueue(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, metrics Metrics, matchRegistry MatchRegistry) *LobbyQueue {
 	q := &LobbyQueue{
-		ctx:           ctx,
-		logger:        logger,
-		matchRegistry: matchRegistry,
+		ctx:    ctx,
+		logger: logger,
 
-		nk: nk,
+		matchRegistry: matchRegistry,
+		metrics:       metrics,
+		nk:            nk,
 	}
 
 	go func() {
 		var labels []*MatchLabel
 		var err error
-		queueTicker := time.NewTicker(5 * time.Second)
+		queueTicker := time.NewTicker(3 * time.Second)
 		for {
 			select {
 			case <-ctx.Done():
@@ -61,19 +68,19 @@ func NewLobbyQueue(ctx context.Context, logger *zap.Logger, nk runtime.NakamaMod
 				}
 				q.Lock()
 				// Rebuild the unfilled lobbies map
-				q.unfilledLobbies = make(map[LobbyQueuePresence][]*MatchLabel)
+				q.cache = make(map[LobbyQueuePresence]map[MatchID]*MatchLabel)
 				for _, label := range labels {
 					presence := LobbyQueuePresence{
-						GroupID:     label.GetGroupID(),
-						VersionLock: label.Broadcaster.VersionLock,
-						Mode:        label.Mode,
+						GroupID: label.GetGroupID(),
+						//VersionLock: label.Broadcaster.VersionLock,
+						Mode: label.Mode,
 					}
 
-					if _, ok := q.unfilledLobbies[presence]; !ok {
-						q.unfilledLobbies[presence] = make([]*MatchLabel, 0)
+					if _, ok := q.cache[presence]; !ok {
+						q.cache[presence] = make(map[MatchID]*MatchLabel)
 					}
+					q.cache[presence][label.ID] = label
 
-					q.unfilledLobbies[presence] = append(q.unfilledLobbies[presence], label)
 				}
 				q.Unlock()
 			}
@@ -113,18 +120,37 @@ func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, params *LobbySessionP
 	defer q.Unlock()
 
 	presence := LobbyQueuePresence{
-		GroupID:     params.GroupID,
-		VersionLock: params.VersionLock,
-		Mode:        params.Mode,
+		GroupID: params.GroupID,
+		//VersionLock: params.VersionLock,
+		Mode: params.Mode,
 	}
 
 	var labels []*MatchLabel
 
-	for _, label := range q.unfilledLobbies[presence] {
+	for _, label := range q.cache[presence] {
 		if label.ID == params.CurrentMatchID {
 			continue
 		}
 		labels = append(labels, label)
+	}
+
+	// If it's a social Lobby, just sort by least open slots
+	if params.Mode == evr.ModeSocialPublic {
+		slices.SortStableFunc(labels, func(a, b *MatchLabel) int {
+			return a.OpenPlayerSlots() - b.OpenPlayerSlots()
+		})
+
+		// Find one that has enough slots
+		for _, l := range labels {
+			if l.OpenPlayerSlots() >= params.PartySize {
+				l.PlayerCount += params.PartySize
+				return l, nil
+			}
+		}
+		if len(labels) == 0 {
+			return q.NewSocialLobby(ctx, params.VersionLock, params.GroupID)
+		}
+		return labels[0], nil
 	}
 
 	labelsWithLatency := params.latencyHistory.LabelsByAverageRTT(labels)
@@ -146,10 +172,90 @@ func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, params *LobbySessionP
 
 	for _, l := range labelsWithLatency {
 		if l.Label.OpenPlayerSlots() >= params.PartySize {
-			l.Label.PlayerCount += params.PartySize
-			return l.Label, nil
+
+			label, err := MatchLabelByID(ctx, q.nk, l.Label.ID)
+			if err != nil {
+				continue
+			} else if label == nil {
+				continue
+			}
+
+			label.PlayerCount += params.PartySize
+			q.cache[presence][label.ID] = label
+
+			return label, nil
 		}
 	}
 
 	return nil, ErrNoUnfilledMatches
+}
+
+type TeamAlignments map[string]int // map[UserID]Role
+
+func (q *LobbyQueue) NewSocialLobby(ctx context.Context, versionLock evr.Symbol, groupID uuid.UUID) (*MatchLabel, error) {
+	metricsTags := map[string]string{
+		"version_lock": versionLock.String(),
+		"group_id":     groupID.String(),
+	}
+
+	q.metrics.CustomCounter("lobby_create_social", metricsTags, 1)
+	nk := q.nk
+	matchRegistry := q.matchRegistry
+	logger := q.logger
+
+	qparts := []string{
+		"+label.open:T",
+		"+label.lobby_type:unassigned",
+		"+label.broadcaster.regions:/(default)/",
+		fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/", Query.Escape(groupID.String())),
+		//fmt.Sprintf("+label.broadcaster.version_lock:%s", versionLock.String()),
+	}
+
+	query := strings.Join(qparts, " ")
+
+	labels, err := lobbyListGameServers(ctx, nk, query)
+	if err != nil {
+		logger.Warn("Failed to list game servers", zap.Any("query", query), zap.Error(err))
+		return nil, err
+	}
+
+	// Pick a random label
+	label := labels[rand.Intn(len(labels))]
+
+	if err := lobbyPrepareSession(ctx, logger, matchRegistry, label.ID, evr.ModeSocialPublic, evr.LevelSocial, uuid.Nil, groupID, TeamAlignments{}, time.Now().UTC()); err != nil {
+		logger.Error("Failed to prepare session", zap.Error(err), zap.String("mid", label.ID.UUID.String()))
+		return nil, err
+	}
+
+	match, _, err := matchRegistry.GetMatch(ctx, label.ID.String())
+	if err != nil {
+		return nil, errors.Join(NewLobbyErrorf(InternalError, "failed to get match"), err)
+	} else if match == nil {
+		logger.Warn("Match not found", zap.String("mid", label.ID.UUID.String()))
+		return nil, ErrMatchNotFound
+	}
+
+	label = &MatchLabel{}
+	if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), label); err != nil {
+		return nil, errors.Join(NewLobbyError(InternalError, "failed to unmarshal match label"), err)
+	}
+	return label, nil
+
+}
+
+func lobbyPrepareSession(ctx context.Context, logger *zap.Logger, matchRegistry MatchRegistry, matchID MatchID, mode, level evr.Symbol, spawnedBy uuid.UUID, groupID uuid.UUID, teamAlignments TeamAlignments, startTime time.Time) error {
+	label := &MatchLabel{
+		ID:             matchID,
+		Mode:           mode,
+		Level:          level,
+		SpawnedBy:      spawnedBy.String(),
+		GroupID:        &groupID,
+		TeamAlignments: teamAlignments,
+		StartTime:      startTime,
+	}
+	response, err := SignalMatch(ctx, matchRegistry, matchID, SignalPrepareSession, label)
+	if err != nil {
+		return errors.Join(ErrMatchmakingUnknownError, fmt.Errorf("failed to prepare session `%s`: %s", label.ID.String(), response))
+	}
+	return nil
 }
