@@ -105,7 +105,7 @@ func lobbyCreateQuery(ctx context.Context, logger *zap.Logger, db *sql.DB, nk ru
 		"+label.lobby_type:unassigned",
 		fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/", Query.Escape(params.GroupID.String())),
 		fmt.Sprintf("+label.broadcaster.regions:/(%s)/", Query.Join(regions, "|")),
-		fmt.Sprintf("+label.broadcaster.version_lock:%s", params.VersionLock),
+		//fmt.Sprintf("+label.broadcaster.version_lock:%s", params.VersionLock),
 	}
 
 	if len(params.RequiredFeatures) > 0 {

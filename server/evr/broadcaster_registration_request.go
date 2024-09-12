@@ -6,6 +6,10 @@ import (
 	"net"
 )
 
+const (
+	VersionLockPreFarewell uint64 = 0xC62F01D78F77910D
+)
+
 // BroadcasterRegistrationRequest is a message from game server to server, requesting game server registration so clients can match with it.
 // NOTE: This is an unofficial message created for Echo Relay.
 type BroadcasterRegistrationRequest struct {
