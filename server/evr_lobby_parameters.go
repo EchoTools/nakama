@@ -228,9 +228,9 @@ func (p *LobbySessionParameters) MatchmakingParameters() (string, map[string]str
 
 	qparts := []string{
 		"+properties.mode:" + p.Mode.String(),
-		"+properties.version_lock:" + p.VersionLock.String(),
 		fmt.Sprintf("+properties.group_id:/%s/", Query.Escape(p.GroupID.String())),
 		fmt.Sprintf(`-properties.blocked:/.*%s.*/`, Query.Escape(p.UserID)),
+		//"+properties.version_lock:" + p.VersionLock.String(),
 		p.MatchmakingQueryAddon,
 	}
 
