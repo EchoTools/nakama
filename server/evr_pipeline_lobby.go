@@ -27,13 +27,35 @@ func (p *EvrPipeline) lobbyMatchmakerStatusRequest(ctx context.Context, logger *
 	// TODO Check if the matchmaking ticket is still open
 	err := session.SendEvr(evr.NewLobbyMatchmakerStatusResponse())
 	if err != nil {
-		return fmt.Errorf("LobbyMatchmakerStatus: %v", err)
+		return fmt.Errorf("LobbyMatchmakerStatus: %w", err)
 	}
 	return nil
 }
 
 func (p *EvrPipeline) lobbySessionRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(evr.LobbySessionRequest)
+
+	/*
+		if request.GetVersionLock() != evr.ToSymbol(evr.VersionLockPreFarewell) {
+			if err := session.SendEvr(evr.NewLobbySessionFailure(request.GetMode(), request.GetGroupID(), evr.LobbySessionFailure_KickedFromLobbyGroup, fmt.Sprintf("Wrong version (%s). Ask for help in Echo VR Lounge.", request.GetVersionLock().String())).Version4()); err != nil {
+				logger.Error("Failed to send lobby session failure message", zap.Error(err))
+			}
+			discordID := p.discordCache.UserIDToDiscordID(session.userID.String())
+
+			// open channel to mmember
+			channel, err := p.appBot.dg.UserChannelCreate(discordID)
+			if err != nil {
+				return status.Errorf(codes.Internal, "failed to create user channel: %v", err)
+			}
+
+			// send message to user
+			_, err = p.appBot.dg.ChannelMessageSend(channel.ID, "Hey, you're trying to join a lobby but you're on the wrong version of the game. Please ask for help in <#779349159852769313>.")
+			if err != nil {
+				return status.Errorf(codes.Internal, "failed to send message to user: %v", err)
+			}
+			return nil
+		}
+	*/
 	go func() {
 
 		ctx, cancel := context.WithCancel(ctx)
@@ -44,6 +66,7 @@ func (p *EvrPipeline) lobbySessionRequest(ctx context.Context, logger *zap.Logge
 			if err := session.SendEvr(LobbySessionFailureFromError(request.GetMode(), request.GetGroupID(), err)); err != nil {
 				logger.Error("Failed to send lobby session failure message", zap.Error(err))
 			}
+			return
 		}
 
 		ctx = context.WithValue(ctx, ctxLobbyParametersKey{}, lobbyParams)

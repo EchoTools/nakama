@@ -292,7 +292,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 
 	// Ensure that arena matches never have more than 4 players per team.
 	if state.Mode == evr.ModeArenaPublic {
-		if mp.RoleAlignment == evr.TeamModerator && mp.RoleAlignment == evr.TeamSpectator && state.OpenNonPlayerSlots() < 1 {
+		if (mp.RoleAlignment == evr.TeamModerator || mp.RoleAlignment == evr.TeamSpectator) && state.OpenNonPlayerSlots() < 1 {
 			return state, false, JoinRejectReasonLobbyFull
 		} else {
 			if state.RoleCount(mp.RoleAlignment) >= state.TeamSize {

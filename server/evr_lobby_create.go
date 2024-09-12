@@ -27,10 +27,10 @@ func (p *EvrPipeline) lobbyCreate(ctx context.Context, logger *zap.Logger, sessi
 	query, err := lobbyCreateQuery(ctx, logger, db, nk, session, params)
 	if err != nil {
 		logger.Warn("Failed to build create query", zap.Error(err))
-		return MatchID{}, fmt.Errorf("failed to build query: %v", err)
+		return MatchID{}, fmt.Errorf("failed to build query: %w", err)
 	}
 	logger.Debug("Create query", zap.String("query", query))
-	labels, err := lobbyListGameServers(ctx, logger, db, nk, session, query)
+	labels, err := lobbyListGameServers(ctx, nk, query)
 	if err != nil {
 		logger.Warn("Failed to list game servers", zap.Any("query", query), zap.Error(err))
 		return MatchID{}, err

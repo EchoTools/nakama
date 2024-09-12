@@ -77,7 +77,7 @@ func (p *EvrPipeline) lobbyFindSpectate(ctx context.Context, logger *zap.Logger,
 					continue
 				}
 
-				entrants, err := EntrantPresencesFromSessionIDs(logger, p.sessionRegistry, uuid.Nil, params.GroupID, nil, params.Role, session.ID())
+				entrants, err := EntrantPresencesFromSessionIDs(logger, p.sessionRegistry, uuid.Nil, params.GroupID, params.Rating, params.Role, session.ID())
 				if err != nil {
 					return status.Errorf(codes.Internal, "failed to create entrant presences: %v", err)
 				}

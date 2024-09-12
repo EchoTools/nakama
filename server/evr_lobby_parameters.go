@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"strings"
@@ -211,6 +212,11 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 	}, nil
 }
 
+func (p LobbySessionParameters) String() string {
+	data, _ := json.Marshal(p)
+	return string(data)
+}
+
 func (p *LobbySessionParameters) MatchmakingParameters() (string, map[string]string, map[string]float64) {
 	averageRTTs := AverageLatencyHistories(p.latencyHistory)
 
@@ -242,6 +248,16 @@ func (p *LobbySessionParameters) MatchmakingParameters() (string, map[string]str
 	query := strings.Join(qparts, " ")
 
 	return query, stringProperties, numericProperties
+}
+
+func (p LobbySessionParameters) GroupStream() PresenceStream {
+	return PresenceStream{Mode: StreamModeMatchmaking, Subject: p.GroupID}
+}
+
+func (p LobbySessionParameters) PresenceMeta() PresenceMeta {
+	return PresenceMeta{
+		Status: p.String(),
+	}
 }
 
 func AverageLatencyHistories(histories LatencyHistory) map[string]int {

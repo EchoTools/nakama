@@ -1,6 +1,7 @@
 package server
 
 import (
+	"log"
 	"sync"
 
 	"github.com/gofrs/uuid/v5"
@@ -12,6 +13,8 @@ import (
 
 type LobbyGroup struct {
 	sync.RWMutex
+	session *sessionWS
+
 	name string
 	ph   *PartyHandler
 }
@@ -29,6 +32,7 @@ func (g *LobbyGroup) IDStr() string {
 	}
 	return g.ph.IDStr
 }
+
 func (g *LobbyGroup) GetLeader() *rtapi.UserPresence {
 	g.ph.RLock()
 	defer g.ph.RUnlock()
@@ -42,8 +46,6 @@ func (g *LobbyGroup) List() []*PartyPresenceListItem {
 	if g.ph == nil {
 		return nil
 	}
-	g.ph.Lock()
-	defer g.ph.Unlock()
 	return g.ph.members.List()
 }
 
@@ -58,16 +60,16 @@ func (g *LobbyGroup) MatchmakerAdd(sessionID, node, query string, minCount, maxC
 	return g.ph.MatchmakerAdd(sessionID, node, query, minCount, maxCount, countMultiple, stringProperties, numericProperties)
 }
 
-func (g *LobbyGroup) PresenceStream() PresenceStream {
-	g.ph.RLock()
-	defer g.ph.RUnlock()
+func (g *LobbyGroup) PartyStream() PresenceStream {
 	if g.ph == nil {
 		return PresenceStream{}
 	}
+	g.ph.RLock()
+	defer g.ph.RUnlock()
 	return g.ph.Stream
 }
 
-func JoinLobbyGroup(session *sessionWS, groupName string, partyID uuid.UUID) (*LobbyGroup, error) {
+func JoinLobbyGroup(session *sessionWS, groupName string, partyID uuid.UUID, currentMatchID MatchID) (*LobbyGroup, error) {
 
 	maxSize := 4
 	open := true
@@ -77,13 +79,6 @@ func JoinLobbyGroup(session *sessionWS, groupName string, partyID uuid.UUID) (*L
 		SessionId: session.ID().String(),
 		Username:  session.Username(),
 	}
-
-	presenceStream := PresenceStream{
-		Mode:    StreamModeMatchmaking,
-		Subject: partyID,
-		Label:   session.pipeline.node,
-	}
-	session.pipeline.tracker.UntrackLocalByModes(session.ID(), map[uint8]struct{}{StreamModeMatchmaking: {}}, presenceStream)
 
 	presence := Presence{
 		ID: PresenceID{
@@ -100,29 +95,36 @@ func JoinLobbyGroup(session *sessionWS, groupName string, partyID uuid.UUID) (*L
 	presenceMeta := PresenceMeta{
 		Format:   session.Format(),
 		Username: session.Username(),
-		Status:   "",
+		Status:   currentMatchID.String(),
 	}
 
 	partyRegistry := session.pipeline.partyRegistry.(*LocalPartyRegistry)
 	// Check if the party already exists
-	ph, ok := partyRegistry.parties.Load(partyID)
-	if !ok {
+	ph, found := partyRegistry.parties.Load(partyID)
+	if !found {
+
+		// Create the party
 		ph = NewPartyHandler(partyRegistry.logger, partyRegistry, partyRegistry.matchmaker, partyRegistry.tracker, partyRegistry.streamManager, partyRegistry.router, partyID, partyRegistry.node, open, maxSize, userPresence)
 		partyRegistry.parties.Store(partyID, ph)
+
+	} else {
+
+		// Join the party
+		success, err := ph.JoinRequest(&presence)
+		log.Printf("joined party %v", success)
+		switch err {
+		case nil, runtime.ErrPartyJoinRequestAlreadyMember:
+			// No-op
+		case runtime.ErrPartyFull, runtime.ErrPartyJoinRequestsFull:
+			return nil, status.Errorf(codes.ResourceExhausted, "Party is full")
+		case runtime.ErrPartyJoinRequestDuplicate:
+			return nil, status.Errorf(codes.AlreadyExists, "Duplicate party join request")
+		}
+		if !success {
+			return nil, status.Errorf(codes.Internal, "Failed to join party")
+		}
 	}
 
-	success, err := partyRegistry.PartyJoinRequest(session.Context(), partyID, session.pipeline.node, &presence)
-	switch err {
-	case nil, runtime.ErrPartyJoinRequestAlreadyMember:
-		// No-op
-	case runtime.ErrPartyFull, runtime.ErrPartyJoinRequestsFull:
-		return nil, status.Errorf(codes.ResourceExhausted, "Party is full")
-	case runtime.ErrPartyJoinRequestDuplicate:
-		return nil, status.Errorf(codes.AlreadyExists, "Duplicate join request")
-	}
-	if !success {
-		return nil, status.Errorf(codes.Internal, "Failed to join party")
-	}
 	// If successful, the creator becomes the first user to join the party.
 	if success, isNew := session.pipeline.tracker.Track(session.Context(), session.ID(), ph.Stream, session.UserID(), presenceMeta); !success {
 		_ = session.Send(&rtapi.Envelope{Message: &rtapi.Envelope_Error{Error: &rtapi.Error{
@@ -145,7 +147,8 @@ func JoinLobbyGroup(session *sessionWS, groupName string, partyID uuid.UUID) (*L
 		return nil, status.Errorf(codes.Internal, "Failed to get party handler")
 	}
 	return &LobbyGroup{
-		name: groupName,
-		ph:   ph,
+		session: session,
+		name:    groupName,
+		ph:      ph,
 	}, nil
 }

@@ -20,7 +20,7 @@ var (
 	ErrJoinFailed                 = errors.New("join failed")
 )
 
-func EntrantPresencesFromSessionIDs(logger *zap.Logger, sessionRegistry SessionRegistry, partyID, groupID uuid.UUID, rating *types.Rating, role int, sessionIDs ...uuid.UUID) ([]*EvrMatchPresence, error) {
+func EntrantPresencesFromSessionIDs(logger *zap.Logger, sessionRegistry SessionRegistry, partyID, groupID uuid.UUID, rating types.Rating, role int, sessionIDs ...uuid.UUID) ([]*EvrMatchPresence, error) {
 	entrants := make([]*EvrMatchPresence, 0, len(sessionIDs))
 	for _, sessionID := range sessionIDs {
 		session := sessionRegistry.Get(sessionID)
@@ -38,8 +38,8 @@ func EntrantPresencesFromSessionIDs(logger *zap.Logger, sessionRegistry SessionR
 		displayName := params.AccountMetadata.GetGroupDisplayNameOrDefault(groupID.String())
 
 		r := types.Rating{}
-		if rating != nil {
-			r = *rating
+		if rating.Mu == 0 || rating.Sigma == 0 || rating.Z == 0 {
+			r = rating
 		}
 
 		entrant := &EvrMatchPresence{
