@@ -1125,6 +1125,12 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		return errResponse(err)
 	}
 
+	logger.WithFields(map[string]any{
+		"mid":      matchID,
+		"preparer": userID,
+		"state":    string(data),
+	}).Info("Match prepared")
+
 	return string(data), nil
 }
 
