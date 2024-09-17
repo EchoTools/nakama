@@ -135,6 +135,8 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	userID := user.GetId()
 	uid := uuid.FromStringOrNil(user.GetId())
 
+	params.DiscordID = p.discordCache.UserIDToDiscordID(userID)
+
 	// Get the user's metadata
 	metadata, err := GetAccountMetadata(ctx, p.runtimeModule, userID)
 	if err != nil {
@@ -209,7 +211,6 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	p.discordCache.Queue(userID, groupID.String())
 	p.discordCache.Queue(userID, "")
 
-	// Get a list of the user's guild memberships and set to the largest one
 	memberships, err := GetGuildGroupMemberships(ctx, p.runtimeModule, userID)
 	if err != nil {
 		return settings, fmt.Errorf("failed to get guild groups: %w", err)
@@ -229,7 +230,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	}
 
 	if !found {
-
+		// Get a list of the user's guild memberships and set to the largest one
 		guildGroups := p.guildGroupCache.GuildGroups()
 		if guildGroups == nil {
 			return settings, fmt.Errorf("guild groups not found")
@@ -575,10 +576,12 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 
 	userID := session.userID.String()
 	for groupID, _ := range memberships {
+
 		gg, found := p.guildGroupCache.GuildGroup(groupID)
 		if !found {
 			return fmt.Errorf("guild group not found: %s", params.AccountMetadata.GetActiveGroupID().String())
 		}
+
 		md := gg.Metadata
 
 		if !md.hasCompletedCommunityValues(userID) {

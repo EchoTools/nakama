@@ -378,9 +378,10 @@ func (c *DiscordCache) SyncGuildGroupMember(ctx context.Context, userID, groupID
 		if _, ok := memberships[groupID]; !ok {
 			return fmt.Errorf("error adding user to group")
 		}
+	}
 
-	} else if err != nil {
-		return fmt.Errorf("error getting guild group membership: %w", err)
+	if err := c.guildGroupCache.UpdateMemberRoles(ctx, groupID, userID, member.Roles); err != nil {
+		return fmt.Errorf("error updating member roles: %w", err)
 	}
 
 	accountMetadata, err := GetAccountMetadata(ctx, c.nk, userID)
