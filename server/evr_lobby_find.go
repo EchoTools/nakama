@@ -34,7 +34,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 
 	// Do authorization checks related to the guild.
 	if err := p.authorizeGuildGroupSession(ctx, session, params.GroupID.String()); err != nil {
-		return fmt.Errorf("failed to authorize guild group session: %w", err)
+		return err
 	}
 
 	switch params.Mode {
