@@ -49,10 +49,6 @@ func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session
 		return err
 	}
 
-	if params.VersionLock != label.Broadcaster.VersionLock {
-		return NewLobbyErrorf(UpdateRequired, "version lock mismatch")
-	}
-
 	presences, err := EntrantPresencesFromSessionIDs(logger, p.sessionRegistry, params.PartyID, params.GroupID, params.Rating, params.Role, session.id)
 	if err != nil {
 		return errors.Join(NewLobbyErrorf(InternalError, "failed to create presences"), err)
