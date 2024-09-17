@@ -1748,9 +1748,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			cnt := 0
 			for _, p := range presences {
-
+				disconnectDelay := 0
 				if p.GetUserId() == targetUserID {
-
+					cnt += 1
 					if label, _ := MatchLabelByID(ctx, d.nk, MatchIDFromStringOrNil(p.GetStatus())); label != nil {
 
 						if label.Broadcaster.SessionID == p.GetSessionId() {
@@ -1766,17 +1766,18 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 							return err
 						}
 						_ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> kicked player <@%s> from [%s](https://echo.taxi/spark://c/%s) match.", user.ID, target.ID, label.Mode.String(), strings.ToUpper(label.ID.UUID.String())), false)
+						disconnectDelay = 15
+					}
 
-					} else {
+					go func() {
+						<-time.After(time.Second * time.Duration(disconnectDelay))
 						// Just disconnect the user, wholesale
-						if n, err := DisconnectUserID(ctx, d.nk, targetUserID); err != nil {
-							return fmt.Errorf("failed to disconnect user: %w", err)
+						if _, err := DisconnectUserID(ctx, d.nk, targetUserID); err != nil {
+							logger.Warn("Failed to disconnect user", zap.Error(err))
 						} else {
 							_ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> disconnected player <@%s> from match service.", user.ID, target.ID), false)
-							cnt += n
-							continue
 						}
-					}
+					}()
 
 					cnt++
 				}
