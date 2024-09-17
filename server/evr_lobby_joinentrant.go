@@ -209,7 +209,7 @@ func (p *EvrPipeline) authorizeGuildGroupSession(ctx context.Context, session Se
 	}
 	groupMetadata := gg.Metadata
 	sendAuditMessage := groupMetadata.AuditChannelID != ""
-	discordID := params.DiscordID
+	discordID := p.discordCache.UserIDToDiscordID(userID)
 
 	membership, ok := params.Memberships[groupID]
 	if !ok && groupMetadata.MembersOnlyMatchmaking {
