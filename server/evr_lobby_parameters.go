@@ -242,7 +242,7 @@ func (p *LobbySessionParameters) MatchmakingParameters() (string, map[string]str
 
 	for k, v := range averageRTTs {
 		numericProperties[k] = float64(v)
-		qparts = append(qparts, fmt.Sprintf("+properties.%s:<=%d", k, v+60))
+		qparts = append(qparts, fmt.Sprintf("properties.%s:<=%d", k, v+60))
 	}
 
 	query := strings.Join(qparts, " ")
