@@ -37,9 +37,9 @@ type LobbyQueue struct {
 	matchRegistry MatchRegistry
 	metrics       Metrics
 
-	nk runtime.NakamaModule
-
-	cache map[LobbyQueuePresence]map[MatchID]*MatchLabel
+	nk       runtime.NakamaModule
+	createMu sync.Mutex
+	cache    map[LobbyQueuePresence]map[MatchID]*MatchLabel
 }
 
 func NewLobbyQueue(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, metrics Metrics, matchRegistry MatchRegistry) *LobbyQueue {
@@ -147,10 +147,15 @@ func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, params *LobbySessionP
 				return l, nil
 			}
 		}
-		if len(labels) == 0 {
+		// Create a new one.
+		if q.createMu.TryLock() {
+			go func() {
+				<-time.After(5 * time.Second)
+				defer q.createMu.Unlock()
+			}()
 			return q.NewSocialLobby(ctx, params.VersionLock, params.GroupID)
 		}
-		return labels[0], nil
+		return nil, ErrNoUnfilledMatches
 	}
 
 	labelsWithLatency := params.latencyHistory.LabelsByAverageRTT(labels)
