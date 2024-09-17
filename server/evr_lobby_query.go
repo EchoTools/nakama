@@ -37,23 +37,23 @@ func (query) Escape(input any) string {
 	}
 
 	s := ""
-	switch input.(type) {
+	switch v := input.(type) {
 	case string:
-		s = input.(string)
+		s = v
 	case int:
-		s = strconv.Itoa(input.(int))
+		s = strconv.Itoa(v)
 	case int64:
-		s = strconv.FormatInt(input.(int64), 10)
+		s = strconv.FormatInt(v, 10)
 	case uint:
-		s = strconv.FormatUint(uint64(input.(uint)), 10)
+		s = strconv.FormatUint(uint64(v), 10)
 	case uint64:
-		s = strconv.FormatUint(input.(uint64), 10)
+		s = strconv.FormatUint(v, 10)
 	case float32:
-		s = strconv.FormatFloat(float64(input.(float32)), 'f', -1, 32)
+		s = strconv.FormatFloat(float64(v), 'f', -1, 32)
 	case float64:
-		s = strconv.FormatFloat(input.(float64), 'f', -1, 64)
+		s = strconv.FormatFloat(v, 'f', -1, 64)
 	case bool:
-		if input == true {
+		if v == true {
 			s = "T"
 		} else {
 			s = "F"
@@ -61,7 +61,7 @@ func (query) Escape(input any) string {
 	case nil:
 		s = "nil"
 	case stringer:
-		return input.(stringer).String()
+		return v.String()
 	default:
 		panic("unsupported type")
 	}
