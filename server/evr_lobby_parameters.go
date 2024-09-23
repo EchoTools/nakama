@@ -217,19 +217,23 @@ func (p LobbySessionParameters) String() string {
 	return string(data)
 }
 
-func (p *LobbySessionParameters) MatchmakingParameters() (string, map[string]string, map[string]float64) {
+func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionParameters, lobbyParams *LobbySessionParameters) (string, map[string]string, map[string]float64) {
 	averageRTTs := AverageLatencyHistories(p.latencyHistory)
+
+	displayName := sessionParams.AccountMetadata.GetGroupDisplayNameOrDefault(lobbyParams.GroupID.String())
 
 	stringProperties := map[string]string{
 		"mode":         p.Mode.String(),
 		"group_id":     p.GroupID.String(),
 		"version_lock": p.VersionLock.String(),
 		"blocked":      strings.Join(p.BlockedIDs, " "),
+		"display_name": displayName,
 	}
 
 	numericProperties := map[string]float64{
 		"rating_mu":    p.Rating.Mu,
 		"rating_sigma": p.Rating.Sigma,
+		"rating_z":     float64(p.Rating.Z),
 	}
 
 	qparts := []string{
@@ -240,9 +244,11 @@ func (p *LobbySessionParameters) MatchmakingParameters() (string, map[string]str
 		p.MatchmakingQueryAddon,
 	}
 
+	maxDelta := 60 // milliseconds
+
 	for k, v := range averageRTTs {
 		numericProperties[k] = float64(v)
-		qparts = append(qparts, fmt.Sprintf("properties.%s:<=%d", k, v+60))
+		qparts = append(qparts, fmt.Sprintf("properties.%s:<=%d", k, v+maxDelta))
 	}
 
 	query := strings.Join(qparts, " ")
