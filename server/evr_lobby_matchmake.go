@@ -77,7 +77,13 @@ func (p *EvrPipeline) lobbyMatchMake(ctx context.Context, logger *zap.Logger, se
 		ratedTeam = append(ratedTeam, rating)
 	}
 
-	query, stringProps, numericProps := params.MatchmakingParameters()
+	sessionParams, ok := LoadParams(ctx)
+	if !ok {
+		return status.Errorf(codes.Internal, "Failed to load session parameters")
+	}
+
+	displayName := sessionParams.AccountMetadata.GetGroupDisplayNameOrDefault(params.GroupID.String())
+	query, stringProps, numericProps := params.MatchmakingParameters(displayName)
 
 	logger.Debug("Matchmaking query", zap.String("query", query), zap.Any("string_properties", stringProps), zap.Any("numeric_properties", numericProps))
 

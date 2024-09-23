@@ -37,13 +37,11 @@ func EntrantPresencesFromSessionIDs(logger *zap.Logger, sessionRegistry SessionR
 
 		displayName := params.AccountMetadata.GetGroupDisplayNameOrDefault(groupID.String())
 
-		r := types.Rating{}
 		if rating.Mu == 0 || rating.Sigma == 0 || rating.Z == 0 {
-			r = rating
+			rating = NewDefaultRating()
 		}
 
 		entrant := &EvrMatchPresence{
-
 			Node:           params.Node,
 			UserID:         session.UserID(),
 			SessionID:      session.ID(),
@@ -57,7 +55,7 @@ func EntrantPresencesFromSessionIDs(logger *zap.Logger, sessionRegistry SessionR
 			ClientIP:       session.ClientIP(),
 			ClientPort:     session.ClientPort(),
 			IsPCVR:         params.IsPCVR,
-			Rating:         r,
+			Rating:         rating,
 		}
 
 		entrants = append(entrants, entrant)

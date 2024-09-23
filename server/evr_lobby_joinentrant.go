@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -49,10 +48,10 @@ func NewEvrMatchPresenceFromSession(session Session, rating *types.Rating, group
 }
 
 func (p *EvrPipeline) LobbySessionGet(ctx context.Context, logger *zap.Logger, matchID MatchID) (*MatchLabel, Session, error) {
-	return LobbySessionGet(ctx, logger, p.db, p.matchRegistry, p.tracker, p.profileRegistry, p.sessionRegistry, matchID)
+	return LobbySessionGet(ctx, logger, p.matchRegistry, p.tracker, p.profileRegistry, p.sessionRegistry, matchID)
 }
 
-func LobbySessionGet(ctx context.Context, logger *zap.Logger, db *sql.DB, matchRegistry MatchRegistry, tracker Tracker, profileRegistry *ProfileRegistry, sessionRegistry SessionRegistry, matchID MatchID) (*MatchLabel, Session, error) {
+func LobbySessionGet(ctx context.Context, logger *zap.Logger, matchRegistry MatchRegistry, tracker Tracker, profileRegistry *ProfileRegistry, sessionRegistry SessionRegistry, matchID MatchID) (*MatchLabel, Session, error) {
 
 	match, _, err := matchRegistry.GetMatch(ctx, matchID.String())
 	if err != nil {
