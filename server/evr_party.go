@@ -10,6 +10,7 @@ import (
 
 var (
 	ErrNoParty                    = errors.New("no party")
+	ErrNoEntrants                 = errors.New("no entrants")
 	ErrLeaderAndFollowerSameMatch = errors.New("leader and follower are in the same match")
 	ErrLeaderNotInMatch           = errors.New("leader is not in a match")
 	ErrLeaderMatchNotPublic       = errors.New("leader's match is not public")
@@ -60,5 +61,10 @@ func EntrantPresencesFromSessionIDs(logger *zap.Logger, sessionRegistry SessionR
 
 		entrants = append(entrants, entrant)
 	}
+
+	if len(entrants) == 0 {
+		return nil, ErrNoEntrants
+	}
+
 	return entrants, nil
 }

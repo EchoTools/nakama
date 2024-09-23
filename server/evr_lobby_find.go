@@ -127,6 +127,12 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		if err != nil {
 			return NewLobbyError(InternalError, "failed to create entrant presences")
 		}
+
+		if len(entrants) == 0 {
+			logger.Error("No entrants found. Cancelling matchmaking.")
+			return nil
+		}
+
 		entrant := entrants[0]
 
 		label, err := p.lobbyQueue.GetUnfilledMatch(ctx, params)
