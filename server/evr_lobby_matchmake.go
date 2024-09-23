@@ -65,7 +65,7 @@ var DefaultMatchmakerTicketConfigs = map[evr.Symbol]MatchmakerTicketConfig{
 }
 
 // Matchmake attempts to find/create a match for the user using the nakama matchmaker
-func (p *EvrPipeline) lobbyMatchMake(ctx context.Context, logger *zap.Logger, session *sessionWS, params *LobbySessionParameters, lobbyGroup *LobbyGroup) (err error) {
+func (p *EvrPipeline) lobbyMatchMake(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters, lobbyGroup *LobbyGroup) (err error) {
 
 	partyList := lobbyGroup.List()
 	ratedTeam := make(RatedTeam, 0, len(partyList))
@@ -82,14 +82,13 @@ func (p *EvrPipeline) lobbyMatchMake(ctx context.Context, logger *zap.Logger, se
 		return status.Errorf(codes.Internal, "Failed to load session parameters")
 	}
 
-	displayName := sessionParams.AccountMetadata.GetGroupDisplayNameOrDefault(params.GroupID.String())
-	query, stringProps, numericProps := params.MatchmakingParameters(displayName)
+	query, stringProps, numericProps := lobbyParams.MatchmakingParameters(sessionParams, lobbyParams)
 
 	logger.Debug("Matchmaking query", zap.String("query", query), zap.Any("string_properties", stringProps), zap.Any("numeric_properties", numericProps))
 
-	ticketConfig, ok := DefaultMatchmakerTicketConfigs[params.Mode]
+	ticketConfig, ok := DefaultMatchmakerTicketConfigs[lobbyParams.Mode]
 	if !ok {
-		return status.Errorf(codes.Internal, "Matchmaking ticket config not found for mode %s", params.Mode)
+		return status.Errorf(codes.Internal, "Matchmaking ticket config not found for mode %s", lobbyParams.Mode)
 	}
 
 	minCount := ticketConfig.MinCount
