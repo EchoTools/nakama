@@ -294,5 +294,7 @@ func (p *EvrPipeline) authorizeGuildGroupSession(ctx context.Context, session Se
 		return errors.Join(NewLobbyErrorf(InternalError, "failed to set lobby profile"), err)
 	}
 
+	session.Logger().Info("Authorized access to lobby session", zap.String("gid", groupID), zap.String("display_name", displayName))
+
 	return nil
 }
