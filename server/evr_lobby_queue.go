@@ -115,7 +115,7 @@ func (q *LobbyQueue) FindUnfilledMatches(ctx context.Context) ([]*MatchLabel, er
 	return labels, nil
 }
 
-func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, params *LobbySessionParameters) (*MatchLabel, error) {
+func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, params *LobbySessionParameters) (*MatchLabel, int, error) {
 	q.Lock()
 	defer q.Unlock()
 
@@ -144,7 +144,7 @@ func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, params *LobbySessionP
 		for _, l := range labels {
 			if l.OpenPlayerSlots() >= params.PartySize {
 				l.PlayerCount += params.PartySize
-				return l, nil
+				return l, evr.TeamSocial, nil
 			}
 		}
 		// Create a new one.
@@ -153,15 +153,19 @@ func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, params *LobbySessionP
 				<-time.After(5 * time.Second)
 				defer q.createMu.Unlock()
 			}()
-			return q.NewSocialLobby(ctx, params.VersionLock, params.GroupID)
+			l, err := q.NewSocialLobby(ctx, params.VersionLock, params.GroupID)
+			if err != nil {
+				return nil, -1, err
+			}
+			return l, evr.TeamSocial, nil
 		}
-		return nil, ErrNoUnfilledMatches
+		return nil, -1, ErrNoUnfilledMatches
 	}
 
 	labelsWithLatency := params.latencyHistory.LabelsByAverageRTT(labels)
 
 	if len(labelsWithLatency) == 0 {
-		return nil, ErrNoUnfilledMatches
+		return nil, -1, ErrNoUnfilledMatches
 	}
 
 	// Sort the labels by size, then latency, putting the largest, lowest latency first
@@ -176,23 +180,36 @@ func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, params *LobbySessionP
 	})
 
 	for _, l := range labelsWithLatency {
-		if l.Label.OpenPlayerSlots() >= params.PartySize {
+		var team int
 
-			label, err := MatchLabelByID(ctx, q.nk, l.Label.ID)
-			if err != nil {
-				continue
-			} else if label == nil {
-				continue
-			}
-
-			label.PlayerCount += params.PartySize
-			q.cache[presence][label.ID] = label
-
-			return label, nil
+		if l.Label.OpenSlotsByRole(evr.TeamBlue) >= params.PartySize {
+			team = evr.TeamBlue
+		} else if l.Label.OpenSlotsByRole(evr.TeamOrange) >= params.PartySize {
+			team = evr.TeamOrange
+		} else {
+			continue
 		}
+
+		label, err := MatchLabelByID(ctx, q.nk, l.Label.ID)
+		if err != nil {
+			continue
+		} else if label == nil {
+			continue
+		}
+
+		// Final check
+		if label.RoleCount(team) >= label.RoleLimit(team) {
+			continue
+		}
+
+		label.PlayerCount += params.PartySize
+		q.cache[presence][label.ID] = label
+
+		return label, team, nil
+
 	}
 
-	return nil, ErrNoUnfilledMatches
+	return nil, -1, ErrNoUnfilledMatches
 }
 
 type TeamAlignments map[string]int // map[UserID]Role
