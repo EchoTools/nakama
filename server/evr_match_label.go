@@ -66,8 +66,25 @@ func (s *MatchLabel) OpenSlots() int {
 	return int(s.MaxSize) - s.Size
 }
 
+func (s *MatchLabel) OpenSlotsByRole(role int) int {
+	roleCount := s.RoleCount(role)
+	if roleCount == 0 {
+		return 0
+	}
+	return s.RoleLimit(role) - roleCount
+}
+
 func (s *MatchLabel) String() string {
 	return s.GetLabel()
+}
+
+func (s *MatchLabel) RoleLimit(role int) int {
+	switch role {
+	case BlueRole, OrangeRole:
+		return s.TeamSize
+	default:
+		return 0
+	}
 }
 
 func (s *MatchLabel) RoleCount(role int) int {

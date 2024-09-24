@@ -135,7 +135,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 
 		entrant := entrants[0]
 
-		label, err := p.lobbyQueue.GetUnfilledMatch(ctx, params)
+		label, team, err := p.lobbyQueue.GetUnfilledMatch(ctx, params)
 		if err == ErrNoUnfilledMatches {
 			continue
 		} else if err != nil {
@@ -153,7 +153,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 			continue
 		}
 		// Player members will detect the join.
-		if err := p.LobbyJoinEntrant(logger, serverSession, label, UnassignedRole, entrant); err != nil {
+		if err := p.LobbyJoinEntrant(logger, serverSession, label, team, entrant); err != nil {
 			// Send the error to the client
 			// If it's full just try again.
 			if LobbyErrorIs(err, ServerIsFull) {
