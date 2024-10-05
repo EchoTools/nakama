@@ -126,9 +126,6 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 
 	logger = logger.With(zap.String("discord_id", discordId), zap.Strings("group_ids", groupIDs), zap.Strings("tags", newParams.ServerTags), zap.Strings("regions", lo.Map(regions, func(v evr.Symbol, _ int) string { return v.String() })))
 
-	// Add the hash of the operator's ID as a region
-	regions = append(regions, evr.ToSymbol(session.UserID().String()))
-
 	// Add the server id as a region
 	regions = append(regions, evr.ToSymbol(request.ServerId))
 
