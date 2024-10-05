@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -442,4 +443,22 @@ func (b *LobbyBuilder) selectNextMap(mode evr.Symbol) evr.Symbol {
 	b.mapQueue[mode] = queue[1:]
 
 	return queue[0]
+}
+
+// CompactedFrequencySort sorts a slice of items by frequency and removes duplicates.
+func CompactedFrequencySort[T comparable](s []T, desc bool) []T {
+	s = s[:]
+	// Create a map of the frequency of each item
+	frequency := make(map[T]int, len(s))
+	for _, item := range s {
+		frequency[item]++
+	}
+	// Sort the items by frequency
+	slices.SortStableFunc(s, func(a, b T) int {
+		return frequency[a] - frequency[b]
+	})
+	if desc {
+		slices.Reverse(s)
+	}
+	return slices.Compact(s)
 }
