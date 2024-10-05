@@ -2,6 +2,7 @@ package evr
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 
 	"github.com/gofrs/uuid/v5"
@@ -20,8 +21,18 @@ func (m LoginRequest) Token() string   { return "SNSLogInRequestv2" }
 func (m *LoginRequest) Symbol() Symbol { return SymbolOf(m) }
 
 func (lr LoginRequest) String() string {
-	return fmt.Sprintf("%s(session=%v, user_id=%s, login_data=%s)",
-		lr.Token(), lr.Session, lr.EvrId.String(), lr.LoginData.String())
+	m := map[string]interface{}{
+		"session":           lr.Session,
+		"user_id":           lr.EvrId.String(),
+		"hmd_serial_number": lr.LoginData.HmdSerialNumber,
+		"headset_type":      lr.LoginData.SystemInfo.HeadsetType,
+	}
+
+	data, err := json.Marshal(m)
+	if err != nil {
+		return fmt.Sprintf("LoginRequest(%s)", err)
+	}
+	return string(data)
 }
 
 func (m *LoginRequest) Stream(s *EasyStream) error {
