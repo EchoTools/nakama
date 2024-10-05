@@ -5,7 +5,7 @@ import "testing"
 func TestLobbyErrorIs(t *testing.T) {
 	type args struct {
 		err  error
-		code LobbyErrorCode
+		code LobbyErrorCodeValue
 	}
 	tests := []struct {
 		name string

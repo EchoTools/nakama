@@ -2,12 +2,7 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"slices"
-	"sort"
-	"strings"
 	"time"
 
 	"github.com/gofrs/uuid/v5"
@@ -15,8 +10,6 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 var LobbyTestCounter = 0
@@ -156,7 +149,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		if err := p.LobbyJoinEntrant(logger, serverSession, label, team, entrant); err != nil {
 			// Send the error to the client
 			// If it's full just try again.
-			if LobbyErrorIs(err, ServerIsFull) {
+			if LobbyErrorCode(err) == ServerIsFull {
 				logger.Warn("Server is full, ignoring.")
 				continue
 			}
@@ -284,13 +277,16 @@ func (p *EvrPipeline) PartyFollow(ctx context.Context, logger *zap.Logger, sessi
 				logger.Debug("Joining leader's lobby", zap.String("mid", leaderMatchID.String()))
 				params.CurrentMatchID = leaderMatchID
 				if err := p.lobbyJoin(ctx, logger, session, params); err != nil {
-					if LobbyErrorIs(err, ServerIsFull) || LobbyErrorIs(err, ServerIsLocked) {
+					code := LobbyErrorCode(err)
+					if code == ServerIsFull || code == ServerIsLocked {
 						<-time.After(5 * time.Second)
 						continue
 					}
 					return errors.Join(NewLobbyError(InternalError, "failed to join leader's social lobby"), err)
 				}
 				return nil
+			default:
+				// The leader is in a non-public match.
 			}
 		}
 		// The leader is in a match, but this player is not.
