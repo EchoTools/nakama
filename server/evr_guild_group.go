@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"slices"
 
+	"github.com/bits-and-blooms/bitset"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 )
@@ -256,6 +257,64 @@ type GuildGroupMembership struct {
 	IsAccountAgeBypass bool
 	IsVPNBypass        bool
 	IsHeadsetLinked    bool
+}
+
+func (m *GuildGroupMembership) ToUint64() uint64 {
+	var i uint64 = 0
+	b := m.asBitSet()
+	if len(b.Bytes()) == 0 {
+		return i
+	}
+	return uint64(b.Bytes()[0])
+}
+
+func (m *GuildGroupMembership) FromUint64(v uint64) {
+	b := bitset.From([]uint64{v})
+	m.FromBitSet(b)
+}
+
+func (m *GuildGroupMembership) FromBitSet(b *bitset.BitSet) {
+	m.IsMember = b.Test(0)
+	m.IsModerator = b.Test(1)
+	m.IsServerHost = b.Test(2)
+	m.IsAllocator = b.Test(3)
+	m.IsSuspended = b.Test(4)
+	m.IsAPIAccess = b.Test(5)
+	m.IsAccountAgeBypass = b.Test(6)
+	m.IsVPNBypass = b.Test(7)
+	m.IsHeadsetLinked = b.Test(8)
+}
+
+func (m *GuildGroupMembership) asBitSet() *bitset.BitSet {
+	b := bitset.New(9)
+	if m.IsMember {
+		b.Set(0)
+	}
+	if m.IsModerator {
+		b.Set(1)
+	}
+	if m.IsServerHost {
+		b.Set(2)
+	}
+	if m.IsAllocator {
+		b.Set(3)
+	}
+	if m.IsSuspended {
+		b.Set(4)
+	}
+	if m.IsAPIAccess {
+		b.Set(5)
+	}
+	if m.IsAccountAgeBypass {
+		b.Set(6)
+	}
+	if m.IsVPNBypass {
+		b.Set(7)
+	}
+	if m.IsHeadsetLinked {
+		b.Set(8)
+	}
+	return b
 }
 
 func NewGuildGroupMembership(group *api.Group, userID uuid.UUID, state api.UserGroupList_UserGroup_State) (*GuildGroupMembership, error) {

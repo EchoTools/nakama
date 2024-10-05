@@ -122,7 +122,7 @@ func (d *DiscordAppBot) handleInteractionCreate(logger runtime.Logger, s *discor
 
 	case "allocate":
 
-		if !membership.isAllocator {
+		if !membership.IsAllocator {
 			return simpleInteractionResponse(s, i, "You must be a guild allocator to use this command.")
 		}
 
@@ -134,7 +134,7 @@ func (d *DiscordAppBot) handleInteractionCreate(logger runtime.Logger, s *discor
 			}
 		}
 
-		if !membership.isModerator {
+		if !membership.IsModerator {
 			return simpleInteractionResponse(s, i, "You must be a guild moderator to use this command.")
 		}
 
@@ -160,12 +160,12 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 	}
 	allocatorGroupIDs := make([]string, 0, len(memberships))
 	for gid, _ := range memberships {
-		if membership.isAllocator {
+		if membership.IsAllocator {
 			allocatorGroupIDs = append(allocatorGroupIDs, gid)
 		}
 	}
 
-	if !membership.isAllocator {
+	if !membership.IsAllocator {
 		return nil, 0, status.Error(codes.PermissionDenied, "user does not have the allocator role in this guild.")
 	}
 
@@ -237,7 +237,7 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 	label.SpawnedBy = userID
 
 	label.StartTime = startTime.UTC().Add(1 * time.Minute)
-	if membership.isAllocator {
+	if membership.IsAllocator {
 		label.StartTime = startTime.UTC().Add(10 * time.Minute)
 	}
 
