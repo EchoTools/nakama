@@ -193,3 +193,57 @@ func (s *MatchLabel) rebuildCache() {
 		return s.Players[i].Team < s.Players[j].Team
 	})
 }
+
+func (l *MatchLabel) PublicView() *MatchLabel {
+	// Remove private data
+	v := &MatchLabel{
+		LobbyType:        l.LobbyType,
+		ID:               l.ID,
+		Open:             l.Open,
+		GameState:        l.GameState,
+		StartTime:        l.StartTime,
+		GroupID:          l.GroupID,
+		GuildID:          l.GuildID,
+		SpawnedBy:        l.SpawnedBy,
+		Mode:             l.Mode,
+		Level:            l.Level,
+		RequiredFeatures: l.RequiredFeatures,
+		MaxSize:          l.MaxSize,
+		Size:             l.Size,
+		PlayerCount:      l.PlayerCount,
+		PlayerLimit:      l.PlayerLimit,
+		TeamSize:         l.TeamSize,
+		Broadcaster: MatchBroadcaster{
+			OperatorID:  l.Broadcaster.OperatorID,
+			GroupIDs:    l.Broadcaster.GroupIDs,
+			VersionLock: l.Broadcaster.VersionLock,
+			Regions:     l.Broadcaster.Regions,
+			Tags:        l.Broadcaster.Tags,
+			Features:    l.Broadcaster.Features,
+		},
+		Players:      make([]PlayerInfo, 0),
+		TeamOrdinals: l.TeamOrdinals,
+	}
+	if l.LobbyType == PrivateLobby || l.LobbyType == UnassignedLobby {
+		// Set the last bytes to FF to hide the ID
+		for i := 12; i < 16; i++ {
+			v.ID.UUID[i] = 0xFF
+		}
+	} else {
+		for i := range l.Players {
+			v.Players = append(v.Players, PlayerInfo{
+				UserID:      l.Players[i].UserID,
+				Username:    l.Players[i].Username,
+				DisplayName: l.Players[i].DisplayName,
+				EvrID:       l.Players[i].EvrID,
+				Team:        l.Players[i].Team,
+				DiscordID:   l.Players[i].DiscordID,
+				PartyID:     l.Players[i].PartyID,
+				JoinTime:    l.Players[i].JoinTime,
+				Rating:      l.Players[i].Rating,
+			})
+		}
+
+	}
+	return v
+}
