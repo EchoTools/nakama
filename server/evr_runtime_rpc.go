@@ -8,6 +8,7 @@ import (
 	"hash/fnv"
 	"slices"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -392,7 +393,7 @@ func KickPlayerRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk ru
 	// Get a slice of groupIDs that this user is a moderator for
 	var groupIDs []string
 	for groupID, m := range memberships {
-		if m.isModerator {
+		if m.IsModerator {
 			groupIDs = append(groupIDs, groupID)
 		}
 	}
@@ -1169,7 +1170,7 @@ func AuthenticatePasswordRPC(ctx context.Context, logger runtime.Logger, db *sql
 		}
 		userID = userUUID.String()
 	} else {
-
+		vars = make(map[string]string)
 		switch {
 
 		case request.UserID != "":
@@ -1202,6 +1203,15 @@ func AuthenticatePasswordRPC(ctx context.Context, logger runtime.Logger, db *sql
 			return "", err
 		}
 		tokenID = uuid.Must(uuid.NewV4()).String()
+
+		memberships, err := GetGuildGroupMemberships(ctx, nk, userID)
+		if err != nil {
+			return "", err
+		}
+
+		for id, membership := range memberships {
+			vars[id] = strconv.FormatUint(membership.ToUint64(), 16)
+		}
 	}
 
 	token, exp := generateToken(nk.config, tokenID, userID, username, vars)

@@ -98,14 +98,14 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 			break
 		}
 
-		if m, ok := memberships[groupID]; ok && m.isServerHost {
+		if m, ok := memberships[groupID]; ok && m.IsServerHost {
 			groupIDs = append(groupIDs, groupID)
 		}
 	}
 
 	if len(groupIDs) == 0 {
 		for groupID, m := range memberships {
-			if m.isServerHost {
+			if m.IsServerHost {
 				groupIDs = append(groupIDs, groupID)
 			}
 		}

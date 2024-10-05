@@ -223,7 +223,7 @@ func (p *EvrPipeline) authorizeGuildGroupSession(ctx context.Context, session Se
 		return NewLobbyError(KickedFromLobbyGroup, "User is not a member of this guild")
 	}
 
-	if membership.isSuspended {
+	if membership.IsSuspended {
 
 		if sendAuditMessage {
 			if _, err := p.appBot.dg.ChannelMessageSend(groupMetadata.AuditChannelID, fmt.Sprintf("Rejected suspended user <@%s>.", discordID)); err != nil {

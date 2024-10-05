@@ -214,16 +214,16 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 			for gid, m := range whoami.GuildGroupMemberships {
 				s := guildGroups[gid].Name()
 				roles := make([]string, 0)
-				if m.isMember {
+				if m.IsMember {
 					roles = append(roles, "member")
 				}
-				if m.isModerator {
+				if m.IsModerator {
 					roles = append(roles, "moderator")
 				}
-				if m.isServerHost {
+				if m.IsServerHost {
 					roles = append(roles, "server-host")
 				}
-				if m.isAllocator {
+				if m.IsAllocator {
 					roles = append(roles, "allocator")
 				}
 				if len(roles) > 0 {

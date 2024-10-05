@@ -1568,7 +1568,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					return errors.New("no membership found")
 				}
 
-				if membership.isModerator {
+				if membership.IsModerator {
 					guildID = i.GuildID
 				}
 			}
