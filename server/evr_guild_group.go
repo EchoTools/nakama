@@ -247,11 +247,15 @@ func NewGuildGroup(group *api.Group) (*GuildGroup, error) {
 }
 
 type GuildGroupMembership struct {
-	isMember     bool
-	isModerator  bool // Admin
-	isServerHost bool // Broadcaster Host
-	isAllocator  bool // Can allocate servers with slash command
-	isSuspended  bool
+	IsMember           bool
+	IsModerator        bool // Admin
+	IsServerHost       bool // Broadcaster Host
+	IsAllocator        bool // Can allocate servers with slash command
+	IsSuspended        bool
+	IsAPIAccess        bool
+	IsAccountAgeBypass bool
+	IsVPNBypass        bool
+	IsHeadsetLinked    bool
 }
 
 func NewGuildGroupMembership(group *api.Group, userID uuid.UUID, state api.UserGroupList_UserGroup_State) (*GuildGroupMembership, error) {
@@ -261,10 +265,14 @@ func NewGuildGroupMembership(group *api.Group, userID uuid.UUID, state api.UserG
 	}
 	userIDStr := userID.String()
 	return &GuildGroupMembership{
-		isMember:     state <= api.UserGroupList_UserGroup_MEMBER,
-		isModerator:  gg.Metadata.IsModerator(userIDStr),
-		isServerHost: gg.Metadata.IsServerHost(userIDStr),
-		isAllocator:  gg.Metadata.IsAllocator(userIDStr),
-		isSuspended:  gg.Metadata.IsSuspended(userIDStr),
+		IsMember:           state <= api.UserGroupList_UserGroup_MEMBER,
+		IsModerator:        gg.Metadata.IsModerator(userIDStr),
+		IsServerHost:       gg.Metadata.IsServerHost(userIDStr),
+		IsAllocator:        gg.Metadata.IsAllocator(userIDStr),
+		IsSuspended:        gg.Metadata.IsSuspended(userIDStr),
+		IsAPIAccess:        gg.Metadata.IsAPIAccess(userIDStr),
+		IsAccountAgeBypass: gg.Metadata.IsAccountAgeBypass(userIDStr),
+		IsVPNBypass:        gg.Metadata.IsVPNBypass(userIDStr),
+		IsHeadsetLinked:    gg.Metadata.IsAccountLinked(userIDStr),
 	}, nil
 }
