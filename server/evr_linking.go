@@ -127,7 +127,7 @@ func (p *EvrPipeline) linkTicket(session *sessionWS, logger *zap.Logger, deviceI
 			linkTicket := &LinkTicket{}
 			err := json.Unmarshal([]byte(record.Value), &linkTicket)
 			if err != nil {
-				return nil, fmt.Errorf(fmt.Sprintf("error unmarshalling link ticket: %w", err))
+				return nil, fmt.Errorf("error unmarshalling link ticket: %w", err)
 			} else {
 				return linkTicket, nil
 			}
