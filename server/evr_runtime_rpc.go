@@ -8,7 +8,6 @@ import (
 	"hash/fnv"
 	"slices"
 	"sort"
-	"strconv"
 	"sync"
 	"time"
 
@@ -186,56 +185,7 @@ func MatchListPublicRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 			return "", runtime.NewError("Failed to unmarshal match label", StatusInternalError)
 		}
 
-		// Remove private data
-		v := &MatchLabel{
-			LobbyType:        l.LobbyType,
-			ID:               l.ID,
-			Open:             l.Open,
-			GameState:        l.GameState,
-			StartTime:        l.StartTime,
-			GroupID:          l.GroupID,
-			GuildID:          l.GuildID,
-			SpawnedBy:        l.SpawnedBy,
-			Mode:             l.Mode,
-			Level:            l.Level,
-			RequiredFeatures: l.RequiredFeatures,
-			MaxSize:          l.MaxSize,
-			Size:             l.Size,
-			PlayerCount:      l.PlayerCount,
-			PlayerLimit:      l.PlayerLimit,
-			TeamSize:         l.TeamSize,
-			Broadcaster: MatchBroadcaster{
-				OperatorID:  l.Broadcaster.OperatorID,
-				GroupIDs:    l.Broadcaster.GroupIDs,
-				VersionLock: l.Broadcaster.VersionLock,
-				Regions:     l.Broadcaster.Regions,
-				Tags:        l.Broadcaster.Tags,
-				Features:    l.Broadcaster.Features,
-			},
-			Players:      make([]PlayerInfo, 0),
-			TeamOrdinals: l.TeamOrdinals,
-		}
-		if l.LobbyType == PrivateLobby || l.LobbyType == UnassignedLobby {
-			// Set the last bytes to FF to hide the ID
-			for i := 12; i < 16; i++ {
-				v.ID.UUID[i] = 0xFF
-			}
-		} else {
-			for i := range l.Players {
-				v.Players = append(v.Players, PlayerInfo{
-					UserID:      l.Players[i].UserID,
-					Username:    l.Players[i].Username,
-					DisplayName: l.Players[i].DisplayName,
-					EvrID:       l.Players[i].EvrID,
-					Team:        l.Players[i].Team,
-					DiscordID:   l.Players[i].DiscordID,
-					PartyID:     l.Players[i].PartyID,
-					JoinTime:    l.Players[i].JoinTime,
-					Rating:      l.Players[i].Rating,
-				})
-			}
-
-		}
+		v := l.PublicView()
 
 		playerCount += v.PlayerCount
 		gameServers = append(gameServers, &v.Broadcaster)
@@ -292,9 +242,9 @@ type MatchRpcRequest struct {
 }
 
 type MatchRpcResponse struct {
-	SystemStartTime string `json:"system_start_time"`
-	Timestamp       string `json:"timestamp"`
-	Labels          []any  `json:"labels"`
+	SystemStartTime string        `json:"system_start_time"`
+	Timestamp       string        `json:"timestamp"`
+	Labels          []*MatchLabel `json:"labels"`
 }
 
 func (r MatchRpcResponse) String() string {
@@ -305,6 +255,23 @@ func (r MatchRpcResponse) String() string {
 	return string(data)
 }
 
+func MembershipsFromSessionVars(vars map[string]string) (map[string]GuildGroupMembership, error) {
+	memberships := make(map[string]GuildGroupMembership)
+	if data, ok := vars["memberships"]; ok {
+		var bitsets map[string]uint64
+		if err := json.Unmarshal([]byte(data), &bitsets); err != nil {
+			return nil, err
+		}
+
+		for groupID, bitset := range bitsets {
+			m := GuildGroupMembership{}
+			m.FromUint64(bitset)
+			memberships[groupID] = m
+		}
+	}
+	return memberships, nil
+}
+
 func MatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 	var err error
 
@@ -312,11 +279,21 @@ func MatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime
 	if !ok {
 		return "", runtime.NewError("authentication required", StatusUnauthenticated)
 	}
+	// Unpack the bitsets from the session token
+	vars, ok := ctx.Value(runtime.RUNTIME_CTX_VARS).(map[string]string)
+	if !ok {
+		return "", runtime.NewError("failed to get session vars", StatusInternalError)
+	}
 
-	if ok, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalPrivateDataAccess); err != nil {
+	memberships, err := MembershipsFromSessionVars(vars)
+	if err != nil {
+		return "", runtime.NewError("failed to get memberships", StatusInternalError)
+	}
+
+	fullAccess := false
+
+	if fullAccess, err = CheckSystemGroupMembership(ctx, db, userID, GroupGlobalPrivateDataAccess); err != nil {
 		return "", runtime.NewError("failed to check group membership", StatusInternalError)
-	} else if !ok {
-		return "", runtime.NewError("unauthorized", StatusPermissionDenied)
 	}
 
 	request := &MatchRpcRequest{}
@@ -351,14 +328,45 @@ func MatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime
 		}
 	}
 
-	labels := make([]any, 0, len(matches))
+	labels := make([]*MatchLabel, 0, len(matches))
 	for _, match := range matches {
 		// "any" avoids some reflection overhead
-		label := map[string]any{}
-		if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), &label); err != nil {
+		label := &MatchLabel{}
+		if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), label); err != nil {
 			return "", runtime.NewError("Failed to unmarshal match label", StatusInternalError)
 		}
-		labels = append(labels, label)
+
+		if fullAccess {
+			labels = append(labels, label)
+			continue
+		} else {
+			// Remove sensitive data
+			label.Broadcaster.IPinfo = nil
+			label.Broadcaster.Endpoint = evr.Endpoint{}
+			for i, p := range label.Players {
+				p.IPinfo = nil
+				p.ClientIP = ""
+				label.Players[i] = p
+			}
+		}
+
+		if label.LobbyType == UnassignedLobby {
+			for _, id := range label.Broadcaster.GroupIDs {
+				if m, ok := memberships[id.String()]; ok {
+					if !m.IsAPIAccess {
+						continue
+					}
+				}
+			}
+		} else {
+			if m, ok := memberships[label.GetGroupID().String()]; ok {
+				if !m.IsAPIAccess {
+					continue
+				}
+			}
+		}
+
+		labels = append(labels, label.PublicView())
 	}
 
 	response := MatchRpcResponse{
@@ -1209,9 +1217,14 @@ func AuthenticatePasswordRPC(ctx context.Context, logger runtime.Logger, db *sql
 			return "", err
 		}
 
+		varMemberships := make(map[string]uint64)
+
 		for id, membership := range memberships {
-			vars[id] = strconv.FormatUint(membership.ToUint64(), 16)
+			varMemberships[id] = membership.ToUint64()
 		}
+
+		data, _ := json.Marshal(varMemberships)
+		vars["memberships"] = string(data)
 	}
 
 	token, exp := generateToken(nk.config, tokenID, userID, username, vars)
