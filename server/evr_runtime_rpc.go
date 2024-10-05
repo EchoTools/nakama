@@ -590,7 +590,7 @@ func DiscordSignInRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	}
 
 	// Store the discord token.
-	WriteAccessTokenToStorage(ctx, logger, nk, nkUserId, accessToken)
+	err = WriteAccessTokenToStorage(ctx, logger, nk, nkUserId, accessToken)
 	if err != nil {
 		logger.WithField("err", err).Error("Unable to write access token to storage")
 		return "", runtime.NewError("Unable to write access token to storage", StatusInternalError)
@@ -851,7 +851,7 @@ func ImportLoadoutsRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 			return "", err
 		}
 
-		if _, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{&runtime.StorageWrite{
+		if _, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{{
 			PermissionRead:  0,
 			PermissionWrite: 0,
 			Collection:      CosmeticLoadoutCollection,
