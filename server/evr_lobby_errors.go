@@ -17,11 +17,12 @@ var (
 	ErrSuspended             = NewLobbyError(KickedFromLobbyGroup, "User is suspended from this guild")
 )
 
-// LobbyErrorCode defines the type for lobby error codes.
-type LobbyErrorCode int
+// LobbyErrorCodeValue defines the type for lobby error codes.
+type LobbyErrorCodeValue int
 
+// The list of lobby error codes. These are hard-coded in the evr client.
 const (
-	TimeoutServerFindFailed LobbyErrorCode = iota
+	TimeoutServerFindFailed LobbyErrorCodeValue = iota
 	UpdateRequired
 	BadRequest
 	Timeout
@@ -39,7 +40,7 @@ const (
 
 // LobbyError struct that implements the error interface.
 type LobbyError struct {
-	Code    LobbyErrorCode
+	Code    LobbyErrorCodeValue
 	Message string
 }
 
@@ -80,7 +81,7 @@ func (e LobbyError) Error() string {
 }
 
 // NewLobbyErrorf creates a new LobbyError with the given code and message.
-func NewLobbyError(code LobbyErrorCode, message string) *LobbyError {
+func NewLobbyError(code LobbyErrorCodeValue, message string) *LobbyError {
 	return &LobbyError{
 		Code:    code,
 		Message: message,
@@ -88,13 +89,14 @@ func NewLobbyError(code LobbyErrorCode, message string) *LobbyError {
 }
 
 // NewLobbyErrorf creates a new LobbyError with the given code and message.
-func NewLobbyErrorf(code LobbyErrorCode, message string, a ...any) *LobbyError {
+func NewLobbyErrorf(code LobbyErrorCodeValue, message string, a ...any) *LobbyError {
 	return &LobbyError{
 		Code:    code,
 		Message: fmt.Sprintf(message, a...),
 	}
 }
 
+// LobbySessionFailureFromError converts an error into a LobbySessionFailure message.
 func LobbySessionFailureFromError(mode evr.Symbol, groupID uuid.UUID, err error) *evr.LobbySessionFailurev4 {
 	if err == nil {
 		return nil
@@ -150,11 +152,16 @@ func LobbySessionFailureFromError(mode evr.Symbol, groupID uuid.UUID, err error)
 	return evr.NewLobbySessionFailure(mode, groupID, code, message).Version4()
 }
 
-func LobbyErrorIs(err error, code LobbyErrorCode) bool {
-	var lobbyError *LobbyError
-	found := errors.As(err, &lobbyError)
-	if !found {
-		return false
+// LobbyErrorIs checks if the given error is a LobbyError with the given code.
+func LobbyErrorIs(err error, code LobbyErrorCodeValue) bool {
+	var lErr *LobbyError
+	return errors.As(err, &lErr) && lErr.Code == code
+}
+
+func LobbyErrorCode(err error) LobbyErrorCodeValue {
+	var lErr *LobbyError
+	if errors.As(err, &lErr) {
+		return lErr.Code
 	}
-	return lobbyError.Code == code
+	return InternalError
 }
