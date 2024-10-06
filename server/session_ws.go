@@ -70,7 +70,6 @@ type (
 	sessionWS struct {
 		sync.Mutex
 		logger     *zap.Logger
-		baseLogger *zap.Logger
 		config     Config
 		id         uuid.UUID
 		format     SessionFormat
@@ -160,12 +159,13 @@ func UpdateParams(ctx context.Context, params *SessionParameters) {
 }
 
 func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessionID, userID uuid.UUID, username string, vars map[string]string, expiry int64, clientIP, clientPort, lang string, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, conn *websocket.Conn, sessionRegistry SessionRegistry, statusRegistry StatusRegistry, matchmaker Matchmaker, tracker Tracker, metrics Metrics, pipeline *Pipeline, evrPipeline *EvrPipeline, runtime *Runtime, request http.Request, storageIndex StorageIndex) Session {
-	sessionLogger := logger.With(zap.String("sid", sessionID.String()))
+	logger = logger.With(zap.String("sid", sessionID.String()))
 
-	if userID != uuid.Nil {
-		sessionLogger = sessionLogger.With(zap.String("uid", userID.String()))
+	if userID.IsNil() {
+		logger = logger.With(zap.String("uid", userID.String()))
 	}
-	sessionLogger.Info("New WebSocket session connected", zap.String("requestUri", request.URL.Path), zap.String("query", request.URL.RawQuery), zap.Uint8("format", uint8(format)))
+
+	logger.Info("New WebSocket session connected", zap.String("requestUri", request.URL.Path), zap.String("query", request.URL.RawQuery), zap.Uint8("format", uint8(format)))
 
 	ctx, ctxCancelFn := context.WithCancel(context.Background())
 
@@ -214,7 +214,7 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 	if params.AuthDiscordID != "" {
 
 		if userIDStr := evrPipeline.discordCache.DiscordIDToUserID(params.AuthDiscordID); userIDStr == "" {
-			sessionLogger.Warn("Failed to get user ID by Discord ID", zap.String("discord_id", params.AuthDiscordID))
+			logger.Warn("Failed to get user ID by Discord ID", zap.String("discord_id", params.AuthDiscordID))
 		} else if passwd := params.AuthPassword; passwd != "" {
 			if len(passwd) > 32 {
 				passwd = passwd[:32]
@@ -222,14 +222,14 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 
 			account, err := GetAccount(ctx, logger, pipeline.db, statusRegistry, uuid.FromStringOrNil(userIDStr))
 			if err != nil {
-				sessionLogger.Warn("Failed to get account by Discord ID", zap.Error(err))
+				logger.Warn("Failed to get account by Discord ID", zap.Error(err))
 			}
 			if account == nil {
-				sessionLogger.Warn("Account not found by Discord ID")
+				logger.Warn("Account not found by Discord ID")
 			}
 
 			if userIDStr, err := AuthenticateUsername(ctx, logger, pipeline.db, account.User.Username, passwd); err != nil {
-				sessionLogger.Warn("Failed to authenticate user by Discord ID", zap.Error(err))
+				logger.Warn("Failed to authenticate user by Discord ID", zap.Error(err))
 
 			} else {
 				// Only include the password in the context if the user was unsuccessful in authenticating.
@@ -243,8 +243,7 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 	}
 
 	return &sessionWS{
-		logger:      sessionLogger,
-		baseLogger:  logger,
+		logger:      logger,
 		config:      config,
 		id:          sessionID,
 		format:      format,
