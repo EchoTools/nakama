@@ -44,6 +44,24 @@ func (h LatencyHistory) Add(extIP string, rtt int) {
 	h[extIP][time.Now().UTC().Unix()] = rtt
 }
 
+func (h LatencyHistory) LatestRTTs() map[string]int {
+	latestRTTs := make(map[string]int)
+	for extIP, history := range h {
+		latestRTTs[extIP] = 0
+		latestTS := int64(0)
+		for ts, rtt := range history {
+			if rtt == 0 || rtt == 999 {
+				continue
+			}
+			if ts > latestTS {
+				latestTS = ts
+				latestRTTs[extIP] = rtt
+			}
+		}
+	}
+	return latestRTTs
+}
+
 func (h LatencyHistory) LabelsByAverageRTT(labels []*MatchLabel) []LabelWithLatency {
 	if len(labels) == 0 {
 		return make([]LabelWithLatency, 0)
