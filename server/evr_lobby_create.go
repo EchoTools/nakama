@@ -97,6 +97,29 @@ func lobbyListGameServers(ctx context.Context, nk runtime.NakamaModule, query st
 	return labels, nil
 }
 
+func lobbyListLabels(ctx context.Context, nk runtime.NakamaModule, query string) ([]*MatchLabel, error) {
+	limit := 200
+	minSize, maxSize := 1, MatchLobbyMaxSize // the game server counts as one.
+	matches, err := listMatches(ctx, nk, limit, minSize, maxSize, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find matches: %w", err)
+	}
+
+	if len(matches) == 0 {
+		return nil, ErrMatchmakingNoAvailableServers
+	}
+
+	labels := make([]*MatchLabel, 0, len(matches))
+	for _, match := range matches {
+		label := &MatchLabel{}
+		if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), label); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal match label: %w", err)
+		}
+		labels = append(labels, label)
+	}
+	return labels, nil
+}
+
 func lobbyCreateQuery(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, session Session, params *LobbySessionParameters) (string, error) {
 
 	regions := []string{params.Region.String(), evr.DefaultRegion.String()}

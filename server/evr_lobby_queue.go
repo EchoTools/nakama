@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -37,12 +38,13 @@ type LobbyQueue struct {
 	matchRegistry MatchRegistry
 	metrics       Metrics
 
+	db       *sql.DB
 	nk       runtime.NakamaModule
 	createMu sync.Mutex
 	cache    map[LobbyQueuePresence]map[MatchID]*MatchLabel
 }
 
-func NewLobbyQueue(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, metrics Metrics, matchRegistry MatchRegistry) *LobbyQueue {
+func NewLobbyQueue(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, metrics Metrics, matchRegistry MatchRegistry) *LobbyQueue {
 	q := &LobbyQueue{
 		ctx:    ctx,
 		logger: logger,
@@ -50,6 +52,7 @@ func NewLobbyQueue(ctx context.Context, logger *zap.Logger, nk runtime.NakamaMod
 		matchRegistry: matchRegistry,
 		metrics:       metrics,
 		nk:            nk,
+		db:            db,
 	}
 
 	go func() {
@@ -241,8 +244,31 @@ func (q *LobbyQueue) NewSocialLobby(ctx context.Context, versionLock evr.Symbol,
 		return nil, err
 	}
 
-	// Pick a random label
-	label := labels[rand.Intn(len(labels))]
+	// Get the latency history of all online pub players
+	// Find server(s) that the most number of players have !999 (or 0) ping to
+	// sort by servers that have <250 ping to all players
+	// Find the with the best average ping to the most nubmer of players
+	label := &MatchLabel{}
+
+	rttByPlayerByExtIP, err := rttByPlayerByExtIP(ctx, logger, q.db, nk, groupID.String())
+	if err != nil {
+		logger.Warn("Failed to get RTT by player by extIP", zap.Error(err))
+	} else {
+		extIPs := sortByGreatestPlayerAvailability(rttByPlayerByExtIP)
+		for _, extIP := range extIPs {
+			for _, l := range labels {
+				if l.Broadcaster.Endpoint.GetExternalIP() == extIP {
+					label = l
+					break
+				}
+			}
+		}
+	}
+
+	// If no label was found, just pick a random one
+	if label.ID.IsNil() {
+		label = labels[rand.Intn(len(labels))]
+	}
 
 	if err := lobbyPrepareSession(ctx, logger, matchRegistry, label.ID, evr.ModeSocialPublic, evr.LevelSocial, uuid.Nil, groupID, TeamAlignments{}, time.Now().UTC()); err != nil {
 		logger.Error("Failed to prepare session", zap.Error(err), zap.String("mid", label.ID.UUID.String()))
@@ -280,4 +306,82 @@ func lobbyPrepareSession(ctx context.Context, logger *zap.Logger, matchRegistry 
 		return errors.Join(ErrMatchmakingUnknownError, fmt.Errorf("failed to prepare session `%s`: %s", label.ID.String(), response))
 	}
 	return nil
+}
+
+func rttByPlayerByExtIP(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, groupID string) (map[string]map[string]int, error) {
+	qparts := []string{
+		"+label.lobby_type:public",
+		fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/", Query.Escape(groupID)),
+	}
+
+	query := strings.Join(qparts, " ")
+
+	pubLabels, err := lobbyListLabels(ctx, nk, query)
+	if err != nil {
+		logger.Warn("Failed to list game servers", zap.Any("query", query), zap.Error(err))
+		return nil, err
+	}
+
+	rttByPlayerByExtIP := make(map[string]map[string]int)
+
+	for _, label := range pubLabels {
+		for _, p := range label.Players {
+			history, err := LoadLatencyHistory(ctx, logger, db, uuid.FromStringOrNil(p.UserID))
+			if err != nil {
+				logger.Warn("Failed to load latency history", zap.Error(err))
+				continue
+			}
+			rtts := history.LatestRTTs()
+			for extIP, rtt := range rtts {
+				if _, ok := rttByPlayerByExtIP[p.UserID]; !ok {
+					rttByPlayerByExtIP[p.UserID] = make(map[string]int)
+				}
+				rttByPlayerByExtIP[p.UserID][extIP] = rtt
+			}
+		}
+	}
+
+	return rttByPlayerByExtIP, nil
+}
+
+func sortByGreatestPlayerAvailability(rttByPlayerByExtIP map[string]map[string]int) []string {
+
+	maxPlayerCount := 0
+	extIPsByAverageRTT := make(map[string]int)
+	extIPsByPlayerCount := make(map[string]int)
+	for extIP, players := range rttByPlayerByExtIP {
+		extIPsByPlayerCount[extIP] += len(players)
+		if len(players) > maxPlayerCount {
+			maxPlayerCount = len(players)
+		}
+
+		averageRTT := 0
+		for _, rtt := range players {
+			averageRTT += rtt
+		}
+		averageRTT /= len(players)
+	}
+
+	// Sort by greatest player availability
+	extIPs := make([]string, 0, len(extIPsByPlayerCount))
+	for extIP := range extIPsByPlayerCount {
+		extIPs = append(extIPs, extIP)
+	}
+
+	sort.SliceStable(extIPs, func(i, j int) bool {
+		// Sort by player count first
+		if extIPsByPlayerCount[extIPs[i]] > extIPsByPlayerCount[extIPs[j]] {
+			return true
+		} else if extIPsByPlayerCount[extIPs[i]] < extIPsByPlayerCount[extIPs[j]] {
+			return false
+		}
+
+		// If the player count is the same, sort by RTT
+		if extIPsByAverageRTT[extIPs[i]] < extIPsByAverageRTT[extIPs[j]] {
+			return true
+		}
+		return false
+	})
+
+	return extIPs
 }
