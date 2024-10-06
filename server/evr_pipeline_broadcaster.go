@@ -139,7 +139,7 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 		return fmt.Errorf("failed to create broadcaster session: %w", err)
 	}
 
-	logger = logger.With(zap.String("userId", session.UserID().String()))
+	logger = logger.With(zap.String("uid", session.UserID().String()))
 
 	// Set the external address in the request (to use for the registration cache).
 	externalIP := net.ParseIP(session.ClientIP())
@@ -172,11 +172,9 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 	}
 
 	if isPrivateIP(externalIP) {
-		logger.Warn("Broadcaster is on a private IP, using this systems external IP", zap.String("privateIP", externalIP.String()), zap.String("externalIP", p.externalIP.String()), zap.String("Port", fmt.Sprintf("%d", externalPort)))
+		logger.Warn("Broadcaster is on a private IP, using this systems external IP", zap.String("private_ip", externalIP.String()), zap.String("external_ip", p.externalIP.String()), zap.String("port", fmt.Sprintf("%d", externalPort)))
 		externalIP = p.externalIP
 	}
-
-	logger = logger.With(zap.String("externalIP", externalIP.String()))
 
 	// Create the broadcaster config
 	config := broadcasterConfig(session.UserID().String(), session.id.String(), request.ServerId, request.InternalIP, externalIP, request.Port, regions, request.VersionLock, params.ServerTags, params.SupportedFeatures)
@@ -188,7 +186,7 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 	}
 	config.GroupIDs = groupUUIDs
 
-	logger = logger.With(zap.String("internalIP", request.InternalIP.String()), zap.String("externalIP", externalIP.String()), zap.Uint16("port", request.Port))
+	logger = logger.With(zap.String("internal_ip", request.InternalIP.String()), zap.String("external_ip", externalIP.String()), zap.Uint16("port", request.Port))
 	// Validate connectivity to the broadcaster.
 	// Wait 2 seconds, then check
 
