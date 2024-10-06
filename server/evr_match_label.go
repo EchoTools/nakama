@@ -51,11 +51,17 @@ type MatchLabel struct {
 }
 
 func (s *MatchLabel) GetPlayerCount() int {
-	return len(s.presenceMap)
+	count := 0
+	for _, p := range s.Players {
+		if int(p.Team) != evr.TeamSpectator && int(p.Team) != evr.TeamModerator {
+			count++
+		}
+	}
+	return count
 }
 
 func (s *MatchLabel) OpenPlayerSlots() int {
-	return s.PlayerLimit - s.PlayerCount
+	return s.PlayerLimit - s.GetPlayerCount()
 }
 
 func (s *MatchLabel) OpenNonPlayerSlots() int {
@@ -67,11 +73,7 @@ func (s *MatchLabel) OpenSlots() int {
 }
 
 func (s *MatchLabel) OpenSlotsByRole(role int) int {
-	roleCount := s.RoleCount(role)
-	if roleCount == 0 {
-		return 0
-	}
-	return s.RoleLimit(role) - roleCount
+	return s.RoleLimit(role) - s.RoleCount(role)
 }
 
 func (s *MatchLabel) String() string {
@@ -89,8 +91,8 @@ func (s *MatchLabel) RoleLimit(role int) int {
 
 func (s *MatchLabel) RoleCount(role int) int {
 	count := 0
-	for _, p := range s.presenceMap {
-		if p.RoleAlignment == role {
+	for _, p := range s.Players {
+		if p.Team == TeamIndex(role) {
 			count++
 		}
 	}
@@ -144,13 +146,12 @@ func (s *MatchLabel) MetricsTags() map[string]string {
 // rebuildCache is called after the presences map is updated.
 func (s *MatchLabel) rebuildCache() {
 	// Rebuild the lookup tables.
-
-	s.Players = make([]PlayerInfo, 0, len(s.presenceMap))
-	s.Size = s.GetPlayerCount()
+	s.Size = len(s.presenceMap)
+	s.Players = make([]PlayerInfo, 0, s.Size)
 	s.PlayerCount = 0
 	// Construct Player list
-	team1 := make(RatedTeam, 0, s.Size)
-	team2 := make(RatedTeam, 0, s.Size)
+	team1 := make(RatedTeam, 0, s.TeamSize)
+	team2 := make(RatedTeam, 0, s.TeamSize)
 	for _, presence := range s.presenceMap {
 		// Do not include spectators or moderators in player count
 		if presence.RoleAlignment != evr.TeamSpectator && presence.RoleAlignment != evr.TeamModerator {

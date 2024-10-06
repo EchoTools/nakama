@@ -64,7 +64,7 @@ func NewLobbyQueue(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runti
 			case <-ctx.Done():
 				return
 			case <-queueTicker.C:
-				labels, err = q.FindUnfilledMatches(ctx)
+				labels, err = q.findUnfilledMatches(ctx)
 				if err != nil {
 					logger.Error("Failed to find unfilled matches", zap.Error(err))
 					continue
@@ -93,7 +93,7 @@ func NewLobbyQueue(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runti
 	return q
 }
 
-func (q *LobbyQueue) FindUnfilledMatches(ctx context.Context) ([]*MatchLabel, error) {
+func (q *LobbyQueue) findUnfilledMatches(ctx context.Context) ([]*MatchLabel, error) {
 	minSize := 0
 	maxSize := MatchLobbyMaxSize
 	limit := 100
@@ -154,7 +154,7 @@ func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, params *LobbySessionP
 		if q.createMu.TryLock() {
 			go func() {
 				<-time.After(5 * time.Second)
-				defer q.createMu.Unlock()
+				q.createMu.Unlock()
 			}()
 			l, err := q.NewSocialLobby(ctx, params.VersionLock, params.GroupID)
 			if err != nil {
