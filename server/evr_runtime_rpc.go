@@ -1357,7 +1357,6 @@ func (r *SetNextMatchRPCResponsePayload) String() string {
 type PlayerStatsRPCRequest struct {
 	UserID    string `json:"user_id"`
 	DiscordID string `json:"discord_id"`
-	EvrID     string `json:"evr_id"`
 }
 
 type PlayerStatsRPCResponse struct {
@@ -1374,8 +1373,23 @@ func (r *PlayerStatsRPCResponse) String() string {
 
 func PlayerStatisticsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 	request := &PlayerStatsRPCRequest{}
-	if err := json.Unmarshal([]byte(payload), request); err != nil {
-		return "", err
+	if payload != "" {
+		if err := json.Unmarshal([]byte(payload), request); err != nil {
+			return "", err
+		}
+	}
+
+	queryParameters := ctx.Value(runtime.RUNTIME_CTX_QUERY_PARAMS).(map[string][]string)
+
+	if len(queryParameters) > 0 {
+		// extract the discordID from the query string
+		if discordID, ok := queryParameters["discord_id"]; ok {
+			request.DiscordID = discordID[0]
+		}
+		// extract the userID from the query string
+		if userID, ok := queryParameters["user_id"]; ok {
+			request.UserID = userID[0]
+		}
 	}
 
 	var userID string
@@ -1384,11 +1398,6 @@ func PlayerStatisticsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 	} else if request.DiscordID != "" {
 		var err error
 		if userID, err = GetUserIDByDiscordID(ctx, db, request.DiscordID); err != nil {
-			return "", err
-		}
-	} else if request.EvrID != "" {
-		var err error
-		if userID, err = GetUserIDByEvrID(ctx, db, request.EvrID); err != nil {
 			return "", err
 		}
 	}
