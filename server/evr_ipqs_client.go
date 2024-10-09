@@ -150,9 +150,12 @@ func NewIPQS(logger *zap.Logger, db *sql.DB, metrics Metrics, storageIndex Stora
 			case <-time.After(time.Minute * 5):
 			}
 
-			if err := ipqs.SaveCache(); err != nil {
+			if n, err := ipqs.SaveCache(); err != nil {
 				logger.Error("Failed to save IPQS cache", zap.Error(err))
+			} else {
+				logger.Info("Saved IPQS cache", zap.Int("count", n))
 			}
+
 		}
 	}()
 
@@ -188,6 +191,10 @@ func (s *IPQSClient) IPDetails(ip string, useCache bool) (*IPQSResponse, error) 
 	err = json.NewDecoder(resp.Body).Decode(&result)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	if result.Success && useCache {
+		s.cache.Store(ip, &result)
 	}
 
 	return &result, nil
@@ -252,7 +259,7 @@ func (s *IPQSClient) IsVPN(ip string) bool {
 	}
 }
 
-func (s *IPQSClient) SaveCache() error {
+func (s *IPQSClient) SaveCache() (int, error) {
 
 	cachemap := make(map[string]*IPQSResponse)
 	s.cache.Range(func(key string, value *IPQSResponse) bool {
@@ -262,7 +269,7 @@ func (s *IPQSClient) SaveCache() error {
 
 	data, err := json.Marshal(cachemap)
 	if err != nil {
-		return fmt.Errorf("failed to marshal cache: %w", err)
+		return 0, fmt.Errorf("failed to marshal cache: %w", err)
 	}
 
 	ops := StorageOpWrites{
@@ -279,10 +286,10 @@ func (s *IPQSClient) SaveCache() error {
 	}
 	_, _, err = StorageWriteObjects(s.ctx, s.logger, s.db, s.metrics, s.storageIndex, true, ops)
 	if err != nil {
-		return fmt.Errorf("failed to write cache: %w", err)
+		return 0, fmt.Errorf("failed to write cache: %w", err)
 	}
 
-	return nil
+	return len(cachemap), nil
 }
 
 func (s *IPQSClient) LoadCache() error {
