@@ -1475,9 +1475,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return fmt.Errorf("this command must be used from a guild")
 			}
 
-			userID := uuid.FromStringOrNil(userIDStr)
-
-			go d.cache.SyncGuildGroupMember(ctx, userIDStr, d.cache.GuildIDToGroupID(member.GuildID))
+			go d.cache.SyncGuildGroupMember(ctx, userIDStr, groupID)
 
 			// Try to find it by searching
 			memberships, err := GetGuildGroupMemberships(ctx, d.nk, userIDStr)
@@ -1494,6 +1492,19 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			if !ok {
 				return errors.New("no membership found")
 			}
+
+			// Set the metadata
+			md, err := GetAccountMetadata(ctx, nk, userIDStr)
+			if err != nil {
+				return err
+			}
+			md.SetActiveGroupID(uuid.FromStringOrNil(groupID))
+
+			if err = nk.AccountUpdateId(ctx, userIDStr, "", md.MarshalMap(), "", "", "", "", ""); err != nil {
+				return err
+			}
+
+			userID := uuid.FromStringOrNil(userIDStr)
 
 			profile, err := d.profileRegistry.Load(ctx, userID)
 			if err != nil {
