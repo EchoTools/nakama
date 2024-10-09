@@ -38,10 +38,11 @@ type LobbyQueue struct {
 	matchRegistry MatchRegistry
 	metrics       Metrics
 
-	db       *sql.DB
-	nk       runtime.NakamaModule
-	createMu sync.Mutex
-	cache    map[LobbyQueuePresence]map[MatchID]*MatchLabel
+	db             *sql.DB
+	nk             runtime.NakamaModule
+	createMu       sync.Mutex
+	cache          map[LobbyQueuePresence]map[MatchID]*MatchLabel
+	reservedCounts map[MatchID]int
 }
 
 func NewLobbyQueue(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, metrics Metrics, matchRegistry MatchRegistry) *LobbyQueue {
@@ -53,6 +54,9 @@ func NewLobbyQueue(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runti
 		metrics:       metrics,
 		nk:            nk,
 		db:            db,
+
+		cache:          make(map[LobbyQueuePresence]map[MatchID]*MatchLabel),
+		reservedCounts: make(map[MatchID]int),
 	}
 
 	go func() {
@@ -63,6 +67,7 @@ func NewLobbyQueue(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runti
 			select {
 			case <-ctx.Done():
 				return
+
 			case <-queueTicker.C:
 				labels, err = q.findUnfilledMatches(ctx)
 				if err != nil {
@@ -71,6 +76,7 @@ func NewLobbyQueue(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runti
 				}
 				q.Lock()
 				// Rebuild the unfilled lobbies map
+				matchIDs := make(map[MatchID]struct{})
 				q.cache = make(map[LobbyQueuePresence]map[MatchID]*MatchLabel)
 				for _, label := range labels {
 					presence := LobbyQueuePresence{
@@ -85,6 +91,19 @@ func NewLobbyQueue(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runti
 					q.cache[presence][label.ID] = label
 
 				}
+
+				// Remove any reservation counts for matches that no longer exist
+				for id := range q.reservedCounts {
+					if q.reservedCounts[id] <= 0 {
+						delete(q.reservedCounts, id)
+						continue
+					}
+
+					if _, ok := matchIDs[id]; !ok {
+						delete(q.reservedCounts, id)
+					}
+				}
+
 				q.Unlock()
 			}
 		}
@@ -134,6 +153,13 @@ func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, params *LobbySessionP
 		if label.ID == params.CurrentMatchID {
 			continue
 		}
+
+		reservedCount := q.reservedCounts[label.ID]
+
+		if label.OpenPlayerSlots()+reservedCount < params.PartySize {
+			continue
+		}
+
 		labels = append(labels, label)
 	}
 
@@ -146,7 +172,14 @@ func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, params *LobbySessionP
 		// Find one that has enough slots
 		for _, l := range labels {
 			if l.OpenPlayerSlots() >= params.PartySize {
-				l.PlayerCount += params.PartySize
+
+				// Update the latest label
+				err := q.updateLabel(ctx, l)
+				if err != nil {
+					continue
+				}
+
+				q.updatePlayerCount(l, params.PartySize)
 				return l, evr.TeamSocial, nil
 			}
 		}
@@ -160,11 +193,14 @@ func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, params *LobbySessionP
 			if err != nil {
 				return nil, -1, err
 			}
+
+			q.updatePlayerCount(l, params.PartySize)
 			return l, evr.TeamSocial, nil
 		}
 		return nil, -1, ErrNoUnfilledMatches
 	}
 
+	// if it's an arena/combat lobby, sort by size, then latency
 	labelsWithLatency := params.latencyHistory.LabelsByAverageRTT(labels)
 
 	if len(labelsWithLatency) == 0 {
@@ -182,37 +218,61 @@ func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, params *LobbySessionP
 		return labelsWithLatency[i].RTT < labelsWithLatency[j].RTT
 	})
 
-	for _, l := range labelsWithLatency {
+	for _, ll := range labelsWithLatency {
 		var team int
+		label := ll.Label
 
-		if l.Label.OpenSlotsByRole(evr.TeamBlue) >= params.PartySize {
+		err := q.updateLabel(ctx, label)
+		if err != nil {
+			continue
+		}
+
+		// Last-minute check if the label has enough open player slots
+		if label.OpenPlayerSlots()+q.reservedCounts[label.ID] < params.PartySize {
+			continue
+		}
+
+		if label.OpenSlotsByRole(evr.TeamBlue) >= params.PartySize {
 			team = evr.TeamBlue
-		} else if l.Label.OpenSlotsByRole(evr.TeamOrange) >= params.PartySize {
+		} else if label.OpenSlotsByRole(evr.TeamOrange) >= params.PartySize {
 			team = evr.TeamOrange
 		} else {
 			continue
 		}
 
-		label, err := MatchLabelByID(ctx, q.nk, l.Label.ID)
-		if err != nil {
-			continue
-		} else if label == nil {
+		// Final check if the label has enough open player slots for the team
+		if label.RoleCount(team)+params.PartySize >= label.RoleLimit(team) {
 			continue
 		}
 
-		// Final check
-		if label.RoleCount(team) >= label.RoleLimit(team) {
-			continue
-		}
-
-		label.PlayerCount += params.PartySize
-		q.cache[presence][label.ID] = label
+		q.updatePlayerCount(label, params.PartySize)
 
 		return label, team, nil
 
 	}
 
 	return nil, -1, ErrNoUnfilledMatches
+}
+
+func (q *LobbyQueue) updateLabel(ctx context.Context, l *MatchLabel) error {
+	label, err := MatchLabelByID(ctx, q.nk, l.ID)
+	if err != nil {
+		q.logger.Warn("Failed to update label", zap.Error(err))
+		return err
+	}
+	*l = *label
+	return nil
+}
+
+func (q *LobbyQueue) updatePlayerCount(l *MatchLabel, n int) {
+	q.reservedCounts[l.ID] += n
+	go func() {
+		// Remove the reservations after 5 seconds
+		<-time.After(5 * time.Second)
+		q.Lock()
+		defer q.Unlock()
+		q.reservedCounts[l.ID] -= n
+	}()
 }
 
 type TeamAlignments map[string]int // map[UserID]Role
