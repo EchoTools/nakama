@@ -67,16 +67,6 @@ var DefaultMatchmakerTicketConfigs = map[evr.Symbol]MatchmakerTicketConfig{
 // Matchmake attempts to find/create a match for the user using the nakama matchmaker
 func (p *EvrPipeline) lobbyMatchMake(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters, lobbyGroup *LobbyGroup) (err error) {
 
-	partyList := lobbyGroup.List()
-	ratedTeam := make(RatedTeam, 0, len(partyList))
-	for _, presence := range partyList {
-		rating, err := GetRatinByUserID(ctx, p.db, presence.Presence.GetUserId())
-		if err != nil || rating.Mu == 0 || rating.Sigma == 0 || rating.Z == 0 {
-			rating = NewDefaultRating()
-		}
-		ratedTeam = append(ratedTeam, rating)
-	}
-
 	sessionParams, ok := LoadParams(ctx)
 	if !ok {
 		return status.Errorf(codes.Internal, "Failed to load session parameters")
@@ -98,7 +88,14 @@ func (p *EvrPipeline) lobbyMatchMake(ctx context.Context, logger *zap.Logger, se
 	ticket := ""
 	otherPresences := []*PresenceID{}
 	sessionID := session.ID().String()
-	if len(partyList) == 1 {
+	if lobbyGroup != nil && lobbyGroup.Size() > 1 {
+
+		// Matchmake with the lobby group via the party handler.
+		ticket, otherPresences, err = lobbyGroup.MatchmakerAdd(sessionID, session.pipeline.node, query, minCount, maxCount, countMultiple, stringProps, numericProps)
+		if err != nil {
+			return status.Errorf(codes.Internal, "Failed to add party matchmaker ticket: %v", err)
+		}
+	} else {
 		// This is a solo matchmaker.
 		presences := []*MatchmakerPresence{
 			{
@@ -109,16 +106,11 @@ func (p *EvrPipeline) lobbyMatchMake(ctx context.Context, logger *zap.Logger, se
 				SessionID: session.id,
 			},
 		}
+
 		// If the user is not in a party, the must submit the ticket through the matchmaker instead of the party handler.
 		ticket, _, err = session.matchmaker.Add(ctx, presences, sessionID, "", query, minCount, maxCount, countMultiple, stringProps, numericProps)
 		if err != nil {
-			return status.Errorf(codes.Internal, "Failed to add matchmaker ticket: %v", err)
-		}
-	} else {
-		// Matchmake with the lobby group via the party handler.
-		ticket, otherPresences, err = lobbyGroup.MatchmakerAdd(sessionID, session.pipeline.node, query, minCount, maxCount, countMultiple, stringProps, numericProps)
-		if err != nil {
-			return status.Errorf(codes.Internal, "Failed to add matchmaker ticket: %v", err)
+			return status.Errorf(codes.Internal, "Failed to add solo matchmaker ticket: %v", err)
 		}
 	}
 
