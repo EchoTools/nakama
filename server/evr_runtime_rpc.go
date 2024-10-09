@@ -155,26 +155,41 @@ func MatchListPublicRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 	}
 	_ = data
 
-	matchmakerTicketCounts := map[string]int{
-		evr.ModeArenaPublic.String():  0,
-		evr.ModeCombatPublic.String(): 0,
+	matchmakingTicketsByGroupID := make(map[string]map[string]int)
+
+	cursor := ""
+	var groups []*api.Group
+
+	for {
+		groups, cursor, err = nk.GroupsList(ctx, "", "guild", nil, nil, 100, "")
+		if err != nil {
+			return "", runtime.NewError("Failed to list guild groups", StatusInternalError)
+		}
+		groups = append(groups, groups...)
+
+		if cursor == "" {
+			break
+		}
 	}
 
-	/*
-		presences, err := nk.StreamUserList(StreamModeMatchmaking, uuid.NewV5(uuid.Nil, "matchmaking").String(), "", "", true, true)
+	for _, group := range groups {
+		groupID := group.GetId()
+		presences, err := nk.StreamUserList(StreamModeMatchmaking, groupID, "", "", true, true)
 		if err != nil {
 			return "", runtime.NewError("Failed to list matchmaker tickets", StatusInternalError)
 		}
+		matchmakingTicketsByGroupID[groupID] = make(map[string]int)
 		for _, presence := range presences {
-			s := MatchmakingStatus{}
+			s := LobbySessionParameters{}
 			if err := json.Unmarshal([]byte(presence.GetStatus()), &s); err != nil {
 				return "", runtime.NewError("Failed to unmarshal matchmaker ticket", StatusInternalError)
 			}
-			if _, ok := matchmakerTicketCounts[s.Mode.String()]; ok {
-				matchmakerTicketCounts[s.Mode.String()] += s.PartySize
-			}
+			matchmakingTicketsByGroupID[groupID][s.Mode.String()] += s.PartySize
 		}
-	*/
+		if len(matchmakingTicketsByGroupID[groupID]) == 0 {
+			delete(matchmakingTicketsByGroupID, groupID)
+		}
+	}
 
 	playerCount := 0
 	gameServers := make([]*MatchBroadcaster, 0, len(matches))
@@ -205,21 +220,21 @@ func MatchListPublicRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 	})
 
 	response := struct {
-		UpdateTime         TimeRFC3339         `json:"update_time"`
-		LobbySessionCount  int                 `json:"lobby_session_count"`
-		GameServerCount    int                 `json:"gameserver_count"`
-		PlayerCount        int                 `json:"player_count"`
-		MatchmakingTickets map[string]int      `json:"active_matchmaking_counts"`
-		Labels             []*MatchLabel       `json:"labels"`
-		GameServers        []*MatchBroadcaster `json:"gameservers"`
+		UpdateTime                  TimeRFC3339               `json:"update_time"`
+		LobbySessionCount           int                       `json:"lobby_session_count"`
+		GameServerCount             int                       `json:"gameserver_count"`
+		PlayerCount                 int                       `json:"player_count"`
+		MatchmakingTicketsByGroupID map[string]map[string]int `json:"active_matchmaking_counts"`
+		Labels                      []*MatchLabel             `json:"labels"`
+		GameServers                 []*MatchBroadcaster       `json:"gameservers"`
 	}{
-		UpdateTime:         TimeRFC3339(time.Now().UTC()),
-		Labels:             labels,
-		LobbySessionCount:  len(labels),
-		GameServers:        gameServers,
-		GameServerCount:    len(gameServers),
-		PlayerCount:        playerCount,
-		MatchmakingTickets: matchmakerTicketCounts,
+		UpdateTime:                  TimeRFC3339(time.Now().UTC()),
+		Labels:                      labels,
+		LobbySessionCount:           len(labels),
+		GameServers:                 gameServers,
+		GameServerCount:             len(gameServers),
+		PlayerCount:                 playerCount,
+		MatchmakingTicketsByGroupID: matchmakingTicketsByGroupID,
 	}
 
 	data, err = json.MarshalIndent(response, "", "  ")
