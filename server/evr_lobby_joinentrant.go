@@ -261,7 +261,7 @@ func (p *EvrPipeline) authorizeGuildGroupSession(ctx context.Context, session Se
 		}
 	}
 
-	if groupMetadata.BlockVPNUsers && params.IsVPN {
+	if groupMetadata.BlockVPNUsers && params.IsVPN && !groupMetadata.IsVPNBypass(userID) {
 
 		score := p.ipqsClient.Score(session.ClientIP())
 
