@@ -255,10 +255,16 @@ func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, params *LobbySessionP
 }
 
 func (q *LobbyQueue) updateLabel(ctx context.Context, l *MatchLabel) error {
+	if l == nil {
+		return ErrMatchNotFound
+	}
 	label, err := MatchLabelByID(ctx, q.nk, l.ID)
 	if err != nil {
 		q.logger.Warn("Failed to update label", zap.Error(err))
 		return err
+	}
+	if label == nil {
+		return ErrMatchNotFound
 	}
 	*l = *label
 	return nil
