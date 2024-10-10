@@ -128,8 +128,9 @@ func LobbyJoinEntrant(logger *zap.Logger, matchRegistry MatchRegistry, tracker T
 	lobbyGroupStream := PresenceStream{Mode: StreamModeLobbyGroup, Subject: label.GetGroupID()}
 
 	untrackModes := map[uint8]struct{}{
-		StreamModeLobbyGroup: {},
-		StreamModeEntrant:    {},
+		StreamModeLobbyGroup:  {},
+		StreamModeEntrant:     {},
+		StreamModeMatchmaking: {},
 	}
 
 	tracker.UntrackLocalByModes(session.ID(), untrackModes, lobbyGroupStream)
