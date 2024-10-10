@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/gofrs/uuid/v5"
@@ -61,7 +62,11 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		}
 	}
 	// Check latency to active game servers.
+	mu := sync.Mutex{}
+
 	go func() {
+		mu.Lock()
+		defer mu.Unlock()
 		// Give a delay to ensure the client is ready to receive the ping response.
 		select {
 		case <-ctx.Done():
@@ -79,6 +84,8 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 			logger.Warn("Failed to ping game servers", zap.Error(err))
 		}
 	}()
+	mu.Lock()
+	defer mu.Unlock()
 
 	if params.Mode == evr.ModeArenaPublic || params.Mode == evr.ModeCombatPublic {
 		// Matchmake a new lobby session
