@@ -140,6 +140,10 @@ func (q *LobbyQueue) findUnfilledMatches(ctx context.Context) ([]*MatchLabel, er
 func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, params *LobbySessionParameters) (*MatchLabel, int, error) {
 	q.Lock()
 	defer q.Unlock()
+	if params.PartySize < 1 {
+		q.logger.Warn("Party size must be at least 1")
+		params.PartySize = 1
+	}
 
 	presence := LobbyQueuePresence{
 		GroupID: params.GroupID,
