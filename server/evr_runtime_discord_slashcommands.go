@@ -350,7 +350,7 @@ var (
 					Type:        discordgo.ApplicationCommandOptionString,
 					Name:        "reason",
 					Description: "Reason for the kick",
-					Required:    false,
+					Required:    true,
 				},
 			},
 		},
