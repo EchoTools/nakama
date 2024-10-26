@@ -34,24 +34,25 @@ type LobbySessionSuccess struct {
 }
 
 // NewLobbySessionSuccessv5 initializes a new LobbySessionSuccessv5 message.
-func NewLobbySessionSuccess(gameTypeSymbol Symbol, matchingSession uuid.UUID, channelUUID uuid.UUID, endpoint Endpoint, role int16, isPCVR bool) *LobbySessionSuccess {
-	c := &PacketEncoderSettings{
+func NewLobbySessionSuccess(gameTypeSymbol Symbol, matchingSession uuid.UUID, channelUUID uuid.UUID, endpoint Endpoint, role int16, isPCVR bool, disableEncryption bool, disableMAC bool) *LobbySessionSuccess {
+
+	clientSettings := &PacketEncoderSettings{
 		isPCVR:                  isPCVR,
-		EncryptionEnabled:       true,
-		MacEnabled:              true,
-		MacDigestSize:           0x20,
-		MacPBKDF2IterationCount: 0x00,
-		MacKeySize:              0x20,
+		EncryptionEnabled:       disableEncryption,
+		MACEnabled:              disableMAC,
+		MACDigestSize:           0x20,
+		MACPBKDF2IterationCount: 0x00,
+		MACKeySize:              0x20,
 		EncryptionKeySize:       0x20,
 		RandomKeySize:           0x20,
 	}
-	s := &PacketEncoderSettings{
+	serverSettings := &PacketEncoderSettings{
 		isPCVR:                  isPCVR,
-		EncryptionEnabled:       true,
-		MacEnabled:              true,
-		MacDigestSize:           0x20,
-		MacPBKDF2IterationCount: 0x00,
-		MacKeySize:              0x20,
+		EncryptionEnabled:       disableEncryption,
+		MACEnabled:              disableMAC,
+		MACDigestSize:           0x20,
+		MACPBKDF2IterationCount: 0x00,
+		MACKeySize:              0x20,
 		EncryptionKeySize:       0x20,
 		RandomKeySize:           0x20,
 	}
@@ -62,16 +63,16 @@ func NewLobbySessionSuccess(gameTypeSymbol Symbol, matchingSession uuid.UUID, ch
 		Endpoint:           endpoint,
 		TeamIndex:          role,
 		Unk1:               0,
-		ServerEncoderFlags: s.ToFlags(),
-		ClientEncoderFlags: c.ToFlags(),
+		ServerEncoderFlags: serverSettings.ToFlags(),
+		ClientEncoderFlags: clientSettings.ToFlags(),
 		ServerSequenceId:   binary.LittleEndian.Uint64(GetRandomBytes(0x08)),
-		ServerMacKey:       GetRandomBytes(s.MacKeySize),
-		ServerEncKey:       GetRandomBytes(s.EncryptionKeySize),
-		ServerRandomKey:    GetRandomBytes(s.RandomKeySize),
+		ServerMacKey:       GetRandomBytes(serverSettings.MACKeySize),
+		ServerEncKey:       GetRandomBytes(serverSettings.EncryptionKeySize),
+		ServerRandomKey:    GetRandomBytes(serverSettings.RandomKeySize),
 		ClientSequenceId:   binary.LittleEndian.Uint64(GetRandomBytes(0x08)),
-		ClientMacKey:       GetRandomBytes(c.MacKeySize),
-		ClientEncKey:       GetRandomBytes(c.EncryptionKeySize),
-		ClientRandomKey:    GetRandomBytes(c.RandomKeySize),
+		ClientMacKey:       GetRandomBytes(clientSettings.MACKeySize),
+		ClientEncKey:       GetRandomBytes(clientSettings.EncryptionKeySize),
+		ClientRandomKey:    GetRandomBytes(clientSettings.RandomKeySize),
 	}
 }
 
@@ -121,11 +122,11 @@ func (m *LobbySessionSuccessv4) Stream(s *EasyStream) error {
 		func() error { se = PacketEncoderSettingsFromFlags(m.ServerEncoderFlags); return nil },
 		func() error { ce = PacketEncoderSettingsFromFlags(m.ClientEncoderFlags); return nil },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.ServerSequenceId) },
-		func() error { return s.StreamBytes(&m.ServerMacKey, se.MacKeySize) },
+		func() error { return s.StreamBytes(&m.ServerMacKey, se.MACKeySize) },
 		func() error { return s.StreamBytes(&m.ServerEncKey, se.EncryptionKeySize) },
 		func() error { return s.StreamBytes(&m.ServerRandomKey, se.RandomKeySize) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.ClientSequenceId) },
-		func() error { return s.StreamBytes(&m.ClientMacKey, ce.MacKeySize) },
+		func() error { return s.StreamBytes(&m.ClientMacKey, ce.MACKeySize) },
 		func() error { return s.StreamBytes(&m.ClientEncKey, ce.EncryptionKeySize) },
 		func() error { return s.StreamBytes(&m.ClientRandomKey, ce.RandomKeySize) },
 	})
@@ -167,11 +168,11 @@ func (m *LobbySessionSuccessv5) Stream(s *EasyStream) error {
 		func() error { se = PacketEncoderSettingsFromFlags(m.ServerEncoderFlags); return nil },
 		func() error { ce = PacketEncoderSettingsFromFlags(m.ClientEncoderFlags); return nil },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.ServerSequenceId) },
-		func() error { return s.StreamBytes(&m.ServerMacKey, se.MacKeySize) },
+		func() error { return s.StreamBytes(&m.ServerMacKey, se.MACKeySize) },
 		func() error { return s.StreamBytes(&m.ServerEncKey, se.EncryptionKeySize) },
 		func() error { return s.StreamBytes(&m.ServerRandomKey, se.RandomKeySize) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.ClientSequenceId) },
-		func() error { return s.StreamBytes(&m.ClientMacKey, ce.MacKeySize) },
+		func() error { return s.StreamBytes(&m.ClientMacKey, ce.MACKeySize) },
 		func() error { return s.StreamBytes(&m.ClientEncKey, ce.EncryptionKeySize) },
 		func() error { return s.StreamBytes(&m.ClientRandomKey, ce.RandomKeySize) },
 	})
@@ -180,10 +181,10 @@ func (m *LobbySessionSuccessv5) Stream(s *EasyStream) error {
 func DefaultClientEncoderSettings() *PacketEncoderSettings {
 	return &PacketEncoderSettings{
 		EncryptionEnabled:       true,
-		MacEnabled:              true,
-		MacDigestSize:           0x40,
-		MacPBKDF2IterationCount: 0x00,
-		MacKeySize:              0x20,
+		MACEnabled:              true,
+		MACDigestSize:           0x40,
+		MACPBKDF2IterationCount: 0x00,
+		MACKeySize:              0x20,
 		EncryptionKeySize:       0x20,
 		RandomKeySize:           0x20,
 	}
@@ -191,10 +192,10 @@ func DefaultClientEncoderSettings() *PacketEncoderSettings {
 func DefaultServerEncoderSettings() *PacketEncoderSettings {
 	return &PacketEncoderSettings{
 		EncryptionEnabled:       true,
-		MacEnabled:              true,
-		MacDigestSize:           0x20,
-		MacPBKDF2IterationCount: 0x00,
-		MacKeySize:              0x20,
+		MACEnabled:              true,
+		MACDigestSize:           0x20,
+		MACPBKDF2IterationCount: 0x00,
+		MACKeySize:              0x20,
 		EncryptionKeySize:       0x20,
 		RandomKeySize:           0x20,
 	}
@@ -204,10 +205,10 @@ func DefaultServerEncoderSettings() *PacketEncoderSettings {
 type PacketEncoderSettings struct {
 	isPCVR                  bool // The headset type of the client. (0: PCVR, 1: Standalone)
 	EncryptionEnabled       bool // Indicates whether encryption should be used for each packet.
-	MacEnabled              bool // Indicates whether MACs should be attached to each packet.
-	MacDigestSize           int  // The byte size (<= 512bit) of the MAC output packets should use. (cut from the front of the HMAC-SHA512)
-	MacPBKDF2IterationCount int  // The iteration count for PBKDF2 HMAC-SHA512.
-	MacKeySize              int  // The byte size of the HMAC-SHA512 key.
+	MACEnabled              bool // Indicates whether MACs should be attached to each packet.
+	MACDigestSize           int  // The byte size (<= 512bit) of the MAC output packets should use. (cut from the front of the HMAC-SHA512)
+	MACPBKDF2IterationCount int  // The iteration count for PBKDF2 HMAC-SHA512.
+	MACKeySize              int  // The byte size of the HMAC-SHA512 key.
 	EncryptionKeySize       int  // The byte size of the AES-CBC key. (default: 32/AES-256-CBC)
 	RandomKeySize           int  // The byte size of the random key for the RNG.
 }
@@ -223,10 +224,10 @@ type PacketEncoderSettings struct {
 func NewPacketEncoderSettings(encryptionEnabled, macEnabled bool, macDigestSize, macPBKDF2IterationCount, macKeySize, encryptionKeySize, randomKeySize int) *PacketEncoderSettings {
 	return &PacketEncoderSettings{
 		EncryptionEnabled:       encryptionEnabled,
-		MacEnabled:              macEnabled,
-		MacDigestSize:           macDigestSize,
-		MacPBKDF2IterationCount: macPBKDF2IterationCount,
-		MacKeySize:              macKeySize,
+		MACEnabled:              macEnabled,
+		MACDigestSize:           macDigestSize,
+		MACPBKDF2IterationCount: macPBKDF2IterationCount,
+		MACKeySize:              macKeySize,
 		EncryptionKeySize:       encryptionKeySize,
 		RandomKeySize:           randomKeySize,
 	}
@@ -235,10 +236,10 @@ func NewPacketEncoderSettings(encryptionEnabled, macEnabled bool, macDigestSize,
 func PacketEncoderSettingsFromFlags(flags uint64) *PacketEncoderSettings {
 	return &PacketEncoderSettings{
 		EncryptionEnabled:       flags&1 != 0,
-		MacEnabled:              flags&2 != 0,
-		MacDigestSize:           int((flags >> 2) & 0xFFF),
-		MacPBKDF2IterationCount: int((flags >> 14) & 0xFFF),
-		MacKeySize:              int((flags >> 26) & 0xFFF),
+		MACEnabled:              flags&2 != 0,
+		MACDigestSize:           int((flags >> 2) & 0xFFF),
+		MACPBKDF2IterationCount: int((flags >> 14) & 0xFFF),
+		MACKeySize:              int((flags >> 26) & 0xFFF),
 		EncryptionKeySize:       int((flags >> 38) & 0xFFF),
 		RandomKeySize:           int((flags >> 50) & 0xFFF),
 		isPCVR:                  int((flags>>62)&0x03) == 0,
@@ -250,7 +251,7 @@ func (p *PacketEncoderSettings) ToFlags() uint64 {
 	if p.EncryptionEnabled {
 		flags |= 1
 	}
-	if p.MacEnabled {
+	if p.MACEnabled {
 		flags |= 2
 	}
 	if p.isPCVR {
@@ -258,9 +259,9 @@ func (p *PacketEncoderSettings) ToFlags() uint64 {
 	} else {
 		flags |= uint64(1&0x03) << 62
 	}
-	flags |= uint64(p.MacDigestSize&0xFFF) << 2
-	flags |= uint64(p.MacPBKDF2IterationCount&0xFFF) << 14
-	flags |= uint64(p.MacKeySize&0xFFF) << 26
+	flags |= uint64(p.MACDigestSize&0xFFF) << 2
+	flags |= uint64(p.MACPBKDF2IterationCount&0xFFF) << 14
+	flags |= uint64(p.MACKeySize&0xFFF) << 26
 	flags |= uint64(p.EncryptionKeySize&0xFFF) << 38
 	flags |= uint64(p.RandomKeySize&0xFFF) << 50
 	return flags

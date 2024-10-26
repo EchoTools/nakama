@@ -43,20 +43,22 @@ func EntrantPresencesFromSessionIDs(logger *zap.Logger, sessionRegistry SessionR
 		}
 
 		entrant := &EvrMatchPresence{
-			Node:           params.Node,
-			UserID:         session.UserID(),
-			SessionID:      session.ID(),
-			LoginSessionID: params.LoginSession.ID(),
-			Username:       session.Username(),
-			DisplayName:    displayName,
-			EvrID:          params.EvrID,
-			PartyID:        partyID,
-			RoleAlignment:  role,
-			DiscordID:      params.DiscordID,
-			ClientIP:       session.ClientIP(),
-			ClientPort:     session.ClientPort(),
-			IsPCVR:         params.IsPCVR,
-			Rating:         rating,
+			Node:              params.Node,
+			UserID:            session.UserID(),
+			SessionID:         session.ID(),
+			LoginSessionID:    params.LoginSession.ID(),
+			Username:          session.Username(),
+			DisplayName:       displayName,
+			EvrID:             params.EvrID,
+			PartyID:           partyID,
+			RoleAlignment:     role,
+			DiscordID:         params.DiscordID,
+			ClientIP:          session.ClientIP(),
+			ClientPort:        session.ClientPort(),
+			IsPCVR:            params.IsPCVR,
+			Rating:            rating,
+			DisableEncryption: params.DisableEncryption,
+			DisableMAC:        params.DisableMAC,
 		}
 
 		entrants = append(entrants, entrant)

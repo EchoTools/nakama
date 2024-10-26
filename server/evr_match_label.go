@@ -130,8 +130,8 @@ func (s *MatchLabel) GetEndpoint() evr.Endpoint {
 	return s.Broadcaster.Endpoint
 }
 
-func (s *MatchLabel) GetEntrantConnectMessage(role int, isPCVR bool) *evr.LobbySessionSuccessv5 {
-	return evr.NewLobbySessionSuccess(s.Mode, s.ID.UUID, s.GetGroupID(), s.Broadcaster.Endpoint, int16(role), isPCVR).Version5()
+func (s *MatchLabel) GetEntrantConnectMessage(role int, isPCVR bool, disableEncryption bool, disableMAC bool) *evr.LobbySessionSuccessv5 {
+	return evr.NewLobbySessionSuccess(s.Mode, s.ID.UUID, s.GetGroupID(), s.Broadcaster.Endpoint, int16(role), isPCVR, disableEncryption, disableMAC).Version5()
 }
 
 func (s *MatchLabel) MetricsTags() map[string]string {

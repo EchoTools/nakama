@@ -170,7 +170,7 @@ func LobbyJoinEntrant(logger *zap.Logger, matchRegistry MatchRegistry, tracker T
 		}
 	}
 
-	connectionSettings := label.GetEntrantConnectMessage(role, e.IsPCVR)
+	connectionSettings := label.GetEntrantConnectMessage(role, e.IsPCVR, e.DisableEncryption, e.DisableMAC)
 	if err := SendEVRMessages(serverSession, connectionSettings); err != nil {
 		logger.Error("failed to send lobby session success to game server", zap.Error(err))
 

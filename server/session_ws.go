@@ -127,13 +127,17 @@ type SessionParameters struct {
 	AuthPassword            string // The Password use for authentication
 	UserDisplayNameOverride string // The display name override (user-defined)
 
-	ExternalServerAddr string   // The external server address (IP:port)
-	IsVPN              bool     // The user is using a VPN
-	SupportedFeatures  []string // features from the urlparam
-	RequiredFeatures   []string // required_features from the urlparam
-	IsVR               bool     // The user is using a VR headset
-	IsPCVR             bool     // The user is using a PCVR headset
-	RelayOutgoing      bool     // The user is relaying outgoing messages
+	ExternalServerAddr string // The external server address (IP:port)
+	IsVPN              bool   // The user is using a VPN
+
+	SupportedFeatures []string // features from the urlparam
+	RequiredFeatures  []string // required_features from the urlparam
+	DisableEncryption bool     // The user has disabled encryption
+	DisableMAC        bool     // The user has disabled MAC
+	IsVR              bool     // The user is using a VR headset
+	IsPCVR            bool     // The user is using a PCVR headset
+
+	RelayOutgoing bool // The user is relaying outgoing messages
 
 	ServerTags    []string // []string of the server tags
 	ServerGuilds  []string // []string of the server guilds
@@ -184,6 +188,9 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 		AuthDiscordID:           parseUserQueryFunc(&request, "discordid", 20, discordIDPattern),
 		AuthPassword:            parseUserQueryFunc(&request, "password", 32, nil),
 		UserDisplayNameOverride: parseUserQueryFunc(&request, "ign", 20, nil),
+
+		DisableEncryption: parseUserQueryFunc(&request, "disable_encryption", 5, nil) == "true",
+		DisableMAC:        parseUserQueryFunc(&request, "disable_mac", 5, nil) == "true",
 
 		ExternalServerAddr: parseUserQueryFunc(&request, "serveraddr", 64, nil),
 		IsVPN:              evrPipeline.ipqsClient.IsVPN(clientIP),
