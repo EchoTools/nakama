@@ -51,7 +51,7 @@ func (h LatencyHistory) LatestRTTs() map[string]int {
 		latestTS := int64(0)
 		for ts, rtt := range history {
 			if rtt == 0 || rtt == 999 {
-				continue
+				rtt = 999
 			}
 			if ts > latestTS {
 				latestTS = ts
@@ -71,7 +71,7 @@ func (h LatencyHistory) LabelsByAverageRTT(labels []*MatchLabel) []LabelWithLate
 	for _, label := range labels {
 		if history, ok := h[label.Broadcaster.Endpoint.GetExternalIP()]; ok {
 			if len(history) == 0 {
-				labelRTTs = append(labelRTTs, LabelWithLatency{Label: label, RTT: 0})
+				labelRTTs = append(labelRTTs, LabelWithLatency{Label: label, RTT: 999})
 				continue
 			}
 			average := 0
@@ -81,7 +81,7 @@ func (h LatencyHistory) LabelsByAverageRTT(labels []*MatchLabel) []LabelWithLate
 			average /= len(history)
 			labelRTTs = append(labelRTTs, LabelWithLatency{Label: label, RTT: average})
 		} else {
-			labelRTTs = append(labelRTTs, LabelWithLatency{Label: label, RTT: 0})
+			labelRTTs = append(labelRTTs, LabelWithLatency{Label: label, RTT: 999})
 		}
 	}
 
