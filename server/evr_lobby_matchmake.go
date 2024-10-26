@@ -64,22 +64,62 @@ var DefaultMatchmakerTicketConfigs = map[evr.Symbol]MatchmakerTicketConfig{
 	},
 }
 
-// Matchmake attempts to find/create a match for the user using the nakama matchmaker
-func (p *EvrPipeline) lobbyMatchMake(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters, lobbyGroup *LobbyGroup) (err error) {
-
-	sessionParams, ok := LoadParams(ctx)
-	if !ok {
-		return status.Errorf(codes.Internal, "Failed to load session parameters")
-	}
-
-	query, stringProps, numericProps := lobbyParams.MatchmakingParameters(sessionParams, lobbyParams)
-
-	logger.Debug("Matchmaking query", zap.String("query", query), zap.Any("string_properties", stringProps), zap.Any("numeric_properties", numericProps))
+func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters, lobbyGroup *LobbyGroup) (err error) {
 
 	ticketConfig, ok := DefaultMatchmakerTicketConfigs[lobbyParams.Mode]
 	if !ok {
-		return status.Errorf(codes.Internal, "Matchmaking ticket config not found for mode %s", lobbyParams.Mode)
+		return fmt.Errorf("matchmaking ticket config not found for mode %s", lobbyParams.Mode)
 	}
+
+	// Caclulate the fallback delay based on the max intervals and interval seconds in the configuration
+	maxIntervals := p.config.GetMatchmaker().MaxIntervals
+	intervalSecs := p.config.GetMatchmaker().IntervalSec
+	fallbackDelay := time.Duration(maxIntervals*intervalSecs) * time.Second
+
+	// Create a context with a timeout for the fallback delay, removing the ticket
+	ticketCtx, _ := context.WithTimeout(ctx, fallbackDelay)
+
+	// Add the primary ticket
+	err = p.addTicket(ticketCtx, logger, session, lobbyParams, lobbyGroup, ticketConfig)
+	if err != nil {
+		return fmt.Errorf("failed to add primary ticket: %v", err)
+	}
+
+	select {
+	case <-ctx.Done():
+		return
+	case <-ticketCtx.Done():
+		logger.Debug("Matchmaking ticket fallback")
+	}
+
+	// Attempt a fallback ticket
+	ticketConfig.MaxCount = ticketConfig.MinCount
+	ticketConfig.MinCount = 1
+
+	if ticketConfig.CountMultiple == 1 || ticketConfig.MaxCount == ticketConfig.MinCount || ticketConfig.MaxCount%ticketConfig.CountMultiple != 0 {
+		logger.Debug("Matchmaking ticket config is not valid for fallbacks", zap.Any("config", ticketConfig))
+		return nil
+	}
+	// This will try to add a secondary ticket with the smallest count.
+	// This works around a nakama limitation of using a custom matchmaker.
+
+	err = p.addTicket(ctx, logger, session, lobbyParams, lobbyGroup, ticketConfig)
+	if err != nil {
+		return fmt.Errorf("failed to add secondary ticket: %v", err)
+	}
+	return nil
+}
+
+func (p *EvrPipeline) addTicket(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters, lobbyGroup *LobbyGroup, ticketConfig MatchmakerTicketConfig) error {
+	var err error
+	sessionParams, ok := LoadParams(ctx)
+	if !ok {
+		return fmt.Errorf("failed to load session parameters")
+	}
+
+	query, stringProps, numericProps := lobbyParams.MatchmakingParameters(sessionParams)
+
+	logger.Debug("Matchmaking query", zap.String("query", query), zap.Any("string_properties", stringProps), zap.Any("numeric_properties", numericProps))
 
 	minCount := ticketConfig.MinCount
 	maxCount := ticketConfig.MaxCount
@@ -93,8 +133,9 @@ func (p *EvrPipeline) lobbyMatchMake(ctx context.Context, logger *zap.Logger, se
 		// Matchmake with the lobby group via the party handler.
 		ticket, otherPresences, err = lobbyGroup.MatchmakerAdd(sessionID, session.pipeline.node, query, minCount, maxCount, countMultiple, stringProps, numericProps)
 		if err != nil {
-			return status.Errorf(codes.Internal, "Failed to add party matchmaker ticket: %v", err)
+			return fmt.Errorf("failed to add party matchmaker ticket: %v", err)
 		}
+
 	} else {
 		// This is a solo matchmaker.
 		presences := []*MatchmakerPresence{
@@ -110,26 +151,16 @@ func (p *EvrPipeline) lobbyMatchMake(ctx context.Context, logger *zap.Logger, se
 		// If the user is not in a party, the must submit the ticket through the matchmaker instead of the party handler.
 		ticket, _, err = session.matchmaker.Add(ctx, presences, sessionID, "", query, minCount, maxCount, countMultiple, stringProps, numericProps)
 		if err != nil {
-			return status.Errorf(codes.Internal, "Failed to add solo matchmaker ticket: %v", err)
+			return fmt.Errorf("failed to add solo matchmaker ticket: %v", err)
 		}
+
 	}
-
-	logger.Debug("Matchmaking ticket added", zap.String("ticket", ticket), zap.Any("presences", otherPresences))
-
 	go func() {
 		<-ctx.Done()
-
-		err := session.pipeline.matchmaker.RemovePartyAll(lobbyGroup.IDStr())
-		if err == nil {
-			logger.Debug("Removed matchmaker ticket", zap.String("ticket", ticket))
-		}
-
-		err = session.pipeline.matchmaker.RemoveSessionAll(sessionID)
-		if err == nil {
-			logger.Debug("Removed matchmaker ticket", zap.String("ticket", ticket))
-		}
-
+		session.matchmaker.Remove([]string{ticket})
 	}()
+
+	logger.Debug("Matchmaking ticket added", zap.String("ticket", ticket), zap.Any("presences", otherPresences))
 
 	return nil
 }

@@ -45,6 +45,7 @@ type LobbySessionParameters struct {
 	BlockedIDs            []string     `json:"blocked_ids"`
 	Rating                types.Rating `json:"rating"`
 	latencyHistory        LatencyHistory
+	ProfileStatistics     evr.PlayerStatistics
 }
 
 func (s LobbySessionParameters) MetricsTags() map[string]string {
@@ -209,6 +210,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		BlockedIDs:            blockedIDs,
 		Rating:                rating,
 		Verbose:               sessionParams.AccountMetadata.DiscordDebugMessages,
+		ProfileStatistics:     profile.LatestStatistics(true, true, false),
 	}, nil
 }
 
@@ -217,16 +219,15 @@ func (p LobbySessionParameters) String() string {
 	return string(data)
 }
 
-func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionParameters, lobbyParams *LobbySessionParameters) (string, map[string]string, map[string]float64) {
-	averageRTTs := AverageLatencyHistories(p.latencyHistory)
+func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionParameters) (string, map[string]string, map[string]float64) {
 
-	displayName := sessionParams.AccountMetadata.GetGroupDisplayNameOrDefault(lobbyParams.GroupID.String())
+	displayName := sessionParams.AccountMetadata.GetGroupDisplayNameOrDefault(p.GroupID.String())
 
 	stringProperties := map[string]string{
 		"mode":         p.Mode.String(),
 		"group_id":     p.GroupID.String(),
 		"version_lock": p.VersionLock.String(),
-		"blocked":      strings.Join(p.BlockedIDs, " "),
+		"blocked_ids":  strings.Join(p.BlockedIDs, " "),
 		"display_name": displayName,
 	}
 
@@ -239,16 +240,26 @@ func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionPar
 	qparts := []string{
 		"+properties.mode:" + p.Mode.String(),
 		fmt.Sprintf("+properties.group_id:/%s/", Query.Escape(p.GroupID.String())),
-		fmt.Sprintf(`-properties.blocked:/.*%s.*/`, Query.Escape(p.UserID)),
+		fmt.Sprintf(`-properties.blocked_ids:/.*%s.*/`, Query.Escape(p.UserID)),
 		//"+properties.version_lock:" + p.VersionLock.String(),
 		p.MatchmakingQueryAddon,
 	}
 
-	maxDelta := 60 // milliseconds
+	// Add the user's weekly stats to their numericProperties
+	for mode, stats := range p.ProfileStatistics {
+		for k, s := range stats {
+			v, ok := s.Value.(float64)
+			if !ok {
+				continue
+			}
+			numericProperties[fmt.Sprintf("stats_%s_%s", mode, k)] = v
+		}
+	}
 
-	for k, v := range averageRTTs {
+	//maxDelta := 60 // milliseconds
+	for k, v := range AverageLatencyHistories(p.latencyHistory) {
 		numericProperties[k] = float64(v)
-		qparts = append(qparts, fmt.Sprintf("properties.%s:<=%d", k, v+maxDelta))
+		//qparts = append(qparts, fmt.Sprintf("properties.%s:<=%d", k, v+maxDelta))
 	}
 
 	query := strings.Join(qparts, " ")

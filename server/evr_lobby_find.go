@@ -21,17 +21,17 @@ var MatchmakingTimeout = 5 * time.Minute
 //var MatchmakingTimeout = 30 * time.Second
 
 // lobbyJoinSessionRequest is a request to join a specific existing session.
-func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session *sessionWS, params *LobbySessionParameters) error {
+func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters) error {
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	// Do authorization checks related to the guild.
-	if err := p.authorizeGuildGroupSession(ctx, session, params.GroupID.String()); err != nil {
+	if err := p.authorizeGuildGroupSession(ctx, session, lobbyParams.GroupID.String()); err != nil {
 		return err
 	}
 
-	switch params.Mode {
+	switch lobbyParams.Mode {
 	case evr.ModeArenaPublic, evr.ModeSocialPublic, evr.ModeCombatPublic:
 
 	default:
@@ -40,24 +40,24 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 
 	// This stream tracks the user's matchmaking status.
 	// This stream is untracked when the user cancels matchmaking.
-	if err := JoinMatchmakingStream(logger, session, params); err != nil {
+	if err := JoinMatchmakingStream(logger, session, lobbyParams); err != nil {
 		return errors.Join(NewLobbyError(InternalError, "failed to join matchmaking stream"), err)
 	}
 
 	// The lobby group is the party that the user is currently in.
-	lobbyGroup, err := JoinLobbyGroup(session, params.PartyGroupName, params.PartyID, params.CurrentMatchID)
+	lobbyGroup, err := JoinLobbyGroup(session, lobbyParams.PartyGroupName, lobbyParams.PartyID, lobbyParams.CurrentMatchID)
 	if err != nil {
 		return errors.Join(NewLobbyError(InternalError, "failed to join lobby group"), err)
 	}
 	logger.Debug("Joined lobby group", zap.String("partyID", lobbyGroup.IDStr()))
 	// Only do party operations if the player is current in a match (i.e not joining from the main menu)
-	if !params.CurrentMatchID.IsNil() {
+	if !lobbyParams.CurrentMatchID.IsNil() {
 
 		if lobbyGroup.GetLeader().SessionId != session.id.String() {
-			return p.PartyFollow(ctx, logger, session, params, lobbyGroup)
+			return p.PartyFollow(ctx, logger, session, lobbyParams, lobbyGroup)
 		}
 
-		if err := p.PartyLead(ctx, logger, session, params, lobbyGroup); err != nil {
+		if err := p.PartyLead(ctx, logger, session, lobbyParams, lobbyGroup); err != nil {
 			return errors.Join(NewLobbyError(InternalError, "failed to be party leader."), err)
 		}
 	}
@@ -84,14 +84,16 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 			logger.Warn("Failed to ping game servers", zap.Error(err))
 		}
 	}()
+
 	mu.Lock()
 	defer mu.Unlock()
 
-	if params.Mode == evr.ModeArenaPublic || params.Mode == evr.ModeCombatPublic {
+	// If this is a public combat or arena match, then matchmake.
+	if lobbyParams.Mode == evr.ModeArenaPublic || lobbyParams.Mode == evr.ModeCombatPublic {
 		// Matchmake a new lobby session
 		logger.Debug("matchmaking", zap.Any("members", lobbyGroup.List()))
 
-		if err := p.lobbyMatchMake(ctx, logger, session, params, lobbyGroup); err != nil {
+		if err := p.lobbyMatchMakeWithFallback(ctx, logger, session, lobbyParams, lobbyGroup); err != nil {
 			return errors.Join(NewLobbyError(InternalError, "failed to matchmake"), err)
 		}
 	}
@@ -119,11 +121,11 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		case <-time.After(backfillInterval):
 		}
 
-		if params.DisableArenaBackfill && params.Mode == evr.ModeArenaPublic {
+		if lobbyParams.DisableArenaBackfill && lobbyParams.Mode == evr.ModeArenaPublic {
 			continue
 		}
 
-		entrants, err := EntrantPresencesFromSessionIDs(logger, p.sessionRegistry, params.PartyID, params.GroupID, params.Rating, params.Role, session.id)
+		entrants, err := EntrantPresencesFromSessionIDs(logger, p.sessionRegistry, lobbyParams.PartyID, lobbyParams.GroupID, lobbyParams.Rating, lobbyParams.Role, session.id)
 		if err != nil {
 			return NewLobbyError(InternalError, "failed to create entrant presences")
 		}
@@ -135,7 +137,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 
 		entrant := entrants[0]
 
-		label, team, err := p.lobbyQueue.GetUnfilledMatch(ctx, params)
+		label, team, err := p.lobbyQueue.GetUnfilledMatch(ctx, lobbyParams)
 		if err == ErrNoUnfilledMatches {
 			continue
 		} else if err != nil {
@@ -145,7 +147,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		logger := logger.With(zap.String("mid", label.ID.UUID.String()))
 
 		logger.Debug("Joining backfill match.")
-		p.metrics.CustomCounter("lobby_join_backfill", params.MetricsTags(), int64(params.PartySize))
+		p.metrics.CustomCounter("lobby_join_backfill", lobbyParams.MetricsTags(), int64(lobbyParams.PartySize))
 
 		label, serverSession, err := p.LobbySessionGet(ctx, logger, label.ID)
 		if err != nil {

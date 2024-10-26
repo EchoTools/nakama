@@ -835,53 +835,21 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 		return fmt.Errorf("failed to get match label: %w", err)
 	}
 
+	team1ids, team2ids, team1, team2, isBackfill, playerInfo := teamRatingsFromPlayers(request.EvrID, label.Players)
+
 	userID := uuid.Nil
 	username := ""
 	for _, p := range label.Players {
 		if p.EvrID == request.EvrID {
 			userID = uuid.FromStringOrNil(p.UserID)
 			username = p.Username
+			break
 		}
 	}
-
-	// Create a list of the teams and their ratings
-	team1ids := make([]string, 0, 4)
-	team2ids := make([]string, 0, 4)
-	team1 := make([]types.Rating, 0, 4)
-	team2 := make([]types.Rating, 0, 4)
-	isBackfill := false
-	var playerInfo *PlayerInfo
-	for _, p := range label.Players {
-		// Get all the players' rating
-		if p.EvrID == request.EvrID {
-			playerInfo = &p
-		}
-		// Ignore players that were backfilled
-		if p.JoinTime != 0.0 {
-			if p.EvrID == request.EvrID {
-				isBackfill = true
-			}
-			continue
-		} else if p.Team == 0 {
-			team1ids = append(team1ids, p.UserID)
-			team1 = append(team1, p.Rating)
-		} else if p.Team == 1 {
-			team2ids = append(team2ids, p.UserID)
-			team2 = append(team2, p.Rating)
-		}
-	}
-
-	// Pad both teams to 4 players with a default rating
-	for i := len(team1); i < 4; i++ {
-		team1 = append(team1, NewDefaultRating())
-	}
-	for i := len(team2); i < 4; i++ {
-		team2 = append(team2, NewDefaultRating())
-	}
-
 	if userID == uuid.Nil {
 		return fmt.Errorf("failed to find player in match")
 	}
+	userIDStr := userID.String()
 
 	profile, err := p.profileRegistry.Load(ctx, userID)
 	if err != nil {
@@ -897,7 +865,6 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 	for groupName, stats := range request.Payload.Update.StatsGroups {
 		if groupName == "arena" {
 
-			eqStats.IncrementCompletedMatches()
 			playerWon := false
 			if v, ok := stats["ArenaWins"]; ok {
 				if v.Value.(float64) > 0 {
@@ -906,18 +873,21 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 			}
 
 			if playerInfo != nil && !isBackfill {
+				// Swap the teams if the player is on the second team
 				if playerWon && playerInfo.Team == 1 {
-					team1, team2 = team2, team1
 					team1ids, team2ids = team2ids, team1ids
+					team1, team2 = team2, team1
 				}
 			}
-			// Get the new ratings for the teams
-			teams := []types.Team{team1, team2}
-			teams = rating.Rate(teams, nil)
-			ratings := append(teams[0], teams[1]...)
 			ids := append(team1ids, team2ids...)
+
+			// Get the new ratings for the teams
+			teams := rating.Rate([]types.Team{team1, team2}, nil)
+
+			ratings := append(teams[0], teams[1]...)
+
 			for i, id := range ids {
-				if id == userID.String() {
+				if id == userIDStr {
 					profile.SetRating(ratings[i])
 					break
 				}
@@ -925,7 +895,7 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 		}
 
 		for statName, stat := range stats {
-			record, err := p.leaderboardRegistry.Submission(ctx, userID.String(), request.EvrID.String(), username, request.Payload.SessionID.String(), groupName, statName, stat.Operand, stat.Value)
+			record, err := p.leaderboardRegistry.Submission(ctx, userIDStr, request.EvrID.String(), username, request.Payload.SessionID.String(), groupName, statName, stat.Operand, stat.Value)
 			if err != nil {
 				logger.Warn("Failed to submit leaderboard", zap.Error(err))
 			}
@@ -960,6 +930,47 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 	p.profileRegistry.Save(ctx, userID, profile)
 
 	return nil
+}
+
+func teamRatingsFromPlayers(evrID evr.EvrId, players []PlayerInfo) ([]string, []string, []types.Rating, []types.Rating, bool, *PlayerInfo) {
+
+	team1ids := make([]string, 0, 4)
+	team2ids := make([]string, 0, 4)
+	team1 := make([]types.Rating, 0, 4)
+	team2 := make([]types.Rating, 0, 4)
+
+	isBackfill := false
+	var playerInfo *PlayerInfo
+
+	for _, p := range players {
+
+		if p.EvrID == evrID {
+			playerInfo = &p
+		}
+
+		if p.JoinTime != 0.0 {
+			if p.EvrID == evrID {
+				isBackfill = true
+			}
+			continue // Skip backfill players
+		} else if p.Team == 0 {
+			team1ids = append(team1ids, p.UserID)
+			team1 = append(team1, p.Rating)
+		} else if p.Team == 1 {
+			team2ids = append(team2ids, p.UserID)
+			team2 = append(team2, p.Rating)
+		}
+	}
+
+	// Fill in the missing ratings
+	for i := len(team1); i < 4; i++ {
+		team1 = append(team1, NewDefaultRating())
+	}
+	for i := len(team2); i < 4; i++ {
+		team2 = append(team2, NewDefaultRating())
+	}
+
+	return team1ids, team2ids, team1, team2, isBackfill, playerInfo
 }
 
 func updateStats(profile *GameProfileData, stats evr.StatsUpdate) {

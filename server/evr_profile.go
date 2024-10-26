@@ -179,7 +179,7 @@ func (p *GameProfileData) GetEarlyQuitStatistics() EarlyQuitStatistics {
 
 func (p *GameProfileData) GetRating() types.Rating {
 	if p.Rating.Mu == 0 || p.Rating.Sigma == 0 {
-		return NewDefaultRating()
+		p.SetRating(NewDefaultRating())
 	}
 	return p.Rating
 }
@@ -233,6 +233,48 @@ func (p *GameProfileData) UpdateDisplayName(displayName string) {
 	p.Server.DisplayName = displayName
 	p.Client.DisplayName = displayName
 	p.SetStale()
+}
+
+func (p *GameProfileData) LatestStatistics(useGlobal bool, useWeekly bool, useDaily bool) evr.PlayerStatistics {
+
+	allStats := evr.PlayerStatistics{
+		"arena":  make(map[string]evr.MatchStatistic),
+		"combat": make(map[string]evr.MatchStatistic),
+	}
+
+	// Start with all time stats
+
+	if useGlobal {
+		for t, s := range p.Server.Statistics {
+			if !strings.HasPrefix(t, "daily_") && !strings.HasPrefix(t, "weekly_") {
+				allStats[t] = s
+			}
+		}
+	}
+	var latestWeekly, latestDaily string
+
+	for t := range p.Server.Statistics {
+		if strings.HasPrefix(t, "weekly_") && (latestWeekly == "" || t > latestWeekly) {
+			latestWeekly = t
+		}
+		if strings.HasPrefix(t, "daily_") && (latestDaily == "" || t > latestDaily) {
+			latestDaily = t
+		}
+	}
+
+	if useWeekly && latestWeekly != "" {
+		for k, v := range p.Server.Statistics[latestWeekly] {
+			allStats["arena"][k] = v
+		}
+	}
+
+	if useDaily && latestDaily != "" {
+		for k, v := range p.Server.Statistics[latestDaily] {
+			allStats["arena"][k] = v
+		}
+	}
+
+	return allStats
 }
 
 func (p *GameProfileData) ExpireStatistics(dailyAge time.Duration, weeklyAge time.Duration) {

@@ -157,7 +157,7 @@ func (s *MatchLabel) rebuildCache() {
 		if presence.RoleAlignment != evr.TeamSpectator && presence.RoleAlignment != evr.TeamModerator {
 			s.PlayerCount++
 		}
-		joinTimeSecs := s.joinTimeSecs[presence.SessionID.String()]
+
 		playerinfo := PlayerInfo{
 			UserID:      presence.UserID.String(),
 			Username:    presence.Username,
@@ -167,12 +167,11 @@ func (s *MatchLabel) rebuildCache() {
 			ClientIP:    presence.ClientIP,
 			DiscordID:   presence.DiscordID,
 			PartyID:     presence.PartyID.String(),
-			JoinTime:    joinTimeSecs,
+			JoinTime:    s.joinTimeSecs[presence.SessionID.String()],
+			Rating:      presence.Rating,
 		}
 
 		s.Players = append(s.Players, playerinfo)
-
-		playerinfo.Rating = presence.Rating
 
 		switch s.Mode {
 		case evr.ModeArenaPublic:
