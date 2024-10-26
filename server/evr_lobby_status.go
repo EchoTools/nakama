@@ -49,7 +49,7 @@ func JoinMatchmakingStream(logger *zap.Logger, s *sessionWS, params *LobbySessio
 		Message: &rtapi.Envelope_StreamData{
 			StreamData: &rtapi.StreamData{
 				Stream: &rtapi.Stream{
-					Mode:    int32(groupStream.Mode),
+					Mode:    int32(SessionFormatJson),
 					Subject: groupStream.Subject.String(),
 				},
 				Sender: &rtapi.UserPresence{

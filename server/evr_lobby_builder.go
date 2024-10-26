@@ -329,6 +329,7 @@ func (b *LobbyBuilder) allocateGameServer(ctx context.Context, logger *zap.Logge
 	if len(available) == 0 {
 		return MatchID{}, ErrMatchmakingNoAvailableServers
 	}
+
 	availableByExtIP := make(map[string]MatchID, len(available))
 
 	for _, label := range available {
