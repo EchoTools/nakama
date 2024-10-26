@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"errors"
-	"sync"
 	"time"
 
 	"github.com/gofrs/uuid/v5"
@@ -62,16 +61,15 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		}
 	}
 	// Check latency to active game servers.
-	mu := sync.Mutex{}
+	doneCh := make(chan struct{})
 
 	go func() {
-		mu.Lock()
-		defer mu.Unlock()
+		defer close(doneCh)
 		// Give a delay to ensure the client is ready to receive the ping response.
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(1 * time.Second):
+		case <-time.After(250 * time.Millisecond):
 		}
 
 		activeEndpoints := make([]evr.Endpoint, 0, 100)
@@ -85,8 +83,12 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		}
 	}()
 
-	mu.Lock()
-	defer mu.Unlock()
+	select {
+	case <-ctx.Done():
+		return nil
+	case <-time.After(4 * time.Second):
+	case <-doneCh:
+	}
 
 	// If this is a public combat or arena match, then matchmake.
 	if lobbyParams.Mode == evr.ModeArenaPublic || lobbyParams.Mode == evr.ModeCombatPublic {

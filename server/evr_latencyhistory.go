@@ -129,6 +129,12 @@ func StoreLatencyHistory(ctx context.Context, logger *zap.Logger, db *sql.DB, me
 		}
 	}
 
+	for ip, history := range latencyHistory {
+		if len(history) == 0 {
+			delete(latencyHistory, ip)
+		}
+	}
+
 	ops := StorageOpWrites{&StorageOpWrite{
 		OwnerID: userID.String(),
 		Object: &api.WriteStorageObject{
