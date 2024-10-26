@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/atomic"
+
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama/v3/server/evr"
@@ -20,32 +22,40 @@ type (
 )
 
 type LobbySessionParameters struct {
-	Node                  string       `json:"node"`
-	UserID                uuid.UUID    `json:"user_id"`
-	SessionID             uuid.UUID    `json:"session_id"`
-	VersionLock           evr.Symbol   `json:"version_lock"`
-	AppID                 evr.Symbol   `json:"app_id"`
-	GroupID               uuid.UUID    `json:"group_id"`
-	Region                evr.Symbol   `json:"region"`
-	Mode                  evr.Symbol   `json:"mode"`
-	Level                 evr.Symbol   `json:"level"`
-	SupportedFeatures     []string     `json:"supported_features"`
-	RequiredFeatures      []string     `json:"required_features"`
-	CurrentMatchID        MatchID      `json:"current_match_id"`
-	Role                  int          `json:"role"`
-	PartyID               uuid.UUID    `json:"party_id"`
-	PartyGroupName        string       `json:"party_group_name"`
-	PartySize             int          `json:"party_size"`
-	NextMatchID           MatchID      `json:"next_match_id"`
-	DisableArenaBackfill  bool         `json:"disable_arena_backfill"`
-	BackfillQueryAddon    string       `json:"backfill_query_addon"`
-	MatchmakingQueryAddon string       `json:"matchmaking_query_addon"`
-	CreateQueryAddon      string       `json:"create_query_addon"`
-	Verbose               bool         `json:"verbose"`
-	BlockedIDs            []string     `json:"blocked_ids"`
-	Rating                types.Rating `json:"rating"`
+	Node                  string        `json:"node"`
+	UserID                uuid.UUID     `json:"user_id"`
+	SessionID             uuid.UUID     `json:"session_id"`
+	VersionLock           evr.Symbol    `json:"version_lock"`
+	AppID                 evr.Symbol    `json:"app_id"`
+	GroupID               uuid.UUID     `json:"group_id"`
+	Region                evr.Symbol    `json:"region"`
+	Mode                  evr.Symbol    `json:"mode"`
+	Level                 evr.Symbol    `json:"level"`
+	SupportedFeatures     []string      `json:"supported_features"`
+	RequiredFeatures      []string      `json:"required_features"`
+	CurrentMatchID        MatchID       `json:"current_match_id"`
+	Role                  int           `json:"role"`
+	PartySize             *atomic.Int64 `json:"party_size"`
+	PartyID               uuid.UUID     `json:"party_id"`
+	PartyGroupName        string        `json:"party_group_name"`
+	NextMatchID           MatchID       `json:"next_match_id"`
+	DisableArenaBackfill  bool          `json:"disable_arena_backfill"`
+	BackfillQueryAddon    string        `json:"backfill_query_addon"`
+	MatchmakingQueryAddon string        `json:"matchmaking_query_addon"`
+	CreateQueryAddon      string        `json:"create_query_addon"`
+	Verbose               bool          `json:"verbose"`
+	BlockedIDs            []string      `json:"blocked_ids"`
+	Rating                types.Rating  `json:"rating"`
 	latencyHistory        LatencyHistory
 	ProfileStatistics     evr.PlayerStatistics
+}
+
+func (p *LobbySessionParameters) GetPartySize() int {
+	return int(p.PartySize.Load())
+}
+
+func (p *LobbySessionParameters) SetPartySize(size int) {
+	p.PartySize.Store(int64(size))
 }
 
 func (s LobbySessionParameters) MetricsTags() map[string]string {
@@ -204,7 +214,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		CreateQueryAddon:      strings.Join(createQueryAddons, " "),
 		PartyGroupName:        lobbyGroupName,
 		PartyID:               uuid.NewV5(uuid.Nil, lobbyGroupName),
-		PartySize:             1,
+		PartySize:             atomic.NewInt64(1),
 		NextMatchID:           userSettings.NextMatchID,
 		latencyHistory:        latencyHistory,
 		BlockedIDs:            blockedIDs,
