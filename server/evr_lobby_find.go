@@ -147,7 +147,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		logger := logger.With(zap.String("mid", label.ID.UUID.String()))
 
 		logger.Debug("Joining backfill match.")
-		p.metrics.CustomCounter("lobby_join_backfill", lobbyParams.MetricsTags(), int64(lobbyParams.PartySize))
+		p.metrics.CustomCounter("lobby_join_backfill", lobbyParams.MetricsTags(), int64(lobbyParams.PartySize.Load()))
 
 		label, serverSession, err := p.LobbySessionGet(ctx, logger, label.ID)
 		if err != nil {
@@ -173,7 +173,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 func (p *EvrPipeline) PartyLead(ctx context.Context, logger *zap.Logger, session *sessionWS, params *LobbySessionParameters, lobbyGroup *LobbyGroup) error {
 
 	logger.Debug("User is leader of party")
-	params.PartySize = len(lobbyGroup.List())
+	params.SetPartySize(len(lobbyGroup.List()))
 
 	// Wait for the party
 	delay := 10 * time.Second
@@ -203,6 +203,9 @@ func (p *EvrPipeline) PartyLead(ctx context.Context, logger *zap.Logger, session
 			session.tracker.UntrackLocalByModes(sessionID, map[uint8]struct{}{StreamModeParty: {}}, PresenceStream{})
 		}
 	}
+
+	params.SetPartySize(len(lobbyGroup.List()))
+
 	return nil
 }
 func (p *EvrPipeline) PartyFollow(ctx context.Context, logger *zap.Logger, session *sessionWS, params *LobbySessionParameters, lobbyGroup *LobbyGroup) error {

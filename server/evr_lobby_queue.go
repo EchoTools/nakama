@@ -140,9 +140,10 @@ func (q *LobbyQueue) findUnfilledMatches(ctx context.Context) ([]*MatchLabel, er
 func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, params *LobbySessionParameters) (*MatchLabel, int, error) {
 	q.Lock()
 	defer q.Unlock()
-	if params.PartySize < 1 {
+	partySize := params.GetPartySize()
+	if partySize < 1 {
 		q.logger.Warn("Party size must be at least 1")
-		params.PartySize = 1
+		partySize = 1
 	}
 
 	presence := LobbyQueuePresence{
@@ -161,7 +162,7 @@ func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, params *LobbySessionP
 
 		reservedCount := q.reservedCounts[label.ID]
 
-		if label.OpenPlayerSlots()+reservedCount < params.PartySize {
+		if label.OpenPlayerSlots()+reservedCount < partySize {
 			continue
 		}
 
@@ -176,7 +177,7 @@ func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, params *LobbySessionP
 
 		// Find one that has enough slots
 		for _, l := range labels {
-			if l.OpenPlayerSlots() >= params.PartySize {
+			if l.OpenPlayerSlots() >= partySize {
 
 				// Update the latest label
 				err := q.updateLabel(ctx, l)
@@ -184,7 +185,7 @@ func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, params *LobbySessionP
 					continue
 				}
 
-				q.updatePlayerCount(l, params.PartySize)
+				q.updatePlayerCount(l, partySize)
 				return l, evr.TeamSocial, nil
 			}
 		}
@@ -199,7 +200,7 @@ func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, params *LobbySessionP
 				return nil, -1, err
 			}
 
-			q.updatePlayerCount(l, params.PartySize)
+			q.updatePlayerCount(l, partySize)
 			return l, evr.TeamSocial, nil
 		}
 		return nil, -1, ErrNoUnfilledMatches
@@ -233,24 +234,24 @@ func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, params *LobbySessionP
 		}
 
 		// Last-minute check if the label has enough open player slots
-		if label.OpenPlayerSlots()+q.reservedCounts[label.ID] < params.PartySize {
+		if label.OpenPlayerSlots()+q.reservedCounts[label.ID] < partySize {
 			continue
 		}
 
-		if label.OpenSlotsByRole(evr.TeamBlue) >= params.PartySize {
+		if label.OpenSlotsByRole(evr.TeamBlue) >= partySize {
 			team = evr.TeamBlue
-		} else if label.OpenSlotsByRole(evr.TeamOrange) >= params.PartySize {
+		} else if label.OpenSlotsByRole(evr.TeamOrange) >= partySize {
 			team = evr.TeamOrange
 		} else {
 			continue
 		}
 
 		// Final check if the label has enough open player slots for the team
-		if label.RoleCount(team)+params.PartySize >= label.RoleLimit(team) {
+		if label.RoleCount(team)+partySize >= label.RoleLimit(team) {
 			continue
 		}
 
-		q.updatePlayerCount(label, params.PartySize)
+		q.updatePlayerCount(label, partySize)
 
 		return label, team, nil
 

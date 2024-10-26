@@ -184,7 +184,7 @@ func MatchListPublicRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 			if err := json.Unmarshal([]byte(presence.GetStatus()), &s); err != nil {
 				return "", runtime.NewError("Failed to unmarshal matchmaker ticket", StatusInternalError)
 			}
-			matchmakingTicketsByGroupID[groupID][s.Mode.String()] += s.PartySize
+			matchmakingTicketsByGroupID[groupID][s.Mode.String()] += s.GetPartySize()
 		}
 		if len(matchmakingTicketsByGroupID[groupID]) == 0 {
 			delete(matchmakingTicketsByGroupID, groupID)
