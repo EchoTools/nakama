@@ -431,7 +431,7 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 		}
 
 		// If the round clock is being used, set the join clock time
-		if state.GameState != nil && !state.GameState.UnpauseTime.IsZero() {
+		if state.GameState != nil && state.GameState.UnpauseTime > 0 {
 			// Do not overwrite an existing value
 			if _, ok := state.joinTimeSecs[p.GetSessionId()]; !ok {
 				state.joinTimeSecs[p.GetSessionId()] = state.GameState.CurrentRoundClock
@@ -583,7 +583,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 
 				if u.PauseDuration != 0 {
 					gs.IsPaused = true
-					gs.UnpauseTime = time.Now().Add(u.PauseDuration)
+					gs.UnpauseTime = time.Now().UTC().UnixMilli() + u.PauseDuration.Milliseconds()
 					gs.ClockPauseSecs = u.CurrentRoundClock
 				}
 
@@ -974,7 +974,7 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk run
 		state.GameState = &GameState{
 			RoundDuration:     RoundDuration,
 			CurrentRoundClock: 0,
-			UnpauseTime:       time.Now().Add(PublicMatchWaitTime * time.Second),
+			UnpauseTime:       time.Now().UTC().UnixMilli() + PublicMatchWaitTime,
 			Goals:             make([]LastGoal, 0),
 		}
 	}
