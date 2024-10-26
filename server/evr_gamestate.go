@@ -6,7 +6,7 @@ type GameState struct {
 	RoundDuration     float64    `json:"round_duration_secs"`       // The length of the round in seconds
 	CurrentRoundClock float64    `json:"current_round_clock_secs"`  // The current elapsed time on the round clock in seconds
 	ClockPauseSecs    float64    `json:"pause_time_secs,omitempty"` // The round clock time when the game was paused
-	UnpauseTime       time.Time  `json:"unpause_time,omitempty"`    // The time at which the game will be unpaused
+	UnpauseTime       int64      `json:"unpause_time,omitempty"`    // The time at which the game will be unpaused
 	IsPaused          bool       `json:"is_paused"`                 // Whether the game is paused
 	IsRoundOver       bool       `json:"is_round_over,omitempty"`   // Whether the round is over
 	Goals             []LastGoal `json:"goals,omitempty"`           // The last goal scored
@@ -15,7 +15,7 @@ type GameState struct {
 func (g *GameState) Update() {
 
 	// If there is no unpause time, the game is stopped
-	if g.UnpauseTime.IsZero() {
+	if g.UnpauseTime == 0 {
 		return
 	}
 
@@ -23,14 +23,14 @@ func (g *GameState) Update() {
 	if g.CurrentRoundClock >= g.RoundDuration {
 		g.CurrentRoundClock = 0
 		g.ClockPauseSecs = 0
-		g.UnpauseTime = time.Time{}
+		g.UnpauseTime = 0
 		g.IsPaused = true
 		g.IsRoundOver = true
 	}
 
-	if time.Now().After(g.UnpauseTime) {
+	if time.Now().UnixMilli() >= g.UnpauseTime {
 		g.IsPaused = false
-		g.CurrentRoundClock = g.ClockPauseSecs + time.Since(g.UnpauseTime).Seconds()
+		g.CurrentRoundClock = g.ClockPauseSecs + float64(time.Now().UnixMilli()-g.UnpauseTime)/1000
 	} else {
 		g.IsPaused = true
 	}
