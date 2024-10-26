@@ -131,7 +131,7 @@ func PingGameServers(ctx context.Context, logger *zap.Logger, session Session, d
 	}
 	if err := SendEVRMessages(session,
 		evr.NewLobbyPingRequest(350, candidates),
-		evr.NewSTcpConnectionUnrequireEvent(),
+		//evr.NewSTcpConnectionUnrequireEvent(),
 	); err != nil {
 		return err
 	}
