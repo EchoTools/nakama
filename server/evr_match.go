@@ -186,11 +186,11 @@ func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql
 		Players:          make([]PlayerInfo, 0, SocialLobbyMaxSize),
 		presenceMap:      make(map[string]*EvrMatchPresence, SocialLobbyMaxSize),
 
-		TeamAlignments: make(map[string]int, SocialLobbyMaxSize),
-		joinTimestamps: make(map[string]time.Time, SocialLobbyMaxSize),
-		joinTimeSecs:   make(map[string]float64, SocialLobbyMaxSize),
-		emptyTicks:     0,
-		tickRate:       10,
+		TeamAlignments:       make(map[string]int, SocialLobbyMaxSize),
+		joinTimestamps:       make(map[string]time.Time, SocialLobbyMaxSize),
+		joinTimeMilliseconds: make(map[string]int64, SocialLobbyMaxSize),
+		emptyTicks:           0,
+		tickRate:             10,
 	}
 
 	state.ID = MatchIDFromContext(ctx)
@@ -433,8 +433,8 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 		// If the round clock is being used, set the join clock time
 		if state.GameState != nil && state.GameState.UnpauseTime > 0 {
 			// Do not overwrite an existing value
-			if _, ok := state.joinTimeSecs[p.GetSessionId()]; !ok {
-				state.joinTimeSecs[p.GetSessionId()] = state.GameState.CurrentRoundClock
+			if _, ok := state.joinTimeMilliseconds[p.GetSessionId()]; !ok {
+				state.joinTimeMilliseconds[p.GetSessionId()] = state.GameState.CurrentRoundClock
 			}
 		}
 		if mp, ok := state.presenceMap[p.GetSessionId()]; !ok {
@@ -584,7 +584,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 				if u.PauseDuration != 0 {
 					gs.IsPaused = true
 					gs.UnpauseTime = time.Now().UTC().UnixMilli() + u.PauseDuration.Milliseconds()
-					gs.ClockPauseSecs = u.CurrentRoundClock
+					gs.ClockPauseMilliseconds = u.CurrentRoundClock
 				}
 
 				if len(u.Goals) > 0 {
@@ -972,10 +972,10 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk run
 	switch state.Mode {
 	case evr.ModeArenaPublic:
 		state.GameState = &GameState{
-			RoundDuration:     RoundDuration,
-			CurrentRoundClock: 0,
-			UnpauseTime:       time.Now().UTC().UnixMilli() + PublicMatchWaitTime,
-			Goals:             make([]LastGoal, 0),
+			RoundDurationMilliseconds: RoundDuration * 1000,
+			CurrentRoundClock:         0,
+			UnpauseTime:               time.Now().UTC().UnixMilli() + PublicMatchWaitTime,
+			Goals:                     make([]LastGoal, 0),
 		}
 	}
 
