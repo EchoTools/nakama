@@ -274,11 +274,14 @@ func (q *LobbyQueue) updateLabel(ctx context.Context, l *MatchLabel) error {
 func (q *LobbyQueue) updatePlayerCount(l *MatchLabel, n int) {
 	q.reservedCounts[l.ID] += n
 	go func() {
-		// Remove the reservations after 5 seconds
+		// Remove the reservations after 3 seconds
 		<-time.After(5 * time.Second)
 		q.Lock()
 		defer q.Unlock()
 		q.reservedCounts[l.ID] -= n
+		if q.reservedCounts[l.ID] <= 0 {
+			delete(q.reservedCounts, l.ID)
+		}
 	}()
 }
 
