@@ -169,6 +169,9 @@ func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, params *LobbySessionP
 			return a.OpenPlayerSlots() - b.OpenPlayerSlots()
 		})
 
+		// Sort by most open slots
+		slices.Reverse(labels)
+
 		// Find one that has enough slots
 		for _, l := range labels {
 			if l.OpenPlayerSlots() >= params.PartySize {
