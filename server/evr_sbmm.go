@@ -7,18 +7,27 @@ import (
 	"math/rand"
 	"slices"
 
+	"github.com/gofrs/uuid/v5"
+	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/intinig/go-openskill/rating"
 	"github.com/intinig/go-openskill/types"
 	"github.com/samber/lo"
+	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
-type SkillBasedMatchmaker struct{}
+type SkillBasedMatchmaker struct {
+	logger *zap.Logger
+	router MessageRouter
+}
 
-func NewSkillBasedMatchmaker() *SkillBasedMatchmaker {
-	return &SkillBasedMatchmaker{}
+func NewSkillBasedMatchmaker(logger *zap.Logger, router MessageRouter) *SkillBasedMatchmaker {
+	return &SkillBasedMatchmaker{
+		logger: logger,
+		router: router,
+	}
 }
 
 func (*SkillBasedMatchmaker) TeamStrength(team RatedEntryTeam) float64 {
@@ -111,9 +120,39 @@ func (m *SkillBasedMatchmaker) BalancedMatchFromCandidate(candidate []runtime.Ma
 // Function to be used as a matchmaker function in Nakama (RegisterMatchmakerOverride)
 func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, candidateMatches [][]runtime.MatchmakerEntry) (madeMatches [][]runtime.MatchmakerEntry) {
 	//profileRegistry := &ProfileRegistry{nk: nk}
-	logger.WithField("matches", candidateMatches).Debug("Match candidates.")
+	if len(candidateMatches) == 0 || len(candidateMatches[0]) == 0 {
+		return nil
+	}
+	v, ok := candidateMatches[0][0].GetProperties()["group_id"]
+	if !ok {
+		logger.Error("Group ID not found in matchmaker properties.")
+		return nil
+	}
+	groupIDStr, ok := v.(string)
+	if !ok {
+		logger.Error("Group ID is not a string.")
+		return nil
+	}
+	groupID := uuid.FromStringOrNil(groupIDStr)
 
-	// TODO FIXME get the team size from the ticket properties
+	data, _ := json.Marshal(candidateMatches)
+
+	m.router.SendToStream(m.logger,
+		PresenceStream{
+			Mode:    StreamModeMatchmaker,
+			Subject: groupID,
+		},
+		&rtapi.Envelope{
+			Message: &rtapi.Envelope_StreamData{
+				StreamData: &rtapi.StreamData{
+					Stream: &rtapi.Stream{
+						Mode:    int32(SessionFormatJson),
+						Subject: groupID.String(),
+					},
+					Data: string(data),
+				},
+			},
+		}, false)
 
 	balancedMatches := make([]RatedMatch, 0, len(candidateMatches))
 
