@@ -43,6 +43,7 @@ const (
 	StreamModeGameServer
 	StreamModeMatchmaking
 	StreamModeLobbyGroup
+	StreamModeMatchmaker
 )
 
 const (
