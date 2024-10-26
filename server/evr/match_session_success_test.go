@@ -33,17 +33,17 @@ func TestPacketEncoderSettingsFromFlags(t *testing.T) {
 		if settings.EncryptionEnabled != tt.expectedEncryption {
 			t.Errorf("EncryptionEnabled = %v, want %v", settings.EncryptionEnabled, tt.expectedEncryption)
 		}
-		if settings.MacEnabled != tt.expectedMac {
-			t.Errorf("MacEnabled = %v, want %v", settings.MacEnabled, tt.expectedMac)
+		if settings.MACEnabled != tt.expectedMac {
+			t.Errorf("MacEnabled = %v, want %v", settings.MACEnabled, tt.expectedMac)
 		}
-		if settings.MacDigestSize != tt.expectedDigestSize {
-			t.Errorf("MacDigestSize = %v, want %v", settings.MacDigestSize, tt.expectedDigestSize)
+		if settings.MACDigestSize != tt.expectedDigestSize {
+			t.Errorf("MacDigestSize = %v, want %v", settings.MACDigestSize, tt.expectedDigestSize)
 		}
-		if settings.MacPBKDF2IterationCount != tt.expectedIteration {
-			t.Errorf("MacPBKDF2IterationCount = %v, want %v", settings.MacPBKDF2IterationCount, tt.expectedIteration)
+		if settings.MACPBKDF2IterationCount != tt.expectedIteration {
+			t.Errorf("MacPBKDF2IterationCount = %v, want %v", settings.MACPBKDF2IterationCount, tt.expectedIteration)
 		}
-		if settings.MacKeySize != tt.expectedMacKeySize {
-			t.Errorf("MacKeySize = %v, want %v", settings.MacKeySize, tt.expectedMacKeySize)
+		if settings.MACKeySize != tt.expectedMacKeySize {
+			t.Errorf("MacKeySize = %v, want %v", settings.MACKeySize, tt.expectedMacKeySize)
 		}
 		if settings.EncryptionKeySize != tt.expectedKeySize {
 			t.Errorf("EncryptionKeySize = %v, want %v", settings.EncryptionKeySize, tt.expectedKeySize)
