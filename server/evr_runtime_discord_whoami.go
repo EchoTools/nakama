@@ -226,6 +226,15 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 				if m.IsAllocator {
 					roles = append(roles, "allocator")
 				}
+				if m.IsAPIAccess {
+					roles = append(roles, "api-access")
+				}
+				if m.IsSuspended {
+					roles = append(roles, "suspended")
+				}
+				if m.IsVPNBypass {
+					roles = append(roles, "vpn-bypass")
+				}
 				if len(roles) > 0 {
 					s += fmt.Sprintf(" (%s)", strings.Join(roles, ", "))
 				}
