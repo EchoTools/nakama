@@ -149,6 +149,7 @@ func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, params *LobbySessionP
 
 	var labels []*MatchLabel
 
+	// Select the labels that match the presence and have enough open slots
 	for _, label := range q.cache[presence] {
 		if label.ID == params.CurrentMatchID {
 			continue
@@ -163,14 +164,11 @@ func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, params *LobbySessionP
 		labels = append(labels, label)
 	}
 
-	// If it's a social Lobby, just sort by least open slots
+	// If it's a social Lobby, sort by most open slots
 	if params.Mode == evr.ModeSocialPublic {
 		slices.SortStableFunc(labels, func(a, b *MatchLabel) int {
-			return a.OpenPlayerSlots() - b.OpenPlayerSlots()
+			return b.OpenPlayerSlots() - a.OpenPlayerSlots()
 		})
-
-		// Sort by most open slots
-		slices.Reverse(labels)
 
 		// Find one that has enough slots
 		for _, l := range labels {
