@@ -89,7 +89,7 @@ func NewLobbyQueue(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runti
 						q.cache[presence] = make(map[MatchID]*MatchLabel)
 					}
 					q.cache[presence][label.ID] = label
-
+					matchIDs[label.ID] = struct{}{}
 				}
 
 				// Remove any reservation counts for matches that no longer exist
@@ -169,6 +169,7 @@ func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, params *LobbySessionP
 		labels = append(labels, label)
 	}
 
+	q.logger.Debug("Found unfilled matches", zap.Any("labels", labels), zap.Any("presence", presence))
 	// If it's a social Lobby, sort by most open slots
 	if params.Mode == evr.ModeSocialPublic {
 		slices.SortStableFunc(labels, func(a, b *MatchLabel) int {
