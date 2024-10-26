@@ -10,6 +10,10 @@ import (
 	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
+type TeamMetadata struct {
+	Strength float64 `json:"strength,omitempty"`
+}
+
 type MatchLabel struct {
 	ID          MatchID          `json:"id"`                    // The Session Id used by EVR (the same as match id)
 	Open        bool             `json:"open"`                  // Whether the lobby is open to new players (Matching Only)
@@ -33,7 +37,7 @@ type MatchLabel struct {
 	TeamSize    int       `json:"team_size,omitempty"`    // The size of each team in arena/combat (either 4 or 5)
 	TeamIndex   TeamIndex `json:"team,omitempty"`         // What team index a player prefers (Used by Matching only)
 
-	TeamOrdinals   []float64      `json:"team_rankings,omitempty"`   // The ratings of the teams in the match.
+	TeamMetadata   []TeamMetadata `json:"team_metadata,omitempty"`   // The metadata of the teams in the match.
 	Players        []PlayerInfo   `json:"players,omitempty"`         // The displayNames of the players (by team name) in the match.
 	TeamAlignments map[string]int `json:"team_alignments,omitempty"` // map[userID]TeamIndex
 
@@ -185,8 +189,17 @@ func (s *MatchLabel) rebuildCache() {
 			playerinfo.Team = TeamIndex(UnassignedRole)
 		}
 	}
+	s.TeamMetadata = make([]TeamMetadata, 0, 2)
+
 	if s.Mode == evr.ModeArenaPublic {
-		s.TeamOrdinals = []float64{team1.Ordinal(), team2.Ordinal()}
+		s.TeamMetadata = []TeamMetadata{
+			{
+				Strength: team1.Strength(),
+			},
+			{
+				Strength: team2.Strength(),
+			},
+		}
 	}
 
 	sort.SliceStable(s.Players, func(i, j int) bool {
@@ -222,7 +235,7 @@ func (l *MatchLabel) PublicView() *MatchLabel {
 			Features:    l.Broadcaster.Features,
 		},
 		Players:      make([]PlayerInfo, 0),
-		TeamOrdinals: l.TeamOrdinals,
+		TeamMetadata: l.TeamMetadata,
 	}
 	if l.LobbyType == PrivateLobby || l.LobbyType == UnassignedLobby {
 		// Set the last bytes to FF to hide the ID
