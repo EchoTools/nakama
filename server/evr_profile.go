@@ -350,19 +350,36 @@ func (r *GameProfileData) UpdateUnlocks(unlocks evr.UnlockedCosmetics) error {
 			return fmt.Errorf("failed to validate unlocks: %w", err)
 		}
 	*/
-	current := r.Server.UnlockedCosmetics.ToMap()
-	updated := unlocks.ToMap()
-	newUnlocks := make([]int64, 0, 10)
+	// Remove newUnlocks that are not known cosmetics
+	var unlocked, updated map[string]map[string]bool
+
+	unlocked = r.Server.UnlockedCosmetics.ToMap()
+	updated = unlocks.ToMap()
+
+	// Remove any existing new unlocks that are not known cosmetics
+
+	for i := 0; i < len(r.Client.NewUnlocks); i++ {
+		u := evr.Symbol(r.Client.NewUnlocks[i])
+		if _, ok := evr.SymbolCache[u]; !ok {
+			r.Client.NewUnlocks = append(r.Client.NewUnlocks[:i], r.Client.NewUnlocks[i+1:]...)
+			i--
+		}
+	}
+
+	new := make([]int64, 0, 10)
+	seen := make(map[string]struct{})
 	for game, unlocks := range updated {
-		curUnlocks := current[game]
+		byGame := unlocked[game]
 		for item, u := range unlocks {
-			if u && (curUnlocks == nil || curUnlocks[item] != u) {
-				newUnlocks = append(newUnlocks, int64(evr.ToSymbol(item)))
+			seen[item] = struct{}{}
+			if u && (byGame == nil || byGame[item] != u) {
+				new = append(new, int64(evr.ToSymbol(item)))
 			}
 		}
 	}
-	if len(newUnlocks) > 0 {
-		r.Client.NewUnlocks = append(r.Client.NewUnlocks, newUnlocks...)
+
+	if len(new) > 0 {
+		r.Client.NewUnlocks = append(r.Client.NewUnlocks, new...)
 		r.SetStale()
 		//r.Client.Customization.NewUnlocksPoiVersion += 1
 	}
