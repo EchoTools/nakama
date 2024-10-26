@@ -56,7 +56,8 @@ func (b *LobbyBuilder) handleMatchedEntries(entries [][]*MatchmakerEntry) {
 	logger.Debug("Handling matched entries")
 
 	for _, entrants := range entries {
-		if err := b.buildMatch(b.logger, entrants); err != nil {
+		sortEntries := false
+		if err := b.buildMatch(b.logger, entrants, sortEntries); err != nil {
 			logger.Error("Failed to build match", zap.Error(err))
 			return
 		}
@@ -119,7 +120,7 @@ func (b *LobbyBuilder) GroupByTicket(entrants []*MatchmakerEntry) [][]*Matchmake
 	return parties
 }
 
-func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntry) (err error) {
+func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntry, sortEntries bool) (err error) {
 	// Build matches one at a time.
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -153,9 +154,16 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 
 	groupID := groupIDs[0]
 
-	// Group the entrants by ticket (i.e. party)
-	presencesByTicket := b.GroupByTicket(entrants)
-	teams := b.distributeParties(presencesByTicket)
+	teams := make([][]*MatchmakerEntry, 0, 2)
+	if sortEntries {
+		// Group the entrants by ticket (i.e. party)
+		presencesByTicket := b.GroupByTicket(entrants)
+		teams = b.distributeParties(presencesByTicket)
+	} else {
+		// Split entrants into two equal teams
+		teams = append(teams, entrants[:len(entrants)/2])
+		teams = append(teams, entrants[len(entrants)/2:])
+	}
 
 	teamAlignments := make(TeamAlignments, len(teams))
 	for i, players := range teams {

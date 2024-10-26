@@ -23,7 +23,7 @@ type MatchEntrant struct {
 }
 
 func NewMatchEntrant(serverSessionID uuid.UUID, clientSessionID uuid.UUID, matchID MatchID, mode evr.Symbol, groupID uuid.UUID, endpoint evr.Endpoint, role int) *MatchEntrant {
-	msg := evr.NewLobbySessionSuccess(evr.ModeArenaPublic, matchID.UUID, groupID, endpoint, int16(role), true)
+	msg := evr.NewLobbySessionSuccess(evr.ModeArenaPublic, matchID.UUID, groupID, endpoint, int16(role), true, false, false)
 
 	return &MatchEntrant{
 		ServerSessionID: serverSessionID,

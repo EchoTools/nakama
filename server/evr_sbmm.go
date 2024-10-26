@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"math"
 	"math/rand"
 	"slices"
 
@@ -12,101 +11,9 @@ import (
 	"github.com/intinig/go-openskill/rating"
 	"github.com/intinig/go-openskill/types"
 	"github.com/samber/lo"
-	"go.uber.org/thriftrw/ptr"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
-
-type (
-	RatedMatch []RatedEntryTeam
-)
-
-func NewDefaultRating() types.Rating {
-	return rating.NewWithOptions(&types.OpenSkillOptions{
-		Mu:    ptr.Float64(25.0),
-		Sigma: ptr.Float64(8.333),
-	})
-}
-
-type RatedEntry struct {
-	Entry  runtime.MatchmakerEntry
-	Rating types.Rating
-}
-
-func NewRatedEntryFromMatchmakerEntry(e runtime.MatchmakerEntry) *RatedEntry {
-	props := e.GetProperties()
-	mu, ok := props["rating_mu"].(float64)
-	if !ok {
-		mu = 25.0
-	}
-	sigma, ok := props["rating_sigma"].(float64)
-	if !ok {
-		sigma = 8.333
-	}
-	return &RatedEntry{
-		Entry: e,
-		Rating: rating.NewWithOptions(&types.OpenSkillOptions{
-			Mu:    ptr.Float64(mu),
-			Sigma: ptr.Float64(sigma),
-		}),
-	}
-}
-
-type RatedEntryTeam []*RatedEntry
-
-func (t RatedEntryTeam) Len() int {
-	return len(t)
-}
-
-func (t RatedEntryTeam) Strength() float64 {
-	s := 0.0
-	for _, p := range t {
-		s += p.Rating.Mu
-	}
-	return s
-}
-
-type RatedTeam []types.Rating
-
-func (t RatedTeam) Strength() float64 {
-	s := 0.0
-	for _, p := range t {
-		s += p.Mu
-	}
-	return s
-}
-
-func (t RatedTeam) Rating() types.Rating {
-	if len(t) == 0 {
-		return NewDefaultRating()
-	}
-	meanMu := t.Strength() / float64(len(t))
-	sumSigmaSquared := 0.0
-	for _, p := range t {
-		sumSigmaSquared += p.Sigma * p.Sigma
-	}
-	averageSigmaSquared := sumSigmaSquared / float64(len(t))
-	rmsSigma := math.Sqrt(averageSigmaSquared)
-
-	return rating.NewWithOptions(&types.OpenSkillOptions{
-		Mu:    ptr.Float64(meanMu),
-		Sigma: ptr.Float64(rmsSigma),
-	})
-}
-
-func (t RatedTeam) Ordinal() float64 {
-	return rating.Ordinal(t.Rating())
-}
-
-type PredictedMatch struct {
-	Team1 RatedEntryTeam `json:"team1"`
-	Team2 RatedEntryTeam `json:"team2"`
-	Draw  float64        `json:"draw"`
-}
-
-func (p PredictedMatch) Entrants() []*RatedEntry {
-	return append(p.Team1, p.Team2...)
-}
 
 type SkillBasedMatchmaker struct{}
 
@@ -138,11 +45,12 @@ func (m *SkillBasedMatchmaker) CreateBalancedMatch(groups [][]*RatedEntry, teamS
 	// Split out the solo players
 	solos := make([]*RatedEntry, 0, len(groups))
 	parties := make([][]*RatedEntry, 0, len(groups))
-	for _, party := range parties {
-		if len(party) == 1 {
-			solos = append(solos, party[0])
+
+	for _, group := range groups {
+		if len(group) == 1 {
+			solos = append(solos, group[0])
 		} else {
-			parties = append(parties, party)
+			parties = append(parties, group)
 		}
 	}
 
@@ -161,6 +69,7 @@ func (m *SkillBasedMatchmaker) CreateBalancedMatch(groups [][]*RatedEntry, teamS
 	team1 := make(RatedEntryTeam, 0, teamSize)
 	team2 := make(RatedEntryTeam, 0, teamSize)
 
+	// Sort parties into teams by strength
 	for _, party := range parties {
 		if len(team1)+len(party) <= teamSize && (len(team2)+len(party) > teamSize || m.TeamStrength(team1) <= m.TeamStrength(team2)) {
 			team1 = append(team1, party...)
@@ -169,6 +78,7 @@ func (m *SkillBasedMatchmaker) CreateBalancedMatch(groups [][]*RatedEntry, teamS
 		}
 	}
 
+	// Sort solo players onto teams by strength
 	for _, player := range solos {
 		if len(team1) < teamSize && (len(team2) >= teamSize || m.TeamStrength(team1) <= m.TeamStrength(team2)) {
 			team1 = append(team1, player)
@@ -198,6 +108,7 @@ func (m *SkillBasedMatchmaker) BalancedMatchFromCandidate(candidate []runtime.Ma
 	return team1, team2
 }
 
+// Function to be used as a matchmaker function in Nakama (RegisterMatchmakerOverride)
 func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, candidateMatches [][]runtime.MatchmakerEntry) (madeMatches [][]runtime.MatchmakerEntry) {
 	//profileRegistry := &ProfileRegistry{nk: nk}
 	logger.WithField("matches", candidateMatches).Debug("Match candidates.")
