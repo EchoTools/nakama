@@ -169,7 +169,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				logger.Error("Failed to save player's profile")
 			}
 			update, _ = updates.LoadOrStore(msg.SessionID(), &MatchGameStateUpdate{})
-			update.CurrentRoundClock = msg.GameInfoGameTime
+			update.CurrentRoundClock = int64(msg.GameInfoGameTime * 1000)
 
 		case "goal":
 			// This is a goal message.
@@ -294,7 +294,7 @@ func (u *MatchGameStateUpdate) Bytes() []byte {
 }
 
 func (u *MatchGameStateUpdate) FromGoal(goal evr.RemoteLogGoal) {
-	u.CurrentRoundClock = goal.GameInfoGameTime
+	u.CurrentRoundClock = int64(goal.GameInfoGameTime * 1000)
 	u.PauseDuration = time.Duration(AfterGoalDuration+RespawnDuration+CatapultDuration) * time.Second
 	if u.Goals == nil {
 		u.Goals = make([]LastGoal, 0, 1)
@@ -313,5 +313,5 @@ func (u *MatchGameStateUpdate) FromGoal(goal evr.RemoteLogGoal) {
 }
 
 func (u *MatchGameStateUpdate) FromVOIPLoudness(goal evr.RemoteLogVOIPLoudness) {
-	u.CurrentRoundClock = float64(goal.GameInfoGameTime)
+	u.CurrentRoundClock = int64(goal.GameInfoGameTime * 1000)
 }
