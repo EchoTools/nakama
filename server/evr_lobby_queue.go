@@ -231,10 +231,15 @@ func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, logger *zap.Logger, p
 	q.logger.Debug("Found unfilled matches", zap.Any("labels", labels), zap.Any("presence", presence))
 
 	// Handle social lobbies separately
-	if params.Mode == evr.ModeSocialPublic {
-		return q.SelectSocial(ctx, params, labels, partySize)
+	switch {
+	case params.Mode == evr.ModeSocialPublic:
+		return q.SelectSocial(ctx, logger, params, labels, partySize)
+	default:
+		return q.SelectArena(ctx, logger, params, labels, partySize)
 	}
+}
 
+func (q *LobbyQueue) SelectArena(ctx context.Context, logger *zap.Logger, params *LobbySessionParameters, labels []*MatchLabel, partySize int) (*MatchLabel, int, error) {
 	// if it's an arena/combat lobby, sort by size, then latency
 	labelsWithLatency := params.latencyHistory.LabelsByAverageRTT(labels)
 
@@ -254,13 +259,17 @@ func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, logger *zap.Logger, p
 			return false
 		}
 
+		if openSlotsByMatch[a.Label.ID] < openSlotsByMatch[b.Label.ID] {
+			return true
+		}
+
 		// If the open slots are the same, sort by latency
 		return a.RTT < b.RTT
 	})
 
 	for _, ll := range labelsWithLatency {
 		var team int
-
+		logger := logger.With(zap.String("mid", ll.Label.ID.String()), zap.Int("open_slots", openSlotsByMatch[ll.Label.ID]), zap.Int("party_size", partySize))
 		// Get the latest label
 		label, err := MatchLabelByID(ctx, q.nk, ll.Label.ID)
 		if err != nil {
@@ -273,6 +282,7 @@ func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, logger *zap.Logger, p
 
 		// Last-minute check if the label has enough open player slots
 		if openSlotsByMatch[label.ID] < partySize {
+			logger.Warn("Label does not have enough open slots", zap.Int("open_slots", openSlotsByMatch[label.ID]), zap.Int("party_size", partySize))
 			continue
 		}
 
@@ -282,11 +292,13 @@ func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, logger *zap.Logger, p
 			team = evr.TeamOrange
 		} else {
 			// No team has enough open slots for the whole party
+			logger.Warn("No team has enough open slots for the party", zap.Int("party_size", partySize))
 			continue
 		}
 
 		// Final check if the label has enough open player slots for the team
-		if label.RoleCount(team)+partySize >= label.RoleLimit(team) {
+		if label.RoleCount(team)+partySize > label.RoleLimit(team) {
+			logger.Warn("Label does not have enough open slots for the team", zap.Int("party_size", partySize), zap.Int("team", team))
 			continue
 		}
 
@@ -297,8 +309,7 @@ func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, logger *zap.Logger, p
 
 	return nil, -1, ErrNoUnfilledMatches
 }
-
-func (q *LobbyQueue) SelectSocial(ctx context.Context, params *LobbySessionParameters, labels []*MatchLabel, partySize int) (*MatchLabel, int, error) {
+func (q *LobbyQueue) SelectSocial(ctx context.Context, logger *zap.Logger, params *LobbySessionParameters, labels []*MatchLabel, partySize int) (*MatchLabel, int, error) {
 
 	openSlotsByMatch := q.openSlotsByMatch()
 
@@ -338,7 +349,6 @@ func (q *LobbyQueue) SelectSocial(ctx context.Context, params *LobbySessionParam
 func (q *LobbyQueue) reserveSlots(matchID MatchID, n int) {
 	q.reservationsMu.Lock()
 	defer q.reservationsMu.Unlock()
-
 	if _, ok := q.reservationsMap[matchID]; !ok {
 		q.reservationsMap[matchID] = make([]SlotReservation, 0)
 	}
