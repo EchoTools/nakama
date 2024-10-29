@@ -274,7 +274,7 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 	b.metrics.CustomCounter("lobby_join_match_made", tags, int64(len(successful)))
 	b.metrics.CustomCounter("lobby_error_match_made", tags, int64(len(errored)))
 
-	logger.Info("Match made", zap.Any("label", label), zap.String("mid", matchID.UUID.String()), zap.Any("teams", teams), zap.Any("successful", successful), zap.Any("errored", errored))
+	logger.Info("Match built.", zap.Any("label", label), zap.String("mid", matchID.UUID.String()), zap.Any("teams", teams), zap.Any("successful", successful), zap.Any("errored", errored))
 	return nil
 }
 
