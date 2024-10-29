@@ -22,6 +22,12 @@ var MatchmakingTimeout = 5 * time.Minute
 // lobbyJoinSessionRequest is a request to join a specific existing session.
 func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters) error {
 
+	startTime := time.Now()
+	defer func() {
+		p.metrics.CustomTimer("lobby_find", lobbyParams.MetricsTags(), time.Since(startTime))
+		logger.Debug("Lobby find complete", zap.Duration("duration", time.Since(startTime)))
+	}()
+
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
