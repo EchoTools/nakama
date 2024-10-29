@@ -443,7 +443,6 @@ func lobbyPrepareSession(ctx context.Context, logger *zap.Logger, matchRegistry 
 
 func rttByPlayerByExtIP(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, groupID string) (map[string]map[string]int, error) {
 	qparts := []string{
-		"+label.lobby_type:public",
 		fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/", Query.Escape(groupID)),
 	}
 
