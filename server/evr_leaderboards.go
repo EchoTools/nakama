@@ -173,3 +173,61 @@ func (r *LeaderboardRegistry) List(ctx context.Context, ownerID, group, statName
 
 	return ownerRecords, nil
 }
+
+func OverallPercentile(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, userID string) (float64, map[string]*api.LeaderboardRecord, error) {
+
+	statNames := []string{
+		"ArenaGamesPlayed",
+		"ArenaWins",
+		"ArenaLosses",
+		"ArenaWinPercentage",
+		"AssistsPerGame",
+		"AveragePointsPerGame",
+		"AverageTopSpeedPerGame",
+		"BlockPercentage",
+		"GoalScorePercentage",
+		"GoalsPerGame",
+	}
+
+	statRecords := make(map[string]*api.LeaderboardRecord)
+	for _, s := range statNames {
+		id := LeaderboardMeta{
+			statName: s,
+			group:    "weekly",
+		}.ID()
+
+		records, _, _, _, err := nk.LeaderboardRecordsList(ctx, id, []string{userID}, 10000, "", 0)
+		if err != nil {
+			logger.Error("Leaderboard records list error", zap.Error(err), zap.String("id", id))
+			continue
+		}
+
+		if len(records) == 0 {
+			continue
+		}
+
+		statRecords[s] = records[0]
+	}
+
+	if len(statRecords) == 0 {
+		return 0, nil, nil
+	}
+
+	// Combine all the stat ranks into a single percentile.
+	percentiles := make([]float64, 0, len(statRecords))
+	for _, r := range statRecords {
+		percentile := float64(r.GetRank()) / float64(r.GetNumScore())
+		percentiles = append(percentiles, percentile)
+	}
+
+	// Calculate the overall percentile.
+	overallPercentile := 0.0
+	for _, p := range percentiles {
+		overallPercentile += p
+	}
+	overallPercentile /= float64(len(percentiles))
+
+	logger.Info("Overall percentile", zap.Float64("percentile", overallPercentile))
+
+	return overallPercentile, statRecords, nil
+}
