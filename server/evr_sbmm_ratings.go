@@ -14,7 +14,7 @@ type (
 )
 
 type RatedEntry struct {
-	Entry  runtime.MatchmakerEntry
+	Entry  *MatchmakerEntry
 	Rating types.Rating
 }
 
@@ -29,7 +29,7 @@ func NewRatedEntryFromMatchmakerEntry(e runtime.MatchmakerEntry) *RatedEntry {
 		sigma = 8.333
 	}
 	return &RatedEntry{
-		Entry: e,
+		Entry: e.(*MatchmakerEntry),
 		Rating: rating.NewWithOptions(&types.OpenSkillOptions{
 			Mu:    ptr.Float64(mu),
 			Sigma: ptr.Float64(sigma),
