@@ -228,7 +228,7 @@ func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, logger *zap.Logger, p
 		labels = append(labels, label)
 	}
 
-	q.logger.Debug("Found unfilled matches", zap.Any("labels", labels), zap.Any("presence", presence))
+	q.logger.Debug("Found unfilled matches", zap.Int("num_matches", len(labels)), zap.Any("presence", presence))
 
 	// Handle social lobbies separately
 	switch {
