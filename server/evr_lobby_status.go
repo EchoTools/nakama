@@ -42,7 +42,7 @@ func JoinMatchmakingStream(logger *zap.Logger, s *sessionWS, params *LobbySessio
 	if success := s.tracker.Update(ctx, s.id, groupStream, s.userID, presenceMeta); !success {
 		return fmt.Errorf("failed to track lobby group matchmaking stream")
 	} else {
-		logger.Debug("Tracked lobby group matchmaking stream", zap.Any("stream", groupStream), zap.Any("meta", presenceMeta))
+		logger.Debug("Tracked lobby group matchmaking stream", zap.Any("stream", groupStream))
 	}
 
 	s.pipeline.router.SendToStream(logger, groupStream, &rtapi.Envelope{

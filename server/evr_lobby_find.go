@@ -75,17 +75,19 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	// Do not matchmake public social lobbies.
 	if lobbyParams.Mode != evr.ModeSocialPublic {
 		// Matchmake a new lobby session
-		logger.Debug("matchmaking", zap.Any("members", lobbyGroup.List()))
+		members := make([]string, 0, lobbyGroup.Size())
+		for _, member := range lobbyGroup.List() {
+			members = append(members, member.Presence.GetUserId())
+		}
+
+		logger.Debug("matchmaking", zap.Any("member_count", len(members)))
 
 		if err := p.lobbyMatchMakeWithFallback(ctx, logger, session, lobbyParams, lobbyGroup); err != nil {
 			return errors.Join(NewLobbyError(InternalError, "failed to matchmake"), err)
 		}
 	}
 
-	timeoutTimer := time.NewTimer(MatchmakingTimeout)
-
 	backfillInterval := 3 * time.Second
-
 	if lobbyParams.DisableArenaBackfill && lobbyParams.Mode == evr.ModeArenaPublic {
 		// Set a long backfill interval for arena matches.
 		backfillInterval = MatchmakingTimeout * 2
@@ -106,7 +108,16 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	// Arbitrary delay
 	<-time.After(1 * time.Second)
 
+	// Attempt to backfill until the timeout.
+	return p.lobbyBackfill(ctx, logger, lobbyParams, entrant, backfillInterval)
+}
+
+func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lobbyParams *LobbySessionParameters, entrant *EvrMatchPresence, interval time.Duration) error {
+
+	timeoutTimer := time.NewTimer(MatchmakingTimeout)
+
 	for {
+		logger.Debug("Backfilling match.")
 		var err error
 		select {
 		case <-ctx.Done():
@@ -117,7 +128,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		case <-timeoutTimer.C:
 			logger.Warn("Matchmaking timeout")
 			return NewLobbyError(Timeout, "matchmaking timeout")
-		case <-time.After(backfillInterval):
+		case <-time.After(interval):
 		}
 
 		label, team, err := p.lobbyQueue.GetUnfilledMatch(ctx, logger, lobbyParams)
@@ -147,9 +158,8 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 			}
 			return errors.Join(NewLobbyError(InternalError, "failed to join backfill match"), err)
 		}
+		return nil
 	}
-
-	return nil
 }
 
 func (p *EvrPipeline) CheckServerPing(ctx context.Context, logger *zap.Logger, session *sessionWS) error {

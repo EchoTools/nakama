@@ -71,42 +71,46 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 		return fmt.Errorf("matchmaking ticket config not found for mode %s", lobbyParams.Mode)
 	}
 
+	// Add the primary ticket
+	err = p.addTicket(ctx, logger, session, lobbyParams, lobbyGroup, ticketConfig)
+	if err != nil {
+		return fmt.Errorf("failed to add primary ticket: %v", err)
+	}
+
 	// Caclulate the fallback delay based on the max intervals and interval seconds in the configuration
 	maxIntervals := p.config.GetMatchmaker().MaxIntervals
 	intervalSecs := p.config.GetMatchmaker().IntervalSec
 	fallbackDelay := time.Duration(maxIntervals*intervalSecs) * time.Second
 
-	// Create a context with a timeout for the fallback delay, removing the ticket
-	ticketCtx, _ := context.WithTimeout(ctx, fallbackDelay)
+	// If the first matchmaking ticket fails, try a fallback ticket
+	go func() {
 
-	// Add the primary ticket
-	err = p.addTicket(ticketCtx, logger, session, lobbyParams, lobbyGroup, ticketConfig)
-	if err != nil {
-		return fmt.Errorf("failed to add primary ticket: %v", err)
-	}
+		// Check if the context was canceled
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(fallbackDelay):
+		}
 
-	select {
-	case <-ctx.Done():
-		return
-	case <-ticketCtx.Done():
-		logger.Debug("Matchmaking ticket fallback")
-	}
+		logger.Warn("Adding fallback ticket")
 
-	// Attempt a fallback ticket
-	ticketConfig.MaxCount = ticketConfig.MinCount
-	ticketConfig.MinCount = 1
+		// Attempt a fallback ticket
+		ticketConfig.MaxCount = ticketConfig.MinCount
+		ticketConfig.MinCount = 1
 
-	if ticketConfig.CountMultiple == 1 || ticketConfig.MaxCount == ticketConfig.MinCount || ticketConfig.MaxCount%ticketConfig.CountMultiple != 0 {
-		logger.Debug("Matchmaking ticket config is not valid for fallbacks", zap.Any("config", ticketConfig))
-		return nil
-	}
-	// This will try to add a secondary ticket with the smallest count.
-	// This works around a nakama limitation of using a custom matchmaker.
+		if ticketConfig.CountMultiple == 1 || ticketConfig.MaxCount == ticketConfig.MinCount || ticketConfig.MaxCount%ticketConfig.CountMultiple != 0 {
+			logger.Debug("Matchmaking ticket config is not valid for fallbacks", zap.Any("config", ticketConfig))
+			return
+		}
+		// This will try to add a secondary ticket with the smallest count.
+		// This works around a nakama limitation of using a custom matchmaker.
 
-	err = p.addTicket(ctx, logger, session, lobbyParams, lobbyGroup, ticketConfig)
-	if err != nil {
-		return fmt.Errorf("failed to add secondary ticket: %v", err)
-	}
+		err = p.addTicket(ctx, logger, session, lobbyParams, lobbyGroup, ticketConfig)
+		if err != nil {
+			logger.Error("Failed to add secondary ticket", zap.Error(err))
+			return
+		}
+	}()
 	return nil
 }
 
