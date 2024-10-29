@@ -222,14 +222,14 @@ func LatencyCmp[T int | time.Duration](i, j T, mround T) bool {
 }
 
 type MatchmakingSettings struct {
-	DisableArenaBackfill  bool     `json:"disable_arena_backfill,omitempty"` // Disable backfilling for arena matches
-	BackfillQueryAddon    string   `json:"backfill_query_addon"`             // Additional query to add to the matchmaking query
-	MatchmakingQueryAddon string   `json:"matchmaking_query_addon"`          // Additional query to add to the matchmaking query
-	CreateQueryAddon      string   `json:"create_query_addon"`               // Additional query to add to the matchmaking query
-	LobbyGroupName        string   `json:"group_id"`                         // Group ID to matchmake with
-	PriorityBroadcasters  []string `json:"priority_broadcasters"`            // Prioritize these broadcasters
-	NextMatchID           MatchID  `json:"next_match_id"`                    // Try to join this match immediately when finding a match
-	NextMatchRole         string   `json:"next_match_role"`                  // The role to join the next match as
+	DisableArenaBackfill  bool     `json:"disable_arena_backfill"`  // Disable backfilling for arena matches
+	BackfillQueryAddon    string   `json:"backfill_query_addon"`    // Additional query to add to the matchmaking query
+	MatchmakingQueryAddon string   `json:"matchmaking_query_addon"` // Additional query to add to the matchmaking query
+	CreateQueryAddon      string   `json:"create_query_addon"`      // Additional query to add to the matchmaking query
+	LobbyGroupName        string   `json:"group_id"`                // Group ID to matchmake with
+	PriorityBroadcasters  []string `json:"priority_broadcasters"`   // Prioritize these broadcasters
+	NextMatchID           MatchID  `json:"next_match_id"`           // Try to join this match immediately when finding a match
+	NextMatchRole         string   `json:"next_match_role"`         // The role to join the next match as
 }
 
 func (MatchmakingSettings) GetStorageID() StorageID {

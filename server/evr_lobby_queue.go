@@ -222,13 +222,12 @@ func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, logger *zap.Logger, p
 
 	labels := make([]*MatchLabel, 0)
 	for _, label := range q.labelsByPresenceByOpenSlots(presence, partySize) {
+		// Skip the current match (this is critical for "New Lobby" from the pause menu)
 		if label == nil || label.ID == params.CurrentMatchID {
 			continue
 		}
 		labels = append(labels, label)
 	}
-
-	q.logger.Debug("Found unfilled matches", zap.Int("num_matches", len(labels)), zap.Any("presence", presence))
 
 	// Handle social lobbies separately
 	switch {

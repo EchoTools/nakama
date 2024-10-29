@@ -117,7 +117,6 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 	timeoutTimer := time.NewTimer(MatchmakingTimeout)
 
 	for {
-		logger.Debug("Backfilling match.")
 		var err error
 		select {
 		case <-ctx.Done():
