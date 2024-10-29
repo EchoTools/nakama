@@ -489,10 +489,10 @@ func (s *EasyStream) StreamCompressedBytes(data []byte, isNullTerminated bool, c
 		if isNullTerminated && len(b) > 0 && b[len(b)-1] == 0x0 {
 			b = b[:len(b)-1]
 		}
-		data = b
+		copy(data, b)
 		return nil
 	case EncodeMode:
-		b := data
+		b := data[:]
 		if isNullTerminated {
 			b = append(b, 0x0)
 		}
