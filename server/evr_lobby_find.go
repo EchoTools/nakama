@@ -25,7 +25,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	startTime := time.Now()
 	defer func() {
 		p.metrics.CustomTimer("lobby_find", lobbyParams.MetricsTags(), time.Since(startTime))
-		logger.Debug("Lobby find complete", zap.Duration("duration", time.Since(startTime)))
+		logger.Debug("Lobby find complete", zap.String("group_id", lobbyParams.GroupID.String()), zap.Int64("partySize", lobbyParams.PartySize.Load()), zap.String("mode", lobbyParams.Mode.String()), zap.Duration("duration", time.Since(startTime)))
 	}()
 
 	ctx, cancel := context.WithCancel(ctx)

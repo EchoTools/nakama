@@ -177,11 +177,6 @@ func (q *LobbyQueue) findUnfilledMatches(ctx context.Context) ([]*MatchLabel, er
 	return labels, nil
 }
 
-func (q *LobbyQueue) labelsByPresence(presence LobbyQueuePresence) map[MatchID]*MatchLabel {
-
-	return nil
-}
-
 func (q *LobbyQueue) openSlotsByMatch() map[MatchID]int {
 	openSlots := q.openSlotsByMatchRead.Load().(map[MatchID]int)
 	return openSlots
@@ -269,6 +264,7 @@ func (q *LobbyQueue) SelectArena(ctx context.Context, logger *zap.Logger, params
 	for _, ll := range labelsWithLatency {
 		var team int
 		logger := logger.With(zap.String("mid", ll.Label.ID.String()), zap.Int("open_slots", openSlotsByMatch[ll.Label.ID]), zap.Int("party_size", partySize))
+
 		// Get the latest label
 		label, err := MatchLabelByID(ctx, q.nk, ll.Label.ID)
 		if err != nil {
@@ -280,8 +276,8 @@ func (q *LobbyQueue) SelectArena(ctx context.Context, logger *zap.Logger, params
 		}
 
 		// Last-minute check if the label has enough open player slots
-		if openSlotsByMatch[label.ID] < partySize {
-			logger.Warn("Label does not have enough open slots", zap.Int("open_slots", openSlotsByMatch[label.ID]), zap.Int("party_size", partySize))
+		if openSlotsByMatch[label.ID] < partySize || label.OpenPlayerSlots() < partySize {
+			logger.Debug("Match is full", zap.Int("open_slots", openSlotsByMatch[label.ID]), zap.Int("party_size", partySize))
 			continue
 		}
 
