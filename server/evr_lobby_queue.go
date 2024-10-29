@@ -74,8 +74,10 @@ func NewLobbyQueue(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runti
 		labelRead:            &atomic.Value{},
 		openSlotsByMatchRead: &atomic.Value{},
 	}
+
 	q.labelRead.Store(make(map[LobbyQueuePresence]map[MatchID]*MatchLabel))
 	q.openSlotsByMatchRead.Store(make(map[MatchID]int))
+
 	go func() {
 		var labels []*MatchLabel
 		var err error
@@ -84,7 +86,6 @@ func NewLobbyQueue(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runti
 			select {
 			case <-ctx.Done():
 				return
-
 			case <-queueTicker.C:
 				// Find unfilled matches
 				labels, err = q.findUnfilledMatches(ctx)
@@ -114,6 +115,7 @@ func NewLobbyQueue(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runti
 
 				// Generate a new open slot map
 				q.reservationsMu.Lock()
+
 				openSlotsByMatch := make(map[MatchID]int, len(labels))
 				for _, label := range labels {
 					reserved := 0

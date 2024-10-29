@@ -49,6 +49,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		return errors.Join(NewLobbyError(InternalError, "failed to join lobby group"), err)
 	}
 	logger.Debug("Joined lobby group", zap.String("partyID", lobbyGroup.IDStr()))
+
 	// Only do party operations if the player is current in a match (i.e not joining from the main menu)
 	if !lobbyParams.CurrentMatchID.IsNil() {
 
@@ -64,7 +65,6 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	doneCh := make(chan struct{})
 
 	go func() {
-		defer close(doneCh)
 		// Give a delay to ensure the client is ready to receive the ping response.
 		select {
 		case <-ctx.Done():
@@ -83,10 +83,12 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		}
 	}()
 
+	// Wait for the ping response to complete
 	select {
 	case <-ctx.Done():
 		return nil
-	case <-time.After(4 * time.Second):
+	case <-time.After(2 * time.Second):
+		logger.Debug("Timed out waiting for ping responses message.")
 	case <-doneCh:
 	}
 
@@ -100,12 +102,8 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		}
 	}
 
-	// Maintain a simple cache of ratings to avoid repeated session lookups.
-
 	initialTimer := time.NewTimer(1 * time.Second)
-
 	backfillInterval := 6 * time.Second
-
 	timeout := time.After(MatchmakingTimeout)
 
 	for {
