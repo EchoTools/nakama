@@ -28,9 +28,9 @@ type WhoAmI struct {
 	GuildGroupMemberships map[string]GuildGroupMembership `json:"guild_memberships"`
 	VRMLSeasons           []string                        `json:"vrml_seasons"`
 	MatchIDs              []string                        `json:"match_ids"`
-
-	ClientAddresses []string `json:"addresses,omitempty"`
-	GhostedPlayers  []string `json:"ghosted_discord_ids,omitempty"`
+	DefaultLobbyGroup     string                          `json:"active_lobby_group,omitempty"`
+	ClientAddresses       []string                        `json:"addresses,omitempty"`
+	GhostedPlayers        []string                        `json:"ghosted_discord_ids,omitempty"`
 }
 
 type EvrIdLogins struct {
@@ -69,6 +69,12 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	if err != nil {
 		return err
 	}
+	md, err := GetAccountMetadata(ctx, nk, userID.String())
+	if err != nil {
+		return err
+	}
+
+	whoami.DefaultLobbyGroup = md.GetActiveGroupID().String()
 
 	whoami.Username = account.GetUser().GetUsername()
 
@@ -160,6 +166,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	whoami.GhostedPlayers = ghostedDiscordIDs
 
 	if !includePrivate {
+		whoami.DefaultLobbyGroup = ""
 		whoami.HasPassword = false
 		whoami.ClientAddresses = nil
 		whoami.DeviceLinks = nil
@@ -211,6 +218,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		}(), Inline: false},
 		{Name: "Guild Memberships", Value: strings.Join(func() []string {
 			output := make([]string, 0, len(whoami.GuildGroupMemberships))
+
 			for gid, m := range whoami.GuildGroupMemberships {
 				s := guildGroups[gid].Name()
 				roles := make([]string, 0)
@@ -237,6 +245,10 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 				}
 				if len(roles) > 0 {
 					s += fmt.Sprintf(" (%s)", strings.Join(roles, ", "))
+				}
+				if gid == whoami.DefaultLobbyGroup {
+					s += " (default)"
+					s = fmt.Sprintf("**%s**", s)
 				}
 				output = append(output, s)
 			}
