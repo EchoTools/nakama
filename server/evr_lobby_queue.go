@@ -16,9 +16,14 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+)
+
+const (
+	MatchReservationExpiry = 5 * time.Second
 )
 
 var (
@@ -31,18 +36,26 @@ type LobbyQueuePresence struct {
 	Mode        evr.Symbol
 }
 
+type SlotReservation struct {
+	Expiry time.Time
+	Slots  int
+}
+
 type LobbyQueue struct {
-	sync.RWMutex
 	ctx           context.Context
 	logger        *zap.Logger
 	matchRegistry MatchRegistry
 	metrics       Metrics
 
-	db             *sql.DB
-	nk             runtime.NakamaModule
-	createMu       sync.Mutex
-	cache          map[LobbyQueuePresence]map[MatchID]*MatchLabel
-	reservedCounts map[MatchID]int
+	db *sql.DB
+	nk runtime.NakamaModule
+
+	createSocialMu *sync.Mutex
+
+	reservationsMu       *sync.Mutex
+	reservationsMap      map[MatchID][]SlotReservation
+	openSlotsByMatchRead *atomic.Value // map[MatchID]int
+	labelRead            *atomic.Value // map[LobbyQueuePresence]map[MatchID]*MatchLabel
 }
 
 func NewLobbyQueue(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, metrics Metrics, matchRegistry MatchRegistry) *LobbyQueue {
@@ -55,10 +68,14 @@ func NewLobbyQueue(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runti
 		nk:            nk,
 		db:            db,
 
-		cache:          make(map[LobbyQueuePresence]map[MatchID]*MatchLabel),
-		reservedCounts: make(map[MatchID]int),
+		createSocialMu:       &sync.Mutex{},
+		reservationsMu:       &sync.Mutex{},
+		reservationsMap:      make(map[MatchID][]SlotReservation),
+		labelRead:            &atomic.Value{},
+		openSlotsByMatchRead: &atomic.Value{},
 	}
-
+	q.labelRead.Store(make(map[LobbyQueuePresence]map[MatchID]*MatchLabel))
+	q.openSlotsByMatchRead.Store(make(map[MatchID]int))
 	go func() {
 		var labels []*MatchLabel
 		var err error
@@ -69,15 +86,17 @@ func NewLobbyQueue(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runti
 				return
 
 			case <-queueTicker.C:
+				// Find unfilled matches
 				labels, err = q.findUnfilledMatches(ctx)
 				if err != nil {
 					logger.Error("Failed to find unfilled matches", zap.Error(err))
 					continue
 				}
-				q.Lock()
-				// Rebuild the unfilled lobbies map
+
+				// Rebuild the unfilled lobbies label map
+				labelsByPresence := make(map[LobbyQueuePresence]map[MatchID]*MatchLabel)
 				matchIDs := make(map[MatchID]struct{})
-				q.cache = make(map[LobbyQueuePresence]map[MatchID]*MatchLabel)
+
 				for _, label := range labels {
 					presence := LobbyQueuePresence{
 						GroupID: label.GetGroupID(),
@@ -85,26 +104,45 @@ func NewLobbyQueue(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runti
 						Mode: label.Mode,
 					}
 
-					if _, ok := q.cache[presence]; !ok {
-						q.cache[presence] = make(map[MatchID]*MatchLabel)
+					if _, ok := labelsByPresence[presence]; !ok {
+						labelsByPresence[presence] = make(map[MatchID]*MatchLabel)
 					}
-					q.cache[presence][label.ID] = label
+					labelsByPresence[presence][label.ID] = label
 					matchIDs[label.ID] = struct{}{}
 				}
+				q.labelRead.Store(labelsByPresence)
 
-				// Remove any reservation counts for matches that no longer exist
-				for id := range q.reservedCounts {
-					if q.reservedCounts[id] <= 0 {
-						delete(q.reservedCounts, id)
-						continue
+				// Generate a new open slot map
+				q.reservationsMu.Lock()
+				openSlotsByMatch := make(map[MatchID]int, len(labels))
+				for _, label := range labels {
+					reserved := 0
+					if n, ok := q.reservationsMap[label.ID]; ok {
+						for _, n := range n {
+							if n.Expiry.Before(time.Now()) {
+								continue
+							}
+							reserved += n.Slots
+						}
 					}
-
-					if _, ok := matchIDs[id]; !ok {
-						delete(q.reservedCounts, id)
+					openSlotsByMatch[label.ID] = label.OpenPlayerSlots() - reserved
+					if openSlotsByMatch[label.ID] < 0 {
+						openSlotsByMatch[label.ID] = 0
 					}
 				}
 
-				q.Unlock()
+				// Remove any reservations for matches that are no longer in the queue
+				reservationMap := make(map[MatchID][]SlotReservation, len(q.reservationsMap))
+				for matchID, reservations := range q.reservationsMap {
+					if _, ok := matchIDs[matchID]; ok {
+						reservationMap[matchID] = reservations
+					}
+				}
+
+				// Update the maps
+				q.reservationsMap = reservationMap
+				q.openSlotsByMatchRead.Store(openSlotsByMatch)
+				q.reservationsMu.Unlock()
 			}
 		}
 	}()
@@ -137,9 +175,37 @@ func (q *LobbyQueue) findUnfilledMatches(ctx context.Context) ([]*MatchLabel, er
 	return labels, nil
 }
 
+func (q *LobbyQueue) labelsByPresence(presence LobbyQueuePresence) map[MatchID]*MatchLabel {
+
+	return nil
+}
+
+func (q *LobbyQueue) openSlotsByMatch() map[MatchID]int {
+	openSlots := q.openSlotsByMatchRead.Load().(map[MatchID]int)
+	return openSlots
+}
+
+func (q *LobbyQueue) labelsByPresenceByOpenSlots(presence LobbyQueuePresence, slots int) map[MatchID]*MatchLabel {
+	byPresence := q.labelRead.Load().(map[LobbyQueuePresence]map[MatchID]*MatchLabel)
+	labels, ok := byPresence[presence]
+	if !ok {
+		return nil
+	}
+
+	openSlots := q.openSlotsByMatch()
+
+	resultMap := make(map[MatchID]*MatchLabel)
+	for _, label := range labels {
+		if openSlots[label.ID] >= slots {
+			resultMap[label.ID] = label
+		}
+	}
+
+	return resultMap
+}
+
 func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, params *LobbySessionParameters) (*MatchLabel, int, error) {
-	q.Lock()
-	defer q.Unlock()
+
 	partySize := params.GetPartySize()
 	if partySize < 1 {
 		q.logger.Warn("Party size must be at least 1")
@@ -152,59 +218,19 @@ func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, params *LobbySessionP
 		Mode: params.Mode,
 	}
 
-	var labels []*MatchLabel
-
-	// Select the labels that match the presence and have enough open slots
-	for _, label := range q.cache[presence] {
-		if label.ID == params.CurrentMatchID {
+	labels := make([]*MatchLabel, 0)
+	for _, label := range q.labelsByPresenceByOpenSlots(presence, partySize) {
+		if label == nil || label.ID == params.CurrentMatchID {
 			continue
 		}
-
-		reservedCount := q.reservedCounts[label.ID]
-
-		if label.OpenPlayerSlots()+reservedCount < partySize {
-			continue
-		}
-
 		labels = append(labels, label)
 	}
 
 	q.logger.Debug("Found unfilled matches", zap.Any("labels", labels), zap.Any("presence", presence))
-	// If it's a social Lobby, sort by most open slots
+
+	// Handle social lobbies separately
 	if params.Mode == evr.ModeSocialPublic {
-		slices.SortStableFunc(labels, func(a, b *MatchLabel) int {
-			return b.OpenPlayerSlots() - a.OpenPlayerSlots()
-		})
-
-		// Find one that has enough slots
-		for _, l := range labels {
-			if l.OpenPlayerSlots() >= partySize {
-
-				// Update the latest label
-				err := q.updateLabel(ctx, l)
-				if err != nil {
-					continue
-				}
-
-				q.updatePlayerCount(l, partySize)
-				return l, evr.TeamSocial, nil
-			}
-		}
-		// Create a new one.
-		if q.createMu.TryLock() {
-			go func() {
-				<-time.After(5 * time.Second)
-				q.createMu.Unlock()
-			}()
-			l, err := q.NewSocialLobby(ctx, params.VersionLock, params.GroupID)
-			if err != nil {
-				return nil, -1, err
-			}
-
-			q.updatePlayerCount(l, partySize)
-			return l, evr.TeamSocial, nil
-		}
-		return nil, -1, ErrNoUnfilledMatches
+		return q.SelectSocial(ctx, params, labels, partySize)
 	}
 
 	// if it's an arena/combat lobby, sort by size, then latency
@@ -214,28 +240,37 @@ func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, params *LobbySessionP
 		return nil, -1, ErrNoUnfilledMatches
 	}
 
+	openSlotsByMatch := q.openSlotsByMatch()
+
 	// Sort the labels by size, then latency, putting the largest, lowest latency first
 	sort.SliceStable(labelsWithLatency, func(i, j int) bool {
-		if labelsWithLatency[i].Label.OpenPlayerSlots() > labelsWithLatency[j].Label.OpenPlayerSlots() {
+		a := labelsWithLatency[i]
+		b := labelsWithLatency[j]
+
+		// Sort by open slots (least open slots first)
+		if openSlotsByMatch[a.Label.ID] > openSlotsByMatch[b.Label.ID] {
 			return false
-		} else if labelsWithLatency[i].Label.OpenPlayerSlots() < labelsWithLatency[j].Label.OpenPlayerSlots() {
-			return true
 		}
 
-		return labelsWithLatency[i].RTT < labelsWithLatency[j].RTT
+		// If the open slots are the same, sort by latency
+		return a.RTT < b.RTT
 	})
 
 	for _, ll := range labelsWithLatency {
 		var team int
-		label := ll.Label
 
-		err := q.updateLabel(ctx, label)
+		// Get the latest label
+		label, err := MatchLabelByID(ctx, q.nk, ll.Label.ID)
 		if err != nil {
+			if err == ErrMatchNotFound {
+				continue
+			}
+			q.logger.Warn("Failed to get match label", zap.Error(err))
 			continue
 		}
 
 		// Last-minute check if the label has enough open player slots
-		if label.OpenPlayerSlots()+q.reservedCounts[label.ID] < partySize {
+		if openSlotsByMatch[label.ID] < partySize {
 			continue
 		}
 
@@ -244,6 +279,7 @@ func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, params *LobbySessionP
 		} else if label.OpenSlotsByRole(evr.TeamOrange) >= partySize {
 			team = evr.TeamOrange
 		} else {
+			// No team has enough open slots for the whole party
 			continue
 		}
 
@@ -252,8 +288,7 @@ func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, params *LobbySessionP
 			continue
 		}
 
-		q.updatePlayerCount(label, partySize)
-
+		q.reserveSlots(label.ID, partySize)
 		return label, team, nil
 
 	}
@@ -261,34 +296,54 @@ func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, params *LobbySessionP
 	return nil, -1, ErrNoUnfilledMatches
 }
 
-func (q *LobbyQueue) updateLabel(ctx context.Context, l *MatchLabel) error {
-	if l == nil {
-		return ErrMatchNotFound
+func (q *LobbyQueue) SelectSocial(ctx context.Context, params *LobbySessionParameters, labels []*MatchLabel, partySize int) (*MatchLabel, int, error) {
+
+	openSlotsByMatch := q.openSlotsByMatch()
+
+	// Sort the labels by open slots
+	slices.SortStableFunc(labels, func(a, b *MatchLabel) int {
+		return openSlotsByMatch[a.ID] - openSlotsByMatch[b.ID]
+	})
+
+	// Reverse the order
+	slices.Reverse(labels)
+
+	// Find one that has enough slots
+	for _, l := range labels {
+		if openSlotsByMatch[l.ID] >= partySize {
+			q.reserveSlots(l.ID, partySize)
+			return l, evr.TeamSocial, nil
+		}
 	}
-	label, err := MatchLabelByID(ctx, q.nk, l.ID)
-	if err != nil {
-		q.logger.Warn("Failed to update label", zap.Error(err))
-		return err
+	// Create a new one.
+	if q.createSocialMu.TryLock() {
+		go func() {
+			<-time.After(5 * time.Second)
+			q.createSocialMu.Unlock()
+		}()
+		l, err := q.NewSocialLobby(ctx, params.VersionLock, params.GroupID)
+		if err != nil {
+			return nil, -1, err
+		}
+
+		q.reserveSlots(l.ID, partySize)
+		return l, evr.TeamSocial, nil
 	}
-	if label == nil {
-		return ErrMatchNotFound
-	}
-	*l = *label
-	return nil
+	return nil, -1, ErrNoUnfilledMatches
+
 }
 
-func (q *LobbyQueue) updatePlayerCount(l *MatchLabel, n int) {
-	q.reservedCounts[l.ID] += n
-	go func() {
-		// Remove the reservations after 3 seconds
-		<-time.After(5 * time.Second)
-		q.Lock()
-		defer q.Unlock()
-		q.reservedCounts[l.ID] -= n
-		if q.reservedCounts[l.ID] <= 0 {
-			delete(q.reservedCounts, l.ID)
-		}
-	}()
+func (q *LobbyQueue) reserveSlots(matchID MatchID, n int) {
+	q.reservationsMu.Lock()
+	defer q.reservationsMu.Unlock()
+
+	if _, ok := q.reservationsMap[matchID]; !ok {
+		q.reservationsMap[matchID] = make([]SlotReservation, 0)
+	}
+	q.reservationsMap[matchID] = append(q.reservationsMap[matchID], SlotReservation{
+		Expiry: time.Now().Add(MatchReservationExpiry),
+		Slots:  n,
+	})
 }
 
 type TeamAlignments map[string]int // map[UserID]Role
