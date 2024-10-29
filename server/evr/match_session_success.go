@@ -38,8 +38,8 @@ func NewLobbySessionSuccess(gameTypeSymbol Symbol, matchingSession uuid.UUID, ch
 
 	clientSettings := &PacketEncoderSettings{
 		isPCVR:                  isPCVR,
-		EncryptionEnabled:       disableEncryption,
-		MACEnabled:              disableMAC,
+		EncryptionEnabled:       !disableEncryption,
+		MACEnabled:              !disableMAC,
 		MACDigestSize:           0x20,
 		MACPBKDF2IterationCount: 0x00,
 		MACKeySize:              0x20,
@@ -48,8 +48,8 @@ func NewLobbySessionSuccess(gameTypeSymbol Symbol, matchingSession uuid.UUID, ch
 	}
 	serverSettings := &PacketEncoderSettings{
 		isPCVR:                  isPCVR,
-		EncryptionEnabled:       disableEncryption,
-		MACEnabled:              disableMAC,
+		EncryptionEnabled:       !disableEncryption,
+		MACEnabled:              !disableMAC,
 		MACDigestSize:           0x20,
 		MACPBKDF2IterationCount: 0x00,
 		MACKeySize:              0x20,
