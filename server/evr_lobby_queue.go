@@ -206,7 +206,7 @@ func (q *LobbyQueue) labelsByPresenceByOpenSlots(presence LobbyQueuePresence, sl
 	return resultMap
 }
 
-func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, params *LobbySessionParameters) (*MatchLabel, int, error) {
+func (q *LobbyQueue) GetUnfilledMatch(ctx context.Context, logger *zap.Logger, params *LobbySessionParameters) (*MatchLabel, int, error) {
 
 	partySize := params.GetPartySize()
 	if partySize < 1 {
