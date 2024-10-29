@@ -1432,3 +1432,85 @@ func PlayerStatisticsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 
 	return response.String(), nil
 }
+
+type StreamJoinRequest struct {
+	Mode        uint8  `json:"mode"`
+	Subject     string `json:"subject"`
+	Subcontext  string `json:"subcontext"`
+	UserID      string `json:"user_id"`
+	SessionID   string `json:"session_id"`
+	Label       string `json:"label"`
+	Hidden      bool   `json:"hidden"`
+	Persistance bool   `json:"persistance"`
+	Status      string `json:"status"`
+}
+
+type StreamJoinResponse struct {
+	Success   bool        `json:"success"`
+	Presences []*Presence `json:"presences"`
+}
+
+func (r *StreamJoinResponse) String() string {
+	b, _ := json.Marshal(r)
+	return string(b)
+}
+
+func StreamJoinRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+
+	request := &StreamJoinRequest{}
+	if err := json.Unmarshal([]byte(payload), request); err != nil {
+		return "", err
+	}
+
+	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if !ok {
+		return "", runtime.NewError("No user ID in context", StatusUnauthenticated)
+	}
+	if request.UserID == "" {
+		request.UserID = userID
+	}
+
+	sessionID, ok := ctx.Value(runtime.RUNTIME_CTX_SESSION_ID).(string)
+	if !ok {
+		return "", runtime.NewError("No session ID in context", StatusUnauthenticated)
+	}
+
+	if request.SessionID == "" {
+		request.SessionID = sessionID
+	}
+
+	success, err := nk.StreamUserJoin(request.Mode, request.Subject, request.Subcontext, request.Label, request.UserID, request.SessionID, request.Hidden, request.Persistance, request.Status)
+	if err != nil {
+		return "", err
+	}
+
+	if !success {
+		return "", runtime.NewError("Failed to join matchmaker stream", StatusInternalError)
+	}
+
+	presences, err := nk.StreamUserList(request.Mode, request.Subject, request.Subcontext, request.Label, false, true)
+	if err != nil {
+		return "", err
+	}
+
+	responsePresences := make([]*Presence, 0, len(presences))
+
+	for _, p := range presences {
+		var parameters LobbySessionParameters
+		if err := json.Unmarshal([]byte(p.GetStatus()), &parameters); err != nil {
+			return "", err
+		}
+
+		if presence, ok := p.(*Presence); ok {
+			responsePresences = append(responsePresences, presence)
+		}
+
+	}
+
+	response := &StreamJoinResponse{
+		Success:   true,
+		Presences: responsePresences,
+	}
+
+	return response.String(), nil
+}

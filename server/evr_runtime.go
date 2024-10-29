@@ -67,6 +67,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		"importloadouts":                ImportLoadoutsRpc,
 		"setmatchamakerstatus":          setMatchmakingStatusRpc,
 		"matchmaker/stream":             MatchmakerStreamRPC,
+		"stream/join":                   StreamJoinRPC,
 		//"/v1/storage/game/sourcedb/rad15/json/r14/loading_tips.json": StorageLoadingTipsRPC,
 	}
 
