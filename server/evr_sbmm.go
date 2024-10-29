@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"math/rand"
 	"slices"
+	"strings"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/rtapi"
@@ -117,26 +118,21 @@ func (m *SkillBasedMatchmaker) BalancedMatchFromCandidate(candidate []runtime.Ma
 	return team1, team2
 }
 
-// Function to be used as a matchmaker function in Nakama (RegisterMatchmakerOverride)
-func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, candidateMatches [][]runtime.MatchmakerEntry) (madeMatches [][]runtime.MatchmakerEntry) {
-	//profileRegistry := &ProfileRegistry{nk: nk}
-	if len(candidateMatches) == 0 || len(candidateMatches[0]) == 0 {
-		return nil
-	}
-	v, ok := candidateMatches[0][0].GetProperties()["group_id"]
+func (m *SkillBasedMatchmaker) streamCandidates(candidates [][]runtime.MatchmakerEntry) {
+	logger := m.logger
+	v, ok := candidates[0][0].GetProperties()["group_id"]
 	if !ok {
 		logger.Error("Group ID not found in matchmaker properties.")
-		return nil
+		return
 	}
 	groupIDStr, ok := v.(string)
 	if !ok {
 		logger.Error("Group ID is not a string.")
-		return nil
+		return
 	}
 	groupID := uuid.FromStringOrNil(groupIDStr)
 
-	data, _ := json.Marshal(candidateMatches)
-
+	data, _ := json.Marshal(candidates)
 	m.router.SendToStream(m.logger,
 		PresenceStream{
 			Mode:    StreamModeMatchmaker,
@@ -153,18 +149,53 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 				},
 			},
 		}, false)
+}
 
-	balancedMatches := make([]RatedMatch, 0, len(candidateMatches))
+func removeDuplicateRosters(candidates [][]runtime.MatchmakerEntry) [][]runtime.MatchmakerEntry {
+	seenRosters := make(map[string]struct{})
+	uniqueCandidates := make([][]runtime.MatchmakerEntry, 0, len(candidates))
+	for _, match := range candidates {
+		roster := make([]string, 0, len(match))
+		for _, e := range match {
+			roster = append(roster, e.GetTicket())
+		}
+		slices.Sort(roster)
+		rosterString := strings.Join(roster, ",")
+		if _, ok := seenRosters[rosterString]; ok {
+			continue
+		}
+		seenRosters[rosterString] = struct{}{}
+		uniqueCandidates = append(uniqueCandidates, match)
+	}
+	return uniqueCandidates
+}
 
+// Function to be used as a matchmaker function in Nakama (RegisterMatchmakerOverride)
+func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, candidateMatches [][]runtime.MatchmakerEntry) (madeMatches [][]runtime.MatchmakerEntry) {
+	//profileRegistry := &ProfileRegistry{nk: nk}
+
+	if len(candidateMatches) == 0 || len(candidateMatches[0]) == 0 {
+		return nil
+	}
+
+	// Remove odd sized teams
 	for _, match := range candidateMatches {
 		if len(match)%2 != 0 {
 			logger.WithField("match", match).Warn("Match has odd number of players.")
 			continue
 		}
-		team1, team2 := m.BalancedMatchFromCandidate(match)
-		balancedMatches = append(balancedMatches, RatedMatch{team1, team2})
-
 	}
+
+	logger.Info("Running skill-based matchmaker.", zap.Int("num_candidates", len(candidateMatches)))
+
+	// Remove duplicate rosters
+	candidateMatches = removeDuplicateRosters(candidateMatches)
+
+	m.streamCandidates(candidateMatches)
+
+	balancedMatches := make([]RatedMatch, 0, len(candidateMatches))
+
+	balancedMatches = balanceMatches(candidateMatches, m, balancedMatches)
 
 	predictions := make([]PredictedMatch, 0, len(balancedMatches))
 	for _, match := range balancedMatches {
@@ -183,10 +214,9 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 	// Sort so that highest draw probability is first
 	slices.Reverse(predictions)
 
-	logger.WithField("matches", predictions).Debug("Match options.")
-
 	seen := make(map[string]struct{})
 	madeMatches = make([][]runtime.MatchmakerEntry, 0, len(predictions))
+
 OuterLoop:
 	for _, p := range predictions {
 		// The players are ordered by their team
@@ -197,6 +227,8 @@ OuterLoop:
 			if _, ok := seen[e.Entry.GetTicket()]; ok {
 				continue OuterLoop
 			}
+			seen[e.Entry.GetTicket()] = struct{}{}
+
 			match = append(match, e.Entry)
 		}
 
@@ -205,6 +237,27 @@ OuterLoop:
 
 	logger.WithField("matches", madeMatches).Debug("Made matches.")
 	return madeMatches
+}
+
+func balanceMatches(candidateMatches [][]runtime.MatchmakerEntry, m *SkillBasedMatchmaker, balancedMatches []RatedMatch) []RatedMatch {
+	seenRosters := make(map[string]struct{})
+
+	for _, match := range candidateMatches {
+		roster := make([]string, 0, len(match))
+		for _, e := range match {
+			roster = append(roster, e.GetTicket())
+		}
+
+		rosterString := strings.Join(roster, ",")
+		if _, ok := seenRosters[rosterString]; ok {
+			continue
+		}
+		seenRosters[rosterString] = struct{}{}
+
+		team1, team2 := m.BalancedMatchFromCandidate(match)
+		balancedMatches = append(balancedMatches, RatedMatch{team1, team2})
+	}
+	return balancedMatches
 }
 
 func GetRatinByUserID(ctx context.Context, db *sql.DB, userID string) (rating types.Rating, err error) {
