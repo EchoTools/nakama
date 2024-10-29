@@ -67,35 +67,9 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 			return errors.Join(NewLobbyError(InternalError, "failed to be party leader."), err)
 		}
 	}
-	// Check latency to active game servers.
-	doneCh := make(chan struct{})
 
-	go func() {
-		// Give a delay to ensure the client is ready to receive the ping response.
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(250 * time.Millisecond):
-		}
-
-		activeEndpoints := make([]evr.Endpoint, 0, 100)
-		p.broadcasterRegistrationBySession.Range(func(_ string, b *MatchBroadcaster) bool {
-			activeEndpoints = append(activeEndpoints, b.Endpoint)
-			return true
-		})
-
-		if err := PingGameServers(ctx, logger, session, p.db, activeEndpoints); err != nil {
-			logger.Warn("Failed to ping game servers", zap.Error(err))
-		}
-	}()
-
-	// Wait for the ping response to complete
-	select {
-	case <-ctx.Done():
-		return nil
-	case <-time.After(2 * time.Second):
-		logger.Debug("Timed out waiting for ping responses message.")
-	case <-doneCh:
+	if err := p.CheckServerPing(ctx, logger, session); err != nil {
+		return errors.Join(NewLobbyError(InternalError, "failed to check server ping"), err)
 	}
 
 	// If this is a public combat or arena match, then matchmake.
@@ -170,10 +144,41 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 			}
 			return errors.Join(NewLobbyError(InternalError, "failed to join backfill match"), err)
 		}
-
-		logger.Debug("Joined match")
-		return nil
 	}
+
+	return nil
+}
+
+func (p *EvrPipeline) CheckServerPing(ctx context.Context, logger *zap.Logger, session *sessionWS) error {
+	// Check latency to active game servers.
+	doneCh := make(chan error)
+
+	go func() {
+		defer close(doneCh)
+
+		// Wait for the client to be ready.
+		<-time.After(1 * time.Second)
+
+		activeEndpoints := make([]evr.Endpoint, 0, 100)
+		p.broadcasterRegistrationBySession.Range(func(_ string, b *MatchBroadcaster) bool {
+			activeEndpoints = append(activeEndpoints, b.Endpoint)
+			return true
+		})
+
+		if err := PingGameServers(ctx, logger, session, p.db, activeEndpoints); err != nil {
+			doneCh <- err
+		}
+		doneCh <- nil
+	}()
+
+	// Wait for the ping response to complete
+	var err error
+	select {
+	case <-time.After(5 * time.Second):
+		logger.Warn("Timed out waiting for ping responses message.")
+	case err = <-doneCh:
+	}
+	return err
 }
 
 func (p *EvrPipeline) PartyLead(ctx context.Context, logger *zap.Logger, session *sessionWS, params *LobbySessionParameters, lobbyGroup *LobbyGroup) error {
