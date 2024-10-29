@@ -15,14 +15,14 @@ func TestPacketEncoderSettingsFromFlags(t *testing.T) {
 		expectedKeySize    int
 		expectedRandomSize int
 	}{
-		{0, false, false, 0, 0, 0, 0, 0},                               // test with all flags disabled
-		{1, true, false, 0, 0, 0, 0, 0},                                // test with encryption flag enabled
-		{2, false, true, 0, 0, 0, 0, 0},                                // test with mac flag enabled
-		{3, true, true, 0, 0, 0, 0, 0},                                 // test with both encryption and mac flags enabled
-		{36037595259470083, true, true, 0x40, 0x00, 0x20, 0x20, 0x20},  // default client flags
-		{36037595259469955, true, true, 0x20, 0x00, 0x20, 0x20, 0x20},  // default server flags
-		{0x0080080080000103, true, true, 0x40, 0x00, 0x20, 0x20, 0x20}, // default client flags
-		{0x0080080080000083, true, true, 0x20, 0x00, 0x20, 0x20, 0x20}, // default server flags
+		{0, false, false, 0, 0, 0, 0, 0},                                // test with all flags disabled
+		{1, true, false, 0, 0, 0, 0, 0},                                 // test with encryption flag enabled
+		{2, false, true, 0, 0, 0, 0, 0},                                 // test with mac flag enabled
+		{3, true, true, 0, 0, 0, 0, 0},                                  // test with both encryption and mac flags enabled
+		{36037595259470083, true, true, 0x40, 0x00, 0x20, 0x20, 0x20},   // default client flags
+		{36037595259469955, true, true, 0x20, 0x00, 0x20, 0x20, 0x20},   // default server flags
+		{0x0080080080000102, false, true, 0x40, 0x00, 0x20, 0x20, 0x20}, // default client flags
+		{0x0080080080000083, true, true, 0x20, 0x00, 0x20, 0x20, 0x20},  // default server flags
 	}
 
 	for _, tt := range tests {
