@@ -171,34 +171,32 @@ func removeDuplicateRosters(candidates [][]runtime.MatchmakerEntry) [][]runtime.
 }
 
 // Function to be used as a matchmaker function in Nakama (RegisterMatchmakerOverride)
-func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, candidateMatches [][]runtime.MatchmakerEntry) (madeMatches [][]runtime.MatchmakerEntry) {
+func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, candidates [][]runtime.MatchmakerEntry) (madeMatches [][]runtime.MatchmakerEntry) {
 	//profileRegistry := &ProfileRegistry{nk: nk}
 
-	if len(candidateMatches) == 0 || len(candidateMatches[0]) == 0 {
+	if len(candidates) == 0 || len(candidates[0]) == 0 {
 		return nil
 	}
 
 	// Remove odd sized teams
-	for _, match := range candidateMatches {
+	for _, match := range candidates {
 		if len(match)%2 != 0 {
 			logger.WithField("match", match).Warn("Match has odd number of players.")
 			continue
 		}
 	}
 
-	logger.Info("Running skill-based matchmaker.", zap.Int("num_candidates", len(candidateMatches)))
+	logger.Info("Running skill-based matchmaker.", zap.Int("num_candidates", len(candidates)))
 
 	// Remove duplicate rosters
-	candidateMatches = removeDuplicateRosters(candidateMatches)
+	candidates = removeDuplicateRosters(candidates)
 
-	m.streamCandidates(candidateMatches)
+	m.streamCandidates(candidates)
 
-	balancedMatches := make([]RatedMatch, 0, len(candidateMatches))
+	balanced := balanceMatches(candidates, m)
 
-	balancedMatches = balanceMatches(candidateMatches, m, balancedMatches)
-
-	predictions := make([]PredictedMatch, 0, len(balancedMatches))
-	for _, match := range balancedMatches {
+	predictions := make([]PredictedMatch, 0, len(balanced))
+	for _, match := range balanced {
 		predictions = append(predictions, PredictedMatch{
 			Team1: match[0],
 			Team2: match[1],
@@ -239,9 +237,10 @@ OuterLoop:
 	return madeMatches
 }
 
-func balanceMatches(candidateMatches [][]runtime.MatchmakerEntry, m *SkillBasedMatchmaker, balancedMatches []RatedMatch) []RatedMatch {
+func balanceMatches(candidateMatches [][]runtime.MatchmakerEntry, m *SkillBasedMatchmaker) []RatedMatch {
 	seenRosters := make(map[string]struct{})
 
+	balancedMatches := make([]RatedMatch, 0, len(candidateMatches))
 	for _, match := range candidateMatches {
 		roster := make([]string, 0, len(match))
 		for _, e := range match {
