@@ -72,8 +72,8 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		return errors.Join(NewLobbyError(InternalError, "failed to check server ping"), err)
 	}
 
-	// If this is a public combat or arena match, then matchmake.
-	if lobbyParams.Mode == evr.ModeArenaPublic || lobbyParams.Mode == evr.ModeCombatPublic {
+	// Do not matchmake public social lobbies.
+	if lobbyParams.Mode != evr.ModeSocialPublic {
 		// Matchmake a new lobby session
 		logger.Debug("matchmaking", zap.Any("members", lobbyGroup.List()))
 
@@ -82,9 +82,29 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		}
 	}
 
-	initialTimer := time.NewTimer(1 * time.Second)
-	backfillInterval := 6 * time.Second
-	timeout := time.After(MatchmakingTimeout)
+	timeoutTimer := time.NewTimer(MatchmakingTimeout)
+
+	backfillInterval := 3 * time.Second
+
+	if lobbyParams.DisableArenaBackfill && lobbyParams.Mode == evr.ModeArenaPublic {
+		// Set a long backfill interval for arena matches.
+		backfillInterval = MatchmakingTimeout * 2
+	}
+
+	entrants, err := EntrantPresencesFromSessionIDs(logger, p.sessionRegistry, lobbyParams.PartyID, lobbyParams.GroupID, lobbyParams.Rating, lobbyParams.Role, session.id)
+	if err != nil {
+		return NewLobbyError(InternalError, "failed to create entrant presences")
+	}
+
+	if len(entrants) == 0 {
+		logger.Error("No entrants found. Cancelling matchmaking.")
+		return nil
+	}
+
+	entrant := entrants[0]
+
+	// Arbitrary delay
+	<-time.After(1 * time.Second)
 
 	for {
 		var err error
@@ -94,30 +114,13 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 				return errors.Join(NewLobbyError(BadRequest, "context error"), ctx.Err())
 			}
 			return nil
-		case <-timeout:
+		case <-timeoutTimer.C:
+			logger.Warn("Matchmaking timeout")
 			return NewLobbyError(Timeout, "matchmaking timeout")
-		case <-initialTimer.C:
-			logger.Debug("initial timer")
 		case <-time.After(backfillInterval):
 		}
 
-		if lobbyParams.DisableArenaBackfill && lobbyParams.Mode == evr.ModeArenaPublic {
-			continue
-		}
-
-		entrants, err := EntrantPresencesFromSessionIDs(logger, p.sessionRegistry, lobbyParams.PartyID, lobbyParams.GroupID, lobbyParams.Rating, lobbyParams.Role, session.id)
-		if err != nil {
-			return NewLobbyError(InternalError, "failed to create entrant presences")
-		}
-
-		if len(entrants) == 0 {
-			logger.Error("No entrants found. Cancelling matchmaking.")
-			return nil
-		}
-
-		entrant := entrants[0]
-
-		label, team, err := p.lobbyQueue.GetUnfilledMatch(ctx, lobbyParams)
+		label, team, err := p.lobbyQueue.GetUnfilledMatch(ctx, logger, lobbyParams)
 		if err == ErrNoUnfilledMatches {
 			continue
 		} else if err != nil {
