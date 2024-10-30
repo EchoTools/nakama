@@ -189,8 +189,12 @@ func (q *LobbyQueue) FindBackfill(ctx context.Context, logger *zap.Logger, param
 		labels = q.sortLabelsByRTT(params.latencyHistory, labels)
 	}
 
-OuterLoop:
 	for _, label := range labels {
+		select {
+		case <-ctx.Done():
+			return nil, -1, ctx.Err()
+		default:
+		}
 
 		// Lock the joins from the backfill queue for this match
 		mu, _ := q.matchMus.LoadOrStore(label.ID, &sync.Mutex{})
@@ -240,7 +244,7 @@ OuterLoop:
 		// Reserve the slots until the join is complete
 		if err := q.matchJoinPartial(ctx, label, entrants); err != nil {
 			logger.Warn("Failed to reserve slots", zap.Any("label", label), zap.Int("party_size", partySize), zap.Error(err))
-			continue OuterLoop
+			continue
 		}
 
 		return label, team, nil

@@ -65,6 +65,7 @@ func JoinMatchmakingStream(logger *zap.Logger, s *sessionWS, params *LobbySessio
 	// Track the groupID as well
 	return nil
 }
+
 func LeaveMatchmakingStream(logger *zap.Logger, s *sessionWS) error {
 	logger.Debug("Leaving lobby group matchmaking stream")
 	s.tracker.UntrackLocalByModes(s.id, map[uint8]struct{}{StreamModeMatchmaking: {}}, PresenceStream{})
