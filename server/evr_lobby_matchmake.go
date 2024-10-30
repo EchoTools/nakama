@@ -17,7 +17,6 @@ import (
 )
 
 const (
-	findAttemptsExpiry          = time.Minute * 3
 	LatencyCacheRefreshInterval = time.Hour * 3
 	LatencyCacheExpiry          = time.Hour * 72 // 3 hours
 
