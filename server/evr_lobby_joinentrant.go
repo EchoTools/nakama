@@ -71,15 +71,15 @@ func LobbySessionGet(ctx context.Context, logger *zap.Logger, matchRegistry Matc
 	return label, serverSession, nil
 }
 
-func (p *EvrPipeline) LobbyJoinEntrant(logger *zap.Logger, serverSession Session, label *MatchLabel, role int, presence *EvrMatchPresence) error {
+func (p *EvrPipeline) LobbyJoinEntrant(logger *zap.Logger, serverSession Session, label *MatchLabel, presence *EvrMatchPresence) error {
 	session := p.sessionRegistry.Get(presence.SessionID)
 	if session == nil {
 		return NewLobbyError(InternalError, "session is nil")
 	}
-	return LobbyJoinEntrant(logger, p.matchRegistry, p.tracker, session, serverSession, label, presence, role)
+	return LobbyJoinEntrant(logger, p.matchRegistry, p.tracker, session, serverSession, label, presence)
 }
 
-func LobbyJoinEntrant(logger *zap.Logger, matchRegistry MatchRegistry, tracker Tracker, session Session, serverSession Session, label *MatchLabel, e *EvrMatchPresence, role int) error {
+func LobbyJoinEntrant(logger *zap.Logger, matchRegistry MatchRegistry, tracker Tracker, session Session, serverSession Session, label *MatchLabel, e *EvrMatchPresence) error {
 	if session == nil || serverSession == nil {
 		return NewLobbyError(InternalError, "session is nil")
 	}
@@ -170,7 +170,7 @@ func LobbyJoinEntrant(logger *zap.Logger, matchRegistry MatchRegistry, tracker T
 		}
 	}
 
-	connectionSettings := label.GetEntrantConnectMessage(role, e.IsPCVR, e.DisableEncryption, e.DisableMAC)
+	connectionSettings := label.GetEntrantConnectMessage(e.RoleAlignment, e.IsPCVR, e.DisableEncryption, e.DisableMAC)
 	if err := SendEVRMessages(serverSession, connectionSettings); err != nil {
 		logger.Error("failed to send lobby session success to game server", zap.Error(err))
 
