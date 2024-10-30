@@ -57,6 +57,22 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		return errors.Join(NewLobbyError(InternalError, "failed to join matchmaking stream"), err)
 	}
 
+	// Monitor the stream and cancel the context if the stream is closed.
+	go func() {
+		stream := lobbyParams.GroupStream()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(1 * time.Second):
+			}
+
+			if session.tracker.GetLocalBySessionIDStreamUserID(session.id, stream, session.userID) == nil {
+				cancel()
+			}
+		}
+	}()
+
 	// The lobby group is the party that the user is currently in.
 	lobbyGroup, err := JoinLobbyGroup(session, lobbyParams.PartyGroupName, lobbyParams.PartyID, lobbyParams.CurrentMatchID)
 	if err != nil {
