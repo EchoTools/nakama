@@ -895,7 +895,7 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 		}
 
 		for statName, stat := range stats {
-			record, err := p.leaderboardRegistry.Submission(ctx, userIDStr, request.EvrID.String(), username, request.Payload.SessionID.String(), groupName, statName, stat.Operand, stat.Value)
+			record, err := p.leaderboardRegistry.Submission(ctx, userIDStr, request.EvrID.String(), username, request.Payload.SessionID.String(), groupName, statName, "set", stat.Value)
 			if err != nil {
 				logger.Warn("Failed to submit leaderboard", zap.Error(err))
 			}

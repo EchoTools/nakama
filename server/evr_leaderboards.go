@@ -7,20 +7,18 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"go.uber.org/zap"
 )
 
-type leaderboard struct {
-	node     string
-	group    string // arena, daily, weekly
+type LeaderboardMeta struct {
 	statName string // ArenaLosses
+	group    string // all, daily, weekly
 }
 
-func (b leaderboard) ID() string {
-	name := fmt.Sprintf("%s.leaderboard:%s:%s", b.node, b.group, b.statName)
-	return uuid.NewV5(uuid.NamespaceDNS, name).String()
+func (b LeaderboardMeta) ID() string {
+	return fmt.Sprintf("%s:%s", b.statName, b.group)
 }
 
 type LeaderboardRegistry struct {
@@ -59,8 +57,7 @@ func (r *LeaderboardRegistry) Submission(ctx context.Context, ownerID, evrID, us
 	s := strings.SplitN(group, "_", 2)
 	group = s[0]
 
-	leaderboard := leaderboard{
-		node:     r.node,
+	leaderboard := LeaderboardMeta{
 		group:    group,
 		statName: statName,
 	}
@@ -136,8 +133,7 @@ func (r *LeaderboardRegistry) Submission(ctx context.Context, ownerID, evrID, us
 }
 
 func (r *LeaderboardRegistry) List(ctx context.Context, ownerID, group, statName string) ([]*api.LeaderboardRecord, error) {
-	leaderboard := leaderboard{
-		node:     r.node,
+	leaderboard := LeaderboardMeta{
 		group:    group,
 		statName: statName,
 	}
