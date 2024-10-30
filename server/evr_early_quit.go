@@ -15,7 +15,8 @@ var (
 )
 
 type EarlyQuitStatistics struct {
-	History map[int64]bool `json:"history,omitempty"`
+	PenaltyExpiry int64          `json:"penalty_expiry,omitempty"`
+	History       map[int64]bool `json:"history,omitempty"`
 }
 
 func (s *EarlyQuitStatistics) IncrementEarlyQuits() {
@@ -32,7 +33,7 @@ func (s *EarlyQuitStatistics) IncrementCompletedMatches() {
 	s.History[time.Now().Unix()] = false
 }
 
-func (s EarlyQuitStatistics) ApplyEarlyQuitPenalty(logger *zap.Logger, playerStats evr.PlayerStatistics, mode evr.Symbol, penalty float64) {
+func (s EarlyQuitStatistics) ApplyEarlyQuitPenalty(logger *zap.Logger, userID string, label *MatchLabel, playerStats evr.PlayerStatistics, penaltyPercent float64) {
 	// This will apply a penalty to the player's statistics
 	// The penalty is a float64 value 0 and 1.0 that will adjust the players ratio by that amount
 	// A penalty of 0.1 will adjust the player's win/loss ratio by -10%
@@ -44,16 +45,40 @@ func (s EarlyQuitStatistics) ApplyEarlyQuitPenalty(logger *zap.Logger, playerSta
 		ArenaLosses
 		HighestArenaWinStreak
 	*/
-	if penalty <= 0 || penalty > 1.0 {
+
+	if penaltyPercent <= 0 || penaltyPercent > 1.0 {
 		return
 	}
-	if mode != evr.ModeArenaPublic {
+	if label.Mode != evr.ModeArenaPublic {
+		// Only apply the penalty to Arena matches
 		return
+	}
+
+	if userID == label.Broadcaster.OperatorID {
+		// The broadcaster is not penalized
+		return
+	}
+
+	gameClock := label.GameState.CurrentRoundClockMs
+	roundDuration := label.GameState.RoundDurationMs
+
+	if gameClock == 0 || roundDuration == 0 {
+		// The game has not started yet. No penalty is applied.
+		return
+	}
+
+	remainingTime := label.GameState.RemainingTime()
+	if remainingTime > 0 {
+		// The game is still in progress. Set a penalty timer for double the length of the game time remaining.
+		expiry := time.Now().Add(remainingTime * 2)
+		s.PenaltyExpiry = expiry.UTC().Unix()
+	} else {
+		// The game is over. No penalty is applied.
+		s.PenaltyExpiry = 0
 	}
 
 	// Update the default stats with the player's stats
-
-	if modeStats, ok := playerStats[modeStatGroupMap[mode]]; ok {
+	if modeStats, ok := playerStats[modeStatGroupMap[label.Mode]]; ok {
 
 		reqFields := []string{"ArenaWins", "ArenaLosses", "ArenaWinPercentage", "HighestArenaWinStreak", "ArenaTies"}
 		for _, field := range reqFields {
@@ -75,7 +100,7 @@ func (s EarlyQuitStatistics) ApplyEarlyQuitPenalty(logger *zap.Logger, playerSta
 		// Subtract from the Wins, Add to the losses
 		// Keep the total games the same
 
-		delta := int64((float64(wins) * penalty) + 0.5)
+		delta := int64((float64(wins) * penaltyPercent) + 0.5)
 		wins = max(0, wins-delta)
 		losses += delta
 
@@ -136,6 +161,6 @@ func (s EarlyQuitStatistics) ApplyEarlyQuitPenalty(logger *zap.Logger, playerSta
 			}
 
 		}
-		playerStats[modeStatGroupMap[mode]] = modeStats
+		playerStats[modeStatGroupMap[label.Mode]] = modeStats
 	}
 }

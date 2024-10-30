@@ -431,10 +431,10 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 		}
 
 		// If the round clock is being used, set the join clock time
-		if state.GameState != nil && state.GameState.UnpauseTime > 0 {
+		if state.GameState != nil && state.GameState.UnpauseTimeMs > 0 {
 			// Do not overwrite an existing value
 			if _, ok := state.joinTimeMilliseconds[p.GetSessionId()]; !ok {
-				state.joinTimeMilliseconds[p.GetSessionId()] = state.GameState.CurrentRoundClock
+				state.joinTimeMilliseconds[p.GetSessionId()] = state.GameState.CurrentRoundClockMs
 			}
 		}
 		if mp, ok := state.presenceMap[p.GetSessionId()]; !ok {
@@ -579,12 +579,12 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 				u := update
 
 				gs.IsRoundOver = u.IsRoundOver
-				gs.CurrentRoundClock = u.CurrentRoundClock
+				gs.CurrentRoundClockMs = u.CurrentRoundClockMs
 
 				if u.PauseDuration != 0 {
 					gs.IsPaused = true
-					gs.UnpauseTime = time.Now().UTC().UnixMilli() + u.PauseDuration.Milliseconds()
-					gs.ClockPauseMilliseconds = u.CurrentRoundClock
+					gs.UnpauseTimeMs = time.Now().UTC().UnixMilli() + u.PauseDuration.Milliseconds()
+					gs.ClockPauseMs = u.CurrentRoundClockMs
 				}
 
 				if len(u.Goals) > 0 {
@@ -972,10 +972,10 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk run
 	switch state.Mode {
 	case evr.ModeArenaPublic:
 		state.GameState = &GameState{
-			RoundDurationMilliseconds: RoundDuration * 1000,
-			CurrentRoundClock:         0,
-			UnpauseTime:               time.Now().UTC().UnixMilli() + PublicMatchWaitTime,
-			Goals:                     make([]LastGoal, 0),
+			RoundDurationMs:     RoundDuration * 1000,
+			CurrentRoundClockMs: 0,
+			UnpauseTimeMs:       time.Now().UTC().UnixMilli() + PublicMatchWaitTime,
+			Goals:               make([]LastGoal, 0),
 		}
 	}
 
