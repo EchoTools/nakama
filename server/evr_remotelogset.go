@@ -146,6 +146,17 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				continue
 			}
 
+			matchID, err := NewMatchID(msg.SessionID(), p.node)
+			if err != nil {
+				logger.Error("Failed to create match ID", zap.Error(err))
+				continue
+			}
+
+			label, err := MatchLabelByID(ctx, p.runtimeModule, matchID)
+			if err != nil {
+				logger.Error("Failed to get match label", zap.Error(err))
+			}
+
 			userID, err := GetUserIDByEvrID(ctx, p.db, msg.PlayerInfoUserid)
 			if err != nil || userID == "" {
 				logger.Error("Failed to get user ID by evr ID", zap.Error(err))
@@ -161,15 +172,15 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 			profile.SetEarlyQuitStatistics(eq)
 			stats := profile.Server.Statistics
 			if stats != nil {
-				eq.ApplyEarlyQuitPenalty(logger, stats, evr.ModeArenaPublic, 0.01)
+				eq.ApplyEarlyQuitPenalty(logger, userID, label, stats, 0.01)
 			}
 
 			err = p.profileRegistry.SaveAndCache(ctx, uuid.FromStringOrNil(userID), profile)
 			if err != nil {
 				logger.Error("Failed to save player's profile")
 			}
-			update, _ = updates.LoadOrStore(msg.SessionID(), &MatchGameStateUpdate{})
-			update.CurrentRoundClock = int64(msg.GameInfoGameTime * 1000)
+			update, _ = updates.LoadOrStore(matchID.UUID, &MatchGameStateUpdate{})
+			update.CurrentRoundClockMs = int64(msg.GameInfoGameTime * 1000)
 
 		case "goal":
 			// This is a goal message.
@@ -294,7 +305,7 @@ func (u *MatchGameStateUpdate) Bytes() []byte {
 }
 
 func (u *MatchGameStateUpdate) FromGoal(goal evr.RemoteLogGoal) {
-	u.CurrentRoundClock = int64(goal.GameInfoGameTime * 1000)
+	u.CurrentRoundClockMs = int64(goal.GameInfoGameTime * 1000)
 	u.PauseDuration = time.Duration(AfterGoalDuration+RespawnDuration+CatapultDuration) * time.Second
 	if u.Goals == nil {
 		u.Goals = make([]LastGoal, 0, 1)
@@ -313,5 +324,5 @@ func (u *MatchGameStateUpdate) FromGoal(goal evr.RemoteLogGoal) {
 }
 
 func (u *MatchGameStateUpdate) FromVOIPLoudness(goal evr.RemoteLogVOIPLoudness) {
-	u.CurrentRoundClock = int64(goal.GameInfoGameTime * 1000)
+	u.CurrentRoundClockMs = int64(goal.GameInfoGameTime * 1000)
 }

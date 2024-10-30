@@ -22,32 +22,33 @@ type (
 )
 
 type LobbySessionParameters struct {
-	Node                  string        `json:"node"`
-	UserID                uuid.UUID     `json:"user_id"`
-	SessionID             uuid.UUID     `json:"session_id"`
-	VersionLock           evr.Symbol    `json:"version_lock"`
-	AppID                 evr.Symbol    `json:"app_id"`
-	GroupID               uuid.UUID     `json:"group_id"`
-	Region                evr.Symbol    `json:"region"`
-	Mode                  evr.Symbol    `json:"mode"`
-	Level                 evr.Symbol    `json:"level"`
-	SupportedFeatures     []string      `json:"supported_features"`
-	RequiredFeatures      []string      `json:"required_features"`
-	CurrentMatchID        MatchID       `json:"current_match_id"`
-	Role                  int           `json:"role"`
-	PartySize             *atomic.Int64 `json:"party_size"`
-	PartyID               uuid.UUID     `json:"party_id"`
-	PartyGroupName        string        `json:"party_group_name"`
-	NextMatchID           MatchID       `json:"next_match_id"`
-	DisableArenaBackfill  bool          `json:"disable_arena_backfill"`
-	BackfillQueryAddon    string        `json:"backfill_query_addon"`
-	MatchmakingQueryAddon string        `json:"matchmaking_query_addon"`
-	CreateQueryAddon      string        `json:"create_query_addon"`
-	Verbose               bool          `json:"verbose"`
-	BlockedIDs            []string      `json:"blocked_ids"`
-	Rating                types.Rating  `json:"rating"`
-	latencyHistory        LatencyHistory
-	ProfileStatistics     evr.PlayerStatistics
+	Node                   string        `json:"node"`
+	UserID                 uuid.UUID     `json:"user_id"`
+	SessionID              uuid.UUID     `json:"session_id"`
+	VersionLock            evr.Symbol    `json:"version_lock"`
+	AppID                  evr.Symbol    `json:"app_id"`
+	GroupID                uuid.UUID     `json:"group_id"`
+	Region                 evr.Symbol    `json:"region"`
+	Mode                   evr.Symbol    `json:"mode"`
+	Level                  evr.Symbol    `json:"level"`
+	SupportedFeatures      []string      `json:"supported_features"`
+	RequiredFeatures       []string      `json:"required_features"`
+	CurrentMatchID         MatchID       `json:"current_match_id"`
+	Role                   int           `json:"role"`
+	PartySize              *atomic.Int64 `json:"party_size"`
+	PartyID                uuid.UUID     `json:"party_id"`
+	PartyGroupName         string        `json:"party_group_name"`
+	NextMatchID            MatchID       `json:"next_match_id"`
+	DisableArenaBackfill   bool          `json:"disable_arena_backfill"`
+	BackfillQueryAddon     string        `json:"backfill_query_addon"`
+	MatchmakingQueryAddon  string        `json:"matchmaking_query_addon"`
+	CreateQueryAddon       string        `json:"create_query_addon"`
+	Verbose                bool          `json:"verbose"`
+	BlockedIDs             []string      `json:"blocked_ids"`
+	Rating                 types.Rating  `json:"rating"`
+	EarlyQuitPenaltyExpiry time.Time     `json:"early_quit_penalty_expiry"`
+	latencyHistory         LatencyHistory
+	ProfileStatistics      evr.PlayerStatistics
 }
 
 func (p *LobbySessionParameters) GetPartySize() int {
@@ -185,39 +186,41 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 	// Add each blocked user that is online to the backfill query addon
 	if len(blockedIDs) > 0 {
 
-		// Avoid players that are blocking this player.
-
 		// Avoid backfilling matches with players that this player blocks.
 		backfillQueryAddons = append(backfillQueryAddons, fmt.Sprintf(`-label.players.user_id:/(%s)/`, Query.Join(blockedIDs, "|")))
 	}
 
+	eqstats := profile.GetEarlyQuitStatistics()
+	penaltyExpiry := time.Unix(eqstats.PenaltyExpiry, 0)
+
 	return &LobbySessionParameters{
-		Node:                  node,
-		UserID:                session.userID,
-		SessionID:             session.id,
-		CurrentMatchID:        currentMatchID,
-		VersionLock:           versionLock,
-		AppID:                 appID,
-		GroupID:               groupID,
-		Region:                region,
-		Mode:                  mode,
-		Level:                 level,
-		SupportedFeatures:     supportedFeatures,
-		RequiredFeatures:      requiredFeatures,
-		Role:                  r.GetEntrantRole(0),
-		DisableArenaBackfill:  globalSettings.DisableArenaBackfill || userSettings.DisableArenaBackfill,
-		BackfillQueryAddon:    strings.Join(backfillQueryAddons, " "),
-		MatchmakingQueryAddon: strings.Join(matchmakingQueryAddons, " "),
-		CreateQueryAddon:      strings.Join(createQueryAddons, " "),
-		PartyGroupName:        lobbyGroupName,
-		PartyID:               uuid.NewV5(uuid.Nil, lobbyGroupName),
-		PartySize:             atomic.NewInt64(1),
-		NextMatchID:           userSettings.NextMatchID,
-		latencyHistory:        latencyHistory,
-		BlockedIDs:            blockedIDs,
-		Rating:                rating,
-		Verbose:               sessionParams.AccountMetadata.DiscordDebugMessages,
-		ProfileStatistics:     profile.LatestStatistics(true, true, false),
+		Node:                   node,
+		UserID:                 session.userID,
+		SessionID:              session.id,
+		CurrentMatchID:         currentMatchID,
+		VersionLock:            versionLock,
+		AppID:                  appID,
+		GroupID:                groupID,
+		Region:                 region,
+		Mode:                   mode,
+		Level:                  level,
+		SupportedFeatures:      supportedFeatures,
+		RequiredFeatures:       requiredFeatures,
+		Role:                   r.GetEntrantRole(0),
+		DisableArenaBackfill:   globalSettings.DisableArenaBackfill || userSettings.DisableArenaBackfill,
+		BackfillQueryAddon:     strings.Join(backfillQueryAddons, " "),
+		MatchmakingQueryAddon:  strings.Join(matchmakingQueryAddons, " "),
+		CreateQueryAddon:       strings.Join(createQueryAddons, " "),
+		PartyGroupName:         lobbyGroupName,
+		PartyID:                uuid.NewV5(uuid.Nil, lobbyGroupName),
+		PartySize:              atomic.NewInt64(1),
+		NextMatchID:            userSettings.NextMatchID,
+		latencyHistory:         latencyHistory,
+		BlockedIDs:             blockedIDs,
+		Rating:                 rating,
+		Verbose:                sessionParams.AccountMetadata.DiscordDebugMessages,
+		ProfileStatistics:      profile.LatestStatistics(true, true, false),
+		EarlyQuitPenaltyExpiry: penaltyExpiry,
 	}, nil
 }
 
@@ -230,18 +233,21 @@ func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionPar
 
 	displayName := sessionParams.AccountMetadata.GetGroupDisplayNameOrDefault(p.GroupID.String())
 
+	submissionTime := time.Now().UTC().Format(time.RFC3339)
 	stringProperties := map[string]string{
-		"mode":         p.Mode.String(),
-		"group_id":     p.GroupID.String(),
-		"version_lock": p.VersionLock.String(),
-		"blocked_ids":  strings.Join(p.BlockedIDs, " "),
-		"display_name": displayName,
+		"mode":            p.Mode.String(),
+		"group_id":        p.GroupID.String(),
+		"version_lock":    p.VersionLock.String(),
+		"blocked_ids":     strings.Join(p.BlockedIDs, " "),
+		"display_name":    displayName,
+		"submission_time": submissionTime,
 	}
 
 	numericProperties := map[string]float64{
-		"rating_mu":    p.Rating.Mu,
-		"rating_sigma": p.Rating.Sigma,
-		"rating_z":     float64(p.Rating.Z),
+		"rating_mu":       p.Rating.Mu,
+		"rating_sigma":    p.Rating.Sigma,
+		"rating_z":        float64(p.Rating.Z),
+		"rank_percentile": p.RankPercentile,
 	}
 
 	qparts := []string{
@@ -250,6 +256,11 @@ func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionPar
 		fmt.Sprintf(`-properties.blocked_ids:/.*%s.*/`, Query.Escape(p.UserID)),
 		//"+properties.version_lock:" + p.VersionLock.String(),
 		p.MatchmakingQueryAddon,
+	}
+
+	// If the user has an early quit penalty, only match them with players who have submitted before the penalty expiry
+	if p.EarlyQuitPenaltyExpiry.After(time.Now()) {
+		qparts = append(qparts, fmt.Sprintf(`-properties.submission_time:<="%s"`, submissionTime))
 	}
 
 	// Add the user's weekly stats to their numericProperties
