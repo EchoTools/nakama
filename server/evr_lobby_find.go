@@ -15,7 +15,7 @@ import (
 var LobbyTestCounter = 0
 
 var ErrCreateLock = errors.New("failed to acquire create lock")
-var MatchmakingTimeout = 5 * time.Minute
+var MatchmakingTimeout = 6 * time.Minute
 
 //var MatchmakingTimeout = 30 * time.Second
 
@@ -24,8 +24,10 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 
 	startTime := time.Now()
 	defer func() {
-		p.metrics.CustomTimer("lobby_find", lobbyParams.MetricsTags(), time.Since(startTime))
-		logger.Debug("Lobby find complete", zap.String("group_id", lobbyParams.GroupID.String()), zap.Int64("partySize", lobbyParams.PartySize.Load()), zap.String("mode", lobbyParams.Mode.String()), zap.Duration("duration", time.Since(startTime)))
+		tags := lobbyParams.MetricsTags()
+		tags["party_size"] = lobbyParams.PartySize.String()
+		p.metrics.CustomTimer("lobby_find", tags, time.Since(startTime))
+		logger.Debug("Lobby find complete", zap.String("group_id", lobbyParams.GroupID.String()), zap.Int64("partySize", lobbyParams.PartySize.Load()), zap.String("mode", lobbyParams.Mode.String()), zap.Int("duration", int(time.Since(startTime).Seconds())))
 	}()
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -93,26 +95,32 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		backfillInterval = MatchmakingTimeout * 2
 	}
 
-	entrants, err := EntrantPresencesFromSessionIDs(logger, p.sessionRegistry, lobbyParams.PartyID, lobbyParams.GroupID, lobbyParams.Rating, lobbyParams.Role, session.id)
+	sessionIDs := []uuid.UUID{session.id}
+	for _, member := range lobbyGroup.List() {
+		if member.Presence.GetSessionId() == session.id.String() {
+			continue
+		}
+		sessionIDs = append(sessionIDs, uuid.FromStringOrNil(member.Presence.GetSessionId()))
+	}
+
+	entrantPresences, err := EntrantPresencesFromSessionIDs(logger, p.sessionRegistry, lobbyParams.PartyID, lobbyParams.GroupID, lobbyParams.Rating, lobbyParams.Role, sessionIDs...)
 	if err != nil {
 		return NewLobbyError(InternalError, "failed to create entrant presences")
 	}
 
-	if len(entrants) == 0 {
+	if len(entrantPresences) == 0 {
 		logger.Error("No entrants found. Cancelling matchmaking.")
 		return nil
 	}
-
-	entrant := entrants[0]
 
 	// Arbitrary delay
 	<-time.After(1 * time.Second)
 
 	// Attempt to backfill until the timeout.
-	return p.lobbyBackfill(ctx, logger, lobbyParams, entrant, backfillInterval)
+	return p.lobbyBackfill(ctx, logger, lobbyParams, backfillInterval, entrantPresences)
 }
 
-func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lobbyParams *LobbySessionParameters, entrant *EvrMatchPresence, interval time.Duration) error {
+func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lobbyParams *LobbySessionParameters, interval time.Duration, entrants []*EvrMatchPresence) error {
 
 	timeoutTimer := time.NewTimer(MatchmakingTimeout)
 
@@ -130,11 +138,18 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 		case <-time.After(interval):
 		}
 
-		label, team, err := p.lobbyQueue.GetUnfilledMatch(ctx, logger, lobbyParams)
+		// This will trigger the MatchJoinAttempt, reserving the slot for the player.
+		// The other party members will follow the leader into the match.
+		label, team, err := p.lobbyQueue.FindBackfill(ctx, logger, lobbyParams, entrants)
 		if err == ErrNoUnfilledMatches {
 			continue
 		} else if err != nil {
 			return errors.Join(NewLobbyError(InternalError, "failed to get unfilled match"), err)
+		}
+
+		// Set the Team Alignment
+		for _, e := range entrants {
+			e.RoleAlignment = team
 		}
 
 		logger := logger.With(zap.String("mid", label.ID.UUID.String()))
@@ -147,8 +162,9 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 			logger.Debug("Failed to get match session", zap.Error(err))
 			continue
 		}
+
 		// Player members will detect the join.
-		if err := p.LobbyJoinEntrant(logger, serverSession, label, team, entrant); err != nil {
+		if err := p.LobbyJoinEntrant(logger, serverSession, label, entrants[0]); err != nil {
 			// Send the error to the client
 			// If it's full just try again.
 			if LobbyErrorCode(err) == ServerIsFull {

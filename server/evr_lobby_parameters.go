@@ -60,11 +60,8 @@ func (p *LobbySessionParameters) SetPartySize(size int) {
 
 func (s LobbySessionParameters) MetricsTags() map[string]string {
 	return map[string]string{
-		"mode":         s.Mode.String(),
-		"level":        s.Level.String(),
-		"region":       s.Region.String(),
-		"version_lock": s.VersionLock.String(),
-		"group_id":     s.GroupID.String(),
+		"mode":     s.Mode.String(),
+		"group_id": s.GroupID.String(),
 	}
 }
 
