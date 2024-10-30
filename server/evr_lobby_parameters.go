@@ -49,6 +49,7 @@ type LobbySessionParameters struct {
 	EarlyQuitPenaltyExpiry time.Time     `json:"early_quit_penalty_expiry"`
 	latencyHistory         LatencyHistory
 	ProfileStatistics      evr.PlayerStatistics
+	RankPercentile         float64 `json:"rank_percentile"`
 }
 
 func (p *LobbySessionParameters) GetPartySize() int {
@@ -193,6 +194,11 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 	eqstats := profile.GetEarlyQuitStatistics()
 	penaltyExpiry := time.Unix(eqstats.PenaltyExpiry, 0)
 
+	percentile, _, err := OverallPercentile(ctx, logger, p.runtimeModule, session.userID.String())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get overall percentile: %w", err)
+	}
+
 	return &LobbySessionParameters{
 		Node:                   node,
 		UserID:                 session.userID,
@@ -221,6 +227,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		Verbose:                sessionParams.AccountMetadata.DiscordDebugMessages,
 		ProfileStatistics:      profile.LatestStatistics(true, true, false),
 		EarlyQuitPenaltyExpiry: penaltyExpiry,
+		RankPercentile:         percentile,
 	}, nil
 }
 

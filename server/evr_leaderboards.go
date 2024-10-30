@@ -54,6 +54,7 @@ func (r *LeaderboardRegistry) set(id string) {
 
 func (r *LeaderboardRegistry) Submission(ctx context.Context, ownerID, evrID, username, matchSessionID, group, statName, operator string, value any) (*api.LeaderboardRecord, error) {
 
+	// Split the daily/weekly prefix from the statName
 	s := strings.SplitN(group, "_", 2)
 	group = s[0]
 

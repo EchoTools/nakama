@@ -894,6 +894,31 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 			}
 		}
 
+		// Add ArenaWins + ArenaLosses as total of how many games played in arena.
+		// Name it "ArenaGames" and set the value to the sum of the two stats.
+		if groupName == "arena" {
+			arenaWins, ok := stats["ArenaWins"]
+			if !ok {
+				arenaWins = evr.StatUpdate{
+					Operand: "set",
+					Value:   0,
+				}
+			}
+			arenaLosses, ok := stats["ArenaLosses"]
+			if !ok {
+				arenaLosses = evr.StatUpdate{
+					Operand: "set",
+					Value:   0,
+				}
+			}
+			gamesPlayed := evr.StatUpdate{
+				Operand: "set",
+				Value:   arenaWins.Int64() + arenaLosses.Int64(),
+			}
+			stats["ArenaGamesPlayed"] = gamesPlayed
+		}
+
+		// Submit the stats to the leaderboard
 		for statName, stat := range stats {
 			record, err := p.leaderboardRegistry.Submission(ctx, userIDStr, request.EvrID.String(), username, request.Payload.SessionID.String(), groupName, statName, "set", stat.Value)
 			if err != nil {
