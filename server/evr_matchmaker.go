@@ -186,7 +186,7 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 		}
 	}
 
-	logger.Info("Running skill-based matchmaker.", zap.Int("num_candidates", len(candidates)))
+	logger.WithField("num_candidates", len(candidates)).Info("Running skill-based matchmaker.")
 
 	// Remove duplicate rosters
 	candidates = removeDuplicateRosters(candidates)
