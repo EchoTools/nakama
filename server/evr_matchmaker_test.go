@@ -1,6 +1,10 @@
 package server
 
 import (
+	"encoding/json"
+	"os"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -98,4 +102,41 @@ func TestRTTweightedPopulationComparison(t *testing.T) {
 			}
 		})
 	}
+}
+
+func Test_balanceMatches(t *testing.T) {
+
+	// read in the possible_matches.json file
+
+	file, err := os.Open("/home/andrew/src/echovrce-mm/possible-matches.json")
+	if err != nil {
+		t.Error("Error opening file")
+	}
+	defer file.Close()
+
+	// read in the file
+	decoder := json.NewDecoder(file)
+	var candidates []*PredictedMatch
+	err = decoder.Decode(&candidates)
+	if err != nil {
+		t.Errorf("Error decoding file: %v", err)
+	}
+
+	seenRosters := make(map[string]struct{})
+	for _, match := range candidates {
+		roster := make([]string, 0, len(match.Entrants()))
+		for _, e := range match.Entrants() {
+			roster = append(roster, e.Entry.GetTicket())
+		}
+		slices.Sort(roster)
+		rosterString := strings.Join(roster, ",")
+		if _, ok := seenRosters[rosterString]; ok {
+			continue
+		}
+		seenRosters[rosterString] = struct{}{}
+	}
+
+	t.Log("Possible Match count", len(candidates))
+	t.Log("Seen Rosters count", len(seenRosters))
+	t.Error(" ")
 }
