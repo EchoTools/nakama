@@ -15,7 +15,7 @@ import (
 var LobbyTestCounter = 0
 
 var ErrCreateLock = errors.New("failed to acquire create lock")
-var MatchmakingTimeout = 6 * time.Minute
+var MatchmakingTimeout = 15 * time.Minute
 
 //var MatchmakingTimeout = 30 * time.Second
 
