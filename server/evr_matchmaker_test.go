@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/heroiclabs/nakama-common/runtime"
 )
 
 func TestMroundRTT(t *testing.T) {
@@ -139,4 +141,55 @@ func Test_balanceMatches(t *testing.T) {
 	t.Log("Possible Match count", len(candidates))
 	t.Log("Seen Rosters count", len(seenRosters))
 	t.Error(" ")
+}
+func TestHasEligibleServers(t *testing.T) {
+	tests := []struct {
+		name   string
+		match  []runtime.MatchmakerEntry
+		maxRTT int
+		want   bool
+	}{
+		{
+			name: "All servers within maxRTT",
+			match: []runtime.MatchmakerEntry{
+				&MatchmakerEntry{Properties: map[string]interface{}{"rtt_server1": 50, "rtt_server2": 60}},
+				&MatchmakerEntry{Properties: map[string]interface{}{"rtt_server1": 40, "rtt_server2": 55}},
+			},
+			maxRTT: 100,
+			want:   true,
+		},
+		{
+			name: "One server exceeds maxRTT",
+			match: []runtime.MatchmakerEntry{
+				&MatchmakerEntry{Properties: map[string]interface{}{"rtt_server1": 150, "rtt_server2": 60}},
+				&MatchmakerEntry{Properties: map[string]interface{}{"rtt_server1": 40, "rtt_server2": 55}},
+			},
+			maxRTT: 100,
+			want:   false,
+		},
+		{
+			name: "Server unreachable for one player",
+			match: []runtime.MatchmakerEntry{
+				&MatchmakerEntry{Properties: map[string]interface{}{"rtt_server1": 50}},
+				&MatchmakerEntry{Properties: map[string]interface{}{"rtt_server1": 20, "rtt_server2": 55}},
+			},
+			maxRTT: 100,
+			want:   false,
+		},
+		{
+			name:   "Empty match",
+			match:  []runtime.MatchmakerEntry{},
+			maxRTT: 100,
+			want:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &SkillBasedMatchmaker{}
+			if got := m.hasEligibleServers(tt.match, tt.maxRTT); got != tt.want {
+				t.Errorf("hasEligibleServers() = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }

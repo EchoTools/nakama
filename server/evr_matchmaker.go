@@ -193,6 +193,15 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 
 	m.streamCandidates(candidates)
 
+	// Ensure that everyone in the match is within 100 ping of a server
+	for i := 0; i < len(candidates); i++ {
+		if !m.hasEligibleServers(candidates[i], 110) {
+			logger.WithField("match", candidates[i]).Warn("Match has players with no eligible servers.")
+			candidates = append(candidates[:i], candidates[i+1:]...)
+			i--
+		}
+	}
+
 	balanced := balanceMatches(candidates, m)
 
 	predictions := make([]PredictedMatch, 0, len(balanced))
@@ -233,8 +242,49 @@ OuterLoop:
 		madeMatches = append(madeMatches, match)
 	}
 
-	logger.WithField("matches", madeMatches).Debug("Made matches.")
+	logger.WithFields(map[string]interface{}{
+		"num_candidates": len(candidates),
+		"num_matches":    len(madeMatches),
+		"matches":        madeMatches,
+	}).Info("Skill-based matchmaker completed.")
+
 	return madeMatches
+}
+
+func (m *SkillBasedMatchmaker) hasEligibleServers(match []runtime.MatchmakerEntry, maxRTT int) bool {
+	rttsByServer := make(map[string][]int)
+	for _, entry := range match {
+		for k, v := range entry.GetProperties() {
+			if !strings.HasPrefix(k, "rtt_") {
+				continue
+			}
+
+			if rtt, ok := v.(int); ok {
+				if _, ok := rttsByServer[k]; !ok {
+					rttsByServer[k] = make([]int, 0, len(match))
+				}
+				rttsByServer[k] = append(rttsByServer[k], rtt)
+			}
+		}
+	}
+
+	for _, s := range rttsByServer {
+		if len(s) != len(match) {
+			// Server is unreachable to one or more players
+			return false
+		}
+	}
+
+	for _, rtts := range rttsByServer {
+		for _, rtt := range rtts {
+			if rtt > maxRTT {
+				// Server is too far away for one or more players
+				return false
+			}
+		}
+	}
+
+	return true
 }
 
 func balanceMatches(candidateMatches [][]runtime.MatchmakerEntry, m *SkillBasedMatchmaker) []RatedMatch {
