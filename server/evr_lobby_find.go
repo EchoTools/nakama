@@ -15,9 +15,6 @@ import (
 var LobbyTestCounter = 0
 
 var ErrCreateLock = errors.New("failed to acquire create lock")
-var MatchmakingTimeout = 15 * time.Minute
-
-//var MatchmakingTimeout = 30 * time.Second
 
 // lobbyJoinSessionRequest is a request to join a specific existing session.
 func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters) error {
@@ -30,7 +27,8 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		logger.Debug("Lobby find complete", zap.String("group_id", lobbyParams.GroupID.String()), zap.Int64("partySize", lobbyParams.PartySize.Load()), zap.String("mode", lobbyParams.Mode.String()), zap.Int("duration", int(time.Since(startTime).Seconds())))
 	}()
 
-	ctx, cancel := context.WithCancel(ctx)
+	// Cancel matchmaking after the timeout.
+	ctx, cancel := context.WithTimeoutCause(ctx, p.matchmakingTicketTimeout(), ErrMatchmakingTimeout)
 	defer cancel()
 
 	// Do authorization checks related to the guild.
@@ -51,12 +49,20 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		return errors.Join(NewLobbyError(InternalError, "failed to join matchmaking stream"), err)
 	}
 
-	// Monitor the stream and cancel the context if the stream is closed.
+	// Monitor the stream and cancel the context (and matchmaking) if the stream is closed.
 	go func() {
+
 		stream := lobbyParams.GroupStream()
 		for {
 			select {
 			case <-ctx.Done():
+				// Check if the cancel was because of a timeout
+				if ctx.Err() == ErrMatchmakingTimeout {
+					logger.Warn("Matchmaking timeout")
+					if err := session.SendEvr(LobbySessionFailureFromError(lobbyParams.Mode, lobbyParams.GroupID, NewLobbyError(Timeout, "matchmaking timeout"))); err != nil {
+						logger.Error("Failed to send lobby session failure message", zap.Error(err))
+					}
+				}
 				return
 			case <-time.After(1 * time.Second):
 			}
@@ -108,7 +114,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	backfillInterval := 3 * time.Second
 	if lobbyParams.DisableArenaBackfill && lobbyParams.Mode == evr.ModeArenaPublic {
 		// Set a long backfill interval for arena matches.
-		backfillInterval = MatchmakingTimeout * 2
+		backfillInterval = 15 * time.Minute
 	}
 
 	sessionIDs := []uuid.UUID{session.id}
@@ -138,8 +144,6 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 
 func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lobbyParams *LobbySessionParameters, interval time.Duration, entrants []*EvrMatchPresence) error {
 
-	timeoutTimer := time.NewTimer(MatchmakingTimeout)
-
 	for {
 		var err error
 		select {
@@ -148,9 +152,6 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 				return errors.Join(NewLobbyError(BadRequest, "context error"), ctx.Err())
 			}
 			return nil
-		case <-timeoutTimer.C:
-			logger.Warn("Matchmaking timeout")
-			return NewLobbyError(Timeout, "matchmaking timeout")
 		case <-time.After(interval):
 		}
 

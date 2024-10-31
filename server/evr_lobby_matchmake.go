@@ -63,6 +63,12 @@ var DefaultMatchmakerTicketConfigs = map[evr.Symbol]MatchmakerTicketConfig{
 	},
 }
 
+func (p *EvrPipeline) matchmakingTicketTimeout() time.Duration {
+	maxIntervals := p.config.GetMatchmaker().MaxIntervals
+	intervalSecs := p.config.GetMatchmaker().IntervalSec
+	return time.Duration(maxIntervals*intervalSecs) * time.Second
+}
+
 func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters, lobbyGroup *LobbyGroup) (err error) {
 
 	ticketConfig, ok := DefaultMatchmakerTicketConfigs[lobbyParams.Mode]
@@ -76,10 +82,8 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 		return fmt.Errorf("failed to add primary ticket: %v", err)
 	}
 
-	// Caclulate the fallback delay based on the max intervals and interval seconds in the configuration
-	maxIntervals := p.config.GetMatchmaker().MaxIntervals
-	intervalSecs := p.config.GetMatchmaker().IntervalSec
-	fallbackDelay := time.Duration(maxIntervals*intervalSecs) * time.Second
+	// Start the fallback when have the matchmaking timeout has expired
+	fallbackDelay := p.matchmakingTicketTimeout() / 2
 
 	// If the first matchmaking ticket fails, try a fallback ticket
 	go func() {
