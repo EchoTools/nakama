@@ -198,6 +198,9 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 	if err != nil {
 		return nil, fmt.Errorf("failed to get overall percentile: %w", err)
 	}
+	if percentile == 0 {
+		percentile = 0.50
+	}
 
 	return &LobbySessionParameters{
 		Node:                   node,

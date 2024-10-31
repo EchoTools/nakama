@@ -22,12 +22,6 @@ var MatchmakingTimeout = 15 * time.Minute
 // lobbyJoinSessionRequest is a request to join a specific existing session.
 func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters) error {
 
-	overallPercentile, statRecords, err := OverallPercentile(ctx, logger, p.runtimeModule, session.UserID().String())
-	if err != nil {
-		return errors.Join(NewLobbyError(InternalError, "failed to get overall percentile"), err)
-	}
-	logger.Debug("Overall stats", zap.Any("stats", statRecords), zap.Float64("percentile", overallPercentile))
-
 	startTime := time.Now()
 	defer func() {
 		tags := lobbyParams.MetricsTags()
