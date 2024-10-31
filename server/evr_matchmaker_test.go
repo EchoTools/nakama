@@ -186,7 +186,7 @@ func TestHasEligibleServers(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := &SkillBasedMatchmaker{}
+			m := &skillBasedMatchmaker{}
 			if got := m.hasEligibleServers(tt.match, tt.maxRTT); got != tt.want {
 				t.Errorf("hasEligibleServers() = %v, want %v", got, tt.want)
 			}
