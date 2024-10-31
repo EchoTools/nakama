@@ -147,7 +147,24 @@ func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 	// Remove duplicate rosters
 	candidates = removeDuplicateRosters(candidates)
 
-	m.streamCandidates(candidates)
+	groupID := candidates[0][0].GetProperties()["group_id"].(string)
+	if groupID == "" {
+		logger.Error("Group ID not found in matchmaker properties.")
+		return nil
+	}
+
+	data, _ := json.Marshal(candidates)
+	if err := nk.StreamSend(StreamModeMatchmaker, groupID, "", "", string(data), nil, false); err != nil {
+		logger.WithField("error", err).Warn("Error streaming candidates")
+	}
+
+	// If there is a non-hidden presence on the stream, then don't make any matches
+	if presences, err := nk.StreamUserList(StreamModeMatchmaker, groupID, "", "", false, true); err != nil {
+		logger.WithField("error", err).Warn("Error listing presences on stream.")
+	} else if len(presences) > 0 {
+		logger.WithField("num_presences", len(presences)).Info("Non-hidden presence on stream, not making matches.")
+		return nil
+	}
 
 	// Ensure that everyone in the match is within 100 ping of a server
 	for i := 0; i < len(candidates); i++ {
