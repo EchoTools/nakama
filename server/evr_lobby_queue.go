@@ -306,11 +306,11 @@ func (q *LobbyQueue) matchJoinPartial(ctx context.Context, label *MatchLabel, en
 
 		presence := &EvrMatchPresence{}
 		if err := json.Unmarshal([]byte(reason), &e); err != nil {
-			return fmt.Errorf("failed to unmarshal match presence", err)
+			return fmt.Errorf("failed to unmarshal match presence: %w", err)
 		}
 
 		if presence.RoleAlignment != e.RoleAlignment {
-			return fmt.Errorf("role alignment mismatch")
+			return errors.New("role alignment mismatch")
 		}
 	}
 
