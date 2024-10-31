@@ -8,30 +8,19 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/gofrs/uuid/v5"
-	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/intinig/go-openskill/rating"
 	"github.com/intinig/go-openskill/types"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
-type SkillBasedMatchmaker struct {
-	logger *zap.Logger
-	router MessageRouter
-}
+type skillBasedMatchmaker struct{}
 
-func NewSkillBasedMatchmaker(logger *zap.Logger, router MessageRouter) *SkillBasedMatchmaker {
-	return &SkillBasedMatchmaker{
-		logger: logger,
-		router: router,
-	}
-}
+var SkillBasedMatchmaker = &skillBasedMatchmaker{}
 
-func (*SkillBasedMatchmaker) TeamStrength(team RatedEntryTeam) float64 {
+func (*skillBasedMatchmaker) TeamStrength(team RatedEntryTeam) float64 {
 	s := 0.0
 	for _, p := range team {
 		s += p.Rating.Mu
@@ -39,7 +28,7 @@ func (*SkillBasedMatchmaker) TeamStrength(team RatedEntryTeam) float64 {
 	return s
 }
 
-func (*SkillBasedMatchmaker) PredictDraw(teams []RatedEntryTeam) float64 {
+func (*skillBasedMatchmaker) PredictDraw(teams []RatedEntryTeam) float64 {
 	team1 := make(types.Team, 0, len(teams[0]))
 	team2 := make(types.Team, 0, len(teams[1]))
 	for _, e := range teams[0] {
@@ -51,7 +40,7 @@ func (*SkillBasedMatchmaker) PredictDraw(teams []RatedEntryTeam) float64 {
 	return rating.PredictDraw([]types.Team{team1, team2}, nil)
 }
 
-func (m *SkillBasedMatchmaker) CreateBalancedMatch(groups [][]*RatedEntry, teamSize int) (RatedEntryTeam, RatedEntryTeam) {
+func (m *skillBasedMatchmaker) CreateBalancedMatch(groups [][]*RatedEntry, teamSize int) (RatedEntryTeam, RatedEntryTeam) {
 	// Split out the solo players
 	solos := make([]*RatedEntry, 0, len(groups))
 	parties := make([][]*RatedEntry, 0, len(groups))
@@ -100,7 +89,7 @@ func (m *SkillBasedMatchmaker) CreateBalancedMatch(groups [][]*RatedEntry, teamS
 	return team1, team2
 }
 
-func (m *SkillBasedMatchmaker) BalancedMatchFromCandidate(candidate []runtime.MatchmakerEntry) (RatedEntryTeam, RatedEntryTeam) {
+func (m *skillBasedMatchmaker) BalancedMatchFromCandidate(candidate []runtime.MatchmakerEntry) (RatedEntryTeam, RatedEntryTeam) {
 	// Create a balanced match
 	ticketMap := lo.GroupBy(candidate, func(e runtime.MatchmakerEntry) string {
 		return e.GetTicket()
@@ -116,39 +105,6 @@ func (m *SkillBasedMatchmaker) BalancedMatchFromCandidate(candidate []runtime.Ma
 
 	team1, team2 := m.CreateBalancedMatch(groups, len(candidate)/2)
 	return team1, team2
-}
-
-func (m *SkillBasedMatchmaker) streamCandidates(candidates [][]runtime.MatchmakerEntry) {
-	logger := m.logger
-	v, ok := candidates[0][0].GetProperties()["group_id"]
-	if !ok {
-		logger.Error("Group ID not found in matchmaker properties.")
-		return
-	}
-	groupIDStr, ok := v.(string)
-	if !ok {
-		logger.Error("Group ID is not a string.")
-		return
-	}
-	groupID := uuid.FromStringOrNil(groupIDStr)
-
-	data, _ := json.Marshal(candidates)
-	m.router.SendToStream(m.logger,
-		PresenceStream{
-			Mode:    StreamModeMatchmaker,
-			Subject: groupID,
-		},
-		&rtapi.Envelope{
-			Message: &rtapi.Envelope_StreamData{
-				StreamData: &rtapi.StreamData{
-					Stream: &rtapi.Stream{
-						Mode:    int32(SessionFormatJson),
-						Subject: groupID.String(),
-					},
-					Data: string(data),
-				},
-			},
-		}, false)
 }
 
 func removeDuplicateRosters(candidates [][]runtime.MatchmakerEntry) [][]runtime.MatchmakerEntry {
@@ -171,7 +127,7 @@ func removeDuplicateRosters(candidates [][]runtime.MatchmakerEntry) [][]runtime.
 }
 
 // Function to be used as a matchmaker function in Nakama (RegisterMatchmakerOverride)
-func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, candidates [][]runtime.MatchmakerEntry) (madeMatches [][]runtime.MatchmakerEntry) {
+func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, candidates [][]runtime.MatchmakerEntry) (madeMatches [][]runtime.MatchmakerEntry) {
 	//profileRegistry := &ProfileRegistry{nk: nk}
 
 	if len(candidates) == 0 || len(candidates[0]) == 0 {
@@ -251,7 +207,7 @@ OuterLoop:
 	return madeMatches
 }
 
-func (m *SkillBasedMatchmaker) hasEligibleServers(match []runtime.MatchmakerEntry, maxRTT int) bool {
+func (m *skillBasedMatchmaker) hasEligibleServers(match []runtime.MatchmakerEntry, maxRTT int) bool {
 	rttsByServer := make(map[string][]int)
 	for _, entry := range match {
 		for k, v := range entry.GetProperties() {
@@ -287,7 +243,7 @@ func (m *SkillBasedMatchmaker) hasEligibleServers(match []runtime.MatchmakerEntr
 	return true
 }
 
-func balanceMatches(candidateMatches [][]runtime.MatchmakerEntry, m *SkillBasedMatchmaker) []RatedMatch {
+func balanceMatches(candidateMatches [][]runtime.MatchmakerEntry, m *skillBasedMatchmaker) []RatedMatch {
 	seenRosters := make(map[string]struct{})
 
 	balancedMatches := make([]RatedMatch, 0, len(candidateMatches))

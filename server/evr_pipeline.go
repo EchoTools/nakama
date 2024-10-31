@@ -68,7 +68,7 @@ type EvrPipeline struct {
 	lobbyQueue                   *LobbyQueue
 	appBot                       *DiscordAppBot
 	leaderboardRegistry          *LeaderboardRegistry
-	sbmm                         *SkillBasedMatchmaker
+	sbmm                         *skillBasedMatchmaker
 	userRemoteLogJournalRegistry *UserLogJouralRegistry
 	ipqsClient                   *IPQSClient
 
@@ -117,7 +117,6 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	leaderboardRegistry := NewLeaderboardRegistry(runtimeLogger, nk, config.GetName())
 	profileRegistry := NewProfileRegistry(nk, db, runtimeLogger, tracker)
 	broadcasterRegistrationBySession := MapOf[string, *MatchBroadcaster]{}
-	skillBasedMatchmaker := NewSkillBasedMatchmaker(logger, router)
 	lobbyBuilder := NewLobbyBuilder(logger, sessionRegistry, matchRegistry, tracker, metrics, profileRegistry)
 	matchmaker.OnMatchedEntries(lobbyBuilder.handleMatchedEntries)
 	userRemoteLogJournalRegistry := NewUserRemoteLogJournalRegistry(sessionRegistry)
@@ -197,7 +196,6 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 
 		profileRegistry:                  profileRegistry,
 		leaderboardRegistry:              leaderboardRegistry,
-		sbmm:                             skillBasedMatchmaker,
 		broadcasterRegistrationBySession: &broadcasterRegistrationBySession,
 		userRemoteLogJournalRegistry:     userRemoteLogJournalRegistry,
 		ipqsClient:                       ipqsClient,
