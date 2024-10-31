@@ -46,6 +46,7 @@ type LobbySessionParameters struct {
 	Verbose                bool          `json:"verbose"`
 	BlockedIDs             []string      `json:"blocked_ids"`
 	Rating                 types.Rating  `json:"rating"`
+	IsEarlyQuitter         bool          `json:"quit_last_game_early"`
 	EarlyQuitPenaltyExpiry time.Time     `json:"early_quit_penalty_expiry"`
 	latencyHistory         LatencyHistory
 	ProfileStatistics      evr.PlayerStatistics
@@ -202,6 +203,20 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		percentile = 0.50
 	}
 
+	isEarlyQuitter := false
+	// Check if the last game was quit early
+	if len(eqstats.History) > 0 {
+		var lastGame int64
+		for ts := range eqstats.History {
+			if ts > lastGame {
+				lastGame = ts
+			}
+		}
+		if eqstats.History[lastGame] {
+			isEarlyQuitter = true
+		}
+	}
+
 	return &LobbySessionParameters{
 		Node:                   node,
 		UserID:                 session.userID,
@@ -230,6 +245,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		Verbose:                sessionParams.AccountMetadata.DiscordDebugMessages,
 		ProfileStatistics:      profile.LatestStatistics(true, true, false),
 		EarlyQuitPenaltyExpiry: penaltyExpiry,
+		IsEarlyQuitter:         isEarlyQuitter,
 		RankPercentile:         percentile,
 	}, nil
 }

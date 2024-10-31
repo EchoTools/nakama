@@ -96,8 +96,9 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		return errors.Join(NewLobbyError(InternalError, "failed to check server ping"), err)
 	}
 
-	// Do not matchmake public social lobbies.
-	if lobbyParams.Mode != evr.ModeSocialPublic {
+	// Do not matchmake for public social lobbies or early quitters.
+	if lobbyParams.Mode != evr.ModeSocialPublic && !lobbyParams.IsEarlyQuitter {
+
 		// Matchmake a new lobby session
 		members := make([]string, 0, lobbyGroup.Size())
 		for _, member := range lobbyGroup.List() {
