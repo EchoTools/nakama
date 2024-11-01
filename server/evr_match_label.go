@@ -85,12 +85,11 @@ func (s *MatchLabel) String() string {
 }
 
 func (s *MatchLabel) RoleLimit(role int) int {
-	switch role {
-	case BlueRole, OrangeRole:
+	switch s.Mode {
+	case evr.ModeArenaPublic, evr.ModeCombatPublic:
 		return s.TeamSize
-	default:
-		return 0
 	}
+	return s.PlayerLimit
 }
 
 func (s *MatchLabel) RoleCount(role int) int {

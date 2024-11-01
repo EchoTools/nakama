@@ -835,10 +835,9 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 		return fmt.Errorf("failed to get match label: %w", err)
 	}
 
-	team1ids, team2ids, team1, team2, isBackfill, playerInfo := teamRatingsFromPlayers(request.EvrID, label.Players)
-
-	userID := uuid.Nil
-	username := ""
+	// Find the user in the match
+	var userID uuid.UUID
+	var username string
 	for _, p := range label.Players {
 		if p.EvrID == request.EvrID {
 			userID = uuid.FromStringOrNil(p.UserID)
@@ -849,8 +848,8 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 	if userID == uuid.Nil {
 		return fmt.Errorf("failed to find player in match")
 	}
-	userIDStr := userID.String()
 
+	userIDStr := userID.String()
 	profile, err := p.profileRegistry.Load(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("failed to load game profiles: %w", err)
@@ -860,39 +859,40 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 	serverProfile := profile.GetServer()
 	eqStats := profile.GetEarlyQuitStatistics()
 
-	matchType := evr.ToSymbol(request.Payload.MatchType).Token().String()
-	_ = matchType
-	for groupName, stats := range request.Payload.Update.StatsGroups {
-		if groupName == "arena" {
+	if label.Mode == evr.ModeArenaPublic {
 
-			playerWon := false
+		isWinner := false
+		if stats, ok := request.Payload.Update.StatsGroups["arena"]; ok {
 			if v, ok := stats["ArenaWins"]; ok {
 				if v.Value.(float64) > 0 {
-					playerWon = true
+					isWinner = true
 				}
-			}
 
-			if playerInfo != nil && !isBackfill {
+				team1ids, team2ids, team1, team2, _, playerInfo := teamRatingsFromPlayers(request.EvrID, label.Players)
+
 				// Swap the teams if the player is on the second team
-				if playerWon && playerInfo.Team == 1 {
+				if playerInfo != nil && isWinner && playerInfo.Team == 1 {
 					team1ids, team2ids = team2ids, team1ids
 					team1, team2 = team2, team1
 				}
-			}
-			ids := append(team1ids, team2ids...)
+				ids := append(team1ids, team2ids...)
 
-			// Get the new ratings for the teams
-			teams := rating.Rate([]types.Team{team1, team2}, nil)
+				// Get the new ratings for the teams
+				teams := rating.Rate([]types.Team{team1, team2}, nil)
 
-			ratings := append(teams[0], teams[1]...)
+				ratings := append(teams[0], teams[1]...)
 
-			for i, id := range ids {
-				if id == userIDStr {
-					profile.SetRating(ratings[i])
-					break
+				for i, id := range ids {
+					if id == userIDStr {
+						profile.SetRating(ratings[i])
+						break
+					}
 				}
 			}
 		}
+	}
+
+	for groupName, stats := range request.Payload.Update.StatsGroups {
 
 		// Add ArenaWins + ArenaLosses as total of how many games played in arena.
 		// Name it "ArenaGames" and set the value to the sum of the two stats.
@@ -911,10 +911,12 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 					Value:   0,
 				}
 			}
+
 			gamesPlayed := evr.StatUpdate{
 				Operand: "set",
 				Value:   arenaWins.Int64() + arenaLosses.Int64(),
 			}
+
 			stats["ArenaGamesPlayed"] = gamesPlayed
 		}
 
