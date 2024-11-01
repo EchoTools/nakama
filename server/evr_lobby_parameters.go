@@ -285,9 +285,9 @@ func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionPar
 	}
 
 	// If the user has an early quit penalty, only match them with players who have submitted before the penalty expiry
-	if p.EarlyQuitPenaltyExpiry.After(time.Now()) {
-		qparts = append(qparts, fmt.Sprintf(`-properties.submission_time:<="%s"`, submissionTime))
-	}
+	//if p.EarlyQuitPenaltyExpiry.After(time.Now()) {
+	//	qparts = append(qparts, fmt.Sprintf(`-properties.submission_time:<="%s"`, submissionTime))
+	//}
 
 	// Add the user's weekly stats to their numericProperties
 	for mode, stats := range p.ProfileStatistics {

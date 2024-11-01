@@ -167,13 +167,27 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				logger.Error("Failed to load player's profile")
 			}
 
+			var username string
+			for _, player := range label.Players {
+				if player.EvrID.String() == msg.PlayerInfoUserid {
+					username = player.Username
+					break
+				}
+			}
+
 			eq := profile.GetEarlyQuitStatistics()
 			eq.IncrementEarlyQuits()
-			profile.SetEarlyQuitStatistics(eq)
-			stats := profile.Server.Statistics
-			if stats != nil {
+
+			if stats := profile.Server.Statistics; stats != nil {
 				eq.ApplyEarlyQuitPenalty(logger, userID, label, stats, 0.01)
+
+				_, err := p.leaderboardRegistry.Submission(ctx, userID, request.EvrID.String(), username, label.ID.UUID.String(), "arena", "ArenaEarlyQuits", "add", 1)
+				if err != nil {
+					logger.Warn("Failed to submit leaderboard", zap.Error(err))
+				}
 			}
+
+			profile.SetEarlyQuitStatistics(eq)
 
 			err = p.profileRegistry.SaveAndCache(ctx, uuid.FromStringOrNil(userID), profile)
 			if err != nil {

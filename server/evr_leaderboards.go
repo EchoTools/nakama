@@ -161,7 +161,6 @@ func (r *LeaderboardRegistry) List(ctx context.Context, ownerID, group, statName
 	for {
 		_, ownerRecords, _, cursor, err = r.nk.LeaderboardRecordsList(ctx, id, ownerIDs, limit, cursor, 0)
 		if err != nil {
-			r.logger.WithField("err", err).Error("Leaderboard records list error.")
 		}
 		if cursor == "" {
 			break
@@ -195,7 +194,6 @@ func OverallPercentile(ctx context.Context, logger *zap.Logger, nk runtime.Nakam
 
 		records, _, _, _, err := nk.LeaderboardRecordsList(ctx, id, []string{userID}, 10000, "", 0)
 		if err != nil {
-			logger.Error("Leaderboard records list error", zap.Error(err), zap.String("id", id))
 			continue
 		}
 

@@ -33,7 +33,7 @@ func (s *EarlyQuitStatistics) IncrementCompletedMatches() {
 	s.History[time.Now().Unix()] = false
 }
 
-func (s EarlyQuitStatistics) ApplyEarlyQuitPenalty(logger *zap.Logger, userID string, label *MatchLabel, playerStats evr.PlayerStatistics, penaltyPercent float64) {
+func (s *EarlyQuitStatistics) ApplyEarlyQuitPenalty(logger *zap.Logger, userID string, label *MatchLabel, playerStats evr.PlayerStatistics, penaltyPercent float64) {
 	// This will apply a penalty to the player's statistics
 	// The penalty is a float64 value 0 and 1.0 that will adjust the players ratio by that amount
 	// A penalty of 0.1 will adjust the player's win/loss ratio by -10%
