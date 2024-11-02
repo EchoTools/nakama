@@ -196,7 +196,7 @@ type DeveloperFeatures struct {
 }
 
 type MatchStatistic struct {
-	Operation string `json:"op"`
+	Operation string `json:"op,omitempty"`
 	Value     any    `json:"val"`
 	Count     int64  `json:"cnt,omitempty"`
 }

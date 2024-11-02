@@ -4,6 +4,7 @@ import (
 	"math"
 
 	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/intinig/go-openskill/rating"
 	"github.com/intinig/go-openskill/types"
 	"go.uber.org/thriftrw/ptr"
@@ -98,4 +99,50 @@ func NewDefaultRating() types.Rating {
 		Mu:    ptr.Float64(25.0),
 		Sigma: ptr.Float64(8.333),
 	})
+}
+
+func CalculateNewPlayerRating(evrID evr.EvrId, players []PlayerInfo, orangeWins bool) types.Rating {
+
+	teams := make([]types.Team, 2)
+
+	// The player's team
+	var teamIdx TeamIndex
+
+	for _, p := range players {
+
+		if p.JoinTime != 0.0 {
+			// Skip backfill players
+			continue
+		}
+
+		t := p.Team
+		teams[t] = append(teams[t], p.Rating)
+
+		if p.EvrID == evrID {
+			teamIdx = p.Team
+			if len(teams[t]) > 0 {
+				// Move the player to the beginning
+				l := len(teams[t])
+				teams[t][0], teams[t][l-1] = teams[t][l-1], teams[t][0]
+			}
+		}
+	}
+
+	// Pad the teams to 4 players
+	for i := range teams {
+		for j := len(teams[i]); j < 4; j++ {
+			teams[i] = append(teams[i], NewDefaultRating())
+		}
+	}
+
+	// Swap the teams if the orangeTeam won
+
+	if orangeWins {
+		teams[0], teams[1] = teams[1], teams[0]
+		teamIdx = 1 - teamIdx
+	}
+
+	teams = rating.Rate(teams, nil)
+
+	return teams[teamIdx][0]
 }

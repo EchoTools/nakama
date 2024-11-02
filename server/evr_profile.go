@@ -18,6 +18,7 @@ import (
 
 type GameProfile interface {
 	GetVersion() string
+	GetEvrID() evr.EvrId
 	SetLogin(login evr.LoginProfile)
 	SetClient(client evr.ClientProfile)
 	SetServer(server evr.ServerProfile)
@@ -173,8 +174,8 @@ func (p *GameProfileData) GetLogin() evr.LoginProfile {
 	return p.Login
 }
 
-func (p *GameProfileData) GetEarlyQuitStatistics() EarlyQuitStatistics {
-	return p.EarlyQuits
+func (p *GameProfileData) GetEarlyQuitStatistics() *EarlyQuitStatistics {
+	return &p.EarlyQuits
 }
 
 func (p *GameProfileData) GetRating() types.Rating {
