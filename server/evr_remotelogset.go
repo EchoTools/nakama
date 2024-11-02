@@ -155,16 +155,19 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 			label, err := MatchLabelByID(ctx, p.runtimeModule, matchID)
 			if err != nil {
 				logger.Error("Failed to get match label", zap.Error(err))
+				continue
 			}
 
 			userID, err := GetUserIDByEvrID(ctx, p.db, msg.PlayerInfoUserid)
 			if err != nil || userID == "" {
 				logger.Error("Failed to get user ID by evr ID", zap.Error(err))
+				continue
 			}
 
 			profile, err := p.profileRegistry.Load(ctx, uuid.FromStringOrNil(userID))
 			if err != nil {
 				logger.Error("Failed to load player's profile")
+				continue
 			}
 
 			var username string
@@ -181,13 +184,20 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 			if stats := profile.Server.Statistics; stats != nil {
 				eq.ApplyEarlyQuitPenalty(logger, userID, label, stats, 0.01)
 
-				_, err := p.leaderboardRegistry.Submission(ctx, userID, request.EvrID.String(), username, label.ID.UUID.String(), "arena", "ArenaEarlyQuits", "add", 1)
-				if err != nil {
-					logger.Warn("Failed to submit leaderboard", zap.Error(err))
+				for _, periodicty := range []string{"alltime", "daily", "weekly"} {
+					meta := LeaderboardMeta{
+						mode:        evr.ModeArenaPublic,
+						name:        "EarlyQuits",
+						periodicity: periodicty,
+					}
+
+					if _, err := p.leaderboardRegistry.RecordWrite(ctx, meta, userID, username, 1); err != nil {
+						logger.Warn("Failed to submit leaderboard", zap.Error(err))
+					}
 				}
 			}
 
-			profile.SetEarlyQuitStatistics(eq)
+			profile.SetEarlyQuitStatistics(*eq)
 
 			err = p.profileRegistry.SaveAndCache(ctx, uuid.FromStringOrNil(userID), profile)
 			if err != nil {

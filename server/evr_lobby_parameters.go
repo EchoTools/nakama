@@ -12,6 +12,7 @@ import (
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
+	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/intinig/go-openskill/types"
 	"go.uber.org/zap"
@@ -349,4 +350,58 @@ func AverageLatencyHistories(histories LatencyHistory) map[string]int {
 	}
 
 	return averages
+}
+
+func OverallPercentile(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, userID string) (float64, map[string]*api.LeaderboardRecord, error) {
+
+	statNames := []string{
+		"ArenaGamesPlayed",
+		"ArenaWins",
+		"ArenaLosses",
+		"ArenaWinPercentage",
+		"AssistsPerGame",
+		"AveragePointsPerGame",
+		"AverageTopSpeedPerGame",
+		"BlockPercentage",
+		"GoalScorePercentage",
+		"GoalsPerGame",
+	}
+
+	statRecords := make(map[string]*api.LeaderboardRecord)
+	for _, s := range statNames {
+		id := fmt.Sprintf("daily:%s", s)
+
+		records, _, _, _, err := nk.LeaderboardRecordsList(ctx, id, []string{userID}, 10000, "", 0)
+		if err != nil {
+			continue
+		}
+
+		if len(records) == 0 {
+			continue
+		}
+
+		statRecords[s] = records[0]
+	}
+
+	if len(statRecords) == 0 {
+		return 0, nil, nil
+	}
+
+	// Combine all the stat ranks into a single percentile.
+	percentiles := make([]float64, 0, len(statRecords))
+	for _, r := range statRecords {
+		percentile := float64(r.GetRank()) / float64(r.GetNumScore())
+		percentiles = append(percentiles, percentile)
+	}
+
+	// Calculate the overall percentile.
+	overallPercentile := 0.0
+	for _, p := range percentiles {
+		overallPercentile += p
+	}
+	overallPercentile /= float64(len(percentiles))
+
+	logger.Info("Overall percentile", zap.Float64("percentile", overallPercentile))
+
+	return overallPercentile, statRecords, nil
 }

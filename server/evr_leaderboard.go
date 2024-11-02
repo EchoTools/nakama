@@ -72,7 +72,22 @@ func (l LeaderboardMeta) ID() string {
 	return fmt.Sprintf("%s:%s:%s", l.mode.String(), l.name, l.periodicity)
 }
 
-func (r *LeaderboardRegistry) ProcessProfileUpdate(ctx context.Context, userID, username string, mode evr.Symbol, payload *evr.UpdatePayload) error {
+func (r *LeaderboardRegistry) LeaderboardMetaFromID(id string) (LeaderboardMeta, error) {
+	parts := strings.Split(id, ":")
+	if len(parts) != 3 {
+		return LeaderboardMeta{}, fmt.Errorf("invalid leaderboard ID: %s", id)
+	}
+
+	mode := evr.ToSymbol(parts[0])
+
+	return LeaderboardMeta{
+		mode:        mode,
+		name:        parts[1],
+		periodicity: parts[2],
+	}, nil
+}
+
+func (r *LeaderboardRegistry) ProcessProfileUpdate(ctx context.Context, userID, username string, mode evr.Symbol, payload *evr.UpdatePayload, serverProfile *evr.ServerProfile) error {
 
 	var statGroup, prefix string
 
@@ -110,14 +125,24 @@ func (r *LeaderboardRegistry) ProcessProfileUpdate(ctx context.Context, userID, 
 			}
 
 			submissions[meta] = stat.Value
+
 		}
 	}
 
 	// Submit the score
 	for meta, value := range submissions {
-		_, err := r.RecordWrite(ctx, meta, userID, username, value)
+		record, err := r.RecordWrite(ctx, meta, userID, username, value)
 		if err != nil {
 			return fmt.Errorf("Leaderboard record write error: %v", err)
+		}
+
+		if _, ok := serverProfile.Statistics[statGroup]; !ok {
+			serverProfile.Statistics[statGroup] = make(map[string]evr.MatchStatistic)
+		}
+
+		serverProfile.Statistics[statGroup][meta.name] = evr.MatchStatistic{
+			Count: int64(record.NumScore),
+			Value: r.scoreToValue(record.Score, record.Subscore),
 		}
 	}
 
@@ -125,7 +150,8 @@ func (r *LeaderboardRegistry) ProcessProfileUpdate(ctx context.Context, userID, 
 }
 
 func (r *LeaderboardRegistry) RecordWrite(ctx context.Context, meta LeaderboardMeta, userID, username string, value float64) (*api.LeaderboardRecord, error) {
-	score, subscore := r.ValueToScore(value)
+	score, subscore := r.valueToScore(value)
+
 	record, err := r.nk.LeaderboardRecordWrite(ctx, meta.ID(), userID, username, score, subscore, nil, nil)
 
 	if err != nil {
@@ -140,6 +166,7 @@ func (r *LeaderboardRegistry) RecordWrite(ctx context.Context, meta LeaderboardM
 			record, err = r.nk.LeaderboardRecordWrite(ctx, meta.ID(), userID, username, score, subscore, nil, nil)
 		}
 	}
+
 	return record, err
 }
 func (r *LeaderboardRegistry) createGamesPlayedStat(stats map[string]evr.StatUpdate, prefix string) {
@@ -157,7 +184,7 @@ func (r *LeaderboardRegistry) createGamesPlayedStat(stats map[string]evr.StatUpd
 	}
 }
 
-func (*LeaderboardRegistry) ValueToScore(v float64) (int64, int64) {
+func (*LeaderboardRegistry) valueToScore(v float64) (int64, int64) {
 	// If it's a whole number, return it as such.
 	if v == float64(int64(v)) {
 		return int64(v), 0
@@ -174,7 +201,7 @@ func (*LeaderboardRegistry) ValueToScore(v float64) (int64, int64) {
 	return whole, fractional
 }
 
-func (*LeaderboardRegistry) ScoreToValue(score int64, subscore int64) float64 {
+func (*LeaderboardRegistry) scoreToValue(score int64, subscore int64) float64 {
 	// If there's no subscore, return the score as a whole number.
 	if subscore == 0 {
 		return float64(score)

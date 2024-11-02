@@ -70,7 +70,7 @@ func TestValueToScore(t *testing.T) {
 
 	for _, test := range tests {
 
-		whole, fractional := (&LeaderboardRegistry{}).ValueToScore(test.input)
+		whole, fractional := (&LeaderboardRegistry{}).valueToScore(test.input)
 
 		if whole != test.expectedWhole || fractional != test.expectedFractional {
 			t.Errorf("splitFloat64(%f) = (%d, %d); expected (%d, %d)", test.input, whole, fractional, test.expectedWhole, test.expectedFractional)
@@ -90,7 +90,7 @@ func TestScoreToValue(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		result := (&LeaderboardRegistry{}).ScoreToValue(test.score, test.subscore)
+		result := (&LeaderboardRegistry{}).scoreToValue(test.score, test.subscore)
 
 		if result != test.expected {
 			t.Errorf("ScoreToValue(%d, %d) = %f; expected %f", test.score, test.subscore, result, test.expected)

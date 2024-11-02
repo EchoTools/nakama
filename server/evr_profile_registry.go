@@ -116,6 +116,8 @@ func (r *ProfileRegistry) Load(ctx context.Context, userID uuid.UUID) (profile *
 	}
 	profile.Stale = false
 
+	// Load the user's leaderboard statistics
+
 	return profile, nil
 }
 func (r *ProfileRegistry) Save(ctx context.Context, userID uuid.UUID, profile GameProfile) error {
@@ -140,6 +142,11 @@ func (r *ProfileRegistry) Save(ctx context.Context, userID uuid.UUID, profile Ga
 		return err
 	}
 
+	// Purge the cache
+	r.cacheMu.Lock()
+	delete(r.cache, profile.GetEvrID())
+	r.cacheMu.Unlock()
+
 	return err
 }
 func (r *ProfileRegistry) SaveAndCache(ctx context.Context, userID uuid.UUID, profile GameProfile) error {
@@ -147,6 +154,7 @@ func (r *ProfileRegistry) SaveAndCache(ctx context.Context, userID uuid.UUID, pr
 	if err := r.Save(ctx, userID, profile); err != nil {
 		return err
 	}
+
 	serverProfile := profile.GetServer()
 	data, err := json.Marshal(serverProfile)
 	if err != nil {

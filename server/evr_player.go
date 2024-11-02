@@ -1,6 +1,7 @@
 package server
 
 import (
+	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/intinig/go-openskill/types"
 	"github.com/ipinfo/go/v2/ipinfo"
@@ -18,4 +19,12 @@ type PlayerInfo struct {
 	JoinTime    int64        `json:"join_time_ms"` // The time on the round clock that the player joined
 	Rating      types.Rating `json:"rating,omitempty"`
 	IPinfo      *ipinfo.Core `json:"ip_info,omitempty"`
+}
+
+func (p *PlayerInfo) IsBackfill() bool {
+	return p.JoinTime != 0.0
+}
+
+func (p *PlayerInfo) UUID() uuid.UUID {
+	return uuid.FromStringOrNil(p.UserID)
 }

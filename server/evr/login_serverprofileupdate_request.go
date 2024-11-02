@@ -32,41 +32,7 @@ type StatsUpdate struct {
 }
 
 type StatUpdate struct {
-	Operand string `json:"op"`
-	Value   any    `json:"val"`
-	Count   int64  `json:"cnt"`
-}
-
-func (u StatUpdate) IsFloat64() bool {
-	if u.Value == nil {
-		return false
-	}
-	if _, ok := u.Value.(float64); ok {
-		return true
-	}
-	return false
-}
-
-func (u StatUpdate) IsInt64() bool {
-	if u.Value == nil {
-		return false
-	}
-	if _, ok := u.Value.(int64); ok {
-		return true
-	}
-	return false
-}
-
-func (u StatUpdate) Int64() int64 {
-	if u.IsInt64() {
-		return u.Value.(int64)
-	}
-	return 0
-}
-
-func (u StatUpdate) Float64() float64 {
-	if u.IsFloat64() {
-		return u.Value.(float64)
-	}
-	return 0
+	Operator string  `json:"op"`
+	Value    float64 `json:"val"`
+	Count    int64   `json:"cnt"`
 }

@@ -14,8 +14,6 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama/v3/server/evr"
-	"github.com/intinig/go-openskill/rating"
-	"github.com/intinig/go-openskill/types"
 	"github.com/muesli/reflow/wordwrap"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -814,6 +812,12 @@ func generateSuspensionNotice(statuses []*SuspensionStatus) string {
 	return strings.Join(msgs, "\n")
 }
 
+func mostRecentThursday() time.Time {
+	now := time.Now()
+	offset := (int(now.Weekday()) - int(time.Thursday) + 7) % 7
+	return now.AddDate(0, 0, -offset).UTC()
+}
+
 // A profile udpate request is sent from the game server's login connection.
 // It is sent 45 seconds before the sessionend is sent, right after the match ends.
 func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
@@ -828,202 +832,48 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 		return fmt.Errorf("failed to generate matchID: %w", err)
 	}
 
-	// Verify the player is a member of this match
 	label, err := MatchLabelByID(ctx, p.runtimeModule, matchID)
 	if err != nil || label == nil {
-		logger.Warn("Failed to get match label", zap.Error(err), zap.String("mid", matchID.String()))
 		return fmt.Errorf("failed to get match label: %w", err)
 	}
 
-	// Find the user in the match
-	var userID uuid.UUID
-	var username string
-	for _, p := range label.Players {
-		if p.EvrID == request.EvrID {
-			userID = uuid.FromStringOrNil(p.UserID)
-			username = p.Username
-			break
-		}
-	}
-	if userID == uuid.Nil {
+	playerInfo := label.GetPlayerByEvrID(request.EvrID)
+
+	if playerInfo == nil {
 		return fmt.Errorf("failed to find player in match")
 	}
 
-	userIDStr := userID.String()
-	profile, err := p.profileRegistry.Load(ctx, userID)
+	// Update the player's rating, if it's not a backfill player
+	if !playerInfo.IsBackfill() {
+		if stats, ok := request.Payload.Update.StatsGroups["arena"]; ok {
+			if s, ok := stats["ArenaWins"]; ok {
+				isWinner := false
+				if s.Value > 0 {
+					isWinner = true
+				}
+				playerInfo.Rating = CalculateNewPlayerRating(request.EvrID, label.Players, isWinner)
+			}
+		}
+	}
+
+	profile, err := p.profileRegistry.Load(ctx, playerInfo.UUID())
 	if err != nil {
 		return fmt.Errorf("failed to load game profiles: %w", err)
 	}
-	profile.SetEvrID(request.EvrID)
 
-	serverProfile := profile.GetServer()
-	eqStats := profile.GetEarlyQuitStatistics()
+	profile.EarlyQuits.IncrementCompletedMatches()
 
-	if label.Mode == evr.ModeArenaPublic {
-
-		isWinner := false
-		if stats, ok := request.Payload.Update.StatsGroups["arena"]; ok {
-			if v, ok := stats["ArenaWins"]; ok {
-				if v.Value.(float64) > 0 {
-					isWinner = true
-				}
-
-				team1ids, team2ids, team1, team2, _, playerInfo := teamRatingsFromPlayers(request.EvrID, label.Players)
-
-				// Swap the teams if the player is on the second team
-				if playerInfo != nil && isWinner && playerInfo.Team == 1 {
-					team1ids, team2ids = team2ids, team1ids
-					team1, team2 = team2, team1
-				}
-				ids := append(team1ids, team2ids...)
-
-				// Get the new ratings for the teams
-				teams := rating.Rate([]types.Team{team1, team2}, nil)
-
-				ratings := append(teams[0], teams[1]...)
-
-				for i, id := range ids {
-					if id == userIDStr {
-						profile.SetRating(ratings[i])
-						break
-					}
-				}
-			}
-		}
+	// Process the update into the leaderboard and profile
+	err = p.leaderboardRegistry.ProcessProfileUpdate(ctx, playerInfo.UserID, playerInfo.Username, label.Mode, &request.Payload, &profile.Server)
+	if err != nil {
+		logger.Error("Failed to process profile update", zap.Error(err), zap.Any("payload", request.Payload))
+		return fmt.Errorf("failed to process profile update: %w", err)
 	}
 
-	for groupName, stats := range request.Payload.Update.StatsGroups {
-
-		// Add ArenaWins + ArenaLosses as total of how many games played in arena.
-		// Name it "ArenaGames" and set the value to the sum of the two stats.
-		if groupName == "arena" {
-			arenaWins, ok := stats["ArenaWins"]
-			if !ok {
-				arenaWins = evr.StatUpdate{
-					Operand: "set",
-					Value:   0,
-				}
-			}
-			arenaLosses, ok := stats["ArenaLosses"]
-			if !ok {
-				arenaLosses = evr.StatUpdate{
-					Operand: "set",
-					Value:   0,
-				}
-			}
-
-			gamesPlayed := evr.StatUpdate{
-				Operand: "set",
-				Value:   arenaWins.Int64() + arenaLosses.Int64(),
-			}
-
-			stats["ArenaGamesPlayed"] = gamesPlayed
-		}
-
-		// Submit the stats to the leaderboard
-		for statName, stat := range stats {
-			record, err := p.leaderboardRegistry.Submission(ctx, userIDStr, request.EvrID.String(), username, request.Payload.SessionID.String(), groupName, statName, "set", stat.Value)
-			if err != nil {
-				logger.Warn("Failed to submit leaderboard", zap.Error(err))
-			}
-			if record != nil {
-				matchStat := evr.MatchStatistic{
-					Operation: stat.Operand,
-				}
-				if matchStat.Count != 0 {
-					matchStat.Count = stat.Count
-				}
-
-				if stat.IsFloat64() {
-					// Combine the record score and the subscore as the decimal value
-					matchStat.Value = float64(record.Score) + float64(record.Subscore)/10000
-				} else {
-					matchStat.Value = record.Score
-				}
-
-				// Update the profile
-				_, ok := serverProfile.Statistics[groupName]
-				if !ok {
-					serverProfile.Statistics[groupName] = make(map[string]evr.MatchStatistic)
-				}
-				matchStat.Operation = stat.Operand
-				serverProfile.Statistics[groupName][statName] = matchStat
-			}
-		}
-	}
-	profile.SetServer(serverProfile)
-	profile.SetEarlyQuitStatistics(eqStats)
 	// Store the profile
-	p.profileRegistry.Save(ctx, userID, profile)
+	p.profileRegistry.Save(ctx, playerInfo.UUID(), profile)
 
 	return nil
-}
-
-func teamRatingsFromPlayers(evrID evr.EvrId, players []PlayerInfo) ([]string, []string, []types.Rating, []types.Rating, bool, *PlayerInfo) {
-
-	team1ids := make([]string, 0, 4)
-	team2ids := make([]string, 0, 4)
-	team1 := make([]types.Rating, 0, 4)
-	team2 := make([]types.Rating, 0, 4)
-
-	isBackfill := false
-	var playerInfo *PlayerInfo
-
-	for _, p := range players {
-
-		if p.EvrID == evrID {
-			playerInfo = &p
-		}
-
-		if p.JoinTime != 0.0 {
-			if p.EvrID == evrID {
-				isBackfill = true
-			}
-			continue // Skip backfill players
-		} else if p.Team == 0 {
-			team1ids = append(team1ids, p.UserID)
-			team1 = append(team1, p.Rating)
-		} else if p.Team == 1 {
-			team2ids = append(team2ids, p.UserID)
-			team2 = append(team2, p.Rating)
-		}
-	}
-
-	// Fill in the missing ratings
-	for i := len(team1); i < 4; i++ {
-		team1 = append(team1, NewDefaultRating())
-	}
-	for i := len(team2); i < 4; i++ {
-		team2 = append(team2, NewDefaultRating())
-	}
-
-	return team1ids, team2ids, team1, team2, isBackfill, playerInfo
-}
-
-func updateStats(profile *GameProfileData, stats evr.StatsUpdate) {
-	serverProfile := profile.GetServer()
-
-	for groupName, stats := range stats.StatsGroups {
-
-		for statName, stat := range stats {
-
-			matchStat := evr.MatchStatistic{
-				Operation: stat.Operand,
-			}
-			if stat.Count != 0 {
-				matchStat.Count = stat.Count
-				matchStat.Value = stat.Value
-			}
-
-			_, ok := serverProfile.Statistics[groupName]
-			if !ok {
-				serverProfile.Statistics[groupName] = make(map[string]evr.MatchStatistic)
-			}
-			serverProfile.Statistics[groupName][statName] = matchStat
-		}
-	}
-
-	profile.SetServer(serverProfile)
 }
 
 func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {

@@ -64,6 +64,15 @@ func (s *MatchLabel) GetPlayerCount() int {
 	return count
 }
 
+func (s *MatchLabel) GetPlayerByEvrID(evrID evr.EvrId) *PlayerInfo {
+	for _, p := range s.Players {
+		if p.EvrID == evrID {
+			return &p
+		}
+	}
+	return nil
+}
+
 func (s *MatchLabel) OpenPlayerSlots() int {
 	return s.PlayerLimit - s.GetPlayerCount()
 }
