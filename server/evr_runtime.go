@@ -138,7 +138,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 type MatchLabelMeta struct {
 	TickRate  int
 	Presences []*rtapi.UserPresence
-	State     MatchLabel
+	State     *MatchLabel
 }
 
 func PurgeNonPlayers(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule) {
@@ -276,7 +276,7 @@ func PurgeNonPlayers(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 	}).Info("Purged non-player users")
 }
 
-func listMatchStates(ctx context.Context, nk runtime.NakamaModule, query string) ([]*MatchLabelMeta, error) {
+func ListMatchStates(ctx context.Context, nk runtime.NakamaModule, query string) ([]*MatchLabelMeta, error) {
 	if query == "" {
 		query = "*"
 	}
@@ -307,7 +307,7 @@ func listMatchStates(ctx context.Context, nk runtime.NakamaModule, query string)
 		}
 
 		matchStates = append(matchStates, &MatchLabelMeta{
-			State:     state,
+			State:     &state,
 			TickRate:  int(tickRate),
 			Presences: presences,
 		})
@@ -351,7 +351,7 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 		}
 
 		// Get the match states
-		matchStates, err := listMatchStates(ctx, nk, "")
+		matchStates, err := ListMatchStates(ctx, nk, "")
 		if err != nil {
 			logger.Error("Error listing match states: %v", err)
 			continue
@@ -801,7 +801,7 @@ AND ge.source_id = $3 AND ge.state >= 0 AND ge.state <= $4;
 
 func PresenceByEntrantID(nk runtime.NakamaModule, matchID MatchID, entrantID uuid.UUID) (presence *EvrMatchPresence, err error) {
 
-	presences, err := nk.StreamUserList(StreamModeEntrant, entrantID.String(), "", matchID.Node, true, true)
+	presences, err := nk.StreamUserList(StreamModeEntrant, entrantID.String(), "", matchID.Node, false, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get stream presences for entrant %s: %w", entrantID.String(), err)
 	}

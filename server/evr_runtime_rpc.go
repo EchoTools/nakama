@@ -1110,7 +1110,7 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		}
 	}
 
-	signalPayload := NewEvrSignal(userID, SignalPrepareSession, label).String()
+	signalPayload := NewSignalEnvelope(userID, SignalPrepareSession, label).String()
 	errResponse := func(err error) (string, error) {
 		response := PrepareMatchRPCResponse{
 			MatchID:       matchID,

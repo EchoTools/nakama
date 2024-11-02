@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/gofrs/uuid/v5"
 	"go.uber.org/zap"
 )
 
@@ -54,13 +53,8 @@ func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session
 		return errors.Join(NewLobbyErrorf(InternalError, "failed to create presences"), err)
 	}
 
-	serverSession := p.sessionRegistry.Get(uuid.FromStringOrNil(label.Broadcaster.SessionID))
-	if serverSession == nil {
-		logger.Debug("Match broadcaster not found", zap.String("mid", matchID.UUID.String()))
-		return ErrMatchNotFound
-	}
 	presences[0].RoleAlignment = params.Role
-	if err := p.LobbyJoinEntrant(logger, serverSession, label, presences[0]); err != nil {
+	if err := p.LobbyJoinEntrants(logger, label, presences); err != nil {
 		// Send the error to the client
 		if err := SendEVRMessages(session, LobbySessionFailureFromError(label.Mode, label.GetGroupID(), err)); err != nil {
 			logger.Debug("Failed to send error message", zap.Error(err))

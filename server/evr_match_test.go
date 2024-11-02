@@ -637,7 +637,7 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 					return state
 				}(),
 				presence: presences[0],
-				metadata: EntrantMetadata{*presences[0]}.MarshalMap(),
+				metadata: EntrantMetadata{presences}.MarshalMap(),
 			},
 			want: func() *MatchLabel {
 				state := &MatchLabel{}
@@ -678,7 +678,7 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 					return state
 				}(),
 				presence: presences[0],
-				metadata: NewJoinMetadata(*presences[0]).MarshalMap(),
+				metadata: NewJoinMetadata(presences[0]).MarshalMap(),
 			},
 			want: func() *MatchLabel {
 				state := &MatchLabel{}
@@ -719,7 +719,7 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 func TestEvrMatch_playerJoinAttempt(t *testing.T) {
 	type args struct {
 		state *MatchLabel
-		mp    EvrMatchPresence
+		mp    *EvrMatchPresence
 	}
 	tests := []struct {
 		name  string

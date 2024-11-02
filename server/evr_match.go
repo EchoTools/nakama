@@ -31,6 +31,9 @@ const (
 	StatGroupArena  MatchStatGroup = "arena"
 	StatGroupCombat MatchStatGroup = "combat"
 
+	DefaultPublicArenaTeamSize  = 4
+	DefaultPublicCombatTeamSize = 5
+
 	// Defaults for public arena matches
 	RoundDuration              = 300
 	AfterGoalDuration          = 15
@@ -53,58 +56,21 @@ var (
 	}
 )
 
+func DefaultLobbySize(mode evr.Symbol) int {
+	if size, ok := LobbySizeByMode[mode]; ok {
+		return size
+	}
+	return MatchLobbyMaxSize
+}
+
 const (
 	OpCodeBroadcasterDisconnected int64 = iota
 	OpCodeEVRPacketData
 	OpCodeMatchGameStateUpdate
-
-	SignalPrepareSession
-	SignalStartSession
-	SignalEndSession
-	SignalLockSession
-	SignalUnlockSession
-	SignalGetEndpoint
-	SignalGetPresences
-	SignalPruneUnderutilized
-	SignalShutdown
 )
 
 type MatchStatGroup string
 type MatchLevelSelection string
-
-type EvrSignal struct {
-	UserId  string
-	Signal  int64
-	Payload []byte
-}
-
-func NewEvrSignal(userId string, signal int64, data any) *EvrSignal {
-	payload, err := json.Marshal(data)
-	if err != nil {
-		return nil
-	}
-	return &EvrSignal{
-		UserId:  userId,
-		Signal:  signal,
-		Payload: payload,
-	}
-}
-
-func (s EvrSignal) GetOpCode() int64 {
-	return s.Signal
-}
-
-func (s EvrSignal) GetData() []byte {
-	return s.Payload
-}
-
-func (s EvrSignal) String() string {
-	b, err := json.Marshal(s)
-	if err != nil {
-		return ""
-	}
-	return string(b)
-}
 
 const (
 	EvrMatchmakerModule = "evrmatchmaker"
@@ -185,6 +151,7 @@ func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql
 		RequiredFeatures: make([]string, 0),
 		Players:          make([]PlayerInfo, 0, SocialLobbyMaxSize),
 		presenceMap:      make(map[string]*EvrMatchPresence, SocialLobbyMaxSize),
+		reservationMap:   make(map[string]*slotReservation, 2),
 
 		TeamAlignments:       make(map[string]int, SocialLobbyMaxSize),
 		joinTimestamps:       make(map[string]time.Time, SocialLobbyMaxSize),
@@ -194,8 +161,6 @@ func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql
 	}
 
 	state.ID = MatchIDFromContext(ctx)
-	state.presenceMap = make(map[string]*EvrMatchPresence)
-	state.joinTimestamps = make(map[string]time.Time)
 
 	if state.Mode == evr.ModeArenaPublic {
 		state.GameState = &GameState{}
@@ -216,24 +181,25 @@ func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql
 }
 
 var (
-	JoinRejectReasonUnassignedLobby    = "unassigned lobby"
-	JoinRejectReasonDuplicateJoin      = "duplicate join"
-	JoinRejectReasonLobbyFull          = "lobby full"
-	JoinRejectReasonFailedToAssignTeam = "failed to assign team"
-	JoinRejectReasonMatchTerminating   = "match terminating"
-	JoinRejectReasonFeatureMismatch    = "feature mismatch"
+	JoinRejectReasonUnassignedLobby           = "unassigned lobby"
+	JoinRejectReasonDuplicateJoin             = "duplicate join"
+	JoinRejectReasonLobbyFull                 = "lobby full"
+	JoinRejectReasonFailedToAssignTeam        = "failed to assign team"
+	JoinRejectReasonPartyMembersMustHaveRoles = "party members must have roles"
+	JoinRejectReasonMatchTerminating          = "match terminating"
+	JoinRejectReasonFeatureMismatch           = "feature mismatch"
 )
 
 type EntrantMetadata struct {
-	Presence EvrMatchPresence
+	Presences []*EvrMatchPresence
 }
 
-func NewJoinMetadata(p EvrMatchPresence) *EntrantMetadata {
-	return &EntrantMetadata{Presence: p}
+func NewJoinMetadata(p *EvrMatchPresence) *EntrantMetadata {
+	return &EntrantMetadata{Presences: []*EvrMatchPresence{p}}
 }
 
 func (m EntrantMetadata) MarshalMap() map[string]string {
-	data, err := json.Marshal(m.Presence)
+	data, err := json.Marshal(m.Presences)
 	if err != nil {
 		return nil
 	}
@@ -245,7 +211,7 @@ func (m *EntrantMetadata) UnmarshalMap(md map[string]string) error {
 	if !ok {
 		return errors.New("no presence")
 	}
-	if err := json.Unmarshal([]byte(data), &m.Presence); err != nil {
+	if err := json.Unmarshal([]byte(data), &m.Presences); err != nil {
 		return err
 	}
 	return nil
@@ -285,9 +251,32 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		return state, false, JoinRejectReasonMatchTerminating
 	}
 
-	mp, reason := m.playerJoinAttempt(state, md.Presence)
+	mp, reason := m.playerJoinAttempt(state, md.Presences[0])
 	if reason != "" {
 		return state, false, reason
+	}
+
+	// If there are multiple presences, then reserve the slots.
+	if len(md.Presences) > 1 {
+
+		slots := make(map[int]int, 2)
+		for _, p := range state.Players {
+			slots[int(p.Team)]++
+		}
+
+		// Ensure that the team is not full
+		for _, p := range md.Presences {
+
+			// Don't allow party members to have unspecified roles
+			if p.RoleAlignment == evr.TeamUnassigned {
+				return state, false, JoinRejectReasonFailedToAssignTeam
+			}
+
+			slots[p.RoleAlignment]++
+			if slots[p.RoleAlignment] >= state.RoleLimit(p.RoleAlignment) {
+				return state, false, JoinRejectReasonLobbyFull
+			}
+		}
 	}
 
 	// Ensure that arena matches never have more than 4 players per team.
@@ -313,7 +302,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		state.StartTime = time.Now().UTC()
 	}
 
-	state.presenceMap[mp.GetSessionId()] = &mp
+	state.presenceMap[mp.GetSessionId()] = mp
 	state.joinTimestamps[mp.GetSessionId()] = time.Now()
 
 	logger.WithFields(map[string]interface{}{
@@ -323,6 +312,20 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		"uid":   mp.GetUserId(),
 		"eid":   mp.EntrantID(state.ID).String(),
 	}).Info("Player joining the match.")
+
+	for _, p := range md.Presences[1:] {
+		state.reservationMap[p.GetSessionId()] = &slotReservation{
+			Entrant: p,
+			Expiry:  time.Now().Add(time.Second * 2),
+		}
+		logger.WithFields(map[string]interface{}{
+			"evrid": mp.EvrID.Token(),
+			"role":  mp.RoleAlignment,
+			"sid":   mp.GetSessionId(),
+			"uid":   mp.GetUserId(),
+			"eid":   mp.EntrantID(state.ID).String(),
+		}).Info("Player slot reserved.")
+	}
 
 	tags := map[string]string{
 		"mode":     state.Mode.String(),
@@ -340,7 +343,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	return state, true, mp.String()
 }
 
-func (m *EvrMatch) playerJoinAttempt(state *MatchLabel, mp EvrMatchPresence) (EvrMatchPresence, string) {
+func (m *EvrMatch) playerJoinAttempt(state *MatchLabel, mp *EvrMatchPresence) (*EvrMatchPresence, string) {
 
 	if state.LobbyType == UnassignedLobby {
 		return mp, JoinRejectReasonUnassignedLobby
@@ -459,6 +462,7 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 			nk.MetricsTimerRecord("match_player_join_duration", tags, time.Since(state.joinTimestamps[p.GetSessionId()]))
 		}
 	}
+	delete(state.reservationMap, presences[0].GetSessionId())
 
 	return state
 }
@@ -496,7 +500,6 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 	rejects := make([]uuid.UUID, 0)
 
 	for _, p := range presences {
-		logger.WithField("presence", p).Debug("Player leaving the match.")
 
 		if mp, ok := state.presenceMap[p.GetSessionId()]; ok {
 			tags := map[string]string{
@@ -507,13 +510,17 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 				"group_id": state.GetGroupID().String(),
 			}
 			msg := "Player removed from game server."
+
 			// If the presence still has the entrant stream, then this was from nakama, not the server. inform the server.
 			if userPresences, err := nk.StreamUserList(StreamModeEntrant, mp.EntrantID(state.ID).String(), "", mp.GetNodeId(), true, true); err != nil {
-				logger.Error("Failed to list user streams: %v", err)
+				logger.Warn("Failed to list user streams: %v", err)
 			} else if len(userPresences) > 0 {
 				rejects = append(rejects, mp.EntrantID(state.ID))
 				msg = "Removing player from game server."
 				nk.MetricsCounterAdd("match_entrant_kick_count", tags, 1)
+				if err := nk.StreamUserLeave(StreamModeEntrant, mp.EntrantID(state.ID).String(), "", mp.GetNodeId(), mp.GetUserId(), mp.GetSessionId()); err != nil {
+					logger.Warn("Failed to leave user stream: %v", err)
+				}
 			}
 			nk.MetricsCounterAdd("match_entrant_leave_count", tags, 1)
 			logger.WithFields(map[string]interface{}{
@@ -562,6 +569,14 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 
 	var err error
 	var updateLabel bool
+
+	// Expire any slot reservations
+	for id, r := range state.reservationMap {
+		if time.Now().After(r.Expiry) {
+			delete(state.reservationMap, id)
+			updateLabel = true
+		}
+	}
 
 	// Handle the messages, one by one
 	for _, in := range messages {
@@ -749,34 +764,6 @@ func (m *EvrMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db 
 	return state
 }
 
-type SignalResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
-	Payload string `json:"payload"`
-}
-
-func (r SignalResponse) String() string {
-	b, err := json.Marshal(r)
-	if err != nil {
-		return ""
-	}
-	return string(b)
-}
-
-func SignalResponseFromString(data string) SignalResponse {
-	r := SignalResponse{}
-	if err := json.Unmarshal([]byte(data), &r); err != nil {
-		return SignalResponse{}
-	}
-	return r
-}
-
-type SignalShutdownPayload struct {
-	GraceSeconds         int  `json:"grace_seconds"`
-	DisconnectGameServer bool `json:"disconnect_game_server"`
-	DisconnectUsers      bool `json:"disconnect_users"`
-}
-
 // MatchSignal is called when a signal is sent into the match.
 func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ interface{}, data string) (interface{}, string) {
 	state, ok := state_.(*MatchLabel)
@@ -786,13 +773,13 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 	}
 
 	// TODO protobuf's would be nice here.
-	signal := &EvrSignal{}
+	signal := &SignalEnvelope{}
 	err := json.Unmarshal([]byte(data), signal)
 	if err != nil {
 		return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal signal: %v", err)}.String()
 	}
 
-	switch signal.Signal {
+	switch signal.OpCode {
 	case SignalShutdown:
 
 		var data SignalShutdownPayload
@@ -874,10 +861,10 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		switch newState.Mode {
 		case evr.ModeArenaPublic:
 			state.LobbyType = PublicLobby
-			state.TeamSize = 4
+			state.TeamSize = DefaultPublicArenaTeamSize
 		case evr.ModeCombatPublic:
 			state.LobbyType = PublicLobby
-			state.TeamSize = 5
+			state.TeamSize = DefaultPublicCombatTeamSize
 		case evr.ModeSocialPublic, evr.ModeSocialPrivate:
 			state.LobbyType = PublicLobby
 		default:
@@ -950,7 +937,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		logger.Debug("Unlocking session")
 		state.Open = true
 	default:
-		logger.Warn("Unknown signal: %v", signal.Signal)
+		logger.Warn("Unknown signal: %v", signal.OpCode)
 		return state, SignalResponse{Success: false, Message: "unknown signal"}.String()
 	}
 
@@ -996,13 +983,14 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk run
 }
 
 // SignalMatch is a helper function to send a signal to a match.
-func SignalMatch(ctx context.Context, matchRegistry MatchRegistry, matchID MatchID, signalID int64, data any) (string, error) {
+func SignalMatch(ctx context.Context, matchRegistry MatchRegistry, matchID MatchID, opCode SignalOpCode, data any) (string, error) {
 	dataJson, err := json.Marshal(data)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal match label: %w", err)
 	}
-	signal := EvrSignal{
-		Signal:  signalID,
+
+	signal := SignalEnvelope{
+		OpCode:  opCode,
 		Payload: dataJson,
 	}
 	signalJson, err := json.Marshal(signal)
