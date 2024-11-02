@@ -82,13 +82,9 @@ func (p *EvrPipeline) lobbyFindSpectate(ctx context.Context, logger *zap.Logger,
 					return status.Errorf(codes.Internal, "failed to create entrant presences: %v", err)
 				}
 
-				serverSession := p.sessionRegistry.Get(uuid.FromStringOrNil(label.Broadcaster.SessionID))
-				if serverSession == nil {
-					logger.Debug("Match broadcaster not found", zap.String("mid", match.GetMatchId()))
-					continue
-				}
 				entrants[0].RoleAlignment = SpectatorRole
-				if err := p.LobbyJoinEntrant(logger, serverSession, &label, entrants[0]); err != nil {
+
+				if err := p.LobbyJoinEntrants(logger, &label, entrants); err != nil {
 					// Send the error to the client
 					if err := SendEVRMessages(session, LobbySessionFailureFromError(label.Mode, label.GetGroupID(), err)); err != nil {
 						logger.Debug("Failed to send error message", zap.Error(err))

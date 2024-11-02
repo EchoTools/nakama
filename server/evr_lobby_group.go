@@ -1,7 +1,6 @@
 package server
 
 import (
-	"log"
 	"sync"
 
 	"github.com/gofrs/uuid/v5"
@@ -69,7 +68,7 @@ func (g *LobbyGroup) PartyStream() PresenceStream {
 	return g.ph.Stream
 }
 
-func JoinLobbyGroup(session *sessionWS, groupName string, partyID uuid.UUID, currentMatchID MatchID) (*LobbyGroup, error) {
+func JoinPartyGroup(session *sessionWS, groupName string, partyID uuid.UUID, currentMatchID MatchID) (*LobbyGroup, error) {
 
 	maxSize := 4
 	open := true
@@ -111,7 +110,7 @@ func JoinLobbyGroup(session *sessionWS, groupName string, partyID uuid.UUID, cur
 
 		// Join the party
 		success, err := ph.JoinRequest(&presence)
-		log.Printf("joined party %v", success)
+
 		switch err {
 		case nil, runtime.ErrPartyJoinRequestAlreadyMember:
 			// No-op

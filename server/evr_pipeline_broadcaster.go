@@ -628,7 +628,7 @@ func (p *EvrPipeline) broadcasterPlayerSessionsLocked(ctx context.Context, logge
 	if err != nil {
 		logger.Warn("Failed to get broadcaster's match by session ID", zap.Error(err))
 	}
-	signal := NewEvrSignal(session.userID.String(), SignalLockSession, nil)
+	signal := NewSignalEnvelope(session.userID.String(), SignalLockSession, nil)
 	if _, err := p.matchRegistry.Signal(ctx, matchID.String(), signal.String()); err != nil {
 		logger.Warn("Failed to signal match", zap.Error(err))
 	}
@@ -640,7 +640,7 @@ func (p *EvrPipeline) broadcasterPlayerSessionsUnlocked(ctx context.Context, log
 	if err != nil {
 		logger.Warn("Failed to get broadcaster's match by session ID", zap.Error(err))
 	}
-	signal := NewEvrSignal(session.userID.String(), SignalUnlockSession, nil)
+	signal := NewSignalEnvelope(session.userID.String(), SignalUnlockSession, nil)
 	if _, err := p.matchRegistry.Signal(ctx, matchID.String(), signal.String()); err != nil {
 		logger.Warn("Failed to signal match", zap.Error(err))
 	}

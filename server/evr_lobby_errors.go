@@ -15,6 +15,7 @@ var (
 	ErrMultipleEntrantsFound = errors.New("multiple entrants found")
 	ErrMatchNotFound         = NewLobbyError(ServerDoesNotExist, "match not found")
 	ErrSuspended             = NewLobbyError(KickedFromLobbyGroup, "User is suspended from this guild")
+	ErrFailedToAcquireLock   = NewLobbyError(InternalError, "Failed to acquire lock")
 )
 
 // LobbyErrorCodeValue defines the type for lobby error codes.

@@ -256,6 +256,52 @@ func (p LobbySessionParameters) String() string {
 	return string(data)
 }
 
+func (p *LobbySessionParameters) BackfillSearchQuery() string {
+	qparts := []string{
+		"+label.open:T",
+		fmt.Sprintf("+label.mode:%s", p.Mode.String()),
+		fmt.Sprintf("+label.group_id:/%s/", Query.Escape(p.GroupID.String())),
+		//fmt.Sprintf("label.version_lock:%s", p.VersionLock.String()),
+	}
+
+	if len(p.RequiredFeatures) > 0 {
+		for _, f := range p.RequiredFeatures {
+			qparts = append(qparts, fmt.Sprintf("+label.features:/.*%s.*/", Query.Escape(f)))
+		}
+	}
+
+	// Do not backfill into the same match
+	if !p.CurrentMatchID.IsNil() {
+		qparts = append(qparts, fmt.Sprintf("-label.id:%s", Query.Escape(p.CurrentMatchID.String())))
+	}
+
+	// Ensure the match is not full
+	playerLimit := 0
+	switch p.Mode {
+	case evr.ModeArenaPublic:
+		playerLimit = DefaultPublicArenaTeamSize * 2
+	case evr.ModeCombatPublic:
+		playerLimit = DefaultPublicCombatTeamSize * 2
+	case evr.ModeSocialPublic:
+		playerLimit = DefaultLobbySize(evr.ModeSocialPublic)
+	}
+
+	if playerLimit > 0 {
+		qparts = append(qparts, fmt.Sprintf("+label.player_count:<=%d", playerLimit-p.GetPartySize()))
+	}
+
+	// Get the latest latency history
+	// Ignore all matches with too high latency
+	for ip, rtt := range p.latencyHistory.LatestRTTs() {
+		if rtt > 250 {
+			qparts = append(qparts, fmt.Sprintf("-label.broadcaster.endpoint:/.*%s.*/", ip))
+		}
+	}
+
+	return strings.Join(qparts, " ")
+
+}
+
 func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionParameters) (string, map[string]string, map[string]float64) {
 
 	displayName := sessionParams.AccountMetadata.GetGroupDisplayNameOrDefault(p.GroupID.String())

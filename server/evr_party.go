@@ -24,6 +24,7 @@ var (
 func EntrantPresencesFromSessionIDs(logger *zap.Logger, sessionRegistry SessionRegistry, partyID, groupID uuid.UUID, rating types.Rating, role int, sessionIDs ...uuid.UUID) ([]*EvrMatchPresence, error) {
 	entrants := make([]*EvrMatchPresence, 0, len(sessionIDs))
 	for _, sessionID := range sessionIDs {
+
 		session := sessionRegistry.Get(sessionID)
 		if session == nil {
 			logger.Warn("Session not found", zap.String("sid", sessionID.String()))
@@ -57,6 +58,8 @@ func EntrantPresencesFromSessionIDs(logger *zap.Logger, sessionRegistry SessionR
 			ClientPort:        session.ClientPort(),
 			IsPCVR:            params.IsPCVR,
 			Rating:            rating,
+			SupportedFeatures: params.SupportedFeatures,
+
 			DisableEncryption: params.DisableEncryption,
 			DisableMAC:        params.DisableMAC,
 		}

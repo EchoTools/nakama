@@ -14,6 +14,11 @@ type TeamMetadata struct {
 	Strength float64 `json:"strength,omitempty"`
 }
 
+type slotReservation struct {
+	Entrant *EvrMatchPresence
+	Expiry  time.Time
+}
+
 type MatchLabel struct {
 	ID          MatchID          `json:"id"`                    // The Session Id used by EVR (the same as match id)
 	Open        bool             `json:"open"`                  // Whether the lobby is open to new players (Matching Only)
@@ -43,15 +48,17 @@ type MatchLabel struct {
 
 	GameState *GameState `json:"game_state,omitempty"` // The game state for the match.
 
-	server               runtime.Presence             // The broadcaster's presence
-	levelLoaded          bool                         // Whether the server has been sent the start instruction.
-	presenceMap          map[string]*EvrMatchPresence // [sessionId]EvrMatchPresence
-	joinTimestamps       map[string]time.Time         // The timestamps of when players joined the match. map[sessionId]time.Time
-	joinTimeMilliseconds map[string]int64             // The round clock time of when players joined the match. map[sessionId]time.Time
-	sessionStartExpiry   int64                        // The tick count at which the match will be shut down if it has not started.
-	tickRate             int64                        // The number of ticks per second.
-	emptyTicks           int64                        // The number of ticks the match has been empty.
-	terminateTick        int64                        // The tick count at which the match will be shut down.
+	server         runtime.Presence             // The broadcaster's presence
+	levelLoaded    bool                         // Whether the server has been sent the start instruction.
+	presenceMap    map[string]*EvrMatchPresence // [sessionId]EvrMatchPresence
+	reservationMap map[string]*slotReservation  // map[sessionID]slotReservation
+
+	joinTimestamps       map[string]time.Time // The timestamps of when players joined the match. map[sessionId]time.Time
+	joinTimeMilliseconds map[string]int64     // The round clock time of when players joined the match. map[sessionId]time.Time
+	sessionStartExpiry   int64                // The tick count at which the match will be shut down if it has not started.
+	tickRate             int64                // The number of ticks per second.
+	emptyTicks           int64                // The number of ticks the match has been empty.
+	terminateTick        int64                // The tick count at which the match will be shut down.
 }
 
 func (s *MatchLabel) GetPlayerCount() int {
@@ -94,10 +101,19 @@ func (s *MatchLabel) String() string {
 }
 
 func (s *MatchLabel) RoleLimit(role int) int {
-	switch s.Mode {
-	case evr.ModeArenaPublic, evr.ModeCombatPublic:
-		return s.TeamSize
+	if s.TeamSize == 0 {
+		return s.PlayerLimit
 	}
+
+	switch role {
+	case UnassignedRole:
+		return s.TeamSize * 2
+	case BlueRole, OrangeRole:
+		return s.TeamSize
+	case SpectatorRole, ModeratorRole:
+		return s.PlayerLimit - s.TeamSize*2
+	}
+
 	return s.PlayerLimit
 }
 
@@ -157,41 +173,57 @@ func (s *MatchLabel) MetricsTags() map[string]string {
 
 // rebuildCache is called after the presences map is updated.
 func (s *MatchLabel) rebuildCache() {
+	presences := make([]*EvrMatchPresence, 0, len(s.presenceMap))
+	for _, p := range s.presenceMap {
+		presences = append(presences, p)
+	}
+
+	// Include the reservations in the cache.
+	for id, r := range s.reservationMap {
+		if r.Expiry.Before(time.Now()) {
+			delete(s.reservationMap, id)
+			continue
+		}
+		// Include the reservation in the cache.
+		presences = append(presences, r.Entrant)
+	}
+
 	// Rebuild the lookup tables.
-	s.Size = len(s.presenceMap)
+	s.Size = len(presences)
 	s.Players = make([]PlayerInfo, 0, s.Size)
 	s.PlayerCount = 0
 	// Construct Player list
 	team1 := make(RatedTeam, 0, s.TeamSize)
 	team2 := make(RatedTeam, 0, s.TeamSize)
-	for _, presence := range s.presenceMap {
+
+	for _, p := range presences {
 		// Do not include spectators or moderators in player count
-		if presence.RoleAlignment != evr.TeamSpectator && presence.RoleAlignment != evr.TeamModerator {
+		if p.RoleAlignment != evr.TeamSpectator && p.RoleAlignment != evr.TeamModerator {
 			s.PlayerCount++
 		}
 
 		playerinfo := PlayerInfo{
-			UserID:      presence.UserID.String(),
-			Username:    presence.Username,
-			DisplayName: presence.DisplayName,
-			EvrID:       presence.EvrID,
-			Team:        TeamIndex(presence.RoleAlignment),
-			ClientIP:    presence.ClientIP,
-			DiscordID:   presence.DiscordID,
-			PartyID:     presence.PartyID.String(),
-			JoinTime:    s.joinTimeMilliseconds[presence.SessionID.String()],
-			Rating:      presence.Rating,
+			UserID:      p.UserID.String(),
+			Username:    p.Username,
+			DisplayName: p.DisplayName,
+			EvrID:       p.EvrID,
+			Team:        TeamIndex(p.RoleAlignment),
+			ClientIP:    p.ClientIP,
+			DiscordID:   p.DiscordID,
+			PartyID:     p.PartyID.String(),
+			JoinTime:    s.joinTimeMilliseconds[p.SessionID.String()],
+			Rating:      p.Rating,
 		}
 
 		s.Players = append(s.Players, playerinfo)
 
 		switch s.Mode {
 		case evr.ModeArenaPublic:
-			switch presence.RoleAlignment {
+			switch p.RoleAlignment {
 			case BlueRole:
-				team1 = append(team1, presence.Rating)
+				team1 = append(team1, p.Rating)
 			case OrangeRole:
-				team2 = append(team2, presence.Rating)
+				team2 = append(team2, p.Rating)
 			}
 		case evr.ModeArenaPrivate, evr.ModeCombatPrivate:
 			playerinfo.Team = TeamIndex(UnassignedRole)

@@ -59,6 +59,7 @@ var (
 		0x7777777777770900: (*BroadcasterChallengeRequest)(nil),
 		0x7777777777770a00: (*GameServerChallengeResponse)(nil),
 		0x7777777777777777: (*BroadcasterRegistrationRequest)(nil),
+		0xe581ba9febf68535: (*GameServerRegistrationRequest)(nil),
 		0x82869f0b37eb4378: (*ConfigRequest)(nil),
 		0xb9cdaf586f7bd012: (*ConfigSuccess)(nil),
 		0x9e687a63dddd3870: (*ConfigFailure)(nil),
