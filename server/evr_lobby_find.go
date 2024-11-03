@@ -462,6 +462,7 @@ func (p *EvrPipeline) prepareEntrantPresences(ctx context.Context, logger *zap.L
 func (p *EvrPipeline) PartyFollow(ctx context.Context, logger *zap.Logger, session *sessionWS, params *LobbySessionParameters, lobbyGroup *LobbyGroup) error {
 
 	logger.Debug("User is member of party", zap.String("leader", lobbyGroup.GetLeader().GetUsername()))
+
 	// This is a party member, wait for the party leader to join a match, or cancel matchmaking.
 	for {
 		select {
@@ -470,6 +471,7 @@ func (p *EvrPipeline) PartyFollow(ctx context.Context, logger *zap.Logger, sessi
 		case <-time.After(3 * time.Second):
 		}
 		leader := lobbyGroup.GetLeader()
+		leaderUserID := uuid.FromStringOrNil(leader.UserId)
 		// Check if the leader has changed to this player.
 		if leader == nil || leader.SessionId == session.id.String() {
 			return NewLobbyError(BadRequest, "party leader changed")
@@ -481,10 +483,16 @@ func (p *EvrPipeline) PartyFollow(ctx context.Context, logger *zap.Logger, sessi
 			Label:   StreamLabelMatchService,
 		}
 
-		// Check if the party leader has joined a match.
-		presence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, stream, uuid.FromStringOrNil(leader.UserId))
+		// Check if the party leader is still in a lobby/match.
+		presence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, stream, leaderUserID)
 		if presence == nil {
 			return NewLobbyError(BadRequest, "party leader left the party")
+		}
+
+		// Check if the leader is still matchmaking. If so, continue waiting.
+		if p := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, params.MatchmakingStream(), leaderUserID); p != nil {
+			// Leader is still matchmaking.
+			continue
 		}
 
 		// Check if the party leader is in a match.
