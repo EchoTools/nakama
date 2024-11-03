@@ -55,7 +55,11 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 				// Match found.
 				return nil
 			case context.Canceled, context.DeadlineExceeded:
-				logger.Warn("Matchmaking canceled or timed out", zap.Error(err))
+				if err == context.Canceled {
+					logger.Debug("Matchmaking context canceled")
+					return nil
+				}
+				logger.Warn("Matchmaking timed out", zap.Error(err))
 			default:
 				p.metrics.CustomCounter("lobby_find_match_error", lobbyParams.MetricsTags(), int64(lobbyParams.GetPartySize()))
 				// On error, leave any party the user might be a member of.
