@@ -179,17 +179,6 @@ func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 		}
 	}
 
-	/*
-		// Ensure all players are within rank range of each other
-		for i := 0; i < len(candidates); i++ {
-			if !m.hasCompatibleRanks(candidates[i], maxRankPercentileDelta) {
-				logger.WithField("match", candidates[i]).Warn("Match has players with incompatible ranks.")
-				candidates = append(candidates[:i], candidates[i+1:]...)
-				i--
-			}
-		}
-	*/
-
 	balanced := balanceMatches(candidates, m)
 
 	predictions := make([]PredictedMatch, 0, len(balanced))
@@ -237,21 +226,6 @@ OuterLoop:
 	}).Info("Skill-based matchmaker completed.")
 
 	return madeMatches
-}
-
-func (m *skillBasedMatchmaker) hasCompatibleRanks(match []runtime.MatchmakerEntry, maxDelta float64) bool {
-	ranks := make([]float64, 0, len(match))
-	for _, entry := range match {
-
-		percentile, ok := entry.GetProperties()["rank_percentile"].(float64)
-		if !ok {
-			return false
-		}
-		ranks = append(ranks, percentile)
-	}
-	slices.Sort(ranks)
-
-	return ranks[len(ranks)-1]-ranks[0] < maxDelta
 }
 
 func (m *skillBasedMatchmaker) eligibleServers(match []runtime.MatchmakerEntry) map[string]int {
