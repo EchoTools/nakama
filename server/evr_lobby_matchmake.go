@@ -12,8 +12,6 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 const (
@@ -30,15 +28,14 @@ const (
 )
 
 var (
-	ErrMatchmakingPingTimeout          = status.Errorf(codes.DeadlineExceeded, "Ping timeout")
-	ErrMatchmakingTimeout              = status.Errorf(codes.DeadlineExceeded, "Matchmaking timeout")
-	ErrMatchmakingNoAvailableServers   = status.Errorf(codes.Unavailable, "No available servers")
-	ErrMatchmakingCanceled             = status.Errorf(codes.Canceled, "Matchmaking canceled")
-	ErrMatchmakingCanceledByPlayer     = status.Errorf(codes.Canceled, "Matchmaking canceled by player")
-	ErrMatchmakingCanceledByParty      = status.Errorf(codes.Aborted, "Matchmaking canceled by party member")
-	ErrMatchmakingRestarted            = status.Errorf(codes.Canceled, "matchmaking restarted")
-	ErrMatchmakingMigrationRequired    = status.Errorf(codes.FailedPrecondition, "Server upgraded, migration")
-	ErrMatchmakingUnknownError         = status.Errorf(codes.Unknown, "Unknown error")
+	ErrMatchmakingPingTimeout          = NewLobbyErrorf(Timeout, "Ping timeout")
+	ErrMatchmakingTimeout              = NewLobbyErrorf(Timeout, "Matchmaking timeout")
+	ErrMatchmakingNoAvailableServers   = NewLobbyError(ServerFindFailed, "No available servers")
+	ErrMatchmakingCanceled             = NewLobbyErrorf(BadRequest, "Matchmaking canceled")
+	ErrMatchmakingCanceledByPlayer     = NewLobbyErrorf(BadRequest, "Matchmaking canceled by player")
+	ErrMatchmakingCanceledByParty      = NewLobbyErrorf(BadRequest, "Matchmaking canceled by party member")
+	ErrMatchmakingRestarted            = NewLobbyErrorf(BadRequest, "matchmaking restarted")
+	ErrMatchmakingUnknownError         = NewLobbyErrorf(InternalError, "Unknown error")
 	MatchmakingStreamSubject           = uuid.NewV5(uuid.Nil, "matchmaking").String()
 	MatchmakingConfigStorageCollection = "Matchmaker"
 	MatchmakingConfigStorageKey        = "config"
@@ -82,7 +79,7 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 		return fmt.Errorf("failed to add primary ticket: %v", err)
 	}
 
-	// Start the fallback when have the matchmaking timeout has expired
+	// Start the fallback when half the matchmaking timeout has expired
 	fallbackDelay := p.matchmakingTicketTimeout() / 2
 
 	// If the first matchmaking ticket fails, try a fallback ticket

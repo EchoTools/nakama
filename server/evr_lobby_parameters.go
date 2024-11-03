@@ -256,7 +256,7 @@ func (p LobbySessionParameters) String() string {
 	return string(data)
 }
 
-func (p *LobbySessionParameters) BackfillSearchQuery() string {
+func (p *LobbySessionParameters) BackfillSearchQuery(maxRTT int) string {
 	qparts := []string{
 		"+label.open:T",
 		fmt.Sprintf("+label.mode:%s", p.Mode.String()),
@@ -290,14 +290,14 @@ func (p *LobbySessionParameters) BackfillSearchQuery() string {
 		qparts = append(qparts, fmt.Sprintf("+label.player_count:<=%d", playerLimit-p.GetPartySize()))
 	}
 
-	// Get the latest latency history
-	// Ignore all matches with too high latency
-	for ip, rtt := range p.latencyHistory.LatestRTTs() {
-		if rtt > 250 {
-			qparts = append(qparts, fmt.Sprintf("-label.broadcaster.endpoint:/.*%s.*/", ip))
+	if maxRTT > 0 {
+		// Ignore all matches with too high latency
+		for ip, rtt := range p.latencyHistory.LatestRTTs() {
+			if rtt > maxRTT {
+				qparts = append(qparts, fmt.Sprintf("-label.broadcaster.endpoint:/.*%s.*/", ip))
+			}
 		}
 	}
-
 	return strings.Join(qparts, " ")
 
 }
@@ -358,7 +358,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionPar
 	return query, stringProperties, numericProperties
 }
 
-func (p LobbySessionParameters) GroupStream() PresenceStream {
+func (p LobbySessionParameters) MatchmakingStream() PresenceStream {
 	return PresenceStream{Mode: StreamModeMatchmaking, Subject: p.GroupID}
 }
 

@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"go.uber.org/zap"
@@ -37,7 +36,7 @@ func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session
 
 	label, err := MatchLabelByID(ctx, p.runtimeModule, matchID)
 	if err != nil {
-		return errors.Join(NewLobbyErrorf(InternalError, "failed to load match label"), err)
+		return fmt.Errorf("failed to load match label: %w", err)
 	} else if label == nil {
 		logger.Warn("Match not found", zap.String("mid", matchID.UUID.String()))
 		return ErrMatchNotFound
@@ -50,7 +49,7 @@ func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session
 
 	presences, err := EntrantPresencesFromSessionIDs(logger, p.sessionRegistry, params.PartyID, params.GroupID, params.Rating, params.Role, session.id)
 	if err != nil {
-		return errors.Join(NewLobbyErrorf(InternalError, "failed to create presences"), err)
+		return fmt.Errorf("failed to create presences: %w", err)
 	}
 
 	presences[0].RoleAlignment = params.Role

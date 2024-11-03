@@ -23,7 +23,8 @@ type LobbyErrorCodeValue int
 
 // The list of lobby error codes. These are hard-coded in the evr client.
 const (
-	TimeoutServerFindFailed LobbyErrorCodeValue = iota
+	LobbyUnknownError LobbyErrorCodeValue = iota - 1 // Custom error code for unknown errors.
+	TimeoutServerFindFailed
 	UpdateRequired
 	BadRequest
 	Timeout
@@ -41,14 +42,33 @@ const (
 
 // LobbyError struct that implements the error interface.
 type LobbyError struct {
-	Code    LobbyErrorCodeValue
-	Message string
+	code       LobbyErrorCodeValue
+	message    string
+	wrappedErr error
+}
+
+// NewLobbyErrorf creates a new LobbyError with the given code and message.
+func NewLobbyError(code LobbyErrorCodeValue, message string) LobbyError {
+	return LobbyError{
+		code:    code,
+		message: message,
+	}
+}
+
+// NewLobbyErrorf creates a new LobbyError with the given code and message.
+func NewLobbyErrorf(code LobbyErrorCodeValue, message string, a ...any) LobbyError {
+	err := fmt.Errorf(message, a...)
+	return LobbyError{
+		code:       code,
+		message:    err.Error(),
+		wrappedErr: err,
+	}
 }
 
 // Error implements the error interface.
 func (e LobbyError) Error() string {
-	message := e.Message
-	switch e.Code {
+	message := e.message
+	switch e.code {
 	case TimeoutServerFindFailed:
 		message = "timeout: server find failed: " + message
 	case UpdateRequired:
@@ -77,24 +97,18 @@ func (e LobbyError) Error() string {
 		message = "kicked: " + message
 	case NotALobbyGroupMod:
 		message = "not a mod: " + message
+	default:
+		message = "unknown error: " + message
 	}
 	return message
 }
 
-// NewLobbyErrorf creates a new LobbyError with the given code and message.
-func NewLobbyError(code LobbyErrorCodeValue, message string) *LobbyError {
-	return &LobbyError{
-		Code:    code,
-		Message: message,
-	}
+func (e LobbyError) Message() string {
+	return e.message
 }
 
-// NewLobbyErrorf creates a new LobbyError with the given code and message.
-func NewLobbyErrorf(code LobbyErrorCodeValue, message string, a ...any) *LobbyError {
-	return &LobbyError{
-		Code:    code,
-		Message: fmt.Sprintf(message, a...),
-	}
+func (e LobbyError) Unwrap() []error {
+	return []error{e.wrappedErr}
 }
 
 // LobbySessionFailureFromError converts an error into a LobbySessionFailure message.
@@ -106,7 +120,18 @@ func LobbySessionFailureFromError(mode evr.Symbol, groupID uuid.UUID, err error)
 	var code evr.LobbySessionFailureErrorCode
 	var message string
 
-	if status.Code(err) != codes.Unknown {
+	// If the error is a LobbyError, use the code and message from it.
+	if lErr, ok := err.(LobbyError); ok {
+		code = evr.LobbySessionFailureErrorCode(lErr.code)
+		message = lErr.Message()
+
+		// If the error is a wrapped LobbyError, use the code and original message
+	} else if errors.As(err, &lErr) {
+		code = evr.LobbySessionFailureErrorCode(lErr.code)
+		// Keep the original message.
+		message = err.Error()
+
+	} else if status.Code(err) != codes.Unknown {
 		// This is a grpc status error.
 		message = status.Convert(err).Message()
 		switch status.Code(err) {
@@ -143,26 +168,25 @@ func LobbySessionFailureFromError(mode evr.Symbol, groupID uuid.UUID, err error)
 		case codes.DeadlineExceeded:
 			code = evr.LobbySessionFailure_Timeout_ServerFindFailed
 		}
-	} else if lobbyErr, ok := err.(*LobbyError); ok {
-		code = evr.LobbySessionFailureErrorCode(lobbyErr.Code)
-		message = lobbyErr.Message
+
 	} else {
 		code = evr.LobbySessionFailure_InternalError
 		message = err.Error()
 	}
+
 	return evr.NewLobbySessionFailure(mode, groupID, code, message).Version4()
 }
 
 // LobbyErrorIs checks if the given error is a LobbyError with the given code.
 func LobbyErrorIs(err error, code LobbyErrorCodeValue) bool {
-	var lErr *LobbyError
-	return errors.As(err, &lErr) && lErr.Code == code
+	var lErr LobbyError
+	return errors.As(err, &lErr) && lErr.code == code
 }
 
 func LobbyErrorCode(err error) LobbyErrorCodeValue {
-	var lErr *LobbyError
+	var lErr LobbyError
 	if errors.As(err, &lErr) {
-		return lErr.Code
+		return lErr.code
 	}
-	return InternalError
+	return LobbyUnknownError
 }
