@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -142,30 +143,29 @@ func Test_balanceMatches(t *testing.T) {
 	t.Log("Seen Rosters count", len(seenRosters))
 	t.Error(" ")
 }
+
 func TestHasEligibleServers(t *testing.T) {
 	tests := []struct {
-		name   string
-		match  []runtime.MatchmakerEntry
-		maxRTT int
-		want   bool
+		name  string
+		match []runtime.MatchmakerEntry
+		want  map[string]int
 	}{
 		{
 			name: "All servers within maxRTT",
 			match: []runtime.MatchmakerEntry{
-				&MatchmakerEntry{Properties: map[string]interface{}{"rtt_server1": 50, "rtt_server2": 60}},
+				&MatchmakerEntry{Properties: map[string]interface{}{"max_rtt": 110, "rtt_server1": 50, "rtt_server2": 60}},
 				&MatchmakerEntry{Properties: map[string]interface{}{"rtt_server1": 40, "rtt_server2": 55}},
 			},
-			maxRTT: 100,
-			want:   true,
+
+			want: map[string]int{"rtt_server1": 45, "rtt_server2": 57},
 		},
 		{
 			name: "One server exceeds maxRTT",
 			match: []runtime.MatchmakerEntry{
-				&MatchmakerEntry{Properties: map[string]interface{}{"rtt_server1": 150, "rtt_server2": 60}},
-				&MatchmakerEntry{Properties: map[string]interface{}{"rtt_server1": 40, "rtt_server2": 55}},
+				&MatchmakerEntry{Properties: map[string]interface{}{"max_rtt": 110, "rtt_server1": 150, "rtt_server2": 60}},
+				&MatchmakerEntry{Properties: map[string]interface{}{"max_rtt": 110, "rtt_server1": 40, "rtt_server2": 55}},
 			},
-			maxRTT: 100,
-			want:   false,
+			want: map[string]int{"rtt_server2": 57},
 		},
 		{
 			name: "Server unreachable for one player",
@@ -173,21 +173,22 @@ func TestHasEligibleServers(t *testing.T) {
 				&MatchmakerEntry{Properties: map[string]interface{}{"rtt_server1": 50}},
 				&MatchmakerEntry{Properties: map[string]interface{}{"rtt_server1": 20, "rtt_server2": 55}},
 			},
-			maxRTT: 100,
-			want:   false,
+			want: map[string]int{"rtt_server1": 35},
 		},
 		{
-			name:   "Empty match",
-			match:  []runtime.MatchmakerEntry{},
-			maxRTT: 100,
-			want:   true,
+			name: "No common servers for players",
+			match: []runtime.MatchmakerEntry{
+				&MatchmakerEntry{Properties: map[string]interface{}{"rtt_server1": 50}},
+				&MatchmakerEntry{Properties: map[string]interface{}{"rtt_server2": 55}},
+			},
+			want: map[string]int{},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &skillBasedMatchmaker{}
-			if got := m.hasEligibleServers(tt.match, tt.maxRTT); got != tt.want {
+			if got := m.eligibleServers(tt.match); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("hasEligibleServers() = %v, want %v", got, tt.want)
 			}
 		})
