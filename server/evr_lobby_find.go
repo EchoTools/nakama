@@ -140,6 +140,9 @@ func (p *EvrPipeline) monitorMatchmakingStream(ctx context.Context, logger *zap.
 
 	stream := lobbyParams.MatchmakingStream()
 	for {
+
+		defer LeaveMatchmakingStream(logger, session)
+
 		select {
 		case <-ctx.Done():
 			// Check if the cancel was because of a timeout
