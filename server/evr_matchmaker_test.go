@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 )
 
@@ -190,6 +191,99 @@ func TestHasEligibleServers(t *testing.T) {
 			m := &skillBasedMatchmaker{}
 			if got := m.eligibleServers(tt.match); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("hasEligibleServers() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+func TestRemoveDuplicateRosters(t *testing.T) {
+	tests := []struct {
+		name       string
+		candidates [][]runtime.MatchmakerEntry
+		want       [][]runtime.MatchmakerEntry
+		wantDupes  int
+	}{
+		{
+			name: "No duplicates",
+			candidates: [][]runtime.MatchmakerEntry{
+				{
+					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "1").String()}},
+					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "2").String()}},
+				},
+				{
+					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "3").String()}},
+					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "4").String()}},
+				},
+			},
+			want: [][]runtime.MatchmakerEntry{
+				{
+					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "1").String()}},
+					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "2").String()}},
+				},
+				{
+					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "3").String()}},
+					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "4").String()}},
+				},
+			},
+			wantDupes: 0,
+		},
+		{
+			name: "With duplicates",
+			candidates: [][]runtime.MatchmakerEntry{
+				{
+					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "1").String()}},
+					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "2").String()}},
+				},
+				{
+					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "1").String()}},
+					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "2").String()}},
+				},
+			},
+			want: [][]runtime.MatchmakerEntry{
+				{
+					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "1").String()}},
+					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "2").String()}},
+				},
+			},
+			wantDupes: 1,
+		},
+		{
+			name: "Mixed duplicates",
+			candidates: [][]runtime.MatchmakerEntry{
+				{
+					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "1").String()}},
+					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "2").String()}},
+				},
+				{
+					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "3").String()}},
+					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "4").String()}},
+				},
+				{
+					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "1").String()}},
+					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "2").String()}},
+				},
+			},
+			want: [][]runtime.MatchmakerEntry{
+				{
+					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "1").String()}},
+					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "2").String()}},
+				},
+				{
+					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "3").String()}},
+					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "4").String()}},
+				},
+			},
+			wantDupes: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, gotDupes := removeDuplicateRosters(tt.candidates)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("removeDuplicateRosters() got = %v, want %v", got, tt.want)
+			}
+			if gotDupes != tt.wantDupes {
+				t.Errorf("removeDuplicateRosters() gotDupes = %v, want %v", gotDupes, tt.wantDupes)
 			}
 		})
 	}

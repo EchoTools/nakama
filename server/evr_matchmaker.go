@@ -107,23 +107,30 @@ func (m *skillBasedMatchmaker) BalancedMatchFromCandidate(candidate []runtime.Ma
 	return team1, team2
 }
 
-func removeDuplicateRosters(candidates [][]runtime.MatchmakerEntry) [][]runtime.MatchmakerEntry {
+func removeDuplicateRosters(candidates [][]runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, int) {
 	seenRosters := make(map[string]struct{})
 	uniqueCandidates := make([][]runtime.MatchmakerEntry, 0, len(candidates))
+	duplicates := 0
 	for _, match := range candidates {
+
 		roster := make([]string, 0, len(match))
 		for _, e := range match {
-			roster = append(roster, e.GetTicket())
+			sessionID := e.GetPresence().GetSessionId()
+			_ = sessionID
+			roster = append(roster, e.GetPresence().GetSessionId())
 		}
+
 		slices.Sort(roster)
 		rosterString := strings.Join(roster, ",")
+
 		if _, ok := seenRosters[rosterString]; ok {
+			duplicates++
 			continue
 		}
 		seenRosters[rosterString] = struct{}{}
 		uniqueCandidates = append(uniqueCandidates, match)
 	}
-	return uniqueCandidates
+	return uniqueCandidates, duplicates
 }
 
 // Function to be used as a matchmaker function in Nakama (RegisterMatchmakerOverride)
@@ -148,7 +155,11 @@ func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 	logger.WithField("num_candidates", len(candidates)).Info("Running skill-based matchmaker.")
 
 	// Remove duplicate rosters
-	candidates = removeDuplicateRosters(candidates)
+	var count int
+	candidates, count = removeDuplicateRosters(candidates)
+	if count > 0 {
+		logger.WithField("num_duplicates", count).Warn("Removed duplicate rosters.")
+	}
 
 	groupID := candidates[0][0].GetProperties()["group_id"].(string)
 	if groupID == "" {
