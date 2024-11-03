@@ -10,7 +10,7 @@ import (
 type OtherUserProfileSuccess struct {
 	Message
 	EvrId             EvrId
-	ServerProfileJSON []byte
+	ServerProfileJSON json.RawMessage
 }
 
 func NewOtherUserProfileSuccess(evrId EvrId, profile *ServerProfile) *OtherUserProfileSuccess {

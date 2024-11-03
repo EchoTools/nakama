@@ -169,7 +169,7 @@ func (r *ProfileRegistry) SaveAndCache(ctx context.Context, userID uuid.UUID, pr
 }
 
 // Retrieves the bytes of a server profile from the cache.
-func (s *ProfileRegistry) GetCached(ctx context.Context, evrID evr.EvrId) ([]byte, error) {
+func (s *ProfileRegistry) GetCached(ctx context.Context, evrID evr.EvrId) (json.RawMessage, error) {
 	s.cacheMu.RLock()
 	if data, ok := s.cache[evrID]; ok {
 		s.cacheMu.RUnlock()
@@ -296,7 +296,7 @@ func (r *ProfileRegistry) UpdateClientProfile(ctx context.Context, logger *zap.L
 }
 
 // A fast lookup of existing profile data
-func StorageReadEVRProfileByXPI(ctx context.Context, db *sql.DB, evrID evr.EvrId) (string, []byte, error) {
+func StorageReadEVRProfileByXPI(ctx context.Context, db *sql.DB, evrID evr.EvrId) (string, json.RawMessage, error) {
 	query := `
 	SELECT s2.user_id, s2.value->>'server' FROM storage s1, storage s2 
 	WHERE 
@@ -319,7 +319,7 @@ func StorageReadEVRProfileByXPI(ctx context.Context, db *sql.DB, evrID evr.EvrId
 	if !found {
 		return "", nil, status.Error(codes.NotFound, "server profile not found")
 	}
-	return dbUserID, []byte(dbServerProfile), nil
+	return dbUserID, json.RawMessage(dbServerProfile), nil
 }
 
 func (p *ProfileRegistry) SetLobbyProfile(ctx context.Context, userID uuid.UUID, evrID evr.EvrId, displayName string) error {
