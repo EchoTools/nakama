@@ -885,6 +885,7 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 			logger.Warn("Failed to get cached profile", zap.Error(err))
 			return
 		}
+
 		// Construct the response
 		response := &evr.OtherUserProfileSuccess{
 			EvrId:             request.EvrId,

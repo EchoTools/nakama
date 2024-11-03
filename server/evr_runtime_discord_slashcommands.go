@@ -1561,7 +1561,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			if member != nil {
 				memberships, err := GetGuildGroupMemberships(ctx, d.nk, userIDStr)
 				if err != nil {
-					return errors.Join(errors.New("failed to get user ID"), err)
+					return fmt.Errorf("failed to get user ID: %w:", err)
 				}
 
 				var membership *GuildGroupMembership

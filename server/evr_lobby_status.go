@@ -29,7 +29,7 @@ type GuildLobbyLabel struct {
 
 func JoinMatchmakingStream(logger *zap.Logger, s *sessionWS, params *LobbySessionParameters) error {
 
-	groupStream := params.GroupStream()
+	groupStream := params.MatchmakingStream()
 	logger.Debug("Joining lobby group matchmaking stream", zap.Any("stream", groupStream))
 
 	presenceMeta := params.PresenceMeta()

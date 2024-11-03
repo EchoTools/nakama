@@ -18,7 +18,7 @@ func NewEvrMatchPresenceFromSession(session Session, rating *types.Rating, group
 	sessionCtx := session.Context()
 	params, ok := LoadParams(sessionCtx)
 	if !ok {
-		return nil, NewLobbyError(InternalError, "failed to get session parameters")
+		return nil, errors.New("failed to get session parameters")
 	}
 
 	displayName := params.AccountMetadata.GetGroupDisplayNameOrDefault(groupID)
@@ -73,24 +73,24 @@ func LobbySessionGet(ctx context.Context, logger *zap.Logger, matchRegistry Matc
 
 func (p *EvrPipeline) LobbyJoinEntrants(logger *zap.Logger, label *MatchLabel, presences []*EvrMatchPresence) error {
 	if len(presences) == 0 {
-		return NewLobbyError(InternalError, "no presences")
+		return errors.New("no presences")
 	}
 
 	session := p.sessionRegistry.Get(presences[0].SessionID)
 	if session == nil {
-		return NewLobbyError(InternalError, "session not found")
+		return errors.New("session not found")
 	}
 
 	serverSession := p.sessionRegistry.Get(uuid.FromStringOrNil(label.Broadcaster.SessionID))
 	if serverSession == nil {
-		return NewLobbyError(InternalError, "server session not found")
+		return errors.New("server session not found")
 	}
 
-	return LobbyJoinEntrants(logger, p.matchRegistry, p.tracker, session, serverSession, label, presences, false)
+	return LobbyJoinEntrants(logger, p.matchRegistry, p.tracker, session, serverSession, label, presences)
 }
-func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker Tracker, session Session, serverSession Session, label *MatchLabel, entrants []*EvrMatchPresence, partial bool) error {
+func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker Tracker, session Session, serverSession Session, label *MatchLabel, entrants []*EvrMatchPresence) error {
 	if session == nil || serverSession == nil {
-		return NewLobbyError(InternalError, "session is nil")
+		return errors.New("session is nil")
 	}
 	for _, e := range entrants {
 		logger = logger.With(zap.String("uid", e.UserID.String()), zap.String("sid", e.SessionID.String()))
@@ -132,7 +132,7 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 
 		e = &EvrMatchPresence{}
 		if err := json.Unmarshal([]byte(reason), e); err != nil {
-			err = errors.Join(NewLobbyErrorf(InternalError, "failed to unmarshal match presence"), err)
+			err = fmt.Errorf("failed to unmarshal match presence: %w", err)
 			return err
 		}
 
@@ -141,7 +141,7 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 
 		success := tracker.Update(sessionCtx, e.SessionID, entrantStream, e.UserID, entrantMeta)
 		if !success {
-			return NewLobbyError(InternalError, "failed to track session ID")
+			return errors.New("failed to track session ID")
 		}
 
 	} else {
@@ -149,19 +149,14 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 		// Use the existing entrant metadata.
 		entrantMeta := tracker.GetLocalBySessionIDStreamUserID(session.ID(), entrantStream, e.EntrantID(label.ID))
 		if entrantMeta == nil {
-			return NewLobbyError(InternalError, "failed to get entrant metadata")
+			return errors.New("failed to get entrant metadata")
 		}
 		if err := json.Unmarshal([]byte(entrantMeta.Status), e); err != nil {
-			return errors.Join(NewLobbyErrorf(InternalError, "failed to unmarshal entrant metadata"), err)
+			return fmt.Errorf("failed to unmarshal entrant metadata: %w", err)
 		}
 	}
 
 	<-time.After(1 * time.Second)
-
-	if partial {
-		logger.Debug("Partial join attempt succeeded.", zap.String("mid", label.ID.UUID.String()), zap.String("uid", e.UserID.String()))
-		return nil
-	}
 
 	matchIDStr := label.ID.String()
 
@@ -193,7 +188,7 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 	// Update the statuses. This is looked up by the pipeline when the game server sends the new entrant message.
 	for _, op := range ops {
 		if ok := tracker.Update(sessionCtx, e.SessionID, op.Stream, e.UserID, op.Meta); !ok {
-			return NewLobbyError(InternalError, "failed to track session ID")
+			return errors.New("failed to track session ID")
 		}
 	}
 
@@ -204,7 +199,7 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 	if err := SendEVRMessages(serverSession, connectionSettings); err != nil {
 		logger.Error("failed to send lobby session success to game server", zap.Error(err))
 
-		return NewLobbyError(InternalError, "failed to send lobby session success to game server")
+		return errors.New("failed to send lobby session success to game server")
 	}
 
 	// Send the lobby session success message to the game client.
@@ -213,7 +208,7 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 	err = SendEVRMessages(session, connectionSettings)
 	if err != nil {
 		logger.Error("failed to send lobby session success to game client", zap.Error(err))
-		return NewLobbyError(InternalError, "failed to send lobby session success to game client")
+		return errors.New("failed to send lobby session success to game client")
 	}
 
 	logger.Info("Joined entrant.", zap.String("mid", label.ID.UUID.String()), zap.String("uid", e.UserID.String()), zap.String("sid", e.SessionID.String()))
@@ -225,13 +220,13 @@ func (p *EvrPipeline) authorizeGuildGroupSession(ctx context.Context, session Se
 
 	params, ok := LoadParams(ctx)
 	if !ok {
-		return NewLobbyError(InternalError, "failed to get session parameters")
+		return errors.New("failed to get session parameters")
 	}
 
 	guildGroups := p.guildGroupCache.GuildGroups()
 	gg, ok := guildGroups[groupID]
 	if !ok {
-		return NewLobbyErrorf(InternalError, "failed to get guild group metadata for %s", groupID)
+		return fmt.Errorf("failed to get guild group metadata for %s", groupID)
 	}
 	groupMetadata := gg.Metadata
 	sendAuditMessage := groupMetadata.AuditChannelID != ""
@@ -265,12 +260,12 @@ func (p *EvrPipeline) authorizeGuildGroupSession(ctx context.Context, session Se
 		// Check the account creation date.
 		discordID, err := GetDiscordIDByUserID(ctx, p.db, userID)
 		if err != nil {
-			return NewLobbyErrorf(InternalError, "failed to get discord ID by user ID: %v", err)
+			return fmt.Errorf("failed to get discord ID by user ID: %v", err)
 		}
 
 		t, err := discordgo.SnowflakeTimestamp(discordID)
 		if err != nil {
-			return NewLobbyErrorf(InternalError, "failed to get discord snowflake timestamp: %v", err)
+			return fmt.Errorf("failed to get discord snowflake timestamp: %v", err)
 		}
 
 		if t.After(time.Now().AddDate(0, 0, -groupMetadata.MinimumAccountAgeDays)) {
@@ -318,7 +313,7 @@ func (p *EvrPipeline) authorizeGuildGroupSession(ctx context.Context, session Se
 	displayName := params.AccountMetadata.GetGroupDisplayNameOrDefault(groupID)
 
 	if err := p.profileRegistry.SetLobbyProfile(ctx, uuid.FromStringOrNil(userID), params.EvrID, displayName); err != nil {
-		return errors.Join(NewLobbyErrorf(InternalError, "failed to set lobby profile"), err)
+		return fmt.Errorf("failed to set lobby profile: %w", err)
 	}
 
 	session.Logger().Info("Authorized access to lobby session", zap.String("gid", groupID), zap.String("display_name", displayName))

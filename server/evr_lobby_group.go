@@ -1,13 +1,12 @@
 package server
 
 import (
+	"errors"
 	"sync"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 type LobbyGroup struct {
@@ -68,10 +67,7 @@ func (g *LobbyGroup) PartyStream() PresenceStream {
 	return g.ph.Stream
 }
 
-func JoinPartyGroup(session *sessionWS, groupName string, partyID uuid.UUID, currentMatchID MatchID) (*LobbyGroup, error) {
-
-	maxSize := 4
-	open := true
+func JoinPartyGroup(session *sessionWS, groupName string, partyID uuid.UUID, currentMatchID MatchID) (*LobbyGroup, bool, error) {
 
 	userPresence := &rtapi.UserPresence{
 		UserId:    session.UserID().String(),
@@ -98,9 +94,13 @@ func JoinPartyGroup(session *sessionWS, groupName string, partyID uuid.UUID, cur
 	}
 
 	partyRegistry := session.pipeline.partyRegistry.(*LocalPartyRegistry)
+
 	// Check if the party already exists
 	ph, found := partyRegistry.parties.Load(partyID)
 	if !found {
+
+		maxSize := 4
+		open := true
 
 		// Create the party
 		ph = NewPartyHandler(partyRegistry.logger, partyRegistry, partyRegistry.matchmaker, partyRegistry.tracker, partyRegistry.streamManager, partyRegistry.router, partyID, partyRegistry.node, open, maxSize, userPresence)
@@ -110,17 +110,12 @@ func JoinPartyGroup(session *sessionWS, groupName string, partyID uuid.UUID, cur
 
 		// Join the party
 		success, err := ph.JoinRequest(&presence)
-
-		switch err {
-		case nil, runtime.ErrPartyJoinRequestAlreadyMember:
-			// No-op
-		case runtime.ErrPartyFull, runtime.ErrPartyJoinRequestsFull:
-			return nil, status.Errorf(codes.ResourceExhausted, "Party is full")
-		case runtime.ErrPartyJoinRequestDuplicate:
-			return nil, status.Errorf(codes.AlreadyExists, "Duplicate party join request")
+		if err != nil && err != runtime.ErrPartyJoinRequestAlreadyMember {
+			return nil, false, err
 		}
+
 		if !success {
-			return nil, status.Errorf(codes.Internal, "Failed to join party")
+			return nil, false, errors.New("Failed to join party")
 		}
 	}
 
@@ -130,12 +125,12 @@ func JoinPartyGroup(session *sessionWS, groupName string, partyID uuid.UUID, cur
 			Code:    int32(rtapi.Error_RUNTIME_EXCEPTION),
 			Message: "Error tracking party creation",
 		}}}, true)
-		return nil, status.Errorf(codes.Internal, "Failed to track party creation")
+		return nil, false, errors.New("Failed to track party creation")
 	} else if isNew {
 		out := &rtapi.Envelope{Message: &rtapi.Envelope_Party{Party: &rtapi.Party{
 			PartyId:   ph.IDStr,
-			Open:      open,
-			MaxSize:   int32(maxSize),
+			Open:      ph.Open,
+			MaxSize:   int32(ph.MaxSize),
 			Self:      userPresence,
 			Leader:    userPresence,
 			Presences: []*rtapi.UserPresence{userPresence},
@@ -143,11 +138,16 @@ func JoinPartyGroup(session *sessionWS, groupName string, partyID uuid.UUID, cur
 		_ = session.Send(out, true)
 	}
 	if ph == nil {
-		return nil, status.Errorf(codes.Internal, "Failed to get party handler")
+		return nil, false, errors.New("failed to get party handler")
 	}
-	return &LobbyGroup{
+
+	lobbyGroup := &LobbyGroup{
 		session: session,
 		name:    groupName,
 		ph:      ph,
-	}, nil
+	}
+	// The player is a member of the party, they will follow the leader to lobbies.
+	isLeader := lobbyGroup.GetLeader().SessionId == session.id.String()
+
+	return lobbyGroup, isLeader, nil
 }

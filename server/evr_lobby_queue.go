@@ -151,7 +151,7 @@ func lobbyPrepareSession(ctx context.Context, logger *zap.Logger, matchRegistry 
 	}
 	response, err := SignalMatch(ctx, matchRegistry, matchID, SignalPrepareSession, label)
 	if err != nil {
-		return errors.Join(ErrMatchmakingUnknownError, fmt.Errorf("failed to prepare session `%s`: %s", label.ID.String(), response))
+		return fmt.Errorf("failed to prepare session `%s`: %s", label.ID.String(), response)
 	}
 	return nil
 }
