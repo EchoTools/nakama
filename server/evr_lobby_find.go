@@ -62,12 +62,28 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	}
 	logger.Debug("Joined party group", zap.String("partyID", lobbyGroup.IDStr()))
 
+	inLobby := !lobbyParams.CurrentMatchID.IsNil()
+
+	// If the player is not in a social lobby yet, then immediately backfill to one.
+	if !inLobby || lobbyParams.Mode == evr.ModeSocialPublic {
+		entrantPresences, err := EntrantPresencesFromSessionIDs(logger, p.sessionRegistry, lobbyParams.PartyID, lobbyParams.GroupID, lobbyParams.Rating, lobbyParams.Role, session.id)
+		if err != nil {
+			return NewLobbyError(InternalError, "failed to create entrant presences")
+		}
+
+		return p.lobbyBackfill(ctx, logger, lobbyParams, entrantPresences)
+	}
 	// Party members will monitor the stream of the party leader to determine when to join a match.
 	if !isLeader {
 		return p.PartyFollow(ctx, logger, session, lobbyParams, lobbyGroup)
 	}
 
-	inLobby := !lobbyParams.CurrentMatchID.IsNil()
+	// Only ping the servers if the player is looking for a arena/combat match
+	if lobbyParams.Mode != evr.ModeSocialPublic {
+		if err := p.CheckServerPing(ctx, logger, session); err != nil {
+			return fmt.Errorf("failed to check server ping: %w", err)
+		}
+	}
 
 	// if the party is larger than one, then delay for 10 seconds to allow other members to start matchmake.
 	// This is to prevent the party leader from starting matchmaking before the other members are ready.
@@ -77,13 +93,6 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(10 * time.Second):
-		}
-	}
-
-	// Only ping the servers if the player is looking for a arena/combat match
-	if lobbyParams.Mode != evr.ModeSocialPublic {
-		if err := p.CheckServerPing(ctx, logger, session); err != nil {
-			return fmt.Errorf("failed to check server ping: %w", err)
 		}
 	}
 
@@ -109,7 +118,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	}
 
 	// Attempt to backfill until the timeout.
-	return p.lobbyBackfill(ctx, logger, session, lobbyParams, entrants)
+	return p.lobbyBackfill(ctx, logger, lobbyParams, entrants)
 }
 
 func (p *EvrPipeline) monitorMatchmakingStream(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters, cancelFn context.CancelFunc) {
@@ -117,7 +126,7 @@ func (p *EvrPipeline) monitorMatchmakingStream(ctx context.Context, logger *zap.
 	// Monitor the stream and cancel the context (and matchmaking) if the stream is closed.
 
 	sendErr := func(err error) {
-		if err := session.SendEvr(LobbySessionFailureFromError(lobbyParams.Mode, lobbyParams.GroupID, NewLobbyError(Timeout, "matchmaking timeout"))); err != nil {
+		if err := session.SendEvr(LobbySessionFailureFromError(lobbyParams.Mode, lobbyParams.GroupID, err)); err != nil {
 			logger.Error("Failed to send lobby session failure message", zap.Error(err))
 		}
 	}
@@ -231,13 +240,13 @@ func (p *EvrPipeline) newSocialLobby(ctx context.Context, logger *zap.Logger, ve
 
 }
 
-func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters, entrants []*EvrMatchPresence) error {
+func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lobbyParams *LobbySessionParameters, entrants []*EvrMatchPresence) error {
 
 	// Default backfill interval
 	interval := 15 * time.Second
 
 	// Early quitters have a shorter backfill interval.
-	if lobbyParams.IsEarlyQuitter {
+	if lobbyParams.IsEarlyQuitter || lobbyParams.Mode == evr.ModeSocialPublic {
 		interval = 3 * time.Second
 	}
 
@@ -258,12 +267,14 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, ses
 
 	query := lobbyParams.BackfillSearchQuery(maxRTT)
 	rtts := lobbyParams.latencyHistory.LatestRTTs()
+	startDelay := time.NewTimer(1 * time.Second)
 
 	for {
 		var err error
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-startDelay.C:
 		case <-time.After(interval):
 		}
 
@@ -288,17 +299,31 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, ses
 
 		partySize := lobbyParams.GetPartySize()
 		var selected *MatchLabel
-		var team int
+
+		team := evr.TeamBlue
+
 		for _, labelMeta := range matches {
 			l := labelMeta.State
 
-			// Check if the label has enough open player slots on the same team for the entire party
-			if l.OpenSlotsByRole(evr.TeamBlue) < partySize {
-				team = evr.TeamOrange
-			} else if l.OpenSlotsByRole(evr.TeamOrange) < partySize {
-				team = evr.TeamBlue
+			// Check if the match is full
+			if l.OpenPlayerSlots() < partySize {
+				continue
+			}
+
+			// Social lobbies can only have one team
+			if lobbyParams.Mode == evr.ModeSocialPublic {
+
+				team = evr.TeamSocial
 			} else {
-				// Both teams are full
+
+				// Determine which team has the least players
+				team = evr.TeamBlue
+				if l.RoleCount(evr.TeamOrange) < l.RoleCount(evr.TeamBlue) {
+					team = evr.TeamOrange
+				}
+			}
+
+			if l.OpenSlotsByRole(team) < partySize {
 				continue
 			}
 

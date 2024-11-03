@@ -153,7 +153,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 			}
 
 			label, err := MatchLabelByID(ctx, p.runtimeModule, matchID)
-			if err != nil {
+			if err != nil || label == nil {
 				logger.Error("Failed to get match label", zap.Error(err))
 				continue
 			}

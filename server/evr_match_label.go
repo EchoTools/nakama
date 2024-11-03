@@ -110,6 +110,8 @@ func (s *MatchLabel) RoleLimit(role int) int {
 		return s.TeamSize * 2
 	case BlueRole, OrangeRole:
 		return s.TeamSize
+	case SocialRole:
+		return s.PlayerLimit
 	case SpectatorRole, ModeratorRole:
 		return s.PlayerLimit - s.TeamSize*2
 	}
