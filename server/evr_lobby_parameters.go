@@ -53,6 +53,7 @@ type LobbySessionParameters struct {
 	ProfileStatistics      evr.PlayerStatistics
 	RankPercentile         float64 `json:"rank_percentile"`
 	RankPercentileRange    float64 `json:"rank_percentile_range"`
+	MaxServerRTT           int     `json:"max_server_rtt"`
 }
 
 func (p *LobbySessionParameters) GetPartySize() int {
@@ -205,13 +206,16 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		percentile = 0.50
 	}
 
-	rankRange := 0.40
+	rankRange := globalSettings.RankPercentileRange
 
-	if globalSettings.RankPercentileRange > 0 {
-		rankRange = globalSettings.RankPercentileRange
-	}
 	if userSettings.RankPercentileRange > 0 {
 		rankRange = userSettings.RankPercentileRange
+	}
+
+	maxServerRTT := globalSettings.MaxServerRTT
+
+	if userSettings.MaxServerRTT > 0 {
+		maxServerRTT = userSettings.MaxServerRTT
 	}
 
 	isEarlyQuitter := false
@@ -259,6 +263,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		IsEarlyQuitter:         isEarlyQuitter,
 		RankPercentile:         percentile,
 		RankPercentileRange:    rankRange,
+		MaxServerRTT:           maxServerRTT,
 	}, nil
 }
 
@@ -332,6 +337,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionPar
 		"rating_sigma":    p.Rating.Sigma,
 		"rating_z":        float64(p.Rating.Z),
 		"rank_percentile": p.RankPercentile,
+		"timestamp":       float64(time.Now().UTC().Unix()),
 	}
 
 	qparts := []string{
@@ -342,9 +348,6 @@ func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionPar
 		p.MatchmakingQueryAddon,
 	}
 
-	if withRankRange && p.RankPercentileRange > 0 {
-		qparts = append(qparts, fmt.Sprintf("+properties.rank_percentile:<=%f", p.RankPercentile+p.RankPercentileRange))
-	}
 	// If the user has an early quit penalty, only match them with players who have submitted before the penalty expiry
 	//if p.EarlyQuitPenaltyExpiry.After(time.Now()) {
 	//	qparts = append(qparts, fmt.Sprintf(`-properties.submission_time:<="%s"`, submissionTime))

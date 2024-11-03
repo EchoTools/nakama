@@ -234,7 +234,7 @@ type MatchmakingSettings struct {
 	NextMatchID           MatchID  `json:"next_match_id"`           // Try to join this match immediately when finding a match
 	NextMatchRole         string   `json:"next_match_role"`         // The role to join the next match as
 	RankPercentileRange   float64  `json:"rank_percentile_range"`   // The percentile range for rank matching
-	MaxRTT                int      `json:"max_rtt"`                 // The maximum RTT to allow
+	MaxServerRTT          int      `json:"max_server_rtt"`          // The maximum RTT to allow
 }
 
 func (MatchmakingSettings) GetStorageID() StorageID {

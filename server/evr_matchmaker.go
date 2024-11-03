@@ -129,21 +129,9 @@ func removeDuplicateRosters(candidates [][]runtime.MatchmakerEntry) [][]runtime.
 // Function to be used as a matchmaker function in Nakama (RegisterMatchmakerOverride)
 func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, candidates [][]runtime.MatchmakerEntry) (madeMatches [][]runtime.MatchmakerEntry) {
 	//profileRegistry := &ProfileRegistry{nk: nk}
-
-	maxRTT := 110
-	maxRankPercentileDelta := 0.40
-
-	settings, err := LoadMatchmakingSettings(ctx, nk, SystemUserID)
-	if err != nil {
-		logger.WithField("error", err).Error("Error loading matchmaking settings.")
-	}
-
-	if settings.MaxRTT > 0 {
-		maxRTT = settings.MaxRTT
-	}
-	if settings.RankPercentileRange > 0 {
-		maxRankPercentileDelta = settings.RankPercentileRange
-	}
+	logger.WithFields(map[string]interface{}{
+		"num_candidates": len(candidates),
+	}).Info("Running skill-based matchmaker.")
 
 	if len(candidates) == 0 || len(candidates[0]) == 0 {
 		return nil
@@ -182,22 +170,25 @@ func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 	}
 
 	// Ensure that everyone in the match is within 100 ping of a server
+
 	for i := 0; i < len(candidates); i++ {
-		if !m.hasEligibleServers(candidates[i], maxRTT) {
+		if len(m.eligibleServers(candidates[i])) == 0 {
 			logger.WithField("match", candidates[i]).Warn("Match has players with no eligible servers.")
 			candidates = append(candidates[:i], candidates[i+1:]...)
 			i--
 		}
 	}
 
-	// Ensure all players are within rank range of each other
-	for i := 0; i < len(candidates); i++ {
-		if !m.hasCompatibleRanks(candidates[i], maxRankPercentileDelta) {
-			logger.WithField("match", candidates[i]).Warn("Match has players with incompatible ranks.")
-			candidates = append(candidates[:i], candidates[i+1:]...)
-			i--
+	/*
+		// Ensure all players are within rank range of each other
+		for i := 0; i < len(candidates); i++ {
+			if !m.hasCompatibleRanks(candidates[i], maxRankPercentileDelta) {
+				logger.WithField("match", candidates[i]).Warn("Match has players with incompatible ranks.")
+				candidates = append(candidates[:i], candidates[i+1:]...)
+				i--
+			}
 		}
-	}
+	*/
 
 	balanced := balanceMatches(candidates, m)
 
@@ -263,40 +254,46 @@ func (m *skillBasedMatchmaker) hasCompatibleRanks(match []runtime.MatchmakerEntr
 	return ranks[len(ranks)-1]-ranks[0] < maxDelta
 }
 
-func (m *skillBasedMatchmaker) hasEligibleServers(match []runtime.MatchmakerEntry, maxRTT int) bool {
+func (m *skillBasedMatchmaker) eligibleServers(match []runtime.MatchmakerEntry) map[string]int {
 	rttsByServer := make(map[string][]int)
 	for _, entry := range match {
-		for k, v := range entry.GetProperties() {
+		props := entry.GetProperties()
+
+		maxRTT := 500
+		if rtt, ok := props["max_rtt"].(int); ok && rtt > 0 {
+			maxRTT = rtt
+		}
+
+		for k, v := range props {
 			if !strings.HasPrefix(k, "rtt_") {
 				continue
 			}
 
 			if rtt, ok := v.(int); ok {
-				if _, ok := rttsByServer[k]; !ok {
-					rttsByServer[k] = make([]int, 0, len(match))
+				if rtt > maxRTT {
+					// Server is too far away from this player
+					continue
 				}
 				rttsByServer[k] = append(rttsByServer[k], rtt)
 			}
 		}
 	}
 
-	for _, s := range rttsByServer {
-		if len(s) != len(match) {
+	average := make(map[string]int)
+	for k, rtts := range rttsByServer {
+		if len(rtts) != len(match) {
 			// Server is unreachable to one or more players
-			return false
+			continue
 		}
-	}
 
-	for _, rtts := range rttsByServer {
+		mean := 0
 		for _, rtt := range rtts {
-			if rtt > maxRTT {
-				// Server is too far away for one or more players
-				return false
-			}
+			mean += rtt
 		}
+		average[k] = mean / len(rtts)
 	}
 
-	return true
+	return average
 }
 
 func balanceMatches(candidateMatches [][]runtime.MatchmakerEntry, m *skillBasedMatchmaker) []RatedMatch {
