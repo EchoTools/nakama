@@ -130,6 +130,21 @@ func removeDuplicateRosters(candidates [][]runtime.MatchmakerEntry) [][]runtime.
 func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, candidates [][]runtime.MatchmakerEntry) (madeMatches [][]runtime.MatchmakerEntry) {
 	//profileRegistry := &ProfileRegistry{nk: nk}
 
+	maxRTT := 110
+	maxRankPercentileDelta := 0.40
+
+	settings, err := LoadMatchmakingSettings(ctx, nk, SystemUserID)
+	if err != nil {
+		logger.WithField("error", err).Error("Error loading matchmaking settings.")
+	}
+
+	if settings.MaxRTT > 0 {
+		maxRTT = settings.MaxRTT
+	}
+	if settings.RankPercentileRange > 0 {
+		maxRankPercentileDelta = settings.RankPercentileRange
+	}
+
 	if len(candidates) == 0 || len(candidates[0]) == 0 {
 		return nil
 	}
@@ -168,7 +183,7 @@ func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 
 	// Ensure that everyone in the match is within 100 ping of a server
 	for i := 0; i < len(candidates); i++ {
-		if !m.hasEligibleServers(candidates[i], 110) {
+		if !m.hasEligibleServers(candidates[i], maxRTT) {
 			logger.WithField("match", candidates[i]).Warn("Match has players with no eligible servers.")
 			candidates = append(candidates[:i], candidates[i+1:]...)
 			i--
@@ -177,7 +192,7 @@ func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 
 	// Ensure all players are within rank range of each other
 	for i := 0; i < len(candidates); i++ {
-		if !m.hasCompatibleRanks(candidates[i], 0.40) {
+		if !m.hasCompatibleRanks(candidates[i], maxRankPercentileDelta) {
 			logger.WithField("match", candidates[i]).Warn("Match has players with incompatible ranks.")
 			candidates = append(candidates[:i], candidates[i+1:]...)
 			i--

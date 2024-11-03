@@ -52,6 +52,7 @@ type LobbySessionParameters struct {
 	latencyHistory         LatencyHistory
 	ProfileStatistics      evr.PlayerStatistics
 	RankPercentile         float64 `json:"rank_percentile"`
+	RankPercentileRange    float64 `json:"rank_percentile_range"`
 }
 
 func (p *LobbySessionParameters) GetPartySize() int {
@@ -204,6 +205,15 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		percentile = 0.50
 	}
 
+	rankRange := 0.40
+
+	if globalSettings.RankPercentileRange > 0 {
+		rankRange = globalSettings.RankPercentileRange
+	}
+	if userSettings.RankPercentileRange > 0 {
+		rankRange = userSettings.RankPercentileRange
+	}
+
 	isEarlyQuitter := false
 	// Check if the last game was quit early
 	if len(eqstats.History) > 0 {
@@ -248,6 +258,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		EarlyQuitPenaltyExpiry: penaltyExpiry,
 		IsEarlyQuitter:         isEarlyQuitter,
 		RankPercentile:         percentile,
+		RankPercentileRange:    rankRange,
 	}, nil
 }
 
@@ -302,7 +313,7 @@ func (p *LobbySessionParameters) BackfillSearchQuery(maxRTT int) string {
 
 }
 
-func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionParameters) (string, map[string]string, map[string]float64) {
+func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionParameters, withRankRange bool) (string, map[string]string, map[string]float64) {
 
 	displayName := sessionParams.AccountMetadata.GetGroupDisplayNameOrDefault(p.GroupID.String())
 
@@ -331,6 +342,9 @@ func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionPar
 		p.MatchmakingQueryAddon,
 	}
 
+	if withRankRange && p.RankPercentileRange > 0 {
+		qparts = append(qparts, fmt.Sprintf("+properties.rank_percentile:<=%f", p.RankPercentile+p.RankPercentileRange))
+	}
 	// If the user has an early quit penalty, only match them with players who have submitted before the penalty expiry
 	//if p.EarlyQuitPenaltyExpiry.After(time.Now()) {
 	//	qparts = append(qparts, fmt.Sprintf(`-properties.submission_time:<="%s"`, submissionTime))
