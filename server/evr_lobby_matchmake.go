@@ -73,6 +73,7 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 	if !ok {
 		return fmt.Errorf("matchmaking ticket config not found for mode %s", lobbyParams.Mode)
 	}
+
 	ticketConfig.includeRankRange = true
 
 	// Add the primary ticket

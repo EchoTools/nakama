@@ -318,7 +318,7 @@ func (p *LobbySessionParameters) BackfillSearchQuery(maxRTT int) string {
 
 }
 
-func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionParameters, withRankRange bool) (string, map[string]string, map[string]float64) {
+func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionParameters, withMinRankPercentile bool) (string, map[string]string, map[string]float64) {
 
 	displayName := sessionParams.AccountMetadata.GetGroupDisplayNameOrDefault(p.GroupID.String())
 
@@ -348,6 +348,9 @@ func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionPar
 		p.MatchmakingQueryAddon,
 	}
 
+	if withMinRankPercentile && p.RankPercentileRange > 0 {
+		qparts = append(qparts, fmt.Sprintf("+properties.rank_percentile:>=%f +properties.rank_percentile:<=%f", p.RankPercentile-(p.RankPercentileRange/2), p.RankPercentile+(p.RankPercentileRange/2)))
+	}
 	// If the user has an early quit penalty, only match them with players who have submitted before the penalty expiry
 	//if p.EarlyQuitPenaltyExpiry.After(time.Now()) {
 	//	qparts = append(qparts, fmt.Sprintf(`-properties.submission_time:<="%s"`, submissionTime))
