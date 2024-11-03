@@ -42,9 +42,10 @@ var (
 )
 
 type MatchmakerTicketConfig struct {
-	MinCount      int
-	MaxCount      int
-	CountMultiple int
+	MinCount         int
+	MaxCount         int
+	CountMultiple    int
+	includeRankRange bool
 }
 
 var DefaultMatchmakerTicketConfigs = map[evr.Symbol]MatchmakerTicketConfig{
@@ -72,6 +73,7 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 	if !ok {
 		return fmt.Errorf("matchmaking ticket config not found for mode %s", lobbyParams.Mode)
 	}
+	ticketConfig.includeRankRange = true
 
 	// Add the primary ticket
 	err = p.addTicket(ctx, logger, session, lobbyParams, lobbyGroup, ticketConfig)
@@ -97,6 +99,7 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 		// Attempt a fallback ticket
 		ticketConfig.MaxCount = ticketConfig.MinCount
 		ticketConfig.MinCount = 1
+		ticketConfig.includeRankRange = false
 
 		if ticketConfig.CountMultiple == 1 || ticketConfig.MaxCount == ticketConfig.MinCount || ticketConfig.MaxCount%ticketConfig.CountMultiple != 0 {
 			logger.Debug("Matchmaking ticket config is not valid for fallbacks", zap.Any("config", ticketConfig))
@@ -121,7 +124,7 @@ func (p *EvrPipeline) addTicket(ctx context.Context, logger *zap.Logger, session
 		return fmt.Errorf("failed to load session parameters")
 	}
 
-	query, stringProps, numericProps := lobbyParams.MatchmakingParameters(sessionParams)
+	query, stringProps, numericProps := lobbyParams.MatchmakingParameters(sessionParams, ticketConfig.includeRankRange)
 
 	logger.Debug("Matchmaking query", zap.String("query", query), zap.Any("string_properties", stringProps), zap.Any("numeric_properties", numericProps))
 
@@ -164,7 +167,7 @@ func (p *EvrPipeline) addTicket(ctx context.Context, logger *zap.Logger, session
 		session.matchmaker.Remove([]string{ticket})
 	}()
 
-	logger.Debug("Matchmaking ticket added", zap.String("ticket", ticket), zap.Any("presences", otherPresences))
+	logger.Debug("Matchmaking ticket added", zap.String("query", query), zap.String("ticket", ticket), zap.Any("presences", otherPresences))
 
 	return nil
 }
@@ -230,6 +233,8 @@ type MatchmakingSettings struct {
 	PriorityBroadcasters  []string `json:"priority_broadcasters"`   // Prioritize these broadcasters
 	NextMatchID           MatchID  `json:"next_match_id"`           // Try to join this match immediately when finding a match
 	NextMatchRole         string   `json:"next_match_role"`         // The role to join the next match as
+	RankPercentileRange   float64  `json:"rank_percentile_range"`   // The percentile range for rank matching
+	MaxRTT                int      `json:"max_rtt"`                 // The maximum RTT to allow
 }
 
 func (MatchmakingSettings) GetStorageID() StorageID {
