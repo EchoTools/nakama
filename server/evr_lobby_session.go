@@ -60,6 +60,7 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 					return nil
 				}
 				logger.Warn("Matchmaking timed out", zap.Error(err))
+				return NewLobbyError(Timeout, "matchmaking timed out")
 			default:
 				p.metrics.CustomCounter("lobby_find_match_error", lobbyParams.MetricsTags(), int64(lobbyParams.GetPartySize()))
 				// On error, leave any party the user might be a member of.
