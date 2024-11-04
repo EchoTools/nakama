@@ -50,7 +50,6 @@ type LobbySessionParameters struct {
 	IsEarlyQuitter         bool          `json:"quit_last_game_early"`
 	EarlyQuitPenaltyExpiry time.Time     `json:"early_quit_penalty_expiry"`
 	latencyHistory         LatencyHistory
-	ProfileStatistics      evr.PlayerStatistics
 	RankPercentile         float64   `json:"rank_percentile"`
 	RankPercentileRange    float64   `json:"rank_percentile_range"`
 	MaxServerRTT           int       `json:"max_server_rtt"`
@@ -259,7 +258,6 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		BlockedIDs:             blockedIDs,
 		Rating:                 rating,
 		Verbose:                sessionParams.AccountMetadata.DiscordDebugMessages,
-		ProfileStatistics:      profile.LatestStatistics(true, true, false),
 		EarlyQuitPenaltyExpiry: penaltyExpiry,
 		IsEarlyQuitter:         isEarlyQuitter,
 		RankPercentile:         percentile,
@@ -334,6 +332,8 @@ func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionPar
 		"submission_time": submissionTime,
 	}
 
+	// now + 2/3 matchmaking timeout
+
 	numericProperties := map[string]float64{
 		"rating_mu":       p.Rating.Mu,
 		"rating_sigma":    p.Rating.Sigma,
@@ -357,17 +357,6 @@ func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionPar
 	//if p.EarlyQuitPenaltyExpiry.After(time.Now()) {
 	//	qparts = append(qparts, fmt.Sprintf(`-properties.submission_time:<="%s"`, submissionTime))
 	//}
-
-	// Add the user's weekly stats to their numericProperties
-	for mode, stats := range p.ProfileStatistics {
-		for k, s := range stats {
-			v, ok := s.Value.(float64)
-			if !ok {
-				continue
-			}
-			numericProperties[fmt.Sprintf("stats_%s_%s", mode, k)] = v
-		}
-	}
 
 	//maxDelta := 60 // milliseconds
 	for k, v := range AverageLatencyHistories(p.latencyHistory) {
