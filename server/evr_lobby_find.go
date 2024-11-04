@@ -254,6 +254,7 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 
 	cycleCount := 0
 	for {
+
 		var err error
 		select {
 		case <-ctx.Done():
@@ -268,7 +269,14 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 			return fmt.Errorf("failed to list matches: %w", err)
 		}
 
-		logger.Debug("Found matches", zap.Int("count", len(matches)), zap.Any("query", query), zap.Int("cycle", cycleCount))
+		cycleCount++
+		if len(matches) > 0 {
+			logger.Debug("Found matches", zap.Int("count", len(matches)), zap.Any("query", query), zap.Int("cycle", cycleCount))
+		} else {
+			if cycleCount%10 == 0 {
+				logger.Debug("No matches found", zap.Any("query", query), zap.Int("cycle", cycleCount))
+			}
+		}
 		// Sort the labels by least open slots, then ping
 
 		// Sort the matches by open slots and then by latency
@@ -335,10 +343,6 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 		}
 
 		if selected == nil {
-			cycleCount++
-			if cycleCount%10 == 0 {
-				logger.Debug("No matches found", zap.Any("query", query), zap.Int("cycle", cycleCount))
-			}
 			continue
 		}
 
