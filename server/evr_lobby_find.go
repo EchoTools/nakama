@@ -53,6 +53,11 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	// Cancel matchmaking after the timeout.
 	ctx, cancel := context.WithTimeoutCause(ctx, p.matchmakingTicketTimeout(), ErrMatchmakingTimeout)
 	defer cancel()
+
+	if err := JoinMatchmakingStream(logger, session, lobbyParams); err != nil {
+		return fmt.Errorf("failed to join matchmaking stream: %w", err)
+	}
+
 	go p.monitorMatchmakingStream(ctx, logger, session, lobbyParams, cancel)
 
 	// The lobby group is the party that the user is currently in.
@@ -77,15 +82,12 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		return p.PartyFollow(ctx, logger, session, lobbyParams, lobbyGroup)
 	}
 
-	// Only ping the servers if the player is looking for a arena/combat match
-
+	// Check latency to active game servers.
 	if err := p.CheckServerPing(ctx, logger, session); err != nil {
 		return fmt.Errorf("failed to check server ping: %w", err)
 	}
 
-	// if the party is larger than one, then delay for 10 seconds to allow other members to start matchmake.
-	// This is to prevent the party leader from starting matchmaking before the other members are ready.
-	// This is only for non-social lobbies.
+	// If this is a party, the party leader will wait for the other members to start matchmaking.
 	if lobbyGroup.Size() > 1 {
 		select {
 		case <-ctx.Done():
@@ -106,7 +108,6 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	}
 
 	// If the player early quit their last match, they will not be matchmade.
-	// Social lobbies are handled differently, they are created as needed (i.e. not matchmade)
 	if !lobbyParams.IsEarlyQuitter {
 
 		// Submit the matchmaking ticket
@@ -122,34 +123,15 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 func (p *EvrPipeline) monitorMatchmakingStream(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters, cancelFn context.CancelFunc) {
 
 	// Monitor the stream and cancel the context (and matchmaking) if the stream is closed.
-
-	sendErr := func(err error) {
-		if err := session.SendEvr(LobbySessionFailureFromError(lobbyParams.Mode, lobbyParams.GroupID, err)); err != nil {
-			logger.Error("Failed to send lobby session failure message", zap.Error(err))
-		}
-	}
-
 	// This stream tracks the user's matchmaking status.
 	// This stream is untracked when the user cancels matchmaking.
-	if err := JoinMatchmakingStream(logger, session, lobbyParams); err != nil {
-		sendErr(err)
-		return
-	}
 
 	stream := lobbyParams.MatchmakingStream()
-
+	defer LeaveMatchmakingStream(logger, session)
 	for {
-
 		select {
 		case <-ctx.Done():
 			// Check if the cancel was because of a timeout
-			if ctx.Err() == context.DeadlineExceeded {
-				logger.Warn("Matchmaking timeout")
-				if err := session.SendEvr(LobbySessionFailureFromError(lobbyParams.Mode, lobbyParams.GroupID, NewLobbyError(Timeout, "matchmaking timeout"))); err != nil {
-					logger.Error("Failed to send lobby session failure message", zap.Error(err))
-				}
-				LeaveMatchmakingStream(logger, session)
-			}
 			return
 		case <-time.After(1 * time.Second):
 		}
@@ -286,14 +268,6 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 			return fmt.Errorf("failed to list matches: %w", err)
 		}
 
-		if len(matches) == 0 {
-			cycleCount++
-			if cycleCount%10 == 0 {
-				logger.Debug("No matches found", zap.Any("query", query), zap.Int("cycle", cycleCount))
-			}
-			continue
-		}
-
 		logger.Debug("Found matches", zap.Int("count", len(matches)), zap.Any("query", query), zap.Int("cycle", cycleCount))
 		// Sort the labels by least open slots, then ping
 
@@ -322,8 +296,8 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 
 			// Social lobbies can only have one team
 			if lobbyParams.Mode == evr.ModeSocialPublic {
-
 				team = evr.TeamSocial
+
 			} else {
 
 				// Determine which team has the least players
@@ -361,7 +335,10 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 		}
 
 		if selected == nil {
-			// No match found
+			cycleCount++
+			if cycleCount%10 == 0 {
+				logger.Debug("No matches found", zap.Any("query", query), zap.Int("cycle", cycleCount))
+			}
 			continue
 		}
 
