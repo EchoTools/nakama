@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"math/rand"
 	"slices"
 	"strings"
 
@@ -51,18 +50,6 @@ func (m *skillBasedMatchmaker) CreateBalancedMatch(groups [][]*RatedEntry, teamS
 		} else {
 			parties = append(parties, group)
 		}
-	}
-
-	// Shuffle parties
-	for i := range parties {
-		j := rand.Intn(i + 1)
-		parties[i], parties[j] = parties[j], parties[i]
-	}
-
-	// Shuffle solo players
-	for i := range solos {
-		j := rand.Intn(i + 1)
-		solos[i], solos[j] = solos[j], solos[i]
 	}
 
 	team1 := make(RatedEntryTeam, 0, teamSize)
@@ -282,21 +269,8 @@ func (m *skillBasedMatchmaker) eligibleServers(match []runtime.MatchmakerEntry) 
 }
 
 func balanceMatches(candidateMatches [][]runtime.MatchmakerEntry, m *skillBasedMatchmaker) []RatedMatch {
-	seenRosters := make(map[string]struct{})
-
 	balancedMatches := make([]RatedMatch, 0, len(candidateMatches))
 	for _, match := range candidateMatches {
-		roster := make([]string, 0, len(match))
-		for _, e := range match {
-			roster = append(roster, e.GetTicket())
-		}
-
-		rosterString := strings.Join(roster, ",")
-		if _, ok := seenRosters[rosterString]; ok {
-			continue
-		}
-		seenRosters[rosterString] = struct{}{}
-
 		team1, team2 := m.BalancedMatchFromCandidate(match)
 		balancedMatches = append(balancedMatches, RatedMatch{team1, team2})
 	}

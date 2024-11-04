@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/gofrs/uuid/v5"
+	"github.com/google/go-cmp/cmp"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/intinig/go-openskill/types"
 )
 
 func TestMroundRTT(t *testing.T) {
@@ -284,6 +286,82 @@ func TestRemoveDuplicateRosters(t *testing.T) {
 			}
 			if gotDupes != tt.wantDupes {
 				t.Errorf("removeDuplicateRosters() gotDupes = %v, want %v", gotDupes, tt.wantDupes)
+			}
+		})
+	}
+}
+
+func TestCreateBalancedMatch(t *testing.T) {
+	tests := []struct {
+		name      string
+		groups    [][]*RatedEntry
+		teamSize  int
+		wantTeam1 RatedEntryTeam
+		wantTeam2 RatedEntryTeam
+	}{
+		{
+			name: "Balanced teams with solo players",
+			groups: [][]*RatedEntry{
+				{&RatedEntry{Rating: types.Rating{Mu: 25, Sigma: 8.333}}},
+				{&RatedEntry{Rating: types.Rating{Mu: 30, Sigma: 8.333}}},
+				{&RatedEntry{Rating: types.Rating{Mu: 35, Sigma: 8.333}}},
+				{&RatedEntry{Rating: types.Rating{Mu: 40, Sigma: 8.333}}},
+			},
+			teamSize: 2,
+			wantTeam1: RatedEntryTeam{
+				&RatedEntry{Rating: types.Rating{Mu: 25, Sigma: 8.333}},
+				&RatedEntry{Rating: types.Rating{Mu: 35, Sigma: 8.333}},
+			},
+			wantTeam2: RatedEntryTeam{
+				&RatedEntry{Rating: types.Rating{Mu: 30, Sigma: 8.333}},
+				&RatedEntry{Rating: types.Rating{Mu: 40, Sigma: 8.333}},
+			},
+		},
+		{
+			name: "Balanced teams with parties",
+			groups: [][]*RatedEntry{
+				{&RatedEntry{Rating: types.Rating{Mu: 25, Sigma: 8.333}}, &RatedEntry{Rating: types.Rating{Mu: 30, Sigma: 8.333}}},
+				{&RatedEntry{Rating: types.Rating{Mu: 35, Sigma: 8.333}}, &RatedEntry{Rating: types.Rating{Mu: 40, Sigma: 8.333}}},
+			},
+			teamSize: 2,
+			wantTeam1: RatedEntryTeam{
+				&RatedEntry{Rating: types.Rating{Mu: 25, Sigma: 8.333}},
+				&RatedEntry{Rating: types.Rating{Mu: 30, Sigma: 8.333}},
+			},
+			wantTeam2: RatedEntryTeam{
+				&RatedEntry{Rating: types.Rating{Mu: 35, Sigma: 8.333}},
+				&RatedEntry{Rating: types.Rating{Mu: 40, Sigma: 8.333}},
+			},
+		},
+		{
+			name: "Mixed solo players and parties",
+			groups: [][]*RatedEntry{
+				{&RatedEntry{Rating: types.Rating{Mu: 25, Sigma: 8.333}}},
+				{&RatedEntry{Rating: types.Rating{Mu: 40, Sigma: 8.333}}, &RatedEntry{Rating: types.Rating{Mu: 35, Sigma: 8.333}}},
+				{&RatedEntry{Rating: types.Rating{Mu: 30, Sigma: 8.333}}},
+			},
+			teamSize: 2,
+			wantTeam1: RatedEntryTeam{
+				&RatedEntry{Rating: types.Rating{Mu: 40, Sigma: 8.333}},
+				&RatedEntry{Rating: types.Rating{Mu: 35, Sigma: 8.333}},
+			},
+			wantTeam2: RatedEntryTeam{
+				&RatedEntry{Rating: types.Rating{Mu: 25, Sigma: 8.333}},
+				&RatedEntry{Rating: types.Rating{Mu: 30, Sigma: 8.333}},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &skillBasedMatchmaker{}
+			gotTeam1, gotTeam2 := m.CreateBalancedMatch(tt.groups, tt.teamSize)
+
+			if cmp.Diff(gotTeam1, tt.wantTeam1) != "" {
+				t.Errorf("CreateBalancedMatch() team1 = %s", cmp.Diff(gotTeam1, tt.wantTeam1))
+			}
+			if !reflect.DeepEqual(gotTeam2, tt.wantTeam2) {
+				t.Errorf("CreateBalancedMatch() team2 = %s", cmp.Diff(gotTeam2, tt.wantTeam2))
 			}
 		})
 	}
