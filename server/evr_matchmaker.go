@@ -27,6 +27,124 @@ func (*skillBasedMatchmaker) TeamStrength(team RatedEntryTeam) float64 {
 	return s
 }
 
+// Function to be used as a matchmaker function in Nakama (RegisterMatchmakerOverride)
+func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, candidates [][]runtime.MatchmakerEntry) (madeMatches [][]runtime.MatchmakerEntry) {
+	//profileRegistry := &ProfileRegistry{nk: nk}
+	logger.WithFields(map[string]interface{}{
+		"num_candidates": len(candidates),
+	}).Info("Running skill-based matchmaker.")
+
+	if len(candidates) == 0 || len(candidates[0]) == 0 {
+		return nil
+	}
+
+	// Remove odd sized teams
+	for _, match := range candidates {
+		if len(match)%2 != 0 {
+			logger.WithField("match", match).Warn("Match has odd number of players.")
+			continue
+		}
+	}
+
+	logger.WithField("num_candidates", len(candidates)).Info("Running skill-based matchmaker.")
+
+	groupID := candidates[0][0].GetProperties()["group_id"].(string)
+	if groupID == "" {
+		logger.Error("Group ID not found in matchmaker properties.")
+		return nil
+	}
+
+	data, _ := json.Marshal(candidates)
+	nk.StorageWrite(ctx, []*runtime.StorageWrite{
+		{
+			UserID:          SystemUserID,
+			Collection:      "Matchmaker",
+			Key:             "latestCandidates",
+			PermissionRead:  0,
+			PermissionWrite: 0,
+			Value:           string(data),
+		},
+	})
+
+	if err := nk.StreamSend(StreamModeMatchmaker, groupID, "", "", string(data), nil, false); err != nil {
+		logger.WithField("error", err).Warn("Error streaming candidates")
+	}
+
+	// If there is a non-hidden presence on the stream, then don't make any matches
+	if presences, err := nk.StreamUserList(StreamModeMatchmaker, groupID, "", "", false, true); err != nil {
+		logger.WithField("error", err).Warn("Error listing presences on stream.")
+	} else if len(presences) > 0 {
+		logger.WithField("num_presences", len(presences)).Info("Non-hidden presence on stream, not making matches.")
+		return nil
+	}
+
+	// Remove duplicate rosters
+	var count int
+	candidates, count = removeDuplicateRosters(candidates)
+	if count > 0 {
+		logger.WithField("num_duplicates", count).Warn("Removed duplicate rosters.")
+	}
+
+	// Ensure that everyone in the match is within 100 ping of a server
+
+	for i := 0; i < len(candidates); i++ {
+		if len(m.eligibleServers(candidates[i])) == 0 {
+			logger.WithField("match", candidates[i]).Warn("Match players have no common servers.")
+			candidates = append(candidates[:i], candidates[i+1:]...)
+			i--
+		}
+	}
+
+	predictions := make([]PredictedMatch, 0, len(candidates))
+	for _, match := range candidates {
+		ratedMatch := m.BalancedMatchFromCandidate(match)
+		predictions = append(predictions, PredictedMatch{
+			Team1: ratedMatch[0],
+			Team2: ratedMatch[1],
+			Draw:  m.PredictDraw(ratedMatch),
+		})
+	}
+
+	// Sort the matches by their balance
+	slices.SortStableFunc(predictions, func(a, b PredictedMatch) int {
+		return int((a.Draw - b.Draw) * 1000)
+	})
+	// Sort so that highest draw probability is first
+	slices.Reverse(predictions)
+
+	// Sort by matches that have players who have been waiting more than half the Matchmaking timeout
+	// This is to prevent players from waiting too long
+
+	seen := make(map[string]struct{})
+	madeMatches = make([][]runtime.MatchmakerEntry, 0, len(predictions))
+
+OuterLoop:
+	for _, p := range predictions {
+		// The players are ordered by their team
+		match := make([]runtime.MatchmakerEntry, 0, 8)
+		for _, e := range p.Entrants() {
+
+			// Skip a match where any player of any ticket that has already been seen
+			if _, ok := seen[e.Entry.GetTicket()]; ok {
+				continue OuterLoop
+			}
+			seen[e.Entry.GetTicket()] = struct{}{}
+
+			match = append(match, e.Entry)
+		}
+
+		madeMatches = append(madeMatches, match)
+	}
+
+	logger.WithFields(map[string]interface{}{
+		"num_candidates": len(candidates),
+		"num_matches":    len(madeMatches),
+		"matches":        madeMatches,
+	}).Info("Skill-based matchmaker completed.")
+
+	return madeMatches
+}
+
 func (*skillBasedMatchmaker) PredictDraw(teams []RatedEntryTeam) float64 {
 	team1 := make(types.Team, 0, len(teams[0]))
 	team2 := make(types.Team, 0, len(teams[1]))
@@ -76,7 +194,7 @@ func (m *skillBasedMatchmaker) CreateBalancedMatch(groups [][]*RatedEntry, teamS
 	return team1, team2
 }
 
-func (m *skillBasedMatchmaker) BalancedMatchFromCandidate(candidate []runtime.MatchmakerEntry) (RatedEntryTeam, RatedEntryTeam) {
+func (m *skillBasedMatchmaker) BalancedMatchFromCandidate(candidate []runtime.MatchmakerEntry) RatedMatch {
 	// Create a balanced match
 	ticketMap := lo.GroupBy(candidate, func(e runtime.MatchmakerEntry) string {
 		return e.GetTicket()
@@ -91,7 +209,7 @@ func (m *skillBasedMatchmaker) BalancedMatchFromCandidate(candidate []runtime.Ma
 	}
 
 	team1, team2 := m.CreateBalancedMatch(groups, len(candidate)/2)
-	return team1, team2
+	return RatedMatch{team1, team2}
 }
 
 func removeDuplicateRosters(candidates [][]runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, int) {
@@ -118,123 +236,6 @@ func removeDuplicateRosters(candidates [][]runtime.MatchmakerEntry) ([][]runtime
 		uniqueCandidates = append(uniqueCandidates, match)
 	}
 	return uniqueCandidates, duplicates
-}
-
-// Function to be used as a matchmaker function in Nakama (RegisterMatchmakerOverride)
-func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, candidates [][]runtime.MatchmakerEntry) (madeMatches [][]runtime.MatchmakerEntry) {
-	//profileRegistry := &ProfileRegistry{nk: nk}
-	logger.WithFields(map[string]interface{}{
-		"num_candidates": len(candidates),
-	}).Info("Running skill-based matchmaker.")
-
-	if len(candidates) == 0 || len(candidates[0]) == 0 {
-		return nil
-	}
-
-	// Remove odd sized teams
-	for _, match := range candidates {
-		if len(match)%2 != 0 {
-			logger.WithField("match", match).Warn("Match has odd number of players.")
-			continue
-		}
-	}
-
-	logger.WithField("num_candidates", len(candidates)).Info("Running skill-based matchmaker.")
-
-	// Remove duplicate rosters
-	var count int
-	candidates, count = removeDuplicateRosters(candidates)
-	if count > 0 {
-		logger.WithField("num_duplicates", count).Warn("Removed duplicate rosters.")
-	}
-
-	groupID := candidates[0][0].GetProperties()["group_id"].(string)
-	if groupID == "" {
-		logger.Error("Group ID not found in matchmaker properties.")
-		return nil
-	}
-
-	data, _ := json.Marshal(candidates)
-	nk.StorageWrite(ctx, []*runtime.StorageWrite{
-		{
-			UserID:          SystemUserID,
-			Collection:      "Matchmaker",
-			Key:             "latest_candidates",
-			PermissionRead:  0,
-			PermissionWrite: 0,
-			Value:           string(data),
-		},
-	})
-
-	if err := nk.StreamSend(StreamModeMatchmaker, groupID, "", "", string(data), nil, false); err != nil {
-		logger.WithField("error", err).Warn("Error streaming candidates")
-	}
-
-	// If there is a non-hidden presence on the stream, then don't make any matches
-	if presences, err := nk.StreamUserList(StreamModeMatchmaker, groupID, "", "", false, true); err != nil {
-		logger.WithField("error", err).Warn("Error listing presences on stream.")
-	} else if len(presences) > 0 {
-		logger.WithField("num_presences", len(presences)).Info("Non-hidden presence on stream, not making matches.")
-		return nil
-	}
-
-	// Ensure that everyone in the match is within 100 ping of a server
-
-	for i := 0; i < len(candidates); i++ {
-		if len(m.eligibleServers(candidates[i])) == 0 {
-			logger.WithField("match", candidates[i]).Warn("Match has players with no eligible servers.")
-			candidates = append(candidates[:i], candidates[i+1:]...)
-			i--
-		}
-	}
-
-	balanced := balanceMatches(candidates, m)
-
-	predictions := make([]PredictedMatch, 0, len(balanced))
-	for _, match := range balanced {
-		predictions = append(predictions, PredictedMatch{
-			Team1: match[0],
-			Team2: match[1],
-			Draw:  m.PredictDraw(match),
-		})
-	}
-
-	// Sort the matches by their balance
-	slices.SortStableFunc(predictions, func(a, b PredictedMatch) int {
-		return int((a.Draw - b.Draw) * 1000)
-	})
-
-	// Sort so that highest draw probability is first
-	slices.Reverse(predictions)
-
-	seen := make(map[string]struct{})
-	madeMatches = make([][]runtime.MatchmakerEntry, 0, len(predictions))
-
-OuterLoop:
-	for _, p := range predictions {
-		// The players are ordered by their team
-		match := make([]runtime.MatchmakerEntry, 0, 8)
-		for _, e := range p.Entrants() {
-
-			// Skip a match where any player of any ticket that has already been seen
-			if _, ok := seen[e.Entry.GetTicket()]; ok {
-				continue OuterLoop
-			}
-			seen[e.Entry.GetTicket()] = struct{}{}
-
-			match = append(match, e.Entry)
-		}
-
-		madeMatches = append(madeMatches, match)
-	}
-
-	logger.WithFields(map[string]interface{}{
-		"num_candidates": len(candidates),
-		"num_matches":    len(madeMatches),
-		"matches":        madeMatches,
-	}).Info("Skill-based matchmaker completed.")
-
-	return madeMatches
 }
 
 func (m *skillBasedMatchmaker) eligibleServers(match []runtime.MatchmakerEntry) map[string]int {
@@ -277,15 +278,6 @@ func (m *skillBasedMatchmaker) eligibleServers(match []runtime.MatchmakerEntry) 
 	}
 
 	return average
-}
-
-func balanceMatches(candidateMatches [][]runtime.MatchmakerEntry, m *skillBasedMatchmaker) []RatedMatch {
-	balancedMatches := make([]RatedMatch, 0, len(candidateMatches))
-	for _, match := range candidateMatches {
-		team1, team2 := m.BalancedMatchFromCandidate(match)
-		balancedMatches = append(balancedMatches, RatedMatch{team1, team2})
-	}
-	return balancedMatches
 }
 
 func GetRatinByUserID(ctx context.Context, db *sql.DB, userID string) (rating types.Rating, err error) {
