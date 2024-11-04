@@ -247,8 +247,14 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	if err := md.UnmarshalMap(metadata); err != nil {
 		return state, false, fmt.Sprintf("failed to unmarshal metadata: %v", err)
 	}
+
 	if state.Started() && !state.Open {
 		return state, false, JoinRejectReasonMatchTerminating
+	}
+
+	// If this is a reservation, use it's presence.
+	if p, ok := state.reservationMap[presence.GetSessionId()]; ok {
+		md.Presences[0] = p.Entrant
 	}
 
 	mp, reason := m.playerJoinAttempt(state, md.Presences[0])
@@ -273,7 +279,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 			}
 
 			slots[p.RoleAlignment]++
-			if slots[p.RoleAlignment] >= state.RoleLimit(p.RoleAlignment) {
+			if slots[p.RoleAlignment] > state.RoleLimit(p.RoleAlignment) {
 				return state, false, JoinRejectReasonLobbyFull
 			}
 		}
@@ -316,7 +322,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	for _, p := range md.Presences[1:] {
 		state.reservationMap[p.GetSessionId()] = &slotReservation{
 			Entrant: p,
-			Expiry:  time.Now().Add(time.Second * 2),
+			Expiry:  time.Now().Add(time.Second * 15),
 		}
 		logger.WithFields(map[string]interface{}{
 			"evrid": mp.EvrID.Token(),
@@ -462,7 +468,10 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 			nk.MetricsTimerRecord("match_player_join_duration", tags, time.Since(state.joinTimestamps[p.GetSessionId()]))
 		}
 	}
-	delete(state.reservationMap, presences[0].GetSessionId())
+
+	for _, p := range presences {
+		delete(state.reservationMap, p.GetSessionId())
+	}
 
 	return state
 }
