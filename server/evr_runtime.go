@@ -83,23 +83,10 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		}
 
 		// Remove all LinkTickets
-		objs, _, err := nk.StorageList(ctx, SystemUserID, SystemUserID, LinkTicketCollection, 1000, "")
-		if err != nil {
-			return fmt.Errorf("unable to list LinkTickets: %w", err)
-		}
-
-		deletes := make([]*runtime.StorageDelete, 0, len(objs))
-		for _, obj := range objs {
-			if obj.GetCreateTime().AsTime().Before(time.Now().Add(-time.Hour * 24)) {
-				deletes = append(deletes, &runtime.StorageDelete{
-					Collection: LinkTicketCollection,
-					Key:        obj.Key,
-					Version:    obj.Version,
-				})
-			}
-		}
-
-		if err := nk.StorageDelete(ctx, deletes); err != nil {
+		if err := nk.StorageDelete(ctx, []*runtime.StorageDelete{{
+			Collection: AuthorizationCollection,
+			Key:        LinkTicketKey,
+		}}); err != nil {
 			return fmt.Errorf("unable to delete LinkTickets: %w", err)
 		}
 
@@ -480,26 +467,14 @@ func createCoreGroups(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 
 // Register Indexes for the login service
 func RegisterIndexes(initializer runtime.Initializer) error {
-	// Register the LinkTicket Index that prevents multiple LinkTickets with the same device_id_str
-	name := LinkTicketIndex
-	collection := LinkTicketCollection
-	key := ""                                                 // Set to empty string to match all keys instead
-	fields := []string{"evrid_token", "nk_device_auth_token"} // index on these fields
-	maxEntries := 10000
-	indexOnly := false
-
-	if err := initializer.RegisterStorageIndex(name, collection, key, fields, maxEntries, indexOnly); err != nil {
-		return err
-	}
-
 	// Register the IP Address index for looking up user's by IP Address
 	// FIXME this needs to be updated for the new login system
-	name = IpAddressIndex
-	collection = EvrLoginStorageCollection
-	key = ""                                           // Set to empty string to match all keys instead
-	fields = []string{"client_ip_address,displayname"} // index on these fields
-	maxEntries = 1000000
-	indexOnly = false
+	name := IpAddressIndex
+	collection := EvrLoginStorageCollection
+	key := ""                                           // Set to empty string to match all keys instead
+	fields := []string{"client_ip_address,displayname"} // index on these fields
+	maxEntries := 1000000
+	indexOnly := false
 	if err := initializer.RegisterStorageIndex(name, collection, key, fields, maxEntries, indexOnly); err != nil {
 		return err
 	}
