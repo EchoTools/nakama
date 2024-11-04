@@ -842,6 +842,10 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 	if playerInfo == nil {
 		return fmt.Errorf("failed to find player in match")
 	}
+	if playerInfo.Team == 0 || playerInfo.Team == 1 {
+		logger.Warn("Player is on a non-player team", zap.String("evrId", request.EvrID.Token()), zap.String("team", playerInfo.Team.String()))
+		return nil
+	}
 
 	// Update the player's rating, if it's not a backfill player
 	if !playerInfo.IsBackfill() {
@@ -864,7 +868,8 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 	profile.EarlyQuits.IncrementCompletedMatches()
 
 	// Process the update into the leaderboard and profile
-	err = p.leaderboardRegistry.ProcessProfileUpdate(ctx, playerInfo.UserID, playerInfo.Username, label.Mode, &request.Payload, &profile.Server)
+
+	err = p.leaderboardRegistry.ProcessProfileUpdate(ctx, logger, playerInfo.UserID, playerInfo.Username, label.Mode, &request.Payload, &profile.Server)
 	if err != nil {
 		logger.Error("Failed to process profile update", zap.Error(err), zap.Any("payload", request.Payload))
 		return fmt.Errorf("failed to process profile update: %w", err)
