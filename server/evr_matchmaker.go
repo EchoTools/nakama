@@ -283,27 +283,28 @@ func (m *skillBasedMatchmaker) eligibleServers(match []runtime.MatchmakerEntry) 
 	for _, entry := range match {
 		props := entry.GetProperties()
 
-		maxRTT := 500
-		if rtt, ok := props["max_rtt"].(int); ok && rtt > 0 {
+		maxRTT := 500.0
+		if rtt, ok := props["max_rtt"].(float64); ok && rtt > 0 {
 			maxRTT = rtt
 		}
 
 		for k, v := range props {
-			if !strings.HasPrefix(k, "rtt_") {
+
+			if !strings.HasPrefix(k, "rtt") {
 				continue
 			}
 
-			if rtt, ok := v.(int); ok {
+			if rtt, ok := v.(float64); ok {
 				if rtt > maxRTT {
 					// Server is too far away from this player
 					continue
 				}
-				rttsByServer[k] = append(rttsByServer[k], rtt)
+				rttsByServer[k] = append(rttsByServer[k], int(rtt))
 			}
 		}
 	}
 
-	average := make(map[string]int)
+	averages := make(map[string]int)
 	for k, rtts := range rttsByServer {
 		if len(rtts) != len(match) {
 			// Server is unreachable to one or more players
@@ -314,10 +315,10 @@ func (m *skillBasedMatchmaker) eligibleServers(match []runtime.MatchmakerEntry) 
 		for _, rtt := range rtts {
 			mean += rtt
 		}
-		average[k] = mean / len(rtts)
+		averages[k] = mean / len(rtts)
 	}
 
-	return average
+	return averages
 }
 
 func GetRatinByUserID(ctx context.Context, db *sql.DB, userID string) (rating types.Rating, err error) {
