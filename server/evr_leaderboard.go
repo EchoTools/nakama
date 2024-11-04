@@ -131,7 +131,7 @@ func (r *LeaderboardRegistry) ProcessProfileUpdate(ctx context.Context, userID, 
 
 	// Submit the score
 	for meta, value := range submissions {
-		record, err := r.RecordWrite(ctx, meta, userID, username, value)
+		record, err := r.RecordWriteTabletStat(ctx, meta, userID, username, value)
 		if err != nil {
 			return fmt.Errorf("Leaderboard record write error: %v", err)
 		}
@@ -149,10 +149,12 @@ func (r *LeaderboardRegistry) ProcessProfileUpdate(ctx context.Context, userID, 
 	return nil
 }
 
-func (r *LeaderboardRegistry) RecordWrite(ctx context.Context, meta LeaderboardMeta, userID, username string, value float64) (*api.LeaderboardRecord, error) {
+func (r *LeaderboardRegistry) RecordWriteTabletStat(ctx context.Context, meta LeaderboardMeta, userID, username string, value float64) (*api.LeaderboardRecord, error) {
 	score, subscore := r.valueToScore(value)
 
-	record, err := r.nk.LeaderboardRecordWrite(ctx, meta.ID(), userID, username, score, subscore, nil, nil)
+	// All tablet stat updates are "set" operations
+	override := 2 // set
+	record, err := r.nk.LeaderboardRecordWrite(ctx, meta.ID(), userID, username, score, subscore, nil, &override)
 
 	if err != nil {
 		// Try to create the leaderboard
@@ -163,7 +165,7 @@ func (r *LeaderboardRegistry) RecordWrite(ctx context.Context, meta LeaderboardM
 			return nil, fmt.Errorf("Leaderboard create error: %v", err)
 		} else {
 			// Retry the write
-			record, err = r.nk.LeaderboardRecordWrite(ctx, meta.ID(), userID, username, score, subscore, nil, nil)
+			record, err = r.nk.LeaderboardRecordWrite(ctx, meta.ID(), userID, username, score, subscore, nil, &override)
 		}
 	}
 
