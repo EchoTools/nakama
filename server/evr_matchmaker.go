@@ -11,7 +11,6 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/intinig/go-openskill/rating"
 	"github.com/intinig/go-openskill/types"
-	"github.com/samber/lo"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -29,9 +28,10 @@ func (*skillBasedMatchmaker) TeamStrength(team RatedEntryTeam) float64 {
 }
 
 // Function to be used as a matchmaker function in Nakama (RegisterMatchmakerOverride)
-func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, candidates [][]runtime.MatchmakerEntry) (madeMatches [][]runtime.MatchmakerEntry) {
+func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, potentialCandidates [][]runtime.MatchmakerEntry) [][]runtime.MatchmakerEntry {
 
-	//profileRegistry := &ProfileRegistry{nk: nk}
+	candidates := potentialCandidates[:]
+
 	logger.WithFields(map[string]interface{}{
 		"num_candidates": len(candidates),
 	}).Info("Running skill-based matchmaker.")
@@ -39,28 +39,17 @@ func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 	if len(candidates) == 0 || len(candidates[0]) == 0 {
 		return nil
 	}
-
-	// Remove odd sized teams
-	for _, match := range candidates {
-		if len(match)%2 != 0 {
-			logger.WithField("match", match).Warn("Match has odd number of players.")
-			continue
-		}
-	}
-
-	logger.WithField("num_candidates", len(candidates)).Info("Running skill-based matchmaker.")
-
 	groupID := candidates[0][0].GetProperties()["group_id"].(string)
 	if groupID == "" {
-		logger.Error("Group ID not found in matchmaker properties.")
-		return nil
+		logger.Error("Group ID not found in entry properties.")
 	}
 
+	// Store the latest candidates in storage
 	data, err := json.Marshal(map[string]interface{}{"candidates": candidates})
 	if err != nil {
 		logger.WithField("error", err).Error("Error marshalling candidates.")
 	} else {
-		_, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{
+		if _, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{
 			{
 				UserID:          SystemUserID,
 				Collection:      "Matchmaker",
@@ -69,11 +58,11 @@ func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 				PermissionWrite: 0,
 				Value:           string(data),
 			},
-		})
-		if err != nil {
+		}); err != nil {
 			logger.WithField("error", err).Error("Error writing latest candidates to storage.")
 		}
 	}
+
 	if err := nk.StreamSend(StreamModeMatchmaker, groupID, "", "", string(data), nil, false); err != nil {
 		logger.WithField("error", err).Warn("Error streaming candidates")
 	}
@@ -86,52 +75,69 @@ func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 		return nil
 	}
 
-	// Remove duplicate rosters
-	var count int
-	candidates, count = removeDuplicateRosters(candidates)
-	if count > 0 {
-		logger.WithField("num_duplicates", count).Warn("Removed duplicate rosters.")
-	}
+	filterCounts := make(map[string]int)
 
-	// Ensure that everyone in the match is within 100 ping of a server
+	// Remove odd sized teams
+	filterCounts["odd_size"] = m.removeOddSizedTeams(candidates)
+
+	// Remove duplicate rosters
+	filterCounts["duplicates"] = m.removeDuplicateRosters(candidates)
+
+	// Ensure that everyone in the match is within their max_rtt of a common server
+	filterCounts["no_matching_servers"] = m.filterWithinMaxRTT(candidates)
+
+	// Create a list of balanced matches with predictions
+	predictions := m.buildPredictions(candidates)
+
+	// Sort the matches by their balance
+	slices.SortStableFunc(predictions, func(a, b PredictedMatch) int {
+		return int((b.Draw - a.Draw) * 1000)
+	})
+
+	// Sort by matches that have players who have been waiting more than half the Matchmaking timeout
+	// This is to prevent players from waiting too long
+	m.sortByPriority(predictions)
+
+	madeMatches := m.composeMatches(predictions)
+
+	logger.WithFields(map[string]interface{}{
+		"num_candidates": len(candidates),
+		"num_matches":    len(madeMatches),
+		"matches":        madeMatches,
+		"filter_counts":  filterCounts,
+	}).Info("Skill-based matchmaker completed.")
+
+	return madeMatches
+}
+
+func (*skillBasedMatchmaker) PredictDraw(teams []RatedEntryTeam) float64 {
+	team1 := make(types.Team, 0, len(teams[0]))
+	team2 := make(types.Team, 0, len(teams[1]))
+	for _, e := range teams[0] {
+		team1 = append(team1, e.Rating)
+	}
+	for _, e := range teams[1] {
+		team2 = append(team2, e.Rating)
+	}
+	return rating.PredictDraw([]types.Team{team1, team2}, nil)
+}
+
+func (m *skillBasedMatchmaker) removeOddSizedTeams(candidates [][]runtime.MatchmakerEntry) int {
+	oddSizedCount := 0
 	for i := 0; i < len(candidates); i++ {
-		if len(m.eligibleServers(candidates[i])) == 0 {
-			logger.WithField("match", candidates[i]).Warn("Match players have no common servers.")
+		if len(candidates[i])%2 != 0 {
+			oddSizedCount++
 			candidates = append(candidates[:i], candidates[i+1:]...)
 			i--
 		}
 	}
+	return oddSizedCount
+}
 
-	// Create a list of predicted matches
-	predictions := make([]PredictedMatch, 0, len(candidates))
-	for _, match := range candidates {
-		ratedMatch := m.BalancedMatchFromCandidate(match)
-		predictions = append(predictions, PredictedMatch{
-			Team1: ratedMatch[0],
-			Team2: ratedMatch[1],
-			Draw:  m.PredictDraw(ratedMatch),
-		})
-	}
-
-	// Sort the matches by their balance
-	slices.SortStableFunc(predictions, func(a, b PredictedMatch) int {
-		return int((a.Draw - b.Draw) * 1000)
-	})
-	// Sort so that highest draw probability is first
-	slices.Reverse(predictions)
-
-	// Sort the matches by the players that have been waiting for more than 2/3s of the matchmaking timeout
-	priorityTickets := make(map[string]struct{})
+// Sort the matches by the players that have been waiting for more than 2/3s of the matchmaking timeout
+func (m skillBasedMatchmaker) sortByPriority(predictions []PredictedMatch) {
 	now := time.Now().UTC().Unix()
-	for _, match := range candidates {
-		for _, e := range match {
-			if ts, ok := e.GetProperties()["priority_threshold"].(float64); ok && int64(ts) < now {
-				priorityTickets[e.GetTicket()] = struct{}{}
-			}
-		}
-	}
 
-	// Sort the matches by the players that have been waiting for more than 2/3s of the matchmaking timeout
 	// This is to prevent players from waiting too long
 	slices.SortStableFunc(predictions, func(a, b PredictedMatch) int {
 		aPriority := false
@@ -157,50 +163,6 @@ func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 			return 0
 		}
 	})
-
-	// Sort by matches that have players who have been waiting more than half the Matchmaking timeout
-	// This is to prevent players from waiting too long
-
-	seen := make(map[string]struct{})
-	madeMatches = make([][]runtime.MatchmakerEntry, 0, len(predictions))
-
-OuterLoop:
-	for _, p := range predictions {
-		// The players are ordered by their team
-		match := make([]runtime.MatchmakerEntry, 0, 8)
-		for _, e := range p.Entrants() {
-
-			// Skip a match where any player of any ticket that has already been seen
-			if _, ok := seen[e.Entry.GetTicket()]; ok {
-				continue OuterLoop
-			}
-			seen[e.Entry.GetTicket()] = struct{}{}
-
-			match = append(match, e.Entry)
-		}
-
-		madeMatches = append(madeMatches, match)
-	}
-
-	logger.WithFields(map[string]interface{}{
-		"num_candidates": len(candidates),
-		"num_matches":    len(madeMatches),
-		"matches":        madeMatches,
-	}).Info("Skill-based matchmaker completed.")
-
-	return madeMatches
-}
-
-func (*skillBasedMatchmaker) PredictDraw(teams []RatedEntryTeam) float64 {
-	team1 := make(types.Team, 0, len(teams[0]))
-	team2 := make(types.Team, 0, len(teams[1]))
-	for _, e := range teams[0] {
-		team1 = append(team1, e.Rating)
-	}
-	for _, e := range teams[1] {
-		team2 = append(team2, e.Rating)
-	}
-	return rating.PredictDraw([]types.Team{team1, team2}, nil)
 }
 
 func (m *skillBasedMatchmaker) CreateBalancedMatch(groups [][]*RatedEntry, teamSize int) (RatedEntryTeam, RatedEntryTeam) {
@@ -240,48 +202,83 @@ func (m *skillBasedMatchmaker) CreateBalancedMatch(groups [][]*RatedEntry, teamS
 	return team1, team2
 }
 
-func (m *skillBasedMatchmaker) BalancedMatchFromCandidate(candidate []runtime.MatchmakerEntry) RatedMatch {
-	// Create a balanced match
-	ticketMap := lo.GroupBy(candidate, func(e runtime.MatchmakerEntry) string {
-		return e.GetTicket()
-	})
-	groups := make([][]*RatedEntry, 0)
-	for _, group := range ticketMap {
-		ratedGroup := make([]*RatedEntry, 0, len(group))
-		for _, e := range group {
-			ratedGroup = append(ratedGroup, NewRatedEntryFromMatchmakerEntry(e))
-		}
-		groups = append(groups, ratedGroup)
+func (m *skillBasedMatchmaker) balanceByTicket(candidate []runtime.MatchmakerEntry) RatedMatch {
+	// Group based on ticket
+
+	ticketMap := make(map[string][]*RatedEntry)
+	for _, e := range candidate {
+		ticketMap[e.GetTicket()] = append(ticketMap[e.GetTicket()], NewRatedEntryFromMatchmakerEntry(e))
 	}
 
-	team1, team2 := m.CreateBalancedMatch(groups, len(candidate)/2)
+	byTicket := make([][]*RatedEntry, 0)
+	for _, entries := range ticketMap {
+		byTicket = append(byTicket, entries)
+	}
+
+	team1, team2 := m.CreateBalancedMatch(byTicket, len(candidate)/2)
 	return RatedMatch{team1, team2}
 }
 
-func removeDuplicateRosters(candidates [][]runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, int) {
+func (m *skillBasedMatchmaker) removeDuplicateRosters(candidates [][]runtime.MatchmakerEntry) int {
 	seenRosters := make(map[string]struct{})
-	uniqueCandidates := make([][]runtime.MatchmakerEntry, 0, len(candidates))
-	duplicates := 0
-	for _, match := range candidates {
 
-		roster := make([]string, 0, len(match))
-		for _, e := range match {
-			sessionID := e.GetPresence().GetSessionId()
-			_ = sessionID
+	duplicates := 0
+	for i := 0; i < len(candidates); i++ {
+		roster := make([]string, 0, len(candidates[i]))
+		for _, e := range candidates[i] {
 			roster = append(roster, e.GetPresence().GetSessionId())
 		}
-
 		slices.Sort(roster)
 		rosterString := strings.Join(roster, ",")
 
 		if _, ok := seenRosters[rosterString]; ok {
 			duplicates++
+			candidates = append(candidates[:i], candidates[i+1:]...)
+			i--
 			continue
 		}
 		seenRosters[rosterString] = struct{}{}
-		uniqueCandidates = append(uniqueCandidates, match)
 	}
-	return uniqueCandidates, duplicates
+
+	return duplicates
+}
+
+// Ensure that everyone in the match is within their max_rtt of a common server
+func (m *skillBasedMatchmaker) filterWithinMaxRTT(candidates [][]runtime.MatchmakerEntry) int {
+
+	filteredCount := 0
+	for i := 0; i < len(candidates); i++ {
+
+		count := 0
+		for _, entry := range candidates[i] {
+
+			maxRTT := 500.0
+			if rtt, ok := entry.GetProperties()["max_rtt"].(float64); ok && rtt > 0 {
+				maxRTT = rtt
+			}
+
+			for k, v := range entry.GetProperties() {
+
+				if !strings.HasPrefix(k, "rtt") {
+					continue
+				}
+
+				if v.(float64) > maxRTT {
+					// Server is too far away from this player
+					continue
+				}
+
+				count++
+			}
+		}
+		if count != len(candidates[i]) {
+			// Server is unreachable to one or more players
+			candidates = append(candidates[:i], candidates[i+1:]...)
+			i--
+			filteredCount++
+		}
+	}
+	return filteredCount
 }
 
 func (m *skillBasedMatchmaker) eligibleServers(match []runtime.MatchmakerEntry) map[string]int {
@@ -327,7 +324,44 @@ func (m *skillBasedMatchmaker) eligibleServers(match []runtime.MatchmakerEntry) 
 	return averages
 }
 
-func GetRatinByUserID(ctx context.Context, db *sql.DB, userID string) (rating types.Rating, err error) {
+func (m *skillBasedMatchmaker) buildPredictions(candidates [][]runtime.MatchmakerEntry) []PredictedMatch {
+	predictions := make([]PredictedMatch, 0, len(candidates))
+	for _, match := range candidates {
+		ratedMatch := m.balanceByTicket(match)
+		predictions = append(predictions, PredictedMatch{
+			Team1: ratedMatch[0],
+			Team2: ratedMatch[1],
+			Draw:  m.PredictDraw(ratedMatch),
+		})
+	}
+	return predictions
+}
+func (m *skillBasedMatchmaker) composeMatches(ratedMatches []PredictedMatch) [][]runtime.MatchmakerEntry {
+	seen := make(map[string]struct{})
+	selected := make([][]runtime.MatchmakerEntry, 0, len(ratedMatches))
+
+OuterLoop:
+	for _, p := range ratedMatches {
+		// The players are ordered by their team
+		match := make([]runtime.MatchmakerEntry, 0, 8)
+
+		// Ensure no player is in more than one match
+		for _, e := range p.Entrants() {
+			sessionID := e.Entry.GetPresence().GetSessionId()
+
+			if _, ok := seen[sessionID]; ok {
+				continue OuterLoop
+			}
+			seen[sessionID] = struct{}{}
+			match = append(match, e.Entry)
+		}
+
+		selected = append(selected, match)
+	}
+	return selected
+}
+
+func GetRatingByUserID(ctx context.Context, db *sql.DB, userID string) (rating types.Rating, err error) {
 	// Look for an existing account.
 	query := "SELECT value->>'rating' FROM storage WHERE user_id = $1 AND collection = $2 and key = $3"
 	var ratingJSON string

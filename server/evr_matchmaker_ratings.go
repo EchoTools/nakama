@@ -90,7 +90,7 @@ type PredictedMatch struct {
 	Draw  float64        `json:"draw"`
 }
 
-func (p PredictedMatch) Entrants() []*RatedEntry {
+func (p PredictedMatch) Entrants() RatedEntryTeam {
 	return append(p.Team1, p.Team2...)
 }
 

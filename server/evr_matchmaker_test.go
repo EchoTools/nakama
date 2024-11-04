@@ -198,6 +198,9 @@ func TestHasEligibleServers(t *testing.T) {
 	}
 }
 func TestRemoveDuplicateRosters(t *testing.T) {
+
+	m := &skillBasedMatchmaker{}
+
 	tests := []struct {
 		name       string
 		candidates [][]runtime.MatchmakerEntry
@@ -280,9 +283,9 @@ func TestRemoveDuplicateRosters(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, gotDupes := removeDuplicateRosters(tt.candidates)
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("removeDuplicateRosters() got = %v, want %v", got, tt.want)
+			gotDupes := m.removeDuplicateRosters(tt.candidates)
+			if !reflect.DeepEqual(tt.candidates, tt.want) {
+				t.Errorf("removeDuplicateRosters() got = %v, want %v", tt.candidates, tt.want)
 			}
 			if gotDupes != tt.wantDupes {
 				t.Errorf("removeDuplicateRosters() gotDupes = %v, want %v", gotDupes, tt.wantDupes)
@@ -365,4 +368,24 @@ func TestCreateBalancedMatch(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestMatchmaker(t *testing.T) {
+
+	// open /tmp/possible-matches.json
+	file, err := os.Open("/tmp/possible-matches.json")
+	if err != nil {
+		t.Error("Error opening file")
+	}
+	defer file.Close()
+
+	candidates := make([]*PredictedMatch, 0)
+
+	// read in the file
+	decoder := json.NewDecoder(file)
+	err = decoder.Decode(&candidates)
+	if err != nil {
+		t.Errorf("Error decoding file: %v", err)
+	}
+
 }
