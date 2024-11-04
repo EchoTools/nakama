@@ -1270,21 +1270,34 @@ func AccountLookupRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		DiscordID string `json:"discord_id"`
 	}{}
 
-	if err := json.Unmarshal([]byte(payload), &request); err != nil {
-		return "", err
+	if payload != "" {
+		if err := json.Unmarshal([]byte(payload), &request); err != nil {
+			return "", err
+		}
+	} else {
+
+		queryParameters := ctx.Value(runtime.RUNTIME_CTX_QUERY_PARAMS).(map[string][]string)
+
+		if len(queryParameters) > 0 {
+			// extract the discordID from the query string
+			if discordID, ok := queryParameters["discord_id"]; ok {
+				request.DiscordID = discordID[0]
+			}
+
+			// extract the userID from the query string
+			if userID, ok := queryParameters["user_id"]; ok {
+				request.UserID = userID[0]
+			}
+		}
 	}
 
 	includePrivate := false
 
 	callerID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
-	if !ok {
-		return "", runtime.NewError("authentication required", StatusUnauthenticated)
-	}
-
-	if ok, err := CheckSystemGroupMembership(ctx, db, callerID, GroupGlobalPrivateDataAccess); err != nil {
-		includePrivate = false
-	} else {
-		includePrivate = ok
+	if ok {
+		if ok, err := CheckSystemGroupMembership(ctx, db, callerID, GroupGlobalPrivateDataAccess); err != nil {
+			includePrivate = ok
+		}
 	}
 
 	var err error
