@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/intinig/go-openskill/rating"
@@ -29,6 +30,7 @@ func (*skillBasedMatchmaker) TeamStrength(team RatedEntryTeam) float64 {
 
 // Function to be used as a matchmaker function in Nakama (RegisterMatchmakerOverride)
 func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, candidates [][]runtime.MatchmakerEntry) (madeMatches [][]runtime.MatchmakerEntry) {
+
 	//profileRegistry := &ProfileRegistry{nk: nk}
 	logger.WithFields(map[string]interface{}{
 		"num_candidates": len(candidates),
@@ -86,7 +88,6 @@ func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 	}
 
 	// Ensure that everyone in the match is within 100 ping of a server
-
 	for i := 0; i < len(candidates); i++ {
 		if len(m.eligibleServers(candidates[i])) == 0 {
 			logger.WithField("match", candidates[i]).Warn("Match players have no common servers.")
@@ -95,6 +96,7 @@ func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 		}
 	}
 
+	// Create a list of predicted matches
 	predictions := make([]PredictedMatch, 0, len(candidates))
 	for _, match := range candidates {
 		ratedMatch := m.BalancedMatchFromCandidate(match)
@@ -111,6 +113,44 @@ func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 	})
 	// Sort so that highest draw probability is first
 	slices.Reverse(predictions)
+
+	// Sort the matches by the players that have been waiting for more than 2/3s of the matchmaking timeout
+	priorityTickets := make(map[string]struct{})
+	now := time.Now().UTC().Unix()
+	for _, match := range candidates {
+		for _, e := range match {
+			if ts, ok := e.GetProperties()["priority_threshold"].(float64); ok && int64(ts) < now {
+				priorityTickets[e.GetTicket()] = struct{}{}
+			}
+		}
+	}
+
+	// Sort the matches by the players that have been waiting for more than 2/3s of the matchmaking timeout
+	// This is to prevent players from waiting too long
+	slices.SortStableFunc(predictions, func(a, b PredictedMatch) int {
+		aPriority := false
+		bPriority := false
+		for _, e := range a.Entrants() {
+			if ts, ok := e.Entry.GetProperties()["priority_threshold"].(float64); ok && int64(ts) < now {
+				aPriority = true
+				break
+			}
+		}
+		for _, e := range b.Entrants() {
+			if ts, ok := e.Entry.GetProperties()["priority_threshold"].(float64); ok && int64(ts) < now {
+				bPriority = true
+				break
+			}
+		}
+
+		if aPriority && !bPriority {
+			return -1
+		} else if !aPriority && bPriority {
+			return 1
+		} else {
+			return 0
+		}
+	})
 
 	// Sort by matches that have players who have been waiting more than half the Matchmaking timeout
 	// This is to prevent players from waiting too long
