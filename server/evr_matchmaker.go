@@ -56,18 +56,24 @@ func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 		return nil
 	}
 
-	data, _ := json.Marshal(candidates)
-	nk.StorageWrite(ctx, []*runtime.StorageWrite{
-		{
-			UserID:          SystemUserID,
-			Collection:      "Matchmaker",
-			Key:             "latestCandidates",
-			PermissionRead:  0,
-			PermissionWrite: 0,
-			Value:           string(data),
-		},
-	})
-
+	data, err := json.Marshal(map[string]interface{}{"candidates": candidates})
+	if err != nil {
+		logger.WithField("error", err).Error("Error marshalling candidates.")
+	} else {
+		_, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{
+			{
+				UserID:          SystemUserID,
+				Collection:      "Matchmaker",
+				Key:             "latestCandidates",
+				PermissionRead:  0,
+				PermissionWrite: 0,
+				Value:           string(data),
+			},
+		})
+		if err != nil {
+			logger.WithField("error", err).Error("Error writing latest candidates to storage.")
+		}
+	}
 	if err := nk.StreamSend(StreamModeMatchmaker, groupID, "", "", string(data), nil, false); err != nil {
 		logger.WithField("error", err).Warn("Error streaming candidates")
 	}
