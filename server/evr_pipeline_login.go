@@ -401,7 +401,7 @@ func (p *EvrPipeline) authenticateAccount(ctx context.Context, logger *zap.Logge
 	}
 
 	// Account requires discord linking.
-	linkTicket, err := p.linkTicket(session, logger, deviceId, &payload)
+	linkTicket, err := p.linkTicket(ctx, logger, deviceId, &payload)
 	if err != nil {
 		return account, status.Error(codes.Internal, fmt.Errorf("error creating link ticket: %w", err).Error())
 	}

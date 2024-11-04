@@ -109,66 +109,100 @@ type LinkTicket struct {
 	LoginRequest *evr.LoginProfile `json:"game_login_request"` // the login request payload that generated this link ticket
 }
 
-// TODO Move this to the evrbackend runtime module
-// linkTicket generates a link ticket for the provided xplatformId and hmdSerialNumber.
-func (p *EvrPipeline) linkTicket(session *sessionWS, logger *zap.Logger, deviceID *DeviceAuth, loginData *evr.LoginProfile) (*LinkTicket, error) {
-	ctx := session.Context()
+func LoadLinkTickets(ctx context.Context, nk runtime.NakamaModule) (map[string]*LinkTicket, error) {
+	linkTickets := make(map[string]*LinkTicket, 1)
 
-	// Check if a link ticket already exists for the provided xplatformId and hmdSerialNumber
-	// Escape dots
-
-	objectIds, err := session.storageIndex.List(ctx, uuid.Nil, LinkTicketIndex, fmt.Sprintf("+value.evrid_token:%s", deviceID.EvrID.Token()), 1)
+	// Load the link ticket storage object
+	objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
+		{
+			Collection: AuthorizationCollection,
+			Key:        LinkTicketKey,
+			UserID:     SystemUserID,
+		},
+	})
 	if err != nil {
-		return nil, fmt.Errorf("error listing link tickets: `%q`  %v", deviceID.Token(), err)
+		return nil, err
 	}
-	// Link ticket was found. Return the link ticket.
-	if objectIds != nil {
-		for _, record := range objectIds.Objects {
-			linkTicket := &LinkTicket{}
-			err := json.Unmarshal([]byte(record.Value), &linkTicket)
-			if err != nil {
-				return nil, fmt.Errorf("error unmarshalling link ticket: %w", err)
-			} else {
-				return linkTicket, nil
-			}
+	if len(objs) != 0 {
+		// unmarshal the document
+		if err := json.Unmarshal([]byte(objs[0].Value), &linkTickets); err != nil {
+			return nil, err
 		}
 	}
+
+	return linkTickets, nil
+}
+
+func StoreLinkTickets(ctx context.Context, nk runtime.NakamaModule, linkTickets map[string]*LinkTicket) error {
+	data, err := json.Marshal(linkTickets)
+	if err != nil {
+		return err
+	}
+
+	// write the document to storage
+	ops := []*runtime.StorageWrite{
+		{
+			Collection:      AuthorizationCollection,
+			Key:             LinkTicketKey,
+			UserID:          SystemUserID,
+			Value:           string(data),
+			PermissionRead:  0,
+			PermissionWrite: 0,
+		},
+	}
+	_, err = nk.StorageWrite(ctx, ops)
+	return err
+}
+
+// linkTicket generates a link ticket for the provided xplatformId and hmdSerialNumber.
+func (p *EvrPipeline) linkTicket(ctx context.Context, logger *zap.Logger, deviceID *DeviceAuth, loginData *evr.LoginProfile) (*LinkTicket, error) {
+
 	if loginData == nil {
 		// This should't happen. A login request is required to create a link ticket.
 		return nil, fmt.Errorf("loginData is nil")
 	}
-	// Generate a link code and attempt to write it to storage
-	for {
-		// loop until we have a unique link code
-		linkTicket := &LinkTicket{
-			Code:            generateLinkCode(),
-			DeviceAuthToken: deviceID.Token(),
-			UserIDToken:     deviceID.EvrID.String(),
-			LoginRequest:    loginData,
-		}
-		linkTicketJson, err := json.Marshal(linkTicket)
-		if err != nil {
-			return nil, err
-		}
-		ops := StorageOpWrites{&StorageOpWrite{
-			OwnerID: session.userID.String(),
-			Object: &api.WriteStorageObject{
-				Collection:      LinkTicketCollection,
-				Key:             linkTicket.Code,
-				Value:           string(linkTicketJson),
-				PermissionRead:  &wrapperspb.Int32Value{Value: int32(0)},
-				PermissionWrite: &wrapperspb.Int32Value{Value: int32(0)},
-			},
-		}}
-		_, _, err = StorageWriteObjects(ctx, session.logger, session.pipeline.db, session.metrics, session.storageIndex, false, ops)
-		if err != nil {
-			<-time.After(time.Millisecond * 100)
-			// If the link code already exists, try again
-			logger.Warn("LinkTicket: link code already exists", zap.String("linkCode", linkTicket.Code))
-			continue
-		}
-		return linkTicket, nil
+
+	linkTickets, err := LoadLinkTickets(ctx, p.runtimeModule)
+	if err != nil {
+		return nil, err
 	}
+
+	found := true
+	var ticket *LinkTicket
+	for _, ticket := range linkTickets {
+		if ticket.DeviceAuthToken == deviceID.Token() {
+			found = true
+			break
+		}
+	}
+	if found {
+		return ticket, nil
+	}
+
+	// Generate a unique link code
+	var code string
+	for {
+		code = generateLinkCode()
+		if _, ok := linkTickets[code]; !ok {
+			break
+		}
+	}
+
+	// Create a new link ticket
+	linkTicket := &LinkTicket{
+		Code:            generateLinkCode(),
+		DeviceAuthToken: deviceID.Token(),
+		UserIDToken:     deviceID.EvrID.String(),
+		LoginRequest:    loginData,
+	}
+	linkTickets[linkTicket.Code] = linkTicket
+
+	// Store the link ticket
+	if err := StoreLinkTickets(ctx, p.runtimeModule, linkTickets); err != nil {
+		return nil, err
+	}
+
+	return linkTicket, nil
 }
 
 // generateLinkCode generates a 4 character random link code (excluding homoglyphs, vowels, and numbers).
@@ -259,49 +293,27 @@ func ExchangeLinkCode(ctx context.Context, nk runtime.NakamaModule, logger runti
 	// Normalize the link code to uppercase.
 	linkCode = strings.ToUpper(linkCode)
 
-	// Define the storage read request.
-	readReq := []*runtime.StorageRead{
-		{
-			Collection: LinkTicketCollection,
-			Key:        linkCode,
-			UserID:     SystemUserID,
-		},
-	}
-
-	// Retrieve the link ticket from storage.
-	objects, err := nk.StorageRead(ctx, readReq)
+	linkTickets, err := LoadLinkTickets(ctx, nk)
 	if err != nil {
-		return nil, runtime.NewError("failed to read link ticket from storage", StatusInternalError)
+		return nil, err
 	}
 
-	// Check if the link ticket was found.
-	if len(objects) == 0 {
-		return nil, runtime.NewError("link ticket not found", StatusNotFound)
+	linkTicket, ok := linkTickets[linkCode]
+	if !ok {
+		return nil, runtime.NewError("link code not found", StatusNotFound)
 	}
 
-	// Parse the link ticket.
-	var linkTicket LinkTicket
-	if err := json.Unmarshal([]byte(objects[0].Value), &linkTicket); err != nil {
-		return nil, runtime.NewError("failed to unmarshal link ticket", StatusInternalError)
-	}
-
-	// Delete the used link ticket from storage.
-	defer func() {
-		deleteReq := []*runtime.StorageDelete{
-			{
-				Collection: LinkTicketCollection,
-				Key:        linkCode,
-				UserID:     SystemUserID,
-			},
-		}
-		if err := nk.StorageDelete(ctx, deleteReq); err != nil {
-			logger.WithField("error", err).WithField("linkTicket", linkCode).Error("Unable to delete link ticket")
-		}
-	}()
 	token, err := ParseDeviceAuthToken(linkTicket.DeviceAuthToken)
 	if err != nil {
 		return nil, runtime.NewError("failed to parse device auth token", StatusInternalError)
 	}
+
+	delete(linkTickets, linkCode)
+
+	if err := StoreLinkTickets(ctx, nk, linkTickets); err != nil {
+		return nil, err
+	}
+
 	return token, nil
 }
 

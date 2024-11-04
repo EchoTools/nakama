@@ -11,8 +11,8 @@ import (
 const (
 	SystemUserID = "00000000-0000-0000-0000-000000000000"
 
-	LinkTicketCollection         = "LinkTickets"
-	LinkTicketIndex              = "Index_" + LinkTicketCollection
+	AuthorizationCollection      = "Authorization"
+	LinkTicketKey                = "linkTickets"
 	DiscordAccessTokenCollection = "DiscordAccessTokens"
 	DiscordAccessTokenKey        = "accessToken"
 	SuspensionStatusCollection   = "SuspensionStatus"
