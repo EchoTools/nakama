@@ -51,9 +51,10 @@ type LobbySessionParameters struct {
 	EarlyQuitPenaltyExpiry time.Time     `json:"early_quit_penalty_expiry"`
 	latencyHistory         LatencyHistory
 	ProfileStatistics      evr.PlayerStatistics
-	RankPercentile         float64 `json:"rank_percentile"`
-	RankPercentileRange    float64 `json:"rank_percentile_range"`
-	MaxServerRTT           int     `json:"max_server_rtt"`
+	RankPercentile         float64   `json:"rank_percentile"`
+	RankPercentileRange    float64   `json:"rank_percentile_range"`
+	MaxServerRTT           int       `json:"max_server_rtt"`
+	MatchmakingTimestamp   time.Time `json:"matchmaking_timestamp"`
 }
 
 func (p *LobbySessionParameters) GetPartySize() int {
@@ -264,6 +265,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		RankPercentile:         percentile,
 		RankPercentileRange:    rankRange,
 		MaxServerRTT:           maxServerRTT,
+		MatchmakingTimestamp:   time.Now().UTC(),
 	}, nil
 }
 
@@ -343,7 +345,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionPar
 	qparts := []string{
 		"+properties.mode:" + p.Mode.String(),
 		fmt.Sprintf("+properties.group_id:/%s/", Query.Escape(p.GroupID.String())),
-		fmt.Sprintf(`-properties.blocked_ids:/.*%s.*/`, Query.Escape(p.UserID)),
+		fmt.Sprintf(`-properties.blocked_ids:/.*%s.*/`, Query.Escape(p.UserID.String())),
 		//"+properties.version_lock:" + p.VersionLock.String(),
 		p.MatchmakingQueryAddon,
 	}

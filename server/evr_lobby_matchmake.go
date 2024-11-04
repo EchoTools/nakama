@@ -127,8 +127,6 @@ func (p *EvrPipeline) addTicket(ctx context.Context, logger *zap.Logger, session
 
 	query, stringProps, numericProps := lobbyParams.MatchmakingParameters(sessionParams, ticketConfig.includeRankRange)
 
-	logger.Debug("Matchmaking query", zap.String("query", query), zap.Any("string_properties", stringProps), zap.Any("numeric_properties", numericProps))
-
 	minCount := ticketConfig.MinCount
 	maxCount := ticketConfig.MaxCount
 	countMultiple := ticketConfig.CountMultiple
@@ -168,7 +166,7 @@ func (p *EvrPipeline) addTicket(ctx context.Context, logger *zap.Logger, session
 		session.matchmaker.Remove([]string{ticket})
 	}()
 
-	logger.Debug("Matchmaking ticket added", zap.String("query", query), zap.String("ticket", ticket), zap.Any("presences", otherPresences))
+	logger.Debug("Matchmaking ticket added", zap.String("query", query), zap.Any("string_properties", stringProps), zap.Any("numeric_properties", numericProps), zap.String("ticket", ticket), zap.Any("presences", otherPresences))
 
 	return nil
 }
