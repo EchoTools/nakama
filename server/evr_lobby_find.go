@@ -108,12 +108,10 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	}
 
 	// If the player early quit their last match, they will not be matchmade.
-	if !lobbyParams.IsEarlyQuitter {
 
-		// Submit the matchmaking ticket
-		if err := p.lobbyMatchMakeWithFallback(ctx, logger, session, lobbyParams, lobbyGroup); err != nil {
-			return fmt.Errorf("failed to matchmake: %w", err)
-		}
+	// Submit the matchmaking ticket
+	if err := p.lobbyMatchMakeWithFallback(ctx, logger, session, lobbyParams, lobbyGroup); err != nil {
+		return fmt.Errorf("failed to matchmake: %w", err)
 	}
 
 	// Attempt to backfill until the timeout.
