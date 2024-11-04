@@ -166,7 +166,16 @@ func (p *EvrPipeline) linkTicket(ctx context.Context, logger *zap.Logger, device
 	if err != nil {
 		return nil, err
 	}
+	linkTicket := generateLinkTicket(linkTickets, deviceID, loginData)
+	// Store the link ticket
+	if err := StoreLinkTickets(ctx, p.runtimeModule, linkTickets); err != nil {
+		return nil, err
+	}
 
+	return linkTicket, nil
+}
+
+func generateLinkTicket(linkTickets map[string]*LinkTicket, deviceID *DeviceAuth, loginData *evr.LoginProfile) *LinkTicket {
 	found := true
 	var ticket *LinkTicket
 	for _, ticket := range linkTickets {
@@ -175,8 +184,8 @@ func (p *EvrPipeline) linkTicket(ctx context.Context, logger *zap.Logger, device
 			break
 		}
 	}
-	if found {
-		return ticket, nil
+	if !found {
+		return ticket
 	}
 
 	// Generate a unique link code
@@ -189,20 +198,15 @@ func (p *EvrPipeline) linkTicket(ctx context.Context, logger *zap.Logger, device
 	}
 
 	// Create a new link ticket
-	linkTicket := &LinkTicket{
+	ticket = &LinkTicket{
 		Code:            generateLinkCode(),
 		DeviceAuthToken: deviceID.Token(),
 		UserIDToken:     deviceID.EvrID.String(),
 		LoginRequest:    loginData,
 	}
-	linkTickets[linkTicket.Code] = linkTicket
+	linkTickets[ticket.Code] = ticket
 
-	// Store the link ticket
-	if err := StoreLinkTickets(ctx, p.runtimeModule, linkTickets); err != nil {
-		return nil, err
-	}
-
-	return linkTicket, nil
+	return ticket
 }
 
 // generateLinkCode generates a 4 character random link code (excluding homoglyphs, vowels, and numbers).
