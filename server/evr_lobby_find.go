@@ -459,6 +459,9 @@ func (p *EvrPipeline) PartyFollow(ctx context.Context, logger *zap.Logger, sessi
 		case <-time.After(3 * time.Second):
 		}
 		leader := lobbyGroup.GetLeader()
+		if leader == nil {
+			return NewLobbyError(BadRequest, "party leader changed")
+		}
 		leaderUserID := uuid.FromStringOrNil(leader.UserId)
 		// Check if the leader has changed to this player.
 		if leader == nil || leader.SessionId == session.id.String() {
