@@ -295,6 +295,11 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 		for _, labelMeta := range matches {
 			l := labelMeta.State
 
+			// if the match is newer than 10 seconds, skip it.
+			if time.Since(l.StartTime) < 10*time.Second {
+				continue
+			}
+
 			// Check if the match is full
 			if l.OpenPlayerSlots() < partySize {
 				continue
