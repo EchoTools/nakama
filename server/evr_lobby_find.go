@@ -62,10 +62,8 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	}
 	logger.Debug("Joined party group", zap.String("partyID", lobbyGroup.IDStr()))
 
-	inLobby := !lobbyParams.CurrentMatchID.IsNil()
-
-	// If the player is not in a social lobby yet, then immediately backfill to one.
-	if !inLobby || lobbyParams.Mode == evr.ModeSocialPublic {
+	// If this is for a social lobby, then immediately backfill to one.
+	if lobbyParams.Mode == evr.ModeSocialPublic {
 		entrantPresences, err := EntrantPresencesFromSessionIDs(logger, p.sessionRegistry, lobbyParams.PartyID, lobbyParams.GroupID, lobbyParams.Rating, lobbyParams.Role, session.id)
 		if err != nil {
 			return NewLobbyError(InternalError, "failed to create entrant presences")
@@ -73,22 +71,22 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 
 		return p.lobbyBackfill(ctx, logger, lobbyParams, entrantPresences)
 	}
+
 	// Party members will monitor the stream of the party leader to determine when to join a match.
 	if !isLeader {
 		return p.PartyFollow(ctx, logger, session, lobbyParams, lobbyGroup)
 	}
 
 	// Only ping the servers if the player is looking for a arena/combat match
-	if lobbyParams.Mode != evr.ModeSocialPublic {
-		if err := p.CheckServerPing(ctx, logger, session); err != nil {
-			return fmt.Errorf("failed to check server ping: %w", err)
-		}
+
+	if err := p.CheckServerPing(ctx, logger, session); err != nil {
+		return fmt.Errorf("failed to check server ping: %w", err)
 	}
 
 	// if the party is larger than one, then delay for 10 seconds to allow other members to start matchmake.
 	// This is to prevent the party leader from starting matchmaking before the other members are ready.
 	// This is only for non-social lobbies.
-	if inLobby && lobbyGroup.Size() > 1 && lobbyParams.Mode != evr.ModeSocialPublic {
+	if lobbyGroup.Size() > 1 {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -109,7 +107,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 
 	// If the player early quit their last match, they will not be matchmade.
 	// Social lobbies are handled differently, they are created as needed (i.e. not matchmade)
-	if !lobbyParams.IsEarlyQuitter && lobbyParams.Mode != evr.ModeSocialPublic {
+	if !lobbyParams.IsEarlyQuitter {
 
 		// Submit the matchmaking ticket
 		if err := p.lobbyMatchMakeWithFallback(ctx, logger, session, lobbyParams, lobbyGroup); err != nil {
@@ -139,9 +137,8 @@ func (p *EvrPipeline) monitorMatchmakingStream(ctx context.Context, logger *zap.
 	}
 
 	stream := lobbyParams.MatchmakingStream()
-	for {
 
-		defer LeaveMatchmakingStream(logger, session)
+	for {
 
 		select {
 		case <-ctx.Done():
@@ -151,6 +148,7 @@ func (p *EvrPipeline) monitorMatchmakingStream(ctx context.Context, logger *zap.
 				if err := session.SendEvr(LobbySessionFailureFromError(lobbyParams.Mode, lobbyParams.GroupID, NewLobbyError(Timeout, "matchmaking timeout"))); err != nil {
 					logger.Error("Failed to send lobby session failure message", zap.Error(err))
 				}
+				LeaveMatchmakingStream(logger, session)
 			}
 			return
 		case <-time.After(1 * time.Second):
@@ -272,6 +270,7 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 	rtts := lobbyParams.latencyHistory.LatestRTTs()
 	startDelay := time.NewTimer(1 * time.Second)
 
+	cycleCount := 0
 	for {
 		var err error
 		select {
@@ -287,7 +286,15 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 			return fmt.Errorf("failed to list matches: %w", err)
 		}
 
-		logger.Debug("Found matches", zap.Int("count", len(matches)), zap.Any("query", query))
+		if len(matches) == 0 {
+			cycleCount++
+			if cycleCount%10 == 0 {
+				logger.Debug("No matches found", zap.Any("query", query), zap.Int("cycle", cycleCount))
+			}
+			continue
+		}
+
+		logger.Debug("Found matches", zap.Int("count", len(matches)), zap.Any("query", query), zap.Int("cycle", cycleCount))
 		// Sort the labels by least open slots, then ping
 
 		// Sort the matches by open slots and then by latency
