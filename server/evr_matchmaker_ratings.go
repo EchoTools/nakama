@@ -109,6 +109,10 @@ func CalculateNewPlayerRating(evrID evr.EvrId, players []PlayerInfo, orangeWins 
 	var teamIdx TeamIndex
 
 	for _, p := range players {
+		if p.Team != 0 && p.Team != 1 {
+			// skip non players
+			continue
+		}
 
 		if p.JoinTime != 0.0 {
 			// Skip backfill players

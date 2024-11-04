@@ -10,6 +10,7 @@ import (
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"go.uber.org/zap"
 )
 
 type LeaderboardRegistry struct {
@@ -87,7 +88,7 @@ func (r *LeaderboardRegistry) LeaderboardMetaFromID(id string) (LeaderboardMeta,
 	}, nil
 }
 
-func (r *LeaderboardRegistry) ProcessProfileUpdate(ctx context.Context, userID, username string, mode evr.Symbol, payload *evr.UpdatePayload, serverProfile *evr.ServerProfile) error {
+func (r *LeaderboardRegistry) ProcessProfileUpdate(ctx context.Context, logger *zap.Logger, userID, username string, mode evr.Symbol, payload *evr.UpdatePayload, serverProfile *evr.ServerProfile) error {
 
 	var statGroup, prefix string
 
@@ -99,6 +100,7 @@ func (r *LeaderboardRegistry) ProcessProfileUpdate(ctx context.Context, userID, 
 		prefix = "Combat"
 		statGroup = "combat"
 	default:
+		logger.Warn("Unknown mode for profile update", zap.String("mode", mode.String()), zap.Any("payload", payload))
 		return fmt.Errorf("unknown mode: %s", mode)
 	}
 

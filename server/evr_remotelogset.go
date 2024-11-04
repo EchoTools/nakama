@@ -191,7 +191,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 						periodicity: periodicty,
 					}
 
-					if _, err := p.leaderboardRegistry.RecordWrite(ctx, meta, userID, username, 1); err != nil {
+					if _, err := p.leaderboardRegistry.RecordWriteTabletStat(ctx, meta, userID, username, 1); err != nil {
 						logger.Warn("Failed to submit leaderboard", zap.Error(err))
 					}
 				}
