@@ -57,6 +57,49 @@ type MatchLabel struct {
 	terminateTick        int64                // The tick count at which the match will be shut down.
 }
 
+func (s *MatchLabel) GetReservation(sessionID string) (*EvrMatchPresence, bool) {
+	r, ok := s.reservationMap[sessionID]
+
+	if !ok || r.Expiry.Before(time.Now()) {
+		delete(s.reservationMap, sessionID)
+		return nil, false
+	}
+
+	return r.Entrant, true
+}
+
+func (s *MatchLabel) IsPublic() bool {
+	return s.LobbyType == PublicLobby
+}
+
+func (s *MatchLabel) IsPrivate() bool {
+	return s.LobbyType == PrivateLobby
+}
+
+func (s *MatchLabel) IsSocial() bool {
+	return s.Mode == evr.ModeSocialPublic || s.Mode == evr.ModeSocialPrivate
+}
+
+func (s *MatchLabel) IsArena() bool {
+	return s.Mode == evr.ModeArenaPublic || s.Mode == evr.ModeArenaPrivate
+}
+
+func (s *MatchLabel) IsCombat() bool {
+	return s.Mode == evr.ModeCombatPublic || s.Mode == evr.ModeCombatPrivate
+}
+
+func (s *MatchLabel) IsMatch() bool {
+	return s.IsArena() || s.IsCombat()
+}
+
+func (s *MatchLabel) IsPrivateMatch() bool {
+	return s.Mode == evr.ModeArenaPrivate || s.Mode == evr.ModeCombatPrivate
+}
+
+func (s *MatchLabel) IsPublicMatch() bool {
+	return s.Mode == evr.ModeArenaPublic || s.Mode == evr.ModeCombatPublic
+}
+
 func (s *MatchLabel) GetPlayerCount() int {
 	count := 0
 	for _, p := range s.Players {
@@ -97,22 +140,35 @@ func (s *MatchLabel) String() string {
 }
 
 func (s *MatchLabel) RoleLimit(role int) int {
-	if s.TeamSize == 0 {
+
+	if s.IsSocial() {
+		if role == evr.TeamSocial || role == evr.TeamModerator {
+			return s.PlayerLimit
+		}
+		return 0
+	}
+
+	if s.IsPrivateMatch() {
+		// roles in private matches are not tracked
 		return s.PlayerLimit
 	}
 
-	switch role {
-	case UnassignedRole:
-		return s.TeamSize * 2
-	case BlueRole, OrangeRole:
-		return s.TeamSize
-	case SocialRole:
-		return s.PlayerLimit
-	case SpectatorRole, ModeratorRole:
-		return s.PlayerLimit - s.TeamSize*2
+	if s.IsPublicMatch() {
+		// roles in public matches must be assigned
+		if role == evr.TeamSpectator || role == evr.TeamModerator {
+			return s.MaxSize - s.PlayerLimit
+		}
+
+		if role == evr.TeamUnassigned {
+			return s.OpenPlayerSlots()
+		}
+
+		if role == evr.TeamBlue || role == evr.TeamOrange {
+			return s.TeamSize
+		}
 	}
 
-	return s.PlayerLimit
+	return 0
 }
 
 func (s *MatchLabel) RoleCount(role int) int {

@@ -365,7 +365,7 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 		p.metrics.CustomCounter("lobby_join_backfill", lobbyParams.MetricsTags(), int64(lobbyParams.PartySize.Load()))
 
 		// Player members will detect the join.
-		if err := p.LobbyJoinEntrants(logger, selected, entrants); err != nil {
+		if err := p.LobbyJoinEntrants(logger, selected, entrants...); err != nil {
 			// Send the error to the client
 			// If it's full just try again.
 			if LobbyErrorCode(err) == ServerIsFull {

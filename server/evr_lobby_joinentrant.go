@@ -71,7 +71,7 @@ func LobbySessionGet(ctx context.Context, logger *zap.Logger, matchRegistry Matc
 	return label, serverSession, nil
 }
 
-func (p *EvrPipeline) LobbyJoinEntrants(logger *zap.Logger, label *MatchLabel, presences []*EvrMatchPresence) error {
+func (p *EvrPipeline) LobbyJoinEntrants(logger *zap.Logger, label *MatchLabel, presences ...*EvrMatchPresence) error {
 	if len(presences) == 0 {
 		return errors.New("no presences")
 	}
@@ -86,9 +86,9 @@ func (p *EvrPipeline) LobbyJoinEntrants(logger *zap.Logger, label *MatchLabel, p
 		return errors.New("server session not found")
 	}
 
-	return LobbyJoinEntrants(logger, p.matchRegistry, p.tracker, session, serverSession, label, presences)
+	return LobbyJoinEntrants(logger, p.matchRegistry, p.tracker, session, serverSession, label, presences...)
 }
-func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker Tracker, session Session, serverSession Session, label *MatchLabel, entrants []*EvrMatchPresence) error {
+func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker Tracker, session Session, serverSession Session, label *MatchLabel, entrants ...*EvrMatchPresence) error {
 	if session == nil || serverSession == nil {
 		return errors.New("session is nil")
 	}
@@ -103,14 +103,18 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 		}
 	}
 
+	// Additional entrants are considered reservations
+	metadata := EntrantMetadata{Presence: entrants[0], Reservations: entrants[1:]}.ToMatchMetadata()
+
 	e := entrants[0]
+
 	sessionCtx := session.Context()
-	metadata := EntrantMetadata{Presences: entrants}.MarshalMap()
 
 	var err error
 	var found, allowed, isNew bool
 	var reason string
 	var labelStr string
+
 	// Trigger MatchJoinAttempt
 	found, allowed, isNew, reason, labelStr, _ = matchRegistry.JoinAttempt(sessionCtx, label.ID.UUID, label.ID.Node, e.UserID, e.SessionID, e.Username, e.SessionExpiry, nil, e.ClientIP, e.ClientPort, label.ID.Node, metadata)
 	if !found {

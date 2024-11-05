@@ -53,7 +53,7 @@ func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session
 	}
 
 	presences[0].RoleAlignment = params.Role
-	if err := p.LobbyJoinEntrants(logger, label, presences); err != nil {
+	if err := p.LobbyJoinEntrants(logger, label, presences...); err != nil {
 		// Send the error to the client
 		if err := SendEVRMessages(session, LobbySessionFailureFromError(label.Mode, label.GetGroupID(), err)); err != nil {
 			logger.Debug("Failed to send error message", zap.Error(err))

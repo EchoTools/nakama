@@ -637,14 +637,14 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 					return state
 				}(),
 				presence: presences[0],
-				metadata: EntrantMetadata{presences}.MarshalMap(),
+				metadata: EntrantMetadata{Presence: presences[0]}.ToMatchMetadata(),
 			},
 			want: func() *MatchLabel {
 				state := &MatchLabel{}
 				return state
 			}(),
 			want1: false,
-			want2: JoinRejectReasonUnassignedLobby,
+			want2: ErrJoinRejectReasonUnassignedLobby.Error(),
 		},
 		{
 			name: "MatchJoinAttempt returns nil if match is full.",
@@ -678,7 +678,7 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 					return state
 				}(),
 				presence: presences[0],
-				metadata: NewJoinMetadata(presences[0]).MarshalMap(),
+				metadata: NewJoinMetadata(presences[0]).ToMatchMetadata(),
 			},
 			want: func() *MatchLabel {
 				state := &MatchLabel{}
@@ -733,12 +733,9 @@ func TestEvrMatch_playerJoinAttempt(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &EvrMatch{}
-			got, got1 := m.playerJoinAttempt(tt.args.state, tt.args.mp)
+			got := m.validateJoin(tt.args.state, tt.args.mp)
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("EvrMatch.playerJoinAttempt() got = %v, want %v", got, tt.want)
-			}
-			if got1 != tt.want1 {
-				t.Errorf("EvrMatch.playerJoinAttempt() got1 = %v, want %v", got1, tt.want1)
 			}
 		})
 	}
