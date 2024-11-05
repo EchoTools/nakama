@@ -248,7 +248,8 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 
 	query := lobbyParams.BackfillSearchQuery(maxRTT)
 	rtts := lobbyParams.latencyHistory.LatestRTTs()
-	startDelay := time.NewTimer(1 * time.Second)
+
+	<-time.After(1 * time.Second)
 
 	cycleCount := 0
 	for {
@@ -257,7 +258,6 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-startDelay.C:
 		case <-time.After(interval):
 		}
 

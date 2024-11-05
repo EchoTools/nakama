@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"go.uber.org/zap"
 )
@@ -47,6 +48,9 @@ func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session
 		return err
 	}
 
+	if time.Since(label.CreatedAt) < 10*time.Second {
+		return NewLobbyError(ServerIsLocked, "Server is too new.")
+	}
 	presences, err := EntrantPresencesFromSessionIDs(logger, p.sessionRegistry, params.PartyID, params.GroupID, params.Rating, params.Role, session.id)
 	if err != nil {
 		return fmt.Errorf("failed to create presences: %w", err)
