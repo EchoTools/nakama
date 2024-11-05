@@ -78,21 +78,13 @@ func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 	filterCounts := make(map[string]int)
 
 	// Remove odd sized teams
-	filterCounts["odd_size"] = m.removeOddSizedTeams(candidates)
-
-	// Remove duplicate rosters
-	filterCounts["duplicates"] = m.removeDuplicateRosters(candidates)
+	candidates, filterCounts["odd_size"] = m.removeOddSizedTeams(candidates)
 
 	// Ensure that everyone in the match is within their max_rtt of a common server
-	filterCounts["no_matching_servers"] = m.filterWithinMaxRTT(candidates)
+	candidates, filterCounts["no_matching_servers"] = m.filterWithinMaxRTT(candidates)
 
 	// Create a list of balanced matches with predictions
 	predictions := m.buildPredictions(candidates)
-
-	// Sort the matches by their balance
-	slices.SortStableFunc(predictions, func(a, b PredictedMatch) int {
-		return int((b.Draw - a.Draw) * 1000)
-	})
 
 	// Sort by matches that have players who have been waiting more than half the Matchmaking timeout
 	// This is to prevent players from waiting too long
@@ -122,7 +114,7 @@ func (*skillBasedMatchmaker) PredictDraw(teams []RatedEntryTeam) float64 {
 	return rating.PredictDraw([]types.Team{team1, team2}, nil)
 }
 
-func (m *skillBasedMatchmaker) removeOddSizedTeams(candidates [][]runtime.MatchmakerEntry) int {
+func (m *skillBasedMatchmaker) removeOddSizedTeams(candidates [][]runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, int) {
 	oddSizedCount := 0
 	for i := 0; i < len(candidates); i++ {
 		if len(candidates[i])%2 != 0 {
@@ -131,7 +123,7 @@ func (m *skillBasedMatchmaker) removeOddSizedTeams(candidates [][]runtime.Matchm
 			i--
 		}
 	}
-	return oddSizedCount
+	return candidates, oddSizedCount
 }
 
 // Sort the matches by the players that have been waiting for more than 2/3s of the matchmaking timeout
@@ -140,6 +132,15 @@ func (m skillBasedMatchmaker) sortByPriority(predictions []PredictedMatch) {
 
 	// This is to prevent players from waiting too long
 	slices.SortStableFunc(predictions, func(a, b PredictedMatch) int {
+
+		// Sort by size of the match
+		if len(a.Entrants()) > len(b.Entrants()) {
+			return -1
+		} else if len(a.Entrants()) < len(b.Entrants()) {
+			return 1
+		}
+
+		// Sort by players that have priority
 		aPriority := false
 		bPriority := false
 		for _, e := range a.Entrants() {
@@ -159,9 +160,17 @@ func (m skillBasedMatchmaker) sortByPriority(predictions []PredictedMatch) {
 			return -1
 		} else if !aPriority && bPriority {
 			return 1
-		} else {
-			return 0
 		}
+
+		// Sort by prediction of a draw
+		if a.Draw > b.Draw {
+			return -1
+		} else if a.Draw < b.Draw {
+			return 1
+		}
+
+		return 0
+
 	})
 }
 
@@ -219,37 +228,14 @@ func (m *skillBasedMatchmaker) balanceByTicket(candidate []runtime.MatchmakerEnt
 	return RatedMatch{team1, team2}
 }
 
-func (m *skillBasedMatchmaker) removeDuplicateRosters(candidates [][]runtime.MatchmakerEntry) int {
-	seenRosters := make(map[string]struct{})
-
-	duplicates := 0
-	for i := 0; i < len(candidates); i++ {
-		roster := make([]string, 0, len(candidates[i]))
-		for _, e := range candidates[i] {
-			roster = append(roster, e.GetPresence().GetSessionId())
-		}
-		slices.Sort(roster)
-		rosterString := strings.Join(roster, ",")
-
-		if _, ok := seenRosters[rosterString]; ok {
-			duplicates++
-			candidates = append(candidates[:i], candidates[i+1:]...)
-			i--
-			continue
-		}
-		seenRosters[rosterString] = struct{}{}
-	}
-
-	return duplicates
-}
-
 // Ensure that everyone in the match is within their max_rtt of a common server
-func (m *skillBasedMatchmaker) filterWithinMaxRTT(candidates [][]runtime.MatchmakerEntry) int {
+func (m *skillBasedMatchmaker) filterWithinMaxRTT(candidates [][]runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, int) {
 
-	filteredCount := 0
+	var filteredCount int
 	for i := 0; i < len(candidates); i++ {
 
-		count := 0
+		serverRTTs := make(map[string][]float64)
+
 		for _, entry := range candidates[i] {
 
 			maxRTT := 500.0
@@ -268,60 +254,25 @@ func (m *skillBasedMatchmaker) filterWithinMaxRTT(candidates [][]runtime.Matchma
 					continue
 				}
 
-				count++
+				serverRTTs[k] = append(serverRTTs[k], v.(float64))
 			}
 		}
-		if count != len(candidates[i]) {
-			// Server is unreachable to one or more players
+
+		for k, rtts := range serverRTTs {
+			if len(rtts) != len(candidates[i]) {
+				// Server is unreachable to one or more players
+				delete(serverRTTs, k)
+			}
+		}
+
+		if len(serverRTTs) == 0 {
+			// No common servers for players
 			candidates = append(candidates[:i], candidates[i+1:]...)
 			i--
 			filteredCount++
 		}
 	}
-	return filteredCount
-}
-
-func (m *skillBasedMatchmaker) eligibleServers(match []runtime.MatchmakerEntry) map[string]int {
-	rttsByServer := make(map[string][]int)
-	for _, entry := range match {
-		props := entry.GetProperties()
-
-		maxRTT := 500.0
-		if rtt, ok := props["max_rtt"].(float64); ok && rtt > 0 {
-			maxRTT = rtt
-		}
-
-		for k, v := range props {
-
-			if !strings.HasPrefix(k, "rtt") {
-				continue
-			}
-
-			if rtt, ok := v.(float64); ok {
-				if rtt > maxRTT {
-					// Server is too far away from this player
-					continue
-				}
-				rttsByServer[k] = append(rttsByServer[k], int(rtt))
-			}
-		}
-	}
-
-	averages := make(map[string]int)
-	for k, rtts := range rttsByServer {
-		if len(rtts) != len(match) {
-			// Server is unreachable to one or more players
-			continue
-		}
-
-		mean := 0
-		for _, rtt := range rtts {
-			mean += rtt
-		}
-		averages[k] = mean / len(rtts)
-	}
-
-	return averages
+	return candidates, filteredCount
 }
 
 func (m *skillBasedMatchmaker) buildPredictions(candidates [][]runtime.MatchmakerEntry) []PredictedMatch {
