@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"reflect"
 	"slices"
@@ -47,10 +48,10 @@ func TestMroundRTT(t *testing.T) {
 			expected: 0 * time.Millisecond,
 		},
 		{
-			name:     ">modulus returns modulus",
-			rtt:      1 * time.Millisecond,
+			name:     "equal to modulus returns rtt",
+			rtt:      30 * time.Millisecond,
 			modulus:  15 * time.Millisecond,
-			expected: 15 * time.Millisecond,
+			expected: 30 * time.Millisecond,
 		},
 	}
 
@@ -110,185 +111,67 @@ func TestRTTweightedPopulationComparison(t *testing.T) {
 	}
 }
 
-func Test_balanceMatches(t *testing.T) {
-
-	// read in the possible_matches.json file
-
-	file, err := os.Open("/home/andrew/src/echovrce-mm/possible-matches.json")
-	if err != nil {
-		t.Error("Error opening file")
-	}
-	defer file.Close()
-
-	// read in the file
-	decoder := json.NewDecoder(file)
-	var candidates []*PredictedMatch
-	err = decoder.Decode(&candidates)
-	if err != nil {
-		t.Errorf("Error decoding file: %v", err)
-	}
-
-	seenRosters := make(map[string]struct{})
-	for _, match := range candidates {
-		roster := make([]string, 0, len(match.Entrants()))
-		for _, e := range match.Entrants() {
-			roster = append(roster, e.Entry.GetTicket())
-		}
-		slices.Sort(roster)
-		rosterString := strings.Join(roster, ",")
-		if _, ok := seenRosters[rosterString]; ok {
-			continue
-		}
-		seenRosters[rosterString] = struct{}{}
-	}
-
-	t.Log("Possible Match count", len(candidates))
-	t.Log("Seen Rosters count", len(seenRosters))
-	t.Error(" ")
-}
-
 func TestHasEligibleServers(t *testing.T) {
+
 	tests := []struct {
-		name  string
-		match []runtime.MatchmakerEntry
-		want  map[string]int
+		name       string
+		candidates [][]runtime.MatchmakerEntry
+		want       [][]runtime.MatchmakerEntry
 	}{
 		{
 			name: "All servers within maxRTT",
-			match: []runtime.MatchmakerEntry{
-				&MatchmakerEntry{Properties: map[string]interface{}{"max_rtt": 110, "rtt_server1": 50, "rtt_server2": 60}},
-				&MatchmakerEntry{Properties: map[string]interface{}{"rtt_server1": 40, "rtt_server2": 55}},
+			candidates: [][]runtime.MatchmakerEntry{
+				{
+					&MatchmakerEntry{Properties: map[string]interface{}{"max_rtt": 110.0, "rtt_server1": 50.0, "rtt_server2": 60.0}},
+					&MatchmakerEntry{Properties: map[string]interface{}{"rtt_server1": 40.0, "rtt_server2": 55.0}},
+				},
 			},
 
-			want: map[string]int{"rtt_server1": 45, "rtt_server2": 57},
+			want: [][]runtime.MatchmakerEntry{
+				{
+					&MatchmakerEntry{Properties: map[string]interface{}{"max_rtt": 110.0, "rtt_server1": 50.0, "rtt_server2": 60.0}},
+					&MatchmakerEntry{Properties: map[string]interface{}{"rtt_server1": 40.0, "rtt_server2": 55.0}},
+				},
+			},
 		},
 		{
 			name: "One server exceeds maxRTT",
-			match: []runtime.MatchmakerEntry{
-				&MatchmakerEntry{Properties: map[string]interface{}{"max_rtt": 110, "rtt_server1": 150, "rtt_server2": 60}},
-				&MatchmakerEntry{Properties: map[string]interface{}{"max_rtt": 110, "rtt_server1": 40, "rtt_server2": 55}},
-			},
-			want: map[string]int{"rtt_server2": 57},
+			candidates: [][]runtime.MatchmakerEntry{{
+				&MatchmakerEntry{Properties: map[string]interface{}{"max_rtt": 110.0, "rtt_server1": 150.0, "rtt_server2": 60.0}},
+				&MatchmakerEntry{Properties: map[string]interface{}{"max_rtt": 110.0, "rtt_server1": 40.0, "rtt_server2": 55.0}},
+			}},
+			want: [][]runtime.MatchmakerEntry{{
+				&MatchmakerEntry{Properties: map[string]interface{}{"max_rtt": 110.0, "rtt_server1": 150.0, "rtt_server2": 60.0}},
+				&MatchmakerEntry{Properties: map[string]interface{}{"max_rtt": 110.0, "rtt_server1": 40.0, "rtt_server2": 55.0}},
+			}},
 		},
 		{
 			name: "Server unreachable for one player",
-			match: []runtime.MatchmakerEntry{
-				&MatchmakerEntry{Properties: map[string]interface{}{"rtt_server1": 50}},
-				&MatchmakerEntry{Properties: map[string]interface{}{"rtt_server1": 20, "rtt_server2": 55}},
-			},
-			want: map[string]int{"rtt_server1": 35},
+			candidates: [][]runtime.MatchmakerEntry{{
+				&MatchmakerEntry{Properties: map[string]interface{}{"rtt_server1": 50.0}},
+				&MatchmakerEntry{Properties: map[string]interface{}{"rtt_server1": 20.0, "rtt_server2": 55.0}},
+			}},
+			want: [][]runtime.MatchmakerEntry{{
+				&MatchmakerEntry{Properties: map[string]interface{}{"rtt_server1": 50.0}},
+				&MatchmakerEntry{Properties: map[string]interface{}{"rtt_server1": 20.0, "rtt_server2": 55.0}},
+			}},
 		},
 		{
 			name: "No common servers for players",
-			match: []runtime.MatchmakerEntry{
-				&MatchmakerEntry{Properties: map[string]interface{}{"rtt_server1": 50}},
-				&MatchmakerEntry{Properties: map[string]interface{}{"rtt_server2": 55}},
-			},
-			want: map[string]int{},
+			candidates: [][]runtime.MatchmakerEntry{{
+				&MatchmakerEntry{Properties: map[string]interface{}{"rtt_server1": 50.0}},
+				&MatchmakerEntry{Properties: map[string]interface{}{"rtt_server2": 55.0}},
+			}},
+			want: [][]runtime.MatchmakerEntry{},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &skillBasedMatchmaker{}
-			if got := m.eligibleServers(tt.match); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("hasEligibleServers() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-func TestRemoveDuplicateRosters(t *testing.T) {
 
-	m := &skillBasedMatchmaker{}
-
-	tests := []struct {
-		name       string
-		candidates [][]runtime.MatchmakerEntry
-		want       [][]runtime.MatchmakerEntry
-		wantDupes  int
-	}{
-		{
-			name: "No duplicates",
-			candidates: [][]runtime.MatchmakerEntry{
-				{
-					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "1").String()}},
-					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "2").String()}},
-				},
-				{
-					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "3").String()}},
-					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "4").String()}},
-				},
-			},
-			want: [][]runtime.MatchmakerEntry{
-				{
-					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "1").String()}},
-					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "2").String()}},
-				},
-				{
-					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "3").String()}},
-					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "4").String()}},
-				},
-			},
-			wantDupes: 0,
-		},
-		{
-			name: "With duplicates",
-			candidates: [][]runtime.MatchmakerEntry{
-				{
-					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "1").String()}},
-					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "2").String()}},
-				},
-				{
-					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "1").String()}},
-					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "2").String()}},
-				},
-			},
-			want: [][]runtime.MatchmakerEntry{
-				{
-					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "1").String()}},
-					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "2").String()}},
-				},
-			},
-			wantDupes: 1,
-		},
-		{
-			name: "Mixed duplicates",
-			candidates: [][]runtime.MatchmakerEntry{
-				{
-					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "1").String()}},
-					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "2").String()}},
-				},
-				{
-					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "3").String()}},
-					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "4").String()}},
-				},
-				{
-					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "1").String()}},
-					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "2").String()}},
-				},
-			},
-			want: [][]runtime.MatchmakerEntry{
-				{
-					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "1").String()}},
-					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "2").String()}},
-				},
-				{
-					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "3").String()}},
-					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, "4").String()}},
-				},
-			},
-			wantDupes: 1,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			gotDupes := m.removeDuplicateRosters(tt.candidates)
-			if !reflect.DeepEqual(tt.candidates, tt.want) {
-				t.Errorf("removeDuplicateRosters() got = %v, want %v", tt.candidates, tt.want)
-			}
-			if gotDupes != tt.wantDupes {
-				t.Errorf("removeDuplicateRosters() gotDupes = %v, want %v", gotDupes, tt.wantDupes)
+			if got, count := m.filterWithinMaxRTT(tt.candidates); cmp.Diff(tt.want, got) != "" {
+				t.Errorf("hasEligibleServers() = %d: (want/got) %s", count, cmp.Diff(tt.want, got))
 			}
 		})
 	}
@@ -370,22 +253,209 @@ func TestCreateBalancedMatch(t *testing.T) {
 	}
 }
 
+func TestRemoveOddSizedTeams(t *testing.T) {
+	m := &skillBasedMatchmaker{}
+
+	entries := make([]runtime.MatchmakerEntry, 0)
+	for i := 0; i < 5; i++ {
+		entries = append(entries, &MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, fmt.Sprintf("%d", i)).String()}})
+	}
+
+	tests := []struct {
+		name       string
+		candidates [][]runtime.MatchmakerEntry
+		want       [][]runtime.MatchmakerEntry
+		wantCount  int
+	}{
+		{
+			name: "No odd-sized teams",
+			candidates: [][]runtime.MatchmakerEntry{
+				{
+					entries[1],
+					entries[2],
+				},
+				{
+					entries[3],
+					entries[4],
+				},
+			},
+			want: [][]runtime.MatchmakerEntry{
+				{
+					entries[1],
+					entries[2],
+				},
+				{
+					entries[3],
+					entries[4],
+				},
+			},
+			wantCount: 0,
+		},
+		{
+			name: "One odd-sized team",
+			candidates: [][]runtime.MatchmakerEntry{
+				{
+					entries[1],
+				},
+				{
+					entries[2],
+					entries[3],
+				},
+			},
+			want: [][]runtime.MatchmakerEntry{
+				{
+					entries[2],
+					entries[3],
+				},
+			},
+			wantCount: 1,
+		},
+		{
+			name: "Multiple odd-sized teams",
+			candidates: [][]runtime.MatchmakerEntry{
+				{
+					entries[1],
+				},
+				{
+					entries[2],
+					entries[3],
+				},
+				{
+					entries[4],
+				},
+			},
+			want: [][]runtime.MatchmakerEntry{
+				{
+					entries[2],
+					entries[3],
+				},
+			},
+			wantCount: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, gotCount := m.removeOddSizedTeams(tt.candidates)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("removeOddSizedTeams() got = %v, want %v", got, tt.want)
+			}
+			if gotCount != tt.wantCount {
+				t.Errorf("removeOddSizedTeams() gotCount = %v, want %v", gotCount, tt.wantCount)
+			}
+		})
+	}
+}
+
+type CandidateData struct {
+	Candidates [][]*MatchmakerEntry `json:"candidates"`
+}
+
+func (c CandidateData) mm() [][]runtime.MatchmakerEntry {
+	var candidates [][]runtime.MatchmakerEntry
+	for _, entry := range c.Candidates {
+		var matchmakerEntries []runtime.MatchmakerEntry
+		for _, e := range entry {
+			matchmakerEntries = append(matchmakerEntries, e)
+		}
+		candidates = append(candidates, matchmakerEntries)
+	}
+	return candidates
+}
+
 func TestMatchmaker(t *testing.T) {
 
 	// open /tmp/possible-matches.json
-	file, err := os.Open("/tmp/possible-matches.json")
+	file, err := os.Open("/tmp/candidates2.json")
 	if err != nil {
 		t.Error("Error opening file")
 	}
 	defer file.Close()
 
-	candidates := make([]*PredictedMatch, 0)
-
+	var data CandidateData
 	// read in the file
 	decoder := json.NewDecoder(file)
-	err = decoder.Decode(&candidates)
+	err = decoder.Decode(&data)
 	if err != nil {
 		t.Errorf("Error decoding file: %v", err)
 	}
+	m := &skillBasedMatchmaker{}
 
+	var n int
+	candidates := data.mm()
+	candidates, n = m.filterWithinMaxRTT(candidates)
+
+	// Remove odd sized teams
+	candidates, n = m.removeOddSizedTeams(candidates)
+
+	// Ensure that everyone in the match is within their max_rtt of a common server
+	candidates, n = m.filterWithinMaxRTT(candidates)
+
+	// Create a list of balanced matches with predictions
+	predictions := m.buildPredictions(candidates)
+
+	m.sortByPriority(predictions)
+
+	rostersByPrediction := make([][]string, 0)
+	for _, c := range predictions {
+		rosters := make([]string, 0)
+		for _, team := range []RatedEntryTeam{c.Team1, c.Team2} {
+			roster := make([]string, 0)
+			for _, player := range team {
+				roster = append(roster, player.Entry.GetPresence().GetSessionId())
+			}
+			slices.Sort(roster)
+			rosters = append(rosters, strings.Join(roster, ","))
+		}
+		slices.Sort(rosters)
+		rostersByPrediction = append(rostersByPrediction, rosters)
+	}
+
+	// open the output
+	file, err = os.Create("/tmp/predictions.json")
+	if err != nil {
+		t.Error("Error opening file")
+	}
+	defer file.Close()
+
+	// Write the data
+	output, err := json.Marshal(rostersByPrediction)
+	if err != nil {
+		t.Errorf("Error marshalling data: %v", err)
+	}
+
+	_, err = file.Write(output)
+	if err != nil {
+		t.Errorf("Error writing data: %v", err)
+	}
+
+	madeMatches := m.composeMatches(predictions)
+
+	// Sort by matches that have players who have been waiting more than half the Matchmaking timeout
+	// This is to prevent players from waiting too long
+
+	//t.Logf("Predictions: %v", predictions)
+
+	t.Errorf("length: %v", len(madeMatches))
+
+	for _, match := range madeMatches {
+		teams := make([]string, 0)
+
+		teamSize := len(match) / 2
+		team1 := make([]string, 0)
+		for _, player := range match[0:teamSize] {
+			team1 = append(team1, player.GetPresence().GetUsername())
+		}
+		team2 := make([]string, 0)
+		for _, player := range match[teamSize:] {
+			team2 = append(team2, player.GetPresence().GetUsername())
+		}
+		teams = append(teams, strings.Join(team1, ","))
+		teams = append(teams, strings.Join(team2, ","))
+
+		t.Errorf("Match: %v", strings.Join(teams, " vs "))
+	}
+
+	t.Errorf("Count: %v", n)
+	//t.Errorf("Candidates: %v", candidates)
 }

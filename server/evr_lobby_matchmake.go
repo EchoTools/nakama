@@ -181,7 +181,7 @@ func mroundRTT[T time.Duration | int](rtt T, modulus T) T {
 	if rtt == 0 {
 		return 0
 	}
-	if rtt < modulus {
+	if rtt <= modulus {
 		return rtt
 	}
 	r := float64(rtt) / float64(modulus)
