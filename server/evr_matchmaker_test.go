@@ -381,18 +381,27 @@ func TestMatchmaker(t *testing.T) {
 	}
 	m := &skillBasedMatchmaker{}
 
-	var n int
 	candidates := data.mm()
-	candidates, n = m.filterWithinMaxRTT(candidates)
+	candidates, _ = m.filterWithinMaxRTT(candidates)
 
 	// Remove odd sized teams
-	candidates, n = m.removeOddSizedTeams(candidates)
+	candidates, _ = m.removeOddSizedTeams(candidates)
 
 	// Ensure that everyone in the match is within their max_rtt of a common server
-	candidates, n = m.filterWithinMaxRTT(candidates)
+	candidates, _ = m.filterWithinMaxRTT(candidates)
 
 	// Create a list of balanced matches with predictions
 	predictions := m.buildPredictions(candidates)
+
+	playerList := make([]string, 0)
+	for _, c := range candidates {
+		for _, entry := range c {
+			playerList = append(playerList, entry.GetPresence().GetUsername())
+		}
+	}
+	slices.Sort(playerList)
+	playerList = slices.Compact(playerList)
+	t.Errorf("Players: %v", playerList)
 
 	m.sortByPriority(predictions)
 
@@ -456,6 +465,5 @@ func TestMatchmaker(t *testing.T) {
 		t.Errorf("Match: %v", strings.Join(teams, " vs "))
 	}
 
-	t.Errorf("Count: %v", n)
 	//t.Errorf("Candidates: %v", candidates)
 }
