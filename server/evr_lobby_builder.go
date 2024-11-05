@@ -109,7 +109,7 @@ func (mr *LobbyBuilder) SortGameServerIPs(entrants []*MatchmakerEntry) []string 
 	return sorted
 }
 
-func (b *LobbyBuilder) GroupByTicket(entrants []*MatchmakerEntry) [][]*MatchmakerEntry {
+func (b *LobbyBuilder) groupByTicket(entrants []*MatchmakerEntry) [][]*MatchmakerEntry {
 	partyMap := make(map[string][]*MatchmakerEntry, 8)
 	for _, e := range entrants {
 		t := e.GetTicket()
@@ -137,45 +137,21 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 		return fmt.Errorf("not enough entrants to build a match")
 	}
 
-	groupIDs := make([]uuid.UUID, 0, len(entrants))
-	for _, e := range entrants {
-		groupID := uuid.FromStringOrNil(e.StringProperties["group_id"])
-		if groupID == uuid.Nil {
-			b.logger.Warn("Entrant has no group_id", zap.Any("entrant", e))
-			continue
-		}
-		groupIDs = append(groupIDs, groupID)
-	}
-
-	groupIDs = CompactedFrequencySort(groupIDs, true)
-
-	if len(groupIDs) == 0 {
-		return fmt.Errorf("no entrants have no group_id")
-	} else if len(groupIDs) > 1 {
-		logger.Warn("Entrants are not in the same group", zap.Any("groupIDs", groupIDs))
-	}
-
-	groupID := groupIDs[0]
+	groupID, err := b.groupIDFromEntrants(entrants)
 
 	teams := make([][]*MatchmakerEntry, 0, 2)
 	if sortEntries {
 		// Group the entrants by ticket (i.e. party)
-		presencesByTicket := b.GroupByTicket(entrants)
+		presencesByTicket := b.groupByTicket(entrants)
 		teams = b.distributeParties(presencesByTicket)
 	} else {
-		// Split entrants into two equal teams
+		// Split entrants into two equal teams (they are already sorted)
 		teams = append(teams, entrants[:len(entrants)/2])
 		teams = append(teams, entrants[len(entrants)/2:])
 	}
 
-	teamAlignments := make(TeamAlignments, len(teams))
-	for i, players := range teams {
-		for _, p := range players {
-			teamAlignments[p.Presence.GetUserId()] = i
-		}
-	}
-
 	entrantPresences := make([]*EvrMatchPresence, 0, len(entrants))
+	sessions := make([]Session, 0, len(entrants))
 	for teamIndex, players := range teams {
 
 		// Assign each player in the team to the match
@@ -187,7 +163,7 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 				continue
 			}
 
-			sessionParams, ok := LoadParams(ctx)
+			sessionParams, ok := LoadParams(session.Context())
 			if !ok {
 				logger.Warn("Failed to load session params", zap.String("sid", entry.Presence.GetSessionId()))
 				continue
@@ -199,8 +175,8 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 				Mu:    &mu,
 				Sigma: &sigma,
 			})
-
-			presence := &EvrMatchPresence{
+			sessions = append(sessions, session)
+			entrantPresences = append(entrantPresences, &EvrMatchPresence{
 				Node:           sessionParams.Node,
 				UserID:         session.UserID(),
 				SessionID:      session.ID(),
@@ -215,8 +191,8 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 				ClientPort:     session.ClientPort(),
 				IsPCVR:         sessionParams.IsPCVR,
 				Rating:         rating,
-			}
-			entrantPresences = append(entrantPresences, presence)
+			})
+
 		}
 	}
 
@@ -234,8 +210,8 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 		StartTime:           time.Now().UTC(),
 	}
 
-	timeout := time.After(60 * time.Second)
 	var label *MatchLabel
+	timeout := time.After(60 * time.Second)
 	for {
 		select {
 		case <-ctx.Done():
@@ -261,16 +237,9 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 	successful := make([]*EvrMatchPresence, 0, len(entrants))
 	errored := make([]*EvrMatchPresence, 0, len(entrants))
 
-	for _, p := range entrantPresences {
+	for i, p := range entrantPresences {
 
-		session := b.sessionRegistry.Get(p.SessionID)
-		if session == nil {
-			logger.Warn("Failed to get session from session registry", zap.String("sid", p.SessionID.String()))
-			errored = append(errored, p)
-			continue
-		}
-
-		if err := LobbyJoinEntrants(logger, b.matchRegistry, b.tracker, session, serverSession, label, []*EvrMatchPresence{p}); err != nil {
+		if err := LobbyJoinEntrants(logger, b.matchRegistry, b.tracker, sessions[i], serverSession, label, []*EvrMatchPresence{p}); err != nil {
 			logger.Error("Failed to join entrant to match", zap.String("mid", label.ID.UUID.String()), zap.String("uid", p.GetUserId()), zap.Error(err))
 			errored = append(errored, p)
 			continue
@@ -287,8 +256,27 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 	b.metrics.CustomCounter("lobby_join_match_made", tags, int64(len(successful)))
 	b.metrics.CustomCounter("lobby_error_match_made", tags, int64(len(errored)))
 
-	logger.Info("Match built.", zap.Any("label", label), zap.String("mid", label.ID.UUID.String()), zap.Any("teams", teams), zap.Any("successful", successful), zap.Any("errored", errored))
+	logger.Info("Match built.", zap.String("mid", label.ID.UUID.String()), zap.Any("teams", teams), zap.Any("successful", successful), zap.Any("errored", errored))
 	return nil
+}
+
+func (b *LobbyBuilder) groupIDFromEntrants(entrants []*MatchmakerEntry) (uuid.UUID, error) {
+
+	var groupID string
+	for _, e := range entrants {
+		g, ok := e.StringProperties["group_id"]
+		if !ok {
+			return uuid.Nil, fmt.Errorf("entrant has no group_id")
+		}
+		if groupID == "" {
+			groupID = g
+			continue
+		}
+		if groupID != g {
+			return uuid.Nil, fmt.Errorf("multiple group_ids found")
+		}
+	}
+	return uuid.FromStringOrNil(groupID), nil
 }
 
 func (b *LobbyBuilder) distributeParties(parties [][]*MatchmakerEntry) [][]*MatchmakerEntry {
