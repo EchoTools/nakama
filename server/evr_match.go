@@ -935,17 +935,20 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 
 		case evr.ModeArenaPublic:
 			state.LobbyType = PublicLobby
+			state.MaxSize = MatchLobbyMaxSize
 			state.TeamSize = DefaultPublicArenaTeamSize
 			state.PlayerLimit = min(state.TeamSize*2, state.MaxSize)
 
 		case evr.ModeCombatPublic:
 			state.LobbyType = PublicLobby
+			state.MaxSize = MatchLobbyMaxSize
 			state.TeamSize = DefaultPublicCombatTeamSize
 			state.PlayerLimit = min(state.TeamSize*2, state.MaxSize)
 
 		default:
 			state.LobbyType = PrivateLobby
 			state.MaxSize = MatchLobbyMaxSize
+			state.TeamSize = MatchLobbyMaxSize
 			state.PlayerLimit = state.MaxSize
 		}
 

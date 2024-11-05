@@ -120,7 +120,11 @@ func CalculateNewPlayerRating(evrID evr.EvrId, players []PlayerInfo, orangeWins 
 		}
 
 		t := p.Team
-		teams[t] = append(teams[t], p.Rating)
+		rating := rating.NewWithOptions(&types.OpenSkillOptions{
+			Mu:    ptr.Float64(p.RatingMu),
+			Sigma: ptr.Float64(p.RatingSigma),
+		})
+		teams[t] = append(teams[t], rating)
 
 		if p.EvrID == evrID {
 			teamIdx = p.Team

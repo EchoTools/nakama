@@ -357,9 +357,9 @@ func MatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime
 		} else {
 			// Remove sensitive data
 			label.Broadcaster.IPinfo = nil
+			label.Broadcaster.ServerID = 0
 			label.Broadcaster.Endpoint = evr.Endpoint{}
 			for i, p := range label.Players {
-				p.IPinfo = nil
 				p.ClientIP = ""
 				label.Players[i] = p
 			}

@@ -300,8 +300,8 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 
 			l := labelMeta.State
 
-			// if the match is newer than 30 seconds, skip it.
-			if time.Since(l.CreatedAt) < 30*time.Second {
+			// if the match is too new, skip it.
+			if time.Since(l.CreatedAt) < 10*time.Second {
 				continue
 			}
 

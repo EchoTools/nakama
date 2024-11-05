@@ -20,34 +20,29 @@ type slotReservation struct {
 }
 
 type MatchLabel struct {
-	ID          MatchID          `json:"id"`                    // The Session Id used by EVR (the same as match id)
-	Open        bool             `json:"open"`                  // Whether the lobby is open to new players (Matching Only)
-	LobbyType   LobbyType        `json:"lobby_type"`            // The type of lobby (Public, Private, Unassigned) (EVR)
-	Broadcaster MatchBroadcaster `json:"broadcaster,omitempty"` // The broadcaster's data
-	StartTime   time.Time        `json:"start_time,omitempty"`  // The time the match was, or will be started.
-	CreatedAt   time.Time        `json:"created_at,omitempty"`  // The time the match was created.
-	SpawnedBy   string           `json:"spawned_by,omitempty"`  // The userId of the player that spawned this match.
-	GroupID     *uuid.UUID       `json:"group_id,omitempty"`    // The channel id of the broadcaster. (EVR)
-	GuildID     string           `json:"guild_id,omitempty"`    // The guild id of the broadcaster. (EVR)
-	GuildName   string           `json:"guild_name,omitempty"`  // The guild name of the broadcaster. (EVR)
+	ID           MatchID        `json:"id"`                      // The Session Id used by EVR (the same as match id)
+	Open         bool           `json:"open"`                    // Whether the lobby is open to new players (Matching Only)
+	LobbyType    LobbyType      `json:"lobby_type"`              // The type of lobby (Public, Private, Unassigned) (EVR)
+	Mode         evr.Symbol     `json:"mode,omitempty"`          // The mode of the lobby (Arena, Combat, Social, etc.) (EVR)
+	Level        evr.Symbol     `json:"level,omitempty"`         // The level to play on (EVR).
+	Size         int            `json:"size"`                    // The number of players (including spectators) in the match.
+	PlayerCount  int            `json:"player_count"`            // The number of participants (not including spectators) in the match.
+	Players      []PlayerInfo   `json:"players,omitempty"`       // The displayNames of the players (by team name) in the match.
+	TeamMetadata []TeamMetadata `json:"team_metadata,omitempty"` // The metadata of the teams in the match.
+	GameState    *GameState     `json:"game_state,omitempty"`    // The game state for the match.
 
-	Mode             evr.Symbol                `json:"mode,omitempty"`             // The mode of the lobby (Arena, Combat, Social, etc.) (EVR)
-	Level            evr.Symbol                `json:"level,omitempty"`            // The level to play on (EVR).
-	SessionSettings  *evr.LobbySessionSettings `json:"session_settings,omitempty"` // The session settings for the match (EVR).
-	RequiredFeatures []string                  `json:"features,omitempty"`         // The required features for the match. map[feature][hmdtype]isRequired
+	TeamSize         int      `json:"team_size,omitempty"`    // The size of each team in arena/combat (either 4 or 5)
+	MaxSize          int      `json:"limit,omitempty"`        // The total lobby size limit (players + specs)
+	PlayerLimit      int      `json:"player_limit,omitempty"` // The number of players in the match (not including spectators).
+	RequiredFeatures []string `json:"features,omitempty"`     // The required features for the match. map[feature][hmdtype]isRequired
 
-	MaxSize     int       `json:"limit,omitempty"`        // The total lobby size limit (players + specs)
-	Size        int       `json:"size"`                   // The number of players (including spectators) in the match.
-	PlayerCount int       `json:"player_count"`           // The number of participants (not including spectators) in the match.
-	PlayerLimit int       `json:"player_limit,omitempty"` // The number of players in the match (not including spectators).
-	TeamSize    int       `json:"team_size,omitempty"`    // The size of each team in arena/combat (either 4 or 5)
-	TeamIndex   TeamIndex `json:"team,omitempty"`         // What team index a player prefers (Used by Matching only)
-
-	TeamMetadata   []TeamMetadata `json:"team_metadata,omitempty"`   // The metadata of the teams in the match.
-	Players        []PlayerInfo   `json:"players,omitempty"`         // The displayNames of the players (by team name) in the match.
-	TeamAlignments map[string]int `json:"team_alignments,omitempty"` // map[userID]TeamIndex
-
-	GameState *GameState `json:"game_state,omitempty"` // The game state for the match.
+	GroupID         *uuid.UUID                `json:"group_id,omitempty"`         // The channel id of the broadcaster. (EVR)
+	SpawnedBy       string                    `json:"spawned_by,omitempty"`       // The userId of the player that spawned this match.
+	StartTime       time.Time                 `json:"start_time,omitempty"`       // The time the match was, or will be started.
+	CreatedAt       time.Time                 `json:"created_at,omitempty"`       // The time the match was created.
+	Broadcaster     MatchBroadcaster          `json:"broadcaster,omitempty"`      // The broadcaster's data
+	SessionSettings *evr.LobbySessionSettings `json:"session_settings,omitempty"` // The session settings for the match (EVR).
+	TeamAlignments  map[string]int            `json:"team_alignments,omitempty"`  // map[userID]TeamIndex
 
 	server         runtime.Presence             // The broadcaster's presence
 	levelLoaded    bool                         // Whether the server has been sent the start instruction.
@@ -215,7 +210,8 @@ func (s *MatchLabel) rebuildCache() {
 			DiscordID:     p.DiscordID,
 			PartyID:       p.PartyID.String(),
 			JoinTime:      s.joinTimeMilliseconds[p.SessionID.String()],
-			Rating:        p.Rating,
+			RatingMu:      p.Rating.Mu,
+			RatingSigma:   p.Rating.Sigma,
 			IsReservation: s.reservationMap[p.SessionID.String()] != nil,
 		}
 
@@ -261,7 +257,6 @@ func (l *MatchLabel) PublicView() *MatchLabel {
 		StartTime:        l.StartTime,
 		CreatedAt:        l.CreatedAt,
 		GroupID:          l.GroupID,
-		GuildID:          l.GuildID,
 		SpawnedBy:        l.SpawnedBy,
 		Mode:             l.Mode,
 		Level:            l.Level,
@@ -290,6 +285,7 @@ func (l *MatchLabel) PublicView() *MatchLabel {
 	} else {
 		for i := range l.Players {
 			v.Players = append(v.Players, PlayerInfo{
+				IsReservation: l.Players[i].IsReservation,
 				UserID:        l.Players[i].UserID,
 				Username:      l.Players[i].Username,
 				DisplayName:   l.Players[i].DisplayName,
@@ -298,8 +294,8 @@ func (l *MatchLabel) PublicView() *MatchLabel {
 				DiscordID:     l.Players[i].DiscordID,
 				PartyID:       l.Players[i].PartyID,
 				JoinTime:      l.Players[i].JoinTime,
-				Rating:        l.Players[i].Rating,
-				IsReservation: l.Players[i].IsReservation,
+				RatingMu:      l.Players[i].RatingMu,
+				RatingSigma:   l.Players[i].RatingSigma,
 			})
 		}
 
