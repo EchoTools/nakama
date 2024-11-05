@@ -855,7 +855,10 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 				if s.Value > 0 {
 					isWinner = true
 				}
-				playerInfo.Rating = CalculateNewPlayerRating(request.EvrID, label.Players, isWinner)
+				rating := CalculateNewPlayerRating(request.EvrID, label.Players, isWinner)
+				playerInfo.RatingMu = rating.Mu
+				playerInfo.RatingSigma = rating.Sigma
+
 			}
 		}
 	}
