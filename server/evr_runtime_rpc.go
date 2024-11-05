@@ -1014,12 +1014,6 @@ type PrepareMatchRPCRequest struct {
 	MatchLabel       *MatchLabel          `json:"label,omitempty"`             // an EvrMatchState to send (unmodified) as the signal payload
 }
 
-type PrepareMatchRPCResponse struct {
-	MatchID       MatchID    `json:"id"`
-	MatchLabel    MatchLabel `json:"label"`
-	SignalPayload string     `json:"signal_payload"`
-}
-
 // PrepareMatchRPC is a function that prepares a match from a given match ID.
 // Global Developers, the operator of the target server, allocators of the target server's specified guilds can prepare matches.
 func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
@@ -1079,74 +1073,53 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		request.StartTime = time.Now().Add(10 * time.Minute)
 	}
 
-	gid := uuid.FromStringOrNil(groupID)
 	label = request.MatchLabel
-	maxSize := SocialLobbyMaxSize
-	if l, ok := LobbySizeByMode[request.Mode.Symbol()]; ok {
-		maxSize = l
-	}
 
-	if label == nil {
-		label = &MatchLabel{
+	var settings *MatchSettings
+	if label != nil {
+		settings = &MatchSettings{
+			Mode:             label.Mode,
+			TeamSize:         label.TeamSize,
+			Level:            label.Level,
+			RequiredFeatures: label.RequiredFeatures,
+			StartTime:        label.StartTime.UTC(),
+			SpawnedBy:        label.SpawnedBy,
+			GroupID:          uuid.FromStringOrNil(groupID),
+			TeamAlignments:   label.TeamAlignments,
+		}
+	} else {
+
+		settings = &MatchSettings{
 			Mode:             request.Mode.Symbol(),
 			TeamSize:         request.TeamSize,
 			Level:            request.Level.Symbol(),
 			RequiredFeatures: request.RequiredFeatures,
 			StartTime:        request.StartTime.UTC(),
 			SpawnedBy:        request.SpawnedBy,
-			MaxSize:          uint8(maxSize),
-			GroupID:          &gid,
+			GroupID:          uuid.FromStringOrNil(groupID),
+			TeamAlignments:   make(map[string]int, len(request.Alignments)),
 		}
 
 		// Translate the discord ID to the nakama ID for the team Alignments
-		label.TeamAlignments = make(map[string]int, len(request.Alignments))
+		settings.TeamAlignments = make(map[string]int, len(request.Alignments))
 		for discordID, teamIndex := range request.Alignments {
 			// Get the nakama ID from the discord ID
 			userID, err := GetUserIDByDiscordID(ctx, db, discordID)
 			if err != nil {
 				return "", runtime.NewError(err.Error(), StatusNotFound)
 			}
-			label.TeamAlignments[userID] = int(teamIndex)
+			settings.TeamAlignments[userID] = int(teamIndex)
 		}
 	}
 
-	signalPayload := NewSignalEnvelope(userID, SignalPrepareSession, label).String()
-	errResponse := func(err error) (string, error) {
-		response := PrepareMatchRPCResponse{
-			MatchID:       matchID,
-			SignalPayload: signalPayload,
-		}
-		data, _ := json.MarshalIndent(response, "", "  ")
-		return string(data), runtime.NewError(err.Error(), StatusInvalidArgument)
-	}
-
-	// Send the signal
-	signalResponsePayload, err := nk.MatchSignal(ctx, matchID.String(), signalPayload)
+	label, err = LobbyPrepareSession(ctx, nk, label.ID, settings)
 	if err != nil {
-		return errResponse(err)
-	}
-	signalResponse := SignalResponse{}
-	if err := json.Unmarshal([]byte(signalResponsePayload), &signalResponse); err != nil {
-		return errResponse(err)
-	}
-	if !signalResponse.Success {
-		return errResponse(fmt.Errorf("failed to signal match: %s", signalResponse.Message))
+		return err.Error(), runtime.NewError(err.Error(), StatusInvalidArgument)
 	}
 
-	// Get the match label
-	match, err := nk.MatchGet(ctx, matchID.String())
+	data, err := json.MarshalIndent(label, "", "  ")
 	if err != nil {
-		return errResponse(err)
-	}
-
-	state := &MatchLabel{}
-	if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), state); err != nil {
-		return errResponse(err)
-	}
-
-	data, err := json.MarshalIndent(state, "", "  ")
-	if err != nil {
-		return errResponse(err)
+		return "", runtime.NewError(err.Error(), StatusInternalError)
 	}
 
 	logger.WithFields(map[string]any{

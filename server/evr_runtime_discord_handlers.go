@@ -10,6 +10,7 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -233,31 +234,28 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 	matchID := MatchIDFromStringOrNil(match.GetMatchId())
 	gid := uuid.FromStringOrNil(groupID)
 	// Prepare the session for the match.
-	label := MatchLabel{}
-	label.SpawnedBy = userID
 
-	label.StartTime = startTime.UTC().Add(1 * time.Minute)
 	if membership.IsAllocator {
-		label.StartTime = startTime.UTC().Add(10 * time.Minute)
+		startTime = startTime.UTC().Add(10 * time.Minute)
+	} else {
+		startTime.UTC().Add(1 * time.Minute)
 	}
 
-	label.GroupID = &gid
-	label.Mode = mode
-	if !level.IsNil() {
-		label.Level = level
+	settings := MatchSettings{
+		Mode:      mode,
+		Level:     level,
+		GroupID:   gid,
+		StartTime: startTime.UTC().Add(1 * time.Minute),
+		SpawnedBy: userID,
 	}
-	nk_ := d.nk.(*RuntimeGoNakamaModule)
-	response, err := SignalMatch(ctx, nk_.matchRegistry, matchID, SignalPrepareSession, label)
+
+	label, err := LobbyPrepareSession(ctx, d.nk, matchID, &settings)
 	if err != nil {
-		return nil, 0, status.Errorf(codes.Internal, "failed to signal match: %v", err)
+		logger.Warn("Failed to prepare session", zap.Error(err), zap.String("mid", label.ID.UUID.String()))
+		return nil, -1, fmt.Errorf("failed to prepare session: %w", err)
 	}
 
-	label = MatchLabel{}
-	if err := json.Unmarshal([]byte(response), &label); err != nil {
-		return nil, 0, status.Errorf(codes.Internal, "failed to unmarshal match label: %v", err)
-	}
-
-	return &label, rtt, nil
+	return label, rtt, nil
 }
 
 func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Logger, userID, guildID string, region, mode, level evr.Symbol, startTime time.Time) (l *MatchLabel, rtt float64, err error) {
@@ -344,28 +342,22 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 
 	match := matches[0]
 	matchID := MatchIDFromStringOrNil(match.GetMatchId())
-	gid := uuid.FromStringOrNil(groupID)
+
 	// Prepare the session for the match.
-	label := MatchLabel{}
-	label.SpawnedBy = userID
 
-	label.StartTime = startTime.UTC().Add(1 * time.Minute)
-
-	label.GroupID = &gid
-	label.Mode = mode
-	if !level.IsNil() {
-		label.Level = level
+	settings := MatchSettings{
+		Mode:      mode,
+		Level:     level,
+		GroupID:   uuid.FromStringOrNil(groupID),
+		StartTime: startTime.UTC().Add(1 * time.Minute),
+		SpawnedBy: userID,
 	}
-	nk_ := d.nk.(*RuntimeGoNakamaModule)
-	response, err := SignalMatch(ctx, nk_.matchRegistry, matchID, SignalPrepareSession, label)
+
+	label, err := LobbyPrepareSession(ctx, d.nk, matchID, &settings)
 	if err != nil {
-		return nil, 0, status.Errorf(codes.Internal, "failed to signal match: %v", err)
+		logger.Warn("Failed to prepare session", zap.Error(err), zap.String("mid", label.ID.UUID.String()))
+		return nil, -1, fmt.Errorf("failed to prepare session: %w", err)
 	}
 
-	label = MatchLabel{}
-	if err := json.Unmarshal([]byte(response), &label); err != nil {
-		return nil, 0, status.Errorf(codes.Internal, "failed to unmarshal match label: %v", err)
-	}
-
-	return &label, rtt, nil
+	return label, rtt, nil
 }

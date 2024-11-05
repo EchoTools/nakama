@@ -121,7 +121,7 @@ func NewGameServerSessionStart(sessionID uuid.UUID, channel uuid.UUID, playerLim
 		GroupID:     channel,
 		PlayerLimit: byte(playerLimit),
 		LobbyType:   byte(lobbyType),
-		Settings:    NewSessionSettings(appID, mode, level, features),
+		Settings:    *NewSessionSettings(appID, mode, level, features),
 		Entrants:    descriptors,
 	}
 }
@@ -164,7 +164,7 @@ func (s *LobbySessionSettings) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func NewSessionSettings(appID string, mode Symbol, level Symbol, features []string) LobbySessionSettings {
+func NewSessionSettings(appID string, mode Symbol, level Symbol, features []string) *LobbySessionSettings {
 	if level == 0 {
 		level = LevelUnspecified
 	}
@@ -178,7 +178,7 @@ func NewSessionSettings(appID string, mode Symbol, level Symbol, features []stri
 		l := int64(level)
 		settings.Level = l
 	}
-	return settings
+	return &settings
 }
 
 func (s *LobbySessionSettings) String() string {

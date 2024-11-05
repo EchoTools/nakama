@@ -134,6 +134,7 @@ func (m skillBasedMatchmaker) sortByPriority(predictions []PredictedMatch) {
 	slices.SortStableFunc(predictions, func(a, b PredictedMatch) int {
 
 		// Sort by size of the match
+
 		if len(a.Entrants()) > len(b.Entrants()) {
 			return -1
 		} else if len(a.Entrants()) < len(b.Entrants()) {

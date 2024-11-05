@@ -13,6 +13,7 @@ import (
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
+	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/intinig/go-openskill/rating"
 	"github.com/intinig/go-openskill/types"
@@ -24,6 +25,7 @@ import (
 type LobbyBuilder struct {
 	sync.Mutex
 	logger *zap.Logger
+	nk     runtime.NakamaModule
 
 	sessionRegistry SessionRegistry
 	matchRegistry   MatchRegistry
@@ -34,11 +36,12 @@ type LobbyBuilder struct {
 	mapQueue map[evr.Symbol][]evr.Symbol // map[mode][]level
 }
 
-func NewLobbyBuilder(logger *zap.Logger, sessionRegistry SessionRegistry, matchRegistry MatchRegistry, tracker Tracker, metrics Metrics, profileRegistry *ProfileRegistry) *LobbyBuilder {
+func NewLobbyBuilder(logger *zap.Logger, nk runtime.NakamaModule, sessionRegistry SessionRegistry, matchRegistry MatchRegistry, tracker Tracker, metrics Metrics, profileRegistry *ProfileRegistry) *LobbyBuilder {
 	logger = logger.With(zap.String("module", "lobby_builder"))
 
 	return &LobbyBuilder{
 		logger: logger,
+		nk:     nk,
 
 		sessionRegistry: sessionRegistry,
 		matchRegistry:   matchRegistry,
@@ -172,31 +175,6 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 		}
 	}
 
-	gameServers := b.SortGameServerIPs(entrants)
-
-	mode := evr.ToSymbol(entrants[0].StringProperties["mode"])
-
-	level := b.selectNextMap(mode)
-	start := true
-	timeout := time.After(60 * time.Second)
-	var matchID MatchID
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-timeout:
-			return ErrMatchmakingNoAvailableServers
-		default:
-		}
-		matchID, err = b.allocateGameServer(ctx, logger, groupID, gameServers, mode, level, teamAlignments, start)
-		if err != nil {
-			logger.Error("Failed to allocate game server.", zap.Error(err))
-			<-time.After(5 * time.Second)
-			continue
-		}
-		break
-	}
-
 	entrantPresences := make([]*EvrMatchPresence, 0, len(entrants))
 	for teamIndex, players := range teams {
 
@@ -208,10 +186,10 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 				logger.Warn("Failed to get session from session registry", zap.String("sid", entry.Presence.GetSessionId()))
 				continue
 			}
-			sessionCtx := session.Context()
-			params, ok := LoadParams(sessionCtx)
+
+			sessionParams, ok := LoadParams(ctx)
 			if !ok {
-				logger.Warn("Failed to get session parameters from session context", zap.String("sid", entry.Presence.GetSessionId()))
+				logger.Warn("Failed to load session params", zap.String("sid", entry.Presence.GetSessionId()))
 				continue
 			}
 
@@ -222,33 +200,63 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 				Sigma: &sigma,
 			})
 
-			metadata := params.AccountMetadata
 			presence := &EvrMatchPresence{
-				Node:           params.Node,
+				Node:           sessionParams.Node,
 				UserID:         session.UserID(),
 				SessionID:      session.ID(),
-				LoginSessionID: params.LoginSession.ID(),
+				LoginSessionID: sessionParams.LoginSession.id,
 				Username:       session.Username(),
-				DisplayName:    metadata.GetGroupDisplayNameOrDefault(groupID.String()),
-				EvrID:          params.EvrID,
-				PartyID:        uuid.FromStringOrNil(entry.StringProperties["party_id"]),
+				DisplayName:    entry.StringProperties["display_name"],
+				EvrID:          sessionParams.EvrID,
+				PartyID:        MatchIDFromStringOrNil(entry.PartyId).UUID,
 				RoleAlignment:  teamIndex,
-				DiscordID:      params.DiscordID,
+				DiscordID:      sessionParams.DiscordID,
 				ClientIP:       session.ClientIP(),
 				ClientPort:     session.ClientPort(),
-				IsPCVR:         params.IsPCVR,
+				IsPCVR:         sessionParams.IsPCVR,
 				Rating:         rating,
 			}
 			entrantPresences = append(entrantPresences, presence)
 		}
 	}
-	tags := map[string]string{
-		"mode":    mode.String(),
-		"level":   level.String(),
-		"groupID": groupID.String(),
+
+	gameServers := b.SortGameServerIPs(entrants)
+
+	mode := evr.ToSymbol(entrants[0].StringProperties["mode"])
+
+	settings := &MatchSettings{
+		Mode:                mode,
+		Level:               b.selectNextMap(mode),
+		SpawnedBy:           SystemUserID,
+		GroupID:             groupID,
+		Reservations:        entrantPresences,
+		ReservationLifetime: 20 * time.Second,
+		StartTime:           time.Now().UTC(),
 	}
 
-	label, serverSession, err := LobbySessionGet(ctx, logger, b.matchRegistry, b.tracker, b.profileRegistry, b.sessionRegistry, matchID)
+	timeout := time.After(60 * time.Second)
+	var label *MatchLabel
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timeout:
+			return ErrMatchmakingNoAvailableServers
+		default:
+		}
+		label, err = b.allocateGameServer(ctx, logger, groupID, gameServers, settings)
+		if err != nil || label == nil {
+			logger.Error("Failed to allocate game server.", zap.Error(err))
+			<-time.After(5 * time.Second)
+			continue
+		}
+		break
+	}
+
+	serverSession := b.sessionRegistry.Get(uuid.FromStringOrNil(label.Broadcaster.SessionID))
+	if serverSession == nil {
+		return fmt.Errorf("failed to get server session")
+	}
 
 	successful := make([]*EvrMatchPresence, 0, len(entrants))
 	errored := make([]*EvrMatchPresence, 0, len(entrants))
@@ -263,7 +271,7 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 		}
 
 		if err := LobbyJoinEntrants(logger, b.matchRegistry, b.tracker, session, serverSession, label, []*EvrMatchPresence{p}); err != nil {
-			logger.Error("Failed to join entrant to match", zap.String("mid", matchID.UUID.String()), zap.String("uid", p.GetUserId()), zap.Error(err))
+			logger.Error("Failed to join entrant to match", zap.String("mid", label.ID.UUID.String()), zap.String("uid", p.GetUserId()), zap.Error(err))
 			errored = append(errored, p)
 			continue
 		}
@@ -271,10 +279,15 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 		successful = append(successful, p)
 	}
 
+	tags := map[string]string{
+		"mode":    label.Mode.String(),
+		"level":   label.Level.String(),
+		"groupID": label.GetGroupID().String(),
+	}
 	b.metrics.CustomCounter("lobby_join_match_made", tags, int64(len(successful)))
 	b.metrics.CustomCounter("lobby_error_match_made", tags, int64(len(errored)))
 
-	logger.Info("Match built.", zap.Any("label", label), zap.String("mid", matchID.UUID.String()), zap.Any("teams", teams), zap.Any("successful", successful), zap.Any("errored", errored))
+	logger.Info("Match built.", zap.Any("label", label), zap.String("mid", label.ID.UUID.String()), zap.Any("teams", teams), zap.Any("successful", successful), zap.Any("errored", errored))
 	return nil
 }
 
@@ -320,14 +333,14 @@ func (b *LobbyBuilder) distributeParties(parties [][]*MatchmakerEntry) [][]*Matc
 
 	return teams
 }
-func (b *LobbyBuilder) allocateGameServer(ctx context.Context, logger *zap.Logger, groupID uuid.UUID, sorted []string, mode, level evr.Symbol, teamAlignments TeamAlignments, start bool) (MatchID, error) {
+func (b *LobbyBuilder) allocateGameServer(ctx context.Context, logger *zap.Logger, groupID uuid.UUID, sorted []string, settings *MatchSettings) (*MatchLabel, error) {
 
 	available, err := b.listUnassignedLobbies(ctx, logger, groupID)
 	if err != nil {
-		return MatchID{}, err
+		return nil, err
 	}
 	if len(available) == 0 {
-		return MatchID{}, ErrMatchmakingNoAvailableServers
+		return nil, ErrMatchmakingNoAvailableServers
 	}
 
 	availableByExtIP := make(map[string]MatchID, len(available))
@@ -353,21 +366,11 @@ func (b *LobbyBuilder) allocateGameServer(ctx context.Context, logger *zap.Logge
 		matchID = available[rand.Intn(len(available))].ID
 	}
 
-	label := &MatchLabel{}
-	label.Mode = mode
-	label.Level = level
-	label.SpawnedBy = SystemUserID
-	label.GroupID = &groupID
-	label.TeamAlignments = teamAlignments
-
-	label.StartTime = time.Now().UTC()
-
-	// Instruct the server to prepare the level
-	response, err := SignalMatch(ctx, b.matchRegistry, matchID, SignalPrepareSession, label)
+	label, err := LobbyPrepareSession(ctx, b.nk, matchID, settings)
 	if err != nil {
-		return MatchID{}, fmt.Errorf("error signaling match `%s`: %s: %v", matchID.String(), response, err)
+		return nil, fmt.Errorf("error signaling match `%s`: %w", matchID.String(), err)
 	}
-	return matchID, nil
+	return label, nil
 }
 
 func (b *LobbyBuilder) listUnassignedLobbies(ctx context.Context, logger *zap.Logger, groupID uuid.UUID) ([]*MatchLabel, error) {

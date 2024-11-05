@@ -36,7 +36,7 @@ type MatchLabel struct {
 	SessionSettings  *evr.LobbySessionSettings `json:"session_settings,omitempty"` // The session settings for the match (EVR).
 	RequiredFeatures []string                  `json:"features,omitempty"`         // The required features for the match. map[feature][hmdtype]isRequired
 
-	MaxSize     uint8     `json:"limit,omitempty"`        // The total lobby size limit (players + specs)
+	MaxSize     int       `json:"limit,omitempty"`        // The total lobby size limit (players + specs)
 	Size        int       `json:"size"`                   // The number of players (including spectators) in the match.
 	PlayerCount int       `json:"player_count"`           // The number of participants (not including spectators) in the match.
 	PlayerLimit int       `json:"player_limit,omitempty"` // The number of players in the match (not including spectators).
@@ -206,16 +206,17 @@ func (s *MatchLabel) rebuildCache() {
 		}
 
 		playerinfo := PlayerInfo{
-			UserID:      p.UserID.String(),
-			Username:    p.Username,
-			DisplayName: p.DisplayName,
-			EvrID:       p.EvrID,
-			Team:        TeamIndex(p.RoleAlignment),
-			ClientIP:    p.ClientIP,
-			DiscordID:   p.DiscordID,
-			PartyID:     p.PartyID.String(),
-			JoinTime:    s.joinTimeMilliseconds[p.SessionID.String()],
-			Rating:      p.Rating,
+			UserID:        p.UserID.String(),
+			Username:      p.Username,
+			DisplayName:   p.DisplayName,
+			EvrID:         p.EvrID,
+			Team:          TeamIndex(p.RoleAlignment),
+			ClientIP:      p.ClientIP,
+			DiscordID:     p.DiscordID,
+			PartyID:       p.PartyID.String(),
+			JoinTime:      s.joinTimeMilliseconds[p.SessionID.String()],
+			Rating:        p.Rating,
+			IsReservation: s.reservationMap[p.SessionID.String()] != nil,
 		}
 
 		s.Players = append(s.Players, playerinfo)
