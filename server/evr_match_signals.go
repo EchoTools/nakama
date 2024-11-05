@@ -1,8 +1,12 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"time"
+
+	"github.com/heroiclabs/nakama-common/runtime"
 )
 
 type SignalOpCode int
@@ -21,18 +25,18 @@ const (
 )
 
 type SignalEnvelope struct {
-	UserId  string
+	UserID  string
 	OpCode  SignalOpCode
 	Payload []byte
 }
 
-func NewSignalEnvelope(userId string, signal SignalOpCode, data any) *SignalEnvelope {
+func NewSignalEnvelope(userID string, signal SignalOpCode, data any) *SignalEnvelope {
 	payload, err := json.Marshal(data)
 	if err != nil {
 		return nil
 	}
 	return &SignalEnvelope{
-		UserId:  userId,
+		UserID:  userID,
 		OpCode:  signal,
 		Payload: payload,
 	}
@@ -86,4 +90,35 @@ type SignalReserveSlotsPayload struct {
 	SessionIDs    []string
 	RoleAlignment int
 	ExpiryTime    time.Time
+}
+
+// SignalMatch is a helper function to send a signal to a match.
+func SignalMatch(ctx context.Context, nk runtime.NakamaModule, matchID MatchID, opCode SignalOpCode, data any) (string, error) {
+	dataJson, err := json.Marshal(data)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal match label: %w", err)
+	}
+
+	signal := SignalEnvelope{
+		OpCode:  opCode,
+		Payload: dataJson,
+	}
+	payload, err := json.Marshal(signal)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal match signal: %w", err)
+	}
+
+	result, err := nk.MatchSignal(ctx, matchID.String(), string(payload))
+	if err != nil {
+		return "", fmt.Errorf("failed to signal match: %w", err)
+	}
+
+	response := SignalResponse{}
+	if err := json.Unmarshal([]byte(result), &response); err != nil {
+		return "", fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+	if !response.Success {
+		return "", fmt.Errorf("match signal response: %v", response.Message)
+	}
+	return response.Payload, nil
 }

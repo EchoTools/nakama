@@ -2,7 +2,10 @@ package server
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 
+	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
 )
@@ -97,4 +100,19 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 	}
 
 	return nil
+}
+
+func LobbyPrepareSession(ctx context.Context, nk runtime.NakamaModule, matchID MatchID, settings *MatchSettings) (*MatchLabel, error) {
+
+	response, err := SignalMatch(ctx, nk, matchID, SignalPrepareSession, settings)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare session: %w", err)
+	}
+
+	label := &MatchLabel{}
+	if err := json.Unmarshal([]byte(response), label); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal match label: %w", err)
+	}
+
+	return label, nil
 }

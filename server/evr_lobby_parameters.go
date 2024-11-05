@@ -50,10 +50,11 @@ type LobbySessionParameters struct {
 	IsEarlyQuitter         bool          `json:"quit_last_game_early"`
 	EarlyQuitPenaltyExpiry time.Time     `json:"early_quit_penalty_expiry"`
 	latencyHistory         LatencyHistory
-	RankPercentile         float64   `json:"rank_percentile"`
-	RankPercentileRange    float64   `json:"rank_percentile_range"`
-	MaxServerRTT           int       `json:"max_server_rtt"`
-	MatchmakingTimestamp   time.Time `json:"matchmaking_timestamp"`
+	RankPercentile         float64           `json:"rank_percentile"`
+	RankPercentileRange    float64           `json:"rank_percentile_range"`
+	MaxServerRTT           int               `json:"max_server_rtt"`
+	MatchmakingTimestamp   time.Time         `json:"matchmaking_timestamp"`
+	DisplayNames           map[string]string `json:"display_names"`
 }
 
 func (p *LobbySessionParameters) GetPartySize() int {
@@ -264,6 +265,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		RankPercentileRange:    rankRange,
 		MaxServerRTT:           maxServerRTT,
 		MatchmakingTimestamp:   time.Now().UTC(),
+		DisplayNames:           sessionParams.AccountMetadata.GroupDisplayNames,
 	}, nil
 }
 

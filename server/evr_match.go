@@ -108,6 +108,19 @@ func (g *MatchBroadcaster) IsPriorityFor(mode evr.Symbol) bool {
 	return slices.Contains(g.DesignatedModes, mode)
 }
 
+type MatchSettings struct {
+	Mode                evr.Symbol
+	Level               evr.Symbol
+	TeamSize            int
+	StartTime           time.Time
+	SpawnedBy           string
+	GroupID             uuid.UUID
+	RequiredFeatures    []string
+	TeamAlignments      map[string]int
+	Reservations        []*EvrMatchPresence
+	ReservationLifetime time.Duration
+}
+
 // This is the match handler for all matches.
 // There always is one per broadcaster.
 // The match is spawned and managed directly by nakama.
@@ -321,6 +334,12 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	}).Info("Player joining the match.")
 
 	for _, p := range md.Presences[1:] {
+
+		// Ignore the reservation if the player is already in the match.
+		if state.presenceMap[p.GetSessionId()] != nil {
+			continue
+		}
+
 		state.reservationMap[p.GetSessionId()] = &slotReservation{
 			Entrant: p,
 			Expiry:  time.Now().Add(time.Second * 15),
@@ -580,14 +599,6 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 	var err error
 	var updateLabel bool
 
-	// Expire any slot reservations
-	for id, r := range state.reservationMap {
-		if time.Now().After(r.Expiry) {
-			delete(state.reservationMap, id)
-			updateLabel = true
-		}
-	}
-
 	// Handle the messages, one by one
 	for _, in := range messages {
 		switch in.GetOpCode() {
@@ -671,6 +682,14 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 
 	if state.LobbyType == UnassignedLobby {
 		return state
+	}
+
+	// Expire any slot reservations
+	for id, r := range state.reservationMap {
+		if time.Now().After(r.Expiry) {
+			delete(state.reservationMap, id)
+			updateLabel = true
+		}
 	}
 
 	// If the match is prepared and the start time has been reached, start it.
@@ -850,85 +869,104 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 			return state, SignalResponse{Message: "session already prepared"}.String()
 		}
 
-		var newState = MatchLabel{}
-		if err := json.Unmarshal(signal.Payload, &newState); err != nil {
-			return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal match label: %v", err)}.String()
+		settings := MatchSettings{}
+
+		if err := json.Unmarshal(signal.Payload, &settings); err != nil {
+			return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal settings: %v", err)}.String()
 		}
 
-		switch state.Mode {
-		case evr.ModeArenaPublic, evr.ModeCombatPublic:
-
-		default:
-			state.PlayerLimit = int(state.MaxSize)
-		}
-		state.MaxSize = SocialLobbyMaxSize
-		if l, ok := LobbySizeByMode[newState.Mode]; ok {
-			state.MaxSize = uint8(l)
-		}
-		state.TeamSize = int(state.MaxSize)
-
-		state.Mode = newState.Mode
-		switch newState.Mode {
-		case evr.ModeArenaPublic:
-			state.LobbyType = PublicLobby
-			state.TeamSize = DefaultPublicArenaTeamSize
-		case evr.ModeCombatPublic:
-			state.LobbyType = PublicLobby
-			state.TeamSize = DefaultPublicCombatTeamSize
-		case evr.ModeSocialPublic, evr.ModeSocialPrivate:
-			state.LobbyType = PublicLobby
-		default:
-			state.LobbyType = PrivateLobby
-		}
-		state.PlayerLimit = min(state.TeamSize*2, int(state.MaxSize))
-		state.Level = newState.Level
-		// validate the mode
-		if levels, ok := evr.LevelsByMode[state.Mode]; !ok {
-			return state, SignalResponse{Message: fmt.Sprintf("invalid mode: %v", state.Mode)}.String()
-		} else {
-			if state.Level == 0xffffffffffffffff || state.Level == 0 {
-				state.Level = levels[rand.Intn(len(levels))]
-			}
-		}
-
-		if newState.SpawnedBy != "" {
-			state.SpawnedBy = newState.SpawnedBy
-		} else {
-			state.SpawnedBy = signal.UserId
-		}
-
-		state.GroupID = newState.GroupID
-		if state.GroupID == nil {
-			state.GroupID = &uuid.Nil
-		}
-
-		state.RequiredFeatures = newState.RequiredFeatures
-		for _, f := range state.RequiredFeatures {
+		for _, f := range settings.RequiredFeatures {
 			if !slices.Contains(state.Broadcaster.Features, f) {
 				return state, SignalResponse{Message: fmt.Sprintf("feature not supported: %v", f)}.String()
 			}
 		}
+		// validate the mode
+		if levels, ok := evr.LevelsByMode[settings.Mode]; !ok {
+			return state, SignalResponse{Message: fmt.Sprintf("invalid mode: %v", state.Mode)}.String()
+		} else {
+			if settings.Level == 0xffffffffffffffff || settings.Level == 0 {
+				settings.Level = levels[rand.Intn(len(levels))]
+			} else {
+				if !slices.Contains(levels, settings.Level) {
+					return state, SignalResponse{Message: fmt.Sprintf("invalid level: %v", settings.Level)}.String()
+				}
 
-		settings := evr.NewSessionSettings(strconv.FormatUint(PcvrAppId, 10), state.Mode, state.Level, state.RequiredFeatures)
-		state.SessionSettings = &settings
+			}
+		}
+
+		state.Mode = settings.Mode
+		state.Level = settings.Level
+		state.RequiredFeatures = settings.RequiredFeatures
+		state.SessionSettings = evr.NewSessionSettings(strconv.FormatUint(PcvrAppId, 10), state.Mode, state.Level, state.RequiredFeatures)
+		state.GroupID = &settings.GroupID
 
 		state.CreatedAt = time.Now().UTC()
-		state.StartTime = newState.StartTime.UTC()
 
 		// If the start time is in the past, set it to now.
 		// If the start time is not set, set it to 10 minutes from now.
-		if state.StartTime.IsZero() {
+		if settings.StartTime.IsZero() {
 			state.StartTime = time.Now().UTC().Add(10 * time.Minute)
-		} else if state.StartTime.Before(time.Now()) {
+		} else if settings.StartTime.Before(time.Now()) {
 			state.StartTime = time.Now().UTC()
+		} else {
+			state.StartTime = settings.StartTime.UTC()
 		}
 
-		state.TeamAlignments = make(map[string]int, SocialLobbyMaxSize)
-		if newState.TeamAlignments != nil {
-			for userID, role := range newState.TeamAlignments {
-				if userID != "" {
-					state.TeamAlignments[userID] = int(role)
-				}
+		if settings.SpawnedBy != "" {
+			state.SpawnedBy = settings.SpawnedBy
+		} else {
+			state.SpawnedBy = signal.UserID
+		}
+
+		// Set the lobby and team sizes
+		switch settings.Mode {
+
+		case evr.ModeSocialPublic:
+			state.LobbyType = PublicLobby
+			state.MaxSize = SocialLobbyMaxSize
+			state.TeamSize = SocialLobbyMaxSize
+			state.PlayerLimit = SocialLobbyMaxSize
+
+		case evr.ModeSocialPrivate:
+			state.LobbyType = PrivateLobby
+			state.MaxSize = SocialLobbyMaxSize
+			state.TeamSize = SocialLobbyMaxSize
+			state.PlayerLimit = SocialLobbyMaxSize
+
+		case evr.ModeArenaPublic:
+			state.LobbyType = PublicLobby
+			state.TeamSize = DefaultPublicArenaTeamSize
+			state.PlayerLimit = min(state.TeamSize*2, state.MaxSize)
+
+		case evr.ModeCombatPublic:
+			state.LobbyType = PublicLobby
+			state.TeamSize = DefaultPublicCombatTeamSize
+			state.PlayerLimit = min(state.TeamSize*2, state.MaxSize)
+
+		default:
+			state.LobbyType = PrivateLobby
+			state.MaxSize = MatchLobbyMaxSize
+			state.PlayerLimit = state.MaxSize
+		}
+
+		if settings.TeamSize > 0 && settings.TeamSize <= 5 {
+			state.TeamSize = settings.TeamSize
+			state.PlayerLimit = min(state.TeamSize*2, state.MaxSize)
+		}
+
+		state.TeamAlignments = make(map[string]int, state.MaxSize)
+
+		for userID, role := range settings.TeamAlignments {
+			if userID != "" {
+				state.TeamAlignments[userID] = int(role)
+			}
+		}
+
+		for _, e := range settings.Reservations {
+			expiry := time.Now().Add(settings.ReservationLifetime)
+			state.reservationMap[e.GetSessionId()] = &slotReservation{
+				Entrant: e,
+				Expiry:  expiry,
 			}
 		}
 
@@ -979,7 +1017,7 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk run
 
 	state.StartTime = time.Now().UTC()
 	entrants := make([]evr.EvrId, 0)
-	message := evr.NewGameServerSessionStart(state.ID.UUID, groupID, state.MaxSize, uint8(state.LobbyType), state.Broadcaster.AppId, state.Mode, state.Level, state.RequiredFeatures, entrants)
+	message := evr.NewGameServerSessionStart(state.ID.UUID, groupID, uint8(state.MaxSize), uint8(state.LobbyType), state.Broadcaster.AppId, state.Mode, state.Level, state.RequiredFeatures, entrants)
 	logger.WithField("message", message).Info("Starting session.")
 	messages := []evr.Message{
 		message,
@@ -991,35 +1029,6 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk run
 	}
 	state.levelLoaded = true
 	return state, nil
-}
-
-// SignalMatch is a helper function to send a signal to a match.
-func SignalMatch(ctx context.Context, matchRegistry MatchRegistry, matchID MatchID, opCode SignalOpCode, data any) (string, error) {
-	dataJson, err := json.Marshal(data)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal match label: %w", err)
-	}
-
-	signal := SignalEnvelope{
-		OpCode:  opCode,
-		Payload: dataJson,
-	}
-	signalJson, err := json.Marshal(signal)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal match signal: %w", err)
-	}
-	responseJSON, err := matchRegistry.Signal(ctx, matchID.String(), string(signalJson))
-	if err != nil {
-		return "", fmt.Errorf("failed to signal match: %w", err)
-	}
-	response := SignalResponse{}
-	if err := json.Unmarshal([]byte(responseJSON), &response); err != nil {
-		return "", fmt.Errorf("failed to unmarshal response: %w", err)
-	}
-	if !response.Success {
-		return "", fmt.Errorf("match signal response: %v", response.Message)
-	}
-	return response.Payload, nil
 }
 
 func (m *EvrMatch) dispatchMessages(_ context.Context, logger runtime.Logger, dispatcher runtime.MatchDispatcher, messages []evr.Message, presences []runtime.Presence, sender runtime.Presence) error {

@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -102,7 +101,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	}
 
 	// Construct the entrant presences for the party members.
-	entrants, err := p.prepareEntrantPresences(ctx, logger, session, lobbyParams, lobbyGroup)
+	entrants, err := PrepareEntrantPresences(ctx, logger, session, lobbyParams, lobbyGroup)
 	if err != nil {
 		return fmt.Errorf("failed to be party leader.: %w", err)
 	}
@@ -174,6 +173,10 @@ func (p *EvrPipeline) newSocialLobby(ctx context.Context, logger *zap.Logger, ve
 		return nil, err
 	}
 
+	if len(labels) == 0 {
+		return nil, NewLobbyError(ServerFindFailed, "failed to find server")
+	}
+
 	// Retrieve the latency history of all online public players.
 	// Identify servers where the majority of players have a ping other than 999 (or 0).
 	// Sort servers by those with a ping less than 250 for all players.
@@ -200,25 +203,21 @@ func (p *EvrPipeline) newSocialLobby(ctx context.Context, logger *zap.Logger, ve
 		label = labels[rand.Intn(len(labels))]
 	}
 
-	if err := lobbyPrepareSession(ctx, logger, p.matchRegistry, label.ID, evr.ModeSocialPublic, evr.LevelSocial, uuid.Nil, groupID, TeamAlignments{}, time.Now().UTC()); err != nil {
-		logger.Error("Failed to prepare session", zap.Error(err), zap.String("mid", label.ID.UUID.String()))
+	matchID := label.ID
+	settings := &MatchSettings{
+		Mode:      evr.ModeSocialPublic,
+		Level:     evr.LevelSocial,
+		SpawnedBy: SystemUserID,
+		GroupID:   groupID,
+		StartTime: time.Now().UTC(),
+	}
+	label, err = LobbyPrepareSession(ctx, p.runtimeModule, matchID, settings)
+	if err != nil {
+		logger.Error("Failed to prepare session", zap.Error(err), zap.String("mid", matchID.String()))
 		return nil, err
 	}
 
-	match, _, err := p.matchRegistry.GetMatch(ctx, label.ID.String())
-	if err != nil {
-		return nil, fmt.Errorf("failed to get match: %w", err)
-	} else if match == nil {
-		logger.Warn("Match not found", zap.String("mid", label.ID.UUID.String()))
-		return nil, ErrMatchNotFound
-	}
-
-	label = &MatchLabel{}
-	if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), label); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal match label: %w", err)
-	}
 	return label, nil
-
 }
 
 func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lobbyParams *LobbySessionParameters, entrants []*EvrMatchPresence) error {
@@ -293,10 +292,16 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 		team := evr.TeamBlue
 
 		for _, labelMeta := range matches {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+
 			l := labelMeta.State
 
-			// if the match is newer than 10 seconds, skip it.
-			if time.Since(l.StartTime) < 10*time.Second {
+			// if the match is newer than 30 seconds, skip it.
+			if time.Since(l.CreatedAt) < 30*time.Second {
 				continue
 			}
 
@@ -427,7 +432,7 @@ func (p *EvrPipeline) pruneInactivePartyMembers(ctx context.Context, logger *zap
 	return nil
 }
 
-func (p *EvrPipeline) prepareEntrantPresences(ctx context.Context, logger *zap.Logger, session *sessionWS, params *LobbySessionParameters, lobbyGroup *LobbyGroup) ([]*EvrMatchPresence, error) {
+func PrepareEntrantPresences(ctx context.Context, logger *zap.Logger, session *sessionWS, params *LobbySessionParameters, lobbyGroup *LobbyGroup) ([]*EvrMatchPresence, error) {
 
 	// prepare the entrant presences for all party members
 	sessionIDs := []uuid.UUID{session.id}
@@ -438,7 +443,7 @@ func (p *EvrPipeline) prepareEntrantPresences(ctx context.Context, logger *zap.L
 		sessionIDs = append(sessionIDs, uuid.FromStringOrNil(member.Presence.GetSessionId()))
 	}
 
-	entrantPresences, err := EntrantPresencesFromSessionIDs(logger, p.sessionRegistry, params.PartyID, params.GroupID, params.Rating, params.Role, sessionIDs...)
+	entrantPresences, err := EntrantPresencesFromSessionIDs(logger, session.sessionRegistry, params.PartyID, params.GroupID, params.Rating, params.Role, sessionIDs...)
 	if err != nil {
 		return nil, NewLobbyError(InternalError, "failed to create entrant presences")
 	}
@@ -450,6 +455,7 @@ func (p *EvrPipeline) prepareEntrantPresences(ctx context.Context, logger *zap.L
 
 	return entrantPresences, nil
 }
+
 func (p *EvrPipeline) PartyFollow(ctx context.Context, logger *zap.Logger, session *sessionWS, params *LobbySessionParameters, lobbyGroup *LobbyGroup) error {
 
 	logger.Debug("User is member of party", zap.String("leader", lobbyGroup.GetLeader().GetUsername()))

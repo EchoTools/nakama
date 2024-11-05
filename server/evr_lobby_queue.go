@@ -14,7 +14,6 @@ import (
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
-	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -137,23 +136,6 @@ func (q *LobbyQueue) listUnfilledMatches(ctx context.Context) ([]*MatchLabel, er
 	}
 
 	return labels, nil
-}
-
-func lobbyPrepareSession(ctx context.Context, logger *zap.Logger, matchRegistry MatchRegistry, matchID MatchID, mode, level evr.Symbol, spawnedBy uuid.UUID, groupID uuid.UUID, teamAlignments TeamAlignments, startTime time.Time) error {
-	label := &MatchLabel{
-		ID:             matchID,
-		Mode:           mode,
-		Level:          level,
-		SpawnedBy:      spawnedBy.String(),
-		GroupID:        &groupID,
-		TeamAlignments: teamAlignments,
-		StartTime:      startTime,
-	}
-	response, err := SignalMatch(ctx, matchRegistry, matchID, SignalPrepareSession, label)
-	if err != nil {
-		return fmt.Errorf("failed to prepare session `%s`: %s", label.ID.String(), response)
-	}
-	return nil
 }
 
 func rttByPlayerByExtIP(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, groupID string) (map[string]map[string]int, error) {

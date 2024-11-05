@@ -393,14 +393,26 @@ func TestMatchmaker(t *testing.T) {
 	// Create a list of balanced matches with predictions
 	predictions := m.buildPredictions(candidates)
 
-	playerList := make([]string, 0)
+	sizes := make(map[int]int, 0)
+	for _, c := range candidates {
+		sizes[len(c)]++
+	}
+
+	t.Errorf("Sizes: %v", sizes)
+
+	playerList := make(map[string]bool, 0)
 	for _, c := range candidates {
 		for _, entry := range c {
-			playerList = append(playerList, entry.GetPresence().GetUsername())
+			isPriority := false
+			ts := entry.GetProperties()["priority_threshold"].(float64)
+			if int64(ts) < time.Now().UTC().Unix() {
+				isPriority = true
+			}
+			playerList[entry.GetPresence().GetUsername()] = isPriority
+
 		}
 	}
-	slices.Sort(playerList)
-	playerList = slices.Compact(playerList)
+
 	t.Errorf("Players: %v", playerList)
 
 	m.sortByPriority(predictions)

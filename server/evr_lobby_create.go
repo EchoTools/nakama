@@ -18,7 +18,7 @@ import (
 func (p *EvrPipeline) lobbyCreate(ctx context.Context, logger *zap.Logger, session Session, params *LobbySessionParameters) (MatchID, error) {
 	nk := p.runtimeModule
 	db := p.db
-	matchRegistry := p.matchRegistry
+
 	// Do authorization checks related to the guild.
 	if err := p.authorizeGuildGroupSession(ctx, session, params.GroupID.String()); err != nil {
 		logger.Warn("Failed to authorize create session request", zap.Error(err))
@@ -55,18 +55,19 @@ func (p *EvrPipeline) lobbyCreate(ctx context.Context, logger *zap.Logger, sessi
 
 	label := labels[0]
 
-	label.Mode = params.Mode
-	label.Level = params.Level
-	label.SpawnedBy = session.UserID().String()
-	label.GroupID = &params.GroupID
-	label.TeamAlignments = map[string]int{session.UserID().String(): params.Role}
+	settings := MatchSettings{
+		Mode:             params.Mode,
+		Level:            params.Level,
+		GroupID:          params.GroupID,
+		RequiredFeatures: params.RequiredFeatures,
+		StartTime:        time.Now().UTC(),
+		TeamAlignments:   map[string]int{session.UserID().String(): params.Role},
+		SpawnedBy:        session.UserID().String(),
+	}
 
-	label.RequiredFeatures = params.RequiredFeatures
-	label.StartTime = time.Now().UTC()
-
-	response, err := SignalMatch(ctx, matchRegistry, label.ID, SignalPrepareSession, label)
+	label, err = LobbyPrepareSession(ctx, nk, label.ID, &settings)
 	if err != nil {
-		logger.Warn("Failed to prepare session", zap.Error(err), zap.String("mid", label.ID.UUID.String()), zap.String("response", response))
+		logger.Warn("Failed to prepare session", zap.Error(err), zap.String("mid", label.ID.UUID.String()))
 		return MatchID{}, err
 	}
 
