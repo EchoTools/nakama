@@ -25,6 +25,7 @@ type MatchLabel struct {
 	LobbyType   LobbyType        `json:"lobby_type"`            // The type of lobby (Public, Private, Unassigned) (EVR)
 	Broadcaster MatchBroadcaster `json:"broadcaster,omitempty"` // The broadcaster's data
 	StartTime   time.Time        `json:"start_time,omitempty"`  // The time the match was, or will be started.
+	CreatedAt   time.Time        `json:"created_at,omitempty"`  // The time the match was created.
 	SpawnedBy   string           `json:"spawned_by,omitempty"`  // The userId of the player that spawned this match.
 	GroupID     *uuid.UUID       `json:"group_id,omitempty"`    // The channel id of the broadcaster. (EVR)
 	GuildID     string           `json:"guild_id,omitempty"`    // The guild id of the broadcaster. (EVR)
@@ -257,6 +258,7 @@ func (l *MatchLabel) PublicView() *MatchLabel {
 		Open:             l.Open,
 		GameState:        l.GameState,
 		StartTime:        l.StartTime,
+		CreatedAt:        l.CreatedAt,
 		GroupID:          l.GroupID,
 		GuildID:          l.GuildID,
 		SpawnedBy:        l.SpawnedBy,

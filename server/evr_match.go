@@ -143,6 +143,7 @@ func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql
 	}
 
 	state := MatchLabel{
+		CreatedAt:        time.Now().UTC(),
 		Broadcaster:      gameserverConfig,
 		Open:             false,
 		LobbyType:        UnassignedLobby,
@@ -911,6 +912,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		settings := evr.NewSessionSettings(strconv.FormatUint(PcvrAppId, 10), state.Mode, state.Level, state.RequiredFeatures)
 		state.SessionSettings = &settings
 
+		state.CreatedAt = time.Now().UTC()
 		state.StartTime = newState.StartTime.UTC()
 
 		// If the start time is in the past, set it to now.
