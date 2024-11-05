@@ -99,7 +99,7 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 
 		// Attempt a fallback ticket
 		ticketConfig.MaxCount = ticketConfig.MinCount
-		ticketConfig.MinCount = 1
+		ticketConfig.MinCount = 1 // This must be 1 to allow for the fallback to work
 		ticketConfig.includeRankRange = false
 
 		if ticketConfig.CountMultiple == 1 || ticketConfig.MaxCount == ticketConfig.MinCount || ticketConfig.MaxCount%ticketConfig.CountMultiple != 0 {
