@@ -1027,7 +1027,6 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 	if err := json.Unmarshal([]byte(payload), request); err != nil {
 		return "", runtime.NewError("Failed to unmarshal match request", StatusInvalidArgument)
 	}
-	matchID := request.MatchID
 
 	if request.GuildID == "" {
 		return "", runtime.NewError("guild ID must be specified", StatusInvalidArgument)
@@ -1040,7 +1039,7 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		return "", runtime.NewError("guild group not found", StatusNotFound)
 	}
 
-	label, err := MatchLabelByID(ctx, nk, matchID)
+	label, err := MatchLabelByID(ctx, nk, request.MatchID)
 	if err != nil || label == nil {
 		return "", runtime.NewError("Failed to get match label", StatusNotFound)
 	}
@@ -1112,8 +1111,8 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		}
 	}
 
-	label, err = LobbyPrepareSession(ctx, nk, label.ID, settings)
-	if err != nil {
+	label, err = LobbyPrepareSession(ctx, nk, request.MatchID, settings)
+	if err != nil || label == nil {
 		return err.Error(), runtime.NewError(err.Error(), StatusInvalidArgument)
 	}
 
@@ -1123,7 +1122,7 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 	}
 
 	logger.WithFields(map[string]any{
-		"mid":      matchID,
+		"mid":      request.MatchID,
 		"preparer": userID,
 		"state":    string(data),
 	}).Info("Match prepared")
