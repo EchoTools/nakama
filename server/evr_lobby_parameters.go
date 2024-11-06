@@ -102,6 +102,23 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		return nil, fmt.Errorf("failed to load user matchmaking settings: %w", err)
 	}
 
+	if userSettings.NextMatchDiscordID != "" {
+		hostUserIDStr := p.discordCache.DiscordIDToUserID(userSettings.NextMatchDiscordID)
+
+		// If the host userID exists, and is in a match, set the next match ID to the host's match ID
+		if hostUserID := uuid.FromStringOrNil(hostUserIDStr); !hostUserID.IsNil() {
+
+			// get the match ID of the host
+			stream := PresenceStream{Mode: StreamModeService, Subject: hostUserID, Label: StreamLabelMatchService}
+			for _, p := range session.pipeline.tracker.ListByStream(stream, false, true) {
+				memberMatchID := MatchIDFromStringOrNil(p.GetStatus())
+				if !memberMatchID.IsNil() {
+					userSettings.NextMatchID = memberMatchID
+				}
+			}
+		}
+	}
+
 	matchmakingQueryAddons := []string{
 		globalSettings.MatchmakingQueryAddon,
 		userSettings.MatchmakingQueryAddon,
