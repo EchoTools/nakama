@@ -31,6 +31,12 @@ func (*skillBasedMatchmaker) TeamStrength(team RatedEntryTeam) float64 {
 func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, potentialCandidates [][]runtime.MatchmakerEntry) [][]runtime.MatchmakerEntry {
 
 	candidates := potentialCandidates[:]
+	players := make(map[string]struct{}, 0)
+	for _, c := range candidates {
+		for _, e := range c {
+			players[e.GetPresence().GetUserId()] = struct{}{}
+		}
+	}
 
 	logger.WithFields(map[string]interface{}{
 		"num_candidates": len(candidates),
@@ -93,6 +99,7 @@ func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 	madeMatches := m.composeMatches(predictions)
 
 	logger.WithFields(map[string]interface{}{
+		"num_players":    len(players),
 		"num_candidates": len(candidates),
 		"num_matches":    len(madeMatches),
 		"matches":        madeMatches,
