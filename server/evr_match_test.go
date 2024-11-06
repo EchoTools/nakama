@@ -733,7 +733,7 @@ func TestEvrMatch_playerJoinAttempt(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &EvrMatch{}
-			got := m.validateJoin(tt.args.state, tt.args.mp)
+			_, got := m.processJoin(tt.args.state, tt.args.mp)
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("EvrMatch.playerJoinAttempt() got = %v, want %v", got, tt.want)
 			}
