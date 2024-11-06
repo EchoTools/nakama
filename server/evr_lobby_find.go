@@ -486,7 +486,7 @@ func (p *EvrPipeline) PartyFollow(ctx context.Context, logger *zap.Logger, sessi
 		// Check if the party leader is still in a lobby/match.
 		presence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, stream, leaderUserID)
 		if presence == nil {
-			return NewLobbyError(BadRequest, "party leader left the party")
+			return NewLobbyError(BadRequest, fmt.Sprintf("party leader `%s` left the party", leader.UserId))
 		}
 
 		// Check if the leader is still matchmaking. If so, continue waiting.

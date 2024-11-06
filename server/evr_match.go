@@ -349,18 +349,29 @@ func (m *EvrMatch) processJoin(state *MatchLabel, entrant *EvrMatchPresence) (bo
 		}
 	}
 
-	// Assign a role to the player
-	if !hasReservation || entrant.RoleAlignment == evr.TeamUnassigned {
-		autoSwitch := false
-		if state.IsPublic() {
-			autoSwitch = true
+	if state.IsPrivate() {
+		// Ensure the match has enough slots available
+		if state.OpenSlots() < 1 {
+			return hasReservation, ErrJoinRejectReasonLobbyFull
 		}
-		m.setRole(state, entrant, autoSwitch)
-	}
+	} else {
+		// Assign a role to the player
+		if !hasReservation || entrant.RoleAlignment == evr.TeamUnassigned {
+			m.setRole(state, entrant)
 
-	// Ensure the match has enough role slots available
-	if state.OpenSlotsByRole(entrant.RoleAlignment) < 1 {
-		return hasReservation, ErrJoinRejectReasonLobbyFull
+			// Ensure the match has enough role slots available
+			if state.OpenSlotsByRole(entrant.RoleAlignment) < 1 {
+				return hasReservation, ErrJoinRejectReasonLobbyFull
+			}
+		}
+
+		// If this an arena match, ensure that no team has more than 4 players.
+		if state.Mode == evr.ModeArenaPublic && (entrant.RoleAlignment == evr.TeamOrange || entrant.RoleAlignment == evr.TeamBlue) {
+			if state.RoleCount(entrant.RoleAlignment) > state.TeamSize {
+				return hasReservation, ErrJoinRejectReasonLobbyFull
+			}
+		}
+
 	}
 
 	return hasReservation, nil
@@ -400,7 +411,7 @@ func (m *EvrMatch) logJoin(logger runtime.Logger, nk runtime.NakamaModule, entra
 	}
 }
 
-func (m *EvrMatch) setRole(state *MatchLabel, mp *EvrMatchPresence, autoSwitch bool) {
+func (m *EvrMatch) setRole(state *MatchLabel, mp *EvrMatchPresence) {
 
 	if mp.RoleAlignment != evr.TeamModerator && mp.RoleAlignment != evr.TeamSpectator {
 		if teamIndex, ok := state.TeamAlignments[mp.GetUserId()]; ok {
@@ -410,17 +421,10 @@ func (m *EvrMatch) setRole(state *MatchLabel, mp *EvrMatchPresence, autoSwitch b
 
 	switch {
 	case mp.RoleAlignment == evr.TeamModerator:
-		mp.RoleAlignment = evr.TeamModerator
+		return
 	case state.Mode == evr.ModeSocialPublic, state.Mode == evr.ModeSocialPrivate:
 		mp.RoleAlignment = evr.TeamSocial
 	case mp.RoleAlignment == evr.TeamSpectator:
-		mp.RoleAlignment = evr.TeamSpectator
-	case state.Mode == evr.ModeArenaPrivate, state.Mode == evr.ModeCombatPrivate:
-		// Do not assign a team if the player is in a private match.
-		return
-	}
-
-	if !autoSwitch {
 		return
 	}
 
