@@ -281,19 +281,11 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 
 		sessionID := entrant.GetSessionId()
 
-		isReservation := i > 0
-		hasReservation := false
+		hasReservation, err := m.processJoin(state, entrant)
 
-		if e, found := state.GetReservation(sessionID); found {
-			hasReservation = true
-			entrant = e
-			delete(state.reservationMap, sessionID)
-			state.rebuildCache()
-		}
+		reserveOnly := i > 0
 
-		err := m.validateJoin(state, entrant)
-
-		m.logJoin(logger, nk, entrant, state, isReservation, hasReservation, err)
+		m.logJoin(logger, nk, entrant, state, reserveOnly, hasReservation, err)
 
 		if err != nil {
 			// Remove any newly added players to the match
@@ -307,7 +299,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 			return state, false, err.Error()
 		}
 
-		if isReservation {
+		if reserveOnly {
 
 			state.reservationMap[sessionID] = &slotReservation{
 				Entrant: entrant,
@@ -315,15 +307,13 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 			}
 
 		} else {
+
 			state.presenceMap[sessionID] = entrant
 		}
 
 		state.joinTimestamps[sessionID] = time.Now()
-
 		added = append(added, sessionID)
-
 		state.rebuildCache()
-
 	}
 
 	if err := m.updateLabel(dispatcher, state); err != nil {
@@ -331,6 +321,49 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	}
 
 	return state, true, meta.Presence.String()
+}
+
+func (m *EvrMatch) processJoin(state *MatchLabel, entrant *EvrMatchPresence) (bool, error) {
+	sessionID := entrant.GetSessionId()
+
+	hasReservation := false
+	// Use the reservation if it exists
+	if e, found := state.GetReservation(sessionID); found {
+		hasReservation = true
+		entrant = e
+		delete(state.reservationMap, sessionID)
+		state.rebuildCache()
+	}
+
+	// If this EvrID is already in the match, reject the player
+	for _, p := range state.presenceMap {
+		if p.GetSessionId() == sessionID || p.EvrID.Equals(entrant.EvrID) {
+			return hasReservation, ErrJoinRejectReasonDuplicateJoin
+		}
+	}
+
+	// Ensure the player has the required features
+	for _, f := range state.RequiredFeatures {
+		if !lo.Contains(entrant.SupportedFeatures, f) {
+			return hasReservation, ErrJoinRejectReasonFeatureMismatch
+		}
+	}
+
+	// Assign a role to the player
+	if !hasReservation || entrant.RoleAlignment == evr.TeamUnassigned {
+		autoSwitch := false
+		if state.IsPublic() {
+			autoSwitch = true
+		}
+		m.setRole(state, entrant, autoSwitch)
+	}
+
+	// Ensure the match has enough role slots available
+	if state.OpenSlotsByRole(entrant.RoleAlignment) < 1 {
+		return hasReservation, ErrJoinRejectReasonLobbyFull
+	}
+
+	return hasReservation, nil
 }
 
 func (m *EvrMatch) logJoin(logger runtime.Logger, nk runtime.NakamaModule, entrant *EvrMatchPresence, state *MatchLabel, isReservation bool, hasReservation bool, err error) {
@@ -366,35 +399,6 @@ func (m *EvrMatch) logJoin(logger runtime.Logger, nk runtime.NakamaModule, entra
 		nk.MetricsCounterAdd("match_entrant_join_count", metricsTags, 1)
 	}
 }
-func (m *EvrMatch) validateJoin(state *MatchLabel, entrant *EvrMatchPresence) error {
-	// Public matches have a role limit, and the role is assigned by the server.
-	autoSwitch := false
-	if state.IsPublic() {
-		autoSwitch = true
-	}
-
-	// Select the role alignment for the player.
-	m.setRole(state, entrant, autoSwitch)
-
-	if state.OpenSlotsByRole(entrant.RoleAlignment) < 1 {
-		return ErrJoinRejectReasonLobbyFull
-	}
-
-	// If this EvrID is already in the match, reject the player
-	for _, p := range state.presenceMap {
-		if p.GetSessionId() == entrant.GetSessionId() || p.EvrID.Equals(entrant.EvrID) {
-			return ErrJoinRejectReasonDuplicateJoin
-		}
-	}
-
-	for _, f := range state.RequiredFeatures {
-		if !lo.Contains(entrant.SupportedFeatures, f) {
-			return ErrJoinRejectReasonFeatureMismatch
-		}
-	}
-
-	return nil
-}
 
 func (m *EvrMatch) setRole(state *MatchLabel, mp *EvrMatchPresence, autoSwitch bool) {
 
@@ -413,7 +417,7 @@ func (m *EvrMatch) setRole(state *MatchLabel, mp *EvrMatchPresence, autoSwitch b
 		mp.RoleAlignment = evr.TeamSpectator
 	case state.Mode == evr.ModeArenaPrivate, state.Mode == evr.ModeCombatPrivate:
 		// Do not assign a team if the player is in a private match.
-		mp.RoleAlignment = mp.RoleAlignment
+		return
 	}
 
 	if !autoSwitch {
@@ -876,6 +880,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 				return state, SignalResponse{Message: fmt.Sprintf("feature not supported: %v", f)}.String()
 			}
 		}
+
 		// validate the mode
 		if levels, ok := evr.LevelsByMode[settings.Mode]; !ok {
 			return state, SignalResponse{Message: fmt.Sprintf("invalid mode: %v", state.Mode)}.String()
