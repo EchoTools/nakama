@@ -299,7 +299,19 @@ func (s *MatchLabel) rebuildCache() {
 	}
 
 	sort.SliceStable(s.Players, func(i, j int) bool {
-		return s.Players[i].Team < s.Players[j].Team
+		if s.Players[i].Team < s.Players[j].Team {
+			return true
+		}
+		if s.Players[i].Team > s.Players[j].Team {
+			return false
+		}
+		if s.Players[i].PartyID < s.Players[j].PartyID {
+			return true
+		}
+		if s.Players[i].PartyID > s.Players[j].PartyID {
+			return false
+		}
+		return s.Players[i].JoinTime < s.Players[j].JoinTime
 	})
 }
 
