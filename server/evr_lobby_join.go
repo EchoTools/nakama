@@ -18,7 +18,7 @@ func (p *EvrPipeline) loadNextMatchFromDB(ctx context.Context, logger *zap.Logge
 		return MatchID{}, nil
 	}
 
-	defer func() {
+	go func() {
 		config.NextMatchID = MatchID{}
 		err = StoreMatchmakingSettings(ctx, p.runtimeModule, session.UserID().String(), config)
 		if err != nil {

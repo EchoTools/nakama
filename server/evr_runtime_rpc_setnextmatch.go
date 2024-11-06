@@ -89,6 +89,7 @@ func SetNextMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 
 	settings.NextMatchID = request.MatchID
 	settings.NextMatchRole = request.Role
+	settings.NextMatchDiscordID = request.TargetDiscordID
 
 	if err = StoreMatchmakingSettings(ctx, nk, request.TargetUserID, settings); err != nil {
 		return "", runtime.NewError(fmt.Sprintf("Error saving matchmaking settings: %s", err.Error()), StatusInternalError)

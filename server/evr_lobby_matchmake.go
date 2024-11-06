@@ -237,6 +237,7 @@ type MatchmakingSettings struct {
 	PriorityBroadcasters  []string `json:"priority_broadcasters"`   // Prioritize these broadcasters
 	NextMatchID           MatchID  `json:"next_match_id"`           // Try to join this match immediately when finding a match
 	NextMatchRole         string   `json:"next_match_role"`         // The role to join the next match as
+	NextMatchDiscordID    string   `json:"next_match_discord_id"`   // The discord ID to join the next match as
 	RankPercentileRange   float64  `json:"rank_percentile_range"`   // The percentile range for rank matching
 	MaxServerRTT          int      `json:"max_server_rtt"`          // The maximum RTT to allow
 }
