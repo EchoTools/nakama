@@ -12,6 +12,7 @@ import (
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"github.com/intinig/go-openskill/types"
 	"github.com/jackc/pgtype"
 	"go.uber.org/zap"
 
@@ -950,7 +951,7 @@ func GetUserIDByEvrID(ctx context.Context, db *sql.DB, evrID string) (string, er
 	return dbUserID, nil
 }
 
-func GetPlayerStats(ctx context.Context, db *sql.DB, userID string) (*evr.PlayerStatistics, error) {
+func GetPlayerStats(ctx context.Context, db *sql.DB, userID string) (evr.PlayerStatistics, error) {
 	query := "SELECT value->'server'->>'stats' FROM storage WHERE user_id = $1 AND collection = $2 AND key = $3"
 	var dbStatsJSON string
 	var found = true
@@ -969,12 +970,39 @@ func GetPlayerStats(ctx context.Context, db *sql.DB, userID string) (*evr.Player
 		return nil, nil
 	}
 
-	playerStats := &evr.PlayerStatistics{}
-	if err := json.Unmarshal([]byte(dbStatsJSON), playerStats); err != nil {
+	playerStats := evr.PlayerStatistics{}
+	if err := json.Unmarshal([]byte(dbStatsJSON), &playerStats); err != nil {
 		return nil, status.Error(codes.Internal, "error unmarshalling player statistics")
 	}
 
 	return playerStats, nil
+}
+
+func GetPlayerRating(ctx context.Context, db *sql.DB, userID string) (*types.Rating, error) {
+	query := "SELECT value->>'rating' FROM storage WHERE user_id = $1 AND collection = $2 AND key = $3"
+	var dbStatsJSON string
+	var found = true
+	err := db.QueryRowContext(ctx, query, userID, GameProfileStorageCollection, GameProfileStorageKey).Scan(&dbStatsJSON)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			found = false
+		} else {
+			return nil, status.Error(codes.Internal, "error finding user account")
+		}
+	}
+	if !found {
+		return nil, status.Error(codes.NotFound, "user account not found")
+	}
+	if dbStatsJSON == "" {
+		return nil, nil
+	}
+
+	playerStats := types.Rating{}
+	if err := json.Unmarshal([]byte(dbStatsJSON), &playerStats); err != nil {
+		return nil, status.Error(codes.Internal, "error unmarshalling player statistics")
+	}
+
+	return &playerStats, nil
 }
 
 func GetPartyGroupUserIDs(ctx context.Context, db *sql.DB, groupName string) ([]string, error) {

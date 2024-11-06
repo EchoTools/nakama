@@ -1286,7 +1286,7 @@ type PlayerStatsRPCRequest struct {
 }
 
 type PlayerStatsRPCResponse struct {
-	Stats *evr.PlayerStatistics `json:"stats"`
+	Stats evr.PlayerStatistics `json:"stats"`
 }
 
 func (r *PlayerStatsRPCResponse) String() string {
@@ -1332,16 +1332,39 @@ func PlayerStatisticsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 		return "", runtime.NewError("user not found", StatusNotFound)
 	}
 
+	cacheKey := "player_stats:" + userID
+	cachedResponse, _, found := rpcResponseCache.Get(cacheKey)
+	if found {
+		return cachedResponse.(string), nil
+	}
+
 	stats, err := GetPlayerStats(ctx, db, userID)
 	if err != nil {
 		return "", err
+	}
+
+	rating, err := GetPlayerRating(ctx, db, userID)
+	if err != nil {
+		return "", err
+	}
+
+	stats["arena"]["RatingMu"] = evr.MatchStatistic{
+		Value: float64(rating.Mu),
+	}
+
+	stats["arena"]["RatingSigma"] = evr.MatchStatistic{
+		Value: float64(rating.Sigma),
 	}
 
 	response := &PlayerStatsRPCResponse{
 		Stats: stats,
 	}
 
-	return response.String(), nil
+	payload = response.String()
+
+	rpcResponseCache.Set(cacheKey, payload, 30*time.Second)
+
+	return payload, nil
 }
 
 type StreamJoinRequest struct {
