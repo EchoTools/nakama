@@ -197,7 +197,7 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 	}
 
 	// Leave any other lobby group stream.
-	tracker.UntrackLocalByModes(session.ID(), map[uint8]struct{}{StreamModeLobbyGroup: {}}, lobbyGroupStream)
+	tracker.UntrackLocalByModes(session.ID(), map[uint8]struct{}{StreamModeMatchmaking: {}, StreamModeLobbyGroup: {}}, lobbyGroupStream)
 
 	connectionSettings := label.GetEntrantConnectMessage(e.RoleAlignment, e.IsPCVR, e.DisableEncryption, e.DisableMAC)
 	if err := SendEVRMessages(serverSession, connectionSettings); err != nil {
