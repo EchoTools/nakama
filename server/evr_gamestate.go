@@ -1,6 +1,9 @@
 package server
 
-import "time"
+import (
+	"log"
+	"time"
+)
 
 type GameState struct {
 	RoundDurationMs     int64        `json:"round_duration_ms"`       // The length of the round in seconds
@@ -9,7 +12,13 @@ type GameState struct {
 	UnpauseTimeMs       int64        `json:"unpause_time,omitempty"`  // The time at which the game will be unpaused
 	IsPaused            bool         `json:"is_paused"`               // Whether the game is paused
 	IsRoundOver         bool         `json:"is_round_over,omitempty"` // Whether the round is over
+	BlueScore           int          `json:"blue_score"`              // The score of the blue team
+	OrangeScore         int          `json:"orange_score"`            // The score of the orange team
 	Goals               []*MatchGoal `json:"goals,omitempty"`         // The last goal scored
+}
+
+func NewGameState() *GameState {
+	return &GameState{}
 }
 
 func (g *GameState) RemainingTime() time.Duration {
@@ -26,6 +35,19 @@ func (g *GameState) Update() {
 		return
 	}
 
+	for _, goal := range g.Goals {
+		points := GoalTypeToPoints(goal.GoalType)
+		if points == 0 {
+			log.Printf("Unknown goal type: %s", goal.GoalType)
+			continue
+		}
+		if goal.Teamid == 0 {
+			g.BlueScore += points
+		} else {
+			g.OrangeScore += points
+		}
+	}
+
 	// If the round clock has reached the round duration, the round is over
 	if g.CurrentRoundClockMs >= g.RoundDurationMs {
 		g.CurrentRoundClockMs = 0
@@ -40,5 +62,30 @@ func (g *GameState) Update() {
 		g.CurrentRoundClockMs = g.ClockPauseMs + time.Now().UTC().UnixMilli() - g.UnpauseTimeMs
 	} else {
 		g.IsPaused = true
+	}
+}
+
+func GoalTypeToPoints(goalType string) int {
+	switch goalType {
+	case "SLAM DUNK":
+		return 2
+	case "BOUNCE SHOT":
+		return 2
+	case "BUMPER SHOT":
+		return 2
+	case "HEADBUTT":
+		return 2
+	case "INSIDE SHOT":
+		return 2
+	case "LONG BOUNCE SHOT":
+		return 3
+	case "LONG BUMPER SHOT":
+		return 3
+	case "LONG HEADBUTT":
+		return 3
+	case "LONG SHOT":
+		return 3
+	default:
+		return 0
 	}
 }

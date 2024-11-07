@@ -2,11 +2,10 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sync"
-	"time"
 
+	"github.com/gofrs/uuid/v5"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.uber.org/zap"
@@ -17,10 +16,13 @@ const (
 	matchLogCollectionName = "log_entries"
 )
 
+type SessionRemoteLog interface {
+	SessionUUID() uuid.UUID
+}
+
 type MatchLogEntry struct {
-	MatchID   MatchID         `json:"match_id"`
-	Timestamp time.Time       `json:"timestamp"`
-	Message   json.RawMessage `json:"message"`
+	MatchUUID string           `json:"match_uuid"`
+	Message   SessionRemoteLog `json:"message"`
 }
 
 type MatchLogManager struct {
@@ -38,24 +40,24 @@ type MatchLogManager struct {
 func NewMatchLogManager(ctx context.Context, logger *zap.Logger, mongoURI string) *MatchLogManager {
 
 	return &MatchLogManager{
-		ctx:     ctx,
-		logger:  logger,
-		entries: make([]MatchLogEntry, 0),
+		ctx:      ctx,
+		logger:   logger,
+		entries:  make([]MatchLogEntry, 0),
+		mongoURI: mongoURI,
 	}
 }
 
-func (m *MatchLogManager) Start() error {
+func (m *MatchLogManager) Start() {
 	var err error
 	m.client, err = mongo.Connect(m.ctx, options.Client().ApplyURI(m.mongoURI))
 	if err != nil {
-		return fmt.Errorf("failed to connect to MongoDB: %v", err)
+		m.logger.Error("Failed to connect to MongoDB", zap.Error(err))
 	}
+	m.logger.Info("Connected to MongoDB")
 	m.collection = m.client.Database(matchLogDatabaseName).Collection(matchLogCollectionName)
-
-	return nil
 }
 
-func (m *MatchLogManager) AddLog(matchID MatchID, timestamp time.Time, message json.RawMessage) error {
+func (m *MatchLogManager) AddLog(message SessionRemoteLog) error {
 	m.Lock()
 	defer m.Unlock()
 
@@ -64,8 +66,7 @@ func (m *MatchLogManager) AddLog(matchID MatchID, timestamp time.Time, message j
 	}
 
 	_, err := m.collection.InsertOne(m.ctx, MatchLogEntry{
-		MatchID:   matchID,
-		Timestamp: timestamp,
+		MatchUUID: message.SessionUUID().String(),
 		Message:   message,
 	})
 	if err != nil {

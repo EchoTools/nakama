@@ -317,11 +317,24 @@ func (s *MatchLabel) rebuildCache() {
 
 func (l *MatchLabel) PublicView() *MatchLabel {
 	// Remove private data
+	var gs *GameState
+	if l.GameState != nil {
+		gs = &GameState{
+			CurrentRoundClockMs: l.GameState.CurrentRoundClockMs,
+			RoundDurationMs:     l.GameState.RoundDurationMs,
+			IsPaused:            l.GameState.IsPaused,
+			IsRoundOver:         l.GameState.IsRoundOver,
+			UnpauseTimeMs:       l.GameState.UnpauseTimeMs,
+			ClockPauseMs:        l.GameState.ClockPauseMs,
+			BlueScore:           l.GameState.BlueScore,
+			OrangeScore:         l.GameState.OrangeScore,
+		}
+	}
 	v := &MatchLabel{
 		LobbyType:        l.LobbyType,
 		ID:               l.ID,
 		Open:             l.Open,
-		GameState:        l.GameState,
+		GameState:        gs,
 		StartTime:        l.StartTime,
 		CreatedAt:        l.CreatedAt,
 		GroupID:          l.GroupID,

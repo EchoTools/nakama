@@ -29,6 +29,7 @@ OuterLoop:
 		entry := map[string]interface{}{}
 
 		data := []byte(str)
+
 		if err := json.Unmarshal(data, &entry); err != nil {
 			if logger.Core().Enabled(zap.DebugLevel) {
 				logger.Debug("Non-JSON log entry", zap.String("entry", str))
@@ -128,30 +129,16 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 	for _, e := range entries {
 		var update *MatchGameStateUpdate
 
-		// Unmarshal the top-level to check the message type.
-		log := map[string]interface{}{}
-
-		messageBytes := []byte(e.Message)
-		if err := json.Unmarshal(messageBytes, &log); err != nil {
-			logger.Warn("Failed to unmarshal remote log", zap.Error(err))
-		}
-
-		if s, ok := log["[session][uuid]"].(string); ok {
-			matchUUID := uuid.FromStringOrNil(strings.Trim(s, "{}"))
-			if matchUUID == uuid.Nil {
-				logger.Warn("Failed to parse match UUID")
-			} else {
-				matchID, _ := NewMatchID(matchUUID, p.node)
-				p.matchLogManager.AddLog(matchID, time.Now(), messageBytes)
+		baseLogMessage := evr.ParseRemoteLog(e.Message)
+		if m, ok := baseLogMessage.(SessionRemoteLog); ok {
+			if err := p.matchLogManager.AddLog(m); err != nil {
+				logger.Warn("Failed to add log", zap.Error(err))
 			}
 		}
 
-		switch strings.ToLower(e.MessageType) {
-		case "user_disconnect":
-			msg := &evr.RemoteLogUserDisconnected{}
-			if err := json.Unmarshal(messageBytes, msg); err != nil {
-				logger.Error("Failed to unmarshal user disconnect", zap.Error(err))
-			}
+		switch msg := evr.ParseRemoteLog(e.Message).(type) {
+		case evr.RemoteLogUserDisconnected:
+
 			if msg.GameInfoIsPrivate || !msg.GameInfoIsArena {
 				// Don't process disconnects for private games, or non-arena games.
 				continue
@@ -162,7 +149,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				continue
 			}
 
-			matchID, err := NewMatchID(msg.SessionID(), p.node)
+			matchID, err := NewMatchID(msg.SessionUUID(), p.node)
 			if err != nil {
 				logger.Error("Failed to create match ID", zap.Error(err))
 				continue
@@ -222,76 +209,46 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 			update, _ = updates.LoadOrStore(matchID.UUID, &MatchGameStateUpdate{})
 			update.CurrentRoundClockMs = int64(msg.GameInfoGameTime * 1000)
 
-		case "goal":
-			// This is a goal message.
-			goal := evr.RemoteLogGoal{}
-			if err := json.Unmarshal(messageBytes, &goal); err != nil {
-				logger.Error("Failed to unmarshal goal", zap.Error(err))
-				continue
-			}
+		case evr.RemoteLogGoal:
 
-			sessionID := goal.SessionID()
+			sessionID := msg.SessionUUID()
 
-			if goal.SessionID() == uuid.Nil {
+			if sessionID.IsNil() {
 				logger.Error("Goal message has no session ID")
 				continue
 			}
 
 			update, _ = updates.LoadOrStore(sessionID, &MatchGameStateUpdate{})
 
-			update.FromGoal(goal)
+			update.FromGoal(msg)
 
-		case "ghost_user":
+		case evr.RemoteLogGhostUser:
 			// This is a ghost user message.
-			ghostUser := &evr.RemoteLogGhostUser{}
-			if err := json.Unmarshal(messageBytes, ghostUser); err != nil {
-				logger.Error("Failed to unmarshal ghost user", zap.Error(err))
-				continue
-			}
-			_ = ghostUser
-		case "voip_loudness":
-			voipVolume := evr.RemoteLogVOIPLoudness{}
-			if err := json.Unmarshal(messageBytes, &voipVolume); err != nil {
-				logger.Error("Failed to unmarshal voip volume", zap.Error(err))
-				continue
-			}
 
-			sessionID := voipVolume.SessionID()
+		case evr.RemoteLogVOIPLoudness:
 
-			if voipVolume.SessionID() == uuid.Nil {
-				logger.Error("Goal message has no session ID")
+			sessionID := msg.SessionUUID()
+
+			if msg.SessionUUID().IsNil() {
+				logger.Error("VOIP loudness message has no session ID")
 				continue
 			}
-			if voipVolume.GameInfoGameTime == 0 {
+			if msg.GameInfoGameTime == 0 {
 				continue
 			}
 			update, _ = updates.LoadOrStore(sessionID, &MatchGameStateUpdate{})
-			update.FromVOIPLoudness(voipVolume)
+			update.FromVOIPLoudness(msg)
 
-		case "game_settings":
-			fallthrough
-		case "session_started":
-			fallthrough
-		case "customization item preview":
-			fallthrough
-		case "customization item equip":
-			fallthrough
-		case "podium interaction":
-			fallthrough
-		case "interaction_event":
-			fallthrough
-		case "customization_metrics_payload":
-			// Update the server profile with the equipped cosmetic item.
-			c := &evr.RemoteLogCustomizationMetricsPayload{}
-			if err := json.Unmarshal(messageBytes, &c); err != nil {
-				logger.Error("Failed to unmarshal customization metrics", zap.Error(err))
+		case evr.RemoteLogSessionStarted:
+
+		case evr.RemoteLogGameSettings:
+
+		case evr.RemoteLogCustomizationMetricsPayload:
+
+			if msg.EventType != "item_equipped" {
 				continue
 			}
-
-			if c.EventType != "item_equipped" {
-				continue
-			}
-			category, name, err := c.GetEquippedCustomization()
+			category, name, err := msg.GetEquippedCustomization()
 			if err != nil {
 				logger.Error("Failed to get equipped customization", zap.Error(err))
 				continue
@@ -310,6 +267,10 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 			if err != nil {
 				return status.Errorf(codes.Internal, "Failed to store player's profile")
 			}
+
+		case evr.RemoteLogRepairMatrix:
+
+		case evr.RemoteLogServerConnectionFailed:
 
 		default:
 		}
