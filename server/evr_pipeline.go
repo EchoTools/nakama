@@ -70,6 +70,7 @@ type EvrPipeline struct {
 	sbmm                         *skillBasedMatchmaker
 	userRemoteLogJournalRegistry *UserLogJouralRegistry
 	ipqsClient                   *IPQSClient
+	matchLogManager              *MatchLogManager
 
 	createLobbyMu                    sync.Mutex
 	broadcasterRegistrationBySession *MapOf[string, *MatchBroadcaster] // sessionID -> MatchBroadcaster
@@ -151,6 +152,8 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		}
 	}
 
+	matchLogManager := NewMatchLogManager(ctx, logger, vars["MONGO_URI"])
+	matchLogManager.Start()
 	localIP, err := DetermineLocalIPAddress()
 	if err != nil {
 		logger.Fatal("Failed to determine local IP address", zap.Error(err))
@@ -196,8 +199,10 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		broadcasterRegistrationBySession: &broadcasterRegistrationBySession,
 		userRemoteLogJournalRegistry:     userRemoteLogJournalRegistry,
 		ipqsClient:                       ipqsClient,
-		placeholderEmail:                 config.GetRuntime().Environment["PLACEHOLDER_EMAIL_DOMAIN"],
-		linkDeviceURL:                    config.GetRuntime().Environment["LINK_DEVICE_URL"],
+		matchLogManager:                  matchLogManager,
+
+		placeholderEmail: config.GetRuntime().Environment["PLACEHOLDER_EMAIL_DOMAIN"],
+		linkDeviceURL:    config.GetRuntime().Environment["LINK_DEVICE_URL"],
 
 		messageCache: messageCache,
 	}

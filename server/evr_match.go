@@ -656,6 +656,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 			default:
 				logger.Warn("Unknown message type: %T", msg)
 			}
+
 			// Time the execution
 			start := time.Now()
 			// Execute the message function
@@ -668,6 +669,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 			logger.Debug("Message %T took %dms", msg, time.Since(start)/time.Millisecond)
 		}
 	}
+
 	if state.server == nil {
 		state.emptyTicks++
 		if state.emptyTicks > 60*state.tickRate {
@@ -1022,7 +1024,7 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk run
 			RoundDurationMs:     RoundDuration * 1000,
 			CurrentRoundClockMs: 0,
 			UnpauseTimeMs:       time.Now().UTC().UnixMilli() + PublicMatchWaitTime,
-			Goals:               make([]LastGoal, 0),
+			Goals:               make([]*MatchGoal, 0),
 		}
 	}
 
@@ -1033,6 +1035,7 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk run
 	messages := []evr.Message{
 		message,
 	}
+
 	nk.MetricsCounterAdd("match_start_count", state.MetricsTags(), 1)
 	// Dispatch the message for delivery.
 	if err := m.dispatchMessages(ctx, logger, dispatcher, messages, []runtime.Presence{state.server}, nil); err != nil {

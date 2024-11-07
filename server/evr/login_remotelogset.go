@@ -400,12 +400,12 @@ type RemoteLogGoal struct {
 	GameInfoLevel          string  `json:"[game_info][level]"`
 	GameInfoMatchType      string  `json:"[game_info][match_type]"`
 	GoalType               string  `json:"[goal_type]"`
-	PlayerInfoDisplayname  string  `json:"[player_info][displayname]"`
-	PlayerInfoTeamid       int64   `json:"[player_info][teamid]"`
-	PlayerInfoUserid       string  `json:"[player_info][userid]"`
+	PlayerInfoDisplayName  string  `json:"[player_info][displayname]"`
+	PlayerInfoTeamID       int64   `json:"[player_info][teamid]"`
+	PlayerInfoEvrID        string  `json:"[player_info][userid]"`
 	PrevPlayerDisplayname  string  `json:"[prev_player][displayname]"`
-	PrevPlayerTeamid       int64   `json:"[prev_player][teamid]"`
-	PrevPlayerUserid       string  `json:"[prev_player][userid]"`
+	PrevPlayerTeamID       int64   `json:"[prev_player][teamid]"`
+	PrevPlayerEvrID        string  `json:"[prev_player][userid]"`
 	SessionUUID            string  `json:"[session][uuid]"`
 	WasHeadbutt            bool    `json:"[was_headbutt]"`
 	Message                string  `json:"message"`

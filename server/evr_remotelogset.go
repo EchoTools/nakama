@@ -129,11 +129,27 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 		var update *MatchGameStateUpdate
 
 		// Unmarshal the top-level to check the message type.
+		log := map[string]interface{}{}
+
+		messageBytes := []byte(e.Message)
+		if err := json.Unmarshal(messageBytes, &log); err != nil {
+			logger.Warn("Failed to unmarshal remote log", zap.Error(err))
+		}
+
+		if s, ok := log["[session][uuid]"].(string); ok {
+			matchUUID := uuid.FromStringOrNil(strings.Trim(s, "{}"))
+			if matchUUID == uuid.Nil {
+				logger.Warn("Failed to parse match UUID")
+			} else {
+				matchID, _ := NewMatchID(matchUUID, p.node)
+				p.matchLogManager.AddLog(matchID, time.Now(), messageBytes)
+			}
+		}
 
 		switch strings.ToLower(e.MessageType) {
 		case "user_disconnect":
 			msg := &evr.RemoteLogUserDisconnected{}
-			if err := json.Unmarshal([]byte(e.Message), msg); err != nil {
+			if err := json.Unmarshal(messageBytes, msg); err != nil {
 				logger.Error("Failed to unmarshal user disconnect", zap.Error(err))
 			}
 			if msg.GameInfoIsPrivate || !msg.GameInfoIsArena {
@@ -209,7 +225,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 		case "goal":
 			// This is a goal message.
 			goal := evr.RemoteLogGoal{}
-			if err := json.Unmarshal([]byte(e.Message), &goal); err != nil {
+			if err := json.Unmarshal(messageBytes, &goal); err != nil {
 				logger.Error("Failed to unmarshal goal", zap.Error(err))
 				continue
 			}
@@ -228,14 +244,14 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 		case "ghost_user":
 			// This is a ghost user message.
 			ghostUser := &evr.RemoteLogGhostUser{}
-			if err := json.Unmarshal([]byte(e.Message), ghostUser); err != nil {
+			if err := json.Unmarshal(messageBytes, ghostUser); err != nil {
 				logger.Error("Failed to unmarshal ghost user", zap.Error(err))
 				continue
 			}
 			_ = ghostUser
 		case "voip_loudness":
 			voipVolume := evr.RemoteLogVOIPLoudness{}
-			if err := json.Unmarshal([]byte(e.Message), &voipVolume); err != nil {
+			if err := json.Unmarshal(messageBytes, &voipVolume); err != nil {
 				logger.Error("Failed to unmarshal voip volume", zap.Error(err))
 				continue
 			}
@@ -267,7 +283,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 		case "customization_metrics_payload":
 			// Update the server profile with the equipped cosmetic item.
 			c := &evr.RemoteLogCustomizationMetricsPayload{}
-			if err := json.Unmarshal([]byte(e.Message), &c); err != nil {
+			if err := json.Unmarshal(messageBytes, &c); err != nil {
 				logger.Error("Failed to unmarshal customization metrics", zap.Error(err))
 				continue
 			}
@@ -332,17 +348,17 @@ func (u *MatchGameStateUpdate) FromGoal(goal evr.RemoteLogGoal) {
 	u.CurrentRoundClockMs = int64(goal.GameInfoGameTime * 1000)
 	u.PauseDuration = time.Duration(AfterGoalDuration+RespawnDuration+CatapultDuration) * time.Second
 	if u.Goals == nil {
-		u.Goals = make([]LastGoal, 0, 1)
+		u.Goals = make([]*MatchGoal, 0, 1)
 	}
-	u.Goals = append(u.Goals, LastGoal{
+	u.Goals = append(u.Goals, &MatchGoal{
 		GoalTime:              goal.GameInfoGameTime,
 		GoalType:              goal.GoalType,
-		Displayname:           goal.PlayerInfoDisplayname,
-		Teamid:                goal.PlayerInfoTeamid,
-		EvrID:                 goal.PlayerInfoUserid,
+		Displayname:           goal.PlayerInfoDisplayName,
+		Teamid:                goal.PlayerInfoTeamID,
+		EvrID:                 goal.PlayerInfoEvrID,
 		PrevPlayerDisplayName: goal.PrevPlayerDisplayname,
-		PrevPlayerTeamID:      goal.PrevPlayerTeamid,
-		PrevPlayerEvrID:       goal.PrevPlayerUserid,
+		PrevPlayerTeamID:      goal.PrevPlayerTeamID,
+		PrevPlayerEvrID:       goal.PrevPlayerEvrID,
 		WasHeadbutt:           goal.WasHeadbutt,
 	})
 }
