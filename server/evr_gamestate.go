@@ -3,13 +3,13 @@ package server
 import "time"
 
 type GameState struct {
-	RoundDurationMs     int64      `json:"round_duration_ms"`       // The length of the round in seconds
-	CurrentRoundClockMs int64      `json:"current_round_clock_ms"`  // The current elapsed time on the round clock in seconds
-	ClockPauseMs        int64      `json:"pause_time_ms,omitempty"` // The round clock time when the game was paused
-	UnpauseTimeMs       int64      `json:"unpause_time,omitempty"`  // The time at which the game will be unpaused
-	IsPaused            bool       `json:"is_paused"`               // Whether the game is paused
-	IsRoundOver         bool       `json:"is_round_over,omitempty"` // Whether the round is over
-	Goals               []LastGoal `json:"goals,omitempty"`         // The last goal scored
+	RoundDurationMs     int64        `json:"round_duration_ms"`       // The length of the round in seconds
+	CurrentRoundClockMs int64        `json:"current_round_clock_ms"`  // The current elapsed time on the round clock in seconds
+	ClockPauseMs        int64        `json:"pause_time_ms,omitempty"` // The round clock time when the game was paused
+	UnpauseTimeMs       int64        `json:"unpause_time,omitempty"`  // The time at which the game will be unpaused
+	IsPaused            bool         `json:"is_paused"`               // Whether the game is paused
+	IsRoundOver         bool         `json:"is_round_over,omitempty"` // Whether the round is over
+	Goals               []*MatchGoal `json:"goals,omitempty"`         // The last goal scored
 }
 
 func (g *GameState) RemainingTime() time.Duration {
@@ -41,16 +41,4 @@ func (g *GameState) Update() {
 	} else {
 		g.IsPaused = true
 	}
-}
-
-type LastGoal struct {
-	GoalTime              float64 `json:"round_clock_secs"`
-	GoalType              string  `json:"goal_type"`
-	Displayname           string  `json:"player_display_name"`
-	Teamid                int64   `json:"player_team_id"`
-	EvrID                 string  `json:"player_user_id"`
-	PrevPlayerDisplayName string  `json:"prev_player_display_name"`
-	PrevPlayerTeamID      int64   `json:"prev_player_team_id"`
-	PrevPlayerEvrID       string  `json:"prev_player_user_id"`
-	WasHeadbutt           bool    `json:"was_headbutt"`
 }

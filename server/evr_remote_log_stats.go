@@ -9,6 +9,18 @@ type PostMatchStats struct {
 	Userid      string     `json:"userid"`
 }
 
+type MatchGoal struct {
+	GoalTime              float64 `json:"round_clock_secs"`
+	GoalType              string  `json:"goal_type"`
+	Displayname           string  `json:"player_display_name"`
+	Teamid                int64   `json:"player_team_id"`
+	EvrID                 string  `json:"player_user_id"`
+	PrevPlayerDisplayName string  `json:"prev_player_display_name"`
+	PrevPlayerTeamID      int64   `json:"prev_player_team_id"`
+	PrevPlayerEvrID       string  `json:"prev_player_user_id"`
+	WasHeadbutt           bool    `json:"was_headbutt"`
+}
+
 type MatchStats struct {
 	Assists            int64   `json:"Assists"`
 	Blocks             int64   `json:"Blocks"`
