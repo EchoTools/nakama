@@ -124,6 +124,10 @@ func GetRemoteLogType[T any](data []byte, typ T) (*T, error) {
 	return &out, err
 }
 
+func UUIDFromRemoteLogString(s string) uuid.UUID {
+	return uuid.FromStringOrNil(strings.Trim(s, "{}"))
+}
+
 // GAME_SETTINGS
 type RemoteLogGameSettings struct {
 	Message      string                     `json:"message"`
@@ -168,22 +172,75 @@ type RemoteLogGameSettingsClass struct {
 
 // SESSION_STARTED
 type RemoteLogSessionStarted struct {
-	Message     string `json:"message"`
-	MessageType string `json:"message_type"`
-	SessionUUID string `json:"[session][uuid]"`
-	MatchType   string `json:"match_type"`
+	Message        string `json:"message"`
+	MessageType    string `json:"message_type"`
+	SessionUUIDStr string `json:"[session][uuid]"`
+	MatchType      string `json:"match_type"`
+}
+
+func (m RemoteLogSessionStarted) SessionUUID() uuid.UUID {
+	return UUIDFromRemoteLogString(m.SessionUUIDStr)
+}
+
+var (
+	remoteLogTypeMap = map[string]any{
+		"ENERGY_BARRIER":                 RemoteLogRepairMatrix{},
+		"FIND_NEW_LOBBY":                 RemoteLogFindNewLobby{},
+		"GAME_SETTINGS":                  RemoteLogGameSettings{},
+		"GHOST_ALL":                      RemoteLogGhostAll{},
+		"GHOST_USER":                     RemoteLogGhostUser{},
+		"GOAL":                           RemoteLogGoal{},
+		"LOAD_STATS":                     RemoteLogLoadStats{},
+		"MUTE_ALL":                       RemoteLogInteractionEvent{},
+		"MUTE_USER":                      RemoteLogInteractionEvent{},
+		"PERSONAL_BUBBLE":                RemoteLogRepairMatrix{},
+		"POST_MATCH_BATTLE_PASS_STATS":   RemoteLogPostMatchBattlePassStats{},
+		"POST_MATCH_BATTLE_PASS_UNLOCKS": RemoteLogPostMatchBattlePassUnlocks{},
+		"POST_MATCH_BATTLE_PASS_XP":      RemoteLogPostMatchBattlePassXP{},
+		"POST_MATCH_EARNED_AWARD":        RemoteLogRepairMatrix{},
+		"POST_MATCH_MATCH_STATS":         RemoteLogRepairMatrix{},
+		"POST_MATCH_MATCH_TYPE_STATS":    RemoteLogRepairMatrix{},
+		"POST_MATCH_MATCH_TYPE_UNLOCKS":  RemoteLogRepairMatrix{},
+		"POST_MATCH_MATCH_TYPE_XP":       RemoteLogRepairMatrix{},
+		"POST_MATCH_MATCH_TYPE_XP_LEVEL": RemoteLogPostMatchMatchTypeXPLevel{},
+		"REPAIR_MATRIX":                  RemoteLogRepairMatrix{},
+		"SESSION_STARTED":                RemoteLogSessionStarted{},
+		"USER_DISCONNECT":                RemoteLogUserDisconnected{},
+		"USER_DISPLAY_NAME_MISMATCH":     RemoteLogUserDisplayNameMismatch{},
+		"VOIP_LOUDNESS":                  RemoteLogVOIPLoudness{},
+	}
+)
+
+func ParseRemoteLog(message string) any {
+
+	msg := map[string]json.RawMessage{}
+	if err := json.Unmarshal([]byte(message), &msg); err != nil {
+		return RemoteLogString(message)
+	}
+
+	if m, ok := remoteLogTypeMap[string(msg["message_type"])]; ok {
+		if err := json.Unmarshal([]byte(message), m); err != nil {
+			return RemoteLogString(message)
+		}
+		return m
+	}
+	return RemoteLogString("")
 }
 
 // CUSTOMIZATION_METRICS_PAYLOAD
 type RemoteLogCustomizationMetricsPayload struct {
-	Message     string `json:"message"`
-	SessionUUID string `json:"[session][uuid]"`
-	PanelID     string `json:"[panel_id]"`
-	EventType   string `json:"[event_type]"`
-	EventDetail string `json:"[event_detail]"`
-	ItemID      int64  `json:"[item_id]"`
-	ItemName    string `json:"[item_name]"`
-	UserID      string `json:"[user_id]"`
+	Message        string `json:"message"`
+	SessionUUIDStr string `json:"[session][uuid]"`
+	PanelID        string `json:"[panel_id]"`
+	EventType      string `json:"[event_type]"`
+	EventDetail    string `json:"[event_detail]"`
+	ItemID         int64  `json:"[item_id]"`
+	ItemName       string `json:"[item_name]"`
+	UserID         string `json:"[user_id]"`
+}
+
+func (m RemoteLogCustomizationMetricsPayload) SessionUUID() uuid.UUID {
+	return UUIDFromRemoteLogString(m.SessionUUIDStr)
 }
 
 // GetCategory returns the category of the item. The category is what determines the equipment slot.
@@ -231,7 +288,7 @@ type RLEventDetail struct {
 	ItemID string `json:"item_id"`
 }
 type RemoteLogUserDisplayNameMismatch struct {
-	SessionUUID       string `json:"[session][uuid]"`
+	SessionUUIDStr    string `json:"[session][uuid]"`
 	ClientDisplayName string `json:"client_display_name"`
 	Level             string `json:"level"`
 	MatchType         string `json:"match_type"`
@@ -239,6 +296,10 @@ type RemoteLogUserDisplayNameMismatch struct {
 	MessageType       string `json:"message_type"`
 	ServerDisplayName string `json:"server_display_name"`
 	Userid            string `json:"userid"`
+}
+
+func (m RemoteLogUserDisplayNameMismatch) SessionUUID() uuid.UUID {
+	return UUIDFromRemoteLogString(m.SessionUUIDStr)
 }
 
 type RemoteLogFindNewLobby struct {
@@ -266,16 +327,20 @@ type RemoteLogPurchasingItem struct {
 }
 
 type RemoteLogPostMatchMatchTypeXPLevel struct {
-	CurrentLevel  int64  `json:"CurrentLevel"`
-	CurrentXP     int64  `json:"CurrentXP"`
-	PreviousLevel int64  `json:"PreviousLevel"`
-	PreviousXP    int64  `json:"PreviousXP"`
-	RemainingXP   int64  `json:"RemainingXP"`
-	SessionUUID   string `json:"[session][uuid]"`
-	MatchType     string `json:"match_type"`
-	Message       string `json:"message"`
-	MessageType   string `json:"message_type"`
-	Userid        string `json:"userid"`
+	CurrentLevel   int64  `json:"CurrentLevel"`
+	CurrentXP      int64  `json:"CurrentXP"`
+	PreviousLevel  int64  `json:"PreviousLevel"`
+	PreviousXP     int64  `json:"PreviousXP"`
+	RemainingXP    int64  `json:"RemainingXP"`
+	SessionUUIDStr string `json:"[session][uuid]"`
+	MatchType      string `json:"match_type"`
+	Message        string `json:"message"`
+	MessageType    string `json:"message_type"`
+	Userid         string `json:"userid"`
+}
+
+func (m RemoteLogPostMatchMatchTypeXPLevel) SessionUUID() uuid.UUID {
+	return UUIDFromRemoteLogString(m.SessionUUIDStr)
 }
 
 type RemoteLogPostMatchBattlePassXP struct {
@@ -290,7 +355,7 @@ type RemoteLogPostMatchBattlePassXP struct {
 	PartyXPMultiplierTimesTeammates int64  `json:"PartyXPMultiplierTimesTeammates"`
 	TotalXP                         int64  `json:"TotalXP"`
 	WeeklyFirstWinBonusXP           int64  `json:"WeeklyFirstWinBonusXP"`
-	SessionUUID                     string `json:"[session][uuid]"`
+	SessionUUIDStr                  string `json:"[session][uuid]"`
 	BattlePassStatGroup             string `json:"battle_pass_stat_group"`
 	MatchType                       string `json:"match_type"`
 	Message                         string `json:"message"`
@@ -298,10 +363,14 @@ type RemoteLogPostMatchBattlePassXP struct {
 	Userid                          string `json:"userid"`
 }
 
+func (m RemoteLogPostMatchBattlePassXP) SessionUUID() uuid.UUID {
+	return UUIDFromRemoteLogString(m.SessionUUIDStr)
+}
+
 type RemoteLogPostMatchBattlePassUnlocks struct {
 	CurrentTier         int64         `json:"CurrentTier"`
 	IsPremiumUnlocked   bool          `json:"IsPremiumUnlocked"`
-	SessionUUID         string        `json:"[session][uuid]"`
+	SessionUUIDStr      string        `json:"[session][uuid]"`
 	BattlePassStatGroup string        `json:"battle_pass_stat_group"`
 	MatchType           string        `json:"match_type"`
 	Message             string        `json:"message"`
@@ -310,13 +379,21 @@ type RemoteLogPostMatchBattlePassUnlocks struct {
 	Userid              string        `json:"userid"`
 }
 
+func (m RemoteLogPostMatchBattlePassUnlocks) SessionUUID() uuid.UUID {
+	return UUIDFromRemoteLogString(m.SessionUUIDStr)
+}
+
 type RemoteLogPostMatchBattlePassStats struct {
-	SessionUUID string         `json:"[session][uuid]"`
-	MatchType   string         `json:"match_type"`
-	Message     string         `json:"message"`
-	MessageType string         `json:"message_type"`
-	Stats       RemoteLogStats `json:"stats"`
-	Userid      string         `json:"userid"`
+	SessionUUIDStr string         `json:"[session][uuid]"`
+	MatchType      string         `json:"match_type"`
+	Message        string         `json:"message"`
+	MessageType    string         `json:"message_type"`
+	Stats          RemoteLogStats `json:"stats"`
+	Userid         string         `json:"userid"`
+}
+
+func (m RemoteLogPostMatchBattlePassStats) SessionUUID() uuid.UUID {
+	return UUIDFromRemoteLogString(m.SessionUUIDStr)
 }
 
 type RemoteLogStats struct {
@@ -324,29 +401,37 @@ type RemoteLogStats struct {
 }
 
 type RemoteLogServerConnectionFailed struct {
-	SessionUUID   string  `json:"[session][uuid]"`
-	GameState     string  `json:"game_state"`
-	Message       string  `json:"message"`
-	ServerAddress string  `json:"server_address"`
-	ServerPing    float64 `json:"server_ping"`
-	Userid        string  `json:"userid"`
+	SessionUUIDStr string  `json:"[session][uuid]"`
+	GameState      string  `json:"game_state"`
+	Message        string  `json:"message"`
+	ServerAddress  string  `json:"server_address"`
+	ServerPing     float64 `json:"server_ping"`
+	Userid         string  `json:"userid"`
+}
+
+func (m RemoteLogServerConnectionFailed) SessionUUID() uuid.UUID {
+	return UUIDFromRemoteLogString(m.SessionUUIDStr)
 }
 
 type RemoteLogStoreMetricsPayload struct {
-	BundlePrice bool   `json:"[bundle_price]"`
-	EventDetail string `json:"[event_detail]"`
-	EventType   string `json:"[event_type]"`
-	IsBundle    bool   `json:"[is_bundle]"`
-	IsFeatured  bool   `json:"[is_featured]"`
-	ItemID      int64  `json:"[item_id]"`
-	ItemName    string `json:"[item_name]"`
-	ItemPrice   bool   `json:"[item_price]"`
-	PanelID     string `json:"[panel_id]"`
-	SessionUUID string `json:"[session][uuid]"`
-	StoreSku    string `json:"[store_sku]"`
-	StoreSlot   bool   `json:"[store_slot]"`
-	UserID      string `json:"[user_id]"`
-	Message     string `json:"message"`
+	BundlePrice    bool   `json:"[bundle_price]"`
+	EventDetail    string `json:"[event_detail]"`
+	EventType      string `json:"[event_type]"`
+	IsBundle       bool   `json:"[is_bundle]"`
+	IsFeatured     bool   `json:"[is_featured]"`
+	ItemID         int64  `json:"[item_id]"`
+	ItemName       string `json:"[item_name]"`
+	ItemPrice      bool   `json:"[item_price]"`
+	PanelID        string `json:"[panel_id]"`
+	SessionUUIDStr string `json:"[session][uuid]"`
+	StoreSku       string `json:"[store_sku]"`
+	StoreSlot      bool   `json:"[store_slot]"`
+	UserID         string `json:"[user_id]"`
+	Message        string `json:"message"`
+}
+
+func (m RemoteLogStoreMetricsPayload) SessionUUID() uuid.UUID {
+	return UUIDFromRemoteLogString(m.SessionUUIDStr)
 }
 
 type RemoteLogRepairMatrix struct {
@@ -362,7 +447,7 @@ type RemoteLogRepairMatrix struct {
 	PlayerInfoDisplayname  string  `json:"[player_info][displayname]"`
 	PlayerInfoTeamid       int64   `json:"[player_info][teamid]"`
 	PlayerInfoUserid       string  `json:"[player_info][userid]"`
-	SessionUUID            string  `json:"[session][uuid]"`
+	SessionUUIDStr         string  `json:"[session][uuid]"`
 	TriggerLocationVec3X   float64 `json:"[trigger_location][vec3][x]"`
 	TriggerLocationVec3Y   float64 `json:"[trigger_location][vec3][y]"`
 	TriggerLocationVec3Z   float64 `json:"[trigger_location][vec3][z]"`
@@ -373,6 +458,10 @@ type RemoteLogRepairMatrix struct {
 	MessageType            string  `json:"message_type"`
 	NumHealed              int64   `json:"num_healed"`
 	SelfOnly               bool    `json:"self_only"`
+}
+
+func (m RemoteLogRepairMatrix) SessionUUID() uuid.UUID {
+	return UUIDFromRemoteLogString(m.SessionUUIDStr)
 }
 
 type RemoteLogGhostAll struct {
@@ -406,14 +495,14 @@ type RemoteLogGoal struct {
 	PrevPlayerDisplayname  string  `json:"[prev_player][displayname]"`
 	PrevPlayerTeamID       int64   `json:"[prev_player][teamid]"`
 	PrevPlayerEvrID        string  `json:"[prev_player][userid]"`
-	SessionUUID            string  `json:"[session][uuid]"`
+	SessionUUIDStr         string  `json:"[session][uuid]"`
 	WasHeadbutt            bool    `json:"[was_headbutt]"`
 	Message                string  `json:"message"`
 	MessageType            string  `json:"message_type"`
 }
 
-func (m RemoteLogGoal) SessionID() uuid.UUID {
-	return uuid.FromStringOrNil(strings.Trim(m.SessionUUID, "{}"))
+func (m RemoteLogGoal) SessionUUID() uuid.UUID {
+	return UUIDFromRemoteLogString(m.SessionUUIDStr)
 }
 
 type RemoteLogLoadStats struct {
@@ -457,13 +546,13 @@ type RemoteLogUserDisconnected struct {
 	PlayerInfoDisplayname  string  `json:"[player_info][displayname]"`
 	PlayerInfoTeamid       int64   `json:"[player_info][teamid]"`
 	PlayerInfoUserid       string  `json:"[player_info][userid]"`
-	SessionUUID            string  `json:"[session][uuid]"`
+	SessionUUIDStr         string  `json:"[session][uuid]"`
 	Message                string  `json:"message"`
 	MessageType            string  `json:"message_type"`
 }
 
-func (m RemoteLogUserDisconnected) SessionID() uuid.UUID {
-	return uuid.FromStringOrNil(strings.Trim(m.SessionUUID, "{}"))
+func (m RemoteLogUserDisconnected) SessionUUID() uuid.UUID {
+	return UUIDFromRemoteLogString(m.SessionUUIDStr)
 }
 
 // VOIP LOUDNESS
@@ -480,13 +569,13 @@ type RemoteLogVOIPLoudness struct {
 	PlayerInfoDisplayname  string  `json:"[player_info][displayname]"`
 	PlayerInfoTeamid       int64   `json:"[player_info][teamid]"`
 	PlayerInfoUserid       string  `json:"[player_info][userid]"`
-	SessionUUID            string  `json:"[session][uuid]"`
+	SessionUUIDStr         string  `json:"[session][uuid]"`
 	MaxLoudnessDB          float64 `json:"max_loudness_db"`
 	Message                string  `json:"message"`
 	MessageType            string  `json:"message_type"`
 	VoiceLoudnessDB        float64 `json:"voice_loudness_db"`
 }
 
-func (m RemoteLogVOIPLoudness) SessionID() uuid.UUID {
-	return uuid.FromStringOrNil(strings.Trim(m.SessionUUID, "{}"))
+func (m RemoteLogVOIPLoudness) SessionUUID() uuid.UUID {
+	return UUIDFromRemoteLogString(m.SessionUUIDStr)
 }

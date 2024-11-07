@@ -176,10 +176,6 @@ func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql
 
 	state.ID = MatchIDFromContext(ctx)
 
-	if state.Mode == evr.ModeArenaPublic {
-		state.GameState = &GameState{}
-	}
-
 	state.rebuildCache()
 
 	labelJson, err := json.Marshal(state)
@@ -315,9 +311,6 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		added = append(added, sessionID)
 		state.rebuildCache()
 	}
-
-	// Start the match (which tells teh server to load the level)
-	state.StartTime = time.Now()
 
 	if err := m.updateLabel(dispatcher, state); err != nil {
 		return state, false, fmt.Sprintf("failed to update label: %v", err)
@@ -473,6 +466,7 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 				state.joinTimeMilliseconds[p.GetSessionId()] = state.GameState.CurrentRoundClockMs
 			}
 		}
+
 		if mp, ok := state.presenceMap[p.GetSessionId()]; !ok {
 			logger.WithFields(map[string]interface{}{
 				"username": p.GetUsername(),
@@ -621,6 +615,10 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 				gs := state.GameState
 				u := update
 
+				if len(u.Goals) > 0 {
+					gs.Goals = append(gs.Goals, u.Goals...)
+				}
+
 				gs.IsRoundOver = u.IsRoundOver
 				gs.CurrentRoundClockMs = u.CurrentRoundClockMs
 
@@ -630,9 +628,6 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 					gs.ClockPauseMs = u.CurrentRoundClockMs
 				}
 
-				if len(u.Goals) > 0 {
-					//gs.Goals = append(gs.Goals, u.Goals...)
-				}
 			}
 			updateLabel = true
 		default:
@@ -702,7 +697,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 	}
 
 	// If the match is prepared and the start time has been reached, start it.
-	if !state.levelLoaded && state.Started() {
+	if !state.levelLoaded && (len(state.presenceMap) != 0 || state.Started()) {
 		if state, err = m.MatchStart(ctx, logger, nk, dispatcher, state); err != nil {
 			logger.Error("failed to start session: %v", err)
 			return nil
@@ -1025,6 +1020,10 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk run
 			CurrentRoundClockMs: 0,
 			UnpauseTimeMs:       time.Now().UTC().UnixMilli() + PublicMatchWaitTime,
 			Goals:               make([]*MatchGoal, 0),
+		}
+	case evr.ModeArenaPrivate:
+		state.GameState = &GameState{
+			Goals: make([]*MatchGoal, 0),
 		}
 	}
 

@@ -43,14 +43,14 @@ func TestRemoteLogCustomizationMetricsPayload_GetCategory(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &RemoteLogCustomizationMetricsPayload{
-				Message:     tt.fields.Message,
-				SessionUUID: tt.fields.SessionUUID,
-				PanelID:     tt.fields.PanelID,
-				EventType:   tt.fields.EventType,
-				EventDetail: tt.fields.EventDetail,
-				ItemID:      tt.fields.ItemID,
-				ItemName:    tt.fields.ItemName,
-				UserID:      tt.fields.UserID,
+				Message:        tt.fields.Message,
+				SessionUUIDStr: tt.fields.SessionUUID,
+				PanelID:        tt.fields.PanelID,
+				EventType:      tt.fields.EventType,
+				EventDetail:    tt.fields.EventDetail,
+				ItemID:         tt.fields.ItemID,
+				ItemName:       tt.fields.ItemName,
+				UserID:         tt.fields.UserID,
 			}
 			if got := m.GetCategory(); got != tt.want {
 				t.Errorf("RemoteLogCustomizationMetricsPayload.GetCategory() = %v, want %v", got, tt.want)

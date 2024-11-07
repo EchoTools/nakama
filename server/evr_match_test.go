@@ -740,27 +740,3 @@ func TestEvrMatch_playerJoinAttempt(t *testing.T) {
 		})
 	}
 }
-
-func TestMatchGameStateUpdate_FromGoal(t *testing.T) {
-	type fields struct {
-		GameState GameState
-	}
-	type args struct {
-		goal evr.RemoteLogGoal
-	}
-	tests := []struct {
-		name   string
-		fields fields
-		args   args
-	}{
-		{},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			u := &MatchGameStateUpdate{
-				GameState: tt.fields.GameState,
-			}
-			u.FromGoal(tt.args.goal)
-		})
-	}
-}
