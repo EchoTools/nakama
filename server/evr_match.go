@@ -316,6 +316,9 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		state.rebuildCache()
 	}
 
+	// Start the match (which tells teh server to load the level)
+	state.StartTime = time.Now()
+
 	if err := m.updateLabel(dispatcher, state); err != nil {
 		return state, false, fmt.Sprintf("failed to update label: %v", err)
 	}
