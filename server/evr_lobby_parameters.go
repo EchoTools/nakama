@@ -35,11 +35,11 @@ type LobbySessionParameters struct {
 	SupportedFeatures      []string      `json:"supported_features"`
 	RequiredFeatures       []string      `json:"required_features"`
 	CurrentMatchID         MatchID       `json:"current_match_id"`
+	NextMatchID            MatchID       `json:"next_match_id"`
 	Role                   int           `json:"role"`
 	PartySize              *atomic.Int64 `json:"party_size"`
 	PartyID                uuid.UUID     `json:"party_id"`
 	PartyGroupName         string        `json:"party_group_name"`
-	NextMatchID            MatchID       `json:"next_match_id"`
 	DisableArenaBackfill   bool          `json:"disable_arena_backfill"`
 	BackfillQueryAddon     string        `json:"backfill_query_addon"`
 	MatchmakingQueryAddon  string        `json:"matchmaking_query_addon"`
@@ -103,6 +103,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 	}
 
 	if userSettings.NextMatchDiscordID != "" {
+		// Get the host's user ID
 		hostUserIDStr := p.discordCache.DiscordIDToUserID(userSettings.NextMatchDiscordID)
 
 		// If the host userID exists, and is in a match, set the next match ID to the host's match ID
@@ -117,6 +118,28 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 				}
 			}
 		}
+	}
+
+	nextMatchID := MatchID{}
+
+	if !userSettings.NextMatchID.IsNil() {
+
+		// Check that the match exists
+		if _, _, err := p.matchRegistry.GetMatch(ctx, userSettings.NextMatchID.String()); err != nil {
+			logger.Warn("Next match not found", zap.String("mid", userSettings.NextMatchID.String()))
+		} else {
+			nextMatchID = userSettings.NextMatchID
+		}
+
+		// Clear the settings
+		go func() {
+			userSettings.NextMatchID = MatchID{}
+			userSettings.NextMatchRole = ""
+			userSettings.NextMatchDiscordID = ""
+			if err := SaveToStorage(ctx, p.runtimeModule, userID, userSettings); err != nil {
+				logger.Warn("Failed to clear next match metadata", zap.Error(err))
+			}
+		}()
 	}
 
 	matchmakingQueryAddons := []string{
@@ -271,7 +294,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		PartyGroupName:         lobbyGroupName,
 		PartyID:                uuid.NewV5(uuid.Nil, lobbyGroupName),
 		PartySize:              atomic.NewInt64(1),
-		NextMatchID:            userSettings.NextMatchID,
+		NextMatchID:            nextMatchID,
 		latencyHistory:         latencyHistory,
 		BlockedIDs:             blockedIDs,
 		Rating:                 rating,
