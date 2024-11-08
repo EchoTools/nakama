@@ -153,19 +153,18 @@ func (s *MatchLabel) RoleLimit(role int) int {
 		return s.PlayerLimit
 	}
 
-	if s.IsPublicMatch() {
-		// roles in public matches must be assigned
-		if role == evr.TeamSpectator || role == evr.TeamModerator {
-			return s.MaxSize - s.PlayerLimit
-		}
+	// roles in public matches must be assigned
+	if role == evr.TeamSpectator || role == evr.TeamModerator {
+		return s.MaxSize - s.PlayerLimit
+	}
 
-		if role == evr.TeamUnassigned {
-			return s.OpenPlayerSlots()
-		}
+	if role == evr.TeamUnassigned {
+		openSlots := s.OpenPlayerSlots()
+		return openSlots
+	}
 
-		if role == evr.TeamBlue || role == evr.TeamOrange {
-			return s.TeamSize
-		}
+	if role == evr.TeamBlue || role == evr.TeamOrange {
+		return s.TeamSize
 	}
 
 	return 0
