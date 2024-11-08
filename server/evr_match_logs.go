@@ -52,6 +52,7 @@ func (m *MatchLogManager) Start() {
 	m.client, err = mongo.Connect(m.ctx, options.Client().ApplyURI(m.mongoURI))
 	if err != nil {
 		m.logger.Error("Failed to connect to MongoDB", zap.Error(err))
+		return
 	}
 	m.logger.Info("Connected to MongoDB")
 	m.collection = m.client.Database(matchLogDatabaseName).Collection(matchLogCollectionName)
