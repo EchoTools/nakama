@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/intinig/go-openskill/rating"
 	"github.com/intinig/go-openskill/types"
+	"go.uber.org/thriftrw/ptr"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -320,7 +322,7 @@ OuterLoop:
 	return selected
 }
 
-func GetRatingByUserID(ctx context.Context, db *sql.DB, userID string) (rating types.Rating, err error) {
+func GetRatingByUserID(ctx context.Context, db *sql.DB, userID string, defaultFallback bool) (r types.Rating, err error) {
 	// Look for an existing account.
 	query := "SELECT value->>'rating' FROM storage WHERE user_id = $1 AND collection = $2 and key = $3"
 	var ratingJSON string
@@ -329,14 +331,21 @@ func GetRatingByUserID(ctx context.Context, db *sql.DB, userID string) (rating t
 		if err == sql.ErrNoRows {
 			found = false
 		} else {
-			return rating, status.Error(codes.Internal, "error finding rating by user ID")
+			return r, status.Error(codes.Internal, "error finding rating by user ID")
 		}
 	}
 	if !found {
-		return rating, status.Error(codes.NotFound, "rating not found")
+		if defaultFallback {
+			return rating.NewWithOptions(&types.OpenSkillOptions{
+				Mu:    ptr.Float64(25.0),
+				Sigma: ptr.Float64(8.333),
+			}), nil
+		} else {
+			return r, errors.New("rating not found")
+		}
 	}
-	if err = json.Unmarshal([]byte(ratingJSON), &rating); err != nil {
-		return rating, status.Error(codes.Internal, "error unmarshalling rating")
+	if err = json.Unmarshal([]byte(ratingJSON), &r); err != nil {
+		return r, errors.New("error unmarshalling rating")
 	}
-	return rating, nil
+	return r, nil
 }
