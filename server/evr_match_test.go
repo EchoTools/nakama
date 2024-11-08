@@ -740,3 +740,107 @@ func TestEvrMatch_playerJoinAttempt(t *testing.T) {
 		})
 	}
 }
+func TestEvrMatch_setRole(t *testing.T) {
+	tests := []struct {
+		name         string
+		state        *MatchLabel
+		mp           *EvrMatchPresence
+		expectedRole int
+	}{
+		{
+			name: "Assign moderator role",
+			state: &MatchLabel{
+				Mode:           evr.ModeArenaPublic,
+				TeamAlignments: map[string]int{},
+			},
+			mp: &EvrMatchPresence{
+				RoleAlignment: evr.TeamModerator,
+			},
+			expectedRole: evr.TeamModerator,
+		},
+		{
+			name: "Assign spectator role",
+			state: &MatchLabel{
+				Mode:           evr.ModeArenaPublic,
+				TeamAlignments: map[string]int{},
+			},
+			mp: &EvrMatchPresence{
+				RoleAlignment: evr.TeamSpectator,
+			},
+			expectedRole: evr.TeamSpectator,
+		},
+		{
+			name: "Assign social role in public social mode",
+			state: &MatchLabel{
+				Mode:           evr.ModeSocialPublic,
+				TeamAlignments: map[string]int{},
+			},
+			mp: &EvrMatchPresence{
+				RoleAlignment: evr.TeamUnassigned,
+			},
+			expectedRole: evr.TeamSocial,
+		},
+		{
+			name: "Assign social role in private social mode",
+			state: &MatchLabel{
+				Mode:           evr.ModeSocialPrivate,
+				TeamAlignments: map[string]int{},
+			},
+			mp: &EvrMatchPresence{
+				RoleAlignment: evr.TeamUnassigned,
+			},
+			expectedRole: evr.TeamSocial,
+		},
+		{
+			name: "Assign orange role when unassigned",
+			state: &MatchLabel{
+				Mode:           evr.ModeArenaPublic,
+				TeamAlignments: map[string]int{},
+			},
+			mp: &EvrMatchPresence{
+				RoleAlignment: evr.TeamUnassigned,
+			},
+			expectedRole: evr.TeamOrange,
+		},
+		{
+			name: "Assign blue role when blue team has fewer players",
+			state: &MatchLabel{
+				Mode:           evr.ModeArenaPublic,
+				TeamAlignments: map[string]int{},
+				presenceMap: map[string]*EvrMatchPresence{
+					"1": {RoleAlignment: evr.TeamOrange},
+					"2": {RoleAlignment: evr.TeamOrange},
+				},
+			},
+			mp: &EvrMatchPresence{
+				RoleAlignment: evr.TeamUnassigned,
+			},
+			expectedRole: evr.TeamBlue,
+		},
+		{
+			name: "Assign orange role when teams are balanced",
+			state: &MatchLabel{
+				Mode:           evr.ModeArenaPublic,
+				TeamAlignments: map[string]int{},
+				presenceMap: map[string]*EvrMatchPresence{
+					"1": {RoleAlignment: evr.TeamOrange},
+					"2": {RoleAlignment: evr.TeamBlue},
+				},
+			},
+			mp: &EvrMatchPresence{
+				RoleAlignment: evr.TeamUnassigned,
+			},
+			expectedRole: evr.TeamOrange,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &EvrMatch{}
+			m.setRole(tt.state, tt.mp)
+			if tt.mp.RoleAlignment != tt.expectedRole {
+				t.Errorf("setRole() = %v, want %v", tt.mp.RoleAlignment, tt.expectedRole)
+			}
+		})
+	}
+}
