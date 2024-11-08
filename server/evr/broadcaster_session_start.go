@@ -69,10 +69,10 @@ var (
 
 	// Valid roles for the game mode
 	RolesByMode = map[Symbol][]int{
-		ModeCombatPublic:  {TeamBlue, TeamOrange, TeamSpectator},
-		ModeArenaPublic:   {TeamBlue, TeamOrange, TeamSpectator},
-		ModeCombatPrivate: {TeamBlue, TeamOrange, TeamSpectator},
-		ModeArenaPrivate:  {TeamBlue, TeamOrange, TeamSpectator},
+		ModeCombatPublic:  {TeamBlue, TeamOrange, TeamSpectator, TeamModerator},
+		ModeArenaPublic:   {TeamBlue, TeamOrange, TeamSpectator, TeamModerator},
+		ModeCombatPrivate: {TeamBlue, TeamOrange, TeamSpectator, TeamModerator},
+		ModeArenaPrivate:  {TeamBlue, TeamOrange, TeamSpectator, TeamModerator},
 		ModeSocialPublic:  {TeamSocial, TeamModerator},
 		ModeSocialPrivate: {TeamSocial, TeamModerator},
 	}
