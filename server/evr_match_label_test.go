@@ -90,3 +90,132 @@ func TestMatchLabel_GetPlayerCount(t *testing.T) {
 		})
 	}
 }
+func TestMatchLabel_RoleLimit(t *testing.T) {
+	type fields struct {
+		LobbyType   LobbyType
+		Mode        evr.Symbol
+		PlayerLimit int
+		MaxSize     int
+		TeamSize    int
+	}
+	type args struct {
+		role int
+	}
+	tests := []struct {
+		name   string
+		fields fields
+		args   args
+		want   int
+	}{
+		{
+			name: "Social TeamSocial",
+			fields: fields{
+				LobbyType:   PublicLobby,
+				Mode:        evr.ModeSocialPublic,
+				PlayerLimit: 12,
+			},
+			args: args{role: evr.TeamSocial},
+			want: 10,
+		},
+		{
+			name: "Social TeamModerator",
+			fields: fields{
+				LobbyType:   PublicLobby,
+				Mode:        evr.ModeSocialPublic,
+				PlayerLimit: 12,
+			},
+			args: args{role: evr.TeamModerator},
+			want: 10,
+		},
+		{
+			name: "Social Other",
+			fields: fields{
+				LobbyType:   PublicLobby,
+				Mode:        evr.ModeSocialPublic,
+				PlayerLimit: 12,
+			},
+			args: args{role: evr.TeamSpectator},
+			want: 0,
+		},
+		{
+			name: "Private Match",
+			fields: fields{
+				LobbyType:   PrivateLobby,
+				Mode:        evr.ModeArenaPrivate,
+				PlayerLimit: 16,
+			},
+			args: args{role: evr.TeamBlue},
+			want: 8,
+		},
+		{
+			name: "Public Match Spectator",
+			fields: fields{
+				LobbyType:   PublicLobby,
+				Mode:        evr.ModeArenaPublic,
+				PlayerLimit: 8,
+				MaxSize:     16,
+			},
+			args: args{role: evr.TeamSpectator},
+			want: 2,
+		},
+		{
+			name: "Public Match Unassigned",
+			fields: fields{
+				LobbyType:   PublicLobby,
+				Mode:        evr.ModeArenaPublic,
+				PlayerLimit: 8,
+				MaxSize:     16,
+			},
+			args: args{role: evr.TeamUnassigned},
+			want: 2,
+		},
+		{
+			name: "Public Match TeamBlue",
+			fields: fields{
+				LobbyType:   PublicLobby,
+				Mode:        evr.ModeArenaPublic,
+				PlayerLimit: 8,
+				TeamSize:    4,
+			},
+			args: args{role: evr.TeamBlue},
+			want: 4,
+		},
+		{
+			name: "Public Match TeamOrange",
+			fields: fields{
+				LobbyType:   PublicLobby,
+				Mode:        evr.ModeArenaPublic,
+				PlayerLimit: 8,
+				TeamSize:    4,
+			},
+			args: args{role: evr.TeamOrange},
+			want: 4,
+		},
+
+		{
+			name: "Public Match (Combat) TeamOrange",
+			fields: fields{
+				LobbyType:   PublicLobby,
+				Mode:        evr.ModeArenaPublic,
+				PlayerLimit: 10,
+				TeamSize:    5,
+			},
+			args: args{role: evr.TeamOrange},
+			want: 4,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &MatchLabel{
+				LobbyType:   tt.fields.LobbyType,
+				Mode:        tt.fields.Mode,
+				PlayerLimit: tt.fields.PlayerLimit,
+				MaxSize:     tt.fields.MaxSize,
+				TeamSize:    tt.fields.TeamSize,
+			}
+			if got := s.roleLimit(tt.args.role); got != tt.want {
+				t.Errorf("MatchLabel.RoleLimit() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

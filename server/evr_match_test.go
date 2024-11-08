@@ -733,7 +733,7 @@ func TestEvrMatch_playerJoinAttempt(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &EvrMatch{}
-			_, got := m.processJoin(tt.args.state, tt.args.mp)
+			_, got := m.processJoin(tt.args.state, NewRuntimeGoLogger(logger), tt.args.mp)
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("EvrMatch.playerJoinAttempt() got = %v, want %v", got, tt.want)
 			}
@@ -840,6 +840,137 @@ func TestEvrMatch_setRole(t *testing.T) {
 			m.setRole(tt.state, tt.mp)
 			if tt.mp.RoleAlignment != tt.expectedRole {
 				t.Errorf("setRole() = %v, want %v", tt.mp.RoleAlignment, tt.expectedRole)
+			}
+		})
+	}
+}
+func TestEvrMatch_processJoin(t *testing.T) {
+	session1 := uuid.Must(uuid.NewV4())
+	session2 := uuid.Must(uuid.NewV4())
+	session3 := uuid.Must(uuid.NewV4())
+	session4 := uuid.Must(uuid.NewV4())
+	session5 := uuid.Must(uuid.NewV4())
+
+	tests := []struct {
+		name           string
+		state          *MatchLabel
+		entrant        *EvrMatchPresence
+		expectedResult bool
+		expectedError  error
+	}{
+		{
+			name: "Player with reservation joins successfully",
+			state: &MatchLabel{
+				Mode:        evr.ModeArenaPublic,
+				MaxSize:     2,
+				TeamSize:    1,
+				PlayerLimit: 2,
+				reservationMap: map[string]*slotReservation{
+					session1.String(): {Entrant: &EvrMatchPresence{RoleAlignment: 0, SessionID: session1, EvrID: evr.EvrId{PlatformCode: 1, AccountId: 1}}, Expiry: time.Now().Add(time.Minute)},
+				},
+				presenceMap: map[string]*EvrMatchPresence{
+					session2.String(): {RoleAlignment: 1, SessionID: session2, EvrID: evr.EvrId{PlatformCode: 1, AccountId: 2}},
+				},
+			},
+			entrant:        &EvrMatchPresence{SessionID: session1, RoleAlignment: -1, EvrID: evr.EvrId{PlatformCode: 1, AccountId: 1}},
+			expectedResult: true,
+			expectedError:  nil,
+		},
+		{
+			name: "Lobby full rejected (due to full slot)",
+			state: &MatchLabel{
+				Mode:        evr.ModeArenaPublic,
+				TeamSize:    2,
+				MaxSize:     6,
+				PlayerLimit: 4,
+				presenceMap: map[string]*EvrMatchPresence{
+					session1.String(): {SessionID: session1, RoleAlignment: 0, EvrID: evr.EvrId{PlatformCode: 1, AccountId: 1}},
+					session2.String(): {SessionID: session2, RoleAlignment: 0, EvrID: evr.EvrId{PlatformCode: 1, AccountId: 2}},
+					session3.String(): {SessionID: session3, RoleAlignment: 1, EvrID: evr.EvrId{PlatformCode: 1, AccountId: 3}},
+				},
+				reservationMap: map[string]*slotReservation{
+					session4.String(): {
+						Entrant: &EvrMatchPresence{SessionID: session4, RoleAlignment: 1, EvrID: evr.EvrId{PlatformCode: 1, AccountId: 4}},
+						Expiry:  time.Now().Add(time.Minute),
+					},
+				},
+			},
+			entrant:        &EvrMatchPresence{SessionID: session5, RoleAlignment: 1, EvrID: evr.EvrId{PlatformCode: 1, AccountId: 5}},
+			expectedResult: false,
+			expectedError:  ErrJoinRejectReasonLobbyFull,
+		},
+		{
+			name: "Duplicate join rejected",
+			state: &MatchLabel{
+				Mode:        evr.ModeArenaPublic,
+				TeamSize:    4,
+				MaxSize:     8,
+				PlayerLimit: 8,
+				presenceMap: map[string]*EvrMatchPresence{
+					session1.String(): {SessionID: session1, EvrID: evr.EvrId{PlatformCode: 1, AccountId: 1}},
+				},
+			},
+			entrant:        &EvrMatchPresence{SessionID: session2, EvrID: evr.EvrId{PlatformCode: 1, AccountId: 1}},
+			expectedResult: false,
+			expectedError:  ErrJoinRejectReasonDuplicateJoin,
+		},
+		{
+			name: "Feature mismatch rejected",
+			state: &MatchLabel{
+				Mode:             evr.ModeArenaPublic,
+				TeamSize:         4,
+				MaxSize:          8,
+				PlayerLimit:      8,
+				RequiredFeatures: []string{"feature1"},
+				presenceMap:      map[string]*EvrMatchPresence{},
+			},
+			entrant:        &EvrMatchPresence{SessionID: session1, SupportedFeatures: []string{"feature2"}},
+			expectedResult: false,
+			expectedError:  ErrJoinRejectReasonFeatureMismatch,
+		},
+		{
+			name: "Assign role and join successfully",
+			state: &MatchLabel{
+				MaxSize:     4,
+				TeamSize:    2,
+				PlayerLimit: 8,
+				Mode:        evr.ModeArenaPublic,
+				presenceMap: map[string]*EvrMatchPresence{},
+			},
+			entrant:        &EvrMatchPresence{SessionID: session1, RoleAlignment: evr.TeamUnassigned, EvrID: evr.EvrId{PlatformCode: 1, AccountId: 1}},
+			expectedResult: false,
+			expectedError:  nil,
+		},
+		{
+			name: "Arena match team full rejected",
+			state: &MatchLabel{
+				Mode:        evr.ModeArenaPublic,
+				MaxSize:     8,
+				PlayerLimit: 8,
+				TeamSize:    4,
+				presenceMap: map[string]*EvrMatchPresence{
+					session1.String(): {SessionID: session1, RoleAlignment: evr.TeamOrange, EvrID: evr.EvrId{PlatformCode: 1, AccountId: 1}},
+					session2.String(): {SessionID: session2, RoleAlignment: evr.TeamOrange, EvrID: evr.EvrId{PlatformCode: 1, AccountId: 2}},
+					session3.String(): {SessionID: session3, RoleAlignment: evr.TeamOrange, EvrID: evr.EvrId{PlatformCode: 1, AccountId: 3}},
+					session4.String(): {SessionID: session4, RoleAlignment: evr.TeamOrange, EvrID: evr.EvrId{PlatformCode: 1, AccountId: 4}},
+				},
+			},
+			entrant:        &EvrMatchPresence{SessionID: session5, RoleAlignment: evr.TeamOrange, EvrID: evr.EvrId{PlatformCode: 1, AccountId: 5}},
+			expectedResult: false,
+			expectedError:  ErrJoinRejectReasonLobbyFull,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.state.rebuildCache()
+			m := &EvrMatch{}
+			gotResult, gotError := m.processJoin(tt.state, NewRuntimeGoLogger(logger), tt.entrant)
+			if gotResult != tt.expectedResult {
+				t.Errorf("processJoin() gotResult = %v, want %v", gotResult, tt.expectedResult)
+			}
+			if gotError != tt.expectedError {
+				t.Errorf("processJoin() gotError = %v, want %v", gotError, tt.expectedError)
 			}
 		})
 	}

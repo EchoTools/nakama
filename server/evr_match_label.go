@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"sort"
 	"time"
 
@@ -131,40 +132,36 @@ func (s *MatchLabel) OpenSlots() int {
 	return int(s.MaxSize) - s.Size
 }
 
-func (s *MatchLabel) OpenSlotsByRole(role int) int {
-	return s.RoleLimit(role) - s.RoleCount(role)
+func (s *MatchLabel) OpenSlotsByRole(role int) (int, error) {
+	if evr.RolesByMode[s.Mode] == nil {
+		return 0, fmt.Errorf("mode %s is not a valid mode", s.Mode)
+	}
+
+	return s.roleLimit(role) - s.RoleCount(role), nil
 }
 
 func (s *MatchLabel) String() string {
 	return s.GetLabel()
 }
 
-func (s *MatchLabel) RoleLimit(role int) int {
+func (s *MatchLabel) roleLimit(role int) int {
 
-	if s.IsSocial() {
-		if role == evr.TeamSocial || role == evr.TeamModerator {
-			return s.PlayerLimit
+	switch s.Mode {
+
+	case evr.ModeArenaPublic, evr.ModeCombatPublic:
+
+		switch role {
+		case evr.TeamBlue, evr.TeamOrange:
+
+			return s.TeamSize
+
+		case evr.TeamSpectator, evr.TeamModerator:
+
+			return s.MaxSize - s.PlayerLimit
 		}
-		return 0
-	}
 
-	if s.IsPrivateMatch() {
-		// roles in private matches are not tracked
+	default:
 		return s.PlayerLimit
-	}
-
-	// roles in public matches must be assigned
-	if role == evr.TeamSpectator || role == evr.TeamModerator {
-		return s.MaxSize - s.PlayerLimit
-	}
-
-	if role == evr.TeamUnassigned {
-		openSlots := s.OpenPlayerSlots()
-		return openSlots
-	}
-
-	if role == evr.TeamBlue || role == evr.TeamOrange {
-		return s.TeamSize
 	}
 
 	return 0
