@@ -7,26 +7,10 @@ import (
 	"go.uber.org/zap"
 )
 
-func (p *EvrPipeline) loadNextMatchFromDB(ctx context.Context, logger *zap.Logger, session *sessionWS) (MatchID, error) {
-
-	config, err := LoadMatchmakingSettings(ctx, p.runtimeModule, session.UserID().String())
-	if err != nil {
-		return MatchID{}, fmt.Errorf("failed to load matchmaking config: %w", err)
-	}
-
-	if config.NextMatchID.IsNil() {
-		return MatchID{}, nil
-	}
-
-	go func() {
-		config.NextMatchID = MatchID{}
-		err = StoreMatchmakingSettings(ctx, p.runtimeModule, session.UserID().String(), config)
-		if err != nil {
-			logger.Warn("Failed to clear matchmaking config", zap.Error(err))
-		}
-	}()
-
-	return config.NextMatchID, nil
+type NextMatchMetadata struct {
+	MatchID   MatchID
+	Role      string
+	DiscordID string
 }
 
 // lobbyJoinSessionRequest is a request to join a specific existing session.

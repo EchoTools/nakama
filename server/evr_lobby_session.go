@@ -13,28 +13,25 @@ import (
 func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.LobbySessionRequest, lobbyParams *LobbySessionParameters) error {
 	var err error
 	var matchID MatchID
+
 	switch in.(type) {
 	case *evr.LobbyFindSessionRequest:
+
+		// If a "next match ID" is set, send the user to that match. (i.e. Echo Taxi)
+		if !lobbyParams.NextMatchID.IsNil() {
+			LeavePartyStream(session)
+			p.metrics.CustomCounter("lobby_join_next_match", lobbyParams.MetricsTags(), 1)
+			logger.Info("Joining next match", zap.String("mid", matchID.String()))
+
+			return p.lobbyJoin(ctx, logger, session, lobbyParams)
+		}
 
 		if len(lobbyParams.RequiredFeatures) > 0 {
 			// reject matchmaking with required features
 			return NewLobbyErrorf(MissingEntitlement, "required features not supported in matchmaking.")
 		}
 
-		// Load the next match from the DB. (e.g. EchoTaxi hails)
-		matchID, err = p.loadNextMatchFromDB(ctx, logger, session)
-		if err != nil {
-			return NewLobbyError(InternalError, "failed to load next match from DB")
-		} else if !matchID.IsNil() {
-			// If a match ID is found, join it.
-			lobbyParams.CurrentMatchID = matchID
-			if _, _, err := p.matchRegistry.GetMatch(ctx, matchID.String()); err == nil {
-				LeavePartyStream(session)
-				p.metrics.CustomCounter("lobby_join_next_match", lobbyParams.MetricsTags(), 1)
-				logger.Info("Joining next match", zap.String("mid", matchID.String()))
-				return p.lobbyJoin(ctx, logger, session, lobbyParams)
-			}
-		} else if lobbyParams.Role == evr.TeamSpectator {
+		if lobbyParams.Role == evr.TeamSpectator {
 			// Leave the party if the user is in one
 			LeavePartyStream(session)
 			// Spectators are only allowed in arena and combat matches.
