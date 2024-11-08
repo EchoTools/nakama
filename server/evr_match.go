@@ -277,7 +277,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 
 		sessionID := entrant.GetSessionId()
 
-		hasReservation, err := m.processJoin(state, entrant)
+		hasReservation, err := m.processJoin(state, logger, entrant)
 
 		reserveOnly := i > 0
 
@@ -319,7 +319,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	return state, true, meta.Presence.String()
 }
 
-func (m *EvrMatch) processJoin(state *MatchLabel, entrant *EvrMatchPresence) (bool, error) {
+func (m *EvrMatch) processJoin(state *MatchLabel, logger runtime.Logger, entrant *EvrMatchPresence) (bool, error) {
 	sessionID := entrant.GetSessionId()
 
 	hasReservation := false
@@ -350,24 +350,29 @@ func (m *EvrMatch) processJoin(state *MatchLabel, entrant *EvrMatchPresence) (bo
 		if state.OpenSlots() < 1 {
 			return hasReservation, ErrJoinRejectReasonLobbyFull
 		}
-	} else {
+		return hasReservation, nil
+	}
+
+	if entrant.RoleAlignment == evr.TeamUnassigned {
+		m.setRole(state, entrant)
+		logger.WithField("role", entrant.RoleAlignment).Warn("Assigned role.")
 		// Assign a role to the player
-		if !hasReservation || entrant.RoleAlignment == evr.TeamUnassigned {
-			m.setRole(state, entrant)
+	}
 
-			// Ensure the match has enough role slots available
-			if state.OpenSlotsByRole(entrant.RoleAlignment) < 1 {
-				return hasReservation, ErrJoinRejectReasonLobbyFull
-			}
+	// Ensure the match has enough role slots available
+	openSlots, err := state.OpenSlotsByRole(entrant.RoleAlignment)
+	if err != nil {
+		return hasReservation, fmt.Errorf("failed to get open slots: %w", err)
+	}
+	if openSlots < 1 {
+		return hasReservation, ErrJoinRejectReasonLobbyFull
+	}
+
+	// If this an arena match, ensure that no team has more than 4 players.
+	if state.Mode == evr.ModeArenaPublic && (entrant.RoleAlignment == evr.TeamOrange || entrant.RoleAlignment == evr.TeamBlue) {
+		if state.RoleCount(entrant.RoleAlignment) > state.TeamSize {
+			return hasReservation, ErrJoinRejectReasonLobbyFull
 		}
-
-		// If this an arena match, ensure that no team has more than 4 players.
-		if state.Mode == evr.ModeArenaPublic && (entrant.RoleAlignment == evr.TeamOrange || entrant.RoleAlignment == evr.TeamBlue) {
-			if state.RoleCount(entrant.RoleAlignment) > state.TeamSize {
-				return hasReservation, ErrJoinRejectReasonLobbyFull
-			}
-		}
-
 	}
 
 	return hasReservation, nil

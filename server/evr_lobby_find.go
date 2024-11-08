@@ -323,7 +323,10 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 				}
 			}
 
-			if l.OpenSlotsByRole(team) < partySize {
+			if n, err := l.OpenSlotsByRole(team); err != nil {
+				logger.Warn("Failed to get open slots by role", zap.Error(err))
+				continue
+			} else if n < partySize {
 				continue
 			}
 
