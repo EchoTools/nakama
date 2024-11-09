@@ -551,8 +551,8 @@ func (p *EvrPipeline) PartyFollow(ctx context.Context, logger *zap.Logger, sessi
 			case evr.ModeSocialPublic, evr.ModeCombatPublic, evr.ModeArenaPublic:
 				// Join the leader's match.
 				logger.Debug("Joining leader's lobby", zap.String("mid", leaderMatchID.String()))
-				params.CurrentMatchID = leaderMatchID
-				if err := p.lobbyJoin(ctx, logger, session, params); err != nil {
+
+				if err := p.lobbyJoin(ctx, logger, session, params, leaderMatchID); err != nil {
 					code := LobbyErrorCode(err)
 					if code == ServerIsFull || code == ServerIsLocked {
 						<-time.After(5 * time.Second)

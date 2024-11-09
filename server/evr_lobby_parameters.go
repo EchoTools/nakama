@@ -120,9 +120,33 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		}
 	}
 
+	entrantRole := r.GetEntrantRole(0)
+
 	nextMatchID := MatchID{}
 
 	if !userSettings.NextMatchID.IsNil() {
+
+		// Check that the match exists
+		if _, _, err := p.matchRegistry.GetMatch(ctx, userSettings.NextMatchID.String()); err != nil {
+			logger.Warn("Next match not found", zap.String("mid", userSettings.NextMatchID.String()))
+		} else {
+			nextMatchID = userSettings.NextMatchID
+
+			if userSettings.NextMatchRole != "" {
+				switch userSettings.NextMatchRole {
+				case "orange":
+					entrantRole = evr.TeamOrange
+				case "blue":
+					entrantRole = evr.TeamBlue
+				case "spectator":
+					entrantRole = evr.TeamSpectator
+				case "any":
+					entrantRole = evr.TeamUnassigned
+				}
+			}
+
+			userSettings.NextMatchRole = ""
+		}
 
 		// Always clear the settings
 		go func() {
@@ -133,13 +157,6 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 				logger.Warn("Failed to clear next match metadata", zap.Error(err))
 			}
 		}()
-
-		// Check that the match exists
-		if _, _, err := p.matchRegistry.GetMatch(ctx, userSettings.NextMatchID.String()); err != nil {
-			logger.Warn("Next match not found", zap.String("mid", userSettings.NextMatchID.String()))
-		} else {
-			nextMatchID = userSettings.NextMatchID
-		}
 	}
 
 	matchmakingQueryAddons := []string{
@@ -286,7 +303,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		Level:                  level,
 		SupportedFeatures:      supportedFeatures,
 		RequiredFeatures:       requiredFeatures,
-		Role:                   r.GetEntrantRole(0),
+		Role:                   entrantRole,
 		DisableArenaBackfill:   globalSettings.DisableArenaBackfill || userSettings.DisableArenaBackfill,
 		BackfillQueryAddon:     strings.Join(backfillQueryAddons, " "),
 		MatchmakingQueryAddon:  strings.Join(matchmakingQueryAddons, " "),
