@@ -22,8 +22,7 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 			LeavePartyStream(session)
 			p.metrics.CustomCounter("lobby_join_next_match", lobbyParams.MetricsTags(), 1)
 			logger.Info("Joining next match", zap.String("mid", matchID.String()))
-
-			return p.lobbyJoin(ctx, logger, session, lobbyParams)
+			return p.lobbyJoin(ctx, logger, session, lobbyParams, lobbyParams.NextMatchID)
 		}
 
 		if len(lobbyParams.RequiredFeatures) > 0 {
@@ -73,7 +72,8 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 		LeavePartyStream(session)
 		p.metrics.CustomCounter("lobby_create_session", lobbyParams.MetricsTags(), 1)
 		logger.Info("Joining session", zap.String("mid", lobbyParams.CurrentMatchID.String()))
-		return p.lobbyJoin(ctx, logger, session, lobbyParams)
+		matchID := lobbyParams.CurrentMatchID
+		return p.lobbyJoin(ctx, logger, session, lobbyParams, matchID)
 
 	case *evr.LobbyCreateSessionRequest:
 
@@ -90,7 +90,7 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 		matchID, err = p.lobbyCreate(ctx, logger, session, lobbyParams)
 		if err == nil {
 			lobbyParams.CurrentMatchID = matchID
-			return p.lobbyJoin(ctx, logger, session, lobbyParams)
+			return p.lobbyJoin(ctx, logger, session, lobbyParams, matchID)
 		} else {
 			return err
 		}
