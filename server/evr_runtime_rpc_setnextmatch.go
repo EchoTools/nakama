@@ -14,6 +14,7 @@ type SetNextMatchRPCRequest struct {
 	TargetDiscordID string  `json:"discord_id"`
 	TargetUserID    string  `json:"user_id"`
 	MatchID         MatchID `json:"match_id"`
+	HostDiscordID   string  `json:"host_discord_id"`
 	Role            string  `json:"role"`
 }
 
@@ -89,7 +90,7 @@ func SetNextMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 
 	settings.NextMatchID = request.MatchID
 	settings.NextMatchRole = request.Role
-	settings.NextMatchDiscordID = request.TargetDiscordID
+	settings.NextMatchDiscordID = request.HostDiscordID
 
 	if err = StoreMatchmakingSettings(ctx, nk, request.TargetUserID, settings); err != nil {
 		return "", runtime.NewError(fmt.Sprintf("Error saving matchmaking settings: %s", err.Error()), StatusInternalError)
