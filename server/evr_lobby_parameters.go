@@ -124,14 +124,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 
 	if !userSettings.NextMatchID.IsNil() {
 
-		// Check that the match exists
-		if _, _, err := p.matchRegistry.GetMatch(ctx, userSettings.NextMatchID.String()); err != nil {
-			logger.Warn("Next match not found", zap.String("mid", userSettings.NextMatchID.String()))
-		} else {
-			nextMatchID = userSettings.NextMatchID
-		}
-
-		// Clear the settings
+		// Always clear the settings
 		go func() {
 			userSettings.NextMatchID = MatchID{}
 			userSettings.NextMatchRole = ""
@@ -140,6 +133,13 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 				logger.Warn("Failed to clear next match metadata", zap.Error(err))
 			}
 		}()
+
+		// Check that the match exists
+		if _, _, err := p.matchRegistry.GetMatch(ctx, userSettings.NextMatchID.String()); err != nil {
+			logger.Warn("Next match not found", zap.String("mid", userSettings.NextMatchID.String()))
+		} else {
+			nextMatchID = userSettings.NextMatchID
+		}
 	}
 
 	matchmakingQueryAddons := []string{
