@@ -309,6 +309,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 
 		state.joinTimestamps[sessionID] = time.Now()
 		added = append(added, sessionID)
+
 		state.rebuildCache()
 	}
 
@@ -369,9 +370,17 @@ func (m *EvrMatch) processJoin(state *MatchLabel, logger runtime.Logger, entrant
 	}
 
 	// If this an arena match, ensure that no team has more than 4 players.
-	if state.Mode == evr.ModeArenaPublic && (entrant.RoleAlignment == evr.TeamOrange || entrant.RoleAlignment == evr.TeamBlue) {
-		if state.RoleCount(entrant.RoleAlignment) > state.TeamSize {
-			return hasReservation, ErrJoinRejectReasonLobbyFull
+	if state.Mode == evr.ModeArenaPublic {
+
+		switch entrant.RoleAlignment {
+
+		case evr.TeamUnassigned:
+			return hasReservation, ErrJoinRejectReasonFailedToAssignTeam
+
+		case evr.TeamOrange, evr.TeamBlue:
+			if state.RoleCount(entrant.RoleAlignment) > state.TeamSize {
+				return hasReservation, ErrJoinRejectReasonLobbyFull
+			}
 		}
 	}
 
