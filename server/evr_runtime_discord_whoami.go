@@ -50,17 +50,19 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		MatchIDs:              make([]string, 0),
 	}
 	// Get the user's ID
+	member, err := s.GuildMember(i.GuildID, discordID)
+	if err != nil || member == nil || member.User == nil {
+		return fmt.Errorf("failed to get guild member: %w", err)
+	}
 
 	userIDStr, err := GetUserIDByDiscordID(ctx, d.db, discordID)
 	if err != nil {
-		userIDStr, _, _, err = d.nk.AuthenticateCustom(ctx, discordID, i.Member.User.Username, true)
+		userIDStr, _, _, err = d.nk.AuthenticateCustom(ctx, discordID, member.User.Username, true)
 		if err != nil {
 			return fmt.Errorf("failed to authenticate (or create) user %s: %w", discordID, err)
 		}
 	}
 	userID := uuid.FromStringOrNil(userIDStr)
-
-	i.Member.GuildID = i.GuildID
 
 	// Basic account details
 	whoami.NakamaID = userID

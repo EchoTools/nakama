@@ -1552,7 +1552,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			caller := user
 			target := options[0].UserValue(s)
 
-			// Clear the cache of the user
+			// Clear the cache of the caller
 			d.cache.Purge(caller.ID)
 
 			// Get the caller's nakama user ID
@@ -1561,7 +1561,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			if member != nil {
 				memberships, err := GetGuildGroupMemberships(ctx, d.nk, userIDStr)
 				if err != nil {
-					return fmt.Errorf("failed to get user ID: %w:", err)
+					return fmt.Errorf("failed to get user ID: %w", err)
 				}
 
 				var membership *GuildGroupMembership
