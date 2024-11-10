@@ -518,15 +518,10 @@ func (p *EvrPipeline) PartyFollow(ctx context.Context, logger *zap.Logger, sessi
 			Subject: session.id,
 			Label:   StreamLabelMatchService,
 		}
-
+		memberMatchID := MatchID{}
 		presence = session.pipeline.tracker.GetLocalBySessionIDStreamUserID(session.id, stream, session.userID)
-		if presence == nil {
-			return NewLobbyError(BadRequest, "this member is not in a match")
-		}
-
-		memberMatchID := MatchIDFromStringOrNil(presence.GetStatus())
-		if memberMatchID.IsNil() {
-			continue
+		if presence != nil {
+			memberMatchID = MatchIDFromStringOrNil(presence.GetStatus())
 		}
 
 		if memberMatchID == leaderMatchID {
