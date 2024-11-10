@@ -65,14 +65,15 @@ func (p *EvrPipeline) lobbyCreate(ctx context.Context, logger *zap.Logger, sessi
 		SpawnedBy:        session.UserID().String(),
 	}
 
-	label, err = LobbyPrepareSession(ctx, nk, label.ID, &settings)
+	matchID := label.ID
+	_, err = LobbyPrepareSession(ctx, nk, matchID, &settings)
 	if err != nil {
-		logger.Warn("Failed to prepare session", zap.Error(err), zap.String("mid", label.ID.UUID.String()))
+		logger.Warn("Failed to prepare session", zap.Error(err), zap.String("mid", matchID.UUID.String()))
 		return MatchID{}, err
 	}
 
 	// Return the prepared session
-	return label.ID, nil
+	return matchID, nil
 }
 
 func lobbyListGameServers(ctx context.Context, nk runtime.NakamaModule, query string) ([]*MatchLabel, error) {
