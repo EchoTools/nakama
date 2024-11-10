@@ -843,7 +843,11 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 		return fmt.Errorf("failed to find player in match")
 	}
 	if playerInfo.Team != 0 && playerInfo.Team != 1 {
-		logger.Warn("Player is on a non-player team", zap.String("evrId", request.EvrID.Token()), zap.String("team", playerInfo.Team.String()))
+		if playerInfo.Team != 2 {
+			// Unless it's a spectator, log the error
+			logger.Warn("Player is on a non-player team", zap.String("evrId", request.EvrID.Token()), zap.String("team", playerInfo.Team.String()))
+		}
+
 		return nil
 	}
 
