@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"go.uber.org/zap"
 )
@@ -37,9 +38,14 @@ func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session
 	presences[0].RoleAlignment = params.Role
 	if err := p.LobbyJoinEntrants(logger, label, presences...); err != nil {
 		// Send the error to the client
-		if err := SendEVRMessages(session, LobbySessionFailureFromError(label.Mode, label.GetGroupID(), err)); err != nil {
-			logger.Debug("Failed to send error message", zap.Error(err))
-		}
+		go func() {
+			// Delay sending the error message to the client.
+			// There are situations where the client will spam the server with join requests.
+			<-time.After(3 * time.Second)
+			if err := SendEVRMessages(session, LobbySessionFailureFromError(label.Mode, label.GetGroupID(), err)); err != nil {
+				logger.Debug("Failed to send error message", zap.Error(err))
+			}
+		}()
 	}
 	return nil
 }
