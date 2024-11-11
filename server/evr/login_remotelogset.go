@@ -1,6 +1,7 @@
 package evr
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -62,70 +63,84 @@ func (m RemoteLogString) String() string {
 	return string(m)
 }
 
-func (m RemoteLogString) GetGameSettings() (*RemoteLogGameSettings, error) {
-	var out RemoteLogGameSettings
-	err := json.Unmarshal([]byte(m), &out)
-	return &out, err
-}
-
-func (m RemoteLogString) GetSessionStarted() (*RemoteLogSessionStarted, error) {
-	var out RemoteLogSessionStarted
-	err := json.Unmarshal([]byte(m), &out)
-	return &out, err
-}
-
-func (m RemoteLogString) GetCustomizationMetricsPayload() (*RemoteLogCustomizationMetricsPayload, error) {
-	var out RemoteLogCustomizationMetricsPayload
-	err := json.Unmarshal([]byte(m), &out)
-	return &out, err
-}
-
-func (m RemoteLogString) GetInteractionEvent() (*RemoteLogInteractionEvent, error) {
-	var out RemoteLogInteractionEvent
-	err := json.Unmarshal([]byte(m), &out)
-	return &out, err
-}
-
-func (m RemoteLogString) GetGhostUser() (*RemoteLogGhostUser, error) {
-	var out RemoteLogGhostUser
-	err := json.Unmarshal([]byte(m), &out)
-	return &out, err
-}
-
-func (m RemoteLogString) GetGoal() (*RemoteLogGoal, error) {
-	var out RemoteLogGoal
-	err := json.Unmarshal([]byte(m), &out)
-	return &out, err
-}
-
-func (m RemoteLogString) GetRepairMatrix() (*RemoteLogRepairMatrix, error) {
-	var out RemoteLogRepairMatrix
-	err := json.Unmarshal([]byte(m), &out)
-	return &out, err
-}
-
-func (m RemoteLogString) GetUserDisconnected() (*RemoteLogUserDisconnected, error) {
-	var out RemoteLogUserDisconnected
-	err := json.Unmarshal([]byte(m), &out)
-	return &out, err
-}
-
-func (m RemoteLogString) GetStoreMetricsPayload() (*RemoteLogStoreMetricsPayload, error) {
-	return GetRemoteLogType([]byte(m), RemoteLogStoreMetricsPayload{})
-}
-
-func (m RemoteLogString) GetGhostAll() (*RemoteLogGhostAll, error) {
-	return GetRemoteLogType([]byte(m), RemoteLogGhostAll{})
-}
-
-func GetRemoteLogType[T any](data []byte, typ T) (*T, error) {
-	var out T
-	err := json.Unmarshal(data, &out)
-	return &out, err
-}
-
 func UUIDFromRemoteLogString(s string) uuid.UUID {
 	return uuid.FromStringOrNil(strings.Trim(s, "{}"))
+}
+
+var (
+	ErrRemoteLogMessageUnknownType = errors.New("unknown message type")
+)
+
+func RemoteLogMessageFromMessage(strMap map[string]interface{}, data []byte) (any, error) {
+
+	var m any
+
+	if s, ok := strMap["message"].(string); ok && s == "CUSTOMIZATION_METRICS_PAYLOAD" {
+		m = &RemoteLogCustomizationMetricsPayload{}
+
+	} else if typ, ok := strMap["message_type"].(string); ok {
+
+		switch typ {
+		case "VOIP_LOUDNESS":
+			m = &RemoteLogVOIPLoudness{}
+		case "GOAL":
+			m = &RemoteLogGoal{}
+		case "POST_MATCH_BATTLE_PASS_STATS":
+			m = &RemoteLogPostMatchBattlePassStats{}
+		case "POST_MATCH_BATTLE_PASS_UNLOCKS":
+			m = &RemoteLogPostMatchBattlePassUnlocks{}
+		case "POST_MATCH_BATTLE_PASS_XP":
+			m = &RemoteLogPostMatchBattlePassXP{}
+		case "POST_MATCH_EARNED_AWARD":
+			m = &RemoteLogRepairMatrix{}
+		case "POST_MATCH_MATCH_STATS":
+			m = &RemoteLogRepairMatrix{}
+		case "POST_MATCH_MATCH_TYPE_STATS":
+			m = &RemoteLogRepairMatrix{}
+		case "POST_MATCH_MATCH_TYPE_UNLOCKS":
+			m = &RemoteLogRepairMatrix{}
+		case "POST_MATCH_MATCH_TYPE_XP":
+			m = &RemoteLogRepairMatrix{}
+		case "POST_MATCH_MATCH_TYPE_XP_LEVEL":
+			m = &RemoteLogPostMatchMatchTypeXPLevel{}
+		case "LOAD_STATS":
+			m = &RemoteLogLoadStats{}
+		case "REPAIR_MATRIX":
+			m = &RemoteLogRepairMatrix{}
+		case "SESSION_STARTED":
+			m = &RemoteLogSessionStarted{}
+		case "USER_DISCONNECT":
+			m = &RemoteLogUserDisconnected{}
+		case "USER_DISPLAY_NAME_MISMATCH":
+			m = &RemoteLogUserDisplayNameMismatch{}
+		case "ENERGY_BARRIER":
+			m = &RemoteLogRepairMatrix{}
+		case "FIND_NEW_LOBBY":
+			m = &RemoteLogFindNewLobby{}
+		case "GAME_SETTINGS":
+			m = &RemoteLogGameSettings{}
+		case "GHOST_ALL":
+			m = &RemoteLogGhostAll{}
+		case "GHOST_USER":
+			m = &RemoteLogGhostUser{}
+		case "PERSONAL_BUBBLE":
+			m = &RemoteLogRepairMatrix{}
+		case "MUTE_ALL":
+			m = &RemoteLogInteractionEvent{}
+		case "MUTE_USER":
+			m = &RemoteLogInteractionEvent{}
+		}
+	}
+
+	if m == nil {
+		return nil, fmt.Errorf("unknown message type")
+	}
+
+	if err := json.Unmarshal(data, m); err != nil {
+		return nil, err
+	}
+
+	return m, nil
 }
 
 // GAME_SETTINGS
@@ -182,51 +197,6 @@ func (m RemoteLogSessionStarted) SessionUUID() uuid.UUID {
 	return UUIDFromRemoteLogString(m.SessionUUIDStr)
 }
 
-var (
-	remoteLogTypeMap = map[string]any{
-		"ENERGY_BARRIER":                 RemoteLogRepairMatrix{},
-		"FIND_NEW_LOBBY":                 RemoteLogFindNewLobby{},
-		"GAME_SETTINGS":                  RemoteLogGameSettings{},
-		"GHOST_ALL":                      RemoteLogGhostAll{},
-		"GHOST_USER":                     RemoteLogGhostUser{},
-		"GOAL":                           RemoteLogGoal{},
-		"LOAD_STATS":                     RemoteLogLoadStats{},
-		"MUTE_ALL":                       RemoteLogInteractionEvent{},
-		"MUTE_USER":                      RemoteLogInteractionEvent{},
-		"PERSONAL_BUBBLE":                RemoteLogRepairMatrix{},
-		"POST_MATCH_BATTLE_PASS_STATS":   RemoteLogPostMatchBattlePassStats{},
-		"POST_MATCH_BATTLE_PASS_UNLOCKS": RemoteLogPostMatchBattlePassUnlocks{},
-		"POST_MATCH_BATTLE_PASS_XP":      RemoteLogPostMatchBattlePassXP{},
-		"POST_MATCH_EARNED_AWARD":        RemoteLogRepairMatrix{},
-		"POST_MATCH_MATCH_STATS":         RemoteLogRepairMatrix{},
-		"POST_MATCH_MATCH_TYPE_STATS":    RemoteLogRepairMatrix{},
-		"POST_MATCH_MATCH_TYPE_UNLOCKS":  RemoteLogRepairMatrix{},
-		"POST_MATCH_MATCH_TYPE_XP":       RemoteLogRepairMatrix{},
-		"POST_MATCH_MATCH_TYPE_XP_LEVEL": RemoteLogPostMatchMatchTypeXPLevel{},
-		"REPAIR_MATRIX":                  RemoteLogRepairMatrix{},
-		"SESSION_STARTED":                RemoteLogSessionStarted{},
-		"USER_DISCONNECT":                RemoteLogUserDisconnected{},
-		"USER_DISPLAY_NAME_MISMATCH":     RemoteLogUserDisplayNameMismatch{},
-		"VOIP_LOUDNESS":                  RemoteLogVOIPLoudness{},
-	}
-)
-
-func ParseRemoteLog(message string) any {
-
-	msg := map[string]json.RawMessage{}
-	if err := json.Unmarshal([]byte(message), &msg); err != nil {
-		return RemoteLogString(message)
-	}
-
-	if m, ok := remoteLogTypeMap[string(msg["message_type"])]; ok {
-		if err := json.Unmarshal([]byte(message), m); err != nil {
-			return RemoteLogString(message)
-		}
-		return m
-	}
-	return RemoteLogString("")
-}
-
 // CUSTOMIZATION_METRICS_PAYLOAD
 type RemoteLogCustomizationMetricsPayload struct {
 	Message        string `json:"message"`
@@ -237,6 +207,14 @@ type RemoteLogCustomizationMetricsPayload struct {
 	ItemID         int64  `json:"[item_id]"`
 	ItemName       string `json:"[item_name]"`
 	UserID         string `json:"[user_id]"`
+}
+
+func (m RemoteLogCustomizationMetricsPayload) MessageString() string {
+	return m.Message
+}
+
+func (m RemoteLogCustomizationMetricsPayload) MessageType() string {
+	return "customization_metrics_payload"
 }
 
 func (m RemoteLogCustomizationMetricsPayload) SessionUUID() uuid.UUID {

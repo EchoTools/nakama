@@ -37,7 +37,7 @@ func NewUserRemoteLogJournalRegistry(sessionRegistry SessionRegistry) *UserLogJo
 }
 
 // returns true if found
-func (r *UserLogJouralRegistry) AddEntries(sessionID uuid.UUID, e []GenericRemoteLog) (found bool) {
+func (r *UserLogJouralRegistry) AddEntries(sessionID uuid.UUID, e []*GenericRemoteLog) (found bool) {
 	r.Lock()
 	defer r.Unlock()
 
