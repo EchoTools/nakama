@@ -273,15 +273,17 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 
 	added := make([]string, len(meta.Presences())) /// []sessionID
 
+	entrantResponse := ""
+
 	for i, entrant := range meta.Presences() {
 
 		sessionID := entrant.GetSessionId()
 
 		hasReservation, err := m.processJoin(state, logger, entrant)
 
-		reserveOnly := i > 0
+		isReservation := i > 0
 
-		m.logJoin(logger, nk, entrant, state, reserveOnly, hasReservation, err)
+		m.logJoin(logger, nk, entrant, state, isReservation, hasReservation, err)
 
 		if err != nil {
 			// Remove any newly added players to the match
@@ -295,7 +297,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 			return state, false, err.Error()
 		}
 
-		if reserveOnly {
+		if isReservation {
 
 			state.reservationMap[sessionID] = &slotReservation{
 				Entrant: entrant,
@@ -303,6 +305,13 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 			}
 
 		} else {
+
+			entrantResponse = meta.Presence.String()
+
+			// If this is a private match, do not track the player's team alignment.
+			if state.IsPrivate() {
+				entrant.RoleAlignment = evr.TeamUnassigned
+			}
 
 			state.presenceMap[sessionID] = entrant
 		}
@@ -317,7 +326,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		return state, false, fmt.Sprintf("failed to update label: %v", err)
 	}
 
-	return state, true, meta.Presence.String()
+	return state, true, entrantResponse
 }
 
 func (m *EvrMatch) processJoin(state *MatchLabel, logger runtime.Logger, entrant *EvrMatchPresence) (bool, error) {
