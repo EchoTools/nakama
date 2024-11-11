@@ -18,50 +18,41 @@ import (
 type GenericRemoteLog struct {
 	MessageType string `json:"messageType"`
 	Message     string `json:"message"`
+	Parsed      any
 }
 
-func parseRemoteLogMessageEntries(logger *zap.Logger, logs []string) []GenericRemoteLog {
-	entries := make([]GenericRemoteLog, 0, len(logs))
+func parseRemoteLogMessageEntries(logger *zap.Logger, logs []string) []*GenericRemoteLog {
+
+	entries := make([]*GenericRemoteLog, 0, len(logs))
+
 OuterLoop:
-	for _, str := range logs {
+	for _, logString := range logs {
 		// Unmarshal the top-level to check the message type.
 
-		entry := map[string]interface{}{}
+		bytes := []byte(logString)
 
-		data := []byte(str)
+		strMap := map[string]interface{}{}
 
-		if err := json.Unmarshal(data, &entry); err != nil {
-			if logger.Core().Enabled(zap.DebugLevel) {
-				logger.Debug("Non-JSON log entry", zap.String("entry", str))
-				continue
-			}
-		}
-
-		if message, ok := entry["message"]; ok {
-			if message == "CUSTOMIZATION_METRICS_PAYLOAD" {
-				entry["message_type"] = "customization_metrics_payload"
-			}
-		}
-
-		if _, ok := entry["message_type"]; !ok {
-			//logger.Debug("Remote log entry has no message type", zap.String("entry", str))
+		if err := json.Unmarshal(bytes, &strMap); err != nil {
+			logger.Debug("Non-JSON log entry", zap.String("entry", logString))
 			continue
 		}
 
-		messageType, ok := entry["message_type"].(string)
+		var ok bool
+		var messageType string
+
+		messageType, ok = strMap["message_type"].(string)
 		if !ok {
-			logger.Debug("Remote log entry has invalid message type", zap.String("entry", str))
-			continue
+			messageType = ""
 		}
 
-		messageType = strings.ToLower(messageType)
-
-		if strings.HasPrefix("ovr_iap", messageType) {
-			// Ignore IAP logs.
-			continue
+		if message, ok := strMap["message"].(string); ok {
+			if message == "CUSTOMIZATION_METRICS_PAYLOAD" {
+				strMap["message_type"] = "customization_metrics_payload"
+			}
 		}
 
-		if category, ok := entry["category"].(string); ok {
+		if category, ok := strMap["category"].(string); ok {
 			ignoredCategories := []string{
 				"iap",
 				"rich_presence",
@@ -73,9 +64,24 @@ OuterLoop:
 				}
 			}
 		}
-		entries = append(entries, GenericRemoteLog{
+
+		if typ, ok := strMap["message_type"].(string); ok {
+			if strings.HasPrefix(typ, "OVR_IAP") {
+				// Ignore IAP logs.
+				continue
+			}
+		}
+
+		parsed, err := evr.RemoteLogMessageFromMessage(strMap, bytes)
+		if err != nil {
+			logger.Debug("Failed to parse remote log message", zap.Error(err))
+			parsed = evr.RemoteLogString(logString)
+		}
+
+		entries = append(entries, &GenericRemoteLog{
 			MessageType: messageType,
-			Message:     str,
+			Message:     logString,
+			Parsed:      parsed,
 		})
 	}
 
@@ -124,20 +130,22 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 		}()
 	}
 
+	// Collect the updates to the match's game metadata (e.g. game clock)
 	updates := MapOf[uuid.UUID, *MatchGameStateUpdate]{}
 
 	for _, e := range entries {
 		var update *MatchGameStateUpdate
 
-		baseLogMessage := evr.ParseRemoteLog(e.Message)
-		if m, ok := baseLogMessage.(SessionRemoteLog); ok {
+		// If this is a session remote log, add it to the match manager.
+		if m, ok := e.Parsed.(SessionRemoteLog); ok {
 			if err := p.matchLogManager.AddLog(m); err != nil {
 				logger.Warn("Failed to add log", zap.Error(err))
 			}
 		}
 
-		switch msg := evr.ParseRemoteLog(e.Message).(type) {
-		case evr.RemoteLogUserDisconnected:
+		switch msg := e.Parsed.(type) {
+
+		case *evr.RemoteLogUserDisconnected:
 
 			if msg.GameInfoIsPrivate || !msg.GameInfoIsArena {
 				// Don't process disconnects for private games, or non-arena games.
@@ -209,7 +217,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 			update, _ = updates.LoadOrStore(matchID.UUID, &MatchGameStateUpdate{})
 			update.CurrentRoundClockMs = int64(msg.GameInfoGameTime * 1000)
 
-		case evr.RemoteLogGoal:
+		case *evr.RemoteLogGoal:
 
 			sessionID := msg.SessionUUID()
 
@@ -222,10 +230,10 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 
 			update.FromGoal(msg)
 
-		case evr.RemoteLogGhostUser:
+		case *evr.RemoteLogGhostUser:
 			// This is a ghost user message.
 
-		case evr.RemoteLogVOIPLoudness:
+		case *evr.RemoteLogVOIPLoudness:
 
 			sessionID := msg.SessionUUID()
 
@@ -239,11 +247,11 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 			update, _ = updates.LoadOrStore(sessionID, &MatchGameStateUpdate{})
 			update.FromVOIPLoudness(msg)
 
-		case evr.RemoteLogSessionStarted:
+		case *evr.RemoteLogSessionStarted:
 
-		case evr.RemoteLogGameSettings:
+		case *evr.RemoteLogGameSettings:
 
-		case evr.RemoteLogCustomizationMetricsPayload:
+		case *evr.RemoteLogCustomizationMetricsPayload:
 
 			if msg.EventType != "item_equipped" {
 				continue
@@ -268,9 +276,9 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				return status.Errorf(codes.Internal, "Failed to store player's profile")
 			}
 
-		case evr.RemoteLogRepairMatrix:
+		case *evr.RemoteLogRepairMatrix:
 
-		case evr.RemoteLogServerConnectionFailed:
+		case *evr.RemoteLogServerConnectionFailed:
 
 		default:
 		}
@@ -305,7 +313,7 @@ func (u *MatchGameStateUpdate) Bytes() []byte {
 	return b
 }
 
-func (u *MatchGameStateUpdate) FromGoal(goal evr.RemoteLogGoal) {
+func (u *MatchGameStateUpdate) FromGoal(goal *evr.RemoteLogGoal) {
 	u.CurrentRoundClockMs = int64(goal.GameInfoGameTime * 1000)
 	u.PauseDuration = time.Duration(AfterGoalDuration+RespawnDuration+CatapultDuration) * time.Second
 	if u.Goals == nil {
@@ -324,6 +332,6 @@ func (u *MatchGameStateUpdate) FromGoal(goal evr.RemoteLogGoal) {
 	})
 }
 
-func (u *MatchGameStateUpdate) FromVOIPLoudness(goal evr.RemoteLogVOIPLoudness) {
+func (u *MatchGameStateUpdate) FromVOIPLoudness(goal *evr.RemoteLogVOIPLoudness) {
 	u.CurrentRoundClockMs = int64(goal.GameInfoGameTime * 1000)
 }

@@ -9,7 +9,7 @@ import (
 )
 
 func TestMatchGameStateUpdate_FromGoal(t *testing.T) {
-	goal := evr.RemoteLogGoal{
+	goal := &evr.RemoteLogGoal{
 		GameInfoGameTime:      123,
 		GoalType:              "header",
 		PlayerInfoDisplayName: "Player1",
