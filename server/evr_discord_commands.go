@@ -1637,6 +1637,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			if err != nil {
 				return err
 			}
+
 			rttMs := int(rtt / 1000000)
 			logger.WithField("label", label).Info("Match created.")
 			content := fmt.Sprintf("Reserved server (%dms ping) for `%s` session. Reservation will timeout in %d minute.\n\nhttps://echo.taxi/spark://c/%s", rttMs, label.Mode.String(), timeoutMinutes, strings.ToUpper(label.ID.UUID.String()))

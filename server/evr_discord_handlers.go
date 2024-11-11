@@ -258,7 +258,7 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 	return label, rtt, nil
 }
 
-func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Logger, userID, guildID string, region, mode, level evr.Symbol, startTime time.Time) (l *MatchLabel, rtt float64, err error) {
+func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Logger, userID, guildID string, region, mode, level evr.Symbol, startTime time.Time) (l *MatchLabel, latencyMillis int, err error) {
 
 	// Find a parking match to prepare
 
@@ -317,6 +317,8 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		return nil, 0, fmt.Errorf("failed to load latency history: %w", err)
 	}
 
+	latencyMap := make(map[MatchID]int)
+
 	labelLatencies := make([]int, len(labels))
 	for _, label := range labels {
 		if history, ok := latencyHistory[label.Broadcaster.Endpoint.GetExternalIP()]; ok && len(history) != 0 {
@@ -327,7 +329,7 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 			}
 			average /= len(history)
 			labelLatencies = append(labelLatencies, average)
-
+			latencyMap[label.ID] = average
 		} else {
 
 			labelLatencies = append(labelLatencies, 0)
@@ -359,5 +361,9 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		return nil, -1, fmt.Errorf("failed to prepare session: %w", err)
 	}
 
-	return label, rtt, nil
+	if rtt, ok := latencyMap[label.ID]; ok {
+		latencyMillis = rtt
+	}
+
+	return label, latencyMillis, nil
 }
