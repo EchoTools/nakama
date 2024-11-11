@@ -38,7 +38,7 @@ func (p *EvrPipeline) lobbyFindSpectate(ctx context.Context, logger *zap.Logger,
 	for {
 		select {
 		case <-ctx.Done():
-			return nil
+			return ctx.Err()
 		case <-listIntervalDelay.C:
 		case <-time.After(3 * time.Second):
 		}
