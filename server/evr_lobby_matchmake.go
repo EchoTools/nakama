@@ -18,8 +18,7 @@ const (
 	LatencyCacheRefreshInterval = time.Hour * 3
 	LatencyCacheExpiry          = time.Hour * 72 // 3 hours
 
-	MatchmakingStorageCollection = "MatchmakingRegistry"
-	LatencyCacheStorageKey       = "LatencyCache"
+	LatencyCacheStorageKey = "LatencyCache"
 )
 
 const (

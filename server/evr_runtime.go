@@ -518,7 +518,7 @@ func RegisterIndexes(initializer runtime.Initializer) error {
 	}
 
 	name = ActivePartyGroupIndex
-	collection = MatchmakingStorageCollection
+	collection = MatchmakingConfigStorageCollection
 	key = MatchmakingConfigStorageKey // Set to empty string to match all keys instead
 	fields = []string{"group_id"}     // index on these fields
 	maxEntries = 100000
@@ -1005,28 +1005,29 @@ func GetPlayerRating(ctx context.Context, db *sql.DB, userID string) (*types.Rat
 	return &playerStats, nil
 }
 
-func GetPartyGroupUserIDs(ctx context.Context, db *sql.DB, groupName string) ([]string, error) {
+func GetPartyGroupUserIDs(ctx context.Context, nk runtime.NakamaModule, groupName string) ([]string, error) {
 	if groupName == "" {
 		return nil, status.Error(codes.InvalidArgument, "user ID is required")
 	}
-	query := "SELECT user_id FROM storage WHERE collection = $1 AND key = $2 AND value->>'group_id' = $3"
 
-	var dbUserID string
-
-	rows, err := db.QueryContext(ctx, query, MatchmakingStorageCollection, MatchmakingConfigStorageKey, groupName)
+	objs, err := nk.StorageIndexList(ctx, SystemUserID, ActivePartyGroupIndex, fmt.Sprintf("+value.group_id:%s", groupName), 100)
 	if err != nil {
 		return nil, status.Error(codes.Internal, "An error occurred while trying to list group IDs.")
 	}
 
-	userIDs := make([]string, 0, 10)
-
-	for rows.Next() {
-		if err := rows.Scan(&dbUserID); err != nil {
-			return nil, err
-		}
-		userIDs = append(userIDs, dbUserID)
+	if len(objs.Objects) == 0 {
+		return nil, status.Error(codes.NotFound, "party group not found")
 	}
-	_ = rows.Close()
+
+	userIDs := make([]string, 0, len(objs.Objects))
+
+	for _, obj := range objs.Objects {
+		if obj.GetUserId() == SystemUserID {
+			continue
+		}
+		userIDs = append(userIDs, obj.GetUserId())
+	}
+
 	return userIDs, nil
 }
 

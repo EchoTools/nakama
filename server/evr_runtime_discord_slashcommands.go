@@ -2012,13 +2012,13 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 
 				//logger = logger.WithField("group_id", matchmakingConfig.GroupID)
-				_, subject, err := GetLobbyGroupID(ctx, d.db, userID)
+				groupName, partyUUID, err := GetLobbyGroupID(ctx, d.db, userID)
 				if err != nil {
 					return fmt.Errorf("failed to get party group ID: %w", err)
 				}
 				// Look for presences
 
-				partyMembers, err := nk.StreamUserList(StreamModeParty, subject.String(), "", d.pipeline.node, false, true)
+				partyMembers, err := nk.StreamUserList(StreamModeParty, partyUUID.String(), "", d.pipeline.node, false, true)
 				if err != nil {
 					return fmt.Errorf("failed to list stream users: %w", err)
 				}
@@ -2029,7 +2029,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 
 				// Get a list of the all the inactive users in the party group
-				userIDs, err := GetPartyGroupUserIDs(ctx, d.db, subject.String())
+				userIDs, err := GetPartyGroupUserIDs(ctx, d.nk, groupName)
 				if err != nil {
 					return fmt.Errorf("failed to get party group user IDs: %w", err)
 				}
@@ -2061,7 +2061,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						b.WriteString("<@" + discordID + ">")
 					}
 					if len(inactiveIDs) > 0 {
-						b.WriteString("\n\nInactive members:\n")
+						b.WriteString("\n\nInactive or offline members:\n")
 						for i, discordID := range inactiveIDs {
 							if i > 0 {
 								b.WriteString(", ")
