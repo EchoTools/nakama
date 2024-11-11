@@ -57,12 +57,15 @@ func (p *EvrPipeline) lobbySessionRequest(ctx context.Context, logger *zap.Logge
 		}
 	*/
 
-	lobbyParams, err := NewLobbyParametersFromRequest(ctx, logger, session, in.(evr.LobbySessionRequest))
-	if err != nil {
-		return fmt.Errorf("failed to create lobby parameters: %w", err)
-	}
-
 	go func() {
+
+		lobbyParams, err := NewLobbyParametersFromRequest(ctx, logger, session, in.(evr.LobbySessionRequest))
+		if err != nil {
+			logger.Error("Failed to create lobby parameters", zap.Error(err))
+			if err := session.SendEvr(LobbySessionFailureFromError(request.GetMode(), request.GetGroupID(), err)); err != nil {
+				logger.Error("Failed to send lobby session failure message", zap.Error(err))
+			}
+		}
 
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
