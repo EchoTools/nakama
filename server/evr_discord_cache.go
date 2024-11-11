@@ -494,8 +494,19 @@ func (d *DiscordCache) updateGuild(ctx context.Context, logger *zap.Logger, guil
 		}
 		ownerUserID, _, _, err = d.nk.AuthenticateCustom(ctx, guild.OwnerID, ownerMember.User.Username, true)
 		if err != nil {
+			// Leave guilds where the owner is globally banned.
+			if status.Code(err) == codes.PermissionDenied {
+
+				logger.Warn("Guild owner is globally banned. Leaving guild.", zap.String("guild_id", guild.ID), zap.String("owner_id", guild.OwnerID))
+				if err := d.dg.GuildLeave(guild.ID); err != nil {
+					return fmt.Errorf("error leaving guild: %w", err)
+				}
+
+				return nil
+			}
 			return fmt.Errorf("failed to authenticate (or create) guild owner %s: %w", guild.OwnerID, err)
 		}
+
 	}
 
 	groupID := d.GuildIDToGroupID(guild.ID)
