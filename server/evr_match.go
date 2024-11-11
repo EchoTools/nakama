@@ -387,7 +387,7 @@ func (m *EvrMatch) processJoin(state *MatchLabel, logger runtime.Logger, entrant
 			return hasReservation, ErrJoinRejectReasonFailedToAssignTeam
 
 		case evr.TeamOrange, evr.TeamBlue:
-			if state.RoleCount(entrant.RoleAlignment) > state.TeamSize {
+			if state.RoleCount(entrant.RoleAlignment)+1 > state.TeamSize {
 				return hasReservation, ErrJoinRejectReasonLobbyFull
 			}
 		}
