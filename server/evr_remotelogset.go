@@ -138,8 +138,10 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 
 		// If this is a session remote log, add it to the match manager.
 		if m, ok := e.Parsed.(SessionRemoteLog); ok {
-			if err := p.matchLogManager.AddLog(m); err != nil {
-				logger.Warn("Failed to add log", zap.Error(err))
+			if p.matchLogManager != nil {
+				if err := p.matchLogManager.AddLog(m); err != nil {
+					logger.Warn("Failed to add log", zap.Error(err))
+				}
 			}
 		}
 
