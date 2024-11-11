@@ -179,7 +179,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 			// Check if this user has 2FA enabled
 			select {
 			case <-ctx.Done():
-				return settings, fmt.Errorf("context cancelled")
+				return settings, ctx.Err()
 			case ok := <-allowed:
 				if !ok {
 					return settings, fmt.Errorf("you must enable 2FA on your Discord account to play")

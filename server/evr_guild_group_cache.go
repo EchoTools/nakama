@@ -50,6 +50,7 @@ func (g *GuildGroupCache) Start() {
 			select {
 			case <-g.ctx.Done():
 				g.Stop()
+				return
 			case <-guildGroupTicker.C:
 			}
 

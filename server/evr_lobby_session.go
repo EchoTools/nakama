@@ -53,11 +53,10 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 			case nil:
 				// Match found.
 				return nil
-			case context.Canceled, context.DeadlineExceeded:
-				if err == context.Canceled {
-					logger.Debug("Matchmaking context canceled")
-					return nil
-				}
+			case context.Canceled:
+				logger.Debug("Matchmaking context canceled")
+				return nil
+			case context.DeadlineExceeded:
 				logger.Warn("Matchmaking timed out", zap.Error(err))
 				return NewLobbyError(Timeout, "matchmaking timed out")
 			default:
