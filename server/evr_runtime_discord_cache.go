@@ -109,6 +109,8 @@ func (c *DiscordCache) Start() {
 					if err := c.SyncUser(c.ctx, entry.UserID); err != nil {
 						logger.Warn("Error syncing user", zap.String("user_id", entry.UserID), zap.Error(err))
 					}
+				} else if entry.GroupID == uuid.Nil.String() {
+					logger.Warn("Invalid group ID", zap.String("user_id", entry.UserID), zap.String("group_id", entry.GroupID))
 				} else {
 					logger.Debug("Syncing guild group member", zap.String("user_id", entry.UserID), zap.String("group_id", entry.GroupID))
 					if err := c.SyncGuildGroupMember(c.ctx, entry.UserID, entry.GroupID); err != nil {
