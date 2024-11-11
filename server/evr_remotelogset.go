@@ -169,7 +169,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				continue
 			}
 
-			userID, err := GetUserIDByEvrID(ctx, p.db, msg.PlayerInfoUserid)
+			userID, err := GetUserIDByEvrID(ctx, p.db, msg.PlayerEvrID)
 			if err != nil || userID == "" {
 				logger.Error("Failed to get user ID by evr ID", zap.Error(err))
 				continue
@@ -183,7 +183,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 
 			var username string
 			for _, player := range label.Players {
-				if player.EvrID.String() == msg.PlayerInfoUserid {
+				if player.EvrID.String() == msg.PlayerEvrID {
 					username = player.Username
 					break
 				}
@@ -215,7 +215,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				logger.Error("Failed to save player's profile")
 			}
 			update, _ = updates.LoadOrStore(matchID.UUID, &MatchGameStateUpdate{})
-			update.CurrentRoundClockMs = int64(msg.GameInfoGameTime * 1000)
+			update.CurrentGameClock = time.Duration(msg.GameInfoGameTime) * time.Second
 
 		case *evr.RemoteLogGoal:
 
@@ -293,8 +293,9 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 }
 
 type MatchGameStateUpdate struct {
-	GameState
-	PauseDuration time.Duration `json:"pause_duration,omitempty"`
+	CurrentGameClock time.Duration `json:"current_game_clock,omitempty"`
+	PauseDuration    time.Duration `json:"pause_duration,omitempty"`
+	Goals            []*MatchGoal  `json:"goals,omitempty"`
 }
 
 func (u *MatchGameStateUpdate) String() string {
@@ -314,8 +315,17 @@ func (u *MatchGameStateUpdate) Bytes() []byte {
 }
 
 func (u *MatchGameStateUpdate) FromGoal(goal *evr.RemoteLogGoal) {
-	u.CurrentRoundClockMs = int64(goal.GameInfoGameTime * 1000)
-	u.PauseDuration = time.Duration(AfterGoalDuration+RespawnDuration+CatapultDuration) * time.Second
+
+	pauseDuration := 0 * time.Second
+
+	if goal.GameInfoIsArena && !goal.GameInfoIsPrivate {
+		// If the game is an arena game, and not private, then pause the clock after the goal.
+		pauseDuration = AfterGoalDuration + RespawnDuration + CatapultDuration
+	}
+
+	u.CurrentGameClock = time.Duration(goal.GameInfoGameTime) * time.Second
+	u.PauseDuration = pauseDuration
+
 	if u.Goals == nil {
 		u.Goals = make([]*MatchGoal, 0, 1)
 	}
@@ -333,5 +343,5 @@ func (u *MatchGameStateUpdate) FromGoal(goal *evr.RemoteLogGoal) {
 }
 
 func (u *MatchGameStateUpdate) FromVOIPLoudness(goal *evr.RemoteLogVOIPLoudness) {
-	u.CurrentRoundClockMs = int64(goal.GameInfoGameTime * 1000)
+	u.CurrentGameClock = time.Duration(goal.GameInfoGameTime)
 }

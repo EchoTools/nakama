@@ -523,7 +523,7 @@ type RemoteLogUserDisconnected struct {
 	GameInfoMatchType      string  `json:"[game_info][match_type]"`
 	PlayerInfoDisplayname  string  `json:"[player_info][displayname]"`
 	PlayerInfoTeamid       int64   `json:"[player_info][teamid]"`
-	PlayerInfoUserid       string  `json:"[player_info][userid]"`
+	PlayerEvrID            string  `json:"[player_info][userid]"`
 	SessionUUIDStr         string  `json:"[session][uuid]"`
 	Message                string  `json:"message"`
 	MessageType            string  `json:"message_type"`

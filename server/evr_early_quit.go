@@ -59,15 +59,15 @@ func (s *EarlyQuitStatistics) ApplyEarlyQuitPenalty(logger *zap.Logger, userID s
 		return
 	}
 
-	gameClock := label.GameState.CurrentRoundClockMs
-	roundDuration := label.GameState.RoundDurationMs
+	gameClock := label.GameState.RoundClock.Current()
+	roundDuration := label.GameState.RoundClock.Duration
 
 	if gameClock == 0 || roundDuration == 0 {
 		// The game has not started yet. No penalty is applied.
 		return
 	}
 
-	remainingTime := label.GameState.RemainingTime()
+	remainingTime := label.GameState.RoundClock.Remaining()
 	if remainingTime > 0 {
 		// The game is still in progress. Set a penalty timer for double the length of the game time remaining.
 		expiry := time.Now().Add(remainingTime * 2)

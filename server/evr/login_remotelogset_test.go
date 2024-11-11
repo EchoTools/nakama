@@ -86,7 +86,7 @@ func TestParseRemoteLog(t *testing.T) {
 				GameInfoMatchType:      "Echo_Arena_Private",
 				PlayerInfoDisplayname:  "sprockee",
 				PlayerInfoTeamid:       1,
-				PlayerInfoUserid:       "OVR-ORG-123412341234",
+				PlayerEvrID:            "OVR-ORG-123412341234",
 				SessionUUIDStr:         "{CC09F341-AF21-4BDF-AB77-1083AD1B3C1E}",
 				Message:                "User disconnected while game still playing",
 				MessageType:            "USER_DISCONNECT",

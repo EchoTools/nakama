@@ -35,13 +35,13 @@ const (
 	DefaultPublicCombatTeamSize = 5
 
 	// Defaults for public arena matches
-	RoundDuration              = 300
-	AfterGoalDuration          = 15
-	RespawnDuration            = 3
-	RoundCatapultDelayDuration = 5
-	CatapultDuration           = 15
-	RoundWaitDuration          = 59
-	PreMatchWaitTime           = 45
+	RoundDuration              = 300 * time.Second
+	AfterGoalDuration          = 15 * time.Second
+	RespawnDuration            = 3 * time.Second
+	RoundCatapultDelayDuration = 5 * time.Second
+	CatapultDuration           = 15 * time.Second
+	RoundWaitDuration          = 59 * time.Second
+	PreMatchWaitTime           = 45 * time.Second
 	PublicMatchWaitTime        = PreMatchWaitTime + CatapultDuration + RoundCatapultDelayDuration
 )
 
@@ -474,10 +474,10 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 		}
 
 		// If the round clock is being used, set the join clock time
-		if state.GameState != nil && state.GameState.UnpauseTimeMs > 0 {
+		if state.GameState != nil && state.GameState.RoundClock != nil {
 			// Do not overwrite an existing value
 			if _, ok := state.joinTimeMilliseconds[p.GetSessionId()]; !ok {
-				state.joinTimeMilliseconds[p.GetSessionId()] = state.GameState.CurrentRoundClockMs
+				state.joinTimeMilliseconds[p.GetSessionId()] = state.GameState.RoundClock.Current().Milliseconds()
 			}
 		}
 
@@ -632,14 +632,14 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 				if len(u.Goals) > 0 {
 					gs.Goals = append(gs.Goals, u.Goals...)
 				}
-
-				gs.IsRoundOver = u.IsRoundOver
-				gs.CurrentRoundClockMs = u.CurrentRoundClockMs
-
-				if u.PauseDuration != 0 {
-					gs.IsPaused = true
-					gs.UnpauseTimeMs = time.Now().UTC().UnixMilli() + u.PauseDuration.Milliseconds()
-					gs.ClockPauseMs = u.CurrentRoundClockMs
+				if state.GameState.RoundClock != nil {
+					if u.CurrentGameClock != 0 {
+						if u.PauseDuration != 0 {
+							gs.RoundClock.UpdateWithPause(u.CurrentGameClock, u.PauseDuration)
+						} else {
+							gs.RoundClock.Update(u.CurrentGameClock)
+						}
+					}
 				}
 
 			}
@@ -1030,14 +1030,13 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk run
 	switch state.Mode {
 	case evr.ModeArenaPublic:
 		state.GameState = &GameState{
-			RoundDurationMs:     RoundDuration * 1000,
-			CurrentRoundClockMs: 0,
-			UnpauseTimeMs:       time.Now().UTC().UnixMilli() + PublicMatchWaitTime,
-			Goals:               make([]*MatchGoal, 0),
+			RoundClock: NewRoundClock(RoundDuration, time.Now().Add(PublicMatchWaitTime)),
+			Goals:      make([]*MatchGoal, 0),
 		}
 	case evr.ModeArenaPrivate:
 		state.GameState = &GameState{
-			Goals: make([]*MatchGoal, 0),
+			RoundClock: NewRoundClock(0, time.Time{}),
+			Goals:      make([]*MatchGoal, 0),
 		}
 	}
 
