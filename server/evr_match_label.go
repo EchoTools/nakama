@@ -316,14 +316,12 @@ func (l *MatchLabel) PublicView() *MatchLabel {
 	var gs *GameState
 	if l.GameState != nil {
 		gs = &GameState{
-			CurrentRoundClockMs: l.GameState.CurrentRoundClockMs,
-			RoundDurationMs:     l.GameState.RoundDurationMs,
-			IsPaused:            l.GameState.IsPaused,
-			IsRoundOver:         l.GameState.IsRoundOver,
-			UnpauseTimeMs:       l.GameState.UnpauseTimeMs,
-			ClockPauseMs:        l.GameState.ClockPauseMs,
-			BlueScore:           l.GameState.BlueScore,
-			OrangeScore:         l.GameState.OrangeScore,
+
+			BlueScore:   l.GameState.BlueScore,
+			OrangeScore: l.GameState.OrangeScore,
+		}
+		if l.GameState.RoundClock != nil {
+			gs.RoundClock = l.GameState.RoundClock.LatestAsNewClock()
 		}
 	}
 	v := &MatchLabel{
