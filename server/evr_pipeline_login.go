@@ -234,7 +234,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 			return settings, fmt.Errorf("guild groups not found")
 		}
 
-		logger.Warn("User is not in the active group", zap.String("userId", userID), zap.String("groupID", groupID.String()))
+		logger.Warn("User is not in the active group", zap.String("uid", userID), zap.String("gid", groupID.String()))
 
 		groupIDs := make([]string, 0, len(membershipMap))
 		for id := range membershipMap {
@@ -676,7 +676,7 @@ func GetEULAVersion(ctx context.Context, db *sql.DB, userID string) (int, int, e
 		}
 	}
 	if !found {
-		return 0, 0, status.Error(codes.NotFound, "server profile not found")
+		return 0, 0, status.Error(codes.NotFound, "EULA version not found")
 	}
 	return dbEULAVersion, dbGameAdminVersion, nil
 }
