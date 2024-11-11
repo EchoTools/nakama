@@ -426,7 +426,6 @@ func writeAuditObjects(ctx context.Context, session *sessionWS, userId string, e
 				Value:           data,
 				PermissionRead:  perm,
 				PermissionWrite: perm,
-				Version:         "",
 			},
 		},
 		{
@@ -437,7 +436,6 @@ func writeAuditObjects(ctx context.Context, session *sessionWS, userId string, e
 				Value:           string(loginPayloadJson),
 				PermissionRead:  perm,
 				PermissionWrite: perm,
-				Version:         "",
 			},
 		},
 	}
