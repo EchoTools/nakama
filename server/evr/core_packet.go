@@ -18,7 +18,7 @@ var (
 	ErrSymbolNotFound = errors.New("symbol not found")
 	ErrParseError     = errors.New("parse error")
 
-	SymbolTypes = map[uint64]interface{}{
+	SymbolTypes = map[uint64]Message{
 		// This is the complete list of implemented message types.
 		/*
 			0x4c1fed6cb4d96c64: (*SNSLobbySmiteEntrant)(nil),
@@ -55,11 +55,10 @@ var (
 		0x7777777777770500: (*GameServerJoinAttempt)(nil),
 		0x7777777777770600: (*GameServerJoinAllowed)(nil),
 		0x7777777777770700: (*GameServerJoinRejected)(nil),
-		0x7777777777770800: (*BroadcasterPlayerRemoved)(nil),
+		0x7777777777770800: (*GameServerPlayerRemoved)(nil),
 		0x7777777777770900: (*BroadcasterChallengeRequest)(nil),
 		0x7777777777770a00: (*GameServerChallengeResponse)(nil),
 		0x7777777777777777: (*BroadcasterRegistrationRequest)(nil),
-		0xe581ba9febf68535: (*GameServerRegistrationRequest)(nil),
 		0x82869f0b37eb4378: (*ConfigRequest)(nil),
 		0xb9cdaf586f7bd012: (*ConfigSuccess)(nil),
 		0x9e687a63dddd3870: (*ConfigFailure)(nil),
@@ -89,6 +88,20 @@ var (
 		0xfcced6f169822bb8: (*DocumentRequest)(nil),
 		0xff71856af7e0fbd9: (*LobbyEntrantsV0)(nil),
 		//0x080495a43a6b7251: (*EarlyQuitConfig)(nil),
+		0xe581ba9febf68535: (*EchoToolsGameServerRegistrationRequestV1)(nil),
+		0x340f0161a85febcb: (*EchoToolsLobbySessionSuccessV1)(nil),
+		0x353172e01aa544a5: (*EchoToolsLobbySessionStartV1)(nil),
+		0x350d1070be48ebcb: (*EchoToolsLobbySessionStartedV1)(nil),
+		0x352768e50db544a5: (*EchoToolsLobbySessionEndedV1)(nil),
+		0x7d5abda8e440b617: (*EchoToolsLobbySessionErroredV1)(nil),
+		0xa2a42bc683ebb3fd: (*EchoToolsLobbySessionLockV1)(nil),
+		0x6fe3fd47131b6713: (*EchoToolsLobbySessionUnlockV1)(nil),
+		0x66b54df504afebcd: (*EchoToolsLobbyEntrantNewV1)(nil),
+		0x174e85ca13e1a637: (*EchoToolsLobbyEntrantAcceptV1)(nil),
+		0x04488cca00e1a637: (*EchoToolsLobbyEntrantRejectV1)(nil),
+		0xe5ef595892ea3d99: (*EchoToolsLobbyEntrantRemovedV1)(nil),
+		0xa2a423c894e1b3fd: (*EchoToolsLobbySessionDataV1)(nil),
+		0xb26450c1a5ba5d79: (*EchoToolsLobbyStatusV1)(nil),
 	}
 
 	// Create a reverse lookup map for the symbol types.

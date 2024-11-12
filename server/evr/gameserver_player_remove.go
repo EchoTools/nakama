@@ -6,32 +6,32 @@ import (
 	"github.com/gofrs/uuid/v5"
 )
 
-// BroadcasterPlayerRemoved is a message from broadcaster to nakama, indicating a player was removed by the game server.
+// GameServerPlayerRemoved is a message from broadcaster to nakama, indicating a player was removed by the game server.
 // NOTE: This is an unofficial message created for Echo Relay.
-type BroadcasterPlayerRemoved struct {
+type GameServerPlayerRemoved struct {
 	EntrantID uuid.UUID
 }
 
-func (m *BroadcasterPlayerRemoved) Symbol() Symbol {
+func (m *GameServerPlayerRemoved) Symbol() Symbol {
 	return SymbolOf(m)
 }
-func (m BroadcasterPlayerRemoved) Token() string {
+func (m GameServerPlayerRemoved) Token() string {
 	return "ERGameServerPlayerRemove"
 }
 
 // NewERGameServerRemovePlayer initializes a new ERGameServerRemovePlayer message.
-func NewBroadcasterRemovePlayer(sid uuid.UUID) *BroadcasterPlayerRemoved {
-	return &BroadcasterPlayerRemoved{
+func NewBroadcasterRemovePlayer(sid uuid.UUID) *GameServerPlayerRemoved {
+	return &GameServerPlayerRemoved{
 		EntrantID: sid,
 	}
 }
 
-func (m *BroadcasterPlayerRemoved) Stream(s *EasyStream) error {
+func (m *GameServerPlayerRemoved) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
 		func() error { return s.StreamGuid(&m.EntrantID) },
 	})
 }
-func (m *BroadcasterPlayerRemoved) String() string {
+func (m *GameServerPlayerRemoved) String() string {
 
 	return fmt.Sprintf("BroadcasterPlayerRemoved(player_session=%s)", m.EntrantID.String())
 }

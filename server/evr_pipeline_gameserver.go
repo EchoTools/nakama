@@ -54,9 +54,21 @@ func errFailedRegistration(session *sessionWS, logger *zap.Logger, err error, co
 	return fmt.Errorf("failed to register game server: %w", err)
 }
 
-// broadcasterRegistrationRequest is called when the broadcaster has sent a registration request.
 func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.BroadcasterRegistrationRequest)
+	return p.gameServerRegistration(ctx, logger, session, request.ServerId, request.InternalIP, request.Port, request.Region, request.VersionLock, 0)
+}
+
+func (p *EvrPipeline) echoToolsGameServerRegistrationRequestV1(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
+	request := in.(*evr.EchoToolsGameServerRegistrationRequestV1)
+
+	return p.gameServerRegistration(ctx, logger, session, request.ServerId, request.InternalIP, request.Port, request.Region, request.VersionLock, request.TimeStepUsecs)
+}
+
+func (p *EvrPipeline) gameServerRegistration(ctx context.Context, logger *zap.Logger, session *sessionWS, serverID uint64, internalIP net.IP, listenPort uint16, region evr.Symbol, versionLock uint64, timeStepUsecs uint32) error {
+
+	// broadcasterRegistrationRequest is called when the broadcaster has sent a registration request.
+
 	discordId := ""
 
 	if session.userID.IsNil() {
@@ -112,29 +124,29 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 	}
 
 	regions := make([]evr.Symbol, 0)
-	for _, region := range sessionParams.ServerRegions {
-		regions = append(regions, evr.ToSymbol(region))
+	for _, r := range sessionParams.ServerRegions {
+		regions = append(regions, evr.ToSymbol(r))
 	}
 
 	if len(regions) == 0 {
 		regions = append(regions, evr.DefaultRegion)
 	}
 
-	if request.Region != evr.DefaultRegion {
-		regions = append(regions, request.Region)
+	if region != evr.DefaultRegion {
+		regions = append(regions, region)
 	}
 
 	logger = logger.With(zap.String("discord_id", discordId), zap.Strings("group_ids", groupIDs), zap.Strings("tags", newParams.ServerTags), zap.Strings("regions", lo.Map(regions, func(v evr.Symbol, _ int) string { return v.String() })))
 
 	// Add the server id as a region
-	regions = append(regions, evr.ToSymbol(request.ServerId))
+	regions = append(regions, evr.ToSymbol(serverID))
 
 	slices.Sort(regions)
 	regions = slices.Compact(regions)
 
 	UpdateParams(ctx, &newParams)
 
-	err = session.BroadcasterSession(session.userID, "broadcaster:"+session.Username(), request.ServerId)
+	err = session.BroadcasterSession(session.userID, "broadcaster:"+session.Username(), serverID)
 	if err != nil {
 		return fmt.Errorf("failed to create broadcaster session: %w", err)
 	}
@@ -143,7 +155,7 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 
 	// Set the external address in the request (to use for the registration cache).
 	externalIP := net.ParseIP(session.ClientIP())
-	externalPort := request.Port
+	externalPort := listenPort
 
 	params, ok := LoadParams(ctx)
 	if !ok {
@@ -177,7 +189,7 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 	}
 
 	// Create the broadcaster config
-	config := broadcasterConfig(session.UserID().String(), session.id.String(), request.ServerId, request.InternalIP, externalIP, request.Port, regions, request.VersionLock, params.ServerTags, params.SupportedFeatures)
+	config := broadcasterConfig(session.UserID().String(), session.id.String(), serverID, internalIP, externalIP, externalPort, regions, versionLock, params.ServerTags, params.SupportedFeatures)
 
 	// Add the operators userID to the group ids. this allows any host to spawn on a server they operate.
 	groupUUIDs := make([]uuid.UUID, 0, len(groupIDs))
@@ -186,7 +198,7 @@ func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger
 	}
 	config.GroupIDs = groupUUIDs
 
-	logger = logger.With(zap.String("internal_ip", request.InternalIP.String()), zap.String("external_ip", externalIP.String()), zap.Uint16("port", request.Port))
+	logger = logger.With(zap.String("internal_ip", internalIP.String()), zap.String("external_ip", externalIP.String()), zap.Uint16("port", externalPort))
 	// Validate connectivity to the broadcaster.
 	// Wait 2 seconds, then check
 
@@ -596,7 +608,7 @@ func (p *EvrPipeline) broadcasterPlayerAccept(ctx context.Context, logger *zap.L
 
 // broadcasterPlayerRemoved is called when a player has been removed from the match.
 func (p *EvrPipeline) broadcasterPlayerRemoved(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	message := in.(*evr.BroadcasterPlayerRemoved)
+	message := in.(*evr.GameServerPlayerRemoved)
 	matchID, _, err := GameServerBySessionID(p.runtimeModule, session.ID())
 	if err != nil {
 		logger.Warn("Failed to get broadcaster's match by session ID", zap.Error(err))

@@ -20,13 +20,6 @@ type BroadcasterRegistrationRequest struct {
 	VersionLock uint64
 }
 
-func (m BroadcasterRegistrationRequest) Symbol() Symbol {
-	return 0x7777777777777777
-}
-func (m BroadcasterRegistrationRequest) Token() string {
-	return "ERGameServerRegistrationRequest"
-}
-
 func NewBroadcasterRegistrationRequest(serverId uint64, internalAddress net.IP, port uint16, regionSymbol Symbol, versionLock uint64) *BroadcasterRegistrationRequest {
 	return &BroadcasterRegistrationRequest{
 		ServerId:    serverId,
@@ -54,9 +47,10 @@ func (m *BroadcasterRegistrationRequest) Stream(s *EasyStream) error {
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.VersionLock) },
 	})
 }
+
 func (m BroadcasterRegistrationRequest) String() string {
-	return fmt.Sprintf("%s(server_id=%d, internal_ip=%s, port=%d, region=%d, version_lock=%d)",
-		m.Token(),
+	return fmt.Sprintf("%T(server_id=%d, internal_ip=%s, port=%d, region=%d, version_lock=%d)",
+		ModeSocialPrivate,
 		m.ServerId,
 		m.InternalIP,
 		m.Port,
