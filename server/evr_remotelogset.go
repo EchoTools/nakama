@@ -48,9 +48,22 @@ OuterLoop:
 		}
 
 		if message, ok := strMap["message"].(string); ok {
-			if message == "CUSTOMIZATION_METRICS_PAYLOAD" {
-				strMap["message_type"] = "customization_metrics_payload"
+
+			switch message {
+
+			// Ignore customization interactions.
+			case "Podium Interaction":
+				fallthrough
+			case "Customization Item Preview":
+				fallthrough
+			case "Customization Item Equip":
+				fallthrough
+			case "server library loaded":
+				continue
+			case "r15 net game error message":
+				continue
 			}
+
 		}
 
 		if category, ok := strMap["category"].(string); ok {
@@ -76,7 +89,7 @@ OuterLoop:
 		parsed, err := evr.RemoteLogMessageFromMessage(strMap, bytes)
 		if err != nil {
 			if errors.Is(err, evr.ErrUnknownRemoteLogMessageType) {
-				logger.Warn("Unknown remote log message type", zap.String("messageType", messageType))
+				logger.Warn("Unknown remote log message type", zap.String("messageType", messageType), zap.String("log", logString))
 			} else {
 				logger.Debug("Failed to parse remote log message", zap.Error(err))
 			}
@@ -141,14 +154,16 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 	for _, e := range entries {
 		var update *MatchGameStateUpdate
 
-		// If this is a session remote log, add it to the match manager.
-		if m, ok := e.Parsed.(SessionRemoteLog); ok {
-			if p.matchLogManager != nil {
-				if err := p.matchLogManager.AddLog(m); err != nil {
-					logger.Warn("Failed to add log", zap.Error(err))
+		/*
+			// If this is a session remote log, add it to the match manager.
+			if m, ok := e.Parsed.(SessionRemoteLog); ok {
+				if p.matchLogManager != nil {
+					if err := p.matchLogManager.AddLog(m); err != nil {
+						logger.Warn("Failed to add log", zap.Error(err))
+					}
 				}
 			}
-		}
+		*/
 
 		switch msg := e.Parsed.(type) {
 
