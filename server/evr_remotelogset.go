@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -74,7 +75,11 @@ OuterLoop:
 
 		parsed, err := evr.RemoteLogMessageFromMessage(strMap, bytes)
 		if err != nil {
-			logger.Debug("Failed to parse remote log message", zap.Error(err))
+			if errors.Is(err, evr.ErrUnknownRemoteLogMessageType) {
+				logger.Warn("Unknown remote log message type", zap.String("messageType", messageType))
+			} else {
+				logger.Debug("Failed to parse remote log message", zap.Error(err))
+			}
 			parsed = evr.RemoteLogString(logString)
 		}
 

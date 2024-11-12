@@ -68,7 +68,7 @@ func UUIDFromRemoteLogString(s string) uuid.UUID {
 }
 
 var (
-	ErrRemoteLogMessageUnknownType = errors.New("unknown message type")
+	ErrUnknownRemoteLogMessageType = errors.New("unknown message type")
 )
 
 func RemoteLogMessageFromMessage(strMap map[string]interface{}, data []byte) (any, error) {
@@ -133,7 +133,7 @@ func RemoteLogMessageFromMessage(strMap map[string]interface{}, data []byte) (an
 	}
 
 	if m == nil {
-		return nil, fmt.Errorf("unknown message type")
+		return nil, ErrUnknownRemoteLogMessageType
 	}
 
 	if err := json.Unmarshal(data, m); err != nil {
