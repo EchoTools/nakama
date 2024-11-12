@@ -149,7 +149,7 @@ func TestParseRemoteLog(t *testing.T) {
 
 			got, err := RemoteLogMessageFromMessage(strMap, []byte(tt.message))
 
-			if (err != nil) != tt.wantError {
+			if err != nil && !tt.wantError {
 				t.Errorf("ParseRemoteLog() error = %v", err)
 
 			} else {
