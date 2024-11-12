@@ -479,7 +479,7 @@ func (d *DiscordCache) updateGuild(ctx context.Context, logger *zap.Logger, guil
 			return fmt.Errorf("failed to authenticate (or create) bot user %s: %w", d.dg.State.User.ID, err)
 		}
 		if created {
-			// Add to teh global bots group
+			// Add to the global bots group
 			if err := d.nk.GroupUserJoin(ctx, GroupGlobalBots, botUserID, username); err != nil {
 				return fmt.Errorf("error adding bot to global bots group: %w", err)
 			}
@@ -511,6 +511,7 @@ func (d *DiscordCache) updateGuild(ctx context.Context, logger *zap.Logger, guil
 
 	groupID := d.GuildIDToGroupID(guild.ID)
 	if groupID == "" {
+		// This is a new guild.
 
 		gm, err := NewGuildGroupMetadata(guild.ID).MarshalToMap()
 		if err != nil {
@@ -521,6 +522,8 @@ func (d *DiscordCache) updateGuild(ctx context.Context, logger *zap.Logger, guil
 		if err != nil {
 			return fmt.Errorf("error creating group: %w", err)
 		}
+
+		// Invite the owner to the game service guild.
 	} else {
 
 		md, err := GetGuildGroupMetadata(ctx, d.db, groupID)
