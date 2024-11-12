@@ -825,6 +825,7 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 		logger.Warn("Failed to send UserServerProfileUpdateSuccess", zap.Error(err))
 	}
 
+	// Validate the player was in the session
 	matchID, err := NewMatchID(uuid.UUID(request.Payload.SessionID), p.node)
 	if err != nil {
 		return fmt.Errorf("failed to generate matchID: %w", err)
