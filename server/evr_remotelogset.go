@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -11,8 +12,6 @@ import (
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
@@ -63,7 +62,6 @@ OuterLoop:
 			case "r15 net game error message":
 				continue
 			}
-
 		}
 
 		if category, ok := strMap["category"].(string); ok {
@@ -285,17 +283,20 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 			}
 			if category == "" || name == "" {
 				logger.Error("Equipped customization is empty")
+				continue
 			}
 			profile, err := p.profileRegistry.Load(ctx, session.userID)
 			if err != nil {
-				return status.Errorf(codes.Internal, "Failed to load player's profile")
+				return fmt.Errorf("failed to load player's profile: %w", err)
 			}
 			profile.SetEvrID(evrID)
-			p.profileRegistry.UpdateEquippedItem(profile, category, name)
+			if err := p.profileRegistry.UpdateEquippedItem(profile, category, name); err != nil {
+				return fmt.Errorf("failed to update equipped item: %w", err)
+			}
 
 			err = p.profileRegistry.SaveAndCache(ctx, session.userID, profile)
 			if err != nil {
-				return status.Errorf(codes.Internal, "Failed to store player's profile")
+				return fmt.Errorf("failed to save player's profile: %w", err)
 			}
 
 		case *evr.RemoteLogRepairMatrix:
