@@ -22,7 +22,19 @@ import (
 
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/encoding/protojson"
+
+	_ "net/http/pprof"
+
+	// Import for side effects to enable pprof endpoint
+	"net/http"
 )
+
+// Enable pprof profiler
+func init() {
+	go func() {
+		log.Println(http.ListenAndServe("localhost:6060", nil)) // Start HTTP server for profiling
+	}()
+}
 
 var GlobalConfig = &struct {
 	sync.RWMutex
@@ -82,6 +94,7 @@ type EvrPipeline struct {
 	cacheMu sync.Mutex // Writers only
 
 	messageCache *atomic.Value // map[string]evr.Message
+
 }
 
 type ctxDiscordBotTokenKey struct{}
