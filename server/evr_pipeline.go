@@ -113,6 +113,11 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 
 	runtimeLogger := NewRuntimeGoLogger(logger)
 
+	// Load the global settings
+	if _, err := LoadGlobalSettingsData(ctx, nk); err != nil {
+		logger.Fatal("Failed to load global settings", zap.Error(err))
+	}
+
 	botToken, ok := ctx.Value(ctxDiscordBotTokenKey{}).(string)
 	if !ok {
 		panic("Bot token is not set in context.")
