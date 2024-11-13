@@ -21,7 +21,7 @@ type PlayerInfo struct {
 }
 
 func (p *PlayerInfo) IsBackfill() bool {
-	return p.JoinTime != 0.0
+	return p.JoinTime <= 0.0
 }
 
 func (p *PlayerInfo) UUID() uuid.UUID {
