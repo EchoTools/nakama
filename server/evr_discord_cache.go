@@ -37,12 +37,6 @@ type DiscordCache struct {
 	cancelFn context.CancelFunc
 	logger   *zap.Logger
 
-	config          Config
-	metrics         Metrics
-	pipeline        *Pipeline
-	profileRegistry *ProfileRegistry
-	statusRegistry  StatusRegistry
-
 	guildGroupCache *GuildGroupCache
 
 	nk runtime.NakamaModule
@@ -55,7 +49,7 @@ type DiscordCache struct {
 	idcache *MapOf[string, string]
 }
 
-func NewDiscordCache(ctx context.Context, logger *zap.Logger, config Config, metrics Metrics, pipeline *Pipeline, profileRegistry *ProfileRegistry, statusRegistry StatusRegistry, guildGroupCache *GuildGroupCache, nk runtime.NakamaModule, db *sql.DB, dg *discordgo.Session) *DiscordCache {
+func NewDiscordCache(ctx context.Context, logger *zap.Logger, config Config, metrics Metrics, guildGroupCache *GuildGroupCache, nk runtime.NakamaModule, db *sql.DB, dg *discordgo.Session) *DiscordCache {
 	ctx, cancelFn := context.WithCancel(ctx)
 
 	guildGroups := &atomic.Value{}
@@ -65,12 +59,6 @@ func NewDiscordCache(ctx context.Context, logger *zap.Logger, config Config, met
 		ctx:      ctx,
 		cancelFn: cancelFn,
 		logger:   logger,
-
-		config:          config,
-		metrics:         metrics,
-		pipeline:        pipeline,
-		profileRegistry: profileRegistry,
-		statusRegistry:  statusRegistry,
 
 		guildGroupCache: guildGroupCache,
 
@@ -675,7 +663,7 @@ func (d *DiscordCache) checkDisplayName(ctx context.Context, nk runtime.NakamaMo
 }
 
 func (d *DiscordCache) CheckUser2FA(ctx context.Context, userID uuid.UUID) (bool, error) {
-	discordID, err := GetDiscordIDByUserID(ctx, d.pipeline.db, userID.String())
+	discordID, err := GetDiscordIDByUserID(ctx, d.db, userID.String())
 	if err != nil {
 		return false, fmt.Errorf("error getting discord id: %w", err)
 	}
