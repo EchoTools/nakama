@@ -3,12 +3,10 @@ package server
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
 	"slices"
-	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -407,9 +405,11 @@ func (c *DiscordCache) SyncGuildGroupMember(ctx context.Context, userID, groupID
 		if err != nil {
 			logger.Warn("Error checking display name", zap.Error(err))
 		} else {
-			if err := c.recordDisplayName(ctx, c.nk, groupID, accountMetadata.ID(), displayName); err != nil {
-				return fmt.Errorf("error setting display name: %w", err)
+
+			if err := DisplayNameHistoryAdd(ctx, c.nk, accountMetadata.ID(), groupID, displayName); err != nil {
+				return fmt.Errorf("error adding display name history entry: %w", err)
 			}
+
 			accountMetadata.SetGroupDisplayName(groupID, displayName)
 
 			if err := c.nk.AccountUpdateId(ctx, userID, member.User.Username, accountMetadata.MarshalMap(), accountMetadata.GetActiveGroupDisplayName(), "", "", "", ""); err != nil {
@@ -662,74 +662,16 @@ func (d *DiscordCache) checkDisplayName(ctx context.Context, nk runtime.NakamaMo
 		}
 		return "", status.Errorf(codes.AlreadyExists, "username `%s` is already taken", displayName)
 	}
-
-	result, err := nk.StorageRead(ctx, []*runtime.StorageRead{
-		{
-			Collection: DisplayNameCollection,
-			Key:        strings.ToLower(displayName),
-		},
-	})
+	userIDs, err := DisplayNameHistoryActiveList(ctx, nk, displayName)
 	if err != nil {
-		return "", fmt.Errorf("error reading displayNames: %w", err)
+		return "", fmt.Errorf("error getting display name history: %w", err)
 	}
 
-	for _, o := range result {
-		if o.UserId == userID {
-			continue
-		}
-		return "", status.Errorf(codes.AlreadyExists, "display name `%s` is already taken", displayName)
+	if len(userIDs) > 0 {
+		return "", status.Errorf(codes.AlreadyExists, "display name `%s` is already in use by %s", displayName, userIDs)
 	}
 
 	return displayName, nil
-}
-
-func (d *DiscordCache) recordDisplayName(ctx context.Context, nk runtime.NakamaModule, groupID string, userID string, displayName string) error {
-
-	// Purge old display names
-	records, err := GetDisplayNameRecords(ctx, nk, userID)
-	if err != nil {
-		return fmt.Errorf("error getting display names: %w", err)
-	}
-	storageDeletes := []*runtime.StorageDelete{}
-	if len(records) > 2 {
-		// Sort the records by create time
-		sort.SliceStable(records, func(i, j int) bool {
-			return records[i].CreateTime.Seconds > records[j].CreateTime.Seconds
-		})
-		// Delete all but the first two
-		for i := 2; i < len(records); i++ {
-			storageDeletes = append(storageDeletes, &runtime.StorageDelete{
-				Collection: DisplayNameCollection,
-				Key:        records[i].Key,
-				UserID:     userID,
-			})
-		}
-	}
-
-	content := map[string]string{
-		"displayName": displayName,
-	}
-	data, _ := json.Marshal(content)
-
-	// Update the account
-	accountUpdates := []*runtime.AccountUpdate{}
-
-	storageWrites := []*runtime.StorageWrite{
-		{
-			Collection: DisplayNameCollection,
-			Key:        strings.ToLower(displayName),
-			UserID:     userID,
-			Value:      string(data),
-			Version:    "",
-		},
-	}
-
-	walletUpdates := []*runtime.WalletUpdate{}
-	updateLedger := true
-	if _, _, err = nk.MultiUpdate(ctx, accountUpdates, storageWrites, storageDeletes, walletUpdates, updateLedger); err != nil {
-		return fmt.Errorf("error updating account: %w", err)
-	}
-	return nil
 }
 
 func (d *DiscordCache) CheckUser2FA(ctx context.Context, userID uuid.UUID) (bool, error) {

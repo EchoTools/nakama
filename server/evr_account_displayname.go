@@ -7,11 +7,6 @@ import (
 	anyascii "github.com/anyascii/go"
 )
 
-type DisplayNameHistory struct {
-	DisplayName string `json:"display_name"`
-	Timestamp   int64  `json:"timestamp"`
-}
-
 type SuspensionStatus struct {
 	GuildId            string        `json:"guild_id"`
 	GuildName          string        `json:"guild_name"`

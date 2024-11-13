@@ -8,6 +8,7 @@ import (
 	"hash/fnv"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -1165,9 +1166,10 @@ type AccountLookupRPCResponse struct {
 
 func AccountLookupRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 	request := struct {
-		Username  string `json:"username"`
-		UserID    string `json:"user_id"`
-		DiscordID string `json:"discord_id"`
+		Username    string `json:"username"`
+		UserID      string `json:"user_id"`
+		DiscordID   string `json:"discord_id"`
+		DisplayName string `json:"display_name"`
 	}{}
 
 	if payload != "" {
@@ -1187,6 +1189,10 @@ func AccountLookupRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 			// extract the userID from the query string
 			if userID, ok := queryParameters["user_id"]; ok {
 				request.UserID = userID[0]
+			}
+			// extract the p from the query string
+			if p, ok := queryParameters["display_name"]; ok {
+				request.DisplayName = p[0]
 			}
 		}
 	}
@@ -1224,6 +1230,18 @@ func AccountLookupRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		if err != nil {
 			return "", err
 		}
+	case request.DisplayName != "":
+		userIDs, err := DisplayNameHistoryActiveList(ctx, nk, request.DisplayName)
+		if err != nil {
+			return "", err
+		}
+		if len(userIDs) > 1 {
+			return "", fmt.Errorf("multiple users found with display name %s", request.DisplayName)
+		}
+		if len(userIDs) == 0 {
+			return "", nil
+		}
+		userID = userIDs[0]
 	}
 
 	// Get the user's account data.
@@ -1367,6 +1385,85 @@ func PlayerStatisticsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 	rpcResponseCache.Set(cacheKey, payload, 30*time.Second)
 
 	return payload, nil
+}
+
+type AccountSearchRequest struct {
+	DisplayNamePattern string `json:"display_name"`
+}
+
+type DisplayNameMatchItem struct {
+	DisplayName string    `json:"display_name"`
+	UserID      string    `json:"user_id"`
+	GroupID     string    `json:"group_id"`
+	IsCurrent   bool      `json:"is_current"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type AccountSearchResponse struct {
+	DisplayNameMatchList []DisplayNameMatchItem `json:"display_name_matches"`
+}
+
+func AccountSearchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	request := &AccountSearchRequest{}
+	if payload != "" {
+		if err := json.Unmarshal([]byte(payload), &request); err != nil {
+			return "", err
+		}
+	} else {
+
+		queryParameters := ctx.Value(runtime.RUNTIME_CTX_QUERY_PARAMS).(map[string][]string)
+
+		if len(queryParameters) > 0 {
+
+			// extract the p from the query string
+			if p, ok := queryParameters["display_name"]; ok {
+				request.DisplayNamePattern = p[0]
+			}
+		}
+	}
+
+	if request.DisplayNamePattern == "" {
+		return "", runtime.NewError("Display name is empty", StatusInvalidArgument)
+	}
+
+	// Sanitize the display name
+	request.DisplayNamePattern = strings.ToLower(request.DisplayNamePattern)
+
+	query := fmt.Sprintf(".*%s.*", Query.Escape(request.DisplayNamePattern))
+	objects, err := DisplayNameHistorySearch(ctx, nk, query)
+	if err != nil {
+		return "", runtime.NewError(err.Error(), StatusInternalError)
+	}
+
+	matches := make([]DisplayNameMatchItem, 0, len(objects))
+	for matchUserID, history := range objects {
+
+		for groupID, entries := range history.History {
+			for i, e := range entries {
+				displayNameL := strings.ToLower(e.DisplayName)
+				if strings.Contains(displayNameL, request.DisplayNamePattern) {
+					matches = append(matches, DisplayNameMatchItem{
+						DisplayName: e.DisplayName,
+						UserID:      matchUserID,
+						GroupID:     groupID,
+						UpdatedAt:   e.UpdateTime,
+						IsCurrent:   i == len(entries)-1,
+					})
+				}
+			}
+		}
+	}
+
+	response := &AccountSearchResponse{
+		DisplayNameMatchList: matches,
+	}
+
+	responseData, err := json.Marshal(response)
+	if err != nil {
+		return "", runtime.NewError("Failed to marshal response", StatusInternalError)
+	}
+
+	return string(responseData), nil
 }
 
 type StreamJoinRequest struct {

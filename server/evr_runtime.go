@@ -51,6 +51,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 
 	// Register RPC's for device linking
 	rpcs := map[string]func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error){
+		"account/search":                AccountSearchRPC,
 		"account/lookup":                AccountLookupRPC,
 		"account/authenticate/password": AuthenticatePasswordRPC,
 		"link/device":                   LinkDeviceRpc,
@@ -490,11 +491,11 @@ func RegisterIndexes(initializer runtime.Initializer) error {
 	}
 	// Register the DisplayName index for avoiding name collisions
 	// FIXME this needs to be updated for the new login system
-	name = DisplayNameIndex
-	collection = EvrLoginStorageCollection
-	key = ""                          // Set to empty string to match all keys instead
-	fields = []string{"display_name"} // index on these fields
-	maxEntries = 100000
+	name = DisplayNameHistoryCacheIndex
+	collection = DisplayNameCollection
+	key = DisplayNameHistoryKey                      // Set to empty string to match all keys instead
+	fields = []string{"active", "reserved", "cache"} // index on these fields
+	maxEntries = 1000000
 	if err := initializer.RegisterStorageIndex(name, collection, key, fields, maxEntries, indexOnly); err != nil {
 		return err
 	}

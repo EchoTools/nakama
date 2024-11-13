@@ -2,10 +2,8 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
@@ -115,24 +113,28 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		whoami.EVRIDLogins[evrID.String()] = record.UpdateTime.UTC()
 	}
 
-	// Get the past displayNames
-	displayNameObjs, err := GetDisplayNameRecords(ctx, nk, userID.String())
+	history, err := DisplayNameHistoryLoad(ctx, nk, userID.String())
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to load display name history: %w", err)
 	}
-	// Sort displayNames by age
-	sort.SliceStable(displayNameObjs, func(i, j int) bool {
-		return displayNameObjs[i].GetUpdateTime().AsTime().After(displayNameObjs[j].GetUpdateTime().AsTime())
-	})
 
-	whoami.DisplayNames = make([]string, 0, len(displayNameObjs))
-	for _, dn := range displayNameObjs {
-		m := map[string]string{}
-		if err := json.Unmarshal([]byte(dn.GetValue()), &m); err != nil {
-			return err
+	pastDisplayNames := make(map[string]time.Time)
+	for _, items := range history.History {
+		for _, item := range items {
+			if e, ok := pastDisplayNames[item.DisplayName]; !ok || e.After(item.UpdateTime) {
+				pastDisplayNames[item.DisplayName] = item.UpdateTime
+			}
 		}
-		whoami.DisplayNames = append(whoami.DisplayNames, m["displayName"])
 	}
+
+	whoami.DisplayNames = make([]string, 0, len(pastDisplayNames))
+	for dn := range pastDisplayNames {
+		whoami.DisplayNames = append(whoami.DisplayNames, dn)
+	}
+
+	slices.SortStableFunc(whoami.DisplayNames, func(a, b string) int {
+		return int(pastDisplayNames[a].Unix() - pastDisplayNames[b].Unix())
+	})
 
 	// Get the MatchIDs for the user from it's presence
 	presences, err := d.nk.StreamUserList(StreamModeService, userID.String(), "", StreamLabelMatchService, true, true)
@@ -248,10 +250,6 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 				if len(roles) > 0 {
 					s += fmt.Sprintf(" (%s)", strings.Join(roles, ", "))
 				}
-				if gid == whoami.DefaultLobbyGroup {
-					s += " (default)"
-					s = fmt.Sprintf("**%s**", s)
-				}
 				output = append(output, s)
 			}
 			return output
@@ -260,6 +258,17 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 			return fmt.Sprintf("https://echo.taxi/spark://c/%s", strings.ToUpper(m))
 		}), "\n"), Inline: false},
 	}
+
+	fields = append(fields, &discordgo.MessageEmbedField{
+		Name: "Default Matchmaking Guild",
+		Value: func() string {
+			if whoami.DefaultLobbyGroup != "" {
+				return guildGroups[whoami.DefaultLobbyGroup].Name()
+			}
+			return ""
+		}(),
+		Inline: false,
+	})
 
 	// Remove any blank fields
 	fields = lo.Filter(fields, func(f *discordgo.MessageEmbedField, _ int) bool {
