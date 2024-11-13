@@ -207,14 +207,6 @@ func GetEVRRecords(ctx context.Context, logger runtime.Logger, nk runtime.Nakama
 	return records, nil
 }
 
-func GetDisplayNameRecords(ctx context.Context, nk runtime.NakamaModule, userId string) ([]*api.StorageObject, error) {
-	listRecords, _, err := nk.StorageList(ctx, SystemUserID, userId, DisplayNameCollection, 150, "")
-	if err != nil {
-		return nil, fmt.Errorf("storage list error: %w", err)
-	}
-	return listRecords, nil
-}
-
 func GetAddressRecords(ctx context.Context, nk runtime.NakamaModule, userId string) ([]*api.StorageObject, error) {
 	listRecords, _, err := nk.StorageList(ctx, SystemUserID, userId, ClientAddrStorageCollection, 100, "")
 	if err != nil {

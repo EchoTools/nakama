@@ -22,8 +22,6 @@ const (
 	ClientAddrStorageCollection  = "ClientAddrs"
 	HmdSerialIndex               = "Index_HmdSerial"
 	IpAddressIndex               = "Index_" + EvrLoginStorageCollection
-	DisplayNameCollection        = "DisplayNames"
-	DisplayNameIndex             = "Index_DisplayName"
 	GhostedUsersIndex            = "Index_MutedUsers"
 	ActiveSocialGroupIndex       = "Index_SocialGroup"
 	ActivePartyGroupIndex        = "Index_PartyGroup"
