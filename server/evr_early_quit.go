@@ -84,7 +84,40 @@ func (s *EarlyQuitStatistics) ApplyEarlyQuitPenalty(logger *zap.Logger, userID s
 		for _, field := range reqFields {
 			if _, ok := modeStats[field]; !ok {
 				logger.Warn("Missing required field in player statistics", zap.String("field", field))
-				return
+
+				switch field {
+				case "ArenaWins":
+					modeStats[field] = evr.MatchStatistic{
+						Count:     1,
+						Operation: "add",
+						Value:     0,
+					}
+				case "ArenaLosses":
+					modeStats[field] = evr.MatchStatistic{
+						Count:     1,
+						Operation: "add",
+						Value:     0,
+					}
+				case "ArenaWinPercentage":
+					modeStats[field] = evr.MatchStatistic{
+						Count:     1,
+						Operation: "rep",
+						Value:     0.0,
+					}
+				case "HighestArenaWinStreak":
+					modeStats[field] = evr.MatchStatistic{
+						Count:     1,
+						Operation: "max",
+						Value:     0,
+					}
+
+				case "ArenaTies":
+					modeStats[field] = evr.MatchStatistic{
+						Count:     1,
+						Operation: "add",
+						Value:     0,
+					}
+				}
 			}
 		}
 
