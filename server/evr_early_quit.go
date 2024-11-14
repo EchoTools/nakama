@@ -90,13 +90,13 @@ func (s *EarlyQuitStatistics) ApplyEarlyQuitPenalty(logger *zap.Logger, userID s
 					modeStats[field] = evr.MatchStatistic{
 						Count:     1,
 						Operation: "add",
-						Value:     0,
+						Value:     0.0,
 					}
 				case "ArenaLosses":
 					modeStats[field] = evr.MatchStatistic{
 						Count:     1,
 						Operation: "add",
-						Value:     0,
+						Value:     0.0,
 					}
 				case "ArenaWinPercentage":
 					modeStats[field] = evr.MatchStatistic{
@@ -108,14 +108,14 @@ func (s *EarlyQuitStatistics) ApplyEarlyQuitPenalty(logger *zap.Logger, userID s
 					modeStats[field] = evr.MatchStatistic{
 						Count:     1,
 						Operation: "max",
-						Value:     0,
+						Value:     0.0,
 					}
 
 				case "ArenaTies":
 					modeStats[field] = evr.MatchStatistic{
 						Count:     1,
 						Operation: "add",
-						Value:     0,
+						Value:     0.0,
 					}
 				}
 			}
