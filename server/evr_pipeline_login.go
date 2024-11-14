@@ -842,33 +842,32 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 		return fmt.Errorf("failed to find player in match")
 	}
 
-	if playerInfo.Team != 0 && playerInfo.Team != 1 {
-		if playerInfo.Team != 2 {
-			// Unless it's a spectator, log the error
-			logger.Warn("Player is on a non-player team", zap.String("evrId", request.EvrID.Token()), zap.String("team", playerInfo.Team.String()), zap.Any("update", request.Payload))
-		}
-
+	if playerInfo.Team != BlueTeam && playerInfo.Team != OrangeTeam || playerInfo.Team == SocialLobbyParticipant {
 		return nil
+	}
+
+	profile, err := p.profileRegistry.Load(ctx, playerInfo.UUID())
+	if err != nil {
+		return fmt.Errorf("failed to load game profiles: %w", err)
 	}
 
 	// Update the player's rating, if it's not a backfill player
 	if !playerInfo.IsBackfill() {
 		if stats, ok := request.Payload.Update.StatsGroups["arena"]; ok {
 			if s, ok := stats["ArenaWins"]; ok {
-				isWinner := false
-				if s.Value > 0 {
-					isWinner = true
+				blueWins := true
+				if s.Value > 0 && playerInfo.Team == OrangeTeam {
+					blueWins = false
 				}
-				rating := CalculateNewPlayerRating(request.EvrID, label.Players, isWinner)
-				playerInfo.RatingMu = rating.Mu
-				playerInfo.RatingSigma = rating.Sigma
+				if rating, err := CalculateNewPlayerRating(request.EvrID, label.Players, label.TeamSize, blueWins); err != nil {
+					logger.Error("Failed to calculate new player rating", zap.Error(err))
+				} else {
+					playerInfo.RatingMu = rating.Mu
+					playerInfo.RatingSigma = rating.Sigma
+					profile.SetRating(rating)
+				}
 			}
 		}
-	}
-
-	profile, err := p.profileRegistry.Load(ctx, playerInfo.UUID())
-	if err != nil {
-		return fmt.Errorf("failed to load game profiles: %w", err)
 	}
 
 	profile.EarlyQuits.IncrementCompletedMatches()

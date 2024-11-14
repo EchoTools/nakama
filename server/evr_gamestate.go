@@ -4,11 +4,19 @@ import (
 	"log"
 )
 
+type TeamMetadata struct {
+	Strength    float64 `json:"strength,omitempty"`
+	RatingMu    float64 `json:"rating_mu,omitempty"`
+	RatingSigma float64 `json:"rating_sigma,omitempty"`
+}
+
 type GameState struct {
-	RoundClock  *RoundClock  `json:"round_clock,omitempty"` // The round clock
-	BlueScore   int          `json:"blue_score"`            // The score for the blue team
-	OrangeScore int          `json:"orange_score"`          // The score for the orange team
-	Goals       []*MatchGoal `json:"goals,omitempty"`       // The goals scored in the game
+	BlueScore              int                     `json:"blue_score"`                        // The score for the blue team
+	OrangeScore            int                     `json:"orange_score"`                      // The score for the orange team
+	RoundClock             *RoundClock             `json:"round_clock,omitempty"`             // The round clock
+	Goals                  []*MatchGoal            `json:"goals,omitempty"`                   // The goals scored in the game
+	EquilibriumCoefficient float64                 `json:"equilibrium_coefficient,omitempty"` // The equilibrium coefficient for the game (how much the game is balanced)
+	Teams                  map[string]TeamMetadata `json:"teams,omitempty"`                   // Metadata for each team
 }
 
 func NewGameState() *GameState {
