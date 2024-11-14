@@ -114,7 +114,7 @@ func CalculateNewPlayerRating(evrID evr.EvrId, players []PlayerInfo, orangeWins 
 			continue
 		}
 
-		if p.JoinTime != 0.0 {
+		if p.JoinTime <= 0.0 {
 			// Skip backfill players
 			continue
 		}
