@@ -65,6 +65,7 @@ func (p *EvrPipeline) lobbySessionRequest(ctx context.Context, logger *zap.Logge
 			if err := session.SendEvr(LobbySessionFailureFromError(request.GetMode(), request.GetGroupID(), err)); err != nil {
 				logger.Error("Failed to send lobby session failure message", zap.Error(err))
 			}
+			return
 		}
 
 		ctx, cancel := context.WithCancel(ctx)
@@ -87,6 +88,7 @@ func (p *EvrPipeline) lobbySessionRequest(ctx context.Context, logger *zap.Logge
 			if err := session.SendEvr(LobbySessionFailureFromError(request.GetMode(), request.GetGroupID(), err)); err != nil {
 				logger.Error("Failed to send lobby session failure message", zap.Error(err))
 			}
+			return
 		}
 	}()
 	return nil
