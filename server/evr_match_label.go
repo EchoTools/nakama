@@ -319,7 +319,11 @@ func (l *MatchLabel) PublicView() *MatchLabel {
 	// Remove private data
 	var gs *GameState
 	if l.GameState != nil {
-		gs = l.GameState
+		gs = &GameState{
+			BlueScore:   l.GameState.BlueScore,
+			OrangeScore: l.GameState.OrangeScore,
+			Teams:       l.GameState.Teams,
+		}
 		if l.GameState.RoundClock != nil {
 			gs.RoundClock = l.GameState.RoundClock.LatestAsNewClock()
 		}
