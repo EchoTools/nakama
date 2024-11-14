@@ -52,36 +52,39 @@ func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 		logger.Error("Group ID not found in entry properties.")
 	}
 
-	// Store the latest candidates in storage
-	data, err := json.Marshal(map[string]interface{}{"candidates": candidates})
-	if err != nil {
-		logger.WithField("error", err).Error("Error marshalling candidates.")
-	} else {
-		if _, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{
-			{
-				UserID:          SystemUserID,
-				Collection:      "Matchmaker",
-				Key:             "latestCandidates",
-				PermissionRead:  0,
-				PermissionWrite: 0,
-				Value:           string(data),
-			},
-		}); err != nil {
-			logger.WithField("error", err).Error("Error writing latest candidates to storage.")
+	/*
+			// Store the latest candidates in storage
+			data, err := json.Marshal(map[string]interface{}{"candidates": candidates})
+			if err != nil {
+				logger.WithField("error", err).Error("Error marshalling candidates.")
+			} else {
+				if _, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{
+					{
+						UserID:          SystemUserID,
+						Collection:      "Matchmaker",
+						Key:             "latestCandidates",
+						PermissionRead:  0,
+						PermissionWrite: 0,
+						Value:           string(data),
+					},
+				}); err != nil {
+					logger.WithField("error", err).Error("Error writing latest candidates to storage.")
+				}
+			}
+
+			if err := nk.StreamSend(StreamModeMatchmaker, groupID, "", "", string(data), nil, false); err != nil {
+				logger.WithField("error", err).Warn("Error streaming candidates")
+			}
+
+
+		// If there is a non-hidden presence on the stream, then don't make any matches
+		if presences, err := nk.StreamUserList(StreamModeMatchmaker, groupID, "", "", false, true); err != nil {
+			logger.WithField("error", err).Warn("Error listing presences on stream.")
+		} else if len(presences) > 0 {
+			logger.WithField("num_presences", len(presences)).Info("Non-hidden presence on stream, not making matches.")
+			return nil
 		}
-	}
-
-	if err := nk.StreamSend(StreamModeMatchmaker, groupID, "", "", string(data), nil, false); err != nil {
-		logger.WithField("error", err).Warn("Error streaming candidates")
-	}
-
-	// If there is a non-hidden presence on the stream, then don't make any matches
-	if presences, err := nk.StreamUserList(StreamModeMatchmaker, groupID, "", "", false, true); err != nil {
-		logger.WithField("error", err).Warn("Error listing presences on stream.")
-	} else if len(presences) > 0 {
-		logger.WithField("num_presences", len(presences)).Info("Non-hidden presence on stream, not making matches.")
-		return nil
-	}
+	*/
 
 	filterCounts := make(map[string]int)
 
