@@ -11,26 +11,21 @@ import (
 	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
-type TeamMetadata struct {
-	Strength float64 `json:"strength,omitempty"`
-}
-
 type slotReservation struct {
-	Entrant *EvrMatchPresence
-	Expiry  time.Time
+	Presence *EvrMatchPresence
+	Expiry   time.Time
 }
 
 type MatchLabel struct {
-	ID           MatchID        `json:"id"`                      // The Session Id used by EVR (the same as match id)
-	Open         bool           `json:"open"`                    // Whether the lobby is open to new players (Matching Only)
-	LobbyType    LobbyType      `json:"lobby_type"`              // The type of lobby (Public, Private, Unassigned) (EVR)
-	Mode         evr.Symbol     `json:"mode,omitempty"`          // The mode of the lobby (Arena, Combat, Social, etc.) (EVR)
-	Level        evr.Symbol     `json:"level,omitempty"`         // The level to play on (EVR).
-	Size         int            `json:"size"`                    // The number of players (including spectators) in the match.
-	PlayerCount  int            `json:"player_count"`            // The number of participants (not including spectators) in the match.
-	Players      []PlayerInfo   `json:"players,omitempty"`       // The displayNames of the players (by team name) in the match.
-	TeamMetadata []TeamMetadata `json:"team_metadata,omitempty"` // The metadata of the teams in the match.
-	GameState    *GameState     `json:"game_state,omitempty"`    // The game state for the match.
+	ID          MatchID      `json:"id"`                   // The Session Id used by EVR (the same as match id)
+	Open        bool         `json:"open"`                 // Whether the lobby is open to new players (Matching Only)
+	LobbyType   LobbyType    `json:"lobby_type"`           // The type of lobby (Public, Private, Unassigned) (EVR)
+	Mode        evr.Symbol   `json:"mode,omitempty"`       // The mode of the lobby (Arena, Combat, Social, etc.) (EVR)
+	Level       evr.Symbol   `json:"level,omitempty"`      // The level to play on (EVR).
+	Size        int          `json:"size"`                 // The number of players (including spectators) in the match.
+	PlayerCount int          `json:"player_count"`         // The number of participants (not including spectators) in the match.
+	Players     []PlayerInfo `json:"players,omitempty"`    // The displayNames of the players (by team name) in the match.
+	GameState   *GameState   `json:"game_state,omitempty"` // The game state for the match.
 
 	TeamSize         int      `json:"team_size,omitempty"`    // The size of each team in arena/combat (either 4 or 5)
 	MaxSize          int      `json:"limit,omitempty"`        // The total lobby size limit (players + specs)
@@ -238,16 +233,13 @@ func (s *MatchLabel) rebuildCache() {
 			continue
 		}
 		// Include the reservation in the cache.
-		presences = append(presences, r.Entrant)
+		presences = append(presences, r.Presence)
 	}
 
 	// Rebuild the lookup tables.
 	s.Size = len(presences)
 	s.Players = make([]PlayerInfo, 0, s.Size)
 	s.PlayerCount = 0
-	// Construct Player list
-	team1 := make(RatedTeam, 0, s.TeamSize)
-	team2 := make(RatedTeam, 0, s.TeamSize)
 
 	for _, p := range presences {
 		// Do not include spectators or moderators in player count
@@ -273,43 +265,52 @@ func (s *MatchLabel) rebuildCache() {
 		s.Players = append(s.Players, playerinfo)
 
 		switch s.Mode {
-		case evr.ModeArenaPublic:
-			switch p.RoleAlignment {
-			case BlueRole:
-				team1 = append(team1, p.Rating)
-			case OrangeRole:
-				team2 = append(team2, p.Rating)
-			}
+
 		case evr.ModeArenaPrivate, evr.ModeCombatPrivate:
 			playerinfo.Team = TeamIndex(UnassignedRole)
 		}
 	}
-	s.TeamMetadata = make([]TeamMetadata, 0, 2)
 
+	// Only arena public matches have team game state or team metadata
 	if s.Mode == evr.ModeArenaPublic {
-		s.TeamMetadata = []TeamMetadata{
-			{
-				Strength: team1.Strength(),
-			},
-			{
-				Strength: team2.Strength(),
-			},
+
+		teams := make(map[TeamIndex]RatedTeam, 2)
+
+		for _, p := range s.Players {
+			if p.Team == BlueTeam || p.Team == OrangeTeam {
+				teams[p.Team] = append(teams[p.Team], p.Rating())
+			}
 		}
+
+		meta := make(map[TeamIndex]TeamMetadata, 2)
+		for t := range teams {
+			meta[t] = TeamMetadata{
+				Strength:    teams[t].Strength(),
+				RatingMu:    teams[t].Rating().Mu,
+				RatingSigma: teams[t].Rating().Sigma,
+			}
+		}
+
 	}
 
 	sort.SliceStable(s.Players, func(i, j int) bool {
+		// by team
 		if s.Players[i].Team < s.Players[j].Team {
 			return true
 		}
 		if s.Players[i].Team > s.Players[j].Team {
 			return false
 		}
+
+		// by party ID
 		if s.Players[i].PartyID < s.Players[j].PartyID {
 			return true
 		}
 		if s.Players[i].PartyID > s.Players[j].PartyID {
 			return false
 		}
+
+		// by join time
 		return s.Players[i].JoinTime < s.Players[j].JoinTime
 	})
 }
@@ -318,11 +319,7 @@ func (l *MatchLabel) PublicView() *MatchLabel {
 	// Remove private data
 	var gs *GameState
 	if l.GameState != nil {
-		gs = &GameState{
-
-			BlueScore:   l.GameState.BlueScore,
-			OrangeScore: l.GameState.OrangeScore,
-		}
+		gs = l.GameState
 		if l.GameState.RoundClock != nil {
 			gs.RoundClock = l.GameState.RoundClock.LatestAsNewClock()
 		}
@@ -352,8 +349,7 @@ func (l *MatchLabel) PublicView() *MatchLabel {
 			Tags:        l.Broadcaster.Tags,
 			Features:    l.Broadcaster.Features,
 		},
-		Players:      make([]PlayerInfo, 0),
-		TeamMetadata: l.TeamMetadata,
+		Players: make([]PlayerInfo, 0),
 	}
 	if l.LobbyType == PrivateLobby || l.LobbyType == UnassignedLobby {
 		// Set the last bytes to FF to hide the ID

@@ -602,7 +602,7 @@ func TestCalculatePlayerRating(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := CalculateNewPlayerRating(tt.args.evrID, tt.args.players, tt.args.orangeWins); got != tt.want {
+			if got, _ := CalculateNewPlayerRating(tt.args.evrID, tt.args.players, 4, tt.args.orangeWins); got != tt.want {
 				t.Errorf("calculatePlayerRating() = %v, want %v", got, tt.want)
 			}
 		})

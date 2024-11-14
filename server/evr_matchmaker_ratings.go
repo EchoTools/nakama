@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"math"
 
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -101,42 +102,38 @@ func NewDefaultRating() types.Rating {
 	})
 }
 
-func CalculateNewPlayerRating(evrID evr.EvrId, players []PlayerInfo, orangeWins bool) types.Rating {
+func CalculateNewPlayerRating(evrID evr.EvrId, players []PlayerInfo, teamSize int, blueWins bool) (types.Rating, error) {
 
-	teams := make([]types.Team, 2)
+	// copy the players slice so as to not modify the original
+	players = players[:]
 
-	// The player's team
-	var teamIdx TeamIndex
+	for i := 0; i < len(players); i++ {
 
-	for _, p := range players {
-		if p.Team != 0 && p.Team != 1 {
-			// skip non players
+		// Remove players that are not on blue/orange, or are backfill
+		if players[i].IsBackfill() || !players[i].IsCompetitor() {
+			players = append(players[:i], players[i+1:]...)
+			i--
 			continue
 		}
 
-		if p.JoinTime <= 0.0 {
-			// Skip backfill players
-			continue
-		}
-
-		t := p.Team
-		rating := rating.NewWithOptions(&types.OpenSkillOptions{
-			Mu:    ptr.Float64(p.RatingMu),
-			Sigma: ptr.Float64(p.RatingSigma),
-		})
-		teams[t] = append(teams[t], rating)
-
-		if p.EvrID == evrID {
-			teamIdx = p.Team
-			if len(teams[t]) > 0 {
-				// Move the player to the beginning
-				l := len(teams[t])
-				teams[t][0], teams[t][l-1] = teams[t][l-1], teams[t][0]
-			}
+		// Move the target player to the front of the list
+		if players[i].EvrID == evrID {
+			// Move the player to the front of the list
+			players[0], players[i] = players[i], players[0]
 		}
 	}
 
-	// Pad the teams to 4 players
+	if players[0].EvrID != evrID {
+		return NewDefaultRating(), fmt.Errorf("player not found in players list")
+	}
+
+	// Sort the roster by team
+	teams := make(map[TeamIndex]types.Team, 2)
+	for _, p := range players {
+		teams[p.Team] = append(teams[p.Team], p.Rating())
+	}
+
+	// Pad the teams to the team size
 	for i := range teams {
 		for j := len(teams[i]); j < 4; j++ {
 			teams[i] = append(teams[i], NewDefaultRating())
@@ -144,13 +141,16 @@ func CalculateNewPlayerRating(evrID evr.EvrId, players []PlayerInfo, orangeWins 
 	}
 
 	// Swap the teams if the orangeTeam won
-
-	if orangeWins {
-		teams[0], teams[1] = teams[1], teams[0]
-		teamIdx = 1 - teamIdx
+	if blueWins {
+		new := rating.Rate([]types.Team{teams[BlueTeam], teams[OrangeTeam]}, nil)
+		teams[BlueTeam] = new[0]
+		teams[OrangeTeam] = new[1]
+	} else {
+		new := rating.Rate([]types.Team{teams[OrangeTeam], teams[BlueTeam]}, nil)
+		teams[OrangeTeam] = new[0]
+		teams[BlueTeam] = new[1]
 	}
 
-	teams = rating.Rate(teams, nil)
-
-	return teams[teamIdx][0]
+	// Return the new rating for the target player
+	return teams[players[0].Team][0], nil
 }

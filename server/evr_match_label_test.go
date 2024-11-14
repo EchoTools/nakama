@@ -70,7 +70,6 @@ func TestMatchLabel_GetPlayerCount(t *testing.T) {
 				PlayerCount:          tt.fields.PlayerCount,
 				PlayerLimit:          tt.fields.PlayerLimit,
 				TeamSize:             tt.fields.TeamSize,
-				TeamMetadata:         tt.fields.TeamMetadata,
 				Players:              tt.fields.Players,
 				TeamAlignments:       tt.fields.TeamAlignments,
 				GameState:            tt.fields.GameState,
