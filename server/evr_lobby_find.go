@@ -81,9 +81,13 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		return p.PartyFollow(ctx, logger, session, lobbyParams, lobbyGroup)
 	}
 
-	// Check latency to active game servers.
-	if err := p.CheckServerPing(ctx, logger, session); err != nil {
-		return fmt.Errorf("failed to check server ping: %w", err)
+	// Don't ping servers for social lobbies.
+	if lobbyParams.Mode != evr.ModeSocialPublic {
+
+		// Check latency to active game servers.
+		if err := p.CheckServerPing(ctx, logger, session); err != nil {
+			return fmt.Errorf("failed to check server ping: %w", err)
+		}
 	}
 
 	// If this is a party, the party leader will wait for the other members to start matchmaking.
@@ -337,7 +341,6 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 			break
 		}
 
-		// If no match was found, continue.
 		// If the lobby is social, create a new social lobby.
 		if selected == nil && lobbyParams.Mode == evr.ModeSocialPublic {
 			// Create a new social lobby
@@ -355,6 +358,7 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 			}
 		}
 
+		// If no match was found, continue.
 		if selected == nil {
 			continue
 		}

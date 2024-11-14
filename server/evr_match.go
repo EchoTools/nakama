@@ -273,6 +273,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	// Remove any reservations of existing players (i.e. party members already in the match)
 	for i := 0; i < len(meta.Reservations); i++ {
 		s := meta.Reservations[i].GetSessionId()
+
 		// Remove existing players from the reservation entrants
 		if _, found := state.presenceMap[s]; found {
 			meta.Reservations = append(meta.Reservations[:i], meta.Reservations[i+1:]...)
