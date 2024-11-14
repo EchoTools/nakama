@@ -841,10 +841,11 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 	if playerInfo == nil {
 		return fmt.Errorf("failed to find player in match")
 	}
+
 	if playerInfo.Team != 0 && playerInfo.Team != 1 {
 		if playerInfo.Team != 2 {
 			// Unless it's a spectator, log the error
-			logger.Warn("Player is on a non-player team", zap.String("evrId", request.EvrID.Token()), zap.String("team", playerInfo.Team.String()))
+			logger.Warn("Player is on a non-player team", zap.String("evrId", request.EvrID.Token()), zap.String("team", playerInfo.Team.String()), zap.Any("update", request.Payload))
 		}
 
 		return nil
@@ -861,7 +862,6 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 				rating := CalculateNewPlayerRating(request.EvrID, label.Players, isWinner)
 				playerInfo.RatingMu = rating.Mu
 				playerInfo.RatingSigma = rating.Sigma
-
 			}
 		}
 	}
