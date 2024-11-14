@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net"
 	"strings"
 	"sync"
@@ -24,17 +23,8 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 
 	_ "net/http/pprof"
-
 	// Import for side effects to enable pprof endpoint
-	"net/http"
 )
-
-// Enable pprof profiler
-func init() {
-	go func() {
-		log.Println(http.ListenAndServe("localhost:6060", nil)) // Start HTTP server for profiling
-	}()
-}
 
 var GlobalConfig = &struct {
 	sync.RWMutex
