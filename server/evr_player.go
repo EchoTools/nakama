@@ -25,7 +25,7 @@ type PlayerInfo struct {
 
 // The player joined after the round clock started
 func (p *PlayerInfo) IsBackfill() bool {
-	return p.JoinTime >= 0.0
+	return p.JoinTime > 0.0
 }
 
 // The player is on blue or orange team

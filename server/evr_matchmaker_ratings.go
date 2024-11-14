@@ -123,7 +123,7 @@ func CalculateNewPlayerRating(evrID evr.EvrId, players []PlayerInfo, teamSize in
 		}
 	}
 
-	if players[0].EvrID != evrID {
+	if len(players) == 0 || players[0].EvrID != evrID {
 		return NewDefaultRating(), fmt.Errorf("player not found in players list")
 	}
 
