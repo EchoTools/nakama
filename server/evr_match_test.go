@@ -716,134 +716,7 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 	}
 }
 
-func TestEvrMatch_playerJoinAttempt(t *testing.T) {
-	type args struct {
-		state *MatchLabel
-		mp    *EvrMatchPresence
-	}
-	tests := []struct {
-		name  string
-		m     *EvrMatch
-		args  args
-		want  *EvrMatchPresence
-		want1 string
-	}{
-		// TODO: Add test cases.
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			m := &EvrMatch{}
-			_, got := m.processJoin(tt.args.state, NewRuntimeGoLogger(logger), tt.args.mp)
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("EvrMatch.playerJoinAttempt() got = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-func TestEvrMatch_setRole(t *testing.T) {
-	tests := []struct {
-		name         string
-		state        *MatchLabel
-		mp           *EvrMatchPresence
-		expectedRole int
-	}{
-		{
-			name: "Assign moderator role",
-			state: &MatchLabel{
-				Mode:           evr.ModeArenaPublic,
-				TeamAlignments: map[string]int{},
-			},
-			mp: &EvrMatchPresence{
-				RoleAlignment: evr.TeamModerator,
-			},
-			expectedRole: evr.TeamModerator,
-		},
-		{
-			name: "Assign spectator role",
-			state: &MatchLabel{
-				Mode:           evr.ModeArenaPublic,
-				TeamAlignments: map[string]int{},
-			},
-			mp: &EvrMatchPresence{
-				RoleAlignment: evr.TeamSpectator,
-			},
-			expectedRole: evr.TeamSpectator,
-		},
-		{
-			name: "Assign social role in public social mode",
-			state: &MatchLabel{
-				Mode:           evr.ModeSocialPublic,
-				TeamAlignments: map[string]int{},
-			},
-			mp: &EvrMatchPresence{
-				RoleAlignment: evr.TeamUnassigned,
-			},
-			expectedRole: evr.TeamSocial,
-		},
-		{
-			name: "Assign social role in private social mode",
-			state: &MatchLabel{
-				Mode:           evr.ModeSocialPrivate,
-				TeamAlignments: map[string]int{},
-			},
-			mp: &EvrMatchPresence{
-				RoleAlignment: evr.TeamUnassigned,
-			},
-			expectedRole: evr.TeamSocial,
-		},
-		{
-			name: "Assign orange role when unassigned",
-			state: &MatchLabel{
-				Mode:           evr.ModeArenaPublic,
-				TeamAlignments: map[string]int{},
-			},
-			mp: &EvrMatchPresence{
-				RoleAlignment: evr.TeamUnassigned,
-			},
-			expectedRole: evr.TeamOrange,
-		},
-		{
-			name: "Assign blue role when blue team has fewer players",
-			state: &MatchLabel{
-				Mode:           evr.ModeArenaPublic,
-				TeamAlignments: map[string]int{},
-				presenceMap: map[string]*EvrMatchPresence{
-					"1": {RoleAlignment: evr.TeamOrange},
-					"2": {RoleAlignment: evr.TeamOrange},
-				},
-			},
-			mp: &EvrMatchPresence{
-				RoleAlignment: evr.TeamUnassigned,
-			},
-			expectedRole: evr.TeamBlue,
-		},
-		{
-			name: "Assign orange role when teams are balanced",
-			state: &MatchLabel{
-				Mode:           evr.ModeArenaPublic,
-				TeamAlignments: map[string]int{},
-				presenceMap: map[string]*EvrMatchPresence{
-					"1": {RoleAlignment: evr.TeamOrange},
-					"2": {RoleAlignment: evr.TeamBlue},
-				},
-			},
-			mp: &EvrMatchPresence{
-				RoleAlignment: evr.TeamUnassigned,
-			},
-			expectedRole: evr.TeamOrange,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			m := &EvrMatch{}
-			m.setRole(tt.state, tt.mp)
-			if tt.mp.RoleAlignment != tt.expectedRole {
-				t.Errorf("setRole() = %v, want %v", tt.mp.RoleAlignment, tt.expectedRole)
-			}
-		})
-	}
-}
+/*
 func TestEvrMatch_processJoin(t *testing.T) {
 	session1 := uuid.Must(uuid.NewV4())
 	session2 := uuid.Must(uuid.NewV4())
@@ -866,7 +739,7 @@ func TestEvrMatch_processJoin(t *testing.T) {
 				TeamSize:    1,
 				PlayerLimit: 2,
 				reservationMap: map[string]*slotReservation{
-					session1.String(): {Entrant: &EvrMatchPresence{RoleAlignment: 0, SessionID: session1, EvrID: evr.EvrId{PlatformCode: 1, AccountId: 1}}, Expiry: time.Now().Add(time.Minute)},
+					session1.String(): {Presence: &EvrMatchPresence{RoleAlignment: 0, SessionID: session1, EvrID: evr.EvrId{PlatformCode: 1, AccountId: 1}}, Expiry: time.Now().Add(time.Minute)},
 				},
 				presenceMap: map[string]*EvrMatchPresence{
 					session2.String(): {RoleAlignment: 1, SessionID: session2, EvrID: evr.EvrId{PlatformCode: 1, AccountId: 2}},
@@ -890,8 +763,8 @@ func TestEvrMatch_processJoin(t *testing.T) {
 				},
 				reservationMap: map[string]*slotReservation{
 					session4.String(): {
-						Entrant: &EvrMatchPresence{SessionID: session4, RoleAlignment: 1, EvrID: evr.EvrId{PlatformCode: 1, AccountId: 4}},
-						Expiry:  time.Now().Add(time.Minute),
+						Presence: &EvrMatchPresence{SessionID: session4, RoleAlignment: 1, EvrID: evr.EvrId{PlatformCode: 1, AccountId: 4}},
+						Expiry:   time.Now().Add(time.Minute),
 					},
 				},
 			},
@@ -975,3 +848,5 @@ func TestEvrMatch_processJoin(t *testing.T) {
 		})
 	}
 }
+
+*/

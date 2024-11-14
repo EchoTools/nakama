@@ -58,7 +58,7 @@ type MatchLabel struct {
 	terminateTick        int64                // The tick count at which the match will be shut down.
 }
 
-func (s *MatchLabel) GetReservation(sessionID string) (*EvrMatchPresence, bool) {
+func (s *MatchLabel) LoadAndDeleteReservation(sessionID string) (*EvrMatchPresence, bool) {
 	r, ok := s.reservationMap[sessionID]
 
 	if !ok || r.Expiry.Before(time.Now()) {
@@ -66,7 +66,10 @@ func (s *MatchLabel) GetReservation(sessionID string) (*EvrMatchPresence, bool) 
 		return nil, false
 	}
 
-	return r.Entrant, true
+	delete(s.reservationMap, sessionID)
+	s.rebuildCache()
+
+	return r.Presence, true
 }
 
 func (s *MatchLabel) IsPublic() bool {
