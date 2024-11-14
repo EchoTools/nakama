@@ -30,7 +30,7 @@ func (p *PlayerInfo) IsBackfill() bool {
 
 // The player is on blue or orange team
 func (p *PlayerInfo) IsCompetitor() bool {
-	return p.Team != BlueTeam || p.Team != OrangeTeam
+	return p.Team == BlueTeam || p.Team == OrangeTeam
 }
 
 func (p *PlayerInfo) UUID() uuid.UUID {
