@@ -425,9 +425,9 @@ func Test_updateProfileStats(t *testing.T) {
 }
 func TestCalculatePlayerRating(t *testing.T) {
 	type args struct {
-		evrID      evr.EvrId
-		players    []PlayerInfo
-		orangeWins bool
+		evrID    evr.EvrId
+		players  []PlayerInfo
+		blueWins bool
 	}
 	tests := []struct {
 		name string
@@ -472,7 +472,7 @@ func TestCalculatePlayerRating(t *testing.T) {
 						JoinTime:    0.0,
 					},
 				},
-				orangeWins: false,
+				blueWins: true,
 			},
 			want: types.Rating{Mu: 19.360315715344896, Sigma: 4.319230265645678},
 		},
@@ -513,7 +513,7 @@ func TestCalculatePlayerRating(t *testing.T) {
 						JoinTime:    0.0,
 					},
 				},
-				orangeWins: true,
+				blueWins: false,
 			},
 			want: types.Rating{Mu: 19.360315715344896, Sigma: 4.319230265645678},
 		},
@@ -554,7 +554,7 @@ func TestCalculatePlayerRating(t *testing.T) {
 						JoinTime:    0.0,
 					},
 				},
-				orangeWins: true,
+				blueWins: false,
 			},
 			want: types.Rating{Mu: 10.494158112090412, Sigma: 8.236456139167874},
 		},
@@ -595,14 +595,14 @@ func TestCalculatePlayerRating(t *testing.T) {
 						JoinTime:    0.0,
 					},
 				},
-				orangeWins: false,
+				blueWins: true,
 			},
 			want: types.Rating{Mu: 19.03637684155125, Sigma: 6.6197969632771665},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got, _ := CalculateNewPlayerRating(tt.args.evrID, tt.args.players, 4, tt.args.orangeWins); got != tt.want {
+			if got, _ := CalculateNewPlayerRating(tt.args.evrID, tt.args.players, 4, tt.args.blueWins); reflect.DeepEqual(got, tt.want) {
 				t.Errorf("calculatePlayerRating() = %v, want %v", got, tt.want)
 			}
 		})
