@@ -16,7 +16,6 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/ipinfo/go/v2/ipinfo"
-	"github.com/samber/lo"
 )
 
 const (
@@ -193,6 +192,7 @@ func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql
 var (
 	ErrJoinRejectReasonUnassignedLobby           = errors.New("unassigned lobby")
 	ErrJoinRejectReasonDuplicateJoin             = errors.New("duplicate join")
+	ErrJoinRejectDuplicateEvrID                  = errors.New("duplicate evr id")
 	ErrJoinRejectReasonLobbyFull                 = errors.New("lobby full")
 	ErrJoinRejectReasonFailedToAssignTeam        = errors.New("failed to assign team")
 	ErrJoinRejectReasonPartyMembersMustHaveRoles = errors.New("party members must have roles")
@@ -235,7 +235,6 @@ func (m *EntrantMetadata) FromMatchMetadata(md map[string]string) error {
 // MatchJoinAttempt decides whether to accept or deny the player session.
 func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state_ interface{}, joinPresence runtime.Presence, metadata map[string]string) (interface{}, bool, string) {
 	state, ok := state_.(*MatchLabel)
-
 	if !ok {
 		logger.Error("state not a valid lobby state object")
 		return nil, false, ""
@@ -257,12 +256,6 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		return state, true, ""
 	}
 
-	// This is a player joining.
-	meta := EntrantMetadata{}
-	if err := meta.FromMatchMetadata(metadata); err != nil {
-		return state, false, fmt.Sprintf("failed to unmarshal metadata: %v", err)
-	}
-
 	if state.Started() && !state.Open {
 		return state, false, ErrJoinRejectReasonMatchTerminating.Error()
 	}
@@ -271,195 +264,132 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		return state, false, ErrJoinRejectReasonUnassignedLobby.Error()
 	}
 
-	added := make([]string, len(meta.Presences())) /// []sessionID
-
-	entrantResponse := ""
-
-	for i, entrant := range meta.Presences() {
-
-		sessionID := entrant.GetSessionId()
-
-		hasReservation, err := m.processJoin(state, logger, entrant)
-
-		isReservation := i > 0
-
-		m.logJoin(logger, nk, entrant, state, isReservation, hasReservation, err)
-
-		if err != nil {
-			// Remove any newly added players to the match
-			for _, s := range added {
-				delete(state.presenceMap, s)
-				delete(state.reservationMap, s)
-				delete(state.joinTimestamps, s)
-				state.rebuildCache()
-			}
-
-			return state, false, err.Error()
-		}
-
-		if isReservation {
-
-			state.reservationMap[sessionID] = &slotReservation{
-				Entrant: entrant,
-				Expiry:  time.Now().Add(time.Second * 15),
-			}
-
-		} else {
-
-			entrantResponse = meta.Presence.String()
-
-			// If this is a private match, do not track the player's team alignment.
-			if state.IsPrivate() {
-				entrant.RoleAlignment = evr.TeamUnassigned
-			}
-
-			state.presenceMap[sessionID] = entrant
-		}
-
-		state.joinTimestamps[sessionID] = time.Now()
-		added = append(added, sessionID)
-
-		state.rebuildCache()
+	// This is a player joining.
+	meta := &EntrantMetadata{}
+	if err := meta.FromMatchMetadata(metadata); err != nil {
+		return state, false, fmt.Sprintf("failed to unmarshal metadata: %v", err)
 	}
+
+	// Remove any reservations of existing players (i.e. party members already in the match)
+	for i := 0; i < len(meta.Reservations); i++ {
+		s := meta.Reservations[i].GetSessionId()
+		// Remove existing players from the reservation entrants
+		if _, found := state.presenceMap[s]; found {
+			meta.Reservations = append(meta.Reservations[:i], meta.Reservations[i+1:]...)
+			i--
+		}
+
+		// Remove any duplicate reservations
+		if _, found := state.reservationMap[s]; found {
+			delete(state.reservationMap, s)
+			state.rebuildCache()
+		}
+
+		// Ensure the player has the required features
+		for _, f := range state.RequiredFeatures {
+			if !slices.Contains(meta.Reservations[i].SupportedFeatures, f) {
+				return state, false, ErrJoinRejectReasonFeatureMismatch.Error()
+			}
+		}
+	}
+
+	// If any entrants with the same EvrID are already in the match, reject the player
+	for _, p := range state.presenceMap {
+
+		// If the player is already in the match, reject the player
+		if p.EvrID.Equals(meta.Presence.EvrID) {
+			return state, false, ErrJoinRejectDuplicateEvrID.Error()
+		}
+
+		// If a reservation with the same EvrID is already in the match, reject the player
+		for _, r := range meta.Reservations {
+			if r.EvrID.Equals(p.EvrID) {
+				return state, false, ErrJoinRejectDuplicateEvrID.Error()
+			}
+		}
+	}
+
+	// Ensure the match has enough slots available
+	if state.OpenSlots() < len(meta.Presences()) {
+		return state, false, ErrJoinRejectReasonLobbyFull.Error()
+	}
+
+	// If this is a reservation, load the reservation
+	if e, found := state.LoadAndDeleteReservation(meta.Presence.GetSessionId()); found {
+		meta.Presence = e
+		state.rebuildCache()
+		logger = logger.WithField("has_reservation", true)
+	}
+
+	// If this player has a team alignment, load it
+	if teamIndex, ok := state.TeamAlignments[meta.Presence.GetUserId()]; ok {
+		// Do not try to load the alignment if the player is a spectator or moderator
+		if teamIndex != evr.TeamSpectator && teamIndex != evr.TeamModerator {
+			meta.Presence.RoleAlignment = teamIndex
+		}
+	}
+
+	// Public and social lobbies require a role alignment
+	if meta.Presence.RoleAlignment == evr.TeamUnassigned {
+		switch state.Mode {
+		case evr.ModeSocialPublic, evr.ModeSocialPrivate:
+			meta.Presence.RoleAlignment = evr.TeamSocial
+
+		case evr.ModeArenaPublic, evr.ModeCombatPublic:
+			// Select the team with the fewest players
+			if state.RoleCount(evr.TeamBlue) < state.RoleCount(evr.TeamOrange) {
+				meta.Presence.RoleAlignment = evr.TeamBlue
+			} else {
+				meta.Presence.RoleAlignment = evr.TeamOrange
+			}
+		}
+	}
+
+	// check the available slots
+	if slots, err := state.OpenSlotsByRole(meta.Presence.RoleAlignment); err != nil {
+		return state, false, ErrJoinRejectReasonFailedToAssignTeam.Error()
+	} else if slots < len(meta.Presences()) {
+		return state, false, ErrJoinRejectReasonLobbyFull.Error()
+	}
+
+	// Add reservations to the reservation map
+	for _, p := range meta.Reservations {
+
+		sessionID := p.GetSessionId()
+
+		// Set the reservations roles to match the player
+		p.RoleAlignment = meta.Presence.RoleAlignment
+
+		// Add the reservation
+		state.reservationMap[sessionID] = &slotReservation{
+			Presence: p,
+			Expiry:   time.Now().Add(time.Second * 15),
+		}
+		state.joinTimestamps[sessionID] = time.Now()
+	}
+
+	// Add the player
+	sessionID := meta.Presence.GetSessionId()
+	state.presenceMap[sessionID] = meta.Presence
+	state.joinTimestamps[sessionID] = time.Now()
 
 	if err := m.updateLabel(dispatcher, state); err != nil {
-		return state, false, fmt.Sprintf("failed to update label: %v", err)
+		logger.Error("Failed to update label: %v", err)
 	}
 
-	return state, true, entrantResponse
+	return state, true, meta.Presence.String()
 }
 
-func (m *EvrMatch) processJoin(state *MatchLabel, logger runtime.Logger, entrant *EvrMatchPresence) (bool, error) {
-	sessionID := entrant.GetSessionId()
-
-	hasReservation := false
-	// Use the reservation if it exists
-	if e, found := state.GetReservation(sessionID); found {
-		hasReservation = true
-		entrant = e
-		delete(state.reservationMap, sessionID)
-		state.rebuildCache()
-	}
-
-	// If this EvrID is already in the match, reject the player
-	for _, p := range state.presenceMap {
-		if p.GetSessionId() == sessionID || p.EvrID.Equals(entrant.EvrID) {
-			return hasReservation, ErrJoinRejectReasonDuplicateJoin
-		}
-	}
-
-	// Ensure the player has the required features
-	for _, f := range state.RequiredFeatures {
-		if !lo.Contains(entrant.SupportedFeatures, f) {
-			return hasReservation, ErrJoinRejectReasonFeatureMismatch
-		}
-	}
-
-	if state.IsPrivate() {
-		// Ensure the match has enough slots available
-		if state.OpenSlots() < 1 {
-			return hasReservation, ErrJoinRejectReasonLobbyFull
-		}
-		return hasReservation, nil
-	}
-
-	if entrant.RoleAlignment == evr.TeamUnassigned {
-		m.setRole(state, entrant)
-		logger.WithField("role", entrant.RoleAlignment).Warn("Assigned role.")
-		// Assign a role to the player
-	}
-
-	// Ensure the match has enough role slots available
-	openSlots, err := state.OpenSlotsByRole(entrant.RoleAlignment)
-	if err != nil {
-		return hasReservation, fmt.Errorf("failed to get open slots: %w", err)
-	}
-	if openSlots < 1 {
-		return hasReservation, ErrJoinRejectReasonLobbyFull
-	}
-
-	// If this an arena match, ensure that no team has more than 4 players.
-	if state.Mode == evr.ModeArenaPublic {
-
-		switch entrant.RoleAlignment {
-
-		case evr.TeamUnassigned:
-			return hasReservation, ErrJoinRejectReasonFailedToAssignTeam
-
-		case evr.TeamOrange, evr.TeamBlue:
-			if state.RoleCount(entrant.RoleAlignment)+1 > state.TeamSize {
-				return hasReservation, ErrJoinRejectReasonLobbyFull
-			}
-		}
-	}
-
-	return hasReservation, nil
-}
-
-func (m *EvrMatch) logJoin(logger runtime.Logger, nk runtime.NakamaModule, entrant *EvrMatchPresence, state *MatchLabel, isReservation bool, hasReservation bool, err error) {
-
-	logFields := map[string]interface{}{
-		"evrid":           entrant.EvrID.Token(),
-		"role":            entrant.RoleAlignment,
-		"sid":             entrant.GetSessionId(),
-		"uid":             entrant.GetUserId(),
-		"eid":             entrant.EntrantID(state.ID).String(),
-		"is_reservation":  isReservation,
-		"has_reservation": hasReservation,
-		"error":           err,
-	}
+func (m *EvrMatch) logJoin(logger runtime.Logger, nk runtime.NakamaModule, presence *EvrMatchPresence, state *MatchLabel) {
 
 	metricsTags := map[string]string{
 		"mode":     state.Mode.String(),
 		"level":    state.Level.String(),
 		"type":     state.LobbyType.String(),
-		"role":     fmt.Sprintf("%d", entrant.RoleAlignment),
+		"role":     fmt.Sprintf("%d", presence.RoleAlignment),
 		"group_id": state.GetGroupID().String(),
 	}
-
-	if err != nil {
-		logger.WithFields(logFields).Error("Player join rejected.")
-		nk.MetricsCounterAdd("match_entrant_join_reject_count", metricsTags, 1)
-		return
-	} else if isReservation {
-		logger.WithFields(logFields).Info("Player reservation accepted.")
-		nk.MetricsCounterAdd("match_entrant_reservation_count", metricsTags, 1)
-	} else {
-		logger.WithFields(logFields).Info("Player join accepted.")
-		nk.MetricsCounterAdd("match_entrant_join_count", metricsTags, 1)
-	}
-}
-
-func (m *EvrMatch) setRole(state *MatchLabel, mp *EvrMatchPresence) {
-
-	if mp.RoleAlignment != evr.TeamModerator && mp.RoleAlignment != evr.TeamSpectator {
-		if teamIndex, ok := state.TeamAlignments[mp.GetUserId()]; ok {
-			mp.RoleAlignment = teamIndex
-		}
-	}
-
-	switch {
-	case mp.RoleAlignment == evr.TeamModerator:
-		return
-	case state.Mode == evr.ModeSocialPublic, state.Mode == evr.ModeSocialPrivate:
-		mp.RoleAlignment = evr.TeamSocial
-	case mp.RoleAlignment == evr.TeamSpectator:
-		return
-	}
-
-	if mp.RoleAlignment == evr.TeamUnassigned {
-		mp.RoleAlignment = evr.TeamOrange
-	}
-
-	if state.RoleCount(evr.TeamOrange) == state.RoleCount(evr.TeamBlue) {
-		return // No need to switch
-	}
-
-	if state.RoleCount(evr.TeamBlue) < state.RoleCount(evr.TeamOrange) {
-		mp.RoleAlignment = evr.TeamBlue
-	}
-
-	mp.RoleAlignment = evr.TeamOrange
+	nk.MetricsCounterAdd("match_entrant_join_count", metricsTags, 1)
 }
 
 // MatchJoin is called after the join attempt.
@@ -996,8 +926,8 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		for _, e := range settings.Reservations {
 			expiry := time.Now().Add(settings.ReservationLifetime)
 			state.reservationMap[e.GetSessionId()] = &slotReservation{
-				Entrant: e,
-				Expiry:  expiry,
+				Presence: e,
+				Expiry:   expiry,
 			}
 		}
 
