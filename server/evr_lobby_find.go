@@ -278,10 +278,12 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 
 		// Sort the matches by open slots and then by latency
 		slices.SortFunc(matches, func(a, b *MatchLabelMeta) int {
-			// Sort by open slots first
-			if s := b.State.OpenPlayerSlots() - a.State.OpenPlayerSlots(); s != 0 {
+
+			// Sort by largest population
+			if s := b.State.PlayerCount - a.State.PlayerCount; s != 0 {
 				return s
 			}
+
 			// If the open slots are the same, sort by latency
 			return rtts[a.State.Broadcaster.Endpoint.GetExternalIP()] - rtts[b.State.Broadcaster.Endpoint.GetExternalIP()]
 		})
