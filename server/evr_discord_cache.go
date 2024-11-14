@@ -399,11 +399,12 @@ func (c *DiscordCache) SyncGuildGroupMember(ctx context.Context, userID, groupID
 			}
 
 			accountMetadata.SetGroupDisplayName(groupID, displayName)
-
-			if err := c.nk.AccountUpdateId(ctx, userID, member.User.Username, accountMetadata.MarshalMap(), accountMetadata.GetActiveGroupDisplayName(), "", "", "", ""); err != nil {
-				return fmt.Errorf("failed to update account: %w", err)
-			}
 		}
+
+		if err := c.nk.AccountUpdateId(ctx, userID, member.User.Username, accountMetadata.MarshalMap(), accountMetadata.GetActiveGroupDisplayName(), "", "", "", ""); err != nil {
+			return fmt.Errorf("failed to update account: %w", err)
+		}
+
 	}
 	// lock the cache since it might be updated.
 
@@ -653,6 +654,10 @@ func (d *DiscordCache) checkDisplayName(ctx context.Context, nk runtime.NakamaMo
 	userIDs, err := DisplayNameHistoryActiveList(ctx, nk, displayName)
 	if err != nil {
 		return "", fmt.Errorf("error getting display name history: %w", err)
+	}
+
+	if len(userIDs) == 1 && userIDs[0] == userID {
+		return displayName, nil
 	}
 
 	if len(userIDs) > 0 {
