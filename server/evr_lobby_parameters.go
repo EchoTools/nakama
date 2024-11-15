@@ -12,7 +12,6 @@ import (
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
-	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/intinig/go-openskill/types"
 	"go.uber.org/zap"
@@ -256,7 +255,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 	eqstats := profile.GetEarlyQuitStatistics()
 	penaltyExpiry := time.Unix(eqstats.PenaltyExpiry, 0)
 
-	percentile, _, err := OverallPercentile(ctx, logger, p.runtimeModule, session.userID.String())
+	percentile, _, err := OverallPercentileRecalculate(ctx, logger, p.runtimeModule, session.userID.String(), mode)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get overall percentile: %w", err)
 	}
@@ -377,7 +376,7 @@ func (p *LobbySessionParameters) BackfillSearchQuery(maxRTT int) string {
 
 }
 
-func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionParameters, withMinRankPercentile bool) (string, map[string]string, map[string]float64) {
+func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionParameters, withRankRange bool) (string, map[string]string, map[string]float64) {
 
 	displayName := sessionParams.AccountMetadata.GetGroupDisplayNameOrDefault(p.GroupID.String())
 
@@ -409,7 +408,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionPar
 		p.MatchmakingQueryAddon,
 	}
 
-	if withMinRankPercentile && p.RankPercentileRange > 0 {
+	if withRankRange && p.RankPercentileRange > 0 {
 		qparts = append(qparts, fmt.Sprintf("+properties.rank_percentile:>=%f +properties.rank_percentile:<=%f", p.RankPercentile-(p.RankPercentileRange/2), p.RankPercentile+(p.RankPercentileRange/2)))
 	}
 	// If the user has an early quit penalty, only match them with players who have submitted before the penalty expiry
@@ -466,58 +465,4 @@ func AverageLatencyHistories(histories LatencyHistory) map[string]int {
 	}
 
 	return averages
-}
-
-func OverallPercentile(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, userID string) (float64, map[string]*api.LeaderboardRecord, error) {
-
-	statNames := []string{
-		"ArenaGamesPlayed",
-		"ArenaWins",
-		"ArenaLosses",
-		"ArenaWinPercentage",
-		"AssistsPerGame",
-		"AveragePointsPerGame",
-		"AverageTopSpeedPerGame",
-		"BlockPercentage",
-		"GoalScorePercentage",
-		"GoalsPerGame",
-	}
-
-	statRecords := make(map[string]*api.LeaderboardRecord)
-	for _, s := range statNames {
-		id := fmt.Sprintf("daily:%s", s)
-
-		records, _, _, _, err := nk.LeaderboardRecordsList(ctx, id, []string{userID}, 10000, "", 0)
-		if err != nil {
-			continue
-		}
-
-		if len(records) == 0 {
-			continue
-		}
-
-		statRecords[s] = records[0]
-	}
-
-	if len(statRecords) == 0 {
-		return 0, nil, nil
-	}
-
-	// Combine all the stat ranks into a single percentile.
-	percentiles := make([]float64, 0, len(statRecords))
-	for _, r := range statRecords {
-		percentile := float64(r.GetRank()) / float64(r.GetNumScore())
-		percentiles = append(percentiles, percentile)
-	}
-
-	// Calculate the overall percentile.
-	overallPercentile := 0.0
-	for _, p := range percentiles {
-		overallPercentile += p
-	}
-	overallPercentile /= float64(len(percentiles))
-
-	logger.Info("Overall percentile", zap.Float64("percentile", overallPercentile))
-
-	return overallPercentile, statRecords, nil
 }
