@@ -109,6 +109,16 @@ func (s *MatchLabel) GetPlayerCount() int {
 	return count
 }
 
+func (s *MatchLabel) GetNonPlayerCount() int {
+	count := 0
+	for _, p := range s.Players {
+		if int(p.Team) == evr.TeamSpectator || int(p.Team) == evr.TeamModerator {
+			count++
+		}
+	}
+	return count
+}
+
 func (s *MatchLabel) GetPlayerByEvrID(evrID evr.EvrId) *PlayerInfo {
 	for _, p := range s.Players {
 		if p.EvrID == evrID {
@@ -123,7 +133,7 @@ func (s *MatchLabel) OpenPlayerSlots() int {
 }
 
 func (s *MatchLabel) OpenNonPlayerSlots() int {
-	return int(s.MaxSize) - s.PlayerLimit
+	return int(s.MaxSize) - s.PlayerLimit - s.GetNonPlayerCount()
 }
 
 func (s *MatchLabel) OpenSlots() int {
