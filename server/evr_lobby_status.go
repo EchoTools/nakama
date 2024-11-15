@@ -30,7 +30,6 @@ type GuildLobbyLabel struct {
 func JoinMatchmakingStream(logger *zap.Logger, s *sessionWS, params *LobbySessionParameters) error {
 
 	groupStream := params.MatchmakingStream()
-	logger.Debug("Joining lobby group matchmaking stream", zap.Any("stream", groupStream))
 
 	presenceMeta := params.PresenceMeta()
 
@@ -41,8 +40,6 @@ func JoinMatchmakingStream(logger *zap.Logger, s *sessionWS, params *LobbySessio
 
 	if success := s.tracker.Update(ctx, s.id, groupStream, s.userID, presenceMeta); !success {
 		return fmt.Errorf("failed to track lobby group matchmaking stream")
-	} else {
-		logger.Debug("Tracked lobby group matchmaking stream", zap.Any("stream", groupStream))
 	}
 
 	s.pipeline.router.SendToStream(logger, groupStream, &rtapi.Envelope{
@@ -62,12 +59,10 @@ func JoinMatchmakingStream(logger *zap.Logger, s *sessionWS, params *LobbySessio
 		},
 	}, true)
 
-	// Track the groupID as well
 	return nil
 }
 
 func LeaveMatchmakingStream(logger *zap.Logger, s *sessionWS) error {
-	logger.Debug("Leaving lobby group matchmaking stream")
 	s.tracker.UntrackLocalByModes(s.id, map[uint8]struct{}{StreamModeMatchmaking: {}}, PresenceStream{})
 	return nil
 }
