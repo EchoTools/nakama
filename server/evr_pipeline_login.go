@@ -50,10 +50,7 @@ func msgFailedLoginFn(session *sessionWS, evrId evr.EvrId, err error) error {
 	errMessage := wordwrap.String(s, 60)
 
 	// Send the messages
-	if err := session.SendEvr(
-		evr.NewLoginFailure(evrId, errMessage),
-		evr.NewSTcpConnectionUnrequireEvent(),
-	); err != nil {
+	if err := session.SendEvrUnrequire(evr.NewLoginFailure(evrId, errMessage)); err != nil {
 		// If there's an error, prefix it with the EchoVR Id
 		return errWithEvrIdFn(evrId, "send LoginFailure failed: %w", err)
 	}
@@ -82,8 +79,9 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 	// Send the login success message and the login settings.
 	return session.SendEvr(
 		evr.NewLoginSuccess(session.id, request.EvrId),
-		evr.NewSTcpConnectionUnrequireEvent(),
+		unrequireMessage,
 		gameSettings,
+		unrequireMessage,
 	)
 }
 
@@ -635,9 +633,8 @@ func (p *EvrPipeline) documentRequest(ctx context.Context, logger *zap.Logger, s
 				gaVersion = 1
 			}
 			document = evr.NewEULADocument(int(eulaVersion), int(gaVersion), request.Language, "https://github.com/EchoTools", "Blank EULA for NoVR clients.")
-			message := evr.NewDocumentSuccess(document)
 
-			return session.SendEvrUnrequire(message)
+			return session.SendEvrUnrequire(evr.NewDocumentSuccess(document))
 
 		}
 

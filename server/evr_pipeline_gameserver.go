@@ -44,9 +44,7 @@ func sendDiscordError(e error, discordId string, logger *zap.Logger, bot *discor
 // errFailedRegistration sends a failure message to the broadcaster and closes the session
 func errFailedRegistration(session *sessionWS, logger *zap.Logger, err error, code evr.BroadcasterRegistrationFailureCode) error {
 	logger.Warn("Failed to register game server", zap.Error(err))
-	if err := session.SendEvr(
-		evr.NewBroadcasterRegistrationFailure(code),
-	); err != nil {
+	if err := session.SendEvrUnrequire(evr.NewBroadcasterRegistrationFailure(code)); err != nil {
 		return fmt.Errorf("failed to send lobby registration failure: %w", err)
 	}
 

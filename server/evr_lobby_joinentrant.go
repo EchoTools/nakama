@@ -200,7 +200,7 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 	tracker.UntrackLocalByModes(session.ID(), map[uint8]struct{}{StreamModeMatchmaking: {}, StreamModeGuildGroup: {}}, lobbyGroupStream)
 
 	connectionSettings := label.GetEntrantConnectMessage(e.RoleAlignment, e.IsPCVR, e.DisableEncryption, e.DisableMAC)
-	if err := SendEVRMessages(serverSession, connectionSettings); err != nil {
+	if err := SendEVRMessages(serverSession, false, connectionSettings); err != nil {
 		logger.Error("failed to send lobby session success to game server", zap.Error(err))
 
 		return errors.New("failed to send lobby session success to game server")
@@ -209,7 +209,7 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 	// Send the lobby session success message to the game client.
 	<-time.After(250 * time.Millisecond)
 
-	err = SendEVRMessages(session, connectionSettings)
+	err = SendEVRMessages(session, false, connectionSettings)
 	if err != nil {
 		logger.Error("failed to send lobby session success to game client", zap.Error(err))
 		return errors.New("failed to send lobby session success to game client")

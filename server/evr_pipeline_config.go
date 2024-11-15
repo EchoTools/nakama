@@ -26,7 +26,7 @@ func (p *EvrPipeline) configRequest(ctx context.Context, logger *zap.Logger, ses
 	// Send an error if the object could not be retrieved.
 	if err != nil {
 		logger.Warn("failed to read objects", zap.Error(err))
-		session.SendEvr(evr.NewConfigFailure(message.Type, message.ID))
+		session.SendEvrUnrequire(evr.NewConfigFailure(message.Type, message.ID))
 		return fmt.Errorf("failed to read objects: %w", err)
 	}
 
@@ -40,7 +40,7 @@ func (p *EvrPipeline) configRequest(ctx context.Context, logger *zap.Logger, ses
 	}
 	if jsonResource == "" {
 		logger.Warn("resource not found")
-		session.SendEvr(evr.NewConfigFailure(message.Type, message.ID))
+		session.SendEvrUnrequire(evr.NewConfigFailure(message.Type, message.ID))
 		return fmt.Errorf("resource not found: %s", message.ID)
 	}
 
@@ -48,15 +48,12 @@ func (p *EvrPipeline) configRequest(ctx context.Context, logger *zap.Logger, ses
 	resource := make(map[string]interface{})
 	if err := json.Unmarshal([]byte(jsonResource), &resource); err != nil {
 
-		session.SendEvr(evr.NewConfigFailure(message.Type, message.ID))
+		session.SendEvrUnrequire(evr.NewConfigFailure(message.Type, message.ID))
 		return fmt.Errorf("failed to parse %s json: %w", message.ID, err)
 	}
 
 	// Send the resource to the client.
-	if err := session.SendEvr(
-		evr.NewConfigSuccess(message.Type, message.ID, resource),
-		evr.NewSTcpConnectionUnrequireEvent(),
-	); err != nil {
+	if err := session.SendEvrUnrequire(evr.NewConfigSuccess(message.Type, message.ID, resource)); err != nil {
 		return fmt.Errorf("failed to send SNSConfigSuccess: %w", err)
 	}
 	return nil
