@@ -224,7 +224,12 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 			output := make([]string, 0, len(whoami.GuildGroupMemberships))
 
 			for gid, m := range whoami.GuildGroupMemberships {
-				s := guildGroups[gid].Name()
+				group, ok := guildGroups[gid]
+				if !ok {
+					continue
+				}
+
+				groupStr := group.Name()
 				roles := make([]string, 0)
 				if m.IsMember {
 					roles = append(roles, "member")
@@ -248,9 +253,9 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 					roles = append(roles, "vpn-bypass")
 				}
 				if len(roles) > 0 {
-					s += fmt.Sprintf(" (%s)", strings.Join(roles, ", "))
+					groupStr += fmt.Sprintf(" (%s)", strings.Join(roles, ", "))
 				}
-				output = append(output, s)
+				output = append(output, groupStr)
 			}
 			return output
 		}(), "\n"), Inline: false},
@@ -263,7 +268,10 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		Name: "Default Matchmaking Guild",
 		Value: func() string {
 			if whoami.DefaultLobbyGroup != "" {
-				return guildGroups[whoami.DefaultLobbyGroup].Name()
+				if group, ok := guildGroups[whoami.DefaultLobbyGroup]; ok {
+					return group.Name()
+				}
+				return whoami.DefaultLobbyGroup
 			}
 			return ""
 		}(),
