@@ -147,6 +147,7 @@ func (p *EvrPipeline) monitorMatchmakingStream(ctx context.Context, logger *zap.
 func (p *EvrPipeline) newSocialLobby(ctx context.Context, logger *zap.Logger, versionLock evr.Symbol, groupID uuid.UUID) (*MatchLabel, error) {
 	if createSocialMu.TryLock() {
 		go func() {
+			// Hold the lock for enough time to create the server
 			<-time.After(5 * time.Second)
 			createSocialMu.Unlock()
 		}()
@@ -230,8 +231,12 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 	interval := 15 * time.Second
 
 	// Early quitters have a shorter backfill interval.
-	if lobbyParams.IsEarlyQuitter || lobbyParams.Mode == evr.ModeSocialPublic {
+	if lobbyParams.IsEarlyQuitter {
 		interval = 3 * time.Second
+	}
+
+	if lobbyParams.Mode == evr.ModeSocialPublic {
+		interval = 1 * time.Second
 	}
 
 	// If the player has backfill disabled, set the backfill interval to an extreme number.
@@ -251,8 +256,6 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 
 	query := lobbyParams.BackfillSearchQuery(maxRTT)
 	rtts := lobbyParams.latencyHistory.LatestRTTs()
-
-	<-time.After(1 * time.Second)
 
 	cycleCount := 0
 	for {
@@ -306,8 +309,8 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 
 			l := labelMeta.State
 
-			// if the match is too new, skip it.
-			if time.Since(l.CreatedAt) < 10*time.Second {
+			// if the match is too new, skip it. (except social lobbies)
+			if lobbyParams.Mode != evr.ModeSocialPublic && time.Since(l.CreatedAt) < 10*time.Second {
 				continue
 			}
 
@@ -349,7 +352,8 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 
 				// If the error is a lock error, just try again.
 				if err == ErrFailedToAcquireLock {
-					logger.Warn("Failed to acquire create lock")
+					// Wait a few seconds to give time for the server to be created.
+					<-time.After(1 * time.Second)
 					continue
 				}
 
