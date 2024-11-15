@@ -322,23 +322,23 @@ func (m RemoteLogPostMatchMatchTypeXPLevel) SessionUUID() uuid.UUID {
 }
 
 type RemoteLogPostMatchBattlePassXP struct {
-	BaseXP                          int64  `json:"BaseXP"`
-	BonusXP                         int64  `json:"BonusXP"`
-	CombinedXPMultiplier            int64  `json:"CombinedXPMultiplier"`
-	DailyFirstGameBonusXP           int64  `json:"DailyFirstGameBonusXP"`
-	GlobalXPMultiplier              int64  `json:"GlobalXPMultiplier"`
-	IndividualXPMultiplier          int64  `json:"IndividualXPMultiplier"`
-	IsPremiumUnlocked               bool   `json:"IsPremiumUnlocked"`
-	PartyXPMultiplier               int64  `json:"PartyXPMultiplier"`
-	PartyXPMultiplierTimesTeammates int64  `json:"PartyXPMultiplierTimesTeammates"`
-	TotalXP                         int64  `json:"TotalXP"`
-	WeeklyFirstWinBonusXP           int64  `json:"WeeklyFirstWinBonusXP"`
-	SessionUUIDStr                  string `json:"[session][uuid]"`
-	BattlePassStatGroup             string `json:"battle_pass_stat_group"`
-	MatchType                       string `json:"match_type"`
-	Message                         string `json:"message"`
-	MessageType                     string `json:"message_type"`
-	Userid                          string `json:"userid"`
+	BaseXP                          int64   `json:"BaseXP"`
+	BonusXP                         int64   `json:"BonusXP"`
+	CombinedXPMultiplier            float64 `json:"CombinedXPMultiplier"`
+	DailyFirstGameBonusXP           int64   `json:"DailyFirstGameBonusXP"`
+	GlobalXPMultiplier              float64 `json:"GlobalXPMultiplier"`
+	IndividualXPMultiplier          float64 `json:"IndividualXPMultiplier"`
+	IsPremiumUnlocked               bool    `json:"IsPremiumUnlocked"`
+	PartyXPMultiplier               float64 `json:"PartyXPMultiplier"`
+	PartyXPMultiplierTimesTeammates float64 `json:"PartyXPMultiplierTimesTeammates"`
+	TotalXP                         int64   `json:"TotalXP"`
+	WeeklyFirstWinBonusXP           int64   `json:"WeeklyFirstWinBonusXP"`
+	SessionUUIDStr                  string  `json:"[session][uuid]"`
+	BattlePassStatGroup             string  `json:"battle_pass_stat_group"`
+	MatchType                       string  `json:"match_type"`
+	Message                         string  `json:"message"`
+	MessageType                     string  `json:"message_type"`
+	Userid                          string  `json:"userid"`
 }
 
 func (m RemoteLogPostMatchBattlePassXP) SessionUUID() uuid.UUID {
