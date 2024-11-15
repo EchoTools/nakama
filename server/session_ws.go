@@ -138,8 +138,8 @@ type SessionParameters struct {
 	IsVR              bool     // The user is using a VR headset
 	IsPCVR            bool     // The user is using a PCVR headset
 
-	RelayOutgoing bool // The user is relaying outgoing messages
-
+	RelayOutgoing bool     // The user wants (some) outgoing messages relayed to them via discord
+	Debug         bool     // The user wants debug information
 	ServerTags    []string // []string of the server tags
 	ServerGuilds  []string // []string of the server guilds
 	ServerRegions []string // []string of the server regions
@@ -151,7 +151,7 @@ type SessionParameters struct {
 	URLParameters map[string][]string // The URL parameters
 }
 
-func LoadParams(ctx context.Context) (*SessionParameters, bool) {
+func LoadParams(ctx context.Context) (parameters *SessionParameters, found bool) {
 	params, ok := ctx.Value(ctxSessionParametersKey{}).(*atomic.Pointer[SessionParameters])
 	if !ok {
 		return nil, false
@@ -200,8 +200,9 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 		ServerTags:         parseUserQueryCommaDelimited(&request, "tags", 32, tagsPattern),
 		ServerGuilds:       parseUserQueryCommaDelimited(&request, "guilds", 32, guildPattern),
 		ServerRegions:      parseUserQueryCommaDelimited(&request, "regions", 32, regionPattern),
-
-		URLParameters: urlParams,
+		RelayOutgoing:      parseUserQueryFunc(&request, "verbose", 5, nil) == "true",
+		Debug:              parseUserQueryFunc(&request, "debug", 5, nil) == "true",
+		URLParameters:      urlParams,
 	}
 
 	ctx = context.WithValue(ctx, ctxSessionParametersKey{}, atomic.NewPointer(&params))
@@ -480,6 +481,16 @@ func (s *sessionWS) LobbySession(loginSessionID uuid.UUID) error {
 
 	}
 	return nil
+}
+
+func (s *sessionWS) Debug(enable bool) {
+	params, ok := LoadParams(s.Context())
+	if !ok {
+		return
+	}
+	newParams := *params
+	newParams.Debug = enable
+	UpdateParams(s.Context(), &newParams)
 }
 
 func (s *sessionWS) Logger() *zap.Logger {
