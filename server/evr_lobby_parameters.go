@@ -259,9 +259,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 	if err != nil {
 		return nil, fmt.Errorf("failed to get overall percentile: %w", err)
 	}
-	if percentile == 0 {
-		percentile = 0.50
-	}
+	percentile = max(0.2, percentile)
 
 	rankPercentileMaxDelta := 1.0
 
