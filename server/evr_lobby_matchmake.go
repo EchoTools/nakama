@@ -84,6 +84,17 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 	// Start the fallback when half the matchmaking timeout has expired
 	fallbackDelay := p.matchmakingTicketTimeout() / 2
 
+	// Reduce fallback delay if there is very few players online
+	stream := lobbyParams.GuildGroupStream()
+	count, err := p.runtimeModule.StreamCount(stream.Mode, stream.Subject.String(), "", stream.Label)
+	if err != nil {
+		logger.Error("Failed to get stream count", zap.Error(err))
+	} else {
+		if count < 16 {
+			fallbackDelay = p.matchmakingTicketTimeout() / 4
+		}
+	}
+
 	// If the first matchmaking ticket fails, try a fallback ticket
 	go func() {
 

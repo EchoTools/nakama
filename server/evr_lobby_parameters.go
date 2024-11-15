@@ -411,10 +411,11 @@ func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionPar
 	if withRankRange && p.RankPercentileRange > 0 {
 		qparts = append(qparts, fmt.Sprintf("+properties.rank_percentile:>=%f +properties.rank_percentile:<=%f", p.RankPercentile-(p.RankPercentileRange/2), p.RankPercentile+(p.RankPercentileRange/2)))
 	}
-	// If the user has an early quit penalty, only match them with players who have submitted before the penalty expiry
-	//if p.EarlyQuitPenaltyExpiry.After(time.Now()) {
-	//	qparts = append(qparts, fmt.Sprintf(`-properties.submission_time:<="%s"`, submissionTime))
-	//}
+
+	// If the user has an early quit penalty, only match them with players who have submitted after now
+	if p.EarlyQuitPenaltyExpiry.After(time.Now()) {
+		qparts = append(qparts, fmt.Sprintf(`-properties.submission_time:>="%s"`, submissionTime))
+	}
 
 	//maxDelta := 60 // milliseconds
 	for k, v := range AverageLatencyHistories(p.latencyHistory) {
@@ -429,6 +430,10 @@ func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionPar
 
 func (p LobbySessionParameters) MatchmakingStream() PresenceStream {
 	return PresenceStream{Mode: StreamModeMatchmaking, Subject: p.GroupID}
+}
+
+func (p LobbySessionParameters) GuildGroupStream() PresenceStream {
+	return PresenceStream{Mode: StreamModeGuildGroup, Subject: p.GroupID, Label: p.Mode.String()}
 }
 
 func (p LobbySessionParameters) PresenceMeta() PresenceMeta {

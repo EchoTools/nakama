@@ -164,7 +164,7 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 
 	matchIDStr := label.ID.String()
 
-	lobbyGroupStream := PresenceStream{Mode: StreamModeLobbyGroup, Subject: label.GetGroupID()}
+	lobbyGroupStream := PresenceStream{Mode: StreamModeGuildGroup, Subject: label.GetGroupID(), Label: label.Mode.String()}
 
 	ops := []*TrackerOp{
 		{
@@ -197,7 +197,7 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 	}
 
 	// Leave any other lobby group stream.
-	tracker.UntrackLocalByModes(session.ID(), map[uint8]struct{}{StreamModeMatchmaking: {}, StreamModeLobbyGroup: {}}, lobbyGroupStream)
+	tracker.UntrackLocalByModes(session.ID(), map[uint8]struct{}{StreamModeMatchmaking: {}, StreamModeGuildGroup: {}}, lobbyGroupStream)
 
 	connectionSettings := label.GetEntrantConnectMessage(e.RoleAlignment, e.IsPCVR, e.DisableEncryption, e.DisableMAC)
 	if err := SendEVRMessages(serverSession, connectionSettings); err != nil {

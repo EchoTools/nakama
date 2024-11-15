@@ -42,7 +42,7 @@ const (
 	StreamModeEntrant
 	StreamModeGameServer
 	StreamModeMatchmaking
-	StreamModeLobbyGroup
+	StreamModeGuildGroup
 	StreamModeMatchmaker
 )
 

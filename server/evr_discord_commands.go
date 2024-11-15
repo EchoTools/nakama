@@ -1719,7 +1719,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			// Check if the player is currently in a lobby for this guild and disconnect them if they are
-			presences, err := d.nk.StreamUserList(StreamModeLobbyGroup, groupID, "", "", true, true)
+			presences, err := d.nk.StreamUserList(StreamModeGuildGroup, groupID, "", "", true, true)
 			if err != nil {
 				return errors.New("failed to get user list")
 			}
