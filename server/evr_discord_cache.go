@@ -418,30 +418,20 @@ func (c *DiscordCache) SyncGuildGroupMember(ctx context.Context, userID, groupID
 		return fmt.Errorf("error getting guild group")
 	}
 
-	// Check if the bot has permissions to change roles in the guild.
-	permissions, err := c.dg.State.UserChannelPermissions(member.User.ID, guildID)
-	if err != nil {
-		return fmt.Errorf("error getting user channel permissions: %w", err)
-	}
-
-	// Only update the role if the bot has the necessary permissions.
-	if permissions&discordgo.PermissionManageRoles != 0 {
-
-		accountLinkedRole := guildGroup.Metadata.Roles.AccountLinked
-		if accountLinkedRole != "" {
-			if len(account.Devices) == 0 {
-				if slices.Contains(member.Roles, accountLinkedRole) {
-					// Remove the role
-					if err := c.dg.GuildMemberRoleRemove(member.GuildID, member.User.ID, accountLinkedRole); err != nil {
-						return fmt.Errorf("error adding role to member: %w", err)
-					}
+	accountLinkedRole := guildGroup.Metadata.Roles.AccountLinked
+	if accountLinkedRole != "" {
+		if len(account.Devices) == 0 {
+			if slices.Contains(member.Roles, accountLinkedRole) {
+				// Remove the role
+				if err := c.dg.GuildMemberRoleRemove(member.GuildID, member.User.ID, accountLinkedRole); err != nil {
+					return fmt.Errorf("error adding role to member: %w", err)
 				}
-			} else {
-				if !slices.Contains(member.Roles, accountLinkedRole) {
-					// Assign the role
-					if err := c.dg.GuildMemberRoleAdd(member.GuildID, member.User.ID, accountLinkedRole); err != nil {
-						return fmt.Errorf("error adding role to member: %w", err)
-					}
+			}
+		} else {
+			if !slices.Contains(member.Roles, accountLinkedRole) {
+				// Assign the role
+				if err := c.dg.GuildMemberRoleAdd(member.GuildID, member.User.ID, accountLinkedRole); err != nil {
+					return fmt.Errorf("error adding role to member: %w", err)
 				}
 			}
 		}
