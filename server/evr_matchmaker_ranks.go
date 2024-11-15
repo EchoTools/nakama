@@ -48,9 +48,16 @@ func OverallPercentileRecalculate(ctx context.Context, logger *zap.Logger, nk ru
 		return 0.0, nil, err
 	}
 
+	if statRecords == nil {
+		return 0.0, nil, nil
+	}
+
 	// Combine all the stat ranks into a single percentile.
 	percentiles := make([]float64, 0, len(statRecords))
 	for _, r := range statRecords {
+		if r.GetNumScore() == 0 {
+			continue
+		}
 		percentile := float64(r.GetRank()) / float64(r.GetNumScore())
 		percentiles = append(percentiles, percentile)
 	}
@@ -70,7 +77,7 @@ func StatRecordsLoad(ctx context.Context, logger *zap.Logger, nk runtime.NakamaM
 	statRecords := make(map[string]*api.LeaderboardRecord)
 	for _, boardID := range boardIDs {
 
-		records, _, _, _, err := nk.LeaderboardRecordsList(ctx, boardID, []string{userID}, 10000, "", 0)
+		_, records, _, _, err := nk.LeaderboardRecordsList(ctx, boardID, []string{userID}, 10000, "", 0)
 		if err != nil {
 			continue
 		}
