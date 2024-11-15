@@ -22,38 +22,38 @@ type (
 )
 
 type LobbySessionParameters struct {
-	Node                   string        `json:"node"`
-	UserID                 uuid.UUID     `json:"user_id"`
-	SessionID              uuid.UUID     `json:"session_id"`
-	VersionLock            evr.Symbol    `json:"version_lock"`
-	AppID                  evr.Symbol    `json:"app_id"`
-	GroupID                uuid.UUID     `json:"group_id"`
-	Region                 evr.Symbol    `json:"region"`
-	Mode                   evr.Symbol    `json:"mode"`
-	Level                  evr.Symbol    `json:"level"`
-	SupportedFeatures      []string      `json:"supported_features"`
-	RequiredFeatures       []string      `json:"required_features"`
-	CurrentMatchID         MatchID       `json:"current_match_id"`
-	NextMatchID            MatchID       `json:"next_match_id"`
-	Role                   int           `json:"role"`
-	PartySize              *atomic.Int64 `json:"party_size"`
-	PartyID                uuid.UUID     `json:"party_id"`
-	PartyGroupName         string        `json:"party_group_name"`
-	DisableArenaBackfill   bool          `json:"disable_arena_backfill"`
-	BackfillQueryAddon     string        `json:"backfill_query_addon"`
-	MatchmakingQueryAddon  string        `json:"matchmaking_query_addon"`
-	CreateQueryAddon       string        `json:"create_query_addon"`
-	Verbose                bool          `json:"verbose"`
-	BlockedIDs             []string      `json:"blocked_ids"`
-	Rating                 types.Rating  `json:"rating"`
-	IsEarlyQuitter         bool          `json:"quit_last_game_early"`
-	EarlyQuitPenaltyExpiry time.Time     `json:"early_quit_penalty_expiry"`
-	latencyHistory         LatencyHistory
-	RankPercentile         float64           `json:"rank_percentile"`
-	RankPercentileRange    float64           `json:"rank_percentile_range"`
-	MaxServerRTT           int               `json:"max_server_rtt"`
-	MatchmakingTimestamp   time.Time         `json:"matchmaking_timestamp"`
-	DisplayNames           map[string]string `json:"display_names"`
+	Node                     string        `json:"node"`
+	UserID                   uuid.UUID     `json:"user_id"`
+	SessionID                uuid.UUID     `json:"session_id"`
+	VersionLock              evr.Symbol    `json:"version_lock"`
+	AppID                    evr.Symbol    `json:"app_id"`
+	GroupID                  uuid.UUID     `json:"group_id"`
+	Region                   evr.Symbol    `json:"region"`
+	Mode                     evr.Symbol    `json:"mode"`
+	Level                    evr.Symbol    `json:"level"`
+	SupportedFeatures        []string      `json:"supported_features"`
+	RequiredFeatures         []string      `json:"required_features"`
+	CurrentMatchID           MatchID       `json:"current_match_id"`
+	NextMatchID              MatchID       `json:"next_match_id"`
+	Role                     int           `json:"role"`
+	PartySize                *atomic.Int64 `json:"party_size"`
+	PartyID                  uuid.UUID     `json:"party_id"`
+	PartyGroupName           string        `json:"party_group_name"`
+	DisableArenaBackfill     bool          `json:"disable_arena_backfill"`
+	BackfillQueryAddon       string        `json:"backfill_query_addon"`
+	MatchmakingQueryAddon    string        `json:"matchmaking_query_addon"`
+	CreateQueryAddon         string        `json:"create_query_addon"`
+	Verbose                  bool          `json:"verbose"`
+	BlockedIDs               []string      `json:"blocked_ids"`
+	Rating                   types.Rating  `json:"rating"`
+	IsEarlyQuitter           bool          `json:"quit_last_game_early"`
+	EarlyQuitPenaltyExpiry   time.Time     `json:"early_quit_penalty_expiry"`
+	latencyHistory           LatencyHistory
+	RankPercentile           float64           `json:"rank_percentile"`
+	RankPercentileUpperLimit float64           `json:"rank_percentile_range"`
+	MaxServerRTT             int               `json:"max_server_rtt"`
+	MatchmakingTimestamp     time.Time         `json:"matchmaking_timestamp"`
+	DisplayNames             map[string]string `json:"display_names"`
 }
 
 func (p *LobbySessionParameters) GetPartySize() int {
@@ -263,10 +263,10 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		percentile = 0.50
 	}
 
-	rankRange := globalSettings.RankPercentileRange
+	rankRangeUpperLimit := globalSettings.RankPercentileUpperLimit
 
-	if userSettings.RankPercentileRange > 0 {
-		rankRange = userSettings.RankPercentileRange
+	if userSettings.RankPercentileUpperLimit > 0 {
+		rankRangeUpperLimit = userSettings.RankPercentileUpperLimit
 	}
 
 	maxServerRTT := globalSettings.MaxServerRTT
@@ -290,38 +290,38 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 	}
 
 	return &LobbySessionParameters{
-		Node:                   node,
-		UserID:                 session.userID,
-		SessionID:              session.id,
-		CurrentMatchID:         currentMatchID,
-		VersionLock:            versionLock,
-		AppID:                  appID,
-		GroupID:                groupID,
-		Region:                 region,
-		Mode:                   mode,
-		Level:                  level,
-		SupportedFeatures:      supportedFeatures,
-		RequiredFeatures:       requiredFeatures,
-		Role:                   entrantRole,
-		DisableArenaBackfill:   globalSettings.DisableArenaBackfill || userSettings.DisableArenaBackfill,
-		BackfillQueryAddon:     strings.Join(backfillQueryAddons, " "),
-		MatchmakingQueryAddon:  strings.Join(matchmakingQueryAddons, " "),
-		CreateQueryAddon:       strings.Join(createQueryAddons, " "),
-		PartyGroupName:         lobbyGroupName,
-		PartyID:                uuid.NewV5(uuid.Nil, lobbyGroupName),
-		PartySize:              atomic.NewInt64(1),
-		NextMatchID:            nextMatchID,
-		latencyHistory:         latencyHistory,
-		BlockedIDs:             blockedIDs,
-		Rating:                 rating,
-		Verbose:                sessionParams.AccountMetadata.DiscordDebugMessages,
-		EarlyQuitPenaltyExpiry: penaltyExpiry,
-		IsEarlyQuitter:         isEarlyQuitter,
-		RankPercentile:         percentile,
-		RankPercentileRange:    rankRange,
-		MaxServerRTT:           maxServerRTT,
-		MatchmakingTimestamp:   time.Now().UTC(),
-		DisplayNames:           sessionParams.AccountMetadata.GroupDisplayNames,
+		Node:                     node,
+		UserID:                   session.userID,
+		SessionID:                session.id,
+		CurrentMatchID:           currentMatchID,
+		VersionLock:              versionLock,
+		AppID:                    appID,
+		GroupID:                  groupID,
+		Region:                   region,
+		Mode:                     mode,
+		Level:                    level,
+		SupportedFeatures:        supportedFeatures,
+		RequiredFeatures:         requiredFeatures,
+		Role:                     entrantRole,
+		DisableArenaBackfill:     globalSettings.DisableArenaBackfill || userSettings.DisableArenaBackfill,
+		BackfillQueryAddon:       strings.Join(backfillQueryAddons, " "),
+		MatchmakingQueryAddon:    strings.Join(matchmakingQueryAddons, " "),
+		CreateQueryAddon:         strings.Join(createQueryAddons, " "),
+		PartyGroupName:           lobbyGroupName,
+		PartyID:                  uuid.NewV5(uuid.Nil, lobbyGroupName),
+		PartySize:                atomic.NewInt64(1),
+		NextMatchID:              nextMatchID,
+		latencyHistory:           latencyHistory,
+		BlockedIDs:               blockedIDs,
+		Rating:                   rating,
+		Verbose:                  sessionParams.AccountMetadata.DiscordDebugMessages,
+		EarlyQuitPenaltyExpiry:   penaltyExpiry,
+		IsEarlyQuitter:           isEarlyQuitter,
+		RankPercentile:           percentile,
+		RankPercentileUpperLimit: rankRangeUpperLimit,
+		MaxServerRTT:             maxServerRTT,
+		MatchmakingTimestamp:     time.Now().UTC(),
+		DisplayNames:             sessionParams.AccountMetadata.GroupDisplayNames,
 	}, nil
 }
 
@@ -376,7 +376,7 @@ func (p *LobbySessionParameters) BackfillSearchQuery(maxRTT int) string {
 
 }
 
-func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionParameters, withRankRange bool, withEarlyQuitPenalty bool) (string, map[string]string, map[string]float64) {
+func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionParameters, withRankUpperLimit bool, withEarlyQuitPenalty bool) (string, map[string]string, map[string]float64) {
 
 	displayName := sessionParams.AccountMetadata.GetGroupDisplayNameOrDefault(p.GroupID.String())
 
@@ -408,8 +408,8 @@ func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionPar
 		p.MatchmakingQueryAddon,
 	}
 
-	if withRankRange && p.RankPercentileRange > 0 {
-		qparts = append(qparts, fmt.Sprintf("+properties.rank_percentile:>=%f +properties.rank_percentile:<=%f", p.RankPercentile-(p.RankPercentileRange/2), p.RankPercentile+(p.RankPercentileRange/2)))
+	if withRankUpperLimit && p.RankPercentileUpperLimit > 0 {
+		qparts = append(qparts, fmt.Sprintf("+properties.rank_percentile:<=%f", p.RankPercentileUpperLimit))
 	}
 
 	if withEarlyQuitPenalty {
