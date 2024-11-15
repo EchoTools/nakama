@@ -524,8 +524,11 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 	if len(rejects) > 0 {
 
 		code := evr.PlayerRejectionReasonKickedFromServer
-		msg := evr.NewGameServerEntrantRejected(code, rejects...)
-		if err := m.dispatchMessages(ctx, logger, dispatcher, []evr.Message{msg}, []runtime.Presence{state.server}, nil); err != nil {
+		msgs := []evr.Message{
+			evr.NewGameServerEntrantRejected(code, rejects...),
+			unrequireMessage,
+		}
+		if err := m.dispatchMessages(ctx, logger, dispatcher, msgs, []runtime.Presence{state.server}, nil); err != nil {
 			logger.Warn("Failed to dispatch message: %v", err)
 		}
 	}

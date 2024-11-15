@@ -42,7 +42,7 @@ func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session
 			// Delay sending the error message to the client.
 			// There are situations where the client will spam the server with join requests.
 			<-time.After(3 * time.Second)
-			if err := SendEVRMessages(session, LobbySessionFailureFromError(label.Mode, label.GetGroupID(), err)); err != nil {
+			if err := SendEVRMessages(session, false, LobbySessionFailureFromError(label.Mode, label.GetGroupID(), err)); err != nil {
 				logger.Debug("Failed to send error message", zap.Error(err))
 			}
 		}()
