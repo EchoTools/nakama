@@ -498,7 +498,9 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 			// If the presence still has the entrant stream, then this was from nakama, not the server. inform the server.
 			if userPresences, err := nk.StreamUserList(StreamModeEntrant, mp.EntrantID(state.ID).String(), "", mp.GetNodeId(), true, true); err != nil {
 				logger.Warn("Failed to list user streams: %v", err)
+
 			} else if len(userPresences) > 0 {
+
 				rejects = append(rejects, mp.EntrantID(state.ID))
 				msg = "Removing player from game server."
 				nk.MetricsCounterAdd("match_entrant_kick_count", tags, 1)

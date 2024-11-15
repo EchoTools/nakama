@@ -221,6 +221,11 @@ func (m *skillBasedMatchmaker) CreateBalancedMatch(groups [][]*RatedEntry, teamS
 		}
 	}
 
+	// Sort so that team2 (orange) is the stronger team
+	if m.TeamStrength(team1) > m.TeamStrength(team2) {
+		team1, team2 = team2, team1
+	}
+
 	return team1, team2
 }
 
@@ -292,6 +297,7 @@ func (m *skillBasedMatchmaker) buildPredictions(candidates [][]runtime.Matchmake
 	predictions := make([]PredictedMatch, 0, len(candidates))
 	for _, match := range candidates {
 		ratedMatch := m.balanceByTicket(match)
+
 		predictions = append(predictions, PredictedMatch{
 			Team1: ratedMatch[0],
 			Team2: ratedMatch[1],
@@ -305,14 +311,15 @@ func (m *skillBasedMatchmaker) composeMatches(ratedMatches []PredictedMatch) [][
 	selected := make([][]runtime.MatchmakerEntry, 0, len(ratedMatches))
 
 OuterLoop:
-	for _, p := range ratedMatches {
+	for _, ratedMatch := range ratedMatches {
 		// The players are ordered by their team
 		match := make([]runtime.MatchmakerEntry, 0, 8)
 
 		// Ensure no player is in more than one match
-		for _, e := range p.Entrants() {
+		for _, e := range ratedMatch.Entrants() {
 			sessionID := e.Entry.GetPresence().GetSessionId()
 
+			// Skip match with players already in a match
 			if _, ok := seen[sessionID]; ok {
 				continue OuterLoop
 			}
