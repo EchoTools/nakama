@@ -29,7 +29,7 @@ var (
 		}
 		for mode, boardIDs := range ids {
 			for s := range boardIDs {
-				boardIDs[s] = fmt.Sprintf("%s:%s:daily", mode, boardIDs[s])
+				boardIDs[s] = fmt.Sprintf("%s:%s:weekly", mode, boardIDs[s])
 			}
 		}
 		return ids
@@ -45,7 +45,7 @@ func OverallPercentileRecalculate(ctx context.Context, logger *zap.Logger, nk ru
 
 	statRecords, err := StatRecordsLoad(ctx, logger, nk, userID, percentileBoardIDs)
 	if err != nil {
-		return 0, nil, err
+		return 0.0, nil, err
 	}
 
 	// Combine all the stat ranks into a single percentile.
