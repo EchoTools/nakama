@@ -242,17 +242,17 @@ func LatencyCmp[T int | time.Duration](i, j T, mround T) bool {
 }
 
 type MatchmakingSettings struct {
-	DisableArenaBackfill  bool     `json:"disable_arena_backfill"`  // Disable backfilling for arena matches
-	BackfillQueryAddon    string   `json:"backfill_query_addon"`    // Additional query to add to the matchmaking query
-	MatchmakingQueryAddon string   `json:"matchmaking_query_addon"` // Additional query to add to the matchmaking query
-	CreateQueryAddon      string   `json:"create_query_addon"`      // Additional query to add to the matchmaking query
-	LobbyGroupName        string   `json:"group_id"`                // Group ID to matchmake with
-	PriorityBroadcasters  []string `json:"priority_broadcasters"`   // Prioritize these broadcasters
-	NextMatchID           MatchID  `json:"next_match_id"`           // Try to join this match immediately when finding a match
-	NextMatchRole         string   `json:"next_match_role"`         // The role to join the next match as
-	NextMatchDiscordID    string   `json:"next_match_discord_id"`   // The discord ID to join the next match as
-	RankPercentileRange   float64  `json:"rank_percentile_range"`   // The percentile range for rank matching
-	MaxServerRTT          int      `json:"max_server_rtt"`          // The maximum RTT to allow
+	DisableArenaBackfill     bool     `json:"disable_arena_backfill"`      // Disable backfilling for arena matches
+	BackfillQueryAddon       string   `json:"backfill_query_addon"`        // Additional query to add to the matchmaking query
+	MatchmakingQueryAddon    string   `json:"matchmaking_query_addon"`     // Additional query to add to the matchmaking query
+	CreateQueryAddon         string   `json:"create_query_addon"`          // Additional query to add to the matchmaking query
+	LobbyGroupName           string   `json:"group_id"`                    // Group ID to matchmake with
+	PriorityBroadcasters     []string `json:"priority_broadcasters"`       // Prioritize these broadcasters
+	NextMatchID              MatchID  `json:"next_match_id"`               // Try to join this match immediately when finding a match
+	NextMatchRole            string   `json:"next_match_role"`             // The role to join the next match as
+	NextMatchDiscordID       string   `json:"next_match_discord_id"`       // The discord ID to join the next match as
+	RankPercentileUpperLimit float64  `json:"rank_percentile_upper_limit"` // The upper limit percentile range to matchmake with
+	MaxServerRTT             int      `json:"max_server_rtt"`              // The maximum RTT to allow
 }
 
 func (MatchmakingSettings) GetStorageID() StorageID {
