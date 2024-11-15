@@ -246,7 +246,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 	}
 
 	// Add each blocked user that is online to the backfill query addon
-	if len(blockedIDs) > 0 {
+	if len(blockedIDs) > 0 && mode != evr.ModeSocialPublic {
 
 		// Avoid backfilling matches with players that this player blocks.
 		backfillQueryAddons = append(backfillQueryAddons, fmt.Sprintf(`-label.players.user_id:/(%s)/`, Query.Join(blockedIDs, "|")))
