@@ -32,7 +32,7 @@ type ProfileRegistry struct {
 	unlocksByItemName map[string]string
 
 	cacheMu sync.RWMutex
-	cache   map[evr.EvrId][]byte
+	cache   map[evr.EvrId]*json.RawMessage
 	// Load out default items
 	defaults map[string]string
 }
@@ -50,7 +50,7 @@ func NewProfileRegistry(nk runtime.NakamaModule, db *sql.DB, logger runtime.Logg
 		nk:          nk,
 		tracker:     tracker,
 
-		cache: make(map[evr.EvrId][]byte),
+		cache: make(map[evr.EvrId]*json.RawMessage),
 
 		unlocksByItemName: unlocksByFieldName,
 		defaults:          generateDefaultLoadoutMap(),
@@ -156,20 +156,41 @@ func (r *ProfileRegistry) SaveAndCache(ctx context.Context, userID uuid.UUID, pr
 	}
 
 	serverProfile := profile.GetServer()
-	data, err := json.Marshal(serverProfile)
+
+	// Extract the "interesting" fields from the server profile
+	/*
+
+		{
+		    "unlocksetids": {
+		        "all": {}
+		    },
+		    "statgroupids": {
+		        "arena": {},
+		        "arena_practice_ai": {},
+		        "arena_public_ai": {},
+		        "combat": {},
+		        "daily_2024_11_15": {},
+		        "weekly_2024_11_11": {},
+		        "active_battle_pass_se": {}
+		    }
+		}
+
+	*/
+	var data json.RawMessage
+	data, err = json.Marshal(serverProfile)
 	if err != nil {
 		return err
 	}
 
 	r.cacheMu.Lock()
-	r.cache[serverProfile.EvrID] = data
+	r.cache[serverProfile.EvrID] = &data
 	defer r.cacheMu.Unlock()
 
 	return err
 }
 
 // Retrieves the bytes of a server profile from the cache.
-func (s *ProfileRegistry) GetCached(ctx context.Context, evrID evr.EvrId) (json.RawMessage, error) {
+func (s *ProfileRegistry) GetCached(ctx context.Context, evrID evr.EvrId) (*json.RawMessage, error) {
 	s.cacheMu.RLock()
 	if data, ok := s.cache[evrID]; ok {
 		s.cacheMu.RUnlock()
@@ -182,10 +203,10 @@ func (s *ProfileRegistry) GetCached(ctx context.Context, evrID evr.EvrId) (json.
 		return nil, err
 	}
 	s.cacheMu.Lock()
-	s.cache[evrID] = data
+	s.cache[evrID] = &data
 	s.cacheMu.Unlock()
 
-	return data, err
+	return &data, err
 }
 
 func (r *ProfileRegistry) NewGameProfile() GameProfileData {
