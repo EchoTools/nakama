@@ -376,7 +376,7 @@ func (p *LobbySessionParameters) BackfillSearchQuery(maxRTT int) string {
 
 }
 
-func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionParameters, withRankRange bool) (string, map[string]string, map[string]float64) {
+func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionParameters, withRankRange bool, withEarlyQuitPenalty bool) (string, map[string]string, map[string]float64) {
 
 	displayName := sessionParams.AccountMetadata.GetGroupDisplayNameOrDefault(p.GroupID.String())
 
@@ -412,9 +412,11 @@ func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionPar
 		qparts = append(qparts, fmt.Sprintf("+properties.rank_percentile:>=%f +properties.rank_percentile:<=%f", p.RankPercentile-(p.RankPercentileRange/2), p.RankPercentile+(p.RankPercentileRange/2)))
 	}
 
-	// If the user has an early quit penalty, only match them with players who have submitted after now
-	if p.EarlyQuitPenaltyExpiry.After(time.Now()) {
-		qparts = append(qparts, fmt.Sprintf(`-properties.submission_time:>="%s"`, submissionTime))
+	if withEarlyQuitPenalty {
+		// If the user has an early quit penalty, only match them with players who have submitted after now
+		if p.EarlyQuitPenaltyExpiry.After(time.Now()) {
+			qparts = append(qparts, fmt.Sprintf(`-properties.submission_time:>="%s"`, submissionTime))
+		}
 	}
 
 	//maxDelta := 60 // milliseconds

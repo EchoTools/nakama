@@ -41,10 +41,11 @@ var (
 )
 
 type MatchmakerTicketConfig struct {
-	MinCount         int
-	MaxCount         int
-	CountMultiple    int
-	includeRankRange bool
+	MinCount                int
+	MaxCount                int
+	CountMultiple           int
+	includeRankRange        bool
+	includeEarlyQuitPenalty bool
 }
 
 var DefaultMatchmakerTicketConfigs = map[evr.Symbol]MatchmakerTicketConfig{
@@ -74,6 +75,7 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 	}
 
 	ticketConfig.includeRankRange = true
+	ticketConfig.includeEarlyQuitPenalty = true
 
 	// Add the primary ticket
 	err = p.addTicket(ctx, logger, session, lobbyParams, lobbyGroup, ticketConfig)
@@ -111,6 +113,7 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 		ticketConfig.MaxCount = ticketConfig.MinCount
 		ticketConfig.MinCount = 1 // This must be 1 to allow for the fallback to work
 		ticketConfig.includeRankRange = false
+		ticketConfig.includeEarlyQuitPenalty = false
 
 		if ticketConfig.CountMultiple == 1 || ticketConfig.MaxCount == ticketConfig.MinCount || ticketConfig.MaxCount%ticketConfig.CountMultiple != 0 {
 			logger.Debug("Matchmaking ticket config is not valid for fallbacks", zap.Any("config", ticketConfig))
@@ -135,7 +138,7 @@ func (p *EvrPipeline) addTicket(ctx context.Context, logger *zap.Logger, session
 		return fmt.Errorf("failed to load session parameters")
 	}
 
-	query, stringProps, numericProps := lobbyParams.MatchmakingParameters(sessionParams, ticketConfig.includeRankRange)
+	query, stringProps, numericProps := lobbyParams.MatchmakingParameters(sessionParams, ticketConfig.includeRankRange, ticketConfig.includeEarlyQuitPenalty)
 
 	// now + 2/3 matchmaking timeout
 	priorityThreshold := time.Now().UTC().Add(p.matchmakingTicketTimeout() * 2 / 3).Unix()
