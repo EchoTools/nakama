@@ -99,8 +99,6 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 
 	nk := NewRuntimeGoNakamaModule(logger, db, protojsonMarshaler, config, socialClient, leaderboardCache, leaderboardRankCache, leaderboardScheduler, sessionRegistry, sessionCache, statusRegistry, matchRegistry, tracker, metrics, streamManager, router, storageIndex)
 
-	// TODO Add a symbol cache that gets populated and stored back occasionally
-
 	runtimeLogger := NewRuntimeGoLogger(logger)
 
 	// Load the global settings
@@ -405,11 +403,13 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 	p := session.evrPipeline
 
 	switch in.Message.(type) {
+
 	case *rtapi.Envelope_StreamData:
 		payload := []byte(in.GetStreamData().GetData())
 		if bytes.HasPrefix(payload, evr.MessageMarker) {
 			return nil, session.SendBytes(payload, true)
 		}
+
 	case *rtapi.Envelope_MatchData:
 		if in.GetMatchData().GetOpCode() == OpCodeEVRPacketData {
 			return nil, session.SendBytes(in.GetMatchData().GetData(), true)
@@ -425,7 +425,38 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 	// DM the user on discord
 	if !strings.HasPrefix(session.Username(), "broadcaster:") && params.RelayOutgoing {
 		content := ""
-		switch in.Message.(type) {
+		switch msg := in.Message.(type) {
+		case *rtapi.Envelope_StreamData:
+
+			discordMessage := struct {
+				Stream  *rtapi.Stream       `json:"stream"`
+				Sender  *rtapi.UserPresence `json:"sender"`
+				Content json.RawMessage     `json:"content"`
+			}{
+				msg.StreamData.Stream,
+				msg.StreamData.Sender,
+				json.RawMessage(msg.StreamData.Data),
+			}
+
+			if msg.StreamData.Stream.Mode == int32(SessionFormatJson) {
+				data, err := json.MarshalIndent(discordMessage, "", "  ")
+				if err != nil {
+					logger.Error("Failed to marshal stream data", zap.Error(err))
+				} else {
+					content = fmt.Sprintf("```json\n%s\n```", data)
+				}
+			}
+
+		case *rtapi.Envelope_Error:
+
+			// Json the message
+			data, err := json.MarshalIndent(in.GetError(), "", "  ")
+			if err != nil {
+				logger.Error("Failed to marshal error", zap.Error(err))
+			} else {
+				content = string("```json\n" + string(data) + "\n```")
+			}
+
 		case *rtapi.Envelope_StatusPresenceEvent, *rtapi.Envelope_MatchPresenceEvent, *rtapi.Envelope_StreamPresenceEvent:
 		case *rtapi.Envelope_Party:
 			discordIDs := make([]string, 0)
@@ -460,6 +491,7 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 			}
 
 			content = fmt.Sprintf("Active party `%s`: %s", partyGroupName, strings.Join(discordIDs, ", "))
+
 		case *rtapi.Envelope_PartyLeader:
 			if discordID, err := GetDiscordIDByUserID(session.Context(), session.pipeline.db, in.GetPartyLeader().GetPresence().GetUserId()); err != nil {
 				logger.Warn("Failed to get discord ID", zap.Error(err))
