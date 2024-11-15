@@ -1245,7 +1245,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			profile.SetJerseyNumber(number)
 
 			// Save the profile
-			if err := d.profileRegistry.Save(ctx, uid, profile); err != nil {
+			if err := d.profileRegistry.SaveAndCache(ctx, uid, profile); err != nil {
 				return fmt.Errorf("failed to save profile: %w", err)
 			}
 

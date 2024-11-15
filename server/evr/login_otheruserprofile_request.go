@@ -7,22 +7,14 @@ import (
 
 // OtherUserProfileRequest represents a message from client to server requesting the user profile for another user.
 type OtherUserProfileRequest struct {
-	EvrId EvrId  // The user identifier.
-	Data  []byte // The request data for the underlying profile, indicating fields of interest.
-}
-
-func (m OtherUserProfileRequest) Token() string {
-	return "SNSOtherUserProfileRequest"
-}
-
-func (m OtherUserProfileRequest) Symbol() Symbol {
-	return ToSymbol(m.Token())
+	EvrId EvrId           // The user identifier.
+	Data  json.RawMessage // The request data for the underlying profile, indicating fields of interest.
 }
 
 func (m *OtherUserProfileRequest) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
 		func() error { return s.StreamStruct(&m.EvrId) },
-		func() error { return s.StreamCompressedBytes(m.Data, true, NoCompression) },
+		func() error { return s.StreamJSONRawMessage(&m.Data, true, NoCompression) },
 	})
 }
 
@@ -36,9 +28,5 @@ func NewOtherUserProfileRequest(userID EvrId, data []byte) *OtherUserProfileRequ
 
 // String returns a string representation of the OtherUserProfileRequest message.
 func (m *OtherUserProfileRequest) String() string {
-	profileJson, err := json.Marshal(m.Data)
-	if err != nil {
-		profileJson = []byte(fmt.Sprintf("error: %s", err))
-	}
-	return fmt.Sprintf("%s(user_id=%s, profile_request=%s)", m.Token(), m.EvrId.String(), profileJson)
+	return fmt.Sprintf("%T(evr_id=%s)", m, m.EvrId.String())
 }

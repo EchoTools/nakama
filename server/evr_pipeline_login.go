@@ -282,7 +282,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	profile.SetChannel(evr.GUID(metadata.GetActiveGroupID()))
 	profile.UpdateDisplayName(metadata.GetActiveGroupDisplayName())
 
-	p.profileRegistry.Save(ctx, session.userID, profile)
+	p.profileRegistry.SaveAndCache(ctx, session.userID, profile)
 	/*
 		session.SendEvr(&evr.EarlyQuitConfig{
 			SteadyPlayerLevel: 1,
@@ -878,7 +878,7 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 	}
 
 	// Store the profile
-	p.profileRegistry.Save(ctx, playerInfo.UUID(), profile)
+	p.profileRegistry.SaveAndCache(ctx, playerInfo.UUID(), profile)
 
 	return nil
 }

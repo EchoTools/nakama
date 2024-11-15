@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"io"
 	"net"
 	"testing"
@@ -155,9 +156,9 @@ func TestReadBytes(t *testing.T) {
 		t.Errorf("ReadBytes() = %s, want %s", got, want)
 	}
 }
-func TestEasyStream_StreamCompressedBytes(t *testing.T) {
+func TestEasyStream_StreamJSONRawMessage(t *testing.T) {
 	// Test data
-	data := []byte("Hello, World!")
+	data := json.RawMessage("{\"hello\": \"world\"}")
 
 	// Create a buffer for testing
 	buf := new(bytes.Buffer)
@@ -167,14 +168,15 @@ func TestEasyStream_StreamCompressedBytes(t *testing.T) {
 		Mode: EncodeMode,
 		w:    buf,
 	}
-	if err := stream.StreamCompressedBytes(data, false, NoCompression); err != nil {
+	want := data[:]
+	if err := stream.StreamJSONRawMessage(&data, false, NoCompression); err != nil {
 		t.Fatalf("failed to stream compressed bytes: %v", err)
 	}
-	want := data
-	got := buf.Bytes()
+
+	var got json.RawMessage = buf.Bytes()
 	encoded := got
 	if !bytes.Equal(got, want) {
-		t.Errorf("StreamCompressedBytes() = %s, want %s", got, want)
+		t.Errorf("Encode StreamJSONRawMessage(&) = %s, want %s", got, want)
 	}
 	// Create an EasyStream
 	stream = &EasyStream{
@@ -183,11 +185,11 @@ func TestEasyStream_StreamCompressedBytes(t *testing.T) {
 	}
 	want = data
 	got = []byte{}
-	if err := stream.StreamCompressedBytes(got, false, NoCompression); err != nil {
+	if err := stream.StreamJSONRawMessage(&got, false, NoCompression); err != nil {
 		t.Fatalf("failed to stream compressed bytes: %v", err)
 	}
 	if !bytes.Equal(got, want) {
-		t.Errorf("StreamCompressedBytes() = %s, want %s", got, want)
+		t.Errorf("Decode StreamJSONRawMessage(&) = %s, want %s", got, want)
 	}
 
 	buf.Reset()
@@ -196,14 +198,14 @@ func TestEasyStream_StreamCompressedBytes(t *testing.T) {
 		Mode: EncodeMode,
 		w:    buf,
 	}
-	if err := stream.StreamCompressedBytes(data, true, NoCompression); err != nil {
-		t.Fatalf("failed to stream compressed bytes: %v", err)
+	if err := stream.StreamJSONRawMessage(&data, true, NoCompression); err != nil {
+		t.Fatalf("Encode failed to stream compressed bytes: %v", err)
 	}
 	want = append(data, 0x00)
 	got = buf.Bytes()
 	encoded = got
 	if !bytes.Equal(got, want) {
-		t.Errorf("StreamCompressedBytes() = %s, want %s", got, want)
+		t.Errorf("StreamJSONRawMessage(&) = %s, want %s", got, want)
 	}
 
 	// NoCompression: Null terminated
@@ -213,11 +215,11 @@ func TestEasyStream_StreamCompressedBytes(t *testing.T) {
 	}
 	want = data
 	got = []byte{}
-	if err := stream.StreamCompressedBytes(got, true, NoCompression); err != nil {
+	if err := stream.StreamJSONRawMessage(&got, true, NoCompression); err != nil {
 		t.Fatalf("failed to stream compressed bytes: %v", err)
 	}
 	if !bytes.Equal(got, want) {
-		t.Errorf("StreamCompressedBytes() = %s, want %s", got, want)
+		t.Errorf("StreamJSONRawMessage(&) = %s, want %s", got, want)
 	}
 
 	// Test ZlibCompression
@@ -227,7 +229,7 @@ func TestEasyStream_StreamCompressedBytes(t *testing.T) {
 		w:    buf,
 	}
 
-	if err := stream.StreamCompressedBytes(data, false, ZlibCompression); err != nil {
+	if err := stream.StreamJSONRawMessage(&data, false, ZlibCompression); err != nil {
 		t.Fatalf("failed to stream compressed bytes: %v", err)
 	}
 	encoded = buf.Bytes()
@@ -240,11 +242,11 @@ func TestEasyStream_StreamCompressedBytes(t *testing.T) {
 	}
 
 	got = []byte{}
-	if err := stream.StreamCompressedBytes(got, false, ZlibCompression); err != nil {
+	if err := stream.StreamJSONRawMessage(&got, false, ZlibCompression); err != nil {
 		t.Fatalf("failed to stream compressed bytes: %v", err)
 	}
 	if !bytes.Equal(got, want) {
-		t.Errorf("StreamCompressedBytes() = %s, want %s", got, want)
+		t.Errorf("StreamJSONRawMessage(&) = %s, want %s", got, want)
 	}
 
 	// Test ZlibCompression
@@ -254,7 +256,7 @@ func TestEasyStream_StreamCompressedBytes(t *testing.T) {
 		w:    buf,
 	}
 
-	if err := stream.StreamCompressedBytes(data, true, ZlibCompression); err != nil {
+	if err := stream.StreamJSONRawMessage(&data, true, ZlibCompression); err != nil {
 		t.Fatalf("failed to stream compressed bytes: %v", err)
 	}
 	encoded = buf.Bytes()
@@ -267,11 +269,11 @@ func TestEasyStream_StreamCompressedBytes(t *testing.T) {
 	}
 
 	got = []byte{}
-	if err := stream.StreamCompressedBytes(got, true, ZlibCompression); err != nil {
+	if err := stream.StreamJSONRawMessage(&got, true, ZlibCompression); err != nil {
 		t.Fatalf("failed to stream compressed bytes: %v", err)
 	}
 	if !bytes.Equal(got, want) {
-		t.Errorf("StreamCompressedBytes() = %s, want %s", got, want)
+		t.Errorf("StreamJSONRawMessage(&) = %s, want %s", got, want)
 	}
 }
 func TestEasyStream_StreamIpAddress(t *testing.T) {
