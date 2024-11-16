@@ -606,23 +606,23 @@ var (
 					Required:    true,
 					Choices: []*discordgo.ApplicationCommandOptionChoice{
 						{
-							Name:  "Echo Arena Private",
+							Name:  "Private Arena Match",
 							Value: "echo_arena_private",
 						},
 						{
-							Name:  "Echo Combat Private",
+							Name:  "Private Combat Match",
 							Value: "echo_combat_private",
 						},
 						{
-							Name:  "Social Private",
+							Name:  "Private Social Lobby",
 							Value: "social_2.0_private",
 						},
 						{
-							Name:  "Echo Arena Public",
+							Name:  "Public Arena Match",
 							Value: "echo_arena",
 						},
 						{
-							Name:  "Echo Combat Public",
+							Name:  "Public Combat Match",
 							Value: "echo_combat",
 						},
 					},
@@ -1620,9 +1620,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return fmt.Errorf("invalid level `%s`", level)
 			}
 
-			timeoutMinutes := 1
-
-			startTime := time.Now().Add(time.Minute * time.Duration(timeoutMinutes))
+			startTime := time.Now().Add(90 * time.Second)
 
 			logger = logger.WithFields(map[string]interface{}{
 				"userID":    userID,
@@ -1633,15 +1631,114 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				"startTime": startTime,
 			})
 
-			label, rtt, err := d.handleCreateMatch(ctx, logger, userID, i.GuildID, region, mode, level, startTime)
+			label, rttMs, err := d.handleCreateMatch(ctx, logger, userID, i.GuildID, region, mode, level, startTime)
 			if err != nil {
 				return err
 			}
 
-			rttMs := int(rtt / 1000000)
-			logger.WithField("label", label).Info("Match created.")
-			content := fmt.Sprintf("Reserved server (%dms ping) for `%s` session. Reservation will timeout in %d minute.\n\nhttps://echo.taxi/spark://c/%s", rttMs, label.Mode.String(), timeoutMinutes, strings.ToUpper(label.ID.UUID.String()))
-			return simpleInteractionResponse(s, i, content)
+			logger.WithFields(map[string]any{
+				"match_id": label.ID.String(),
+				"rtt_ms":   rttMs,
+			}).Info("Match created.")
+
+			content := fmt.Sprintf(" Reservation will timeout <t:%d:R>. \n\nClick play or start matchmaking to automatically join your match.\n\nhttps://echo.taxi/spark://c/%s", startTime.Unix(), strings.ToUpper(label.ID.UUID.String()))
+
+			niceNameMap := map[evr.Symbol]string{
+				evr.ModeArenaPrivate:  "Private Arena Match",
+				evr.ModeArenaPublic:   "Public Arena Match",
+				evr.ModeCombatPrivate: "Private Combat Match",
+				evr.ModeCombatPublic:  "Public Combat Match",
+				evr.ModeSocialPrivate: "Private Social Lobby",
+			}
+			prettyName, ok := niceNameMap[mode]
+			if !ok {
+				prettyName = mode.String()
+			}
+
+			responseContent := &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Flags: discordgo.MessageFlagsEphemeral,
+					Embeds: []*discordgo.MessageEmbed{{
+						Title:       "Match Created",
+						Description: content,
+						Color:       0x9656ce,
+						Fields: []*discordgo.MessageEmbedField{
+							{
+								Name:   "Mode",
+								Value:  prettyName,
+								Inline: true,
+							},
+							{
+								Name:   "Region Code",
+								Value:  fmt.Sprintf("```%s```", region.String()),
+								Inline: true,
+							},
+							{
+								Name:   "Ping Latency",
+								Value:  fmt.Sprintf("%dms", rttMs),
+								Inline: false,
+							},
+							{
+								Name:   "Spark Link",
+								Value:  fmt.Sprintf("https://echo.taxi/spark://c/%s", strings.ToUpper(label.ID.UUID.String())),
+								Inline: false,
+							},
+							{
+								Name:  "Participants",
+								Value: "No participants yet",
+							},
+						},
+					}},
+				},
+			}
+
+			go func() {
+
+				// Monitor the match and update the interaction
+				for {
+					startCheckTimer := time.NewTicker(15 * time.Second)
+					updateTicker := time.NewTicker(30 * time.Second)
+					select {
+					case <-startCheckTimer.C:
+					case <-updateTicker.C:
+					}
+
+					presences, err := d.nk.StreamUserList(StreamModeMatchAuthoritative, label.ID.UUID.String(), "", label.ID.Node, true, false)
+					if err != nil {
+						logger.Error("Failed to get user list", zap.Error(err))
+					}
+					if len(presences) == 0 {
+						// Match is gone. update the response.
+						responseContent.Data.Embeds[0].Title = "Match Over"
+						responseContent.Data.Embeds[0].Description = "The match expired/ended."
+
+						if _, err = s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+							Embeds: &responseContent.Data.Embeds,
+						}); err != nil {
+							logger.Error("Failed to update interaction", zap.Error(err))
+							return
+						}
+					}
+
+					// Update the list of players in the interaction response
+					var players strings.Builder
+					for _, p := range presences {
+						players.WriteString(fmt.Sprintf("<@%s>\n", d.cache.UserIDToDiscordID(p.GetUserId())))
+					}
+					responseContent.Data.Embeds[0].Fields[4].Value = players.String()
+
+					if _, err = s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+						Embeds: &responseContent.Data.Embeds,
+					}); err != nil {
+						logger.Error("Failed to update interaction", zap.Error(err))
+						return
+					}
+
+				}
+			}()
+
+			return s.InteractionRespond(i.Interaction, responseContent)
 		},
 		"allocate": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			options := i.ApplicationCommandData().Options
