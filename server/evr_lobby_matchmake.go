@@ -93,7 +93,7 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 		logger.Error("Failed to get stream count", zap.Error(err))
 	} else {
 		if count < 16 {
-			fallbackDelay = p.matchmakingTicketTimeout() / 4
+			fallbackDelay = time.Minute * 2
 		}
 	}
 
@@ -107,18 +107,17 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 		case <-time.After(fallbackDelay):
 		}
 
-		logger.Warn("Adding fallback ticket")
-
 		// Attempt a fallback ticket
 		ticketConfig.MaxCount = ticketConfig.MinCount
-		ticketConfig.MinCount = 1 // This must be 1 to allow for the fallback to work
+		ticketConfig.MinCount = 1 // This must be 1 to allow for the fallback to work with nakama's matchmaker (min must always be less than max)
 		ticketConfig.includeRankRange = false
 		ticketConfig.includeEarlyQuitPenalty = false
 
 		if ticketConfig.CountMultiple == 1 || ticketConfig.MaxCount == ticketConfig.MinCount || ticketConfig.MaxCount%ticketConfig.CountMultiple != 0 {
-			logger.Debug("Matchmaking ticket config is not valid for fallbacks", zap.Any("config", ticketConfig))
+			logger.Error("Matchmaking ticket config is not valid for fallbacks", zap.Any("config", ticketConfig))
 			return
 		}
+
 		// This will try to add a secondary ticket with the smallest count.
 		// This works around a nakama limitation of using a custom matchmaker.
 
@@ -141,7 +140,8 @@ func (p *EvrPipeline) addTicket(ctx context.Context, logger *zap.Logger, session
 	query, stringProps, numericProps := lobbyParams.MatchmakingParameters(sessionParams, ticketConfig.includeRankRange, ticketConfig.includeEarlyQuitPenalty)
 
 	// now + 2/3 matchmaking timeout
-	priorityThreshold := time.Now().UTC().Add(p.matchmakingTicketTimeout() * 2 / 3).Unix()
+	timeout := (p.matchmakingTicketTimeout() * 2) / 3
+	priorityThreshold := time.Now().UTC().Add(timeout).Unix()
 
 	numericProps["priority_threshold"] = float64(priorityThreshold)
 
@@ -242,17 +242,20 @@ func LatencyCmp[T int | time.Duration](i, j T, mround T) bool {
 }
 
 type MatchmakingSettings struct {
-	DisableArenaBackfill   bool     `json:"disable_arena_backfill"`    // Disable backfilling for arena matches
-	BackfillQueryAddon     string   `json:"backfill_query_addon"`      // Additional query to add to the matchmaking query
-	MatchmakingQueryAddon  string   `json:"matchmaking_query_addon"`   // Additional query to add to the matchmaking query
-	CreateQueryAddon       string   `json:"create_query_addon"`        // Additional query to add to the matchmaking query
-	LobbyGroupName         string   `json:"group_id"`                  // Group ID to matchmake with
-	PriorityBroadcasters   []string `json:"priority_broadcasters"`     // Prioritize these broadcasters
-	NextMatchID            MatchID  `json:"next_match_id"`             // Try to join this match immediately when finding a match
-	NextMatchRole          string   `json:"next_match_role"`           // The role to join the next match as
-	NextMatchDiscordID     string   `json:"next_match_discord_id"`     // The discord ID to join the next match as
-	RankPercentileMaxDelta float64  `json:"rank_percentile_delta_max"` // The upper limit percentile range to matchmake with
-	MaxServerRTT           int      `json:"max_server_rtt"`            // The maximum RTT to allow
+	DisableArenaBackfill        bool     `json:"disable_arena_backfill"`                   // Disable backfilling for arena matches
+	BackfillQueryAddon          string   `json:"backfill_query_addon"`                     // Additional query to add to the matchmaking query
+	MatchmakingQueryAddon       string   `json:"matchmaking_query_addon"`                  // Additional query to add to the matchmaking query
+	CreateQueryAddon            string   `json:"create_query_addon"`                       // Additional query to add to the matchmaking query
+	LobbyGroupName              string   `json:"group_id"`                                 // Group ID to matchmake with
+	PriorityBroadcasters        []string `json:"priority_broadcasters,omitempty"`          // Prioritize these broadcasters
+	NextMatchID                 MatchID  `json:"next_match_id"`                            // Try to join this match immediately when finding a match
+	NextMatchRole               string   `json:"next_match_role"`                          // The role to join the next match as
+	NextMatchDiscordID          string   `json:"next_match_discord_id"`                    // The discord ID to join the next match as
+	MaxServerRTT                int      `json:"max_server_rtt,omitempty"`                 // The maximum RTT to allow
+	RankPercentileMaxDelta      float64  `json:"rank_percentile_delta_max,omitempty"`      // The upper limit percentile range to matchmake with
+	RankResetSchedule           string   `json:"rank_reset_schedule,omitempty"`            // The reset schedule to use for rankings
+	RankPercentileDampingFactor float64  `json:"rank_percentile_damping_factor,omitempty"` // The damping factor to use for rank percentile
+	RankInDisplayName           bool     `json:"rank_in_display_name,omitempty"`           // Display the rank in the display name
 }
 
 func (MatchmakingSettings) GetStorageID() StorageID {

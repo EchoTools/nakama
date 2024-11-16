@@ -11,39 +11,37 @@ import (
 	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
+type Periodicity string
+
 var (
-	percentileBoardIDsByMode = func() map[string][]string {
-		ids := map[string][]string{
-			"echo_arena": {
-				"ArenaGamesPlayed",
-				"ArenaWins",
-				"ArenaLosses",
-				"ArenaWinPercentage",
-				"AssistsPerGame",
-				"AveragePointsPerGame",
-				"AverageTopSpeedPerGame",
-				"BlockPercentage",
-				"GoalScorePercentage",
-				"GoalsPerGame",
-			},
-		}
-		for mode, boardIDs := range ids {
-			for s := range boardIDs {
-				boardIDs[s] = fmt.Sprintf("%s:%s:weekly", mode, boardIDs[s])
-			}
-		}
-		return ids
-	}()
+	percentileStateIDsByMode = map[evr.Symbol][]string{
+		evr.ModeArenaPublic: {
+			"ArenaGamesPlayed",
+			"ArenaWins",
+			"ArenaLosses",
+			"ArenaWinPercentage",
+			"AssistsPerGame",
+			"AveragePointsPerGame",
+			"AverageTopSpeedPerGame",
+			"BlockPercentage",
+			"GoalScorePercentage",
+			"GoalsPerGame",
+		},
+	}
 )
 
-func OverallPercentileRecalculate(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, userID string, mode evr.Symbol) (float64, map[string]*api.LeaderboardRecord, error) {
+func RecalculatePlayerRankPercentile(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, userID string, mode evr.Symbol, periodicity string) (float64, map[string]*api.LeaderboardRecord, error) {
 
-	percentileBoardIDs, ok := percentileBoardIDsByMode[mode.String()]
-	if !ok {
+	if _, ok := percentileStateIDsByMode[mode]; !ok {
 		return 0.5, nil, nil
 	}
 
-	statRecords, err := StatRecordsLoad(ctx, logger, nk, userID, percentileBoardIDs)
+	boardIDs := make([]string, 0, len(percentileStateIDsByMode[mode]))
+	for _, id := range percentileStateIDsByMode[mode] {
+		boardIDs = append(boardIDs, fmt.Sprintf("%s:%s:%s", mode.String(), id, periodicity))
+	}
+
+	statRecords, err := StatRecordsLoad(ctx, logger, nk, userID, boardIDs)
 	if err != nil {
 		return 0.0, nil, err
 	}

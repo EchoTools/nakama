@@ -95,6 +95,10 @@ func (p PredictedMatch) Entrants() RatedEntryTeam {
 	return append(p.Team1, p.Team2...)
 }
 
+func (p PredictedMatch) Teams() []RatedEntryTeam {
+	return []RatedEntryTeam{p.Team1, p.Team2}
+}
+
 func NewDefaultRating() types.Rating {
 	return rating.NewWithOptions(&types.OpenSkillOptions{
 		Mu:    ptr.Float64(25.0),

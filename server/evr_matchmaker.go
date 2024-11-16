@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"math"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -29,10 +31,11 @@ func (*skillBasedMatchmaker) TeamStrength(team RatedEntryTeam) float64 {
 	return s
 }
 
-// Function to be used as a matchmaker function in Nakama (RegisterMatchmakerOverride)
-func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, potentialCandidates [][]runtime.MatchmakerEntry) [][]runtime.MatchmakerEntry {
+var writerMu sync.Mutex
 
-	candidates := potentialCandidates[:]
+// Function to be used as a matchmaker function in Nakama (RegisterMatchmakerOverride)
+func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, candidates [][]runtime.MatchmakerEntry) [][]runtime.MatchmakerEntry {
+
 	players := make(map[string]struct{}, 0)
 	for _, c := range candidates {
 		for _, e := range c {
@@ -52,8 +55,14 @@ func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 		logger.Error("Group ID not found in entry properties.")
 	}
 
-	/*
-			// Store the latest candidates in storage
+	// Write the candidates to storage
+	if writerMu.TryLock() {
+		defer writerMu.Unlock()
+		if data, err := json.Marshal(map[string]interface{}{"candidates": candidates}); err != nil {
+			logger.WithField("error", err).Error("Error marshalling candidates.")
+		} else if len(data) > 8*1024*1024 {
+			logger.WithField("size", len(data)).Error("Data is too large to write to storage.")
+		} else {
 			data, err := json.Marshal(map[string]interface{}{"candidates": candidates})
 			if err != nil {
 				logger.WithField("error", err).Error("Error marshalling candidates.")
@@ -70,21 +79,14 @@ func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 				}); err != nil {
 					logger.WithField("error", err).Error("Error writing latest candidates to storage.")
 				}
+
+				// Send the candidates to the stream as well
+				if err := nk.StreamSend(StreamModeMatchmaker, groupID, "", "", string(data), nil, false); err != nil {
+					logger.WithField("error", err).Warn("Error streaming candidates")
+				}
 			}
-
-			if err := nk.StreamSend(StreamModeMatchmaker, groupID, "", "", string(data), nil, false); err != nil {
-				logger.WithField("error", err).Warn("Error streaming candidates")
-			}
-
-
-		// If there is a non-hidden presence on the stream, then don't make any matches
-		if presences, err := nk.StreamUserList(StreamModeMatchmaker, groupID, "", "", false, true); err != nil {
-			logger.WithField("error", err).Warn("Error listing presences on stream.")
-		} else if len(presences) > 0 {
-			logger.WithField("num_presences", len(presences)).Info("Non-hidden presence on stream, not making matches.")
-			return nil
 		}
-	*/
+	}
 
 	filterCounts := make(map[string]int)
 
@@ -145,25 +147,17 @@ func (m skillBasedMatchmaker) sortByPriority(predictions []PredictedMatch) {
 	// This is to prevent players from waiting too long
 	slices.SortStableFunc(predictions, func(a, b PredictedMatch) int {
 
-		// Sort by size of the match
-
-		if len(a.Entrants()) > len(b.Entrants()) {
-			return -1
-		} else if len(a.Entrants()) < len(b.Entrants()) {
-			return 1
-		}
-
 		// Sort by players that have priority
 		aPriority := false
 		bPriority := false
 		for _, e := range a.Entrants() {
-			if ts, ok := e.Entry.GetProperties()["priority_threshold"].(float64); ok && int64(ts) < now {
+			if ts, ok := e.Entry.GetProperties()["priority_threshold"].(float64); ok && now > int64(ts) {
 				aPriority = true
 				break
 			}
 		}
 		for _, e := range b.Entrants() {
-			if ts, ok := e.Entry.GetProperties()["priority_threshold"].(float64); ok && int64(ts) < now {
+			if ts, ok := e.Entry.GetProperties()["priority_threshold"].(float64); ok && now > int64(ts) {
 				bPriority = true
 				break
 			}
@@ -172,6 +166,37 @@ func (m skillBasedMatchmaker) sortByPriority(predictions []PredictedMatch) {
 		if aPriority && !bPriority {
 			return -1
 		} else if !aPriority && bPriority {
+			return 1
+		}
+
+		// Sort by rank spread by team
+
+		rankTeamAvgs := make([][]float64, 2)
+
+		for i, o := range []PredictedMatch{a, b} {
+			for j, team := range o.Teams() {
+				rankTeamAvgs[i] = append(rankTeamAvgs[i], 0)
+				for _, player := range team {
+					rankTeamAvgs[i][j] += player.Entry.GetProperties()["rank_percentile"].(float64)
+				}
+				rankTeamAvgs[i][j] /= float64(len(team))
+			}
+		}
+
+		// get the delta between the two teams
+		rankSpreadA := math.Abs(rankTeamAvgs[0][0] - rankTeamAvgs[0][1])
+		rankSpreadB := math.Abs(rankTeamAvgs[1][0] - rankTeamAvgs[1][1])
+
+		if math.Abs(rankSpreadA-rankSpreadB) > 0.10 {
+			return -1
+		} else if math.Abs(rankSpreadA-rankSpreadB) > 0.10 {
+			return 1
+		}
+
+		// Sort by size of the match
+		if len(a.Entrants()) > len(b.Entrants()) {
+			return -1
+		} else if len(a.Entrants()) < len(b.Entrants()) {
 			return 1
 		}
 

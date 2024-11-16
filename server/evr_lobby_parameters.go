@@ -48,12 +48,14 @@ type LobbySessionParameters struct {
 	Rating                 types.Rating  `json:"rating"`
 	IsEarlyQuitter         bool          `json:"quit_last_game_early"`
 	EarlyQuitPenaltyExpiry time.Time     `json:"early_quit_penalty_expiry"`
-	latencyHistory         LatencyHistory
-	RankPercentile         float64           `json:"rank_percentile"`
-	RankPercentileMaxDelta float64           `json:"rank_percentile_max_delta"`
-	MaxServerRTT           int               `json:"max_server_rtt"`
-	MatchmakingTimestamp   time.Time         `json:"matchmaking_timestamp"`
-	DisplayNames           map[string]string `json:"display_names"`
+	RankPercentile         float64       `json:"rank_percentile"`
+	RankPercentileMaxDelta float64       `json:"rank_percentile_max_delta"`
+	MaxServerRTT           int           `json:"max_server_rtt"`
+	MatchmakingTimestamp   time.Time     `json:"matchmaking_timestamp"`
+	MatchmakingTimeout     time.Duration `json:"matchmaking_timeout"`
+	DisplayName            string        `json:"display_name"`
+
+	latencyHistory LatencyHistory
 }
 
 func (p *LobbySessionParameters) GetPartySize() int {
@@ -255,12 +257,6 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 	eqstats := profile.GetEarlyQuitStatistics()
 	penaltyExpiry := time.Unix(eqstats.PenaltyExpiry, 0)
 
-	percentile, _, err := OverallPercentileRecalculate(ctx, logger, p.runtimeModule, session.userID.String(), mode)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get overall percentile: %w", err)
-	}
-	percentile = max(0.2, percentile)
-
 	rankPercentileMaxDelta := 1.0
 
 	if globalSettings.RankPercentileMaxDelta > 0 {
@@ -271,7 +267,40 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		rankPercentileMaxDelta = userSettings.RankPercentileMaxDelta
 	}
 
-	maxServerRTT := globalSettings.MaxServerRTT
+	rankStatsPeriod := "weekly"
+	if globalSettings.RankResetSchedule != "" {
+		rankStatsPeriod = globalSettings.RankResetSchedule
+	}
+
+	if userSettings.RankResetSchedule != "" {
+		rankStatsPeriod = userSettings.RankResetSchedule
+	}
+
+	percentile, _, err := RecalculatePlayerRankPercentile(ctx, logger, p.runtimeModule, session.userID.String(), mode, rankStatsPeriod)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get overall percentile: %w", err)
+	}
+
+	dailyPercentile, _, err := RecalculatePlayerRankPercentile(ctx, logger, p.runtimeModule, session.userID.String(), mode, "daily")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get daily percentile: %w", err)
+	}
+
+	if dailyPercentile == 0 {
+		dailyPercentile = percentile
+	}
+
+	smoothingFactor := globalSettings.RankPercentileDampingFactor
+	if userSettings.RankPercentileDampingFactor > 0 {
+		// Ensure the percentile is at least 0.2
+		percentile = percentile - (dailyPercentile-percentile)*smoothingFactor
+	}
+
+	maxServerRTT := 250
+
+	if globalSettings.MaxServerRTT > 0 {
+		maxServerRTT = globalSettings.MaxServerRTT
+	}
 
 	if userSettings.MaxServerRTT > 0 {
 		maxServerRTT = userSettings.MaxServerRTT
@@ -289,6 +318,13 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		if eqstats.History[lastGame] {
 			isEarlyQuitter = true
 		}
+	}
+
+	displayName := sessionParams.AccountMetadata.GetGroupDisplayNameOrDefault(groupID.String())
+
+	if (globalSettings.RankInDisplayName || userSettings.RankInDisplayName) && percentile > 0.4 {
+		// Pad to 20 characters and add [XX] to the end
+		displayName = fmt.Sprintf("%-20s [%02d]", displayName, int(percentile*100))
 	}
 
 	return &LobbySessionParameters{
@@ -323,7 +359,8 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		RankPercentileMaxDelta: rankPercentileMaxDelta,
 		MaxServerRTT:           maxServerRTT,
 		MatchmakingTimestamp:   time.Now().UTC(),
-		DisplayNames:           sessionParams.AccountMetadata.GroupDisplayNames,
+		MatchmakingTimeout:     p.matchmakingTicketTimeout(),
+		DisplayName:            displayName,
 	}, nil
 }
 
@@ -332,12 +369,19 @@ func (p LobbySessionParameters) String() string {
 	return string(data)
 }
 
-func (p *LobbySessionParameters) BackfillSearchQuery(maxRTT int) string {
+func (p *LobbySessionParameters) BackfillSearchQuery(includeRankRange bool, includeMaxRTT bool) string {
 	qparts := []string{
 		"+label.open:T",
 		fmt.Sprintf("+label.mode:%s", p.Mode.String()),
 		fmt.Sprintf("+label.group_id:/%s/", Query.Escape(p.GroupID.String())),
 		//fmt.Sprintf("label.version_lock:%s", p.VersionLock.String()),
+	}
+
+	if includeRankRange {
+		rankMin := max(0.0, p.RankPercentile-p.RankPercentileMaxDelta)
+		rankMax := min(1.0, p.RankPercentile+p.RankPercentileMaxDelta)
+
+		qparts = append(qparts, fmt.Sprintf("+label.rank_percentile:>=%f +label.rank_percentile:<=%f", rankMin, rankMax))
 	}
 
 	if len(p.RequiredFeatures) > 0 {
@@ -366,11 +410,11 @@ func (p *LobbySessionParameters) BackfillSearchQuery(maxRTT int) string {
 		qparts = append(qparts, fmt.Sprintf("+label.player_count:<=%d", playerLimit-p.GetPartySize()))
 	}
 
-	if maxRTT > 0 {
+	if includeMaxRTT {
 		// Ignore all matches with too high latency
 		for ip, rtt := range p.latencyHistory.LatestRTTs() {
-			if rtt > maxRTT {
-				qparts = append(qparts, fmt.Sprintf("-label.broadcaster.endpoint:/.*%s.*/", ip))
+			if rtt > p.MaxServerRTT {
+				qparts = append(qparts, fmt.Sprintf("-label.broadcaster.endpoint:/.*%s.*/", Query.Escape(ip)))
 			}
 		}
 	}
@@ -391,8 +435,6 @@ func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionPar
 		"display_name":    displayName,
 		"submission_time": submissionTime,
 	}
-
-	// now + 2/3 matchmaking timeout
 
 	numericProperties := map[string]float64{
 		"rating_mu":       p.Rating.Mu,
