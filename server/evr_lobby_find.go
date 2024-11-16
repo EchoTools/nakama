@@ -120,7 +120,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	}
 
 	// Attempt to backfill until the timeout.
-	return p.lobbyBackfill(ctx, logger, lobbyParams, entrants)
+	return p.lobbyBackfill(ctx, logger, lobbyParams, entrants...)
 }
 
 func (p *EvrPipeline) monitorMatchmakingStream(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters, cancelFn context.CancelFunc) {
@@ -227,7 +227,7 @@ func (p *EvrPipeline) newSocialLobby(ctx context.Context, logger *zap.Logger, ve
 	return label, nil
 }
 
-func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lobbyParams *LobbySessionParameters, entrants []*EvrMatchPresence) error {
+func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lobbyParams *LobbySessionParameters, entrants ...*EvrMatchPresence) error {
 
 	// Default backfill interval
 	interval := 15 * time.Second
@@ -458,9 +458,20 @@ func PrepareEntrantPresences(ctx context.Context, logger *zap.Logger, session *s
 		sessionIDs = append(sessionIDs, uuid.FromStringOrNil(member.Presence.GetSessionId()))
 	}
 
-	entrantPresences, err := EntrantPresencesFromSessionIDs(logger, session.sessionRegistry, params.PartyID, params.GroupID, params.Rating, params.Role, sessionIDs...)
-	if err != nil {
-		return nil, NewLobbyError(InternalError, "failed to create entrant presences")
+	entrantPresences := make([]*EvrMatchPresence, 0, len(sessionIDs))
+	for _, sessionID := range sessionIDs {
+		session := session.sessionRegistry.Get(sessionID)
+		if session == nil {
+			logger.Warn("Session not found", zap.String("sid", sessionID.String()))
+			continue
+		}
+
+		presence, err := EntrantPresenceFromLobbyParams(session, params)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create entrant presences: %w", err)
+		}
+
+		entrantPresences = append(entrantPresences, presence)
 	}
 
 	if len(entrantPresences) == 0 {

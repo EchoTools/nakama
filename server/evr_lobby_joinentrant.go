@@ -10,42 +10,8 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/gofrs/uuid/v5"
-	"github.com/intinig/go-openskill/types"
 	"go.uber.org/zap"
 )
-
-func NewEvrMatchPresenceFromSession(session Session, rating *types.Rating, groupID string, partyID uuid.UUID, role int) (*EvrMatchPresence, error) {
-	sessionCtx := session.Context()
-	params, ok := LoadParams(sessionCtx)
-	if !ok {
-		return nil, errors.New("failed to get session parameters")
-	}
-
-	displayName := params.AccountMetadata.GetGroupDisplayNameOrDefault(groupID)
-
-	r := types.Rating{}
-	if rating != nil {
-		r = *rating
-	}
-
-	return &EvrMatchPresence{
-
-		Node:           params.Node,
-		UserID:         session.UserID(),
-		SessionID:      session.ID(),
-		LoginSessionID: params.LoginSession.ID(),
-		Username:       session.Username(),
-		DisplayName:    displayName,
-		EvrID:          params.EvrID,
-		PartyID:        partyID,
-		RoleAlignment:  role,
-		DiscordID:      params.DiscordID,
-		ClientIP:       session.ClientIP(),
-		ClientPort:     session.ClientPort(),
-		IsPCVR:         params.IsPCVR,
-		Rating:         r,
-	}, nil
-}
 
 func (p *EvrPipeline) LobbySessionGet(ctx context.Context, logger *zap.Logger, matchID MatchID) (*MatchLabel, Session, error) {
 	return LobbySessionGet(ctx, logger, p.matchRegistry, p.tracker, p.profileRegistry, p.sessionRegistry, matchID)
