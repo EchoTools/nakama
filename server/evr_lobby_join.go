@@ -30,13 +30,13 @@ func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session
 		return err
 	}
 
-	presences, err := EntrantPresencesFromSessionIDs(logger, p.sessionRegistry, params.PartyID, params.GroupID, params.Rating, params.Role, session.id)
+	presence, err := EntrantPresenceFromLobbyParams(session, params)
 	if err != nil {
 		return fmt.Errorf("failed to create presences: %w", err)
 	}
 
-	presences[0].RoleAlignment = params.Role
-	if err := p.LobbyJoinEntrants(logger, label, presences...); err != nil {
+	presence.RoleAlignment = params.Role
+	if err := p.LobbyJoinEntrants(logger, label, presence); err != nil {
 		// Send the error to the client
 		go func() {
 			// Delay sending the error message to the client.

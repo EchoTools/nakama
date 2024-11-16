@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
@@ -77,14 +76,14 @@ func (p *EvrPipeline) lobbyFindSpectate(ctx context.Context, logger *zap.Logger,
 					continue
 				}
 
-				entrants, err := EntrantPresencesFromSessionIDs(logger, p.sessionRegistry, uuid.Nil, params.GroupID, params.Rating, params.Role, session.ID())
+				entrant, err := EntrantPresenceFromLobbyParams(session, params)
 				if err != nil {
 					return status.Errorf(codes.Internal, "failed to create entrant presences: %v", err)
 				}
 
-				entrants[0].RoleAlignment = SpectatorRole
+				entrant.RoleAlignment = SpectatorRole
 
-				if err := p.LobbyJoinEntrants(logger, &label, entrants...); err != nil {
+				if err := p.LobbyJoinEntrants(logger, &label, entrant); err != nil {
 					// Send the error to the client
 					if err := SendEVRMessages(session, false, LobbySessionFailureFromError(label.Mode, label.GetGroupID(), err)); err != nil {
 						logger.Debug("Failed to send error message", zap.Error(err))

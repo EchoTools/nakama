@@ -102,3 +102,35 @@ func (p EvrMatchPresence) String() string {
 func NewEntrantID(matchID MatchID, evrID evr.EvrId) uuid.UUID {
 	return uuid.NewV5(matchID.UUID, EntrantIDSalt+evrID.String())
 }
+
+func EntrantPresenceFromLobbyParams(session Session, lobbyParams *LobbySessionParameters) (*EvrMatchPresence, error) {
+
+	sessionCtx := session.Context()
+	params, ok := LoadParams(sessionCtx)
+	if !ok {
+		return nil, errors.New("failed to get session parameters")
+	}
+
+	entrant := &EvrMatchPresence{
+		Node:              lobbyParams.Node,
+		UserID:            session.UserID(),
+		SessionID:         session.ID(),
+		LoginSessionID:    params.LoginSession.ID(),
+		Username:          session.Username(),
+		DisplayName:       lobbyParams.DisplayName,
+		EvrID:             params.EvrID,
+		PartyID:           lobbyParams.PartyID,
+		RoleAlignment:     lobbyParams.Role,
+		DiscordID:         params.DiscordID,
+		ClientIP:          session.ClientIP(),
+		ClientPort:        session.ClientPort(),
+		IsPCVR:            params.IsPCVR,
+		Rating:            lobbyParams.Rating,
+		SupportedFeatures: params.SupportedFeatures,
+
+		DisableEncryption: params.DisableEncryption,
+		DisableMAC:        params.DisableMAC,
+	}
+
+	return entrant, nil
+}
