@@ -62,7 +62,7 @@ func (p *EvrPipeline) lobbySessionRequest(ctx context.Context, logger *zap.Logge
 		lobbyParams, err := NewLobbyParametersFromRequest(ctx, logger, session, in.(evr.LobbySessionRequest))
 		if err != nil {
 			logger.Error("Failed to create lobby parameters", zap.Error(err))
-			if err := session.SendEvrUnrequire(LobbySessionFailureFromError(request.GetMode(), request.GetGroupID(), err)); err != nil {
+			if err := session.SendEvr(LobbySessionFailureFromError(request.GetMode(), request.GetGroupID(), err)); err != nil {
 				logger.Error("Failed to send lobby session failure message", zap.Error(err))
 			}
 			return
@@ -85,7 +85,7 @@ func (p *EvrPipeline) lobbySessionRequest(ctx context.Context, logger *zap.Logge
 				}, true)
 			}
 			logger.Error("Failed to process lobby session request", zap.Error(err))
-			if err := session.SendEvrUnrequire(LobbySessionFailureFromError(request.GetMode(), request.GetGroupID(), err)); err != nil {
+			if err := session.SendEvr(LobbySessionFailureFromError(request.GetMode(), request.GetGroupID(), err)); err != nil {
 				logger.Error("Failed to send lobby session failure message", zap.Error(err))
 			}
 			return
@@ -171,7 +171,7 @@ func (p *EvrPipeline) lobbyPendingSessionCancel(ctx context.Context, logger *zap
 		logger.Warn("Failed to leave lobby group stream", zap.Error(err))
 	}
 
-	return session.SendEvr(unrequireMessage)
+	return session.SendEvrUnrequire()
 }
 
 // lobbyPlayerSessionsRequest is called when a client requests the player sessions for a list of EchoVR IDs.
@@ -197,5 +197,5 @@ func (p *EvrPipeline) lobbyPlayerSessionsRequest(ctx context.Context, logger *za
 
 	entrant := evr.NewLobbyEntrant(message.EvrId, message.LobbyID, entrantID, entrantIDs, int16(presence.RoleAlignment))
 
-	return session.SendEvrUnrequire(entrant.VersionU(), entrant.Version2(), entrant.Version3())
+	return session.SendEvr(entrant.VersionU(), entrant.Version2(), entrant.Version3())
 }

@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"

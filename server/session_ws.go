@@ -815,11 +815,6 @@ func (s *sessionWS) SendEvr(messages ...evr.Message) error {
 		}
 	}
 
-	// If the last message is a STcpConnectionUnrequireEvent, return early.
-	if _, ok := message.(*evr.STcpConnectionUnrequireEvent); !ok {
-		return nil
-	}
-
 	return nil
 }
 
