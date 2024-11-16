@@ -82,7 +82,7 @@ func RemoteLogMessageFromMessage(strMap map[string]interface{}, data []byte) (an
 		case "Server connection failed":
 			m = &RemoteLogServerConnectionFailed{}
 		}
-	} else if typ, ok := strMap["message_type"].(string); ok {
+	} else if typ, ok := strMap["messageType"].(string); ok {
 
 		switch typ {
 		case "VOIP_LOUDNESS":
