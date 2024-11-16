@@ -68,13 +68,13 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	logger.Debug("Joined party group", zap.String("partyID", lobbyGroup.IDStr()))
 
 	// If this is for a social lobby, then immediately backfill to one.
-	if lobbyParams.Mode == evr.ModeSocialPublic {
-		entrantPresences, err := EntrantPresencesFromSessionIDs(logger, p.sessionRegistry, lobbyParams.PartyID, lobbyParams.GroupID, lobbyParams.Rating, lobbyParams.Role, session.id)
+	if lobbyParams.CurrentMatchID.IsNil() && lobbyParams.Mode == evr.ModeSocialPublic {
+		entrantPresence, err := EntrantPresenceFromLobbyParams(session, lobbyParams)
 		if err != nil {
 			return NewLobbyError(InternalError, "failed to create entrant presences")
 		}
 
-		return p.lobbyBackfill(ctx, logger, lobbyParams, entrantPresences)
+		return p.lobbyBackfill(ctx, logger, lobbyParams, entrantPresence)
 	}
 
 	// Party members will monitor the stream of the party leader to determine when to join a match.
@@ -89,20 +89,21 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		if err := p.CheckServerPing(ctx, logger, session); err != nil {
 			return fmt.Errorf("failed to check server ping: %w", err)
 		}
-	}
 
-	// If this is a party, the party leader will wait for the other members to start matchmaking.
-	if lobbyGroup.Size() > 1 {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(10 * time.Second):
+		// If this is a party, the party leader will wait for the other members to start matchmaking.
+		if lobbyGroup.Size() > 1 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(10 * time.Second):
+			}
 		}
-	}
 
-	// Remove any players not matchmaking.
-	if err := p.pruneInactivePartyMembers(ctx, logger, session, lobbyParams, lobbyGroup); err != nil {
-		return fmt.Errorf("failed to collect party entrants: %w", err)
+		// Remove any players not matchmaking.
+		if err := p.pruneInactivePartyMembers(ctx, logger, session, lobbyParams, lobbyGroup); err != nil {
+			return fmt.Errorf("failed to collect party entrants: %w", err)
+		}
+
 	}
 
 	// Construct the entrant presences for the party members.
