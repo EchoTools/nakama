@@ -900,7 +900,7 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 		}
 
 		// Send the profile to the client
-		if err := session.SendEvr(response); err != nil {
+		if err := session.SendEvrUnrequire(response); err != nil {
 			logger.Warn("Failed to send OtherUserProfileSuccess", zap.Error(err))
 		}
 	}()
