@@ -5,8 +5,7 @@ import (
 	"database/sql"
 	"math/rand"
 	"net"
-	"sort"
-	"time"
+	"slices"
 
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
@@ -53,86 +52,86 @@ func PingGameServers(ctx context.Context, logger *zap.Logger, session Session, d
 
 	}
 
-	// Compact the list by ExternalIP
-	seen := make(map[string]struct{}, len(activeEndpoints))
-	for i := 0; i < len(activeEndpoints); i++ {
-		id := activeEndpoints[i].GetExternalIP()
-		if _, ok := seen[id]; ok {
-			// Remove the duplicate
-			activeEndpoints = append(activeEndpoints[:i], activeEndpoints[i+1:]...)
-			i--
-			continue
-		}
-		seen[id] = struct{}{}
+	hostIPs := make([]string, 0, len(activeEndpoints))
+	hostMap := make(map[string]evr.Endpoint, len(activeEndpoints))
+	for _, endpoint := range activeEndpoints {
+		ip := endpoint.GetExternalIP()
+		hostIPs = append(hostIPs, ip)
+		hostMap[ip] = endpoint
 	}
 
-	candidates := make([]evr.Endpoint, 0, 16)
-	if len(activeEndpoints) >= 16 {
-		// Shuffle the candidates
-		for i := len(activeEndpoints) - 1; i > 0; i-- {
-			j := rand.Intn(i + 1)
-			activeEndpoints[i], activeEndpoints[j] = activeEndpoints[j], activeEndpoints[i]
-		}
-		candidates = activeEndpoints[:16]
-	} else {
-		// Fill the candidates with the oldest entries, up to 16 entries
-		// Add all the endpoints that are not in the cache
-		entryAges := make([]int64, 0, len(latencyHistory))
-		for _, endpoint := range activeEndpoints {
-			if len(candidates) >= 16 {
-				break
-			}
-			extIP := endpoint.GetExternalIP()
-			if history, ok := latencyHistory[extIP]; !ok {
-				candidates = append(candidates, endpoint)
-				entryAges = append(entryAges, time.Time{}.Unix())
-			} else {
-				// Find the latest latency record
-				var latest int64
-				for ts := range history {
-					if ts > latest {
-						latest = ts
-					}
-				}
-				entryAges = append(entryAges, latest)
-			}
-		}
+	// Remove Duplicates
+	slices.Sort(hostIPs)
+	hostIPs = slices.Compact(hostIPs)
 
-		// Sort the candidates by age
-		sort.SliceStable(activeEndpoints, func(i, j int) bool {
-			return entryAges[i] < entryAges[j]
-		})
+	// Sort the candidates by latency history
+	sortPingCandidatesByLatencyHistory(hostIPs, latencyHistory)
 
-		// Fill the candidates with the oldest entries, up to 16 entries
-		for _, endpoint := range activeEndpoints {
-			if len(candidates) >= 16 {
-				break
-			}
-			candidates = append(candidates, endpoint)
-		}
+	candidates := make([]evr.Endpoint, 0, len(hostIPs))
 
-		// Remove duplicates from the candidates
-		seen = make(map[string]struct{}, len(candidates))
-		for i := 0; i < len(candidates); i++ {
-			id := candidates[i].GetExternalIP()
-			if _, ok := seen[id]; ok {
-				// Remove the duplicate
-				candidates = append(candidates[:i], candidates[i+1:]...)
-				i--
-				continue
-			}
-			seen[id] = struct{}{}
-		}
-
-		candidates = append(activeEndpoints, candidates...)
-		if len(candidates) > 16 {
-			candidates = candidates[:16]
-		}
+	for i := 0; i < len(hostIPs) && i < 16; i++ {
+		candidates = append(candidates, hostMap[hostIPs[i]])
 	}
+
 	if err := SendEVRMessages(session, false, evr.NewLobbyPingRequest(350, candidates)); err != nil {
 		return err
 	}
 
 	logger.Debug("Sent ping request", zap.Any("candidates", candidates))
 	return nil
+}
+
+func sortPingCandidatesByLatencyHistory(hostIPs []string, latencyHistory map[string]map[int64]int) {
+
+	// Shuffle the candidates
+	for i := len(hostIPs) - 1; i > 0; i-- {
+		j := rand.Intn(i + 1)
+		hostIPs[i], hostIPs[j] = hostIPs[j], hostIPs[i]
+	}
+
+	// Sort the active endpoints
+	slices.SortStableFunc(hostIPs, func(a, b string) int {
+
+		// by whether the endpoint is in the cache
+		var aHistory, bHistory map[int64]int
+		var aInCache, bInCache bool
+		var aOldest, bOldest int64
+
+		aHistory, aInCache = latencyHistory[a]
+		bHistory, bInCache = latencyHistory[b]
+
+		if !aInCache && bInCache {
+			return -1
+		}
+
+		if aInCache && !bInCache {
+			return 1
+		}
+
+		if !aInCache && !bInCache {
+			return 0
+		}
+
+		for ts := range aHistory {
+			if ts < aOldest {
+				aOldest = ts
+			}
+		}
+
+		for ts := range bHistory {
+			if ts < bOldest {
+				bOldest = ts
+			}
+		}
+
+		if aOldest < bOldest {
+			return -1
+		}
+
+		if aOldest > bOldest {
+			return 1
+		}
+
+		return 0
+	})
 }
