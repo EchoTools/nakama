@@ -75,9 +75,13 @@ func RemoteLogMessageFromMessage(strMap map[string]interface{}, data []byte) (an
 
 	var m any
 
-	if s, ok := strMap["message"].(string); ok && s == "CUSTOMIZATION_METRICS_PAYLOAD" {
-		m = &RemoteLogCustomizationMetricsPayload{}
-
+	if message, ok := strMap["message"].(string); ok {
+		switch message {
+		case "CUSTOMIZATION_METRICS_PAYLOAD":
+			m = &RemoteLogCustomizationMetricsPayload{}
+		case "Server connection failed":
+			m = &RemoteLogServerConnectionFailed{}
+		}
 	} else if typ, ok := strMap["message_type"].(string); ok {
 
 		switch typ {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -303,6 +304,73 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 
 		case *evr.RemoteLogServerConnectionFailed:
 
+			params, ok := LoadParams(session.Context())
+			if !ok {
+				logger.Error("Failed to load params")
+				continue
+			}
+
+			msgData, err := json.MarshalIndent(msg, "", "  ")
+			if err != nil {
+				logger.Error("Failed to marshal remote log message", zap.Error(err))
+			}
+
+			matchID, err := NewMatchID(msg.SessionUUID(), p.node)
+			if err != nil {
+				logger.Error("Failed to create match ID", zap.Error(err))
+				continue
+			}
+			// Get the match label
+			label, err := MatchLabelByID(ctx, p.runtimeModule, matchID)
+			if err != nil {
+				logger.Error("Failed to get match label", zap.Error(err))
+				continue
+			}
+
+			messageContent := struct {
+				MatchID          MatchID    `json:"match_id"`
+				MatchMode        evr.Symbol `json:"match_mode"`
+				MatchStartedAt   time.Time  `json:"match_start_time"`
+				ServerID         string     `json:"server_id"`
+				MatchOperator    string     `json:"server_operator"`
+				MatchEndpoint    string     `json:"server_endpoint"`
+				ClientUserID     string     `json:"client_user_id"`
+				ClientUsername   string     `json:"client_username"`
+				ClientDiscordID  string     `json:"client_discord_id"`
+				ClientEvrID      evr.EvrId  `json:"client_evr_id"`
+				ClientIsPCVR     bool       `json:"client_is_pcvr"`
+				RemoteLogMessage string     `json:"remote_log_message"`
+			}{
+				MatchID:          matchID,
+				MatchMode:        label.Mode,
+				MatchStartedAt:   label.StartTime,
+				ServerID:         label.Broadcaster.SessionID,
+				MatchOperator:    label.Broadcaster.OperatorID,
+				MatchEndpoint:    label.Broadcaster.Endpoint.String(),
+				ClientIsPCVR:     params.IsPCVR,
+				ClientUserID:     session.userID.String(),
+				ClientUsername:   session.Username(),
+				ClientDiscordID:  params.DiscordID,
+				ClientEvrID:      params.EvrID,
+				RemoteLogMessage: string(msgData),
+			}
+			// Check if the match's group wants audit messages
+			contentData, err := json.Marshal(messageContent)
+			if err != nil {
+				logger.Error("Failed to marshal message content", zap.Error(err))
+			}
+			p.appBot.LogAuditMessage(ctx, label.GetGroupID().String(), string(contentData), false)
+
+			logger.Warn("Server connection failed", zap.String("username", session.Username()), zap.String("match_id", msg.SessionUUID().String()), zap.String("evr_id", evrID.String()), zap.Any("remote_log_message", msg))
+
+			tags := map[string]string{
+				"operator": label.Broadcaster.OperatorID,
+				"ext_ip":   label.Broadcaster.Endpoint.GetExternalIP(),
+				"mode":     label.Mode.String(),
+				"is_pcvr":  strconv.FormatBool(params.IsPCVR),
+			}
+
+			p.runtimeModule.MetricsCounterAdd("remotelog_error_server_connection_failed_count", tags, 1)
 		default:
 		}
 	}
