@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"math/rand"
 	"slices"
 	"strings"
@@ -32,7 +33,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	defer func() {
 		tags := lobbyParams.MetricsTags()
 		tags["party_size"] = lobbyParams.PartySize.String()
-		p.metrics.CustomTimer("lobby_find", tags, time.Since(startTime))
+		p.metrics.CustomTimer("lobby_find_duration", tags, time.Since(startTime))
 		logger.Debug("Lobby find complete", zap.String("group_id", lobbyParams.GroupID.String()), zap.Int64("partySize", lobbyParams.PartySize.Load()), zap.String("mode", lobbyParams.Mode.String()), zap.Int("duration", int(time.Since(startTime).Seconds())))
 	}()
 
