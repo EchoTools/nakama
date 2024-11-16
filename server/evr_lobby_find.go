@@ -51,7 +51,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	}
 
 	// Cancel matchmaking after the timeout.
-	ctx, cancel := context.WithTimeoutCause(ctx, p.matchmakingTicketTimeout(), ErrMatchmakingTimeout)
+	ctx, cancel := context.WithTimeoutCause(ctx, lobbyParams.MatchmakingTimeout, ErrMatchmakingTimeout)
 	defer cancel()
 
 	if err := JoinMatchmakingStream(logger, session, lobbyParams); err != nil {
@@ -249,23 +249,30 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 
 	// Backfill search query
 	// Maximum RTT for a server to be considered for backfill
-	maxRTT := 250
 
-	if lobbyParams.Mode == evr.ModeSocialPublic {
-		// any server is fine for social lobbies
-		maxRTT = 999
+	includeRankPercentile := false
+	incldueMaxRTT := false
+
+	if lobbyParams.Mode == evr.ModeArenaPublic {
+		includeRankPercentile = true
+		incldueMaxRTT = true
 	}
+	query := lobbyParams.BackfillSearchQuery(includeRankPercentile, incldueMaxRTT)
 
-	query := lobbyParams.BackfillSearchQuery(maxRTT)
 	rtts := lobbyParams.latencyHistory.LatestRTTs()
 
 	cycleCount := 0
+
+	fallbackTimer := time.NewTimer(lobbyParams.MatchmakingTimeout / 2)
+
 	for {
 
 		var err error
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-fallbackTimer.C:
+			query = lobbyParams.BackfillSearchQuery(false, false)
 		case <-time.After(interval):
 		}
 
@@ -283,10 +290,21 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 				logger.Debug("No matches found", zap.Any("query", query), zap.Int("cycle", cycleCount))
 			}
 		}
-		// Sort the labels by least open slots, then ping
 
 		// Sort the matches by open slots and then by latency
 		slices.SortFunc(matches, func(a, b *MatchLabelMeta) int {
+
+			// By rank percentile difference
+			rankDeltaA := math.Abs(a.State.RankPercentile - lobbyParams.RankPercentile)
+			rankDeltaB := math.Abs(b.State.RankPercentile - lobbyParams.RankPercentile)
+
+			if rankDeltaA < rankDeltaB {
+				return -1
+			}
+
+			if rankDeltaA > rankDeltaB {
+				return 1
+			}
 
 			// Sort by largest population
 			if s := b.State.PlayerCount - a.State.PlayerCount; s != 0 {
@@ -334,6 +352,8 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 				}
 			}
 
+			// Only join the player to a team that has similar rank
+
 			if n, err := l.OpenSlotsByRole(team); err != nil {
 				logger.Warn("Failed to get open slots by role", zap.Error(err))
 				continue
@@ -351,7 +371,6 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 			// Create a new social lobby
 			selected, err = p.newSocialLobby(ctx, logger, lobbyParams.VersionLock, lobbyParams.GroupID)
 			if err != nil {
-
 				// If the error is a lock error, just try again.
 				if err == ErrFailedToAcquireLock {
 					// Wait a few seconds to give time for the server to be created.

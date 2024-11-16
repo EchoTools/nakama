@@ -39,7 +39,8 @@ type EvrMatchPresence struct {
 	DisableEncryption bool      `json:"disable_encryption,omitempty"`
 	DisableMAC        bool      `json:"disable_mac,omitempty"`
 
-	Rating types.Rating `json:"rating,omitempty"`
+	RankPercentile float64      `json:"rank_percentile,omitempty"`
+	Rating         types.Rating `json:"rating,omitempty"`
 }
 
 func (p EvrMatchPresence) EntrantID(matchID MatchID) uuid.UUID {

@@ -9,18 +9,19 @@ import (
 )
 
 type PlayerInfo struct {
-	DisplayName   string    `json:"display_name,omitempty"`
-	PartyID       string    `json:"party_id,omitempty"`
-	Team          TeamIndex `json:"team"`
-	IsReservation bool      `json:"is_reservation,omitempty"`
-	JoinTime      int64     `json:"join_time_ms"` // The time on the round clock that the player joined
-	RatingMu      float64   `json:"rating_mu,omitempty"`
-	RatingSigma   float64   `json:"rating_sigma,omitempty"`
-	Username      string    `json:"username,omitempty"`
-	DiscordID     string    `json:"discord_id,omitempty"`
-	UserID        string    `json:"user_id,omitempty"`
-	EvrID         evr.EvrId `json:"evr_id,omitempty"`
-	ClientIP      string    `json:"client_ip,omitempty"`
+	DisplayName    string    `json:"display_name,omitempty"`
+	PartyID        string    `json:"party_id,omitempty"`
+	Team           TeamIndex `json:"team"`
+	IsReservation  bool      `json:"is_reservation,omitempty"`
+	JoinTime       int64     `json:"join_time_ms"` // The time on the round clock that the player joined
+	RankPercentile float64   `json:"rank_percentile,omitempty"`
+	RatingMu       float64   `json:"rating_mu,omitempty"`
+	RatingSigma    float64   `json:"rating_sigma,omitempty"`
+	Username       string    `json:"username,omitempty"`
+	DiscordID      string    `json:"discord_id,omitempty"`
+	UserID         string    `json:"user_id,omitempty"`
+	EvrID          evr.EvrId `json:"evr_id,omitempty"`
+	ClientIP       string    `json:"client_ip,omitempty"`
 }
 
 // The player joined after the round clock started

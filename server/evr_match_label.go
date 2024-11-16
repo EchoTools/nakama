@@ -17,15 +17,16 @@ type slotReservation struct {
 }
 
 type MatchLabel struct {
-	ID          MatchID      `json:"id"`                   // The Session Id used by EVR (the same as match id)
-	Open        bool         `json:"open"`                 // Whether the lobby is open to new players (Matching Only)
-	LobbyType   LobbyType    `json:"lobby_type"`           // The type of lobby (Public, Private, Unassigned) (EVR)
-	Mode        evr.Symbol   `json:"mode,omitempty"`       // The mode of the lobby (Arena, Combat, Social, etc.) (EVR)
-	Level       evr.Symbol   `json:"level,omitempty"`      // The level to play on (EVR).
-	Size        int          `json:"size"`                 // The number of players (including spectators) in the match.
-	PlayerCount int          `json:"player_count"`         // The number of participants (not including spectators) in the match.
-	Players     []PlayerInfo `json:"players,omitempty"`    // The displayNames of the players (by team name) in the match.
-	GameState   *GameState   `json:"game_state,omitempty"` // The game state for the match.
+	ID             MatchID      `json:"id"`                        // The Session Id used by EVR (the same as match id)
+	Open           bool         `json:"open"`                      // Whether the lobby is open to new players (Matching Only)
+	LobbyType      LobbyType    `json:"lobby_type"`                // The type of lobby (Public, Private, Unassigned) (EVR)
+	Mode           evr.Symbol   `json:"mode,omitempty"`            // The mode of the lobby (Arena, Combat, Social, etc.) (EVR)
+	Level          evr.Symbol   `json:"level,omitempty"`           // The level to play on (EVR).
+	Size           int          `json:"size"`                      // The number of players (including spectators) in the match.
+	PlayerCount    int          `json:"player_count"`              // The number of participants (not including spectators) in the match.
+	Players        []PlayerInfo `json:"players,omitempty"`         // The displayNames of the players (by team name) in the match.
+	RankPercentile float64      `json:"rank_percentile,omitempty"` // The average percentile rank of the players in the match.
+	GameState      *GameState   `json:"game_state,omitempty"`      // The game state for the match.
 
 	TeamSize         int      `json:"team_size,omitempty"`    // The size of each team in arena/combat (either 4 or 5)
 	MaxSize          int      `json:"limit,omitempty"`        // The total lobby size limit (players + specs)
@@ -258,18 +259,19 @@ func (s *MatchLabel) rebuildCache() {
 		}
 
 		playerinfo := PlayerInfo{
-			UserID:        p.UserID.String(),
-			Username:      p.Username,
-			DisplayName:   p.DisplayName,
-			EvrID:         p.EvrID,
-			Team:          TeamIndex(p.RoleAlignment),
-			ClientIP:      p.ClientIP,
-			DiscordID:     p.DiscordID,
-			PartyID:       p.PartyID.String(),
-			JoinTime:      s.joinTimeMilliseconds[p.SessionID.String()],
-			RatingMu:      p.Rating.Mu,
-			RatingSigma:   p.Rating.Sigma,
-			IsReservation: s.reservationMap[p.SessionID.String()] != nil,
+			UserID:         p.UserID.String(),
+			Username:       p.Username,
+			DisplayName:    p.DisplayName,
+			EvrID:          p.EvrID,
+			Team:           TeamIndex(p.RoleAlignment),
+			ClientIP:       p.ClientIP,
+			DiscordID:      p.DiscordID,
+			PartyID:        p.PartyID.String(),
+			JoinTime:       s.joinTimeMilliseconds[p.SessionID.String()],
+			RatingMu:       p.Rating.Mu,
+			RatingSigma:    p.Rating.Sigma,
+			RankPercentile: p.RankPercentile,
+			IsReservation:  s.reservationMap[p.SessionID.String()] != nil,
 		}
 
 		s.Players = append(s.Players, playerinfo)
@@ -303,6 +305,7 @@ func (s *MatchLabel) rebuildCache() {
 
 	}
 
+	// Sort the players by team, party ID, and join time.
 	sort.SliceStable(s.Players, func(i, j int) bool {
 		// by team
 		if s.Players[i].Team < s.Players[j].Team {
@@ -323,6 +326,16 @@ func (s *MatchLabel) rebuildCache() {
 		// by join time
 		return s.Players[i].JoinTime < s.Players[j].JoinTime
 	})
+
+	// Recalculate the match's aggregate rank percentile
+	s.RankPercentile = 0.0
+
+	if len(s.Players) > 0 {
+		for _, p := range s.Players {
+			s.RankPercentile += p.RankPercentile
+		}
+		s.RankPercentile = s.RankPercentile / float64(len(s.Players))
+	}
 }
 
 func (l *MatchLabel) PublicView() *MatchLabel {
@@ -363,7 +376,8 @@ func (l *MatchLabel) PublicView() *MatchLabel {
 			Tags:        l.Broadcaster.Tags,
 			Features:    l.Broadcaster.Features,
 		},
-		Players: make([]PlayerInfo, 0),
+		Players:        make([]PlayerInfo, 0),
+		RankPercentile: l.RankPercentile,
 	}
 	if l.LobbyType == PrivateLobby || l.LobbyType == UnassignedLobby {
 		// Set the last bytes to FF to hide the ID

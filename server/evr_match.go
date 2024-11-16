@@ -171,6 +171,7 @@ func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql
 		joinTimeMilliseconds: make(map[string]int64, SocialLobbyMaxSize),
 		emptyTicks:           0,
 		tickRate:             10,
+		RankPercentile:       0.0,
 	}
 
 	state.ID = MatchIDFromContext(ctx)
