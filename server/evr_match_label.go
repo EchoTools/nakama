@@ -258,21 +258,36 @@ func (s *MatchLabel) rebuildCache() {
 			s.PlayerCount++
 		}
 
-		playerinfo := PlayerInfo{
-			UserID:         p.UserID.String(),
-			Username:       p.Username,
-			DisplayName:    p.DisplayName,
-			EvrID:          p.EvrID,
-			Team:           TeamIndex(p.RoleAlignment),
-			ClientIP:       p.ClientIP,
-			DiscordID:      p.DiscordID,
-			PartyID:        p.PartyID.String(),
-			JoinTime:       s.joinTimeMilliseconds[p.SessionID.String()],
-			RatingMu:       p.Rating.Mu,
-			RatingSigma:    p.Rating.Sigma,
-			RankPercentile: p.RankPercentile,
-			Query:          p.Query,
-			IsReservation:  s.reservationMap[p.SessionID.String()] != nil,
+		var playerinfo PlayerInfo
+		if p.RoleAlignment == evr.TeamSpectator {
+			playerinfo = PlayerInfo{
+				UserID:      p.UserID.String(),
+				Username:    p.Username,
+				DisplayName: p.DisplayName,
+				EvrID:       p.EvrID,
+				Team:        TeamIndex(p.RoleAlignment),
+				ClientIP:    p.ClientIP,
+				DiscordID:   p.DiscordID,
+				JoinTime:    s.joinTimeMilliseconds[p.SessionID.String()],
+			}
+		} else {
+
+			playerinfo = PlayerInfo{
+				UserID:         p.UserID.String(),
+				Username:       p.Username,
+				DisplayName:    p.DisplayName,
+				EvrID:          p.EvrID,
+				Team:           TeamIndex(p.RoleAlignment),
+				ClientIP:       p.ClientIP,
+				DiscordID:      p.DiscordID,
+				PartyID:        p.PartyID.String(),
+				JoinTime:       s.joinTimeMilliseconds[p.SessionID.String()],
+				RatingMu:       p.Rating.Mu,
+				RatingSigma:    p.Rating.Sigma,
+				RankPercentile: p.RankPercentile,
+				Query:          p.Query,
+				IsReservation:  s.reservationMap[p.SessionID.String()] != nil,
+			}
 		}
 
 		s.Players = append(s.Players, playerinfo)
@@ -332,11 +347,16 @@ func (s *MatchLabel) rebuildCache() {
 	// Recalculate the match's aggregate rank percentile
 	s.RankPercentile = 0.0
 
+	count := 0
 	if len(s.Players) > 0 {
 		for _, p := range s.Players {
+			if (p.Team != BlueTeam && p.Team != OrangeTeam) || p.RankPercentile > 0 {
+				continue
+			}
+			count++
 			s.RankPercentile += p.RankPercentile
 		}
-		s.RankPercentile = s.RankPercentile / float64(len(s.Players))
+		s.RankPercentile = s.RankPercentile / float64(count)
 	}
 }
 
