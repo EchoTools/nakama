@@ -206,6 +206,11 @@ func (s *IPQSClient) Score(ip string) int {
 }
 
 func (s *IPQSClient) IPDetailsWithTimeout(ip string) *IPQSResponse {
+	// ignore reserved IPs
+	if ip := net.ParseIP(ip); ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsPrivate() {
+		return nil
+	}
+
 	ctx, cancelFn := context.WithTimeout(s.ctx, time.Second*1)
 	defer cancelFn()
 	resultCh := make(chan *IPQSResponse)
