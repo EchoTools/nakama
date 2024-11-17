@@ -83,6 +83,10 @@ func LeaderboardRankPercentile(ctx context.Context, logger *zap.Logger, nk runti
 
 	percentile := 0.0
 
+	if len(percentiles) == 0 {
+		return 0.3, nil
+	}
+
 	for _, p := range percentiles {
 		percentile += p
 	}

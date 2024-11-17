@@ -109,7 +109,7 @@ func MatchListPublicRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		for _, presence := range presences {
 			s := LobbySessionParameters{}
 			if err := json.Unmarshal([]byte(presence.GetStatus()), &s); err != nil {
-				return "", runtime.NewError("Failed to unmarshal matchmaker ticket", StatusInternalError)
+				return "", runtime.NewError(fmt.Sprintf("Failed to unmarshal lobby session parameters: %s", err.Error()), StatusInternalError)
 			}
 			matchmakingTicketsByGroupID[groupID][s.Mode.String()] += s.GetPartySize()
 		}
