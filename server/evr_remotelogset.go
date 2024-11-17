@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gofrs/uuid/v5"
@@ -37,56 +36,43 @@ OuterLoop:
 			continue
 		}
 
-		var ok bool
-		var messageType string
-
-		messageType, ok = strMap["message_type"].(string)
-		if !ok {
-			messageType = ""
-		}
-
-		if message, ok := strMap["message"].(string); ok {
-
-			switch message {
-
-			// Ignore customization interactions.
-			case "Podium Interaction":
-				fallthrough
-			case "Customization Item Preview":
-				fallthrough
-			case "Customization Item Equip":
-				fallthrough
-			case "server library loaded":
-				continue
-			case "r15 net game error message":
-				continue
-			}
-		}
-
-		if category, ok := strMap["category"].(string); ok {
-			ignoredCategories := []string{
+		ignores := map[string][]string{
+			"message": {
+				"Podium Interaction",
+				"Customization Item Preview",
+				"Customization Item Equip",
+				"server library loaded",
+				"r15 net game error message",
+			},
+			"category": {
 				"iap",
 				"rich_presence",
 				"social",
-			}
-			for _, ignored := range ignoredCategories {
-				if category == ignored {
-					continue OuterLoop
+			},
+			"message_type": {
+				"OVR_IAP",
+			},
+		}
+
+		for key, values := range ignores {
+			if value, ok := strMap[key].(string); ok {
+				for _, v := range values {
+					if value == v {
+						continue OuterLoop
+					}
 				}
 			}
 		}
 
-		if typ, ok := strMap["message_type"].(string); ok {
-			if strings.HasPrefix(typ, "OVR_IAP") {
-				// Ignore IAP logs.
-				continue
-			}
+		var messageType string
+		if v, ok := strMap["message_type"].(string); ok {
+			messageType = v
 		}
 
 		parsed, err := evr.RemoteLogMessageFromMessage(strMap, bytes)
 		if err != nil {
 			if errors.Is(err, evr.ErrUnknownRemoteLogMessageType) {
-				logger.Warn("Unknown remote log message type", zap.String("messageType", messageType), zap.String("log", logString))
+				logger.Warn("Unknown remote log message type", zap.String("message_type", messageType), zap.String("log", logString))
 			} else {
 				logger.Debug("Failed to parse remote log message", zap.Error(err))
 			}
@@ -105,13 +91,11 @@ OuterLoop:
 
 func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logger, session *sessionWS, evrID evr.EvrId, request *evr.RemoteLogSet) error {
 
+	// Add the raw logs to the journal.
+	p.userRemoteLogJournalRegistry.AddEntries(session.id, request.Logs)
+
 	// Parse the useful remote logs from the set.
 	entries := parseRemoteLogMessageEntries(logger, request.Logs)
-
-	// Add them to the journal first.
-	if found := p.userRemoteLogJournalRegistry.AddEntries(session.id, entries); !found {
-		// This is a new session, so we need to start a goroutine to remove/store the session's journal entries when the session is closed.
-	}
 
 	// Collect the updates to the match's game metadata (e.g. game clock)
 	updates := MapOf[uuid.UUID, *MatchGameStateUpdate]{}
@@ -119,16 +103,24 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 	for _, e := range entries {
 		var update *MatchGameStateUpdate
 
-		/*
-			// If this is a session remote log, add it to the match manager.
-			if m, ok := e.Parsed.(SessionRemoteLog); ok {
-				if p.matchLogManager != nil {
-					if err := p.matchLogManager.AddLog(m); err != nil {
-						logger.Warn("Failed to add log", zap.Error(err))
-					}
+		// If this is a session remote log, add it to the match manager.
+		if m, ok := e.Parsed.(SessionRemoteLog); ok {
+			if p.matchLogManager != nil {
+				if err := p.matchLogManager.AddLog(m); err != nil {
+					logger.Warn("Failed to add log", zap.Error(err))
 				}
 			}
-		*/
+		}
+
+		if msg, ok := e.Parsed.(evr.GameTimer); ok {
+			matchID, err := NewMatchID(msg.SessionUUID(), p.node)
+			if err != nil {
+				logger.Error("Failed to create match ID", zap.Error(err))
+			} else {
+				update, _ = updates.LoadOrStore(matchID.UUID, &MatchGameStateUpdate{})
+				update.CurrentGameClock = time.Duration(msg.GameTime()) * time.Second
+			}
+		}
 
 		switch msg := e.Parsed.(type) {
 
@@ -201,8 +193,6 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 			if err != nil {
 				logger.Error("Failed to save player's profile")
 			}
-			update, _ = updates.LoadOrStore(matchID.UUID, &MatchGameStateUpdate{})
-			update.CurrentGameClock = time.Duration(msg.GameInfoGameTime) * time.Second
 
 		case *evr.RemoteLogGoal:
 
@@ -221,18 +211,6 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 			// This is a ghost user message.
 
 		case *evr.RemoteLogVOIPLoudness:
-
-			sessionID := msg.SessionUUID()
-
-			if msg.SessionUUID().IsNil() {
-				logger.Error("VOIP loudness message has no session ID")
-				continue
-			}
-			if msg.GameInfoGameTime == 0 {
-				continue
-			}
-			update, _ = updates.LoadOrStore(sessionID, &MatchGameStateUpdate{})
-			update.FromVOIPLoudness(msg)
 
 		case *evr.RemoteLogSessionStarted:
 
@@ -380,7 +358,6 @@ func (u *MatchGameStateUpdate) FromGoal(goal *evr.RemoteLogGoal) {
 		pauseDuration = AfterGoalDuration + RespawnDuration + CatapultDuration
 	}
 
-	u.CurrentGameClock = time.Duration(goal.GameInfoGameTime) * time.Second
 	u.PauseDuration = pauseDuration
 
 	if u.Goals == nil {
@@ -397,8 +374,4 @@ func (u *MatchGameStateUpdate) FromGoal(goal *evr.RemoteLogGoal) {
 		PrevPlayerEvrID:       goal.PrevPlayerEvrID,
 		WasHeadbutt:           goal.WasHeadbutt,
 	})
-}
-
-func (u *MatchGameStateUpdate) FromVOIPLoudness(goal *evr.RemoteLogVOIPLoudness) {
-	u.CurrentGameClock = time.Duration(goal.GameInfoGameTime)
 }

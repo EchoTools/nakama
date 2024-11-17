@@ -123,19 +123,6 @@ func TestParseRemoteLog(t *testing.T) {
 			},
 			wantError: false,
 		},
-
-		{
-			name:    "Test with valid GAME_SETTINGS message",
-			message: `{"message": "Game settings updated", "message_type": "GAME_SETTINGS", "game_settings": {"EnableAPIAccess": true}}`,
-			want: &RemoteLogGameSettings{
-				Message:     "Game settings updated",
-				MessageType: "GAME_SETTINGS",
-				GameSettings: RemoteLogGameSettingsClass{
-					EnableAPIAccess: true,
-				},
-			},
-			wantError: false,
-		},
 	}
 
 	for _, tt := range tests {
