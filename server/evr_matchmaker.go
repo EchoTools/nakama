@@ -104,6 +104,11 @@ func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 	// Sort by matches that have players who have been waiting more than half the Matchmaking timeout
 	// This is to prevent players from waiting too long
 
+	if len(predictions) == 0 {
+		logger.Warn("No predictions made. Matchmaker cannot run.")
+		return nil
+	}
+
 	modestr := candidates[0][0].GetProperties()["mode"].(string)
 	if modestr == "" {
 		logger.Error("Mode not found in entry properties. Matchmaker cannot run.")

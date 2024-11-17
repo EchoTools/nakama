@@ -47,7 +47,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	case evr.ModeArenaPublic, evr.ModeSocialPublic, evr.ModeCombatPublic:
 
 	default:
-		return NewLobbyError(BadRequest, "invalid mode")
+		return NewLobbyError(BadRequest, fmt.Sprintf("`%s` is an invalid mode for matchmaking.", lobbyParams.Mode.String()))
 	}
 
 	// Cancel matchmaking after the timeout.
@@ -522,7 +522,7 @@ func (p *EvrPipeline) PartyFollow(ctx context.Context, logger *zap.Logger, sessi
 		leaderUserID := uuid.FromStringOrNil(leader.UserId)
 		// Check if the leader has changed to this player.
 		if leader.SessionId == session.id.String() {
-			return NewLobbyError(BadRequest, "this player is now the party leader.")
+			return NewLobbyError(BadRequest, "party leader has changed (to this player). Canceling matchmaking.")
 		}
 
 		leaderSessionID := uuid.FromStringOrNil(leader.SessionId)
