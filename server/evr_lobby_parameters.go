@@ -448,7 +448,9 @@ func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionPar
 	}
 
 	if withRankRange && p.RankPercentileMaxDelta > 0 {
+		minRankPercentile := max(p.RankPercentile-p.RankPercentileMaxDelta, 0.0)
 		maxRankPercentile := min(p.RankPercentile+p.RankPercentileMaxDelta, 1.0)
+		qparts = append(qparts, fmt.Sprintf("+properties.rank_percentile:>=%f", minRankPercentile))
 		qparts = append(qparts, fmt.Sprintf("+properties.rank_percentile:<=%f", maxRankPercentile))
 	}
 
@@ -463,6 +465,14 @@ func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionPar
 	for k, v := range AverageLatencyHistories(p.latencyHistory) {
 		numericProperties[k] = float64(v)
 		//qparts = append(qparts, fmt.Sprintf("properties.%s:<=%d", k, v+maxDelta))
+	}
+
+	// Remove blanks from qparts
+	for i := 0; i < len(qparts); i++ {
+		if qparts[i] == "" {
+			qparts = append(qparts[:i], qparts[i+1:]...)
+			i--
+		}
 	}
 
 	query := strings.Join(qparts, " ")
