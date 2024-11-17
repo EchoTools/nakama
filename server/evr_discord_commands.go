@@ -332,7 +332,7 @@ var (
 					Type:        discordgo.ApplicationCommandOptionString,
 					Name:        "reason",
 					Description: "Reason for the CV",
-					Required:    false,
+					Required:    true,
 				},
 			},
 		},
