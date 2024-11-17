@@ -319,15 +319,6 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		}
 	}
 
-	displayName := sessionParams.AccountMetadata.GetGroupDisplayNameOrDefault(groupID.String())
-
-	if (globalSettings.RankInDisplayName || userSettings.RankInDisplayName) && percentile > 0.4 {
-		// Pad to 20 characters and add [XX] to the end
-		// Invert it too
-		percentile = 1.0 - percentile
-		displayName = fmt.Sprintf("%-20s [%02d]", displayName, int(percentile*100))
-	}
-
 	return &LobbySessionParameters{
 		Node:                   node,
 		UserID:                 session.userID,
@@ -361,7 +352,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		MaxServerRTT:           maxServerRTT,
 		MatchmakingTimestamp:   time.Now().UTC(),
 		MatchmakingTimeout:     p.matchmakingTicketTimeout(),
-		DisplayName:            displayName,
+		DisplayName:            sessionParams.AccountMetadata.GetGroupDisplayNameOrDefault(groupID.String()),
 	}, nil
 }
 
