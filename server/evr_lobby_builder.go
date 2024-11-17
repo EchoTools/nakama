@@ -191,6 +191,7 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 				ClientPort:     session.ClientPort(),
 				IsPCVR:         sessionParams.IsPCVR,
 				Rating:         rating,
+				Query:          entry.StringProperties["query"],
 			})
 
 		}

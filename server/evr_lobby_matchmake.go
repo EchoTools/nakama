@@ -157,6 +157,8 @@ func (p *EvrPipeline) addTicket(ctx context.Context, logger *zap.Logger, session
 	maxCount := ticketConfig.MaxCount
 	countMultiple := ticketConfig.CountMultiple
 
+	stringProps["query"] = query
+
 	ticket := ""
 	otherPresences := []*PresenceID{}
 	sessionID := session.ID().String()
@@ -183,6 +185,7 @@ func (p *EvrPipeline) addTicket(ctx context.Context, logger *zap.Logger, session
 		// If the user is not in a party, the must submit the ticket through the matchmaker instead of the party handler.
 		ticket, _, err = session.matchmaker.Add(ctx, presences, sessionID, "", query, minCount, maxCount, countMultiple, stringProps, numericProps)
 		if err != nil {
+			logger.Error("Failed to add solo matchmaker ticket", zap.Error(err), zap.String("query", query), zap.Any("string_properties", stringProps), zap.Any("numeric_properties", numericProps))
 			return fmt.Errorf("failed to add solo matchmaker ticket: %v", err)
 		}
 

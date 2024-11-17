@@ -22,6 +22,7 @@ type PlayerInfo struct {
 	UserID         string    `json:"user_id,omitempty"`
 	EvrID          evr.EvrId `json:"evr_id,omitempty"`
 	ClientIP       string    `json:"client_ip,omitempty"`
+	Query          string    `json:"query,omitempty"`
 }
 
 // The player joined after the round clock started
