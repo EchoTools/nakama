@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/gofrs/uuid/v5"
@@ -92,8 +93,15 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 	if err != nil {
 		logger.Error("Failed to get stream count", zap.Error(err))
 	} else {
-		if count < 16 {
-			fallbackDelay = time.Minute * 2
+
+		// If there are fewer players online, reduce the fallback delay
+		if !strings.Contains(p.node, "dev") {
+			// If there are fewer than 16 players online, reduce the fallback delay
+			if count < 16 {
+				fallbackDelay = min(p.matchmakingTicketTimeout()/2, 4*time.Minute)
+			} else if count < 8 {
+				fallbackDelay = 1 * time.Minute
+			}
 		}
 	}
 
