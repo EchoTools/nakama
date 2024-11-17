@@ -557,11 +557,6 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 
 func recordMatchTimeToLeaderboard(ctx context.Context, nk runtime.NakamaModule, userID, username string, mode evr.Symbol, matchTimeSecs int64) error {
 	periods := []string{"alltime", "daily", "weekly"}
-	ids := make([]string, 0, len(periods))
-
-	for _, p := range periods {
-		ids = append(ids, fmt.Sprintf("%s:%s:%s", mode.String(), "LobbyTime", p))
-	}
 
 	for _, period := range periods {
 		id := fmt.Sprintf("%s:%s:%s", mode.String(), "LobbyTime", period)
