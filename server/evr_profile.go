@@ -34,13 +34,13 @@ type GameProfile interface {
 }
 
 type GameProfileData struct {
-	Login      evr.LoginProfile    `json:"login"`
-	Client     evr.ClientProfile   `json:"client"`
-	Server     evr.ServerProfile   `json:"server"`
-	Rating     types.Rating        `json:"rating"`
-	EarlyQuits EarlyQuitStatistics `json:"early_quit"`
-	Version    string              // The version of the profile from the DB
-	Stale      bool                // Whether the profile is stale and needs to be updated
+	Login      evr.LoginProfile                          `json:"login"`
+	Client     evr.ClientProfile                         `json:"client"`
+	Server     evr.ServerProfile                         `json:"server"`
+	Ratings    map[uuid.UUID]map[evr.Symbol]types.Rating `json:"ratings"`
+	EarlyQuits EarlyQuitStatistics                       `json:"early_quit"`
+	Version    string                                    // The version of the profile from the DB
+	Stale      bool                                      // Whether the profile is stale and needs to be updated
 }
 
 type AccountProfile struct {
@@ -178,15 +178,21 @@ func (p *GameProfileData) GetEarlyQuitStatistics() *EarlyQuitStatistics {
 	return &p.EarlyQuits
 }
 
-func (p *GameProfileData) GetRating() types.Rating {
-	if p.Rating.Mu == 0 || p.Rating.Sigma == 0 {
-		p.SetRating(NewDefaultRating())
+func (p *GameProfileData) GetRating(groupID uuid.UUID, mode evr.Symbol) types.Rating {
+	if p.Ratings == nil || p.Ratings[groupID] == nil || p.Ratings[groupID][mode] == (types.Rating{}) {
+		p.SetRating(groupID, mode, NewDefaultRating())
 	}
-	return p.Rating
+	return p.Ratings[groupID][mode]
 }
 
-func (p *GameProfileData) SetRating(rating types.Rating) {
-	p.Rating = rating
+func (p *GameProfileData) SetRating(groupID uuid.UUID, mode evr.Symbol, rating types.Rating) {
+	if p.Ratings == nil {
+		p.Ratings = make(map[uuid.UUID]map[evr.Symbol]types.Rating)
+	}
+	if p.Ratings[groupID] == nil {
+		p.Ratings[groupID] = make(map[evr.Symbol]types.Rating)
+	}
+	p.Ratings[groupID][mode] = rating
 	p.SetStale()
 }
 
