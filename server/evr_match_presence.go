@@ -128,6 +128,7 @@ func EntrantPresenceFromLobbyParams(session Session, lobbyParams *LobbySessionPa
 		IsPCVR:            params.IsPCVR,
 		Rating:            lobbyParams.Rating,
 		SupportedFeatures: params.SupportedFeatures,
+		RankPercentile:    lobbyParams.RankPercentile,
 
 		DisableEncryption: params.DisableEncryption,
 		DisableMAC:        params.DisableMAC,
