@@ -121,17 +121,17 @@ func (r *UserLogJouralRegistry) storageLoad(ctx context.Context, userID uuid.UUI
 		Key:        RemoteLogStorageJournalKey,
 	}
 
-	read, err := r.nk.StorageRead(ctx, []*runtime.StorageRead{storageRead})
+	objs, err := r.nk.StorageRead(ctx, []*runtime.StorageRead{storageRead})
 	if err != nil {
 		return nil, err
 	}
 
-	if read[0].Value == "" {
+	if len(objs) == 0 {
 		return nil, nil
 	}
 
 	var journal map[time.Time][]*UserLogJournalEntry
-	if err := json.Unmarshal([]byte(read[0].Value), &journal); err != nil {
+	if err := json.Unmarshal([]byte(objs[0].Value), &journal); err != nil {
 		return nil, err
 	}
 
@@ -144,7 +144,10 @@ func (r *UserLogJouralRegistry) StoreLogs(ctx context.Context, sessionID, userID
 
 	journal, err := r.storageLoad(ctx, userID)
 	if err != nil {
-		return err
+		r.logger.Warn("Failed to load remote log, overwriting.", zap.Error(err))
+	}
+	if journal == nil {
+		journal = make(map[time.Time][]*UserLogJournalEntry)
 	}
 
 	// Remove any logs over a month old
