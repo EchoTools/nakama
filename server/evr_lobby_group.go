@@ -115,7 +115,7 @@ func JoinPartyGroup(session *sessionWS, groupName string, partyID uuid.UUID, cur
 		}
 
 		if !success {
-			return nil, false, errors.New("Failed to join party")
+			return nil, false, errors.New("failed to join party")
 		}
 	}
 
@@ -125,7 +125,7 @@ func JoinPartyGroup(session *sessionWS, groupName string, partyID uuid.UUID, cur
 			Code:    int32(rtapi.Error_RUNTIME_EXCEPTION),
 			Message: "Error tracking party creation",
 		}}}, true)
-		return nil, false, errors.New("Failed to track party creation")
+		return nil, false, errors.New("failed to track party creation")
 	} else if isNew {
 		out := &rtapi.Envelope{Message: &rtapi.Envelope_Party{Party: &rtapi.Party{
 			PartyId:   ph.IDStr,
