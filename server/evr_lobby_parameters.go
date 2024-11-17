@@ -423,7 +423,7 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeRankRange bool, incl
 
 }
 
-func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionParameters, withRankUpperLimit bool, withEarlyQuitPenalty bool) (string, map[string]string, map[string]float64) {
+func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionParameters, withRankRange bool, withEarlyQuitPenalty bool) (string, map[string]string, map[string]float64) {
 
 	displayName := sessionParams.AccountMetadata.GetGroupDisplayNameOrDefault(p.GroupID.String())
 
@@ -450,10 +450,13 @@ func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionPar
 		fmt.Sprintf("+properties.group_id:/%s/", Query.Escape(p.GroupID.String())),
 		fmt.Sprintf(`-properties.blocked_ids:/.*%s.*/`, Query.Escape(p.UserID.String())),
 		//"+properties.version_lock:" + p.VersionLock.String(),
-		p.MatchmakingQueryAddon,
 	}
 
-	if withRankUpperLimit && p.RankPercentileMaxDelta > 0 {
+	if p.MatchmakingQueryAddon != "" {
+		qparts = append(qparts, p.MatchmakingQueryAddon)
+	}
+
+	if withRankRange && p.RankPercentileMaxDelta > 0 {
 		maxRankPercentile := min(p.RankPercentile+p.RankPercentileMaxDelta, 1.0)
 		qparts = append(qparts, fmt.Sprintf("+properties.rank_percentile:<=%f", maxRankPercentile))
 	}
