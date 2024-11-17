@@ -103,15 +103,16 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 	for _, e := range entries {
 		var update *MatchGameStateUpdate
 
-		// If this is a session remote log, add it to the match manager.
-		if m, ok := e.Parsed.(SessionRemoteLog); ok {
-			if p.matchLogManager != nil {
-				if err := p.matchLogManager.AddLog(m); err != nil {
-					logger.Warn("Failed to add log", zap.Error(err))
+		/*
+			// If this is a session remote log, add it to the match manager.
+			if m, ok := e.Parsed.(SessionRemoteLog); ok {
+				if p.matchLogManager != nil {
+					if err := p.matchLogManager.AddLog(m); err != nil {
+						logger.Warn("Failed to add log", zap.Error(err))
+					}
 				}
 			}
-		}
-
+		*/
 		if msg, ok := e.Parsed.(evr.GameTimer); ok {
 			matchID, err := NewMatchID(msg.SessionUUID(), p.node)
 			if err != nil {
@@ -121,7 +122,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				update.CurrentGameClock = time.Duration(msg.GameTime()) * time.Second
 			}
 		}
-
+		logger := logger.With(zap.String("message_type", fmt.Sprintf("%T", e.Parsed)))
 		switch msg := e.Parsed.(type) {
 
 		case *evr.RemoteLogUserDisconnected:
