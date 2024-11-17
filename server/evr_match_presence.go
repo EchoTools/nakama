@@ -33,12 +33,12 @@ type EvrMatchPresence struct {
 	PartyID           uuid.UUID `json:"party_id,omitempty"`
 	RoleAlignment     int       `json:"role,omitempty"` // The team they want to be on
 	SupportedFeatures []string  `json:"supported_features,omitempty"`
-	Query             string    `json:"query,omitempty"` // Their matchmaking query
 	SessionExpiry     int64     `json:"session_expiry,omitempty"`
 	IsPCVR            bool      `json:"is_pcvr,omitempty"` // PCVR or Standalone
 	DisableEncryption bool      `json:"disable_encryption,omitempty"`
 	DisableMAC        bool      `json:"disable_mac,omitempty"`
 
+	Query          string       `json:"query,omitempty"` // Their matchmaking query
 	RankPercentile float64      `json:"rank_percentile,omitempty"`
 	Rating         types.Rating `json:"rating,omitempty"`
 }
