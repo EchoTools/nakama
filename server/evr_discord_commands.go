@@ -1851,19 +1851,45 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return errors.New("failed to update guild group metadata")
 			}
 
-			// Check if the player is currently in a lobby for this guild and disconnect them if they are
-			presences, err := d.nk.StreamUserList(StreamModeGuildGroup, groupID, "", "", true, true)
+			presences, err := d.nk.StreamUserList(StreamModeService, targetUserID, "", StreamLabelMatchService, true, true)
 			if err != nil {
-				return errors.New("failed to get user list")
+				return err
 			}
 
 			cnt := 0
-			for _, presence := range presences {
-				if presence.GetUserId() == targetUserID {
-					cnt, err = DisconnectUserID(ctx, d.nk, targetUserID)
-					if err != nil {
-						return fmt.Errorf("failed to disconnect user: %w", err)
+			for _, p := range presences {
+				disconnectDelay := 0
+				if p.GetUserId() == targetUserID {
+					cnt += 1
+					if label, _ := MatchLabelByID(ctx, d.nk, MatchIDFromStringOrNil(p.GetStatus())); label != nil {
+
+						if label.Broadcaster.SessionID == p.GetSessionId() {
+							continue
+						}
+
+						if label.GetGroupID().String() != groupID {
+							return errors.New("user's match is not from this guild")
+						}
+
+						// Kick the player from the match
+						if err := KickPlayerFromMatch(ctx, d.nk, label.ID, targetUserID); err != nil {
+							return err
+						}
+						_ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> kicked player <@%s> from [%s](https://echo.taxi/spark://c/%s) match.", user.ID, target.ID, label.Mode.String(), strings.ToUpper(label.ID.UUID.String())), false)
+						disconnectDelay = 15
 					}
+
+					go func() {
+						<-time.After(time.Second * time.Duration(disconnectDelay))
+						// Just disconnect the user, wholesale
+						if _, err := DisconnectUserID(ctx, d.nk, targetUserID); err != nil {
+							logger.Warn("Failed to disconnect user", zap.Error(err))
+						} else {
+							_ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> disconnected player <@%s> from match service.", user.ID, target.ID), false)
+						}
+					}()
+
+					cnt++
 				}
 			}
 
