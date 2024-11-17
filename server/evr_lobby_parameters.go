@@ -237,7 +237,6 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 	rating := profile.GetRating()
 
 	// Add blocked players who are online to the Matchmaking Query Addon
-
 	blockedIDs := make([]string, 0)
 	for _, f := range friends {
 		if api.Friend_State(f.GetState().Value) == api.Friend_BLOCKED {

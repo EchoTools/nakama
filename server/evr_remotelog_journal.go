@@ -11,13 +11,19 @@ import (
 	"go.uber.org/zap"
 )
 
+type UserLogJournalEntry struct {
+	SessionID uuid.UUID `json:"sessionID"`
+	Timestamp time.Time `json:"timestamp"`
+	Message   string    `json:"message"`
+}
+
 type UserLogJouralRegistry struct {
 	sync.RWMutex
 	logger *zap.Logger
 	nk     runtime.NakamaModule
 
 	sessionRegistry SessionRegistry
-	journalRegistry map[uuid.UUID]map[string]string // map[sessionID]map[messageType]messageJSON
+	journalRegistry map[uuid.UUID][]*UserLogJournalEntry // map[sessionID]messages
 }
 
 func NewUserRemoteLogJournalRegistry(logger *zap.Logger, nk runtime.NakamaModule, sessionRegistry SessionRegistry) *UserLogJouralRegistry {
@@ -27,7 +33,7 @@ func NewUserRemoteLogJournalRegistry(logger *zap.Logger, nk runtime.NakamaModule
 		nk:     nk,
 
 		sessionRegistry: sessionRegistry,
-		journalRegistry: make(map[uuid.UUID]map[string]string),
+		journalRegistry: make(map[uuid.UUID][]*UserLogJournalEntry),
 	}
 
 	// Every 10 minutes, remove all entries that do not have a session.
@@ -47,15 +53,12 @@ func NewUserRemoteLogJournalRegistry(logger *zap.Logger, nk runtime.NakamaModule
 }
 
 // returns true if found
-func (r *UserLogJouralRegistry) AddEntries(sessionID uuid.UUID, e []*GenericRemoteLog) (found bool) {
+func (r *UserLogJouralRegistry) AddEntries(sessionID uuid.UUID, e []string) (found bool) {
 	r.Lock()
 	defer r.Unlock()
 
 	if _, found = r.journalRegistry[sessionID]; !found {
-		r.journalRegistry[sessionID] = make(map[string]string)
-	}
-	for _, entry := range e {
-		r.journalRegistry[sessionID][entry.MessageType] = entry.Message
+		r.journalRegistry[sessionID] = make([]*UserLogJournalEntry, 0, len(e))
 	}
 
 	if !found {
@@ -74,10 +77,19 @@ func (r *UserLogJouralRegistry) AddEntries(sessionID uuid.UUID, e []*GenericRemo
 
 		}()
 	}
+
+	for _, entry := range e {
+		r.journalRegistry[sessionID] = append(r.journalRegistry[sessionID], &UserLogJournalEntry{
+			SessionID: sessionID,
+			Timestamp: time.Now(),
+			Message:   entry,
+		})
+	}
+
 	return found
 }
 
-func (r *UserLogJouralRegistry) RemoveSessionAll(sessionID uuid.UUID) map[string]string {
+func (r *UserLogJouralRegistry) loadAndDelete(sessionID uuid.UUID) []*UserLogJournalEntry {
 	r.Lock()
 	defer r.Unlock()
 
@@ -85,45 +97,54 @@ func (r *UserLogJouralRegistry) RemoveSessionAll(sessionID uuid.UUID) map[string
 		return nil
 	}
 
-	defer delete(r.journalRegistry, sessionID)
-	return r.journalRegistry[sessionID]
+	entries := r.journalRegistry[sessionID]
+	delete(r.journalRegistry, sessionID)
+	return entries
 }
 
-func (r *UserLogJouralRegistry) GetSession(sessionID uuid.UUID) (map[string]string, bool) {
+func (r *UserLogJouralRegistry) GetLogs(sessionID uuid.UUID) []*UserLogJournalEntry {
 	r.RLock()
 	defer r.RUnlock()
 
 	if _, ok := r.journalRegistry[sessionID]; !ok {
-		return nil, false
+		return nil
 	}
-	messages, ok := r.journalRegistry[sessionID]
-	return messages, ok
+
+	return r.journalRegistry[sessionID]
+}
+
+func (r *UserLogJouralRegistry) storageLoad(ctx context.Context, userID uuid.UUID) (map[time.Time][]*UserLogJournalEntry, error) {
+
+	storageRead := &runtime.StorageRead{
+		UserID:     userID.String(),
+		Collection: RemoteLogStorageCollection,
+		Key:        RemoteLogStorageJournalKey,
+	}
+
+	read, err := r.nk.StorageRead(ctx, []*runtime.StorageRead{storageRead})
+	if err != nil {
+		return nil, err
+	}
+
+	if read[0].Value == "" {
+		return nil, nil
+	}
+
+	var journal map[time.Time][]*UserLogJournalEntry
+	if err := json.Unmarshal([]byte(read[0].Value), &journal); err != nil {
+		return nil, err
+	}
+
+	return journal, nil
 }
 
 func (r *UserLogJouralRegistry) StoreLogs(ctx context.Context, sessionID, userID uuid.UUID) error {
 
-	messages := r.RemoveSessionAll(sessionID)
+	messages := r.loadAndDelete(sessionID)
 
-	// Get the existing remoteLog from storage.
-	journal := make(map[time.Time]map[string]string)
-
-	rops := []*runtime.StorageRead{
-		{
-			UserID:     userID.String(),
-			Collection: RemoteLogStorageCollection,
-			Key:        RemoteLogStorageJournalKey,
-		},
-	}
-
-	results, err := r.nk.StorageRead(ctx, rops)
+	journal, err := r.storageLoad(ctx, userID)
 	if err != nil {
 		return err
-	}
-
-	if len(results) > 0 {
-		if err := json.Unmarshal([]byte(results[0].Value), &journal); err != nil {
-			return err
-		}
 	}
 
 	// Remove any logs over a month old
@@ -140,6 +161,7 @@ func (r *UserLogJouralRegistry) StoreLogs(ctx context.Context, sessionID, userID
 	if err != nil {
 		return err
 	}
+
 	// Write the remoteLog to storage.
 	wops := []*runtime.StorageWrite{
 		{
