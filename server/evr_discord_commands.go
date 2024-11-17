@@ -1636,12 +1636,18 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return err
 			}
 
+			// set the player's next match
+			if err := SetNextMatchID(ctx, nk, userID, label.ID, AnyTeam, ""); err != nil {
+				logger.Error("Failed to set next match ID", zap.Error(err))
+				return fmt.Errorf("failed to set next match ID: %w", err)
+			}
+
 			logger.WithFields(map[string]any{
 				"match_id": label.ID.String(),
 				"rtt_ms":   rttMs,
 			}).Info("Match created.")
 
-			content := fmt.Sprintf(" Reservation will timeout <t:%d:R>. \n\nClick play or start matchmaking to automatically join your match.\n\nhttps://echo.taxi/spark://c/%s", startTime.Unix(), strings.ToUpper(label.ID.UUID.String()))
+			content := fmt.Sprintf("Reservation will timeout <t:%d:R>. \n\nClick play or start matchmaking to automatically join your match.", startTime.Unix())
 
 			niceNameMap := map[evr.Symbol]string{
 				evr.ModeArenaPrivate:  "Private Arena Match",
@@ -1655,6 +1661,24 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				prettyName = mode.String()
 			}
 
+			serverLocation := ""
+
+			ipqsCache.Range(func(key string, value *IPQSResponse) bool {
+				// print out
+				logger.Info("IPQS Cache", zap.String("key", key), zap.Any("value", value))
+				return true
+			})
+
+			serverExtIP := label.Broadcaster.Endpoint.ExternalIP.String()
+			if ipqs, found := ipqsCache.Load(serverExtIP); found {
+				serverLocation = ipqs.Region
+			}
+
+			// local the guild name
+			guild, err := s.Guild(i.GuildID)
+			if err != nil {
+				logger.Error("Failed to get guild", zap.Error(err))
+			}
 			responseContent := &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
@@ -1665,14 +1689,23 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						Color:       0x9656ce,
 						Fields: []*discordgo.MessageEmbedField{
 							{
+								Name:   "Guild",
+								Value:  guild.Name,
+								Inline: false,
+							},
+							{
 								Name:   "Mode",
 								Value:  prettyName,
 								Inline: true,
 							},
 							{
 								Name:   "Region Code",
-								Value:  fmt.Sprintf("```%s```", region.String()),
-								Inline: true,
+								Value:  region.String(),
+								Inline: false,
+							},
+							{
+								Name:  "Server Location",
+								Value: serverLocation,
 							},
 							{
 								Name:   "Ping Latency",
@@ -1681,7 +1714,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 							},
 							{
 								Name:   "Spark Link",
-								Value:  fmt.Sprintf("https://echo.taxi/spark://c/%s", strings.ToUpper(label.ID.UUID.String())),
+								Value:  fmt.Sprintf("[Spark Link](https://echo.taxi/spark://c/%s)", strings.ToUpper(label.ID.UUID.String())),
 								Inline: false,
 							},
 							{
@@ -1704,7 +1737,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					case <-updateTicker.C:
 					}
 
-					presences, err := d.nk.StreamUserList(StreamModeMatchAuthoritative, label.ID.UUID.String(), "", label.ID.Node, true, false)
+					presences, err := d.nk.StreamUserList(StreamModeMatchAuthoritative, label.ID.UUID.String(), "", label.ID.Node, false, true)
 					if err != nil {
 						logger.Error("Failed to get user list", zap.Error(err))
 					}
@@ -1724,6 +1757,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					// Update the list of players in the interaction response
 					var players strings.Builder
 					for _, p := range presences {
+						if p.GetSessionId() == label.Broadcaster.SessionID {
+							continue
+						}
 						players.WriteString(fmt.Sprintf("<@%s>\n", d.cache.UserIDToDiscordID(p.GetUserId())))
 					}
 					responseContent.Data.Embeds[0].Fields[4].Value = players.String()
