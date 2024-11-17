@@ -298,9 +298,7 @@ func (s *MatchLabel) rebuildCache() {
 		meta := make(map[TeamIndex]TeamMetadata, 2)
 		for t := range teams {
 			meta[t] = TeamMetadata{
-				Strength:    teams[t].Strength(),
-				RatingMu:    teams[t].Rating().Mu,
-				RatingSigma: teams[t].Rating().Sigma,
+				Strength: teams[t].Strength(),
 			}
 		}
 		if s.GameState == nil {
