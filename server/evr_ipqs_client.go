@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"time"
@@ -111,8 +112,6 @@ type IPQSClient struct {
 	url        string
 	apiKey     string
 	parameters map[string]string
-
-	cache *MapOf[string, *IPQSResponse]
 }
 
 func NewIPQS(logger *zap.Logger, db *sql.DB, metrics Metrics, storageIndex StorageIndex, apiKey string) (*IPQSClient, error) {
@@ -134,8 +133,6 @@ func NewIPQS(logger *zap.Logger, db *sql.DB, metrics Metrics, storageIndex Stora
 			"allow_public_access_points": "true",
 			"lighter_penalties":          "false",
 		},
-
-		cache: ipqsCache,
 	}
 
 	if err := ipqs.LoadCache(); err != nil {
@@ -165,7 +162,7 @@ func NewIPQS(logger *zap.Logger, db *sql.DB, metrics Metrics, storageIndex Stora
 func (s *IPQSClient) IPDetails(ip string, useCache bool) (*IPQSResponse, error) {
 
 	if useCache {
-		if cached, ok := s.cache.Load(ip); ok {
+		if cached, ok := ipqsCache.Load(ip); ok {
 			return cached, nil
 		}
 	}
@@ -194,7 +191,7 @@ func (s *IPQSClient) IPDetails(ip string, useCache bool) (*IPQSResponse, error) 
 	}
 
 	if result.Success && useCache {
-		s.cache.Store(ip, &result)
+		ipqsCache.Store(ip, &result)
 	}
 
 	return &result, nil
@@ -262,7 +259,7 @@ func (s *IPQSClient) IsVPN(ip string) bool {
 func (s *IPQSClient) SaveCache() (int, error) {
 
 	cachemap := make(map[string]*IPQSResponse)
-	s.cache.Range(func(key string, value *IPQSResponse) bool {
+	ipqsCache.Range(func(key string, value *IPQSResponse) bool {
 		cachemap[key] = value
 		return true
 	})
@@ -316,7 +313,7 @@ func (s *IPQSClient) LoadCache() error {
 	}
 
 	for key, value := range cachemap {
-		s.cache.Store(key, value)
+		ipqsCache.Store(key, value)
 	}
 	s.logger.Info("Loaded IPQS cache", zap.Int("count", len(cachemap)))
 	return nil
