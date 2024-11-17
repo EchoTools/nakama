@@ -84,9 +84,14 @@ func (p *EvrPipeline) lobbySessionRequest(ctx context.Context, logger *zap.Logge
 					},
 				}, true)
 			}
+
+			if err == context.Canceled {
+				logger.Debug("Lobby session request was canceled (context.Canceled)")
+				return
+			}
 			logger.Error("Failed to process lobby session request", zap.Error(err))
 
-			if err := p.appBot.LogAuditMessage(ctx, lobbyParams.GroupID.String(), fmt.Sprintf("```fix\n%s\n%T failed:\n %v\n```", session.Username(), in, err), false); err != nil {
+			if err := p.appBot.LogAuditMessage(ctx, lobbyParams.GroupID.String(), fmt.Sprintf("```fix\n%s\n\n%T failed:\n %v\n```", session.Username(), in, err), false); err != nil {
 				logger.Warn("Failed to log audit message", zap.Error(err))
 			}
 
