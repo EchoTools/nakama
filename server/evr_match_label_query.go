@@ -162,21 +162,22 @@ func (t TeamIndex) MarshalJSON() ([]byte, error) {
 	return json.Marshal(t.String())
 }
 
-func (t *TeamIndex) UnmarshalJSON(b []byte) error {
-	var s string
-	if err := json.Unmarshal(b, &s); err != nil {
-		return err
-	}
-	switch strings.ToLower(s) {
+func MarshalText(t TeamIndex) ([]byte, error) {
+	return []byte(t.String()), nil
+}
+
+func (t *TeamIndex) UnmarshalText(b []byte) error {
+	switch strings.ToLower(string(b)) {
 	default:
-		i, err := strconv.Atoi(s)
+		i, err := strconv.Atoi(string(b))
 		if err != nil {
 			return err
 		}
 		*t = TeamIndex(i)
+	case "":
+		*t = AnyTeam
 	case "any":
 		*t = AnyTeam
-
 	case "orange":
 		*t = OrangeTeam
 	case "blue":
