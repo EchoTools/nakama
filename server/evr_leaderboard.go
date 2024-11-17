@@ -21,6 +21,17 @@ type LeaderboardRegistry struct {
 	logger runtime.Logger
 }
 
+func PeriodicityToSchedule(periodicity string) string {
+	switch periodicity {
+	case "daily":
+		return "0 0 * * *"
+	case "weekly":
+		return "0 0 * * 1"
+	default:
+		return ""
+	}
+}
+
 func NewLeaderboardRegistry(logger runtime.Logger, nk runtime.NakamaModule, node string) *LeaderboardRegistry {
 	return &LeaderboardRegistry{
 		node:   node,
@@ -173,6 +184,7 @@ func (r *LeaderboardRegistry) RecordWriteTabletStat(ctx context.Context, meta Le
 
 	return record, err
 }
+
 func (r *LeaderboardRegistry) createGamesPlayedStat(stats map[string]evr.StatUpdate, prefix string) {
 	wins := stats[prefix+"Wins"].Value
 	losses := stats[prefix+"Losses"].Value

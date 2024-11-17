@@ -518,6 +518,12 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 			ts := state.joinTimestamps[mp.GetSessionId()]
 			nk.MetricsTimerRecord("match_player_session_duration", tags, time.Since(ts))
 
+			// Store the player's time in the match to a leaderboard
+
+			if err := recordMatchTimeToLeaderboard(ctx, nk, mp.GetUserId(), mp.GetUsername(), state.Mode, int64(time.Since(ts).Seconds())); err != nil {
+				logger.Warn("Failed to record match time to leaderboard: %v", err)
+			}
+
 			delete(state.presenceMap, p.GetSessionId())
 			delete(state.joinTimestamps, p.GetSessionId())
 
@@ -547,6 +553,39 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 	}
 
 	return state
+}
+
+func recordMatchTimeToLeaderboard(ctx context.Context, nk runtime.NakamaModule, userID, username string, mode evr.Symbol, matchTimeSecs int64) error {
+	periods := []string{"alltime", "daily", "weekly"}
+	ids := make([]string, 0, len(periods))
+
+	for _, p := range periods {
+		ids = append(ids, fmt.Sprintf("%s:%s:%s", mode.String(), "LobbyTime", p))
+	}
+
+	for _, period := range periods {
+		id := fmt.Sprintf("%s:%s:%s", mode.String(), "LobbyTime", period)
+
+		// Write the record
+		_, err := nk.LeaderboardRecordWrite(ctx, id, userID, username, matchTimeSecs, 0, nil, nil)
+
+		if err != nil {
+			// Try to create the leaderboard
+			err = nk.LeaderboardCreate(ctx, id, true, "desc", "incr", PeriodicityToSchedule(period), nil)
+
+			if err != nil {
+				return fmt.Errorf("Leaderboard create error: %v", err)
+			} else {
+				// Retry the write
+				_, err := nk.LeaderboardRecordWrite(ctx, id, userID, username, matchTimeSecs, 0, nil, nil)
+				if err != nil {
+					return fmt.Errorf("Leaderboard record write error: %v", err)
+				}
+			}
+		}
+	}
+
+	return nil
 }
 
 // MatchLoop is called every tick of the match and handles state, plus messages from the client.
