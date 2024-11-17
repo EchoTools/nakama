@@ -113,8 +113,8 @@ func CalculateNewPlayerRating(evrID evr.EvrId, players []PlayerInfo, teamSize in
 
 	for i := 0; i < len(players); i++ {
 
-		// Remove players that are not on blue/orange, or are backfill
-		if players[i].IsBackfill() || !players[i].IsCompetitor() {
+		// Remove players that are not on blue/orange
+		if !players[i].IsCompetitor() {
 			players = append(players[:i], players[i+1:]...)
 			i--
 			continue
