@@ -112,11 +112,11 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		return fmt.Errorf("failed to be party leader.: %w", err)
 	}
 
-	// If the player early quit their last match, they will not be matchmade.
-
-	// Submit the matchmaking ticket
-	if err := p.lobbyMatchMakeWithFallback(ctx, logger, session, lobbyParams, lobbyGroup); err != nil {
-		return fmt.Errorf("failed to matchmake: %w", err)
+	if lobbyParams.Mode != evr.ModeSocialPublic {
+		// Submit the matchmaking ticket
+		if err := p.lobbyMatchMakeWithFallback(ctx, logger, session, lobbyParams, lobbyGroup); err != nil {
+			return fmt.Errorf("failed to matchmake: %w", err)
+		}
 	}
 
 	// Attempt to backfill until the timeout.
@@ -251,13 +251,15 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 	// Maximum RTT for a server to be considered for backfill
 
 	includeRankPercentile := false
-	incldueMaxRTT := false
+	includeMaxRTT := false
 
+	// Only use rank percentile for arena matches.
 	if lobbyParams.Mode == evr.ModeArenaPublic {
 		includeRankPercentile = true
-		incldueMaxRTT = true
+		includeMaxRTT = true
 	}
-	query := lobbyParams.BackfillSearchQuery(includeRankPercentile, incldueMaxRTT)
+
+	query := lobbyParams.BackfillSearchQuery(includeRankPercentile, includeMaxRTT)
 
 	rtts := lobbyParams.latencyHistory.LatestRTTs()
 
