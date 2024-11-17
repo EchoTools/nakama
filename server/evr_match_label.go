@@ -302,7 +302,10 @@ func (s *MatchLabel) rebuildCache() {
 				RatingSigma: teams[t].Rating().Sigma,
 			}
 		}
-
+		if s.GameState == nil {
+			s.GameState = &GameState{}
+		}
+		s.GameState.Teams = meta
 	}
 
 	// Sort the players by team, party ID, and join time.
@@ -387,17 +390,18 @@ func (l *MatchLabel) PublicView() *MatchLabel {
 	} else {
 		for i := range l.Players {
 			v.Players = append(v.Players, PlayerInfo{
-				IsReservation: l.Players[i].IsReservation,
-				UserID:        l.Players[i].UserID,
-				Username:      l.Players[i].Username,
-				DisplayName:   l.Players[i].DisplayName,
-				EvrID:         l.Players[i].EvrID,
-				Team:          l.Players[i].Team,
-				DiscordID:     l.Players[i].DiscordID,
-				PartyID:       l.Players[i].PartyID,
-				JoinTime:      l.Players[i].JoinTime,
-				RatingMu:      l.Players[i].RatingMu,
-				RatingSigma:   l.Players[i].RatingSigma,
+				IsReservation:  l.Players[i].IsReservation,
+				UserID:         l.Players[i].UserID,
+				Username:       l.Players[i].Username,
+				DisplayName:    l.Players[i].DisplayName,
+				EvrID:          l.Players[i].EvrID,
+				Team:           l.Players[i].Team,
+				DiscordID:      l.Players[i].DiscordID,
+				PartyID:        l.Players[i].PartyID,
+				JoinTime:       l.Players[i].JoinTime,
+				RatingMu:       l.Players[i].RatingMu,
+				RatingSigma:    l.Players[i].RatingSigma,
+				RankPercentile: l.Players[i].RankPercentile,
 			})
 		}
 
