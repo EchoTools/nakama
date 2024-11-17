@@ -126,7 +126,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	broadcasterRegistrationBySession := MapOf[string, *MatchBroadcaster]{}
 	lobbyBuilder := NewLobbyBuilder(logger, nk, sessionRegistry, matchRegistry, tracker, metrics, profileRegistry)
 	matchmaker.OnMatchedEntries(lobbyBuilder.handleMatchedEntries)
-	userRemoteLogJournalRegistry := NewUserRemoteLogJournalRegistry(sessionRegistry)
+	userRemoteLogJournalRegistry := NewUserRemoteLogJournalRegistry(logger, nk, sessionRegistry)
 	guildGroupCache := NewGuildGroupCache(ctx, runtimeLogger, nk)
 	guildGroupCache.Start()
 
