@@ -147,7 +147,7 @@ func MatchListPublicRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 	})
 
 	response := struct {
-		Uptime                      time.Duration             `json:"uptime"`
+		Uptime                      int64                     `json:"uptime_mins"`
 		UpdateTime                  TimeRFC3339               `json:"update_time"`
 		LobbySessionCount           int                       `json:"lobby_session_count"`
 		GameServerCount             int                       `json:"gameserver_count"`
@@ -156,7 +156,7 @@ func MatchListPublicRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		Labels                      []*MatchLabel             `json:"labels"`
 		GameServers                 []*MatchBroadcaster       `json:"gameservers"`
 	}{
-		Uptime:                      time.Since(nakamaStartTime),
+		Uptime:                      int64(time.Since(nakamaStartTime).Minutes()),
 		UpdateTime:                  TimeRFC3339(time.Now().UTC()),
 		Labels:                      labels,
 		LobbySessionCount:           len(labels),
