@@ -10,10 +10,8 @@ import (
 	"time"
 
 	"github.com/gofrs/uuid/v5"
-	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 type GenericRemoteLog struct {
@@ -113,38 +111,6 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 	// Add them to the journal first.
 	if found := p.userRemoteLogJournalRegistry.AddEntries(session.id, entries); !found {
 		// This is a new session, so we need to start a goroutine to remove/store the session's journal entries when the session is closed.
-		go func() {
-			<-session.Context().Done()
-			messages := p.userRemoteLogJournalRegistry.RemoveSessionAll(session.id)
-
-			data, err := json.Marshal(messages)
-			if err != nil {
-				logger.Error("Failed to marshal remote log messages", zap.Error(err))
-				return
-			}
-			// Write the remoteLog to storage.
-			ops := StorageOpWrites{
-				{
-					OwnerID: session.userID.String(),
-					Object: &api.WriteStorageObject{
-						Collection:      RemoteLogStorageCollection,
-						Key:             RemoteLogStorageJournalKey,
-						Value:           string(data),
-						PermissionRead:  &wrapperspb.Int32Value{Value: int32(1)},
-						PermissionWrite: &wrapperspb.Int32Value{Value: int32(0)},
-						Version:         "",
-					},
-				},
-			}
-
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
-			defer cancel()
-			_, _, err = StorageWriteObjects(ctx, logger, session.pipeline.db, session.metrics, session.storageIndex, true, ops)
-			if err != nil {
-				logger.Error("Failed to write remote log journal.", zap.Error(err))
-			}
-			logger.Debug("Wrote remote log journal to storage.")
-		}()
 	}
 
 	// Collect the updates to the match's game metadata (e.g. game clock)
