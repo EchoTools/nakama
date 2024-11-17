@@ -5,9 +5,7 @@ import (
 )
 
 type TeamMetadata struct {
-	Strength    float64 `json:"strength,omitempty"`
-	RatingMu    float64 `json:"rating_mu,omitempty"`
-	RatingSigma float64 `json:"rating_sigma,omitempty"`
+	Strength float64 `json:"strength,omitempty"`
 }
 
 type GameState struct {

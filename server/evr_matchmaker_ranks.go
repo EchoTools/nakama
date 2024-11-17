@@ -41,41 +41,21 @@ func RecalculatePlayerRankPercentile(ctx context.Context, logger *zap.Logger, nk
 		boardIDs = append(boardIDs, fmt.Sprintf("%s:%s:%s", mode.String(), id, periodicity))
 	}
 
-	statRecords, err := StatRecordsLoad(ctx, logger, nk, userID, boardIDs)
+	percentile, err := LeaderboardRankPercentile(ctx, logger, nk, userID, boardIDs)
 	if err != nil {
 		return 0.0, nil, err
 	}
 
-	if statRecords == nil {
-		return 0.0, nil, nil
-	}
-
-	// Combine all the stat ranks into a single percentile.
-	percentiles := make([]float64, 0, len(statRecords))
-	for _, r := range statRecords {
-		if r.GetNumScore() == 0 {
-			continue
-		}
-		percentile := float64(r.GetRank()) / float64(r.GetNumScore())
-		percentiles = append(percentiles, percentile)
-	}
-
-	// Calculate the overall percentile.
-	overallPercentile := 0.0
-	for _, p := range percentiles {
-		overallPercentile += p
-	}
-	overallPercentile /= float64(len(percentiles))
-
-	return overallPercentile, statRecords, nil
+	return percentile, nil, nil
 }
 
-func StatRecordsLoad(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, userID string, boardIDs []string) (map[string]*api.LeaderboardRecord, error) {
+func LeaderboardRankPercentile(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, userID string, boardIDs []string) (float64, error) {
 
-	statRecords := make(map[string]*api.LeaderboardRecord)
+	percentiles := make([]float64, 0, len(boardIDs))
+
 	for _, boardID := range boardIDs {
 
-		_, records, _, _, err := nk.LeaderboardRecordsList(ctx, boardID, []string{userID}, 10000, "", 0)
+		records, _, _, _, err := nk.LeaderboardRecordsList(ctx, boardID, []string{userID}, 10000, "", 0)
 		if err != nil {
 			continue
 		}
@@ -84,12 +64,29 @@ func StatRecordsLoad(ctx context.Context, logger *zap.Logger, nk runtime.NakamaM
 			continue
 		}
 
-		statRecords[boardID] = records[0]
+		// Find the user's rank.
+		var rank int64 = -1
+		for _, record := range records {
+			if record.OwnerId == userID {
+				rank = record.Rank
+				break
+			}
+		}
+		if rank == -1 {
+			continue
+		}
+
+		// Calculate the percentile.
+		percentiles = append(percentiles, float64(rank)/float64(len(records)))
+
 	}
 
-	if len(statRecords) == 0 {
-		return nil, nil
-	}
+	percentile := 0.0
 
-	return statRecords, nil
+	for _, p := range percentiles {
+		percentile += p
+	}
+	percentile /= float64(len(percentiles))
+
+	return percentile, nil
 }
