@@ -7,11 +7,13 @@ import (
 	"errors"
 	"math"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/intinig/go-openskill/rating"
 	"github.com/intinig/go-openskill/types"
 	"go.uber.org/thriftrw/ptr"
@@ -36,10 +38,10 @@ var writerMu sync.Mutex
 // Function to be used as a matchmaker function in Nakama (RegisterMatchmakerOverride)
 func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, candidates [][]runtime.MatchmakerEntry) [][]runtime.MatchmakerEntry {
 
-	players := make(map[string]struct{}, 0)
+	allPlayers := make(map[string]struct{}, 0)
 	for _, c := range candidates {
 		for _, e := range c {
-			players[e.GetPresence().GetUserId()] = struct{}{}
+			allPlayers[e.GetPresence().GetUserId()] = struct{}{}
 		}
 	}
 
@@ -101,16 +103,52 @@ func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 
 	// Sort by matches that have players who have been waiting more than half the Matchmaking timeout
 	// This is to prevent players from waiting too long
-	m.sortByPriority(predictions)
 
-	madeMatches := m.composeMatches(predictions)
+	modestr := candidates[0][0].GetProperties()["mode"].(string)
+	if modestr == "" {
+		logger.Error("Mode not found in entry properties. Matchmaker cannot run.")
+		return nil
+	}
+
+	switch modestr {
+
+	case evr.ModeCombatPublic.String():
+		m.sortCombat(predictions)
+
+	case evr.ModeArenaPublic.String():
+		m.sortArena(predictions)
+
+	default:
+		logger.WithField("mode", modestr).Error("Unknown mode. Matchmaker cannot run.")
+		return nil
+	}
+
+	madeMatches := m.assembleUniqueMatches(predictions)
+
+	includedPlayers := make(map[string]struct{}, 0)
+	for _, c := range madeMatches {
+		for _, e := range c {
+			includedPlayers[e.GetPresence().GetUserId()] = struct{}{}
+		}
+	}
+
+	// Create a list of excluded players
+	unmatchedPlayers := make([]string, 0)
+	for p := range allPlayers {
+		if _, ok := includedPlayers[p]; !ok {
+			unmatchedPlayers = append(unmatchedPlayers, p)
+		}
+	}
 
 	logger.WithFields(map[string]interface{}{
-		"num_players":    len(players),
-		"num_candidates": len(candidates),
-		"num_matches":    len(madeMatches),
-		"matches":        madeMatches,
-		"filter_counts":  filterCounts,
+		"mode":                modestr,
+		"num_player_total":    len(allPlayers),
+		"num_player_included": len(includedPlayers),
+		"num_match_options":   len(candidates),
+		"num_match_made":      len(madeMatches),
+		"made_matches":        madeMatches,
+		"filter_counts":       filterCounts,
+		"unmatched_players":   unmatchedPlayers,
 	}).Info("Skill-based matchmaker completed.")
 
 	return madeMatches
@@ -140,8 +178,28 @@ func (m *skillBasedMatchmaker) removeOddSizedTeams(candidates [][]runtime.Matchm
 	return candidates, oddSizedCount
 }
 
+func (m *skillBasedMatchmaker) sortCombat(predictions []PredictedMatch) {
+	// Sort by size, then by prediction of a draw
+	slices.SortStableFunc(predictions, func(a, b PredictedMatch) int {
+		if len(a.Entrants()) > len(b.Entrants()) {
+			return -1
+		} else if len(a.Entrants()) < len(b.Entrants()) {
+			return 1
+		}
+
+		if a.Draw > b.Draw {
+			return -1
+		}
+		if a.Draw < b.Draw {
+			return 1
+		}
+		return 0
+
+	})
+}
+
 // Sort the matches by the players that have been waiting for more than 2/3s of the matchmaking timeout
-func (m skillBasedMatchmaker) sortByPriority(predictions []PredictedMatch) {
+func (m skillBasedMatchmaker) sortArena(predictions []PredictedMatch) {
 	now := time.Now().UTC().Unix()
 
 	// This is to prevent players from waiting too long
@@ -214,40 +272,49 @@ func (m skillBasedMatchmaker) sortByPriority(predictions []PredictedMatch) {
 
 func (m *skillBasedMatchmaker) CreateBalancedMatch(groups [][]*RatedEntry, teamSize int) (RatedEntryTeam, RatedEntryTeam) {
 	// Split out the solo players
-	solos := make([]*RatedEntry, 0, len(groups))
-	parties := make([][]*RatedEntry, 0, len(groups))
-
-	for _, group := range groups {
-		if len(group) == 1 {
-			solos = append(solos, group[0])
-		} else {
-			parties = append(parties, group)
-		}
-	}
 
 	team1 := make(RatedEntryTeam, 0, teamSize)
 	team2 := make(RatedEntryTeam, 0, teamSize)
 
-	// Sort parties into teams by strength
-	for _, party := range parties {
-		if len(team1)+len(party) <= teamSize && (len(team2)+len(party) > teamSize || m.TeamStrength(team1) <= m.TeamStrength(team2)) {
-			team1 = append(team1, party...)
-		} else if len(team2)+len(party) <= teamSize {
-			team2 = append(team2, party...)
+	// Sort the groups by party size, largest first.
+
+	sort.Slice(groups, func(i, j int) bool {
+		// first by party size
+		if len(groups[i]) > len(groups[j]) {
+			return true
+		} else if len(groups[i]) < len(groups[j]) {
+			return false
+		}
+
+		// Then by strength
+		if m.TeamStrength(groups[i]) > m.TeamStrength(groups[j]) {
+			return true
+		} else if m.TeamStrength(groups[i]) < m.TeamStrength(groups[j]) {
+			return false
+		}
+
+		return false
+	})
+
+	// Organize groups onto teams, balancing by strength
+	for _, group := range groups {
+		if len(team1)+len(group) <= teamSize && (len(team2)+len(group) > teamSize || m.TeamStrength(team1) <= m.TeamStrength(team2)) {
+			team1 = append(team1, group...)
+		} else if len(team2)+len(group) <= teamSize {
+			team2 = append(team2, group...)
 		}
 	}
 
-	// Sort solo players onto teams by strength
-	for _, player := range solos {
-		if len(team1) < teamSize && (len(team2) >= teamSize || m.TeamStrength(team1) <= m.TeamStrength(team2)) {
-			team1 = append(team1, player)
-		} else if len(team2) < teamSize {
-			team2 = append(team2, player)
-		}
-	}
+	// Sort the players on the team by their rating
+	sort.Slice(team1, func(i, j int) bool {
+		return team1[i].Rating.Mu > team1[j].Rating.Mu
+	})
+	sort.Slice(team2, func(i, j int) bool {
+		return team2[i].Rating.Mu > team2[j].Rating.Mu
+	})
 
-	// Sort so that team2 (orange) is the stronger team
-	if m.TeamStrength(team1) > m.TeamStrength(team2) {
+	// Sort so that team1 (blue) is the stronger team
+	if m.TeamStrength(team1) < m.TeamStrength(team2) {
 		team1, team2 = team2, team1
 	}
 
@@ -331,7 +398,7 @@ func (m *skillBasedMatchmaker) buildPredictions(candidates [][]runtime.Matchmake
 	}
 	return predictions
 }
-func (m *skillBasedMatchmaker) composeMatches(ratedMatches []PredictedMatch) [][]runtime.MatchmakerEntry {
+func (m *skillBasedMatchmaker) assembleUniqueMatches(ratedMatches []PredictedMatch) [][]runtime.MatchmakerEntry {
 	seen := make(map[string]struct{})
 	selected := make([][]runtime.MatchmakerEntry, 0, len(ratedMatches))
 

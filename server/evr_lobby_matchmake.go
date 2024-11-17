@@ -201,44 +201,10 @@ func mroundRTT[T time.Duration | int](rtt T, modulus T) T {
 	return T(math.Round(r)) * modulus
 }
 
-// RTTweightedPopulationCmp compares two RTTs and populations
-func RTTweightedPopulationCmp(i, j time.Duration, o, p int) bool {
-	if i == 0 && j != 0 {
-		return false
-	}
-
-	// Sort by if over or under 90ms
-	if i < 90*time.Millisecond && j > 90*time.Millisecond {
-		return true
-	}
-	if i > 90*time.Millisecond && j < 90*time.Millisecond {
-		return false
-	}
-
-	// Sort by Population
-	if o != p {
-		return o > p
-	}
-
-	// If all else equal, sort by rtt
-	return i < j
-}
-
-// PopulationCmp compares two populations
-func PopulationCmp(i, j time.Duration, o, p int) bool {
-	if o == p {
-		// If all else equal, sort by rtt
-		return i != 0 && i < j
-	}
-	return o > p
-}
-
 // LatencyCmp compares by latency, round to the nearest 10ms
 func LatencyCmp[T int | time.Duration](i, j T, mround T) bool {
 	// Round to the closest 10ms
-	i = mroundRTT(i, mround)
-	j = mroundRTT(j, mround)
-	return i < j
+	return mroundRTT(i, mround) < mroundRTT(j, mround)
 }
 
 type MatchmakingSettings struct {

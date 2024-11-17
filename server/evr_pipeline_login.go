@@ -848,29 +848,46 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 		return fmt.Errorf("failed to load game profiles: %w", err)
 	}
 
-	// Update the player's rating, if it's not a backfill player
-	if !playerInfo.IsBackfill() {
-		if stats, ok := request.Payload.Update.StatsGroups["arena"]; ok {
-			if s, ok := stats["ArenaWins"]; ok {
-				blueWins := true
-				if s.Value > 0 && playerInfo.Team == OrangeTeam {
-					blueWins = false
-				}
-				if rating, err := CalculateNewPlayerRating(request.EvrID, label.Players, label.TeamSize, blueWins); err != nil {
-					logger.Error("Failed to calculate new player rating", zap.Error(err))
-				} else {
-					playerInfo.RatingMu = rating.Mu
-					playerInfo.RatingSigma = rating.Sigma
-					profile.SetRating(rating)
-				}
+	// Determine winner
+	blueWins := false
+	switch label.Mode {
+	case evr.ModeArenaPublic:
+
+		// Check which team won
+		if stats, ok := request.Payload.Update.StatsGroups["arena"]; !ok {
+			return fmt.Errorf("stats group doesn't match mode")
+
+		} else {
+
+			if s, ok := stats["ArenaWins"]; ok && s.Value > 0 && playerInfo.Team == BlueTeam {
+				blueWins = true
 			}
 		}
+	case evr.ModeCombatPublic:
+
+		// Check which team won
+		if stats, ok := request.Payload.Update.StatsGroups["combat"]; !ok {
+			return fmt.Errorf("stats group doesn't match mode")
+
+		} else {
+
+			if s, ok := stats["CombatWins"]; ok && s.Value > 0 && playerInfo.Team == BlueTeam {
+				blueWins = true
+			}
+		}
+	}
+
+	if rating, err := CalculateNewPlayerRating(request.EvrID, label.Players, label.TeamSize, blueWins); err != nil {
+		logger.Error("Failed to calculate new player rating", zap.Error(err))
+	} else {
+		playerInfo.RatingMu = rating.Mu
+		playerInfo.RatingSigma = rating.Sigma
+		profile.SetRating(label.GetGroupID(), label.Mode, playerInfo.Rating())
 	}
 
 	profile.EarlyQuits.IncrementCompletedMatches()
 
 	// Process the update into the leaderboard and profile
-
 	err = p.leaderboardRegistry.ProcessProfileUpdate(ctx, logger, playerInfo.UserID, playerInfo.Username, label.Mode, &request.Payload, &profile.Server)
 	if err != nil {
 		logger.Error("Failed to process profile update", zap.Error(err), zap.Any("payload", request.Payload))

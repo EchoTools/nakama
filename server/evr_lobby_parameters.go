@@ -234,7 +234,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		return nil, fmt.Errorf("failed to load profile: %w", err)
 	}
 
-	rating := profile.GetRating()
+	rating := profile.GetRating(groupID, mode)
 
 	// Add blocked players who are online to the Matchmaking Query Addon
 	blockedIDs := make([]string, 0)
@@ -323,6 +323,8 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 
 	if (globalSettings.RankInDisplayName || userSettings.RankInDisplayName) && percentile > 0.4 {
 		// Pad to 20 characters and add [XX] to the end
+		// Invert it too
+		percentile = 1.0 - percentile
 		displayName = fmt.Sprintf("%-20s [%02d]", displayName, int(percentile*100))
 	}
 
@@ -490,7 +492,10 @@ func (p LobbySessionParameters) PresenceMeta() PresenceMeta {
 
 func AverageLatencyHistories(histories LatencyHistory) map[string]int {
 	averages := make(map[string]int)
+
+	// Only consider the last 3 days of latency data
 	threedays := time.Now().Add(-time.Hour * 72).UTC().Unix()
+
 	for ip, history := range histories {
 		// Average the RTT
 		rtt := 0
