@@ -85,6 +85,11 @@ func (p *EvrPipeline) lobbySessionRequest(ctx context.Context, logger *zap.Logge
 				}, true)
 			}
 			logger.Error("Failed to process lobby session request", zap.Error(err))
+
+			if err := p.appBot.SendErrorToUser(session.userID.String(), fmt.Errorf("```fix\nmatchmaking request error: %w\n```", err)); err != nil {
+				logger.Warn("Failed to send error message to user", zap.Error(err))
+			}
+
 			if err := session.SendEvr(LobbySessionFailureFromError(request.GetMode(), request.GetGroupID(), err)); err != nil {
 				logger.Error("Failed to send lobby session failure message", zap.Error(err))
 			}

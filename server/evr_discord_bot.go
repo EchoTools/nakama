@@ -124,3 +124,29 @@ func (d *DiscordAppBot) LogAuditMessage(ctx context.Context, groupID string, mes
 	}
 	return nil
 }
+
+func (d *DiscordAppBot) SendErrorToUser(userID string, err error) error {
+	if err == nil {
+		return nil
+	}
+	if d.dg == nil {
+		return fmt.Errorf("discord session is not initialized")
+	}
+
+	discordID := d.cache.UserIDToDiscordID(userID)
+	if discordID == "" {
+		return fmt.Errorf("discordID not found for user %s", userID)
+	}
+
+	_, err = d.dg.UserChannelCreate(discordID)
+	if err != nil {
+		return fmt.Errorf("failed to send message: %w", err)
+	}
+
+	_, err = d.dg.ChannelMessageSend(discordID, err.Error())
+	if err != nil {
+		return fmt.Errorf("failed to send message: %w", err)
+	}
+
+	return nil
+}
