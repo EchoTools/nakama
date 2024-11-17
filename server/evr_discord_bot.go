@@ -125,10 +125,12 @@ func (d *DiscordAppBot) LogAuditMessage(ctx context.Context, groupID string, mes
 	return nil
 }
 
-func (d *DiscordAppBot) SendErrorToUser(userID string, err error) error {
-	if err == nil {
+func (d *DiscordAppBot) SendErrorToUser(userID string, userErr error) error {
+
+	if userErr == nil {
 		return nil
 	}
+	var err error
 	if d.dg == nil {
 		return fmt.Errorf("discord session is not initialized")
 	}
@@ -143,7 +145,7 @@ func (d *DiscordAppBot) SendErrorToUser(userID string, err error) error {
 		return fmt.Errorf("failed to send message: %w", err)
 	}
 
-	_, err = d.dg.ChannelMessageSend(discordID, err.Error())
+	_, err = d.dg.ChannelMessageSend(discordID, userErr.Error())
 	if err != nil {
 		return fmt.Errorf("failed to send message: %w", err)
 	}
