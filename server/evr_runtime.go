@@ -1035,3 +1035,20 @@ func GetPartyGroupUserIDs(ctx context.Context, nk runtime.NakamaModule, groupNam
 func RuntimeLoggerToZapLogger(logger runtime.Logger) *zap.Logger {
 	return logger.(*RuntimeGoLogger).logger
 }
+
+func SetNextMatchID(ctx context.Context, nk runtime.NakamaModule, userID string, matchID MatchID, role TeamIndex, hostDiscordID string) error {
+	settings, err := LoadMatchmakingSettings(ctx, nk, userID)
+	if err != nil {
+		return fmt.Errorf("Error loading matchmaking settings: %w", err)
+	}
+
+	settings.NextMatchID = matchID
+	settings.NextMatchRole = role.String()
+	settings.NextMatchDiscordID = hostDiscordID
+
+	if err = StoreMatchmakingSettings(ctx, nk, userID, settings); err != nil {
+		return fmt.Errorf("Error storing matchmaking settings: %w", err)
+	}
+
+	return nil
+}
