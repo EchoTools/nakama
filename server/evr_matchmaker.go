@@ -213,26 +213,19 @@ func (*skillBasedMatchmaker) predictDraw(teams []RatedEntryTeam) float64 {
 
 func (m *skillBasedMatchmaker) sortPriority(predictions []PredictedMatch) {
 	now := float64(time.Now().UTC().Unix())
-	thresholds := make([]float64, len(predictions))
 
-	for i, match := range predictions {
-		thresholds[i] = now
-		for _, e := range match.Entrants() {
-			if ts, ok := e.Entry.GetProperties()["priority_threshold"].(float64); ok {
-				if ts < thresholds[i] {
-					thresholds[i] = ts
+	slices.SortStableFunc(predictions, func(a, b PredictedMatch) int {
+		// If a player has a priority_threshold set, and it's less than "now" it should be sorted to the top
+		for _, o := range []PredictedMatch{a, b} {
+			for _, team := range o.Teams() {
+				for _, player := range team {
+					if p, ok := player.Entry.GetProperties()["priority_threshold"].(float64); ok && p < now {
+						return -1
+					}
 				}
-				break
 			}
 		}
-	}
-
-	sort.SliceStable(predictions, func(i, j int) bool {
-		if thresholds[i] > now || thresholds[j] > now {
-			return false
-		}
-
-		return thresholds[i] < thresholds[j]
+		return 0
 	})
 }
 
