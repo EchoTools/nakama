@@ -1,6 +1,10 @@
 package server
 
 import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 
@@ -9,6 +13,8 @@ import (
 	"github.com/intinig/go-openskill/rating"
 	"github.com/intinig/go-openskill/types"
 	"go.uber.org/thriftrw/ptr"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type (
@@ -157,4 +163,32 @@ func CalculateNewPlayerRating(evrID evr.EvrId, players []PlayerInfo, teamSize in
 
 	// Return the new rating for the target player
 	return teams[players[0].Team][0], nil
+}
+
+func GetRatingByUserID(ctx context.Context, db *sql.DB, userID string, defaultFallback bool) (r types.Rating, err error) {
+	// Look for an existing account.
+	query := "SELECT value->>'rating' FROM storage WHERE user_id = $1 AND collection = $2 and key = $3"
+	var ratingJSON string
+	var found = true
+	if err = db.QueryRowContext(ctx, query, userID, GameProfileStorageCollection, GameProfileStorageKey).Scan(&ratingJSON); err != nil {
+		if err == sql.ErrNoRows {
+			found = false
+		} else {
+			return r, status.Error(codes.Internal, "error finding rating by user ID")
+		}
+	}
+	if !found {
+		if defaultFallback {
+			return rating.NewWithOptions(&types.OpenSkillOptions{
+				Mu:    ptr.Float64(25.0),
+				Sigma: ptr.Float64(8.333),
+			}), nil
+		} else {
+			return r, errors.New("rating not found")
+		}
+	}
+	if err = json.Unmarshal([]byte(ratingJSON), &r); err != nil {
+		return r, errors.New("error unmarshalling rating")
+	}
+	return r, nil
 }

@@ -258,9 +258,8 @@ func (s *MatchLabel) rebuildCache() {
 			s.PlayerCount++
 		}
 
-		var playerinfo PlayerInfo
 		if p.RoleAlignment == evr.TeamSpectator {
-			playerinfo = PlayerInfo{
+			s.Players = append(s.Players, PlayerInfo{
 				UserID:      p.UserID.String(),
 				Username:    p.Username,
 				DisplayName: p.DisplayName,
@@ -269,59 +268,88 @@ func (s *MatchLabel) rebuildCache() {
 				ClientIP:    p.ClientIP,
 				DiscordID:   p.DiscordID,
 				JoinTime:    s.joinTimeMilliseconds[p.SessionID.String()],
-			}
+			})
 		} else {
 
-			playerinfo = PlayerInfo{
-				UserID:         p.UserID.String(),
-				Username:       p.Username,
-				DisplayName:    p.DisplayName,
-				EvrID:          p.EvrID,
-				Team:           TeamIndex(p.RoleAlignment),
-				ClientIP:       p.ClientIP,
-				DiscordID:      p.DiscordID,
-				PartyID:        p.PartyID.String(),
-				JoinTime:       s.joinTimeMilliseconds[p.SessionID.String()],
-				RatingMu:       p.Rating.Mu,
-				RatingSigma:    p.Rating.Sigma,
-				RankPercentile: p.RankPercentile,
-				Query:          p.Query,
-				IsReservation:  s.reservationMap[p.SessionID.String()] != nil,
+			switch s.Mode {
+			case evr.ModeArenaPublic, evr.ModeCombatPublic:
+				s.Players = append(s.Players, PlayerInfo{
+					UserID:         p.UserID.String(),
+					Username:       p.Username,
+					DisplayName:    p.DisplayName,
+					EvrID:          p.EvrID,
+					Team:           TeamIndex(p.RoleAlignment),
+					ClientIP:       p.ClientIP,
+					DiscordID:      p.DiscordID,
+					PartyID:        p.PartyID.String(),
+					JoinTime:       s.joinTimeMilliseconds[p.SessionID.String()],
+					RatingMu:       p.Rating.Mu,
+					RatingSigma:    p.Rating.Sigma,
+					RankPercentile: p.RankPercentile,
+					Query:          p.Query,
+					IsReservation:  s.reservationMap[p.SessionID.String()] != nil,
+				})
+
+			case evr.ModeArenaPrivate, evr.ModeCombatPrivate:
+				s.Players = append(s.Players, PlayerInfo{
+					UserID:        p.UserID.String(),
+					Username:      p.Username,
+					DisplayName:   p.DisplayName,
+					EvrID:         p.EvrID,
+					Team:          AnyTeam, // Roles are not tracked in private matches.
+					ClientIP:      p.ClientIP,
+					DiscordID:     p.DiscordID,
+					PartyID:       p.PartyID.String(),
+					IsReservation: s.reservationMap[p.SessionID.String()] != nil,
+				})
+			case evr.ModeSocialPublic, evr.ModeSocialPrivate:
+				s.Players = append(s.Players, PlayerInfo{
+					UserID:        p.UserID.String(),
+					Username:      p.Username,
+					DisplayName:   p.DisplayName,
+					EvrID:         p.EvrID,
+					Team:          TeamIndex(p.RoleAlignment),
+					ClientIP:      p.ClientIP,
+					DiscordID:     p.DiscordID,
+					PartyID:       p.PartyID.String(),
+					IsReservation: s.reservationMap[p.SessionID.String()] != nil,
+				})
+			default:
+				s.Players = append(s.Players, PlayerInfo{
+					UserID:        p.UserID.String(),
+					Username:      p.Username,
+					DisplayName:   p.DisplayName,
+					EvrID:         p.EvrID,
+					Team:          TeamIndex(p.RoleAlignment),
+					ClientIP:      p.ClientIP,
+					DiscordID:     p.DiscordID,
+					PartyID:       p.PartyID.String(),
+					IsReservation: s.reservationMap[p.SessionID.String()] != nil,
+				})
 			}
 		}
-
-		s.Players = append(s.Players, playerinfo)
 
 		switch s.Mode {
+		case evr.ModeArenaPublic:
 
-		case evr.ModeArenaPrivate, evr.ModeCombatPrivate:
-			playerinfo.Team = TeamIndex(UnassignedRole)
-		}
-	}
-
-	// Only arena public matches have team game state or team metadata
-	if s.Mode == evr.ModeArenaPublic {
-
-		teams := make(map[TeamIndex]RatedTeam, 2)
-
-		for _, p := range s.Players {
-			if p.Team == BlueTeam || p.Team == OrangeTeam {
+			teams := make(map[TeamIndex]RatedTeam, 2)
+			for _, p := range s.Players {
 				teams[p.Team] = append(teams[p.Team], p.Rating())
 			}
-		}
 
-		meta := make(map[TeamIndex]TeamMetadata, 2)
-		for t := range teams {
-			meta[t] = TeamMetadata{
-				Strength: teams[t].Strength(),
+			meta := make(map[TeamIndex]TeamMetadata, 2)
+			for _, t := range []TeamIndex{BlueTeam, OrangeTeam} {
+				meta[t] = TeamMetadata{
+					Strength: teams[t].Strength(),
+				}
 			}
-		}
-		if s.GameState == nil {
-			s.GameState = &GameState{}
-		}
-		s.GameState.Teams = meta
-	}
 
+			if s.GameState == nil {
+				s.GameState = &GameState{}
+			}
+			s.GameState.Teams = meta
+		}
+	}
 	// Sort the players by team, party ID, and join time.
 	sort.SliceStable(s.Players, func(i, j int) bool {
 		// by team

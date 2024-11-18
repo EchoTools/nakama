@@ -150,9 +150,9 @@ func (p *EvrPipeline) addTicket(ctx context.Context, logger *zap.Logger, session
 
 	// now + 2/3 matchmaking timeout
 	timeout := (p.matchmakingTicketTimeout() * 2) / 3
-	priorityThreshold := time.Now().UTC().Add(timeout).Unix()
+	priorityThreshold := time.Now().UTC().Add(timeout)
 
-	numericProps["priority_threshold"] = float64(priorityThreshold)
+	numericProps["priority_threshold"] = float64(priorityThreshold.Unix())
 
 	minCount := ticketConfig.MinCount
 	maxCount := ticketConfig.MaxCount

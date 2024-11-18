@@ -201,7 +201,7 @@ func TestCreateBalancedMatch(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &skillBasedMatchmaker{}
-			gotTeam1, gotTeam2 := m.CreateBalancedMatch(tt.groups, tt.teamSize)
+			gotTeam1, gotTeam2 := m.createBalancedMatch(tt.groups, tt.teamSize)
 
 			t.Logf("Team 1 Strength: %f", gotTeam1.Strength())
 			t.Logf("Team 2 Strength: %f", gotTeam2.Strength())
@@ -300,7 +300,7 @@ func TestRemoveOddSizedTeams(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, gotCount := m.removeOddSizedTeams(tt.candidates)
+			got, gotCount := m.filterOddSizedTeams(tt.candidates)
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("removeOddSizedTeams() got = %v, want %v", got, tt.want)
 			}
@@ -350,13 +350,13 @@ func TestMatchmaker(t *testing.T) {
 	candidates, _ = m.filterWithinMaxRTT(candidates)
 
 	// Remove odd sized teams
-	candidates, _ = m.removeOddSizedTeams(candidates)
+	candidates, _ = m.filterOddSizedTeams(candidates)
 
 	// Ensure that everyone in the match is within their max_rtt of a common server
 	candidates, _ = m.filterWithinMaxRTT(candidates)
 
 	// Create a list of balanced matches with predictions
-	predictions := m.buildPredictions(candidates)
+	predictions := m.predictOutcomes(candidates)
 
 	sizes := make(map[int]int, 0)
 	for _, c := range candidates {
@@ -365,23 +365,9 @@ func TestMatchmaker(t *testing.T) {
 
 	t.Errorf("Sizes: %v", sizes)
 
-	playerList := make(map[string]bool, 0)
-	for _, c := range candidates {
-		for _, entry := range c {
-			isPriority := false
-			ts := entry.GetProperties()["priority_threshold"].(float64)
-			if int64(ts) < time.Now().UTC().Unix() {
-				isPriority = true
-			}
-			playerList[entry.GetPresence().GetUsername()] = isPriority
-
-		}
-	}
-
-	t.Errorf("Players: %v", playerList)
-
-	m.sortArena(predictions)
-
+	m.sortByDraw(predictions)
+	m.sortLimitRankSpread(predictions, 0.10)
+	m.sortPriority(predictions)
 	rostersByPrediction := make([][]string, 0)
 	for _, c := range predictions {
 		rosters := make([]string, 0)
@@ -443,4 +429,141 @@ func TestMatchmaker(t *testing.T) {
 	}
 
 	//t.Errorf("Candidates: %v", candidates)
+}
+
+func TestSortPriority(t *testing.T) {
+
+	tests := []struct {
+		name        string
+		predictions []PredictedMatch
+		want        []PredictedMatch
+	}{
+		{
+			name: "No priority thresholds",
+			predictions: []PredictedMatch{
+				{
+					Team1: RatedEntryTeam{{Entry: &MatchmakerEntry{Ticket: "team1", Properties: map[string]interface{}{}}}},
+					Team2: RatedEntryTeam{{Entry: &MatchmakerEntry{Ticket: "team2", Properties: map[string]interface{}{}}}},
+				},
+				{
+					Team1: RatedEntryTeam{{Entry: &MatchmakerEntry{Ticket: "team3", Properties: map[string]interface{}{}}}},
+					Team2: RatedEntryTeam{{Entry: &MatchmakerEntry{Ticket: "team4", Properties: map[string]interface{}{}}}},
+				},
+			},
+			want: []PredictedMatch{
+				{
+					Team1: RatedEntryTeam{{Entry: &MatchmakerEntry{Ticket: "team1", Properties: map[string]interface{}{}}}},
+					Team2: RatedEntryTeam{{Entry: &MatchmakerEntry{Ticket: "team2", Properties: map[string]interface{}{}}}},
+				},
+				{
+					Team1: RatedEntryTeam{{Entry: &MatchmakerEntry{Ticket: "team3", Properties: map[string]interface{}{}}}},
+					Team2: RatedEntryTeam{{Entry: &MatchmakerEntry{Ticket: "team4", Properties: map[string]interface{}{}}}},
+				},
+			},
+		},
+		{
+			name: "One priority threshold",
+			predictions: []PredictedMatch{
+				{
+					Team1: RatedEntryTeam{{Entry: &MatchmakerEntry{Ticket: "team1", Properties: map[string]interface{}{}}}},
+					Team2: RatedEntryTeam{{Entry: &MatchmakerEntry{Ticket: "team2", Properties: map[string]interface{}{}}}},
+				},
+				{
+					Team1: RatedEntryTeam{{Entry: &MatchmakerEntry{Ticket: "team3", Properties: map[string]interface{}{"priority_threshold": float64(time.Now().UTC().Add(-1 * time.Hour).Unix())}}}},
+					Team2: RatedEntryTeam{{Entry: &MatchmakerEntry{Ticket: "team4", Properties: map[string]interface{}{}}}},
+				},
+			},
+			want: []PredictedMatch{
+				{
+					Team1: RatedEntryTeam{{Entry: &MatchmakerEntry{Ticket: "team3", Properties: map[string]interface{}{"priority_threshold": float64(time.Now().UTC().Add(-1 * time.Hour).Unix())}}}},
+					Team2: RatedEntryTeam{{Entry: &MatchmakerEntry{Ticket: "team4", Properties: map[string]interface{}{}}}},
+				},
+				{
+					Team1: RatedEntryTeam{{Entry: &MatchmakerEntry{Ticket: "team1", Properties: map[string]interface{}{}}}},
+					Team2: RatedEntryTeam{{Entry: &MatchmakerEntry{Ticket: "team2", Properties: map[string]interface{}{}}}},
+				},
+			},
+		},
+		{
+			name: "Multiple priority thresholds",
+			predictions: []PredictedMatch{
+				{
+					Team1: RatedEntryTeam{{Entry: &MatchmakerEntry{Ticket: "team1", Properties: map[string]interface{}{"priority_threshold": float64(float64(time.Now().UTC().Add(-1 * time.Hour).Unix()))}}}},
+					Team2: RatedEntryTeam{{Entry: &MatchmakerEntry{Ticket: "team2", Properties: map[string]interface{}{}}}},
+				},
+				{
+					Team1: RatedEntryTeam{{Entry: &MatchmakerEntry{Ticket: "team3", Properties: map[string]interface{}{}}}},
+					Team2: RatedEntryTeam{{Entry: &MatchmakerEntry{Ticket: "team4", Properties: map[string]interface{}{}}}},
+				},
+				{
+					Team1: RatedEntryTeam{{Entry: &MatchmakerEntry{Ticket: "team5", Properties: map[string]interface{}{"priority_threshold": float64(time.Now().UTC().Add(-3 * time.Hour).Unix())}}}},
+					Team2: RatedEntryTeam{{Entry: &MatchmakerEntry{Ticket: "team6", Properties: map[string]interface{}{}}}},
+				},
+				{
+					Team1: RatedEntryTeam{{Entry: &MatchmakerEntry{Ticket: "team7", Properties: map[string]interface{}{"priority_threshold": float64(time.Now().UTC().Add(-2 * time.Hour).Unix())}}}},
+					Team2: RatedEntryTeam{{Entry: &MatchmakerEntry{Ticket: "team8", Properties: map[string]interface{}{}}}},
+				},
+			},
+			want: []PredictedMatch{
+				{
+					Team1: RatedEntryTeam{{Entry: &MatchmakerEntry{Ticket: "team5", Properties: map[string]interface{}{"priority_threshold": float64(time.Now().UTC().Add(-3 * time.Hour).Unix())}}}},
+					Team2: RatedEntryTeam{{Entry: &MatchmakerEntry{Ticket: "team6", Properties: map[string]interface{}{}}}},
+				},
+				{
+					Team1: RatedEntryTeam{{Entry: &MatchmakerEntry{Ticket: "team7", Properties: map[string]interface{}{"priority_threshold": float64(time.Now().UTC().Add(-2 * time.Hour).Unix())}}}},
+					Team2: RatedEntryTeam{{Entry: &MatchmakerEntry{Ticket: "team8", Properties: map[string]interface{}{}}}},
+				},
+				{
+					Team1: RatedEntryTeam{{Entry: &MatchmakerEntry{Ticket: "team1", Properties: map[string]interface{}{"priority_threshold": float64(float64(time.Now().UTC().Add(-1 * time.Hour).Unix()))}}}},
+					Team2: RatedEntryTeam{{Entry: &MatchmakerEntry{Ticket: "team2", Properties: map[string]interface{}{}}}},
+				},
+				{
+					Team1: RatedEntryTeam{{Entry: &MatchmakerEntry{Ticket: "team3", Properties: map[string]interface{}{}}}},
+					Team2: RatedEntryTeam{{Entry: &MatchmakerEntry{Ticket: "team4", Properties: map[string]interface{}{}}}},
+				},
+			},
+		},
+	}
+
+	matchToString := func(m PredictedMatch) string {
+		matches := make([]string, 0)
+
+		teams := make([]string, 0)
+		for _, team := range []RatedEntryTeam{m.Team1, m.Team2} {
+			roster := make([]string, 0)
+			for _, player := range team {
+				roster = append(roster, player.Entry.GetTicket())
+			}
+			slices.Sort(roster)
+			teams = append(teams, strings.Join(roster, ","))
+		}
+		slices.Sort(teams)
+		matches = append(matches, strings.Join(teams, "/"))
+
+		return strings.Join(matches, "\n")
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &skillBasedMatchmaker{}
+			m.sortPriority(tt.predictions)
+
+			if diff := cmp.Diff(tt.want, tt.predictions, cmp.AllowUnexported(PredictedMatch{})); diff != "" {
+
+				wantMatches := make([]string, 0)
+				for _, match := range tt.want {
+					wantMatches = append(wantMatches, matchToString(match))
+				}
+
+				gotMatches := make([]string, 0)
+				for _, match := range tt.predictions {
+					gotMatches = append(gotMatches, matchToString(match))
+				}
+
+				t.Errorf("\ngot:\n%v\n\nwant:\n%v\n\n", gotMatches, wantMatches)
+
+				t.Errorf("sortPriority() mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
 }
