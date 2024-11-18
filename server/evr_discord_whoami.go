@@ -29,6 +29,7 @@ type WhoAmI struct {
 	DefaultLobbyGroup     string                          `json:"active_lobby_group,omitempty"`
 	ClientAddresses       []string                        `json:"addresses,omitempty"`
 	GhostedPlayers        []string                        `json:"ghosted_discord_ids,omitempty"`
+	LastMatchmakingError  error                           `json:"last_matchmaking_error,omitempty"`
 }
 
 type EvrIdLogins struct {
@@ -150,6 +151,17 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 				continue
 			}
 			whoami.MatchIDs = append(whoami.MatchIDs, mid.UUID.String())
+		}
+	}
+
+	// If the player is online, Get the most recent matchmaking error for the player.
+	if len(presences) > 0 {
+		// Get the most recent matchmaking error for the player
+		if session := d.pipeline.sessionRegistry.Get(uuid.FromStringOrNil(presences[0].GetSessionId())); session != nil {
+			params, ok := LoadParams(session.Context())
+			if ok {
+				whoami.LastMatchmakingError = params.LastMatchmakingError.Load()
+			}
 		}
 	}
 
@@ -278,6 +290,13 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		Inline: false,
 	})
 
+	if whoami.LastMatchmakingError != nil {
+		fields = append(fields, &discordgo.MessageEmbedField{
+			Name:   "Last Matchmaking Error",
+			Value:  whoami.LastMatchmakingError.Error(),
+			Inline: false,
+		})
+	}
 	// Remove any blank fields
 	fields = lo.Filter(fields, func(f *discordgo.MessageEmbedField, _ int) bool {
 		return f.Value != ""

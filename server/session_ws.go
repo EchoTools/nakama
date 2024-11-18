@@ -117,11 +117,12 @@ type (
 )
 
 type SessionParameters struct {
-	Node         string     // The node name
-	EvrID        evr.EvrId  // The EchoVR ID
-	DiscordID    string     // The Discord ID
-	LoginSession *sessionWS // The login session ID
-	LobbySession *sessionWS // The match session ID
+	Node          string                    // The node name
+	EvrID         evr.EvrId                 // The EchoVR ID
+	DiscordID     string                    // The Discord ID
+	LoginSession  atomic.Pointer[sessionWS] // The login session
+	LobbySession  atomic.Pointer[sessionWS] // The match session
+	ServerSession atomic.Pointer[sessionWS] // The server session
 
 	HMDSerialOverride       string // The HMD Serial Override
 	AuthDiscordID           string // The Discord ID use for authentication
@@ -131,12 +132,12 @@ type SessionParameters struct {
 	ExternalServerAddr string // The external server address (IP:port)
 	IsVPN              bool   // The user is using a VPN
 
-	SupportedFeatures []string // features from the urlparam
-	RequiredFeatures  []string // required_features from the urlparam
-	DisableEncryption bool     // The user has disabled encryption
-	DisableMAC        bool     // The user has disabled MAC
-	IsVR              bool     // The user is using a VR headset
-	IsPCVR            bool     // The user is using a PCVR headset
+	SupportedFeatures []string    // features from the urlparam
+	RequiredFeatures  []string    // required_features from the urlparam
+	DisableEncryption bool        // The user has disabled encryption
+	DisableMAC        bool        // The user has disabled MAC
+	IsVR              atomic.Bool // The user is using a VR headset
+	IsPCVR            atomic.Bool // The user is using a PCVR headset
 
 	RelayOutgoing bool     // The user wants (some) outgoing messages relayed to them via discord
 	Debug         bool     // The user wants debug information
@@ -144,11 +145,23 @@ type SessionParameters struct {
 	ServerGuilds  []string // []string of the server guilds
 	ServerRegions []string // []string of the server regions
 
-	AccountMetadata     *AccountMetadata // The account metadata
-	GuildGroupMetadatas map[uuid.UUID]*GroupMetadata
-	Memberships         map[string]GuildGroupMembership
+	AccountMetadata *AccountMetadata // The account metadata
+	Memberships     atomic.Value     // map[string]GuildGroupMembership
 
-	URLParameters map[string][]string // The URL parameters
+	URLParameters        map[string][]string // The URL parameters
+	LastMatchmakingError atomic.Error        // The last matchmaking error
+}
+
+func (p *SessionParameters) MembershipsLoad() map[string]GuildGroupMembership {
+	v := p.Memberships.Load()
+	if v == nil {
+		return nil
+	}
+	return v.(map[string]GuildGroupMembership)
+}
+
+func (p *SessionParameters) MembershipsStore(memberships map[string]GuildGroupMembership) {
+	p.Memberships.Store(memberships)
 }
 
 func LoadParams(ctx context.Context) (parameters *SessionParameters, found bool) {
@@ -157,10 +170,6 @@ func LoadParams(ctx context.Context) (parameters *SessionParameters, found bool)
 		return nil, false
 	}
 	return params.Load(), true
-}
-
-func UpdateParams(ctx context.Context, params *SessionParameters) {
-	ctx.Value(ctxSessionParametersKey{}).(*atomic.Pointer[SessionParameters]).Store(params)
 }
 
 func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessionID, userID uuid.UUID, username string, vars map[string]string, expiry int64, clientIP, clientPort, lang string, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, conn *websocket.Conn, sessionRegistry SessionRegistry, statusRegistry StatusRegistry, matchmaker Matchmaker, tracker Tracker, metrics Metrics, pipeline *Pipeline, evrPipeline *EvrPipeline, runtime *Runtime, request http.Request, storageIndex StorageIndex) Session {
@@ -436,29 +445,27 @@ func (s *sessionWS) LobbySession(loginSessionID uuid.UUID) error {
 
 		// Use the context to avoid any locking issues.
 		loginCtx := loginSession.Context()
-
-		loginParams, ok := LoadParams(loginCtx)
+		sessionParams, ok := LoadParams(loginCtx)
 		if !ok {
 			return fmt.Errorf("login session parameters not found: %v", loginSessionID)
 		}
 
-		lobbyParams, ok := LoadParams(s.Context())
-		if !ok {
-			return fmt.Errorf("lobby session parameters not found: %v", s.id)
-		}
-		newParams := *loginParams
-		// Copy some of the lobby session parameters to the login session.
-		if len(newParams.SupportedFeatures) > 0 {
-			newParams.SupportedFeatures = lobbyParams.SupportedFeatures
-		}
-		if len(newParams.RequiredFeatures) > 0 {
-			newParams.RequiredFeatures = lobbyParams.RequiredFeatures
-		}
+		sessionParams.LobbySession.Store(s)
+		// Store the login parameters as the lobby session.
+		lobbyCtx := s.Context()
+		lobbyCtx.Value(ctxSessionParametersKey{}).(*atomic.Pointer[SessionParameters]).Store(sessionParams)
 
-		UpdateParams(loginCtx, &newParams)
-		UpdateParams(s.Context(), &newParams)
+		// Create a derived context for this session.
+		lobbyCtx = context.WithValue(lobbyCtx, ctxUserIDKey{}, loginSession.UserID())     // apiServer compatibility
+		lobbyCtx = context.WithValue(lobbyCtx, ctxUsernameKey{}, loginSession.Username()) // apiServer compatibility
 
-		// Store this session as the lobby session.
+		// Set the session information
+		s.Lock()
+		s.ctx = lobbyCtx
+		s.userID = loginSession.UserID()
+		s.SetUsername(loginSession.Username())
+		s.logger = s.logger.With(zap.String("login_sid", loginSessionID.String()), zap.String("uid", s.userID.String()), zap.String("evr_id", sessionParams.EvrID.Token()), zap.String("username", s.Username()))
+		s.Unlock()
 
 		// cancel/disconnect this session if the login session is cancelled.
 		go func() {
@@ -466,31 +473,8 @@ func (s *sessionWS) LobbySession(loginSessionID uuid.UUID) error {
 			s.Close("echovr login session closed", runtime.PresenceReasonDisconnect)
 		}()
 
-		// Create a derived context for this session.
-
-		ctx := context.WithValue(s.Context(), ctxUserIDKey{}, loginSession.UserID()) // apiServer compatibility
-		ctx = context.WithValue(ctx, ctxUsernameKey{}, loginSession.Username())      // apiServer compatibility
-
-		// Set the session information
-		s.Lock()
-		s.ctx = ctx
-		s.userID = loginSession.UserID()
-		s.SetUsername(loginSession.Username())
-		s.logger = s.logger.With(zap.String("loginsid", loginSessionID.String()), zap.String("uid", s.userID.String()), zap.String("evrid", newParams.EvrID.Token()), zap.String("username", s.Username()))
-		s.Unlock()
-
 	}
 	return nil
-}
-
-func (s *sessionWS) Debug(enable bool) {
-	params, ok := LoadParams(s.Context())
-	if !ok {
-		return
-	}
-	newParams := *params
-	newParams.Debug = enable
-	UpdateParams(s.Context(), &newParams)
 }
 
 func (s *sessionWS) Logger() *zap.Logger {

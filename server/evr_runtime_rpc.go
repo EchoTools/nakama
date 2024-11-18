@@ -1547,3 +1547,27 @@ func StreamJoinRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk ru
 
 	return response.String(), nil
 }
+
+func MatchmakerCandidatesRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+
+	// Load the match candidates from the storage.
+
+	objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
+		{
+			UserID:     uuid.Nil.String(),
+			Collection: MatchmakerStorageCollection,
+			Key:        MatchmakerLatestCandidatesKey,
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+
+	if len(objs) == 0 {
+		return "", nil
+	}
+
+	// Unmarshal the match candidates, remove IPs
+
+	return objs[0].Value, nil
+}

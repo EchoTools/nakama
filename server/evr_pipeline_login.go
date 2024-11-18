@@ -88,11 +88,10 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 // processLogin handles the authentication of the login connection.
 func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, session *sessionWS, request *evr.LoginRequest) (settings *evr.GameSettings, err error) {
 
-	paramsPtr, ok := LoadParams(ctx)
+	params, ok := LoadParams(ctx)
 	if !ok {
 		return nil, errors.New("session parameters not found")
 	}
-	params := *paramsPtr
 
 	payload := request.LoginData
 
@@ -105,7 +104,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	// Providing a discord ID and password avoids the need to link the device to the account.
 	// Server Hosts use this method to authenticate.
 	evrID := request.GetEvrID()
-	params.LoginSession = session
+	params.LoginSession.Store(session)
 	params.EvrID = evrID
 
 	var account *api.Account
@@ -160,7 +159,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		}
 	}
 
-	params.IsVR = payload.SystemInfo.HeadsetType != "No VR"
+	params.IsVR.Store(payload.SystemInfo.HeadsetType != "No VR")
 
 	// Check if this user is required to use 2FA
 	if found, err := CheckSystemGroupMembership(ctx, p.db, uid.String(), GroupGlobalRequire2FA); err != nil {
@@ -249,7 +248,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		logger.Debug("Setting active group", zap.String("groupID", groupID.String()))
 		metadata.SetActiveGroupID(groupID)
 	}
-	params.Memberships = membershipMap
+	params.Memberships.Store(membershipMap)
 
 	questTypes := []string{
 		"Quest",
@@ -258,11 +257,11 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		"Quest Pro",
 	}
 
-	params.IsPCVR = true
+	params.IsPCVR.Store(true)
 
 	for _, t := range questTypes {
 		if strings.Contains(strings.ToLower(request.LoginData.SystemInfo.HeadsetType), strings.ToLower(t)) {
-			params.IsPCVR = false
+			params.IsPCVR.Store(false)
 			break
 		}
 	}
@@ -271,7 +270,6 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		return settings, fmt.Errorf("failed to update user metadata: %w", err)
 	}
 
-	UpdateParams(ctx, &params)
 	// Initialize the full session
 	if err := session.SetIdentity(uuid.FromStringOrNil(userID), evrID, user.GetUsername()); err != nil {
 		return settings, fmt.Errorf("failed to login: %w", err)
@@ -566,7 +564,7 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 	}
 
 	// Get the user's metadata
-	memberships := params.Memberships
+	memberships := params.MembershipsLoad()
 
 	userID := session.userID.String()
 	for groupID, _ := range memberships {
@@ -624,7 +622,7 @@ func (p *EvrPipeline) documentRequest(ctx context.Context, logger *zap.Logger, s
 	switch request.Type {
 	case "eula":
 
-		if !params.IsVR {
+		if !params.IsVR.Load() {
 
 			eulaVersion, gaVersion, err := GetEULAVersion(ctx, p.db, session.userID.String())
 			if err != nil {

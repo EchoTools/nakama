@@ -78,8 +78,6 @@ func (p *EvrPipeline) gameServerRegistration(ctx context.Context, logger *zap.Lo
 		return fmt.Errorf("session parameters not provided")
 	}
 
-	newParams := *sessionParams
-
 	// Get a list of the user's guild memberships and set to the largest one
 	memberships, err := GetGuildGroupMemberships(ctx, p.runtimeModule, session.UserID().String())
 	if err != nil {
@@ -89,7 +87,7 @@ func (p *EvrPipeline) gameServerRegistration(ctx context.Context, logger *zap.Lo
 		return fmt.Errorf("user is not in any guild groups")
 	}
 
-	newParams.Memberships = memberships
+	sessionParams.Memberships.Store(memberships)
 
 	// Get the guilds that the broadcaster wants to host for
 	groupIDs := make([]string, 0)
@@ -134,15 +132,13 @@ func (p *EvrPipeline) gameServerRegistration(ctx context.Context, logger *zap.Lo
 		regions = append(regions, region)
 	}
 
-	logger = logger.With(zap.String("discord_id", discordId), zap.Strings("group_ids", groupIDs), zap.Strings("tags", newParams.ServerTags), zap.Strings("regions", lo.Map(regions, func(v evr.Symbol, _ int) string { return v.String() })))
+	logger = logger.With(zap.String("discord_id", discordId), zap.Strings("group_ids", groupIDs), zap.Strings("tags", sessionParams.ServerTags), zap.Strings("regions", lo.Map(regions, func(v evr.Symbol, _ int) string { return v.String() })))
 
 	// Add the server id as a region
 	regions = append(regions, evr.ToSymbol(serverID))
 
 	slices.Sort(regions)
 	regions = slices.Compact(regions)
-
-	UpdateParams(ctx, &newParams)
 
 	err = session.BroadcasterSession(session.userID, "broadcaster:"+session.Username(), serverID)
 	if err != nil {
