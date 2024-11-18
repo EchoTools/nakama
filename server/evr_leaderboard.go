@@ -217,6 +217,23 @@ func (*LeaderboardRegistry) valueToScore(v float64) (int64, int64) {
 	return whole, fractional
 }
 
+func ValueToScore(v float64) (int64, int64) {
+	// If it's a whole number, return it as such.
+	if v == float64(int64(v)) {
+		return int64(v), 0
+	}
+
+	// Otherwise, split the float into whole and fractional parts.
+	str := strconv.FormatFloat(float64(v), 'f', -1, 64)
+	s := strings.Split(str, ".")
+
+	// Parse the whole and fractional parts as integers.
+	whole, _ := strconv.ParseInt(s[0], 10, 64)
+	fractional, _ := strconv.ParseInt(s[1], 10, 64)
+
+	return whole, fractional
+}
+
 func (*LeaderboardRegistry) scoreToValue(score int64, subscore int64) float64 {
 	// If there's no subscore, return the score as a whole number.
 	if subscore == 0 {

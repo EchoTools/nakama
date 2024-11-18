@@ -887,8 +887,13 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 
 	profile.EarlyQuits.IncrementCompletedMatches()
 
+	// Add leaderboard for percentile
+	if err := recordPercentileToLeaderboard(ctx, p.runtimeModule, playerInfo.UserID, playerInfo.DisplayName, label.Mode, playerInfo.RankPercentile); err != nil {
+		logger.Warn("Failed to record percentile to leaderboard", zap.Error(err))
+	}
+
 	// Process the update into the leaderboard and profile
-	err = p.leaderboardRegistry.ProcessProfileUpdate(ctx, logger, playerInfo.UserID, playerInfo.Username, label.Mode, &request.Payload, &profile.Server)
+	err = p.leaderboardRegistry.ProcessProfileUpdate(ctx, logger, playerInfo.UserID, playerInfo.DisplayName, label.Mode, &request.Payload, &profile.Server)
 	if err != nil {
 		logger.Error("Failed to process profile update", zap.Error(err), zap.Any("payload", request.Payload))
 		return fmt.Errorf("failed to process profile update: %w", err)
