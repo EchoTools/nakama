@@ -69,6 +69,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		"importloadouts":                ImportLoadoutsRpc,
 		"setmatchamakerstatus":          setMatchmakingStatusRpc,
 		"matchmaker/stream":             MatchmakerStreamRPC,
+		"matchmaker/candidates":         MatchmakerCandidatesRPC,
 		"stream/join":                   StreamJoinRPC,
 		//"/v1/storage/game/sourcedb/rad15/json/r14/loading_tips.json": StorageLoadingTipsRPC,
 	}
@@ -519,7 +520,7 @@ func RegisterIndexes(initializer runtime.Initializer) error {
 	}
 
 	name = ActivePartyGroupIndex
-	collection = MatchmakingConfigStorageCollection
+	collection = MatchmakerStorageCollection
 	key = MatchmakingConfigStorageKey // Set to empty string to match all keys instead
 	fields = []string{"group_id"}     // index on these fields
 	maxEntries = 100000
@@ -824,7 +825,7 @@ func GetLobbyGroupID(ctx context.Context, db *sql.DB, userID string) (string, uu
 	query := "SELECT value->>'group_id' FROM storage WHERE collection = $1 AND key = $2 and user_id = $3"
 	var dbPartyGroupName string
 	var found = true
-	err := db.QueryRowContext(ctx, query, MatchmakingConfigStorageCollection, MatchmakingConfigStorageKey, userID).Scan(&dbPartyGroupName)
+	err := db.QueryRowContext(ctx, query, MatchmakerStorageCollection, MatchmakingConfigStorageKey, userID).Scan(&dbPartyGroupName)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			found = false

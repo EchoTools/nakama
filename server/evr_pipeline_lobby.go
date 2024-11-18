@@ -91,6 +91,13 @@ func (p *EvrPipeline) lobbySessionRequest(ctx context.Context, logger *zap.Logge
 			}
 			logger.Error("Failed to process lobby session request", zap.Error(err))
 
+			params, ok := LoadParams(ctx)
+			if !ok {
+				logger.Error("Failed to load params from context")
+			} else {
+				params.LastMatchmakingError.Store(err)
+			}
+
 			if err := p.appBot.LogAuditMessage(ctx, lobbyParams.GroupID.String(), fmt.Sprintf("```fix\n%s\n\n%T failed:\n %v\n```", session.Username(), in, err), false); err != nil {
 				logger.Warn("Failed to log audit message", zap.Error(err))
 			}

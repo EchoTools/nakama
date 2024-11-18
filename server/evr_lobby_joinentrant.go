@@ -202,7 +202,7 @@ func (p *EvrPipeline) authorizeGuildGroupSession(ctx context.Context, session Se
 	sendAuditMessage := groupMetadata.AuditChannelID != ""
 	discordID := p.discordCache.UserIDToDiscordID(userID)
 
-	membership, ok := params.Memberships[groupID]
+	membership, ok := params.MembershipsLoad()[groupID]
 	if !ok && groupMetadata.MembersOnlyMatchmaking {
 		if sendAuditMessage {
 

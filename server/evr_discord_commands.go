@@ -2153,7 +2153,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				// List the other players in this party group
 				objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
 					{
-						Collection: MatchmakingConfigStorageCollection,
+						Collection: MatchmakerStorageCollection,
 						Key:        MatchmakingConfigStorageKey,
 						UserID:     userID,
 					},
@@ -2262,7 +2262,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 				objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
 					{
-						Collection: MatchmakingConfigStorageCollection,
+						Collection: MatchmakerStorageCollection,
 						Key:        MatchmakingConfigStorageKey,
 						UserID:     userID,
 					},
@@ -2286,7 +2286,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 				if _, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{
 					{
-						Collection:      MatchmakingConfigStorageCollection,
+						Collection:      MatchmakerStorageCollection,
 						Key:             MatchmakingConfigStorageKey,
 						UserID:          userID,
 						Value:           string(data),

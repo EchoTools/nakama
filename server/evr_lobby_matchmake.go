@@ -28,17 +28,18 @@ const (
 )
 
 var (
-	ErrMatchmakingPingTimeout          = NewLobbyErrorf(Timeout, "Ping timeout")
-	ErrMatchmakingTimeout              = NewLobbyErrorf(Timeout, "Matchmaking timeout")
-	ErrMatchmakingNoAvailableServers   = NewLobbyError(ServerFindFailed, "No available servers")
-	ErrMatchmakingCanceled             = NewLobbyErrorf(BadRequest, "Matchmaking canceled")
-	ErrMatchmakingCanceledByPlayer     = NewLobbyErrorf(BadRequest, "Matchmaking canceled by player")
-	ErrMatchmakingCanceledByParty      = NewLobbyErrorf(BadRequest, "Matchmaking canceled by party member")
-	ErrMatchmakingRestarted            = NewLobbyErrorf(BadRequest, "matchmaking restarted")
-	ErrMatchmakingUnknownError         = NewLobbyErrorf(InternalError, "Unknown error")
-	MatchmakingStreamSubject           = uuid.NewV5(uuid.Nil, "matchmaking").String()
-	MatchmakingConfigStorageCollection = "Matchmaker"
-	MatchmakingConfigStorageKey        = "config"
+	ErrMatchmakingPingTimeout        = NewLobbyErrorf(Timeout, "Ping timeout")
+	ErrMatchmakingTimeout            = NewLobbyErrorf(Timeout, "Matchmaking timeout")
+	ErrMatchmakingNoAvailableServers = NewLobbyError(ServerFindFailed, "No available servers")
+	ErrMatchmakingCanceled           = NewLobbyErrorf(BadRequest, "Matchmaking canceled")
+	ErrMatchmakingCanceledByPlayer   = NewLobbyErrorf(BadRequest, "Matchmaking canceled by player")
+	ErrMatchmakingCanceledByParty    = NewLobbyErrorf(BadRequest, "Matchmaking canceled by party member")
+	ErrMatchmakingRestarted          = NewLobbyErrorf(BadRequest, "matchmaking restarted")
+	ErrMatchmakingUnknownError       = NewLobbyErrorf(InternalError, "Unknown error")
+	MatchmakingStreamSubject         = uuid.NewV5(uuid.Nil, "matchmaking").String()
+	MatchmakerStorageCollection      = "Matchmaker"
+	MatchmakerLatestCandidatesKey    = "latestCandidates"
+	MatchmakingConfigStorageKey      = "config"
 )
 
 type MatchmakerTicketConfig struct {
@@ -237,7 +238,7 @@ type MatchmakingSettings struct {
 
 func (MatchmakingSettings) GetStorageID() StorageID {
 	return StorageID{
-		Collection: MatchmakingConfigStorageCollection,
+		Collection: MatchmakerStorageCollection,
 		Key:        MatchmakingConfigStorageKey,
 	}
 }

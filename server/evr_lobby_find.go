@@ -376,13 +376,16 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 				// If the error is a lock error, just try again.
 				if err == ErrFailedToAcquireLock {
 					// Wait a few seconds to give time for the server to be created.
-					<-time.After(1 * time.Second)
+					<-time.After(2 * time.Second)
 					continue
 				}
 
 				// This should't happen unless there's no servers available.
 				return NewLobbyErrorf(ServerFindFailed, "failed to find social lobby: %w", err)
+			} else {
+				<-time.After(1 * time.Second)
 			}
+
 		}
 
 		// If no match was found, continue.
