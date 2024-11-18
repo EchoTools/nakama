@@ -12,6 +12,7 @@ import (
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
+	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/intinig/go-openskill/types"
 	"go.uber.org/zap"
@@ -525,4 +526,34 @@ func AverageLatencyHistories(histories LatencyHistory) map[string]int {
 	}
 
 	return averages
+}
+
+func recordPercentileToLeaderboard(ctx context.Context, nk runtime.NakamaModule, userID, username string, mode evr.Symbol, percentile float64) error {
+	periods := []string{"alltime", "daily", "weekly"}
+
+	for _, period := range periods {
+		id := fmt.Sprintf("%s:%s:%s", mode.String(), "AggregateRankPercentile", period)
+
+		score, subScore := ValueToScore(percentile)
+
+		// Write the record
+		_, err := nk.LeaderboardRecordWrite(ctx, id, userID, username, score, subScore, nil, nil)
+
+		if err != nil {
+			// Try to create the leaderboard
+			err = nk.LeaderboardCreate(ctx, id, true, "desc", "set", PeriodicityToSchedule(period), nil)
+
+			if err != nil {
+				return fmt.Errorf("Leaderboard create error: %v", err)
+			} else {
+				// Retry the write
+				_, err := nk.LeaderboardRecordWrite(ctx, id, userID, username, score, subScore, nil, nil)
+				if err != nil {
+					return fmt.Errorf("Leaderboard record write error: %v", err)
+				}
+			}
+		}
+	}
+
+	return nil
 }
