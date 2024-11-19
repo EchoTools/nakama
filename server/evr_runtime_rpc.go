@@ -1303,6 +1303,7 @@ func (r *SetNextMatchRPCResponsePayload) String() string {
 
 type PlayerStatsRPCRequest struct {
 	UserID    string `json:"user_id"`
+	GuildID   string `json:"guild_id"`
 	DiscordID string `json:"discord_id"`
 }
 
@@ -1337,6 +1338,11 @@ func PlayerStatisticsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 		if userID, ok := queryParameters["user_id"]; ok {
 			request.UserID = userID[0]
 		}
+
+		// extract the guildID from the query string
+		if guildID, ok := queryParameters["guild_id"]; ok {
+			request.GuildID = guildID[0]
+		}
 	}
 
 	var userID string
@@ -1353,7 +1359,19 @@ func PlayerStatisticsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 		return "", runtime.NewError("user not found", StatusNotFound)
 	}
 
-	cacheKey := "player_stats:" + userID
+	var groupID string
+	var err error
+	if request.GuildID == "" {
+		return "", runtime.NewError("guild ID must be specified", StatusInvalidArgument)
+	} else if groupID, err = GetGroupIDByGuildID(ctx, db, request.GuildID); err != nil {
+		return "", runtime.NewError("failed to get group ID by guild ID: "+err.Error(), StatusInternalError)
+	}
+
+	if groupID == "" {
+		return "", runtime.NewError("guild group not found", StatusNotFound)
+	}
+
+	cacheKey := fmt.Sprintf("player_stats:%s:%s", groupID, userID)
 	cachedResponse, _, found := rpcResponseCache.Get(cacheKey)
 	if found {
 		return cachedResponse.(string), nil
