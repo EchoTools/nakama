@@ -2,7 +2,6 @@ package evr
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -128,16 +127,13 @@ func (s Symbol) Token() SymbolToken {
 	return t
 }
 
-func (s Symbol) MarshalJSON() ([]byte, error) {
+func (s Symbol) MarshalText() ([]byte, error) {
 	v := s.Token().String()
-	return json.Marshal(v)
+	return []byte(v), nil
 }
 
-func (s *Symbol) UnmarshalJSON(data []byte) error {
-	var v string
-	if err := json.Unmarshal(data, &v); err != nil {
-		return err
-	}
+func (s *Symbol) UnmarshalText(data []byte) error {
+	v := string(data)
 	*s = ToSymbol(v)
 	return nil
 }
