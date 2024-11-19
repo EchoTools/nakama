@@ -348,6 +348,16 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		}
 	}
 
+	// Ensure the player has a role alignment
+	metricsTags := map[string]string{
+		"mode":     state.Mode.String(),
+		"level":    state.Level.String(),
+		"type":     state.LobbyType.String(),
+		"role":     fmt.Sprintf("%d", meta.Presence.RoleAlignment),
+		"group_id": state.GetGroupID().String(),
+	}
+	nk.MetricsCounterAdd("match_entrant_join_count", metricsTags, 1)
+
 	// check the available slots
 	if slots, err := state.OpenSlotsByRole(meta.Presence.RoleAlignment); err != nil {
 		return state, false, ErrJoinRejectReasonFailedToAssignTeam.Error()
@@ -381,18 +391,6 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	}
 
 	return state, true, meta.Presence.String()
-}
-
-func (m *EvrMatch) logJoin(logger runtime.Logger, nk runtime.NakamaModule, presence *EvrMatchPresence, state *MatchLabel) {
-
-	metricsTags := map[string]string{
-		"mode":     state.Mode.String(),
-		"level":    state.Level.String(),
-		"type":     state.LobbyType.String(),
-		"role":     fmt.Sprintf("%d", presence.RoleAlignment),
-		"group_id": state.GetGroupID().String(),
-	}
-	nk.MetricsCounterAdd("match_entrant_join_count", metricsTags, 1)
 }
 
 // MatchJoin is called after the join attempt.
