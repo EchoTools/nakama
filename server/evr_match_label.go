@@ -257,6 +257,7 @@ func (s *MatchLabel) rebuildCache() {
 		if p.RoleAlignment != evr.TeamSpectator && p.RoleAlignment != evr.TeamModerator {
 			s.PlayerCount++
 		}
+		p.RankPercentile = 0.0
 
 		if p.RoleAlignment == evr.TeamSpectator {
 			s.Players = append(s.Players, PlayerInfo{

@@ -541,11 +541,12 @@ func EvrApiHttpHandler(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 
 	response, err := json.Marshal(map[string]interface{}{"message": message})
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("error marshalling response: %v", err)
 	}
 
 	return string(response), nil
 }
+
 func GetUserIDByDiscordID(ctx context.Context, db *sql.DB, customID string) (userID string, err error) {
 	// Look for an existing account.
 	query := "SELECT id, disable_time FROM users WHERE custom_id = $1"
@@ -557,11 +558,11 @@ func GetUserIDByDiscordID(ctx context.Context, db *sql.DB, customID string) (use
 		if err == sql.ErrNoRows {
 			found = false
 		} else {
-			return uuid.Nil.String(), status.Error(codes.Internal, "error finding user account")
+			return uuid.Nil.String(), fmt.Errorf("error finding user by discord ID: %w", err)
 		}
 	}
 	if !found {
-		return uuid.Nil.String(), status.Error(codes.NotFound, "user account not found")
+		return uuid.Nil.String(), ErrAccountNotFound
 	}
 
 	// Check if it's disabled.
@@ -581,7 +582,7 @@ func GetGroupIDByGuildID(ctx context.Context, db *sql.DB, guildID string) (group
 		if err == sql.ErrNoRows {
 			found = false
 		} else {
-			return uuid.Nil.String(), status.Error(codes.Internal, "error finding group by guild ID")
+			return uuid.Nil.String(), fmt.Errorf("error finding guild ID: %w", err)
 		}
 	}
 	if !found {
@@ -600,7 +601,7 @@ func GetDiscordIDByUserID(ctx context.Context, db *sql.DB, userID string) (disco
 		if err == sql.ErrNoRows {
 			found = false
 		} else {
-			return "", status.Error(codes.Internal, "error finding discord ID by user ID: "+err.Error())
+			return "", fmt.Errorf("error finding discord ID: %w", err)
 		}
 	}
 	if !found {
@@ -619,7 +620,7 @@ func GetGuildIDByGroupID(ctx context.Context, db *sql.DB, groupID string) (guild
 		if err == sql.ErrNoRows {
 			found = false
 		} else {
-			return "", status.Error(codes.Internal, "error finding guild ID by group ID")
+			return "", fmt.Errorf("error finding guild ID: %w", err)
 		}
 	}
 	if !found {
@@ -639,7 +640,7 @@ func GetGuildGroupMetadata(ctx context.Context, db *sql.DB, groupID string) (*Gr
 		if err == sql.ErrNoRows {
 			found = false
 		} else {
-			return nil, status.Error(codes.Internal, "error finding guild ID by group ID")
+			return nil, fmt.Errorf("error finding guild metadata: %w", err)
 		}
 	}
 	if !found {
@@ -682,45 +683,6 @@ func PartyMemberList(ctx context.Context, nk runtime.NakamaModule, partyID uuid.
 	}
 	return presences, nil
 }
-
-/*
-func CheckAllocationPermission(ctx context.Context, db *sql.DB, userID, groupID string) error {
-	var err error
-	var allowed bool
-	// Validate that this userID has permission to signal this match
-
-	if ok, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalDevelopers); err != nil {
-		return runtime.NewError("Failed to check group membership", StatusInternalError)
-	} else if ok {
-		allowed = true
-	} else if label.Broadcaster.OperatorID == userID {
-		allowed = true
-	} else {
-		for _, groupID := range label.Broadcaster.GroupIDs {
-			if _, md, err := GetGuildGroupMetadata(ctx, nk, groupID.String()); err != nil {
-				returnruntime.NewError("Failed to get group metadata", StatusInternalError)
-			} else if slices.Contains(md.AllocatorUserIDs, userID) {
-				allowed = true
-				break
-			}
-		}
-	}
-
-	if !allowed {
-		return runtime.NewError("unauthorized to signal match", StatusPermissionDenied)
-	}
-
-	var groupID string
-	if request.GuildID != "" {
-		if groupID, err = GetGroupIDByGuildID(ctx, db, request.GuildID); err != nil {
-			return runtime.NewError(err.Error(), StatusInternalError)
-		} else if groupID == "" {
-			return runtime.NewError("guild group not found", StatusNotFound)
-		}
-	}
-
-}
-*/
 
 func CheckSystemGroupMembership(ctx context.Context, db *sql.DB, userID, groupName string) (bool, error) {
 	return CheckGroupMembershipByName(ctx, db, userID, groupName, SystemGroupLangTag)
@@ -830,7 +792,7 @@ func GetLobbyGroupID(ctx context.Context, db *sql.DB, userID string) (string, uu
 		if err == sql.ErrNoRows {
 			found = false
 		} else {
-			return "", uuid.Nil, status.Error(codes.Internal, "error finding lobby group id")
+			return "", uuid.Nil, fmt.Errorf("error finding lobby group id: %w", err)
 		}
 	}
 	if !found {
@@ -857,7 +819,7 @@ func GetGuildGroupIDsByUser(ctx context.Context, db *sql.DB, userID string) (map
 	var dbGuildID string
 	rows, err := db.QueryContext(ctx, query, userID)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "An error occurred while trying to list group IDs.")
+		return nil, fmt.Errorf("error finding guild groups: %w", err)
 	}
 
 	groups := make(map[string]string, 0)
@@ -941,7 +903,7 @@ func GetUserIDByEvrID(ctx context.Context, db *sql.DB, evrID string) (string, er
 		if err == sql.ErrNoRows {
 			found = false
 		} else {
-			return "", status.Error(codes.Internal, "error finding user account")
+			return "", fmt.Errorf("error finding user ID By Evr ID: %w", err)
 		}
 	}
 	if !found {
@@ -962,7 +924,7 @@ func GetPlayerStats(ctx context.Context, db *sql.DB, userID string) (evr.PlayerS
 		if err == sql.ErrNoRows {
 			found = false
 		} else {
-			return nil, status.Error(codes.Internal, "error finding user account")
+			return nil, fmt.Errorf("error finding player stats: %w", err)
 		}
 	}
 	if !found {
@@ -974,22 +936,22 @@ func GetPlayerStats(ctx context.Context, db *sql.DB, userID string) (evr.PlayerS
 
 	playerStats := evr.PlayerStatistics{}
 	if err := json.Unmarshal([]byte(dbStatsJSON), &playerStats); err != nil {
-		return nil, status.Error(codes.Internal, "error unmarshalling player statistics")
+		return nil, fmt.Errorf("error unmarshalling player stats: %w", err)
 	}
 
 	return playerStats, nil
 }
 
-func GetPlayerRating(ctx context.Context, db *sql.DB, userID string) (*types.Rating, error) {
-	query := "SELECT value->>'rating' FROM storage WHERE user_id = $1 AND collection = $2 AND key = $3"
+func GetPlayerRating(ctx context.Context, db *sql.DB, userID, groupID uuid.UUID, mode evr.Symbol) (*types.Rating, error) {
+	query := "SELECT value->'rating'->$4->$5 FROM storage WHERE collection = $1 AND key = $2 AND user_id = $3"
 	var dbStatsJSON string
 	var found = true
-	err := db.QueryRowContext(ctx, query, userID, GameProfileStorageCollection, GameProfileStorageKey).Scan(&dbStatsJSON)
+	err := db.QueryRowContext(ctx, query, GameProfileStorageCollection, GameProfileStorageKey, userID.String(), groupID.String(), mode.String()).Scan(&dbStatsJSON)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			found = false
 		} else {
-			return nil, status.Error(codes.Internal, "error finding user account")
+			return nil, fmt.Errorf("error finding player statistics: %w", err)
 		}
 	}
 	if !found {
@@ -1014,7 +976,7 @@ func GetPartyGroupUserIDs(ctx context.Context, nk runtime.NakamaModule, groupNam
 
 	objs, err := nk.StorageIndexList(ctx, SystemUserID, ActivePartyGroupIndex, fmt.Sprintf("+value.group_id:%s", groupName), 100)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "An error occurred while trying to list group IDs.")
+		return nil, fmt.Errorf("error listing party group users: %w", err)
 	}
 
 	if len(objs.Objects) == 0 {
