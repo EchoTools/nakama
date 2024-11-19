@@ -124,7 +124,7 @@ func MatchListPublicRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 	for _, m := range matches {
 		l := &MatchLabel{}
 		if err := json.Unmarshal([]byte(m.GetLabel().GetValue()), l); err != nil {
-			return "", runtime.NewError("Failed to unmarshal match label", StatusInternalError)
+			return "", fmt.Errorf("Failed to unmarshal match label: %s", err.Error())
 		}
 
 		v := l.PublicView()
@@ -226,24 +226,24 @@ func MatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime
 	// Unpack the bitsets from the session token
 	vars, ok := ctx.Value(runtime.RUNTIME_CTX_VARS).(map[string]string)
 	if !ok {
-		return "", runtime.NewError("failed to get session vars", StatusInternalError)
+		return "", fmt.Errorf("failed to get session vars")
 	}
 
 	memberships, err := MembershipsFromSessionVars(vars)
 	if err != nil {
-		return "", runtime.NewError("failed to get memberships", StatusInternalError)
+		return "", fmt.Errorf("failed to get memberships from session vars: %s", err.Error())
 	}
 
 	fullAccess := false
 
 	if fullAccess, err = CheckSystemGroupMembership(ctx, db, userID, GroupGlobalPrivateDataAccess); err != nil {
-		return "", runtime.NewError("failed to check group membership", StatusInternalError)
+		return "", fmt.Errorf("failed to check system group membership: %s", err.Error())
 	}
 
 	request := &MatchRpcRequest{}
 	if payload != "" {
 		if err := json.Unmarshal([]byte(payload), request); err != nil {
-			return "", runtime.NewError("Failed to unmarshal match list request", StatusInternalError)
+			return "", fmt.Errorf("failed to unmarshal payload: %s", err.Error())
 		}
 	}
 	if request.Query == "" {
@@ -258,7 +258,7 @@ func MatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime
 		for _, id := range request.MatchIDs {
 			match, err := nk.MatchGet(ctx, id.String())
 			if err != nil {
-				return "", runtime.NewError("Failed to get match", StatusInternalError)
+				return "", fmt.Errorf("failed to get match: %s", err.Error())
 			}
 			matches = append(matches, match)
 		}
@@ -268,7 +268,7 @@ func MatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime
 		// Get all the matches
 		matches, err = nk.MatchList(ctx, 1000, true, "", nil, nil, request.Query)
 		if err != nil {
-			return "", runtime.NewError("Failed to list matches", StatusInternalError)
+			return "", fmt.Errorf("failed to list matches: %s", err.Error())
 		}
 	}
 
@@ -277,7 +277,7 @@ func MatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime
 		// "any" avoids some reflection overhead
 		label := &MatchLabel{}
 		if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), label); err != nil {
-			return "", runtime.NewError("Failed to unmarshal match label", StatusInternalError)
+			return "", fmt.Errorf("failed to unmarshal match label: %s", err.Error())
 		}
 
 		if fullAccess {
@@ -473,6 +473,7 @@ func ExportAccountData(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 		return string(accountData), nil
 	}
 */
+
 type DiscordSignInRpcRequest struct {
 	Code             string `json:"code"`
 	OAuthRedirectUrl string `json:"oauth_redirect_url"`
