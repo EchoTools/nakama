@@ -961,12 +961,21 @@ func GetPlayerRating(ctx context.Context, db *sql.DB, userID, groupID uuid.UUID,
 		return nil, nil
 	}
 
-	playerStats := types.Rating{}
-	if err := json.Unmarshal([]byte(dbStatsJSON), &playerStats); err != nil {
-		return nil, status.Error(codes.Internal, "error unmarshalling player statistics")
+	var ratings map[uuid.UUID]map[evr.Symbol]types.Rating
+	if err := json.Unmarshal([]byte(dbStatsJSON), &ratings); err != nil {
+		return nil, fmt.Errorf("error unmarshalling player statistics: %w", err)
 	}
 
-	return &playerStats, nil
+	if _, ok := ratings[groupID]; !ok {
+		return nil, status.Error(codes.NotFound, "group not found")
+	}
+
+	if rating, ok := ratings[groupID][mode]; ok {
+		return &rating, nil
+	}
+
+	rating := NewDefaultRating()
+	return &rating, nil
 }
 
 func GetPartyGroupUserIDs(ctx context.Context, nk runtime.NakamaModule, groupName string) ([]string, error) {
