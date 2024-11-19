@@ -181,7 +181,7 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 	maxSize := 1
 	matches, err := d.nk.MatchList(ctx, 100, true, "", &minSize, &maxSize, query)
 	if err != nil {
-		return nil, 0, status.Errorf(codes.Internal, "failed to list matches: %v", err)
+		return nil, 0, status.Errorf(codes.Internal, "failed to list matches `%s`: %v", query, err)
 	}
 
 	if len(matches) == 0 {

@@ -176,6 +176,21 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 				Sigma: &sigma,
 			})
 
+			displayName, ok := entry.StringProperties["display_name"]
+			if !ok {
+				displayName = ""
+			}
+
+			percentile, ok := entry.NumericProperties["rank_percentile"]
+			if !ok {
+				percentile = 0.0
+			}
+
+			query, ok := entry.StringProperties["query"]
+			if !ok {
+				query = ""
+			}
+
 			sessions = append(sessions, session)
 			entrantPresences = append(entrantPresences, &EvrMatchPresence{
 				Node:           sessionParams.Node,
@@ -183,7 +198,7 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 				SessionID:      session.ID(),
 				LoginSessionID: sessionParams.LoginSession.Load().id,
 				Username:       session.Username(),
-				DisplayName:    entry.StringProperties["display_name"],
+				DisplayName:    displayName,
 				EvrID:          sessionParams.EvrID,
 				PartyID:        MatchIDFromStringOrNil(entry.PartyId).UUID,
 				RoleAlignment:  teamIndex,
@@ -192,8 +207,8 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 				ClientPort:     session.ClientPort(),
 				IsPCVR:         sessionParams.IsPCVR.Load(),
 				Rating:         rating,
-				RankPercentile: entry.NumericProperties["rank_percentile"],
-				Query:          entry.StringProperties["query"],
+				RankPercentile: percentile,
+				Query:          query,
 			})
 
 		}
@@ -201,7 +216,12 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 
 	gameServers := b.SortGameServerIPs(entrants)
 
-	mode := evr.ToSymbol(entrants[0].StringProperties["mode"])
+	modestr, ok := entrants[0].StringProperties["mode"]
+	if !ok {
+		return fmt.Errorf("missing mode property")
+	}
+
+	mode := evr.ToSymbol(modestr)
 
 	settings := &MatchSettings{
 		Mode:                mode,

@@ -251,8 +251,9 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		logger.Debug("Broadcaster joining the match.")
 		state.server = joinPresence
 		state.Open = true
+
 		if err := m.updateLabel(dispatcher, state); err != nil {
-			return state, false, fmt.Sprintf("failed to update label: %v", err)
+			logger.Error("Failed to update label: %v", err)
 		}
 		return state, true, ""
 	}
