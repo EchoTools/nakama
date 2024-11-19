@@ -385,7 +385,9 @@ func (s *MatchLabel) rebuildCache() {
 			count++
 			s.RankPercentile += p.RankPercentile
 		}
-		s.RankPercentile = s.RankPercentile / float64(count)
+		if count > 0 {
+			s.RankPercentile = s.RankPercentile / float64(count)
+		}
 	}
 }
 
@@ -402,6 +404,7 @@ func (l *MatchLabel) PublicView() *MatchLabel {
 			gs.RoundClock = l.GameState.RoundClock.LatestAsNewClock()
 		}
 	}
+
 	v := &MatchLabel{
 		LobbyType:        l.LobbyType,
 		ID:               l.ID,
