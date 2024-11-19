@@ -1382,19 +1382,29 @@ func PlayerStatisticsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 		return "", err
 	}
 
-	rating, err := GetPlayerRating(ctx, db, userID)
-	if err != nil {
-		return "", err
+	modeMap := map[evr.Symbol]string{
+		evr.ModeArenaPublic:  "arena",
+		evr.ModeCombatPublic: "combat",
 	}
 
-	stats["arena"]["RatingMu"] = evr.MatchStatistic{
-		Value: float64(rating.Mu),
-	}
+	for mode, modestr := range modeMap {
+		uid := uuid.FromStringOrNil(userID)
+		gid := uuid.FromStringOrNil(groupID)
 
-	stats["arena"]["RatingSigma"] = evr.MatchStatistic{
-		Value: float64(rating.Sigma),
-	}
+		rating, err := GetPlayerRating(ctx, db, uid, gid, mode)
+		if err != nil {
+			return "", err
+		}
 
+		stats[modestr]["RatingMu"] = evr.MatchStatistic{
+			Value: float64(rating.Mu),
+		}
+
+		stats[modestr]["RatingSigma"] = evr.MatchStatistic{
+			Value: float64(rating.Sigma),
+		}
+
+	}
 	response := &PlayerStatsRPCResponse{
 		Stats: stats,
 	}
