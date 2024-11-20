@@ -49,15 +49,7 @@ func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 	}
 	originalCandidates := matchEntries[:]
 
-	// Extract all players from the candidates
-	allPlayers := make(map[string]struct{}, 0)
-	for _, c := range matchEntries {
-		for _, e := range c {
-			allPlayers[e.GetProperties()["display_name"].(string)] = struct{}{}
-		}
-	}
-
-	matches, _, filterCounts, matchedPlayers, unmatchedPlayers, err := m.processPotentialMatches(modestr, matchEntries)
+	matches, _, filterCounts, included, excluded, err := m.processPotentialMatches(modestr, matchEntries)
 	if err != nil {
 		logger.Error("Error processing potential matches.", zap.Error(err))
 		return nil
@@ -65,15 +57,15 @@ func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 
 	logger.WithFields(map[string]interface{}{
 		"mode":                modestr,
-		"num_player_total":    len(allPlayers),
-		"num_player_included": len(matchedPlayers),
-		"num_player_excluded": len(matchedPlayers),
+		"num_player_total":    len(included) + len(excluded),
+		"num_player_included": len(included),
+		"num_player_excluded": len(included),
 		"num_match_options":   len(matchEntries),
 		"num_match_made":      len(matches),
 		"made_matches":        matches,
 		"filter_counts":       filterCounts,
-		"matched_players":     matchedPlayers,
-		"unmatched_players":   unmatchedPlayers,
+		"matched_players":     included,
+		"unmatched_players":   excluded,
 		"duration":            time.Since(startTime).String(),
 	}).Info("Skill-based matchmaker completed.")
 
@@ -159,12 +151,12 @@ func (m *skillBasedMatchmaker) filterWithinMaxRTT(candidates [][]runtime.Matchma
 	var filteredCount int
 	for i := 0; i < len(candidates); i++ {
 
-		serverRTTs := make(map[string][]int64)
+		serverRTTs := make(map[string][]float64)
 
 		for _, entry := range candidates[i] {
 
-			var maxRTT int64 = 250
-			if rtt, ok := entry.GetProperties()["max_rtt"].(int64); ok && rtt > 0 {
+			var maxRTT float64 = 250.0
+			if rtt, ok := entry.GetProperties()["max_rtt"].(float64); ok && rtt > 0 {
 				maxRTT = rtt
 			}
 
@@ -174,12 +166,12 @@ func (m *skillBasedMatchmaker) filterWithinMaxRTT(candidates [][]runtime.Matchma
 					continue
 				}
 
-				if v.(int64) > maxRTT {
+				if v.(float64) > maxRTT {
 					// Server is too far away from this player
 					continue
 				}
 
-				serverRTTs[k] = append(serverRTTs[k], v.(int64))
+				serverRTTs[k] = append(serverRTTs[k], v.(float64))
 			}
 		}
 
