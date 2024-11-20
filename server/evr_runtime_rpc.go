@@ -1694,3 +1694,112 @@ func ServerScoreRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk r
 
 	return response.String(), nil
 }
+
+type ServerScoresRPCRequest struct {
+	DiscordIDs   []string `json:"discord_ids"`
+	MinRTT       int      `json:"min_rtt"`
+	MaxRTT       int      `json:"max_rtt"`
+	ThresholdRTT int      `json:"threshold_rtt"`
+}
+
+type ServerScoresRPCResponse struct {
+	Scores map[string]float64 `json:"scores"`
+}
+
+func (r *ServerScoresRPCResponse) String() string {
+	data, err := json.MarshalIndent(r, "", "  ")
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+func ServerScoresRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+
+	request := &ServerScoresRPCRequest{}
+
+	// Get the pings from the query string
+	queryParameters := ctx.Value(runtime.RUNTIME_CTX_QUERY_PARAMS).(map[string][]string)
+
+	if payload != "" {
+		if err := json.Unmarshal([]byte(payload), request); err != nil {
+			return "", err
+		}
+
+	} else if len(queryParameters) == 0 {
+		return "", runtime.NewError("No query parameters", StatusInvalidArgument)
+	}
+	var err error
+	// extract the p from the query string
+	if p, ok := queryParameters["discord_ids"]; ok {
+
+		s := strings.Split(p[0], ",")
+		for _, v := range s {
+			request.DiscordIDs = append(request.DiscordIDs, strings.TrimSpace(v))
+		}
+	}
+	if p, ok := queryParameters["min_rtt"]; ok {
+		request.MinRTT, err = strconv.Atoi(p[0])
+		if err != nil {
+			return "", fmt.Errorf("failed to parse min_rtt: %w", err)
+		}
+	}
+
+	if p, ok := queryParameters["max_rtt"]; ok {
+		request.MaxRTT, err = strconv.Atoi(p[0])
+		if err != nil {
+			return "", fmt.Errorf("failed to parse max_rtt: %w", err)
+		}
+	}
+
+	if p, ok := queryParameters["threshold_rtt"]; ok {
+		request.ThresholdRTT, err = strconv.Atoi(p[0])
+		if err != nil {
+			return "", fmt.Errorf("failed to parse threshold_rtt: %w", err)
+		}
+	}
+
+	latencies := make(map[string][]int, 2)
+
+	for _, discordID := range request.DiscordIDs {
+		userID, err := GetUserIDByDiscordID(ctx, db, discordID)
+		if err != nil {
+			return "", err
+		}
+
+		zapLogger := RuntimeLoggerToZapLogger(logger)
+		latencyHistory, err := LoadLatencyHistory(ctx, zapLogger, db, uuid.FromStringOrNil(userID))
+		if err != nil {
+			return "", err
+		}
+
+		for ip, latency := range latencyHistory.AverageRTTs() {
+			latencies[ip] = append(latencies[ip], latency)
+		}
+	}
+
+	scoresByServer := make(map[string]float64, len(latencies))
+	for server, latencies := range latencies {
+		if len(latencies) != len(request.DiscordIDs) {
+			scoresByServer[server] = 999
+		}
+
+		teams := make([][]int, 2)
+		for i, rtt := range latencies {
+			teams[i%2] = append(teams[i%2], rtt)
+		}
+
+		score, err := CalculateServerScore(teams, request.MinRTT, request.MaxRTT, request.ThresholdRTT)
+		if err != nil {
+			return "", fmt.Errorf("failed to calculate server score: %w", err)
+		}
+
+		scoresByServer[server] = score
+	}
+
+	response := &ServerScoresRPCResponse{
+		Scores: scoresByServer,
+	}
+
+	return response.String(), nil
+}
