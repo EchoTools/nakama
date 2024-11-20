@@ -260,8 +260,8 @@ func (p *EvrPipeline) authorizeGuildGroupSession(ctx context.Context, session Se
 		if score >= groupMetadata.FraudScoreThreshold {
 
 			if sendAuditMessage {
-
-				if _, err := p.appBot.dg.ChannelMessageSend(groupMetadata.AuditChannelID, fmt.Sprintf("Rejected VPN user <@%s> (score: %d) from %s", discordID, score, session.ClientIP())); err != nil {
+				content := fmt.Sprintf("Rejected VPN user <@%s> (score: %d) from %s", discordID, score, session.ClientIP())
+				if _, err := p.appBot.LogAuditMessage(ctx, groupID, content, false); err != nil {
 					p.logger.Warn("Failed to send audit message", zap.String("channel_id", groupMetadata.AuditChannelID), zap.Error(err))
 				}
 			}

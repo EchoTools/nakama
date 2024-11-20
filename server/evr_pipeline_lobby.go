@@ -98,7 +98,7 @@ func (p *EvrPipeline) lobbySessionRequest(ctx context.Context, logger *zap.Logge
 				params.LastMatchmakingError.Store(err)
 			}
 
-			if err := p.appBot.LogAuditMessage(ctx, lobbyParams.GroupID.String(), fmt.Sprintf("```fix\n%s\n\n%T failed:\n %v\n```", session.Username(), in, err), false); err != nil {
+			if _, err := p.appBot.LogAuditMessage(ctx, lobbyParams.GroupID.String(), fmt.Sprintf("```fix\n%s\n\n%T failed:\n %v\n```", session.Username(), in, err), false); err != nil {
 				logger.Warn("Failed to log audit message", zap.Error(err))
 			}
 

@@ -827,7 +827,7 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 	}
 
 	label, err := MatchLabelByID(ctx, p.runtimeModule, matchID)
-	if err != nil || label == nil {
+	if err != nil {
 		return fmt.Errorf("failed to get match label: %w", err)
 	}
 
