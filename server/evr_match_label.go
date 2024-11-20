@@ -52,6 +52,7 @@ type MatchLabel struct {
 	tickRate             int64                // The number of ticks per second.
 	emptyTicks           int64                // The number of ticks the match has been empty.
 	terminateTick        int64                // The tick count at which the match will be shut down.
+	goals                []*MatchGoal         // The goals scored in the match.
 }
 
 func (s *MatchLabel) LoadAndDeleteReservation(sessionID string) (*EvrMatchPresence, bool) {
