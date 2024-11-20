@@ -8,6 +8,7 @@ import (
 	"hash/fnv"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -1641,4 +1642,97 @@ func MatchmakerCandidatesRPCFactory(sbmm *SkillBasedMatchmaker) func(ctx context
 		return string(data), nil
 	}
 
+}
+
+type ServerScoreRPCRequest struct {
+	PlayerRTTs   []float64 `json:"rtts"`
+	MinRTT       int       `json:"min_rtt"`
+	MaxRTT       int       `json:"max_rtt"`
+	ThresholdRTT int       `json:"threshold_rtt"`
+}
+
+type ServerScoreRPCResponse struct {
+	Score float64 `json:"score"`
+}
+
+func (r *ServerScoreRPCResponse) String() string {
+	data, err := json.MarshalIndent(r, "", "  ")
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+func ServerScoreRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+
+	request := &ServerScoreRPCRequest{}
+
+	// Get the pings from the query string
+	queryParameters := ctx.Value(runtime.RUNTIME_CTX_QUERY_PARAMS).(map[string][]string)
+
+	if payload != "" {
+		if err := json.Unmarshal([]byte(payload), request); err != nil {
+			return "", err
+		}
+
+	} else if len(queryParameters) == 0 {
+		return "", runtime.NewError("No query parameters", StatusInvalidArgument)
+	}
+	var err error
+	// extract the p from the query string
+	if p, ok := queryParameters["rtts"]; ok {
+		// Split by comma
+		s := strings.Split(p[0], ",")
+		rttstrs := make([]string, 0, len(s))
+		for _, v := range s {
+			rttstrs = append(rttstrs, strings.TrimSpace(v))
+		}
+
+		request.PlayerRTTs = make([]float64, 0, len(rttstrs))
+		for _, rttstr := range rttstrs {
+			rtt, err := strconv.ParseFloat(rttstr, 64)
+			if err != nil {
+				return "", err
+			}
+			request.PlayerRTTs = append(request.PlayerRTTs, rtt)
+		}
+
+		if p, ok := queryParameters["min_rtt"]; ok {
+			request.MinRTT, err = strconv.Atoi(p[0])
+			if err != nil {
+				return "", fmt.Errorf("Failed to parse min_rtt: %w", err)
+			}
+		}
+
+		if p, ok := queryParameters["max_rtt"]; ok {
+			request.MaxRTT, err = strconv.Atoi(p[0])
+			if err != nil {
+				return "", fmt.Errorf("Failed to parse max_rtt: %w", err)
+			}
+		}
+
+		if p, ok := queryParameters["threshold_rtt"]; ok {
+			request.ThresholdRTT, err = strconv.Atoi(p[0])
+			if err != nil {
+				return "", fmt.Errorf("Failed to parse threshold_rtt: %w", err)
+			}
+		}
+
+	}
+	// Split the rtts in two groups
+	teams := make([][]int, 2)
+	for i, rtt := range request.PlayerRTTs {
+		teams[i%2] = append(teams[i%2], int(rtt))
+	}
+
+	score, err := CalculateServerScore(teams, request.MinRTT, request.MaxRTT, request.ThresholdRTT)
+	if err != nil {
+		return "", fmt.Errorf("Failed to calculate server score: %w", err)
+	}
+
+	response := &ServerScoreRPCResponse{
+		Score: score,
+	}
+
+	return response.String(), nil
 }
