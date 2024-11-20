@@ -89,15 +89,15 @@ func calculateServerScore(bluePings, orangePings []int) (float64, error) {
 	}
 
 	// Calculate max variances and sum diff for normalization
-	maxServerVar := stat.Variance(repeat(float64(minPing), float64(maxPing), ppt*2), nil)
-	a := repeat(float64(minPing), float64(maxPing), ppt/2)
-	b := stat.Variance(repeat(float64(minPing), float64(maxPing), (ppt+1)/2), nil)
+	maxServerVar := stat.Variance(repeat(minPing, maxPing, ppt*2), nil)
+	a := repeat(minPing, maxPing, ppt/2)
+	b := stat.Variance(repeat(minPing, maxPing, (ppt+1)/2), nil)
 	maxTeamVar := stat.Variance(append(a, b), nil)
 	maxSumDiff := float64(ppt) * (maxPing - minPing)
 
 	// Sum difference points
 	blueSum, orangeSum := floats.Sum(bPings), floats.Sum(oPings)
-	sumDiff := math.Abs(float64(blueSum - orangeSum))
+	sumDiff := math.Abs(blueSum - orangeSum)
 	sumPoints := (1 - (sumDiff / maxSumDiff)) * pointsDistribution[0]
 
 	// Team variance points
