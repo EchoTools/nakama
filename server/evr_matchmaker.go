@@ -64,12 +64,13 @@ func NewSkillBasedMatchmaker() *SkillBasedMatchmaker {
 // Function to be used as a matchmaker function in Nakama (RegisterMatchmakerOverride)
 func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, candidates [][]runtime.MatchmakerEntry) [][]runtime.MatchmakerEntry {
 
-	if len(candidates) == 0 || len(candidates[0]) == 0 {
+	startTime := time.Now()
+	if len(matchEntries) == 0 || len(matchEntries[0]) == 0 {
 		logger.Error("No candidates found. Matchmaker cannot run.")
 		return nil
 	}
 
-	groupID, ok := candidates[0][0].GetProperties()["group_id"].(string)
+	groupID, ok := matchEntries[0][0].GetProperties()["group_id"].(string)
 	if !ok || groupID == "" {
 		logger.Error("Group ID not found in entry properties.")
 		return nil
@@ -83,9 +84,9 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 
 	// Extract all players from the candidates
 	allPlayers := make(map[string]struct{}, 0)
-	for _, c := range candidates {
+	for _, c := range matchEntries {
 		for _, e := range c {
-			allPlayers[e.GetPresence().GetUserId()] = struct{}{}
+			allPlayers[e.GetProperties()["display_name"].(string)] = struct{}{}
 		}
 	}
 	matches, filterCounts := m.processPotentialMatches(candidates)
@@ -110,12 +111,14 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 		"mode":                modestr,
 		"num_player_total":    len(allPlayers),
 		"num_player_included": len(matchedPlayers),
-		"num_match_options":   len(candidates),
+		"num_player_excluded": len(matchedPlayers),
+		"num_match_options":   len(matchEntries),
 		"num_match_made":      len(matches),
 		"made_matches":        matches,
 		"filter_counts":       filterCounts,
-		"matched_players":     matchedPlayerMap,
+		"matched_players":     matchedPlayers,
 		"unmatched_players":   unmatchedPlayers,
+		"duration":            time.Since(startTime).String(),
 	}).Info("Skill-based matchmaker completed.")
 
 	m.StoreLatestResult(candidates, matches)
@@ -153,7 +156,7 @@ func EvrMatchmakerOverrideFn(ctx context.Context, candidateMatches [][]*Matchmak
 
 func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, map[string]int) {
 
-	filterCounts := make(map[string]int)
+	filterCounts = make(map[string]int)
 
 	// Remove odd sized teams
 	candidates, filterCounts["odd_size"] = m.filterOddSizedTeams(candidates)
@@ -162,7 +165,7 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.Ma
 	candidates, filterCounts["no_matching_servers"] = m.filterWithinMaxRTT(candidates)
 
 	// Create a list of balanced matches with predictions
-	predictions := m.predictOutcomes(candidates)
+	predictions = m.predictOutcomes(candidates)
 
 	m.sortByDraw(predictions)
 	m.sortLimitRankSpread(predictions, MaximumRankDelta)
@@ -192,12 +195,12 @@ func (m *SkillBasedMatchmaker) filterWithinMaxRTT(candidates [][]runtime.Matchma
 	var filteredCount int
 	for i := 0; i < len(candidates); i++ {
 
-		serverRTTs := make(map[string][]float64)
+		serverRTTs := make(map[string][]int64)
 
 		for _, entry := range candidates[i] {
 
-			maxRTT := 500.0
-			if rtt, ok := entry.GetProperties()["max_rtt"].(float64); ok && rtt > 0 {
+			var maxRTT int64 = 250
+			if rtt, ok := entry.GetProperties()["max_rtt"].(int64); ok && rtt > 0 {
 				maxRTT = rtt
 			}
 
@@ -207,12 +210,12 @@ func (m *SkillBasedMatchmaker) filterWithinMaxRTT(candidates [][]runtime.Matchma
 					continue
 				}
 
-				if v.(float64) > maxRTT {
+				if v.(int64) > maxRTT {
 					// Server is too far away from this player
 					continue
 				}
 
-				serverRTTs[k] = append(serverRTTs[k], v.(float64))
+				serverRTTs[k] = append(serverRTTs[k], v.(int64))
 			}
 		}
 
@@ -261,7 +264,12 @@ func (m *SkillBasedMatchmaker) sortPriority(predictions []PredictedMatch) {
 		for _, o := range []PredictedMatch{a, b} {
 			for _, team := range o.Teams() {
 				for _, player := range team {
-					if p, ok := player.Entry.GetProperties()["priority_threshold"].(float64); ok && p < now {
+
+					ts, ok := player.Entry.GetProperties()["priority_threshold"].(int64)
+					if !ok {
+						continue
+					}
+					if ts < now {
 						return -1
 					}
 				}
@@ -302,13 +310,7 @@ func (m *SkillBasedMatchmaker) sortLimitRankSpread(predictions []PredictedMatch,
 func (m *SkillBasedMatchmaker) sortBySize(predictions []PredictedMatch) {
 	// Sort by size, then by prediction of a draw
 	slices.SortStableFunc(predictions, func(a, b PredictedMatch) int {
-		if len(a.Entrants()) > len(b.Entrants()) {
-			return -1
-		} else if len(a.Entrants()) < len(b.Entrants()) {
-			return 1
-		}
-
-		return 0
+		return len(b.Entrants()) - len(a.Entrants())
 	})
 }
 

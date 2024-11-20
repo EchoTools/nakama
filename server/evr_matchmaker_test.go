@@ -490,7 +490,7 @@ func TestMatchmaker(t *testing.T) {
 		t.Errorf("Match: %v", strings.Join(teams, " vs "))
 	}
 
-	//t.Errorf("Candidates: %v", candidates)
+	t.Errorf("Made Matches: %v", madeMatches)
 }
 func TestSortPriority(t *testing.T) {
 	team1 := RatedEntryTeam{

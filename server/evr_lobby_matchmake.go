@@ -85,8 +85,8 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 		return fmt.Errorf("failed to add primary ticket: %v", err)
 	}
 
-	// Start the fallback when half the matchmaking timeout has expired
-	fallbackDelay := p.matchmakingTicketTimeout() / 2
+	// Start the fallback when 2/3's of the matchmaking timeout has expired
+	fallbackDelay := p.matchmakingTicketTimeout() * (2 / 3)
 
 	// Reduce fallback delay if there is very few players online
 	stream := lobbyParams.GuildGroupStream()
