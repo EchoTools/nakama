@@ -28,66 +28,62 @@ type skillBasedMatchmaker struct{}
 var SkillBasedMatchmaker = &skillBasedMatchmaker{}
 
 // Function to be used as a matchmaker function in Nakama (RegisterMatchmakerOverride)
-func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, candidates [][]runtime.MatchmakerEntry) [][]runtime.MatchmakerEntry {
+func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, matchEntries [][]runtime.MatchmakerEntry) [][]runtime.MatchmakerEntry {
 
-	if len(candidates) == 0 || len(candidates[0]) == 0 {
+	startTime := time.Now()
+	if len(matchEntries) == 0 || len(matchEntries[0]) == 0 {
 		logger.Error("No candidates found. Matchmaker cannot run.")
 		return nil
 	}
 
-	groupID, ok := candidates[0][0].GetProperties()["group_id"].(string)
+	groupID, ok := matchEntries[0][0].GetProperties()["group_id"].(string)
 	if !ok || groupID == "" {
 		logger.Error("Group ID not found in entry properties.")
 		return nil
 	}
 
-	modestr, ok := candidates[0][0].GetProperties()["mode"].(string)
+	modestr, ok := matchEntries[0][0].GetProperties()["mode"].(string)
 	if !ok || modestr == "" {
 		logger.Error("Mode not found in entry properties. Matchmaker cannot run.")
 		return nil
 	}
-	originalCandidates := candidates[:]
+	originalCandidates := matchEntries[:]
 
 	// Extract all players from the candidates
 	allPlayers := make(map[string]struct{}, 0)
-	for _, c := range candidates {
+	for _, c := range matchEntries {
 		for _, e := range c {
-			allPlayers[e.GetPresence().GetUserId()] = struct{}{}
+			allPlayers[e.GetProperties()["display_name"].(string)] = struct{}{}
 		}
 	}
-	matches, filterCounts, err := m.processPotentialMatches(modestr, candidates)
+
+	matches, _, filterCounts, matchedPlayers, unmatchedPlayers, err := m.processPotentialMatches(modestr, matchEntries)
 	if err != nil {
 		logger.Error("Error processing potential matches.", zap.Error(err))
 		return nil
 	}
 
-	// Extract all players from the matches
-	matchedPlayerMap := make(map[string]struct{}, 0)
-	for _, c := range matches {
-		for _, e := range c {
-			matchedPlayerMap[e.GetPresence().GetUserId()] = struct{}{}
-		}
-	}
-
-	matchedPlayers := lo.Keys(matchedPlayerMap)
-
-	// Create a list of excluded players
-	unmatchedPlayers := lo.FilterMap(lo.Keys(allPlayers), func(p string, _ int) (string, bool) {
-		_, ok := matchedPlayerMap[p]
-		return p, !ok
-	})
-
 	logger.WithFields(map[string]interface{}{
 		"mode":                modestr,
 		"num_player_total":    len(allPlayers),
 		"num_player_included": len(matchedPlayers),
-		"num_match_options":   len(candidates),
+		"num_player_excluded": len(matchedPlayers),
+		"num_match_options":   len(matchEntries),
 		"num_match_made":      len(matches),
 		"made_matches":        matches,
 		"filter_counts":       filterCounts,
-		"matched_players":     matchedPlayerMap,
+		"matched_players":     matchedPlayers,
 		"unmatched_players":   unmatchedPlayers,
+		"duration":            time.Since(startTime).String(),
 	}).Info("Skill-based matchmaker completed.")
+
+	metricsTags := map[string]string{
+		"mode": modestr,
+	}
+
+	nk.MetricsGaugeSet("matchmaker_num_candidates", metricsTags, float64(len(originalCandidates)))
+	nk.MetricsGaugeSet("matchmaker_num_matches", metricsTags, float64(len(matches)))
+	nk.MetricsTimerRecord("matchmaker_duration", metricsTags, time.Since(startTime))
 
 	// Save the candidates in storage
 	if err := m.saveLatestCandidates(ctx, nk, groupID, originalCandidates, matches); err != nil {
@@ -96,9 +92,9 @@ func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 	return matches
 }
 
-func (m *skillBasedMatchmaker) processPotentialMatches(modestr string, candidates [][]runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, map[string]int, error) {
+func (m *skillBasedMatchmaker) processPotentialMatches(modestr string, candidates [][]runtime.MatchmakerEntry) (madeMatches [][]runtime.MatchmakerEntry, predictions []PredictedMatch, includedPlayers []string, excludedPlayers []string, filterCounts map[string]int, err error) {
 
-	filterCounts := make(map[string]int)
+	filterCounts = make(map[string]int)
 
 	// Remove odd sized teams
 	candidates, filterCounts["odd_size"] = m.filterOddSizedTeams(candidates)
@@ -107,7 +103,7 @@ func (m *skillBasedMatchmaker) processPotentialMatches(modestr string, candidate
 	candidates, filterCounts["no_matching_servers"] = m.filterWithinMaxRTT(candidates)
 
 	// Create a list of balanced matches with predictions
-	predictions := m.predictOutcomes(candidates)
+	predictions = m.predictOutcomes(candidates)
 
 	// Sort the matches based on the mode
 	switch modestr {
@@ -120,16 +116,29 @@ func (m *skillBasedMatchmaker) processPotentialMatches(modestr string, candidate
 	case evr.ModeArenaPublic.String():
 		m.sortByDraw(predictions)
 		m.sortLimitRankSpread(predictions, MaximumRankDelta)
-		m.sortBySize(predictions)
 		m.sortPriority(predictions)
+		m.sortBySize(predictions)
 
 	default:
-		return nil, nil, fmt.Errorf("unknown mode: %s", modestr)
+		return nil, nil, nil, nil, nil, fmt.Errorf("unknown mode: %s", modestr)
 	}
 
-	madeMatches := m.assembleUniqueMatches(predictions)
+	madeMatches = m.assembleUniqueMatches(predictions)
 
-	return madeMatches, filterCounts, nil
+	matchedPlayers := make(map[string]struct{}, 0)
+	for _, c := range madeMatches {
+		for _, e := range c {
+			matchedPlayers[e.GetPresence().GetUserId()] = struct{}{}
+		}
+	}
+
+	// Create a list of excluded players
+	unmatchedPlayers := lo.FilterMap(lo.Keys(matchedPlayers), func(p string, _ int) (string, bool) {
+		_, ok := matchedPlayers[p]
+		return p, !ok
+	})
+
+	return madeMatches, predictions, lo.Keys(matchedPlayers), unmatchedPlayers, filterCounts, nil
 }
 
 func (m *skillBasedMatchmaker) filterOddSizedTeams(candidates [][]runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, int) {
@@ -150,12 +159,12 @@ func (m *skillBasedMatchmaker) filterWithinMaxRTT(candidates [][]runtime.Matchma
 	var filteredCount int
 	for i := 0; i < len(candidates); i++ {
 
-		serverRTTs := make(map[string][]float64)
+		serverRTTs := make(map[string][]int64)
 
 		for _, entry := range candidates[i] {
 
-			maxRTT := 500.0
-			if rtt, ok := entry.GetProperties()["max_rtt"].(float64); ok && rtt > 0 {
+			var maxRTT int64 = 250
+			if rtt, ok := entry.GetProperties()["max_rtt"].(int64); ok && rtt > 0 {
 				maxRTT = rtt
 			}
 
@@ -165,12 +174,12 @@ func (m *skillBasedMatchmaker) filterWithinMaxRTT(candidates [][]runtime.Matchma
 					continue
 				}
 
-				if v.(float64) > maxRTT {
+				if v.(int64) > maxRTT {
 					// Server is too far away from this player
 					continue
 				}
 
-				serverRTTs[k] = append(serverRTTs[k], v.(float64))
+				serverRTTs[k] = append(serverRTTs[k], v.(int64))
 			}
 		}
 
@@ -212,14 +221,19 @@ func (*skillBasedMatchmaker) predictDraw(teams []RatedEntryTeam) float64 {
 }
 
 func (m *skillBasedMatchmaker) sortPriority(predictions []PredictedMatch) {
-	now := float64(time.Now().UTC().Unix())
+	now := time.Now().UTC().Unix()
 
 	slices.SortStableFunc(predictions, func(a, b PredictedMatch) int {
 		// If a player has a priority_threshold set, and it's less than "now" it should be sorted to the top
 		for _, o := range []PredictedMatch{a, b} {
 			for _, team := range o.Teams() {
 				for _, player := range team {
-					if p, ok := player.Entry.GetProperties()["priority_threshold"].(float64); ok && p < now {
+
+					ts, ok := player.Entry.GetProperties()["priority_threshold"].(int64)
+					if !ok {
+						continue
+					}
+					if ts < now {
 						return -1
 					}
 				}
@@ -258,15 +272,9 @@ func (m *skillBasedMatchmaker) sortLimitRankSpread(predictions []PredictedMatch,
 }
 
 func (m *skillBasedMatchmaker) sortBySize(predictions []PredictedMatch) {
-	// Sort by size, then by prediction of a draw
+	// Sort by size, descending
 	slices.SortStableFunc(predictions, func(a, b PredictedMatch) int {
-		if len(a.Entrants()) > len(b.Entrants()) {
-			return -1
-		} else if len(a.Entrants()) < len(b.Entrants()) {
-			return 1
-		}
-
-		return 0
+		return len(b.Entrants()) - len(a.Entrants())
 	})
 }
 

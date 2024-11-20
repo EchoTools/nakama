@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"go.uber.org/atomic"
+	"gonum.org/v1/gonum/floats"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
@@ -371,8 +372,8 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeRankRange bool, incl
 	}
 
 	if includeRankRange {
-		rankMin := max(0.0, p.RankPercentile-p.RankPercentileMaxDelta)
-		rankMax := min(1.0, p.RankPercentile+p.RankPercentileMaxDelta)
+		rankMin := floats.Max([]float64{p.RankPercentile - p.RankPercentileMaxDelta, 0.0})
+		rankMax := floats.Min([]float64{1.0, p.RankPercentile + p.RankPercentileMaxDelta})
 
 		qparts = append(qparts, fmt.Sprintf("+label.rank_percentile:>=%f +label.rank_percentile:<=%f", rankMin, rankMax))
 	}
@@ -430,11 +431,14 @@ func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionPar
 	}
 
 	numericProperties := map[string]float64{
-		"rating_mu":       p.Rating.Mu,
-		"rating_sigma":    p.Rating.Sigma,
-		"rating_z":        float64(p.Rating.Z),
-		"rank_percentile": p.RankPercentile,
-		"timestamp":       float64(time.Now().UTC().Unix()),
+		"rating_mu":           p.Rating.Mu,
+		"rating_sigma":        p.Rating.Sigma,
+		"rating_z":            float64(p.Rating.Z),
+		"rank_percentile":     p.RankPercentile,
+		"timestamp":           float64(time.Now().UTC().Unix()),
+		"min_rank_percentile": 0.0,
+		"max_rank_percentile": 1.0,
+		"max_server_rtt":      float64(p.MaxServerRTT),
 	}
 
 	qparts := []string{
@@ -449,8 +453,11 @@ func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionPar
 	}
 
 	if withRankRange && p.RankPercentileMaxDelta > 0 {
-		minRankPercentile := max(p.RankPercentile-p.RankPercentileMaxDelta, 0.0)
-		maxRankPercentile := min(p.RankPercentile+p.RankPercentileMaxDelta, 1.0)
+
+		minRankPercentile := floats.Max([]float64{p.RankPercentile - p.RankPercentileMaxDelta, 0.0})
+		maxRankPercentile := floats.Max([]float64{p.RankPercentile + p.RankPercentileMaxDelta, 1.0})
+		numericProperties["min_rank_percentile"] = minRankPercentile
+		numericProperties["max_rank_percentile"] = maxRankPercentile
 		qparts = append(qparts, fmt.Sprintf("+properties.rank_percentile:>=%f", minRankPercentile))
 		qparts = append(qparts, fmt.Sprintf("+properties.rank_percentile:<=%f", maxRankPercentile))
 	}
