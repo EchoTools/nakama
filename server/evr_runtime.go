@@ -656,8 +656,10 @@ func GetGuildGroupMetadata(ctx context.Context, db *sql.DB, groupID string) (*Gr
 
 func MatchLabelByID(ctx context.Context, nk runtime.NakamaModule, matchID MatchID) (*MatchLabel, error) {
 	match, err := nk.MatchGet(ctx, matchID.String())
-	if err != nil || match == nil {
+	if err != nil {
 		return nil, err
+	} else if match == nil {
+		return nil, ErrMatchNotFound
 	}
 
 	label := MatchLabel{}

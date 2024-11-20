@@ -106,7 +106,7 @@ func (d *DiscordAppBot) LogMessageToChannel(message string, channelID string) er
 	return nil
 }
 
-func (d *DiscordAppBot) LogAuditMessage(ctx context.Context, groupID string, message string, replaceMentions bool) error {
+func (d *DiscordAppBot) LogAuditMessage(ctx context.Context, groupID string, message string, replaceMentions bool) (*discordgo.Message, error) {
 	// replace all <@uuid> mentions with <@discordID>
 	if replaceMentions {
 		message = d.cache.ReplaceMentions(message)
@@ -114,15 +114,13 @@ func (d *DiscordAppBot) LogAuditMessage(ctx context.Context, groupID string, mes
 
 	groupMetadata, err := GetGuildGroupMetadata(ctx, d.db, groupID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if groupMetadata.AuditChannelID != "" {
-		if _, err := d.dg.ChannelMessageSend(groupMetadata.AuditChannelID, message); err != nil {
-			return err
-		}
+		return d.dg.ChannelMessageSend(groupMetadata.AuditChannelID, message)
 	}
-	return nil
+	return nil, nil
 }
 
 func (d *DiscordAppBot) SendErrorToUser(userID string, userErr error) error {

@@ -1875,7 +1875,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						if err := KickPlayerFromMatch(ctx, d.nk, label.ID, targetUserID); err != nil {
 							return err
 						}
-						_ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> kicked player <@%s> from [%s](https://echo.taxi/spark://c/%s) match.", user.ID, target.ID, label.Mode.String(), strings.ToUpper(label.ID.UUID.String())), false)
+						_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> kicked player <@%s> from [%s](https://echo.taxi/spark://c/%s) match.", user.ID, target.ID, label.Mode.String(), strings.ToUpper(label.ID.UUID.String())), false)
 						disconnectDelay = 15
 					}
 
@@ -1885,7 +1885,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						if _, err := DisconnectUserID(ctx, d.nk, targetUserID); err != nil {
 							logger.Warn("Failed to disconnect user", zap.Error(err))
 						} else {
-							_ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> disconnected player <@%s> from match service.", user.ID, target.ID), false)
+							_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> disconnected player <@%s> from match service.", user.ID, target.ID), false)
 						}
 					}()
 
@@ -1936,7 +1936,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						if err := KickPlayerFromMatch(ctx, d.nk, label.ID, targetUserID); err != nil {
 							return err
 						}
-						_ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> kicked player <@%s> from [%s](https://echo.taxi/spark://c/%s) match.", user.ID, target.ID, label.Mode.String(), strings.ToUpper(label.ID.UUID.String())), false)
+						_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> kicked player <@%s> from [%s](https://echo.taxi/spark://c/%s) match.", user.ID, target.ID, label.Mode.String(), strings.ToUpper(label.ID.UUID.String())), false)
 						disconnectDelay = 15
 					}
 
@@ -1946,7 +1946,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						if _, err := DisconnectUserID(ctx, d.nk, targetUserID); err != nil {
 							logger.Warn("Failed to disconnect user", zap.Error(err))
 						} else {
-							_ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> disconnected player <@%s> from match service.", user.ID, target.ID), false)
+							_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> disconnected player <@%s> from match service.", user.ID, target.ID), false)
 						}
 					}()
 
