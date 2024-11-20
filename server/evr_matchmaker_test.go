@@ -329,9 +329,9 @@ func (c CandidateData) mm() [][]runtime.MatchmakerEntry {
 
 func TestMatchmaker(t *testing.T) {
 	// disable for now
-	t.SkipNow()
+	//t.SkipNow()
 	// open /tmp/possible-matches.json
-	file, err := os.Open("/tmp/candidates2.json")
+	file, err := os.Open("../_matches/m1.json")
 	if err != nil {
 		t.Error("Error opening file")
 	}
@@ -347,27 +347,28 @@ func TestMatchmaker(t *testing.T) {
 	m := &skillBasedMatchmaker{}
 
 	candidates := data.mm()
-	candidates, _ = m.filterWithinMaxRTT(candidates)
+	// Set the priority thresholds to the future
 
-	// Remove odd sized teams
-	candidates, _ = m.filterOddSizedTeams(candidates)
-
-	// Ensure that everyone in the match is within their max_rtt of a common server
-	candidates, _ = m.filterWithinMaxRTT(candidates)
-
-	// Create a list of balanced matches with predictions
-	predictions := m.predictOutcomes(candidates)
-
-	sizes := make(map[int]int, 0)
 	for _, c := range candidates {
-		sizes[len(c)]++
+		for _, player := range c {
+			if player.GetPresence().GetUsername() == "peanutbueater" {
+				//player.GetProperties()["priority_threshold"] = time.Now().Add(-1 * time.Minute).UTC().Unix()
+			} else {
+				player.GetProperties()["priority_threshold"] = time.Now().Add(10 * time.Minute).UTC().Unix()
+			}
+		}
 	}
 
-	t.Errorf("Sizes: %v", sizes)
+	madeMatches, predictions, matchedPlayers, unmatchedPlayers, filterCounts, err := m.processPotentialMatches("echo_arena", candidates)
+	if err != nil {
+		t.Fatalf("Error processing potential matches: %v", err)
+	}
 
-	m.sortByDraw(predictions)
-	m.sortLimitRankSpread(predictions, 0.10)
-	m.sortPriority(predictions)
+	t.Logf("Matched Players: %v", matchedPlayers)
+	t.Logf("Unmatched Players: %v", unmatchedPlayers)
+	t.Logf("Filter Counts: %v", filterCounts)
+	_, _ = matchedPlayers, unmatchedPlayers
+
 	rostersByPrediction := make([][]string, 0)
 	for _, c := range predictions {
 		rosters := make([]string, 0)
@@ -401,8 +402,6 @@ func TestMatchmaker(t *testing.T) {
 		t.Errorf("Error writing data: %v", err)
 	}
 
-	madeMatches := m.assembleUniqueMatches(predictions)
-
 	// Sort by matches that have players who have been waiting more than half the Matchmaking timeout
 	// This is to prevent players from waiting too long
 
@@ -428,7 +427,7 @@ func TestMatchmaker(t *testing.T) {
 		t.Errorf("Match: %v", strings.Join(teams, " vs "))
 	}
 
-	//t.Errorf("Candidates: %v", candidates)
+	t.Errorf("Made Matches: %v", madeMatches)
 }
 func TestSortPriority(t *testing.T) {
 	team1 := RatedEntryTeam{
