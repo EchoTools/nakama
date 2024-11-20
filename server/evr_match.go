@@ -165,6 +165,7 @@ func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql
 		Players:          make([]PlayerInfo, 0, SocialLobbyMaxSize),
 		presenceMap:      make(map[string]*EvrMatchPresence, SocialLobbyMaxSize),
 		reservationMap:   make(map[string]*slotReservation, 2),
+		goals:            make([]*MatchGoal, 0),
 
 		TeamAlignments:       make(map[string]int, SocialLobbyMaxSize),
 		joinTimestamps:       make(map[string]time.Time, SocialLobbyMaxSize),
@@ -597,6 +598,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 	for _, in := range messages {
 		switch in.GetOpCode() {
 		case OpCodeMatchGameStateUpdate:
+
 			update := MatchGameStateUpdate{}
 			if err := json.Unmarshal(in.GetData(), &update); err != nil {
 				logger.Error("Failed to unmarshal match update: %v", err)
@@ -609,8 +611,9 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 				u := update
 
 				if len(u.Goals) > 0 {
-					gs.Goals = append(gs.Goals, u.Goals...)
+					state.goals = append(state.goals, u.Goals...)
 				}
+
 				if state.GameState.RoundClock != nil {
 					if u.CurrentGameClock != 0 {
 						if u.PauseDuration != 0 {
@@ -714,7 +717,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 
 	// Update the game clock every second
 	if tick%state.tickRate == 0 && state.GameState != nil {
-		state.GameState.Update()
+		state.GameState.Update(state.goals)
 		updateLabel = true
 	}
 
@@ -1010,12 +1013,10 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk run
 	case evr.ModeArenaPublic:
 		state.GameState = &GameState{
 			RoundClock: NewRoundClock(RoundDuration, time.Now().Add(PublicMatchWaitTime)),
-			Goals:      make([]*MatchGoal, 0),
 		}
 	case evr.ModeArenaPrivate:
 		state.GameState = &GameState{
 			RoundClock: NewRoundClock(0, time.Time{}),
-			Goals:      make([]*MatchGoal, 0),
 		}
 	}
 
