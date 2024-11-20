@@ -62,6 +62,35 @@ func (h LatencyHistory) LatestRTTs() map[string]int {
 	return latestRTTs
 }
 
+func (h LatencyHistory) AverageRTTs() map[string]int {
+	rtts := make(map[string][]int)
+	averageRTTs := make(map[string]int)
+
+	for extIP, history := range h {
+
+		for _, rtt := range history {
+			if rtt == 0 || rtt == 999 {
+				rtt = 999
+			}
+			rtts[extIP] = append(rtts[extIP], rtt)
+		}
+	}
+
+	for extIP, rtt := range rtts {
+		if len(rtt) == 0 {
+			averageRTTs[extIP] = 999
+			continue
+		}
+		average := 0
+		for _, l := range rtt {
+			average += l
+		}
+		average /= len(rtt)
+		averageRTTs[extIP] = average
+	}
+	return averageRTTs
+}
+
 func (h LatencyHistory) LabelsByAverageRTT(labels []*MatchLabel) []LabelWithLatency {
 	if len(labels) == 0 {
 		return make([]LabelWithLatency, 0)
@@ -96,6 +125,7 @@ func (h LatencyHistory) LabelsByAverageRTT(labels []*MatchLabel) []LabelWithLate
 
 // map[externalIP]map[timestamp]latency
 func LoadLatencyHistory(ctx context.Context, logger *zap.Logger, db *sql.DB, userID uuid.UUID) (LatencyHistory, error) {
+
 	result, err := StorageReadObjects(ctx, logger, db, userID, []*api.ReadStorageObjectId{
 		{
 			Collection: LatencyHistoryStorageCollection,
