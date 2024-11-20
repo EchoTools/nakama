@@ -8,7 +8,6 @@ require (
 	github.com/blugelabs/bluge_segment_api v0.2.0
 	github.com/blugelabs/query_string v0.3.0
 	github.com/davecgh/go-spew v1.1.1
-	github.com/dgrijalva/jwt-go v3.2.0+incompatible
 	github.com/dop251/goja v0.0.0-20240220182346-e401ed450204
 	github.com/go-gorp/gorp/v3 v3.1.0
 	github.com/go-playground/validator/v10 v10.19.0
@@ -36,9 +35,11 @@ require (
 	github.com/twmb/murmur3 v1.1.8
 	github.com/uber-go/tally/v4 v4.1.16
 	go.uber.org/atomic v1.11.0
+	go.uber.org/thriftrw v1.32.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.26.0
 	golang.org/x/oauth2 v0.20.0
+	gonum.org/v1/gonum v0.15.1
 	google.golang.org/genproto/googleapis/api v0.0.0-20240415180920-8c6c420018be
 	google.golang.org/grpc v1.63.2
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.3.0
@@ -49,32 +50,17 @@ require (
 
 require (
 	cloud.google.com/go/compute/metadata v0.3.0 // indirect
-	github.com/anmitsu/go-shlex v0.0.0-20200514113438-38f4b401e2be // indirect
-	github.com/elliotchance/pie/v2 v2.7.0 // indirect
-	github.com/fatih/structtag v1.2.0 // indirect
 	github.com/golang/mock v1.6.0 // indirect
-	github.com/hablullah/go-hijri v1.0.2 // indirect
-	github.com/hablullah/go-juliandays v1.0.0 // indirect
-	github.com/jalaali/go-jalaali v0.0.0-20210801064154-80525e88d958 // indirect
-	github.com/jessevdk/go-flags v1.6.1 // indirect
-	github.com/kr/text v0.2.0 // indirect
-	github.com/magefile/mage v1.14.0 // indirect
 	github.com/mattn/go-runewidth v0.0.15 // indirect
 	github.com/montanaflynn/stats v0.7.1 // indirect
 	github.com/patrickmn/go-cache v2.1.0+incompatible // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
-	github.com/rogpeppe/go-internal v1.11.0 // indirect
-	github.com/tetratelabs/wazero v1.2.1 // indirect
-	github.com/wasilibs/go-re2 v1.3.0 // indirect
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect
 	github.com/xdg-go/scram v1.1.2 // indirect
 	github.com/xdg-go/stringprep v1.0.4 // indirect
 	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
-	go.uber.org/thriftrw v1.32.0 // indirect
 	golang.org/x/exp v0.0.0-20240416160154-fe59bbe5cc7f // indirect
 	golang.org/x/sync v0.8.0 // indirect
-	golang.org/x/tools v0.24.0 // indirect
-	gonum.org/v1/gonum v0.15.0 // indirect
 )
 
 require (
@@ -106,9 +92,7 @@ require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgproto3/v2 v2.3.3 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20231201235250-de7065d80cb9 // indirect
-	github.com/kr/pretty v0.3.1
 	github.com/leodido/go-urn v1.4.0 // indirect
-	github.com/markusmobius/go-dateparser v1.2.2
 	github.com/mschoch/smat v0.2.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
