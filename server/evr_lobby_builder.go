@@ -176,11 +176,6 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 				Sigma: &sigma,
 			})
 
-			displayName, ok := entry.StringProperties["display_name"]
-			if !ok {
-				displayName = ""
-			}
-
 			percentile, ok := entry.NumericProperties["rank_percentile"]
 			if !ok {
 				percentile = 0.0
@@ -198,7 +193,7 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 				SessionID:      session.ID(),
 				LoginSessionID: sessionParams.LoginSession.Load().id,
 				Username:       session.Username(),
-				DisplayName:    displayName,
+				DisplayName:    sessionParams.AccountMetadata.GetGroupDisplayNameOrDefault(groupID.String()),
 				EvrID:          sessionParams.EvrID,
 				PartyID:        MatchIDFromStringOrNil(entry.PartyId).UUID,
 				RoleAlignment:  teamIndex,
