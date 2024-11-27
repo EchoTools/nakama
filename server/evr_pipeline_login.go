@@ -266,7 +266,13 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		}
 	}
 
-	if err := p.runtimeModule.AccountUpdateId(ctx, userID, "", metadata.MarshalMap(), "", "", "", "", ""); err != nil {
+	if params.UserDisplayNameOverride != "" {
+		metadata.DisplayNameOverride = params.UserDisplayNameOverride
+	}
+
+	displayName := metadata.GetActiveGroupDisplayName()
+
+	if err := p.runtimeModule.AccountUpdateId(ctx, userID, "", metadata.MarshalMap(), displayName, "", "", "", ""); err != nil {
 		return settings, fmt.Errorf("failed to update user metadata: %w", err)
 	}
 
@@ -278,7 +284,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 
 	profile.SetEvrID(evrID)
 	profile.SetChannel(evr.GUID(metadata.GetActiveGroupID()))
-	profile.UpdateDisplayName(metadata.GetActiveGroupDisplayName())
+	profile.UpdateDisplayName(displayName)
 
 	p.profileRegistry.SaveAndCache(ctx, session.userID, profile)
 	/*
