@@ -192,12 +192,18 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 		urlParams[k] = v
 	}
 
+	ign := parseUserQueryFunc(&request, "ign", 20, nil)
+
+	if ign == "randomize" {
+		ign = RandomDisplayName()
+	}
+
 	params := SessionParameters{
 		Node:                    pipeline.node,
 		HMDSerialOverride:       parseUserQueryFunc(&request, "hmdserial", 32, hmdOverridePattern),
 		AuthDiscordID:           parseUserQueryFunc(&request, "discordid", 20, discordIDPattern),
 		AuthPassword:            parseUserQueryFunc(&request, "password", 32, nil),
-		UserDisplayNameOverride: parseUserQueryFunc(&request, "ign", 20, nil),
+		UserDisplayNameOverride: ign,
 
 		DisableEncryption: parseUserQueryFunc(&request, "disable_encryption", 5, nil) == "true",
 		DisableMAC:        parseUserQueryFunc(&request, "disable_mac", 5, nil) == "true",

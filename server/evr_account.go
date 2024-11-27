@@ -61,6 +61,8 @@ func (p *GroupProfile) UpdateUnlockedItems(updated []evr.Symbol) {
 type AccountMetadata struct {
 	account *api.Account
 
+	RandomizeDisplayName   bool              `json:"randomize_display_name"`    // Randomize the display name
+	RandomizedDisplayName  string            `json:"randomized_display_name"`   // The randomized display name
 	DisplayNameOverride    string            `json:"display_name_override"`     // The display name override
 	GlobalBanReason        string            `json:"global_ban_reason"`         // The global ban reason
 	ActiveGroupID          string            `json:"active_group_id"`           // The active group ID
@@ -70,7 +72,6 @@ type AccountMetadata struct {
 	DiscordDebugMessages   bool              `json:"discord_debug_messages"`    // Enable debug messages in Discord
 	RelayMessagesToDiscord bool              `json:"relay_messages_to_discord"` // Relay messages to Discord
 	isModified             bool              // Indicates whether the account metadata has been modified
-
 }
 
 func (a *AccountMetadata) ID() string {
@@ -125,6 +126,7 @@ func (a *AccountMetadata) GetDisplayName(groupID string) string {
 }
 
 func (a *AccountMetadata) GetGroupDisplayNameOrDefault(groupID string) string {
+
 	if a.GroupDisplayNames == nil {
 		a.GroupDisplayNames = make(map[string]string)
 	}
