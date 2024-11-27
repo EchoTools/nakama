@@ -408,7 +408,7 @@ func (c CandidateData) mm() [][]runtime.MatchmakerEntry {
 
 func TestMatchmaker(t *testing.T) {
 	// disable for now
-	//t.SkipNow()
+	t.SkipNow()
 	// open /tmp/possible-matches.json
 	file, err := os.Open("/tmp/candidates.json")
 	if err != nil {
@@ -493,20 +493,19 @@ func TestMatchmaker(t *testing.T) {
 	t.Errorf("Made Matches: %v", madeMatches)
 }
 func TestSortPriority(t *testing.T) {
-	team1 := RatedEntryTeam{
-		&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"priority_threshold": float64(time.Now().Add(-10 * time.Minute).Unix())}, Ticket: "ticket1"}},
-	}
-	team2 := RatedEntryTeam{
-		&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{}}},
-	}
-	team3 := RatedEntryTeam{
-		&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"priority_threshold": float64(time.Now().Add(-1 * time.Minute).Unix())}, Ticket: "ticket3"}},
-	}
-	team4 := RatedEntryTeam{
-		&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"priority_threshold": float64(time.Now().Add(-2 * time.Minute).Unix())}, Ticket: "ticket4"}},
-	}
-	team5 := RatedEntryTeam{
-		&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{}, Ticket: "ticket5"}},
+
+	teams := make([]RatedEntryTeam, 0)
+	for i := int64(0); i < 5; i++ {
+		threshold := time.Now().Unix() - (1 * 60 * i)
+		if i == 0 {
+			teams = append(teams, RatedEntryTeam{
+				&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{}, Ticket: fmt.Sprintf("ticket%d", i)}},
+			})
+			continue
+		}
+		teams = append(teams, RatedEntryTeam{
+			&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"priority_threshold": threshold}, Ticket: fmt.Sprintf("ticket%d", i)}},
+		})
 	}
 
 	tests := []struct {
@@ -517,14 +516,14 @@ func TestSortPriority(t *testing.T) {
 		{
 			name: "Mixed priority thresholds",
 			predictions: []PredictedMatch{
-				{Team1: team1, Team2: team5},
-				{Team1: team3, Team2: team4},
-				{Team1: team3, Team2: team2},
+				{Team1: teams[0], Team2: teams[4]},
+				{Team1: teams[2], Team2: teams[3]},
+				{Team1: teams[2], Team2: teams[1]},
 			},
 			want: []PredictedMatch{
-				{Team1: team3, Team2: team2},
-				{Team1: team3, Team2: team4},
-				{Team1: team1, Team2: team5},
+				{Team1: teams[2], Team2: teams[1]},
+				{Team1: teams[2], Team2: teams[3]},
+				{Team1: teams[0], Team2: teams[4]},
 			},
 		},
 	}
@@ -537,8 +536,107 @@ func TestSortPriority(t *testing.T) {
 			for i, got := range tt.predictions {
 				want := tt.want[i]
 				if !reflect.DeepEqual(got, want) {
-					t.Errorf("sortPriority() =\nTeam1: %v\nTeam2: %v\nwant\nTeam1: %v\nTeam2: %v", getTeamTickets(got.Team1), getTeamTickets(got.Team2), getTeamTickets(want.Team1), getTeamTickets(want.Team2))
+					t.Errorf("sortPriority() =\nTeam1: %v\nTeam2: %v\nwant\nTeam1: %v\nTeam2: %v",
+						getTeamTickets(got.Team1),
+						getTeamTickets(got.Team2),
+						getTeamTickets(want.Team1),
+						getTeamTickets(want.Team2),
+					)
 				}
+			}
+		})
+	}
+}
+
+func TestFilterOddSizedTeams(t *testing.T) {
+	m := &skillBasedMatchmaker{}
+
+	entries := make([]runtime.MatchmakerEntry, 0)
+	for i := 0; i < 5; i++ {
+		entries = append(entries, &MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: uuid.NewV5(uuid.Nil, fmt.Sprintf("%d", i)).String()}})
+	}
+
+	tests := []struct {
+		name       string
+		candidates [][]runtime.MatchmakerEntry
+		want       [][]runtime.MatchmakerEntry
+		wantCount  int
+	}{
+		{
+			name: "No odd-sized teams",
+			candidates: [][]runtime.MatchmakerEntry{
+				{
+					entries[1],
+					entries[2],
+				},
+				{
+					entries[3],
+					entries[4],
+				},
+			},
+			want: [][]runtime.MatchmakerEntry{
+				{
+					entries[1],
+					entries[2],
+				},
+				{
+					entries[3],
+					entries[4],
+				},
+			},
+			wantCount: 0,
+		},
+		{
+			name: "One odd-sized team",
+			candidates: [][]runtime.MatchmakerEntry{
+				{
+					entries[1],
+				},
+				{
+					entries[2],
+					entries[3],
+				},
+			},
+			want: [][]runtime.MatchmakerEntry{
+				{
+					entries[2],
+					entries[3],
+				},
+			},
+			wantCount: 1,
+		},
+		{
+			name: "Multiple odd-sized teams",
+			candidates: [][]runtime.MatchmakerEntry{
+				{
+					entries[1],
+				},
+				{
+					entries[2],
+					entries[3],
+				},
+				{
+					entries[4],
+				},
+			},
+			want: [][]runtime.MatchmakerEntry{
+				{
+					entries[2],
+					entries[3],
+				},
+			},
+			wantCount: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, gotCount := m.filterOddSizedTeams(tt.candidates)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("filterOddSizedTeams() got = %v, want %v", got, tt.want)
+			}
+			if gotCount != tt.wantCount {
+				t.Errorf("filterOddSizedTeams() gotCount = %v, want %v", gotCount, tt.wantCount)
 			}
 		})
 	}

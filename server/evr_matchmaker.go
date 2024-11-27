@@ -181,12 +181,12 @@ func (m *SkillBasedMatchmaker) filterOddSizedTeams(candidates [][]runtime.Matchm
 	oddSizedCount := 0
 	for i := 0; i < len(candidates); i++ {
 		if len(candidates[i])%2 != 0 {
-			oddSizedCount++
+			count++
 			candidates = append(candidates[:i], candidates[i+1:]...)
 			i--
 		}
 	}
-	return candidates, oddSizedCount
+	return candidates, count
 }
 
 // Ensure that everyone in the match is within their max_rtt of a common server
