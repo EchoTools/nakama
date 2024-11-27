@@ -944,11 +944,12 @@ func GetPlayerStats(ctx context.Context, db *sql.DB, userID string) (evr.PlayerS
 	return playerStats, nil
 }
 
-func GetPlayerRating(ctx context.Context, db *sql.DB, userID, groupID uuid.UUID, mode evr.Symbol) (*types.Rating, error) {
-	query := "SELECT value->'rating'->$4->$5 FROM storage WHERE collection = $1 AND key = $2 AND user_id = $3"
+func GetPlayerRatings(ctx context.Context, db *sql.DB, userID uuid.UUID) (map[uuid.UUID]map[evr.Symbol]types.Rating, error) {
+	query := "SELECT value->>'ratings' FROM storage WHERE user_id = $1 AND collection = $2 AND key = $3"
 	var dbStatsJSON string
 	var found = true
-	err := db.QueryRowContext(ctx, query, GameProfileStorageCollection, GameProfileStorageKey, userID.String(), groupID.String(), mode.String()).Scan(&dbStatsJSON)
+
+	err := db.QueryRowContext(ctx, query, userID.String(), GameProfileStorageCollection, GameProfileStorageKey).Scan(&dbStatsJSON)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			found = false
@@ -968,16 +969,7 @@ func GetPlayerRating(ctx context.Context, db *sql.DB, userID, groupID uuid.UUID,
 		return nil, fmt.Errorf("error unmarshalling player statistics: %w", err)
 	}
 
-	if _, ok := ratings[groupID]; !ok {
-		return nil, status.Error(codes.NotFound, "group not found")
-	}
-
-	if rating, ok := ratings[groupID][mode]; ok {
-		return &rating, nil
-	}
-
-	rating := NewDefaultRating()
-	return &rating, nil
+	return ratings, nil
 }
 
 func GetPartyGroupUserIDs(ctx context.Context, nk runtime.NakamaModule, groupName string) ([]string, error) {

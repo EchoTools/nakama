@@ -1391,20 +1391,55 @@ func PlayerStatisticsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 		uid := uuid.FromStringOrNil(userID)
 		gid := uuid.FromStringOrNil(groupID)
 
-		rating, err := GetPlayerRating(ctx, db, uid, gid, mode)
+		// Set a default if they don't have a rating
+		if _, ok := stats[modestr]; !ok {
+			stats[modestr] = make(map[string]evr.MatchStatistic)
+			stats[modestr]["RatingMu"] = evr.MatchStatistic{
+				Operation: "rep",
+				Value:     25.0,
+				Count:     1,
+			}
+
+			stats[modestr]["RatingSigma"] = evr.MatchStatistic{
+				Operation: "rep",
+				Value:     8.333,
+				Count:     1,
+			}
+		}
+
+		ratings, err := GetPlayerRatings(ctx, db, uid)
 		if err != nil {
 			return "", err
 		}
 
-		stats[modestr]["RatingMu"] = evr.MatchStatistic{
-			Value: float64(rating.Mu),
-		}
+		if r, ok := ratings[gid]; ok {
+			if r, ok := r[mode]; ok {
+				stats[modestr]["RatingMu"] = evr.MatchStatistic{
+					Operation: "rep",
+					Value:     float64(r.Mu),
+					Count:     1,
+				}
 
-		stats[modestr]["RatingSigma"] = evr.MatchStatistic{
-			Value: float64(rating.Sigma),
+				stats[modestr]["RatingSigma"] = evr.MatchStatistic{
+					Operation: "rep",
+					Value:     float64(r.Sigma),
+					Count:     1,
+				}
+			}
 		}
-
 	}
+
+	for g, mode := range stats {
+		for m, stat := range mode {
+			if stat.Count > 0 {
+				stats[g][m] = evr.MatchStatistic{
+					Operation: stat.Operation,
+					Value:     stat.Value,
+				}
+			}
+		}
+	}
+
 	response := &PlayerStatsRPCResponse{
 		Stats: stats,
 	}
