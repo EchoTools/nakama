@@ -613,22 +613,22 @@ type ArenaUnlocks struct {
 	Emissive0013                bool `json:"rwd_emissive_0013,omitempty"`
 	Emissive0014                bool `json:"rwd_emissive_0014,omitempty"`
 	Emissive0016                bool `json:"rwd_emissive_0016,omitempty"`
-	EmissiveUnreleasedLancer    bool `json:"rwd_emissive_0017,omitempty" validate:"restricted"`
+	EmissiveUnreleasedLancer    bool `json:"rwd_emissive_0017,omitempty"`
 	Emissive0023                bool `json:"rwd_emissive_0023,omitempty"`
 	Emissive0024                bool `json:"rwd_emissive_0024,omitempty"`
 	Emissive0025                bool `json:"rwd_emissive_0025,omitempty"`
 	Emissive0026                bool `json:"rwd_emissive_0026,omitempty"`
-	EmissiveMoonlight           bool `json:"rwd_emissive_0027,omitempty" validate:"restricted"`
+	EmissiveMoonlight           bool `json:"rwd_emissive_0027,omitempty"`
 	Emissive0028                bool `json:"rwd_emissive_0028,omitempty"`
 	Emissive0029                bool `json:"rwd_emissive_0029,omitempty"`
-	EmissiveHalloween           bool `json:"rwd_emissive_0031,omitempty" validate:"restricted"`
-	EmissiveVroom               bool `json:"rwd_emissive_0033,omitempty" validate:"restricted"`
-	EmissiveDayDream            bool `json:"rwd_emissive_0034,omitempty" validate:"restricted"`
-	EmissivePaladin             bool `json:"rwd_emissive_0035,omitempty" validate:"restricted"`
-	EmissiveFume                bool `json:"rwd_emissive_0036,omitempty" validate:"restricted"`
-	EmissiveCircadian           bool `json:"rwd_emissive_0037,omitempty" validate:"restricted"`
-	EmissiveSpringtime          bool `json:"rwd_emissive_0038,omitempty" validate:"restricted"`
-	EmissiveValor               bool `json:"rwd_emissive_0040,omitempty" validate:"restricted"`
+	EmissiveHalloween           bool `json:"rwd_emissive_0031,omitempty"`
+	EmissiveVroom               bool `json:"rwd_emissive_0033,omitempty"`
+	EmissiveDayDream            bool `json:"rwd_emissive_0034,omitempty"`
+	EmissivePaladin             bool `json:"rwd_emissive_0035,omitempty"`
+	EmissiveFume                bool `json:"rwd_emissive_0036,omitempty"`
+	EmissiveCircadian           bool `json:"rwd_emissive_0037,omitempty"`
+	EmissiveSpringtime          bool `json:"rwd_emissive_0038,omitempty"`
+	EmissiveValor               bool `json:"rwd_emissive_0040,omitempty"`
 	EmissiveDefault             bool `json:"emissive_default,omitempty"`
 	Emote0000                   bool `json:"rwd_emote_0000,omitempty"`
 	Emote0001                   bool `json:"rwd_emote_0001,omitempty"`
