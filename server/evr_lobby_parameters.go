@@ -281,7 +281,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		return nil, fmt.Errorf("failed to get overall percentile: %w", err)
 	}
 
-	dailyPercentile, _, err := RecalculatePlayerRankPercentile(ctx, logger, p.runtimeModule, session.userID.String(), mode, "daily")
+	dailyPercentile, _, err := RecalculatePlayerRankPercentile(ctx, logger, p.runtimeModule, session.userID.String(), mode, "weekly")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get daily percentile: %w", err)
 	}
