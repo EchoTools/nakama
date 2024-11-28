@@ -993,7 +993,6 @@ type ArenaUnlocks struct {
 	RWDTitle0019                bool `json:"rwd_title_0019,omitempty"`
 	StubMedal0018               bool `json:"rwd_medal_0018,omitempty" validate:"blocked"`
 	StubMedal0019               bool `json:"rwd_medal_0019,omitempty" validate:"blocked"`
-	StubMedal0026               bool `json:"rwd_medal_0026,omitempty" validate:"blocked"`
 	StubPattern0013             bool `json:"rwd_pattern_0013,omitempty" validate:"blocked"`
 	StubPattern0014             bool `json:"rwd_pattern_0014,omitempty" validate:"blocked"`
 	StubPattern0015             bool `json:"rwd_pattern_0015,omitempty" validate:"blocked"`
