@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -130,7 +131,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 
 	whoami.DisplayNames = make([]string, 0, len(pastDisplayNames))
 	for dn := range pastDisplayNames {
-		whoami.DisplayNames = append(whoami.DisplayNames, dn)
+		whoami.DisplayNames = append(whoami.DisplayNames, EscapeDiscordMarkdown(dn))
 	}
 
 	slices.SortStableFunc(whoami.DisplayNames, func(a, b string) int {
@@ -207,22 +208,22 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	}
 
 	fields := []*discordgo.MessageEmbedField{
-		{Name: "Nakama ID", Value: whoami.NakamaID.String(), Inline: false},
-		{Name: "Online", Value: func() string {
-			if len(presences) > 0 {
-				return "Yes"
-			}
-			return "No"
-		}(), Inline: true},
-		{Name: "Create Time", Value: fmt.Sprintf("<t:%d:R>", whoami.CreateTime.Unix()), Inline: false},
+		{Name: "Nakama ID", Value: whoami.NakamaID.String(), Inline: true},
 		{Name: "Username", Value: whoami.Username, Inline: true},
 		{Name: "Discord ID", Value: whoami.DiscordID, Inline: true},
+		{Name: "Created", Value: fmt.Sprintf("<t:%d:R>", whoami.CreateTime.Unix()), Inline: false},
 		{Name: "Password Set", Value: func() string {
 			if whoami.HasPassword {
 				return "Yes"
 			}
 			return ""
 		}(), Inline: true},
+		{Name: "Online", Value: func() string {
+			if len(presences) > 0 {
+				return "Yes"
+			}
+			return "No"
+		}(), Inline: false},
 		{Name: "Linked Devices", Value: strings.Join(whoami.DeviceLinks, "\n"), Inline: false},
 		{Name: "Display Names", Value: strings.Join(whoami.DisplayNames, "\n"), Inline: false},
 		{Name: "Recent Logins", Value: func() string {
@@ -241,7 +242,15 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		{Name: "Guild Memberships", Value: strings.Join(func() []string {
 			output := make([]string, 0, len(whoami.GuildGroupMemberships))
 
-			for gid, m := range whoami.GuildGroupMemberships {
+			groupIDs := make([]string, 0, len(whoami.GuildGroupMemberships))
+			for gid := range whoami.GuildGroupMemberships {
+				groupIDs = append(groupIDs, gid)
+			}
+			sort.Strings(groupIDs)
+
+			for _, gid := range groupIDs {
+				m := whoami.GuildGroupMemberships[gid]
+
 				group, ok := guildGroups[gid]
 				if !ok {
 					continue
@@ -278,7 +287,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 			return output
 		}(), "\n"), Inline: false},
 		{Name: "Match List", Value: strings.Join(lo.Map(whoami.MatchLabels, func(l *MatchLabel, index int) string {
-			link := fmt.Sprintf("[%s](https://echo.taxi/spark://c/%s)", l.Mode.String(), strings.ToUpper(l.ID.UUID.String()))
+			link := fmt.Sprintf("`%s`: https://echo.taxi/spark://c/%s", l.Mode.String(), strings.ToUpper(l.ID.UUID.String()))
 			players := make([]string, 0, len(l.Players))
 			for _, p := range l.Players {
 				players = append(players, fmt.Sprintf("<@%s>", p.DiscordID))
