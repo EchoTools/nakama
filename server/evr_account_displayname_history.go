@@ -23,26 +23,26 @@ type DisplayNameHistoryEntry struct {
 }
 
 type DisplayNameHistory struct {
-	History  map[string][]DisplayNameHistoryEntry `json:"history"`  // map[groupID]DisplayNameHistoryEntry
-	Cache    []string                             `json:"cache"`    // All past display names
-	Reserved []string                             `json:"reserved"` // staticly reserved names
-	Active   []string                             `json:"active"`   // names that the user has reserved
+	Histories map[string][]DisplayNameHistoryEntry `json:"history"`  // map[groupID]DisplayNameHistoryEntry
+	Cache     []string                             `json:"cache"`    // All past display names
+	Reserved  []string                             `json:"reserved"` // staticly reserved names
+	Active    []string                             `json:"active"`   // names that the user has reserved
 }
 
 func NewDisplayNameHistory() *DisplayNameHistory {
 	return &DisplayNameHistory{
-		History:  make(map[string][]DisplayNameHistoryEntry),
-		Active:   make([]string, 0),
-		Reserved: make([]string, 0),
+		Histories: make(map[string][]DisplayNameHistoryEntry),
+		Active:    make([]string, 0),
+		Reserved:  make([]string, 0),
 	}
 }
 
 func (h *DisplayNameHistory) AddEntry(groupID, displayName string) {
-	if h.History == nil {
-		h.History = make(map[string][]DisplayNameHistoryEntry)
+	if h.Histories == nil {
+		h.Histories = make(map[string][]DisplayNameHistoryEntry)
 	}
 
-	h.History[groupID] = append(h.History[groupID], DisplayNameHistoryEntry{
+	h.Histories[groupID] = append(h.Histories[groupID], DisplayNameHistoryEntry{
 		DisplayName: displayName,
 		UpdateTime:  time.Now(),
 	})
@@ -53,9 +53,9 @@ func (h *DisplayNameHistory) AddEntry(groupID, displayName string) {
 
 func (h *DisplayNameHistory) updateCache() {
 	// Limit the history to the past two months
-	h.Cache = make([]string, 0, len(h.History))
+	h.Cache = make([]string, 0, len(h.Histories))
 
-	for _, items := range h.History {
+	for _, items := range h.Histories {
 		for i := 0; i < len(items); i++ {
 			if items[i].UpdateTime.AddDate(0, 2, 0).Before(time.Now()) {
 				items = append(items[:i], items[i+1:]...)
@@ -94,7 +94,7 @@ func (h *DisplayNameHistory) RemoveStaticReserved(displayName string) {
 
 func (h *DisplayNameHistory) updateActive() {
 	h.Active = make([]string, 0)
-	for _, items := range h.History {
+	for _, items := range h.Histories {
 		if len(items) == 0 {
 			continue
 		}
@@ -166,7 +166,7 @@ func DisplayNameHistoryAdd(ctx context.Context, nk runtime.NakamaModule, userID 
 	return nil
 }
 
-func DisplayNameHistorySearch(ctx context.Context, nk runtime.NakamaModule, pattern string) (map[string]*DisplayNameHistory, error) {
+func DisplayNameCacheRegexSearch(ctx context.Context, nk runtime.NakamaModule, pattern string) (map[string]*DisplayNameHistory, error) {
 	query := fmt.Sprintf("+value.cache:/%s/", pattern)
 	// Perform the storage list operation
 	result, err := nk.StorageIndexList(ctx, SystemUserID, DisplayNameHistoryCacheIndex, query, 100)
@@ -199,14 +199,4 @@ func DisplayNameHistoryActiveList(ctx context.Context, nk runtime.NakamaModule, 
 	}
 
 	return userIDs, nil
-}
-
-func DisplayNameHistoryListPattern(ctx context.Context, nk runtime.NakamaModule, pattern string) (int, error) {
-	// Perform the storage list operation
-	query := fmt.Sprintf("+value.cache:/%s/", pattern)
-	result, err := nk.StorageIndexList(ctx, SystemUserID, DisplayNameHistoryCacheIndex, query, 100)
-	if err != nil {
-		return -1, fmt.Errorf("error listing display name history: %w", err)
-	}
-	return len(result.Objects), nil
 }

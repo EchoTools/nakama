@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"regexp"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -302,6 +303,18 @@ var (
 					Type:        discordgo.ApplicationCommandOptionUser,
 					Name:        "user",
 					Description: "User to lookup",
+					Required:    true,
+				},
+			},
+		},
+		{
+			Name:        "search",
+			Description: "Search for a player by display name, user ID, or EVR ID (i.e. OVR-ORG-).",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "pattern",
+					Description: "Partial name to use in search pattern",
 					Required:    true,
 				},
 			},
@@ -1593,6 +1606,134 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			return d.handleProfileRequest(ctx, logger, nk, s, i, target.ID, target.Username, guildID, isGlobalModerator, isGlobalModerator)
 		},
+		"search": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userIDStr string, groupID string) error {
+
+			if user == nil {
+				return nil
+			}
+
+			options := i.ApplicationCommandData().Options
+
+			if len(options) == 0 {
+				return errors.New("no options provided")
+			}
+
+			partial := options[0].StringValue()
+
+			partial = sanitizeDisplayName(strings.ToLower(partial))
+
+			pattern := fmt.Sprintf(".*%s.*", partial)
+			histories, err := DisplayNameCacheRegexSearch(ctx, nk, pattern)
+			if err != nil {
+				logger.Error("Failed to search display name history", zap.Error(err))
+				return fmt.Errorf("failed to search display name history: %w", err)
+			}
+
+			if len(histories) == 0 {
+				return simpleInteractionResponse(s, i, "No results found")
+			}
+
+			exactOnly := false
+			/*
+				if len(histories) > 10 {
+
+					// limit to exact hits
+					exactOnly = true
+				}
+			*/
+
+			resultsByUserID := make(map[string][]DisplayNameHistoryEntry, len(histories))
+
+			for userID, journal := range histories {
+
+				// Only search this guild
+				history, ok := journal.Histories[groupID]
+				if !ok {
+					continue
+				}
+
+				for _, e := range history {
+
+					if exactOnly && strings.ToLower(e.DisplayName) != partial {
+						continue
+					}
+
+					if !strings.Contains(strings.ToLower(e.DisplayName), partial) {
+						continue
+					}
+
+					resultsByUserID[userID] = append(resultsByUserID[userID], e)
+				}
+			}
+
+			if len(resultsByUserID) == 0 {
+				return simpleInteractionResponse(s, i, "No results found")
+			}
+
+			// Sort each players results by update time
+			for userID, r := range resultsByUserID {
+				sort.Slice(r, func(i, j int) bool {
+					return r[i].UpdateTime.After(r[j].UpdateTime)
+				})
+
+				// Remove older duplicates
+				seen := make(map[string]struct{})
+				unique := make([]DisplayNameHistoryEntry, 0, len(r))
+				for _, e := range r {
+					if _, ok := seen[e.DisplayName]; ok {
+						continue
+					}
+					seen[e.DisplayName] = struct{}{}
+					unique = append(unique, e)
+				}
+				resultsByUserID[userID] = unique
+
+				// Limit the results to the most recent 10
+			}
+
+			// Create the embed
+			embed := &discordgo.MessageEmbed{
+				Title:  "Search Results",
+				Color:  0x9656ce,
+				Fields: make([]*discordgo.MessageEmbedField, 0, len(resultsByUserID)),
+			}
+
+			for userID, results := range resultsByUserID {
+
+				// Get the discord ID
+				discordID := d.cache.UserIDToDiscordID(userID)
+				if discordID == "" {
+					logger.Warn("Failed to get discord ID", zap.Error(err))
+					continue
+				}
+
+				embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+					Name:   "Player",
+					Value:  fmt.Sprintf("<@%s>", discordID),
+					Inline: true,
+				})
+
+				displayNames := make([]string, 0, len(results))
+				for _, r := range results {
+					displayNames = append(displayNames, fmt.Sprintf("%s <t:%d:R>", EscapeDiscordMarkdown(r.DisplayName), r.UpdateTime.UTC().Unix()))
+				}
+
+				embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+					Name:   "In-Game Names",
+					Value:  strings.Join(displayNames, "\n"),
+					Inline: false,
+				})
+			}
+
+			// Send the response
+			return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Flags:  discordgo.MessageFlagsEphemeral,
+					Embeds: []*discordgo.MessageEmbed{embed},
+				},
+			})
+		},
 		"create": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			options := i.ApplicationCommandData().Options
 
@@ -2772,4 +2913,21 @@ func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runt
 		}()
 	}
 	return nil
+}
+
+var discordMarkdownEscapeReplacer = strings.NewReplacer(
+	`\`, `\\`,
+	"`", "\\`",
+	"~", "\\~",
+	"|", "\\|",
+	"**", "\\**",
+	"~~", "\\~~",
+	"@", "@\u200B",
+	"<", "<\u200B",
+	">", ">\u200B",
+	"_", "\\_",
+)
+
+func EscapeDiscordMarkdown(s string) string {
+	return discordMarkdownEscapeReplacer.Replace(s)
 }

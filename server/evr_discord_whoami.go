@@ -120,7 +120,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	}
 
 	pastDisplayNames := make(map[string]time.Time)
-	for _, items := range history.History {
+	for _, items := range history.Histories {
 		for _, item := range items {
 			if e, ok := pastDisplayNames[item.DisplayName]; !ok || e.After(item.UpdateTime) {
 				pastDisplayNames[item.DisplayName] = item.UpdateTime

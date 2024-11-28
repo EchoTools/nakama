@@ -1487,14 +1487,17 @@ func AccountSearchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	}
 
 	if request.DisplayNamePattern == "" {
-		return "", runtime.NewError("Display name is empty", StatusInvalidArgument)
+		return "", runtime.NewError("Search pattern name is empty", StatusInvalidArgument)
 	}
 
 	// Sanitize the display name
-	request.DisplayNamePattern = strings.ToLower(request.DisplayNamePattern)
+	request.DisplayNamePattern = sanitizeDisplayName(strings.ToLower(request.DisplayNamePattern))
 
+	if request.DisplayNamePattern == "" {
+		return "", runtime.NewError("Search pattern is empty after sanitization.", StatusInvalidArgument)
+	}
 	query := fmt.Sprintf(".*%s.*", Query.Escape(request.DisplayNamePattern))
-	objects, err := DisplayNameHistorySearch(ctx, nk, query)
+	objects, err := DisplayNameCacheRegexSearch(ctx, nk, query)
 	if err != nil {
 		return "", runtime.NewError(err.Error(), StatusInternalError)
 	}
@@ -1502,7 +1505,7 @@ func AccountSearchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	matches := make([]DisplayNameMatchItem, 0, len(objects))
 	for matchUserID, history := range objects {
 
-		for groupID, entries := range history.History {
+		for groupID, entries := range history.Histories {
 			for i, e := range entries {
 				displayNameL := strings.ToLower(e.DisplayName)
 				if strings.Contains(displayNameL, request.DisplayNamePattern) {
