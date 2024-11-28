@@ -519,6 +519,9 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 	if err != nil {
 		return session.SendEvr(evr.NewLoggedInUserProfileFailure(request.EvrID, 400, "failed to load game profiles"))
 	}
+
+	profile.ExpireStatistics(2, 2)
+
 	profile.SetEvrID(request.EvrID)
 
 	gg, found := p.guildGroupCache.GuildGroup(params.AccountMetadata.GetActiveGroupID().String())
