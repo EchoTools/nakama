@@ -25,7 +25,7 @@ type WhoAmI struct {
 	EVRIDLogins           map[string]time.Time            `json:"evr_id_logins"`
 	GuildGroupMemberships map[string]GuildGroupMembership `json:"guild_memberships"`
 	VRMLSeasons           []string                        `json:"vrml_seasons"`
-	MatchIDs              []string                        `json:"match_ids"`
+	MatchLabels           []*MatchLabel                   `json:"match_labels"`
 	DefaultLobbyGroup     string                          `json:"active_lobby_group,omitempty"`
 	ClientAddresses       []string                        `json:"addresses,omitempty"`
 	GhostedPlayers        []string                        `json:"ghosted_discord_ids,omitempty"`
@@ -46,7 +46,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		ClientAddresses:       make([]string, 0),
 		DeviceLinks:           make([]string, 0),
 		GuildGroupMemberships: make(map[string]GuildGroupMembership, 0),
-		MatchIDs:              make([]string, 0),
+		MatchLabels:           make([]*MatchLabel, 0),
 	}
 	// Get the user's ID
 	member, err := s.GuildMember(i.GuildID, discordID)
@@ -143,14 +143,20 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		return err
 	}
 
-	whoami.MatchIDs = make([]string, 0, len(presences))
+	whoami.MatchLabels = make([]*MatchLabel, 0, len(presences))
 	for _, p := range presences {
 		if p.GetStatus() != "" {
 			mid := MatchIDFromStringOrNil(p.GetStatus())
 			if mid.IsNil() {
 				continue
 			}
-			whoami.MatchIDs = append(whoami.MatchIDs, mid.UUID.String())
+			label, err := MatchLabelByID(ctx, nk, mid)
+			if err != nil {
+				logger.Warn("failed to get match label", "error", err)
+				continue
+			}
+
+			whoami.MatchLabels = append(whoami.MatchLabels, label)
 		}
 	}
 
@@ -197,7 +203,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 			whoami.GuildGroupMemberships = nil
 		}
 		whoami.GhostedPlayers = nil
-		whoami.MatchIDs = nil
+		whoami.MatchLabels = nil
 	}
 
 	fields := []*discordgo.MessageEmbedField{
@@ -271,8 +277,13 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 			}
 			return output
 		}(), "\n"), Inline: false},
-		{Name: "Current Match(es)", Value: strings.Join(lo.Map(whoami.MatchIDs, func(m string, index int) string {
-			return fmt.Sprintf("https://echo.taxi/spark://c/%s", strings.ToUpper(m))
+		{Name: "Match List", Value: strings.Join(lo.Map(whoami.MatchLabels, func(l *MatchLabel, index int) string {
+			link := fmt.Sprintf("[%s](https://echo.taxi/spark://c/%s)", l.Mode.String(), strings.ToUpper(l.ID.UUID.String()))
+			players := make([]string, 0, len(l.Players))
+			for _, p := range l.Players {
+				players = append(players, fmt.Sprintf("<@%s>", p.DiscordID))
+			}
+			return fmt.Sprintf("%s - %s\n%s", l.Mode.String(), link, strings.Join(players, ", "))
 		}), "\n"), Inline: false},
 	}
 
