@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -1628,11 +1627,10 @@ func MatchmakerCandidatesRPCFactory(sbmm *SkillBasedMatchmaker) func(ctx context
 			"matches":    matches,
 		}
 
-		data := make([]byte, 0)
-		if err := json.NewEncoder(bytes.NewBuffer(data)).Encode(response); err != nil {
+		data, err := json.Marshal(response)
+		if err != nil {
 			return "", err
 		}
-
 		// Cache the result
 
 		rpcResponseCache.Set("matchmaker_candidates", data, 30*time.Second)
