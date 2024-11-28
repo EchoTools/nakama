@@ -39,17 +39,28 @@ func (s *SkillBasedMatchmaker) StoreLatestResult(candidates, madeMatches [][]run
 }
 
 func (s *SkillBasedMatchmaker) GetLatestResult() (candidates, madeMatches [][]runtime.MatchmakerEntry) {
-	candidates = s.latestCandidates.Load().([][]runtime.MatchmakerEntry)
-	madeMatches = s.latestMatches.Load().([][]runtime.MatchmakerEntry)
+	var ok bool
+	candidates, ok = s.latestCandidates.Load().([][]runtime.MatchmakerEntry)
+	if !ok {
+		return
+	}
+	madeMatches, ok = s.latestMatches.Load().([][]runtime.MatchmakerEntry)
+	if !ok {
+		return candidates, nil
+	}
 	return
 }
 
 func NewSkillBasedMatchmaker() *SkillBasedMatchmaker {
-	return &SkillBasedMatchmaker{
+	sbmm := SkillBasedMatchmaker{
 		writeMu:          &sync.RWMutex{},
 		latestCandidates: &atomic.Value{},
 		latestMatches:    &atomic.Value{},
 	}
+
+	sbmm.latestCandidates.Store([][]runtime.MatchmakerEntry{})
+	sbmm.latestMatches.Store([][]runtime.MatchmakerEntry{})
+	return &sbmm
 }
 
 // Function to be used as a matchmaker function in Nakama (RegisterMatchmakerOverride)
