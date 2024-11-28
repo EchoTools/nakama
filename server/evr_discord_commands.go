@@ -1693,7 +1693,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			// Create the embed
 			embed := &discordgo.MessageEmbed{
-				Title:  "Search Results",
+				Title:  "Search Results for `" + partial + "`",
 				Color:  0x9656ce,
 				Fields: make([]*discordgo.MessageEmbedField, 0, len(resultsByUserID)),
 			}
