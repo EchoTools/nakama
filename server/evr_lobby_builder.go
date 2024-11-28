@@ -181,6 +181,11 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 				percentile = 0.0
 			}
 
+			query, ok := entry.StringProperties["query"]
+			if !ok {
+				query = ""
+			}
+
 			sessions = append(sessions, session)
 			entrantPresences = append(entrantPresences, &EvrMatchPresence{
 				Node:           sessionParams.Node,
@@ -198,6 +203,7 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 				IsPCVR:         sessionParams.IsPCVR.Load(),
 				Rating:         rating,
 				RankPercentile: percentile,
+				Query:          query,
 			})
 
 		}
