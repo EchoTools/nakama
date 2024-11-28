@@ -40,6 +40,8 @@ func RemoteLogMessageFromMessage(strMap map[string]interface{}, data []byte) (an
 			m = &RemoteLogStoreMetricsPayload{}
 		case "Server connection failed":
 			m = &RemoteLogServerConnectionFailed{}
+		case "Disconnected from server due to timeout":
+			m = &RemoteLogDisconnectedDueToTimeout{}
 		}
 	}
 
@@ -357,6 +359,22 @@ type RemoteLogServerConnectionFailed struct {
 }
 
 func (m RemoteLogServerConnectionFailed) SessionUUID() uuid.UUID {
+	return UUIDFromRemoteLogString(m.SessionUUIDStr)
+}
+
+type RemoteLogDisconnectedDueToTimeout struct {
+	Message               string  `json:"message"`
+	SessionUUIDStr        string  `json:"[session][uuid]"`
+	GameState             string  `json:"game_state"`
+	ServerAddress         string  `json:"server_address"`
+	ServerPing            float64 `json:"server_ping"`
+	RealPingEstimate      float64 `json:"real_ping_estimate"`
+	TimeSinceLastReceived float64 `json:"time_since_last_received"`
+	DecodeFailureRate     float64 `json:"decode_failure_rate"`
+	DropPercent           float64 `json:"drop_percent"`
+}
+
+func (m RemoteLogDisconnectedDueToTimeout) SessionUUID() uuid.UUID {
 	return UUIDFromRemoteLogString(m.SessionUUIDStr)
 }
 
