@@ -41,8 +41,12 @@ OuterLoop:
 				"Podium Interaction",
 				"Customization Item Preview",
 				"Customization Item Equip",
+				"Confirmation Panel Press",
 				"server library loaded",
 				"r15 net game error message",
+				"cst_usage_metrics",
+				"purchasing item",
+				"Tutorial progress",
 			},
 			"category": {
 				"iap",
