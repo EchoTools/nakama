@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -85,7 +86,7 @@ func (p *EvrPipeline) lobbySessionRequest(ctx context.Context, logger *zap.Logge
 				}, true)
 			}
 
-			if err == context.Canceled {
+			if ctx.Err() == context.Canceled || errors.Is(err, context.Canceled) {
 				logger.Debug("Lobby session request was canceled (context.Canceled)")
 				return
 			}
