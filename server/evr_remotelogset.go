@@ -116,7 +116,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 		if msg, ok := e.Parsed.(evr.GameTimer); ok {
 			matchID, err := NewMatchID(msg.SessionUUID(), p.node)
 			if err != nil {
-				logger.Error("Failed to create match ID", zap.Error(err))
+				logger.Error("Failed to create match ID", zap.Error(err), zap.Any("msg", msg))
 			} else {
 				update, _ = updates.LoadOrStore(matchID.UUID, &MatchGameStateUpdate{})
 				update.CurrentGameClock = time.Duration(msg.GameTime()) * time.Second
@@ -124,6 +124,9 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 		}
 		logger := logger.With(zap.String("message_type", fmt.Sprintf("%T", e.Parsed)))
 		switch msg := e.Parsed.(type) {
+
+		case *evr.RemoteLogDisconnectedDueToTimeout:
+			logger.Warn("Disconnected due to timeout", zap.String("username", session.Username()), zap.String("evr_id", evrID.String()), zap.Any("remote_log_message", msg))
 
 		case *evr.RemoteLogUserDisconnected:
 
