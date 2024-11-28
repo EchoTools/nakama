@@ -49,6 +49,8 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		}
 	*/
 
+	sbmm := NewSkillBasedMatchmaker()
+
 	// Register RPC's for device linking
 	rpcs := map[string]func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error){
 		"account/search":                AccountSearchRPC,
@@ -69,7 +71,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		"importloadouts":                ImportLoadoutsRpc,
 		"setmatchamakerstatus":          setMatchmakingStatusRpc,
 		"matchmaker/stream":             MatchmakerStreamRPC,
-		"matchmaker/candidates":         MatchmakerCandidatesRPC,
+		"matchmaker/candidates":         MatchmakerCandidatesRPCFactory(sbmm),
 		"stream/join":                   StreamJoinRPC,
 		//"/v1/storage/game/sourcedb/rad15/json/r14/loading_tips.json": StorageLoadingTipsRPC,
 	}
@@ -112,7 +114,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 
 	// Register the matchmaking override
 
-	if err := initializer.RegisterMatchmakerOverride(SkillBasedMatchmaker.EvrMatchmakerFn); err != nil {
+	if err := initializer.RegisterMatchmakerOverride(sbmm.EvrMatchmakerFn); err != nil {
 		return fmt.Errorf("unable to register matchmaker override: %w", err)
 	}
 

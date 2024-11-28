@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -1612,26 +1613,31 @@ func StreamJoinRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk ru
 	return response.String(), nil
 }
 
-func MatchmakerCandidatesRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+func MatchmakerCandidatesRPCFactory(sbmm *SkillBasedMatchmaker) func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 
-	// Load the match candidates from the storage.
+	return func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 
-	objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
-		{
-			UserID:     uuid.Nil.String(),
-			Collection: MatchmakerStorageCollection,
-			Key:        MatchmakerLatestCandidatesKey,
-		},
-	})
-	if err != nil {
-		return "", err
+		if data, _, found := rpcResponseCache.Get("matchmaker_candidates"); found {
+			return data.(string), nil
+		}
+
+		candidates, matches := sbmm.GetLatestResult()
+
+		response := map[string][][]runtime.MatchmakerEntry{
+			"candidates": candidates,
+			"matches":    matches,
+		}
+
+		data := make([]byte, 0)
+		if err := json.NewEncoder(bytes.NewBuffer(data)).Encode(response); err != nil {
+			return "", err
+		}
+
+		// Cache the result
+
+		rpcResponseCache.Set("matchmaker_candidates", data, 30*time.Second)
+
+		return string(data), nil
 	}
 
-	if len(objs) == 0 {
-		return "", nil
-	}
-
-	// Unmarshal the match candidates, remove IPs
-
-	return objs[0].Value, nil
 }
