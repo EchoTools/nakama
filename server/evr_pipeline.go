@@ -70,7 +70,6 @@ type EvrPipeline struct {
 	guildGroupCache              *GuildGroupCache
 	appBot                       *DiscordAppBot
 	leaderboardRegistry          *LeaderboardRegistry
-	sbmm                         *skillBasedMatchmaker
 	userRemoteLogJournalRegistry *UserLogJouralRegistry
 	ipqsClient                   *IPQSClient
 	matchLogManager              *MatchLogManager

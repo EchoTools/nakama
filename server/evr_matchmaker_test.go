@@ -122,7 +122,7 @@ func TestHasEligibleServers(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := &skillBasedMatchmaker{}
+			m := &SkillBasedMatchmaker{}
 
 			if got, count := m.filterWithinMaxRTT(tt.candidates); cmp.Diff(tt.want, got) != "" {
 				t.Errorf("hasEligibleServers() = %d: (want/got) %s", count, cmp.Diff(tt.want, got))
@@ -200,7 +200,7 @@ func TestCreateBalancedMatch(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := &skillBasedMatchmaker{}
+			m := &SkillBasedMatchmaker{}
 			gotTeam1, gotTeam2 := m.createBalancedMatch(tt.groups, tt.teamSize)
 
 			t.Logf("Team 1 Strength: %f", gotTeam1.Strength())
@@ -218,7 +218,7 @@ func TestCreateBalancedMatch(t *testing.T) {
 }
 
 func TestRemoveOddSizedTeams(t *testing.T) {
-	m := &skillBasedMatchmaker{}
+	m := &SkillBasedMatchmaker{}
 
 	entries := make([]runtime.MatchmakerEntry, 0)
 	for i := 0; i < 5; i++ {
@@ -344,7 +344,7 @@ func TestMatchmaker(t *testing.T) {
 	if err != nil {
 		t.Errorf("Error decoding file: %v", err)
 	}
-	m := &skillBasedMatchmaker{}
+	m := &SkillBasedMatchmaker{}
 
 	candidates := data.mm()
 	candidates, _ = m.filterWithinMaxRTT(candidates)
@@ -469,7 +469,7 @@ func TestSortPriority(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := &skillBasedMatchmaker{}
+			m := &SkillBasedMatchmaker{}
 			m.sortPriority(tt.predictions)
 
 			for i, got := range tt.predictions {

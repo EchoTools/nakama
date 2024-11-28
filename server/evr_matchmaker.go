@@ -3,12 +3,13 @@ package server
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"math"
 	"slices"
 	"sort"
 	"strings"
+	"sync"
+
 	"time"
 
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -16,6 +17,7 @@ import (
 	"github.com/intinig/go-openskill/rating"
 	"github.com/intinig/go-openskill/types"
 	"github.com/samber/lo"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 )
 
@@ -23,12 +25,35 @@ const (
 	MaximumRankDelta = 0.10
 )
 
-type skillBasedMatchmaker struct{}
+type SkillBasedMatchmaker struct {
+	writeMu          *sync.RWMutex
+	latestCandidates *atomic.Value // [][]runtime.MatchmakerEntry
+	latestMatches    *atomic.Value // [][]runtime.MatchmakerEntry
+}
 
-var SkillBasedMatchmaker = &skillBasedMatchmaker{}
+func (s *SkillBasedMatchmaker) StoreLatestResult(candidates, madeMatches [][]runtime.MatchmakerEntry) {
+	s.writeMu.Lock()
+	s.latestCandidates.Store(candidates)
+	s.latestMatches.Store(madeMatches)
+	s.writeMu.Unlock()
+}
+
+func (s *SkillBasedMatchmaker) GetLatestResult() (candidates, madeMatches [][]runtime.MatchmakerEntry) {
+	candidates = s.latestCandidates.Load().([][]runtime.MatchmakerEntry)
+	madeMatches = s.latestMatches.Load().([][]runtime.MatchmakerEntry)
+	return
+}
+
+func NewSkillBasedMatchmaker() *SkillBasedMatchmaker {
+	return &SkillBasedMatchmaker{
+		writeMu:          &sync.RWMutex{},
+		latestCandidates: &atomic.Value{},
+		latestMatches:    &atomic.Value{},
+	}
+}
 
 // Function to be used as a matchmaker function in Nakama (RegisterMatchmakerOverride)
-func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, candidates [][]runtime.MatchmakerEntry) [][]runtime.MatchmakerEntry {
+func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, candidates [][]runtime.MatchmakerEntry) [][]runtime.MatchmakerEntry {
 
 	if len(candidates) == 0 || len(candidates[0]) == 0 {
 		logger.Error("No candidates found. Matchmaker cannot run.")
@@ -46,7 +71,6 @@ func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 		logger.Error("Mode not found in entry properties. Matchmaker cannot run.")
 		return nil
 	}
-	originalCandidates := candidates[:]
 
 	// Extract all players from the candidates
 	allPlayers := make(map[string]struct{}, 0)
@@ -89,14 +113,12 @@ func (m *skillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 		"unmatched_players":   unmatchedPlayers,
 	}).Info("Skill-based matchmaker completed.")
 
-	// Save the candidates in storage
-	if err := m.saveLatestCandidates(ctx, nk, groupID, originalCandidates, matches); err != nil {
-		logger.Warn("Error saving latest candidates.", zap.Error(err))
-	}
+	m.StoreLatestResult(candidates, matches)
+
 	return matches
 }
 
-func (m *skillBasedMatchmaker) processPotentialMatches(modestr string, candidates [][]runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, map[string]int, error) {
+func (m *SkillBasedMatchmaker) processPotentialMatches(modestr string, candidates [][]runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, map[string]int, error) {
 
 	filterCounts := make(map[string]int)
 
@@ -132,7 +154,7 @@ func (m *skillBasedMatchmaker) processPotentialMatches(modestr string, candidate
 	return madeMatches, filterCounts, nil
 }
 
-func (m *skillBasedMatchmaker) filterOddSizedTeams(candidates [][]runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, int) {
+func (m *SkillBasedMatchmaker) filterOddSizedTeams(candidates [][]runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, int) {
 	oddSizedCount := 0
 	for i := 0; i < len(candidates); i++ {
 		if len(candidates[i])%2 != 0 {
@@ -145,7 +167,7 @@ func (m *skillBasedMatchmaker) filterOddSizedTeams(candidates [][]runtime.Matchm
 }
 
 // Ensure that everyone in the match is within their max_rtt of a common server
-func (m *skillBasedMatchmaker) filterWithinMaxRTT(candidates [][]runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, int) {
+func (m *SkillBasedMatchmaker) filterWithinMaxRTT(candidates [][]runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, int) {
 
 	var filteredCount int
 	for i := 0; i < len(candidates); i++ {
@@ -191,7 +213,7 @@ func (m *skillBasedMatchmaker) filterWithinMaxRTT(candidates [][]runtime.Matchma
 	return candidates, filteredCount
 }
 
-func (*skillBasedMatchmaker) teamStrength(team RatedEntryTeam) float64 {
+func (*SkillBasedMatchmaker) teamStrength(team RatedEntryTeam) float64 {
 	s := 0.0
 	for _, p := range team {
 		s += p.Rating.Mu
@@ -199,7 +221,7 @@ func (*skillBasedMatchmaker) teamStrength(team RatedEntryTeam) float64 {
 	return s
 }
 
-func (*skillBasedMatchmaker) predictDraw(teams []RatedEntryTeam) float64 {
+func (*SkillBasedMatchmaker) predictDraw(teams []RatedEntryTeam) float64 {
 	team1 := make(types.Team, 0, len(teams[0]))
 	team2 := make(types.Team, 0, len(teams[1]))
 	for _, e := range teams[0] {
@@ -211,7 +233,7 @@ func (*skillBasedMatchmaker) predictDraw(teams []RatedEntryTeam) float64 {
 	return rating.PredictDraw([]types.Team{team1, team2}, nil)
 }
 
-func (m *skillBasedMatchmaker) sortPriority(predictions []PredictedMatch) {
+func (m *SkillBasedMatchmaker) sortPriority(predictions []PredictedMatch) {
 	now := float64(time.Now().UTC().Unix())
 
 	slices.SortStableFunc(predictions, func(a, b PredictedMatch) int {
@@ -229,7 +251,7 @@ func (m *skillBasedMatchmaker) sortPriority(predictions []PredictedMatch) {
 	})
 }
 
-func (m *skillBasedMatchmaker) sortLimitRankSpread(predictions []PredictedMatch, maximumRankSpread float64) {
+func (m *SkillBasedMatchmaker) sortLimitRankSpread(predictions []PredictedMatch, maximumRankSpread float64) {
 	slices.SortStableFunc(predictions, func(a, b PredictedMatch) int {
 		rankTeamAvgs := make([][]float64, 2)
 
@@ -257,7 +279,7 @@ func (m *skillBasedMatchmaker) sortLimitRankSpread(predictions []PredictedMatch,
 	})
 }
 
-func (m *skillBasedMatchmaker) sortBySize(predictions []PredictedMatch) {
+func (m *SkillBasedMatchmaker) sortBySize(predictions []PredictedMatch) {
 	// Sort by size, then by prediction of a draw
 	slices.SortStableFunc(predictions, func(a, b PredictedMatch) int {
 		if len(a.Entrants()) > len(b.Entrants()) {
@@ -270,7 +292,7 @@ func (m *skillBasedMatchmaker) sortBySize(predictions []PredictedMatch) {
 	})
 }
 
-func (m *skillBasedMatchmaker) sortByDraw(predictions []PredictedMatch) {
+func (m *SkillBasedMatchmaker) sortByDraw(predictions []PredictedMatch) {
 	slices.SortStableFunc(predictions, func(a, b PredictedMatch) int {
 		if a.Draw > b.Draw {
 			return -1
@@ -282,7 +304,7 @@ func (m *skillBasedMatchmaker) sortByDraw(predictions []PredictedMatch) {
 	})
 }
 
-func (m *skillBasedMatchmaker) createBalancedMatch(groups [][]*RatedEntry, teamSize int) (RatedEntryTeam, RatedEntryTeam) {
+func (m *SkillBasedMatchmaker) createBalancedMatch(groups [][]*RatedEntry, teamSize int) (RatedEntryTeam, RatedEntryTeam) {
 	// Split out the solo players
 
 	team1 := make(RatedEntryTeam, 0, teamSize)
@@ -333,7 +355,7 @@ func (m *skillBasedMatchmaker) createBalancedMatch(groups [][]*RatedEntry, teamS
 	return team1, team2
 }
 
-func (m *skillBasedMatchmaker) balanceByTicket(candidate []runtime.MatchmakerEntry) RatedMatch {
+func (m *SkillBasedMatchmaker) balanceByTicket(candidate []runtime.MatchmakerEntry) RatedMatch {
 	// Group based on ticket
 
 	ticketMap := make(map[string][]*RatedEntry)
@@ -350,7 +372,7 @@ func (m *skillBasedMatchmaker) balanceByTicket(candidate []runtime.MatchmakerEnt
 	return RatedMatch{team1, team2}
 }
 
-func (m *skillBasedMatchmaker) predictOutcomes(candidates [][]runtime.MatchmakerEntry) []PredictedMatch {
+func (m *SkillBasedMatchmaker) predictOutcomes(candidates [][]runtime.MatchmakerEntry) []PredictedMatch {
 	predictions := make([]PredictedMatch, 0, len(candidates))
 	for _, match := range candidates {
 		ratedMatch := m.balanceByTicket(match)
@@ -363,7 +385,7 @@ func (m *skillBasedMatchmaker) predictOutcomes(candidates [][]runtime.Matchmaker
 	}
 	return predictions
 }
-func (m *skillBasedMatchmaker) assembleUniqueMatches(ratedMatches []PredictedMatch) [][]runtime.MatchmakerEntry {
+func (m *SkillBasedMatchmaker) assembleUniqueMatches(ratedMatches []PredictedMatch) [][]runtime.MatchmakerEntry {
 	seen := make(map[string]struct{})
 	selected := make([][]runtime.MatchmakerEntry, 0, len(ratedMatches))
 
@@ -387,43 +409,4 @@ OuterLoop:
 		selected = append(selected, match)
 	}
 	return selected
-}
-
-func (m *skillBasedMatchmaker) saveLatestCandidates(ctx context.Context, nk runtime.NakamaModule, groupID string, candidates [][]runtime.MatchmakerEntry, matches [][]runtime.MatchmakerEntry) error {
-
-	result := map[string]interface{}{
-		"candidates": candidates,
-		"matches":    matches,
-	}
-
-	if data, err := json.Marshal(result); err != nil {
-		return fmt.Errorf("error marshalling candidates: %v", err)
-	} else if len(data) > 10*1024*1024 {
-		return fmt.Errorf("candidates data too large: %d bytes", len(data))
-	} else {
-		data, err := json.Marshal(map[string]interface{}{"candidates": candidates})
-		if err != nil {
-			return fmt.Errorf("error marshalling candidates: %v", err)
-		} else {
-			if _, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{
-				{
-					UserID:          SystemUserID,
-					Collection:      MatchmakerStorageCollection,
-					Key:             MatchmakerLatestCandidatesKey,
-					PermissionRead:  0,
-					PermissionWrite: 0,
-					Value:           string(data),
-				},
-			}); err != nil {
-				return fmt.Errorf("error writing candidates to storage: %v", err)
-			}
-
-			// Send the candidates to the stream as well
-			if err := nk.StreamSend(StreamModeMatchmaker, groupID, "", "", string(data), nil, false); err != nil {
-				return fmt.Errorf("error sending candidates to stream: %v", err)
-			}
-		}
-	}
-
-	return nil
 }
