@@ -175,8 +175,11 @@ func LoadParams(ctx context.Context) (parameters *SessionParameters, found bool)
 func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessionID, userID uuid.UUID, username string, vars map[string]string, expiry int64, clientIP, clientPort, lang string, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, conn *websocket.Conn, sessionRegistry SessionRegistry, statusRegistry StatusRegistry, matchmaker Matchmaker, tracker Tracker, metrics Metrics, pipeline *Pipeline, evrPipeline *EvrPipeline, runtime *Runtime, request http.Request, storageIndex StorageIndex) Session {
 	logger = logger.With(zap.String("sid", sessionID.String()))
 
-	if userID.IsNil() {
+	if !userID.IsNil() {
 		logger = logger.With(zap.String("uid", userID.String()))
+	}
+	if username != "" {
+		logger = logger.With(zap.String("username", username))
 	}
 
 	logger.Info("New WebSocket session connected", zap.String("requestUri", request.URL.Path), zap.String("query", request.URL.RawQuery), zap.Uint8("format", uint8(format)))
