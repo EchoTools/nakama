@@ -379,7 +379,7 @@ func (s *MatchLabel) rebuildCache() {
 	count := 0
 	if len(s.Players) > 0 {
 		for _, p := range s.Players {
-			if (p.Team != BlueTeam && p.Team != OrangeTeam) || p.RankPercentile > 0 {
+			if (p.Team != BlueTeam && p.Team != OrangeTeam) || p.RankPercentile == 0 {
 				continue
 			}
 			count++
