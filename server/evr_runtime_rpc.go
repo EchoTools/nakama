@@ -124,7 +124,7 @@ func MatchListPublicRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 	for _, m := range matches {
 		l := &MatchLabel{}
 		if err := json.Unmarshal([]byte(m.GetLabel().GetValue()), l); err != nil {
-			return "", fmt.Errorf("Failed to unmarshal match label: %s", err.Error())
+			return "", fmt.Errorf("failed to unmarshal match label: %s", err.Error())
 		}
 
 		v := l.PublicView()
