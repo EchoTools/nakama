@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 
@@ -72,7 +73,7 @@ func (r *UserLogJouralRegistry) AddEntries(sessionID uuid.UUID, e []string) (fou
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 			defer cancel()
 			if err := r.StoreLogs(ctx, sessionID, session.UserID()); err != nil {
-				r.logger.Error("Failed to store logs", zap.Error(err))
+				r.logger.Error("Failed to store logs", zap.Error(err), zap.String("sid", sessionID.String()), zap.String("uid", session.UserID().String()))
 			}
 
 		}()
@@ -150,9 +151,9 @@ func (r *UserLogJouralRegistry) StoreLogs(ctx context.Context, sessionID, userID
 		journal = make(map[time.Time][]*UserLogJournalEntry)
 	}
 
-	// Remove any logs over a month old
+	// Remove old messages
 	for k := range journal {
-		if time.Since(k) > time.Hour*24*30 {
+		if time.Since(k) > time.Hour*24*3 {
 			delete(journal, k)
 		}
 	}
@@ -163,6 +164,31 @@ func (r *UserLogJouralRegistry) StoreLogs(ctx context.Context, sessionID, userID
 	data, err := json.Marshal(journal)
 	if err != nil {
 		return err
+	}
+
+	if len(data) == 0 {
+		return nil
+	}
+
+	for {
+		if len(data) < 4*1024*1024 {
+			break
+		}
+
+		// Remove the oldest messages
+		oldest := time.Now()
+		for k := range journal {
+			if k.Before(oldest) {
+				oldest = k
+			}
+		}
+
+		delete(journal, oldest)
+
+		data, err = json.Marshal(journal)
+		if err != nil {
+			return fmt.Errorf("failed to marshal journal: %w", err)
+		}
 	}
 
 	// Write the remoteLog to storage.
