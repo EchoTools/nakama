@@ -14,6 +14,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/intinig/go-openskill/types"
+	"go.uber.org/zap"
 )
 
 func TestMroundRTT(t *testing.T) {
@@ -122,7 +123,7 @@ func TestHasEligibleServers(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := &SkillBasedMatchmaker{}
+			m := NewSkillBasedMatchmaker()
 
 			if got, count := m.filterWithinMaxRTT(tt.candidates); cmp.Diff(tt.want, got) != "" {
 				t.Errorf("hasEligibleServers() = %d: (want/got) %s", count, cmp.Diff(tt.want, got))
@@ -200,7 +201,7 @@ func TestCreateBalancedMatch(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := &SkillBasedMatchmaker{}
+			m := NewSkillBasedMatchmaker()
 			gotTeam1, gotTeam2 := m.createBalancedMatch(tt.groups, tt.teamSize)
 
 			t.Logf("Team 1 Strength: %f", gotTeam1.Strength())
@@ -218,7 +219,7 @@ func TestCreateBalancedMatch(t *testing.T) {
 }
 
 func TestRemoveOddSizedTeams(t *testing.T) {
-	m := &SkillBasedMatchmaker{}
+	m := NewSkillBasedMatchmaker()
 
 	entries := make([]runtime.MatchmakerEntry, 0)
 	for i := 0; i < 5; i++ {
@@ -313,6 +314,7 @@ func TestRemoveOddSizedTeams(t *testing.T) {
 
 type CandidateData struct {
 	Candidates [][]*MatchmakerEntry `json:"candidates"`
+	Matches    [][]*MatchmakerEntry `json:"matches"`
 }
 
 func (c CandidateData) mm() [][]runtime.MatchmakerEntry {
@@ -329,9 +331,9 @@ func (c CandidateData) mm() [][]runtime.MatchmakerEntry {
 
 func TestMatchmaker(t *testing.T) {
 	// disable for now
-	t.SkipNow()
+	//t.SkipNow()
 	// open /tmp/possible-matches.json
-	file, err := os.Open("/tmp/candidates2.json")
+	file, err := os.Open("/tmp/candidates.json")
 	if err != nil {
 		t.Error("Error opening file")
 	}
@@ -344,20 +346,11 @@ func TestMatchmaker(t *testing.T) {
 	if err != nil {
 		t.Errorf("Error decoding file: %v", err)
 	}
-	m := &SkillBasedMatchmaker{}
+	m := NewSkillBasedMatchmaker()
 
 	candidates := data.mm()
-	candidates, _ = m.filterWithinMaxRTT(candidates)
 
-	// Remove odd sized teams
-	candidates, _ = m.filterOddSizedTeams(candidates)
-
-	// Ensure that everyone in the match is within their max_rtt of a common server
-	candidates, _ = m.filterWithinMaxRTT(candidates)
-
-	// Create a list of balanced matches with predictions
-	predictions := m.predictOutcomes(candidates)
-
+	// Get teh sizes of the candidate matches
 	sizes := make(map[int]int, 0)
 	for _, c := range candidates {
 		sizes[len(c)]++
@@ -365,7 +358,17 @@ func TestMatchmaker(t *testing.T) {
 
 	t.Errorf("Sizes: %v", sizes)
 
+	candidates, _ = m.filterWithinMaxRTT(candidates)
+
+	// Remove odd sized teams
+	candidates, _ = m.filterOddSizedTeams(candidates)
+
+	// Create a list of balanced matches with predictions
+	predictions := m.predictOutcomes(candidates)
+
 	m.sortByDraw(predictions)
+
+	writeAsJSONFile(predictions, "/tmp/predictions.json")
 	m.sortLimitRankSpread(predictions, 0.10)
 	m.sortPriority(predictions)
 	rostersByPrediction := make([][]string, 0)
@@ -381,24 +384,6 @@ func TestMatchmaker(t *testing.T) {
 		}
 		slices.Sort(rosters)
 		rostersByPrediction = append(rostersByPrediction, rosters)
-	}
-
-	// open the output
-	file, err = os.Create("/tmp/predictions.json")
-	if err != nil {
-		t.Error("Error opening file")
-	}
-	defer file.Close()
-
-	// Write the data
-	output, err := json.Marshal(rostersByPrediction)
-	if err != nil {
-		t.Errorf("Error marshalling data: %v", err)
-	}
-
-	_, err = file.Write(output)
-	if err != nil {
-		t.Errorf("Error writing data: %v", err)
 	}
 
 	madeMatches := m.assembleUniqueMatches(predictions)
@@ -469,7 +454,7 @@ func TestSortPriority(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := &SkillBasedMatchmaker{}
+			m := NewSkillBasedMatchmaker()
 			m.sortPriority(tt.predictions)
 
 			for i, got := range tt.predictions {
@@ -488,4 +473,22 @@ func getTeamTickets(team RatedEntryTeam) []string {
 		tickets[i] = entry.Entry.Ticket
 	}
 	return tickets
+}
+
+func writeAsJSONFile(data interface{}, filename string) {
+	file, err := os.Create(filename)
+	if err != nil {
+		logger.Error("Error opening file", zap.Error(err), zap.String("filename", filename))
+		return
+	}
+	defer file.Close()
+
+	// Write the data
+	output, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		logger.Error("Error marshalling data", zap.Error(err))
+		return
+	}
+
+	file.Write(output)
 }
