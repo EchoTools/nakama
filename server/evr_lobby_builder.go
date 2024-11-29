@@ -67,46 +67,79 @@ func (b *LobbyBuilder) handleMatchedEntries(entries [][]*MatchmakerEntry) {
 	}
 }
 
-func (mr *LobbyBuilder) SortGameServerIPs(entrants []*MatchmakerEntry) []string {
-	// Create a map of each endpoint and it's latencies to each entrant
-	latencies := make(map[string][]int, 100)
+func (b *LobbyBuilder) extractLatenciesFromEntrants(entrants []*MatchmakerEntry) map[string][][]float64 {
+	latenciesByTeamByExtIP := make(map[string][][]float64, 100)
+
 	for _, e := range entrants {
-		nprops := e.NumericProperties
-		//sprops := e.StringProperties
 
 		// loop over the number props and get the latencies
-		for k, v := range nprops {
+		for k, v := range e.GetProperties() {
 			if strings.HasPrefix(k, "rtt") {
-				latencies[k] = append(latencies[k], int(v))
+				extIP := keyToIP(k).String()
+				latenciesByTeamByExtIP[extIP] = append(latenciesByTeamByExtIP[extIP], []float64{v.(float64)})
 			}
 		}
 	}
 
-	// Score each endpoint based on the latencies
-	scored := make(map[string]int, len(latencies))
-	for k, v := range latencies {
-		if len(v) == 0 {
-			scored[k] = 0
+	return latenciesByTeamByExtIP
+}
+
+// SortGameServerIPs sorts the game server IPs by latency, returning a slice of external IP addresses
+func (b *LobbyBuilder) rankEndpointsByAverageLatency(entrants []*MatchmakerEntry) []string {
+
+	latencies := b.extractLatenciesFromEntrants(entrants)
+
+	meanRTTByExtIP := make(map[string]float64, len(latencies))
+
+	for extIP, latenciesByTeam := range latencies {
+		// Calculate the mean RTT across the lobby
+		var sum float64
+		for _, teamLatencies := range latenciesByTeam {
+			for _, latency := range teamLatencies {
+				sum += latency
+			}
 		}
-		// Sort the latencies
-		sort.Ints(v)
-		// Get the average
-		average := 0
-		for _, i := range v {
-			average += i
-		}
-		average /= len(v)
-		scored[k] = average
+		meanRTT := sum / float64(len(entrants))
+
+		meanRTTByExtIP[extIP] = meanRTT
 	}
-	// Sort the scored endpoints
-	sorted := make([]string, 0, len(scored))
-	for k := range scored {
-		sorted = append(sorted, k)
+
+	// Sort the endpoints by mean RTT
+	extIPs := make([]string, 0, len(meanRTTByExtIP))
+	for k := range meanRTTByExtIP {
+		extIPs = append(extIPs, k)
 	}
-	sort.SliceStable(sorted, func(i, j int) bool {
-		return scored[sorted[i]] < scored[sorted[j]]
+
+	sort.SliceStable(extIPs, func(i, j int) bool {
+		return meanRTTByExtIP[extIPs[i]] < meanRTTByExtIP[extIPs[j]]
 	})
-	return sorted
+
+	return extIPs
+}
+
+// SortGameServerIPs sorts the game server IPs by latency, returning a slice of external IP addresses
+func (b *LobbyBuilder) rankEndpointsByServerScore(entrants []*MatchmakerEntry) []string {
+
+	latencies := b.extractLatenciesFromEntrants(entrants)
+
+	scoresByExtIP := make(map[string]float64, len(latencies))
+
+	for extIP, latenciesByTeam := range latencies {
+		score := VRMLServerScore(latenciesByTeam, ServerScoreDefaultMinRTT, ServerScoreDefaultMaxRTT, ServerScoreDefaultThreshold, ServerScorePointsDistribution)
+		scoresByExtIP[extIP] = score
+	}
+
+	// Sort the scored endpoints
+	extIPs := make([]string, 0, len(scoresByExtIP))
+	for k := range scoresByExtIP {
+		extIPs = append(extIPs, k)
+	}
+
+	sort.SliceStable(extIPs, func(i, j int) bool {
+		return scoresByExtIP[extIPs[i]] < scoresByExtIP[extIPs[j]]
+	})
+
+	return extIPs
 }
 
 func (b *LobbyBuilder) groupByTicket(entrants []*MatchmakerEntry) [][]*MatchmakerEntry {
@@ -209,7 +242,7 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 		}
 	}
 
-	gameServers := b.SortGameServerIPs(entrants)
+	gameServers := b.rankEndpointsByServerScore(entrants)
 
 	modestr, ok := entrants[0].StringProperties["mode"]
 	if !ok {
@@ -341,42 +374,91 @@ func (b *LobbyBuilder) distributeParties(parties [][]*MatchmakerEntry) [][]*Matc
 }
 func (b *LobbyBuilder) allocateGameServer(ctx context.Context, logger *zap.Logger, groupID uuid.UUID, sorted []string, settings *MatchSettings) (*MatchLabel, error) {
 
-	available, err := b.listUnassignedLobbies(ctx, logger, groupID)
+	// string bulder
+	var query strings.Builder
+
+	query.WriteString(fmt.Sprintf("+label.group_id:/%s/", Query.Escape(groupID)))
+	query.WriteString(" +label.broadcaster.regions:/(default)/")
+
+	matches, err := b.listMatches(ctx, 100, 1, MatchLobbyMaxSize+1, query.String())
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to find matches: %v", err)
 	}
-	if len(available) == 0 {
+
+	if len(matches) == 0 {
 		return nil, ErrMatchmakingNoAvailableServers
 	}
 
-	availableByExtIP := make(map[string]MatchID, len(available))
-
-	for _, label := range available {
-		k := ipToKey(label.Broadcaster.Endpoint.ExternalIP)
-		availableByExtIP[k] = label.ID
+	// Create a slice containing the matches' labels
+	labels := make([]*MatchLabel, 0, len(matches))
+	for _, match := range matches {
+		label := &MatchLabel{}
+		if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), label); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal match label: %v", err)
+		}
+		labels = append(labels, label)
 	}
 
-	var matchID MatchID
+	labelsByExternalIP := make(map[string][]*MatchLabel, len(labels))
+	for _, label := range labels {
+		k := ipToKey(label.Broadcaster.Endpoint.ExternalIP)
+		labelsByExternalIP[k] = append(labelsByExternalIP[k], label)
+	}
+
+	// Count the number of active matches by extIP
+	availableByExtIP := make(map[string]*MatchLabel, len(labels))
+	countByExtIP := make(map[string]int, len(labels))
+	for _, label := range labels {
+		k := ipToKey(label.Broadcaster.Endpoint.ExternalIP)
+		countByExtIP[k]++
+
+		if label.LobbyType == UnassignedLobby {
+			availableByExtIP[k] = label
+		}
+	}
+	// Now find the first server with less game server's in use than the previous one
+
+	var label *MatchLabel
 	var found bool
-	for _, k := range sorted {
-		// Get the endpoint
-		matchID, found = availableByExtIP[k]
-		if !found {
+	cnt := 1
+	for _, extIP := range sorted {
+
+		// Get the count to the active game servers from this extIP
+		if countByExtIP[extIP] > cnt {
+			// This extIP has more active game servers than the previous one
 			continue
 		}
+		cnt = countByExtIP[extIP]
+
+		// Get the available game servers from this extIP
+		// Get the endpoint
+
+		if label, found = availableByExtIP[extIP]; !found {
+			continue
+		}
+
 		break
 	}
-	// shuffle the available game servers and pick one
 
-	if matchID.IsNil() {
-		matchID = available[rand.Intn(len(available))].ID
+	if label == nil {
+		return nil, ErrMatchmakingNoAvailableServers
 	}
 
-	label, err := LobbyPrepareSession(ctx, b.nk, matchID, settings)
+	label, err = LobbyPrepareSession(ctx, b.nk, label.ID, settings)
 	if err != nil {
-		return nil, fmt.Errorf("error signaling match `%s`: %w", matchID.String(), err)
+		return nil, fmt.Errorf("error signaling match `%s`: %w", label.ID.String(), err)
 	}
 	return label, nil
+}
+
+// Count the number of active matches by external IP
+func countByExtIP(labels []*MatchLabel) map[string]int {
+	countByExtIP := make(map[string]int, len(labels))
+	for _, label := range labels {
+		k := ipToKey(label.Broadcaster.Endpoint.ExternalIP)
+		countByExtIP[k]++
+	}
+	return countByExtIP
 }
 
 func (b *LobbyBuilder) listUnassignedLobbies(ctx context.Context, logger *zap.Logger, groupID uuid.UUID) ([]*MatchLabel, error) {
