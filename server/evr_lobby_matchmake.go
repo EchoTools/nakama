@@ -52,12 +52,12 @@ type MatchmakerTicketConfig struct {
 
 var DefaultMatchmakerTicketConfigs = map[evr.Symbol]MatchmakerTicketConfig{
 	evr.ModeArenaPublic: {
-		MinCount:      2,
+		MinCount:      6,
 		MaxCount:      8,
 		CountMultiple: 2,
 	},
 	evr.ModeCombatPublic: {
-		MinCount:      2,
+		MinCount:      6,
 		MaxCount:      10,
 		CountMultiple: 2,
 	},
@@ -117,7 +117,6 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 		}
 
 		// Attempt a fallback ticket
-		ticketConfig.MaxCount = ticketConfig.MinCount
 		ticketConfig.MinCount = 1 // This must be 1 to allow for the fallback to work with nakama's matchmaker (min must always be less than max)
 		ticketConfig.includeRankRange = false
 		ticketConfig.includeEarlyQuitPenalty = false
