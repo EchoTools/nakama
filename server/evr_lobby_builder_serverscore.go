@@ -135,3 +135,59 @@ func average(values ...float64) float64 {
 	}
 	return floats.Sum(values) / float64(len(values))
 }
+
+// This s a port of the ServerScore function from github.com/ntsfranz/spark
+func VRMLServerScore(latencies [][]float64, minRTT, maxRTT, thresholdRTT float64, pointsDistro []float64) (float64, error) {
+
+	teamSize := len(latencies[0])
+
+	// Calculate the maximum variance of the server
+	rtts := make([]float64, teamSize*2)
+	for i := 0; i < teamSize; i++ {
+		rtts[i] = minRTT
+		rtts[i+teamSize] = maxRTT
+	}
+
+	maxServerVar := stat.Variance(rtts, nil)
+
+	// calculate the maximum variance within a team
+	vsize := (teamSize + 1) / 2
+
+	rtts = make([]float64, vsize)
+	for i := 0; i < (teamSize+1)/2; i++ {
+		// first half of the team has minRTT
+		rtts[i] = minRTT
+
+		// second half of the team has maxRTT
+		rtts[i+(teamSize+1)/2] = maxRTT
+	}
+
+	maxTeamVariance := stat.Variance(rtts, nil)
+
+	maxSumDiff := (maxRTT - minRTT) * float64(teamSize)
+
+	// Sum difference points
+	blueSum, orangeSum := floats.Sum(latencies[0]), floats.Sum(latencies[1])
+	sumDiff := math.Abs(blueSum - orangeSum)
+	sumPoints := (1 - (sumDiff / maxSumDiff)) * pointsDistro[0]
+
+	allRTTs := append(latencies[0], latencies[1]...)
+
+	// Team variance points
+	meanVar := floats.Sum(allRTTs) / float64(len(allRTTs))
+
+	teamPoints := (1 - (meanVar / maxTeamVariance)) * pointsDistro[1]
+
+	serverVar := stat.Variance(allRTTs, nil)
+	serverPoints := (1 - (serverVar / maxServerVar)) * pointsDistro[2]
+
+	lobbySize := float64(teamSize) * 2
+
+	// High/low ping points
+	hilo := float64((blueSum + orangeSum) - (minRTT*lobbySize)/float64((thresholdRTT*lobbySize)-(minRTT*lobbySize)))
+	hiloPoints := (1 - hilo) * pointsDistro[3]
+
+	// Final score
+	finalScore := floats.Sum([]float64{sumPoints, teamPoints, serverPoints, hiloPoints})
+	return finalScore, nil
+}
