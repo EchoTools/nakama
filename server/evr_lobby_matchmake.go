@@ -219,20 +219,19 @@ func LatencyCmp[T int | time.Duration](i, j T, mround T) bool {
 }
 
 type MatchmakingSettings struct {
-	DisableArenaBackfill        bool     `json:"disable_arena_backfill"`                   // Disable backfilling for arena matches
-	BackfillQueryAddon          string   `json:"backfill_query_addon"`                     // Additional query to add to the matchmaking query
-	MatchmakingQueryAddon       string   `json:"matchmaking_query_addon"`                  // Additional query to add to the matchmaking query
-	CreateQueryAddon            string   `json:"create_query_addon"`                       // Additional query to add to the matchmaking query
-	LobbyGroupName              string   `json:"group_id"`                                 // Group ID to matchmake with
-	PriorityBroadcasters        []string `json:"priority_broadcasters,omitempty"`          // Prioritize these broadcasters
-	NextMatchID                 MatchID  `json:"next_match_id"`                            // Try to join this match immediately when finding a match
-	NextMatchRole               string   `json:"next_match_role"`                          // The role to join the next match as
-	NextMatchDiscordID          string   `json:"next_match_discord_id"`                    // The discord ID to join the next match as
-	MaxServerRTT                int      `json:"max_server_rtt,omitempty"`                 // The maximum RTT to allow
-	RankPercentileMaxDelta      float64  `json:"rank_percentile_delta_max,omitempty"`      // The upper limit percentile range to matchmake with
-	RankResetSchedule           string   `json:"rank_reset_schedule,omitempty"`            // The reset schedule to use for rankings
-	RankPercentileDampingFactor float64  `json:"rank_percentile_damping_factor,omitempty"` // The damping factor to use for rank percentile
-	RankInDisplayName           bool     `json:"rank_in_display_name,omitempty"`           // Display the rank in the display name
+	DisableArenaBackfill        bool    `json:"disable_arena_backfill"`                   // Disable backfilling for arena matches
+	BackfillQueryAddon          string  `json:"backfill_query_addon"`                     // Additional query to add to the matchmaking query
+	MatchmakingQueryAddon       string  `json:"matchmaking_query_addon"`                  // Additional query to add to the matchmaking query
+	CreateQueryAddon            string  `json:"create_query_addon"`                       // Additional query to add to the matchmaking query
+	LobbyGroupName              string  `json:"group_id"`                                 // Group ID to matchmake with
+	NextMatchID                 MatchID `json:"next_match_id"`                            // Try to join this match immediately when finding a match
+	NextMatchRole               string  `json:"next_match_role"`                          // The role to join the next match as
+	NextMatchDiscordID          string  `json:"next_match_discord_id"`                    // The discord ID to join the next match as
+	MaxServerRTT                int     `json:"max_server_rtt,omitempty"`                 // The maximum RTT to allow
+	RankPercentileMaxDelta      float64 `json:"rank_percentile_delta_max,omitempty"`      // The upper limit percentile range to matchmake with
+	RankResetSchedule           string  `json:"rank_reset_schedule,omitempty"`            // The reset schedule to use for rankings
+	RankPercentileDampingFactor float64 `json:"rank_percentile_damping_factor,omitempty"` // The damping factor to use for rank percentile
+	RankInDisplayName           bool    `json:"rank_in_display_name,omitempty"`           // Display the rank in the display name
 }
 
 func (MatchmakingSettings) GetStorageID() StorageID {
