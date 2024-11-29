@@ -120,7 +120,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 		if msg, ok := e.Parsed.(evr.GameTimer); ok {
 			matchID, err := NewMatchID(msg.SessionUUID(), p.node)
 			if err != nil {
-				logger.Error("Failed to create match ID", zap.Error(err), zap.Any("msg", msg))
+				logger.Warn("Failed to create match ID", zap.Error(err), zap.Any("msg", msg))
 			} else {
 				update, _ = updates.LoadOrStore(matchID.UUID, &MatchGameStateUpdate{})
 				update.CurrentGameClock = time.Duration(msg.GameTime()) * time.Second
