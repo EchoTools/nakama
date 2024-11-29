@@ -63,6 +63,8 @@ func GoalTypeToPoints(goalType string) int {
 		return 3
 	case "LONG SHOT":
 		return 3
+	case "SELF GOAL":
+		return 2
 	default:
 		return 0
 	}
