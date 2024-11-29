@@ -1,6 +1,8 @@
 package server
 
 import (
+	"encoding/json"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -71,7 +73,7 @@ func TestSortGameServerIPs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			lb := &LobbyBuilder{}
-			result := lb.SortGameServerIPs(tt.entrants)
+			result := lb.rankEndpointsByServerScore(tt.entrants)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -165,4 +167,33 @@ func TestGroupByTicket(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+func TestRankEndpointsByAverageLatency(t *testing.T) {
+
+	// open /tmp/candidates.json
+
+	file, err := os.Open("/tmp/candidates.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+
+	fmap := map[string][][]*MatchmakerEntry{}
+
+	if err := json.NewDecoder(file).Decode(&fmap); err != nil {
+		t.Fatal(err)
+	}
+
+	candidates := fmap["candidates"]
+
+	entrants := candidates[0]
+
+	lb := &LobbyBuilder{}
+	result := lb.rankEndpointsByAverageLatency(entrants)
+
+	t.Errorf("latency result: %v", result)
+
+	result = lb.rankEndpointsByServerScore(entrants)
+
+	t.Errorf("server score result: %v", result)
 }

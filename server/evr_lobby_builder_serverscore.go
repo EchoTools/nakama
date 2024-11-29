@@ -137,7 +137,7 @@ func average(values ...float64) float64 {
 }
 
 // This s a port of the ServerScore function from github.com/ntsfranz/spark
-func VRMLServerScore(latencies [][]float64, minRTT, maxRTT, thresholdRTT float64, pointsDistro []float64) (float64, error) {
+func VRMLServerScore(latencies [][]float64, minRTT, maxRTT, thresholdRTT float64, pointsDistro []float64) float64 {
 
 	teamSize := len(latencies[0])
 
@@ -151,9 +151,8 @@ func VRMLServerScore(latencies [][]float64, minRTT, maxRTT, thresholdRTT float64
 	maxServerVar := stat.Variance(rtts, nil)
 
 	// calculate the maximum variance within a team
-	vsize := (teamSize + 1) / 2
 
-	rtts = make([]float64, vsize)
+	rtts = make([]float64, teamSize)
 	for i := 0; i < (teamSize+1)/2; i++ {
 		// first half of the team has minRTT
 		rtts[i] = minRTT
@@ -189,5 +188,5 @@ func VRMLServerScore(latencies [][]float64, minRTT, maxRTT, thresholdRTT float64
 
 	// Final score
 	finalScore := floats.Sum([]float64{sumPoints, teamPoints, serverPoints, hiloPoints})
-	return finalScore, nil
+	return finalScore
 }
