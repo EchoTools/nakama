@@ -1620,9 +1620,11 @@ func MatchmakerCandidatesRPCFactory(sbmm *SkillBasedMatchmaker) func(ctx context
 
 	return func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 
-		if data, _, found := rpcResponseCache.Get("matchmaker_candidates"); found {
-			return data.(string), nil
-		}
+		/*
+			if data, _, found := rpcResponseCache.Get("matchmaker_candidates"); found {
+				return data.(string), nil
+			}
+		*/
 
 		candidates, matches := sbmm.GetLatestResult()
 
@@ -1637,8 +1639,9 @@ func MatchmakerCandidatesRPCFactory(sbmm *SkillBasedMatchmaker) func(ctx context
 		}
 		// Cache the result
 
-		rpcResponseCache.Set("matchmaker_candidates", data, 30*time.Second)
-
+		/*
+			rpcResponseCache.Set("matchmaker_candidates", data, 30*time.Second)
+		*/
 		return string(data), nil
 	}
 
