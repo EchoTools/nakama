@@ -15,6 +15,7 @@ const (
 )
 
 type MatchmakingStreamData struct {
+	DiscordID  string                  `json:"discord_id,omitempty"`
 	Parameters *LobbySessionParameters `json:"parameters,omitempty"`
 }
 
@@ -27,11 +28,11 @@ type GuildLobbyLabel struct {
 	GroupID string `json:"group_id"`
 }
 
-func JoinMatchmakingStream(logger *zap.Logger, s *sessionWS, params *LobbySessionParameters) error {
+func JoinMatchmakingStream(logger *zap.Logger, s *sessionWS, lobbyParams *LobbySessionParameters) error {
 
-	groupStream := params.MatchmakingStream()
+	groupStream := lobbyParams.MatchmakingStream()
 
-	presenceMeta := params.PresenceMeta()
+	presenceMeta := lobbyParams.PresenceMeta()
 
 	// Leave any existing lobby group stream.
 	s.tracker.UntrackLocalByModes(s.id, map[uint8]struct{}{StreamModeMatchmaking: {}}, groupStream)
@@ -40,6 +41,11 @@ func JoinMatchmakingStream(logger *zap.Logger, s *sessionWS, params *LobbySessio
 
 	if success := s.tracker.Update(ctx, s.id, groupStream, s.userID, presenceMeta); !success {
 		return fmt.Errorf("failed to track lobby group matchmaking stream")
+	}
+
+	sessionParams, found := LoadParams(s.ctx)
+	if !found {
+		return fmt.Errorf("failed to load lobby session parameters")
 	}
 
 	s.pipeline.router.SendToStream(logger, groupStream, &rtapi.Envelope{
@@ -54,7 +60,9 @@ func JoinMatchmakingStream(logger *zap.Logger, s *sessionWS, params *LobbySessio
 					SessionId: s.ID().String(),
 					Username:  s.Username(),
 				},
-				Data: MatchmakingStreamData{Parameters: params}.String(),
+				Data: MatchmakingStreamData{
+					DiscordID:  sessionParams.DiscordID,
+					Parameters: lobbyParams}.String(),
 			},
 		},
 	}, true)
