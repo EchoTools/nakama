@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -289,65 +292,15 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		return nil, 0, status.Error(codes.ResourceExhausted, fmt.Sprintf("rate limit exceeded (%0.0f requests per minute)", limiter.Limit()*60))
 	}
 
-	query := fmt.Sprintf("+label.lobby_type:unassigned +label.broadcaster.group_ids:/(%s)/ +label.broadcaster.regions:/(default)/ +label.broadcaster.regions:/(%s)/", groupID, region.String())
-
-	minSize := 1
-	maxSize := 1
-	matches, err := d.nk.MatchList(ctx, 100, true, "", &minSize, &maxSize, query)
-	if err != nil {
-		return nil, 0, status.Errorf(codes.Internal, "failed to list matches: %v", err)
-	}
-
-	if len(matches) == 0 {
-		return nil, 0, status.Error(codes.NotFound, fmt.Sprintf("no game servers are available in region `%s`", region.String()))
-	}
-
-	labels := make([]*MatchLabel, 0, len(matches))
-	for _, match := range matches {
-		label := MatchLabel{}
-		if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), &label); err != nil {
-			return nil, 0, status.Errorf(codes.Internal, "failed to unmarshal match label: %v", err)
-		}
-		labels = append(labels, &label)
-	}
-
 	zapLogger := logger.(*RuntimeGoLogger).logger
 	latencyHistory, err := LoadLatencyHistory(ctx, zapLogger, d.db, uuid.FromStringOrNil(userID))
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to load latency history: %w", err)
 	}
 
-	latencyMap := make(map[MatchID]int)
+	extIPs := latencyHistory.AverageRTTs(true, true)
 
-	labelLatencies := make([]int, len(labels))
-	for _, label := range labels {
-		if history, ok := latencyHistory[label.Broadcaster.Endpoint.GetExternalIP()]; ok && len(history) != 0 {
-
-			average := 0
-			for _, l := range history {
-				average += l
-			}
-			average /= len(history)
-			labelLatencies = append(labelLatencies, average)
-			latencyMap[label.ID] = average
-		} else {
-
-			labelLatencies = append(labelLatencies, 0)
-		}
-	}
-
-	params := LobbySessionParameters{
-		Region: region,
-		Mode:   mode,
-	}
-	lobbyCreateSortOptions(labels, labelLatencies, &params)
-
-	match := matches[0]
-	matchID := MatchIDFromStringOrNil(match.GetMatchId())
-
-	// Prepare the session for the match.
-
-	settings := MatchSettings{
+	settings := &MatchSettings{
 		Mode:      mode,
 		Level:     level,
 		GroupID:   uuid.FromStringOrNil(groupID),
@@ -355,15 +308,167 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		SpawnedBy: userID,
 	}
 
-	label, err := LobbyPrepareSession(ctx, d.nk, matchID, &settings)
-	if err != nil {
-		logger.Warn("Failed to prepare session", zap.Error(err), zap.String("mid", label.ID.UUID.String()))
-		return nil, -1, fmt.Errorf("failed to prepare session: %w", err)
-	}
+	label, err := AllocateGameServer(ctx, logger, d.nk, groupID, extIPs, settings, []string{region.String()}, true, false)
 
-	if rtt, ok := latencyMap[label.ID]; ok {
-		latencyMillis = rtt
-	}
+	latencyMillis = latencyHistory.AverageRTT(label.Broadcaster.Endpoint.ExternalIP.String(), true)
 
 	return label, latencyMillis, nil
+}
+
+func AllocateGameServer(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, groupID string, rttsByExternalIP map[string]int, settings *MatchSettings, regions []string, requireDefaultRegion bool, requireRegion bool) (*MatchLabel, error) {
+
+	qparts := []string{
+		"+label.open:T",
+		"+label.lobby_type:unassigned",
+		fmt.Sprintf("+label.broadcaster.group_ids:%s", Query.Escape(groupID)),
+	}
+
+	if requireDefaultRegion {
+		qparts = append(qparts, "+label.broadcaster.regions:/(default)/")
+	}
+
+	if len(regions) > 0 {
+		prefix := ""
+		if requireRegion {
+			prefix = "+"
+		}
+
+		qparts = append(qparts, "%slabel.broadcaster.regions:/(%s)/", prefix, Query.Join(regions, "|"))
+	}
+
+	query := strings.Join(qparts, " ")
+
+	matches, err := nk.MatchList(ctx, 100, true, "", nil, nil, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find matches: %v", err)
+	}
+
+	if len(matches) == 0 {
+		return nil, ErrMatchmakingNoAvailableServers
+	}
+
+	// Create a slice containing the match labels
+	labels := make([]*MatchLabel, 0, len(matches))
+	for _, match := range matches {
+		label := &MatchLabel{}
+		if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), label); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal match label: %v", err)
+		}
+		labels = append(labels, label)
+	}
+
+	labelsByExternalIP := make(map[string][]*MatchLabel, len(labels))
+	for _, label := range labels {
+		k := label.Broadcaster.Endpoint.ExternalIP.String()
+		labelsByExternalIP[k] = append(labelsByExternalIP[k], label)
+	}
+
+	// Count the number of active matches by extIP
+	availableByExtIP := make(map[string]*MatchLabel, len(labels))
+	countByExtIP := make(map[string]int, len(labels))
+	for _, label := range labels {
+		k := label.Broadcaster.Endpoint.ExternalIP.String()
+		countByExtIP[k]++
+
+		if label.LobbyType == UnassignedLobby {
+			availableByExtIP[k] = label
+		}
+	}
+
+	// Sort the labels by region, then by latency (rounded to the nearest 15ms), then by the number of in-use game servers
+	// This will provide a list of extIPs that are in the same region as the player, with the lowest latency, and the least load
+
+	sort.SliceStable(labels, func(i, j int) bool {
+		a := labels[i]
+		b := labels[j]
+
+		// Sort by region
+		if a.Broadcaster.IsPriorityFor(settings.Mode) && !b.Broadcaster.IsPriorityFor(settings.Mode) {
+			return true
+		}
+		if a.Broadcaster.IsPriorityFor(settings.Mode) && !b.Broadcaster.IsPriorityFor(settings.Mode) {
+			return false
+		}
+
+		regionMatchA := false
+		for _, region := range regions {
+			if slices.Contains(a.Broadcaster.Regions, evr.ToSymbol(region)) {
+				regionMatchA = true
+				break
+			}
+		}
+
+		regionMatchB := false
+		for _, region := range regions {
+			if slices.Contains(b.Broadcaster.Regions, evr.ToSymbol(region)) {
+				regionMatchB = true
+				break
+			}
+		}
+
+		if regionMatchA && !regionMatchB {
+			return true
+		}
+
+		if !regionMatchA && regionMatchB {
+			return false
+		}
+
+		// Sort by servers that are in the sorted extIP list
+		ipA := a.Broadcaster.Endpoint.ExternalIP.String()
+		ipB := b.Broadcaster.Endpoint.ExternalIP.String()
+
+		if rttsByExternalIP[ipA] == 0 && rttsByExternalIP[ipB] != 0 {
+			return true
+		}
+
+		if rttsByExternalIP[ipA] != 0 && rttsByExternalIP[ipB] == 0 {
+			return false
+		}
+
+		rttA := rttsByExternalIP[ipA]
+		rttB := rttsByExternalIP[ipB]
+
+		// Round to the nearest 20ms
+		rttA = (rttA + 10) / 20 * 20
+		rttB = (rttB + 10) / 20 * 20
+
+		if rttA < rttB {
+			return true
+		}
+
+		if rttA > rttB {
+			return false
+		}
+
+		// Sort by the number of active game servers
+		if countByExtIP[ipA] < countByExtIP[ipB] {
+			return true
+		}
+
+		if countByExtIP[ipA] > countByExtIP[ipB] {
+			return false
+		}
+
+		return false
+	})
+
+	// Find the first available game server
+	var label *MatchLabel
+	for _, l := range labels {
+		if l.LobbyType == UnassignedLobby {
+			label = l
+			break
+		}
+
+		label, err = LobbyPrepareSession(ctx, nk, label.ID, settings)
+		if err != nil {
+			logger.WithFields(map[string]interface{}{
+				"mid": label.ID.UUID.String(),
+				"err": err,
+			}).Warn("Failed to prepare session")
+			continue
+		}
+	}
+	return label, nil
 }

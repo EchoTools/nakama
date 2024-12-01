@@ -1819,7 +1819,7 @@ func ServerScoresRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 			return "", err
 		}
 
-		for ip, latency := range latencyHistory.AverageRTTs() {
+		for ip, latency := range latencyHistory.AverageRTTs(false, true) {
 			latencies[ip] = append(latencies[ip], latency)
 		}
 	}

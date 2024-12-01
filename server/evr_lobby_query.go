@@ -1,14 +1,11 @@
 package server
 
 import (
-	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/gofrs/uuid/v5"
 )
-
-var escapePattern = regexp.MustCompile(`[-+=&|><!(){}\[\]^"~*?:\\/ ]`)
 
 var Query query
 
@@ -69,6 +66,34 @@ func (query) Escape(input any) string {
 	return Query.escapeString(s)
 }
 
+var queryStringReplacer = strings.NewReplacer(
+	`-`, `\-`,
+	`[`, `\[`,
+	`+`, `\+`,
+	`=`, `\=`,
+	`&`, `\&`,
+	`|`, `\|`,
+	`>`, `\>`,
+	`<`, `\<`,
+	`!`, `\!`,
+	`(`, `\(`,
+	`)`, `\)`,
+	`{`, `\{`,
+	`}`, `\}`,
+	`^`, `\^`,
+	`"`, `\"`,
+	`~`, `\~`,
+	`*`, `\*`,
+	`?`, `\?`,
+	`:`, `\:`,
+	`\\`, `\\`,
+	`/`, `\/`,
+	` `, `\ `,
+)
+
 func (query) escapeString(input string) string {
-	return escapePattern.ReplaceAllString(input, `\$0`)
+
+	// escape `[-+=&|><!(){}\[\]^"~*?:\\/ ]`
+
+	return queryStringReplacer.Replace(input)
 }

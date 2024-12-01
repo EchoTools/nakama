@@ -62,22 +62,51 @@ func (h LatencyHistory) LatestRTTs() map[string]int {
 	return latestRTTs
 }
 
-func (h LatencyHistory) AverageRTTs() map[string]int {
-	rtts := make(map[string][]int)
+// Return the average rtt for a single external IP
+func (h LatencyHistory) AverageRTT(extIP string, roundRTT bool) int {
+	if history, ok := h[extIP]; ok {
+		if len(history) == 0 {
+			return 999
+		}
+		average := 0
+		for _, l := range history {
+			average += l
+		}
+		average /= len(history)
+
+		if roundRTT {
+			average = (average + 5) / 10 * 10
+		}
+
+		return average
+	}
+	return 999
+}
+
+// RTTs by external IP
+func (h LatencyHistory) AverageRTTs(roundRTTs, includeUnreachable bool) map[string]int {
+	rttByIP := make(map[string][]int)
 	averageRTTs := make(map[string]int)
 
 	for extIP, history := range h {
 
 		for _, rtt := range history {
 			if rtt == 0 || rtt == 999 {
+				if !includeUnreachable {
+					continue
+				}
 				rtt = 999
 			}
-			rtts[extIP] = append(rtts[extIP], rtt)
+
+			rttByIP[extIP] = append(rttByIP[extIP], rtt)
 		}
 	}
 
-	for extIP, rtt := range rtts {
+	for extIP, rtt := range rttByIP {
 		if len(rtt) == 0 {
+			if !includeUnreachable {
+				continue
+			}
 			averageRTTs[extIP] = 999
 			continue
 		}
@@ -86,8 +115,14 @@ func (h LatencyHistory) AverageRTTs() map[string]int {
 			average += l
 		}
 		average /= len(rtt)
+
+		if roundRTTs {
+			average = (average + 5) / 10 * 10
+		}
+
 		averageRTTs[extIP] = average
 	}
+
 	return averageRTTs
 }
 
