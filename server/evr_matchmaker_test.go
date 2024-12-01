@@ -18,7 +18,81 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/intinig/go-openskill/types"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/encoding/protojson"
 )
+
+func createTestMatchmakerWithOverride(t fatalable, logger *zap.Logger, tickerActive bool, messageCallback func(presences []*PresenceID, envelope *rtapi.Envelope), overrideFn RuntimeMatchmakerOverrideFunction) (*LocalMatchmaker, func() error, error) {
+	cfg := NewConfig(logger)
+	cfg.Database.Addresses = []string{"postgres:postgres@localhost:5432/nakama"}
+	cfg.Matchmaker.IntervalSec = 1
+	cfg.Matchmaker.MaxIntervals = 5
+	cfg.Matchmaker.RevPrecision = true
+	// configure a path runtime can use (it will mkdir this, so it must be writable)
+	var err error
+	cfg.Runtime.Path, err = os.MkdirTemp("", "nakama-matchmaker-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	messageRouter := &testMessageRouter{
+		sendToPresence: messageCallback,
+	}
+	sessionRegistry := &testSessionRegistry{}
+	tracker := &testTracker{}
+	metrics := &testMetrics{}
+
+	jsonpbMarshaler := &protojson.MarshalOptions{
+		UseEnumNumbers:  true,
+		EmitUnpopulated: false,
+		Indent:          "",
+		UseProtoNames:   true,
+	}
+	jsonpbUnmarshaler := &protojson.UnmarshalOptions{
+		DiscardUnknown: false,
+	}
+
+	matchRegistry, runtimeMatchCreateFunc, err := createTestMatchRegistry(t, logger)
+	if err != nil {
+		t.Fatalf("error creating test match registry: %v", err)
+	}
+
+	rt, _, err := NewRuntime(context.Background(), logger, logger, nil, jsonpbMarshaler, jsonpbUnmarshaler, cfg, "", nil, nil, nil, nil, sessionRegistry, nil, nil, nil, tracker, metrics, nil, messageRouter, storageIdx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rt.matchmakerOverrideFunction = overrideFn
+
+	// simulate a matchmaker match function
+	rt.matchmakerMatchedFunction = func(ctx context.Context, entries []*MatchmakerEntry) (string, bool, error) {
+		if len(entries) != 2 {
+			return "", false, nil
+		}
+
+		if !isModeAuthoritative(entries[0].Properties) {
+			return "", false, nil
+		}
+
+		if !isModeAuthoritative(entries[1].Properties) {
+			return "", false, nil
+		}
+
+		res, err := matchRegistry.CreateMatch(context.Background(),
+			runtimeMatchCreateFunc, "match", map[string]interface{}{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res, true, nil
+	}
+
+	matchMaker := NewLocalBenchMatchmaker(logger, logger, cfg, messageRouter, metrics, rt, tickerActive)
+
+	return matchMaker.(*LocalMatchmaker), func() error {
+		matchMaker.Stop()
+		matchRegistry.Stop(0)
+		return os.RemoveAll(cfg.Runtime.Path)
+	}, nil
+}
 
 func TestMroundRTT(t *testing.T) {
 	tests := []struct {
@@ -502,9 +576,26 @@ func TestCharacterizationMatchmaker1v1(t *testing.T) {
 	maxCycles := 7
 
 	matchesSeen := make(map[string]*rtapi.MatchmakerMatched, maxCycles)
-
 	mu := sync.Mutex{}
+	/*
+
+		matchMaker, cleanup, err := createTestMatchmakerWithOverride(t, consoleLogger, true, func(presences []*PresenceID, envelope *rtapi.Envelope) {
+
+			mu.Lock()
+			defer mu.Unlock()
+			if len(presences) == 1 {
+				matchesSeen[presences[0].SessionID.String()] = envelope.GetMatchmakerMatched()
+			}
+		},
+			EvrMatchmakerOverrideFn,
+		)
+		if err != nil {
+			t.Fatalf("error creating test matchmaker: %v", err)
+		}
+	*/
+
 	matchMaker, cleanup, err := createTestMatchmaker(t, consoleLogger, true, func(presences []*PresenceID, envelope *rtapi.Envelope) {
+
 		mu.Lock()
 		defer mu.Unlock()
 		if len(presences) == 1 {
@@ -554,8 +645,8 @@ func TestCharacterizationMatchmaker1v1(t *testing.T) {
 
 	t.Logf("Entry count: %d", len(entries))
 
-	minCount := 2
-	maxCount := 2
+	minCount := 6
+	maxCount := 8
 	countMultiple := 2
 
 	playerNames := make([]string, 0, len(entries))
@@ -568,7 +659,7 @@ func TestCharacterizationMatchmaker1v1(t *testing.T) {
 	// Enter tickets for all players
 	for _, entry := range entries {
 		query := entry.StringProperties["query"]
-		query = "+properties.game_mode:echo_arena"
+		t.Logf("Adding player %s to matchmaker with query `%s`", entry.Presence.Username, query)
 		_, _, err := matchMaker.Add(
 			context.Background(),
 			[]*MatchmakerPresence{entry.Presence},
@@ -586,10 +677,7 @@ func TestCharacterizationMatchmaker1v1(t *testing.T) {
 		}
 	}
 
-	// Run the "process" 8 times.
-	for i := 0; i < maxCycles; i++ {
-		matchMaker.Process()
-	}
+	matchMaker.Process()
 
 	count := 0
 	// output the matches that were created
