@@ -30,6 +30,19 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 			return NewLobbyErrorf(MissingEntitlement, "required features not supported in matchmaking.")
 		}
 
+		// Rewrite mode 'echo_arena_public_ai' as 'echo_combat' for PCVR users
+		if lobbyParams.Mode == evr.ModeArenaPublicAI {
+
+			params, ok := LoadParams(ctx)
+			if ok && params != nil && params.IsPCVR.Load() {
+				lobbyParams.Mode = evr.ModeCombatPublic
+				lobbyParams.Level = evr.LevelUnspecified
+			} else {
+				// Otherwise, respond with a bad request
+				return NewLobbyErrorf(BadRequest, "mode `%s` not supported", lobbyParams.Mode.String())
+			}
+		}
+
 		if lobbyParams.Role == evr.TeamSpectator {
 			// Leave the party if the user is in one
 			LeavePartyStream(session)
@@ -67,6 +80,7 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 			return err
 		}
 		return nil
+
 	case *evr.LobbyJoinSessionRequest:
 		LeavePartyStream(session)
 		p.metrics.CustomCounter("lobby_create_session", lobbyParams.MetricsTags(), 1)
