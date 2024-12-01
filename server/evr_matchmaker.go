@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"math"
 	"slices"
 	"sort"
@@ -13,12 +12,10 @@ import (
 	"time"
 
 	"github.com/heroiclabs/nakama-common/runtime"
-	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/intinig/go-openskill/rating"
 	"github.com/intinig/go-openskill/types"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 )
 
 const (
@@ -91,11 +88,7 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 			allPlayers[e.GetPresence().GetUserId()] = struct{}{}
 		}
 	}
-	matches, filterCounts, err := m.processPotentialMatches(modestr, candidates)
-	if err != nil {
-		logger.Error("Error processing potential matches.", zap.Error(err))
-		return nil
-	}
+	matches, filterCounts := m.processPotentialMatches(candidates)
 
 	// Extract all players from the matches
 	matchedPlayerMap := make(map[string]struct{}, 0)
@@ -130,7 +123,35 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 	return matches
 }
 
-func (m *SkillBasedMatchmaker) processPotentialMatches(modestr string, candidates [][]runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, map[string]int, error) {
+// Special function used for testing the matchmaker
+func EvrMatchmakerOverrideFn(ctx context.Context, candidateMatches [][]*MatchmakerEntry) (matches [][]*MatchmakerEntry) {
+
+	runtimeCombinations := make([][]runtime.MatchmakerEntry, len(candidateMatches))
+	for i, combination := range candidateMatches {
+		runtimeEntry := make([]runtime.MatchmakerEntry, len(combination))
+		for j, entry := range combination {
+			runtimeEntry[j] = runtime.MatchmakerEntry(entry)
+		}
+		runtimeCombinations[i] = runtimeEntry
+	}
+
+	sbmm := NewSkillBasedMatchmaker()
+	returnedEntries, _ := sbmm.processPotentialMatches(runtimeCombinations)
+
+	combinations := make([][]*MatchmakerEntry, len(returnedEntries))
+	for i, combination := range returnedEntries {
+		entries := make([]*MatchmakerEntry, len(combination))
+		for j, entry := range combination {
+			e, _ := entry.(*MatchmakerEntry)
+			entries[j] = e
+		}
+		combinations[i] = entries
+	}
+	return combinations
+
+}
+
+func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, map[string]int) {
 
 	filterCounts := make(map[string]int)
 
@@ -143,27 +164,14 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(modestr string, candidate
 	// Create a list of balanced matches with predictions
 	predictions := m.predictOutcomes(candidates)
 
-	// Sort the matches based on the mode
-	switch modestr {
-
-	case evr.ModeCombatPublic.String():
-		m.sortByDraw(predictions)
-		m.sortBySize(predictions)
-		m.sortPriority(predictions)
-
-	case evr.ModeArenaPublic.String():
-		m.sortByDraw(predictions)
-		m.sortLimitRankSpread(predictions, MaximumRankDelta)
-		m.sortBySize(predictions)
-		m.sortPriority(predictions)
-
-	default:
-		return nil, nil, fmt.Errorf("unknown mode: %s", modestr)
-	}
+	m.sortByDraw(predictions)
+	m.sortLimitRankSpread(predictions, MaximumRankDelta)
+	m.sortBySize(predictions)
+	m.sortPriority(predictions)
 
 	madeMatches := m.assembleUniqueMatches(predictions)
 
-	return madeMatches, filterCounts, nil
+	return madeMatches, filterCounts
 }
 
 func (m *SkillBasedMatchmaker) filterOddSizedTeams(candidates [][]runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, int) {

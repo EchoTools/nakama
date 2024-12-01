@@ -454,11 +454,9 @@ func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionPar
 		qparts = append(qparts, fmt.Sprintf("+properties.rank_percentile:<=%f", maxRankPercentile))
 	}
 
-	if withEarlyQuitPenalty {
-		// If the user has an early quit penalty, only match them with players who have submitted after now
-		if p.EarlyQuitPenaltyExpiry.After(time.Now()) {
-			qparts = append(qparts, fmt.Sprintf(`-properties.submission_time:>="%s"`, submissionTime))
-		}
+	// If the user has an early quit penalty, only match them with players who have submitted after now
+	if withEarlyQuitPenalty && p.EarlyQuitPenaltyExpiry.After(time.Now()) {
+		qparts = append(qparts, fmt.Sprintf(`-properties.submission_time:<="%s"`, submissionTime))
 	}
 
 	//maxDelta := 60 // milliseconds
