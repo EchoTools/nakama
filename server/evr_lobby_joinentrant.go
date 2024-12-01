@@ -166,6 +166,8 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 	tracker.UntrackLocalByModes(session.ID(), map[uint8]struct{}{StreamModeMatchmaking: {}, StreamModeGuildGroup: {}}, guildGroupStream)
 
 	connectionSettings := label.GetEntrantConnectMessage(e.RoleAlignment, e.IsPCVR, e.DisableEncryption, e.DisableMAC)
+
+	// Send the lobby session success message to the game server.
 	if err := SendEVRMessages(serverSession, false, connectionSettings); err != nil {
 		logger.Error("failed to send lobby session success to game server", zap.Error(err))
 
