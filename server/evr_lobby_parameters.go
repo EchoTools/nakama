@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
 	"strings"
 	"time"
 
@@ -519,10 +518,9 @@ func AverageLatencyHistories(histories LatencyHistory) map[string]int {
 			continue
 		}
 
-		k := ipToKey(net.ParseIP(ip))
 		rtt = mroundRTT(rtt, 10)
 
-		averages[k] = rtt
+		averages[ip] = rtt
 	}
 
 	return averages
