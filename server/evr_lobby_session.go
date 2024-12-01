@@ -83,8 +83,8 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 
 	case *evr.LobbyJoinSessionRequest:
 		LeavePartyStream(session)
-		p.metrics.CustomCounter("lobby_create_session", lobbyParams.MetricsTags(), 1)
-		logger.Info("Joining session", zap.String("mid", lobbyParams.CurrentMatchID.String()))
+		p.metrics.CustomCounter("lobby_join_session", lobbyParams.MetricsTags(), 1)
+		logger.Info("Joining session", zap.String("mid", lobbyParams.CurrentMatchID.String()), zap.String("role", TeamIndex(lobbyParams.Role).String()))
 		matchID := lobbyParams.CurrentMatchID
 		return p.lobbyJoin(ctx, logger, session, lobbyParams, matchID)
 
