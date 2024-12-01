@@ -49,6 +49,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		GuildGroupMemberships: make(map[string]GuildGroupMembership, 0),
 		MatchLabels:           make([]*MatchLabel, 0),
 	}
+
 	// Get the user's ID
 	member, err := s.GuildMember(i.GuildID, discordID)
 	if err != nil || member == nil || member.User == nil {
@@ -69,11 +70,11 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 
 	account, err := nk.AccountGetId(ctx, whoami.NakamaID.String())
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get account by ID: %w", err)
 	}
 	md, err := GetAccountMetadata(ctx, nk, userID.String())
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get account metadata: %w", err)
 	}
 
 	whoami.DefaultLobbyGroup = md.GetActiveGroupID().String()
@@ -323,7 +324,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	})
 
 	// Send the response
-	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+	return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Flags: discordgo.MessageFlagsEphemeral,
@@ -336,5 +337,4 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 			},
 		},
 	})
-	return nil
 }
