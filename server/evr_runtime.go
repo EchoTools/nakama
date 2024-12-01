@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/gofrs/uuid/v5"
@@ -315,18 +316,23 @@ type MatchStateTags struct {
 	Level            string
 	OperatorID       string
 	OperatorUsername string
+	IPAddress        string
+	Port             string
 	Region           string
 	Group            string
 }
 
 func (t MatchStateTags) AsMap() map[string]string {
 	return map[string]string{
-		"type":     t.Type,
-		"mode":     t.Mode,
-		"level":    t.Level,
-		"operator": t.Operator,
-		"region":   t.Region,
-		"group":    t.Group,
+		"type":              t.Type,
+		"mode":              t.Mode,
+		"level":             t.Level,
+		"operator_id":       t.OperatorID,
+		"operator_username": t.OperatorUsername,
+		"ip":                t.IPAddress,
+		"port":              t.Port,
+		"region":            t.Region,
+		"group":             t.Group,
 	}
 }
 
@@ -383,6 +389,8 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 				OperatorUsername: operatorUsername,
 				Region:           region,
 				Group:            groupID.String(),
+				IPAddress:        state.State.Broadcaster.Endpoint.GetExternalIP(),
+				Port:             strconv.Itoa(int(state.State.Broadcaster.Endpoint.Port)),
 			}
 
 			playercounts[stateTags] = append(playercounts[stateTags], len(state.State.Players))
