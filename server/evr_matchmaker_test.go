@@ -1,17 +1,20 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/google/go-cmp/cmp"
+	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/intinig/go-openskill/types"
 	"go.uber.org/zap"
@@ -491,4 +494,153 @@ func writeAsJSONFile(data interface{}, filename string) {
 	}
 
 	file.Write(output)
+}
+
+func TestCharacterizationMatchmaker1v1(t *testing.T) {
+	consoleLogger := loggerForTest(t)
+
+	maxCycles := 7
+
+	matchesSeen := make(map[string]*rtapi.MatchmakerMatched, maxCycles)
+
+	mu := sync.Mutex{}
+	matchMaker, cleanup, err := createTestMatchmaker(t, consoleLogger, true, func(presences []*PresenceID, envelope *rtapi.Envelope) {
+		mu.Lock()
+		defer mu.Unlock()
+		if len(presences) == 1 {
+			matchesSeen[presences[0].SessionID.String()] = envelope.GetMatchmakerMatched()
+		}
+	})
+	if err != nil {
+		t.Fatalf("error creating test matchmaker: %v", err)
+	}
+	defer cleanup()
+
+	// Load the candidate data from the json file
+	file, err := os.Open("/tmp/candidates.json")
+	if err != nil {
+		t.Error("Error opening file")
+	}
+	defer file.Close()
+
+	var data CandidateData
+
+	// read in the file
+	decoder := json.NewDecoder(file)
+	err = decoder.Decode(&data)
+	if err != nil {
+		t.Errorf("Error decoding file: %v", err)
+	}
+
+	// Create a list of all players from all match candidates
+
+	entries := make([]*MatchmakerEntry, 0, len(data.Candidates))
+	for _, c := range data.Candidates {
+		entries = append(entries, c...)
+	}
+
+	// ensure that all players are unique
+	seen := make(map[string]struct{})
+	for i := 0; i < len(entries); i++ {
+		if _, ok := seen[entries[i].Presence.SessionId]; ok {
+			entries = append(entries[:i], entries[i+1:]...)
+			i--
+		} else {
+			seen[entries[i].Presence.SessionId] = struct{}{}
+			entries[i].StringProperties, entries[i].NumericProperties = splitProperties(entries[i].Properties)
+			entries[i].Presence.SessionID = uuid.FromStringOrNil(entries[i].Presence.SessionId)
+		}
+	}
+
+	t.Logf("Entry count: %d", len(entries))
+
+	minCount := 2
+	maxCount := 2
+	countMultiple := 2
+
+	playerNames := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		playerNames = append(playerNames, entry.Presence.Username)
+	}
+
+	t.Logf("Players: %v", strings.Join(playerNames, ", "))
+
+	// Enter tickets for all players
+	for _, entry := range entries {
+		query := entry.StringProperties["query"]
+		query = "+properties.game_mode:echo_arena"
+		_, _, err := matchMaker.Add(
+			context.Background(),
+			[]*MatchmakerPresence{entry.Presence},
+			entry.GetPresence().GetSessionId(),
+			entry.PartyId,
+			query,
+			minCount,
+			maxCount,
+			countMultiple,
+			entry.StringProperties,
+			entry.NumericProperties,
+		)
+		if err != nil {
+			t.Fatalf("error matchmaker add: %v", err)
+		}
+	}
+
+	// Run the "process" 8 times.
+	for i := 0; i < maxCycles; i++ {
+		matchMaker.Process()
+	}
+
+	count := 0
+	// output the matches that were created
+	for _, match := range matchesSeen {
+
+		// Create a map of partyID's to alpha numeric characters
+		partyMap := make(map[string]string)
+		partyMap[""] = "-"
+		for _, entry := range entries {
+			if _, ok := partyMap[entry.PartyId]; ok {
+				continue
+			}
+			partyMap[entry.PartyId] = string('A' + rune(len(partyMap)))
+		}
+
+		// get the players in the match
+		playerIds := make([]string, 0, len(match.GetUsers()))
+		for _, p := range match.GetUsers() {
+			playerName := fmt.Sprintf("%s:%s", partyMap[match.GetUsers()[0].PartyId], p.Presence.GetUsername())
+			playerIds = append(playerIds, playerName)
+		}
+		t.Logf("  Match %d: %s", count, strings.Join(playerIds, ", "))
+		count++
+	}
+
+	// count the total matches
+
+	// assert that 2 are notified of a match
+	if len(matchesSeen) != 2 {
+		t.Fatalf("expected 2 matches, got %d", len(matchesSeen))
+	}
+
+	// assert that session1 is one of the ones notified
+	if _, ok := matchesSeen[entries[0].Presence.SessionId]; !ok {
+		t.Errorf("expected session1 to match, it didn't %#v", matchesSeen)
+	}
+	// cannot assert session2 or session3, one of them will match, but it
+	// cannot be assured which one
+}
+
+func splitProperties(props map[string]interface{}) (map[string]string, map[string]float64) {
+	// Split the properties into string and numeric
+	stringProperties := make(map[string]string)
+	numericProperties := make(map[string]float64)
+	for k, v := range props {
+		switch v := v.(type) {
+		case string:
+			stringProperties[k] = v
+		case float64:
+			numericProperties[k] = v
+		}
+	}
+	return stringProperties, numericProperties
 }
