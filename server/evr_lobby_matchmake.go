@@ -52,12 +52,12 @@ type MatchmakerTicketConfig struct {
 
 var DefaultMatchmakerTicketConfigs = map[evr.Symbol]MatchmakerTicketConfig{
 	evr.ModeArenaPublic: {
-		MinCount:      1,
+		MinCount:      2,
 		MaxCount:      8,
 		CountMultiple: 2,
 	},
 	evr.ModeCombatPublic: {
-		MinCount:      1,
+		MinCount:      2,
 		MaxCount:      10,
 		CountMultiple: 2,
 	},
