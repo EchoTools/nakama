@@ -53,65 +53,47 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	ctx, cancel := context.WithTimeoutCause(ctx, lobbyParams.MatchmakingTimeout, ErrMatchmakingTimeout)
 	defer cancel()
 
+	// Join the "matchmaking" status stream
 	if err := JoinMatchmakingStream(logger, session, lobbyParams); err != nil {
 		return fmt.Errorf("failed to join matchmaking stream: %w", err)
 	}
 
+	// Monitor the matchmaking status stream, canceling the context if the stream is closed.
 	go p.monitorMatchmakingStream(ctx, logger, session, lobbyParams, cancel)
 
-	// The lobby group is the party that the user is currently in.
-	lobbyGroup, isLeader, err := JoinPartyGroup(session, lobbyParams.PartyGroupName, lobbyParams.PartyID, lobbyParams.CurrentMatchID)
-	if err != nil {
-		return fmt.Errorf("failed to join party group: %w", err)
-	}
-	logger.Debug("Joined party group", zap.String("partyID", lobbyGroup.IDStr()))
+	entrantSessionIDs := []uuid.UUID{session.id}
 
-	// If this is for a social lobby, then immediately backfill to one.
-	if lobbyParams.CurrentMatchID.IsNil() && lobbyParams.Mode == evr.ModeSocialPublic {
-		entrantPresence, err := EntrantPresenceFromLobbyParams(session, lobbyParams)
+	var lobbyGroup *LobbyGroup
+
+	if lobbyParams.PartyGroupName == "" {
+		var err error
+		var isLeader bool
+		var memberSessionIDs []uuid.UUID
+		lobbyGroup, memberSessionIDs, isLeader, err = p.configureParty(ctx, logger, session, lobbyParams)
 		if err != nil {
-			return NewLobbyError(InternalError, "failed to create entrant presences")
+			return fmt.Errorf("failed to join party: %w", err)
 		}
 
-		return p.lobbyBackfill(ctx, logger, lobbyParams, entrantPresence)
-	}
-
-	// Party members will monitor the stream of the party leader to determine when to join a match.
-	if !isLeader {
-		return p.PartyFollow(ctx, logger, session, lobbyParams, lobbyGroup)
-	}
-
-	// Don't ping servers for social lobbies.
-	if lobbyParams.Mode != evr.ModeSocialPublic {
-
-		// Check latency to active game servers.
-		if err := p.CheckServerPing(ctx, logger, session); err != nil {
-			return fmt.Errorf("failed to check server ping: %w", err)
+		if !isLeader {
+			return p.PartyFollow(ctx, logger, session, lobbyParams, lobbyGroup)
 		}
 
-		// If this is a party, the party leader will wait for the other members to start matchmaking.
-		if lobbyGroup.Size() > 1 {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(10 * time.Second):
-			}
-		}
-
-		// Remove any players not matchmaking.
-		if err := p.pruneInactivePartyMembers(ctx, logger, session, lobbyParams, lobbyGroup); err != nil {
-			return fmt.Errorf("failed to collect party entrants: %w", err)
-		}
+		entrantSessionIDs = append(entrantSessionIDs, memberSessionIDs...)
 
 	}
 
 	// Construct the entrant presences for the party members.
-	entrants, err := PrepareEntrantPresences(ctx, logger, session, lobbyParams, lobbyGroup)
+	entrants, err := PrepareEntrantPresences(ctx, logger, session, lobbyParams, entrantSessionIDs...)
 	if err != nil {
 		return fmt.Errorf("failed to be party leader.: %w", err)
 	}
 
 	if lobbyParams.Mode != evr.ModeSocialPublic {
+		// Check latency to active game servers.
+		if err := p.CheckServerPing(ctx, logger, session); err != nil {
+			return fmt.Errorf("failed to check server ping: %w", err)
+		}
+
 		// Submit the matchmaking ticket
 		if err := p.lobbyMatchMakeWithFallback(ctx, logger, session, lobbyParams, lobbyGroup); err != nil {
 			return fmt.Errorf("failed to matchmake: %w", err)
@@ -120,6 +102,43 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 
 	// Attempt to backfill until the timeout.
 	return p.lobbyBackfill(ctx, logger, lobbyParams, entrants...)
+
+}
+
+func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters) (*LobbyGroup, []uuid.UUID, bool, error) {
+
+	// Join the party if a player has a party group id set.
+	// The lobby group is the party that the user is currently in.
+	lobbyGroup, isLeader, err := JoinPartyGroup(session, lobbyParams.PartyGroupName, lobbyParams.PartyID, lobbyParams.CurrentMatchID)
+	if err != nil {
+		return nil, nil, false, fmt.Errorf("failed to join party group: %w", err)
+	}
+	logger.Debug("Joined party group", zap.String("partyID", lobbyGroup.IDStr()))
+
+	// If this is a party, the party leader will wait for the other members to start matchmaking.
+	if isLeader && lobbyGroup.Size() > 1 {
+		select {
+		case <-ctx.Done():
+			return nil, nil, false, ctx.Err()
+		case <-time.After(10 * time.Second):
+		}
+	}
+
+	// Remove any players not matchmaking.
+	if err := p.pruneInactivePartyMembers(ctx, logger, session, lobbyParams, lobbyGroup); err != nil {
+		return nil, nil, false, fmt.Errorf("failed to prune inactive party members: %w", err)
+	}
+
+	memberSessionIDs := []uuid.UUID{session.id}
+	// Add the party members to the sessionID slice
+	for _, member := range lobbyGroup.List() {
+		if member.Presence.GetSessionId() == session.id.String() {
+			continue
+		}
+		memberSessionIDs = append(memberSessionIDs, uuid.FromStringOrNil(member.Presence.GetSessionId()))
+	}
+
+	return lobbyGroup, memberSessionIDs, isLeader, nil
 }
 
 func (p *EvrPipeline) monitorMatchmakingStream(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters, cancelFn context.CancelFunc) {
@@ -470,16 +489,7 @@ func (p *EvrPipeline) pruneInactivePartyMembers(ctx context.Context, logger *zap
 	return nil
 }
 
-func PrepareEntrantPresences(ctx context.Context, logger *zap.Logger, session *sessionWS, params *LobbySessionParameters, lobbyGroup *LobbyGroup) ([]*EvrMatchPresence, error) {
-
-	// prepare the entrant presences for all party members
-	sessionIDs := []uuid.UUID{session.id}
-	for _, member := range lobbyGroup.List() {
-		if member.Presence.GetSessionId() == session.id.String() {
-			continue
-		}
-		sessionIDs = append(sessionIDs, uuid.FromStringOrNil(member.Presence.GetSessionId()))
-	}
+func PrepareEntrantPresences(ctx context.Context, logger *zap.Logger, session *sessionWS, params *LobbySessionParameters, sessionIDs ...uuid.UUID) ([]*EvrMatchPresence, error) {
 
 	entrantPresences := make([]*EvrMatchPresence, 0, len(sessionIDs))
 	for _, sessionID := range sessionIDs {
