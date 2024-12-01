@@ -22,7 +22,8 @@ import (
 )
 
 const (
-	MaximumRankDelta = 0.10
+	MaximumRankDelta  = 0.10
+	RTTPropertyPrefix = "rtt_"
 )
 
 type SkillBasedMatchmaker struct {
@@ -194,7 +195,7 @@ func (m *SkillBasedMatchmaker) filterWithinMaxRTT(candidates [][]runtime.Matchma
 
 			for k, v := range entry.GetProperties() {
 
-				if !strings.HasPrefix(k, "rtt") {
+				if !strings.HasPrefix(k, RTTPropertyPrefix) {
 					continue
 				}
 

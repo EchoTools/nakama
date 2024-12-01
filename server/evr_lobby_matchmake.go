@@ -148,8 +148,8 @@ func (p *EvrPipeline) addTicket(ctx context.Context, logger *zap.Logger, session
 	query, stringProps, numericProps := lobbyParams.MatchmakingParameters(sessionParams, ticketConfig.includeRankRange, ticketConfig.includeEarlyQuitPenalty)
 
 	// now + 2/3 matchmaking timeout
-	timeout := (p.matchmakingTicketTimeout() * 2) / 3
-	priorityThreshold := time.Now().UTC().Add(timeout)
+
+	priorityThreshold := time.Now().UTC().Add(p.matchmakingTicketTimeout() / 3 * 2)
 
 	numericProps["priority_threshold"] = float64(priorityThreshold.Unix())
 
@@ -250,10 +250,6 @@ func StoreMatchmakingSettings(ctx context.Context, nk runtime.NakamaModule, user
 	return SaveToStorage(ctx, nk, userID, settings)
 }
 
-func ipToKey(ip net.IP) string {
-	b := ip.To4()
-	return fmt.Sprintf("rtt%02x%02x%02x%02x", b[0], b[1], b[2], b[3])
-}
 func keyToIP(key string) net.IP {
 	b, _ := hex.DecodeString(key[3:])
 	return net.IPv4(b[0], b[1], b[2], b[3])
@@ -277,7 +273,7 @@ func (e *LatencyMetric) ID() string {
 
 // The key used for matchmaking properties
 func (e *LatencyMetric) AsProperty() (string, float64) {
-	k := fmt.Sprintf("rtt%s", ipToKey(e.Endpoint.ExternalIP))
+	k := RTTPropertyPrefix + e.Endpoint.ExternalIP.String()
 	v := float64(e.RTT / time.Millisecond)
 	return k, v
 }
