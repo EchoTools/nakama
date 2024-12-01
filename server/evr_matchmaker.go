@@ -77,7 +77,7 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 		return nil
 	}
 
-	modestr, ok := candidates[0][0].GetProperties()["mode"].(string)
+	modestr, ok := candidates[0][0].GetProperties()["game_mode"].(string)
 	if !ok || modestr == "" {
 		logger.Error("Mode not found in entry properties. Matchmaker cannot run.")
 		return nil

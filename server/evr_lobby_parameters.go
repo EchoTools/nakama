@@ -421,7 +421,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionPar
 
 	submissionTime := time.Now().UTC().Format(time.RFC3339)
 	stringProperties := map[string]string{
-		"mode":            p.Mode.String(),
+		"game_mode":       p.Mode.String(),
 		"group_id":        p.GroupID.String(),
 		"version_lock":    p.VersionLock.String(),
 		"blocked_ids":     strings.Join(p.BlockedIDs, " "),
@@ -438,7 +438,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionPar
 	}
 
 	qparts := []string{
-		"+properties.mode:" + p.Mode.String(),
+		"+properties.game_mode:" + p.Mode.String(),
 		fmt.Sprintf("+properties.group_id:/%s/", Query.Escape(p.GroupID.String())),
 		fmt.Sprintf(`-properties.blocked_ids:/.*%s.*/`, Query.Escape(p.UserID.String())),
 		//"+properties.version_lock:" + p.VersionLock.String(),
