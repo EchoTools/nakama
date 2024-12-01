@@ -169,7 +169,7 @@ func DisplayNameHistoryAdd(ctx context.Context, nk runtime.NakamaModule, userID 
 func DisplayNameCacheRegexSearch(ctx context.Context, nk runtime.NakamaModule, pattern string) (map[string]*DisplayNameHistory, error) {
 	query := fmt.Sprintf("+value.cache:/%s/", pattern)
 	// Perform the storage list operation
-	result, err := nk.StorageIndexList(ctx, SystemUserID, DisplayNameHistoryCacheIndex, query, 100)
+	result, _, err := nk.StorageIndexList(ctx, SystemUserID, DisplayNameHistoryCacheIndex, query, 100, nil, "")
 	if err != nil {
 		return nil, fmt.Errorf("error listing display name history: %w", err)
 	}
@@ -189,7 +189,7 @@ func DisplayNameCacheRegexSearch(ctx context.Context, nk runtime.NakamaModule, p
 func DisplayNameHistoryActiveList(ctx context.Context, nk runtime.NakamaModule, displayName string) ([]string, error) {
 	// Perform the storage list operation
 	query := fmt.Sprintf("+value.active:%s", Query.Escape(displayName))
-	result, err := nk.StorageIndexList(ctx, SystemUserID, DisplayNameHistoryCacheIndex, query, 100)
+	result, _, err := nk.StorageIndexList(ctx, SystemUserID, DisplayNameHistoryCacheIndex, query, 100, nil, "")
 	if err != nil {
 		return nil, fmt.Errorf("error listing display name history: %w", err)
 	}

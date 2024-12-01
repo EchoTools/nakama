@@ -482,7 +482,7 @@ func RegisterIndexes(initializer runtime.Initializer) error {
 	fields := []string{"client_ip_address,displayname"} // index on these fields
 	maxEntries := 1000000
 	indexOnly := false
-	if err := initializer.RegisterStorageIndex(name, collection, key, fields, maxEntries, indexOnly); err != nil {
+	if err := initializer.RegisterStorageIndex(name, collection, key, fields, nil, maxEntries, indexOnly); err != nil {
 		return err
 	}
 	name = EvrIDStorageIndex
@@ -491,7 +491,7 @@ func RegisterIndexes(initializer runtime.Initializer) error {
 	fields = []string{"server.xplatformid"} // index on these fields
 	maxEntries = 100000
 	indexOnly = false
-	if err := initializer.RegisterStorageIndex(name, collection, key, fields, maxEntries, indexOnly); err != nil {
+	if err := initializer.RegisterStorageIndex(name, collection, key, fields, nil, maxEntries, indexOnly); err != nil {
 		return err
 	}
 	// Register the DisplayName index for avoiding name collisions
@@ -501,7 +501,7 @@ func RegisterIndexes(initializer runtime.Initializer) error {
 	key = DisplayNameHistoryKey                      // Set to empty string to match all keys instead
 	fields = []string{"active", "reserved", "cache"} // index on these fields
 	maxEntries = 1000000
-	if err := initializer.RegisterStorageIndex(name, collection, key, fields, maxEntries, indexOnly); err != nil {
+	if err := initializer.RegisterStorageIndex(name, collection, key, fields, nil, maxEntries, indexOnly); err != nil {
 		return err
 	}
 
@@ -510,7 +510,7 @@ func RegisterIndexes(initializer runtime.Initializer) error {
 	key = GameProfileStorageKey             // Set to empty string to match all keys instead
 	fields = []string{"client.ghost.users"} // index on these fields
 	maxEntries = 1000000
-	if err := initializer.RegisterStorageIndex(name, collection, key, fields, maxEntries, indexOnly); err != nil {
+	if err := initializer.RegisterStorageIndex(name, collection, key, fields, nil, maxEntries, indexOnly); err != nil {
 		return err
 	}
 
@@ -519,7 +519,7 @@ func RegisterIndexes(initializer runtime.Initializer) error {
 	key = GameProfileStorageKey              // Set to empty string to match all keys instead
 	fields = []string{"client.social.group"} // index on these fields
 	maxEntries = 100000
-	if err := initializer.RegisterStorageIndex(name, collection, key, fields, maxEntries, indexOnly); err != nil {
+	if err := initializer.RegisterStorageIndex(name, collection, key, fields, nil, maxEntries, indexOnly); err != nil {
 		return err
 	}
 
@@ -528,7 +528,7 @@ func RegisterIndexes(initializer runtime.Initializer) error {
 	key = MatchmakingConfigStorageKey // Set to empty string to match all keys instead
 	fields = []string{"group_id"}     // index on these fields
 	maxEntries = 100000
-	if err := initializer.RegisterStorageIndex(name, collection, key, fields, maxEntries, indexOnly); err != nil {
+	if err := initializer.RegisterStorageIndex(name, collection, key, fields, nil, maxEntries, indexOnly); err != nil {
 		return err
 	}
 
@@ -981,7 +981,7 @@ func GetPartyGroupUserIDs(ctx context.Context, nk runtime.NakamaModule, groupNam
 		return nil, status.Error(codes.InvalidArgument, "user ID is required")
 	}
 
-	objs, err := nk.StorageIndexList(ctx, SystemUserID, ActivePartyGroupIndex, fmt.Sprintf("+value.group_id:%s", groupName), 100)
+	objs, _, err := nk.StorageIndexList(ctx, SystemUserID, ActivePartyGroupIndex, fmt.Sprintf("+value.group_id:%s", groupName), 100, nil, "")
 	if err != nil {
 		return nil, fmt.Errorf("error listing party group users: %w", err)
 	}

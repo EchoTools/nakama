@@ -172,7 +172,9 @@ func (r *LeaderboardRegistry) RecordWriteTabletStat(ctx context.Context, meta Le
 	if err != nil {
 		// Try to create the leaderboard
 		operator, sortOrder, resetSchedule := r.leaderboardConfig(meta.name, meta.operator, meta.periodicity)
-		err = r.nk.LeaderboardCreate(ctx, meta.ID(), true, sortOrder, operator, resetSchedule, nil)
+		enableRanks := true
+		metadata := map[string]any{}
+		err = r.nk.LeaderboardCreate(ctx, meta.ID(), true, sortOrder, operator, resetSchedule, metadata, enableRanks)
 
 		if err != nil {
 			return nil, fmt.Errorf("Leaderboard create error: %v", err)

@@ -310,7 +310,7 @@ type EvrIDHistory struct {
 func (p *EvrPipeline) checkEvrIDOwner(ctx context.Context, evrId evr.EvrId) ([]EvrIDHistory, error) {
 
 	// Check the storage index for matching evrIDs
-	objectIds, err := p.storageIndex.List(ctx, uuid.Nil, EvrIDStorageIndex, fmt.Sprintf("+value.server.xplatformid:%s", evrId.String()), 1)
+	objectIds, _, err := p.storageIndex.List(ctx, uuid.Nil, EvrIDStorageIndex, fmt.Sprintf("+value.server.xplatformid:%s", evrId.String()), 1, nil, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to list evrIDs: %w", err)
 	}

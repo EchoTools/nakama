@@ -541,7 +541,7 @@ func recordPercentileToLeaderboard(ctx context.Context, nk runtime.NakamaModule,
 
 		if err != nil {
 			// Try to create the leaderboard
-			err = nk.LeaderboardCreate(ctx, id, true, "desc", "set", PeriodicityToSchedule(period), nil)
+			err = nk.LeaderboardCreate(ctx, id, true, "desc", "set", PeriodicityToSchedule(period), nil, true)
 
 			if err != nil {
 				return fmt.Errorf("Leaderboard create error: %v", err)
