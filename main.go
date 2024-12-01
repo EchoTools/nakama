@@ -30,20 +30,19 @@ import (
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama/v3/console"
-	"github.com/heroiclabs/nakama/v3/ga"
 	"github.com/heroiclabs/nakama/v3/migrate"
+	"github.com/heroiclabs/nakama/v3/se"
 	"github.com/heroiclabs/nakama/v3/server"
 	"github.com/heroiclabs/nakama/v3/social"
-	_ "github.com/jackc/pgx/v4/stdlib"
+	"github.com/jackc/pgx/v5/stdlib"
+	_ "github.com/jackc/pgx/v5/stdlib" // Blank import to register SQL driver
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"google.golang.org/protobuf/encoding/protojson"
 
-	_ "github.com/bits-and-blooms/bitset"
-	_ "github.com/go-gorp/gorp/v3"
-	_ "github.com/golang/snappy"
+	_ "github.com/klauspost/compress"
 	_ "github.com/prometheus/client_golang/prometheus"
-	_ "github.com/twmb/murmur3"
+	_ "github.com/prometheus/common/model"
 )
 
 const cookieFilename = ".cookie"
@@ -65,11 +64,15 @@ var (
 )
 
 func main() {
+	defer os.Exit(0)
+
 	semver := fmt.Sprintf("%s+%s", version, commitID)
 	// Always set default timeout on HTTP client.
 	http.DefaultClient.Timeout = 1500 * time.Millisecond
 
 	tmpLogger := server.NewJSONLogger(os.Stdout, zapcore.InfoLevel, server.JSONFormat)
+
+	ctx, ctxCancelFn := context.WithCancel(context.Background())
 
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
@@ -77,7 +80,26 @@ func main() {
 			fmt.Println(semver)
 			return
 		case "migrate":
-			migrate.Parse(os.Args[2:], tmpLogger)
+			config := server.ParseArgs(tmpLogger, os.Args[2:])
+			server.ValidateConfigDatabase(tmpLogger, config)
+			db := server.DbConnect(ctx, tmpLogger, config, true)
+			defer db.Close()
+
+			conn, err := db.Conn(ctx)
+			if err != nil {
+				tmpLogger.Fatal("Failed to acquire db conn for migration", zap.Error(err))
+			}
+
+			if err = conn.Raw(func(driverConn any) error {
+				pgxConn := driverConn.(*stdlib.Conn).Conn()
+				migrate.RunCmd(ctx, tmpLogger, pgxConn, os.Args[2], config.GetLimit(), config.GetLogger().Format)
+
+				return nil
+			}); err != nil {
+				conn.Close()
+				tmpLogger.Fatal("Failed to acquire pgx conn for migration", zap.Error(err))
+			}
+			conn.Close()
 			return
 		case "check":
 			// Parse any command line args to look up runtime path.
@@ -97,7 +119,12 @@ func main() {
 			}
 			return
 		case "healthcheck":
-			resp, err := http.Get("http://localhost:7350")
+			port := "7350"
+			if len(os.Args) > 2 {
+				port = os.Args[2]
+			}
+
+			resp, err := http.Get("http://localhost:" + port)
 			if err != nil || resp.StatusCode != http.StatusOK {
 				tmpLogger.Fatal("healthcheck failed")
 			}
@@ -108,7 +135,7 @@ func main() {
 
 	config := server.ParseArgs(tmpLogger, os.Args)
 	logger, startupLogger := server.SetupLogging(tmpLogger, config)
-	configWarnings := server.CheckConfig(logger, config)
+	configWarnings := server.ValidateConfig(logger, config)
 
 	startupLogger.Info("Nakama starting")
 	startupLogger.Info("Node", zap.String("name", config.GetName()), zap.String("version", semver), zap.String("runtime", runtime.Version()), zap.Int("cpu", runtime.NumCPU()), zap.Int("proc", runtime.GOMAXPROCS(0)))
@@ -125,20 +152,28 @@ func main() {
 	}
 	startupLogger.Info("Database connections", zap.Strings("dsns", redactedAddresses))
 
-	// Global server context.
-	ctx, ctxCancelFn := context.WithCancel(context.Background())
-
-	db, dbVersion := server.DbConnect(ctx, startupLogger, config)
-	startupLogger.Info("Database information", zap.String("version", dbVersion))
+	db := server.DbConnect(ctx, startupLogger, config, false)
 
 	// Check migration status and fail fast if the schema has diverged.
-	migrate.StartupCheck(startupLogger, db)
+	conn, err := db.Conn(context.Background())
+	if err != nil {
+		logger.Fatal("Failed to acquire db conn for migration check", zap.Error(err))
+	}
+
+	if err = conn.Raw(func(driverConn any) error {
+		pgxConn := driverConn.(*stdlib.Conn).Conn()
+		migrate.Check(ctx, startupLogger, pgxConn)
+		return nil
+	}); err != nil {
+		conn.Close()
+		logger.Fatal("Failed to acquire pgx conn for migration check", zap.Error(err))
+	}
+	conn.Close()
 
 	// Access to social provider integrations.
 	socialClient := social.NewClient(logger, 5*time.Second, config.GetGoogleAuth().OAuthConfig)
 
 	// Start up server components.
-	cookie := newOrLoadCookie(config)
 	metrics := server.NewLocalMetrics(logger, startupLogger, db, config)
 	sessionRegistry := server.NewLocalSessionRegistry(metrics)
 	sessionCache := server.NewLocalSessionCache(config.GetSession().TokenExpirySec, config.GetSession().RefreshTokenExpirySec)
@@ -166,7 +201,7 @@ func main() {
 		startupLogger.Fatal("Failed initializing runtime modules", zap.Error(err))
 	}
 	matchmaker := server.NewLocalMatchmaker(logger, startupLogger, config, router, metrics, runtime)
-	partyRegistry := server.NewLocalPartyRegistry(logger, matchmaker, tracker, streamManager, router, config.GetName())
+	partyRegistry := server.NewLocalPartyRegistry(logger, config, matchmaker, tracker, streamManager, router, config.GetName())
 	tracker.SetPartyJoinListener(partyRegistry.Join)
 	tracker.SetPartyLeaveListener(partyRegistry.Leave)
 
@@ -183,21 +218,22 @@ func main() {
 	pipeline := server.NewPipeline(logger, config, db, jsonpbMarshaler, jsonpbUnmarshaler, sessionRegistry, statusRegistry, matchRegistry, partyRegistry, matchmaker, tracker, router, runtime)
 	statusHandler := server.NewLocalStatusHandler(logger, sessionRegistry, matchRegistry, tracker, metrics, config.GetName())
 
+	telemetryEnabled := len(os.Getenv("NAKAMA_TELEMETRY")) < 1
+	console.UIFS.Nt = !telemetryEnabled
+	cookie := newOrLoadCookie(telemetryEnabled, config)
+
 	evrPipeline := server.NewEvrPipeline(logger, startupLogger, db, jsonpbMarshaler, jsonpbUnmarshaler, config, version, socialClient, storageIndex, leaderboardScheduler, leaderboardCache, leaderboardRankCache, sessionRegistry, sessionCache, statusRegistry, matchRegistry, matchmaker, tracker, router, streamManager, metrics, pipeline, runtime)
 	apiServer := server.StartApiServer(logger, startupLogger, db, jsonpbMarshaler, jsonpbUnmarshaler, config, version, socialClient, storageIndex, leaderboardCache, leaderboardRankCache, sessionRegistry, sessionCache, statusRegistry, matchRegistry, matchmaker, tracker, router, streamManager, metrics, pipeline, runtime, evrPipeline)
 	consoleServer := server.StartConsoleServer(logger, startupLogger, db, config, tracker, router, streamManager, metrics, sessionRegistry, sessionCache, consoleSessionCache, loginAttemptCache, statusRegistry, statusHandler, runtimeInfo, matchRegistry, configWarnings, semver, leaderboardCache, leaderboardRankCache, leaderboardScheduler, storageIndex, apiServer, runtime, cookie)
 
 	evrPipeline.SetApiServer(apiServer)
 
-	gaenabled := len(os.Getenv("NAKAMA_TELEMETRY")) < 1
-	console.UIFS.Nt = !gaenabled
-	const gacode = "UA-89792135-1"
-	var telemetryClient *http.Client
-	if gaenabled {
-		telemetryClient = &http.Client{
-			Timeout: 1500 * time.Millisecond,
-		}
-		runTelemetry(telemetryClient, gacode, cookie)
+	if telemetryEnabled {
+		const telemetryKey = "YU1bIKUhjQA9WC0O6ouIRIWTaPlJ5kFs"
+		_ = se.Start(telemetryKey, cookie, semver, "nakama")
+		defer func() {
+			_ = se.End(telemetryKey, cookie)
+		}()
 	}
 
 	// Respect OS stop signals.
@@ -209,37 +245,7 @@ func main() {
 	// Wait for a termination signal.
 	<-c
 
-	graceSeconds := config.GetShutdownGraceSec()
-
-	// If a shutdown grace period is allowed, prepare a timer.
-	var timer *time.Timer
-	timerCh := make(<-chan time.Time, 1)
-	if graceSeconds != 0 {
-		timer = time.NewTimer(time.Duration(graceSeconds) * time.Second)
-		timerCh = timer.C
-		startupLogger.Info("Shutdown started - use CTRL^C to force stop server", zap.Int("grace_period_sec", graceSeconds))
-	} else {
-		// No grace period.
-		startupLogger.Info("Shutdown started")
-	}
-
-	// Stop any running authoritative matches and do not accept any new ones.
-	select {
-	case <-matchRegistry.Stop(graceSeconds):
-		// Graceful shutdown has completed.
-		startupLogger.Info("All authoritative matches stopped")
-	case <-timerCh:
-		// Timer has expired, terminate matches immediately.
-		startupLogger.Info("Shutdown grace period expired")
-		<-matchRegistry.Stop(0)
-	case <-c:
-		// A second interrupt has been received.
-		startupLogger.Info("Skipping graceful shutdown")
-		<-matchRegistry.Stop(0)
-	}
-	if timer != nil {
-		timer.Stop()
-	}
+	server.HandleShutdown(ctx, logger, matchRegistry, config.GetShutdownGraceSec(), runtime.Shutdown(), c)
 
 	// Signal cancellation to the global runtime context.
 	ctxCancelFn()
@@ -258,13 +264,7 @@ func main() {
 	metrics.Stop(logger)
 	loginAttemptCache.Stop()
 
-	if gaenabled {
-		_ = ga.SendSessionStop(telemetryClient, gacode, cookie)
-	}
-
 	startupLogger.Info("Shutdown complete")
-
-	os.Exit(0)
 }
 
 // Help improve Nakama by sending anonymous usage statistics.
@@ -277,19 +277,12 @@ func main() {
 // * Version of Nakama being used which includes build metadata.
 // * Amount of time the server ran for.
 //
-// This information is sent via Google Analytics which allows the Nakama team to
+// This information is sent via Segment which allows the Nakama team to
 // analyze usage patterns and errors in order to help improve the server.
-func runTelemetry(httpc *http.Client, gacode string, cookie string) {
-	if ga.SendSessionStart(httpc, gacode, cookie) != nil {
-		return
+func newOrLoadCookie(enabled bool, config server.Config) string {
+	if !enabled {
+		return ""
 	}
-	if ga.SendEvent(httpc, gacode, cookie, &ga.Event{Ec: "version", Ea: fmt.Sprintf("%s+%s", version, commitID)}) != nil {
-		return
-	}
-	_ = ga.SendEvent(httpc, gacode, cookie, &ga.Event{Ec: "variant", Ea: "nakama"})
-}
-
-func newOrLoadCookie(config server.Config) string {
 	filePath := filepath.FromSlash(config.GetDataDir() + "/" + cookieFilename)
 	b, err := os.ReadFile(filePath)
 	cookie := uuid.FromBytesOrNil(b)

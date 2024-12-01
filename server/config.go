@@ -18,17 +18,17 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
-	"net/url"
-	"os"
-	"path/filepath"
-	"sort"
-	"strings"
-
+	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/flags"
 	"go.uber.org/zap"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"gopkg.in/yaml.v3"
+	"net/url"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 )
 
 // Config interface is the Nakama core configuration.
@@ -52,8 +52,11 @@ type Config interface {
 	GetGoogleAuth() *GoogleAuthConfig
 	GetSatori() *SatoriConfig
 	GetStorage() *StorageConfig
+	GetMFA() *MFAConfig
+	GetLimit() int
 
 	Clone() (Config, error)
+	GetRuntimeConfig() (runtime.Config, error)
 }
 
 func ParseArgs(logger *zap.Logger, args []string) Config {
@@ -123,182 +126,183 @@ func ParseArgs(logger *zap.Logger, args []string) Config {
 	return mainConfig
 }
 
-func CheckConfig(logger *zap.Logger, config Config) map[string]string {
+func ValidateConfig(logger *zap.Logger, c Config) map[string]string {
 	// Fail fast on invalid values.
-	if l := len(config.GetName()); l < 1 || l > 16 {
+	ValidateConfigDatabase(logger, c)
+	if l := len(c.GetName()); l < 1 || l > 16 {
 		logger.Fatal("Name must be 1-16 characters", zap.String("param", "name"))
 	}
-	if config.GetShutdownGraceSec() < 0 {
-		logger.Fatal("Shutdown grace period must be >= 0", zap.Int("shutdown_grace_sec", config.GetShutdownGraceSec()))
+	if c.GetShutdownGraceSec() < 0 {
+		logger.Fatal("Shutdown grace period must be >= 0", zap.Int("shutdown_grace_sec", c.GetShutdownGraceSec()))
 	}
-	if config.GetSocket().ServerKey == "" {
+	if c.GetSocket().ServerKey == "" {
 		logger.Fatal("Server key must be set", zap.String("param", "socket.server_key"))
 	}
-	if config.GetSession().TokenExpirySec < 1 {
+	if c.GetSession().TokenExpirySec < 1 {
 		logger.Fatal("Token expiry seconds must be >= 1", zap.String("param", "session.token_expiry_sec"))
 	}
-	if config.GetSession().EncryptionKey == "" {
+	if c.GetSession().EncryptionKey == "" {
 		logger.Fatal("Encryption key must be set", zap.String("param", "session.encryption_key"))
 	}
-	if config.GetSession().RefreshEncryptionKey == "" {
+	if c.GetSession().RefreshEncryptionKey == "" {
 		logger.Fatal("Refresh token encryption key must be set", zap.String("param", "session.refresh_encryption_key"))
 	}
-	if config.GetSession().RefreshTokenExpirySec < 1 {
+	if c.GetSession().RefreshTokenExpirySec < 1 {
 		logger.Fatal("Refresh token expiry seconds must be >= 1", zap.String("param", "session.refresh_token_expiry_sec"))
 	}
-	if config.GetSession().EncryptionKey == config.GetSession().RefreshEncryptionKey {
+	if c.GetSession().EncryptionKey == c.GetSession().RefreshEncryptionKey {
 		logger.Fatal("Encryption key and refresh token encryption cannot match", zap.Strings("param", []string{"session.encryption_key", "session.refresh_encryption_key"}))
 	}
-	if config.GetSession().SingleMatch && !config.GetSession().SingleSocket {
+	if c.GetSession().SingleMatch && !c.GetSession().SingleSocket {
 		logger.Fatal("Single match cannot be enabled without single socket", zap.Strings("param", []string{"session.single_match", "session.single_socket"}))
 	}
-	if config.GetRuntime().HTTPKey == "" {
+	if c.GetSession().SingleParty && !c.GetSession().SingleSocket {
+		logger.Fatal("Single party cannot be enabled without single socket", zap.Strings("param", []string{"session.single_party", "session.single_socket"}))
+	}
+	if c.GetRuntime().HTTPKey == "" {
 		logger.Fatal("Runtime HTTP key must be set", zap.String("param", "runtime.http_key"))
 	}
-	if config.GetConsole().MaxMessageSizeBytes < 1 {
-		logger.Fatal("Console max message size bytes must be >= 1", zap.Int64("console.max_message_size_bytes", config.GetConsole().MaxMessageSizeBytes))
+	if c.GetConsole().MaxMessageSizeBytes < 1 {
+		logger.Fatal("Console max message size bytes must be >= 1", zap.Int64("console.max_message_size_bytes", c.GetConsole().MaxMessageSizeBytes))
 	}
-	if config.GetConsole().ReadTimeoutMs < 1 {
-		logger.Fatal("Console read timeout milliseconds must be >= 1", zap.Int("console.read_timeout_ms", config.GetConsole().ReadTimeoutMs))
+	if c.GetConsole().ReadTimeoutMs < 1 {
+		logger.Fatal("Console read timeout milliseconds must be >= 1", zap.Int("console.read_timeout_ms", c.GetConsole().ReadTimeoutMs))
 	}
-	if config.GetConsole().WriteTimeoutMs < 1 {
-		logger.Fatal("Console write timeout milliseconds must be >= 1", zap.Int("console.write_timeout_ms", config.GetConsole().WriteTimeoutMs))
+	if c.GetConsole().WriteTimeoutMs < 1 {
+		logger.Fatal("Console write timeout milliseconds must be >= 1", zap.Int("console.write_timeout_ms", c.GetConsole().WriteTimeoutMs))
 	}
-	if config.GetConsole().IdleTimeoutMs < 1 {
-		logger.Fatal("Console idle timeout milliseconds must be >= 1", zap.Int("console.idle_timeout_ms", config.GetConsole().IdleTimeoutMs))
+	if c.GetConsole().IdleTimeoutMs < 1 {
+		logger.Fatal("Console idle timeout milliseconds must be >= 1", zap.Int("console.idle_timeout_ms", c.GetConsole().IdleTimeoutMs))
 	}
-	if config.GetConsole().Username == "" || !usernameRegex.MatchString(config.GetConsole().Username) {
+	if c.GetConsole().Username == "" || !usernameRegex.MatchString(c.GetConsole().Username) {
 		logger.Fatal("Console username must be set and valid", zap.String("param", "console.username"))
 	}
-	if config.GetConsole().Password == "" {
+	if c.GetConsole().Password == "" {
 		logger.Fatal("Console password must be set", zap.String("param", "console.password"))
 	}
-	if config.GetConsole().SigningKey == "" {
+	if c.GetConsole().SigningKey == "" {
 		logger.Fatal("Console signing key must be set", zap.String("param", "console.signing_key"))
 	}
-	if p := config.GetSocket().Protocol; p != "tcp" && p != "tcp4" && p != "tcp6" {
-		logger.Fatal("Socket protocol must be one of: tcp, tcp4, tcp6", zap.String("socket.protocol", config.GetSocket().Protocol))
+	if p := c.GetSocket().Protocol; p != "tcp" && p != "tcp4" && p != "tcp6" {
+		logger.Fatal("Socket protocol must be one of: tcp, tcp4, tcp6", zap.String("socket.protocol", c.GetSocket().Protocol))
 	}
-	if config.GetSocket().MaxMessageSizeBytes < 1 {
-		logger.Fatal("Socket max message size bytes must be >= 1", zap.Int64("socket.max_message_size_bytes", config.GetSocket().MaxMessageSizeBytes))
+	if c.GetSocket().MaxMessageSizeBytes < 1 {
+		logger.Fatal("Socket max message size bytes must be >= 1", zap.Int64("socket.max_message_size_bytes", c.GetSocket().MaxMessageSizeBytes))
 	}
-	if config.GetSocket().MaxRequestSizeBytes < 1 {
-		logger.Fatal("Socket max request size bytes must be >= 1", zap.Int64("socket.max_request_size_bytes", config.GetSocket().MaxRequestSizeBytes))
+	if c.GetSocket().MaxRequestSizeBytes < 1 {
+		logger.Fatal("Socket max request size bytes must be >= 1", zap.Int64("socket.max_request_size_bytes", c.GetSocket().MaxRequestSizeBytes))
 	}
-	if config.GetSocket().ReadBufferSizeBytes < 1 {
-		logger.Fatal("Socket read buffer size bytes must be >= 1", zap.Int("socket.read_buffer_size_bytes", config.GetSocket().ReadBufferSizeBytes))
+	if c.GetSocket().ReadBufferSizeBytes < 1 {
+		logger.Fatal("Socket read buffer size bytes must be >= 1", zap.Int("socket.read_buffer_size_bytes", c.GetSocket().ReadBufferSizeBytes))
 	}
-	if config.GetSocket().WriteBufferSizeBytes < 1 {
-		logger.Fatal("Socket write buffer size bytes must be >= 1", zap.Int("socket.write_buffer_size_bytes", config.GetSocket().WriteBufferSizeBytes))
+	if c.GetSocket().WriteBufferSizeBytes < 1 {
+		logger.Fatal("Socket write buffer size bytes must be >= 1", zap.Int("socket.write_buffer_size_bytes", c.GetSocket().WriteBufferSizeBytes))
 	}
-	if config.GetSocket().ReadTimeoutMs < 1 {
-		logger.Fatal("Socket read timeout milliseconds must be >= 1", zap.Int("socket.read_timeout_ms", config.GetSocket().ReadTimeoutMs))
+	if c.GetSocket().ReadTimeoutMs < 1 {
+		logger.Fatal("Socket read timeout milliseconds must be >= 1", zap.Int("socket.read_timeout_ms", c.GetSocket().ReadTimeoutMs))
 	}
-	if config.GetSocket().WriteTimeoutMs < 1 {
-		logger.Fatal("Socket write timeout milliseconds must be >= 1", zap.Int("socket.write_timeout_ms", config.GetSocket().WriteTimeoutMs))
+	if c.GetSocket().WriteTimeoutMs < 1 {
+		logger.Fatal("Socket write timeout milliseconds must be >= 1", zap.Int("socket.write_timeout_ms", c.GetSocket().WriteTimeoutMs))
 	}
-	if config.GetSocket().IdleTimeoutMs < 1 {
-		logger.Fatal("Socket idle timeout milliseconds must be >= 1", zap.Int("socket.idle_timeout_ms", config.GetSocket().IdleTimeoutMs))
+	if c.GetSocket().IdleTimeoutMs < 1 {
+		logger.Fatal("Socket idle timeout milliseconds must be >= 1", zap.Int("socket.idle_timeout_ms", c.GetSocket().IdleTimeoutMs))
 	}
-	if config.GetSocket().PingPeriodMs >= config.GetSocket().PongWaitMs {
-		logger.Fatal("Ping period value must be less than pong wait value", zap.Int("socket.ping_period_ms", config.GetSocket().PingPeriodMs), zap.Int("socket.pong_wait_ms", config.GetSocket().PongWaitMs))
+	if c.GetSocket().PingPeriodMs >= c.GetSocket().PongWaitMs {
+		logger.Fatal("Ping period value must be less than pong wait value", zap.Int("socket.ping_period_ms", c.GetSocket().PingPeriodMs), zap.Int("socket.pong_wait_ms", c.GetSocket().PongWaitMs))
 	}
-	if len(config.GetDatabase().Addresses) < 1 {
-		logger.Fatal("At least one database address must be specified", zap.Strings("database.address", config.GetDatabase().Addresses))
+	if c.GetRuntime().GetLuaMinCount() < 0 {
+		logger.Fatal("Minimum Lua runtime instance count must be >= 0", zap.Int("runtime.lua_min_count", c.GetRuntime().GetLuaMinCount()))
 	}
-	for _, address := range config.GetDatabase().Addresses {
-		rawURL := fmt.Sprintf("postgresql://%s", address)
-		if _, err := url.Parse(rawURL); err != nil {
-			logger.Fatal("Bad database connection URL", zap.String("database.address", address), zap.Error(err))
-		}
+	if c.GetRuntime().GetLuaMaxCount() < 1 {
+		logger.Fatal("Maximum Lua runtime instance count must be >= 1", zap.Int("runtime.lua_max_count", c.GetRuntime().GetLuaMinCount()))
 	}
-	if config.GetDatabase().DnsScanIntervalSec < 1 {
-		logger.Fatal("Database DNS scan interval seconds must be > 0", zap.Int("database.dns_scan_interval_sec", config.GetDatabase().DnsScanIntervalSec))
+	if c.GetRuntime().GetLuaMinCount() > c.GetRuntime().GetLuaMaxCount() {
+		logger.Fatal("Minimum Lua runtime instance count must be less than or equal to maximum Lua runtime instance count", zap.Int("runtime.lua_min_count", c.GetRuntime().GetLuaMinCount()), zap.Int("runtime.lua_max_count", c.GetRuntime().GetLuaMaxCount()))
 	}
-	if config.GetRuntime().GetLuaMinCount() < 0 {
-		logger.Fatal("Minimum Lua runtime instance count must be >= 0", zap.Int("runtime.lua_min_count", config.GetRuntime().GetLuaMinCount()))
+	if c.GetRuntime().GetLuaCallStackSize() < 1 {
+		logger.Fatal("Lua runtime instance call stack size must be >= 1", zap.Int("runtime.lua_call_stack_size", c.GetRuntime().GetLuaCallStackSize()))
 	}
-	if config.GetRuntime().GetLuaMaxCount() < 1 {
-		logger.Fatal("Maximum Lua runtime instance count must be >= 1", zap.Int("runtime.lua_max_count", config.GetRuntime().GetLuaMinCount()))
+	if c.GetRuntime().GetLuaRegistrySize() < 128 {
+		logger.Fatal("Lua runtime instance registry size must be >= 128", zap.Int("runtime.registry_size", c.GetRuntime().GetLuaRegistrySize()))
 	}
-	if config.GetRuntime().GetLuaMinCount() > config.GetRuntime().GetLuaMaxCount() {
-		logger.Fatal("Minimum Lua runtime instance count must be less than or equal to maximum Lua runtime instance count", zap.Int("runtime.lua_min_count", config.GetRuntime().GetLuaMinCount()), zap.Int("runtime.lua_max_count", config.GetRuntime().GetLuaMaxCount()))
+	if c.GetRuntime().JsMinCount < 0 {
+		logger.Fatal("Minimum JavaScript runtime instance count must be >= 0", zap.Int("runtime.js_min_count", c.GetRuntime().JsMinCount))
 	}
-	if config.GetRuntime().GetLuaCallStackSize() < 1 {
-		logger.Fatal("Lua runtime instance call stack size must be >= 1", zap.Int("runtime.lua_call_stack_size", config.GetRuntime().GetLuaCallStackSize()))
+	if c.GetRuntime().JsMaxCount < 1 {
+		logger.Fatal("Maximum JavaScript runtime instance count must be >= 1", zap.Int("runtime.js_max_count", c.GetRuntime().JsMinCount))
 	}
-	if config.GetRuntime().GetLuaRegistrySize() < 128 {
-		logger.Fatal("Lua runtime instance registry size must be >= 128", zap.Int("runtime.registry_size", config.GetRuntime().GetLuaRegistrySize()))
+	if c.GetRuntime().JsMinCount > c.GetRuntime().JsMaxCount {
+		logger.Fatal("Minimum JavaScript runtime instance count must be less than or equal to maximum JavaScript runtime instance count", zap.Int("runtime.js_min_count", c.GetRuntime().JsMinCount), zap.Int("runtime.js_max_count", c.GetRuntime().JsMaxCount))
 	}
-	if config.GetRuntime().JsMinCount < 0 {
-		logger.Fatal("Minimum JavaScript runtime instance count must be >= 0", zap.Int("runtime.js_min_count", config.GetRuntime().JsMinCount))
+	if c.GetRuntime().EventQueueSize < 1 {
+		logger.Fatal("Runtime event queue stack size must be >= 1", zap.Int("runtime.event_queue_size", c.GetRuntime().EventQueueSize))
 	}
-	if config.GetRuntime().JsMaxCount < 1 {
-		logger.Fatal("Maximum JavaScript runtime instance count must be >= 1", zap.Int("runtime.js_max_count", config.GetRuntime().JsMinCount))
+	if c.GetRuntime().EventQueueWorkers < 1 {
+		logger.Fatal("Runtime event queue workers must be >= 1", zap.Int("runtime.event_queue_workers", c.GetRuntime().EventQueueWorkers))
 	}
-	if config.GetRuntime().JsMinCount > config.GetRuntime().JsMaxCount {
-		logger.Fatal("Minimum JavaScript runtime instance count must be less than or equal to maximum JavaScript runtime instance count", zap.Int("runtime.js_min_count", config.GetRuntime().JsMinCount), zap.Int("runtime.js_max_count", config.GetRuntime().JsMaxCount))
+	if c.GetMatch().InputQueueSize < 1 {
+		logger.Fatal("Match input queue size must be >= 1", zap.Int("match.input_queue_size", c.GetMatch().InputQueueSize))
 	}
-	if config.GetRuntime().EventQueueSize < 1 {
-		logger.Fatal("Runtime event queue stack size must be >= 1", zap.Int("runtime.event_queue_size", config.GetRuntime().EventQueueSize))
+	if c.GetMatch().CallQueueSize < 1 {
+		logger.Fatal("Match call queue size must be >= 1", zap.Int("match.call_queue_size", c.GetMatch().CallQueueSize))
 	}
-	if config.GetRuntime().EventQueueWorkers < 1 {
-		logger.Fatal("Runtime event queue workers must be >= 1", zap.Int("runtime.event_queue_workers", config.GetRuntime().EventQueueWorkers))
+	if c.GetMatch().SignalQueueSize < 1 {
+		logger.Fatal("Match signal queue size must be >= 1", zap.Int("match.signal_queue_size", c.GetMatch().SignalQueueSize))
 	}
-	if config.GetMatch().InputQueueSize < 1 {
-		logger.Fatal("Match input queue size must be >= 1", zap.Int("match.input_queue_size", config.GetMatch().InputQueueSize))
+	if c.GetMatch().JoinAttemptQueueSize < 1 {
+		logger.Fatal("Match join attempt queue size must be >= 1", zap.Int("match.join_attempt_queue_size", c.GetMatch().JoinAttemptQueueSize))
 	}
-	if config.GetMatch().CallQueueSize < 1 {
-		logger.Fatal("Match call queue size must be >= 1", zap.Int("match.call_queue_size", config.GetMatch().CallQueueSize))
+	if c.GetMatch().DeferredQueueSize < 1 {
+		logger.Fatal("Match deferred queue size must be >= 1", zap.Int("match.deferred_queue_size", c.GetMatch().DeferredQueueSize))
 	}
-	if config.GetMatch().SignalQueueSize < 1 {
-		logger.Fatal("Match signal queue size must be >= 1", zap.Int("match.signal_queue_size", config.GetMatch().SignalQueueSize))
+	if c.GetMatch().JoinMarkerDeadlineMs < 1 {
+		logger.Fatal("Match join marker deadline must be >= 1", zap.Int("match.join_marker_deadline_ms", c.GetMatch().JoinMarkerDeadlineMs))
 	}
-	if config.GetMatch().JoinAttemptQueueSize < 1 {
-		logger.Fatal("Match join attempt queue size must be >= 1", zap.Int("match.join_attempt_queue_size", config.GetMatch().JoinAttemptQueueSize))
+	if c.GetMatch().MaxEmptySec < 0 {
+		logger.Fatal("Match max idle seconds must be >= 0", zap.Int("match.max_empty_sec", c.GetMatch().MaxEmptySec))
 	}
-	if config.GetMatch().DeferredQueueSize < 1 {
-		logger.Fatal("Match deferred queue size must be >= 1", zap.Int("match.deferred_queue_size", config.GetMatch().DeferredQueueSize))
+	if c.GetMatch().LabelUpdateIntervalMs < 1 {
+		logger.Fatal("Match label update interval milliseconds must be > 0", zap.Int("match.label_update_interval_ms", c.GetMatch().LabelUpdateIntervalMs))
 	}
-	if config.GetMatch().JoinMarkerDeadlineMs < 1 {
-		logger.Fatal("Match join marker deadline must be >= 1", zap.Int("match.join_marker_deadline_ms", config.GetMatch().JoinMarkerDeadlineMs))
+	if c.GetTracker().EventQueueSize < 1 {
+		logger.Fatal("Tracker presence event queue size must be >= 1", zap.Int("tracker.event_queue_size", c.GetTracker().EventQueueSize))
 	}
-	if config.GetMatch().MaxEmptySec < 0 {
-		logger.Fatal("Match max idle seconds must be >= 0", zap.Int("match.max_empty_sec", config.GetMatch().MaxEmptySec))
+	if c.GetLeaderboard().CallbackQueueSize < 1 {
+		logger.Fatal("Leaderboard callback queue stack size must be >= 1", zap.Int("leaderboard.callback_queue_size", c.GetLeaderboard().CallbackQueueSize))
 	}
-	if config.GetMatch().LabelUpdateIntervalMs < 1 {
-		logger.Fatal("Match label update interval milliseconds must be > 0", zap.Int("match.label_update_interval_ms", config.GetMatch().LabelUpdateIntervalMs))
+	if c.GetLeaderboard().CallbackQueueWorkers < 1 {
+		logger.Fatal("Leaderboard callback queue workers must be >= 1", zap.Int("leaderboard.callback_queue_workers", c.GetLeaderboard().CallbackQueueWorkers))
 	}
-	if config.GetTracker().EventQueueSize < 1 {
-		logger.Fatal("Tracker presence event queue size must be >= 1", zap.Int("tracker.event_queue_size", config.GetTracker().EventQueueSize))
+	if c.GetMatchmaker().MaxTickets < 1 {
+		logger.Fatal("Matchmaker maximum ticket count must be >= 1", zap.Int("matchmaker.max_tickets", c.GetMatchmaker().MaxTickets))
 	}
-	if config.GetLeaderboard().CallbackQueueSize < 1 {
-		logger.Fatal("Leaderboard callback queue stack size must be >= 1", zap.Int("leaderboard.callback_queue_size", config.GetLeaderboard().CallbackQueueSize))
+	if c.GetMatchmaker().IntervalSec < 1 {
+		logger.Fatal("Matchmaker interval time seconds must be >= 1", zap.Int("matchmaker.interval_sec", c.GetMatchmaker().IntervalSec))
 	}
-	if config.GetLeaderboard().CallbackQueueWorkers < 1 {
-		logger.Fatal("Leaderboard callback queue workers must be >= 1", zap.Int("leaderboard.callback_queue_workers", config.GetLeaderboard().CallbackQueueWorkers))
+	if c.GetMatchmaker().MaxIntervals < 1 {
+		logger.Fatal("Matchmaker max intervals must be >= 1", zap.Int("matchmaker.max_intervals", c.GetMatchmaker().MaxIntervals))
 	}
-	if config.GetMatchmaker().MaxTickets < 1 {
-		logger.Fatal("Matchmaker maximum ticket count must be >= 1", zap.Int("matchmaker.max_tickets", config.GetMatchmaker().MaxTickets))
+	if c.GetMatchmaker().RevThreshold < 0 {
+		logger.Fatal("Matchmaker reverse matching threshold must be >= 0", zap.Int("matchmaker.rev_threshold", c.GetMatchmaker().RevThreshold))
 	}
-	if config.GetMatchmaker().IntervalSec < 1 {
-		logger.Fatal("Matchmaker interval time seconds must be >= 1", zap.Int("matchmaker.interval_sec", config.GetMatchmaker().IntervalSec))
+	if c.GetMatchmaker().MaxIntervals < 1 {
+		logger.Fatal("Matchmaker max intervals must be >= 1", zap.Int("matchmaker.max_intervals", c.GetMatchmaker().MaxIntervals))
 	}
-	if config.GetMatchmaker().MaxIntervals < 1 {
-		logger.Fatal("Matchmaker max intervals must be >= 1", zap.Int("matchmaker.max_intervals", config.GetMatchmaker().MaxIntervals))
+	if c.GetMatchmaker().RevThreshold < 0 {
+		logger.Fatal("Matchmaker reverse matching threshold must be >= 0", zap.Int("matchmaker.rev_threshold", c.GetMatchmaker().RevThreshold))
 	}
-	if config.GetMatchmaker().RevThreshold < 0 {
-		logger.Fatal("Matchmaker reverse matching threshold must be >= 0", zap.Int("matchmaker.rev_threshold", config.GetMatchmaker().RevThreshold))
+	if c.GetLimit() != -1 {
+		logger.Warn("WARNING: 'limit' is only valid if used with the migrate command", zap.String("param", "limit"))
 	}
 
 	// If the runtime path is not overridden, set it to `datadir/modules`.
-	if config.GetRuntime().Path == "" {
-		config.GetRuntime().Path = filepath.Join(config.GetDataDir(), "modules")
+	if c.GetRuntime().Path == "" {
+		c.GetRuntime().Path = filepath.Join(c.GetDataDir(), "modules")
 	}
 
 	// If JavaScript entrypoint is set, make sure it points to a valid file.
-	if config.GetRuntime().JsEntrypoint != "" {
-		p := filepath.Join(config.GetRuntime().Path, config.GetRuntime().JsEntrypoint)
+	if c.GetRuntime().JsEntrypoint != "" {
+		p := filepath.Join(c.GetRuntime().Path, c.GetRuntime().JsEntrypoint)
 		info, err := os.Stat(p)
 		if err != nil {
 			logger.Fatal("JavaScript entrypoint must be a valid path", zap.Error(err))
@@ -308,8 +312,8 @@ func CheckConfig(logger *zap.Logger, config Config) map[string]string {
 		}
 	}
 
-	if config.GetIAP().Google.RefundCheckPeriodMin != 0 {
-		if config.GetIAP().Google.RefundCheckPeriodMin < 15 {
+	if c.GetIAP().Google.RefundCheckPeriodMin != 0 {
+		if c.GetIAP().Google.RefundCheckPeriodMin < 15 {
 			logger.Fatal("Google IAP refund check period must be >= 15 min")
 		}
 	}
@@ -317,82 +321,82 @@ func CheckConfig(logger *zap.Logger, config Config) map[string]string {
 	configWarnings := make(map[string]string, 8)
 
 	// Log warnings for insecure default parameter values.
-	if config.GetConsole().Username == "admin" {
+	if c.GetConsole().Username == "admin" {
 		logger.Warn("WARNING: insecure default parameter value, change this for production!", zap.String("param", "console.username"))
 		configWarnings["console.username"] = "Insecure default parameter value, change this for production!"
 	}
-	if config.GetConsole().Password == "password" {
+	if c.GetConsole().Password == "password" {
 		logger.Warn("WARNING: insecure default parameter value, change this for production!", zap.String("param", "console.password"))
 		configWarnings["console.password"] = "Insecure default parameter value, change this for production!"
 	}
-	if config.GetConsole().SigningKey == "defaultsigningkey" {
+	if c.GetConsole().SigningKey == "defaultsigningkey" {
 		logger.Warn("WARNING: insecure default parameter value, change this for production!", zap.String("param", "console.signing_key"))
 		configWarnings["console.signing_key"] = "Insecure default parameter value, change this for production!"
 	}
-	if config.GetSocket().ServerKey == "defaultkey" {
+	if c.GetSocket().ServerKey == "defaultkey" {
 		logger.Warn("WARNING: insecure default parameter value, change this for production!", zap.String("param", "socket.server_key"))
 		configWarnings["socket.server_key"] = "Insecure default parameter value, change this for production!"
 	}
-	if config.GetSession().EncryptionKey == "defaultencryptionkey" {
+	if c.GetSession().EncryptionKey == "defaultencryptionkey" {
 		logger.Warn("WARNING: insecure default parameter value, change this for production!", zap.String("param", "session.encryption_key"))
 		configWarnings["session.encryption_key"] = "Insecure default parameter value, change this for production!"
 	}
-	if config.GetSession().RefreshEncryptionKey == "defaultrefreshencryptionkey" {
+	if c.GetSession().RefreshEncryptionKey == "defaultrefreshencryptionkey" {
 		logger.Warn("WARNING: insecure default parameter value, change this for production!", zap.String("param", "session.refresh_encryption_key"))
 		configWarnings["session.refresh_encryption_key"] = "Insecure default parameter value, change this for production!"
 	}
-	if config.GetRuntime().HTTPKey == "defaulthttpkey" {
+	if c.GetRuntime().HTTPKey == "defaulthttpkey" {
 		logger.Warn("WARNING: insecure default parameter value, change this for production!", zap.String("param", "runtime.http_key"))
 		configWarnings["runtime.http_key"] = "Insecure default parameter value, change this for production!"
 	}
 
-	// Log warnings for deprecated config parameters.
-	if config.GetRuntime().MinCount != 0 {
+	// Log warnings for deprecated c parameters.
+	if c.GetRuntime().MinCount != 0 {
 		logger.Warn("WARNING: deprecated configuration parameter", zap.String("deprecated", "runtime.min_count"), zap.String("param", "runtime.lua_min_count"))
 		configWarnings["runtime.min_count"] = "Deprecated configuration parameter"
 	}
-	if config.GetRuntime().MaxCount != 0 {
+	if c.GetRuntime().MaxCount != 0 {
 		logger.Warn("WARNING: deprecated configuration parameter", zap.String("deprecated", "runtime.max_count"), zap.String("param", "runtime.lua_max_count"))
 		configWarnings["runtime.max_count"] = "Deprecated configuration parameter"
 	}
-	if config.GetRuntime().CallStackSize != 0 {
+	if c.GetRuntime().CallStackSize != 0 {
 		logger.Warn("WARNING: deprecated configuration parameter", zap.String("deprecated", "runtime.call_stack_size"), zap.String("param", "runtime.lua_call_stack_size"))
 		configWarnings["runtime.call_stack_size"] = "Deprecated configuration parameter"
 	}
-	if config.GetRuntime().RegistrySize != 0 {
+	if c.GetRuntime().RegistrySize != 0 {
 		logger.Warn("WARNING: deprecated configuration parameter", zap.String("deprecated", "runtime.registry_size"), zap.String("param", "runtime.lua_registry_size"))
 		configWarnings["runtime.registry_size"] = "Deprecated configuration parameter"
 	}
-	if !config.GetRuntime().ReadOnlyGlobals {
+	if !c.GetRuntime().ReadOnlyGlobals {
 		logger.Warn("WARNING: deprecated configuration parameter", zap.String("deprecated", "runtime.read_only_globals"), zap.String("param", "runtime.lua_read_only_globals"))
 		configWarnings["runtime.read_only_globals"] = "Deprecated configuration parameter"
 	}
 
-	if l := len(config.GetSocket().ResponseHeaders); l > 0 {
-		config.GetSocket().Headers = make(map[string]string, l)
-		for _, header := range config.GetSocket().ResponseHeaders {
+	if l := len(c.GetSocket().ResponseHeaders); l > 0 {
+		c.GetSocket().Headers = make(map[string]string, l)
+		for _, header := range c.GetSocket().ResponseHeaders {
 			parts := strings.SplitN(header, "=", 2)
 			if len(parts) != 2 {
 				logger.Fatal("Response headers configuration invalid, format must be 'key=value'", zap.String("param", "socket.response_headers"))
 			}
-			config.GetSocket().Headers[parts[0]] = parts[1]
+			c.GetSocket().Headers[parts[0]] = parts[1]
 		}
 	}
 
 	// Log warnings for SSL usage.
-	if config.GetSocket().SSLCertificate != "" && config.GetSocket().SSLPrivateKey == "" {
+	if c.GetSocket().SSLCertificate != "" && c.GetSocket().SSLPrivateKey == "" {
 		logger.Fatal("SSL configuration invalid, specify both socket.ssl_certificate and socket.ssl_private_key", zap.String("param", "socket.ssl_certificate"))
 	}
-	if config.GetSocket().SSLCertificate == "" && config.GetSocket().SSLPrivateKey != "" {
+	if c.GetSocket().SSLCertificate == "" && c.GetSocket().SSLPrivateKey != "" {
 		logger.Fatal("SSL configuration invalid, specify both socket.ssl_certificate and socket.ssl_private_key", zap.String("param", "socket.ssl_private_key"))
 	}
-	if config.GetSocket().SSLCertificate != "" && config.GetSocket().SSLPrivateKey != "" {
+	if c.GetSocket().SSLCertificate != "" && c.GetSocket().SSLPrivateKey != "" {
 		logger.Warn("WARNING: enabling direct SSL termination is not recommended, use an SSL-capable proxy or load balancer for production!")
-		certPEMBlock, err := os.ReadFile(config.GetSocket().SSLCertificate)
+		certPEMBlock, err := os.ReadFile(c.GetSocket().SSLCertificate)
 		if err != nil {
 			logger.Fatal("Error loading SSL certificate cert file", zap.Error(err))
 		}
-		keyPEMBlock, err := os.ReadFile(config.GetSocket().SSLPrivateKey)
+		keyPEMBlock, err := os.ReadFile(c.GetSocket().SSLPrivateKey)
 		if err != nil {
 			logger.Fatal("Error loading SSL certificate key file", zap.Error(err))
 		}
@@ -403,14 +407,33 @@ func CheckConfig(logger *zap.Logger, config Config) map[string]string {
 		configWarnings["socket.ssl_certificate"] = "Enabling direct SSL termination is not recommended, use an SSL-capable proxy or load balancer for production!"
 		configWarnings["socket.ssl_private_key"] = "Enabling direct SSL termination is not recommended, use an SSL-capable proxy or load balancer for production!"
 		logger.Info("SSL mode enabled")
-		config.GetSocket().CertPEMBlock = certPEMBlock
-		config.GetSocket().KeyPEMBlock = keyPEMBlock
-		config.GetSocket().TLSCert = []tls.Certificate{cert}
+		c.GetSocket().CertPEMBlock = certPEMBlock
+		c.GetSocket().KeyPEMBlock = keyPEMBlock
+		c.GetSocket().TLSCert = []tls.Certificate{cert}
 	}
 
-	config.GetSatori().Validate(logger)
+	c.GetSatori().Validate(logger)
+
+	if k := c.GetMFA().StorageEncryptionKey; k != "" && len(k) != 32 {
+		logger.Fatal("MFA encryption key has to be 32 bits long")
+	}
 
 	return configWarnings
+}
+
+func ValidateConfigDatabase(logger *zap.Logger, c Config) {
+	if len(c.GetDatabase().Addresses) < 1 {
+		logger.Fatal("At least one database address must be specified", zap.Strings("database.address", c.GetDatabase().Addresses))
+	}
+	for _, address := range c.GetDatabase().Addresses {
+		rawURL := fmt.Sprintf("postgresql://%s", address)
+		if _, err := url.Parse(rawURL); err != nil {
+			logger.Fatal("Bad database connection URL", zap.String("database.address", address), zap.Error(err))
+		}
+	}
+	if c.GetDatabase().DnsScanIntervalSec < 1 {
+		logger.Fatal("Database DNS scan interval seconds must be > 0", zap.Int("database.dns_scan_interval_sec", c.GetDatabase().DnsScanIntervalSec))
+	}
 }
 
 func convertRuntimeEnv(logger *zap.Logger, existingEnv map[string]string, mergeEnv []string) map[string]string {
@@ -455,6 +478,8 @@ type config struct {
 	GoogleAuth       *GoogleAuthConfig  `yaml:"google_auth" json:"google_auth" usage:"Google's auth settings."`
 	Satori           *SatoriConfig      `yaml:"satori" json:"satori" usage:"Satori integration settings."`
 	Storage          *StorageConfig     `yaml:"storage" json:"storage" usage:"Storage settings."`
+	MFA              *MFAConfig         `yaml:"mfa" json:"mfa" usage:"MFA settings."`
+	Limit            int                `json:"-"` // Only used for migrate command.
 }
 
 // NewConfig constructs a Config struct which represents server settings, and populates it with default values.
@@ -483,68 +508,40 @@ func NewConfig(logger *zap.Logger) *config {
 		GoogleAuth:       NewGoogleAuthConfig(),
 		Satori:           NewSatoriConfig(),
 		Storage:          NewStorageConfig(),
+		MFA:              NewMFAConfig(),
+		Limit:            -1,
 	}
 }
 
 func (c *config) Clone() (Config, error) {
-	configLogger := *(c.Logger)
-	configMetrics := *(c.Metrics)
-	configSession := *(c.Session)
-	configSocket := *(c.Socket)
-	configDatabase := *(c.Database)
-	configSocial := *(c.Social)
-	configRuntime := *(c.Runtime)
-	configMatch := *(c.Match)
-	configTracker := *(c.Tracker)
-	configConsole := *(c.Console)
-	configLeaderboard := *(c.Leaderboard)
-	configMatchmaker := *(c.Matchmaker)
-	configIAP := *(c.IAP)
-	configSatori := *(c.Satori)
-	configStorage := *(c.Storage)
-	configGoogleAuth := *(c.GoogleAuth)
+	configSocket, err := c.Socket.Clone()
+	if err != nil {
+		return nil, err
+	}
+
 	nc := &config{
 		Name:             c.Name,
 		Datadir:          c.Datadir,
 		ShutdownGraceSec: c.ShutdownGraceSec,
-		Logger:           &configLogger,
-		Metrics:          &configMetrics,
-		Session:          &configSession,
-		Socket:           &configSocket,
-		Database:         &configDatabase,
-		Social:           &configSocial,
-		Runtime:          &configRuntime,
-		Match:            &configMatch,
-		Tracker:          &configTracker,
-		Console:          &configConsole,
-		Leaderboard:      &configLeaderboard,
-		Matchmaker:       &configMatchmaker,
-		IAP:              &configIAP,
-		Satori:           &configSatori,
-		GoogleAuth:       &configGoogleAuth,
-		Storage:          &configStorage,
+		Logger:           c.Logger.Clone(),
+		Metrics:          c.Metrics.Clone(),
+		Session:          c.Session.Clone(),
+		Socket:           configSocket,
+		Database:         c.Database.Clone(),
+		Social:           c.Social.Clone(),
+		Runtime:          c.Runtime.Clone(),
+		Match:            c.Match.Clone(),
+		Tracker:          c.Tracker.Clone(),
+		Console:          c.Console.Clone(),
+		Leaderboard:      c.Leaderboard.Clone(),
+		Matchmaker:       c.Matchmaker.Clone(),
+		IAP:              c.IAP.Clone(),
+		Satori:           c.Satori.Clone(),
+		GoogleAuth:       c.GoogleAuth.Clone(),
+		Storage:          c.Storage.Clone(),
+		MFA:              c.MFA.Clone(),
+		Limit:            c.Limit,
 	}
-	nc.Socket.CertPEMBlock = make([]byte, len(c.Socket.CertPEMBlock))
-	copy(nc.Socket.CertPEMBlock, c.Socket.CertPEMBlock)
-	nc.Socket.KeyPEMBlock = make([]byte, len(c.Socket.KeyPEMBlock))
-	copy(nc.Socket.KeyPEMBlock, c.Socket.KeyPEMBlock)
-	if len(c.Socket.TLSCert) != 0 {
-		cert, err := tls.X509KeyPair(nc.Socket.CertPEMBlock, nc.Socket.KeyPEMBlock)
-		if err != nil {
-			return nil, err
-		}
-		nc.Socket.TLSCert = []tls.Certificate{cert}
-	}
-	nc.Database.Addresses = make([]string, len(c.Database.Addresses))
-	copy(nc.Database.Addresses, c.Database.Addresses)
-	nc.Runtime.Env = make([]string, len(c.Runtime.Env))
-	copy(nc.Runtime.Env, c.Runtime.Env)
-	nc.Runtime.Environment = make(map[string]string, len(c.Runtime.Environment))
-	for k, v := range c.Runtime.Environment {
-		nc.Runtime.Environment[k] = v
-	}
-	nc.Leaderboard.BlacklistRankCache = make([]string, len(c.Leaderboard.BlacklistRankCache))
-	copy(nc.Leaderboard.BlacklistRankCache, c.Leaderboard.BlacklistRankCache)
 
 	return nc, nil
 }
@@ -625,6 +622,47 @@ func (c *config) GetStorage() *StorageConfig {
 	return c.Storage
 }
 
+func (c *config) GetMFA() *MFAConfig {
+	return c.MFA
+}
+
+func (c *config) GetRuntimeConfig() (runtime.Config, error) {
+	clone, err := c.Clone()
+	if err != nil {
+		return nil, err
+	}
+
+	var lc runtime.LoggerConfig = clone.GetLogger()
+	var sc runtime.SessionConfig = clone.GetSession()
+	var soc runtime.SocketConfig = clone.GetSocket()
+	var socialConf runtime.SocialConfig = clone.GetSocial()
+	var rc runtime.RuntimeConfig = clone.GetRuntime()
+	var iap runtime.IAPConfig = clone.GetIAP()
+	var gauth runtime.GoogleAuthConfig = clone.GetGoogleAuth()
+	var satori runtime.SatoriConfig = clone.GetSatori()
+
+	cn := &RuntimeConfigClone{
+		Name:          clone.GetName(),
+		ShutdownGrace: clone.GetShutdownGraceSec(),
+		Logger:        lc,
+		Session:       sc,
+		Socket:        soc,
+		Social:        socialConf,
+		Runtime:       rc,
+		Iap:           iap,
+		GoogleAuth:    gauth,
+		Satori:        satori,
+	}
+
+	return cn, nil
+}
+
+func (c *config) GetLimit() int {
+	return c.Limit
+}
+
+var _ runtime.LoggerConfig = &LoggerConfig{}
+
 // LoggerConfig is configuration relevant to logging levels and output.
 type LoggerConfig struct {
 	Level    string `yaml:"level" json:"level" usage:"Log level to set. Valid values are 'debug', 'info', 'warn', 'error'. Default 'info'."`
@@ -638,6 +676,19 @@ type LoggerConfig struct {
 	LocalTime  bool   `yaml:"local_time" json:"local_time" usage:"This determines if the time used for formatting the timestamps in backup files is the computer's local time. The default is to use UTC time."`
 	Compress   bool   `yaml:"compress" json:"compress" usage:"This determines if the rotated log files should be compressed using gzip."`
 	Format     string `yaml:"format" json:"format" usage:"Set logging output format. Can either be 'JSON' or 'Stackdriver'. Default is 'JSON'."`
+}
+
+func (cfg *LoggerConfig) GetLevel() string {
+	return cfg.Level
+}
+
+func (cfg *LoggerConfig) Clone() *LoggerConfig {
+	if cfg == nil {
+		return nil
+	}
+
+	cfgCopy := *cfg
+	return &cfgCopy
 }
 
 func NewLoggerConfig() *LoggerConfig {
@@ -664,6 +715,15 @@ type MetricsConfig struct {
 	CustomPrefix     string `yaml:"custom_prefix" json:"custom_prefix" usage:"Prefix for custom runtime metric names. Default is 'custom', empty string '' disables the prefix."`
 }
 
+func (cfg *MetricsConfig) Clone() *MetricsConfig {
+	if cfg == nil {
+		return nil
+	}
+
+	cfgCopy := *cfg
+	return &cfgCopy
+}
+
 func NewMetricsConfig() *MetricsConfig {
 	return &MetricsConfig{
 		ReportingFreqSec: 60,
@@ -674,6 +734,8 @@ func NewMetricsConfig() *MetricsConfig {
 	}
 }
 
+var _ runtime.SessionConfig = &SessionConfig{}
+
 // SessionConfig is configuration relevant to the session.
 type SessionConfig struct {
 	EncryptionKey         string `yaml:"encryption_key" json:"encryption_key" usage:"The encryption key used to produce the client token."`
@@ -682,6 +744,49 @@ type SessionConfig struct {
 	RefreshTokenExpirySec int64  `yaml:"refresh_token_expiry_sec" json:"refresh_token_expiry_sec" usage:"Refresh token expiry in seconds."`
 	SingleSocket          bool   `yaml:"single_socket" json:"single_socket" usage:"Only allow one socket per user. Older sessions are disconnected. Default false."`
 	SingleMatch           bool   `yaml:"single_match" json:"single_match" usage:"Only allow one match per user. Older matches receive a leave. Requires single socket to enable. Default false."`
+	SingleParty           bool   `yaml:"single_party" json:"single_party" usage:"Only allow one party per user. Older parties receive a leave. Requires single socket to enable. Default false."`
+	SingleSession         bool   `yaml:"single_session" json:"single_session" usage:"Only allow one session token per user. Older session tokens are invalidated in the session cache. Default false."`
+}
+
+func (cfg *SessionConfig) GetEncryptionKey() string {
+	return cfg.EncryptionKey
+}
+
+func (cfg *SessionConfig) GetTokenExpirySec() int64 {
+	return cfg.TokenExpirySec
+}
+
+func (cfg *SessionConfig) GetRefreshEncryptionKey() string {
+	return cfg.RefreshEncryptionKey
+}
+
+func (cfg *SessionConfig) GetRefreshTokenExpirySec() int64 {
+	return cfg.RefreshTokenExpirySec
+}
+
+func (cfg *SessionConfig) GetSingleSocket() bool {
+	return cfg.SingleSocket
+}
+
+func (cfg *SessionConfig) GetSingleMatch() bool {
+	return cfg.SingleMatch
+}
+
+func (cfg *SessionConfig) GetSingleParty() bool {
+	return cfg.SingleParty
+}
+
+func (cfg *SessionConfig) GetSingleSession() bool {
+	return cfg.SingleSession
+}
+
+func (cfg *SessionConfig) Clone() *SessionConfig {
+	if cfg == nil {
+		return nil
+	}
+
+	cfgCopy := *cfg
+	return &cfgCopy
 }
 
 func NewSessionConfig() *SessionConfig {
@@ -692,6 +797,8 @@ func NewSessionConfig() *SessionConfig {
 		RefreshTokenExpirySec: 3600,
 	}
 }
+
+var _ runtime.SocketConfig = &SocketConfig{}
 
 // SocketConfig is configuration relevant to the transport socket and protocol.
 type SocketConfig struct {
@@ -718,6 +825,58 @@ type SocketConfig struct {
 	CertPEMBlock         []byte            `yaml:"-" json:"-"` // Created by fully reading the file contents of SSLCertificate, not set from input args directly.
 	KeyPEMBlock          []byte            `yaml:"-" json:"-"` // Created by fully reading the file contents of SSLPrivateKey, not set from input args directly.
 	TLSCert              []tls.Certificate `yaml:"-" json:"-"` // Created by processing CertPEMBlock and KeyPEMBlock, not set from input args directly.
+}
+
+func (cfg *SocketConfig) GetServerKey() string {
+	return cfg.ServerKey
+}
+
+func (cfg *SocketConfig) GetPort() int {
+	return cfg.Port
+}
+
+func (cfg *SocketConfig) GetAddress() string {
+	return cfg.Address
+}
+
+func (cfg *SocketConfig) GetProtocol() string {
+	return cfg.Protocol
+}
+
+func (cfg *SocketConfig) Clone() (*SocketConfig, error) {
+	if cfg == nil {
+		return nil, nil
+	}
+
+	cfgCopy := *cfg
+
+	if cfg.ResponseHeaders != nil {
+		cfgCopy.ResponseHeaders = make([]string, len(cfg.ResponseHeaders))
+		copy(cfgCopy.ResponseHeaders, cfg.ResponseHeaders)
+	}
+	if cfg.Headers != nil {
+		cfgCopy.Headers = make(map[string]string, len(cfg.Headers))
+		for k, v := range cfg.Headers {
+			cfgCopy.Headers[k] = v
+		}
+	}
+	if cfg.CertPEMBlock != nil {
+		cfgCopy.CertPEMBlock = make([]byte, len(cfg.CertPEMBlock))
+		copy(cfgCopy.CertPEMBlock, cfg.CertPEMBlock)
+	}
+	if cfg.KeyPEMBlock != nil {
+		cfgCopy.KeyPEMBlock = make([]byte, len(cfg.KeyPEMBlock))
+		copy(cfgCopy.KeyPEMBlock, cfg.KeyPEMBlock)
+	}
+	if len(cfg.TLSCert) != 0 {
+		cert, err := tls.X509KeyPair(cfg.CertPEMBlock, cfg.KeyPEMBlock)
+		if err != nil {
+			return nil, err
+		}
+		cfgCopy.TLSCert = []tls.Certificate{cert}
+	}
+
+	return &cfgCopy, nil
 }
 
 func NewSocketConfig() *SocketConfig {
@@ -752,6 +911,21 @@ type DatabaseConfig struct {
 	DnsScanIntervalSec int      `yaml:"dns_scan_interval_sec" json:"dns_scan_interval_sec" usage:"Number of seconds between scans looking for DNS resolution changes for the database hostname. Default 60."`
 }
 
+func (cfg *DatabaseConfig) Clone() *DatabaseConfig {
+	if cfg == nil {
+		return nil
+	}
+
+	cfgCopy := *cfg
+
+	if cfg.Addresses != nil {
+		cfgCopy.Addresses = make([]string, len(cfg.Addresses))
+		copy(cfgCopy.Addresses, cfg.Addresses)
+	}
+
+	return &cfgCopy
+}
+
 func NewDatabaseConfig() *DatabaseConfig {
 	return &DatabaseConfig{
 		Addresses:          []string{"root@localhost:26257"},
@@ -762,6 +936,8 @@ func NewDatabaseConfig() *DatabaseConfig {
 	}
 }
 
+var _ runtime.SocialConfig = &SocialConfig{}
+
 // SocialConfig is configuration relevant to the social authentication providers.
 type SocialConfig struct {
 	Steam                *SocialConfigSteam                `yaml:"steam" json:"steam" usage:"Steam configuration."`
@@ -770,25 +946,96 @@ type SocialConfig struct {
 	Apple                *SocialConfigApple                `yaml:"apple" json:"apple" usage:"Apple Sign In configuration."`
 }
 
+func (cfg *SocialConfig) GetSteam() runtime.SocialConfigSteam {
+	return cfg.Steam
+}
+
+func (cfg *SocialConfig) GetFacebookInstantGame() runtime.SocialConfigFacebookInstantGame {
+	return cfg.FacebookInstantGame
+}
+
+func (cfg *SocialConfig) GetFacebookLimitedLogin() runtime.SocialConfigFacebookLimitedLogin {
+	return cfg.FacebookLimitedLogin
+}
+
+func (cfg *SocialConfig) GetApple() runtime.SocialConfigApple {
+	return cfg.Apple
+}
+
+func (cfg *SocialConfig) Clone() *SocialConfig {
+	if cfg == nil {
+		return nil
+	}
+
+	cfgCopy := *cfg
+
+	if cfg.Steam != nil {
+		c := *(cfg.Steam)
+		cfgCopy.Steam = &c
+	}
+	if cfg.FacebookInstantGame != nil {
+		c := *(cfg.FacebookInstantGame)
+		cfgCopy.FacebookInstantGame = &c
+	}
+	if cfg.FacebookLimitedLogin != nil {
+		c := *(cfg.FacebookLimitedLogin)
+		cfgCopy.FacebookLimitedLogin = &c
+	}
+	if cfg.Apple != nil {
+		c := *(cfg.Apple)
+		cfgCopy.Apple = &c
+	}
+
+	return &cfgCopy
+}
+
+var _ runtime.SocialConfigSteam = &SocialConfigSteam{}
+
 // SocialConfigSteam is configuration relevant to Steam.
 type SocialConfigSteam struct {
 	PublisherKey string `yaml:"publisher_key" json:"publisher_key" usage:"Steam Publisher Key value."`
 	AppID        int    `yaml:"app_id" json:"app_id" usage:"Steam App ID."`
 }
 
+func (s SocialConfigSteam) GetPublisherKey() string {
+	return s.PublisherKey
+}
+
+func (s SocialConfigSteam) GetAppID() int {
+	return s.AppID
+}
+
+var _ runtime.SocialConfigFacebookInstantGame = &SocialConfigFacebookInstantGame{}
+
 // SocialConfigFacebookInstantGame is configuration relevant to Facebook Instant Games.
 type SocialConfigFacebookInstantGame struct {
 	AppSecret string `yaml:"app_secret" json:"app_secret" usage:"Facebook Instant App secret."`
 }
+
+func (s SocialConfigFacebookInstantGame) GetAppSecret() string {
+	return s.AppSecret
+}
+
+var _ runtime.SocialConfigFacebookLimitedLogin = &SocialConfigFacebookLimitedLogin{}
 
 // SocialConfigFacebookLimitedLogin is configuration relevant to Facebook Limited Login.
 type SocialConfigFacebookLimitedLogin struct {
 	AppId string `yaml:"app_id" json:"app_id" usage:"Facebook Limited Login App ID."`
 }
 
+func (s SocialConfigFacebookLimitedLogin) GetAppId() string {
+	return s.AppId
+}
+
+var _ runtime.SocialConfigApple = &SocialConfigApple{}
+
 // SocialConfigApple is configuration relevant to Apple Sign In.
 type SocialConfigApple struct {
 	BundleId string `yaml:"bundle_id" json:"bundle_id" usage:"Apple Sign In bundle ID."`
+}
+
+func (s SocialConfigApple) GetBundleId() string {
+	return s.BundleId
 }
 
 func NewSocialConfig() *SocialConfig {
@@ -809,6 +1056,8 @@ func NewSocialConfig() *SocialConfig {
 	}
 }
 
+var _ runtime.RuntimeConfig = &RuntimeConfig{}
+
 // RuntimeConfig is configuration relevant to the Runtimes.
 type RuntimeConfig struct {
 	Environment        map[string]string `yaml:"-" json:"-"`
@@ -819,8 +1068,8 @@ type RuntimeConfig struct {
 	LuaMinCount        int               `yaml:"lua_min_count" json:"lua_min_count" usage:"Minimum number of Lua runtime instances to allocate. Default 16."`
 	MaxCount           int               `yaml:"max_count" json:"max_count" usage:"Maximum number of Lua runtime instances to allocate. Default 0."` // Kept for backwards compatibility
 	LuaMaxCount        int               `yaml:"lua_max_count" json:"lua_max_count" usage:"Maximum number of Lua runtime instances to allocate. Default 48."`
-	JsMinCount         int               `yaml:"js_min_count" json:"js_min_count" usage:"Maximum number of Javascript runtime instances to allocate. Default 48."`
-	JsMaxCount         int               `yaml:"js_max_count" json:"js_max_count" usage:"Maximum number of Javascript runtime instances to allocate. Default 48."`
+	JsMinCount         int               `yaml:"js_min_count" json:"js_min_count" usage:"Maximum number of Javascript runtime instances to allocate. Default 16."`
+	JsMaxCount         int               `yaml:"js_max_count" json:"js_max_count" usage:"Maximum number of Javascript runtime instances to allocate. Default 32."`
 	CallStackSize      int               `yaml:"call_stack_size" json:"call_stack_size" usage:"Size of each runtime instance's call stack. Default 0."` // Kept for backwards compatibility
 	LuaCallStackSize   int               `yaml:"lua_call_stack_size" json:"lua_call_stack_size" usage:"Size of each runtime instance's call stack. Default 128."`
 	RegistrySize       int               `yaml:"registry_size" json:"registry_size" usage:"Size of each Lua runtime instance's registry. Default 0."` // Kept for backwards compatibility
@@ -832,6 +1081,35 @@ type RuntimeConfig struct {
 	JsReadOnlyGlobals  bool              `yaml:"js_read_only_globals" json:"js_read_only_globals" usage:"When enabled marks all Javascript runtime globals as read-only to reduce memory footprint. Default true."`
 	LuaApiStacktrace   bool              `yaml:"lua_api_stacktrace" json:"lua_api_stacktrace" usage:"Include the Lua stacktrace in error responses returned to the client. Default false."`
 	JsEntrypoint       string            `yaml:"js_entrypoint" json:"js_entrypoint" usage:"Specifies the location of the bundled JavaScript runtime source code."`
+}
+
+func (r *RuntimeConfig) GetEnv() []string {
+	return r.Env
+}
+
+func (r *RuntimeConfig) GetHTTPKey() string {
+	return r.HTTPKey
+}
+
+func (r *RuntimeConfig) Clone() *RuntimeConfig {
+	if r == nil {
+		return nil
+	}
+
+	cfgCopy := *r
+
+	if r.Env != nil {
+		cfgCopy.Env = make([]string, len(r.Env))
+		copy(cfgCopy.Env, r.Env)
+	}
+	if r.Environment != nil {
+		cfgCopy.Environment = make(map[string]string, len(r.Environment))
+		for k, v := range r.Environment {
+			cfgCopy.Environment[k] = v
+		}
+	}
+
+	return &cfgCopy
 }
 
 // Function to allow backwards compatibility for MinCount config
@@ -876,7 +1154,7 @@ func (r *RuntimeConfig) GetLuaReadOnlyGlobals() bool {
 
 func NewRuntimeConfig() *RuntimeConfig {
 	return &RuntimeConfig{
-		Environment:        make(map[string]string, 0),
+		Environment:        make(map[string]string),
 		Env:                make([]string, 0),
 		Path:               "",
 		HTTPKey:            "defaulthttpkey",
@@ -907,6 +1185,15 @@ type MatchConfig struct {
 	LabelUpdateIntervalMs int `yaml:"label_update_interval_ms" json:"label_update_interval_ms" usage:"Time in milliseconds between match label update batch processes. Default 1000."`
 }
 
+func (cfg *MatchConfig) Clone() *MatchConfig {
+	if cfg == nil {
+		return nil
+	}
+
+	cfgCopy := *cfg
+	return &cfgCopy
+}
+
 func NewMatchConfig() *MatchConfig {
 	return &MatchConfig{
 		InputQueueSize:        128,
@@ -925,6 +1212,15 @@ type TrackerConfig struct {
 	EventQueueSize int `yaml:"event_queue_size" json:"event_queue_size" usage:"Size of the tracker presence event buffer. Increase if the server is expected to generate a large number of presence events in a short time. Default 1024."`
 }
 
+func (cfg *TrackerConfig) Clone() *TrackerConfig {
+	if cfg == nil {
+		return nil
+	}
+
+	cfgCopy := *cfg
+	return &cfgCopy
+}
+
 func NewTrackerConfig() *TrackerConfig {
 	return &TrackerConfig{
 		EventQueueSize: 1024,
@@ -933,16 +1229,32 @@ func NewTrackerConfig() *TrackerConfig {
 
 // ConsoleConfig is configuration relevant to the embedded console.
 type ConsoleConfig struct {
-	Port                int    `yaml:"port" json:"port" usage:"The port for accepting connections for the embedded console, listening on all interfaces."`
-	Address             string `yaml:"address" json:"address" usage:"The IP address of the interface to listen for console traffic on. Default listen on all available addresses/interfaces."`
-	MaxMessageSizeBytes int64  `yaml:"max_message_size_bytes" json:"max_message_size_bytes" usage:"Maximum amount of data in bytes allowed to be read from the client socket per message."`
-	ReadTimeoutMs       int    `yaml:"read_timeout_ms" json:"read_timeout_ms" usage:"Maximum duration in milliseconds for reading the entire request."`
-	WriteTimeoutMs      int    `yaml:"write_timeout_ms" json:"write_timeout_ms" usage:"Maximum duration in milliseconds before timing out writes of the response."`
-	IdleTimeoutMs       int    `yaml:"idle_timeout_ms" json:"idle_timeout_ms" usage:"Maximum amount of time in milliseconds to wait for the next request when keep-alives are enabled."`
-	Username            string `yaml:"username" json:"username" usage:"Username for the embedded console. Default username is 'admin'."`
-	Password            string `yaml:"password" json:"password" usage:"Password for the embedded console. Default password is 'password'."`
-	TokenExpirySec      int64  `yaml:"token_expiry_sec" json:"token_expiry_sec" usage:"Token expiry in seconds. Default 86400."`
-	SigningKey          string `yaml:"signing_key" json:"signing_key" usage:"Key used to sign console session tokens."`
+	Port                int        `yaml:"port" json:"port" usage:"The port for accepting connections for the embedded console, listening on all interfaces."`
+	Address             string     `yaml:"address" json:"address" usage:"The IP address of the interface to listen for console traffic on. Default listen on all available addresses/interfaces."`
+	MaxMessageSizeBytes int64      `yaml:"max_message_size_bytes" json:"max_message_size_bytes" usage:"Maximum amount of data in bytes allowed to be read from the client socket per message."`
+	ReadTimeoutMs       int        `yaml:"read_timeout_ms" json:"read_timeout_ms" usage:"Maximum duration in milliseconds for reading the entire request."`
+	WriteTimeoutMs      int        `yaml:"write_timeout_ms" json:"write_timeout_ms" usage:"Maximum duration in milliseconds before timing out writes of the response."`
+	IdleTimeoutMs       int        `yaml:"idle_timeout_ms" json:"idle_timeout_ms" usage:"Maximum amount of time in milliseconds to wait for the next request when keep-alives are enabled."`
+	Username            string     `yaml:"username" json:"username" usage:"Username for the embedded console. Default username is 'admin'."`
+	Password            string     `yaml:"password" json:"password" usage:"Password for the embedded console. Default password is 'password'."`
+	TokenExpirySec      int64      `yaml:"token_expiry_sec" json:"token_expiry_sec" usage:"Token expiry in seconds. Default 86400."`
+	SigningKey          string     `yaml:"signing_key" json:"signing_key" usage:"Key used to sign console session tokens."`
+	MFA                 *MFAConfig `yaml:"mfa" json:"mfa" usage:"MFA settings."`
+}
+
+func (cfg *ConsoleConfig) Clone() *ConsoleConfig {
+	if cfg == nil {
+		return nil
+	}
+
+	cfgCopy := *cfg
+
+	if cfg.MFA != nil {
+		c := *(cfg.MFA)
+		cfgCopy.MFA = &c
+	}
+
+	return &cfgCopy
 }
 
 func NewConsoleConfig() *ConsoleConfig {
@@ -956,6 +1268,7 @@ func NewConsoleConfig() *ConsoleConfig {
 		Password:            "password",
 		TokenExpirySec:      86400,
 		SigningKey:          "defaultsigningkey",
+		MFA:                 NewMFAConfig(),
 	}
 }
 
@@ -965,6 +1278,21 @@ type LeaderboardConfig struct {
 	CallbackQueueSize    int      `yaml:"callback_queue_size" json:"callback_queue_size" usage:"Size of the leaderboard and tournament callback queue that sequences expiry/reset/end invocations. Default 65536."`
 	CallbackQueueWorkers int      `yaml:"callback_queue_workers" json:"callback_queue_workers" usage:"Number of workers to use for concurrent processing of leaderboard and tournament callbacks. Default 8."`
 	RankCacheWorkers     int      `yaml:"rank_cache_workers" json:"rank_cache_workers" usage:"The number of parallel workers to use while populating leaderboard rank cache from the database. Higher number of workers usually makes the process faster but at the cost of increased database load. Default 1."`
+}
+
+func (cfg *LeaderboardConfig) Clone() *LeaderboardConfig {
+	if cfg == nil {
+		return nil
+	}
+
+	cfgCopy := *cfg
+
+	if cfg.BlacklistRankCache != nil {
+		cfgCopy.BlacklistRankCache = make([]string, len(cfg.BlacklistRankCache))
+		copy(cfgCopy.BlacklistRankCache, cfg.BlacklistRankCache)
+	}
+
+	return &cfgCopy
 }
 
 func NewLeaderboardConfig() *LeaderboardConfig {
@@ -984,6 +1312,15 @@ type MatchmakerConfig struct {
 	RevThreshold int  `yaml:"rev_threshold" json:"rev_threshold" usage:"Reverse matching threshold. Default 1."`
 }
 
+func (cfg *MatchmakerConfig) Clone() *MatchmakerConfig {
+	if cfg == nil {
+		return nil
+	}
+
+	cfgCopy := *cfg
+	return &cfgCopy
+}
+
 func NewMatchmakerConfig() *MatchmakerConfig {
 	return &MatchmakerConfig{
 		MaxTickets:   3,
@@ -994,11 +1331,56 @@ func NewMatchmakerConfig() *MatchmakerConfig {
 	}
 }
 
+var _ runtime.IAPConfig = &IAPConfig{}
+
 type IAPConfig struct {
 	Apple           *IAPAppleConfig           `yaml:"apple" json:"apple" usage:"Apple App Store purchase validation configuration."`
 	Google          *IAPGoogleConfig          `yaml:"google" json:"google" usage:"Google Play Store purchase validation configuration."`
 	Huawei          *IAPHuaweiConfig          `yaml:"huawei" json:"huawei" usage:"Huawei purchase validation configuration."`
 	FacebookInstant *IAPFacebookInstantConfig `yaml:"facebook_instant" json:"facebook_instant" usage:"Facebook Instant purchase validation configuration."`
+}
+
+func (cfg *IAPConfig) GetApple() runtime.IAPAppleConfig {
+	return cfg.Apple
+}
+
+func (cfg *IAPConfig) GetGoogle() runtime.IAPGoogleConfig {
+	return cfg.Google
+}
+
+func (cfg *IAPConfig) GetHuawei() runtime.IAPHuaweiConfig {
+	return cfg.Huawei
+}
+
+func (cfg *IAPConfig) GetFacebookInstant() runtime.IAPFacebookInstantConfig {
+	return cfg.FacebookInstant
+}
+
+func (cfg *IAPConfig) Clone() *IAPConfig {
+	if cfg == nil {
+		return nil
+	}
+
+	cfgCopy := *cfg
+
+	if cfg.Google != nil {
+		c := *(cfg.Google)
+		cfgCopy.Google = &c
+	}
+	if cfg.Apple != nil {
+		c := *(cfg.Apple)
+		cfgCopy.Apple = &c
+	}
+	if cfg.FacebookInstant != nil {
+		c := *(cfg.FacebookInstant)
+		cfgCopy.FacebookInstant = &c
+	}
+	if cfg.Huawei != nil {
+		c := *(cfg.Huawei)
+		cfgCopy.Huawei = &c
+	}
+
+	return &cfgCopy
 }
 
 func NewIAPConfig() *IAPConfig {
@@ -1010,10 +1392,22 @@ func NewIAPConfig() *IAPConfig {
 	}
 }
 
+var _ runtime.IAPAppleConfig = &IAPAppleConfig{}
+
 type IAPAppleConfig struct {
 	SharedPassword          string `yaml:"shared_password" json:"shared_password" usage:"Your Apple Store App IAP shared password. Only necessary for validation of auto-renewable subscriptions."`
 	NotificationsEndpointId string `yaml:"notifications_endpoint_id" json:"notifications_endpoint_id" usage:"The callback endpoint identifier for Apple Store subscription notifications."`
 }
+
+func (iap IAPAppleConfig) GetSharedPassword() string {
+	return iap.SharedPassword
+}
+
+func (iap IAPAppleConfig) GetNotificationsEndpointId() string {
+	return iap.NotificationsEndpointId
+}
+
+var _ runtime.IAPGoogleConfig = &IAPGoogleConfig{}
 
 type IAPGoogleConfig struct {
 	ClientEmail             string `yaml:"client_email" json:"client_email" usage:"Google Service Account client email."`
@@ -1023,6 +1417,26 @@ type IAPGoogleConfig struct {
 	PackageName             string `yaml:"package_name" json:"package_name" usage:"Google Play Store App Package Name."`
 }
 
+func (iapg *IAPGoogleConfig) GetClientEmail() string {
+	return iapg.ClientEmail
+}
+
+func (iapg *IAPGoogleConfig) GetPrivateKey() string {
+	return iapg.PrivateKey
+}
+
+func (iapg *IAPGoogleConfig) GetNotificationsEndpointId() string {
+	return iapg.NotificationsEndpointId
+}
+
+func (iapg *IAPGoogleConfig) GetRefundCheckPeriodMin() int {
+	return iapg.RefundCheckPeriodMin
+}
+
+func (iapg *IAPGoogleConfig) GetPackageName() string {
+	return iapg.PackageName
+}
+
 func (iapg *IAPGoogleConfig) Enabled() bool {
 	if iapg.PrivateKey != "" && iapg.PackageName != "" {
 		return true
@@ -1030,11 +1444,38 @@ func (iapg *IAPGoogleConfig) Enabled() bool {
 	return false
 }
 
+var _ runtime.SatoriConfig = &SatoriConfig{}
+
 type SatoriConfig struct {
 	Url        string `yaml:"url" json:"url" usage:"Satori URL."`
 	ApiKeyName string `yaml:"api_key_name" json:"api_key_name" usage:"Satori Api key name."`
 	ApiKey     string `yaml:"api_key" json:"api_key" usage:"Satori Api key."`
 	SigningKey string `yaml:"signing_key" json:"signing_key" usage:"Key used to sign Satori session tokens."`
+}
+
+func (sc *SatoriConfig) GetUrl() string {
+	return sc.Url
+}
+
+func (sc *SatoriConfig) GetApiKeyName() string {
+	return sc.ApiKeyName
+}
+
+func (sc *SatoriConfig) GetApiKey() string {
+	return sc.ApiKey
+}
+
+func (sc *SatoriConfig) GetSigningKey() string {
+	return sc.SigningKey
+}
+
+func (sc *SatoriConfig) Clone() *SatoriConfig {
+	if sc == nil {
+		return nil
+	}
+
+	cfgCopy := *sc
+	return &cfgCopy
 }
 
 func NewSatoriConfig() *SatoriConfig {
@@ -1062,19 +1503,64 @@ func (sc *SatoriConfig) Validate(logger *zap.Logger) {
 	}
 }
 
+var _ runtime.IAPHuaweiConfig = &IAPHuaweiConfig{}
+
 type IAPHuaweiConfig struct {
 	PublicKey    string `yaml:"public_key" json:"public_key" usage:"Huawei IAP store Base64 encoded Public Key."`
 	ClientID     string `yaml:"client_id" json:"client_id" usage:"Huawei OAuth client secret."`
 	ClientSecret string `yaml:"client_secret" json:"client_secret" usage:"Huawei OAuth app client secret."`
 }
 
+func (i IAPHuaweiConfig) GetPublicKey() string {
+	return i.PublicKey
+}
+
+func (i IAPHuaweiConfig) GetClientID() string {
+	return i.ClientID
+}
+
+func (i IAPHuaweiConfig) GetClientSecret() string {
+	return i.ClientSecret
+}
+
+var _ runtime.IAPFacebookInstantConfig = &IAPFacebookInstantConfig{}
+
 type IAPFacebookInstantConfig struct {
 	AppSecret string `yaml:"app_secret" json:"app_secret" usage:"Facebook Instant OAuth app client secret."`
 }
 
+func (i IAPFacebookInstantConfig) GetAppSecret() string {
+	return i.AppSecret
+}
+
+var _ runtime.GoogleAuthConfig = &GoogleAuthConfig{}
+
 type GoogleAuthConfig struct {
 	CredentialsJSON string         `yaml:"credentials_json" json:"credentials_json" usage:"Google's Access Credentials."`
 	OAuthConfig     *oauth2.Config `yaml:"-" json:"-"`
+}
+
+func (cfg *GoogleAuthConfig) GetCredentialsJSON() string {
+	return cfg.CredentialsJSON
+}
+
+func (cfg *GoogleAuthConfig) Clone() *GoogleAuthConfig {
+	if cfg == nil {
+		return nil
+	}
+
+	cfgCopy := *cfg
+
+	if cfg.OAuthConfig != nil {
+		c := *cfg.OAuthConfig
+		if cfg.OAuthConfig.Scopes != nil {
+			c.Scopes = make([]string, len(cfg.OAuthConfig.Scopes))
+			copy(c.Scopes, cfg.OAuthConfig.Scopes)
+		}
+		cfgCopy.OAuthConfig = &c
+	}
+
+	return &cfgCopy
 }
 
 func NewGoogleAuthConfig() *GoogleAuthConfig {
@@ -1088,6 +1574,36 @@ type StorageConfig struct {
 	DisableIndexOnly bool `yaml:"disable_index_only" json:"disable_index_only" usage:"Override and disable 'index_only' storage indices config and fallback to reading from the database."`
 }
 
+func (cfg *StorageConfig) Clone() *StorageConfig {
+	if cfg == nil {
+		return nil
+	}
+
+	cfgCopy := *cfg
+	return &cfgCopy
+}
+
 func NewStorageConfig() *StorageConfig {
 	return &StorageConfig{}
+}
+
+type MFAConfig struct {
+	StorageEncryptionKey string `yaml:"storage_encryption_key" json:"storage_encryption_key" usage:"The encryption key to be used when persisting MFA related data. Has to be 32 bytes long."`
+	AdminAccountOn       bool   `yaml:"admin_account_enabled" json:"admin_account_enabled" usage:"Require MFA for the Console Admin account."`
+}
+
+func (cfg *MFAConfig) Clone() *MFAConfig {
+	if cfg == nil {
+		return nil
+	}
+
+	cfgCopy := *cfg
+	return &cfgCopy
+}
+
+func NewMFAConfig() *MFAConfig {
+	return &MFAConfig{
+		StorageEncryptionKey: "the-key-has-to-be-32-bytes-long!", // Has to be 32 bit long.
+		AdminAccountOn:       false,
+	}
 }

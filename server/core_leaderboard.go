@@ -21,6 +21,7 @@ import (
 	"encoding/base64"
 	"encoding/gob"
 	"errors"
+	"github.com/heroiclabs/nakama-common/runtime"
 	"sort"
 	"strings"
 	"time"
@@ -28,8 +29,9 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama/v3/internal/cronexpr"
-	"github.com/jackc/pgconn"
-	"github.com/jackc/pgtype"
+
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
@@ -366,7 +368,7 @@ WHERE leaderboard_id = $1 AND expiry_time = $2 AND owner_id = ANY($3)`
 	sort.Slice(ownerRecords, sortFn)
 
 	// Bulk fill in the ranks of any owner records requested.
-	rankCount := rankCache.Fill(leaderboardId, expiryTime, ownerRecords)
+	rankCount := rankCache.Fill(leaderboardId, expiryTime, ownerRecords, leaderboard.EnableRanks)
 
 	return &api.LeaderboardRecordList{
 		Records:      records,
@@ -551,7 +553,7 @@ func LeaderboardRecordWrite(ctx context.Context, logger *zap.Logger, db *sql.DB,
 		rank = rankCache.Get(leaderboardId, expiryTime, uuid.Must(uuid.FromString(ownerID)))
 	} else {
 		// Ensure we have the latest dbscore, dbsubscore if there was an update.
-		rank = rankCache.Insert(leaderboardId, leaderboard.SortOrder, dbScore, dbSubscore, dbNumScore, expiryTime, uuid.Must(uuid.FromString(ownerID)))
+		rank = rankCache.Insert(leaderboardId, leaderboard.SortOrder, dbScore, dbSubscore, dbNumScore, expiryTime, uuid.Must(uuid.FromString(ownerID)), leaderboard.EnableRanks)
 	}
 
 	record := &api.LeaderboardRecord{
@@ -634,7 +636,7 @@ func LeaderboardRecordsDeleteAll(ctx context.Context, logger *zap.Logger, leader
 		}
 
 		expiryUnix := expiryTime.Time.Unix()
-		if expiryUnix <= currentTime {
+		if expiryUnix != 0 && expiryUnix <= currentTime {
 			// Expired ranks are handled by the rank cache itself.
 			continue
 		}
@@ -855,7 +857,12 @@ func getLeaderboardRecordsHaystack(ctx context.Context, logger *zap.Logger, db *
 		}
 
 		records = records[start:end]
-		rankCount := rankCache.Fill(leaderboardId, expiryTime.Unix(), records)
+		l := leaderboardCache.Get(leaderboardId)
+		if l == nil {
+			// Should never happen unless leaderboard is concurrently deleted as records are being requested.
+			return nil, ErrLeaderboardNotFound
+		}
+		rankCount := rankCache.Fill(leaderboardId, expiryTime.Unix(), records, l.EnableRanks)
 
 		var prevCursorStr string
 		if setPrevCursor {
@@ -966,4 +973,27 @@ func calculateExpiryOverride(overrideExpiry int64, leaderboard *Leaderboard) (in
 		}
 	}
 	return overrideExpiry, true
+}
+
+func disableLeaderboardRanks(ctx context.Context, logger *zap.Logger, db *sql.DB, leaderboardCache LeaderboardCache, rankCache LeaderboardRankCache, id string) error {
+	l := leaderboardCache.Get(id)
+	if l == nil || l.IsTournament() {
+		return runtime.ErrLeaderboardNotFound
+	}
+
+	if _, err := db.QueryContext(ctx, "UPDATE leaderboard SET enable_ranks = false WHERE id = $1", id); err != nil {
+		logger.Error("failed to set leaderboard enable_ranks value", zap.Error(err))
+		return errors.New("failed to disable tournament ranks")
+	}
+
+	leaderboardCache.Insert(l.Id, l.Authoritative, l.SortOrder, l.Operator, l.ResetScheduleStr, l.Metadata, l.CreateTime, false)
+
+	expiryTime := int64(0)
+	if l.ResetSchedule != nil {
+		expiryTime = l.ResetSchedule.Next(time.Now().UTC()).UTC().Unix()
+	}
+
+	rankCache.DeleteLeaderboard(l.Id, expiryTime)
+
+	return nil
 }

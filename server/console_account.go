@@ -28,7 +28,7 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama/v3/console"
-	"github.com/jackc/pgtype"
+	"github.com/jackc/pgx/v5/pgtype"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/grpc/codes"
@@ -372,7 +372,7 @@ func (s *ConsoleServer) ListAccounts(ctx context.Context, in *console.ListAccoun
 
 	// Filtered queries do not observe cursor or limit inputs, and do not return cursors.
 	if in.Filter != "" {
-		// Exact match based on username or social identifiers, and any.
+		// Exact match based on username or social identifiers, if any.
 		params := []interface{}{in.Filter}
 		query := `
 			SELECT id, username, display_name, avatar_url, lang_tag, location, timezone, metadata, apple_id, facebook_id, facebook_instant_game_id, google_id, gamecenter_id, steam_id, edge_count, create_time, update_time

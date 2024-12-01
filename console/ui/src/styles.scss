@@ -36,7 +36,6 @@ h1, h2, h3, h4, h5 {
 }
 
 
-
 /* Button and link stuff */
 a {
   color: $brand-purple;
@@ -110,7 +109,6 @@ a {
   }
 
   &:disabled {
-    background-color: $brand-purple;
     border-color: $brand-purple;
   }
 }
@@ -134,7 +132,6 @@ a {
   }
 
   &:disabled {
-    background-color: $brand-purple;
     border-color: $brand-purple;
   }
 }
@@ -562,5 +559,5 @@ a {
   --jse-theme-color: #7668ED;
   --jes-theme-light-color: #A69BFF;
   --jse-button-primary-background: #7668ED;
-  --jse-message-success-background: #A69BFF; 
+  --jse-message-success-background: #A69BFF;
 }

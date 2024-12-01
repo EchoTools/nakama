@@ -26,7 +26,7 @@
       </form>
     </div>
     <div class="col-md-3 justify-content-end text-right">
-        <div class="btn-group page-btns" role="group" aria-label="Basic example">
+        <div class="btn-group page-btns" role="group" aria-label="Search">
           <button type="button" class="btn btn-outline-secondary" (click)="search(0)" [disabled]="accounts.length === 0"><img src="/static/svg/page-first.svg" alt="" width="20" height=""></button>
 <!--            <button type="button" class="btn btn-outline-secondary" (click)="search(-1)" [disabled]="prev_cursor === ''"><img src="/static/svg/page-prev.svg" alt="" width="20" height=""></button>-->
           <button type="button" class="btn btn-outline-secondary" (click)="search(1)" [disabled]="nextCursor === ''"><img src="/static/svg/page-next.svg" alt="" width="20" height=""></button>
@@ -38,6 +38,12 @@
 <ngb-alert [dismissible]="false" type="danger" class="mb-3" *ngIf="error">
   <img src="/static/svg/red-triangle.svg" alt="" width="16" height="" class="mr-2">
   <h6 class="mr-2 d-inline font-weight-bold">Error when querying accounts: {{error}}</h6>
+</ngb-alert>
+
+<ngb-alert [dismissible]="false" type="danger" class="mb-3" *ngIf="ongoingQuery">
+  <img src="/static/svg/red-triangle.svg" alt="" width="16" height="" class="mr-2">
+  <h6 class="mr-2 d-inline font-weight-bold">Query ongoing...</h6>
+  <button type="button" class="btn btn-danger" (click)="cancelQuery()">Cancel!</button>
 </ngb-alert>
 
 <div class="row no-gutters">

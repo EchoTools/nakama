@@ -53,6 +53,7 @@ type Metrics interface {
 	CountDroppedEvents(delta int64)
 	CountWebsocketOpened(delta int64)
 	CountWebsocketClosed(delta int64)
+	CountUntaggedGrpcStatsCalls(delta int64)
 	GaugeSessions(value float64)
 	GaugePresences(value float64)
 	GaugeStorageIndexEntries(indexName string, value float64)
@@ -163,7 +164,7 @@ func NewLocalMetrics(logger, startupLogger *zap.Logger, db *sql.DB, config Confi
 		// Create a HTTP server to expose Prometheus metrics through.
 		CORSHeaders := handlers.AllowedHeaders([]string{"Content-Type", "User-Agent"})
 		CORSOrigins := handlers.AllowedOrigins([]string{"*"})
-		CORSMethods := handlers.AllowedMethods([]string{"GET", "HEAD"})
+		CORSMethods := handlers.AllowedMethods([]string{http.MethodGet, http.MethodHead})
 		handlerWithCORS := handlers.CORS(CORSHeaders, CORSOrigins, CORSMethods)(m.refreshDBStats(reporter.HTTPHandler()))
 		m.prometheusHTTPServer = &http.Server{
 			Addr:         fmt.Sprintf(":%d", config.GetMetrics().PrometheusPort),
@@ -406,6 +407,11 @@ func (m *LocalMetrics) CountWebsocketOpened(delta int64) {
 // Increment the number of closed WS connections.
 func (m *LocalMetrics) CountWebsocketClosed(delta int64) {
 	m.PrometheusScope.Counter("socket_ws_closed").Inc(delta)
+}
+
+// Increment the number of untagged gRpc stats calls.
+func (m *LocalMetrics) CountUntaggedGrpcStatsCalls(delta int64) {
+	m.PrometheusScope.Counter("untagged_grpc_stats_calls").Inc(delta)
 }
 
 // Set the absolute value of currently active sessions.
