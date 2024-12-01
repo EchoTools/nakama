@@ -99,7 +99,7 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 		if !strings.Contains(p.node, "dev") {
 			// If there are fewer than 16 players online, reduce the fallback delay
 			if count < 16 {
-				fallbackDelay = min(p.matchmakingTicketTimeout()/2, 4*time.Minute)
+				fallbackDelay = min(p.matchmakingTicketTimeout()/2, 2*time.Minute)
 			} else if count < 8 {
 				fallbackDelay = 1 * time.Minute
 			}
