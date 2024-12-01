@@ -35,7 +35,7 @@ import (
 	"sync"
 	"time"
 
-	jwt "github.com/golang-jwt/jwt/v4"
+	"github.com/golang-jwt/jwt/v4"
 	"go.uber.org/zap"
 	"golang.org/x/oauth2"
 )
@@ -886,9 +886,7 @@ func (c *Client) CheckFacebookLimitedLoginToken(ctx context.Context, appId strin
 
 		// Verify the issuer.
 		switch iss, _ := claims["iss"].(string); iss {
-		case "https://www.facebook.com":
-			fallthrough
-		case "https://facebook.com":
+		case "https://www.facebook.com", "https://facebook.com":
 			break
 		default:
 			return nil, fmt.Errorf("unexpected issuer: %v", claims["iss"])
@@ -974,9 +972,17 @@ func (c *Client) requestRaw(ctx context.Context, provider, path string, headers 
 	case 200:
 		return body, nil
 	case 401:
-		return nil, fmt.Errorf("%v error url %v, status code %v, body %s", provider, path, resp.StatusCode, body)
+		return nil, &UnauthorizedError{Err: fmt.Errorf("%v url: %q, status code: %q, body: %q", provider, path, resp.StatusCode, body)}
 	default:
 		c.logger.Warn("error response code from social request", zap.String("provider", provider), zap.Int("code", resp.StatusCode), zap.String("body", string(body)))
-		return nil, fmt.Errorf("%v error url %v, status code %v, body %s", provider, path, resp.StatusCode, body)
+		return nil, fmt.Errorf("%v url: %q, status code: %q, body: %q", provider, path, resp.StatusCode, body)
 	}
 }
+
+type UnauthorizedError struct {
+	Err error
+}
+
+func (e *UnauthorizedError) Error() string { return e.Err.Error() }
+
+func (e *UnauthorizedError) Unwrap() error { return e.Err }

@@ -41,8 +41,13 @@ import {LeaderboardDetailsComponent} from './leaderboard/details/details.compone
 import {LeaderboardRecordsComponent, LeaderboardRecordsResolver} from './leaderboard/records/records.component';
 import {ApiExplorerComponent, ApiExplorerEndpointsResolver} from './apiexplorer/apiexplorer.component';
 import {PurchasesComponent, PurchasesResolver} from './account/purchases/purchases.component';
-import {ChatListComponent, ChatSearchResolver} from "./channels/chatMessages.component";
+import {ChatListComponent, ChatSearchResolver} from './channels/chat-list.component';
 import {SubscriptionsComponent, SubscriptionsResolver} from './account/subscriptions/subscriptions.component';
+import {PurchasesListComponent} from './purchases/purchases-list.component';
+import {SubscriptionsListComponent} from './subscriptions/subscriptions-list.component';
+import {MfaSetupComponent} from './mfa-setup/mfa-setup.component';
+import {NotificationsListComponent} from './notifications/notifications-list.component';
+import {NotificationsComponent, NotificationsResolver} from './account/notifications/notifications.component';
 
 const routes: Routes = [
   {
@@ -86,14 +91,24 @@ const routes: Routes = [
           {path: 'wallet', component: WalletComponent, resolve: [WalletLedgerResolver]},
           {path: 'friends', component: FriendsComponent, resolve: [FriendsResolver]},
           {path: 'groups', component: GroupsComponent, resolve: [GroupsResolver]},
+          {path: 'notifications', component: NotificationsComponent, resolve: [NotificationsResolver]},
           {path: 'purchases', component: PurchasesComponent, resolve: [PurchasesResolver]},
           {path: 'subscriptions', component: SubscriptionsComponent, resolve: [SubscriptionsResolver]}
         ]
       },
       {path: 'apiexplorer', component: ApiExplorerComponent, resolve: [ApiExplorerEndpointsResolver]},
-      {path: 'chat', component: ChatListComponent, resolve: [ChatSearchResolver]}
+      {path: 'chat', component: ChatListComponent, resolve: [ChatSearchResolver]},
+      {path: 'notifications', component: NotificationsListComponent, resolve: [NotificationsResolver]},
+      {path: 'purchases', component: PurchasesListComponent, resolve: [PurchasesResolver]},
+      {path: 'subscriptions', component: SubscriptionsListComponent, resolve: [SubscriptionsResolver]},
+      {path: 'settings/mfa', component: MfaSetupComponent, resolve: []}
     ]},
-  {path: 'login', component: LoginComponent, canActivate: [LoginGuard]},
+  {
+    path: 'login', component: LoginComponent, canActivate: [LoginGuard],
+    children: [
+      {path: 'mfa', component: MfaSetupComponent, resolve: []}
+    ]
+  },
 
   // Fallback redirect.
   {path: '**', redirectTo: ''}

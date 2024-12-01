@@ -32,12 +32,12 @@ func TestSatoriClient_EventsPublish(t *testing.T) {
 	identityID := uuid.Must(uuid.NewV4()).String()
 
 	logger := NewConsoleLogger(os.Stdout, true)
-	client := NewSatoriClient(logger, "<URL>", "<API KEY NAME>", "<API KEY>", "<SIGNING KEY>")
+	client := NewSatoriClient(logger, "<URL>", "<API KEY NAME>", "<API KEY>", "<SIGNING KEY>", 0)
 
 	ctx, ctxCancelFn := context.WithTimeout(context.Background(), 5*time.Second)
 	defer ctxCancelFn()
 
-	if err := client.Authenticate(ctx, identityID); err != nil {
+	if err := client.Authenticate(ctx, identityID, nil, nil); err != nil {
 		t.Fatalf("error in client.Authenticate: %+v", err)
 	}
 

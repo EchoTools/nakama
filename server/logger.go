@@ -50,9 +50,7 @@ func SetupLogging(tmpLogger *zap.Logger, config Config) (*zap.Logger, *zap.Logge
 
 	format := JSONFormat
 	switch strings.ToLower(config.GetLogger().Format) {
-	case "":
-		fallthrough
-	case "json":
+	case "", "json":
 		format = JSONFormat
 	case "stackdriver":
 		format = StackdriverFormat
@@ -218,4 +216,49 @@ func RedirectStdLog(logger *zap.Logger) {
 	log.SetPrefix("")
 	skipLogger := logger.WithOptions(zap.AddCallerSkip(3))
 	log.SetOutput(&RedirectStdLogWriter{skipLogger})
+}
+
+type grpcCustomLogger struct {
+	*zap.SugaredLogger
+}
+
+// GRPC custom logger defaults to Error level, unless the logger level is higher.
+// https://github.com/grpc/grpc-go/blob/master/grpclog/loggerv2.go
+func NewGrpcCustomLogger(logger *zap.Logger) (grpcCustomLogger, error) {
+	level := zap.NewAtomicLevelAt(logger.Level())
+	if logger.Level() <= zap.ErrorLevel {
+		level = zap.NewAtomicLevelAt(zap.ErrorLevel)
+	}
+	errLogger, err := zapcore.NewIncreaseLevelCore(logger.Core(), level)
+	if err != nil {
+		logger.Error("failed to set grpc error level logger", zap.Error(err))
+		return grpcCustomLogger{}, err
+	}
+
+	newLevelLoggerOption := zap.WrapCore(func(zapcore.Core) zapcore.Core {
+		return errLogger
+	})
+
+	sLogger := logger.WithOptions(newLevelLoggerOption)
+	grpcLogger := sLogger.Sugar()
+
+	return grpcCustomLogger{
+		grpcLogger,
+	}, nil
+}
+
+func (g grpcCustomLogger) Warning(args ...any) {
+	g.Warn(args...)
+}
+
+func (g grpcCustomLogger) Warningln(args ...any) {
+	g.Warnln(args...)
+}
+
+func (g grpcCustomLogger) Warningf(format string, args ...any) {
+	g.Warnf(format, args...)
+}
+
+func (g grpcCustomLogger) V(l int) bool {
+	return int(g.Level()) <= l
 }

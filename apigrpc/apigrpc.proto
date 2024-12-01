@@ -58,10 +58,11 @@ option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
       }
     }
     security: {
-      // Made up security so we can apply "Bearer <JWT_TOKEN>"
-      key: "BearerJwt";
+      key: "BearerJwt"
       value: {
-        type: TYPE_INVALID;
+        type: TYPE_API_KEY
+        in: IN_HEADER
+        name: "Authorization"
       }
     }
     security: {
@@ -345,6 +346,11 @@ service Nakama {
     option (google.api.http).get = "/v2/iap/subscription/{product_id}";
   }
 
+  // Get matchmaker stats.
+  rpc GetMatchmakerStats (google.protobuf.Empty) returns (api.MatchmakerStats) {
+    option (google.api.http).get = "/v2/matchmaker/stats";
+  }
+
   // A healthcheck which load balancers can use to check the service.
   rpc Healthcheck (google.protobuf.Empty) returns (google.protobuf.Empty) {
     option (google.api.http).get = "/healthcheck";
@@ -466,6 +472,11 @@ service Nakama {
   // List all friends for the current user.
   rpc ListFriends (api.ListFriendsRequest) returns (api.FriendList) {
     option (google.api.http).get = "/v2/friend";
+  }
+
+  // List friends of friends for the current user.
+  rpc ListFriendsOfFriends(api.ListFriendsOfFriendsRequest) returns (api.FriendsOfFriendsList) {
+    option (google.api.http).get = "/v2/friend/friends";
   }
 
   // List groups based on given filters.

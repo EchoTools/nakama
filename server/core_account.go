@@ -26,9 +26,10 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama/v3/console"
-	"github.com/jackc/pgconn"
-	"github.com/jackc/pgtype"
-	pgx "github.com/jackc/pgx/v4"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -51,8 +52,8 @@ type accountUpdate struct {
 }
 
 func GetAccount(ctx context.Context, logger *zap.Logger, db *sql.DB, statusRegistry StatusRegistry, userID uuid.UUID) (*api.Account, error) {
-	var displayName sql.NullString
 	var username sql.NullString
+	var displayName sql.NullString
 	var avatarURL sql.NullString
 	var langTag sql.NullString
 	var location sql.NullString
@@ -72,7 +73,9 @@ func GetAccount(ctx context.Context, logger *zap.Logger, db *sql.DB, statusRegis
 	var updateTime pgtype.Timestamptz
 	var verifyTime pgtype.Timestamptz
 	var disableTime pgtype.Timestamptz
-	var deviceIDs pgtype.VarcharArray
+	var deviceIDs pgtype.FlatArray[string]
+
+	m := pgtype.NewMap()
 
 	query := `
 SELECT u.username, u.display_name, u.avatar_url, u.lang_tag, u.location, u.timezone, u.metadata, u.wallet,
@@ -81,7 +84,7 @@ SELECT u.username, u.display_name, u.avatar_url, u.lang_tag, u.location, u.timez
 FROM users u
 WHERE u.id = $1`
 
-	if err := db.QueryRowContext(ctx, query, userID).Scan(&username, &displayName, &avatarURL, &langTag, &location, &timezone, &metadata, &wallet, &email, &apple, &facebook, &facebookInstantGame, &google, &gamecenter, &steam, &customID, &edgeCount, &createTime, &updateTime, &verifyTime, &disableTime, &deviceIDs); err != nil {
+	if err := db.QueryRowContext(ctx, query, userID).Scan(&username, &displayName, &avatarURL, &langTag, &location, &timezone, &metadata, &wallet, &email, &apple, &facebook, &facebookInstantGame, &google, &gamecenter, &steam, &customID, &edgeCount, &createTime, &updateTime, &verifyTime, &disableTime, m.SQLScanner(&deviceIDs)); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, ErrAccountNotFound
 		}
@@ -89,17 +92,17 @@ WHERE u.id = $1`
 		return nil, err
 	}
 
-	devices := make([]*api.AccountDevice, 0, len(deviceIDs.Elements))
-	for _, deviceID := range deviceIDs.Elements {
-		devices = append(devices, &api.AccountDevice{Id: deviceID.String})
+	devices := make([]*api.AccountDevice, 0, len(deviceIDs))
+	for _, deviceID := range deviceIDs {
+		devices = append(devices, &api.AccountDevice{Id: deviceID})
 	}
 
 	var verifyTimestamp *timestamppb.Timestamp
-	if verifyTime.Status == pgtype.Present && verifyTime.Time.Unix() != 0 {
+	if verifyTime.Valid && verifyTime.Time.Unix() != 0 {
 		verifyTimestamp = &timestamppb.Timestamp{Seconds: verifyTime.Time.Unix()}
 	}
 	var disableTimestamp *timestamppb.Timestamp
-	if disableTime.Status == pgtype.Present && disableTime.Time.Unix() != 0 {
+	if disableTime.Valid && disableTime.Time.Unix() != 0 {
 		disableTimestamp = &timestamppb.Timestamp{Seconds: disableTime.Time.Unix()}
 	}
 
@@ -175,26 +178,28 @@ WHERE u.id = ANY($1)`
 		var updateTime pgtype.Timestamptz
 		var verifyTime pgtype.Timestamptz
 		var disableTime pgtype.Timestamptz
-		var deviceIDs pgtype.VarcharArray
+		var deviceIDs pgtype.FlatArray[string]
 
-		err = rows.Scan(&userID, &username, &displayName, &avatarURL, &langTag, &location, &timezone, &metadata, &wallet, &email, &apple, &facebook, &facebookInstantGame, &google, &gamecenter, &steam, &customID, &edgeCount, &createTime, &updateTime, &verifyTime, &disableTime, &deviceIDs)
+		m := pgtype.NewMap()
+
+		err = rows.Scan(&userID, &username, &displayName, &avatarURL, &langTag, &location, &timezone, &metadata, &wallet, &email, &apple, &facebook, &facebookInstantGame, &google, &gamecenter, &steam, &customID, &edgeCount, &createTime, &updateTime, &verifyTime, &disableTime, m.SQLScanner(&deviceIDs))
 		if err != nil {
 			_ = rows.Close()
 			logger.Error("Error retrieving user accounts.", zap.Error(err))
 			return nil, err
 		}
 
-		devices := make([]*api.AccountDevice, 0, len(deviceIDs.Elements))
-		for _, deviceID := range deviceIDs.Elements {
-			devices = append(devices, &api.AccountDevice{Id: deviceID.String})
+		devices := make([]*api.AccountDevice, 0, len(deviceIDs))
+		for _, deviceID := range deviceIDs {
+			devices = append(devices, &api.AccountDevice{Id: deviceID})
 		}
 
 		var verifyTimestamp *timestamppb.Timestamp
-		if verifyTime.Status == pgtype.Present && verifyTime.Time.Unix() != 0 {
+		if verifyTime.Valid && verifyTime.Time.Unix() != 0 {
 			verifyTimestamp = &timestamppb.Timestamp{Seconds: verifyTime.Time.Unix()}
 		}
 		var disableTimestamp *timestamppb.Timestamp
-		if disableTime.Status == pgtype.Present && disableTime.Time.Unix() != 0 {
+		if disableTime.Valid && disableTime.Time.Unix() != 0 {
 			disableTimestamp = &timestamppb.Timestamp{Seconds: disableTime.Time.Unix()}
 		}
 
@@ -403,7 +408,7 @@ func ExportAccount(ctx context.Context, logger *zap.Logger, db *sql.DB, userID u
 	}
 
 	// Notifications.
-	notifications, err := NotificationList(ctx, logger, db, userID, 0, "", nil)
+	notifications, err := NotificationList(ctx, logger, db, userID, 0, "", true)
 	if err != nil {
 		logger.Error("Could not fetch notifications", zap.Error(err), zap.String("user_id", userID.String()))
 		return nil, status.Error(codes.Internal, "An error occurred while trying to export user data.")

@@ -33,7 +33,7 @@ import (
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/apigrpc"
-	_ "github.com/jackc/pgx/v4/stdlib"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc"
@@ -55,7 +55,7 @@ var (
 	}
 	metrics       = NewLocalMetrics(logger, logger, nil, cfg)
 	storageIdx, _ = NewLocalStorageIndex(logger, nil, &StorageConfig{DisableIndexOnly: false}, metrics)
-	_             = CheckConfig(logger, cfg)
+	_             = ValidateConfig(logger, cfg)
 )
 
 type DummyMessageRouter struct{}
@@ -171,7 +171,7 @@ func NewConsoleLogger(output *os.File, verbose bool) *zap.Logger {
 }
 
 func NewDB(t *testing.T) *sql.DB {
-	// dbUrl := "postgresql://postgres@127.0.0.1:5432/nakama?sslmode=disable"
+	//dbUrl := "postgresql://postgres@127.0.0.1:5432/nakama?sslmode=disable"
 	dbUrl := "postgresql://root@127.0.0.1:26257/nakama?sslmode=disable"
 	if dbUrlEnv := os.Getenv("TEST_DB_URL"); len(dbUrlEnv) > 0 {
 		dbUrl = dbUrlEnv
@@ -238,7 +238,7 @@ func NewSession(t *testing.T, customID string) (*grpc.ClientConn, apigrpc.Nakama
 	outgoingCtx := metadata.NewOutgoingContext(ctx, metadata.New(map[string]string{
 		"authorization": "Basic " + base64.StdEncoding.EncodeToString([]byte("defaultkey:")),
 	}))
-	conn, err := grpc.DialContext(outgoingCtx, "localhost:7349", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient("localhost:7349", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,7 +265,7 @@ func NewAuthenticatedAPIClient(t *testing.T, customID string) (*grpc.ClientConn,
 	outgoingCtx := metadata.NewOutgoingContext(ctx, metadata.New(map[string]string{
 		"authorization": "Bearer " + session.Token,
 	}))
-	conn, err := grpc.DialContext(outgoingCtx, "localhost:7349", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient("localhost:7349", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		t.Fatal(err)
 	}

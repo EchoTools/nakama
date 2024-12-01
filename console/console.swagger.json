@@ -981,6 +981,12 @@
                 },
                 "user_id": {
                   "type": "string"
+                },
+                "session_vars": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
                 }
               },
               "title": "API Explorer request definition for CallApiEndpoint"
@@ -1029,6 +1035,12 @@
                 },
                 "user_id": {
                   "type": "string"
+                },
+                "session_vars": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
                 }
               },
               "title": "API Explorer request definition for CallApiEndpoint"
@@ -1106,6 +1118,40 @@
             "required": true,
             "schema": {
               "$ref": "#/definitions/consoleAuthenticateLogoutRequest"
+            }
+          }
+        ],
+        "tags": [
+          "Console"
+        ]
+      }
+    },
+    "/v2/console/authenticate/mfa": {
+      "post": {
+        "summary": "Change an account's MFA using a code, usually delivered over email.",
+        "operationId": "Console_AuthenticateMFASetup",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/consoleAuthenticateMFASetupResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googlerpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "description": "Request to change MFA.",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/consoleAuthenticateMFASetupRequest"
             }
           }
         ],
@@ -1579,6 +1625,70 @@
         ]
       }
     },
+    "/v2/console/iap/purchase/{transaction_id}": {
+      "get": {
+        "summary": "Get purchase by transaction_id",
+        "operationId": "Console_GetPurchase",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/apiValidatedPurchase"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googlerpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "transaction_id",
+            "description": "Purchase original transaction id.",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "Console"
+        ]
+      }
+    },
+    "/v2/console/iap/subscription/{original_transaction_id}": {
+      "get": {
+        "summary": "Get subscription by original_transaction_id",
+        "operationId": "Console_GetSubscription",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/apiValidatedSubscription"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googlerpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "original_transaction_id",
+            "description": "Subscription original transaction id.",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "Console"
+        ]
+      }
+    },
     "/v2/console/leaderboard": {
       "get": {
         "summary": "List leaderboards",
@@ -1933,6 +2043,116 @@
               "type": "string"
             },
             "collectionFormat": "multi"
+          }
+        ],
+        "tags": [
+          "Console"
+        ]
+      }
+    },
+    "/v2/console/notification": {
+      "get": {
+        "summary": "List notifications.",
+        "operationId": "Console_ListNotifications",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/nakamaconsoleNotificationList"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googlerpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "user_id",
+            "description": "User ID to filter purchases for",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "limit",
+            "description": "The number of notifications to get.",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "format": "int64"
+          },
+          {
+            "name": "cursor",
+            "description": "A cursor to page through notifications.",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "Console"
+        ]
+      }
+    },
+    "/v2/console/notification/{id}": {
+      "get": {
+        "summary": "Get a notification by id.",
+        "operationId": "Console_GetNotification",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/nakamaconsoleNotification"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googlerpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "description": "Notification id.",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "Console"
+        ]
+      },
+      "delete": {
+        "summary": "Delete notification",
+        "operationId": "Console_DeleteNotification",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "type": "object",
+              "properties": {}
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googlerpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "description": "Notification ID.",
+            "in": "path",
+            "required": true,
+            "type": "string"
           }
         ],
         "tags": [
@@ -2488,6 +2708,87 @@
           "Console"
         ]
       }
+    },
+    "/v2/console/user/{username}/mfa/require": {
+      "post": {
+        "summary": "Sets the user's MFA as required or not required.",
+        "operationId": "Console_RequireUserMfa",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "type": "object",
+              "properties": {}
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googlerpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "username",
+            "description": "User username.",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "type": "object",
+              "properties": {
+                "required": {
+                  "type": "boolean",
+                  "description": "Required."
+                }
+              },
+              "description": "Make a user's mfa required or not."
+            }
+          }
+        ],
+        "tags": [
+          "Console"
+        ]
+      }
+    },
+    "/v2/console/user/{username}/mfa/reset": {
+      "post": {
+        "summary": "Reset a user's multi-factor authentication credentials.",
+        "operationId": "Console_ResetUserMfa",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "type": "object",
+              "properties": {}
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googlerpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "username",
+            "description": "User username.",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "Console"
+        ]
+      }
     }
   },
   "definitions": {
@@ -2865,42 +3166,6 @@
       },
       "description": "A set of leaderboard records, may be part of a leaderboard records page or a batch of individual records."
     },
-    "apiNotification": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string",
-          "description": "ID of the Notification."
-        },
-        "subject": {
-          "type": "string",
-          "description": "Subject of the notification."
-        },
-        "content": {
-          "type": "string",
-          "description": "Content of the notification in JSON."
-        },
-        "code": {
-          "type": "integer",
-          "format": "int32",
-          "description": "Category code for this notification."
-        },
-        "sender_id": {
-          "type": "string",
-          "description": "ID of the sender, if a user. Otherwise 'null'."
-        },
-        "create_time": {
-          "type": "string",
-          "format": "date-time",
-          "description": "The UNIX time (for gRPC clients) or ISO string (for REST clients) when the notification was created."
-        },
-        "persistent": {
-          "type": "boolean",
-          "description": "True if this notification was persisted to the database."
-        }
-      },
-      "description": "A notification in the server."
-    },
     "apiPurchaseList": {
       "type": "object",
       "properties": {
@@ -3231,7 +3496,7 @@
           "type": "array",
           "items": {
             "type": "object",
-            "$ref": "#/definitions/apiNotification"
+            "$ref": "#/definitions/nakamaapiNotification"
           },
           "description": "The user's notifications."
         },
@@ -3288,6 +3553,10 @@
           "$ref": "#/definitions/consoleUserRole",
           "title": "Role of this user;"
         },
+        "mfa_required": {
+          "type": "boolean",
+          "title": "Require MFA"
+        },
         "newsletter_subscription": {
           "type": "boolean",
           "title": "Subscribe to newsletters"
@@ -3337,6 +3606,33 @@
       },
       "description": "Log out a session and invalidate a session token."
     },
+    "consoleAuthenticateMFASetupRequest": {
+      "type": "object",
+      "properties": {
+        "mfa": {
+          "type": "string",
+          "description": "MFA token."
+        },
+        "code": {
+          "type": "string",
+          "description": "MFA code."
+        }
+      },
+      "description": "Request to change MFA."
+    },
+    "consoleAuthenticateMFASetupResponse": {
+      "type": "object",
+      "properties": {
+        "recovery_codes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "An one-time code to configure the MFA mechanism"
+        }
+      },
+      "description": "Response to change MFA."
+    },
     "consoleAuthenticateRequest": {
       "type": "object",
       "properties": {
@@ -3347,6 +3643,10 @@
         "password": {
           "type": "string",
           "description": "The password of the user."
+        },
+        "mfa": {
+          "type": "string",
+          "description": "Multi-factor authentication code."
         }
       },
       "description": "Authenticate a console user with username and password."
@@ -3391,6 +3691,10 @@
         "token": {
           "type": "string",
           "description": "A session token (JWT) for the console user."
+        },
+        "mfa_code": {
+          "type": "string",
+          "description": "MFA code required to setup the MFA mechanism."
         }
       },
       "description": "A console user session."
@@ -3622,7 +3926,7 @@
           "type": "array",
           "items": {
             "type": "object",
-            "$ref": "#/definitions/apiStorageObject"
+            "$ref": "#/definitions/consoleStorageListObject"
           },
           "description": "List of storage objects matching list/filter operation."
         },
@@ -3637,6 +3941,48 @@
         }
       },
       "description": "List of storage objects."
+    },
+    "consoleStorageListObject": {
+      "type": "object",
+      "properties": {
+        "collection": {
+          "type": "string",
+          "description": "The collection which stores the object."
+        },
+        "key": {
+          "type": "string",
+          "description": "The key of the object within the collection."
+        },
+        "user_id": {
+          "type": "string",
+          "description": "The user owner of the object."
+        },
+        "version": {
+          "type": "string",
+          "description": "The version hash of the object."
+        },
+        "permission_read": {
+          "type": "integer",
+          "format": "int32",
+          "description": "The read access permissions for the object."
+        },
+        "permission_write": {
+          "type": "integer",
+          "format": "int32",
+          "description": "The write access permissions for the object."
+        },
+        "create_time": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The UNIX time (for gRPC clients) or ISO string (for REST clients) when the object was created."
+        },
+        "update_time": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The UNIX time (for gRPC clients) or ISO string (for REST clients) when the object was last updated."
+        }
+      },
+      "description": "An object within the storage engine."
     },
     "consoleUserList": {
       "type": "object",
@@ -3666,6 +4012,14 @@
         "role": {
           "$ref": "#/definitions/consoleUserRole",
           "title": "Role of the user;"
+        },
+        "mfa_required": {
+          "type": "boolean",
+          "description": "Whether the user is required to setup MFA."
+        },
+        "mfa_enabled": {
+          "type": "boolean",
+          "description": "Whether the user has MFA enabled."
         }
       },
       "title": "A console user"
@@ -3827,6 +4181,42 @@
       },
       "description": "Represents a realtime match."
     },
+    "nakamaapiNotification": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "ID of the Notification."
+        },
+        "subject": {
+          "type": "string",
+          "description": "Subject of the notification."
+        },
+        "content": {
+          "type": "string",
+          "description": "Content of the notification in JSON."
+        },
+        "code": {
+          "type": "integer",
+          "format": "int32",
+          "description": "Category code for this notification."
+        },
+        "sender_id": {
+          "type": "string",
+          "description": "ID of the sender, if a user. Otherwise 'null'."
+        },
+        "create_time": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The UNIX time (for gRPC clients) or ISO string (for REST clients) when the notification was created."
+        },
+        "persistent": {
+          "type": "boolean",
+          "description": "True if this notification was persisted to the database."
+        }
+      },
+      "description": "A notification in the server."
+    },
     "nakamaapiUser": {
       "type": "object",
       "properties": {
@@ -3944,7 +4334,7 @@
           "description": "Next cursor."
         }
       },
-      "title": "A list of groups"
+      "description": "A list of groups."
     },
     "nakamaconsoleLeaderboard": {
       "type": "object",
@@ -4090,6 +4480,66 @@
       },
       "description": "A list of realtime matches, with their node names."
     },
+    "nakamaconsoleNotification": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "ID of the Notification."
+        },
+        "subject": {
+          "type": "string",
+          "description": "Subject of the notification."
+        },
+        "content": {
+          "type": "string",
+          "description": "Content of the notification in JSON."
+        },
+        "code": {
+          "type": "integer",
+          "format": "int32",
+          "description": "Category code for this notification."
+        },
+        "sender_id": {
+          "type": "string",
+          "description": "ID of the sender, if a user. Otherwise 'null'."
+        },
+        "create_time": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The UNIX time (for gRPC clients) or ISO string (for REST clients) when the notification was created."
+        },
+        "persistent": {
+          "type": "boolean",
+          "description": "True if this notification was persisted to the database."
+        },
+        "user_id": {
+          "type": "string",
+          "description": "User id."
+        }
+      }
+    },
+    "nakamaconsoleNotificationList": {
+      "type": "object",
+      "properties": {
+        "notifications": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/nakamaconsoleNotification"
+          },
+          "description": "List of notifications."
+        },
+        "next_cursor": {
+          "type": "string",
+          "description": "Next page cursor if any."
+        },
+        "prev_cursor": {
+          "type": "string",
+          "description": "Previous page cursor if any."
+        }
+      }
+    },
     "protobufAny": {
       "type": "object",
       "properties": {
@@ -4131,7 +4581,9 @@
       "type": "basic"
     },
     "BearerJwt": {
-      "type": ""
+      "type": "apiKey",
+      "name": "Authorization",
+      "in": "header"
     }
   },
   "security": [

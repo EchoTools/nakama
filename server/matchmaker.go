@@ -17,12 +17,14 @@ package server
 import (
 	"context"
 	"fmt"
+	"google.golang.org/protobuf/types/known/timestamppb"
 	"sync"
 	"time"
 
 	"github.com/blugelabs/bluge"
 	"github.com/gofrs/uuid/v5"
-	jwt "github.com/golang-jwt/jwt/v4"
+	"github.com/golang-jwt/jwt/v4"
+	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"go.uber.org/atomic"
@@ -68,6 +70,7 @@ type MatchmakerEntry struct {
 	Presence   *MatchmakerPresence    `json:"presence"`
 	Properties map[string]interface{} `json:"properties"`
 	PartyId    string                 `json:"party_id"`
+	CreateTime int64                  `json:"create_time"`
 
 	StringProperties  map[string]string  `json:"-"`
 	NumericProperties map[string]float64 `json:"-"`
@@ -172,6 +175,7 @@ type Matchmaker interface {
 	Resume()
 	Stop()
 	OnMatchedEntries(fn func(entries [][]*MatchmakerEntry))
+	OnStatsUpdate(fn func(stats *api.MatchmakerStats))
 	Add(ctx context.Context, presences []*MatchmakerPresence, sessionID, partyId, query string, minCount, maxCount, countMultiple int, stringProperties map[string]string, numericProperties map[string]float64) (string, int64, error)
 	Insert(extracts []*MatchmakerExtract) error
 	Extract() []*MatchmakerExtract
@@ -181,6 +185,54 @@ type Matchmaker interface {
 	RemovePartyAll(partyID string) error
 	RemoveAll(node string)
 	Remove(tickets []string)
+	GetStats() *api.MatchmakerStats
+	SetStats(*api.MatchmakerStats)
+}
+
+type MatchmakerStatsEntry struct {
+	CreatedAt   int64 // Unix nanoseconds.
+	CompletedAt int64 // Unix nanoseconds.
+}
+
+type FifoQueue[T any] interface {
+	Insert(T)
+	Clone() []T
+}
+
+type Buffer[T any] struct {
+	mutex  sync.RWMutex
+	values []*T
+}
+
+func NewBuffer(size int) *Buffer[MatchmakerStatsEntry] {
+	return &Buffer[MatchmakerStatsEntry]{
+		mutex:  sync.RWMutex{},
+		values: make([]*MatchmakerStatsEntry, 0, size),
+	}
+}
+
+func (q *Buffer[T]) Insert(v T) {
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
+	if len(q.values) < cap(q.values) {
+		q.values = append(q.values, &v)
+		return
+	}
+	// We've reached capacity, remove older entry and insert new one
+	for i := 0; i < len(q.values)-1; i++ {
+		q.values[i] = q.values[i+1]
+	}
+	q.values[len(q.values)-1] = &v
+}
+
+func (q *Buffer[T]) Clone() []T {
+	q.mutex.RLock()
+	defer q.mutex.RUnlock()
+	out := make([]T, len(q.values))
+	for i, v := range q.values {
+		out[i] = *v
+	}
+	return out
 }
 
 type LocalMatchmaker struct {
@@ -198,7 +250,13 @@ type LocalMatchmaker struct {
 	ctxCancelFn context.CancelFunc
 
 	matchedEntriesFn func([][]*MatchmakerEntry)
-	indexWriter      *bluge.Writer
+	statsUpdateFn    func(*api.MatchmakerStats)
+
+	indexWriter *bluge.Writer
+	// Running tally of matchmaker stats.
+	statsCompletions FifoQueue[MatchmakerStatsEntry]
+	// Stats snapshot.
+	statsSnapshot *atomic.Pointer[api.MatchmakerStats]
 	// All tickets for a session ID.
 	sessionTickets map[string]map[string]struct{}
 	// All tickets for a party ID.
@@ -234,12 +292,14 @@ func NewLocalMatchmaker(logger, startupLogger *zap.Logger, config Config, router
 		ctx:         ctx,
 		ctxCancelFn: ctxCancelFn,
 
-		indexWriter:    indexWriter,
-		sessionTickets: make(map[string]map[string]struct{}),
-		partyTickets:   make(map[string]map[string]struct{}),
-		indexes:        make(map[string]*MatchmakerIndex),
-		activeIndexes:  make(map[string]*MatchmakerIndex),
-		revCache:       &MapOf[string, map[string]bool]{},
+		indexWriter:      indexWriter,
+		statsCompletions: NewBuffer(10), // Only keep 10 samples in memory.
+		statsSnapshot:    atomic.NewPointer[api.MatchmakerStats](&api.MatchmakerStats{}),
+		sessionTickets:   make(map[string]map[string]struct{}),
+		partyTickets:     make(map[string]map[string]struct{}),
+		indexes:          make(map[string]*MatchmakerIndex),
+		activeIndexes:    make(map[string]*MatchmakerIndex),
+		revCache:         &MapOf[string, map[string]bool]{},
 	}
 
 	if revThreshold := m.config.GetMatchmaker().RevThreshold; revThreshold > 0 && m.config.GetMatchmaker().RevPrecision {
@@ -295,6 +355,10 @@ func (m *LocalMatchmaker) OnMatchedEntries(fn func(entries [][]*MatchmakerEntry)
 	m.matchedEntriesFn = fn
 }
 
+func (m *LocalMatchmaker) OnStatsUpdate(fn func(*api.MatchmakerStats)) {
+	m.statsUpdateFn = fn
+}
+
 func (m *LocalMatchmaker) Process() {
 	startTime := time.Now()
 	var activeIndexCount, indexCount int
@@ -307,19 +371,48 @@ func (m *LocalMatchmaker) Process() {
 	activeIndexCount = len(m.activeIndexes)
 	indexCount = len(m.indexes)
 
-	// No active matchmaking tickets, the pool may be non-empty but there are no new tickets to check/query with.
-	if activeIndexCount == 0 {
-		m.Unlock()
-		return
-	}
-
 	activeIndexesCopy := make(map[string]*MatchmakerIndex, activeIndexCount)
 	for ticket, activeIndex := range m.activeIndexes {
 		activeIndexesCopy[ticket] = activeIndex
 	}
+	var oldestTicketCreatedAt int64
 	indexesCopy := make(map[string]*MatchmakerIndex, indexCount)
 	for ticket, index := range m.indexes {
 		indexesCopy[ticket] = index
+		if oldestTicketCreatedAt == 0 || index.CreatedAt < oldestTicketCreatedAt {
+			oldestTicketCreatedAt = index.CreatedAt
+		}
+	}
+
+	defer func() {
+		completions := m.statsCompletions.Clone()
+
+		compStats := make([]*api.MatchmakerCompletionStats, 0, len(completions))
+		for _, c := range completions {
+			stats := &api.MatchmakerCompletionStats{
+				CreateTime:   timestamppb.New(time.Unix(0, c.CreatedAt)),
+				CompleteTime: timestamppb.New(time.Unix(0, c.CompletedAt)),
+			}
+			compStats = append(compStats, stats)
+		}
+
+		stats := &api.MatchmakerStats{
+			TicketCount: int32(indexCount),
+			Completions: compStats,
+		}
+		if oldestTicketCreatedAt != 0 {
+			stats.OldestTicketCreateTime = timestamppb.New(time.Unix(0, oldestTicketCreatedAt))
+		}
+		m.statsSnapshot.Store(stats)
+		if m.statsUpdateFn != nil {
+			m.statsUpdateFn(stats)
+		}
+	}()
+
+	// No active matchmaking tickets, the pool may be non-empty but there are no new tickets to check/query with.
+	if activeIndexCount == 0 {
+		m.Unlock()
+		return
 	}
 
 	m.Unlock()
@@ -390,8 +483,9 @@ func (m *LocalMatchmaker) Process() {
 	if matchedEntriesCount := len(matchedEntries); matchedEntriesCount > 0 {
 		wg := &sync.WaitGroup{}
 		wg.Add(matchedEntriesCount)
+		ts := time.Now().UnixNano()
 		for _, entries := range matchedEntries {
-			go func(entries []*MatchmakerEntry) {
+			go func(entries []*MatchmakerEntry, ts int64) {
 				var tokenOrMatchID string
 				var isMatchID bool
 				var err error
@@ -440,15 +534,23 @@ func (m *LocalMatchmaker) Process() {
 				}
 
 				for i, entry := range entries {
+					statsEntry := MatchmakerStatsEntry{
+						CreatedAt:   entry.CreateTime,
+						CompletedAt: ts,
+					}
+					m.statsCompletions.Insert(statsEntry)
+
 					// Set per-recipient fields.
 					outgoing.GetMatchmakerMatched().Self = users[i]
 					outgoing.GetMatchmakerMatched().Ticket = entry.Ticket
 					// Route outgoing message.
 					m.router.SendToPresenceIDs(m.logger, []*PresenceID{{Node: entry.Presence.Node, SessionID: entry.Presence.SessionID}}, outgoing, true)
 				}
+
 				wg.Done()
-			}(entries)
+			}(entries, ts)
 		}
+
 		wg.Wait()
 		if m.matchedEntriesFn != nil {
 			go m.matchedEntriesFn(matchedEntries)
@@ -557,6 +659,7 @@ func (m *LocalMatchmaker) Add(ctx context.Context, presences []*MatchmakerPresen
 			m.sessionTickets[presence.SessionId] = map[string]struct{}{ticket: {}}
 		}
 		index.Entries = append(index.Entries, &MatchmakerEntry{
+			CreateTime:        createdAt,
 			Ticket:            ticket,
 			Presence:          presence,
 			Properties:        properties,
@@ -656,6 +759,7 @@ func (m *LocalMatchmaker) Insert(extracts []*MatchmakerExtract) error {
 				Presence:          presence,
 				Properties:        properties,
 				PartyId:           extract.PartyId,
+				CreateTime:        extract.CreatedAt,
 				StringProperties:  extract.StringProperties,
 				NumericProperties: extract.NumericProperties,
 			})
@@ -1039,6 +1143,17 @@ func (m *LocalMatchmaker) Remove(tickets []string) {
 	}
 }
 
+func (m *LocalMatchmaker) GetStats() *api.MatchmakerStats {
+	return m.statsSnapshot.Load()
+}
+
+func (m *LocalMatchmaker) SetStats(stats *api.MatchmakerStats) {
+	if stats == nil {
+		return
+	}
+	m.statsSnapshot.Store(stats)
+}
+
 func MapMatchmakerIndex(id string, in *MatchmakerIndex) (*bluge.Document, error) {
 	rv := bluge.NewDocument(id)
 
@@ -1049,7 +1164,7 @@ func MapMatchmakerIndex(id string, in *MatchmakerIndex) (*bluge.Document, error)
 	rv.AddField(bluge.NewNumericField("created_at", float64(in.CreatedAt)).StoreValue())
 
 	if in.Properties != nil {
-		BlugeWalkDocument(in.Properties, []string{"properties"}, rv)
+		BlugeWalkDocument(in.Properties, []string{"properties"}, map[string]bool{}, rv)
 	}
 
 	return rv, nil

@@ -31,13 +31,14 @@ import {NgbNavChangeEvent} from '@ng-bootstrap/ng-bootstrap';
 import {SegmentService} from 'ngx-segment-analytics';
 import {ConsoleService, UserRole} from '../console.service';
 import {Globals} from '../globals';
-import {environment} from "../../environments/environment";
+import {environment} from '../../environments/environment';
 
 @Component({
   templateUrl: './base.component.html',
   styleUrls: ['./base.component.scss'],
 })
 export class BaseComponent implements OnInit, OnDestroy {
+  protected readonly UserRole = UserRole;
   private routerSub: Subscription;
   private segmentRouterSub: Subscription;
   public loading = true;
@@ -53,6 +54,9 @@ export class BaseComponent implements OnInit, OnDestroy {
     {navItem: 'storage', routerLink: ['/storage'], label: 'Storage', minRole: UserRole.USER_ROLE_READONLY, icon: 'storage'},
     {navItem: 'leaderboards', routerLink: ['/leaderboards'], label: 'Leaderboards', minRole: UserRole.USER_ROLE_READONLY, icon: 'leaderboard'},
     {navItem: 'chat', routerLink: ['/chat'], label: 'Chat Messages', minRole: UserRole.USER_ROLE_READONLY, icon: 'chat'},
+    {navItem: 'notifications', routerLink: ['/notifications'], label: 'Notifications', minRole: UserRole.USER_ROLE_READONLY, icon: 'notification'},
+    {navItem: 'purchases', routerLink: ['/purchases'], label: 'Purchases', minRole: UserRole.USER_ROLE_READONLY, icon: 'purchases'},
+    {navItem: 'subscriptions', routerLink: ['/subscriptions'], label: 'Subscriptions', minRole: UserRole.USER_ROLE_READONLY, icon: 'subscriptions'},
     {navItem: 'matches', routerLink: ['/matches'], label: 'Matches', minRole: UserRole.USER_ROLE_READONLY, icon: 'running-matches'},
     {navItem: 'apiexplorer', routerLink: ['/apiexplorer'], label: 'API Explorer', minRole: UserRole.USER_ROLE_DEVELOPER, icon: 'api-explorer'},
   ];
@@ -61,7 +65,6 @@ export class BaseComponent implements OnInit, OnDestroy {
     private readonly route: ActivatedRoute,
     private readonly router: Router,
     private segment: SegmentService,
-    private readonly consoleService: ConsoleService,
     private readonly authService: AuthenticationService,
   ) {
     this.loading = false;
@@ -112,6 +115,10 @@ export class BaseComponent implements OnInit, OnDestroy {
 
   getUsername(): string {
     return this.authService.username;
+  }
+
+  isMfaEnabled(): boolean {
+    return !this.authService.session?.mfa_code;
   }
 
   logout(): void {
