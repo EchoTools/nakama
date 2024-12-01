@@ -200,7 +200,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 	var lobbyGroupName string
 	var partyID uuid.UUID
 
-	if userSettings.LobbyGroupName != uuid.Nil.String() {
+	if userSettings.LobbyGroupName != "" {
 		lobbyGroupName = userSettings.LobbyGroupName
 		partyID = uuid.NewV5(uuid.Nil, lobbyGroupName)
 	}
