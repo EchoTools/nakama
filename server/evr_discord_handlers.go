@@ -456,12 +456,11 @@ func AllocateGameServer(ctx context.Context, logger runtime.Logger, nk runtime.N
 	// Find the first available game server
 	var label *MatchLabel
 	for _, l := range labels {
-		if l.LobbyType == UnassignedLobby {
-			label = l
-			break
+		if l.LobbyType != UnassignedLobby {
+			continue
 		}
 
-		label, err = LobbyPrepareSession(ctx, nk, label.ID, settings)
+		label, err = LobbyPrepareSession(ctx, nk, l.ID, settings)
 		if err != nil {
 			logger.WithFields(map[string]interface{}{
 				"mid": label.ID.UUID.String(),
@@ -469,6 +468,9 @@ func AllocateGameServer(ctx context.Context, logger runtime.Logger, nk runtime.N
 			}).Warn("Failed to prepare session")
 			continue
 		}
+
+		return label, nil
 	}
-	return label, nil
+
+	return nil, ErrMatchmakingNoAvailableServers
 }
