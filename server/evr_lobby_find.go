@@ -335,7 +335,6 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 			return rtts[a.State.Broadcaster.Endpoint.GetExternalIP()] - rtts[b.State.Broadcaster.Endpoint.GetExternalIP()]
 		})
 
-		partySize := lobbyParams.GetPartySize()
 		var selected *MatchLabel
 
 		team := evr.TeamBlue
@@ -355,7 +354,7 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 			}
 
 			// Check if the match is full
-			if l.OpenPlayerSlots() < partySize {
+			if l.OpenPlayerSlots() < len(entrants) {
 				continue
 			}
 
@@ -377,7 +376,7 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 			if n, err := l.OpenSlotsByRole(team); err != nil {
 				logger.Warn("Failed to get open slots by role", zap.Error(err))
 				continue
-			} else if n < partySize {
+			} else if n < len(entrants) {
 				continue
 			}
 
