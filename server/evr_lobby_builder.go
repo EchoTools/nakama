@@ -245,7 +245,7 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 	// gameServers := b.rankEndpointsByServerScore(entrants)
 	gameServers := b.rankEndpointsByAverageLatency(entrants)
 
-	modestr, ok := entrants[0].StringProperties["mode"]
+	modestr, ok := entrants[0].StringProperties["game_mode"]
 	if !ok {
 		return fmt.Errorf("missing mode property")
 	}
