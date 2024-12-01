@@ -288,18 +288,33 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 
 	successful := make([]*EvrMatchPresence, 0, len(entrants))
 	errored := make([]*EvrMatchPresence, 0, len(entrants))
+	wg := &sync.WaitGroup{}
+	wg.Add(len(entrantPresences))
+
+	mu := sync.Mutex{}
 
 	for i, p := range entrantPresences {
+		go func(session Session, p *EvrMatchPresence) {
+			defer wg.Done()
+			if p == nil {
+				return
+			}
 
-		if err := LobbyJoinEntrants(logger, b.matchRegistry, b.tracker, sessions[i], serverSession, label, p); err != nil {
-			logger.Error("Failed to join entrant to match", zap.String("mid", label.ID.UUID.String()), zap.String("uid", p.GetUserId()), zap.Error(err))
-			errored = append(errored, p)
-			continue
-		}
+			if err := LobbyJoinEntrants(logger, b.matchRegistry, b.tracker, session, serverSession, label, p); err != nil {
+				logger.Error("Failed to join entrant to match", zap.String("mid", label.ID.UUID.String()), zap.String("uid", p.GetUserId()), zap.Error(err))
+				mu.Lock()
+				errored = append(errored, p)
+				mu.Unlock()
+				return
+			}
 
-		successful = append(successful, p)
+			mu.Lock()
+			successful = append(successful, p)
+			mu.Unlock()
+		}(sessions[i], p)
 	}
 
+	wg.Wait()
 	tags := map[string]string{
 		"mode":    label.Mode.String(),
 		"level":   label.Level.String(),
