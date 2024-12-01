@@ -1086,11 +1086,12 @@ func AuthenticatePasswordRPC(ctx context.Context, logger runtime.Logger, db *sql
 
 	var err error
 	var userID, username, tokenID string
+	var tokenIssuedAt int64 = time.Now().UTC().Unix()
 	var vars map[string]string
 
 	if request.RefreshToken != "" {
 		var userUUID uuid.UUID
-		userUUID, username, vars, tokenID, err = SessionRefresh(ctx, nk.logger, db, nk.config, nk.sessionCache, request.RefreshToken)
+		userUUID, username, vars, tokenID, tokenIssuedAt, err = SessionRefresh(ctx, nk.logger, db, nk.config, nk.sessionCache, request.RefreshToken)
 		if err != nil {
 			return "", err
 		}
@@ -1145,8 +1146,8 @@ func AuthenticatePasswordRPC(ctx context.Context, logger runtime.Logger, db *sql
 		vars["memberships"] = string(data)
 	}
 
-	token, exp := generateToken(nk.config, tokenID, userID, username, vars)
-	refreshToken, refreshExp := generateRefreshToken(nk.config, tokenID, userID, username, vars)
+	token, exp := generateToken(nk.config, tokenID, tokenIssuedAt, userID, username, vars)
+	refreshToken, refreshExp := generateRefreshToken(nk.config, tokenID, tokenIssuedAt, userID, username, vars)
 	nk.sessionCache.Add(uuid.FromStringOrNil(userID), exp, tokenID, refreshExp, tokenID)
 	session := &api.Session{Token: token, RefreshToken: refreshToken}
 
