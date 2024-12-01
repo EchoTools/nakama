@@ -310,12 +310,13 @@ func ListMatchStates(ctx context.Context, nk runtime.NakamaModule, query string)
 }
 
 type MatchStateTags struct {
-	Type     string
-	Mode     string
-	Level    string
-	Operator string
-	Region   string
-	Group    string
+	Type             string
+	Mode             string
+	Level            string
+	OperatorID       string
+	OperatorUsername string
+	Region           string
+	Group            string
 }
 
 func (t MatchStateTags) AsMap() map[string]string {
@@ -344,6 +345,8 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 		case <-ticker.C:
 		}
 
+		operatorUsernames := make(map[string]string)
+
 		// Get the match states
 		matchStates, err := ListMatchStates(ctx, nk, "")
 		if err != nil {
@@ -357,18 +360,29 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 				groupID = &uuid.Nil
 			}
 
+			operatorUsername, ok := operatorUsernames[state.State.Broadcaster.OperatorID]
+			if !ok {
+				account, err := nk.AccountGetId(ctx, state.State.Broadcaster.OperatorID)
+				if err != nil {
+					logger.Error("Error getting account: %v", err)
+					continue
+				}
+				operatorUsername = account.User.Username
+			}
+
 			region := "default"
 			if len(state.State.Broadcaster.Regions) > 0 {
 				region = state.State.Broadcaster.Regions[0].String()
 			}
 
 			stateTags := MatchStateTags{
-				Type:     state.State.LobbyType.String(),
-				Mode:     state.State.Mode.String(),
-				Level:    state.State.Level.String(),
-				Operator: state.State.Broadcaster.OperatorID,
-				Region:   region,
-				Group:    groupID.String(),
+				Type:             state.State.LobbyType.String(),
+				Mode:             state.State.Mode.String(),
+				Level:            state.State.Level.String(),
+				OperatorID:       state.State.Broadcaster.OperatorID,
+				OperatorUsername: operatorUsername,
+				Region:           region,
+				Group:            groupID.String(),
 			}
 
 			playercounts[stateTags] = append(playercounts[stateTags], len(state.State.Players))
