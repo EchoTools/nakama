@@ -912,7 +912,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			symbol := evr.ToSymbol(token)
 			bytes := binary.LittleEndian.AppendUint64([]byte{}, uint64(symbol))
 
-			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
 					Flags: discordgo.MessageFlagsEphemeral,
@@ -1024,7 +1024,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return nk.UnlinkDevice(ctx, userID, deviceId)
 
 			}(); err != nil {
-				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 					Type: discordgo.InteractionResponseChannelMessageWithSource,
 					Data: &discordgo.InteractionResponseData{
 						Flags:   discordgo.MessageFlagsEphemeral,
@@ -1036,14 +1036,13 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			go d.cache.SyncGuildGroupMember(ctx, userID, d.cache.GuildIDToGroupID(member.GuildID))
 
 			// Send the response
-			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
 					Flags:   discordgo.MessageFlagsEphemeral,
 					Content: content,
 				},
 			})
-			return nil
 		},
 		"check-broadcaster": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 
@@ -1479,7 +1478,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 			includePrivate := true
 
-			return d.handleProfileRequest(ctx, logger, nk, s, i, user.ID, user.Username, "", includePrivate, withDetail)
+			err := d.handleProfileRequest(ctx, logger, nk, s, i, user.ID, user.Username, "", includePrivate, withDetail)
+			logger.Debug("whoami", zap.String("discord_id", user.ID), zap.String("discord_username", user.Username), zap.Error(err))
+			return err
 		},
 
 		"set-lobby": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userIDStr string, groupID string) error {
@@ -2691,7 +2692,7 @@ func (d *DiscordAppBot) sendPartyInvite(ctx context.Context, s *discordgo.Sessio
 	partyID := uuid.Must(uuid.NewV4())
 	inviteeSessionID := uuid.Must(uuid.NewV4())
 	// Send ephemeral message to inviter
-	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Flags:   discordgo.MessageFlagsEphemeral,
@@ -2709,7 +2710,9 @@ func (d *DiscordAppBot) sendPartyInvite(ctx context.Context, s *discordgo.Sessio
 				},
 			},
 		},
-	})
+	}); err != nil {
+		return fmt.Errorf("failed to send interaction response: %w", err)
+	}
 
 	// Send invite message to invitee
 	channel, err := s.UserChannelCreate(invitee.ID)
