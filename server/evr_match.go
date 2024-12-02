@@ -283,7 +283,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 			i--
 		}
 
-		// Remove any duplicate reservations
+		// Remove any existing reservations for this player.
 		if _, found := state.reservationMap[s]; found {
 			delete(state.reservationMap, s)
 			state.rebuildCache()
@@ -297,17 +297,15 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		}
 	}
 
-	// If any entrants with the same EvrID are already in the match, reject the player
-	for _, p := range state.presenceMap {
+	// Check both the match's presence and reservation map for a duplicate join with the same EvrID
+	for _, p := range meta.Presences() {
 
-		// If the player is already in the match, reject the player
-		if p.EvrID.Equals(meta.Presence.EvrID) {
-			return state, false, ErrJoinRejectDuplicateEvrID.Error()
-		}
-
-		// If a reservation with the same EvrID is already in the match, reject the player
-		for _, r := range meta.Reservations {
-			if r.EvrID.Equals(p.EvrID) {
+		for _, e := range state.presenceMap {
+			if e.EvrID.Equals(p.EvrID) {
+				logger.WithFields(map[string]interface{}{
+					"evr_id": p.EvrID,
+					"uid":    p.GetUserId(),
+				}).Error("Duplicate EVR-ID join attempt.")
 				return state, false, ErrJoinRejectDuplicateEvrID.Error()
 			}
 		}
@@ -404,6 +402,7 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 	}
 
 	for _, p := range presences {
+		// Game servers don't get added to the presence map.
 		if p.GetSessionId() == state.Broadcaster.SessionID {
 			continue
 		}
@@ -445,10 +444,7 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 		}
 	}
 
-	for _, p := range presences {
-		delete(state.reservationMap, p.GetSessionId())
-	}
-
+	//m.updateLabel(dispatcher, state)
 	return state
 }
 
