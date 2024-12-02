@@ -106,14 +106,15 @@ func (c *DiscordCache) Start() {
 
 			case <-cleanupTicker.C:
 				// Cleanup the queue limiters.
+				count := 0
 				c.queueLimiters.Range(func(k QueueEntry, v *rate.Limiter) bool {
 					if v.Tokens() >= float64(v.Burst()) {
-						logger.Debug("Removing queue limiter", zap.Any("entry", k))
-
+						count++
 						c.queueLimiters.Delete(k)
 					}
 					return true
 				})
+				logger.Debug("Removing queue limiters", zap.Int("count", count))
 			}
 		}
 	}()

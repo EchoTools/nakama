@@ -102,7 +102,7 @@ func MatchListPublicRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 
 	for _, group := range groups {
 		groupID := group.GetId()
-		presences, err := nk.StreamUserList(StreamModeMatchmaking, groupID, "", "", true, true)
+		presences, err := nk.StreamUserList(StreamModeMatchmaking, groupID, "", "", false, true)
 		if err != nil {
 			return "", runtime.NewError("Failed to list matchmaker tickets", StatusInternalError)
 		}
@@ -110,7 +110,11 @@ func MatchListPublicRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		for _, presence := range presences {
 			s := LobbySessionParameters{}
 			if err := json.Unmarshal([]byte(presence.GetStatus()), &s); err != nil {
-				return "", runtime.NewError(fmt.Sprintf("Failed to unmarshal lobby session parameters: %s", err.Error()), StatusInternalError)
+				logger.WithFields(map[string]interface{}{
+					"error":  err.Error(),
+					"status": presence.GetStatus(),
+				}).Warn("Failed to unmarshal lobby session parameters")
+				continue
 			}
 			matchmakingTicketsByGroupID[groupID][s.Mode.String()] += s.GetPartySize()
 		}
