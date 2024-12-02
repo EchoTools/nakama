@@ -87,6 +87,7 @@ func JoinPartyGroup(session *sessionWS, groupName string, partyID uuid.UUID, cur
 			// Other meta fields not needed.
 		},
 	}
+
 	presenceMeta := PresenceMeta{
 		Format:   session.Format(),
 		Username: session.Username(),
