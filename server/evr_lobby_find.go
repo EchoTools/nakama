@@ -75,11 +75,21 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		}
 
 		if !isLeader {
-			return p.PartyFollow(ctx, logger, session, lobbyParams, lobbyGroup)
+			// Skip following the party leader if the member is not in a match (and going to a social lobby)
+			if lobbyParams.Mode != evr.ModeSocialPublic || !lobbyParams.CurrentMatchID.IsNil() {
+				return p.PartyFollow(ctx, logger, session, lobbyParams, lobbyGroup)
+			}
+		} else {
+
+			for _, memberSessionIDs := range memberSessionIDs {
+
+				if memberSessionIDs == session.id {
+					continue
+				}
+
+				entrantSessionIDs = append(entrantSessionIDs, memberSessionIDs)
+			}
 		}
-
-		entrantSessionIDs = append(entrantSessionIDs, memberSessionIDs...)
-
 	}
 
 	// Construct the entrant presences for the party members.
@@ -88,6 +98,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		return fmt.Errorf("failed to be party leader.: %w", err)
 	}
 
+	// Ping for matches, not social lobbies.
 	if lobbyParams.Mode != evr.ModeSocialPublic {
 		// Check latency to active game servers.
 		if err := p.CheckServerPing(ctx, logger, session); err != nil {
@@ -115,18 +126,38 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 	}
 	logger.Debug("Joined party group", zap.String("partyID", lobbyGroup.IDStr()))
 
-	// If this is a party, the party leader will wait for the other members to start matchmaking.
-	if isLeader && lobbyGroup.Size() > 1 {
-		select {
-		case <-ctx.Done():
-			return nil, nil, false, ctx.Err()
-		case <-time.After(10 * time.Second):
-		}
-	}
+	// If this is the leader, then set the presence status to the current match ID.
+	if isLeader {
 
-	// Remove any players not matchmaking.
-	if err := p.pruneInactivePartyMembers(ctx, logger, session, lobbyParams, lobbyGroup); err != nil {
-		return nil, nil, false, fmt.Errorf("failed to prune inactive party members: %w", err)
+		// If there are more than one player in the party, wait for the other players to start matchmaking.
+		if lobbyGroup.Size() > 1 {
+			select {
+			case <-ctx.Done():
+				return nil, nil, false, ctx.Err()
+			case <-time.After(10 * time.Second):
+			}
+		}
+		stream := lobbyParams.MatchmakingStream()
+
+		for _, member := range lobbyGroup.List() {
+			if member.Presence.GetSessionId() == session.id.String() {
+				continue
+			}
+
+			meta, err := p.runtimeModule.StreamUserGet(stream.Mode, stream.Subject.String(), stream.Subcontext.String(), stream.Label, member.Presence.GetUserId(), member.Presence.GetSessionId())
+			if err != nil {
+				return nil, nil, false, fmt.Errorf("failed to get party stream: %w", err)
+			} else if meta == nil {
+				logger.Warn("Party member is not following the leader", zap.String("uid", member.Presence.GetUserId()), zap.String("sid", member.Presence.GetSessionId()), zap.String("leader_sid", session.id.String()))
+				if err := p.runtimeModule.StreamUserKick(stream.Mode, stream.Subject.String(), stream.Subcontext.String(), stream.Label, member.Presence); err != nil {
+					return nil, nil, false, fmt.Errorf("failed to kick party member: %w", err)
+				}
+			}
+		}
+
+		logger.Debug("Party of players is ready to start matchmaking", zap.String("leader", session.id.String()), zap.Int("size", lobbyGroup.Size()))
+		lobbyParams.SetPartySize(len(lobbyGroup.List()))
+
 	}
 
 	memberSessionIDs := []uuid.UUID{session.id}
@@ -466,28 +497,6 @@ func (p *EvrPipeline) CheckServerPing(ctx context.Context, logger *zap.Logger, s
 	return err
 }
 
-func (p *EvrPipeline) pruneInactivePartyMembers(ctx context.Context, logger *zap.Logger, session *sessionWS, params *LobbySessionParameters, lobbyGroup *LobbyGroup) error {
-
-	// Remove any players not matchmaking.
-	for _, member := range lobbyGroup.List() {
-		if member.Presence.GetSessionId() == session.id.String() {
-			continue
-		}
-
-		sessionID := uuid.FromStringOrNil(member.Presence.GetSessionId())
-		userID := uuid.FromStringOrNil(member.Presence.GetUserId())
-		if session.tracker.GetLocalBySessionIDStreamUserID(sessionID, params.MatchmakingStream(), userID) == nil {
-			// Kick the player from the party.
-			logger.Debug("Kicking player from party, because they are not matchmaking.", zap.String("uid", member.Presence.GetUserId()))
-			session.tracker.UntrackLocalByModes(sessionID, map[uint8]struct{}{StreamModeParty: {}}, PresenceStream{})
-		}
-	}
-
-	params.SetPartySize(len(lobbyGroup.List()))
-
-	return nil
-}
-
 func PrepareEntrantPresences(ctx context.Context, logger *zap.Logger, session *sessionWS, params *LobbySessionParameters, sessionIDs ...uuid.UUID) ([]*EvrMatchPresence, error) {
 
 	entrantPresences := make([]*EvrMatchPresence, 0, len(sessionIDs))
@@ -524,6 +533,7 @@ func (p *EvrPipeline) PartyFollow(ctx context.Context, logger *zap.Logger, sessi
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(3 * time.Second):
+			// Time for the party leader to join a match.
 		}
 		leader := lobbyGroup.GetLeader()
 		if leader == nil {
@@ -543,16 +553,16 @@ func (p *EvrPipeline) PartyFollow(ctx context.Context, logger *zap.Logger, sessi
 			Label:   StreamLabelMatchService,
 		}
 
-		// Check if the party leader is still in a lobby/match.
-		presence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, stream, leaderUserID)
-		if presence == nil {
-			return NewLobbyError(BadRequest, fmt.Sprintf("party leader `%s` left the party", leader.UserId))
-		}
-
 		// Check if the leader is still matchmaking. If so, continue waiting.
 		if p := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, params.MatchmakingStream(), leaderUserID); p != nil {
 			// Leader is still matchmaking.
 			continue
+		}
+
+		// Check if the party leader is still in a lobby/match.
+		presence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, stream, leaderUserID)
+		if presence == nil {
+			return NewLobbyError(BadRequest, fmt.Sprintf("party leader `%s` is no longer in a match.", leader.UserId))
 		}
 
 		// Check if the party leader is in a match.
@@ -598,7 +608,7 @@ func (p *EvrPipeline) PartyFollow(ctx context.Context, logger *zap.Logger, sessi
 
 			switch label.Mode {
 
-			case evr.ModeSocialPublic, evr.ModeCombatPublic, evr.ModeArenaPublic:
+			case evr.ModeSocialPrivate, evr.ModeSocialPublic, evr.ModeCombatPublic, evr.ModeArenaPublic:
 				// Join the leader's match.
 				logger.Debug("Joining leader's lobby", zap.String("mid", leaderMatchID.String()))
 
