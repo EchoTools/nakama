@@ -58,12 +58,11 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 	if session == nil || serverSession == nil {
 		return errors.New("session is nil")
 	}
-	for _, e := range entrants {
-		logger = logger.With(zap.String("uid", e.UserID.String()), zap.String("sid", e.SessionID.String()))
 
+	for _, e := range entrants {
 		for _, feature := range label.RequiredFeatures {
 			if !slices.Contains(e.SupportedFeatures, feature) {
-				logger.Warn("Player does not support required feature", zap.String("feature", feature), zap.String("mid", label.ID.UUID.String()), zap.String("uid", e.UserID.String()))
+				logger.With(zap.String("uid", e.UserID.String()), zap.String("sid", e.SessionID.String())).Warn("Player does not support required feature", zap.String("feature", feature), zap.String("mid", label.ID.UUID.String()), zap.String("uid", e.UserID.String()))
 				return NewLobbyErrorf(MissingEntitlement, "player does not support required feature: %s", feature)
 			}
 		}
