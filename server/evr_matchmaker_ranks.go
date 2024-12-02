@@ -30,10 +30,10 @@ var (
 	}
 )
 
-func RecalculatePlayerRankPercentile(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, userID string, mode evr.Symbol, periodicity string) (float64, map[string]*api.LeaderboardRecord, error) {
+func RecalculatePlayerRankPercentile(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, userID string, mode evr.Symbol, periodicity string, defaultRankPercentile float64) (float64, map[string]*api.LeaderboardRecord, error) {
 
 	if _, ok := percentileStateIDsByMode[mode]; !ok {
-		return 0.5, nil, nil
+		return defaultRankPercentile, nil, nil
 	}
 
 	boardIDs := make([]string, 0, len(percentileStateIDsByMode[mode]))
@@ -41,7 +41,7 @@ func RecalculatePlayerRankPercentile(ctx context.Context, logger *zap.Logger, nk
 		boardIDs = append(boardIDs, fmt.Sprintf("%s:%s:%s", mode.String(), id, periodicity))
 	}
 
-	percentile, err := LeaderboardRankPercentile(ctx, logger, nk, userID, boardIDs)
+	percentile, err := LeaderboardRankPercentile(ctx, logger, nk, userID, boardIDs, defaultRankPercentile)
 	if err != nil {
 		return 0.0, nil, err
 	}
@@ -49,7 +49,7 @@ func RecalculatePlayerRankPercentile(ctx context.Context, logger *zap.Logger, nk
 	return percentile, nil, nil
 }
 
-func LeaderboardRankPercentile(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, userID string, boardIDs []string) (float64, error) {
+func LeaderboardRankPercentile(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, userID string, boardIDs []string, defaultRankPercentile float64) (float64, error) {
 
 	percentiles := make([]float64, 0, len(boardIDs))
 
@@ -61,6 +61,7 @@ func LeaderboardRankPercentile(ctx context.Context, logger *zap.Logger, nk runti
 		}
 
 		if len(records) == 0 {
+			percentiles = append(percentiles, defaultRankPercentile)
 			continue
 		}
 
@@ -84,7 +85,7 @@ func LeaderboardRankPercentile(ctx context.Context, logger *zap.Logger, nk runti
 	percentile := 0.0
 
 	if len(percentiles) == 0 {
-		return 0.3, nil
+		return defaultRankPercentile, nil
 	}
 
 	for _, p := range percentiles {

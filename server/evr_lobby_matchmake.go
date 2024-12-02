@@ -230,7 +230,9 @@ type MatchmakingSettings struct {
 	MaxServerRTT                int     `json:"max_server_rtt,omitempty"`                 // The maximum RTT to allow
 	RankPercentileMaxDelta      float64 `json:"rank_percentile_delta_max,omitempty"`      // The upper limit percentile range to matchmake with
 	RankResetSchedule           string  `json:"rank_reset_schedule,omitempty"`            // The reset schedule to use for rankings
+	RankResetScheduleDamping    string  `json:"rank_reset_schedule_damping,omitempty"`    // The reset schedule to use for rankings
 	RankPercentileDampingFactor float64 `json:"rank_percentile_damping_factor,omitempty"` // The damping factor to use for rank percentile
+	RankPercentileDefault       float64 `json:"rank_percentile_default,omitempty"`        // The default rank percentile to use
 	RankInDisplayName           bool    `json:"rank_in_display_name,omitempty"`           // Display the rank in the display name
 }
 

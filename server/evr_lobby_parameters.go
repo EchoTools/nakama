@@ -268,20 +268,38 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 	}
 
 	rankStatsPeriod := "weekly"
+
 	if globalSettings.RankResetSchedule != "" {
 		rankStatsPeriod = globalSettings.RankResetSchedule
 	}
-
 	if userSettings.RankResetSchedule != "" {
 		rankStatsPeriod = userSettings.RankResetSchedule
 	}
 
-	percentile, _, err := RecalculatePlayerRankPercentile(ctx, logger, p.runtimeModule, session.userID.String(), mode, rankStatsPeriod)
+	rankStatsPeriodDamping := "daily"
+	if globalSettings.RankResetScheduleDamping != "" {
+		rankStatsPeriod = globalSettings.RankResetScheduleDamping
+	}
+
+	if userSettings.RankResetScheduleDamping != "" {
+		rankStatsPeriod = userSettings.RankResetScheduleDamping
+	}
+
+	rankStatsDefaultPercentile := 0.3
+	if globalSettings.RankPercentileDefault > 0 {
+		rankStatsDefaultPercentile = globalSettings.RankPercentileDefault
+	}
+
+	if userSettings.RankPercentileDefault > 0 {
+		rankStatsDefaultPercentile = userSettings.RankPercentileDefault
+	}
+
+	percentile, _, err := RecalculatePlayerRankPercentile(ctx, logger, p.runtimeModule, session.userID.String(), mode, rankStatsPeriod, rankStatsDefaultPercentile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get overall percentile: %w", err)
 	}
 
-	dailyPercentile, _, err := RecalculatePlayerRankPercentile(ctx, logger, p.runtimeModule, session.userID.String(), mode, "daily")
+	dailyPercentile, _, err := RecalculatePlayerRankPercentile(ctx, logger, p.runtimeModule, session.userID.String(), mode, rankStatsPeriodDamping, rankStatsDefaultPercentile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get daily percentile: %w", err)
 	}
