@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"slices"
@@ -304,7 +305,7 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 	b.metrics.CustomCounter("lobby_join_match_made", tags, int64(len(successful)))
 	b.metrics.CustomCounter("lobby_error_match_made", tags, int64(len(errored)))
 
-	logger.Info("Match built.", zap.String("mid", label.ID.UUID.String()), zap.Any("teams", ratedMatch), zap.Any("successful", successful), zap.Any("errored", errored))
+	logger.Info("Match built.", zap.String("mid", label.ID.UUID.String()), zap.Any("teams", ratedMatch), zap.Any("successful", successful), zap.Any("errored", errored), zap.Any("game_server", label.Broadcaster))
 	return nil
 }
 
@@ -429,4 +430,207 @@ func CompactedFrequencySort[T comparable](s []T, desc bool) []T {
 		slices.Reverse(s)
 	}
 	return slices.Compact(s)
+}
+
+func AllocateGameServer(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, groupID string, rttsByExternalIP map[string]int, settings *MatchSettings, regions []string, requireDefaultRegion bool, requireRegion bool) (*MatchLabel, error) {
+
+	// Load the server ratings storage object
+	ratings, err := LoadServerRatings(ctx, logger, nk, groupID)
+
+	qparts := []string{
+		"+label.open:T",
+		"+label.lobby_type:unassigned",
+		fmt.Sprintf("+label.broadcaster.group_ids:%s", Query.Escape(groupID)),
+	}
+
+	if requireDefaultRegion {
+		qparts = append(qparts, "+label.broadcaster.regions:/(default)/")
+	}
+
+	if len(regions) > 0 {
+		prefix := ""
+		if requireRegion {
+			prefix = "+"
+		}
+
+		qparts = append(qparts, "%slabel.broadcaster.regions:/(%s)/", prefix, Query.Join(regions, "|"))
+	}
+
+	query := strings.Join(qparts, " ")
+
+	matches, err := nk.MatchList(ctx, 100, true, "", nil, nil, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find matches: %v", err)
+	}
+
+	if len(matches) == 0 {
+		return nil, ErrMatchmakingNoAvailableServers
+	}
+
+	// Create a slice containing the match labels
+	labels := make([]*MatchLabel, 0, len(matches))
+	for _, match := range matches {
+		label := &MatchLabel{}
+		if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), label); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal match label: %v", err)
+		}
+		labels = append(labels, label)
+	}
+
+	labelsByExternalIP := make(map[string][]*MatchLabel, len(labels))
+	for _, label := range labels {
+		k := label.Broadcaster.Endpoint.ExternalIP.String()
+		labelsByExternalIP[k] = append(labelsByExternalIP[k], label)
+	}
+
+	// Count the number of active matches by extIP
+	availableByExtIP := make(map[string]*MatchLabel, len(labels))
+	countByExtIP := make(map[string]int, len(labels))
+	for _, label := range labels {
+		k := label.Broadcaster.Endpoint.ExternalIP.String()
+		countByExtIP[k]++
+
+		if label.LobbyType == UnassignedLobby {
+			availableByExtIP[k] = label
+		}
+	}
+
+	// Sort the labels
+	slices.SortStableFunc(labels, func(a, b *MatchLabel) int {
+
+		// Sort by whether the server is a priority server
+		if a.Broadcaster.IsPriorityFor(settings.Mode) && !b.Broadcaster.IsPriorityFor(settings.Mode) {
+			return -1
+		}
+		if a.Broadcaster.IsPriorityFor(settings.Mode) && !b.Broadcaster.IsPriorityFor(settings.Mode) {
+			return 1
+		}
+
+		ipA := a.Broadcaster.Endpoint.ExternalIP.String()
+		ipB := b.Broadcaster.Endpoint.ExternalIP.String()
+
+		rttA := rttsByExternalIP[ipA]
+		rttB := rttsByExternalIP[ipB]
+
+		// Sort whether it's on the list or not
+		if rttA != 0 && rttB == 0 {
+			return -1
+		}
+
+		if rttA == 0 && rttB != 0 {
+			return 1
+		}
+
+		// Only apply the next sort if the servers are more than 40ms from each other.
+		if rttA > rttB+40 || rttA < rttB-40 {
+
+			// Round to the nearest 20ms
+			rttA = (rttA + 10) / 20 * 20
+			rttB = (rttB + 10) / 20 * 20
+
+			if rttA < rttB {
+				return -1
+			}
+
+			if rttA > rttB {
+				return 1
+			}
+		}
+
+		ratingA, ok := ratings.ByExternalIP[a.Broadcaster.Endpoint.ExternalIP.String()]
+		if !ok {
+			ratingA = 0
+		}
+
+		ratingB, ok := ratings.ByExternalIP[b.Broadcaster.Endpoint.ExternalIP.String()]
+		if !ok {
+			ratingB = 0
+		}
+
+		if ratingA > ratingB {
+			return -1
+		}
+
+		if ratingA < ratingB {
+			return 1
+		}
+
+		// Sort by the number of active game servers
+		if countByExtIP[ipA] < countByExtIP[ipB] {
+			return -1
+		}
+
+		if countByExtIP[ipA] > countByExtIP[ipB] {
+			return 1
+		}
+
+		return 0
+	})
+
+	// Find the first available game server
+	var label *MatchLabel
+	for _, l := range labels {
+		if l.LobbyType != UnassignedLobby {
+			continue
+		}
+
+		label, err = LobbyPrepareSession(ctx, nk, l.ID, settings)
+		if err != nil {
+			logger.WithFields(map[string]interface{}{
+				"mid": label.ID.UUID.String(),
+				"err": err,
+			}).Warn("Failed to prepare session")
+			continue
+		}
+
+		return label, nil
+	}
+
+	return nil, ErrMatchmakingNoAvailableServers
+}
+
+type ServerRatings struct {
+	ByExternalIP map[string]float64 `json:"by_external_ip"`
+	ByOperatorID map[string]float64 `json:"by_operator_id"`
+}
+
+func LoadServerRatings(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, groupID string) (*ServerRatings, error) {
+
+	objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
+		{
+			UserID:     SystemUserID,
+			Collection: "ServerRatings",
+			Key:        "ratings",
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to read server ratings: %v", err)
+	}
+
+	if len(objs) == 0 {
+		_, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{
+			{
+				UserID:     SystemUserID,
+				Collection: "ServerRatings",
+				Key:        "ratings",
+				Value:      `{"by_external_ip":{},"by_operator_id":{}}`,
+			},
+		})
+
+		if err != nil {
+			return nil, fmt.Errorf("failed to write server ratings: %v", err)
+		}
+
+		return &ServerRatings{
+			ByExternalIP: make(map[string]float64),
+			ByOperatorID: make(map[string]float64),
+		}, nil
+	}
+
+	ratings := &ServerRatings{}
+	if err := json.Unmarshal([]byte(objs[0].Value), ratings); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal server ratings: %v", err)
+	}
+
+	return ratings, nil
 }
