@@ -25,6 +25,7 @@ type LobbySessionParameters struct {
 	Node                   string        `json:"node"`
 	UserID                 uuid.UUID     `json:"user_id"`
 	SessionID              uuid.UUID     `json:"session_id"`
+	DiscordID              string        `json:"discord_id"`
 	VersionLock            evr.Symbol    `json:"version_lock"`
 	AppID                  evr.Symbol    `json:"app_id"`
 	GroupID                uuid.UUID     `json:"group_id"`
@@ -323,6 +324,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		Node:                   node,
 		UserID:                 session.userID,
 		SessionID:              session.id,
+		DiscordID:              sessionParams.DiscordID,
 		CurrentMatchID:         currentMatchID,
 		VersionLock:            versionLock,
 		AppID:                  appID,
