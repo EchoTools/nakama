@@ -358,6 +358,9 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 		}
 	}
 
+	// Identifying messages are used to associate the message with a user.
+	// The session ID is used to identify the user.
+	// The session ID is mostly ignored once the connection is established.
 	if idmessage, ok := in.(evr.IdentifyingMessage); ok {
 		// Validate the user identifier
 		if !idmessage.GetEvrID().Valid() {
@@ -404,12 +407,14 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 	switch in.Message.(type) {
 
 	case *rtapi.Envelope_StreamData:
+		// EVR binary protocol data
 		payload := []byte(in.GetStreamData().GetData())
 		if bytes.HasPrefix(payload, evr.MessageMarker) {
 			return nil, session.SendBytes(payload, true)
 		}
 
 	case *rtapi.Envelope_MatchData:
+		// EVR binary protocol data
 		if in.GetMatchData().GetOpCode() == OpCodeEVRPacketData {
 			return nil, session.SendBytes(in.GetMatchData().GetData(), true)
 		}
@@ -457,6 +462,11 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 			}
 
 		case *rtapi.Envelope_StatusPresenceEvent, *rtapi.Envelope_MatchPresenceEvent, *rtapi.Envelope_StreamPresenceEvent:
+
+			// Json the message
+			data, _ := json.MarshalIndent(in.GetMessage(), "", "  ")
+			content = string("```json\n" + string(data) + "\n```")
+
 		case *rtapi.Envelope_Party:
 			discordIDs := make([]string, 0)
 			leader := in.GetParty().GetLeader()
@@ -549,8 +559,25 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 				logger.Warn("Failed to get discord ID", zap.Error(err))
 			} else if channel, err := dg.UserChannelCreate(discordID); err != nil {
 				logger.Warn("Failed to create DM channel", zap.Error(err))
-			} else if _, err = dg.ChannelMessageSend(channel.ID, content); err != nil {
-				logger.Warn("Failed to send message to user", zap.Error(err))
+			} else {
+
+				// Limit the entire size of the message to 4k bytes
+				if len(content) > 4000 {
+					content = content[:4000]
+				}
+
+				// If the message is over 1800 bytes, then send it in chunks. just split it into 1800 byte chunks
+				if len(content) > 1800 {
+					for i := 0; i < len(content); i += 1800 {
+						if _, err = dg.ChannelMessageSend(channel.ID, content[i:i+1800]); err != nil {
+							logger.Warn("Failed to send message to user", zap.Error(err))
+						}
+					}
+				} else {
+					if _, err = dg.ChannelMessageSend(channel.ID, content); err != nil {
+						logger.Warn("Failed to send message to user", zap.Error(err))
+					}
+				}
 			}
 		}
 	}
