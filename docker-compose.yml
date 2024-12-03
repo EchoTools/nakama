@@ -51,24 +51,12 @@ services:
   prometheus:
     image: prom/prometheus
     entrypoint: /bin/sh -c
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./web-config.yml:/etc/prometheus/web-config.yml
     command: |
       'sh -s <<EOF
-        cat > ./prometheus.yml <<EON
-      global:
-        scrape_interval:     15s
-        evaluation_interval: 15s
-
-      scrape_configs:
-        - job_name: prometheus
-          static_configs:
-          - targets: ['localhost:9090']
-
-        - job_name: nakama
-          metrics_path: /
-          static_configs:
-          - targets: ['nakama:9100']
-      EON
-      prometheus --config.file=./prometheus.yml
+      prometheus --config.file=/etc/prometheus/prometheus.yml --web.config.file=/etc/prometheus/web-config.yml
       EOF'
     ports:
       - '9090:9090'
