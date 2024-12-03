@@ -51,7 +51,13 @@ func JoinMatchmakingStream(logger *zap.Logger, s *sessionWS, lobbyParams *LobbyS
 	if !found {
 		return fmt.Errorf("failed to load lobby session parameters")
 	}
-	query, stringProps, numericProps := lobbyParams.MatchmakingParameters(sessionParams, true, true)
+
+	ticketConfig, ok := DefaultMatchmakerTicketConfigs[lobbyParams.Mode]
+	if !ok {
+		return fmt.Errorf("failed to find default matchmaker ticket config for mode %v", lobbyParams.Mode)
+	}
+
+	query, stringProps, numericProps := lobbyParams.MatchmakingParameters(sessionParams, &ticketConfig)
 	s.pipeline.router.SendToStream(logger, stream, &rtapi.Envelope{
 		Message: &rtapi.Envelope_StreamData{
 			StreamData: &rtapi.StreamData{
