@@ -223,12 +223,19 @@ func (s *MatchLabel) GetEntrantConnectMessage(role int, isPCVR bool, disableEncr
 }
 
 func (s *MatchLabel) MetricsTags() map[string]string {
-	return map[string]string{
-		"mode":     s.Mode.String(),
-		"level":    s.Level.String(),
-		"type":     s.LobbyType.String(),
-		"group_id": s.GetGroupID().String(),
+
+	tags := map[string]string{
+		"mode":        s.Mode.String(),
+		"level":       s.Level.String(),
+		"type":        s.LobbyType.String(),
+		"group_id":    s.GetGroupID().String(),
+		"operator_id": s.Broadcaster.OperatorID,
 	}
+
+	if s.server != nil {
+		tags["operator_username"] = s.server.GetUsername()
+	}
+	return tags
 }
 
 // rebuildCache is called after the presences map is updated.
