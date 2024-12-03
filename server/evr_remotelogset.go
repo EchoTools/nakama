@@ -186,11 +186,12 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 					meta := LeaderboardMeta{
 						mode:        evr.ModeArenaPublic,
 						name:        "EarlyQuits",
+						operator:    "add",
 						periodicity: periodicty,
 					}
 
-					if _, err := p.leaderboardRegistry.RecordWriteTabletStat(ctx, meta, userID, username, 1); err != nil {
-						logger.Warn("Failed to submit leaderboard", zap.Error(err))
+					if _, err := p.leaderboardRegistry.LeaderboardTabletStatWrite(context.Background(), meta, userID, username, 1.0); err != nil {
+						return fmt.Errorf("Leaderboard record write error: %v", err)
 					}
 				}
 			}

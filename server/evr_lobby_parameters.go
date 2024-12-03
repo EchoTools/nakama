@@ -294,24 +294,32 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		rankStatsDefaultPercentile = userSettings.RankPercentileDefault
 	}
 
-	percentile, _, err := RecalculatePlayerRankPercentile(ctx, logger, p.runtimeModule, session.userID.String(), mode, rankStatsPeriod, rankStatsDefaultPercentile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get overall percentile: %w", err)
+	basePercentile := rankStatsDefaultPercentile
+	dampingPercentile := rankStatsDefaultPercentile
+
+	if globalSettings.RankBoardWeights != nil {
+		if boardWeights, ok := globalSettings.RankBoardWeights[mode.String()]; ok {
+
+			basePercentile, err = RecalculatePlayerRankPercentile(ctx, logger, p.runtimeModule, session.userID.String(), mode, rankStatsPeriod, rankStatsDefaultPercentile, boardWeights)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get overall percentile: %w", err)
+			}
+
+			dampingPercentile, err = RecalculatePlayerRankPercentile(ctx, logger, p.runtimeModule, session.userID.String(), mode, rankStatsPeriodDamping, rankStatsDefaultPercentile, boardWeights)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get daily percentile: %w", err)
+			}
+		}
 	}
 
-	dailyPercentile, _, err := RecalculatePlayerRankPercentile(ctx, logger, p.runtimeModule, session.userID.String(), mode, rankStatsPeriodDamping, rankStatsDefaultPercentile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get daily percentile: %w", err)
-	}
-
-	if dailyPercentile == 0 {
-		dailyPercentile = percentile
+	if dampingPercentile == 0 {
+		dampingPercentile = basePercentile
 	}
 
 	smoothingFactor := globalSettings.RankPercentileDampingFactor
 	if userSettings.RankPercentileDampingFactor > 0 {
 		// Ensure the percentile is at least 0.2
-		percentile = percentile - (dailyPercentile-percentile)*smoothingFactor
+		basePercentile = basePercentile - (dampingPercentile-basePercentile)*smoothingFactor
 	}
 
 	maxServerRTT := 250
@@ -367,7 +375,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		Verbose:                sessionParams.AccountMetadata.DiscordDebugMessages,
 		EarlyQuitPenaltyExpiry: penaltyExpiry,
 		IsEarlyQuitter:         isEarlyQuitter,
-		RankPercentile:         percentile,
+		RankPercentile:         basePercentile,
 		RankPercentileMaxDelta: rankPercentileMaxDelta,
 		MaxServerRTT:           maxServerRTT,
 		MatchmakingTimestamp:   time.Now().UTC(),
@@ -557,7 +565,7 @@ func recordPercentileToLeaderboard(ctx context.Context, nk runtime.NakamaModule,
 
 		if err != nil {
 			// Try to create the leaderboard
-			err = nk.LeaderboardCreate(ctx, id, true, "desc", "set", PeriodicityToSchedule(period), nil, true)
+			err = nk.LeaderboardCreate(ctx, id, true, "asc", "set", PeriodicityToSchedule(period), nil, true)
 
 			if err != nil {
 				return fmt.Errorf("Leaderboard create error: %v", err)
