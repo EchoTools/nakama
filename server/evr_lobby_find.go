@@ -349,15 +349,22 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 			rankDeltaA := math.Abs(a.State.RankPercentile - lobbyParams.RankPercentile)
 			rankDeltaB := math.Abs(b.State.RankPercentile - lobbyParams.RankPercentile)
 
-			if rankDeltaA < rankDeltaB {
-				return -1
-			}
+			// if the rank delta is more than 0.15, sort by rank delta
+			if rankDeltaA > 0.15 && rankDeltaB > 0.15 {
+				if rankDeltaA < rankDeltaB {
+					return -1
+				}
 
-			if rankDeltaA > rankDeltaB {
-				return 1
+				if rankDeltaA > rankDeltaB {
+					return 1
+				}
 			}
 
 			// Sort by largest population
+			if s := b.State.PlayerCount - a.State.PlayerCount; s != 0 {
+				return s
+			}
+
 			if s := b.State.PlayerCount - a.State.PlayerCount; s != 0 {
 				return s
 			}
