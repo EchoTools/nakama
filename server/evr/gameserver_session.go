@@ -93,3 +93,7 @@ func (m *EchoToolsGameServerRegistrationRequestV1) Stream(s *EasyStream) error {
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.TimeStepUsecs) },
 	})
 }
+
+func (m *EchoToolsGameServerRegistrationRequestV1) GetLoginSessionID() uuid.UUID {
+	return m.LoginSessionID
+}

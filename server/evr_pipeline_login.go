@@ -277,7 +277,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	}
 
 	// Initialize the full session
-	if err := session.SetIdentity(uuid.FromStringOrNil(userID), evrID, user.GetUsername()); err != nil {
+	if err := session.SetIdentity(uuid.FromStringOrNil(userID), evrID, account.User.Username); err != nil {
 		return settings, fmt.Errorf("failed to login: %w", err)
 	}
 	ctx = session.Context()

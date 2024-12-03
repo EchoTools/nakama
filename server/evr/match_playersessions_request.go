@@ -54,7 +54,7 @@ func (m *LobbyPlayerSessionsRequest) String() string {
 	return fmt.Sprintf("%T(login_session_id=%s, evr_id=%s, lobby_id=%s, evr_ids=%s)", m, m.LoginSessionID, m.EvrId, m.LobbyID, evrIDstrs)
 }
 
-func (m *LobbyPlayerSessionsRequest) GetSessionID() uuid.UUID {
+func (m *LobbyPlayerSessionsRequest) GetLoginSessionID() uuid.UUID {
 	return m.LoginSessionID
 }
 

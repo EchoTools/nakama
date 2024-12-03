@@ -40,7 +40,7 @@ func (m *LoginSuccess) Stream(s *EasyStream) error {
 	})
 }
 
-func (m *LoginSuccess) GetSessionID() uuid.UUID {
+func (m *LoginSuccess) GetLoginSessionID() uuid.UUID {
 	return m.Session
 }
 

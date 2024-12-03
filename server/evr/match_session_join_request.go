@@ -27,7 +27,7 @@ const (
 	Flags_Flag16
 )
 
-var _ = IdentifyingMessage(&LobbyJoinSessionRequest{})
+var _ = LoginIdentifier(&LobbyJoinSessionRequest{})
 var _ = LobbySessionRequest(&LobbyJoinSessionRequest{})
 
 // LobbyJoinSessionRequest is a message from client to server requesting joining of a specified game session that
@@ -135,7 +135,7 @@ func (m LobbyJoinSessionRequest) String() string {
 	return fmt.Sprintf("LobbyJoinSessionRequest(match=%s)", m.LobbyID)
 }
 
-func (m *LobbyJoinSessionRequest) GetSessionID() uuid.UUID {
+func (m *LobbyJoinSessionRequest) GetLoginSessionID() uuid.UUID {
 	return m.LoginSessionID
 }
 

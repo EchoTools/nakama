@@ -43,7 +43,7 @@ func (r *ReconcileIAP) ToString() string {
 	return fmt.Sprintf("%s(user_id=%s, session=%v)", r.Token(), r.EvrId.Token(), r.Session)
 }
 
-func (m *ReconcileIAP) GetSessionID() uuid.UUID {
+func (m *ReconcileIAP) GetLoginSessionID() uuid.UUID {
 	return m.Session
 }
 

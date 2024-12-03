@@ -42,7 +42,7 @@ func NewLoggedInUserProfileRequest(session uuid.UUID, evrId EvrId, profileReques
 		ProfileRequestData: profileRequestData,
 	}
 }
-func (m *LoggedInUserProfileRequest) GetSessionID() uuid.UUID {
+func (m *LoggedInUserProfileRequest) GetLoginSessionID() uuid.UUID {
 	return m.Session
 }
 
