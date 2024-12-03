@@ -6,54 +6,17 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
-type Periodicity string
+func RecalculatePlayerRankPercentile(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, userID string, mode evr.Symbol, periodicity string, defaultRankPercentile float64, boardNameWeights map[string]float64) (float64, error) {
 
-var (
-	percentileStateIDsByMode = map[evr.Symbol][]string{
-		evr.ModeArenaPublic: {
-			"ArenaGamesPlayed",
-			"ArenaWins",
-			"ArenaLosses",
-			"ArenaWinPercentage",
-			"AssistsPerGame",
-			"AveragePointsPerGame",
-			"AverageTopSpeedPerGame",
-			"BlockPercentage",
-			"GoalScorePercentage",
-			"GoalsPerGame",
-		},
-	}
-)
+	percentiles := make([]float64, 0, len(boardNameWeights))
 
-func RecalculatePlayerRankPercentile(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, userID string, mode evr.Symbol, periodicity string, defaultRankPercentile float64) (float64, map[string]*api.LeaderboardRecord, error) {
+	for boardName, weight := range boardNameWeights {
 
-	if _, ok := percentileStateIDsByMode[mode]; !ok {
-		return defaultRankPercentile, nil, nil
-	}
-
-	boardIDs := make([]string, 0, len(percentileStateIDsByMode[mode]))
-	for _, id := range percentileStateIDsByMode[mode] {
-		boardIDs = append(boardIDs, fmt.Sprintf("%s:%s:%s", mode.String(), id, periodicity))
-	}
-
-	percentile, err := LeaderboardRankPercentile(ctx, logger, nk, userID, boardIDs, defaultRankPercentile)
-	if err != nil {
-		return 0.0, nil, err
-	}
-
-	return percentile, nil, nil
-}
-
-func LeaderboardRankPercentile(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, userID string, boardIDs []string, defaultRankPercentile float64) (float64, error) {
-
-	percentiles := make([]float64, 0, len(boardIDs))
-
-	for _, boardID := range boardIDs {
+		boardID := fmt.Sprintf("%s:%s:%s", mode.String(), boardName, periodicity)
 
 		records, _, _, _, err := nk.LeaderboardRecordsList(ctx, boardID, []string{userID}, 10000, "", 0)
 		if err != nil {
@@ -77,8 +40,9 @@ func LeaderboardRankPercentile(ctx context.Context, logger *zap.Logger, nk runti
 			continue
 		}
 
+		percentile := float64(rank) / float64(len(records))
 		// Calculate the percentile.
-		percentiles = append(percentiles, float64(rank)/float64(len(records)))
+		percentiles = append(percentiles, percentile*weight)
 
 	}
 
