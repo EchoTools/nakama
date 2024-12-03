@@ -15,8 +15,12 @@ const (
 )
 
 type MatchmakingStreamData struct {
-	DiscordID  string                  `json:"discord_id,omitempty"`
-	Parameters *LobbySessionParameters `json:"parameters,omitempty"`
+	DiscordID         string                  `json:"discord_id,omitempty"`
+	Parameters        *LobbySessionParameters `json:"parameters,omitempty"`
+	BackfillQuery     string                  `json:"backfill_query,omitempty"`
+	MatchmakingQuery  string                  `json:"matchmaking_query,omitempty"`
+	StringParameters  map[string]string       `json:"string_parameters,omitempty"`
+	NumericParameters map[string]float64      `json:"numeric_parameters,omitempty"`
 }
 
 func (d MatchmakingStreamData) String() string {
@@ -47,7 +51,7 @@ func JoinMatchmakingStream(logger *zap.Logger, s *sessionWS, lobbyParams *LobbyS
 	if !found {
 		return fmt.Errorf("failed to load lobby session parameters")
 	}
-
+	query, stringProps, numericProps := lobbyParams.MatchmakingParameters(sessionParams, true, true)
 	s.pipeline.router.SendToStream(logger, stream, &rtapi.Envelope{
 		Message: &rtapi.Envelope_StreamData{
 			StreamData: &rtapi.StreamData{
@@ -61,8 +65,13 @@ func JoinMatchmakingStream(logger *zap.Logger, s *sessionWS, lobbyParams *LobbyS
 					Username:  s.Username(),
 				},
 				Data: MatchmakingStreamData{
-					DiscordID:  sessionParams.DiscordID,
-					Parameters: lobbyParams}.String(),
+					DiscordID:         sessionParams.DiscordID,
+					Parameters:        lobbyParams,
+					BackfillQuery:     lobbyParams.BackfillSearchQuery(true, true),
+					MatchmakingQuery:  query,
+					StringParameters:  stringProps,
+					NumericParameters: numericProps,
+				}.String(),
 			},
 		},
 	}, true)
