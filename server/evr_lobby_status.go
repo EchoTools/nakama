@@ -54,7 +54,10 @@ func JoinMatchmakingStream(logger *zap.Logger, s *sessionWS, lobbyParams *LobbyS
 
 	ticketConfig, ok := DefaultMatchmakerTicketConfigs[lobbyParams.Mode]
 	if !ok {
-		return fmt.Errorf("failed to find default matchmaker ticket config for mode %v", lobbyParams.Mode)
+		ticketConfig = MatchmakingTicketParameters{
+			IncludeRankRange:        true,
+			IncludeEarlyQuitPenalty: true,
+		}
 	}
 
 	query, stringProps, numericProps := lobbyParams.MatchmakingParameters(sessionParams, &ticketConfig)
