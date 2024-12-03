@@ -25,8 +25,9 @@ func createTestMatchmakerWithOverride(t fatalable, logger *zap.Logger, tickerAct
 	cfg := NewConfig(logger)
 	cfg.Database.Addresses = []string{"postgres:postgres@localhost:5432/nakama"}
 	cfg.Matchmaker.IntervalSec = 1
-	cfg.Matchmaker.MaxIntervals = 5
+	cfg.Matchmaker.MaxIntervals = 2
 	cfg.Matchmaker.RevPrecision = true
+	cfg.Matchmaker.MaxTickets = 5
 	// configure a path runtime can use (it will mkdir this, so it must be writable)
 	var err error
 	cfg.Runtime.Path, err = os.MkdirTemp("", "nakama-matchmaker-test")
@@ -573,42 +574,44 @@ func writeAsJSONFile(data interface{}, filename string) {
 func TestCharacterizationMatchmaker1v1(t *testing.T) {
 	consoleLogger := loggerForTest(t)
 
-	maxCycles := 7
+	useOverride := true
 
-	matchesSeen := make(map[string]*rtapi.MatchmakerMatched, maxCycles)
+	matchesSeen := make(map[string]*rtapi.MatchmakerMatched)
 	mu := sync.Mutex{}
-	/*
+	var matchmaker *LocalMatchmaker
+	var cleanup func() error
+	var err error
 
-		matchMaker, cleanup, err := createTestMatchmakerWithOverride(t, consoleLogger, true, func(presences []*PresenceID, envelope *rtapi.Envelope) {
+	if useOverride {
+		matchmaker, cleanup, err = createTestMatchmakerWithOverride(t, consoleLogger, true, func(presences []*PresenceID, envelope *rtapi.Envelope) {
+			id := envelope.GetMatchmakerMatched().GetToken()
+			t.Logf("Matched: %s", id)
+			mu.Lock()
+			defer mu.Unlock()
+			matchesSeen[id] = envelope.GetMatchmakerMatched()
+
+		},
+			EvrMatchmakerOverrideFn,
+		)
+	} else {
+
+		matchmaker, cleanup, err = createTestMatchmaker(t, consoleLogger, true, func(presences []*PresenceID, envelope *rtapi.Envelope) {
 
 			mu.Lock()
 			defer mu.Unlock()
 			if len(presences) == 1 {
 				matchesSeen[presences[0].SessionID.String()] = envelope.GetMatchmakerMatched()
 			}
-		},
-			EvrMatchmakerOverrideFn,
-		)
-		if err != nil {
-			t.Fatalf("error creating test matchmaker: %v", err)
-		}
-	*/
-
-	matchMaker, cleanup, err := createTestMatchmaker(t, consoleLogger, true, func(presences []*PresenceID, envelope *rtapi.Envelope) {
-
-		mu.Lock()
-		defer mu.Unlock()
-		if len(presences) == 1 {
-			matchesSeen[presences[0].SessionID.String()] = envelope.GetMatchmakerMatched()
-		}
-	})
+		})
+	}
 	if err != nil {
 		t.Fatalf("error creating test matchmaker: %v", err)
 	}
+
 	defer cleanup()
 
 	// Load the candidate data from the json file
-	file, err := os.Open("/tmp/candidates.json")
+	file, err := os.Open("../_matches/m1.json")
 	if err != nil {
 		t.Error("Error opening file")
 	}
@@ -624,11 +627,15 @@ func TestCharacterizationMatchmaker1v1(t *testing.T) {
 	}
 
 	// Create a list of all players from all match candidates
+	candidateSizes := make(map[int]int)
 
 	entries := make([]*MatchmakerEntry, 0, len(data.Candidates))
 	for _, c := range data.Candidates {
+		candidateSizes[len(c)]++
 		entries = append(entries, c...)
 	}
+
+	t.Logf("Candidate sizes: %v", candidateSizes)
 
 	// ensure that all players are unique
 	seen := make(map[string]struct{})
@@ -645,10 +652,10 @@ func TestCharacterizationMatchmaker1v1(t *testing.T) {
 
 	t.Logf("Entry count: %d", len(entries))
 
-	minCount := 6
+	minCount := 1
 	maxCount := 8
 	countMultiple := 2
-
+	_ = maxCount
 	playerNames := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		playerNames = append(playerNames, entry.Presence.Username)
@@ -656,11 +663,34 @@ func TestCharacterizationMatchmaker1v1(t *testing.T) {
 
 	t.Logf("Players: %v", strings.Join(playerNames, ", "))
 
-	// Enter tickets for all players
+	// Find parties in the entries
+	parties := make(map[string][]*MatchmakerEntry)
+	for i := 0; i < len(entries); i++ {
+		if entries[i].PartyId != "" {
+			if _, ok := parties[entries[i].PartyId]; !ok {
+				parties[entries[i].PartyId] = make([]*MatchmakerEntry, 0)
+			}
+			parties[entries[i].PartyId] = append(parties[entries[i].PartyId], entries[i])
+
+			// Remove the party from the entries
+			entries = append(entries[:i], entries[i+1:]...)
+			i--
+		}
+	}
+	t.Logf("Found %d parties and %d solo players", len(parties), len(entries))
+
+	ticketCount := 0
+
+	// print out all the session ids of the entries
+	for _, entry := range entries {
+		t.Logf("Entry: %s", entry.Presence.SessionId)
+	}
+
+	ticketCounts := make(map[string]int)
+
 	for _, entry := range entries {
 		query := entry.StringProperties["query"]
-		t.Logf("Adding player %s to matchmaker with query `%s`", entry.Presence.Username, query)
-		_, _, err := matchMaker.Add(
+		_, _, err := matchmaker.Add(
 			context.Background(),
 			[]*MatchmakerPresence{entry.Presence},
 			entry.GetPresence().GetSessionId(),
@@ -673,36 +703,76 @@ func TestCharacterizationMatchmaker1v1(t *testing.T) {
 			entry.NumericProperties,
 		)
 		if err != nil {
-			t.Fatalf("error matchmaker add: %v", err)
+			// print out ticket counts
+			for k, v := range ticketCounts {
+				t.Logf("Ticket count for %s: %d", k, v)
+			}
+			t.Fatalf("error matchmaker add (ticket #%d): %v", ticketCount+1, err)
 		}
+		ticketCounts[entry.Presence.SessionId]++
+		ticketCount++
 	}
 
-	matchMaker.Process()
-
-	count := 0
-	// output the matches that were created
-	for _, match := range matchesSeen {
-
-		// Create a map of partyID's to alpha numeric characters
-		partyMap := make(map[string]string)
-		partyMap[""] = "-"
-		for _, entry := range entries {
-			if _, ok := partyMap[entry.PartyId]; ok {
+	for IDStr, members := range parties {
+		// add the parties using the other itnerface
+		// Prepare the list of presences that will go into the matchmaker as part of the party.
+		presences := make([]*MatchmakerPresence, 0, len(members))
+		for _, member := range members {
+			memberUserPresence := member.Presence
+			presences = append(presences, &MatchmakerPresence{
+				UserId:    memberUserPresence.UserId,
+				SessionId: memberUserPresence.SessionId,
+				Username:  memberUserPresence.Username,
+				Node:      member.Presence.Node,
+				SessionID: member.Presence.SessionID,
+			})
+			if member.Presence.SessionID == members[0].Presence.SessionID && members[0].Presence.Node == member.Presence.Node {
 				continue
 			}
-			partyMap[entry.PartyId] = string('A' + rune(len(partyMap)))
 		}
+		query := members[0].StringProperties["query"]
+		_, _, err := matchmaker.Add(context.Background(), presences, "", IDStr, query, minCount, maxCount, countMultiple, members[0].StringProperties, members[0].NumericProperties)
+		if err != nil {
+			t.Fatalf("error matchmaker add: %v", err)
+		}
+		ticketCount++
 
-		// get the players in the match
-		playerIds := make([]string, 0, len(match.GetUsers()))
-		for _, p := range match.GetUsers() {
-			playerName := fmt.Sprintf("%s:%s", partyMap[match.GetUsers()[0].PartyId], p.Presence.GetUsername())
-			playerIds = append(playerIds, playerName)
-		}
-		t.Logf("  Match %d: %s", count, strings.Join(playerIds, ", "))
-		count++
 	}
+	t.Logf("Entered %d tickets", ticketCount)
 
+	maxCycles := 2
+
+	for i := 0; i < maxCycles; i++ {
+
+		startTime := time.Now()
+		matchmaker.Process()
+		t.Logf("Matchmaker process time: %v", time.Since(startTime))
+
+		count := 0
+
+		// output the matches that were created
+		for _, match := range matchesSeen {
+
+			// Create a map of partyID's to alpha numeric characters
+			partyMap := make(map[string]string)
+			partyMap[""] = "-"
+			for _, entry := range entries {
+				if _, ok := partyMap[entry.PartyId]; ok {
+					continue
+				}
+				partyMap[entry.PartyId] = string('A' + rune(len(partyMap)))
+			}
+
+			// get the players in the match
+			playerIds := make([]string, 0, len(match.GetUsers()))
+			for _, p := range match.GetUsers() {
+				playerName := fmt.Sprintf("%s:%s", partyMap[match.GetUsers()[0].PartyId], p.Presence.GetUsername())
+				playerIds = append(playerIds, playerName)
+			}
+			t.Logf("  Match %d: %s", count, strings.Join(playerIds, ", "))
+			count++
+		}
+	}
 	// count the total matches
 
 	// assert that 2 are notified of a match

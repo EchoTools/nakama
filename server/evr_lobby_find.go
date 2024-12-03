@@ -314,7 +314,7 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 
 	cycleCount := 0
 
-	fallbackTimer := time.NewTimer(lobbyParams.MatchmakingTimeout / 2)
+	fallbackTimer := time.NewTimer(p.matchmakingTicketTimeout())
 
 	for {
 
