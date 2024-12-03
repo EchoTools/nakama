@@ -46,20 +46,24 @@ type MatchmakerTicketConfig struct {
 	MinCount                int
 	MaxCount                int
 	CountMultiple           int
-	includeRankRange        bool
-	includeEarlyQuitPenalty bool
+	IncludeRankRange        bool
+	IncludeEarlyQuitPenalty bool
 }
 
 var DefaultMatchmakerTicketConfigs = map[evr.Symbol]MatchmakerTicketConfig{
 	evr.ModeArenaPublic: {
-		MinCount:      2,
-		MaxCount:      8,
-		CountMultiple: 2,
+		MinCount:                1,
+		MaxCount:                8,
+		CountMultiple:           2,
+		IncludeRankRange:        true,
+		IncludeEarlyQuitPenalty: true,
 	},
 	evr.ModeCombatPublic: {
-		MinCount:      2,
-		MaxCount:      10,
-		CountMultiple: 2,
+		MinCount:                1,
+		MaxCount:                10,
+		CountMultiple:           2,
+		IncludeRankRange:        false,
+		IncludeEarlyQuitPenalty: false,
 	},
 }
 
@@ -76,63 +80,49 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 		return fmt.Errorf("matchmaking ticket config not found for mode %s", lobbyParams.Mode)
 	}
 
-	ticketConfig.includeRankRange = true
-	ticketConfig.includeEarlyQuitPenalty = true
+	// Continue to enter tickets until the context is cancelled.
+	go func() {
 
-	// Add the primary ticket
-	err = p.addTicket(ctx, logger, session, lobbyParams, lobbyGroup, ticketConfig)
-	if err != nil {
-		return fmt.Errorf("failed to add primary ticket: %v", err)
-	}
-
-	// Start the fallback when half the matchmaking timeout has expired
-	fallbackDelay := p.matchmakingTicketTimeout() / 2
-
-	// Reduce fallback delay if there is very few players online
-	stream := lobbyParams.GuildGroupStream()
-	count, err := p.runtimeModule.StreamCount(stream.Mode, stream.Subject.String(), "", stream.Label)
-	if err != nil {
-		logger.Error("Failed to get stream count", zap.Error(err))
-	} else {
+		stream := lobbyParams.GuildGroupStream()
+		count, err := p.runtimeModule.StreamCount(stream.Mode, stream.Subject.String(), "", stream.Label)
+		if err != nil {
+			logger.Error("Failed to get stream count", zap.Error(err))
+		}
 
 		// If there are fewer players online, reduce the fallback delay
 		if !strings.Contains(p.node, "dev") {
 			// If there are fewer than 16 players online, reduce the fallback delay
 			if count < 16 {
-				fallbackDelay = min(p.matchmakingTicketTimeout()/2, 2*time.Minute)
-			} else if count < 8 {
-				fallbackDelay = 1 * time.Minute
+				ticketConfig.IncludeRankRange = false
+				ticketConfig.IncludeEarlyQuitPenalty = false
 			}
 		}
-	}
+		timer := time.NewTimer(lobbyParams.MatchmakingTimeout)
+		ticker := time.NewTicker(p.matchmakingTicketTimeout())
+		cycle := 0
+		for {
 
-	// If the first matchmaking ticket fails, try a fallback ticket
-	go func() {
+			// Reduce the matchmaking precision after the first cycle
+			if cycle > 1 {
+				ticketConfig.IncludeRankRange = false
+				ticketConfig.IncludeEarlyQuitPenalty = false
+			}
 
-		// Check if the context was canceled
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(fallbackDelay):
-		}
+			err = p.addTicket(ctx, logger, session, lobbyParams, lobbyGroup, ticketConfig)
+			if err != nil {
+				logger.Error("Failed to add secondary ticket", zap.Error(err))
+				return
+			}
 
-		// Attempt a fallback ticket
-		ticketConfig.MinCount = 1 // This must be 1 to allow for the fallback to work with nakama's matchmaker (min must always be less than max)
-		ticketConfig.includeRankRange = false
-		ticketConfig.includeEarlyQuitPenalty = false
-
-		if ticketConfig.CountMultiple == 1 || ticketConfig.MaxCount == ticketConfig.MinCount || ticketConfig.MaxCount%ticketConfig.CountMultiple != 0 {
-			logger.Error("Matchmaking ticket config is not valid for fallbacks", zap.Any("config", ticketConfig))
-			return
-		}
-
-		// This will try to add a secondary ticket with the smallest count.
-		// This works around a nakama limitation of using a custom matchmaker.
-
-		err = p.addTicket(ctx, logger, session, lobbyParams, lobbyGroup, ticketConfig)
-		if err != nil {
-			logger.Error("Failed to add secondary ticket", zap.Error(err))
-			return
+			select {
+			case <-ctx.Done():
+				return
+			case <-timer.C:
+				logger.Debug("Matchmaking timeout")
+				return
+			case <-ticker.C:
+				logger.Debug("Matchmaking ticket timeout", zap.Int("cycle", cycle))
+			}
 		}
 	}()
 	return nil
@@ -145,10 +135,9 @@ func (p *EvrPipeline) addTicket(ctx context.Context, logger *zap.Logger, session
 		return fmt.Errorf("failed to load session parameters")
 	}
 
-	query, stringProps, numericProps := lobbyParams.MatchmakingParameters(sessionParams, ticketConfig.includeRankRange, ticketConfig.includeEarlyQuitPenalty)
+	query, stringProps, numericProps := lobbyParams.MatchmakingParameters(sessionParams, ticketConfig.IncludeRankRange, ticketConfig.IncludeEarlyQuitPenalty)
 
-	// now + 2/3 matchmaking timeout
-
+	// The matchmaker will always prioritize the players that are about to time out.
 	priorityThreshold := time.Now().UTC().Add((p.matchmakingTicketTimeout() / 3) * 2)
 
 	numericProps["priority_threshold"] = float64(priorityThreshold.Unix())

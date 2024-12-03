@@ -155,6 +155,9 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.Ma
 
 	filterCounts := make(map[string]int)
 
+	// Remove identical matches
+	candidates, filterCounts["duplicate"] = m.filterDuplicates(candidates)
+
 	// Remove odd sized teams
 	candidates, filterCounts["odd_size"] = m.filterOddSizedTeams(candidates)
 
@@ -167,11 +170,37 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.Ma
 	m.sortByDraw(predictions)
 	m.sortLimitRankSpread(predictions, MaximumRankDelta)
 	m.sortBySize(predictions)
-	m.sortPriority(predictions)
+	//m.sortPriority(predictions)
 
 	madeMatches := m.assembleUniqueMatches(predictions)
 
 	return madeMatches, filterCounts
+}
+
+func (m *SkillBasedMatchmaker) filterDuplicates(candidates [][]runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, int) {
+	// Filter out the duplicates
+	seen := make(map[string]struct{})
+	count := 0
+	for i := 0; i < len(candidates); i++ {
+
+		sort.Slice(candidates[i], func(k, l int) bool {
+			return candidates[i][k].GetPresence().GetUserId() < candidates[i][l].GetPresence().GetUserId()
+		})
+
+		key := ""
+		for _, e := range candidates[i] {
+			key += e.GetPresence().GetUserId()
+		}
+
+		if _, ok := seen[key]; ok {
+			count++
+			candidates = append(candidates[:i], candidates[i+1:]...)
+			i--
+		} else {
+			seen[key] = struct{}{}
+		}
+	}
+	return candidates, count
 }
 
 func (m *SkillBasedMatchmaker) filterOddSizedTeams(candidates [][]runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, int) {

@@ -379,7 +379,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		RankPercentileMaxDelta: rankPercentileMaxDelta,
 		MaxServerRTT:           maxServerRTT,
 		MatchmakingTimestamp:   time.Now().UTC(),
-		MatchmakingTimeout:     p.matchmakingTicketTimeout(),
+		MatchmakingTimeout:     time.Minute * 12,
 		DisplayName:            sessionParams.AccountMetadata.GetGroupDisplayNameOrDefault(groupID.String()),
 	}, nil
 }
@@ -489,7 +489,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionPar
 
 	//maxDelta := 60 // milliseconds
 	for k, v := range AverageLatencyHistories(p.latencyHistory) {
-		numericProperties[k] = float64(v)
+		numericProperties[RTTPropertyPrefix+k] = float64(v)
 		//qparts = append(qparts, fmt.Sprintf("properties.%s:<=%d", k, v+maxDelta))
 	}
 
