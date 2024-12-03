@@ -569,7 +569,8 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 				// If the message is over 1800 bytes, then send it in chunks. just split it into 1800 byte chunks
 				if len(content) > 1800 {
 					for i := 0; i < len(content); i += 1800 {
-						if _, err = dg.ChannelMessageSend(channel.ID, content[i:i+1800]); err != nil {
+						max := min(i+1800, len(content))
+						if _, err = dg.ChannelMessageSend(channel.ID, content[i:max]); err != nil {
 							logger.Warn("Failed to send message to user", zap.Error(err))
 						}
 					}
