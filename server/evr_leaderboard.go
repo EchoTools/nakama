@@ -99,70 +99,98 @@ func (r *LeaderboardRegistry) LeaderboardMetaFromID(id string) (LeaderboardMeta,
 	}, nil
 }
 
-func (r *LeaderboardRegistry) ProcessProfileUpdate(ctx context.Context, logger *zap.Logger, userID, username string, mode evr.Symbol, payload *evr.UpdatePayload, serverProfile *evr.ServerProfile) error {
+func (r *LeaderboardRegistry) profileUpdate(userID, username string, profile *evr.ServerProfile, data map[string]map[LeaderboardMeta]float64) error {
 
-	var statGroup, prefix string
-
-	switch mode {
-	case evr.ModeArenaPublic:
-		prefix = "Arena"
-		statGroup = "arena"
-	case evr.ModeCombatPublic:
-		prefix = "Combat"
-		statGroup = "combat"
-	default:
-		logger.Warn("Unknown mode for profile update", zap.String("mode", mode.String()), zap.Any("payload", payload))
-		return fmt.Errorf("unknown mode: %s", mode)
-	}
-
-	stats, ok := payload.Update.StatsGroups[statGroup]
-	if !ok {
-		return fmt.Errorf("no stats found for group: %s", statGroup)
-	}
-
-	// Create the games played stat
-	r.createGamesPlayedStat(stats, prefix)
-
-	// Create the leaderboard submissions
-	submissions := make(map[LeaderboardMeta]float64)
-
-	for name, stat := range stats {
-
-		// Use the daily and weekly leaderboards
-		for _, p := range []string{"alltime", "daily", "weekly"} {
-			meta := LeaderboardMeta{
-				mode:        mode,
-				name:        name,
-				operator:    stat.Operator,
-				periodicity: p,
+	for statGroup, stats := range data {
+		for meta, value := range stats {
+			record, err := r.LeaderboardTabletStatWrite(context.Background(), meta, userID, username, value)
+			if err != nil {
+				return fmt.Errorf("Leaderboard record write error: %v", err)
 			}
 
-			submissions[meta] = stat.Value
+			// Update the tablet stats with the record from the leaderboard
+			if _, ok := profile.Statistics[statGroup]; !ok {
+				profile.Statistics[statGroup] = make(map[string]evr.MatchStatistic)
+			}
 
-		}
-	}
-
-	// Submit the score
-	for meta, value := range submissions {
-		record, err := r.RecordWriteTabletStat(ctx, meta, userID, username, value)
-		if err != nil {
-			return fmt.Errorf("Leaderboard record write error: %v", err)
-		}
-
-		if _, ok := serverProfile.Statistics[statGroup]; !ok {
-			serverProfile.Statistics[statGroup] = make(map[string]evr.MatchStatistic)
-		}
-
-		serverProfile.Statistics[statGroup][meta.name] = evr.MatchStatistic{
-			Count: int64(record.NumScore),
-			Value: r.scoreToValue(record.Score, record.Subscore),
+			profile.Statistics[statGroup][meta.name] = evr.MatchStatistic{
+				Count: 1,
+				Value: r.scoreToValue(record.Score, record.Subscore),
+			}
 		}
 	}
 
 	return nil
 }
 
-func (r *LeaderboardRegistry) RecordWriteTabletStat(ctx context.Context, meta LeaderboardMeta, userID, username string, value float64) (*api.LeaderboardRecord, error) {
+func (r *LeaderboardRegistry) ProcessProfileUpdate(ctx context.Context, logger *zap.Logger, userID, username string, mode evr.Symbol, payload *evr.UpdatePayload, serverProfile *evr.ServerProfile) error {
+
+	// Build the operations
+	ops := r.buildOperations(mode, payload)
+	if err := r.profileUpdate(userID, username, serverProfile, ops); err != nil {
+		return fmt.Errorf("Profile update error: %v", err)
+	}
+	return nil
+}
+
+func (r *LeaderboardRegistry) buildOperations(mode evr.Symbol, payload *evr.UpdatePayload) map[string]map[LeaderboardMeta]float64 {
+	var prefix, periodicity string
+
+	opsByStatGroup := make(map[string]map[LeaderboardMeta]float64)
+	// Process each statGroup
+	for statGroup, stats := range payload.Update.StatsGroups {
+
+		opsByStatGroup[statGroup] = make(map[LeaderboardMeta]float64)
+
+		// Determine the prefix and periodicity
+
+		if statGroup == "arena" {
+
+			prefix = "Arena"
+			periodicity = "alltime"
+
+		} else if statGroup == "combat" {
+
+			prefix = "Combat"
+			periodicity = "alltime"
+
+		} else if strings.HasPrefix(statGroup, "daily_") {
+
+			prefix = "Arena"
+			periodicity = "daily"
+
+		} else if strings.HasPrefix(statGroup, "weekly_") {
+
+			prefix = "Arena"
+			periodicity = "weekly"
+
+		} else {
+			r.logger.Warn("Unknown mode for profile update", zap.String("mode", mode.String()), zap.Any("payload", payload))
+			continue
+		}
+
+		// Create the games played stat
+		r.createGamesPlayedStat(stats, prefix)
+
+		// Build the operations
+		for name, stat := range stats {
+
+			meta := LeaderboardMeta{
+				mode:        mode,
+				name:        name,
+				operator:    stat.Operator,
+				periodicity: periodicity,
+			}
+			opsByStatGroup[statGroup][meta] = stat.Value
+		}
+	}
+
+	return opsByStatGroup
+}
+
+func (r *LeaderboardRegistry) LeaderboardTabletStatWrite(ctx context.Context, meta LeaderboardMeta, userID, username string, value float64) (*api.LeaderboardRecord, error) {
+
+	// split the value into score and subscore (whole and fractional)
 	score, subscore := r.valueToScore(value)
 
 	// All tablet stat updates are "set" operations
@@ -196,7 +224,7 @@ func (r *LeaderboardRegistry) createGamesPlayedStat(stats map[string]evr.StatUpd
 		return
 	}
 
-	stats["GamesPlayed"] = evr.StatUpdate{
+	stats[prefix+"GamesPlayed"] = evr.StatUpdate{
 		Operator: "add",
 		Value:    total,
 	}
