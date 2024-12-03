@@ -998,6 +998,8 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		return state, SignalResponse{Message: fmt.Sprintf("failed to update label: %v", err)}.String()
 	}
 
+	nk.MetricsCounterAdd("match_prepare_count", state.MetricsTags(), 1)
+
 	return state, SignalResponse{Success: true, Payload: state.GetLabel()}.String()
 
 }
