@@ -97,6 +97,7 @@ type MatchBroadcaster struct {
 	ServerID        uint64       `json:"server_id,omitempty"`        // The server id of the broadcaster. (EVR)
 	PublisherLock   bool         `json:"publisher_lock,omitempty"`   // Publisher lock (EVR)
 	Features        []string     `json:"features,omitempty"`         // The features of the broadcaster.
+	TimeStepUsecs   uint32       `json:"time_step_usecs,omitempty"`  // The time step in microseconds.
 	Tags            []string     `json:"tags,omitempty"`             // The tags given on the urlparam for the match.
 	DesignatedModes []evr.Symbol `json:"designated_modes,omitempty"` // The priority modes for the broadcaster.
 	Location        string       `json:"location,omitempty"`         // The location of the broadcaster.
@@ -104,6 +105,7 @@ type MatchBroadcaster struct {
 	Latitude        float64      `json:"latitude,omitempty"`         // The latitude of the broadcaster.
 	Longitude       float64      `json:"longitude,omitempty"`        // The longitude of the broadcaster.
 	ASNumber        int          `json:"asn,omitempty"`              // The ASN of the broadcaster.
+	NativeSupport   bool         `json:"native,omitempty"`           // The native support of the broadcaster.
 }
 
 func (g *MatchBroadcaster) IsPriorityFor(mode evr.Symbol) bool {
@@ -1035,7 +1037,9 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk run
 	state.StartTime = time.Now().UTC()
 	entrants := make([]evr.EvrId, 0)
 	message := evr.NewGameServerSessionStart(state.ID.UUID, groupID, uint8(state.MaxSize), uint8(state.LobbyType), state.Broadcaster.AppId, state.Mode, state.Level, state.RequiredFeatures, entrants)
+
 	logger.WithField("message", message).Info("Starting session.")
+
 	messages := []evr.Message{
 		message,
 	}

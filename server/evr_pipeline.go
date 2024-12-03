@@ -338,6 +338,8 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 	case *evr.EchoToolsGameServerRegistrationRequestV1:
 		requireAuthed = false
 		pipelineFn = p.echoToolsGameServerRegistrationRequestV1
+	case *evr.EchoToolsLobbySessionStartedV1:
+		pipelineFn = p.echoToolsLobbySessionStartedV1
 	case *evr.BroadcasterSessionStarted:
 		pipelineFn = p.broadcasterSessionStarted
 	case *evr.GameServerJoinAttempt:

@@ -74,6 +74,24 @@ func (s *EasyStream) StreamNumber(order binary.ByteOrder, value any) error {
 	}
 }
 
+func (s *EasyStream) StreamBool(value *bool) error {
+
+	switch s.Mode {
+
+	case DecodeMode:
+		b, err := s.r.ReadByte()
+		*value = b != 0
+		return err
+
+	case EncodeMode:
+		if *value {
+			return s.w.WriteByte(1)
+		}
+		return s.w.WriteByte(0)
+	}
+	return errInvalidMode
+}
+
 func (s *EasyStream) StreamIpAddress(data *net.IP) error {
 	b := make([]byte, net.IPv4len)
 	copy(b, (*data).To4())
