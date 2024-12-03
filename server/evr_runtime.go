@@ -114,6 +114,11 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		return fmt.Errorf("unable to register /evr/api service: %w", err)
 	}
 
+	// Register event handler
+	if err := initializer.RegisterEvent(processEvent); err != nil {
+		return err
+	}
+
 	// Register the matchmaking override
 	if err := initializer.RegisterMatchmakerOverride(sbmm.EvrMatchmakerFn); err != nil {
 		return fmt.Errorf("unable to register matchmaker override: %w", err)
