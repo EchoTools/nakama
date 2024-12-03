@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
@@ -73,7 +74,16 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 				logger.Warn("Matchmaking timed out", zap.Error(err))
 				return NewLobbyError(Timeout, "matchmaking timed out")
 			default:
-				p.metrics.CustomCounter("lobby_find_match_error", lobbyParams.MetricsTags(), int64(lobbyParams.GetPartySize()))
+				var code LobbyErrorCodeValue = InternalError
+				switch err.(type) {
+				case *LobbyError:
+					code = InternalError
+				}
+
+				tags := lobbyParams.MetricsTags()
+				tags["error_code"] = strconv.Itoa(int(code))
+
+				p.metrics.CustomCounter("lobby_find_match_error", tags, int64(lobbyParams.GetPartySize()))
 				// On error, leave any party the user might be a member of.
 				LeavePartyStream(session)
 			}
