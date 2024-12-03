@@ -311,7 +311,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				RemoteLogMessage: string(msgData),
 			}
 			// Check if the match's group wants audit messages
-			contentData, err := json.Marshal(messageContent)
+			contentData, err := json.MarshalIndent(messageContent, "", "  ")
 			if err != nil {
 				logger.Error("Failed to marshal message content", zap.Error(err))
 			}
