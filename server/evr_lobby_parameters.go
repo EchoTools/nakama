@@ -442,9 +442,7 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeRankRange bool, incl
 
 }
 
-func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionParameters, withRankRange bool, withEarlyQuitPenalty bool) (string, map[string]string, map[string]float64) {
-
-	displayName := sessionParams.AccountMetadata.GetGroupDisplayNameOrDefault(p.GroupID.String())
+func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionParameters, ticketParams *MatchmakingTicketParameters) (string, map[string]string, map[string]float64) {
 
 	submissionTime := time.Now().UTC().Format(time.RFC3339)
 	stringProperties := map[string]string{
@@ -452,14 +450,13 @@ func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionPar
 		"group_id":        p.GroupID.String(),
 		"version_lock":    p.VersionLock.String(),
 		"blocked_ids":     strings.Join(p.BlockedIDs, " "),
-		"display_name":    displayName,
+		"display_name":    p.DisplayName,
 		"submission_time": submissionTime,
 	}
 
 	numericProperties := map[string]float64{
 		"rating_mu":       p.Rating.Mu,
 		"rating_sigma":    p.Rating.Sigma,
-		"rating_z":        float64(p.Rating.Z),
 		"rank_percentile": p.RankPercentile,
 		"timestamp":       float64(time.Now().UTC().Unix()),
 	}
@@ -475,7 +472,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionPar
 		qparts = append(qparts, p.MatchmakingQueryAddon)
 	}
 
-	if withRankRange && p.RankPercentileMaxDelta > 0 {
+	if ticketParams.IncludeRankRange && p.RankPercentileMaxDelta > 0 {
 		minRankPercentile := max(p.RankPercentile-p.RankPercentileMaxDelta, 0.0)
 		maxRankPercentile := min(p.RankPercentile+p.RankPercentileMaxDelta, 1.0)
 		qparts = append(qparts, fmt.Sprintf("+properties.rank_percentile:>=%f", minRankPercentile))
@@ -483,7 +480,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionPar
 	}
 
 	// If the user has an early quit penalty, only match them with players who have submitted after now
-	if withEarlyQuitPenalty && p.EarlyQuitPenaltyExpiry.After(time.Now()) {
+	if ticketParams.IncludeEarlyQuitPenalty && p.EarlyQuitPenaltyExpiry.After(time.Now()) {
 		qparts = append(qparts, fmt.Sprintf(`-properties.submission_time:<="%s"`, submissionTime))
 	}
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -42,7 +43,7 @@ var (
 	MatchmakingConfigStorageKey      = "config"
 )
 
-type MatchmakerTicketConfig struct {
+type MatchmakingTicketParameters struct {
 	MinCount                int
 	MaxCount                int
 	CountMultiple           int
@@ -50,7 +51,47 @@ type MatchmakerTicketConfig struct {
 	IncludeEarlyQuitPenalty bool
 }
 
-var DefaultMatchmakerTicketConfigs = map[evr.Symbol]MatchmakerTicketConfig{
+func (m *MatchmakingTicketParameters) MarshalText() ([]byte, error) {
+	// encode it as minCount/maxCount/countMultiple/includeRankRange/includeEarlyQuitPenalty
+	s := fmt.Sprintf("%d/%d/%d/%t/%t", m.MinCount, m.MaxCount, m.CountMultiple, m.IncludeRankRange, m.IncludeEarlyQuitPenalty)
+	return []byte(s), nil
+}
+
+func (m *MatchmakingTicketParameters) UnmarshalText(text []byte) error {
+
+	parts := strings.Split(string(text), "/")
+	if len(parts) != 5 {
+		return fmt.Errorf("invalid MatchmakingTicketParameters format")
+	}
+
+	minCount, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return err
+	}
+
+	maxCount, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return err
+	}
+
+	countMultiple, err := strconv.Atoi(parts[2])
+	if err != nil {
+		return err
+	}
+
+	includeRankRange := parts[3] == "true"
+	includeEarlyQuitPenalty := parts[4] == "true"
+
+	m.MinCount = minCount
+	m.MaxCount = maxCount
+	m.CountMultiple = countMultiple
+	m.IncludeRankRange = includeRankRange
+	m.IncludeEarlyQuitPenalty = includeEarlyQuitPenalty
+
+	return nil
+}
+
+var DefaultMatchmakerTicketConfigs = map[evr.Symbol]MatchmakingTicketParameters{
 	evr.ModeArenaPublic: {
 		MinCount:                1,
 		MaxCount:                8,
@@ -128,14 +169,14 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 	return nil
 }
 
-func (p *EvrPipeline) addTicket(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters, lobbyGroup *LobbyGroup, ticketConfig MatchmakerTicketConfig) error {
+func (p *EvrPipeline) addTicket(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters, lobbyGroup *LobbyGroup, ticketConfig MatchmakingTicketParameters) error {
 	var err error
 	sessionParams, ok := LoadParams(ctx)
 	if !ok {
 		return fmt.Errorf("failed to load session parameters")
 	}
 
-	query, stringProps, numericProps := lobbyParams.MatchmakingParameters(sessionParams, ticketConfig.IncludeRankRange, ticketConfig.IncludeEarlyQuitPenalty)
+	query, stringProps, numericProps := lobbyParams.MatchmakingParameters(sessionParams, &ticketConfig)
 
 	// The matchmaker will always prioritize the players that are about to time out.
 	priorityThreshold := time.Now().UTC().Add((p.matchmakingTicketTimeout() / 3) * 2)
