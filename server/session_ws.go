@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -130,6 +131,7 @@ type SessionParameters struct {
 	UserDisplayNameOverride string // The display name override (user-defined)
 
 	ExternalServerAddr string // The external server address (IP:port)
+	GeoHashPrecision   int    // The geohash precision
 	IsVPN              bool   // The user is using a VPN
 
 	SupportedFeatures []string    // features from the urlparam
@@ -201,6 +203,23 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 		ign = RandomDisplayName()
 	}
 
+	// Parse the geo precision value
+	geoPrecision := 8
+	if s := parseUserQueryFunc(&request, "geo_precision", 2, nil); s != "" {
+		v, err := strconv.Atoi(s)
+		if err != nil {
+			logger.Warn("Failed to parse geo precision", zap.Error(err), zap.String("geo_precision", parseUserQueryFunc(&request, "geo_precision", 2, nil)))
+		} else {
+			if v < 0 {
+				v = 0
+			}
+			if v > 12 {
+				v = 12
+			}
+			geoPrecision = v
+		}
+	}
+
 	params := SessionParameters{
 		Node:                    pipeline.node,
 		HMDSerialOverride:       parseUserQueryFunc(&request, "hmdserial", 32, hmdOverridePattern),
@@ -212,6 +231,7 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 		DisableMAC:        parseUserQueryFunc(&request, "disable_mac", 5, nil) == "true",
 
 		ExternalServerAddr: parseUserQueryFunc(&request, "serveraddr", 64, nil),
+		GeoHashPrecision:   geoPrecision,
 		IsVPN:              evrPipeline.ipqsClient.IsVPN(clientIP),
 		SupportedFeatures:  parseUserQueryCommaDelimited(&request, "features", 32, featurePattern),
 		RequiredFeatures:   parseUserQueryCommaDelimited(&request, "requires", 32, featurePattern),

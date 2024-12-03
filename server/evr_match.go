@@ -15,7 +15,6 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
-	"github.com/ipinfo/go/v2/ipinfo"
 )
 
 const (
@@ -95,12 +94,16 @@ type MatchBroadcaster struct {
 	VersionLock     evr.Symbol   `json:"version_lock,omitempty"`     // The game build version. (EVR)
 	AppId           string       `json:"app_id,omitempty"`           // The game app id. (EVR)
 	Regions         []evr.Symbol `json:"regions,omitempty"`          // The region the match is hosted in. (Matching Only) (EVR)
-	IPinfo          *ipinfo.Core `json:"ip_info,omitempty"`          // The IPinfo of the broadcaster.
 	ServerID        uint64       `json:"server_id,omitempty"`        // The server id of the broadcaster. (EVR)
 	PublisherLock   bool         `json:"publisher_lock,omitempty"`   // Publisher lock (EVR)
 	Features        []string     `json:"features,omitempty"`         // The features of the broadcaster.
 	Tags            []string     `json:"tags,omitempty"`             // The tags given on the urlparam for the match.
 	DesignatedModes []evr.Symbol `json:"designated_modes,omitempty"` // The priority modes for the broadcaster.
+	Location        string       `json:"location,omitempty"`         // The location of the broadcaster.
+	GeoHash         string       `json:"geohash,omitempty"`          // The geohash of the broadcaster.
+	Latitude        float64      `json:"latitude,omitempty"`         // The latitude of the broadcaster.
+	Longitude       float64      `json:"longitude,omitempty"`        // The longitude of the broadcaster.
+	ASNumber        int          `json:"asn,omitempty"`              // The ASN of the broadcaster.
 }
 
 func (g *MatchBroadcaster) IsPriorityFor(mode evr.Symbol) bool {

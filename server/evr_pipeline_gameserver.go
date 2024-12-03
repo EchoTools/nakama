@@ -21,6 +21,7 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"github.com/mmcloughlin/geohash"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 )
@@ -182,8 +183,13 @@ func (p *EvrPipeline) gameServerRegistration(ctx context.Context, logger *zap.Lo
 		externalIP = p.externalIP
 	}
 
+	ipqsData, err := p.ipqsClient.IPDetails(externalIP.String(), true)
+	if err != nil {
+		logger.Warn("Failed to get IPQS data", zap.Error(err))
+	}
+
 	// Create the broadcaster config
-	config := broadcasterConfig(session.UserID().String(), session.id.String(), serverID, internalIP, externalIP, externalPort, regions, versionLock, params.ServerTags, params.SupportedFeatures)
+	config := broadcasterConfig(session.UserID().String(), session.id.String(), serverID, internalIP, externalIP, externalPort, regions, versionLock, params.ServerTags, params.SupportedFeatures, ipqsData, params.GeoHashPrecision)
 
 	// Add the operators userID to the group ids. this allows any host to spawn on a server they operate.
 	groupUUIDs := make([]uuid.UUID, 0, len(groupIDs))
@@ -244,7 +250,22 @@ func (p *EvrPipeline) gameServerRegistration(ctx context.Context, logger *zap.Lo
 	return session.SendEvrUnrequire(evr.NewBroadcasterRegistrationSuccess(config.ServerID, config.Endpoint.ExternalIP))
 }
 
-func broadcasterConfig(userId, sessionId string, serverId uint64, internalIP, externalIP net.IP, port uint16, regions []evr.Symbol, versionLock uint64, tags, features []string) *MatchBroadcaster {
+func broadcasterConfig(userId, sessionId string, serverId uint64, internalIP, externalIP net.IP, port uint16, regions []evr.Symbol, versionLock uint64, tags, features []string, ipqs *IPQSResponse, geoPrecision int) *MatchBroadcaster {
+
+	location := ""
+	lat := 0.0
+	lon := 0.0
+	asn := 0
+	geoHash := ""
+
+	if geoPrecision > 0 && ipqs != nil {
+		location = strings.Join([]string{ipqs.City, ipqs.Region, ipqs.CountryCode}, ", ")
+		lat = ipqs.Latitude
+		lon = ipqs.Longitude
+		asn = ipqs.ASN
+
+		geoHash = geohash.EncodeWithPrecision(lat, lon, uint(geoPrecision))
+	}
 
 	config := &MatchBroadcaster{
 		SessionID:  sessionId,
@@ -259,6 +280,11 @@ func broadcasterConfig(userId, sessionId string, serverId uint64, internalIP, ex
 		VersionLock: evr.ToSymbol(versionLock),
 		GroupIDs:    make([]uuid.UUID, 0),
 		Features:    features,
+		GeoHash:     geoHash,
+		Latitude:    lat,
+		Longitude:   lon,
+		Location:    location,
+		ASNumber:    asn,
 
 		Tags: make([]string, 0),
 	}

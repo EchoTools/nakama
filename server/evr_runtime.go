@@ -343,6 +343,8 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
 
+	previouslySeen := make(map[MatchStateTags]struct{})
+
 	for {
 
 		select {
@@ -351,6 +353,7 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 			return
 		case <-ticker.C:
 		}
+		seen := make(map[MatchStateTags]struct{})
 
 		operatorUsernames := make(map[string]string)
 
@@ -393,6 +396,7 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 				IPAddress:        state.State.Broadcaster.Endpoint.GetExternalIP(),
 				Port:             strconv.Itoa(int(state.State.Broadcaster.Endpoint.Port)),
 			}
+			seen[stateTags] = struct{}{}
 
 			playercounts[stateTags] = append(playercounts[stateTags], len(state.State.Players))
 		}
@@ -407,6 +411,31 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 			nk.metrics.CustomGauge("match_active_gauge", tagMap, float64(len(matches)))
 			nk.metrics.CustomGauge("player_active_gauge", tagMap, float64(playerCount))
 		}
+
+		// Zero out the metrics for the previously seen, but not currently seen matches
+		for tags := range previouslySeen {
+			if _, ok := seen[tags]; !ok {
+				tagMap := tags.AsMap()
+				nk.metrics.CustomGauge("match_active_gauge", tagMap, 0)
+				nk.metrics.CustomGauge("player_active_gauge", tagMap, 0)
+			}
+		}
+
+		previouslySeen = seen
+
+		// Update the geomap data
+		locations := make(map[string][]float64)
+
+		for _, state := range matchStates {
+			if state.State.Broadcaster.Endpoint.GetExternalIP() == "" {
+				continue
+			}
+			locations[state.State.Broadcaster.Endpoint.GetExternalIP()] = []float64{
+				state.State.Broadcaster.Latitude,
+				state.State.Broadcaster.Longitude,
+			}
+		}
+
 	}
 }
 
