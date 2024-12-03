@@ -15,7 +15,7 @@ type BroadcasterSessionStarted struct {
 // Stream streams the message data in/out based on the streaming mode set.
 func (m *BroadcasterSessionStarted) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
-		func() error { return s.StreamGuid(&m.LobbySessionID) },
+		func() error { return s.StreamGUID(&m.LobbySessionID) },
 	})
 }
 

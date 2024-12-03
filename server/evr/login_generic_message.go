@@ -36,7 +36,7 @@ func (m *GenericMessage) Symbol() Symbol {
 
 func (m *GenericMessage) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
-		func() error { return s.StreamGuid(&m.Session) },
+		func() error { return s.StreamGUID(&m.Session) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.AcctId) },
 		func() error { return s.StreamSymbol(&m.MessageType) },
 		func() error { return s.StreamStruct(&m.OtherEvrID) },

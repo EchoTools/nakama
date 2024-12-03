@@ -55,12 +55,12 @@ func (m *LobbyEntrantsV0) Stream(s *EasyStream) error {
 
 	return RunErrorFunctions([]func() error{
 		func() error { return s.StreamNumber(binary.LittleEndian, &count) },
-		func() error { return s.StreamGuid(&m.LobbyID) },
+		func() error { return s.StreamGUID(&m.LobbyID) },
 		func() error {
 			if s.Mode == DecodeMode {
 				m.EntrantIDs = make([]uuid.UUID, count)
 			}
-			return s.StreamGuids(&m.EntrantIDs)
+			return s.StreamGUIDs(&m.EntrantIDs)
 		},
 	})
 }
@@ -79,7 +79,7 @@ func (m *LobbyEntrantsV3) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Unk0) },
 		func() error { return s.StreamStruct(&m.EvrID) },
-		func() error { return s.StreamGuid(&m.EntrantID) },
+		func() error { return s.StreamGUID(&m.EntrantID) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.TeamIndex) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Unk1) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Unk2) },
@@ -99,7 +99,7 @@ func (m *LobbyEntrantsV2) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Unk0) },
 		func() error { return s.StreamStruct(&m.EvrID) },
-		func() error { return s.StreamGuid(&m.EntrantID) },
+		func() error { return s.StreamGUID(&m.EntrantID) },
 	})
 }
 

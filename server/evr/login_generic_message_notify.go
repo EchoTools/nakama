@@ -36,7 +36,7 @@ func (m *GenericMessageNotify) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
 		func() error { return s.StreamBytes(&padding, 8) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.RoomId) },
-		func() error { return s.StreamGuid(&m.Session) },
+		func() error { return s.StreamGUID(&m.Session) },
 		func() error { return s.StreamSymbol(&m.MessageType) },
 		func() error { return s.StreamJson(&m.PartyData, true, ZstdCompression) },
 	})

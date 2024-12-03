@@ -172,10 +172,10 @@ func (s *EasyStream) StreamStruct(obj Serializable) error {
 }
 
 // Stream multiple GUIDs
-func (s *EasyStream) StreamGuids(uuids *[]uuid.UUID) error {
+func (s *EasyStream) StreamGUIDs(uuids *[]uuid.UUID) error {
 	var err error
 	for i := 0; i < len(*uuids); i++ {
-		if err = s.StreamGuid(&(*uuids)[i]); err != nil {
+		if err = s.StreamGUID(&(*uuids)[i]); err != nil {
 			return err
 		}
 	}
@@ -183,31 +183,28 @@ func (s *EasyStream) StreamGuids(uuids *[]uuid.UUID) error {
 }
 
 // Microsoft's GUID has some bytes re-ordered.
-func (s *EasyStream) StreamGuid(uuid *uuid.UUID) error {
+func (s *EasyStream) StreamGUID(guid *uuid.UUID) error {
 	var err error
 	var b []byte
-	fn := func(p *[]byte) {
-		b := *p
-		// flip the first four bytes, and the next two pairs
-		b[0], b[1], b[2], b[3] = b[3], b[2], b[1], b[0]
-		b[4], b[5] = b[5], b[4]
-		b[6], b[7] = b[7], b[6]
-	}
+
 	switch s.Mode {
 	case DecodeMode:
 		b = make([]byte, 16)
 		if err = s.StreamBytes(&b, 16); err != nil {
 			return err
 		}
-		fn(&b)
-		if err = uuid.UnmarshalBinary(b); err != nil {
-			return err
-		}
+		// Reorder the bytes
+
+		b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7] = b[3], b[2], b[1], b[0], b[5], b[4], b[7], b[6]
+		copy(guid[:], b)
+
 	case EncodeMode:
-		if b, err = uuid.MarshalBinary(); err != nil {
-			return err
-		}
-		fn(&b)
+		b = make([]byte, 16)
+		copy(b, guid[:])
+
+		// Reorder the bytes
+		b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7] = b[3], b[2], b[1], b[0], b[5], b[4], b[7], b[6]
+
 		return s.StreamBytes(&b, 16)
 	default:
 		return errInvalidMode

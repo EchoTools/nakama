@@ -13,7 +13,7 @@ type EchoToolsLobbySessionStartedV1 struct {
 }
 
 func (m *EchoToolsLobbySessionStartedV1) Stream(s *EasyStream) error {
-	return s.StreamGuid(&m.LobbySessionID)
+	return s.StreamGUID(&m.LobbySessionID)
 }
 
 type EchoToolsLobbySessionSuccessV1 struct {
@@ -21,7 +21,7 @@ type EchoToolsLobbySessionSuccessV1 struct {
 }
 
 func (m *EchoToolsLobbySessionSuccessV1) Stream(s *EasyStream) error {
-	return s.StreamGuid(&m.LobbySessionID)
+	return s.StreamGUID(&m.LobbySessionID)
 }
 
 type EchoToolsLobbySessionStartV1 struct {
@@ -33,7 +33,7 @@ type EchoToolsLobbySessionEndedV1 struct {
 }
 
 func (m *EchoToolsLobbySessionEndedV1) Stream(s *EasyStream) error {
-	return s.StreamGuid(&m.LobbySessionID)
+	return s.StreamGUID(&m.LobbySessionID)
 }
 
 type EchoToolsLobbySessionErroredV1 struct {
@@ -41,7 +41,7 @@ type EchoToolsLobbySessionErroredV1 struct {
 }
 
 func (m *EchoToolsLobbySessionErroredV1) Stream(s *EasyStream) error {
-	return s.StreamGuid(&m.LobbySessionID)
+	return s.StreamGUID(&m.LobbySessionID)
 }
 
 type EchoToolsLobbySessionLockV1 struct {
@@ -49,7 +49,7 @@ type EchoToolsLobbySessionLockV1 struct {
 }
 
 func (m *EchoToolsLobbySessionLockV1) Stream(s *EasyStream) error {
-	return s.StreamGuid(&m.LobbySessionID)
+	return s.StreamGUID(&m.LobbySessionID)
 }
 
 type EchoToolsLobbySessionUnlockV1 struct {
@@ -57,7 +57,7 @@ type EchoToolsLobbySessionUnlockV1 struct {
 }
 
 func (m *EchoToolsLobbySessionUnlockV1) Stream(s *EasyStream) error {
-	return s.StreamGuid(&m.LobbySessionID)
+	return s.StreamGUID(&m.LobbySessionID)
 }
 
 type EchoToolsLobbyEntrantNewV1 struct {
@@ -65,7 +65,7 @@ type EchoToolsLobbyEntrantNewV1 struct {
 }
 
 func (m *EchoToolsLobbyEntrantNewV1) Stream(s *EasyStream) error {
-	return s.StreamGuid(&m.LobbySessionID)
+	return s.StreamGUID(&m.LobbySessionID)
 }
 
 type EchoToolsLobbyEntrantAcceptV1 struct {
@@ -90,7 +90,7 @@ type EchoToolsLobbySessionDataV1 struct {
 func (m *EchoToolsLobbySessionDataV1) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
 
-		func() error { return s.StreamGuid(&m.SessionID) },
+		func() error { return s.StreamGUID(&m.SessionID) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.DataLength) },
 		func() error { return s.StreamBytes(&m.Data, int(m.DataLength)) },
 	})
@@ -112,7 +112,7 @@ type LobbyStatusEntrant struct {
 func (m *LobbyStatusEntrant) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
 
-		func() error { return s.StreamGuid(&m.EntrantSessionID) },
+		func() error { return s.StreamGUID(&m.EntrantSessionID) },
 		func() error { return s.StreamStruct(&m.EntrantEvrID) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.EntrantFlags) },
 	})
@@ -121,7 +121,7 @@ func (m *LobbyStatusEntrant) Stream(s *EasyStream) error {
 func (m *EchoToolsLobbyStatusV1) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
 
-		func() error { return s.StreamGuid(&m.SessionID) },
+		func() error { return s.StreamGUID(&m.SessionID) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.TimeStepUsecs) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.NumEntrants) },
 		func() error {
@@ -152,7 +152,7 @@ type EchoToolsGameServerRegistrationRequestV1 struct {
 
 func (m *EchoToolsGameServerRegistrationRequestV1) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
-		func() error { return s.StreamGuid(&m.LoginSessionID) },
+		func() error { return s.StreamGUID(&m.LoginSessionID) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.ServerId) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Port) },
 		func() error { return s.StreamIpAddress(&m.InternalIP) },
