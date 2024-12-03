@@ -870,6 +870,7 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 				blueWins = true
 			}
 		}
+
 	case evr.ModeCombatPublic:
 
 		// Check which team won
