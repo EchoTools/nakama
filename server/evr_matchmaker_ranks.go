@@ -13,6 +13,7 @@ import (
 func RecalculatePlayerRankPercentile(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, userID string, mode evr.Symbol, periodicity string, defaultRankPercentile float64, boardNameWeights map[string]float64) (float64, error) {
 
 	percentiles := make([]float64, 0, len(boardNameWeights))
+	weights := make([]float64, 0, len(boardNameWeights))
 
 	for boardName, weight := range boardNameWeights {
 
@@ -25,6 +26,7 @@ func RecalculatePlayerRankPercentile(ctx context.Context, logger *zap.Logger, nk
 
 		if len(records) == 0 {
 			percentiles = append(percentiles, defaultRankPercentile)
+			weights = append(weights, weight)
 			continue
 		}
 
@@ -41,8 +43,9 @@ func RecalculatePlayerRankPercentile(ctx context.Context, logger *zap.Logger, nk
 		}
 
 		percentile := float64(rank) / float64(len(records))
-		// Calculate the percentile.
-		percentiles = append(percentiles, percentile*weight)
+
+		weights = append(weights, weight)
+		percentiles = append(percentiles, percentile)
 
 	}
 
@@ -57,5 +60,34 @@ func RecalculatePlayerRankPercentile(ctx context.Context, logger *zap.Logger, nk
 	}
 	percentile /= float64(len(percentiles))
 
+	percentile, err := normalizedWeightedAverage(percentiles, weights)
+	if err != nil {
+		return defaultRankPercentile, err
+	}
+
 	return percentile, nil
+}
+
+func normalizedWeightedAverage(values, weights []float64) (float64, error) {
+	if len(values) != len(weights) {
+		return 0, fmt.Errorf("values and weights must have the same length")
+	}
+
+	// Normalize weights to sum to 1
+	var weightSum float64
+	for _, w := range weights {
+		weightSum += w
+	}
+
+	if weightSum == 0 {
+		return 0, fmt.Errorf("sum of weights must not be zero")
+	}
+
+	var sum float64
+	for i := range values {
+		normalizedWeight := weights[i] / weightSum
+		sum += values[i] * normalizedWeight
+	}
+
+	return sum, nil
 }
