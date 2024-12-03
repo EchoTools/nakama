@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/gofrs/uuid/v5"
@@ -233,7 +234,7 @@ func (s *MatchLabel) MetricsTags() map[string]string {
 	}
 
 	if s.server != nil {
-		tags["operator_username"] = s.server.GetUsername()
+		tags["operator_username"] = strings.TrimPrefix("broadcaster:", s.server.GetUsername())
 	}
 	return tags
 }

@@ -55,24 +55,43 @@ func errFailedRegistration(session *sessionWS, logger *zap.Logger, err error, co
 
 func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.BroadcasterRegistrationRequest)
-	return p.gameServerRegistration(ctx, logger, session, request.ServerId, request.InternalIP, request.Port, request.Region, request.VersionLock, 0)
+
+	if session.userID.IsNil() {
+		return errFailedRegistration(session, logger, errors.New("game servers must authenticate with discordID/password auth"), evr.BroadcasterRegistration_Unknown)
+	}
+
+	return p.gameServerRegistration(ctx, logger, session, request.ServerId, request.InternalIP, request.Port, request.Region, request.VersionLock, 0, false)
 }
 
 func (p *EvrPipeline) echoToolsGameServerRegistrationRequestV1(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.EchoToolsGameServerRegistrationRequestV1)
 
-	return p.gameServerRegistration(ctx, logger, session, request.ServerId, request.InternalIP, request.Port, request.Region, request.VersionLock, request.TimeStepUsecs)
-}
+	// This new message type includes extra fields and can identify itself with a login session.
+	if request.LoginSessionID == uuid.Nil {
+		return errFailedRegistration(session, logger, errors.New("missing login session ID"), evr.BroadcasterRegistration_Unknown)
+	}
 
-func (p *EvrPipeline) gameServerRegistration(ctx context.Context, logger *zap.Logger, session *sessionWS, serverID uint64, internalIP net.IP, listenPort uint16, region evr.Symbol, versionLock uint64, timeStepUsecs uint32) error {
+	logger.Info("Game server registration request", zap.String("login_session_id", request.LoginSessionID.String()), zap.Uint64("server_id", request.ServerID), zap.String("internal_ip", request.InternalIP.String()), zap.Uint16("port", request.Port), zap.String("region", request.RegionHash.String()), zap.Uint64("version_lock", request.VersionLock), zap.Uint32("time_step_usecs", request.TimeStepUsecs))
+	// Get the login session ID
+	loginSession := p.sessionRegistry.Get(request.LoginSessionID)
+	if loginSession == nil {
+		return errFailedRegistration(session, logger, errors.New("failed to get login session"), evr.BroadcasterRegistration_Unknown)
+	}
 
-	// broadcasterRegistrationRequest is called when the broadcaster has sent a registration request.
-
-	discordId := ""
+	if err := session.Secondary(loginSession.(*sessionWS), true, false); err != nil {
+		return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_Unknown)
+	}
 
 	if session.userID.IsNil() {
-		return errFailedRegistration(session, logger, errors.New("game servers must authenticate with discordID/password auth"), evr.BroadcasterRegistration_Unknown)
+		return errFailedRegistration(session, logger, errors.New("game server is not authenticated."), evr.BroadcasterRegistration_Unknown)
 	}
+
+	return p.gameServerRegistration(ctx, logger, session, request.ServerID, request.InternalIP, request.Port, request.RegionHash, request.VersionLock, request.TimeStepUsecs, true)
+}
+
+func (p *EvrPipeline) gameServerRegistration(ctx context.Context, logger *zap.Logger, session *sessionWS, serverID uint64, internalIP net.IP, listenPort uint16, region evr.Symbol, versionLock uint64, timeStepUsecs uint32, isNative bool) error {
+
+	discordId := ""
 
 	sessionParams, ok := LoadParams(ctx)
 	if !ok {
@@ -189,7 +208,7 @@ func (p *EvrPipeline) gameServerRegistration(ctx context.Context, logger *zap.Lo
 	}
 
 	// Create the broadcaster config
-	config := broadcasterConfig(session.UserID().String(), session.id.String(), serverID, internalIP, externalIP, externalPort, regions, versionLock, params.ServerTags, params.SupportedFeatures, ipqsData, params.GeoHashPrecision)
+	config := broadcasterConfig(session.UserID().String(), session.id.String(), serverID, internalIP, externalIP, externalPort, regions, versionLock, params.ServerTags, params.SupportedFeatures, timeStepUsecs, ipqsData, params.GeoHashPrecision, isNative)
 
 	// Add the operators userID to the group ids. this allows any host to spawn on a server they operate.
 	groupUUIDs := make([]uuid.UUID, 0, len(groupIDs))
@@ -246,11 +265,12 @@ func (p *EvrPipeline) gameServerRegistration(ctx context.Context, logger *zap.Lo
 	if err := p.newParkingMatch(logger, session, config); err != nil {
 		return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_Failure)
 	}
+
 	// Send the registration success message
 	return session.SendEvrUnrequire(evr.NewBroadcasterRegistrationSuccess(config.ServerID, config.Endpoint.ExternalIP))
 }
 
-func broadcasterConfig(userId, sessionId string, serverId uint64, internalIP, externalIP net.IP, port uint16, regions []evr.Symbol, versionLock uint64, tags, features []string, ipqs *IPQSResponse, geoPrecision int) *MatchBroadcaster {
+func broadcasterConfig(userId, sessionId string, serverId uint64, internalIP, externalIP net.IP, port uint16, regions []evr.Symbol, versionLock uint64, tags, features []string, timeStepUsecs uint32, ipqs *IPQSResponse, geoPrecision int, isNative bool) *MatchBroadcaster {
 
 	location := ""
 	lat := 0.0
@@ -276,15 +296,17 @@ func broadcasterConfig(userId, sessionId string, serverId uint64, internalIP, ex
 			ExternalIP: externalIP,
 			Port:       port,
 		},
-		Regions:     regions,
-		VersionLock: evr.ToSymbol(versionLock),
-		GroupIDs:    make([]uuid.UUID, 0),
-		Features:    features,
-		GeoHash:     geoHash,
-		Latitude:    lat,
-		Longitude:   lon,
-		Location:    location,
-		ASNumber:    asn,
+		Regions:       regions,
+		VersionLock:   evr.ToSymbol(versionLock),
+		GroupIDs:      make([]uuid.UUID, 0),
+		Features:      features,
+		GeoHash:       geoHash,
+		Latitude:      lat,
+		Longitude:     lon,
+		Location:      location,
+		ASNumber:      asn,
+		TimeStepUsecs: timeStepUsecs,
+		NativeSupport: isNative,
 
 		Tags: make([]string, 0),
 	}
@@ -701,4 +723,12 @@ func GameServerBySessionID(nk runtime.NakamaModule, sessionID uuid.UUID) (MatchI
 		return MatchID{}, nil, err
 	}
 	return matchID, presence, nil
+}
+
+func (p *EvrPipeline) echoToolsLobbySessionStartedV1(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
+	request := in.(*evr.EchoToolsLobbySessionStartedV1)
+
+	logger.Info("Lobby session started", zap.String("mid", request.LobbySessionID.String()))
+
+	return nil
 }

@@ -88,7 +88,6 @@ var (
 		0xff71856af7e0fbd9: (*LobbyEntrantsV0)(nil),
 		//0x080495a43a6b7251: (*EarlyQuitConfig)(nil),
 		0xe581ba9febf68535: (*EchoToolsGameServerRegistrationRequestV1)(nil),
-		0x340f0161a85febcb: (*EchoToolsLobbySessionSuccessV1)(nil),
 		0x353172e01aa544a5: (*EchoToolsLobbySessionStartV1)(nil),
 		0x350d1070be48ebcb: (*EchoToolsLobbySessionStartedV1)(nil),
 		0x352768e50db544a5: (*EchoToolsLobbySessionEndedV1)(nil),
