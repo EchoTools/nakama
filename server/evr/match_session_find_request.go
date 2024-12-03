@@ -61,7 +61,7 @@ func (m *LobbyFindSessionRequest) Stream(s *EasyStream) error {
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Mode) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Level) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Platform) },
-		func() error { return s.StreamGuid(&m.LoginSessionID) },
+		func() error { return s.StreamGUID(&m.LoginSessionID) },
 		func() error {
 			c := uint8(len(m.Entrants))
 			if err := s.StreamNumber(binary.LittleEndian, &c); err != nil {
@@ -105,8 +105,8 @@ func (m *LobbyFindSessionRequest) Stream(s *EasyStream) error {
 			}
 			return s.Skip(3) // Skip 3 bytes for alignment
 		},
-		func() error { return s.StreamGuid(&m.CurrentLobbyID) },
-		func() error { return s.StreamGuid(&m.GroupID) },
+		func() error { return s.StreamGUID(&m.CurrentLobbyID) },
+		func() error { return s.StreamGUID(&m.GroupID) },
 		func() error { return s.StreamJson(&m.SessionSettings, true, NoCompression) },
 		func() error {
 			// Stream the entrants

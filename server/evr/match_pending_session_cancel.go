@@ -33,7 +33,7 @@ func NewLobbyPendingSessionCancel(session uuid.UUID) *LobbyPendingSessionCancel 
 
 func (m *LobbyPendingSessionCancel) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
-		func() error { return s.StreamGuid(&m.Session) },
+		func() error { return s.StreamGUID(&m.Session) },
 	})
 }
 

@@ -19,7 +19,7 @@ func (lr *UpdateClientProfile) String() string {
 
 func (m *UpdateClientProfile) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
-		func() error { return s.StreamGuid(&m.Session) },
+		func() error { return s.StreamGUID(&m.Session) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.EvrId.PlatformCode) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.EvrId.AccountId) },
 		func() error { return s.StreamJson(&m.ClientProfile, true, NoCompression) },

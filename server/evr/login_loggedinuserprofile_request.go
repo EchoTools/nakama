@@ -28,7 +28,7 @@ func (r LoggedInUserProfileRequest) String() string {
 
 func (m *LoggedInUserProfileRequest) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
-		func() error { return s.StreamGuid(&m.Session) },
+		func() error { return s.StreamGUID(&m.Session) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.EvrID.PlatformCode) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.EvrID.AccountId) },
 		func() error { return s.StreamJson(&m.ProfileRequestData, true, NoCompression) },

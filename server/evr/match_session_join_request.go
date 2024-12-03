@@ -55,10 +55,10 @@ func (m LobbyJoinSessionRequest) Symbol() Symbol {
 func (m *LobbyJoinSessionRequest) Stream(s *EasyStream) error {
 	flags := uint32(0)
 	return RunErrorFunctions([]func() error{
-		func() error { return s.StreamGuid(&m.LobbyID) },
+		func() error { return s.StreamGUID(&m.LobbyID) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.VersionLock) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Platform) },
-		func() error { return s.StreamGuid(&m.LoginSessionID) },
+		func() error { return s.StreamGUID(&m.LoginSessionID) },
 		func() error {
 			switch s.Mode {
 			case DecodeMode:

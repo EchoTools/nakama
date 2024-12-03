@@ -52,7 +52,7 @@ func (m *GameServerJoinRejected) Stream(s *EasyStream) error {
 			if s.Mode == DecodeMode {
 				m.EntrantIDs = make([]uuid.UUID, (s.r.Len()-s.Position())/16)
 			}
-			return s.StreamGuids(&m.EntrantIDs)
+			return s.StreamGUIDs(&m.EntrantIDs)
 		},
 	})
 }

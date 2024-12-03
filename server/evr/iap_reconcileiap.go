@@ -34,7 +34,7 @@ func NewReconcileIAP(userID EvrId, session uuid.UUID) *ReconcileIAP {
 
 func (r *ReconcileIAP) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
-		func() error { return s.StreamGuid(&r.Session) },
+		func() error { return s.StreamGUID(&r.Session) },
 		func() error { return s.StreamStruct(&r.EvrId) },
 	})
 }

@@ -15,8 +15,8 @@ var (
 	EvrIdNil = EvrId{}
 )
 
-func init() {
-	validate = validator.New()
+func ProfileValidator() *validator.Validate {
+	validate := validator.New()
 	validate.RegisterValidation("restricted", func(fl validator.FieldLevel) bool { return true })
 	validate.RegisterValidation("blocked", forceFalse)
 	validate.RegisterValidation("evrid", func(fl validator.FieldLevel) bool {
@@ -26,6 +26,8 @@ func init() {
 		}
 		return true
 	})
+
+	return validate
 }
 
 func forceFalse(fl validator.FieldLevel) bool {

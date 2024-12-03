@@ -50,7 +50,7 @@ func NewLobbyStatusNotifyv2(channel uuid.UUID, message string, expiryTime uint64
 func (l *LobbyStatusNotify) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
 
-		func() error { return s.StreamGuid(&l.Channel) },
+		func() error { return s.StreamGUID(&l.Channel) },
 		func() error { return s.StreamBytes(&l.Message, 64) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &l.ExpiryTime) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &l.Reason) },

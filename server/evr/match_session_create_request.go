@@ -43,7 +43,7 @@ func (m *LobbyCreateSessionRequest) Stream(s *EasyStream) error {
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Mode) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Level) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Platform) },
-		func() error { return s.StreamGuid(&m.LoginSessionID) },
+		func() error { return s.StreamGUID(&m.LoginSessionID) },
 		func() error {
 			c := int8(len(m.Entrants))
 			if err := s.StreamNumber(binary.LittleEndian, &c); err != nil {
@@ -94,7 +94,7 @@ func (m *LobbyCreateSessionRequest) Stream(s *EasyStream) error {
 			}
 			return nil
 		},
-		func() error { return s.StreamGuid(&m.GroupID) },
+		func() error { return s.StreamGUID(&m.GroupID) },
 		func() error {
 			return s.StreamJson(&m.SessionSettings, true, NoCompression)
 		},

@@ -220,8 +220,8 @@ func (m *GameServerSessionStart) Stream(s *EasyStream) error {
 	finalStructCount := byte(len(m.Entrants))
 	pad1 := byte(0)
 	return RunErrorFunctions([]func() error{
-		func() error { return s.StreamGuid(&m.MatchID) },
-		func() error { return s.StreamGuid(&m.GroupID) },
+		func() error { return s.StreamGUID(&m.MatchID) },
+		func() error { return s.StreamGUID(&m.GroupID) },
 		func() error { return s.StreamByte(&m.PlayerLimit) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &finalStructCount) },
 		func() error { return s.StreamByte(&m.LobbyType) },
@@ -233,7 +233,7 @@ func (m *GameServerSessionStart) Stream(s *EasyStream) error {
 			}
 			for _, entrant := range m.Entrants {
 				err := RunErrorFunctions([]func() error{
-					func() error { return s.StreamGuid(&entrant.Unk0) },
+					func() error { return s.StreamGUID(&entrant.Unk0) },
 					func() error { return s.StreamStruct(&entrant.EvrID) },
 					func() error { return s.StreamNumber(binary.LittleEndian, &entrant.Flags) },
 				})
