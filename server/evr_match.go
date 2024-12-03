@@ -202,6 +202,7 @@ var (
 	ErrJoinRejectReasonFailedToAssignTeam        = errors.New("failed to assign team")
 	ErrJoinRejectReasonPartyMembersMustHaveRoles = errors.New("party members must have roles")
 	ErrJoinRejectReasonMatchTerminating          = errors.New("match terminating")
+	ErrJoinRejectReasonMatchClosed               = errors.New("match closed to new entrants")
 	ErrJoinRejectReasonFeatureMismatch           = errors.New("feature mismatch")
 )
 
@@ -262,10 +263,6 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		return state, true, ""
 	}
 
-	if state.Started() && !state.Open {
-		return state, false, ErrJoinRejectReasonMatchTerminating.Error()
-	}
-
 	if state.LobbyType == UnassignedLobby {
 		return state, false, ErrJoinRejectReasonUnassignedLobby.Error()
 	}
@@ -274,6 +271,20 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	meta := &EntrantMetadata{}
 	if err := meta.FromMatchMetadata(metadata); err != nil {
 		return state, false, fmt.Sprintf("failed to unmarshal metadata: %v", err)
+	}
+
+	// Check if the match is locked.
+	if !state.Open {
+
+		// Reject if the match is terminating
+		if state.Started() && state.terminateTick > 0 {
+			return state, false, ErrJoinRejectReasonMatchTerminating.Error()
+		}
+
+		// Only allow spectators to join closed/ending matches
+		if !meta.Presence.IsSpectator() {
+			return state, false, ErrJoinRejectReasonMatchClosed.Error()
+		}
 	}
 
 	// Remove any reservations of existing players (i.e. party members already in the match)
