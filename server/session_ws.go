@@ -369,6 +369,22 @@ func parseUserQueryCommaDelimited(request *http.Request, key string, maxLength i
 	return items
 }
 
+func (s *sessionWS) Secondary(loginSession *sessionWS, isLobby bool, isServer bool) error {
+	// This is a secondary session, so it should inherit the login session's context.
+
+	params, ok := LoadParams(loginSession.Context())
+	if !ok {
+		return fmt.Errorf("login session parameters not found: %v", loginSession.ID())
+	}
+	if isLobby {
+		params.LobbySession.Store(s)
+	}
+	if isServer {
+		params.ServerSession.Store(s)
+	}
+
+	return s.SetIdentity(loginSession.UserID(), params.EvrID, loginSession.Username())
+}
 func (s *sessionWS) SetIdentity(userID uuid.UUID, evrID evr.EvrId, username string) error {
 	// Each player has a single login connection, which will act as the core session.
 	// When this connection is terminated, all other connections should be terminated.

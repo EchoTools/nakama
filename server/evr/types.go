@@ -8,19 +8,22 @@ import (
 	"github.com/gofrs/uuid/v5"
 )
 
-// A message that can be used to validate the session.
-type IdentifyingMessage interface {
-	GetSessionID() uuid.UUID
+type LoginIdentifier interface {
+	GetLoginSessionID() uuid.UUID
+}
+
+type XPIdentifier interface {
+	LoginIdentifier
 	GetEvrID() EvrId
 }
 
 type LobbySessionMessage interface {
-	IdentifyingMessage
+	LoginIdentifier
 	LobbyID() uuid.UUID
 }
 
 type LobbySessionRequest interface {
-	IdentifyingMessage
+	LoginIdentifier
 	GetVersionLock() Symbol
 	GetAppID() Symbol
 	GetGroupID() uuid.UUID

@@ -14,7 +14,7 @@ const (
 )
 
 var (
-	_ = IdentifyingMessage(&LobbyFindSessionRequest{})
+	_ = LoginIdentifier(&LobbyFindSessionRequest{})
 	_ = LobbySessionRequest(&LobbyFindSessionRequest{})
 )
 
@@ -138,7 +138,7 @@ func (m *LobbyFindSessionRequest) GetMode() Symbol { return m.Mode }
 
 func (m *LobbyFindSessionRequest) GetGroupID() uuid.UUID { return m.GroupID }
 
-func (m LobbyFindSessionRequest) GetSessionID() uuid.UUID { return m.LoginSessionID }
+func (m LobbyFindSessionRequest) GetLoginSessionID() uuid.UUID { return m.LoginSessionID }
 
 func (m LobbyFindSessionRequest) GetEvrID() (evrID EvrId) {
 	if len(m.Entrants) > 0 {

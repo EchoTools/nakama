@@ -363,16 +363,25 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 	// Identifying messages are used to associate the message with a user.
 	// The session ID is used to identify the user.
 	// The session ID is mostly ignored once the connection is established.
-	if idmessage, ok := in.(evr.IdentifyingMessage); ok {
-		// Validate the user identifier
-		if !idmessage.GetEvrID().Valid() {
-			logger.Error("Invalid evr id", zap.String("evr_id", idmessage.GetEvrID().String()))
-			return false
-		}
+	if idmessage, ok := in.(evr.LoginIdentifier); ok {
 		// If the message is an identifying message, validate the session and evr id.
-		if err := session.LobbySession(idmessage.GetSessionID()); err != nil {
+		if err := session.LobbySession(idmessage.GetLoginSessionID()); err != nil {
 			logger.Error("Invalid session", zap.Error(err))
 			// Disconnect the client if the session is invalid.
+			return false
+		}
+	}
+
+	if xpimessage, ok := in.(evr.XPIdentifier); ok {
+		// If the message is an identifying message, validate the session and evr id.
+		params, ok := LoadParams(session.Context())
+		if !ok {
+			logger.Error("Failed to get lobby parameters")
+			return false
+		}
+
+		if !params.EvrID.Equals(xpimessage.GetEvrID()) {
+			logger.Error("mismatched evr id", zap.String("evrid", xpimessage.GetEvrID().String()), zap.String("evrid2", params.EvrID.String()))
 			return false
 		}
 	}

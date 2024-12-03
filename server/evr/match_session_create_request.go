@@ -9,7 +9,7 @@ import (
 )
 
 var (
-	_ = IdentifyingMessage(&LobbyCreateSessionRequest{})
+	_ = LoginIdentifier(&LobbyCreateSessionRequest{})
 	_ = LobbySessionRequest(&LobbyCreateSessionRequest{})
 )
 
@@ -144,7 +144,7 @@ func (m *LobbyCreateSessionRequest) String() string {
 	)
 }
 
-func (m *LobbyCreateSessionRequest) GetSessionID() uuid.UUID {
+func (m *LobbyCreateSessionRequest) GetLoginSessionID() uuid.UUID {
 	return m.LoginSessionID
 }
 
