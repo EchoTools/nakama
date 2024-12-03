@@ -17,9 +17,10 @@ package server
 import (
 	"context"
 	"fmt"
-	"google.golang.org/protobuf/types/known/timestamppb"
 	"sync"
 	"time"
+
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/blugelabs/bluge"
 	"github.com/gofrs/uuid/v5"

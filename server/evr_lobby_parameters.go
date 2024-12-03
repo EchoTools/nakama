@@ -319,7 +319,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 	smoothingFactor := globalSettings.RankPercentileDampingFactor
 	if userSettings.RankPercentileDampingFactor > 0 {
 		// Ensure the percentile is at least 0.2
-		basePercentile = basePercentile - (dampingPercentile-basePercentile)*smoothingFactor
+		basePercentile = basePercentile + (dampingPercentile-basePercentile)*smoothingFactor
 	}
 
 	maxServerRTT := 250
