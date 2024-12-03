@@ -101,7 +101,7 @@ func RemoteLogMessageFromMessage(strMap map[string]interface{}, data []byte) (an
 		case "GHOST_USER":
 			m = &RemoteLogGhostUser{}
 		case "PERSONAL_BUBBLE":
-			m = &RemoteLogRepairMatrix{}
+			m = &RemoteLogPersonalBubble{}
 		case "MUTE_ALL":
 			m = &RemoteLogInteractionEvent{}
 		case "MUTE_USER":
@@ -821,4 +821,16 @@ type RemoteLogCSTUsageMetrics struct {
 
 func (m RemoteLogCSTUsageMetrics) SessionUUID() uuid.UUID {
 	return UUIDFromRemoteLogString(m.SessionUUIDStr)
+}
+
+type RemoteLogPersonalBubble struct {
+	Enabled           bool   `json:"[enabled]"`
+	GameType          string `json:"[game_type]"`
+	Map               string `json:"[map]"`
+	PlayerDisplayname string `json:"[player][displayname]"`
+	PlayerUserid      string `json:"[player][userid]"`
+	RoomID            int64  `json:"[room_id]"`
+	SocialGroupID     string `json:"[social_group_id]"`
+	Message           string `json:"message"`
+	MessageType       string `json:"message_type"`
 }
