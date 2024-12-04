@@ -276,7 +276,7 @@ func (p *EvrPipeline) authorizeGuildGroupSession(ctx context.Context, session Se
 		allowedFeatures := groupMetadata.AllowedFeatures
 		for _, feature := range features {
 			if !slices.Contains(allowedFeatures, feature) {
-				return NewLobbyError(KickedFromLobbyGroup, "This guild does not allow clients with `feature DLLs``.")
+				return NewLobbyError(KickedFromLobbyGroup, "This guild does not allow clients with `feature DLLs`.")
 			}
 		}
 	}
