@@ -203,7 +203,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 
 	if userSettings.LobbyGroupName != "" {
 		lobbyGroupName = userSettings.LobbyGroupName
-		partyID = uuid.NewV5(uuid.Nil, lobbyGroupName)
+		partyID = uuid.NewV5(EntrantIDSalt, lobbyGroupName)
 	}
 
 	node := session.pipeline.node
