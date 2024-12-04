@@ -18,6 +18,7 @@ import (
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"go.uber.org/zap"
 )
 
 const (
@@ -1412,6 +1413,29 @@ func PlayerStatisticsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 				Value:     8.333,
 				Count:     1,
 			}
+
+			if mode == evr.ModeArenaPublic {
+				rankPercentile := 0.0
+				globalSettings, err := LoadMatchmakingSettings(ctx, nk, userID)
+				if err != nil {
+					return "", err
+				}
+				userSettings, err := LoadMatchmakingSettings(ctx, nk, userID)
+				if err != nil {
+					return "", err
+				}
+
+				rankPercentile, err = CalculateSmoothedPlayerRankPercentile(ctx, zap.NewNop(), nk, userID, mode, &globalSettings, &userSettings)
+				if err != nil {
+					return "", err
+				}
+
+				stats[modestr]["ArenaRankPercentile"] = evr.MatchStatistic{
+					Operation: "rep",
+					Value:     rankPercentile,
+					Count:     1,
+				}
+			}
 		}
 
 		ratings, err := GetPlayerRatings(ctx, db, uid)
@@ -1462,16 +1486,16 @@ type AccountSearchRequest struct {
 	DisplayNamePattern string `json:"display_name"`
 }
 
+type AccountSearchResponse struct {
+	DisplayNameMatchList []DisplayNameMatchItem `json:"display_name_matches"`
+}
+
 type DisplayNameMatchItem struct {
 	DisplayName string    `json:"display_name"`
 	UserID      string    `json:"user_id"`
 	GroupID     string    `json:"group_id"`
 	IsCurrent   bool      `json:"is_current"`
 	UpdatedAt   time.Time `json:"updated_at"`
-}
-
-type AccountSearchResponse struct {
-	DisplayNameMatchList []DisplayNameMatchItem `json:"display_name_matches"`
 }
 
 func AccountSearchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {

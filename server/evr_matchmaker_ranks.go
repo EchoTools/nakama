@@ -10,6 +10,54 @@ import (
 	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
+func CalculateSmoothedPlayerRankPercentile(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, userID string, mode evr.Symbol, globalSettings, userSettings *MatchmakingSettings) (float64, error) {
+
+	defaultRankPercentile := globalSettings.RankPercentileDefault
+	if userSettings.RankPercentileDefault != 0 {
+		defaultRankPercentile = userSettings.RankPercentileDefault
+	}
+
+	baseSchedule := globalSettings.RankResetSchedule
+	if userSettings.RankResetSchedule != "" {
+		baseSchedule = userSettings.RankResetSchedule
+	}
+
+	dampingSchedule := globalSettings.RankResetScheduleDamping
+	if userSettings.RankResetScheduleDamping != "" {
+		dampingSchedule = userSettings.RankResetScheduleDamping
+	}
+
+	dampingFactor := globalSettings.RankPercentileDampingFactor
+	if userSettings.RankPercentileDampingFactor != 0 {
+		dampingFactor = userSettings.RankPercentileDampingFactor
+	}
+
+	boardWeights, ok := globalSettings.RankBoardWeights[mode.String()]
+	if !ok {
+		if userSettings.RankBoardWeights != nil {
+			boardWeights, ok = userSettings.RankBoardWeights[mode.String()]
+			if !ok {
+				return 0, fmt.Errorf("No rank board weights found for mode %v", mode)
+			}
+		} else {
+			return 0, fmt.Errorf("No rank board weights found for mode %v", mode)
+		}
+	}
+
+	basePercentile, err := RecalculatePlayerRankPercentile(ctx, logger, nk, userID, mode, baseSchedule, defaultRankPercentile, boardWeights)
+	if err != nil {
+		return 0.0, fmt.Errorf("failed to get overall percentile: %w", err)
+	}
+
+	dampingPercentile, err := RecalculatePlayerRankPercentile(ctx, logger, nk, userID, mode, dampingSchedule, defaultRankPercentile, boardWeights)
+	if err != nil {
+		return 0.0, fmt.Errorf("failed to get daily percentile: %w", err)
+	}
+	// Ensure the percentile is at least 0.2
+
+	return basePercentile + (dampingPercentile-basePercentile)*dampingFactor, nil
+}
+
 func RecalculatePlayerRankPercentile(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, userID string, mode evr.Symbol, periodicity string, defaultRankPercentile float64, boardNameWeights map[string]float64) (float64, error) {
 
 	percentiles := make([]float64, 0, len(boardNameWeights))
