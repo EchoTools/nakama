@@ -560,8 +560,16 @@ func AverageLatencyHistories(histories LatencyHistory) map[string]int {
 func recordPercentileToLeaderboard(ctx context.Context, nk runtime.NakamaModule, userID, username string, mode evr.Symbol, percentile float64) error {
 	periods := []string{"alltime", "daily", "weekly"}
 
+	modeprefix := ""
+	switch mode {
+	case evr.ModeArenaPublic:
+		modeprefix = "Arena"
+	case evr.ModeCombatPublic:
+		modeprefix = "Combat"
+	}
+
 	for _, period := range periods {
-		id := fmt.Sprintf("%s:%s:%s", mode.String(), "AggregateRankPercentile", period)
+		id := fmt.Sprintf("%s:%s:%s", mode.String(), modeprefix+"RankPercentile", period)
 
 		score, subScore := ValueToScore(percentile)
 
