@@ -511,6 +511,12 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 		return errors.New("session parameters not found")
 	}
 
+	if ismember, err := CheckSystemGroupMembership(ctx, p.db, session.userID.String(), GroupGlobalDevelopers); err != nil {
+		return fmt.Errorf("failed to check system group membership: %w", err)
+	} else if ismember {
+		params.IsGlobalDeveloper.Store(true)
+	}
+
 	if params.EvrID != request.EvrID {
 		return fmt.Errorf("evrId mismatch: %s != %s", params.EvrID.Token(), request.EvrID.Token())
 	}
@@ -917,12 +923,50 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 	request := in.(*evr.OtherUserProfileRequest)
 
 	go func() {
-		data, err := p.profileRegistry.GetCached(ctx, request.EvrId)
-		if err != nil {
-			logger.Warn("Failed to get cached profile", zap.Error(err))
-			return
+		var data *json.RawMessage
+		var err error
+		// if the requester is a dev, modify the display name
+		if params, ok := LoadParams(ctx); ok && params.IsGlobalDeveloper.Load() {
+			profile := evr.ServerProfile{}
+
+			bytes, _ := p.profileRegistry.GetCached(ctx, request.EvrId)
+
+			_ = json.Unmarshal(*bytes, &profile)
+
+			// Get the match the current player is in
+			if matchID, _, err := GetMatchBySessionID(p.runtimeModule, session.id); err == nil {
+
+				if label, err := MatchLabelByID(ctx, p.runtimeModule, matchID); err == nil && label != nil {
+
+					// Add asterisk if the player is backfill
+					if player := label.GetPlayerByEvrID(request.EvrId); player != nil {
+						// If the player is backfill, add a note to the display name
+
+						if player.IsBackfill() {
+							profile.DisplayName = fmt.Sprintf("%s*", profile.DisplayName)
+						}
+
+						percentile := int(player.RankPercentile * 100)
+						rating := int(player.RatingMu)
+						sigma := int(player.RatingSigma)
+
+						profile.DisplayName = fmt.Sprintf("%s|%d/%d:%d", profile.DisplayName, percentile, rating, sigma)
+					}
+				}
+			}
+			var rawMessage json.RawMessage
+			if rawMessage, err = json.Marshal(profile); err != nil {
+				data = &rawMessage
+			}
 		}
 
+		if data == nil {
+			data, err = p.profileRegistry.GetCached(ctx, request.EvrId)
+			if err != nil {
+				logger.Warn("Failed to get cached profile", zap.Error(err))
+				return
+			}
+		}
 		// Construct the response
 		response := &evr.OtherUserProfileSuccess{
 			EvrId:             request.EvrId,
