@@ -306,6 +306,13 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 	}
 
 	label, err := AllocateGameServer(ctx, logger, d.nk, groupID, extIPs, settings, []string{region.String()}, true, false)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to allocate game server: %w", err)
+	}
+
+	if label == nil {
+		return nil, 0, fmt.Errorf("failed to allocate game server: label is nil")
+	}
 
 	latencyMillis = latencyHistory.AverageRTT(label.Broadcaster.Endpoint.ExternalIP.String(), true)
 
