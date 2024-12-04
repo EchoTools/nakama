@@ -142,7 +142,7 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.Ma
 	m.sortByDraw(predictions)
 	m.sortLimitRankSpread(predictions, MaximumRankDelta)
 	m.sortBySize(predictions)
-	//m.sortPriority(predictions)
+	m.sortPriority(predictions)
 
 	madeMatches := m.assembleUniqueMatches(predictions)
 
