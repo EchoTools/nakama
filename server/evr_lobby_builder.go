@@ -577,7 +577,7 @@ func AllocateGameServer(ctx context.Context, logger runtime.Logger, nk runtime.N
 		label, err = LobbyPrepareSession(ctx, nk, l.ID, settings)
 		if err != nil {
 			logger.WithFields(map[string]interface{}{
-				"mid": label.ID.UUID.String(),
+				"mid": l.ID.UUID.String(),
 				"err": err,
 			}).Warn("Failed to prepare session")
 			continue
