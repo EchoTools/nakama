@@ -312,6 +312,14 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		}
 	}
 
+	if globalSettings.StaticBaseRankPercentile > 0 {
+		basePercentile = globalSettings.StaticBaseRankPercentile
+	}
+
+	if userSettings.StaticBaseRankPercentile > 0 {
+		basePercentile = userSettings.StaticBaseRankPercentile
+	}
+
 	if dampingPercentile == 0 {
 		dampingPercentile = basePercentile
 	}

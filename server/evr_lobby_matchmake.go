@@ -258,6 +258,7 @@ type MatchmakingSettings struct {
 	NextMatchRole               string                        `json:"next_match_role"`                          // The role to join the next match as
 	NextMatchDiscordID          string                        `json:"next_match_discord_id"`                    // The discord ID to join the next match as
 	MaxServerRTT                int                           `json:"max_server_rtt,omitempty"`                 // The maximum RTT to allow
+	StaticBaseRankPercentile    float64                       `json:"static_rank_percentile,omitempty"`         // The static rank percentile to use
 	RankPercentileMaxDelta      float64                       `json:"rank_percentile_delta_max,omitempty"`      // The upper limit percentile range to matchmake with
 	RankResetSchedule           string                        `json:"rank_reset_schedule,omitempty"`            // The reset schedule to use for rankings
 	RankResetScheduleDamping    string                        `json:"rank_reset_schedule_damping,omitempty"`    // The reset schedule to use for rankings
