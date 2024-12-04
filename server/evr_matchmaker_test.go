@@ -571,7 +571,60 @@ func writeAsJSONFile(data interface{}, filename string) {
 	file.Write(output)
 }
 
+func TestOverrideFn(t *testing.T) {
+	candidatesFilename := "../_matches/m4.json"
+	// Load the candidate data from the json file
+	file, err := os.Open(candidatesFilename)
+	if err != nil {
+		t.Error("Error opening file")
+	}
+	defer file.Close()
+
+	var data CandidateData
+
+	// read in the file
+	decoder := json.NewDecoder(file)
+	err = decoder.Decode(&data)
+	if err != nil {
+		t.Errorf("Error decoding file: %v", err)
+	}
+
+	t.Logf("candidates: %d", len(data.Candidates))
+
+	sbmm := NewSkillBasedMatchmaker()
+
+	runtimeCombinations := make([][]runtime.MatchmakerEntry, len(data.Candidates))
+	for i, combination := range data.Candidates {
+		runtimeEntry := make([]runtime.MatchmakerEntry, len(combination))
+		for j, entry := range combination {
+			runtimeEntry[j] = runtime.MatchmakerEntry(entry)
+		}
+		runtimeCombinations[i] = runtimeEntry
+	}
+
+	deduped, _ := sbmm.filterDuplicates(runtimeCombinations)
+
+	players := make(map[string]struct{}, 0)
+	for _, combination := range runtimeCombinations {
+		for _, entry := range combination {
+			players[entry.GetPresence().GetUsername()] = struct{}{}
+		}
+	}
+
+	t.Logf("players: %d, original: %d, filtered: %d", len(players), len(data.Candidates), len(deduped))
+	t.Errorf("autofail")
+
+}
+
 func TestCharacterizationMatchmaker1v1(t *testing.T) {
+
+	candidatesFilename := "../_matches/m4.json"
+	// Load the candidate data from the json file
+	file, err := os.Open(candidatesFilename)
+	if err != nil {
+		t.Error("Error opening file")
+	}
+	defer file.Close()
 	consoleLogger := loggerForTest(t)
 
 	useOverride := true
@@ -580,7 +633,6 @@ func TestCharacterizationMatchmaker1v1(t *testing.T) {
 	mu := sync.Mutex{}
 	var matchmaker *LocalMatchmaker
 	var cleanup func() error
-	var err error
 
 	if useOverride {
 		matchmaker, cleanup, err = createTestMatchmakerWithOverride(t, consoleLogger, true, func(presences []*PresenceID, envelope *rtapi.Envelope) {
@@ -589,9 +641,8 @@ func TestCharacterizationMatchmaker1v1(t *testing.T) {
 			mu.Lock()
 			defer mu.Unlock()
 			matchesSeen[id] = envelope.GetMatchmakerMatched()
-
 		},
-			EvrMatchmakerOverrideFn,
+			evrMatchmakerOverrideFn,
 		)
 	} else {
 
@@ -609,13 +660,6 @@ func TestCharacterizationMatchmaker1v1(t *testing.T) {
 	}
 
 	defer cleanup()
-
-	// Load the candidate data from the json file
-	file, err := os.Open("../_matches/m1.json")
-	if err != nil {
-		t.Error("Error opening file")
-	}
-	defer file.Close()
 
 	var data CandidateData
 
@@ -801,4 +845,32 @@ func splitProperties(props map[string]interface{}) (map[string]string, map[strin
 		}
 	}
 	return stringProperties, numericProperties
+}
+
+// Special function used for testing the matchmaker
+func evrMatchmakerOverrideFn(ctx context.Context, candidateMatches [][]*MatchmakerEntry) (matches [][]*MatchmakerEntry) {
+
+	runtimeCombinations := make([][]runtime.MatchmakerEntry, len(candidateMatches))
+	for i, combination := range candidateMatches {
+		runtimeEntry := make([]runtime.MatchmakerEntry, len(combination))
+		for j, entry := range combination {
+			runtimeEntry[j] = runtime.MatchmakerEntry(entry)
+		}
+		runtimeCombinations[i] = runtimeEntry
+	}
+
+	sbmm := NewSkillBasedMatchmaker()
+	returnedEntries, _ := sbmm.processPotentialMatches(runtimeCombinations)
+
+	combinations := make([][]*MatchmakerEntry, len(returnedEntries))
+	for i, combination := range returnedEntries {
+		entries := make([]*MatchmakerEntry, len(combination))
+		for j, entry := range combination {
+			e, _ := entry.(*MatchmakerEntry)
+			entries[j] = e
+		}
+		combinations[i] = entries
+	}
+	return combinations
+
 }
