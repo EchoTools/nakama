@@ -392,7 +392,25 @@ func (c *DiscordCache) SyncGuildGroupMember(ctx context.Context, userID, groupID
 		logger = logger.With(zap.String("display_name", displayName), zap.String("prev_display_name", prevDisplayName))
 		displayName, err := c.checkDisplayName(ctx, c.nk, accountMetadata.ID(), displayName)
 		if err != nil {
-			logger.Warn("Error checking display name", zap.Error(err))
+			switch e := err.(type) {
+			case DisplayNameInUseError:
+				logger.Warn("Display name in use", zap.Error(e))
+
+				accountMetadata.SetGroupDisplayName(groupID, member.User.Username)
+
+				// send user a message telling them their display name is in use.
+				channel, err := c.dg.UserChannelCreate(discordID)
+				if err != nil {
+					return fmt.Errorf("error creating user channel: %w", err)
+				}
+				otherDiscordID := c.UserIDToDiscordID(e.UserIDs[0])
+				message := fmt.Sprintf("The display name `%s` is already in use/reserved by <@%s>. Your in-game name will be your username: `%s`", EscapeDiscordMarkdown(e.DisplayName), otherDiscordID, EscapeDiscordMarkdown(member.User.Username))
+				if _, err := c.dg.ChannelMessageSend(channel.ID, message); err != nil {
+					return fmt.Errorf("error sending message: %w", err)
+				}
+			default:
+				logger.Warn("Error checking display name", zap.Error(err))
+			}
 		} else {
 
 			if err := DisplayNameHistoryAdd(ctx, c.nk, accountMetadata.ID(), groupID, displayName); err != nil {
@@ -639,6 +657,15 @@ func (d *DiscordCache) GuildGroupMemberRemove(ctx context.Context, guildID, disc
 	return nil
 }
 
+type DisplayNameInUseError struct {
+	DisplayName string
+	UserIDs     []string
+}
+
+func (e DisplayNameInUseError) Error() string {
+	return fmt.Sprintf("display name `%s` is already in use by %s", e.DisplayName, e.UserIDs)
+}
+
 func (d *DiscordCache) checkDisplayName(ctx context.Context, nk runtime.NakamaModule, userID string, displayName string) (string, error) {
 
 	// Filter usernames of other players
@@ -650,7 +677,7 @@ func (d *DiscordCache) checkDisplayName(ctx context.Context, nk runtime.NakamaMo
 		if u.Id == userID {
 			continue
 		}
-		return "", status.Errorf(codes.AlreadyExists, "username `%s` is already taken", displayName)
+		return "", DisplayNameInUseError{DisplayName: displayName, UserIDs: []string{u.Id}}
 	}
 	userIDs, err := DisplayNameHistoryActiveList(ctx, nk, displayName)
 	if err != nil {
@@ -662,7 +689,7 @@ func (d *DiscordCache) checkDisplayName(ctx context.Context, nk runtime.NakamaMo
 	}
 
 	if len(userIDs) > 0 {
-		return "", status.Errorf(codes.AlreadyExists, "display name `%s` is already in use by %s", displayName, userIDs)
+		return "", DisplayNameInUseError{DisplayName: displayName, UserIDs: userIDs}
 	}
 
 	return displayName, nil
