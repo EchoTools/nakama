@@ -313,8 +313,9 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 	rtts := lobbyParams.latencyHistory.LatestRTTs()
 
 	cycleCount := 0
+	backfillMultipler := 1.5
 
-	fallbackTimer := time.NewTimer(p.matchmakingTicketTimeout() * 2)
+	fallbackTimer := time.NewTimer(time.Duration(backfillMultipler * float64(p.matchmakingTicketTimeout())))
 
 	for {
 
