@@ -153,16 +153,21 @@ func (m *SkillBasedMatchmaker) filterDuplicates(candidates [][]runtime.Matchmake
 	// Filter out the duplicates
 	seen := make(map[string]struct{})
 	count := 0
+
 	for i := 0; i < len(candidates); i++ {
 
-		sort.Slice(candidates[i], func(k, l int) bool {
-			return candidates[i][k].GetPresence().GetUserId() < candidates[i][l].GetPresence().GetUserId()
-		})
-
-		key := ""
+		seenTickets := make(map[string]struct{})
+		tickets := make([]string, 0, len(candidates[i]))
 		for _, e := range candidates[i] {
-			key += e.GetPresence().GetUserId()
+			if _, ok := seenTickets[e.GetTicket()]; !ok {
+				tickets = append(tickets, e.GetTicket())
+				seenTickets[e.GetTicket()] = struct{}{}
+			}
 		}
+
+		sort.Strings(tickets)
+
+		key := strings.Join(tickets, "")
 
 		if _, ok := seen[key]; ok {
 			count++
@@ -172,6 +177,7 @@ func (m *SkillBasedMatchmaker) filterDuplicates(candidates [][]runtime.Matchmake
 			seen[key] = struct{}{}
 		}
 	}
+
 	return candidates, count
 }
 
@@ -407,6 +413,7 @@ func (m *SkillBasedMatchmaker) predictOutcomes(candidates [][]runtime.Matchmaker
 	return predictions
 }
 func (m *SkillBasedMatchmaker) assembleUniqueMatches(ratedMatches []PredictedMatch) [][]runtime.MatchmakerEntry {
+
 	seen := make(map[string]struct{})
 	selected := make([][]runtime.MatchmakerEntry, 0, len(ratedMatches))
 
