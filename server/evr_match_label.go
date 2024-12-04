@@ -449,11 +449,11 @@ func (l *MatchLabel) PublicView() *MatchLabel {
 	} else {
 		for i := range l.Players {
 			v.Players = append(v.Players, PlayerInfo{
-				IsReservation:  l.Players[i].IsReservation,
-				UserID:         l.Players[i].UserID,
-				Username:       l.Players[i].Username,
-				DisplayName:    l.Players[i].DisplayName,
-				EvrID:          l.Players[i].EvrID,
+				IsReservation: l.Players[i].IsReservation,
+				UserID:        l.Players[i].UserID,
+				Username:      l.Players[i].Username,
+				DisplayName:   l.Players[i].DisplayName,
+				//EvrID:          l.Players[i].EvrID,
 				Team:           l.Players[i].Team,
 				DiscordID:      l.Players[i].DiscordID,
 				PartyID:        l.Players[i].PartyID,

@@ -10,10 +10,12 @@ import (
 	"github.com/intinig/go-openskill/types"
 )
 
-var EntrantIDSalt string
+var EntrantIDSalt uuid.UUID
+var EntrantIDSaltStr string
 
 func init() {
-	EntrantIDSalt = uuid.Must(uuid.NewV4()).String()
+	EntrantIDSalt = uuid.Must(uuid.NewV4())
+	EntrantIDSaltStr = EntrantIDSalt.String()
 }
 
 var _ runtime.Presence = &EvrMatchPresence{}
@@ -101,7 +103,7 @@ func (p EvrMatchPresence) String() string {
 }
 
 func NewEntrantID(matchID MatchID, evrID evr.EvrId) uuid.UUID {
-	return uuid.NewV5(matchID.UUID, EntrantIDSalt+evrID.String())
+	return uuid.NewV5(matchID.UUID, EntrantIDSaltStr+evrID.String())
 }
 
 func EntrantPresenceFromLobbyParams(session Session, lobbyParams *LobbySessionParameters) (*EvrMatchPresence, error) {
