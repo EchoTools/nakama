@@ -219,7 +219,6 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 				RankPercentile: percentile,
 				Query:          query,
 			})
-
 		}
 	}
 

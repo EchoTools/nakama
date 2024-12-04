@@ -140,6 +140,7 @@ type SessionParameters struct {
 	DisableMAC        bool        // The user has disabled MAC
 	IsVR              atomic.Bool // The user is using a VR headset
 	IsPCVR            atomic.Bool // The user is using a PCVR headset
+	IsGlobalDeveloper atomic.Bool // The user is a developer
 
 	RelayOutgoing bool     // The user wants (some) outgoing messages relayed to them via discord
 	Debug         bool     // The user wants debug information
