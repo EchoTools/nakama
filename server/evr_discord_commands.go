@@ -1803,13 +1803,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				prettyName = mode.String()
 			}
 
-			serverLocation := ""
-
-			ipqsCache.Range(func(key string, value *IPQSResponse) bool {
-				// print out
-				logger.Info("IPQS Cache", zap.String("key", key), zap.Any("value", value))
-				return true
-			})
+			serverLocation := "Unknown"
 
 			serverExtIP := label.Broadcaster.Endpoint.ExternalIP.String()
 			if ipqs, found := ipqsCache.Load(serverExtIP); found {
