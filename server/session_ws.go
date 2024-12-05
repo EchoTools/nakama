@@ -185,7 +185,7 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 		logger = logger.With(zap.String("username", username))
 	}
 
-	logger.Info("New WebSocket session connected", zap.String("requestUri", request.URL.Path), zap.String("query", request.URL.RawQuery), zap.Uint8("format", uint8(format)))
+	logger.Info("New WebSocket session connected", zap.String("request_uri", request.URL.Path), zap.String("query", request.URL.RawQuery), zap.Uint8("format", uint8(format)), zap.String("client_ip", clientIP), zap.String("client_port", clientPort))
 
 	ctx, ctxCancelFn := context.WithCancel(context.Background())
 
