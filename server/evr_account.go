@@ -104,6 +104,9 @@ func (a *AccountMetadata) DiscordAccountCreationTime() time.Time {
 }
 
 func (a *AccountMetadata) GetActiveGroupID() uuid.UUID {
+	if a.ActiveGroupID == "" {
+		return uuid.Nil
+	}
 	return uuid.FromStringOrNil(a.ActiveGroupID)
 }
 
