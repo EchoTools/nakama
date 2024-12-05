@@ -694,7 +694,7 @@ func GetLobbyGroupID(ctx context.Context, db *sql.DB, userID string) (string, uu
 	if dbPartyGroupName == "" {
 		return "", uuid.Nil, nil
 	}
-	return dbPartyGroupName, uuid.NewV5(uuid.Nil, dbPartyGroupName), nil
+	return dbPartyGroupName, uuid.NewV5(EntrantIDSalt, dbPartyGroupName), nil
 }
 
 // returns map[guildID]groupID
