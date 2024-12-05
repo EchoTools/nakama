@@ -860,8 +860,8 @@ func evrMatchmakerOverrideFn(ctx context.Context, candidateMatches [][]*Matchmak
 	}
 
 	sbmm := NewSkillBasedMatchmaker()
-	returnedEntries, _ := sbmm.processPotentialMatches(runtimeCombinations)
-
+	filteredCandidates, returnedEntries, _ := sbmm.processPotentialMatches(runtimeCombinations)
+	_ = filteredCandidates
 	combinations := make([][]*MatchmakerEntry, len(returnedEntries))
 	for i, combination := range returnedEntries {
 		entries := make([]*MatchmakerEntry, len(combination))
