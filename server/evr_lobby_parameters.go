@@ -406,10 +406,13 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeRankRange bool, incl
 	}
 
 	if includeRankRange {
-		rankMin := max(0.0, p.RankPercentile-p.RankPercentileMaxDelta)
-		rankMax := min(1.0, p.RankPercentile+p.RankPercentileMaxDelta)
+		rankLower := max(p.RankPercentile-p.RankPercentileMaxDelta, 0.0)
+		rankUpper := min(p.RankPercentile+p.RankPercentileMaxDelta, 1.0)
+		rankLower = min(rankLower, 1.0-2.0*p.RankPercentileMaxDelta)
+		rankUpper = max(rankUpper, 2.0*p.RankPercentileMaxDelta)
+		// Ensure that the rank minRank percentile range is 1.0-2.0*p.RankPercentileMaxDelta
 
-		qparts = append(qparts, fmt.Sprintf("+label.rank_percentile:>=%f +label.rank_percentile:<=%f", rankMin, rankMax))
+		qparts = append(qparts, fmt.Sprintf("+label.rank_percentile:>=%f +label.rank_percentile:<=%f", rankLower, rankUpper))
 	}
 
 	if len(p.RequiredFeatures) > 0 {
@@ -481,10 +484,11 @@ func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionPar
 	}
 
 	if ticketParams.IncludeRankRange && p.RankPercentileMaxDelta > 0 {
-		minRankPercentile := max(p.RankPercentile-p.RankPercentileMaxDelta, 0.0)
-		maxRankPercentile := min(p.RankPercentile+p.RankPercentileMaxDelta, 1.0)
-		qparts = append(qparts, fmt.Sprintf("+properties.rank_percentile:>=%f", minRankPercentile))
-		qparts = append(qparts, fmt.Sprintf("+properties.rank_percentile:<=%f", maxRankPercentile))
+		rankLower := max(p.RankPercentile-p.RankPercentileMaxDelta, 0.0)
+		rankUpper := min(p.RankPercentile+p.RankPercentileMaxDelta, 1.0)
+		rankLower = min(rankLower, 1.0-2.0*p.RankPercentileMaxDelta)
+		rankUpper = max(rankUpper, 2.0*p.RankPercentileMaxDelta)
+		qparts = append(qparts, fmt.Sprintf("+properties.rank_percentile:>=%f +properties.rank_percentile:<=%f", rankLower, rankUpper))
 	}
 
 	// If the user has an early quit penalty, only match them with players who have submitted after now
