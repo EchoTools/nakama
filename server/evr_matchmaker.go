@@ -81,6 +81,13 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 		return nil
 	}
 
+	var matches [][]runtime.MatchmakerEntry
+	var filterCounts map[string]int
+
+	originalCount := len(candidates)
+
+	candidates, matches, filterCounts = m.processPotentialMatches(candidates)
+
 	// Extract all players from the candidates
 	allPlayers := make(map[string]struct{}, 0)
 	for _, c := range candidates {
@@ -88,8 +95,6 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 			allPlayers[e.GetPresence().GetUserId()] = struct{}{}
 		}
 	}
-	matches, filterCounts := m.processPotentialMatches(candidates)
-
 	// Extract all players from the matches
 	matchedPlayerMap := make(map[string]struct{}, 0)
 	for _, c := range matches {
@@ -110,7 +115,7 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 		"mode":                modestr,
 		"num_player_total":    len(allPlayers),
 		"num_player_included": len(matchedPlayers),
-		"num_match_options":   len(candidates),
+		"num_match_options":   originalCount,
 		"num_match_made":      len(matches),
 		"made_matches":        matches,
 		"filter_counts":       filterCounts,
@@ -123,7 +128,7 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 	return matches
 }
 
-func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, map[string]int) {
+func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, [][]runtime.MatchmakerEntry, map[string]int) {
 
 	filterCounts := make(map[string]int)
 
@@ -146,7 +151,7 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.Ma
 
 	madeMatches := m.assembleUniqueMatches(predictions)
 
-	return madeMatches, filterCounts
+	return candidates, madeMatches, filterCounts
 }
 
 func (m *SkillBasedMatchmaker) filterDuplicates(candidates [][]runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, int) {
