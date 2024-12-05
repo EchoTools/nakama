@@ -164,6 +164,7 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 			case <-ticker.C:
 				logger.Debug("Matchmaking ticket timeout", zap.Int("cycle", cycle))
 			}
+			cycle++
 		}
 	}()
 	return nil
