@@ -123,7 +123,9 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 		"unmatched_players":   unmatchedPlayers,
 	}).Info("Skill-based matchmaker completed.")
 
-	m.StoreLatestResult(candidates, matches)
+	if candidates != nil && matches != nil {
+		m.StoreLatestResult(candidates, matches)
+	}
 
 	return matches
 }

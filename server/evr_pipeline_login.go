@@ -456,7 +456,12 @@ func (p *EvrPipeline) channelInfoRequest(ctx context.Context, logger *zap.Logger
 		return errors.New("session parameters not found")
 	}
 
-	groupID := params.AccountMetadata.GetActiveGroupID()
+	groupID := uuid.Nil
+	if params.AccountMetadata == nil {
+		logger.Error("AccountMetadata not found")
+	} else {
+		groupID = params.AccountMetadata.GetActiveGroupID()
+	}
 
 	key := fmt.Sprintf("channelInfo,%s", groupID.String())
 
