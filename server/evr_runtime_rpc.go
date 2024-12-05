@@ -1291,24 +1291,6 @@ func AccountLookupRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	return string(jsonResponse), nil
 }
 
-type SetNextMatchRPCRequestPayload struct {
-	UserID    string   `json:"user_id"`
-	DiscordID string   `json:"discord_id"`
-	MatchID   *MatchID `json:"match_id"`
-}
-
-type SetNextMatchRPCResponsePayload struct {
-	Label *MatchLabel `json:"label,omitempty"`
-}
-
-func (r *SetNextMatchRPCResponsePayload) String() string {
-	data, err := json.MarshalIndent(r, "", "  ")
-	if err != nil {
-		return ""
-	}
-	return string(data)
-}
-
 type PlayerStatsRPCRequest struct {
 	UserID    string `json:"user_id"`
 	GuildID   string `json:"guild_id"`
@@ -1657,7 +1639,15 @@ func MatchmakerCandidatesRPCFactory(sbmm *SkillBasedMatchmaker) func(ctx context
 		*/
 
 		candidates, matches := sbmm.GetLatestResult()
+		if len(candidates) > 10000 {
 
+			logger.WithFields(map[string]any{
+				"count": len(candidates),
+			}).Warn("Matchmaker candidates list is too long, truncating to 1000 entries")
+
+			candidates = candidates[:10000]
+
+		}
 		response := map[string][][]runtime.MatchmakerEntry{
 			"candidates": candidates,
 			"matches":    matches,
