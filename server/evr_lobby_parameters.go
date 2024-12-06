@@ -406,10 +406,11 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeRankRange bool, incl
 	}
 
 	if includeRankRange {
-		rankLower := max(p.RankPercentile-p.RankPercentileMaxDelta, 0.0)
-		rankUpper := min(p.RankPercentile+p.RankPercentileMaxDelta, 1.0)
-		rankLower = min(rankLower, 1.0-2.0*p.RankPercentileMaxDelta)
-		rankUpper = max(rankUpper, 2.0*p.RankPercentileMaxDelta)
+		rankLower := min(p.RankPercentile-p.RankPercentileMaxDelta, 1.0-2.0*p.RankPercentileMaxDelta)
+		rankUpper := max(p.RankPercentile+p.RankPercentileMaxDelta, 2.0*p.RankPercentileMaxDelta)
+		rankLower = max(rankLower, 0.0)
+		rankUpper = min(rankUpper, 1.0)
+
 		// Ensure that the rank minRank percentile range is 1.0-2.0*p.RankPercentileMaxDelta
 
 		qparts = append(qparts, fmt.Sprintf("+label.rank_percentile:>=%f +label.rank_percentile:<=%f", rankLower, rankUpper))
@@ -484,10 +485,10 @@ func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionPar
 	}
 
 	if ticketParams.IncludeRankRange && p.RankPercentileMaxDelta > 0 {
-		rankLower := max(p.RankPercentile-p.RankPercentileMaxDelta, 0.0)
-		rankUpper := min(p.RankPercentile+p.RankPercentileMaxDelta, 1.0)
-		rankLower = min(rankLower, 1.0-2.0*p.RankPercentileMaxDelta)
-		rankUpper = max(rankUpper, 2.0*p.RankPercentileMaxDelta)
+		rankLower := min(p.RankPercentile-p.RankPercentileMaxDelta, 1.0-2.0*p.RankPercentileMaxDelta)
+		rankUpper := max(p.RankPercentile+p.RankPercentileMaxDelta, 2.0*p.RankPercentileMaxDelta)
+		rankLower = max(rankLower, 0.0)
+		rankUpper = min(rankUpper, 1.0)
 		qparts = append(qparts, fmt.Sprintf("+properties.rank_percentile:>=%f +properties.rank_percentile:<=%f", rankLower, rankUpper))
 	}
 

@@ -495,16 +495,16 @@ func TestMatchmaker(t *testing.T) {
 }
 func TestSortPriority(t *testing.T) {
 	team1 := RatedEntryTeam{
-		&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"priority_threshold": float64(time.Now().Add(-10 * time.Minute).Unix())}, Ticket: "ticket1"}},
+		&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"priority_threshold": float64(time.Now().UTC().Add(-10 * time.Minute).Unix())}, Ticket: "ticket1"}},
 	}
 	team2 := RatedEntryTeam{
 		&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{}}},
 	}
 	team3 := RatedEntryTeam{
-		&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"priority_threshold": float64(time.Now().Add(-1 * time.Minute).Unix())}, Ticket: "ticket3"}},
+		&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"priority_threshold": float64(time.Now().UTC().Add(-1 * time.Minute).Unix())}, Ticket: "ticket3"}},
 	}
 	team4 := RatedEntryTeam{
-		&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"priority_threshold": float64(time.Now().Add(-2 * time.Minute).Unix())}, Ticket: "ticket4"}},
+		&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"priority_threshold": float64(time.Now().UTC().Add(-2 * time.Minute).Unix())}, Ticket: "ticket4"}},
 	}
 	team5 := RatedEntryTeam{
 		&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{}, Ticket: "ticket5"}},

@@ -123,7 +123,7 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 		"unmatched_players":   unmatchedPlayers,
 	}).Info("Skill-based matchmaker completed.")
 
-	if candidates != nil && matches != nil {
+	if candidates != nil && matches != nil && len(candidates) > 0 {
 		m.StoreLatestResult(candidates, matches)
 	}
 
@@ -272,14 +272,36 @@ func (m *SkillBasedMatchmaker) sortPriority(predictions []PredictedMatch) {
 
 	slices.SortStableFunc(predictions, func(a, b PredictedMatch) int {
 		// If a player has a priority_threshold set, and it's less than "now" it should be sorted to the top
-		for _, o := range []PredictedMatch{a, b} {
+		timestamps := make([]float64, 2)
+
+		for i, o := range []PredictedMatch{a, b} {
+			timestamps[i] = float64(time.Now().UTC().Unix())
+
 			for _, team := range o.Teams() {
 				for _, player := range team {
-					if p, ok := player.Entry.GetProperties()["priority_threshold"].(float64); ok && p < now {
-						return -1
+					if p, ok := player.Entry.GetProperties()["priority_threshold"].(float64); ok {
+						if p < timestamps[i] {
+							timestamps[i] = p
+						}
 					}
 				}
 			}
+		}
+
+		if timestamps[0] > now && timestamps[1] > now {
+			return 0
+		}
+		if timestamps[0] < now && timestamps[1] > now {
+			return -1
+		}
+		if timestamps[0] > now && timestamps[1] < now {
+			return 1
+		}
+
+		if timestamps[0] < timestamps[1] {
+			return -1
+		} else if timestamps[0] > timestamps[1] {
+			return 1
 		}
 		return 0
 	})
