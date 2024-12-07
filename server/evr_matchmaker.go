@@ -117,7 +117,6 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 		"num_player_included": len(matchedPlayers),
 		"num_match_options":   originalCount,
 		"num_match_made":      len(matches),
-		"made_matches":        matches,
 		"filter_counts":       filterCounts,
 		"matched_players":     matchedPlayerMap,
 		"unmatched_players":   unmatchedPlayers,
