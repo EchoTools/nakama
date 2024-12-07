@@ -13,6 +13,7 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"github.com/intinig/go-openskill/types"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -218,8 +219,12 @@ func (s *ProfileRegistry) GetCached(ctx context.Context, evrID evr.EvrId) (*json
 func (r *ProfileRegistry) NewGameProfile() GameProfileData {
 
 	profile := GameProfileData{
-		Client: evr.NewClientProfile(),
-		Server: evr.NewServerProfile(),
+		Client:  evr.NewClientProfile(),
+		Server:  evr.NewServerProfile(),
+		Ratings: make(map[uuid.UUID]map[evr.Symbol]types.Rating),
+		EarlyQuits: EarlyQuitStatistics{
+			History: make(map[int64]bool),
+		},
 	}
 
 	// Apply a community "designed" loadout to the new user
