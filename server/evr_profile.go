@@ -135,6 +135,7 @@ func NewGameProfile(login evr.LoginProfile, client evr.ClientProfile, server evr
 		Client:  client,
 		Server:  server,
 		Version: version,
+		Ratings: make(map[uuid.UUID]map[evr.Symbol]types.Rating),
 	}
 }
 
