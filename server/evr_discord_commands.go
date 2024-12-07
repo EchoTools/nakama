@@ -2343,13 +2343,16 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					inactiveIDs = append(inactiveIDs, d.cache.UserIDToDiscordID(u))
 				}
 
-				// Create a list of the members
+				// Create a list of the members, and the mode of the lobby they are currently in, linked to an echotaxi link, and whether they are matchmaking.
+				// <@discord_id> - [mode](https://echo.taxi/spark://c/match_id) (matchmaking)
+
+
 				var content string
 				if len(activeIDs) == 0 && len(inactiveIDs) == 0 {
 					content = "No members in your party group."
 				} else {
 					b := strings.Builder{}
-					b.WriteString("Members in your party group:\n")
+					b.WriteString(fmt.Sprintf("Members in party group `%s`:\n", groupName))
 					for i, discordID := range activeIDs {
 						if i > 0 {
 							b.WriteString(", ")
