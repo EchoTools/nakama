@@ -27,6 +27,7 @@ type ProfileRegistry struct {
 	nk          runtime.NakamaModule
 
 	tracker Tracker
+	metrics Metrics
 
 	// Unlocks by item name
 	unlocksByItemName map[string]string
@@ -37,7 +38,7 @@ type ProfileRegistry struct {
 	defaults map[string]string
 }
 
-func NewProfileRegistry(nk runtime.NakamaModule, db *sql.DB, logger runtime.Logger, tracker Tracker) *ProfileRegistry {
+func NewProfileRegistry(nk runtime.NakamaModule, db *sql.DB, logger runtime.Logger, tracker Tracker, metrics Metrics) *ProfileRegistry {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	unlocksByFieldName := createUnlocksFieldByKey()
@@ -49,6 +50,7 @@ func NewProfileRegistry(nk runtime.NakamaModule, db *sql.DB, logger runtime.Logg
 		db:          db,
 		nk:          nk,
 		tracker:     tracker,
+		metrics:     metrics,
 
 		cache: make(map[evr.EvrId]*json.RawMessage),
 
@@ -108,6 +110,10 @@ func (r *ProfileRegistry) Load(ctx context.Context, userID uuid.UUID) (profile *
 	if len(objs) == 0 {
 		profile.Client = evr.NewClientProfile()
 		profile.Server = evr.NewServerProfile()
+		if err := r.Save(ctx, userID, profile); err != nil {
+			return nil, err
+		}
+		r.metrics.CustomCounter("profile_created", nil, 1)
 		return profile, nil
 	}
 

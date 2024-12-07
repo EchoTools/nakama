@@ -121,7 +121,7 @@ type SystemInfo struct {
 	DriverVersion      string `json:"driver_version"`
 	NetworkType        string `json:"network_type"`
 	VideoCard          string `json:"video_card"`
-	CPU                string `json:"cpu"`
+	CPUModel           string `json:"cpu"`
 	NumPhysicalCores   int64  `json:"num_physical_cores"`
 	NumLogicalCores    int64  `json:"num_logical_cores"`
 	MemoryTotal        int64  `json:"memory_total"`
