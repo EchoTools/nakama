@@ -943,7 +943,7 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 			_ = json.Unmarshal(*bytes, &profile)
 
 			// Get the match the current player is in
-			if matchID, _, err := GetMatchBySessionID(p.runtimeModule, session.id); err == nil {
+			if matchID, _, err := GetMatchIDBySessionID(p.runtimeModule, session.id); err == nil {
 
 				if label, err := MatchLabelByID(ctx, p.runtimeModule, matchID); err == nil && label != nil {
 
