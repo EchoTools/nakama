@@ -37,9 +37,20 @@ func NewDisplayNameHistory() *DisplayNameHistory {
 	}
 }
 
-func (h *DisplayNameHistory) AddEntry(groupID, displayName string) {
+// Returns true if the display name history was updated
+func (h *DisplayNameHistory) Set(groupID, displayName string) bool {
 	if h.Histories == nil {
 		h.Histories = make(map[string][]DisplayNameHistoryEntry)
+	}
+
+	if _, ok := h.Histories[groupID]; !ok {
+		h.Histories[groupID] = make([]DisplayNameHistoryEntry, 0)
+	}
+
+	if len(h.Histories[groupID]) > 0 {
+		if h.Histories[groupID][len(h.Histories[groupID])-1].DisplayName == displayName {
+			return false
+		}
 	}
 
 	h.Histories[groupID] = append(h.Histories[groupID], DisplayNameHistoryEntry{
@@ -49,6 +60,7 @@ func (h *DisplayNameHistory) AddEntry(groupID, displayName string) {
 
 	h.updateCache()
 	h.updateActive()
+	return true
 }
 
 func (h *DisplayNameHistory) updateCache() {
@@ -152,16 +164,18 @@ func DisplayNameHistoryStore(ctx context.Context, nk runtime.NakamaModule, userI
 	return nil
 }
 
-func DisplayNameHistoryAdd(ctx context.Context, nk runtime.NakamaModule, userID string, guildID string, displayName string) error {
+func DisplayNameHistorySet(ctx context.Context, nk runtime.NakamaModule, userID string, guildID string, displayName string) error {
 	history, err := DisplayNameHistoryLoad(ctx, nk, userID)
 	if err != nil {
 		return fmt.Errorf("error getting display name history: %w", err)
 	}
 
-	history.AddEntry(guildID, displayName)
+	updated := history.Set(guildID, displayName)
 
-	if err := DisplayNameHistoryStore(ctx, nk, userID, history); err != nil {
-		return fmt.Errorf("error storing display name history: %w", err)
+	if updated {
+		if err := DisplayNameHistoryStore(ctx, nk, userID, history); err != nil {
+			return fmt.Errorf("error storing display name history: %w", err)
+		}
 	}
 	return nil
 }
