@@ -413,7 +413,7 @@ func (c *DiscordCache) SyncGuildGroupMember(ctx context.Context, userID, groupID
 			}
 		} else {
 
-			if err := DisplayNameHistoryAdd(ctx, c.nk, accountMetadata.ID(), groupID, displayName); err != nil {
+			if err := DisplayNameHistorySet(ctx, c.nk, accountMetadata.ID(), groupID, displayName); err != nil {
 				return fmt.Errorf("error adding display name history entry: %w", err)
 			}
 
