@@ -21,6 +21,13 @@ var (
 // LobbyErrorCodeValue defines the type for lobby error codes.
 type LobbyErrorCodeValue int
 
+func (c LobbyErrorCodeValue) String() string {
+	if msg, ok := LobbyErrorMessages[c]; ok {
+		return msg
+	}
+	return "unknown"
+}
+
 // The list of lobby error codes. These are hard-coded in the evr client.
 const (
 	LobbyUnknownError LobbyErrorCodeValue = iota - 1 // Custom error code for unknown errors.
@@ -39,6 +46,23 @@ const (
 	KickedFromLobbyGroup
 	NotALobbyGroupMod
 )
+
+var LobbyErrorMessages = map[LobbyErrorCodeValue]string{
+	TimeoutServerFindFailed: "time_server_find_failed",
+	UpdateRequired:          "update_required",
+	BadRequest:              "bad_request",
+	Timeout:                 "timeout",
+	ServerDoesNotExist:      "server_does_not_exist",
+	ServerIncompatible:      "server_incompatible",
+	ServerFindFailed:        "server_find_failed",
+	ServerIsLocked:          "server_is_locked",
+	ServerIsFull:            "server_is_full",
+	InternalError:           "internal_error",
+	MissingEntitlement:      "missing_entitlement",
+	BannedFromLobbyGroup:    "banned_from_lobby_group",
+	KickedFromLobbyGroup:    "kicked_from_lobby_group",
+	NotALobbyGroupMod:       "not_a_lobby_group_mod",
+}
 
 // LobbyError struct that implements the error interface.
 type LobbyError struct {
@@ -105,6 +129,10 @@ func (e LobbyError) Error() string {
 
 func (e LobbyError) Message() string {
 	return e.message
+}
+
+func (e LobbyError) String() string {
+	return e.Error()
 }
 
 func (e LobbyError) Unwrap() []error {

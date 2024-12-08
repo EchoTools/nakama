@@ -63,6 +63,8 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 			p.metrics.CustomCounter("lobby_find_match", lobbyParams.MetricsTags(), int64(lobbyParams.GetPartySize()))
 			logger.Info("Finding match", zap.String("mode", lobbyParams.Mode.String()), zap.Any("party_size", lobbyParams.PartySize))
 			err = p.lobbyFind(ctx, logger, session, lobbyParams)
+
+			var code LobbyErrorCodeValue
 			switch err {
 			case nil:
 				// Match found.
@@ -70,18 +72,23 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 			case context.Canceled:
 				logger.Debug("Matchmaking context canceled")
 				return nil
-			case context.DeadlineExceeded:
+			case context.DeadlineExceeded, ErrMatchmakingTimeout:
 				logger.Warn("Matchmaking timed out", zap.Error(err))
-				return NewLobbyError(Timeout, "matchmaking timed out")
+				err = NewLobbyError(Timeout, "matchmaking timed out")
+				fallthrough
 			default:
-				var code LobbyErrorCodeValue = InternalError
-				switch err.(type) {
+
+				switch e := err.(type) {
 				case *LobbyError:
+					code = e.code
+				default:
+					logger.Warn("Unexpected error while finding match", zap.Error(err))
 					code = InternalError
 				}
 
 				tags := lobbyParams.MetricsTags()
 				tags["error_code"] = strconv.Itoa(int(code))
+				tags["error_str"] = code.String()
 
 				p.metrics.CustomCounter("lobby_find_match_error", tags, int64(lobbyParams.GetPartySize()))
 				// On error, leave any party the user might be a member of.
