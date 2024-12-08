@@ -655,22 +655,23 @@ func PresenceByEntrantID(nk runtime.NakamaModule, matchID MatchID, entrantID uui
 	return mp, nil
 }
 
-func GetMatchBySessionID(nk runtime.NakamaModule, sessionID uuid.UUID) (matchID MatchID, presence runtime.Presence, err error) {
+func GetMatchIDBySessionID(nk runtime.NakamaModule, sessionID uuid.UUID) (matchID MatchID, presence runtime.Presence, err error) {
 
-	presences, err := nk.StreamUserList(StreamModeService, sessionID.String(), "", StreamLabelMatchService, true, true)
+	presences, err := nk.StreamUserList(StreamModeService, sessionID.String(), "", StreamLabelMatchService, false, true)
 	if err != nil {
 		return MatchID{}, nil, fmt.Errorf("failed to get stream presences: %w", err)
 	}
+	if len(presences) == 0 {
+		return MatchID{}, nil, ErrMatchNotFound
+	}
 
-	for _, presence := range presences {
-		matchID := MatchIDFromStringOrNil(presence.GetStatus())
-		if !matchID.IsNil() {
-			// Verify that the user is actually in the match
-			if meta, err := nk.StreamUserGet(StreamModeMatchAuthoritative, matchID.UUID.String(), "", matchID.Node, presence.GetUserId(), presence.GetSessionId()); err != nil || meta == nil {
-				return MatchID{}, nil, ErrMatchNotFound
-			}
-			return matchID, presence, nil
+	matchID = MatchIDFromStringOrNil(presences[0].GetStatus())
+	if !matchID.IsNil() {
+		// Verify that the user is actually in the match
+		if meta, err := nk.StreamUserGet(StreamModeMatchAuthoritative, matchID.UUID.String(), "", matchID.Node, presence.GetUserId(), presence.GetSessionId()); err != nil || meta == nil {
+			return MatchID{}, nil, ErrMatchNotFound
 		}
+		return matchID, presence, nil
 	}
 
 	return MatchID{}, nil, ErrMatchNotFound
