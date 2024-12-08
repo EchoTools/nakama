@@ -7,6 +7,7 @@ import (
 	"math"
 	"math/rand"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -30,12 +31,6 @@ var ErrCreateLock = errors.New("failed to acquire create lock")
 func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters) error {
 
 	startTime := time.Now()
-	defer func() {
-		tags := lobbyParams.MetricsTags()
-		tags["party_size"] = lobbyParams.PartySize.String()
-		p.metrics.CustomTimer("lobby_find_duration", tags, time.Since(startTime))
-		logger.Debug("Lobby find complete", zap.String("group_id", lobbyParams.GroupID.String()), zap.Int64("partySize", lobbyParams.PartySize.Load()), zap.String("mode", lobbyParams.Mode.String()), zap.Int("duration", int(time.Since(startTime).Seconds())))
-	}()
 
 	// Do authorization checks related to the guild.
 	if err := p.authorizeGuildGroupSession(ctx, session, lobbyParams.GroupID.String()); err != nil {
@@ -92,6 +87,16 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		}
 	}
 
+	p.metrics.CustomCounter("lobby_find_match", lobbyParams.MetricsTags(), int64(lobbyParams.GetPartySize()))
+	logger.Info("Finding match", zap.String("mode", lobbyParams.Mode.String()), zap.Int("party_size", lobbyParams.GetPartySize()))
+
+	defer func() {
+		tags := lobbyParams.MetricsTags()
+		tags["party_size"] = strconv.Itoa(lobbyParams.GetPartySize())
+		p.metrics.CustomTimer("lobby_find_duration", tags, time.Since(startTime))
+		logger.Debug("Lobby find complete", zap.String("group_id", lobbyParams.GroupID.String()), zap.Int("party_size", lobbyParams.GetPartySize()), zap.String("mode", lobbyParams.Mode.String()), zap.Int("duration", int(time.Since(startTime).Seconds())))
+	}()
+
 	// Construct the entrant presences for the party members.
 	entrants, err := PrepareEntrantPresences(ctx, logger, session, lobbyParams, entrantSessionIDs...)
 	if err != nil {
@@ -139,10 +144,13 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 		}
 		stream := lobbyParams.MatchmakingStream()
 
+		memberUsernames := make([]string, 0, lobbyGroup.Size())
+
 		for _, member := range lobbyGroup.List() {
 			if member.Presence.GetSessionId() == session.id.String() {
 				continue
 			}
+			memberUsernames = append(memberUsernames, member.Presence.GetUsername())
 
 			meta, err := p.runtimeModule.StreamUserGet(stream.Mode, stream.Subject.String(), stream.Subcontext.String(), stream.Label, member.Presence.GetUserId(), member.Presence.GetSessionId())
 			if err != nil {
@@ -155,8 +163,10 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 			}
 		}
 
-		logger.Debug("Party of players is ready to start matchmaking", zap.String("leader", session.id.String()), zap.Int("size", lobbyGroup.Size()))
-		lobbyParams.SetPartySize(len(lobbyGroup.List()))
+		partySize := lobbyGroup.Size()
+		logger.Debug("Party is ready", zap.String("leader", session.id.String()), zap.Int("size", partySize), zap.Strings("members", memberUsernames))
+
+		lobbyParams.SetPartySize(partySize)
 
 	}
 
@@ -457,7 +467,7 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 		logger := logger.With(zap.String("mid", selected.ID.UUID.String()))
 
 		logger.Debug("Joining backfill match.")
-		p.metrics.CustomCounter("lobby_join_backfill", lobbyParams.MetricsTags(), int64(lobbyParams.PartySize.Load()))
+		p.metrics.CustomCounter("lobby_join_backfill", lobbyParams.MetricsTags(), int64(lobbyParams.GetPartySize()))
 
 		// Player members will detect the join.
 		if err := p.LobbyJoinEntrants(logger, selected, entrants...); err != nil {
