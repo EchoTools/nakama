@@ -296,6 +296,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 
 	// Login Service
 	case *evr.RemoteLogSet:
+		requireAuthed = false
 		pipelineFn = p.remoteLogSetv3
 	case *evr.LoginRequest:
 		requireAuthed = false
@@ -390,13 +391,15 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 	if requireAuthed {
 		// If the session is not authenticated, log the error and return.
 		if session != nil && session.UserID() == uuid.Nil {
-			logger.Warn("Session not authenticated. sending unrequire message.")
+
+			logger.Warn("Received unauthenticated message", zap.Any("message", in))
 
 			// Send an unrequire
 			if err := session.SendEvr(unrequireMessage); err != nil {
 				logger.Error("Failed to send unrequire message", zap.Error(err))
 				return false
 			}
+
 			return true
 		}
 	}
@@ -404,7 +407,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 	if params, ok := LoadParams(session.Context()); ok {
 		evrID := params.EvrID
 		if !evrID.IsNil() {
-			logger = logger.With(zap.String("uid", session.UserID().String()), zap.String("sid", session.ID().String()), zap.String("uname", session.Username()), zap.String("evrid", evrID.String()))
+			logger = logger.With(zap.String("uid", session.UserID().String()), zap.String("sid", session.ID().String()), zap.String("username", session.Username()), zap.String("evrid", evrID.String()))
 		}
 	}
 
