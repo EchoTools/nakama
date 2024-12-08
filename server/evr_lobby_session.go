@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 
@@ -62,20 +63,19 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 			// This is also responsible for creation of social lobbies.
 
 			err = p.lobbyFind(ctx, logger, session, lobbyParams)
-
-			var code LobbyErrorCodeValue
-			switch err {
-			case nil:
-				// Match found.
+			if err == nil {
 				return nil
-			case context.Canceled:
+			}
+			code := InternalError
+
+			if errors.Is(err, context.Canceled) {
 				logger.Debug("Matchmaking context canceled")
 				return nil
-			case context.DeadlineExceeded, ErrMatchmakingTimeout:
+			}
+			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrMatchmakingTimeout) {
 				logger.Warn("Matchmaking timed out", zap.Error(err))
 				err = NewLobbyError(Timeout, "matchmaking timed out")
-				fallthrough
-			default:
+			} else {
 
 				switch e := err.(type) {
 				case *LobbyError:
