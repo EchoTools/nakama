@@ -24,7 +24,7 @@ func createTestProfileRegistry(t *testing.T, logger *zap.Logger) (*ProfileRegist
 	db := NewDB(t)
 	nk := NewRuntimeGoNakamaModule(logger, db, nil, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
-	profileRegistry := NewProfileRegistry(nk, db, runtimeLogger, tracker)
+	profileRegistry := NewProfileRegistry(nk, db, runtimeLogger, tracker, metrics)
 
 	return profileRegistry, nil
 }
