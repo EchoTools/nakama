@@ -90,11 +90,14 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 
 	// Extract all players from the candidates
 	allPlayers := make(map[string]struct{}, 0)
+	tickets := make(map[string]struct{}, len(candidates))
 	for _, c := range candidates {
 		for _, e := range c {
+			tickets[e.GetTicket()] = struct{}{}
 			allPlayers[e.GetPresence().GetUserId()] = struct{}{}
 		}
 	}
+
 	// Extract all players from the matches
 	matchedPlayerMap := make(map[string]struct{}, 0)
 	for _, c := range matches {
@@ -112,14 +115,15 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 	})
 
 	logger.WithFields(map[string]interface{}{
-		"mode":                modestr,
-		"num_player_total":    len(allPlayers),
-		"num_player_included": len(matchedPlayers),
-		"num_match_options":   originalCount,
-		"num_match_made":      len(matches),
-		"filter_counts":       filterCounts,
-		"matched_players":     matchedPlayerMap,
-		"unmatched_players":   unmatchedPlayers,
+		"mode":                 modestr,
+		"num_player_total":     len(allPlayers),
+		"num_tickets":          len(tickets),
+		"num_players_matched":  len(matchedPlayers),
+		"num_match_candidates": originalCount,
+		"num_matches_made":     len(matches),
+		"filter_counts":        filterCounts,
+		"matched_players":      matchedPlayerMap,
+		"unmatched_players":    unmatchedPlayers,
 	}).Info("Skill-based matchmaker completed.")
 
 	if candidates != nil && matches != nil && len(candidates) > 0 {
@@ -134,13 +138,22 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.Ma
 	filterCounts := make(map[string]int)
 
 	// Remove identical matches
-	candidates, filterCounts["duplicate"] = m.filterDuplicates(candidates)
+	filterCounts["duplicate"] = m.filterDuplicates(candidates)
 
 	// Remove odd sized teams
-	candidates, filterCounts["odd_size"] = m.filterOddSizedTeams(candidates)
+	filterCounts["odd_sized"] = m.filterOddSizedTeams(candidates)
 
 	// Ensure that everyone in the match is within their max_rtt of a common server
-	candidates, filterCounts["no_matching_servers"] = m.filterWithinMaxRTT(candidates)
+	filterCounts["no_matching_server"] = m.filterWithinMaxRTT(candidates)
+
+	totalMatches := 0
+	filtered := 0
+	for _, c := range candidates {
+		totalMatches++
+		if c == nil {
+			filtered++
+		}
+	}
 
 	// Create a list of balanced matches with predictions
 	predictions := m.predictOutcomes(candidates)
@@ -155,12 +168,109 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.Ma
 	return candidates, madeMatches, filterCounts
 }
 
-func (m *SkillBasedMatchmaker) filterDuplicates(candidates [][]runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, int) {
+func (m *SkillBasedMatchmaker) filter(candidates [][]runtime.MatchmakerEntry) int {
+	numOddSized := 0
+	numDuplicates := 0
+	numNoCommonServer := 0
+
+	var ok bool
+
+	var props map[string]interface{}
+
+	seenTickets := make(map[string]struct{})
+	ticketIDs := make([]string, 0, 8)
+	seenTicketSets := make(map[string]struct{})
+
+	for i, c := range candidates {
+		if c == nil {
+			continue
+		}
+
+		// Filter odd sized matches
+
+		if len(c)%2 != 0 {
+			numOddSized++
+			candidates[i] = nil
+			continue
+		}
+
+		// Filter out the duplicates
+
+		for _, e := range candidates[i] {
+			if _, ok := seenTickets[e.GetTicket()]; !ok {
+				ticketIDs = append(ticketIDs, e.GetTicket())
+				seenTickets[e.GetTicket()] = struct{}{}
+			}
+		}
+
+		sort.Strings(ticketIDs)
+
+		key := strings.Join(ticketIDs, "")
+
+		if _, ok := seenTicketSets[key]; ok {
+			numDuplicates++
+			candidates[i] = nil
+			continue
+		} else {
+			seenTicketSets[key] = struct{}{}
+		}
+
+		// Filter matches without a common server under the max rtt
+
+		noCommonServer := true
+		var maxRTT float64
+	EntryLoop:
+		for _, e := range c {
+
+			props = e.GetProperties()
+
+			if maxRTT, ok = props["max_rtt"].(float64); !ok || maxRTT <= 0 {
+				maxRTT = 500.0
+			}
+
+			numPlayers := make(map[string]int)
+			for k, v := range props {
+
+				if !strings.HasPrefix(k, RTTPropertyPrefix) {
+					continue
+				}
+
+				if v.(float64) > maxRTT {
+					// Server is too far away from this player
+					continue
+				}
+
+				if numPlayers[k] == len(c)-1 {
+					// This server is reachable by all players, so this candidate is valid
+					noCommonServer = false
+					break EntryLoop
+				}
+
+				numPlayers[k]++
+			}
+		}
+
+		if noCommonServer {
+			// No common servers for players
+			candidates[i] = nil
+			numNoCommonServer++
+			continue
+		}
+
+	}
+	return numNoCommonServer + numOddSized + numDuplicates
+}
+
+func (m *SkillBasedMatchmaker) filterDuplicates(candidates [][]runtime.MatchmakerEntry) int {
 	// Filter out the duplicates
 	seen := make(map[string]struct{})
 	count := 0
 
 	for i := 0; i < len(candidates); i++ {
+
+		if candidates[i] == nil {
+			continue
+		}
 
 		seenTickets := make(map[string]struct{})
 		tickets := make([]string, 0, len(candidates[i]))
@@ -177,33 +287,40 @@ func (m *SkillBasedMatchmaker) filterDuplicates(candidates [][]runtime.Matchmake
 
 		if _, ok := seen[key]; ok {
 			count++
-			candidates = append(candidates[:i], candidates[i+1:]...)
-			i--
+			candidates[i] = nil
 		} else {
 			seen[key] = struct{}{}
 		}
 	}
 
-	return candidates, count
+	return count
 }
 
-func (m *SkillBasedMatchmaker) filterOddSizedTeams(candidates [][]runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, int) {
+func (m *SkillBasedMatchmaker) filterOddSizedTeams(candidates [][]runtime.MatchmakerEntry) int {
 	oddSizedCount := 0
 	for i := 0; i < len(candidates); i++ {
+		if candidates[i] == nil {
+			continue
+		}
 		if len(candidates[i])%2 != 0 {
 			oddSizedCount++
-			candidates = append(candidates[:i], candidates[i+1:]...)
-			i--
+			candidates[i] = nil
+			continue
 		}
+
 	}
-	return candidates, oddSizedCount
+	return oddSizedCount
 }
 
 // Ensure that everyone in the match is within their max_rtt of a common server
-func (m *SkillBasedMatchmaker) filterWithinMaxRTT(candidates [][]runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, int) {
+func (m *SkillBasedMatchmaker) filterWithinMaxRTT(candidates [][]runtime.MatchmakerEntry) int {
 
 	var filteredCount int
 	for i := 0; i < len(candidates); i++ {
+
+		if candidates[i] == nil {
+			continue
+		}
 
 		serverRTTs := make(map[string][]float64)
 
@@ -238,12 +355,11 @@ func (m *SkillBasedMatchmaker) filterWithinMaxRTT(candidates [][]runtime.Matchma
 
 		if len(serverRTTs) == 0 {
 			// No common servers for players
-			candidates = append(candidates[:i], candidates[i+1:]...)
-			i--
+			candidates[i] = nil
 			filteredCount++
 		}
 	}
-	return candidates, filteredCount
+	return filteredCount
 }
 
 func (*SkillBasedMatchmaker) teamStrength(team RatedEntryTeam) float64 {
@@ -267,12 +383,12 @@ func (*SkillBasedMatchmaker) predictDraw(teams []RatedEntryTeam) float64 {
 }
 
 func (m *SkillBasedMatchmaker) sortPriority(predictions []PredictedMatch) {
-	now := float64(time.Now().UTC().Unix())
 
 	slices.SortStableFunc(predictions, func(a, b PredictedMatch) int {
 		// If a player has a priority_threshold set, and it's less than "now" it should be sorted to the top
 		timestamps := make([]float64, 2)
 
+		now := float64(time.Now().UTC().Unix())
 		for i, o := range []PredictedMatch{a, b} {
 			timestamps[i] = float64(time.Now().UTC().Unix())
 
@@ -304,6 +420,7 @@ func (m *SkillBasedMatchmaker) sortPriority(predictions []PredictedMatch) {
 		}
 		return 0
 	})
+
 }
 
 func (m *SkillBasedMatchmaker) sortLimitRankSpread(predictions []PredictedMatch, maximumRankSpread float64) {
@@ -429,7 +546,11 @@ func (m *SkillBasedMatchmaker) balanceByTicket(candidate []runtime.MatchmakerEnt
 
 func (m *SkillBasedMatchmaker) predictOutcomes(candidates [][]runtime.MatchmakerEntry) []PredictedMatch {
 	predictions := make([]PredictedMatch, 0, len(candidates))
+
 	for _, match := range candidates {
+		if match == nil {
+			continue
+		}
 		ratedMatch := m.balanceByTicket(match)
 
 		predictions = append(predictions, PredictedMatch{
@@ -438,6 +559,7 @@ func (m *SkillBasedMatchmaker) predictOutcomes(candidates [][]runtime.Matchmaker
 			Draw:  m.predictDraw(ratedMatch),
 		})
 	}
+
 	return predictions
 }
 func (m *SkillBasedMatchmaker) assembleUniqueMatches(ratedMatches []PredictedMatch) [][]runtime.MatchmakerEntry {
