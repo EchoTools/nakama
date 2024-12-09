@@ -49,6 +49,7 @@ type MatchmakingTicketParameters struct {
 	CountMultiple           int
 	IncludeRankRange        bool
 	IncludeEarlyQuitPenalty bool
+	IncludeServerRTTs       bool
 }
 
 func (m *MatchmakingTicketParameters) MarshalText() ([]byte, error) {
