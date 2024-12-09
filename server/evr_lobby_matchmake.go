@@ -121,6 +121,13 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 		return fmt.Errorf("matchmaking ticket config not found for mode %s", lobbyParams.Mode)
 	}
 
+	tickets := make([]string, 0)
+
+	defer func() {
+		// Remove the tickets when the function exits
+		session.matchmaker.Remove(tickets)
+	}()
+
 	// Continue to enter tickets until the context is cancelled.
 	go func() {
 
@@ -149,12 +156,16 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 				ticketConfig.IncludeEarlyQuitPenalty = false
 			}
 
-			err = p.addTicket(ctx, logger, session, lobbyParams, lobbyGroup, ticketConfig)
+			// Remove the ticket
+
+			var ticket string
+
+			ticket, err = p.addTicket(ctx, logger, session, lobbyParams, lobbyGroup, ticketConfig)
 			if err != nil {
-				logger.Error("Failed to add secondary ticket", zap.Error(err))
+				logger.Error("Failed to add ticket", zap.Error(err))
 				return
 			}
-
+			tickets = append(tickets, ticket)
 			select {
 			case <-ctx.Done():
 				return
@@ -170,11 +181,11 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 	return nil
 }
 
-func (p *EvrPipeline) addTicket(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters, lobbyGroup *LobbyGroup, ticketConfig MatchmakingTicketParameters) error {
+func (p *EvrPipeline) addTicket(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters, lobbyGroup *LobbyGroup, ticketConfig MatchmakingTicketParameters) (string, error) {
 	var err error
 	sessionParams, ok := LoadParams(ctx)
 	if !ok {
-		return fmt.Errorf("failed to load session parameters")
+		return "", fmt.Errorf("failed to load session parameters")
 	}
 
 	query, stringProps, numericProps := lobbyParams.MatchmakingParameters(sessionParams, &ticketConfig)
@@ -198,7 +209,7 @@ func (p *EvrPipeline) addTicket(ctx context.Context, logger *zap.Logger, session
 		// Matchmake with the lobby group via the party handler.
 		ticket, otherPresences, err = lobbyGroup.MatchmakerAdd(sessionID, session.pipeline.node, query, minCount, maxCount, countMultiple, stringProps, numericProps)
 		if err != nil {
-			return fmt.Errorf("failed to add party matchmaker ticket: %v", err)
+			return "", fmt.Errorf("failed to add party matchmaker ticket: %v", err)
 		}
 
 	} else {
@@ -217,7 +228,7 @@ func (p *EvrPipeline) addTicket(ctx context.Context, logger *zap.Logger, session
 		ticket, _, err = session.matchmaker.Add(ctx, presences, sessionID, "", query, minCount, maxCount, countMultiple, stringProps, numericProps)
 		if err != nil {
 			logger.Error("Failed to add solo matchmaker ticket", zap.Error(err), zap.String("query", query), zap.Any("string_properties", stringProps), zap.Any("numeric_properties", numericProps))
-			return fmt.Errorf("failed to add solo matchmaker ticket: %v", err)
+			return "", fmt.Errorf("failed to add solo matchmaker ticket: %v", err)
 		}
 
 	}
@@ -228,7 +239,7 @@ func (p *EvrPipeline) addTicket(ctx context.Context, logger *zap.Logger, session
 
 	logger.Debug("Matchmaking ticket added", zap.String("query", query), zap.Any("string_properties", stringProps), zap.Any("numeric_properties", numericProps), zap.String("ticket", ticket), zap.Any("presences", otherPresences))
 
-	return nil
+	return ticket, nil
 }
 
 // mroundRTT rounds the rtt to the nearest modulus
