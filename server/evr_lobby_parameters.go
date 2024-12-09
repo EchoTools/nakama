@@ -387,7 +387,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		RankPercentileMaxDelta: rankPercentileMaxDelta,
 		MaxServerRTT:           maxServerRTT,
 		MatchmakingTimestamp:   time.Now().UTC(),
-		MatchmakingTimeout:     time.Minute * 12,
+		MatchmakingTimeout:     time.Minute * 6,
 		DisplayName:            sessionParams.AccountMetadata.GetGroupDisplayNameOrDefault(groupID.String()),
 	}, nil
 }
