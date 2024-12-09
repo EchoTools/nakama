@@ -375,7 +375,9 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 
 	// check the available slots
 	if slots, err := state.OpenSlotsByRole(meta.Presence.RoleAlignment); err != nil {
-		return state, false, ErrJoinRejectReasonFailedToAssignTeam.Error()
+		if ok, err := CheckSystemGroupMembership(ctx, db, joinPresence.GetUserId(), state.GetGroupID().String()); err != nil || !ok {
+			return state, false, ErrJoinRejectReasonFailedToAssignTeam.Error()
+		}
 	} else if slots < len(meta.Presences()) {
 		return state, false, ErrJoinRejectReasonLobbyFull.Error()
 	}
@@ -893,17 +895,20 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 			}
 		}
 
-		// validate the mode
-		if levels, ok := evr.LevelsByMode[settings.Mode]; !ok {
-			return state, SignalResponse{Message: fmt.Sprintf("invalid mode: %v", state.Mode)}.String()
-		} else {
-			if settings.Level == 0xffffffffffffffff || settings.Level == 0 {
-				settings.Level = levels[rand.Intn(len(levels))]
+		if ok, err := CheckSystemGroupMembership(ctx, db, settings.SpawnedBy, GroupGlobalDevelopers); err != nil {
+			return state, SignalResponse{Message: fmt.Sprintf("failed to check group membership: %v", err)}.String()
+		} else if !ok {
+			if levels, ok := evr.LevelsByMode[settings.Mode]; !ok {
+				return state, SignalResponse{Message: fmt.Sprintf("invalid mode: %v", settings.Mode)}.String()
 			} else {
-				if !slices.Contains(levels, settings.Level) {
-					return state, SignalResponse{Message: fmt.Sprintf("invalid level: %v", settings.Level)}.String()
-				}
+				if settings.Level == 0xffffffffffffffff || settings.Level == 0 {
+					settings.Level = levels[rand.Intn(len(levels))]
+				} else {
+					if !slices.Contains(levels, settings.Level) {
+						return state, SignalResponse{Message: fmt.Sprintf("invalid level: %v", settings.Level)}.String()
+					}
 
+				}
 			}
 		}
 
