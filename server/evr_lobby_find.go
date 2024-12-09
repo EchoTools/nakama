@@ -21,7 +21,7 @@ import (
 
 type TeamAlignments map[string]int // map[UserID]Role
 
-var createSocialMu = sync.Mutex{}
+var createLobbyMu = sync.Mutex{}
 
 var LobbyTestCounter = 0
 
@@ -205,29 +205,30 @@ func (p *EvrPipeline) monitorMatchmakingStream(ctx context.Context, logger *zap.
 	}
 }
 
-func (p *EvrPipeline) newSocialLobby(ctx context.Context, logger *zap.Logger, versionLock evr.Symbol, groupID uuid.UUID) (*MatchLabel, error) {
-	if createSocialMu.TryLock() {
+func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyParams *LobbySessionParameters) (*MatchLabel, error) {
+	if createLobbyMu.TryLock() {
 		go func() {
 			// Hold the lock for enough time to create the server
 			<-time.After(5 * time.Second)
-			createSocialMu.Unlock()
+			createLobbyMu.Unlock()
 		}()
 	} else {
 		return nil, ErrFailedToAcquireLock
 	}
 
 	metricsTags := map[string]string{
-		"version_lock": versionLock.String(),
-		"group_id":     groupID.String(),
+		"version_lock": lobbyParams.VersionLock.String(),
+		"group_id":     lobbyParams.GroupID.String(),
+		"mode":         lobbyParams.Mode.String(),
 	}
 
-	p.metrics.CustomCounter("lobby_create_social", metricsTags, 1)
+	p.metrics.CustomCounter("lobby_new", metricsTags, 1)
 
 	qparts := []string{
 		"+label.open:T",
 		"+label.lobby_type:unassigned",
 		"+label.broadcaster.regions:/(default)/",
-		fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/", Query.Escape(groupID.String())),
+		fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/", Query.Escape(lobbyParams.GroupID.String())),
 		//fmt.Sprintf("+label.broadcaster.version_lock:%s", versionLock.String()),
 	}
 
@@ -249,21 +250,30 @@ func (p *EvrPipeline) newSocialLobby(ctx context.Context, logger *zap.Logger, ve
 	// Select the server with the best average ping for the highest number of players.
 	label := &MatchLabel{}
 
-	rttByPlayerByExtIP, err := rttByPlayerByExtIP(ctx, logger, p.db, p.runtimeModule, groupID.String())
-	if err != nil {
-		logger.Warn("Failed to get RTT by player by extIP", zap.Error(err))
-	} else {
-		extIPs := sortByGreatestPlayerAvailability(rttByPlayerByExtIP)
-		for _, extIP := range extIPs {
-			for _, l := range labels {
-				if l.Broadcaster.Endpoint.GetExternalIP() == extIP {
-					label = l
-					break
+	switch lobbyParams.Mode {
+	case evr.ModeSocialPublic:
+		rttByPlayerByExtIP, err := rttByPlayerByExtIP(ctx, logger, p.db, p.runtimeModule, lobbyParams.GroupID.String())
+		if err != nil {
+			logger.Warn("Failed to get RTT by player by extIP", zap.Error(err))
+		} else {
+			extIPs := sortByGreatestPlayerAvailability(rttByPlayerByExtIP)
+			for _, extIP := range extIPs {
+				for _, l := range labels {
+					if l.Broadcaster.Endpoint.GetExternalIP() == extIP {
+						label = l
+						break
+					}
 				}
 			}
 		}
-	}
+	default:
 
+		// Create a lobby that is closest to the player requesting
+		withLatency := lobbyParams.latencyHistory.LabelsByAverageRTT(labels)
+		if len(withLatency) > 0 {
+			label = withLatency[0].Label
+		}
+	}
 	// If no label was found, just pick a random one
 	if label.ID.IsNil() {
 		label = labels[rand.Intn(len(labels))]
@@ -274,7 +284,7 @@ func (p *EvrPipeline) newSocialLobby(ctx context.Context, logger *zap.Logger, ve
 		Mode:      evr.ModeSocialPublic,
 		Level:     evr.LevelSocial,
 		SpawnedBy: SystemUserID,
-		GroupID:   groupID,
+		GroupID:   lobbyParams.GroupID,
 		StartTime: time.Now().UTC(),
 	}
 	label, err = LobbyPrepareSession(ctx, p.runtimeModule, matchID, settings)
@@ -323,10 +333,11 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 	rtts := lobbyParams.latencyHistory.LatestRTTs()
 
 	cycleCount := 0
-	backfillMultipler := 1.5
+	backfillMultipler := 1.25 // Multiplier of matchmaking ticket timeout before starting backfill search
 
 	fallbackTimer := time.NewTimer(time.Duration(backfillMultipler * float64(p.matchmakingTicketTimeout())))
 
+	failsafeTimer := time.NewTimer(lobbyParams.MatchmakingTimeout - interval*2)
 	for {
 
 		var err error
@@ -335,6 +346,24 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 			return ctx.Err()
 		case <-fallbackTimer.C:
 			query = lobbyParams.BackfillSearchQuery(false, false)
+		case <-failsafeTimer.C:
+
+			// The failsafe timer has expired.
+			// Create a match.
+			logger.Warn("Failsafe timer expired. Creating a new match.")
+			_, err := p.newLobby(ctx, logger, lobbyParams)
+			if err != nil {
+				// If the error is a lock error, just try again.
+				if err == ErrFailedToAcquireLock {
+					// Wait a few seconds to give time for the server to be created.
+					<-time.After(2 * time.Second)
+					continue
+				}
+
+				// This should't happen unless there's no servers available.
+				return NewLobbyErrorf(ServerFindFailed, "failed to create new lobby failsafe: %w", err)
+			}
+			<-time.After(2 * time.Second)
 		case <-time.After(interval):
 		}
 
@@ -437,7 +466,7 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 		// If the lobby is social, create a new social lobby.
 		if selected == nil && lobbyParams.Mode == evr.ModeSocialPublic {
 			// Create a new social lobby
-			selected, err = p.newSocialLobby(ctx, logger, lobbyParams.VersionLock, lobbyParams.GroupID)
+			selected, err = p.newLobby(ctx, logger, lobbyParams)
 			if err != nil {
 				// If the error is a lock error, just try again.
 				if err == ErrFailedToAcquireLock {
@@ -451,7 +480,6 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 			} else {
 				<-time.After(1 * time.Second)
 			}
-
 		}
 
 		// If no match was found, continue.
