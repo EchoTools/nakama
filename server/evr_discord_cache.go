@@ -153,8 +153,14 @@ func (c *DiscordCache) Start() {
 		ctx, cancel := context.WithTimeout(c.ctx, time.Second*5)
 		defer cancel()
 		logger.Info("Member Remove", zap.Any("member", m.Member.User.ID))
-		if err := c.GuildGroupMemberRemove(ctx, m.GuildID, m.Member.User.ID); err != nil {
+		if err := c.GuildGroupMemberRemove(ctx, m.GuildID, m.Member.User.ID, ""); err != nil {
 			logger.Warn("Error removing guild group member", zap.Any("guildMemberRemove", m), zap.Error(err))
+		}
+	})
+
+	dg.AddHandler(func(s *discordgo.Session, m *discordgo.GuildBanAdd) {
+		if err := c.handleGuildBanAdd(c.ctx, logger, s, m); err != nil {
+			logger.Error("Error handling guild ban add", zap.Any("guildBanAdd", m), zap.Error(err))
 		}
 	})
 	c.logger.Info("Starting Discord cache")
@@ -343,7 +349,7 @@ func (c *DiscordCache) SyncGuildGroupMember(ctx context.Context, userID, groupID
 	if err != nil {
 		// Remove the user from the guild group.
 
-		if err := c.GuildGroupMemberRemove(ctx, guildID, userID); err != nil {
+		if err := c.GuildGroupMemberRemove(ctx, guildID, userID, ""); err != nil {
 			return fmt.Errorf("failed to remove guild group member: %w", err)
 		}
 		return ErrMemberNotFound
@@ -627,33 +633,80 @@ func (d *DiscordCache) handleMemberUpdate(logger *zap.Logger, s *discordgo.Sessi
 	return nil
 }
 
-func (d *DiscordCache) GuildGroupMemberRemove(ctx context.Context, guildID, discordID string) error {
-
-	userID := d.DiscordIDToUserID(discordID)
-	if userID == "" {
-		return nil
-	}
-
-	// Remove the user from the guild group
-	groupID := d.GuildIDToGroupID(guildID)
-	if groupID == "" {
-		return nil
-	}
-
-	d.logger.Info("Member Remove", zap.Any("member", discordID))
+func (d *DiscordCache) GuildGroupMemberRemove(ctx context.Context, groupID, userID string, callerID string) error {
 
 	md, err := GetAccountMetadata(ctx, d.nk, userID)
 	if err != nil {
 		return fmt.Errorf("error getting account metadata: %w", err)
 	}
-	if err := d.nk.GroupUserLeave(ctx, groupID, userID, md.Username()); err != nil {
-		return fmt.Errorf("error removing user from group: %w", err)
+
+	if callerID != "" {
+		if err := d.nk.GroupUsersKick(ctx, callerID, groupID, []string{userID}); err != nil {
+			return fmt.Errorf("error kicking user from group: %w", err)
+		}
+	} else {
+		if err := d.nk.GroupUserLeave(ctx, groupID, userID, md.Username()); err != nil {
+			return fmt.Errorf("error removing user from group: %w", err)
+		}
 	}
 
 	delete(md.GroupDisplayNames, groupID)
 	if md.GetActiveGroupID().String() == groupID {
 		md.SetActiveGroupID(uuid.Nil)
 	}
+
+	// Store the account metadata
+	if err := d.nk.AccountUpdateId(ctx, userID, md.Username(), md.MarshalMap(), md.GetActiveGroupDisplayName(), "", "", "", ""); err != nil {
+		return fmt.Errorf("failed to update account: %w", err)
+	}
+	return nil
+}
+
+func (d *DiscordCache) handleGuildBanAdd(ctx context.Context, logger *zap.Logger, s *discordgo.Session, e *discordgo.GuildBanAdd) error {
+
+	groupID := d.GuildIDToGroupID(e.GuildID)
+	if groupID == "" {
+		return fmt.Errorf("guild not found")
+	}
+
+	userID := d.DiscordIDToUserID(e.User.ID)
+	if userID == "" {
+		return fmt.Errorf("user not found")
+	}
+
+	logger = logger.With(zap.String("event", "GuildBanAdd"), zap.String("guild_id", e.GuildID), zap.String("discord_id", e.User.ID), zap.String("gid", groupID), zap.String("uid", userID), zap.String("username", e.User.Username))
+
+	ctx, cancel := context.WithTimeout(ctx, time.Second*5)
+	defer cancel()
+
+	// Fetch the audit log for recent bans
+	auditLogs, err := s.GuildAuditLog(e.GuildID, "", "", int(discordgo.AuditLogActionMemberBanAdd), 1)
+	if err != nil {
+		return fmt.Errorf("error fetching audit log: %w", err)
+	}
+	var issuerUserID string
+	if len(auditLogs.AuditLogEntries) == 0 {
+		logger.Warn("No relevant audit log entries found.")
+	} else if latestBan := auditLogs.AuditLogEntries[0]; latestBan.TargetID != e.User.ID {
+		logger.Warn("Latest ban action does not match the user ID", zap.String("target_id", latestBan.TargetID))
+	} else if issuer, err := s.User(latestBan.UserID); err != nil {
+		logger.Warn("Failed to fetch issuing user", zap.Error(err))
+	} else {
+		issuerUserID = d.DiscordIDToUserID(issuer.ID)
+		logger = logger.With(
+			zap.String("issuer_username", issuer.Username),
+			zap.String("issuer_user_id", issuerUserID),
+			zap.String("issuer_discord_id", issuer.ID),
+			zap.String("reason", latestBan.Reason),
+			zap.Any("audit_log", latestBan),
+		)
+	}
+
+	if err := d.GuildGroupMemberRemove(ctx, e.GuildID, e.User.ID, issuerUserID); err != nil {
+		logger.Warn("Error removing guild group member", zap.Any("guildMemberRemove", e), zap.Error(err))
+	}
+
+	logger.Info("User was banned from guild", zap.String("event", "GuildBanAdd"))
 	return nil
 }
 
