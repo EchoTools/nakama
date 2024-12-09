@@ -467,10 +467,12 @@ func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionPar
 	}
 
 	numericProperties := map[string]float64{
-		"rating_mu":       p.Rating.Mu,
-		"rating_sigma":    p.Rating.Sigma,
-		"rank_percentile": p.RankPercentile,
-		"timestamp":       float64(time.Now().UTC().Unix()),
+		"rating_mu":           p.Rating.Mu,
+		"rating_sigma":        p.Rating.Sigma,
+		"rank_percentile":     p.RankPercentile,
+		"timestamp":           float64(time.Now().UTC().Unix()),
+		"rank_percentile_min": 0.0,
+		"rank_percentile_max": 1.0,
 	}
 
 	qparts := []string{
@@ -489,7 +491,34 @@ func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionPar
 		rankUpper := max(p.RankPercentile+p.RankPercentileMaxDelta, 2.0*p.RankPercentileMaxDelta)
 		rankLower = max(rankLower, 0.0)
 		rankUpper = min(rankUpper, 1.0)
+		/*
+			qparts = append(qparts,
+				fmt.Sprintf("-properties.rank_percentile_min:>=%f", p.RankPercentile),
+				fmt.Sprintf("-properties.rank_percentile_max:<=%f", p.RankPercentile),
+			)
+		*/
 		qparts = append(qparts, fmt.Sprintf("+properties.rank_percentile:>=%f +properties.rank_percentile:<=%f", rankLower, rankUpper))
+		numericProperties["rank_percentile_min"] = rankLower
+		numericProperties["rank_percentile_max"] = rankUpper
+	}
+
+	// Create a string list of validRTTs
+	acceptableServers := make([]string, 0)
+	for ip, rtt := range p.latencyHistory.LatestRTTs() {
+		if rtt <= p.MaxServerRTT {
+			acceptableServers = append(acceptableServers, ip)
+		}
+	}
+	stringProperties["acceptable_servers"] = strings.Join(acceptableServers, " ")
+	// Add the acceptable servers to the query
+	if len(acceptableServers) > 0 {
+		qparts = append(qparts, fmt.Sprintf("+properties.broadcaster.endpoint:/.*(%s).*/", Query.Join(acceptableServers, "|")))
+	}
+
+	if ticketParams.IncludeServerRTTs {
+		for ip, rtt := range p.latencyHistory.LatestRTTs() {
+			qparts = append(qparts, fmt.Sprintf("+properties.%s:<=%d", RTTPropertyPrefix+ip, rtt))
+		}
 	}
 
 	// If the user has an early quit penalty, only match them with players who have submitted after now
