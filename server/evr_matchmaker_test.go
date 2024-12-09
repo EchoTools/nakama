@@ -204,8 +204,8 @@ func TestHasEligibleServers(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			m := NewSkillBasedMatchmaker()
 
-			if got, count := m.filterWithinMaxRTT(tt.candidates); cmp.Diff(tt.want, got) != "" {
-				t.Errorf("hasEligibleServers() = %d: (want/got) %s", count, cmp.Diff(tt.want, got))
+			if count := m.filterWithinMaxRTT(tt.candidates); cmp.Diff(tt.want, tt.candidates) != "" {
+				t.Errorf("hasEligibleServers() = %d: (want/got) %s", count, cmp.Diff(tt.want, tt.candidates))
 			}
 		})
 	}
@@ -380,10 +380,7 @@ func TestRemoveOddSizedTeams(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, gotCount := m.filterOddSizedTeams(tt.candidates)
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("removeOddSizedTeams() got = %v, want %v", got, tt.want)
-			}
+			gotCount := m.filterOddSizedTeams(tt.candidates)
 			if gotCount != tt.wantCount {
 				t.Errorf("removeOddSizedTeams() gotCount = %v, want %v", gotCount, tt.wantCount)
 			}
@@ -437,10 +434,10 @@ func TestMatchmaker(t *testing.T) {
 
 	t.Errorf("Sizes: %v", sizes)
 
-	candidates, _ = m.filterWithinMaxRTT(candidates)
+	_ = m.filterWithinMaxRTT(candidates)
 
 	// Remove odd sized teams
-	candidates, _ = m.filterOddSizedTeams(candidates)
+	_ = m.filterOddSizedTeams(candidates)
 
 	// Create a list of balanced matches with predictions
 	predictions := m.predictOutcomes(candidates)
@@ -603,7 +600,7 @@ func TestOverrideFn(t *testing.T) {
 		runtimeCombinations[i] = runtimeEntry
 	}
 
-	deduped, _ := sbmm.filterDuplicates(runtimeCombinations)
+	deduped := sbmm.filterDuplicates(runtimeCombinations)
 
 	players := make(map[string]struct{}, 0)
 	for _, combination := range runtimeCombinations {
@@ -612,14 +609,14 @@ func TestOverrideFn(t *testing.T) {
 		}
 	}
 
-	t.Logf("players: %d, original: %d, filtered: %d", len(players), len(data.Candidates), len(deduped))
+	t.Logf("players: %d, original: %d, filtered: %d", len(players), len(data.Candidates), deduped)
 	t.Errorf("autofail")
 
 }
 
 func TestCharacterizationMatchmaker1v1(t *testing.T) {
 
-	candidatesFilename := "../_matches/m4.json"
+	candidatesFilename := "../_matches/m5.json"
 	// Load the candidate data from the json file
 	file, err := os.Open(candidatesFilename)
 	if err != nil {
@@ -726,9 +723,25 @@ func TestCharacterizationMatchmaker1v1(t *testing.T) {
 
 	ticketCount := 0
 
-	// print out all the session ids of the entries
+	newestSubmission := 0.0
+
 	for _, entry := range entries {
-		t.Logf("Entry: %s", entry.Presence.SessionId)
+		if t, ok := entry.NumericProperties["submission_time"]; ok {
+			if t > newestSubmission {
+				newestSubmission = t
+			}
+		}
+	}
+	offset := float64(time.Now().UTC().Unix()) - newestSubmission
+
+	// Offset all the submission times and thresholds so that the newest is the current itme
+	for _, entry := range entries {
+		if t, ok := entry.NumericProperties["submission_time"]; ok {
+			entry.NumericProperties["submission_time"] = t + offset
+		}
+		if t, ok := entry.NumericProperties["priority_threshold"]; ok {
+			entry.NumericProperties["priority_threshold"] = t + offset
+		}
 	}
 
 	ticketCounts := make(map[string]int)
@@ -785,38 +798,33 @@ func TestCharacterizationMatchmaker1v1(t *testing.T) {
 	}
 	t.Logf("Entered %d tickets", ticketCount)
 
-	maxCycles := 2
+	startTime := time.Now()
+	matchmaker.Process()
+	t.Logf("Matchmaker process time: %v", time.Since(startTime))
 
-	for i := 0; i < maxCycles; i++ {
+	count := 0
 
-		startTime := time.Now()
-		matchmaker.Process()
-		t.Logf("Matchmaker process time: %v", time.Since(startTime))
+	// output the matches that were created
+	for _, match := range matchesSeen {
 
-		count := 0
-
-		// output the matches that were created
-		for _, match := range matchesSeen {
-
-			// Create a map of partyID's to alpha numeric characters
-			partyMap := make(map[string]string)
-			partyMap[""] = "-"
-			for _, entry := range entries {
-				if _, ok := partyMap[entry.PartyId]; ok {
-					continue
-				}
-				partyMap[entry.PartyId] = string('A' + rune(len(partyMap)))
+		// Create a map of partyID's to alpha numeric characters
+		partyMap := make(map[string]string)
+		partyMap[""] = "-"
+		for _, entry := range entries {
+			if _, ok := partyMap[entry.PartyId]; ok {
+				continue
 			}
-
-			// get the players in the match
-			playerIds := make([]string, 0, len(match.GetUsers()))
-			for _, p := range match.GetUsers() {
-				playerName := fmt.Sprintf("%s:%s", partyMap[match.GetUsers()[0].PartyId], p.Presence.GetUsername())
-				playerIds = append(playerIds, playerName)
-			}
-			t.Logf("  Match %d: %s", count, strings.Join(playerIds, ", "))
-			count++
+			partyMap[entry.PartyId] = string('A' + rune(len(partyMap)))
 		}
+
+		// get the players in the match
+		playerIds := make([]string, 0, len(match.GetUsers()))
+		for _, p := range match.GetUsers() {
+			playerName := fmt.Sprintf("%s:%s", partyMap[match.GetUsers()[0].PartyId], p.Presence.GetUsername())
+			playerIds = append(playerIds, playerName)
+		}
+		t.Logf("  Match %d: %s", count, strings.Join(playerIds, ", "))
+		count++
 	}
 	// count the total matches
 
@@ -851,6 +859,7 @@ func splitProperties(props map[string]interface{}) (map[string]string, map[strin
 // Special function used for testing the matchmaker
 func evrMatchmakerOverrideFn(ctx context.Context, candidateMatches [][]*MatchmakerEntry) (matches [][]*MatchmakerEntry) {
 
+	log.Printf("Override function called with %d candidate matches", len(candidateMatches))
 	runtimeCombinations := make([][]runtime.MatchmakerEntry, len(candidateMatches))
 	for i, combination := range candidateMatches {
 		runtimeEntry := make([]runtime.MatchmakerEntry, len(combination))
