@@ -386,18 +386,15 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 		slices.SortFunc(matches, func(a, b *MatchLabelMeta) int {
 
 			// By rank percentile difference
-			rankDeltaA := math.Abs(a.State.RankPercentile - lobbyParams.RankPercentile)
-			rankDeltaB := math.Abs(b.State.RankPercentile - lobbyParams.RankPercentile)
 
-			// if the rank delta is more than 0.15, sort by rank delta
-			if rankDeltaA > 0.15 && rankDeltaB > 0.15 {
-				if rankDeltaA < rankDeltaB {
-					return -1
-				}
+			rankPercentileDifferenceA := math.Abs(a.State.RankPercentile - lobbyParams.RankPercentile)
+			rankPercentileDifferenceB := math.Abs(b.State.RankPercentile - lobbyParams.RankPercentile)
 
-				if rankDeltaA > rankDeltaB {
-					return 1
-				}
+			if rankPercentileDifferenceA < lobbyParams.RankPercentileMaxDelta && rankPercentileDifferenceB > lobbyParams.RankPercentileMaxDelta {
+				return -1
+			}
+			if rankPercentileDifferenceA > lobbyParams.RankPercentile && rankPercentileDifferenceB < lobbyParams.RankPercentile {
+				return 1
 			}
 
 			// Sort by largest population
