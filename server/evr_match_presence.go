@@ -22,27 +22,27 @@ var _ runtime.Presence = &EvrMatchPresence{}
 
 // Represents identity information for a single match participant.
 type EvrMatchPresence struct {
-	Node              string    `json:"node,omitempty"`
-	SessionID         uuid.UUID `json:"session_id,omitempty"`       // The Player's "match" connection session ID
-	LoginSessionID    uuid.UUID `json:"login_session_id,omitempty"` // The Player's "login" connection session ID
-	UserID            uuid.UUID `json:"user_id,omitempty"`
-	EvrID             evr.EvrId `json:"evr_id,omitempty"`
-	DiscordID         string    `json:"discord_id,omitempty"`
-	ClientIP          string    `json:"client_ip,omitempty"`
-	ClientPort        string    `json:"client_port,omitempty"`
-	Username          string    `json:"username,omitempty"`
-	DisplayName       string    `json:"display_name,omitempty"`
-	PartyID           uuid.UUID `json:"party_id,omitempty"`
-	RoleAlignment     int       `json:"role,omitempty"` // The team they want to be on
-	SupportedFeatures []string  `json:"supported_features,omitempty"`
-	SessionExpiry     int64     `json:"session_expiry,omitempty"`
-	IsPCVR            bool      `json:"is_pcvr,omitempty"` // PCVR or Standalone
-	DisableEncryption bool      `json:"disable_encryption,omitempty"`
-	DisableMAC        bool      `json:"disable_mac,omitempty"`
-
-	Query          string       `json:"query,omitempty"` // Their matchmaking query
-	RankPercentile float64      `json:"rank_percentile,omitempty"`
-	Rating         types.Rating `json:"rating,omitempty"`
+	Node              string       `json:"node,omitempty"`
+	SessionID         uuid.UUID    `json:"session_id,omitempty"`       // The Player's "match" connection session ID
+	LoginSessionID    uuid.UUID    `json:"login_session_id,omitempty"` // The Player's "login" connection session ID
+	UserID            uuid.UUID    `json:"user_id,omitempty"`
+	EvrID             evr.EvrId    `json:"evr_id,omitempty"`
+	DiscordID         string       `json:"discord_id,omitempty"`
+	ClientIP          string       `json:"client_ip,omitempty"`
+	ClientPort        string       `json:"client_port,omitempty"`
+	Username          string       `json:"username,omitempty"`
+	DisplayName       string       `json:"display_name,omitempty"`
+	PartyID           uuid.UUID    `json:"party_id,omitempty"`
+	RoleAlignment     int          `json:"role,omitempty"` // The team they want to be on
+	SupportedFeatures []string     `json:"supported_features,omitempty"`
+	SessionExpiry     int64        `json:"session_expiry,omitempty"`
+	IsPCVR            bool         `json:"is_pcvr,omitempty"` // PCVR or Standalone
+	DisableEncryption bool         `json:"disable_encryption,omitempty"`
+	DisableMAC        bool         `json:"disable_mac,omitempty"`
+	Query             string       `json:"query,omitempty"` // Their matchmaking query
+	RankPercentile    float64      `json:"rank_percentile,omitempty"`
+	Rating            types.Rating `json:"rating,omitempty"`
+	Ping              int          `json:"ping,omitempty"`
 }
 
 func (p EvrMatchPresence) EntrantID(matchID MatchID) uuid.UUID {

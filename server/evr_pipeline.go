@@ -361,12 +361,12 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 	case *evr.EchoToolsGameServerRegistrationRequestV1:
 		requireAuthed = false
 		pipelineFn = p.echoToolsGameServerRegistrationRequestV1
-	case *evr.EchoToolsLobbySessionStartedV1:
-		pipelineFn = p.echoToolsLobbySessionStartedV1
+
 	case *evr.BroadcasterSessionStarted:
 		pipelineFn = p.broadcasterSessionStarted
+
 	case *evr.GameServerJoinAttempt:
-		pipelineFn = p.broadcasterPlayerAccept
+		pipelineFn = p.legacyGameServerPlayerAccept
 	case *evr.GameServerPlayerRemoved:
 		pipelineFn = p.broadcasterPlayerRemoved
 	case *evr.BroadcasterPlayerSessionsLocked:
@@ -375,6 +375,16 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 		pipelineFn = p.broadcasterPlayerSessionsUnlocked
 	case *evr.BroadcasterSessionEnded:
 		pipelineFn = p.broadcasterSessionEnded
+
+		// Advanced Game Servers
+	case *evr.EchoToolsLobbySessionStartedV1:
+		pipelineFn = p.echoToolsLobbySessionStartedV1
+	case *evr.EchoToolsLobbyStatusV1:
+		pipelineFn = p.echoToolsLobbyStatusV1
+	case *evr.EchoToolsLobbyEntrantNewV1:
+		pipelineFn = p.echoToolsLobbyEntrantNewV1
+	case *evr.EchoToolsLobbySessionEndedV1:
+		pipelineFn = p.echoToolsLobbySessionEndedV1
 
 	default:
 		pipelineFn = func(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {

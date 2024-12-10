@@ -553,12 +553,21 @@ func (p *EvrPipeline) broadcasterSessionStarted(_ context.Context, logger *zap.L
 
 // broadcasterSessionEnded is called when the broadcaster has ended the session.
 func (p *EvrPipeline) broadcasterSessionEnded(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	matchID, presence, err := GameServerBySessionID(p.runtimeModule, session.ID())
+	matchID, _, err := GameServerBySessionID(p.runtimeModule, session.ID())
 	if err != nil {
 		logger.Warn("Failed to get broadcaster's match by session ID", zap.Error(err))
 	}
 
-	if err := p.runtimeModule.StreamUserLeave(StreamModeMatchAuthoritative, matchID.UUID.String(), "", p.node, presence.GetUserId(), presence.GetSessionId()); err != nil {
+	return p.gameServerLobbySessionEnded(logger, session, matchID.UUID)
+}
+
+func (p *EvrPipeline) echoToolsLobbySessionEndedV1(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
+	request := in.(*evr.EchoToolsLobbySessionEndedV1)
+	return p.gameServerLobbySessionEnded(logger, session, request.LobbySessionID)
+}
+
+func (p *EvrPipeline) gameServerLobbySessionEnded(logger *zap.Logger, session *sessionWS, lobbySessionID uuid.UUID) error {
+	if err := p.runtimeModule.StreamUserLeave(StreamModeMatchAuthoritative, lobbySessionID.String(), "", p.node, session.UserID().String(), session.ID().String()); err != nil {
 		logger.Warn("Failed to leave match stream", zap.Error(err))
 	}
 
@@ -589,19 +598,31 @@ func (p *EvrPipeline) broadcasterSessionEnded(ctx context.Context, logger *zap.L
 	return nil
 }
 
-func (p *EvrPipeline) broadcasterPlayerAccept(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
+func (p *EvrPipeline) legacyGameServerPlayerAccept(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.GameServerJoinAttempt)
-
 	matchID, _, err := GameServerBySessionID(p.runtimeModule, session.ID())
 	if err != nil {
 		logger.Warn("Failed to get broadcaster's match by session ID", zap.Error(err))
 	}
-	baseLogger := logger.With(zap.String("mid", matchID.String()))
+	return p.gameServerLobbyEntrantNew(ctx, logger, session, matchID.UUID, request.EntrantIDs)
+}
 
-	accepted := make([]uuid.UUID, 0, len(request.EntrantIDs))
+func (p *EvrPipeline) echoToolsLobbyEntrantNewV1(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
+	request := in.(*evr.EchoToolsLobbyEntrantNewV1)
+
+	return p.gameServerLobbyEntrantNew(ctx, logger, session, request.LobbySessionID, request.EntrantIDs)
+}
+
+func (p *EvrPipeline) gameServerLobbyEntrantNew(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbySessionID uuid.UUID, entrantIDs []uuid.UUID) error {
+
+	baseLogger := logger.With(zap.String("mid", lobbySessionID.String()))
+
+	accepted := make([]uuid.UUID, 0, len(entrantIDs))
 	rejected := make([]uuid.UUID, 0)
 
-	for _, entrantID := range request.EntrantIDs {
+	matchID, _ := NewMatchID(lobbySessionID, p.node)
+
+	for _, entrantID := range entrantIDs {
 		logger := baseLogger.With(zap.String("entrant_id", entrantID.String()))
 
 		presence, err := PresenceByEntrantID(p.runtimeModule, matchID, entrantID)
@@ -736,6 +757,19 @@ func (p *EvrPipeline) echoToolsLobbySessionStartedV1(ctx context.Context, logger
 	request := in.(*evr.EchoToolsLobbySessionStartedV1)
 
 	logger.Info("Lobby session started", zap.String("mid", request.LobbySessionID.String()))
+
+	return nil
+}
+
+func (p *EvrPipeline) echoToolsLobbyStatusV1(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
+	request := in.(*evr.EchoToolsLobbyStatusV1)
+
+	data, err := json.Marshal(request)
+	if err != nil {
+		return fmt.Errorf("failed to marshal lobby status: %w", err)
+	}
+
+	p.matchRegistry.SendData(request.LobbySessionID, p.node, session.userID, session.id, session.Username(), p.node, OpCodeGameServerLobbyStatus, data, false, time.Now().UTC().Unix())
 
 	return nil
 }

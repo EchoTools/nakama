@@ -42,10 +42,11 @@ type MatchLabel struct {
 	SessionSettings *evr.LobbySessionSettings `json:"session_settings,omitempty"` // The session settings for the match (EVR).
 	TeamAlignments  map[string]int            `json:"team_alignments,omitempty"`  // map[userID]TeamIndex
 
-	server         runtime.Presence             // The broadcaster's presence
-	levelLoaded    bool                         // Whether the server has been sent the start instruction.
-	presenceMap    map[string]*EvrMatchPresence // [sessionId]EvrMatchPresence
-	reservationMap map[string]*slotReservation  // map[sessionID]slotReservation
+	server          runtime.Presence                // The broadcaster's presence
+	levelLoaded     bool                            // Whether the server has been sent the start instruction.
+	presenceMap     map[string]*EvrMatchPresence    // [sessionId]EvrMatchPresence
+	reservationMap  map[string]*slotReservation     // map[sessionID]slotReservation
+	presenceByEvrID map[evr.EvrId]*EvrMatchPresence // map[evrID]EvrMatchPresence
 
 	joinTimestamps       map[string]time.Time // The timestamps of when players joined the match. map[sessionId]time.Time
 	joinTimeMilliseconds map[string]int64     // The round clock time of when players joined the match. map[sessionId]time.Time

@@ -65,6 +65,7 @@ const (
 	OpCodeBroadcasterDisconnected int64 = iota
 	OpCodeEVRPacketData
 	OpCodeMatchGameStateUpdate
+	OpCodeGameServerLobbyStatus
 )
 
 type MatchStatGroup string
@@ -170,6 +171,7 @@ func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql
 		Players:          make([]PlayerInfo, 0, SocialLobbyMaxSize),
 		presenceMap:      make(map[string]*EvrMatchPresence, SocialLobbyMaxSize),
 		reservationMap:   make(map[string]*slotReservation, 2),
+		presenceByEvrID:  make(map[evr.EvrId]*EvrMatchPresence, SocialLobbyMaxSize),
 		goals:            make([]*MatchGoal, 0),
 
 		TeamAlignments:       make(map[string]int, SocialLobbyMaxSize),
@@ -202,6 +204,7 @@ var (
 	ErrJoinRejectDuplicateEvrID                  = errors.New("duplicate evr id")
 	ErrJoinRejectReasonLobbyFull                 = errors.New("lobby full")
 	ErrJoinRejectReasonFailedToAssignTeam        = errors.New("failed to assign team")
+	ErrJoinInvalidRoleForLevel                   = errors.New("invalid role for level")
 	ErrJoinRejectReasonPartyMembersMustHaveRoles = errors.New("party members must have roles")
 	ErrJoinRejectReasonMatchTerminating          = errors.New("match terminating")
 	ErrJoinRejectReasonMatchClosed               = errors.New("match closed to new entrants")
@@ -401,6 +404,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	// Add the player
 	sessionID := meta.Presence.GetSessionId()
 	state.presenceMap[sessionID] = meta.Presence
+	state.presenceByEvrID[meta.Presence.EvrID] = meta.Presence
 	state.joinTimestamps[sessionID] = time.Now()
 
 	if err := m.updateLabel(dispatcher, state); err != nil {
@@ -539,6 +543,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 			}
 
 			delete(state.presenceMap, p.GetSessionId())
+			delete(state.presenceByEvrID, mp.EvrID)
 			delete(state.joinTimestamps, p.GetSessionId())
 
 		}
@@ -640,6 +645,28 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 
 			}
 			updateLabel = true
+		case OpCodeGameServerLobbyStatus:
+
+			lobbyStatus := evr.EchoToolsLobbyStatusV1{}
+			if err := json.Unmarshal(in.GetData(), &lobbyStatus); err != nil {
+				logger.Error("Failed to unmarshal lobby status: %v", err)
+				continue
+			}
+			for _, s := range lobbyStatus.Slots {
+				if s == nil {
+					continue
+				}
+
+				// Find the player in the match
+				presence := state.presenceByEvrID[s.XPlatformId]
+				if presence == nil {
+					logger.Warn("Player not found in match: %s", s.XPlatformId)
+					continue
+				}
+				presence.Ping = int(s.Ping)
+				presence.RoleAlignment = int(s.TeamIndex)
+			}
+
 		default:
 			typ, found := evr.SymbolTypes[uint64(in.GetOpCode())]
 			if !found {
