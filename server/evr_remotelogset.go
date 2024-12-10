@@ -319,11 +319,19 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 
 			logger.Warn("Server connection failed", zap.String("username", session.Username()), zap.String("match_id", msg.SessionUUID().String()), zap.String("evr_id", evrID.String()), zap.Any("remote_log_message", msg))
 
+			acct, err := p.runtimeModule.AccountGetId(ctx, label.Broadcaster.OperatorID)
+			if err != nil {
+				logger.Error("Failed to get account", zap.Error(err))
+				continue
+			}
+
 			tags := map[string]string{
-				"operator": label.Broadcaster.OperatorID,
-				"ext_ip":   label.Broadcaster.Endpoint.GetExternalIP(),
-				"mode":     label.Mode.String(),
-				"is_pcvr":  strconv.FormatBool(params.IsPCVR.Load()),
+				"operator_id":       label.Broadcaster.OperatorID,
+				"operator_username": acct.User.Username,
+				"ext_ip":            label.Broadcaster.Endpoint.GetExternalIP(),
+				"port":              strconv.Itoa(int(label.Broadcaster.Endpoint.Port)),
+				"mode":              label.Mode.String(),
+				"is_pcvr":           strconv.FormatBool(params.IsPCVR.Load()),
 			}
 
 			p.runtimeModule.MetricsCounterAdd("remotelog_error_server_connection_failed_count", tags, 1)
