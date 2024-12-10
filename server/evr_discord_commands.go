@@ -137,12 +137,16 @@ func NewDiscordAppBot(logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB
 		for {
 			select {
 			case <-updateTicker.C:
+				if !bot.DataReady {
+					continue
+				}
+
 				// Get all the matches
 				minSize := 2
 				maxSize := MatchLobbyMaxSize + 1
-				matches, err := nk.MatchList(ctx, 1000, true, "", &minSize, &maxSize, "")
+				matches, err := nk.MatchList(ctx, 1000, true, "", &minSize, &maxSize, "*")
 				if err != nil {
-					logger.Error("Error fetching matches: %w", err)
+					logger.WithField("err", err).Warn("Error fetching matches.")
 					continue
 				}
 				playerCount := 0
@@ -154,7 +158,8 @@ func NewDiscordAppBot(logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB
 				}
 				status := fmt.Sprintf("with %d players in %d matches", playerCount, matchCount)
 				if err := bot.UpdateGameStatus(0, status); err != nil {
-					logger.Error("Error updating status: %w", err)
+					logger.WithField("err", err).Warn("Failed to update status")
+					continue
 				}
 
 			case <-ctx.Done():
@@ -2346,7 +2351,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				// Create a list of the members, and the mode of the lobby they are currently in, linked to an echotaxi link, and whether they are matchmaking.
 				// <@discord_id> - [mode](https://echo.taxi/spark://c/match_id) (matchmaking)
 
-
 				var content string
 				if len(activeIDs) == 0 && len(inactiveIDs) == 0 {
 					content = "No members in your party group."
@@ -2472,7 +2476,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			if handler, ok := commandHandlers[appCommandName]; ok {
 				err := d.handleInteractionCreate(logger, s, i, appCommandName, handler)
 				if err != nil {
-					logger.WithField("error", err).Error("Failed to handle interaction")
+					logger.WithField("err", err).Error("Failed to handle interaction")
 					// Queue the user to be updated in the cache
 					userID := d.cache.DiscordIDToUserID(user.ID)
 					groupID := d.cache.GuildIDToGroupID(i.GuildID)
