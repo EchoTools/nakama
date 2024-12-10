@@ -125,7 +125,10 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	}
 
 	// Update the metrics with match data
-	go metricsUpdateLoop(ctx, logger, nk.(*RuntimeGoNakamaModule))
+	go func() {
+		<-time.After(15 * time.Second)
+		metricsUpdateLoop(ctx, logger, nk.(*RuntimeGoNakamaModule))
+	}()
 
 	//go PurgeNonPlayers(ctx, logger, db, nk)
 

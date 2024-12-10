@@ -31,7 +31,7 @@ func (t MatchStateTags) AsMap() map[string]string {
 		"level":             t.Level,
 		"operator_id":       t.OperatorID,
 		"operator_username": t.OperatorUsername,
-		"ip":                t.IPAddress,
+		"ext_ip":            t.IPAddress,
 		"port":              t.Port,
 		"group":             t.Group,
 		"geohash":           t.Geohash,
