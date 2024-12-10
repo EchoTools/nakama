@@ -340,6 +340,19 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		maxServerRTT = userSettings.MaxServerRTT
 	}
 
+	// Set the maxRTT to at least the average of the player's latency history
+	averageRTT := 0
+	count := 0
+	if avgRTT := AverageLatencyHistories(latencyHistory); len(avgRTT) > 0 {
+		for _, rtt := range avgRTT {
+			averageRTT += rtt
+			count++
+		}
+		averageRTT /= count
+	}
+
+	maxServerRTT = max(maxServerRTT, averageRTT)
+
 	isEarlyQuitter := false
 	// Check if the last game was quit early
 	if len(eqstats.History) > 0 {
