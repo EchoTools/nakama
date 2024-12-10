@@ -471,7 +471,7 @@ func (s *sessionWS) BroadcasterSession(userID uuid.UUID, username string, server
 	return nil
 }
 
-// LobbySession validates the session information provided by the client.
+// LobbySession is the matchmaker/lobby connection from the client
 func (s *sessionWS) LobbySession(loginSessionID uuid.UUID) error {
 	if loginSessionID == uuid.Nil {
 		return fmt.Errorf("login session ID is nil")
@@ -510,7 +510,11 @@ func (s *sessionWS) LobbySession(loginSessionID uuid.UUID) error {
 		s.ctx = lobbyCtx
 		s.userID = loginSession.UserID()
 		s.SetUsername(loginSession.Username())
-		s.logger = s.logger.With(zap.String("login_sid", loginSessionID.String()), zap.String("uid", s.userID.String()), zap.String("evr_id", sessionParams.EvrID.Token()), zap.String("username", s.Username()))
+		s.logger = s.logger.With(
+			zap.String("login_sid", loginSessionID.String()),
+			zap.String("uid", s.userID.String()),
+			zap.String("evr_id", sessionParams.EvrID.Token()),
+			zap.String("username", s.Username()))
 		s.Unlock()
 
 		// cancel/disconnect this session if the login session is cancelled.

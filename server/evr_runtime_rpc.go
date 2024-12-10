@@ -112,7 +112,7 @@ func MatchListPublicRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 			s := LobbySessionParameters{}
 			if err := json.Unmarshal([]byte(presence.GetStatus()), &s); err != nil {
 				logger.WithFields(map[string]interface{}{
-					"error":  err.Error(),
+					"err":    err,
 					"status": presence.GetStatus(),
 				}).Warn("Failed to unmarshal lobby session parameters")
 				continue
