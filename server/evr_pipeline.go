@@ -40,9 +40,9 @@ type EvrPipeline struct {
 	ctx context.Context
 
 	node              string
-	broadcasterUserID string // The userID used for broadcaster connections
-	externalIP        net.IP // Server's external IP for external connections
-	localIP           net.IP // Server's local IP for external connections
+	broadcasterUserID string        // The userID used for broadcaster connections
+	externalIP        *atomic.Value // Server's external IP for external connections
+	localIP           net.IP        // Server's local IP for external connections
 
 	logger               *zap.Logger
 	db                   *sql.DB
@@ -154,7 +154,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 			logger.Error("Failed to initialize app bot", zap.Error(err))
 		}
 		if err = appBot.dg.Open(); err != nil {
-			logger.Error("Failed to open discord bot connection: %w", zap.Error(err))
+			logger.Warn("Failed to open discord bot connection: %w", zap.Error(err))
 		}
 	}
 
@@ -163,12 +163,6 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	localIP, err := DetermineLocalIPAddress()
 	if err != nil {
 		logger.Fatal("Failed to determine local IP address", zap.Error(err))
-	}
-
-	// loop until teh external IP is set
-	externalIP, err := DetermineExternalIPAddress()
-	if err != nil {
-		logger.Fatal("Failed to determine external IP address", zap.Error(err))
 	}
 
 	evrPipeline := &EvrPipeline{
@@ -198,7 +192,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		guildGroupCache: guildGroupCache,
 		appBot:          appBot,
 		localIP:         localIP,
-		externalIP:      externalIP,
+		externalIP:      &atomic.Value{},
 
 		profileRegistry:                  profileRegistry,
 		leaderboardRegistry:              leaderboardRegistry,
@@ -211,6 +205,15 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		linkDeviceURL:    config.GetRuntime().Environment["LINK_DEVICE_URL"],
 
 		messageCache: messageCache,
+	}
+
+	evrPipeline.externalIP.Store(net.IPv4zero)
+
+	externalIP, err := DetermineExternalIPAddress()
+	if err != nil {
+		logger.Warn("Failed to determine external IP address, using internal", zap.Error(err))
+	} else {
+		evrPipeline.externalIP.Store(externalIP)
 	}
 
 	// Create a timer to periodically clear the backfill queue
@@ -250,6 +253,25 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	}()
 
 	return evrPipeline
+}
+
+func (p *EvrPipeline) ServiceExternalIP() net.IP {
+	extIP := p.externalIP.Load().(net.IP)
+	var err error
+	// Update it, if it's missing
+	if extIP == nil {
+		extIP, err = DetermineExternalIPAddress()
+		if err != nil {
+			p.logger.Warn("Failed to determine external IP address, using internal", zap.Error(err))
+			extIP, err = DetermineLocalIPAddress()
+			if err != nil {
+				p.logger.Warn("Could not determine internal IP")
+			}
+		} else {
+			p.externalIP.Store(extIP)
+		}
+	}
+	return extIP
 }
 
 func (p *EvrPipeline) SetApiServer(apiServer *ApiServer) {
