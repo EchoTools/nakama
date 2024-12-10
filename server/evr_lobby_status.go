@@ -60,7 +60,7 @@ func JoinMatchmakingStream(logger *zap.Logger, s *sessionWS, lobbyParams *LobbyS
 		}
 	}
 
-	query, stringProps, numericProps := lobbyParams.MatchmakingParameters(sessionParams, &ticketConfig)
+	query, stringProps, numericProps := lobbyParams.MatchmakingParameters(&ticketConfig)
 	s.pipeline.router.SendToStream(logger, stream, &rtapi.Envelope{
 		Message: &rtapi.Envelope_StreamData{
 			StreamData: &rtapi.StreamData{
