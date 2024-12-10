@@ -562,29 +562,34 @@ func (m *SkillBasedMatchmaker) predictOutcomes(candidates [][]runtime.Matchmaker
 
 	return predictions
 }
+
 func (m *SkillBasedMatchmaker) assembleUniqueMatches(ratedMatches []PredictedMatch) [][]runtime.MatchmakerEntry {
 
-	seen := make(map[string]struct{})
-	selected := make([][]runtime.MatchmakerEntry, 0, len(ratedMatches))
+	matches := make([][]runtime.MatchmakerEntry, 0, len(ratedMatches))
+
+	matchedPlayers := make(map[string]struct{}, 0)
 
 OuterLoop:
-	for _, ratedMatch := range ratedMatches {
-		// The players are ordered by their team
+	for _, r := range ratedMatches {
+
 		match := make([]runtime.MatchmakerEntry, 0, 8)
 
-		// Ensure no player is in more than one match
-		for _, e := range ratedMatch.Entrants() {
-			sessionID := e.Entry.GetPresence().GetSessionId()
-
-			// Skip match with players already in a match
-			if _, ok := seen[sessionID]; ok {
+		for _, e := range r.Entrants() {
+			if _, ok := matchedPlayers[e.Entry.Presence.SessionId]; ok {
 				continue OuterLoop
 			}
-			seen[sessionID] = struct{}{}
+
 			match = append(match, e.Entry)
 		}
 
-		selected = append(selected, match)
+		for _, e := range r.Entrants() {
+			matchedPlayers[e.Entry.Presence.SessionId] = struct{}{}
+		}
+
+		matches = append(matches, match)
 	}
-	return selected
+
+	log.Printf("Selected %d matches", len(matches))
+
+	return matches
 }
