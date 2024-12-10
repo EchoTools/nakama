@@ -203,7 +203,7 @@ func (p *EvrPipeline) gameServerRegistration(ctx context.Context, logger *zap.Lo
 			logger.Warn("Failed to determine external IP address, using internal", zap.Error(err))
 			externalIP = internalIP
 		} else {
-			logger.Warn("Game Server is on a private IP, using this systems external IP", zap.String("private_ip", externalIP.String()), zap.String("external_ip", externalIP.String()), zap.String("port", fmt.Sprintf("%d", externalPort)))
+			logger.Warn("Game Server is on a private IP, using this systems external IP", zap.String("private_ip", internalIP.String()), zap.String("external_ip", serviceExtIP.String()), zap.String("port", fmt.Sprintf("%d", externalPort)))
 			externalIP = serviceExtIP
 		}
 	}
