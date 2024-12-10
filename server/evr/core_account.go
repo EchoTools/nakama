@@ -69,7 +69,7 @@ type ClientProfile struct {
 	NewPlayerProgress  NewPlayerProgress `json:"npe,omitempty"`
 	Customization      Customization     `json:"customization,omitempty"`
 	Social             ClientSocial      `json:"social,omitempty"`
-	NewUnlocks         []int64           `json:"newunlocks,omitempty"`
+	NewUnlocks         []int64           `json:"newunlocks"`
 	EarlyQuitFeatures  EarlyQuitFeatures `json:"earlyquit"` // Early quit features
 }
 
@@ -114,10 +114,10 @@ func (c *ClientProfile) String() string {
 
 type Customization struct {
 	// WARNING: EchoVR dictates this struct/schema.
-	BattlePassSeasonPoiVersion uint16 `json:"battlepass_season_poi_version,omitempty"` // Battle pass season point of interest version (manually set to 3246)
-	NewUnlocksPoiVersion       uint16 `json:"new_unlocks_poi_version,omitempty"`       // New unlocks point of interest version
-	StoreEntryPoiVersion       uint16 `json:"store_entry_poi_version,omitempty"`       // Store entry point of interest version
-	ClearNewUnlocksVersion     uint16 `json:"clear_new_unlocks_version,omitempty"`     // Clear new unlocks version
+	BattlePassSeasonPoiVersion uint64 `json:"battlepass_season_poi_version,omitempty"` // Battle pass season point of interest version (manually set to 3246)
+	NewUnlocksPoiVersion       uint64 `json:"new_unlocks_poi_version,omitempty"`       // New unlocks point of interest version
+	StoreEntryPoiVersion       uint64 `json:"store_entry_poi_version,omitempty"`       // Store entry point of interest version
+	ClearNewUnlocksVersion     uint64 `json:"clear_new_unlocks_version,omitempty"`     // Clear new unlocks version
 }
 
 type Players struct {
