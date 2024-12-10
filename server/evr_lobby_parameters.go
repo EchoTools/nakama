@@ -330,7 +330,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		basePercentile = basePercentile + (dampingPercentile-basePercentile)*smoothingFactor
 	}
 
-	maxServerRTT := 250
+	maxServerRTT := 180
 
 	if globalSettings.MaxServerRTT > 0 {
 		maxServerRTT = globalSettings.MaxServerRTT
@@ -453,37 +453,85 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeRankRange bool, incl
 	return strings.Join(qparts, " ")
 
 }
+func (p *LobbySessionParameters) FromMatchmakerEntry(entry *MatchmakerEntry) {
 
-func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionParameters, ticketParams *MatchmakingTicketParameters) (string, map[string]string, map[string]float64) {
+	// Break out the strings and numerics
+	stringProperties := make(map[string]string)
+	numericProperties := make(map[string]float64)
+
+	for k, v := range entry.Properties {
+		switch v := v.(type) {
+		case string:
+			stringProperties[k] = v
+		case float64:
+			numericProperties[k] = v
+		}
+	}
+
+	p.Mode = evr.ToSymbol(stringProperties["game_mode"])
+	p.GroupID = uuid.FromStringOrNil(stringProperties["group_id"])
+	p.VersionLock = evr.ToSymbol(stringProperties["version_lock:"])
+	p.BlockedIDs = strings.Split(stringProperties["blocked_ids"], " ")
+	p.DisplayName = stringProperties["display_name"]
+	p.EarlyQuitPenaltyExpiry, _ = time.Parse(time.RFC3339, stringProperties["early_quit_penalty_expiry"])
+	p.Rating = types.Rating{Mu: numericProperties["rating_mu"], Sigma: numericProperties["rating_sigma"]}
+	p.RankPercentile = numericProperties["rank_percentile"]
+	p.MatchmakingTimestamp, _ = time.Parse(time.RFC3339, stringProperties["submission_time"])
+	p.RankPercentileMaxDelta = numericProperties["rank_percentile_max"]
+	p.MaxServerRTT = 180
+
+	serverRTTs := make(map[string]int)
+	for k, v := range numericProperties {
+		if strings.HasPrefix(k, RTTPropertyPrefix) {
+			serverRTTs[strings.TrimPrefix(k, RTTPropertyPrefix)] = int(v)
+		}
+	}
+
+	// Rebuild the latency history
+	p.latencyHistory = make(LatencyHistory)
+	for ip, rtt := range serverRTTs {
+		p.latencyHistory[ip] = make(map[int64]int)
+		p.latencyHistory[ip][time.Now().UTC().Unix()] = rtt
+	}
+}
+
+func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *MatchmakingTicketParameters) (string, map[string]string, map[string]float64) {
 
 	submissionTime := time.Now().UTC().Format(time.RFC3339)
 	stringProperties := map[string]string{
-		"game_mode":       p.Mode.String(),
-		"group_id":        p.GroupID.String(),
-		"version_lock":    p.VersionLock.String(),
-		"blocked_ids":     strings.Join(p.BlockedIDs, " "),
-		"display_name":    p.DisplayName,
-		"submission_time": submissionTime,
+		"game_mode":                 p.Mode.String(),
+		"group_id":                  p.GroupID.String(),
+		"version_lock":              p.VersionLock.String(),
+		"blocked_ids":               strings.Join(p.BlockedIDs, " "),
+		"display_name":              p.DisplayName,
+		"submission_time":           submissionTime,
+		"early_quit_penalty_expiry": p.EarlyQuitPenaltyExpiry.Format(time.RFC3339),
 	}
 
 	numericProperties := map[string]float64{
-		"rating_mu":           p.Rating.Mu,
-		"rating_sigma":        p.Rating.Sigma,
-		"rank_percentile":     p.RankPercentile,
-		"timestamp":           float64(time.Now().UTC().Unix()),
-		"rank_percentile_min": 0.0,
-		"rank_percentile_max": 1.0,
+		"rating_mu":                 p.Rating.Mu,
+		"rating_sigma":              p.Rating.Sigma,
+		"rank_percentile":           p.RankPercentile,
+		"timestamp":                 float64(time.Now().UTC().Unix()),
+		"rank_percentile_max_delta": p.RankPercentileMaxDelta,
+		"max_rtt":                   float64(p.MaxServerRTT),
 	}
 
 	qparts := []string{
 		"+properties.game_mode:" + p.Mode.String(),
-		fmt.Sprintf("+properties.group_id:/%s/", Query.Escape(p.GroupID.String())),
+		fmt.Sprintf("+properties.group_id:%s", Query.Escape(p.GroupID.String())),
 		fmt.Sprintf(`-properties.blocked_ids:/.*%s.*/`, Query.Escape(p.UserID.String())),
 		//"+properties.version_lock:" + p.VersionLock.String(),
+
+		p.MatchmakingQueryAddon,
 	}
 
-	if p.MatchmakingQueryAddon != "" {
-		qparts = append(qparts, p.MatchmakingQueryAddon)
+	// If the user has an early quit penalty, only match them with players who have submitted after now
+	if ticketParams.IncludeEarlyQuitPenalty {
+		qparts = append(qparts, fmt.Sprintf(`-properties.early_quit_penalty_expiry:>="%s"`, submissionTime))
+		if p.EarlyQuitPenaltyExpiry.After(time.Now()) {
+			qparts = append(qparts, fmt.Sprintf(`-properties.submission_time:<"%s"`, submissionTime))
+		}
 	}
 
 	if ticketParams.IncludeRankRange && p.RankPercentileMaxDelta > 0 {
@@ -491,45 +539,40 @@ func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionPar
 		rankUpper := max(p.RankPercentile+p.RankPercentileMaxDelta, 2.0*p.RankPercentileMaxDelta)
 		rankLower = max(rankLower, 0.0)
 		rankUpper = min(rankUpper, 1.0)
-		/*
-			qparts = append(qparts,
-				fmt.Sprintf("-properties.rank_percentile_min:>=%f", p.RankPercentile),
-				fmt.Sprintf("-properties.rank_percentile_max:<=%f", p.RankPercentile),
-			)
-		*/
-		qparts = append(qparts, fmt.Sprintf("+properties.rank_percentile:>=%f +properties.rank_percentile:<=%f", rankLower, rankUpper))
 		numericProperties["rank_percentile_min"] = rankLower
 		numericProperties["rank_percentile_max"] = rankUpper
-	}
 
-	// Create a string list of validRTTs
-	acceptableServers := make([]string, 0)
-	for ip, rtt := range p.latencyHistory.LatestRTTs() {
-		if rtt <= p.MaxServerRTT {
-			acceptableServers = append(acceptableServers, ip)
-		}
-	}
-	stringProperties["acceptable_servers"] = strings.Join(acceptableServers, " ")
-	// Add the acceptable servers to the query
-	if len(acceptableServers) > 0 {
-		qparts = append(qparts, fmt.Sprintf("+properties.broadcaster.endpoint:/.*(%s).*/", Query.Join(acceptableServers, "|")))
-	}
+		qparts = append(qparts,
 
-	if ticketParams.IncludeServerRTTs {
-		for ip, rtt := range p.latencyHistory.LatestRTTs() {
-			qparts = append(qparts, fmt.Sprintf("+properties.%s:<=%d", RTTPropertyPrefix+ip, rtt))
-		}
-	}
+			fmt.Sprintf("-properties.rank_percentile_min:>%f", p.RankPercentile),
+			fmt.Sprintf("-properties.rank_percentile_max:<%f", p.RankPercentile),
+		)
 
-	// If the user has an early quit penalty, only match them with players who have submitted after now
-	if ticketParams.IncludeEarlyQuitPenalty && p.EarlyQuitPenaltyExpiry.After(time.Now()) {
-		qparts = append(qparts, fmt.Sprintf(`-properties.submission_time:<="%s"`, submissionTime))
+		qparts = append(qparts, fmt.Sprintf("-properties.rank_percentile:<%f -properties.rank_percentile:>%f", rankLower, rankUpper))
 	}
 
 	//maxDelta := 60 // milliseconds
 	for k, v := range AverageLatencyHistories(p.latencyHistory) {
 		numericProperties[RTTPropertyPrefix+k] = float64(v)
 		//qparts = append(qparts, fmt.Sprintf("properties.%s:<=%d", k, v+maxDelta))
+	}
+
+	if ticketParams.IncludeRequireCommonServer {
+		// Create a string list of validRTTs
+		acceptableServers := make([]string, 0)
+		for ip, rtt := range p.latencyHistory.LatestRTTs() {
+			if rtt <= p.MaxServerRTT {
+				acceptableServers = append(acceptableServers, ip)
+			}
+		}
+
+		stringProperties["servers"] = strings.Join(acceptableServers, " ")
+
+		// Add the acceptable servers to the query
+		if len(acceptableServers) > 0 {
+			qparts = append(qparts, fmt.Sprintf("+properties.servers:/.*(%s).*/", Query.Join(acceptableServers, "|")))
+		}
+
 	}
 
 	// Remove blanks from qparts
@@ -541,6 +584,8 @@ func (p *LobbySessionParameters) MatchmakingParameters(sessionParams *SessionPar
 	}
 
 	query := strings.Join(qparts, " ")
+
+	stringProperties["query"] = query
 
 	return query, stringProperties, numericProperties
 }

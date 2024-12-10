@@ -44,12 +44,12 @@ var (
 )
 
 type MatchmakingTicketParameters struct {
-	MinCount                int
-	MaxCount                int
-	CountMultiple           int
-	IncludeRankRange        bool
-	IncludeEarlyQuitPenalty bool
-	IncludeServerRTTs       bool
+	MinCount                   int
+	MaxCount                   int
+	CountMultiple              int
+	IncludeRankRange           bool
+	IncludeEarlyQuitPenalty    bool
+	IncludeRequireCommonServer bool
 }
 
 func (m *MatchmakingTicketParameters) MarshalText() ([]byte, error) {
@@ -184,17 +184,13 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 
 func (p *EvrPipeline) addTicket(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters, lobbyGroup *LobbyGroup, ticketConfig MatchmakingTicketParameters) (string, error) {
 	var err error
-	sessionParams, ok := LoadParams(ctx)
-	if !ok {
-		return "", fmt.Errorf("failed to load session parameters")
-	}
 
-	query, stringProps, numericProps := lobbyParams.MatchmakingParameters(sessionParams, &ticketConfig)
+	query, stringProps, numericProps := lobbyParams.MatchmakingParameters(&ticketConfig)
 
 	// The matchmaker will always prioritize the players that are about to time out.
 	priorityThreshold := time.Now().UTC().Add((p.matchmakingTicketTimeout() / 3) * 2)
 
-	numericProps["priority_threshold"] = float64(priorityThreshold.Unix())
+	stringProps["priority_threshold"] = priorityThreshold.UTC().Format(time.RFC3339)
 
 	minCount := ticketConfig.MinCount
 	maxCount := ticketConfig.MaxCount

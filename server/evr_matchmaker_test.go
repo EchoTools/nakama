@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"reflect"
 	"slices"
@@ -20,14 +22,15 @@ import (
 	"github.com/intinig/go-openskill/types"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/encoding/protojson"
+	"gopkg.in/yaml.v3"
 )
 
 func createTestMatchmakerWithOverride(t fatalable, logger *zap.Logger, tickerActive bool, messageCallback func(presences []*PresenceID, envelope *rtapi.Envelope), overrideFn RuntimeMatchmakerOverrideFunction) (*LocalMatchmaker, func() error, error) {
 	cfg := NewConfig(logger)
 	cfg.Database.Addresses = []string{"postgres:postgres@localhost:5432/nakama"}
-	cfg.Matchmaker.IntervalSec = 1
-	cfg.Matchmaker.MaxIntervals = 2
-	cfg.Matchmaker.RevPrecision = true
+	cfg.Matchmaker.IntervalSec = 60
+	cfg.Matchmaker.MaxIntervals = 8
+	cfg.Matchmaker.RevPrecision = false
 	cfg.Matchmaker.MaxTickets = 5
 	// configure a path runtime can use (it will mkdir this, so it must be writable)
 	var err error
@@ -94,6 +97,47 @@ func createTestMatchmakerWithOverride(t fatalable, logger *zap.Logger, tickerAct
 		matchRegistry.Stop(0)
 		return os.RemoveAll(cfg.Runtime.Path)
 	}, nil
+}
+
+// Special function used for testing the matchmaker
+func testEvrMatchmakerOverrideFn(ctx context.Context, candidateMatches [][]*MatchmakerEntry) (matches [][]*MatchmakerEntry) {
+
+	log.Printf("Override function called with %d candidate matches", len(candidateMatches))
+	runtimeCombinations := make([][]runtime.MatchmakerEntry, len(candidateMatches))
+	for i, combination := range candidateMatches {
+		runtimeEntry := make([]runtime.MatchmakerEntry, len(combination))
+		for j, entry := range combination {
+			runtimeEntry[j] = runtime.MatchmakerEntry(entry)
+		}
+		runtimeCombinations[i] = runtimeEntry
+	}
+
+	sbmm := NewSkillBasedMatchmaker()
+
+	// Get all the tickets
+	tickets := make(map[string]struct{}, 0)
+	for _, combination := range runtimeCombinations {
+		for _, entry := range combination {
+			tickets[entry.GetTicket()] = struct{}{}
+		}
+	}
+	log.Printf("Processing %d tickets", len(tickets))
+
+	startTime := time.Now()
+	filteredCandidates, returnedEntries, _ := sbmm.processPotentialMatches(runtimeCombinations)
+	log.Printf("Processing %d candidate matches in %s", len(runtimeCombinations), time.Since(startTime))
+	_ = filteredCandidates
+	combinations := make([][]*MatchmakerEntry, len(returnedEntries))
+	for i, combination := range returnedEntries {
+		entries := make([]*MatchmakerEntry, len(combination))
+		for j, entry := range combination {
+			e, _ := entry.(*MatchmakerEntry)
+			entries[j] = e
+		}
+		combinations[i] = entries
+	}
+	return combinations
+
 }
 
 func TestMroundRTT(t *testing.T) {
@@ -464,11 +508,6 @@ func TestMatchmaker(t *testing.T) {
 
 	madeMatches := m.assembleUniqueMatches(predictions)
 
-	// Sort by matches that have players who have been waiting more than half the Matchmaking timeout
-	// This is to prevent players from waiting too long
-
-	//t.Logf("Predictions: %v", predictions)
-
 	t.Errorf("length: %v", len(madeMatches))
 
 	for _, match := range madeMatches {
@@ -493,16 +532,16 @@ func TestMatchmaker(t *testing.T) {
 }
 func TestSortPriority(t *testing.T) {
 	team1 := RatedEntryTeam{
-		&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"priority_threshold": float64(time.Now().UTC().Add(-10 * time.Minute).Unix())}, Ticket: "ticket1"}},
+		&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"priority_threshold": time.Now().UTC().Add(-10 * time.Minute).Unix()}, Ticket: "ticket1"}},
 	}
 	team2 := RatedEntryTeam{
 		&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{}}},
 	}
 	team3 := RatedEntryTeam{
-		&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"priority_threshold": float64(time.Now().UTC().Add(-1 * time.Minute).Unix())}, Ticket: "ticket3"}},
+		&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"priority_threshold": time.Now().UTC().Add(-1 * time.Minute).Format(time.RFC3339)}, Ticket: "ticket3"}},
 	}
 	team4 := RatedEntryTeam{
-		&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"priority_threshold": float64(time.Now().UTC().Add(-2 * time.Minute).Unix())}, Ticket: "ticket4"}},
+		&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"priority_threshold": time.Now().UTC().Add(-2 * time.Minute).Format(time.RFC3339)}, Ticket: "ticket4"}},
 	}
 	team5 := RatedEntryTeam{
 		&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{}, Ticket: "ticket5"}},
@@ -570,22 +609,43 @@ func writeAsJSONFile(data interface{}, filename string) {
 }
 
 func TestOverrideFn(t *testing.T) {
-	candidatesFilename := "../_matches/m4.json"
-	// Load the candidate data from the json file
-	file, err := os.Open(candidatesFilename)
-	if err != nil {
-		t.Error("Error opening file")
-	}
-	defer file.Close()
-
 	var data CandidateData
-
-	// read in the file
-	decoder := json.NewDecoder(file)
-	err = decoder.Decode(&data)
-	if err != nil {
-		t.Errorf("Error decoding file: %v", err)
+	candidatesFilenames := []string{
+		"/tmp/candidates.json",
 	}
+
+	for _, candidatesFilename := range candidatesFilenames {
+
+		// Load the candidate data from the json file
+		reader, err := os.Open(candidatesFilename)
+		if err != nil {
+			t.Error("Error opening file")
+		}
+
+		// read in the file
+		decoder := json.NewDecoder(reader)
+		err = decoder.Decode(&data)
+		if err != nil {
+			t.Errorf("Error decoding file: %v", err)
+		}
+
+		// Dedupe the candidates
+		candidateByTicket := make(map[string]map[string]*MatchmakerEntry)
+		for i, match := range data.Candidates {
+			for j, entry := range match {
+				if _, ok := candidateByTicket[entry.Ticket]; !ok {
+					candidateByTicket[entry.Ticket] = make(map[string]*MatchmakerEntry)
+				}
+				if _, ok := candidateByTicket[entry.Ticket][entry.Presence.SessionId]; !ok {
+					candidateByTicket[entry.Ticket][entry.Presence.SessionId] = entry
+				} else {
+					data.Candidates[i][j] = candidateByTicket[entry.Ticket][entry.Presence.SessionId]
+				}
+			}
+		}
+	}
+
+	// Garbage collect the candidates
 
 	t.Logf("candidates: %d", len(data.Candidates))
 
@@ -595,52 +655,133 @@ func TestOverrideFn(t *testing.T) {
 	for i, combination := range data.Candidates {
 		runtimeEntry := make([]runtime.MatchmakerEntry, len(combination))
 		for j, entry := range combination {
-			runtimeEntry[j] = runtime.MatchmakerEntry(entry)
+			runtimeEntry[j] = entry
 		}
 		runtimeCombinations[i] = runtimeEntry
 	}
 
-	deduped := sbmm.filterDuplicates(runtimeCombinations)
+	t.Logf("Processing %d candidate matches", len(runtimeCombinations))
+	startTime := time.Now()
+	_, returnedEntries, _ := sbmm.processPotentialMatches(runtimeCombinations)
+	t.Logf("Matched %d candidate matches in %s", len(returnedEntries), time.Since(startTime))
 
-	players := make(map[string]struct{}, 0)
-	for _, combination := range runtimeCombinations {
-		for _, entry := range combination {
-			players[entry.GetPresence().GetUsername()] = struct{}{}
-		}
-	}
-
-	t.Logf("players: %d, original: %d, filtered: %d", len(players), len(data.Candidates), deduped)
 	t.Errorf("autofail")
 
 }
 
 func TestCharacterizationMatchmaker1v1(t *testing.T) {
 
-	candidatesFilename := "../_matches/m5.json"
-	// Load the candidate data from the json file
-	file, err := os.Open(candidatesFilename)
-	if err != nil {
-		t.Error("Error opening file")
+	EvrRuntimeModuleFns = nil
+
+	// read the yml config file
+
+	limitEntries := 32
+	downloadLiveData := false
+	saveCopy := true
+	candidatesFilenames := []string{
+		"../_matches/m5.json",
+		"../_matches/m6.json",
+		"../_matches/m7.json",
+		"../_matches/m8.json",
+		"../_matches/m9.json",
+		"../_matches/live-2024-12-09-22-55-03.json",
+		"../_matches/live-2024-12-09-21-54-20.json",
+		"../_matches/live-2024-12-09-23-23-56.json",
+		"../_matches/live-2024-12-09-23-16-44.json",
 	}
-	defer file.Close()
+
+	reconstruct := true
+	useOverrideFn := true
+	minCount := 2
+	maxCount := 8
+	countMultiple := 2
+
+	var reader io.ReadCloser
+	var err error
+	var data CandidateData
+
+	if downloadLiveData {
+
+		cfg := make(map[string]interface{})
+		file, err := os.ReadFile("../local.yml")
+		if err != nil {
+			t.Fatalf("Error reading yaml file: %v", err)
+		}
+		err = yaml.Unmarshal(file, &cfg)
+		if err != nil {
+			t.Fatalf("Error unmarshalling yaml file: %v", err)
+		}
+		httpKey := cfg["runtime"].(map[string]interface{})["http_key"].(string)
+		// Download the match data from the server
+
+		url := `https://g.echovrce.com/v2/rpc/matchmaker/candidates?unwrap&http_key=` + httpKey
+
+		resp, err := http.Get(url)
+		if err != nil {
+			t.Fatalf("Error fetching match data: %v", err)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("Unexpected status code: %d", resp.StatusCode)
+		}
+
+		jsonBytes, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatalf("Error reading file: %v", err)
+		}
+		resp.Body.Close()
+		if saveCopy {
+			// Create a timestamp for the file
+			timestamp := time.Now().Format("2006-01-02-15-04-05")
+			fn := fmt.Sprintf("../_matches/live-%s.json", timestamp)
+			err = os.WriteFile(fn, jsonBytes, 0644)
+			t.Logf("Saved %d bytes of live data to %s", len(jsonBytes), fn)
+		}
+
+		// read in the file
+		err = json.Unmarshal(jsonBytes, &data)
+		if err != nil {
+			t.Errorf("Error decoding file: %v", err)
+		}
+
+	} else {
+
+		for _, candidatesFilename := range candidatesFilenames {
+			d := CandidateData{}
+			// Load the candidate data from the json file
+			reader, err = os.Open(candidatesFilename)
+			if err != nil {
+				t.Error("Error opening file")
+			}
+
+			// read in the file
+			decoder := json.NewDecoder(reader)
+			err = decoder.Decode(&d)
+			if err != nil {
+				t.Errorf("Error decoding file: %v", err)
+			}
+
+			data.Candidates = append(data.Candidates, d.Candidates...)
+			data.Matches = append(data.Matches, d.Matches...)
+		}
+
+	}
+
 	consoleLogger := loggerForTest(t)
-
-	useOverride := true
-
 	matchesSeen := make(map[string]*rtapi.MatchmakerMatched)
 	mu := sync.Mutex{}
 	var matchmaker *LocalMatchmaker
 	var cleanup func() error
 
-	if useOverride {
+	if useOverrideFn {
 		matchmaker, cleanup, err = createTestMatchmakerWithOverride(t, consoleLogger, true, func(presences []*PresenceID, envelope *rtapi.Envelope) {
 			id := envelope.GetMatchmakerMatched().GetToken()
-			t.Logf("Matched: %s", id)
+
 			mu.Lock()
 			defer mu.Unlock()
 			matchesSeen[id] = envelope.GetMatchmakerMatched()
 		},
-			evrMatchmakerOverrideFn,
+			testEvrMatchmakerOverrideFn,
 		)
 	} else {
 
@@ -653,20 +794,8 @@ func TestCharacterizationMatchmaker1v1(t *testing.T) {
 			}
 		})
 	}
-	if err != nil {
-		t.Fatalf("error creating test matchmaker: %v", err)
-	}
 
 	defer cleanup()
-
-	var data CandidateData
-
-	// read in the file
-	decoder := json.NewDecoder(file)
-	err = decoder.Decode(&data)
-	if err != nil {
-		t.Errorf("Error decoding file: %v", err)
-	}
 
 	// Create a list of all players from all match candidates
 	candidateSizes := make(map[int]int)
@@ -692,12 +821,24 @@ func TestCharacterizationMatchmaker1v1(t *testing.T) {
 		}
 	}
 
+	if reconstruct {
+		// Reconstruct the entry (to get the latest matchmaking query and props)
+		for i, entry := range entries {
+
+			entries[i] = newMatchmakingEntryFromExisting(entry, minCount, maxCount, countMultiple)
+			if err != nil {
+				t.Fatalf("Error creating entry: %v", err)
+			}
+
+		}
+	}
+
+	if limitEntries > 0 && len(entries) > limitEntries {
+		entries = entries[:limitEntries]
+	}
+
 	t.Logf("Entry count: %d", len(entries))
 
-	minCount := 1
-	maxCount := 8
-	countMultiple := 2
-	_ = maxCount
 	playerNames := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		playerNames = append(playerNames, entry.Presence.Username)
@@ -721,6 +862,11 @@ func TestCharacterizationMatchmaker1v1(t *testing.T) {
 	}
 	t.Logf("Found %d parties and %d solo players", len(parties), len(entries))
 
+	for _, entry := range entries {
+		// Output the ticket query, and how long they have been waiting
+		t.Logf("Waiting: %v, Ticket: %s, Query: %s, ", time.Now().UTC().Unix()-int64(entry.CreateTime), entry.Presence.SessionId, entry.StringProperties["query"])
+	}
+
 	ticketCount := 0
 
 	newestSubmission := 0.0
@@ -732,28 +878,19 @@ func TestCharacterizationMatchmaker1v1(t *testing.T) {
 			}
 		}
 	}
-	offset := float64(time.Now().UTC().Unix()) - newestSubmission
-
-	// Offset all the submission times and thresholds so that the newest is the current itme
-	for _, entry := range entries {
-		if t, ok := entry.NumericProperties["submission_time"]; ok {
-			entry.NumericProperties["submission_time"] = t + offset
-		}
-		if t, ok := entry.NumericProperties["priority_threshold"]; ok {
-			entry.NumericProperties["priority_threshold"] = t + offset
-		}
-	}
 
 	ticketCounts := make(map[string]int)
 
+	// If the /tmp/unmatched.json exists, load it as the entries
+
 	for _, entry := range entries {
-		query := entry.StringProperties["query"]
-		_, _, err := matchmaker.Add(
+
+		_, _, err = matchmaker.Add(
 			context.Background(),
 			[]*MatchmakerPresence{entry.Presence},
 			entry.GetPresence().GetSessionId(),
 			entry.PartyId,
-			query,
+			entry.StringProperties["query"],
 			minCount,
 			maxCount,
 			countMultiple,
@@ -772,7 +909,7 @@ func TestCharacterizationMatchmaker1v1(t *testing.T) {
 	}
 
 	for IDStr, members := range parties {
-		// add the parties using the other itnerface
+		// add the parties using the other interface
 		// Prepare the list of presences that will go into the matchmaker as part of the party.
 		presences := make([]*MatchmakerPresence, 0, len(members))
 		for _, member := range members {
@@ -804,6 +941,10 @@ func TestCharacterizationMatchmaker1v1(t *testing.T) {
 
 	count := 0
 
+	playerNamesByMatch := make([]string, 0, len(matchesSeen))
+
+	matchedPlayersMap := make(map[string]struct{}, 0)
+	matchedPlayers := make([]string, 0, len(matchedPlayersMap))
 	// output the matches that were created
 	for _, match := range matchesSeen {
 
@@ -819,26 +960,247 @@ func TestCharacterizationMatchmaker1v1(t *testing.T) {
 
 		// get the players in the match
 		playerIds := make([]string, 0, len(match.GetUsers()))
+		playerUsernames := make([]string, 0, len(match.GetUsers()))
 		for _, p := range match.GetUsers() {
+			matchedPlayersMap[p.Presence.GetUsername()] = struct{}{}
+			matchedPlayers = append(matchedPlayers, p.Presence.GetUsername())
 			playerName := fmt.Sprintf("%s:%s", partyMap[match.GetUsers()[0].PartyId], p.Presence.GetUsername())
 			playerIds = append(playerIds, playerName)
+
+			playerUsernames = append(playerUsernames, p.Presence.GetUsername())
 		}
+
+		slices.Sort(playerUsernames)
+		playerNamesByMatch = append(playerNamesByMatch, strings.Join(playerUsernames, ", "))
+
 		t.Logf("  Match %d: %s", count, strings.Join(playerIds, ", "))
 		count++
 	}
 	// count the total matches
+	t.Logf("Total matches: %d", count)
 
-	// assert that 2 are notified of a match
-	if len(matchesSeen) != 2 {
-		t.Fatalf("expected 2 matches, got %d", len(matchesSeen))
+	unmatched := make([]*MatchmakerEntry, 0, len(entries))
+
+	for _, entry := range entries {
+		if _, ok := matchedPlayersMap[entry.Presence.Username]; !ok {
+			unmatched = append(unmatched, entry)
+
+		}
 	}
 
-	// assert that session1 is one of the ones notified
-	if _, ok := matchesSeen[entries[0].Presence.SessionId]; !ok {
-		t.Errorf("expected session1 to match, it didn't %#v", matchesSeen)
+	t.Logf("Unmatched count: %d", len(unmatched))
+	for _, e := range unmatched {
+		entryJson, _ := json.MarshalIndent(e, "", "  ")
+		t.Logf("Unmatched: %s", string(entryJson))
 	}
-	// cannot assert session2 or session3, one of them will match, but it
-	// cannot be assured which one
+	// Compare the player lists of the data.Matches with the matchesSeen
+
+	livePlayerNamesByMatch := make([]string, 0, len(data.Matches))
+	for _, match := range data.Matches {
+
+		// Create a map of ticketID's to alpha numeric characters
+
+		playerUsernames := make([]string, 0, len(match))
+		for _, p := range match {
+			playerUsernames = append(playerUsernames, p.Presence.Username)
+		}
+
+		slices.Sort(playerUsernames)
+
+		livePlayerNamesByMatch = append(livePlayerNamesByMatch, strings.Join(playerUsernames, ", "))
+	}
+
+	slices.Sort(playerNamesByMatch)
+	slices.Sort(livePlayerNamesByMatch)
+
+	// compare the player names
+	if cmp.Diff(playerNamesByMatch, livePlayerNamesByMatch) != "" {
+		t.Errorf("Player names mismatch")
+	}
+	t.Errorf("autofail")
+}
+
+func TestAssembleUniqueMatches(t *testing.T) {
+	tests := []struct {
+		name         string
+		ratedMatches []PredictedMatch
+		want         [][]runtime.MatchmakerEntry
+	}{
+		{
+			name: "No duplicates",
+			ratedMatches: []PredictedMatch{
+				{
+					Team1: RatedEntryTeam{
+						&RatedEntry{Entry: &MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "1"}}},
+					},
+					Team2: RatedEntryTeam{
+						&RatedEntry{Entry: &MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "2"}}},
+					},
+				},
+				{
+					Team1: RatedEntryTeam{
+						&RatedEntry{Entry: &MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "3"}}},
+					},
+					Team2: RatedEntryTeam{
+						&RatedEntry{Entry: &MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "4"}}},
+					},
+				},
+			},
+			want: [][]runtime.MatchmakerEntry{
+				{
+					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "1"}},
+					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "2"}},
+				},
+				{
+					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "3"}},
+					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "4"}},
+				},
+			},
+		},
+		{
+			name: "With duplicates",
+			ratedMatches: []PredictedMatch{
+				{
+					Team1: RatedEntryTeam{
+						&RatedEntry{Entry: &MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "1"}}},
+					},
+					Team2: RatedEntryTeam{
+						&RatedEntry{Entry: &MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "2"}}},
+					},
+				},
+				{
+					Team1: RatedEntryTeam{
+						&RatedEntry{Entry: &MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "1"}}},
+					},
+					Team2: RatedEntryTeam{
+						&RatedEntry{Entry: &MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "3"}}},
+					},
+				},
+			},
+			want: [][]runtime.MatchmakerEntry{
+				{
+					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "1"}},
+					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "2"}},
+				},
+			},
+		},
+		{
+			name: "All duplicates",
+			ratedMatches: []PredictedMatch{
+				{
+					Team1: RatedEntryTeam{
+						&RatedEntry{Entry: &MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "1"}}},
+					},
+					Team2: RatedEntryTeam{
+						&RatedEntry{Entry: &MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "2"}}},
+					},
+				},
+				{
+					Team1: RatedEntryTeam{
+						&RatedEntry{Entry: &MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "1"}}},
+					},
+					Team2: RatedEntryTeam{
+						&RatedEntry{Entry: &MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "2"}}},
+					},
+				},
+			},
+			want: [][]runtime.MatchmakerEntry{
+				{
+					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "1"}},
+					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "2"}},
+				},
+			},
+		},
+		{
+			name:         "Empty rated matches",
+			ratedMatches: []PredictedMatch{},
+			want:         [][]runtime.MatchmakerEntry{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := NewSkillBasedMatchmaker()
+			got := m.assembleUniqueMatches(tt.ratedMatches)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("assembleUniqueMatches() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFilterWithinMaxRTT(t *testing.T) {
+	tests := []struct {
+		name       string
+		candidates [][]runtime.MatchmakerEntry
+		want       [][]runtime.MatchmakerEntry
+		wantCount  int
+	}{
+		{
+			name: "All servers within maxRTT",
+			candidates: [][]runtime.MatchmakerEntry{
+				{
+					&MatchmakerEntry{Properties: map[string]interface{}{"max_rtt": 110.0, "rtt_server1": 50.0, "rtt_server2": 60.0}},
+					&MatchmakerEntry{Properties: map[string]interface{}{"rtt_server1": 40.0, "rtt_server2": 55.0}},
+				},
+			},
+			want: [][]runtime.MatchmakerEntry{
+				{
+					&MatchmakerEntry{Properties: map[string]interface{}{"max_rtt": 110.0, "rtt_server1": 50.0, "rtt_server2": 60.0}},
+					&MatchmakerEntry{Properties: map[string]interface{}{"rtt_server1": 40.0, "rtt_server2": 55.0}},
+				},
+			},
+			wantCount: 0,
+		},
+		{
+			name: "One server exceeds maxRTT",
+			candidates: [][]runtime.MatchmakerEntry{{
+				&MatchmakerEntry{Properties: map[string]interface{}{"max_rtt": 110.0, "rtt_server1": 150.0, "rtt_server2": 60.0}},
+				&MatchmakerEntry{Properties: map[string]interface{}{"max_rtt": 110.0, "rtt_server1": 40.0, "rtt_server2": 55.0}},
+			}},
+			want: [][]runtime.MatchmakerEntry{{
+				&MatchmakerEntry{Properties: map[string]interface{}{"max_rtt": 110.0, "rtt_server1": 150.0, "rtt_server2": 60.0}},
+				&MatchmakerEntry{Properties: map[string]interface{}{"max_rtt": 110.0, "rtt_server1": 40.0, "rtt_server2": 55.0}},
+			}},
+			wantCount: 0,
+		},
+		{
+			name: "Server unreachable for one player",
+			candidates: [][]runtime.MatchmakerEntry{{
+				&MatchmakerEntry{Properties: map[string]interface{}{"rtt_server1": 50.0}},
+				&MatchmakerEntry{Properties: map[string]interface{}{"rtt_server1": 20.0, "rtt_server2": 55.0}},
+			}},
+			want: [][]runtime.MatchmakerEntry{{
+				&MatchmakerEntry{Properties: map[string]interface{}{"rtt_server1": 50.0}},
+				&MatchmakerEntry{Properties: map[string]interface{}{"rtt_server1": 20.0, "rtt_server2": 55.0}},
+			}},
+			wantCount: 0,
+		},
+		{
+			name: "No common servers for players",
+			candidates: [][]runtime.MatchmakerEntry{{
+				&MatchmakerEntry{Properties: map[string]interface{}{"rtt_server1": 50.0}},
+				&MatchmakerEntry{Properties: map[string]interface{}{"rtt_server2": 55.0}},
+			}},
+			want: [][]runtime.MatchmakerEntry{
+				nil,
+			},
+			wantCount: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := NewSkillBasedMatchmaker()
+			gotCount := m.filterWithinMaxRTT(tt.candidates)
+			if gotCount != tt.wantCount {
+				t.Errorf("filterWithinMaxRTT() gotCount = %v, want %v", gotCount, tt.wantCount)
+			}
+			if !reflect.DeepEqual(tt.candidates, tt.want) {
+				t.Errorf("filterWithinMaxRTT() candidates = %v, want %v", tt.candidates, tt.want)
+			}
+		})
+	}
 }
 
 func splitProperties(props map[string]interface{}) (map[string]string, map[string]float64) {
@@ -856,31 +1218,57 @@ func splitProperties(props map[string]interface{}) (map[string]string, map[strin
 	return stringProperties, numericProperties
 }
 
-// Special function used for testing the matchmaker
-func evrMatchmakerOverrideFn(ctx context.Context, candidateMatches [][]*MatchmakerEntry) (matches [][]*MatchmakerEntry) {
+func newMatchmakingEntryFromExisting(entry *MatchmakerEntry, minCount, maxCount, countMultiple int) *MatchmakerEntry {
 
-	log.Printf("Override function called with %d candidate matches", len(candidateMatches))
-	runtimeCombinations := make([][]runtime.MatchmakerEntry, len(candidateMatches))
-	for i, combination := range candidateMatches {
-		runtimeEntry := make([]runtime.MatchmakerEntry, len(combination))
-		for j, entry := range combination {
-			runtimeEntry[j] = runtime.MatchmakerEntry(entry)
+	params := LobbySessionParameters{}
+
+	entry.StringProperties = make(map[string]string)
+	entry.NumericProperties = make(map[string]float64)
+
+	for k, v := range entry.Properties {
+		switch v := v.(type) {
+		case string:
+			entry.StringProperties[k] = v
+		case float64:
+			entry.NumericProperties[k] = v
 		}
-		runtimeCombinations[i] = runtimeEntry
+	}
+	params.FromMatchmakerEntry(entry)
+
+	if params.RankPercentileMaxDelta == 0 {
+		params.RankPercentileMaxDelta = 0.3
 	}
 
-	sbmm := NewSkillBasedMatchmaker()
-	filteredCandidates, returnedEntries, _ := sbmm.processPotentialMatches(runtimeCombinations)
-	_ = filteredCandidates
-	combinations := make([][]*MatchmakerEntry, len(returnedEntries))
-	for i, combination := range returnedEntries {
-		entries := make([]*MatchmakerEntry, len(combination))
-		for j, entry := range combination {
-			e, _ := entry.(*MatchmakerEntry)
-			entries[j] = e
-		}
-		combinations[i] = entries
+	ticketParams := MatchmakingTicketParameters{
+		MinCount:                   minCount,
+		MaxCount:                   maxCount,
+		CountMultiple:              countMultiple,
+		IncludeRankRange:           true,
+		IncludeEarlyQuitPenalty:    true,
+		IncludeRequireCommonServer: true,
 	}
-	return combinations
 
+	_, stringProps, numericProps := params.MatchmakingParameters(&ticketParams)
+
+	newEntry := &MatchmakerEntry{
+		Ticket:     entry.Ticket,
+		Presence:   entry.Presence,
+		PartyId:    entry.PartyId,
+		Properties: make(map[string]interface{}),
+		CreateTime: entry.CreateTime,
+
+		StringProperties:  stringProps,
+		NumericProperties: numericProps,
+	}
+
+	entry.Properties = make(map[string]interface{})
+	for k, v := range stringProps {
+		newEntry.Properties[k] = v
+	}
+
+	for k, v := range numericProps {
+		newEntry.Properties[k] = v
+	}
+
+	return newEntry
 }
