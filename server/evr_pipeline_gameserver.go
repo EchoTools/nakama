@@ -198,8 +198,14 @@ func (p *EvrPipeline) gameServerRegistration(ctx context.Context, logger *zap.Lo
 	}
 
 	if isPrivateIP(externalIP) {
-		logger.Warn("Broadcaster is on a private IP, using this systems external IP", zap.String("private_ip", externalIP.String()), zap.String("external_ip", p.externalIP.String()), zap.String("port", fmt.Sprintf("%d", externalPort)))
-		externalIP = p.externalIP
+		serviceExtIP := p.ServiceExternalIP()
+		if serviceExtIP == nil {
+			logger.Warn("Failed to determine external IP address, using internal", zap.Error(err))
+			externalIP = internalIP
+		} else {
+			logger.Warn("Game Server is on a private IP, using this systems external IP", zap.String("private_ip", externalIP.String()), zap.String("external_ip", externalIP.String()), zap.String("port", fmt.Sprintf("%d", externalPort)))
+			externalIP = serviceExtIP
+		}
 	}
 
 	ipqsData, err := p.ipqsClient.IPDetails(externalIP.String(), true)
@@ -517,6 +523,7 @@ func DetermineExternalIPAddress() (net.IP, error) {
 	if addr == nil {
 		return nil, errors.New("failed to parse IP address")
 	}
+
 	return addr, nil
 }
 
