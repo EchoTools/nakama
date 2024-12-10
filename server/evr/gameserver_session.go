@@ -53,10 +53,21 @@ func (m *EchoToolsLobbySessionUnlockV1) Stream(s *EasyStream) error {
 
 type EchoToolsLobbyEntrantNewV1 struct {
 	LobbySessionID uuid.UUID
+	EntrantIDs     []uuid.UUID
 }
 
 func (m *EchoToolsLobbyEntrantNewV1) Stream(s *EasyStream) error {
-	return s.StreamGUID(&m.LobbySessionID)
+	numEntrants := uint64(len(m.EntrantIDs))
+	return RunErrorFunctions([]func() error{
+		func() error { return s.StreamGUID(&m.LobbySessionID) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &numEntrants) },
+		func() error {
+			if s.Mode == DecodeMode {
+				m.EntrantIDs = make([]uuid.UUID, numEntrants)
+			}
+			return s.StreamGUIDs(&m.EntrantIDs)
+		},
+	})
 }
 
 type EchoToolsLobbyEntrantAcceptV1 struct {
