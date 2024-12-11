@@ -198,14 +198,9 @@ func (p *EvrPipeline) gameServerRegistration(ctx context.Context, logger *zap.Lo
 	}
 
 	if isPrivateIP(externalIP) {
-		serviceExtIP := p.ServiceExternalIP()
-		if serviceExtIP == nil {
-			logger.Warn("Failed to determine external IP address, using internal", zap.Error(err))
-			externalIP = internalIP
-		} else {
-			logger.Warn("Game Server is on a private IP, using this systems external IP", zap.String("private_ip", internalIP.String()), zap.String("external_ip", serviceExtIP.String()), zap.String("port", fmt.Sprintf("%d", externalPort)))
-			externalIP = serviceExtIP
-		}
+		externalIP = p.externalIP
+		logger.Warn("Game Server is on a private IP, using this systems external IP", zap.String("private_ip", internalIP.String()), zap.String("external_ip", externalIP.String()), zap.String("port", fmt.Sprintf("%d", externalPort)))
+
 	}
 
 	ipqsData, err := p.ipqsClient.IPDetails(externalIP.String(), true)
@@ -235,11 +230,17 @@ func (p *EvrPipeline) gameServerRegistration(ctx context.Context, logger *zap.Lo
 	retries := 5
 	var rtt time.Duration
 	for i := 0; i < retries; i++ {
-		rtt, err = BroadcasterHealthcheck(p.localIP, config.Endpoint.ExternalIP, int(config.Endpoint.Port), 500*time.Millisecond)
+		rtt, err = BroadcasterHealthcheck(p.internalIP, config.Endpoint.ExternalIP, int(config.Endpoint.Port), 500*time.Millisecond)
+		logger.Warn("Failed to healthcheck broadcaster on externalIP", zap.String("external_ip", config.Endpoint.ExternalIP.String()), zap.Error(err))
 		if err != nil {
-			logger.Warn("Failed to healthcheck broadcaster", zap.Error(err))
-			time.Sleep(500 * time.Millisecond)
-			continue
+			// Try the internal IP
+			rtt, err = BroadcasterHealthcheck(p.internalIP, config.Endpoint.InternalIP, int(config.Endpoint.Port), 500*time.Millisecond)
+			if err != nil {
+				logger.Error("Failed to healthcheck broadcaster on internalIP", zap.String("external_ip", config.Endpoint.InternalIP.String()), zap.Error(err))
+				time.Sleep(500 * time.Millisecond)
+				continue
+			}
+
 		}
 		if rtt >= 0 {
 			alive = true
