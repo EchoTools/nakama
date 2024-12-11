@@ -335,11 +335,11 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 	cycleCount := 0
 	backfillMultipler := 1.25 // Multiplier of matchmaking ticket timeout before starting backfill search
 
-	fallbackTimer := time.NewTimer(time.Duration(backfillMultipler * float64(p.matchmakingTicketTimeout())))
+	fallbackTimer := time.NewTimer(time.Duration(backfillMultipler * float64(lobbyParams.FallbackTimeout)))
 
-	failsafeTimer := time.NewTimer(lobbyParams.MatchmakingTimeout - interval*2)
+	failsafeTimer := time.NewTimer(lobbyParams.FailsafeTimeout)
+	logger.Info("Using failsafe timer", zap.Duration("timeout", lobbyParams.FailsafeTimeout))
 	for {
-
 		var err error
 		select {
 		case <-ctx.Done():

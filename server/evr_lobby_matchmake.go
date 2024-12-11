@@ -146,8 +146,9 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 				ticketConfig.IncludeEarlyQuitPenalty = false
 			}
 		}
+
 		timer := time.NewTimer(lobbyParams.MatchmakingTimeout)
-		ticker := time.NewTicker(p.matchmakingTicketTimeout())
+		ticker := time.NewTicker(max(p.matchmakingTicketTimeout(), lobbyParams.FallbackTimeout))
 		cycle := 0
 		for {
 
@@ -275,6 +276,9 @@ type MatchmakingSettings struct {
 	RankPercentileDefault       float64                       `json:"rank_percentile_default,omitempty"`        // The default rank percentile to use
 	RankInDisplayName           bool                          `json:"rank_in_display_name,omitempty"`           // Display the rank in the display name
 	RankBoardWeights            map[string]map[string]float64 `json:"rank_board_weights,omitempty"`             // The weights to use for ranking boards map[mode][board]weight
+	MatchmakingTimeoutSecs      int                           `json:"matchmaking_timeout_secs,omitempty"`       // The matchmaking timeout
+	FailsafeTimeoutSecs         int                           `json:"failsafe_timeout_secs,omitempty"`          // The failsafe timeout
+	FallbackTimeoutSecs         int                           `json:"fallback_timeout_secs,omitempty"`          // The fallback timeout
 }
 
 func (MatchmakingSettings) GetStorageID() StorageID {

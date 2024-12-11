@@ -54,6 +54,8 @@ type LobbySessionParameters struct {
 	MaxServerRTT           int           `json:"max_server_rtt"`
 	MatchmakingTimestamp   time.Time     `json:"matchmaking_timestamp"`
 	MatchmakingTimeout     time.Duration `json:"matchmaking_timeout"`
+	FailsafeTimeout        time.Duration `json:"failsafe_timeout"` // The failsafe timeout
+	FallbackTimeout        time.Duration `json:"fallback_timeout"` // The fallback timeout
 	DisplayName            string        `json:"display_name"`
 
 	latencyHistory LatencyHistory
@@ -367,6 +369,9 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		}
 	}
 
+	maximumFailsafeSecs := globalSettings.MatchmakingTimeoutSecs - p.config.GetMatchmaker().IntervalSec*2
+	failsafeTimeoutSecs := min(maximumFailsafeSecs, globalSettings.FailsafeTimeoutSecs)
+
 	return &LobbySessionParameters{
 		Node:                   node,
 		UserID:                 session.userID,
@@ -400,7 +405,9 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		RankPercentileMaxDelta: rankPercentileMaxDelta,
 		MaxServerRTT:           maxServerRTT,
 		MatchmakingTimestamp:   time.Now().UTC(),
-		MatchmakingTimeout:     time.Minute * 6,
+		MatchmakingTimeout:     time.Duration(globalSettings.MatchmakingTimeoutSecs) * time.Second,
+		FailsafeTimeout:        time.Duration(failsafeTimeoutSecs) * time.Second,
+		FallbackTimeout:        time.Duration(globalSettings.FallbackTimeoutSecs) * time.Second,
 		DisplayName:            sessionParams.AccountMetadata.GetGroupDisplayNameOrDefault(groupID.String()),
 	}, nil
 }
