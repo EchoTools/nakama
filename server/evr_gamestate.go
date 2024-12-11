@@ -2,6 +2,7 @@ package server
 
 import (
 	"log"
+	"time"
 )
 
 type TeamMetadata struct {
@@ -14,6 +15,7 @@ type GameState struct {
 	RoundClock             *RoundClock                `json:"round_clock,omitempty"`             // The round clock
 	EquilibriumCoefficient float64                    `json:"equilibrium_coefficient,omitempty"` // The equilibrium coefficient for the game (how much the game is balanced)
 	Teams                  map[TeamIndex]TeamMetadata `json:"teams,omitempty"`                   // Metadata for each team
+	LockedAt               time.Time                  `json:"locked_at,omitempty"`               // Whether the game state is locked
 }
 
 func NewGameState() *GameState {

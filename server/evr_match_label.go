@@ -103,6 +103,13 @@ func (s *MatchLabel) IsPublicMatch() bool {
 	return s.Mode == evr.ModeArenaPublic || s.Mode == evr.ModeCombatPublic
 }
 
+func (s *MatchLabel) IsLocked() bool {
+	if !s.Open || (s.GameState != nil && !s.GameState.LockedAt.IsZero()) {
+		return true
+	}
+	return false
+}
+
 func (s *MatchLabel) GetPlayerCount() int {
 	count := 0
 	for _, p := range s.Players {

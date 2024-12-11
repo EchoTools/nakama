@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/rand"
 	"reflect"
 	"slices"
@@ -762,6 +763,17 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		updateLabel = true
 	}
 
+	// If the arena score is close, then lock later than usual.
+	if state.Open && state.IsLocked() && state.Mode == evr.ModeArenaPublic {
+		// Get the score difference between the teams
+		scoreDiff := int(math.Abs(float64(state.GameState.BlueScore - state.GameState.OrangeScore)))
+
+		if scoreDiff > 4 || state.GameState.RoundClock.Current().Seconds() > 240 {
+			logger.Info("Match is over, closing the match.")
+			state.Open = false
+		}
+	}
+
 	if updateLabel {
 		if err := m.updateLabel(dispatcher, state); err != nil {
 			return nil
@@ -1028,11 +1040,20 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 
 	case SignalLockSession:
 		logger.Debug("Locking session")
-		state.Open = false
+		if state.GameState != nil {
+			state.GameState.LockedAt = time.Now().UTC()
+		} else {
+			state.Open = false
+		}
 
 	case SignalUnlockSession:
 		logger.Debug("Unlocking session")
+
+		if state.GameState != nil {
+			state.GameState.LockedAt = time.Time{}
+		}
 		state.Open = true
+
 	default:
 		logger.Warn("Unknown signal: %v", signal.OpCode)
 		return state, SignalResponse{Success: false, Message: "unknown signal"}.String()
