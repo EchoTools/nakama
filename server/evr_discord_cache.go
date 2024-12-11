@@ -348,8 +348,8 @@ func (c *DiscordCache) SyncGuildGroupMember(ctx context.Context, userID, groupID
 	member, _, err := c.GuildMember(guildID, discordID)
 	if err != nil {
 		// Remove the user from the guild group.
-
-		if err := c.GuildGroupMemberRemove(ctx, guildID, userID, ""); err != nil {
+		logger.Warn("Error getting guild member", zap.Error(err))
+		if err := c.GuildGroupMemberRemove(ctx, guildID, discordID, ""); err != nil {
 			return fmt.Errorf("failed to remove guild group member: %w", err)
 		}
 		return ErrMemberNotFound
@@ -633,7 +633,21 @@ func (d *DiscordCache) handleMemberUpdate(logger *zap.Logger, s *discordgo.Sessi
 	return nil
 }
 
-func (d *DiscordCache) GuildGroupMemberRemove(ctx context.Context, groupID, userID string, callerID string) error {
+func (d *DiscordCache) GuildGroupMemberRemove(ctx context.Context, guildID, discordID string, callerDiscordID string) error {
+	groupID := d.GuildIDToGroupID(guildID)
+	if groupID == "" {
+		return nil
+	}
+
+	userID := d.DiscordIDToUserID(discordID)
+	if userID == "" {
+		return nil
+	}
+
+	callerID := ""
+	if callerDiscordID != "" {
+		callerID = d.DiscordIDToUserID(callerDiscordID)
+	}
 
 	md, err := GetAccountMetadata(ctx, d.nk, userID)
 	if err != nil {
@@ -684,7 +698,7 @@ func (d *DiscordCache) handleGuildBanAdd(ctx context.Context, logger *zap.Logger
 	if err != nil {
 		return fmt.Errorf("error fetching audit log: %w", err)
 	}
-	var issuerUserID string
+	var issuerDiscordID string
 	if len(auditLogs.AuditLogEntries) == 0 {
 		logger.Warn("No relevant audit log entries found.")
 	} else if latestBan := auditLogs.AuditLogEntries[0]; latestBan.TargetID != e.User.ID {
@@ -692,7 +706,8 @@ func (d *DiscordCache) handleGuildBanAdd(ctx context.Context, logger *zap.Logger
 	} else if issuer, err := s.User(latestBan.UserID); err != nil {
 		logger.Warn("Failed to fetch issuing user", zap.Error(err))
 	} else {
-		issuerUserID = d.DiscordIDToUserID(issuer.ID)
+		issuerDiscordID = issuer.ID
+		issuerUserID := d.DiscordIDToUserID(issuer.ID)
 		logger = logger.With(
 			zap.String("issuer_username", issuer.Username),
 			zap.String("issuer_user_id", issuerUserID),
@@ -702,7 +717,7 @@ func (d *DiscordCache) handleGuildBanAdd(ctx context.Context, logger *zap.Logger
 		)
 	}
 
-	if err := d.GuildGroupMemberRemove(ctx, e.GuildID, e.User.ID, issuerUserID); err != nil {
+	if err := d.GuildGroupMemberRemove(ctx, e.GuildID, e.User.ID, issuerDiscordID); err != nil {
 		logger.Warn("Error removing guild group member", zap.Any("guildMemberRemove", e), zap.Error(err))
 	}
 
