@@ -281,9 +281,9 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 
 	matchID := label.ID
 	settings := &MatchSettings{
-		Mode:      evr.ModeSocialPublic,
-		Level:     evr.LevelSocial,
-		SpawnedBy: SystemUserID,
+		Mode:      lobbyParams.Mode,
+		Level:     evr.LevelUnspecified,
+		SpawnedBy: lobbyParams.UserID.String(),
 		GroupID:   lobbyParams.GroupID,
 		StartTime: time.Now().UTC(),
 	}
@@ -299,7 +299,7 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lobbyParams *LobbySessionParameters, entrants ...*EvrMatchPresence) error {
 
 	// Default backfill interval
-	interval := 15 * time.Second
+	interval := 10 * time.Second
 
 	// Early quitters have a shorter backfill interval.
 	if lobbyParams.IsEarlyQuitter {
@@ -338,15 +338,17 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 	fallbackTimer := time.NewTimer(time.Duration(backfillMultipler * float64(lobbyParams.FallbackTimeout)))
 
 	failsafeTimer := time.NewTimer(lobbyParams.FailsafeTimeout)
-	logger.Info("Using failsafe timer", zap.Duration("timeout", lobbyParams.FailsafeTimeout))
 	for {
 		var err error
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+
 		case <-fallbackTimer.C:
 			query = lobbyParams.BackfillSearchQuery(false, false)
+
 		case <-failsafeTimer.C:
+			query = lobbyParams.BackfillSearchQuery(false, false)
 
 			// The failsafe timer has expired.
 			// Create a match.
@@ -356,7 +358,7 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 				// If the error is a lock error, just try again.
 				if err == ErrFailedToAcquireLock {
 					// Wait a few seconds to give time for the server to be created.
-					<-time.After(2 * time.Second)
+					<-time.After(20 * time.Second)
 					continue
 				}
 
@@ -447,7 +449,6 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 			}
 
 			// Only join the player to a team that has similar rank
-
 			if n, err := l.OpenSlotsByRole(team); err != nil {
 				logger.Warn("Failed to get open slots by role", zap.Error(err))
 				continue
