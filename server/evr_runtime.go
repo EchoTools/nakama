@@ -667,7 +667,7 @@ func GetMatchIDBySessionID(nk runtime.NakamaModule, sessionID uuid.UUID) (matchI
 	if len(presences) == 0 {
 		return MatchID{}, nil, ErrMatchNotFound
 	}
-
+	presence = presences[0]
 	matchID = MatchIDFromStringOrNil(presences[0].GetStatus())
 	if !matchID.IsNil() {
 		// Verify that the user is actually in the match
