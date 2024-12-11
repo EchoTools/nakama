@@ -596,7 +596,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 		}
 	}
 
-	query := strings.Join(qparts, " ")
+	query := strings.Trim(strings.Join(qparts, " "), " ")
 
 	stringProperties["query"] = query
 
