@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/heroiclabs/nakama-common/runtime"
+	"gonum.org/v1/gonum/stat"
 )
 
 type MatchStateTags struct {
@@ -38,6 +39,20 @@ func (t MatchStateTags) AsMap() map[string]string {
 		"latitude":          t.Latitude,
 		"longitude":         t.Longitude,
 		"as_number":         t.ASNumber,
+	}
+}
+
+type MatchmakingStatusTags struct {
+	Mode      string
+	Group     string
+	PartySize string
+}
+
+func (t MatchmakingStatusTags) AsMap() map[string]string {
+	return map[string]string{
+		"mode":       t.Mode,
+		"group":      t.Group,
+		"party_size": t.PartySize,
 	}
 }
 
@@ -107,7 +122,8 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 
-	previouslySeen := make(map[MatchStateTags]struct{})
+	previouslySeenMatches := make(map[MatchStateTags]struct{})
+	previouslySeenMatchmaking := make(map[MatchmakingStatusTags]struct{})
 
 	for {
 
@@ -117,7 +133,7 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 			return
 		case <-ticker.C:
 		}
-		seen := make(map[MatchStateTags]struct{})
+		seenMatches := make(map[MatchStateTags]struct{})
 
 		operatorUsernames := make(map[string]string)
 
@@ -127,10 +143,16 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 			logger.Error("Error listing match states: %v", err)
 			continue
 		}
+
 		playercounts := make(map[MatchStateTags][]int)
+
+		groupIDs := make(map[string]struct{})
+
+		percentileVariances := make(map[MatchStateTags][]float64)
+		matchRankPercentiles := make(map[MatchStateTags][]float64)
 		for _, state := range matchStates {
 			groupID := state.State.GetGroupID()
-
+			groupIDs[groupID.String()] = struct{}{}
 			operatorUsername, ok := operatorUsernames[state.State.Broadcaster.OperatorID]
 			if !ok {
 				account, err := nk.AccountGetId(ctx, state.State.Broadcaster.OperatorID)
@@ -158,10 +180,18 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 			}
 
 			playercounts[stateTags] = append(playercounts[stateTags], len(state.State.Players))
+
+			rank_percentiles := make([]float64, 0, len(state.State.Players))
+			for _, player := range state.State.Players {
+				rank_percentiles = append(rank_percentiles, float64(player.RankPercentile))
+			}
+
+			percentileVariances[stateTags] = append(percentileVariances[stateTags], stat.Variance(rank_percentiles, nil))
+			matchRankPercentiles[stateTags] = append(matchRankPercentiles[stateTags], state.State.RankPercentile)
 		}
 		// Update the metrics
 		for tags, matches := range playercounts {
-			seen[tags] = struct{}{}
+			seenMatches[tags] = struct{}{}
 			playerCount := 0
 			for _, match := range matches {
 				playerCount += match
@@ -169,18 +199,22 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 			tagMap := tags.AsMap()
 			nk.metrics.CustomGauge("match_active_gauge", tagMap, float64(len(matches)))
 			nk.metrics.CustomGauge("player_active_gauge", tagMap, float64(playerCount))
+			nk.metrics.CustomGauge("match_rank_percentile_average_variance", tagMap, stat.Mean(percentileVariances[tags], nil))
+			nk.metrics.CustomGauge("match_rank_percentile_average", tagMap, stat.Mean(matchRankPercentiles[tags], nil))
 		}
 
 		// Zero out the metrics for the previously seen, but not currently seen matches
-		for tags := range previouslySeen {
-			if _, ok := seen[tags]; !ok {
+		for tags := range previouslySeenMatches {
+			if _, ok := seenMatches[tags]; !ok {
 				tagMap := tags.AsMap()
 				nk.metrics.CustomGauge("match_active_gauge", tagMap, 0)
 				nk.metrics.CustomGauge("player_active_gauge", tagMap, 0)
+				nk.metrics.CustomGauge("match_rank_percentile_average_variance", tagMap, 0)
+				nk.metrics.CustomGauge("match_rank_percentile_average", tagMap, 0)
 			}
 		}
 
-		previouslySeen = seen
+		previouslySeenMatches = seenMatches
 
 		// Update the geomap data
 		locations := make(map[string][]float64)
@@ -195,5 +229,46 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 			}
 		}
 
+		seenMatchmaking := make(map[MatchmakingStatusTags]struct{})
+		// Matchmaking gauge
+		matchmakingPlayers := make(map[MatchmakingStatusTags]int)
+		for groupID := range groupIDs {
+
+			presences, err := nk.StreamUserList(StreamModeMatchmaking, groupID, "", "", false, true)
+			if err != nil {
+				logger.Error("Error listing matchmaking presences: %v", err)
+				continue
+			}
+
+			for _, presence := range presences {
+				lobbyParams := LobbySessionParameters{}
+				if err := json.Unmarshal([]byte(presence.GetStatus()), &lobbyParams); err != nil {
+					logger.Error("Error unmarshalling matchmaking presence: %v", err)
+					continue
+				}
+
+				tags := MatchmakingStatusTags{
+					Mode:      lobbyParams.Mode.String(),
+					Group:     groupID,
+					PartySize: strconv.Itoa(lobbyParams.GetPartySize()),
+				}
+				matchmakingPlayers[tags] += 1
+			}
+
+			for tags, count := range matchmakingPlayers {
+				seenMatchmaking[tags] = struct{}{}
+				tagMap := tags.AsMap()
+				nk.metrics.CustomGauge("matchmaking_active_gauge", tagMap, float64(count))
+			}
+
+		}
+		// Zero out the metrics for the previously seen, but not currently seen matches
+		for tags := range previouslySeenMatchmaking {
+			if _, ok := seenMatchmaking[tags]; !ok {
+				tagMap := tags.AsMap()
+				nk.metrics.CustomGauge("matchmaking_active_gauge", tagMap, 0)
+			}
+		}
+		previouslySeenMatchmaking = seenMatchmaking
 	}
 }
