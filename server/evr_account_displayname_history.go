@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 )
 
@@ -180,12 +181,34 @@ func DisplayNameHistorySet(ctx context.Context, nk runtime.NakamaModule, userID 
 	return nil
 }
 
-func DisplayNameCacheRegexSearch(ctx context.Context, nk runtime.NakamaModule, pattern string) (map[string]*DisplayNameHistory, error) {
+func DisplayNameCacheRegexSearch(ctx context.Context, nk runtime.NakamaModule, pattern string, limit int) (map[string]*DisplayNameHistory, error) {
 	query := fmt.Sprintf("+value.cache:/%s/", pattern)
 	// Perform the storage list operation
-	result, _, err := nk.StorageIndexList(ctx, SystemUserID, DisplayNameHistoryCacheIndex, query, 100, nil, "")
-	if err != nil {
-		return nil, fmt.Errorf("error listing display name history: %w", err)
+
+	cursor := ""
+
+	hardLimit := 1000
+	results := make([]*api.StorageObject, 100)
+	var err error
+	var result *api.StorageObjects
+	for {
+		result, cursor, err = nk.StorageIndexList(ctx, SystemUserID, DisplayNameHistoryCacheIndex, query, 100, []string{"value.active"}, cursor)
+		if err != nil {
+			return nil, fmt.Errorf("error listing display name history: %w", err)
+		}
+		if len(result.Objects) == 0 || len(results) >= hardLimit {
+			break
+		}
+		results = append(results, result.Objects...)
+
+		if len(results) >= limit {
+			results = results[:limit]
+			break
+		}
+
+		if cursor == "" {
+			break
+		}
 	}
 
 	histories := make(map[string]*DisplayNameHistory, len(result.Objects))
@@ -203,12 +226,29 @@ func DisplayNameCacheRegexSearch(ctx context.Context, nk runtime.NakamaModule, p
 func DisplayNameHistoryActiveList(ctx context.Context, nk runtime.NakamaModule, displayName string) ([]string, error) {
 	// Perform the storage list operation
 	query := fmt.Sprintf("+value.active:%s", Query.Escape(displayName))
-	result, _, err := nk.StorageIndexList(ctx, SystemUserID, DisplayNameHistoryCacheIndex, query, 100, nil, "")
-	if err != nil {
-		return nil, fmt.Errorf("error listing display name history: %w", err)
+
+	cursor := ""
+	var results []*api.StorageObject
+	for {
+
+		result, cursor, err := nk.StorageIndexList(ctx, SystemUserID, DisplayNameHistoryCacheIndex, query, 100, nil, cursor)
+		if err != nil {
+			return nil, fmt.Errorf("error listing display name history: %w", err)
+		}
+
+		if len(result.Objects) == 0 {
+			break
+		}
+
+		results = append(results, result.Objects...)
+
+		if cursor == "" {
+			break
+		}
 	}
-	userIDs := make([]string, 0, len(result.Objects))
-	for _, entry := range result.Objects {
+
+	userIDs := make([]string, 0, len(results))
+	for _, entry := range results {
 		userIDs = append(userIDs, entry.UserId)
 	}
 

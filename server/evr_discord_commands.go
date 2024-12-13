@@ -1629,7 +1629,13 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			partial = sanitizeDisplayName(strings.ToLower(partial))
 
 			pattern := fmt.Sprintf(".*%s.*", partial)
-			histories, err := DisplayNameCacheRegexSearch(ctx, nk, pattern)
+
+			if len(partial) <= 3 {
+				// exact match only
+				pattern = partial
+			}
+
+			histories, err := DisplayNameCacheRegexSearch(ctx, nk, pattern, 10)
 			if err != nil {
 				logger.Error("Failed to search display name history", zap.Error(err))
 				return fmt.Errorf("failed to search display name history: %w", err)
