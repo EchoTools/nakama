@@ -231,12 +231,12 @@ func (p *EvrPipeline) gameServerRegistration(ctx context.Context, logger *zap.Lo
 	var rtt time.Duration
 	for i := 0; i < retries; i++ {
 		rtt, err = BroadcasterHealthcheck(p.internalIP, config.Endpoint.ExternalIP, int(config.Endpoint.Port), 500*time.Millisecond)
-		logger.Warn("Failed to healthcheck broadcaster on externalIP", zap.String("external_ip", config.Endpoint.ExternalIP.String()), zap.Error(err))
+		logger.Debug("Failed to healthcheck broadcaster on externalIP", zap.String("external_ip", config.Endpoint.ExternalIP.String()), zap.Error(err))
 		if err != nil {
 			// Try the internal IP
 			rtt, err = BroadcasterHealthcheck(p.internalIP, config.Endpoint.InternalIP, int(config.Endpoint.Port), 500*time.Millisecond)
 			if err != nil {
-				logger.Error("Failed to healthcheck broadcaster on internalIP", zap.String("external_ip", config.Endpoint.InternalIP.String()), zap.Error(err))
+				logger.Debug("Failed to healthcheck broadcaster on internalIP", zap.String("external_ip", config.Endpoint.InternalIP.String()), zap.Error(err))
 				time.Sleep(500 * time.Millisecond)
 				continue
 			}
@@ -249,6 +249,7 @@ func (p *EvrPipeline) gameServerRegistration(ctx context.Context, logger *zap.Lo
 	}
 	if !alive {
 		// If the broadcaster is not available, send an error message to the user on discord
+		logger.Error("Broadcaster could not be reached", zap.Error(err))
 		errorMessage := fmt.Sprintf("Broadcaster (Endpoint ID: %s, Server ID: %d) could not be reached. Error: %v", config.Endpoint.ExternalAddress(), config.ServerID, err)
 		go sendDiscordError(errors.New(errorMessage), discordId, logger, p.discordCache.dg)
 		return errFailedRegistration(session, logger, errors.New(errorMessage), evr.BroadcasterRegistration_Failure)
