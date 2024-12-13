@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -71,8 +72,10 @@ func (p *LobbySessionParameters) SetPartySize(size int) {
 
 func (s LobbySessionParameters) MetricsTags() map[string]string {
 	return map[string]string{
-		"mode":     s.Mode.String(),
-		"group_id": s.GroupID.String(),
+		"mode":             s.Mode.String(),
+		"group_id":         s.GroupID.String(),
+		"is_early_quitter": strconv.FormatBool(s.IsEarlyQuitter),
+		"role":             strconv.Itoa(s.Role),
 	}
 }
 
@@ -548,10 +551,14 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 
 	// If the user has an early quit penalty, only match them with players who have submitted after now
 	if ticketParams.IncludeEarlyQuitPenalty {
-		qparts = append(qparts, fmt.Sprintf(`-properties.early_quit_penalty_expiry:>="%s"`, submissionTime))
-		if p.EarlyQuitPenaltyExpiry.After(time.Now()) {
-			qparts = append(qparts, fmt.Sprintf(`-properties.submission_time:<"%s"`, submissionTime))
-		}
+		// Only match with players who have submitted after this player starts matchmaking
+		qparts = append(qparts, fmt.Sprintf(`-properties.submission_time:>="%s"`, submissionTime))
+		// Until the match clock is correct, this has to be disabled
+		/*
+			if p.EarlyQuitPenaltyExpiry.After(time.Now()) {
+				qparts = append(qparts, fmt.Sprintf(`-properties.submission_time:<"%s"`, submissionTime))
+			}
+		*/
 	}
 
 	if ticketParams.IncludeRankRange && p.RankPercentileMaxDelta > 0 {
