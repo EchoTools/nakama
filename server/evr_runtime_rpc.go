@@ -1467,6 +1467,7 @@ func PlayerStatisticsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 
 type AccountSearchRequest struct {
 	DisplayNamePattern string `json:"display_name"`
+	Limit              int    `json:"limit"`
 }
 
 type AccountSearchResponse struct {
@@ -1510,8 +1511,12 @@ func AccountSearchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	if request.DisplayNamePattern == "" {
 		return "", runtime.NewError("Search pattern is empty after sanitization.", StatusInvalidArgument)
 	}
+
 	query := fmt.Sprintf(".*%s.*", Query.Escape(request.DisplayNamePattern))
-	objects, err := DisplayNameCacheRegexSearch(ctx, nk, query)
+
+	limit := min(request.Limit, 100)
+
+	objects, err := DisplayNameCacheRegexSearch(ctx, nk, query, limit)
 	if err != nil {
 		return "", runtime.NewError(err.Error(), StatusInternalError)
 	}

@@ -21,7 +21,6 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.24.0
 	github.com/heroiclabs/nakama-common v1.35.0
 	github.com/heroiclabs/sql-migrate v0.0.0-20241125131053-95a7949783b0
-	github.com/ipinfo/go/v2 v2.10.0
 	github.com/jackc/pgerrcode v0.0.0-20240316143900-6e2875d9b438
 	github.com/jackc/pgtype v1.14.3
 	github.com/jackc/pgx/v5 v5.7.1
@@ -55,7 +54,6 @@ require (
 	github.com/lib/pq v1.10.7 // indirect
 	github.com/mattn/go-runewidth v0.0.15 // indirect
 	github.com/montanaflynn/stats v0.7.1 // indirect
-	github.com/patrickmn/go-cache v2.1.0+incompatible // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/twmb/murmur3 v1.1.8 // indirect
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect
