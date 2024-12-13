@@ -251,7 +251,7 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 
 	label, err := LobbyPrepareSession(ctx, d.nk, matchID, &settings)
 	if err != nil {
-		logger.Warn("Failed to prepare session", zap.Error(err), zap.String("mid", label.ID.UUID.String()))
+		logger.Warn("Failed to prepare session", zap.Error(err), zap.String("mid", matchID.UUID.String()))
 		return nil, -1, fmt.Errorf("failed to prepare session: %w", err)
 	}
 
