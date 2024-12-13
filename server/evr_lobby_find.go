@@ -341,7 +341,7 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 	cycleCount := 0
 	backfillMultipler := 1.25 // Multiplier of matchmaking ticket timeout before starting backfill search
 
-	fallbackTimer := time.NewTimer(time.Duration(backfillMultipler * float64(lobbyParams.FallbackTimeout)))
+	fallbackTimer := time.NewTimer(time.Duration(backfillMultipler*float64(lobbyParams.FallbackTimeout)) * time.Second)
 
 	failsafeTimer := time.NewTimer(lobbyParams.FailsafeTimeout)
 	for {
@@ -354,6 +354,7 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 			query = lobbyParams.BackfillSearchQuery(false, false)
 
 		case <-failsafeTimer.C:
+
 			query = lobbyParams.BackfillSearchQuery(false, false)
 
 			// The failsafe timer has expired.
@@ -373,6 +374,7 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 			}
 			<-time.After(2 * time.Second)
 		case <-time.After(interval):
+
 		}
 
 		// List all matches that are open and have available slots.
@@ -387,14 +389,22 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 		} else {
 			if cycleCount%10 == 0 {
 				logger.Debug("No matches found", zap.Any("query", query), zap.Int("cycle", cycleCount))
+				continue
 			}
 		}
 
 		// Sort the matches by open slots and then by latency
 		slices.SortFunc(matches, func(a, b *MatchLabelMeta) int {
 
-			// By rank percentile difference
+			// Rank by RTT
+			if rtts[a.State.Broadcaster.Endpoint.GetExternalIP()] > lobbyParams.MaxServerRTT && rtts[b.State.Broadcaster.Endpoint.GetExternalIP()] < lobbyParams.MaxServerRTT {
+				return -1
+			}
+			if rtts[a.State.Broadcaster.Endpoint.GetExternalIP()] < lobbyParams.MaxServerRTT && rtts[b.State.Broadcaster.Endpoint.GetExternalIP()] > lobbyParams.MaxServerRTT {
+				return 1
+			}
 
+			// By rank percentile difference
 			rankPercentileDifferenceA := math.Abs(a.State.RankPercentile - lobbyParams.RankPercentile)
 			rankPercentileDifferenceB := math.Abs(b.State.RankPercentile - lobbyParams.RankPercentile)
 
@@ -417,8 +427,6 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 			// If the open slots are the same, sort by latency
 			return rtts[a.State.Broadcaster.Endpoint.GetExternalIP()] - rtts[b.State.Broadcaster.Endpoint.GetExternalIP()]
 		})
-
-		var selected *MatchLabel
 
 		team := evr.TeamBlue
 
@@ -444,7 +452,6 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 			// Social lobbies can only have one team
 			if lobbyParams.Mode == evr.ModeSocialPublic {
 				team = evr.TeamSocial
-
 			} else {
 
 				// Determine which team has the least players
@@ -462,15 +469,32 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 				continue
 			}
 
-			// Match found
-			selected = l
-			break
+			// Set the role alignment for each entrant in the party
+			for _, e := range entrants {
+				e.RoleAlignment = team
+			}
+
+			logger := logger.With(zap.String("mid", l.ID.UUID.String()))
+
+			logger.Debug("Joining backfill match.")
+			p.metrics.CustomCounter("lobby_join_backfill", lobbyParams.MetricsTags(), int64(lobbyParams.GetPartySize()))
+
+			// Player members will detect the join.
+			if err := p.LobbyJoinEntrants(logger, l, entrants...); err != nil {
+				// Send the error to the client
+				// If it's full just try again.
+				if LobbyErrorCode(err) == ServerIsFull {
+					logger.Warn("Server is full, ignoring.")
+					continue
+				}
+				return fmt.Errorf("failed to join backfill match: %w", err)
+			}
 		}
 
 		// If the lobby is social, create a new social lobby.
-		if selected == nil && lobbyParams.Mode == evr.ModeSocialPublic {
+		if lobbyParams.Mode == evr.ModeSocialPublic {
 			// Create a new social lobby
-			selected, err = p.newLobby(ctx, logger, lobbyParams)
+			_, err = p.newLobby(ctx, logger, lobbyParams)
 			if err != nil {
 				// If the error is a lock error, just try again.
 				if err == ErrFailedToAcquireLock {
@@ -485,33 +509,6 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 				<-time.After(1 * time.Second)
 			}
 		}
-
-		// If no match was found, continue.
-		if selected == nil {
-			continue
-		}
-
-		// Set the role alignment for each entrant in the party
-		for _, e := range entrants {
-			e.RoleAlignment = team
-		}
-
-		logger := logger.With(zap.String("mid", selected.ID.UUID.String()))
-
-		logger.Debug("Joining backfill match.")
-		p.metrics.CustomCounter("lobby_join_backfill", lobbyParams.MetricsTags(), int64(lobbyParams.GetPartySize()))
-
-		// Player members will detect the join.
-		if err := p.LobbyJoinEntrants(logger, selected, entrants...); err != nil {
-			// Send the error to the client
-			// If it's full just try again.
-			if LobbyErrorCode(err) == ServerIsFull {
-				logger.Warn("Server is full, ignoring.")
-				continue
-			}
-			return fmt.Errorf("failed to join backfill match: %w", err)
-		}
-		return nil
 	}
 }
 
