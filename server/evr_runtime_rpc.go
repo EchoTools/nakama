@@ -1174,14 +1174,20 @@ type AccountLookupRPCResponse struct {
 	IPQSData    *IPQSResponse `json:"ipqs_data,omitempty"`
 }
 
-func AccountLookupRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
-	request := struct {
-		Username    string `json:"username"`
-		UserID      string `json:"user_id"`
-		DiscordID   string `json:"discord_id"`
-		DisplayName string `json:"display_name"`
-	}{}
+type AccountLookupRequest struct {
+	Username    string `json:"username"`
+	UserID      string `json:"user_id"`
+	DiscordID   string `json:"discord_id"`
+	DisplayName string `json:"display_name"`
+}
 
+func (r *AccountLookupRequest) CacheKey() string {
+	return fmt.Sprintf("%s:%s:%s:%s", r.Username, r.UserID, r.DiscordID, r.DisplayName)
+}
+
+func AccountLookupRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+
+	request := AccountLookupRequest{}
 	if payload != "" {
 		if err := json.Unmarshal([]byte(payload), &request); err != nil {
 			return "", err
@@ -1213,6 +1219,13 @@ func AccountLookupRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	if ok {
 		if ok, err := CheckSystemGroupMembership(ctx, db, callerID, GroupGlobalPrivateDataAccess); err != nil {
 			includePrivate = ok
+		}
+	}
+
+	if !includePrivate {
+		// check the cache
+		if cachedResponse, _, found := rpcResponseCache.Get(request.CacheKey()); found {
+			return cachedResponse.(string), nil
 		}
 	}
 
@@ -1287,6 +1300,11 @@ func AccountLookupRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	jsonResponse, err := json.Marshal(response)
 	if err != nil {
 		return "", err
+	}
+
+	if !includePrivate {
+		// Cache the response
+		rpcResponseCache.Set(request.CacheKey(), string(jsonResponse), 5*time.Minute)
 	}
 
 	return string(jsonResponse), nil
