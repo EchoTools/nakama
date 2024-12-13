@@ -230,8 +230,9 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		if guildGroups == nil {
 			return settings, fmt.Errorf("guild groups not found")
 		}
-
-		logger.Warn("User is not in the active group", zap.String("uid", userID), zap.String("gid", groupID.String()))
+		if groupID != uuid.Nil {
+			logger.Warn("User is not in the active group", zap.String("uid", userID), zap.String("gid", groupID.String()))
+		}
 
 		groupIDs := make([]string, 0, len(membershipMap))
 		for id := range membershipMap {
