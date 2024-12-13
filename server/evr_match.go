@@ -375,7 +375,9 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		"role":     fmt.Sprintf("%d", meta.Presence.RoleAlignment),
 		"group_id": state.GetGroupID().String(),
 	}
-	nk.MetricsCounterAdd("match_entrant_join_count", metricsTags, 1)
+	if nk != nil { // for testing
+		nk.MetricsCounterAdd("match_entrant_join_count", metricsTags, 1)
+	}
 
 	// check the available slots
 	if slots, err := state.OpenSlotsByRole(meta.Presence.RoleAlignment); err != nil {
@@ -1125,8 +1127,10 @@ func (m *EvrMatch) dispatchMessages(_ context.Context, logger runtime.Logger, di
 
 func (m *EvrMatch) updateLabel(dispatcher runtime.MatchDispatcher, state *MatchLabel) error {
 	state.rebuildCache()
-	if err := dispatcher.MatchLabelUpdate(state.GetLabel()); err != nil {
-		return fmt.Errorf("could not update label: %w", err)
+	if dispatcher != nil {
+		if err := dispatcher.MatchLabelUpdate(state.GetLabel()); err != nil {
+			return fmt.Errorf("could not update label: %w", err)
+		}
 	}
 	return nil
 }
