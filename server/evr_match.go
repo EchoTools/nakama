@@ -381,9 +381,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 
 	// check the available slots
 	if slots, err := state.OpenSlotsByRole(meta.Presence.RoleAlignment); err != nil {
-		if ok, err := CheckSystemGroupMembership(ctx, db, joinPresence.GetUserId(), state.GetGroupID().String()); err != nil || !ok {
-			return state, false, ErrJoinRejectReasonFailedToAssignTeam.Error()
-		}
+		return state, false, ErrJoinRejectReasonFailedToAssignTeam.Error()
 	} else if slots < len(meta.Presences()) {
 		return state, false, ErrJoinRejectReasonLobbyFull.Error()
 	}
