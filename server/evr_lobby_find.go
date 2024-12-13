@@ -91,10 +91,16 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	logger.Info("Finding match", zap.String("mode", lobbyParams.Mode.String()), zap.Int("party_size", lobbyParams.GetPartySize()))
 
 	defer func() {
+
+		isLeader := lobbyGroup == nil || lobbyGroup.GetLeader().SessionId == session.id.String()
+		// If this is the leader, or a solo player, send the metrics
+
 		tags := lobbyParams.MetricsTags()
+		tags["is_leader"] = strconv.FormatBool(isLeader)
 		tags["party_size"] = strconv.Itoa(lobbyParams.GetPartySize())
 		p.metrics.CustomTimer("lobby_find_duration", tags, time.Since(startTime))
-		logger.Debug("Lobby find complete", zap.String("group_id", lobbyParams.GroupID.String()), zap.Int("party_size", lobbyParams.GetPartySize()), zap.String("mode", lobbyParams.Mode.String()), zap.Int("duration", int(time.Since(startTime).Seconds())))
+
+		logger.Debug("Lobby find complete", zap.String("group_id", lobbyParams.GroupID.String()), zap.Int("party_size", lobbyParams.GetPartySize()), zap.String("mode", lobbyParams.Mode.String()), zap.Int("role", lobbyParams.Role), zap.Bool("leader", isLeader), zap.Int("duration", int(time.Since(startTime).Seconds())))
 	}()
 
 	// Construct the entrant presences for the party members.
