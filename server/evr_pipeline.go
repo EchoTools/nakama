@@ -289,27 +289,98 @@ func (p *EvrPipeline) GetCachedMessage(key string) evr.Message {
 
 func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, in evr.Message) bool {
 
+	// Set log levels
+	switch in.(type) {
+	}
+
+	// Handle legacy messages
+
+	switch msg := in.(type) {
+
+	case *evr.BroadcasterRegistrationRequest:
+
+		in = &evr.EchoToolsGameServerRegistrationRequestV1{
+			LoginSessionID: uuid.Nil,
+			ServerID:       msg.ServerId,
+			InternalIP:     msg.InternalIP,
+			Port:           msg.Port,
+			RegionHash:     msg.Region,
+			VersionLock:    msg.VersionLock,
+			TimeStepUsecs:  0,
+		}
+
+	case *evr.BroadcasterPlayerSessionsLocked:
+		matchID, _, err := GameServerBySessionID(p.runtimeModule, session.ID())
+		if err != nil {
+			logger.Error("Failed to get broadcaster's match by session ID", zap.Error(err))
+			return true
+		}
+		in = &evr.EchoToolsLobbySessionLockV1{LobbySessionID: matchID.UUID}
+
+	case *evr.BroadcasterPlayerSessionsUnlocked:
+		matchID, _, err := GameServerBySessionID(p.runtimeModule, session.ID())
+		if err != nil {
+			logger.Error("Failed to get broadcaster's match by session ID", zap.Error(err))
+			return true
+		}
+		in = &evr.EchoToolsLobbySessionUnlockV1{LobbySessionID: matchID.UUID}
+
+	case *evr.GameServerJoinAttempt:
+		matchID, _, err := GameServerBySessionID(p.runtimeModule, session.ID())
+		if err != nil {
+			logger.Error("Failed to get broadcaster's match by session ID", zap.Error(err))
+			return true
+		}
+		in = &evr.EchoToolsLobbyEntrantNewV1{LobbySessionID: matchID.UUID, EntrantIDs: msg.EntrantIDs}
+
+	case *evr.GameServerPlayerRemoved:
+		matchID, _, err := GameServerBySessionID(p.runtimeModule, session.ID())
+		if err != nil {
+			logger.Error("Failed to get broadcaster's match by session ID", zap.Error(err))
+			return true
+		}
+
+		in = &evr.EchoToolsLobbyEntrantRemovedV1{EntrantID: msg.EntrantID, LobbySessionID: matchID.UUID}
+
+	case *evr.BroadcasterSessionStarted:
+		matchID, _, err := GameServerBySessionID(p.runtimeModule, session.ID())
+		if err != nil {
+			logger.Error("Failed to get broadcaster's match by session ID", zap.Error(err))
+			return true
+		}
+		in = &evr.EchoToolsLobbySessionStartedV1{LobbySessionID: matchID.UUID}
+
+	case *evr.BroadcasterSessionEnded:
+		matchID, _, err := GameServerBySessionID(p.runtimeModule, session.ID())
+		if err != nil {
+			logger.Error("Failed to get broadcaster's match by session ID", zap.Error(err))
+			return true
+		}
+		in = &evr.EchoToolsLobbySessionEndedV1{LobbySessionID: matchID.UUID}
+
+	}
+
 	var pipelineFn func(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error
 
-	requireAuthed := true
+	isAuthenticationRequired := true
 
 	switch in.(type) {
 	// Config service
 	case *evr.ConfigRequest:
-		requireAuthed = false
+		isAuthenticationRequired = false
 		pipelineFn = p.configRequest
 
 	// Transaction (IAP) service
 	case *evr.ReconcileIAP:
-		requireAuthed = false
+		isAuthenticationRequired = false
 		pipelineFn = p.reconcileIAP
 
 	// Login Service
 	case *evr.RemoteLogSet:
-		requireAuthed = false
+		isAuthenticationRequired = false
 		pipelineFn = p.remoteLogSetv3
 	case *evr.LoginRequest:
-		requireAuthed = false
+		isAuthenticationRequired = false
 		pipelineFn = p.loginRequest
 	case *evr.DocumentRequest:
 		pipelineFn = p.documentRequest
@@ -343,36 +414,21 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 		pipelineFn = p.lobbyPendingSessionCancel
 
 	// ServerDB service
-	case *evr.BroadcasterRegistrationRequest:
-		requireAuthed = false
-		pipelineFn = p.broadcasterRegistrationRequest
 	case *evr.EchoToolsGameServerRegistrationRequestV1:
-		requireAuthed = false
-		pipelineFn = p.echoToolsGameServerRegistrationRequestV1
-
-	case *evr.BroadcasterSessionStarted:
-		pipelineFn = p.broadcasterSessionStarted
-
-	case *evr.GameServerJoinAttempt:
-		pipelineFn = p.legacyGameServerPlayerAccept
-	case *evr.GameServerPlayerRemoved:
-		pipelineFn = p.broadcasterPlayerRemoved
-	case *evr.BroadcasterPlayerSessionsLocked:
-		pipelineFn = p.broadcasterPlayerSessionsLocked
-	case *evr.BroadcasterPlayerSessionsUnlocked:
-		pipelineFn = p.broadcasterPlayerSessionsUnlocked
-	case *evr.BroadcasterSessionEnded:
-		pipelineFn = p.broadcasterSessionEnded
-
-		// Advanced Game Servers
+		isAuthenticationRequired = false
+		pipelineFn = p.gameserverRegistrationRequest
 	case *evr.EchoToolsLobbySessionStartedV1:
-		pipelineFn = p.echoToolsLobbySessionStartedV1
+		pipelineFn = p.gameserverLobbySessionStarted
 	case *evr.EchoToolsLobbyStatusV1:
-		pipelineFn = p.echoToolsLobbyStatusV1
+		pipelineFn = p.gameserverLobbySessionStatus
 	case *evr.EchoToolsLobbyEntrantNewV1:
-		pipelineFn = p.echoToolsLobbyEntrantNewV1
+		pipelineFn = p.gameserverLobbyEntrantNew
 	case *evr.EchoToolsLobbySessionEndedV1:
-		pipelineFn = p.echoToolsLobbySessionEndedV1
+		pipelineFn = p.gameserverLobbySessionEnded
+	case *evr.EchoToolsLobbySessionLockV1:
+		pipelineFn = p.gameserverLobbySessionLock
+	case *evr.EchoToolsLobbySessionUnlockV1:
+		pipelineFn = p.gameserverLobbySessionUnlock
 
 	default:
 		pipelineFn = func(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
