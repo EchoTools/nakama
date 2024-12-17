@@ -437,34 +437,60 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 		}
 	}
 
-	// Identifying messages are used to associate the message with a user.
-	// The session ID is used to identify the user.
-	// The session ID is mostly ignored once the connection is established.
-	if idmessage, ok := in.(evr.LoginIdentifier); ok {
-		// If the message is an identifying message, validate the session and evr id.
-		if err := session.LobbySession(idmessage.GetLoginSessionID()); err != nil {
-			logger.Error("Invalid session", zap.Error(err))
-			// Disconnect the client if the session is invalid.
-			return false
-		}
-	}
+	if isAuthenticationRequired && session.userID.IsNil() {
 
-	if xpimessage, ok := in.(evr.XPIdentifier); ok {
-		// If the message is an identifying message, validate the session and evr id.
-		params, ok := LoadParams(session.Context())
-		if !ok {
-			logger.Error("Failed to get lobby parameters")
-			return false
+		// set/validate the login session
+		if idmessage, ok := in.(evr.LoginIdentifier); ok {
+
+			if idmessage.GetLoginSessionID().IsNil() {
+				logger.Error("Login session ID is nil")
+				return false
+			}
+
+			params, ok := LoadParams(session.Context())
+			if !ok {
+				logger.Error("Failed to get lobby parameters")
+				return false
+			}
+
+			loginSession := params.LoginSession.Load()
+			if loginSession == nil {
+				switch idmessage.(type) {
+				case evr.LobbySessionRequest:
+					// associate lobby session with login session
+					// If the message is an identifying message, validate the session and evr id.
+					if err := session.LobbySession(idmessage.GetLoginSessionID()); err != nil {
+						logger.Error("Invalid session", zap.Error(err))
+						// Disconnect the client if the session is invalid.
+						return false
+					}
+				default:
+					logger.Error("Login session not found", zap.String("login_session_id", idmessage.GetLoginSessionID().String()))
+					return false
+				}
+			} else if !loginSession.id.IsNil() && loginSession.id != idmessage.GetLoginSessionID() {
+				// If the ID message is not associated with the current session, log the error and return.
+				logger.Error("mismatched login session id", zap.String("login_session_id", idmessage.GetLoginSessionID().String()), zap.String("login_session_id", loginSession.id.String()))
+				return false
+			}
+
 		}
 
-		if !params.EvrID.Equals(xpimessage.GetEvrID()) {
-			logger.Error("mismatched evr id", zap.String("evrid", xpimessage.GetEvrID().String()), zap.String("evrid2", params.EvrID.String()))
-			return false
-		}
-	}
+		// Set/validate the XPI
+		if xpimessage, ok := in.(evr.XPIdentifier); ok {
 
-	// If the message requires authentication, check if the session is authenticated.
-	if requireAuthed {
+			params, ok := LoadParams(session.Context())
+			if !ok {
+				logger.Error("Failed to get lobby parameters")
+				return false
+			}
+
+			if !params.EvrID.Equals(xpimessage.GetEvrID()) {
+				logger.Error("mismatched evr id", zap.String("evrid", xpimessage.GetEvrID().String()), zap.String("evrid2", params.EvrID.String()))
+				return false
+			}
+		}
+
 		// If the session is not authenticated, log the error and return.
 		if session != nil && session.UserID() == uuid.Nil {
 
@@ -480,11 +506,8 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 		}
 	}
 
-	if params, ok := LoadParams(session.Context()); ok {
-		evrID := params.EvrID
-		if !evrID.IsNil() {
-			logger = logger.With(zap.String("uid", session.UserID().String()), zap.String("sid", session.ID().String()), zap.String("username", session.Username()), zap.String("evrid", evrID.String()))
-		}
+	if params, ok := LoadParams(session.Context()); ok && !params.EvrID.IsNil() {
+		logger = logger.With(zap.String("uid", session.UserID().String()), zap.String("sid", session.ID().String()), zap.String("username", session.Username()), zap.String("evrid", params.EvrID.String()))
 	}
 
 	if err := pipelineFn(session.Context(), logger, session, in); err != nil {
