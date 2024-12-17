@@ -183,49 +183,23 @@ type EVRLoginRecord struct {
 	UpdateTime   time.Time
 }
 
-func GetEVRRecords(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, userId string) (map[evr.EvrId]EVRLoginRecord, error) {
-	listRecords, _, err := nk.StorageList(ctx, SystemUserID, userId, EvrLoginStorageCollection, 100, "")
+func GetEVRRecords(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, userID string) (map[evr.EvrId]EVRLoginRecord, error) {
+	history, err := LoginHistoryLoad(ctx, nk, userID)
 	if err != nil {
-		logger.WithField("err", err).Error("Storage list error.")
-		return nil, fmt.Errorf("storage list error: %w", err)
+		return nil, fmt.Errorf("error getting device history: %w", err)
 	}
 
-	records := make(map[evr.EvrId]EVRLoginRecord, len(listRecords))
-
-	for _, record := range listRecords {
-		var loginProfile evr.LoginProfile
-		if err := json.Unmarshal([]byte(record.Value), &loginProfile); err != nil {
-			return nil, fmt.Errorf("error unmarshalling login profile for %s: %v", record.GetKey(), err)
-		}
-		evrID, err := evr.ParseEvrId(record.Key)
-		if err != nil {
-			return nil, fmt.Errorf("error parsing evrID: %w", err)
-		}
-		records[*evrID] = EVRLoginRecord{
-			EvrID:        *evrID,
-			LoginProfile: &loginProfile,
-			CreateTime:   record.CreateTime.AsTime(),
-			UpdateTime:   record.UpdateTime.AsTime(),
+	records := make(map[evr.EvrId]EVRLoginRecord, 0)
+	for _, e := range history.History {
+		records[e.DeviceAuth.EvrID] = EVRLoginRecord{
+			EvrID:        e.DeviceAuth.EvrID,
+			LoginProfile: e.LoginData,
+			CreateTime:   e.UpdatedAt,
+			UpdateTime:   e.UpdatedAt,
 		}
 	}
 
 	return records, nil
-}
-
-func GetAddressRecords(ctx context.Context, nk runtime.NakamaModule, userId string) ([]*api.StorageObject, error) {
-	listRecords, _, err := nk.StorageList(ctx, SystemUserID, userId, ClientAddrStorageCollection, 100, "")
-	if err != nil {
-		return nil, fmt.Errorf("storage list error: %w", err)
-	}
-	return listRecords, nil
-}
-
-func GetUserIpAddresses(ctx context.Context, nk runtime.NakamaModule, userId string) ([]*api.StorageObject, error) {
-	listRecords, _, err := nk.StorageList(ctx, SystemUserID, userId, IpAddressIndex, 100, "")
-	if err != nil {
-		return nil, fmt.Errorf("storage list error: %w", err)
-	}
-	return listRecords, nil
 }
 
 func GetDisplayNameByGroupID(ctx context.Context, nk runtime.NakamaModule, userID, groupID string) (string, error) {

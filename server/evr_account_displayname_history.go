@@ -171,7 +171,11 @@ func DisplayNameHistorySet(ctx context.Context, nk runtime.NakamaModule, userID 
 		return fmt.Errorf("error getting display name history: %w", err)
 	}
 
-	updated := history.Set(guildID, displayName)
+	updated := false
+
+	if u := history.Set(guildID, displayName); u {
+		updated = true
+	}
 
 	if updated {
 		if err := DisplayNameHistoryStore(ctx, nk, userID, history); err != nil {

@@ -364,61 +364,78 @@ func createCoreGroups(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 
 // Register Indexes for the login service
 func RegisterIndexes(initializer runtime.Initializer) error {
-	// Register the IP Address index for looking up user's by IP Address
-	// FIXME this needs to be updated for the new login system
-	name := IpAddressIndex
-	collection := EvrLoginStorageCollection
-	key := ""                                           // Set to empty string to match all keys instead
-	fields := []string{"client_ip_address,displayname"} // index on these fields
-	maxEntries := 1000000
-	indexOnly := false
-	if err := initializer.RegisterStorageIndex(name, collection, key, fields, nil, maxEntries, indexOnly); err != nil {
+	// XPI collision detection
+	if err := initializer.RegisterStorageIndex(
+		XPIStorageIndex,
+		GameProfileStorageCollection,
+		GameProfileStorageKey,
+		[]string{"server.xplatformid"},
+		nil,
+		100000,
+		false,
+	); err != nil {
 		return err
 	}
-	name = EvrIDStorageIndex
-	collection = GameProfileStorageCollection
-	key = GameProfileStorageKey             // Set to empty string to match all keys instead
-	fields = []string{"server.xplatformid"} // index on these fields
-	maxEntries = 100000
-	indexOnly = false
-	if err := initializer.RegisterStorageIndex(name, collection, key, fields, nil, maxEntries, indexOnly); err != nil {
-		return err
-	}
+
 	// Register the DisplayName index for avoiding name collisions
-	// FIXME this needs to be updated for the new login system
-	name = DisplayNameHistoryCacheIndex
-	collection = DisplayNameCollection
-	key = DisplayNameHistoryKey                      // Set to empty string to match all keys instead
-	fields = []string{"active", "reserved", "cache"} // index on these fields
-	maxEntries = 1000000
-	if err := initializer.RegisterStorageIndex(name, collection, key, fields, nil, maxEntries, indexOnly); err != nil {
+
+	if err := initializer.RegisterStorageIndex(
+		DisplayNameHistoryCacheIndex,
+		DisplayNameCollection,
+		DisplayNameHistoryKey,
+		[]string{"active", "reserved", "cache"},
+		nil,
+		1000000,
+		false,
+	); err != nil {
 		return err
 	}
 
-	name = GhostedUsersIndex
-	collection = GameProfileStorageCollection
-	key = GameProfileStorageKey             // Set to empty string to match all keys instead
-	fields = []string{"client.ghost.users"} // index on these fields
-	maxEntries = 1000000
-	if err := initializer.RegisterStorageIndex(name, collection, key, fields, nil, maxEntries, indexOnly); err != nil {
+	if err := initializer.RegisterStorageIndex(
+		GhostedUsersIndex,
+		GameProfileStorageCollection,
+		GameProfileStorageKey,
+		[]string{"client.ghost.users"},
+		nil,
+		1000000,
+		false,
+	); err != nil {
 		return err
 	}
 
-	name = ActiveSocialGroupIndex
-	collection = GameProfileStorageCollection
-	key = GameProfileStorageKey              // Set to empty string to match all keys instead
-	fields = []string{"client.social.group"} // index on these fields
-	maxEntries = 100000
-	if err := initializer.RegisterStorageIndex(name, collection, key, fields, nil, maxEntries, indexOnly); err != nil {
+	if err := initializer.RegisterStorageIndex(
+		ActiveSocialGroupIndex,
+		GameProfileStorageCollection,
+		GameProfileStorageKey,
+		[]string{"client.social.group"},
+		nil,
+		100000,
+		false,
+	); err != nil {
 		return err
 	}
 
-	name = ActivePartyGroupIndex
-	collection = MatchmakerStorageCollection
-	key = MatchmakingConfigStorageKey // Set to empty string to match all keys instead
-	fields = []string{"group_id"}     // index on these fields
-	maxEntries = 100000
-	if err := initializer.RegisterStorageIndex(name, collection, key, fields, nil, maxEntries, indexOnly); err != nil {
+	if err := initializer.RegisterStorageIndex(
+		ActivePartyGroupIndex,
+		MatchmakerStorageCollection,
+		MatchmakingConfigStorageKey,
+		[]string{"group_id"},
+		nil,
+		100000,
+		false,
+	); err != nil {
+		return err
+	}
+
+	if err := initializer.RegisterStorageIndex(
+		LoginHistoryCacheIndex,
+		LoginStorageCollection,
+		LoginHistoryStorageKey,
+		[]string{"cache", "xpis", "client_ips", "alternates"},
+		nil,
+		1000000,
+		false,
+	); err != nil {
 		return err
 	}
 
@@ -792,10 +809,10 @@ func GetAccountMetadata(ctx context.Context, nk runtime.NakamaModule, userID str
 }
 
 func GetUserIDByEvrID(ctx context.Context, db *sql.DB, evrID string) (string, error) {
-	query := "SELECT user_id FROM storage WHERE collection = $1 AND key = $2 ORDER BY update_time DESC LIMIT 1"
+	query := "SELECT user_id FROM storage s WHERE collection = $1 AND key = $2 AND s.value->'server'->>'xplatformid' = $3 ORDER BY update_time DESC LIMIT 1"
 	var dbUserID string
 	var found = true
-	err := db.QueryRowContext(ctx, query, EvrLoginStorageCollection, evrID).Scan(&dbUserID)
+	err := db.QueryRowContext(ctx, query, GameProfileStorageCollection, GameProfileStorageKey, evrID).Scan(&dbUserID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			found = false
