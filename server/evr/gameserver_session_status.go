@@ -1,8 +1,10 @@
 package evr
 
 import (
+	"encoding/base64"
 	"encoding/binary"
-	"encoding/json"
+	"fmt"
+	"log"
 
 	"github.com/gofrs/uuid/v5"
 )
@@ -18,39 +20,25 @@ func (m *EchoToolsLobbySessionDataV1) Stream(s *EasyStream) error {
 }
 
 type EntrantData struct {
-	XPlatformId      EvrId
-	PlatformId       Symbol
-	UniqueName       []byte
-	DisplayName      []byte
-	SfwDisplayName   []byte
-	Censored         int32
-	Owned            bool
-	Dirty            bool
-	CrossplayEnabled bool
-	Unused           uint16
-	Ping             uint16
-	GenIndex         uint16
-	TeamIndex        uint16
-	Json             json.RawMessage
+	XPlatformId EvrId
+	TeamIndex   uint16
+	Ping        uint16
+}
+
+func (m *EntrantData) String() string {
+	return fmt.Sprintf("%T(%v, %d, %d)", m, m.XPlatformId, m.TeamIndex, m.Ping)
+}
+
+func (m *EntrantData) SizeOf() int {
+	return SizeOf(EntrantData{})
 }
 
 func (m *EntrantData) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
-
-		func() error { return s.StreamStruct(&m.XPlatformId) },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.PlatformId) },
-		func() error { return s.StreamBytes(&m.UniqueName, 32) },
-		func() error { return s.StreamBytes(&m.DisplayName, 32) },
-		func() error { return s.StreamBytes(&m.SfwDisplayName, 32) },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.Censored) },
-		func() error { return s.StreamBool(&m.Owned) },
-		func() error { return s.StreamBool(&m.Dirty) },
-		func() error { return s.StreamBool(&m.CrossplayEnabled) },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.Unused) },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.Ping) },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.GenIndex) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.XPlatformId.AccountId) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.XPlatformId.PlatformCode) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.TeamIndex) },
-		func() error { return s.StreamJSONRawMessage(&m.Json, true, NoCompression) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.Ping) },
 	})
 }
 
@@ -70,21 +58,32 @@ func (m *EchoToolsLobbyStatusV1) Stream(s *EasyStream) error {
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.TimeStepUsecs) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.TickCount) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &numSlots) },
-		/*
-			func() error {
-				return nil
-				if s.Mode == DecodeMode {
-					m.Slots = make([]*EntrantData, numSlots)
+
+		func() error {
+
+			if s.Mode == DecodeMode {
+				m.Slots = make([]*EntrantData, numSlots)
+			}
+
+			for i := range m.Slots {
+				m.Slots[i] = &EntrantData{}
+				log.Printf("Stream EntrantData[%d] (%d): %d/%d", i, SizeOf(EntrantData{}), s.Position(), s.Len())
+
+				log.Printf("entrantdata: %v", m.Slots[i])
+				if s.Len() < SizeOf(EntrantData{}) {
+					m.Slots = m.Slots[:i]
+					return nil
 				}
-				for i := range m.Slots {
-					slot := EntrantData{}
-					if err := s.StreamStruct(&slot); err != nil {
-						return err
-					}
-					m.Slots[i] = &slot
+				if err := s.StreamStruct(m.Slots[i]); err != nil {
+					return err
 				}
-				return nil
-			},
-		*/
+				log.Printf("%v", m.Slots[i])
+			}
+			return nil
+		},
 	})
+}
+
+func (m *EchoToolsLobbyStatusV1) String() string {
+	return fmt.Sprintf("%T(%s, %d, %d, %d)", m, m.LobbySessionID, m.TimeStepUsecs, m.TickCount, len(m.Slots))
 }

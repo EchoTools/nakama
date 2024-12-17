@@ -141,7 +141,7 @@ func MessageTypeHash(msg Message) uint64 {
 		return 0x6fe3fd47131b6713
 	case *EchoToolsLobbyEntrantNewV1:
 		return 0x66b54df504afebcd
-	case *EchoToolsLobbyEntrantAcceptV1:
+	case *EchoToolsLobbyEntrantAllowV1:
 		return 0x174e85ca13e1a637
 	case *EchoToolsLobbyEntrantRejectV1:
 		return 0x04488cca00e1a637
@@ -300,7 +300,7 @@ func NewMessageFromHash(hash uint64) Message {
 	case 0x66b54df504afebcd:
 		return &EchoToolsLobbyEntrantNewV1{}
 	case 0x174e85ca13e1a637:
-		return &EchoToolsLobbyEntrantAcceptV1{}
+		return &EchoToolsLobbyEntrantAllowV1{}
 	case 0x04488cca00e1a637:
 		return &EchoToolsLobbyEntrantRejectV1{}
 	case 0xe5ef595892ea3d99:

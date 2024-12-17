@@ -2,6 +2,7 @@ package evr
 
 import (
 	"encoding/binary"
+	"reflect"
 
 	"github.com/go-restruct/restruct"
 )
@@ -94,4 +95,33 @@ func Unpack(data []byte) (p *Packet, err error) {
 
 func Pack(p *Packet) (data []byte, err error) {
 	return restruct.Pack(binary.LittleEndian, p)
+}
+
+func SizeOf(v interface{}) int {
+	val := reflect.ValueOf(v)
+	return int(sizeOfValue(val))
+}
+
+func sizeOfValue(val reflect.Value) uintptr {
+	switch val.Kind() {
+	case reflect.Ptr, reflect.Interface:
+		if val.IsNil() {
+			return 0
+		}
+		return sizeOfValue(val.Elem())
+	case reflect.Struct:
+		var size uintptr
+		for i := 0; i < val.NumField(); i++ {
+			size += sizeOfValue(val.Field(i))
+		}
+		return size
+	case reflect.Array, reflect.Slice:
+		var size uintptr
+		for i := 0; i < val.Len(); i++ {
+			size += sizeOfValue(val.Index(i))
+		}
+		return size
+	default:
+		return val.Type().Size()
+	}
 }
