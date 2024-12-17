@@ -53,44 +53,28 @@ func errFailedRegistration(session *sessionWS, logger *zap.Logger, err error, co
 	return fmt.Errorf("failed to register game server: %w", err)
 }
 
-func (p *EvrPipeline) broadcasterRegistrationRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	request := in.(*evr.BroadcasterRegistrationRequest)
-
-	if session.userID.IsNil() {
-		return errFailedRegistration(session, logger, errors.New("game servers must authenticate with discordID/password auth"), evr.BroadcasterRegistration_Unknown)
-	}
-
-	return p.gameServerRegistration(ctx, logger, session, request.ServerId, request.InternalIP, request.Port, request.Region, request.VersionLock, 0, false)
-}
-
-func (p *EvrPipeline) echoToolsGameServerRegistrationRequestV1(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
+func (p *EvrPipeline) gameserverRegistrationRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.EchoToolsGameServerRegistrationRequestV1)
 
-	// This new message type includes extra fields and can identify itself with a login session.
-	if request.LoginSessionID == uuid.Nil {
-		return errFailedRegistration(session, logger, errors.New("missing login session ID"), evr.BroadcasterRegistration_Unknown)
-	}
+	isNative := false
+	if request.LoginSessionID != uuid.Nil {
+		isNative = true
 
-	logger.Info("Game server registration request", zap.String("login_session_id", request.LoginSessionID.String()), zap.Uint64("server_id", request.ServerID), zap.String("internal_ip", request.InternalIP.String()), zap.Uint16("port", request.Port), zap.String("region", request.RegionHash.String()), zap.Uint64("version_lock", request.VersionLock), zap.Uint32("time_step_usecs", request.TimeStepUsecs))
-	// Get the login session ID
-	loginSession := p.sessionRegistry.Get(request.LoginSessionID)
-	if loginSession == nil {
-		return errFailedRegistration(session, logger, errors.New("failed to get login session"), evr.BroadcasterRegistration_Unknown)
-	}
+		logger.Info("Game server registration request", zap.String("login_session_id", request.LoginSessionID.String()), zap.Uint64("server_id", request.ServerID), zap.String("internal_ip", request.InternalIP.String()), zap.Uint16("port", request.Port), zap.String("region", request.RegionHash.String()), zap.Uint64("version_lock", request.VersionLock), zap.Uint32("time_step_usecs", request.TimeStepUsecs))
+		// Get the login session ID
+		loginSession := p.sessionRegistry.Get(request.LoginSessionID)
+		if loginSession == nil {
+			return errFailedRegistration(session, logger, errors.New("failed to get login session"), evr.BroadcasterRegistration_Unknown)
+		}
 
-	if err := session.Secondary(loginSession.(*sessionWS), true, false); err != nil {
-		return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_Unknown)
+		if err := session.Secondary(loginSession.(*sessionWS), true, false); err != nil {
+			return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_Unknown)
+		}
 	}
 
 	if session.userID.IsNil() {
 		return errFailedRegistration(session, logger, errors.New("game server is not authenticated."), evr.BroadcasterRegistration_Unknown)
 	}
-
-	return p.gameServerRegistration(ctx, logger, session, request.ServerID, request.InternalIP, request.Port, request.RegionHash, request.VersionLock, request.TimeStepUsecs, true)
-}
-
-func (p *EvrPipeline) gameServerRegistration(ctx context.Context, logger *zap.Logger, session *sessionWS, serverID uint64, internalIP net.IP, listenPort uint16, region evr.Symbol, versionLock uint64, timeStepUsecs uint32, isNative bool) error {
-
 	discordId := ""
 
 	sessionParams, ok := LoadParams(ctx)
@@ -148,19 +132,19 @@ func (p *EvrPipeline) gameServerRegistration(ctx context.Context, logger *zap.Lo
 		regions = append(regions, evr.DefaultRegion)
 	}
 
-	if region != evr.DefaultRegion {
-		regions = append(regions, region)
+	if request.RegionHash != evr.DefaultRegion {
+		regions = append(regions, request.RegionHash)
 	}
 
 	logger = logger.With(zap.String("discord_id", discordId), zap.Strings("group_ids", groupIDs), zap.Strings("tags", sessionParams.ServerTags), zap.Strings("regions", lo.Map(regions, func(v evr.Symbol, _ int) string { return v.String() })))
 
 	// Add the server id as a region
-	regions = append(regions, evr.ToSymbol(serverID))
+	regions = append(regions, evr.ToSymbol(request.ServerID))
 
 	slices.Sort(regions)
 	regions = slices.Compact(regions)
 
-	err = session.BroadcasterSession(session.userID, "broadcaster:"+session.Username(), serverID)
+	err = session.BroadcasterSession(session.userID, "broadcaster:"+session.Username(), request.ServerID)
 	if err != nil {
 		return fmt.Errorf("failed to create broadcaster session: %w", err)
 	}
@@ -169,7 +153,7 @@ func (p *EvrPipeline) gameServerRegistration(ctx context.Context, logger *zap.Lo
 
 	// Set the external address in the request (to use for the registration cache).
 	externalIP := net.ParseIP(session.ClientIP())
-	externalPort := listenPort
+	externalPort := request.Port
 
 	params, ok := LoadParams(ctx)
 	if !ok {
@@ -199,7 +183,7 @@ func (p *EvrPipeline) gameServerRegistration(ctx context.Context, logger *zap.Lo
 
 	if isPrivateIP(externalIP) {
 		externalIP = p.externalIP
-		logger.Warn("Game Server is on a private IP, using this systems external IP", zap.String("private_ip", internalIP.String()), zap.String("external_ip", externalIP.String()), zap.String("port", fmt.Sprintf("%d", externalPort)))
+		logger.Warn("Game Server is on a private IP, using this systems external IP", zap.String("private_ip", request.InternalIP.String()), zap.String("external_ip", externalIP.String()), zap.String("port", fmt.Sprintf("%d", externalPort)))
 
 	}
 
@@ -209,7 +193,7 @@ func (p *EvrPipeline) gameServerRegistration(ctx context.Context, logger *zap.Lo
 	}
 
 	// Create the broadcaster config
-	config := broadcasterConfig(session.UserID().String(), session.id.String(), serverID, internalIP, externalIP, externalPort, regions, versionLock, params.ServerTags, params.SupportedFeatures, timeStepUsecs, ipqsData, params.GeoHashPrecision, isNative)
+	config := broadcasterConfig(session.UserID().String(), session.id.String(), request.ServerID, request.InternalIP, externalIP, externalPort, regions, request.VersionLock, params.ServerTags, params.SupportedFeatures, request.TimeStepUsecs, ipqsData, params.GeoHashPrecision, isNative)
 
 	// Add the operators userID to the group ids. this allows any host to spawn on a server they operate.
 	groupUUIDs := make([]uuid.UUID, 0, len(groupIDs))
@@ -218,7 +202,7 @@ func (p *EvrPipeline) gameServerRegistration(ctx context.Context, logger *zap.Lo
 	}
 	config.GroupIDs = groupUUIDs
 
-	logger = logger.With(zap.String("internal_ip", internalIP.String()), zap.String("external_ip", externalIP.String()), zap.Uint16("port", externalPort))
+	logger = logger.With(zap.String("internal_ip", request.InternalIP.String()), zap.String("external_ip", externalIP.String()), zap.Uint16("port", externalPort))
 	// Validate connectivity to the broadcaster.
 	// Wait 2 seconds, then check
 
@@ -231,12 +215,10 @@ func (p *EvrPipeline) gameServerRegistration(ctx context.Context, logger *zap.Lo
 	var rtt time.Duration
 	for i := 0; i < retries; i++ {
 		rtt, err = BroadcasterHealthcheck(p.internalIP, config.Endpoint.ExternalIP, int(config.Endpoint.Port), 500*time.Millisecond)
-		logger.Debug("Failed to healthcheck broadcaster on externalIP", zap.String("external_ip", config.Endpoint.ExternalIP.String()), zap.Error(err))
 		if err != nil {
 			// Try the internal IP
 			rtt, err = BroadcasterHealthcheck(p.internalIP, config.Endpoint.InternalIP, int(config.Endpoint.Port), 500*time.Millisecond)
 			if err != nil {
-				logger.Debug("Failed to healthcheck broadcaster on internalIP", zap.String("external_ip", config.Endpoint.InternalIP.String()), zap.Error(err))
 				time.Sleep(500 * time.Millisecond)
 				continue
 			}
@@ -545,31 +527,17 @@ func isPrivateIP(ip net.IP) bool {
 	return false
 }
 
-func (p *EvrPipeline) broadcasterSessionStarted(_ context.Context, logger *zap.Logger, _ *sessionWS, in evr.Message) error {
-	request := in.(*evr.BroadcasterSessionStarted)
+func (p *EvrPipeline) gameserverLobbySessionStarted(_ context.Context, logger *zap.Logger, _ *sessionWS, in evr.Message) error {
+	request := in.(*evr.EchoToolsLobbySessionStartedV1)
 
 	logger.Info("Game session started", zap.String("mid", request.LobbySessionID.String()))
 
 	return nil
 }
 
-// broadcasterSessionEnded is called when the broadcaster has ended the session.
-func (p *EvrPipeline) broadcasterSessionEnded(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	matchID, _, err := GameServerBySessionID(p.runtimeModule, session.ID())
-	if err != nil {
-		logger.Warn("Failed to get broadcaster's match by session ID", zap.Error(err))
-	}
-
-	return p.gameServerLobbySessionEnded(logger, session, matchID.UUID)
-}
-
-func (p *EvrPipeline) echoToolsLobbySessionEndedV1(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
+func (p *EvrPipeline) gameserverLobbySessionEnded(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.EchoToolsLobbySessionEndedV1)
-	return p.gameServerLobbySessionEnded(logger, session, request.LobbySessionID)
-}
-
-func (p *EvrPipeline) gameServerLobbySessionEnded(logger *zap.Logger, session *sessionWS, lobbySessionID uuid.UUID) error {
-	if err := p.runtimeModule.StreamUserLeave(StreamModeMatchAuthoritative, lobbySessionID.String(), "", p.node, session.UserID().String(), session.ID().String()); err != nil {
+	if err := p.runtimeModule.StreamUserLeave(StreamModeMatchAuthoritative, request.LobbySessionID.String(), "", p.node, session.UserID().String(), session.ID().String()); err != nil {
 		logger.Warn("Failed to leave match stream", zap.Error(err))
 	}
 
@@ -600,31 +568,17 @@ func (p *EvrPipeline) gameServerLobbySessionEnded(logger *zap.Logger, session *s
 	return nil
 }
 
-func (p *EvrPipeline) legacyGameServerPlayerAccept(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	request := in.(*evr.GameServerJoinAttempt)
-	matchID, _, err := GameServerBySessionID(p.runtimeModule, session.ID())
-	if err != nil {
-		logger.Warn("Failed to get broadcaster's match by session ID", zap.Error(err))
-	}
-	return p.gameServerLobbyEntrantNew(ctx, logger, session, matchID.UUID, request.EntrantIDs)
-}
+func (p *EvrPipeline) gameserverLobbyEntrantNew(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
+	message := in.(*evr.EchoToolsLobbyEntrantNewV1)
 
-func (p *EvrPipeline) echoToolsLobbyEntrantNewV1(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	request := in.(*evr.EchoToolsLobbyEntrantNewV1)
+	baseLogger := logger.With(zap.String("mid", message.LobbySessionID.String()))
 
-	return p.gameServerLobbyEntrantNew(ctx, logger, session, request.LobbySessionID, request.EntrantIDs)
-}
-
-func (p *EvrPipeline) gameServerLobbyEntrantNew(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbySessionID uuid.UUID, entrantIDs []uuid.UUID) error {
-
-	baseLogger := logger.With(zap.String("mid", lobbySessionID.String()))
-
-	accepted := make([]uuid.UUID, 0, len(entrantIDs))
+	accepted := make([]uuid.UUID, 0, len(message.EntrantIDs))
 	rejected := make([]uuid.UUID, 0)
 
-	matchID, _ := NewMatchID(lobbySessionID, p.node)
+	matchID, _ := NewMatchID(message.LobbySessionID, p.node)
 
-	for _, entrantID := range entrantIDs {
+	for _, entrantID := range message.EntrantIDs {
 		logger := baseLogger.With(zap.String("entrant_id", entrantID.String()))
 
 		presence, err := PresenceByEntrantID(p.runtimeModule, matchID, entrantID)
@@ -668,24 +622,26 @@ func (p *EvrPipeline) gameServerLobbyEntrantNew(ctx context.Context, logger *zap
 	// Only include the message if there are players to accept or reject.
 	messages := []evr.Message{}
 	if len(accepted) > 0 {
-		messages = append(messages, evr.NewGameServerJoinAllowed(accepted...))
+		messages = append(messages,
+			evr.NewGameServerJoinAllowed(accepted...),
+			evr.NewEchoToolsLobbyEntrantAllowV1(accepted...),
+		)
 	}
 
 	if len(rejected) > 0 {
-		messages = append(messages, evr.NewGameServerEntrantRejected(evr.PlayerRejectionReasonBadRequest, rejected...))
+		messages = append(messages,
+			evr.NewGameServerEntrantRejected(evr.PlayerRejectionReasonBadRequest, rejected...),
+			evr.NewEchoToolsLobbyEntrantRejectV1(evr.PlayerRejectionReasonBadRequest, accepted...),
+		)
 	}
 
 	return session.SendEvr(messages...)
 }
 
-// broadcasterPlayerRemoved is called when a player has been removed from the match.
-func (p *EvrPipeline) broadcasterPlayerRemoved(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	message := in.(*evr.GameServerPlayerRemoved)
-	matchID, _, err := GameServerBySessionID(p.runtimeModule, session.ID())
-	if err != nil {
-		logger.Warn("Failed to get broadcaster's match by session ID", zap.Error(err))
-	}
+func (p *EvrPipeline) gameserverLobbyEntrantRemoved(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
+	message := in.(*evr.EchoToolsLobbyEntrantRemovedV1)
 
+	matchID, _ := NewMatchID(message.LobbySessionID, p.node)
 	presence, err := PresenceByEntrantID(p.runtimeModule, matchID, message.EntrantID)
 	if err != nil {
 		if err != ErrEntrantNotFound {
@@ -707,27 +663,31 @@ func (p *EvrPipeline) broadcasterPlayerRemoved(ctx context.Context, logger *zap.
 	return nil
 }
 
-func (p *EvrPipeline) broadcasterPlayerSessionsLocked(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	matchID, _, err := GameServerBySessionID(p.runtimeModule, session.ID())
-	if err != nil {
-		logger.Warn("Failed to get broadcaster's match by session ID", zap.Error(err))
-	}
+func (p *EvrPipeline) gameserverLobbySessionLock(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
+	message := in.(*evr.EchoToolsLobbySessionLockV1)
+
+	matchID, _ := NewMatchID(message.LobbySessionID, p.node)
+
+	// Signal the match to lock the session
 	signal := NewSignalEnvelope(session.userID.String(), SignalLockSession, nil)
 	if _, err := p.matchRegistry.Signal(ctx, matchID.String(), signal.String()); err != nil {
 		logger.Warn("Failed to signal match", zap.Error(err))
 	}
+
 	return nil
 }
 
-func (p *EvrPipeline) broadcasterPlayerSessionsUnlocked(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	matchID, _, err := GameServerBySessionID(p.runtimeModule, session.ID())
-	if err != nil {
-		logger.Warn("Failed to get broadcaster's match by session ID", zap.Error(err))
-	}
+func (p *EvrPipeline) gameserverLobbySessionUnlock(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
+	message := in.(*evr.EchoToolsLobbySessionUnlockV1)
+
+	matchID, _ := NewMatchID(message.LobbySessionID, p.node)
+
+	// Signal the match to lock the session
 	signal := NewSignalEnvelope(session.userID.String(), SignalUnlockSession, nil)
 	if _, err := p.matchRegistry.Signal(ctx, matchID.String(), signal.String()); err != nil {
 		logger.Warn("Failed to signal match", zap.Error(err))
 	}
+
 	return nil
 }
 
@@ -755,15 +715,7 @@ func GameServerBySessionID(nk runtime.NakamaModule, sessionID uuid.UUID) (MatchI
 	return matchID, presence, nil
 }
 
-func (p *EvrPipeline) echoToolsLobbySessionStartedV1(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	request := in.(*evr.EchoToolsLobbySessionStartedV1)
-
-	logger.Info("Lobby session started", zap.String("mid", request.LobbySessionID.String()))
-
-	return nil
-}
-
-func (p *EvrPipeline) echoToolsLobbyStatusV1(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
+func (p *EvrPipeline) gameserverLobbySessionStatus(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.EchoToolsLobbyStatusV1)
 
 	data, err := json.Marshal(request)
