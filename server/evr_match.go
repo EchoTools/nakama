@@ -643,9 +643,8 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 						}
 					}
 				}
-
+				updateLabel = true
 			}
-			updateLabel = true
 		case OpCodeGameServerLobbyStatus:
 
 			lobbyStatus := evr.EchoToolsLobbyStatusV1{}
@@ -741,6 +740,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 			return nil
 		}
 		if err := m.updateLabel(dispatcher, state); err != nil {
+			logger.Error("failed to update label: %v", err)
 			return nil
 		}
 		return state
@@ -764,18 +764,27 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 	}
 
 	// If the arena score is close, then lock later than usual.
-	if state.Open && state.IsLocked() && state.Mode == evr.ModeArenaPublic {
-		// Get the score difference between the teams
-		scoreDiff := int(math.Abs(float64(state.GameState.BlueScore - state.GameState.OrangeScore)))
+	if state.Open && state.IsLocked() {
+		switch state.Mode {
+		case evr.ModeArenaPublic:
+			// Get the score difference between the teams
+			scoreDiff := int(math.Abs(float64(state.GameState.BlueScore - state.GameState.OrangeScore)))
 
-		if scoreDiff > 4 || state.GameState.RoundClock.Current().Seconds() > 240 {
-			logger.Info("Match is over, closing the match.")
+			if scoreDiff > 4 || state.GameState.RoundClock.Current().Seconds() > 240 {
+				logger.Info("Match is over, closing the match.")
+				state.Open = false
+				updateLabel = true
+			}
+		default:
+			logger.Info("Closing the match in response to a lock.")
 			state.Open = false
+			updateLabel = true
 		}
 	}
 
 	if updateLabel {
 		if err := m.updateLabel(dispatcher, state); err != nil {
+			logger.Error("failed to update label: %v", err)
 			return nil
 		}
 	}
@@ -791,7 +800,7 @@ func (m *EvrMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, db
 		return nil
 	}
 	state.Open = false
-	logger.WithField("state", state).Info("MatchTerminate called.")
+	logger.WithField("state", state).Debug("MatchTerminate called.")
 	nk.MetricsCounterAdd("match_terminate_count", state.MetricsTags(), 1)
 	if state.server != nil {
 		// Disconnect the players
