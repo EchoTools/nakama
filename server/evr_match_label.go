@@ -415,6 +415,7 @@ func (l *MatchLabel) PublicView() *MatchLabel {
 			BlueScore:   l.GameState.BlueScore,
 			OrangeScore: l.GameState.OrangeScore,
 			Teams:       l.GameState.Teams,
+			LockedAt:    l.GameState.LockedAt,
 		}
 		if l.GameState.RoundClock != nil {
 			gs.RoundClock = l.GameState.RoundClock.LatestAsNewClock()

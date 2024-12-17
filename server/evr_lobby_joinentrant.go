@@ -86,6 +86,10 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 		err = NewLobbyErrorf(ServerDoesNotExist, "join attempt failed: match not found")
 	} else if labelStr == "" {
 		err = NewLobbyErrorf(ServerDoesNotExist, "join attempt failed: match label empty")
+	} else if reason == ErrJoinRejectDuplicateEvrID.Error() {
+		err = NewLobbyErrorf(BadRequest, "join attempt failed: duplicate evr ID")
+	} else if reason == ErrJoinRejectReasonMatchClosed.Error() {
+		err = NewLobbyErrorf(ServerIsLocked, "join attempt failed: match closed")
 	} else if !allowed {
 		err = NewLobbyErrorf(ServerIsFull, "join attempt failed: not allowed: %s", reason)
 	}
