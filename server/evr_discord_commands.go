@@ -265,13 +265,13 @@ var (
 			},
 		},
 		{
-			Name:        "check-broadcaster",
-			Description: "Check if an EchoVR broadcaster is actively responding on a port.",
+			Name:        "check-server",
+			Description: "Check if an EchoVR game server is actively responding on a port.",
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
 					Name:        "address",
-					Description: "host:port of the broadcaster",
+					Description: "host:port of the game server",
 					Required:    true,
 				},
 			},
@@ -1049,7 +1049,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				},
 			})
 		},
-		"check-broadcaster": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+		"check-server": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 
 			options := i.ApplicationCommandData().Options
 			if len(options) == 0 {
@@ -1146,7 +1146,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				// If a single port is specified, do not scan
 				rtts, err := BroadcasterRTTcheck(localIP, remoteIP, startPort, count, interval, timeout)
 				if err != nil {
-					return fmt.Errorf("failed to healthcheck broadcaster: %w", err)
+					return fmt.Errorf("failed to healthcheck game server: %w", err)
 				}
 				var sum time.Duration
 				// Craft a message that contains the comma-delimited list of the rtts. Use a * for any failed pings (rtt == -1)
@@ -1173,22 +1173,22 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 						Data: &discordgo.InteractionResponseData{
 							Flags:   discordgo.MessageFlagsEphemeral,
-							Content: fmt.Sprintf("Broadcaster %s:%d RTTs (AVG: %.0f): %s", remoteIP, startPort, avgrtt.Seconds()*1000, rttMessage),
+							Content: fmt.Sprintf("game server %s:%d RTTs (AVG: %.0f): %s", remoteIP, startPort, avgrtt.Seconds()*1000, rttMessage),
 						},
 					})
 				} else {
-					return errors.New("no response from broadcaster")
+					return errors.New("no response from game server")
 
 				}
 			} else {
 
-				// Scan the address for responding broadcasters and then return the results as a newline-delimited list of ip:port
+				// Scan the address for responding game servers and then return the results as a newline-delimited list of ip:port
 				responses, _ := BroadcasterPortScan(localIP, remoteIP, 6792, 6820, 500*time.Millisecond)
 				if len(responses) == 0 {
-					return errors.New("no broadcasters are responding")
+					return errors.New("no game servers are responding")
 				}
 
-				// Craft a message that contains the newline-delimited list of the responding broadcasters
+				// Craft a message that contains the newline-delimited list of the responding game servers
 				var b strings.Builder
 				for port, r := range responses {
 					b.WriteString(fmt.Sprintf("%s:%-5d %3.0fms\n", remoteIP, port, r.Seconds()*1000))
@@ -1551,7 +1551,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						fmt.Sprintf("EchoVR lobby changed to **%s**.", guild.Name),
 						"- Matchmaking will prioritize members",
 						"- Social lobbies will contain only members",
-						"- Private matches that you create will prioritize guild's broadcasters/servers.",
+						"- Private matches that you create will prioritize guild's game servers.",
 					}, "\n"),
 				},
 			})
@@ -2403,7 +2403,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					return errors.New("invalid group ID. It must be alphanumeric")
 				}
 				// Validate the group is not a reserved group
-				if lo.Contains([]string{"admin", "moderator", "verified", "broadcaster"}, groupName) {
+				if lo.Contains([]string{"admin", "moderator", "verified", "serverhosts"}, groupName) {
 					return errors.New("invalid group ID. It is a reserved group")
 				}
 				// lowercase the group

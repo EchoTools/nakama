@@ -35,6 +35,7 @@ type LobbySessionRequest interface {
 	GetEntrantRole(idx int) int
 	GetRegion() Symbol
 }
+
 type Entrant struct {
 	EvrID EvrId
 	Role  int8 // -1 for any team

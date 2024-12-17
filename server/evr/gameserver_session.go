@@ -57,6 +57,8 @@ type EchoToolsLobbyEntrantNewV1 struct {
 }
 
 func (m *EchoToolsLobbyEntrantNewV1) Stream(s *EasyStream) error {
+	// Print out the base64 encoded bytes
+
 	numEntrants := uint64(len(m.EntrantIDs))
 	return RunErrorFunctions([]func() error{
 		func() error { return s.StreamGUID(&m.LobbySessionID) },
@@ -70,17 +72,59 @@ func (m *EchoToolsLobbyEntrantNewV1) Stream(s *EasyStream) error {
 	})
 }
 
-type EchoToolsLobbyEntrantAcceptV1 struct {
-	GameServerJoinAllowed
+type EchoToolsLobbyEntrantAllowV1 struct {
+	EntrantIDs []uuid.UUID
+}
+
+func NewEchoToolsLobbyEntrantAllowV1(entrantIDs ...uuid.UUID) *EchoToolsLobbyEntrantAllowV1 {
+	return &EchoToolsLobbyEntrantAllowV1{EntrantIDs: entrantIDs}
+}
+
+func (m *EchoToolsLobbyEntrantAllowV1) Stream(s *EasyStream) error {
+	return RunErrorFunctions([]func() error{
+		func() error { return s.Skip(1) },
+		func() error {
+			if s.Mode == DecodeMode {
+				m.EntrantIDs = make([]uuid.UUID, s.Len()/16)
+			}
+			return s.StreamGUIDs(&m.EntrantIDs)
+		},
+	})
 }
 
 type EchoToolsLobbyEntrantRejectV1 struct {
-	GameServerJoinRejected
+	ErrorCode  PlayerRejectionReason
+	EntrantIDs []uuid.UUID
+}
+
+func NewEchoToolsLobbyEntrantRejectV1(errorCode PlayerRejectionReason, entrantIDs ...uuid.UUID) *EchoToolsLobbyEntrantRejectV1 {
+	return &EchoToolsLobbyEntrantRejectV1{ErrorCode: errorCode, EntrantIDs: entrantIDs}
+}
+
+func (m *EchoToolsLobbyEntrantRejectV1) Stream(s *EasyStream) error {
+	numEntrants := uint64(len(m.EntrantIDs))
+	return RunErrorFunctions([]func() error{
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.ErrorCode) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &numEntrants) },
+		func() error {
+			if s.Mode == DecodeMode {
+				m.EntrantIDs = make([]uuid.UUID, numEntrants)
+			}
+			return s.StreamGUIDs(&m.EntrantIDs)
+		},
+	})
 }
 
 type EchoToolsLobbyEntrantRemovedV1 struct {
-	GameServerPlayerRemoved
+	EntrantID      uuid.UUID
 	LobbySessionID uuid.UUID
+}
+
+func (m *EchoToolsLobbyEntrantRemovedV1) Stream(s *EasyStream) error {
+	return RunErrorFunctions([]func() error{
+		func() error { return s.StreamGUID(&m.EntrantID) },
+		func() error { return s.StreamGUID(&m.LobbySessionID) },
+	})
 }
 
 type EchoToolsGameServerRegistrationRequestV1 struct {

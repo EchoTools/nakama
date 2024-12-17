@@ -95,7 +95,7 @@ var (
 		0xa2a42bc683ebb3fd: (*EchoToolsLobbySessionLockV1)(nil),
 		0x6fe3fd47131b6713: (*EchoToolsLobbySessionUnlockV1)(nil),
 		0x66b54df504afebcd: (*EchoToolsLobbyEntrantNewV1)(nil),
-		0x174e85ca13e1a637: (*EchoToolsLobbyEntrantAcceptV1)(nil),
+		0x174e85ca13e1a637: (*EchoToolsLobbyEntrantAllowV1)(nil),
 		0x04488cca00e1a637: (*EchoToolsLobbyEntrantRejectV1)(nil),
 		0xe5ef595892ea3d99: (*EchoToolsLobbyEntrantRemovedV1)(nil),
 		0xa2a423c894e1b3fd: (*EchoToolsLobbySessionDataV1)(nil),
