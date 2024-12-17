@@ -1,10 +1,17 @@
 package server
 
 import (
+	"regexp"
 	"strings"
 	"time"
 
 	anyascii "github.com/anyascii/go"
+)
+
+var (
+	DisplayNameFilterRegex       = regexp.MustCompile(`[^-0-9A-Za-z_\[\] ]`)
+	DisplayNameMatchRegex        = regexp.MustCompile(`[A-Za-z]`)
+	DisplayNameFilterScoreSuffix = regexp.MustCompile(`\s\(\d+\)\s\[\d+\.\d+%]`)
 )
 
 type SuspensionStatus struct {

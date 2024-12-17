@@ -330,18 +330,20 @@ func (r *ProfileRegistry) UpdateClientProfile(ctx context.Context, logger *zap.L
 // A fast lookup of existing profile data
 func StorageReadEVRProfileByXPI(ctx context.Context, db *sql.DB, evrID evr.EvrId) (string, json.RawMessage, error) {
 	query := `
-	SELECT s2.user_id, s2.value->>'server' FROM storage s1, storage s2 
+	SELECT 
+		s.user_id, s.value->>'server' 
+	FROM 
+		storage s
 	WHERE 
-		s1.user_id = s2.user_id 
-		AND s1.collection = $1 AND s1.key = $2
-		AND s2.collection = $3 AND s2.key = $4
-		AND s2.value->'server'->>'xplatformid' = $2
-	ORDER BY s2.update_time DESC LIMIT 1;`
+		s.collection = $1 AND s.key = $2
+		AND 
+		s.value->'server'->>'xplatformid' = $3
+	ORDER BY s.update_time DESC LIMIT 1;`
 
 	var dbUserID string
 	var dbServerProfile string
 	var found = true
-	if err := db.QueryRowContext(ctx, query, EvrLoginStorageCollection, evrID.String(), GameProfileStorageCollection, GameProfileStorageKey).Scan(&dbUserID, &dbServerProfile); err != nil {
+	if err := db.QueryRowContext(ctx, query, GameProfileStorageCollection, GameProfileStorageKey, evrID.String()).Scan(&dbUserID, &dbServerProfile); err != nil {
 		if err == sql.ErrNoRows {
 			found = false
 		} else {

@@ -329,8 +329,7 @@ func (c *DiscordCache) SyncUser(ctx context.Context, userID string) error {
 	}
 
 	if update {
-		displayName := md.GetActiveGroupDisplayName()
-		if err := c.nk.AccountUpdateId(ctx, account.User.Id, member.User.Username, md.MarshalMap(), displayName, "", "", langTag, member.User.AvatarURL("512")); err != nil {
+		if err := c.nk.AccountUpdateId(ctx, account.User.Id, member.User.Username, md.MarshalMap(), "", "", "", langTag, member.User.AvatarURL("512")); err != nil {
 			return fmt.Errorf("failed to update account: %w", err)
 		}
 	}
@@ -426,7 +425,7 @@ func (c *DiscordCache) SyncGuildGroupMember(ctx context.Context, userID, groupID
 			accountMetadata.SetGroupDisplayName(groupID, displayName)
 		}
 
-		if err := c.nk.AccountUpdateId(ctx, userID, member.User.Username, accountMetadata.MarshalMap(), accountMetadata.GetActiveGroupDisplayName(), "", "", "", ""); err != nil {
+		if err := c.nk.AccountUpdateId(ctx, userID, member.User.Username, accountMetadata.MarshalMap(), "", "", "", "", member.User.Avatar); err != nil {
 			return fmt.Errorf("failed to update account: %w", err)
 		}
 

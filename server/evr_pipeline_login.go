@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	EvrIDStorageIndex            = "EvrIDs_Index"
+	XPIStorageIndex              = "EvrIDs_Index"
 	GameClientSettingsStorageKey = "clientSettings"
 	GamePlayerSettingsStorageKey = "playerSettings"
 	DocumentStorageCollection    = "GameDocuments"
@@ -107,15 +107,17 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	params.LoginSession.Store(session)
 	params.EvrID = evrID
 
+	deviceAuthID := NewDeviceAuth(payload.AppId, request.EvrId, hmdsn, session.clientIP)
+
 	var account *api.Account
 	if session.userID.IsNil() {
 		// Construct the device auth token from the login payload
-		deviceId := NewDeviceAuth(payload.AppId, request.EvrId, hmdsn, session.clientIP)
 
-		account, err = p.authenticateAccount(ctx, logger, session, deviceId, params.AuthDiscordID, params.AuthPassword, payload)
+		account, err = p.authenticateAccount(ctx, logger, session, deviceAuthID, params.AuthDiscordID, params.AuthPassword, payload)
 		if err != nil {
 			return settings, err
 		}
+
 	} else {
 		account, err = GetAccount(ctx, logger, p.db, session.statusRegistry, session.userID)
 		if err != nil {
@@ -126,11 +128,21 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	if account == nil {
 		return settings, fmt.Errorf("account not found")
 	}
+
 	user := account.GetUser()
 	userID := user.GetId()
 	uid := uuid.FromStringOrNil(user.GetId())
 
 	params.DiscordID = p.discordCache.UserIDToDiscordID(userID)
+
+	// Migrate any account data
+	if err := MigrateDeviceHistory(ctx, p.runtimeModule, p.db, userID); err != nil {
+		logger.Warn("Failed to migrate device history", zap.Error(err))
+	}
+
+	if err := LoginHistoryUpdate(ctx, p.runtimeModule, userID, *deviceAuthID, &payload); err != nil {
+		logger.Warn("Failed to set login history", zap.Error(err))
+	}
 
 	// Get the user's metadata
 	metadata, err := GetAccountMetadata(ctx, p.runtimeModule, userID)
@@ -149,13 +161,6 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		// Check if the user is the owner of the EVR-ID
 		if otherLogins[0].UserID != uuid.FromStringOrNil(userID) {
 			session.logger.Warn("EVR-ID is already in use", zap.String("evrId", evrID.Token()), zap.String("userId", userID))
-		}
-	}
-
-	// If user ID is not empty, write out the login payload to storage.
-	if userID != "" {
-		if err := writeAuditObjects(ctx, session, userID, evrID.Token(), payload); err != nil {
-			session.logger.Warn("Failed to write audit objects", zap.Error(err))
 		}
 	}
 
@@ -276,8 +281,8 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	if err := DisplayNameHistorySet(ctx, p.runtimeModule, userID, groupID.String(), displayName); err != nil {
 		logger.Warn("Failed to set display name history", zap.Error(err))
 	}
-
-	if err := p.runtimeModule.AccountUpdateId(ctx, userID, "", metadata.MarshalMap(), displayName, "", "", "", ""); err != nil {
+	// Update the user's metadata
+	if err := p.runtimeModule.AccountUpdateId(ctx, userID, "", metadata.MarshalMap(), metadata.GetActiveGroupDisplayName(), "", "", "", ""); err != nil {
 		return settings, fmt.Errorf("failed to update user metadata: %w", err)
 	}
 
@@ -315,7 +320,7 @@ type EvrIDHistory struct {
 func (p *EvrPipeline) checkEvrIDOwner(ctx context.Context, evrId evr.EvrId) ([]EvrIDHistory, error) {
 
 	// Check the storage index for matching evrIDs
-	objectIds, _, err := p.storageIndex.List(ctx, uuid.Nil, EvrIDStorageIndex, fmt.Sprintf("+value.server.xplatformid:%s", evrId.String()), 1, nil, "")
+	objectIds, _, err := p.storageIndex.List(ctx, uuid.Nil, XPIStorageIndex, fmt.Sprintf("+value.server.xplatformid:%s", evrId.String()), 1, nil, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to list evrIDs: %w", err)
 	}
@@ -416,43 +421,6 @@ func (p *EvrPipeline) authenticateAccount(ctx context.Context, logger *zap.Logge
 	return account, errors.New(msg)
 }
 
-func writeAuditObjects(ctx context.Context, session *sessionWS, userId string, evrIdToken string, payload evr.LoginProfile) error {
-	// Write logging/auditing storage objects.
-	loginPayloadJson, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("error marshalling login payload: %w", err)
-	}
-	data := string(loginPayloadJson)
-	perm := &wrapperspb.Int32Value{Value: int32(0)}
-	ops := StorageOpWrites{
-		{
-			OwnerID: userId,
-			Object: &api.WriteStorageObject{
-				Collection:      EvrLoginStorageCollection,
-				Key:             evrIdToken,
-				Value:           data,
-				PermissionRead:  perm,
-				PermissionWrite: perm,
-			},
-		},
-		{
-			OwnerID: userId,
-			Object: &api.WriteStorageObject{
-				Collection:      ClientAddrStorageCollection,
-				Key:             session.clientIP,
-				Value:           string(loginPayloadJson),
-				PermissionRead:  perm,
-				PermissionWrite: perm,
-			},
-		},
-	}
-	_, _, err = StorageWriteObjects(ctx, session.logger, session.pipeline.db, session.metrics, session.storageIndex, true, ops)
-	if err != nil {
-		return fmt.Errorf("failed to write objects: %w", err)
-	}
-	return nil
-}
-
 func (p *EvrPipeline) channelInfoRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	_ = in.(*evr.ChannelInfoRequest)
 
@@ -527,10 +495,6 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 		params.IsGlobalDeveloper.Store(true)
 	}
 
-	if params.EvrID != request.EvrID {
-		return fmt.Errorf("evrId mismatch: %s != %s", params.EvrID.Token(), request.EvrID.Token())
-	}
-
 	profile, err := p.profileRegistry.Load(ctx, session.userID)
 	if err != nil {
 		return session.SendEvr(evr.NewLoggedInUserProfileFailure(request.EvrID, 400, "failed to load game profiles"))
@@ -556,27 +520,20 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 func (p *EvrPipeline) updateClientProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.UpdateClientProfile)
 
-	params, ok := LoadParams(ctx)
-	if !ok {
-		return errors.New("session parameters not found")
-	}
-
-	evrID := request.ClientProfile.EvrID
-
-	if params.EvrID != evrID {
-		return fmt.Errorf("evrId mismatch: %s != %s", params.EvrID.Token(), evrID.Token())
+	if !request.EvrId.Equals(request.ClientProfile.EvrID) {
+		return fmt.Errorf("xpi mismatch: %s != %s", request.ClientProfile.EvrID.Token(), request.EvrId.Token())
 	}
 
 	go func() {
-		if err := p.handleClientProfileUpdate(ctx, logger, session, evrID, request.ClientProfile); err != nil {
-			if err := session.SendEvr(evr.NewUpdateProfileFailure(evrID, uint64(400), err.Error())); err != nil {
+		if err := p.handleClientProfileUpdate(ctx, logger, session, request.EvrId, request.ClientProfile); err != nil {
+			if err := session.SendEvr(evr.NewUpdateProfileFailure(request.EvrId, uint64(400), err.Error())); err != nil {
 				logger.Error("Failed to send UpdateProfileFailure", zap.Error(err))
 			}
 		}
 	}()
 
 	// Send the profile update to the client
-	return session.SendEvrUnrequire(evr.NewSNSUpdateProfileSuccess(&evrID))
+	return session.SendEvrUnrequire(evr.NewSNSUpdateProfileSuccess(&request.EvrId))
 }
 
 func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap.Logger, session *sessionWS, evrID evr.EvrId, update evr.ClientProfile) error {
