@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -47,19 +48,13 @@ func (d *DiscordAppBot) syncLinkedRoles(ctx context.Context, userID string) erro
 	return nil
 }
 
-func (d *DiscordAppBot) handleInteractionCreate(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, commandName string, commandFn DiscordCommandHandlerFn) error {
+func (d *DiscordAppBot) handleInteractionApplicationCommand(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, commandName string, commandFn DiscordCommandHandlerFn) error {
 	ctx := d.ctx
 
 	user, member := getScopedUserMember(i)
 
 	if user == nil {
 		return fmt.Errorf("user is nil")
-	}
-	// Check if the interaction is a command
-	if i.Type != discordgo.InteractionApplicationCommand {
-		// Handle the command
-		logger.WithField("type", i.Type).Warn("Unhandled interaction type")
-		return nil
 	}
 
 	var err error
@@ -142,6 +137,86 @@ func (d *DiscordAppBot) handleInteractionCreate(logger runtime.Logger, s *discor
 	}
 
 	return commandFn(logger, s, i, user, member, userID, groupID)
+}
+
+func (d *DiscordAppBot) handleInteractionMessageComponent(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, commandName, value string) error {
+	ctx := d.ctx
+	nk := d.nk
+	user, member := getScopedUserMember(i)
+
+	if user == nil {
+		return fmt.Errorf("user is nil")
+	}
+	_, _ = user, member
+
+	userID := d.cache.DiscordIDToUserID(user.ID)
+	groupID := d.cache.GuildIDToGroupID(i.GuildID)
+
+	_ = groupID
+
+	switch commandName {
+	case "approve_ip":
+		ip := net.ParseIP(value)
+		if ip == nil {
+			return simpleInteractionResponse(s, i, "Invalid IP address.")
+		}
+
+		history, err := LoginHistoryLoad(ctx, nk, userID)
+		if err != nil {
+			return fmt.Errorf("failed to load login history: %w", err)
+		}
+		history.AuthorizeIP(ip.String())
+
+		if err := LoginHistoryStore(ctx, nk, userID, history); err != nil {
+			return fmt.Errorf("failed to save login history: %w", err)
+		}
+
+		// Modify the message
+		message, err := s.ChannelMessage(i.ChannelID, i.Message.ID)
+		if err != nil {
+			return fmt.Errorf("failed to get message: %w", err)
+		}
+
+		message.Components = []discordgo.MessageComponent{
+			discordgo.ActionsRow{
+				Components: []discordgo.MessageComponent{
+					discordgo.Button{
+						Label:    "Approved",
+						Style:    discordgo.SuccessButton,
+						CustomID: "nil",
+						Disabled: true,
+					},
+					discordgo.Button{
+						Label:    "Report",
+						Style:    discordgo.LinkButton,
+						URL:      "https://echovrce.com/report",
+						Disabled: false,
+					},
+				},
+			},
+		}
+		if _, err := s.ChannelMessageEditComplex(&discordgo.MessageEdit{
+			ID:              i.Message.ID,
+			Channel:         i.ChannelID,
+			Embeds:          &message.Embeds,
+			Components:      &message.Components,
+			AllowedMentions: &discordgo.MessageAllowedMentions{},
+		}); err != nil {
+			return fmt.Errorf("failed to edit message: %w", err)
+		}
+
+		if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: fmt.Sprintf("Approved IP address `%s`.\n### Please restart the game to play.", ip),
+			},
+		}); err != nil {
+			return fmt.Errorf("failed to respond to interaction: %w", err)
+		}
+		return err
+	}
+
+	return nil
 }
 
 func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.Logger, userID, guildID string, region, mode, level evr.Symbol, startTime time.Time) (l *MatchLabel, rtt float64, err error) {

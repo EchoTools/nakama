@@ -29,22 +29,18 @@ var (
 )
 
 type LoginHistoryEntry struct {
-	UpdatedAt  time.Time         `json:"update_time"`
-	DeviceAuth DeviceAuth        `json:"device_auth"`
-	LoginData  *evr.LoginProfile `json:"login_data"`
+	UpdatedAt time.Time         `json:"update_time"`
+	XPID      evr.EvrId         `json:"xpi"`
+	ClientIP  string            `json:"client_ip"`
+	LoginData *evr.LoginProfile `json:"login_data"`
+}
+
+func (h *LoginHistoryEntry) Key() string {
+	return h.XPID.Token() + ":" + h.ClientIP
 }
 
 func (h *LoginHistoryEntry) SystemProfile() string {
-	components := []string{
-		h.LoginData.SystemInfo.HeadsetType,
-		h.LoginData.SystemInfo.NetworkType,
-		h.LoginData.SystemInfo.VideoCard,
-		h.LoginData.SystemInfo.CPUModel,
-		fmt.Sprintf("%d", h.LoginData.SystemInfo.NumPhysicalCores),
-		fmt.Sprintf("%d", h.LoginData.SystemInfo.NumLogicalCores),
-		fmt.Sprintf("%d", h.LoginData.SystemInfo.MemoryTotal),
-		fmt.Sprintf("%d", h.LoginData.SystemInfo.DedicatedGPUMemory),
-	}
+	components := []string{h.LoginData.SystemInfo.HeadsetType, h.LoginData.SystemInfo.NetworkType, h.LoginData.SystemInfo.VideoCard, h.LoginData.SystemInfo.CPUModel, fmt.Sprintf("%d", h.LoginData.SystemInfo.NumPhysicalCores), fmt.Sprintf("%d", h.LoginData.SystemInfo.NumLogicalCores), fmt.Sprintf("%d", h.LoginData.SystemInfo.MemoryTotal), fmt.Sprintf("%d", h.LoginData.SystemInfo.DedicatedGPUMemory)}
 
 	for i := range components {
 		components[i] = strings.ReplaceAll(components[i], "::", ";")
@@ -58,6 +54,7 @@ type LoginHistory struct {
 	Cache            []string                      `json:"cache"`   // list of IP addresses, EvrID's, HMD Serial Numbers, and System Data
 	XPIs             map[string]time.Time          `json:"xpis"`    // list of XPIs
 	ClientIPs        map[string]time.Time          `json:"client_ips"`
+	AuthorizedIPs    map[string]time.Time          `json:"authorized_ips"`
 	AlternateUserIDs []string                      `json:"alternates"`
 	version          string                        // storage record version
 }
@@ -68,21 +65,23 @@ func NewLoginHistory() *LoginHistory {
 		Cache:            make([]string, 0),
 		XPIs:             make(map[string]time.Time),
 		ClientIPs:        make(map[string]time.Time),
+		AuthorizedIPs:    make(map[string]time.Time),
 		AlternateUserIDs: make([]string, 0),
 	}
 }
 
 // Returns true if the display name history was updated
-func (h *LoginHistory) Update(deviceAuth DeviceAuth, loginData *evr.LoginProfile) {
+func (h *LoginHistory) Update(xpid evr.EvrId, clientIP string, loginData *evr.LoginProfile) {
 	if h.History == nil {
 		h.History = make(map[string]*LoginHistoryEntry)
 	}
-
-	h.History[deviceAuth.Token()] = &LoginHistoryEntry{
-		UpdatedAt:  time.Now(),
-		DeviceAuth: deviceAuth,
-		LoginData:  loginData,
+	e := &LoginHistoryEntry{
+		UpdatedAt: time.Now(),
+		XPID:      xpid,
+		ClientIP:  clientIP,
+		LoginData: loginData,
 	}
+	h.History[e.Key()] = e
 }
 
 func (h *LoginHistory) Insert(entry *LoginHistoryEntry) {
@@ -90,7 +89,42 @@ func (h *LoginHistory) Insert(entry *LoginHistoryEntry) {
 		h.History = make(map[string]*LoginHistoryEntry)
 	}
 
-	h.History[entry.DeviceAuth.Token()] = entry
+	h.History[entry.Key()] = entry
+}
+
+func (h *LoginHistory) AuthorizeIP(ip string) {
+	if h.AuthorizedIPs == nil {
+		h.AuthorizedIPs = make(map[string]time.Time)
+	}
+
+	h.AuthorizedIPs[ip] = time.Now().UTC()
+}
+
+func (h *LoginHistory) IsAuthorizedIP(ip string) bool {
+	if h.AuthorizedIPs == nil {
+		return false
+	}
+	_, found := h.AuthorizedIPs[ip]
+	return found
+}
+
+func (h *LoginHistory) UpdateAlternateUserIDs(ctx context.Context, nk runtime.NakamaModule, userID string) error {
+	matches, err := LoginAlternateSearch(ctx, nk, userID, h)
+	if err != nil {
+		return fmt.Errorf("error searching for alternate logins: %w", err)
+	}
+
+	if h.AlternateUserIDs == nil {
+		h.AlternateUserIDs = make([]string, 0)
+	}
+
+	for _, m := range matches {
+		if !slices.Contains(h.AlternateUserIDs, m.OtherUserID) {
+			h.AlternateUserIDs = append(h.AlternateUserIDs, m.OtherUserID)
+		}
+	}
+
+	return nil
 }
 
 func (h *LoginHistory) rebuildCache() {
@@ -98,21 +132,21 @@ func (h *LoginHistory) rebuildCache() {
 	h.XPIs = make(map[string]time.Time, len(h.History))
 	h.ClientIPs = make(map[string]time.Time, len(h.History))
 	for _, e := range h.History {
-		h.Cache = append(h.Cache, e.DeviceAuth.ClientIP)
-		h.Cache = append(h.Cache, e.DeviceAuth.EvrID.String())
-		h.Cache = append(h.Cache, e.DeviceAuth.HMDSerialNumber)
+		h.Cache = append(h.Cache, e.ClientIP)
+		h.Cache = append(h.Cache, e.LoginData.HMDSerialNumber)
+		h.Cache = append(h.Cache, e.XPID.Token())
 		h.Cache = append(h.Cache, e.SystemProfile())
 
-		if !e.DeviceAuth.EvrID.IsNil() {
-			evrIDStr := e.DeviceAuth.EvrID.String()
+		if !e.XPID.IsNil() {
+			evrIDStr := e.XPID.String()
 			if t, found := h.XPIs[evrIDStr]; !found || e.UpdatedAt.After(t) {
 				h.XPIs[evrIDStr] = e.UpdatedAt
 			}
 		}
 
-		if e.DeviceAuth.ClientIP != "" {
-			if t, found := h.ClientIPs[e.DeviceAuth.ClientIP]; !found || e.UpdatedAt.After(t) {
-				h.ClientIPs[e.DeviceAuth.ClientIP] = e.UpdatedAt
+		if e.ClientIP != "" {
+			if t, found := h.ClientIPs[e.ClientIP]; !found || e.UpdatedAt.After(t) {
+				h.ClientIPs[e.ClientIP] = e.UpdatedAt
 			}
 		}
 	}
@@ -201,28 +235,13 @@ func LoginHistoryStore(ctx context.Context, nk runtime.NakamaModule, userID stri
 	return nil
 }
 
-func LoginHistoryUpdate(ctx context.Context, nk runtime.NakamaModule, userID string, deviceAuth DeviceAuth, loginData *evr.LoginProfile) error {
+func LoginHistoryUpdate(ctx context.Context, nk runtime.NakamaModule, userID string, xpi evr.EvrId, clientIP string, loginData *evr.LoginProfile) error {
 	history, err := LoginHistoryLoad(ctx, nk, userID)
 	if err != nil {
 		return fmt.Errorf("error getting display name history: %w", err)
 	}
 
-	history.Update(deviceAuth, loginData)
-
-	matches, err := LoginAlternateSearch(ctx, nk, userID, history)
-	if err != nil {
-		return fmt.Errorf("error searching for alternate logins: %w", err)
-	}
-
-	if history.AlternateUserIDs == nil {
-		history.AlternateUserIDs = make([]string, 0)
-	}
-
-	for _, m := range matches {
-		if !slices.Contains(history.AlternateUserIDs, m.OtherUserID) {
-			history.AlternateUserIDs = append(history.AlternateUserIDs, m.OtherUserID)
-		}
-	}
+	history.Update(xpi, clientIP, loginData)
 
 	if err := LoginHistoryStore(ctx, nk, userID, history); err != nil {
 		return fmt.Errorf("error storing display name history: %w", err)

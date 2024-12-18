@@ -121,7 +121,7 @@ func EntrantPresenceFromLobbyParams(session Session, lobbyParams *LobbySessionPa
 		LoginSessionID:    params.LoginSession.Load().ID(),
 		Username:          session.Username(),
 		DisplayName:       lobbyParams.DisplayName,
-		EvrID:             params.EvrID,
+		EvrID:             params.XPID,
 		PartyID:           lobbyParams.PartyID,
 		RoleAlignment:     lobbyParams.Role,
 		DiscordID:         params.DiscordID,

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
@@ -72,13 +71,13 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 	gameSettings, err := p.processLogin(ctx, logger, session, request)
 	if err != nil {
 		st := status.Convert(err)
-		return msgFailedLoginFn(session, request.EvrId, errors.New(st.Message()))
+		return msgFailedLoginFn(session, request.XPID, errors.New(st.Message()))
 	}
 
 	// Let the client know that the login was successful.
 	// Send the login success message and the login settings.
 	return session.SendEvr(
-		evr.NewLoginSuccess(session.id, request.EvrId),
+		evr.NewLoginSuccess(session.id, request.XPID),
 		unrequireMessage,
 		gameSettings,
 		unrequireMessage,
@@ -95,38 +94,84 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 
 	payload := request.LoginData
 
-	hmdsn := request.LoginData.HmdSerialNumber
-
-	if params.HMDSerialOverride != "" {
-		hmdsn = payload.HmdSerialNumber
-	}
-
 	// Providing a discord ID and password avoids the need to link the device to the account.
 	// Server Hosts use this method to authenticate.
-	evrID := request.GetEvrID()
+	xpid := request.GetEvrID()
 	params.LoginSession.Store(session)
-	params.EvrID = evrID
-
-	deviceAuthID := NewDeviceAuth(payload.AppId, request.EvrId, hmdsn, session.clientIP)
+	params.XPID = xpid
 
 	var account *api.Account
+
 	if session.userID.IsNil() {
 		// Construct the device auth token from the login payload
 
-		account, err = p.authenticateAccount(ctx, logger, session, deviceAuthID, params.AuthDiscordID, params.AuthPassword, payload)
+		account, err = p.authenticateAccount(ctx, logger, session, xpid, session.clientIP, params.AuthDiscordID, params.AuthPassword, payload)
 		if err != nil {
 			return settings, err
 		}
 
 	} else {
+
+		// Validate the device link
+		deviceUserID, _, _, err := AuthenticateDevice(ctx, session.logger, session.pipeline.db, xpid.Token(), "", false)
+		switch status.Code(err) {
+		case codes.OK:
+
+			if deviceUserID != session.userID.String() {
+				logger.Error("Device is already linked to another account", zap.String("device_user_id", deviceUserID), zap.String("session_user_id", session.userID.String()))
+				return settings, fmt.Errorf("device is already linked to another account")
+			}
+			// The account was found.
+			account, err = GetAccount(ctx, session.logger, session.pipeline.db, session.statusRegistry, uuid.FromStringOrNil(deviceUserID))
+			if err != nil {
+				return settings, fmt.Errorf("failed to get account: %w", err)
+			}
+		case codes.NotFound:
+			// The account was not found.
+			// try to link the device to the account
+			err := p.runtimeModule.LinkDevice(ctx, session.UserID().String(), xpid.Token())
+			if err != nil {
+				return settings, fmt.Errorf("failed to link device: %w", err)
+			}
+		default:
+			// Possibly banned or other error.
+			return settings, err
+		}
+
 		account, err = GetAccount(ctx, logger, p.db, session.statusRegistry, session.userID)
 		if err != nil {
 			return settings, fmt.Errorf("failed to get account: %w", err)
 		}
+
 	}
 
 	if account == nil {
 		return settings, fmt.Errorf("account not found")
+	}
+
+	loginHistory, err := LoginHistoryLoad(ctx, p.runtimeModule, account.User.Id)
+	if err != nil {
+		return settings, fmt.Errorf("failed to load login history: %w", err)
+	}
+
+	if session.UserID().IsNil() {
+		// Validate the clientIP
+		if ok := loginHistory.IsAuthorizedIP(session.ClientIP()); !ok {
+
+			if p.appBot != nil && p.appBot.dg != nil && p.appBot.dg.State != nil && p.appBot.dg.State.User != nil {
+				ipqs := p.ipqsClient.IPDetailsWithTimeout(session.ClientIP())
+				if err := p.appBot.SendIPApprovalRequest(ctx, account.User.Id, session.ClientIP(), ipqs); err != nil {
+					return settings, fmt.Errorf("failed to send IP approval request: %w", err)
+				}
+				return settings, fmt.Errorf("New location detected.\nPlease check your Discord DMs to accept the \nverification request from @%s.", p.appBot.dg.State.User.Username)
+			} else {
+				return settings, errors.New("New IP address detected. Please check your Discord DMs for a verification request.")
+			}
+
+		}
+	} else {
+		// Auto-authorize the IP
+		loginHistory.AuthorizeIP(session.clientIP)
 	}
 
 	user := account.GetUser()
@@ -136,13 +181,14 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	params.DiscordID = p.discordCache.UserIDToDiscordID(userID)
 
 	// Migrate any account data
-	if err := MigrateDeviceHistory(ctx, p.runtimeModule, p.db, userID); err != nil {
+	if err := MigrateUserData(ctx, p.runtimeModule, p.db, userID); err != nil {
 		logger.Warn("Failed to migrate device history", zap.Error(err))
 	}
 
-	if err := LoginHistoryUpdate(ctx, p.runtimeModule, userID, *deviceAuthID, &payload); err != nil {
-		logger.Warn("Failed to set login history", zap.Error(err))
-	}
+	loginHistory.UpdateAlternateUserIDs(ctx, p.runtimeModule, userID)
+	loginHistory.Update(xpid, session.clientIP, &payload)
+
+	LoginHistoryStore(ctx, p.runtimeModule, account.User.Id, loginHistory)
 
 	// Get the user's metadata
 	metadata, err := GetAccountMetadata(ctx, p.runtimeModule, userID)
@@ -150,19 +196,6 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		return settings, fmt.Errorf("failed to get user metadata: %w", err)
 	}
 	params.AccountMetadata = metadata
-
-	// Check that this EVR-ID is only used by this userID
-	otherLogins, err := p.checkEvrIDOwner(ctx, evrID)
-	if err != nil {
-		return settings, fmt.Errorf("failed to check EVR-ID owner: %w", err)
-	}
-
-	if len(otherLogins) > 0 {
-		// Check if the user is the owner of the EVR-ID
-		if otherLogins[0].UserID != uuid.FromStringOrNil(userID) {
-			session.logger.Warn("EVR-ID is already in use", zap.String("evrId", evrID.Token()), zap.String("userId", userID))
-		}
-	}
 
 	params.IsVR.Store(payload.SystemInfo.HeadsetType != "No VR")
 
@@ -192,7 +225,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	}
 
 	// Load the user's profile
-	profile, err := p.profileRegistry.GameProfile(ctx, logger, uuid.FromStringOrNil(userID), request.LoginData, evrID)
+	profile, err := p.profileRegistry.GameProfile(ctx, logger, uuid.FromStringOrNil(userID), request.LoginData, xpid)
 	if err != nil {
 		session.logger.Error("failed to load game profiles", zap.Error(err))
 		return evr.NewDefaultGameSettings(), fmt.Errorf("failed to load game profiles")
@@ -287,12 +320,12 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	}
 
 	// Initialize the full session
-	if err := session.SetIdentity(uuid.FromStringOrNil(userID), evrID, account.User.Username); err != nil {
+	if err := session.SetIdentity(uuid.FromStringOrNil(userID), xpid, account.User.Username); err != nil {
 		return settings, fmt.Errorf("failed to login: %w", err)
 	}
 	ctx = session.Context()
 
-	profile.SetEvrID(evrID)
+	profile.SetEvrID(xpid)
 	profile.SetChannel(evr.GUID(metadata.GetActiveGroupID()))
 	profile.UpdateDisplayName(displayName)
 
@@ -317,64 +350,12 @@ type EvrIDHistory struct {
 	UserID  uuid.UUID
 }
 
-func (p *EvrPipeline) checkEvrIDOwner(ctx context.Context, evrId evr.EvrId) ([]EvrIDHistory, error) {
-
-	// Check the storage index for matching evrIDs
-	objectIds, _, err := p.storageIndex.List(ctx, uuid.Nil, XPIStorageIndex, fmt.Sprintf("+value.server.xplatformid:%s", evrId.String()), 1, nil, "")
-	if err != nil {
-		return nil, fmt.Errorf("failed to list evrIDs: %w", err)
-	}
-
-	history := make([]EvrIDHistory, len(objectIds.Objects))
-	for i, obj := range objectIds.Objects {
-		history[i] = EvrIDHistory{
-			Updated: obj.GetUpdateTime().AsTime(),
-			Created: obj.GetCreateTime().AsTime(),
-			UserID:  uuid.FromStringOrNil(obj.UserId),
-		}
-	}
-
-	// sort history by updated time descending
-	sort.Slice(history, func(i, j int) bool {
-		return history[i].Updated.After(history[j].Updated)
-	})
-
-	return history, nil
-}
-func (p *EvrPipeline) authenticateAccount(ctx context.Context, logger *zap.Logger, session *sessionWS, deviceId *DeviceAuth, discordId string, userPassword string, payload evr.LoginProfile) (*api.Account, error) {
+func (p *EvrPipeline) authenticateAccount(ctx context.Context, logger *zap.Logger, session *sessionWS, xpid evr.EvrId, clientIP string, discordId string, userPassword string, payload evr.LoginProfile) (*api.Account, error) {
 	var err error
 	var userId string
 	var account *api.Account
 
-	// Discord Authentication
-	if discordId != "" {
-
-		if userPassword == "" {
-			return nil, status.Error(codes.InvalidArgument, "password required")
-		}
-
-		userId = p.discordCache.DiscordIDToUserID(discordId)
-		if userId != "" {
-			// Authenticate the password.
-			userId, _, _, err = AuthenticateEmail(ctx, session.logger, session.pipeline.db, userId+"@"+p.placeholderEmail, userPassword, "", false)
-			if err == nil {
-				// Complete. Return account.
-				return GetAccount(ctx, session.logger, session.pipeline.db, session.statusRegistry, uuid.FromStringOrNil(userId))
-			} else if status.Code(err) != codes.NotFound {
-				// Possibly banned or other error.
-				return account, err
-			}
-		}
-		// TODO FIXME return early if the discordId is non-existant.
-		// Account requires discord linking, clear the discordId.
-		discordId = ""
-	}
-
-	userId, _, _, err = AuthenticateDevice(ctx, session.logger, session.pipeline.db, deviceId.Token(), "", false)
-	if err != nil && status.Code(err) == codes.NotFound {
-		// Try to authenticate the device with a wildcard address.
-		userId, _, _, err = AuthenticateDevice(ctx, session.logger, session.pipeline.db, deviceId.WildcardToken(), "", false)
-	}
+	userId, _, _, err = AuthenticateDevice(ctx, session.logger, session.pipeline.db, xpid.Token(), "", false)
 	if err != nil && status.Code(err) != codes.NotFound {
 		// Possibly banned or other error.
 		return account, err
@@ -413,7 +394,7 @@ func (p *EvrPipeline) authenticateAccount(ctx context.Context, logger *zap.Logge
 	}
 
 	// Account requires discord linking.
-	linkTicket, err := p.linkTicket(ctx, logger, deviceId, &payload)
+	linkTicket, err := p.linkTicket(ctx, logger, xpid, clientIP, &payload)
 	if err != nil {
 		return account, status.Error(codes.Internal, fmt.Errorf("error creating link ticket: %w", err).Error())
 	}
@@ -857,6 +838,8 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 			}
 		}
 	}
+
+	// Put the XP in the player's wallet
 
 	if rating, err := CalculateNewPlayerRating(request.EvrID, label.Players, label.TeamSize, blueWins); err != nil {
 		logger.Error("Failed to calculate new player rating", zap.Error(err))

@@ -2,62 +2,44 @@ package evr
 
 import (
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 
 	"github.com/gofrs/uuid/v5"
 )
 
-var Symbol_SNSLoginRequestv2 Symbol = LoginFailure{}.Symbol()
-
 // LoginRequest represents a message from client to server requesting for a user sign-in.
 type LoginRequest struct {
-	Session   uuid.UUID    `json:"Session"` // This is the old session id, if it had one.
-	EvrId     EvrId        `json:"UserId"`
-	LoginData LoginProfile `json:"LoginData"`
+	PreviousSessionID uuid.UUID // This is the old session id, if it had one.
+	XPID              EvrId
+	LoginData         LoginProfile
 }
 
-func (m LoginRequest) Token() string   { return "SNSLogInRequestv2" }
-func (m *LoginRequest) Symbol() Symbol { return SymbolOf(m) }
-
 func (lr LoginRequest) String() string {
-	m := map[string]interface{}{
-		"session":           lr.Session,
-		"user_id":           lr.EvrId.String(),
-		"hmd_serial_number": lr.LoginData.HmdSerialNumber,
-		"headset_type":      lr.LoginData.SystemInfo.HeadsetType,
-	}
-
-	data, err := json.Marshal(m)
-	if err != nil {
-		return fmt.Sprintf("LoginRequest(%s)", err)
-	}
-	return string(data)
+	return fmt.Sprintf("%T(Session=%s, XPID=%s, HMDSerialNumber=%s, HeadsetType=%s)", lr, lr.PreviousSessionID, lr.XPID, lr.LoginData.HMDSerialNumber, lr.LoginData.SystemInfo.HeadsetType)
 }
 
 func (m *LoginRequest) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
-		func() error { return s.StreamGUID(&m.Session) },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.EvrId.PlatformCode) },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.EvrId.AccountId) },
+		func() error { return s.StreamGUID(&m.PreviousSessionID) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.XPID.PlatformCode) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.XPID.AccountId) },
 		func() error { return s.StreamJson(&m.LoginData, true, NoCompression) },
 	})
 }
 
 func NewLoginRequest(session uuid.UUID, userId EvrId, loginData LoginProfile) (*LoginRequest, error) {
 	return &LoginRequest{
-		Session:   session,
-		EvrId:     userId,
-		LoginData: loginData,
+		PreviousSessionID: session,
+		XPID:              userId,
+		LoginData:         loginData,
 	}, nil
 }
 
 func (m *LoginRequest) GetEvrID() EvrId {
-	return m.EvrId
+	return m.XPID
 }
 
 type LoginProfile struct {
-	// WARNING: EchoVR dictates this schema.
 	AccountId                   uint64     `json:"accountid"`
 	DisplayName                 string     `json:"displayname"`
 	BypassAuth                  bool       `json:"bypassauth"`
@@ -67,18 +49,17 @@ type LoginProfile struct {
 	LobbyVersion                uint64     `json:"lobbyversion"`
 	AppId                       uint64     `json:"appid"`
 	PublisherLock               string     `json:"publisher_lock"`
-	HmdSerialNumber             string     `json:"hmdserialnumber"`
+	HMDSerialNumber             string     `json:"hmdserialnumber"`
 	DesiredClientProfileVersion int64      `json:"desiredclientprofileversion"`
 	SystemInfo                  SystemInfo `json:"system_info"`
 }
 
 func (ld *LoginProfile) String() string {
 	return fmt.Sprintf("%s(account_id=%d, display_name=%s, hmd_serial_number=%s, "+
-		")", "LoginData", ld.AccountId, ld.DisplayName, ld.HmdSerialNumber)
+		")", "LoginData", ld.AccountId, ld.DisplayName, ld.HMDSerialNumber)
 }
 
 type GraphicsSettings struct {
-	// WARNING: EchoVR dictates this schema.
 	TemporalAA                        bool    `json:"temporalaa"`
 	Fullscreen                        bool    `json:"fullscreen"`
 	Display                           int64   `json:"display"`
@@ -98,7 +79,6 @@ type GraphicsSettings struct {
 }
 
 type Quality struct {
-	// WARNING: EchoVR dictates this schema.
 	ShadowResolution   int64   `json:"shadowresolution"`
 	FX                 int64   `json:"fx"`
 	Bloom              bool    `json:"bloom"`
@@ -116,7 +96,6 @@ type Quality struct {
 }
 
 type SystemInfo struct {
-	// WARNING: EchoVR dictates this schema.
 	HeadsetType        string `json:"headset_type"`
 	DriverVersion      string `json:"driver_version"`
 	NetworkType        string `json:"network_type"`
