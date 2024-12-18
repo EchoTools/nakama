@@ -1049,9 +1049,8 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 
 	case SignalLockSession:
 		logger.Debug("Locking session")
-		if state.GameState != nil {
-			state.GameState.LockedAt = time.Now().UTC()
-		} else {
+		state.LockedAt = time.Now().UTC()
+		if state.GameState == nil {
 			state.Open = false
 		}
 
@@ -1059,7 +1058,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		logger.Debug("Unlocking session")
 
 		if state.GameState != nil {
-			state.GameState.LockedAt = time.Time{}
+			state.LockedAt = time.Time{}
 		}
 		state.Open = true
 
