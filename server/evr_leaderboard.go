@@ -99,11 +99,11 @@ func (r *LeaderboardRegistry) LeaderboardMetaFromID(id string) (LeaderboardMeta,
 	}, nil
 }
 
-func (r *LeaderboardRegistry) profileUpdate(userID, username string, profile *evr.ServerProfile, data map[string]map[LeaderboardMeta]float64) error {
+func (r *LeaderboardRegistry) profileUpdate(userID, displayName string, profile *evr.ServerProfile, data map[string]map[LeaderboardMeta]float64) error {
 
 	for statGroup, stats := range data {
 		for meta, value := range stats {
-			record, err := r.LeaderboardTabletStatWrite(context.Background(), meta, userID, username, value)
+			record, err := r.LeaderboardTabletStatWrite(context.Background(), meta, userID, displayName, value)
 			if err != nil {
 				return fmt.Errorf("Leaderboard record write error: %v", err)
 			}
@@ -123,11 +123,11 @@ func (r *LeaderboardRegistry) profileUpdate(userID, username string, profile *ev
 	return nil
 }
 
-func (r *LeaderboardRegistry) ProcessProfileUpdate(ctx context.Context, logger *zap.Logger, userID, username string, mode evr.Symbol, payload *evr.UpdatePayload, serverProfile *evr.ServerProfile) error {
+func (r *LeaderboardRegistry) ProcessProfileUpdate(ctx context.Context, logger *zap.Logger, userID, displayName string, mode evr.Symbol, payload *evr.UpdatePayload, serverProfile *evr.ServerProfile) error {
 
 	// Build the operations
 	ops := r.buildOperations(mode, payload)
-	if err := r.profileUpdate(userID, username, serverProfile, ops); err != nil {
+	if err := r.profileUpdate(userID, displayName, serverProfile, ops); err != nil {
 		return fmt.Errorf("Profile update error: %v", err)
 	}
 	return nil
@@ -188,14 +188,14 @@ func (r *LeaderboardRegistry) buildOperations(mode evr.Symbol, payload *evr.Upda
 	return opsByStatGroup
 }
 
-func (r *LeaderboardRegistry) LeaderboardTabletStatWrite(ctx context.Context, meta LeaderboardMeta, userID, username string, value float64) (*api.LeaderboardRecord, error) {
+func (r *LeaderboardRegistry) LeaderboardTabletStatWrite(ctx context.Context, meta LeaderboardMeta, userID, displayName string, value float64) (*api.LeaderboardRecord, error) {
 
 	// split the value into score and subscore (whole and fractional)
 	score, subscore := r.valueToScore(value)
 
 	// All tablet stat updates are "set" operations
 	override := 2 // set
-	record, err := r.nk.LeaderboardRecordWrite(ctx, meta.ID(), userID, username, score, subscore, nil, &override)
+	record, err := r.nk.LeaderboardRecordWrite(ctx, meta.ID(), userID, displayName, score, subscore, nil, &override)
 
 	if err != nil {
 		// Try to create the leaderboard
@@ -208,7 +208,7 @@ func (r *LeaderboardRegistry) LeaderboardTabletStatWrite(ctx context.Context, me
 			return nil, fmt.Errorf("Leaderboard create error: %v", err)
 		} else {
 			// Retry the write
-			record, err = r.nk.LeaderboardRecordWrite(ctx, meta.ID(), userID, username, score, subscore, nil, &override)
+			record, err = r.nk.LeaderboardRecordWrite(ctx, meta.ID(), userID, displayName, score, subscore, nil, &override)
 		}
 	}
 
