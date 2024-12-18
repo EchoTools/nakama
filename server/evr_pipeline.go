@@ -429,6 +429,8 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 		pipelineFn = p.gameserverLobbySessionLock
 	case *evr.EchoToolsLobbySessionUnlockV1:
 		pipelineFn = p.gameserverLobbySessionUnlock
+	case *evr.EchoToolsLobbyEntrantRemovedV1:
+		pipelineFn = p.gameserverLobbyEntrantRemoved
 
 	default:
 		pipelineFn = func(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
