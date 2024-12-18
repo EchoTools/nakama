@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -26,7 +27,6 @@ func MigrateUserData(ctx context.Context, nk runtime.NakamaModule, db *sql.DB, u
 	var objs []*api.StorageObject
 
 	removeOperations := make([]*runtime.StorageDelete, 0)
-
 	for _, collection := range []string{evrLoginStorageCollection, clientAddrStorageCollection} {
 		cursor := ""
 		for {
@@ -34,8 +34,6 @@ func MigrateUserData(ctx context.Context, nk runtime.NakamaModule, db *sql.DB, u
 			if objs, cursor, err = nk.StorageList(ctx, SystemUserID, userID, collection, 100, cursor); err != nil {
 				return fmt.Errorf("storage list error: %w", err)
 			}
-
-			// Associate evrLogins with clientAddrs by date/time
 
 			for _, record := range objs {
 
@@ -59,6 +57,13 @@ func MigrateUserData(ctx context.Context, nk runtime.NakamaModule, db *sql.DB, u
 					xpid = *e
 				case clientAddrStorageCollection:
 					clientAddr = record.Key
+					if history.AuthorizedIPs == nil {
+						history.AuthorizedIPs = make(map[string]time.Time)
+					}
+					// If it's within the past month
+					if record.UpdateTime.AsTime().After(time.Now().AddDate(0, -1, 0)) {
+						history.AuthorizedIPs[clientAddr] = record.UpdateTime.AsTime()
+					}
 				}
 
 				history.Insert(&LoginHistoryEntry{
@@ -80,6 +85,14 @@ func MigrateUserData(ctx context.Context, nk runtime.NakamaModule, db *sql.DB, u
 				break
 			}
 		}
+	}
+
+	if err := CombineHistoryRecords(ctx, nk, db, userID, history); err != nil {
+		return fmt.Errorf("error combining history records for %s: %w", userID, err)
+	}
+
+	if err := history.UpdateAlternateUserIDs(ctx, nk, userID); err != nil {
+		return fmt.Errorf("error updating alternate user IDs: %w", err)
 	}
 
 	if err := LoginHistoryStore(ctx, nk, userID, history); err != nil {
@@ -116,6 +129,113 @@ func MigrateUserData(ctx context.Context, nk runtime.NakamaModule, db *sql.DB, u
 	if len(removeOperations) > 0 {
 		if err := nk.StorageDelete(ctx, removeOperations); err != nil {
 			return fmt.Errorf("error deleting records: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func CombineHistoryRecords(ctx context.Context, nk runtime.NakamaModule, db *sql.DB, userID string, loginHistory *LoginHistory) error {
+
+	needsUpdate := false
+
+	for k, _ := range loginHistory.History {
+		xpid, clientIP, _ := strings.Cut(k, ":")
+		if xpid == "" || xpid == "UNK-0" || clientIP == "" {
+			needsUpdate = true
+			break
+		}
+	}
+
+	if !needsUpdate {
+		return nil
+	}
+
+	combined := make(map[time.Time]*LoginHistoryEntry)
+	for _, entry := range loginHistory.History {
+		// round UpdatedAt to the nearest minute
+		rounded := entry.UpdatedAt.Round(time.Minute)
+		if _, ok := combined[rounded]; !ok {
+			combined[rounded] = entry
+		} else {
+			if combined[rounded].XPID.IsNil() {
+				combined[rounded].XPID = entry.XPID
+			}
+			if combined[rounded].ClientIP == "" {
+				combined[rounded].ClientIP = entry.ClientIP
+			}
+		}
+	}
+
+	for _, entry := range combined {
+		loginHistory.Insert(entry)
+	}
+
+	// Delete entries missing xpi or clientIP
+	for k, _ := range loginHistory.History {
+		xpid, clientIP, _ := strings.Cut(k, ":")
+		if xpid == "" || xpid == "UNK-0" || clientIP == "" {
+			delete(loginHistory.History, k)
+		}
+	}
+
+	return nil
+}
+
+func MigrateAllUserData(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB) error {
+
+	var cursor string
+	var results []*api.StorageObject
+	var err error
+
+	for {
+		if results, cursor, err = nk.StorageList(ctx, SystemUserID, "", "Devices", 100, cursor); err != nil {
+			return fmt.Errorf("storage list error: %w", err)
+		}
+
+		for _, r := range results {
+			loginHistory, err := LoginHistoryLoad(ctx, nk, r.UserId)
+			if err != nil {
+				return fmt.Errorf("error loading login history: %w", err)
+			}
+
+			if err := CombineHistoryRecords(ctx, nk, db, r.UserId, loginHistory); err != nil {
+				return fmt.Errorf("error combining history records for %s: %w", r.UserId, err)
+			}
+
+			if err := loginHistory.UpdateAlternateUserIDs(ctx, nk, r.UserId); err != nil {
+				return fmt.Errorf("error updating alternate user IDs: %w", err)
+			}
+
+			if err := LoginHistoryStore(ctx, nk, r.UserId, loginHistory); err != nil {
+				return fmt.Errorf("error storing login history: %w", err)
+			}
+		}
+
+		if cursor == "" {
+			break
+		}
+
+	}
+
+	cursor = ""
+
+	for {
+
+		if results, cursor, err = nk.StorageList(ctx, SystemUserID, "", "EvrLogins", 100, cursor); err != nil {
+			return fmt.Errorf("storage list error: %w", err)
+		}
+
+		for _, r := range results {
+			if err := MigrateUserData(ctx, nk, db, r.UserId); err != nil {
+				return fmt.Errorf("error migrating user data for %s: %w", r.UserId, err)
+			}
+
+			logger.Debug("Migrated user data for %s", r.UserId)
+		}
+
+		if cursor == "" {
+			break
 		}
 	}
 

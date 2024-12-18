@@ -20,11 +20,13 @@ const (
 )
 
 var (
-	ignoredLoginCacheKeys = map[string]struct{}{
-		"N/A":     {},
-		"":        {},
-		"UNK-0":   {},
-		"unknown": {},
+	IgnoredLoginValues = map[string]struct{}{
+		"":               {},
+		"1WMHH000X00000": {},
+		"N/A":            {},
+		"UNK-0":          {},
+		"unknown":        {},
+		"1PASH5D1P17365": {},
 	}
 )
 
@@ -114,14 +116,14 @@ func (h *LoginHistory) UpdateAlternateUserIDs(ctx context.Context, nk runtime.Na
 		return fmt.Errorf("error searching for alternate logins: %w", err)
 	}
 
-	if h.AlternateUserIDs == nil {
-		h.AlternateUserIDs = make([]string, 0)
+	alternateMap := make(map[string]struct{})
+	for _, m := range matches {
+		alternateMap[m.OtherUserID] = struct{}{}
 	}
 
-	for _, m := range matches {
-		if !slices.Contains(h.AlternateUserIDs, m.OtherUserID) {
-			h.AlternateUserIDs = append(h.AlternateUserIDs, m.OtherUserID)
-		}
+	h.AlternateUserIDs = make([]string, 0)
+	for k := range alternateMap {
+		h.AlternateUserIDs = append(h.AlternateUserIDs, k)
 	}
 
 	return nil
@@ -133,8 +135,11 @@ func (h *LoginHistory) rebuildCache() {
 	h.ClientIPs = make(map[string]time.Time, len(h.History))
 	for _, e := range h.History {
 		h.Cache = append(h.Cache, e.ClientIP)
+
 		h.Cache = append(h.Cache, e.LoginData.HMDSerialNumber)
-		h.Cache = append(h.Cache, e.XPID.Token())
+		if !e.XPID.IsNil() {
+			h.Cache = append(h.Cache, e.XPID.Token())
+		}
 		h.Cache = append(h.Cache, e.SystemProfile())
 
 		if !e.XPID.IsNil() {
@@ -153,7 +158,7 @@ func (h *LoginHistory) rebuildCache() {
 	slices.Sort(h.Cache)
 	h.Cache = slices.Compact(h.Cache)
 	for i := 0; i < len(h.Cache); i++ {
-		if _, ok := ignoredLoginCacheKeys[h.Cache[i]]; ok {
+		if _, ok := IgnoredLoginValues[h.Cache[i]]; ok {
 			h.Cache = append(h.Cache[:i], h.Cache[i+1:]...)
 			i--
 		}
