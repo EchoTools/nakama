@@ -334,6 +334,21 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 		includeMaxRTT = true
 	}
 
+	stream := lobbyParams.GuildGroupStream()
+	count, err := p.runtimeModule.StreamCount(stream.Mode, stream.Subject.String(), "", stream.Label)
+	if err != nil {
+		logger.Error("Failed to get stream count", zap.Error(err))
+	}
+
+	// If there are fewer players online, reduce the fallback delay
+	if !strings.Contains(p.node, "dev") {
+		// If there are fewer than 16 players online, reduce the fallback delay
+		if count < 24 {
+			includeRankPercentile = false
+			includeMaxRTT = false
+		}
+	}
+
 	query := lobbyParams.BackfillSearchQuery(includeRankPercentile, includeMaxRTT)
 
 	rtts := lobbyParams.latencyHistory.LatestRTTs()
