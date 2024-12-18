@@ -147,12 +147,9 @@ func NewIPQS(logger *zap.Logger, db *sql.DB, metrics Metrics, storageIndex Stora
 			case <-time.After(time.Minute * 5):
 			}
 
-			if n, err := ipqs.SaveCache(); err != nil {
+			if _, err := ipqs.SaveCache(); err != nil {
 				logger.Error("Failed to save IPQS cache", zap.Error(err))
-			} else {
-				logger.Info("Saved IPQS cache", zap.Int("count", n))
 			}
-
 		}
 	}()
 
