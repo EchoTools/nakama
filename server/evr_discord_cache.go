@@ -114,7 +114,6 @@ func (c *DiscordCache) Start() {
 					}
 					return true
 				})
-				logger.Debug("Removing queue limiters", zap.Int("count", count))
 			}
 		}
 	}()

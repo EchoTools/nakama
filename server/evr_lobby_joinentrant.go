@@ -287,7 +287,7 @@ func (p *EvrPipeline) authorizeGuildGroupSession(ctx context.Context, session Se
 
 	displayName := params.AccountMetadata.GetGroupDisplayNameOrDefault(groupID)
 
-	if err := p.profileRegistry.SetLobbyProfile(ctx, uuid.FromStringOrNil(userID), params.EvrID, displayName); err != nil {
+	if err := p.profileRegistry.SetLobbyProfile(ctx, uuid.FromStringOrNil(userID), params.XPID, displayName); err != nil {
 		return fmt.Errorf("failed to set lobby profile: %w", err)
 	}
 

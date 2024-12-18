@@ -119,13 +119,12 @@ type (
 
 type SessionParameters struct {
 	Node          string                    // The node name
-	EvrID         evr.EvrId                 // The EchoVR ID
+	XPID          evr.EvrId                 // The EchoVR ID
 	DiscordID     string                    // The Discord ID
 	LoginSession  atomic.Pointer[sessionWS] // The login session
 	LobbySession  atomic.Pointer[sessionWS] // The match session
 	ServerSession atomic.Pointer[sessionWS] // The server session
 
-	HMDSerialOverride       string // The HMD Serial Override
 	AuthDiscordID           string // The Discord ID use for authentication
 	AuthPassword            string // The Password use for authentication
 	UserDisplayNameOverride string // The display name override (user-defined)
@@ -223,7 +222,6 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 
 	params := SessionParameters{
 		Node:                    pipeline.node,
-		HMDSerialOverride:       parseUserQueryFunc(&request, "hmdserial", 32, hmdOverridePattern),
 		AuthDiscordID:           parseUserQueryFunc(&request, "discordid", 20, discordIDPattern),
 		AuthPassword:            parseUserQueryFunc(&request, "password", 32, nil),
 		UserDisplayNameOverride: ign,
@@ -384,7 +382,7 @@ func (s *sessionWS) Secondary(loginSession *sessionWS, isLobby bool, isServer bo
 		params.ServerSession.Store(s)
 	}
 
-	return s.SetIdentity(loginSession.UserID(), params.EvrID, loginSession.Username())
+	return s.SetIdentity(loginSession.UserID(), params.XPID, loginSession.Username())
 }
 func (s *sessionWS) SetIdentity(userID uuid.UUID, evrID evr.EvrId, username string) error {
 	// Each player has a single login connection, which will act as the core session.
@@ -513,7 +511,7 @@ func (s *sessionWS) LobbySession(loginSessionID uuid.UUID) error {
 		s.logger = s.logger.With(
 			zap.String("login_sid", loginSessionID.String()),
 			zap.String("uid", s.userID.String()),
-			zap.String("evr_id", sessionParams.EvrID.Token()),
+			zap.String("evr_id", sessionParams.XPID.Token()),
 			zap.String("username", s.Username()))
 		s.Unlock()
 

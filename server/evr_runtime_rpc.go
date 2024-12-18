@@ -632,13 +632,13 @@ func LinkDeviceRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk ru
 	uid := token.Claims.(jwt.MapClaims)["uid"].(string)
 
 	// Exchange the link code for an auth token and remove the link code
-	authToken, err := ExchangeLinkCode(ctx, nk, logger, request.LinkCode)
+	ticket, err := ExchangeLinkCode(ctx, nk, logger, request.LinkCode)
 	if err != nil {
 		return "", err
 	}
 
 	// Link the device to the user account
-	if err := nk.LinkDevice(ctx, uid, authToken.Token()); err != nil {
+	if err := nk.LinkDevice(ctx, uid, ticket.XPID.Token()); err != nil {
 		logger.WithField("err", err).Error("Unable to link device")
 		return "", runtime.NewError("Unable to link device", StatusInternalError)
 	}
@@ -684,13 +684,13 @@ func LinkUserIdDeviceRpc(ctx context.Context, logger runtime.Logger, db *sql.DB,
 	userId := userIds[0].GetId()
 
 	// Exchange the link code for an auth token and remove the link code
-	authToken, err := ExchangeLinkCode(ctx, nk, logger, request.LinkCode)
+	ticket, err := ExchangeLinkCode(ctx, nk, logger, request.LinkCode)
 	if err != nil {
 		return "fail", err
 	}
 
 	// Link the device to the user account
-	if err := nk.LinkDevice(ctx, userId, authToken.Token()); err != nil {
+	if err := nk.LinkDevice(ctx, userId, ticket.XPID.Token()); err != nil {
 		logger.WithField("err", err).Error("Unable to link device")
 		return "", runtime.NewError("Unable to link device", StatusInternalError)
 	}

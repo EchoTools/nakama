@@ -105,24 +105,24 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		whoami.GuildGroupMemberships[gid] = m
 	}
 
-	evrIDRecords, err := GetEVRRecords(ctx, logger, nk, userID.String())
+	loginHistory, err := LoginHistoryLoad(ctx, nk, userID.String())
 	if err != nil {
-		return err
+		return fmt.Errorf("error getting device history: %w", err)
 	}
 
-	whoami.EVRIDLogins = make(map[string]time.Time, len(evrIDRecords))
+	whoami.EVRIDLogins = make(map[string]time.Time, 0)
 
-	for evrID, record := range evrIDRecords {
-		whoami.EVRIDLogins[evrID.String()] = record.UpdateTime.UTC()
+	for _, e := range loginHistory.History {
+		whoami.EVRIDLogins[e.XPID.String()] = e.UpdatedAt.UTC()
 	}
 
-	history, err := DisplayNameHistoryLoad(ctx, nk, userID.String())
+	displayNameHistory, err := DisplayNameHistoryLoad(ctx, nk, userID.String())
 	if err != nil {
 		return fmt.Errorf("failed to load display name history: %w", err)
 	}
 
 	pastDisplayNames := make(map[string]time.Time)
-	for _, items := range history.Histories {
+	for _, items := range displayNameHistory.Histories {
 		for _, item := range items {
 			if e, ok := pastDisplayNames[item.DisplayName]; !ok || e.After(item.UpdateTime) {
 				pastDisplayNames[item.DisplayName] = item.UpdateTime

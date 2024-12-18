@@ -304,7 +304,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				ClientUserID:     session.userID.String(),
 				ClientUsername:   session.Username(),
 				ClientDiscordID:  params.DiscordID,
-				ClientEvrID:      params.EvrID,
+				ClientEvrID:      params.XPID,
 				RemoteLogMessage: string(msgData),
 			}
 			// Check if the match's group wants audit messages

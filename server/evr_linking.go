@@ -24,13 +24,10 @@ import (
 // It contains the link code, xplatform ID string, and HMD serial number.
 // TODO move this to evr-common
 type LinkTicket struct {
-	Code            string `json:"link_code"`            // the code the user will exchange to link the account
-	DeviceAuthToken string `json:"nk_device_auth_token"` // the device ID token to be linked
-
-	// NOTE: The UserIDToken has an index that is created in the InitModule function
-	UserIDToken string `json:"evrid_token"` // the xplatform ID used by EchoVR as a UserID
-
-	LoginRequest *evr.LoginProfile `json:"game_login_request"` // the login request payload that generated this link ticket
+	Code         string            `json:"link_code"`          // the code the user will exchange to link the account
+	XPID         evr.EvrId         `json:"xp_id"`              // the xplatform ID used by EchoVR
+	ClientIP     string            `json:"client_ip"`          // the client IP address that generated this link ticket
+	LoginProfile *evr.LoginProfile `json:"game_login_request"` // the login request payload that generated this link ticket
 }
 
 func LoadLinkTickets(ctx context.Context, nk runtime.NakamaModule) (map[string]*LinkTicket, error) {
@@ -79,7 +76,7 @@ func StoreLinkTickets(ctx context.Context, nk runtime.NakamaModule, linkTickets 
 }
 
 // linkTicket generates a link ticket for the provided xplatformId and hmdSerialNumber.
-func (p *EvrPipeline) linkTicket(ctx context.Context, logger *zap.Logger, deviceID *DeviceAuth, loginData *evr.LoginProfile) (*LinkTicket, error) {
+func (p *EvrPipeline) linkTicket(ctx context.Context, logger *zap.Logger, xpid evr.EvrId, clientIP string, loginData *evr.LoginProfile) (*LinkTicket, error) {
 
 	if loginData == nil {
 		// This should't happen. A login request is required to create a link ticket.
@@ -90,7 +87,7 @@ func (p *EvrPipeline) linkTicket(ctx context.Context, logger *zap.Logger, device
 	if err != nil {
 		return nil, err
 	}
-	linkTicket := generateLinkTicket(linkTickets, deviceID, loginData)
+	linkTicket := generateLinkTicket(linkTickets, xpid, clientIP, loginData)
 	// Store the link ticket
 	if err := StoreLinkTickets(ctx, p.runtimeModule, linkTickets); err != nil {
 		return nil, err
@@ -99,11 +96,11 @@ func (p *EvrPipeline) linkTicket(ctx context.Context, logger *zap.Logger, device
 	return linkTicket, nil
 }
 
-func generateLinkTicket(linkTickets map[string]*LinkTicket, deviceID *DeviceAuth, loginData *evr.LoginProfile) *LinkTicket {
+func generateLinkTicket(linkTickets map[string]*LinkTicket, xpid evr.EvrId, clientIP string, loginData *evr.LoginProfile) *LinkTicket {
 	found := true
 	var ticket *LinkTicket
 	for _, ticket := range linkTickets {
-		if ticket.DeviceAuthToken == deviceID.Token() {
+		if ticket.XPID == xpid {
 			found = true
 			break
 		}
@@ -123,10 +120,10 @@ func generateLinkTicket(linkTickets map[string]*LinkTicket, deviceID *DeviceAuth
 
 	// Create a new link ticket
 	ticket = &LinkTicket{
-		Code:            generateLinkCode(),
-		DeviceAuthToken: deviceID.Token(),
-		UserIDToken:     deviceID.EvrID.String(),
-		LoginRequest:    loginData,
+		Code:         generateLinkCode(),
+		XPID:         xpid,
+		ClientIP:     clientIP,
+		LoginProfile: loginData,
 	}
 	linkTickets[ticket.Code] = ticket
 
@@ -217,7 +214,7 @@ func (p *EvrPipeline) evrStorageObjectDefault(session *sessionWS, collection str
 // and returns the device auth token from the link ticket.
 // If any error occurs during these operations, it logs the error and returns it.
 // Regardless of the outcome, it deletes the used link ticket from storage.
-func ExchangeLinkCode(ctx context.Context, nk runtime.NakamaModule, logger runtime.Logger, linkCode string) (*DeviceAuth, error) {
+func ExchangeLinkCode(ctx context.Context, nk runtime.NakamaModule, logger runtime.Logger, linkCode string) (*LinkTicket, error) {
 	// Normalize the link code to uppercase.
 	linkCode = strings.ToUpper(linkCode)
 
@@ -228,12 +225,7 @@ func ExchangeLinkCode(ctx context.Context, nk runtime.NakamaModule, logger runti
 
 	linkTicket, ok := linkTickets[linkCode]
 	if !ok {
-		return nil, runtime.NewError("link code not found", StatusNotFound)
-	}
-
-	token, err := ParseDeviceAuthToken(linkTicket.DeviceAuthToken)
-	if err != nil {
-		return nil, runtime.NewError("failed to parse device auth token", StatusInternalError)
+		return nil, runtime.NewError(fmt.Sprintf("link code `%s` not found", linkCode), StatusNotFound)
 	}
 
 	delete(linkTickets, linkCode)
@@ -242,7 +234,7 @@ func ExchangeLinkCode(ctx context.Context, nk runtime.NakamaModule, logger runti
 		return nil, err
 	}
 
-	return token, nil
+	return linkTicket, nil
 }
 
 // verifyJWT parses and verifies a JWT token using the provided key function.

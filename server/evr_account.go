@@ -176,31 +176,6 @@ type AccountCosmetics struct {
 	JerseyNumber int64               `json:"number"`           // The loadout number (jersey number)
 	Loadout      evr.CosmeticLoadout `json:"cosmetic_loadout"` // The loadout
 }
-type EVRLoginRecord struct {
-	EvrID        evr.EvrId
-	LoginProfile *evr.LoginProfile
-	CreateTime   time.Time
-	UpdateTime   time.Time
-}
-
-func GetEVRRecords(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, userID string) (map[evr.EvrId]EVRLoginRecord, error) {
-	history, err := LoginHistoryLoad(ctx, nk, userID)
-	if err != nil {
-		return nil, fmt.Errorf("error getting device history: %w", err)
-	}
-
-	records := make(map[evr.EvrId]EVRLoginRecord, 0)
-	for _, e := range history.History {
-		records[e.DeviceAuth.EvrID] = EVRLoginRecord{
-			EvrID:        e.DeviceAuth.EvrID,
-			LoginProfile: e.LoginData,
-			CreateTime:   e.UpdatedAt,
-			UpdateTime:   e.UpdatedAt,
-		}
-	}
-
-	return records, nil
-}
 
 func GetDisplayNameByGroupID(ctx context.Context, nk runtime.NakamaModule, userID, groupID string) (string, error) {
 	md, err := GetAccountMetadata(ctx, nk, userID)

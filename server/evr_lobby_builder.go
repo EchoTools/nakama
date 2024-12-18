@@ -208,7 +208,7 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 				LoginSessionID: sessionParams.LoginSession.Load().id,
 				Username:       session.Username(),
 				DisplayName:    sessionParams.AccountMetadata.GetGroupDisplayNameOrDefault(groupID.String()),
-				EvrID:          sessionParams.EvrID,
+				EvrID:          sessionParams.XPID,
 				PartyID:        MatchIDFromStringOrNil(entry.Entry.GetPartyId()).UUID,
 				RoleAlignment:  teamIndex,
 				DiscordID:      sessionParams.DiscordID,

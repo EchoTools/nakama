@@ -236,7 +236,7 @@ var (
 
 		{
 			Name:        "link-headset",
-			Description: "Link your device to your discord account.",
+			Description: "Link your headset device to your discord account.",
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
@@ -244,29 +244,24 @@ var (
 					Description: "Your four character link code.",
 					Required:    true,
 				},
-				{
-					Type:        discordgo.ApplicationCommandOptionBoolean,
-					Name:        "disable-ip-verification",
-					Description: "Disable IP verification",
-					Required:    false,
-				},
 			},
 		},
 		{
 			Name:        "unlink-headset",
-			Description: "Unlink a device from your discord account.",
+			Description: "Unlink a headset from your discord account.",
 			Options: []*discordgo.ApplicationCommandOption{
 				{
-					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "device-link",
-					Description: "device link from /whoami",
-					Required:    true,
+					Type:         discordgo.ApplicationCommandOptionString,
+					Name:         "device-link",
+					Description:  "device link from /whoami",
+					Required:     false,
+					Autocomplete: true,
 				},
 			},
 		},
 		{
 			Name:        "check-server",
-			Description: "Check if an EchoVR game server is actively responding on a port.",
+			Description: "Check if a game server is actively responding on a port.",
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
@@ -282,7 +277,7 @@ var (
 		},
 		{
 			Name:        "whoami",
-			Description: "Receive your echo account information (privately).",
+			Description: "Receive your account information (privately).",
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Type:        discordgo.ApplicationCommandOptionBoolean,
@@ -293,16 +288,12 @@ var (
 			},
 		},
 		{
-			Name:        "fixit",
-			Description: "Fix your echo account",
-		},
-		{
 			Name:        "set-lobby",
-			Description: "Set your EchoVR lobby to this Discord server/guild.",
+			Description: "Set your default lobby to this Discord server/guild.",
 		},
 		{
 			Name:        "lookup",
-			Description: "Lookup information about echo users.",
+			Description: "Lookup information about players.",
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Type:        discordgo.ApplicationCommandOptionUser,
@@ -314,7 +305,7 @@ var (
 		},
 		{
 			Name:        "search",
-			Description: "Search for a player by display name, user ID, or EVR ID (i.e. OVR-ORG-).",
+			Description: "Search for a player by display name, user ID, or XPI (i.e. OVR-ORG-).",
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
@@ -326,7 +317,7 @@ var (
 		},
 		{
 			Name:        "hash",
-			Description: "Convert a string into an EVR symbol hash.",
+			Description: "Convert a string into a symbol hash.",
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
@@ -336,15 +327,23 @@ var (
 				},
 			},
 		},
+		/*
+			{
+				Name:        "kick",
+				Description: "Force user to go through community values in the social lobby.",
+				Options:     []*discordgo.ApplicationCommandOption{},
+			},
+		*/
 		{
 			Name:        "trigger-cv",
-			Description: "Force user to go through community values in social lobby.",
+			Description: "Force user to go through community values in the social lobby.",
 			Options: []*discordgo.ApplicationCommandOption{
 				{
-					Type:        discordgo.ApplicationCommandOptionUser,
-					Name:        "user",
-					Description: "Target user",
-					Required:    true,
+					Type:         discordgo.ApplicationCommandOptionUser,
+					Name:         "user",
+					Description:  "Target user",
+					Required:     true,
+					Autocomplete: true,
 				},
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
@@ -913,6 +912,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 		"hash": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			options := i.ApplicationCommandData().Options
+			if len(options) == 0 {
+				return errors.New("no options provided")
+			}
 			token := options[0].StringValue()
 			symbol := evr.ToSymbol(token)
 			bytes := binary.LittleEndian.AppendUint64([]byte{}, uint64(symbol))
@@ -956,11 +958,13 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					},
 				},
 			})
-			return nil
 		},
 
 		"link-headset": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			options := i.ApplicationCommandData().Options
+			if len(options) == 0 {
+				return errors.New("no options provided")
+			}
 			linkCode := options[0].StringValue()
 
 			if user == nil {
@@ -969,30 +973,33 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			// Validate the link code as a 4 character string
 			if len(linkCode) != 4 {
-				return errors.New("invalid link code: link code must be (4) characters long")
-			}
-			disableIPVerification := false
-			if len(options) > 1 {
-				disableIPVerification = options[1].BoolValue()
+				return errors.New("invalid link code: link code must be (4) letters long (i.e. ABCD)")
 			}
 
 			if err := func() error {
 
-				if linkCode == "0000" {
-					return errors.New("sychronized Discord<->Nakama")
-				}
-
 				// Exchange the link code for a device auth.
-				token, err := ExchangeLinkCode(ctx, nk, logger, linkCode)
+				ticket, err := ExchangeLinkCode(ctx, nk, logger, linkCode)
 				if err != nil {
-					return err
+					return fmt.Errorf("failed to exchange link code: %w", err)
 				}
 
-				if disableIPVerification {
-					token.ClientIP = "*"
+				if err := nk.LinkDevice(ctx, userID, ticket.XPID.Token()); err != nil {
+					return fmt.Errorf("failed to link headset: %w", err)
 				}
 
-				return nk.LinkDevice(ctx, userID, token.Token())
+				// Set the client IP as authorized in the LoginHistory
+				history, err := LoginHistoryLoad(ctx, nk, userID)
+				if err != nil {
+					return fmt.Errorf("failed to load login history: %w", err)
+				}
+
+				history.AuthorizeIP(ticket.ClientIP)
+
+				if err := LoginHistoryStore(ctx, nk, userID, history); err != nil {
+					return fmt.Errorf("failed to save login history: %w", err)
+				}
+				return nil
 			}(); err != nil {
 				logger.WithFields(map[string]interface{}{
 					"discord_id": user.ID,
@@ -1014,9 +1021,190 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				},
 			})
 		},
+		"kick": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+			return fmt.Errorf("not implemented")
+			/*
+				response := &discordgo.InteractionResponse{
+					Type: discordgo.InteractionResponseChannelMessageWithSource,
+					Data: &discordgo.InteractionResponseData{
+						Content: "Select a player to kick",
+						Flags:   discordgo.MessageFlagsEphemeral,
+						Components: []discordgo.MessageComponent{
+							discordgo.ActionsRow{
+								Components: []discordgo.MessageComponent{
+									discordgo.SelectMenu{
+										CustomID:    "select",
+										Placeholder: "<select a player to kick>",
+										Options:     options,
+									},
+								},
+							},
+							discordgo.ActionsRow{
+								Components: []discordgo.MessageComponent{
+									discordgo.SelectMenu{
+										CustomID:    "trigger_cv",
+										Placeholder: "Send user through Community Values?",
+										Options: []discordgo.SelectMenuOption{
+											{
+												Label: "Yes",
+												Value: "yes",
+											},
+											{
+												Label: "No",
+												Value: "no",
+											},
+										},
+									},
+								},
+							},
+							discordgo.ActionsRow{
+								Components: []discordgo.MessageComponent{
+									discordgo.SelectMenu{
+										CustomID:    "reason",
+										Placeholder: "<select a reason>",
+										Options: []discordgo.SelectMenuOption{
+											{
+												Label: "Toxicity",
+												Value: "toxicity",
+											},
+											{
+												Label: "Poor Sportsmanship",
+												Value: "poor_sportsmanship",
+											},
+											{
+												Label: "Other (see below)",
+												Value: "custom_reason",
+											},
+										},
+									},
+								},
+							},
+							discordgo.ActionsRow{
+								Components: []discordgo.MessageComponent{
+									discordgo.TextInput{
+										CustomID:    "custom_reason_input",
+										Label:       "Custom Reason",
+										Style:       discordgo.TextInputParagraph,
+										Placeholder: "Enter custom reason here...",
+										Required:    false,
+									},
+								},
+							},
+						},
+					},
+				}
+				return s.InteractionRespond(i.Interaction, response)
+				// Show the players currently in the same match as the user
+				// Get the user's current match
+
+					presences, err := nk.StreamUserList(StreamModeService, userID, "", StreamLabelMatchService, false, true)
+					if err != nil {
+						logger.Error("Failed to get user list", zap.Error(err))
+					}
+
+					if len(presences) == 0 {
+						if err := simpleInteractionResponse(s, i, "You are not in a match"); err != nil {
+							return
+						}
+					}
+
+					// Get the match label
+					label, err := MatchLabelByID(ctx, d.nk, MatchIDFromStringOrNil(presences[0].GetStatus()))
+					if err != nil {
+						logger.Error("Failed to get match label", zap.Error(err))
+					}
+
+					if label == nil {
+						if err := simpleInteractionResponse(s, i, "You are not in a match"); err != nil {
+							return
+						}
+					}
+
+					choices = make([]*discordgo.ApplicationCommandOptionChoice, len(presences))
+					for i, player := range label.Players {
+						choices[i] = &discordgo.ApplicationCommandOptionChoice{
+							Name:  player.DisplayName,
+							Value: player.UserID,
+						}
+					}
+			*/
+		},
 		"unlink-headset": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			options := i.ApplicationCommandData().Options
-			deviceId := options[0].StringValue()
+			if len(options) == 0 {
+
+				account, err := nk.AccountGetId(ctx, userID)
+				if err != nil {
+					logger.Error("Failed to get account", zap.Error(err))
+					return err
+				}
+				if len(account.Devices) == 0 {
+					return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+						Type: discordgo.InteractionResponseChannelMessageWithSource,
+						Data: &discordgo.InteractionResponseData{
+							Flags:   discordgo.MessageFlagsEphemeral,
+							Content: "No devices linked",
+						},
+					})
+				}
+
+				loginHistory, err := LoginHistoryLoad(ctx, nk, userID)
+				if err != nil {
+					return err
+				}
+
+				options := make([]discordgo.SelectMenuOption, 0, len(account.Devices))
+				for _, device := range account.Devices {
+
+					description := ""
+					if ts, ok := loginHistory.XPIs[device.GetId()]; ok {
+						hours := int(time.Since(ts).Hours())
+						if hours < 1 {
+							minutes := int(time.Since(ts).Minutes())
+							if minutes < 1 {
+								description = "Just now"
+							} else {
+								description = fmt.Sprintf("%d minutes ago", minutes)
+							}
+						} else if hours < 24 {
+							description = fmt.Sprintf("%d hours ago", hours)
+						} else {
+							description = fmt.Sprintf("%d days ago", int(time.Since(ts).Hours()/24))
+						}
+					}
+
+					options = append(options, discordgo.SelectMenuOption{
+						Label: device.GetId(),
+						Value: device.GetId(),
+						Emoji: &discordgo.ComponentEmoji{
+							Name: "🔗",
+						},
+						Description: description,
+					})
+				}
+
+				response := &discordgo.InteractionResponse{
+					Type: discordgo.InteractionResponseChannelMessageWithSource,
+					Data: &discordgo.InteractionResponseData{
+						Content: "Select a device to unlink",
+						Flags:   discordgo.MessageFlagsEphemeral,
+						Components: []discordgo.MessageComponent{
+							discordgo.ActionsRow{
+								Components: []discordgo.MessageComponent{
+									discordgo.SelectMenu{
+										// Select menu, as other components, must have a customID, so we set it to this value.
+										CustomID:    "select",
+										Placeholder: "<select a device to unlink>",
+										Options:     options,
+									},
+								},
+							},
+						},
+					},
+				}
+				return s.InteractionRespond(i.Interaction, response)
+			}
+			xpid := options[0].StringValue()
 			// Validate the link code as a 4 character string
 
 			if user == nil {
@@ -1025,8 +1213,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			if err := func() error {
 				// Get the userid by username
-
-				return nk.UnlinkDevice(ctx, userID, deviceId)
+				return nk.UnlinkDevice(ctx, userID, xpid)
 
 			}(); err != nil {
 				return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -1037,10 +1224,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					},
 				})
 			}
+
 			content := "Your headset has been unlinked. Restart EchoVR."
 			go d.cache.SyncGuildGroupMember(ctx, userID, d.cache.GuildIDToGroupID(member.GuildID))
 
-			// Send the response
 			return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
@@ -1345,7 +1532,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 				// Send a message to the channel
 				channel := "1232462244797874247"
-				_, err = s.ChannelMessageSend(channel, fmt.Sprintf("<@%s> assigned VRML cosmetics `%s` to user `%s`", user.ID, badgeCodestr, target.Username))
+				_, err = s.ChannelMessageSend(channel, fmt.Sprintf("%s assigned VRML cosmetics `%s` to user `%s`", user.Mention(), badgeCodestr, target.Username))
 				if err != nil {
 					logger.Warn("failed to send message", zap.Error(err))
 					break
@@ -1753,6 +1940,11 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return simpleInteractionResponse(s, i, "this command must be used from a guild")
 
 			}
+
+			if len(options) == 0 {
+				return simpleInteractionResponse(s, i, "no options provided")
+			}
+
 			mode := evr.ModeArenaPrivate
 			region := evr.DefaultRegion
 			level := evr.LevelUnspecified
@@ -2462,25 +2654,28 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		user, _ := getScopedUserMember(i)
 
-		appCommandName := i.ApplicationCommandData().Name
-
 		logger := d.logger.WithFields(map[string]any{
-			"discord_id":  user.ID,
-			"username":    user.Username,
-			"app_command": appCommandName,
-			"guild_id":    i.GuildID,
-			"channel_id":  i.ChannelID,
-			"user_id":     d.cache.DiscordIDToUserID(user.ID),
-			"group_id":    d.cache.GuildIDToGroupID(i.GuildID),
-			"options":     i.ApplicationCommandData().Options,
+			"discord_id": user.ID,
+			"username":   user.Username,
+			"guild_id":   i.GuildID,
+			"channel_id": i.ChannelID,
+			"user_id":    d.cache.DiscordIDToUserID(user.ID),
+			"group_id":   d.cache.GuildIDToGroupID(i.GuildID),
 		})
 
-		logger.Info("Handling interaction.")
-
 		switch i.Type {
+
 		case discordgo.InteractionApplicationCommand:
+
+			appCommandName := i.ApplicationCommandData().Name
+			logger = logger.WithFields(map[string]any{
+				"app_command": appCommandName,
+				"options":     i.ApplicationCommandData().Options,
+			})
+
+			logger.Info("Handling application command.")
 			if handler, ok := commandHandlers[appCommandName]; ok {
-				err := d.handleInteractionCreate(logger, s, i, appCommandName, handler)
+				err := d.handleInteractionApplicationCommand(logger, s, i, appCommandName, handler)
 				if err != nil {
 					logger.WithField("err", err).Error("Failed to handle interaction")
 					// Queue the user to be updated in the cache
@@ -2496,6 +2691,84 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			} else {
 				logger.Info("Unhandled command: %v", appCommandName)
 			}
+		case discordgo.InteractionMessageComponent:
+
+			customID := i.MessageComponentData().CustomID
+			commandName, value, ok := strings.Cut(customID, ":")
+			if !ok {
+				logger.Error("Invalid custom ID: %v", customID)
+				return
+			}
+
+			logger = logger.WithFields(map[string]any{
+				"custom_id": commandName,
+				"value":     value,
+			})
+
+			logger.Info("Handling interaction message component.")
+
+			err := d.handleInteractionMessageComponent(logger, s, i, commandName, value)
+			if err != nil {
+				logger.WithField("err", err).Error("Failed to handle interaction message component")
+				if err := simpleInteractionResponse(s, i, err.Error()); err != nil {
+					return
+				}
+			}
+		case discordgo.InteractionApplicationCommandAutocomplete:
+
+			data := i.ApplicationCommandData()
+			appCommandName := i.ApplicationCommandData().Name
+			logger = logger.WithFields(map[string]any{
+				"app_command_autocomplete": appCommandName,
+				"options":                  i.ApplicationCommandData().Options,
+			})
+
+			switch appCommandName {
+			case "unlink-headset":
+				userID := d.cache.DiscordIDToUserID(user.ID)
+				if userID == "" {
+					logger.Error("Failed to get user ID")
+					return
+				}
+
+				account, err := nk.AccountGetId(ctx, userID)
+				if err != nil {
+					logger.Error("Failed to get account", zap.Error(err))
+				}
+
+				devices := make([]string, 0, len(account.Devices))
+				for _, device := range account.Devices {
+					devices = append(devices, device.GetId())
+				}
+
+				if data.Options[0].StringValue() != "" {
+					// User is typing a custom device name
+					for i := 0; i < len(devices); i++ {
+						if !strings.Contains(strings.ToLower(devices[i]), strings.ToLower(data.Options[0].StringValue())) {
+							devices = append(devices[:i], devices[i+1:]...)
+							i--
+						}
+					}
+				}
+
+				choices := make([]*discordgo.ApplicationCommandOptionChoice, len(account.Devices))
+				for i, device := range account.Devices {
+					choices[i] = &discordgo.ApplicationCommandOptionChoice{
+						Name:  device.GetId(),
+						Value: device.GetId(),
+					}
+				}
+
+				if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+					Type: discordgo.InteractionApplicationCommandAutocompleteResult,
+					Data: &discordgo.InteractionResponseData{
+						Choices: choices, // This is basically the whole purpose of autocomplete interaction - return custom options to the user.
+					},
+				}); err != nil {
+					logger.Error("Failed to respond to interaction", zap.Error(err))
+				}
+			}
+
 		default:
 			logger.Info("Unhandled interaction type: %v", i.Type)
 		}
@@ -2940,4 +3213,73 @@ var discordMarkdownEscapeReplacer = strings.NewReplacer(
 
 func EscapeDiscordMarkdown(s string) string {
 	return discordMarkdownEscapeReplacer.Replace(s)
+}
+
+func (d *DiscordAppBot) SendIPApprovalRequest(ctx context.Context, userID, ip string, ipqs *IPQSResponse) error {
+	// Get the user's discord ID
+	discordID, err := GetDiscordIDByUserID(ctx, d.db, userID)
+	if err != nil {
+		return err
+	}
+
+	// Send the message to the user
+	channel, err := d.dg.UserChannelCreate(discordID)
+	if err != nil {
+		return err
+	}
+
+	// Send the message
+
+	embed := &discordgo.MessageEmbed{
+		Title:       "New Login Location",
+		Description: "Please verify the login attempt from a new location.",
+		Color:       0x00ff00,
+		Fields: []*discordgo.MessageEmbedField{
+			{
+				Name:   "IP Address",
+				Value:  ip,
+				Inline: true,
+			}},
+	}
+
+	if ipqs != nil {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name:   "Location",
+			Value:  fmt.Sprintf("%s, %s", ipqs.City, ipqs.Region),
+			Inline: true,
+		})
+
+	}
+	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+		Name:   "Note",
+		Value:  "If this login attempt was not made by you, please report it to EchoVRCE using the button below.",
+		Inline: false,
+	})
+	components := []discordgo.MessageComponent{
+		discordgo.ActionsRow{
+			Components: []discordgo.MessageComponent{
+				discordgo.Button{
+					Label:    "This is Me",
+					Style:    discordgo.SuccessButton,
+					CustomID: fmt.Sprintf("approve_ip:%s", ip),
+				},
+				discordgo.Button{
+					Label:    "Report",
+					Style:    discordgo.LinkButton,
+					URL:      "https://echovrce.com/report",
+					Disabled: false,
+				},
+			},
+		},
+	}
+
+	_, err = d.dg.ChannelMessageSendComplex(channel.ID, &discordgo.MessageSend{
+		Embeds:     []*discordgo.MessageEmbed{embed},
+		Components: components,
+	})
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

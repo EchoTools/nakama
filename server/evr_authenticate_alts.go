@@ -33,15 +33,15 @@ func (m *AlternateSearchMatch) IsMatch() bool {
 }
 
 func (m *AlternateSearchMatch) IsXPIMatch() bool {
-	return m.Entry.DeviceAuth.EvrID == m.Other.DeviceAuth.EvrID
+	return m.Entry.XPID == m.Entry.XPID
 }
 
 func (m *AlternateSearchMatch) IsHMDSerialNumberMatch() bool {
-	return m.Entry.DeviceAuth.HMDSerialNumber == m.Other.DeviceAuth.HMDSerialNumber
+	return m.Entry.LoginData.HMDSerialNumber == m.Entry.LoginData.HMDSerialNumber
 }
 
 func (m *AlternateSearchMatch) IsClientIPMatch() bool {
-	return m.Entry.DeviceAuth.ClientIP == m.Other.DeviceAuth.ClientIP
+	return m.Entry.ClientIP == m.Other.ClientIP
 }
 
 func (m *AlternateSearchMatch) IsSystemProfileMatch() bool {
@@ -63,13 +63,13 @@ func LoginAlternateSearch(ctx context.Context, nk runtime.NakamaModule, userID s
 	patterns := make([]string, 0)
 
 	for _, e := range loginHistory.History {
-		patterns = append(patterns, e.DeviceAuth.EvrID.String())
+		patterns = append(patterns, e.XPID.Token())
 
-		if !slices.Contains(ignoredHMDSerialNumbers, e.DeviceAuth.HMDSerialNumber) {
-			patterns = append(patterns, e.DeviceAuth.HMDSerialNumber)
+		if !slices.Contains(ignoredHMDSerialNumbers, e.LoginData.HMDSerialNumber) {
+			patterns = append(patterns, e.LoginData.HMDSerialNumber)
 		}
 
-		patterns = append(patterns, e.DeviceAuth.ClientIP)
+		patterns = append(patterns, e.ClientIP)
 
 		//patterns = append(patterns, e.SystemProfile())
 	}

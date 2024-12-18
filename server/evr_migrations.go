@@ -12,7 +12,7 @@ import (
 	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
-func MigrateDeviceHistory(ctx context.Context, nk runtime.NakamaModule, db *sql.DB, userID string) error {
+func MigrateUserData(ctx context.Context, nk runtime.NakamaModule, db *sql.DB, userID string) error {
 
 	history, err := LoginHistoryLoad(ctx, nk, userID)
 	if err != nil {
@@ -35,17 +35,20 @@ func MigrateDeviceHistory(ctx context.Context, nk runtime.NakamaModule, db *sql.
 				return fmt.Errorf("storage list error: %w", err)
 			}
 
+			// Associate evrLogins with clientAddrs by date/time
+
 			for _, record := range objs {
 
-				var loginProfile evr.LoginProfile
-				if err := json.Unmarshal([]byte(record.Value), &loginProfile); err != nil {
+				loginProfile := &evr.LoginProfile{}
+				if err := json.Unmarshal([]byte(record.Value), loginProfile); err != nil {
 					return fmt.Errorf("error unmarshalling login profile for %s: %v", record.GetKey(), err)
 				}
 
 				// Replace _'s with - in EvrID
 				strings.Replace(record.Key, "OVR_ORG", "OVR-ORG", 1)
-				evrID := evr.EvrId{}
-				clientAddr := ""
+
+				var xpid evr.EvrId
+				var clientAddr string
 
 				switch record.Collection {
 				case evrLoginStorageCollection:
@@ -53,17 +56,16 @@ func MigrateDeviceHistory(ctx context.Context, nk runtime.NakamaModule, db *sql.
 					if err != nil {
 						return fmt.Errorf("error parsing evrID: %w", err)
 					}
-					evrID = *e
+					xpid = *e
 				case clientAddrStorageCollection:
 					clientAddr = record.Key
 				}
 
-				deviceAuth := NewDeviceAuth(loginProfile.AppId, evrID, loginProfile.HmdSerialNumber, clientAddr)
-
 				history.Insert(&LoginHistoryEntry{
-					UpdatedAt:  record.UpdateTime.AsTime(),
-					DeviceAuth: *deviceAuth,
-					LoginData:  &loginProfile,
+					UpdatedAt: record.UpdateTime.AsTime(),
+					XPID:      xpid,
+					ClientIP:  clientAddr,
+					LoginData: loginProfile,
 				})
 
 				removeOperations = append(removeOperations, &runtime.StorageDelete{
