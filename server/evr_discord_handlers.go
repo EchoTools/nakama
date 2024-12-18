@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -189,7 +190,7 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(logger runtime.Logger,
 					discordgo.Button{
 						Label:    "Report",
 						Style:    discordgo.LinkButton,
-						URL:      "https://echovrce.com/report",
+						URL:      "https://discord.gg/AMMYQXcapm",
 						Disabled: false,
 					},
 				},
@@ -214,6 +215,24 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(logger runtime.Logger,
 			return fmt.Errorf("failed to respond to interaction: %w", err)
 		}
 		return err
+	case "unlink_device_id":
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return simpleInteractionResponse(s, i, "Invalid device ID.")
+		}
+
+		if err := nk.UnlinkDevice(ctx, userID, value); err != nil {
+			return fmt.Errorf("failed to unlink device ID: %w", err)
+		}
+
+		if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: fmt.Sprintf("Unlinked device ID `%s`.", value),
+			},
+		}); err != nil {
+			return fmt.Errorf("failed to respond to interaction: %w", err)
+		}
 	}
 
 	return nil

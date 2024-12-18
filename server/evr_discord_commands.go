@@ -1193,7 +1193,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 								Components: []discordgo.MessageComponent{
 									discordgo.SelectMenu{
 										// Select menu, as other components, must have a customID, so we set it to this value.
-										CustomID:    "select",
+										CustomID:    "unlink-headset",
 										Placeholder: "<select a device to unlink>",
 										Options:     options,
 									},

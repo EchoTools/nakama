@@ -800,7 +800,7 @@ func (m *EvrMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, db
 		return nil
 	}
 	state.Open = false
-	logger.WithField("state", state).Debug("MatchTerminate called.")
+	logger.Debug("MatchTerminate called.")
 	nk.MetricsCounterAdd("match_terminate_count", state.MetricsTags(), 1)
 	if state.server != nil {
 		// Disconnect the players

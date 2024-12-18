@@ -131,7 +131,11 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	}()
 
 	//go PurgeNonPlayers(ctx, logger, db, nk)
-
+	go func() {
+		if err := MigrateAllUserData(context.Background(), logger, nk, db); err != nil {
+			logger.Error("Error migrating user data: %v", err)
+		}
+	}()
 	logger.Info("Initialized runtime module.")
 	return nil
 }

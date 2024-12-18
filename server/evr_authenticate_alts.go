@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"slices"
-	"strings"
 
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -58,14 +56,12 @@ func (m *AlternateSearchMatch) Matches() (xpi bool, hmdSerialNumber bool, client
 
 func LoginAlternateSearch(ctx context.Context, nk runtime.NakamaModule, userID string, loginHistory *LoginHistory) ([]*AlternateSearchMatch, error) {
 
-	ignoredHMDSerialNumbers := []string{"N/A", "unknown", "", "1PASH5D1P17365"}
-
 	patterns := make([]string, 0)
 
 	for _, e := range loginHistory.History {
 		patterns = append(patterns, e.XPID.Token())
 
-		if !slices.Contains(ignoredHMDSerialNumbers, e.LoginData.HMDSerialNumber) {
+		if _, ok := IgnoredLoginValues[e.LoginData.HMDSerialNumber]; !ok {
 			patterns = append(patterns, e.LoginData.HMDSerialNumber)
 		}
 
@@ -83,18 +79,24 @@ func LoginAlternateSearch(ctx context.Context, nk runtime.NakamaModule, userID s
 	var err error
 	var result *api.StorageObjects
 	for {
-		qparts := make([]string, len(patterns))
+
+		values := make([]string, 0, len(loginHistory.History)*4)
+
 		for _, pattern := range patterns {
-			if pattern == "" {
+			if _, ok := IgnoredLoginValues[pattern]; ok {
 				continue
 			}
-			qparts = append(qparts, fmt.Sprintf("value.cache:%s", Query.Escape(pattern)))
+			values = append(values, pattern)
 		}
-		query := strings.Trim(strings.Join(qparts, " "), " ")
-		log.Printf("query: %s", query)
-		result, cursor, err = nk.StorageIndexList(ctx, SystemUserID, LoginHistoryCacheIndex, strings.Join(qparts[:1], " "), 100, nil, cursor)
+
+		if len(values) == 0 {
+			break
+		}
+
+		query := fmt.Sprintf("value.cache:/(%s)/", Query.Join(values, "|"))
+		result, cursor, err = nk.StorageIndexList(ctx, SystemUserID, LoginHistoryCacheIndex, query, 100, nil, cursor)
 		if err != nil {
-			return nil, fmt.Errorf("error listing display name history: %w", err)
+			return nil, fmt.Errorf("error listing alt index: %w", err)
 		}
 
 		for _, obj := range result.Objects {
@@ -103,7 +105,7 @@ func LoginAlternateSearch(ctx context.Context, nk runtime.NakamaModule, userID s
 			}
 			otherHistory := LoginHistory{}
 			if err := json.Unmarshal([]byte(obj.Value), &otherHistory); err != nil {
-				return nil, fmt.Errorf("error unmarshalling display name history: %w", err)
+				return nil, fmt.Errorf("error unmarshalling alt history: %w", err)
 			}
 
 			for _, e := range loginHistory.History {
