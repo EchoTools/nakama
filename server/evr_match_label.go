@@ -20,6 +20,7 @@ type slotReservation struct {
 type MatchLabel struct {
 	ID             MatchID      `json:"id"`                        // The Session Id used by EVR (the same as match id)
 	Open           bool         `json:"open"`                      // Whether the lobby is open to new players (Matching Only)
+	LockedAt       time.Time    `json:"locked_at,omitempty"`       // The time the match was locked.
 	LobbyType      LobbyType    `json:"lobby_type"`                // The type of lobby (Public, Private, Unassigned) (EVR)
 	Mode           evr.Symbol   `json:"mode,omitempty"`            // The mode of the lobby (Arena, Combat, Social, etc.) (EVR)
 	Level          evr.Symbol   `json:"level,omitempty"`           // The level to play on (EVR).
@@ -104,7 +105,7 @@ func (s *MatchLabel) IsPublicMatch() bool {
 }
 
 func (s *MatchLabel) IsLocked() bool {
-	if !s.Open || (s.GameState != nil && !s.GameState.LockedAt.IsZero()) {
+	if !s.Open || !s.LockedAt.IsZero() {
 		return true
 	}
 	return false
@@ -415,7 +416,6 @@ func (l *MatchLabel) PublicView() *MatchLabel {
 			BlueScore:   l.GameState.BlueScore,
 			OrangeScore: l.GameState.OrangeScore,
 			Teams:       l.GameState.Teams,
-			LockedAt:    l.GameState.LockedAt,
 		}
 		if l.GameState.RoundClock != nil {
 			gs.RoundClock = l.GameState.RoundClock.LatestAsNewClock()
@@ -426,6 +426,7 @@ func (l *MatchLabel) PublicView() *MatchLabel {
 		LobbyType:        l.LobbyType,
 		ID:               l.ID,
 		Open:             l.Open,
+		LockedAt:         l.LockedAt,
 		GameState:        gs,
 		StartTime:        l.StartTime,
 		CreatedAt:        l.CreatedAt,
