@@ -390,6 +390,11 @@ func (c *DiscordCache) SyncGuildGroupMember(ctx context.Context, userID, groupID
 		displayName = sanitizeDisplayName(member.User.Username)
 	}
 
+	account, err := c.nk.AccountGetId(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("error getting account: %w", err)
+	}
+
 	prevDisplayName := accountMetadata.GetDisplayName(groupID)
 
 	if prevDisplayName != displayName {
@@ -417,7 +422,9 @@ func (c *DiscordCache) SyncGuildGroupMember(ctx context.Context, userID, groupID
 			}
 		} else {
 
-			if err := DisplayNameHistorySet(ctx, c.nk, accountMetadata.ID(), groupID, displayName); err != nil {
+			isInactive := len(account.Devices) == 0
+
+			if err := DisplayNameHistorySet(ctx, c.nk, accountMetadata.ID(), groupID, displayName, isInactive); err != nil {
 				return fmt.Errorf("error adding display name history entry: %w", err)
 			}
 
@@ -431,10 +438,6 @@ func (c *DiscordCache) SyncGuildGroupMember(ctx context.Context, userID, groupID
 	}
 	// lock the cache since it might be updated.
 
-	account, err := c.nk.AccountGetId(ctx, userID)
-	if err != nil {
-		return fmt.Errorf("error getting account: %w", err)
-	}
 	// Add the linked role if necessary.
 	guildGroup, found := c.guildGroupCache.GuildGroup(groupID)
 	if !found {

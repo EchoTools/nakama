@@ -285,9 +285,10 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 
 	displayName := metadata.GetActiveGroupDisplayName()
 
-	if err := DisplayNameHistorySet(ctx, p.runtimeModule, userID, groupID.String(), displayName); err != nil {
+	if err := DisplayNameHistorySet(ctx, p.runtimeModule, userID, groupID.String(), displayName, false); err != nil {
 		logger.Warn("Failed to set display name history", zap.Error(err))
 	}
+
 	// Update the user's metadata
 	if err := p.runtimeModule.AccountUpdateId(ctx, userID, "", metadata.MarshalMap(), metadata.GetActiveGroupDisplayName(), "", "", "", ""); err != nil {
 		return settings, fmt.Errorf("failed to update user metadata: %w", err)

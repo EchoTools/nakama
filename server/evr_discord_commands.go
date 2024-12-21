@@ -1212,7 +1212,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			if err := func() error {
-				// Get the userid by username
+
 				return nk.UnlinkDevice(ctx, userID, xpid)
 
 			}(); err != nil {

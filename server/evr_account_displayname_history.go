@@ -24,10 +24,11 @@ type DisplayNameHistoryEntry struct {
 }
 
 type DisplayNameHistory struct {
-	Histories map[string][]DisplayNameHistoryEntry `json:"history"`  // map[groupID]DisplayNameHistoryEntry
-	Cache     []string                             `json:"cache"`    // All past display names
-	Reserved  []string                             `json:"reserved"` // staticly reserved names
-	Active    []string                             `json:"active"`   // names that the user has reserved
+	Histories  map[string][]DisplayNameHistoryEntry `json:"history"`  // map[groupID]DisplayNameHistoryEntry
+	Cache      []string                             `json:"cache"`    // All past display names
+	Reserved   []string                             `json:"reserved"` // staticly reserved names
+	Active     []string                             `json:"active"`   // names that the user has reserved
+	IsInactive bool                                 `json:"is_inactive"`
 }
 
 func NewDisplayNameHistory() *DisplayNameHistory {
@@ -60,7 +61,13 @@ func (h *DisplayNameHistory) Set(groupID, displayName string) bool {
 	})
 
 	h.updateCache()
-	h.updateActive()
+
+	if h.IsInactive {
+		h.Active = make([]string, 0)
+	} else {
+		h.updateActive()
+	}
+
 	return true
 }
 
@@ -165,13 +172,19 @@ func DisplayNameHistoryStore(ctx context.Context, nk runtime.NakamaModule, userI
 	return nil
 }
 
-func DisplayNameHistorySet(ctx context.Context, nk runtime.NakamaModule, userID string, guildID string, displayName string) error {
+func DisplayNameHistorySet(ctx context.Context, nk runtime.NakamaModule, userID string, guildID string, displayName string, isInactive bool) error {
 	history, err := DisplayNameHistoryLoad(ctx, nk, userID)
 	if err != nil {
 		return fmt.Errorf("error getting display name history: %w", err)
 	}
 
 	updated := false
+
+	if history.IsInactive != isInactive {
+		history.IsInactive = true
+		updated = true
+		history.Active = make([]string, 0)
+	}
 
 	if u := history.Set(guildID, displayName); u {
 		updated = true
