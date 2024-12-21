@@ -589,12 +589,12 @@ func recordMatchTimeToLeaderboard(ctx context.Context, nk runtime.NakamaModule, 
 			err = nk.LeaderboardCreate(ctx, id, true, "desc", "incr", PeriodicityToSchedule(period), nil, true)
 
 			if err != nil {
-				return fmt.Errorf("Leaderboard create error: %v", err)
+				return fmt.Errorf("Leaderboard create error: %w", err)
 			} else {
 				// Retry the write
 				_, err := nk.LeaderboardRecordWrite(ctx, id, userID, username, matchTimeSecs, 0, nil, nil)
 				if err != nil {
-					return fmt.Errorf("Leaderboard record write error: %v", err)
+					return fmt.Errorf("Leaderboard record write error: %w", err)
 				}
 			}
 		}

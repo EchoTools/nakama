@@ -71,7 +71,7 @@ func (m *MatchLogManager) AddLog(message SessionRemoteLog) error {
 		Message:   message,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to insert log entry: %v", err)
+		return fmt.Errorf("failed to insert log entry: %w", err)
 	}
 
 	return nil

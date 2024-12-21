@@ -170,7 +170,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(ctx context.Context, logger 
 			// Try to resolve it as a hostname
 			ips, err := net.LookupIP(parts[0])
 			if err != nil {
-				return errFailedRegistration(session, logger, fmt.Errorf("invalid address `%s`: %v", parts[0], err), evr.BroadcasterRegistration_Unknown)
+				return errFailedRegistration(session, logger, fmt.Errorf("invalid address `%s`: %w", parts[0], err), evr.BroadcasterRegistration_Unknown)
 			}
 			externalIP = ips[0]
 		}
@@ -372,13 +372,13 @@ func BroadcasterHealthcheck(localIP net.IP, remoteIP net.IP, port int, timeout t
 	// Establish a UDP connection to the specified address
 	conn, err := net.DialUDP("udp", laddr, raddr)
 	if err != nil {
-		return 0, fmt.Errorf("could not establish connection to %v: %v", raddr, err)
+		return 0, fmt.Errorf("could not establish connection to %v: %w", raddr, err)
 	}
 	defer conn.Close() // Ensure the connection is closed when the function ends
 
 	// Set a deadline for the connection to prevent hanging indefinitely
 	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
-		return 0, fmt.Errorf("could not set deadline for connection to %v: %v", raddr, err)
+		return 0, fmt.Errorf("could not set deadline for connection to %v: %w", raddr, err)
 	}
 
 	// Generate a random 8-byte number for the ping request
@@ -398,7 +398,7 @@ func BroadcasterHealthcheck(localIP net.IP, remoteIP net.IP, port int, timeout t
 
 	// Send the ping request to the broadcaster
 	if _, err := conn.Write(request); err != nil {
-		return 0, fmt.Errorf("could not send ping request to %v: %v", raddr, err)
+		return 0, fmt.Errorf("could not send ping request to %v: %w", raddr, err)
 	}
 
 	// Read the response from the broadcaster
@@ -406,7 +406,7 @@ func BroadcasterHealthcheck(localIP net.IP, remoteIP net.IP, port int, timeout t
 		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 			return -1, fmt.Errorf("ping request to %v timed out (>%dms)", raddr, timeout.Milliseconds())
 		}
-		return 0, fmt.Errorf("could not read ping response from %v: %v", raddr, err)
+		return 0, fmt.Errorf("could not read ping response from %v: %w", raddr, err)
 	}
 	// Calculate the round trip time
 	rtt = time.Since(start)

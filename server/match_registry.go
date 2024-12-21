@@ -247,7 +247,7 @@ func (r *LocalMatchRegistry) CreateMatch(ctx context.Context, createFn RuntimeMa
 	// Start the match.
 	mh, err := r.NewMatch(matchLogger, id, core, stopped, params)
 	if err != nil {
-		return "", fmt.Errorf("error creating match: %v", err.Error())
+		return "", fmt.Errorf("error creating match: %w", err)
 	}
 
 	return mh.IDStr, nil
@@ -371,7 +371,7 @@ func (r *LocalMatchRegistry) ListMatches(ctx context.Context, limit int, authori
 
 	indexReader, err := r.indexWriter.Reader()
 	if err != nil {
-		return nil, nil, fmt.Errorf("error accessing index reader: %v", err.Error())
+		return nil, nil, fmt.Errorf("error accessing index reader: %w", err)
 	}
 	defer func() {
 		err = indexReader.Close()
@@ -404,7 +404,7 @@ func (r *LocalMatchRegistry) ListMatches(ctx context.Context, limit int, authori
 		} else {
 			parsed, err := ParseQueryString(queryString)
 			if err != nil {
-				return nil, nil, fmt.Errorf("error parsing query string: %v", err.Error())
+				return nil, nil, fmt.Errorf("error parsing query string: %w", err)
 			}
 			q = parsed
 		}
@@ -422,7 +422,7 @@ func (r *LocalMatchRegistry) ListMatches(ctx context.Context, limit int, authori
 
 		labelResultsItr, err := indexReader.Search(ctx, searchReq)
 		if err != nil {
-			return nil, nil, fmt.Errorf("error listing matches by query: %v", err.Error())
+			return nil, nil, fmt.Errorf("error listing matches by query: %w", err)
 		}
 		labelResults, err = IterateBlugeMatches(labelResultsItr,
 			map[string]struct{}{
@@ -432,7 +432,7 @@ func (r *LocalMatchRegistry) ListMatches(ctx context.Context, limit int, authori
 				"node":         {},
 			}, r.logger)
 		if err != nil {
-			return nil, nil, fmt.Errorf("error iterating bluge matches: %v", err.Error())
+			return nil, nil, fmt.Errorf("error iterating bluge matches: %w", err)
 		}
 	} else if label != nil {
 		if authoritative != nil && !authoritative.Value {
@@ -458,7 +458,7 @@ func (r *LocalMatchRegistry) ListMatches(ctx context.Context, limit int, authori
 
 		labelResultsItr, err := indexReader.Search(ctx, searchReq)
 		if err != nil {
-			return nil, nil, fmt.Errorf("error listing matches by label: %v", err.Error())
+			return nil, nil, fmt.Errorf("error listing matches by label: %w", err)
 		}
 		labelResults, err = IterateBlugeMatches(labelResultsItr,
 			map[string]struct{}{
@@ -468,7 +468,7 @@ func (r *LocalMatchRegistry) ListMatches(ctx context.Context, limit int, authori
 				"node":         {},
 			}, r.logger)
 		if err != nil {
-			return nil, nil, fmt.Errorf("error iterating bluge matches: %v", err.Error())
+			return nil, nil, fmt.Errorf("error iterating bluge matches: %w", err)
 		}
 	} else if authoritative == nil || authoritative.Value {
 		// Not using label/query filter but we still need access to the indexed labels to return them
@@ -495,7 +495,7 @@ func (r *LocalMatchRegistry) ListMatches(ctx context.Context, limit int, authori
 
 		labelResultsItr, err := indexReader.Search(ctx, searchReq)
 		if err != nil {
-			return nil, nil, fmt.Errorf("error listing matches by label: %v", err.Error())
+			return nil, nil, fmt.Errorf("error listing matches by label: %w", err)
 		}
 		labelResults, err = IterateBlugeMatches(labelResultsItr,
 			map[string]struct{}{
@@ -505,7 +505,7 @@ func (r *LocalMatchRegistry) ListMatches(ctx context.Context, limit int, authori
 				"node":         {},
 			}, r.logger)
 		if err != nil {
-			return nil, nil, fmt.Errorf("error iterating bluge matches: %v", err.Error())
+			return nil, nil, fmt.Errorf("error iterating bluge matches: %w", err)
 		}
 
 		if authoritative == nil {

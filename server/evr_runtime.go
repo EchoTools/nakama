@@ -80,7 +80,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 
 	for name, rpc := range rpcs {
 		if err = initializer.RegisterRpc(name, rpc); err != nil {
-			return fmt.Errorf("unable to register %s: %v", name, err)
+			return fmt.Errorf("unable to register %s: %w", name, err)
 		}
 	}
 
@@ -456,7 +456,7 @@ func EvrApiHttpHandler(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 
 	response, err := json.Marshal(map[string]interface{}{"message": message})
 	if err != nil {
-		return "", fmt.Errorf("error marshalling response: %v", err)
+		return "", fmt.Errorf("error marshalling response: %w", err)
 	}
 
 	return string(response), nil

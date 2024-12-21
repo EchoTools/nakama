@@ -207,7 +207,7 @@ func (p *EvrPipeline) addTicket(ctx context.Context, logger *zap.Logger, session
 		// Matchmake with the lobby group via the party handler.
 		ticket, otherPresences, err = lobbyGroup.MatchmakerAdd(sessionID, session.pipeline.node, query, minCount, maxCount, countMultiple, stringProps, numericProps)
 		if err != nil {
-			return "", fmt.Errorf("failed to add party matchmaker ticket: %v", err)
+			return "", fmt.Errorf("failed to add party matchmaker ticket: %w", err)
 		}
 
 	} else {
@@ -226,7 +226,7 @@ func (p *EvrPipeline) addTicket(ctx context.Context, logger *zap.Logger, session
 		ticket, _, err = session.matchmaker.Add(ctx, presences, sessionID, "", query, minCount, maxCount, countMultiple, stringProps, numericProps)
 		if err != nil {
 			logger.Error("Failed to add solo matchmaker ticket", zap.Error(err), zap.String("query", query), zap.Any("string_properties", stringProps), zap.Any("numeric_properties", numericProps))
-			return "", fmt.Errorf("failed to add solo matchmaker ticket: %v", err)
+			return "", fmt.Errorf("failed to add solo matchmaker ticket: %w", err)
 		}
 
 	}
