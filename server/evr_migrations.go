@@ -39,7 +39,7 @@ func MigrateUserData(ctx context.Context, nk runtime.NakamaModule, db *sql.DB, u
 
 				loginProfile := &evr.LoginProfile{}
 				if err := json.Unmarshal([]byte(record.Value), loginProfile); err != nil {
-					return fmt.Errorf("error unmarshalling login profile for %s: %v", record.GetKey(), err)
+					return fmt.Errorf("error unmarshalling login profile for %s: %w", record.GetKey(), err)
 				}
 
 				// Replace _'s with - in EvrID

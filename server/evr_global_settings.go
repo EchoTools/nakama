@@ -39,7 +39,7 @@ func LoadGlobalSettingsData(ctx context.Context, nk runtime.NakamaModule) (*Glob
 		},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to read global settings: %v", err)
+		return nil, fmt.Errorf("failed to read global settings: %w", err)
 	}
 
 	data := GlobalSettingsData{}
@@ -54,11 +54,11 @@ func LoadGlobalSettingsData(ctx context.Context, nk runtime.NakamaModule) (*Glob
 			Value:           data.String(),
 		}})
 		if err != nil {
-			return nil, fmt.Errorf("failed to write global settings: %v", err)
+			return nil, fmt.Errorf("failed to write global settings: %w", err)
 		}
 	} else {
 		if err := json.Unmarshal([]byte(objs[0].Value), &data); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal global settings: %v", err)
+			return nil, fmt.Errorf("failed to unmarshal global settings: %w", err)
 		}
 	}
 	globalSettings.Store(&data)

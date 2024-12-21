@@ -459,7 +459,7 @@ func AllocateGameServer(ctx context.Context, logger runtime.Logger, nk runtime.N
 
 	matches, err := nk.MatchList(ctx, 100, true, "", nil, nil, query)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find matches: %v", err)
+		return nil, fmt.Errorf("failed to find matches: %w", err)
 	}
 
 	if len(matches) == 0 {
@@ -471,7 +471,7 @@ func AllocateGameServer(ctx context.Context, logger runtime.Logger, nk runtime.N
 	for _, match := range matches {
 		label := &MatchLabel{}
 		if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), label); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal match label: %v", err)
+			return nil, fmt.Errorf("failed to unmarshal match label: %w", err)
 		}
 		labels = append(labels, label)
 	}
@@ -603,7 +603,7 @@ func LoadServerRatings(ctx context.Context, logger runtime.Logger, nk runtime.Na
 		},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to read server ratings: %v", err)
+		return nil, fmt.Errorf("failed to read server ratings: %w", err)
 	}
 
 	if len(objs) == 0 {
@@ -617,7 +617,7 @@ func LoadServerRatings(ctx context.Context, logger runtime.Logger, nk runtime.Na
 		})
 
 		if err != nil {
-			return nil, fmt.Errorf("failed to write server ratings: %v", err)
+			return nil, fmt.Errorf("failed to write server ratings: %w", err)
 		}
 
 		return &ServerRatings{
@@ -628,7 +628,7 @@ func LoadServerRatings(ctx context.Context, logger runtime.Logger, nk runtime.Na
 
 	ratings := &ServerRatings{}
 	if err := json.Unmarshal([]byte(objs[0].Value), ratings); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal server ratings: %v", err)
+		return nil, fmt.Errorf("failed to unmarshal server ratings: %w", err)
 	}
 
 	return ratings, nil

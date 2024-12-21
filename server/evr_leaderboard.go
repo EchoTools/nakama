@@ -105,7 +105,7 @@ func (r *LeaderboardRegistry) profileUpdate(userID, displayName string, profile 
 		for meta, value := range stats {
 			record, err := r.LeaderboardTabletStatWrite(context.Background(), meta, userID, displayName, value)
 			if err != nil {
-				return fmt.Errorf("Leaderboard record write error: %v", err)
+				return fmt.Errorf("Leaderboard record write error: %w", err)
 			}
 
 			// Update the tablet stats with the record from the leaderboard
@@ -128,7 +128,7 @@ func (r *LeaderboardRegistry) ProcessProfileUpdate(ctx context.Context, logger *
 	// Build the operations
 	ops := r.buildOperations(mode, payload)
 	if err := r.profileUpdate(userID, displayName, serverProfile, ops); err != nil {
-		return fmt.Errorf("Profile update error: %v", err)
+		return fmt.Errorf("Profile update error: %w", err)
 	}
 	return nil
 }
@@ -205,7 +205,7 @@ func (r *LeaderboardRegistry) LeaderboardTabletStatWrite(ctx context.Context, me
 		err = r.nk.LeaderboardCreate(ctx, meta.ID(), true, sortOrder, operator, resetSchedule, metadata, enableRanks)
 
 		if err != nil {
-			return nil, fmt.Errorf("Leaderboard create error: %v", err)
+			return nil, fmt.Errorf("Leaderboard create error: %w", err)
 		} else {
 			// Retry the write
 			record, err = r.nk.LeaderboardRecordWrite(ctx, meta.ID(), userID, displayName, score, subscore, nil, &override)

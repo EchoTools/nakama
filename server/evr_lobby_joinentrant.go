@@ -235,12 +235,12 @@ func (p *EvrPipeline) authorizeGuildGroupSession(ctx context.Context, session Se
 		// Check the account creation date.
 		discordID, err := GetDiscordIDByUserID(ctx, p.db, userID)
 		if err != nil {
-			return fmt.Errorf("failed to get discord ID by user ID: %v", err)
+			return fmt.Errorf("failed to get discord ID by user ID: %w", err)
 		}
 
 		t, err := discordgo.SnowflakeTimestamp(discordID)
 		if err != nil {
-			return fmt.Errorf("failed to get discord snowflake timestamp: %v", err)
+			return fmt.Errorf("failed to get discord snowflake timestamp: %w", err)
 		}
 
 		if t.After(time.Now().AddDate(0, 0, -groupMetadata.MinimumAccountAgeDays)) {

@@ -191,7 +191,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 					}
 
 					if _, err := p.leaderboardRegistry.LeaderboardTabletStatWrite(context.Background(), meta, userID, username, 1.0); err != nil {
-						return fmt.Errorf("Leaderboard record write error: %v", err)
+						return fmt.Errorf("Leaderboard record write error: %w", err)
 					}
 				}
 			}
