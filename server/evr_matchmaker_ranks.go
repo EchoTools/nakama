@@ -17,9 +17,9 @@ func CalculateSmoothedPlayerRankPercentile(ctx context.Context, logger *zap.Logg
 		defaultRankPercentile = userSettings.RankPercentileDefault
 	}
 
-	baseSchedule := globalSettings.RankResetSchedule
+	activeSchedule := globalSettings.RankResetSchedule
 	if userSettings.RankResetSchedule != "" {
-		baseSchedule = userSettings.RankResetSchedule
+		activeSchedule = userSettings.RankResetSchedule
 	}
 
 	dampingSchedule := globalSettings.RankResetScheduleDamping
@@ -44,18 +44,17 @@ func CalculateSmoothedPlayerRankPercentile(ctx context.Context, logger *zap.Logg
 		}
 	}
 
-	basePercentile, err := RecalculatePlayerRankPercentile(ctx, logger, nk, userID, mode, baseSchedule, defaultRankPercentile, boardWeights)
-	if err != nil {
-		return 0.0, fmt.Errorf("failed to get overall percentile: %w", err)
-	}
-
 	dampingPercentile, err := RecalculatePlayerRankPercentile(ctx, logger, nk, userID, mode, dampingSchedule, defaultRankPercentile, boardWeights)
 	if err != nil {
-		return 0.0, fmt.Errorf("failed to get daily percentile: %w", err)
+		return 0.0, fmt.Errorf("failed to get damping percentile: %w", err)
 	}
-	// Ensure the percentile is at least 0.2
 
-	return basePercentile + (dampingPercentile-basePercentile)*dampingFactor, nil
+	activePercentile, err := RecalculatePlayerRankPercentile(ctx, logger, nk, userID, mode, activeSchedule, dampingPercentile, boardWeights)
+	if err != nil {
+		return 0.0, fmt.Errorf("failed to get active percentile: %w", err)
+	}
+
+	return activePercentile + (dampingPercentile-activePercentile)*dampingFactor, nil
 }
 
 func RecalculatePlayerRankPercentile(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, userID string, mode evr.Symbol, periodicity string, defaultRankPercentile float64, boardNameWeights map[string]float64) (float64, error) {
