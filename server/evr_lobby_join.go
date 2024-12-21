@@ -3,8 +3,10 @@ package server
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
+	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
 )
 
@@ -33,6 +35,15 @@ func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session
 	presence, err := EntrantPresenceFromLobbyParams(session, params)
 	if err != nil {
 		return fmt.Errorf("failed to create presences: %w", err)
+	}
+
+	switch label.Mode {
+	case evr.ModeSocialPublic, evr.ModeSocialPrivate:
+		if params.Role == evr.TeamUnassigned {
+			params.Role = evr.TeamSocial
+		} else if slices.Contains([]int{evr.TeamModerator, evr.TeamSocial}, params.Role) {
+			return fmt.Errorf("invalid role for social lobby: %d", params.Role)
+		}
 	}
 
 	presence.RoleAlignment = params.Role
