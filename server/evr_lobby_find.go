@@ -145,6 +145,7 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 	}
 	logger.Debug("Joined party group", zap.String("partyID", lobbyGroup.IDStr()))
 
+	rankPercentiles := make([]float64, 0, lobbyGroup.Size())
 	// If this is the leader, then set the presence status to the current match ID.
 	if isLeader {
 
@@ -174,14 +175,28 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 				if err := p.runtimeModule.StreamUserKick(stream.Mode, stream.Subject.String(), stream.Subcontext.String(), stream.Label, member.Presence); err != nil {
 					return nil, nil, false, fmt.Errorf("failed to kick party member: %w", err)
 				}
+			} else {
+
+				memberParams := &LobbySessionParameters{}
+				if err := json.Unmarshal([]byte(member.Presence.GetStatus()), &memberParams); err != nil {
+					return nil, nil, false, fmt.Errorf("failed to unmarshal member params: %w", err)
+				}
+
+				rankPercentiles = append(rankPercentiles, memberParams.GetRankPercentile())
 			}
 		}
 
 		partySize := lobbyGroup.Size()
 		logger.Debug("Party is ready", zap.String("leader", session.id.String()), zap.Int("size", partySize), zap.Strings("members", memberUsernames))
 
-		lobbyParams.SetPartySize(partySize)
+		// Average the rank percentiles
+		averageRankPercentile := 0.0
+		for _, rankPercentile := range rankPercentiles {
+			averageRankPercentile += rankPercentile
+		}
+		averageRankPercentile /= float64(partySize)
 
+		lobbyParams.SetPartySize(partySize)
 	}
 
 	memberSessionIDs := []uuid.UUID{session.id}
@@ -360,7 +375,7 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 	query := lobbyParams.BackfillSearchQuery(includeRankPercentile, includeMaxRTT)
 
 	rtts := lobbyParams.latencyHistory.LatestRTTs()
-
+	rankPercentile := lobbyParams.GetRankPercentile()
 	cycleCount := 0
 	backfillMultipler := 1.25 // Multiplier of matchmaking ticket timeout before starting backfill search
 
@@ -428,13 +443,13 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 			}
 
 			// By rank percentile difference
-			rankPercentileDifferenceA := math.Abs(a.State.RankPercentile - lobbyParams.RankPercentile)
-			rankPercentileDifferenceB := math.Abs(b.State.RankPercentile - lobbyParams.RankPercentile)
+			rankPercentileDifferenceA := math.Abs(a.State.RankPercentile - rankPercentile)
+			rankPercentileDifferenceB := math.Abs(b.State.RankPercentile - rankPercentile)
 
 			if rankPercentileDifferenceA < lobbyParams.RankPercentileMaxDelta && rankPercentileDifferenceB > lobbyParams.RankPercentileMaxDelta {
 				return -1
 			}
-			if rankPercentileDifferenceA > lobbyParams.RankPercentile && rankPercentileDifferenceB < lobbyParams.RankPercentile {
+			if rankPercentileDifferenceA > rankPercentile && rankPercentileDifferenceB < rankPercentile {
 				return 1
 			}
 
