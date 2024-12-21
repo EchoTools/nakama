@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -92,7 +93,14 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 
 	defer func() {
 
-		isLeader := lobbyGroup == nil || lobbyGroup.GetLeader().SessionId == session.id.String()
+		isLeader := true
+
+		if lobbyGroup != nil {
+			leader := lobbyGroup.GetLeader()
+			if leader != nil && leader.SessionId != session.id.String() {
+				isLeader = false
+			}
+		}
 		// If this is the leader, or a solo player, send the metrics
 
 		tags := lobbyParams.MetricsTags()
