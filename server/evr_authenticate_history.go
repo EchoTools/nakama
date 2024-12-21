@@ -116,15 +116,27 @@ func (h *LoginHistory) UpdateAlternateUserIDs(ctx context.Context, nk runtime.Na
 		return fmt.Errorf("error searching for alternate logins: %w", err)
 	}
 
+	// collect the userIDs of all the alternate logins
 	alternateMap := make(map[string]struct{})
 	for _, m := range matches {
 		alternateMap[m.OtherUserID] = struct{}{}
+
+		otherHistory, err := LoginHistoryLoad(ctx, nk, m.OtherUserID)
+		if err != nil {
+			return fmt.Errorf("error loading alternate login history: %w", err)
+		}
+
+		for _, k := range otherHistory.AlternateUserIDs {
+			alternateMap[k] = struct{}{}
+		}
 	}
 
 	h.AlternateUserIDs = make([]string, 0)
 	for k := range alternateMap {
 		h.AlternateUserIDs = append(h.AlternateUserIDs, k)
 	}
+
+	slices.Sort(h.AlternateUserIDs)
 
 	return nil
 }
