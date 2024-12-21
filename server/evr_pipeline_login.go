@@ -101,58 +101,32 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	params.XPID = xpid
 
 	var account *api.Account
-
+	var authErr error
+	// device authentication
 	if session.userID.IsNil() {
 		// Construct the device auth token from the login payload
 
-		account, err = p.authenticateAccount(ctx, logger, session, xpid, session.clientIP, params.AuthDiscordID, params.AuthPassword, payload)
-		if err != nil {
-			return settings, err
-		}
+		account, authErr = p.authenticateHeadset(ctx, logger, session, xpid, session.clientIP, params.AuthPassword, payload)
 
 	} else {
 
-		// Validate the device link
-		deviceUserID, _, _, err := AuthenticateDevice(ctx, session.logger, session.pipeline.db, xpid.Token(), "", false)
-		switch status.Code(err) {
-		case codes.OK:
-
-			if deviceUserID != session.userID.String() {
-				logger.Error("Device is already linked to another account", zap.String("device_user_id", deviceUserID), zap.String("session_user_id", session.userID.String()))
-				return settings, fmt.Errorf("device is already linked to another account")
-			}
-			// The account was found.
-			account, err = GetAccount(ctx, session.logger, session.pipeline.db, session.statusRegistry, uuid.FromStringOrNil(deviceUserID))
-			if err != nil {
-				return settings, fmt.Errorf("failed to get account: %w", err)
-			}
-		case codes.NotFound:
-			// The account was not found.
-			// try to link the device to the account
-			err := p.runtimeModule.LinkDevice(ctx, session.UserID().String(), xpid.Token())
-			if err != nil {
-				return settings, fmt.Errorf("failed to link device: %w", err)
-			}
-		default:
-			// Possibly banned or other error.
-			return settings, err
-		}
-
-		account, err = GetAccount(ctx, logger, p.db, session.statusRegistry, session.userID)
-		if err != nil {
-			return settings, fmt.Errorf("failed to get account: %w", err)
-		}
-
+		// Validate the device ID from the authenticated session
+		account, authErr = p.validateDeviceID(ctx, logger, session, xpid)
 	}
 
 	if account == nil {
-		return settings, fmt.Errorf("account not found")
+		return settings, fmt.Errorf("account is nil: %w", err)
 	}
 
+	// add the login attempt to the login history
 	loginHistory, err := LoginHistoryLoad(ctx, p.runtimeModule, account.User.Id)
 	if err != nil {
 		return settings, fmt.Errorf("failed to load login history: %w", err)
 	}
+	defer loginHistory.Store(ctx, p.runtimeModule)
+
+	loginHistory.UpdateAlternateUserIDs(ctx, p.runtimeModule)
+	loginHistory.Update(xpid, session.clientIP, &payload)
 
 	if session.UserID().IsNil() {
 		// Validate the clientIP
@@ -181,7 +155,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	params.DiscordID = p.discordCache.UserIDToDiscordID(userID)
 
 	// Migrate any account data
-	if err := MigrateUserData(ctx, p.runtimeModule, p.db, userID); err != nil {
+	if err := MigrateUserData(ctx, p.runtimeModule, p.db, userID, loginHistory); err != nil {
 		logger.Warn("Failed to migrate device history", zap.Error(err))
 	}
 
