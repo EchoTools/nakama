@@ -3266,7 +3266,7 @@ func (d *DiscordAppBot) SendIPApprovalRequest(ctx context.Context, userID, ip st
 				discordgo.Button{
 					Label:    "Report",
 					Style:    discordgo.LinkButton,
-					URL:      "https://echovrce.com/report",
+					URL:      "https://discord.gg/AMMYQXcapm",
 					Disabled: false,
 				},
 			},
