@@ -2208,7 +2208,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return errors.New("failed to update guild group metadata")
 			}
 
-			presences, err := d.nk.StreamUserList(StreamModeService, targetUserID, "", StreamLabelMatchService, true, true)
+			presences, err := d.nk.StreamUserList(StreamModeService, targetUserID, "", StreamLabelMatchService, false, true)
 			if err != nil {
 				return err
 			}
