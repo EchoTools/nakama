@@ -140,7 +140,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	})
 
 	// Get the MatchIDs for the user from it's presence
-	presences, err := d.nk.StreamUserList(StreamModeService, userID.String(), "", StreamLabelMatchService, true, true)
+	presences, err := d.nk.StreamUserList(StreamModeService, userID.String(), "", StreamLabelMatchService, false, true)
 	if err != nil {
 		return err
 	}

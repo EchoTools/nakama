@@ -147,12 +147,12 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		// If the host userID exists, and is in a match, set the next match ID to the host's match ID
 		if hostUserID := uuid.FromStringOrNil(hostUserIDStr); !hostUserID.IsNil() {
 
-			// get the match ID of the host
-			stream := PresenceStream{Mode: StreamModeService, Subject: hostUserID, Label: StreamLabelMatchService}
-			for _, p := range session.pipeline.tracker.ListByStream(stream, false, true) {
-				memberMatchID := MatchIDFromStringOrNil(p.GetStatus())
-				if !memberMatchID.IsNil() {
-					userSettings.NextMatchID = memberMatchID
+			// Get the MatchIDs for the user from it's presence
+			presences, _ := p.runtimeModule.StreamUserList(StreamModeService, hostUserID.String(), "", StreamLabelMatchService, false, true)
+			for _, presence := range presences {
+				matchID := MatchIDFromStringOrNil(presence.GetStatus())
+				if !matchID.IsNil() {
+					userSettings.NextMatchID = matchID
 				}
 			}
 		}
@@ -178,6 +178,8 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 					entrantRole = evr.TeamBlue
 				case "spectator":
 					entrantRole = evr.TeamSpectator
+				case "moderator":
+					entrantRole = evr.TeamModerator
 				case "any":
 					entrantRole = evr.TeamUnassigned
 				}

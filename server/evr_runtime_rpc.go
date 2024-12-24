@@ -362,7 +362,7 @@ func KickPlayerRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk ru
 	}
 
 	// Get the match of the user
-	presences, err := nk.StreamUserList(StreamModeService, request.UserID, "", StreamLabelMatchService, true, true)
+	presences, err := nk.StreamUserList(StreamModeService, request.UserID, "", StreamLabelMatchService, false, true)
 	if err != nil {
 		return "", err
 	}

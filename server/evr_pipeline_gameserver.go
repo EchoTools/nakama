@@ -241,7 +241,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(ctx context.Context, logger 
 		return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_Failure)
 	}
 
-	if err := p.runtimeModule.StreamUserUpdate(StreamModeGameServer, session.ID().String(), "", StreamLabelGameServerService, session.UserID().String(), session.ID().String(), true, false, string(configJson)); err != nil {
+	if err := p.runtimeModule.StreamUserUpdate(StreamModeGameServer, session.ID().String(), "", StreamLabelGameServerService, session.UserID().String(), session.ID().String(), false, false, string(configJson)); err != nil {
 		return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_Failure)
 	}
 
@@ -599,7 +599,7 @@ func (p *EvrPipeline) gameserverLobbyEntrantNew(ctx context.Context, logger *zap
 
 		ctx := s.Context()
 		for _, subject := range []uuid.UUID{presence.SessionID, presence.UserID, presence.EvrID.UUID()} {
-			session.tracker.Update(ctx, s.ID(), PresenceStream{Mode: StreamModeService, Subject: subject, Label: StreamLabelMatchService}, s.UserID(), PresenceMeta{Format: s.Format(), Hidden: true, Status: matchID.String()})
+			session.tracker.Update(ctx, s.ID(), PresenceStream{Mode: StreamModeService, Subject: subject, Label: StreamLabelMatchService}, s.UserID(), PresenceMeta{Format: s.Format(), Hidden: false, Status: matchID.String()})
 		}
 
 		// Trigger the MatchJoin event.
@@ -692,12 +692,12 @@ func (p *EvrPipeline) gameserverLobbySessionUnlock(ctx context.Context, logger *
 }
 
 func UpdateGameServerBySessionID(nk runtime.NakamaModule, userID uuid.UUID, sessionID uuid.UUID, matchID MatchID) error {
-	return nk.StreamUserUpdate(StreamModeGameServer, sessionID.String(), "", StreamLabelMatchService, userID.String(), sessionID.String(), true, false, matchID.String())
+	return nk.StreamUserUpdate(StreamModeGameServer, sessionID.String(), "", StreamLabelMatchService, userID.String(), sessionID.String(), false, false, matchID.String())
 }
 
 func GameServerBySessionID(nk runtime.NakamaModule, sessionID uuid.UUID) (MatchID, runtime.Presence, error) {
 
-	presences, err := nk.StreamUserList(StreamModeGameServer, sessionID.String(), "", StreamLabelMatchService, true, true)
+	presences, err := nk.StreamUserList(StreamModeGameServer, sessionID.String(), "", StreamLabelMatchService, false, true)
 	if err != nil {
 		return MatchID{}, nil, err
 	}
