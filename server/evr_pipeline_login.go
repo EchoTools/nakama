@@ -115,7 +115,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	}
 
 	if account == nil {
-		return settings, fmt.Errorf("account is nil: %w", err)
+		return settings, fmt.Errorf("account is nil: %w", authErr)
 	}
 
 	// add the login attempt to the login history
@@ -144,8 +144,24 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 
 		}
 	} else {
-		// Auto-authorize the IP
+		// Auto-authorize the IP (due to username/password authentication)
 		loginHistory.AuthorizeIP(session.clientIP)
+	}
+
+	// Common error handling
+	if account.GetDisableTime() != nil {
+		// The account is banned. log the attempt.
+		logger.Info("Attempted login to banned account.",
+			zap.String("xpid", xpid.Token()),
+			zap.String("client_ip", session.clientIP),
+			zap.String("uid", account.User.Id),
+			zap.Any("login_payload", payload))
+
+		return settings, fmt.Errorf("User account banned.")
+	}
+
+	if authErr != nil {
+		return settings, authErr
 	}
 
 	user := account.GetUser()
@@ -158,11 +174,6 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	if err := MigrateUserData(ctx, p.runtimeModule, p.db, userID, loginHistory); err != nil {
 		logger.Warn("Failed to migrate device history", zap.Error(err))
 	}
-
-	loginHistory.UpdateAlternateUserIDs(ctx, p.runtimeModule, userID)
-	loginHistory.Update(xpid, session.clientIP, &payload)
-
-	LoginHistoryStore(ctx, p.runtimeModule, account.User.Id, loginHistory)
 
 	// Get the user's metadata
 	metadata, err := GetAccountMetadata(ctx, p.runtimeModule, userID)
@@ -325,47 +336,49 @@ type EvrIDHistory struct {
 	UserID  uuid.UUID
 }
 
-func (p *EvrPipeline) authenticateAccount(ctx context.Context, logger *zap.Logger, session *sessionWS, xpid evr.EvrId, clientIP string, discordId string, userPassword string, payload evr.LoginProfile) (*api.Account, error) {
+func (p *EvrPipeline) authenticateHeadset(ctx context.Context, logger *zap.Logger, session *sessionWS, xpid evr.EvrId, clientIP string, userPassword string, payload evr.LoginProfile) (*api.Account, error) {
 	var err error
 	var userId string
 	var account *api.Account
 
-	userId, _, _, err = AuthenticateDevice(ctx, session.logger, session.pipeline.db, xpid.Token(), "", false)
-	if err != nil && status.Code(err) != codes.NotFound {
-		// Possibly banned or other error.
-		return account, err
-	} else if err == nil {
-
+	userId, err = GetUserIDByDeviceID(ctx, logger, session.pipeline.db, xpid.Token())
+	if userId != "" {
 		// The account was found.
-		account, err = GetAccount(ctx, session.logger, session.pipeline.db, session.statusRegistry, uuid.FromStringOrNil(userId))
+		account, err = GetAccount(ctx, logger, session.pipeline.db, session.statusRegistry, uuid.FromStringOrNil(userId))
 		if err != nil {
 			return account, status.Error(codes.Internal, fmt.Sprintf("failed to get account: %s", err))
 		}
+	}
 
-		if account.GetCustomId() == "" {
+	if err != nil && status.Code(err) != codes.NotFound {
+		// Possibly banned or other error.
+		return account, err
+	}
 
-			// Account requires discord linking.
-			userId = ""
+	if account.GetCustomId() == "" {
 
-		} else if account.GetEmail() != "" {
+		// Account requires discord linking.
+		userId = ""
 
-			// The account has a password, authenticate the password.
-			_, _, _, err := AuthenticateEmail(ctx, session.logger, session.pipeline.db, account.Email, userPassword, "", false)
-			return account, err
+	} else if account.GetEmail() != "" {
 
-		} else if userPassword != "" {
+		// The account has a password, authenticate the password.
+		// This is just a failsafe, since this authentication should be handled at the session level.
+		_, _, _, err := AuthenticateEmail(ctx, logger, session.pipeline.db, account.Email, userPassword, "", false)
+		return account, err
 
-			// The user provided a password and the account has no password.
-			err = LinkEmail(ctx, session.logger, session.pipeline.db, uuid.FromStringOrNil(userId), account.User.Id+"@"+p.placeholderEmail, userPassword)
-			if err != nil {
-				return account, status.Error(codes.Internal, fmt.Errorf("error linking email: %w", err).Error())
-			}
+	} else if userPassword != "" {
 
-			return account, nil
-		} else if status.Code(err) != codes.NotFound {
-			// Possibly banned or other error.
-			return account, err
+		// The user provided a password and the account has no password.
+		err = LinkEmail(ctx, logger, session.pipeline.db, uuid.FromStringOrNil(userId), account.User.Id+"@"+p.placeholderEmail, userPassword)
+		if err != nil {
+			return account, status.Error(codes.Internal, fmt.Errorf("error linking email: %w", err).Error())
 		}
+
+		return account, nil
+	} else if status.Code(err) != codes.NotFound {
+		// Possibly banned or other error.
+		return account, err
 	}
 
 	// Account requires discord linking.
@@ -375,6 +388,36 @@ func (p *EvrPipeline) authenticateAccount(ctx context.Context, logger *zap.Logge
 	}
 	msg := fmt.Sprintf("\nEnter this code:\n  \n>>> %s <<<\nusing '/link-headset %s' in the Echo VR Lounge Discord.", linkTicket.Code, linkTicket.Code)
 	return account, errors.New(msg)
+}
+
+func (p *EvrPipeline) validateDeviceID(ctx context.Context, logger *zap.Logger, session *sessionWS, xpid evr.EvrId) (*api.Account, error) {
+	// Validate the session login
+
+	// The account was found.
+	account, err := GetAccount(ctx, logger, session.pipeline.db, session.statusRegistry, session.userID)
+	if err != nil {
+		return account, status.Error(codes.Internal, fmt.Sprintf("failed to get account: %s", err))
+	}
+
+	deviceUserID, err := GetUserIDByDeviceID(ctx, logger, session.pipeline.db, xpid.Token())
+
+	switch status.Code(err) {
+	case codes.OK:
+		if deviceUserID != session.userID.String() {
+			logger.Error("Device is already linked to another account", zap.String("device_user_id", deviceUserID), zap.String("session_user_id", session.userID.String()))
+			return account, fmt.Errorf("device is already linked to another account")
+		}
+	case codes.NotFound:
+		// The account was not found.
+		// try to link the device to the account
+		if err := p.runtimeModule.LinkDevice(ctx, session.UserID().String(), xpid.Token()); err != nil {
+			return account, fmt.Errorf("failed to link device: %w", err)
+		}
+	default:
+		return account, err
+	}
+
+	return account, nil
 }
 
 func (p *EvrPipeline) channelInfoRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {

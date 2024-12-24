@@ -457,6 +457,7 @@ func EvrApiHttpHandler(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 }
 
 func GetUserIDByDiscordID(ctx context.Context, db *sql.DB, customID string) (userID string, err error) {
+
 	// Look for an existing account.
 	query := "SELECT id, disable_time FROM users WHERE custom_id = $1"
 	var dbUserID string
@@ -472,11 +473,6 @@ func GetUserIDByDiscordID(ctx context.Context, db *sql.DB, customID string) (use
 	}
 	if !found {
 		return uuid.Nil.String(), ErrAccountNotFound
-	}
-
-	// Check if it's disabled.
-	if dbDisableTime.Status == pgtype.Present && dbDisableTime.Time.Unix() != 0 {
-		return dbUserID, status.Error(codes.PermissionDenied, "account banned")
 	}
 
 	return dbUserID, nil
