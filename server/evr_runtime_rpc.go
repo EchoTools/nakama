@@ -1892,3 +1892,31 @@ func ServerScoresRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 
 	return response.String(), nil
 }
+
+func MigrateUserDataRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	request := struct {
+		UserID string `json:"user_id"`
+	}{}
+
+	if err := json.Unmarshal([]byte(payload), &request); err != nil {
+		return "", runtime.NewError("Invalid payload", StatusInvalidArgument)
+	}
+
+	if request.UserID == "" {
+		return "", runtime.NewError("User ID is required", StatusInvalidArgument)
+	}
+
+	loginHistory, err := LoginHistoryLoad(ctx, nk, request.UserID)
+	if err != nil {
+		return "", runtime.NewError("Failed to load login history", StatusInternalError)
+	}
+	// Migrate any account data
+	if err := MigrateUserData(ctx, nk, db, request.UserID, loginHistory); err != nil {
+		logger.Warn("Failed to migrate device history", zap.Error(err))
+		return "", runtime.NewError("Failed to migrate device history", StatusInternalError)
+	}
+
+	loginHistory.Store(ctx, nk)
+
+	return "{}", nil
+}
