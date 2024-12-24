@@ -2232,7 +2232,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						if err := KickPlayerFromMatch(ctx, d.nk, label.ID, targetUserID); err != nil {
 							return err
 						}
-						_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> kicked player <@%s> from [%s](https://echo.taxi/spark://c/%s) match.", user.ID, target.ID, label.Mode.String(), strings.ToUpper(label.ID.UUID.String())), false)
+						_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s kicked player %s from [%s](https://echo.taxi/spark://c/%s) match.", user.Mention(), target.Mention(), label.Mode.String(), strings.ToUpper(label.ID.UUID.String())), false)
 						disconnectDelay = 15
 					}
 
@@ -2242,7 +2242,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						if _, err := DisconnectUserID(ctx, d.nk, targetUserID); err != nil {
 							logger.Warn("Failed to disconnect user", zap.Error(err))
 						} else {
-							_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> disconnected player <@%s> from match service.", user.ID, target.ID), false)
+							_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s disconnected player %s from match service.", user.Mention(), target.Mention()), false)
 						}
 					}()
 
@@ -2250,7 +2250,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 			}
 
-			return simpleInteractionResponse(s, i, fmt.Sprintf("<@%s> is required to complete *Community Values* when entering the next social lobby. (Disconnected %d sessions)", target.ID, cnt))
+			return simpleInteractionResponse(s, i, fmt.Sprintf("%s is required to complete *Community Values* when entering the next social lobby. (Disconnected %d sessions)", target.Mention(), cnt))
 		},
 		"kick-player": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 
@@ -2269,7 +2269,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return errors.New("failed to get target user ID")
 			}
 
-			presences, err := d.nk.StreamUserList(StreamModeService, targetUserID, "", StreamLabelMatchService, true, true)
+			presences, err := d.nk.StreamUserList(StreamModeService, targetUserID, "", StreamLabelMatchService, false, true)
 			if err != nil {
 				return err
 			}
