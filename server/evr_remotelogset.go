@@ -96,7 +96,9 @@ OuterLoop:
 func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logger, session *sessionWS, evrID evr.EvrId, request *evr.RemoteLogSet) error {
 
 	// Add the raw logs to the journal.
-	p.userRemoteLogJournalRegistry.AddEntries(session.id, request.Logs)
+	if !session.id.IsNil() {
+		p.userRemoteLogJournalRegistry.AddEntries(session.id, request.Logs)
+	}
 
 	// Parse the useful remote logs from the set.
 	entries := parseRemoteLogMessageEntries(logger, request.Logs)
