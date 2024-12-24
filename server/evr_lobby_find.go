@@ -148,13 +148,14 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 	rankPercentiles := make([]float64, 0, lobbyGroup.Size())
 	// If this is the leader, then set the presence status to the current match ID.
 	if isLeader {
-
-		// If there are more than one player in the party, wait for the other players to start matchmaking.
-		if lobbyGroup.Size() > 1 {
-			select {
-			case <-ctx.Done():
-				return nil, nil, false, ctx.Err()
-			case <-time.After(10 * time.Second):
+		if !lobbyParams.CurrentMatchID.IsNil() && lobbyParams.Mode != evr.ModeSocialPublic {
+			// If there are more than one player in the party, wait for the other players to start matchmaking.
+			if lobbyGroup.Size() > 1 {
+				select {
+				case <-ctx.Done():
+					return nil, nil, false, ctx.Err()
+				case <-time.After(10 * time.Second):
+				}
 			}
 		}
 		stream := lobbyParams.MatchmakingStream()
@@ -402,7 +403,7 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 			if err != nil {
 				// If the error is a lock error, just try again.
 				if err == ErrFailedToAcquireLock {
-					// Wait a few seconds to give time for the server to be created.
+					// Wait until after the "avoidance time" to give time for the server to be created.
 					<-time.After(20 * time.Second)
 					continue
 				}
