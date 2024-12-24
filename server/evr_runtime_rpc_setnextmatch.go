@@ -44,7 +44,7 @@ func SetNextMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		request.TargetUserID = callerUserID
 	}
 
-	if request.TargetUserID != callerUserID {
+	if request.TargetUserID != callerUserID || request.HostDiscordID != "" {
 		// require them to be a global bot or global developer
 		isGlobalDeveloper, _ := CheckSystemGroupMembership(ctx, db, callerUserID, GroupGlobalDevelopers)
 		isGlobalBot, _ := CheckSystemGroupMembership(ctx, db, callerUserID, GroupGlobalBots)
