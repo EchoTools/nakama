@@ -170,10 +170,12 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 
 	params.DiscordID = p.discordCache.UserIDToDiscordID(userID)
 
-	// Migrate any account data
-	if err := MigrateUserData(ctx, p.runtimeModule, p.db, userID, loginHistory); err != nil {
-		logger.Warn("Failed to migrate device history", zap.Error(err))
-	}
+	/*
+		// Migrate any account data
+		if err := MigrateUserData(ctx, p.runtimeModule, p.db, userID, loginHistory); err != nil {
+			logger.Warn("Failed to migrate device history", zap.Error(err))
+		}
+	*/
 
 	// Get the user's metadata
 	metadata, err := GetAccountMetadata(ctx, p.runtimeModule, userID)
