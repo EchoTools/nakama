@@ -63,21 +63,31 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(logger runtime.Logge
 	groupID := d.cache.GuildIDToGroupID(i.GuildID)
 
 	switch commandName {
-	case "whoami", "link-headset":
+	case "link-headset":
 
 		// Authenticate/create an account.
-		userID = d.cache.DiscordIDToUserID(user.ID)
 		if userID == "" {
 			userID, _, _, err = d.nk.AuthenticateCustom(ctx, user.ID, user.Username, true)
 			if err != nil {
 				return fmt.Errorf("failed to authenticate (or create) user %s: %w", user.ID, err)
 			}
 		}
-
 		// Do some profile checks and cleanups
 		// The user must be in a guild for the empty groupID to be valid
 		d.cache.Queue(userID, groupID)
 		d.cache.Queue(userID, "")
+
+	case "unlink-headset":
+
+		account, err := d.nk.AccountGetId(ctx, userID)
+		if err != nil {
+			return fmt.Errorf("failed to get account: %w", err)
+		}
+
+		if account.GetDisableTime() != nil {
+			return simpleInteractionResponse(s, i, "This account has been disabled.")
+		}
+
 	default:
 		if userID == "" {
 			return simpleInteractionResponse(s, i, "a headset must be linked to this Discord account to use slash commands")
