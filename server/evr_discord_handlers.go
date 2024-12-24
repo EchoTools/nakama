@@ -123,7 +123,7 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(logger runtime.Logge
 			return simpleInteractionResponse(s, i, "You must be a guild allocator to use this command.")
 		}
 
-	case "trigger-cv", "kick-player":
+	case "trigger-cv", "kick-player", "join-player", "lookup":
 
 		if md.AuditChannelID != "" {
 			if err := d.LogInteractionToChannel(i, md.AuditChannelID); err != nil {
