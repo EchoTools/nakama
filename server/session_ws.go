@@ -269,21 +269,21 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 			account, err := GetAccount(ctx, logger, pipeline.db, statusRegistry, uuid.FromStringOrNil(userIDStr))
 			if err != nil {
 				logger.Warn("Failed to get account by Discord ID", zap.Error(err))
-			}
-			if account == nil {
+			} else if account == nil {
 				logger.Warn("Account not found by Discord ID")
-			}
-
-			if userIDStr, err := AuthenticateUsername(ctx, logger, pipeline.db, account.User.Username, passwd); err != nil {
-				logger.Warn("Failed to authenticate user by Discord ID", zap.Error(err), zap.String("discord_id", params.AuthDiscordID))
-
 			} else {
-				// Only include the password in the context if the user was unsuccessful in authenticating.
-				// Once the user has been authenticated with a deviceID, their password will be set.
-				params.AuthPassword = ""
+				userIDStr, err := AuthenticateUsername(ctx, logger, pipeline.db, account.User.Username, passwd)
+				if err != nil {
+					logger.Warn("Failed to authenticate user by Discord ID", zap.Error(err), zap.String("discord_id", params.AuthDiscordID))
 
-				username = account.User.Username
-				userID = uuid.FromStringOrNil(userIDStr)
+				} else {
+					// Only include the password in the context if the user was unsuccessful in authenticating.
+					// Once the user has been authenticated with a deviceID, their password will be set.
+					params.AuthPassword = ""
+
+					username = account.User.Username
+					userID = uuid.FromStringOrNil(userIDStr)
+				}
 			}
 		}
 	}
