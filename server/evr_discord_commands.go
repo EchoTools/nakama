@@ -354,6 +354,24 @@ var (
 			},
 		},
 		{
+			Name:        "join-player",
+			Description: "Join a player's session as a moderator.",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionUser,
+					Name:        "user",
+					Description: "Target user",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "reason",
+					Description: "Reason for joining the player's session.",
+					Required:    true,
+				},
+			},
+		},
+		{
 			Name:        "kick-player",
 			Description: "Kick a player's sessions.",
 			Options: []*discordgo.ApplicationCommandOption{
@@ -2294,7 +2312,48 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 			return simpleInteractionResponse(s, i, fmt.Sprintf("Disconnected %d sessions.", cnt))
 		},
+		"join-player": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 
+			if user == nil {
+				return nil
+			}
+
+			options := i.ApplicationCommandData().Options
+			if len(options) == 0 {
+				return errors.New("no options provided")
+			}
+
+			target := options[0].UserValue(s)
+			targetUserID := d.cache.DiscordIDToUserID(target.ID)
+			if targetUserID == "" {
+				return errors.New("failed to get target user ID")
+			}
+
+			presences, err := d.nk.StreamUserList(StreamModeService, targetUserID, "", StreamLabelMatchService, false, true)
+			if err != nil {
+				return err
+			}
+
+			if len(presences) == 0 {
+				return simpleInteractionResponse(s, i, "No sessions found.")
+			}
+			presence := presences[0]
+			if label, _ := MatchLabelByID(ctx, d.nk, MatchIDFromStringOrNil(presence.GetStatus())); label != nil {
+
+				if label.GetGroupID().String() != groupID {
+					return errors.New("user's match is not from this guild")
+				}
+
+				if err := SetNextMatchID(ctx, d.nk, userID, label.ID, Moderator, ""); err != nil {
+					return fmt.Errorf("failed to set next match ID: %w", err)
+				}
+
+				_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> join player <@%s> at [%s](https://echo.taxi/spark://c/%s) match.", user.ID, target.ID, label.Mode.String(), strings.ToUpper(label.ID.UUID.String())), false)
+				content := fmt.Sprintf("Joining %s [%s](https://echo.taxi/spark://c/%s) match next.", target.Mention(), label.Mode.String(), strings.ToUpper(label.ID.UUID.String()))
+				return simpleInteractionResponse(s, i, content)
+			}
+			return simpleInteractionResponse(s, i, "No match found.")
+		},
 		"set-roles": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			options := i.ApplicationCommandData().Options
 
