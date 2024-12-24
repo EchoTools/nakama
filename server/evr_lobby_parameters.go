@@ -449,7 +449,10 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 }
 
 func (p LobbySessionParameters) String() string {
-	data, _ := json.Marshal(p)
+	data, err := json.Marshal(p)
+	if err != nil {
+		return ""
+	}
 	return string(data)
 }
 

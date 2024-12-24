@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -177,25 +176,30 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 					return nil, nil, false, fmt.Errorf("failed to kick party member: %w", err)
 				}
 			} else {
+				/*
+					memberParams := &LobbySessionParameters{}
+					if err := json.Unmarshal([]byte(member.Presence.GetStatus()), &memberParams); err != nil {
+						return nil, nil, false, fmt.Errorf("failed to unmarshal member params: %w", err)
+					}
 
-				memberParams := &LobbySessionParameters{}
-				if err := json.Unmarshal([]byte(member.Presence.GetStatus()), &memberParams); err != nil {
-					return nil, nil, false, fmt.Errorf("failed to unmarshal member params: %w", err)
-				}
-
-				rankPercentiles = append(rankPercentiles, memberParams.GetRankPercentile())
+					rankPercentiles = append(rankPercentiles, memberParams.GetRankPercentile())
+				*/
 			}
 		}
 
 		partySize := lobbyGroup.Size()
 		logger.Debug("Party is ready", zap.String("leader", session.id.String()), zap.Int("size", partySize), zap.Strings("members", memberUsernames))
 
-		// Average the rank percentiles
-		averageRankPercentile := 0.0
-		for _, rankPercentile := range rankPercentiles {
-			averageRankPercentile += rankPercentile
+		if len(rankPercentiles) > 0 {
+			// Average the rank percentiles
+			averageRankPercentile := 0.0
+			for _, rankPercentile := range rankPercentiles {
+				averageRankPercentile += rankPercentile
+			}
+			averageRankPercentile /= float64(partySize)
+
+			lobbyParams.SetRankPercentile(averageRankPercentile)
 		}
-		averageRankPercentile /= float64(partySize)
 
 		lobbyParams.SetPartySize(partySize)
 	}
