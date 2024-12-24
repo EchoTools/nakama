@@ -394,13 +394,14 @@ func (c *DiscordCache) SyncGuildGroupMember(ctx context.Context, userID, groupID
 	if err != nil {
 		return fmt.Errorf("error getting account: %w", err)
 	}
+	isInactive := account.GetDisableTime() != nil || len(account.Devices) == 0
 
 	prevDisplayName := accountMetadata.GetDisplayName(groupID)
 
 	if prevDisplayName != displayName {
 		logger = logger.With(zap.String("display_name", displayName), zap.String("prev_display_name", prevDisplayName))
 		displayName, err := c.checkDisplayName(ctx, c.nk, accountMetadata.ID(), displayName)
-		if err != nil {
+		if !isInactive && err != nil {
 			switch e := err.(type) {
 			case DisplayNameInUseError:
 				logger.Warn("Display name in use", zap.Error(e))
@@ -421,8 +422,6 @@ func (c *DiscordCache) SyncGuildGroupMember(ctx context.Context, userID, groupID
 				logger.Warn("Error checking display name", zap.Error(err))
 			}
 		} else {
-
-			isInactive := len(account.Devices) == 0
 
 			if err := DisplayNameHistorySet(ctx, c.nk, accountMetadata.ID(), groupID, displayName, isInactive); err != nil {
 				return fmt.Errorf("error adding display name history entry: %w", err)
@@ -511,17 +510,27 @@ func (d *DiscordCache) updateGuild(ctx context.Context, logger *zap.Logger, guil
 		if err != nil {
 			// Leave guilds where the owner is globally banned.
 			if status.Code(err) == codes.PermissionDenied {
-
 				logger.Warn("Guild owner is globally banned. Leaving guild.", zap.String("guild_id", guild.ID), zap.String("owner_id", guild.OwnerID))
 				if err := d.dg.GuildLeave(guild.ID); err != nil {
 					return fmt.Errorf("error leaving guild: %w", err)
 				}
-
-				return nil
 			}
 			return fmt.Errorf("failed to authenticate (or create) guild owner %s: %w", guild.OwnerID, err)
 		}
+	}
 
+	ownerAccount, err := d.nk.AccountGetId(ctx, ownerUserID)
+	if err != nil {
+		return fmt.Errorf("error getting owner account: %w", err)
+	}
+
+	if ownerAccount.GetDisableTime() != nil {
+		logger.Warn("Guild owner is globally banned. Leaving guild.", zap.String("guild_id", guild.ID), zap.String("owner_id", guild.OwnerID))
+		if err := d.dg.GuildLeave(guild.ID); err != nil {
+			return fmt.Errorf("error leaving guild: %w", err)
+		}
+
+		return nil
 	}
 
 	groupID := d.GuildIDToGroupID(guild.ID)
@@ -600,18 +609,14 @@ func (d *DiscordCache) handleGuildDelete(logger *zap.Logger, s *discordgo.Sessio
 }
 
 func (d *DiscordCache) handleMemberAdd(logger *zap.Logger, s *discordgo.Session, e *discordgo.GuildMemberAdd) error {
-	ctx, cancel := context.WithTimeout(d.ctx, time.Second*5)
-	defer cancel()
+	/*
+		logger.Info("Member Add", zap.Any("member", e))
 
-	if d.DiscordIDToUserID(e.Member.User.ID) == "" {
-		return nil
-	}
 
-	logger.Info("Member Add", zap.Any("member", e))
-
-	if err := d.SyncGuildGroupMember(ctx, d.DiscordIDToUserID(e.Member.User.ID), d.GuildIDToGroupID(e.GuildID)); err != nil {
-		return fmt.Errorf("failed to sync guild group member: %w", err)
-	}
+			if err := d.SyncGuildGroupMember(ctx, d.DiscordIDToUserID(e.Member.User.ID), d.GuildIDToGroupID(e.GuildID)); err != nil {
+				return fmt.Errorf("failed to sync guild group member: %w", err)
+			}
+	*/
 
 	return nil
 }
@@ -623,9 +628,16 @@ func (d *DiscordCache) handleMemberUpdate(logger *zap.Logger, s *discordgo.Sessi
 	ctx, cancel := context.WithTimeout(d.ctx, time.Second*5)
 	defer cancel()
 
-	if d.DiscordIDToUserID(e.Member.User.ID) == "" {
+	userID := d.DiscordIDToUserID(e.Member.User.ID)
+
+	if userID == "" {
 		return nil
 	}
+
+	if ok, _ := HasLoggedIntoEcho(ctx, d.nk, userID); !ok {
+		return nil
+	}
+
 	logger.Info("Member Update", zap.Any("member", e))
 
 	if err := d.SyncGuildGroupMember(ctx, d.DiscordIDToUserID(e.Member.User.ID), d.GuildIDToGroupID(e.GuildID)); err != nil {
@@ -687,6 +699,10 @@ func (d *DiscordCache) handleGuildBanAdd(ctx context.Context, logger *zap.Logger
 	userID := d.DiscordIDToUserID(e.User.ID)
 	if userID == "" {
 		return fmt.Errorf("user not found")
+	}
+
+	if ok, _ := HasLoggedIntoEcho(ctx, d.nk, userID); !ok {
+		return nil
 	}
 
 	logger = logger.With(zap.String("event", "GuildBanAdd"), zap.String("guild_id", e.GuildID), zap.String("discord_id", e.User.ID), zap.String("gid", groupID), zap.String("uid", userID), zap.String("username", e.User.Username))
@@ -791,4 +807,20 @@ func (d *DiscordCache) ReplaceMentions(message string) string {
 		return mention
 	})
 	return replacedMessage
+}
+
+func HasLoggedIntoEcho(ctx context.Context, nk runtime.NakamaModule, userID string) (bool, error) {
+	// If the member hasn't ever logged into echo, then don't sync them.
+	objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
+		{
+			Collection: GameProfileStorageCollection,
+			Key:        GameProfileStorageKey,
+			UserID:     userID,
+		},
+	})
+	if err != nil {
+		return false, fmt.Errorf("error reading game profile: %w", err)
+	}
+
+	return len(objs) > 0, nil
 }

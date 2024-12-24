@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -11,6 +12,9 @@ import (
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -58,7 +62,9 @@ type LoginHistory struct {
 	ClientIPs        map[string]time.Time          `json:"client_ips"`
 	AuthorizedIPs    map[string]time.Time          `json:"authorized_ips"`
 	AlternateUserIDs []string                      `json:"alternates"`
-	version          string                        // storage record version
+
+	userID  string // user ID
+	version string // storage record version
 }
 
 func NewLoginHistory() *LoginHistory {
@@ -110,8 +116,8 @@ func (h *LoginHistory) IsAuthorizedIP(ip string) bool {
 	return found
 }
 
-func (h *LoginHistory) UpdateAlternateUserIDs(ctx context.Context, nk runtime.NakamaModule, userID string) error {
-	matches, err := LoginAlternateSearch(ctx, nk, userID, h)
+func (h *LoginHistory) UpdateAlternateUserIDs(ctx context.Context, nk runtime.NakamaModule) error {
+	matches, err := LoginAlternateSearch(ctx, nk, h)
 	if err != nil {
 		return fmt.Errorf("error searching for alternate logins: %w", err)
 	}
@@ -177,6 +183,10 @@ func (h *LoginHistory) rebuildCache() {
 	}
 }
 
+func (h *LoginHistory) Store(ctx context.Context, nk runtime.NakamaModule) error {
+	return LoginHistoryStore(ctx, nk, h.userID, h)
+}
+
 func LoginHistoryLoad(ctx context.Context, nk runtime.NakamaModule, userID string) (*LoginHistory, error) {
 	objects, err := nk.StorageRead(ctx, []*runtime.StorageRead{
 		{
@@ -197,6 +207,7 @@ func LoginHistoryLoad(ctx context.Context, nk runtime.NakamaModule, userID strin
 	if err := json.Unmarshal([]byte(objects[0].Value), &history); err != nil {
 		return nil, fmt.Errorf("error unmarshalling display name cache: %w", err)
 	}
+	history.userID = userID
 	history.version = objects[0].Version
 
 	return &history, nil
@@ -237,7 +248,7 @@ func LoginHistoryStore(ctx context.Context, nk runtime.NakamaModule, userID stri
 		history.rebuildCache()
 	}
 
-	if _, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{
+	acks, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{
 		{
 			Collection: LoginStorageCollection,
 			Key:        LoginHistoryStorageKey,
@@ -245,8 +256,14 @@ func LoginHistoryStore(ctx context.Context, nk runtime.NakamaModule, userID stri
 			UserID:     userID,
 			Version:    history.version,
 		},
-	}); err != nil {
+	})
+
+	if err != nil {
 		return fmt.Errorf("error writing display name history: %w", err)
+	}
+
+	if acks[0].Version != history.version {
+		history.version = acks[0].Version
 	}
 
 	return nil
@@ -307,4 +324,27 @@ func DeviceCacheRegexSearch(ctx context.Context, nk runtime.NakamaModule, patter
 	}
 
 	return History, nil
+}
+
+func GetUserIDByDeviceID(ctx context.Context, logger *zap.Logger, db *sql.DB, deviceID string) (string, error) {
+	found := true
+
+	// Look for an existing account.
+	query := "SELECT user_id FROM user_device WHERE id = $1"
+	var dbUserID string
+	err := db.QueryRowContext(ctx, query, deviceID).Scan(&dbUserID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			found = false
+		} else {
+			logger.Error("Error looking up user by device ID.", zap.Error(err), zap.String("deviceID", deviceID))
+			return "", status.Error(codes.Internal, "Error finding user account.")
+		}
+	}
+
+	if found {
+		return dbUserID, nil
+	}
+
+	return "", status.Error(codes.NotFound, "User account not found.")
 }

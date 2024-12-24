@@ -1681,14 +1681,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return nil
 			}
 			// check for the with-detail boolean option
-			options := i.ApplicationCommandData().Options
-			withDetail := false
-			if len(options) > 0 {
-				withDetail = options[0].BoolValue()
-			}
+
 			includePrivate := true
 
-			err := d.handleProfileRequest(ctx, logger, nk, s, i, user.ID, user.Username, "", includePrivate, withDetail)
+			err := d.handleProfileRequest(ctx, logger, nk, s, i, user.ID, user.Username, "", includePrivate, false)
 			logger.Debug("whoami", zap.String("discord_id", user.ID), zap.String("discord_username", user.Username), zap.Error(err))
 			return err
 		},

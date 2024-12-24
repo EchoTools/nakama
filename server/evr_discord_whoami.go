@@ -39,7 +39,7 @@ type EvrIdLogins struct {
 	DisplayName   string `json:"display_name,omitempty"`
 }
 
-func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, s *discordgo.Session, i *discordgo.InteractionCreate, discordID string, username string, guildID string, includePrivate bool, includeDetail bool) error {
+func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, s *discordgo.Session, i *discordgo.InteractionCreate, discordID string, username string, guildID string, includePrivate bool, isGlobalModerator bool) error {
 	whoami := &WhoAmI{
 		DiscordID:             discordID,
 		EVRIDLogins:           make(map[string]time.Time),
@@ -72,6 +72,11 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	if err != nil {
 		return fmt.Errorf("failed to get account by ID: %w", err)
 	}
+
+	if account.GetDisableTime() != nil && !isGlobalModerator {
+		return fmt.Errorf("account is disabled")
+	}
+
 	md, err := GetAccountMetadata(ctx, nk, userID.String())
 	if err != nil {
 		return fmt.Errorf("failed to get account metadata: %w", err)

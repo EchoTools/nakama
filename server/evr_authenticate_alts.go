@@ -54,7 +54,7 @@ func (m *AlternateSearchMatch) Matches() (xpi bool, hmdSerialNumber bool, client
 	return
 }
 
-func LoginAlternateSearch(ctx context.Context, nk runtime.NakamaModule, userID string, loginHistory *LoginHistory) ([]*AlternateSearchMatch, error) {
+func LoginAlternateSearch(ctx context.Context, nk runtime.NakamaModule, loginHistory *LoginHistory) ([]*AlternateSearchMatch, error) {
 
 	patterns := make([]string, 0)
 
@@ -100,7 +100,7 @@ func LoginAlternateSearch(ctx context.Context, nk runtime.NakamaModule, userID s
 		}
 
 		for _, obj := range result.Objects {
-			if obj.UserId == userID {
+			if obj.UserId == loginHistory.userID {
 				continue
 			}
 			otherHistory := LoginHistory{}
@@ -110,7 +110,7 @@ func LoginAlternateSearch(ctx context.Context, nk runtime.NakamaModule, userID s
 
 			for _, e := range loginHistory.History {
 				for _, o := range otherHistory.History {
-					m := NewAlternateSearchMatch(userID, obj.UserId, e, o)
+					m := NewAlternateSearchMatch(loginHistory.userID, obj.UserId, e, o)
 					if m.IsMatch() {
 						matches = append(matches, m)
 					}

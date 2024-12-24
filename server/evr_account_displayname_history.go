@@ -29,6 +29,7 @@ type DisplayNameHistory struct {
 	Reserved   []string                             `json:"reserved"` // staticly reserved names
 	Active     []string                             `json:"active"`   // names that the user has reserved
 	IsInactive bool                                 `json:"is_inactive"`
+	updated    bool
 }
 
 func NewDisplayNameHistory() *DisplayNameHistory {
@@ -40,7 +41,8 @@ func NewDisplayNameHistory() *DisplayNameHistory {
 }
 
 // Returns true if the display name history was updated
-func (h *DisplayNameHistory) Set(groupID, displayName string) bool {
+func (h *DisplayNameHistory) Set(groupID, displayName string) {
+
 	if h.Histories == nil {
 		h.Histories = make(map[string][]DisplayNameHistoryEntry)
 	}
@@ -49,11 +51,18 @@ func (h *DisplayNameHistory) Set(groupID, displayName string) bool {
 		h.Histories[groupID] = make([]DisplayNameHistoryEntry, 0)
 	}
 
+	if h.IsInactive && len(h.Active) > 0 {
+		h.Active = make([]string, 0)
+		h.updated = true
+	}
+
 	if len(h.Histories[groupID]) > 0 {
 		if h.Histories[groupID][len(h.Histories[groupID])-1].DisplayName == displayName {
-			return false
+			return
 		}
 	}
+
+	h.updated = true
 
 	h.Histories[groupID] = append(h.Histories[groupID], DisplayNameHistoryEntry{
 		DisplayName: displayName,
@@ -68,7 +77,7 @@ func (h *DisplayNameHistory) Set(groupID, displayName string) bool {
 		h.updateActive()
 	}
 
-	return true
+	return
 }
 
 func (h *DisplayNameHistory) updateCache() {
@@ -178,19 +187,15 @@ func DisplayNameHistorySet(ctx context.Context, nk runtime.NakamaModule, userID 
 		return fmt.Errorf("error getting display name history: %w", err)
 	}
 
-	updated := false
-
 	if history.IsInactive != isInactive {
-		history.IsInactive = true
-		updated = true
-		history.Active = make([]string, 0)
+		history.IsInactive = isInactive
+		history.updated = true
 	}
 
-	if u := history.Set(guildID, displayName); u {
-		updated = true
-	}
+	// If it's inactive, the active list will be cleared.
+	history.Set(guildID, displayName)
 
-	if updated {
+	if history.updated {
 		if err := DisplayNameHistoryStore(ctx, nk, userID, history); err != nil {
 			return fmt.Errorf("error storing display name history: %w", err)
 		}
