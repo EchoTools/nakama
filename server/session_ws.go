@@ -118,12 +118,12 @@ type (
 )
 
 type SessionParameters struct {
-	Node          string                    // The node name
-	XPID          evr.EvrId                 // The EchoVR ID
-	DiscordID     string                    // The Discord ID
-	LoginSession  atomic.Pointer[sessionWS] // The login session
-	LobbySession  atomic.Pointer[sessionWS] // The match session
-	ServerSession atomic.Pointer[sessionWS] // The server session
+	Node          string                     // The node name
+	XPID          evr.EvrId                  // The EchoVR ID
+	DiscordID     string                     // The Discord ID
+	LoginSession  *atomic.Pointer[sessionWS] // The login session
+	LobbySession  *atomic.Pointer[sessionWS] // The match session
+	ServerSession *atomic.Pointer[sessionWS] // The server session
 
 	AuthDiscordID           string // The Discord ID use for authentication
 	AuthPassword            string // The Password use for authentication
@@ -133,13 +133,13 @@ type SessionParameters struct {
 	GeoHashPrecision   int    // The geohash precision
 	IsVPN              bool   // The user is using a VPN
 
-	SupportedFeatures []string    // features from the urlparam
-	RequiredFeatures  []string    // required_features from the urlparam
-	DisableEncryption bool        // The user has disabled encryption
-	DisableMAC        bool        // The user has disabled MAC
-	IsVR              atomic.Bool // The user is using a VR headset
-	IsPCVR            atomic.Bool // The user is using a PCVR headset
-	IsGlobalDeveloper atomic.Bool // The user is a developer
+	SupportedFeatures []string     // features from the urlparam
+	RequiredFeatures  []string     // required_features from the urlparam
+	DisableEncryption bool         // The user has disabled encryption
+	DisableMAC        bool         // The user has disabled MAC
+	IsVR              *atomic.Bool // The user is using a VR headset
+	IsPCVR            *atomic.Bool // The user is using a PCVR headset
+	IsGlobalDeveloper *atomic.Bool // The user is a developer
 
 	RelayOutgoing bool     // The user wants (some) outgoing messages relayed to them via discord
 	Debug         bool     // The user wants debug information
@@ -148,10 +148,10 @@ type SessionParameters struct {
 	ServerRegions []string // []string of the server regions
 
 	AccountMetadata *AccountMetadata // The account metadata
-	Memberships     atomic.Value     // map[string]GuildGroupMembership
+	Memberships     *atomic.Value    // map[string]GuildGroupMembership
 
 	URLParameters        map[string][]string // The URL parameters
-	LastMatchmakingError atomic.Error        // The last matchmaking error
+	LastMatchmakingError *atomic.Error       // The last matchmaking error
 }
 
 func (p *SessionParameters) MembershipsLoad() map[string]GuildGroupMembership {
@@ -229,17 +229,27 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 		DisableEncryption: parseUserQueryFunc(&request, "disable_encryption", 5, nil) == "true",
 		DisableMAC:        parseUserQueryFunc(&request, "disable_mac", 5, nil) == "true",
 
-		ExternalServerAddr: parseUserQueryFunc(&request, "serveraddr", 64, nil),
-		GeoHashPrecision:   geoPrecision,
-		IsVPN:              evrPipeline.ipqsClient.IsVPN(clientIP),
-		SupportedFeatures:  parseUserQueryCommaDelimited(&request, "features", 32, featurePattern),
-		RequiredFeatures:   parseUserQueryCommaDelimited(&request, "requires", 32, featurePattern),
-		ServerTags:         parseUserQueryCommaDelimited(&request, "tags", 32, tagsPattern),
-		ServerGuilds:       parseUserQueryCommaDelimited(&request, "guilds", 32, guildPattern),
-		ServerRegions:      parseUserQueryCommaDelimited(&request, "regions", 32, regionPattern),
-		RelayOutgoing:      parseUserQueryFunc(&request, "verbose", 5, nil) == "true",
-		Debug:              parseUserQueryFunc(&request, "debug", 5, nil) == "true",
-		URLParameters:      urlParams,
+		ExternalServerAddr:   parseUserQueryFunc(&request, "serveraddr", 64, nil),
+		GeoHashPrecision:     geoPrecision,
+		IsVPN:                evrPipeline.ipqsClient.IsVPN(clientIP),
+		IsVR:                 atomic.NewBool(false),
+		IsGlobalDeveloper:    atomic.NewBool(false),
+		IsPCVR:               atomic.NewBool(false),
+		SupportedFeatures:    parseUserQueryCommaDelimited(&request, "features", 32, featurePattern),
+		RequiredFeatures:     parseUserQueryCommaDelimited(&request, "requires", 32, featurePattern),
+		ServerTags:           parseUserQueryCommaDelimited(&request, "tags", 32, tagsPattern),
+		ServerGuilds:         parseUserQueryCommaDelimited(&request, "guilds", 32, guildPattern),
+		ServerRegions:        parseUserQueryCommaDelimited(&request, "regions", 32, regionPattern),
+		RelayOutgoing:        parseUserQueryFunc(&request, "verbose", 5, nil) == "true",
+		Debug:                parseUserQueryFunc(&request, "debug", 5, nil) == "true",
+		URLParameters:        urlParams,
+		LastMatchmakingError: atomic.NewError(nil),
+		Memberships:          &atomic.Value{},
+		AccountMetadata:      &AccountMetadata{},
+
+		LoginSession:  atomic.NewPointer((*sessionWS)(nil)),
+		LobbySession:  atomic.NewPointer((*sessionWS)(nil)),
+		ServerSession: atomic.NewPointer((*sessionWS)(nil)),
 	}
 
 	ctx = context.WithValue(ctx, ctxSessionParametersKey{}, atomic.NewPointer(&params))
