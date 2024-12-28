@@ -550,7 +550,7 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 	memberships := params.MembershipsLoad()
 
 	userID := session.userID.String()
-	for groupID, _ := range memberships {
+	for groupID := range memberships {
 
 		gg, found := p.guildGroupCache.GuildGroup(groupID)
 		if !found {
