@@ -1205,7 +1205,11 @@ func AccountLookupRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 
 			// extract the userID from the query string
 			if userID, ok := queryParameters["user_id"]; ok {
-				request.UserID = userID[0]
+				uid, err := uuid.FromString(userID[0])
+				if err != nil {
+					return "", runtime.NewError("invalid user id", StatusInvalidArgument)
+				}
+				request.UserID = uid
 			}
 			// extract the p from the query string
 			if p, ok := queryParameters["display_name"]; ok {
@@ -1233,12 +1237,8 @@ func AccountLookupRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	var err error
 	userID := ""
 	switch {
-	case request.UserID != "":
-		uid, err := uuid.FromString(request.UserID)
-		if err != nil {
-			return "", runtime.NewError("invalid user id", StatusInvalidArgument)
-		}
-		userID = uid.String()
+	case !request.UserID.IsNil():
+		userID = request.UserID.String()
 	case request.Username != "":
 		users, err := nk.UsersGetUsername(ctx, []string{request.Username})
 		if err != nil {
@@ -1275,7 +1275,7 @@ func AccountLookupRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	}
 
 	response := AccountLookupRPCResponse{
-		ID:          account.User.Id,
+		ID:          uuid.FromStringOrNil(account.User.Id),
 		Username:    account.User.Username,
 		DiscordID:   account.CustomId,
 		DisplayName: account.User.DisplayName,
