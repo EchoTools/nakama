@@ -179,32 +179,7 @@ func (e *DiscordAppBot) loadPrepareMatchRateLimiter(userID, groupID string) *rat
 }
 
 var (
-	vrmlGroupChoices = []*discordgo.ApplicationCommandOptionChoice{
-		{Name: "VRML Preseason", Value: "VRML Season Preseason"},
-		{Name: "VRML S1", Value: "VRML Season 1"},
-		{Name: "VRML S1 Champion", Value: "VRML Season 1 Champion"},
-		{Name: "VRML S1 Finalist", Value: "VRML Season 1 Finalist"},
-		{Name: "VRML S2", Value: "VRML Season 2"},
-		{Name: "VRML S2 Champion", Value: "VRML Season 2 Champion"},
-		{Name: "VRML S2 Finalist", Value: "VRML Season 2 Finalist"},
-		{Name: "VRML S3", Value: "VRML Season 3"},
-		{Name: "VRML S3 Champion", Value: "VRML Season 3 Champion"},
-		{Name: "VRML S3 Finalist", Value: "VRML Season 3 Finalist"},
-		{Name: "VRML S4", Value: "VRML Season 4"},
-		{Name: "VRML S4 Finalist", Value: "VRML Season 4 Finalist"},
-		{Name: "VRML S4 Champion", Value: "VRML Season 4 Champion"},
-		{Name: "VRML S5", Value: "VRML Season 5"},
-		{Name: "VRML S5 Finalist", Value: "VRML Season 5 Finalist"},
-		{Name: "VRML S5 Champion", Value: "VRML Season 5 Champion"},
-		{Name: "VRML S6", Value: "VRML Season 6"},
-		{Name: "VRML S6 Finalist", Value: "VRML Season 6 Finalist"},
-		{Name: "VRML S6 Champion", Value: "VRML Season 6 Champion"},
-		{Name: "VRML S7", Value: "VRML Season 7"},
-		{Name: "VRML S7 Finalist", Value: "VRML Season 7 Finalist"},
-		{Name: "VRML S7 Champion", Value: "VRML Season 7 Champion"},
-	}
-
-	vrmlGroupShortMap = map[string]string{
+	vrmlMap = map[string]string{
 		"p":  "VRML Season Preseason",
 		"1":  "VRML Season 1",
 		"1f": "VRML Season 1 Finalist",
@@ -906,25 +881,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 	ctx := d.ctx
 	nk := d.nk
 	db := d.db
-
 	dg := d.dg
-
-	// Build a map of VRML group names to their group IDs
-	vrmlGroups := make(map[string]string)
-	for _, choice := range vrmlGroupChoices {
-		// Look up the group by name
-		groupName := choice.Value.(string)
-		groups, _, err := nk.GroupsList(ctx, groupName, "", nil, nil, 1, "")
-		if err != nil {
-			d.logger.Error("Error looking up group: %s", err.Error())
-			continue
-		}
-		if len(groups) == 0 {
-			d.logger.Error("Group not found: %s", groupName)
-			continue
-		}
-		vrmlGroups[groupName] = groups[0].Id
-	}
 
 	commandHandlers := map[string]DiscordCommandHandlerFn{
 
@@ -1510,50 +1467,55 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				if target == nil {
 					return status.Error(codes.InvalidArgument, "you must specify a user")
 				}
+				targetUserID := d.cache.DiscordIDToUserID(target.ID)
+				if targetUserID == "" {
+					return status.Error(codes.NotFound, "target user not found")
+				}
 
 				// Get the badge name
 				badgeCodestr := options[1].StringValue()
 				badgeCodes := strings.Split(strings.ToLower(badgeCodestr), ",")
-				badgeGroups := make([]string, 0, len(badgeCodes))
+
+				changeset := make(map[string]int64, len(badgeCodes))
+
 				for _, c := range badgeCodes {
 
 					c := strings.TrimSpace(c)
 					if c == "" {
 						continue
 					}
-					groupName, ok := vrmlGroupShortMap[c]
+					groupName, ok := vrmlMap[c]
 					if !ok {
-						return status.Errorf(codes.InvalidArgument, fmt.Sprintf("badge `%s` not found", c))
+						return status.Errorf(codes.InvalidArgument, "badge `%s` not found", c)
 					}
 
-					groupID, ok := vrmlGroups[groupName]
-					if !ok {
-						return status.Error(codes.Internal, fmt.Sprintf("badge `%s` not found (this shouldn't happen)", c)) // This shouldn't happen
-					}
-					badgeGroups = append(badgeGroups, groupID)
+					changeset[groupName] = 1
 				}
 
-				targetUserID := d.cache.DiscordIDToUserID(target.ID)
-				if targetUserID == "" {
-					return status.Error(codes.NotFound, "target user not found")
+				assignerID := d.cache.DiscordIDToUserID(user.ID)
+				metadata := map[string]interface{}{
+					"assigner_id": assignerID,
+					"discord_id":  target.ID,
 				}
-				for _, groupID := range badgeGroups {
-					// Add the user to the group
 
-					if err = nk.GroupUsersAdd(ctx, SystemUserID, groupID, []string{targetUserID}); err != nil {
-						return status.Error(codes.Internal, fmt.Errorf("failed to assign badge `%s` to user `%s`: %w", groupID, target.Username, err).Error())
-					}
-				}
+				nk.WalletUpdate(ctx, targetUserID, changeset, metadata, true)
 
 				// Log the action
-				logger.Info("assign badges", zap.String("badges", badgeCodestr), zap.String("user", target.Username), zap.String("discord_id", target.ID), zap.String("assigner", user.ID))
+				logger.WithFields(map[string]interface{}{
+					"badges":     badgeCodestr,
+					"user":       target.Username,
+					"discord_id": target.ID,
+					"assigner":   user.ID,
+				}).Debug("assign badges")
 
 				// Send a message to the channel
+
 				channel := "1232462244797874247"
 				_, err = s.ChannelMessageSend(channel, fmt.Sprintf("%s assigned VRML cosmetics `%s` to user `%s`", user.Mention(), badgeCodestr, target.Username))
 				if err != nil {
-					logger.Warn("failed to send message", zap.Error(err))
-					break
+					logger.WithFields(map[string]interface{}{
+						"error": err,
+					}).Error("Failed to send badge channel update message")
 				}
 				simpleInteractionResponse(s, i, fmt.Sprintf("Assigned VRML cosmetics `%s` to user `%s`", badgeCodestr, target.Username))
 
