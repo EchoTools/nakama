@@ -114,6 +114,11 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		account, authErr = p.validateDeviceID(ctx, logger, session, xpid)
 	}
 
+	if authErr != nil && account == nil {
+		// Headset is not linked to an account.
+		return settings, authErr
+	}
+
 	if account == nil {
 		return settings, fmt.Errorf("account is nil: %w", authErr)
 	}
