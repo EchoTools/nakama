@@ -1,7 +1,6 @@
 package evr
 
 import (
-	"encoding/base64"
 	"encoding/binary"
 	"fmt"
 	"log"
