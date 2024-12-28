@@ -374,7 +374,7 @@ func (p *EvrPipeline) authenticateHeadset(ctx context.Context, logger *zap.Logge
 		// The user provided a password and the account has no password.
 		err = LinkEmail(ctx, logger, session.pipeline.db, uuid.FromStringOrNil(userId), account.User.Id+"@"+p.placeholderEmail, userPassword)
 		if err != nil {
-			return account, status.Error(codes.Internal, fmt.Errorf("error linking email: %w", err).Error())
+			return account, status.Errorf(codes.Internal, "error linking email: %s", err)
 		}
 
 		return account, nil
@@ -386,7 +386,7 @@ func (p *EvrPipeline) authenticateHeadset(ctx context.Context, logger *zap.Logge
 	// Account requires discord linking.
 	linkTicket, err := p.linkTicket(ctx, logger, xpid, clientIP, &payload)
 	if err != nil {
-		return account, status.Error(codes.Internal, fmt.Errorf("error creating link ticket: %w", err).Error())
+		return account, status.Errorf(codes.Internal, "error creating link ticket: %s", err)
 	}
 	msg := fmt.Sprintf("\nEnter this code:\n  \n>>> %s <<<\nusing '/link-headset %s' in the Echo VR Lounge Discord.", linkTicket.Code, linkTicket.Code)
 	return account, errors.New(msg)
