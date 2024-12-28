@@ -1166,7 +1166,7 @@ func AuthenticatePasswordRPC(ctx context.Context, logger runtime.Logger, db *sql
 }
 
 type AccountLookupRPCResponse struct {
-	ID          string        `json:"id"`
+	ID          uuid.UUID     `json:"id"`
 	DiscordID   string        `json:"discord_id"`
 	Username    string        `json:"username"`
 	DisplayName string        `json:"display_name"`
@@ -1175,10 +1175,11 @@ type AccountLookupRPCResponse struct {
 }
 
 type AccountLookupRequest struct {
-	Username    string `json:"username"`
-	UserID      string `json:"user_id"`
-	DiscordID   string `json:"discord_id"`
-	DisplayName string `json:"display_name"`
+	Username    string    `json:"username"`     // discord/nakama username
+	UserID      uuid.UUID `json:"user_id"`      // nakama user uuid
+	DiscordID   string    `json:"discord_id"`   // discord ID (snowflake)
+	XPID        string    `json:"xp_id"`        // OVR-ORG-123412341234
+	DisplayName string    `json:"display_name"` // active display name (probably unreliable)
 }
 
 func (r *AccountLookupRequest) CacheKey() string {
