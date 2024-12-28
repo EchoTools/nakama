@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
@@ -468,6 +469,15 @@ func (r *ProfileRegistry) UpdateEquippedItem(profile *GameProfileData, category 
 // Set the user's profile based on their groups
 func (r *ProfileRegistry) UpdateEntitledCosmetics(ctx context.Context, userID uuid.UUID, profile *GameProfileData) error {
 
+	account, err := r.nk.AccountGetId(ctx, userID.String())
+	if err != nil {
+		return fmt.Errorf("failed to get account: %w", err)
+	}
+	wallet := make(map[string]int64, 0)
+	if err := json.Unmarshal([]byte(account.Wallet), &wallet); err != nil {
+		return fmt.Errorf("failed to unmarshal wallet: %w", err)
+	}
+
 	// Get the user's groups
 	// Check if the user has any groups that would grant them cosmetics
 	userGroups, _, err := r.nk.UserGroupsList(ctx, userID.String(), 100, nil, "")
@@ -502,6 +512,7 @@ func (r *ProfileRegistry) UpdateEntitledCosmetics(ctx context.Context, userID uu
 
 	// Disable Restricted Cosmetics
 	enableAll := isDeveloper
+
 	err = SetCosmeticDefaults(&profile.Server, enableAll)
 	if err != nil {
 		return fmt.Errorf("failed to disable restricted cosmetics: %w", err)
@@ -510,21 +521,17 @@ func (r *ProfileRegistry) UpdateEntitledCosmetics(ctx context.Context, userID uu
 	// Set the user's unlocked cosmetics based on their groups
 	unlocked := profile.Server.UnlockedCosmetics
 	arena := &unlocked.Arena
-	// Set the user's unlocked cosmetics based on their groups
-	for _, userGroup := range userGroups {
-		group := userGroup.GetGroup()
 
-		if group.LangTag != "entitlement" {
+	// Unlock VRML cosmetics
+	for k, v := range wallet {
+		if v <= 0 || !strings.HasPrefix("VRML ", k) {
 			continue
 		}
 
-		name := group.GetName()
-		if strings.HasPrefix(name, "VRML ") {
-			arena.DecalVRML = true
-			arena.EmoteVRMLA = true
-		}
+		arena.DecalVRML = true
+		arena.EmoteVRMLA = true
 
-		switch name {
+		switch k {
 		case "VRML Season Preseason":
 			arena.TagVRMLPreseason = true
 			arena.MedalVRMLPreseason = true
@@ -603,7 +610,20 @@ func (r *ProfileRegistry) UpdateEntitledCosmetics(ctx context.Context, userID uu
 			fallthrough
 		case "VRML Season 7":
 			arena.TagVRMLS7 = true
+		}
+	}
 
+	// Set the user's unlocked cosmetics based on their groups
+	for _, userGroup := range userGroups {
+		group := userGroup.GetGroup()
+
+		if group.LangTag != "entitlement" {
+			continue
+		}
+
+		name := group.GetName()
+
+		switch name {
 		case GroupGlobalDevelopers:
 			arena.TagDeveloper = true
 			fallthrough

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gofrs/uuid/v5"
@@ -126,6 +127,10 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		return fmt.Errorf("unable to register matchmaker override: %w", err)
 	}
 
+	if err := MigrateVRMLGroupsToWallet(ctx, logger, db, nk); err != nil {
+		return fmt.Errorf("unable to migrate VRML groups to wallet: %w", err)
+	}
+
 	// Update the metrics with match data
 	go func() {
 		<-time.After(15 * time.Second)
@@ -140,6 +145,61 @@ type MatchLabelMeta struct {
 	TickRate  int
 	Presences []*rtapi.UserPresence
 	State     *MatchLabel
+}
+
+func MigrateVRMLGroupsToWallet(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule) error {
+	// Get all the VRML groups
+
+	groups, _, err := nk.GroupsList(ctx, "", "entitlement", nil, nil, 100, "")
+	if err != nil {
+		return err
+	}
+
+	for _, group := range groups {
+
+		if !strings.HasPrefix(group.Name, "VRML ") {
+			continue
+		}
+
+		cursor := ""
+		var members []*api.GroupUserList_GroupUser
+		var err error
+
+		for {
+
+			members, cursor, err = nk.GroupUsersList(ctx, group.Id, 50, nil, "")
+			if err != nil {
+				logger.Error("Error listing group members: %v", err)
+				break
+			}
+			logger.Info("Migrating %d members from group %s", len(members), group.Name)
+
+			for _, member := range members {
+				// Add the vrml badge to their wallet
+				changeset := map[string]int64{
+					group.Name: 1, // Add badge to users wallet
+				}
+				metadata := map[string]interface{}{
+					"assigned_by": SystemUserID,
+				}
+
+				if _, _, err := nk.WalletUpdate(ctx, member.User.Id, changeset, metadata, true); err != nil {
+					logger.Error("Error updating wallet: %v", err)
+					continue
+				}
+				if err := nk.GroupUserLeave(ctx, group.Id, member.User.Id, member.User.Username); err != nil {
+					logger.Error("Error leaving group: %v", err)
+					continue
+				}
+			}
+
+			if cursor == "" {
+				break
+			}
+
+		}
+	}
+	return nil
 }
 
 func PurgeNonPlayers(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule) {
@@ -309,56 +369,13 @@ func createCoreGroups(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 
 		if len(groups) == 0 {
 			// Create a nakama core group
-			_, err = nk.GroupCreate(ctx, userId, name, userId, SystemGroupLangTag, name, "", false, map[string]interface{}{}, 1000)
+			_, err = nk.GroupCreate(ctx, SystemUserID, name, userId, SystemGroupLangTag, name, "", false, map[string]interface{}{}, 1000)
 			if err != nil {
 				logger.WithField("err", err).Warn("Group `%s` create error: %v", name, err)
 			}
 		}
 	}
 
-	// Create a VRML group for each season
-	vrmlgroups := []string{
-		"VRML Season Preseason",
-		"VRML Season 1",
-		"VRML Season 1 Finalist",
-		"VRML Season 1 Champion",
-		"VRML Season 2",
-		"VRML Season 2 Finalist",
-		"VRML Season 2 Champion",
-		"VRML Season 3",
-		"VRML Season 3 Finalist",
-		"VRML Season 3 Champion",
-		"VRML Season 4",
-		"VRML Season 4 Finalist",
-		"VRML Season 4 Champion",
-		"VRML Season 5",
-		"VRML Season 5 Finalist",
-		"VRML Season 5 Champion",
-		"VRML Season 6",
-		"VRML Season 6 Finalist",
-		"VRML Season 6 Champion",
-		"VRML Season 7",
-		"VRML Season 7 Finalist",
-		"VRML Season 7 Champion",
-	}
-	// Create the VRML groups
-	for _, name := range vrmlgroups {
-		groups, _, err := nk.GroupsList(ctx, name, "", nil, nil, 1, "")
-		if err != nil {
-			logger.WithField("err", err).Error("Group list error: %v", err)
-		}
-		if len(groups) == 0 {
-			_, err = nk.GroupCreate(ctx, userId, name, userId, "entitlement", "VRML Badge Entitlement", "", false, map[string]interface{}{}, 1000)
-			if err != nil {
-				logger.WithField("err", err).Error("Group create error: %v", err)
-			}
-			continue
-		}
-		group := groups[0]
-		if err := nk.GroupUpdate(ctx, group.Id, userId, name, userId, "entitlement", "VRML Badge Entitlement", "", false, map[string]interface{}{}, 1000); err != nil {
-			logger.WithField("err", err).Error("Group update error: %v", err)
-		}
-	}
 	return nil
 }
 
