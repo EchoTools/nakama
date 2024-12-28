@@ -901,7 +901,10 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 
 			bytes, _ := p.profileRegistry.GetCached(ctx, request.EvrId)
 
-			_ = json.Unmarshal(*bytes, &profile)
+			if err = json.Unmarshal(*bytes, &profile); err != nil {
+				logger.Error("Failed to unmarshal cached profile", zap.Error(err))
+				return
+			}
 
 			// Get the match the current player is in
 			if matchID, _, err := GetMatchIDBySessionID(p.runtimeModule, session.id); err == nil {
