@@ -485,11 +485,12 @@ func (r *ProfileRegistry) UpdateEntitledCosmetics(ctx context.Context, userID uu
 		return fmt.Errorf("failed to get user groups: %w", err)
 	}
 
-	for i, group := range userGroups {
+	for i := 0; i < len(userGroups); i++ {
 		// If the user is not a member of the group, don't include it.
-		if group.GetState().GetValue() > int32(api.GroupUserList_GroupUser_MEMBER) {
+		if userGroups[i].GetState().GetValue() > int32(api.GroupUserList_GroupUser_MEMBER) {
 			// Remove the group
 			userGroups = append(userGroups[:i], userGroups[i+1:]...)
+			i--
 		}
 	}
 
