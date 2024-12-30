@@ -142,6 +142,9 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 	// The lobby group is the party that the user is currently in.
 	lobbyGroup, isLeader, err := JoinPartyGroup(session, lobbyParams.PartyGroupName, lobbyParams.PartyID, lobbyParams.CurrentMatchID)
 	if err != nil {
+		if err == runtime.ErrPartyFull {
+			return nil, nil, false, NewLobbyError(ServerIsFull, "party is full")
+		}
 		return nil, nil, false, fmt.Errorf("failed to join party group: %w", err)
 	}
 	logger.Debug("Joined party group", zap.String("partyID", lobbyGroup.IDStr()))
