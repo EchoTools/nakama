@@ -477,7 +477,7 @@ func (p *EvrPipeline) channelInfoRequest(ctx context.Context, logger *zap.Logger
 		resource.Groups = make([]evr.ChannelGroup, 4)
 		for i := range resource.Groups {
 			resource.Groups[i] = evr.ChannelGroup{
-				ChannelUuid:  strings.ToUpper(g.GuildID),
+				ChannelUuid:  strings.ToUpper(g.ID().String()),
 				Name:         g.Name(),
 				Description:  g.Description(),
 				Rules:        g.Description() + "\n" + g.RulesText,
