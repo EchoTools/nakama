@@ -270,12 +270,7 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 
 	labels, err := lobbyListGameServers(ctx, p.runtimeModule, query)
 	if err != nil {
-		logger.Warn("Failed to list game servers", zap.Any("query", query), zap.Error(err))
 		return nil, err
-	}
-
-	if len(labels) == 0 {
-		return nil, NewLobbyError(ServerFindFailed, "failed to find server")
 	}
 
 	// Retrieve the latency history of all online public players.
@@ -547,7 +542,7 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 				}
 
 				// This should't happen unless there's no servers available.
-				return NewLobbyErrorf(ServerFindFailed, "failed to find social lobby: %w", err)
+				return NewLobbyErrorf(ServerFindFailed, "failed to create social lobby: %w", err)
 			} else {
 				<-time.After(1 * time.Second)
 			}

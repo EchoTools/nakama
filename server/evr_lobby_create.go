@@ -27,13 +27,11 @@ func (p *EvrPipeline) lobbyCreate(ctx context.Context, logger *zap.Logger, sessi
 
 	query, err := lobbyCreateQuery(ctx, logger, db, nk, session, params)
 	if err != nil {
-		logger.Warn("Failed to build create query", zap.Error(err))
 		return MatchID{}, fmt.Errorf("failed to build query: %w", err)
 	}
 	logger.Debug("Create query", zap.String("query", query))
 	labels, err := lobbyListGameServers(ctx, nk, query)
 	if err != nil {
-		logger.Warn("Failed to list game servers", zap.Any("query", query), zap.Error(err))
 		return MatchID{}, err
 	}
 
@@ -82,7 +80,7 @@ func lobbyListGameServers(ctx context.Context, nk runtime.NakamaModule, query st
 	minSize, maxSize := 1, 1 // the game server counts as one.
 	matches, err := listMatches(ctx, nk, limit, minSize, maxSize, query)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find matches: %w", err)
+		return nil, fmt.Errorf("failed to list matches: %w", err)
 	}
 
 	if len(matches) == 0 {
@@ -105,7 +103,7 @@ func lobbyListLabels(ctx context.Context, nk runtime.NakamaModule, query string)
 	minSize, maxSize := 1, MatchLobbyMaxSize // the game server counts as one.
 	matches, err := listMatches(ctx, nk, limit, minSize, maxSize, query)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find matches: %w", err)
+		return nil, fmt.Errorf("failed to list matches: %w", err)
 	}
 
 	if len(matches) == 0 {

@@ -76,11 +76,10 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 				logger.Warn("Matchmaking timed out", zap.String("mode", lobbyParams.Mode.String()), zap.Error(err))
 				err = NewLobbyError(Timeout, "matchmaking timed out")
 			} else {
-
-				switch e := err.(type) {
-				case *LobbyError:
-					code = e.code
-				default:
+				lobbyErr := &LobbyError{}
+				if errors.As(err, &lobbyErr) {
+					code = lobbyErr.code
+				} else {
 					logger.Warn("Unexpected error while finding match", zap.Error(err))
 					code = InternalError
 				}
