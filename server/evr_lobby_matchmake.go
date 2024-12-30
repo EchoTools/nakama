@@ -279,6 +279,8 @@ type MatchmakingSettings struct {
 	MatchmakingTimeoutSecs      int                           `json:"matchmaking_timeout_secs,omitempty"`       // The matchmaking timeout
 	FailsafeTimeoutSecs         int                           `json:"failsafe_timeout_secs,omitempty"`          // The failsafe timeout
 	FallbackTimeoutSecs         int                           `json:"fallback_timeout_secs,omitempty"`          // The fallback timeout
+	GlobalSettingsVersion       string                        `json:"global_settings_version,omitempty"`        // The global settings version (for caching)
+	PreviousRankPercentile      float64                       `json:"previous_rank_percentile,omitempty"`       // The previous rank percentile
 }
 
 func (MatchmakingSettings) GetStorageID() StorageID {
@@ -288,13 +290,19 @@ func (MatchmakingSettings) GetStorageID() StorageID {
 	}
 }
 
+func LoadMatchmakingSettingsWithVersion(ctx context.Context, nk runtime.NakamaModule, userID string) (version string, settings MatchmakingSettings, err error) {
+	version, err = LoadFromStorage(ctx, nk, userID, &settings, true)
+	return
+}
+
 func LoadMatchmakingSettings(ctx context.Context, nk runtime.NakamaModule, userID string) (settings MatchmakingSettings, err error) {
-	err = LoadFromStorage(ctx, nk, userID, &settings, true)
+	_, err = LoadFromStorage(ctx, nk, userID, &settings, true)
 	return
 }
 
 func StoreMatchmakingSettings(ctx context.Context, nk runtime.NakamaModule, userID string, settings MatchmakingSettings) error {
-	return SaveToStorage(ctx, nk, userID, settings)
+	_, err := SaveToStorage(ctx, nk, userID, settings)
+	return err
 }
 
 func keyToIP(key string) net.IP {

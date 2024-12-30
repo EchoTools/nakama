@@ -12,17 +12,46 @@ import (
 
 func CalculateSmoothedPlayerRankPercentile(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, userID string, mode evr.Symbol, globalSettings, userSettings *MatchmakingSettings) (float64, error) {
 
+	if mode != evr.ModeSocialPublic {
+		mode = evr.ModeArenaPublic
+	}
+
+	globalSettingsVersion, _, err := LoadMatchmakingSettingsWithVersion(ctx, nk, userID)
+	if err != nil {
+		return 0.0, fmt.Errorf("failed to load matchmaking settings: %w", err)
+	}
+
+	if userSettings.StaticBaseRankPercentile > 0 {
+		return userSettings.StaticBaseRankPercentile, nil
+	}
+
+	if globalSettings.StaticBaseRankPercentile > 0 {
+		return globalSettings.StaticBaseRankPercentile, nil
+	}
+
+	if userSettings.PreviousRankPercentile > 0 || globalSettingsVersion == userSettings.GlobalSettingsVersion {
+		return userSettings.PreviousRankPercentile, nil
+	}
+
 	defaultRankPercentile := globalSettings.RankPercentileDefault
 	if userSettings.RankPercentileDefault != 0 {
 		defaultRankPercentile = userSettings.RankPercentileDefault
 	}
 
-	activeSchedule := globalSettings.RankResetSchedule
+	activeSchedule := "daily"
+	if globalSettings.RankResetSchedule != "" {
+		activeSchedule = globalSettings.RankResetSchedule
+	}
+
 	if userSettings.RankResetSchedule != "" {
 		activeSchedule = userSettings.RankResetSchedule
 	}
 
-	dampingSchedule := globalSettings.RankResetScheduleDamping
+	dampingSchedule := "weekly"
+	if globalSettings.RankResetScheduleDamping != "" {
+		dampingSchedule = globalSettings.RankResetScheduleDamping
+	}
+
 	if userSettings.RankResetScheduleDamping != "" {
 		dampingSchedule = userSettings.RankResetScheduleDamping
 	}
@@ -32,16 +61,18 @@ func CalculateSmoothedPlayerRankPercentile(ctx context.Context, logger *zap.Logg
 		dampingFactor = userSettings.RankPercentileDampingFactor
 	}
 
-	boardWeights, ok := globalSettings.RankBoardWeights[mode.String()]
-	if !ok {
-		if userSettings.RankBoardWeights != nil {
-			boardWeights, ok = userSettings.RankBoardWeights[mode.String()]
-			if !ok {
-				return 0, fmt.Errorf("No rank board weights found for mode %v", mode)
-			}
-		} else {
-			return 0, fmt.Errorf("No rank board weights found for mode %v", mode)
-		}
+	var boardWeights map[string]float64
+
+	if len(globalSettings.RankBoardWeights) > 0 {
+		boardWeights = globalSettings.RankBoardWeights[mode.String()]
+	}
+
+	if len(userSettings.RankBoardWeights) > 0 {
+		boardWeights = userSettings.RankBoardWeights[mode.String()]
+	}
+
+	if len(boardWeights) == 0 {
+		return defaultRankPercentile, nil
 	}
 
 	dampingPercentile, err := RecalculatePlayerRankPercentile(ctx, logger, nk, userID, mode, dampingSchedule, defaultRankPercentile, boardWeights)
@@ -54,7 +85,14 @@ func CalculateSmoothedPlayerRankPercentile(ctx context.Context, logger *zap.Logg
 		return 0.0, fmt.Errorf("failed to get active percentile: %w", err)
 	}
 
-	return activePercentile + (dampingPercentile-activePercentile)*dampingFactor, nil
+	percentile := activePercentile + (dampingPercentile-activePercentile)*dampingFactor
+
+	userSettings.PreviousRankPercentile = percentile
+	userSettings.GlobalSettingsVersion = globalSettingsVersion
+	if _, err := SaveToStorage(ctx, nk, userID, userSettings); err != nil {
+		logger.Warn("Failed to save user settings", zap.Error(err))
+	}
+	return percentile, nil
 }
 
 func RecalculatePlayerRankPercentile(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, userID string, mode evr.Symbol, periodicity string, defaultRankPercentile float64, boardNameWeights map[string]float64) (float64, error) {

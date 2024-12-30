@@ -129,7 +129,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 	}
 
 	// Load the global matchmaking config
-	globalSettings, err := LoadMatchmakingSettings(ctx, p.runtimeModule, SystemUserID)
+	globalSettingsVersion, globalSettings, err := LoadMatchmakingSettingsWithVersion(ctx, p.runtimeModule, SystemUserID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load global matchmaking settings: %w", err)
 	}
@@ -193,7 +193,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 			userSettings.NextMatchID = MatchID{}
 			userSettings.NextMatchRole = ""
 			userSettings.NextMatchDiscordID = ""
-			if err := SaveToStorage(ctx, p.runtimeModule, userID, userSettings); err != nil {
+			if _, err := SaveToStorage(ctx, p.runtimeModule, userID, userSettings); err != nil {
 				logger.Warn("Failed to clear next match metadata", zap.Error(err))
 			}
 		}()
@@ -305,67 +305,22 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		rankPercentileMaxDelta = userSettings.RankPercentileMaxDelta
 	}
 
-	rankStatsPeriod := "weekly"
+	// Only calculate it, if it's out of date.
+	basePercentile := userSettings.PreviousRankPercentile
 
-	if globalSettings.RankResetSchedule != "" {
-		rankStatsPeriod = globalSettings.RankResetSchedule
-	}
-	if userSettings.RankResetSchedule != "" {
-		rankStatsPeriod = userSettings.RankResetSchedule
-	}
-
-	rankStatsPeriodDamping := "daily"
-	if globalSettings.RankResetScheduleDamping != "" {
-		rankStatsPeriod = globalSettings.RankResetScheduleDamping
-	}
-
-	if userSettings.RankResetScheduleDamping != "" {
-		rankStatsPeriod = userSettings.RankResetScheduleDamping
-	}
-
-	rankStatsDefaultPercentile := 0.3
-	if globalSettings.RankPercentileDefault > 0 {
-		rankStatsDefaultPercentile = globalSettings.RankPercentileDefault
-	}
-
-	if userSettings.RankPercentileDefault > 0 {
-		rankStatsDefaultPercentile = userSettings.RankPercentileDefault
-	}
-
-	basePercentile := rankStatsDefaultPercentile
-	dampingPercentile := rankStatsDefaultPercentile
-
-	if globalSettings.RankBoardWeights != nil {
-		if boardWeights, ok := globalSettings.RankBoardWeights[mode.String()]; ok {
-
-			basePercentile, err = RecalculatePlayerRankPercentile(ctx, logger, p.runtimeModule, session.userID.String(), mode, rankStatsPeriod, rankStatsDefaultPercentile, boardWeights)
-			if err != nil {
-				return nil, fmt.Errorf("failed to get overall percentile: %w", err)
-			}
-
-			dampingPercentile, err = RecalculatePlayerRankPercentile(ctx, logger, p.runtimeModule, session.userID.String(), mode, rankStatsPeriodDamping, rankStatsDefaultPercentile, boardWeights)
-			if err != nil {
-				return nil, fmt.Errorf("failed to get daily percentile: %w", err)
-			}
+	if userSettings.PreviousRankPercentile == 0 || globalSettingsVersion != userSettings.GlobalSettingsVersion {
+		basePercentile, err = CalculateSmoothedPlayerRankPercentile(ctx, logger, p.runtimeModule, userID, mode, &globalSettings, &userSettings)
+		if err != nil {
+			return nil, fmt.Errorf("failed to calculate smoothed player rank percentile: %w", err)
 		}
 	}
 
-	if globalSettings.StaticBaseRankPercentile > 0 {
-		basePercentile = globalSettings.StaticBaseRankPercentile
-	}
-
-	if userSettings.StaticBaseRankPercentile > 0 {
-		basePercentile = userSettings.StaticBaseRankPercentile
-	}
-
-	if dampingPercentile == 0 {
-		dampingPercentile = basePercentile
-	}
-
-	smoothingFactor := globalSettings.RankPercentileDampingFactor
-	if userSettings.RankPercentileDampingFactor > 0 {
-		// Ensure the percentile is at least 0.2
-		basePercentile = basePercentile + (dampingPercentile-basePercentile)*smoothingFactor
+	if basePercentile != userSettings.PreviousRankPercentile {
+		userSettings.PreviousRankPercentile = basePercentile
+		userSettings.GlobalSettingsVersion = globalSettingsVersion
+		if _, err := SaveToStorage(ctx, p.runtimeModule, userID, userSettings); err != nil {
+			logger.Warn("Failed to save user settings", zap.Error(err))
+		}
 	}
 
 	maxServerRTT := 180
