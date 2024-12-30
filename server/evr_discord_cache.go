@@ -274,7 +274,7 @@ func (c *DiscordCache) syncMember(ctx context.Context, logger *zap.Logger, disco
 
 	var group *GuildGroup
 	for _, g := range groups {
-		if group.GuildID == guildID {
+		if g.GuildID == guildID {
 			group = g
 			break
 		}
@@ -285,6 +285,7 @@ func (c *DiscordCache) syncMember(ctx context.Context, logger *zap.Logger, disco
 	}
 
 	if member == nil {
+		// Clear the role cache for the user.
 		group.RolesCacheUpdate(evrAccount.ID(), nil)
 		return nil
 	}

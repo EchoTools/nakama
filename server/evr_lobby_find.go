@@ -2,11 +2,13 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"math"
 	"math/rand"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -719,4 +721,80 @@ func (p *EvrPipeline) PartyFollow(ctx context.Context, logger *zap.Logger, sessi
 // Wrapper for the matchRegistry.ListMatches function.
 func listMatches(ctx context.Context, nk runtime.NakamaModule, limit int, minSize int, maxSize int, query string) ([]*api.Match, error) {
 	return nk.MatchList(ctx, limit, true, "", &minSize, &maxSize, query)
+}
+
+func rttByPlayerByExtIP(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, groupID string) (map[string]map[string]int, error) {
+	qparts := []string{
+		fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/", Query.Escape(groupID)),
+	}
+
+	query := strings.Join(qparts, " ")
+
+	pubLabels, err := lobbyListLabels(ctx, nk, query)
+	if err != nil {
+		return nil, err
+	}
+
+	rttByPlayerByExtIP := make(map[string]map[string]int)
+
+	for _, label := range pubLabels {
+		for _, p := range label.Players {
+			history, err := LoadLatencyHistory(ctx, logger, db, uuid.FromStringOrNil(p.UserID))
+			if err != nil {
+				logger.Warn("Failed to load latency history", zap.Error(err))
+				continue
+			}
+			rtts := history.LatestRTTs()
+			for extIP, rtt := range rtts {
+				if _, ok := rttByPlayerByExtIP[p.UserID]; !ok {
+					rttByPlayerByExtIP[p.UserID] = make(map[string]int)
+				}
+				rttByPlayerByExtIP[p.UserID][extIP] = rtt
+			}
+		}
+	}
+
+	return rttByPlayerByExtIP, nil
+}
+
+func sortByGreatestPlayerAvailability(rttByPlayerByExtIP map[string]map[string]int) []string {
+
+	maxPlayerCount := 0
+	extIPsByAverageRTT := make(map[string]int)
+	extIPsByPlayerCount := make(map[string]int)
+	for extIP, players := range rttByPlayerByExtIP {
+		extIPsByPlayerCount[extIP] += len(players)
+		if len(players) > maxPlayerCount {
+			maxPlayerCount = len(players)
+		}
+
+		averageRTT := 0
+		for _, rtt := range players {
+			averageRTT += rtt
+		}
+		averageRTT /= len(players)
+	}
+
+	// Sort by greatest player availability
+	extIPs := make([]string, 0, len(extIPsByPlayerCount))
+	for extIP := range extIPsByPlayerCount {
+		extIPs = append(extIPs, extIP)
+	}
+
+	sort.SliceStable(extIPs, func(i, j int) bool {
+		// Sort by player count first
+		if extIPsByPlayerCount[extIPs[i]] > extIPsByPlayerCount[extIPs[j]] {
+			return true
+		} else if extIPsByPlayerCount[extIPs[i]] < extIPsByPlayerCount[extIPs[j]] {
+			return false
+		}
+
+		// If the player count is the same, sort by RTT
+		if extIPsByAverageRTT[extIPs[i]] < extIPsByAverageRTT[extIPs[j]] {
+			return true
+		}
+		return false
+	})
+
+	return extIPs
 }
