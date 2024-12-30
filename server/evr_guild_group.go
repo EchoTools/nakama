@@ -7,6 +7,7 @@ import (
 	"github.com/bits-and-blooms/bitset"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
+	"github.com/samber/lo"
 )
 
 type GuildGroupRoles struct {
@@ -22,7 +23,7 @@ type GuildGroupRoles struct {
 }
 
 // Roles returns a slice of role IDs
-func (r *GuildGroupRoles) Slice() []string {
+func (r *GuildGroupRoles) AsSlice() []string {
 	roles := make([]string, 0)
 	for _, r := range []string{
 		r.Member,
@@ -41,6 +42,17 @@ func (r *GuildGroupRoles) Slice() []string {
 	}
 	slices.Sort(roles)
 	return slices.Compact(roles)
+}
+
+type GuildGroupRoleCache struct {
+	Member           []string `json:"member"`
+	Moderator        []string `json:"moderator"`
+	ServerHost       []string `json:"server_host"`
+	Allocator        []string `json:"allocator"`
+	Suspended        []string `json:"suspended"`
+	APIAccess        []string `json:"api_access"`
+	AccountAgeBypass []string `json:"account_age_bypass"`
+	VPNBypass        []string `json:"vpn_bypass"`
 }
 
 type GuildGroupMemberships map[string]GuildGroupMembership
@@ -67,8 +79,6 @@ type GroupMetadata struct {
 
 	// UserIDs that are required to go to community values when the first join the social lobby
 	CommunityValuesUserIDs []string `json:"community_values_user_ids"`
-
-	Unhandled map[string]interface{} `json:"-"`
 }
 
 func NewGuildGroupMetadata(guildID string) *GroupMetadata {
@@ -147,6 +157,18 @@ func (m *GroupMetadata) IsAllowedFeature(feature string) bool {
 	return slices.Contains(m.AllowedFeatures, feature)
 }
 
+func (m *GroupMetadata) IsAllowedMatchmaking(userID string) bool {
+	if !m.MembersOnlyMatchmaking {
+		return true
+	}
+
+	if userIDs, ok := m.RoleCache[m.Roles.Member]; ok {
+		return slices.Contains(userIDs, userID)
+	}
+
+	return false
+}
+
 func (m *GroupMetadata) hasCompletedCommunityValues(userID string) bool {
 	return !slices.Contains(m.CommunityValuesUserIDs, userID)
 }
@@ -205,12 +227,26 @@ func UnmarshalGuildGroupMetadataFromMap(guildGroupMap map[string]interface{}) (*
 }
 
 type GuildGroup struct {
-	Metadata *GroupMetadata
-	Group    *api.Group
+	GroupMetadata
+	Group *api.Group
 }
 
-func (g *GuildGroup) GuildID() string {
-	return g.Metadata.GuildID
+func NewGuildGroup(group *api.Group) (*GuildGroup, error) {
+
+	md := &GroupMetadata{}
+	if err := json.Unmarshal([]byte(group.Metadata), md); err != nil {
+		return nil, err
+	}
+
+	// Ensure the matchmaking channel IDs have been initialized
+	if md.MatchmakingChannelIDs == nil {
+		md.MatchmakingChannelIDs = make(map[string]string)
+	}
+
+	return &GuildGroup{
+		GroupMetadata: *md,
+		Group:         group,
+	}, nil
 }
 
 func (g *GuildGroup) Name() string {
@@ -229,34 +265,64 @@ func (g *GuildGroup) Size() int {
 	return int(g.Group.EdgeCount)
 }
 
-func NewGuildGroup(group *api.Group) (*GuildGroup, error) {
+// Roles returns a slice of role IDs
+func (g *GuildGroup) RolesUserList(userID string) []string {
+	roles := make([]string, 0, len(g.RoleCache))
+	for role, userIDs := range g.RoleCache {
+		if slices.Contains(userIDs, userID) {
+			roles = append(roles, role)
+		}
+	}
+	return roles
+}
 
-	md := &GroupMetadata{}
-	if err := json.Unmarshal([]byte(group.Metadata), md); err != nil {
-		return nil, err
+func (g *GuildGroup) PermissionsUser(userID string) *GuildGroupMembership {
+	return &GuildGroupMembership{
+		IsAllowedMatchmaking: g.IsAllowedMatchmaking(userID),
+		IsModerator:          g.IsModerator(userID),
+		IsServerHost:         g.IsServerHost(userID),
+		IsAllocator:          g.IsAllocator(userID),
+		IsSuspended:          g.IsSuspended(userID),
+		IsAPIAccess:          g.IsAPIAccess(userID),
+		IsAccountAgeBypass:   g.IsAccountAgeBypass(userID),
+		IsVPNBypass:          g.IsVPNBypass(userID),
+		IsHeadsetLinked:      g.IsAccountLinked(userID),
+	}
+}
+
+func (g *GuildGroup) RolesCacheUpdate(userID string, current []string) bool {
+
+	removals, additions := lo.Difference(g.RolesUserList(userID), current)
+
+	if len(removals) == 0 && len(additions) == 0 {
+		return false
 	}
 
-	// Ensure the matchmaking channel IDs have been initialized
-	if md.MatchmakingChannelIDs == nil {
-		md.MatchmakingChannelIDs = make(map[string]string)
+	for _, role := range removals {
+		i := slices.Index(g.RoleCache[role], userID)
+		if i == -1 {
+			continue
+		}
+		g.RoleCache[role] = append(g.RoleCache[role][:i], g.RoleCache[role][i+1:]...)
 	}
 
-	return &GuildGroup{
-		Metadata: md,
-		Group:    group,
-	}, nil
+	for _, role := range additions {
+		g.RoleCache[role] = append(g.RoleCache[role], userID)
+	}
+
+	return true
 }
 
 type GuildGroupMembership struct {
-	IsMember           bool
-	IsModerator        bool // Admin
-	IsServerHost       bool // Broadcaster Host
-	IsAllocator        bool // Can allocate servers with slash command
-	IsSuspended        bool
-	IsAPIAccess        bool
-	IsAccountAgeBypass bool
-	IsVPNBypass        bool
-	IsHeadsetLinked    bool
+	IsAllowedMatchmaking bool
+	IsModerator          bool // Admin
+	IsServerHost         bool // Broadcaster Host
+	IsAllocator          bool // Can allocate servers with slash command
+	IsSuspended          bool
+	IsAPIAccess          bool
+	IsAccountAgeBypass   bool
+	IsVPNBypass          bool
+	IsHeadsetLinked      bool
 }
 
 func (m *GuildGroupMembership) ToUint64() uint64 {
@@ -274,7 +340,7 @@ func (m *GuildGroupMembership) FromUint64(v uint64) {
 }
 
 func (m *GuildGroupMembership) FromBitSet(b *bitset.BitSet) {
-	m.IsMember = b.Test(0)
+	m.IsAllowedMatchmaking = b.Test(0)
 	m.IsModerator = b.Test(1)
 	m.IsServerHost = b.Test(2)
 	m.IsAllocator = b.Test(3)
@@ -287,7 +353,7 @@ func (m *GuildGroupMembership) FromBitSet(b *bitset.BitSet) {
 
 func (m *GuildGroupMembership) asBitSet() *bitset.BitSet {
 	b := bitset.New(9)
-	if m.IsMember {
+	if m.IsAllowedMatchmaking {
 		b.Set(0)
 	}
 	if m.IsModerator {
@@ -315,23 +381,4 @@ func (m *GuildGroupMembership) asBitSet() *bitset.BitSet {
 		b.Set(8)
 	}
 	return b
-}
-
-func NewGuildGroupMembership(group *api.Group, userID uuid.UUID, state api.UserGroupList_UserGroup_State) (*GuildGroupMembership, error) {
-	gg, err := NewGuildGroup(group)
-	if err != nil {
-		return nil, err
-	}
-	userIDStr := userID.String()
-	return &GuildGroupMembership{
-		IsMember:           state <= api.UserGroupList_UserGroup_MEMBER,
-		IsModerator:        gg.Metadata.IsModerator(userIDStr),
-		IsServerHost:       gg.Metadata.IsServerHost(userIDStr),
-		IsAllocator:        gg.Metadata.IsAllocator(userIDStr),
-		IsSuspended:        gg.Metadata.IsSuspended(userIDStr),
-		IsAPIAccess:        gg.Metadata.IsAPIAccess(userIDStr),
-		IsAccountAgeBypass: gg.Metadata.IsAccountAgeBypass(userIDStr),
-		IsVPNBypass:        gg.Metadata.IsVPNBypass(userIDStr),
-		IsHeadsetLinked:    gg.Metadata.IsAccountLinked(userIDStr),
-	}, nil
 }

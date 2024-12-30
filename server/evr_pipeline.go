@@ -67,7 +67,6 @@ type EvrPipeline struct {
 
 	profileRegistry              *ProfileRegistry
 	discordCache                 *DiscordCache
-	guildGroupCache              *GuildGroupCache
 	appBot                       *DiscordAppBot
 	leaderboardRegistry          *LeaderboardRegistry
 	userRemoteLogJournalRegistry *UserLogJouralRegistry
@@ -126,8 +125,6 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	lobbyBuilder := NewLobbyBuilder(logger, nk, sessionRegistry, matchRegistry, tracker, metrics, profileRegistry)
 	matchmaker.OnMatchedEntries(lobbyBuilder.handleMatchedEntries)
 	userRemoteLogJournalRegistry := NewUserRemoteLogJournalRegistry(logger, nk, sessionRegistry)
-	guildGroupCache := NewGuildGroupCache(ctx, runtimeLogger, nk)
-	guildGroupCache.Start()
 
 	ipqsClient, err := NewIPQS(logger, db, metrics, storageIndex, vars["IPQS_API_KEY"])
 	if err != nil {
@@ -142,7 +139,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	if disable, ok := vars["DISABLE_DISCORD_BOT"]; ok && disable == "true" {
 		logger.Info("Discord bot is disabled")
 	} else {
-		discordCache = NewDiscordCache(ctx, logger, config, metrics, guildGroupCache, nk, db, dg)
+		discordCache = NewDiscordCache(ctx, logger, config, metrics, nk, db, dg)
 		discordCache.Start()
 
 		appBot, err = NewDiscordAppBot(runtimeLogger, nk, db, metrics, pipeline, config, discordCache, profileRegistry, statusRegistry, dg)
@@ -189,11 +186,10 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		runtimeModule:        nk,
 		runtimeLogger:        runtimeLogger,
 
-		discordCache:    discordCache,
-		guildGroupCache: guildGroupCache,
-		appBot:          appBot,
-		internalIP:      internalIP,
-		externalIP:      externalIP,
+		discordCache: discordCache,
+		appBot:       appBot,
+		internalIP:   internalIP,
+		externalIP:   externalIP,
 
 		profileRegistry:                  profileRegistry,
 		leaderboardRegistry:              leaderboardRegistry,

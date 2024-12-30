@@ -58,6 +58,50 @@ func (p *GroupProfile) UpdateUnlockedItems(updated []evr.Symbol) {
 	p.UpdateTime = time.Now()
 }
 
+type EVRAccount struct {
+	AccountMetadata
+	User        *api.User
+	Wallet      string
+	Email       string
+	Devices     []*api.AccountDevice
+	CustomId    string
+	VerifyTime  time.Time
+	DisableTime time.Time
+}
+
+func NewEVRAccount(account *api.Account) (*EVRAccount, error) {
+	md := AccountMetadata{}
+	if err := json.Unmarshal([]byte(account.User.Metadata), &md); err != nil {
+		return nil, fmt.Errorf("error unmarshalling account metadata: %w", err)
+	}
+	md.account = account
+
+	a := &EVRAccount{
+		AccountMetadata: md,
+		User:            account.User,
+		Wallet:          account.Wallet,
+		Email:           account.Email,
+		Devices:         account.Devices,
+		CustomId:        account.CustomId,
+	}
+	if account.VerifyTime != nil {
+		a.VerifyTime = account.VerifyTime.AsTime()
+	}
+	if account.DisableTime != nil {
+		a.DisableTime = account.DisableTime.AsTime()
+	}
+
+	return a, nil
+}
+
+func (e *EVRAccount) IsDisabled() bool {
+	return !e.DisableTime.IsZero()
+}
+
+func (e *EVRAccount) IsLinked() bool {
+	return len(e.Devices) > 0
+}
+
 type AccountMetadata struct {
 	account *api.Account
 
@@ -72,6 +116,7 @@ type AccountMetadata struct {
 	DiscordDebugMessages   bool              `json:"discord_debug_messages"`    // Enable debug messages in Discord
 	RelayMessagesToDiscord bool              `json:"relay_messages_to_discord"` // Relay messages to Discord
 	isModified             bool              // Indicates whether the account metadata has been modified
+	DiscordUser            *discordgo.User   `json:"discord_user"` // The Discord user object
 }
 
 func (a *AccountMetadata) ID() string {
@@ -193,9 +238,8 @@ func GetDisplayNameByGroupID(ctx context.Context, nk runtime.NakamaModule, userI
 	}
 }
 
-func GetGuildGroupMemberships(ctx context.Context, nk runtime.NakamaModule, userID string) (map[string]GuildGroupMembership, error) {
-
-	memberships := make(map[string]GuildGroupMembership, 0)
+func UserGuildGroupsList(ctx context.Context, nk runtime.NakamaModule, userID string) (map[string]*GuildGroup, error) {
+	groups := make(map[string]*GuildGroup, 0)
 	cursor := ""
 	for {
 		// Fetch the groups using the provided userId
@@ -203,22 +247,38 @@ func GetGuildGroupMemberships(ctx context.Context, nk runtime.NakamaModule, user
 		if err != nil {
 			return nil, fmt.Errorf("error getting user groups: %w", err)
 		}
+
 		for _, ug := range userGroups {
 			g := ug.GetGroup()
 			if g.GetLangTag() != "guild" {
 				continue
 			}
-
-			membership, err := NewGuildGroupMembership(g, uuid.FromStringOrNil(userID), api.UserGroupList_UserGroup_State(ug.GetState().GetValue()))
+			gg, err := NewGuildGroup(g)
 			if err != nil {
-				return nil, fmt.Errorf("error creating guild group membership: %w", err)
+				return nil, fmt.Errorf("error creating guild group: %w", err)
 			}
 
-			memberships[g.GetId()] = *membership
+			groups[g.GetId()] = gg
 		}
 		if cursor == "" {
 			break
 		}
 	}
+	return groups, nil
+}
+
+func GetGuildGroupMemberships(ctx context.Context, nk runtime.NakamaModule, userID string) (map[string]GuildGroupMembership, error) {
+
+	// Get the caller's nakama user ID
+	groups, err := UserGuildGroupsList(ctx, nk, userID)
+	if err != nil {
+		return nil, fmt.Errorf("error getting user guild groups: %w", err)
+	}
+
+	memberships := make(map[string]GuildGroupMembership, 0)
+	for _, group := range groups {
+		memberships[group.ID().String()] = *group.PermissionsUser(userID)
+	}
+
 	return memberships, nil
 }
