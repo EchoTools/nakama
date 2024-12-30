@@ -103,11 +103,10 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		return err
 	}
 
-	for gid, m := range memberships {
-		if guildID != "" && gid != guildID {
-			continue
+	for _, g := range guildGroups {
+		if includePrivate || g.GuildID == i.GuildID {
+			whoami.GuildGroupMemberships[gid] = m
 		}
-		whoami.GuildGroupMemberships[gid] = m
 	}
 
 	loginHistory, err := LoginHistoryLoad(ctx, nk, userID.String())
