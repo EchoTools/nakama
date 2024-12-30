@@ -525,7 +525,7 @@ func (r *ProfileRegistry) UpdateEntitledCosmetics(ctx context.Context, userID uu
 
 	// Unlock VRML cosmetics
 	for k, v := range wallet {
-		if v <= 0 || !strings.HasPrefix("VRML ", k) {
+		if v <= 0 || !strings.HasPrefix(k, "VRML ") {
 			continue
 		}
 
