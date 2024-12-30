@@ -17,38 +17,6 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-func (d *DiscordAppBot) syncLinkedRoles(ctx context.Context, userID string) error {
-
-	memberships, err := GetGuildGroupMemberships(ctx, d.nk, userID)
-	if err != nil {
-		return fmt.Errorf("failed to get guild group memberships: %w", err)
-	}
-	guildGroups := d.cache.guildGroupCache.GuildGroups()
-	if guildGroups == nil {
-		return fmt.Errorf("guild groups cache is nil")
-	}
-
-	for groupID, _ := range memberships {
-		guildGroup, ok := guildGroups[groupID]
-		if !ok {
-			continue
-		}
-
-		if guildGroup.Metadata.Roles.AccountLinked != "" {
-			if guildGroup.Metadata.IsAccountLinked(userID) {
-				if err := d.dg.GuildMemberRoleAdd(groupID, userID, guildGroup.Metadata.Roles.AccountLinked); err != nil {
-					return fmt.Errorf("error adding role to member: %w", err)
-				}
-			} else {
-				if err := d.dg.GuildMemberRoleRemove(groupID, userID, guildGroup.Metadata.Roles.AccountLinked); err != nil {
-					return fmt.Errorf("error removing role from member: %w", err)
-				}
-			}
-		}
-	}
-	return nil
-}
-
 func (d *DiscordAppBot) handleInteractionApplicationCommand(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, commandName string, commandFn DiscordCommandHandlerFn) error {
 	ctx := d.ctx
 
@@ -72,10 +40,6 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(logger runtime.Logge
 				return fmt.Errorf("failed to authenticate (or create) user %s: %w", user.ID, err)
 			}
 		}
-		// Do some profile checks and cleanups
-		// The user must be in a guild for the empty groupID to be valid
-		d.cache.Queue(userID, groupID)
-		d.cache.Queue(userID, "")
 
 	case "unlink-headset":
 
@@ -98,50 +62,51 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(logger runtime.Logge
 		return simpleInteractionResponse(s, i, "This command can only be used in a guild.")
 	}
 
-	// Require guild moderator
-	memberships, err := GetGuildGroupMemberships(ctx, d.nk, userID)
-	if err != nil {
-		return fmt.Errorf("failed to get guild group membership: %w", err)
+	guildGroups, err := UserGuildGroupsList(ctx, d.nk, userID)
+
+	var group *GuildGroup
+	for _, gg := range guildGroups {
+		if gg.GuildID == i.GuildID {
+			group = gg
+			break
+		}
 	}
 
-	membership := memberships[groupID]
-
-	gg, ok := d.cache.guildGroupCache.GuildGroup(groupID)
-	if !ok {
+	if group == nil {
 		return simpleInteractionResponse(s, i, "This guild does not exist.")
 	}
+	perms := group.PermissionsUser(userID)
 
-	md := gg.Metadata
 	// Global security check
 	switch commandName {
 
 	case "create":
 
-		if md.AuditChannelID != "" {
-			if err := d.LogInteractionToChannel(i, md.AuditChannelID); err != nil {
+		if group.AuditChannelID != "" {
+			if err := d.LogInteractionToChannel(i, group.AuditChannelID); err != nil {
 				logger.Warn("Failed to log interaction to channel")
 			}
 		}
 
-		if md.DisableCreateCommand {
+		if group.DisableCreateCommand {
 			return simpleInteractionResponse(s, i, "This guild does not allow public allocation.")
 		}
 
 	case "allocate":
 
-		if !membership.IsAllocator {
+		if !perms.IsAllocator {
 			return simpleInteractionResponse(s, i, "You must be a guild allocator to use this command.")
 		}
 
 	case "trigger-cv", "kick-player", "join-player":
 
-		if md.AuditChannelID != "" {
-			if err := d.LogInteractionToChannel(i, md.AuditChannelID); err != nil {
+		if group.AuditChannelID != "" {
+			if err := d.LogInteractionToChannel(i, group.AuditChannelID); err != nil {
 				logger.Warn("Failed to log interaction to channel")
 			}
 		}
 
-		if !membership.IsModerator {
+		if !perms.IsModerator {
 			return simpleInteractionResponse(s, i, "You must be a guild moderator to use this command.")
 		}
 
@@ -368,24 +333,23 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 
 	groupID := d.cache.GuildIDToGroupID(guildID)
 
-	// Get a list of the groups that this user has allocate access to
-	memberships, err := GetGuildGroupMemberships(ctx, d.nk, userID)
+	guildGroups, err := UserGuildGroupsList(ctx, d.nk, userID)
 	if err != nil {
-		return nil, 0, status.Errorf(codes.Internal, "failed to get guild group memberships: %v", err)
+		return nil, 0, status.Errorf(codes.Internal, "failed to get guild groups: %v", err)
 	}
 
-	_, ok := memberships[groupID]
+	group, ok := guildGroups[groupID]
 	if !ok {
 		return nil, 0, status.Error(codes.PermissionDenied, "user is not a member of the guild")
 	}
 
-	guildGroup, found := d.cache.guildGroupCache.GuildGroup(groupID)
-	if !found {
-		return nil, 0, status.Error(codes.Internal, "guild groups cache is nil")
+	perms := group.PermissionsUser(userID)
+	if perms.IsSuspended {
+		return nil, 0, status.Error(codes.PermissionDenied, "user is suspended from the guild")
 	}
 
-	if guildGroup.Metadata.DisableCreateCommand {
-		return nil, 0, status.Error(codes.PermissionDenied, "guild does not allow public allocation")
+	if group.DisableCreateCommand {
+		return nil, 0, status.Error(codes.PermissionDenied, "guild does not allow public match creation")
 	}
 
 	limiter := d.loadPrepareMatchRateLimiter(userID, groupID)

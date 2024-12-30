@@ -190,40 +190,43 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 	return nil
 }
 
-func (p *EvrPipeline) authorizeGuildGroupSession(ctx context.Context, session Session, groupID string) error {
+func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, session Session, lobbyParams *LobbySessionParameters, groupID string) error {
 	userID := session.UserID().String()
 
 	params, ok := LoadParams(ctx)
 	if !ok {
 		return errors.New("failed to get session parameters")
 	}
-
-	guildGroups := p.guildGroupCache.GuildGroups()
-	gg, ok := guildGroups[groupID]
-	if !ok {
-		return fmt.Errorf("failed to get guild group metadata for %s", groupID)
+	var err error
+	var groupMetadata *GroupMetadata
+	if guildGroup, ok := params.GuildGroupsLoad()[groupID]; ok {
+		groupMetadata = &guildGroup.GroupMetadata
+	} else {
+		groupMetadata, err = GetGuildGroupMetadata(ctx, p.db, groupID)
+		if err != nil {
+			return fmt.Errorf("failed to get guild group metadata: %w", err)
+		}
 	}
-	groupMetadata := gg.Metadata
+
 	sendAuditMessage := groupMetadata.AuditChannelID != ""
-	discordID := p.discordCache.UserIDToDiscordID(userID)
 
 	membership, ok := params.MembershipsLoad()[groupID]
-	if !ok && groupMetadata.MembersOnlyMatchmaking {
-		if sendAuditMessage {
 
-			if _, err := p.appBot.dg.ChannelMessageSend(groupMetadata.AuditChannelID, fmt.Sprintf("Rejected non-member <@%s>", discordID)); err != nil {
+	if !ok && groupMetadata.MembersOnlyMatchmaking {
+
+		if sendAuditMessage {
+			if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("Rejected non-member <@%s>", userID), true); err != nil {
 				p.logger.Warn("Failed to send audit message", zap.String("channel_id", groupMetadata.AuditChannelID), zap.Error(err))
 			}
-
 		}
 
-		return NewLobbyError(KickedFromLobbyGroup, "User is not a member of this guild")
+		return NewLobbyError(KickedFromLobbyGroup, "user does not have matchmaking permission")
 	}
 
 	if membership.IsSuspended {
 
 		if sendAuditMessage {
-			if _, err := p.appBot.dg.ChannelMessageSend(groupMetadata.AuditChannelID, fmt.Sprintf("Rejected suspended user <@%s>.", discordID)); err != nil {
+			if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("Rejected suspended user <@%s>", userID), true); err != nil {
 				p.logger.Warn("Failed to send audit message", zap.String("channel_id", groupMetadata.AuditChannelID), zap.Error(err))
 			}
 		}
@@ -265,8 +268,8 @@ func (p *EvrPipeline) authorizeGuildGroupSession(ctx context.Context, session Se
 		if score >= groupMetadata.FraudScoreThreshold {
 
 			if sendAuditMessage {
-				content := fmt.Sprintf("Rejected VPN user <@%s> (score: %d) from %s", discordID, score, session.ClientIP())
-				if _, err := p.appBot.LogAuditMessage(ctx, groupID, content, false); err != nil {
+				content := fmt.Sprintf("Rejected VPN user <@%s> (score: %d) from %s", lobbyParams.DiscordID, score, session.ClientIP())
+				if _, err := p.appBot.LogAuditMessage(ctx, groupID, content, true); err != nil {
 					p.logger.Warn("Failed to send audit message", zap.String("channel_id", groupMetadata.AuditChannelID), zap.Error(err))
 				}
 			}

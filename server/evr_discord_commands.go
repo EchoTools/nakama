@@ -986,7 +986,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			content := "Your headset has been linked. Restart EchoVR."
 
-			go d.cache.SyncGuildGroupMember(ctx, userID, d.cache.GuildIDToGroupID(member.GuildID))
+			d.cache.QueueSyncMember(i.GuildID, user.ID)
+
 			// Send the response
 			return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -1201,7 +1202,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			content := "Your headset has been unlinked. Restart EchoVR."
-			go d.cache.SyncGuildGroupMember(ctx, userID, d.cache.GuildIDToGroupID(member.GuildID))
+			d.cache.QueueSyncMember(i.GuildID, user.ID)
 
 			return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -1642,22 +1643,24 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			if user == nil {
 				return nil
 			}
+			if member == nil {
+				return errors.New("this command must be used from a guild")
+			}
 			// check for the with-detail boolean option
+			d.cache.Purge(user.ID)
+			d.cache.QueueSyncMember(i.GuildID, user.ID)
 
-			includePrivate := true
-
-			err := d.handleProfileRequest(ctx, logger, nk, s, i, user.ID, user.Username, "", includePrivate, false)
+			err := d.handleProfileRequest(ctx, logger, nk, s, i, user.ID, user.Username, true, true)
 			logger.Debug("whoami", zap.String("discord_id", user.ID), zap.String("discord_username", user.Username), zap.Error(err))
 			return err
 		},
 
 		"set-lobby": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userIDStr string, groupID string) error {
-
 			if member == nil {
 				return fmt.Errorf("this command must be used from a guild")
 			}
 
-			go d.cache.SyncGuildGroupMember(ctx, userIDStr, groupID)
+			d.cache.QueueSyncMember(i.GuildID, member.User.ID)
 
 			// Try to find it by searching
 			memberships, err := GetGuildGroupMemberships(ctx, d.nk, userIDStr)
@@ -1734,37 +1737,35 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			caller := user
 			target := options[0].UserValue(s)
 
-			// Clear the cache of the caller
+			// Clear the cache of the caller and target
 			d.cache.Purge(caller.ID)
+			d.cache.Purge(target.ID)
+
+			callerUserID := d.cache.DiscordIDToUserID(caller.ID)
+			if callerUserID == "" {
+				return errors.New("caller not found")
+			}
+
+			targetUserID := d.cache.DiscordIDToUserID(target.ID)
+			if targetUserID == "" {
+				return errors.New("player not found")
+			}
 
 			// Get the caller's nakama user ID
+			callerGuildGroups, err := UserGuildGroupsList(ctx, d.nk, callerUserID)
+			if err != nil {
+				return fmt.Errorf("failed to get guild groups: %w", err)
+			}
 
-			guildID := ""
-			if member != nil {
-				memberships, err := GetGuildGroupMemberships(ctx, d.nk, userIDStr)
-				if err != nil {
-					return fmt.Errorf("failed to get user ID: %w", err)
-				}
+			isGuildModerator := false
 
-				var membership *GuildGroupMembership
-
-				// Get the caller's nakama guild group membership
-				for id, m := range memberships {
-					if id == groupID {
-						membership = &m
-						break
-					}
-				}
-
-				if membership == nil {
-					go d.cache.SyncGuildGroupMember(ctx, userIDStr, groupID)
-					return errors.New("no membership found")
-				}
-
-				if membership.IsModerator {
-					guildID = i.GuildID
+			for _, g := range callerGuildGroups {
+				if g.GuildID == i.GuildID {
+					isGuildModerator = g.PermissionsUser(callerUserID).IsModerator
 				}
 			}
+
+			// Get the caller's nakama user ID
 
 			isGlobalModerator, err := CheckSystemGroupMembership(ctx, db, userIDStr, GroupGlobalModerators)
 			if err != nil {
@@ -1773,7 +1774,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			d.cache.Purge(target.ID)
 
-			return d.handleProfileRequest(ctx, logger, nk, s, i, target.ID, target.Username, guildID, isGlobalModerator, isGlobalModerator)
+			return d.handleProfileRequest(ctx, logger, nk, s, i, target.ID, target.Username, isGuildModerator, isGlobalModerator)
 		},
 		"search": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userIDStr string, groupID string) error {
 
@@ -2162,8 +2163,13 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 			metadata.CommunityValuesUserIDsAdd(targetUserID)
 
-			if err := d.cache.guildGroupCache.UpdateMetadata(ctx, groupID, metadata); err != nil {
-				return errors.New("failed to update guild group metadata")
+			data, err := metadata.MarshalToMap()
+			if err != nil {
+				return fmt.Errorf("error marshalling group data: %w", err)
+			}
+
+			if err := nk.GroupUpdate(ctx, groupID, SystemUserID, "", "", "", "", "", false, data, 1000000); err != nil {
+				return fmt.Errorf("error updating group: %w", err)
 			}
 
 			presences, err := d.nk.StreamUserList(StreamModeService, targetUserID, "", StreamLabelMatchService, false, true)
@@ -2359,9 +2365,13 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 			}
 
-			// Write the metadata to the group
-			if err := d.cache.guildGroupCache.UpdateMetadata(ctx, groupID, metadata); err != nil {
-				return errors.New("failed to update guild group metadata")
+			data, err := metadata.MarshalToMap()
+			if err != nil {
+				return fmt.Errorf("error marshalling group data: %w", err)
+			}
+
+			if err := nk.GroupUpdate(ctx, groupID, SystemUserID, "", "", "", "", "", false, data, 1000000); err != nil {
+				return fmt.Errorf("error updating group: %w", err)
 			}
 
 			return simpleInteractionResponse(s, i, "roles set!")
@@ -2699,7 +2709,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					userID := d.cache.DiscordIDToUserID(user.ID)
 					groupID := d.cache.GuildIDToGroupID(i.GuildID)
 					if userID != "" && groupID != "" {
-						d.cache.Queue(userID, groupID)
+						d.cache.QueueSyncMember(i.GuildID, user.ID)
 					}
 					if err := simpleInteractionResponse(s, i, err.Error()); err != nil {
 						return

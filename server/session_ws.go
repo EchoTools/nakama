@@ -147,11 +147,19 @@ type SessionParameters struct {
 	ServerGuilds  []string // []string of the server guilds
 	ServerRegions []string // []string of the server regions
 
-	AccountMetadata *AccountMetadata // The account metadata
-	Memberships     *atomic.Value    // map[string]GuildGroupMembership
-
+	AccountMetadata      *AccountMetadata    // The account metadata
+	Memberships          *atomic.Value       // map[string]GuildGroupMembership
+	GuildGroups          *atomic.Value       // map[string]*GuildGroup
 	URLParameters        map[string][]string // The URL parameters
 	LastMatchmakingError *atomic.Error       // The last matchmaking error
+}
+
+func (p *SessionParameters) GuildGroupsLoad() map[string]*GuildGroup {
+	v := p.GuildGroups.Load()
+	if v == nil {
+		return nil
+	}
+	return v.(map[string]*GuildGroup)
 }
 
 func (p *SessionParameters) MembershipsLoad() map[string]GuildGroupMembership {
@@ -245,6 +253,7 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 		URLParameters:        urlParams,
 		LastMatchmakingError: atomic.NewError(nil),
 		Memberships:          &atomic.Value{},
+		GuildGroups:          &atomic.Value{},
 		AccountMetadata:      &AccountMetadata{},
 
 		LoginSession:  atomic.NewPointer((*sessionWS)(nil)),
