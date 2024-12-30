@@ -290,7 +290,22 @@ func (s *MatchLabel) rebuildCache() {
 		} else {
 
 			switch s.Mode {
-			case evr.ModeArenaPublic, evr.ModeCombatPublic:
+			case evr.ModeArenaPublic:
+				s.Players = append(s.Players, PlayerInfo{
+					UserID:         p.UserID.String(),
+					Username:       p.Username,
+					DisplayName:    p.DisplayName,
+					EvrID:          p.EvrID,
+					Team:           TeamIndex(p.RoleAlignment),
+					ClientIP:       p.ClientIP,
+					DiscordID:      p.DiscordID,
+					PartyID:        p.PartyID.String(),
+					RatingMu:       p.Rating.Mu,
+					RatingSigma:    p.Rating.Sigma,
+					RankPercentile: p.RankPercentile,
+					IsReservation:  s.reservationMap[p.SessionID.String()] != nil,
+				})
+			case evr.ModeCombatPublic, evr.ModeSocialPublic:
 				s.Players = append(s.Players, PlayerInfo{
 					UserID:         p.UserID.String(),
 					Username:       p.Username,
@@ -320,7 +335,7 @@ func (s *MatchLabel) rebuildCache() {
 					PartyID:       p.PartyID.String(),
 					IsReservation: s.reservationMap[p.SessionID.String()] != nil,
 				})
-			case evr.ModeSocialPublic, evr.ModeSocialPrivate:
+			case evr.ModeSocialPrivate:
 				s.Players = append(s.Players, PlayerInfo{
 					UserID:        p.UserID.String(),
 					Username:      p.Username,
