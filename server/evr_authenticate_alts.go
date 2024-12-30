@@ -27,7 +27,7 @@ func NewAlternateSearchMatch(entryUserID, otherUserID string, entry, other *Logi
 }
 
 func (m *AlternateSearchMatch) IsMatch() bool {
-	return m.IsXPIMatch() || m.IsHMDSerialNumberMatch() || m.IsClientIPMatch()
+	return (m.IsXPIMatch() && m.IsSystemProfileMatch()) || m.IsHMDSerialNumberMatch() || m.IsClientIPMatch()
 }
 
 func (m *AlternateSearchMatch) IsXPIMatch() bool {
