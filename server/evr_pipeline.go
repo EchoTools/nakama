@@ -204,7 +204,6 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		messageCache: messageCache,
 	}
 
-	// Create a timer to periodically clear the backfill queue
 	go func() {
 		interval := 3 * time.Minute
 
