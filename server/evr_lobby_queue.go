@@ -122,7 +122,7 @@ func (q *LobbyQueue) listUnfilledMatches(ctx context.Context) ([]*MatchLabel, er
 	// Search for possible matches
 	matches, err := listMatches(ctx, q.nk, limit, minSize+1, maxSize+1, query)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "Failed to find matches: %v", err)
+		return nil, fmt.Errorf("Failed to list matches: %v", err)
 	}
 
 	// Create a label slice of the matches
@@ -147,7 +147,6 @@ func rttByPlayerByExtIP(ctx context.Context, logger *zap.Logger, db *sql.DB, nk 
 
 	pubLabels, err := lobbyListLabels(ctx, nk, query)
 	if err != nil {
-		logger.Warn("Failed to list game servers", zap.Any("query", query), zap.Error(err))
 		return nil, err
 	}
 
