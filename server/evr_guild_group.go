@@ -76,6 +76,7 @@ type GroupMetadata struct {
 	BlockVPNUsers          bool                `json:"block_vpn_users"`          // Block VPN users
 	FraudScoreThreshold    int                 `json:"fraud_score_threshold"`    // The fraud score threshold
 	AllowedFeatures        []string            `json:"allowed_features"`         // Allowed features
+	LogAlternateAccounts   bool                `json:"log_alternate_accounts"`   // Log alternate accounts
 
 	// UserIDs that are required to go to community values when the first join the social lobby
 	CommunityValuesUserIDs []string `json:"community_values_user_ids"`

@@ -10,6 +10,7 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/gofrs/uuid/v5"
+	"github.com/heroiclabs/nakama-common/api"
 	"go.uber.org/zap"
 )
 
@@ -293,6 +294,18 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, session Session, lobby
 	if err := p.profileRegistry.SetLobbyProfile(ctx, uuid.FromStringOrNil(userID), params.XPID, displayName); err != nil {
 		return fmt.Errorf("failed to set lobby profile: %w", err)
 	}
+
+	p.runtimeModule.Event(ctx, &api.Event{
+		Name: "lobby_session_authorized",
+		Properties: map[string]string{
+			"session_id":   session.ID().String(),
+			"group_id":     groupID,
+			"user_id":      userID,
+			"discord_id":   params.DiscordID,
+			"display_name": displayName,
+		},
+		External: true, // used to denote if the event was generated from the client
+	})
 
 	session.Logger().Info("Authorized access to lobby session", zap.String("gid", groupID), zap.String("display_name", displayName))
 
