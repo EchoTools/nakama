@@ -130,6 +130,8 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	}
 	defer loginHistory.Store(ctx, p.runtimeModule)
 
+	params.LoginHistory.Store(loginHistory)
+
 	loginHistory.UpdateAlternateUserIDs(ctx, p.runtimeModule)
 	loginHistory.Update(xpid, session.clientIP, &payload)
 

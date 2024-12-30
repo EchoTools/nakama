@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gofrs/uuid/v5"
@@ -118,7 +119,22 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	}
 
 	// Register event handler
-	if err := initializer.RegisterEvent(processEvent); err != nil {
+	eventCache := &sync.Map{}
+
+	if err := initializer.RegisterEvent(func(ctx context.Context, logger runtime.Logger, evt *api.Event) {
+		logger.WithField("event", evt).Debug("received event")
+		switch evt.GetName() {
+		case "account_updated":
+			logger.Debug("process evt: %+v", evt)
+			// Send event to an analytics service.
+		case "lobby_session_authorized":
+			if err := eventLobbySessionAuthorized(ctx, logger, db, nk, eventCache, evt); err != nil {
+				logger.Error("error processing lobby session authorized event: %v", err)
+			}
+		default:
+			logger.Error("unrecognised evt: %+v", evt)
+		}
+	}); err != nil {
 		return err
 	}
 
@@ -196,7 +212,6 @@ func MigrateVRMLGroupsToWallet(ctx context.Context, logger runtime.Logger, db *s
 			if cursor == "" {
 				break
 			}
-
 		}
 	}
 	return nil

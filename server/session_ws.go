@@ -118,16 +118,16 @@ type (
 )
 
 type SessionParameters struct {
-	Node          string                     // The node name
-	XPID          evr.EvrId                  // The EchoVR ID
-	DiscordID     string                     // The Discord ID
-	LoginSession  *atomic.Pointer[sessionWS] // The login session
-	LobbySession  *atomic.Pointer[sessionWS] // The match session
-	ServerSession *atomic.Pointer[sessionWS] // The server session
-
-	AuthDiscordID           string // The Discord ID use for authentication
-	AuthPassword            string // The Password use for authentication
-	UserDisplayNameOverride string // The display name override (user-defined)
+	Node                    string                        // The node name
+	XPID                    evr.EvrId                     // The EchoVR ID
+	DiscordID               string                        // The Discord ID
+	LoginSession            *atomic.Pointer[sessionWS]    // The login session
+	LobbySession            *atomic.Pointer[sessionWS]    // The match session
+	ServerSession           *atomic.Pointer[sessionWS]    // The server session
+	LoginHistory            *atomic.Pointer[LoginHistory] // The login history
+	AuthDiscordID           string                        // The Discord ID use for authentication
+	AuthPassword            string                        // The Password use for authentication
+	UserDisplayNameOverride string                        // The display name override (user-defined)
 
 	ExternalServerAddr string // The external server address (IP:port)
 	GeoHashPrecision   int    // The geohash precision
@@ -233,6 +233,7 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 		AuthDiscordID:           parseUserQueryFunc(&request, "discordid", 20, discordIDPattern),
 		AuthPassword:            parseUserQueryFunc(&request, "password", 32, nil),
 		UserDisplayNameOverride: ign,
+		LoginHistory:            atomic.NewPointer((*LoginHistory)(nil)),
 
 		DisableEncryption: parseUserQueryFunc(&request, "disable_encryption", 5, nil) == "true",
 		DisableMAC:        parseUserQueryFunc(&request, "disable_mac", 5, nil) == "true",

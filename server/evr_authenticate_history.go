@@ -62,9 +62,9 @@ type LoginHistory struct {
 	ClientIPs        map[string]time.Time          `json:"client_ips"`
 	AuthorizedIPs    map[string]time.Time          `json:"authorized_ips"`
 	AlternateUserIDs []string                      `json:"alternates"`
-
-	userID  string // user ID
-	version string // storage record version
+	NotifiedGroupIDs map[string]time.Time          `json:"notified_groups"` // list of groups that have been notified of this alternate login
+	userID           string                        // user ID
+	version          string                        // storage record version
 }
 
 func NewLoginHistory() *LoginHistory {
@@ -75,6 +75,7 @@ func NewLoginHistory() *LoginHistory {
 		ClientIPs:        make(map[string]time.Time),
 		AuthorizedIPs:    make(map[string]time.Time),
 		AlternateUserIDs: make([]string, 0),
+		NotifiedGroupIDs: make(map[string]time.Time),
 	}
 }
 
@@ -114,6 +115,21 @@ func (h *LoginHistory) IsAuthorizedIP(ip string) bool {
 	}
 	_, found := h.AuthorizedIPs[ip]
 	return found
+}
+
+func (h *LoginHistory) NotifyGroup(groupID string) bool {
+	if h.NotifiedGroupIDs == nil {
+		h.NotifiedGroupIDs = make(map[string]time.Time)
+	}
+	if len(h.AlternateUserIDs) == 0 {
+		return false
+	}
+
+	if _, found := h.NotifiedGroupIDs[groupID]; found {
+		return false
+	}
+	h.NotifiedGroupIDs[groupID] = time.Now().UTC()
+	return true
 }
 
 func (h *LoginHistory) UpdateAlternateUserIDs(ctx context.Context, nk runtime.NakamaModule) error {
