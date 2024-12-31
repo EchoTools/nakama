@@ -1119,7 +1119,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						Type: discordgo.InteractionResponseChannelMessageWithSource,
 						Data: &discordgo.InteractionResponseData{
 							Flags:   discordgo.MessageFlagsEphemeral,
-							Content: "No devices linked",
+							Content: "No headsets are linked to this account.",
 						},
 					})
 				}
@@ -2721,11 +2721,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 		case discordgo.InteractionMessageComponent:
 
 			customID := i.MessageComponentData().CustomID
-			commandName, value, ok := strings.Cut(customID, ":")
-			if !ok {
-				logger.Error("Invalid custom ID: %v", customID)
-				return
-			}
+			commandName, value, _ := strings.Cut(customID, ":")
 
 			logger = logger.WithFields(map[string]any{
 				"custom_id": commandName,
