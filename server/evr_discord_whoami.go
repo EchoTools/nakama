@@ -161,6 +161,10 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		return int(pastDisplayNames[a].Unix() - pastDisplayNames[b].Unix())
 	})
 
+	if len(whoami.DisplayNames) > 10 {
+		whoami.DisplayNames = whoami.DisplayNames[len(whoami.DisplayNames)-10:]
+	}
+
 	if !includePriviledged && len(whoami.DisplayNames) > 1 {
 		// Only show the most recent display name
 		whoami.DisplayNames = whoami.DisplayNames[len(whoami.DisplayNames)-1:]
