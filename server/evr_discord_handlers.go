@@ -32,14 +32,6 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(logger runtime.Logge
 	switch commandName {
 	case "link-headset":
 
-		// Authenticate/create an account.
-		if userID == "" {
-			userID, _, _, err = d.nk.AuthenticateCustom(ctx, user.ID, user.Username, true)
-			if err != nil {
-				return fmt.Errorf("failed to authenticate (or create) user %s: %w", user.ID, err)
-			}
-		}
-
 	case "unlink-headset":
 
 		account, err := d.nk.AccountGetId(ctx, userID)

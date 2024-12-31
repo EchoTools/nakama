@@ -241,7 +241,9 @@ func (c *DiscordCache) GroupIDToGuildID(groupID string) string {
 
 // Sync's a user to all of their guilds.
 func (c *DiscordCache) syncMember(ctx context.Context, logger *zap.Logger, discordID, guildID string) error {
-
+	if guildID == "" {
+		return fmt.Errorf("guild not specified")
+	}
 	groupID := c.GuildIDToGroupID(guildID)
 	if groupID == "" {
 		return fmt.Errorf("guild group not found")
@@ -272,11 +274,21 @@ func (c *DiscordCache) syncMember(ctx context.Context, logger *zap.Logger, disco
 		return fmt.Errorf("error getting user guild groups: %w", err)
 	}
 
-	var group *GuildGroup
-	for _, g := range groups {
-		if g.GuildID == guildID {
-			group = g
-			break
+	group, ok := groups[groupID]
+	if !ok {
+		// Add the player to the group
+		if err := c.nk.GroupUserJoin(ctx, groupID, evrAccount.ID(), evrAccount.Username()); err != nil {
+			return fmt.Errorf("error joining group: %w", err)
+		}
+
+		groups, err = UserGuildGroupsList(ctx, c.nk, c.DiscordIDToUserID(discordID))
+		if err != nil {
+			return fmt.Errorf("error getting user guild groups: %w", err)
+		}
+
+		group, ok = groups[groupID]
+		if !ok {
+			return fmt.Errorf("guild group not found")
 		}
 	}
 
