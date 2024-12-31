@@ -61,19 +61,19 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(logger runtime.Logge
 		return simpleInteractionResponse(s, i, "This command can only be used in a guild.")
 	}
 
-	guildGroups, err := UserGuildGroupsList(ctx, d.nk, userID)
-
-	var group *GuildGroup
-	for _, gg := range guildGroups {
-		if gg.GuildID == i.GuildID {
-			group = gg
-			break
-		}
+	groups, err := d.nk.GroupsGetId(ctx, []string{groupID})
+	if err != nil {
+		return fmt.Errorf("failed to get group: %w", err)
+	}
+	if len(groups) == 0 {
+		return simpleInteractionResponse(s, i, "This guild is not registered.")
 	}
 
-	if group == nil {
-		return simpleInteractionResponse(s, i, "This guild does not exist.")
+	group, err := NewGuildGroup(groups[0])
+	if err != nil {
+		return fmt.Errorf("failed to create guild group: %w", err)
 	}
+
 	perms := group.PermissionsUser(userID)
 
 	// Global security check
