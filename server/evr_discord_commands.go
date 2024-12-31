@@ -959,6 +959,18 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					return fmt.Errorf("failed to exchange link code: %w", err)
 				}
 
+				// Authenticate/create an account.
+				if userID == "" {
+					userID, _, _, err = d.nk.AuthenticateCustom(ctx, user.ID, user.Username, true)
+					if err != nil {
+						return fmt.Errorf("failed to authenticate (or create) user %s: %w", user.ID, err)
+					}
+				}
+
+				if err := d.nk.GroupUserJoin(ctx, groupID, userID, user.Username); err != nil {
+					return fmt.Errorf("error joining group: %w", err)
+				}
+
 				if err := nk.LinkDevice(ctx, userID, ticket.XPID.Token()); err != nil {
 					return fmt.Errorf("failed to link headset: %w", err)
 				}
