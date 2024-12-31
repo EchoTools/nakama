@@ -314,7 +314,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 			if err != nil {
 				logger.Error("Failed to marshal message content", zap.Error(err))
 			}
-			p.appBot.LogAuditMessage(ctx, label.GetGroupID().String(), fmt.Sprintf("```json\n%s\n```", string(contentData)), false)
+			p.appBot.LogUserErrorMessage(ctx, label.GetGroupID().String(), fmt.Sprintf("```json\n%s\n```", string(contentData)), false)
 
 			logger.Warn("Server connection failed", zap.String("username", session.Username()), zap.String("match_id", msg.SessionUUID().String()), zap.String("evr_id", evrID.String()), zap.Any("remote_log_message", msg))
 

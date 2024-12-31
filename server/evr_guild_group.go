@@ -73,6 +73,7 @@ type GroupMetadata struct {
 	MatchmakingChannelIDs  map[string]string   `json:"matchmaking_channel_ids"`  // The matchmaking channel IDs
 	DebugChannelID         string              `json:"debug_channel_id"`         // The debug channel
 	AuditChannelID         string              `json:"audit_channel_id"`         // The audit channel
+	ErrorChannelID         string              `json:"error_channel_id"`         // The error channel
 	BlockVPNUsers          bool                `json:"block_vpn_users"`          // Block VPN users
 	FraudScoreThreshold    int                 `json:"fraud_score_threshold"`    // The fraud score threshold
 	AllowedFeatures        []string            `json:"allowed_features"`         // Allowed features

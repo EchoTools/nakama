@@ -212,7 +212,6 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(logger runtime.Logger,
 		}); err != nil {
 			return fmt.Errorf("failed to respond to interaction: %w", err)
 		}
-
 	}
 
 	return nil
