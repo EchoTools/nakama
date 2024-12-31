@@ -53,7 +53,7 @@ func eventLobbySessionAuthorized(ctx context.Context, logger runtime.Logger, db 
 		// Clear it after thirty seconds
 		go func() {
 			<-time.After(30 * time.Second)
-			cache.Delete(groupID)
+			cache.Delete(key)
 		}()
 	}
 	if md.LogAlternateAccounts {
