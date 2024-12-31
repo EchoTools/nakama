@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"strings"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -190,8 +189,12 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(logger runtime.Logger,
 			return fmt.Errorf("failed to respond to interaction: %w", err)
 		}
 		return err
-	case "unlink_device_id":
-		value = strings.TrimSpace(value)
+	case "unlink-headset":
+		data := i.Interaction.MessageComponentData()
+		if len(data.Values) == 0 {
+			return simpleInteractionResponse(s, i, "Invalid device ID.")
+		}
+		value = data.Values[0]
 		if value == "" {
 			return simpleInteractionResponse(s, i, "Invalid device ID.")
 		}
@@ -199,6 +202,7 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(logger runtime.Logger,
 		if err := nk.UnlinkDevice(ctx, userID, value); err != nil {
 			return fmt.Errorf("failed to unlink device ID: %w", err)
 		}
+		// Modify the interaction response
 
 		if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -208,6 +212,7 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(logger runtime.Logger,
 		}); err != nil {
 			return fmt.Errorf("failed to respond to interaction: %w", err)
 		}
+
 	}
 
 	return nil
