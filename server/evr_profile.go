@@ -35,13 +35,14 @@ type GameProfile interface {
 }
 
 type GameProfileData struct {
-	Login      evr.LoginProfile                          `json:"login"`
-	Client     evr.ClientProfile                         `json:"client"`
-	Server     evr.ServerProfile                         `json:"server"`
-	Ratings    map[uuid.UUID]map[evr.Symbol]types.Rating `json:"ratings"`
-	EarlyQuits EarlyQuitStatistics                       `json:"early_quit"`
-	Version    string                                    // The version of the profile from the DB
-	Stale      bool                                      // Whether the profile is stale and needs to be updated
+	Login        evr.LoginProfile                          `json:"login"`
+	Client       evr.ClientProfile                         `json:"client"`
+	Server       evr.ServerProfile                         `json:"server"`
+	Ratings      map[uuid.UUID]map[evr.Symbol]types.Rating `json:"ratings"`
+	EarlyQuits   EarlyQuitStatistics                       `json:"early_quit"`
+	GameSettings evr.RemoteLogGameSettings                 `json:"game_settings"`
+	Version      string                                    // The version of the profile from the DB
+	Stale        bool                                      // Whether the profile is stale and needs to be updated
 }
 
 func NewGameProfile(login evr.LoginProfile, client evr.ClientProfile, server evr.ServerProfile, version string) GameProfileData {
@@ -73,6 +74,10 @@ func (p *GameProfileData) SetServer(server evr.ServerProfile) {
 	p.SetStale()
 }
 
+func (p *GameProfileData) SetGameSettings(settings evr.RemoteLogGameSettings) {
+	p.GameSettings = settings
+	p.SetStale()
+}
 func (p *GameProfileData) SetEarlyQuitStatistics(stats EarlyQuitStatistics) {
 	p.EarlyQuits = stats
 	p.SetStale()

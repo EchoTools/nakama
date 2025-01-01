@@ -97,7 +97,9 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 
 	// Add the raw logs to the journal.
 	if !session.id.IsNil() {
-		p.userRemoteLogJournalRegistry.AddEntries(session.id, request.Logs)
+		if ok := p.userRemoteLogJournalRegistry.AddEntries(session.id, request.Logs); !ok {
+			logger.Warn("Failed to add remote log entries to journal")
+		}
 	}
 
 	// Parse the useful remote logs from the set.
@@ -226,6 +228,12 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 		case *evr.RemoteLogSessionStarted:
 
 		case *evr.RemoteLogGameSettings:
+
+			profile, err := p.profileRegistry.Load(ctx, session.userID)
+			if err != nil {
+				return fmt.Errorf("failed to load player's profile: %w", err)
+			}
+			profile.SetGameSettings(*msg)
 
 		case *evr.RemoteLogCustomizationMetricsPayload:
 
