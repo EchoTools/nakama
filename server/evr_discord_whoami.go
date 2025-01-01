@@ -30,6 +30,7 @@ type WhoAmI struct {
 	DefaultLobbyGroup    string               `json:"active_lobby_group,omitempty"`
 	GhostedPlayers       []string             `json:"ghosted_discord_ids,omitempty"`
 	LastMatchmakingError error                `json:"last_matchmaking_error,omitempty"`
+	PotentialAlternates  []string             `json:"potential_alternates,omitempty"`
 }
 
 type EvrIdLogins struct {
@@ -38,7 +39,7 @@ type EvrIdLogins struct {
 	DisplayName   string `json:"display_name,omitempty"`
 }
 
-func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, s *discordgo.Session, i *discordgo.InteractionCreate, targetID string, username string, includePriviledged bool, includePrivate bool) error {
+func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, s *discordgo.Session, i *discordgo.InteractionCreate, targetID string, username string, includePriviledged bool, includePrivate bool, includeSystem bool) error {
 	whoami := &WhoAmI{
 		DiscordID:    targetID,
 		RecentLogins: make(map[string]time.Time),
@@ -221,6 +222,21 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		whoami.GhostedPlayers = ghostedDiscordIDs
 	}
 
+	if includeSystem {
+		for _, altUserID := range loginHistory.AlternateUserIDs {
+			altAccount, err := nk.AccountGetId(ctx, altUserID)
+			if err != nil {
+				return fmt.Errorf("failed to get account by ID: %w", err)
+			}
+			state := ""
+			if altAccount.GetDisableTime() != nil {
+				state = "disabled"
+			}
+			s := fmt.Sprintf("<@%s>[%s] %s <t:%s:R>", altAccount.CustomId, state, altAccount.User.UpdateTime.AsTime().UTC().Unix())
+			whoami.PotentialAlternates = append(whoami.PotentialAlternates, s)
+		}
+	}
+
 	fields := []*discordgo.MessageEmbedField{
 		{Name: "Nakama ID", Value: whoami.NakamaID.String(), Inline: true},
 		{Name: "Username", Value: whoami.Username, Inline: true},
@@ -311,6 +327,14 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 			}
 			return fmt.Sprintf("%s - %s\n%s", l.Mode.String(), link, strings.Join(players, ", "))
 		}), "\n"), Inline: false},
+	}
+
+	if len(whoami.PotentialAlternates) > 0 {
+		fields = append(fields, &discordgo.MessageEmbedField{
+			Name:   "Potential Alternate Accounts",
+			Value:  strings.Join(whoami.PotentialAlternates, "\n"),
+			Inline: false,
+		})
 	}
 
 	fields = append(fields, &discordgo.MessageEmbedField{

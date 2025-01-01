@@ -280,7 +280,7 @@ var (
 		},
 		{
 			Name:        "search",
-			Description: "Search for a player by display name, user ID, or XPI (i.e. OVR-ORG-).",
+			Description: "Search for a player by display name.",
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
@@ -1586,7 +1586,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			d.cache.Purge(user.ID)
 			d.cache.QueueSyncMember(i.GuildID, user.ID)
 
-			err := d.handleProfileRequest(ctx, logger, nk, s, i, user.ID, user.Username, true, true)
+			err := d.handleProfileRequest(ctx, logger, nk, s, i, user.ID, user.Username, true, true, false)
 			logger.Debug("whoami", zap.String("discord_id", user.ID), zap.String("discord_username", user.Username), zap.Error(err))
 			return err
 		},
@@ -1693,8 +1693,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return fmt.Errorf("failed to get guild groups: %w", err)
 			}
 
-			isGuildModerator := false
+			isSelf := caller.ID == target.ID
 
+			isGuildModerator := false
 			for _, g := range callerGuildGroups {
 				if g.GuildID == i.GuildID {
 					isGuildModerator = g.PermissionsUser(callerUserID).IsModerator
@@ -1710,7 +1711,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			d.cache.Purge(target.ID)
 
-			return d.handleProfileRequest(ctx, logger, nk, s, i, target.ID, target.Username, isGuildModerator, isGlobalModerator)
+			return d.handleProfileRequest(ctx, logger, nk, s, i, target.ID, target.Username, isGuildModerator || isGlobalModerator, isSelf || isGlobalModerator, isGlobalModerator)
 		},
 		"search": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userIDStr string, groupID string) error {
 
