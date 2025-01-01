@@ -272,7 +272,8 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 	wg := &sync.WaitGroup{}
 	wg.Add(len(entrantPresences))
 
-	mu := sync.Mutex{}
+	erroredCh := make(chan *EvrMatchPresence, len(entrantPresences))
+	succeededCh := make(chan *EvrMatchPresence, len(entrantPresences))
 
 	for i, p := range entrantPresences {
 		go func(session Session, p *EvrMatchPresence) {
@@ -283,19 +284,28 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 
 			if err := LobbyJoinEntrants(logger, b.matchRegistry, b.tracker, session, serverSession, label, p); err != nil {
 				logger.Error("Failed to join entrant to match", zap.String("mid", label.ID.UUID.String()), zap.String("uid", p.GetUserId()), zap.Error(err))
-				mu.Lock()
-				errored = append(errored, p)
-				mu.Unlock()
+				erroredCh <- p
 				return
 			}
 
-			mu.Lock()
-			successful = append(successful, p)
-			mu.Unlock()
+			succeededCh <- p
+
 		}(sessions[i], p)
 	}
 
 	wg.Wait()
+
+	close(erroredCh)
+	close(succeededCh)
+
+	for p := range erroredCh {
+		errored = append(errored, p)
+	}
+
+	for p := range succeededCh {
+		successful = append(successful, p)
+	}
+
 	tags := map[string]string{
 		"mode":    label.Mode.String(),
 		"level":   label.Level.String(),
