@@ -56,10 +56,6 @@ const (
 var (
 	ErrSessionQueueFull = errors.New("session outgoing queue full")
 
-	StreamContextLogin      = uuid.NewV5(uuid.Nil, "login")
-	StreamContextMatch      = uuid.NewV5(uuid.Nil, "match")
-	StreamContextGameServer = uuid.NewV5(uuid.Nil, "gameserver")
-
 	hmdOverridePattern = regexp.MustCompile(`^[-a-zA-Z0-9_]+$`)
 	featurePattern     = regexp.MustCompile(`^[a-z0-9_]+$`)
 	discordIDPattern   = regexp.MustCompile(`^[0-9]+$`)
@@ -431,18 +427,18 @@ func (s *sessionWS) SetIdentity(userID uuid.UUID, evrID evr.EvrId, username stri
 	s.tracker.TrackMulti(ctx, s.id, []*TrackerOp{
 		// EVR packet data stream for the login session by user ID, and service ID, with EVR ID
 		{
-			Stream: PresenceStream{Mode: StreamModeService, Subject: s.userID, Subcontext: StreamContextLogin},
-			Meta:   PresenceMeta{Format: s.format, Username: evrID.Token(), Hidden: true},
+			Stream: PresenceStream{Mode: StreamModeService, Subject: s.userID, Label: StreamLabelLoginService},
+			Meta:   PresenceMeta{Format: s.format, Username: evrID.Token(), Hidden: false},
 		},
 		// EVR packet data stream for the login session by session ID and service ID, with EVR ID
 		{
-			Stream: PresenceStream{Mode: StreamModeService, Subject: s.id, Subcontext: StreamContextLogin},
-			Meta:   PresenceMeta{Format: s.format, Username: evrID.Token(), Hidden: true},
+			Stream: PresenceStream{Mode: StreamModeService, Subject: s.id, Label: StreamLabelLoginService},
+			Meta:   PresenceMeta{Format: s.format, Username: evrID.Token(), Hidden: false},
 		},
 		// Notification presence.
 		{
 			Stream: PresenceStream{Mode: StreamModeNotifications, Subject: s.userID},
-			Meta:   PresenceMeta{Format: s.format, Username: username, Hidden: true},
+			Meta:   PresenceMeta{Format: s.format, Username: username, Hidden: false},
 		},
 
 		// Status presence.
@@ -476,13 +472,13 @@ func (s *sessionWS) BroadcasterSession(userID uuid.UUID, username string, server
 	s.tracker.TrackMulti(ctx, s.id, []*TrackerOp{
 		// EVR packet data stream for the login session by Session ID and broadcaster ID
 		{
-			Stream: PresenceStream{Mode: StreamModeService, Subject: s.userID, Subcontext: StreamContextGameServer},
-			Meta:   PresenceMeta{Format: s.format, Username: s.username.String(), Hidden: true},
+			Stream: PresenceStream{Mode: StreamModeService, Subject: s.userID, Label: StreamLabelGameServerService},
+			Meta:   PresenceMeta{Format: s.format, Username: s.username.String(), Hidden: false},
 		},
 		// EVR packet data stream by session ID and broadcaster ID
 		{
-			Stream: PresenceStream{Mode: StreamModeService, Subject: s.id, Subcontext: StreamContextGameServer},
-			Meta:   PresenceMeta{Format: s.format, Username: s.username.String(), Hidden: true},
+			Stream: PresenceStream{Mode: StreamModeService, Subject: s.id, Label: StreamLabelGameServerService},
+			Meta:   PresenceMeta{Format: s.format, Username: s.username.String(), Hidden: false},
 		},
 	}, s.userID)
 
