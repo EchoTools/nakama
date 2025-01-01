@@ -313,46 +313,27 @@ func LoginHistoryUpdate(ctx context.Context, nk runtime.NakamaModule, userID str
 	return nil
 }
 
-func DeviceCacheRegexSearch(ctx context.Context, nk runtime.NakamaModule, pattern string, limit int) (map[string]*LoginHistory, error) {
+func DeviceCacheRegexSearch(ctx context.Context, nk runtime.NakamaModule, pattern string, limit int, cursor string) (map[string]*LoginHistory, error) {
+
 	query := fmt.Sprintf("+value.cache:/%s/", pattern)
 	// Perform the storage list operation
 
-	cursor := ""
-
-	hardLimit := 1000
-	results := make([]*api.StorageObject, 0, 100)
-	var err error
-	var result *api.StorageObjects
-	for {
-		result, cursor, err = nk.StorageIndexList(ctx, SystemUserID, LoginHistoryCacheIndex, query, 100, []string{"value.active"}, cursor)
-		if err != nil {
-			return nil, fmt.Errorf("error listing display name history: %w", err)
-		}
-		if len(result.Objects) == 0 || len(results) >= hardLimit {
-			break
-		}
-		results = append(results, result.Objects...)
-
-		if len(results) >= limit {
-			results = results[:limit]
-			break
-		}
-
-		if cursor == "" {
-			break
-		}
+	result, cursor, err := nk.StorageIndexList(ctx, SystemUserID, LoginHistoryCacheIndex, query, limit, []string{"value.active"}, cursor)
+	if err != nil {
+		return nil, fmt.Errorf("error listing display name history: %w", err)
 	}
 
-	History := make(map[string]*LoginHistory, len(result.Objects))
+	histories := make(map[string]*LoginHistory, len(result.Objects))
+
 	for _, obj := range result.Objects {
 		var history LoginHistory
 		if err := json.Unmarshal([]byte(obj.Value), &history); err != nil {
 			return nil, fmt.Errorf("error unmarshalling display name history: %w", err)
 		}
-		History[obj.UserId] = &history
+		histories[obj.UserId] = &history
 	}
 
-	return History, nil
+	return histories, nil
 }
 
 func GetUserIDByDeviceID(ctx context.Context, logger *zap.Logger, db *sql.DB, deviceID string) (string, error) {
