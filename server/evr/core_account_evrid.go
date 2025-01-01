@@ -119,6 +119,10 @@ func (xpi EvrId) IsNotNil() bool {
 	return xpi.PlatformCode != 0 && xpi.AccountId != 0
 }
 
+func (xpi EvrId) IsValid() bool {
+	return xpi.PlatformCode > STM && xpi.PlatformCode < TEN && xpi.AccountId > 0
+}
+
 func (xpi *EvrId) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
 		func() error { return s.StreamNumber(binary.LittleEndian, &xpi.PlatformCode) },
