@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
@@ -233,10 +232,21 @@ func LoginHistoryLoad(ctx context.Context, nk runtime.NakamaModule, userID strin
 
 func LoginHistoryStore(ctx context.Context, nk runtime.NakamaModule, userID string, history *LoginHistory) error {
 
-	history.rebuildCache()
+	// Clear authorized IPs that haven't been used in over 30 days
+	for ip, t := range history.AuthorizedIPs {
+		used := false
+		for _, e := range history.History {
+			if e.ClientIP == ip && time.Since(t) < 30*24*time.Hour {
+				used = true
+				break
+			}
+		}
+		if !used {
+			delete(history.AuthorizedIPs, ip)
+		}
+	}
 
 	// Keep the history size under 5MB
-
 	bytes := make([]byte, 0)
 	var err error
 	for {
@@ -263,8 +273,9 @@ func LoginHistoryStore(ctx context.Context, nk runtime.NakamaModule, userID stri
 			delete(history.History, oldestKey)
 		}
 
-		history.rebuildCache()
 	}
+
+	history.rebuildCache()
 
 	acks, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{
 		{
