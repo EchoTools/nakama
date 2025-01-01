@@ -2215,7 +2215,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					go func() {
 						<-time.After(time.Second * time.Duration(disconnectDelay))
 						// Just disconnect the user, wholesale
-						if _, err := DisconnectUserID(ctx, d.nk, targetUserID); err != nil {
+						if _, err := DisconnectUserID(ctx, d.nk, targetUserID, false); err != nil {
 							logger.Warn("Failed to disconnect user", zap.Error(err))
 						} else {
 							_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s disconnected player %s from match service.", user.Mention(), target.Mention()), false)
@@ -2276,7 +2276,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					go func() {
 						<-time.After(time.Second * time.Duration(disconnectDelay))
 						// Just disconnect the user, wholesale
-						if _, err := DisconnectUserID(ctx, d.nk, targetUserID); err != nil {
+						if _, err := DisconnectUserID(ctx, d.nk, targetUserID, false); err != nil {
 							logger.Warn("Failed to disconnect user", zap.Error(err))
 						} else {
 							_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> disconnected player <@%s> from match service.", user.ID, target.ID), false)

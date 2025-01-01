@@ -780,7 +780,12 @@ func GetGuildGroupIDsByUser(ctx context.Context, db *sql.DB, userID string) (map
 func KickPlayerFromMatch(ctx context.Context, nk runtime.NakamaModule, matchID MatchID, userID string) error {
 	// Get the user's presences
 
-	presences, err := nk.StreamUserList(StreamModeMatchAuthoritative, matchID.UUID.String(), "", matchID.Node, true, true)
+	label, err := MatchLabelByID(ctx, nk, matchID)
+	if err != nil {
+		return fmt.Errorf("failed to get match label: %w", err)
+	}
+
+	presences, err := nk.StreamUserList(StreamModeMatchAuthoritative, matchID.UUID.String(), "", matchID.Node, false, true)
 	if err != nil {
 		return fmt.Errorf("failed to get stream presences: %w", err)
 	}
@@ -789,37 +794,43 @@ func KickPlayerFromMatch(ctx context.Context, nk runtime.NakamaModule, matchID M
 		if presence.GetUserId() != userID {
 			continue
 		}
-		kickPresence := &MatchPresence{
-			Node:      presence.GetNodeId(),
-			UserID:    uuid.FromStringOrNil(presence.GetUserId()),
-			Username:  presence.GetUsername(),
-			SessionID: uuid.FromStringOrNil(presence.GetSessionId()),
-			Reason:    PresenceReasonKicked,
+		if presence.GetSessionId() == label.Broadcaster.SessionID {
+			// Do not kick the game server
+			continue
 		}
-		if err = nk.StreamUserKick(StreamModeMatchAuthoritative, matchID.UUID.String(), "", matchID.Node, kickPresence); err != nil {
+
+		if err = nk.StreamUserKick(StreamModeMatchAuthoritative, matchID.UUID.String(), "", matchID.Node, presence); err != nil {
 			return fmt.Errorf("failed to disconnect session `%s`: %w", presence.GetSessionId(), err)
 		}
+
 	}
 
 	return nil
 }
 
-func DisconnectUserID(ctx context.Context, nk runtime.NakamaModule, userID string) (int, error) {
+func DisconnectUserID(ctx context.Context, nk runtime.NakamaModule, userID string, includeGameServers bool) (int, error) {
 	// Get the user's presences
 
-	presences, err := nk.StreamUserList(StreamModeService, userID, StreamContextLogin.String(), "", true, true)
-	if err != nil {
-		return 0, fmt.Errorf("failed to get stream presences: %w", err)
+	labels := []string{StreamLabelMatchService}
+	if includeGameServers {
+		labels = append(labels, StreamLabelGameServerService, StreamLabelLoginService)
 	}
 
 	cnt := 0
-	for _, presence := range presences {
-		if err = nk.SessionDisconnect(ctx, presence.GetSessionId(), runtime.PresenceReasonDisconnect); err != nil {
-			return cnt, fmt.Errorf("failed to disconnect session `%s`: %w", presence.GetSessionId(), err)
-		}
-		cnt++
-	}
+	for _, l := range labels {
 
+		presences, err := nk.StreamUserList(StreamModeService, userID, "", l, false, true)
+		if err != nil {
+			return 0, fmt.Errorf("failed to get stream presences: %w", err)
+		}
+
+		for _, presence := range presences {
+			if err = nk.SessionDisconnect(ctx, presence.GetSessionId(), runtime.PresenceReasonDisconnect); err != nil {
+				return cnt, fmt.Errorf("failed to disconnect session `%s`: %w", presence.GetSessionId(), err)
+			}
+			cnt++
+		}
+	}
 	return cnt, nil
 }
 
