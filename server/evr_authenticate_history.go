@@ -56,6 +56,10 @@ func (h *LoginHistoryEntry) SystemProfile() string {
 	return strings.Join(components, "::")
 }
 
+func (h *LoginHistoryEntry) Items() []string {
+	return []string{h.ClientIP, h.LoginData.HMDSerialNumber, h.XPID.Token(), h.SystemProfile()}
+}
+
 type LoginHistory struct {
 	History          map[string]*LoginHistoryEntry `json:"history"` // map[deviceID]DeviceHistoryEntry
 	Cache            []string                      `json:"cache"`   // list of IP addresses, EvrID's, HMD Serial Numbers, and System Data
@@ -63,6 +67,7 @@ type LoginHistory struct {
 	ClientIPs        map[string]time.Time          `json:"client_ips"`
 	AuthorizedIPs    map[string]time.Time          `json:"authorized_ips"`
 	AlternateUserIDs []string                      `json:"alternates"`
+	AlternateMap     map[string][]string           `json:"alternate_map"`   // map of alternate user IDs and what they have in common
 	NotifiedGroupIDs map[string]time.Time          `json:"notified_groups"` // list of groups that have been notified of this alternate login
 	userID           string                        // user ID
 	version          string                        // storage record version
@@ -76,6 +81,7 @@ func NewLoginHistory() *LoginHistory {
 		ClientIPs:        make(map[string]time.Time),
 		AuthorizedIPs:    make(map[string]time.Time),
 		AlternateUserIDs: make([]string, 0),
+		AlternateMap:     make(map[string][]string),
 		NotifiedGroupIDs: make(map[string]time.Time),
 	}
 }
@@ -122,7 +128,7 @@ func (h *LoginHistory) NotifyGroup(groupID string) bool {
 	if h.NotifiedGroupIDs == nil {
 		h.NotifiedGroupIDs = make(map[string]time.Time)
 	}
-	if len(h.AlternateUserIDs) == 0 {
+	if len(h.AlternateMap) == 0 {
 		return false
 	}
 
@@ -133,7 +139,7 @@ func (h *LoginHistory) NotifyGroup(groupID string) bool {
 	return true
 }
 
-func (h *LoginHistory) UpdateAlternateUserIDs(ctx context.Context, nk runtime.NakamaModule) error {
+func (h *LoginHistory) UpdateAlternates(ctx context.Context, nk runtime.NakamaModule) error {
 	matches, err := LoginAlternateSearch(ctx, nk, h)
 	if err != nil {
 		return fmt.Errorf("error searching for alternate logins: %w", err)

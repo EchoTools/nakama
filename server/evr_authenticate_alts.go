@@ -15,14 +15,25 @@ type AlternateSearchMatch struct {
 	OtherUserID string
 	Entry       *LoginHistoryEntry
 	Other       *LoginHistoryEntry
+	Items       []string
 }
 
 func NewAlternateSearchMatch(entryUserID, otherUserID string, entry, other *LoginHistoryEntry) *AlternateSearchMatch {
+	items := make([]string, 0)
+	for _, item := range entry.Items() {
+		for _, otherItem := range other.Items() {
+			if item == otherItem {
+				items = append(items, item)
+			}
+		}
+	}
+
 	return &AlternateSearchMatch{
 		EntryUserID: entryUserID,
 		OtherUserID: otherUserID,
 		Entry:       entry,
 		Other:       other,
+		Items:       items,
 	}
 }
 
