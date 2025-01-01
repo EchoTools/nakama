@@ -137,7 +137,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 
 	params.LoginHistory.Store(loginHistory)
 
-	loginHistory.UpdateAlternateUserIDs(ctx, p.runtimeModule)
+	loginHistory.UpdateAlternates(ctx, p.runtimeModule)
 	loginHistory.Update(xpid, session.clientIP, &payload)
 
 	if session.UserID().IsNil() {
@@ -888,17 +888,18 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 	// Put the XP in the player's wallet
 
 	// temp disable
-	_ = blueWins
-	/*
-			if rating, err := CalculateNewPlayerRating(request.EvrID, label.Players, label.TeamSize, blueWins); err != nil {
-				logger.Error("Failed to calculate new player rating", zap.Error(err))
-			} else {
-				playerInfo.RatingMu = rating.Mu
-				playerInfo.RatingSigma = rating.Sigma
-				profile.SetRating(label.GetGroupID(), label.Mode, playerInfo.Rating())
-			}
 
+	if !globalSettings.Load().DisableRatingsUpdates {
+		if rating, err := CalculateNewPlayerRating(request.EvrID, label.Players, label.TeamSize, blueWins); err != nil {
+			logger.Error("Failed to calculate new player rating", zap.Error(err))
+		} else {
+			playerInfo.RatingMu = rating.Mu
+			playerInfo.RatingSigma = rating.Sigma
+			profile.SetRating(label.GetGroupID(), label.Mode, playerInfo.Rating())
+		}
+	}
 
+	if !globalSettings.Load().DisableStatisticsUpdates {
 		// Add leaderboard for percentile
 		if err := recordPercentileToLeaderboard(ctx, p.runtimeModule, playerInfo.UserID, playerInfo.DisplayName, label.Mode, playerInfo.RankPercentile); err != nil {
 			logger.Warn("Failed to record percentile to leaderboard", zap.Error(err))
@@ -910,7 +911,7 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 			logger.Error("Failed to process profile update", zap.Error(err), zap.Any("payload", request.Payload))
 			return fmt.Errorf("failed to process profile update: %w", err)
 		}
-	*/
+	}
 	// Store the profile
 	p.profileRegistry.SaveAndCache(ctx, playerInfo.UUID(), profile)
 

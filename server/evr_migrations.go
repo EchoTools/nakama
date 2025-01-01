@@ -23,7 +23,7 @@ func MigrateUserData(ctx context.Context, nk runtime.NakamaModule, db *sql.DB, u
 		return fmt.Errorf("error combining history records for %s: %w", userID, err)
 	}
 
-	if err := history.UpdateAlternateUserIDs(ctx, nk); err != nil {
+	if err := history.UpdateAlternates(ctx, nk); err != nil {
 		return fmt.Errorf("error updating alternate user IDs: %w", err)
 	}
 

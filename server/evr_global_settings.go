@@ -17,7 +17,9 @@ const (
 var globalSettings = atomic.NewPointer(&GlobalSettingsData{})
 
 type GlobalSettingsData struct {
-	ServiceGuildID string `json:"service_guild_id"` // Central/Support guild ID
+	ServiceGuildID           string `json:"service_guild_id"` // Central/Support guild ID
+	DisableStatisticsUpdates bool   `json:"disable_statistics_updates"`
+	DisableRatingsUpdates    bool   `json:"disable_ratings_updates"`
 }
 
 func GlobalSettings() *GlobalSettingsData {
