@@ -347,14 +347,18 @@ var (
 			},
 		},
 		{
+			Name:        "mod-panel",
+			Description: "Use the mod panel."},
+		{
 			Name:        "kick-player",
 			Description: "Kick a player's sessions.",
 			Options: []*discordgo.ApplicationCommandOption{
 				{
-					Type:        discordgo.ApplicationCommandOptionUser,
-					Name:        "user",
-					Description: "Target user",
-					Required:    true,
+					Type:         discordgo.ApplicationCommandOptionUser,
+					Name:         "user",
+					Description:  "Target user",
+					Required:     true,
+					Autocomplete: true,
 				},
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
@@ -1009,113 +1013,33 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				},
 			})
 		},
-		"kick": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
-			return fmt.Errorf("not implemented")
-			/*
-				response := &discordgo.InteractionResponse{
+		"mod-panel": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+			components, err := d.ModPanelMessageEmbed(ctx, logger, nk, member.User.ID)
+			if err != nil {
+				if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 					Type: discordgo.InteractionResponseChannelMessageWithSource,
 					Data: &discordgo.InteractionResponseData{
-						Content: "Select a player to kick",
 						Flags:   discordgo.MessageFlagsEphemeral,
-						Components: []discordgo.MessageComponent{
-							discordgo.ActionsRow{
-								Components: []discordgo.MessageComponent{
-									discordgo.SelectMenu{
-										CustomID:    "select",
-										Placeholder: "<select a player to kick>",
-										Options:     options,
-									},
-								},
-							},
-							discordgo.ActionsRow{
-								Components: []discordgo.MessageComponent{
-									discordgo.SelectMenu{
-										CustomID:    "trigger_cv",
-										Placeholder: "Send user through Community Values?",
-										Options: []discordgo.SelectMenuOption{
-											{
-												Label: "Yes",
-												Value: "yes",
-											},
-											{
-												Label: "No",
-												Value: "no",
-											},
-										},
-									},
-								},
-							},
-							discordgo.ActionsRow{
-								Components: []discordgo.MessageComponent{
-									discordgo.SelectMenu{
-										CustomID:    "reason",
-										Placeholder: "<select a reason>",
-										Options: []discordgo.SelectMenuOption{
-											{
-												Label: "Toxicity",
-												Value: "toxicity",
-											},
-											{
-												Label: "Poor Sportsmanship",
-												Value: "poor_sportsmanship",
-											},
-											{
-												Label: "Other (see below)",
-												Value: "custom_reason",
-											},
-										},
-									},
-								},
-							},
-							discordgo.ActionsRow{
-								Components: []discordgo.MessageComponent{
-									discordgo.TextInput{
-										CustomID:    "custom_reason_input",
-										Label:       "Custom Reason",
-										Style:       discordgo.TextInputParagraph,
-										Placeholder: "Enter custom reason here...",
-										Required:    false,
-									},
-								},
-							},
+						Content: "Failed to load mod panel",
+					},
+				}); err != nil {
+					logger.Error("Failed to send mod panel error message", zap.Error(err))
+				}
+			}
+
+			response := &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: "Select a player to kick",
+					Flags:   discordgo.MessageFlagsEphemeral,
+					Components: []discordgo.MessageComponent{
+						discordgo.ActionsRow{
+							Components: components,
 						},
 					},
-				}
-				return s.InteractionRespond(i.Interaction, response)
-				// Show the players currently in the same match as the user
-				// Get the user's current match
-
-					presences, err := nk.StreamUserList(StreamModeService, userID, "", StreamLabelMatchService, false, true)
-					if err != nil {
-						logger.Error("Failed to get user list", zap.Error(err))
-					}
-
-					if len(presences) == 0 {
-						if err := simpleInteractionResponse(s, i, "You are not in a match"); err != nil {
-							return
-						}
-					}
-
-					// Get the match label
-					label, err := MatchLabelByID(ctx, d.nk, MatchIDFromStringOrNil(presences[0].GetStatus()))
-					if err != nil {
-						logger.Error("Failed to get match label", zap.Error(err))
-					}
-
-					if label == nil {
-						if err := simpleInteractionResponse(s, i, "You are not in a match"); err != nil {
-							return
-						}
-					}
-
-					choices = make([]*discordgo.ApplicationCommandOptionChoice, len(presences))
-					for i, player := range label.Players {
-						choices[i] = &discordgo.ApplicationCommandOptionChoice{
-							Name:  player.DisplayName,
-							Value: player.UserID,
-						}
-					}
-			*/
+				},
+			}
+			return s.InteractionRespond(i.Interaction, response)
 		},
 		"unlink-headset": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			options := i.ApplicationCommandData().Options
