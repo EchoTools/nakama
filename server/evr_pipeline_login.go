@@ -882,31 +882,34 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 			}
 		}
 	}
+	profile.EarlyQuits.IncrementCompletedMatches()
 
 	// Put the XP in the player's wallet
 
-	if rating, err := CalculateNewPlayerRating(request.EvrID, label.Players, label.TeamSize, blueWins); err != nil {
-		logger.Error("Failed to calculate new player rating", zap.Error(err))
-	} else {
-		playerInfo.RatingMu = rating.Mu
-		playerInfo.RatingSigma = rating.Sigma
-		profile.SetRating(label.GetGroupID(), label.Mode, playerInfo.Rating())
-	}
+	// temp disable
+	_ = blueWins
+	/*
+			if rating, err := CalculateNewPlayerRating(request.EvrID, label.Players, label.TeamSize, blueWins); err != nil {
+				logger.Error("Failed to calculate new player rating", zap.Error(err))
+			} else {
+				playerInfo.RatingMu = rating.Mu
+				playerInfo.RatingSigma = rating.Sigma
+				profile.SetRating(label.GetGroupID(), label.Mode, playerInfo.Rating())
+			}
 
-	profile.EarlyQuits.IncrementCompletedMatches()
 
-	// Add leaderboard for percentile
-	if err := recordPercentileToLeaderboard(ctx, p.runtimeModule, playerInfo.UserID, playerInfo.DisplayName, label.Mode, playerInfo.RankPercentile); err != nil {
-		logger.Warn("Failed to record percentile to leaderboard", zap.Error(err))
-	}
+		// Add leaderboard for percentile
+		if err := recordPercentileToLeaderboard(ctx, p.runtimeModule, playerInfo.UserID, playerInfo.DisplayName, label.Mode, playerInfo.RankPercentile); err != nil {
+			logger.Warn("Failed to record percentile to leaderboard", zap.Error(err))
+		}
 
-	// Process the update into the leaderboard and profile
-	err = p.leaderboardRegistry.ProcessProfileUpdate(ctx, logger, playerInfo.UserID, playerInfo.DisplayName, label.Mode, &request.Payload, &profile.Server)
-	if err != nil {
-		logger.Error("Failed to process profile update", zap.Error(err), zap.Any("payload", request.Payload))
-		return fmt.Errorf("failed to process profile update: %w", err)
-	}
-
+		// Process the update into the leaderboard and profile
+		err = p.leaderboardRegistry.ProcessProfileUpdate(ctx, logger, playerInfo.UserID, playerInfo.DisplayName, label.Mode, &request.Payload, &profile.Server)
+		if err != nil {
+			logger.Error("Failed to process profile update", zap.Error(err), zap.Any("payload", request.Payload))
+			return fmt.Errorf("failed to process profile update: %w", err)
+		}
+	*/
 	// Store the profile
 	p.profileRegistry.SaveAndCache(ctx, playerInfo.UUID(), profile)
 
