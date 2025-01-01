@@ -172,10 +172,10 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				continue
 			}
 
-			var username string
+			var displayName string
 			for _, player := range label.Players {
 				if player.EvrID.String() == msg.PlayerEvrID {
-					username = player.Username
+					displayName = player.DisplayName
 					break
 				}
 			}
@@ -194,9 +194,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 						periodicity: periodicty,
 					}
 
-					if _, err := p.leaderboardRegistry.LeaderboardTabletStatWrite(context.Background(), meta, userID, username, 1.0); err != nil {
-						return fmt.Errorf("Leaderboard record write error: %w", err)
-					}
+					p.leaderboardRegistry.LeaderboardTabletStatWrite(context.Background(), meta, userID, displayName, 1.0)
 				}
 			}
 
