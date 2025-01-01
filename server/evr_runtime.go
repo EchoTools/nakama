@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -144,9 +143,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		return fmt.Errorf("unable to register matchmaker override: %w", err)
 	}
 
-	if err := MigrateVRMLGroupsToWallet(ctx, logger, db, nk); err != nil {
-		return fmt.Errorf("unable to migrate VRML groups to wallet: %w", err)
-	}
+	Migrations(ctx, logger, db, nk)
 
 	// Update the metrics with match data
 	go func() {
@@ -162,195 +159,6 @@ type MatchLabelMeta struct {
 	TickRate  int
 	Presences []*rtapi.UserPresence
 	State     *MatchLabel
-}
-
-func MigrateVRMLGroupsToWallet(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule) error {
-	// Get all the VRML groups
-
-	groups, _, err := nk.GroupsList(ctx, "", "entitlement", nil, nil, 100, "")
-	if err != nil {
-		return err
-	}
-
-	for _, group := range groups {
-
-		if !strings.HasPrefix(group.Name, "VRML ") {
-			continue
-		}
-
-		cursor := ""
-		var members []*api.GroupUserList_GroupUser
-		var err error
-
-		for {
-
-			members, cursor, err = nk.GroupUsersList(ctx, group.Id, 50, nil, "")
-			if err != nil {
-				logger.Error("Error listing group members: %v", err)
-				break
-			}
-			logger.Info("Migrating %d members from group %s", len(members), group.Name)
-
-			for _, member := range members {
-				// Add the vrml badge to their wallet
-				changeset := map[string]int64{
-					group.Name: 1, // Add badge to users wallet
-				}
-				metadata := map[string]interface{}{
-					"assigned_by": SystemUserID,
-				}
-
-				if _, _, err := nk.WalletUpdate(ctx, member.User.Id, changeset, metadata, true); err != nil {
-					logger.Error("Error updating wallet: %v", err)
-					continue
-				}
-				if err := nk.GroupUserLeave(ctx, group.Id, member.User.Id, member.User.Username); err != nil {
-					logger.Error("Error leaving group: %v", err)
-					continue
-				}
-			}
-
-			if cursor == "" {
-				break
-			}
-		}
-	}
-	return nil
-}
-
-func PurgeNonPlayers(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule) {
-
-	var err error
-	var groups []*api.Group
-	logger.Info("Purging non-player users")
-	groupCursor := ""
-	purgeCount := 0
-	for {
-		groups, groupCursor, err = nk.GroupsList(ctx, "", "guild", nil, nil, 100, groupCursor)
-		if err != nil {
-			logger.Error("Error listing guilds: %v", err)
-			return
-		}
-		logger.Debug("Found %d guilds", len(groups))
-		for _, group := range groups {
-			logger := logger.WithFields(map[string]any{
-				"group_id":   group.Id,
-				"group_name": group.Name,
-			})
-			memberCursor := ""
-			for {
-				var members []*api.GroupUserList_GroupUser
-				members, memberCursor, err = nk.GroupUsersList(ctx, group.Id, 100, nil, memberCursor)
-				if err != nil {
-					logger.Error("Error listing group members: %v", err)
-					continue
-				}
-
-				logger.Debug("Found %d members", len(members))
-				for _, member := range members {
-
-					if member.State.Value < int32(api.UserGroupList_UserGroup_MEMBER) {
-						continue
-					}
-
-					logger := logger.WithFields(map[string]any{
-						"user_id":  member.User.Id,
-						"username": member.User.Username,
-					})
-					if member.User == nil {
-						continue
-					}
-					if member.User.Id == SystemUserID {
-						continue
-					}
-					objs, _, err := nk.StorageList(ctx, SystemUserID, member.User.Id, DisplayNameCollection, 1, "")
-					if err != nil {
-						logger.Error("Error listing user objects: %v", err)
-						continue
-					}
-					if len(objs) > 0 {
-						// This is a real user.. leave it alone.
-						continue
-					}
-					account, err := nk.AccountGetId(ctx, member.User.Id)
-					if err != nil {
-						logger.Error("Error getting account: %v", err)
-						continue
-					}
-					if account.CustomId == "" {
-						logger.Warn("Found user without discord ID")
-						continue
-					}
-					// This is a non-player user, remove it from the system
-					logger.WithFields(map[string]any{
-						"discord_id": account.CustomId,
-					}).Info("Purging non-player user")
-
-					if err := nk.AccountDeleteId(ctx, member.User.Id, true); err != nil {
-						logger.Error("Error deleting account: %v", err)
-						continue
-					}
-					purgeCount++
-				}
-
-				if memberCursor == "" {
-					break
-				}
-			}
-
-		}
-
-		if groupCursor == "" {
-			break
-		}
-
-	}
-
-	// Delete users who are not members of any group.
-	query := "SELECT id FROM users WHERE id NOT IN (SELECT source_id FROM group_edge WHERE state >= 0 AND state <= 2)"
-	rows, err := db.QueryContext(ctx, query)
-	if err != nil {
-		logger.Error("Error listing users not in any group: %v", err)
-		return
-	}
-	defer rows.Close()
-	var users []string
-	for rows.Next() {
-		var userID string
-		if err := rows.Scan(&userID); err != nil {
-			logger.Error("Error scanning user ID: %v", err)
-			continue
-		}
-		users = append(users, userID)
-	}
-
-	logger.Info("Found %d users not in any group", len(users))
-
-	for _, userID := range users {
-		account, err := nk.AccountGetId(ctx, userID)
-		if err != nil {
-			logger.Error("Error getting account: %v", err)
-		}
-		if account.CustomId == "" {
-			continue
-		}
-
-		logger := logger.WithFields(map[string]any{
-			"user_id":    userID,
-			"username":   account.User.Username,
-			"discord_id": account.CustomId,
-		})
-		logger.Info("Purging non-player user")
-
-		if err := nk.AccountDeleteId(ctx, userID, true); err != nil {
-			logger.Error("Error deleting account: %v", err)
-		}
-		purgeCount++
-	}
-
-	logger.WithFields(map[string]any{
-		"purge_count": purgeCount,
-	}).Info("Purged non-player users")
 }
 
 func createCoreGroups(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) error {
