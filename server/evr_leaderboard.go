@@ -7,7 +7,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
@@ -16,9 +15,10 @@ import (
 type LeaderboardRegistry struct {
 	sync.RWMutex
 
-	node   string
-	nk     runtime.NakamaModule
-	logger runtime.Logger
+	node    string
+	nk      runtime.NakamaModule
+	logger  runtime.Logger
+	queueCh chan LeaderboardRecordWriteQueueEntry
 }
 
 func PeriodicityToSchedule(periodicity string) string {
@@ -33,11 +33,34 @@ func PeriodicityToSchedule(periodicity string) string {
 }
 
 func NewLeaderboardRegistry(logger runtime.Logger, nk runtime.NakamaModule, node string) *LeaderboardRegistry {
-	return &LeaderboardRegistry{
-		node:   node,
-		nk:     nk,
-		logger: logger,
+	queueCh := make(chan LeaderboardRecordWriteQueueEntry, 8*3*100) // three matches ending at the same time, 100 records per player
+	r := &LeaderboardRegistry{
+		node:    node,
+		nk:      nk,
+		logger:  logger,
+		queueCh: queueCh,
 	}
+
+	go func() {
+		ctx := context.Background()
+		select {
+		case <-ctx.Done():
+			return
+		case e := <-queueCh:
+			if _, err := nk.LeaderboardRecordWrite(ctx, e.BoardMeta.ID(), e.UserID, e.DisplayName, e.Score, e.Subscore, map[string]any{}, &e.Override); err != nil {
+				// Try to create the leaderboard
+				operator, sortOrder, resetSchedule := r.leaderboardConfig(e.BoardMeta.name, e.BoardMeta.operator, e.BoardMeta.periodicity)
+				if err = nk.LeaderboardCreate(ctx, e.BoardMeta.ID(), true, sortOrder, operator, resetSchedule, map[string]any{}, true); err != nil {
+					logger.Error("Leaderboard create error", zap.Error(err))
+				} else {
+					logger.Error("Leaderboard record write error", zap.Error(err))
+				}
+			}
+		}
+
+	}()
+
+	return r
 }
 
 func (r *LeaderboardRegistry) leaderboardConfig(name, op, group string) (operator, sortOrder, resetSchedule string) {
@@ -103,10 +126,7 @@ func (r *LeaderboardRegistry) profileUpdate(userID, displayName string, profile 
 
 	for statGroup, stats := range data {
 		for meta, value := range stats {
-			record, err := r.LeaderboardTabletStatWrite(context.Background(), meta, userID, displayName, value)
-			if err != nil {
-				return fmt.Errorf("Leaderboard record write error: %w", err)
-			}
+			r.LeaderboardTabletStatWrite(context.Background(), meta, userID, displayName, value)
 
 			// Update the tablet stats with the record from the leaderboard
 			if _, ok := profile.Statistics[statGroup]; !ok {
@@ -115,7 +135,7 @@ func (r *LeaderboardRegistry) profileUpdate(userID, displayName string, profile 
 
 			profile.Statistics[statGroup][meta.name] = evr.MatchStatistic{
 				Count: 1,
-				Value: r.scoreToValue(record.Score, record.Subscore),
+				Value: value,
 			}
 		}
 	}
@@ -188,31 +208,36 @@ func (r *LeaderboardRegistry) buildOperations(mode evr.Symbol, payload *evr.Upda
 	return opsByStatGroup
 }
 
-func (r *LeaderboardRegistry) LeaderboardTabletStatWrite(ctx context.Context, meta LeaderboardMeta, userID, displayName string, value float64) (*api.LeaderboardRecord, error) {
+type LeaderboardRecordWriteQueueEntry struct {
+	BoardMeta   LeaderboardMeta
+	UserID      string
+	DisplayName string
+	Score       int64
+	Subscore    int64
+	Metadata    map[string]string
+	Override    int
+}
+
+func (r *LeaderboardRegistry) LeaderboardTabletStatWrite(ctx context.Context, meta LeaderboardMeta, userID, displayName string, value float64) {
 
 	// split the value into score and subscore (whole and fractional)
 	score, subscore := r.valueToScore(value)
 
-	// All tablet stat updates are "set" operations
-	override := 2 // set
-	record, err := r.nk.LeaderboardRecordWrite(ctx, meta.ID(), userID, displayName, score, subscore, nil, &override)
-
-	if err != nil {
-		// Try to create the leaderboard
-		operator, sortOrder, resetSchedule := r.leaderboardConfig(meta.name, meta.operator, meta.periodicity)
-		enableRanks := true
-		metadata := map[string]any{}
-		err = r.nk.LeaderboardCreate(ctx, meta.ID(), true, sortOrder, operator, resetSchedule, metadata, enableRanks)
-
-		if err != nil {
-			return nil, fmt.Errorf("Leaderboard create error: %w", err)
-		} else {
-			// Retry the write
-			record, err = r.nk.LeaderboardRecordWrite(ctx, meta.ID(), userID, displayName, score, subscore, nil, &override)
-		}
+	entry := LeaderboardRecordWriteQueueEntry{
+		BoardMeta:   meta,
+		UserID:      userID,
+		DisplayName: displayName,
+		Score:       score,
+		Subscore:    subscore,
+		Metadata:    nil,
+		Override:    2, // set
 	}
 
-	return record, err
+	select {
+	case r.queueCh <- entry:
+	default:
+		r.logger.Warn("Leaderboard record write queue full, dropping entry", zap.Any("entry", entry))
+	}
 }
 
 func (r *LeaderboardRegistry) createGamesPlayedStat(stats map[string]evr.StatUpdate, prefix string) {
