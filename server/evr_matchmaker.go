@@ -7,7 +7,6 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"sync"
 
 	"time"
 
@@ -24,16 +23,15 @@ const (
 )
 
 type SkillBasedMatchmaker struct {
-	writeMu          *sync.RWMutex
 	latestCandidates *atomic.Value // [][]runtime.MatchmakerEntry
 	latestMatches    *atomic.Value // [][]runtime.MatchmakerEntry
 }
 
 func (s *SkillBasedMatchmaker) StoreLatestResult(candidates, madeMatches [][]runtime.MatchmakerEntry) {
-	s.writeMu.Lock()
+
 	s.latestCandidates.Store(candidates)
 	s.latestMatches.Store(madeMatches)
-	s.writeMu.Unlock()
+
 }
 
 func (s *SkillBasedMatchmaker) GetLatestResult() (candidates, madeMatches [][]runtime.MatchmakerEntry) {
@@ -51,7 +49,6 @@ func (s *SkillBasedMatchmaker) GetLatestResult() (candidates, madeMatches [][]ru
 
 func NewSkillBasedMatchmaker() *SkillBasedMatchmaker {
 	sbmm := SkillBasedMatchmaker{
-		writeMu:          &sync.RWMutex{},
 		latestCandidates: &atomic.Value{},
 		latestMatches:    &atomic.Value{},
 	}

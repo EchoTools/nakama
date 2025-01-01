@@ -14,6 +14,8 @@ type PartyGroup struct {
 }
 
 func (g *PartyGroup) ID() uuid.UUID {
+	g.RLock()
+	defer g.RUnlock()
 	if g.ph == nil {
 		return uuid.Nil
 	}
@@ -21,12 +23,16 @@ func (g *PartyGroup) ID() uuid.UUID {
 }
 
 func (g *PartyGroup) IDStr() string {
+	g.RLock()
+	defer g.RUnlock()
 	if g.ph == nil {
 		return uuid.Nil.String()
 	}
 	return g.ph.IDStr
 }
 func (g *PartyGroup) GetLeader() *rtapi.UserPresence {
+	g.RLock()
+	defer g.RUnlock()
 	g.ph.RLock()
 	defer g.ph.RUnlock()
 	if g.ph.leader == nil {
@@ -36,6 +42,9 @@ func (g *PartyGroup) GetLeader() *rtapi.UserPresence {
 }
 
 func (g *PartyGroup) List() []*PartyPresenceListItem {
+	g.RLock()
+	defer g.RUnlock()
+
 	if g.ph == nil {
 		return nil
 	}
@@ -45,6 +54,8 @@ func (g *PartyGroup) List() []*PartyPresenceListItem {
 }
 
 func (g *PartyGroup) Size() int {
+	g.RLock()
+	defer g.RUnlock()
 	if g.ph == nil {
 		return 1
 	}
