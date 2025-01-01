@@ -131,7 +131,7 @@ func (r *ProfileRegistry) Save(ctx context.Context, userID uuid.UUID, profile Ga
 	if !profile.IsStale() {
 		return nil
 	}
-
+	profile.ClearStale()
 	data, err := json.Marshal(profile)
 	if err != nil {
 		return err

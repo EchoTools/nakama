@@ -230,6 +230,9 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		return evr.NewDefaultGameSettings(), fmt.Errorf("failed to load game profiles")
 	}
 
+	// Expire the profile statistics
+	profile.ExpireStatistics(2, 2)
+
 	// Get the GroupID from the user's metadata
 	groupID := metadata.GetActiveGroupID()
 	// Validate that the user is in the group
@@ -520,8 +523,6 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 	if err != nil {
 		return session.SendEvr(evr.NewLoggedInUserProfileFailure(request.EvrID, 400, "failed to load game profiles"))
 	}
-
-	profile.ExpireStatistics(2, 2)
 
 	profile.SetEvrID(request.EvrID)
 

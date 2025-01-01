@@ -31,6 +31,7 @@ type GameProfile interface {
 	UpdateUnlocks(unlocks evr.UnlockedCosmetics) error
 	IsStale() bool
 	SetStale()
+	ClearStale()
 }
 
 type GameProfileData struct {
@@ -237,6 +238,11 @@ func (p *GameProfileData) SetStale() {
 func (p *GameProfileData) IsStale() bool {
 	return p.Stale
 }
+
+func (p *GameProfileData) ClearStale() {
+	p.Stale = false
+}
+
 func (p *GameProfileData) DisableAFKTimeout(enable bool) {
 
 	if enable {
