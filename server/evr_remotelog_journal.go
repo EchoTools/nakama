@@ -12,6 +12,12 @@ import (
 	"go.uber.org/zap"
 )
 
+type UserLogJournal struct {
+	sync.Mutex
+	UserID  uuid.UUID              `json:"userID"`
+	Entries []*UserLogJournalEntry `json:"entries"`
+}
+
 type UserLogJournalEntry struct {
 	SessionID uuid.UUID `json:"sessionID"`
 	Timestamp time.Time `json:"timestamp"`
@@ -23,31 +29,52 @@ type UserLogJouralRegistry struct {
 	logger *zap.Logger
 	nk     runtime.NakamaModule
 
+	storeQueueCh    chan *UserLogJournal
 	sessionRegistry SessionRegistry
-	journalRegistry map[uuid.UUID][]*UserLogJournalEntry // map[sessionID]messages
+	journalRegistry map[uuid.UUID]*UserLogJournal // map[sessionID]messages
 }
 
-func NewUserRemoteLogJournalRegistry(logger *zap.Logger, nk runtime.NakamaModule, sessionRegistry SessionRegistry) *UserLogJouralRegistry {
+func NewUserRemoteLogJournalRegistry(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, sessionRegistry SessionRegistry) *UserLogJouralRegistry {
 
 	registry := &UserLogJouralRegistry{
 		logger: logger,
 		nk:     nk,
 
+		storeQueueCh:    make(chan *UserLogJournal, 200),
 		sessionRegistry: sessionRegistry,
-		journalRegistry: make(map[uuid.UUID][]*UserLogJournalEntry),
+		journalRegistry: make(map[uuid.UUID]*UserLogJournal),
 	}
 
 	// Every 10 minutes, remove all entries that do not have a session.
 	go func() {
+
+		cleanUpTicker := time.NewTicker(10 * time.Minute)
+		defer cleanUpTicker.Stop()
 		for {
-			registry.Lock()
-			for sessionID := range registry.journalRegistry {
-				if registry.sessionRegistry.Get(sessionID) == nil {
-					delete(registry.journalRegistry, sessionID)
+			select {
+			case <-ctx.Done():
+				return
+			case j := <-registry.storeQueueCh:
+				j.Lock()
+				userID := j.UserID
+				entries := j.Entries
+				j.Entries = nil
+				j.Unlock()
+
+				if err := registry.WriteUserJournal(ctx, userID, entries); err != nil {
+					registry.logger.Warn("Failed to write user journal", zap.String("userID", userID.String()), zap.Error(err))
+					continue
 				}
+			case <-cleanUpTicker.C:
+
+				registry.Lock()
+				for sessionID := range registry.journalRegistry {
+					if registry.sessionRegistry.Get(sessionID) == nil {
+						delete(registry.journalRegistry, sessionID)
+					}
+				}
+				registry.Unlock()
 			}
-			registry.Unlock()
-			time.Sleep(10 * time.Minute)
 		}
 	}()
 	return registry
@@ -55,55 +82,59 @@ func NewUserRemoteLogJournalRegistry(logger *zap.Logger, nk runtime.NakamaModule
 
 // returns true if found
 func (r *UserLogJouralRegistry) AddEntries(sessionID uuid.UUID, e []string) (found bool) {
-	r.Lock()
-	defer r.Unlock()
 
-	if _, found = r.journalRegistry[sessionID]; !found {
-		r.journalRegistry[sessionID] = make([]*UserLogJournalEntry, 0, len(e))
-	}
+	r.RLock()
+	journal, found := r.journalRegistry[sessionID]
+	defer r.RUnlock()
 
 	if !found {
+		session := r.sessionRegistry.Get(sessionID)
+		if session == nil {
+			return false
+		}
+		journal = &UserLogJournal{
+			UserID:  session.UserID(),
+			Entries: make([]*UserLogJournalEntry, 0, 10),
+		}
+
+		r.Lock()
+		r.journalRegistry[sessionID] = journal
+		r.Unlock()
+
+		// Write it after the session closes.
 		go func() {
-
-			session := r.sessionRegistry.Get(sessionID)
-			if session == nil {
-				return
-			}
 			<-session.Context().Done()
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
-			defer cancel()
-			if err := r.StoreLogs(ctx, sessionID, session.UserID()); err != nil {
-				r.logger.Error("Failed to store logs", zap.Error(err), zap.String("sid", sessionID.String()), zap.String("uid", session.UserID().String()))
-			}
-
+			r.QueueStorage(sessionID)
 		}()
 	}
 
+	journal.Lock()
 	for _, entry := range e {
-		r.journalRegistry[sessionID] = append(r.journalRegistry[sessionID], &UserLogJournalEntry{
+		journal.Entries = append(journal.Entries, &UserLogJournalEntry{
 			SessionID: sessionID,
 			Timestamp: time.Now(),
 			Message:   entry,
 		})
-	}
 
+	}
+	journal.Unlock()
 	return found
 }
 
-func (r *UserLogJouralRegistry) loadAndDelete(sessionID uuid.UUID) []*UserLogJournalEntry {
+func (r *UserLogJouralRegistry) loadAndDelete(sessionID uuid.UUID) *UserLogJournal {
 	r.Lock()
 	defer r.Unlock()
 
-	if _, ok := r.journalRegistry[sessionID]; !ok {
+	journal, ok := r.journalRegistry[sessionID]
+	if !ok {
 		return nil
 	}
 
-	entries := r.journalRegistry[sessionID]
 	delete(r.journalRegistry, sessionID)
-	return entries
+	return journal
 }
 
-func (r *UserLogJouralRegistry) GetLogs(sessionID uuid.UUID) []*UserLogJournalEntry {
+func (r *UserLogJouralRegistry) GetLogs(sessionID uuid.UUID) *UserLogJournal {
 	r.RLock()
 	defer r.RUnlock()
 
@@ -139,29 +170,36 @@ func (r *UserLogJouralRegistry) storageLoad(ctx context.Context, userID uuid.UUI
 	return journal, nil
 }
 
-func (r *UserLogJouralRegistry) StoreLogs(ctx context.Context, sessionID, userID uuid.UUID) error {
+func (r *UserLogJouralRegistry) QueueStorage(sessionID uuid.UUID) {
+	journal := r.loadAndDelete(sessionID)
+	select {
+	case r.storeQueueCh <- journal:
+		return
+	default:
+		r.logger.Warn("Failed to queue log storage")
+	}
+}
+func (r *UserLogJouralRegistry) WriteUserJournal(ctx context.Context, userID uuid.UUID, messages []*UserLogJournalEntry) error {
 
-	messages := r.loadAndDelete(sessionID)
-
-	journal, err := r.storageLoad(ctx, userID)
+	storedJournal, err := r.storageLoad(ctx, userID)
 	if err != nil {
 		r.logger.Warn("Failed to load remote log, overwriting.", zap.Error(err))
 	}
-	if journal == nil {
-		journal = make(map[time.Time][]*UserLogJournalEntry)
+	if storedJournal == nil {
+		storedJournal = make(map[time.Time][]*UserLogJournalEntry)
 	}
 
 	// Remove old messages
-	for k := range journal {
+	for k := range storedJournal {
 		if time.Since(k) > time.Hour*24*3 {
-			delete(journal, k)
+			delete(storedJournal, k)
 		}
 	}
 
 	// Add the current messages
-	journal[time.Now()] = messages
+	storedJournal[time.Now()] = messages
 
-	data, err := json.Marshal(journal)
+	data, err := json.Marshal(storedJournal)
 	if err != nil {
 		return err
 	}
@@ -170,6 +208,7 @@ func (r *UserLogJouralRegistry) StoreLogs(ctx context.Context, sessionID, userID
 		return nil
 	}
 
+	// Limit the overall size
 	for {
 		if len(data) < 4*1024*1024 {
 			break
@@ -177,15 +216,15 @@ func (r *UserLogJouralRegistry) StoreLogs(ctx context.Context, sessionID, userID
 
 		// Remove the oldest messages
 		oldest := time.Now()
-		for k := range journal {
+		for k := range storedJournal {
 			if k.Before(oldest) {
 				oldest = k
 			}
 		}
 
-		delete(journal, oldest)
+		delete(storedJournal, oldest)
 
-		data, err = json.Marshal(journal)
+		data, err = json.Marshal(storedJournal)
 		if err != nil {
 			return fmt.Errorf("failed to marshal journal: %w", err)
 		}
