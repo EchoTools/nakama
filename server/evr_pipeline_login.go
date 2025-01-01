@@ -97,6 +97,11 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	// Providing a discord ID and password avoids the need to link the device to the account.
 	// Server Hosts use this method to authenticate.
 	xpid := request.GetEvrID()
+
+	if xpid.IsNil() || !xpid.IsValid() {
+		return settings, fmt.Errorf("invalid xpid: %s", xpid.Token())
+	}
+
 	params.LoginSession.Store(session)
 	params.XPID = xpid
 
