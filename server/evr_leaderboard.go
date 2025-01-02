@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strconv"
 	"strings"
@@ -17,6 +18,7 @@ type LeaderboardRegistry struct {
 
 	node    string
 	nk      runtime.NakamaModule
+	db      *sql.DB
 	logger  runtime.Logger
 	queueCh chan LeaderboardRecordWriteQueueEntry
 }
@@ -32,11 +34,12 @@ func PeriodicityToSchedule(periodicity string) string {
 	}
 }
 
-func NewLeaderboardRegistry(logger runtime.Logger, nk runtime.NakamaModule, node string) *LeaderboardRegistry {
+func NewLeaderboardRegistry(logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, node string) *LeaderboardRegistry {
 	queueCh := make(chan LeaderboardRecordWriteQueueEntry, 8*3*100) // three matches ending at the same time, 100 records per player
 	r := &LeaderboardRegistry{
 		node:    node,
 		nk:      nk,
+		db:      db,
 		logger:  logger,
 		queueCh: queueCh,
 	}
@@ -49,7 +52,7 @@ func NewLeaderboardRegistry(logger runtime.Logger, nk runtime.NakamaModule, node
 		case e := <-queueCh:
 			if _, err := nk.LeaderboardRecordWrite(ctx, e.BoardMeta.ID(), e.UserID, e.DisplayName, e.Score, e.Subscore, map[string]any{}, &e.Override); err != nil {
 				// Try to create the leaderboard
-				operator, sortOrder, resetSchedule := r.leaderboardConfig(e.BoardMeta.name, e.BoardMeta.operator, e.BoardMeta.periodicity)
+				operator, sortOrder, resetSchedule := r.leaderboardConfig(e.BoardMeta.name, e.BoardMeta.operator, e.BoardMeta.resetSchedule)
 				if err = nk.LeaderboardCreate(ctx, e.BoardMeta.ID(), true, sortOrder, operator, resetSchedule, map[string]any{}, true); err != nil {
 					logger.Error("Leaderboard create error", zap.Error(err))
 				} else {
@@ -97,17 +100,17 @@ func (r *LeaderboardRegistry) leaderboardConfig(name, op, group string) (operato
 }
 
 type LeaderboardMeta struct {
-	mode        evr.Symbol
-	name        string
-	operator    string
-	periodicity string
+	mode          evr.Symbol
+	name          string
+	operator      string
+	resetSchedule string
 }
 
 func (l LeaderboardMeta) ID() string {
-	return fmt.Sprintf("%s:%s:%s", l.mode.String(), l.name, l.periodicity)
+	return fmt.Sprintf("%s:%s:%s", l.mode.String(), l.name, l.resetSchedule)
 }
 
-func (r *LeaderboardRegistry) LeaderboardMetaFromID(id string) (LeaderboardMeta, error) {
+func LeaderboardMetaFromID(id string) (LeaderboardMeta, error) {
 	parts := strings.Split(id, ":")
 	if len(parts) != 3 {
 		return LeaderboardMeta{}, fmt.Errorf("invalid leaderboard ID: %s", id)
@@ -116,44 +119,13 @@ func (r *LeaderboardRegistry) LeaderboardMetaFromID(id string) (LeaderboardMeta,
 	mode := evr.ToSymbol(parts[0])
 
 	return LeaderboardMeta{
-		mode:        mode,
-		name:        parts[1],
-		periodicity: parts[2],
+		mode:          mode,
+		name:          parts[1],
+		resetSchedule: parts[2],
 	}, nil
 }
 
-func (r *LeaderboardRegistry) profileUpdate(userID, displayName string, profile *evr.ServerProfile, data map[string]map[LeaderboardMeta]float64) error {
-
-	for statGroup, stats := range data {
-		for meta, value := range stats {
-			r.LeaderboardTabletStatWrite(context.Background(), meta, userID, displayName, value)
-
-			// Update the tablet stats with the record from the leaderboard
-			if _, ok := profile.Statistics[statGroup]; !ok {
-				profile.Statistics[statGroup] = make(map[string]evr.MatchStatistic)
-			}
-
-			profile.Statistics[statGroup][meta.name] = evr.MatchStatistic{
-				Count: 1,
-				Value: value,
-			}
-		}
-	}
-
-	return nil
-}
-
-func (r *LeaderboardRegistry) ProcessProfileUpdate(ctx context.Context, logger *zap.Logger, userID, displayName string, mode evr.Symbol, payload *evr.UpdatePayload, serverProfile *evr.ServerProfile) error {
-
-	// Build the operations
-	ops := r.buildOperations(mode, payload)
-	if err := r.profileUpdate(userID, displayName, serverProfile, ops); err != nil {
-		return fmt.Errorf("Profile update error: %w", err)
-	}
-	return nil
-}
-
-func (r *LeaderboardRegistry) buildOperations(mode evr.Symbol, payload *evr.UpdatePayload) map[string]map[LeaderboardMeta]float64 {
+func (r *LeaderboardRegistry) ProcessProfileUpdate(ctx context.Context, logger *zap.Logger, userID, displayName string, mode evr.Symbol, payload *evr.UpdatePayload) error {
 	var prefix, periodicity string
 
 	opsByStatGroup := make(map[string]map[LeaderboardMeta]float64)
@@ -196,16 +168,16 @@ func (r *LeaderboardRegistry) buildOperations(mode evr.Symbol, payload *evr.Upda
 		for name, stat := range stats {
 
 			meta := LeaderboardMeta{
-				mode:        mode,
-				name:        name,
-				operator:    stat.Operator,
-				periodicity: periodicity,
+				mode:          mode,
+				name:          name,
+				operator:      stat.Operator,
+				resetSchedule: periodicity,
 			}
-			opsByStatGroup[statGroup][meta] = stat.Value
+			r.LeaderboardTabletStatWrite(context.Background(), meta, userID, displayName, stat.Value)
 		}
 	}
 
-	return opsByStatGroup
+	return nil
 }
 
 type LeaderboardRecordWriteQueueEntry struct {
@@ -289,7 +261,7 @@ func ValueToScore(v float64) (int64, int64) {
 	return whole, fractional
 }
 
-func (*LeaderboardRegistry) scoreToValue(score int64, subscore int64) float64 {
+func (*LeaderboardRegistry) ScoreToValue(score int64, subscore int64) any {
 	// If there's no subscore, return the score as a whole number.
 	if subscore == 0 {
 		return float64(score)
@@ -298,4 +270,30 @@ func (*LeaderboardRegistry) scoreToValue(score int64, subscore int64) float64 {
 	// Otherwise, combine the score and subscore as a float.
 	f, _ := strconv.ParseFloat(fmt.Sprintf("%d.%d", score, subscore), 64)
 	return f
+}
+
+func (r *LeaderboardRegistry) RecordToStatistic(operator int, score, subscore int64, count int64) evr.MatchStatistic {
+
+	var op string
+	switch operator {
+	case LeaderboardOperatorSet:
+		op = "set"
+	case LeaderboardOperatorBest:
+		op = "max"
+	case LeaderboardOperatorIncrement:
+		op = "add"
+	}
+
+	var value any
+	if subscore == 0 {
+		value = int64(score)
+	} else {
+		value, _ = strconv.ParseFloat(fmt.Sprintf("%d.%d", score, subscore), 64)
+	}
+
+	return evr.MatchStatistic{
+		Operator: op,
+		Value:    value,
+		Count:    count,
+	}
 }

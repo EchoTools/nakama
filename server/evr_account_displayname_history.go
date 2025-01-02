@@ -56,10 +56,8 @@ func (h *DisplayNameHistory) Set(groupID, displayName string) {
 		h.updated = true
 	}
 
-	if len(h.Histories[groupID]) > 0 {
-		if h.Histories[groupID][len(h.Histories[groupID])-1].DisplayName == displayName {
-			return
-		}
+	if h.GetLatest(groupID) == displayName {
+		return
 	}
 
 	h.updated = true
@@ -78,6 +76,13 @@ func (h *DisplayNameHistory) Set(groupID, displayName string) {
 	}
 
 	return
+}
+
+func (h *DisplayNameHistory) GetLatest(groupID string) string {
+	if items, ok := h.Histories[groupID]; ok && len(items) > 0 {
+		return items[len(items)-1].DisplayName
+	}
+	return ""
 }
 
 func (h *DisplayNameHistory) updateCache() {

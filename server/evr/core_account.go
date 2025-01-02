@@ -37,8 +37,8 @@ func forceFalse(fl validator.FieldLevel) bool {
 
 // Profiles represents the 'profile' field in the JSON data
 type GameProfiles struct {
-	Client ClientProfile `json:"client"`
-	Server ServerProfile `json:"server"`
+	Client *ClientProfile `json:"client"`
+	Server *ServerProfile `json:"server"`
 }
 
 func UnmarshalGameProfiles(data []byte) (GameProfiles, error) {
@@ -52,20 +52,17 @@ func (r *GameProfiles) Marshal() ([]byte, error) {
 }
 
 type ClientProfile struct {
-	// WARNING: EchoVR dictates this struct/schema.
-	DisplayName string `json:"displayname,omitempty"` // Ignored and set by nakama
-	EvrID       EvrId  `json:"xplatformid,omitempty"` // Ignored and set by nakama
-
-	// The team name shown on the spectator scoreboard overlay
-	TeamName           string            `json:"teamname,omitempty" validate:"omitempty,ascii"`
+	DisplayName        string            `json:"displayname,omitempty"`                         // Ignored and set by nakama
+	EvrID              EvrId             `json:"xplatformid,omitempty"`                         // Ignored and set by nakama
+	ModifyTime         int64             `json:"modifytime" validate:"gte=0"`                   // Ignored and set by nakama
+	TeamName           string            `json:"teamname,omitempty" validate:"omitempty,ascii"` // The team name shown on the spectator scoreboard overlay
 	CombatWeapon       string            `json:"weapon" validate:"omitnil,oneof=assault blaster rocket scout magnum smg chain rifle"`
 	CombatGrenade      string            `json:"grenade" validate:"omitnil,oneof=arc burst det stun loc"`
 	CombatDominantHand uint8             `json:"weaponarm" validate:"eq=0|eq=1"`
-	ModifyTime         int64             `json:"modifytime" validate:"gte=0"` // Ignored and set by nakama
 	CombatAbility      string            `json:"ability" validate:"oneof=buff heal sensor shield wraith"`
 	LegalConsents      LegalConsents     `json:"legal" validate:"required"`
-	MutedPlayers       Players           `json:"mute,omitempty"`
-	GhostedPlayers     Players           `json:"ghost,omitempty"`
+	MutedPlayers       Players           `json:"mute"`
+	GhostedPlayers     Players           `json:"ghost"`
 	NewPlayerProgress  NewPlayerProgress `json:"npe,omitempty"`
 	Customization      Customization     `json:"customization,omitempty"`
 	Social             ClientSocial      `json:"social,omitempty"`
@@ -122,7 +119,7 @@ type Customization struct {
 
 type Players struct {
 	// WARNING: EchoVR dictates this struct/schema.
-	UserIds []string `json:"users"` // List of user IDs
+	Players []EvrId `json:"users"` // List of user IDs
 }
 
 type LegalConsents struct {
@@ -172,22 +169,22 @@ type PlayerStatistics map[string]map[string]MatchStatistic
 
 type ServerProfile struct {
 	// WARNING: EchoVR dictates this struct/schema.
-	DisplayName       string            `json:"displayname"`                                    // Overridden by nakama
-	EvrID             EvrId             `json:"xplatformid"`                                    // Overridden by nakama
-	SchemaVersion     int16             `json:"_version,omitempty" validate:"gte=0"`            // Version of the schema(?)
-	PublisherLock     string            `json:"publisher_lock,omitempty"`                       // unused atm
-	PurchasedCombat   int8              `json:"purchasedcombat,omitempty" validate:"eq=0|eq=1"` // unused (combat was made free)
-	LobbyVersion      uint64            `json:"lobbyversion" validate:"gte=0"`                  // set from the login request
-	LoginTime         int64             `json:"logintime" validate:"gte=0"`                     // When the player logged in
-	UpdateTime        int64             `json:"updatetime" validate:"gte=0"`                    // When the profile was last stored.
-	CreateTime        int64             `json:"createtime" validate:"gte=0"`                    // When the player's nakama account was created.
-	Statistics        PlayerStatistics  `json:"stats,omitempty"`                                // Player statistics
-	MaybeStale        bool              `json:"maybestale,omitempty" validate:"boolean"`        // If the profile is stale
-	UnlockedCosmetics UnlockedCosmetics `json:"unlocks,omitempty"`                              // Unlocked cosmetics
-	EquippedCosmetics EquippedCosmetics `json:"loadout,omitempty"`                              // Equipped cosmetics
-	Social            ServerSocial      `json:"social,omitempty"`                               // Social settings
-	Achievements      interface{}       `json:"achievements,omitempty"`                         // Achievements
-	RewardState       interface{}       `json:"reward_state,omitempty"`                         // Reward state?
+	DisplayName       string                     `json:"displayname"`                                    // Overridden by nakama
+	EvrID             EvrId                      `json:"xplatformid"`                                    // Overridden by nakama
+	SchemaVersion     int16                      `json:"_version,omitempty" validate:"gte=0"`            // Version of the schema(?)
+	PublisherLock     string                     `json:"publisher_lock,omitempty"`                       // unused atm
+	PurchasedCombat   int8                       `json:"purchasedcombat,omitempty" validate:"eq=0|eq=1"` // unused (combat was made free)
+	LobbyVersion      uint64                     `json:"lobbyversion" validate:"gte=0"`                  // set from the login request
+	LoginTime         int64                      `json:"logintime" validate:"gte=0"`                     // When the player logged in
+	UpdateTime        int64                      `json:"updatetime" validate:"gte=0"`                    // When the profile was last stored.
+	CreateTime        int64                      `json:"createtime" validate:"gte=0"`                    // When the player's nakama account was created.
+	Statistics        PlayerStatistics           `json:"stats,omitempty"`                                // Player statistics
+	MaybeStale        bool                       `json:"maybestale,omitempty" validate:"boolean"`        // If the profile is stale
+	UnlockedCosmetics map[string]map[string]bool `json:"unlocks,omitempty"`                              // Unlocked cosmetics
+	EquippedCosmetics EquippedCosmetics          `json:"loadout,omitempty"`                              // Equipped cosmetics
+	Social            ServerSocial               `json:"social,omitempty"`                               // Social settings
+	Achievements      interface{}                `json:"achievements,omitempty"`                         // Achievements
+	RewardState       interface{}                `json:"reward_state,omitempty"`                         // Reward state?
 	// If DeveloperFeatures is not null, the player will have a gold name
 	DeveloperFeatures *DeveloperFeatures `json:"dev,omitempty"` // Developer features
 }
@@ -198,9 +195,9 @@ type DeveloperFeatures struct {
 }
 
 type MatchStatistic struct {
-	Operation string `json:"op,omitempty"`
-	Value     any    `json:"val"`
-	Count     int64  `json:"cnt,omitempty"`
+	Operator string `json:"op,omitempty"`
+	Value    any    `json:"val"`
+	Count    int64  `json:"cnt,omitempty"`
 }
 
 type EquippedCosmetics struct {
@@ -225,8 +222,6 @@ type CosmeticLoadout struct {
 	Chassis        string `json:"chassis"`
 	Decal          string `json:"decal"`
 	DecalBody      string `json:"decal_body"`
-	DecalBorder    string `json:"decal_border"`
-	DecalBack      string `json:"decal_back"`
 	Emissive       string `json:"emissive"`
 	Emote          string `json:"emote"`
 	GoalFX         string `json:"goal_fx"`
@@ -297,7 +292,7 @@ type UnlockedCosmetics struct {
 	Combat CombatUnlocks `json:"combat"`
 }
 
-func (u *UnlockedCosmetics) ToMap() map[string]map[string]bool {
+func (u UnlockedCosmetics) ToMap() map[string]map[string]bool {
 	m := make(map[string]map[string]bool)
 	m["arena"] = make(map[string]bool)
 	m["combat"] = make(map[string]bool)
@@ -1283,14 +1278,14 @@ func NewStatistics() map[string]map[string]MatchStatistic {
 	return map[string]map[string]MatchStatistic{
 		"arena": {
 			"Level": MatchStatistic{
-				Operation: "add",
-				Value:     1,
+				Operator: "add",
+				Value:    1,
 			},
 		},
 		"combat": {
 			"Level": MatchStatistic{
-				Operation: "add",
-				Value:     1,
+				Operator: "add",
+				Value:    1,
 			},
 		},
 	}
@@ -1313,14 +1308,14 @@ func NewServerProfile() ServerProfile {
 		Statistics: map[string]map[string]MatchStatistic{
 			"arena": {
 				"Level": MatchStatistic{
-					Operation: "add",
-					Value:     1,
+					Operator: "add",
+					Value:    1,
 				},
 			},
 			"combat": {
 				"Level": MatchStatistic{
-					Operation: "add",
-					Value:     1,
+					Operator: "add",
+					Value:    1,
 				},
 			},
 		},
@@ -1357,27 +1352,9 @@ func NewServerProfile() ServerProfile {
 				BoosterS10:      true,
 				ChassisBodyS10A: true,
 			},
-		},
+		}.ToMap(),
 		EvrID: EvrIdNil,
 	}
-}
-
-// DisableRestrictedCosmetics sets all the restricted cosmetics to false.
-func (s *ServerProfile) DisableRestrictedCosmetics() error {
-	// Set all the VRML cosmetics to false
-	structs := []interface{}{s.UnlockedCosmetics.Arena, s.UnlockedCosmetics.Combat}
-	for _, t := range structs {
-		v := reflect.ValueOf(t).Elem()
-		for i := 0; i < v.NumField(); i++ {
-			tag := v.Type().Field(i).Tag.Get("validate")
-			if strings.Contains(tag, "restricted") {
-				if v.Field(i).CanSet() {
-					v.Field(i).Set(reflect.ValueOf(false))
-				}
-			}
-		}
-	}
-	return nil
 }
 
 func NewClientProfile() ClientProfile {
@@ -1429,7 +1406,7 @@ func DefaultGameProfiles(evrID EvrId, displayname string) (GameProfiles, error) 
 	server.DisplayName = displayname
 
 	return GameProfiles{
-		Client: client,
-		Server: server,
+		Client: &client,
+		Server: &server,
 	}, nil
 }

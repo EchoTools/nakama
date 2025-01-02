@@ -334,15 +334,6 @@ func (c *DiscordCache) syncMember(ctx context.Context, logger *zap.Logger, disco
 		}
 	}
 
-	// Store a reference to the user in the cache.
-	if evrAccount.DiscordUser == nil || *evrAccount.DiscordUser != *member.User {
-		evrAccount.DiscordUser = member.User
-		logger.Debug("Updating account details.")
-		if err := c.nk.AccountUpdateId(ctx, evrAccount.User.Id, member.User.Username, evrAccount.MarshalMap(), "", "", "", member.User.Locale, member.User.AvatarURL("512")); err != nil {
-			return fmt.Errorf("failed to update account: %w", err)
-		}
-	}
-
 	return nil
 }
 

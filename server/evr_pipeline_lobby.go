@@ -96,7 +96,7 @@ func (p *EvrPipeline) lobbySessionRequest(ctx context.Context, logger *zap.Logge
 			if !ok {
 				logger.Error("Failed to load params from context")
 			} else {
-				params.LastMatchmakingError.Store(err)
+				params.lastMatchmakingError.Store(err)
 			}
 
 			if _, err := p.appBot.LogUserErrorMessage(ctx, lobbyParams.GroupID.String(), fmt.Sprintf("```fix\n%s\n\n%T failed:\n %v\n```", session.Username(), in, err), false); err != nil {

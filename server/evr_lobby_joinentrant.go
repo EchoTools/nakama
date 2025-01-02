@@ -18,7 +18,7 @@ func (p *EvrPipeline) LobbySessionGet(ctx context.Context, logger *zap.Logger, m
 	return LobbySessionGet(ctx, logger, p.matchRegistry, p.tracker, p.profileRegistry, p.sessionRegistry, matchID)
 }
 
-func LobbySessionGet(ctx context.Context, logger *zap.Logger, matchRegistry MatchRegistry, tracker Tracker, profileRegistry *ProfileRegistry, sessionRegistry SessionRegistry, matchID MatchID) (*MatchLabel, Session, error) {
+func LobbySessionGet(ctx context.Context, logger *zap.Logger, matchRegistry MatchRegistry, tracker Tracker, profileRegistry *ProfileCache, sessionRegistry SessionRegistry, matchID MatchID) (*MatchLabel, Session, error) {
 
 	match, _, err := matchRegistry.GetMatch(ctx, matchID.String())
 	if err != nil {
@@ -191,7 +191,7 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 	return nil
 }
 
-func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, session Session, lobbyParams *LobbySessionParameters, groupID string) error {
+func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, session Session, lobbyParams *LobbySessionParameters, groupID string) error {
 	userID := session.UserID().String()
 
 	params, ok := LoadParams(ctx)
@@ -200,7 +200,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, session Session, lobby
 	}
 	var err error
 	var groupMetadata *GroupMetadata
-	if guildGroup, ok := params.GuildGroupsLoad()[groupID]; ok {
+	if guildGroup, ok := params.guildGroups[groupID]; ok {
 		groupMetadata = &guildGroup.GroupMetadata
 	} else {
 		groupMetadata, err = GetGuildGroupMetadata(ctx, p.db, groupID)
@@ -211,7 +211,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, session Session, lobby
 
 	sendAuditMessage := groupMetadata.AuditChannelID != ""
 
-	membership, ok := params.MembershipsLoad()[groupID]
+	membership, ok := params.memberships[groupID]
 
 	if !ok && groupMetadata.MembersOnlyMatchmaking {
 
@@ -262,7 +262,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, session Session, lobby
 		}
 	}
 
-	if groupMetadata.BlockVPNUsers && params.IsVPN && !groupMetadata.IsVPNBypass(userID) {
+	if groupMetadata.BlockVPNUsers && params.isVPN && !groupMetadata.IsVPNBypass(userID) {
 
 		score := p.ipqsClient.Score(session.ClientIP())
 
@@ -279,7 +279,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, session Session, lobby
 		}
 	}
 
-	features := params.SupportedFeatures
+	features := params.supportedFeatures
 	if ok && len(features) > 0 {
 		allowedFeatures := groupMetadata.AllowedFeatures
 		for _, feature := range features {
@@ -289,25 +289,45 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, session Session, lobby
 		}
 	}
 
-	displayName := params.AccountMetadata.GetGroupDisplayNameOrDefault(groupID)
+	if params.account.User.DisplayName != params.accountMetadata.GetGroupDisplayNameOrDefault(groupID) {
 
-	if err := p.profileRegistry.SetLobbyProfile(ctx, uuid.FromStringOrNil(userID), params.XPID, displayName); err != nil {
-		return fmt.Errorf("failed to set lobby profile: %w", err)
+		if err := DisplayNameHistorySet(ctx, p.runtimeModule, session.UserID().String(), params.accountMetadata.ActiveGroupID, params.accountMetadata.GetActiveGroupDisplayName(), false); err != nil {
+			logger.Warn("Failed to set display name history", zap.Error(err))
+		}
+
+		// Update the user's metadata
+		if err := p.runtimeModule.AccountUpdateId(ctx, session.UserID().String(), "", params.accountMetadata.MarshalMap(), params.accountMetadata.GetActiveGroupDisplayName(), "", "", "", ""); err != nil {
+			return fmt.Errorf("failed to update user metadata: %w", err)
+		}
+
+		params.account, err = p.runtimeModule.AccountGetId(ctx, session.UserID().String())
+		if err != nil {
+			return fmt.Errorf("failed to get account: %w", err)
+		}
+
+		StoreParams(ctx, &params)
+	}
+
+	profile := *params.profile.Load()
+	profile.DisplayName = params.accountMetadata.GetGroupDisplayNameOrDefault(groupID)
+
+	if err := p.profileRegistry.CacheProfile(ctx, profile); err != nil {
+		return fmt.Errorf("failed to cache profile: %w", err)
 	}
 
 	p.runtimeModule.Event(ctx, &api.Event{
-		Name: "lobby_session_authorized",
+		Name: EventLobbySessionAuthorized,
 		Properties: map[string]string{
 			"session_id":   session.ID().String(),
 			"group_id":     groupID,
 			"user_id":      userID,
-			"discord_id":   params.DiscordID,
-			"display_name": displayName,
+			"discord_id":   params.discordID,
+			"display_name": profile.DisplayName,
 		},
 		External: true, // used to denote if the event was generated from the client
 	})
 
-	session.Logger().Info("Authorized access to lobby session", zap.String("gid", groupID), zap.String("display_name", displayName))
+	session.Logger().Info("Authorized access to lobby session", zap.String("gid", groupID), zap.String("display_name", profile.DisplayName))
 
 	return nil
 }

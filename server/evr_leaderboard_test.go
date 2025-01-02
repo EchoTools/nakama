@@ -90,7 +90,7 @@ func TestScoreToValue(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		result := (&LeaderboardRegistry{}).scoreToValue(test.score, test.subscore)
+		result := (&LeaderboardRegistry{}).ScoreToValue(test.score, test.subscore)
 
 		if result != test.expected {
 			t.Errorf("ScoreToValue(%d, %d) = %f; expected %f", test.score, test.subscore, result, test.expected)

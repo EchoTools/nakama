@@ -285,6 +285,7 @@ func (s *MatchLabel) rebuildCache() {
 				Team:        TeamIndex(p.RoleAlignment),
 				ClientIP:    p.ClientIP,
 				DiscordID:   p.DiscordID,
+				SessionID:   p.SessionID.String(),
 				JoinTime:    s.joinTimeMilliseconds[p.SessionID.String()],
 			})
 		} else {
@@ -303,6 +304,8 @@ func (s *MatchLabel) rebuildCache() {
 					RatingMu:       p.Rating.Mu,
 					RatingSigma:    p.Rating.Sigma,
 					RankPercentile: p.RankPercentile,
+					SessionID:      p.SessionID.String(),
+					Query:          p.Query,
 					IsReservation:  s.reservationMap[p.SessionID.String()] != nil,
 				})
 			case evr.ModeCombatPublic, evr.ModeSocialPublic:
@@ -319,6 +322,7 @@ func (s *MatchLabel) rebuildCache() {
 					RatingMu:       p.Rating.Mu,
 					RatingSigma:    p.Rating.Sigma,
 					RankPercentile: p.RankPercentile,
+					SessionID:      p.SessionID.String(),
 					Query:          p.Query,
 					IsReservation:  s.reservationMap[p.SessionID.String()] != nil,
 				})
@@ -333,6 +337,7 @@ func (s *MatchLabel) rebuildCache() {
 					ClientIP:      p.ClientIP,
 					DiscordID:     p.DiscordID,
 					PartyID:       p.PartyID.String(),
+					SessionID:     p.SessionID.String(),
 					IsReservation: s.reservationMap[p.SessionID.String()] != nil,
 				})
 			case evr.ModeSocialPrivate:
@@ -345,6 +350,7 @@ func (s *MatchLabel) rebuildCache() {
 					ClientIP:      p.ClientIP,
 					DiscordID:     p.DiscordID,
 					PartyID:       p.PartyID.String(),
+					SessionID:     p.SessionID.String(),
 					IsReservation: s.reservationMap[p.SessionID.String()] != nil,
 				})
 			default:
@@ -357,6 +363,7 @@ func (s *MatchLabel) rebuildCache() {
 					ClientIP:      p.ClientIP,
 					DiscordID:     p.DiscordID,
 					PartyID:       p.PartyID.String(),
+					SessionID:     p.SessionID.String(),
 					IsReservation: s.reservationMap[p.SessionID.String()] != nil,
 				})
 			}

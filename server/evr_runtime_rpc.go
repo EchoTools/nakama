@@ -1405,37 +1405,30 @@ func PlayerStatisticsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 		if _, ok := stats[modestr]; !ok {
 			stats[modestr] = make(map[string]evr.MatchStatistic)
 			stats[modestr]["RatingMu"] = evr.MatchStatistic{
-				Operation: "rep",
-				Value:     25.0,
-				Count:     1,
+				Operator: "rep",
+				Value:    25.0,
+				Count:    1,
 			}
 
 			stats[modestr]["RatingSigma"] = evr.MatchStatistic{
-				Operation: "rep",
-				Value:     8.333,
-				Count:     1,
+				Operator: "rep",
+				Value:    8.333,
+				Count:    1,
 			}
 
 			if mode == evr.ModeArenaPublic {
 				rankPercentile := 0.0
-				globalSettings, err := LoadMatchmakingSettings(ctx, nk, userID)
-				if err != nil {
+				if userSettings, err := LoadMatchmakingSettings(ctx, nk, userID); err != nil {
 					return "", err
+				} else if userSettings.RankPercentile > 0 {
+					rankPercentile = userSettings.RankPercentile
+				} else {
+					rankPercentile = serviceSettings.Load().Matchmaking.RankPercentile.Default
 				}
-				userSettings, err := LoadMatchmakingSettings(ctx, nk, userID)
-				if err != nil {
-					return "", err
-				}
-
-				rankPercentile, err = CalculateSmoothedPlayerRankPercentile(ctx, zap.NewNop(), nk, userID, mode, &globalSettings, &userSettings)
-				if err != nil {
-					return "", err
-				}
-
 				stats[modestr]["ArenaRankPercentile"] = evr.MatchStatistic{
-					Operation: "rep",
-					Value:     rankPercentile,
-					Count:     1,
+					Operator: "rep",
+					Value:    rankPercentile,
+					Count:    1,
 				}
 			}
 		}
@@ -1448,15 +1441,15 @@ func PlayerStatisticsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 		if r, ok := ratings[gid]; ok {
 			if r, ok := r[mode]; ok {
 				stats[modestr]["RatingMu"] = evr.MatchStatistic{
-					Operation: "rep",
-					Value:     float64(r.Mu),
-					Count:     1,
+					Operator: "rep",
+					Value:    float64(r.Mu),
+					Count:    1,
 				}
 
 				stats[modestr]["RatingSigma"] = evr.MatchStatistic{
-					Operation: "rep",
-					Value:     float64(r.Sigma),
-					Count:     1,
+					Operator: "rep",
+					Value:    float64(r.Sigma),
+					Count:    1,
 				}
 			}
 		}
@@ -1466,8 +1459,8 @@ func PlayerStatisticsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 		for m, stat := range mode {
 			if stat.Count > 0 {
 				stats[g][m] = evr.MatchStatistic{
-					Operation: stat.Operation,
-					Value:     stat.Value,
+					Operator: stat.Operator,
+					Value:    stat.Value,
 				}
 			}
 		}
@@ -1920,4 +1913,75 @@ func MigrateUserDataRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 	loginHistory.Store(ctx, nk)
 
 	return "{}", nil
+}
+
+func UserServerProfileRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+
+	// Get the pings from the query string
+	queryParameters := ctx.Value(runtime.RUNTIME_CTX_QUERY_PARAMS).(map[string][]string)
+
+	request := make(map[string]string)
+
+	var userID string
+	var ok bool
+	var err error
+
+	if payload != "" {
+		if err := json.Unmarshal([]byte(payload), request); err != nil {
+			return "", err
+		}
+	} else if len(queryParameters) > 0 {
+		if p, ok := queryParameters["user_id"]; ok {
+			request["user_id"] = p[0]
+		}
+		if p, ok := queryParameters["xp_id"]; ok {
+			request["xp_id"] = p[0]
+		}
+	} else {
+		if userID, ok = ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string); !ok {
+			return "", runtime.NewError("No user ID in context", StatusUnauthenticated)
+		}
+	}
+
+	var xpIDStr string
+	switch {
+	case request["user_id"] != "":
+		userID = request["user_id"]
+
+	case request["xp_id"] != "":
+		xpIDStr = request["xp_id"]
+		if userID, err = GetUserIDByEvrID(ctx, db, xpIDStr); err != nil {
+			return "", err
+		}
+	default:
+		return "", runtime.NewError("No user ID specified", StatusInvalidArgument)
+	}
+
+	account, err := nk.AccountGetId(ctx, userID)
+	if err != nil {
+		return "", err
+	}
+
+	if xpIDStr == "" {
+		if len(account.Devices) == 0 {
+			return "", runtime.NewError("No devices found for user", StatusNotFound)
+		}
+		xpIDStr = account.Devices[0].Id
+	}
+	xpID, err := evr.ParseEvrId(xpIDStr)
+	if err != nil {
+		return "", runtime.NewError("Failed to parse xp_id", StatusInvalidArgument)
+	}
+
+	serverProfile, err := NewUserServerProfile(ctx, db, account, *xpID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get server profile: %w", err)
+	}
+
+	data, err := json.MarshalIndent(serverProfile, "", "  ")
+	if err != nil {
+		return "", runtime.NewError("Failed to marshal server profile", StatusInternalError)
+	}
+
+	return string(data), nil
 }

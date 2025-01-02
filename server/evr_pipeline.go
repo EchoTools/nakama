@@ -64,7 +64,7 @@ type EvrPipeline struct {
 	runtimeModule        *RuntimeGoNakamaModule
 	runtimeLogger        runtime.Logger
 
-	profileRegistry              *ProfileRegistry
+	profileRegistry              *ProfileCache
 	discordCache                 *DiscordCache
 	appBot                       *DiscordAppBot
 	leaderboardRegistry          *LeaderboardRegistry
@@ -115,7 +115,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		dg.StateEnabled = true
 	}
 
-	leaderboardRegistry := NewLeaderboardRegistry(runtimeLogger, nk, config.GetName())
+	leaderboardRegistry := NewLeaderboardRegistry(runtimeLogger, db, nk, config.GetName())
 	profileRegistry := NewProfileRegistry(nk, db, runtimeLogger, tracker, metrics)
 	broadcasterRegistrationBySession := MapOf[string, *MatchBroadcaster]{}
 	lobbyBuilder := NewLobbyBuilder(logger, nk, sessionRegistry, matchRegistry, tracker, metrics, profileRegistry)
@@ -429,7 +429,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 				return false
 			}
 
-			loginSession := params.LoginSession.Load()
+			loginSession := params.loginSession
 			if loginSession == nil {
 				switch idmessage.(type) {
 				case evr.LobbySessionRequest:
@@ -461,8 +461,8 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 				return false
 			}
 
-			if !params.XPID.Equals(xpimessage.GetEvrID()) {
-				logger.Error("mismatched evr id", zap.String("evrid", xpimessage.GetEvrID().String()), zap.String("evrid2", params.XPID.String()))
+			if !params.xpID.Equals(xpimessage.GetEvrID()) {
+				logger.Error("mismatched evr id", zap.String("evrid", xpimessage.GetEvrID().String()), zap.String("evrid2", params.xpID.String()))
 				return false
 			}
 		}
@@ -482,8 +482,8 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 		}
 	}
 
-	if params, ok := LoadParams(session.Context()); ok && !params.XPID.IsNil() {
-		logger = logger.With(zap.String("uid", session.UserID().String()), zap.String("sid", session.ID().String()), zap.String("username", session.Username()), zap.String("evrid", params.XPID.String()))
+	if params, ok := LoadParams(session.Context()); ok && !params.xpID.IsNil() {
+		logger = logger.With(zap.String("uid", session.UserID().String()), zap.String("sid", session.ID().String()), zap.String("username", session.Username()), zap.String("evrid", params.xpID.String()))
 	}
 
 	if err := pipelineFn(session.Context(), logger, session, in); err != nil {
@@ -522,7 +522,7 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 	}
 
 	// DM the user on discord
-	if !strings.HasPrefix(session.Username(), "broadcaster:") && params.RelayOutgoing {
+	if !strings.HasPrefix(session.Username(), "broadcaster:") && params.relayOutgoing {
 		content := ""
 		switch msg := in.Message.(type) {
 		case *rtapi.Envelope_StreamData:

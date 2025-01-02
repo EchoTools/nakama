@@ -50,7 +50,6 @@ type LobbySessionParameters struct {
 	BlockedIDs             []string                      `json:"blocked_ids"`
 	Rating                 *atomic.Pointer[types.Rating] `json:"rating"`
 	IsEarlyQuitter         bool                          `json:"quit_last_game_early"`
-	EarlyQuitPenaltyExpiry time.Time                     `json:"early_quit_penalty_expiry"`
 	RankPercentile         *atomic.Float64               `json:"rank_percentile"` // Updated when party is created
 	RankPercentileMaxDelta float64                       `json:"rank_percentile_max_delta"`
 	MaxServerRTT           int                           `json:"max_server_rtt"`
@@ -59,8 +58,8 @@ type LobbySessionParameters struct {
 	FailsafeTimeout        time.Duration                 `json:"failsafe_timeout"` // The failsafe timeout
 	FallbackTimeout        time.Duration                 `json:"fallback_timeout"` // The fallback timeout
 	DisplayName            string                        `json:"display_name"`
-
-	latencyHistory LatencyHistory
+	profile                *GameProfileData
+	latencyHistory         LatencyHistory
 }
 
 func (p *LobbySessionParameters) GetPartySize() int {
@@ -124,15 +123,14 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		return nil, fmt.Errorf("failed to load session parameters")
 	}
 
-	if sessionParams == nil || sessionParams.AccountMetadata == nil {
+	if sessionParams.accountMetadata == nil {
 		return nil, fmt.Errorf("failed to load session parameters")
 	}
 
 	// Load the global matchmaking config
-	globalSettingsVersion, globalSettings, err := LoadMatchmakingSettingsWithVersion(ctx, p.runtimeModule, SystemUserID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load global matchmaking settings: %w", err)
-	}
+	serviceSettings := ServiceSettings()
+	globalSettings := serviceSettings.Matchmaking
+	globalSettingsVersion := serviceSettings.version
 
 	// Load the user's matchmaking config
 	userSettings, err := LoadMatchmakingSettings(ctx, p.runtimeModule, userID)
@@ -158,6 +156,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		}
 	}
 
+	rating := userSettings.GetRating(mode)
 	entrantRole := r.GetEntrantRole(0)
 
 	nextMatchID := MatchID{}
@@ -200,17 +199,17 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 	}
 
 	matchmakingQueryAddons := []string{
-		globalSettings.MatchmakingQueryAddon,
-		userSettings.MatchmakingQueryAddon,
+		globalSettings.QueryAddons.Matchmaking,
+		userSettings.LobbyBuilderQueryAddon,
 	}
 
 	backfillQueryAddons := []string{
-		globalSettings.BackfillQueryAddon,
+		globalSettings.QueryAddons.Backfill,
 		userSettings.BackfillQueryAddon,
 	}
 
 	createQueryAddons := []string{
-		globalSettings.CreateQueryAddon,
+		globalSettings.QueryAddons.Create,
 		userSettings.CreateQueryAddon,
 	}
 
@@ -246,8 +245,8 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 
 	node := session.pipeline.node
 
-	requiredFeatures := sessionParams.RequiredFeatures
-	supportedFeatures := sessionParams.SupportedFeatures
+	requiredFeatures := sessionParams.requiredFeatures
+	supportedFeatures := sessionParams.supportedFeatures
 
 	if r.GetFeatures() != nil {
 		supportedFeatures = append(supportedFeatures, r.GetFeatures()...)
@@ -255,7 +254,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 
 	groupID := r.GetGroupID()
 	if r.GetGroupID() == uuid.Nil {
-		groupID = sessionParams.AccountMetadata.GetActiveGroupID()
+		groupID = sessionParams.accountMetadata.GetActiveGroupID()
 	}
 
 	region := r.GetRegion()
@@ -267,13 +266,6 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 	if r.GetCurrentLobbyID() != uuid.Nil {
 		currentMatchID = MatchID{UUID: r.GetCurrentLobbyID(), Node: node}
 	}
-
-	profile, err := session.evrPipeline.profileRegistry.Load(ctx, session.userID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load profile: %w", err)
-	}
-
-	rating := profile.GetRating(groupID, mode)
 
 	// Add blocked players who are online to the Matchmaking Query Addon
 	blockedIDs := make([]string, 0)
@@ -292,31 +284,27 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		backfillQueryAddons = append(backfillQueryAddons, fmt.Sprintf(`-label.players.user_id:/(%s)/`, Query.Join(blockedIDs, "|")))
 	}
 
-	eqstats := profile.GetEarlyQuitStatistics()
-	penaltyExpiry := time.Unix(eqstats.PenaltyExpiry, 0)
-
 	rankPercentileMaxDelta := 1.0
 
-	if globalSettings.RankPercentileMaxDelta > 0 {
-		rankPercentileMaxDelta = globalSettings.RankPercentileMaxDelta
-	}
-
-	if userSettings.RankPercentileMaxDelta > 0 {
-		rankPercentileMaxDelta = userSettings.RankPercentileMaxDelta
+	if globalSettings.RankPercentile.MaxDelta > 0 {
+		rankPercentileMaxDelta = globalSettings.RankPercentile.MaxDelta
 	}
 
 	// Only calculate it, if it's out of date.
-	basePercentile := userSettings.PreviousRankPercentile
+	rankPercentile := globalSettings.RankPercentile.Default
 
-	if userSettings.PreviousRankPercentile == 0 || globalSettingsVersion != userSettings.GlobalSettingsVersion {
-		basePercentile, err = CalculateSmoothedPlayerRankPercentile(ctx, logger, p.runtimeModule, userID, mode, &globalSettings, &userSettings)
+	if userSettings.StaticBaseRankPercentile > 0 {
+		rankPercentile = userSettings.StaticBaseRankPercentile
+	} else if userSettings.RankPercentile == 0 || globalSettingsVersion != userSettings.GlobalSettingsVersion {
+
+		rankPercentile, err = CalculateSmoothedPlayerRankPercentile(ctx, logger, p.runtimeModule, userID, mode)
 		if err != nil {
 			return nil, fmt.Errorf("failed to calculate smoothed player rank percentile: %w", err)
 		}
 	}
 
-	if basePercentile != userSettings.PreviousRankPercentile {
-		userSettings.PreviousRankPercentile = basePercentile
+	if rankPercentile != userSettings.RankPercentile {
+		userSettings.RankPercentile = rankPercentile
 		userSettings.GlobalSettingsVersion = globalSettingsVersion
 		if _, err := SaveToStorage(ctx, p.runtimeModule, userID, userSettings); err != nil {
 			logger.Warn("Failed to save user settings", zap.Error(err))
@@ -327,10 +315,6 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 
 	if globalSettings.MaxServerRTT > 0 {
 		maxServerRTT = globalSettings.MaxServerRTT
-	}
-
-	if userSettings.MaxServerRTT > 0 {
-		maxServerRTT = userSettings.MaxServerRTT
 	}
 
 	// Set the maxRTT to at least the average of the player's latency history
@@ -346,19 +330,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 
 	maxServerRTT = max(maxServerRTT, averageRTT)
 
-	isEarlyQuitter := false
-	// Check if the last game was quit early
-	if len(eqstats.History) > 0 {
-		var lastGame int64
-		for ts := range eqstats.History {
-			if ts > lastGame {
-				lastGame = ts
-			}
-		}
-		if eqstats.History[lastGame] {
-			isEarlyQuitter = true
-		}
-	}
+	isEarlyQuitter := sessionParams.isEarlyQuitter.Load()
 
 	maximumFailsafeSecs := globalSettings.MatchmakingTimeoutSecs - p.config.GetMatchmaker().IntervalSec*2
 	failsafeTimeoutSecs := min(maximumFailsafeSecs, globalSettings.FailsafeTimeoutSecs)
@@ -367,7 +339,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		Node:                   node,
 		UserID:                 session.userID,
 		SessionID:              session.id,
-		DiscordID:              sessionParams.DiscordID,
+		DiscordID:              sessionParams.discordID,
 		CurrentMatchID:         currentMatchID,
 		VersionLock:            versionLock,
 		AppID:                  appID,
@@ -389,17 +361,16 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		latencyHistory:         latencyHistory,
 		BlockedIDs:             blockedIDs,
 		Rating:                 atomic.NewPointer(&rating),
-		Verbose:                sessionParams.AccountMetadata.DiscordDebugMessages,
-		EarlyQuitPenaltyExpiry: penaltyExpiry,
+		Verbose:                sessionParams.accountMetadata.DiscordDebugMessages,
 		IsEarlyQuitter:         isEarlyQuitter,
-		RankPercentile:         atomic.NewFloat64(basePercentile),
+		RankPercentile:         atomic.NewFloat64(rankPercentile),
 		RankPercentileMaxDelta: rankPercentileMaxDelta,
 		MaxServerRTT:           maxServerRTT,
 		MatchmakingTimestamp:   time.Now().UTC(),
 		MatchmakingTimeout:     time.Duration(globalSettings.MatchmakingTimeoutSecs) * time.Second,
 		FailsafeTimeout:        time.Duration(failsafeTimeoutSecs) * time.Second,
 		FallbackTimeout:        time.Duration(globalSettings.FallbackTimeoutSecs) * time.Second,
-		DisplayName:            sessionParams.AccountMetadata.GetGroupDisplayNameOrDefault(groupID.String()),
+		DisplayName:            sessionParams.accountMetadata.GetGroupDisplayNameOrDefault(groupID.String()),
 	}, nil
 }
 
@@ -417,11 +388,12 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeRankRange bool, incl
 		fmt.Sprintf("+label.mode:%s", p.Mode.String()),
 		fmt.Sprintf("+label.group_id:/%s/", Query.Escape(p.GroupID.String())),
 		//fmt.Sprintf("label.version_lock:%s", p.VersionLock.String()),
+		p.BackfillQueryAddon,
 	}
 
 	if includeRankRange {
-		rankLower := min(p.RankPercentile.Load()-p.RankPercentileMaxDelta, 1.0-2.0*p.RankPercentileMaxDelta)
-		rankUpper := max(p.RankPercentile.Load()+p.RankPercentileMaxDelta, 2.0*p.RankPercentileMaxDelta)
+		rankLower := min(p.GetRankPercentile()-p.RankPercentileMaxDelta, 1.0-2.0*p.RankPercentileMaxDelta)
+		rankUpper := max(p.GetRankPercentile()+p.RankPercentileMaxDelta, 2.0*p.RankPercentileMaxDelta)
 		rankLower = max(rankLower, 0.0)
 		rankUpper = min(rankUpper, 1.0)
 
@@ -492,7 +464,6 @@ func (p *LobbySessionParameters) FromMatchmakerEntry(entry *MatchmakerEntry) {
 	p.VersionLock = evr.ToSymbol(stringProperties["version_lock:"])
 	p.BlockedIDs = strings.Split(stringProperties["blocked_ids"], " ")
 	p.DisplayName = stringProperties["display_name"]
-	p.EarlyQuitPenaltyExpiry, _ = time.Parse(time.RFC3339, stringProperties["early_quit_penalty_expiry"])
 	p.SetRating(rating)
 	p.SetRankPercentile(numericProperties["rank_percentile"])
 	p.MatchmakingTimestamp, _ = time.Parse(time.RFC3339, stringProperties["submission_time"])
@@ -518,13 +489,12 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 
 	submissionTime := time.Now().UTC().Format(time.RFC3339)
 	stringProperties := map[string]string{
-		"game_mode":                 p.Mode.String(),
-		"group_id":                  p.GroupID.String(),
-		"version_lock":              p.VersionLock.String(),
-		"blocked_ids":               strings.Join(p.BlockedIDs, " "),
-		"display_name":              p.DisplayName,
-		"submission_time":           submissionTime,
-		"early_quit_penalty_expiry": p.EarlyQuitPenaltyExpiry.Format(time.RFC3339),
+		"game_mode":       p.Mode.String(),
+		"group_id":        p.GroupID.String(),
+		"version_lock":    p.VersionLock.String(),
+		"blocked_ids":     strings.Join(p.BlockedIDs, " "),
+		"display_name":    p.DisplayName,
+		"submission_time": submissionTime,
 	}
 
 	rating := p.GetRating()
@@ -542,7 +512,6 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 		fmt.Sprintf("+properties.group_id:%s", Query.Escape(p.GroupID.String())),
 		fmt.Sprintf(`-properties.blocked_ids:/.*%s.*/`, Query.Escape(p.UserID.String())),
 		//"+properties.version_lock:" + p.VersionLock.String(),
-
 		p.MatchmakingQueryAddon,
 	}
 
@@ -662,8 +631,43 @@ func AverageLatencyHistories(histories LatencyHistory) map[string]int {
 	return averages
 }
 
+func recordRatingToLeaderboard(ctx context.Context, nk runtime.NakamaModule, userID, displayName string, mode evr.Symbol, rating types.Rating) error {
+	modeprefix := ""
+	switch mode {
+	case evr.ModeArenaPublic:
+		modeprefix = "Arena"
+	case evr.ModeCombatPublic:
+		modeprefix = "Combat"
+	}
+
+	scores := map[string]float64{
+		fmt.Sprintf("%s:%s:%s", mode.String(), modeprefix+"RatingSigma", "alltime"): rating.Sigma,
+		fmt.Sprintf("%s:%s:%s", mode.String(), modeprefix+"RatingMu", "alltime"):    rating.Mu,
+	}
+
+	for id, value := range scores {
+		score, subscore := ValueToScore(value)
+
+		// Write the record
+		if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, displayName, score, subscore, nil, nil); err != nil {
+			// Try to create the leaderboard
+			err = nk.LeaderboardCreate(ctx, id, true, "desc", "set", "", nil, true)
+			if err != nil {
+				return fmt.Errorf("Leaderboard create error: %w", err)
+			} else {
+				// Retry the write
+				_, err := nk.LeaderboardRecordWrite(ctx, id, userID, displayName, score, subscore, nil, nil)
+				if err != nil {
+					return fmt.Errorf("Leaderboard record write error: %w", err)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
 func recordPercentileToLeaderboard(ctx context.Context, nk runtime.NakamaModule, userID, username string, mode evr.Symbol, percentile float64) error {
-	periods := []string{"alltime", "daily", "weekly"}
 
 	modeprefix := ""
 	switch mode {
@@ -673,26 +677,24 @@ func recordPercentileToLeaderboard(ctx context.Context, nk runtime.NakamaModule,
 		modeprefix = "Combat"
 	}
 
-	for _, period := range periods {
-		id := fmt.Sprintf("%s:%s:%s", mode.String(), modeprefix+"RankPercentile", period)
+	id := fmt.Sprintf("%s:%s:%s", mode.String(), modeprefix+"RankPercentile", "alltime")
 
-		score, subScore := ValueToScore(percentile)
+	score, subscore := ValueToScore(percentile)
 
-		// Write the record
-		_, err := nk.LeaderboardRecordWrite(ctx, id, userID, username, score, subScore, nil, nil)
+	// Write the record
+	_, err := nk.LeaderboardRecordWrite(ctx, id, userID, username, score, subscore, nil, nil)
+
+	if err != nil {
+		// Try to create the leaderboard
+		err = nk.LeaderboardCreate(ctx, id, true, "asc", "set", "", nil, true)
 
 		if err != nil {
-			// Try to create the leaderboard
-			err = nk.LeaderboardCreate(ctx, id, true, "asc", "set", PeriodicityToSchedule(period), nil, true)
-
+			return fmt.Errorf("Leaderboard create error: %w", err)
+		} else {
+			// Retry the write
+			_, err := nk.LeaderboardRecordWrite(ctx, id, userID, username, score, subscore, nil, nil)
 			if err != nil {
-				return fmt.Errorf("Leaderboard create error: %w", err)
-			} else {
-				// Retry the write
-				_, err := nk.LeaderboardRecordWrite(ctx, id, userID, username, score, subScore, nil, nil)
-				if err != nil {
-					return fmt.Errorf("Leaderboard record write error: %w", err)
-				}
+				return fmt.Errorf("Leaderboard record write error: %w", err)
 			}
 		}
 	}
