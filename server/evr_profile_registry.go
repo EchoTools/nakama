@@ -22,17 +22,17 @@ var unlocksByItemName map[string]string
 
 func init() {
 
-	unlocks := make(map[string]string)
+	byItemName := make(map[string]string)
 	types := []interface{}{evr.ArenaUnlocks{}, evr.CombatUnlocks{}}
 	for _, t := range types {
 		for i := 0; i < reflect.TypeOf(t).NumField(); i++ {
 			field := reflect.TypeOf(t).Field(i)
 			tag := field.Tag.Get("json")
 			name := strings.SplitN(tag, ",", 2)[0]
-			unlocks[name] = field.Name
+			byItemName[field.Name] = name
 		}
 	}
-	unlocksByItemName = unlocks
+	unlocksByItemName = byItemName
 
 }
 
@@ -396,6 +396,7 @@ func cosmeticDefaults(enableAll bool) map[string]map[string]struct{} {
 
 			if !disabled || enableAll {
 				k := v.Type().Field(i).Name
+				k = unlocksByItemName[k]
 				cosmetics[m][k] = struct{}{}
 			}
 
