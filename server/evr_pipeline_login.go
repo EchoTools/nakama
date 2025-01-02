@@ -367,26 +367,20 @@ func (p *EvrPipeline) authenticateHeadset(ctx context.Context, logger *zap.Logge
 	var userId string
 	var account *api.Account
 
-	userId, err = GetUserIDByDeviceID(ctx, logger, session.pipeline.db, xpid.Token())
-	if userId != "" {
+	// Lookup the account by the device ID
+	account, err = AccountGetDeviceID(ctx, p.db, p.runtimeModule, xpid.String())
+
+	switch status.Code(err) {
+	case codes.OK:
 		// The account was found.
-		account, err = GetAccount(ctx, logger, session.pipeline.db, session.statusRegistry, uuid.FromStringOrNil(userId))
-		if err != nil {
-			return account, status.Error(codes.Internal, fmt.Sprintf("failed to get account: %s", err))
-		}
+		userId = account.User.Id
+	case codes.NotFound:
+		// Continue with linking
+	default:
+		return account, fmt.Errorf("failed to get account: %w", err)
 	}
 
-	if err != nil && status.Code(err) != codes.NotFound {
-		// Possibly banned or other error.
-		return account, err
-	}
-
-	if account.GetCustomId() == "" {
-
-		// Account requires discord linking.
-		userId = ""
-
-	} else if account.GetEmail() != "" {
+	if account.GetEmail() != "" {
 
 		// The account has a password, authenticate the password.
 		// This is just a failsafe, since this authentication should be handled at the session level.
@@ -394,20 +388,18 @@ func (p *EvrPipeline) authenticateHeadset(ctx context.Context, logger *zap.Logge
 		return account, err
 
 	} else if userPassword != "" {
+		// This is the first time the user has authenticate via device id, while providing a password.
+		// Set the password on the account.
 
-		// The user provided a password and the account has no password.
 		err = LinkEmail(ctx, logger, session.pipeline.db, uuid.FromStringOrNil(userId), account.User.Id+"@"+p.placeholderEmail, userPassword)
 		if err != nil {
 			return account, status.Errorf(codes.Internal, "error linking email: %s", err)
 		}
 
 		return account, nil
-	} else if status.Code(err) != codes.NotFound {
-		// Possibly banned or other error.
-		return account, err
 	}
 
-	// Account requires discord linking.
+	// Device requires discord linking.
 	linkTicket, err := p.linkTicket(ctx, logger, xpid, clientIP, &payload)
 	if err != nil {
 		return account, status.Errorf(codes.Internal, "error creating link ticket: %s", err)
@@ -425,13 +417,13 @@ func (p *EvrPipeline) validateDeviceID(ctx context.Context, logger *zap.Logger, 
 		return account, status.Error(codes.Internal, fmt.Sprintf("failed to get account: %s", err))
 	}
 
-	deviceUserID, err := GetUserIDByDeviceID(ctx, logger, session.pipeline.db, xpid.Token())
+	account, err = AccountGetDeviceID(ctx, session.pipeline.db, p.runtimeModule, xpid.Token())
 
 	switch status.Code(err) {
 	case codes.OK:
-		if deviceUserID != session.userID.String() {
-			logger.Error("Device is already linked to another account", zap.String("device_user_id", deviceUserID), zap.String("session_user_id", session.userID.String()))
-			return account, fmt.Errorf("device is already linked to another account")
+		if account.User.Id != session.userID.String() {
+			logger.Error("Device is already linked to another account", zap.String("device_user_id", account.User.Id), zap.String("session_user_id", session.userID.String()))
+			return account, fmt.Errorf("device is already linked to another account (%s)", account.User.Username)
 		}
 	case codes.NotFound:
 		// The account was not found.
