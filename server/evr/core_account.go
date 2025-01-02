@@ -666,7 +666,7 @@ type ArenaUnlocks struct {
 	EmoteGingerbreadManA        bool `json:"emote_gingerbread_man_a,omitempty"`
 	EmoteHeartEyesA             bool `json:"emote_heart_eyes_a,omitempty"`
 	EmoteHourglassA             bool `json:"emote_hourglass_a,omitempty"`
-	EmoteKissyLipsA             bool `json:"emote_kissy_lips_a,omitempty"`
+	EmoteKissyLipsA             bool `json:"emote_kissy_lips_a,omitempty" validate:"restricted"`
 	EmoteLightbulbA             bool `json:"emote_lightbulb_a,omitempty"`
 	EmoteLightningA             bool `json:"rwd_emote_lightning_a,omitempty"`
 	EmoteLoadingA               bool `json:"emote_loading_a,omitempty"`
