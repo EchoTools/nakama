@@ -347,7 +347,7 @@ var (
 			},
 		},
 		{
-			Name:        "mod-panel",
+			Name:        "igp",
 			Description: "Use the mod panel."},
 		{
 			Name:        "kick-player",
@@ -1013,7 +1013,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				},
 			})
 		},
-		"mod-panel": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+		"igp": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			components, err := d.ModPanelMessageEmbed(ctx, logger, nk, member.User.ID)
 			if err != nil {
 				if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -3191,8 +3191,8 @@ func (d *DiscordAppBot) SendIPApprovalRequest(ctx context.Context, userID, ip st
 	// Send the message
 
 	embed := &discordgo.MessageEmbed{
-		Title:       "New Login Location",
-		Description: "Please verify the login attempt from a new location.",
+		Title:       "Authorize New Login Device",
+		Description: "Please verify the login attempt.",
 		Color:       0x00ff00,
 		Fields: []*discordgo.MessageEmbedField{
 			{
@@ -3204,7 +3204,7 @@ func (d *DiscordAppBot) SendIPApprovalRequest(ctx context.Context, userID, ip st
 
 	if ipqs != nil {
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-			Name:   "Location",
+			Name:   "Location (may be inaccurate)",
 			Value:  fmt.Sprintf("%s, %s", ipqs.City, ipqs.Region),
 			Inline: true,
 		})
@@ -3212,7 +3212,7 @@ func (d *DiscordAppBot) SendIPApprovalRequest(ctx context.Context, userID, ip st
 	}
 	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
 		Name:   "Note",
-		Value:  "If this login attempt was not made by you, please report it to EchoVRCE using the button below.",
+		Value:  "If you were not instructed (in your headset) to look for this message, this login attempt may not be you! please report it to EchoVRCE using the button below.",
 		Inline: false,
 	})
 	components := []discordgo.MessageComponent{
