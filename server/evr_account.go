@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -192,7 +193,14 @@ func (a *AccountMetadata) GetGroupDisplayNameOrDefault(groupID string) string {
 	if dn, ok := a.GroupDisplayNames[a.ActiveGroupID]; ok && dn != "" {
 		return dn
 	} else {
-		return a.account.User.Username
+		if len(a.GroupDisplayNames) > 0 {
+			for _, dn := range a.GroupDisplayNames {
+				if dn != "" {
+					return dn
+				}
+			}
+		}
+		return ""
 	}
 }
 
@@ -222,6 +230,18 @@ func (a *AccountMetadata) GetMuted() []evr.EvrId {
 	if a.MutedPlayers == nil {
 		return make([]evr.EvrId, 0)
 	}
+	v, ok := a.MutedPlayers.Load().([]evr.EvrId)
+	if !ok {
+		return make([]evr.EvrId, 0)
+	}
+	return v
+}
+
+func (a *AccountMetadata) SetMuted(muted []evr.EvrId) {
+	if a.MutedPlayers == nil {
+		a.MutedPlayers = &atomic.Value{}
+	}
+	a.MutedPlayers.Store(muted)
 	return a.MutedPlayers
 }
 
