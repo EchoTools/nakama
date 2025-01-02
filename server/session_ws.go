@@ -272,7 +272,7 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 		wsMessageType = websocket.BinaryMessage
 	}
 
-	// Add the Discord ID to the context if it's present in the request URL
+	// Authenticate the user if a Discord ID is provided.
 	if params.AuthDiscordID != "" {
 
 		if userIDStr := evrPipeline.discordCache.DiscordIDToUserID(params.AuthDiscordID); userIDStr == "" {
