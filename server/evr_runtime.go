@@ -68,6 +68,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		"player/setnextmatch":           SetNextMatchRPC,
 		"player/statistics":             PlayerStatisticsRPC,
 		"player/kick":                   KickPlayerRPC,
+		"player/profile":                UserServerProfileRPC,
 		"link":                          LinkingAppRpc,
 		"evr/servicestatus":             ServiceStatusRpc,
 		"importloadouts":                ImportLoadoutsRpc,
@@ -658,12 +659,7 @@ func GetAccountMetadata(ctx context.Context, nk runtime.NakamaModule, userID str
 
 func GetUserIDByEvrID(ctx context.Context, db *sql.DB, evrID string) (string, error) {
 	query := `
-	SELECT 
-		s.user_id
-	FROM 
-		user_device ud
-	WHERE
-		ud.id = $1`
+	SELECT ud.user_id FROM user_device ud WHERE ud.id = $1`
 	var dbUserID string
 	var found = true
 	err := db.QueryRowContext(ctx, query, evrID).Scan(&dbUserID)

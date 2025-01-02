@@ -236,6 +236,7 @@ type ArenaStats struct {
 	BlockPercentage              StatisticFloatReplacement `json:"BlockPercentage"`
 	Blocks                       StatisticIntegerAddition  `json:"Blocks"`
 	BounceGoals                  StatisticIntegerAddition  `json:"BounceGoals"`
+	BumperShots                  StatisticIntegerAddition  `json:"BumperShots"`
 	Catches                      StatisticIntegerAddition  `json:"Catches"`
 	Clears                       StatisticIntegerAddition  `json:"Clears"`
 	CurrentArenaMVPStreak        StatisticIntegerAddition  `json:"CurrentArenaMVPStreak"`
@@ -245,6 +246,7 @@ type ArenaStats struct {
 	GoalScorePercentage          StatisticFloatReplacement `json:"GoalScorePercentage"`
 	GoalsPerGame                 StatisticFloatAverage     `json:"GoalsPerGame"`
 	HatTricks                    StatisticIntegerAddition  `json:"HatTricks"`
+	HeadbuttGoals                StatisticIntegerAddition  `json:"HeadbuttGoals"`
 	HighestArenaMVPStreak        StatisticIntegerMaximum   `json:"HighestArenaMVPStreak"`
 	HighestArenaWinStreak        StatisticIntegerMaximum   `json:"HighestArenaWinStreak"`
 	HighestPoints                StatisticIntegerMaximum   `json:"HighestPoints"`

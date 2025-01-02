@@ -105,18 +105,24 @@ func (e *EVRAccount) IsLinked() bool {
 type AccountMetadata struct {
 	account *api.Account
 
-	RandomizeDisplayName   bool              `json:"randomize_display_name"`    // Randomize the display name
-	RandomizedDisplayName  string            `json:"randomized_display_name"`   // The randomized display name
-	DisplayNameOverride    string            `json:"display_name_override"`     // The display name override
-	GlobalBanReason        string            `json:"global_ban_reason"`         // The global ban reason
-	ActiveGroupID          string            `json:"active_group_id"`           // The active group ID
-	GroupDisplayNames      map[string]string `json:"group_display_names"`       // The display names for each guild map[groupID]displayName
-	DisableAFKTimeout      bool              `json:"disable_afk_timeout"`       // Disable AFK detection
-	TargetUserID           string            `json:"target_user_id"`            // The target user ID to follow in public spaces
-	DiscordDebugMessages   bool              `json:"discord_debug_messages"`    // Enable debug messages in Discord
-	RelayMessagesToDiscord bool              `json:"relay_messages_to_discord"` // Relay messages to Discord
-	isModified             bool              // Indicates whether the account metadata has been modified
-	DiscordUser            *discordgo.User   `json:"discord_user"` // The Discord user object
+	GlobalBanReason        string                     `json:"global_ban_reason"`         // The global ban reason
+	RandomizeDisplayName   bool                       `json:"randomize_display_name"`    // Randomize the display name
+	RandomizedDisplayName  string                     `json:"randomized_display_name"`   // The randomized display name
+	DisplayNameOverride    string                     `json:"display_name_override"`     // The display name override
+	GroupDisplayNames      map[string]string          `json:"group_display_names"`       // The display names for each guild map[groupID]displayName
+	ActiveGroupID          string                     `json:"active_group_id"`           // The active group ID
+	DiscordDebugMessages   bool                       `json:"discord_debug_messages"`    // Enable debug messages in Discord
+	RelayMessagesToDiscord bool                       `json:"relay_messages_to_discord"` // Relay messages to Discord
+	TeamName               string                     `json:"team_name"`                 // The team name
+	DisableAFKTimeout      bool                       `json:"disable_afk_timeout"`       // Disable AFK detection
+	EnableAllCosmetics     bool                       `json:"enable_all_cosmetics"`      // Enable all cosmetics
+	IsGlobalDeveloper      bool                       `json:"is_global_developer"`       // Is a global developer
+	IsGlobalModerator      bool                       `json:"is_global_moderator"`       // Is a global moderator
+	LoadoutCosmetics       AccountCosmetics           `json:"cosmetic_loadout"`          // The equipped cosmetics
+	CombatLoadout          CombatLoadout              `json:"combat_loadout"`            // The combat loadout
+	MutedPlayers           []evr.EvrId                `json:"muted_players"`             // The muted players
+	GhostedPlayers         []evr.EvrId                `json:"ghosted_players"`           // The ghosted players
+	GameSettings           *evr.RemoteLogGameSettings `json:"game_settings"`             // The game settings
 }
 
 func (a *AccountMetadata) ID() string {
@@ -160,7 +166,6 @@ func (a *AccountMetadata) SetActiveGroupID(id uuid.UUID) {
 		return
 	}
 	a.ActiveGroupID = id.String()
-	a.isModified = true
 }
 
 func (a *AccountMetadata) GetDisplayName(groupID string) string {
@@ -213,10 +218,26 @@ func (a *AccountMetadata) MarshalMap() map[string]interface{} {
 	return m
 }
 
-func (a *AccountMetadata) NeedsUpdate() bool {
-	return a.isModified
+func (a *AccountMetadata) GetMuted() []evr.EvrId {
+	if a.MutedPlayers == nil {
+		return make([]evr.EvrId, 0)
+	}
+	return a.MutedPlayers
 }
 
+func (a *AccountMetadata) GetGhosted() []evr.EvrId {
+	if a.GhostedPlayers == nil {
+		return make([]evr.EvrId, 0)
+	}
+	return a.GhostedPlayers
+}
+
+type CombatLoadout struct {
+	CombatWeapon       string `json:"combat_weapon"`
+	CombatGrenade      string `json:"combat_grenade"`
+	CombatDominantHand uint8  `json:"combat_dominant_hand"`
+	CombatAbility      string `json:"combat_ability"`
+}
 type AccountCosmetics struct {
 	JerseyNumber int64               `json:"number"`           // The loadout number (jersey number)
 	Loadout      evr.CosmeticLoadout `json:"cosmetic_loadout"` // The loadout

@@ -74,7 +74,7 @@ func JoinMatchmakingStream(logger *zap.Logger, s *sessionWS, lobbyParams *LobbyS
 					Username:  s.Username(),
 				},
 				Data: MatchmakingStreamData{
-					DiscordID:         sessionParams.DiscordID,
+					DiscordID:         sessionParams.discordID,
 					Parameters:        lobbyParams,
 					BackfillQuery:     lobbyParams.BackfillSearchQuery(true, true),
 					MatchmakingQuery:  query,

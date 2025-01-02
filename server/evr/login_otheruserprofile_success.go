@@ -10,7 +10,7 @@ import (
 type OtherUserProfileSuccess struct {
 	Message
 	EvrId             EvrId
-	ServerProfileJSON *json.RawMessage
+	ServerProfileJSON json.RawMessage
 }
 
 func NewOtherUserProfileSuccess(evrId EvrId, profile *ServerProfile) *OtherUserProfileSuccess {
@@ -22,7 +22,7 @@ func NewOtherUserProfileSuccess(evrId EvrId, profile *ServerProfile) *OtherUserP
 
 	return &OtherUserProfileSuccess{
 		EvrId:             evrId,
-		ServerProfileJSON: &data,
+		ServerProfileJSON: data,
 	}
 }
 
@@ -31,7 +31,7 @@ func (m *OtherUserProfileSuccess) Stream(s *EasyStream) error {
 		func() error { return s.StreamStruct(&m.EvrId) },
 		func() error {
 
-			return s.StreamJSONRawMessage(m.ServerProfileJSON, true, ZstdCompression)
+			return s.StreamJSONRawMessage(&m.ServerProfileJSON, true, ZstdCompression)
 		},
 	})
 }

@@ -29,6 +29,7 @@ import (
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/gorilla/websocket"
+	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
@@ -111,71 +112,61 @@ type (
 
 	// Keys used for storing/retrieving user information in the context of a request after authentication.
 	ctxSessionParametersKey struct{} // The Session Parameters
+	ctxLoggedInAtKey        struct{} // The time the user logged in
 )
 
 type SessionParameters struct {
-	Node                    string                        // The node name
-	XPID                    evr.EvrId                     // The EchoVR ID
-	DiscordID               string                        // The Discord ID
-	LoginSession            *atomic.Pointer[sessionWS]    // The login session
-	LobbySession            *atomic.Pointer[sessionWS]    // The match session
-	ServerSession           *atomic.Pointer[sessionWS]    // The server session
-	LoginHistory            *atomic.Pointer[LoginHistory] // The login history
-	AuthDiscordID           string                        // The Discord ID use for authentication
-	AuthPassword            string                        // The Password use for authentication
-	UserDisplayNameOverride string                        // The display name override (user-defined)
+	node                    string        // The node name
+	xpID                    evr.EvrId     // The EchoVR ID
+	discordID               string        // The Discord ID
+	loginSession            *sessionWS    // The login session
+	lobbySession            *sessionWS    // The match session
+	serverSession           *sessionWS    // The server session
+	loginHistory            *LoginHistory // The login history
+	authDiscordID           string        // The Discord ID use for authentication
+	authPassword            string        // The Password use for authentication
+	userDisplayNameOverride string        // The display name override (user-defined)
 
-	ExternalServerAddr string // The external server address (IP:port)
-	GeoHashPrecision   int    // The geohash precision
-	IsVPN              bool   // The user is using a VPN
+	externalServerAddr string // The external server address (IP:port)
+	geoHashPrecision   int    // The geohash precision
+	isVPN              bool   // The user is using a VPN
 
-	SupportedFeatures []string     // features from the urlparam
-	RequiredFeatures  []string     // required_features from the urlparam
-	DisableEncryption bool         // The user has disabled encryption
-	DisableMAC        bool         // The user has disabled MAC
-	IsVR              *atomic.Bool // The user is using a VR headset
-	IsPCVR            *atomic.Bool // The user is using a PCVR headset
-	IsGlobalDeveloper *atomic.Bool // The user is a developer
+	supportedFeatures []string // features from the urlparam
+	requiredFeatures  []string // required_features from the urlparam
+	disableEncryption bool     // The user has disabled encryption
+	disableMAC        bool     // The user has disabled MAC
+	isVR              bool     // The user is using a VR headset
+	isPCVR            bool     // The user is using a PCVR headset
+	isGlobalDeveloper bool     // The user is a developer
 
-	RelayOutgoing bool     // The user wants (some) outgoing messages relayed to them via discord
-	Debug         bool     // The user wants debug information
-	ServerTags    []string // []string of the server tags
-	ServerGuilds  []string // []string of the server guilds
-	ServerRegions []string // []string of the server regions
+	relayOutgoing bool                // The user wants (some) outgoing messages relayed to them via discord
+	debug         bool                // The user wants debug information
+	serverTags    []string            // []string of the server tags
+	serverGuilds  []string            // []string of the server guilds
+	serverRegions []string            // []string of the server regions
+	urlParameters map[string][]string // The URL parameters
 
-	AccountMetadata      *AccountMetadata    // The account metadata
-	Memberships          *atomic.Value       // map[string]GuildGroupMembership
-	GuildGroups          *atomic.Value       // map[string]*GuildGroup
-	URLParameters        map[string][]string // The URL parameters
-	LastMatchmakingError *atomic.Error       // The last matchmaking error
+	account              *api.Account                       // The account
+	accountMetadata      *AccountMetadata                   // The account metadata
+	profile              *atomic.Pointer[evr.ServerProfile] // The server profile
+	memberships          map[string]GuildGroupMembership    // map[string]GuildGroupMembership
+	guildGroups          map[string]*GuildGroup             // map[string]*GuildGroup
+	publisherLock        string                             // The publisher lock
+	lobbyVersion         uint64                             // The lobby version
+	isEarlyQuitter       *atomic.Bool                       // The user is an early quitter
+	lastMatchmakingError *atomic.Error                      // The last matchmaking error
 }
 
-func (p *SessionParameters) GuildGroupsLoad() map[string]*GuildGroup {
-	v := p.GuildGroups.Load()
-	if v == nil {
-		return nil
-	}
-	return v.(map[string]*GuildGroup)
+func StoreParams(ctx context.Context, params *SessionParameters) {
+	ctx.Value(ctxSessionParametersKey{}).(*atomic.Pointer[SessionParameters]).Store(params)
 }
 
-func (p *SessionParameters) MembershipsLoad() map[string]GuildGroupMembership {
-	v := p.Memberships.Load()
-	if v == nil {
-		return nil
-	}
-	return v.(map[string]GuildGroupMembership)
-}
-
-func (p *SessionParameters) MembershipsStore(memberships map[string]GuildGroupMembership) {
-	p.Memberships.Store(memberships)
-}
-
-func LoadParams(ctx context.Context) (parameters *SessionParameters, found bool) {
+func LoadParams(ctx context.Context) (parameters SessionParameters, found bool) {
 	params, ok := ctx.Value(ctxSessionParametersKey{}).(*atomic.Pointer[SessionParameters])
 	if !ok {
-		return nil, false
+		return SessionParameters{}, false
 	}
-	return params.Load(), true
+	return *params.Load(), true
 }
 
 func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessionID, userID uuid.UUID, username string, vars map[string]string, expiry int64, clientIP, clientPort, lang string, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, conn *websocket.Conn, sessionRegistry SessionRegistry, statusRegistry StatusRegistry, matchmaker Matchmaker, tracker Tracker, metrics Metrics, pipeline *Pipeline, evrPipeline *EvrPipeline, runtime *Runtime, request http.Request, storageIndex StorageIndex) Session {
@@ -195,6 +186,7 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 	ctx = context.WithValue(ctx, ctxVarsKey{}, vars)     // apiServer compatibility
 	ctx = context.WithValue(ctx, ctxExpiryKey{}, expiry) // apiServer compatibility
 
+	ctx = context.WithValue(ctx, ctxLoggedInAtKey{}, time.Now().UTC())
 	// Add the URL parameters to the context
 	urlParams := make(map[string][]string, 0)
 	for k, v := range request.URL.Query() {
@@ -225,47 +217,50 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 	}
 
 	params := SessionParameters{
-		Node:                    pipeline.node,
-		AuthDiscordID:           parseUserQueryFunc(&request, "discordid", 20, discordIDPattern),
-		AuthPassword:            parseUserQueryFunc(&request, "password", 32, nil),
-		UserDisplayNameOverride: ign,
-		LoginHistory:            atomic.NewPointer((*LoginHistory)(nil)),
+		node:                    pipeline.node,
+		authDiscordID:           parseUserQueryFunc(&request, "discordid", 20, discordIDPattern),
+		authPassword:            parseUserQueryFunc(&request, "password", 32, nil),
+		userDisplayNameOverride: ign,
+		loginHistory:            nil,
 
-		DisableEncryption: parseUserQueryFunc(&request, "disable_encryption", 5, nil) == "true",
-		DisableMAC:        parseUserQueryFunc(&request, "disable_mac", 5, nil) == "true",
+		disableEncryption: parseUserQueryFunc(&request, "disable_encryption", 5, nil) == "true",
+		disableMAC:        parseUserQueryFunc(&request, "disable_mac", 5, nil) == "true",
 
-		ExternalServerAddr:   parseUserQueryFunc(&request, "serveraddr", 64, nil),
-		GeoHashPrecision:     geoPrecision,
-		IsVPN:                evrPipeline.ipqsClient.IsVPN(clientIP),
-		IsVR:                 atomic.NewBool(false),
-		IsGlobalDeveloper:    atomic.NewBool(false),
-		IsPCVR:               atomic.NewBool(false),
-		SupportedFeatures:    parseUserQueryCommaDelimited(&request, "features", 32, featurePattern),
-		RequiredFeatures:     parseUserQueryCommaDelimited(&request, "requires", 32, featurePattern),
-		ServerTags:           parseUserQueryCommaDelimited(&request, "tags", 32, tagsPattern),
-		ServerGuilds:         parseUserQueryCommaDelimited(&request, "guilds", 32, guildPattern),
-		ServerRegions:        parseUserQueryCommaDelimited(&request, "regions", 32, regionPattern),
-		RelayOutgoing:        parseUserQueryFunc(&request, "verbose", 5, nil) == "true",
-		Debug:                parseUserQueryFunc(&request, "debug", 5, nil) == "true",
-		URLParameters:        urlParams,
-		LastMatchmakingError: atomic.NewError(nil),
-		Memberships:          &atomic.Value{},
-		GuildGroups:          &atomic.Value{},
-		AccountMetadata:      &AccountMetadata{},
+		externalServerAddr:   parseUserQueryFunc(&request, "serveraddr", 64, nil),
+		geoHashPrecision:     geoPrecision,
+		isVPN:                evrPipeline.ipqsClient.IsVPN(clientIP),
+		isVR:                 false,
+		isGlobalDeveloper:    false,
+		isPCVR:               false,
+		supportedFeatures:    parseUserQueryCommaDelimited(&request, "features", 32, featurePattern),
+		requiredFeatures:     parseUserQueryCommaDelimited(&request, "requires", 32, featurePattern),
+		serverTags:           parseUserQueryCommaDelimited(&request, "tags", 32, tagsPattern),
+		serverGuilds:         parseUserQueryCommaDelimited(&request, "guilds", 32, guildPattern),
+		serverRegions:        parseUserQueryCommaDelimited(&request, "regions", 32, regionPattern),
+		relayOutgoing:        parseUserQueryFunc(&request, "verbose", 5, nil) == "true",
+		debug:                parseUserQueryFunc(&request, "debug", 5, nil) == "true",
+		urlParameters:        urlParams,
+		lastMatchmakingError: atomic.NewError(nil),
+		memberships:          make(map[string]GuildGroupMembership),
+		guildGroups:          make(map[string]*GuildGroup),
+		account:              &api.Account{},
+		accountMetadata:      &AccountMetadata{},
+		profile:              atomic.NewPointer((*evr.ServerProfile)(nil)),
 
-		LoginSession:  atomic.NewPointer((*sessionWS)(nil)),
-		LobbySession:  atomic.NewPointer((*sessionWS)(nil)),
-		ServerSession: atomic.NewPointer((*sessionWS)(nil)),
+		loginSession:   nil,
+		lobbySession:   nil,
+		serverSession:  nil,
+		isEarlyQuitter: atomic.NewBool(false),
 	}
 
 	ctx = context.WithValue(ctx, ctxSessionParametersKey{}, atomic.NewPointer(&params))
 
-	for _, f := range params.RequiredFeatures {
-		if !slices.Contains(params.SupportedFeatures, f) {
-			params.SupportedFeatures = append(params.SupportedFeatures, f)
+	for _, f := range params.requiredFeatures {
+		if !slices.Contains(params.supportedFeatures, f) {
+			params.supportedFeatures = append(params.supportedFeatures, f)
 		}
 	}
-	slices.Sort(params.SupportedFeatures)
+	slices.Sort(params.supportedFeatures)
 
 	wsMessageType := websocket.TextMessage
 	if format == SessionFormatProtobuf || format == SessionFormatEVR {
@@ -273,11 +268,11 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 	}
 
 	// Authenticate the user if a Discord ID is provided.
-	if params.AuthDiscordID != "" {
+	if params.authDiscordID != "" {
 
-		if userIDStr := evrPipeline.discordCache.DiscordIDToUserID(params.AuthDiscordID); userIDStr == "" {
-			logger.Warn("Failed to get user ID by Discord ID", zap.String("discord_id", params.AuthDiscordID))
-		} else if passwd := params.AuthPassword; passwd != "" {
+		if userIDStr := evrPipeline.discordCache.DiscordIDToUserID(params.authDiscordID); userIDStr == "" {
+			logger.Warn("Failed to get user ID by Discord ID", zap.String("discord_id", params.authDiscordID))
+		} else if passwd := params.authPassword; passwd != "" {
 			if len(passwd) > 32 {
 				passwd = passwd[:32]
 			}
@@ -290,12 +285,12 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 			} else {
 				userIDStr, err := AuthenticateUsername(ctx, logger, pipeline.db, account.User.Username, passwd)
 				if err != nil {
-					logger.Warn("Failed to authenticate user by Discord ID", zap.Error(err), zap.String("discord_id", params.AuthDiscordID))
+					logger.Warn("Failed to authenticate user by Discord ID", zap.Error(err), zap.String("discord_id", params.authDiscordID))
 
 				} else {
 					// Only include the password in the context if the user was unsuccessful in authenticating.
 					// Once the user has been authenticated with a deviceID, their password will be set.
-					params.AuthPassword = ""
+					params.authPassword = ""
 
 					username = account.User.Username
 					userID = uuid.FromStringOrNil(userIDStr)
@@ -391,14 +386,16 @@ func (s *sessionWS) Secondary(loginSession *sessionWS, isLobby bool, isServer bo
 	if !ok {
 		return fmt.Errorf("login session parameters not found: %v", loginSession.ID())
 	}
+
 	if isLobby {
-		params.LobbySession.Store(s)
+		params.lobbySession = s
 	}
 	if isServer {
-		params.ServerSession.Store(s)
+		params.serverSession = s
 	}
 
-	return s.SetIdentity(loginSession.UserID(), params.XPID, loginSession.Username())
+	StoreParams(s.Context(), &params)
+	return s.SetIdentity(loginSession.UserID(), params.xpID, loginSession.Username())
 }
 func (s *sessionWS) SetIdentity(userID uuid.UUID, evrID evr.EvrId, username string) error {
 	// Each player has a single login connection, which will act as the core session.
@@ -505,15 +502,21 @@ func (s *sessionWS) LobbySession(loginSessionID uuid.UUID) error {
 
 		// Use the context to avoid any locking issues.
 		loginCtx := loginSession.Context()
-		sessionParams, ok := LoadParams(loginCtx)
+		loginParams, ok := LoadParams(loginCtx)
 		if !ok {
 			return fmt.Errorf("login session parameters not found: %v", loginSessionID)
 		}
+		lobbyParams, ok := LoadParams(s.Context())
+		if !ok {
+			return fmt.Errorf("lobby session parameters not found: %v", s.id)
+		}
 
-		sessionParams.LobbySession.Store(s)
-		// Store the login parameters as the lobby session.
+		loginParams.lobbySession = s
+		loginParams.requiredFeatures = lobbyParams.requiredFeatures
+
+		// Store the login parameters as the lobby session's parameters.
 		lobbyCtx := s.Context()
-		lobbyCtx.Value(ctxSessionParametersKey{}).(*atomic.Pointer[SessionParameters]).Store(sessionParams)
+		StoreParams(lobbyCtx, &loginParams)
 
 		// Create a derived context for this session.
 		lobbyCtx = context.WithValue(lobbyCtx, ctxUserIDKey{}, loginSession.UserID())     // apiServer compatibility
@@ -527,7 +530,7 @@ func (s *sessionWS) LobbySession(loginSessionID uuid.UUID) error {
 		s.logger = s.logger.With(
 			zap.String("login_sid", loginSessionID.String()),
 			zap.String("uid", s.userID.String()),
-			zap.String("evr_id", sessionParams.XPID.Token()),
+			zap.String("evr_id", loginParams.xpID.Token()),
 			zap.String("username", s.Username()))
 		s.Unlock()
 

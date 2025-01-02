@@ -28,13 +28,13 @@ type LobbyBuilder struct {
 	sessionRegistry SessionRegistry
 	matchRegistry   MatchRegistry
 	tracker         Tracker
-	profileRegistry *ProfileRegistry
+	profileRegistry *ProfileCache
 	metrics         Metrics
 
 	mapQueue map[evr.Symbol][]evr.Symbol // map[mode][]level
 }
 
-func NewLobbyBuilder(logger *zap.Logger, nk runtime.NakamaModule, sessionRegistry SessionRegistry, matchRegistry MatchRegistry, tracker Tracker, metrics Metrics, profileRegistry *ProfileRegistry) *LobbyBuilder {
+func NewLobbyBuilder(logger *zap.Logger, nk runtime.NakamaModule, sessionRegistry SessionRegistry, matchRegistry MatchRegistry, tracker Tracker, metrics Metrics, profileRegistry *ProfileCache) *LobbyBuilder {
 	logger = logger.With(zap.String("module", "lobby_builder"))
 
 	return &LobbyBuilder{
@@ -202,19 +202,19 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 
 			sessions = append(sessions, session)
 			entrantPresences = append(entrantPresences, &EvrMatchPresence{
-				Node:           sessionParams.Node,
+				Node:           sessionParams.node,
 				UserID:         session.UserID(),
 				SessionID:      session.ID(),
-				LoginSessionID: sessionParams.LoginSession.Load().id,
+				LoginSessionID: sessionParams.loginSession.id,
 				Username:       session.Username(),
-				DisplayName:    sessionParams.AccountMetadata.GetGroupDisplayNameOrDefault(groupID.String()),
-				EvrID:          sessionParams.XPID,
+				DisplayName:    sessionParams.accountMetadata.GetGroupDisplayNameOrDefault(groupID.String()),
+				EvrID:          sessionParams.xpID,
 				PartyID:        MatchIDFromStringOrNil(entry.Entry.GetPartyId()).UUID,
 				RoleAlignment:  teamIndex,
-				DiscordID:      sessionParams.DiscordID,
+				DiscordID:      sessionParams.discordID,
 				ClientIP:       session.ClientIP(),
 				ClientPort:     session.ClientPort(),
-				IsPCVR:         sessionParams.IsPCVR.Load(),
+				IsPCVR:         sessionParams.isPCVR,
 				Rating:         rating,
 				RankPercentile: percentile,
 				Query:          query,
@@ -444,12 +444,13 @@ func CompactedFrequencySort[T comparable](s []T, desc bool) []T {
 func AllocateGameServer(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, groupID string, rttsByExternalIP map[string]int, settings *MatchSettings, regions []string, requireDefaultRegion bool, requireRegion bool) (*MatchLabel, error) {
 
 	// Load the server ratings storage object
-	ratings, err := LoadServerRatings(ctx, logger, nk, groupID)
+	globalSettings := ServiceSettings().Matchmaking
 
 	qparts := []string{
 		"+label.open:T",
 		"+label.lobby_type:unassigned",
 		fmt.Sprintf("+label.broadcaster.group_ids:%s", Query.Escape(groupID)),
+		globalSettings.QueryAddons.LobbyBuilder,
 	}
 
 	if requireDefaultRegion {
@@ -546,12 +547,12 @@ func AllocateGameServer(ctx context.Context, logger runtime.Logger, nk runtime.N
 			}
 		}
 
-		ratingA, ok := ratings.ByExternalIP[a.Broadcaster.Endpoint.ExternalIP.String()]
+		ratingA, ok := globalSettings.ServerRatings.ByExternalIP[a.Broadcaster.Endpoint.ExternalIP.String()]
 		if !ok {
 			ratingA = 0
 		}
 
-		ratingB, ok := ratings.ByExternalIP[b.Broadcaster.Endpoint.ExternalIP.String()]
+		ratingB, ok := globalSettings.ServerRatings.ByExternalIP[b.Broadcaster.Endpoint.ExternalIP.String()]
 		if !ok {
 			ratingB = 0
 		}
@@ -596,50 +597,4 @@ func AllocateGameServer(ctx context.Context, logger runtime.Logger, nk runtime.N
 	}
 
 	return nil, ErrMatchmakingNoAvailableServers
-}
-
-type ServerRatings struct {
-	ByExternalIP map[string]float64 `json:"by_external_ip"`
-	ByOperatorID map[string]float64 `json:"by_operator_id"`
-}
-
-func LoadServerRatings(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, groupID string) (*ServerRatings, error) {
-
-	objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
-		{
-			UserID:     SystemUserID,
-			Collection: "ServerRatings",
-			Key:        "ratings",
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to read server ratings: %w", err)
-	}
-
-	if len(objs) == 0 {
-		_, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{
-			{
-				UserID:     SystemUserID,
-				Collection: "ServerRatings",
-				Key:        "ratings",
-				Value:      `{"by_external_ip":{},"by_operator_id":{}}`,
-			},
-		})
-
-		if err != nil {
-			return nil, fmt.Errorf("failed to write server ratings: %w", err)
-		}
-
-		return &ServerRatings{
-			ByExternalIP: make(map[string]float64),
-			ByOperatorID: make(map[string]float64),
-		}, nil
-	}
-
-	ratings := &ServerRatings{}
-	if err := json.Unmarshal([]byte(objs[0].Value), ratings); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal server ratings: %w", err)
-	}
-
-	return ratings, nil
 }

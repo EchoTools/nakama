@@ -77,7 +77,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(ctx context.Context, logger 
 	}
 	discordId := ""
 
-	sessionParams, ok := LoadParams(ctx)
+	params, ok := LoadParams(ctx)
 	if !ok {
 		return fmt.Errorf("session parameters not provided")
 	}
@@ -91,11 +91,12 @@ func (p *EvrPipeline) gameserverRegistrationRequest(ctx context.Context, logger 
 		return fmt.Errorf("user is not in any guild groups")
 	}
 
-	sessionParams.Memberships.Store(memberships)
+	params.memberships = memberships
+	StoreParams(ctx, &params)
 
 	// Get the guilds that the broadcaster wants to host for
 	groupIDs := make([]string, 0)
-	for _, guildID := range sessionParams.ServerGuilds {
+	for _, guildID := range params.serverGuilds {
 		if guildID == "" {
 			continue
 		}
@@ -124,7 +125,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(ctx context.Context, logger 
 	}
 
 	regions := make([]evr.Symbol, 0)
-	for _, r := range sessionParams.ServerRegions {
+	for _, r := range params.serverRegions {
 		regions = append(regions, evr.ToSymbol(r))
 	}
 
@@ -136,7 +137,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(ctx context.Context, logger 
 		regions = append(regions, request.RegionHash)
 	}
 
-	logger = logger.With(zap.String("discord_id", discordId), zap.Strings("group_ids", groupIDs), zap.Strings("tags", sessionParams.ServerTags), zap.Strings("regions", lo.Map(regions, func(v evr.Symbol, _ int) string { return v.String() })))
+	logger = logger.With(zap.String("discord_id", discordId), zap.Strings("group_ids", groupIDs), zap.Strings("tags", params.serverTags), zap.Strings("regions", lo.Map(regions, func(v evr.Symbol, _ int) string { return v.String() })))
 
 	// Add the server id as a region
 	regions = append(regions, evr.ToSymbol(request.ServerID))
@@ -155,15 +156,10 @@ func (p *EvrPipeline) gameserverRegistrationRequest(ctx context.Context, logger 
 	externalIP := net.ParseIP(session.ClientIP())
 	externalPort := request.Port
 
-	params, ok := LoadParams(ctx)
-	if !ok {
-		return errFailedRegistration(session, logger, errors.New("session parameters not provided"), evr.BroadcasterRegistration_Unknown)
-	}
-
-	if params.ExternalServerAddr != "" {
-		parts := strings.Split(":", params.ExternalServerAddr)
+	if params.externalServerAddr != "" {
+		parts := strings.Split(":", params.externalServerAddr)
 		if len(parts) != 2 {
-			return errFailedRegistration(session, logger, fmt.Errorf("invalid external IP address: %s. it must be `ip:port`", params.ExternalServerAddr), evr.BroadcasterRegistration_Unknown)
+			return errFailedRegistration(session, logger, fmt.Errorf("invalid external IP address: %s. it must be `ip:port`", params.externalServerAddr), evr.BroadcasterRegistration_Unknown)
 		}
 		externalIP = net.ParseIP(parts[0])
 		if externalIP == nil {
@@ -193,7 +189,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(ctx context.Context, logger 
 	}
 
 	// Create the broadcaster config
-	config := broadcasterConfig(session.UserID().String(), session.id.String(), request.ServerID, request.InternalIP, externalIP, externalPort, regions, request.VersionLock, params.ServerTags, params.SupportedFeatures, request.TimeStepUsecs, ipqsData, params.GeoHashPrecision, isNative)
+	config := broadcasterConfig(session.UserID().String(), session.id.String(), request.ServerID, request.InternalIP, externalIP, externalPort, regions, request.VersionLock, params.serverTags, params.supportedFeatures, request.TimeStepUsecs, ipqsData, params.geoHashPrecision, isNative)
 
 	// Add the operators userID to the group ids. this allows any host to spawn on a server they operate.
 	groupUUIDs := make([]uuid.UUID, 0, len(groupIDs))

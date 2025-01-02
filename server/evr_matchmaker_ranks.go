@@ -10,88 +10,29 @@ import (
 	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
-func CalculateSmoothedPlayerRankPercentile(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, userID string, mode evr.Symbol, globalSettings, userSettings *MatchmakingSettings) (float64, error) {
+func CalculateSmoothedPlayerRankPercentile(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, userID string, mode evr.Symbol) (float64, error) {
+	settings := ServiceSettings().Matchmaking.RankPercentile
 
-	if mode != evr.ModeSocialPublic {
+	if len(settings.LeaderboardWeights) == 0 {
+		return settings.Default, nil
+	}
+
+	if mode == evr.ModeSocialPublic {
 		mode = evr.ModeArenaPublic
 	}
 
-	globalSettingsVersion, _, err := LoadMatchmakingSettingsWithVersion(ctx, nk, userID)
-	if err != nil {
-		return 0.0, fmt.Errorf("failed to load matchmaking settings: %w", err)
-	}
-
-	if userSettings.StaticBaseRankPercentile > 0 {
-		return userSettings.StaticBaseRankPercentile, nil
-	}
-
-	if globalSettings.StaticBaseRankPercentile > 0 {
-		return globalSettings.StaticBaseRankPercentile, nil
-	}
-
-	if userSettings.PreviousRankPercentile > 0 || globalSettingsVersion == userSettings.GlobalSettingsVersion {
-		return userSettings.PreviousRankPercentile, nil
-	}
-
-	defaultRankPercentile := globalSettings.RankPercentileDefault
-	if userSettings.RankPercentileDefault != 0 {
-		defaultRankPercentile = userSettings.RankPercentileDefault
-	}
-
-	activeSchedule := "daily"
-	if globalSettings.RankResetSchedule != "" {
-		activeSchedule = globalSettings.RankResetSchedule
-	}
-
-	if userSettings.RankResetSchedule != "" {
-		activeSchedule = userSettings.RankResetSchedule
-	}
-
-	dampingSchedule := "weekly"
-	if globalSettings.RankResetScheduleDamping != "" {
-		dampingSchedule = globalSettings.RankResetScheduleDamping
-	}
-
-	if userSettings.RankResetScheduleDamping != "" {
-		dampingSchedule = userSettings.RankResetScheduleDamping
-	}
-
-	dampingFactor := globalSettings.RankPercentileDampingFactor
-	if userSettings.RankPercentileDampingFactor != 0 {
-		dampingFactor = userSettings.RankPercentileDampingFactor
-	}
-
-	var boardWeights map[string]float64
-
-	if len(globalSettings.RankBoardWeights) > 0 {
-		boardWeights = globalSettings.RankBoardWeights[mode.String()]
-	}
-
-	if len(userSettings.RankBoardWeights) > 0 {
-		boardWeights = userSettings.RankBoardWeights[mode.String()]
-	}
-
-	if len(boardWeights) == 0 {
-		return defaultRankPercentile, nil
-	}
-
-	dampingPercentile, err := RecalculatePlayerRankPercentile(ctx, logger, nk, userID, mode, dampingSchedule, defaultRankPercentile, boardWeights)
+	dampingPercentile, err := RecalculatePlayerRankPercentile(ctx, logger, nk, userID, mode, settings.ResetScheduleDamper, settings.Default, settings.LeaderboardWeights[mode])
 	if err != nil {
 		return 0.0, fmt.Errorf("failed to get damping percentile: %w", err)
 	}
 
-	activePercentile, err := RecalculatePlayerRankPercentile(ctx, logger, nk, userID, mode, activeSchedule, dampingPercentile, boardWeights)
+	activePercentile, err := RecalculatePlayerRankPercentile(ctx, logger, nk, userID, mode, settings.ResetSchedule, dampingPercentile, settings.LeaderboardWeights[mode])
 	if err != nil {
 		return 0.0, fmt.Errorf("failed to get active percentile: %w", err)
 	}
 
-	percentile := activePercentile + (dampingPercentile-activePercentile)*dampingFactor
+	percentile := activePercentile + (dampingPercentile-activePercentile)*settings.DampeningFactor
 
-	userSettings.PreviousRankPercentile = percentile
-	userSettings.GlobalSettingsVersion = globalSettingsVersion
-	if _, err := SaveToStorage(ctx, nk, userID, userSettings); err != nil {
-		logger.Warn("Failed to save user settings", zap.Error(err))
-	}
 	return percentile, nil
 }
 

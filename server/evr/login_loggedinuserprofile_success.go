@@ -1,7 +1,6 @@
 package evr
 
 import (
-	"encoding/binary"
 	"fmt"
 )
 
@@ -22,8 +21,7 @@ func (m LoggedInUserProfileSuccess) Symbol() Symbol {
 
 func (m *LoggedInUserProfileSuccess) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.UserId.PlatformCode) },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.UserId.AccountId) },
+		func() error { return s.StreamStruct(&m.UserId) },
 		func() error { return s.StreamJson(&m.Payload, true, ZstdCompression) },
 	})
 }
@@ -31,9 +29,9 @@ func (r LoggedInUserProfileSuccess) String() string {
 	return fmt.Sprintf("LoggedInUserProfileSuccess(user_id=%v)", r.UserId)
 }
 
-func NewLoggedInUserProfileSuccess(userId EvrId, client ClientProfile, server ServerProfile) *LoggedInUserProfileSuccess {
+func NewLoggedInUserProfileSuccess(xpid EvrId, client *ClientProfile, server *ServerProfile) *LoggedInUserProfileSuccess {
 	return &LoggedInUserProfileSuccess{
-		UserId: userId,
+		UserId: xpid,
 		Payload: GameProfiles{
 			Client: client,
 			Server: server,

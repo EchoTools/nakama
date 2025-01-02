@@ -70,11 +70,11 @@ func eventLobbySessionAuthorized(ctx context.Context, logger runtime.Logger, db 
 			return fmt.Errorf("failed to load params")
 		}
 
-		loginHistory := params.LoginHistory.Load()
+		loginHistory := params.loginHistory
 
 		if ok := loginHistory.NotifyGroup(groupID); ok {
 
-			altAccounts, err := nk.AccountsGetId(ctx, loginHistory.AlternateUserIDs)
+			altAccounts, err := nk.AccountsGetId(ctx, loginHistory.SecondOrderAlternates)
 			if err != nil {
 				return fmt.Errorf("failed to get alternate accounts: %w", err)
 			}
@@ -93,7 +93,7 @@ func eventLobbySessionAuthorized(ctx context.Context, logger runtime.Logger, db 
 
 				alts = append(alts, s)
 			}
-			content := fmt.Sprintf("<@%s> detected as a possible alternate of %s", params.DiscordID, strings.Join(alts, ", "))
+			content := fmt.Sprintf("<@%s> detected as a possible alternate of %s", params.discordID, strings.Join(alts, ", "))
 			_, _ = s.(*sessionWS).evrPipeline.appBot.LogAuditMessage(ctx, groupID, content, false)
 
 			if err := loginHistory.Store(ctx, nk); err != nil {

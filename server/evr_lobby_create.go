@@ -20,7 +20,7 @@ func (p *EvrPipeline) lobbyCreate(ctx context.Context, logger *zap.Logger, sessi
 	db := p.db
 
 	// Do authorization checks related to the guild.
-	if err := p.lobbyAuthorize(ctx, session, params, params.GroupID.String()); err != nil {
+	if err := p.lobbyAuthorize(ctx, logger, session, params, params.GroupID.String()); err != nil {
 		logger.Warn("Failed to authorize create session request", zap.Error(err))
 		return MatchID{}, err
 	}
