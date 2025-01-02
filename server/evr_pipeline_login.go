@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -465,7 +464,7 @@ func (p *EvrPipeline) channelInfoRequest(ctx context.Context, logger *zap.Logger
 	key := fmt.Sprintf("channelInfo,%s", groupID.String())
 
 	// Check the cache first
-	message := p.GetCachedMessage(key)
+	message := p.MessageCacheLoad(key)
 
 	if message == nil {
 
@@ -501,7 +500,7 @@ func (p *EvrPipeline) channelInfoRequest(ctx context.Context, logger *zap.Logger
 		}
 
 		message = evr.NewSNSChannelInfoResponse(resource)
-		p.CacheMessage(key, message)
+		p.MessageCacheStore(key, message, time.Minute*3)
 	}
 
 	// send the document to the client
@@ -631,28 +630,30 @@ func (p *EvrPipeline) documentRequest(ctx context.Context, logger *zap.Logger, s
 	case "eula":
 
 		if !params.IsVR.Load() {
-
-			eulaVersion, gaVersion, err := GetEULAVersion(ctx, p.db, session.userID.String())
+			profile, err := p.profileRegistry.Load(ctx, session.userID)
 			if err != nil {
-				logger.Warn("Failed to get EULA version", zap.Error(err))
-				eulaVersion = 1
-				gaVersion = 1
+				return fmt.Errorf("failed to load game profiles: %w", err)
 			}
+
+			eulaVersion := profile.Client.LegalConsents.EulaVersion
+			gaVersion := profile.Client.LegalConsents.GameAdminVersion
+
 			document = evr.NewEULADocument(int(eulaVersion), int(gaVersion), request.Language, "https://github.com/EchoTools", "Blank EULA for NoVR clients.")
 
 			return session.SendEvrUnrequire(evr.NewDocumentSuccess(document))
 
 		}
 
-		message := p.GetCachedMessage("eula:vr:" + request.Language)
+		key := "eula:vr:" + request.Language
+		message := p.MessageCacheLoad(key)
 
 		if message == nil {
 			document, err = p.generateEULA(ctx, logger, request.Language)
 			if err != nil {
 				return fmt.Errorf("failed to get eula document: %w", err)
 			}
-
 			message = evr.NewDocumentSuccess(document)
+			p.MessageCacheStore(key, message, time.Minute*1)
 		}
 
 		return session.SendEvrUnrequire(message)
@@ -660,26 +661,6 @@ func (p *EvrPipeline) documentRequest(ctx context.Context, logger *zap.Logger, s
 	default:
 		return fmt.Errorf("unknown document: %s,%s", request.Language, request.Type)
 	}
-}
-
-func GetEULAVersion(ctx context.Context, db *sql.DB, userID string) (int, int, error) {
-	query := `
-		SELECT (s.value->'client'->'legal'->>'eula_version')::int, (s.value->'client'->'legal'->>'game_admin_version')::int FROM storage s WHERE s.collection = $1 AND s.key = $2 AND s.user_id = $3 LIMIT 1;
-	`
-	var dbEULAVersion int
-	var dbGameAdminVersion int
-	var found = true
-	if err := db.QueryRowContext(ctx, query, GameProfileStorageCollection, GameProfileStorageKey, userID).Scan(&dbEULAVersion, &dbGameAdminVersion); err != nil {
-		if err == sql.ErrNoRows {
-			found = false
-		} else {
-			return 0, 0, status.Error(codes.Internal, "failed to get EULA version")
-		}
-	}
-	if !found {
-		return 0, 0, status.Error(codes.NotFound, "EULA version not found")
-	}
-	return dbEULAVersion, dbGameAdminVersion, nil
 }
 
 func (p *EvrPipeline) generateEULA(ctx context.Context, logger *zap.Logger, language string) (evr.EULADocument, error) {

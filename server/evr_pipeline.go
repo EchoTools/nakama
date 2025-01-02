@@ -9,7 +9,6 @@ import (
 	"net"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -79,10 +78,7 @@ type EvrPipeline struct {
 	placeholderEmail string
 	linkDeviceURL    string
 
-	cacheMu sync.Mutex // Writers only
-
-	messageCache *atomic.Value // map[string]evr.Message
-
+	messageCache *MapOf[string, evr.Message]
 }
 
 type ctxDiscordBotTokenKey struct{}
@@ -130,9 +126,6 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	if err != nil {
 		logger.Fatal("Failed to create IPQS client", zap.Error(err))
 	}
-
-	messageCache := &atomic.Value{}
-	messageCache.Store(make(map[string]evr.Message))
 
 	var appBot *DiscordAppBot
 	var discordCache *DiscordCache
@@ -201,7 +194,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		placeholderEmail: config.GetRuntime().Environment["PLACEHOLDER_EMAIL_DOMAIN"],
 		linkDeviceURL:    config.GetRuntime().Environment["LINK_DEVICE_URL"],
 
-		messageCache: messageCache,
+		messageCache: &MapOf[string, evr.Message]{},
 	}
 
 	go func() {
@@ -210,20 +203,11 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
-		messageCacheTicker := time.NewTicker(3 * time.Minute)
-		defer messageCacheTicker.Stop()
-
 		for {
 			select {
 			case <-evrPipeline.ctx.Done():
 				ticker.Stop()
 				return
-
-			case <-messageCacheTicker.C:
-
-				evrPipeline.cacheMu.Lock()
-				evrPipeline.messageCache.Store(make(map[string]evr.Message))
-				evrPipeline.cacheMu.Unlock()
 
 			case <-ticker.C:
 
@@ -263,23 +247,18 @@ func (p *EvrPipeline) SetApiServer(apiServer *ApiServer) {
 
 func (p *EvrPipeline) Stop() {}
 
-func (p *EvrPipeline) CacheMessage(key string, message evr.Message) {
-	p.cacheMu.Lock()
-	defer p.cacheMu.Unlock()
-
-	newCache := make(map[string]evr.Message)
-	for k, v := range p.messageCache.Load().(map[string]evr.Message) {
-		newCache[k] = v
-	}
-	newCache[key] = message
-	p.messageCache.Store(newCache)
+func (p *EvrPipeline) MessageCacheStore(key string, message evr.Message, ttl time.Duration) {
+	p.messageCache.Store(key, message)
+	time.AfterFunc(ttl, func() {
+		p.messageCache.Delete(key)
+	})
 }
 
-func (p *EvrPipeline) GetCachedMessage(key string) evr.Message {
-	p.cacheMu.Lock()
-	defer p.cacheMu.Unlock()
-
-	return p.messageCache.Load().(map[string]evr.Message)[key]
+func (p *EvrPipeline) MessageCacheLoad(key string) evr.Message {
+	if message, ok := p.messageCache.Load(key); ok {
+		return message
+	}
+	return nil
 }
 
 func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, in evr.Message) bool {
