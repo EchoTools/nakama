@@ -334,11 +334,12 @@ func StorageReadEVRProfileByXPI(ctx context.Context, db *sql.DB, evrID evr.EvrId
 		s.user_id, s.value->>'server' 
 	FROM 
 		storage s
+	JOIN 
+		user_device ud ON s.user_id = ud.user_id
 	WHERE 
-		s.collection = $1 AND s.key = $2
-		AND 
-		s.value->'server'->>'xplatformid' = $3
-	ORDER BY s.update_time DESC LIMIT 1;`
+		s.collection = $1 
+		AND s.key = $2
+		AND ud.id = $3`
 
 	var dbUserID string
 	var dbServerProfile string

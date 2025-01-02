@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
-	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -341,7 +341,7 @@ func DeviceCacheRegexSearch(ctx context.Context, nk runtime.NakamaModule, patter
 	return histories, nil
 }
 
-func GetUserIDByDeviceID(ctx context.Context, logger *zap.Logger, db *sql.DB, deviceID string) (string, error) {
+func AccountGetDeviceID(ctx context.Context, db *sql.DB, nk runtime.NakamaModule, deviceID string) (*api.Account, error) {
 	found := true
 
 	// Look for an existing account.
@@ -352,14 +352,13 @@ func GetUserIDByDeviceID(ctx context.Context, logger *zap.Logger, db *sql.DB, de
 		if err == sql.ErrNoRows {
 			found = false
 		} else {
-			logger.Error("Error looking up user by device ID.", zap.Error(err), zap.String("deviceID", deviceID))
-			return "", status.Error(codes.Internal, "Error finding user account.")
+			return nil, status.Error(codes.Internal, "Error finding user account by device id.")
 		}
 	}
 
 	if found {
-		return dbUserID, nil
+		return nk.AccountGetId(ctx, dbUserID)
 	}
 
-	return "", status.Error(codes.NotFound, "User account not found.")
+	return nil, status.Error(codes.NotFound, "User account not found.")
 }
