@@ -268,6 +268,7 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 		"+label.lobby_type:unassigned",
 		"+label.broadcaster.regions:/(default)/",
 		fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/", Query.Escape(lobbyParams.GroupID.String())),
+		lobbyParams.CreateQueryAddon,
 		//fmt.Sprintf("+label.broadcaster.version_lock:%s", versionLock.String()),
 	}
 
