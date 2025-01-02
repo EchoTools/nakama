@@ -146,11 +146,8 @@ func TestUpdateEquippedItem(t *testing.T) {
 					},
 				},
 			},
-			UnlockedCosmetics: evr.UnlockedCosmetics{
-				Arena:  evr.ArenaUnlocks{},
-				Combat: evr.CombatUnlocks{},
-			},
-			UpdateTime: time.Now().UTC().Unix(),
+			UnlockedCosmetics: nil,
+			UpdateTime:        time.Now().UTC().Unix(),
 		},
 	}
 

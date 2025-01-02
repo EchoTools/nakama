@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"go.uber.org/atomic"
+
 	"github.com/bwmarrin/discordgo"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
@@ -105,18 +107,22 @@ func (e *EVRAccount) IsLinked() bool {
 type AccountMetadata struct {
 	account *api.Account
 
-	RandomizeDisplayName   bool              `json:"randomize_display_name"`    // Randomize the display name
-	RandomizedDisplayName  string            `json:"randomized_display_name"`   // The randomized display name
-	DisplayNameOverride    string            `json:"display_name_override"`     // The display name override
-	GlobalBanReason        string            `json:"global_ban_reason"`         // The global ban reason
-	ActiveGroupID          string            `json:"active_group_id"`           // The active group ID
-	GroupDisplayNames      map[string]string `json:"group_display_names"`       // The display names for each guild map[groupID]displayName
-	DisableAFKTimeout      bool              `json:"disable_afk_timeout"`       // Disable AFK detection
-	TargetUserID           string            `json:"target_user_id"`            // The target user ID to follow in public spaces
-	DiscordDebugMessages   bool              `json:"discord_debug_messages"`    // Enable debug messages in Discord
-	RelayMessagesToDiscord bool              `json:"relay_messages_to_discord"` // Relay messages to Discord
-	isModified             bool              // Indicates whether the account metadata has been modified
-	DiscordUser            *discordgo.User   `json:"discord_user"` // The Discord user object
+	GlobalBanReason        string                                     `json:"global_ban_reason"`         // The global ban reason
+	RandomizeDisplayName   bool                                       `json:"randomize_display_name"`    // Randomize the display name
+	RandomizedDisplayName  string                                     `json:"randomized_display_name"`   // The randomized display name
+	DisplayNameOverride    string                                     `json:"display_name_override"`     // The display name override
+	GroupDisplayNames      map[string]string                          `json:"group_display_names"`       // The display names for each guild map[groupID]displayName
+	ActiveGroupID          string                                     `json:"active_group_id"`           // The active group ID
+	DiscordDebugMessages   bool                                       `json:"discord_debug_messages"`    // Enable debug messages in Discord
+	RelayMessagesToDiscord bool                                       `json:"relay_messages_to_discord"` // Relay messages to Discord
+	TeamName               *atomic.String                             `json:"team_name"`                 // The team name
+	DisableAFKTimeout      bool                                       `json:"disable_afk_timeout"`       // Disable AFK detection
+	EnableAllCosmetics     bool                                       `json:"enable_all_cosmetics"`      // Enable all cosmetics
+	LoadoutCosmetics       *atomic.Pointer[AccountCosmetics]          `json:"cosmetic_loadout"`          // The equipped cosmetics
+	CombatLoadout          *atomic.Pointer[CombatLoadout]             `json:"combat_loadout"`            // The combat loadout
+	MutedPlayers           *atomic.Value                              `json:"muted_players"`             // The muted players
+	GhostedPlayers         *atomic.Value                              `json:"ghosted_players"`           // The ghosted players
+	GameSettings           *atomic.Pointer[evr.RemoteLogGameSettings] `json:"game_settings"`             // The game settings
 }
 
 func (a *AccountMetadata) ID() string {
@@ -160,7 +166,6 @@ func (a *AccountMetadata) SetActiveGroupID(id uuid.UUID) {
 		return
 	}
 	a.ActiveGroupID = id.String()
-	a.isModified = true
 }
 
 func (a *AccountMetadata) GetDisplayName(groupID string) string {
@@ -213,10 +218,130 @@ func (a *AccountMetadata) MarshalMap() map[string]interface{} {
 	return m
 }
 
-func (a *AccountMetadata) NeedsUpdate() bool {
-	return a.isModified
+func (a *AccountMetadata) GetMuted() []evr.EvrId {
+	if a.MutedPlayers == nil {
+		return make([]evr.EvrId, 0)
+	}
+	return a.MutedPlayers.Load().([]evr.EvrId)
 }
 
+func (a *AccountMetadata) SetMuted(muted []evr.EvrId) {
+	if a.MutedPlayers == nil {
+		a.MutedPlayers = &atomic.Value{}
+	}
+	a.MutedPlayers.Store(muted)
+}
+
+func (a *AccountMetadata) GetGhosted() []evr.EvrId {
+	if a.GhostedPlayers == nil {
+		return make([]evr.EvrId, 0)
+	}
+	return a.GhostedPlayers.Load().([]evr.EvrId)
+}
+
+func (a *AccountMetadata) SetGhosted(ghosted []evr.EvrId) {
+	if a.GhostedPlayers == nil {
+		a.GhostedPlayers = &atomic.Value{}
+	}
+	a.GhostedPlayers.Store(ghosted)
+}
+
+func (a *AccountMetadata) SetTeamName(name string) {
+	if a.TeamName == nil {
+		a.TeamName = atomic.NewString(name)
+	}
+	a.TeamName.Store(name)
+}
+
+func (a *AccountMetadata) GetTeamName() string {
+	if a.TeamName == nil {
+		return ""
+	}
+	return a.TeamName.Load()
+}
+
+func (a *AccountMetadata) GetCombatLoadout() CombatLoadout {
+	if a.CombatLoadout == nil {
+		return CombatLoadout{}
+	}
+	if p := a.CombatLoadout.Load(); p != nil {
+		return *p
+	}
+	return CombatLoadout{}
+}
+
+func (a *AccountMetadata) SetCombatLoadout(c CombatLoadout) {
+	if a.CombatLoadout == nil {
+		a.CombatLoadout = atomic.NewPointer(&c)
+	}
+	a.CombatLoadout.Store(&c)
+}
+
+func (a *AccountMetadata) GetEquippedCosmetics() AccountCosmetics {
+	var ptr *AccountCosmetics
+	if a.LoadoutCosmetics != nil {
+		if p := a.LoadoutCosmetics.Load(); p != nil {
+			ptr = p
+		}
+	}
+	if ptr == nil {
+		return AccountCosmetics{
+			JerseyNumber: 0,
+			Loadout: evr.CosmeticLoadout{
+				Emote:          "emote_blink_smiley_a",
+				Decal:          "decal_default",
+				Tint:           "tint_neutral_a_default",
+				TintAlignmentA: "tint_blue_a_default",
+				TintAlignmentB: "tint_orange_a_default",
+				Pattern:        "pattern_default",
+				PIP:            "rwd_decalback_default",
+				Chassis:        "rwd_chassis_body_s11_a",
+				Bracer:         "rwd_bracer_default",
+				Booster:        "rwd_booster_default",
+				Title:          "rwd_title_title_default",
+				Tag:            "rwd_tag_s1_a_secondary",
+				Banner:         "rwd_banner_s1_default",
+				Medal:          "rwd_medal_default",
+				GoalFX:         "rwd_goal_fx_default",
+				SecondEmote:    "emote_blink_smiley_a",
+				Emissive:       "emissive_default",
+				TintBody:       "tint_neutral_a_default",
+				PatternBody:    "pattern_default",
+				DecalBody:      "decal_default",
+			},
+		}
+	}
+
+	return *a.LoadoutCosmetics.Load()
+}
+
+func (a *AccountMetadata) SetEquippedCosmetics(c AccountCosmetics) {
+	if a.LoadoutCosmetics == nil {
+		a.LoadoutCosmetics = atomic.NewPointer(&c)
+	}
+	a.LoadoutCosmetics.Store(&c)
+}
+
+func (a *AccountMetadata) GetGameSettings() *evr.RemoteLogGameSettings {
+	if a.GameSettings == nil {
+		return nil
+	}
+	return a.GameSettings.Load()
+}
+
+func (a *AccountMetadata) SetGameSettings(settings evr.RemoteLogGameSettings) {
+	if a.GameSettings == nil {
+		a.GameSettings = atomic.NewPointer(&settings)
+	}
+	a.GameSettings.Store(&settings)
+}
+
+type CombatLoadout struct {
+	CombatWeapon       string `json:"combat_weapon"`
+	CombatGrenade      string `json:"combat_grenade"`
+	CombatDominantHand uint8  `json:"combat_dominant_hand"`
+	CombatAbility      string `json:"combat_ability"`
+}
 type AccountCosmetics struct {
 	JerseyNumber int64               `json:"number"`           // The loadout number (jersey number)
 	Loadout      evr.CosmeticLoadout `json:"cosmetic_loadout"` // The loadout

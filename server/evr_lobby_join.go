@@ -28,7 +28,7 @@ func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session
 	}
 
 	// Do authorization checks related to the lobby's guild.
-	if err := p.lobbyAuthorize(ctx, session, params, label.GetGroupID().String()); err != nil {
+	if err := p.lobbyAuthorize(ctx, logger, session, params, label.GetGroupID().String()); err != nil {
 		return err
 	}
 

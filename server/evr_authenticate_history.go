@@ -62,28 +62,28 @@ func (h *LoginHistoryEntry) Items() []string {
 }
 
 type LoginHistory struct {
-	History          map[string]*LoginHistoryEntry `json:"history"` // map[deviceID]DeviceHistoryEntry
-	Cache            []string                      `json:"cache"`   // list of IP addresses, EvrID's, HMD Serial Numbers, and System Data
-	XPIs             map[string]time.Time          `json:"xpis"`    // list of XPIs
-	ClientIPs        map[string]time.Time          `json:"client_ips"`
-	AuthorizedIPs    map[string]time.Time          `json:"authorized_ips"`
-	AlternateUserIDs []string                      `json:"alternates"`
-	AlternateMap     map[string][]string           `json:"alternate_map"`   // map of alternate user IDs and what they have in common
-	NotifiedGroupIDs map[string]time.Time          `json:"notified_groups"` // list of groups that have been notified of this alternate login
-	userID           string                        // user ID
-	version          string                        // storage record version
+	History               map[string]*LoginHistoryEntry      `json:"history"` // map[deviceID]DeviceHistoryEntry
+	Cache                 []string                           `json:"cache"`   // list of IP addresses, EvrID's, HMD Serial Numbers, and System Data
+	XPIs                  map[string]time.Time               `json:"xpis"`    // list of XPIs
+	ClientIPs             map[string]time.Time               `json:"client_ips"`
+	AuthorizedIPs         map[string]time.Time               `json:"authorized_ips"`
+	SecondOrderAlternates []string                           `json:"second_order"`
+	AlternateMap          map[string][]*AlternateSearchMatch `json:"alternate_matches"` // map of alternate user IDs and what they have in common
+	NotifiedGroupIDs      map[string]time.Time               `json:"notified_groups"`   // list of groups that have been notified of this alternate login
+	userID                string                             // user ID
+	version               string                             // storage record version
 }
 
 func NewLoginHistory() *LoginHistory {
 	return &LoginHistory{
-		History:          make(map[string]*LoginHistoryEntry),
-		Cache:            make([]string, 0),
-		XPIs:             make(map[string]time.Time),
-		ClientIPs:        make(map[string]time.Time),
-		AuthorizedIPs:    make(map[string]time.Time),
-		AlternateUserIDs: make([]string, 0),
-		AlternateMap:     make(map[string][]string),
-		NotifiedGroupIDs: make(map[string]time.Time),
+		History:               make(map[string]*LoginHistoryEntry),
+		Cache:                 make([]string, 0),
+		XPIs:                  make(map[string]time.Time),
+		ClientIPs:             make(map[string]time.Time),
+		AuthorizedIPs:         make(map[string]time.Time),
+		SecondOrderAlternates: make([]string, 0),
+		AlternateMap:          make(map[string][]*AlternateSearchMatch),
+		NotifiedGroupIDs:      make(map[string]time.Time),
 	}
 }
 
@@ -146,26 +146,22 @@ func (h *LoginHistory) UpdateAlternates(ctx context.Context, nk runtime.NakamaMo
 		return fmt.Errorf("error searching for alternate logins: %w", err)
 	}
 
-	h.AlternateUserIDs = make([]string, 0)
-	h.AlternateMap = make(map[string][]string)
+	h.AlternateMap = make(map[string][]*AlternateSearchMatch, len(matches))
+	h.SecondOrderAlternates = make([]string, 0)
 
 	for _, m := range matches {
-
-		h.AlternateUserIDs = append(h.AlternateUserIDs, m.OtherUserID)
-		h.AlternateMap[m.OtherUserID] = m.Items
-
-		otherHistory, err := LoginHistoryLoad(ctx, nk, m.OtherUserID)
-		if err != nil {
-			return fmt.Errorf("error loading alternate login history: %w", err)
+		if _, found := h.AlternateMap[m.otherHistory.userID]; !found {
+			// add second-level alternates
+			for id := range m.otherHistory.AlternateMap {
+				h.SecondOrderAlternates = append(h.SecondOrderAlternates, id)
+			}
 		}
+		h.AlternateMap[m.otherHistory.userID] = append(h.AlternateMap[m.otherHistory.userID], m)
 
-		for id := range otherHistory.AlternateMap {
-			h.AlternateUserIDs = append(h.AlternateUserIDs, id)
-		}
 	}
 
-	slices.Sort(h.AlternateUserIDs)
-	h.AlternateUserIDs = slices.Compact(h.AlternateUserIDs)
+	slices.Sort(h.SecondOrderAlternates)
+	h.SecondOrderAlternates = slices.Compact(h.SecondOrderAlternates)
 	return nil
 }
 

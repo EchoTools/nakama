@@ -138,7 +138,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 
 		case *evr.RemoteLogUserDisconnected:
 
-			if msg.GameInfoIsPrivate || !msg.GameInfoIsArena {
+			if !msg.GameInfoIsArena || msg.GameInfoIsPrivate {
 				// Don't process disconnects for private games, or non-arena games.
 				continue
 			}
@@ -166,12 +166,6 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				continue
 			}
 
-			profile, err := p.profileRegistry.Load(ctx, uuid.FromStringOrNil(userID))
-			if err != nil {
-				logger.Error("Failed to load player's profile")
-				continue
-			}
-
 			var displayName string
 			for _, player := range label.Players {
 				if player.EvrID.String() == msg.PlayerEvrID {
@@ -180,30 +174,24 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				}
 			}
 
-			eq := profile.GetEarlyQuitStatistics()
-			eq.IncrementEarlyQuits()
-
-			if stats := profile.Server.Statistics; stats != nil {
-				eq.ApplyEarlyQuitPenalty(logger, userID, label, stats, 0.01)
-
-				for _, periodicty := range []string{"alltime", "daily", "weekly"} {
-					meta := LeaderboardMeta{
-						mode:        evr.ModeArenaPublic,
-						name:        "EarlyQuits",
-						operator:    "add",
-						periodicity: periodicty,
-					}
-
-					p.leaderboardRegistry.LeaderboardTabletStatWrite(context.Background(), meta, userID, displayName, 1.0)
+			for _, periodicty := range []string{"alltime", "daily", "weekly"} {
+				meta := LeaderboardMeta{
+					mode:        evr.ModeArenaPublic,
+					name:        "EarlyQuits",
+					operator:    "add",
+					periodicity: periodicty,
 				}
+
+				p.leaderboardRegistry.LeaderboardTabletStatWrite(context.Background(), meta, userID, displayName, 1.0)
 			}
 
-			profile.SetEarlyQuitStatistics(*eq)
-
-			err = p.profileRegistry.SaveAndCache(ctx, uuid.FromStringOrNil(userID), profile)
-			if err != nil {
-				logger.Error("Failed to save player's profile")
+			params, ok := LoadParams(session.Context())
+			if !ok {
+				logger.Error("Failed to load params")
+				continue
 			}
+			params.isEarlyQuitter.Store(true)
+			p.runtimeModule.AccountUpdateId(ctx, session.userID.String(), "", params.accountMetadata.MarshalMap(), "", "", "", "", "")
 
 		case *evr.RemoteLogGoal:
 
@@ -227,11 +215,13 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 
 		case *evr.RemoteLogGameSettings:
 
-			profile, err := p.profileRegistry.Load(ctx, session.userID)
-			if err != nil {
-				return fmt.Errorf("failed to load player's profile: %w", err)
+			params, ok := LoadParams(session.Context())
+			if !ok {
+				logger.Error("Failed to load params")
+				continue
 			}
-			profile.SetGameSettings(*msg)
+			params.accountMetadata.SetGameSettings(*msg)
+			p.runtimeModule.AccountUpdateId(ctx, session.userID.String(), "", params.accountMetadata.MarshalMap(), "", "", "", "", "")
 
 		case *evr.RemoteLogCustomizationMetricsPayload:
 
@@ -247,19 +237,20 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				logger.Error("Equipped customization is empty")
 				continue
 			}
-			profile, err := p.profileRegistry.Load(ctx, session.userID)
-			if err != nil {
-				return fmt.Errorf("failed to load player's profile: %w", err)
+
+			params, ok := LoadParams(session.Context())
+			if !ok {
+				logger.Error("Failed to load params")
+				continue
 			}
-			profile.SetEvrID(evrID)
-			if err := p.profileRegistry.UpdateEquippedItem(profile, category, name); err != nil {
+			equipped := params.accountMetadata.GetEquippedCosmetics()
+
+			// Update the equipped item in the profile.
+			if equipped.Loadout, err = LoadoutEquipItem(equipped.Loadout, category, name); err != nil {
 				return fmt.Errorf("failed to update equipped item: %w", err)
 			}
-
-			err = p.profileRegistry.SaveAndCache(ctx, session.userID, profile)
-			if err != nil {
-				return fmt.Errorf("failed to save player's profile: %w", err)
-			}
+			params.accountMetadata.SetEquippedCosmetics(equipped)
+			p.runtimeModule.AccountUpdateId(ctx, session.userID.String(), "", params.accountMetadata.MarshalMap(), "", "", "", "", "")
 
 		case *evr.RemoteLogRepairMatrix:
 
@@ -308,11 +299,11 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				ServerID:         label.Broadcaster.SessionID,
 				MatchOperator:    label.Broadcaster.OperatorID,
 				MatchEndpoint:    label.Broadcaster.Endpoint.String(),
-				ClientIsPCVR:     params.IsPCVR.Load(),
+				ClientIsPCVR:     params.isPCVR,
 				ClientUserID:     session.userID.String(),
 				ClientUsername:   session.Username(),
-				ClientDiscordID:  params.DiscordID,
-				ClientEvrID:      params.XPID,
+				ClientDiscordID:  params.discordID,
+				ClientEvrID:      params.xpID,
 				RemoteLogMessage: string(msgData),
 			}
 			// Check if the match's group wants audit messages
@@ -336,7 +327,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				"ext_ip":            label.Broadcaster.Endpoint.GetExternalIP(),
 				"port":              strconv.Itoa(int(label.Broadcaster.Endpoint.Port)),
 				"mode":              label.Mode.String(),
-				"is_pcvr":           strconv.FormatBool(params.IsPCVR.Load()),
+				"is_pcvr":           strconv.FormatBool(params.isPCVR),
 			}
 
 			p.runtimeModule.MetricsCounterAdd("remotelog_error_server_connection_failed_count", tags, 1)

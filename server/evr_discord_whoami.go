@@ -200,7 +200,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 			if session := d.pipeline.sessionRegistry.Get(uuid.FromStringOrNil(presences[0].GetSessionId())); session != nil {
 				params, ok := LoadParams(session.Context())
 				if ok {
-					whoami.LastMatchmakingError = params.LastMatchmakingError.Load()
+					whoami.LastMatchmakingError = params.lastMatchmakingError.Load()
 				}
 			}
 		}
@@ -223,7 +223,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	}
 
 	if includeSystem {
-		for _, altUserID := range loginHistory.AlternateUserIDs {
+		for _, altUserID := range loginHistory.SecondOrderAlternates {
 			altAccount, err := nk.AccountGetId(ctx, altUserID)
 			if err != nil {
 				return fmt.Errorf("failed to get account by ID: %w", err)

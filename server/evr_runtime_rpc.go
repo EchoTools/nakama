@@ -1405,37 +1405,30 @@ func PlayerStatisticsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 		if _, ok := stats[modestr]; !ok {
 			stats[modestr] = make(map[string]evr.MatchStatistic)
 			stats[modestr]["RatingMu"] = evr.MatchStatistic{
-				Operation: "rep",
-				Value:     25.0,
-				Count:     1,
+				Operator: "rep",
+				Value:    25.0,
+				Count:    1,
 			}
 
 			stats[modestr]["RatingSigma"] = evr.MatchStatistic{
-				Operation: "rep",
-				Value:     8.333,
-				Count:     1,
+				Operator: "rep",
+				Value:    8.333,
+				Count:    1,
 			}
 
 			if mode == evr.ModeArenaPublic {
 				rankPercentile := 0.0
-				globalSettings, err := LoadMatchmakingSettings(ctx, nk, userID)
-				if err != nil {
+				if userSettings, err := LoadMatchmakingSettings(ctx, nk, userID); err != nil {
 					return "", err
+				} else if userSettings.RankPercentile > 0 {
+					rankPercentile = userSettings.RankPercentile
+				} else {
+					rankPercentile = serviceSettings.Load().Matchmaking.RankPercentile.Default
 				}
-				userSettings, err := LoadMatchmakingSettings(ctx, nk, userID)
-				if err != nil {
-					return "", err
-				}
-
-				rankPercentile, err = CalculateSmoothedPlayerRankPercentile(ctx, zap.NewNop(), nk, userID, mode, &globalSettings, &userSettings)
-				if err != nil {
-					return "", err
-				}
-
 				stats[modestr]["ArenaRankPercentile"] = evr.MatchStatistic{
-					Operation: "rep",
-					Value:     rankPercentile,
-					Count:     1,
+					Operator: "rep",
+					Value:    rankPercentile,
+					Count:    1,
 				}
 			}
 		}
@@ -1448,15 +1441,15 @@ func PlayerStatisticsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 		if r, ok := ratings[gid]; ok {
 			if r, ok := r[mode]; ok {
 				stats[modestr]["RatingMu"] = evr.MatchStatistic{
-					Operation: "rep",
-					Value:     float64(r.Mu),
-					Count:     1,
+					Operator: "rep",
+					Value:    float64(r.Mu),
+					Count:    1,
 				}
 
 				stats[modestr]["RatingSigma"] = evr.MatchStatistic{
-					Operation: "rep",
-					Value:     float64(r.Sigma),
-					Count:     1,
+					Operator: "rep",
+					Value:    float64(r.Sigma),
+					Count:    1,
 				}
 			}
 		}
@@ -1466,8 +1459,8 @@ func PlayerStatisticsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 		for m, stat := range mode {
 			if stat.Count > 0 {
 				stats[g][m] = evr.MatchStatistic{
-					Operation: stat.Operation,
-					Value:     stat.Value,
+					Operator: stat.Operator,
+					Value:    stat.Value,
 				}
 			}
 		}

@@ -1351,18 +1351,21 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return errors.New("no user ID")
 			}
 			// Get the user's profile
-			uid := uuid.FromStringOrNil(userID)
-			profile, err := d.profileRegistry.Load(ctx, uid)
+
+			md, err := GetAccountMetadata(ctx, nk, userID)
 			if err != nil {
-				return fmt.Errorf("failed to load profile: %w", err)
+				return fmt.Errorf("failed to get account metadata: %w", err)
 			}
 
 			// Update the jersey number
-			profile.SetJerseyNumber(number)
+
+			loadout := md.LoadoutCosmetics.Load()
+			loadout.JerseyNumber = int64(number)
+			md.LoadoutCosmetics.Store(loadout)
 
 			// Save the profile
-			if err := d.profileRegistry.SaveAndCache(ctx, uid, profile); err != nil {
-				return fmt.Errorf("failed to save profile: %w", err)
+			if err := nk.AccountUpdateId(ctx, userID, "", md.MarshalMap(), "", "", "", "", ""); err != nil {
+				return fmt.Errorf("failed to update account metadata: %w", err)
 			}
 
 			// Send the response
@@ -1625,26 +1628,12 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return err
 			}
 
-			userID := uuid.FromStringOrNil(userIDStr)
-
-			profile, err := d.profileRegistry.Load(ctx, userID)
-			if err != nil {
-				return err
-			}
-
-			profile.SetChannel(evr.GUID(uuid.FromStringOrNil(groupID)))
-
-			if err = d.profileRegistry.SaveAndCache(ctx, userID, profile); err != nil {
-				return err
-			}
-
 			guild, err := s.Guild(i.GuildID)
 			if err != nil {
 				logger.Error("Failed to get guild", zap.Error(err))
 				return err
 			}
 
-			d.profileRegistry.SaveAndCache(ctx, userID, profile)
 			return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{

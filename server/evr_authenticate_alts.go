@@ -11,17 +11,16 @@ import (
 )
 
 type AlternateSearchMatch struct {
-	EntryUserID string
-	OtherUserID string
-	Entry       *LoginHistoryEntry
-	Other       *LoginHistoryEntry
-	Items       []string
+	otherHistory *LoginHistory
+	sourceEntry  *LoginHistoryEntry
+	MatchEntry   *LoginHistoryEntry `json:"entry"`
+	Items        []string           `json:"items"`
 }
 
-func NewAlternateSearchMatch(entryUserID, otherUserID string, entry, other *LoginHistoryEntry) *AlternateSearchMatch {
+func NewAlternateSearchMatch(source, match *LoginHistoryEntry, history *LoginHistory) *AlternateSearchMatch {
 	items := make([]string, 0)
-	for _, item := range entry.Items() {
-		for _, otherItem := range other.Items() {
+	for _, item := range source.Items() {
+		for _, otherItem := range match.Items() {
 			if item == otherItem {
 				items = append(items, item)
 			}
@@ -29,11 +28,10 @@ func NewAlternateSearchMatch(entryUserID, otherUserID string, entry, other *Logi
 	}
 
 	return &AlternateSearchMatch{
-		EntryUserID: entryUserID,
-		OtherUserID: otherUserID,
-		Entry:       entry,
-		Other:       other,
-		Items:       items,
+		sourceEntry:  source,
+		MatchEntry:   match,
+		Items:        items,
+		otherHistory: history,
 	}
 }
 
@@ -42,19 +40,19 @@ func (m *AlternateSearchMatch) IsMatch() bool {
 }
 
 func (m *AlternateSearchMatch) IsXPIMatch() bool {
-	return m.Entry.XPID == m.Entry.XPID
+	return m.sourceEntry.XPID == m.MatchEntry.XPID
 }
 
 func (m *AlternateSearchMatch) IsHMDSerialNumberMatch() bool {
-	return m.Entry.LoginData.HMDSerialNumber == m.Entry.LoginData.HMDSerialNumber
+	return m.sourceEntry.LoginData.HMDSerialNumber == m.MatchEntry.LoginData.HMDSerialNumber
 }
 
 func (m *AlternateSearchMatch) IsClientIPMatch() bool {
-	return m.Entry.ClientIP == m.Other.ClientIP
+	return m.sourceEntry.ClientIP == m.MatchEntry.ClientIP
 }
 
 func (m *AlternateSearchMatch) IsSystemProfileMatch() bool {
-	return m.Entry.SystemProfile() == m.Other.SystemProfile()
+	return m.sourceEntry.SystemProfile() == m.MatchEntry.SystemProfile()
 }
 
 func (m *AlternateSearchMatch) Matches() (xpi bool, hmdSerialNumber bool, clientIP bool, systemProfile bool) {
@@ -121,7 +119,7 @@ func LoginAlternateSearch(ctx context.Context, nk runtime.NakamaModule, loginHis
 
 			for _, e := range loginHistory.History {
 				for _, o := range otherHistory.History {
-					m := NewAlternateSearchMatch(loginHistory.userID, obj.UserId, e, o)
+					m := NewAlternateSearchMatch(e, o, &otherHistory)
 					if m.IsMatch() {
 						matches = append(matches, m)
 					}
