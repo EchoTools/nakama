@@ -206,21 +206,8 @@ func createCoreGroups(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 
 // Register Indexes for the login service
 func RegisterIndexes(initializer runtime.Initializer) error {
-	// XPI collision detection
-	if err := initializer.RegisterStorageIndex(
-		XPIStorageIndex,
-		GameProfileStorageCollection,
-		GameProfileStorageKey,
-		[]string{"server.xplatformid"},
-		nil,
-		100000,
-		false,
-	); err != nil {
-		return err
-	}
 
 	// Register the DisplayName index for avoiding name collisions
-
 	if err := initializer.RegisterStorageIndex(
 		DisplayNameHistoryCacheIndex,
 		DisplayNameCollection,
@@ -273,7 +260,7 @@ func RegisterIndexes(initializer runtime.Initializer) error {
 		LoginHistoryCacheIndex,
 		LoginStorageCollection,
 		LoginHistoryStorageKey,
-		[]string{"cache", "xpis", "client_ips", "alternates"},
+		[]string{"cache", "xpis", "client_ips", "second_order", "alternate_matches"},
 		nil,
 		1000000,
 		false,

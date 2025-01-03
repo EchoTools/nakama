@@ -339,7 +339,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		Node:                   node,
 		UserID:                 session.userID,
 		SessionID:              session.id,
-		DiscordID:              sessionParams.discordID,
+		DiscordID:              sessionParams.DiscordID(),
 		CurrentMatchID:         currentMatchID,
 		VersionLock:            versionLock,
 		AppID:                  appID,

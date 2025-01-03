@@ -1,12 +1,15 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"slices"
 
 	"github.com/bits-and-blooms/bitset"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
+	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/samber/lo"
 )
 
@@ -383,4 +386,45 @@ func (m *GuildGroupMembership) asBitSet() *bitset.BitSet {
 		b.Set(8)
 	}
 	return b
+}
+
+func GuildGroupGetID(ctx context.Context, nk runtime.NakamaModule, groupID string) (*GuildGroup, error) {
+	g, err := nk.GroupsGetId(ctx, []string{groupID})
+	if err != nil {
+		return nil, fmt.Errorf("error getting group: %w", err)
+	}
+	if g == nil {
+		return nil, fmt.Errorf("group not found")
+	}
+	return NewGuildGroup(g[0])
+}
+
+func GuildUserGroupsList(ctx context.Context, nk runtime.NakamaModule, userID string) (map[string]*GuildGroup, error) {
+	guildGroups := make(map[string]*GuildGroup, 0)
+	cursor := ""
+	for {
+		// Fetch the groups using the provided userId
+		groups, _, err := nk.UserGroupsList(ctx, userID, 100, nil, cursor)
+		if err != nil {
+			return nil, fmt.Errorf("error getting user groups: %w", err)
+		}
+		for _, ug := range groups {
+			if ug.State.Value > int32(api.UserGroupList_UserGroup_MEMBER) {
+				continue
+			}
+			switch ug.Group.GetLangTag() {
+			case "guild":
+				gg, err := NewGuildGroup(ug.Group)
+				if err != nil {
+					return nil, fmt.Errorf("error creating guild group: %w", err)
+				}
+				guildGroups[ug.Group.GetId()] = gg
+
+			}
+		}
+		if cursor == "" {
+			break
+		}
+	}
+	return guildGroups, nil
 }

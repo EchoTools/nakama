@@ -18,6 +18,11 @@ import (
 	"github.com/samber/lo"
 )
 
+const (
+	GameProfileStorageCollection = "GameProfiles"
+	GameProfileStorageKey        = "gameProfile"
+)
+
 var unlocksByItemName map[string]string
 
 func init() {
@@ -193,14 +198,14 @@ func NewUserServerProfile(ctx context.Context, db *sql.DB, account *api.Account,
 	}, nil
 }
 
-func NewClientProfile(ctx context.Context, db *sql.DB, nk runtime.NakamaModule, params *SessionParameters) (*evr.ClientProfile, error) {
+func NewClientProfile(ctx context.Context, db *sql.DB, nk runtime.NakamaModule, metadata *AccountMetadata, xpID evr.EvrId) (*evr.ClientProfile, error) {
 	// Load friends to get blocked (ghosted) players
 	muted := make([]evr.EvrId, 0)
 	ghosted := make([]evr.EvrId, 0)
-	if m := params.accountMetadata.GetMuted(); len(m) > 0 {
+	if m := metadata.GetMuted(); len(m) > 0 {
 		muted = append(muted, m...)
 	}
-	if g := params.accountMetadata.GetGhosted(); len(g) > 0 {
+	if g := metadata.GetGhosted(); len(g) > 0 {
 		ghosted = append(ghosted, g...)
 	}
 
@@ -246,7 +251,7 @@ func NewClientProfile(ctx context.Context, db *sql.DB, nk runtime.NakamaModule, 
 		Social: evr.ClientSocial{
 			CommunityValuesVersion: 1,
 			SetupVersion:           1,
-			Channel:                evr.GUID(params.accountMetadata.GetActiveGroupID()),
+			Channel:                evr.GUID(metadata.GetActiveGroupID()),
 		},
 		NewUnlocks: []int64{}, // This could pull from the wallet ledger
 	}, nil
@@ -428,19 +433,21 @@ func (r *ProfileCache) ValidateArenaUnlockByName(i interface{}, itemName string)
 func (r *ProfileCache) retrieveStarterLoadout(ctx context.Context) (evr.CosmeticLoadout, error) {
 	defaultLoadout := evr.DefaultCosmeticLoadout()
 	// Retrieve a random starter loadout from storage
-	ids, _, err := r.nk.StorageList(ctx, uuid.Nil.String(), uuid.Nil.String(), CosmeticLoadoutCollection, 100, "")
+	objs, _, err := r.nk.StorageList(ctx, uuid.Nil.String(), uuid.Nil.String(), CosmeticLoadoutCollection, 100, "")
 	if err != nil {
 		return defaultLoadout, fmt.Errorf("failed to list objects: %w", err)
 	}
-	if len(ids) == 0 {
+	if len(objs) == 0 {
 		return defaultLoadout, nil
 	}
-	// Pick a random id
-	obj := ids[rand.Intn(len(ids))]
-	loadout := StoredCosmeticLoadout{}
-	if err = json.Unmarshal([]byte(obj.Value), &loadout); err != nil {
+
+	var loadouts []StoredCosmeticLoadout
+	if err = json.Unmarshal([]byte(objs[0].Value), &loadouts); err != nil {
 		return defaultLoadout, fmt.Errorf("error unmarshalling client profile: %w", err)
 	}
+
+	// Pick a random id
+	loadout := loadouts[rand.Intn(len(loadouts))]
 	return loadout.Loadout, nil
 }
 

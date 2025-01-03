@@ -211,7 +211,7 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 				EvrID:          sessionParams.xpID,
 				PartyID:        MatchIDFromStringOrNil(entry.Entry.GetPartyId()).UUID,
 				RoleAlignment:  teamIndex,
-				DiscordID:      sessionParams.discordID,
+				DiscordID:      sessionParams.DiscordID(),
 				ClientIP:       session.ClientIP(),
 				ClientPort:     session.ClientPort(),
 				IsPCVR:         sessionParams.isPCVR,

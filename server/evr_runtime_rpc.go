@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"net/http"
+	"net/url"
 	"slices"
 	"sort"
 	"strconv"
@@ -344,15 +346,15 @@ func KickPlayerRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk ru
 		return "", runtime.NewError("authentication required", StatusUnauthenticated)
 	}
 
-	memberships, err := GetGuildGroupMemberships(ctx, nk, callerID)
+	guildGroups, err := GuildUserGroupsList(ctx, nk, callerID)
 	if err != nil {
 		return "", err
 	}
 
 	// Get a slice of groupIDs that this user is a moderator for
 	var groupIDs []string
-	for groupID, m := range memberships {
-		if m.IsModerator {
+	for groupID, g := range guildGroups {
+		if g.IsModerator(callerID) {
 			groupIDs = append(groupIDs, groupID)
 		}
 	}
@@ -1138,15 +1140,15 @@ func AuthenticatePasswordRPC(ctx context.Context, logger runtime.Logger, db *sql
 		}
 		tokenID = uuid.Must(uuid.NewV4()).String()
 
-		memberships, err := GetGuildGroupMemberships(ctx, nk, userID)
+		guildGroups, err := GuildUserGroupsList(ctx, nk, userID)
 		if err != nil {
 			return "", err
 		}
 
 		varMemberships := make(map[string]uint64)
 
-		for id, membership := range memberships {
-			varMemberships[id] = membership.ToUint64()
+		for id, gg := range guildGroups {
+			varMemberships[id] = gg.PermissionsUser(userID).ToUint64()
 		}
 
 		data, _ := json.Marshal(varMemberships)

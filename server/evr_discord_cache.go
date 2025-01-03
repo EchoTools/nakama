@@ -91,7 +91,7 @@ func (c *DiscordCache) Start() {
 					continue
 				}
 
-				queueCooldowns[entry] = time.Now().Add(time.Second * 10)
+				queueCooldowns[entry] = time.Now().Add(time.Second * 30)
 
 				if err := c.syncMember(c.ctx, logger, entry.DiscordID, entry.GuildID); err != nil {
 					logger.Warn("Error syncing guild group member", zap.Error(err))
@@ -269,7 +269,7 @@ func (c *DiscordCache) syncMember(ctx context.Context, logger *zap.Logger, disco
 		return fmt.Errorf("error building evr account: %w", err)
 	}
 
-	groups, err := UserGuildGroupsList(ctx, c.nk, c.DiscordIDToUserID(discordID))
+	groups, err := GuildUserGroupsList(ctx, c.nk, c.DiscordIDToUserID(discordID))
 	if err != nil {
 		return fmt.Errorf("error getting user guild groups: %w", err)
 	}
@@ -281,7 +281,8 @@ func (c *DiscordCache) syncMember(ctx context.Context, logger *zap.Logger, disco
 			return fmt.Errorf("error joining group: %w", err)
 		}
 
-		groups, err = UserGuildGroupsList(ctx, c.nk, c.DiscordIDToUserID(discordID))
+		// Get the group data again
+		groups, err = GuildUserGroupsList(ctx, c.nk, c.DiscordIDToUserID(discordID))
 		if err != nil {
 			return fmt.Errorf("error getting user guild groups: %w", err)
 		}

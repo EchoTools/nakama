@@ -7,15 +7,27 @@ import (
 	"github.com/gofrs/uuid/v5"
 )
 
+type BuildNumber int64
+
+const (
+	StandaloneBuild BuildNumber = 630783
+	PCVRBuild       BuildNumber = 631547
+)
+
+var KnownBuilds = []BuildNumber{
+	StandaloneBuild,
+	PCVRBuild,
+}
+
 // LoginRequest represents a message from client to server requesting for a user sign-in.
 type LoginRequest struct {
 	PreviousSessionID uuid.UUID // This is the old session id, if it had one.
 	XPID              EvrId
-	LoginData         LoginProfile
+	Payload           LoginProfile
 }
 
 func (lr LoginRequest) String() string {
-	return fmt.Sprintf("%T(Session=%s, XPID=%s, HMDSerialNumber=%s, HeadsetType=%s)", lr, lr.PreviousSessionID, lr.XPID, lr.LoginData.HMDSerialNumber, lr.LoginData.SystemInfo.HeadsetType)
+	return fmt.Sprintf("%T(Session=%s, XPID=%s, HMDSerialNumber=%s, HeadsetType=%s)", lr, lr.PreviousSessionID, lr.XPID, lr.Payload.HMDSerialNumber, lr.Payload.SystemInfo.HeadsetType)
 }
 
 func (m *LoginRequest) Stream(s *EasyStream) error {
@@ -23,7 +35,7 @@ func (m *LoginRequest) Stream(s *EasyStream) error {
 		func() error { return s.StreamGUID(&m.PreviousSessionID) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.XPID.PlatformCode) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.XPID.AccountId) },
-		func() error { return s.StreamJson(&m.LoginData, true, NoCompression) },
+		func() error { return s.StreamJson(&m.Payload, true, NoCompression) },
 	})
 }
 
@@ -31,7 +43,7 @@ func NewLoginRequest(session uuid.UUID, userId EvrId, loginData LoginProfile) (*
 	return &LoginRequest{
 		PreviousSessionID: session,
 		XPID:              userId,
-		LoginData:         loginData,
+		Payload:           loginData,
 	}, nil
 }
 
@@ -40,18 +52,18 @@ func (m *LoginRequest) GetEvrID() EvrId {
 }
 
 type LoginProfile struct {
-	AccountId                   uint64     `json:"accountid"`
-	DisplayName                 string     `json:"displayname"`
-	BypassAuth                  bool       `json:"bypassauth"`
-	AccessToken                 string     `json:"access_token"`
-	Nonce                       string     `json:"nonce"`
-	BuildVersion                int64      `json:"buildversion"`
-	LobbyVersion                uint64     `json:"lobbyversion"`
-	AppId                       uint64     `json:"appid"`
-	PublisherLock               string     `json:"publisher_lock"`
-	HMDSerialNumber             string     `json:"hmdserialnumber"`
-	DesiredClientProfileVersion int64      `json:"desiredclientprofileversion"`
-	SystemInfo                  SystemInfo `json:"system_info"`
+	AccountId                   uint64      `json:"accountid"`
+	DisplayName                 string      `json:"displayname"`
+	BypassAuth                  bool        `json:"bypassauth"`
+	AccessToken                 string      `json:"access_token"`
+	Nonce                       string      `json:"nonce"`
+	BuildVersion                BuildNumber `json:"buildversion"`
+	LobbyVersion                uint64      `json:"lobbyversion"`
+	AppId                       uint64      `json:"appid"`
+	PublisherLock               string      `json:"publisher_lock"`
+	HMDSerialNumber             string      `json:"hmdserialnumber"`
+	DesiredClientProfileVersion int64       `json:"desiredclientprofileversion"`
+	SystemInfo                  SystemInfo  `json:"system_info"`
 }
 
 func (ld *LoginProfile) String() string {

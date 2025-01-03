@@ -20,26 +20,14 @@ import (
 )
 
 const (
-	XPIStorageIndex              = "EvrIDs_Index"
-	GameClientSettingsStorageKey = "clientSettings"
-	GamePlayerSettingsStorageKey = "playerSettings"
-	DocumentStorageCollection    = "GameDocuments"
-	GameProfileStorageCollection = "GameProfiles"
-	GameProfileStorageKey        = "gameProfile"
-	RemoteLogStorageCollection   = "RemoteLogs"
-	RemoteLogStorageJournalKey   = "journal"
+	DocumentStorageCollection = "GameDocuments"
 )
-
-// errWithEvrIdFn prefixes an error with the EchoVR Id.
-func errWithEvrIdFn(evrId evr.EvrId, format string, a ...interface{}) error {
-	return fmt.Errorf("%s: %w", evrId.Token(), fmt.Errorf(format, a...))
-}
 
 // msgFailedLoginFn sends a LoginFailure message to the client.
 // The error message is word-wrapped to 60 characters, 4 lines long.
 func msgFailedLoginFn(session *sessionWS, evrId evr.EvrId, err error) error {
 	// Format the error message
-	s := fmt.Sprintf("%s: %s", evrId.Token(), err.Error())
+	s := fmt.Sprintf("%s: %s", evrId.String(), err.Error())
 
 	// Replace ": " with ":\n" for better readability
 	s = strings.Replace(s, ": ", ":\n", 2)
@@ -50,7 +38,7 @@ func msgFailedLoginFn(session *sessionWS, evrId evr.EvrId, err error) error {
 	// Send the messages
 	if err := session.SendEvrUnrequire(evr.NewLoginFailure(evrId, errMessage)); err != nil {
 		// If there's an error, prefix it with the EchoVR Id
-		return errWithEvrIdFn(evrId, "send LoginFailure failed: %w", err)
+		return fmt.Errorf("failed to send LoginFailure: %w", err)
 	}
 
 	return nil
@@ -62,210 +50,223 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 
 	// Start a timer to add to the metrics
 	timer := time.Now()
-	defer func() { p.metrics.CustomTimer("login_duration", nil, time.Since(timer)) }()
-
-	// Check for an HMD serial override
 
 	// Authenticate the connection
-	gameSettings, err := p.processLogin(ctx, logger, session, request)
-	if err != nil {
+	if err := p.processLogin(ctx, logger, session, request); err != nil {
 		st := status.Convert(err)
 		return msgFailedLoginFn(session, request.XPID, errors.New(st.Message()))
 	}
 
+	p.metrics.CustomTimer("login_duration", nil, time.Since(timer))
 	// Let the client know that the login was successful.
 	// Send the login success message and the login settings.
 	return session.SendEvr(
 		evr.NewLoginSuccess(session.id, request.XPID),
 		unrequireMessage,
-		gameSettings,
+		evr.NewDefaultGameSettings(),
 		unrequireMessage,
 	)
 }
 
 // processLogin handles the authentication of the login connection.
-func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, session *sessionWS, request *evr.LoginRequest) (settings *evr.GameSettings, err error) {
+func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, session *sessionWS, request *evr.LoginRequest) (err error) {
 
-	// Validate the XPID
-	if request.XPID.IsNil() || !request.XPID.IsValid() {
-		return settings, fmt.Errorf("invalid xpid: %s", request.XPID.String())
-	}
-
+	// Load the session parameters.
 	params, ok := LoadParams(ctx)
 	if !ok {
-		return nil, errors.New("session parameters not found")
+		return errors.New("session parameters not found")
 	}
 
-	params.xpID = request.GetEvrID()
+	// Set the basic parameters related to client hardware and software
 	params.loginSession = session
-	params.isVR = request.LoginData.SystemInfo.HeadsetType != "No VR"
-	params.lobbyVersion = request.LoginData.LobbyVersion
-	params.publisherLock = request.LoginData.PublisherLock
+	params.xpID = request.XPID
+	params.isVR = request.Payload.SystemInfo.HeadsetType != "No VR"
+	params.isPCVR = request.Payload.BuildVersion != evr.StandaloneBuild
 
-	questTypes := []string{
-		"Quest",
-		"Quest 2",
-		"Quest 3",
-		"Quest Pro",
+	// Validate the XPID
+	if !params.xpID.IsValid() {
+		return errors.New("invalid XPID: " + params.xpID.String())
 	}
 
-	params.isPCVR = true
-
-	for _, t := range questTypes {
-		if strings.Contains(strings.ToLower(request.LoginData.SystemInfo.HeadsetType), strings.ToLower(t)) {
-			params.isPCVR = false
-			break
-		}
+	// Set the basic parameters related to client hardware and software
+	if sn := request.Payload.HMDSerialNumber; strings.Contains(sn, ":") {
+		return errors.New("Invalid HMD Serial Number: " + sn)
 	}
 
-	var account *api.Account
-	var authErr error
-
-	// device authentication
-	if session.userID.IsNil() {
-		// Construct the device auth token from the login payload
-
-		account, authErr = p.authenticateHeadset(ctx, logger, session, params.xpID, session.clientIP, params.authPassword, request.LoginData)
-
-	} else {
-
-		// Validate the device ID from the authenticated session
-		account, authErr = p.validateDeviceID(ctx, logger, session, params.xpID)
+	if !slices.Contains(evr.KnownBuilds, request.Payload.BuildVersion) {
+		logger.Warn("Unknown build version", zap.Int64("build", int64(request.Payload.BuildVersion)))
 	}
 
-	if authErr != nil && account == nil {
-		// Headset is not linked to an account.
-		return settings, authErr
-	}
+	// Get the user for this device
+	params.account, err = AccountGetDeviceID(ctx, p.db, p.runtimeModule, params.xpID.String())
+	switch status.Code(err) {
+	// The device is not linked to an account.
+	case codes.NotFound:
 
-	if account == nil {
-		return settings, fmt.Errorf("account is nil: %w", authErr)
-	}
-
-	// add the login attempt to the login history
-	loginHistory, err := LoginHistoryLoad(ctx, p.runtimeModule, account.User.Id)
-	if err != nil {
-		return settings, fmt.Errorf("failed to load login history: %w", err)
-	}
-	defer loginHistory.Store(ctx, p.runtimeModule)
-
-	params.loginHistory = loginHistory
-
-	loginHistory.UpdateAlternates(ctx, p.runtimeModule)
-	loginHistory.Update(params.xpID, session.clientIP, &request.LoginData)
-
-	if session.UserID().IsNil() {
-		// Validate the clientIP
-		if ok := loginHistory.IsAuthorizedIP(session.ClientIP()); !ok {
-
-			if p.appBot != nil && p.appBot.dg != nil && p.appBot.dg.State != nil && p.appBot.dg.State.User != nil {
-				ipqs := p.ipqsClient.IPDetailsWithTimeout(session.ClientIP())
-				if err := p.appBot.SendIPApprovalRequest(ctx, account.User.Id, session.ClientIP(), ipqs); err != nil {
-					return settings, fmt.Errorf("failed to send IP approval request: %w", err)
-				}
-				return settings, fmt.Errorf("New location detected.\nPlease check your Discord DMs to accept the \nverification request from @%s.", p.appBot.dg.State.User.Username)
-			} else {
-				return settings, errors.New("New IP address detected. Please check your Discord DMs for a verification request.")
+		// the session is authenticated. Automatically link the device.
+		if !session.userID.IsNil() {
+			if err := p.runtimeModule.LinkDevice(ctx, session.UserID().String(), params.xpID.String()); err != nil {
+				return fmt.Errorf("failed to link device: %w", err)
 			}
-
+		} else {
+			if linkTicket, err := p.linkTicket(ctx, logger, params.xpID, session.clientIP, &request.Payload); err != nil {
+				return fmt.Errorf("error creating link ticket: %s", err)
+			} else {
+				return fmt.Errorf("\nEnter this code:\n  \n>>> %s <<<\nusing '/link-headset %s' in the Echo VR Lounge Discord.", linkTicket.Code, linkTicket.Code)
+			}
 		}
-	} else {
-		// Auto-authorize the IP (due to username/password authentication)
-		loginHistory.AuthorizeIP(session.clientIP)
+
+	// The device is linked to an account.
+	case codes.OK:
+
+		// if the account has a password, authenticate it.
+		if params.account.Email != "" {
+			// If this session was already authorized, verify it matches with the device's account.
+			if !session.userID.IsNil() && params.account.User.Id != session.userID.String() {
+				logger.Error("Device is linked to a different account.", zap.String("device_user_id", params.account.User.Id), zap.String("session_user_id", session.userID.String()))
+				return fmt.Errorf("device linked to a different account. (%s)", params.account.User.Username)
+			}
+		} else if params.authPassword != "" {
+			// The account has no password, and the user has provided one.
+			// Set the password.
+			if err := LinkEmail(ctx, logger, p.db, uuid.FromStringOrNil(params.account.User.Id), params.account.User.Username+"@"+p.placeholderEmail, params.authPassword); err != nil {
+				return fmt.Errorf("failed to link email: %w", err)
+			}
+		}
 	}
 
-	// Common error handling
-	if account.GetDisableTime() != nil {
-		// The account is banned. log the attempt.
+	session.userID = uuid.FromStringOrNil(params.account.User.Id)
+	session.SetUsername(params.account.User.Username)
+
+	if status.Code(err) != codes.PermissionDenied || params.account.DisableTime != nil {
 		logger.Info("Attempted login to banned account.",
 			zap.String("xpid", params.xpID.Token()),
 			zap.String("client_ip", session.clientIP),
-			zap.String("uid", account.User.Id),
-			zap.Any("login_payload", request.LoginData))
+			zap.String("uid", params.account.User.Id),
+			zap.Any("login_payload", request.Payload))
 
-		return settings, fmt.Errorf("User account banned.")
+		// If the user has provided a password for the first time, then set the password on the account.
+	} else if params.authPassword != "" && deviceAccount.Email == "" {
+
+		// Set the password on the account.
+		if err := LinkEmail(ctx, logger, session.pipeline.db, uuid.FromStringOrNil(deviceAccount.User.Id), deviceAccount.User.Id+"@"+p.placeholderEmail, params.authPassword); err != nil {
+			if err != nil {
+				return fmt.Errorf("failed to link email: %w", err)
+			}
+		}
+	} else {
+
+		// Some other error occurred.
+		return fmt.Errorf("failed to get account: %w", err)
 	}
 
-	if authErr != nil {
-		return settings, authErr
+	// Migrate the user's account
+
+	if err := MigrateUser(ctx, NewRuntimeGoLogger(logger), p.runtimeModule, p.db, params.account.User.Id); err != nil {
+		return fmt.Errorf("failed to migrate user data: %w", err)
 	}
 
-	params.discordID = account.CustomId
+	// Load the login history for audit purposes.
+	loginHistory, err := LoginHistoryLoad(ctx, p.runtimeModule, params.account.User.Id)
+	if err != nil {
+		return fmt.Errorf("failed to load login history: %w", err)
+	}
+
+	// Automatically validate the IP if the session is authenticated.
+	if !session.userID.IsNil() {
+
+		loginHistory.AuthorizeIP(session.clientIP)
+
+		// Require IP verification, if the session is not authenticated.
+	} else if ok := loginHistory.IsAuthorizedIP(session.clientIP); !ok {
+
+		loginHistory.AddPendingAuthorizationIP(session.clientIP)
+
+		if p.appBot != nil && p.appBot.dg != nil && p.appBot.dg.State != nil && p.appBot.dg.State.User != nil {
+			ipqs := p.ipqsClient.IPDetailsWithTimeout(session.clientIP)
+			if err := p.appBot.SendIPApprovalRequest(ctx, params.account.User.Id, session.clientIP, ipqs); err != nil {
+				return fmt.Errorf("failed to send IP approval request: %w", err)
+			}
+			return fmt.Errorf("New location detected.\nPlease check your Discord DMs to accept the \nverification request from @%s.", p.appBot.dg.State.User.Username)
+		}
+		return fmt.Errorf("New location detected. Please contact EchoVRCE support.")
+
+	}
+
+	loginHistory.Update(params.xpID, session.clientIP, &request.Payload)
+
+	// If the session is authenticated, auto-validate teh
+
+	session.userID = uuid.FromStringOrNil(params.account.User.Id)
+	session.SetUsername(params.account.User.Username)
+
+	// Common error handling
+	if params.account.GetDisableTime() != nil {
+		// The account is banned. log the attempt.
+
+		return fmt.Errorf("Account disabled by EchoVRCE Admins.")
+	}
 
 	params.accountMetadata = &AccountMetadata{}
-	if err := json.Unmarshal([]byte(account.User.Metadata), params.accountMetadata); err != nil {
-		return settings, fmt.Errorf("failed to unmarshal metadata: %w", err)
+	if err := json.Unmarshal([]byte(params.account.User.Metadata), params.accountMetadata); err != nil {
+		return fmt.Errorf("failed to unmarshal metadata: %w", err)
 	}
-	params.accountMetadata.account = account
+	params.accountMetadata.account = params.account
+
 	// Get the GroupID from the user's metadata
-
-	groups, err := UserGuildGroupsList(ctx, p.runtimeModule, account.User.Id)
+	params.guildGroups, err = GuildUserGroupsList(ctx, p.runtimeModule, params.account.User.Id)
 	if err != nil {
-		return settings, fmt.Errorf("failed to get guild groups: %w", err)
-	}
-	params.guildGroups = groups
-
-	for _, g := range groups {
-		p.discordCache.QueueSyncMember(g.GuildID, params.discordID)
+		return fmt.Errorf("failed to get guild groups: %w", err)
 	}
 
-	memberships, err := GetGuildGroupMemberships(ctx, p.runtimeModule, account.User.Id)
-	if err != nil {
-		return settings, fmt.Errorf("failed to get guild groups: %w", err)
-	}
-	if len(memberships) == 0 {
-		return settings, fmt.Errorf("user is not in any guild groups")
+	if g, ok := params.guildGroups[params.accountMetadata.ActiveGroupID]; !ok {
+		// User is not in the active group
+		logger.Warn("User is not in the active group", zap.String("uid", params.account.User.Id), zap.String("gid", g.Group.Id))
+		params.accountMetadata.ActiveGroupID = uuid.Nil.String()
 	}
 
-	params.memberships = memberships
-
-	if g := params.accountMetadata.ActiveGroupID; g != uuid.Nil.String() {
-		if _, ok := memberships[g]; !ok {
-			// User is not in the active group
-			logger.Warn("User is not in the active group", zap.String("uid", account.User.Id), zap.String("gid", g))
-			params.accountMetadata.ActiveGroupID = uuid.Nil.String()
-		}
-	}
-
+	// If the user is not in a group, set the active group to the group with the most members
 	if params.accountMetadata.ActiveGroupID == uuid.Nil.String() {
-		groupIDs := make([]string, 0, len(memberships))
-		for id := range memberships {
+		groupIDs := make([]string, 0, len(params.guildGroups))
+		for id := range params.guildGroups {
 			groupIDs = append(groupIDs, id)
 		}
 		// Sort the groups by the edgecount
 		slices.SortStableFunc(groupIDs, func(a, b string) int {
-			return int(groups[a].Group.EdgeCount - groups[b].Group.EdgeCount)
+			return int(params.guildGroups[a].Group.EdgeCount - params.guildGroups[b].Group.EdgeCount)
 		})
 		slices.Reverse(groupIDs)
 
 		params.accountMetadata.SetActiveGroupID(uuid.FromStringOrNil(groupIDs[0]))
-		logger.Debug("Set active group", zap.String("uid", account.User.Id), zap.String("gid", params.accountMetadata.ActiveGroupID))
+		logger.Debug("Set active group", zap.String("uid", params.account.User.Id), zap.String("gid", params.accountMetadata.ActiveGroupID))
+
+		if err := p.runtimeModule.AccountUpdateId(ctx, params.account.User.Id, "", params.accountMetadata.MarshalMap(), "", "", "", "", ""); err != nil {
+			return fmt.Errorf("failed to update user metadata: %w", err)
+		}
 	}
 
 	if ismember, err := CheckSystemGroupMembership(ctx, p.db, session.userID.String(), GroupGlobalDevelopers); err != nil {
-		return settings, fmt.Errorf("failed to check system group membership: %w", err)
+		return fmt.Errorf("failed to check system group membership: %w", err)
 	} else if ismember {
 		params.isGlobalDeveloper = true
+		params.isGlobalModerator = true
+
+	} else if ismember, err := CheckSystemGroupMembership(ctx, p.db, session.userID.String(), GroupGlobalModerators); err != nil {
+		return fmt.Errorf("failed to check system group membership: %w", err)
+	} else if ismember {
+		params.isGlobalModerator = true
 	}
 
 	if params.userDisplayNameOverride != "" {
 		// This will be picked up by GetActiveGroupDisplayName and other functions
-		params.accountMetadata.DisplayNameOverride = params.userDisplayNameOverride
+		params.accountMetadata.sessionDisplayNameOverride = params.userDisplayNameOverride
 	}
-
-	// Update the user's metadata
-	if err := p.runtimeModule.AccountUpdateId(ctx, account.User.Id, "", params.accountMetadata.MarshalMap(), "", "", "", "", ""); err != nil {
-		return settings, fmt.Errorf("failed to update user metadata: %w", err)
-	}
-	params.account = account
 
 	StoreParams(ctx, &params)
 	// Initialize the full session
-	if err := session.SetIdentity(uuid.FromStringOrNil(account.User.Id), params.xpID, account.User.Username); err != nil {
-		return settings, fmt.Errorf("failed to login: %w", err)
+	if err := session.SetIdentity(uuid.FromStringOrNil(params.account.User.Id), params.xpID, params.account.User.Username); err != nil {
+		return fmt.Errorf("failed to login: %w", err)
 	}
-	ctx = session.Context()
-
 	/*
 		session.SendEvr(&evr.EarlyQuitConfig{
 			SteadyPlayerLevel: 1,
@@ -276,90 +277,8 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		})
 	*/
 	// TODO Add the settings to the user profile
-	settings = evr.NewDefaultGameSettings()
-	return settings, nil
-}
 
-type EvrIDHistory struct {
-	Created time.Time
-	Updated time.Time
-	UserID  uuid.UUID
-}
-
-func (p *EvrPipeline) authenticateHeadset(ctx context.Context, logger *zap.Logger, session *sessionWS, xpid evr.EvrId, clientIP string, userPassword string, payload evr.LoginProfile) (*api.Account, error) {
-	var err error
-	var userId string
-	var account *api.Account
-
-	// Lookup the account by the device ID
-	account, err = AccountGetDeviceID(ctx, p.db, p.runtimeModule, xpid.String())
-
-	switch status.Code(err) {
-	case codes.OK:
-		// The account was found.
-		userId = account.User.Id
-	case codes.NotFound:
-		// Continue with linking
-	default:
-		return account, fmt.Errorf("failed to get account: %w", err)
-	}
-
-	if account.GetEmail() != "" {
-
-		// The account has a password, authenticate the password.
-		// This is just a failsafe, since this authentication should be handled at the session level.
-		_, _, _, err := AuthenticateEmail(ctx, logger, session.pipeline.db, account.Email, userPassword, "", false)
-		return account, err
-
-	} else if userPassword != "" {
-		// This is the first time the user has authenticate via device id, while providing a password.
-		// Set the password on the account.
-
-		err = LinkEmail(ctx, logger, session.pipeline.db, uuid.FromStringOrNil(userId), account.User.Id+"@"+p.placeholderEmail, userPassword)
-		if err != nil {
-			return account, status.Errorf(codes.Internal, "error linking email: %s", err)
-		}
-
-		return account, nil
-	}
-
-	// Device requires discord linking.
-	linkTicket, err := p.linkTicket(ctx, logger, xpid, clientIP, &payload)
-	if err != nil {
-		return account, status.Errorf(codes.Internal, "error creating link ticket: %s", err)
-	}
-	msg := fmt.Sprintf("\nEnter this code:\n  \n>>> %s <<<\nusing '/link-headset %s' in the Echo VR Lounge Discord.", linkTicket.Code, linkTicket.Code)
-	return account, errors.New(msg)
-}
-
-func (p *EvrPipeline) validateDeviceID(ctx context.Context, logger *zap.Logger, session *sessionWS, xpid evr.EvrId) (*api.Account, error) {
-	// Validate the session login
-
-	// The account was found.
-	account, err := GetAccount(ctx, logger, session.pipeline.db, session.statusRegistry, session.userID)
-	if err != nil {
-		return account, status.Error(codes.Internal, fmt.Sprintf("failed to get account: %s", err))
-	}
-
-	account, err = AccountGetDeviceID(ctx, session.pipeline.db, p.runtimeModule, xpid.Token())
-
-	switch status.Code(err) {
-	case codes.OK:
-		if account.User.Id != session.userID.String() {
-			logger.Error("Device is already linked to another account", zap.String("device_user_id", account.User.Id), zap.String("session_user_id", session.userID.String()))
-			return account, fmt.Errorf("device is already linked to another account (%s)", account.User.Username)
-		}
-	case codes.NotFound:
-		// The account was not found.
-		// try to link the device to the account
-		if err := p.runtimeModule.LinkDevice(ctx, session.UserID().String(), xpid.Token()); err != nil {
-			return account, fmt.Errorf("failed to link device: %w", err)
-		}
-	default:
-		return account, err
-	}
-
-	return account, nil
+	return nil
 }
 
 func (p *EvrPipeline) channelInfoRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
@@ -371,53 +290,40 @@ func (p *EvrPipeline) channelInfoRequest(ctx context.Context, logger *zap.Logger
 	}
 
 	groupID := uuid.Nil
-	if params.accountMetadata == nil {
-		logger.Error("AccountMetadata not found")
-	} else {
-		groupID = params.accountMetadata.GetActiveGroupID()
+	if groupID := params.accountMetadata.GetActiveGroupID(); groupID == uuid.Nil {
+		return fmt.Errorf("active group is nil")
 	}
 
 	key := fmt.Sprintf("channelInfo,%s", groupID.String())
 
 	// Check the cache first
-	message := p.MessageCacheLoad(key)
-
-	if message == nil {
-
-		params, ok := LoadParams(ctx)
-		if !ok {
-			return errors.New("session parameters not found")
-		}
-
-		guildGroups := params.guildGroups
-		if guildGroups == nil {
-			return errors.New("guild groups not found")
-		}
-		g, ok := guildGroups[groupID.String()]
-
-		resource := evr.NewChannelInfoResource()
-
-		resource.Groups = make([]evr.ChannelGroup, 4)
-		for i := range resource.Groups {
-			resource.Groups[i] = evr.ChannelGroup{
-				ChannelUuid:  strings.ToUpper(g.ID().String()),
-				Name:         g.Name(),
-				Description:  g.Description(),
-				Rules:        g.Description() + "\n" + g.RulesText,
-				RulesVersion: 1,
-				Link:         fmt.Sprintf("https://discord.gg/channel/%s", g.GuildID),
-				Priority:     uint64(i),
-				RAD:          true,
-			}
-		}
-
-		if resource == nil {
-			resource = evr.NewChannelInfoResource()
-		}
-
-		message = evr.NewSNSChannelInfoResponse(resource)
-		p.MessageCacheStore(key, message, time.Minute*3)
+	if message := p.MessageCacheLoad(key); message != nil {
+		return session.SendEvrUnrequire(message)
 	}
+
+	g, ok := params.guildGroups[groupID.String()]
+	if !ok {
+		return fmt.Errorf("guild group not found: %s", groupID.String())
+	}
+
+	resource := evr.NewChannelInfoResource()
+
+	resource.Groups = make([]evr.ChannelGroup, 4)
+	for i := range resource.Groups {
+		resource.Groups[i] = evr.ChannelGroup{
+			ChannelUuid:  strings.ToUpper(g.ID().String()),
+			Name:         g.Name(),
+			Description:  g.Description(),
+			Rules:        g.Description() + "\n" + g.RulesText,
+			RulesVersion: 1,
+			Link:         fmt.Sprintf("https://discord.gg/channel/%s", g.GuildID),
+			Priority:     uint64(i),
+			RAD:          true,
+		}
+	}
+
+	message := evr.NewSNSChannelInfoResponse(resource)
+	p.MessageCacheStore(key, message, time.Minute*3)
 
 	// send the document to the client
 	return session.SendEvrUnrequire(message)
@@ -448,7 +354,11 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 		p.profileRegistry.PurgeProfile(params.xpID)
 	}()
 
-	clientProfile, err := NewClientProfile(ctx, p.db, p.runtimeModule, &params)
+	clientProfile, err := NewClientProfile(ctx, p.db, p.runtimeModule, params.accountMetadata, params.xpID)
+	if err != nil {
+		return fmt.Errorf("failed to get client profile: %w", err)
+	}
+
 	gg, ok := params.guildGroups[params.accountMetadata.GetActiveGroupID().String()]
 	if !ok {
 		return fmt.Errorf("guild group not found: %s", params.accountMetadata.GetActiveGroupID().String())
@@ -465,19 +375,12 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 func (p *EvrPipeline) updateClientProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.UpdateClientProfile)
 
-	if !request.EvrId.Equals(request.ClientProfile.EvrID) {
-		return fmt.Errorf("xpi mismatch: %s != %s", request.ClientProfile.EvrID.Token(), request.EvrId.Token())
+	if err := p.handleClientProfileUpdate(ctx, logger, session, request.EvrId, request.ClientProfile); err != nil {
+		if err := session.SendEvr(evr.NewUpdateProfileFailure(request.EvrId, uint64(400), err.Error())); err != nil {
+			logger.Error("Failed to send UpdateProfileFailure", zap.Error(err))
+		}
 	}
 
-	go func() {
-		if err := p.handleClientProfileUpdate(ctx, logger, session, request.EvrId, request.ClientProfile); err != nil {
-			if err := session.SendEvr(evr.NewUpdateProfileFailure(request.EvrId, uint64(400), err.Error())); err != nil {
-				logger.Error("Failed to send UpdateProfileFailure", zap.Error(err))
-			}
-		}
-	}()
-
-	// Send the profile update to the client
 	return session.SendEvrUnrequire(evr.NewSNSUpdateProfileSuccess(&request.EvrId))
 }
 
@@ -518,7 +421,7 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 					return fmt.Errorf("error updating group: %w", err)
 				}
 
-				p.appBot.LogMessageToChannel(fmt.Sprintf("User <@%s> has accepted the community values.", params.discordID), gg.AuditChannelID)
+				p.appBot.LogMessageToChannel(fmt.Sprintf("User <@%s> has accepted the community values.", params.DiscordID()), gg.AuditChannelID)
 			}
 		}
 	}

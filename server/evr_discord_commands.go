@@ -1650,22 +1650,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			d.cache.QueueSyncMember(i.GuildID, member.User.ID)
 
-			// Try to find it by searching
-			memberships, err := GetGuildGroupMemberships(ctx, d.nk, userIDStr)
-			if err != nil {
-				return err
-			}
-
-			if len(memberships) == 0 {
-
-				return errors.New("guild data stale, please try again in a few seconds")
-
-			}
-			_, ok := memberships[groupID]
-			if !ok {
-				return errors.New("no membership found")
-			}
-
 			// Set the metadata
 			md, err := GetAccountMetadata(ctx, nk, userIDStr)
 			if err != nil {
@@ -1726,7 +1710,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			// Get the caller's nakama user ID
-			callerGuildGroups, err := UserGuildGroupsList(ctx, d.nk, callerUserID)
+			callerGuildGroups, err := GuildUserGroupsList(ctx, d.nk, callerUserID)
 			if err != nil {
 				return fmt.Errorf("failed to get guild groups: %w", err)
 			}

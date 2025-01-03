@@ -216,22 +216,22 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 	groupID := d.cache.GuildIDToGroupID(guildID)
 
 	// Get a list of the groups that this user has allocate access to
-	memberships, err := GetGuildGroupMemberships(ctx, d.nk, userID)
+	guildGroups, err := GuildUserGroupsList(ctx, d.nk, userID)
 	if err != nil {
 		return nil, 0, status.Errorf(codes.Internal, "failed to get guild group memberships: %v", err)
 	}
-	membership, ok := memberships[groupID]
+	membership, ok := guildGroups[groupID]
 	if !ok {
 		return nil, 0, status.Error(codes.PermissionDenied, "user is not a member of the guild")
 	}
-	allocatorGroupIDs := make([]string, 0, len(memberships))
-	for gid, _ := range memberships {
-		if membership.IsAllocator {
+	allocatorGroupIDs := make([]string, 0, len(guildGroups))
+	for gid, g := range guildGroups {
+		if g.IsAllocator(userID) {
 			allocatorGroupIDs = append(allocatorGroupIDs, gid)
 		}
 	}
 
-	if !membership.IsAllocator {
+	if !membership.IsAllocator(userID) {
 		return nil, 0, status.Error(codes.PermissionDenied, "user does not have the allocator role in this guild.")
 	}
 
@@ -300,7 +300,7 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 	gid := uuid.FromStringOrNil(groupID)
 	// Prepare the session for the match.
 
-	if membership.IsAllocator {
+	if membership.IsAllocator(userID) {
 		startTime = startTime.UTC().Add(10 * time.Minute)
 	} else {
 		startTime.UTC().Add(1 * time.Minute)
@@ -329,7 +329,7 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 
 	groupID := d.cache.GuildIDToGroupID(guildID)
 
-	guildGroups, err := UserGuildGroupsList(ctx, d.nk, userID)
+	guildGroups, err := GuildUserGroupsList(ctx, d.nk, userID)
 	if err != nil {
 		return nil, 0, status.Errorf(codes.Internal, "failed to get guild groups: %v", err)
 	}

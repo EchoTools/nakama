@@ -211,7 +211,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 
 	sendAuditMessage := groupMetadata.AuditChannelID != ""
 
-	membership, ok := params.memberships[groupID]
+	guildGroup, ok := params.guildGroups[groupID]
 
 	if !ok && groupMetadata.MembersOnlyMatchmaking {
 
@@ -222,9 +222,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		}
 
 		return NewLobbyError(KickedFromLobbyGroup, "user does not have matchmaking permission")
-	}
-
-	if membership.IsSuspended {
+	} else if ok && guildGroup.IsSuspended(userID) {
 
 		if sendAuditMessage {
 			if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("Rejected suspended user <@%s>", userID), true); err != nil {
@@ -321,7 +319,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 			"session_id":   session.ID().String(),
 			"group_id":     groupID,
 			"user_id":      userID,
-			"discord_id":   params.discordID,
+			"discord_id":   params.DiscordID(),
 			"display_name": profile.DisplayName,
 		},
 		External: true, // used to denote if the event was generated from the client

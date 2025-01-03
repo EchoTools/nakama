@@ -124,7 +124,7 @@ func EntrantPresenceFromLobbyParams(session Session, lobbyParams *LobbySessionPa
 		EvrID:             params.xpID,
 		PartyID:           lobbyParams.PartyID,
 		RoleAlignment:     lobbyParams.Role,
-		DiscordID:         params.discordID,
+		DiscordID:         params.DiscordID(),
 		ClientIP:          session.ClientIP(),
 		ClientPort:        session.ClientPort(),
 		IsPCVR:            params.isPCVR,

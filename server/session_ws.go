@@ -118,7 +118,6 @@ type (
 type SessionParameters struct {
 	node                    string        // The node name
 	xpID                    evr.EvrId     // The EchoVR ID
-	discordID               string        // The Discord ID
 	loginSession            *sessionWS    // The login session
 	lobbySession            *sessionWS    // The match session
 	serverSession           *sessionWS    // The server session
@@ -138,6 +137,7 @@ type SessionParameters struct {
 	isVR              bool     // The user is using a VR headset
 	isPCVR            bool     // The user is using a PCVR headset
 	isGlobalDeveloper bool     // The user is a developer
+	isGlobalModerator bool     // The user is a moderator
 
 	relayOutgoing bool                // The user wants (some) outgoing messages relayed to them via discord
 	debug         bool                // The user wants debug information
@@ -149,12 +149,16 @@ type SessionParameters struct {
 	account              *api.Account                       // The account
 	accountMetadata      *AccountMetadata                   // The account metadata
 	profile              *atomic.Pointer[evr.ServerProfile] // The server profile
-	memberships          map[string]GuildGroupMembership    // map[string]GuildGroupMembership
 	guildGroups          map[string]*GuildGroup             // map[string]*GuildGroup
-	publisherLock        string                             // The publisher lock
-	lobbyVersion         uint64                             // The lobby version
 	isEarlyQuitter       *atomic.Bool                       // The user is an early quitter
 	lastMatchmakingError *atomic.Error                      // The last matchmaking error
+}
+
+func (s *SessionParameters) DiscordID() string {
+	if s.account == nil {
+		return ""
+	}
+	return s.account.GetCustomId()
 }
 
 func StoreParams(ctx context.Context, params *SessionParameters) {
@@ -221,7 +225,6 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 		authDiscordID:           parseUserQueryFunc(&request, "discordid", 20, discordIDPattern),
 		authPassword:            parseUserQueryFunc(&request, "password", 32, nil),
 		userDisplayNameOverride: ign,
-		loginHistory:            nil,
 
 		disableEncryption: parseUserQueryFunc(&request, "disable_encryption", 5, nil) == "true",
 		disableMAC:        parseUserQueryFunc(&request, "disable_mac", 5, nil) == "true",
@@ -231,6 +234,7 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 		isVPN:                evrPipeline.ipqsClient.IsVPN(clientIP),
 		isVR:                 false,
 		isGlobalDeveloper:    false,
+		isGlobalModerator:    false,
 		isPCVR:               false,
 		supportedFeatures:    parseUserQueryCommaDelimited(&request, "features", 32, featurePattern),
 		requiredFeatures:     parseUserQueryCommaDelimited(&request, "requires", 32, featurePattern),
@@ -241,7 +245,6 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 		debug:                parseUserQueryFunc(&request, "debug", 5, nil) == "true",
 		urlParameters:        urlParams,
 		lastMatchmakingError: atomic.NewError(nil),
-		memberships:          make(map[string]GuildGroupMembership),
 		guildGroups:          make(map[string]*GuildGroup),
 		account:              &api.Account{},
 		accountMetadata:      &AccountMetadata{},
@@ -288,9 +291,7 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 					logger.Warn("Failed to authenticate user by Discord ID", zap.Error(err), zap.String("discord_id", params.authDiscordID))
 
 				} else {
-					// Only include the password in the context if the user was unsuccessful in authenticating.
 					// Once the user has been authenticated with a deviceID, their password will be set.
-					params.authPassword = ""
 
 					username = account.User.Username
 					userID = uuid.FromStringOrNil(userIDStr)

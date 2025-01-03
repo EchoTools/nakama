@@ -93,7 +93,7 @@ func eventLobbySessionAuthorized(ctx context.Context, logger runtime.Logger, db 
 
 				alts = append(alts, s)
 			}
-			content := fmt.Sprintf("<@%s> detected as a possible alternate of %s", params.discordID, strings.Join(alts, ", "))
+			content := fmt.Sprintf("<@%s> detected as a possible alternate of %s", params.DiscordID(), strings.Join(alts, ", "))
 			_, _ = s.(*sessionWS).evrPipeline.appBot.LogAuditMessage(ctx, groupID, content, false)
 
 			if err := loginHistory.Store(ctx, nk); err != nil {
