@@ -153,12 +153,6 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(logger runtime.Logger,
 						CustomID: "nil",
 						Disabled: true,
 					},
-					discordgo.Button{
-						Label:    "Report",
-						Style:    discordgo.LinkButton,
-						URL:      "https://discord.gg/AMMYQXcapm",
-						Disabled: false,
-					},
 				},
 			},
 		}

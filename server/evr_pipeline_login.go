@@ -174,7 +174,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	if err != nil {
 		return fmt.Errorf("failed to load login history: %w", err)
 	}
-
+	defer params.loginHistory.Store(ctx, p.runtimeModule)
 	// Automatically validate the IP if the session is authenticated.
 	if !session.userID.IsNil() {
 
@@ -188,7 +188,8 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		if p.appBot != nil && p.appBot.dg != nil && p.appBot.dg.State != nil && p.appBot.dg.State.User != nil {
 			ipqs := p.ipqsClient.IPDetailsWithTimeout(session.clientIP)
 			if err := p.appBot.SendIPApprovalRequest(ctx, params.account.User.Id, session.clientIP, ipqs); err != nil {
-				return fmt.Errorf("failed to send IP approval request: %w", err)
+				// The user has DMs from non-friends disabled. Tell them to use the slash command.
+				return fmt.Errorf("\nUnrecognized connection location.\nPlease type\n  /verify  \nin any server where @EchoVRCE bot is.")
 			}
 			return fmt.Errorf("New location detected.\nPlease check your Discord DMs to accept the \nverification request from @%s.", p.appBot.dg.State.User.Username)
 		}
