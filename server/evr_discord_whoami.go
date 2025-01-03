@@ -241,7 +241,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		{Name: "Nakama ID", Value: whoami.NakamaID.String(), Inline: true},
 		{Name: "Username", Value: whoami.Username, Inline: true},
 		{Name: "Discord ID", Value: whoami.DiscordID, Inline: true},
-		{Name: "Created", Value: fmt.Sprintf("<t:%d:R>", whoami.CreateTime.Unix()), Inline: false},
+		{Name: "Created", Value: fmt.Sprintf("<t:%d:R>", whoami.CreateTime.Unix()), Inline: true},
 		{Name: "Password Set", Value: func() string {
 			if whoami.HasPassword {
 				return "Yes"
@@ -253,7 +253,22 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 				return "Yes"
 			}
 			return "No"
-		}(), Inline: false},
+		}(), Inline: true},
+		func() *discordgo.MessageEmbedField {
+			if includePriviledged {
+				matchmakingSettings, err := LoadMatchmakingSettings(ctx, nk, whoami.NakamaID.String())
+				if err != nil {
+					return nil
+				}
+
+				return &discordgo.MessageEmbedField{
+					Name:   "Party Group",
+					Value:  fmt.Sprintf("`%s`", matchmakingSettings.LobbyGroupName),
+					Inline: false,
+				}
+			}
+			return nil
+		}(),
 		{Name: "Linked Devices", Value: strings.Join(whoami.DeviceLinks, "\n"), Inline: false},
 		{Name: "Display Names", Value: strings.Join(whoami.DisplayNames, "\n"), Inline: false},
 		{Name: "Recent Logins", Value: func() string {
