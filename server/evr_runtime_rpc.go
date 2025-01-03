@@ -1907,7 +1907,7 @@ func MigrateUserDataRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		return "", runtime.NewError("Failed to load login history", StatusInternalError)
 	}
 	// Migrate any account data
-	if err := MigrateUserData(ctx, nk, db, request.UserID, loginHistory); err != nil {
+	if err := MigrateUserData(ctx, nk, db, request.UserID); err != nil {
 		logger.Warn("Failed to migrate device history", zap.Error(err))
 		return "", runtime.NewError("Failed to migrate device history", StatusInternalError)
 	}

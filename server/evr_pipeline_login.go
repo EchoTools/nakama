@@ -108,6 +108,9 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 			if err := p.runtimeModule.LinkDevice(ctx, session.UserID().String(), params.xpID.String()); err != nil {
 				return fmt.Errorf("failed to link device: %w", err)
 			}
+
+			params.account = deviceAccount
+
 		} else {
 			if linkTicket, err := p.linkTicket(ctx, logger, params.xpID, session.clientIP, &request.Payload); err != nil {
 				return fmt.Errorf("error creating link ticket: %s", err)

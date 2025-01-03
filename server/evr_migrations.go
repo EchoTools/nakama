@@ -13,9 +13,18 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 )
 
-func MigrateUserData(ctx context.Context, nk runtime.NakamaModule, db *sql.DB, userID string, history *LoginHistory) error {
+func MigrateUserData(ctx context.Context, nk runtime.NakamaModule, db *sql.DB, userID string) error {
 	var err error
 	// EvrLogin
+
+	if err := MigrateUserCosmetics(ctx, nk, userID); err != nil {
+		return fmt.Errorf("error migrating user cosmetics: %w", err)
+	}
+
+	history, err := LoginHistoryLoad(ctx, nk, userID)
+	if err != nil {
+		return fmt.Errorf("error loading login history: %w", err)
+	}
 
 	var objs []*api.StorageObject
 
@@ -217,7 +226,7 @@ func CombineStoredCosmeticLoadouts(ctx context.Context, nk runtime.NakamaModule)
 	return nil
 }
 
-func SetCosmeticEntitlements(ctx context.Context, nk runtime.NakamaModule, userID string) error {
+func MigrateUserCosmetics(ctx context.Context, nk runtime.NakamaModule, userID string) error {
 	account, err := nk.AccountGetId(ctx, userID)
 	if err != nil {
 		return err
