@@ -67,6 +67,7 @@ type LoginHistory struct {
 	XPIs                  map[string]time.Time               `json:"xpis"`    // list of XPIs
 	ClientIPs             map[string]time.Time               `json:"client_ips"`
 	AuthorizedIPs         map[string]time.Time               `json:"authorized_ips"`
+	PendingAuthorizations map[string]*LoginHistoryEntry      `json:"unverified_ips"`
 	SecondOrderAlternates []string                           `json:"second_order"`
 	AlternateMap          map[string][]*AlternateSearchMatch `json:"alternate_matches"` // map of alternate user IDs and what they have in common
 	NotifiedGroupIDs      map[string]time.Time               `json:"notified_groups"`   // list of groups that have been notified of this alternate login
@@ -81,6 +82,7 @@ func NewLoginHistory() *LoginHistory {
 		XPIs:                  make(map[string]time.Time),
 		ClientIPs:             make(map[string]time.Time),
 		AuthorizedIPs:         make(map[string]time.Time),
+		PendingAuthorizations: make(map[string]*LoginHistoryEntry),
 		SecondOrderAlternates: make([]string, 0),
 		AlternateMap:          make(map[string][]*AlternateSearchMatch),
 		NotifiedGroupIDs:      make(map[string]time.Time),
@@ -115,6 +117,9 @@ func (h *LoginHistory) AuthorizeIP(ip string) {
 	}
 
 	h.AuthorizedIPs[ip] = time.Now().UTC()
+	if h.PendingAuthorizations != nil {
+		delete(h.PendingAuthorizations, ip)
+	}
 }
 
 func (h *LoginHistory) IsAuthorizedIP(ip string) bool {
@@ -123,6 +128,35 @@ func (h *LoginHistory) IsAuthorizedIP(ip string) bool {
 	}
 	_, found := h.AuthorizedIPs[ip]
 	return found
+}
+
+func (h *LoginHistory) AddPendingAuthorizationIP(xpid evr.EvrId, clientIP string, loginData *evr.LoginProfile) *LoginHistoryEntry {
+	if h.PendingAuthorizations == nil {
+		h.PendingAuthorizations = make(map[string]*LoginHistoryEntry)
+	}
+	e := &LoginHistoryEntry{
+		UpdatedAt: time.Now(),
+		XPID:      xpid,
+		ClientIP:  clientIP,
+		LoginData: loginData,
+	}
+
+	h.PendingAuthorizations[e.Key()] = e
+	return e
+}
+
+func (h *LoginHistory) GetPendingAuthorizationIP(ip string) *LoginHistoryEntry {
+	if h.PendingAuthorizations == nil {
+		return nil
+	}
+	return h.PendingAuthorizations[ip]
+}
+
+func (h *LoginHistory) RemovePendingAuthorizationIP(ip string) {
+	if h.PendingAuthorizations == nil {
+		return
+	}
+	delete(h.PendingAuthorizations, ip)
 }
 
 func (h *LoginHistory) NotifyGroup(groupID string) bool {
@@ -251,7 +285,7 @@ func LoginHistoryStore(ctx context.Context, nk runtime.NakamaModule, userID stri
 	bytes := make([]byte, 0)
 	var err error
 	for {
-
+		history.rebuildCache()
 		bytes, err = json.Marshal(history)
 		if err != nil {
 			return fmt.Errorf("error marshalling display name history: %w", err)
@@ -273,10 +307,7 @@ func LoginHistoryStore(ctx context.Context, nk runtime.NakamaModule, userID stri
 			}
 			delete(history.History, oldestKey)
 		}
-
 	}
-
-	history.rebuildCache()
 
 	acks, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{
 		{

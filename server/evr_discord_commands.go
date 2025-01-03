@@ -273,6 +273,10 @@ var (
 			Description: "Set your default lobby to this Discord server/guild.",
 		},
 		{
+			Name:        "verify",
+			Description: "Verify new login locations.",
+		},
+		{
 			Name:        "lookup",
 			Description: "Lookup information about players.",
 			Options: []*discordgo.ApplicationCommandOption{
@@ -1679,6 +1683,56 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					}, "\n"),
 				},
 			})
+		},
+		"verify": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userIDStr string, groupID string) error {
+			if member == nil {
+				return fmt.Errorf("this command must be used from a guild")
+			}
+			loginHistory, err := LoginHistoryLoad(ctx, nk, userIDStr)
+			if err != nil {
+				return fmt.Errorf("failed to load login history: %w", err)
+			}
+			if len(loginHistory.PendingAuthorizations) == 0 {
+				return simpleInteractionResponse(s, i, "No pending IP verifications")
+			}
+
+			requests := make([]*LoginHistoryEntry, 0, len(loginHistory.PendingAuthorizations))
+			for ip, e := range loginHistory.PendingAuthorizations {
+				if time.Since(e.UpdatedAt) > 10*time.Minute {
+					delete(loginHistory.PendingAuthorizations, ip)
+				}
+				requests = append(requests, e)
+			}
+
+			if len(requests) == 0 {
+				return simpleInteractionResponse(s, i, "No pending IP verifications")
+			}
+
+			// Sort by time
+			sort.Slice(requests, func(i, j int) bool {
+				return requests[i].UpdatedAt.After(requests[j].UpdatedAt)
+			})
+			// Show the first one.
+			request := requests[0]
+
+			ipqs, _ := d.ipqsCache.Get(ctx, request.ClientIP)
+
+			embeds, components, _ := IPVerificationEmbed(request, ipqs)
+			// Send it as the interaction response
+			if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Flags:      discordgo.MessageFlagsEphemeral,
+					Embeds:     embeds,
+					Components: components,
+				},
+			}); err != nil {
+				logger.Error("Failed to send IP verification message", zap.Error(err))
+				return err
+			}
+
+			return nil
+
 		},
 		"lookup": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userIDStr string, groupID string) error {
 
@@ -3310,7 +3364,7 @@ func EscapeDiscordMarkdown(s string) string {
 	return discordMarkdownEscapeReplacer.Replace(s)
 }
 
-func (d *DiscordAppBot) SendIPApprovalRequest(ctx context.Context, userID, ip string, ipqs *IPQSResponse) error {
+func (d *DiscordAppBot) SendIPApprovalRequest(ctx context.Context, userID string, e *LoginHistoryEntry, ipqs *IPQSResponse) error {
 	// Get the user's discord ID
 	discordID, err := GetDiscordIDByUserID(ctx, d.db, userID)
 	if err != nil {
@@ -3324,15 +3378,46 @@ func (d *DiscordAppBot) SendIPApprovalRequest(ctx context.Context, userID, ip st
 	}
 
 	// Send the message
+	embeds, components, thisIsMeButton := IPVerificationEmbed(e, ipqs)
+	message, err := d.dg.ChannelMessageSendComplex(channel.ID, &discordgo.MessageSend{
+		Embeds:     embeds,
+		Components: components,
+	})
+	if err != nil {
+		return err
+	}
+
+	// Only allow th user 3 minutes to respond, then disable the "This Is Me" button
+	go func() {
+		<-time.After(3 * time.Minute)
+		thisIsMeButton.Disabled = true
+		thisIsMeButton.Style = discordgo.DangerButton
+		thisIsMeButton.Label = "Expired"
+
+		_, err := d.dg.ChannelMessageEditComplex(&discordgo.MessageEdit{
+			ID:         message.ID,
+			Channel:    channel.ID,
+			Embeds:     &embeds,
+			Components: &components,
+		})
+		if err != nil {
+			d.logger.Error("Failed to disable button", zap.Error(err))
+		}
+	}()
+
+	return nil
+}
+
+func IPVerificationEmbed(entry *LoginHistoryEntry, ipqs *IPQSResponse) ([]*discordgo.MessageEmbed, []discordgo.MessageComponent, *discordgo.Button) {
 
 	embed := &discordgo.MessageEmbed{
-		Title:       "Authorize New Login Device",
+		Title:       "New Login Location",
 		Description: "Please verify the login attempt.",
 		Color:       0x00ff00,
 		Fields: []*discordgo.MessageEmbedField{
 			{
 				Name:   "IP Address",
-				Value:  ip,
+				Value:  entry.ClientIP,
 				Inline: true,
 			}},
 	}
@@ -3347,34 +3432,29 @@ func (d *DiscordAppBot) SendIPApprovalRequest(ctx context.Context, userID, ip st
 	}
 	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
 		Name:   "Note",
-		Value:  "If you were not instructed (in your headset) to look for this message, this login attempt may not be you! please report it to EchoVRCE using the button below.",
+		Value:  "If you were not instructed (in your headset) to look for this message, this login attempt may not be you! please report it to EchoVRCE using the **Report** button below.",
 		Inline: false,
 	})
+
+	thisIsMeButton := &discordgo.Button{
+		Label:    "This is My Headset",
+		Style:    discordgo.SuccessButton,
+		CustomID: fmt.Sprintf("approve_ip:%s", entry.ClientIP),
+	}
+
 	components := []discordgo.MessageComponent{
 		discordgo.ActionsRow{
 			Components: []discordgo.MessageComponent{
-				discordgo.Button{
-					Label:    "This is Me",
-					Style:    discordgo.SuccessButton,
-					CustomID: fmt.Sprintf("approve_ip:%s", ip),
-				},
-				discordgo.Button{
-					Label:    "Report",
+				thisIsMeButton,
+				&discordgo.Button{
+					Label:    "Report to EchoVRCE",
 					Style:    discordgo.LinkButton,
-					URL:      "https://discord.gg/AMMYQXcapm",
+					URL:      "https://discord.gg/q6aFugY3",
 					Disabled: false,
 				},
 			},
 		},
 	}
 
-	_, err = d.dg.ChannelMessageSendComplex(channel.ID, &discordgo.MessageSend{
-		Embeds:     []*discordgo.MessageEmbed{embed},
-		Components: components,
-	})
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return []*discordgo.MessageEmbed{embed}, components, thisIsMeButton
 }
