@@ -79,6 +79,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		"server/score":                  ServerScoreRPC,
 		"server/scores":                 ServerScoresRPC,
 		"forcecheck":                    CheckForceUserRPC,
+		"oauth/redirect":                VRMasterLeagueOAuthRedirectRPC,
 
 		//"/v1/storage/game/sourcedb/rad15/json/r14/loading_tips.json": StorageLoadingTipsRPC,
 	}
