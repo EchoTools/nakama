@@ -12,6 +12,11 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	RemoteLogStorageCollection = "RemoteLogs"
+	RemoteLogStorageJournalKey = "journal"
+)
+
 type UserLogJournal struct {
 	sync.Mutex
 	UserID  uuid.UUID              `json:"userID"`

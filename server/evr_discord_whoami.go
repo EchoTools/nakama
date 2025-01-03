@@ -107,7 +107,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		whoami.HasPassword = account.GetEmail() != ""
 	}
 
-	guildGroups, err := UserGuildGroupsList(ctx, nk, userID.String())
+	guildGroups, err := GuildUserGroupsList(ctx, nk, userID.String())
 	if err != nil {
 		return fmt.Errorf("error getting guild groups: %w", err)
 	}
@@ -232,7 +232,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 			if altAccount.GetDisableTime() != nil {
 				state = "disabled"
 			}
-			s := fmt.Sprintf("<@%s>[%s] %s <t:%s:R>", altAccount.CustomId, state, altAccount.User.UpdateTime.AsTime().UTC().Unix())
+			s := fmt.Sprintf("<@%s>[%s] %s <t:%d:R>", altAccount.CustomId, altAccount.User.Username, state, altAccount.User.UpdateTime.AsTime().UTC().Unix())
 			whoami.PotentialAlternates = append(whoami.PotentialAlternates, s)
 		}
 	}

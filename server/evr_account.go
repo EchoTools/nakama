@@ -297,47 +297,34 @@ func GetDisplayNameByGroupID(ctx context.Context, nk runtime.NakamaModule, userI
 	}
 }
 
-func UserGuildGroupsList(ctx context.Context, nk runtime.NakamaModule, userID string) (map[string]*GuildGroup, error) {
-	groups := make(map[string]*GuildGroup, 0)
+func UserGuildGroupsList(ctx context.Context, nk runtime.NakamaModule, userID string) (map[string]*GuildGroup, []*api.Group, error) {
+	guildGroups := make(map[string]*GuildGroup, 0)
+	systemGroups := make([]*api.Group, 0)
 	cursor := ""
 	for {
 		// Fetch the groups using the provided userId
 		userGroups, _, err := nk.UserGroupsList(ctx, userID, 100, nil, cursor)
 		if err != nil {
-			return nil, fmt.Errorf("error getting user groups: %w", err)
+			return nil, nil, fmt.Errorf("error getting user groups: %w", err)
 		}
 
 		for _, ug := range userGroups {
 			g := ug.GetGroup()
-			if g.GetLangTag() != "guild" {
-				continue
-			}
-			gg, err := NewGuildGroup(g)
-			if err != nil {
-				return nil, fmt.Errorf("error creating guild group: %w", err)
+			switch g.GetLangTag() {
+			case "guild":
+				gg, err := NewGuildGroup(g)
+				if err != nil {
+					return nil, nil, fmt.Errorf("error creating guild group: %w", err)
+				}
+				guildGroups[g.GetId()] = gg
+			case "system":
+				systemGroups = append(systemGroups, g)
 			}
 
-			groups[g.GetId()] = gg
 		}
 		if cursor == "" {
 			break
 		}
 	}
-	return groups, nil
-}
-
-func GetGuildGroupMemberships(ctx context.Context, nk runtime.NakamaModule, userID string) (map[string]GuildGroupMembership, error) {
-
-	// Get the caller's nakama user ID
-	groups, err := UserGuildGroupsList(ctx, nk, userID)
-	if err != nil {
-		return nil, fmt.Errorf("error getting user guild groups: %w", err)
-	}
-
-	memberships := make(map[string]GuildGroupMembership, 0)
-	for _, group := range groups {
-		memberships[group.ID().String()] = *group.PermissionsUser(userID)
-	}
-
-	return memberships, nil
+	return guildGroups, systemGroups, nil
 }

@@ -83,15 +83,15 @@ func (p *EvrPipeline) gameserverRegistrationRequest(ctx context.Context, logger 
 	}
 
 	// Get a list of the user's guild memberships and set to the largest one
-	memberships, err := GetGuildGroupMemberships(ctx, p.runtimeModule, session.UserID().String())
+	guildGroups, err := GuildUserGroupsList(ctx, p.runtimeModule, session.UserID().String())
 	if err != nil {
 		return fmt.Errorf("failed to get guild groups: %w", err)
 	}
-	if len(memberships) == 0 {
+	if len(guildGroups) == 0 {
 		return fmt.Errorf("user is not in any guild groups")
 	}
 
-	params.memberships = memberships
+	params.guildGroups = guildGroups
 	StoreParams(ctx, &params)
 
 	// Get the guilds that the broadcaster wants to host for
@@ -111,14 +111,14 @@ func (p *EvrPipeline) gameserverRegistrationRequest(ctx context.Context, logger 
 			break
 		}
 
-		if m, ok := memberships[groupID]; ok && m.IsServerHost {
+		if m, ok := guildGroups[groupID]; ok && m.IsServerHost(session.userID.String()) {
 			groupIDs = append(groupIDs, groupID)
 		}
 	}
 
 	if len(groupIDs) == 0 {
-		for groupID, m := range memberships {
-			if m.IsServerHost {
+		for groupID, m := range guildGroups {
+			if m.IsServerHost(session.userID.String()) {
 				groupIDs = append(groupIDs, groupID)
 			}
 		}

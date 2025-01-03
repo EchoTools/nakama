@@ -18,6 +18,7 @@ const (
 	CacheStorageCollection    = "Cache"
 	IPinfoCacheKey            = "IPinfo"
 	CosmeticLoadoutCollection = "CosmeticLoadouts"
+	CosmeticLoadoutKey        = "loadouts"
 	VRMLStorageCollection     = "VRML"
 
 	// The Application ID for Echo VR

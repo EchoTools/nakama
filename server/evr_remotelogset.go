@@ -306,7 +306,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				ClientIsPCVR:     params.isPCVR,
 				ClientUserID:     session.userID.String(),
 				ClientUsername:   session.Username(),
-				ClientDiscordID:  params.discordID,
+				ClientDiscordID:  params.DiscordID(),
 				ClientEvrID:      params.xpID,
 				RemoteLogMessage: string(msgData),
 			}
