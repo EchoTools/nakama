@@ -13,27 +13,78 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 )
 
-func afterUpdateAccount(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, in *api.UpdateAccountRequest) error {
-	evt := &api.Event{
-		Name:       "account_updated",
-		Properties: map[string]string{},
-		External:   false,
+const (
+	EventLobbySessionAuthorized = "lobby_session_authorized"
+	EventUserLogin              = "user_login"
+	EventAccountUpdated         = "account_updated"
+	EventSessionStart           = "session_start"
+)
+
+type EventDispatch struct {
+	ctx    context.Context
+	logger runtime.Logger
+	nk     runtime.NakamaModule
+	db     *sql.DB
+
+	cache *sync.Map
+}
+
+func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) (*EventDispatch, error) {
+	return &EventDispatch{
+		ctx:    ctx,
+		logger: logger,
+		db:     db,
+		nk:     nk,
+		cache:  &sync.Map{},
+	}, nil
+}
+
+func (h *EventDispatch) eventFn(ctx context.Context, logger runtime.Logger, evt *api.Event) {
+	logger.WithField("event", evt).Debug("received event")
+
+	eventMap := map[string]func(context.Context, runtime.Logger, map[string]string) error{
+		EventLobbySessionAuthorized: h.eventSessionStart,
+		EventUserLogin:              h.eventSessionStart,
+		EventAccountUpdated:         h.eventSessionEnd,
+		EventSessionStart:           h.eventSessionStart,
 	}
-	return nk.Event(context.Background(), evt)
+
+	fields := map[string]any{
+		"event":   evt.Name,
+		"handler": fmt.Sprintf("%T", h),
+	}
+
+	for k, v := range evt.Properties {
+		fields[k] = v
+	}
+
+	logger = logger.WithFields(fields)
+
+	if fn, ok := eventMap[evt.Name]; ok {
+		if err := fn(ctx, logger, evt.Properties); err != nil {
+			logger.Error("error processing event: %v", err)
+		}
+		logger.Debug("processed event")
+	} else {
+		logger.Warn("unhandled event: %s", evt.Name)
+	}
+
 }
 
-func eventSessionEnd(ctx context.Context, logger runtime.Logger, evt *api.Event) {
-	logger.Debug("process event session end: %+v", evt)
+func (h *EventDispatch) eventSessionStart(ctx context.Context, logger runtime.Logger, properties map[string]string) error {
+	logger.Debug("process event session start: %+v", properties)
+	return nil
 }
 
-func eventSessionStart(ctx context.Context, logger runtime.Logger, evt *api.Event) {
-	logger.Debug("process event session start: %+v", evt)
+func (h *EventDispatch) eventSessionEnd(ctx context.Context, logger runtime.Logger, properties map[string]string) error {
+	logger.Debug("process event session end: %+v", properties)
+	return nil
 }
 
-func eventLobbySessionAuthorized(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, cache *sync.Map, evt *api.Event) error {
-	groupID := evt.Properties["group_id"]
-	userID := evt.Properties["user_id"]
-	sessionID := evt.Properties["session_id"]
+func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, cache *sync.Map, properties map[string]string) error {
+	groupID := properties["group_id"]
+	userID := properties["user_id"]
+	sessionID := properties["session_id"]
 
 	var err error
 	var md *GroupMetadata
@@ -70,7 +121,10 @@ func eventLobbySessionAuthorized(ctx context.Context, logger runtime.Logger, db 
 			return fmt.Errorf("failed to load params")
 		}
 
-		loginHistory := params.loginHistory
+		loginHistory, err := LoginHistoryLoad(ctx, nk, userID)
+		if err != nil {
+			logger.Error("error loading login history: %v", err)
+		}
 
 		if ok := loginHistory.NotifyGroup(groupID); ok {
 
@@ -102,6 +156,21 @@ func eventLobbySessionAuthorized(ctx context.Context, logger runtime.Logger, db 
 
 		}
 	}
-	logger.Debug("process event lobby session authorized: %+v", evt)
+	return nil
+}
+
+func (h *EventDispatch) handleUserLogin(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, evt *api.Event) error {
+	userID := evt.Properties["user_id"]
+
+	loginHistory, err := LoginHistoryLoad(ctx, nk, userID)
+	if err != nil {
+		logger.Error("error loading login history: %v", err)
+	}
+	loginHistory.UpdateAlternates(ctx, nk)
+
+	if err := loginHistory.Store(ctx, nk); err != nil {
+		logger.Error("failed to store login history: %v", err)
+	}
+
 	return nil
 }
