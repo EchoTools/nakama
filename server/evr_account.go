@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sync/atomic"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -124,6 +123,7 @@ type AccountMetadata struct {
 	MutedPlayers           []evr.EvrId                `json:"muted_players"`             // The muted players
 	GhostedPlayers         []evr.EvrId                `json:"ghosted_players"`           // The ghosted players
 	GameSettings           *evr.RemoteLogGameSettings `json:"game_settings"`             // The game settings
+	LegalConsents          evr.LegalConsents          `json:"legal_consents"`            // The legal consents
 }
 
 func (a *AccountMetadata) ID() string {
@@ -230,18 +230,6 @@ func (a *AccountMetadata) GetMuted() []evr.EvrId {
 	if a.MutedPlayers == nil {
 		return make([]evr.EvrId, 0)
 	}
-	v, ok := a.MutedPlayers.Load().([]evr.EvrId)
-	if !ok {
-		return make([]evr.EvrId, 0)
-	}
-	return v
-}
-
-func (a *AccountMetadata) SetMuted(muted []evr.EvrId) {
-	if a.MutedPlayers == nil {
-		a.MutedPlayers = &atomic.Value{}
-	}
-	a.MutedPlayers.Store(muted)
 	return a.MutedPlayers
 }
 

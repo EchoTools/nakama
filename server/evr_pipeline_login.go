@@ -11,6 +11,7 @@ import (
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
+	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/muesli/reflow/wordwrap"
 	"go.uber.org/zap"
@@ -93,7 +94,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		return errors.New("Invalid HMD Serial Number: " + sn)
 	}
 
-	if !slices.Contains(evr.KnownBuilds, request.Payload.BuildVersion) {
+	if request.Payload.BuildVersion != 0 && !slices.Contains(evr.KnownBuilds, request.Payload.BuildVersion) {
 		logger.Warn("Unknown build version", zap.Int64("build", int64(request.Payload.BuildVersion)))
 	}
 
@@ -109,8 +110,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 				return fmt.Errorf("failed to link device: %w", err)
 			}
 
-			params.account = deviceAccount
-
+			// The session is not authenticated. Create a link ticket.
 		} else {
 			if linkTicket, err := p.linkTicket(ctx, logger, params.xpID, session.clientIP, &request.Payload); err != nil {
 				return fmt.Errorf("error creating link ticket: %s", err)
@@ -141,26 +141,14 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	session.userID = uuid.FromStringOrNil(params.account.User.Id)
 	session.SetUsername(params.account.User.Username)
 
-	if status.Code(err) != codes.PermissionDenied || params.account.DisableTime != nil {
+	if status.Code(err) == codes.PermissionDenied || params.account.DisableTime != nil {
 		logger.Info("Attempted login to banned account.",
 			zap.String("xpid", params.xpID.Token()),
 			zap.String("client_ip", session.clientIP),
 			zap.String("uid", params.account.User.Id),
 			zap.Any("login_payload", request.Payload))
 
-		// If the user has provided a password for the first time, then set the password on the account.
-	} else if params.authPassword != "" && deviceAccount.Email == "" {
-
-		// Set the password on the account.
-		if err := LinkEmail(ctx, logger, session.pipeline.db, uuid.FromStringOrNil(deviceAccount.User.Id), deviceAccount.User.Id+"@"+p.placeholderEmail, params.authPassword); err != nil {
-			if err != nil {
-				return fmt.Errorf("failed to link email: %w", err)
-			}
-		}
-	} else {
-
-		// Some other error occurred.
-		return fmt.Errorf("failed to get account: %w", err)
+		return fmt.Errorf("Account disabled by EchoVRCE Admins.")
 	}
 
 	// Migrate the user's account
@@ -174,7 +162,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	if err != nil {
 		return fmt.Errorf("failed to load login history: %w", err)
 	}
-	defer params.loginHistory.Store(ctx, p.runtimeModule)
+	defer loginHistory.Store(ctx, p.runtimeModule)
 	// Automatically validate the IP if the session is authenticated.
 	if !session.userID.IsNil() {
 
@@ -223,18 +211,24 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		return fmt.Errorf("failed to get guild groups: %w", err)
 	}
 
-	if g, ok := params.guildGroups[params.accountMetadata.ActiveGroupID]; !ok {
+	if _, ok := params.guildGroups[params.accountMetadata.ActiveGroupID]; !ok {
 		// User is not in the active group
-		logger.Warn("User is not in the active group", zap.String("uid", params.account.User.Id), zap.String("gid", g.Group.Id))
+		logger.Warn("User is not in the active group", zap.String("uid", params.account.User.Id), zap.String("gid", params.accountMetadata.ActiveGroupID))
 		params.accountMetadata.ActiveGroupID = uuid.Nil.String()
 	}
 
 	// If the user is not in a group, set the active group to the group with the most members
 	if params.accountMetadata.ActiveGroupID == uuid.Nil.String() {
+
 		groupIDs := make([]string, 0, len(params.guildGroups))
 		for id := range params.guildGroups {
 			groupIDs = append(groupIDs, id)
 		}
+
+		if len(groupIDs) == 0 {
+			return fmt.Errorf("user is not in any groups")
+		}
+
 		// Sort the groups by the edgecount
 		slices.SortStableFunc(groupIDs, func(a, b string) int {
 			return int(params.guildGroups[a].Group.EdgeCount - params.guildGroups[b].Group.EdgeCount)
@@ -294,7 +288,7 @@ func (p *EvrPipeline) channelInfoRequest(ctx context.Context, logger *zap.Logger
 	}
 
 	groupID := uuid.Nil
-	if groupID := params.accountMetadata.GetActiveGroupID(); groupID == uuid.Nil {
+	if groupID = params.accountMetadata.GetActiveGroupID(); groupID.IsNil() {
 		return fmt.Errorf("active group is nil")
 	}
 
@@ -344,7 +338,7 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 		return errors.New("session parameters not found")
 	}
 
-	serverProfile, err := NewUserServerProfile(ctx, p.db, params.account, params.xpID)
+	serverProfile, err := NewUserServerProfile(ctx, p.db, params.account, params.xpID, params.accountMetadata.GetActiveGroupID().String())
 	if err != nil {
 		return fmt.Errorf("failed to get server profile: %w", err)
 	}
@@ -355,10 +349,10 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 		// Purge the profile after the session is done
 		<-session.Context().Done()
 		<-time.After(time.Minute * 1)
-		p.profileRegistry.PurgeProfile(params.xpID)
+		p.profileCache.PurgeProfile(params.xpID)
 	}()
 
-	clientProfile, err := NewClientProfile(ctx, p.db, p.runtimeModule, params.accountMetadata, params.xpID)
+	clientProfile, err := NewClientProfile(ctx, params.accountMetadata, params.xpID)
 	if err != nil {
 		return fmt.Errorf("failed to get client profile: %w", err)
 	}
@@ -439,7 +433,7 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 		CombatDominantHand: update.CombatDominantHand,
 		CombatAbility:      update.CombatAbility,
 	}
-
+	newMetadata.LegalConsents = update.LegalConsents
 	newMetadata.GhostedPlayers = update.GhostedPlayers.Players
 	newMetadata.MutedPlayers = update.MutedPlayers.Players
 
@@ -654,6 +648,8 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 		logger.Warn("Failed to send UserServerProfileUpdateSuccess", zap.Error(err))
 	}
 
+	defer p.profileCache.PurgeProfile(request.EvrID)
+
 	// Validate the player was in the session
 	matchID, err := NewMatchID(uuid.UUID(request.Payload.SessionID), p.node)
 	if err != nil {
@@ -719,7 +715,13 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 
 	// temp disable
 
-	if !serviceSettings.Load().DisableStatisticsUpdates {
+	// If the player isn't a member of the group, do not update the stats
+	metadata, err := GetAccountMetadata(ctx, p.runtimeModule, playerInfo.UserID)
+	if err != nil {
+		return fmt.Errorf("failed to get account metadata: %w", err)
+	}
+	groupIDStr := label.GetGroupID().String()
+	if !serviceSettings.Load().DisableStatisticsUpdates && metadata.GroupDisplayNames[groupIDStr] != "" {
 
 		userSettings, err := LoadMatchmakingSettings(ctx, p.runtimeModule, playerInfo.UserID)
 		if err != nil {
@@ -731,29 +733,29 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 			} else {
 				playerInfo.RatingMu = rating.Mu
 				playerInfo.RatingSigma = rating.Sigma
-				if err := recordRatingToLeaderboard(ctx, p.runtimeModule, playerInfo.UserID, playerInfo.DisplayName, label.Mode, rating); err != nil {
+				if err := MatchmakingRatingStore(ctx, p.runtimeModule, playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, rating); err != nil {
 					logger.Warn("Failed to record percentile to leaderboard", zap.Error(err))
 				}
-				userSettings.SetRating(label.Mode, rating)
 			}
 
 			// Calculate a new rank percentile
-			if rankPercentile, err := CalculateSmoothedPlayerRankPercentile(ctx, logger, p.runtimeModule, playerInfo.UserID, label.Mode); err != nil {
+			if rankPercentile, err := CalculateSmoothedPlayerRankPercentile(ctx, logger, p.runtimeModule, playerInfo.UserID, groupIDStr, label.Mode); err != nil {
 				logger.Error("Failed to calculate new player rank percentile", zap.Error(err))
 			} else {
 				// Add leaderboard for percentile
-				if err := recordPercentileToLeaderboard(ctx, p.runtimeModule, playerInfo.UserID, playerInfo.DisplayName, label.Mode, rankPercentile); err != nil {
+				if err := MatchmakingRankPercentileStore(ctx, p.runtimeModule, playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, rankPercentile); err != nil {
 					logger.Warn("Failed to record percentile to leaderboard", zap.Error(err))
 				}
-				userSettings.RankPercentile = rankPercentile
 			}
+			userSettings.GlobalSettingsVersion = GlobalSettings().version
+
 			if err := StoreMatchmakingSettings(ctx, p.runtimeModule, playerInfo.UserID, userSettings); err != nil {
 				logger.Warn("Failed to save matchmaking settings", zap.Error(err))
 			}
 		}
 
 		// Process the update into the leaderboard and profile
-		err = p.leaderboardRegistry.ProcessProfileUpdate(ctx, logger, playerInfo.UserID, playerInfo.DisplayName, label.Mode, &request.Payload)
+		err = p.leaderboardRegistry.ProcessProfileUpdate(ctx, logger, playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, &request.Payload)
 		if err != nil {
 			logger.Error("Failed to process profile update", zap.Error(err), zap.Any("payload", request.Payload))
 			return fmt.Errorf("failed to process profile update: %w", err)
@@ -766,69 +768,95 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.OtherUserProfileRequest)
 
-	go func() {
-		var data json.RawMessage
-		var err error
-		/*
-			// if the requester is a dev, modify the display name
-			if params, ok := LoadParams(ctx); ok && params.IsGlobalDeveloper.Load() {
-				profile := evr.ServerProfile{}
+	var ok bool
+	data, ok := p.profileCache.Load(request.EvrId)
+	if !ok {
+		nk := p.runtimeModule
+		// Get the MatchID From this players session
+		matchIDs, err := MatchIDsByEvrID(ctx, nk, request.EvrId)
+		if err != nil {
+			return fmt.Errorf("failed to get matchID: %w", err)
+		}
 
-				bytes, _ := p.profileRegistry.GetCached(ctx, request.EvrId)
+		callerID := session.userID.String()
+		var userID string
+		var groupID string
 
-				if err = json.Unmarshal(*bytes, &profile); err != nil {
-					logger.Error("Failed to unmarshal cached profile", zap.Error(err))
-					return
-				}
+		for _, matchID := range matchIDs {
 
-				// Get the match the current player is in
-				if matchID, _, err := GetMatchIDBySessionID(p.runtimeModule, session.id); err == nil {
-
-					if label, err := MatchLabelByID(ctx, p.runtimeModule, matchID); err == nil && label != nil {
-
-						// Add asterisk if the player is backfill
-						if player := label.GetPlayerByEvrID(request.EvrId); player != nil {
-							// If the player is backfill, add a note to the display name
-
-							if player.IsBackfill() {
-								profile.DisplayName = fmt.Sprintf("%s*", profile.DisplayName)
-							}
-
-							percentile := int(player.RankPercentile * 100)
-							rating := int(player.RatingMu)
-							sigma := int(player.RatingSigma)
-
-							profile.DisplayName = fmt.Sprintf("%s|%d/%d:%d", profile.DisplayName, percentile, rating, sigma)
-						}
-					}
-				}
-				var rawMessage json.RawMessage
-				if rawMessage, err = json.Marshal(profile); err != nil {
-					data = &rawMessage
-				}
-			}
-		*/
-		if data == nil {
-			data, err = p.profileRegistry.GetCached(ctx, request.EvrId)
+			label, err := MatchLabelByID(ctx, nk, matchID)
 			if err != nil {
-				logger.Warn("Failed to get cached profile", zap.Error(err))
-				j, err := json.Marshal(evr.NewServerProfile())
-				if err != nil {
-					logger.Error("Failed to marshal empty profile", zap.Error(err))
+				return fmt.Errorf("failed to get match label: %w", err)
+			}
+
+			// Find the common match
+			userID = ""
+			groupID = ""
+			foundCaller := false
+			for _, player := range label.Players {
+				if player.EvrID == request.EvrId {
+					userID = player.UserID
+					groupID = label.GetGroupID().String()
 				}
-				data = json.RawMessage(j)
+				if player.UserID == callerID {
+					foundCaller = true
+				}
+			}
+			if userID != "" && foundCaller {
+				break
 			}
 		}
-		// Construct the response
-		response := &evr.OtherUserProfileSuccess{
-			EvrId:             request.EvrId,
-			ServerProfileJSON: data,
+
+		if userID == "" {
+			return fmt.Errorf("failed to find player in match")
 		}
 
-		// Send the profile to the client
-		if err := session.SendEvrUnrequire(response); err != nil {
-			logger.Warn("Failed to send OtherUserProfileSuccess", zap.Error(err))
+		// Generate the profile
+		account, err := p.runtimeModule.AccountGetId(ctx, userID)
+		if err != nil {
+			return fmt.Errorf("failed to get account: %w", err)
 		}
-	}()
+
+		profile, err := NewUserServerProfile(ctx, p.db, account, request.EvrId, groupID)
+		if err != nil {
+			return fmt.Errorf("failed to generate profile: %w", err)
+		}
+
+		p.profileCache.Store(*profile)
+
+		data, ok = p.profileCache.Load(request.EvrId)
+		if !ok {
+			return fmt.Errorf("failed to load profile")
+		}
+	}
+
+	// Construct the response
+	response := &evr.OtherUserProfileSuccess{
+		EvrId:             request.EvrId,
+		ServerProfileJSON: data,
+	}
+
+	// Send the profile to the client
+	if err := session.SendEvrUnrequire(response); err != nil {
+		logger.Warn("Failed to send OtherUserProfileSuccess", zap.Error(err))
+	}
+
 	return nil
+}
+
+func MatchIDsByEvrID(ctx context.Context, nk runtime.NakamaModule, evrID evr.EvrId) ([]MatchID, error) {
+	presences, err := nk.StreamUserList(StreamModeService, evrID.UUID().String(), "", StreamLabelMatchService, false, true)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user stream: %w", err)
+	}
+
+	matchIDs := make([]MatchID, 0, len(presences))
+	for _, presence := range presences {
+		if matchID, err := MatchIDFromString(presence.GetStatus()); err != nil {
+			continue
+		} else {
+			matchIDs = append(matchIDs, matchID)
+		}
+	}
+	return matchIDs, nil
 }

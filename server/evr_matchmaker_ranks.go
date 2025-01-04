@@ -10,7 +10,7 @@ import (
 	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
-func CalculateSmoothedPlayerRankPercentile(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, userID string, mode evr.Symbol) (float64, error) {
+func CalculateSmoothedPlayerRankPercentile(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, userID, groupID string, mode evr.Symbol) (float64, error) {
 	settings := ServiceSettings().Matchmaking.RankPercentile
 
 	if len(settings.LeaderboardWeights) == 0 {
@@ -21,12 +21,12 @@ func CalculateSmoothedPlayerRankPercentile(ctx context.Context, logger *zap.Logg
 		mode = evr.ModeArenaPublic
 	}
 
-	dampingPercentile, err := RecalculatePlayerRankPercentile(ctx, logger, nk, userID, mode, settings.ResetScheduleDamper, settings.Default, settings.LeaderboardWeights[mode])
+	dampingPercentile, err := RecalculatePlayerRankPercentile(ctx, logger, nk, userID, groupID, mode, settings.ResetScheduleDamper, settings.Default, settings.LeaderboardWeights[mode])
 	if err != nil {
 		return 0.0, fmt.Errorf("failed to get damping percentile: %w", err)
 	}
 
-	activePercentile, err := RecalculatePlayerRankPercentile(ctx, logger, nk, userID, mode, settings.ResetSchedule, dampingPercentile, settings.LeaderboardWeights[mode])
+	activePercentile, err := RecalculatePlayerRankPercentile(ctx, logger, nk, userID, groupID, mode, settings.ResetSchedule, dampingPercentile, settings.LeaderboardWeights[mode])
 	if err != nil {
 		return 0.0, fmt.Errorf("failed to get active percentile: %w", err)
 	}
@@ -36,14 +36,14 @@ func CalculateSmoothedPlayerRankPercentile(ctx context.Context, logger *zap.Logg
 	return percentile, nil
 }
 
-func RecalculatePlayerRankPercentile(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, userID string, mode evr.Symbol, periodicity string, defaultRankPercentile float64, boardNameWeights map[string]float64) (float64, error) {
+func RecalculatePlayerRankPercentile(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, userID, groupID string, mode evr.Symbol, resetSchedule string, defaultRankPercentile float64, boardNameWeights map[string]float64) (float64, error) {
 
 	percentiles := make([]float64, 0, len(boardNameWeights))
 	weights := make([]float64, 0, len(boardNameWeights))
 
 	for boardName, weight := range boardNameWeights {
 
-		boardID := fmt.Sprintf("%s:%s:%s", mode.String(), boardName, periodicity)
+		boardID := StatisticBoardID(groupID, mode, boardName, resetSchedule)
 
 		records, _, _, _, err := nk.LeaderboardRecordsList(ctx, boardID, []string{userID}, 10000, "", 0)
 		if err != nil {

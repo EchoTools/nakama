@@ -1605,24 +1605,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					User     VRMLUser `json:"user"`
 					ThisGame ThisGame `json:"thisGame"`
 				}
-				jsonData, err := json.Marshal(players[0])
-				if err != nil {
-					return status.Error(codes.Internal, "failed to marshal player data: "+err.Error())
-				}
-
-				// Set the VRML ID for the user in their profile as a storage object
-				_, err = nk.StorageWrite(ctx, []*runtime.StorageWrite{
-					{
-						Collection: VRMLStorageCollection,
-						Key:        playerID,
-						UserID:     user.ID,
-						Value:      string(jsonData),
-						Version:    "*",
-					},
-				})
-				if err != nil {
-					return status.Error(codes.Internal, "failed to set VRML ID: "+err.Error())
-				}
 
 				logger.Info("set vrml id", zap.String("discord_id", user.ID), zap.String("discord_username", user.Username), zap.String("vrml_id", playerID))
 
@@ -1643,7 +1625,11 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			d.cache.QueueSyncMember(i.GuildID, user.ID)
 
 			err := d.handleProfileRequest(ctx, logger, nk, s, i, user.ID, user.Username, true, true, false)
-			logger.Debug("whoami", zap.String("discord_id", user.ID), zap.String("discord_username", user.Username), zap.Error(err))
+			logger.WithFields(map[string]interface{}{
+				"discord_id":       user.ID,
+				"discord_username": user.Username,
+				"error":            err,
+			}).Debug("whoami")
 			return err
 		},
 

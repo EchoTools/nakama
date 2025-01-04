@@ -23,7 +23,20 @@ type LeaderboardRegistry struct {
 	queueCh chan LeaderboardRecordWriteQueueEntry
 }
 
-func PeriodicityToSchedule(periodicity string) string {
+func StatisticBoardID(groupID string, mode evr.Symbol, statName, resetSchedule string) string {
+	return fmt.Sprintf("%s:%s:%s:%s", groupID, mode.String(), statName, resetSchedule)
+}
+
+func ParseStatisticBoardID(id string) (groupID string, mode evr.Symbol, statName string, resetSchedule string, err error) {
+	parts := strings.SplitN(id, ":", 4)
+	if len(parts) != 4 {
+		err = fmt.Errorf("invalid leaderboard ID: %s", id)
+		return
+	}
+	return parts[0], evr.ToSymbol(parts[1]), parts[2], parts[3], nil
+}
+
+func ResetScheduleToCron(periodicity string) string {
 	switch periodicity {
 	case "daily":
 		return "0 0 * * *"
@@ -100,6 +113,7 @@ func (r *LeaderboardRegistry) leaderboardConfig(name, op, group string) (operato
 }
 
 type LeaderboardMeta struct {
+	groupID       string
 	mode          evr.Symbol
 	name          string
 	operator      string
@@ -107,7 +121,7 @@ type LeaderboardMeta struct {
 }
 
 func (l LeaderboardMeta) ID() string {
-	return fmt.Sprintf("%s:%s:%s", l.mode.String(), l.name, l.resetSchedule)
+	return StatisticBoardID(l.groupID, l.mode, l.name, l.resetSchedule)
 }
 
 func LeaderboardMetaFromID(id string) (LeaderboardMeta, error) {
@@ -119,14 +133,15 @@ func LeaderboardMetaFromID(id string) (LeaderboardMeta, error) {
 	mode := evr.ToSymbol(parts[0])
 
 	return LeaderboardMeta{
+		groupID:       parts[0],
 		mode:          mode,
 		name:          parts[1],
 		resetSchedule: parts[2],
 	}, nil
 }
 
-func (r *LeaderboardRegistry) ProcessProfileUpdate(ctx context.Context, logger *zap.Logger, userID, displayName string, mode evr.Symbol, payload *evr.UpdatePayload) error {
-	var prefix, periodicity string
+func (r *LeaderboardRegistry) ProcessProfileUpdate(ctx context.Context, logger *zap.Logger, userID, displayName, groupID string, mode evr.Symbol, payload *evr.UpdatePayload) error {
+	var prefix, resetSchedule string
 
 	opsByStatGroup := make(map[string]map[LeaderboardMeta]float64)
 	// Process each statGroup
@@ -138,40 +153,44 @@ func (r *LeaderboardRegistry) ProcessProfileUpdate(ctx context.Context, logger *
 
 		if statGroup == "arena" {
 
+			resetSchedule = "alltime"
 			prefix = "Arena"
-			periodicity = "alltime"
 
 		} else if statGroup == "combat" {
 
+			resetSchedule = "alltime"
 			prefix = "Combat"
-			periodicity = "alltime"
 
-		} else if strings.HasPrefix(statGroup, "daily_") {
+		}
 
-			prefix = "Arena"
-			periodicity = "daily"
+		if strings.HasPrefix(statGroup, "daily_") {
+
+			resetSchedule = "daily"
 
 		} else if strings.HasPrefix(statGroup, "weekly_") {
 
-			prefix = "Arena"
-			periodicity = "weekly"
+			resetSchedule = "weekly"
 
 		} else {
 			r.logger.Warn("Unknown mode for profile update", zap.String("mode", mode.String()), zap.Any("payload", payload))
 			continue
 		}
 
-		// Create the games played stat
-		r.createGamesPlayedStat(stats, prefix)
+		// Create games played stat
+		stats["GamesPlayed"] = evr.StatUpdate{
+			Operator: "add",
+			Value:    stats[prefix+"Wins"].Value + stats[prefix+"Losses"].Value,
+		}
 
 		// Build the operations
 		for name, stat := range stats {
 
 			meta := LeaderboardMeta{
+				groupID:       groupID,
 				mode:          mode,
 				name:          name,
 				operator:      stat.Operator,
-				resetSchedule: periodicity,
+				resetSchedule: resetSchedule,
 			}
 			r.LeaderboardTabletStatWrite(context.Background(), meta, userID, displayName, stat.Value)
 		}
@@ -212,21 +231,6 @@ func (r *LeaderboardRegistry) LeaderboardTabletStatWrite(ctx context.Context, me
 	}
 }
 
-func (r *LeaderboardRegistry) createGamesPlayedStat(stats map[string]evr.StatUpdate, prefix string) {
-	wins := stats[prefix+"Wins"].Value
-	losses := stats[prefix+"Losses"].Value
-	total := wins + losses
-
-	if total == 0 {
-		return
-	}
-
-	stats[prefix+"GamesPlayed"] = evr.StatUpdate{
-		Operator: "add",
-		Value:    total,
-	}
-}
-
 func (*LeaderboardRegistry) valueToScore(v float64) (int64, int64) {
 	// If it's a whole number, return it as such.
 	if v == float64(int64(v)) {
@@ -261,7 +265,7 @@ func ValueToScore(v float64) (int64, int64) {
 	return whole, fractional
 }
 
-func (*LeaderboardRegistry) ScoreToValue(score int64, subscore int64) any {
+func ScoreToValue(score int64, subscore int64) float64 {
 	// If there's no subscore, return the score as a whole number.
 	if subscore == 0 {
 		return float64(score)
@@ -296,4 +300,120 @@ func (r *LeaderboardRegistry) RecordToStatistic(operator int, score, subscore in
 		Value:    value,
 		Count:    count,
 	}
+}
+
+func LeaderboardsUserTabletStatisticsGet(ctx context.Context, db *sql.DB, userID, groupID string, modes []evr.Symbol, resetSchedule string) (map[string]map[string]evr.MatchStatistic, error) {
+	if len(modes) == 0 {
+		return nil, nil
+	}
+	query := `
+	SELECT leaderboard_id, operator, score, subscore
+ 	FROM leaderboard_record lr, leaderboard l
+ 		WHERE lr.leaderboard_id = l.id
+   		AND owner_id = $1
+		AND (%s)
+	`
+	params := make([]interface{}, 0, len(modes)+1)
+
+	params = append(params, userID)
+
+	likes := make([]string, 0, len(modes))
+	for i, mode := range modes {
+		likes = append(likes, fmt.Sprintf(" l.id LIKE $%d", i+2))
+		params = append(params, fmt.Sprintf("%s:%s:%%:%s", groupID, mode.String(), resetSchedule))
+	}
+
+	query = fmt.Sprintf(query, strings.Join(likes, " OR "))
+
+	rows, err := db.QueryContext(ctx, query, params...)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return map[string]map[string]evr.MatchStatistic{
+				"arena": {
+					"Level": evr.MatchStatistic{
+						Operator: "add",
+						Value:    1,
+					},
+				},
+				"combat": {
+					"Level": evr.MatchStatistic{
+						Operator: "add",
+						Value:    1,
+					},
+				},
+			}, nil
+		}
+		return nil, fmt.Errorf("failed to query leaderboard records: %w", err)
+	}
+
+	records := make(map[string]map[string]evr.MatchStatistic) // map[mode]map[statName]MatchStatistic
+
+	var dbLeaderboardID string
+	var dbOperator int
+	var dbScore int64
+	var dbSubscore int64
+
+	defer rows.Close()
+
+	gamesPlayedByGroup := make(map[string]int64)
+
+	for rows.Next() {
+
+		err = rows.Scan(&dbLeaderboardID, &dbOperator, &dbScore, &dbSubscore)
+		if err != nil {
+
+			return nil, err
+		}
+		_, mode, statName, _, err := ParseStatisticBoardID(dbLeaderboardID)
+		if err != nil {
+			return nil, fmt.Errorf("invalid leaderboard ID: %s", dbLeaderboardID)
+		}
+
+		var statGroup string
+
+		switch mode {
+		case evr.ModeArenaPublic:
+			statGroup = "arena"
+		case evr.ModeCombatPublic:
+			statGroup = "combat"
+		default:
+			continue
+		}
+		var op string
+		switch dbOperator {
+		case LeaderboardOperatorSet:
+			op = "set"
+		case LeaderboardOperatorBest:
+			op = "max"
+		case LeaderboardOperatorIncrement:
+			op = "add"
+		}
+
+		if _, ok := records[statGroup]; !ok {
+			records[statGroup] = make(map[string]evr.MatchStatistic)
+		}
+
+		records[statGroup][statName] = evr.MatchStatistic{
+			Operator: op,
+			Value:    ScoreToTableStatistic(mode, statName, dbScore, dbSubscore),
+			Count:    1,
+		}
+
+		if statName == "GamesPlayed" {
+			gamesPlayedByGroup[statGroup] = records[statGroup][statName].Value.(int64)
+		}
+	}
+
+	// Use the GamesPlayed stat to fill in all the cnt's
+	for group, gamesPlayed := range gamesPlayedByGroup {
+		for statName, stat := range records[group] {
+			if statName == "GamesPlayed" {
+				continue
+			}
+			stat.Count = gamesPlayed
+			records[group][statName] = stat
+		}
+	}
+
+	return records, nil
 }

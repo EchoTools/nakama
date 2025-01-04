@@ -17,9 +17,9 @@ import (
 )
 
 const (
-	LoginStorageCollection = "Devices"
+	LoginStorageCollection = "Login"
 	LoginHistoryStorageKey = "history"
-	LoginHistoryCacheIndex = "Index_DeviceHistory"
+	LoginHistoryCacheIndex = "Index_LoginHistory"
 )
 
 var (
@@ -89,7 +89,6 @@ func NewLoginHistory() *LoginHistory {
 	}
 }
 
-// Returns true if the display name history was updated
 func (h *LoginHistory) Update(xpid evr.EvrId, clientIP string, loginData *evr.LoginProfile) {
 	if h.History == nil {
 		h.History = make(map[string]*LoginHistoryEntry)

@@ -64,7 +64,7 @@ type EvrPipeline struct {
 	runtimeModule        *RuntimeGoNakamaModule
 	runtimeLogger        runtime.Logger
 
-	profileRegistry              *ProfileCache
+	profileCache                 *ProfileCache
 	discordCache                 *DiscordCache
 	appBot                       *DiscordAppBot
 	leaderboardRegistry          *LeaderboardRegistry
@@ -84,17 +84,10 @@ type EvrPipeline struct {
 type ctxDiscordBotTokenKey struct{}
 
 func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, config Config, version string, socialClient *social.Client, storageIndex StorageIndex, leaderboardScheduler LeaderboardScheduler, leaderboardCache LeaderboardCache, leaderboardRankCache LeaderboardRankCache, sessionRegistry SessionRegistry, sessionCache SessionCache, statusRegistry StatusRegistry, matchRegistry MatchRegistry, matchmaker Matchmaker, tracker Tracker, router MessageRouter, streamManager StreamManager, metrics Metrics, pipeline *Pipeline, _runtime *Runtime) *EvrPipeline {
-
-	// Add the bot token to the context
-
-	vars := config.GetRuntime().Environment
-
-	ctx := context.WithValue(context.Background(), ctxDiscordBotTokenKey{}, vars["DISCORD_BOT_TOKEN"])
-
 	nk := _runtime.nk
-
-	runtimeLogger := NewRuntimeGoLogger(logger)
-
+	// Add the bot token to the context
+	vars := config.GetRuntime().Environment
+	ctx := context.WithValue(context.Background(), ctxDiscordBotTokenKey{}, vars["DISCORD_BOT_TOKEN"])
 	// Load the global settings
 	if _, err := LoadGlobalSettingsData(ctx, nk); err != nil {
 		logger.Error("Failed to load global settings", zap.Error(err))
@@ -114,6 +107,8 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		}
 		dg.StateEnabled = true
 	}
+
+	runtimeLogger := NewRuntimeGoLogger(logger)
 
 	leaderboardRegistry := NewLeaderboardRegistry(runtimeLogger, db, nk, config.GetName())
 	profileRegistry := NewProfileRegistry(nk, db, runtimeLogger, tracker, metrics)
@@ -184,7 +179,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		internalIP:   internalIP,
 		externalIP:   externalIP,
 
-		profileRegistry:                  profileRegistry,
+		profileCache:                     profileRegistry,
 		leaderboardRegistry:              leaderboardRegistry,
 		broadcasterRegistrationBySession: &broadcasterRegistrationBySession,
 		userRemoteLogJournalRegistry:     userRemoteLogJournalRegistry,

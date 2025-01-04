@@ -539,7 +539,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 
 			// Store the player's time in the match to a leaderboard
 
-			if err := recordMatchTimeToLeaderboard(ctx, nk, mp.GetUserId(), mp.GetUsername(), state.Mode, int64(time.Since(ts).Seconds())); err != nil {
+			if err := recordMatchTimeToLeaderboard(ctx, nk, mp.GetUserId(), mp.GetUsername(), state.GetGroupID().String(), state.Mode, int64(time.Since(ts).Seconds())); err != nil {
 				logger.Warn("Failed to record match time to leaderboard: %v", err)
 			}
 
@@ -575,31 +575,23 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 	return state
 }
 
-func recordMatchTimeToLeaderboard(ctx context.Context, nk runtime.NakamaModule, userID, username string, mode evr.Symbol, matchTimeSecs int64) error {
+func recordMatchTimeToLeaderboard(ctx context.Context, nk runtime.NakamaModule, userID, username, groupID string, mode evr.Symbol, matchTimeSecs int64) error {
 	periods := []string{"alltime", "daily", "weekly"}
 
 	for _, period := range periods {
-		id := fmt.Sprintf("%s:%s:%s", mode.String(), "LobbyTime", period)
+		id := StatisticBoardID(groupID, mode, LobbyTimeStatisticID, period)
 
 		// Write the record
-		_, err := nk.LeaderboardRecordWrite(ctx, id, userID, username, matchTimeSecs, 0, nil, nil)
+		if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, username, matchTimeSecs, 0, nil, nil); err != nil {
 
-		if err != nil {
 			// Try to create the leaderboard
-			err = nk.LeaderboardCreate(ctx, id, true, "desc", "incr", resetScheduleToCron(period), nil, true)
-
-			if err != nil {
+			if err = nk.LeaderboardCreate(ctx, id, true, "desc", "incr", ResetScheduleToCron(period), nil, true); err != nil {
 				return fmt.Errorf("Leaderboard create error: %w", err)
-			} else {
-				// Retry the write
-				_, err := nk.LeaderboardRecordWrite(ctx, id, userID, username, matchTimeSecs, 0, nil, nil)
-				if err != nil {
-					return fmt.Errorf("Leaderboard record write error: %w", err)
-				}
+			} else if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, username, matchTimeSecs, 0, nil, nil); err != nil {
+				return fmt.Errorf("Leaderboard record write error: %w", err)
 			}
 		}
 	}
-
 	return nil
 }
 

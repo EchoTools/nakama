@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/gofrs/uuid/v5"
 	"github.com/google/go-cmp/cmp"
 	"go.uber.org/zap"
 )
@@ -107,13 +106,4 @@ func wantGotDiff(t *testing.T, want, got interface{}) {
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Errorf("mismatch (-want +got):\n%s", diff)
 	}
-}
-
-type testProfileRegistry struct {
-	ProfileCache
-	mockLoadFn func(userID uuid.UUID) (*GameProfileData, bool)
-}
-
-func (r *testProfileRegistry) Load(userID uuid.UUID) (*GameProfileData, bool) {
-	return r.mockLoadFn(userID)
 }

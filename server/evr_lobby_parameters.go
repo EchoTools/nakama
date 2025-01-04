@@ -12,7 +12,6 @@ import (
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
-	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/intinig/go-openskill/rating"
 	"github.com/intinig/go-openskill/types"
@@ -58,7 +57,6 @@ type LobbySessionParameters struct {
 	FailsafeTimeout        time.Duration                 `json:"failsafe_timeout"` // The failsafe timeout
 	FallbackTimeout        time.Duration                 `json:"fallback_timeout"` // The fallback timeout
 	DisplayName            string                        `json:"display_name"`
-	profile                *GameProfileData
 	latencyHistory         LatencyHistory
 }
 
@@ -156,7 +154,12 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		}
 	}
 
-	rating := userSettings.GetRating(mode)
+	rating, err := MatchmakingRatingLoad(ctx, p.runtimeModule, r.GetGroupID().String(), userID, mode)
+	if err != nil {
+		logger.Warn("Failed to load matchmaking rating", zap.Error(err))
+		rating = NewDefaultRating()
+	}
+
 	entrantRole := r.GetEntrantRole(0)
 
 	nextMatchID := MatchID{}
@@ -291,23 +294,24 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 	}
 
 	// Only calculate it, if it's out of date.
-	rankPercentile := globalSettings.RankPercentile.Default
+
+	rankPercentile, err := MatchmakingRankPercentileLoad(ctx, p.runtimeModule, userID, groupID.String(), mode)
+	if err != nil {
+		logger.Warn("Failed to load user rank percentile", zap.Error(err))
+		rankPercentile = globalSettings.RankPercentile.Default
+	}
 
 	if userSettings.StaticBaseRankPercentile > 0 {
 		rankPercentile = userSettings.StaticBaseRankPercentile
-	} else if userSettings.RankPercentile == 0 || globalSettingsVersion != userSettings.GlobalSettingsVersion {
+	} else if rankPercentile == 0 || globalSettingsVersion != userSettings.GlobalSettingsVersion {
 
-		rankPercentile, err = CalculateSmoothedPlayerRankPercentile(ctx, logger, p.runtimeModule, userID, mode)
+		rankPercentile, err = CalculateSmoothedPlayerRankPercentile(ctx, logger, p.runtimeModule, userID, groupID.String(), mode)
 		if err != nil {
 			return nil, fmt.Errorf("failed to calculate smoothed player rank percentile: %w", err)
 		}
-	}
 
-	if rankPercentile != userSettings.RankPercentile {
-		userSettings.RankPercentile = rankPercentile
-		userSettings.GlobalSettingsVersion = globalSettingsVersion
-		if _, err := SaveToStorage(ctx, p.runtimeModule, userID, userSettings); err != nil {
-			logger.Warn("Failed to save user settings", zap.Error(err))
+		if err := MatchmakingRankPercentileStore(ctx, p.runtimeModule, userID, session.Username(), groupID.String(), mode, rankPercentile); err != nil {
+			logger.Warn("Failed to store user rank percentile", zap.Error(err))
 		}
 	}
 
@@ -629,75 +633,4 @@ func AverageLatencyHistories(histories LatencyHistory) map[string]int {
 	}
 
 	return averages
-}
-
-func recordRatingToLeaderboard(ctx context.Context, nk runtime.NakamaModule, userID, displayName string, mode evr.Symbol, rating types.Rating) error {
-	modeprefix := ""
-	switch mode {
-	case evr.ModeArenaPublic:
-		modeprefix = "Arena"
-	case evr.ModeCombatPublic:
-		modeprefix = "Combat"
-	}
-
-	scores := map[string]float64{
-		fmt.Sprintf("%s:%s:%s", mode.String(), modeprefix+"RatingSigma", "alltime"): rating.Sigma,
-		fmt.Sprintf("%s:%s:%s", mode.String(), modeprefix+"RatingMu", "alltime"):    rating.Mu,
-	}
-
-	for id, value := range scores {
-		score, subscore := ValueToScore(value)
-
-		// Write the record
-		if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, displayName, score, subscore, nil, nil); err != nil {
-			// Try to create the leaderboard
-			err = nk.LeaderboardCreate(ctx, id, true, "desc", "set", "", nil, true)
-			if err != nil {
-				return fmt.Errorf("Leaderboard create error: %w", err)
-			} else {
-				// Retry the write
-				_, err := nk.LeaderboardRecordWrite(ctx, id, userID, displayName, score, subscore, nil, nil)
-				if err != nil {
-					return fmt.Errorf("Leaderboard record write error: %w", err)
-				}
-			}
-		}
-	}
-
-	return nil
-}
-
-func recordPercentileToLeaderboard(ctx context.Context, nk runtime.NakamaModule, userID, username string, mode evr.Symbol, percentile float64) error {
-
-	modeprefix := ""
-	switch mode {
-	case evr.ModeArenaPublic:
-		modeprefix = "Arena"
-	case evr.ModeCombatPublic:
-		modeprefix = "Combat"
-	}
-
-	id := fmt.Sprintf("%s:%s:%s", mode.String(), modeprefix+"RankPercentile", "alltime")
-
-	score, subscore := ValueToScore(percentile)
-
-	// Write the record
-	_, err := nk.LeaderboardRecordWrite(ctx, id, userID, username, score, subscore, nil, nil)
-
-	if err != nil {
-		// Try to create the leaderboard
-		err = nk.LeaderboardCreate(ctx, id, true, "asc", "set", "", nil, true)
-
-		if err != nil {
-			return fmt.Errorf("Leaderboard create error: %w", err)
-		} else {
-			// Retry the write
-			_, err := nk.LeaderboardRecordWrite(ctx, id, userID, username, score, subscore, nil, nil)
-			if err != nil {
-				return fmt.Errorf("Leaderboard record write error: %w", err)
-			}
-		}
-	}
-
-	return nil
 }
