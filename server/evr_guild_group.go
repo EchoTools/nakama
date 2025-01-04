@@ -297,6 +297,9 @@ func (g *GuildGroup) PermissionsUser(userID string) *GuildGroupMembership {
 
 func (g *GuildGroup) RolesCacheUpdate(userID string, current []string) bool {
 
+	// Only cache relavent roles.
+	current = lo.Intersect(current, g.Roles.AsSlice())
+
 	removals, additions := lo.Difference(g.RolesUserList(userID), current)
 
 	if len(removals) == 0 && len(additions) == 0 {
