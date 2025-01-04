@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
-	"net/http"
-	"net/url"
 	"slices"
 	"sort"
 	"strconv"
@@ -717,31 +715,38 @@ type ServiceStatusService struct {
 }
 
 func ServiceStatusRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+
+	if cachedResponse, _, found := rpcResponseCache.Get("server-status"); found {
+		return cachedResponse.(string), nil
+	}
+
 	// /status/services,news?env=live&projectid=rad14
 	// Get the serviceStatus object from storage
 
-	payload = `{
-		2731580513406714229: [
-		  {
-			"serviceid": 1,
-			"available": true,
-			"message": "Service 1 operational."
-		  },
-		  {
-			"serviceid": 2,
-			"available": false,
-			"message": "Service 2 under maintenance."
-		  }
-		],
-		-3980269165826668125: [
-		  {
-			"message": "New feature release next week."
-		  },
-		  {
-			"message": "Scheduled downtime for maintenance."
-		  }
-		]
-	  }`
+	/*
+		 `{
+			2731580513406714229: [
+			  {
+				"serviceid": 1,
+				"available": true,
+				"message": "Service 1 operational."
+			  },
+			  {
+				"serviceid": 2,
+				"available": false,
+				"message": "Service 2 under maintenance."
+			  }
+			],
+			-3980269165826668125: [
+			  {
+				"message": "New feature release next week."
+			  },
+			  {
+				"message": "Scheduled downtime for maintenance."
+			  }
+			]
+		  }`
+	*/
 
 	objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
 		{
@@ -757,6 +762,8 @@ func ServiceStatusRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	if len(objs) == 0 {
 		return "", nil
 	}
+
+	rpcResponseCache.Set("server-status", objs[0].Value, 60*time.Second)
 
 	return objs[0].Value, nil
 }
