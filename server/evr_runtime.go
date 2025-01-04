@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/gofrs/uuid/v5"
@@ -79,8 +78,6 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		"server/score":                  ServerScoreRPC,
 		"server/scores":                 ServerScoresRPC,
 		"forcecheck":                    CheckForceUserRPC,
-		"oauth/redirect":                VRMasterLeagueOAuthRedirectRPC,
-
 		//"/v1/storage/game/sourcedb/rad15/json/r14/loading_tips.json": StorageLoadingTipsRPC,
 	}
 
@@ -120,23 +117,12 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		return fmt.Errorf("unable to register /evr/api service: %w", err)
 	}
 
-	// Register event handler
-	eventCache := &sync.Map{}
+	eventDispatch, err := NewEventDispatch(ctx, logger, db, nk, initializer)
+	if err != nil {
+		return fmt.Errorf("unable to create event dispatch: %w", err)
+	}
 
-	if err := initializer.RegisterEvent(func(ctx context.Context, logger runtime.Logger, evt *api.Event) {
-		logger.WithField("event", evt).Debug("received event")
-		switch evt.GetName() {
-		case "account_updated":
-			logger.Debug("process evt: %+v", evt)
-			// Send event to an analytics service.
-		case "lobby_session_authorized":
-			if err := eventLobbySessionAuthorized(ctx, logger, db, nk, eventCache, evt); err != nil {
-				logger.Error("error processing lobby session authorized event: %v", err)
-			}
-		default:
-			logger.Error("unrecognised evt: %+v", evt)
-		}
-	}); err != nil {
+	if err := initializer.RegisterEvent(eventDispatch.eventFn); err != nil {
 		return err
 	}
 
@@ -145,7 +131,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		return fmt.Errorf("unable to register matchmaker override: %w", err)
 	}
 
-	Migrations(ctx, logger, db, nk)
+	MigrateSystem(ctx, logger, db, nk)
 
 	// Update the metrics with match data
 	go func() {
