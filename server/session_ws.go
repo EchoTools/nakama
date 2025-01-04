@@ -116,15 +116,15 @@ type (
 )
 
 type SessionParameters struct {
-	node                    string        // The node name
-	xpID                    evr.EvrId     // The EchoVR ID
-	loginSession            *sessionWS    // The login session
-	lobbySession            *sessionWS    // The match session
-	serverSession           *sessionWS    // The server session
-	loginHistory            *LoginHistory // The login history
-	authDiscordID           string        // The Discord ID use for authentication
-	authPassword            string        // The Password use for authentication
-	userDisplayNameOverride string        // The display name override (user-defined)
+	node          string     // The node name
+	xpID          evr.EvrId  // The EchoVR ID
+	loginSession  *sessionWS // The login session
+	lobbySession  *sessionWS // The match session
+	serverSession *sessionWS // The server session
+
+	authDiscordID           string // The Discord ID use for authentication
+	authPassword            string // The Password use for authentication
+	userDisplayNameOverride string // The display name override (user-defined)
 
 	externalServerAddr string // The external server address (IP:port)
 	geoHashPrecision   int    // The geohash precision
