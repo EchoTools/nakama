@@ -121,7 +121,7 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 	} else {
 
 		// Use the existing entrant metadata.
-		entrantMeta := tracker.GetLocalBySessionIDStreamUserID(session.ID(), entrantStream, e.EntrantID(label.ID))
+		entrantMeta := tracker.GetLocalBySessionIDStreamUserID(e.SessionID, entrantStream, e.UserID)
 		if entrantMeta == nil {
 			return errors.New("failed to get entrant metadata")
 		}
