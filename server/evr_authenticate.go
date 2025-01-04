@@ -8,18 +8,12 @@ const (
 	DiscordAccessTokenCollection = "DiscordAccessTokens"
 	DiscordAccessTokenKey        = "accessToken"
 	SuspensionStatusCollection   = "SuspensionStatus"
-	ChannelInfoStorageCollection = "ChannelInfo"
-	ChannelInfoStorageKey        = "channelInfo"
-
-	HmdSerialIndex            = "Index_HmdSerial"
-	GhostedUsersIndex         = "Index_MutedUsers"
-	ActiveSocialGroupIndex    = "Index_SocialGroup"
-	ActivePartyGroupIndex     = "Index_PartyGroup"
-	CacheStorageCollection    = "Cache"
-	IPinfoCacheKey            = "IPinfo"
-	CosmeticLoadoutCollection = "CosmeticLoadouts"
-	CosmeticLoadoutKey        = "loadouts"
-	VRMLStorageCollection     = "VRML"
+	ActivePartyGroupIndex        = "Index_PartyGroup"
+	CacheStorageCollection       = "Cache"
+	IPinfoCacheKey               = "IPinfo"
+	CosmeticLoadoutCollection    = "CosmeticLoadouts"
+	CosmeticLoadoutKey           = "loadouts"
+	VRMLStorageCollection        = "VRML"
 
 	// The Application ID for Echo VR
 	NoOvrAppId uint64 = 0x0

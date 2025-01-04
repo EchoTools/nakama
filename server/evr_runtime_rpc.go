@@ -1396,83 +1396,14 @@ func PlayerStatisticsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 		return cachedResponse.(string), nil
 	}
 
-	stats, err := GetPlayerStats(ctx, db, userID)
+	modes := []evr.Symbol{
+		evr.ModeArenaPublic,
+		evr.ModeCombatPublic,
+	}
+	resetSchedule := "alltime"
+	stats, err := LeaderboardsUserTabletStatisticsGet(ctx, db, userID, groupID, modes, resetSchedule)
 	if err != nil {
 		return "", err
-	}
-
-	modeMap := map[evr.Symbol]string{
-		evr.ModeArenaPublic:  "arena",
-		evr.ModeCombatPublic: "combat",
-	}
-
-	for mode, modestr := range modeMap {
-		uid := uuid.FromStringOrNil(userID)
-		gid := uuid.FromStringOrNil(groupID)
-
-		// Set a default if they don't have a rating
-		if _, ok := stats[modestr]; !ok {
-			stats[modestr] = make(map[string]evr.MatchStatistic)
-			stats[modestr]["RatingMu"] = evr.MatchStatistic{
-				Operator: "rep",
-				Value:    25.0,
-				Count:    1,
-			}
-
-			stats[modestr]["RatingSigma"] = evr.MatchStatistic{
-				Operator: "rep",
-				Value:    8.333,
-				Count:    1,
-			}
-
-			if mode == evr.ModeArenaPublic {
-				rankPercentile := 0.0
-				if userSettings, err := LoadMatchmakingSettings(ctx, nk, userID); err != nil {
-					return "", err
-				} else if userSettings.RankPercentile > 0 {
-					rankPercentile = userSettings.RankPercentile
-				} else {
-					rankPercentile = serviceSettings.Load().Matchmaking.RankPercentile.Default
-				}
-				stats[modestr]["ArenaRankPercentile"] = evr.MatchStatistic{
-					Operator: "rep",
-					Value:    rankPercentile,
-					Count:    1,
-				}
-			}
-		}
-
-		ratings, err := GetPlayerRatings(ctx, db, uid)
-		if err != nil {
-			return "", err
-		}
-
-		if r, ok := ratings[gid]; ok {
-			if r, ok := r[mode]; ok {
-				stats[modestr]["RatingMu"] = evr.MatchStatistic{
-					Operator: "rep",
-					Value:    float64(r.Mu),
-					Count:    1,
-				}
-
-				stats[modestr]["RatingSigma"] = evr.MatchStatistic{
-					Operator: "rep",
-					Value:    float64(r.Sigma),
-					Count:    1,
-				}
-			}
-		}
-	}
-
-	for g, mode := range stats {
-		for m, stat := range mode {
-			if stat.Count > 0 {
-				stats[g][m] = evr.MatchStatistic{
-					Operator: stat.Operator,
-					Value:    stat.Value,
-				}
-			}
-		}
 	}
 
 	response := &PlayerStatsRPCResponse{
@@ -1914,7 +1845,7 @@ func MigrateUserDataRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		return "", runtime.NewError("Failed to load login history", StatusInternalError)
 	}
 	// Migrate any account data
-	if err := MigrateUserData(ctx, nk, db, request.UserID); err != nil {
+	if err := MigrateUser(ctx, logger, nk, db, request.UserID); err != nil {
 		logger.Warn("Failed to migrate device history", zap.Error(err))
 		return "", runtime.NewError("Failed to migrate device history", StatusInternalError)
 	}
@@ -1982,7 +1913,7 @@ func UserServerProfileRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 		return "", runtime.NewError("Failed to parse xp_id", StatusInvalidArgument)
 	}
 
-	serverProfile, err := NewUserServerProfile(ctx, db, account, *xpID)
+	serverProfile, err := NewUserServerProfile(ctx, db, account, *xpID, "")
 	if err != nil {
 		return "", fmt.Errorf("failed to get server profile: %w", err)
 	}

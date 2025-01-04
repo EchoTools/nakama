@@ -13,7 +13,6 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
-	"github.com/intinig/go-openskill/types"
 	"go.uber.org/zap"
 )
 
@@ -260,19 +259,17 @@ func LatencyCmp[T int | time.Duration](i, j T, mround T) bool {
 }
 
 type MatchmakingSettings struct {
-	DisableArenaBackfill     bool                        `json:"disable_arena_backfill"`    // Disable backfilling for arena matches
-	BackfillQueryAddon       string                      `json:"backfill_query_addon"`      // Additional query to add to the matchmaking query
-	LobbyBuilderQueryAddon   string                      `json:"lobby_builder_query_addon"` // Additional query to add to the matchmaking query
-	CreateQueryAddon         string                      `json:"create_query_addon"`        // Additional query to add to the matchmaking query
-	MatchmakerQueryAddon     string                      `json:"matchmaker_query_addon"`    // Additional query to add to the matchmaking query
-	LobbyGroupName           string                      `json:"group_id"`                  // Group ID to matchmake with
-	NextMatchID              MatchID                     `json:"next_match_id"`             // Try to join this match immediately when finding a match
-	NextMatchRole            string                      `json:"next_match_role"`           // The role to join the next match as
-	NextMatchDiscordID       string                      `json:"next_match_discord_id"`     // The discord ID to join the next match as
-	StaticBaseRankPercentile float64                     `json:"static_rank_percentile"`    // The static rank percentile to use
-	RankPercentile           float64                     `json:"rank_percentile"`           // The previous rank percentile
-	GlobalSettingsVersion    string                      `json:"global_settings_version"`   // The global settings version (for caching)
-	Ratings                  map[evr.Symbol]types.Rating `json:"ratings"`                   // The player ratings
+	DisableArenaBackfill     bool    `json:"disable_arena_backfill"`    // Disable backfilling for arena matches
+	BackfillQueryAddon       string  `json:"backfill_query_addon"`      // Additional query to add to the matchmaking query
+	LobbyBuilderQueryAddon   string  `json:"lobby_builder_query_addon"` // Additional query to add to the matchmaking query
+	CreateQueryAddon         string  `json:"create_query_addon"`        // Additional query to add to the matchmaking query
+	MatchmakerQueryAddon     string  `json:"matchmaker_query_addon"`    // Additional query to add to the matchmaking query
+	LobbyGroupName           string  `json:"group_id"`                  // Group ID to matchmake with
+	NextMatchID              MatchID `json:"next_match_id"`             // Try to join this match immediately when finding a match
+	NextMatchRole            string  `json:"next_match_role"`           // The role to join the next match as
+	NextMatchDiscordID       string  `json:"next_match_discord_id"`     // The discord ID to join the next match as
+	StaticBaseRankPercentile float64 `json:"static_rank_percentile"`    // The static rank percentile to use
+	GlobalSettingsVersion    string  `json:"global_settings_version"`   // The global settings version (for caching)
 }
 
 func (MatchmakingSettings) GetStorageID() StorageID {
@@ -280,26 +277,6 @@ func (MatchmakingSettings) GetStorageID() StorageID {
 		Collection: MatchmakerStorageCollection,
 		Key:        MatchmakingConfigStorageKey,
 	}
-}
-
-func (m *MatchmakingSettings) GetRating(mode evr.Symbol) types.Rating {
-	if m.Ratings == nil {
-		return NewDefaultRating()
-	}
-
-	r, ok := m.Ratings[mode]
-	if !ok || r.Mu == 0.0 || r.Sigma == 0.0 {
-		return NewDefaultRating()
-	}
-
-	return r
-}
-
-func (m *MatchmakingSettings) SetRating(mode evr.Symbol, r types.Rating) {
-	if m.Ratings == nil {
-		m.Ratings = make(map[evr.Symbol]types.Rating)
-	}
-	m.Ratings[mode] = r
 }
 
 func LoadMatchmakingSettings(ctx context.Context, nk runtime.NakamaModule, userID string) (settings MatchmakingSettings, err error) {

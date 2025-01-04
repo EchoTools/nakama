@@ -11,8 +11,6 @@ import (
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
-	"github.com/heroiclabs/nakama/v3/server/evr"
-	"github.com/intinig/go-openskill/types"
 	"github.com/jackc/pgtype"
 	"go.uber.org/zap"
 
@@ -202,30 +200,6 @@ func RegisterIndexes(initializer runtime.Initializer) error {
 		[]string{"active", "reserved", "cache"},
 		nil,
 		1000000,
-		false,
-	); err != nil {
-		return err
-	}
-
-	if err := initializer.RegisterStorageIndex(
-		GhostedUsersIndex,
-		GameProfileStorageCollection,
-		GameProfileStorageKey,
-		[]string{"client.ghost.users"},
-		nil,
-		1000000,
-		false,
-	); err != nil {
-		return err
-	}
-
-	if err := initializer.RegisterStorageIndex(
-		ActiveSocialGroupIndex,
-		GameProfileStorageCollection,
-		GameProfileStorageKey,
-		[]string{"client.social.group"},
-		nil,
-		100000,
 		false,
 	); err != nil {
 		return err
@@ -651,61 +625,6 @@ func GetUserIDByEvrID(ctx context.Context, db *sql.DB, evrID string) (string, er
 		return "", nil
 	}
 	return dbUserID, nil
-}
-
-func GetPlayerStats(ctx context.Context, db *sql.DB, userID string) (evr.PlayerStatistics, error) {
-	query := "SELECT value->'server'->>'stats' FROM storage WHERE user_id = $1 AND collection = $2 AND key = $3"
-	var dbStatsJSON string
-	var found = true
-	err := db.QueryRowContext(ctx, query, userID, GameProfileStorageCollection, GameProfileStorageKey).Scan(&dbStatsJSON)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			found = false
-		} else {
-			return nil, fmt.Errorf("error finding player stats: %w", err)
-		}
-	}
-	if !found {
-		return nil, status.Error(codes.NotFound, "user account not found")
-	}
-	if dbStatsJSON == "" {
-		return nil, nil
-	}
-
-	playerStats := evr.PlayerStatistics{}
-	if err := json.Unmarshal([]byte(dbStatsJSON), &playerStats); err != nil {
-		return nil, fmt.Errorf("error unmarshalling player stats: %w", err)
-	}
-
-	return playerStats, nil
-}
-
-func GetPlayerRatings(ctx context.Context, db *sql.DB, userID uuid.UUID) (map[uuid.UUID]map[evr.Symbol]types.Rating, error) {
-	query := "SELECT value->>'ratings' FROM storage WHERE user_id = $1 AND collection = $2 AND key = $3"
-	var dbStatsJSON string
-	var found = true
-
-	err := db.QueryRowContext(ctx, query, userID.String(), GameProfileStorageCollection, GameProfileStorageKey).Scan(&dbStatsJSON)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			found = false
-		} else {
-			return nil, fmt.Errorf("error finding player statistics: %w", err)
-		}
-	}
-	if !found {
-		return nil, status.Error(codes.NotFound, "user account not found")
-	}
-	if dbStatsJSON == "" {
-		return nil, nil
-	}
-
-	var ratings map[uuid.UUID]map[evr.Symbol]types.Rating
-	if err := json.Unmarshal([]byte(dbStatsJSON), &ratings); err != nil {
-		return nil, fmt.Errorf("error unmarshalling player statistics: %w", err)
-	}
-
-	return ratings, nil
 }
 
 func GetPartyGroupUserIDs(ctx context.Context, nk runtime.NakamaModule, groupName string) ([]string, error) {

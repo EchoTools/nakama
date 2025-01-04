@@ -3,58 +3,8 @@ package server
 import (
 	"testing"
 
-	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/stretchr/testify/assert"
 )
-
-func TestCreatePlayedStat(t *testing.T) {
-
-	tests := []struct {
-		name     string
-		stats    map[string]evr.StatUpdate
-		expected float64
-	}{
-		{
-			name: "Both ArenaWins and ArenaLosses present",
-			stats: map[string]evr.StatUpdate{
-				"ArenaWins":   {Operator: "add", Value: 5},
-				"ArenaLosses": {Operator: "add", Value: 3},
-			},
-			expected: 8,
-		},
-		{
-			name: "Only ArenaWins present",
-			stats: map[string]evr.StatUpdate{
-				"ArenaWins": {Operator: "add", Value: 5},
-			},
-			expected: 5,
-		},
-		{
-			name: "Only ArenaLosses present",
-			stats: map[string]evr.StatUpdate{
-				"ArenaLosses": {Operator: "add", Value: 3},
-			},
-			expected: 3,
-		},
-		{
-			name:     "Neither ArenaWins nor ArenaLosses present",
-			stats:    map[string]evr.StatUpdate{},
-			expected: 0,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			registry := &LeaderboardRegistry{}
-			registry.createGamesPlayedStat(tt.stats, "Arena")
-
-			assert.Equal(t, tt.expected, tt.stats["GamesPlayed"].Value)
-			if tt.expected != 0 {
-				assert.Equal(t, "add", tt.stats["GamesPlayed"].Operator)
-			}
-		})
-	}
-}
 
 func TestValueToScore(t *testing.T) {
 	tests := []struct {
@@ -90,7 +40,7 @@ func TestScoreToValue(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		result := (&LeaderboardRegistry{}).ScoreToValue(test.score, test.subscore)
+		result := ScoreToValue(test.score, test.subscore)
 
 		if result != test.expected {
 			t.Errorf("ScoreToValue(%d, %d) = %f; expected %f", test.score, test.subscore, result, test.expected)

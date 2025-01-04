@@ -18,9 +18,8 @@ import (
 	"github.com/samber/lo"
 )
 
-const (
-	GameProfileStorageCollection = "GameProfiles"
-	GameProfileStorageKey        = "gameProfile"
+var (
+	ErrProfileNotFound = fmt.Errorf("profile not found")
 )
 
 var unlocksByItemName map[string]string
@@ -74,16 +73,16 @@ func NewProfileRegistry(nk runtime.NakamaModule, db *sql.DB, logger runtime.Logg
 	return profileRegistry
 }
 
-func (r *ProfileCache) GetCached(ctx context.Context, xpid evr.EvrId) (json.RawMessage, error) {
+func (r *ProfileCache) Load(xpid evr.EvrId) (json.RawMessage, bool) {
 	r.cacheMu.RLock()
 	defer r.cacheMu.RUnlock()
-	if p, ok := r.cache[xpid]; ok {
-		return p, nil
+	if data, ok := r.cache[xpid]; ok {
+		return data, true
 	}
-	return nil, nil
+	return nil, false
 }
 
-func (r *ProfileCache) CacheProfile(ctx context.Context, p evr.ServerProfile) error {
+func (r *ProfileCache) Store(p evr.ServerProfile) error {
 	r.cacheMu.Lock()
 	defer r.cacheMu.Unlock()
 	data, err := json.Marshal(p)
@@ -117,7 +116,7 @@ func walletToCosmetics(wallet map[string]int64, unlocks map[string]map[string]bo
 	}
 }
 
-func NewUserServerProfile(ctx context.Context, db *sql.DB, account *api.Account, xpID evr.EvrId) (*evr.ServerProfile, error) {
+func NewUserServerProfile(ctx context.Context, db *sql.DB, account *api.Account, xpID evr.EvrId, groupID string) (*evr.ServerProfile, error) {
 
 	metadata := AccountMetadata{}
 	if err := json.Unmarshal([]byte(account.User.Metadata), &metadata); err != nil {
@@ -153,7 +152,12 @@ func NewUserServerProfile(ctx context.Context, db *sql.DB, account *api.Account,
 		}
 	}
 
-	stats, err := LeaderboardsUserTabletStatisticsGet(ctx, db, account.User.Id, []evr.Symbol{evr.ModeArenaPublic, evr.ModeCombatPublic}, "alltime")
+	// Default to their main group if they are not a member of the group
+	if groupID == "" || metadata.GroupDisplayNames[groupID] == "" {
+		groupID = metadata.GetActiveGroupID().String()
+	}
+
+	stats, err := LeaderboardsUserTabletStatisticsGet(ctx, db, account.User.Id, groupID, []evr.Symbol{evr.ModeArenaPublic, evr.ModeCombatPublic}, "alltime")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user tablet statistics: %w", err)
 	}
@@ -198,7 +202,7 @@ func NewUserServerProfile(ctx context.Context, db *sql.DB, account *api.Account,
 	}, nil
 }
 
-func NewClientProfile(ctx context.Context, db *sql.DB, nk runtime.NakamaModule, metadata *AccountMetadata, xpID evr.EvrId) (*evr.ClientProfile, error) {
+func NewClientProfile(ctx context.Context, metadata *AccountMetadata, xpID evr.EvrId) (*evr.ClientProfile, error) {
 	// Load friends to get blocked (ghosted) players
 	muted := make([]evr.EvrId, 0)
 	ghosted := make([]evr.EvrId, 0)
@@ -224,12 +228,7 @@ func NewClientProfile(ctx context.Context, db *sql.DB, nk runtime.NakamaModule, 
 		GhostedPlayers: evr.Players{
 			Players: ghosted,
 		},
-		LegalConsents: evr.LegalConsents{
-			PointsPolicyVersion: 1,
-			EulaVersion:         1,
-			GameAdminVersion:    1,
-			SplashScreenVersion: 2,
-		},
+		LegalConsents: metadata.LegalConsents,
 		NewPlayerProgress: evr.NewPlayerProgress{
 			Lobby: evr.NpeMilestone{Completed: true},
 
@@ -243,7 +242,7 @@ func NewClientProfile(ctx context.Context, db *sql.DB, nk runtime.NakamaModule, 
 			OrangeTintTabSeen: evr.Versioned{Version: 1},
 		},
 		Customization: evr.Customization{
-			BattlePassSeasonPoiVersion: 1,
+			BattlePassSeasonPoiVersion: 3246,
 			NewUnlocksPoiVersion:       1,
 			StoreEntryPoiVersion:       1,
 			ClearNewUnlocksVersion:     1,
@@ -457,121 +456,36 @@ type StoredCosmeticLoadout struct {
 	UserID    string              `json:"user_id"` // the creator
 }
 
-func LeaderboardsUserTabletStatisticsGet(ctx context.Context, db *sql.DB, userID string, modes []evr.Symbol, resetSchedule string) (map[string]map[string]evr.MatchStatistic, error) {
-	if len(modes) == 0 {
-		return nil, nil
-	}
-	query := `
-	SELECT leaderboard_id, operator, score, subscore
- 	FROM leaderboard_record lr, leaderboard l
- 		WHERE lr.leaderboard_id = l.id
-   		AND owner_id = $1
-		AND (%s)
-	`
-	params := make([]interface{}, 0, len(modes)+1)
+// Set the user's profile based on their groups
+func (r *ProfileCache) GenerateCosmetics(ctx context.Context, wallet map[string]int64, enableAll bool) error {
 
-	params = append(params, userID)
+	// Convert the cosmetics to a map to compare with the wallet map
+	cosmeticMap := make(map[string]bool)
 
-	likes := make([]string, 0, len(modes))
-	for i, mode := range modes {
-		likes = append(likes, fmt.Sprintf(" l.id LIKE $%d", i+2))
-		params = append(params, fmt.Sprintf("%s:%%:%s", mode.String(), resetSchedule))
-	}
-
-	query = fmt.Sprintf(query, strings.Join(likes, " OR "))
-
-	rows, err := db.QueryContext(ctx, query, params...)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return map[string]map[string]evr.MatchStatistic{
-				"arena": {
-					"Level": evr.MatchStatistic{
-						Operator: "add",
-						Value:    1,
-					},
-				},
-				"combat": {
-					"Level": evr.MatchStatistic{
-						Operator: "add",
-						Value:    1,
-					},
-				},
-			}, nil
-		}
-		return nil, fmt.Errorf("failed to query leaderboard records: %w", err)
-	}
-
-	records := make(map[string]map[string]evr.MatchStatistic) // map[mode]map[statName]MatchStatistic
-
-	var dbLeaderboardID string
-	var dbOperator int
-	var dbScore int64
-	var dbSubscore int64
-
-	defer rows.Close()
-
-	gamesPlayedByGroup := make(map[string]int64)
-
-	for rows.Next() {
-
-		err = rows.Scan(&dbLeaderboardID, &dbOperator, &dbScore, &dbSubscore)
-		if err != nil {
-
-			return nil, err
-		}
-		s := strings.SplitN(dbLeaderboardID, ":", 3)
-		if len(s) != 3 {
-			return nil, fmt.Errorf("invalid leaderboard ID: %s", dbLeaderboardID)
-		}
-		modeStr, statName := s[0], s[1]
-
-		mode := evr.ToSymbol(modeStr)
-
-		var group string
-
-		switch mode {
-		case evr.ModeArenaPublic:
-			group = "arena"
-		case evr.ModeCombatPublic:
-			group = "combat"
-		default:
-			continue
-		}
-		var op string
-		switch dbOperator {
-		case LeaderboardOperatorSet:
-			op = "set"
-		case LeaderboardOperatorBest:
-			op = "max"
-		case LeaderboardOperatorIncrement:
-			op = "add"
-		}
-
-		if _, ok := records[group]; !ok {
-			records[group] = make(map[string]evr.MatchStatistic)
-		}
-
-		records[group][statName] = evr.MatchStatistic{
-			Operator: op,
-			Value:    ScoreToTableStatistic(mode, statName, dbScore, dbSubscore),
-			Count:    1,
-		}
-
-		if statName == "GamesPlayed" {
-			gamesPlayedByGroup[group] = records[group][statName].Value.(int64)
+	for k, _ := range wallet {
+		if k, ok := strings.CutPrefix(k, "cosmetic:"); ok {
+			cosmeticMap[k] = true
 		}
 	}
 
-	// Use the GamesPlayed stat to fill in all the cnt's
-	for group, gamesPlayed := range gamesPlayedByGroup {
-		for statName, stat := range records[group] {
-			if statName == "GamesPlayed" {
-				continue
+	return nil
+}
+
+func enforceLoadoutEntitlements(logger runtime.Logger, loadout *evr.CosmeticLoadout, unlocked *evr.UnlockedCosmetics, defaults map[string]string) error {
+	unlockMap := unlocked.ToMap()
+
+	loadoutMap := loadout.ToMap()
+
+	for k, v := range loadoutMap {
+		for _, unlocks := range unlockMap {
+			if _, found := unlocks[v]; !found {
+				logger.Warn("User has item equip that does not exist: %s: %s", k, v)
+				loadoutMap[k] = defaults[k]
+			} else if !unlocks[v] {
+				logger.Warn("User does not have entitlement to item: %s: %s", k, v)
 			}
-			stat.Count = gamesPlayed
-			records[group][statName] = stat
 		}
 	}
-
-	return records, nil
+	loadout.FromMap(loadoutMap)
+	return nil
 }

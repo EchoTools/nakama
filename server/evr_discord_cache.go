@@ -105,6 +105,7 @@ func (c *DiscordCache) Start() {
 						delete(queueCooldowns, entry)
 						if err := c.syncMember(c.ctx, logger, entry.DiscordID, entry.GuildID); err != nil {
 							logger.Warn("Error syncing guild group member", zap.Error(err))
+							continue
 						}
 						logger.Debug("Synced guild group member")
 					}
@@ -216,9 +217,10 @@ func (d *DiscordCache) GuildIDToGroupID(guildID string) string {
 	if !ok {
 		var err error
 		groupID, err = GetGroupIDByGuildID(context.Background(), d.db, guildID)
-		if err != nil {
+		if err != nil || groupID == "" || groupID == uuid.Nil.String() {
 			return ""
 		}
+
 		d.idcache.Store(guildID, groupID)
 		d.idcache.Store(groupID, guildID)
 	}
@@ -277,7 +279,7 @@ func (c *DiscordCache) syncMember(ctx context.Context, logger *zap.Logger, disco
 	group, ok := groups[groupID]
 	if !ok {
 		// Add the player to the group
-		if err := c.nk.GroupUserJoin(ctx, groupID, evrAccount.ID(), evrAccount.Username()); err != nil {
+		if err := c.nk.GroupUsersAdd(ctx, SystemUserID, groupID, []string{evrAccount.ID()}); err != nil {
 			return fmt.Errorf("error joining group: %w", err)
 		}
 
@@ -767,8 +769,8 @@ func HasLoggedIntoEcho(ctx context.Context, nk runtime.NakamaModule, userID stri
 	// If the member hasn't ever logged into echo, then don't sync them.
 	objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
 		{
-			Collection: GameProfileStorageCollection,
-			Key:        GameProfileStorageKey,
+			Collection: LoginStorageCollection,
+			Key:        LoginHistoryStorageKey,
 			UserID:     userID,
 		},
 	})

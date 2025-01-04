@@ -15,7 +15,7 @@ import (
 )
 
 func (p *EvrPipeline) LobbySessionGet(ctx context.Context, logger *zap.Logger, matchID MatchID) (*MatchLabel, Session, error) {
-	return LobbySessionGet(ctx, logger, p.matchRegistry, p.tracker, p.profileRegistry, p.sessionRegistry, matchID)
+	return LobbySessionGet(ctx, logger, p.matchRegistry, p.tracker, p.profileCache, p.sessionRegistry, matchID)
 }
 
 func LobbySessionGet(ctx context.Context, logger *zap.Logger, matchRegistry MatchRegistry, tracker Tracker, profileRegistry *ProfileCache, sessionRegistry SessionRegistry, matchID MatchID) (*MatchLabel, Session, error) {
@@ -309,7 +309,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 	profile := *params.profile.Load()
 	profile.DisplayName = params.accountMetadata.GetGroupDisplayNameOrDefault(groupID)
 
-	if err := p.profileRegistry.CacheProfile(ctx, profile); err != nil {
+	if err := p.profileCache.Store(profile); err != nil {
 		return fmt.Errorf("failed to cache profile: %w", err)
 	}
 
