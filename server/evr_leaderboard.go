@@ -308,22 +308,24 @@ func LeaderboardsUserTabletStatisticsGet(ctx context.Context, db *sql.DB, userID
 	}
 	query := `
 	SELECT leaderboard_id, operator, score, subscore
- 	FROM leaderboard_record lr, leaderboard l
- 		WHERE lr.leaderboard_id = l.id
-   		AND owner_id = $1
-		AND (%s)
+	FROM leaderboard_record lr
+	JOIN leaderboard l ON lr.leaderboard_id = l.id
+	JOIN ROWS FROM (
+		unnest($2::text[]),
+		unnest($3::text[])
+	) t(group_id, mode)
+	WHERE lr.owner_id = $1
+	AND l.id LIKE group_id || ':' || mode || ':%' || $4
 	`
-	params := make([]interface{}, 0, len(modes)+1)
+	params := []interface{}{userID, groupID, resetSchedule}
 
-	params = append(params, userID)
-
-	likes := make([]string, 0, len(modes))
+	groupIDs := make([]string, len(modes))
+	modesStr := make([]string, len(modes))
 	for i, mode := range modes {
-		likes = append(likes, fmt.Sprintf(" l.id LIKE $%d", i+2))
-		params = append(params, fmt.Sprintf("%s:%s:%%:%s", groupID, mode.String(), resetSchedule))
+		groupIDs[i] = groupID
+		modesStr[i] = mode.String()
 	}
-
-	query = fmt.Sprintf(query, strings.Join(likes, " OR "))
+	params = append(params, groupIDs, modesStr)
 
 	rows, err := db.QueryContext(ctx, query, params...)
 	if err != nil {
