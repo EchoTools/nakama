@@ -157,7 +157,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(ctx context.Context, logger 
 	externalPort := request.Port
 
 	if params.externalServerAddr != "" {
-		parts := strings.Split(":", params.externalServerAddr)
+		parts := strings.Split(params.externalServerAddr, ":")
 		if len(parts) != 2 {
 			return errFailedRegistration(session, logger, fmt.Errorf("invalid external IP address: %s. it must be `ip:port`", params.externalServerAddr), evr.BroadcasterRegistration_Unknown)
 		}

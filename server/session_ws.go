@@ -185,6 +185,11 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 
 	logger.Info("New WebSocket session connected", zap.String("request_uri", request.URL.Path), zap.String("query", request.URL.RawQuery), zap.Uint8("format", uint8(format)), zap.String("client_ip", clientIP), zap.String("client_port", clientPort))
 
+	// Support Cloudflare
+	if ip := request.Header.Get("CF-Connecting-IP"); ip != "" {
+		clientIP = ip
+	}
+
 	ctx, ctxCancelFn := context.WithCancel(context.Background())
 
 	ctx = context.WithValue(ctx, ctxVarsKey{}, vars)     // apiServer compatibility
