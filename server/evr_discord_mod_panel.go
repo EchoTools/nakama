@@ -7,7 +7,6 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/heroiclabs/nakama-common/runtime"
-	"go.uber.org/zap"
 )
 
 var ErrNotInAMatch = errors.New("You are not in a match")
@@ -29,10 +28,8 @@ func (d *DiscordAppBot) ModPanelMessageEmbed(ctx context.Context, logger runtime
 	// Get the match label
 	label, err := MatchLabelByID(ctx, d.nk, MatchIDFromStringOrNil(presences[0].GetStatus()))
 	if err != nil {
-		logger.Error("Failed to get match label", zap.Error(err))
-	}
-
-	if label == nil {
+		return nil, fmt.Errorf("Failed to get match label: %w", err)
+	} else if label == nil {
 		return nil, errors.New("Failed to get match label")
 	}
 
