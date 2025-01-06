@@ -3380,7 +3380,7 @@ func (d *DiscordAppBot) SendIPApprovalRequest(ctx context.Context, userID string
 	go func() {
 		<-time.After(3 * time.Minute)
 		thisIsMeButton.Disabled = true
-		thisIsMeButton.Style = discordgo.DangerButton
+		thisIsMeButton.Style = discordgo.SecondaryButton
 		thisIsMeButton.Label = "Expired"
 
 		_, err := d.dg.ChannelMessageEditComplex(&discordgo.MessageEdit{

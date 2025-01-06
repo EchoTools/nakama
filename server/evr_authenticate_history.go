@@ -110,15 +110,19 @@ func (h *LoginHistory) Insert(entry *LoginHistoryEntry) {
 	h.History[entry.Key()] = entry
 }
 
-func (h *LoginHistory) AuthorizeIP(ip string) {
+func (h *LoginHistory) AuthorizeIP(ip string) bool {
 	if h.AuthorizedIPs == nil {
 		h.AuthorizedIPs = make(map[string]time.Time)
 	}
-
+	isNew := false
+	if _, found := h.AuthorizedIPs[ip]; !found {
+		isNew = true
+	}
 	h.AuthorizedIPs[ip] = time.Now().UTC()
 	if h.PendingAuthorizations != nil {
 		delete(h.PendingAuthorizations, ip)
 	}
+	return isNew
 }
 
 func (h *LoginHistory) IsAuthorizedIP(ip string) bool {
@@ -268,14 +272,7 @@ func LoginHistoryStore(ctx context.Context, nk runtime.NakamaModule, userID stri
 
 	// Clear authorized IPs that haven't been used in over 30 days
 	for ip, t := range history.AuthorizedIPs {
-		used := false
-		for _, e := range history.History {
-			if e.ClientIP == ip && time.Since(t) < 30*24*time.Hour {
-				used = true
-				break
-			}
-		}
-		if !used {
+		if time.Since(t) > 30*24*time.Hour {
 			delete(history.AuthorizedIPs, ip)
 		}
 	}
