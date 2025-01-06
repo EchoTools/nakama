@@ -10,17 +10,12 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/gofrs/uuid/v5"
-	"github.com/heroiclabs/nakama-common/api"
+	"github.com/go-redis/redis"
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
-var ipqsCache = &MapOf[string, *IPQSResponse]{}
-
 const (
-	IPQSStorageCollection = "IPQS"
-	IPQSCacheStorageKey   = "cache"
+	IPQSRedisDatabase = 16
 )
 
 type IPQSTransactionDetails struct {
@@ -109,12 +104,14 @@ type IPQSClient struct {
 	db           *sql.DB
 	storageIndex StorageIndex
 
+	redisClient *redis.Client
+
 	url        string
 	apiKey     string
 	parameters map[string]string
 }
 
-func NewIPQS(logger *zap.Logger, db *sql.DB, metrics Metrics, storageIndex StorageIndex, apiKey string) (*IPQSClient, error) {
+func NewIPQS(logger *zap.Logger, db *sql.DB, metrics Metrics, storageIndex StorageIndex, redisClient *redis.Client, apiKey string) (*IPQSClient, error) {
 	ctx, cancelFn := context.WithCancel(context.Background())
 
 	ipqs := IPQSClient{
@@ -126,6 +123,8 @@ func NewIPQS(logger *zap.Logger, db *sql.DB, metrics Metrics, storageIndex Stora
 		db:           db,
 		storageIndex: storageIndex,
 
+		redisClient: redisClient,
+
 		apiKey: apiKey,
 		url:    "https://www.ipqualityscore.com/api/json/ip/" + apiKey,
 		parameters: map[string]string{
@@ -135,34 +134,91 @@ func NewIPQS(logger *zap.Logger, db *sql.DB, metrics Metrics, storageIndex Stora
 		},
 	}
 
-	if err := ipqs.LoadCache(); err != nil {
-		return nil, err
-	}
-
-	go func() {
-		for {
-			select {
-			case <-ipqs.ctx.Done():
-				return
-			case <-time.After(time.Minute * 5):
-			}
-
-			if _, err := ipqs.SaveCache(); err != nil {
-				logger.Error("Failed to save IPQS cache", zap.Error(err))
-			}
-		}
-	}()
-
 	return &ipqs, nil
 }
 
-func (s *IPQSClient) IPDetails(ip string, useCache bool) (*IPQSResponse, error) {
-
-	if useCache {
-		if cached, ok := ipqsCache.Load(ip); ok {
-			return cached, nil
-		}
+func (s *IPQSClient) load(ip string) (*IPQSResponse, error) {
+	cachedData, err := s.redisClient.Get(ip).Result()
+	if err == redis.Nil {
+		return nil, nil
+	} else if err != nil {
+		return nil, fmt.Errorf("failed to get data from redis: %w", err)
 	}
+
+	var result IPQSResponse
+	err = json.Unmarshal([]byte(cachedData), &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal cached data: %w", err)
+	}
+
+	return &result, nil
+}
+
+func (s *IPQSClient) store(ip string, result *IPQSResponse) error {
+	data, err := json.Marshal(result)
+	if err != nil {
+		return fmt.Errorf("failed to marshal data: %w", err)
+	}
+
+	err = s.redisClient.Set(ip, data, time.Hour*24*30).Err()
+	if err != nil {
+		return fmt.Errorf("failed to set data in redis: %w", err)
+	}
+
+	return nil
+}
+
+func (s *IPQSClient) Get(ctx context.Context, ip string) (*IPQSResponse, error) {
+
+	// ignore reserved IPs
+	if ip := net.ParseIP(ip); ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsPrivate() {
+		return nil, nil
+	}
+
+	var err error
+	var result *IPQSResponse
+	if result, err = s.load(ip); err != nil {
+		return nil, err
+	} else if result != nil {
+		return result, nil
+	}
+
+	ctx, cancelFn := context.WithTimeout(ctx, time.Second*1)
+	defer cancelFn()
+	resultCh := make(chan *IPQSResponse)
+
+	go func() {
+		result, err := s.retrieve(ip)
+		if err != nil {
+			s.logger.Warn("Failed to get IPQS details, failing open.", zap.Error(err))
+		}
+
+		// cache the result
+		if err := s.store(ip, result); err != nil {
+			s.logger.Warn("Failed to store IPQS details in cache.", zap.Error(err))
+		}
+
+		resultCh <- result
+	}()
+
+	select {
+	case <-ctx.Done():
+		if ctx.Err() == context.DeadlineExceeded {
+			s.logger.Warn("IPQS request timed out, failing open.")
+		}
+		return nil, ctx.Err()
+	case result := <-resultCh:
+
+		if result == nil {
+			return nil, nil
+		}
+
+		return result, nil
+	}
+
+}
+
+func (s *IPQSClient) retrieve(ip string) (*IPQSResponse, error) {
 
 	u, err := url.Parse(s.url + "/" + ip)
 	if err != nil {
@@ -187,46 +243,7 @@ func (s *IPQSClient) IPDetails(ip string, useCache bool) (*IPQSResponse, error) 
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	if result.Success && useCache {
-		ipqsCache.Store(ip, &result)
-	}
-
 	return &result, nil
-}
-
-func (s *IPQSClient) Score(ip string) int {
-	result := s.IPDetailsWithTimeout(ip)
-	if result == nil {
-		return 0
-	}
-	return result.FraudScore
-}
-
-func (s *IPQSClient) IPDetailsWithTimeout(ip string) *IPQSResponse {
-	// ignore reserved IPs
-	if ip := net.ParseIP(ip); ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsPrivate() {
-		return nil
-	}
-
-	ctx, cancelFn := context.WithTimeout(s.ctx, time.Second*1)
-	defer cancelFn()
-	resultCh := make(chan *IPQSResponse)
-
-	go func() {
-		result, err := s.IPDetails(ip, true)
-		if err != nil {
-			s.logger.Warn("Failed to get IPQS details, failing open.", zap.Error(err))
-		}
-		resultCh <- result
-	}()
-
-	select {
-	case <-ctx.Done():
-		s.logger.Warn("IPQS request timed out, failing open.")
-		return nil
-	case result := <-resultCh:
-		return result
-	}
 }
 
 func (s *IPQSClient) IsVPN(ip string) bool {
@@ -235,7 +252,7 @@ func (s *IPQSClient) IsVPN(ip string) bool {
 	resultCh := make(chan *IPQSResponse)
 
 	go func() {
-		result, err := s.IPDetails(ip, true)
+		result, err := s.retrieve(ip)
 		if err != nil {
 			s.logger.Warn("Failed to get IPQS details, failing open.", zap.Error(err))
 		}
@@ -256,67 +273,4 @@ func (s *IPQSClient) IsVPN(ip string) bool {
 		}
 		return false
 	}
-}
-
-func (s *IPQSClient) SaveCache() (int, error) {
-
-	cachemap := make(map[string]*IPQSResponse)
-	ipqsCache.Range(func(key string, value *IPQSResponse) bool {
-		cachemap[key] = value
-		return true
-	})
-
-	data, err := json.Marshal(cachemap)
-	if err != nil {
-		return 0, fmt.Errorf("failed to marshal cache: %w", err)
-	}
-
-	ops := StorageOpWrites{
-		&StorageOpWrite{
-			OwnerID: SystemUserID,
-			Object: &api.WriteStorageObject{
-				Collection:      IPQSStorageCollection,
-				Key:             IPQSCacheStorageKey,
-				Value:           string(data),
-				PermissionRead:  &wrapperspb.Int32Value{Value: int32(0)},
-				PermissionWrite: &wrapperspb.Int32Value{Value: int32(0)},
-			},
-		},
-	}
-	_, _, err = StorageWriteObjects(s.ctx, s.logger, s.db, s.metrics, s.storageIndex, true, ops)
-	if err != nil {
-		return 0, fmt.Errorf("failed to write cache: %w", err)
-	}
-
-	return len(cachemap), nil
-}
-
-func (s *IPQSClient) LoadCache() error {
-
-	result, err := StorageReadObjects(s.ctx, s.logger, s.db, uuid.Nil, []*api.ReadStorageObjectId{
-		{
-			Collection: IPQSStorageCollection,
-			Key:        IPQSCacheStorageKey,
-			UserId:     SystemUserID,
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("failed to read cache: %w", err)
-	}
-
-	if result == nil || len(result.Objects) == 0 {
-		return nil
-	}
-
-	var cachemap map[string]*IPQSResponse
-	err = json.Unmarshal([]byte(result.Objects[0].Value), &cachemap)
-	if err != nil {
-		return fmt.Errorf("failed to unmarshal cache: %w", err)
-	}
-
-	for key, value := range cachemap {
-		ipqsCache.Store(key, value)
-	}
-	s.logger.Info("Loaded IPQS cache", zap.Int("count", len(cachemap)))
-	return nil
 }

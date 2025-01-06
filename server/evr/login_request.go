@@ -57,7 +57,7 @@ type LoginProfile struct {
 	BypassAuth                  bool        `json:"bypassauth"`
 	AccessToken                 string      `json:"access_token"`
 	Nonce                       string      `json:"nonce"`
-	BuildVersion                BuildNumber `json:"buildversion"`
+	BuildNumber                 BuildNumber `json:"buildversion"`
 	LobbyVersion                uint64      `json:"lobbyversion"`
 	AppId                       uint64      `json:"appid"`
 	PublisherLock               string      `json:"publisher_lock"`

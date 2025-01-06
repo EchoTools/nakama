@@ -234,13 +234,12 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 		disableEncryption: parseUserQueryFunc(&request, "disable_encryption", 5, nil) == "true",
 		disableMAC:        parseUserQueryFunc(&request, "disable_mac", 5, nil) == "true",
 
-		externalServerAddr:   parseUserQueryFunc(&request, "serveraddr", 64, nil),
-		geoHashPrecision:     geoPrecision,
-		isVPN:                evrPipeline.ipqsClient.IsVPN(clientIP),
-		isVR:                 false,
+		externalServerAddr: parseUserQueryFunc(&request, "serveraddr", 64, nil),
+		geoHashPrecision:   geoPrecision,
+		isVPN:              evrPipeline.ipqsClient.IsVPN(clientIP),
+
 		isGlobalDeveloper:    false,
 		isGlobalModerator:    false,
-		isPCVR:               false,
 		supportedFeatures:    parseUserQueryCommaDelimited(&request, "features", 32, featurePattern),
 		requiredFeatures:     parseUserQueryCommaDelimited(&request, "requires", 32, featurePattern),
 		serverTags:           parseUserQueryCommaDelimited(&request, "tags", 32, tagsPattern),

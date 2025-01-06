@@ -183,7 +183,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(ctx context.Context, logger 
 
 	}
 
-	ipqsData, err := p.ipqsClient.IPDetails(externalIP.String(), true)
+	ipqsData, err := p.ipqsClient.Get(ctx, externalIP.String())
 	if err != nil {
 		logger.Warn("Failed to get IPQS data", zap.Error(err))
 	}
