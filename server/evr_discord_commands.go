@@ -185,29 +185,119 @@ func (e *DiscordAppBot) loadPrepareMatchRateLimiter(userID, groupID string) *rat
 }
 
 var (
-	vrmlMap = map[string]string{
-		"p":  "VRML Season Preseason",
-		"1":  "VRML Season 1",
-		"1f": "VRML Season 1 Finalist",
-		"1c": "VRML Season 1 Champion",
-		"2":  "VRML Season 2",
-		"2f": "VRML Season 2 Finalist",
-		"2c": "VRML Season 2 Champion",
-		"3":  "VRML Season 3",
-		"3f": "VRML Season 3 Finalist",
-		"3c": "VRML Season 3 Champion",
-		"4":  "VRML Season 4",
-		"4f": "VRML Season 4 Finalist",
-		"4c": "VRML Season 4 Champion",
-		"5":  "VRML Season 5",
-		"5f": "VRML Season 5 Finalist",
-		"5c": "VRML Season 5 Champion",
-		"6":  "VRML Season 6",
-		"6f": "VRML Season 6 Finalist",
-		"6c": "VRML Season 6 Champion",
-		"7":  "VRML Season 7",
-		"7f": "VRML Season 7 Finalist",
-		"7c": "VRML Season 7 Champion",
+	VRMLEntitlementMap = map[string][]string{
+		"p": {
+			"rwd_tag_s1_vrml_preseason",
+			"rwd_medal_s1_vrml_preseason",
+		},
+		"1": {
+			"rwd_tag_s1_vrml_s1",
+			"rwd_medal_s1_vrml_s1_user",
+		},
+		"1f": {
+			"rwd_tag_s1_vrml_s1",
+			"rwd_medal_s1_vrml_s1_user",
+			"rwd_medal_s1_vrml_s1_finalist",
+			"rwd_tag_s1_vrml_s1_finalist",
+		},
+		"1c": {
+			"rwd_tag_s1_vrml_s1",
+			"rwd_medal_s1_vrml_s1_user",
+			"rwd_medal_s1_vrml_s1_finalist",
+			"rwd_tag_s1_vrml_s1_finalist",
+			"rwd_medal_s1_vrml_s1_champion",
+			"rwd_tag_s1_vrml_s1_champion",
+		},
+		"2": {
+			"rwd_tag_s1_vrml_s2",
+			"rwd_medal_s1_vrml_s2",
+		},
+		"2f": {
+			"rwd_tag_s1_vrml_s2",
+			"rwd_medal_s1_vrml_s2",
+			"rwd_medal_s1_vrml_s2_finalist",
+			"rwd_tag_s1_vrml_s2_finalist",
+		},
+		"2c": {
+			"rwd_tag_s1_vrml_s2",
+			"rwd_medal_s1_vrml_s2",
+			"rwd_medal_s1_vrml_s2_finalist",
+			"rwd_tag_s1_vrml_s2_finalist",
+			"rwd_medal_s1_vrml_s2_champion",
+			"rwd_tag_s1_vrml_s2_champion",
+		},
+		"3": {
+			"rwd_medal_s1_vrml_s3",
+			"rwd_tag_s1_vrml_s3",
+		},
+		"3f": {
+			"rwd_medal_s1_vrml_s3",
+			"rwd_tag_s1_vrml_s3",
+			"rwd_medal_s1_vrml_s3_finalist",
+			"rwd_tag_s1_vrml_s3_finalist",
+		},
+		"3c": {
+			"rwd_medal_s1_vrml_s3",
+			"rwd_tag_s1_vrml_s3",
+			"rwd_medal_s1_vrml_s3_finalist",
+			"rwd_tag_s1_vrml_s3_finalist",
+			"rwd_medal_s1_vrml_s3_champion",
+			"rwd_tag_s1_vrml_s3_champion",
+		},
+		"4": {
+			"rwd_tag_0008",
+			"rwd_medal_0006",
+		},
+		"4f": {
+			"rwd_tag_0008",
+			"rwd_medal_0006",
+			"rwd_tag_0009",
+			"rwd_medal_0007",
+		},
+		"4c": {
+			"rwd_tag_0008",
+			"rwd_medal_0006",
+			"rwd_tag_0009",
+			"rwd_medal_0007",
+			"rwd_tag_0010",
+			"rwd_medal_0008",
+		},
+		"5": {
+			"rwd_tag_0035",
+		},
+		"5f": {
+			"rwd_tag_0035",
+			"rwd_tag_0036",
+		},
+		"5c": {
+			"rwd_tag_0035",
+			"rwd_tag_0036",
+			"rwd_tag_0037",
+		},
+		"6": {
+			"rwd_tag_0040",
+		},
+		"6f": {
+			"rwd_tag_0040",
+			"rwd_tag_0041",
+		},
+		"6c": {
+			"rwd_tag_0040",
+			"rwd_tag_0041",
+			"rwd_tag_0042",
+		},
+		"7": {
+			"rwd_tag_0043",
+		},
+		"7f": {
+			"rwd_tag_0043",
+			"rwd_tag_0044",
+		},
+		"7c": {
+			"rwd_tag_0043",
+			"rwd_tag_0044",
+			"rwd_tag_0045",
+		},
 	}
 
 	partyGroupIDPattern = regexp.MustCompile("^[a-z0-9]+$")
@@ -1480,6 +1570,17 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					return status.Error(codes.NotFound, "target user not found")
 				}
 
+				account, err := nk.AccountGetId(ctx, targetUserID)
+				if err != nil {
+					return status.Error(codes.Internal, "failed to get account")
+				}
+
+				wallet := make(map[string]int64)
+
+				if err := json.Unmarshal([]byte(account.Wallet), &wallet); err != nil {
+					return status.Error(codes.Internal, "failed to unmarshal wallet")
+				}
+
 				// Get the badge name
 				badgeCodestr := options[1].StringValue()
 				badgeCodes := strings.Split(strings.ToLower(badgeCodestr), ",")
@@ -1492,12 +1593,15 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					if c == "" {
 						continue
 					}
-					groupName, ok := vrmlMap[c]
-					if !ok {
-						return status.Errorf(codes.InvalidArgument, "badge `%s` not found", c)
+					if _, ok := VRMLEntitlementMap[c]; !ok {
+						return status.Error(codes.InvalidArgument, "invalid badge code")
 					}
-
-					changeset[groupName] = 1
+					for _, name := range VRMLEntitlementMap[c] {
+						name := "cosmetic:arena:" + name
+						if v, ok := wallet[name]; !ok || v != 1 {
+							changeset[name] = v*-1 + 1
+						}
+					}
 				}
 
 				assignerID := d.cache.DiscordIDToUserID(user.ID)

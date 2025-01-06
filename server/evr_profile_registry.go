@@ -100,12 +100,18 @@ func (r *ProfileCache) PurgeProfile(xpid evr.EvrId) {
 	delete(r.cache, xpid)
 }
 
-func walletToCosmetics(wallet map[string]int64, unlocks map[string]map[string]bool) {
+func walletToCosmetics(wallet map[string]int64, unlocks map[string]map[string]bool) map[string]map[string]bool {
+	if unlocks == nil {
+		unlocks = make(map[string]map[string]bool)
+	}
+
 	for k, v := range wallet {
 		if v <= 0 {
 			continue
 		}
-		if k, ok := strings.CutPrefix("cosmetics:", k); ok {
+
+		// cosmetic:arena:rwd_tag_s1_vrml_s1
+		if k, ok := strings.CutPrefix(k, "cosmetic:"); ok {
 			if mode, item, ok := strings.Cut(k, ":"); ok {
 				if _, ok := unlocks[mode]; !ok {
 					unlocks[mode] = make(map[string]bool)
@@ -114,6 +120,7 @@ func walletToCosmetics(wallet map[string]int64, unlocks map[string]map[string]bo
 			}
 		}
 	}
+	return unlocks
 }
 
 func NewUserServerProfile(ctx context.Context, db *sql.DB, account *api.Account, xpID evr.EvrId, groupID string) (*evr.ServerProfile, error) {
@@ -136,21 +143,7 @@ func NewUserServerProfile(ctx context.Context, db *sql.DB, account *api.Account,
 		}
 	}
 
-	walletToCosmetics(wallet, cosmetics)
-	// Convert wallet items into cosmetics
-	for k, v := range wallet {
-		if v <= 0 {
-			continue
-		}
-		if k, ok := strings.CutPrefix("cosmetics:", k); ok {
-			if k, v, ok := strings.Cut(k, ":"); ok {
-				if _, ok := cosmetics[k]; !ok {
-					cosmetics[k] = make(map[string]bool)
-				}
-				cosmetics[k][v] = true
-			}
-		}
-	}
+	cosmetics = walletToCosmetics(wallet, cosmetics)
 
 	// Default to their main group if they are not a member of the group
 	if groupID == "" || metadata.GroupDisplayNames[groupID] == "" {
@@ -454,21 +447,6 @@ type StoredCosmeticLoadout struct {
 	LoadoutID string              `json:"loadout_id"`
 	Loadout   evr.CosmeticLoadout `json:"loadout"`
 	UserID    string              `json:"user_id"` // the creator
-}
-
-// Set the user's profile based on their groups
-func (r *ProfileCache) GenerateCosmetics(ctx context.Context, wallet map[string]int64, enableAll bool) error {
-
-	// Convert the cosmetics to a map to compare with the wallet map
-	cosmeticMap := make(map[string]bool)
-
-	for k, _ := range wallet {
-		if k, ok := strings.CutPrefix(k, "cosmetic:"); ok {
-			cosmeticMap[k] = true
-		}
-	}
-
-	return nil
 }
 
 func enforceLoadoutEntitlements(logger runtime.Logger, loadout *evr.CosmeticLoadout, unlocked *evr.UnlockedCosmetics, defaults map[string]string) error {

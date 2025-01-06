@@ -119,13 +119,10 @@ var tabletStatisticTypeMap = map[evr.Symbol]map[string]int{
 	evr.ModeSocialPublic: {
 		LobbyTimeStatisticID: TabletStatisticFloatValue,
 	},
-	evr.ModeArenaPublic: {
+	evr.ModeSocialPrivate: {
 		LobbyTimeStatisticID: TabletStatisticFloatValue,
 	},
 	evr.ModeCombatPrivate: {
-		LobbyTimeStatisticID: TabletStatisticFloatValue,
-	},
-	evr.ModeSocialPrivate: {
 		LobbyTimeStatisticID: TabletStatisticFloatValue,
 	},
 	evr.ModeArenaPrivate: {
