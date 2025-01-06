@@ -270,6 +270,18 @@ var (
 			},
 		},
 		{
+			Name:        "next-match",
+			Description: "Set your next match.",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "match-id",
+					Description: "Match ID or Spark link",
+					Required:    true,
+				},
+			},
+		},
+		{
 			Name:        "set-lobby",
 			Description: "Set your default lobby to this Discord server/guild.",
 		},
@@ -1076,10 +1088,11 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					Type: discordgo.InteractionResponseChannelMessageWithSource,
 					Data: &discordgo.InteractionResponseData{
 						Flags:   discordgo.MessageFlagsEphemeral,
-						Content: "Failed to load mod panel",
+						Content: "Failed to load mod panel: " + err.Error(),
 					},
 				}); err != nil {
 					logger.Error("Failed to send mod panel error message", zap.Error(err))
+					return nil
 				}
 			}
 
@@ -1632,6 +1645,42 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				"error":            err,
 			}).Debug("whoami")
 			return err
+		},
+		"next-match": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+			if user == nil {
+				return nil
+			}
+			if len(i.ApplicationCommandData().Options) == 0 {
+				return errors.New("no match provided.")
+			}
+
+			matchIDStr := i.ApplicationCommandData().Options[0].StringValue()
+			matchIDStr = MatchUUIDPattern.FindString(strings.ToLower(matchIDStr))
+			if matchIDStr == "" {
+				return fmt.Errorf("invalid match ID: %s", matchIDStr)
+			}
+
+			node, ok := ctx.Value(runtime.RUNTIME_CTX_NODE).(string)
+			if !ok {
+				return fmt.Errorf("error getting node from context")
+			}
+
+			matchID, err := MatchIDFromString(matchIDStr + "." + node)
+			if err != nil {
+				return fmt.Errorf("failed to parse match ID: %w", err)
+			}
+
+			// Make sure the match exists
+			if _, err := MatchLabelByID(ctx, nk, matchID); err != nil {
+				return fmt.Errorf("failed to get match: %w", err)
+			}
+
+			// Set the next match ID
+			if err := SetNextMatchID(ctx, nk, userID, matchID, AnyTeam, ""); err != nil {
+				return fmt.Errorf("failed to set next match ID: %w", err)
+			}
+
+			return simpleInteractionResponse(s, i, fmt.Sprintf("Next match set to `%s`", matchID))
 		},
 
 		"set-lobby": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userIDStr string, groupID string) error {
