@@ -50,7 +50,8 @@ type DiscordAppBot struct {
 	db              *sql.DB
 	dg              *discordgo.Session
 
-	cache *DiscordCache
+	cache     *DiscordCache
+	ipqsCache *IPQSClient
 
 	debugChannels map[string]string // map[groupID]channelID
 	userID        string            // Nakama UserID of the bot
@@ -60,7 +61,7 @@ type DiscordAppBot struct {
 	prepareMatchRateLimiters  *MapOf[string, *rate.Limiter]
 }
 
-func NewDiscordAppBot(logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, metrics Metrics, pipeline *Pipeline, config Config, discordCache *DiscordCache, profileRegistry *ProfileCache, statusRegistry StatusRegistry, dg *discordgo.Session) (*DiscordAppBot, error) {
+func NewDiscordAppBot(logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, metrics Metrics, pipeline *Pipeline, config Config, discordCache *DiscordCache, profileRegistry *ProfileCache, statusRegistry StatusRegistry, dg *discordgo.Session, ipqsCache *IPQSClient) (*DiscordAppBot, error) {
 	ctx, cancelFn := context.WithCancel(context.Background())
 	logger = logger.WithField("system", "discordAppBot")
 
@@ -1985,7 +1986,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			serverLocation := "Unknown"
 
 			serverExtIP := label.Broadcaster.Endpoint.ExternalIP.String()
-			if ipqs, found := ipqsCache.Load(serverExtIP); found {
+			if ipqs, err := d.ipqsCache.Get(ctx, serverExtIP); err != nil {
+				logger.Error("Failed to get IPQS data", zap.Error(err))
+			} else {
 				serverLocation = ipqs.Region
 			}
 

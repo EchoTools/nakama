@@ -48,6 +48,18 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+  redis:
+    image: redis:latest
+    restart: "unless-stopped"
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - ./redis_conf:/usr/local/etc/redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
   prometheus:
     image: prom/prometheus
     entrypoint: /bin/sh -c

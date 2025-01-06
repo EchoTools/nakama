@@ -12,12 +12,12 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/go-redis/redis"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/heroiclabs/nakama/v3/social"
-
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/encoding/protojson"
 
@@ -117,7 +117,26 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	matchmaker.OnMatchedEntries(lobbyBuilder.handleMatchedEntries)
 	userRemoteLogJournalRegistry := NewUserRemoteLogJournalRegistry(ctx, logger, nk, sessionRegistry)
 
-	ipqsClient, err := NewIPQS(logger, db, metrics, storageIndex, vars["IPQS_API_KEY"])
+	var redisClient *redis.Client
+
+	// Connect to the redis server
+	redisUri := vars["REDIS_URI"]
+	if redisUri != "" {
+		redisOptions, err := redis.ParseURL(redisUri)
+		if err != nil {
+			logger.Fatal("Failed to parse Redis URI", zap.Error(err))
+		}
+
+		redisClient = redis.NewClient(redisOptions)
+		_, err = redisClient.Ping().Result()
+		if err != nil {
+			logger.Fatal("Failed to connect to Redis", zap.Error(err))
+		}
+
+		logger.Info("Connected to Redis", zap.String("addr", redisOptions.Addr))
+	}
+
+	ipqsClient, err := NewIPQS(logger, db, metrics, storageIndex, redisClient, vars["IPQS_API_KEY"])
 	if err != nil {
 		logger.Fatal("Failed to create IPQS client", zap.Error(err))
 	}
@@ -130,7 +149,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		discordCache = NewDiscordCache(ctx, logger, config, metrics, nk, db, dg)
 		discordCache.Start()
 
-		appBot, err = NewDiscordAppBot(runtimeLogger, nk, db, metrics, pipeline, config, discordCache, profileRegistry, statusRegistry, dg)
+		appBot, err = NewDiscordAppBot(runtimeLogger, nk, db, metrics, pipeline, config, discordCache, profileRegistry, statusRegistry, dg, ipqsClient)
 		if err != nil {
 			logger.Error("Failed to create app bot", zap.Error(err))
 
