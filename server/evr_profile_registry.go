@@ -82,16 +82,16 @@ func (r *ProfileCache) Load(xpid evr.EvrId) (json.RawMessage, bool) {
 	return nil, false
 }
 
-func (r *ProfileCache) Store(p evr.ServerProfile) error {
+func (r *ProfileCache) Store(p evr.ServerProfile) (json.RawMessage, error) {
 	r.cacheMu.Lock()
 	defer r.cacheMu.Unlock()
 	data, err := json.Marshal(p)
 	if err != nil {
-		return fmt.Errorf("failed to marshal profile: %w", err)
+		return nil, fmt.Errorf("failed to marshal profile: %w", err)
 	}
 
 	r.cache[p.EvrID] = json.RawMessage(data)
-	return nil
+	return data, nil
 }
 
 func (r *ProfileCache) PurgeProfile(xpid evr.EvrId) {

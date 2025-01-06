@@ -386,7 +386,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 	profile := *params.profile.Load()
 	profile.DisplayName = params.accountMetadata.GetGroupDisplayNameOrDefault(groupID)
 
-	if err := p.profileCache.Store(profile); err != nil {
+	if _, err := p.profileCache.Store(profile); err != nil {
 		return fmt.Errorf("failed to cache profile: %w", err)
 	}
 
