@@ -130,7 +130,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		return fmt.Errorf("unable to register matchmaker override: %w", err)
 	}
 
-	MigrateSystem(ctx, logger, db, nk)
+	go MigrateSystem(ctx, logger, db, nk)
 
 	// Update the metrics with match data
 	go func() {
