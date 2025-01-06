@@ -36,7 +36,7 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 		if lobbyParams.Mode == evr.ModeArenaPublicAI {
 
 			params, ok := LoadParams(ctx)
-			if ok && params.isPCVR {
+			if ok && params.IsPCVR() {
 				lobbyParams.Mode = evr.ModeCombatPublic
 				lobbyParams.Level = evr.LevelUnspecified
 			} else {

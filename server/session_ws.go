@@ -115,64 +115,6 @@ type (
 	ctxLoggedInAtKey        struct{} // The time the user logged in
 )
 
-type SessionParameters struct {
-	node          string     // The node name
-	xpID          evr.EvrId  // The EchoVR ID
-	loginSession  *sessionWS // The login session
-	lobbySession  *sessionWS // The match session
-	serverSession *sessionWS // The server session
-
-	authDiscordID           string // The Discord ID use for authentication
-	authPassword            string // The Password use for authentication
-	userDisplayNameOverride string // The display name override (user-defined)
-
-	externalServerAddr string // The external server address (IP:port)
-	geoHashPrecision   int    // The geohash precision
-	isVPN              bool   // The user is using a VPN
-
-	supportedFeatures []string // features from the urlparam
-	requiredFeatures  []string // required_features from the urlparam
-	disableEncryption bool     // The user has disabled encryption
-	disableMAC        bool     // The user has disabled MAC
-	isVR              bool     // The user is using a VR headset
-	isPCVR            bool     // The user is using a PCVR headset
-	isGlobalDeveloper bool     // The user is a developer
-	isGlobalModerator bool     // The user is a moderator
-
-	relayOutgoing bool                // The user wants (some) outgoing messages relayed to them via discord
-	debug         bool                // The user wants debug information
-	serverTags    []string            // []string of the server tags
-	serverGuilds  []string            // []string of the server guilds
-	serverRegions []string            // []string of the server regions
-	urlParameters map[string][]string // The URL parameters
-
-	account              *api.Account                       // The account
-	accountMetadata      *AccountMetadata                   // The account metadata
-	profile              *atomic.Pointer[evr.ServerProfile] // The server profile
-	guildGroups          map[string]*GuildGroup             // map[string]*GuildGroup
-	isEarlyQuitter       *atomic.Bool                       // The user is an early quitter
-	lastMatchmakingError *atomic.Error                      // The last matchmaking error
-}
-
-func (s *SessionParameters) DiscordID() string {
-	if s.account == nil {
-		return ""
-	}
-	return s.account.GetCustomId()
-}
-
-func StoreParams(ctx context.Context, params *SessionParameters) {
-	ctx.Value(ctxSessionParametersKey{}).(*atomic.Pointer[SessionParameters]).Store(params)
-}
-
-func LoadParams(ctx context.Context) (parameters SessionParameters, found bool) {
-	params, ok := ctx.Value(ctxSessionParametersKey{}).(*atomic.Pointer[SessionParameters])
-	if !ok {
-		return SessionParameters{}, false
-	}
-	return *params.Load(), true
-}
-
 func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessionID, userID uuid.UUID, username string, vars map[string]string, expiry int64, clientIP, clientPort, lang string, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, conn *websocket.Conn, sessionRegistry SessionRegistry, statusRegistry StatusRegistry, matchmaker Matchmaker, tracker Tracker, metrics Metrics, pipeline *Pipeline, evrPipeline *EvrPipeline, runtime *Runtime, request http.Request, storageIndex StorageIndex) Session {
 	logger = logger.With(zap.String("sid", sessionID.String()))
 
@@ -400,55 +342,17 @@ func (s *sessionWS) Secondary(loginSession *sessionWS, isLobby bool, isServer bo
 	}
 
 	StoreParams(s.Context(), &params)
-	return s.SetIdentity(loginSession.UserID(), params.xpID, loginSession.Username())
-}
-func (s *sessionWS) SetIdentity(userID uuid.UUID, evrID evr.EvrId, username string) error {
-	// Each player has a single login connection, which will act as the core session.
-	// When this connection is terminated, all other connections should be terminated.
-
-	// The EVR context is used by the secondary connections, once they have validated.
-	// It ensures that all secondary connections are disconnected when the login
-	// connection  is disconnected. It is passed at the pipeline level to ensure
-	// that evr functions have access to it.
 
 	// Replace the session context with a derived one that includes the login session ID and the EVR ID
 	ctx := s.Context()
 	s.Lock()
-	ctx = context.WithValue(ctx, ctxUserIDKey{}, userID)     // apiServer compatibility
-	ctx = context.WithValue(ctx, ctxUsernameKey{}, username) // apiServer compatibility
+	ctx = context.WithValue(ctx, ctxUserIDKey{}, loginSession.userID)       // apiServer compatibility
+	ctx = context.WithValue(ctx, ctxUsernameKey{}, loginSession.Username()) // apiServer compatibility
 	s.ctx = ctx
-	s.userID = userID
-	s.SetUsername(username)
-	s.logger = s.logger.With(zap.String("loginsid", s.id.String()), zap.String("uid", s.userID.String()), zap.String("evrid", evrID.Token()), zap.String("username", username))
+	s.userID = loginSession.userID
+	s.SetUsername(loginSession.Username())
+	s.logger = s.logger.With(zap.String("loginsid", s.id.String()), zap.String("uid", s.userID.String()), zap.String("evrid", params.xpID.String()), zap.String("username", loginSession.Username()))
 	s.Unlock()
-
-	// Register initial status tracking and presence(s) for this session.
-	s.statusRegistry.Follow(s.id, map[uuid.UUID]struct{}{s.userID: {}})
-
-	// Both notification and status presence.
-	s.tracker.TrackMulti(ctx, s.id, []*TrackerOp{
-		// EVR packet data stream for the login session by user ID, and service ID, with EVR ID
-		{
-			Stream: PresenceStream{Mode: StreamModeService, Subject: s.userID, Label: StreamLabelLoginService},
-			Meta:   PresenceMeta{Format: s.format, Username: evrID.Token(), Hidden: false},
-		},
-		// EVR packet data stream for the login session by session ID and service ID, with EVR ID
-		{
-			Stream: PresenceStream{Mode: StreamModeService, Subject: s.id, Label: StreamLabelLoginService},
-			Meta:   PresenceMeta{Format: s.format, Username: evrID.Token(), Hidden: false},
-		},
-		// Notification presence.
-		{
-			Stream: PresenceStream{Mode: StreamModeNotifications, Subject: s.userID},
-			Meta:   PresenceMeta{Format: s.format, Username: username, Hidden: false},
-		},
-
-		// Status presence.
-		{
-			Stream: PresenceStream{Mode: StreamModeStatus, Subject: s.userID},
-			Meta:   PresenceMeta{Format: s.format, Username: username, Status: ""},
-		},
-	}, s.userID)
 
 	return nil
 }

@@ -18,7 +18,6 @@ import (
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
-	"go.uber.org/zap"
 )
 
 const (
@@ -1291,21 +1290,6 @@ func AccountLookupRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		AvatarURL:   account.User.AvatarUrl,
 	}
 
-	if includePrivate {
-		// Check if the player is online
-		if presences, err := nk.StreamUserList(StreamModeNotifications, userID, "", "", true, true); err != nil {
-			logger.Error("Failed to get user presence: %v", err)
-		} else if len(presences) > 0 {
-
-			nkgo := nk.(*RuntimeGoNakamaModule)
-			sessionID := uuid.FromStringOrNil(presences[0].GetSessionId())
-			session := nkgo.sessionRegistry.Get(sessionID)
-			if session != nil {
-				response.IPQSData, _ = ipqsCache.Load(session.ClientIP())
-			}
-		}
-	}
-
 	// Convert the account data to a json object.
 	jsonResponse, err := json.Marshal(response)
 	if err != nil {
@@ -1825,34 +1809,6 @@ func ServerScoresRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 	}
 
 	return response.String(), nil
-}
-
-func MigrateUserDataRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
-	request := struct {
-		UserID string `json:"user_id"`
-	}{}
-
-	if err := json.Unmarshal([]byte(payload), &request); err != nil {
-		return "", runtime.NewError("Invalid payload", StatusInvalidArgument)
-	}
-
-	if request.UserID == "" {
-		return "", runtime.NewError("User ID is required", StatusInvalidArgument)
-	}
-
-	loginHistory, err := LoginHistoryLoad(ctx, nk, request.UserID)
-	if err != nil {
-		return "", runtime.NewError("Failed to load login history", StatusInternalError)
-	}
-	// Migrate any account data
-	if err := MigrateUser(ctx, logger, nk, db, request.UserID); err != nil {
-		logger.Warn("Failed to migrate device history", zap.Error(err))
-		return "", runtime.NewError("Failed to migrate device history", StatusInternalError)
-	}
-
-	loginHistory.Store(ctx, nk)
-
-	return "{}", nil
 }
 
 func UserServerProfileRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {

@@ -127,7 +127,7 @@ func EntrantPresenceFromLobbyParams(session Session, lobbyParams *LobbySessionPa
 		DiscordID:         params.DiscordID(),
 		ClientIP:          session.ClientIP(),
 		ClientPort:        session.ClientPort(),
-		IsPCVR:            params.isPCVR,
+		IsPCVR:            params.IsPCVR(),
 		Rating:            lobbyParams.GetRating(),
 		SupportedFeatures: params.supportedFeatures,
 		RankPercentile:    lobbyParams.GetRankPercentile(),
