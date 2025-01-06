@@ -210,9 +210,8 @@ var (
 		"7c": "VRML Season 7 Champion",
 	}
 
-	partyGroupIDPattern   = regexp.MustCompile("^[a-z0-9]+$")
-	vrmlIDPattern         = regexp.MustCompile("^[-a-zA-Z0-9]{24}$")
-	cosmeticPresetPattern = regexp.MustCompile("^[a-zA-Z0-9-_]+$")
+	partyGroupIDPattern = regexp.MustCompile("^[a-z0-9]+$")
+	vrmlIDPattern       = regexp.MustCompile("^[-a-zA-Z0-9]{24}$")
 
 	mainSlashCommands = []*discordgo.ApplicationCommand{
 
@@ -1421,7 +1420,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 			// Get the user's profile
 
-			md, err := GetAccountMetadata(ctx, nk, userID)
+			md, err := AccountMetadataLoad(ctx, nk, userID)
 			if err != nil {
 				return fmt.Errorf("failed to get account metadata: %w", err)
 			}
@@ -1429,9 +1428,11 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			// Update the jersey number
 
 			md.LoadoutCosmetics.JerseyNumber = int64(number)
+			md.LoadoutCosmetics.Loadout.Decal = "loadout_number"
+			md.LoadoutCosmetics.Loadout.DecalBody = "loadout_number"
 
 			// Save the profile
-			if err := nk.AccountUpdateId(ctx, userID, "", md.MarshalMap(), "", "", "", "", ""); err != nil {
+			if err := AccountMetadataSet(ctx, nk, userID, md); err != nil {
 				return fmt.Errorf("failed to update account metadata: %w", err)
 			}
 
