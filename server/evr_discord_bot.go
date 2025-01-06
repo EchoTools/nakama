@@ -167,3 +167,29 @@ func (d *DiscordAppBot) SendErrorToUser(userID string, userErr error) error {
 
 	return nil
 }
+
+func (d *DiscordAppBot) SendIPAuthorizationNotification(userID string, ip string) error {
+	if d == nil {
+		return fmt.Errorf("discord bot is not initialized")
+	}
+
+	if d.dg == nil {
+		return fmt.Errorf("discord session is not initialized")
+	}
+
+	discordID := d.cache.UserIDToDiscordID(userID)
+	if discordID == "" {
+		return fmt.Errorf("discordID not found for user %s", userID)
+	}
+
+	channel, err := d.dg.UserChannelCreate(discordID)
+	if err != nil {
+		return fmt.Errorf("failed to send message: %w", err)
+	}
+
+	if _, err = d.dg.ChannelMessageSend(channel.ID, fmt.Sprintf("IP `%s` has been automatically authorized, because you used discordID/password authentication.", ip)); err != nil {
+		return fmt.Errorf("failed to send message: %w", err)
+	}
+
+	return nil
+}

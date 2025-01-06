@@ -224,36 +224,44 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 		return fmt.Errorf("Account disabled by EchoVRCE Admins.")
 	}
 
-	// Automatically validate the IP if the session is authenticated.
-	if session.userID.IsNil() {
+	// Require IP verification, if the session is not authenticated.
+	if authorized := loginHistory.IsAuthorizedIP(session.clientIP); !authorized {
 
-		loginHistory.AuthorizeIP(session.clientIP)
+		// Automatically validate the IP if the session is authenticated.
+		if !session.userID.IsNil() {
 
-		// Require IP verification, if the session is not authenticated.
-	} else if ok := loginHistory.IsAuthorizedIP(session.clientIP); !ok {
+			if isNew := loginHistory.AuthorizeIP(session.clientIP); isNew {
+				if err := p.appBot.SendIPAuthorizationNotification(params.account.User.Id, session.clientIP); err != nil {
+					logger.Warn("Failed to send IP authorization notification", zap.Error(err))
+				}
+			}
+		} else {
 
-		entry := loginHistory.AddPendingAuthorizationIP(params.xpID, session.clientIP, params.loginPayload)
+			// IP is not authorized. Add a pending authorization entry.
+			entry := loginHistory.AddPendingAuthorizationIP(params.xpID, session.clientIP, params.loginPayload)
 
-		if p.appBot != nil && p.appBot.dg != nil && p.appBot.dg.State != nil && p.appBot.dg.State.User != nil {
-			ipqs, err := p.ipqsClient.Get(ctx, session.clientIP)
-			if err != nil {
-				logger.Debug("Failed to get IPQS details", zap.Error(err))
+			if p.appBot != nil && p.appBot.dg != nil && p.appBot.dg.State != nil && p.appBot.dg.State.User != nil {
+				ipqs, err := p.ipqsClient.Get(ctx, session.clientIP)
+				if err != nil {
+					logger.Debug("Failed to get IPQS details", zap.Error(err))
+				}
+
+				if err := p.appBot.SendIPApprovalRequest(ctx, params.account.User.Id, entry, ipqs); err != nil {
+					// The user has DMs from non-friends disabled. Tell them to use the slash command.
+					metricsTags["error"] = "failed_send_ip_approval_request"
+
+					return fmt.Errorf("\nUnrecognized connection location. Please type\n  /verify  \nin a guild with the @%s bot.", p.appBot.dg.State.User.Username)
+				}
+
+				metricsTags["error"] = "ip_verification_required"
+				return fmt.Errorf("New location detected.\nPlease check your Discord DMs to accept the \nverification request from @%s.", p.appBot.dg.State.User.Username)
 			}
 
-			if err := p.appBot.SendIPApprovalRequest(ctx, params.account.User.Id, entry, ipqs); err != nil {
-				// The user has DMs from non-friends disabled. Tell them to use the slash command.
-				metricsTags["error"] = "failed_send_ip_approval_request"
-
-				return fmt.Errorf("\nUnrecognized connection location. Please type\n  /verify  \nin a guild with the @EchoVRCE bot.")
-			}
-
-			metricsTags["error"] = "ip_verification_required"
-			return fmt.Errorf("New location detected.\nPlease check your Discord DMs to accept the \nverification request from @%s.", p.appBot.dg.State.User.Username)
+			metricsTags["error"] = "ip_verification_failed"
+			return fmt.Errorf("New location detected. Please contact EchoVRCE support.")
 		}
-
-		metricsTags["error"] = "ip_verification_failed"
-		return fmt.Errorf("New location detected. Please contact EchoVRCE support.")
-
+	} else {
+		loginHistory.AuthorizeIP(session.clientIP)
 	}
 
 	loginHistory.Update(params.xpID, session.clientIP, params.loginPayload)
