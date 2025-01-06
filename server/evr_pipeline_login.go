@@ -24,16 +24,16 @@ const (
 	DocumentStorageCollection = "GameDocuments"
 )
 
-// msgFailedLoginFn sends a LoginFailure message to the client.
-// The error message is word-wrapped to 60 characters, 4 lines long.
-func msgFailedLoginFn(session *sessionWS, evrId evr.EvrId, err error) error {
-
-	return nil
-}
-
 // loginRequest handles the login request from the client.
 func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.LoginRequest)
+
+	if s := ServiceSettings(); s.DisableLoginMessage != "" {
+		if err := session.SendEvrUnrequire(evr.NewLoginFailure(request.XPID, "System is Temporarily Unavailable:\n"+s.DisableLoginMessage)); err != nil {
+			// If there's an error, prefix it with the EchoVR Id
+			return fmt.Errorf("failed to send LoginFailure: %w", err)
+		}
+	}
 
 	// Start a timer to add to the metrics
 	timer := time.Now()
