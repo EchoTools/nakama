@@ -52,6 +52,12 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 
 	if err = p.authenticateSession(ctx, logger, session, &params); err == nil {
 		if MigrateUser(ctx, logger, p.runtimeModule, p.db, session.userID.String()); err == nil {
+			account, err := p.runtimeModule.AccountGetId(ctx, session.userID.String())
+			if err != nil {
+				return fmt.Errorf("failed to get account: %w", err)
+			}
+			params.account = account
+
 			if err = p.authorizeSession(ctx, logger, session, &params); err == nil {
 				if err = p.initializeSession(ctx, logger, session, &params); err == nil {
 
@@ -299,6 +305,9 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		p.runtimeModule.MetricsCounterAdd("session_initialize", metricsTags, 1)
 	}()
 	params.accountMetadata = &AccountMetadata{}
+
+	// Get the user's metadata from the storage
+
 	if err := json.Unmarshal([]byte(params.account.User.Metadata), params.accountMetadata); err != nil {
 		metricsTags["error"] = "failed_unmarshal_metadata"
 		return fmt.Errorf("failed to unmarshal metadata: %w", err)

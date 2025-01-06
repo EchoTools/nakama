@@ -192,6 +192,7 @@ func NewUserServerProfile(ctx context.Context, db *sql.DB, account *api.Account,
 				},
 			},
 		},
+
 		Social: evr.ServerSocial{
 			Channel: evr.GUID(metadata.GetActiveGroupID()),
 		},
