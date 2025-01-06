@@ -35,8 +35,11 @@ func (m *MigrationCombineStoredCosmeticLoadouts) MigrateSystem(ctx context.Conte
 		logger.Info("No stored cosmetic loadouts to combine.")
 		return nil
 	}
+	obj := StarterCosmeticLoadouts{
+		Loadouts: combined,
+	}
 
-	data, err := json.Marshal(combined)
+	data, err := json.Marshal(obj)
 	if err != nil {
 		return fmt.Errorf("failed to marshal combined loadouts: %w", err)
 	}

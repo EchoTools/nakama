@@ -40,6 +40,10 @@ func init() {
 
 }
 
+type StarterCosmeticLoadouts struct {
+	Loadouts []*StoredCosmeticLoadout `json:"loadouts"`
+}
+
 // ProfileCache is a registry of user evr profiles.
 type ProfileCache struct {
 	ctx         context.Context
