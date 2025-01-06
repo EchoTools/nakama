@@ -89,9 +89,24 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	vars := config.GetRuntime().Environment
 	ctx := context.WithValue(context.Background(), ctxDiscordBotTokenKey{}, vars["DISCORD_BOT_TOKEN"])
 	// Load the global settings
-	if _, err := LoadGlobalSettingsData(ctx, nk); err != nil {
-		logger.Error("Failed to load global settings", zap.Error(err))
-	}
+
+	go func() {
+		interval := 30 * time.Second
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				ticker.Stop()
+				return
+			case <-ticker.C:
+				if _, err := LoadGlobalSettingsData(ctx, nk); err != nil {
+					logger.Error("Failed to load global settings", zap.Error(err))
+				}
+			}
+		}
+	}()
 
 	botToken, ok := ctx.Value(ctxDiscordBotTokenKey{}).(string)
 	if !ok {
