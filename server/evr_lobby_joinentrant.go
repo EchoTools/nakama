@@ -83,15 +83,20 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 
 	// Trigger MatchJoinAttempt
 	found, allowed, isNew, reason, labelStr, _ = matchRegistry.JoinAttempt(sessionCtx, label.ID.UUID, label.ID.Node, e.UserID, e.SessionID, e.Username, e.SessionExpiry, nil, e.ClientIP, e.ClientPort, label.ID.Node, metadata)
-	if !found {
+	switch {
+	case !found:
 		err = NewLobbyErrorf(ServerDoesNotExist, "join attempt failed: match not found")
-	} else if labelStr == "" {
+
+	case labelStr == "":
 		err = NewLobbyErrorf(ServerDoesNotExist, "join attempt failed: match label empty")
-	} else if reason == ErrJoinRejectDuplicateEvrID.Error() {
+
+	case reason == ErrJoinRejectDuplicateEvrID.Error():
 		err = NewLobbyErrorf(BadRequest, "join attempt failed: duplicate evr ID")
-	} else if reason == ErrJoinRejectReasonMatchClosed.Error() {
+
+	case reason == ErrJoinRejectReasonMatchClosed.Error():
 		err = NewLobbyErrorf(ServerIsLocked, "join attempt failed: match closed")
-	} else if !allowed {
+
+	case !allowed:
 		err = NewLobbyErrorf(ServerIsFull, "join attempt failed: not allowed: %s", reason)
 	}
 
@@ -192,6 +197,14 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 }
 
 func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, session Session, lobbyParams *LobbySessionParameters, groupID string) error {
+	metricsTags := map[string]string{
+		"group_id": groupID,
+	}
+
+	defer func() {
+		p.runtimeModule.MetricsCounterAdd("lobby_authorization", metricsTags, 1)
+	}()
+
 	userID := session.UserID().String()
 
 	params, ok := LoadParams(ctx)
@@ -215,6 +228,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 
 	if !ok && groupMetadata.MembersOnlyMatchmaking {
 
+		metricsTags["error"] = "members_only_matchmaking"
 		if sendAuditMessage {
 			if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("Rejected non-member <@%s>", userID), true); err != nil {
 				p.logger.Warn("Failed to send audit message", zap.String("channel_id", groupMetadata.AuditChannelID), zap.Error(err))
@@ -222,8 +236,10 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		}
 
 		return NewLobbyError(KickedFromLobbyGroup, "user does not have matchmaking permission")
+
 	} else if ok && guildGroup.IsSuspended(userID) {
 
+		metricsTags["error"] = "suspended_user"
 		if sendAuditMessage {
 			if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("Rejected suspended user <@%s>", userID), true); err != nil {
 				p.logger.Warn("Failed to send audit message", zap.String("channel_id", groupMetadata.AuditChannelID), zap.Error(err))
@@ -251,24 +267,85 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 
 				accountAge := time.Since(t).Hours() / 24
 
+				metricsTags["error"] = "account_age"
+
 				if _, err := p.appBot.dg.ChannelMessageSend(groupMetadata.AuditChannelID, fmt.Sprintf("Rejected user <@%s> because of account age (%d days).", discordID, int(accountAge))); err != nil {
 					p.logger.Warn("Failed to send audit message", zap.String("channel_id", groupMetadata.AuditChannelID), zap.Error(err))
 				}
 			}
 
-			return NewLobbyErrorf(KickedFromLobbyGroup, "account is too young to join this guild")
+			return NewLobbyErrorf(KickedFromLobbyGroup, "account is too new to join this guild")
 		}
 	}
 
 	if groupMetadata.BlockVPNUsers && params.isVPN && !groupMetadata.IsVPNBypass(userID) {
+		metricsTags["error"] = "vpn_user"
 
-		score := p.ipqsClient.Score(session.ClientIP())
+		if ipqs, err := p.ipqsClient.Get(ctx, session.ClientIP()); err != nil {
+			logger.Warn("Failed to get IPQS details", zap.Error(err))
+		} else if ipqs != nil && ipqs.FraudScore >= groupMetadata.FraudScoreThreshold {
 
-		if score >= groupMetadata.FraudScoreThreshold {
+			var fields []*discordgo.MessageEmbedField
 
 			if sendAuditMessage {
-				content := fmt.Sprintf("Rejected VPN user <@%s> (score: %d) from %s", lobbyParams.DiscordID, score, session.ClientIP())
-				if _, err := p.appBot.LogAuditMessage(ctx, groupID, content, true); err != nil {
+
+				fields = []*discordgo.MessageEmbedField{
+					{
+						Name:   "Player",
+						Value:  fmt.Sprintf("<@%s>", lobbyParams.DiscordID),
+						Inline: false,
+					},
+					{
+						Name:   "IP Address",
+						Value:  session.ClientIP(),
+						Inline: true,
+					},
+					{
+						Name:   "Score",
+						Value:  fmt.Sprintf("%d", ipqs.FraudScore),
+						Inline: true,
+					},
+					{
+						Name:   "ISP",
+						Value:  ipqs.ISP,
+						Inline: true,
+					},
+					{
+						Name:   "Organization",
+						Value:  ipqs.Organization,
+						Inline: true,
+					},
+					{
+						Name:   "ASN",
+						Value:  fmt.Sprintf("%d", ipqs.ASN),
+						Inline: true,
+					},
+					{
+						Name:   "City",
+						Value:  ipqs.City,
+						Inline: true,
+					},
+					{
+						Name:   "Region",
+						Value:  ipqs.Region,
+						Inline: true,
+					},
+					{
+						Name:   "Country",
+						Value:  ipqs.CountryCode,
+						Inline: true,
+					},
+				}
+
+				embed := &discordgo.MessageEmbed{
+					Title:  "VPN User Rejected",
+					Fields: fields,
+					Color:  0xff0000, // Red color
+				}
+				message := &discordgo.MessageSend{
+					Embeds: []*discordgo.MessageEmbed{embed},
+				}
+				if _, err := p.appBot.dg.ChannelMessageSendComplex(groupMetadata.AuditChannelID, message); err != nil {
 					p.logger.Warn("Failed to send audit message", zap.String("channel_id", groupMetadata.AuditChannelID), zap.Error(err))
 				}
 			}
