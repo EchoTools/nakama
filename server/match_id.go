@@ -2,6 +2,7 @@ package server
 
 import (
 	"errors"
+	"regexp"
 
 	"strings"
 
@@ -13,6 +14,7 @@ var (
 	ErrInvalidMatchTokenFormat = errors.New("invalid match token format")
 	ErrInvalidMatchUUID        = errors.New("invalid match ID")
 	ErrInvalidMatchNode        = errors.New("invalid match node")
+	MatchUUIDPattern           = regexp.MustCompile("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 )
 
 // MatchID represents a unique identifier for a match, consisting of a uuid.UUID and a node name.
