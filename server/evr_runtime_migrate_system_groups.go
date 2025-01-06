@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -106,5 +107,46 @@ func (m *PruneSystemGroups) MigrateSystem(ctx context.Context, logger runtime.Lo
 		}
 	}
 
+	if groups, _, err := nk.GroupsList(ctx, "", "system", nil, nil, 100, ""); err != nil {
+		return fmt.Errorf("error listing groups: %w", err)
+	} else {
+
+		// Assign ghost emote to global testers
+		for _, group := range groups {
+			if group.Name == "Global Testers" {
+				if users, _, err := nk.GroupUsersList(ctx, group.Id, 100, nil, ""); err != nil {
+					return fmt.Errorf("error listing group users: %w", err)
+				} else {
+
+					updates := make([]*runtime.WalletUpdate, 0)
+
+					for _, gu := range users {
+
+						// Add the ghost emote (rwd_emote_0015) to the players wallet
+						account, err := nk.AccountGetId(ctx, gu.User.Id)
+						if err != nil {
+							return fmt.Errorf("error getting account: %w", err)
+						}
+
+						if !strings.Contains(account.Wallet, "cosmetic:arena:rwd_emote_0015") {
+
+							updates = append(updates, &runtime.WalletUpdate{
+								UserID: gu.User.Id,
+								Changeset: map[string]int64{
+									"cosmetic:arena:rwd_emote_0015": 1,
+								},
+							})
+						}
+					}
+
+					if len(updates) > 0 {
+						if _, err := nk.WalletsUpdate(ctx, updates, false); err != nil {
+							return fmt.Errorf("error updating wallet: %w", err)
+						}
+					}
+				}
+			}
+		}
+	}
 	return nil
 }
