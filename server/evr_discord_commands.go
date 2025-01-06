@@ -29,6 +29,11 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+const (
+	CustomizationStorageCollection = "Customization"
+	SavedOutfitsStorageKey         = "outfits"
+)
+
 type DiscordAppBot struct {
 	sync.Mutex
 
@@ -838,7 +843,7 @@ var (
 		*/
 
 		{
-			Name:        "cosmetic-loadout",
+			Name:        "outfits",
 			Description: "Manage user-defined cosmetic loadouts.",
 			Options: []*discordgo.ApplicationCommandOption{
 				{
@@ -2646,7 +2651,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 			return discordgo.ErrNilState
 		},
-		"cosmetic-loadout": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+		"outfits": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			if user == nil {
 				return nil
 			}
@@ -2657,86 +2662,106 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return nil
 			}
 
-			profile, err := d.profileRegistry.Load(ctx, uuid.FromStringOrNil(userID))
+			outfits := make(map[string]*AccountCosmetics)
+
+			objs, err := d.nk.StorageRead(ctx, []*runtime.StorageRead{
+				{
+					Collection: CustomizationStorageCollection,
+					Key:        SavedOutfitsStorageKey,
+					UserID:     userID,
+				},
+			})
 			if err != nil {
-				return err
+				return fmt.Errorf("Failed to read saved outfits: %w", err)
+			}
+
+			if len(objs) != 0 {
+				if err := json.Unmarshal([]byte(objs[0].Value), &outfits); err != nil {
+					return fmt.Errorf("Failed to unmarshal saved outfits: %w", err)
+				}
+			}
+
+			metadata, err := GetAccountMetadata(ctx, d.nk, userID)
+			if err != nil {
+				return fmt.Errorf("Failed to get account metadata: %w", err)
 			}
 
 			switch options[0].Name {
 			case "manage":
-				profileName := options[0].Options[1].StringValue()
-				if len(profileName) < 3 || len(profileName) > 32 {
-					simpleInteractionResponse(s, i, "Invalid profile name. It must be between three (3) and thirty two (32) characters long.")
-					return nil
-				}
-				if !cosmeticPresetPattern.MatchString(profileName) {
-					simpleInteractionResponse(s, i, "Invalid profile name. It must contain only characters a-z, A-Z, 0-9, underscores, and hyphens.")
-					return nil
+				outfitName := options[0].Options[1].StringValue()
+				if len(outfitName) > 72 {
+					return errors.New("Invalid profile name. It must be less than 72 characters long.")
 				}
 
 				switch options[0].Options[0].StringValue() {
 				case "save":
 					// limit set arbitrarily
-					if len(profile.CosmeticPresets) >= 5 {
-						simpleInteractionResponse(s, i, "Cannot save more than 5 loadouts.")
-						return nil
+					if len(outfits) >= 25 {
+						return fmt.Errorf("Cannot save more than 25 outfits.")
+
 					}
 
-					profile.saveCosmeticPreset(profileName)
+					outfits[outfitName] = &metadata.LoadoutCosmetics
 
-					if err := d.profileRegistry.SaveAndCache(ctx, uuid.FromStringOrNil(userID), profile); err != nil {
-						return err
+					data, err := json.Marshal(outfits)
+					if err != nil {
+						return fmt.Errorf("Failed to marshal outfits: %w", err)
+					}
+					if _, err := d.nk.StorageWrite(ctx, []*runtime.StorageWrite{
+						{
+							Collection: CustomizationStorageCollection,
+							Key:        SavedOutfitsStorageKey,
+							UserID:     userID,
+							Value:      string(data),
+						},
+					}); err != nil {
+						return fmt.Errorf("Failed to save outfits: %w", err)
 					}
 
-					simpleInteractionResponse(s, i, fmt.Sprintf("Saved current loadout to profile `%s`", profileName))
-					return nil
+					return simpleInteractionResponse(s, i, fmt.Sprintf("Saved current outfit as `%s`", outfitName))
 
 				case "load":
-					if _, ok := profile.CosmeticPresets[profileName]; !ok {
-						simpleInteractionResponse(s, i, fmt.Sprintf("Profile `%s` does not exist.", profileName))
-						return nil
+					if _, ok := outfits[outfitName]; !ok {
+						return simpleInteractionResponse(s, i, fmt.Sprintf("Outfit `%s` does not exist.", outfitName))
 					}
 
-					profile.loadCosmeticPreset(profileName)
+					metadata.LoadoutCosmetics = *outfits[outfitName]
 
-					if err := d.profileRegistry.SaveAndCache(ctx, uuid.FromStringOrNil(userID), profile); err != nil {
-						return err
+					if err := AccountMetadataSet(ctx, d.nk, userID, metadata); err != nil {
+						return fmt.Errorf("Failed to set account metadata: %w", err)
 					}
 
-					simpleInteractionResponse(s, i, fmt.Sprintf("Applied loadout from profile `%s`. Please relog for changes to take effect.", profileName))
-					return nil
+					return simpleInteractionResponse(s, i, fmt.Sprintf("Applied outfit `%s`. If the changes do not take effect in your next match, Please re-open your game.", outfitName))
 
 				case "delete":
-					if _, ok := profile.CosmeticPresets[profileName]; !ok {
-						simpleInteractionResponse(s, i, fmt.Sprintf("Profile `%s` does not exist.", profileName))
+					if _, ok := outfits[outfitName]; !ok {
+						simpleInteractionResponse(s, i, fmt.Sprintf("Outfit `%s` does not exist.", outfitName))
 						return nil
 					}
 
-					profile.deleteCosmeticPreset(profileName)
+					delete(outfits, outfitName)
 
-					if err := d.profileRegistry.SaveAndCache(ctx, uuid.FromStringOrNil(userID), profile); err != nil {
-						return err
+					if err := AccountMetadataSet(ctx, d.nk, userID, metadata); err != nil {
+						return fmt.Errorf("Failed to set account metadata: %w", err)
 					}
 
-					simpleInteractionResponse(s, i, fmt.Sprintf("Deleted loadout profile `%s`", profileName))
-					return nil
+					return simpleInteractionResponse(s, i, fmt.Sprintf("Deleted loadout profile `%s`", outfitName))
 				}
 
 			case "list":
-				if len(profile.CosmeticPresets) == 0 {
-					simpleInteractionResponse(s, i, "No saved profiles.")
-					return nil
+				if len(outfits) == 0 {
+					return simpleInteractionResponse(s, i, "No saved outfits.")
 				}
 
 				responseString := "Available profiles: "
 
-				for k := range profile.CosmeticPresets {
+				for k := range outfits {
 					responseString += fmt.Sprintf("`%s`, ", k)
 				}
-				responseString = responseString[:len(responseString)-2]
-				simpleInteractionResponse(s, i, responseString)
-				return nil
+
+				return simpleInteractionResponse(s, i, responseString[:len(responseString)-2])
 			}
+
 			return discordgo.ErrNilState
 		},
 	}

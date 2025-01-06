@@ -232,6 +232,24 @@ func (a *AccountMetadata) GetGhosted() []evr.EvrId {
 	return a.GhostedPlayers
 }
 
+func AccountMetadataLoad(ctx context.Context, nk runtime.NakamaModule, userID string) (*AccountMetadata, error) {
+	account, err := nk.AccountGetId(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	md := &AccountMetadata{}
+	if err := json.Unmarshal([]byte(account.GetUser().GetMetadata()), md); err != nil {
+		return nil, err
+	}
+	md.account = account
+	return md, nil
+}
+
+func AccountMetadataSet(ctx context.Context, nk runtime.NakamaModule, userID string, md *AccountMetadata) error {
+	return nk.AccountUpdateId(ctx, userID, "", md.MarshalMap(), "", "", "", "", "")
+}
+
 type CombatLoadout struct {
 	CombatWeapon       string `json:"combat_weapon"`
 	CombatGrenade      string `json:"combat_grenade"`
