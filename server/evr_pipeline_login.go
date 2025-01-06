@@ -84,13 +84,27 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	params.isVR = request.Payload.SystemInfo.HeadsetType != "No VR"
 	params.isPCVR = request.Payload.BuildVersion != evr.StandaloneBuild
 
+	metricsTags := map[string]string{
+		"session_auth":  fmt.Sprintf("%t", !session.userID.IsNil()),
+		"is_vr":         fmt.Sprintf("%t", params.isVR),
+		"is_pcvr":       fmt.Sprintf("%t", params.isPCVR),
+		"build_version": fmt.Sprintf("%d", request.Payload.BuildVersion),
+		"device_type":   request.Payload.SystemInfo.HeadsetType,
+	}
+
+	defer func() {
+		p.runtimeModule.MetricsCounterAdd("login_attempt", metricsTags, 1)
+	}()
+
 	// Validate the XPID
 	if !params.xpID.IsValid() {
+		metricsTags["error"] = "invalid_xpid"
 		return errors.New("invalid XPID: " + params.xpID.String())
 	}
 
 	// Set the basic parameters related to client hardware and software
 	if sn := request.Payload.HMDSerialNumber; strings.Contains(sn, ":") {
+		metricsTags["error"] = "invalid_sn"
 		return errors.New("Invalid HMD Serial Number: " + sn)
 	}
 
@@ -103,18 +117,25 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	switch status.Code(err) {
 	// The device is not linked to an account.
 	case codes.NotFound:
-
+		metricsTags["device_linked"] = "false"
 		// the session is authenticated. Automatically link the device.
 		if !session.userID.IsNil() {
 			if err := p.runtimeModule.LinkDevice(ctx, session.UserID().String(), params.xpID.String()); err != nil {
+				metricsTags["error"] = "failed_link_device"
 				return fmt.Errorf("failed to link device: %w", err)
 			}
 
 			// The session is not authenticated. Create a link ticket.
 		} else {
 			if linkTicket, err := p.linkTicket(ctx, logger, params.xpID, session.clientIP, &request.Payload); err != nil {
+
+				metricsTags["error"] = "link_ticket_error"
+
 				return fmt.Errorf("error creating link ticket: %s", err)
 			} else {
+
+				metricsTags["error"] = "link_required"
+
 				return fmt.Errorf("\nEnter this code:\n  \n>>> %s <<<\nusing '/link-headset %s' in the Echo VR Lounge Discord.", linkTicket.Code, linkTicket.Code)
 			}
 		}
@@ -122,10 +143,14 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	// The device is linked to an account.
 	case codes.OK:
 
+		metricsTags["device_linked"] = "true"
+
 		// if the account has a password, authenticate it.
 		if params.account.Email != "" {
 			// If this session was already authorized, verify it matches with the device's account.
+
 			if !session.userID.IsNil() && params.account.User.Id != session.userID.String() {
+				metricsTags["error"] = "device_link_mismatch"
 				logger.Error("Device is linked to a different account.", zap.String("device_user_id", params.account.User.Id), zap.String("session_user_id", session.userID.String()))
 				return fmt.Errorf("device linked to a different account. (%s)", params.account.User.Username)
 			}
@@ -133,20 +158,28 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 			// The account has no password, and the user has provided one.
 			// Set the password.
 			if err := LinkEmail(ctx, logger, p.db, uuid.FromStringOrNil(params.account.User.Id), params.account.User.Username+"@"+p.placeholderEmail, params.authPassword); err != nil {
+				metricsTags["error"] = "failed_link_email"
 				return fmt.Errorf("failed to link email: %w", err)
 			}
 		}
 	}
 
+	// The account is now authenticated. Authorize the session.
+
 	session.userID = uuid.FromStringOrNil(params.account.User.Id)
 	session.SetUsername(params.account.User.Username)
 
 	if status.Code(err) == codes.PermissionDenied || params.account.DisableTime != nil {
+
+		p.runtimeModule.MetricsCounterAdd("login_attempt_banned_account", nil, 1)
+
 		logger.Info("Attempted login to banned account.",
 			zap.String("xpid", params.xpID.Token()),
 			zap.String("client_ip", session.clientIP),
 			zap.String("uid", params.account.User.Id),
 			zap.Any("login_payload", request.Payload))
+
+		metricsTags["error"] = "account_disabled"
 
 		return fmt.Errorf("Account disabled by EchoVRCE Admins.")
 	}
@@ -154,12 +187,14 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	// Migrate the user's account
 
 	if err := MigrateUser(ctx, NewRuntimeGoLogger(logger), p.runtimeModule, p.db, params.account.User.Id); err != nil {
+		metricsTags["error"] = "failed_migrate_user"
 		return fmt.Errorf("failed to migrate user data: %w", err)
 	}
 
 	// Load the login history for audit purposes.
 	loginHistory, err := LoginHistoryLoad(ctx, p.runtimeModule, params.account.User.Id)
 	if err != nil {
+		metricsTags["error"] = "failed_load_login_history"
 		return fmt.Errorf("failed to load login history: %w", err)
 	}
 	defer loginHistory.Store(ctx, p.runtimeModule)
@@ -175,12 +210,18 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 
 		if p.appBot != nil && p.appBot.dg != nil && p.appBot.dg.State != nil && p.appBot.dg.State.User != nil {
 			ipqs := p.ipqsClient.IPDetailsWithTimeout(session.clientIP)
+
 			if err := p.appBot.SendIPApprovalRequest(ctx, params.account.User.Id, session.clientIP, ipqs); err != nil {
 				// The user has DMs from non-friends disabled. Tell them to use the slash command.
+				metricsTags["error"] = "failed_send_ip_approval_request"
 				return fmt.Errorf("\nUnrecognized connection location.\nPlease type\n  /verify  \nin any server where @EchoVRCE bot is.")
 			}
+
+			metricsTags["error"] = "ip_verification_required"
 			return fmt.Errorf("New location detected.\nPlease check your Discord DMs to accept the \nverification request from @%s.", p.appBot.dg.State.User.Username)
 		}
+
+		metricsTags["error"] = "ip_verification_failed"
 		return fmt.Errorf("New location detected. Please contact EchoVRCE support.")
 
 	}
@@ -195,12 +236,20 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	// Common error handling
 	if params.account.GetDisableTime() != nil {
 		// The account is banned. log the attempt.
+		logger.Info("Attempted login to banned account.",
+			zap.String("xpid", params.xpID.Token()),
+			zap.String("client_ip", session.clientIP),
+			zap.String("uid", params.account.User.Id),
+			zap.Any("login_payload", request.Payload))
+
+		metricsTags["error"] = "account_disabled"
 
 		return fmt.Errorf("Account disabled by EchoVRCE Admins.")
 	}
 
 	params.accountMetadata = &AccountMetadata{}
 	if err := json.Unmarshal([]byte(params.account.User.Metadata), params.accountMetadata); err != nil {
+		metricsTags["error"] = "failed_unmarshal_metadata"
 		return fmt.Errorf("failed to unmarshal metadata: %w", err)
 	}
 	params.accountMetadata.account = params.account
@@ -208,6 +257,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	// Get the GroupID from the user's metadata
 	params.guildGroups, err = GuildUserGroupsList(ctx, p.runtimeModule, params.account.User.Id)
 	if err != nil {
+		metricsTags["error"] = "failed_get_guild_groups"
 		return fmt.Errorf("failed to get guild groups: %w", err)
 	}
 
@@ -226,6 +276,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		}
 
 		if len(groupIDs) == 0 {
+			metricsTags["error"] = "user_not_in_group"
 			return fmt.Errorf("user is not in any groups")
 		}
 
@@ -239,17 +290,20 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		logger.Debug("Set active group", zap.String("uid", params.account.User.Id), zap.String("gid", params.accountMetadata.ActiveGroupID))
 
 		if err := p.runtimeModule.AccountUpdateId(ctx, params.account.User.Id, "", params.accountMetadata.MarshalMap(), "", "", "", "", ""); err != nil {
+			metricsTags["error"] = "failed_update_metadata"
 			return fmt.Errorf("failed to update user metadata: %w", err)
 		}
 	}
 
 	if ismember, err := CheckSystemGroupMembership(ctx, p.db, session.userID.String(), GroupGlobalDevelopers); err != nil {
+		metricsTags["error"] = "group_check_failed"
 		return fmt.Errorf("failed to check system group membership: %w", err)
 	} else if ismember {
 		params.isGlobalDeveloper = true
 		params.isGlobalModerator = true
 
 	} else if ismember, err := CheckSystemGroupMembership(ctx, p.db, session.userID.String(), GroupGlobalModerators); err != nil {
+		metricsTags["error"] = "group_check_failed"
 		return fmt.Errorf("failed to check system group membership: %w", err)
 	} else if ismember {
 		params.isGlobalModerator = true
@@ -263,6 +317,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	StoreParams(ctx, &params)
 	// Initialize the full session
 	if err := session.SetIdentity(uuid.FromStringOrNil(params.account.User.Id), params.xpID, params.account.User.Username); err != nil {
+		metricsTags["error"] = "failed_set_identity"
 		return fmt.Errorf("failed to login: %w", err)
 	}
 	/*
@@ -274,8 +329,8 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 			NumEarlyQuits:     1,
 		})
 	*/
-	// TODO Add the settings to the user profile
 
+	metricsTags["error"] = "nil"
 	return nil
 }
 
