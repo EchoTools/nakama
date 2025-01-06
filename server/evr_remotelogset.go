@@ -303,7 +303,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				ServerID:         label.Broadcaster.SessionID,
 				MatchOperator:    label.Broadcaster.OperatorID,
 				MatchEndpoint:    label.Broadcaster.Endpoint.String(),
-				ClientIsPCVR:     params.isPCVR,
+				ClientIsPCVR:     params.IsPCVR(),
 				ClientUserID:     session.userID.String(),
 				ClientUsername:   session.Username(),
 				ClientDiscordID:  params.DiscordID(),
@@ -331,7 +331,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				"ext_ip":            label.Broadcaster.Endpoint.GetExternalIP(),
 				"port":              strconv.Itoa(int(label.Broadcaster.Endpoint.Port)),
 				"mode":              label.Mode.String(),
-				"is_pcvr":           strconv.FormatBool(params.isPCVR),
+				"is_pcvr":           strconv.FormatBool(params.IsPCVR()),
 			}
 
 			p.runtimeModule.MetricsCounterAdd("remotelog_error_server_connection_failed_count", tags, 1)

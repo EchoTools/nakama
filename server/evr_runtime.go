@@ -54,7 +54,6 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		"account/search":                AccountSearchRPC,
 		"account/lookup":                AccountLookupRPC,
 		"account/authenticate/password": AuthenticatePasswordRPC,
-		"account/migrate":               MigrateUserDataRPC,
 		"link/device":                   LinkDeviceRpc,
 		"link/usernamedevice":           LinkUserIdDeviceRpc,
 		"signin/discord":                DiscordSignInRpc,
@@ -114,6 +113,8 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	if err := initializer.RegisterRpc("evr/api", EvrApiHttpHandler); err != nil {
 		return fmt.Errorf("unable to register /evr/api service: %w", err)
 	}
+
+	// Register the event
 
 	eventDispatch, err := NewEventDispatch(ctx, logger, db, nk, initializer)
 	if err != nil {

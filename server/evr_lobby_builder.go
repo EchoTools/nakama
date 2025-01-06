@@ -214,7 +214,7 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 				DiscordID:      sessionParams.DiscordID(),
 				ClientIP:       session.ClientIP(),
 				ClientPort:     session.ClientPort(),
-				IsPCVR:         sessionParams.isPCVR,
+				IsPCVR:         sessionParams.IsPCVR(),
 				Rating:         rating,
 				RankPercentile: percentile,
 				Query:          query,

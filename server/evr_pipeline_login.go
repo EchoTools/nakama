@@ -27,20 +27,6 @@ const (
 // msgFailedLoginFn sends a LoginFailure message to the client.
 // The error message is word-wrapped to 60 characters, 4 lines long.
 func msgFailedLoginFn(session *sessionWS, evrId evr.EvrId, err error) error {
-	// Format the error message
-	s := fmt.Sprintf("%s: %s", evrId.String(), err.Error())
-
-	// Replace ": " with ":\n" for better readability
-	s = strings.Replace(s, ": ", ":\n", 2)
-
-	// Word wrap the error message
-	errMessage := wordwrap.String(s, 60)
-
-	// Send the messages
-	if err := session.SendEvrUnrequire(evr.NewLoginFailure(evrId, errMessage)); err != nil {
-		// If there's an error, prefix it with the EchoVR Id
-		return fmt.Errorf("failed to send LoginFailure: %w", err)
-	}
 
 	return nil
 }
@@ -51,26 +37,7 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 
 	// Start a timer to add to the metrics
 	timer := time.Now()
-
-	// Authenticate the connection
-	if err := p.processLogin(ctx, logger, session, request); err != nil {
-		st := status.Convert(err)
-		return msgFailedLoginFn(session, request.XPID, errors.New(st.Message()))
-	}
-
-	p.metrics.CustomTimer("login_duration", nil, time.Since(timer))
-	// Let the client know that the login was successful.
-	// Send the login success message and the login settings.
-	return session.SendEvr(
-		evr.NewLoginSuccess(session.id, request.XPID),
-		unrequireMessage,
-		evr.NewDefaultGameSettings(),
-		unrequireMessage,
-	)
-}
-
-// processLogin handles the authentication of the login connection.
-func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, session *sessionWS, request *evr.LoginRequest) (err error) {
+	var err error
 
 	// Load the session parameters.
 	params, ok := LoadParams(ctx)
@@ -81,19 +48,57 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	// Set the basic parameters related to client hardware and software
 	params.loginSession = session
 	params.xpID = request.XPID
-	params.isVR = request.Payload.SystemInfo.HeadsetType != "No VR"
-	params.isPCVR = request.Payload.BuildVersion != evr.StandaloneBuild
+	params.loginPayload = &request.Payload
 
-	metricsTags := map[string]string{
-		"session_auth":  fmt.Sprintf("%t", !session.userID.IsNil()),
-		"is_vr":         fmt.Sprintf("%t", params.isVR),
-		"is_pcvr":       fmt.Sprintf("%t", params.isPCVR),
-		"build_version": fmt.Sprintf("%d", request.Payload.BuildVersion),
-		"device_type":   request.Payload.SystemInfo.HeadsetType,
+	if err = p.authenticateSession(ctx, logger, session, &params); err == nil {
+		if MigrateUser(ctx, logger, p.runtimeModule, p.db, session.userID.String()); err == nil {
+			if err = p.authorizeSession(ctx, logger, session, &params); err == nil {
+				if err = p.initializeSession(ctx, logger, session, &params); err == nil {
+
+					StoreParams(ctx, &params)
+
+					p.metrics.CustomTimer("login_process_latency", params.MetricsTags(), time.Since(timer))
+
+					return session.SendEvr(
+						evr.NewLoginSuccess(session.id, request.XPID),
+						unrequireMessage,
+						evr.NewDefaultGameSettings(),
+						unrequireMessage,
+					)
+				}
+			}
+		}
 	}
 
+	err = errors.New(status.Convert(err).Message())
+
+	// Format the error message
+	errMessage := fmt.Sprintf("%s: %s", request.XPID.String(), err.Error())
+
+	// Replace ": " with ":\n" for better readability
+	errMessage = strings.Replace(errMessage, ": ", ":\n", 2)
+
+	// Word wrap the error message
+	errMessage = wordwrap.String(errMessage, 60)
+
+	// Send the messages
+	if err := session.SendEvrUnrequire(evr.NewLoginFailure(request.XPID, errMessage)); err != nil {
+		// If there's an error, prefix it with the EchoVR Id
+		return fmt.Errorf("failed to send LoginFailure: %w", err)
+	}
+
+	// Let the client know that the login was successful.
+	// Send the login success message and the login settings.
+	return nil
+}
+
+// authenticateSession handles the authentication of the login connection.
+func (p *EvrPipeline) authenticateSession(ctx context.Context, logger *zap.Logger, session *sessionWS, params *SessionParameters) (err error) {
+
+	metricsTags := params.MetricsTags()
+
 	defer func() {
-		p.runtimeModule.MetricsCounterAdd("login_attempt", metricsTags, 1)
+		p.runtimeModule.MetricsCounterAdd("session_authenticate", metricsTags, 1)
 	}()
 
 	// Validate the XPID
@@ -103,13 +108,13 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	}
 
 	// Set the basic parameters related to client hardware and software
-	if sn := request.Payload.HMDSerialNumber; strings.Contains(sn, ":") {
+	if sn := params.loginPayload.HMDSerialNumber; strings.Contains(sn, ":") {
 		metricsTags["error"] = "invalid_sn"
 		return errors.New("Invalid HMD Serial Number: " + sn)
 	}
 
-	if request.Payload.BuildVersion != 0 && !slices.Contains(evr.KnownBuilds, request.Payload.BuildVersion) {
-		logger.Warn("Unknown build version", zap.Int64("build", int64(request.Payload.BuildVersion)))
+	if params.loginPayload.BuildNumber != 0 && !slices.Contains(evr.KnownBuilds, params.loginPayload.BuildNumber) {
+		logger.Warn("Unknown build version", zap.Int64("build", int64(params.loginPayload.BuildNumber)))
 	}
 
 	// Get the user for this device
@@ -117,7 +122,9 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 	switch status.Code(err) {
 	// The device is not linked to an account.
 	case codes.NotFound:
+
 		metricsTags["device_linked"] = "false"
+
 		// the session is authenticated. Automatically link the device.
 		if !session.userID.IsNil() {
 			if err := p.runtimeModule.LinkDevice(ctx, session.UserID().String(), params.xpID.String()); err != nil {
@@ -127,14 +134,13 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 
 			// The session is not authenticated. Create a link ticket.
 		} else {
-			if linkTicket, err := p.linkTicket(ctx, logger, params.xpID, session.clientIP, &request.Payload); err != nil {
+
+			if linkTicket, err := p.linkTicket(ctx, logger, params.xpID, session.clientIP, params.loginPayload); err != nil {
 
 				metricsTags["error"] = "link_ticket_error"
 
 				return fmt.Errorf("error creating link ticket: %s", err)
 			} else {
-
-				metricsTags["error"] = "link_required"
 
 				return fmt.Errorf("\nEnter this code:\n  \n>>> %s <<<\nusing '/link-headset %s' in the Echo VR Lounge Discord.", linkTicket.Code, linkTicket.Code)
 			}
@@ -147,6 +153,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 
 		// if the account has a password, authenticate it.
 		if params.account.Email != "" {
+
 			// If this session was already authorized, verify it matches with the device's account.
 
 			if !session.userID.IsNil() && params.account.User.Id != session.userID.String() {
@@ -155,8 +162,9 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 				return fmt.Errorf("device linked to a different account. (%s)", params.account.User.Username)
 			}
 		} else if params.authPassword != "" {
-			// The account has no password, and the user has provided one.
-			// Set the password.
+
+			// Set the provided password on the account, if the user has provided one.
+
 			if err := LinkEmail(ctx, logger, p.db, uuid.FromStringOrNil(params.account.User.Id), params.account.User.Username+"@"+p.placeholderEmail, params.authPassword); err != nil {
 				metricsTags["error"] = "failed_link_email"
 				return fmt.Errorf("failed to link email: %w", err)
@@ -164,10 +172,42 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		}
 	}
 
-	// The account is now authenticated. Authorize the session.
+	// Replace the session context with a derived one that includes the login session ID and the EVR ID
+	ctx = session.Context()
+	session.Lock()
 
 	session.userID = uuid.FromStringOrNil(params.account.User.Id)
 	session.SetUsername(params.account.User.Username)
+	session.logger = session.logger.With(zap.String("loginsid", session.id.String()), zap.String("uid", session.userID.String()), zap.String("evrid", params.xpID.String()), zap.String("username", session.Username()))
+
+	ctx = context.WithValue(ctx, ctxUserIDKey{}, session.userID)     // apiServer compatibility
+	ctx = context.WithValue(ctx, ctxUsernameKey{}, session.Username) // apiServer compatibility
+	session.ctx = ctx
+
+	session.Unlock()
+
+	return nil
+}
+
+func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, session *sessionWS, params *SessionParameters) error {
+
+	var err error
+
+	metricsTags := params.MetricsTags()
+	defer func() {
+		p.runtimeModule.MetricsCounterAdd("session_authorize", metricsTags, 1)
+	}()
+	// Authentication is complete. Authorize the session.
+
+	// Load the login history for audit purposes.
+	loginHistory, err := LoginHistoryLoad(ctx, p.runtimeModule, params.account.User.Id)
+	if err != nil {
+		metricsTags["error"] = "failed_load_login_history"
+		return fmt.Errorf("failed to load login history: %w", err)
+	}
+	defer loginHistory.Store(ctx, p.runtimeModule)
+
+	// The account is now authenticated. Authorize the session.
 
 	if status.Code(err) == codes.PermissionDenied || params.account.DisableTime != nil {
 
@@ -177,44 +217,34 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 			zap.String("xpid", params.xpID.Token()),
 			zap.String("client_ip", session.clientIP),
 			zap.String("uid", params.account.User.Id),
-			zap.Any("login_payload", request.Payload))
+			zap.Any("login_payload", params.loginPayload))
 
 		metricsTags["error"] = "account_disabled"
 
 		return fmt.Errorf("Account disabled by EchoVRCE Admins.")
 	}
 
-	// Migrate the user's account
-
-	if err := MigrateUser(ctx, NewRuntimeGoLogger(logger), p.runtimeModule, p.db, params.account.User.Id); err != nil {
-		metricsTags["error"] = "failed_migrate_user"
-		return fmt.Errorf("failed to migrate user data: %w", err)
-	}
-
-	// Load the login history for audit purposes.
-	loginHistory, err := LoginHistoryLoad(ctx, p.runtimeModule, params.account.User.Id)
-	if err != nil {
-		metricsTags["error"] = "failed_load_login_history"
-		return fmt.Errorf("failed to load login history: %w", err)
-	}
-	defer loginHistory.Store(ctx, p.runtimeModule)
 	// Automatically validate the IP if the session is authenticated.
-	if !session.userID.IsNil() {
+	if session.userID.IsNil() {
 
 		loginHistory.AuthorizeIP(session.clientIP)
 
 		// Require IP verification, if the session is not authenticated.
 	} else if ok := loginHistory.IsAuthorizedIP(session.clientIP); !ok {
 
-		loginHistory.AddPendingAuthorizationIP(session.clientIP)
+		entry := loginHistory.AddPendingAuthorizationIP(params.xpID, session.clientIP, params.loginPayload)
 
 		if p.appBot != nil && p.appBot.dg != nil && p.appBot.dg.State != nil && p.appBot.dg.State.User != nil {
-			ipqs := p.ipqsClient.IPDetailsWithTimeout(session.clientIP)
+			ipqs, err := p.ipqsClient.Get(ctx, session.clientIP)
+			if err != nil {
+				logger.Debug("Failed to get IPQS details", zap.Error(err))
+			}
 
-			if err := p.appBot.SendIPApprovalRequest(ctx, params.account.User.Id, session.clientIP, ipqs); err != nil {
+			if err := p.appBot.SendIPApprovalRequest(ctx, params.account.User.Id, entry, ipqs); err != nil {
 				// The user has DMs from non-friends disabled. Tell them to use the slash command.
 				metricsTags["error"] = "failed_send_ip_approval_request"
-				return fmt.Errorf("\nUnrecognized connection location.\nPlease type\n  /verify  \nin any server where @EchoVRCE bot is.")
+
+				return fmt.Errorf("\nUnrecognized connection location. Please type\n  /verify  \nin a guild with the @EchoVRCE bot.")
 			}
 
 			metricsTags["error"] = "ip_verification_required"
@@ -226,7 +256,7 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 
 	}
 
-	loginHistory.Update(params.xpID, session.clientIP, &request.Payload)
+	loginHistory.Update(params.xpID, session.clientIP, params.loginPayload)
 
 	// If the session is authenticated, auto-validate teh
 
@@ -240,13 +270,26 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 			zap.String("xpid", params.xpID.Token()),
 			zap.String("client_ip", session.clientIP),
 			zap.String("uid", params.account.User.Id),
-			zap.Any("login_payload", request.Payload))
+			zap.Any("login_payload", params.loginPayload))
 
 		metricsTags["error"] = "account_disabled"
 
 		return fmt.Errorf("Account disabled by EchoVRCE Admins.")
 	}
 
+	metricsTags["error"] = "nil"
+
+	return nil
+}
+
+func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger, session *sessionWS, params *SessionParameters) error {
+
+	var err error
+
+	metricsTags := params.MetricsTags()
+	defer func() {
+		p.runtimeModule.MetricsCounterAdd("session_initialize", metricsTags, 1)
+	}()
 	params.accountMetadata = &AccountMetadata{}
 	if err := json.Unmarshal([]byte(params.account.User.Metadata), params.accountMetadata); err != nil {
 		metricsTags["error"] = "failed_unmarshal_metadata"
@@ -314,23 +357,35 @@ func (p *EvrPipeline) processLogin(ctx context.Context, logger *zap.Logger, sess
 		params.accountMetadata.sessionDisplayNameOverride = params.userDisplayNameOverride
 	}
 
-	StoreParams(ctx, &params)
-	// Initialize the full session
-	if err := session.SetIdentity(uuid.FromStringOrNil(params.account.User.Id), params.xpID, params.account.User.Username); err != nil {
-		metricsTags["error"] = "failed_set_identity"
-		return fmt.Errorf("failed to login: %w", err)
-	}
-	/*
-		session.SendEvr(&evr.EarlyQuitConfig{
-			SteadyPlayerLevel: 1,
-			NumSteadyMatches:  1,
-			PenaltyLevel:      1,
-			PenaltyTs:         time.Now().Add(12 * time.Hour).Unix(),
-			NumEarlyQuits:     1,
-		})
-	*/
+	s := session
+	// Register initial status tracking and presence(s) for this session.
+	s.statusRegistry.Follow(s.id, map[uuid.UUID]struct{}{s.userID: {}})
 
-	metricsTags["error"] = "nil"
+	// Both notification and status presence.
+	s.tracker.TrackMulti(ctx, s.id, []*TrackerOp{
+		// EVR packet data stream for the login session by user ID, and service ID, with EVR ID
+		{
+			Stream: PresenceStream{Mode: StreamModeService, Subject: s.userID, Label: StreamLabelLoginService},
+			Meta:   PresenceMeta{Format: s.format, Username: params.xpID.String(), Hidden: false},
+		},
+		// EVR packet data stream for the login session by session ID and service ID, with EVR ID
+		{
+			Stream: PresenceStream{Mode: StreamModeService, Subject: s.id, Label: StreamLabelLoginService},
+			Meta:   PresenceMeta{Format: s.format, Username: params.xpID.String(), Hidden: false},
+		},
+		// Notification presence.
+		{
+			Stream: PresenceStream{Mode: StreamModeNotifications, Subject: s.userID},
+			Meta:   PresenceMeta{Format: s.format, Username: s.Username(), Hidden: false},
+		},
+
+		// Status presence.
+		{
+			Stream: PresenceStream{Mode: StreamModeStatus, Subject: s.userID},
+			Meta:   PresenceMeta{Format: s.format, Username: s.Username(), Status: ""},
+		},
+	}, s.userID)
+
 	return nil
 }
 
@@ -527,12 +582,12 @@ func (p *EvrPipeline) documentRequest(ctx context.Context, logger *zap.Logger, s
 	switch request.Type {
 	case "eula":
 
-		if !params.isVR {
+		if !params.IsVR() {
 
 			eulaVersion := 1
 			gaVersion := 1
 
-			document = evr.NewEULADocument(int(eulaVersion), int(gaVersion), request.Language, "https://github.com/EchoTools", "Blank EULA for NoVR clients.")
+			document = evr.NewEULADocument(int(eulaVersion), int(gaVersion), request.Language, "https://github.com/EchoTools", "Blank EULA for NoVR clients. You should only see this once.")
 
 			return session.SendEvrUnrequire(evr.NewDocumentSuccess(document))
 
@@ -823,13 +878,30 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.OtherUserProfileRequest)
 
+	tags := make(map[string]string, 0)
+	startTime := time.Now()
+
+	defer func() {
+		tags["error"] = "nil"
+		p.metrics.CustomCounter("profile_request_count", tags, 1)
+		p.metrics.CustomTimer("profile_request_latency", tags, time.Since(startTime))
+	}()
+
 	var ok bool
-	data, ok := p.profileCache.Load(request.EvrId)
-	if !ok {
+	var data json.RawMessage
+
+	if data, ok = p.profileCache.Load(request.EvrId); ok {
+
+		tags["cached"] = "true"
+
+	} else {
+
+		tags["cached"] = "false"
 		nk := p.runtimeModule
 		// Get the MatchID From this players session
 		matchIDs, err := MatchIDsByEvrID(ctx, nk, request.EvrId)
 		if err != nil {
+			tags["error"] = "failed_get_match_id"
 			return fmt.Errorf("failed to get matchID: %w", err)
 		}
 
@@ -841,6 +913,7 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 
 			label, err := MatchLabelByID(ctx, nk, matchID)
 			if err != nil {
+				tags["error"] = "failed_get_match_label"
 				return fmt.Errorf("failed to get match label: %w", err)
 			}
 
@@ -863,36 +936,38 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 		}
 
 		if userID == "" {
+			tags["error"] = "failed_find_player"
 			return fmt.Errorf("failed to find player in match")
 		}
 
 		// Generate the profile
 		account, err := p.runtimeModule.AccountGetId(ctx, userID)
 		if err != nil {
+			tags["error"] = "failed_get_account"
 			return fmt.Errorf("failed to get account: %w", err)
 		}
 
 		profile, err := NewUserServerProfile(ctx, p.db, account, request.EvrId, groupID)
 		if err != nil {
+			tags["error"] = "failed_generate_profile"
 			return fmt.Errorf("failed to generate profile: %w", err)
 		}
 
-		p.profileCache.Store(*profile)
-
-		data, ok = p.profileCache.Load(request.EvrId)
-		if !ok {
-			return fmt.Errorf("failed to load profile")
+		if data, err = p.profileCache.Store(*profile); err != nil {
+			tags["error"] = "failed_store_profile"
+			return fmt.Errorf("failed to store profile")
 		}
 	}
 
-	// Construct the response
 	response := &evr.OtherUserProfileSuccess{
 		EvrId:             request.EvrId,
 		ServerProfileJSON: data,
 	}
 
-	// Send the profile to the client
+	p.metrics.CustomGauge("profile_size_bytes", nil, float64(len(data)))
+
 	if err := session.SendEvrUnrequire(response); err != nil {
+		tags["error"] = "failed_send_profile"
 		logger.Warn("Failed to send OtherUserProfileSuccess", zap.Error(err))
 	}
 
