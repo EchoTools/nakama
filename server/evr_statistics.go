@@ -17,6 +17,7 @@ const (
 	TabletStatisticIntegerValue = iota
 	TabletStatisticFloatValue
 
+	GamesPlayedStatisticID      = "GamesPlayed"
 	RankPercentileStatisticID   = "RankPercentile"
 	SkillRatingMuStatisticID    = "SkillRatingMu"
 	SkillRatingSigmaStatisticID = "SkillRatingSigma"
@@ -75,9 +76,11 @@ var tabletStatisticTypeMap = map[evr.Symbol]map[string]int{
 		"TopSpeedsTotal":               TabletStatisticFloatValue,
 		"TwoPointGoals":                TabletStatisticIntegerValue,
 		"XP":                           TabletStatisticIntegerValue,
-		SkillRatingSigmaStatisticID:    TabletStatisticFloatValue,
-		SkillRatingMuStatisticID:       TabletStatisticFloatValue,
-		RankPercentileStatisticID:      TabletStatisticFloatValue,
+		GamesPlayedStatisticID:         TabletStatisticIntegerValue,
+
+		SkillRatingSigmaStatisticID: TabletStatisticFloatValue,
+		SkillRatingMuStatisticID:    TabletStatisticFloatValue,
+		RankPercentileStatisticID:   TabletStatisticFloatValue,
 	},
 	evr.ModeCombatPublic: {
 		"CombatAssists":                      TabletStatisticIntegerValue,
@@ -111,6 +114,7 @@ var tabletStatisticTypeMap = map[evr.Symbol]map[string]int{
 		"CombatWins":                         TabletStatisticIntegerValue,
 		"Level":                              TabletStatisticIntegerValue,
 		"XP":                                 TabletStatisticIntegerValue,
+		GamesPlayedStatisticID:               TabletStatisticIntegerValue,
 		SkillRatingSigmaStatisticID:          TabletStatisticFloatValue,
 		SkillRatingMuStatisticID:             TabletStatisticFloatValue,
 		RankPercentileStatisticID:            TabletStatisticFloatValue,
