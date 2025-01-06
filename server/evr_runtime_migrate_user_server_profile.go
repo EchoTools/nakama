@@ -30,6 +30,7 @@ func (m *MigrateUserGameProfile) MigrateUser(ctx context.Context, logger runtime
 	})
 	if err != nil {
 		logger.Error("Error fetching game profile", zap.Error(err))
+		return fmt.Errorf("Error fetching game profile: %v", err)
 	}
 	if len(objs) == 0 {
 		// Already migrated
@@ -39,11 +40,13 @@ func (m *MigrateUserGameProfile) MigrateUser(ctx context.Context, logger runtime
 	a, err := nk.AccountGetId(ctx, userID)
 	if err != nil {
 		logger.Error("Error fetching account", zap.Error(err))
+		return fmt.Errorf("Error fetching account: %v", err)
 	}
 
 	account, err := NewEVRAccount(a)
 	if err != nil {
 		logger.Error("Error converting account", zap.Error(err))
+		return fmt.Errorf("Error converting account: %v", err)
 	}
 
 	type GameProfileData struct {
@@ -68,22 +71,22 @@ func (m *MigrateUserGameProfile) MigrateUser(ctx context.Context, logger runtime
 	errored := false
 	if err := m.migrateClient(account, profile.Client); err != nil {
 		logger.Error("Error migrating client profile", zap.Error(err))
-		errored = true
+		return fmt.Errorf("Error migrating client profile: %v", err)
 	}
 
 	if err := m.migrateMatchmakingSettings(ctx, nk, account); err != nil {
 		logger.Error("Error migrating matchmaking settings", zap.Error(err))
-		errored = true
+		return fmt.Errorf("Error migrating matchmaking settings: %v", err)
 	}
 
 	if err := m.migrateRatings(ctx, nk, account, profile.Ratings); err != nil {
 		logger.Error("Error migrating server profile", zap.Error(err))
-		errored = true
+		return fmt.Errorf("Error migrating server profile: %v", err)
 	}
 
 	if err := m.migrateServer(account, profile.Server); err != nil {
 		logger.Error("Error migrating server profile", zap.Error(err))
-		errored = true
+		return fmt.Errorf("Error migrating server profile: %v", err)
 	}
 
 	// Save the account
