@@ -177,7 +177,7 @@ func (r *LeaderboardRegistry) ProcessProfileUpdate(ctx context.Context, logger *
 		}
 
 		// Create games played stat
-		stats["GamesPlayed"] = evr.StatUpdate{
+		stats[GamesPlayedStatisticID] = evr.StatUpdate{
 			Operator: "add",
 			Value:    stats[prefix+"Wins"].Value + stats[prefix+"Losses"].Value,
 		}
@@ -396,7 +396,7 @@ func LeaderboardsUserTabletStatisticsGet(ctx context.Context, db *sql.DB, userID
 			Count:    1,
 		}
 
-		if statName == "GamesPlayed" {
+		if statName == GamesPlayedStatisticID {
 			gamesPlayedByGroup[statGroup] = records[statGroup][statName].Value.(int64)
 		}
 	}
@@ -404,7 +404,7 @@ func LeaderboardsUserTabletStatisticsGet(ctx context.Context, db *sql.DB, userID
 	// Use the GamesPlayed stat to fill in all the cnt's
 	for group, gamesPlayed := range gamesPlayedByGroup {
 		for statName, stat := range records[group] {
-			if statName == "GamesPlayed" {
+			if statName == GamesPlayedStatisticID {
 				continue
 			}
 			stat.Count = gamesPlayed
