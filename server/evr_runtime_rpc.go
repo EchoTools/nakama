@@ -1823,7 +1823,7 @@ func UserServerProfileRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 	var err error
 
 	if payload != "" {
-		if err := json.Unmarshal([]byte(payload), request); err != nil {
+		if err := json.Unmarshal([]byte(payload), &request); err != nil {
 			return "", err
 		}
 	} else if len(queryParameters) > 0 {
@@ -1832,6 +1832,15 @@ func UserServerProfileRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 		}
 		if p, ok := queryParameters["xp_id"]; ok {
 			request["xp_id"] = p[0]
+		}
+		if p, ok := queryParameters["discord_id"]; ok {
+			request["discord_id"] = p[0]
+		}
+		if p, ok := queryParameters["guild_id"]; ok {
+			request["guild_id"] = p[0]
+		}
+		if p, ok := queryParameters["group_id"]; ok {
+			request["group_id"] = p[0]
 		}
 	} else {
 		if userID, ok = ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string); !ok {
@@ -1849,6 +1858,11 @@ func UserServerProfileRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 		if userID, err = GetUserIDByEvrID(ctx, db, xpIDStr); err != nil {
 			return "", err
 		}
+	case request["discord_id"] != "":
+		if userID, err = GetUserIDByDiscordID(ctx, db, request["discord_id"]); err != nil {
+			return "", err
+		}
+
 	default:
 		return "", runtime.NewError("No user ID specified", StatusInvalidArgument)
 	}
@@ -1869,7 +1883,20 @@ func UserServerProfileRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 		return "", runtime.NewError("Failed to parse xp_id", StatusInvalidArgument)
 	}
 
-	serverProfile, err := NewUserServerProfile(ctx, db, account, *xpID, "")
+	// Get the group
+	var groupID string
+
+	switch {
+	case request["group_id"] != "":
+		groupID = request["group_id"]
+	case request["guild_id"] != "":
+		groupID, err = GetGroupIDByGuildID(ctx, db, request["guild_id"])
+		if err != nil {
+			return "", err
+		}
+	}
+
+	serverProfile, err := NewUserServerProfile(ctx, db, account, *xpID, groupID)
 	if err != nil {
 		return "", fmt.Errorf("failed to get server profile: %w", err)
 	}
