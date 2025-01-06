@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 )
 
@@ -16,23 +15,20 @@ type MigrationLeaderboardPrune struct{}
 
 func (m *MigrationLeaderboardPrune) MigrateSystem(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule) error {
 
-	leaderboardUpdateTimes := make(map[string]time.Time)
-
-	toDelete := make([]string, 0)
-
 	validLeaderboards := make(map[string]struct{}, 0)
 
 	// First, remove any invalid boards.
 	for mode, leaderboard := range tabletStatisticTypeMap {
 		for statName := range leaderboard {
 			for _, resetSchedule := range []string{"alltime", "monthly", "weekly", "daily"} {
-				id := StatisticBoardID("", mode, statName, resetSchedule)
+				id := StatisticBoardID("", mode, statName, resetSchedule)[1:]
 				validLeaderboards[id] = struct{}{}
 			}
 
 		}
 	}
-
+	toDelete := make([]string, 0)
+	toRename := make(map[string]string, 0)
 	var listCursor string
 	for {
 		list, err := nk.LeaderboardList(100, listCursor)
@@ -43,43 +39,26 @@ func (m *MigrationLeaderboardPrune) MigrateSystem(ctx context.Context, logger ru
 
 		for _, leaderboard := range list.Leaderboards {
 
+			// Valid leaderboard without the group name
 			if _, ok := validLeaderboards[leaderboard.Id]; ok {
 				// Rename it with the echovr lounge uuid
 				newId := "147afc9d-2819-4197-926d-5b3f92790edc:" + leaderboard.Id
-				_ = newId
-			}
-
-			suffix, found := strings.CutPrefix(leaderboard.Id, ":")
-
-			if _, ok := validLeaderboards[suffix]; !ok || !found {
-				logger.Info("Found bad leaderboard: ", leaderboard.Id)
+				toRename[leaderboard.Id] = newId
 				continue
 			}
 
-			// If the board doesn't have colons (like the old uuid ones), delete it.
-			if s := strings.SplitN(leaderboard.Id, ":", 4); len(s) != 4 {
+			_, suffix, found := strings.Cut(leaderboard.Id, ":")
+			if !found {
+				// Invalid (legacy uuid) leaderboard
 				toDelete = append(toDelete, leaderboard.Id)
 				continue
 			}
 
-			var recordCursor string
-			var records []*api.LeaderboardRecord
-			for {
-				records, _, recordCursor, _, err = nk.LeaderboardRecordsList(ctx, leaderboard.Id, nil, 200, recordCursor, 0)
-				if err != nil {
-					continue
-				}
-
-				for _, record := range records {
-					if record.UpdateTime.AsTime().After(leaderboardUpdateTimes[leaderboard.Id]) {
-						leaderboardUpdateTimes[leaderboard.Id] = record.UpdateTime.AsTime()
-					}
-				}
-
-				if recordCursor == "" {
-					break
-				}
+			if _, ok := validLeaderboards[suffix]; !ok || !found {
+				toDelete = append(toDelete, leaderboard.Id)
+				continue
 			}
+
 		}
 
 		if listCursor == "" {
@@ -87,13 +66,34 @@ func (m *MigrationLeaderboardPrune) MigrateSystem(ctx context.Context, logger ru
 		}
 	}
 
-	for _, id := range toDelete {
-
-		if err := nk.LeaderboardDelete(ctx, id); err != nil {
+	for src, dst := range toRename {
+		startTime := time.Now()
+		if err := MoveLeaderboard(ctx, db, src, dst); err != nil {
 			return nil
 		}
-		logger.WithField("id", id).Info("Deleted leaderboard.")
+		logger.WithFields(map[string]interface{}{
+			"src":      src,
+			"dst":      dst,
+			"duration": time.Since(startTime),
+		}).Info("Renamed leaderboard")
 	}
+	/*
+		for _, id := range toDelete {
+			startTime := time.Now()
+			if err := nk.LeaderboardDelete(ctx, id); err != nil {
+				return nil
+			}
+			logger.WithFields(map[string]interface{}{
+				"id":       id,
+				"duration": time.Since(startTime),
+			}).Info("Deleted invalid leaderboard")
+		}
+	*/
 
 	return nil
+}
+
+func MoveLeaderboard(ctx context.Context, db *sql.DB, src, dst string) error {
+	_, err := db.ExecContext(ctx, "UPDATE leaderboard SET id = $1 WHERE id = $2", dst, src)
+	return err
 }

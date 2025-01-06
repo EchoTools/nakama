@@ -23,7 +23,8 @@ func MigrateSystem(ctx context.Context, logger runtime.Logger, db *sql.DB, nk ru
 
 	migrations := []SystemMigrator{
 		&PruneSystemGroups{},
-		//&MigrationCombineStoredCosmeticLoadouts{},
+		&MigrationCombineStoredCosmeticLoadouts{},
+		&MigrationLeaderboardPrune{},
 		//&MigrationLeaderboardPrune{},
 
 	}
