@@ -22,7 +22,8 @@ func ServiceSettings() *GlobalSettingsData {
 }
 
 type GlobalSettingsData struct {
-	ServiceGuildID           string                    `json:"service_guild_id"` // Central/Support guild ID
+	DisableLoginMessage      string                    `json:"disable_login_message"` // Disable the login, and show this message
+	ServiceGuildID           string                    `json:"service_guild_id"`      // Central/Support guild ID
 	DisableStatisticsUpdates bool                      `json:"disable_statistics_updates"`
 	DisableRatingsUpdates    bool                      `json:"disable_ratings_updates"`
 	Matchmaking              GlobalMatchmakingSettings `json:"matchmaking"`
@@ -102,6 +103,42 @@ func LoadGlobalSettingsData(ctx context.Context, nk runtime.NakamaModule) (*Glob
 	}
 	if data.Matchmaking.RankPercentile.LeaderboardWeights == nil {
 		data.Matchmaking.RankPercentile.LeaderboardWeights = make(map[evr.Symbol]map[string]float64)
+	}
+
+	if data.Matchmaking.MatchmakingTimeoutSecs == 0 {
+		data.Matchmaking.MatchmakingTimeoutSecs = 360
+	}
+
+	if data.Matchmaking.FailsafeTimeoutSecs == 0 {
+		data.Matchmaking.FailsafeTimeoutSecs = data.Matchmaking.MatchmakingTimeoutSecs - 60
+	}
+
+	if data.Matchmaking.FallbackTimeoutSecs == 0 {
+		data.Matchmaking.FallbackTimeoutSecs = data.Matchmaking.FailsafeTimeoutSecs / 2
+	}
+
+	if data.Matchmaking.MaxServerRTT == 0 {
+		data.Matchmaking.MaxServerRTT = 150
+	}
+
+	if data.Matchmaking.RankPercentile.Default == 0 {
+		data.Matchmaking.RankPercentile.Default = 0.5
+	}
+
+	if data.Matchmaking.RankPercentile.MaxDelta == 0 {
+		data.Matchmaking.RankPercentile.MaxDelta = 0.3
+	}
+
+	if data.Matchmaking.RankPercentile.DampeningFactor == 0 {
+		data.Matchmaking.RankPercentile.DampeningFactor = 0.5
+	}
+
+	if data.Matchmaking.RankPercentile.ResetSchedule == "" {
+		data.Matchmaking.RankPercentile.ResetSchedule = "daily"
+	}
+
+	if data.Matchmaking.RankPercentile.ResetScheduleDamper == "" {
+		data.Matchmaking.RankPercentile.ResetScheduleDamper = "weekly"
 	}
 
 	// If the object doesn't exist, or this is the first start
