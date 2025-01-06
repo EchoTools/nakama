@@ -122,12 +122,13 @@ func (MigrationUserVRMLEntitlementsToWallet) migrateWallet(wallet map[string]int
 
 	changeset := make(map[string]int64, 0)
 	for k, v := range wallet {
-		if _, ok := walletMap[k]; ok {
+		if items, ok := walletMap[k]; ok {
 			if v > 0 {
 				changeset[k] = v * -1
-				for _, item := range walletMap[k] {
-					if _, ok := wallet[item]; !ok {
-						changeset[item] = 1
+				for _, item := range items {
+					itemName := "cosmetic:arena:" + item
+					if v, ok := wallet[itemName]; !ok || v <= 0 {
+						changeset[itemName] = v*-1 + 1
 					}
 				}
 			}

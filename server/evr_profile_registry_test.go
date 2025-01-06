@@ -48,7 +48,7 @@ func TestConvertWalletToCosmetics(t *testing.T) {
 		{
 			name: "Single cosmetic item",
 			wallet: map[string]int64{
-				"cosmetics:arena:rwd_tag_s1_vrml_s1": 1,
+				"cosmetic:arena:rwd_tag_s1_vrml_s1": 1,
 			},
 			expected: map[string]map[string]bool{
 				"arena": {
@@ -59,8 +59,8 @@ func TestConvertWalletToCosmetics(t *testing.T) {
 		{
 			name: "Multiple cosmetic items",
 			wallet: map[string]int64{
-				"cosmetics:arena:rwd_tag_s1_vrml_s1": 1,
-				"cosmetics:arena:rwd_tag_s1_vrml_s2": 1,
+				"cosmetic:arena:rwd_tag_s1_vrml_s1": 1,
+				"cosmetic:arena:rwd_tag_s1_vrml_s2": 1,
 			},
 			expected: map[string]map[string]bool{
 				"arena": {
@@ -72,8 +72,8 @@ func TestConvertWalletToCosmetics(t *testing.T) {
 		{
 			name: "Non-cosmetic items",
 			wallet: map[string]int64{
-				"noncosmetic:item1":                  1,
-				"cosmetics:arena:rwd_tag_s1_vrml_s2": 1,
+				"noncosmetic:item1":                 1,
+				"cosmetic:arena:rwd_tag_s1_vrml_s2": 1,
 			},
 			expected: map[string]map[string]bool{
 				"arena": {
@@ -84,7 +84,7 @@ func TestConvertWalletToCosmetics(t *testing.T) {
 		{
 			name: "Cosmetic item with zero quantity",
 			wallet: map[string]int64{
-				"cosmetics:arena:rwd_tag_s1_vrml_s1": 0,
+				"cosmetic:arena:rwd_tag_s1_vrml_s1": 0,
 			},
 			expected: map[string]map[string]bool{},
 		},
@@ -92,8 +92,7 @@ func TestConvertWalletToCosmetics(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			unlocks := make(map[string]map[string]bool)
-			walletToCosmetics(tt.wallet, unlocks)
+			unlocks := walletToCosmetics(tt.wallet, nil)
 			if cmp.Diff(unlocks, tt.expected) != "" {
 				wantGotDiff(t, tt.expected, unlocks)
 			}
