@@ -138,6 +138,9 @@ func NewIPQS(logger *zap.Logger, db *sql.DB, metrics Metrics, storageIndex Stora
 }
 
 func (s *IPQSClient) load(ip string) (*IPQSResponse, error) {
+	if s.redisClient == nil {
+		return nil, nil
+	}
 	cachedData, err := s.redisClient.Get(ip).Result()
 	if err == redis.Nil {
 		return nil, nil
