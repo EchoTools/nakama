@@ -383,12 +383,12 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		// EVR packet data stream for the login session by user ID, and service ID, with EVR ID
 		{
 			Stream: PresenceStream{Mode: StreamModeService, Subject: s.userID, Label: StreamLabelLoginService},
-			Meta:   PresenceMeta{Format: s.format, Username: params.xpID.String(), Hidden: false},
+			Meta:   PresenceMeta{Format: s.format, Username: session.Username(), Hidden: false},
 		},
 		// EVR packet data stream for the login session by session ID and service ID, with EVR ID
 		{
 			Stream: PresenceStream{Mode: StreamModeService, Subject: s.id, Label: StreamLabelLoginService},
-			Meta:   PresenceMeta{Format: s.format, Username: params.xpID.String(), Hidden: false},
+			Meta:   PresenceMeta{Format: s.format, Username: session.Username(), Hidden: false},
 		},
 		// Notification presence.
 		{
