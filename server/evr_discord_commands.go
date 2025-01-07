@@ -1128,7 +1128,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					}
 				}
 
-				if err := d.nk.GroupUserJoin(ctx, groupID, userID, user.Username); err != nil {
+				if err := d.nk.GroupUsersAdd(ctx, SystemUserID, groupID, []string{userID}); err != nil {
 					return fmt.Errorf("error joining group: %w", err)
 				}
 
