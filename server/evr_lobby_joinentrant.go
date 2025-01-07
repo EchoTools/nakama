@@ -383,10 +383,14 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		StoreParams(ctx, &params)
 	}
 
-	profile := *params.profile.Load()
+	profile, err := NewUserServerProfile(ctx, p.db, params.account, params.xpID, lobbyParams.GroupID.String())
+	if err != nil {
+		return fmt.Errorf("failed to create user server profile: %w", err)
+	}
+
 	profile.DisplayName = params.accountMetadata.GetGroupDisplayNameOrDefault(groupID)
 
-	if _, err := p.profileCache.Store(profile); err != nil {
+	if _, err := p.profileCache.Store(*profile); err != nil {
 		return fmt.Errorf("failed to cache profile: %w", err)
 	}
 
