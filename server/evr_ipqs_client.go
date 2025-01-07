@@ -165,6 +165,7 @@ func (s *IPQSClient) store(ip string, result *IPQSResponse) error {
 
 	err = s.redisClient.Set(ip, data, time.Hour*24*30).Err()
 	if err != nil {
+		s.metrics.CustomCounter("ipqs_cache_store_error", nil, 1)
 		return fmt.Errorf("failed to set data in redis: %w", err)
 	}
 
@@ -183,9 +184,11 @@ func (s *IPQSClient) Get(ctx context.Context, ip string) (*IPQSResponse, error) 
 	if result, err = s.load(ip); err != nil {
 		return nil, err
 	} else if result != nil {
+		s.metrics.CustomCounter("ipqs_cache_hit", nil, 1)
 		return result, nil
 	}
 
+	s.metrics.CustomCounter("ipqs_cache_miss", nil, 1)
 	ctx, cancelFn := context.WithTimeout(ctx, time.Second*1)
 	defer cancelFn()
 	resultCh := make(chan *IPQSResponse)
@@ -194,6 +197,7 @@ func (s *IPQSClient) Get(ctx context.Context, ip string) (*IPQSResponse, error) 
 		result, err := s.retrieve(ip)
 		if err != nil {
 			s.logger.Warn("Failed to get IPQS details, failing open.", zap.Error(err))
+			resultCh <- nil
 		}
 
 		// cache the result
@@ -208,6 +212,7 @@ func (s *IPQSClient) Get(ctx context.Context, ip string) (*IPQSResponse, error) 
 	case <-ctx.Done():
 		if ctx.Err() == context.DeadlineExceeded {
 			s.logger.Warn("IPQS request timed out, failing open.")
+			s.metrics.CustomCounter("ipqs_request_timeout", nil, 1)
 		}
 		return nil, ctx.Err()
 	case result := <-resultCh:
@@ -215,7 +220,7 @@ func (s *IPQSClient) Get(ctx context.Context, ip string) (*IPQSResponse, error) 
 		if result == nil {
 			return nil, nil
 		}
-
+		s.metrics.CustomCounter("ipqs_cache_miss", nil, 1)
 		return result, nil
 	}
 
