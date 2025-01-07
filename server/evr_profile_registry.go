@@ -57,22 +57,48 @@ type ProfileCache struct {
 
 	// Unlocks by item name
 
-	cacheMu *sync.RWMutex
-	cache   map[evr.EvrId]json.RawMessage
+	cacheMu  *sync.RWMutex
+	cache    map[evr.EvrId]json.RawMessage
+	expiries map[evr.EvrId]time.Time
 }
 
 func NewProfileRegistry(nk runtime.NakamaModule, db *sql.DB, logger runtime.Logger, tracker Tracker, metrics Metrics) *ProfileCache {
 
-	profileRegistry := &ProfileCache{
-		logger:  logger,
-		db:      db,
-		nk:      nk,
-		tracker: tracker,
-		metrics: metrics,
+	ctx, cancelFn := context.WithCancel(context.Background())
 
-		cacheMu: &sync.RWMutex{},
-		cache:   make(map[evr.EvrId]json.RawMessage),
+	profileRegistry := &ProfileCache{
+		ctx:         ctx,
+		ctxCancelFn: cancelFn,
+		logger:      logger,
+		db:          db,
+		nk:          nk,
+		tracker:     tracker,
+		metrics:     metrics,
+
+		cacheMu:  &sync.RWMutex{},
+		cache:    make(map[evr.EvrId]json.RawMessage),
+		expiries: make(map[evr.EvrId]time.Time),
 	}
+
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-profileRegistry.ctx.Done():
+				return
+			case <-ticker.C:
+				profileRegistry.cacheMu.Lock()
+				for xpid, expiry := range profileRegistry.expiries {
+					if time.Now().After(expiry) {
+						delete(profileRegistry.cache, xpid)
+						delete(profileRegistry.expiries, xpid)
+					}
+				}
+				profileRegistry.cacheMu.Unlock()
+			}
+		}
+	}()
 
 	return profileRegistry
 }
@@ -81,6 +107,7 @@ func (r *ProfileCache) Load(xpid evr.EvrId) (json.RawMessage, bool) {
 	r.cacheMu.RLock()
 	defer r.cacheMu.RUnlock()
 	if data, ok := r.cache[xpid]; ok {
+		r.expiries[xpid] = time.Now().Add(time.Minute * 10)
 		return data, true
 	}
 	return nil, false
@@ -93,7 +120,7 @@ func (r *ProfileCache) Store(p evr.ServerProfile) (json.RawMessage, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal profile: %w", err)
 	}
-
+	r.expiries[p.EvrID] = time.Now().Add(time.Minute * 10)
 	r.cache[p.EvrID] = json.RawMessage(data)
 	return data, nil
 }
