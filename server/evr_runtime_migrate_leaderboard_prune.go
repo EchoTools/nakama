@@ -16,14 +16,16 @@ type MigrationLeaderboardPrune struct{}
 
 func (m *MigrationLeaderboardPrune) MigrateSystem(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule) error {
 
-	validLeaderboards := make(map[string]int, 0)
-
+	legacyValidBoards := make(map[string]int, 0)
+	newBoards := make(map[string]int, 0)
+	groupPrefix := "147afc9d-2819-4197-926d-5b3f92790edc:"
 	// First, remove any invalid boards.
 	for mode, leaderboard := range tabletStatisticTypeMap {
 		for statName, operator := range leaderboard {
 			for _, resetSchedule := range []string{"alltime", "monthly", "weekly", "daily"} {
 				id := StatisticBoardID("", mode, statName, resetSchedule)[1:]
-				validLeaderboards[id] = operator
+				legacyValidBoards[id] = operator
+				newBoards[groupPrefix+id] = operator
 			}
 
 		}
@@ -32,6 +34,8 @@ func (m *MigrationLeaderboardPrune) MigrateSystem(ctx context.Context, logger ru
 	toDelete := make([]string, 0)
 	firstStartTime := time.Now()
 	var listCursor string
+
+	movedCount := 0
 	for {
 
 		list, err := nk.LeaderboardList(100, listCursor)
@@ -41,20 +45,21 @@ func (m *MigrationLeaderboardPrune) MigrateSystem(ctx context.Context, logger ru
 		listCursor = list.Cursor
 	LeaderboardLoop:
 		for _, leaderboard := range list.Leaderboards {
+
+			logger := logger.WithFields(map[string]interface{}{
+				"leaderboard": leaderboard.Id,
+			})
+
+			if _, ok := newBoards[leaderboard.Id]; ok {
+				continue
+			}
+
 			boardStartTime := time.Now()
-			_, suffix, found := strings.Cut(leaderboard.Id, ":")
-			if !found {
-				// Invalid (legacy uuid) leaderboard
+			if _, ok := legacyValidBoards[leaderboard.Id]; !ok {
+				logger.Warn("Unknown leaderboard")
 				toDelete = append(toDelete, leaderboard.Id)
 				continue
 			}
-			_ = suffix
-			/*
-				if _, ok := validLeaderboards[suffix]; !ok || !found {
-					toDelete = append(toDelete, leaderboard.Id)
-					continue
-				}
-			*/
 
 			records := make([]*api.LeaderboardRecord, 0)
 			var chunk []*api.LeaderboardRecord
@@ -66,21 +71,15 @@ func (m *MigrationLeaderboardPrune) MigrateSystem(ctx context.Context, logger ru
 			}
 			mode := s[0]
 			statName := s[1]
-			resetSchedule := s[2]
 
-			if resetSchedule != "alltime" || strings.Contains(leaderboard.Id, "Percentile") || strings.Contains(leaderboard.Id, "Rating") {
-				// Only move all time
-				toDelete = append(toDelete, leaderboard.Id)
-				continue
-			}
+			dst := groupPrefix + leaderboard.Id
 
-			dst := "147afc9d-2819-4197-926d-5b3f92790edc:" + leaderboard.Id
-			movedCount := 0
 			startTime := time.Now()
-			logger := logger.WithFields(map[string]interface{}{
+			logger = logger.WithFields(map[string]interface{}{
 				"src": leaderboard.Id,
 				"dst": dst,
 			})
+
 			if err := nk.LeaderboardRanksDisable(ctx, leaderboard.Id); err != nil {
 				logger.WithField("error", err).Warn("Failed to disable leaderboard ranks")
 			}
@@ -98,7 +97,7 @@ func (m *MigrationLeaderboardPrune) MigrateSystem(ctx context.Context, logger ru
 				}
 			}
 
-			op, ok := validLeaderboards[mode+":"+statName+":alltime"]
+			op, ok := legacyValidBoards[mode+":"+statName+":alltime"]
 			if !ok {
 				logger.Warn("Invalid leaderboard")
 				continue LeaderboardLoop
@@ -184,18 +183,35 @@ func (m *MigrationLeaderboardPrune) MigrateSystem(ctx context.Context, logger ru
 	logger.WithFields(map[string]interface{}{
 		"duration": time.Since(firstStartTime),
 	}).Info("Moved leaderboards")
+
+	logger.WithFields(map[string]interface{}{
+		"count": len(toDelete),
+	}).Info("Would delete")
+
 	/*
+		deleteCount := 0
+		deleteStart := time.Now()
 		for _, id := range toDelete {
 			startTime := time.Now()
 			if err := nk.LeaderboardDelete(ctx, id); err != nil {
 				return nil
 			}
 			logger.WithFields(map[string]interface{}{
-				"id":       id,
-				"duration": time.Since(startTime),
+				"id":              id,
+				"delete_duration": time.Since(startTime),
 			}).Info("Deleted invalid leaderboard")
 		}
+
+		logger.WithFields(map[string]interface{}{
+			"count":            deleteCount,
+			"deletes_duration": time.Since(deleteStart),
+			"total_duration":   time.Since(firstStartTime),
+		}).Info("Finished migrating leaderboards")
 	*/
+	logger.WithFields(map[string]interface{}{
+		"moved_count":    movedCount,
+		"total_duration": time.Since(firstStartTime),
+	}).Info("Finished migrating leaderboards")
 
 	return nil
 }
