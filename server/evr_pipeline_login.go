@@ -472,13 +472,6 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 
 	params.profile.Store(serverProfile)
 
-	go func() {
-		// Purge the profile after the session is done
-		<-session.Context().Done()
-		<-time.After(time.Minute * 1)
-		p.profileCache.PurgeProfile(params.xpID)
-	}()
-
 	clientProfile, err := NewClientProfile(ctx, params.accountMetadata, params.xpID)
 	if err != nil {
 		return fmt.Errorf("failed to get client profile: %w", err)
