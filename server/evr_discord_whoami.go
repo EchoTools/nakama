@@ -374,9 +374,10 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 			Inline: false,
 		})
 	}
+
 	// Remove any blank fields
 	fields = lo.Filter(fields, func(f *discordgo.MessageEmbedField, _ int) bool {
-		return f.Value != ""
+		return f == nil || f.Value != ""
 	})
 
 	// Send the response
