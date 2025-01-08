@@ -146,15 +146,24 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				}
 			}
 
-			for _, resetSchedule := range []string{"alltime", "daily", "weekly"} {
+			for _, resetSchedule := range []evr.ResetSchedule{evr.ResetScheduleAllTime, evr.ResetScheduleDaily, evr.ResetScheduleWeekly} {
 				meta := LeaderboardMeta{
-					mode:          evr.ModeArenaPublic,
-					name:          EarlyQuitStatisticID,
-					operator:      "add",
-					resetSchedule: resetSchedule,
+					GroupID:       label.GroupID.String(),
+					Mode:          evr.ModeArenaPublic,
+					StatName:      EarlyQuitStatisticID,
+					Operator:      LeaderboardOperatorIncrement,
+					ResetSchedule: resetSchedule,
+				}
+				entry := &StatisticsQueueEntry{
+					BoardMeta:   meta,
+					UserID:      userID,
+					DisplayName: displayName,
+					Score:       1,
+					Subscore:    0,
+					Override:    LeaderboardOperatorIncrement,
 				}
 
-				p.leaderboardRegistry.LeaderboardTabletStatWrite(context.Background(), meta, userID, displayName, 1.0)
+				p.statisticsQueue.Add(entry)
 			}
 
 			params, ok := LoadParams(session.Context())

@@ -1953,6 +1953,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			// Get the caller's nakama user ID
+			callerGuildGroups := make(map[string]*GuildGroup)
 			callerGuildGroups, err := GuildUserGroupsList(ctx, d.nk, callerUserID)
 			if err != nil {
 				return fmt.Errorf("failed to get guild groups: %w", err)

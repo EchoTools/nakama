@@ -194,6 +194,7 @@ func (s *IPQSClient) Get(ctx context.Context, ip string) (*IPQSResponse, error) 
 	}
 
 	s.metrics.CustomCounter("ipqs_cache_miss", nil, 1)
+
 	ctx, cancelFn := context.WithTimeout(ctx, time.Second*1)
 	defer cancelFn()
 

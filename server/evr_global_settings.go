@@ -51,8 +51,8 @@ type QueryAddons struct {
 }
 
 type RankPercentileSettings struct {
-	ResetSchedule       string                            `json:"reset_schedule"`       // The reset schedule to use for rankings
-	ResetScheduleDamper string                            `json:"damping_schedule"`     // The reset schedule to use for rankings
+	ResetSchedule       evr.ResetSchedule                 `json:"reset_schedule"`       // The reset schedule to use for rankings
+	ResetScheduleDamper evr.ResetSchedule                 `json:"damping_schedule"`     // The reset schedule to use for rankings
 	DampeningFactor     float64                           `json:"damping_factor"`       // The damping factor to use for rank percentile
 	Default             float64                           `json:"default"`              // The default rank percentile to use
 	MaxDelta            float64                           `json:"player_range"`         // The upper limit percentile range to matchmake with
@@ -91,7 +91,7 @@ func LoadGlobalSettingsData(ctx context.Context, nk runtime.NakamaModule) (*Glob
 
 	// Always write back on first load
 	if len(objs) > 0 {
-		data.version = objs[0].Value
+		data.version = objs[0].Version
 		if err := json.Unmarshal([]byte(objs[0].Value), &data); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal global settings: %w", err)
 		}

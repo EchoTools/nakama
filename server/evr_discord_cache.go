@@ -146,10 +146,8 @@ func (c *DiscordCache) Start() {
 	})
 
 	dg.AddHandler(func(s *discordgo.Session, m *discordgo.GuildMemberRemove) {
-		ctx, cancel := context.WithTimeout(c.ctx, time.Second*5)
-		defer cancel()
 		logger.Info("Member Remove", zap.Any("member", m.Member.User.ID))
-		if err := c.GuildGroupMemberRemove(ctx, m.GuildID, m.Member.User.ID, ""); err != nil {
+		if err := c.GuildGroupMemberRemove(c.ctx, m.GuildID, m.Member.User.ID, ""); err != nil {
 			logger.Warn("Error removing guild group member", zap.Any("guildMemberRemove", m), zap.Error(err))
 		}
 	})
@@ -188,7 +186,7 @@ func (d *DiscordCache) DiscordIDToUserID(discordID string) string {
 	userID, ok := d.idcache.Load(discordID)
 	if !ok {
 		var err error
-		userID, err = GetUserIDByDiscordID(context.Background(), d.db, discordID)
+		userID, err = GetUserIDByDiscordID(d.ctx, d.db, discordID)
 		if err != nil {
 			return ""
 		}
@@ -202,7 +200,7 @@ func (d *DiscordCache) UserIDToDiscordID(userID string) string {
 	discordID, ok := d.idcache.Load(userID)
 	if !ok {
 		var err error
-		discordID, err = GetDiscordIDByUserID(context.Background(), d.db, userID)
+		discordID, err = GetDiscordIDByUserID(d.ctx, d.db, userID)
 		if err != nil {
 			return ""
 		}
@@ -217,7 +215,7 @@ func (d *DiscordCache) GuildIDToGroupID(guildID string) string {
 	groupID, ok := d.idcache.Load(guildID)
 	if !ok {
 		var err error
-		groupID, err = GetGroupIDByGuildID(context.Background(), d.db, guildID)
+		groupID, err = GetGroupIDByGuildID(d.ctx, d.db, guildID)
 		if err != nil || groupID == "" || groupID == uuid.Nil.String() {
 			return ""
 		}
@@ -232,7 +230,7 @@ func (c *DiscordCache) GroupIDToGuildID(groupID string) string {
 	guildID, ok := c.idcache.Load(groupID)
 	if !ok {
 		var err error
-		guildID, err = GetGuildIDByGroupID(context.Background(), c.db, groupID)
+		guildID, err = GetGuildIDByGroupID(c.ctx, c.db, groupID)
 		if err != nil {
 			return ""
 		}
@@ -472,35 +470,30 @@ func (d *DiscordCache) updateGuild(ctx context.Context, logger *zap.Logger, guil
 }
 
 func (d *DiscordCache) handleGuildCreate(logger *zap.Logger, s *discordgo.Session, e *discordgo.GuildCreate) error {
-	ctx, cancel := context.WithTimeout(d.ctx, time.Second*5)
-	defer cancel()
 	logger.Info("Guild Create", zap.Any("guild", e.Guild.ID))
-	if err := d.updateGuild(ctx, logger, e.Guild); err != nil {
+	if err := d.updateGuild(d.ctx, logger, e.Guild); err != nil {
 		return fmt.Errorf("failed to update guild: %w", err)
 	}
 	return nil
 }
 
 func (d *DiscordCache) handleGuildUpdate(logger *zap.Logger, s *discordgo.Session, e *discordgo.GuildUpdate) error {
-	ctx, cancel := context.WithTimeout(d.ctx, time.Second*5)
-	defer cancel()
 	logger.Info("Guild Update", zap.Any("guild", e.Guild.ID))
-	if err := d.updateGuild(ctx, logger, e.Guild); err != nil {
+	if err := d.updateGuild(d.ctx, logger, e.Guild); err != nil {
 		return fmt.Errorf("failed to update guild: %w", err)
 	}
 	return nil
 }
 
 func (d *DiscordCache) handleGuildDelete(logger *zap.Logger, s *discordgo.Session, e *discordgo.GuildDelete) error {
-	ctx, cancel := context.WithTimeout(d.ctx, time.Second*5)
-	defer cancel()
+
 	logger.Info("Guild Delete", zap.Any("guild", e.Guild.ID))
 	groupID := d.GuildIDToGroupID(e.Guild.ID)
 	if groupID == "" {
 		return nil
 	}
 
-	if err := d.nk.GroupDelete(ctx, groupID); err != nil {
+	if err := d.nk.GroupDelete(d.ctx, groupID); err != nil {
 		return fmt.Errorf("error deleting group: %w", err)
 	}
 
@@ -525,9 +518,7 @@ func (d *DiscordCache) handleMemberUpdate(logger *zap.Logger, s *discordgo.Sessi
 	if e.Member == nil || e.Member.User == nil {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(d.ctx, time.Second*5)
-	defer cancel()
-
+	ctx := d.ctx
 	userID := d.DiscordIDToUserID(e.Member.User.ID)
 
 	if userID == "" {
@@ -842,9 +833,6 @@ func (d *DiscordCache) handleGuildBanAdd(ctx context.Context, logger *zap.Logger
 	}
 
 	logger = logger.With(zap.String("event", "GuildBanAdd"), zap.String("guild_id", e.GuildID), zap.String("discord_id", e.User.ID), zap.String("gid", groupID), zap.String("uid", userID), zap.String("username", e.User.Username))
-
-	ctx, cancel := context.WithTimeout(ctx, time.Second*5)
-	defer cancel()
 
 	// Fetch the audit log for recent bans
 	auditLogs, err := s.GuildAuditLog(e.GuildID, "", "", int(discordgo.AuditLogActionMemberBanAdd), 1)

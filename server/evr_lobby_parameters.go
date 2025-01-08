@@ -128,7 +128,6 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 	// Load the global matchmaking config
 	serviceSettings := ServiceSettings()
 	globalSettings := serviceSettings.Matchmaking
-	globalSettingsVersion := serviceSettings.version
 
 	// Load the user's matchmaking config
 	userSettings, err := LoadMatchmakingSettings(ctx, p.runtimeModule, userID)
@@ -301,8 +300,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 
 	if userSettings.StaticBaseRankPercentile > 0 {
 		rankPercentile = userSettings.StaticBaseRankPercentile
-	} else if rankPercentile == 0 || globalSettingsVersion != userSettings.GlobalSettingsVersion {
-
+	} else {
 		rankPercentile, err = CalculateSmoothedPlayerRankPercentile(ctx, logger, p.runtimeModule, userID, groupID.String(), mode)
 		if err != nil {
 			return nil, fmt.Errorf("failed to calculate smoothed player rank percentile: %w", err)
@@ -310,6 +308,10 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 
 		if err := MatchmakingRankPercentileStore(ctx, p.runtimeModule, userID, session.Username(), groupID.String(), mode, rankPercentile); err != nil {
 			logger.Warn("Failed to store user rank percentile", zap.Error(err))
+		}
+
+		if err := StoreMatchmakingSettings(ctx, p.runtimeModule, userID, userSettings); err != nil {
+			logger.Warn("Failed to store user matchmaking settings", zap.Error(err))
 		}
 	}
 

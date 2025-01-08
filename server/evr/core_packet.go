@@ -173,6 +173,8 @@ func ToSymbol(v any) Symbol {
 		return Symbol(t)
 	case SymbolToken:
 		return ToSymbol(string(t))
+	case []uint8:
+		return ToSymbol(string(t))
 	case string:
 		str := t
 		// Empty string returns 0

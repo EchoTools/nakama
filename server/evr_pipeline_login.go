@@ -3,8 +3,10 @@ package server
 import (
 	"context"
 	"encoding/json"
+
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -797,7 +799,7 @@ func mostRecentThursday() time.Time {
 	return now.AddDate(0, 0, -offset).UTC()
 }
 
-// A profile udpate request is sent from the game server's login connection.
+// A profile update request is sent from the game server's login connection.
 // It is sent 45 seconds before the sessionend is sent, right after the match ends.
 func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.UserServerProfileUpdateRequest)
@@ -819,61 +821,26 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 
 	playerInfo := label.GetPlayerByEvrID(request.EvrID)
 
-	if playerInfo == nil {
-		return fmt.Errorf("failed to find player in match")
+	// If the player isn't in the match, or isn't a player, do not update the stats
+	if playerInfo == nil || playerInfo.Team != BlueTeam && playerInfo.Team != OrangeTeam {
+		return fmt.Errorf("non-player profile update request: %s", request.EvrID.String())
 	}
 
 	// Set the player's session to not be an early quitter
-	playerSession := p.sessionRegistry.Get(uuid.FromStringOrNil(playerInfo.SessionID))
-	if playerSession != nil {
-		params, ok := LoadParams(playerSession.Context())
-		if !ok {
-			return errors.New("session parameters not found")
-		}
-		params.isEarlyQuitter.Store(false)
-	}
-
-	if playerInfo.Team != BlueTeam && playerInfo.Team != OrangeTeam || playerInfo.Team == SocialLobbyParticipant {
-		return nil
-	}
-
-	// Determine winner
-	blueWins := false
-	switch label.Mode {
-	case evr.ModeArenaPublic:
-
-		// Check which team won
-		if stats, ok := request.Payload.Update.StatsGroups["arena"]; !ok {
-			return fmt.Errorf("stats group doesn't match mode")
-
+	if playerSession := p.sessionRegistry.Get(uuid.FromStringOrNil(playerInfo.SessionID)); playerSession != nil {
+		if params, ok := LoadParams(playerSession.Context()); ok {
+			params.isEarlyQuitter.Store(false)
 		} else {
-
-			if s, ok := stats["ArenaWins"]; ok && s.Value > 0 && playerInfo.Team == BlueTeam {
-				blueWins = true
-			}
-		}
-
-	case evr.ModeCombatPublic:
-
-		// Check which team won
-		if stats, ok := request.Payload.Update.StatsGroups["combat"]; !ok {
-			return fmt.Errorf("stats group doesn't match mode")
-
-		} else {
-
-			if s, ok := stats["CombatWins"]; ok && s.Value > 0 && playerInfo.Team == BlueTeam {
-				blueWins = true
-			}
+			logger.Warn("Failed to load session parameters", zap.String("sessionID", playerInfo.SessionID))
 		}
 	}
-
-	// Put the XP in the player's wallet
 
 	// If the player isn't a member of the group, do not update the stats
 	metadata, err := AccountMetadataLoad(ctx, p.runtimeModule, playerInfo.UserID)
 	if err != nil {
 		return fmt.Errorf("failed to get account metadata: %w", err)
 	}
+
 	groupIDStr := label.GetGroupID().String()
 
 	if !serviceSettings.Load().DisableStatisticsUpdates && metadata.GroupDisplayNames[groupIDStr] != "" {
@@ -883,7 +850,10 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 			logger.Warn("Failed to load matchmaking settings", zap.Error(err))
 		} else {
 
-			if rating, err := CalculateNewPlayerRating(request.EvrID, label.Players, label.TeamSize, blueWins); err != nil {
+			// Determine winning team
+			blueWins := playerInfo.Team == BlueTeam && request.Payload.IsWinner()
+
+			if rating, err := CalculateNewPlayerRating(playerInfo.EvrID, label.Players, label.TeamSize, blueWins); err != nil {
 				logger.Error("Failed to calculate new player rating", zap.Error(err))
 			} else {
 				playerInfo.RatingMu = rating.Mu
@@ -896,25 +866,88 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 			// Calculate a new rank percentile
 			if rankPercentile, err := CalculateSmoothedPlayerRankPercentile(ctx, logger, p.runtimeModule, playerInfo.UserID, groupIDStr, label.Mode); err != nil {
 				logger.Error("Failed to calculate new player rank percentile", zap.Error(err))
-			} else {
-				// Add leaderboard for percentile
-				if err := MatchmakingRankPercentileStore(ctx, p.runtimeModule, playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, rankPercentile); err != nil {
-					logger.Warn("Failed to record percentile to leaderboard", zap.Error(err))
-				}
+			} else if err := MatchmakingRankPercentileStore(ctx, p.runtimeModule, playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, rankPercentile); err != nil {
+				logger.Warn("Failed to record percentile to leaderboard", zap.Error(err))
 			}
-			userSettings.GlobalSettingsVersion = GlobalSettings().version
 
 			if err := StoreMatchmakingSettings(ctx, p.runtimeModule, playerInfo.UserID, userSettings); err != nil {
 				logger.Warn("Failed to save matchmaking settings", zap.Error(err))
 			}
 		}
 
-		// Process the update into the leaderboard and profile
-		err = p.leaderboardRegistry.ProcessProfileUpdate(ctx, logger, playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, &request.Payload)
+		// Get the players existing statistics
+		prevPlayerStats, _, err := PlayerStatisticsGetID(ctx, p.db, playerInfo.UserID, groupIDStr, []evr.Symbol{label.Mode}, false)
 		if err != nil {
-			logger.Error("Failed to process profile update", zap.Error(err), zap.Any("payload", request.Payload))
-			return fmt.Errorf("failed to process profile update: %w", err)
+			return fmt.Errorf("failed to get player statistics: %w", err)
 		}
+
+		var stats evr.Statistics
+		switch label.Mode {
+		case evr.ModeArenaPublic:
+			stats = &request.Payload.Update.Statistics.Arena
+		case evr.ModeCombatPublic:
+			stats = &request.Payload.Update.Statistics.Combat
+		}
+
+		prevStats := prevPlayerStats[evr.StatisticsGroup{
+			Mode:          label.Mode,
+			ResetSchedule: evr.ResetScheduleAllTime,
+		}]
+		statsValue := reflect.ValueOf(stats).Elem()
+		prevStatsValue := reflect.ValueOf(prevStats).Elem()
+		statsType := statsValue.Type()
+
+		entries := make([]*StatisticsQueueEntry, 0, statsType.NumField()*3)
+		for i := 0; i < statsType.NumField(); i++ {
+
+			prev := prevStatsValue.Field(i).Addr().Interface().(evr.Statistic)
+			value := statsValue.Field(i).Addr().Interface().(evr.Statistic)
+
+			t := statsValue.Field(i).Type()
+			statName := t.Field(i).Tag.Get("json")
+			statName = strings.SplitN(statName, ",", 2)[0]
+
+			// Based on the type of the field, modify the update value
+			var updateValue float64
+			switch statsValue.Field(i).Addr().Interface().(type) {
+			case evr.StatisticAdditionInteger:
+				updateValue = value.GetValue() - prev.GetValue()
+			case evr.StatisticAdditionFloat:
+				updateValue = value.GetValue() - prev.GetValue()
+			case evr.StatisticAverageFloat:
+
+			}
+
+			for _, r := range []evr.ResetSchedule{evr.ResetScheduleDaily, evr.ResetScheduleWeekly, evr.ResetScheduleAllTime} {
+				op := StatisticOperator(value)
+				meta := LeaderboardMeta{
+					groupID:       groupIDStr,
+					mode:          label.Mode,
+					statName:      statName,
+					operator:      op,
+					resetSchedule: r,
+				}
+
+				// If the value is zero, or the previous value is zero, do not update the stat
+				if updateValue == 0 {
+					continue
+				}
+
+				score, subscore := ValueToScore(updateValue)
+
+				entries = append(entries, &StatisticsQueueEntry{
+					BoardMeta:   meta,
+					UserID:      playerInfo.UserID,
+					DisplayName: playerInfo.DisplayName,
+					Score:       score,
+					Subscore:    subscore,
+					Metadata:    nil,
+					Override:    2, // set
+				})
+			}
+		}
+
+		p.statisticsQueue.Add(entries...)
 	}
 
 	return nil

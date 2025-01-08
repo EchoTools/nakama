@@ -189,8 +189,16 @@ func NewUserServerProfile(ctx context.Context, db *sql.DB, account *api.Account,
 	if groupID == "" || metadata.GroupDisplayNames[groupID] == "" {
 		groupID = metadata.GetActiveGroupID().String()
 	}
+	modes := []evr.Symbol{
+		evr.ModeArenaPublic,
+		evr.ModeCombatPublic,
+		evr.ModeCombatPrivate,
+		evr.ModeArenaPrivate,
+		evr.ModeSocialPublic,
+		evr.ModeSocialPrivate,
+	}
 
-	stats, err := LeaderboardsUserTabletStatisticsGet(ctx, db, account.User.Id, groupID, []evr.Symbol{evr.ModeArenaPublic, evr.ModeCombatPublic}, "alltime")
+	statsBySchedule, _, err := PlayerStatisticsGetID(ctx, db, account.User.Id, groupID, modes, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user tablet statistics: %w", err)
 	}
@@ -217,7 +225,7 @@ func NewUserServerProfile(ctx context.Context, db *sql.DB, account *api.Account,
 		LoginTime:         loginTime.UTC().Unix(),
 		UpdateTime:        account.User.UpdateTime.AsTime().UTC().Unix(),
 		CreateTime:        account.User.CreateTime.AsTime().UTC().Unix(),
-		Statistics:        stats,
+		Statistics:        statsBySchedule,
 		UnlockedCosmetics: cosmetics,
 		EquippedCosmetics: evr.EquippedCosmetics{
 			Number:     int(metadata.LoadoutCosmetics.JerseyNumber),

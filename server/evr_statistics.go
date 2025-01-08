@@ -22,188 +22,9 @@ const (
 	SkillRatingMuStatisticID    = "SkillRatingMu"
 	SkillRatingSigmaStatisticID = "SkillRatingSigma"
 	LobbyTimeStatisticID        = "LobbyTime"
+	GameServerTimeStatisticsID  = "GameServerTime"
 	EarlyQuitStatisticID        = "EarlyQuits"
 )
-
-var tabletStatisticTypeMap = map[evr.Symbol]map[string]int{
-	evr.ModeArenaPublic: {
-		"ArenaLosses":                  TabletStatisticIntegerValue,
-		"ArenaMVPPercentage":           TabletStatisticFloatValue,
-		"ArenaMVPs":                    TabletStatisticIntegerValue,
-		"ArenaTies":                    TabletStatisticIntegerValue,
-		"ArenaWinPercentage":           TabletStatisticFloatValue,
-		"ArenaWins":                    TabletStatisticIntegerValue,
-		"Assists":                      TabletStatisticIntegerValue,
-		"AssistsPerGame":               TabletStatisticFloatValue,
-		"AveragePointsPerGame":         TabletStatisticFloatValue,
-		"AveragePossessionTimePerGame": TabletStatisticFloatValue,
-		"AverageTopSpeedPerGame":       TabletStatisticFloatValue,
-		"BlockPercentage":              TabletStatisticFloatValue,
-		"Blocks":                       TabletStatisticIntegerValue,
-		"BounceGoals":                  TabletStatisticIntegerValue,
-		"BumperShots":                  TabletStatisticIntegerValue,
-		"Catches":                      TabletStatisticIntegerValue,
-		"Clears":                       TabletStatisticIntegerValue,
-		"CurrentArenaMVPStreak":        TabletStatisticIntegerValue,
-		"CurrentArenaWinStreak":        TabletStatisticIntegerValue,
-		"Goals":                        TabletStatisticIntegerValue,
-		"GoalSavePercentage":           TabletStatisticFloatValue,
-		"GoalScorePercentage":          TabletStatisticFloatValue,
-		"GoalsPerGame":                 TabletStatisticFloatValue,
-		"HatTricks":                    TabletStatisticIntegerValue,
-		"HeadbuttGoals":                TabletStatisticIntegerValue,
-		"HighestArenaMVPStreak":        TabletStatisticIntegerValue,
-		"HighestArenaWinStreak":        TabletStatisticIntegerValue,
-		"HighestPoints":                TabletStatisticIntegerValue,
-		"HighestSaves":                 TabletStatisticIntegerValue,
-		"HighestStuns":                 TabletStatisticIntegerValue,
-		"Interceptions":                TabletStatisticIntegerValue,
-		"JoustsWon":                    TabletStatisticIntegerValue,
-		"Level":                        TabletStatisticIntegerValue,
-		"OnePointGoals":                TabletStatisticIntegerValue,
-		"Passes":                       TabletStatisticIntegerValue,
-		"Points":                       TabletStatisticIntegerValue,
-		"PossessionTime":               TabletStatisticFloatValue,
-		"PunchesReceived":              TabletStatisticIntegerValue,
-		"Saves":                        TabletStatisticIntegerValue,
-		"SavesPerGame":                 TabletStatisticFloatValue,
-		"ShotsOnGoal":                  TabletStatisticIntegerValue,
-		"ShotsOnGoalAgainst":           TabletStatisticIntegerValue,
-		"Steals":                       TabletStatisticIntegerValue,
-		"StunPercentage":               TabletStatisticFloatValue,
-		"Stuns":                        TabletStatisticIntegerValue,
-		"StunsPerGame":                 TabletStatisticFloatValue,
-		"ThreePointGoals":              TabletStatisticIntegerValue,
-		"TopSpeedsTotal":               TabletStatisticFloatValue,
-		"TwoPointGoals":                TabletStatisticIntegerValue,
-		"XP":                           TabletStatisticIntegerValue,
-		GamesPlayedStatisticID:         TabletStatisticIntegerValue,
-
-		SkillRatingSigmaStatisticID: TabletStatisticFloatValue,
-		SkillRatingMuStatisticID:    TabletStatisticFloatValue,
-		RankPercentileStatisticID:   TabletStatisticFloatValue,
-		EarlyQuitStatisticID:        TabletStatisticIntegerValue,
-	},
-	evr.ModeCombatPublic: {
-		"CombatAssists":                      TabletStatisticIntegerValue,
-		"CombatAverageEliminationDeathRatio": TabletStatisticFloatValue,
-		"CombatBestEliminationStreak":        TabletStatisticIntegerValue,
-		"CombatDamage":                       TabletStatisticFloatValue,
-		"CombatDamageAbsorbed":               TabletStatisticFloatValue,
-		"CombatDamageTaken":                  TabletStatisticFloatValue,
-		"CombatDeaths":                       TabletStatisticIntegerValue,
-		"CombatEliminations":                 TabletStatisticIntegerValue,
-		"CombatHeadshotKills":                TabletStatisticIntegerValue,
-		"CombatHealing":                      TabletStatisticFloatValue,
-		"CombatHillCaptures":                 TabletStatisticIntegerValue,
-		"CombatHillDefends":                  TabletStatisticIntegerValue,
-		"CombatKills":                        TabletStatisticIntegerValue,
-		"CombatLosses":                       TabletStatisticIntegerValue,
-		"CombatMVPs":                         TabletStatisticIntegerValue,
-		"CombatObjectiveDamage":              TabletStatisticFloatValue,
-		"CombatObjectiveEliminations":        TabletStatisticIntegerValue,
-		"CombatObjectiveTime":                TabletStatisticFloatValue,
-		"CombatPayloadGamesPlayed":           TabletStatisticIntegerValue,
-		"CombatPayloadWinPercentage":         TabletStatisticFloatValue,
-		"CombatPayloadWins":                  TabletStatisticIntegerValue,
-		"CombatPointCaptureGamesPlayed":      TabletStatisticIntegerValue,
-		"CombatPointCaptureWinPercentage":    TabletStatisticFloatValue,
-		"CombatPointCaptureWins":             TabletStatisticIntegerValue,
-		"CombatSoloKills":                    TabletStatisticIntegerValue,
-		"CombatStuns":                        TabletStatisticIntegerValue,
-		"CombatTeammateHealing":              TabletStatisticFloatValue,
-		"CombatWinPercentage":                TabletStatisticFloatValue,
-		"CombatWins":                         TabletStatisticIntegerValue,
-		"Level":                              TabletStatisticIntegerValue,
-		"XP":                                 TabletStatisticIntegerValue,
-		GamesPlayedStatisticID:               TabletStatisticIntegerValue,
-		SkillRatingSigmaStatisticID:          TabletStatisticFloatValue,
-		SkillRatingMuStatisticID:             TabletStatisticFloatValue,
-		RankPercentileStatisticID:            TabletStatisticFloatValue,
-		LobbyTimeStatisticID:                 TabletStatisticFloatValue,
-		EarlyQuitStatisticID:                 TabletStatisticIntegerValue,
-	},
-	evr.ModeSocialPublic: {
-		LobbyTimeStatisticID: TabletStatisticFloatValue,
-	},
-	evr.ModeSocialPrivate: {
-		LobbyTimeStatisticID: TabletStatisticFloatValue,
-	},
-	evr.ModeCombatPrivate: {
-		LobbyTimeStatisticID: TabletStatisticFloatValue,
-	},
-	evr.ModeArenaPrivate: {
-		LobbyTimeStatisticID: TabletStatisticFloatValue,
-	},
-}
-
-func ScoreToTableStatistic(mode evr.Symbol, name string, score, subscore int64) any {
-	switch tabletStatisticTypeMap[mode][name] {
-	case TabletStatisticIntegerValue:
-		return TabletStatisticInteger{}.ScoreToValue(score, subscore)
-	case TabletStatisticFloatValue:
-		return TabletStatisticFloat{}.ScoreToValue(score, subscore)
-	default:
-		return nil
-	}
-}
-
-func TabletStatisticToScore(mode evr.Symbol, name string, v any) (int64, int64) {
-	switch tabletStatisticTypeMap[mode][name] {
-	case TabletStatisticIntegerValue:
-		return TabletStatisticInteger{}.ValueToScore(v)
-	case TabletStatisticFloatValue:
-		return TabletStatisticFloat{}.ValueToScore(v)
-	default:
-		return 0, 0
-	}
-}
-
-type TabletStatisticFloat struct{}
-
-func (TabletStatisticFloat) ScoreToValue(score, subscore int64) any {
-	f, _ := strconv.ParseFloat(fmt.Sprintf("%d.%d", score, subscore), 64)
-	return f
-}
-
-func (TabletStatisticFloat) ValueToScore(v any) (int64, int64) {
-	if v == nil {
-		return 0, 0
-	}
-	switch v := v.(type) {
-	case float64:
-		str := strconv.FormatFloat(v, 'f', -1, 64)
-		s := strings.Split(str, ".")
-
-		whole, _ := strconv.ParseInt(s[0], 10, 64)
-		fractional, _ := strconv.ParseInt(s[1], 10, 64)
-		return whole, fractional
-	case int64:
-		return v, 0
-	default:
-		return 0, 0
-	}
-}
-
-type TabletStatisticInteger struct{}
-
-func (TabletStatisticInteger) ValueToScore(v any) (int64, int64) {
-	if v == nil {
-		return 0, 0
-	}
-	switch v := v.(type) {
-	case float64:
-		return int64(v), 0
-	case int64:
-		return v, 0
-	default:
-		return 0, 0
-	}
-}
-
-func (TabletStatisticInteger) ScoreToValue(score, subscore int64) any {
-	return int64(score)
-}
 
 func MatchmakingRatingLoad(ctx context.Context, nk runtime.NakamaModule, groupID, userID string, mode evr.Symbol) (types.Rating, error) {
 	// Look for an existing account.
@@ -309,4 +130,96 @@ func MatchmakingRankPercentileStore(ctx context.Context, nk runtime.NakamaModule
 	}
 
 	return nil
+}
+
+func ValueToScore(v float64) (int64, int64) {
+	// If it's a whole number, return it as such.
+	if v == float64(int64(v)) {
+		return int64(v), 0
+	}
+
+	// Otherwise, split the float into whole and fractional parts.
+	str := strconv.FormatFloat(float64(v), 'f', -1, 64)
+	s := strings.Split(str, ".")
+
+	// Parse the whole and fractional parts as integers.
+	whole, _ := strconv.ParseInt(s[0], 10, 64)
+	fractional, _ := strconv.ParseInt(s[1], 10, 64)
+
+	return whole, fractional
+}
+
+func ScoreToValue(score int64, subscore int64) float64 {
+	// If there's no subscore, return the score as a whole number.
+	if subscore == 0 {
+		return float64(score)
+	}
+
+	// Otherwise, combine the score and subscore as a float.
+	f, _ := strconv.ParseFloat(fmt.Sprintf("%d.%d", score, subscore), 64)
+	return f
+}
+
+func StatisticBoardID(groupID string, mode evr.Symbol, statName string, resetSchedule evr.ResetSchedule) string {
+	return fmt.Sprintf("%s:%s:%s:%s", groupID, mode.String(), statName, resetSchedule)
+}
+
+func ParseStatisticBoardID(id string) (groupID string, mode evr.Symbol, statName string, resetSchedule string, err error) {
+	parts := strings.SplitN(id, ":", 4)
+	if len(parts) != 4 {
+		err = fmt.Errorf("invalid leaderboard ID: %s", id)
+		return
+	}
+	return parts[0], evr.ToSymbol(parts[1]), parts[2], parts[3], nil
+}
+
+func ResetScheduleToCron(resetSchedule evr.ResetSchedule) string {
+	switch resetSchedule {
+	case evr.ResetScheduleDaily:
+		return "0 16 * * *"
+	case evr.ResetScheduleWeekly:
+		return "0 16 * * 4"
+	case evr.ResetScheduleAllTime:
+		fallthrough
+	default:
+		return ""
+	}
+}
+
+func OperatorToLeaderboardOperator(op int) string {
+	switch op {
+	case LeaderboardOperatorIncrement:
+		return "incr"
+	case LeaderboardOperatorDecrement:
+		return "decr"
+	case LeaderboardOperatorBest:
+		return "best"
+	case LeaderboardOperatorSet:
+		return "set"
+	default:
+		return "set"
+	}
+}
+
+func StatisticOperator(v evr.Statistic) int {
+	switch v.(type) {
+	case *evr.StatisticAdditionFloat:
+		return LeaderboardOperatorIncrement
+	case *evr.StatisticAdditionInteger:
+		return LeaderboardOperatorIncrement
+	case *evr.StatisticAverageFloat:
+		return LeaderboardOperatorSet
+	case *evr.StatisticAverageInteger:
+		return LeaderboardOperatorSet
+	case *evr.StatisticMaximumFloat:
+		return LeaderboardOperatorBest
+	case *evr.StatisticMaximumInteger:
+		return LeaderboardOperatorBest
+	case *evr.StatisticReplacementFloat:
+		return LeaderboardOperatorSet
+	case *evr.StatisticReplacementInteger:
+		return LeaderboardOperatorSet
+	default:
+		return LeaderboardOperatorSet
+	}
 }

@@ -36,7 +36,7 @@ func CalculateSmoothedPlayerRankPercentile(ctx context.Context, logger *zap.Logg
 	return percentile, nil
 }
 
-func RecalculatePlayerRankPercentile(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, userID, groupID string, mode evr.Symbol, resetSchedule string, defaultRankPercentile float64, boardNameWeights map[string]float64) (float64, error) {
+func RecalculatePlayerRankPercentile(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, userID, groupID string, mode evr.Symbol, resetSchedule evr.ResetSchedule, defaultRankPercentile float64, boardNameWeights map[string]float64) (float64, error) {
 
 	percentiles := make([]float64, 0, len(boardNameWeights))
 	weights := make([]float64, 0, len(boardNameWeights))
@@ -45,12 +45,12 @@ func RecalculatePlayerRankPercentile(ctx context.Context, logger *zap.Logger, nk
 
 		boardID := StatisticBoardID(groupID, mode, boardName, resetSchedule)
 
-		records, _, _, _, err := nk.LeaderboardRecordsList(ctx, boardID, []string{userID}, 10000, "", 0)
+		_, ownerRecords, _, _, err := nk.LeaderboardRecordsList(ctx, boardID, []string{userID}, 10000, "", 0)
 		if err != nil {
 			continue
 		}
 
-		if len(records) == 0 {
+		if len(ownerRecords) == 0 {
 			percentiles = append(percentiles, defaultRankPercentile)
 			weights = append(weights, weight)
 			continue
@@ -58,7 +58,7 @@ func RecalculatePlayerRankPercentile(ctx context.Context, logger *zap.Logger, nk
 
 		// Find the user's rank.
 		var rank int64 = -1
-		for _, record := range records {
+		for _, record := range ownerRecords {
 			if record.OwnerId == userID {
 				rank = record.Rank
 				break
@@ -68,7 +68,7 @@ func RecalculatePlayerRankPercentile(ctx context.Context, logger *zap.Logger, nk
 			continue
 		}
 
-		percentile := float64(rank) / float64(len(records))
+		percentile := float64(rank) / float64(len(ownerRecords))
 
 		weights = append(weights, weight)
 		percentiles = append(percentiles, percentile)
