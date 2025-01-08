@@ -1106,14 +1106,16 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			if user == nil {
 				return nil
 			}
-
+			tags := map[string]string{
+				"new_account": "false",
+			}
 			// Validate the link code as a 4 character string
 			if len(linkCode) != 4 {
 				return errors.New("invalid link code: link code must be (4) letters long (i.e. ABCD)")
 			}
 
 			if err := func() error {
-
+				tags["new_account"] = "false"
 				// Exchange the link code for a device auth.
 				ticket, err := ExchangeLinkCode(ctx, nk, logger, linkCode)
 				if err != nil {
@@ -1122,6 +1124,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 				// Authenticate/create an account.
 				if userID == "" {
+					tags["new_account"] = "true"
 					userID, _, _, err = d.nk.AuthenticateCustom(ctx, user.ID, user.Username, true)
 					if err != nil {
 						return fmt.Errorf("failed to authenticate (or create) user %s: %w", user.ID, err)
@@ -1135,7 +1138,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				if err := nk.LinkDevice(ctx, userID, ticket.XPID.Token()); err != nil {
 					return fmt.Errorf("failed to link headset: %w", err)
 				}
-
+				d.metrics.CustomCounter("link_headset", map[string]string{"new_account": "true"}, 1)
 				// Set the client IP as authorized in the LoginHistory
 				history, err := LoginHistoryLoad(ctx, nk, userID)
 				if err != nil {
@@ -1294,7 +1297,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					},
 				})
 			}
-
+			d.metrics.CustomCounter("unlink_headset", nil, 1)
 			content := "Your headset has been unlinked. Restart EchoVR."
 			d.cache.QueueSyncMember(i.GuildID, user.ID)
 
