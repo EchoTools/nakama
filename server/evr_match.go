@@ -412,6 +412,16 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		logger.Error("Failed to update label: %v", err)
 	}
 
+	// Check team sizes
+	if state.Mode == evr.ModeArenaPublic {
+		if state.RoleCount(evr.TeamBlue) > state.TeamSize || state.RoleCount(evr.TeamOrange) > state.TeamSize {
+			logger.WithFields(map[string]interface{}{
+				"blue":   state.RoleCount(evr.TeamBlue),
+				"orange": state.RoleCount(evr.TeamOrange),
+			}).Error("Oversized team.")
+		}
+	}
+
 	return state, true, meta.Presence.String()
 }
 
@@ -466,7 +476,6 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 			nk.MetricsTimerRecord("match_player_join_duration", tags, time.Since(state.joinTimestamps[p.GetSessionId()]))
 		}
 	}
-
 	//m.updateLabel(dispatcher, state)
 	return state
 }
