@@ -196,7 +196,7 @@ func (r *UserLogJouralRegistry) storageWrite(ctx context.Context, logger *zap.Lo
 
 			if data, err = json.Marshal(journal); err != nil {
 				return err
-			} else if len(data) < 8*1024*1024 {
+			} else if len(data) < 4*1024*1024 {
 				break
 			}
 
