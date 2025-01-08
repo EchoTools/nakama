@@ -149,7 +149,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 			for _, resetSchedule := range []string{"alltime", "daily", "weekly"} {
 				meta := LeaderboardMeta{
 					mode:          evr.ModeArenaPublic,
-					name:          "EarlyQuits",
+					name:          EarlyQuitStatisticID,
 					operator:      "add",
 					resetSchedule: resetSchedule,
 				}
