@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/gofrs/uuid/v5"
@@ -17,26 +16,22 @@ const (
 	RemoteLogStorageJournalKey = "journal"
 )
 
-type UserLogJournal struct {
-	sync.Mutex
-	UserID  uuid.UUID              `json:"userID"`
-	Entries []*UserLogJournalEntry `json:"entries"`
-}
-
-type UserLogJournalEntry struct {
+type RemoteUserLogMessage struct {
 	SessionID uuid.UUID `json:"sessionID"`
 	Timestamp time.Time `json:"timestamp"`
 	Message   string    `json:"message"`
 }
 
+type JournalPresence struct {
+	UserID    uuid.UUID
+	SessionID uuid.UUID
+}
+
 type UserLogJouralRegistry struct {
-	sync.RWMutex
 	logger *zap.Logger
 	nk     runtime.NakamaModule
 
-	storeQueueCh    chan *UserLogJournal
-	sessionRegistry SessionRegistry
-	journalRegistry map[uuid.UUID]*UserLogJournal // map[sessionID]messages
+	queueCh chan map[JournalPresence][]string
 }
 
 func NewUserRemoteLogJournalRegistry(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, sessionRegistry SessionRegistry) *UserLogJouralRegistry {
@@ -45,120 +40,97 @@ func NewUserRemoteLogJournalRegistry(ctx context.Context, logger *zap.Logger, nk
 		logger: logger,
 		nk:     nk,
 
-		storeQueueCh:    make(chan *UserLogJournal, 200),
-		sessionRegistry: sessionRegistry,
-		journalRegistry: make(map[uuid.UUID]*UserLogJournal),
+		queueCh: make(chan map[JournalPresence][]string, 200),
 	}
 
 	// Every 10 minutes, remove all entries that do not have a session.
 	go func() {
+		journals := make(map[JournalPresence]map[time.Time][]string, 200)
+		storageCh := make(chan JournalPresence, 200)
 
-		cleanUpTicker := time.NewTicker(10 * time.Minute)
+		cleanUpTicker := time.NewTicker(30 * time.Second)
 		defer cleanUpTicker.Stop()
+
 		for {
 			select {
 			case <-ctx.Done():
-				return
-			case j := <-registry.storeQueueCh:
-				j.Lock()
-				userID := j.UserID
-				entries := j.Entries
-				j.Entries = nil
-				j.Unlock()
+				// Write all remaining entries
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
 
-				if err := registry.WriteUserJournal(ctx, userID, entries); err != nil {
-					registry.logger.Warn("Failed to write user journal", zap.String("userID", userID.String()), zap.Error(err))
-					continue
+				if err := registry.storageWrite(ctx, logger, journals); err != nil {
+					registry.logger.Warn("Failed to write user journals", zap.Error(err))
+				}
+
+				return
+
+			case entries := <-registry.queueCh:
+				now := time.Now().UTC()
+				for presence, logs := range entries {
+
+					if _, found := journals[presence]; !found {
+						// This is the first entry for this session.
+						if s := sessionRegistry.Get(presence.SessionID); s != nil {
+							// Write it after the session closes.
+							go func() {
+								<-s.Context().Done()
+								<-time.After(10 * time.Second)
+								select {
+								case storageCh <- presence:
+									return
+								default:
+									logger.Warn("Failed to queue log storage")
+								}
+							}()
+						}
+						journals[presence] = make(map[time.Time][]string, len(logs))
+					}
+
+					journals[presence][now] = append(journals[presence][now], logs...)
+
 				}
 			case <-cleanUpTicker.C:
 
-				registry.Lock()
-				for sessionID := range registry.journalRegistry {
-					if registry.sessionRegistry.Get(sessionID) == nil {
-						delete(registry.journalRegistry, sessionID)
+				queue := make(map[JournalPresence]map[time.Time][]string, 200)
+
+				for p, j := range journals {
+					if s := sessionRegistry.Get(p.SessionID); s == nil {
+						queue[p] = j
+						delete(journals, p)
 					}
 				}
-				registry.Unlock()
+
+				if err := registry.storageWrite(ctx, logger, queue); err != nil {
+					registry.logger.Warn("Failed to write user journals", zap.Error(err))
+				}
 			}
 		}
+
 	}()
 	return registry
 }
 
 // returns true if found
-func (r *UserLogJouralRegistry) AddEntries(sessionID uuid.UUID, e []string) (found bool) {
-
-	r.RLock()
-	journal, found := r.journalRegistry[sessionID]
-	defer r.RUnlock()
-
-	if !found {
-		session := r.sessionRegistry.Get(sessionID)
-		if session == nil {
-			return false
-		}
-		journal = &UserLogJournal{
-			UserID:  session.UserID(),
-			Entries: make([]*UserLogJournalEntry, 0, 10),
-		}
-
-		r.Lock()
-		r.journalRegistry[sessionID] = journal
-		r.Unlock()
-
-		// Write it after the session closes.
-		go func() {
-			<-session.Context().Done()
-			r.QueueStorage(sessionID)
-		}()
-	}
-
-	journal.Lock()
-	for _, entry := range e {
-		journal.Entries = append(journal.Entries, &UserLogJournalEntry{
+func (r *UserLogJouralRegistry) Add(sessionID, userID uuid.UUID, e []string) {
+	select {
+	case r.queueCh <- map[JournalPresence][]string{
+		{
+			UserID:    userID,
 			SessionID: sessionID,
-			Timestamp: time.Now(),
-			Message:   entry,
-		})
-
+		}: e,
+	}:
+	default:
+		r.logger.Warn("Failed to queue log storage")
 	}
-	journal.Unlock()
-	return found
 }
 
-func (r *UserLogJouralRegistry) loadAndDelete(sessionID uuid.UUID) *UserLogJournal {
-	r.Lock()
-	defer r.Unlock()
+func (r *UserLogJouralRegistry) storageRead(ctx context.Context, userID uuid.UUID) (map[time.Time][]*RemoteUserLogMessage, error) {
 
-	journal, ok := r.journalRegistry[sessionID]
-	if !ok {
-		return nil
-	}
-
-	delete(r.journalRegistry, sessionID)
-	return journal
-}
-
-func (r *UserLogJouralRegistry) GetLogs(sessionID uuid.UUID) *UserLogJournal {
-	r.RLock()
-	defer r.RUnlock()
-
-	if _, ok := r.journalRegistry[sessionID]; !ok {
-		return nil
-	}
-
-	return r.journalRegistry[sessionID]
-}
-
-func (r *UserLogJouralRegistry) storageLoad(ctx context.Context, userID uuid.UUID) (map[time.Time][]*UserLogJournalEntry, error) {
-
-	storageRead := &runtime.StorageRead{
+	objs, err := r.nk.StorageRead(ctx, []*runtime.StorageRead{{
 		UserID:     userID.String(),
 		Collection: RemoteLogStorageCollection,
 		Key:        RemoteLogStorageJournalKey,
-	}
-
-	objs, err := r.nk.StorageRead(ctx, []*runtime.StorageRead{storageRead})
+	}})
 	if err != nil {
 		return nil, err
 	}
@@ -167,7 +139,7 @@ func (r *UserLogJouralRegistry) storageLoad(ctx context.Context, userID uuid.UUI
 		return nil, nil
 	}
 
-	var journal map[time.Time][]*UserLogJournalEntry
+	var journal map[time.Time][]*RemoteUserLogMessage
 	if err := json.Unmarshal([]byte(objs[0].Value), &journal); err != nil {
 		return nil, err
 	}
@@ -175,81 +147,76 @@ func (r *UserLogJouralRegistry) storageLoad(ctx context.Context, userID uuid.UUI
 	return journal, nil
 }
 
-func (r *UserLogJouralRegistry) QueueStorage(sessionID uuid.UUID) {
-	journal := r.loadAndDelete(sessionID)
-	select {
-	case r.storeQueueCh <- journal:
-		return
-	default:
-		r.logger.Warn("Failed to queue log storage")
-	}
-}
-func (r *UserLogJouralRegistry) WriteUserJournal(ctx context.Context, userID uuid.UUID, messages []*UserLogJournalEntry) error {
+func (r *UserLogJouralRegistry) storageWrite(ctx context.Context, logger *zap.Logger, journals map[JournalPresence]map[time.Time][]string) error {
 
-	storedJournal, err := r.storageLoad(ctx, userID)
-	if err != nil {
-		r.logger.Warn("Failed to load remote log, overwriting.", zap.Error(err))
-	}
-	if storedJournal == nil {
-		storedJournal = make(map[time.Time][]*UserLogJournalEntry)
-	}
+	now := time.Now().UTC()
+	var data []byte
+	var journal map[time.Time][]*RemoteUserLogMessage
+	var err error
 
-	// Remove old messages
-	for k := range storedJournal {
-		if time.Since(k) > time.Hour*24*3 {
-			delete(storedJournal, k)
+	ops := make([]*runtime.StorageWrite, 0, len(journals))
+
+	for presence, entries := range journals {
+
+		journal, err = r.storageRead(ctx, presence.UserID)
+		if err != nil {
+			r.logger.Warn("Failed to load remote log, overwriting.", zap.Error(err))
 		}
-	}
-
-	// Add the current messages
-	storedJournal[time.Now()] = messages
-
-	data, err := json.Marshal(storedJournal)
-	if err != nil {
-		return err
-	}
-
-	if len(data) == 0 {
-		return nil
-	}
-
-	// Limit the overall size
-	for {
-		if len(data) < 4*1024*1024 {
-			break
+		if journal == nil {
+			journal = make(map[time.Time][]*RemoteUserLogMessage)
 		}
 
-		// Remove the oldest messages
-		oldest := time.Now()
-		for k := range storedJournal {
-			if k.Before(oldest) {
-				oldest = k
+		// Remove old messages
+		for k := range journal {
+			if time.Since(k) > time.Hour*24*7 {
+				delete(journal, k)
 			}
 		}
 
-		delete(storedJournal, oldest)
-
-		data, err = json.Marshal(storedJournal)
-		if err != nil {
-			return fmt.Errorf("failed to marshal journal: %w", err)
+		for ts, e := range entries {
+			for _, m := range e {
+				journal[now] = append(journal[now], &RemoteUserLogMessage{
+					SessionID: presence.SessionID,
+					Timestamp: ts,
+					Message:   m,
+				})
+			}
 		}
-	}
 
-	// Write the remoteLog to storage.
-	wops := []*runtime.StorageWrite{
-		{
-			UserID:          userID.String(),
+		// Limit the overall size
+
+		for {
+
+			if data, err = json.Marshal(journal); err != nil {
+				return err
+			} else if len(data) < 8*1024*1024 {
+				break
+			}
+
+			// Remove the oldest messages
+			oldest := time.Now()
+			for k := range journal {
+				if k.Before(oldest) {
+					oldest = k
+				}
+			}
+
+			delete(journal, oldest)
+		}
+
+		ops = append(ops, &runtime.StorageWrite{
+			UserID:          presence.UserID.String(),
 			Collection:      RemoteLogStorageCollection,
 			Key:             RemoteLogStorageJournalKey,
 			Value:           string(data),
-			PermissionRead:  1,
+			PermissionRead:  0,
 			PermissionWrite: 0,
-		},
+		})
 	}
 
-	_, err = r.nk.StorageWrite(ctx, wops)
-	if err != nil {
-		return err
+	if _, err = r.nk.StorageWrite(ctx, ops); err != nil {
+		return fmt.Errorf("Failed to write remote log: %v", err)
 	}
+
 	return nil
 }
