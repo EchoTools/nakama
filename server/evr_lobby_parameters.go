@@ -293,8 +293,6 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		rankPercentileMaxDelta = globalSettings.RankPercentile.MaxDelta
 	}
 
-	// Only calculate it, if it's out of date.
-
 	rankPercentile, err := MatchmakingRankPercentileLoad(ctx, p.runtimeModule, userID, groupID.String(), mode)
 	if err != nil {
 		logger.Warn("Failed to load user rank percentile", zap.Error(err))
@@ -338,6 +336,22 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 
 	maximumFailsafeSecs := globalSettings.MatchmakingTimeoutSecs - p.config.GetMatchmaker().IntervalSec*2
 	failsafeTimeoutSecs := min(maximumFailsafeSecs, globalSettings.FailsafeTimeoutSecs)
+
+	account, err := p.runtimeModule.AccountGetId(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get account: %w", err)
+	}
+
+	profile, err := NewUserServerProfile(ctx, p.db, account, sessionParams.xpID, groupID.String())
+	if err != nil {
+		return nil, fmt.Errorf("failed to create user server profile: %w", err)
+	}
+
+	profile.DisplayName = sessionParams.accountMetadata.GetGroupDisplayNameOrDefault(groupID.String())
+
+	if _, err := p.profileCache.Store(session.ID(), *profile); err != nil {
+		return nil, fmt.Errorf("failed to cache profile: %w", err)
+	}
 
 	return &LobbySessionParameters{
 		Node:                   node,
