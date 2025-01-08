@@ -90,6 +90,7 @@ func LoadGlobalSettingsData(ctx context.Context, nk runtime.NakamaModule) (*Glob
 
 	// Always write back on first load
 	if len(objs) > 0 {
+		data.version = objs[0].Value
 		if err := json.Unmarshal([]byte(objs[0].Value), &data); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal global settings: %w", err)
 		}
