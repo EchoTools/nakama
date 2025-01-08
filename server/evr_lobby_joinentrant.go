@@ -364,22 +364,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		}
 	}
 
-	account, err := p.runtimeModule.AccountGetId(ctx, userID)
-	if err != nil {
-		logger.Error("Failed to get account", zap.Error(err))
-	}
-
-	profile, err := NewUserServerProfile(ctx, p.db, account, params.xpID, lobbyParams.GroupID.String())
-	if err != nil {
-		return fmt.Errorf("failed to create user server profile: %w", err)
-	}
-
-	profile.DisplayName = params.accountMetadata.GetGroupDisplayNameOrDefault(groupID)
-
-	if _, err := p.profileCache.Store(session.ID(), *profile); err != nil {
-		return fmt.Errorf("failed to cache profile: %w", err)
-	}
-
+	displayName := params.accountMetadata.GetGroupDisplayNameOrDefault(groupID)
 	p.runtimeModule.Event(ctx, &api.Event{
 		Name: EventLobbySessionAuthorized,
 		Properties: map[string]string{
@@ -387,12 +372,12 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 			"group_id":     groupID,
 			"user_id":      userID,
 			"discord_id":   params.DiscordID(),
-			"display_name": profile.DisplayName,
+			"display_name": displayName,
 		},
 		External: true, // used to denote if the event was generated from the client
 	})
 
-	session.Logger().Info("Authorized access to lobby session", zap.String("gid", groupID), zap.String("display_name", profile.DisplayName))
+	session.Logger().Info("Authorized access to lobby session", zap.String("gid", groupID), zap.String("display_name", displayName))
 
 	return nil
 }
