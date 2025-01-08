@@ -671,7 +671,7 @@ type RemoteLogNetExplosion struct {
 	ExplosionLocationXz    string  `json:"[explosion_location][xz]"`
 	ExplosionLocationYz    string  `json:"[explosion_location][yz]"`
 	ExplosionType          string  `json:"explosion_type"`
-	DamageAmount           int64   `json:"damage_amount"`
+	DamageAmount           float64 `json:"damage_amount"`
 }
 
 func (m RemoteLogNetExplosion) SessionUUID() uuid.UUID {
@@ -718,7 +718,7 @@ type RemoteLogPlayerDeath struct {
 	SelfKill                    bool      `json:"self_kill"`
 	KillingBlowUserid           string    `json:"[killing_blow][userid]"`
 	KillingBlowDamageType       string    `json:"[killing_blow][damage_type]"`
-	KillingBlowDamageAmount     int64     `json:"[killing_blow][damage_amount]"`
+	KillingBlowDamageAmount     float64   `json:"[killing_blow][damage_amount]"`
 	TimeAlive                   float64   `json:"time_alive"`
 	StunnedBeforeDeath          bool      `json:"stunned_before_death"`
 	StunnedOnDeath              bool      `json:"stunned_on_death"`
