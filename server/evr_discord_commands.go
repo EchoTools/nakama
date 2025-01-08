@@ -2453,7 +2453,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 			}()
 
-			return simpleInteractionResponse(s, i, fmt.Sprintf(fmt.Sprintf("%s (%s sessions)", result, cnt)))
+			return simpleInteractionResponse(s, i, fmt.Sprintf("%s (%s sessions)", result, cnt))
 
 		},
 		"join-player": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
