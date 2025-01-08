@@ -2382,6 +2382,11 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return nil
 			}
 
+			isGlobalModerator, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalModerators)
+			if err != nil {
+				return errors.New("error checking global moderator status")
+			}
+
 			options := i.ApplicationCommandData().Options
 			if len(options) == 0 {
 				return errors.New("no options provided")
@@ -2399,42 +2404,62 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			cnt := 0
+
+			result := ""
 			for _, p := range presences {
-				disconnectDelay := 0
-				if p.GetUserId() == targetUserID {
-					cnt += 1
-					if label, _ := MatchLabelByID(ctx, d.nk, MatchIDFromStringOrNil(p.GetStatus())); label != nil {
 
-						if label.Broadcaster.SessionID == p.GetSessionId() {
-							continue
-						}
-
-						if label.GetGroupID().String() != groupID {
-							return errors.New("user's match is not from this guild")
-						}
-
-						// Kick the player from the match
-						if err := KickPlayerFromMatch(ctx, d.nk, label.ID, targetUserID); err != nil {
-							return err
-						}
-						_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> kicked player <@%s> from [%s](https://echo.taxi/spark://c/%s) match.", user.ID, target.ID, label.Mode.String(), strings.ToUpper(label.ID.UUID.String())), false)
-						disconnectDelay = 15
-					}
-
-					go func() {
-						<-time.After(time.Second * time.Duration(disconnectDelay))
-						// Just disconnect the user, wholesale
-						if _, err := DisconnectUserID(ctx, d.nk, targetUserID, false); err != nil {
-							logger.Warn("Failed to disconnect user", zap.Error(err))
-						} else {
-							_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> disconnected player <@%s> from match service.", user.ID, target.ID), false)
-						}
-					}()
-
-					cnt++
+				if p.GetUserId() != targetUserID {
+					continue
 				}
+
+				label, _ := MatchLabelByID(ctx, d.nk, MatchIDFromStringOrNil(p.GetStatus()))
+				if label == nil {
+					continue
+				}
+
+				if label.Broadcaster.SessionID == p.GetSessionId() {
+					continue
+				}
+
+				if label.GetGroupID().String() != groupID && !isGlobalModerator {
+					result = "user's lobby is not from this guild"
+					continue
+				}
+
+				cnt += 1
+
+				// Kick the player from the match
+				if err := KickPlayerFromMatch(ctx, d.nk, label.ID, targetUserID); err != nil {
+					result = fmt.Sprintf("failed to kick player from [%s](https://echo.taxi/spark://c/%s) lobby: %v", label.Mode.String(), strings.ToUpper(label.ID.UUID.String()), err)
+					continue
+				}
+				result := fmt.Sprintf("kicked player %s from [%s](https://echo.taxi/spark://c/%s) match.", target.Mention(), label.Mode.String(), strings.ToUpper(label.ID.UUID.String()))
+				_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> %s", user.Mention(), result), false)
+
+				cnt++
+
 			}
-			return simpleInteractionResponse(s, i, fmt.Sprintf("Disconnected %d sessions.", cnt))
+
+			if result != "" {
+				return simpleInteractionResponse(s, i, result)
+			}
+
+			if cnt == 0 {
+				return simpleInteractionResponse(s, i, "No sessions found.")
+			}
+
+			go func() {
+				<-time.After(time.Second * 15)
+				// Just disconnect the user, wholesale
+				if _, err := DisconnectUserID(ctx, d.nk, targetUserID, false); err != nil {
+					logger.Warn("Failed to disconnect user", zap.Error(err))
+				} else {
+					_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> disconnected player <@%s> from match service.", user.ID, target.ID), false)
+				}
+			}()
+
+			return simpleInteractionResponse(s, i, fmt.Sprintf(fmt.Sprintf("%s (%s sessions)", result, cnt)))
+
 		},
 		"join-player": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 
