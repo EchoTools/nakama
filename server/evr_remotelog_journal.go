@@ -89,6 +89,13 @@ func NewUserRemoteLogJournalRegistry(ctx context.Context, logger *zap.Logger, nk
 					journals[presence][now] = append(journals[presence][now], logs...)
 
 				}
+
+			case p := <-storageCh:
+				journal := journals[p]
+				delete(journals, p)
+				if err := registry.storageWrite(ctx, logger, map[JournalPresence]map[time.Time][]string{p: journal}); err != nil {
+					registry.logger.Warn("Failed to write user journals", zap.Error(err))
+				}
 			case <-cleanUpTicker.C:
 
 				queue := make(map[JournalPresence]map[time.Time][]string, 200)
