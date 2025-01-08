@@ -220,7 +220,7 @@ func (s *IPQSClient) Get(ctx context.Context, ip string) (*IPQSResponse, error) 
 			s.logger.Warn("IPQS request timed out, failing open.")
 			s.metrics.CustomCounter("ipqs_request_timeout", nil, 1)
 		}
-		return nil, ctx.Err()
+		return nil, fmt.Errorf("IPQS request timed out")
 	case result := <-resultCh:
 
 		if result == nil {
