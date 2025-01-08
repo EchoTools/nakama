@@ -597,13 +597,10 @@ func (p *EvrPipeline) documentRequest(ctx context.Context, logger *zap.Logger, s
 
 		if !params.IsVR() {
 
-			eulaVersion := 1
-			gaVersion := 1
-
+			eulaVersion := params.accountMetadata.LegalConsents.EulaVersion
+			gaVersion := params.accountMetadata.LegalConsents.GameAdminVersion
 			document = evr.NewEULADocument(int(eulaVersion), int(gaVersion), request.Language, "https://github.com/EchoTools", "Blank EULA for NoVR clients. You should only see this once.")
-
 			return session.SendEvrUnrequire(evr.NewDocumentSuccess(document))
-
 		}
 
 		key := "eula:vr:" + request.Language
