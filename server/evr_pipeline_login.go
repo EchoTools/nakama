@@ -768,8 +768,6 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 		logger.Warn("Failed to send UserServerProfileUpdateSuccess", zap.Error(err))
 	}
 
-	defer p.profileCache.PurgeProfile(request.EvrID)
-
 	// Validate the player was in the session
 	matchID, err := NewMatchID(uuid.UUID(request.Payload.SessionID), p.node)
 	if err != nil {
@@ -900,73 +898,9 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 	var ok bool
 	var data json.RawMessage
 
-	if data, ok = p.profileCache.Load(request.EvrId); ok {
-
-		tags["cached"] = "true"
-
-	} else {
-
-		tags["cached"] = "false"
-		nk := p.runtimeModule
-		// Get the MatchID From this players session
-		matchIDs, err := MatchIDsByEvrID(ctx, nk, request.EvrId)
-		if err != nil {
-			tags["error"] = "failed_get_match_id"
-			return fmt.Errorf("failed to get matchID: %w", err)
-		}
-
-		callerID := session.userID.String()
-		var userID string
-		var groupID string
-
-		for _, matchID := range matchIDs {
-
-			label, err := MatchLabelByID(ctx, nk, matchID)
-			if err != nil {
-				tags["error"] = "failed_get_match_label"
-				return fmt.Errorf("failed to get match label: %w", err)
-			}
-
-			// Find the common match
-			userID = ""
-			groupID = ""
-			foundCaller := false
-			for _, player := range label.Players {
-				if player.EvrID == request.EvrId {
-					userID = player.UserID
-					groupID = label.GetGroupID().String()
-				}
-				if player.UserID == callerID {
-					foundCaller = true
-				}
-			}
-			if userID != "" && foundCaller {
-				break
-			}
-		}
-
-		if userID == "" {
-			tags["error"] = "failed_find_player"
-			return fmt.Errorf("failed to find player in match")
-		}
-
-		// Generate the profile
-		account, err := p.runtimeModule.AccountGetId(ctx, userID)
-		if err != nil {
-			tags["error"] = "failed_get_account"
-			return fmt.Errorf("failed to get account: %w", err)
-		}
-
-		profile, err := NewUserServerProfile(ctx, p.db, account, request.EvrId, groupID)
-		if err != nil {
-			tags["error"] = "failed_generate_profile"
-			return fmt.Errorf("failed to generate profile: %w", err)
-		}
-
-		if data, err = p.profileCache.Store(*profile); err != nil {
-			tags["error"] = "failed_store_profile"
-			return fmt.Errorf("failed to store profile")
-		}
+	if data, ok = p.profileCache.Load(request.EvrId); !ok {
+		logger.Error("Profile does not exist in cache.", zap.String("evrId", request.EvrId.String()))
+		return nil
 	}
 
 	response := &evr.OtherUserProfileSuccess{

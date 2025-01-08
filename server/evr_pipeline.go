@@ -126,7 +126,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	runtimeLogger := NewRuntimeGoLogger(logger)
 
 	leaderboardRegistry := NewLeaderboardRegistry(runtimeLogger, db, nk, config.GetName())
-	profileRegistry := NewProfileRegistry(nk, db, runtimeLogger, tracker, metrics)
+	profileRegistry := NewProfileRegistry(nk, db, runtimeLogger, metrics, sessionRegistry)
 	broadcasterRegistrationBySession := MapOf[string, *MatchBroadcaster]{}
 	lobbyBuilder := NewLobbyBuilder(logger, nk, sessionRegistry, matchRegistry, tracker, metrics, profileRegistry)
 	matchmaker.OnMatchedEntries(lobbyBuilder.handleMatchedEntries)
