@@ -1769,12 +1769,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return fmt.Errorf("invalid match ID: %s", matchIDStr)
 			}
 
-			node, ok := ctx.Value(runtime.RUNTIME_CTX_NODE).(string)
-			if !ok {
-				return fmt.Errorf("error getting node from context")
-			}
-
-			matchID, err := MatchIDFromString(matchIDStr + "." + node)
+			matchID, err := MatchIDFromString(matchIDStr + "." + d.pipeline.node)
 			if err != nil {
 				return fmt.Errorf("failed to parse match ID: %w", err)
 			}
