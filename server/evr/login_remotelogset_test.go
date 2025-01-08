@@ -1,7 +1,6 @@
 package evr
 
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -75,6 +74,10 @@ func TestParseRemoteLog(t *testing.T) {
 			name:    "Test with valid USER_DISCONNECT message",
 			message: `{"[game_info][game_time]": 36.913235, "[game_info][is_arena]": true, "[game_info][is_capture_point]": false, "[game_info][is_combat]": false, "[game_info][is_payload]": false, "[game_info][is_private]": true, "[game_info][is_social]": false, "[game_info][level]": "mpl_arena_a", "[game_info][match_type]": "Echo_Arena_Private", "[player_info][displayname]": "sprockee", "[player_info][teamid]": 1, "[player_info][userid]": "OVR-ORG-123412341234", "[session][uuid]": "{CC09F341-AF21-4BDF-AB77-1083AD1B3C1E}", "message": "User disconnected while game still playing", "message_type": "USER_DISCONNECT"}`,
 			want: &RemoteLogUserDisconnected{
+				GenericRemoteLog: GenericRemoteLog{
+					Message: "User disconnected while game still playing",
+					Type:    "USER_DISCONNECT",
+				},
 				GameInfoGameTime:       36.913235,
 				GameInfoIsArena:        true,
 				GameInfoIsCapturePoint: false,
@@ -88,8 +91,6 @@ func TestParseRemoteLog(t *testing.T) {
 				PlayerInfoTeamid:       1,
 				PlayerEvrID:            "OVR-ORG-123412341234",
 				SessionUUIDStr:         "{CC09F341-AF21-4BDF-AB77-1083AD1B3C1E}",
-				Message:                "User disconnected while game still playing",
-				MessageType:            "USER_DISCONNECT",
 			},
 			wantError: false,
 		},
@@ -128,13 +129,7 @@ func TestParseRemoteLog(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 
-			strMap := map[string]any{}
-
-			if err := json.Unmarshal([]byte(tt.message), &strMap); err != nil {
-				t.Errorf("ParseRemoteLog() error = %v", err)
-			}
-
-			got, err := RemoteLogMessageFromMessage(strMap, []byte(tt.message))
+			got, err := RemoteLogMessageFromLogString([]byte(tt.message))
 
 			if err != nil && !tt.wantError {
 				t.Errorf("ParseRemoteLog() error = %v", err)
