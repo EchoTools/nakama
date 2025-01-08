@@ -533,6 +533,7 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 				}
 				return fmt.Errorf("failed to join backfill match: %w", err)
 			}
+			return nil
 		}
 
 		// If the lobby is social, create a new social lobby.
