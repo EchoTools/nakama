@@ -44,25 +44,28 @@ type StarterCosmeticLoadouts struct {
 	Loadouts []*StoredCosmeticLoadout `json:"loadouts"`
 }
 
+type cacheID struct {
+	XPID      evr.EvrId
+	SessionID uuid.UUID
+}
+
 // ProfileCache is a registry of user evr profiles.
 type ProfileCache struct {
+	sync.RWMutex
 	ctx         context.Context
 	ctxCancelFn context.CancelFunc
 	logger      runtime.Logger
 	db          *sql.DB
 	nk          runtime.NakamaModule
 
-	tracker Tracker
-	metrics Metrics
+	metrics         Metrics
+	sessionRegistry SessionRegistry
 
-	// Unlocks by item name
-
-	cacheMu  *sync.RWMutex
-	cache    map[evr.EvrId]json.RawMessage
-	expiries map[evr.EvrId]time.Time
+	profileByXPID    map[evr.EvrId]json.RawMessage
+	sessionIDsByXPID map[evr.EvrId]map[uuid.UUID]struct{}
 }
 
-func NewProfileRegistry(nk runtime.NakamaModule, db *sql.DB, logger runtime.Logger, tracker Tracker, metrics Metrics) *ProfileCache {
+func NewProfileRegistry(nk runtime.NakamaModule, db *sql.DB, logger runtime.Logger, metrics Metrics, sessionRegistry SessionRegistry) *ProfileCache {
 
 	ctx, cancelFn := context.WithCancel(context.Background())
 
@@ -72,12 +75,12 @@ func NewProfileRegistry(nk runtime.NakamaModule, db *sql.DB, logger runtime.Logg
 		logger:      logger,
 		db:          db,
 		nk:          nk,
-		tracker:     tracker,
-		metrics:     metrics,
 
-		cacheMu:  &sync.RWMutex{},
-		cache:    make(map[evr.EvrId]json.RawMessage),
-		expiries: make(map[evr.EvrId]time.Time),
+		metrics:         metrics,
+		sessionRegistry: sessionRegistry,
+
+		profileByXPID:    make(map[evr.EvrId]json.RawMessage),
+		sessionIDsByXPID: make(map[evr.EvrId]map[uuid.UUID]struct{}),
 	}
 
 	go func() {
@@ -88,14 +91,21 @@ func NewProfileRegistry(nk runtime.NakamaModule, db *sql.DB, logger runtime.Logg
 			case <-profileRegistry.ctx.Done():
 				return
 			case <-ticker.C:
-				profileRegistry.cacheMu.Lock()
-				for xpid, expiry := range profileRegistry.expiries {
-					if time.Now().After(expiry) {
-						delete(profileRegistry.cache, xpid)
-						delete(profileRegistry.expiries, xpid)
+				profileRegistry.Lock()
+				for xpid, sessionIDs := range profileRegistry.sessionIDsByXPID {
+					for sessionID := range sessionIDs {
+						if profileRegistry.sessionRegistry.Get(sessionID) == nil {
+
+							delete(profileRegistry.sessionIDsByXPID[xpid], sessionID)
+
+							// If there are no more sessions for this xpid, delete the profile
+							if len(profileRegistry.sessionIDsByXPID[xpid]) == 0 {
+								delete(profileRegistry.profileByXPID, xpid)
+							}
+						}
 					}
 				}
-				profileRegistry.cacheMu.Unlock()
+				profileRegistry.Unlock()
 			}
 		}
 	}()
@@ -104,31 +114,30 @@ func NewProfileRegistry(nk runtime.NakamaModule, db *sql.DB, logger runtime.Logg
 }
 
 func (r *ProfileCache) Load(xpid evr.EvrId) (json.RawMessage, bool) {
-	r.cacheMu.RLock()
-	defer r.cacheMu.RUnlock()
-	if data, ok := r.cache[xpid]; ok {
-		r.expiries[xpid] = time.Now().Add(time.Minute * 10)
-		return data, true
-	}
-	return nil, false
+	r.RLock()
+	defer r.RUnlock()
+	profiles, found := r.profileByXPID[xpid]
+	return profiles, found
 }
 
-func (r *ProfileCache) Store(p evr.ServerProfile) (json.RawMessage, error) {
-	r.cacheMu.Lock()
-	defer r.cacheMu.Unlock()
+func (r *ProfileCache) Store(sessionID uuid.UUID, p evr.ServerProfile) (json.RawMessage, error) {
+	r.Lock()
+	defer r.Unlock()
+
 	data, err := json.Marshal(p)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal profile: %w", err)
 	}
-	r.expiries[p.EvrID] = time.Now().Add(time.Minute * 10)
-	r.cache[p.EvrID] = json.RawMessage(data)
-	return data, nil
-}
 
-func (r *ProfileCache) PurgeProfile(xpid evr.EvrId) {
-	r.cacheMu.Lock()
-	defer r.cacheMu.Unlock()
-	delete(r.cache, xpid)
+	r.profileByXPID[p.EvrID] = data
+
+	if _, ok := r.sessionIDsByXPID[p.EvrID]; !ok {
+		r.sessionIDsByXPID[p.EvrID] = make(map[uuid.UUID]struct{})
+	}
+
+	r.sessionIDsByXPID[p.EvrID][sessionID] = struct{}{}
+
+	return data, nil
 }
 
 func walletToCosmetics(wallet map[string]int64, unlocks map[string]map[string]bool) map[string]map[string]bool {
