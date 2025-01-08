@@ -43,9 +43,3 @@ func (m *RemoteLogSet) Stream(s *EasyStream) error {
 		func() error { return s.StreamStringTable(&m.Logs) },
 	})
 }
-
-type RemoteLogString string
-
-func (m RemoteLogString) String() string {
-	return string(m)
-}

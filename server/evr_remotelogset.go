@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gofrs/uuid/v5"
@@ -13,97 +14,68 @@ import (
 	"go.uber.org/zap"
 )
 
-type GenericRemoteLog struct {
-	MessageType string `json:"messageType"`
-	Message     string `json:"message"`
-	Parsed      any
-}
-
-func parseRemoteLogMessageEntries(logger *zap.Logger, logs []string) []*GenericRemoteLog {
-
-	entries := make([]*GenericRemoteLog, 0, len(logs))
-
-OuterLoop:
-	for _, logString := range logs {
-		// Unmarshal the top-level to check the message type.
-
-		bytes := []byte(logString)
-
-		strMap := map[string]interface{}{}
-
-		if err := json.Unmarshal(bytes, &strMap); err != nil {
-			logger.Debug("Non-JSON log entry", zap.String("entry", logString))
-			continue
-		}
-
-		ignores := map[string][]string{
-			"message": {
-				"Podium Interaction",
-				"Customization Item Preview",
-				"Customization Item Equip",
-				"Confirmation Panel Press",
-				"server library loaded",
-				"r15 net game error message",
-				"cst_usage_metrics",
-				"purchasing item",
-				"Tutorial progress",
-			},
-			"category": {
-				"iap",
-				"rich_presence",
-				"social",
-			},
-			"message_type": {
-				"OVR_IAP",
-			},
-		}
-
-		for key, values := range ignores {
-			if value, ok := strMap[key].(string); ok {
-				for _, v := range values {
-					if value == v {
-						continue OuterLoop
-					}
-				}
-			}
-		}
-
-		var messageType string
-		if v, ok := strMap["message_type"].(string); ok {
-			messageType = v
-		}
-
-		parsed, err := evr.RemoteLogMessageFromMessage(strMap, bytes)
-		if err != nil {
-			if errors.Is(err, evr.ErrUnknownRemoteLogMessageType) {
-				logger.Warn("Unknown remote log message type", zap.String("message_type", messageType), zap.String("log", logString))
-			} else {
-				logger.Debug("Failed to parse remote log message", zap.Error(err))
-			}
-			parsed = evr.RemoteLogString(logString)
-		}
-
-		entries = append(entries, &GenericRemoteLog{
-			MessageType: messageType,
-			Message:     logString,
-			Parsed:      parsed,
-		})
+var remoteLogFilters = func() []string {
+	filters := map[string][]string{
+		"message": {
+			"Podium Interaction",
+			"Customization Item Preview",
+			"Customization Item Equip",
+			"Confirmation Panel Press",
+			"server library loaded",
+			"r15 net game error message",
+			"cst_usage_metrics",
+			"purchasing item",
+			"Tutorial progress",
+		},
+		"category": {
+			"iap",
+			"rich_presence",
+			"social",
+		},
+		"message_type": {
+			"OVR_IAP",
+		},
 	}
 
-	return entries
-}
+	filterStrings := make([]string, 0, len(filters))
+	for key, values := range filters {
+		for _, value := range values {
+			filterStrings = append(filterStrings, fmt.Sprintf(`"%s":"%s"`, key, value))
+		}
+	}
+
+	return filterStrings
+}()
 
 func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logger, session *sessionWS, evrID evr.EvrId, request *evr.RemoteLogSet) error {
 
 	// Add the raw logs to the journal.
 	if !session.userID.IsNil() {
-		if ok := p.userRemoteLogJournalRegistry.AddEntries(session.id, request.Logs); !ok {
-			logger.Warn("Failed to add remote log entries to journal")
-		}
+		p.userRemoteLogJournalRegistry.Add(session.id, session.userID, request.Logs)
 	}
 
-	// Parse the useful remote logs from the set.
-	entries := parseRemoteLogMessageEntries(logger, request.Logs)
+	entries := make([]evr.RemoteLog, 0, len(request.Logs))
+
+	for i := 0; i < len(request.Logs); i++ {
+		// Filter out logs that are not useful.
+		for _, filter := range remoteLogFilters {
+			if strings.Contains(request.Logs[i], filter) {
+				continue
+			}
+		}
+
+		// Parse the useful remote logs from the set.
+		parsed, err := evr.RemoteLogMessageFromLogString([]byte(request.Logs[i]))
+		if err != nil {
+			if errors.Is(err, evr.ErrUnknownRemoteLogMessageType) {
+				logger.Warn("Unknown remote log message type", zap.String("log", request.Logs[i]))
+			} else if !errors.Is(err, evr.ErrRemoteLogIsNotJSON) {
+				logger.Warn("Failed to parse remote log message", zap.Error(err))
+			}
+		}
+
+		entries = append(entries, parsed)
+	}
 
 	// Collect the updates to the match's game metadata (e.g. game clock)
 	updates := MapOf[uuid.UUID, *MatchGameStateUpdate]{}
@@ -121,7 +93,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				}
 			}
 		*/
-		if msg, ok := e.Parsed.(evr.GameTimer); ok {
+		if msg, ok := e.(evr.GameTimer); ok {
 			matchID, err := NewMatchID(msg.SessionUUID(), p.node)
 			if err != nil {
 				logger.Warn("Failed to create match ID", zap.Error(err), zap.Any("msg", msg))
@@ -130,8 +102,8 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				update.CurrentGameClock = time.Duration(msg.GameTime()) * time.Second
 			}
 		}
-		logger := logger.With(zap.String("message_type", fmt.Sprintf("%T", e.Parsed)))
-		switch msg := e.Parsed.(type) {
+		logger := logger.With(zap.String("message_type", fmt.Sprintf("%T", e)))
+		switch msg := e.(type) {
 
 		case *evr.RemoteLogDisconnectedDueToTimeout:
 			logger.Warn("Disconnected due to timeout", zap.String("username", session.Username()), zap.String("evr_id", evrID.String()), zap.Any("remote_log_message", msg))
