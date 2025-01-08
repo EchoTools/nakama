@@ -196,6 +196,7 @@ func (s *IPQSClient) Get(ctx context.Context, ip string) (*IPQSResponse, error) 
 	s.metrics.CustomCounter("ipqs_cache_miss", nil, 1)
 	ctx, cancelFn := context.WithTimeout(ctx, time.Second*1)
 	defer cancelFn()
+
 	resultCh := make(chan *IPQSResponse)
 
 	go func() {
@@ -260,30 +261,14 @@ func (s *IPQSClient) retrieve(ip string) (*IPQSResponse, error) {
 }
 
 func (s *IPQSClient) IsVPN(ip string) bool {
-	ctx, cancelFn := context.WithTimeout(s.ctx, time.Second*1)
-	defer cancelFn()
-	resultCh := make(chan *IPQSResponse)
 
-	go func() {
-		result, err := s.retrieve(ip)
-		if err != nil {
-			s.logger.Warn("Failed to get IPQS details, failing open.", zap.Error(err))
-		}
-		resultCh <- result
-	}()
-
-	select {
-	case <-ctx.Done():
-		s.logger.Warn("IPQS request timed out, failing open.")
-		return false
-	case result := <-resultCh:
-		if result == nil {
-			return false
-		}
-
-		if result.VPN {
-			return true
-		}
+	result, err := s.Get(s.ctx, ip)
+	if err != nil {
+		s.logger.Warn("Failed to get IPQS details, failing open.", zap.Error(err))
 		return false
 	}
+	if result == nil {
+		return false
+	}
+	return result.VPN
 }
