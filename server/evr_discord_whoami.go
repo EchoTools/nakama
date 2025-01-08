@@ -260,10 +260,14 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 				if err != nil {
 					return nil
 				}
+				name := "not set"
+				if matchmakingSettings.LobbyGroupName != "" {
+					name = fmt.Sprintf("`%s`", matchmakingSettings.LobbyGroupName)
+				}
 
 				return &discordgo.MessageEmbedField{
 					Name:   "Party Group",
-					Value:  fmt.Sprintf("`%s`", matchmakingSettings.LobbyGroupName),
+					Value:  name,
 					Inline: false,
 				}
 			}
