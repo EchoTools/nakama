@@ -425,7 +425,7 @@ type RemoteLogRepairMatrix struct {
 	TriggerLocationVec3Z   float64 `json:"[trigger_location][vec3][z]"`
 	TriggerLocationXz      string  `json:"[trigger_location][xz]"`
 	TriggerLocationYz      string  `json:"[trigger_location][yz]"`
-	HealAmount             int64   `json:"heal_amount"`
+	HealAmount             float64 `json:"heal_amount"`
 	NumHealed              int64   `json:"num_healed"`
 	SelfOnly               bool    `json:"self_only"`
 }
