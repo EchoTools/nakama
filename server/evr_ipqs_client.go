@@ -138,6 +138,9 @@ func NewIPQS(logger *zap.Logger, db *sql.DB, metrics Metrics, storageIndex Stora
 }
 
 func (s *IPQSClient) load(ip string) (*IPQSResponse, error) {
+	if s == nil {
+		return nil, nil
+	}
 	if s.redisClient == nil {
 		return nil, nil
 	}
@@ -173,7 +176,9 @@ func (s *IPQSClient) store(ip string, result *IPQSResponse) error {
 }
 
 func (s *IPQSClient) Get(ctx context.Context, ip string) (*IPQSResponse, error) {
-
+	if s == nil {
+		return nil, nil
+	}
 	// ignore reserved IPs
 	if ip := net.ParseIP(ip); ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsPrivate() {
 		return nil, nil

@@ -79,7 +79,8 @@ func NewDiscordAppBot(logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB
 		profileRegistry: profileRegistry,
 		statusRegistry:  statusRegistry,
 
-		cache: discordCache,
+		cache:     discordCache,
+		ipqsCache: ipqsCache,
 
 		dg: dg,
 
