@@ -186,7 +186,7 @@ func DisplayNameHistoryStore(ctx context.Context, nk runtime.NakamaModule, userI
 	return nil
 }
 
-func DisplayNameHistorySet(ctx context.Context, nk runtime.NakamaModule, userID string, guildID string, displayName string, isInactive bool) error {
+func DisplayNameHistorySet(ctx context.Context, nk runtime.NakamaModule, userID string, groupID string, displayName string, isInactive bool) error {
 	history, err := DisplayNameHistoryLoad(ctx, nk, userID)
 	if err != nil {
 		return fmt.Errorf("error getting display name history: %w", err)
@@ -198,7 +198,7 @@ func DisplayNameHistorySet(ctx context.Context, nk runtime.NakamaModule, userID 
 	}
 
 	// If it's inactive, the active list will be cleared.
-	history.Set(guildID, displayName)
+	history.Set(groupID, displayName)
 
 	if history.updated {
 		if err := DisplayNameHistoryStore(ctx, nk, userID, history); err != nil {
