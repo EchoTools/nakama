@@ -82,7 +82,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		return fmt.Errorf("account is disabled")
 	}
 
-	md, err := GetAccountMetadata(ctx, nk, userID.String())
+	md, err := AccountMetadataLoad(ctx, nk, userID.String())
 	if err != nil {
 		return fmt.Errorf("failed to get account metadata: %w", err)
 	}

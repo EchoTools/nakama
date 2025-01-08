@@ -274,7 +274,7 @@ type AccountCosmetics struct {
 }
 
 func GetDisplayNameByGroupID(ctx context.Context, nk runtime.NakamaModule, userID, groupID string) (string, error) {
-	md, err := GetAccountMetadata(ctx, nk, userID)
+	md, err := AccountMetadataLoad(ctx, nk, userID)
 	if err != nil {
 		return md.account.GetUser().GetDisplayName(), fmt.Errorf("error unmarshalling account user metadata: %w", err)
 	}
