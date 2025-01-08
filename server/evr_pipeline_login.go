@@ -374,6 +374,11 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		params.accountMetadata.sessionDisplayNameOverride = params.userDisplayNameOverride
 	}
 
+	if err := DisplayNameHistorySet(ctx, p.runtimeModule, session.userID.String(), params.accountMetadata.GetActiveGroupID().String(), params.accountMetadata.GetActiveGroupDisplayName(), false); err != nil {
+		metricsTags["error"] = "failed_set_display_name_history"
+		logger.Warn("Failed to set display name history", zap.Error(err))
+	}
+
 	s := session
 	// Register initial status tracking and presence(s) for this session.
 	s.statusRegistry.Follow(s.id, map[uuid.UUID]struct{}{s.userID: {}})
