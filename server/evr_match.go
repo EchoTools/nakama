@@ -612,9 +612,9 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 }
 
 func recordMatchTimeToLeaderboard(ctx context.Context, nk runtime.NakamaModule, userID, username, groupID string, mode evr.Symbol, matchTimeSecs int64) error {
-	periods := []string{"alltime", "daily", "weekly"}
+	resetSchedules := []evr.ResetSchedule{evr.ResetScheduleDaily, evr.ResetScheduleWeekly, evr.ResetScheduleAllTime}
 
-	for _, period := range periods {
+	for _, period := range resetSchedules {
 		id := StatisticBoardID(groupID, mode, LobbyTimeStatisticID, period)
 
 		// Write the record

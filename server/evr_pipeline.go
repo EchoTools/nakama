@@ -67,7 +67,7 @@ type EvrPipeline struct {
 	profileCache                 *ProfileCache
 	discordCache                 *DiscordCache
 	appBot                       *DiscordAppBot
-	leaderboardRegistry          *LeaderboardRegistry
+	statisticsQueue              *StatisticsQueue
 	userRemoteLogJournalRegistry *UserLogJouralRegistry
 	ipqsClient                   *IPQSClient
 	matchLogManager              *MatchLogManager
@@ -125,7 +125,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 
 	runtimeLogger := NewRuntimeGoLogger(logger)
 
-	leaderboardRegistry := NewLeaderboardRegistry(runtimeLogger, db, nk, config.GetName())
+	leaderboardRegistry := NewStatisticsQueue(runtimeLogger, nk)
 	profileRegistry := NewProfileRegistry(nk, db, runtimeLogger, metrics, sessionRegistry)
 	broadcasterRegistrationBySession := MapOf[string, *MatchBroadcaster]{}
 	lobbyBuilder := NewLobbyBuilder(logger, nk, sessionRegistry, matchRegistry, tracker, metrics, profileRegistry)
@@ -214,7 +214,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		externalIP:   externalIP,
 
 		profileCache:                     profileRegistry,
-		leaderboardRegistry:              leaderboardRegistry,
+		statisticsQueue:                  leaderboardRegistry,
 		broadcasterRegistrationBySession: &broadcasterRegistrationBySession,
 		userRemoteLogJournalRegistry:     userRemoteLogJournalRegistry,
 		ipqsClient:                       ipqsClient,

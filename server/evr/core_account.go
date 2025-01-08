@@ -165,8 +165,6 @@ type ServerSocial struct {
 	Channel GUID `json:"group,omitempty" validate:"uuid_rfc4122"` // The channel. It is a GUID, uppercase.
 }
 
-type PlayerStatistics map[string]map[string]MatchStatistic
-
 type ServerProfile struct {
 	// WARNING: EchoVR dictates this struct/schema.
 	DisplayName       string                     `json:"displayname"`                                    // Overridden by nakama
@@ -192,12 +190,6 @@ type ServerProfile struct {
 type DeveloperFeatures struct {
 	DisableAfkTimeout bool  `json:"disable_afk_timeout,omitempty"`
 	EvrIDOverride     EvrId `json:"xplatformid,omitempty"`
-}
-
-type MatchStatistic struct {
-	Operator string `json:"op,omitempty"`
-	Value    any    `json:"val"`
-	Count    int64  `json:"cnt,omitempty"`
 }
 
 type EquippedCosmetics struct {
@@ -1274,23 +1266,6 @@ type CombatUnlocks struct {
 	TitleTitleB          bool `json:"rwd_title_title_b,omitempty"`
 }
 
-func NewStatistics() map[string]map[string]MatchStatistic {
-	return map[string]map[string]MatchStatistic{
-		"arena": {
-			"Level": MatchStatistic{
-				Operator: "add",
-				Value:    1,
-			},
-		},
-		"combat": {
-			"Level": MatchStatistic{
-				Operator: "add",
-				Value:    1,
-			},
-		},
-	}
-}
-
 func NewServerProfile() ServerProfile {
 	// This is the default server profile that EchoVR shipped with.
 	return ServerProfile{
@@ -1305,20 +1280,7 @@ func NewServerProfile() ServerProfile {
 			Number:     1,
 			NumberBody: 1,
 		},
-		Statistics: map[string]map[string]MatchStatistic{
-			"arena": {
-				"Level": MatchStatistic{
-					Operator: "add",
-					Value:    1,
-				},
-			},
-			"combat": {
-				"Level": MatchStatistic{
-					Operator: "add",
-					Value:    1,
-				},
-			},
-		},
+		Statistics: NewStatistics(),
 		UnlockedCosmetics: UnlockedCosmetics{
 			Arena: ArenaUnlocks{
 				DecalCombatFlamingoA:   true,

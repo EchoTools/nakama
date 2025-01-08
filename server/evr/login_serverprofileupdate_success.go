@@ -4,22 +4,12 @@ import (
 	"fmt"
 )
 
-var SNSUserServerProfileUpdateSuccessSymbol Symbol = ToSymbol("SNSUserServerProfileUpdateSuccess")
-
 type UserServerProfileUpdateSuccess struct {
 	EvrId EvrId
 }
 
-func (m *UserServerProfileUpdateSuccess) Token() string {
-	return "SNSUserServerProfileUpdateSuccess"
-}
-
-func (m *UserServerProfileUpdateSuccess) Symbol() Symbol {
-	return SymbolOf(m)
-}
-
 func (lr *UserServerProfileUpdateSuccess) String() string {
-	return fmt.Sprintf("%s(user_id=%s)", lr.Token(), lr.EvrId.String())
+	return fmt.Sprintf("%T(user_id=%s)", lr, lr.EvrId.String())
 }
 func (m *UserServerProfileUpdateSuccess) Stream(s *EasyStream) error {
 	return s.StreamStruct(&m.EvrId)

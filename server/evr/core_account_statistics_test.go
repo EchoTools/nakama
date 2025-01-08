@@ -1,11 +1,119 @@
-package server
+package evr
 
 import (
 	"testing"
+	"time"
 )
 
-func TestDefaultArenaStatsIsComplete(t *testing.T) {
-	t.Skip()
+func TestStatisticsGroup_MarshalText(t *testing.T) {
+	tests := []struct {
+		name     string
+		group    StatisticsGroup
+		expected string
+	}{
+		{
+			name: "Daily Arena",
+			group: StatisticsGroup{
+				Mode:          ModeArenaPublic,
+				ResetSchedule: ResetScheduleDaily,
+			},
+			expected: "daily_" + time.Now().Format("2006_01_02"),
+		},
+		{
+			name: "Weekly Arena",
+			group: StatisticsGroup{
+				Mode:          ModeArenaPublic,
+				ResetSchedule: ResetScheduleWeekly,
+			},
+			expected: "weekly_" + mostRecentThursday().Format("2006_01_02"),
+		},
+		{
+			name: "All Time Arena",
+			group: StatisticsGroup{
+				Mode:          ModeArenaPublic,
+				ResetSchedule: ResetScheduleAllTime,
+			},
+			expected: "arena",
+		},
+		{
+			name: "All Time Combat",
+			group: StatisticsGroup{
+				Mode:          ModeCombatPublic,
+				ResetSchedule: ResetScheduleAllTime,
+			},
+			expected: "combat",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := tt.group.MarshalText()
+			if err != nil {
+				t.Errorf("MarshalText() error = %v", err)
+				return
+			}
+
+			gotStr := string(got)
+			if gotStr != tt.expected {
+				t.Errorf("MarshalText() got = %v, expected %v", gotStr, tt.expected)
+			}
+		})
+	}
+}
+func TestStatisticsGroup_UnmarshalText(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected StatisticsGroup
+	}{
+		{
+			name:  "Daily Arena",
+			input: "daily_" + time.Now().Format("2006_01_02"),
+			expected: StatisticsGroup{
+				Mode:          ModeArenaPublic,
+				ResetSchedule: ResetScheduleDaily,
+			},
+		},
+		{
+			name:  "Weekly Arena",
+			input: "weekly_" + mostRecentThursday().Format("2006_01_02"),
+			expected: StatisticsGroup{
+				Mode:          ModeArenaPublic,
+				ResetSchedule: ResetScheduleWeekly,
+			},
+		},
+		{
+			name:  "All Time Arena",
+			input: "arena",
+			expected: StatisticsGroup{
+				Mode:          ModeArenaPublic,
+				ResetSchedule: ResetScheduleAllTime,
+			},
+		},
+		{
+			name:  "All Time Combat",
+			input: "combat",
+			expected: StatisticsGroup{
+				Mode:          ModeCombatPublic,
+				ResetSchedule: ResetScheduleAllTime,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var group StatisticsGroup
+			err := group.UnmarshalText([]byte(tt.input))
+			if err != nil {
+				t.Errorf("UnmarshalText() error = %v", err)
+				return
+			}
+
+			if group != tt.expected {
+				t.Errorf("UnmarshalText() got = %v, expected %v", group, tt.expected)
+			}
+		})
+	}
 }
 
 var preshutdownProfileStatistics = []byte(`

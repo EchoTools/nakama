@@ -1305,9 +1305,10 @@ func AccountLookupRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 }
 
 type PlayerStatsRPCRequest struct {
-	UserID    string `json:"user_id"`
-	GuildID   string `json:"guild_id"`
-	DiscordID string `json:"discord_id"`
+	UserID    string     `json:"user_id"`
+	GuildID   string     `json:"guild_id"`
+	DiscordID string     `json:"discord_id"`
+	Mode      evr.Symbol `json:"mode"`
 }
 
 type PlayerStatsRPCResponse struct {
@@ -1379,22 +1380,25 @@ func PlayerStatisticsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 		return "", runtime.NewError("guild group not found", StatusNotFound)
 	}
 
-	cacheKey := fmt.Sprintf("player_stats:%s:%s", groupID, userID)
-	cachedResponse, _, found := rpcResponseCache.Get(cacheKey)
-	if found {
-		return cachedResponse.(string), nil
+	var modes []evr.Symbol
+	var includeDailyWeekly bool
+
+	if request.Mode.IsNil() {
+		modes = []evr.Symbol{
+			evr.ModeArenaPublic,
+			evr.ModeCombatPublic,
+			evr.ModeCombatPrivate,
+			evr.ModeArenaPrivate,
+			evr.ModeSocialPublic,
+			evr.ModeSocialPrivate,
+		}
+		includeDailyWeekly = false
+	} else {
+		modes = []evr.Symbol{request.Mode}
+		includeDailyWeekly = true
 	}
 
-	modes := []evr.Symbol{
-		evr.ModeArenaPublic,
-		evr.ModeCombatPublic,
-		evr.ModeCombatPrivate,
-		evr.ModeArenaPrivate,
-		evr.ModeSocialPublic,
-		evr.ModeSocialPrivate,
-	}
-	resetSchedule := "alltime"
-	stats, err := LeaderboardsUserTabletStatisticsGet(ctx, db, userID, groupID, modes, resetSchedule)
+	stats, _, err := PlayerStatisticsGetID(ctx, db, userID, groupID, modes, includeDailyWeekly)
 	if err != nil {
 		return "", err
 	}
@@ -1403,11 +1407,7 @@ func PlayerStatisticsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 		Stats: stats,
 	}
 
-	payload = response.String()
-
-	rpcResponseCache.Set(cacheKey, payload, 30*time.Second)
-
-	return payload, nil
+	return response.String(), nil
 }
 
 type AccountSearchRequest struct {
@@ -1830,99 +1830,74 @@ func ServerScoresRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 	return response.String(), nil
 }
 
+type UserServerProfileRPCRequest struct {
+	UserID    uuid.UUID `json:"user_id"`
+	XPID      evr.EvrId `json:"xp_id"`
+	DiscordID string    `json:"discord_id"`
+	GuildID   string    `json:"guild_id"`
+	GroupID   uuid.UUID `json:"group_id"`
+}
+
 func UserServerProfileRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 
-	// Get the pings from the query string
-	queryParameters := ctx.Value(runtime.RUNTIME_CTX_QUERY_PARAMS).(map[string][]string)
-
-	request := make(map[string]string)
-
-	var userID string
-	var ok bool
-	var err error
-
-	if payload != "" {
-		if err := json.Unmarshal([]byte(payload), &request); err != nil {
-			return "", err
-		}
-	} else if len(queryParameters) > 0 {
-		if p, ok := queryParameters["user_id"]; ok {
-			request["user_id"] = p[0]
-		}
-		if p, ok := queryParameters["xp_id"]; ok {
-			request["xp_id"] = p[0]
-		}
-		if p, ok := queryParameters["discord_id"]; ok {
-			request["discord_id"] = p[0]
-		}
-		if p, ok := queryParameters["guild_id"]; ok {
-			request["guild_id"] = p[0]
-		}
-		if p, ok := queryParameters["group_id"]; ok {
-			request["group_id"] = p[0]
-		}
-	} else {
-		if userID, ok = ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string); !ok {
-			return "", runtime.NewError("No user ID in context", StatusUnauthenticated)
-		}
+	request := &UserServerProfileRPCRequest{}
+	if err := parseRequest(ctx, payload, request); err != nil {
+		return "", err
 	}
 
-	var xpIDStr string
 	switch {
-	case request["user_id"] != "":
-		userID = request["user_id"]
+	case !request.UserID.IsNil():
 
-	case request["xp_id"] != "":
-		xpIDStr = request["xp_id"]
-		if userID, err = GetUserIDByEvrID(ctx, db, xpIDStr); err != nil {
-			return "", err
+	case !request.XPID.IsNil():
+		if userID, err := GetUserIDByEvrID(ctx, db, request.XPID.String()); err != nil {
+			return "", fmt.Errorf("failed to get user ID by xp_id: %w", err)
+		} else {
+			request.UserID = uuid.FromStringOrNil(userID)
 		}
-	case request["discord_id"] != "":
-		if userID, err = GetUserIDByDiscordID(ctx, db, request["discord_id"]); err != nil {
-			return "", err
+	case request.DiscordID != "":
+		if userID, err := GetUserIDByDiscordID(ctx, db, request.DiscordID); err != nil {
+			return "", fmt.Errorf("failed to get user ID by discord ID: %w", err)
+		} else {
+			request.UserID = uuid.FromStringOrNil(userID)
 		}
-
 	default:
 		return "", runtime.NewError("No user ID specified", StatusInvalidArgument)
 	}
 
-	account, err := nk.AccountGetId(ctx, userID)
+	account, err := nk.AccountGetId(ctx, request.UserID.String())
 	if err != nil {
 		return "", err
 	}
 
-	if xpIDStr == "" {
-		if len(account.Devices) == 0 {
-			return "", runtime.NewError("No devices found for user", StatusNotFound)
+	if request.XPID.IsNil() && len(account.Devices) == 0 {
+		return "", runtime.NewError("No devices found for user", StatusNotFound)
+	} else {
+		if xpid, err := evr.ParseEvrId(account.Devices[0].Id); err != nil {
+			return "", fmt.Errorf("failed to parse xp_id `%s`: %w", account.Devices[0].Id, err)
+		} else {
+			request.XPID = *xpid
 		}
-		xpIDStr = account.Devices[0].Id
 	}
-	xpID, err := evr.ParseEvrId(xpIDStr)
-	if err != nil {
-		return "", runtime.NewError("Failed to parse xp_id", StatusInvalidArgument)
-	}
-
-	// Get the group
-	var groupID string
 
 	switch {
-	case request["group_id"] != "":
-		groupID = request["group_id"]
-	case request["guild_id"] != "":
-		groupID, err = GetGroupIDByGuildID(ctx, db, request["guild_id"])
-		if err != nil {
+	case !request.GroupID.IsNil():
+
+	case request.GuildID != "":
+		if groupID, err := GetGroupIDByGuildID(ctx, db, request.GuildID); err != nil {
 			return "", err
+		} else {
+			request.GroupID = uuid.FromStringOrNil(groupID)
 		}
 	}
 
-	serverProfile, err := NewUserServerProfile(ctx, db, account, *xpID, groupID)
+	serverProfile, err := NewUserServerProfile(ctx, db, account, request.XPID, request.GroupID.String())
 	if err != nil {
 		return "", fmt.Errorf("failed to get server profile: %w", err)
 	}
 
 	data, err := json.MarshalIndent(serverProfile, "", "  ")
 	if err != nil {
-		return "", runtime.NewError("Failed to marshal server profile", StatusInternalError)
+		return "", fmt.Errorf("failed to marshal server profile: %w", err)
 	}
 
 	return string(data), nil
