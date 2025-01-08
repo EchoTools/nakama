@@ -1800,13 +1800,13 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			d.cache.QueueSyncMember(i.GuildID, member.User.ID)
 
 			// Set the metadata
-			md, err := GetAccountMetadata(ctx, nk, userIDStr)
+			md, err := AccountMetadataLoad(ctx, nk, userIDStr)
 			if err != nil {
 				return err
 			}
 			md.SetActiveGroupID(uuid.FromStringOrNil(groupID))
 
-			if err = nk.AccountUpdateId(ctx, userIDStr, "", md.MarshalMap(), "", "", "", "", ""); err != nil {
+			if err := AccountMetadataSet(ctx, nk, userIDStr, md); err != nil {
 				return err
 			}
 
@@ -2891,7 +2891,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 			}
 
-			metadata, err := GetAccountMetadata(ctx, d.nk, userID)
+			metadata, err := AccountMetadataLoad(ctx, d.nk, userID)
 			if err != nil {
 				return fmt.Errorf("Failed to get account metadata: %w", err)
 			}

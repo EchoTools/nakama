@@ -364,26 +364,12 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		}
 	}
 
-	if params.account.User.DisplayName != params.accountMetadata.GetGroupDisplayNameOrDefault(groupID) {
-
-		if err := DisplayNameHistorySet(ctx, p.runtimeModule, session.UserID().String(), params.accountMetadata.ActiveGroupID, params.accountMetadata.GetActiveGroupDisplayName(), false); err != nil {
-			logger.Warn("Failed to set display name history", zap.Error(err))
-		}
-
-		// Update the user's metadata
-		if err := p.runtimeModule.AccountUpdateId(ctx, session.UserID().String(), "", params.accountMetadata.MarshalMap(), params.accountMetadata.GetActiveGroupDisplayName(), "", "", "", ""); err != nil {
-			return fmt.Errorf("failed to update user metadata: %w", err)
-		}
-
-		params.account, err = p.runtimeModule.AccountGetId(ctx, session.UserID().String())
-		if err != nil {
-			return fmt.Errorf("failed to get account: %w", err)
-		}
-
-		StoreParams(ctx, &params)
+	account, err := p.runtimeModule.AccountGetId(ctx, userID)
+	if err != nil {
+		logger.Error("Failed to get account", zap.Error(err))
 	}
 
-	profile, err := NewUserServerProfile(ctx, p.db, params.account, params.xpID, lobbyParams.GroupID.String())
+	profile, err := NewUserServerProfile(ctx, p.db, account, params.xpID, lobbyParams.GroupID.String())
 	if err != nil {
 		return fmt.Errorf("failed to create user server profile: %w", err)
 	}

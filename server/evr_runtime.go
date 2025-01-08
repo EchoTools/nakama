@@ -592,20 +592,6 @@ func DisconnectUserID(ctx context.Context, nk runtime.NakamaModule, userID strin
 	return cnt, nil
 }
 
-func GetAccountMetadata(ctx context.Context, nk runtime.NakamaModule, userID string) (*AccountMetadata, error) {
-	account, err := nk.AccountGetId(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-
-	md := &AccountMetadata{}
-	if err := json.Unmarshal([]byte(account.GetUser().GetMetadata()), md); err != nil {
-		return nil, err
-	}
-	md.account = account
-	return md, nil
-}
-
 func GetUserIDByEvrID(ctx context.Context, db *sql.DB, evrID string) (string, error) {
 	query := `
 	SELECT ud.user_id FROM user_device ud WHERE ud.id = $1`

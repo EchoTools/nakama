@@ -349,7 +349,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		params.accountMetadata.SetActiveGroupID(uuid.FromStringOrNil(groupIDs[0]))
 		logger.Debug("Set active group", zap.String("uid", params.account.User.Id), zap.String("gid", params.accountMetadata.ActiveGroupID))
 
-		if err := p.runtimeModule.AccountUpdateId(ctx, params.account.User.Id, "", params.accountMetadata.MarshalMap(), "", "", "", "", ""); err != nil {
+		if err := p.runtimeModule.AccountUpdateId(ctx, params.account.User.Id, "", params.accountMetadata.MarshalMap(), params.accountMetadata.GetActiveGroupDisplayName(), "", "", "", ""); err != nil {
 			metricsTags["error"] = "failed_update_metadata"
 			return fmt.Errorf("failed to update user metadata: %w", err)
 		}
@@ -543,27 +543,30 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 			}
 		}
 	}
-	newMetadata := *params.accountMetadata
 
-	newMetadata.TeamName = update.TeamName
+	metadata, err := AccountMetadataLoad(ctx, p.runtimeModule, session.userID.String())
+	if err != nil {
+		return fmt.Errorf("failed to load account metadata: %w", err)
+	}
 
-	newMetadata.CombatLoadout = CombatLoadout{
+	metadata.TeamName = update.TeamName
+
+	metadata.CombatLoadout = CombatLoadout{
 		CombatWeapon:       update.CombatWeapon,
 		CombatGrenade:      update.CombatGrenade,
 		CombatDominantHand: update.CombatDominantHand,
 		CombatAbility:      update.CombatAbility,
 	}
-	newMetadata.LegalConsents = update.LegalConsents
-	newMetadata.GhostedPlayers = update.GhostedPlayers.Players
-	newMetadata.MutedPlayers = update.MutedPlayers.Players
+	metadata.LegalConsents = update.LegalConsents
+	metadata.GhostedPlayers = update.GhostedPlayers.Players
+	metadata.MutedPlayers = update.MutedPlayers.Players
 
-	params.accountMetadata = &newMetadata
-
-	StoreParams(ctx, &params)
-
-	if err := p.runtimeModule.AccountUpdateId(ctx, userID, "", newMetadata.MarshalMap(), "", "", "", "", ""); err != nil {
-		return fmt.Errorf("failed to update user metadata: %w", err)
+	if err := AccountMetadataSet(ctx, p.runtimeModule, session.userID.String(), metadata); err != nil {
+		return fmt.Errorf("failed to update account metadata: %w", err)
 	}
+
+	params.accountMetadata = metadata
+	StoreParams(ctx, &params)
 	return nil
 }
 
@@ -831,14 +834,13 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 
 	// Put the XP in the player's wallet
 
-	// temp disable
-
 	// If the player isn't a member of the group, do not update the stats
-	metadata, err := GetAccountMetadata(ctx, p.runtimeModule, playerInfo.UserID)
+	metadata, err := AccountMetadataLoad(ctx, p.runtimeModule, playerInfo.UserID)
 	if err != nil {
 		return fmt.Errorf("failed to get account metadata: %w", err)
 	}
 	groupIDStr := label.GetGroupID().String()
+
 	if !serviceSettings.Load().DisableStatisticsUpdates && metadata.GroupDisplayNames[groupIDStr] != "" {
 
 		userSettings, err := LoadMatchmakingSettings(ctx, p.runtimeModule, playerInfo.UserID)

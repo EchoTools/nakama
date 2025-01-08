@@ -407,7 +407,7 @@ func (c DiscordCache) memberUpdateDisplayName(ctx context.Context, member *disco
 			evrAccount.SetGroupDisplayName(groupID, displayName)
 		}
 
-		if err := c.nk.AccountUpdateId(ctx, evrAccount.ID(), member.User.Username, evrAccount.MarshalMap(), "", "", "", "", member.User.Avatar); err != nil {
+		if err := c.nk.AccountUpdateId(ctx, evrAccount.ID(), member.User.Username, evrAccount.MarshalMap(), evrAccount.GetActiveGroupDisplayName(), "", "", "", member.User.Avatar); err != nil {
 			return fmt.Errorf("failed to update account: %w", err)
 		}
 	}
@@ -618,7 +618,7 @@ func (d *DiscordCache) GuildGroupMemberRemove(ctx context.Context, guildID, disc
 		callerID = d.DiscordIDToUserID(callerDiscordID)
 	}
 
-	md, err := GetAccountMetadata(ctx, d.nk, userID)
+	md, err := AccountMetadataLoad(ctx, d.nk, userID)
 	if err != nil {
 		return fmt.Errorf("error getting account metadata: %w", err)
 	}

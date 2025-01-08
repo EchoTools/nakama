@@ -163,7 +163,6 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				continue
 			}
 			params.isEarlyQuitter.Store(true)
-			p.runtimeModule.AccountUpdateId(ctx, session.userID.String(), "", params.accountMetadata.MarshalMap(), "", "", "", "", "")
 
 		case *evr.RemoteLogGoal:
 
@@ -187,13 +186,16 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 
 		case *evr.RemoteLogGameSettings:
 
-			params, ok := LoadParams(session.Context())
-			if !ok {
-				logger.Error("Failed to load params")
+			metadata, err := AccountMetadataLoad(ctx, p.runtimeModule, session.userID.String())
+			if err != nil {
+				logger.Error("Failed to load account metadata", zap.Error(err))
 				continue
 			}
-			params.accountMetadata.GameSettings = msg
-			p.runtimeModule.AccountUpdateId(ctx, session.userID.String(), "", params.accountMetadata.MarshalMap(), "", "", "", "", "")
+
+			metadata.GameSettings = msg
+			if err := AccountMetadataSet(ctx, p.runtimeModule, session.userID.String(), metadata); err != nil {
+				logger.Error("Failed to set account metadata", zap.Error(err))
+			}
 
 		case *evr.RemoteLogCustomizationMetricsPayload:
 
@@ -209,25 +211,20 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				logger.Error("Equipped customization is empty")
 				continue
 			}
-
-			params, ok := LoadParams(session.Context())
-			if !ok {
-				logger.Error("Failed to load params")
+			metadata, err := AccountMetadataLoad(ctx, p.runtimeModule, session.userID.String())
+			if err != nil {
+				logger.Error("Failed to load account metadata", zap.Error(err))
 				continue
 			}
 
-			params.accountMetadata = &(*params.accountMetadata)
-
 			// Update the equipped item in the profile.
-			if params.accountMetadata.LoadoutCosmetics.Loadout, err = LoadoutEquipItem(params.accountMetadata.LoadoutCosmetics.Loadout, category, name); err != nil {
+			if metadata.LoadoutCosmetics.Loadout, err = LoadoutEquipItem(metadata.LoadoutCosmetics.Loadout, category, name); err != nil {
 				return fmt.Errorf("failed to update equipped item: %w", err)
 			}
 
-			if err := p.runtimeModule.AccountUpdateId(ctx, session.userID.String(), "", params.accountMetadata.MarshalMap(), "", "", "", "", ""); err != nil {
-				return fmt.Errorf("failed to update account metadata: %w", err)
+			if err := AccountMetadataSet(ctx, p.runtimeModule, session.userID.String(), metadata); err != nil {
+				logger.Error("Failed to set account metadata", zap.Error(err))
 			}
-
-			StoreParams(session.Context(), &params)
 		case *evr.RemoteLogRepairMatrix:
 
 		case *evr.RemoteLogServerConnectionFailed:
