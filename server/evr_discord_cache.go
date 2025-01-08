@@ -337,6 +337,13 @@ func (c *DiscordCache) syncMember(ctx context.Context, logger *zap.Logger, disco
 		}
 	}
 
+	// Ensure the display name history exists.
+	// It only checks for existing use when the member changes their nick.
+	isInactive := evrAccount.IsDisabled() || !evrAccount.IsLinked()
+	if err := DisplayNameHistorySet(ctx, c.nk, account.User.Id, groupID, evrAccount.GetDisplayName(groupID), isInactive); err != nil {
+		logger.Warn("Failed to set display name history", zap.Error(err))
+	}
+
 	return nil
 }
 
