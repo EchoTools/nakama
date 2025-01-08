@@ -513,35 +513,61 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 	rejects := make([]uuid.UUID, 0)
 
 	for _, p := range presences {
+		logger := logger.WithFields(map[string]interface{}{
+			"username": p.GetUsername(),
+			"uid":      p.GetUserId(),
+			"sid":      p.GetSessionId(),
+		})
+
+		reason := ""
+		switch p.GetReason() {
+		case runtime.PresenceReasonUnknown:
+			reason = "unknown"
+		case runtime.PresenceReasonJoin:
+			reason = "join"
+		case runtime.PresenceReasonUpdate:
+			reason = "update"
+		case runtime.PresenceReasonLeave:
+			reason = "leave"
+		case runtime.PresenceReasonDisconnect:
+			reason = "disconnect"
+		default:
+			reason = "unknown"
+		}
 
 		if mp, ok := state.presenceMap[p.GetSessionId()]; ok {
+
 			tags := map[string]string{
 				"mode":     state.Mode.String(),
 				"level":    state.Level.String(),
 				"type":     state.LobbyType.String(),
 				"role":     fmt.Sprintf("%d", mp.RoleAlignment),
 				"group_id": state.GetGroupID().String(),
+				"reason":   reason,
 			}
-			msg := "Player removed from game server."
 
 			// If the presence still has the entrant stream, then this was from nakama, not the server. inform the server.
 			if userPresences, err := nk.StreamUserList(StreamModeEntrant, mp.EntrantID(state.ID).String(), "", mp.GetNodeId(), true, true); err != nil {
 				logger.Warn("Failed to list user streams: %v", err)
 
-			} else if len(userPresences) > 0 {
+			} else if len(userPresences) > 0 || p.GetReason() == runtime.PresenceReasonDisconnect {
+				tags["reject_sent"] = "true"
 
 				rejects = append(rejects, mp.EntrantID(state.ID))
-				msg = "Removing player from game server."
+
 				nk.MetricsCounterAdd("match_entrant_kick_count", tags, 1)
+
+				logger.Info("Kicking player from game server.")
+
 				if err := nk.StreamUserLeave(StreamModeEntrant, mp.EntrantID(state.ID).String(), "", mp.GetNodeId(), mp.GetUserId(), mp.GetSessionId()); err != nil {
 					logger.Warn("Failed to leave user stream: %v", err)
 				}
+
+			} else {
+				logger.Info("Player disconnected from game server.")
 			}
+
 			nk.MetricsCounterAdd("match_entrant_leave_count", tags, 1)
-			logger.WithFields(map[string]interface{}{
-				"username": mp.GetUsername(),
-				"uid":      mp.GetUserId(),
-			}).Info(msg)
 
 			ts := state.joinTimestamps[mp.GetSessionId()]
 			nk.MetricsTimerRecord("match_player_session_duration", tags, time.Since(ts))
@@ -560,11 +586,9 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 	}
 
 	if len(rejects) > 0 {
-
 		code := evr.PlayerRejectionReasonKickedFromServer
 		msgs := []evr.Message{
 			evr.NewGameServerEntrantRejected(code, rejects...),
-			unrequireMessage,
 		}
 		if err := m.dispatchMessages(ctx, logger, dispatcher, msgs, []runtime.Presence{state.server}, nil); err != nil {
 			logger.Warn("Failed to dispatch message: %v", err)
