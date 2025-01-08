@@ -22,6 +22,7 @@ const (
 	SkillRatingMuStatisticID    = "SkillRatingMu"
 	SkillRatingSigmaStatisticID = "SkillRatingSigma"
 	LobbyTimeStatisticID        = "LobbyTime"
+	EarlyQuitStatisticID        = "EarlyQuits"
 )
 
 var tabletStatisticTypeMap = map[evr.Symbol]map[string]int{
@@ -81,6 +82,7 @@ var tabletStatisticTypeMap = map[evr.Symbol]map[string]int{
 		SkillRatingSigmaStatisticID: TabletStatisticFloatValue,
 		SkillRatingMuStatisticID:    TabletStatisticFloatValue,
 		RankPercentileStatisticID:   TabletStatisticFloatValue,
+		EarlyQuitStatisticID:        TabletStatisticIntegerValue,
 	},
 	evr.ModeCombatPublic: {
 		"CombatAssists":                      TabletStatisticIntegerValue,
@@ -119,6 +121,7 @@ var tabletStatisticTypeMap = map[evr.Symbol]map[string]int{
 		SkillRatingMuStatisticID:             TabletStatisticFloatValue,
 		RankPercentileStatisticID:            TabletStatisticFloatValue,
 		LobbyTimeStatisticID:                 TabletStatisticFloatValue,
+		EarlyQuitStatisticID:                 TabletStatisticIntegerValue,
 	},
 	evr.ModeSocialPublic: {
 		LobbyTimeStatisticID: TabletStatisticFloatValue,
