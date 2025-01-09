@@ -100,8 +100,20 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 		LeavePartyStream(session)
 		p.metrics.CustomCounter("lobby_join_session", lobbyParams.MetricsTags(), 1)
 		logger.Info("Joining session", zap.String("mid", lobbyParams.CurrentMatchID.String()), zap.String("role", TeamIndex(lobbyParams.Role).String()))
-		matchID := lobbyParams.CurrentMatchID
-		return p.lobbyJoin(ctx, logger, session, lobbyParams, matchID)
+
+		label, err := MatchLabelByID(ctx, p.runtimeModule, lobbyParams.CurrentMatchID)
+		if err != nil {
+			return fmt.Errorf("failed to load match label: %w", err)
+		} else if label == nil {
+			logger.Warn("Match not found", zap.String("mid", matchID.UUID.String()))
+			return ErrMatchNotFound
+		}
+		lobbyParams.GroupID = label.GetGroupID()
+		lobbyParams.Mode = label.Mode
+		lobbyParams.Level = label.Level
+		lobbyParams.RequiredFeatures = label.RequiredFeatures
+
+		return p.lobbyJoin(ctx, logger, session, lobbyParams, label.ID)
 
 	case *evr.LobbyCreateSessionRequest:
 

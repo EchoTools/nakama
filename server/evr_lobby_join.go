@@ -31,13 +31,15 @@ func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session
 		logger.Warn("Match not found", zap.String("mid", matchID.UUID.String()))
 		return ErrMatchNotFound
 	}
-	lobbyParams.GroupID = label.GetGroupID()
-	groupID := lobbyParams.GroupID.String()
+
+	groupID := label.GetGroupID().String()
+
 	// Do authorization checks related to the lobby's guild.
 	if err := p.lobbyAuthorize(ctx, logger, session, lobbyParams, groupID); err != nil {
 		return err
 	}
 
+	// If the is a non-default group, then generate a profile specifically for it.
 	if params.accountMetadata.GetActiveGroupID() != lobbyParams.GroupID {
 		// Generate a profile for this group
 		profile, err := NewUserServerProfile(ctx, p.db, params.account, params.xpID, groupID)

@@ -11,6 +11,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
+	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
 )
 
@@ -196,7 +197,7 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 	return nil
 }
 
-func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, session Session, lobbyParams *LobbySessionParameters, groupID string) error {
+func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, session Session, lobbyParams *LobbySessionParameters, mode evr.Symbol, groupID string) error {
 	metricsTags := map[string]string{
 		"group_id": groupID,
 	}
@@ -224,20 +225,19 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 
 	sendAuditMessage := groupMetadata.AuditChannelID != ""
 
-	guildGroup, ok := params.guildGroups[groupID]
-
-	if !ok && groupMetadata.MembersOnlyMatchmaking {
-
-		metricsTags["error"] = "members_only_matchmaking"
+	// User is not a member of the group.
+	if groupMetadata.MembersOnlyMatchmaking && !groupMetadata.IsMember(userID) {
+		metricsTags["error"] = "not_member"
 		if sendAuditMessage {
 			if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("Rejected non-member <@%s>", userID), true); err != nil {
 				p.logger.Warn("Failed to send audit message", zap.String("channel_id", groupMetadata.AuditChannelID), zap.Error(err))
 			}
 		}
+		return NewLobbyError(KickedFromLobbyGroup, "user does not have member role")
+	}
 
-		return NewLobbyError(KickedFromLobbyGroup, "user does not have matchmaking permission")
-
-	} else if ok && guildGroup.IsSuspended(userID) {
+	// User is suspended from the group.
+	if groupMetadata.IsSuspended(userID) {
 
 		metricsTags["error"] = "suspended_user"
 		if sendAuditMessage {
@@ -247,6 +247,20 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		}
 
 		return ErrSuspended
+	}
+
+	if groupMetadata.IsLimitedAccess(userID) {
+
+		switch mode {
+		case evr.ModeArenaPublic, evr.ModeCombatPublic, evr.ModeSocialPublic:
+			metricsTags["error"] = "limited_access_user"
+			if sendAuditMessage {
+				if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("Rejected limited access user <@%s>", userID), true); err != nil {
+					p.logger.Warn("Failed to send audit message", zap.String("channel_id", groupMetadata.AuditChannelID), zap.Error(err))
+				}
+			}
+			return NewLobbyError(KickedFromLobbyGroup, "user does not have access social lobbies or matchmaking.")
+		}
 	}
 
 	if groupMetadata.MinimumAccountAgeDays > 0 && groupMetadata.IsAccountAgeBypass(userID) {
@@ -354,10 +368,9 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		}
 	}
 
-	features := params.supportedFeatures
-	if ok && len(features) > 0 {
+	if len(groupMetadata.AllowedFeatures) > 0 {
 		allowedFeatures := groupMetadata.AllowedFeatures
-		for _, feature := range features {
+		for _, feature := range params.supportedFeatures {
 			if !slices.Contains(allowedFeatures, feature) {
 				return NewLobbyError(KickedFromLobbyGroup, "This guild does not allow clients with `feature DLLs`.")
 			}

@@ -19,6 +19,7 @@ type GuildGroupRoles struct {
 	ServerHost       string `json:"server_host"`
 	Allocator        string `json:"allocator"`
 	Suspended        string `json:"suspended"`
+	LimitedAccess    string `json:"limited_access"` // Can Access Private matches only
 	APIAccess        string `json:"api_access"`
 	AccountAgeBypass string `json:"account_age_bypass"`
 	VPNBypass        string `json:"vpn_bypass"`
@@ -123,8 +124,25 @@ func (g *GroupMetadata) IsModerator(userID string) bool {
 	return false
 }
 
+func (g *GroupMetadata) IsMember(userID string) bool {
+	if userIDs, ok := g.RoleCache[g.Roles.Member]; ok {
+		return slices.Contains(userIDs, userID)
+	}
+	return false
+}
+
 func (g *GroupMetadata) IsSuspended(userID string) bool {
 	if userIDs, ok := g.RoleCache[g.Roles.Suspended]; ok {
+		return slices.Contains(userIDs, userID)
+	}
+	return false
+}
+
+func (g *GroupMetadata) IsLimitedAccess(userID string) bool {
+	if g.Roles.LimitedAccess == "" {
+		return g.IsSuspended(userID)
+	}
+	if userIDs, ok := g.RoleCache[g.Roles.LimitedAccess]; ok {
 		return slices.Contains(userIDs, userID)
 	}
 	return false
