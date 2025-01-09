@@ -188,26 +188,26 @@ func (m *MigrationLeaderboardPrune) MigrateSystem(ctx context.Context, logger ru
 		"count": len(toDelete),
 	}).Info("Would delete")
 
-	/*
-		deleteCount := 0
-		deleteStart := time.Now()
-		for _, id := range toDelete {
-			startTime := time.Now()
-			if err := nk.LeaderboardDelete(ctx, id); err != nil {
-				return nil
-			}
-			logger.WithFields(map[string]interface{}{
-				"id":              id,
-				"delete_duration": time.Since(startTime),
-			}).Info("Deleted invalid leaderboard")
+	deleteCount := 0
+	deleteStart := time.Now()
+	for _, id := range toDelete {
+		startTime := time.Now()
+		if err := nk.LeaderboardDelete(ctx, id); err != nil {
+			return nil
 		}
-
 		logger.WithFields(map[string]interface{}{
-			"count":            deleteCount,
-			"deletes_duration": time.Since(deleteStart),
-			"total_duration":   time.Since(firstStartTime),
-		}).Info("Finished migrating leaderboards")
-	*/
+			"id":              id,
+			"delete_duration": time.Since(startTime),
+		}).Info("Deleted invalid leaderboard")
+		<-time.After(time.Since(startTime)) // Give the system time to recover
+	}
+
+	logger.WithFields(map[string]interface{}{
+		"count":            deleteCount,
+		"deletes_duration": time.Since(deleteStart),
+		"total_duration":   time.Since(firstStartTime),
+	}).Info("Finished migrating leaderboards")
+
 	logger.WithFields(map[string]interface{}{
 		"moved_count":    movedCount,
 		"total_duration": time.Since(firstStartTime),
