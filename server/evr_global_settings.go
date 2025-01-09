@@ -29,6 +29,7 @@ type GlobalSettingsData struct {
 	Matchmaking              GlobalMatchmakingSettings `json:"matchmaking"`
 	version                  string
 	defaultCosmetics         map[string]struct{}
+	RemoteLogFilters         map[string][]string `json:"remote_logs_filter"` //	Ignore remote logs from specific servers
 }
 
 type GlobalMatchmakingSettings struct {
@@ -140,6 +141,30 @@ func LoadGlobalSettingsData(ctx context.Context, nk runtime.NakamaModule) (*Glob
 
 	if data.Matchmaking.RankPercentile.ResetScheduleDamper == "" {
 		data.Matchmaking.RankPercentile.ResetScheduleDamper = "weekly"
+	}
+
+	if data.RemoteLogFilters == nil {
+		data.RemoteLogFilters = map[string][]string{
+			"message": {
+				"Podium Interaction",
+				"Customization Item Preview",
+				"Customization Item Equip",
+				"Confirmation Panel Press",
+				"server library loaded",
+				"r15 net game error message",
+				"cst_usage_metrics",
+				"purchasing item",
+				"Tutorial progress",
+			},
+			"category": {
+				"iap",
+				"rich_presence",
+				"social",
+			},
+			"message_type": {
+				"OVR_IAP",
+			},
+		}
 	}
 
 	// If the object doesn't exist, or this is the first start

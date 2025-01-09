@@ -17,7 +17,12 @@ type NextMatchMetadata struct {
 }
 
 // lobbyJoinSessionRequest is a request to join a specific existing session.
-func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session *sessionWS, params *LobbySessionParameters, matchID MatchID) error {
+func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters, matchID MatchID) error {
+
+	params, ok := LoadParams(session.Context())
+	if !ok {
+		return fmt.Errorf("failed to get session parameters")
+	}
 
 	label, err := MatchLabelByID(ctx, p.runtimeModule, matchID)
 	if err != nil {
@@ -26,27 +31,42 @@ func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session
 		logger.Warn("Match not found", zap.String("mid", matchID.UUID.String()))
 		return ErrMatchNotFound
 	}
-
+	lobbyParams.GroupID = label.GetGroupID()
+	groupID := lobbyParams.GroupID.String()
 	// Do authorization checks related to the lobby's guild.
-	if err := p.lobbyAuthorize(ctx, logger, session, params, label.GetGroupID().String()); err != nil {
+	if err := p.lobbyAuthorize(ctx, logger, session, lobbyParams, groupID); err != nil {
 		return err
 	}
 
-	presence, err := EntrantPresenceFromLobbyParams(session, params)
+	if params.accountMetadata.GetActiveGroupID() != lobbyParams.GroupID {
+		// Generate a profile for this group
+		profile, err := NewUserServerProfile(ctx, p.db, params.account, params.xpID, groupID)
+		if err != nil {
+			return fmt.Errorf("failed to create user server profile: %w", err)
+		}
+
+		profile.DisplayName = params.accountMetadata.GetGroupDisplayNameOrDefault(groupID)
+
+		if _, err := p.profileCache.Store(session.ID(), *profile); err != nil {
+			return fmt.Errorf("failed to cache profile: %w", err)
+		}
+	}
+
+	presence, err := EntrantPresenceFromLobbyParams(session, lobbyParams)
 	if err != nil {
 		return fmt.Errorf("failed to create presences: %w", err)
 	}
 
 	switch label.Mode {
 	case evr.ModeSocialPublic, evr.ModeSocialPrivate:
-		if params.Role == evr.TeamUnassigned {
-			params.Role = evr.TeamSocial
-		} else if slices.Contains([]int{evr.TeamModerator, evr.TeamSocial}, params.Role) {
-			return fmt.Errorf("invalid role for social lobby: %d", params.Role)
+		if lobbyParams.Role == evr.TeamUnassigned {
+			lobbyParams.Role = evr.TeamSocial
+		} else if slices.Contains([]int{evr.TeamModerator, evr.TeamSocial}, lobbyParams.Role) {
+			return fmt.Errorf("invalid role for social lobby: %d", lobbyParams.Role)
 		}
 	}
 
-	presence.RoleAlignment = params.Role
+	presence.RoleAlignment = lobbyParams.Role
 	if err := p.LobbyJoinEntrants(logger, label, presence); err != nil {
 		// Send the error to the client
 		go func() {

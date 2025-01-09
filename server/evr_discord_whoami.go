@@ -140,18 +140,21 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	if err != nil {
 		return fmt.Errorf("failed to load display name history: %w", err)
 	}
-
+	_ = displayNameHistory
 	pastDisplayNames := make(map[string]time.Time)
-	for groupID, items := range displayNameHistory.Histories {
-		if !includePriviledged && groupID != i.GuildID {
-			continue
-		}
-		for _, item := range items {
-			if e, ok := pastDisplayNames[item.DisplayName]; !ok || e.After(item.UpdateTime) {
-				pastDisplayNames[item.DisplayName] = item.UpdateTime
+	/*
+
+		for groupID, items := range displayNameHistory.Histories {
+			if !includePriviledged && groupID != i.GuildID {
+				continue
+			}
+			for _, item := range items {
+				if e, ok := pastDisplayNames[item.DisplayName]; !ok || e.After(item.UpdateTime) {
+					pastDisplayNames[item.DisplayName] = item.UpdateTime
+				}
 			}
 		}
-	}
+	*/
 
 	whoami.DisplayNames = make([]string, 0, len(pastDisplayNames))
 	for dn := range pastDisplayNames {

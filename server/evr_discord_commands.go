@@ -1945,7 +1945,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			partial = sanitizeDisplayName(strings.ToLower(partial))
 
-			pattern := fmt.Sprintf(".*%s.*", partial)
+			pattern := fmt.Sprintf(".*%s.*", Query.Escape(partial))
 
 			if len(partial) <= 3 {
 				// exact match only
@@ -1971,7 +1971,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 			*/
 
-			resultsByUserID := make(map[string][]DisplayNameHistoryEntry, len(histories))
+			resultsByUserID := make(map[string]map[string]time.Time)
 
 			for userID, journal := range histories {
 
@@ -1981,43 +1981,26 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					continue
 				}
 
-				for _, e := range history {
+				for d, e := range history {
 
-					if exactOnly && strings.ToLower(e.DisplayName) != partial {
+					if exactOnly && strings.ToLower(d) != partial {
 						continue
 					}
 
-					if !strings.Contains(strings.ToLower(e.DisplayName), partial) {
+					if !strings.Contains(strings.ToLower(d), partial) {
 						continue
 					}
 
-					resultsByUserID[userID] = append(resultsByUserID[userID], e)
+					if _, ok := resultsByUserID[userID]; !ok {
+						resultsByUserID[userID] = make(map[string]time.Time)
+					}
+
+					resultsByUserID[userID][d] = e
 				}
 			}
 
 			if len(resultsByUserID) == 0 {
 				return simpleInteractionResponse(s, i, "No results found")
-			}
-
-			// Sort each players results by update time
-			for userID, r := range resultsByUserID {
-				sort.Slice(r, func(i, j int) bool {
-					return r[i].UpdateTime.After(r[j].UpdateTime)
-				})
-
-				// Remove older duplicates
-				seen := make(map[string]struct{})
-				unique := make([]DisplayNameHistoryEntry, 0, len(r))
-				for _, e := range r {
-					if _, ok := seen[e.DisplayName]; ok {
-						continue
-					}
-					seen[e.DisplayName] = struct{}{}
-					unique = append(unique, e)
-				}
-				resultsByUserID[userID] = unique
-
-				// Limit the results to the most recent 10
 			}
 
 			// Create the embed
@@ -2043,9 +2026,14 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				})
 
 				displayNames := make([]string, 0, len(results))
-				for _, r := range results {
-					displayNames = append(displayNames, fmt.Sprintf("%s <t:%d:R>", EscapeDiscordMarkdown(r.DisplayName), r.UpdateTime.UTC().Unix()))
+				for n, t := range results {
+					displayNames = append(displayNames, fmt.Sprintf("%s <t:%d:R>", EscapeDiscordMarkdown(n), t.UTC().Unix()))
 				}
+
+				// Sort the display names by time
+				sort.Slice(displayNames, func(i, j int) bool {
+					return results[displayNames[i]].After(results[displayNames[j]])
+				})
 
 				embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
 					Name:   "In-Game Names",
