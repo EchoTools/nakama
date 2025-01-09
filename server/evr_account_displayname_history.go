@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/heroiclabs/nakama-common/api"
@@ -11,7 +13,7 @@ import (
 )
 
 const (
-	DisplayNameCollection        = "DisplayNames"
+	DisplayNameCollection        = "DisplayName"
 	DisplayNameHistoryKey        = "history"
 	DisplayNameHistoryCacheIndex = "Index_DisplayNameHistory"
 )
@@ -21,71 +23,128 @@ var (
 )
 
 type DisplayNameHistory struct {
-	Histories map[string]map[string]time.Time `json:"history"`  // map[groupID]map[displayName]lastUsedTime
-	Reserved  map[string]struct{}             `json:"reserved"` // staticly reserved names
-	Active    map[string]map[string]time.Time `json:"active"`   // names that the user has reserved
+	Histories    map[string]map[string]time.Time `json:"history"`   // map[groupID]map[displayName]lastUsedTime
+	Reserved     map[string]struct{}             `json:"reserved"`  // staticly reserved names
+	Username     string                          `json:"username"`  // the user's username
+	ActiveCache  []string                        `json:"active"`    // (lowercased) names that the user has active/reserved
+	HistoryCache []string                        `json:"cache"`     // (lowercased) used for searching
+	IsActive     bool                            `json:"is_active"` // if the user has an actively linked headset
 }
 
 func NewDisplayNameHistory() *DisplayNameHistory {
 	return &DisplayNameHistory{
-		Histories: make(map[string]map[string]time.Time),
-		Active:    make(map[string]map[string]time.Time),
-		Reserved:  make(map[string]struct{}),
+		Histories:    make(map[string]map[string]time.Time),
+		ActiveCache:  make([]string, 0),
+		HistoryCache: make([]string, 0),
+		Reserved:     make(map[string]struct{}),
 	}
 }
 
 func (h *DisplayNameHistory) MarshalJSON() ([]byte, error) {
-
-	// Update Active list
-	h.Active = make(map[string]map[string]time.Time)
-	for groupID, history := range h.Histories {
-		for displayName, lastUsed := range history {
-			if time.Since(lastUsed) < MaximumDisplayNameAge {
-				if _, ok := h.Active[groupID]; !ok {
-					h.Active[groupID] = make(map[string]time.Time)
-				}
-				if h.Active[groupID][displayName].Before(lastUsed) {
-					h.Active[groupID][displayName] = lastUsed
-				}
-			}
-		}
-	}
+	// Update the caches
+	h.compile()
 	type Alias DisplayNameHistory
 	aux := &struct{ *Alias }{Alias: (*Alias)(h)}
 	return json.Marshal(aux)
 }
 
-func (h *DisplayNameHistory) UnmarshalJSON(data []byte) error {
-	type Alias DisplayNameHistory
-	aux := &struct{ *Alias }{Alias: (*Alias)(h)}
+func (h *DisplayNameHistory) compile() {
 
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
-	}
-	if h.Active == nil {
-		h.Active = make(map[string]map[string]time.Time)
+	cache := make(map[string]struct{})
+	active := make(map[string]struct{})
+
+	for groupID, names := range h.Histories {
+
+		var latestName string
+		var latestTime time.Time
+
+		for name, updateTime := range names {
+
+			// Remove any invalid display names
+			if name == "" {
+				delete(h.Histories[groupID], name)
+				continue
+			}
+
+			// Add it to the cache
+			cache[strings.ToLower(name)] = struct{}{}
+
+			// Find the latest display name
+			if updateTime.After(latestTime) {
+				latestName = name
+				latestTime = updateTime
+			}
+		}
+
+		// Add latest, and recently used, display names to the active list
+		if h.IsActive && time.Since(latestTime) < MaximumDisplayNameAge {
+			active[strings.ToLower(latestName)] = struct{}{}
+		}
 	}
 
-	if h.Reserved == nil {
-		h.Reserved = make(map[string]struct{})
+	// Add the reserved names to the cache
+	for name := range h.Reserved {
+		active[strings.ToLower(name)] = struct{}{}
 	}
 
+	// Add the username to the active list
+	active[strings.ToLower(h.Username)] = struct{}{}
+
+	// Add the active names to the cache
+	for name := range active {
+		cache[name] = struct{}{}
+	}
+
+	// Build the caches
+	caches := map[*map[string]struct{}]*[]string{
+		&cache:  &h.HistoryCache,
+		&active: &h.ActiveCache,
+	}
+
+	for cache, list := range caches {
+		*list = make([]string, 0, len(*cache))
+		for name := range *cache {
+			*list = append(*list, name)
+		}
+	}
+}
+
+func (h *DisplayNameHistory) Set(groupID, displayName string, lastUsed time.Time, username string) {
 	if h.Histories == nil {
 		h.Histories = make(map[string]map[string]time.Time)
 	}
-	return nil
+	if _, ok := h.Histories[groupID]; !ok {
+		h.Histories[groupID] = make(map[string]time.Time)
+	}
+	h.Histories[groupID][displayName] = lastUsed
+
+	if username != "" {
+		h.Username = username
+	}
 }
 
 // Set the display name for the given groupID
-func (h *DisplayNameHistory) Set(groupID, displayName string) {
+func (h *DisplayNameHistory) Update(groupID, displayName string, username string, isActive bool) {
+	if h.Histories == nil {
+		h.Histories = make(map[string]map[string]time.Time)
+	}
+
 	if _, ok := h.Histories[groupID]; !ok {
 		h.Histories[groupID] = make(map[string]time.Time)
 	}
 	h.Histories[groupID][displayName] = time.Now()
+	if username != "" {
+		h.Username = username
+	}
+	h.IsActive = isActive
 }
 
 // Returns the latest display name for the given groupID
-func (h *DisplayNameHistory) Latest(groupID string) string {
+func (h *DisplayNameHistory) Latest(groupID string) (string, time.Time) {
+	if h.Histories == nil {
+		h.Histories = make(map[string]map[string]time.Time)
+	}
+
 	// Return the latest display name by date for the group
 	var latest string
 	var latestTime time.Time
@@ -95,14 +154,22 @@ func (h *DisplayNameHistory) Latest(groupID string) string {
 			latestTime = updateTime
 		}
 	}
-	return latest
+	return latest, latestTime
 }
 
 func (h *DisplayNameHistory) AddReserved(displayName string) {
+	if h.Reserved == nil {
+		h.Reserved = make(map[string]struct{})
+	}
+
 	h.Reserved[displayName] = struct{}{}
 }
 
 func (h *DisplayNameHistory) RemoveReserved(displayName string) {
+	if h.Reserved == nil {
+		h.Reserved = make(map[string]struct{})
+	}
+
 	delete(h.Reserved, displayName)
 }
 
@@ -150,14 +217,14 @@ func DisplayNameHistoryStore(ctx context.Context, nk runtime.NakamaModule, userI
 	return nil
 }
 
-func DisplayNameHistorySet(ctx context.Context, nk runtime.NakamaModule, userID string, groupID string, displayName string, isInactive bool) error {
+func DisplayNameHistoryUpdate(ctx context.Context, nk runtime.NakamaModule, userID string, groupID string, displayName string, username string, isActive bool) error {
 	history, err := DisplayNameHistoryLoad(ctx, nk, userID)
 	if err != nil {
 		return fmt.Errorf("error getting display name history: %w", err)
 	}
 
 	// If it's inactive, the active list will be cleared.
-	history.Set(groupID, displayName)
+	history.Update(groupID, displayName, username, true)
 
 	if err := DisplayNameHistoryStore(ctx, nk, userID, history); err != nil {
 		return fmt.Errorf("error storing display name history: %w", err)
@@ -166,32 +233,64 @@ func DisplayNameHistorySet(ctx context.Context, nk runtime.NakamaModule, userID 
 	return nil
 }
 
-func DisplayNameCacheRegexSearch(ctx context.Context, nk runtime.NakamaModule, escapedPattern string, limit int) (map[string]*DisplayNameHistory, error) {
-	query := fmt.Sprintf(`value.history:/%s/ value.active.%s:>"%s"`, escapedPattern, escapedPattern, escapedPattern, time.Now().Add(-MaximumDisplayNameAge).Format(time.RFC3339))
+func DisplayNameCacheRegexSearch(ctx context.Context, nk runtime.NakamaModule, displayName string, limit int) (map[string]map[string]map[string]time.Time, error) {
+
+	var useWildcardPrefix, useWildcardSuffix bool
+
+	// Check if the display name has a wildcard prefix or suffix
+	if strings.HasPrefix(displayName, "*") {
+		displayName = displayName[1:]
+		useWildcardPrefix = true
+	}
+	if strings.HasSuffix(displayName, "*") {
+		displayName = displayName[:len(displayName)-1]
+		useWildcardSuffix = true
+	}
+
+	// Sanitize the display name
+	displayName = strings.ToLower(sanitizeDisplayName(displayName))
+
+	// If the display name is empty, return nil
+	if len(displayName) == 0 {
+		return nil, fmt.Errorf("search string is empty")
+	}
+
+	// If the display name is less than 3 characters, don't use wildcards
+	if len(displayName) < 3 && (useWildcardPrefix || useWildcardSuffix) {
+		return nil, fmt.Errorf("search string is too short for wildcards")
+	}
+
+	pattern := Query.Escape(displayName)
+
+	// Check if the display name is a partial match
+	if useWildcardPrefix {
+		pattern = fmt.Sprintf(".*%s", pattern)
+	}
+	if useWildcardSuffix {
+		pattern = fmt.Sprintf("%s.*", pattern)
+	}
+
+	query := fmt.Sprintf(`+value.cache:/%s/`, pattern)
+
 	// Perform the storage list operation
 
-	cursor := ""
-
-	hardLimit := 1000
-	results := make([]*api.StorageObject, 100)
-	sorting := []string{
-		fmt.Sprintf("value.active.%s", escapedPattern),
-	}
 	var err error
+	histories := make(map[string]*DisplayNameHistory, 10)
 	var result *api.StorageObjects
+
+	cursor := ""
 	for {
-		result, cursor, err = nk.StorageIndexList(ctx, SystemUserID, DisplayNameHistoryCacheIndex, query, 100, sorting, cursor)
+		result, cursor, err = nk.StorageIndexList(ctx, SystemUserID, DisplayNameHistoryCacheIndex, query, 200, nil, cursor)
 		if err != nil {
 			return nil, fmt.Errorf("error listing display name history: %w", err)
 		}
-		if len(result.Objects) == 0 || len(results) >= hardLimit {
-			break
-		}
-		results = append(results, result.Objects...)
 
-		if len(results) >= limit {
-			results = results[:limit]
-			break
+		for _, obj := range result.Objects {
+			var history DisplayNameHistory
+			if err := json.Unmarshal([]byte(obj.Value), &history); err != nil {
+				return nil, fmt.Errorf("error unmarshalling display name history: %w", err)
+			}
+			histories[obj.UserId] = &history
 		}
 
 		if cursor == "" {
@@ -199,20 +298,118 @@ func DisplayNameCacheRegexSearch(ctx context.Context, nk runtime.NakamaModule, e
 		}
 	}
 
-	histories := make(map[string]*DisplayNameHistory, len(result.Objects))
-	for _, obj := range result.Objects {
-		var history DisplayNameHistory
-		if err := json.Unmarshal([]byte(obj.Value), &history); err != nil {
-			return nil, fmt.Errorf("error unmarshalling display name history: %w", err)
+	matches := make(map[string]map[string]map[string]time.Time, len(histories)) // map[userID]map[groupID]map[displayName]lastUsedTime'
+
+	matchFn := func(s string, p string) bool {
+		s = strings.ToLower(s)
+		if useWildcardPrefix && useWildcardSuffix {
+			return strings.Contains(s, p)
+		} else if useWildcardPrefix {
+			return strings.HasSuffix(s, p)
+		} else if useWildcardSuffix {
+			return strings.HasPrefix(s, p)
 		}
-		histories[obj.UserId] = &history
+		return s == p
 	}
 
-	return histories, nil
+	for userID, history := range histories {
+		matches[userID] = make(map[string]map[string]time.Time)
+
+		for groupID, e := range history.Histories {
+			matches[userID][groupID] = make(map[string]time.Time)
+
+			for name, lastUsed := range e {
+
+				if matchFn(name, displayName) {
+					matches[userID][groupID][name] = lastUsed
+				}
+			}
+
+			if len(matches[userID][groupID]) == 0 {
+				delete(matches[userID], groupID)
+			}
+		}
+
+		// Add exact matches for usernames
+		if strings.ToLower(history.Username) == displayName {
+			if _, ok := matches[userID][""]; !ok {
+				matches[userID][""] = make(map[string]time.Time)
+			}
+			matches[userID][""][history.Username] = time.Time{}
+		}
+
+		// Add exact matches for reserved names
+		for n := range history.Reserved {
+			if strings.ToLower(n) == displayName {
+				matches[userID][""][n] = time.Time{}
+			}
+		}
+
+		if len(matches[userID]) == 0 {
+			delete(matches, userID)
+		}
+
+	}
+
+	if len(matches) > limit {
+		// Keep the most recent matches by userID
+
+		type match struct {
+			userID   string
+			lastUsed time.Time
+			names    map[string]map[string]time.Time
+		}
+		sorted := make([]match, 0, len(matches))
+		for userID, namesByGroupID := range matches {
+			match := match{userID: userID, names: namesByGroupID}
+
+			// reduce to the most recent, plus reserved
+			for _, names := range namesByGroupID {
+				for _, lastUsed := range names {
+
+					// Find the most recent last used time; if it's zero, it's a reserved name
+					if lastUsed.IsZero() || lastUsed.After(match.lastUsed) {
+						match.lastUsed = lastUsed
+					}
+				}
+			}
+			sorted = append(sorted, match)
+		}
+
+		// Sort the matches by last used time
+		sort.Slice(sorted, func(i, j int) bool {
+			if sorted[i].lastUsed.IsZero() {
+				return true
+			} else if sorted[i].lastUsed.IsZero() {
+				return false
+			}
+
+			return sorted[i].lastUsed.After(sorted[j].lastUsed)
+		})
+
+		matches = make(map[string]map[string]map[string]time.Time, limit)
+
+		// Include all reserved names
+		for i := 0; i < len(matches); i++ {
+			if sorted[i].lastUsed.IsZero() {
+				matches[sorted[i].userID] = sorted[i].names
+			}
+			sorted = append(sorted[:i], sorted[i+1:]...)
+			i--
+		}
+
+		limit := min(limit, len(sorted))
+		// Add the most recent matches, up to the limit
+		for _, m := range sorted[:limit] {
+			matches[m.userID] = m.names
+		}
+	}
+
+	return matches, nil
 }
 
 func DisplayNameHistoryActiveList(ctx context.Context, nk runtime.NakamaModule, displayName string) ([]string, error) {
-	// Perform the storage list operation
+
 	query := fmt.Sprintf("+value.active:%s", Query.Escape(displayName))
 
 	cursor := ""

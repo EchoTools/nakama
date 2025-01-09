@@ -10,12 +10,12 @@ import (
 type BuildNumber int64
 
 const (
-	StandaloneBuild BuildNumber = 630783
-	PCVRBuild       BuildNumber = 631547
+	StandaloneBuildNumber BuildNumber = 630783
+	PCVRBuild             BuildNumber = 631547
 )
 
 var KnownBuilds = []BuildNumber{
-	StandaloneBuild,
+	StandaloneBuildNumber,
 	PCVRBuild,
 }
 

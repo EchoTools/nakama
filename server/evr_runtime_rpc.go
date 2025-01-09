@@ -1407,6 +1407,7 @@ type AccountSearchRequest struct {
 }
 
 type AccountSearchResponse struct {
+	Cursor               *string                `json:"cursor,omitempty"`
 	DisplayNameMatchList []DisplayNameMatchItem `json:"display_name_matches"`
 }
 
@@ -1414,7 +1415,6 @@ type DisplayNameMatchItem struct {
 	DisplayName string    `json:"display_name"`
 	UserID      string    `json:"user_id"`
 	GroupID     string    `json:"group_id"`
-	IsCurrent   bool      `json:"is_current"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
@@ -1430,58 +1430,67 @@ func AccountSearchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 
 		if len(queryParameters) > 0 {
 
-			// extract the p from the query string
-			if p, ok := queryParameters["display_name"]; ok {
-				request.DisplayNamePattern = p[0]
+			for k, v := range queryParameters {
+				switch k {
+				case "display_name":
+					request.DisplayNamePattern = v[0]
+				case "limit":
+					limit, err := strconv.ParseUint(v[0], 10, 64)
+					if err != nil {
+						return "", runtime.NewError("invalid limit", StatusInvalidArgument)
+					}
+					request.Limit = int(limit)
+				}
 			}
 		}
+	}
+
+	if request.Limit == 0 {
+		request.Limit = 10
 	}
 
 	if request.DisplayNamePattern == "" {
 		return "", runtime.NewError("Search pattern name is empty", StatusInvalidArgument)
 	}
 
-	// Sanitize the display name
-	request.DisplayNamePattern = sanitizeDisplayName(strings.ToLower(request.DisplayNamePattern))
+	limit := min(request.Limit, 1000)
 
-	if request.DisplayNamePattern == "" {
-		return "", runtime.NewError("Search pattern is empty after sanitization.", StatusInvalidArgument)
-	}
-
-	query := fmt.Sprintf(".*%s.*", Query.Escape(request.DisplayNamePattern))
-
-	limit := min(request.Limit, 100)
-
-	objects, err := DisplayNameCacheRegexSearch(ctx, nk, query, limit)
+	matches, err := DisplayNameCacheRegexSearch(ctx, nk, request.DisplayNamePattern, limit)
 	if err != nil {
 		return "", runtime.NewError(err.Error(), StatusInternalError)
 	}
 
-	matches := make([]DisplayNameMatchItem, 0, len(objects))
-	for matchUserID, history := range objects {
+	results := make([]DisplayNameMatchItem, 0, len(matches))
+	for matchUserID, byGroup := range matches {
 
-		for groupID, entries := range history.Histories {
-			latest := history.Latest(groupID)
+		for groupID, entries := range byGroup {
 			for n, t := range entries {
 				displayNameL := strings.ToLower(n)
 				if strings.Contains(displayNameL, request.DisplayNamePattern) {
-					matches = append(matches, DisplayNameMatchItem{
+					results = append(results, DisplayNameMatchItem{
 						DisplayName: n,
 						UserID:      matchUserID,
 						GroupID:     groupID,
 						UpdatedAt:   t,
-						IsCurrent:   n == latest,
 					})
 				}
 			}
 		}
 	}
 
-	response := &AccountSearchResponse{
-		DisplayNameMatchList: matches,
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].UpdatedAt.After(results[j].UpdatedAt)
+	})
+
+	if len(results) > limit {
+		// Sort by updated at
+
+		results = results[:limit]
 	}
 
-	responseData, err := json.Marshal(response)
+	responseData, err := json.Marshal(&AccountSearchResponse{
+		DisplayNameMatchList: results,
+	})
 	if err != nil {
 		return "", runtime.NewError("Failed to marshal response", StatusInternalError)
 	}

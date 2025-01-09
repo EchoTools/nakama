@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -378,10 +379,14 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		// This will be picked up by GetActiveGroupDisplayName and other functions
 		params.accountMetadata.sessionDisplayNameOverride = params.userDisplayNameOverride
 	}
+	params.displayNames, err = DisplayNameHistoryLoad(ctx, p.runtimeModule, session.userID.String())
+	if err != nil {
+		logger.Warn("Failed to load display name history", zap.Error(err))
+	}
+	params.displayNames.Update(params.accountMetadata.ActiveGroupID, params.accountMetadata.GetActiveGroupDisplayName(), params.account.User.Id, true)
 
-	if err := DisplayNameHistorySet(ctx, p.runtimeModule, session.userID.String(), params.accountMetadata.GetActiveGroupID().String(), params.accountMetadata.GetActiveGroupDisplayName(), false); err != nil {
-		metricsTags["error"] = "failed_set_display_name_history"
-		logger.Warn("Failed to set display name history", zap.Error(err))
+	if err := DisplayNameHistoryStore(ctx, p.runtimeModule, session.userID.String(), params.displayNames); err != nil {
+		logger.Warn("Failed to store display name history", zap.Error(err))
 	}
 
 	s := session

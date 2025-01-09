@@ -285,10 +285,10 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 			Region: region,
 			Mode:   mode,
 		}
+
 		lobbyCreateSortOptions(labels, labelLatencies, &params)
 	}
 
-	// Pick a random result
 	match := matches[0]
 	matchID := MatchIDFromStringOrNil(match.GetMatchId())
 	gid := uuid.FromStringOrNil(groupID)

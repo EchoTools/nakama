@@ -25,8 +25,6 @@ func MigrateSystem(ctx context.Context, logger runtime.Logger, db *sql.DB, nk ru
 		//&PruneSystemGroups{},
 		//&MigrationCombineStoredCosmeticLoadouts{},
 		//&MigrationLeaderboardPrune{},
-		//&MigrationLeaderboardPrune{},
-
 	}
 
 	for _, m := range migrations {
@@ -35,6 +33,48 @@ func MigrateSystem(ctx context.Context, logger runtime.Logger, db *sql.DB, nk ru
 		}
 	}
 
+	if err := MigrateAllUsers(ctx, logger, nk, db); err != nil {
+		logger.WithField("error", err).Error("Error migrating all users")
+	}
+
+}
+
+func MigrateAllUsers(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB) error {
+	query := `
+	SELECT
+		user_id
+	FROM
+		storage
+	WHERE
+		collection = 'DisplayNames'
+		AND key = 'history'
+	ORDER BY
+		update_time DESC
+	`
+
+	rows, err := db.Query(query)
+	if err != nil {
+		return fmt.Errorf("error fetching users: %w", err)
+	}
+
+	userIDs := make([]string, 0)
+	for rows.Next() {
+		var userID string
+		if err := rows.Scan(&userID); err != nil {
+			return fmt.Errorf("error scanning user id: %w", err)
+		}
+		userIDs = append(userIDs, userID)
+	}
+
+	for _, userID := range userIDs {
+		if err := MigrateUser(ctx, RuntimeLoggerToZapLogger(logger), nk, db, userID); err != nil {
+			return fmt.Errorf("error migrating user data: %w", err)
+		}
+	}
+
+	logger.WithField("count", len(userIDs)).Info("Migrated all users")
+
+	return nil
 }
 
 func MigrateUser(ctx context.Context, zapLogger *zap.Logger, nk runtime.NakamaModule, db *sql.DB, userID string) error {
@@ -44,6 +84,7 @@ func MigrateUser(ctx context.Context, zapLogger *zap.Logger, nk runtime.NakamaMo
 		&MigrateUserLoginHistory{},
 		&MigrationUserVRMLEntitlementsToWallet{},
 		&MigrateUserGameProfile{},
+		&MigrateDisplayNameHistory{},
 	}
 	startTime := time.Now()
 
@@ -58,7 +99,7 @@ func MigrateUser(ctx context.Context, zapLogger *zap.Logger, nk runtime.NakamaMo
 				"migration": fmt.Sprintf("%T", m),
 			}
 			nk.MetricsCounterAdd("migration_error_count", metricsTags, 1)
-			logger.Error("Error migrating user data")
+			logger.WithField("error", err).Error("Error migrating user data")
 		}
 	}
 

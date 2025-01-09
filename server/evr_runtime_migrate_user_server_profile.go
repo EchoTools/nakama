@@ -90,7 +90,7 @@ func (m *MigrateUserGameProfile) MigrateUser(ctx context.Context, logger runtime
 	}
 
 	// Save the account
-	if err := nk.AccountUpdateId(ctx, userID, "", account.AccountMetadata.MarshalMap(), "", "", "", "", ""); err != nil {
+	if err := nk.AccountUpdateId(ctx, userID, "", account.AccountMetadata.MarshalMap(), account.AccountMetadata.GetActiveGroupDisplayName(), "", "", "", ""); err != nil {
 		logger.Error("Error updating account", zap.Error(err))
 		return fmt.Errorf("Error updating account: %v", err)
 	}

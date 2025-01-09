@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"strings"
 
 	"github.com/heroiclabs/nakama-common/runtime"
 )
@@ -29,6 +30,40 @@ func (m *MigrationUserVRMLEntitlementsToWallet) MigrateUser(ctx context.Context,
 	}
 
 	if _, _, err := nk.WalletUpdate(ctx, userID, changeset, nil, false); err != nil {
+		return err
+	}
+
+	// load the wallet as a regular object and delete the old VRML entitlements
+	account, err = nk.AccountGetId(ctx, userID)
+	if err != nil {
+		return err
+	}
+
+	wallet = make(map[string]int64, 0)
+	if err := json.Unmarshal([]byte(account.Wallet), &wallet); err != nil {
+		return err
+	}
+
+	for k := range wallet {
+		if strings.HasPrefix(k, "VRML ") {
+			delete(wallet, k)
+		}
+	}
+
+	data, err := json.Marshal(wallet)
+	if err != nil {
+		return err
+	}
+
+	query := `
+	UPDATE
+		users
+	SET
+		wallet = $1
+	WHERE
+		id = $2`
+
+	if _, err := db.Exec(query, string(data), userID); err != nil {
 		return err
 	}
 
