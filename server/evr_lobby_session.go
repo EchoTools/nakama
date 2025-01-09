@@ -101,19 +101,7 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 		p.metrics.CustomCounter("lobby_join_session", lobbyParams.MetricsTags(), 1)
 		logger.Info("Joining session", zap.String("mid", lobbyParams.CurrentMatchID.String()), zap.String("role", TeamIndex(lobbyParams.Role).String()))
 
-		label, err := MatchLabelByID(ctx, p.runtimeModule, lobbyParams.CurrentMatchID)
-		if err != nil {
-			return fmt.Errorf("failed to load match label: %w", err)
-		} else if label == nil {
-			logger.Warn("Match not found", zap.String("mid", matchID.UUID.String()))
-			return ErrMatchNotFound
-		}
-		lobbyParams.GroupID = label.GetGroupID()
-		lobbyParams.Mode = label.Mode
-		lobbyParams.Level = label.Level
-		lobbyParams.RequiredFeatures = label.RequiredFeatures
-
-		return p.lobbyJoin(ctx, logger, session, lobbyParams, label.ID)
+		return p.lobbyJoin(ctx, logger, session, lobbyParams, lobbyParams.CurrentMatchID)
 
 	case *evr.LobbyCreateSessionRequest:
 
@@ -129,7 +117,6 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 		logger.Info("Creating session", zap.String("mode", lobbyParams.Mode.String()), zap.String("level", lobbyParams.Level.String()), zap.String("region", lobbyParams.Region.String()))
 		matchID, err = p.lobbyCreate(ctx, logger, session, lobbyParams)
 		if err == nil {
-			lobbyParams.CurrentMatchID = matchID
 			return p.lobbyJoin(ctx, logger, session, lobbyParams, matchID)
 		} else {
 			return err

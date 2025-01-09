@@ -120,7 +120,7 @@ func EntrantPresenceFromLobbyParams(session Session, lobbyParams *LobbySessionPa
 		SessionID:         session.ID(),
 		LoginSessionID:    params.loginSession.ID(),
 		Username:          session.Username(),
-		DisplayName:       lobbyParams.DisplayName,
+		DisplayName:       params.accountMetadata.GetGroupDisplayNameOrDefault(lobbyParams.GroupID.String()),
 		EvrID:             params.xpID,
 		PartyID:           lobbyParams.PartyID,
 		RoleAlignment:     lobbyParams.Role,
