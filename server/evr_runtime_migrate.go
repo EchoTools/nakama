@@ -67,9 +67,11 @@ func MigrateAllUsers(ctx context.Context, logger runtime.Logger, nk runtime.Naka
 	}
 
 	for _, userID := range userIDs {
+		startTime := time.Now()
 		if err := MigrateUser(ctx, RuntimeLoggerToZapLogger(logger), nk, db, userID); err != nil {
 			return fmt.Errorf("error migrating user data: %w", err)
 		}
+		<-time.After(time.Since(startTime)) // Give the system time to recover
 	}
 
 	logger.WithField("count", len(userIDs)).Info("Migrated all users")
@@ -100,10 +102,14 @@ func MigrateUser(ctx context.Context, zapLogger *zap.Logger, nk runtime.NakamaMo
 			}
 			nk.MetricsCounterAdd("migration_error_count", metricsTags, 1)
 			logger.WithField("error", err).Error("Error migrating user data")
+
 		}
 	}
 
 	nk.MetricsTimerRecord("migration_latency", nil, time.Since(startTime))
-
+	logger.WithFields(map[string]interface{}{
+		"uid":      userID,
+		"duration": time.Since(startTime),
+	}).Info("Migrated user")
 	return nil
 }
