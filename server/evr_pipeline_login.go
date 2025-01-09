@@ -321,6 +321,15 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		return fmt.Errorf("failed to get guild groups: %w", err)
 	}
 
+	if len(params.guildGroups) == 0 {
+		// User is not in any groups
+		metricsTags["error"] = "user_not_in_any_groups"
+		guildID := p.discordCache.GroupIDToGuildID(params.accountMetadata.ActiveGroupID)
+		p.discordCache.QueueSyncMember(guildID, params.account.CustomId)
+
+		return fmt.Errorf("user is not in any groups. try again in 30 seconds.")
+	}
+
 	if _, ok := params.guildGroups[params.accountMetadata.ActiveGroupID]; !ok {
 		// User is not in the active group
 		logger.Warn("User is not in the active group", zap.String("uid", params.account.User.Id), zap.String("gid", params.accountMetadata.ActiveGroupID))
@@ -328,16 +337,12 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	}
 
 	// If the user is not in a group, set the active group to the group with the most members
-	if params.accountMetadata.ActiveGroupID == uuid.Nil.String() {
+	if params.accountMetadata.ActiveGroupID == "" || params.accountMetadata.ActiveGroupID == uuid.Nil.String() {
+		// Active group is not set.
 
 		groupIDs := make([]string, 0, len(params.guildGroups))
 		for id := range params.guildGroups {
 			groupIDs = append(groupIDs, id)
-		}
-
-		if len(groupIDs) == 0 {
-			metricsTags["error"] = "user_not_in_group"
-			return fmt.Errorf("user is not in any groups")
 		}
 
 		// Sort the groups by the edgecount
