@@ -198,7 +198,7 @@ func RegisterIndexes(initializer runtime.Initializer) error {
 		DisplayNameHistoryCacheIndex,
 		DisplayNameCollection,
 		DisplayNameHistoryKey,
-		[]string{"active", "reserved", "history"},
+		[]string{"active", "cache"},
 		nil,
 		1000000,
 		false,

@@ -251,7 +251,7 @@ func (c *DiscordCache) syncMember(ctx context.Context, logger *zap.Logger, disco
 		return fmt.Errorf("guild group not found")
 	}
 
-	member, _, err := c.GuildMember(guildID, discordID)
+	member, err := c.GuildMember(guildID, discordID)
 	if err == ErrMemberNotFound {
 		// Remove the user from the guild group.
 		if err := c.GuildGroupMemberRemove(ctx, guildID, discordID, ""); err != nil {
@@ -337,11 +337,13 @@ func (c *DiscordCache) syncMember(ctx context.Context, logger *zap.Logger, disco
 		}
 	}
 
-	// Ensure the display name history exists.
-	// It only checks for existing use when the member changes their nick.
-	isInactive := evrAccount.IsDisabled() || !evrAccount.IsLinked()
-	if err := DisplayNameHistorySet(ctx, c.nk, account.User.Id, groupID, evrAccount.GetDisplayName(groupID), isInactive); err != nil {
-		logger.Warn("Failed to set display name history", zap.Error(err))
+	displayName, err := c.checkDisplayName(ctx, c.nk, evrAccount.ID(), member.DisplayName())
+	if err == nil {
+		// Ensure the display name history exists.
+		isActive := evrAccount.IsLinked() && !evrAccount.IsDisabled()
+		if err := DisplayNameHistoryUpdate(ctx, c.nk, account.User.Id, groupID, displayName, account.User.Username, isActive); err != nil {
+			logger.Warn("Failed to set display name history", zap.Error(err))
+		}
 	}
 
 	return nil
@@ -371,7 +373,7 @@ func (c DiscordCache) memberUpdateDisplayName(ctx context.Context, member *disco
 		displayName = sanitizeDisplayName(member.User.Username)
 	}
 
-	isInactive := evrAccount.IsDisabled() || !evrAccount.IsLinked()
+	isActive := evrAccount.IsLinked() && !evrAccount.IsDisabled()
 
 	groupID := c.GuildIDToGroupID(member.GuildID)
 	if groupID == "" {
@@ -383,7 +385,7 @@ func (c DiscordCache) memberUpdateDisplayName(ctx context.Context, member *disco
 	if prevDisplayName != displayName {
 		logger := c.logger.With(zap.String("display_name", displayName), zap.String("prev_display_name", prevDisplayName))
 		displayName, err := c.checkDisplayName(ctx, c.nk, evrAccount.ID(), displayName)
-		if !isInactive && err != nil {
+		if isActive && err != nil {
 			switch e := err.(type) {
 			case DisplayNameInUseError:
 				logger.Warn("Display name in use", zap.Error(e))
@@ -407,7 +409,7 @@ func (c DiscordCache) memberUpdateDisplayName(ctx context.Context, member *disco
 			}
 		} else {
 
-			if err := DisplayNameHistorySet(ctx, c.nk, evrAccount.ID(), groupID, displayName, isInactive); err != nil {
+			if err := DisplayNameHistoryUpdate(ctx, c.nk, evrAccount.ID(), groupID, displayName, account.User.Username, isActive); err != nil {
 				return fmt.Errorf("error adding display name history entry: %w", err)
 			}
 
@@ -423,18 +425,19 @@ func (c DiscordCache) memberUpdateDisplayName(ctx context.Context, member *disco
 }
 
 // Loads/Adds a user to the cache.
-func (c *DiscordCache) GuildMember(guildID, discordID string) (member *discordgo.Member, found bool, err error) {
+func (c *DiscordCache) GuildMember(guildID, discordID string) (member *discordgo.Member, err error) {
 	// Check the cache first.
-	if member, err = c.dg.State.Member(guildID, discordID); err == nil {
-		return member, true, nil
+	if member, err = c.dg.State.Member(guildID, discordID); err == nil && member != nil {
+		return member, nil
 	} else if member, err = c.dg.GuildMember(guildID, discordID); err != nil {
 		if restError, _ := err.(*discordgo.RESTError); errors.As(err, &restError) && restError.Message != nil && restError.Message.Code == discordgo.ErrCodeUnknownMember {
-			return nil, false, ErrMemberNotFound
+			return nil, ErrMemberNotFound
 		}
-		return nil, false, fmt.Errorf("error getting guild member: %w", err)
+		return nil, fmt.Errorf("error getting guild member: %w", err)
 	}
+
 	c.dg.State.MemberAdd(member)
-	return member, false, nil
+	return member, nil
 }
 
 func (d *DiscordCache) updateGuild(ctx context.Context, logger *zap.Logger, guild *discordgo.Guild) error {
@@ -599,8 +602,10 @@ func (d *DiscordCache) handleMemberUpdate(logger *zap.Logger, s *discordgo.Sessi
 		return nil
 	}
 
-	if e.BeforeUpdate != nil && e.Member.Nick != e.BeforeUpdate.Nick {
-		d.memberUpdateDisplayName(ctx, e.Member)
+	if e.BeforeUpdate != nil && e.Member.DisplayName() != e.BeforeUpdate.DisplayName() {
+		if err := d.memberUpdateDisplayName(ctx, e.Member); err != nil {
+			logger.Warn("Error updating display name", zap.Error(err))
+		}
 	}
 
 	d.QueueSyncMember(e.GuildID, e.Member.User.ID)
@@ -732,15 +737,18 @@ func (d *DiscordCache) checkDisplayName(ctx context.Context, nk runtime.NakamaMo
 		return "", fmt.Errorf("error getting display name history: %w", err)
 	}
 
-	if len(userIDs) == 1 && userIDs[0] == userID {
+	switch len(userIDs) {
+	case 0:
 		return displayName, nil
-	}
-
-	if len(userIDs) > 0 {
+	case 1:
+		if userIDs[0] == userID {
+			return displayName, nil
+		}
+		return "", DisplayNameInUseError{DisplayName: displayName, UserIDs: userIDs}
+	default:
+		d.logger.Warn("Multiple users found with the same display name", zap.String("display_name", displayName), zap.Strings("user_ids", userIDs))
 		return "", DisplayNameInUseError{DisplayName: displayName, UserIDs: userIDs}
 	}
-
-	return displayName, nil
 }
 
 func (d *DiscordCache) CheckUser2FA(ctx context.Context, userID uuid.UUID) (bool, error) {

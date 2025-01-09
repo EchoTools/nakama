@@ -20,6 +20,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/gofrs/uuid/v5"
 	"github.com/google/go-cmp/cmp"
+	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/samber/lo"
@@ -1912,10 +1913,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			isSelf := caller.ID == target.ID
 
 			isGuildModerator := false
-			for _, g := range callerGuildGroups {
-				if g.GuildID == i.GuildID {
-					isGuildModerator = g.PermissionsUser(callerUserID).IsModerator
-				}
+			if gg, ok := callerGuildGroups[groupID]; ok {
+				isGuildModerator = gg.PermissionsUser(callerUserID).IsModerator
 			}
 
 			// Get the caller's nakama user ID
@@ -1926,6 +1925,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			d.cache.Purge(target.ID)
+			if isGlobalModerator {
+				d.cache.QueueSyncMember(i.GuildID, target.ID)
+			}
 
 			return d.handleProfileRequest(ctx, logger, nk, s, i, target.ID, target.Username, isGuildModerator || isGlobalModerator, isSelf || isGlobalModerator, isGlobalModerator)
 		},
@@ -1941,105 +1943,152 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return errors.New("no options provided")
 			}
 
-			partial := options[0].StringValue()
-
-			partial = sanitizeDisplayName(strings.ToLower(partial))
-
-			pattern := fmt.Sprintf(".*%s.*", Query.Escape(partial))
-
-			if len(partial) <= 3 {
-				// exact match only
-				pattern = partial
+			pattern := options[0].StringValue()
+			if pattern == "" {
+				return errors.New("invalid pattern")
 			}
 
-			histories, err := DisplayNameCacheRegexSearch(ctx, nk, pattern, 10)
+			matches, err := DisplayNameCacheRegexSearch(ctx, nk, pattern, 5)
 			if err != nil {
-				logger.Error("Failed to search display name history", zap.Error(err))
+				logger.WithField("error", err).Error("Failed to search display name history")
 				return fmt.Errorf("failed to search display name history: %w", err)
 			}
 
-			if len(histories) == 0 {
+			if len(matches) == 0 {
 				return simpleInteractionResponse(s, i, "No results found")
 			}
 
-			exactOnly := false
-			/*
-				if len(histories) > 10 {
+			type result struct {
+				account *api.Account
+				updated time.Time
+				matches map[string]time.Time
+			}
 
-					// limit to exact hits
-					exactOnly = true
-				}
-			*/
+			results := make([]result, 0, len(matches))
 
-			resultsByUserID := make(map[string]map[string]time.Time)
+			for userID, byGroup := range matches {
 
-			for userID, journal := range histories {
-
-				// Only search this guild
-				history, ok := journal.Histories[groupID]
-				if !ok {
+				account, err := nk.AccountGetId(ctx, userID)
+				if err != nil {
+					logger.WithFields(map[string]interface{}{}).Warn("Failed to get account")
 					continue
 				}
 
-				for d, e := range history {
-
-					if exactOnly && strings.ToLower(d) != partial {
-						continue
-					}
-
-					if !strings.Contains(strings.ToLower(d), partial) {
-						continue
-					}
-
-					if _, ok := resultsByUserID[userID]; !ok {
-						resultsByUserID[userID] = make(map[string]time.Time)
-					}
-
-					resultsByUserID[userID][d] = e
+				result := result{
+					account: account,
+					matches: make(map[string]time.Time, len(byGroup)),
 				}
-			}
 
-			if len(resultsByUserID) == 0 {
-				return simpleInteractionResponse(s, i, "No results found")
-			}
+				for _, names := range byGroup {
+					for dn, ts := range names {
 
-			// Create the embed
-			embed := &discordgo.MessageEmbed{
-				Title:  "Search Results for `" + partial + "`",
-				Color:  0x9656ce,
-				Fields: make([]*discordgo.MessageEmbedField, 0, len(resultsByUserID)),
-			}
+						if ts.After(result.matches[dn]) {
+							result.matches[dn] = ts
 
-			for userID, results := range resultsByUserID {
+							if ts.After(result.updated) {
+								result.updated = ts
+							}
+						}
+					}
+				}
 
-				// Get the discord ID
-				discordID := d.cache.UserIDToDiscordID(userID)
-				if discordID == "" {
-					logger.Warn("Failed to get discord ID", zap.Error(err))
+				if len(result.matches) == 0 {
 					continue
 				}
 
-				embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-					Name:   "Player",
-					Value:  fmt.Sprintf("<@%s>", discordID),
+				results = append(results, result)
+			}
+
+			// Sort the results by last updated
+			sort.Slice(results, func(i, j int) bool {
+				return results[i].updated.Before(results[j].updated)
+			})
+
+			// Create the embeds
+			embeds := make([]*discordgo.MessageEmbed, 0, len(matches))
+
+			for _, r := range results {
+
+				if r.account.User.AvatarUrl != "" && !strings.HasPrefix(r.account.User.AvatarUrl, "https://") {
+					r.account.User.AvatarUrl = discordgo.EndpointUserAvatar(r.account.CustomId, r.account.User.AvatarUrl)
+				}
+				// Discord-ish green
+				color := 0x43b581
+				footer := ""
+				if r.account.DisableTime != nil {
+					// Discord-ish red
+					color = 0xf04747
+					footer = "Account disabled"
+				} else if len(r.account.Devices) == 0 {
+					// Discord-ish grey
+					color = 0x747f8d
+					footer = "Account is inactive (no linked devices)"
+				}
+
+				embed := &discordgo.MessageEmbed{
+					Author: &discordgo.MessageEmbedAuthor{
+						IconURL: r.account.User.AvatarUrl,
+						Name:    r.account.User.DisplayName,
+					},
+					Description: fmt.Sprintf("<@%s>", r.account.CustomId),
+					Color:       color,
+					Fields:      make([]*discordgo.MessageEmbedField, 0, 2),
+					Footer: &discordgo.MessageEmbedFooter{
+						Text: footer,
+					},
+				}
+
+				embeds = append(embeds, embed)
+
+				names := &discordgo.MessageEmbedField{
+					Name:   "In-Game Name     ",
 					Inline: true,
-				})
-
-				displayNames := make([]string, 0, len(results))
-				for n, t := range results {
-					displayNames = append(displayNames, fmt.Sprintf("%s <t:%d:R>", EscapeDiscordMarkdown(n), t.UTC().Unix()))
 				}
 
-				// Sort the display names by time
+				lastActive := &discordgo.MessageEmbedField{
+					Name:   "Last Active",
+					Inline: true,
+				}
+
+				embed.Fields = append(embed.Fields,
+					names,
+					lastActive,
+				)
+
+				type item struct {
+					displayName string
+					lastActive  time.Time
+				}
+
+				displayNames := make([]item, 0, len(r.matches))
+				reserved := make([]string, 0, 1)
+				for dn, ts := range r.matches {
+					if ts.IsZero() {
+						reserved = append(reserved, dn)
+					} else {
+						displayNames = append(displayNames, item{dn, ts})
+					}
+				}
+
 				sort.Slice(displayNames, func(i, j int) bool {
-					return results[displayNames[i]].After(results[displayNames[j]])
+					return displayNames[i].lastActive.Before(displayNames[j].lastActive)
 				})
 
-				embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-					Name:   "In-Game Names",
-					Value:  strings.Join(displayNames, "\n"),
-					Inline: false,
-				})
+				if len(displayNames) > 5 {
+					displayNames = displayNames[:5]
+				}
+				for _, n := range displayNames {
+					names.Value += fmt.Sprintf("%s\n", EscapeDiscordMarkdown(n.displayName))
+					lastActive.Value += fmt.Sprintf("<t:%d:R>\n", n.lastActive.UTC().Unix())
+				}
+				for _, n := range reserved {
+					names.Value += fmt.Sprintf("%s\n", EscapeDiscordMarkdown(n))
+					lastActive.Value += "*reserved*\n"
+				}
+			}
+
+			if len(embeds) == 0 {
+				return simpleInteractionResponse(s, i, "No results found")
 			}
 
 			// Send the response
@@ -2047,7 +2096,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
 					Flags:  discordgo.MessageFlagsEphemeral,
-					Embeds: []*discordgo.MessageEmbed{embed},
+					Embeds: embeds,
 				},
 			})
 		},
@@ -2056,7 +2105,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			if member == nil {
 				return simpleInteractionResponse(s, i, "this command must be used from a guild")
-
 			}
 
 			if len(options) == 0 {

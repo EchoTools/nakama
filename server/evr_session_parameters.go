@@ -42,6 +42,7 @@ type SessionParameters struct {
 
 	account              *api.Account                       // The account
 	accountMetadata      *AccountMetadata                   // The account metadata
+	displayNames         *DisplayNameHistory                // The display name history
 	profile              *atomic.Pointer[evr.ServerProfile] // The server profile
 	guildGroups          map[string]*GuildGroup             // map[string]*GuildGroup
 	isEarlyQuitter       *atomic.Bool                       // The user is an early quitter
@@ -69,7 +70,7 @@ func (s *SessionParameters) IsPCVR() bool {
 	if s.loginPayload == nil {
 		return false
 	}
-	return s.loginPayload.BuildNumber != evr.StandaloneBuild
+	return s.loginPayload.BuildNumber != evr.StandaloneBuildNumber
 }
 
 func (s *SessionParameters) BuildNumber() evr.BuildNumber {
