@@ -22,8 +22,6 @@ func MigrateSystem(ctx context.Context, logger runtime.Logger, db *sql.DB, nk ru
 	// Combine the loadouts into one storage object
 
 	migrations := []SystemMigrator{
-		//&PruneSystemGroups{},
-		//&MigrationCombineStoredCosmeticLoadouts{},
 		//&MigrationLeaderboardPrune{},
 	}
 
