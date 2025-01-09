@@ -148,7 +148,7 @@ func (p *EvrPipeline) authenticateSession(ctx context.Context, logger *zap.Logge
 				return fmt.Errorf("error creating link ticket: %s", err)
 			} else {
 
-				return fmt.Errorf("\nEnter this code:\n  \n>>> %s <<<\nusing '/link-headset %s' in the Echo VR Lounge Discord.", linkTicket.Code, linkTicket.Code)
+				return fmt.Errorf("\nEnter this code:\n  \n>>> %s <<<\nusing '/link-headset %s' on the @%s bot.", linkTicket.Code, linkTicket.Code, p.appBot.dg.State.User.Username)
 			}
 		}
 

@@ -1461,15 +1461,16 @@ func AccountSearchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	for matchUserID, history := range objects {
 
 		for groupID, entries := range history.Histories {
-			for i, e := range entries {
-				displayNameL := strings.ToLower(e.DisplayName)
+			latest := history.Latest(groupID)
+			for n, t := range entries {
+				displayNameL := strings.ToLower(n)
 				if strings.Contains(displayNameL, request.DisplayNamePattern) {
 					matches = append(matches, DisplayNameMatchItem{
-						DisplayName: e.DisplayName,
+						DisplayName: n,
 						UserID:      matchUserID,
 						GroupID:     groupID,
-						UpdatedAt:   e.UpdateTime,
-						IsCurrent:   i == len(entries)-1,
+						UpdatedAt:   t,
+						IsCurrent:   n == latest,
 					})
 				}
 			}
