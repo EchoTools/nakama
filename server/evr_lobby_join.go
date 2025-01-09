@@ -32,15 +32,18 @@ func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session
 		return ErrMatchNotFound
 	}
 
+	lobbyParams.GroupID = label.GetGroupID()
+	lobbyParams.Mode = label.Mode
+
 	groupID := label.GetGroupID().String()
 
 	// Do authorization checks related to the lobby's guild.
-	if err := p.lobbyAuthorize(ctx, logger, session, lobbyParams, groupID); err != nil {
+	if err := p.lobbyAuthorize(ctx, logger, session, lobbyParams); err != nil {
 		return err
 	}
 
 	// If the is a non-default group, then generate a profile specifically for it.
-	if params.accountMetadata.GetActiveGroupID() != lobbyParams.GroupID {
+	if params.accountMetadata.GetActiveGroupID() != label.GetGroupID() {
 		// Generate a profile for this group
 		profile, err := NewUserServerProfile(ctx, p.db, params.account, params.xpID, groupID)
 		if err != nil {
@@ -61,10 +64,13 @@ func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session
 
 	switch label.Mode {
 	case evr.ModeSocialPublic, evr.ModeSocialPrivate:
+
+		if !slices.Contains([]int{evr.TeamUnassigned, evr.TeamModerator, evr.TeamSocial}, lobbyParams.Role) {
+			return fmt.Errorf("invalid role for social lobby: %d", lobbyParams.Role)
+		}
+
 		if lobbyParams.Role == evr.TeamUnassigned {
 			lobbyParams.Role = evr.TeamSocial
-		} else if slices.Contains([]int{evr.TeamModerator, evr.TeamSocial}, lobbyParams.Role) {
-			return fmt.Errorf("invalid role for social lobby: %d", lobbyParams.Role)
 		}
 	}
 

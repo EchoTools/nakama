@@ -197,7 +197,8 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 	return nil
 }
 
-func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, session Session, lobbyParams *LobbySessionParameters, mode evr.Symbol, groupID string) error {
+func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, session Session, lobbyParams *LobbySessionParameters) error {
+	groupID := lobbyParams.GroupID.String()
 	metricsTags := map[string]string{
 		"group_id": groupID,
 	}
@@ -251,7 +252,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 
 	if groupMetadata.IsLimitedAccess(userID) {
 
-		switch mode {
+		switch lobbyParams.Mode {
 		case evr.ModeArenaPublic, evr.ModeCombatPublic, evr.ModeSocialPublic:
 			metricsTags["error"] = "limited_access_user"
 			if sendAuditMessage {
