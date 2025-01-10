@@ -84,11 +84,16 @@ func (h *DisplayNameHistory) compile() {
 
 	// Add the reserved names to the cache
 	for name := range h.Reserved {
+		if name == "" {
+			continue
+		}
 		active[strings.ToLower(name)] = struct{}{}
 	}
 
-	// Add the username to the active list
-	active[strings.ToLower(h.Username)] = struct{}{}
+	if h.Username != "" {
+		// Add the username to the active list
+		active[strings.ToLower(h.Username)] = struct{}{}
+	}
 
 	// Add the active names to the cache
 	for name := range active {
@@ -106,6 +111,7 @@ func (h *DisplayNameHistory) compile() {
 		for name := range *cache {
 			*list = append(*list, name)
 		}
+		sort.Strings(*list)
 	}
 }
 
@@ -223,7 +229,6 @@ func DisplayNameHistoryUpdate(ctx context.Context, nk runtime.NakamaModule, user
 		return fmt.Errorf("error getting display name history: %w", err)
 	}
 
-	// If it's inactive, the active list will be cleared.
 	history.Update(groupID, displayName, username, true)
 
 	if err := DisplayNameHistoryStore(ctx, nk, userID, history); err != nil {
