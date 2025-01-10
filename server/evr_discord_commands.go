@@ -1108,20 +1108,25 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			if user == nil {
 				return nil
 			}
-			tags := map[string]string{
-				"new_account": "false",
-			}
+
 			// Validate the link code as a 4 character string
 			if len(linkCode) != 4 {
 				return errors.New("invalid link code: link code must be (4) letters long (i.e. ABCD)")
 			}
 
 			if err := func() error {
-				tags["new_account"] = "false"
+
 				// Exchange the link code for a device auth.
 				ticket, err := ExchangeLinkCode(ctx, nk, logger, linkCode)
 				if err != nil {
 					return fmt.Errorf("failed to exchange link code: %w", err)
+				}
+
+				tags := map[string]string{
+					"group_id":     groupID,
+					"headset_type": ticket.LoginProfile.SystemInfo.HeadsetType,
+					"is_pcvr":      fmt.Sprintf("%t", ticket.LoginProfile.BuildNumber != evr.StandaloneBuildNumber),
+					"new_account":  "false",
 				}
 
 				// Authenticate/create an account.
@@ -1140,7 +1145,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				if err := nk.LinkDevice(ctx, userID, ticket.XPID.Token()); err != nil {
 					return fmt.Errorf("failed to link headset: %w", err)
 				}
-				d.metrics.CustomCounter("link_headset", map[string]string{"new_account": "true"}, 1)
+				d.metrics.CustomCounter("link_headset", tags, 1)
 				// Set the client IP as authorized in the LoginHistory
 				history, err := LoginHistoryLoad(ctx, nk, userID)
 				if err != nil {
