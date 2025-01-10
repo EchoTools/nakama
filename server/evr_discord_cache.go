@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"sort"
 	"sync/atomic"
 	"time"
 
@@ -337,77 +338,17 @@ func (c *DiscordCache) syncMember(ctx context.Context, logger *zap.Logger, disco
 		}
 	}
 
-	displayName, err := c.checkDisplayName(ctx, c.nk, evrAccount.ID(), member.DisplayName())
-	if err == nil {
-		// Ensure the display name history exists.
-		isActive := evrAccount.IsLinked() && !evrAccount.IsDisabled()
-		if err := DisplayNameHistoryUpdate(ctx, c.nk, account.User.Id, groupID, displayName, account.User.Username, isActive); err != nil {
-			logger.Warn("Failed to set display name history", zap.Error(err))
-		}
-	}
-
 	return nil
 }
 
-func (c DiscordCache) memberUpdateDisplayName(ctx context.Context, member *discordgo.Member, evrAccount *EVRAccount) error {
-
-	displayName := sanitizeDisplayName(member.DisplayName())
-	if displayName == "" {
-		displayName = sanitizeDisplayName(member.User.GlobalName)
+func InGameName(m *discordgo.Member) string {
+	if m.Nick != "" {
+		return sanitizeDisplayName(m.Nick)
 	}
-	if displayName == "" {
-		displayName = sanitizeDisplayName(member.User.Username)
+	if m.User.GlobalName != "" {
+		return sanitizeDisplayName(m.User.GlobalName)
 	}
-
-	isActive := evrAccount.IsLinked() && !evrAccount.IsDisabled()
-
-	groupID := c.GuildIDToGroupID(member.GuildID)
-	if groupID == "" {
-		return nil
-	}
-
-	prevDisplayName := evrAccount.GetDisplayName(groupID)
-
-	if prevDisplayName != displayName {
-		logger := c.logger.With(zap.String("display_name", displayName), zap.String("prev_display_name", prevDisplayName))
-		displayName, err := c.checkDisplayName(ctx, c.nk, evrAccount.ID(), displayName)
-		if isActive && err != nil {
-			switch e := err.(type) {
-			case DisplayNameInUseError:
-				logger.Warn("Display name in use", zap.Error(e))
-
-				evrAccount.SetGroupDisplayName(groupID, member.User.Username)
-
-				// send user a message telling them their display name is in use.
-				channel, err := c.dg.UserChannelCreate(member.User.ID)
-				if err != nil {
-					return fmt.Errorf("error creating user channel: %w", err)
-				}
-
-				otherDiscordID := c.UserIDToDiscordID(e.UserIDs[0])
-				message := fmt.Sprintf("The display name `%s` is already in use/reserved by <@%s>. Your in-game name will be your username: `%s`", EscapeDiscordMarkdown(e.DisplayName), otherDiscordID, EscapeDiscordMarkdown(member.User.Username))
-				if _, err := c.dg.ChannelMessageSend(channel.ID, message); err != nil {
-					return fmt.Errorf("error sending message: %w", err)
-				}
-
-			default:
-				logger.Warn("Error checking display name", zap.Error(err))
-			}
-		} else {
-
-			if err := DisplayNameHistoryUpdate(ctx, c.nk, evrAccount.ID(), groupID, displayName, evrAccount.User.Username, isActive); err != nil {
-				return fmt.Errorf("error adding display name history entry: %w", err)
-			}
-
-			evrAccount.SetGroupDisplayName(groupID, displayName)
-		}
-
-		if err := c.nk.AccountUpdateId(ctx, evrAccount.ID(), member.User.Username, evrAccount.MarshalMap(), evrAccount.GetActiveGroupDisplayName(), "", "", "", member.User.Avatar); err != nil {
-			return fmt.Errorf("failed to update account: %w", err)
-		}
-	}
-
-	return nil
+	return sanitizeDisplayName(m.User.Username)
 }
 
 // Loads/Adds a user to the cache.
@@ -590,10 +531,241 @@ func (d *DiscordCache) handleMemberUpdate(logger *zap.Logger, s *discordgo.Sessi
 		return nil
 	}
 
-	d.QueueSyncMember(e.GuildID, e.Member.User.ID)
+	// Ensure the user is in the guild group
+	account, err := d.nk.AccountGetId(ctx, d.DiscordIDToUserID(e.Member.User.ID))
+	if err != nil {
+		return fmt.Errorf("error getting account: %w", err)
+	}
+
+	evrAccount, err := NewEVRAccount(account)
+	if err != nil {
+		return fmt.Errorf("error building evr account: %w", err)
+	}
+
+	groups, err := GuildUserGroupsList(ctx, d.nk, d.DiscordIDToUserID(e.Member.User.ID))
+	if err != nil {
+		return fmt.Errorf("error getting user guild groups: %w", err)
+	}
+
+	group, ok := groups[groupID]
+	if !ok {
+		// Add the player to the group
+		if err := d.nk.GroupUsersAdd(ctx, SystemUserID, groupID, []string{evrAccount.ID()}); err != nil {
+			return fmt.Errorf("error joining group: %w", err)
+		}
+
+		// Get the group data again
+		groups, err = GuildUserGroupsList(ctx, d.nk, d.DiscordIDToUserID(e.Member.User.ID))
+		if err != nil {
+			return fmt.Errorf("error getting user guild groups: %w", err)
+		}
+
+		group, ok = groups[groupID]
+		if !ok {
+			return fmt.Errorf("guild group not found")
+		}
+	}
+
+	isActive := evrAccount.IsLinked() && !evrAccount.IsDisabled()
+
+	// If the guild has a linked role, update it.
+	if r := group.Roles.AccountLinked; r != "" {
+
+		if isActive {
+			if !slices.Contains(e.Member.Roles, r) {
+				// Assign the role
+				if err := d.dg.GuildMemberRoleAdd(e.GuildID, e.Member.User.ID, r); err != nil {
+					logger.Warn("Error adding headset-linked role to member", zap.String("role", r), zap.Error(err))
+				}
+			}
+		} else {
+			if slices.Contains(e.Member.Roles, r) {
+				// Remove the role
+				if err := d.dg.GuildMemberRoleRemove(e.GuildID, e.Member.User.ID, r); err != nil {
+					logger.Warn("Error removing headset-linked role from member", zap.String("role", r), zap.Error(err))
+				}
+			}
+		}
+	}
+
+	// Update the role cache
+	if updated := group.RolesCacheUpdate(evrAccount.ID(), e.Member.Roles); updated {
+		// save the group data
+		data, err := group.MarshalToMap()
+		if err != nil {
+			return fmt.Errorf("error marshalling group data: %w", err)
+		}
+
+		if err := d.nk.GroupUpdate(ctx, group.ID().String(), SystemUserID, "", "", "", "", "", false, data, 1000000); err != nil {
+			return fmt.Errorf("error updating group: %w", err)
+		}
+	}
+
+	// Update the display name
+	if displayName := InGameName(e.Member); displayName != evrAccount.GetDisplayName(groupID) {
+
+		if err := DisplayNameHistoryUpdate(ctx, d.nk, evrAccount.ID(), groupID, displayName, evrAccount.User.Username, isActive); err != nil {
+			return fmt.Errorf("error adding display name history entry: %w", err)
+		}
+
+		if ownerID, err := d.deconflictDisplayName(ctx, displayName); err != nil {
+			return fmt.Errorf("error deconflicting display name: %w", err)
+		} else if ownerID != "" && ownerID != evrAccount.ID() {
+
+			logger.Warn("Display name in use", zap.String("owner_id", ownerID), zap.String("display_name", displayName), zap.String("caller_user_id", evrAccount.ID()))
+
+			evrAccount.SetGroupDisplayName(groupID, e.Member.User.Username)
+
+			otherDiscordID := d.UserIDToDiscordID(ownerID)
+			message := fmt.Sprintf("The display name `%s` is already in use/reserved by <@%s>. Your in-game name will be your username: `%s`", EscapeDiscordMarkdown(displayName), otherDiscordID, EscapeDiscordMarkdown(e.Member.User.Username))
+			if _, err := SendUserMessage(ctx, d.dg, e.Member.User.ID, message); err != nil {
+				return fmt.Errorf("error sending message: %w", err)
+			}
+
+		} else {
+			// Update the display name
+			evrAccount.SetGroupDisplayName(groupID, displayName)
+		}
+	}
+
+	avatarURL := ""
+	// If this is there active group, update the account with this guild
+	if groupID == evrAccount.GetActiveGroupID().String() {
+		avatarURL = e.Member.AvatarURL("512")
+	}
+
+	if err := d.nk.AccountUpdateId(ctx, evrAccount.ID(), evrAccount.User.Username, evrAccount.MarshalMap(), evrAccount.GetActiveGroupDisplayName(), "", "", e.Member.User.Locale, avatarURL); err != nil {
+		return fmt.Errorf("failed to update account: %w", err)
+	}
+
 	logger.Info("Member Updated", zap.Any("member", e))
 
 	return nil
+}
+
+func (d *DiscordCache) deconflictDisplayName(ctx context.Context, displayName string) (string, error) {
+
+	userIDs, err := DisplayNameHistoryActiveList(ctx, d.nk, displayName)
+	if err != nil {
+		return "", fmt.Errorf("error getting display name history: %w", err)
+	}
+
+	switch len(userIDs) {
+	case 0:
+		return "", nil
+	case 1:
+		return userIDs[0], nil
+	default:
+	}
+
+	type user struct {
+		userID     string
+		metadata   *AccountMetadata
+		used       time.Time
+		isReserved bool
+		isUsername bool
+	}
+
+	users := make([]*user, 0, len(userIDs))
+
+	// Only include users that have used the name in game
+	for _, userID := range userIDs {
+
+		history, err := DisplayNameHistoryLoad(ctx, d.nk, userID)
+		if err != nil {
+			return "", fmt.Errorf("error getting display name history: %w", err)
+		}
+
+		md, err := AccountMetadataLoad(ctx, d.nk, userID)
+		if err != nil {
+			return "", fmt.Errorf("error getting account metadata: %w", err)
+		}
+
+		user := &user{
+			userID:   userID,
+			metadata: md,
+		}
+
+		users = append(users, user)
+
+		if _, ok := history.Reserved[displayName]; ok {
+			// this user has reserved the name, remove all other users
+			user.isReserved = true
+			continue
+		}
+
+		if md.Username() == displayName {
+			user.isUsername = true
+		}
+
+		usedInGame := false
+		for _, name := range md.GroupDisplayNames {
+			if name == displayName {
+				usedInGame = true
+			}
+		}
+
+		// They have not used it in game.
+		if !usedInGame {
+			continue
+		}
+
+		byGroup, found := history.GetAll(displayName)
+		if !found {
+			continue
+		}
+
+		for _, t := range byGroup {
+			if t.After(user.used) {
+				user.used = t
+			}
+		}
+	}
+
+	// sort by reserved, username, and then earliest use
+	sort.Slice(users, func(i, j int) bool {
+		a, b := users[i], users[j]
+
+		// Reserved users take priority
+		if a.isReserved && !b.isReserved {
+			return true
+		}
+		if !a.isReserved && b.isReserved {
+			return false
+		}
+
+		if a.isUsername && !b.isUsername {
+			return true
+		}
+		if !a.isUsername && b.isUsername {
+			return false
+		}
+
+		return a.used.After(b.used)
+	})
+
+	if len(users) == 0 {
+		return "", nil
+	}
+
+	if len(users) == 1 {
+		return users[0].metadata.ID(), nil
+	}
+
+	// Remove the display name from all but the owner
+	for _, u := range users[1:] {
+
+		for groupID, displayName := range u.metadata.GroupDisplayNames {
+			if displayName == displayName {
+				delete(u.metadata.GroupDisplayNames, groupID)
+			}
+		}
+		if err := d.nk.AccountUpdateId(ctx, u.userID, u.metadata.Username(), u.metadata.MarshalMap(), u.metadata.GetActiveGroupDisplayName(), "", "", "", ""); err != nil {
+			return "", fmt.Errorf("failed to update account: %w", err)
+		}
+	}
+
+	return users[0].metadata.ID(), nil
 }
 
 func (d *DiscordCache) GuildGroupMemberRemove(ctx context.Context, guildID, discordID string, callerDiscordID string) error {
@@ -701,38 +873,6 @@ func (e DisplayNameInUseError) Error() string {
 	return fmt.Sprintf("display name `%s` is already in use by %s", e.DisplayName, e.UserIDs)
 }
 
-func (d *DiscordCache) checkDisplayName(ctx context.Context, nk runtime.NakamaModule, userID string, displayName string) (string, error) {
-
-	// Filter usernames of other players
-	users, err := nk.UsersGetUsername(ctx, []string{displayName})
-	if err != nil {
-		return "", fmt.Errorf("error getting users by username: %w", err)
-	}
-	for _, u := range users {
-		if u.Id == userID {
-			continue
-		}
-		return "", DisplayNameInUseError{DisplayName: displayName, UserIDs: []string{u.Id}}
-	}
-	userIDs, err := DisplayNameHistoryActiveList(ctx, nk, displayName)
-	if err != nil {
-		return "", fmt.Errorf("error getting display name history: %w", err)
-	}
-
-	switch len(userIDs) {
-	case 0:
-		return displayName, nil
-	case 1:
-		if userIDs[0] == userID {
-			return displayName, nil
-		}
-		return "", DisplayNameInUseError{DisplayName: displayName, UserIDs: userIDs}
-	default:
-		d.logger.Warn("Multiple users found with the same display name", zap.String("display_name", displayName), zap.Strings("user_ids", userIDs))
-		return "", DisplayNameInUseError{DisplayName: displayName, UserIDs: userIDs}
-	}
-}
-
 func (d *DiscordCache) CheckUser2FA(ctx context.Context, userID uuid.UUID) (bool, error) {
 	discordID, err := GetDiscordIDByUserID(ctx, d.db, userID.String())
 	if err != nil {
@@ -776,4 +916,13 @@ func HasLoggedIntoEcho(ctx context.Context, nk runtime.NakamaModule, userID stri
 	}
 
 	return len(objs) > 0, nil
+}
+
+func SendUserMessage(ctx context.Context, dg *discordgo.Session, userID, message string) (*discordgo.Message, error) {
+	channel, err := dg.UserChannelCreate(userID)
+	if err != nil {
+		return nil, fmt.Errorf("error creating user channel: %w", err)
+	}
+
+	return dg.ChannelMessageSend(channel.ID, message)
 }
