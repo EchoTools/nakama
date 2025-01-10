@@ -29,7 +29,7 @@ func (m *MigrateUserLoginHistory) MigrateUser(ctx context.Context, logger runtim
 		},
 		{
 			Collection: "Devices",
-			Key:        "loginHistory",
+			Key:        "history",
 			UserID:     userID,
 		},
 	})
@@ -78,7 +78,7 @@ func (m *MigrateUserLoginHistory) MigrateUser(ctx context.Context, logger runtim
 		if err := nk.StorageDelete(ctx, []*runtime.StorageDelete{
 			{
 				Collection: "Devices",
-				Key:        "loginHistory",
+				Key:        "history",
 				UserID:     userID,
 			},
 		}); err != nil {

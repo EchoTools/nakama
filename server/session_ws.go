@@ -241,6 +241,8 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 
 					username = account.User.Username
 					userID = uuid.FromStringOrNil(userIDStr)
+					params.IsWebsocketAuthenticated = true
+					params.account = account
 				}
 			}
 		}

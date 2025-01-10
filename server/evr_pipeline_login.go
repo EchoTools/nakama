@@ -248,7 +248,7 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 	if authorized := loginHistory.IsAuthorizedIP(session.clientIP); !authorized {
 
 		// Automatically validate the IP if the session is authenticated.
-		if !session.userID.IsNil() {
+		if params.IsWebsocketAuthenticated {
 
 			if isNew := loginHistory.AuthorizeIP(session.clientIP); isNew {
 				if err := p.appBot.SendIPAuthorizationNotification(params.account.User.Id, session.clientIP); err != nil {
