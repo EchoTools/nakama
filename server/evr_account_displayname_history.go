@@ -115,6 +115,27 @@ func (h *DisplayNameHistory) compile() {
 	}
 }
 
+func (h *DisplayNameHistory) GetAll(displayName string) (map[string]time.Time, bool) {
+	if h.Histories == nil {
+		h.Histories = make(map[string]map[string]time.Time)
+	}
+
+	byGroup := make(map[string]time.Time)
+	for groupID, names := range h.Histories {
+		for name, lastUsed := range names {
+			if time.Since(lastUsed) > MaximumDisplayNameAge {
+				continue
+			}
+
+			if strings.ToLower(name) == displayName {
+				byGroup[groupID] = lastUsed
+			}
+		}
+	}
+
+	return byGroup, len(byGroup) > 0
+}
+
 func (h *DisplayNameHistory) Set(groupID, displayName string, lastUsed time.Time, username string) {
 	if h.Histories == nil {
 		h.Histories = make(map[string]map[string]time.Time)
