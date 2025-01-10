@@ -1383,6 +1383,10 @@ func PlayerStatisticsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 	modes := []evr.Symbol{
 		evr.ModeArenaPublic,
 		evr.ModeCombatPublic,
+		evr.ModeCombatPrivate,
+		evr.ModeArenaPrivate,
+		evr.ModeSocialPublic,
+		evr.ModeSocialPrivate,
 	}
 	resetSchedule := "alltime"
 	stats, err := LeaderboardsUserTabletStatisticsGet(ctx, db, userID, groupID, modes, resetSchedule)
