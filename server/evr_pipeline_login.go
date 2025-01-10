@@ -63,7 +63,20 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 				if err = p.initializeSession(ctx, logger, session, &params); err == nil {
 
 					StoreParams(ctx, &params)
+					tags := params.MetricsTags()
+					tags["cpu_model"] = strings.Trim(params.loginPayload.SystemInfo.CPUModel, " ")
+					tags["gpu_model"] = strings.Trim(params.loginPayload.SystemInfo.VideoCard, " ")
+					tags["network_type"] = params.loginPayload.SystemInfo.NetworkType
+					tags["total_memory"] = strconv.FormatInt(params.loginPayload.SystemInfo.MemoryTotal, 10)
+					tags["num_logical_cores"] = strconv.FormatInt(params.loginPayload.SystemInfo.NumLogicalCores, 10)
+					tags["num_physical_cores"] = strconv.FormatInt(params.loginPayload.SystemInfo.NumPhysicalCores, 10)
+					tags["driver_version"] = strings.Trim(params.loginPayload.SystemInfo.DriverVersion, " ")
+					tags["headset_type"] = params.loginPayload.SystemInfo.HeadsetType
+					tags["build_number"] = strconv.FormatInt(int64(params.loginPayload.BuildNumber), 10)
+					tags["app_id"] = strconv.FormatInt(int64(params.loginPayload.AppId), 10)
+					tags["publisher_lock"] = params.loginPayload.PublisherLock
 
+					p.metrics.CustomCounter("login_success", tags, 1)
 					p.metrics.CustomTimer("login_process_latency", params.MetricsTags(), time.Since(timer))
 
 					return session.SendEvr(

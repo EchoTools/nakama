@@ -490,6 +490,8 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 		return nil
 	}
 
+	node := ctx.Value(runtime.RUNTIME_CTX_NODE).(string)
+
 	for _, p := range presences {
 		logger.WithField("presence", p).Debug("Player leaving the match.")
 	}
@@ -546,25 +548,22 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 				"reason":   reason,
 			}
 
-			// If the presence still has the entrant stream, then this was from nakama, not the server. inform the server.
-			if userPresences, err := nk.StreamUserList(StreamModeEntrant, mp.EntrantID(state.ID).String(), "", mp.GetNodeId(), true, true); err != nil {
-				logger.Warn("Failed to list user streams: %v", err)
+			// The entrant stream presence is only present when the player has not disconnect from the server yet.
+			if userPresences, err := nk.StreamUserList(StreamModeEntrant, mp.EntrantID(state.ID).String(), "", node, false, true); err != nil {
+				logger.Error("Failed to list user streams: %v", err)
 
 			} else if len(userPresences) > 0 || p.GetReason() == runtime.PresenceReasonDisconnect {
 				tags["reject_sent"] = "true"
 
 				rejects = append(rejects, mp.EntrantID(state.ID))
 
-				nk.MetricsCounterAdd("match_entrant_kick_count", tags, 1)
-
-				logger.Info("Kicking player from game server.")
-
-				if err := nk.StreamUserLeave(StreamModeEntrant, mp.EntrantID(state.ID).String(), "", mp.GetNodeId(), mp.GetUserId(), mp.GetSessionId()); err != nil {
+				if err := nk.StreamUserLeave(StreamModeEntrant, mp.EntrantID(state.ID).String(), "", node, mp.GetUserId(), mp.GetSessionId()); err != nil {
 					logger.Warn("Failed to leave user stream: %v", err)
 				}
 
 			} else {
-				logger.Info("Player disconnected from game server.")
+				tags["reject_sent"] = "false"
+				logger.Info("Player disconnected from game server. Removing from handler.")
 			}
 
 			nk.MetricsCounterAdd("match_entrant_leave_count", tags, 1)
@@ -586,10 +585,15 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 	}
 
 	if len(rejects) > 0 {
-		code := evr.PlayerRejectionReasonKickedFromServer
+		code := evr.PlayerRejectionReasonDisconnected
 		msgs := []evr.Message{
 			evr.NewGameServerEntrantRejected(code, rejects...),
 		}
+		logger.WithFields(map[string]interface{}{
+			"rejects": rejects,
+			"code":    code,
+		}).Debug("Sending reject message to game server.")
+
 		if err := m.dispatchMessages(ctx, logger, dispatcher, msgs, []runtime.Presence{state.server}, nil); err != nil {
 			logger.Warn("Failed to dispatch message: %v", err)
 		}
