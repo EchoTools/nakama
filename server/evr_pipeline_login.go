@@ -403,7 +403,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	if err != nil {
 		logger.Warn("Failed to load display name history", zap.Error(err))
 	}
-	params.displayNames.Update(params.accountMetadata.ActiveGroupID, params.accountMetadata.GetActiveGroupDisplayName(), params.account.User.Id, true)
+	params.displayNames.Update(params.accountMetadata.ActiveGroupID, params.accountMetadata.GetActiveGroupDisplayName(), params.account.User.Username, true)
 
 	if err := DisplayNameHistoryStore(ctx, p.runtimeModule, session.userID.String(), params.displayNames); err != nil {
 		logger.Warn("Failed to store display name history", zap.Error(err))

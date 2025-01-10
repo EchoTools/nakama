@@ -349,21 +349,7 @@ func (c *DiscordCache) syncMember(ctx context.Context, logger *zap.Logger, disco
 	return nil
 }
 
-func (c DiscordCache) memberUpdateDisplayName(ctx context.Context, member *discordgo.Member) error {
-	userID := c.DiscordIDToUserID(member.User.ID)
-	if userID == "" {
-		return nil
-	}
-
-	account, err := c.nk.AccountGetId(ctx, userID)
-	if err != nil {
-		return fmt.Errorf("error getting account: %w", err)
-	}
-
-	evrAccount, err := NewEVRAccount(account)
-	if err != nil {
-		return fmt.Errorf("error building evr account: %w", err)
-	}
+func (c DiscordCache) memberUpdateDisplayName(ctx context.Context, member *discordgo.Member, evrAccount *EVRAccount) error {
 
 	displayName := sanitizeDisplayName(member.DisplayName())
 	if displayName == "" {
@@ -409,7 +395,7 @@ func (c DiscordCache) memberUpdateDisplayName(ctx context.Context, member *disco
 			}
 		} else {
 
-			if err := DisplayNameHistoryUpdate(ctx, c.nk, evrAccount.ID(), groupID, displayName, account.User.Username, isActive); err != nil {
+			if err := DisplayNameHistoryUpdate(ctx, c.nk, evrAccount.ID(), groupID, displayName, evrAccount.User.Username, isActive); err != nil {
 				return fmt.Errorf("error adding display name history entry: %w", err)
 			}
 
@@ -593,19 +579,15 @@ func (d *DiscordCache) handleMemberUpdate(logger *zap.Logger, s *discordgo.Sessi
 		return nil
 	}
 
+	// Ignore members who haven't logged into echo.
 	if ok, _ := HasLoggedIntoEcho(ctx, d.nk, userID); !ok {
 		return nil
 	}
 
+	// Ignore unknown guilds
 	groupID := d.GuildIDToGroupID(e.GuildID)
 	if groupID == "" {
 		return nil
-	}
-
-	if e.BeforeUpdate != nil && e.Member.DisplayName() != e.BeforeUpdate.DisplayName() {
-		if err := d.memberUpdateDisplayName(ctx, e.Member); err != nil {
-			logger.Warn("Error updating display name", zap.Error(err))
-		}
 	}
 
 	d.QueueSyncMember(e.GuildID, e.Member.User.ID)
