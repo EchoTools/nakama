@@ -301,11 +301,6 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 
 	loginHistory.Update(params.xpID, session.clientIP, params.loginPayload)
 
-	// If the session is authenticated, auto-validate teh
-
-	session.userID = uuid.FromStringOrNil(params.account.User.Id)
-	session.SetUsername(params.account.User.Username)
-
 	// Common error handling
 	if params.account.GetDisableTime() != nil {
 		// The account is banned. log the attempt.
