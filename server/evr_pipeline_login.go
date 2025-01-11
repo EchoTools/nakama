@@ -52,7 +52,7 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 	params.loginPayload = &request.Payload
 
 	if err = p.authenticateSession(ctx, logger, session, &params); err == nil {
-		if MigrateUser(ctx, logger, p.runtimeModule, p.db, session.userID.String()); err == nil {
+		if err = MigrateUser(ctx, logger, p.runtimeModule, p.db, session.userID.String()); err == nil {
 			account, err := p.runtimeModule.AccountGetId(ctx, session.userID.String())
 			if err != nil {
 				return fmt.Errorf("failed to get account: %w", err)
@@ -85,6 +85,14 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 
 					p.metrics.CustomCounter("login_success", tags, 1)
 					p.metrics.CustomTimer("login_process_latency", params.MetricsTags(), time.Since(timer))
+
+					p.runtimeModule.Event(ctx, &api.Event{
+						Name: EventUserLogin,
+						Properties: map[string]string{
+							"user_id": session.userID.String(),
+						},
+						External: true,
+					})
 
 					return session.SendEvr(
 						evr.NewLoginSuccess(session.id, request.XPID),
