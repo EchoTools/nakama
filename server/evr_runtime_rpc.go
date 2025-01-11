@@ -1322,30 +1322,35 @@ func (r *PlayerStatsRPCResponse) String() string {
 	return string(data)
 }
 
-func PlayerStatisticsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
-	request := &PlayerStatsRPCRequest{}
+func parseRequest(ctx context.Context, payload string, request any) error {
+
+	// Parse Payload
 	if payload != "" {
 		if err := json.Unmarshal([]byte(payload), request); err != nil {
-			return "", err
+			return err
+		}
+
+		// Parse Query Parameters
+	} else if params := ctx.Value(runtime.RUNTIME_CTX_QUERY_PARAMS).(map[string][]string); len(params) > 0 {
+		pmap := make(map[string]any)
+		for k, v := range params {
+			pmap[k] = v[0]
+		}
+
+		if data, err := json.Marshal(pmap); err != nil {
+			return fmt.Errorf("error marshalling query parameters: %w", err)
+		} else if err := json.Unmarshal(data, request); err != nil {
+			return fmt.Errorf("error unmarshalling query parameters: %w", err)
 		}
 	}
 
-	queryParameters := ctx.Value(runtime.RUNTIME_CTX_QUERY_PARAMS).(map[string][]string)
+	return nil
+}
 
-	if len(queryParameters) > 0 {
-		// extract the discordID from the query string
-		if discordID, ok := queryParameters["discord_id"]; ok {
-			request.DiscordID = discordID[0]
-		}
-		// extract the userID from the query string
-		if userID, ok := queryParameters["user_id"]; ok {
-			request.UserID = userID[0]
-		}
-
-		// extract the guildID from the query string
-		if guildID, ok := queryParameters["guild_id"]; ok {
-			request.GuildID = guildID[0]
-		}
+func PlayerStatisticsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	request := &PlayerStatsRPCRequest{}
+	if err := parseRequest(ctx, payload, request); err != nil {
+		return "", err
 	}
 
 	var userID string
