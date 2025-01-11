@@ -37,6 +37,7 @@ var (
 )
 
 type LoginHistoryEntry struct {
+	CreatedAt time.Time         `json:"create_time"`
 	UpdatedAt time.Time         `json:"update_time"`
 	XPID      evr.EvrId         `json:"xpi"`
 	ClientIP  string            `json:"client_ip"`
@@ -69,8 +70,8 @@ type LoginHistory struct {
 	AuthorizedIPs         map[string]time.Time               `json:"authorized_ips"`
 	PendingAuthorizations map[string]*LoginHistoryEntry      `json:"unverified_ips"`
 	SecondOrderAlternates []string                           `json:"second_order"`
-	AlternateMap          map[string][]*AlternateSearchMatch `json:"alternate_matches"` // map of alternate user IDs and what they have in common
-	NotifiedGroupIDs      map[string]time.Time               `json:"notified_groups"`   // list of groups that have been notified of this alternate login
+	AlternateMap          map[string][]*AlternateSearchMatch `json:"alternate_accounts"` // map of alternate user IDs and what they have in common
+	NotifiedGroupIDs      map[string]time.Time               `json:"notified_groups"`    // list of groups that have been notified of this alternate login
 	userID                string                             // user ID
 	version               string                             // storage record version
 }
@@ -93,12 +94,18 @@ func (h *LoginHistory) Update(xpid evr.EvrId, clientIP string, loginData *evr.Lo
 	if h.History == nil {
 		h.History = make(map[string]*LoginHistoryEntry)
 	}
+
 	e := &LoginHistoryEntry{
 		UpdatedAt: time.Now(),
 		XPID:      xpid,
 		ClientIP:  clientIP,
 		LoginData: loginData,
 	}
+
+	if h.History[e.Key()] != nil {
+		e.CreatedAt = h.History[e.Key()].CreatedAt
+	}
+
 	h.History[e.Key()] = e
 }
 
