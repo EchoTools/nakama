@@ -43,8 +43,8 @@ func (h *EventDispatch) eventFn(ctx context.Context, logger runtime.Logger, evt 
 	logger.WithField("event", evt).Debug("received event")
 
 	eventMap := map[string]func(context.Context, runtime.Logger, map[string]string) error{
-		EventLobbySessionAuthorized: h.eventSessionStart,
-		EventUserLogin:              h.eventSessionStart,
+		EventLobbySessionAuthorized: h.handleLobbyAuthorized,
+		EventUserLogin:              h.handleUserLogin,
 		EventAccountUpdated:         h.eventSessionEnd,
 		EventSessionStart:           h.eventSessionStart,
 	}
@@ -81,7 +81,7 @@ func (h *EventDispatch) eventSessionEnd(ctx context.Context, logger runtime.Logg
 	return nil
 }
 
-func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, cache *sync.Map, properties map[string]string) error {
+func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtime.Logger, properties map[string]string) error {
 	groupID := properties["group_id"]
 	userID := properties["user_id"]
 	sessionID := properties["session_id"]
@@ -91,25 +91,25 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 
 	key := groupID + ":*GroupMetadata"
 
-	if v, ok := cache.Load(key); ok {
+	if v, ok := h.cache.Load(key); ok {
 		md = v.(*GroupMetadata)
 	} else {
 		// Notify the group of the login, if it's an alternate
-		md, err = GetGuildGroupMetadata(ctx, db, groupID)
+		md, err = GetGuildGroupMetadata(ctx, h.db, groupID)
 		if err != nil {
 			return fmt.Errorf("failed to get guild group metadata: %w", err)
 		}
-		cache.Store(key, md)
+		h.cache.Store(key, md)
 
 		// Clear it after thirty seconds
 		go func() {
 			<-time.After(30 * time.Second)
-			cache.Delete(key)
+			h.cache.Delete(key)
 		}()
 	}
 	if md.LogAlternateAccounts {
 		// Get the users session
-		_nk := nk.(*RuntimeGoNakamaModule)
+		_nk := h.nk.(*RuntimeGoNakamaModule)
 
 		s := _nk.sessionRegistry.Get(uuid.FromStringOrNil(sessionID))
 		if s == nil {
@@ -121,14 +121,14 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 			return fmt.Errorf("failed to load params")
 		}
 
-		loginHistory, err := LoginHistoryLoad(ctx, nk, userID)
+		loginHistory, err := LoginHistoryLoad(ctx, h.nk, userID)
 		if err != nil {
 			logger.Error("error loading login history: %v", err)
 		}
 
 		if ok := loginHistory.NotifyGroup(groupID); ok {
 
-			altAccounts, err := nk.AccountsGetId(ctx, loginHistory.SecondOrderAlternates)
+			altAccounts, err := h.nk.AccountsGetId(ctx, loginHistory.SecondOrderAlternates)
 			if err != nil {
 				return fmt.Errorf("failed to get alternate accounts: %w", err)
 			}
@@ -150,7 +150,7 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 			content := fmt.Sprintf("<@%s> detected as a possible alternate of %s", params.DiscordID(), strings.Join(alts, ", "))
 			_, _ = s.(*sessionWS).evrPipeline.appBot.LogAuditMessage(ctx, groupID, content, false)
 
-			if err := loginHistory.Store(ctx, nk); err != nil {
+			if err := loginHistory.Store(ctx, h.nk); err != nil {
 				return fmt.Errorf("failed to store login history: %w", err)
 			}
 
@@ -159,17 +159,20 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 	return nil
 }
 
-func (h *EventDispatch) handleUserLogin(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, evt *api.Event) error {
-	userID := evt.Properties["user_id"]
+func (h *EventDispatch) handleUserLogin(ctx context.Context, logger runtime.Logger, properties map[string]string) error {
+	userID := properties["user_id"]
 
-	loginHistory, err := LoginHistoryLoad(ctx, nk, userID)
+	loginHistory, err := LoginHistoryLoad(ctx, h.nk, userID)
 	if err != nil {
-		logger.Error("error loading login history: %v", err)
+		return fmt.Errorf("failed to load login history: %w", err)
 	}
-	loginHistory.UpdateAlternates(ctx, nk)
+	if err := loginHistory.UpdateAlternates(ctx, h.nk); err != nil {
+		return fmt.Errorf("failed to update alternates: %w", err)
 
-	if err := loginHistory.Store(ctx, nk); err != nil {
-		logger.Error("failed to store login history: %v", err)
+	}
+
+	if err := loginHistory.Store(ctx, h.nk); err != nil {
+		return fmt.Errorf("failed to store login history: %w", err)
 	}
 
 	return nil
