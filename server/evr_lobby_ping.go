@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"math/rand"
 	"net"
 	"slices"
@@ -44,7 +45,7 @@ func (e *endpointCompact) Endpoint() evr.Endpoint {
 func PingGameServers(ctx context.Context, logger *zap.Logger, session Session, db *sql.DB, activeEndpoints []evr.Endpoint) error {
 	latencyHistory, err := LoadLatencyHistory(ctx, logger, db, session.UserID())
 	if err != nil {
-		return err
+		return fmt.Errorf("Error loading latency history: %v", err)
 	}
 
 	if len(activeEndpoints) == 0 {
@@ -74,7 +75,7 @@ func PingGameServers(ctx context.Context, logger *zap.Logger, session Session, d
 	}
 
 	if err := SendEVRMessages(session, false, evr.NewLobbyPingRequest(350, candidates)); err != nil {
-		return err
+		return fmt.Errorf("Error sending ping request: %v", err)
 	}
 
 	logger.Debug("Sent ping request", zap.Any("candidates", candidates))
