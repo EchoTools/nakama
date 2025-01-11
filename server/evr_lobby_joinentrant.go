@@ -215,8 +215,15 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 	}
 	var err error
 	var groupMetadata *GroupMetadata
+
+	isMember := false
+
 	if guildGroup, ok := params.guildGroups[groupID]; ok {
 		groupMetadata = &guildGroup.GroupMetadata
+
+		// If there is no member role, the user is considered a member if they are in the discord guild.
+		isMember = groupMetadata.Roles.Member == "" || groupMetadata.IsMember(userID)
+
 	} else {
 		groupMetadata, err = GetGuildGroupMetadata(ctx, p.db, groupID)
 		if err != nil {
@@ -227,7 +234,8 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 	sendAuditMessage := groupMetadata.AuditChannelID != ""
 
 	// User is not a member of the group.
-	if groupMetadata.MembersOnlyMatchmaking && !groupMetadata.IsMember(userID) {
+	if groupMetadata.MembersOnlyMatchmaking && !isMember {
+
 		metricsTags["error"] = "not_member"
 		if sendAuditMessage {
 			if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("Rejected non-member <@%s>", userID), true); err != nil {
