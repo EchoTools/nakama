@@ -1973,11 +1973,14 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			d.cache.Purge(target.ID)
-			if isGlobalModerator {
+			if isGuildModerator {
 				d.cache.QueueSyncMember(i.GuildID, target.ID)
 			}
+			includePrivate := isGuildModerator || isSelf
+			includePriviledged := includePrivate || isGlobalModerator
+			includeSystem := isGlobalModerator
 
-			return d.handleProfileRequest(ctx, logger, nk, s, i, target.ID, target.Username, isGuildModerator || isGlobalModerator, isSelf || isGlobalModerator, isGlobalModerator)
+			return d.handleProfileRequest(ctx, logger, nk, s, i, target.ID, target.Username, includePriviledged, includePrivate, includeSystem)
 		},
 		"search": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userIDStr string, groupID string) error {
 
