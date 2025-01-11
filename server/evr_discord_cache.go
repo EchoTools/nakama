@@ -319,6 +319,18 @@ func (c *DiscordCache) syncMember(ctx context.Context, logger *zap.Logger, disco
 
 	}
 
+	if updated := evrAccount.SetGroupDisplayName(groupID, InGameName(member)); updated {
+		// Update the display name
+		if displayName := InGameName(member); displayName != evrAccount.GetActiveGroupDisplayName() {
+			if err := DisplayNameHistoryUpdate(ctx, c.nk, evrAccount.ID(), groupID, displayName, evrAccount.User.Username, evrAccount.IsLinked() && !evrAccount.IsDisabled()); err != nil {
+				return fmt.Errorf("error adding display name history entry: %w", err)
+			}
+		}
+		if err := c.nk.AccountUpdateId(ctx, evrAccount.ID(), evrAccount.User.Username, evrAccount.MarshalMap(), evrAccount.GetActiveGroupDisplayName(), "", "", member.User.Locale, ""); err != nil {
+			return fmt.Errorf("failed to update account: %w", err)
+		}
+	}
+
 	// Update headset linked role
 	if r := group.Roles.AccountLinked; r != "" {
 		if len(evrAccount.Devices) == 0 {
