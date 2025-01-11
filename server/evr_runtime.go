@@ -391,14 +391,13 @@ func CheckSystemGroupMembership(ctx context.Context, db *sql.DB, userID, groupNa
 func CheckGroupMembershipByName(ctx context.Context, db *sql.DB, userID, groupName, groupType string) (bool, error) {
 	query := `
 SELECT ge.state FROM groups g, group_edge ge WHERE g.id = ge.destination_id AND g.lang_tag = $1 AND g.name = $2 
-AND ge.source_id = $3 AND ge.state >= 0 AND ge.state <= $4;
+AND ge.source_id = $3 AND ge.state >= 0 AND ge.state <= 2;
 `
 
 	params := make([]interface{}, 0, 4)
 	params = append(params, groupType)
 	params = append(params, groupName)
 	params = append(params, userID)
-	params = append(params, int32(api.UserGroupList_UserGroup_MEMBER))
 	rows, err := db.QueryContext(ctx, query, params...)
 	if err != nil {
 		if err == sql.ErrNoRows {
