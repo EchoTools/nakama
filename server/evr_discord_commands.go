@@ -373,6 +373,10 @@ var (
 			},
 		},
 		{
+			Name:        "throw-settings",
+			Description: "See your throw settings.",
+		},
+		{
 			Name:        "set-lobby",
 			Description: "Set your default lobby to this Discord server/guild.",
 		},
@@ -1791,6 +1795,45 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			return simpleInteractionResponse(s, i, fmt.Sprintf("Next match set to `%s`", matchID))
+		},
+		"throw-settings": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userIDStr string, groupID string) error {
+			metadata, err := AccountMetadataLoad(ctx, nk, userIDStr)
+			if err != nil {
+				return fmt.Errorf("failed to get account metadata: %w", err)
+			}
+
+			embed := &discordgo.MessageEmbed{
+				Title: "Game Settings",
+				Color: 5814783, // A hexadecimal color code
+				Fields: []*discordgo.MessageEmbedField{
+					{
+						Name:   "Grab Deadzone",
+						Value:  strconv.FormatFloat(metadata.GameSettings.Grabdeadzone, 'f', -1, 64),
+						Inline: true,
+					},
+					{
+						Name:   "Release Distance",
+						Value:  strconv.FormatFloat(metadata.GameSettings.Releasedistance, 'f', -1, 64),
+						Inline: true,
+					},
+					{
+						Name:   "Wrist Angle Offset",
+						Value:  strconv.FormatFloat(metadata.GameSettings.Wristangleoffset, 'f', -1, 64),
+						Inline: true,
+					},
+				},
+			}
+
+			if err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Flags:  discordgo.MessageFlagsEphemeral,
+					Embeds: []*discordgo.MessageEmbed{embed},
+				},
+			}); err != nil {
+				return fmt.Errorf("failed to send game settings message: %w", err)
+			}
+			return nil
 		},
 
 		"set-lobby": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userIDStr string, groupID string) error {
