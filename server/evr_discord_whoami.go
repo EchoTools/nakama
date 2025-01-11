@@ -142,15 +142,15 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	}
 	_ = displayNameHistory
 	pastDisplayNames := make(map[string]time.Time)
-	/*
 
+	/*
 		for groupID, items := range displayNameHistory.Histories {
 			if !includePriviledged && groupID != i.GuildID {
 				continue
 			}
-			for _, item := range items {
-				if e, ok := pastDisplayNames[item.DisplayName]; !ok || e.After(item.UpdateTime) {
-					pastDisplayNames[item.DisplayName] = item.UpdateTime
+			for dn, ts := range items {
+				if e, ok := pastDisplayNames[dn]; !ok || e.After(ts) {
+					pastDisplayNames[dn] = ts
 				}
 			}
 		}
@@ -226,7 +226,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	}
 
 	if includeSystem {
-		for _, altUserID := range loginHistory.SecondOrderAlternates {
+		for altUserID, matches := range loginHistory.AlternateMap {
 			altAccount, err := nk.AccountGetId(ctx, altUserID)
 			if err != nil {
 				return fmt.Errorf("failed to get account by ID: %w", err)
@@ -235,7 +235,12 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 			if altAccount.GetDisableTime() != nil {
 				state = "disabled"
 			}
-			s := fmt.Sprintf("<@%s>[%s] %s <t:%d:R>", altAccount.CustomId, altAccount.User.Username, state, altAccount.User.UpdateTime.AsTime().UTC().Unix())
+			s := fmt.Sprintf("<@%s>[%s] %s <t:%d:R>\n", altAccount.CustomId, altAccount.User.Username, state, altAccount.User.UpdateTime.AsTime().UTC().Unix())
+			for _, m := range matches {
+				for _, item := range m.Items {
+					s += fmt.Sprintf("-  `%s`\n", item)
+				}
+			}
 			whoami.PotentialAlternates = append(whoami.PotentialAlternates, s)
 		}
 	}
