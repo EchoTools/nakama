@@ -205,17 +205,20 @@ func (m RemoteLogCustomizationMetricsPayload) SessionUUID() uuid.UUID {
 
 // GetCategory returns the category of the item. The category is what determines the equipment slot.
 func (m *RemoteLogCustomizationMetricsPayload) GetCategory() string {
-	itemName := m.ItemName
-	if itemName[:4] == "rwd_" {
+
+	if m.ItemName == "loadout_number" {
+		return "decal"
+	}
+	if m.ItemName[:4] == "rwd_" {
 		// Reward Item.
-		s := strings.SplitN(itemName, "_", 3)
+		s := strings.SplitN(m.ItemName, "_", 3)
 		if len(s) != 3 {
 			return ""
 		}
 		return s[1]
 	} else {
 		// Standard Item.
-		s := strings.SplitN(itemName, "_", 2)
+		s := strings.SplitN(m.ItemName, "_", 2)
 		if len(s) != 2 {
 			return ""
 		}
