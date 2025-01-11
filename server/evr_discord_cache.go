@@ -491,6 +491,8 @@ func (d *DiscordCache) handleGuildDelete(logger *zap.Logger, s *discordgo.Sessio
 	if err := d.nk.GroupDelete(ctx, groupID); err != nil {
 		return fmt.Errorf("error deleting group: %w", err)
 	}
+
+	d.Purge(e.Guild.ID)
 	return nil
 }
 

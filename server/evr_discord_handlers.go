@@ -58,6 +58,7 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(logger runtime.Logge
 		return fmt.Errorf("failed to get group: %w", err)
 	}
 	if len(groups) == 0 {
+		logger.Warn("Guild not registered", zap.String("group_id", groupID), zap.String("guild_id", i.GuildID))
 		return simpleInteractionResponse(s, i, "This guild is not registered.")
 	}
 
