@@ -367,7 +367,12 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 
 	isAuthenticationRequired := true
 
+	if m, ok := in.(*evr.EchoToolsProtobufMessageV1); ok {
+		logger.Info("Received protobuf message", zap.Any("message", m.Envelope))
+	}
+
 	switch in.(type) {
+
 	// Config service
 	case *evr.ConfigRequest:
 		isAuthenticationRequired = false

@@ -1,5 +1,7 @@
 module github.com/heroiclabs/nakama/v3
 
+replace github.com/echotools/nevr-common => /mnt/c/Users/User/source/repos/evr-game-server-native/nevr-common
+
 go 1.23.3
 
 require (
@@ -10,6 +12,7 @@ require (
 	github.com/davecgh/go-spew v1.1.1
 	github.com/dgryski/dgoogauth v0.0.0-20190221195224-5a805980a5f3
 	github.com/dop251/goja v0.0.0-20241024094426-79f3a7efcdbd
+	github.com/echotools/nevr-common v0.0.0-00010101000000-000000000000
 	github.com/go-playground/validator/v10 v10.19.0
 	github.com/go-restruct/restruct v1.2.0-alpha
 	github.com/gofrs/uuid/v5 v5.3.0
@@ -40,7 +43,7 @@ require (
 	google.golang.org/genproto/googleapis/api v0.0.0-20241118233622-e639e219e697
 	google.golang.org/grpc v1.68.0
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.5.1
-	google.golang.org/protobuf v1.36.1
+	google.golang.org/protobuf v1.36.2
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gopkg.in/yaml.v3 v3.0.1
 )
