@@ -106,8 +106,6 @@ type AccountMetadata struct {
 	account *api.Account
 
 	GlobalBanReason            string                     `json:"global_ban_reason"`         // The global ban reason
-	RandomizeDisplayName       bool                       `json:"randomize_display_name"`    // Randomize the display name
-	RandomizedDisplayName      string                     `json:"randomized_display_name"`   // The randomized display name
 	DisplayNameOverride        string                     `json:"display_name_override"`     // The display name override
 	GroupDisplayNames          map[string]string          `json:"group_display_names"`       // The display names for each guild map[groupID]displayName
 	ActiveGroupID              string                     `json:"active_group_id"`           // The active group ID
@@ -204,7 +202,11 @@ func (a *AccountMetadata) GetGroupDisplayNameOrDefault(groupID string) string {
 				}
 			}
 		}
-		return ""
+		if a.account != nil {
+			return a.account.User.Username
+		} else {
+			return ""
+		}
 	}
 }
 
