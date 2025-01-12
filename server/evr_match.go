@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"math/rand"
 	"reflect"
 	"slices"
@@ -793,22 +792,10 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 	}
 
 	// If the arena score is close, then lock later than usual.
-	if state.Open && state.IsLocked() {
-		switch state.Mode {
-		case evr.ModeArenaPublic:
-			// Get the score difference between the teams
-			scoreDiff := int(math.Abs(float64(state.GameState.BlueScore - state.GameState.OrangeScore)))
-
-			if scoreDiff > 4 || state.GameState.RoundClock.Current().Seconds() > 240 {
-				logger.Info("Match is over, closing the match.")
-				state.Open = false
-				updateLabel = true
-			}
-		default:
-			logger.Info("Closing the match in response to a lock.")
-			state.Open = false
-			updateLabel = true
-		}
+	if state.Open && !state.LockedAt.IsZero() && time.Now().After(state.LockedAt) {
+		logger.Info("Closing the match in response to a lock.")
+		state.Open = false
+		updateLabel = true
 	}
 
 	if updateLabel {
@@ -1078,10 +1065,8 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 
 	case SignalLockSession:
 		logger.Debug("Locking session")
-		state.LockedAt = time.Now().UTC()
-		if state.GameState == nil {
-			state.Open = false
-		}
+		// Lock hte sesion 60 seconds later.
+		state.LockedAt = time.Now().UTC().Add(60 * time.Second)
 
 	case SignalUnlockSession:
 		logger.Debug("Unlocking session")
