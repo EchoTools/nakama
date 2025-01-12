@@ -585,63 +585,63 @@ type RemoteLogGearStatsPerRound struct {
 	PlayerInfoTeamid         int64   `json:"[player_info][teamid]"`
 	GEARAssaultTotalTime     float64 `json:"[GEAR][assault][total_time]"`
 	GEARAssaultObjTime0      float64 `json:"[GEAR][assault][obj_time_0]"`
-	GEARAssaultObjTime1      int64   `json:"[GEAR][assault][obj_time_1]"`
-	GEARAssaultObjTime2      int64   `json:"[GEAR][assault][obj_time_2]"`
-	GEARAssaultObjTime3      int64   `json:"[GEAR][assault][obj_time_3]"`
+	GEARAssaultObjTime1      float64 `json:"[GEAR][assault][obj_time_1]"`
+	GEARAssaultObjTime2      float64 `json:"[GEAR][assault][obj_time_2]"`
+	GEARAssaultObjTime3      float64 `json:"[GEAR][assault][obj_time_3]"`
 	GEARAssaultKillCount     int64   `json:"[GEAR][assault][kill_count]"`
 	GEARBlasterTotalTime     float64 `json:"[GEAR][blaster][total_time]"`
 	GEARBlasterObjTime0      float64 `json:"[GEAR][blaster][obj_time_0]"`
-	GEARBlasterObjTime1      int64   `json:"[GEAR][blaster][obj_time_1]"`
-	GEARBlasterObjTime2      int64   `json:"[GEAR][blaster][obj_time_2]"`
-	GEARBlasterObjTime3      int64   `json:"[GEAR][blaster][obj_time_3]"`
+	GEARBlasterObjTime1      float64 `json:"[GEAR][blaster][obj_time_1]"`
+	GEARBlasterObjTime2      float64 `json:"[GEAR][blaster][obj_time_2]"`
+	GEARBlasterObjTime3      float64 `json:"[GEAR][blaster][obj_time_3]"`
 	GEARBlasterKillCount     int64   `json:"[GEAR][blaster][kill_count]"`
 	GEARDetTotalTime         float64 `json:"[GEAR][det][total_time]"`
 	GEARDetObjTime0          float64 `json:"[GEAR][det][obj_time_0]"`
-	GEARDetObjTime1          int64   `json:"[GEAR][det][obj_time_1]"`
-	GEARDetObjTime2          int64   `json:"[GEAR][det][obj_time_2]"`
-	GEARDetObjTime3          int64   `json:"[GEAR][det][obj_time_3]"`
+	GEARDetObjTime1          float64 `json:"[GEAR][det][obj_time_1]"`
+	GEARDetObjTime2          float64 `json:"[GEAR][det][obj_time_2]"`
+	GEARDetObjTime3          float64 `json:"[GEAR][det][obj_time_3]"`
 	GEARDetKillCount         int64   `json:"[GEAR][det][kill_count]"`
 	GEARStunTotalTime        float64 `json:"[GEAR][stun][total_time]"`
 	GEARStunObjTime0         float64 `json:"[GEAR][stun][obj_time_0]"`
-	GEARStunObjTime1         int64   `json:"[GEAR][stun][obj_time_1]"`
-	GEARStunObjTime2         int64   `json:"[GEAR][stun][obj_time_2]"`
-	GEARStunObjTime3         int64   `json:"[GEAR][stun][obj_time_3]"`
+	GEARStunObjTime1         float64 `json:"[GEAR][stun][obj_time_1]"`
+	GEARStunObjTime2         float64 `json:"[GEAR][stun][obj_time_2]"`
+	GEARStunObjTime3         float64 `json:"[GEAR][stun][obj_time_3]"`
 	GEARStunKillCount        int64   `json:"[GEAR][stun][kill_count]"`
 	GEARArcTotalTime         float64 `json:"[GEAR][arc][total_time]"`
 	GEARArcObjTime0          float64 `json:"[GEAR][arc][obj_time_0]"`
-	GEARArcObjTime1          int64   `json:"[GEAR][arc][obj_time_1]"`
-	GEARArcObjTime2          int64   `json:"[GEAR][arc][obj_time_2]"`
-	GEARArcObjTime3          int64   `json:"[GEAR][arc][obj_time_3]"`
+	GEARArcObjTime1          float64 `json:"[GEAR][arc][obj_time_1]"`
+	GEARArcObjTime2          float64 `json:"[GEAR][arc][obj_time_2]"`
+	GEARArcObjTime3          float64 `json:"[GEAR][arc][obj_time_3]"`
 	GEARArcKillCount         int64   `json:"[GEAR][arc][kill_count]"`
 	GEARBurstTotalTime       float64 `json:"[GEAR][burst][total_time]"`
 	GEARBurstObjTime0        float64 `json:"[GEAR][burst][obj_time_0]"`
-	GEARBurstObjTime1        int64   `json:"[GEAR][burst][obj_time_1]"`
-	GEARBurstObjTime2        int64   `json:"[GEAR][burst][obj_time_2]"`
-	GEARBurstObjTime3        int64   `json:"[GEAR][burst][obj_time_3]"`
+	GEARBurstObjTime1        float64 `json:"[GEAR][burst][obj_time_1]"`
+	GEARBurstObjTime2        float64 `json:"[GEAR][burst][obj_time_2]"`
+	GEARBurstObjTime3        float64 `json:"[GEAR][burst][obj_time_3]"`
 	GEARBurstKillCount       int64   `json:"[GEAR][burst][kill_count]"`
 	GEARHealTotalTime        float64 `json:"[GEAR][heal][total_time]"`
 	GEARHealObjTime0         float64 `json:"[GEAR][heal][obj_time_0]"`
-	GEARHealObjTime1         int64   `json:"[GEAR][heal][obj_time_1]"`
-	GEARHealObjTime2         int64   `json:"[GEAR][heal][obj_time_2]"`
-	GEARHealObjTime3         int64   `json:"[GEAR][heal][obj_time_3]"`
+	GEARHealObjTime1         float64 `json:"[GEAR][heal][obj_time_1]"`
+	GEARHealObjTime2         float64 `json:"[GEAR][heal][obj_time_2]"`
+	GEARHealObjTime3         float64 `json:"[GEAR][heal][obj_time_3]"`
 	GEARHealKillCount        int64   `json:"[GEAR][heal][kill_count]"`
 	GEARSensorTotalTime      float64 `json:"[GEAR][sensor][total_time]"`
 	GEARSensorObjTime0       float64 `json:"[GEAR][sensor][obj_time_0]"`
-	GEARSensorObjTime1       int64   `json:"[GEAR][sensor][obj_time_1]"`
-	GEARSensorObjTime2       int64   `json:"[GEAR][sensor][obj_time_2]"`
-	GEARSensorObjTime3       int64   `json:"[GEAR][sensor][obj_time_3]"`
+	GEARSensorObjTime1       float64 `json:"[GEAR][sensor][obj_time_1]"`
+	GEARSensorObjTime2       float64 `json:"[GEAR][sensor][obj_time_2]"`
+	GEARSensorObjTime3       float64 `json:"[GEAR][sensor][obj_time_3]"`
 	GEARSensorKillCount      int64   `json:"[GEAR][sensor][kill_count]"`
 	GEARShieldTotalTime      float64 `json:"[GEAR][shield][total_time]"`
 	GEARShieldObjTime0       float64 `json:"[GEAR][shield][obj_time_0]"`
-	GEARShieldObjTime1       int64   `json:"[GEAR][shield][obj_time_1]"`
-	GEARShieldObjTime2       int64   `json:"[GEAR][shield][obj_time_2]"`
-	GEARShieldObjTime3       int64   `json:"[GEAR][shield][obj_time_3]"`
+	GEARShieldObjTime1       float64 `json:"[GEAR][shield][obj_time_1]"`
+	GEARShieldObjTime2       float64 `json:"[GEAR][shield][obj_time_2]"`
+	GEARShieldObjTime3       float64 `json:"[GEAR][shield][obj_time_3]"`
 	GEARShieldKillCount      int64   `json:"[GEAR][shield][kill_count]"`
 	GEARWraithTotalTime      float64 `json:"[GEAR][wraith][total_time]"`
 	GEARWraithObjTime0       float64 `json:"[GEAR][wraith][obj_time_0]"`
-	GEARWraithObjTime1       int64   `json:"[GEAR][wraith][obj_time_1]"`
-	GEARWraithObjTime2       int64   `json:"[GEAR][wraith][obj_time_2]"`
-	GEARWraithObjTime3       int64   `json:"[GEAR][wraith][obj_time_3]"`
+	GEARWraithObjTime1       float64 `json:"[GEAR][wraith][obj_time_1]"`
+	GEARWraithObjTime2       float64 `json:"[GEAR][wraith][obj_time_2]"`
+	GEARWraithObjTime3       float64 `json:"[GEAR][wraith][obj_time_3]"`
 	GEARWraithKillCount      int64   `json:"[GEAR][wraith][kill_count]"`
 }
 
