@@ -15,11 +15,11 @@ import (
 
 type StatisticsQueue struct {
 	logger runtime.Logger
-	ch     chan *StatisticsQueueEntry
+	ch     chan []*StatisticsQueueEntry
 }
 
 func NewStatisticsQueue(logger runtime.Logger, nk runtime.NakamaModule) *StatisticsQueue {
-	ch := make(chan *StatisticsQueueEntry, 8*3*100) // three matches ending at the same time, 100 records per player
+	ch := make(chan []*StatisticsQueueEntry, 8*3*100) // three matches ending at the same time, 100 records per player
 	r := &StatisticsQueue{
 		logger: logger,
 		ch:     ch,
@@ -35,7 +35,7 @@ func NewStatisticsQueue(logger runtime.Logger, nk runtime.NakamaModule) *Statist
 			for _, e := range entries {
 				if _, err := nk.LeaderboardRecordWrite(ctx, e.BoardMeta.ID(), e.UserID, e.DisplayName, e.Score, e.Subscore, map[string]any{}, &e.Override); err != nil {
 					// Try to create the leaderboard
-					operator, sortOrder, cronSchedule := OperatorToLeaderboardOperator(e.BoardMeta.Operator), "desc", ResetScheduleToCron(e.BoardMeta.ResetSchedule)
+					operator, sortOrder, cronSchedule := OperatorToLeaderboardOperator(e.BoardMeta.operator), "desc", ResetScheduleToCron(e.BoardMeta.resetSchedule)
 					if err = nk.LeaderboardCreate(ctx, e.BoardMeta.ID(), true, sortOrder, operator, cronSchedule, map[string]any{}, true); err != nil {
 						logger.Error("Leaderboard create error", zap.Error(err))
 					} else {
@@ -88,13 +88,13 @@ type StatisticsQueueEntry struct {
 	Override    int
 }
 
-func (r *StatisticsQueue) Add(entries ...*StatisticsQueueEntry) {
-	for _, e := range entries {
-		select {
-		case r.ch <- e:
-		default:
-			r.logger.Warn("Leaderboard record write queue full, dropping entry", zap.Any("entry", e))
-		}
+func (r *StatisticsQueue) Add(entries []*StatisticsQueueEntry) {
+
+	select {
+	case r.ch <- entries:
+		r.logger.Debug("Leaderboard record queued", zap.Int("count", len(entries)))
+	default:
+		r.logger.Warn("Leaderboard record write queue full, dropping entry", zap.Int("count", len(entries)))
 	}
 }
 
@@ -214,16 +214,13 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, ownerID, groupID str
 	return playerStatistics, boardMap, nil
 }
 
-func StatisticsToEntries(userID, displayName, groupID string, mode evr.Symbol, prevStats, updateStats evr.Statistics) ([]*StatisticsQueueEntry, error) {
+func StatisticsToEntries(userID, displayName, groupID string, mode evr.Symbol, prev, update evr.Statistics) ([]*StatisticsQueueEntry, error) {
+	statsValue := reflect.ValueOf(update).Elem()
+	prevStatsValue := reflect.ValueOf(prev).Elem()
+	statsType := statsValue.Type()
 
-	prevStatsValue := reflect.ValueOf(prevStats)
-	updateStatsValue := reflect.ValueOf(updateStats)
-
-	updateStatsType := updateStatsValue.Elem().Type()
-
-	entries := make([]*StatisticsQueueEntry, 0, updateStatsType.NumField()*3)
-
-	for i := 0; i < updateStatsType.NumField(); i++ {
+	entries := make([]*StatisticsQueueEntry, 0, statsType.NumField()*3)
+	for i := 0; i < statsType.NumField(); i++ {
 
 		prev := prevStatsValue.Field(i).Interface().(evr.Statistic)
 		value := statsValue.Field(i).Interface().(evr.Statistic)
@@ -244,7 +241,7 @@ func StatisticsToEntries(userID, displayName, groupID string, mode evr.Symbol, p
 		}
 
 		for _, r := range []evr.ResetSchedule{evr.ResetScheduleDaily, evr.ResetScheduleWeekly, evr.ResetScheduleAllTime} {
-			op := StatisticOperator(updateValue.Interface().(evr.Statistic))
+			op := StatisticOperator(value)
 			meta := LeaderboardMeta{
 				GroupID:       groupID,
 				Mode:          mode,
@@ -254,11 +251,11 @@ func StatisticsToEntries(userID, displayName, groupID string, mode evr.Symbol, p
 			}
 
 			// If the value is zero, or the previous value is zero, do not update the stat
-			if val == 0 {
+			if updateValue == 0 {
 				continue
 			}
 
-			score, subscore := ValueToScore(val)
+			score, subscore := ValueToScore(updateValue)
 
 			entries = append(entries, &StatisticsQueueEntry{
 				BoardMeta:   meta,

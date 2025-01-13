@@ -14,14 +14,6 @@ type LoggedInUserProfileRequest struct {
 	ProfileRequestData ProfileRequestData
 }
 
-func (m LoggedInUserProfileRequest) Token() string {
-	return "SNSLoggedInUserProfileRequest"
-}
-
-func (m LoggedInUserProfileRequest) Symbol() Symbol {
-	return ToSymbol(m.Token())
-}
-
 func (r LoggedInUserProfileRequest) String() string {
 	return fmt.Sprintf("LoggedInUserProfileRequest(session=%v, user_id=%v, profile_request=%v)", r.Session, r.EvrID, r.ProfileRequestData)
 }

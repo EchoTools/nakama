@@ -1306,6 +1306,7 @@ func AccountLookupRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 
 type PlayerStatsRPCRequest struct {
 	UserID    string     `json:"user_id"`
+	GroupID   string     `json:"group_id"`
 	GuildID   string     `json:"guild_id"`
 	DiscordID string     `json:"discord_id"`
 	Mode      evr.Symbol `json:"mode"`
@@ -1354,29 +1355,31 @@ func PlayerStatisticsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 		return "", err
 	}
 
-	var userID string
-	if request.UserID != "" {
-		userID = request.UserID
-	} else if request.DiscordID != "" {
-		var err error
-		if userID, err = GetUserIDByDiscordID(ctx, db, request.DiscordID); err != nil {
-			return "", err
+	switch {
+	case request.UserID != "":
+	case request.DiscordID != "":
+		if userID, err := GetUserIDByDiscordID(ctx, db, request.DiscordID); err != nil {
+			return "", fmt.Errorf("failed to get user ID by discord ID: %w", err)
+		} else {
+			request.UserID = userID
 		}
 	}
 
-	if userID == "" {
+	if request.UserID == "" {
 		return "", runtime.NewError("user not found", StatusNotFound)
 	}
 
-	var groupID string
-	var err error
-	if request.GuildID == "" {
-		return "", runtime.NewError("guild ID must be specified", StatusInvalidArgument)
-	} else if groupID, err = GetGroupIDByGuildID(ctx, db, request.GuildID); err != nil {
-		return "", runtime.NewError("failed to get group ID by guild ID: "+err.Error(), StatusInternalError)
+	switch {
+	case request.GroupID != "":
+	case request.GuildID != "":
+		if groupID, err := GetGroupIDByGuildID(ctx, db, request.GuildID); err != nil {
+			return "", fmt.Errorf("failed to get group ID by guild ID: %w", err)
+		} else {
+			request.GroupID = groupID
+		}
 	}
 
-	if groupID == "" {
+	if request.GroupID == "" {
 		return "", runtime.NewError("guild group not found", StatusNotFound)
 	}
 
@@ -1398,7 +1401,7 @@ func PlayerStatisticsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 		includeDailyWeekly = true
 	}
 
-	stats, _, err := PlayerStatisticsGetID(ctx, db, userID, groupID, modes, includeDailyWeekly)
+	stats, _, err := PlayerStatisticsGetID(ctx, db, request.UserID, request.GroupID, modes, includeDailyWeekly)
 	if err != nil {
 		return "", err
 	}
@@ -1890,7 +1893,16 @@ func UserServerProfileRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 		}
 	}
 
-	serverProfile, err := NewUserServerProfile(ctx, db, account, request.XPID, request.GroupID.String())
+	modes := []evr.Symbol{
+		evr.ModeArenaPublic,
+		evr.ModeCombatPublic,
+		evr.ModeSocialPublic,
+		evr.ModeCombatPrivate,
+		evr.ModeArenaPrivate,
+		evr.ModeSocialPrivate,
+	}
+
+	serverProfile, err := NewUserServerProfile(ctx, db, account, request.XPID, request.GroupID.String(), modes, false)
 	if err != nil {
 		return "", fmt.Errorf("failed to get server profile: %w", err)
 	}

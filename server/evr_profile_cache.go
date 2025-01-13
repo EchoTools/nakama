@@ -163,7 +163,7 @@ func walletToCosmetics(wallet map[string]int64, unlocks map[string]map[string]bo
 	return unlocks
 }
 
-func NewUserServerProfile(ctx context.Context, db *sql.DB, account *api.Account, xpID evr.EvrId, groupID string) (*evr.ServerProfile, error) {
+func NewUserServerProfile(ctx context.Context, db *sql.DB, account *api.Account, xpID evr.EvrId, groupID string, modes []evr.Symbol, includeDailyWeekly bool) (*evr.ServerProfile, error) {
 
 	metadata := AccountMetadata{}
 	if err := json.Unmarshal([]byte(account.User.Metadata), &metadata); err != nil {
@@ -189,16 +189,8 @@ func NewUserServerProfile(ctx context.Context, db *sql.DB, account *api.Account,
 	if groupID == "" || metadata.GroupDisplayNames[groupID] == "" {
 		groupID = metadata.GetActiveGroupID().String()
 	}
-	modes := []evr.Symbol{
-		evr.ModeArenaPublic,
-		evr.ModeCombatPublic,
-		evr.ModeCombatPrivate,
-		evr.ModeArenaPrivate,
-		evr.ModeSocialPublic,
-		evr.ModeSocialPrivate,
-	}
 
-	statsBySchedule, _, err := PlayerStatisticsGetID(ctx, db, account.User.Id, groupID, modes, true)
+	statsBySchedule, _, err := PlayerStatisticsGetID(ctx, db, account.User.Id, groupID, modes, includeDailyWeekly)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user tablet statistics: %w", err)
 	}

@@ -6,7 +6,6 @@ import (
 
 	"errors"
 	"fmt"
-	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -505,7 +504,11 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 		return errors.New("session parameters not found")
 	}
 
-	serverProfile, err := NewUserServerProfile(ctx, p.db, params.account, params.xpID, params.accountMetadata.GetActiveGroupID().String())
+	modes := []evr.Symbol{
+		evr.ModeArenaPublic,
+		evr.ModeCombatPublic,
+	}
+	serverProfile, err := NewUserServerProfile(ctx, p.db, params.account, params.xpID, params.accountMetadata.GetActiveGroupID().String(), modes, false)
 	if err != nil {
 		return fmt.Errorf("failed to get server profile: %w", err)
 	}
@@ -875,12 +878,6 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 			}
 		}
 
-		// Get the players existing statistics
-		prevPlayerStats, _, err := PlayerStatisticsGetID(ctx, p.db, playerInfo.UserID, groupIDStr, []evr.Symbol{label.Mode}, false)
-		if err != nil {
-			return fmt.Errorf("failed to get player statistics: %w", err)
-		}
-
 		var stats evr.Statistics
 		switch label.Mode {
 		case evr.ModeArenaPublic:
@@ -889,65 +886,24 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 			stats = &request.Payload.Update.Statistics.Combat
 		}
 
-		prevStats := prevPlayerStats[evr.StatisticsGroup{
+		// Get the players existing statistics
+		prevPlayerStats, _, err := PlayerStatisticsGetID(ctx, p.db, playerInfo.UserID, groupIDStr, []evr.Symbol{label.Mode}, false)
+		if err != nil {
+			return fmt.Errorf("failed to get player statistics: %w", err)
+		}
+		g := evr.StatisticsGroup{
 			Mode:          label.Mode,
 			ResetSchedule: evr.ResetScheduleAllTime,
-		}]
-		statsValue := reflect.ValueOf(stats).Elem()
-		prevStatsValue := reflect.ValueOf(prevStats).Elem()
-		statsType := statsValue.Type()
-
-		entries := make([]*StatisticsQueueEntry, 0, statsType.NumField()*3)
-		for i := 0; i < statsType.NumField(); i++ {
-
-			prev := prevStatsValue.Field(i).Addr().Interface().(evr.Statistic)
-			value := statsValue.Field(i).Addr().Interface().(evr.Statistic)
-
-			t := statsValue.Field(i).Type()
-			statName := t.Field(i).Tag.Get("json")
-			statName = strings.SplitN(statName, ",", 2)[0]
-
-			// Based on the type of the field, modify the update value
-			var updateValue float64
-			switch statsValue.Field(i).Addr().Interface().(type) {
-			case evr.StatisticAdditionInteger:
-				updateValue = value.GetValue() - prev.GetValue()
-			case evr.StatisticAdditionFloat:
-				updateValue = value.GetValue() - prev.GetValue()
-			case evr.StatisticAverageFloat:
-
-			}
-
-			for _, r := range []evr.ResetSchedule{evr.ResetScheduleDaily, evr.ResetScheduleWeekly, evr.ResetScheduleAllTime} {
-				op := StatisticOperator(value)
-				meta := LeaderboardMeta{
-					groupID:       groupIDStr,
-					mode:          label.Mode,
-					statName:      statName,
-					operator:      op,
-					resetSchedule: r,
-				}
-
-				// If the value is zero, or the previous value is zero, do not update the stat
-				if updateValue == 0 {
-					continue
-				}
-
-				score, subscore := ValueToScore(updateValue)
-
-				entries = append(entries, &StatisticsQueueEntry{
-					BoardMeta:   meta,
-					UserID:      playerInfo.UserID,
-					DisplayName: playerInfo.DisplayName,
-					Score:       score,
-					Subscore:    subscore,
-					Metadata:    nil,
-					Override:    2, // set
-				})
-			}
 		}
 
-		p.statisticsQueue.Add(entries...)
+		prevStats, ok := prevPlayerStats[g]
+		if !ok {
+			prevStats = evr.NewServerProfile().Statistics[g]
+		}
+
+		entries, err := StatisticsToEntries(playerInfo.UserID, playerInfo.DisplayName, label.GetGroupID().String(), label.Mode, prevStats, stats)
+
+		p.statisticsQueue.Add(entries)
 	}
 
 	return nil

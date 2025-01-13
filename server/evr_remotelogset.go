@@ -163,7 +163,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 					Override:    LeaderboardOperatorIncrement,
 				}
 
-				p.statisticsQueue.Add(entry)
+				p.statisticsQueue.Add([]*StatisticsQueueEntry{entry})
 			}
 
 			params, ok := LoadParams(session.Context())

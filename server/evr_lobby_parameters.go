@@ -344,7 +344,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		return nil, fmt.Errorf("failed to get account: %w", err)
 	}
 
-	profile, err := NewUserServerProfile(ctx, p.db, account, sessionParams.xpID, groupID.String())
+	profile, err := NewUserServerProfile(ctx, p.db, account, sessionParams.xpID, groupID.String(), []evr.Symbol{mode}, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create user server profile: %w", err)
 	}
