@@ -203,21 +203,17 @@ func OperatorToLeaderboardOperator(op int) string {
 
 func StatisticOperator(v evr.Statistic) int {
 	switch v.(type) {
-	case *evr.StatisticAdditionFloat:
+	case *evr.StatisticFloatIncrement:
 		return LeaderboardOperatorIncrement
-	case *evr.StatisticAdditionInteger:
+	case *evr.StatisticIntegerIncrement:
 		return LeaderboardOperatorIncrement
-	case *evr.StatisticAverageFloat:
-		return LeaderboardOperatorSet
-	case *evr.StatisticAverageInteger:
-		return LeaderboardOperatorSet
-	case *evr.StatisticMaximumFloat:
+	case *evr.StatisticFloatBest:
 		return LeaderboardOperatorBest
-	case *evr.StatisticMaximumInteger:
+	case *evr.StatisticIntegerBest:
 		return LeaderboardOperatorBest
-	case *evr.StatisticReplacementFloat:
+	case *evr.StatisticFloatSet:
 		return LeaderboardOperatorSet
-	case *evr.StatisticReplacementInteger:
+	case *evr.StatisticIntegerSet:
 		return LeaderboardOperatorSet
 	default:
 		return LeaderboardOperatorSet

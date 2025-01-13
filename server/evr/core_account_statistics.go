@@ -157,61 +157,61 @@ func (s *PlayerStatistics) UnmarshalJSON(data []byte) error {
 }
 
 type ArenaStatistics struct {
-	ArenaLosses                  *StatisticAdditionInteger  `json:"ArenaLosses"`
-	ArenaMVPPercentage           *StatisticReplacementFloat `json:"ArenaMVPPercentage"`
-	ArenaMVPS                    *StatisticAdditionInteger  `json:"ArenaMVPs"`
-	ArenaTies                    *StatisticAdditionInteger  `json:"ArenaTies"`
-	ArenaWinPercentage           *StatisticReplacementFloat `json:"ArenaWinPercentage"`
-	ArenaWins                    *StatisticAdditionInteger  `json:"ArenaWins"`
-	Assists                      *StatisticAdditionInteger  `json:"Assists"`
-	AssistsPerGame               *StatisticAverageFloat     `json:"AssistsPerGame"`
-	AveragePointsPerGame         *StatisticAverageFloat     `json:"AveragePointsPerGame"`
-	AveragePossessionTimePerGame *StatisticAverageFloat     `json:"AveragePossessionTimePerGame"`
-	AverageTopSpeedPerGame       *StatisticAverageFloat     `json:"AverageTopSpeedPerGame"`
-	BlockPercentage              *StatisticReplacementFloat `json:"BlockPercentage"`
-	Blocks                       *StatisticAdditionInteger  `json:"Blocks"`
-	BounceGoals                  *StatisticAdditionInteger  `json:"BounceGoals"`
-	BumperShots                  *StatisticAdditionInteger  `json:"BumperShots"`
-	Catches                      *StatisticAdditionInteger  `json:"Catches"`
-	Clears                       *StatisticAdditionInteger  `json:"Clears"`
-	CurrentArenaMVPStreak        *StatisticAdditionInteger  `json:"CurrentArenaMVPStreak"`
-	CurrentArenaWinStreak        *StatisticAdditionInteger  `json:"CurrentArenaWinStreak"`
-	Goals                        *StatisticAdditionInteger  `json:"Goals"`
-	GoalSavePercentage           *StatisticReplacementFloat `json:"GoalSavePercentage"`
-	GoalScorePercentage          *StatisticReplacementFloat `json:"GoalScorePercentage"`
-	GoalsPerGame                 *StatisticAverageFloat     `json:"GoalsPerGame"`
-	HatTricks                    *StatisticAdditionInteger  `json:"HatTricks"`
-	HeadbuttGoals                *StatisticAdditionInteger  `json:"HeadbuttGoals"`
-	HighestArenaMVPStreak        *StatisticMaximumInteger   `json:"HighestArenaMVPStreak"`
-	HighestArenaWinStreak        *StatisticMaximumInteger   `json:"HighestArenaWinStreak"`
-	HighestPoints                *StatisticMaximumInteger   `json:"HighestPoints"`
-	HighestSaves                 *StatisticMaximumInteger   `json:"HighestSaves"`
-	HighestStuns                 *StatisticMaximumInteger   `json:"HighestStuns"`
-	Interceptions                *StatisticAdditionInteger  `json:"Interceptions"`
-	JoustsWon                    *StatisticAdditionInteger  `json:"JoustsWon"`
-	Level                        *StatisticAdditionInteger  `json:"Level"`
-	OnePointGoals                *StatisticAdditionInteger  `json:"OnePointGoals"`
-	Passes                       *StatisticAdditionInteger  `json:"Passes"`
-	Points                       *StatisticAdditionInteger  `json:"Points"`
-	PossessionTime               *StatisticAdditionFloat    `json:"PossessionTime"`
-	PunchesReceived              *StatisticAdditionInteger  `json:"PunchesReceived"`
-	Saves                        *StatisticAdditionInteger  `json:"Saves"`
-	SavesPerGame                 *StatisticAverageFloat     `json:"SavesPerGame"`
-	ShotsOnGoal                  *StatisticAdditionInteger  `json:"ShotsOnGoal"`
-	ShotsOnGoalAgainst           *StatisticAdditionInteger  `json:"ShotsOnGoalAgainst"`
-	Steals                       *StatisticAdditionInteger  `json:"Steals"`
-	StunPercentage               *StatisticReplacementFloat `json:"StunPercentage"`
-	Stuns                        *StatisticAdditionInteger  `json:"Stuns"`
-	StunsPerGame                 *StatisticAverageFloat     `json:"StunsPerGame"`
-	ThreePointGoals              *StatisticAdditionInteger  `json:"ThreePointGoals"`
-	TopSpeedsTotal               *StatisticAdditionFloat    `json:"TopSpeedsTotal"`
-	TwoPointGoals                *StatisticAdditionInteger  `json:"TwoPointGoals"`
-	XP                           *StatisticAdditionInteger  `json:"XP"`
-	GamesPlayed                  *StatisticAdditionInteger  `json:"GamesPlayed"`
-	SkillRatingMu                *StatisticReplacementFloat `json:"SkillRatingMu"`
-	SkillRatingSigma             *StatisticReplacementFloat `json:"SkillRatingSigma"`
-	RankPercentile               *StatisticReplacementFloat `json:"RankPercentile"`
-	LobbyTime                    *StatisticReplacementFloat `json:"LobbyTime"`
+	ArenaLosses                  *StatisticIntegerIncrement `json:"ArenaLosses"`
+	ArenaMVPPercentage           *StatisticFloatSet         `json:"ArenaMVPPercentage"`
+	ArenaMVPS                    *StatisticIntegerIncrement `json:"ArenaMVPs"`
+	ArenaTies                    *StatisticIntegerIncrement `json:"ArenaTies"`
+	ArenaWinPercentage           *StatisticFloatSet         `json:"ArenaWinPercentage"`
+	ArenaWins                    *StatisticIntegerIncrement `json:"ArenaWins"`
+	Assists                      *StatisticIntegerIncrement `json:"Assists"`
+	AssistsPerGame               *StatisticFloatSet         `json:"AssistsPerGame"`
+	AveragePointsPerGame         *StatisticFloatSet         `json:"AveragePointsPerGame"`
+	AveragePossessionTimePerGame *StatisticFloatSet         `json:"AveragePossessionTimePerGame"`
+	AverageTopSpeedPerGame       *StatisticFloatSet         `json:"AverageTopSpeedPerGame"`
+	BlockPercentage              *StatisticFloatSet         `json:"BlockPercentage"`
+	Blocks                       *StatisticIntegerIncrement `json:"Blocks"`
+	BounceGoals                  *StatisticIntegerIncrement `json:"BounceGoals"`
+	BumperShots                  *StatisticIntegerIncrement `json:"BumperShots"`
+	Catches                      *StatisticIntegerIncrement `json:"Catches"`
+	Clears                       *StatisticIntegerIncrement `json:"Clears"`
+	CurrentArenaMVPStreak        *StatisticIntegerIncrement `json:"CurrentArenaMVPStreak"`
+	CurrentArenaWinStreak        *StatisticIntegerIncrement `json:"CurrentArenaWinStreak"`
+	Goals                        *StatisticIntegerIncrement `json:"Goals"`
+	GoalSavePercentage           *StatisticFloatSet         `json:"GoalSavePercentage"`
+	GoalScorePercentage          *StatisticFloatSet         `json:"GoalScorePercentage"`
+	GoalsPerGame                 *StatisticFloatSet         `json:"GoalsPerGame"`
+	HatTricks                    *StatisticIntegerIncrement `json:"HatTricks"`
+	HeadbuttGoals                *StatisticIntegerIncrement `json:"HeadbuttGoals"`
+	HighestArenaMVPStreak        *StatisticIntegerBest      `json:"HighestArenaMVPStreak"`
+	HighestArenaWinStreak        *StatisticIntegerBest      `json:"HighestArenaWinStreak"`
+	HighestPoints                *StatisticIntegerBest      `json:"HighestPoints"`
+	HighestSaves                 *StatisticIntegerBest      `json:"HighestSaves"`
+	HighestStuns                 *StatisticIntegerBest      `json:"HighestStuns"`
+	Interceptions                *StatisticIntegerIncrement `json:"Interceptions"`
+	JoustsWon                    *StatisticIntegerIncrement `json:"JoustsWon"`
+	Level                        *StatisticIntegerIncrement `json:"Level"`
+	OnePointGoals                *StatisticIntegerIncrement `json:"OnePointGoals"`
+	Passes                       *StatisticIntegerIncrement `json:"Passes"`
+	Points                       *StatisticIntegerIncrement `json:"Points"`
+	PossessionTime               *StatisticFloatIncrement   `json:"PossessionTime"`
+	PunchesReceived              *StatisticIntegerIncrement `json:"PunchesReceived"`
+	Saves                        *StatisticIntegerIncrement `json:"Saves"`
+	SavesPerGame                 *StatisticFloatSet         `json:"SavesPerGame"`
+	ShotsOnGoal                  *StatisticIntegerIncrement `json:"ShotsOnGoal"`
+	ShotsOnGoalAgainst           *StatisticIntegerIncrement `json:"ShotsOnGoalAgainst"`
+	Steals                       *StatisticIntegerIncrement `json:"Steals"`
+	StunPercentage               *StatisticFloatSet         `json:"StunPercentage"`
+	Stuns                        *StatisticIntegerIncrement `json:"Stuns"`
+	StunsPerGame                 *StatisticFloatSet         `json:"StunsPerGame"`
+	ThreePointGoals              *StatisticIntegerIncrement `json:"ThreePointGoals"`
+	TopSpeedsTotal               *StatisticFloatIncrement   `json:"TopSpeedsTotal"`
+	TwoPointGoals                *StatisticIntegerIncrement `json:"TwoPointGoals"`
+	XP                           *StatisticFloatSet         `json:"XP"`
+	GamesPlayed                  *StatisticIntegerIncrement `json:"GamesPlayed"`
+	SkillRatingMu                *StatisticFloatSet         `json:"SkillRatingMu"`
+	SkillRatingSigma             *StatisticFloatSet         `json:"SkillRatingSigma"`
+	RankPercentile               *StatisticFloatSet         `json:"RankPercentile"`
+	LobbyTime                    *StatisticFloatSet         `json:"LobbyTime"`
 }
 
 func (s *ArenaStatistics) CalculateFields() {
@@ -261,42 +261,42 @@ func (s *ArenaStatistics) CalculateFields() {
 }
 
 type CombatStatistics struct {
-	CombatAssists                      *StatisticAdditionInteger  `json:"CombatAssists"`
-	CombatAverageEliminationDeathRatio *StatisticAverageFloat     `json:"CombatAverageEliminationDeathRatio"`
-	CombatBestEliminationStreak        *StatisticAdditionInteger  `json:"CombatBestEliminationStreak"`
-	CombatDamage                       *StatisticAdditionFloat    `json:"CombatDamage"`
-	CombatDamageAbsorbed               *StatisticAdditionFloat    `json:"CombatDamageAbsorbed"`
-	CombatDamageTaken                  *StatisticAdditionFloat    `json:"CombatDamageTaken"`
-	CombatDeaths                       *StatisticAdditionInteger  `json:"CombatDeaths"`
-	CombatEliminations                 *StatisticAdditionInteger  `json:"CombatEliminations"`
-	CombatHeadshotKills                *StatisticAdditionInteger  `json:"CombatHeadshotKills"`
-	CombatHealing                      *StatisticAdditionFloat    `json:"CombatHealing"`
-	CombatHillCaptures                 *StatisticAdditionInteger  `json:"CombatHillCaptures"`
-	CombatHillDefends                  *StatisticAdditionInteger  `json:"CombatHillDefends"`
-	CombatKills                        *StatisticAdditionInteger  `json:"CombatKills"`
-	CombatLosses                       *StatisticAdditionInteger  `json:"CombatLosses"`
-	CombatMVPs                         *StatisticAdditionInteger  `json:"CombatMVPs"`
-	CombatObjectiveDamage              *StatisticAdditionFloat    `json:"CombatObjectiveDamage"`
-	CombatObjectiveEliminations        *StatisticAdditionInteger  `json:"CombatObjectiveEliminations"`
-	CombatObjectiveTime                *StatisticAdditionFloat    `json:"CombatObjectiveTime"`
-	CombatPayloadGamesPlayed           *StatisticAdditionInteger  `json:"CombatPayloadGamesPlayed"`
-	CombatPayloadWinPercentage         *StatisticReplacementFloat `json:"CombatPayloadWinPercentage"`
-	CombatPayloadWins                  *StatisticAdditionInteger  `json:"CombatPayloadWins"`
-	CombatPointCaptureGamesPlayed      *StatisticAdditionInteger  `json:"CombatPointCaptureGamesPlayed"`
-	CombatPointCaptureWinPercentage    *StatisticReplacementFloat `json:"CombatPointCaptureWinPercentage"`
-	CombatPointCaptureWins             *StatisticAdditionInteger  `json:"CombatPointCaptureWins"`
-	CombatSoloKills                    *StatisticAdditionInteger  `json:"CombatSoloKills"`
-	CombatStuns                        *StatisticAdditionInteger  `json:"CombatStuns"`
-	CombatTeammateHealing              *StatisticAdditionFloat    `json:"CombatTeammateHealing"`
-	CombatWinPercentage                *StatisticReplacementFloat `json:"CombatWinPercentage"`
-	CombatWins                         *StatisticAdditionInteger  `json:"CombatWins"`
-	Level                              *StatisticAdditionInteger  `json:"Level"`
-	XP                                 *StatisticAdditionInteger  `json:"XP"`
-	GamesPlayed                        *StatisticAdditionInteger  `json:"GamesPlayed"`
-	SkillRatingMu                      *StatisticReplacementFloat `json:"SkillRatingMu"`
-	SkillRatingSigma                   *StatisticReplacementFloat `json:"SkillRatingSigma"`
-	RankPercentile                     *StatisticReplacementFloat `json:"RankPercentile"`
-	LobbyTime                          *StatisticReplacementFloat `json:"LobbyTime"`
+	CombatAssists                      *StatisticIntegerIncrement `json:"CombatAssists"`
+	CombatAverageEliminationDeathRatio *StatisticFloatSet         `json:"CombatAverageEliminationDeathRatio"`
+	CombatBestEliminationStreak        *StatisticIntegerIncrement `json:"CombatBestEliminationStreak"`
+	CombatDamage                       *StatisticFloatIncrement   `json:"CombatDamage"`
+	CombatDamageAbsorbed               *StatisticFloatIncrement   `json:"CombatDamageAbsorbed"`
+	CombatDamageTaken                  *StatisticFloatIncrement   `json:"CombatDamageTaken"`
+	CombatDeaths                       *StatisticIntegerIncrement `json:"CombatDeaths"`
+	CombatEliminations                 *StatisticIntegerIncrement `json:"CombatEliminations"`
+	CombatHeadshotKills                *StatisticIntegerIncrement `json:"CombatHeadshotKills"`
+	CombatHealing                      *StatisticFloatIncrement   `json:"CombatHealing"`
+	CombatHillCaptures                 *StatisticIntegerIncrement `json:"CombatHillCaptures"`
+	CombatHillDefends                  *StatisticIntegerIncrement `json:"CombatHillDefends"`
+	CombatKills                        *StatisticIntegerIncrement `json:"CombatKills"`
+	CombatLosses                       *StatisticIntegerIncrement `json:"CombatLosses"`
+	CombatMVPs                         *StatisticIntegerIncrement `json:"CombatMVPs"`
+	CombatObjectiveDamage              *StatisticFloatIncrement   `json:"CombatObjectiveDamage"`
+	CombatObjectiveEliminations        *StatisticIntegerIncrement `json:"CombatObjectiveEliminations"`
+	CombatObjectiveTime                *StatisticFloatIncrement   `json:"CombatObjectiveTime"`
+	CombatPayloadGamesPlayed           *StatisticIntegerIncrement `json:"CombatPayloadGamesPlayed"`
+	CombatPayloadWinPercentage         *StatisticFloatSet         `json:"CombatPayloadWinPercentage"`
+	CombatPayloadWins                  *StatisticIntegerIncrement `json:"CombatPayloadWins"`
+	CombatPointCaptureGamesPlayed      *StatisticIntegerIncrement `json:"CombatPointCaptureGamesPlayed"`
+	CombatPointCaptureWinPercentage    *StatisticFloatSet         `json:"CombatPointCaptureWinPercentage"`
+	CombatPointCaptureWins             *StatisticIntegerIncrement `json:"CombatPointCaptureWins"`
+	CombatSoloKills                    *StatisticIntegerIncrement `json:"CombatSoloKills"`
+	CombatStuns                        *StatisticIntegerIncrement `json:"CombatStuns"`
+	CombatTeammateHealing              *StatisticFloatIncrement   `json:"CombatTeammateHealing"`
+	CombatWinPercentage                *StatisticFloatSet         `json:"CombatWinPercentage"`
+	CombatWins                         *StatisticIntegerIncrement `json:"CombatWins"`
+	Level                              *StatisticIntegerIncrement `json:"Level"`
+	XP                                 *StatisticFloatSet         `json:"XP"`
+	GamesPlayed                        *StatisticIntegerIncrement `json:"GamesPlayed"`
+	SkillRatingMu                      *StatisticFloatSet         `json:"SkillRatingMu"`
+	SkillRatingSigma                   *StatisticFloatSet         `json:"SkillRatingSigma"`
+	RankPercentile                     *StatisticFloatSet         `json:"RankPercentile"`
+	LobbyTime                          *StatisticFloatSet         `json:"LobbyTime"`
 }
 
 func (s *CombatStatistics) CalculateFields() {
@@ -318,7 +318,7 @@ func (s *CombatStatistics) CalculateFields() {
 }
 
 type GenericStats struct { // Privates and Social Lobby
-	LobbyTime *StatisticAdditionFloat `json:"LobbyTime"`
+	LobbyTime *StatisticFloatIncrement `json:"LobbyTime"`
 }
 
 func (GenericStats) CalculateFields() {}
@@ -371,34 +371,29 @@ func (s *FloatStatistic) FromScore(score, subscore int64) {
 	s.Value, _ = strconv.ParseFloat(fmt.Sprintf("%d.%d", score, subscore), 64)
 }
 
-type StatisticAdditionInteger struct {
+type StatisticIntegerIncrement struct {
 	IntegerStatistic
 }
-type StatisticReplacementInteger struct {
+type StatisticIntegerSet struct {
 	IntegerStatistic
 }
-type StatisticMaximumInteger struct {
+type StatisticIntegerBest struct {
 	IntegerStatistic
 }
-type StatisticAverageInteger struct {
-	IntegerStatistic
-}
-type StatisticAdditionFloat struct {
+
+type StatisticFloatIncrement struct {
 	FloatStatistic
 }
-type StatisticReplacementFloat struct {
+type StatisticFloatSet struct {
 	FloatStatistic
 }
-type StatisticMaximumFloat struct {
-	FloatStatistic
-}
-type StatisticAverageFloat struct {
+type StatisticFloatBest struct {
 	FloatStatistic
 }
 
 func NewStatistics() PlayerStatistics {
 	return PlayerStatistics{
-		StatisticsGroup{Mode: ModeArenaPublic, ResetSchedule: ResetScheduleAllTime}: &ArenaStatistics{
+		StatisticsGroup{Mode: ModeArenaPublic, ResetSchedule: ResetScheduleAllTime}: ArenaStatistics{
 			Level: &StatisticIntegerIncrement{
 				IntegerStatistic{
 					Count: 1,
@@ -406,7 +401,7 @@ func NewStatistics() PlayerStatistics {
 				},
 			},
 		},
-		StatisticsGroup{Mode: ModeCombatPublic, ResetSchedule: ResetScheduleAllTime}: &CombatStatistics{
+		StatisticsGroup{Mode: ModeCombatPublic, ResetSchedule: ResetScheduleAllTime}: CombatStatistics{
 			Level: &StatisticIntegerIncrement{
 				IntegerStatistic{
 					Count: 1,
