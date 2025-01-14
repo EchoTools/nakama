@@ -23,6 +23,8 @@ type PlayerInfo struct {
 	EvrID          evr.EvrId `json:"evr_id,omitempty"`
 	ClientIP       string    `json:"client_ip,omitempty"`
 	SessionID      string    `json:"session_id,omitempty"`
+	GeoHash        string    `json:"geohash,omitempty"`
+	PingMillis     int       `json:"ping_ms,omitempty"` // The latency as measured from the ping check.
 	Query          string    `json:"query,omitempty"`
 }
 

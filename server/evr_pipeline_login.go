@@ -233,7 +233,12 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 	defer func() {
 		p.runtimeModule.MetricsCounterAdd("session_authorize", metricsTags, 1)
 	}()
-	// Authentication is complete. Authorize the session.
+
+	// Get the IPQS Data
+	params.ipqs, err = p.ipqsClient.Get(ctx, session.clientIP)
+	if err != nil {
+		logger.Debug("Failed to get IPQS details", zap.Error(err))
+	}
 
 	// Load the login history for audit purposes.
 	loginHistory, err := LoginHistoryLoad(ctx, p.runtimeModule, params.account.User.Id)
@@ -277,12 +282,8 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 			entry := loginHistory.AddPendingAuthorizationIP(params.xpID, session.clientIP, params.loginPayload)
 
 			if p.appBot != nil && p.appBot.dg != nil && p.appBot.dg.State != nil && p.appBot.dg.State.User != nil {
-				ipqs, err := p.ipqsClient.Get(ctx, session.clientIP)
-				if err != nil {
-					logger.Debug("Failed to get IPQS details", zap.Error(err))
-				}
 
-				if err := p.appBot.SendIPApprovalRequest(ctx, params.account.User.Id, entry, ipqs); err != nil {
+				if err := p.appBot.SendIPApprovalRequest(ctx, params.account.User.Id, entry, params.ipqs); err != nil {
 					// The user has DMs from non-friends disabled. Tell them to use the slash command.
 					metricsTags["error"] = "failed_send_ip_approval_request"
 
@@ -825,7 +826,7 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 	playerInfo := label.GetPlayerByEvrID(request.EvrID)
 
 	// If the player isn't in the match, or isn't a player, do not update the stats
-	if playerInfo == nil || playerInfo.Team != BlueTeam && playerInfo.Team != OrangeTeam {
+	if playerInfo == nil || (playerInfo.Team != BlueTeam && playerInfo.Team != OrangeTeam) {
 		return fmt.Errorf("non-player profile update request: %s", request.EvrID.String())
 	}
 
@@ -912,11 +913,12 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.OtherUserProfileRequest)
 
-	tags := make(map[string]string, 0)
+	tags := map[string]string{
+		"error": "nil",
+	}
 	startTime := time.Now()
 
 	defer func() {
-		tags["error"] = "nil"
 		p.metrics.CustomCounter("profile_request_count", tags, 1)
 		p.metrics.CustomTimer("profile_request_latency", tags, time.Since(startTime))
 	}()

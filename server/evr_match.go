@@ -710,7 +710,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 					logger.Warn("Player not found in match: %s", s.XPlatformId)
 					continue
 				}
-				presence.Ping = int(s.Ping)
+				presence.PingMillis = int(s.Ping)
 				presence.RoleAlignment = int(s.TeamIndex)
 			}
 

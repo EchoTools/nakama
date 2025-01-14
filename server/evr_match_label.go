@@ -306,6 +306,7 @@ func (s *MatchLabel) rebuildCache() {
 					RankPercentile: p.RankPercentile,
 					SessionID:      p.SessionID.String(),
 					Query:          p.Query,
+					PingMillis:     p.PingMillis,
 					IsReservation:  s.reservationMap[p.SessionID.String()] != nil,
 				})
 			case evr.ModeCombatPublic, evr.ModeSocialPublic:

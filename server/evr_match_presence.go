@@ -30,6 +30,7 @@ type EvrMatchPresence struct {
 	DiscordID         string       `json:"discord_id,omitempty"`
 	ClientIP          string       `json:"client_ip,omitempty"`
 	ClientPort        string       `json:"client_port,omitempty"`
+	GeoHash           string       `json:"geohash,omitempty"`
 	Username          string       `json:"username,omitempty"`
 	DisplayName       string       `json:"display_name,omitempty"`
 	PartyID           uuid.UUID    `json:"party_id,omitempty"`
@@ -42,7 +43,7 @@ type EvrMatchPresence struct {
 	Query             string       `json:"query,omitempty"` // Their matchmaking query
 	RankPercentile    float64      `json:"rank_percentile,omitempty"`
 	Rating            types.Rating `json:"rating,omitempty"`
-	Ping              int          `json:"ping,omitempty"`
+	PingMillis        int          `json:"ping_ms,omitempty"`
 }
 
 func (p EvrMatchPresence) EntrantID(matchID MatchID) uuid.UUID {
