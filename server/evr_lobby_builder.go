@@ -61,8 +61,9 @@ func (b *LobbyBuilder) handleMatchedEntries(entries [][]*MatchmakerEntry) {
 	}
 }
 
-func (b *LobbyBuilder) extractLatenciesFromEntrants(entrants []*MatchmakerEntry) map[string][][]float64 {
+func (b *LobbyBuilder) extractLatenciesFromEntrants(entrants []*MatchmakerEntry) (map[string][][]float64, map[string]map[string]float64) {
 	latenciesByTeamByExtIP := make(map[string][][]float64, 100)
+	latenciesByPlayerByExtIP := make(map[string]map[string]float64, 100)
 
 	for _, e := range entrants {
 
@@ -70,21 +71,27 @@ func (b *LobbyBuilder) extractLatenciesFromEntrants(entrants []*MatchmakerEntry)
 		for k, v := range e.GetProperties() {
 			if extIP, ok := strings.CutPrefix(k, RTTPropertyPrefix); ok {
 				latenciesByTeamByExtIP[extIP] = append(latenciesByTeamByExtIP[extIP], []float64{v.(float64)})
+
+				if _, ok := latenciesByPlayerByExtIP[extIP]; !ok {
+					latenciesByPlayerByExtIP[extIP] = make(map[string]float64, 8)
+				}
+
+				latenciesByPlayerByExtIP[extIP][e.Presence.UserId] = v.(float64)
 			}
 		}
 	}
 
-	return latenciesByTeamByExtIP
+	return latenciesByTeamByExtIP, latenciesByPlayerByExtIP
 }
 
 // SortGameServerIPs sorts the game server IPs by latency, returning a slice of external IP addresses
-func (b *LobbyBuilder) rankEndpointsByAverageLatency(entrants []*MatchmakerEntry) map[string]int {
+func (b *LobbyBuilder) rankEndpointsByAverageLatency(entrants []*MatchmakerEntry) (map[string]int, map[string]map[string]float64) {
 
-	latencies := b.extractLatenciesFromEntrants(entrants)
+	latenciesByTeamByExtIP, latenciesByPlayerByExtIP := b.extractLatenciesFromEntrants(entrants)
 
-	meanRTTByExtIP := make(map[string]int, len(latencies))
+	meanRTTByExtIP := make(map[string]int, len(latenciesByTeamByExtIP))
 
-	for extIP, latenciesByTeam := range latencies {
+	for extIP, latenciesByTeam := range latenciesByTeamByExtIP {
 		// Calculate the mean RTT across the lobby
 		var sum float64
 		for _, teamLatencies := range latenciesByTeam {
@@ -97,17 +104,17 @@ func (b *LobbyBuilder) rankEndpointsByAverageLatency(entrants []*MatchmakerEntry
 		meanRTTByExtIP[extIP] = int(meanRTT)
 	}
 
-	return meanRTTByExtIP
+	return meanRTTByExtIP, latenciesByPlayerByExtIP
 }
 
 // SortGameServerIPs sorts the game server IPs by latency, returning a slice of external IP addresses
 func (b *LobbyBuilder) rankEndpointsByServerScore(entrants []*MatchmakerEntry) []string {
 
-	latencies := b.extractLatenciesFromEntrants(entrants)
+	latenciesByTeamByExtIP, _ := b.extractLatenciesFromEntrants(entrants)
 
-	scoresByExtIP := make(map[string]float64, len(latencies))
+	scoresByExtIP := make(map[string]float64, len(latenciesByTeamByExtIP))
 
-	for extIP, latenciesByTeam := range latencies {
+	for extIP, latenciesByTeam := range latenciesByTeamByExtIP {
 		score := VRMLServerScore(latenciesByTeam, ServerScoreDefaultMinRTT, ServerScoreDefaultMaxRTT, ServerScoreDefaultThreshold, ServerScorePointsDistribution)
 		scoresByExtIP[extIP] = score
 	}
@@ -177,12 +184,6 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 				continue
 			}
 
-			sessionParams, ok := LoadParams(session.Context())
-			if !ok {
-				logger.Warn("Failed to load session params", zap.String("sid", entry.Entry.Presence.GetSessionId()))
-				continue
-			}
-
 			mu := entry.Entry.NumericProperties["rating_mu"]
 			sigma := entry.Entry.NumericProperties["rating_sigma"]
 			rating := rating.NewWithOptions(&types.OpenSkillOptions{
@@ -201,29 +202,18 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 			}
 
 			sessions = append(sessions, session)
-			entrantPresences = append(entrantPresences, &EvrMatchPresence{
-				Node:           sessionParams.node,
-				UserID:         session.UserID(),
-				SessionID:      session.ID(),
-				LoginSessionID: sessionParams.loginSession.id,
-				Username:       session.Username(),
-				DisplayName:    sessionParams.accountMetadata.GetGroupDisplayNameOrDefault(groupID.String()),
-				EvrID:          sessionParams.xpID,
-				PartyID:        MatchIDFromStringOrNil(entry.Entry.GetPartyId()).UUID,
-				RoleAlignment:  teamIndex,
-				DiscordID:      sessionParams.DiscordID(),
-				ClientIP:       session.ClientIP(),
-				ClientPort:     session.ClientPort(),
-				IsPCVR:         sessionParams.IsPCVR(),
-				Rating:         rating,
-				RankPercentile: percentile,
-				Query:          query,
-			})
+
+			if entrant, err := EntrantPresenceFromSession(session, MatchIDFromStringOrNil(entry.Entry.GetPartyId()).UUID, teamIndex, rating, percentile, groupID.String(), 0, query); err != nil {
+				logger.Error("Failed to create entrant presence", zap.String("sid", session.ID().String()), zap.Error(err))
+				continue
+			} else {
+				entrantPresences = append(entrantPresences, entrant)
+			}
 		}
 	}
 
 	// gameServers := b.rankEndpointsByServerScore(entrants)
-	gameServers := b.rankEndpointsByAverageLatency(entrants)
+	meanRTTByExtIP, latenciesByPlayerByExtIP := b.rankEndpointsByAverageLatency(entrants)
 
 	modestr, ok := entrants[0].StringProperties["game_mode"]
 	if !ok {
@@ -253,7 +243,7 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 		default:
 		}
 
-		label, err = AllocateGameServer(ctx, NewRuntimeGoLogger(logger), b.nk, groupID.String(), gameServers, settings, nil, true, false)
+		label, err = AllocateGameServer(ctx, NewRuntimeGoLogger(logger), b.nk, groupID.String(), meanRTTByExtIP, settings, nil, true, false)
 		if err != nil || label == nil {
 			logger.Error("Failed to allocate game server.", zap.Error(err))
 			<-time.After(5 * time.Second)
@@ -262,7 +252,12 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 		break
 	}
 
-	serverSession := b.sessionRegistry.Get(uuid.FromStringOrNil(label.Broadcaster.SessionID))
+	// Update the entrant ping to the game server
+	for _, p := range entrantPresences {
+		p.PingMillis = int(latenciesByPlayerByExtIP[label.Broadcaster.Endpoint.ExternalIP.String()][p.GetUserId()])
+	}
+
+	serverSession := b.sessionRegistry.Get(label.Broadcaster.SessionID)
 	if serverSession == nil {
 		return fmt.Errorf("failed to get server session")
 	}
