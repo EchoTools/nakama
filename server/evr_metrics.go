@@ -6,39 +6,81 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/heroiclabs/nakama/v3/server/evr"
 	"gonum.org/v1/gonum/stat"
 )
 
+type PlayerTags struct {
+	Group             uuid.UUID
+	Mode              evr.Symbol
+	PlayerGeoHash     string
+	GameServerGeoHash string
+	Latency           int
+}
+
+func NewPlayerTags(group uuid.UUID, mode evr.Symbol, playerGeoHash, gameServerGeoHash string, rtt int) PlayerTags {
+
+	// Reduce the precision of the geohash to two characters
+	if len(playerGeoHash) > 2 {
+		playerGeoHash = playerGeoHash[:2]
+	}
+	if len(gameServerGeoHash) > 2 {
+		gameServerGeoHash = gameServerGeoHash[:2]
+	}
+
+	// Reduce the precision of the latency to 10ms
+	const precision_ms = 10
+
+	return PlayerTags{
+		Group:             group,
+		Mode:              mode,
+		PlayerGeoHash:     playerGeoHash,
+		GameServerGeoHash: gameServerGeoHash,
+		Latency:           ((rtt / 2) + (precision_ms / 2)) / precision_ms * precision_ms,
+	}
+}
+
+func (t PlayerTags) AsMap() map[string]string {
+	return map[string]string{
+		"group":              t.Group.String(),
+		"mode":               t.Mode.String(),
+		"player_geohash":     t.PlayerGeoHash,
+		"gameserver_geohash": t.GameServerGeoHash,
+		"latency":            strconv.Itoa(t.Latency),
+	}
+}
+
 type MatchStateTags struct {
-	Type             string
-	Mode             string
-	Level            string
+	Type             LobbyType
+	Mode             evr.Symbol
+	Level            evr.Symbol
 	OperatorID       string
 	OperatorUsername string
 	IPAddress        string
-	Port             string
+	Port             uint16
 	Group            string
 	Geohash          string
-	Latitude         string
-	Longitude        string
-	ASNumber         string
+	Latitude         float64
+	Longitude        float64
+	ASNumber         int
 }
 
 func (t MatchStateTags) AsMap() map[string]string {
 	return map[string]string{
-		"type":              t.Type,
-		"mode":              t.Mode,
-		"level":             t.Level,
+		"type":              t.Type.String(),
+		"mode":              t.Mode.String(),
+		"level":             t.Level.String(),
 		"operator_id":       t.OperatorID,
 		"operator_username": t.OperatorUsername,
 		"ext_ip":            t.IPAddress,
-		"port":              t.Port,
+		"port":              strconv.Itoa(int(t.Port)),
 		"group":             t.Group,
 		"geohash":           t.Geohash,
-		"latitude":          t.Latitude,
-		"longitude":         t.Longitude,
-		"as_number":         t.ASNumber,
+		"latitude":          strconv.FormatFloat(t.Latitude, 'f', 2, 64),
+		"longitude":         strconv.FormatFloat(t.Longitude, 'f', 2, 64),
+		"as_number":         strconv.Itoa(t.ASNumber),
 	}
 }
 
@@ -120,6 +162,7 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 
 	previouslySeenMatches := make(map[MatchStateTags]struct{})
 	previouslySeenMatchmaking := make(map[MatchmakingStatusTags]struct{})
+	previouslySeenPlayers := make(map[PlayerTags]struct{})
 
 	for {
 
@@ -131,7 +174,7 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 		}
 		seenMatches := make(map[MatchStateTags]struct{})
 
-		operatorUsernames := make(map[string]string)
+		operatorUsernames := make(map[uuid.UUID]string)
 
 		// Get the match states
 		matchStates, err := ListMatchStates(ctx, nk, "")
@@ -164,38 +207,64 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 			}
 
 			stateTags := MatchStateTags{
-				Type:             state.State.LobbyType.String(),
-				Mode:             state.State.Mode.String(),
-				Level:            state.State.Level.String(),
-				OperatorID:       state.State.Broadcaster.OperatorID,
+				Type:             state.State.LobbyType,
+				Mode:             state.State.Mode,
+				Level:            state.State.Level,
+				OperatorID:       state.State.Broadcaster.OperatorID.String(),
 				OperatorUsername: operatorUsername,
 				Group:            groupID.String(),
-				IPAddress:        state.State.Broadcaster.Endpoint.GetExternalIP(),
-				Port:             strconv.Itoa(int(state.State.Broadcaster.Endpoint.Port)),
+				IPAddress:        state.State.Broadcaster.Endpoint.ExternalIP.String(),
+				Port:             state.State.Broadcaster.Endpoint.Port,
 				Geohash:          state.State.Broadcaster.GeoHash,
-				Latitude:         strconv.FormatFloat(state.State.Broadcaster.Latitude, 'f', -1, 64),
-				Longitude:        strconv.FormatFloat(state.State.Broadcaster.Longitude, 'f', -1, 64),
-				ASNumber:         strconv.FormatInt(int64(state.State.Broadcaster.ASNumber), 10),
+				Latitude:         state.State.Broadcaster.Latitude,
+				Longitude:        state.State.Broadcaster.Longitude,
+				ASNumber:         state.State.Broadcaster.ASNumber,
 			}
-
 			playercounts[stateTags] = append(playercounts[stateTags], len(state.State.Players))
 
 			rank_percentiles := make([]float64, 0, len(state.State.Players))
+
 			for _, player := range state.State.Players {
+				tags := NewPlayerTags(groupID, state.State.Mode, player.GeoHash, state.State.Broadcaster.GeoHash, player.PingMillis)
+				playerData[tags] += 1
+
 				rank_percentiles = append(rank_percentiles, float64(player.RankPercentile))
 			}
 
 			percentileVariances[stateTags] = append(percentileVariances[stateTags], stat.Variance(rank_percentiles, nil))
 			matchRankPercentiles[stateTags] = append(matchRankPercentiles[stateTags], state.State.RankPercentile)
 		}
+
+		seenPlayers := make(map[PlayerTags]struct{})
+		// Update the player to game server relationship metrics
+		for tags, count := range playerData {
+			seenPlayers[tags] = struct{}{}
+			tagMap := tags.AsMap()
+			nk.metrics.CustomGauge("player_geodata_gauge", tagMap, float64(count))
+		}
+
+		// Zero out the metrics for the previously seen, but not currently seen players
+		for tags := range previouslySeenPlayers {
+			if _, ok := seenPlayers[tags]; !ok {
+				tagMap := tags.AsMap()
+				nk.metrics.CustomGauge("player_geodata_gauge", tagMap, 0)
+			}
+		}
+
+		previouslySeenPlayers = seenPlayers
+
 		// Update the metrics
 		for tags, matches := range playercounts {
+
 			seenMatches[tags] = struct{}{}
+
 			playerCount := 0
 			for _, match := range matches {
 				playerCount += match
 			}
+
 			tagMap := tags.AsMap()
+
 			nk.metrics.CustomGauge("match_active_gauge", tagMap, float64(len(matches)))
 			nk.metrics.CustomGauge("player_active_gauge", tagMap, float64(playerCount))
 			nk.metrics.CustomGauge("match_rank_percentile_average_variance", tagMap, stat.Mean(percentileVariances[tags], nil))
