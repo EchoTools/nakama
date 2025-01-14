@@ -104,10 +104,6 @@ func ListMatchStates(ctx context.Context, nk runtime.NakamaModule, query string)
 			return nil, err
 		}
 
-		if state.LobbyType == UnassignedLobby {
-			continue
-		}
-
 		matchStates = append(matchStates, &MatchLabelMeta{
 			State:     &state,
 			TickRate:  int(tickRate),
