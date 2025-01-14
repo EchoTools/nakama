@@ -67,21 +67,22 @@ func (g GuildGroupMemberships) IsMember(groupID string) bool {
 }
 
 type GroupMetadata struct {
-	GuildID                string              `json:"guild_id"`                 // The guild ID
-	RulesText              string              `json:"rules_text"`               // The rules text displayed on the main menu
-	MinimumAccountAgeDays  int                 `json:"minimum_account_age_days"` // The minimum account age in days to be able to play echo on this guild's sessions
-	MembersOnlyMatchmaking bool                `json:"members_only_matchmaking"` // Restrict matchmaking to members only (when this group is the active one)
-	DisableCreateCommand   bool                `json:"disable_create_command"`   // Disable the public allocate command
-	Roles                  *GuildGroupRoles    `json:"roles"`                    // The roles text displayed on the main menu
-	RoleCache              map[string][]string `json:"role_cache"`               // The role cache
-	MatchmakingChannelIDs  map[string]string   `json:"matchmaking_channel_ids"`  // The matchmaking channel IDs
-	DebugChannelID         string              `json:"debug_channel_id"`         // The debug channel
-	AuditChannelID         string              `json:"audit_channel_id"`         // The audit channel
-	ErrorChannelID         string              `json:"error_channel_id"`         // The error channel
-	BlockVPNUsers          bool                `json:"block_vpn_users"`          // Block VPN users
-	FraudScoreThreshold    int                 `json:"fraud_score_threshold"`    // The fraud score threshold
-	AllowedFeatures        []string            `json:"allowed_features"`         // Allowed features
-	LogAlternateAccounts   bool                `json:"log_alternate_accounts"`   // Log alternate accounts
+	GuildID                 string              `json:"guild_id"`                   // The guild ID
+	RulesText               string              `json:"rules_text"`                 // The rules text displayed on the main menu
+	MinimumAccountAgeDays   int                 `json:"minimum_account_age_days"`   // The minimum account age in days to be able to play echo on this guild's sessions
+	MembersOnlyMatchmaking  bool                `json:"members_only_matchmaking"`   // Restrict matchmaking to members only (when this group is the active one)
+	DisableCreateCommand    bool                `json:"disable_create_command"`     // Disable the public allocate command
+	ModeratorsHaveGoldNames bool                `json:"moderators_have_gold_names"` // Moderators have gold display names
+	Roles                   *GuildGroupRoles    `json:"roles"`                      // The roles text displayed on the main menu
+	RoleCache               map[string][]string `json:"role_cache"`                 // The role cache
+	MatchmakingChannelIDs   map[string]string   `json:"matchmaking_channel_ids"`    // The matchmaking channel IDs
+	DebugChannelID          string              `json:"debug_channel_id"`           // The debug channel
+	AuditChannelID          string              `json:"audit_channel_id"`           // The audit channel
+	ErrorChannelID          string              `json:"error_channel_id"`           // The error channel
+	BlockVPNUsers           bool                `json:"block_vpn_users"`            // Block VPN users
+	FraudScoreThreshold     int                 `json:"fraud_score_threshold"`      // The fraud score threshold
+	AllowedFeatures         []string            `json:"allowed_features"`           // Allowed features
+	LogAlternateAccounts    bool                `json:"log_alternate_accounts"`     // Log alternate accounts
 
 	// UserIDs that are required to go to community values when the first join the social lobby
 	CommunityValuesUserIDs []string `json:"community_values_user_ids"`

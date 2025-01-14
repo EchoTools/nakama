@@ -185,9 +185,18 @@ func NewUserServerProfile(ctx context.Context, db *sql.DB, account *api.Account,
 
 	cosmetics = walletToCosmetics(wallet, cosmetics)
 
+	var developerFeatures *evr.DeveloperFeatures
+
 	// Default to their main group if they are not a member of the group
 	if groupID == "" || metadata.GroupDisplayNames[groupID] == "" {
 		groupID = metadata.GetActiveGroupID().String()
+
+	} else if md, err := GetGuildGroupMetadata(ctx, db, groupID); err != nil {
+		return nil, fmt.Errorf("failed to get guild group metadata: %w", err)
+
+	} else if md.IsModerator(account.User.Id) {
+		// Give the user a gold name if they are enabled as a moderator in the guild.
+		developerFeatures = &evr.DeveloperFeatures{}
 	}
 
 	statsBySchedule, _, err := PlayerStatisticsGetID(ctx, db, account.User.Id, groupID, modes, includeDailyWeekly)
@@ -195,7 +204,6 @@ func NewUserServerProfile(ctx context.Context, db *sql.DB, account *api.Account,
 		return nil, fmt.Errorf("failed to get user tablet statistics: %w", err)
 	}
 
-	var developerFeatures *evr.DeveloperFeatures
 	if metadata.DisableAFKTimeout {
 		developerFeatures = &evr.DeveloperFeatures{
 			DisableAfkTimeout: true,
