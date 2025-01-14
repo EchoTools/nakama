@@ -1002,7 +1002,7 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 
 	// Operators may signal their own game servers.
 	// Otherwise, the game server must host for the guild.
-	if label.Broadcaster.OperatorID != userID && !slices.Contains(label.Broadcaster.GroupIDs, uuid.FromStringOrNil(groupID)) {
+	if label.Broadcaster.OperatorID.String() != userID && !slices.Contains(label.Broadcaster.GroupIDs, uuid.FromStringOrNil(groupID)) {
 		return "", runtime.NewError("game server does not host for that guild.", StatusPermissionDenied)
 	}
 

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
@@ -31,7 +30,7 @@ func LobbySessionGet(ctx context.Context, logger *zap.Logger, matchRegistry Matc
 		return nil, nil, fmt.Errorf("failed to unmarshal match label: %w", err)
 	}
 
-	serverSession := sessionRegistry.Get(uuid.FromStringOrNil(label.Broadcaster.SessionID))
+	serverSession := sessionRegistry.Get(label.Broadcaster.SessionID)
 	if serverSession == nil {
 		return nil, nil, fmt.Errorf("failed to get server session")
 	}
@@ -49,7 +48,7 @@ func (p *EvrPipeline) LobbyJoinEntrants(logger *zap.Logger, label *MatchLabel, p
 		return errors.New("session not found")
 	}
 
-	serverSession := p.sessionRegistry.Get(uuid.FromStringOrNil(label.Broadcaster.SessionID))
+	serverSession := p.sessionRegistry.Get(label.Broadcaster.SessionID)
 	if serverSession == nil {
 		return errors.New("server session not found")
 	}

@@ -241,8 +241,8 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 			case <-ticker.C:
 
 				evrPipeline.broadcasterRegistrationBySession.Range(func(key string, value *MatchBroadcaster) bool {
-					if sessionRegistry.Get(uuid.FromStringOrNil(value.SessionID)) == nil {
-						logger.Debug("Housekeeping: Session not found for broadcaster", zap.String("sessionID", value.SessionID))
+					if sessionRegistry.Get(value.SessionID) == nil {
+						logger.Debug("Housekeeping: Session not found for broadcaster", zap.String("sessionID", value.SessionID.String()))
 						evrPipeline.broadcasterRegistrationBySession.Delete(key)
 					}
 					return true

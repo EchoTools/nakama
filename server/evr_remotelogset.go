@@ -278,8 +278,8 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				MatchID:          matchID,
 				MatchMode:        label.Mode,
 				MatchStartedAt:   label.StartTime,
-				ServerID:         label.Broadcaster.SessionID,
-				MatchOperator:    label.Broadcaster.OperatorID,
+				ServerID:         label.Broadcaster.SessionID.String(),
+				MatchOperator:    label.Broadcaster.OperatorID.String(),
 				MatchEndpoint:    label.Broadcaster.Endpoint.String(),
 				ClientIsPCVR:     params.IsPCVR(),
 				ClientUserID:     session.userID.String(),
@@ -297,14 +297,14 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 
 			logger.Warn("Server connection failed", zap.String("username", session.Username()), zap.String("match_id", msg.SessionUUID().String()), zap.String("evr_id", evrID.String()), zap.Any("remote_log_message", msg))
 
-			acct, err := p.runtimeModule.AccountGetId(ctx, label.Broadcaster.OperatorID)
+			acct, err := p.runtimeModule.AccountGetId(ctx, label.Broadcaster.OperatorID.String())
 			if err != nil {
 				logger.Error("Failed to get account", zap.Error(err))
 				continue
 			}
 
 			tags := map[string]string{
-				"operator_id":       label.Broadcaster.OperatorID,
+				"operator_id":       label.Broadcaster.OperatorID.String(),
 				"operator_username": acct.User.Username,
 				"ext_ip":            label.Broadcaster.Endpoint.GetExternalIP(),
 				"port":              strconv.Itoa(int(label.Broadcaster.Endpoint.Port)),
