@@ -57,7 +57,7 @@ func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session
 		}
 	}
 
-	presence, err := EntrantPresenceFromLobbyParams(session, lobbyParams)
+	presence, err := EntrantPresenceFromSession(session, lobbyParams.PartyID, lobbyParams.Role, lobbyParams.GetRating(), lobbyParams.GetRankPercentile(), label.GetGroupID().String(), 0, "")
 	if err != nil {
 		return fmt.Errorf("failed to create presences: %w", err)
 	}

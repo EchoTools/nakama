@@ -26,7 +26,7 @@ const (
 	EarlyQuitStatisticID        = "EarlyQuits"
 )
 
-func MatchmakingRatingLoad(ctx context.Context, nk runtime.NakamaModule, groupID, userID string, mode evr.Symbol) (types.Rating, error) {
+func MatchmakingRatingLoad(ctx context.Context, nk runtime.NakamaModule, userID, groupID string, mode evr.Symbol) (types.Rating, error) {
 	// Look for an existing account.
 
 	var sigma, mu float64
@@ -105,7 +105,7 @@ func MatchmakingRankPercentileLoad(ctx context.Context, nk runtime.NakamaModule,
 	return ScoreToValue(records[0].Score, records[0].Subscore), nil
 }
 
-func MatchmakingRankPercentileStore(ctx context.Context, nk runtime.NakamaModule, userID, username string, groupID string, mode evr.Symbol, percentile float64) error {
+func MatchmakingRankPercentileStore(ctx context.Context, nk runtime.NakamaModule, userID, username, groupID string, mode evr.Symbol, percentile float64) error {
 
 	id := StatisticBoardID(groupID, mode, RankPercentileStatisticID, "alltime")
 
