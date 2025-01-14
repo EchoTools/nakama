@@ -300,12 +300,10 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		}
 	}
 
-	if groupMetadata.BlockVPNUsers && params.isVPN && !groupMetadata.IsVPNBypass(userID) {
+	if groupMetadata.BlockVPNUsers && params.isVPN && !groupMetadata.IsVPNBypass(userID) && params.ipqs != nil {
 		metricsTags["error"] = "vpn_user"
 
-		if ipqs, err := p.ipqsClient.Get(ctx, session.ClientIP()); err != nil {
-			logger.Warn("Failed to get IPQS details", zap.Error(err))
-		} else if ipqs != nil && ipqs.FraudScore >= groupMetadata.FraudScoreThreshold {
+		if params.ipqs.FraudScore >= groupMetadata.FraudScoreThreshold {
 
 			var fields []*discordgo.MessageEmbedField
 
@@ -324,37 +322,37 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 					},
 					{
 						Name:   "Score",
-						Value:  fmt.Sprintf("%d", ipqs.FraudScore),
+						Value:  fmt.Sprintf("%d", params.ipqs.FraudScore),
 						Inline: true,
 					},
 					{
 						Name:   "ISP",
-						Value:  ipqs.ISP,
+						Value:  params.ipqs.ISP,
 						Inline: true,
 					},
 					{
 						Name:   "Organization",
-						Value:  ipqs.Organization,
+						Value:  params.ipqs.Organization,
 						Inline: true,
 					},
 					{
 						Name:   "ASN",
-						Value:  fmt.Sprintf("%d", ipqs.ASN),
+						Value:  fmt.Sprintf("%d", params.ipqs.ASN),
 						Inline: true,
 					},
 					{
 						Name:   "City",
-						Value:  ipqs.City,
+						Value:  params.ipqs.City,
 						Inline: true,
 					},
 					{
 						Name:   "Region",
-						Value:  ipqs.Region,
+						Value:  params.ipqs.Region,
 						Inline: true,
 					},
 					{
 						Name:   "Country",
-						Value:  ipqs.CountryCode,
+						Value:  params.ipqs.CountryCode,
 						Inline: true,
 					},
 				}

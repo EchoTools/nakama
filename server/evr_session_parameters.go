@@ -6,6 +6,7 @@ import (
 
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"github.com/mmcloughlin/geohash"
 	"go.uber.org/atomic"
 )
 
@@ -21,9 +22,10 @@ type SessionParameters struct {
 	authPassword             string // The Password use for authentication
 	userDisplayNameOverride  string // The display name override (user-defined)
 
-	externalServerAddr string // The external server address (IP:port)
-	geoHashPrecision   int    // The geohash precision
-	isVPN              bool   // The user is using a VPN
+	externalServerAddr string        // The external server address (IP:port)
+	geoHashPrecision   int           // The geohash precision
+	isVPN              bool          // The user is using a VPN
+	ipqs               *IPQSResponse // The IPQS data
 
 	supportedFeatures []string          // features from the urlparam
 	requiredFeatures  []string          // required_features from the urlparam
@@ -42,6 +44,7 @@ type SessionParameters struct {
 
 	account              *api.Account                       // The account
 	accountMetadata      *AccountMetadata                   // The account metadata
+	matchmakingSettings  *MatchmakingSettings               // The matchmaking settings
 	displayNames         *DisplayNameHistory                // The display name history
 	profile              *atomic.Pointer[evr.ServerProfile] // The server profile
 	guildGroups          map[string]*GuildGroup             // map[string]*GuildGroup
@@ -92,6 +95,13 @@ func (s *SessionParameters) DiscordID() string {
 		return ""
 	}
 	return s.account.GetCustomId()
+}
+
+func (s *SessionParameters) GeoHash() string {
+	if s.ipqs == nil {
+		return ""
+	}
+	return geohash.EncodeWithPrecision(s.ipqs.Latitude, s.ipqs.Longitude, 2)
 }
 
 func StoreParams(ctx context.Context, params *SessionParameters) {
