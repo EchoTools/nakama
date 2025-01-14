@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"github.com/intinig/go-openskill/types"
 	"go.uber.org/zap"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 func (p *EvrPipeline) lobbyFindSpectate(ctx context.Context, logger *zap.Logger, session *sessionWS, params *LobbySessionParameters) error {
@@ -76,9 +76,10 @@ func (p *EvrPipeline) lobbyFindSpectate(ctx context.Context, logger *zap.Logger,
 					continue
 				}
 
-				entrant, err := EntrantPresenceFromLobbyParams(session, params)
+				entrant, err := EntrantPresenceFromSession(session, uuid.Nil, SpectatorRole, types.Rating{}, 0, label.GetGroupID().String(), 0, "")
 				if err != nil {
-					return status.Errorf(codes.Internal, "failed to create entrant presences: %v", err)
+					logger.Warn("Failed to create entrant presence", zap.String("session_id", session.ID().String()), zap.Error(err))
+					continue
 				}
 
 				entrant.RoleAlignment = SpectatorRole

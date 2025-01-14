@@ -153,7 +153,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		}
 	}
 
-	rating, err := MatchmakingRatingLoad(ctx, p.runtimeModule, r.GetGroupID().String(), userID, mode)
+	rating, err := MatchmakingRatingLoad(ctx, p.runtimeModule, userID, r.GetGroupID().String(), mode)
 	if err != nil {
 		logger.Warn("Failed to load matchmaking rating", zap.Error(err))
 		rating = NewDefaultRating()

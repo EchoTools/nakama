@@ -107,35 +107,35 @@ func NewEntrantID(matchID MatchID, evrID evr.EvrId) uuid.UUID {
 	return uuid.NewV5(matchID.UUID, EntrantIDSaltStr+evrID.String())
 }
 
-func EntrantPresenceFromLobbyParams(session Session, lobbyParams *LobbySessionParameters) (*EvrMatchPresence, error) {
+func EntrantPresenceFromSession(session Session, partyID uuid.UUID, roleAlignment int, rating types.Rating, rankPercentile float64, groupID string, ping int, query string) (*EvrMatchPresence, error) {
 
-	sessionCtx := session.Context()
-	params, ok := LoadParams(sessionCtx)
+	params, ok := LoadParams(session.Context())
 	if !ok {
 		return nil, errors.New("failed to get session parameters")
 	}
 
-	entrant := &EvrMatchPresence{
-		Node:              lobbyParams.Node,
+	return &EvrMatchPresence{
+		Node:              params.node,
 		UserID:            session.UserID(),
 		SessionID:         session.ID(),
 		LoginSessionID:    params.loginSession.ID(),
 		Username:          session.Username(),
-		DisplayName:       params.accountMetadata.GetGroupDisplayNameOrDefault(lobbyParams.GroupID.String()),
+		DisplayName:       params.accountMetadata.GetGroupDisplayNameOrDefault(groupID),
 		EvrID:             params.xpID,
-		PartyID:           lobbyParams.PartyID,
-		RoleAlignment:     lobbyParams.Role,
+		PartyID:           partyID,
+		RoleAlignment:     roleAlignment,
 		DiscordID:         params.DiscordID(),
 		ClientIP:          session.ClientIP(),
 		ClientPort:        session.ClientPort(),
+		GeoHash:           params.GeoHash(),
 		IsPCVR:            params.IsPCVR(),
-		Rating:            lobbyParams.GetRating(),
+		Rating:            rating,
 		SupportedFeatures: params.supportedFeatures,
-		RankPercentile:    lobbyParams.GetRankPercentile(),
+		RankPercentile:    rankPercentile,
 
 		DisableEncryption: params.disableEncryption,
 		DisableMAC:        params.disableMAC,
-	}
-
-	return entrant, nil
+		PingMillis:        ping,
+		Query:             query,
+	}, nil
 }

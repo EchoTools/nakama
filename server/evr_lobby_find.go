@@ -113,7 +113,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	}()
 
 	// Construct the entrant presences for the party members.
-	entrants, err := PrepareEntrantPresences(ctx, logger, session, lobbyParams, entrantSessionIDs...)
+	entrants, err := PrepareEntrantPresences(ctx, logger, p.runtimeModule, p.sessionRegistry, lobbyParams, entrantSessionIDs...)
 	if err != nil {
 		return fmt.Errorf("failed to be party leader.: %w", err)
 	}
@@ -589,27 +589,39 @@ func (p *EvrPipeline) CheckServerPing(ctx context.Context, logger *zap.Logger, s
 	return err
 }
 
-func PrepareEntrantPresences(ctx context.Context, logger *zap.Logger, session *sessionWS, params *LobbySessionParameters, sessionIDs ...uuid.UUID) ([]*EvrMatchPresence, error) {
+func PrepareEntrantPresences(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, sessionRegistry SessionRegistry, lobbyParams *LobbySessionParameters, sessionIDs ...uuid.UUID) ([]*EvrMatchPresence, error) {
 
 	entrantPresences := make([]*EvrMatchPresence, 0, len(sessionIDs))
 	for _, sessionID := range sessionIDs {
-		session := session.sessionRegistry.Get(sessionID)
+		session := sessionRegistry.Get(sessionID)
 		if session == nil {
 			logger.Warn("Session not found", zap.String("sid", sessionID.String()))
 			continue
 		}
 
-		presence, err := EntrantPresenceFromLobbyParams(session, params)
+		rankPercentile, err := MatchmakingRankPercentileLoad(ctx, nk, session.UserID().String(), lobbyParams.GroupID.String(), lobbyParams.Mode)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create entrant presences: %w", err)
+			logger.Warn("Failed to load rank percentile", zap.String("sid", sessionID.String()), zap.Error(err))
+			rankPercentile = ServiceSettings().Matchmaking.RankPercentile.Default
+		}
+
+		rating, err := MatchmakingRatingLoad(ctx, nk, session.UserID().String(), lobbyParams.GroupID.String(), lobbyParams.Mode)
+		if err != nil {
+			logger.Warn("Failed to load rating", zap.String("sid", sessionID.String()), zap.Error(err))
+			rating = NewDefaultRating()
+		}
+
+		presence, err := EntrantPresenceFromSession(session, lobbyParams.PartyID, lobbyParams.Role, rating, rankPercentile, lobbyParams.GroupID.String(), 0, "")
+		if err != nil {
+			logger.Warn("Failed to create entrant presence", zap.String("session_id", session.ID().String()), zap.Error(err))
+			continue
 		}
 
 		entrantPresences = append(entrantPresences, presence)
 	}
 
 	if len(entrantPresences) == 0 {
-		logger.Error("No entrants found. Cancelling matchmaking.")
-		return nil, NewLobbyError(InternalError, "no entrants found")
+		return nil, fmt.Errorf("no entrants found")
 	}
 
 	return entrantPresences, nil
