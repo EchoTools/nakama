@@ -189,7 +189,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(ctx context.Context, logger 
 	}
 
 	// Create the broadcaster config
-	config := broadcasterConfig(session.UserID().String(), session.id.String(), request.ServerID, request.InternalIP, externalIP, externalPort, regions, request.VersionLock, params.serverTags, params.supportedFeatures, request.TimeStepUsecs, ipqsData, params.geoHashPrecision, isNative)
+	config := broadcasterConfig(session.UserID(), session.id, request.ServerID, request.InternalIP, externalIP, externalPort, regions, request.VersionLock, params.serverTags, params.supportedFeatures, request.TimeStepUsecs, ipqsData, params.geoHashPrecision, isNative)
 
 	// Add the operators userID to the group ids. this allows any host to spawn on a server they operate.
 	groupUUIDs := make([]uuid.UUID, 0, len(groupIDs))
@@ -256,7 +256,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(ctx context.Context, logger 
 	return session.SendEvrUnrequire(evr.NewBroadcasterRegistrationSuccess(config.ServerID, config.Endpoint.ExternalIP))
 }
 
-func broadcasterConfig(userId, sessionId string, serverId uint64, internalIP, externalIP net.IP, port uint16, regions []evr.Symbol, versionLock uint64, tags, features []string, timeStepUsecs uint32, ipqs *IPQSResponse, geoPrecision int, isNative bool) *MatchBroadcaster {
+func broadcasterConfig(userId, sessionId uuid.UUID, serverId uint64, internalIP, externalIP net.IP, port uint16, regions []evr.Symbol, versionLock uint64, tags, features []string, timeStepUsecs uint32, ipqs *IPQSResponse, geoPrecision int, isNative bool) *MatchBroadcaster {
 
 	location := ""
 	lat := 0.0

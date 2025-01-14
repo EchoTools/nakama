@@ -88,15 +88,14 @@ type MatchGameMode struct {
 }
 
 type MatchBroadcaster struct {
-	SessionID       string       `json:"sid,omitempty"`              // The broadcaster's Session ID
-	OperatorID      string       `json:"oper,omitempty"`             // The user id of the broadcaster.
+	SessionID       uuid.UUID    `json:"sid,omitempty"`              // The broadcaster's Session ID
+	OperatorID      uuid.UUID    `json:"oper,omitempty"`             // The user id of the broadcaster.
 	GroupIDs        []uuid.UUID  `json:"group_ids,omitempty"`        // The channels this broadcaster will host matches for.
 	Endpoint        evr.Endpoint `json:"endpoint,omitempty"`         // The endpoint data used for connections.
 	VersionLock     evr.Symbol   `json:"version_lock,omitempty"`     // The game build version. (EVR)
 	AppId           string       `json:"app_id,omitempty"`           // The game app id. (EVR)
 	Regions         []evr.Symbol `json:"regions,omitempty"`          // The region the match is hosted in. (Matching Only) (EVR)
 	ServerID        uint64       `json:"server_id,omitempty"`        // The server id of the broadcaster. (EVR)
-	PublisherLock   bool         `json:"publisher_lock,omitempty"`   // Publisher lock (EVR)
 	Features        []string     `json:"features,omitempty"`         // The features of the broadcaster.
 	TimeStepUsecs   uint32       `json:"time_step_usecs,omitempty"`  // The time step in microseconds.
 	Tags            []string     `json:"tags,omitempty"`             // The tags given on the urlparam for the match.
@@ -256,7 +255,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		"uid":      joinPresence.GetUserId(),
 		"username": joinPresence.GetUsername()})
 
-	if joinPresence.GetSessionId() == state.Broadcaster.SessionID {
+	if joinPresence.GetSessionId() == state.Broadcaster.SessionID.String() {
 
 		logger.Debug("Broadcaster joining the match.")
 		state.server = joinPresence
@@ -435,7 +434,7 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 
 	for _, p := range presences {
 		// Game servers don't get added to the presence map.
-		if p.GetSessionId() == state.Broadcaster.SessionID {
+		if p.GetSessionId() == state.Broadcaster.SessionID.String() {
 			continue
 		}
 
@@ -503,7 +502,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 
 	// if the broadcaster is in the presences, then shut down.
 	for _, p := range presences {
-		if p.GetSessionId() == state.Broadcaster.SessionID {
+		if p.GetSessionId() == state.Broadcaster.SessionID.String() {
 			state.server = nil
 
 			logger.Debug("Broadcaster left the match. Shutting down.")

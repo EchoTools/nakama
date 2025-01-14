@@ -2316,7 +2316,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					// Update the list of players in the interaction response
 					var players strings.Builder
 					for _, p := range presences {
-						if p.GetSessionId() == label.Broadcaster.SessionID {
+						if p.GetSessionId() == label.Broadcaster.SessionID.String() {
 							continue
 						}
 						players.WriteString(fmt.Sprintf("<@%s>\n", d.cache.UserIDToDiscordID(p.GetUserId())))
@@ -2427,7 +2427,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					cnt += 1
 					if label, _ := MatchLabelByID(ctx, d.nk, MatchIDFromStringOrNil(p.GetStatus())); label != nil {
 
-						if label.Broadcaster.SessionID == p.GetSessionId() {
+						if label.Broadcaster.SessionID.String() == p.GetSessionId() {
 							continue
 						}
 
@@ -2500,7 +2500,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					continue
 				}
 
-				if label.Broadcaster.SessionID == p.GetSessionId() {
+				if label.Broadcaster.SessionID.String() == p.GetSessionId() {
 					continue
 				}
 

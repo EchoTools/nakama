@@ -239,7 +239,7 @@ func (s *MatchLabel) MetricsTags() map[string]string {
 		"level":       s.Level.String(),
 		"type":        s.LobbyType.String(),
 		"group_id":    s.GetGroupID().String(),
-		"operator_id": s.Broadcaster.OperatorID,
+		"operator_id": s.Broadcaster.OperatorID.String(),
 	}
 
 	if s.server != nil {

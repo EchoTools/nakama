@@ -144,18 +144,21 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 			continue
 		}
 
+		playerData := make(map[PlayerTags]int)
+
 		playercounts := make(map[MatchStateTags][]int)
 
 		groupIDs := make(map[string]struct{})
 
 		percentileVariances := make(map[MatchStateTags][]float64)
 		matchRankPercentiles := make(map[MatchStateTags][]float64)
+
 		for _, state := range matchStates {
 			groupID := state.State.GetGroupID()
 			groupIDs[groupID.String()] = struct{}{}
 			operatorUsername, ok := operatorUsernames[state.State.Broadcaster.OperatorID]
 			if !ok {
-				account, err := nk.AccountGetId(ctx, state.State.Broadcaster.OperatorID)
+				account, err := nk.AccountGetId(ctx, state.State.Broadcaster.OperatorID.String())
 				if err != nil {
 					logger.Error("Error getting account: %v", err)
 					continue

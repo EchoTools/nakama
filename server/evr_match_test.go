@@ -581,8 +581,8 @@ func TestEvrMatch_MatchLoop(t *testing.T) {
 func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 	now := time.Now()
 	serverConfig := MatchBroadcaster{
-		SessionID:  uuid.Must(uuid.NewV4()).String(),
-		OperatorID: uuid.Must(uuid.NewV4()).String(),
+		SessionID:  uuid.Must(uuid.NewV4()),
+		OperatorID: uuid.Must(uuid.NewV4()),
 		ServerID:   12341234,
 		Endpoint: evr.Endpoint{
 			InternalIP: net.ParseIP("1.1.1.1"),
@@ -912,8 +912,8 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 func TestEvrMatch_MatchJoinAttempt_Counts(t *testing.T) {
 	now := time.Now()
 	serverConfig := MatchBroadcaster{
-		SessionID:  uuid.Must(uuid.NewV4()).String(),
-		OperatorID: uuid.Must(uuid.NewV4()).String(),
+		SessionID:  uuid.Must(uuid.NewV4()),
+		OperatorID: uuid.Must(uuid.NewV4()),
 		ServerID:   12341234,
 		Endpoint: evr.Endpoint{
 			InternalIP: net.ParseIP("1.1.1.1"),
