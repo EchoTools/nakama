@@ -340,6 +340,9 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	}
 	params.accountMetadata.account = params.account
 
+	if params.accountMetadata.LoadoutCosmetics.Loadout == (evr.CosmeticLoadout{}) {
+		params.accountMetadata.LoadoutCosmetics.Loadout = evr.DefaultCosmeticLoadout()
+	}
 	// Get the GroupID from the user's metadata
 	params.guildGroups, err = GuildUserGroupsList(ctx, p.runtimeModule, params.account.User.Id)
 	if err != nil {
@@ -412,6 +415,12 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 
 	if err := DisplayNameHistoryStore(ctx, p.runtimeModule, session.userID.String(), params.displayNames); err != nil {
 		logger.Warn("Failed to store display name history", zap.Error(err))
+	}
+
+	if settings, err := LoadMatchmakingSettings(ctx, p.runtimeModule, session.userID.String()); err != nil {
+		logger.Warn("Failed to load matchmaking settings", zap.Error(err))
+	} else {
+		params.matchmakingSettings = &settings
 	}
 
 	s := session
