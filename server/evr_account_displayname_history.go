@@ -350,10 +350,6 @@ func DisplayNameCacheRegexSearch(ctx context.Context, nk runtime.NakamaModule, d
 					matches[userID][groupID][name] = lastUsed
 				}
 			}
-
-			if len(matches[userID][groupID]) == 0 {
-				delete(matches[userID], groupID)
-			}
 		}
 
 		// Add exact matches for usernames
@@ -370,11 +366,20 @@ func DisplayNameCacheRegexSearch(ctx context.Context, nk runtime.NakamaModule, d
 				matches[userID][""][n] = time.Time{}
 			}
 		}
+	}
 
-		if len(matches[userID]) == 0 {
-			delete(matches, userID)
+	// Remove any empty matches
+	for userID, groupMatches := range matches {
+
+		for groupID, names := range groupMatches {
+			if len(names) == 0 {
+				delete(groupMatches, groupID)
+			}
 		}
 
+		if len(groupMatches) == 0 {
+			delete(matches, userID)
+		}
 	}
 
 	if len(matches) > limit {
