@@ -340,8 +340,11 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	}
 	params.accountMetadata.account = params.account
 
+	metadataUpdated := false
+
 	if params.accountMetadata.LoadoutCosmetics.Loadout == (evr.CosmeticLoadout{}) {
 		params.accountMetadata.LoadoutCosmetics.Loadout = evr.DefaultCosmeticLoadout()
+		metadataUpdated = true
 	}
 	// Get the GroupID from the user's metadata
 	params.guildGroups, err = GuildUserGroupsList(ctx, p.runtimeModule, params.account.User.Id)
@@ -382,11 +385,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 
 		params.accountMetadata.SetActiveGroupID(uuid.FromStringOrNil(groupIDs[0]))
 		logger.Debug("Set active group", zap.String("uid", params.account.User.Id), zap.String("gid", params.accountMetadata.ActiveGroupID))
-
-		if err := p.runtimeModule.AccountUpdateId(ctx, params.account.User.Id, "", params.accountMetadata.MarshalMap(), params.accountMetadata.GetActiveGroupDisplayName(), "", "", "", ""); err != nil {
-			metricsTags["error"] = "failed_update_metadata"
-			return fmt.Errorf("failed to update user metadata: %w", err)
-		}
+		metadataUpdated = true
 	}
 
 	if ismember, err := CheckSystemGroupMembership(ctx, p.db, session.userID.String(), GroupGlobalDevelopers); err != nil {
@@ -421,6 +420,13 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		logger.Warn("Failed to load matchmaking settings", zap.Error(err))
 	} else {
 		params.matchmakingSettings = &settings
+	}
+
+	if metadataUpdated {
+		if err := p.runtimeModule.AccountUpdateId(ctx, params.account.User.Id, "", params.accountMetadata.MarshalMap(), params.accountMetadata.GetActiveGroupDisplayName(), "", "", "", ""); err != nil {
+			metricsTags["error"] = "failed_update_metadata"
+			return fmt.Errorf("failed to update user metadata: %w", err)
+		}
 	}
 
 	s := session
