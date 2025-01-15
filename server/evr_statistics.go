@@ -200,22 +200,3 @@ func OperatorToLeaderboardOperator(op int) string {
 		return "set"
 	}
 }
-
-func StatisticOperator(v evr.Statistic) int {
-	switch v.(type) {
-	case *evr.StatisticFloatIncrement:
-		return LeaderboardOperatorIncrement
-	case *evr.StatisticIntegerIncrement:
-		return LeaderboardOperatorIncrement
-	case *evr.StatisticFloatBest:
-		return LeaderboardOperatorBest
-	case *evr.StatisticIntegerBest:
-		return LeaderboardOperatorBest
-	case *evr.StatisticFloatSet:
-		return LeaderboardOperatorSet
-	case *evr.StatisticIntegerSet:
-		return LeaderboardOperatorSet
-	default:
-		return LeaderboardOperatorSet
-	}
-}
