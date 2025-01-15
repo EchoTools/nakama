@@ -261,6 +261,9 @@ func AccountMetadataLoad(ctx context.Context, nk runtime.NakamaModule, userID st
 }
 
 func AccountMetadataSet(ctx context.Context, nk runtime.NakamaModule, userID string, md *AccountMetadata) error {
+	if userID == SystemUserID {
+		return fmt.Errorf("cannot set metadata for system user")
+	}
 	return nk.AccountUpdateId(ctx, userID, "", md.MarshalMap(), "", "", "", "", "")
 }
 
