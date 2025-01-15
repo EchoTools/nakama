@@ -393,7 +393,7 @@ type StatisticFloatBest struct {
 
 func NewStatistics() PlayerStatistics {
 	return PlayerStatistics{
-		StatisticsGroup{Mode: ModeArenaPublic, ResetSchedule: ResetScheduleAllTime}: ArenaStatistics{
+		StatisticsGroup{Mode: ModeArenaPublic, ResetSchedule: ResetScheduleAllTime}: &ArenaStatistics{
 			Level: &StatisticIntegerIncrement{
 				IntegerStatistic{
 					Count: 1,
@@ -401,7 +401,7 @@ func NewStatistics() PlayerStatistics {
 				},
 			},
 		},
-		StatisticsGroup{Mode: ModeCombatPublic, ResetSchedule: ResetScheduleAllTime}: CombatStatistics{
+		StatisticsGroup{Mode: ModeCombatPublic, ResetSchedule: ResetScheduleAllTime}: &CombatStatistics{
 			Level: &StatisticIntegerIncrement{
 				IntegerStatistic{
 					Count: 1,
