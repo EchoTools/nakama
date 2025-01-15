@@ -183,17 +183,21 @@ func (s *IPQSClient) Get(ctx context.Context, ip string) (*IPQSResponse, error) 
 	if ip := net.ParseIP(ip); ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsPrivate() {
 		return nil, nil
 	}
+	startTime := time.Now()
+	metricsTags := map[string]string{"result": "cache_hit"}
+
+	defer func() {
+		s.metrics.CustomTimer("ipqs_request_duration", metricsTags, time.Since(startTime))
+	}()
 
 	var err error
 	var result *IPQSResponse
 	if result, err = s.load(ip); err != nil {
+		metricsTags["result"] = "cache_error"
 		return nil, err
 	} else if result != nil {
-		s.metrics.CustomCounter("ipqs_cache_hit", nil, 1)
 		return result, nil
 	}
-
-	s.metrics.CustomCounter("ipqs_cache_miss", nil, 1)
 
 	ctx, cancelFn := context.WithTimeout(ctx, time.Second*1)
 	defer cancelFn()
@@ -218,16 +222,17 @@ func (s *IPQSClient) Get(ctx context.Context, ip string) (*IPQSResponse, error) 
 	select {
 	case <-ctx.Done():
 		if ctx.Err() == context.DeadlineExceeded {
+			metricsTags["result"] = "request_timeout"
 			s.logger.Warn("IPQS request timed out, failing open.")
-			s.metrics.CustomCounter("ipqs_request_timeout", nil, 1)
 		}
 		return nil, fmt.Errorf("IPQS request timed out")
 	case result := <-resultCh:
 
 		if result == nil {
+			metricsTags["result"] = "request_error"
 			return nil, nil
 		}
-		s.metrics.CustomCounter("ipqs_cache_miss", nil, 1)
+		metricsTags["result"] = "cache_miss"
 		return result, nil
 	}
 
