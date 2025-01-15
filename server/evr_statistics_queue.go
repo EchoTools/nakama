@@ -35,7 +35,7 @@ func NewStatisticsQueue(logger runtime.Logger, nk runtime.NakamaModule) *Statist
 			for _, e := range entries {
 				if _, err := nk.LeaderboardRecordWrite(ctx, e.BoardMeta.ID(), e.UserID, e.DisplayName, e.Score, e.Subscore, map[string]any{}, &e.Override); err != nil {
 					// Try to create the leaderboard
-					operator, sortOrder, cronSchedule := OperatorToLeaderboardOperator(e.BoardMeta.operator), "desc", ResetScheduleToCron(e.BoardMeta.resetSchedule)
+					operator, sortOrder, cronSchedule := OperatorToLeaderboardOperator(e.BoardMeta.Operator), "desc", ResetScheduleToCron(e.BoardMeta.ResetSchedule)
 					if err = nk.LeaderboardCreate(ctx, e.BoardMeta.ID(), true, sortOrder, operator, cronSchedule, map[string]any{}, true); err != nil {
 						logger.Error("Leaderboard create error", zap.Error(err))
 					} else {
@@ -215,33 +215,58 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, ownerID, groupID str
 }
 
 func StatisticsToEntries(userID, displayName, groupID string, mode evr.Symbol, prev, update evr.Statistics) ([]*StatisticsQueueEntry, error) {
-	statsValue := reflect.ValueOf(update).Elem()
-	prevStatsValue := reflect.ValueOf(prev).Elem()
-	statsType := statsValue.Type()
 
-	entries := make([]*StatisticsQueueEntry, 0, statsType.NumField()*3)
-	for i := 0; i < statsType.NumField(); i++ {
+	// Modify the update based on the previous stats
+	for i := 0; i < reflect.ValueOf(update).Elem().NumField(); i++ {
 
-		prev := prevStatsValue.Field(i).Interface().(evr.Statistic)
-		value := statsValue.Field(i).Interface().(evr.Statistic)
+		if !reflect.ValueOf(update).Elem().Field(i).IsNil() {
 
-		t := statsValue.Field(i).Type()
-		statName := t.Field(i).Tag.Get("json")
-		statName = strings.SplitN(statName, ",", 2)[0]
+			stat := reflect.ValueOf(update).Elem().Field(i).Interface().(evr.Statistic)
 
-		// Based on the type of the field, modify the update value
-		var updateValue float64
-		switch statsValue.Field(i).Addr().Elem().Interface().(type) {
-		case evr.StatisticIntegerIncrement:
-			updateValue = value.GetValue() - prev.GetValue()
-		case evr.StatisticFloatIncrement:
-			updateValue = value.GetValue() - prev.GetValue()
-		default:
-			updateValue = value.GetValue()
+			if prevField := reflect.ValueOf(prev).Elem().Field(i); !prevField.IsNil() {
+
+				switch prevStat := prevField.Interface().(type) {
+				case *evr.StatisticIntegerIncrement:
+					stat.SetValue(stat.GetValue() - prevStat.GetValue())
+				case *evr.StatisticFloatIncrement:
+					stat.SetValue(stat.GetValue() - prevStat.GetValue())
+				}
+			}
 		}
+	}
 
-		for _, r := range []evr.ResetSchedule{evr.ResetScheduleDaily, evr.ResetScheduleWeekly, evr.ResetScheduleAllTime} {
-			op := StatisticOperator(value)
+	// construct the entries
+	entries := make([]*StatisticsQueueEntry, 0, 3*reflect.ValueOf(update).Elem().NumField())
+
+	for _, r := range []evr.ResetSchedule{evr.ResetScheduleDaily, evr.ResetScheduleWeekly, evr.ResetScheduleAllTime} {
+
+		for i := 0; i < reflect.ValueOf(update).Elem().NumField(); i++ {
+
+			if reflect.ValueOf(update).Elem().Field(i).IsNil() {
+				continue
+			}
+
+			statName := reflect.ValueOf(update).Elem().Type().Field(i).Tag.Get("json")
+			statName = strings.SplitN(statName, ",", 2)[0]
+			statValue := reflect.ValueOf(update).Elem().Field(i).Interface().(evr.Statistic).GetValue()
+			op := LeaderboardOperatorSet
+			switch reflect.ValueOf(update).Elem().Field(i).Interface().(type) {
+			case *evr.StatisticFloatIncrement:
+				op = LeaderboardOperatorIncrement
+			case *evr.StatisticIntegerIncrement:
+				op = LeaderboardOperatorIncrement
+			case *evr.StatisticFloatBest:
+				op = LeaderboardOperatorBest
+			case *evr.StatisticIntegerBest:
+				op = LeaderboardOperatorBest
+			case *evr.StatisticFloatSet:
+				op = LeaderboardOperatorSet
+			case *evr.StatisticIntegerSet:
+				op = LeaderboardOperatorSet
+			default:
+				op = LeaderboardOperatorSet
+			}
+
 			meta := LeaderboardMeta{
 				GroupID:       groupID,
 				Mode:          mode,
@@ -250,12 +275,7 @@ func StatisticsToEntries(userID, displayName, groupID string, mode evr.Symbol, p
 				ResetSchedule: r,
 			}
 
-			// If the value is zero, or the previous value is zero, do not update the stat
-			if updateValue == 0 {
-				continue
-			}
-
-			score, subscore := ValueToScore(updateValue)
+			score, subscore := ValueToScore(statValue)
 
 			entries = append(entries, &StatisticsQueueEntry{
 				BoardMeta:   meta,
