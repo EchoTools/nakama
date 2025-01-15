@@ -334,8 +334,8 @@ type ArenaUnlocks struct {
 	Banner0023                  bool `json:"rwd_banner_0023,omitempty"`
 	Banner0024                  bool `json:"rwd_banner_0024,omitempty"`
 	Banner0025                  bool `json:"rwd_banner_0025,omitempty"`
-	BannerStub1                 bool `json:"rwd_banner_0030,omitempty" validate:"blocked"`
-	BannerStub2                 bool `json:"rwd_banner_0031,omitempty" validate:"blocked"`
+	BannerStub1                 bool `json:"rwd_banner_0030" validate:"blocked"`
+	BannerStub2                 bool `json:"rwd_banner_0031" validate:"blocked"`
 	BannerLoneEcho2_A           bool `json:"rwd_banner_lone_echo_2_a,omitempty"`
 	BannerS1Basic               bool `json:"rwd_banner_s1_basic,omitempty"`
 	BannerS1BoldStripe          bool `json:"rwd_banner_s1_bold_stripe,omitempty"`
@@ -492,8 +492,8 @@ type ArenaUnlocks struct {
 	Decal0018                   bool `json:"rwd_decal_0018,omitempty"`
 	Decal0019                   bool `json:"rwd_decal_0019,omitempty"`
 	Decal0020                   bool `json:"rwd_decal_0020,omitempty"`
-	DecalStub1                  bool `json:"rwd_decal_0023,omitempty" validate:"blocked"`
-	DecalStub2                  bool `json:"rwd_decal_0024,omitempty" validate:"blocked"`
+	DecalStub1                  bool `json:"rwd_decal_0023" validate:"blocked"`
+	DecalStub2                  bool `json:"rwd_decal_0024" validate:"blocked"`
 	DecalAlienHeadA             bool `json:"decal_alien_head_a,omitempty"`
 	DecalAnniversaryCupcakeA    bool `json:"decal_anniversary_cupcake_a,omitempty"`
 	DecalAxolotlS2A             bool `json:"rwd_decal_axolotl_s2_a,omitempty"`
@@ -553,17 +553,17 @@ type ArenaUnlocks struct {
 	DecalLoneEcho2_A            bool `json:"rwd_decal_lone_echo_2_a,omitempty"`
 	DecalMusicNoteA             bool `json:"decal_music_note_a,omitempty"`
 	DecalNarwhalA               bool `json:"rwd_decal_narwhal_a,omitempty"`
-	DecalOculusA                bool `json:"decal_oculus_a,omitempty"  validate:"restricted"`
-	DecalOneYearA               bool `json:"decal_one_year_a,omitempty" validate:"restricted"`
+	DecalOculusA                bool `json:"decal_oculus_a" validate:"restricted"`
+	DecalOneYearA               bool `json:"decal_one_year_a" validate:"restricted"`
 	DecalOniA                   bool `json:"rwd_decal_oni_a,omitempty"`
 	DecalPenguinA               bool `json:"decal_penguin_a,omitempty"`
 	DecalPepperA                bool `json:"rwd_decal_pepper_a,omitempty"`
 	DecalPresentA               bool `json:"decal_present_a,omitempty"`
 	DecalProfileWolfA           bool `json:"decal_profile_wolf_a,omitempty"`
-	DecalQuestLaunchA           bool `json:"decal_quest_launch_a,omitempty" validate:"restricted"`
+	DecalQuestLaunchA           bool `json:"decal_quest_launch_a" validate:"restricted"`
 	DecalRadioactiveA           bool `json:"decal_radioactive_a,omitempty"`
 	DecalRadioactiveBioA        bool `json:"decal_radioactive_bio_a,omitempty"`
-	DecalRadLogo                bool `json:"decal_radlogo_a,omitempty" validate:"restricted"`
+	DecalRadLogo                bool `json:"decal_radlogo_a" validate:"restricted"`
 	DecalRageWolfA              bool `json:"decal_rage_wolf_a,omitempty"`
 	DecalRamenA                 bool `json:"rwd_decal_ramen_a,omitempty"`
 	DecalRayGunA                bool `json:"decal_ray_gun_a,omitempty"`
@@ -585,7 +585,7 @@ type ArenaUnlocks struct {
 	DecalSummerSubmarineA       bool `json:"decal_summer_submarine_a,omitempty"`
 	DecalSummerWhaleA           bool `json:"decal_summer_whale_a,omitempty"`
 	DecalSwordsA                bool `json:"decal_swords_a,omitempty"`
-	DecalVRML                   bool `json:"decal_vrml_a,omitempty" validate:"restricted"`
+	DecalVRML                   bool `json:"decal_vrml_a" validate:"restricted"`
 	DecalWreathA                bool `json:"decal_wreath_a,omitempty"`
 	Emissive0001                bool `json:"rwd_emissive_0001,omitempty"`
 	Emissive0002                bool `json:"rwd_emissive_0002,omitempty"`
@@ -658,7 +658,7 @@ type ArenaUnlocks struct {
 	EmoteGingerbreadManA        bool `json:"emote_gingerbread_man_a,omitempty"`
 	EmoteHeartEyesA             bool `json:"emote_heart_eyes_a,omitempty"`
 	EmoteHourglassA             bool `json:"emote_hourglass_a,omitempty"`
-	EmoteKissyLipsA             bool `json:"emote_kissy_lips_a,omitempty" validate:"restricted"`
+	EmoteKissyLipsA             bool `json:"emote_kissy_lips_a" validate:"restricted"`
 	EmoteLightbulbA             bool `json:"emote_lightbulb_a,omitempty"`
 	EmoteLightningA             bool `json:"rwd_emote_lightning_a,omitempty"`
 	EmoteLoadingA               bool `json:"emote_loading_a,omitempty"`
@@ -688,7 +688,7 @@ type ArenaUnlocks struct {
 	EmoteStinkyPoopA            bool `json:"emote_stinky_poop_a,omitempty"`
 	EmoteTearDropA              bool `json:"emote_tear_drop_a,omitempty"`
 	EmoteUwuS2A                 bool `json:"emote_uwu_s2_a,omitempty"`
-	EmoteVRMLA                  bool `json:"emote_vrml_a,omitempty" validate:"restricted"`
+	EmoteVRMLA                  bool `json:"emote_vrml_a" validate:"restricted"`
 	EmoteWifiSymbolA            bool `json:"emote_wifi_symbol_a,omitempty"`
 	EmoteWinkyTongueA           bool `json:"emote_winky_tongue_a,omitempty"`
 	GoalFx0002                  bool `json:"rwd_goal_fx_0002,omitempty"`
@@ -696,7 +696,7 @@ type ArenaUnlocks struct {
 	GoalFx0004                  bool `json:"rwd_goal_fx_0004,omitempty"`
 	GoalFx0005                  bool `json:"rwd_goal_fx_0005,omitempty"`
 	GoalFx0008                  bool `json:"rwd_goal_fx_0008,omitempty"`
-	GoalFx0009                  bool `json:"rwd_goal_fx_0009,omitempty" validate:"blocked"`
+	GoalFx0009                  bool `json:"rwd_goal_fx_0009" validate:"blocked"`
 	GoalFx0010                  bool `json:"rwd_goal_fx_0010,omitempty"`
 	GoalFx0011                  bool `json:"rwd_goal_fx_0011,omitempty"`
 	GoalFx0012                  bool `json:"rwd_goal_fx_0012,omitempty"`
@@ -719,7 +719,7 @@ type ArenaUnlocks struct {
 	Medal0014                   bool `json:"rwd_medal_0014,omitempty"`
 	Medal0015                   bool `json:"rwd_medal_0015,omitempty"`
 	Medal0016                   bool `json:"rwd_medal_0016,omitempty"`
-	Medal0017                   bool `json:"rwd_medal_0017,omitempty" validate:"blocked"`
+	Medal0017                   bool `json:"rwd_medal_0017" validate:"blocked"`
 	MedalDefault                bool `json:"rwd_medal_default,omitempty"`
 	MedalLoneEcho2_A            bool `json:"rwd_medal_lone_echo_2_a,omitempty"`
 	MedalS1ArenaBronze          bool `json:"rwd_medal_s1_arena_bronze,omitempty"`
@@ -735,19 +735,19 @@ type ArenaUnlocks struct {
 	MedalS3EchoPassBronzeA      bool `json:"rwd_medal_s3_echo_pass_bronze_a,omitempty" `
 	MedalS3EchoPassGoldA        bool `json:"rwd_medal_s3_echo_pass_gold_a,omitempty" `
 	MedalS3EchoPassSilverA      bool `json:"rwd_medal_s3_echo_pass_silver_a,omitempty" `
-	MedalVRMLPreseason          bool `json:"rwd_medal_s1_vrml_preseason,omitempty" validate:"restricted"`
-	MedalVRMLS1                 bool `json:"rwd_medal_s1_vrml_s1_user,omitempty" validate:"restricted"`
-	MedalVRMLS1Champion         bool `json:"rwd_medal_s1_vrml_s1_champion,omitempty" validate:"restricted"`
-	MedalVRMLS1Finalist         bool `json:"rwd_medal_s1_vrml_s1_finalist,omitempty" validate:"restricted"`
-	MedalVRMLS2                 bool `json:"rwd_medal_s1_vrml_s2,omitempty" validate:"restricted"`
-	MedalVRMLS2Champion         bool `json:"rwd_medal_s1_vrml_s2_champion,omitempty" validate:"restricted"`
-	MedalVRMLS2Finalist         bool `json:"rwd_medal_s1_vrml_s2_finalist,omitempty" validate:"restricted"`
-	MedalVRMLS3                 bool `json:"rwd_medal_s1_vrml_s3,omitempty" validate:"restricted"`
-	MedalVRMLS3Champion         bool `json:"rwd_medal_s1_vrml_s3_champion,omitempty" validate:"restricted"`
-	MedalVRMLS3Finalist         bool `json:"rwd_medal_s1_vrml_s3_finalist,omitempty" validate:"restricted"`
-	MedalVRMLS4                 bool `json:"rwd_medal_0006,omitempty"  validate:"restricted"`
-	MedalVRMLS4Finalist         bool `json:"rwd_medal_0007,omitempty"  validate:"restricted"`
-	MedalVRMLS4Champion         bool `json:"rwd_medal_0008,omitempty"  validate:"restricted"`
+	MedalVRMLPreseason          bool `json:"rwd_medal_s1_vrml_preseason" validate:"restricted"`
+	MedalVRMLS1                 bool `json:"rwd_medal_s1_vrml_s1_user" validate:"restricted"`
+	MedalVRMLS1Champion         bool `json:"rwd_medal_s1_vrml_s1_champion" validate:"restricted"`
+	MedalVRMLS1Finalist         bool `json:"rwd_medal_s1_vrml_s1_finalist" validate:"restricted"`
+	MedalVRMLS2                 bool `json:"rwd_medal_s1_vrml_s2" validate:"restricted"`
+	MedalVRMLS2Champion         bool `json:"rwd_medal_s1_vrml_s2_champion" validate:"restricted"`
+	MedalVRMLS2Finalist         bool `json:"rwd_medal_s1_vrml_s2_finalist" validate:"restricted"`
+	MedalVRMLS3                 bool `json:"rwd_medal_s1_vrml_s3" validate:"restricted"`
+	MedalVRMLS3Champion         bool `json:"rwd_medal_s1_vrml_s3_champion" validate:"restricted"`
+	MedalVRMLS3Finalist         bool `json:"rwd_medal_s1_vrml_s3_finalist" validate:"restricted"`
+	MedalVRMLS4                 bool `json:"rwd_medal_0006" validate:"restricted"`
+	MedalVRMLS4Finalist         bool `json:"rwd_medal_0007" validate:"restricted"`
+	MedalVRMLS4Champion         bool `json:"rwd_medal_0008" validate:"restricted"`
 	Pattern0000                 bool `json:"rwd_pattern_0000,omitempty"`
 	Pattern0001                 bool `json:"rwd_pattern_0001,omitempty"`
 	Pattern0002                 bool `json:"rwd_pattern_0002,omitempty"`
@@ -848,10 +848,10 @@ type ArenaUnlocks struct {
 	Pip0023                     bool `json:"rwd_pip_0023,omitempty"`
 	Pip0024                     bool `json:"rwd_pip_0024,omitempty"`
 	Pip0025                     bool `json:"rwd_pip_0025,omitempty"`
-	PipStubUi                   bool `json:"rwd_pip_0026,omitempty" validate:"blocked"`
-	PlaceholderBooster          bool `json:"rwd_booster_ranger_a,omitempty" validate:"blocked"`
-	PlaceholderBracer           bool `json:"rwd_bracer_ranger_a,omitempty" validate:"blocked"`
-	PlaceholderChassis          bool `json:"rwd_chassis_ranger_a,omitempty" validate:"blocked"`
+	PipStubUi                   bool `json:"rwd_pip_0026" validate:"blocked"`
+	PlaceholderBooster          bool `json:"rwd_booster_ranger_a" validate:"blocked"`
+	PlaceholderBracer           bool `json:"rwd_bracer_ranger_a" validate:"blocked"`
+	PlaceholderChassis          bool `json:"rwd_chassis_ranger_a" validate:"blocked"`
 	RWDBanner0004               bool `json:"rwd_banner_0004,omitempty"`
 	RWDBanner0005               bool `json:"rwd_banner_0005,omitempty"`
 	RWDBanner0006               bool `json:"rwd_banner_0006,omitempty"`
@@ -941,7 +941,7 @@ type ArenaUnlocks struct {
 	RWDEmote0009                bool `json:"rwd_emote_0009,omitempty"`
 	RWDEmote0013                bool `json:"rwd_emote_0013,omitempty"`
 	RWDEmote0014                bool `json:"rwd_emote_0014,omitempty"`
-	RWDEmoteGhost               bool `json:"rwd_emote_0015,omitempty" validate:"restricted"`
+	RWDEmoteGhost               bool `json:"rwd_emote_0015" validate:"restricted"`
 	RWDEmote0021                bool `json:"rwd_emote_0021,omitempty"`
 	RWDEmote0022                bool `json:"rwd_emote_0022,omitempty"`
 	RWDEmote0023                bool `json:"rwd_emote_0023,omitempty"`
@@ -980,11 +980,11 @@ type ArenaUnlocks struct {
 	RWDTitle0017                bool `json:"rwd_title_0017,omitempty"`
 	RWDTitle0018                bool `json:"rwd_title_0018,omitempty"`
 	RWDTitle0019                bool `json:"rwd_title_0019,omitempty"`
-	StubMedal0018               bool `json:"rwd_medal_0018,omitempty" validate:"blocked"`
-	StubMedal0019               bool `json:"rwd_medal_0019,omitempty" validate:"blocked"`
-	StubPattern0013             bool `json:"rwd_pattern_0013,omitempty" validate:"blocked"`
-	StubPattern0014             bool `json:"rwd_pattern_0014,omitempty" validate:"blocked"`
-	StubPattern0015             bool `json:"rwd_pattern_0015,omitempty" validate:"blocked"`
+	StubMedal0018               bool `json:"rwd_medal_0018" validate:"blocked"`
+	StubMedal0019               bool `json:"rwd_medal_0019" validate:"blocked"`
+	StubPattern0013             bool `json:"rwd_pattern_0013" validate:"blocked"`
+	StubPattern0014             bool `json:"rwd_pattern_0014" validate:"blocked"`
+	StubPattern0015             bool `json:"rwd_pattern_0015" validate:"blocked"`
 	StubPattern0022             bool `json:"rwd_pattern_0022,omitempty"  validate:"blocked"`
 	Tag0000                     bool `json:"rwd_tag_0000,omitempty" `
 	Tag0001                     bool `json:"rwd_tag_0001,omitempty"`
@@ -993,30 +993,30 @@ type ArenaUnlocks struct {
 	Tag0005                     bool `json:"rwd_tag_0005,omitempty"`
 	Tag0006                     bool `json:"rwd_tag_0006,omitempty"`
 	Tag0007                     bool `json:"rwd_tag_0007,omitempty"`
-	Tag0012                     bool `json:"rwd_tag_0012,omitempty" validate:"blocked"`
-	Tag0013                     bool `json:"rwd_tag_0013,omitempty" validate:"blocked"`
-	Tag0014                     bool `json:"rwd_tag_0014,omitempty" validate:"blocked"`
-	Tag0015                     bool `json:"rwd_tag_0015,omitempty" validate:"blocked"`
-	Tag0018                     bool `json:"rwd_tag_0018,omitempty" validate:"blocked"`
-	Tag0019                     bool `json:"rwd_tag_0019,omitempty" validate:"blocked"`
-	Tag0020                     bool `json:"rwd_tag_0020,omitempty" validate:"blocked"`
-	Tag0021                     bool `json:"rwd_tag_0021,omitempty" validate:"blocked"`
-	Tag0023                     bool `json:"rwd_tag_0023,omitempty" validate:"blocked"`
-	Tag0025                     bool `json:"rwd_tag_0025,omitempty" validate:"blocked"`
-	Tag0026                     bool `json:"rwd_tag_0026,omitempty" validate:"blocked"`
-	Tag0027                     bool `json:"rwd_tag_0027,omitempty" validate:"blocked"`
-	Tag0028                     bool `json:"rwd_tag_0028,omitempty" validate:"blocked"`
-	Tag0029                     bool `json:"rwd_tag_0029,omitempty" validate:"blocked"`
-	Tag0030                     bool `json:"rwd_tag_0030,omitempty" validate:"blocked"`
-	Tag0031                     bool `json:"rwd_tag_0031,omitempty" validate:"blocked"`
-	Tag0033                     bool `json:"rwd_tag_0033,omitempty" validate:"blocked"`
-	Tag0034                     bool `json:"rwd_tag_0034,omitempty" validate:"blocked"`
-	Tag0038                     bool `json:"rwd_tag_0038,omitempty" validate:"blocked"`
-	Tag0039                     bool `json:"rwd_tag_0039,omitempty" validate:"blocked"`
+	Tag0012                     bool `json:"rwd_tag_0012" validate:"blocked"`
+	Tag0013                     bool `json:"rwd_tag_0013" validate:"blocked"`
+	Tag0014                     bool `json:"rwd_tag_0014" validate:"blocked"`
+	Tag0015                     bool `json:"rwd_tag_0015" validate:"blocked"`
+	Tag0018                     bool `json:"rwd_tag_0018" validate:"blocked"`
+	Tag0019                     bool `json:"rwd_tag_0019" validate:"blocked"`
+	Tag0020                     bool `json:"rwd_tag_0020" validate:"blocked"`
+	Tag0021                     bool `json:"rwd_tag_0021" validate:"blocked"`
+	Tag0023                     bool `json:"rwd_tag_0023" validate:"blocked"`
+	Tag0025                     bool `json:"rwd_tag_0025" validate:"blocked"`
+	Tag0026                     bool `json:"rwd_tag_0026" validate:"blocked"`
+	Tag0027                     bool `json:"rwd_tag_0027" validate:"blocked"`
+	Tag0028                     bool `json:"rwd_tag_0028" validate:"blocked"`
+	Tag0029                     bool `json:"rwd_tag_0029" validate:"blocked"`
+	Tag0030                     bool `json:"rwd_tag_0030" validate:"blocked"`
+	Tag0031                     bool `json:"rwd_tag_0031" validate:"blocked"`
+	Tag0033                     bool `json:"rwd_tag_0033" validate:"blocked"`
+	Tag0034                     bool `json:"rwd_tag_0034" validate:"blocked"`
+	Tag0038                     bool `json:"rwd_tag_0038" validate:"blocked"`
+	Tag0039                     bool `json:"rwd_tag_0039" validate:"blocked"`
 	TagDefault                  bool `json:"rwd_tag_default,omitempty"`
-	TagDeveloper                bool `json:"rwd_tag_s1_developer,omitempty" validate:"restricted"`
+	TagDeveloper                bool `json:"rwd_tag_s1_developer" validate:"restricted"`
 	TagDiamonds                 bool `json:"rwd_tag_diamonds_a,omitempty"`
-	TagGameAdmin                bool `json:"rwd_tag_0011,omitempty" validate:"restricted"`
+	TagGameAdmin                bool `json:"rwd_tag_0011" validate:"restricted"`
 	TagLoneEcho2                bool `json:"rwd_tag_lone_echo_2_a,omitempty"`
 	TagS1ASecondary             bool `json:"rwd_tag_s1_a_secondary,omitempty"`
 	TagS1BSecondary             bool `json:"rwd_tag_s1_b_secondary,omitempty"`
@@ -1039,42 +1039,42 @@ type ArenaUnlocks struct {
 	TagS2GSecondary             bool `json:"rwd_tag_s2_g_secondary,omitempty"`
 	TagS2HSecondary             bool `json:"rwd_tag_s2_h_secondary,omitempty"`
 	TagSpearA                   bool `json:"rwd_tag_spear_a,omitempty"`
-	TagStub0002                 bool `json:"rwd_tag_0002,omitempty" validate:"blocked"`
-	TagStub0032                 bool `json:"rwd_tag_0032,omitempty" validate:"blocked"`
-	TagStub0046                 bool `json:"rwd_tag_0046,omitempty" validate:"blocked"`
-	TagStub0047                 bool `json:"rwd_tag_0047,omitempty" validate:"blocked"`
-	TagStub0048                 bool `json:"rwd_tag_0048,omitempty" validate:"blocked"`
-	TagStub0049                 bool `json:"rwd_tag_0049,omitempty" validate:"blocked"`
-	TagStub0050                 bool `json:"rwd_tag_0050,omitempty" validate:"blocked"`
-	TagStub0051                 bool `json:"rwd_tag_0051,omitempty" validate:"blocked"`
-	TagStub0052                 bool `json:"rwd_tag_0052,omitempty" validate:"blocked"`
-	TagStub0053                 bool `json:"rwd_tag_0053,omitempty" validate:"blocked"`
-	TagStub0054                 bool `json:"rwd_tag_0054,omitempty" validate:"blocked"`
-	TagTagUnreleased0024        bool `json:"rwd_tag_0024,omitempty" validate:"blocked"`
+	TagStub0002                 bool `json:"rwd_tag_0002" validate:"blocked"`
+	TagStub0032                 bool `json:"rwd_tag_0032" validate:"blocked"`
+	TagStub0046                 bool `json:"rwd_tag_0046" validate:"blocked"`
+	TagStub0047                 bool `json:"rwd_tag_0047" validate:"blocked"`
+	TagStub0048                 bool `json:"rwd_tag_0048" validate:"blocked"`
+	TagStub0049                 bool `json:"rwd_tag_0049" validate:"blocked"`
+	TagStub0050                 bool `json:"rwd_tag_0050" validate:"blocked"`
+	TagStub0051                 bool `json:"rwd_tag_0051" validate:"blocked"`
+	TagStub0052                 bool `json:"rwd_tag_0052" validate:"blocked"`
+	TagStub0053                 bool `json:"rwd_tag_0053" validate:"blocked"`
+	TagStub0054                 bool `json:"rwd_tag_0054" validate:"blocked"`
+	TagTagUnreleased0024        bool `json:"rwd_tag_0024" validate:"blocked"`
 	TagToriA                    bool `json:"rwd_tag_tori_a,omitempty"`
-	TagUnreleased0022           bool `json:"rwd_tag_0022,omitempty" validate:"blocked"`
-	TagVRMLPreseason            bool `json:"rwd_tag_s1_vrml_preseason,omitempty" validate:"restricted"`
-	TagVRMLS1                   bool `json:"rwd_tag_s1_vrml_s1,omitempty" validate:"restricted"`
-	TagVRMLS1Champion           bool `json:"rwd_tag_s1_vrml_s1_champion,omitempty" validate:"restricted"`
-	TagVRMLS1Finalist           bool `json:"rwd_tag_s1_vrml_s1_finalist,omitempty" validate:"restricted"`
-	TagVRMLS2                   bool `json:"rwd_tag_s1_vrml_s2,omitempty" validate:"restricted"`
-	TagVRMLS2Champion           bool `json:"rwd_tag_s1_vrml_s2_champion,omitempty" validate:"restricted"`
-	TagVRMLS2Finalist           bool `json:"rwd_tag_s1_vrml_s2_finalist,omitempty" validate:"restricted"`
-	TagVRMLS3                   bool `json:"rwd_tag_s1_vrml_s3,omitempty" validate:"restricted"`
-	TagVRMLS3Champion           bool `json:"rwd_tag_s1_vrml_s3_champion,omitempty" validate:"restricted"`
-	TagVRMLS3Finalist           bool `json:"rwd_tag_s1_vrml_s3_finalist,omitempty" validate:"restricted"`
-	TagVRMLS4                   bool `json:"rwd_tag_0008,omitempty" validate:"restricted"`
-	TagVRMLS4Champion           bool `json:"rwd_tag_0010,omitempty" validate:"restricted"`
-	TagVRMLS4Finalist           bool `json:"rwd_tag_0009,omitempty" validate:"restricted"`
-	TagVRMLS5                   bool `json:"rwd_tag_0035,omitempty" validate:"restricted"`
-	TagVRMLS5Champion           bool `json:"rwd_tag_0037,omitempty" validate:"restricted"`
-	TagVRMLS5Finalist           bool `json:"rwd_tag_0036,omitempty" validate:"restricted"`
-	TagVRMLS6                   bool `json:"rwd_tag_0040,omitempty" validate:"restricted"`
-	TagVRMLS6Champion           bool `json:"rwd_tag_0042,omitempty" validate:"restricted"`
-	TagVRMLS6Finalist           bool `json:"rwd_tag_0041,omitempty" validate:"restricted"`
-	TagVRMLS7                   bool `json:"rwd_tag_0043,omitempty" validate:"restricted"`
-	TagVRMLS7Champion           bool `json:"rwd_tag_0045,omitempty" validate:"restricted"`
-	TagVRMLS7Finalist           bool `json:"rwd_tag_0044,omitempty" validate:"restricted"`
+	TagUnreleased0022           bool `json:"rwd_tag_0022" validate:"blocked"`
+	TagVRMLPreseason            bool `json:"rwd_tag_s1_vrml_preseason" validate:"restricted"`
+	TagVRMLS1                   bool `json:"rwd_tag_s1_vrml_s1" validate:"restricted"`
+	TagVRMLS1Champion           bool `json:"rwd_tag_s1_vrml_s1_champion" validate:"restricted"`
+	TagVRMLS1Finalist           bool `json:"rwd_tag_s1_vrml_s1_finalist" validate:"restricted"`
+	TagVRMLS2                   bool `json:"rwd_tag_s1_vrml_s2" validate:"restricted"`
+	TagVRMLS2Champion           bool `json:"rwd_tag_s1_vrml_s2_champion" validate:"restricted"`
+	TagVRMLS2Finalist           bool `json:"rwd_tag_s1_vrml_s2_finalist" validate:"restricted"`
+	TagVRMLS3                   bool `json:"rwd_tag_s1_vrml_s3" validate:"restricted"`
+	TagVRMLS3Champion           bool `json:"rwd_tag_s1_vrml_s3_champion" validate:"restricted"`
+	TagVRMLS3Finalist           bool `json:"rwd_tag_s1_vrml_s3_finalist" validate:"restricted"`
+	TagVRMLS4                   bool `json:"rwd_tag_0008" validate:"restricted"`
+	TagVRMLS4Champion           bool `json:"rwd_tag_0010" validate:"restricted"`
+	TagVRMLS4Finalist           bool `json:"rwd_tag_0009" validate:"restricted"`
+	TagVRMLS5                   bool `json:"rwd_tag_0035" validate:"restricted"`
+	TagVRMLS5Champion           bool `json:"rwd_tag_0037" validate:"restricted"`
+	TagVRMLS5Finalist           bool `json:"rwd_tag_0036" validate:"restricted"`
+	TagVRMLS6                   bool `json:"rwd_tag_0040" validate:"restricted"`
+	TagVRMLS6Champion           bool `json:"rwd_tag_0042" validate:"restricted"`
+	TagVRMLS6Finalist           bool `json:"rwd_tag_0041" validate:"restricted"`
+	TagVRMLS7                   bool `json:"rwd_tag_0043" validate:"restricted"`
+	TagVRMLS7Champion           bool `json:"rwd_tag_0045" validate:"restricted"`
+	TagVRMLS7Finalist           bool `json:"rwd_tag_0044" validate:"restricted"`
 	Tint0000                    bool `json:"rwd_tint_0000,omitempty"`
 	Tint0001                    bool `json:"rwd_tint_0001,omitempty"`
 	Tint0002                    bool `json:"rwd_tint_0002,omitempty"`
@@ -1181,7 +1181,7 @@ type ArenaUnlocks struct {
 	TitleTitleD                 bool `json:"rwd_title_title_d,omitempty"`
 	TitleTitleDefault           bool `json:"rwd_title_title_default,omitempty"`
 	TitleTitleE                 bool `json:"rwd_title_title_e,omitempty"`
-	XPBoostGroupS0101           bool `json:"rwd_xp_boost_group_s01_01,omitempty" validate:"restricted"`
+	XPBoostGroupS0101           bool `json:"rwd_xp_boost_group_s01_01" validate:"restricted"`
 	XPBoostGroupS0102           bool `json:"rwd_xp_boost_group_s01_02,omitempty"`
 	XPBoostGroupS0103           bool `json:"rwd_xp_boost_group_s01_03,omitempty"`
 	XPBoostGroupS0104           bool `json:"rwd_xp_boost_group_s01_04,omitempty"`
