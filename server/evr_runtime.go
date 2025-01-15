@@ -180,7 +180,7 @@ func createCoreGroups(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 
 		if len(groups) == 0 {
 			// Create a nakama core group
-			_, err = nk.GroupCreate(ctx, SystemUserID, name, userId, SystemGroupLangTag, name, "", false, map[string]interface{}{}, 1000)
+			_, err = nk.GroupCreate(ctx, userId, name, userId, SystemGroupLangTag, name, "", false, map[string]interface{}{}, 1000)
 			if err != nil {
 				logger.WithField("err", err).Warn("Group `%s` create error: %v", name, err)
 			}
