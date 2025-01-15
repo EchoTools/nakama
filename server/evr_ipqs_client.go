@@ -148,13 +148,13 @@ func (s *IPQSClient) load(ip string) (*IPQSResponse, error) {
 	if err == redis.Nil {
 		return nil, nil
 	} else if err != nil {
-		return nil, fmt.Errorf("failed to get data from redis: %w", err)
+		return nil, fmt.Errorf("failed to get data from redis: %v", err)
 	}
 
 	var result IPQSResponse
 	err = json.Unmarshal([]byte(cachedData), &result)
 	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal cached data: %w", err)
+		return nil, fmt.Errorf("failed to unmarshal cached data: %v", err)
 	}
 
 	return &result, nil
@@ -163,13 +163,13 @@ func (s *IPQSClient) load(ip string) (*IPQSResponse, error) {
 func (s *IPQSClient) store(ip string, result *IPQSResponse) error {
 	data, err := json.Marshal(result)
 	if err != nil {
-		return fmt.Errorf("failed to marshal data: %w", err)
+		return fmt.Errorf("failed to marshal data: %v", err)
 	}
 
 	err = s.redisClient.Set(ip, data, time.Hour*24*30).Err()
 	if err != nil {
 		s.metrics.CustomCounter("ipqs_cache_store_error", nil, 1)
-		return fmt.Errorf("failed to set data in redis: %w", err)
+		return fmt.Errorf("failed to set data in redis: %v", err)
 	}
 
 	return nil
