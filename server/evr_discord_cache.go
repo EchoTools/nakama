@@ -352,11 +352,11 @@ func (c *DiscordCache) syncMember(ctx context.Context, logger *zap.Logger, disco
 }
 
 func InGameName(m *discordgo.Member) string {
-	if m.Nick != "" {
-		return sanitizeDisplayName(m.Nick)
+	if n := sanitizeDisplayName(m.Nick); n != "" {
+		return n
 	}
-	if m.User.GlobalName != "" {
-		return sanitizeDisplayName(m.User.GlobalName)
+	if n := sanitizeDisplayName(m.User.GlobalName); n != "" {
+		return n
 	}
 	return sanitizeDisplayName(m.User.Username)
 }
