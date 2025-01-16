@@ -1,66 +1,20 @@
 package evr
 
 import (
-	"encoding/json"
-	"fmt"
 	"reflect"
 	"strings"
-
-	"github.com/go-playground/validator/v10"
 )
-
-var (
-	validate *validator.Validate
-
-	EvrIdNil = EvrId{}
-)
-
-func ProfileValidator() *validator.Validate {
-	validate := validator.New()
-	validate.RegisterValidation("restricted", func(fl validator.FieldLevel) bool { return true })
-	validate.RegisterValidation("blocked", forceFalse)
-	validate.RegisterValidation("evrid", func(fl validator.FieldLevel) bool {
-		evrId, err := ParseEvrId(fl.Field().String())
-		if err != nil || evrId.Equals(EvrIdNil) {
-			return false
-		}
-		return true
-	})
-
-	return validate
-}
-
-func forceFalse(fl validator.FieldLevel) bool {
-	fl.Field().Set(reflect.ValueOf(false))
-	return true
-}
-
-// Profiles represents the 'profile' field in the JSON data
-type GameProfiles struct {
-	Client *ClientProfile `json:"client"`
-	Server *ServerProfile `json:"server"`
-}
-
-func UnmarshalGameProfiles(data []byte) (GameProfiles, error) {
-	var r GameProfiles
-	err := json.Unmarshal(data, &r)
-	return r, err
-}
-
-func (r *GameProfiles) Marshal() ([]byte, error) {
-	return json.Marshal(r)
-}
 
 type ClientProfile struct {
-	DisplayName        string            `json:"displayname,omitempty"`                         // Ignored and set by nakama
-	EvrID              EvrId             `json:"xplatformid,omitempty"`                         // Ignored and set by nakama
-	ModifyTime         int64             `json:"modifytime" validate:"gte=0"`                   // Ignored and set by nakama
-	TeamName           string            `json:"teamname,omitempty" validate:"omitempty,ascii"` // The team name shown on the spectator scoreboard overlay
-	CombatWeapon       string            `json:"weapon" validate:"omitnil,oneof=assault blaster rocket scout magnum smg chain rifle"`
-	CombatGrenade      string            `json:"grenade" validate:"omitnil,oneof=arc burst det stun loc"`
-	CombatDominantHand uint8             `json:"weaponarm" validate:"eq=0|eq=1"`
-	CombatAbility      string            `json:"ability" validate:"oneof=buff heal sensor shield wraith"`
-	LegalConsents      LegalConsents     `json:"legal" validate:"required"`
+	DisplayName        string            `json:"displayname,omitempty"` // Ignored and set by nakama
+	EvrID              EvrId             `json:"xplatformid,omitempty"` // Ignored and set by nakama
+	ModifyTime         int64             `json:"modifytime"`            // Ignored and set by nakama
+	TeamName           string            `json:"teamname,omitempty"`    // The team name shown on the spectator scoreboard overlay
+	CombatWeapon       string            `json:"weapon"`
+	CombatGrenade      string            `json:"grenade"`
+	CombatDominantHand uint8             `json:"weaponarm"`
+	CombatAbility      string            `json:"ability"`
+	LegalConsents      LegalConsents     `json:"legal"`
 	MutedPlayers       Players           `json:"mute"`
 	GhostedPlayers     Players           `json:"ghost"`
 	NewPlayerProgress  NewPlayerProgress `json:"npe,omitempty"`
@@ -79,38 +33,7 @@ type EarlyQuitFeatures struct {
 	SteadyPlayerLevel   int   `json:"steadyplayerlevel"`
 }
 
-// MergePlayerData merges a partial PlayerData with a template PlayerData.
-func (base *ClientProfile) Merge(partial *ClientProfile) (*ClientProfile, error) {
-
-	partialJSON, err := json.Marshal(partial)
-	if err != nil {
-		return nil, fmt.Errorf("error marshaling partial data: %w", err)
-	}
-
-	err = json.Unmarshal(partialJSON, &base)
-	if err != nil {
-		return nil, fmt.Errorf("error unmarshaling partial data: %w", err)
-	}
-
-	return base, nil
-}
-
-func (c *ClientProfile) SetDefaults() error {
-	err := validate.Struct(c)
-	if err != nil {
-		return fmt.Errorf("error validating profile: %w", err)
-	}
-
-	return nil
-}
-
-func (c *ClientProfile) String() string {
-	return fmt.Sprintf("ClientProfile{DisplayName: %s, EchoUserIdToken: %s, TeamName: %s, CombatWeapon: %s, CombatGrenade: %s, CombatDominantHand: %d, ModifyTime: %d, CombatAbility: %s, LegalConsents: %v, MutedPlayers: %v, GhostedPlayers: %v, NewPlayerProgress: %v, Customization: %v, Social: %v, NewUnlocks: %v}",
-		c.DisplayName, c.EvrID.Token(), c.TeamName, c.CombatWeapon, c.CombatGrenade, c.CombatDominantHand, c.ModifyTime, c.CombatAbility, c.LegalConsents, c.MutedPlayers, c.GhostedPlayers, c.NewPlayerProgress, c.Customization, c.Social, c.NewUnlocks)
-}
-
 type Customization struct {
-	// WARNING: EchoVR dictates this struct/schema.
 	BattlePassSeasonPoiVersion uint64 `json:"battlepass_season_poi_version,omitempty"` // Battle pass season point of interest version (manually set to 3246)
 	NewUnlocksPoiVersion       uint64 `json:"new_unlocks_poi_version,omitempty"`       // New unlocks point of interest version
 	StoreEntryPoiVersion       uint64 `json:"store_entry_poi_version,omitempty"`       // Store entry point of interest version
@@ -118,12 +41,10 @@ type Customization struct {
 }
 
 type Players struct {
-	// WARNING: EchoVR dictates this struct/schema.
 	Players []EvrId `json:"users"` // List of user IDs
 }
 
 type LegalConsents struct {
-	// WARNING: EchoVR dictates this struct/schema.
 	PointsPolicyVersion int64 `json:"points_policy_version,omitempty"`
 	EulaVersion         int64 `json:"eula_version,omitempty"`
 	GameAdminVersion    int64 `json:"game_admin_version,omitempty"`
@@ -132,7 +53,6 @@ type LegalConsents struct {
 }
 
 type NewPlayerProgress struct {
-	// WARNING: EchoVR dictates this struct/schema.
 	Lobby             NpeMilestone `json:"lobby,omitempty"`                // User has completed the tutorial
 	FirstMatch        NpeMilestone `json:"firstmatch,omitempty"`           // User has completed their first match
 	Movement          NpeMilestone `json:"movement,omitempty"`             // User has completed the movement tutorial
@@ -145,44 +65,42 @@ type NewPlayerProgress struct {
 }
 
 type NpeMilestone struct {
-	// WARNING: EchoVR dictates this struct/schema.
-	Completed bool `json:"completed,omitempty" validate:"boolean"` // User has completed the milestone
+	Completed bool `json:"completed,omitempty"` // User has completed the milestone
 }
 
 type Versioned struct {
-	// WARNING: EchoVR dictates this struct/schema.
-	Version int `json:"version,omitempty" validate:"gte=0"` // A version number, 1 is seen, 0 is not seen ?
+	Version int `json:"version,omitempty"` // A version number, 1 is seen, 0 is not seen ?
 }
 
 type ClientSocial struct {
-	// WARNING: EchoVR dictates this struct/schema.
-	CommunityValuesVersion int64 `json:"community_values_version,omitempty" validate:"gte=0"`
-	SetupVersion           int64 `json:"setup_version,omitempty" validate:"gte=0"`
-	Channel                GUID  `json:"group,omitempty" validate:"uuid_rfc4122"` // The channel. It is a GUID, uppercase.
+	CommunityValuesVersion int64 `json:"community_values_version,omitempty"`
+	SetupVersion           int64 `json:"setup_version,omitempty"`
+	Channel                GUID  `json:"group,omitempty"` // The channel. It is a GUID, uppercase.
 }
 
 type ServerSocial struct {
-	Channel GUID `json:"group,omitempty" validate:"uuid_rfc4122"` // The channel. It is a GUID, uppercase.
+	Channel GUID `json:"group,omitempty"` // The channel. It is a GUID, uppercase.
 }
 
 type ServerProfile struct {
-	// WARNING: EchoVR dictates this struct/schema.
-	DisplayName       string                     `json:"displayname"`                                    // Overridden by nakama
-	EvrID             EvrId                      `json:"xplatformid"`                                    // Overridden by nakama
-	SchemaVersion     int16                      `json:"_version,omitempty" validate:"gte=0"`            // Version of the schema(?)
-	PublisherLock     string                     `json:"publisher_lock,omitempty"`                       // unused atm
-	PurchasedCombat   int8                       `json:"purchasedcombat,omitempty" validate:"eq=0|eq=1"` // unused (combat was made free)
-	LobbyVersion      uint64                     `json:"lobbyversion" validate:"gte=0"`                  // set from the login request
-	LoginTime         int64                      `json:"logintime" validate:"gte=0"`                     // When the player logged in
-	UpdateTime        int64                      `json:"updatetime" validate:"gte=0"`                    // When the profile was last stored.
-	CreateTime        int64                      `json:"createtime" validate:"gte=0"`                    // When the player's nakama account was created.
-	Statistics        PlayerStatistics           `json:"stats,omitempty"`                                // Player statistics
-	MaybeStale        bool                       `json:"maybestale,omitempty" validate:"boolean"`        // If the profile is stale
-	UnlockedCosmetics map[string]map[string]bool `json:"unlocks,omitempty"`                              // Unlocked cosmetics
-	EquippedCosmetics EquippedCosmetics          `json:"loadout,omitempty"`                              // Equipped cosmetics
-	Social            ServerSocial               `json:"social,omitempty"`                               // Social settings
-	Achievements      interface{}                `json:"achievements,omitempty"`                         // Achievements
-	RewardState       interface{}                `json:"reward_state,omitempty"`                         // Reward state?
+	DisplayName       string                     `json:"displayname,omitempty"`
+	EvrID             EvrId                      `json:"xplatformid"`
+	SchemaVersion     int16                      `json:"_version,omitempty"`        // Version of the schema(?)
+	PublisherLock     string                     `json:"publisher_lock,omitempty"`  // unused atm
+	PurchasedCombat   int8                       `json:"purchasedcombat,omitempty"` // unused (combat was made free)
+	LobbyVersion      uint64                     `json:"lobbyversion"`              // set from the login request
+	LoginTime         int64                      `json:"logintime"`                 // When the player logged in
+	UpdateTime        int64                      `json:"updatetime"`                // When the profile was last stored.
+	ModifyTime        int64                      `json:"modifytime"`                // When the profile was last modified.
+	CreateTime        int64                      `json:"createtime"`                // When the player's nakama account was created.
+	CreationTime      int64                      `json:"creationtime" _version:"5"` // When the player's Echo account was created.
+	Statistics        PlayerStatistics           `json:"stats,omitempty"`           // Player statistics
+	MaybeStale        bool                       `json:"maybestale,omitempty"`      // If the profile is stale
+	UnlockedCosmetics map[string]map[string]bool `json:"unlocks,omitempty"`         // Unlocked cosmetics
+	EquippedCosmetics EquippedCosmetics          `json:"loadout,omitempty"`         // Equipped cosmetics
+	Social            ServerSocial               `json:"social,omitempty"`          // Social settings
+	Achievements      interface{}                `json:"achievements,omitempty"`    // Achievements
+	RewardState       interface{}                `json:"reward_state,omitempty"`    // Reward state?
 	// If DeveloperFeatures is not null, the player will have a gold name
 	DeveloperFeatures *DeveloperFeatures `json:"dev,omitempty"` // Developer features
 }
@@ -195,7 +113,7 @@ type DeveloperFeatures struct {
 type EquippedCosmetics struct {
 	Instances  CosmeticInstances `json:"instances"`
 	Number     int               `json:"number"`
-	NumberBody int               `json:"number_body"`
+	NumberBody int               `json:"number_body,omitempty"`
 }
 
 type CosmeticInstances struct {
@@ -204,7 +122,7 @@ type CosmeticInstances struct {
 
 type UnifiedCosmeticInstance struct {
 	Slots             CosmeticLoadout `json:"slots"`
-	ApplyHeraldryTint bool            `json:"apply_heraldry_tint"`
+	ApplyHeraldryTint bool            `json:"apply_heraldry_tint,omitempty"`
 }
 
 type CosmeticLoadout struct {
@@ -214,8 +132,8 @@ type CosmeticLoadout struct {
 	Chassis        string `json:"chassis"`
 	Decal          string `json:"decal"`
 	DecalBody      string `json:"decal_body"`
-	DecalBorder    string `json:"decalborder" _version:"5"`
-	DecalBack      string `json:"decalback" _version:"5"`
+	DecalBorder    string `json:"decalborder,omitempty" _version:"5"`
+	DecalBack      string `json:"decalback,omitempty" _version:"5"`
 	Emissive       string `json:"emissive"`
 	Emote          string `json:"emote"`
 	GoalFX         string `json:"goal_fx"`
@@ -236,6 +154,8 @@ func DefaultCosmeticLoadout() CosmeticLoadout {
 	return CosmeticLoadout{
 		Emote:          "emote_blink_smiley_a",
 		Decal:          "decal_default",
+		DecalBorder:    "rwd_decalborder_default",
+		DecalBack:      "rwd_decalback_default",
 		Tint:           "tint_neutral_a_default",
 		TintAlignmentA: "tint_blue_a_default",
 		TintAlignmentB: "tint_orange_a_default",
@@ -311,9 +231,6 @@ func (u UnlockedCosmetics) ToMap() map[string]map[string]bool {
 }
 
 type ArenaUnlocks struct {
-	// WARNING: EchoVR dictates this struct/schema.
-	// If an unlock needs to be filtered out, use the  validate field tag.
-	// If an unlock must not be allowed ever, use the "isdefault" validator tag.
 
 	/*
 		Decals
@@ -336,8 +253,8 @@ type ArenaUnlocks struct {
 	Banner0023                  bool `json:"rwd_banner_0023,omitempty"`
 	Banner0024                  bool `json:"rwd_banner_0024,omitempty"`
 	Banner0025                  bool `json:"rwd_banner_0025,omitempty"`
-	BannerStub1                 bool `json:"rwd_banner_0030" validate:"blocked"`
-	BannerStub2                 bool `json:"rwd_banner_0031" validate:"blocked"`
+	BannerStub1                 bool `json:"rwd_banner_0030"`
+	BannerStub2                 bool `json:"rwd_banner_0031"`
 	BannerLoneEcho2_A           bool `json:"rwd_banner_lone_echo_2_a,omitempty"`
 	BannerS1Basic               bool `json:"rwd_banner_s1_basic,omitempty"`
 	BannerS1BoldStripe          bool `json:"rwd_banner_s1_bold_stripe,omitempty"`
@@ -494,8 +411,8 @@ type ArenaUnlocks struct {
 	Decal0018                   bool `json:"rwd_decal_0018,omitempty"`
 	Decal0019                   bool `json:"rwd_decal_0019,omitempty"`
 	Decal0020                   bool `json:"rwd_decal_0020,omitempty"`
-	DecalStub1                  bool `json:"rwd_decal_0023" validate:"blocked"`
-	DecalStub2                  bool `json:"rwd_decal_0024" validate:"blocked"`
+	DecalStub1                  bool `json:"rwd_decal_0023"`
+	DecalStub2                  bool `json:"rwd_decal_0024"`
 	DecalAlienHeadA             bool `json:"decal_alien_head_a,omitempty"`
 	DecalAnniversaryCupcakeA    bool `json:"decal_anniversary_cupcake_a,omitempty"`
 	DecalAxolotlS2A             bool `json:"rwd_decal_axolotl_s2_a,omitempty"`
@@ -555,17 +472,17 @@ type ArenaUnlocks struct {
 	DecalLoneEcho2_A            bool `json:"rwd_decal_lone_echo_2_a,omitempty"`
 	DecalMusicNoteA             bool `json:"decal_music_note_a,omitempty"`
 	DecalNarwhalA               bool `json:"rwd_decal_narwhal_a,omitempty"`
-	DecalOculusA                bool `json:"decal_oculus_a" validate:"restricted"`
-	DecalOneYearA               bool `json:"decal_one_year_a" validate:"restricted"`
+	DecalOculusA                bool `json:"decal_oculus_a"`
+	DecalOneYearA               bool `json:"decal_one_year_a"`
 	DecalOniA                   bool `json:"rwd_decal_oni_a,omitempty"`
 	DecalPenguinA               bool `json:"decal_penguin_a,omitempty"`
 	DecalPepperA                bool `json:"rwd_decal_pepper_a,omitempty"`
 	DecalPresentA               bool `json:"decal_present_a,omitempty"`
 	DecalProfileWolfA           bool `json:"decal_profile_wolf_a,omitempty"`
-	DecalQuestLaunchA           bool `json:"decal_quest_launch_a" validate:"restricted"`
+	DecalQuestLaunchA           bool `json:"decal_quest_launch_a"`
 	DecalRadioactiveA           bool `json:"decal_radioactive_a,omitempty"`
 	DecalRadioactiveBioA        bool `json:"decal_radioactive_bio_a,omitempty"`
-	DecalRadLogo                bool `json:"decal_radlogo_a" validate:"restricted"`
+	DecalRadLogo                bool `json:"decal_radlogo_a"`
 	DecalRageWolfA              bool `json:"decal_rage_wolf_a,omitempty"`
 	DecalRamenA                 bool `json:"rwd_decal_ramen_a,omitempty"`
 	DecalRayGunA                bool `json:"decal_ray_gun_a,omitempty"`
@@ -587,7 +504,7 @@ type ArenaUnlocks struct {
 	DecalSummerSubmarineA       bool `json:"decal_summer_submarine_a,omitempty"`
 	DecalSummerWhaleA           bool `json:"decal_summer_whale_a,omitempty"`
 	DecalSwordsA                bool `json:"decal_swords_a,omitempty"`
-	DecalVRML                   bool `json:"decal_vrml_a" validate:"restricted"`
+	DecalVRML                   bool `json:"decal_vrml_a"`
 	DecalWreathA                bool `json:"decal_wreath_a,omitempty"`
 	Emissive0001                bool `json:"rwd_emissive_0001,omitempty"`
 	Emissive0002                bool `json:"rwd_emissive_0002,omitempty"`
@@ -660,7 +577,7 @@ type ArenaUnlocks struct {
 	EmoteGingerbreadManA        bool `json:"emote_gingerbread_man_a,omitempty"`
 	EmoteHeartEyesA             bool `json:"emote_heart_eyes_a,omitempty"`
 	EmoteHourglassA             bool `json:"emote_hourglass_a,omitempty"`
-	EmoteKissyLipsA             bool `json:"emote_kissy_lips_a" validate:"restricted"`
+	EmoteKissyLipsA             bool `json:"emote_kissy_lips_a"`
 	EmoteLightbulbA             bool `json:"emote_lightbulb_a,omitempty"`
 	EmoteLightningA             bool `json:"rwd_emote_lightning_a,omitempty"`
 	EmoteLoadingA               bool `json:"emote_loading_a,omitempty"`
@@ -690,7 +607,7 @@ type ArenaUnlocks struct {
 	EmoteStinkyPoopA            bool `json:"emote_stinky_poop_a,omitempty"`
 	EmoteTearDropA              bool `json:"emote_tear_drop_a,omitempty"`
 	EmoteUwuS2A                 bool `json:"emote_uwu_s2_a,omitempty"`
-	EmoteVRMLA                  bool `json:"emote_vrml_a" validate:"restricted"`
+	EmoteVRMLA                  bool `json:"emote_vrml_a"`
 	EmoteWifiSymbolA            bool `json:"emote_wifi_symbol_a,omitempty"`
 	EmoteWinkyTongueA           bool `json:"emote_winky_tongue_a,omitempty"`
 	GoalFx0002                  bool `json:"rwd_goal_fx_0002,omitempty"`
@@ -698,7 +615,7 @@ type ArenaUnlocks struct {
 	GoalFx0004                  bool `json:"rwd_goal_fx_0004,omitempty"`
 	GoalFx0005                  bool `json:"rwd_goal_fx_0005,omitempty"`
 	GoalFx0008                  bool `json:"rwd_goal_fx_0008,omitempty"`
-	GoalFx0009                  bool `json:"rwd_goal_fx_0009" validate:"blocked"`
+	GoalFx0009                  bool `json:"rwd_goal_fx_0009"`
 	GoalFx0010                  bool `json:"rwd_goal_fx_0010,omitempty"`
 	GoalFx0011                  bool `json:"rwd_goal_fx_0011,omitempty"`
 	GoalFx0012                  bool `json:"rwd_goal_fx_0012,omitempty"`
@@ -721,7 +638,7 @@ type ArenaUnlocks struct {
 	Medal0014                   bool `json:"rwd_medal_0014,omitempty"`
 	Medal0015                   bool `json:"rwd_medal_0015,omitempty"`
 	Medal0016                   bool `json:"rwd_medal_0016,omitempty"`
-	Medal0017                   bool `json:"rwd_medal_0017" validate:"blocked"`
+	Medal0017                   bool `json:"rwd_medal_0017"`
 	MedalDefault                bool `json:"rwd_medal_default,omitempty"`
 	MedalLoneEcho2_A            bool `json:"rwd_medal_lone_echo_2_a,omitempty"`
 	MedalS1ArenaBronze          bool `json:"rwd_medal_s1_arena_bronze,omitempty"`
@@ -737,19 +654,19 @@ type ArenaUnlocks struct {
 	MedalS3EchoPassBronzeA      bool `json:"rwd_medal_s3_echo_pass_bronze_a,omitempty" `
 	MedalS3EchoPassGoldA        bool `json:"rwd_medal_s3_echo_pass_gold_a,omitempty" `
 	MedalS3EchoPassSilverA      bool `json:"rwd_medal_s3_echo_pass_silver_a,omitempty" `
-	MedalVRMLPreseason          bool `json:"rwd_medal_s1_vrml_preseason" validate:"restricted"`
-	MedalVRMLS1                 bool `json:"rwd_medal_s1_vrml_s1_user" validate:"restricted"`
-	MedalVRMLS1Champion         bool `json:"rwd_medal_s1_vrml_s1_champion" validate:"restricted"`
-	MedalVRMLS1Finalist         bool `json:"rwd_medal_s1_vrml_s1_finalist" validate:"restricted"`
-	MedalVRMLS2                 bool `json:"rwd_medal_s1_vrml_s2" validate:"restricted"`
-	MedalVRMLS2Champion         bool `json:"rwd_medal_s1_vrml_s2_champion" validate:"restricted"`
-	MedalVRMLS2Finalist         bool `json:"rwd_medal_s1_vrml_s2_finalist" validate:"restricted"`
-	MedalVRMLS3                 bool `json:"rwd_medal_s1_vrml_s3" validate:"restricted"`
-	MedalVRMLS3Champion         bool `json:"rwd_medal_s1_vrml_s3_champion" validate:"restricted"`
-	MedalVRMLS3Finalist         bool `json:"rwd_medal_s1_vrml_s3_finalist" validate:"restricted"`
-	MedalVRMLS4                 bool `json:"rwd_medal_0006" validate:"restricted"`
-	MedalVRMLS4Finalist         bool `json:"rwd_medal_0007" validate:"restricted"`
-	MedalVRMLS4Champion         bool `json:"rwd_medal_0008" validate:"restricted"`
+	MedalVRMLPreseason          bool `json:"rwd_medal_s1_vrml_preseason"`
+	MedalVRMLS1                 bool `json:"rwd_medal_s1_vrml_s1_user"`
+	MedalVRMLS1Champion         bool `json:"rwd_medal_s1_vrml_s1_champion"`
+	MedalVRMLS1Finalist         bool `json:"rwd_medal_s1_vrml_s1_finalist"`
+	MedalVRMLS2                 bool `json:"rwd_medal_s1_vrml_s2"`
+	MedalVRMLS2Champion         bool `json:"rwd_medal_s1_vrml_s2_champion"`
+	MedalVRMLS2Finalist         bool `json:"rwd_medal_s1_vrml_s2_finalist"`
+	MedalVRMLS3                 bool `json:"rwd_medal_s1_vrml_s3"`
+	MedalVRMLS3Champion         bool `json:"rwd_medal_s1_vrml_s3_champion"`
+	MedalVRMLS3Finalist         bool `json:"rwd_medal_s1_vrml_s3_finalist"`
+	MedalVRMLS4                 bool `json:"rwd_medal_0006"`
+	MedalVRMLS4Finalist         bool `json:"rwd_medal_0007"`
+	MedalVRMLS4Champion         bool `json:"rwd_medal_0008"`
 	Pattern0000                 bool `json:"rwd_pattern_0000,omitempty"`
 	Pattern0001                 bool `json:"rwd_pattern_0001,omitempty"`
 	Pattern0002                 bool `json:"rwd_pattern_0002,omitempty"`
@@ -850,10 +767,10 @@ type ArenaUnlocks struct {
 	Pip0023                     bool `json:"rwd_pip_0023,omitempty"`
 	Pip0024                     bool `json:"rwd_pip_0024,omitempty"`
 	Pip0025                     bool `json:"rwd_pip_0025,omitempty"`
-	PipStubUi                   bool `json:"rwd_pip_0026" validate:"blocked"`
-	PlaceholderBooster          bool `json:"rwd_booster_ranger_a" validate:"blocked"`
-	PlaceholderBracer           bool `json:"rwd_bracer_ranger_a" validate:"blocked"`
-	PlaceholderChassis          bool `json:"rwd_chassis_ranger_a" validate:"blocked"`
+	PipStubUi                   bool `json:"rwd_pip_0026"`
+	PlaceholderBooster          bool `json:"rwd_booster_ranger_a"`
+	PlaceholderBracer           bool `json:"rwd_bracer_ranger_a"`
+	PlaceholderChassis          bool `json:"rwd_chassis_ranger_a"`
 	RWDBanner0004               bool `json:"rwd_banner_0004,omitempty"`
 	RWDBanner0005               bool `json:"rwd_banner_0005,omitempty"`
 	RWDBanner0006               bool `json:"rwd_banner_0006,omitempty"`
@@ -943,7 +860,7 @@ type ArenaUnlocks struct {
 	RWDEmote0009                bool `json:"rwd_emote_0009,omitempty"`
 	RWDEmote0013                bool `json:"rwd_emote_0013,omitempty"`
 	RWDEmote0014                bool `json:"rwd_emote_0014,omitempty"`
-	RWDEmoteGhost               bool `json:"rwd_emote_0015" validate:"restricted"`
+	RWDEmoteGhost               bool `json:"rwd_emote_0015"`
 	RWDEmote0021                bool `json:"rwd_emote_0021,omitempty"`
 	RWDEmote0022                bool `json:"rwd_emote_0022,omitempty"`
 	RWDEmote0023                bool `json:"rwd_emote_0023,omitempty"`
@@ -982,12 +899,12 @@ type ArenaUnlocks struct {
 	RWDTitle0017                bool `json:"rwd_title_0017,omitempty"`
 	RWDTitle0018                bool `json:"rwd_title_0018,omitempty"`
 	RWDTitle0019                bool `json:"rwd_title_0019,omitempty"`
-	StubMedal0018               bool `json:"rwd_medal_0018" validate:"blocked"`
-	StubMedal0019               bool `json:"rwd_medal_0019" validate:"blocked"`
-	StubPattern0013             bool `json:"rwd_pattern_0013" validate:"blocked"`
-	StubPattern0014             bool `json:"rwd_pattern_0014" validate:"blocked"`
-	StubPattern0015             bool `json:"rwd_pattern_0015" validate:"blocked"`
-	StubPattern0022             bool `json:"rwd_pattern_0022,omitempty"  validate:"blocked"`
+	StubMedal0018               bool `json:"rwd_medal_0018"`
+	StubMedal0019               bool `json:"rwd_medal_0019"`
+	StubPattern0013             bool `json:"rwd_pattern_0013"`
+	StubPattern0014             bool `json:"rwd_pattern_0014"`
+	StubPattern0015             bool `json:"rwd_pattern_0015"`
+	StubPattern0022             bool `json:"rwd_pattern_0022,omitempty"`
 	Tag0000                     bool `json:"rwd_tag_0000,omitempty" `
 	Tag0001                     bool `json:"rwd_tag_0001,omitempty"`
 	Tag0003                     bool `json:"rwd_tag_0003,omitempty"`
@@ -995,30 +912,30 @@ type ArenaUnlocks struct {
 	Tag0005                     bool `json:"rwd_tag_0005,omitempty"`
 	Tag0006                     bool `json:"rwd_tag_0006,omitempty"`
 	Tag0007                     bool `json:"rwd_tag_0007,omitempty"`
-	Tag0012                     bool `json:"rwd_tag_0012" validate:"blocked"`
-	Tag0013                     bool `json:"rwd_tag_0013" validate:"blocked"`
-	Tag0014                     bool `json:"rwd_tag_0014" validate:"blocked"`
-	Tag0015                     bool `json:"rwd_tag_0015" validate:"blocked"`
-	Tag0018                     bool `json:"rwd_tag_0018" validate:"blocked"`
-	Tag0019                     bool `json:"rwd_tag_0019" validate:"blocked"`
-	Tag0020                     bool `json:"rwd_tag_0020" validate:"blocked"`
-	Tag0021                     bool `json:"rwd_tag_0021" validate:"blocked"`
-	Tag0023                     bool `json:"rwd_tag_0023" validate:"blocked"`
-	Tag0025                     bool `json:"rwd_tag_0025" validate:"blocked"`
-	Tag0026                     bool `json:"rwd_tag_0026" validate:"blocked"`
-	Tag0027                     bool `json:"rwd_tag_0027" validate:"blocked"`
-	Tag0028                     bool `json:"rwd_tag_0028" validate:"blocked"`
-	Tag0029                     bool `json:"rwd_tag_0029" validate:"blocked"`
-	Tag0030                     bool `json:"rwd_tag_0030" validate:"blocked"`
-	Tag0031                     bool `json:"rwd_tag_0031" validate:"blocked"`
-	Tag0033                     bool `json:"rwd_tag_0033" validate:"blocked"`
-	Tag0034                     bool `json:"rwd_tag_0034" validate:"blocked"`
-	Tag0038                     bool `json:"rwd_tag_0038" validate:"blocked"`
-	Tag0039                     bool `json:"rwd_tag_0039" validate:"blocked"`
+	Tag0012                     bool `json:"rwd_tag_0012"`
+	Tag0013                     bool `json:"rwd_tag_0013"`
+	Tag0014                     bool `json:"rwd_tag_0014"`
+	Tag0015                     bool `json:"rwd_tag_0015"`
+	Tag0018                     bool `json:"rwd_tag_0018"`
+	Tag0019                     bool `json:"rwd_tag_0019"`
+	Tag0020                     bool `json:"rwd_tag_0020"`
+	Tag0021                     bool `json:"rwd_tag_0021"`
+	Tag0023                     bool `json:"rwd_tag_0023"`
+	Tag0025                     bool `json:"rwd_tag_0025"`
+	Tag0026                     bool `json:"rwd_tag_0026"`
+	Tag0027                     bool `json:"rwd_tag_0027"`
+	Tag0028                     bool `json:"rwd_tag_0028"`
+	Tag0029                     bool `json:"rwd_tag_0029"`
+	Tag0030                     bool `json:"rwd_tag_0030"`
+	Tag0031                     bool `json:"rwd_tag_0031"`
+	Tag0033                     bool `json:"rwd_tag_0033"`
+	Tag0034                     bool `json:"rwd_tag_0034"`
+	Tag0038                     bool `json:"rwd_tag_0038"`
+	Tag0039                     bool `json:"rwd_tag_0039"`
 	TagDefault                  bool `json:"rwd_tag_default,omitempty"`
-	TagDeveloper                bool `json:"rwd_tag_s1_developer" validate:"restricted"`
+	TagDeveloper                bool `json:"rwd_tag_s1_developer"`
 	TagDiamonds                 bool `json:"rwd_tag_diamonds_a,omitempty"`
-	TagGameAdmin                bool `json:"rwd_tag_0011" validate:"restricted"`
+	TagGameAdmin                bool `json:"rwd_tag_0011"`
 	TagLoneEcho2                bool `json:"rwd_tag_lone_echo_2_a,omitempty"`
 	TagS1ASecondary             bool `json:"rwd_tag_s1_a_secondary,omitempty"`
 	TagS1BSecondary             bool `json:"rwd_tag_s1_b_secondary,omitempty"`
@@ -1041,42 +958,42 @@ type ArenaUnlocks struct {
 	TagS2GSecondary             bool `json:"rwd_tag_s2_g_secondary,omitempty"`
 	TagS2HSecondary             bool `json:"rwd_tag_s2_h_secondary,omitempty"`
 	TagSpearA                   bool `json:"rwd_tag_spear_a,omitempty"`
-	TagStub0002                 bool `json:"rwd_tag_0002" validate:"blocked"`
-	TagStub0032                 bool `json:"rwd_tag_0032" validate:"blocked"`
-	TagStub0046                 bool `json:"rwd_tag_0046" validate:"blocked"`
-	TagStub0047                 bool `json:"rwd_tag_0047" validate:"blocked"`
-	TagStub0048                 bool `json:"rwd_tag_0048" validate:"blocked"`
-	TagStub0049                 bool `json:"rwd_tag_0049" validate:"blocked"`
-	TagStub0050                 bool `json:"rwd_tag_0050" validate:"blocked"`
-	TagStub0051                 bool `json:"rwd_tag_0051" validate:"blocked"`
-	TagStub0052                 bool `json:"rwd_tag_0052" validate:"blocked"`
-	TagStub0053                 bool `json:"rwd_tag_0053" validate:"blocked"`
-	TagStub0054                 bool `json:"rwd_tag_0054" validate:"blocked"`
-	TagTagUnreleased0024        bool `json:"rwd_tag_0024" validate:"blocked"`
+	TagStub0002                 bool `json:"rwd_tag_0002"`
+	TagStub0032                 bool `json:"rwd_tag_0032"`
+	TagStub0046                 bool `json:"rwd_tag_0046"`
+	TagStub0047                 bool `json:"rwd_tag_0047"`
+	TagStub0048                 bool `json:"rwd_tag_0048"`
+	TagStub0049                 bool `json:"rwd_tag_0049"`
+	TagStub0050                 bool `json:"rwd_tag_0050"`
+	TagStub0051                 bool `json:"rwd_tag_0051"`
+	TagStub0052                 bool `json:"rwd_tag_0052"`
+	TagStub0053                 bool `json:"rwd_tag_0053"`
+	TagStub0054                 bool `json:"rwd_tag_0054"`
+	TagTagUnreleased0024        bool `json:"rwd_tag_0024"`
 	TagToriA                    bool `json:"rwd_tag_tori_a,omitempty"`
-	TagUnreleased0022           bool `json:"rwd_tag_0022" validate:"blocked"`
-	TagVRMLPreseason            bool `json:"rwd_tag_s1_vrml_preseason" validate:"restricted"`
-	TagVRMLS1                   bool `json:"rwd_tag_s1_vrml_s1" validate:"restricted"`
-	TagVRMLS1Champion           bool `json:"rwd_tag_s1_vrml_s1_champion" validate:"restricted"`
-	TagVRMLS1Finalist           bool `json:"rwd_tag_s1_vrml_s1_finalist" validate:"restricted"`
-	TagVRMLS2                   bool `json:"rwd_tag_s1_vrml_s2" validate:"restricted"`
-	TagVRMLS2Champion           bool `json:"rwd_tag_s1_vrml_s2_champion" validate:"restricted"`
-	TagVRMLS2Finalist           bool `json:"rwd_tag_s1_vrml_s2_finalist" validate:"restricted"`
-	TagVRMLS3                   bool `json:"rwd_tag_s1_vrml_s3" validate:"restricted"`
-	TagVRMLS3Champion           bool `json:"rwd_tag_s1_vrml_s3_champion" validate:"restricted"`
-	TagVRMLS3Finalist           bool `json:"rwd_tag_s1_vrml_s3_finalist" validate:"restricted"`
-	TagVRMLS4                   bool `json:"rwd_tag_0008" validate:"restricted"`
-	TagVRMLS4Champion           bool `json:"rwd_tag_0010" validate:"restricted"`
-	TagVRMLS4Finalist           bool `json:"rwd_tag_0009" validate:"restricted"`
-	TagVRMLS5                   bool `json:"rwd_tag_0035" validate:"restricted"`
-	TagVRMLS5Champion           bool `json:"rwd_tag_0037" validate:"restricted"`
-	TagVRMLS5Finalist           bool `json:"rwd_tag_0036" validate:"restricted"`
-	TagVRMLS6                   bool `json:"rwd_tag_0040" validate:"restricted"`
-	TagVRMLS6Champion           bool `json:"rwd_tag_0042" validate:"restricted"`
-	TagVRMLS6Finalist           bool `json:"rwd_tag_0041" validate:"restricted"`
-	TagVRMLS7                   bool `json:"rwd_tag_0043" validate:"restricted"`
-	TagVRMLS7Champion           bool `json:"rwd_tag_0045" validate:"restricted"`
-	TagVRMLS7Finalist           bool `json:"rwd_tag_0044" validate:"restricted"`
+	TagUnreleased0022           bool `json:"rwd_tag_0022"`
+	TagVRMLPreseason            bool `json:"rwd_tag_s1_vrml_preseason"`
+	TagVRMLS1                   bool `json:"rwd_tag_s1_vrml_s1"`
+	TagVRMLS1Champion           bool `json:"rwd_tag_s1_vrml_s1_champion"`
+	TagVRMLS1Finalist           bool `json:"rwd_tag_s1_vrml_s1_finalist"`
+	TagVRMLS2                   bool `json:"rwd_tag_s1_vrml_s2"`
+	TagVRMLS2Champion           bool `json:"rwd_tag_s1_vrml_s2_champion"`
+	TagVRMLS2Finalist           bool `json:"rwd_tag_s1_vrml_s2_finalist"`
+	TagVRMLS3                   bool `json:"rwd_tag_s1_vrml_s3"`
+	TagVRMLS3Champion           bool `json:"rwd_tag_s1_vrml_s3_champion"`
+	TagVRMLS3Finalist           bool `json:"rwd_tag_s1_vrml_s3_finalist"`
+	TagVRMLS4                   bool `json:"rwd_tag_0008"`
+	TagVRMLS4Champion           bool `json:"rwd_tag_0010"`
+	TagVRMLS4Finalist           bool `json:"rwd_tag_0009"`
+	TagVRMLS5                   bool `json:"rwd_tag_0035"`
+	TagVRMLS5Champion           bool `json:"rwd_tag_0037"`
+	TagVRMLS5Finalist           bool `json:"rwd_tag_0036"`
+	TagVRMLS6                   bool `json:"rwd_tag_0040"`
+	TagVRMLS6Champion           bool `json:"rwd_tag_0042"`
+	TagVRMLS6Finalist           bool `json:"rwd_tag_0041"`
+	TagVRMLS7                   bool `json:"rwd_tag_0043"`
+	TagVRMLS7Champion           bool `json:"rwd_tag_0045"`
+	TagVRMLS7Finalist           bool `json:"rwd_tag_0044"`
 	Tint0000                    bool `json:"rwd_tint_0000,omitempty"`
 	Tint0001                    bool `json:"rwd_tint_0001,omitempty"`
 	Tint0002                    bool `json:"rwd_tint_0002,omitempty"`
@@ -1183,7 +1100,7 @@ type ArenaUnlocks struct {
 	TitleTitleD                 bool `json:"rwd_title_title_d,omitempty"`
 	TitleTitleDefault           bool `json:"rwd_title_title_default,omitempty"`
 	TitleTitleE                 bool `json:"rwd_title_title_e,omitempty"`
-	XPBoostGroupS0101           bool `json:"rwd_xp_boost_group_s01_01" validate:"restricted"`
+	XPBoostGroupS0101           bool `json:"rwd_xp_boost_group_s01_01"`
 	XPBoostGroupS0102           bool `json:"rwd_xp_boost_group_s01_02,omitempty"`
 	XPBoostGroupS0103           bool `json:"rwd_xp_boost_group_s01_03,omitempty"`
 	XPBoostGroupS0104           bool `json:"rwd_xp_boost_group_s01_04,omitempty"`
@@ -1317,7 +1234,7 @@ func NewServerProfile() ServerProfile {
 				ChassisBodyS10A: true,
 			},
 		}.ToMap(),
-		EvrID: EvrIdNil,
+		EvrID: EvrId{},
 	}
 }
 
@@ -1359,18 +1276,4 @@ func NewClientProfile() ClientProfile {
 		},
 		NewUnlocks: []int64{},
 	}
-}
-
-func DefaultGameProfiles(evrID EvrId, displayname string) (GameProfiles, error) {
-	client := NewClientProfile()
-	server := NewServerProfile()
-	client.EvrID = evrID
-	server.EvrID = evrID
-	client.DisplayName = displayname
-	server.DisplayName = displayname
-
-	return GameProfiles{
-		Client: &client,
-		Server: &server,
-	}, nil
 }
