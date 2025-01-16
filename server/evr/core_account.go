@@ -214,6 +214,8 @@ type CosmeticLoadout struct {
 	Chassis        string `json:"chassis"`
 	Decal          string `json:"decal"`
 	DecalBody      string `json:"decal_body"`
+	DecalBorder    string `json:"decalborder" _version:"5"`
+	DecalBack      string `json:"decalback" _version:"5"`
 	Emissive       string `json:"emissive"`
 	Emote          string `json:"emote"`
 	GoalFX         string `json:"goal_fx"`
