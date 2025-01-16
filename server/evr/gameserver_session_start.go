@@ -27,14 +27,15 @@ const (
 )
 
 var (
-	ModeUnloaded       Symbol = ToSymbol("")                      // Unloaded Lobby
-	ModeSocialPublic   Symbol = ToSymbol("social_2.0")            // Public Social Lobby
-	ModeSocialPrivate  Symbol = ToSymbol("social_2.0_private")    // Private Social Lobby
-	ModeSocialNPE      Symbol = ToSymbol("social_2.0_npe")        // Social Lobby NPE
-	ModeArenaPublic    Symbol = ToSymbol("echo_arena")            // Public Echo Arena
-	ModeArenaPrivate   Symbol = ToSymbol("echo_arena_private")    // Private Echo Arena
-	ModeArenaTournment Symbol = ToSymbol("echo_arena_tournament") // Echo Arena Tournament
-	ModeArenaPublicAI  Symbol = ToSymbol("echo_arena_public_ai")  // Public Echo Arena AI
+	ModeUnloaded        Symbol = ToSymbol("")                      // Unloaded Lobby
+	ModeSocialPublic    Symbol = ToSymbol("social_2.0")            // Public Social Lobby
+	ModeSocialPrivate   Symbol = ToSymbol("social_2.0_private")    // Private Social Lobby
+	ModeSocialNPE       Symbol = ToSymbol("social_2.0_npe")        // Social Lobby NPE
+	ModeArenaPublic     Symbol = ToSymbol("echo_arena")            // Public Echo Arena
+	ModeArenaPrivate    Symbol = ToSymbol("echo_arena_private")    // Private Echo Arena
+	ModeArenaTournment  Symbol = ToSymbol("echo_arena_tournament") // Echo Arena Tournament
+	ModeArenaPublicAI   Symbol = ToSymbol("echo_arena_public_ai")  // Public Echo Arena AI
+	ModeArenaPracticeAI Symbol = ToSymbol("echo_arena_practice")   // Echo Arena Practice
 
 	ModeEchoCombatTournament Symbol = ToSymbol("echo_combat_tournament") // Echo Combat Tournament
 	ModeCombatPublic         Symbol = ToSymbol("echo_combat")            // Echo Combat

@@ -8,7 +8,7 @@ import (
 // server requesting the user profile for their logged-in account.
 type LoggedInUserProfileSuccess struct {
 	UserId  EvrId
-	Payload GameProfiles
+	Payload UserProfiles
 }
 
 func (m LoggedInUserProfileSuccess) Token() string {
@@ -32,9 +32,14 @@ func (r LoggedInUserProfileSuccess) String() string {
 func NewLoggedInUserProfileSuccess(xpid EvrId, client *ClientProfile, server *ServerProfile) *LoggedInUserProfileSuccess {
 	return &LoggedInUserProfileSuccess{
 		UserId: xpid,
-		Payload: GameProfiles{
+		Payload: UserProfiles{
 			Client: client,
 			Server: server,
 		},
 	}
+}
+
+type UserProfiles struct {
+	Client *ClientProfile `json:"client"`
+	Server *ServerProfile `json:"server"`
 }

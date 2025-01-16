@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"sync"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -50,7 +49,6 @@ func (m *MigrateUserGameProfile) MigrateUser(ctx context.Context, logger runtime
 	}
 
 	type GameProfileData struct {
-		sync.RWMutex
 		Login        evr.LoginProfile                          `json:"login"`
 		Client       evr.ClientProfile                         `json:"client"`
 		Server       evr.ServerProfile                         `json:"server"`

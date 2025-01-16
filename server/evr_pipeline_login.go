@@ -342,10 +342,6 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 
 	metadataUpdated := false
 
-	if params.accountMetadata.LoadoutCosmetics.Loadout == (evr.CosmeticLoadout{}) {
-		params.accountMetadata.LoadoutCosmetics.Loadout = evr.DefaultCosmeticLoadout()
-		metadataUpdated = true
-	}
 	// Get the GroupID from the user's metadata
 	params.guildGroups, err = GuildUserGroupsList(ctx, p.runtimeModule, params.account.User.Id)
 	if err != nil {
@@ -826,9 +822,21 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 	if err := session.SendEvr(evr.NewUserServerProfileUpdateSuccess(request.EvrID)); err != nil {
 		logger.Warn("Failed to send UserServerProfileUpdateSuccess", zap.Error(err))
 	}
+	logger.Info("UserServerProfileUpdateRequest", zap.Any("request", request.Payload))
+
+	payload := evr.UpdatePayload{}
+
+	if err := json.Unmarshal(request.Payload, &payload); err != nil {
+		return fmt.Errorf("failed to unmarshal update payload: %w", err)
+	}
+
+	// Ignore anything but statistics updates.
+	if payload.Update.Statistics == nil {
+		return nil
+	}
 
 	// Validate the player was in the session
-	matchID, err := NewMatchID(uuid.UUID(request.Payload.SessionID), p.node)
+	matchID, err := NewMatchID(uuid.UUID(payload.SessionID), p.node)
 	if err != nil {
 		return fmt.Errorf("failed to generate matchID: %w", err)
 	}
@@ -870,7 +878,7 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 		} else {
 
 			// Determine winning team
-			blueWins := playerInfo.Team == BlueTeam && request.Payload.IsWinner()
+			blueWins := playerInfo.Team == BlueTeam && payload.IsWinner()
 
 			if rating, err := CalculateNewPlayerRating(playerInfo.EvrID, label.Players, label.TeamSize, blueWins); err != nil {
 				logger.Error("Failed to calculate new player rating", zap.Error(err))
@@ -897,9 +905,15 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 		var stats evr.Statistics
 		switch label.Mode {
 		case evr.ModeArenaPublic:
-			stats = &request.Payload.Update.Statistics.Arena
+			if payload.Update.Statistics.Arena == nil {
+				return fmt.Errorf("missing arena statistics")
+			}
+			stats = payload.Update.Statistics.Arena
 		case evr.ModeCombatPublic:
-			stats = &request.Payload.Update.Statistics.Combat
+			if payload.Update.Statistics.Combat == nil {
+				return fmt.Errorf("missing combat statistics")
+			}
+			stats = payload.Update.Statistics.Combat
 		}
 
 		// Get the players existing statistics

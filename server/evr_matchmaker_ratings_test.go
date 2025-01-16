@@ -184,10 +184,53 @@ func TestCalculatePlayerRating(t *testing.T) {
 			},
 			want: types.Rating{Mu: 19.03637684155125, Sigma: 6.6197969632771665},
 		},
+		{
+			name: "Player alone",
+			args: args{
+				evrID: evr.EvrId{
+					PlatformCode: 4,
+					AccountId:    123456789,
+				},
+				players: []PlayerInfo{
+					{
+						EvrID:       evr.EvrId{PlatformCode: 4, AccountId: 123456789},
+						Team:        0,
+						RatingMu:    30,
+						RatingSigma: 7.5,
+						JoinTime:    0.0,
+					},
+				},
+				blueWins: true,
+			},
+			want: types.Rating{Mu: 30.007502012383465, Sigma: 7.498474448099583},
+		},
+		{
+			name: "Player not found",
+			args: args{
+				evrID: evr.EvrId{
+					PlatformCode: 4,
+					AccountId:    123456789,
+				},
+				players: []PlayerInfo{
+					{
+						EvrID:       evr.EvrId{PlatformCode: 4, AccountId: 987654321},
+						Team:        0,
+						RatingMu:    30,
+						RatingSigma: 7.5,
+						JoinTime:    0.0,
+					},
+				},
+				blueWins: true,
+			},
+			want: types.Rating{Mu: 25.0, Sigma: 8.333},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+
 			if got, _ := CalculateNewPlayerRating(tt.args.evrID, tt.args.players, 4, tt.args.blueWins); reflect.DeepEqual(got, tt.want) {
+				t.Errorf("calculatePlayerRating() = %v, want %v", got, tt.want)
+			} else {
 				t.Errorf("calculatePlayerRating() = %v, want %v", got, tt.want)
 			}
 		})

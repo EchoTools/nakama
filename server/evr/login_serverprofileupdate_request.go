@@ -8,17 +8,17 @@ import (
 
 type UserServerProfileUpdateRequest struct {
 	EvrID   EvrId
-	Payload UpdatePayload
+	Payload json.RawMessage
 }
 
 func (m UserServerProfileUpdateRequest) String() string {
-	return fmt.Sprintf("%T{EVRID:%s, MatchType:%s, SessionID:%s}", m, m.EvrID.String(), Symbol(m.Payload.mode).Token().String(), m.Payload.SessionID.String())
+	return fmt.Sprintf("%T{EVRID:%s", m, m.EvrID)
 }
 
 func (m *UserServerProfileUpdateRequest) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.EvrID) },
-		func() error { return s.StreamJson(&m.Payload, true, NoCompression) },
+		func() error { return s.StreamJSONRawMessage(&m.Payload, true, NoCompression) },
 	})
 }
 
@@ -43,7 +43,6 @@ func (m *UpdatePayload) UmarshalJSON(data []byte) error {
 	case 14654894462969098216:
 		aux.mode = ModeArenaPublic
 	default:
-		return fmt.Errorf("invalid match type: %s", aux.mode)
 	}
 
 	return nil
@@ -59,8 +58,6 @@ func (m UpdatePayload) MarshalJSON() ([]byte, error) {
 		aux.mode = 0x3D5C3976578A3158
 	case ModeArenaPublic:
 		aux.mode = 0xCB60A4DE7E1CAFE8
-	default:
-		return nil, fmt.Errorf("invalid match type: %s", aux.mode)
 	}
 
 	return json.Marshal(aux)
@@ -78,13 +75,13 @@ func (m UpdatePayload) IsWinner() bool {
 }
 
 type ServerProfileUpdate struct {
-	Statistics ServerProfileUpdateStatistics `json:"stats"`
-	Unlocks    ServerProfileUpdateUnlocks    `json:"unlocks"`
+	Statistics *ServerProfileUpdateStatistics `json:"stats,omitempty"`
+	Unlocks    *ServerProfileUpdateUnlocks    `json:"unlocks,omitempty"`
 }
 
 type ServerProfileUpdateStatistics struct {
-	Arena  ArenaStatistics  `json:"arena"`
-	Combat CombatStatistics `json:"combat"`
+	Arena  *ArenaStatistics  `json:"arena,omitempty"`
+	Combat *CombatStatistics `json:"combat,omitempty"`
 }
 
 type ServerProfileUpdateUnlocks struct {
@@ -93,7 +90,7 @@ type ServerProfileUpdateUnlocks struct {
 }
 
 type StatUpdate struct {
-	Operator string  `json:"op"`
-	Value    float64 `json:"val"`
-	Count    int64   `json:"cnt"`
+	Operator string  `json:"op,omitempty"`
+	Value    float64 `json:"val,omitempty"`
+	Count    int64   `json:"cnt,omitempty"`
 }
