@@ -121,7 +121,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	// Ping for matches, not social lobbies.
 	if lobbyParams.Mode != evr.ModeSocialPublic {
 		// Check latency to active game servers.
-		if err := p.CheckServerPing(ctx, logger, session); err != nil {
+		if err := p.CheckServerPing(logger, session); err != nil {
 			return fmt.Errorf("failed to check server ping: %w", err)
 		}
 
@@ -557,16 +557,17 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 	}
 }
 
-func (p *EvrPipeline) CheckServerPing(ctx context.Context, logger *zap.Logger, session *sessionWS) error {
+func (p *EvrPipeline) CheckServerPing(logger *zap.Logger, session *sessionWS) error {
 	// Check latency to active game servers.
 	doneCh := make(chan error)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
 	go func() {
 		defer close(doneCh)
 
 		// Wait for the client to be ready.
 		<-time.After(1 * time.Second)
-
 		activeEndpoints := make([]evr.Endpoint, 0, 100)
 		p.broadcasterRegistrationBySession.Range(func(_ string, b *MatchBroadcaster) bool {
 			activeEndpoints = append(activeEndpoints, b.Endpoint)
