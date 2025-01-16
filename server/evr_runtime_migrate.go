@@ -84,6 +84,7 @@ func MigrateUser(ctx context.Context, zapLogger *zap.Logger, nk runtime.NakamaMo
 		&MigrateUserLoginHistory{},
 		&MigrationUserVRMLEntitlementsToWallet{},
 		&MigrateUserGameProfile{},
+		&MigrateUserIncompleteProfile{},
 		&MigrateDisplayNameHistory{},
 	}
 	startTime := time.Now()

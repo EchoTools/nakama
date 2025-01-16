@@ -105,6 +105,7 @@ func (e *EVRAccount) IsLinked() bool {
 type AccountMetadata struct {
 	account *api.Account
 
+	Debug                      bool                       `json:"debug"`                     // Enable debug mode
 	GlobalBanReason            string                     `json:"global_ban_reason"`         // The global ban reason
 	DisplayNameOverride        string                     `json:"display_name_override"`     // The display name override
 	GroupDisplayNames          map[string]string          `json:"group_display_names"`       // The display names for each guild map[groupID]displayName
@@ -113,6 +114,7 @@ type AccountMetadata struct {
 	RelayMessagesToDiscord     bool                       `json:"relay_messages_to_discord"` // Relay messages to Discord
 	TeamName                   string                     `json:"team_name"`                 // The team name
 	DisableAFKTimeout          bool                       `json:"disable_afk_timeout"`       // Disable AFK detection
+	AllowBrokenCosmetics       bool                       `json:"allow_broken_cosmetics"`    // Allow broken cosmetics
 	EnableAllCosmetics         bool                       `json:"enable_all_cosmetics"`      // Enable all cosmetics
 	IsGlobalDeveloper          bool                       `json:"is_global_developer"`       // Is a global developer
 	IsGlobalModerator          bool                       `json:"is_global_moderator"`       // Is a global moderator

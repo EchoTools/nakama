@@ -139,7 +139,7 @@ func CalculateNewPlayerRating(evrID evr.EvrId, players []PlayerInfo, teamSize in
 
 	// Pad the teams to the team size
 	for i := range teams {
-		for j := len(teams[i]); j < 4; j++ {
+		for j := len(teams[i]); j < teamSize; j++ {
 			teams[i] = append(teams[i], NewDefaultRating())
 		}
 	}

@@ -1,8 +1,11 @@
 package evr
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 func TestStatisticsGroup_MarshalText(t *testing.T) {
@@ -114,6 +117,97 @@ func TestStatisticsGroup_UnmarshalText(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestStatisticIntegerIncrement_MarshalJSON(t *testing.T) {
+
+	statOps := map[Statistic]string{
+		&StatisticIntegerIncrement{}: "add",
+		&StatisticIntegerSet{}:       "rep",
+		&StatisticIntegerBest{}:      "max",
+		&StatisticFloatIncrement{}:   "add",
+		&StatisticFloatSet{}:         "rep",
+		&StatisticFloatBest{}:        "max",
+	}
+
+	tests := []struct {
+		name     string
+		count    int
+		value    int
+		expected func(op string) string
+	}{
+		{
+			name:     "Basic Increment",
+			count:    1,
+			value:    100,
+			expected: func(op string) string { return `{"cnt":1,"op":"` + op + `","val":100}` },
+		},
+		{
+			name:     "Zero Value",
+			count:    0,
+			value:    0,
+			expected: func(op string) string { return `{"cnt":0,"op":"` + op + `","val":0}` },
+		},
+		{
+			name:     "Negative Value",
+			count:    1,
+			value:    -50,
+			expected: func(op string) string { return `{"cnt":1,"op":"` + op + `","val":-50}` },
+		},
+	}
+
+	for stat, op := range statOps {
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				want := tt.expected(op)
+				stat.SetCount(int64(tt.count))
+				stat.SetValue(float64(tt.value))
+				got, err := stat.MarshalJSON()
+				if err != nil {
+					t.Errorf("MarshalJSON() error = %v", err)
+					return
+				}
+
+				if gotStr := string(got); gotStr != want {
+					t.Errorf("MarshalJSON() got = %v, expected %v", gotStr, want)
+				}
+			})
+		}
+	}
+}
+
+func TestFullStatisticsGeneration(t *testing.T) {
+
+	var interfaceStats map[string]any
+	err := json.Unmarshal(preshutdownProfileStatistics, &interfaceStats)
+	if err != nil {
+		t.Errorf("json.Unmarshal() error = %v", err)
+		return
+	}
+
+	want, err := json.MarshalIndent(interfaceStats, "", "  ")
+	if err != nil {
+		t.Errorf("json.Marshal() error = %v", err)
+		return
+	}
+
+	stats := ArenaStatistics{}
+	if err := json.Unmarshal(preshutdownProfileStatistics, &stats); err != nil {
+		t.Errorf("json.Unmarshal() error = %v", err)
+		return
+	}
+
+	got, err := json.MarshalIndent(stats, "", "  ")
+	if err != nil {
+		t.Errorf("json.Marshal() error = %v", err)
+		return
+	}
+
+	if cmp.Diff(string(got), string(want)) != "" {
+		t.Errorf("MarshalJSON() want/got (-/+) = %v", cmp.Diff(string(got), string(want)))
+	}
+
 }
 
 var preshutdownProfileStatistics = []byte(`

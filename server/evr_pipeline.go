@@ -293,8 +293,6 @@ func (p *EvrPipeline) MessageCacheLoad(key string) evr.Message {
 func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, in evr.Message) bool {
 
 	// Set log levels
-	switch in.(type) {
-	}
 
 	// Handle legacy messages
 

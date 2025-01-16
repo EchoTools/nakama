@@ -178,8 +178,8 @@ func NewUserServerProfile(ctx context.Context, db *sql.DB, account *api.Account,
 	cosmetics := make(map[string]map[string]bool)
 	for m, c := range cosmeticDefaults(metadata.EnableAllCosmetics) {
 		cosmetics[m] = make(map[string]bool, len(c))
-		for k := range c {
-			cosmetics[m][k] = true
+		for k, v := range c {
+			cosmetics[m][k] = v
 		}
 	}
 
@@ -210,11 +210,6 @@ func NewUserServerProfile(ctx context.Context, db *sql.DB, account *api.Account,
 		}
 	}
 
-	loginTime, ok := ctx.Value(ctxLoggedInAtKey{}).(time.Time)
-	if !ok {
-		loginTime = time.Now().UTC()
-	}
-
 	return &evr.ServerProfile{
 		DisplayName:       metadata.GetActiveGroupDisplayName(),
 		EvrID:             xpID,
@@ -222,9 +217,6 @@ func NewUserServerProfile(ctx context.Context, db *sql.DB, account *api.Account,
 		PublisherLock:     "echovrce",
 		LobbyVersion:      1680630467,
 		PurchasedCombat:   1,
-		LoginTime:         loginTime.UTC().Unix(),
-		UpdateTime:        account.User.UpdateTime.AsTime().UTC().Unix(),
-		CreateTime:        account.User.CreateTime.AsTime().UTC().Unix(),
 		Statistics:        statsBySchedule,
 		UnlockedCosmetics: cosmetics,
 		EquippedCosmetics: evr.EquippedCosmetics{
@@ -417,38 +409,47 @@ func LoadoutEquipItem(loadout evr.CosmeticLoadout, category string, name string)
 	return newLoadout, nil
 }
 
-func cosmeticDefaults(enableAll bool) map[string]map[string]struct{} {
-
-	// Return all but the restricted and blocked cosmetics
-	cosmetics := make(map[string]map[string]struct{})
-
+var defaultCosmetics = func() map[string]map[string]bool {
+	cosmetics := make(map[string]map[string]bool)
 	structs := map[string]interface{}{
 		"arena":  evr.ArenaUnlocks{},
 		"combat": evr.CombatUnlocks{},
 	}
 	for m, t := range structs {
-
 		v := reflect.ValueOf(t)
 		if v.Kind() == reflect.Ptr {
 			v = v.Elem()
 		}
 
-		cosmetics[m] = make(map[string]struct{})
+		cosmetics[m] = make(map[string]bool)
 
 		for i := 0; i < v.NumField(); i++ {
-
 			tag := v.Type().Field(i).Tag.Get("validate")
-			disabled := strings.Contains(tag, "restricted") || strings.Contains(tag, "blocked")
-
-			if !disabled || enableAll {
-				k := v.Type().Field(i).Name
-				k = unlocksByItemName[k]
-				cosmetics[m][k] = struct{}{}
-			}
-
+			cosmetics[m][v.Type().Field(i).Name] = strings.Contains(tag, "restricted") || strings.Contains(tag, "blocked")
 		}
 	}
 	return cosmetics
+}()
+
+var allCosmetics = func() map[string]map[string]bool {
+
+	all := make(map[string]map[string]bool, len(defaultCosmetics))
+	for m, t := range defaultCosmetics {
+		all[m] = make(map[string]bool, len(t))
+		for k, _ := range t {
+			defaultCosmetics[m][k] = true
+		}
+	}
+	return all
+}()
+
+func cosmeticDefaults(enableAll bool) map[string]map[string]bool {
+
+	if enableAll {
+		return allCosmetics
+	}
+
+	return defaultCosmetics
 }
 
 func (r *ProfileCache) ValidateArenaUnlockByName(i interface{}, itemName string) (bool, error) {
@@ -496,23 +497,4 @@ type StoredCosmeticLoadout struct {
 	LoadoutID string              `json:"loadout_id"`
 	Loadout   evr.CosmeticLoadout `json:"loadout"`
 	UserID    string              `json:"user_id"` // the creator
-}
-
-func enforceLoadoutEntitlements(logger runtime.Logger, loadout *evr.CosmeticLoadout, unlocked *evr.UnlockedCosmetics, defaults map[string]string) error {
-	unlockMap := unlocked.ToMap()
-
-	loadoutMap := loadout.ToMap()
-
-	for k, v := range loadoutMap {
-		for _, unlocks := range unlockMap {
-			if _, found := unlocks[v]; !found {
-				logger.Warn("User has item equip that does not exist: %s: %s", k, v)
-				loadoutMap[k] = defaults[k]
-			} else if !unlocks[v] {
-				logger.Warn("User does not have entitlement to item: %s: %s", k, v)
-			}
-		}
-	}
-	loadout.FromMap(loadoutMap)
-	return nil
 }

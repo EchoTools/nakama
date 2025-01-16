@@ -92,17 +92,20 @@ func (r *StatisticsQueue) Add(entries []*StatisticsQueueEntry) {
 
 	select {
 	case r.ch <- entries:
-		r.logger.Debug("Leaderboard record queued", zap.Int("count", len(entries)))
+		r.logger.WithFields(map[string]interface{}{
+			"count": len(entries),
+		}).Debug("Leaderboard record queued")
 	default:
-		r.logger.Warn("Leaderboard record write queue full, dropping entry", zap.Int("count", len(entries)))
+		r.logger.WithFields(map[string]interface{}{
+			"count": len(entries),
+		}).Warn("Leaderboard record write queue full, dropping entry")
 	}
 }
 
 func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, ownerID, groupID string, modes []evr.Symbol, includeDailyWeekly bool) (evr.PlayerStatistics, map[string]evr.Statistic, error) {
 
-	resetSchedules := []evr.ResetSchedule{
-		evr.ResetScheduleAllTime,
-	}
+	resetSchedules := []evr.ResetSchedule{evr.ResetScheduleAllTime}
+
 	if includeDailyWeekly {
 		if len(modes) > 1 {
 			return nil, nil, fmt.Errorf("cannot include daily/weekly stats for multiple modes")
@@ -115,6 +118,7 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, ownerID, groupID str
 
 	boardMap := make(map[string]evr.Statistic)
 	boardIDs := make([]string, 0, len(boardMap))
+	gamesPlayedBoardIDs := make(map[evr.StatisticsGroup]string)
 
 	for _, m := range modes {
 		for _, r := range resetSchedules {
@@ -123,10 +127,10 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, ownerID, groupID str
 			switch m {
 			case evr.ModeCombatPublic:
 				stats = &evr.CombatStatistics{}
-			case evr.ModeCombatPrivate:
-				stats = &evr.GenericStats{}
 			case evr.ModeArenaPublic:
 				stats = &evr.ArenaStatistics{}
+			case evr.ModeCombatPrivate:
+				stats = &evr.GenericStats{}
 			case evr.ModeArenaPrivate:
 				stats = &evr.GenericStats{}
 			case evr.ModeSocialPublic:
@@ -151,10 +155,15 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, ownerID, groupID str
 				boardID := StatisticBoardID(groupID, m, fieldType.Name, r)
 				boardIDs = append(boardIDs, boardID)
 
+				if fieldType.Name == "GamesPlayed" {
+					gamesPlayedBoardIDs[evr.StatisticsGroup{
+						Mode:          m,
+						ResetSchedule: r,
+					}] = boardID
+				}
+
 				fieldValue := statsValue.Elem().Field(i)
 				fieldValue.Set(reflect.New(fieldType.Type.Elem()))
-				v := fieldValue.Elem()
-				_ = v
 				boardMap[boardID] = fieldValue.Interface().(evr.Statistic)
 			}
 		}
@@ -200,16 +209,86 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, ownerID, groupID str
 			return nil, nil, fmt.Errorf("failed to scan leaderboard record: %w", err)
 		}
 
+		if dbScore == 0 && dbSubscore == 0 {
+			continue
+		}
+
 		v, ok := boardMap[dbLeaderboardID]
 		if !ok {
 			log.Printf("Leaderboard record found for unknown leaderboard ID: %s", dbLeaderboardID)
 			continue
 		}
+		v.SetCount(1)
 		v.FromScore(dbScore, dbSubscore)
 
 	}
 
 	// Use the GamesPlayed stat to fill in all the cnt's
+	for _, m := range modes {
+		for _, r := range resetSchedules {
+
+			gamesPlayedID := gamesPlayedBoardIDs[evr.StatisticsGroup{
+				Mode:          m,
+				ResetSchedule: r,
+			}]
+
+			if gamesPlayed, ok := boardMap[gamesPlayedID].(*evr.StatisticIntegerIncrement); ok {
+				for _, boardID := range boardIDs {
+					if _, ok = boardMap[boardID].(*evr.StatisticFloatAverage); ok {
+						boardMap[boardID].SetCount(int64(gamesPlayed.GetValue()))
+					}
+					// If the board's count is 0, remove it.
+					if boardMap[boardID].GetCount() == 0 {
+						delete(boardMap, boardID)
+					}
+				}
+			}
+		}
+	}
+
+	// Ensure arena level is always set
+	if s := playerStatistics[evr.StatisticsGroup{
+		Mode:          evr.ModeArenaPublic,
+		ResetSchedule: evr.ResetScheduleAllTime,
+	}].(*evr.ArenaStatistics); s != nil {
+		if s.Level == nil {
+			s.Level = &evr.StatisticIntegerIncrement{
+				IntegerStatistic: evr.IntegerStatistic{
+					Count: 1,
+					Value: 1,
+				},
+			}
+		} else {
+			if s.Level.GetCount() <= 0 {
+				s.Level.SetCount(1)
+			}
+			if s.Level.GetValue() <= 0 {
+				s.Level.SetValue(1)
+			}
+		}
+	}
+
+	// Ensure combat level is always set
+	if s := playerStatistics[evr.StatisticsGroup{
+		Mode:          evr.ModeCombatPublic,
+		ResetSchedule: evr.ResetScheduleAllTime,
+	}].(*evr.CombatStatistics); s != nil {
+		if s.Level == nil {
+			s.Level = &evr.StatisticIntegerIncrement{
+				IntegerStatistic: evr.IntegerStatistic{
+					Count: 1,
+					Value: 1,
+				},
+			}
+		} else {
+			if s.Level.GetCount() <= 0 {
+				s.Level.SetCount(1)
+			}
+			if s.Level.GetValue() <= 0 {
+				s.Level.SetValue(1)
+			}
+		}
+	}
 
 	return playerStatistics, boardMap, nil
 }
@@ -217,13 +296,15 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, ownerID, groupID str
 func StatisticsToEntries(userID, displayName, groupID string, mode evr.Symbol, prev, update evr.Statistics) ([]*StatisticsQueueEntry, error) {
 
 	// Modify the update based on the previous stats
-	for i := 0; i < reflect.ValueOf(update).Elem().NumField(); i++ {
+	updateValue := reflect.ValueOf(update).Elem()
+	prevValue := reflect.ValueOf(prev).Elem()
+	for i := 0; i < updateValue.Elem().NumField(); i++ {
 
-		if !reflect.ValueOf(update).Elem().Field(i).IsNil() {
+		if !updateValue.Field(i).IsNil() {
 
-			stat := reflect.ValueOf(update).Elem().Field(i).Interface().(evr.Statistic)
+			stat := updateValue.Field(i).Interface().(evr.Statistic)
 
-			if prevField := reflect.ValueOf(prev).Elem().Field(i); !prevField.IsNil() {
+			if prevField := prevValue.Field(i); !prevField.IsNil() {
 
 				switch prevStat := prevField.Interface().(type) {
 				case *evr.StatisticIntegerIncrement:
@@ -234,11 +315,11 @@ func StatisticsToEntries(userID, displayName, groupID string, mode evr.Symbol, p
 			}
 		}
 	}
-
+	resetSchedules := []evr.ResetSchedule{evr.ResetScheduleDaily, evr.ResetScheduleWeekly, evr.ResetScheduleAllTime}
 	// construct the entries
-	entries := make([]*StatisticsQueueEntry, 0, 3*reflect.ValueOf(update).Elem().NumField())
+	entries := make([]*StatisticsQueueEntry, 0, len(resetSchedules)*reflect.ValueOf(update).Elem().NumField())
 
-	for _, r := range []evr.ResetSchedule{evr.ResetScheduleDaily, evr.ResetScheduleWeekly, evr.ResetScheduleAllTime} {
+	for _, r := range resetSchedules {
 
 		for i := 0; i < reflect.ValueOf(update).Elem().NumField(); i++ {
 
@@ -250,6 +331,7 @@ func StatisticsToEntries(userID, displayName, groupID string, mode evr.Symbol, p
 			statName = strings.SplitN(statName, ",", 2)[0]
 			statValue := reflect.ValueOf(update).Elem().Field(i).Interface().(evr.Statistic).GetValue()
 			op := LeaderboardOperatorSet
+
 			switch reflect.ValueOf(update).Elem().Field(i).Interface().(type) {
 			case *evr.StatisticFloatIncrement:
 				op = LeaderboardOperatorIncrement
