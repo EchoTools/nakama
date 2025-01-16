@@ -83,24 +83,16 @@ type ServerSocial struct {
 }
 
 type ServerProfile struct {
-	DisplayName       string                     `json:"displayname,omitempty"`
+	DisplayName       string                     `json:"displayname"`
 	EvrID             EvrId                      `json:"xplatformid"`
-	SchemaVersion     int16                      `json:"_version,omitempty"`        // Version of the schema(?)
-	PublisherLock     string                     `json:"publisher_lock,omitempty"`  // unused atm
-	PurchasedCombat   int8                       `json:"purchasedcombat,omitempty"` // unused (combat was made free)
-	LobbyVersion      uint64                     `json:"lobbyversion"`              // set from the login request
-	LoginTime         int64                      `json:"logintime"`                 // When the player logged in
-	UpdateTime        int64                      `json:"updatetime"`                // When the profile was last stored.
-	ModifyTime        int64                      `json:"modifytime"`                // When the profile was last modified.
-	CreateTime        int64                      `json:"createtime"`                // When the player's nakama account was created.
-	CreationTime      int64                      `json:"creationtime" _version:"5"` // When the player's Echo account was created.
-	Statistics        PlayerStatistics           `json:"stats,omitempty"`           // Player statistics
-	MaybeStale        bool                       `json:"maybestale,omitempty"`      // If the profile is stale
-	UnlockedCosmetics map[string]map[string]bool `json:"unlocks,omitempty"`         // Unlocked cosmetics
-	EquippedCosmetics EquippedCosmetics          `json:"loadout,omitempty"`         // Equipped cosmetics
-	Social            ServerSocial               `json:"social,omitempty"`          // Social settings
-	Achievements      interface{}                `json:"achievements,omitempty"`    // Achievements
-	RewardState       interface{}                `json:"reward_state,omitempty"`    // Reward state?
+	SchemaVersion     int16                      `json:"_version"`        // Version of the schema(?)
+	PublisherLock     string                     `json:"publisher_lock"`  // unused atm
+	PurchasedCombat   uint64                     `json:"purchasedcombat"` // unused (combat was made free)
+	LobbyVersion      uint64                     `json:"lobbyversion"`    // set from the login request
+	Statistics        PlayerStatistics           `json:"stats"`           // Player statistics
+	UnlockedCosmetics map[string]map[string]bool `json:"unlocks"`         // Unlocked cosmetics
+	EquippedCosmetics EquippedCosmetics          `json:"loadout"`         // Equipped cosmetics
+	Social            ServerSocial               `json:"social"`          // Social settings
 	// If DeveloperFeatures is not null, the player will have a gold name
 	DeveloperFeatures *DeveloperFeatures `json:"dev,omitempty"` // Developer features
 }
