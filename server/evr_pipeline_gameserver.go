@@ -111,14 +111,14 @@ func (p *EvrPipeline) gameserverRegistrationRequest(ctx context.Context, logger 
 			break
 		}
 
-		if m, ok := guildGroups[groupID]; ok && m.IsServerHost(session.userID.String()) {
+		if m, ok := guildGroups[groupID]; ok && m.HasRole(session.userID.String(), m.Roles.ServerHost) {
 			groupIDs = append(groupIDs, groupID)
 		}
 	}
 
 	if len(groupIDs) == 0 {
 		for groupID, m := range guildGroups {
-			if m.IsServerHost(session.userID.String()) {
+			if m.HasRole(session.userID.String(), m.Roles.ServerHost) {
 				groupIDs = append(groupIDs, groupID)
 			}
 		}
