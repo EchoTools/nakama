@@ -122,6 +122,7 @@ type AccountMetadata struct {
 	CombatLoadout              CombatLoadout              `json:"combat_loadout"`            // The combat loadout
 	MutedPlayers               []evr.EvrId                `json:"muted_players"`             // The muted players
 	GhostedPlayers             []evr.EvrId                `json:"ghosted_players"`           // The ghosted players
+	NewUnlocks                 []int64                    `json:"new_unlocks"`               // The new unlocks
 	GameSettings               *evr.RemoteLogGameSettings `json:"game_settings"`             // The game settings
 	LegalConsents              evr.LegalConsents          `json:"legal_consents"`            // The legal consents
 	sessionDisplayNameOverride string                     // The display name override for this session
