@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/rand"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -197,6 +198,9 @@ func NewUserServerProfile(ctx context.Context, db *sql.DB, account *api.Account,
 	} else if md.IsModerator(account.User.Id) {
 		// Give the user a gold name if they are enabled as a moderator in the guild.
 		developerFeatures = &evr.DeveloperFeatures{}
+	}
+	if slices.Equal(modes, []evr.Symbol{0}) {
+		modes = []evr.Symbol{evr.ModeArenaPublic, evr.ModeCombatPublic}
 	}
 
 	statsBySchedule, _, err := PlayerStatisticsGetID(ctx, db, account.User.Id, groupID, modes, includeDailyWeekly)
