@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 
 	"go.uber.org/zap"
@@ -116,4 +117,50 @@ func normalizedWeightedAverage(values, weights []float64) (float64, error) {
 	}
 
 	return sum, nil
+}
+
+func retrieveLatestLeaderboardRecords(ctx context.Context, db *sql.DB, userID string) (map[string]float64, error) {
+
+	query := `
+	WITH ranked_records AS (
+		SELECT 
+			leaderboard_id,
+			owner_id,
+			expiry_time,
+			score,
+			subscore,
+			ROW_NUMBER() OVER (
+				PARTITION BY leaderboard_id 
+				ORDER BY expiry_time DESC
+			) AS rank
+		FROM leaderboard_record
+		WHERE owner_id = $1
+	)
+	SELECT leaderboard_id, owner_id, expiry_time, score, subscore
+	FROM ranked_records
+	WHERE rank = 1;`
+
+	rows, err := db.QueryContext(ctx, query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query latest leaderboard records: %w", err)
+	}
+	defer rows.Close()
+
+	records := make(map[string]float64)
+
+	for rows.Next() {
+		var leaderboardID, ownerID string
+		var expiryTime int64
+		var score, subscore int64
+
+		err = rows.Scan(&leaderboardID, &ownerID, &expiryTime, &score, &subscore)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan latest leaderboard record: %w", err)
+		}
+
+		records[leaderboardID] = ScoreToValue(score, subscore)
+
+	}
+
+	return records, nil
 }
