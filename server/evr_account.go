@@ -249,6 +249,45 @@ func (a *AccountMetadata) GetGhosted() []evr.EvrId {
 	return a.GhostedPlayers
 }
 
+func (a *AccountMetadata) FixBrokenCosmetics() bool {
+
+	c := a.LoadoutCosmetics.Loadout
+	d := evr.DefaultCosmeticLoadout()
+
+	mapping := map[*string]string{
+		&c.Banner:         d.Banner,
+		&c.Booster:        d.Booster,
+		&c.Bracer:         d.Bracer,
+		&c.Chassis:        d.Chassis,
+		&c.Decal:          d.Decal,
+		&c.DecalBody:      d.DecalBody,
+		&c.Emissive:       d.Emissive,
+		&c.Emote:          d.Emote,
+		&c.GoalFX:         d.GoalFX,
+		&c.Medal:          d.Medal,
+		&c.Pattern:        d.Pattern,
+		&c.PatternBody:    d.PatternBody,
+		&c.PIP:            d.PIP,
+		&c.SecondEmote:    d.SecondEmote,
+		&c.Tag:            d.Tag,
+		&c.Tint:           d.Tint,
+		&c.TintAlignmentA: d.TintAlignmentA,
+		&c.TintAlignmentB: d.TintAlignmentB,
+		&c.TintBody:       d.TintBody,
+		&c.Title:          d.Title,
+	}
+
+	updated := false
+	for k, v := range mapping {
+		if *k == "" {
+			*k = v
+			updated = true
+		}
+	}
+
+	return updated
+}
+
 func AccountMetadataLoad(ctx context.Context, nk runtime.NakamaModule, userID string) (*AccountMetadata, error) {
 	account, err := nk.AccountGetId(ctx, userID)
 	if err != nil {

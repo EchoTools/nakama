@@ -427,6 +427,12 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		params.matchmakingSettings = &settings
 	}
 
+	if !params.accountMetadata.AllowBrokenCosmetics {
+		if u := params.accountMetadata.FixBrokenCosmetics(); u {
+			metadataUpdated = true
+		}
+	}
+
 	if metadataUpdated {
 		if err := p.runtimeModule.AccountUpdateId(ctx, params.account.User.Id, "", params.accountMetadata.MarshalMap(), params.accountMetadata.GetActiveGroupDisplayName(), "", "", "", ""); err != nil {
 			metricsTags["error"] = "failed_update_metadata"
