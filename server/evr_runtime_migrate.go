@@ -81,13 +81,7 @@ func MigrateAllUsers(ctx context.Context, logger runtime.Logger, nk runtime.Naka
 func MigrateUser(ctx context.Context, zapLogger *zap.Logger, nk runtime.NakamaModule, db *sql.DB, userID string) error {
 	logger := NewRuntimeGoLogger(zapLogger)
 
-	migrations := []UserMigrator{
-		&MigrateUserLoginHistory{},
-		&MigrationUserVRMLEntitlementsToWallet{},
-		&MigrateUserGameProfile{},
-		&MigrateUserIncompleteProfile{},
-		&MigrateDisplayNameHistory{},
-	}
+	migrations := []UserMigrator{}
 	startTime := time.Now()
 
 	for _, m := range migrations {
