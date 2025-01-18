@@ -169,22 +169,32 @@ func (h *LoginHistory) RemovePendingAuthorizationIP(ip string) {
 	delete(h.PendingAuthorizations, ip)
 }
 
-func (h *LoginHistory) NotifyGroup(groupID string, userIDs []string) bool {
+func (h *LoginHistory) NotifyGroup(groupID string) bool {
+
+	firstIDs := make([]string, 0, len(h.AlternateMap))
+	for k := range h.AlternateMap {
+		firstIDs = append(firstIDs, k)
+	}
+
+	userIDs := append(firstIDs, h.SecondDegreeAlternates...)
+
+	if len(userIDs) == 0 {
+		return false
+	}
+
 	slices.Sort(userIDs)
 	userIDs = slices.Compact(userIDs)
 
 	if h.NotifiedGroups == nil {
 		h.NotifiedGroups = make(map[string][]string)
 	}
-	if len(h.AlternateMap) == 0 {
-		return false
+
+	if currentIDs, found := h.NotifiedGroups[groupID]; !found || !slices.Equal(currentIDs, userIDs) {
+		h.NotifiedGroups[groupID] = userIDs
+		return true
 	}
 
-	if _, found := h.NotifiedGroups[groupID]; found && slices.Equal(h.NotifiedGroups[groupID], userIDs) {
-		return false
-	}
-	h.NotifiedGroups[groupID] = userIDs
-	return true
+	return false
 }
 
 func (h *LoginHistory) UpdateAlternates(ctx context.Context, nk runtime.NakamaModule) error {
