@@ -126,13 +126,13 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 			logger.Error("error loading login history: %v", err)
 		}
 
-		firstIDs := make([]string, 0, len(loginHistory.AlternateMap))
-		for k := range loginHistory.AlternateMap {
-			firstIDs = append(firstIDs, k)
-		}
-		allIDs := append(firstIDs, loginHistory.SecondDegreeAlternates...)
+		if updated := loginHistory.NotifyGroup(groupID); updated {
 
-		if updated := loginHistory.NotifyGroup(groupID, allIDs); updated {
+			firstIDs := make([]string, 0, len(loginHistory.AlternateMap))
+
+			for k := range loginHistory.AlternateMap {
+				firstIDs = append(firstIDs, k)
+			}
 
 			firstDegree := make([]string, 0, len(firstIDs))
 			if len(firstIDs) > 0 {
