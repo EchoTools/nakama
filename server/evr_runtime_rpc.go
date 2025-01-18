@@ -991,7 +991,7 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 	}
 
 	// Validate that the user has permissions to allocate for the guild
-	if !slices.Contains(md.RoleCache[md.Roles.Allocator], userID) {
+	if !md.HasRole(userID, md.Roles.Allocator) {
 		return "", runtime.NewError("user must have the `allocator` in the guild.", StatusPermissionDenied)
 	}
 

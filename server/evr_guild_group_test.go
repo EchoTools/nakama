@@ -3,6 +3,7 @@ package server
 import (
 	"testing"
 
+	"github.com/bits-and-blooms/bitset"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -23,7 +24,6 @@ func TestGuildGroupMembership_ToUint64(t *testing.T) {
 				IsAPIAccess:          true,
 				IsAccountAgeBypass:   true,
 				IsVPNBypass:          true,
-				IsHeadsetLinked:      true,
 			},
 			expected: uint64(511), // 111111111 in binary
 		},
@@ -38,7 +38,6 @@ func TestGuildGroupMembership_ToUint64(t *testing.T) {
 				IsAPIAccess:          false,
 				IsAccountAgeBypass:   false,
 				IsVPNBypass:          false,
-				IsHeadsetLinked:      false,
 			},
 			expected: uint64(0),
 		},
@@ -53,7 +52,6 @@ func TestGuildGroupMembership_ToUint64(t *testing.T) {
 				IsAPIAccess:          false,
 				IsAccountAgeBypass:   true,
 				IsVPNBypass:          false,
-				IsHeadsetLinked:      true,
 			},
 			expected: uint64(341), // 101010101 in binary
 		},
@@ -63,6 +61,129 @@ func TestGuildGroupMembership_ToUint64(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := tt.membership.ToUint64()
 			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+func TestGuildGroupMembership_FromBitSet(t *testing.T) {
+	tests := []struct {
+		name     string
+		bitset   *bitset.BitSet
+		expected GuildGroupMembership
+	}{
+		{
+			name:   "All flags set",
+			bitset: bitset.From([]uint64{511}), // 111111111 in binary
+			expected: GuildGroupMembership{
+				IsAllowedMatchmaking: true,
+				IsModerator:          true,
+				IsServerHost:         true,
+				IsAllocator:          true,
+				IsSuspended:          true,
+				IsAPIAccess:          true,
+				IsAccountAgeBypass:   true,
+				IsVPNBypass:          true,
+				IsLimitedAccess:      true,
+			},
+		},
+		{
+			name:   "No flags set",
+			bitset: bitset.From([]uint64{0}),
+			expected: GuildGroupMembership{
+				IsAllowedMatchmaking: false,
+				IsModerator:          false,
+				IsServerHost:         false,
+				IsAllocator:          false,
+				IsSuspended:          false,
+				IsAPIAccess:          false,
+				IsAccountAgeBypass:   false,
+				IsVPNBypass:          false,
+				IsLimitedAccess:      false,
+			},
+		},
+		{
+			name:   "Some flags set",
+			bitset: bitset.From([]uint64{341}), // 101010101 in binary
+			expected: GuildGroupMembership{
+				IsAllowedMatchmaking: true,
+				IsModerator:          false,
+				IsServerHost:         true,
+				IsAllocator:          false,
+				IsSuspended:          true,
+				IsAPIAccess:          false,
+				IsAccountAgeBypass:   true,
+				IsVPNBypass:          false,
+				IsLimitedAccess:      true,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var membership GuildGroupMembership
+			membership.FromBitSet(tt.bitset)
+			assert.Equal(t, tt.expected, membership)
+		})
+	}
+}
+func TestGuildGroupMembership_asBitSet(t *testing.T) {
+	tests := []struct {
+		name       string
+		membership GuildGroupMembership
+		expected   *bitset.BitSet
+	}{
+		{
+			name: "All flags set",
+			membership: GuildGroupMembership{
+				IsAllowedMatchmaking: true,
+				IsModerator:          true,
+				IsServerHost:         true,
+				IsAllocator:          true,
+				IsSuspended:          true,
+				IsAPIAccess:          true,
+				IsAccountAgeBypass:   true,
+				IsVPNBypass:          true,
+				IsLimitedAccess:      true,
+			},
+			expected: bitset.From([]uint64{511}), // 111111111 in binary
+		},
+		{
+			name: "No flags set",
+			membership: GuildGroupMembership{
+				IsAllowedMatchmaking: false,
+				IsModerator:          false,
+				IsServerHost:         false,
+				IsAllocator:          false,
+				IsSuspended:          false,
+				IsAPIAccess:          false,
+				IsAccountAgeBypass:   false,
+				IsVPNBypass:          false,
+				IsLimitedAccess:      false,
+			},
+			expected: bitset.From([]uint64{0}),
+		},
+		{
+			name: "Some flags set",
+			membership: GuildGroupMembership{
+				IsAllowedMatchmaking: true,
+				IsModerator:          false,
+				IsServerHost:         true,
+				IsAllocator:          false,
+				IsSuspended:          true,
+				IsAPIAccess:          false,
+				IsAccountAgeBypass:   true,
+				IsVPNBypass:          false,
+				IsLimitedAccess:      true,
+			},
+			expected: bitset.From([]uint64{341}), // 101010101 in binary
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.membership.asBitSet()
+			if result.Difference(tt.expected).Any() {
+				t.Errorf("Expected %v, got %v", tt.expected, result)
+			}
 		})
 	}
 }

@@ -4,13 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"slices"
+	"time"
 
 	"github.com/bits-and-blooms/bitset"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
-	"github.com/samber/lo"
 )
 
 type GuildGroupRoles struct {
@@ -24,6 +25,7 @@ type GuildGroupRoles struct {
 	AccountAgeBypass string `json:"account_age_bypass"`
 	VPNBypass        string `json:"vpn_bypass"`
 	AccountLinked    string `json:"headset_linked"`
+	UsernameOnly     string `json:"username_only"`
 }
 
 // Roles returns a slice of role IDs
@@ -39,6 +41,8 @@ func (r *GuildGroupRoles) AsSlice() []string {
 		r.AccountAgeBypass,
 		r.VPNBypass,
 		r.AccountLinked,
+		r.LimitedAccess,
+		r.UsernameOnly,
 	} {
 		if r != "" {
 			roles = append(roles, r)
@@ -46,17 +50,6 @@ func (r *GuildGroupRoles) AsSlice() []string {
 	}
 	slices.Sort(roles)
 	return slices.Compact(roles)
-}
-
-type GuildGroupRoleCache struct {
-	Member           []string `json:"member"`
-	Moderator        []string `json:"moderator"`
-	ServerHost       []string `json:"server_host"`
-	Allocator        []string `json:"allocator"`
-	Suspended        []string `json:"suspended"`
-	APIAccess        []string `json:"api_access"`
-	AccountAgeBypass []string `json:"account_age_bypass"`
-	VPNBypass        []string `json:"vpn_bypass"`
 }
 
 type GuildGroupMemberships map[string]GuildGroupMembership
@@ -67,31 +60,31 @@ func (g GuildGroupMemberships) IsMember(groupID string) bool {
 }
 
 type GroupMetadata struct {
-	GuildID                 string              `json:"guild_id"`                   // The guild ID
-	RulesText               string              `json:"rules_text"`                 // The rules text displayed on the main menu
-	MinimumAccountAgeDays   int                 `json:"minimum_account_age_days"`   // The minimum account age in days to be able to play echo on this guild's sessions
-	MembersOnlyMatchmaking  bool                `json:"members_only_matchmaking"`   // Restrict matchmaking to members only (when this group is the active one)
-	DisableCreateCommand    bool                `json:"disable_create_command"`     // Disable the public allocate command
-	ModeratorsHaveGoldNames bool                `json:"moderators_have_gold_names"` // Moderators have gold display names
-	Roles                   *GuildGroupRoles    `json:"roles"`                      // The roles text displayed on the main menu
-	RoleCache               map[string][]string `json:"role_cache"`                 // The role cache
-	MatchmakingChannelIDs   map[string]string   `json:"matchmaking_channel_ids"`    // The matchmaking channel IDs
-	DebugChannelID          string              `json:"debug_channel_id"`           // The debug channel
-	AuditChannelID          string              `json:"audit_channel_id"`           // The audit channel
-	ErrorChannelID          string              `json:"error_channel_id"`           // The error channel
-	BlockVPNUsers           bool                `json:"block_vpn_users"`            // Block VPN users
-	FraudScoreThreshold     int                 `json:"fraud_score_threshold"`      // The fraud score threshold
-	AllowedFeatures         []string            `json:"allowed_features"`           // Allowed features
-	LogAlternateAccounts    bool                `json:"log_alternate_accounts"`     // Log alternate accounts
+	GuildID                 string                         `json:"guild_id"`                   // The guild ID
+	RulesText               string                         `json:"rules_text"`                 // The rules text displayed on the main menu
+	MinimumAccountAgeDays   int                            `json:"minimum_account_age_days"`   // The minimum account age in days to be able to play echo on this guild's sessions
+	MembersOnlyMatchmaking  bool                           `json:"members_only_matchmaking"`   // Restrict matchmaking to members only (when this group is the active one)
+	DisableCreateCommand    bool                           `json:"disable_create_command"`     // Disable the public allocate command
+	ModeratorsHaveGoldNames bool                           `json:"moderators_have_gold_names"` // Moderators have gold display names
+	Roles                   *GuildGroupRoles               `json:"roles"`                      // The roles text displayed on the main menu
+	RoleCache               map[string]map[string]struct{} `json:"role_cache"`                 // The role cache
+	MatchmakingChannelIDs   map[string]string              `json:"matchmaking_channel_ids"`    // The matchmaking channel IDs
+	DebugChannelID          string                         `json:"debug_channel_id"`           // The debug channel
+	AuditChannelID          string                         `json:"audit_channel_id"`           // The audit channel
+	ErrorChannelID          string                         `json:"error_channel_id"`           // The error channel
+	BlockVPNUsers           bool                           `json:"block_vpn_users"`            // Block VPN users
+	FraudScoreThreshold     int                            `json:"fraud_score_threshold"`      // The fraud score threshold
+	AllowedFeatures         []string                       `json:"allowed_features"`           // Allowed features
+	LogAlternateAccounts    bool                           `json:"log_alternate_accounts"`     // Log alternate accounts
 
 	// UserIDs that are required to go to community values when the first join the social lobby
-	CommunityValuesUserIDs []string `json:"community_values_user_ids"`
+	CommunityValuesUserIDs map[string]time.Time `json:"community_values_user_ids"`
 }
 
 func NewGuildGroupMetadata(guildID string) *GroupMetadata {
 	return &GroupMetadata{
 		GuildID:               guildID,
-		RoleCache:             make(map[string][]string),
+		RoleCache:             make(map[string]map[string]struct{}),
 		Roles:                 &GuildGroupRoles{},
 		MatchmakingChannelIDs: make(map[string]string),
 	}
@@ -104,77 +97,49 @@ func (g *GroupMetadata) MarshalMap() map[string]any {
 	return m
 }
 
-func (g *GroupMetadata) IsServerHost(userID string) bool {
-	if userIDs, ok := g.RoleCache[g.Roles.ServerHost]; ok {
-		return slices.Contains(userIDs, userID)
+func (g *GroupMetadata) HasRole(userID string, role string) bool {
+	if userIDs, ok := g.RoleCache[role]; ok {
+		if _, ok := userIDs[userID]; ok {
+			return true
+		}
 	}
 	return false
+}
+
+func (g *GroupMetadata) IsServerHost(userID string) bool {
+	return g.HasRole(userID, g.Roles.ServerHost)
 }
 
 func (g *GroupMetadata) IsAllocator(userID string) bool {
-	if userIDs, ok := g.RoleCache[g.Roles.Allocator]; ok {
-		return slices.Contains(userIDs, userID)
-	}
-	return false
+	return g.HasRole(userID, g.Roles.Allocator)
 }
 
 func (g *GroupMetadata) IsModerator(userID string) bool {
-	if userIDs, ok := g.RoleCache[g.Roles.Moderator]; ok {
-		return slices.Contains(userIDs, userID)
-	}
-	return false
+	return g.HasRole(userID, g.Roles.Moderator)
 }
 
 func (g *GroupMetadata) IsMember(userID string) bool {
-	if userIDs, ok := g.RoleCache[g.Roles.Member]; ok {
-		return slices.Contains(userIDs, userID)
-	}
-	return false
+	return g.HasRole(userID, g.Roles.Member)
 }
 
 func (g *GroupMetadata) IsSuspended(userID string) bool {
-	if userIDs, ok := g.RoleCache[g.Roles.Suspended]; ok {
-		return slices.Contains(userIDs, userID)
-	}
-	return false
+	return g.HasRole(userID, g.Roles.Suspended)
 }
 
 func (g *GroupMetadata) IsLimitedAccess(userID string) bool {
-	if g.Roles.LimitedAccess == "" {
-		return g.IsSuspended(userID)
-	}
-	if userIDs, ok := g.RoleCache[g.Roles.LimitedAccess]; ok {
-		return slices.Contains(userIDs, userID)
-	}
-	return false
+	return g.HasRole(userID, g.Roles.LimitedAccess)
 }
 
-func (m *GroupMetadata) IsAPIAccess(userID string) bool {
-	if userIDs, ok := m.RoleCache[m.Roles.APIAccess]; ok {
-		return slices.Contains(userIDs, userID)
-	}
-	return false
+func (g *GroupMetadata) IsAPIAccess(userID string) bool {
+	return g.HasRole(userID, g.Roles.APIAccess)
 }
 
-func (m *GroupMetadata) IsAccountAgeBypass(userID string) bool {
-	if userIDs, ok := m.RoleCache[m.Roles.AccountAgeBypass]; ok {
-		return slices.Contains(userIDs, userID)
-	}
-	return false
+func (g *GroupMetadata) IsAccountAgeBypass(userID string) bool {
+	return g.HasRole(userID, g.Roles.AccountAgeBypass)
 }
 
-func (m *GroupMetadata) IsVPNBypass(userID string) bool {
-	if userIDs, ok := m.RoleCache[m.Roles.VPNBypass]; ok {
-		return slices.Contains(userIDs, userID)
-	}
-	return false
-}
-
-func (m *GroupMetadata) IsAccountLinked(userID string) bool {
-	if userIDs, ok := m.RoleCache[m.Roles.AccountLinked]; ok {
-		return slices.Contains(userIDs, userID)
-	}
-	return false
+func (g *GroupMetadata) IsVPNBypass(userID string) bool {
+	return g.HasRole(userID, g.Roles.VPNBypass)
 }
 
 func (m *GroupMetadata) IsAllowedFeature(feature string) bool {
@@ -187,37 +152,32 @@ func (m *GroupMetadata) IsAllowedMatchmaking(userID string) bool {
 	}
 
 	if userIDs, ok := m.RoleCache[m.Roles.Member]; ok {
-		return slices.Contains(userIDs, userID)
+		if _, ok := userIDs[userID]; ok {
+			return true
+		}
 	}
 
 	return false
 }
 
 func (m *GroupMetadata) hasCompletedCommunityValues(userID string) bool {
-	return !slices.Contains(m.CommunityValuesUserIDs, userID)
+	_, found := m.CommunityValuesUserIDs[userID]
+	return found
 }
 
 func (m *GroupMetadata) CommunityValuesUserIDsAdd(userID string) {
 	if m.CommunityValuesUserIDs == nil {
-		m.CommunityValuesUserIDs = make([]string, 0)
+		m.CommunityValuesUserIDs = make(map[string]time.Time)
 	}
-	if slices.Contains(m.CommunityValuesUserIDs, userID) {
-		return
-	}
-	m.CommunityValuesUserIDs = append(m.CommunityValuesUserIDs, userID)
+	m.CommunityValuesUserIDs[userID] = time.Now().UTC()
 }
 
 func (m *GroupMetadata) CommunityValuesUserIDsRemove(userID string) bool {
-	if !slices.Contains(m.CommunityValuesUserIDs, userID) {
+	if _, ok := m.CommunityValuesUserIDs[userID]; !ok {
 		return false
 	}
-	for i, id := range m.CommunityValuesUserIDs {
-		if id == userID {
-			m.CommunityValuesUserIDs = append(m.CommunityValuesUserIDs[:i], m.CommunityValuesUserIDs[i+1:]...)
-			return true
-		}
-	}
-	return false
+	delete(m.CommunityValuesUserIDs, userID)
+	return true
 }
 
 func (g *GroupMetadata) MarshalToMap() (map[string]interface{}, error) {
@@ -293,7 +253,7 @@ func (g *GuildGroup) Size() int {
 func (g *GuildGroup) RolesUserList(userID string) []string {
 	roles := make([]string, 0, len(g.RoleCache))
 	for role, userIDs := range g.RoleCache {
-		if slices.Contains(userIDs, userID) {
+		if _, ok := userIDs[userID]; ok {
 			roles = append(roles, role)
 		}
 	}
@@ -307,37 +267,57 @@ func (g *GuildGroup) PermissionsUser(userID string) *GuildGroupMembership {
 		IsServerHost:         g.IsServerHost(userID),
 		IsAllocator:          g.IsAllocator(userID),
 		IsSuspended:          g.IsSuspended(userID),
+		IsLimitedAccess:      g.IsLimitedAccess(userID),
 		IsAPIAccess:          g.IsAPIAccess(userID),
 		IsAccountAgeBypass:   g.IsAccountAgeBypass(userID),
 		IsVPNBypass:          g.IsVPNBypass(userID),
-		IsHeadsetLinked:      g.IsAccountLinked(userID),
 	}
 }
 
 func (g *GuildGroup) RolesCacheUpdate(userID string, current []string) bool {
 
-	// Only cache relavent roles.
-	current = lo.Intersect(current, g.Roles.AsSlice())
-
-	removals, additions := lo.Difference(g.RolesUserList(userID), current)
-
-	if len(removals) == 0 && len(additions) == 0 {
-		return false
+	// Ensure the role cache has been initialized
+	if g.RoleCache == nil {
+		g.RoleCache = make(map[string]map[string]struct{})
 	}
-
-	for _, role := range removals {
-		i := slices.Index(g.RoleCache[role], userID)
-		if i == -1 {
-			continue
+	relevantRoles := make(map[string]struct{}, len(g.Roles.AsSlice()))
+	for _, r := range g.Roles.AsSlice() {
+		relevantRoles[r] = struct{}{}
+		if _, ok := g.RoleCache[r]; !ok {
+			g.RoleCache[r] = make(map[string]struct{})
 		}
-		g.RoleCache[role] = append(g.RoleCache[role][:i], g.RoleCache[role][i+1:]...)
 	}
 
-	for _, role := range additions {
-		g.RoleCache[role] = append(g.RoleCache[role], userID)
+	updated := false
+
+	// Remove any roles that are not relevant
+	for role := range g.RoleCache {
+		if _, ok := relevantRoles[role]; !ok {
+			delete(g.RoleCache, role)
+			updated = true
+		}
 	}
 
-	return true
+	// Add the user to the roles
+	userRoles := make(map[string]struct{}, len(current))
+	for _, r := range current {
+		userRoles[r] = struct{}{}
+	}
+
+	// Update the roles
+	for role, userIDs := range g.RoleCache {
+		_, hasRole := userRoles[role]
+		_, hasUser := userIDs[userID]
+		if hasRole && !hasUser {
+			userIDs[userID] = struct{}{}
+			updated = true
+		} else if !hasRole && hasUser {
+			delete(userIDs, userID)
+			updated = true
+		}
+	}
+
+	return updated
 }
 
 type GuildGroupMembership struct {
@@ -349,7 +329,7 @@ type GuildGroupMembership struct {
 	IsAPIAccess          bool
 	IsAccountAgeBypass   bool
 	IsVPNBypass          bool
-	IsHeadsetLinked      bool
+	IsLimitedAccess      bool
 }
 
 func (m *GuildGroupMembership) ToUint64() uint64 {
@@ -367,46 +347,31 @@ func (m *GuildGroupMembership) FromUint64(v uint64) {
 }
 
 func (m *GuildGroupMembership) FromBitSet(b *bitset.BitSet) {
-	m.IsAllowedMatchmaking = b.Test(0)
-	m.IsModerator = b.Test(1)
-	m.IsServerHost = b.Test(2)
-	m.IsAllocator = b.Test(3)
-	m.IsSuspended = b.Test(4)
-	m.IsAPIAccess = b.Test(5)
-	m.IsAccountAgeBypass = b.Test(6)
-	m.IsVPNBypass = b.Test(7)
-	m.IsHeadsetLinked = b.Test(8)
+
+	value := reflect.ValueOf(m).Elem()
+	for i := 0; i < value.NumField(); i++ {
+		field := value.Field(i)
+		if field.Kind() != reflect.Bool {
+			continue
+		}
+		field.SetBool(b.Test(uint(i)))
+	}
 }
 
 func (m *GuildGroupMembership) asBitSet() *bitset.BitSet {
-	b := bitset.New(9)
-	if m.IsAllowedMatchmaking {
-		b.Set(0)
+	value := reflect.ValueOf(m).Elem()
+
+	b := bitset.New(uint(value.NumField()))
+	for i := 0; i < value.NumField(); i++ {
+		field := value.Field(i)
+		if field.Kind() != reflect.Bool {
+			continue
+		}
+		if field.Bool() {
+			b.Set(uint(i))
+		}
 	}
-	if m.IsModerator {
-		b.Set(1)
-	}
-	if m.IsServerHost {
-		b.Set(2)
-	}
-	if m.IsAllocator {
-		b.Set(3)
-	}
-	if m.IsSuspended {
-		b.Set(4)
-	}
-	if m.IsAPIAccess {
-		b.Set(5)
-	}
-	if m.IsAccountAgeBypass {
-		b.Set(6)
-	}
-	if m.IsVPNBypass {
-		b.Set(7)
-	}
-	if m.IsHeadsetLinked {
-		b.Set(8)
-	}
+
 	return b
 }
 

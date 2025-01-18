@@ -339,6 +339,9 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 				if m.IsVPNBypass {
 					roles = append(roles, "vpn-bypass")
 				}
+				if m.IsLimitedAccess {
+					roles = append(roles, "limited-access")
+				}
 				if len(roles) > 0 {
 					groupStr += fmt.Sprintf(" (%s)", strings.Join(roles, ", "))
 				}
