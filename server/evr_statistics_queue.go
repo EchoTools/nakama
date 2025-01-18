@@ -10,7 +10,6 @@ import (
 
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
-	"go.uber.org/zap"
 )
 
 type StatisticsQueue struct {
@@ -37,9 +36,16 @@ func NewStatisticsQueue(logger runtime.Logger, nk runtime.NakamaModule) *Statist
 					// Try to create the leaderboard
 					operator, sortOrder, cronSchedule := OperatorToLeaderboardOperator(e.BoardMeta.Operator), "desc", ResetScheduleToCron(e.BoardMeta.ResetSchedule)
 					if err = nk.LeaderboardCreate(ctx, e.BoardMeta.ID(), true, sortOrder, operator, cronSchedule, map[string]any{}, true); err != nil {
-						logger.Error("Leaderboard create error", zap.Error(err))
+						logger.WithFields(map[string]interface{}{
+							"leaderboard_id": e.BoardMeta.ID(),
+							"error":          err.Error(),
+						}).Error("Failed to create leaderboard")
+
 					} else {
-						logger.Error("Leaderboard record write error", zap.Error(err))
+						logger.WithFields(map[string]interface{}{
+							"leaderboard_id": e.BoardMeta.ID(),
+						}).Debug("Leaderboard created")
+
 					}
 				}
 			}
@@ -296,15 +302,15 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, ownerID, groupID str
 func StatisticsToEntries(userID, displayName, groupID string, mode evr.Symbol, prev, update evr.Statistics) ([]*StatisticsQueueEntry, error) {
 
 	// Modify the update based on the previous stats
-	updateValue := reflect.ValueOf(update).Elem()
-	prevValue := reflect.ValueOf(prev).Elem()
+	updateValue := reflect.ValueOf(update)
+	prevValue := reflect.ValueOf(prev)
 	for i := 0; i < updateValue.Elem().NumField(); i++ {
 
-		if !updateValue.Field(i).IsNil() {
+		if field := updateValue.Elem().Field(i); !field.IsNil() {
 
-			stat := updateValue.Field(i).Interface().(evr.Statistic)
+			stat := field.Interface().(evr.Statistic)
 
-			if prevField := prevValue.Field(i); !prevField.IsNil() {
+			if prevField := prevValue.Elem().Field(i); !prevField.IsNil() {
 
 				switch prevStat := prevField.Interface().(type) {
 				case *evr.StatisticIntegerIncrement:
