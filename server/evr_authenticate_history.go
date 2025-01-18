@@ -67,8 +67,8 @@ type LoginHistory struct {
 	Cache                  []string                           `json:"cache"`   // list of IP addresses, EvrID's, HMD Serial Numbers, and System Data
 	XPIs                   map[string]time.Time               `json:"xpis"`    // list of XPIs
 	ClientIPs              map[string]time.Time               `json:"client_ips"`
-	AuthorizedIPs          map[string]time.Time               `json:"authorized_ips"`
-	PendingAuthorizations  map[string]*LoginHistoryEntry      `json:"unverified_ips"`
+	AuthorizedIPs          map[string]time.Time               `json:"authorized_client_ips"`
+	PendingAuthorizations  map[string]*LoginHistoryEntry      `json:"pending_authorizations"`
 	SecondDegreeAlternates []string                           `json:"second_degree"`
 	AlternateMap           map[string][]*AlternateSearchMatch `json:"alternate_accounts"`         // map of alternate user IDs and what they have in common
 	NotifiedGroups         map[string][]string                `json:"group_notification_history"` // list of groups that have been notified of this alternate login
@@ -117,6 +117,37 @@ func (h *LoginHistory) Insert(entry *LoginHistoryEntry) {
 	h.History[entry.Key()] = entry
 }
 
+func (h *LoginHistory) AuthorizeIPWithCode(ip, code string) error {
+	if h.AuthorizedIPs == nil {
+		h.AuthorizedIPs = make(map[string]time.Time)
+	}
+
+	found := false
+	var entry *LoginHistoryEntry
+	for k, e := range h.PendingAuthorizations {
+		if e.ClientIP == ip {
+			found = true
+			// Always delete the entry
+			delete(h.PendingAuthorizations, k)
+			entry = e
+			break
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("no pending authorization found for IP %s", ip)
+	}
+
+	pendingCode := fmt.Sprintf("%02d", entry.CreatedAt.Nanosecond()%100)
+	if pendingCode != code {
+
+		return fmt.Errorf("invalid code %s for IP %s", code, ip)
+	}
+
+	h.AuthorizedIPs[ip] = time.Now().UTC()
+	return nil
+}
+
 func (h *LoginHistory) AuthorizeIP(ip string) bool {
 	if h.AuthorizedIPs == nil {
 		h.AuthorizedIPs = make(map[string]time.Time)
@@ -145,6 +176,7 @@ func (h *LoginHistory) AddPendingAuthorizationIP(xpid evr.EvrId, clientIP string
 		h.PendingAuthorizations = make(map[string]*LoginHistoryEntry)
 	}
 	e := &LoginHistoryEntry{
+		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 		XPID:      xpid,
 		ClientIP:  clientIP,
@@ -171,7 +203,7 @@ func (h *LoginHistory) RemovePendingAuthorizationIP(ip string) {
 
 func (h *LoginHistory) NotifyGroup(groupID string) bool {
 
-	firstIDs := make([]string, 0, len(h.AlternateMap))
+	firstIDs := make([]string, 0, len(h.AlternateMap)+len(h.SecondDegreeAlternates))
 	for k := range h.AlternateMap {
 		firstIDs = append(firstIDs, k)
 	}
@@ -186,7 +218,10 @@ func (h *LoginHistory) NotifyGroup(groupID string) bool {
 	userIDs = slices.Compact(userIDs)
 
 	if h.NotifiedGroups == nil {
-		h.NotifiedGroups = make(map[string][]string)
+		h.NotifiedGroups = map[string][]string{
+			groupID: userIDs,
+		}
+		return true
 	}
 
 	if currentIDs, found := h.NotifiedGroups[groupID]; !found || !slices.Equal(currentIDs, userIDs) {

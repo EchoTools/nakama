@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand"
 	"net"
 	"net/http"
 	"regexp"
@@ -1906,7 +1907,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			ipqs, _ := d.ipqsCache.Get(ctx, request.ClientIP)
 
-			embeds, components, _ := IPVerificationEmbed(request, ipqs)
+			embeds, components := IPVerificationEmbed(request, ipqs)
 			// Send it as the interaction response
 			if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -3633,8 +3634,8 @@ func (d *DiscordAppBot) SendIPApprovalRequest(ctx context.Context, userID string
 	}
 
 	// Send the message
-	embeds, components, thisIsMeButton := IPVerificationEmbed(e, ipqs)
-	message, err := d.dg.ChannelMessageSendComplex(channel.ID, &discordgo.MessageSend{
+	embeds, components := IPVerificationEmbed(e, ipqs)
+	_, err = d.dg.ChannelMessageSendComplex(channel.ID, &discordgo.MessageSend{
 		Embeds:     embeds,
 		Components: components,
 	})
@@ -3642,28 +3643,37 @@ func (d *DiscordAppBot) SendIPApprovalRequest(ctx context.Context, userID string
 		return err
 	}
 
-	// Only allow th user 3 minutes to respond, then disable the "This Is Me" button
-	go func() {
-		<-time.After(3 * time.Minute)
-		thisIsMeButton.Disabled = true
-		thisIsMeButton.Style = discordgo.SecondaryButton
-		thisIsMeButton.Label = "Expired"
-
-		_, err := d.dg.ChannelMessageEditComplex(&discordgo.MessageEdit{
-			ID:         message.ID,
-			Channel:    channel.ID,
-			Embeds:     &embeds,
-			Components: &components,
-		})
-		if err != nil {
-			d.logger.Error("Failed to disable button", zap.Error(err))
-		}
-	}()
-
 	return nil
 }
 
-func IPVerificationEmbed(entry *LoginHistoryEntry, ipqs *IPQSResponse) ([]*discordgo.MessageEmbed, []discordgo.MessageComponent, *discordgo.Button) {
+func IPVerificationEmbed(entry *LoginHistoryEntry, ipqs *IPQSResponse) ([]*discordgo.MessageEmbed, []discordgo.MessageComponent) {
+
+	code := fmt.Sprintf("%02d", entry.CreatedAt.Nanosecond()%100)
+
+	codes := []string{code}
+
+	// Generate 3 more random numbers
+	for len(codes) < 4 {
+		s := fmt.Sprintf("%02d", rand.Intn(100))
+		if slices.Contains(codes, s) {
+			continue
+		}
+		codes = append(codes, s)
+	}
+
+	// Shuffle the numbers
+	rand.Shuffle(len(codes), func(i, j int) {
+		codes[i], codes[j] = codes[j], codes[i]
+	})
+
+	options := make([]discordgo.SelectMenuOption, 0, 4)
+
+	for _, code := range codes {
+		options = append(options, discordgo.SelectMenuOption{
+			Label: code,
+			Value: entry.ClientIP + ":" + code,
+		})
+	}
 
 	embed := &discordgo.MessageEmbed{
 		Title:       "New Login Location",
@@ -3687,29 +3697,31 @@ func IPVerificationEmbed(entry *LoginHistoryEntry, ipqs *IPQSResponse) ([]*disco
 	}
 	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
 		Name:   "Note",
-		Value:  "If you were not instructed (in your headset) to look for this message, this login attempt may not be you! please report it to EchoVRCE using the **Report** button below.",
+		Value:  "Report this message, If you were not instructed (in your headset) to look for this message. Use the **Report** button below.",
 		Inline: false,
 	})
-
-	thisIsMeButton := &discordgo.Button{
-		Label:    "This is My Headset",
-		Style:    discordgo.SuccessButton,
-		CustomID: fmt.Sprintf("approve_ip:%s", entry.ClientIP),
-	}
 
 	components := []discordgo.MessageComponent{
 		discordgo.ActionsRow{
 			Components: []discordgo.MessageComponent{
-				thisIsMeButton,
+				&discordgo.SelectMenu{
+					CustomID:    "approve_ip",
+					Placeholder: "Select the correct code",
+					Options:     options,
+				},
+			},
+		},
+		discordgo.ActionsRow{
+			Components: []discordgo.MessageComponent{
 				&discordgo.Button{
 					Label:    "Report to EchoVRCE",
 					Style:    discordgo.LinkButton,
-					URL:      "https://discord.gg/q6aFugY3",
+					URL:      ServiceSettings().ReportURL,
 					Disabled: false,
 				},
 			},
 		},
 	}
 
-	return []*discordgo.MessageEmbed{embed}, components, thisIsMeButton
+	return []*discordgo.MessageEmbed{embed}, components
 }

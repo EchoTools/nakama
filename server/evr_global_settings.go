@@ -15,7 +15,7 @@ const (
 	GlobalSettingsKey               = "settings"
 )
 
-var serviceSettings = atomic.NewPointer(&GlobalSettingsData{})
+var serviceSettings = atomic.NewPointer((*GlobalSettingsData)(nil))
 
 func ServiceSettings() *GlobalSettingsData {
 	return serviceSettings.Load()
@@ -30,6 +30,7 @@ type GlobalSettingsData struct {
 	version                  string
 	defaultCosmetics         map[string]struct{}
 	RemoteLogFilters         map[string][]string `json:"remote_logs_filter"` //	Ignore remote logs from specific servers
+	ReportURL                string              `json:"report_url"`         // URL to report issues
 }
 
 type GlobalMatchmakingSettings struct {
@@ -169,7 +170,7 @@ func LoadGlobalSettingsData(ctx context.Context, nk runtime.NakamaModule) (*Glob
 
 	// If the object doesn't exist, or this is the first start
 	// write the settings to the storage
-	if data.version == "" || serviceSettings.Load() == nil {
+	if serviceSettings.Load() == nil || data.version == "" {
 
 		_, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{{
 			Collection:      GlobalSettingsStorageCollection,

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -124,28 +125,55 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(logger runtime.Logger,
 
 	switch commandName {
 	case "approve_ip":
-		ip := net.ParseIP(value)
-		if ip == nil {
-			return simpleInteractionResponse(s, i, "Invalid IP address.")
-		}
 
 		history, err := LoginHistoryLoad(ctx, nk, userID)
 		if err != nil {
 			return fmt.Errorf("failed to load login history: %w", err)
 		}
-		history.AuthorizeIP(ip.String())
+
+		if value != "" {
+			ip := net.ParseIP(value)
+			if ip == nil {
+				return simpleInteractionResponse(s, i, "Invalid IP address.")
+			}
+		} else {
+			// it's an option
+			data := i.Interaction.MessageComponentData()
+			if len(data.Values) == 0 {
+				return simpleInteractionResponse(s, i, "Invalid device ID.")
+			}
+
+			if len(data.Values) != 1 {
+				return simpleInteractionResponse(s, i, "Invalid code.")
+			}
+
+			strs := strings.SplitN(data.Values[0], ":", 2)
+			if len(strs) != 2 {
+				return simpleInteractionResponse(s, i, "Invalid code.")
+			}
+
+			if err := history.AuthorizeIPWithCode(strs[0], strs[1]); err != nil {
+
+				// Store the history
+				if err := LoginHistoryStore(ctx, nk, userID, history); err != nil {
+					return fmt.Errorf("failed to save login history: %w", err)
+				}
+
+				return simpleInteractionResponse(s, i, fmt.Sprintf("Invalid: %v", err))
+			}
+		}
 
 		if err := LoginHistoryStore(ctx, nk, userID, history); err != nil {
 			return fmt.Errorf("failed to save login history: %w", err)
 		}
 
-		// Modify the message
-		message, err := s.ChannelMessage(i.ChannelID, i.Message.ID)
-		if err != nil {
-			return fmt.Errorf("failed to get message: %w", err)
+		// Modify the interaction
+
+		if i.Message == nil {
+			return fmt.Errorf("message is nil")
 		}
 
-		message.Components = []discordgo.MessageComponent{
+		i.Message.Components = []discordgo.MessageComponent{
 			discordgo.ActionsRow{
 				Components: []discordgo.MessageComponent{
 					discordgo.Button{
@@ -157,20 +185,11 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(logger runtime.Logger,
 				},
 			},
 		}
-		if _, err := s.ChannelMessageEditComplex(&discordgo.MessageEdit{
-			ID:              i.Message.ID,
-			Channel:         i.ChannelID,
-			Embeds:          &message.Embeds,
-			Components:      &message.Components,
-			AllowedMentions: &discordgo.MessageAllowedMentions{},
-		}); err != nil {
-			return fmt.Errorf("failed to edit message: %w", err)
-		}
 
 		if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: fmt.Sprintf("Approved IP address `%s`.\n### Please restart the game to play.", ip),
+				Content: fmt.Sprintf("Approved IP address.\n### Please restart the game to play."),
 			},
 		}); err != nil {
 			return fmt.Errorf("failed to respond to interaction: %w", err)
