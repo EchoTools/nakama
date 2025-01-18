@@ -426,8 +426,11 @@ var defaultCosmetics = func() map[string]map[string]bool {
 		for i := 0; i < v.NumField(); i++ {
 			tag := v.Type().Field(i).Tag.Get("validate")
 			j := v.Type().Field(i).Tag.Get("json")
-			j = strings.SplitN(tag, ",", 2)[0]
-			cosmetics[m][j] = strings.Contains(tag, "restricted") || strings.Contains(tag, "blocked")
+			j = strings.SplitN(j, ",", 2)[0]
+			if j == "" {
+				continue
+			}
+			cosmetics[m][j] = !strings.Contains(tag, "restricted") && !strings.Contains(tag, "blocked")
 		}
 	}
 	return cosmetics
@@ -438,8 +441,8 @@ var allCosmetics = func() map[string]map[string]bool {
 	all := make(map[string]map[string]bool, len(defaultCosmetics))
 	for m, t := range defaultCosmetics {
 		all[m] = make(map[string]bool, len(t))
-		for k, _ := range t {
-			defaultCosmetics[m][k] = true
+		for k := range t {
+			all[m][k] = true
 		}
 	}
 	return all
