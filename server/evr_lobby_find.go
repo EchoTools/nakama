@@ -239,6 +239,7 @@ func (p *EvrPipeline) monitorMatchmakingStream(ctx context.Context, logger *zap.
 
 		// Check if the matchmaking stream has been closed.  (i.e. the user has canceled matchmaking)
 		if session.tracker.GetLocalBySessionIDStreamUserID(session.id, stream, session.userID) == nil {
+			<-time.After(1 * time.Second)
 			cancelFn()
 		}
 	}
@@ -392,7 +393,7 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 		var err error
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return fmt.Errorf("context canceled: %w", ctx.Err())
 
 		case <-fallbackTimer.C:
 			query = lobbyParams.BackfillSearchQuery(false, false)
@@ -586,8 +587,12 @@ func (p *EvrPipeline) CheckServerPing(logger *zap.Logger, session *sessionWS) er
 	case <-time.After(5 * time.Second):
 		logger.Warn("Timed out waiting for ping responses message.")
 	case err = <-doneCh:
+		if err != nil {
+			return fmt.Errorf("failed to ping game servers: %v", err)
+		}
 	}
-	return err
+
+	return nil
 }
 
 func PrepareEntrantPresences(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, sessionRegistry SessionRegistry, lobbyParams *LobbySessionParameters, sessionIDs ...uuid.UUID) ([]*EvrMatchPresence, error) {
