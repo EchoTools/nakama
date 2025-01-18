@@ -305,17 +305,21 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 			// IP is not authorized. Add a pending authorization entry.
 			entry := loginHistory.AddPendingAuthorizationIP(params.xpID, session.clientIP, params.loginPayload)
 
+			// Use the last two digits of the nanos seconds as a random code.
+			// This is used to verify the user's location.
+
+			twoFactorCode := fmt.Sprintf("%02d", entry.CreatedAt.Nanosecond()%100)
+
 			if p.appBot != nil && p.appBot.dg != nil && p.appBot.dg.State != nil && p.appBot.dg.State.User != nil {
 
 				if err := p.appBot.SendIPApprovalRequest(ctx, params.account.User.Id, entry, params.ipqs); err != nil {
 					// The user has DMs from non-friends disabled. Tell them to use the slash command.
 					metricsTags["error"] = "failed_send_ip_approval_request"
-
-					return fmt.Errorf("\nUnrecognized connection location. Please type\n  /verify  \nin a guild with the @%s bot.", p.appBot.dg.State.User.Username)
+					return fmt.Errorf("\nPlease authorize this new location by typing:\n/verify\nand select code >>> %s <<< in a guild with the @%s bot.", twoFactorCode, p.appBot.dg.State.User.Username)
 				}
 
 				metricsTags["error"] = "ip_verification_required"
-				return fmt.Errorf("New location detected.\nPlease check your Discord DMs to accept the \nverification request from @%s.", p.appBot.dg.State.User.Username)
+				return fmt.Errorf("Please authorize this new location.\nCheck your Discord DMs from @%s. \nSelect code >>> %s <<<.", p.appBot.dg.State.User.Username, twoFactorCode)
 			}
 
 			metricsTags["error"] = "ip_verification_failed"
