@@ -55,13 +55,11 @@ func NewUserRemoteLogJournalRegistry(ctx context.Context, logger *zap.Logger, nk
 			select {
 			case <-ctx.Done():
 				// Write all remaining entries
-				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-				defer cancel()
+				ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
 
 				if err := registry.storageWrite(ctx, logger, journals); err != nil {
 					registry.logger.Warn("Failed to write user journals", zap.Error(err))
 				}
-
 				return
 
 			case entries := <-registry.queueCh:
