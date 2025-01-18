@@ -615,6 +615,7 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 	metadata.LegalConsents = update.LegalConsents
 	metadata.GhostedPlayers = update.GhostedPlayers.Players
 	metadata.MutedPlayers = update.MutedPlayers.Players
+	metadata.NewUnlocks = update.NewUnlocks
 
 	if err := AccountMetadataSet(ctx, p.runtimeModule, session.userID.String(), metadata); err != nil {
 		return fmt.Errorf("failed to update account metadata: %w", err)
