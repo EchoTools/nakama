@@ -1977,8 +1977,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			if isGuildModerator {
 				d.cache.QueueSyncMember(i.GuildID, target.ID)
 			}
-			includePrivate := isGuildModerator || isSelf
-			includePriviledged := includePrivate || isGlobalModerator
+			includePrivate := isSelf || isGlobalModerator
+			includePriviledged := includePrivate || isGuildModerator
 			includeSystem := isGlobalModerator
 
 			return d.handleProfileRequest(ctx, logger, nk, s, i, target.ID, target.Username, includePriviledged, includePrivate, includeSystem)

@@ -125,7 +125,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 
 	whoami.RecentLogins = make(map[string]time.Time, 0)
 
-	if includePriviledged {
+	if includePrivate {
 		for k, e := range loginHistory.History {
 			if !includePrivate {
 				// Remove the IP address
@@ -143,18 +143,16 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	_ = displayNameHistory
 	pastDisplayNames := make(map[string]time.Time)
 
-	/*
-		for groupID, items := range displayNameHistory.Histories {
-			if !includePriviledged && groupID != i.GuildID {
-				continue
-			}
-			for dn, ts := range items {
-				if e, ok := pastDisplayNames[dn]; !ok || e.After(ts) {
-					pastDisplayNames[dn] = ts
-				}
+	for groupID, items := range displayNameHistory.Histories {
+		if !includePriviledged && groupID != i.GuildID {
+			continue
+		}
+		for dn, ts := range items {
+			if e, ok := pastDisplayNames[dn]; !ok || e.After(ts) {
+				pastDisplayNames[dn] = ts
 			}
 		}
-	*/
+	}
 
 	whoami.DisplayNames = make([]string, 0, len(pastDisplayNames))
 	for dn := range pastDisplayNames {
@@ -235,12 +233,20 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 			if altAccount.GetDisableTime() != nil {
 				state = "disabled"
 			}
-			s := fmt.Sprintf("<@%s>[%s] %s <t:%d:R>\n", altAccount.CustomId, altAccount.User.Username, state, altAccount.User.UpdateTime.AsTime().UTC().Unix())
+
+			items := make([]string, 0, len(matches))
 			for _, m := range matches {
-				for _, item := range m.Items {
-					s += fmt.Sprintf("-  `%s`\n", item)
-				}
+				items = append(items, m.Items...)
 			}
+			slices.Sort(items)
+			items = slices.Compact(items)
+
+			s := fmt.Sprintf("<@%s> [%s] %s <t:%d:R>\n", altAccount.CustomId, altAccount.User.Username, state, altAccount.User.UpdateTime.AsTime().UTC().Unix())
+
+			for _, item := range items {
+				s += fmt.Sprintf("-  `%s`\n", item)
+			}
+
 			whoami.PotentialAlternates = append(whoami.PotentialAlternates, s)
 		}
 	}
@@ -392,7 +398,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 
 	// Remove any blank fields
 	fields = lo.Filter(fields, func(f *discordgo.MessageEmbedField, _ int) bool {
-		return f == nil || f.Value != ""
+		return f != nil && f.Name != "" && f.Value != ""
 	})
 
 	// Send the response
