@@ -162,7 +162,7 @@ func (m *GroupMetadata) IsAllowedMatchmaking(userID string) bool {
 
 func (m *GroupMetadata) hasCompletedCommunityValues(userID string) bool {
 	_, found := m.CommunityValuesUserIDs[userID]
-	return found
+	return !found
 }
 
 func (m *GroupMetadata) CommunityValuesUserIDsAdd(userID string) {

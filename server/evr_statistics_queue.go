@@ -237,15 +237,20 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, ownerID, groupID str
 				Mode:          m,
 				ResetSchedule: r,
 			}]
+			if stat, ok := boardMap[gamesPlayedID]; ok {
+				if gamesPlayed, ok := stat.(*evr.StatisticIntegerIncrement); ok {
+					for _, boardID := range boardIDs {
+						if v, ok := boardMap[boardID]; ok {
 
-			if gamesPlayed, ok := boardMap[gamesPlayedID].(*evr.StatisticIntegerIncrement); ok {
-				for _, boardID := range boardIDs {
-					if _, ok = boardMap[boardID].(*evr.StatisticFloatAverage); ok {
-						boardMap[boardID].SetCount(int64(gamesPlayed.GetValue()))
-					}
-					// If the board's count is 0, remove it.
-					if boardMap[boardID].GetCount() == 0 {
-						delete(boardMap, boardID)
+							// If the board's value is 0, remove it.
+							if boardMap[boardID].GetValue() == 0 {
+								delete(boardMap, boardID)
+								continue
+							}
+							if _, ok := v.(*evr.StatisticFloatAverage); ok {
+								boardMap[boardID].SetCount(int64(gamesPlayed.GetValue()))
+							}
+						}
 					}
 				}
 			}
@@ -372,7 +377,7 @@ func StatisticsToEntries(userID, displayName, groupID string, mode evr.Symbol, p
 				Score:       score,
 				Subscore:    subscore,
 				Metadata:    nil,
-				Override:    2, // set
+				Override:    op,
 			})
 		}
 	}

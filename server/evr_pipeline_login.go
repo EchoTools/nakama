@@ -37,9 +37,12 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 		}
 	}
 
+	if request.Payload == (evr.LoginProfile{}) {
+		return errors.New("login profile is empty")
+	}
+
 	// Start a timer to add to the metrics
 	timer := time.Now()
-	var err error
 
 	// Load the session parameters.
 	params, ok := LoadParams(ctx)
@@ -47,84 +50,105 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 		return errors.New("session parameters not found")
 	}
 
-	// Set the basic parameters related to client hardware and software
+	// Set the basic parameters
 	params.loginSession = session
 	params.xpID = request.XPID
 	params.loginPayload = &request.Payload
 
-	if err = p.authenticateSession(ctx, logger, session, &params); err == nil {
-		if err = MigrateUser(ctx, logger, p.runtimeModule, p.db, session.userID.String()); err == nil {
-			account, err := p.runtimeModule.AccountGetId(ctx, session.userID.String())
-			if err != nil {
-				return fmt.Errorf("failed to get account: %w", err)
-			}
-			params.account = account
+	// Process the login request and populate the session parameters.
+	if err := p.processLoginRequest(ctx, logger, session, &params); err != nil {
 
-			if err = p.authorizeSession(ctx, logger, session, &params); err == nil {
-				if err = p.initializeSession(ctx, logger, session, &params); err == nil {
+		errMessage := formatLoginErrorMessage(request.XPID, err)
 
-					StoreParams(ctx, &params)
-					tags := params.MetricsTags()
-					tags["cpu_model"] = strings.Trim(params.loginPayload.SystemInfo.CPUModel, " ")
-					tags["gpu_model"] = strings.Trim(params.loginPayload.SystemInfo.VideoCard, " ")
-					tags["network_type"] = params.loginPayload.SystemInfo.NetworkType
-					tags["total_memory"] = strconv.FormatInt(params.loginPayload.SystemInfo.MemoryTotal, 10)
-					tags["num_logical_cores"] = strconv.FormatInt(params.loginPayload.SystemInfo.NumLogicalCores, 10)
-					tags["num_physical_cores"] = strconv.FormatInt(params.loginPayload.SystemInfo.NumPhysicalCores, 10)
-					tags["driver_version"] = strings.Trim(params.loginPayload.SystemInfo.DriverVersion, " ")
-					tags["headset_type"] = params.loginPayload.SystemInfo.HeadsetType
-					tags["build_number"] = strconv.FormatInt(int64(params.loginPayload.BuildNumber), 10)
-					tags["app_id"] = strconv.FormatInt(int64(params.loginPayload.AppId), 10)
-					tags["publisher_lock"] = params.loginPayload.PublisherLock
-
-					// Remove blank tags
-					for k, v := range tags {
-						if v == "" {
-							delete(tags, k)
-						}
-					}
-
-					p.metrics.CustomCounter("login_success", tags, 1)
-					p.metrics.CustomTimer("login_process_latency", params.MetricsTags(), time.Since(timer))
-
-					p.runtimeModule.Event(ctx, &api.Event{
-						Name: EventUserLogin,
-						Properties: map[string]string{
-							"user_id": session.userID.String(),
-						},
-						External: true,
-					})
-
-					return session.SendEvr(
-						evr.NewLoginSuccess(session.id, request.XPID),
-						unrequireMessage,
-						evr.NewDefaultGameSettings(),
-						unrequireMessage,
-					)
-				}
-			}
+		if err := session.SendEvrUnrequire(evr.NewLoginFailure(request.XPID, errMessage)); err != nil {
+			// If there's an error, prefix it with the EchoVR Id
+			return fmt.Errorf("failed to send LoginFailure: %w", err)
 		}
 	}
 
-	err = errors.New(status.Convert(err).Message())
+	StoreParams(ctx, &params)
 
-	// Format the error message
-	errMessage := fmt.Sprintf("%s: %s", request.XPID.String(), err.Error())
+	tags := params.MetricsTags()
+	tags["cpu_model"] = strings.Trim(params.loginPayload.SystemInfo.CPUModel, " ")
+	tags["gpu_model"] = strings.Trim(params.loginPayload.SystemInfo.VideoCard, " ")
+	tags["network_type"] = params.loginPayload.SystemInfo.NetworkType
+	tags["total_memory"] = strconv.FormatInt(params.loginPayload.SystemInfo.MemoryTotal, 10)
+	tags["num_logical_cores"] = strconv.FormatInt(params.loginPayload.SystemInfo.NumLogicalCores, 10)
+	tags["num_physical_cores"] = strconv.FormatInt(params.loginPayload.SystemInfo.NumPhysicalCores, 10)
+	tags["driver_version"] = strings.Trim(params.loginPayload.SystemInfo.DriverVersion, " ")
+	tags["headset_type"] = params.loginPayload.SystemInfo.HeadsetType
+	tags["build_number"] = strconv.FormatInt(int64(params.loginPayload.BuildNumber), 10)
+	tags["app_id"] = strconv.FormatInt(int64(params.loginPayload.AppId), 10)
+	tags["publisher_lock"] = params.loginPayload.PublisherLock
 
-	// Replace ": " with ":\n" for better readability
-	errMessage = strings.Replace(errMessage, ": ", ":\n", 2)
-
-	// Word wrap the error message
-	errMessage = wordwrap.String(errMessage, 60)
-
-	// Send the messages
-	if err := session.SendEvrUnrequire(evr.NewLoginFailure(request.XPID, errMessage)); err != nil {
-		// If there's an error, prefix it with the EchoVR Id
-		return fmt.Errorf("failed to send LoginFailure: %w", err)
+	// Remove blank tags
+	for k, v := range tags {
+		if v == "" {
+			delete(tags, k)
+		}
 	}
 
-	// Let the client know that the login was successful.
-	// Send the login success message and the login settings.
+	p.metrics.CustomCounter("login_success", tags, 1)
+	p.metrics.CustomTimer("login_process_latency", params.MetricsTags(), time.Since(timer))
+
+	p.runtimeModule.Event(ctx, &api.Event{
+		Name: EventUserLogin,
+		Properties: map[string]string{
+			"user_id": session.userID.String(),
+		},
+		External: true,
+	})
+
+	return session.SendEvr(
+		evr.NewLoginSuccess(session.id, request.XPID),
+		unrequireMessage,
+		evr.NewDefaultGameSettings(),
+		unrequireMessage,
+	)
+}
+
+func formatLoginErrorMessage(xpID evr.EvrId, err error) string {
+	errContent := ""
+	if e, ok := status.FromError(err); ok {
+		errContent = e.Message()
+	} else {
+		errContent = err.Error()
+	}
+
+	// Format the error message with the XPID prefix
+	errContent = fmt.Sprintf("%s: %s", xpID.String(), errContent)
+
+	// Replace ": " with ":\n" for better readability
+	errContent = strings.Replace(errContent, ": ", ":\n", 2)
+
+	// Word wrap the error message
+	errContent = wordwrap.String(errContent, 60)
+
+	return errContent
+}
+
+func (p *EvrPipeline) processLoginRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, params *SessionParameters) error {
+
+	var err error
+	if err = p.authenticateSession(ctx, logger, session, params); err != nil {
+		return err
+	}
+	if err = MigrateUser(ctx, logger, p.runtimeModule, p.db, session.userID.String()); err != nil {
+		return fmt.Errorf("failed to migrate user: %w", err)
+	}
+
+	if params.account, err = p.runtimeModule.AccountGetId(ctx, session.userID.String()); err != nil {
+		return fmt.Errorf("failed to get account: %w", err)
+	}
+
+	if err = p.authorizeSession(ctx, logger, session, params); err != nil {
+		return err
+	}
+
+	if err = p.initializeSession(ctx, logger, session, params); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -295,7 +319,7 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 			}
 
 			metricsTags["error"] = "ip_verification_failed"
-			return fmt.Errorf("New location detected. Please contact EchoVRCE support.")
+			return errors.New("New location detected. Please contact EchoVRCE support.")
 		}
 	} else {
 		loginHistory.AuthorizeIP(session.clientIP)
@@ -414,6 +438,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	params.displayNames, err = DisplayNameHistoryLoad(ctx, p.runtimeModule, session.userID.String())
 	if err != nil {
 		logger.Warn("Failed to load display name history", zap.Error(err))
+		return fmt.Errorf("failed to load display name history: %w", err)
 	}
 	params.displayNames.Update(params.accountMetadata.ActiveGroupID, params.accountMetadata.GetActiveGroupDisplayName(), params.account.User.Username, true)
 
@@ -423,6 +448,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 
 	if settings, err := LoadMatchmakingSettings(ctx, p.runtimeModule, session.userID.String()); err != nil {
 		logger.Warn("Failed to load matchmaking settings", zap.Error(err))
+		return fmt.Errorf("failed to load matchmaking settings: %w", err)
 	} else {
 		params.matchmakingSettings = &settings
 	}
@@ -837,8 +863,16 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 	if err := session.SendEvr(evr.NewUserServerProfileUpdateSuccess(request.EvrID)); err != nil {
 		logger.Warn("Failed to send UserServerProfileUpdateSuccess", zap.Error(err))
 	}
-	logger.Info("UserServerProfileUpdateRequest", zap.Any("request", request.Payload))
 
+	go func() {
+		if err := p.processUserServerProfileUpdate(ctx, logger, session, request); err != nil {
+			logger.Error("Failed to process user server profile update", zap.Error(err))
+		}
+	}()
+	return nil
+}
+
+func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger *zap.Logger, session *sessionWS, request *evr.UserServerProfileUpdateRequest) error {
 	payload := evr.UpdatePayload{}
 
 	if err := json.Unmarshal(request.Payload, &payload); err != nil {
