@@ -382,7 +382,7 @@ type GenericStats struct { // Privates and Social Lobby
 func (GenericStats) CalculateFields() {}
 
 func statisticMarshalJSON[T int64 | float64 | float32](op string, cnt int64, val T) ([]byte, error) {
-	return []byte(fmt.Sprintf("{\"cnt\":%d,\"op\":\"%s\",\"val\":%v}", cnt, op, val)), nil
+	return []byte(fmt.Sprintf("{\"val\":%v,\"op\":\"%s\",\"cnt\":%d}", val, op, cnt)), nil
 }
 
 type Statistics interface {
@@ -399,8 +399,8 @@ type Statistic interface {
 }
 
 type IntegerStatistic struct {
-	Count int64 `json:"cnt"`
 	Value int64 `json:"val"`
+	Count int64 `json:"cnt"`
 }
 
 func (s *IntegerStatistic) GetCount() int64 {
@@ -427,8 +427,8 @@ func (s *IntegerStatistic) FromScore(score, subscore int64) {
 }
 
 type FloatStatistic struct {
-	Count int64   `json:"cnt"`
 	Value float32 `json:"val"`
+	Count int64   `json:"cnt"`
 }
 
 func (s *FloatStatistic) GetCount() int64 {
