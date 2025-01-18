@@ -1,27 +1,25 @@
 package evr
 
 import (
-	"encoding/binary"
 	"fmt"
 
 	"github.com/gofrs/uuid/v5"
 )
 
 type UpdateClientProfile struct {
-	Session       uuid.UUID
-	EvrId         EvrId
-	ClientProfile ClientProfile
+	LoginSessionID uuid.UUID
+	XPID           EvrId
+	Payload        ClientProfile
 }
 
 func (lr *UpdateClientProfile) String() string {
-	return fmt.Sprintf("%T(session=%s, evr_id=%s)", lr, lr.Session.String(), lr.EvrId.String())
+	return fmt.Sprintf("%T(session=%s, evr_id=%s)", lr, lr.LoginSessionID.String(), lr.XPID.String())
 }
 
 func (m *UpdateClientProfile) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
-		func() error { return s.StreamGUID(&m.Session) },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.EvrId.PlatformCode) },
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.EvrId.AccountId) },
-		func() error { return s.StreamJson(&m.ClientProfile, true, NoCompression) },
+		func() error { return s.StreamGUID(&m.LoginSessionID) },
+		func() error { return s.StreamStruct(&m.XPID) },
+		func() error { return s.StreamJson(&m.Payload, true, NoCompression) },
 	})
 }

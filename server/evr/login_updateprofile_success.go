@@ -5,26 +5,18 @@ import (
 )
 
 type UpdateProfileSuccess struct {
-	UserId EvrId
-}
-
-func (m *UpdateProfileSuccess) Token() string {
-	return "SNSUpdateProfileSuccess"
-}
-
-func (m *UpdateProfileSuccess) Symbol() Symbol {
-	return ToSymbol(m.Token())
+	XPID EvrId
 }
 
 func (lr *UpdateProfileSuccess) String() string {
-	return fmt.Sprintf("%s(user_id=%s)", lr.Token(), lr.UserId.String())
+	return fmt.Sprintf("%T(XPID=%s)", lr, lr.XPID.String())
 }
 
 func (m *UpdateProfileSuccess) Stream(s *EasyStream) error {
-	return s.StreamStruct(&m.UserId)
+	return s.StreamStruct(&m.XPID)
 }
-func NewSNSUpdateProfileSuccess(userId *EvrId) *UpdateProfileSuccess {
+func NewUpdateProfileSuccess(xpID *EvrId) *UpdateProfileSuccess {
 	return &UpdateProfileSuccess{
-		UserId: *userId,
+		XPID: *xpID,
 	}
 }
