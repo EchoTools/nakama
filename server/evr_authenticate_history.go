@@ -70,8 +70,8 @@ type LoginHistory struct {
 	AuthorizedIPs          map[string]time.Time               `json:"authorized_ips"`
 	PendingAuthorizations  map[string]*LoginHistoryEntry      `json:"unverified_ips"`
 	SecondDegreeAlternates []string                           `json:"second_degree"`
-	AlternateMap           map[string][]*AlternateSearchMatch `json:"alternate_accounts"` // map of alternate user IDs and what they have in common
-	NotifiedGroupIDs       map[string][]string                `json:"notified_groups"`    // list of groups that have been notified of this alternate login
+	AlternateMap           map[string][]*AlternateSearchMatch `json:"alternate_accounts"`         // map of alternate user IDs and what they have in common
+	NotifiedGroups         map[string][]string                `json:"group_notification_history"` // list of groups that have been notified of this alternate login
 	userID                 string                             // user ID
 	version                string                             // storage record version
 }
@@ -86,7 +86,7 @@ func NewLoginHistory() *LoginHistory {
 		PendingAuthorizations:  make(map[string]*LoginHistoryEntry),
 		SecondDegreeAlternates: make([]string, 0),
 		AlternateMap:           make(map[string][]*AlternateSearchMatch),
-		NotifiedGroupIDs:       make(map[string][]string),
+		NotifiedGroups:         make(map[string][]string),
 	}
 }
 
@@ -173,17 +173,17 @@ func (h *LoginHistory) NotifyGroup(groupID string, userIDs []string) bool {
 	slices.Sort(userIDs)
 	userIDs = slices.Compact(userIDs)
 
-	if h.NotifiedGroupIDs == nil {
-		h.NotifiedGroupIDs = make(map[string][]string)
+	if h.NotifiedGroups == nil {
+		h.NotifiedGroups = make(map[string][]string)
 	}
 	if len(h.AlternateMap) == 0 {
 		return false
 	}
 
-	if _, found := h.NotifiedGroupIDs[groupID]; found && slices.Equal(h.NotifiedGroupIDs[groupID], userIDs) {
+	if _, found := h.NotifiedGroups[groupID]; found && slices.Equal(h.NotifiedGroups[groupID], userIDs) {
 		return false
 	}
-	h.NotifiedGroupIDs[groupID] = userIDs
+	h.NotifiedGroups[groupID] = userIDs
 	return true
 }
 
