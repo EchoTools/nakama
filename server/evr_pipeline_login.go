@@ -398,10 +398,19 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		params.isGlobalModerator = true
 	}
 
+	// Update in-memory account metadata for guilds that the user has
+	// the force username role.
+	for groupID, gg := range params.guildGroups {
+		if gg.HasRole(session.userID.String(), gg.Roles.UsernameOnly) {
+			params.accountMetadata.GroupDisplayNames[groupID] = params.account.User.Username
+		}
+	}
+
 	if params.userDisplayNameOverride != "" {
 		// This will be picked up by GetActiveGroupDisplayName and other functions
 		params.accountMetadata.sessionDisplayNameOverride = params.userDisplayNameOverride
 	}
+
 	params.displayNames, err = DisplayNameHistoryLoad(ctx, p.runtimeModule, session.userID.String())
 	if err != nil {
 		logger.Warn("Failed to load display name history", zap.Error(err))
@@ -566,7 +575,6 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 		return errors.New("session parameters not found")
 	}
 
-	// Get the user's metadata
 	guildGroups := params.guildGroups
 
 	userID := session.userID.String()
