@@ -124,6 +124,7 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 		loginHistory, err := LoginHistoryLoad(ctx, h.nk, userID)
 		if err != nil {
 			logger.Error("error loading login history: %v", err)
+			return fmt.Errorf("failed to load login history: %w", err)
 		}
 
 		if updated := loginHistory.NotifyGroup(groupID); updated {
