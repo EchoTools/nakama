@@ -251,30 +251,29 @@ func (a *AccountMetadata) GetGhosted() []evr.EvrId {
 
 func (a *AccountMetadata) FixBrokenCosmetics() bool {
 
-	c := a.LoadoutCosmetics.Loadout
 	d := evr.DefaultCosmeticLoadout()
 
 	mapping := map[*string]string{
-		&c.Banner:         d.Banner,
-		&c.Booster:        d.Booster,
-		&c.Bracer:         d.Bracer,
-		&c.Chassis:        d.Chassis,
-		&c.Decal:          d.Decal,
-		&c.DecalBody:      d.DecalBody,
-		&c.Emissive:       d.Emissive,
-		&c.Emote:          d.Emote,
-		&c.GoalFX:         d.GoalFX,
-		&c.Medal:          d.Medal,
-		&c.Pattern:        d.Pattern,
-		&c.PatternBody:    d.PatternBody,
-		&c.PIP:            d.PIP,
-		&c.SecondEmote:    d.SecondEmote,
-		&c.Tag:            d.Tag,
-		&c.Tint:           d.Tint,
-		&c.TintAlignmentA: d.TintAlignmentA,
-		&c.TintAlignmentB: d.TintAlignmentB,
-		&c.TintBody:       d.TintBody,
-		&c.Title:          d.Title,
+		&a.LoadoutCosmetics.Loadout.Banner:         d.Banner,
+		&a.LoadoutCosmetics.Loadout.Booster:        d.Booster,
+		&a.LoadoutCosmetics.Loadout.Bracer:         d.Bracer,
+		&a.LoadoutCosmetics.Loadout.Chassis:        d.Chassis,
+		&a.LoadoutCosmetics.Loadout.Decal:          d.Decal,
+		&a.LoadoutCosmetics.Loadout.DecalBody:      d.DecalBody,
+		&a.LoadoutCosmetics.Loadout.Emissive:       d.Emissive,
+		&a.LoadoutCosmetics.Loadout.Emote:          d.Emote,
+		&a.LoadoutCosmetics.Loadout.GoalFX:         d.GoalFX,
+		&a.LoadoutCosmetics.Loadout.Medal:          d.Medal,
+		&a.LoadoutCosmetics.Loadout.Pattern:        d.Pattern,
+		&a.LoadoutCosmetics.Loadout.PatternBody:    d.PatternBody,
+		&a.LoadoutCosmetics.Loadout.PIP:            d.PIP,
+		&a.LoadoutCosmetics.Loadout.SecondEmote:    d.SecondEmote,
+		&a.LoadoutCosmetics.Loadout.Tag:            d.Tag,
+		&a.LoadoutCosmetics.Loadout.Tint:           d.Tint,
+		&a.LoadoutCosmetics.Loadout.TintAlignmentA: d.TintAlignmentA,
+		&a.LoadoutCosmetics.Loadout.TintAlignmentB: d.TintAlignmentB,
+		&a.LoadoutCosmetics.Loadout.TintBody:       d.TintBody,
+		&a.LoadoutCosmetics.Loadout.Title:          d.Title,
 	}
 
 	updated := false
