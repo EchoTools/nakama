@@ -548,13 +548,13 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 func (p *EvrPipeline) updateClientProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.UpdateClientProfile)
 
-	if err := p.handleClientProfileUpdate(ctx, logger, session, request.EvrId, request.ClientProfile); err != nil {
-		if err := session.SendEvr(evr.NewUpdateProfileFailure(request.EvrId, uint64(400), err.Error())); err != nil {
+	if err := p.handleClientProfileUpdate(ctx, logger, session, request.XPID, request.Payload); err != nil {
+		if err := session.SendEvr(evr.NewUpdateProfileFailure(request.XPID, uint64(400), err.Error())); err != nil {
 			logger.Error("Failed to send UpdateProfileFailure", zap.Error(err))
 		}
 	}
 
-	return session.SendEvrUnrequire(evr.NewSNSUpdateProfileSuccess(&request.EvrId))
+	return session.SendEvrUnrequire(evr.NewUpdateProfileSuccess(&request.XPID))
 }
 
 func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap.Logger, session *sessionWS, evrID evr.EvrId, update evr.ClientProfile) error {
