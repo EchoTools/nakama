@@ -116,6 +116,7 @@ func LoginAlternateSearch(ctx context.Context, nk runtime.NakamaModule, loginHis
 			if err := json.Unmarshal([]byte(obj.Value), &otherHistory); err != nil {
 				return nil, fmt.Errorf("error unmarshalling alt history: %w", err)
 			}
+			otherHistory.userID = obj.UserId
 
 			for _, e := range loginHistory.History {
 				for _, o := range otherHistory.History {

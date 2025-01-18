@@ -63,30 +63,30 @@ func (h *LoginHistoryEntry) Items() []string {
 }
 
 type LoginHistory struct {
-	History               map[string]*LoginHistoryEntry      `json:"history"` // map[deviceID]DeviceHistoryEntry
-	Cache                 []string                           `json:"cache"`   // list of IP addresses, EvrID's, HMD Serial Numbers, and System Data
-	XPIs                  map[string]time.Time               `json:"xpis"`    // list of XPIs
-	ClientIPs             map[string]time.Time               `json:"client_ips"`
-	AuthorizedIPs         map[string]time.Time               `json:"authorized_ips"`
-	PendingAuthorizations map[string]*LoginHistoryEntry      `json:"unverified_ips"`
-	SecondOrderAlternates []string                           `json:"second_order"`
-	AlternateMap          map[string][]*AlternateSearchMatch `json:"alternate_accounts"` // map of alternate user IDs and what they have in common
-	NotifiedGroupIDs      map[string]time.Time               `json:"notified_groups"`    // list of groups that have been notified of this alternate login
-	userID                string                             // user ID
-	version               string                             // storage record version
+	History                map[string]*LoginHistoryEntry      `json:"history"` // map[deviceID]DeviceHistoryEntry
+	Cache                  []string                           `json:"cache"`   // list of IP addresses, EvrID's, HMD Serial Numbers, and System Data
+	XPIs                   map[string]time.Time               `json:"xpis"`    // list of XPIs
+	ClientIPs              map[string]time.Time               `json:"client_ips"`
+	AuthorizedIPs          map[string]time.Time               `json:"authorized_ips"`
+	PendingAuthorizations  map[string]*LoginHistoryEntry      `json:"unverified_ips"`
+	SecondDegreeAlternates []string                           `json:"second_degree"`
+	AlternateMap           map[string][]*AlternateSearchMatch `json:"alternate_accounts"` // map of alternate user IDs and what they have in common
+	NotifiedGroupIDs       map[string][]string                `json:"notified_groups"`    // list of groups that have been notified of this alternate login
+	userID                 string                             // user ID
+	version                string                             // storage record version
 }
 
 func NewLoginHistory() *LoginHistory {
 	return &LoginHistory{
-		History:               make(map[string]*LoginHistoryEntry),
-		Cache:                 make([]string, 0),
-		XPIs:                  make(map[string]time.Time),
-		ClientIPs:             make(map[string]time.Time),
-		AuthorizedIPs:         make(map[string]time.Time),
-		PendingAuthorizations: make(map[string]*LoginHistoryEntry),
-		SecondOrderAlternates: make([]string, 0),
-		AlternateMap:          make(map[string][]*AlternateSearchMatch),
-		NotifiedGroupIDs:      make(map[string]time.Time),
+		History:                make(map[string]*LoginHistoryEntry),
+		Cache:                  make([]string, 0),
+		XPIs:                   make(map[string]time.Time),
+		ClientIPs:              make(map[string]time.Time),
+		AuthorizedIPs:          make(map[string]time.Time),
+		PendingAuthorizations:  make(map[string]*LoginHistoryEntry),
+		SecondDegreeAlternates: make([]string, 0),
+		AlternateMap:           make(map[string][]*AlternateSearchMatch),
+		NotifiedGroupIDs:       make(map[string][]string),
 	}
 }
 
@@ -169,18 +169,21 @@ func (h *LoginHistory) RemovePendingAuthorizationIP(ip string) {
 	delete(h.PendingAuthorizations, ip)
 }
 
-func (h *LoginHistory) NotifyGroup(groupID string) bool {
+func (h *LoginHistory) NotifyGroup(groupID string, userIDs []string) bool {
+	slices.Sort(userIDs)
+	userIDs = slices.Compact(userIDs)
+
 	if h.NotifiedGroupIDs == nil {
-		h.NotifiedGroupIDs = make(map[string]time.Time)
+		h.NotifiedGroupIDs = make(map[string][]string)
 	}
 	if len(h.AlternateMap) == 0 {
 		return false
 	}
 
-	if _, found := h.NotifiedGroupIDs[groupID]; found {
+	if _, found := h.NotifiedGroupIDs[groupID]; found && slices.Equal(h.NotifiedGroupIDs[groupID], userIDs) {
 		return false
 	}
-	h.NotifiedGroupIDs[groupID] = time.Now().UTC()
+	h.NotifiedGroupIDs[groupID] = userIDs
 	return true
 }
 
@@ -191,21 +194,24 @@ func (h *LoginHistory) UpdateAlternates(ctx context.Context, nk runtime.NakamaMo
 	}
 
 	h.AlternateMap = make(map[string][]*AlternateSearchMatch, len(matches))
-	h.SecondOrderAlternates = make([]string, 0)
+	h.SecondDegreeAlternates = make([]string, 0)
 
 	for _, m := range matches {
 		if _, found := h.AlternateMap[m.otherHistory.userID]; !found {
 			// add second-level alternates
 			for id := range m.otherHistory.AlternateMap {
-				h.SecondOrderAlternates = append(h.SecondOrderAlternates, id)
+				if id == h.userID {
+					continue
+				}
+				h.SecondDegreeAlternates = append(h.SecondDegreeAlternates, id)
 			}
 		}
 		h.AlternateMap[m.otherHistory.userID] = append(h.AlternateMap[m.otherHistory.userID], m)
 
 	}
 
-	slices.Sort(h.SecondOrderAlternates)
-	h.SecondOrderAlternates = slices.Compact(h.SecondOrderAlternates)
+	slices.Sort(h.SecondDegreeAlternates)
+	h.SecondDegreeAlternates = slices.Compact(h.SecondDegreeAlternates)
 	return nil
 }
 

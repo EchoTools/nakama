@@ -126,34 +126,75 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 			logger.Error("error loading login history: %v", err)
 		}
 
-		if ok := loginHistory.NotifyGroup(groupID); ok {
+		firstIDs := make([]string, 0, len(loginHistory.AlternateMap))
+		for k := range loginHistory.AlternateMap {
+			firstIDs = append(firstIDs, k)
+		}
+		allIDs := append(firstIDs, loginHistory.SecondDegreeAlternates...)
 
-			altAccounts, err := h.nk.AccountsGetId(ctx, loginHistory.SecondOrderAlternates)
-			if err != nil {
-				return fmt.Errorf("failed to get alternate accounts: %w", err)
-			}
-			alts := make([]string, 0, len(altAccounts))
-			for _, a := range altAccounts {
-				// Check if any are banned, or currently suspended by the guild
-				if a.User.Id == userID {
-					continue
-				}
-				s := "<@" + a.CustomId + ">"
-				if md.IsSuspended(s) {
-					s = s + " (suspended)"
-				} else if a.DisableTime != nil {
-					s = s + " (globally banned)"
+		if updated := loginHistory.NotifyGroup(groupID, allIDs); updated {
+
+			firstDegree := make([]string, 0, len(firstIDs))
+			if len(firstIDs) > 0 {
+				firstDegreeAccounts, err := h.nk.AccountsGetId(ctx, firstIDs)
+				if err != nil {
+					return fmt.Errorf("failed to get alternate accounts: %w", err)
 				}
 
-				alts = append(alts, s)
+				for _, a := range firstDegreeAccounts {
+					if a.User.Id == userID {
+						continue
+					}
+					s := "<@" + a.CustomId + ">"
+					if md.IsSuspended(s) {
+						s = s + " (suspended)"
+					} else if a.DisableTime != nil {
+						s = s + " (globally banned)"
+					}
+
+					firstDegree = append(firstDegree, s)
+				}
+
 			}
-			content := fmt.Sprintf("<@%s> detected as a possible alternate of %s", params.DiscordID(), strings.Join(alts, ", "))
-			_, _ = s.(*sessionWS).evrPipeline.appBot.LogAuditMessage(ctx, groupID, content, false)
+
+			secondDegree := make([]string, 0, len(loginHistory.SecondDegreeAlternates))
+
+			if len(loginHistory.SecondDegreeAlternates) > 0 {
+
+				secondDegreeAccounts, err := h.nk.AccountsGetId(ctx, loginHistory.SecondDegreeAlternates)
+				if err != nil {
+					return fmt.Errorf("failed to get alternate accounts: %w", err)
+				}
+
+				for _, a := range secondDegreeAccounts {
+					// Check if any are banned, or currently suspended by the guild
+					if a.User.Id == userID {
+						continue
+					}
+					s := "<@" + a.CustomId + ">"
+					if md.IsSuspended(s) {
+						s = s + " (suspended)"
+					} else if a.DisableTime != nil {
+						s = s + " (globally banned)"
+					}
+
+					secondDegree = append(secondDegree, s)
+				}
+
+			}
+
+			if len(firstDegree)+len(secondDegree) > 0 {
+				content := fmt.Sprintf("<@%s> detected as a likely alternate of: %s", params.DiscordID(), strings.Join(firstDegree, ", "))
+
+				if len(secondDegree) > 0 {
+					content += fmt.Sprintf("\nSecond degree (possible) alternates: %s\n", strings.Join(secondDegree, ", "))
+				}
+				_, _ = s.(*sessionWS).evrPipeline.appBot.LogAuditMessage(ctx, groupID, content, false)
+			}
 
 			if err := loginHistory.Store(ctx, h.nk); err != nil {
 				return fmt.Errorf("failed to store login history: %w", err)
 			}
-
 		}
 	}
 	return nil
