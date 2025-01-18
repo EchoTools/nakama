@@ -292,8 +292,6 @@ func (p *EvrPipeline) MessageCacheLoad(key string) evr.Message {
 
 func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, in evr.Message) bool {
 
-	// Set log levels
-
 	// Handle legacy messages
 
 	switch msg := in.(type) {
@@ -396,7 +394,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 		pipelineFn = p.channelInfoRequest
 	case *evr.UpdateClientProfile:
 		pipelineFn = p.updateClientProfileRequest
-	case *evr.OtherUserProfileRequest: // Broadcaster only via it's login connection
+	case *evr.OtherUserProfileRequest:
 		pipelineFn = p.otherUserProfileRequest
 	case *evr.UserServerProfileUpdateRequest: // Broadcaster only via it's login connection
 		pipelineFn = p.userServerProfileUpdateRequest
@@ -516,7 +514,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 
 	if params, ok := LoadParams(session.Context()); ok && !params.xpID.IsNil() {
 		if !params.accountMetadata.Debug {
-			logger = logger.WithOptions(zap.IncreaseLevel(zap.InfoLevel))
+			//logger = logger.WithOptions(zap.IncreaseLevel(zap.InfoLevel))
 		}
 
 		logger = logger.With(zap.String("uid", session.UserID().String()), zap.String("sid", session.ID().String()), zap.String("username", session.Username()), zap.String("evrid", params.xpID.String()))
