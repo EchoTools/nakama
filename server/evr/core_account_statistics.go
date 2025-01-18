@@ -273,48 +273,106 @@ type ArenaStatistics struct {
 }
 
 func (s *ArenaStatistics) CalculateFields() {
-	if s.ArenaWins != nil && s.GamesPlayed != nil && s.GamesPlayed.Value != 0 {
-		s.ArenaWinPercentage.Value = float32(float64(s.ArenaWins.Value) / float64(s.GamesPlayed.Value) * 100)
+
+	gamesPlayed := s.ArenaWins.GetValue() + s.ArenaLosses.GetValue()
+
+	s.GamesPlayed = &StatisticIntegerIncrement{
+		IntegerStatistic{
+			Value: int64(gamesPlayed),
+			Count: 1,
+		},
 	}
 
-	if s.Assists != nil && s.GamesPlayed != nil && s.GamesPlayed.Value != 0 {
-		s.AssistsPerGame.Value = float32(float64(s.Assists.Value) / float64(s.GamesPlayed.Value))
-	}
+	// ArenaWinPercentage
+	if gamesPlayed > 0 {
+		s.ArenaWinPercentage = &StatisticFloatSet{
+			FloatStatistic{
+				Value: s.ArenaWins.GetValue() / gamesPlayed * 100,
+				Count: 1,
+			},
+		}
 
-	if s.Points != nil && s.GamesPlayed != nil && s.GamesPlayed.Value != 0 {
-		s.AveragePointsPerGame.Value = float32(float64(s.Points.Value) / float64(s.GamesPlayed.Value))
-	}
+		s.AssistsPerGame = &StatisticFloatAverage{
+			FloatStatistic{
+				Value: s.Assists.GetValue() / gamesPlayed,
+				Count: 1,
+			},
+		}
 
-	if s.PossessionTime != nil && s.GamesPlayed != nil && s.GamesPlayed.Value != 0 {
-		s.AveragePossessionTimePerGame.Value = s.PossessionTime.Value / float32(s.GamesPlayed.Value)
-	}
+		s.AveragePointsPerGame = &StatisticFloatAverage{
+			FloatStatistic{
+				Value: float64(s.Points.GetValue()) / gamesPlayed,
+				Count: 1,
+			},
+		}
 
-	if s.TopSpeedsTotal != nil && s.GamesPlayed != nil && s.GamesPlayed.Value != 0 {
-		s.AverageTopSpeedPerGame.Value = s.TopSpeedsTotal.Value / float32(s.GamesPlayed.Value)
-	}
+		s.AveragePossessionTimePerGame = &StatisticFloatAverage{
+			FloatStatistic{
+				Value: s.PossessionTime.GetValue() / gamesPlayed,
+				Count: 1,
+			},
+		}
 
-	if s.Saves != nil && s.ShotsOnGoalAgainst != nil && s.ShotsOnGoalAgainst.Value != 0 {
-		s.GoalSavePercentage.Value = float32(s.Saves.Value) / float32(s.ShotsOnGoalAgainst.Value) * 100
-	}
+		s.AverageTopSpeedPerGame = &StatisticFloatAverage{
+			FloatStatistic{
+				Value: s.TopSpeedsTotal.GetValue() / gamesPlayed,
+				Count: 1,
+			},
+		}
 
-	if s.Goals != nil && s.ShotsOnGoal != nil && s.ShotsOnGoal.Value != 0 {
-		s.GoalScorePercentage.Value = float32(s.Goals.Value) / float32(s.ShotsOnGoal.Value) * 100
-	}
+		if s.ShotsOnGoalAgainst.GetValue() > 0 {
+			s.GoalSavePercentage = &StatisticFloatSet{
+				FloatStatistic{
+					Value: s.Saves.GetValue() / s.ShotsOnGoalAgainst.GetValue() * 100,
+					Count: 1,
+				},
+			}
+		}
 
-	if s.Goals != nil && s.GamesPlayed != nil && s.GamesPlayed.Value != 0 {
-		s.GoalsPerGame.Value = float32(s.Goals.Value) / float32(s.GamesPlayed.Value)
-	}
+		if s.ShotsOnGoal.GetValue() > 0 {
+			s.GoalScorePercentage = &StatisticFloatSet{
+				FloatStatistic{
+					Value: s.Goals.GetValue() / s.ShotsOnGoal.GetValue() * 100,
+					Count: 1,
+				},
+			}
+		}
 
-	if s.Saves != nil && s.GamesPlayed != nil && s.GamesPlayed.Value != 0 {
-		s.SavesPerGame.Value = float32(s.Saves.Value) / float32(s.GamesPlayed.Value)
-	}
+		s.GoalsPerGame = &StatisticFloatAverage{
+			FloatStatistic{
+				Value: s.Goals.GetValue() / gamesPlayed,
+				Count: 1,
+			},
+		}
 
-	if s.Stuns != nil && s.GamesPlayed != nil && s.GamesPlayed.Value != 0 {
-		s.StunPercentage.Value = float32(s.Stuns.Value) / float32(s.GamesPlayed.Value) * 100
-	}
+		s.SavesPerGame = &StatisticFloatAverage{
+			FloatStatistic{
+				Value: s.Saves.GetValue() / gamesPlayed,
+				Count: 1,
+			},
+		}
 
-	if s.Stuns != nil && s.GamesPlayed != nil && s.GamesPlayed.Value != 0 {
-		s.StunsPerGame.Value = float32(s.Stuns.Value) / float32(s.GamesPlayed.Value)
+		if s.PunchesReceived.GetValue() > 0 {
+			s.StunPercentage = &StatisticFloatSet{
+				FloatStatistic{
+					Value: s.Stuns.GetValue() / s.PunchesReceived.GetValue() * 100,
+					Count: 1,
+				},
+			}
+			s.BlockPercentage = &StatisticFloatSet{
+				FloatStatistic{
+					Value: s.Blocks.GetValue() / s.PunchesReceived.GetValue() * 100,
+					Count: 1,
+				},
+			}
+		}
+
+		s.StunsPerGame = &StatisticFloatAverage{
+			FloatStatistic{
+				Value: s.Stuns.GetValue() / gamesPlayed,
+				Count: 1,
+			},
+		}
 	}
 }
 
@@ -359,19 +417,19 @@ type CombatStatistics struct {
 
 func (s *CombatStatistics) CalculateFields() {
 	if s.CombatWins != nil && s.GamesPlayed != nil && s.GamesPlayed.Value != 0 {
-		s.CombatWinPercentage.Value = float32(s.CombatWins.Value) / float32(s.GamesPlayed.Value) * 100
+		s.CombatWinPercentage.Value = float64(s.CombatWins.Value) / float64(s.GamesPlayed.Value) * 100
 	}
 
 	if s.CombatAssists != nil && s.GamesPlayed != nil && s.GamesPlayed.Value != 0 {
-		s.CombatAverageEliminationDeathRatio.Value = float32(s.CombatAssists.Value) / float32(s.GamesPlayed.Value)
+		s.CombatAverageEliminationDeathRatio.Value = float64(s.CombatAssists.Value) / float64(s.GamesPlayed.Value)
 	}
 
 	if s.CombatPayloadWins != nil && s.CombatPayloadGamesPlayed != nil && s.CombatPayloadGamesPlayed.Value != 0 {
-		s.CombatPayloadWinPercentage.Value = float32(s.CombatPayloadWins.Value) / float32(s.CombatPayloadGamesPlayed.Value) * 100
+		s.CombatPayloadWinPercentage.Value = float64(s.CombatPayloadWins.Value) / float64(s.CombatPayloadGamesPlayed.Value) * 100
 	}
 
 	if s.CombatPointCaptureWins != nil && s.CombatPointCaptureGamesPlayed != nil && s.CombatPointCaptureGamesPlayed.Value != 0 {
-		s.CombatPointCaptureWinPercentage.Value = float32(s.CombatPointCaptureWins.Value) / float32(s.CombatPointCaptureGamesPlayed.Value) * 100
+		s.CombatPointCaptureWinPercentage.Value = float64(s.CombatPointCaptureWins.Value) / float64(s.CombatPointCaptureGamesPlayed.Value) * 100
 	}
 }
 
@@ -382,7 +440,7 @@ type GenericStats struct { // Privates and Social Lobby
 func (GenericStats) CalculateFields() {}
 
 func statisticMarshalJSON[T int64 | float64 | float32](op string, cnt int64, val T) ([]byte, error) {
-	return []byte(fmt.Sprintf("{\"val\":%v,\"op\":\"%s\",\"cnt\":%d}", val, op, cnt)), nil
+	return []byte(fmt.Sprintf("{\"val\":%v,\"op\":\"%s\",\"cnt\":%d}", float32(val), op, cnt)), nil
 }
 
 type Statistics interface {
@@ -405,7 +463,7 @@ type IntegerStatistic struct {
 
 func (s *IntegerStatistic) GetCount() int64 {
 	if s == nil {
-		return 0
+		return 1
 	}
 	return s.Count
 }
@@ -414,7 +472,10 @@ func (s *IntegerStatistic) SetCount(c int64) {
 	s.Count = c
 }
 
-func (s IntegerStatistic) GetValue() float64 {
+func (s *IntegerStatistic) GetValue() float64 {
+	if s == nil {
+		return 0
+	}
 	return float64(s.Value)
 }
 
@@ -427,7 +488,7 @@ func (s *IntegerStatistic) FromScore(score, subscore int64) {
 }
 
 type FloatStatistic struct {
-	Value float32 `json:"val"`
+	Value float64 `json:"val"`
 	Count int64   `json:"cnt"`
 }
 
@@ -442,17 +503,20 @@ func (s *FloatStatistic) SetCount(c int64) {
 	s.Count = c
 }
 
-func (s FloatStatistic) GetValue() float64 {
+func (s *FloatStatistic) GetValue() float64 {
+	if s == nil {
+		return 0
+	}
 	return float64(s.Value)
 }
 
 func (s *FloatStatistic) SetValue(v float64) {
-	s.Value = float32(v)
+	s.Value = float64(v)
 }
 
 func (s *FloatStatistic) FromScore(score, subscore int64) {
 	v, _ := strconv.ParseFloat(fmt.Sprintf("%d.%d", score, subscore), 32)
-	s.Value = float32(v)
+	s.Value = float64(v)
 }
 
 type StatisticIntegerIncrement struct {
