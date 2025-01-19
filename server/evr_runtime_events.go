@@ -21,6 +21,8 @@ const (
 )
 
 type EventDispatch struct {
+	sync.Mutex
+
 	ctx    context.Context
 	logger runtime.Logger
 	nk     runtime.NakamaModule
@@ -61,10 +63,13 @@ func (h *EventDispatch) eventFn(ctx context.Context, logger runtime.Logger, evt 
 	logger = logger.WithFields(fields)
 
 	if fn, ok := eventMap[evt.Name]; ok {
-		if err := fn(ctx, logger, evt.Properties); err != nil {
-			logger.Error("error processing event: %v", err)
-		}
-		logger.Debug("processed event")
+		go func() {
+			if err := fn(ctx, logger, evt.Properties); err != nil {
+				logger.Error("error processing event: %v", err)
+			}
+			logger.Debug("processed event")
+		}()
+
 	} else {
 		logger.Warn("unhandled event: %s", evt.Name)
 	}
@@ -82,6 +87,8 @@ func (h *EventDispatch) eventSessionEnd(ctx context.Context, logger runtime.Logg
 }
 
 func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtime.Logger, properties map[string]string) error {
+	h.Lock()
+	defer h.Unlock()
 	groupID := properties["group_id"]
 	userID := properties["user_id"]
 	sessionID := properties["session_id"]
@@ -202,6 +209,8 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 }
 
 func (h *EventDispatch) handleUserLogin(ctx context.Context, logger runtime.Logger, properties map[string]string) error {
+	h.Lock()
+	defer h.Unlock()
 	userID := properties["user_id"]
 
 	loginHistory, err := LoginHistoryLoad(ctx, h.nk, userID)
