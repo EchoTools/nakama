@@ -7,6 +7,7 @@ import (
 	"log"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
@@ -108,7 +109,13 @@ func (r *StatisticsQueue) Add(entries []*StatisticsQueueEntry) {
 	}
 }
 
-func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, ownerID, groupID string, modes []evr.Symbol, includeDailyWeekly bool) (evr.PlayerStatistics, map[string]evr.Statistic, error) {
+func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, nk runtime.NakamaModule, ownerID, groupID string, modes []evr.Symbol, includeDailyWeekly bool) (evr.PlayerStatistics, map[string]evr.Statistic, error) {
+
+	startTime := time.Now()
+
+	defer func() {
+		nk.MetricsTimerRecord("player_statistics_get_latency", nil, time.Since(startTime))
+	}()
 
 	resetSchedules := []evr.ResetSchedule{evr.ResetScheduleAllTime}
 

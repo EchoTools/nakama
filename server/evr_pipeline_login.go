@@ -568,7 +568,7 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 		evr.ModeArenaPublic,
 		evr.ModeCombatPublic,
 	}
-	serverProfile, err := NewUserServerProfile(ctx, p.db, params.account, params.xpID, params.accountMetadata.GetActiveGroupID().String(), modes, false)
+	serverProfile, err := NewUserServerProfile(ctx, p.db, p.runtimeModule, params.account, params.xpID, params.accountMetadata.GetActiveGroupID().String(), modes, false)
 	if err != nil {
 		return fmt.Errorf("failed to get server profile: %w", err)
 	}
@@ -973,7 +973,7 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 		}
 
 		// Get the players existing statistics
-		prevPlayerStats, _, err := PlayerStatisticsGetID(ctx, p.db, playerInfo.UserID, groupIDStr, []evr.Symbol{label.Mode}, false)
+		prevPlayerStats, _, err := PlayerStatisticsGetID(ctx, p.db, p.runtimeModule, playerInfo.UserID, groupIDStr, []evr.Symbol{label.Mode}, false)
 		if err != nil {
 			return fmt.Errorf("failed to get player statistics: %w", err)
 		}

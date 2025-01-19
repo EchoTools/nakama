@@ -45,7 +45,7 @@ func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session
 	// If the is a non-default group, then generate a profile specifically for it.
 	if params.accountMetadata.GetActiveGroupID() != label.GetGroupID() {
 		// Generate a profile for this group
-		profile, err := NewUserServerProfile(ctx, p.db, params.account, params.xpID, groupID, []evr.Symbol{lobbyParams.Mode}, true)
+		profile, err := NewUserServerProfile(ctx, p.db, p.runtimeModule, params.account, params.xpID, groupID, []evr.Symbol{lobbyParams.Mode}, true)
 		if err != nil {
 			return fmt.Errorf("failed to create user server profile: %w", err)
 		}
