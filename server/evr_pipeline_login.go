@@ -235,7 +235,10 @@ func (p *EvrPipeline) authenticateSession(ctx context.Context, logger *zap.Logge
 	// Replace the session context with a derived one that includes the login session ID and the EVR ID
 	ctx = session.Context()
 	session.Lock()
-
+	if params.account == nil {
+		session.Unlock()
+		return errors.New("account is nil")
+	}
 	session.userID = uuid.FromStringOrNil(params.account.User.Id)
 	session.SetUsername(params.account.User.Username)
 	session.logger = session.logger.With(zap.String("loginsid", session.id.String()), zap.String("uid", session.userID.String()), zap.String("evrid", params.xpID.String()), zap.String("username", session.Username()))
