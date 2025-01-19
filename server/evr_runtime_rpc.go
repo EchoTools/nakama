@@ -1401,7 +1401,7 @@ func PlayerStatisticsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 		includeDailyWeekly = true
 	}
 
-	stats, _, err := PlayerStatisticsGetID(ctx, db, request.UserID, request.GroupID, modes, includeDailyWeekly)
+	stats, _, err := PlayerStatisticsGetID(ctx, db, nk, request.UserID, request.GroupID, modes, includeDailyWeekly)
 	if err != nil {
 		return "", err
 	}
@@ -1902,7 +1902,7 @@ func UserServerProfileRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 		evr.ModeSocialPrivate,
 	}
 
-	serverProfile, err := NewUserServerProfile(ctx, db, account, request.XPID, request.GroupID.String(), modes, false)
+	serverProfile, err := NewUserServerProfile(ctx, db, nk, account, request.XPID, request.GroupID.String(), modes, false)
 	if err != nil {
 		return "", fmt.Errorf("failed to get server profile: %w", err)
 	}
