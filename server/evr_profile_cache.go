@@ -164,7 +164,7 @@ func walletToCosmetics(wallet map[string]int64, unlocks map[string]map[string]bo
 	return unlocks
 }
 
-func NewUserServerProfile(ctx context.Context, db *sql.DB, nk runtime.NakamaModule, account *api.Account, xpID evr.EvrId, groupID string, modes []evr.Symbol, includeDailyWeekly bool) (*evr.ServerProfile, error) {
+func NewUserServerProfile(ctx context.Context, db *sql.DB, nk runtime.NakamaModule, account *api.Account, xpID evr.EvrId, groupID string, modes []evr.Symbol, dailyWeeklyMode evr.Symbol) (*evr.ServerProfile, error) {
 
 	metadata := AccountMetadata{}
 	if err := json.Unmarshal([]byte(account.User.Metadata), &metadata); err != nil {
@@ -203,7 +203,7 @@ func NewUserServerProfile(ctx context.Context, db *sql.DB, nk runtime.NakamaModu
 		modes = []evr.Symbol{evr.ModeArenaPublic, evr.ModeCombatPublic}
 	}
 
-	statsBySchedule, _, err := PlayerStatisticsGetID(ctx, db, nk, account.User.Id, groupID, modes, includeDailyWeekly)
+	statsBySchedule, _, err := PlayerStatisticsGetID(ctx, db, nk, account.User.Id, groupID, modes, dailyWeeklyMode)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user tablet statistics: %w", err)
 	}
@@ -215,7 +215,7 @@ func NewUserServerProfile(ctx context.Context, db *sql.DB, nk runtime.NakamaModu
 	}
 
 	return &evr.ServerProfile{
-		DisplayName:       metadata.GetActiveGroupDisplayName(),
+		DisplayName:       metadata.GetGroupDisplayNameOrDefault(groupID),
 		EvrID:             xpID,
 		SchemaVersion:     4,
 		PublisherLock:     "echovrce",

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -109,7 +110,7 @@ func (r *StatisticsQueue) Add(entries []*StatisticsQueueEntry) {
 	}
 }
 
-func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, nk runtime.NakamaModule, ownerID, groupID string, modes []evr.Symbol, includeDailyWeekly bool) (evr.PlayerStatistics, map[string]evr.Statistic, error) {
+func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, nk runtime.NakamaModule, ownerID, groupID string, modes []evr.Symbol, dailyWeeklyStatMode evr.Symbol) (evr.PlayerStatistics, map[string]evr.Statistic, error) {
 
 	startTime := time.Now()
 
@@ -117,14 +118,18 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, nk runtime.NakamaMod
 		nk.MetricsTimerRecord("player_statistics_get_latency", nil, time.Since(startTime))
 	}()
 
-	resetSchedules := []evr.ResetSchedule{evr.ResetScheduleAllTime}
+	statGroups := make(map[evr.Symbol][]evr.ResetSchedule)
 
-	if includeDailyWeekly {
-		if len(modes) > 1 {
-			return nil, nil, fmt.Errorf("cannot include daily/weekly stats for multiple modes")
+	// Always include Arena and Combat Public stats
+	modes = append(modes, evr.ModeCombatPublic, evr.ModeArenaPublic)
+	slices.Sort(modes)
+	modes = slices.Compact(modes)
+
+	for _, m := range modes {
+		statGroups[m] = []evr.ResetSchedule{evr.ResetScheduleAllTime}
+		if dailyWeeklyStatMode == m {
+			statGroups[m] = append(statGroups[m], evr.ResetScheduleDaily, evr.ResetScheduleWeekly)
 		}
-
-		resetSchedules = append(resetSchedules, evr.ResetScheduleDaily, evr.ResetScheduleWeekly)
 	}
 
 	playerStatistics := evr.NewStatistics()
@@ -133,7 +138,7 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, nk runtime.NakamaMod
 	boardIDs := make([]string, 0, len(boardMap))
 	gamesPlayedBoardIDs := make(map[evr.StatisticsGroup]string)
 
-	for _, m := range modes {
+	for m, resetSchedules := range statGroups {
 		for _, r := range resetSchedules {
 
 			var stats evr.Statistics
@@ -237,7 +242,7 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, nk runtime.NakamaMod
 	}
 
 	// Use the GamesPlayed stat to fill in all the cnt's
-	for _, m := range modes {
+	for m, resetSchedules := range statGroups {
 		for _, r := range resetSchedules {
 
 			gamesPlayedID := gamesPlayedBoardIDs[evr.StatisticsGroup{

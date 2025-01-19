@@ -568,7 +568,8 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 		evr.ModeArenaPublic,
 		evr.ModeCombatPublic,
 	}
-	serverProfile, err := NewUserServerProfile(ctx, p.db, p.runtimeModule, params.account, params.xpID, params.accountMetadata.GetActiveGroupID().String(), modes, false)
+
+	serverProfile, err := NewUserServerProfile(ctx, p.db, p.runtimeModule, params.account, params.xpID, params.accountMetadata.GetActiveGroupID().String(), modes, 0)
 	if err != nil {
 		return fmt.Errorf("failed to get server profile: %w", err)
 	}
@@ -872,6 +873,9 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 	}
 
 	go func() {
+		ctx, cancel := context.WithTimeout(ctx, time.Second*10)
+		defer cancel()
+
 		if err := p.processUserServerProfileUpdate(ctx, logger, session, request); err != nil {
 			logger.Error("Failed to process user server profile update", zap.Error(err))
 		}
@@ -973,7 +977,7 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 		}
 
 		// Get the players existing statistics
-		prevPlayerStats, _, err := PlayerStatisticsGetID(ctx, p.db, p.runtimeModule, playerInfo.UserID, groupIDStr, []evr.Symbol{label.Mode}, false)
+		prevPlayerStats, _, err := PlayerStatisticsGetID(ctx, p.db, p.runtimeModule, playerInfo.UserID, groupIDStr, []evr.Symbol{label.Mode}, label.Mode)
 		if err != nil {
 			return fmt.Errorf("failed to get player statistics: %w", err)
 		}

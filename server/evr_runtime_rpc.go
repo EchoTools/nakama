@@ -1384,7 +1384,6 @@ func PlayerStatisticsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 	}
 
 	var modes []evr.Symbol
-	var includeDailyWeekly bool
 
 	if request.Mode.IsNil() {
 		modes = []evr.Symbol{
@@ -1395,13 +1394,11 @@ func PlayerStatisticsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 			evr.ModeSocialPublic,
 			evr.ModeSocialPrivate,
 		}
-		includeDailyWeekly = false
 	} else {
 		modes = []evr.Symbol{request.Mode}
-		includeDailyWeekly = true
 	}
 
-	stats, _, err := PlayerStatisticsGetID(ctx, db, nk, request.UserID, request.GroupID, modes, includeDailyWeekly)
+	stats, _, err := PlayerStatisticsGetID(ctx, db, nk, request.UserID, request.GroupID, modes, request.Mode)
 	if err != nil {
 		return "", err
 	}
@@ -1902,7 +1899,7 @@ func UserServerProfileRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 		evr.ModeSocialPrivate,
 	}
 
-	serverProfile, err := NewUserServerProfile(ctx, db, nk, account, request.XPID, request.GroupID.String(), modes, false)
+	serverProfile, err := NewUserServerProfile(ctx, db, nk, account, request.XPID, request.GroupID.String(), modes, 0)
 	if err != nil {
 		return "", fmt.Errorf("failed to get server profile: %w", err)
 	}
