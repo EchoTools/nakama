@@ -274,6 +274,10 @@ type ArenaStatistics struct {
 
 func (s *ArenaStatistics) CalculateFields() {
 
+	if s == nil || s.ArenaWins == nil || s.ArenaLosses == nil {
+		return
+	}
+
 	gamesPlayed := s.ArenaWins.GetValue() + s.ArenaLosses.GetValue()
 
 	s.GamesPlayed = &StatisticIntegerIncrement{
@@ -285,93 +289,120 @@ func (s *ArenaStatistics) CalculateFields() {
 
 	// ArenaWinPercentage
 	if gamesPlayed > 0 {
-		s.ArenaWinPercentage = &StatisticFloatSet{
-			FloatStatistic{
-				Value: s.ArenaWins.GetValue() / gamesPlayed * 100,
-				Count: 1,
-			},
-		}
 
-		s.AssistsPerGame = &StatisticFloatAverage{
-			FloatStatistic{
-				Value: s.Assists.GetValue() / gamesPlayed,
-				Count: 1,
-			},
-		}
-
-		s.AveragePointsPerGame = &StatisticFloatAverage{
-			FloatStatistic{
-				Value: float64(s.Points.GetValue()) / gamesPlayed,
-				Count: 1,
-			},
-		}
-
-		s.AveragePossessionTimePerGame = &StatisticFloatAverage{
-			FloatStatistic{
-				Value: s.PossessionTime.GetValue() / gamesPlayed,
-				Count: 1,
-			},
-		}
-
-		s.AverageTopSpeedPerGame = &StatisticFloatAverage{
-			FloatStatistic{
-				Value: s.TopSpeedsTotal.GetValue() / gamesPlayed,
-				Count: 1,
-			},
-		}
-
-		if s.ShotsOnGoalAgainst.GetValue() > 0 {
-			s.GoalSavePercentage = &StatisticFloatSet{
+		if s.ArenaWins != nil {
+			s.ArenaWinPercentage = &StatisticFloatSet{
 				FloatStatistic{
-					Value: s.Saves.GetValue() / s.ShotsOnGoalAgainst.GetValue() * 100,
+					Value: s.ArenaWins.GetValue() / gamesPlayed * 100,
 					Count: 1,
 				},
 			}
 		}
 
-		if s.ShotsOnGoal.GetValue() > 0 {
-			s.GoalScorePercentage = &StatisticFloatSet{
+		if s.Assists != nil {
+			s.AssistsPerGame = &StatisticFloatAverage{
 				FloatStatistic{
-					Value: s.Goals.GetValue() / s.ShotsOnGoal.GetValue() * 100,
+					Value: s.Assists.GetValue() / gamesPlayed,
 					Count: 1,
 				},
 			}
 		}
 
-		s.GoalsPerGame = &StatisticFloatAverage{
-			FloatStatistic{
-				Value: s.Goals.GetValue() / gamesPlayed,
-				Count: 1,
-			},
-		}
-
-		s.SavesPerGame = &StatisticFloatAverage{
-			FloatStatistic{
-				Value: s.Saves.GetValue() / gamesPlayed,
-				Count: 1,
-			},
-		}
-
-		if s.PunchesReceived.GetValue() > 0 {
-			s.StunPercentage = &StatisticFloatSet{
+		if s.Points != nil {
+			s.AveragePointsPerGame = &StatisticFloatAverage{
 				FloatStatistic{
-					Value: s.Stuns.GetValue() / s.PunchesReceived.GetValue() * 100,
+					Value: float64(s.Points.GetValue()) / gamesPlayed,
 					Count: 1,
 				},
 			}
-			s.BlockPercentage = &StatisticFloatSet{
+
+		}
+
+		if s.PossessionTime != nil {
+			s.AveragePossessionTimePerGame = &StatisticFloatAverage{
 				FloatStatistic{
-					Value: s.Blocks.GetValue() / s.PunchesReceived.GetValue() * 100,
+					Value: s.PossessionTime.GetValue() / gamesPlayed,
 					Count: 1,
 				},
 			}
 		}
 
-		s.StunsPerGame = &StatisticFloatAverage{
-			FloatStatistic{
-				Value: s.Stuns.GetValue() / gamesPlayed,
-				Count: 1,
-			},
+		if s.TopSpeedsTotal != nil {
+			s.AverageTopSpeedPerGame = &StatisticFloatAverage{
+				FloatStatistic{
+					Value: s.TopSpeedsTotal.GetValue() / gamesPlayed,
+					Count: 1,
+				},
+			}
+		}
+
+		if s.Saves != nil && s.ShotsOnGoalAgainst != nil {
+			if s.ShotsOnGoalAgainst.GetValue() > 0 {
+				s.GoalSavePercentage = &StatisticFloatSet{
+					FloatStatistic{
+						Value: s.Saves.GetValue() / s.ShotsOnGoalAgainst.GetValue() * 100,
+						Count: 1,
+					},
+				}
+			}
+		}
+
+		if s.Goals != nil && s.ShotsOnGoal != nil {
+			if s.ShotsOnGoal.GetValue() > 0 {
+				s.GoalScorePercentage = &StatisticFloatSet{
+					FloatStatistic{
+						Value: s.Goals.GetValue() / s.ShotsOnGoal.GetValue() * 100,
+						Count: 1,
+					},
+				}
+			}
+
+		}
+
+		if s.Goals != nil {
+			s.GoalsPerGame = &StatisticFloatAverage{
+				FloatStatistic{
+					Value: s.Goals.GetValue() / gamesPlayed,
+					Count: 1,
+				},
+			}
+		}
+
+		if s.Saves != nil {
+			s.SavesPerGame = &StatisticFloatAverage{
+				FloatStatistic{
+					Value: s.Saves.GetValue() / gamesPlayed,
+					Count: 1,
+				},
+			}
+		}
+
+		if s.PunchesReceived != nil && s.PunchesReceived.GetValue() > 0 {
+			if s.Stuns != nil {
+				s.StunPercentage = &StatisticFloatSet{
+					FloatStatistic{
+						Value: s.Stuns.GetValue() / s.PunchesReceived.GetValue() * 100,
+						Count: 1,
+					},
+				}
+			}
+			if s.Blocks != nil {
+				s.BlockPercentage = &StatisticFloatSet{
+					FloatStatistic{
+						Value: s.Blocks.GetValue() / s.PunchesReceived.GetValue() * 100,
+						Count: 1,
+					},
+				}
+			}
+		}
+
+		if s.Stuns != nil {
+			s.StunsPerGame = &StatisticFloatAverage{
+				FloatStatistic{
+					Value: s.Stuns.GetValue() / gamesPlayed,
+					Count: 1,
+				},
+			}
 		}
 	}
 }

@@ -42,19 +42,14 @@ func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session
 		return err
 	}
 
-	// If the is a non-default group, then generate a profile specifically for it.
-	if params.accountMetadata.GetActiveGroupID() != label.GetGroupID() {
-		// Generate a profile for this group
-		profile, err := NewUserServerProfile(ctx, p.db, p.runtimeModule, params.account, params.xpID, groupID, []evr.Symbol{lobbyParams.Mode}, true)
-		if err != nil {
-			return fmt.Errorf("failed to create user server profile: %w", err)
-		}
+	// Generate a profile for this group
+	profile, err := NewUserServerProfile(ctx, p.db, p.runtimeModule, params.account, params.xpID, groupID, []evr.Symbol{label.Mode}, label.Mode)
+	if err != nil {
+		return fmt.Errorf("failed to create user server profile: %w", err)
+	}
 
-		profile.DisplayName = params.accountMetadata.GetGroupDisplayNameOrDefault(groupID)
-
-		if _, err := p.profileCache.Store(session.ID(), *profile); err != nil {
-			return fmt.Errorf("failed to cache profile: %w", err)
-		}
+	if _, err := p.profileCache.Store(session.ID(), *profile); err != nil {
+		return fmt.Errorf("failed to cache profile: %w", err)
 	}
 
 	presence, err := EntrantPresenceFromSession(session, lobbyParams.PartyID, lobbyParams.Role, lobbyParams.GetRating(), lobbyParams.GetRankPercentile(), label.GetGroupID().String(), 0, "")
