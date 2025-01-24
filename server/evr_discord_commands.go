@@ -1129,7 +1129,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 				tags := map[string]string{
 					"group_id":     groupID,
-					"headset_type": ticket.LoginProfile.SystemInfo.HeadsetType,
+					"headset_type": normalizeHeadsetType(ticket.LoginProfile.SystemInfo.HeadsetType),
 					"is_pcvr":      fmt.Sprintf("%t", ticket.LoginProfile.BuildNumber != evr.StandaloneBuildNumber),
 					"new_account":  "false",
 				}
