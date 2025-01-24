@@ -1092,16 +1092,18 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 	case SignalLockSession:
 		logger.Debug("Locking session")
 		// Lock hte sesion 60 seconds later.
-		state.LockedAt = time.Now().UTC().Add(60 * time.Second)
+		state.LockedAt = time.Now().UTC()
 
 	case SignalUnlockSession:
-		logger.Debug("Unlocking session")
 
-		if state.GameState != nil {
-			state.LockedAt = time.Time{}
+		if state.Mode != evr.ModeArenaPublic {
+			logger.Debug("Unlocking session")
+
+			if state.GameState != nil {
+				state.LockedAt = time.Time{}
+			}
+			state.Open = true
 		}
-		state.Open = true
-
 	default:
 		logger.Warn("Unknown signal: %v", signal.OpCode)
 		return state, SignalResponse{Success: false, Message: "unknown signal"}.String()
