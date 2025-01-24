@@ -126,6 +126,9 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, nk runtime.NakamaMod
 	modes = slices.Compact(modes)
 
 	for _, m := range modes {
+		if m == evr.Symbol(0) {
+			continue
+		}
 		statGroups[m] = []evr.ResetSchedule{evr.ResetScheduleAllTime}
 		if dailyWeeklyStatMode == m {
 			statGroups[m] = append(statGroups[m], evr.ResetScheduleDaily, evr.ResetScheduleWeekly)
