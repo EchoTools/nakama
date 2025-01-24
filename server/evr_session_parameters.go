@@ -87,7 +87,7 @@ func (s *SessionParameters) DeviceType() string {
 	if s.loginPayload == nil {
 		return "Unknown"
 	}
-	return s.loginPayload.SystemInfo.HeadsetType
+	return normalizeHeadsetType(s.loginPayload.SystemInfo.HeadsetType)
 }
 
 func (s *SessionParameters) DiscordID() string {

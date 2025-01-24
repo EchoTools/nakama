@@ -69,17 +69,17 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 	StoreParams(ctx, &params)
 
 	tags := params.MetricsTags()
-	tags["cpu_model"] = strings.Trim(params.loginPayload.SystemInfo.CPUModel, " ")
-	tags["gpu_model"] = strings.Trim(params.loginPayload.SystemInfo.VideoCard, " ")
+	tags["cpu_model"] = strings.TrimSpace(params.loginPayload.SystemInfo.CPUModel)
+	tags["gpu_model"] = strings.TrimSpace(params.loginPayload.SystemInfo.VideoCard)
 	tags["network_type"] = params.loginPayload.SystemInfo.NetworkType
 	tags["total_memory"] = strconv.FormatInt(params.loginPayload.SystemInfo.MemoryTotal, 10)
 	tags["num_logical_cores"] = strconv.FormatInt(params.loginPayload.SystemInfo.NumLogicalCores, 10)
 	tags["num_physical_cores"] = strconv.FormatInt(params.loginPayload.SystemInfo.NumPhysicalCores, 10)
-	tags["driver_version"] = strings.Trim(params.loginPayload.SystemInfo.DriverVersion, " ")
-	tags["headset_type"] = params.loginPayload.SystemInfo.HeadsetType
+	tags["driver_version"] = strings.TrimSpace(params.loginPayload.SystemInfo.DriverVersion)
+	tags["headset_type"] = normalizeHeadsetType(params.loginPayload.SystemInfo.HeadsetType)
 	tags["build_number"] = strconv.FormatInt(int64(params.loginPayload.BuildNumber), 10)
 	tags["app_id"] = strconv.FormatInt(int64(params.loginPayload.AppId), 10)
-	tags["publisher_lock"] = params.loginPayload.PublisherLock
+	tags["publisher_lock"] = strings.TrimSpace(params.loginPayload.PublisherLock)
 
 	// Remove blank tags
 	for k, v := range tags {
@@ -105,6 +105,55 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 		evr.NewDefaultGameSettings(),
 		unrequireMessage,
 	)
+}
+
+// normalizes all the meta headset types to a common format
+
+var headsetMappings = func() map[string]string {
+
+	mappings := map[string][]string{
+		"Meta Quest 1":   {"Quest", "Oculus Quest"},
+		"Meta Quest 2":   {"Quest 2", "Oculus Quest2"},
+		"Meta Quest Pro": {"Quest Pro"},
+		"Meta Quest 3":   {"Quest 3", "Oculus Quest3"},
+		"Meta Quest 3S":  {"Quest 3S", "Oculus Quest3S"},
+
+		"Meta Quest 1 (Link)":   {"Quest (Link)", "Oculus Quest (Link)"},
+		"Meta Quest 2 (Link)":   {"Quest 2 (Link)", "Oculus Quest2 (Link)"},
+		"Meta Quest Pro (Link)": {"Quest Pro (Link)", "Oculus Quest Pro (Link)", "Meta Quest Pro (Link)"},
+		"Meta Quest 3 (Link)":   {"Quest 3 (Link)", "Oculus Quest3 (Link)"},
+		"Meta Quest 3S (Link)":  {"Quest 3S (Link)", "Oculus Quest3S (Link)"},
+
+		"Meta Rift CV1":    {"Oculus Rift CV1"},
+		"Meta Rift S":      {"Oculus Rift S"},
+		"HTC Vive Elite":   {"Vive Elite"},
+		"HTC Vive MV":      {"Vive MV", "Vive. MV"},
+		"Bigscreen Beyond": {"Beyond"},
+		"Valve Index":      {"Index"},
+		"Potato Potato 4K": {"Potato VR"},
+	}
+
+	// Create a reverse mapping
+	reverse := make(map[string]string)
+	for k, v := range mappings {
+		for _, s := range v {
+			reverse[s] = k
+		}
+	}
+
+	return reverse
+}()
+
+func normalizeHeadsetType(headset string) string {
+	if headset == "" {
+		return "Unknown"
+	}
+
+	if v, ok := headsetMappings[headset]; ok {
+		return v
+	}
+
+	return headset
 }
 
 func formatLoginErrorMessage(xpID evr.EvrId, err error) string {
