@@ -396,6 +396,16 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		External: true, // used to denote if the event was generated from the client
 	})
 
+	// Generate a profile for this group
+	profile, err := NewUserServerProfile(ctx, p.db, p.runtimeModule, params.account, params.xpID, groupID, []evr.Symbol{lobbyParams.Mode}, lobbyParams.Mode)
+	if err != nil {
+		return fmt.Errorf("failed to create user server profile: %w", err)
+	}
+
+	if _, err := p.profileCache.Store(session.ID(), *profile); err != nil {
+		return fmt.Errorf("failed to cache profile: %w", err)
+	}
+
 	session.Logger().Info("Authorized access to lobby session", zap.String("gid", groupID), zap.String("display_name", displayName))
 
 	return nil
