@@ -3773,20 +3773,6 @@ func (d *DiscordAppBot) LogInteractionToChannel(i *discordgo.InteractionCreate, 
 	return nil
 }
 
-func (d *DiscordAppBot) LogMessageToChannel(message string, channelID string) error {
-	if d.dg == nil {
-		return fmt.Errorf("discord session is not initialized")
-	}
-	if channelID == "" {
-		return fmt.Errorf("channelID is empty")
-	}
-	_, err := d.dg.ChannelMessageSend(channelID, message)
-	if err != nil {
-		return fmt.Errorf("failed to send message: %w", err)
-	}
-	return nil
-}
-
 func (d *DiscordAppBot) LogAuditMessage(ctx context.Context, groupID string, message string, replaceMentions bool) (*discordgo.Message, error) {
 	// replace all <@uuid> mentions with <@discordID>
 	if replaceMentions {
