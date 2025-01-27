@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math/rand"
 	"reflect"
 	"slices"
@@ -17,6 +18,7 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/samber/lo"
+	"go.uber.org/zap"
 )
 
 var (
@@ -164,7 +166,7 @@ func walletToCosmetics(wallet map[string]int64, unlocks map[string]map[string]bo
 	return unlocks
 }
 
-func NewUserServerProfile(ctx context.Context, db *sql.DB, nk runtime.NakamaModule, account *api.Account, xpID evr.EvrId, groupID string, modes []evr.Symbol, dailyWeeklyMode evr.Symbol) (*evr.ServerProfile, error) {
+func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, account *api.Account, xpID evr.EvrId, groupID string, modes []evr.Symbol, dailyWeeklyMode evr.Symbol) (*evr.ServerProfile, error) {
 
 	metadata := AccountMetadata{}
 	if err := json.Unmarshal([]byte(account.User.Metadata), &metadata); err != nil {
@@ -180,11 +182,17 @@ func NewUserServerProfile(ctx context.Context, db *sql.DB, nk runtime.NakamaModu
 	for m, c := range cosmeticDefaults(metadata.EnableAllCosmetics) {
 		cosmetics[m] = make(map[string]bool, len(c))
 		for k, v := range c {
-			cosmetics[m][k] = v
+			if v {
+				cosmetics[m][k] = v
+			}
 		}
 	}
 
-	cosmetics = walletToCosmetics(wallet, cosmetics)
+	cosmeticLoadout := metadata.LoadoutCosmetics.Loadout
+	// If the player has "kissy lips" emote equipped, set their emote to default.
+	if cosmeticLoadout.Emote == "emote_kissy_lips_a" {
+		cosmeticLoadout.Emote = "emote_blink_smiley_a"
+	}
 
 	var developerFeatures *evr.DeveloperFeatures
 
@@ -228,7 +236,7 @@ func NewUserServerProfile(ctx context.Context, db *sql.DB, nk runtime.NakamaModu
 			NumberBody: int(metadata.LoadoutCosmetics.JerseyNumber),
 			Instances: evr.CosmeticInstances{
 				Unified: evr.UnifiedCosmeticInstance{
-					Slots: metadata.LoadoutCosmetics.Loadout,
+					Slots: cosmeticLoadout,
 				},
 			},
 		},
@@ -240,7 +248,7 @@ func NewUserServerProfile(ctx context.Context, db *sql.DB, nk runtime.NakamaModu
 	}, nil
 }
 
-func NewClientProfile(ctx context.Context, metadata *AccountMetadata, xpID evr.EvrId) (*evr.ClientProfile, error) {
+func NewClientProfile(ctx context.Context, metadata *AccountMetadata, serverProfile *evr.ServerProfile) (*evr.ClientProfile, error) {
 	// Load friends to get blocked (ghosted) players
 	muted := make([]evr.EvrId, 0)
 	ghosted := make([]evr.EvrId, 0)
@@ -251,10 +259,38 @@ func NewClientProfile(ctx context.Context, metadata *AccountMetadata, xpID evr.E
 		ghosted = append(ghosted, g...)
 	}
 
+	for g, items := range serverProfile.UnlockedCosmetics {
+		for n := range items {
+			s := fmt.Sprintf("%s|%s", g, n)
+			log.Printf("Unlocked cosmetic %s %d", s, evr.ToSymbol(s).Int64())
+		}
+	}
+	// Remove newunlocks for cosmetics that the user does not have unlocked
+	for i := 0; i < len(metadata.NewUnlocks); i++ {
+		sym := evr.ToSymbol(metadata.NewUnlocks[i])
+		name := sym.String()
+		if !serverProfile.IsUnlocked(name) {
+			metadata.NewUnlocks = append(metadata.NewUnlocks[:i], metadata.NewUnlocks[i+1:]...)
+			i--
+		}
+	}
+
+	var customizationPOIs *evr.Customization
+	if metadata.CustomizationPOIs != nil {
+		customizationPOIs = metadata.CustomizationPOIs
+	} else {
+		customizationPOIs = &evr.Customization{
+			BattlePassSeasonPoiVersion: 3246,
+			NewUnlocksPoiVersion:       1,
+			StoreEntryPoiVersion:       1,
+			ClearNewUnlocksVersion:     1,
+		}
+	}
+
 	return &evr.ClientProfile{
 		ModifyTime:         time.Now().UTC().Unix(),
-		DisplayName:        metadata.GetActiveGroupDisplayName(),
-		EvrID:              xpID,
+		DisplayName:        serverProfile.DisplayName,
+		EvrID:              serverProfile.EvrID,
 		TeamName:           metadata.TeamName,
 		CombatWeapon:       metadata.CombatLoadout.CombatWeapon,
 		CombatGrenade:      metadata.CombatLoadout.CombatGrenade,
@@ -279,18 +315,13 @@ func NewClientProfile(ctx context.Context, metadata *AccountMetadata, xpID evr.E
 			HeraldryTabSeen:   evr.Versioned{Version: 1},
 			OrangeTintTabSeen: evr.Versioned{Version: 1},
 		},
-		Customization: evr.Customization{
-			BattlePassSeasonPoiVersion: 3246,
-			NewUnlocksPoiVersion:       1,
-			StoreEntryPoiVersion:       1,
-			ClearNewUnlocksVersion:     1,
-		},
+		Customization: customizationPOIs,
 		Social: evr.ClientSocial{
 			CommunityValuesVersion: 1,
 			SetupVersion:           1,
-			Channel:                evr.GUID(metadata.GetActiveGroupID()),
+			Channel:                serverProfile.Social.Channel,
 		},
-		NewUnlocks: []int64{}, // This could pull from the wallet ledger
+		NewUnlocks: metadata.NewUnlocks, // This could pull from the wallet ledger
 	}, nil
 }
 
@@ -453,11 +484,9 @@ var allCosmetics = func() map[string]map[string]bool {
 }()
 
 func cosmeticDefaults(enableAll bool) map[string]map[string]bool {
-
 	if enableAll {
 		return allCosmetics
 	}
-
 	return defaultCosmetics
 }
 

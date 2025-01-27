@@ -1,6 +1,7 @@
 package evr
 
 import (
+	"encoding/json"
 	"reflect"
 	"strings"
 )
@@ -18,7 +19,7 @@ type ClientProfile struct {
 	MutedPlayers       Players           `json:"mute"`
 	GhostedPlayers     Players           `json:"ghost"`
 	NewPlayerProgress  NewPlayerProgress `json:"npe,omitempty"`
-	Customization      Customization     `json:"customization,omitempty"`
+	Customization      *Customization    `json:"customization,omitempty"`
 	Social             ClientSocial      `json:"social,omitempty"`
 	NewUnlocks         []int64           `json:"newunlocks"`
 	EarlyQuitFeatures  EarlyQuitFeatures `json:"earlyquit"` // Early quit features
@@ -95,6 +96,38 @@ type ServerProfile struct {
 	Social            ServerSocial               `json:"social"`          // Social settings
 	// If DeveloperFeatures is not null, the player will have a gold name
 	DeveloperFeatures *DeveloperFeatures `json:"dev,omitempty"` // Developer features
+}
+
+func (s ServerProfile) IsUnlocked(id string) bool {
+	if s.UnlockedCosmetics == nil {
+		return false
+	}
+	for _, m := range s.UnlockedCosmetics {
+		if _, ok := m[id]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func (p ServerProfile) MarshallJSON() ([]byte, error) {
+	type Alias ServerProfile
+	a := &struct {
+		*Alias
+	}{
+		Alias: (*Alias)(&p),
+	}
+
+	// Echo treats this list like a map[string]struct{} so filter out the false values
+	for g, items := range a.UnlockedCosmetics {
+		for k, v := range items {
+			if !v {
+				delete(a.UnlockedCosmetics[g], k)
+			}
+		}
+	}
+
+	return json.Marshal(a)
 }
 
 type DeveloperFeatures struct {
@@ -567,7 +600,7 @@ type ArenaUnlocks struct {
 	EmoteGingerbreadManA        bool `json:"emote_gingerbread_man_a,omitempty"`
 	EmoteHeartEyesA             bool `json:"emote_heart_eyes_a,omitempty"`
 	EmoteHourglassA             bool `json:"emote_hourglass_a,omitempty"`
-	EmoteKissyLipsA             bool `json:"emote_kissy_lips_a" validate:"restricted"`
+	EmoteKissyLipsA             bool `json:"emote_kissy_lips_a,omitempty" validate:"restricted"`
 	EmoteLightbulbA             bool `json:"emote_lightbulb_a,omitempty"`
 	EmoteLightningA             bool `json:"rwd_emote_lightning_a,omitempty"`
 	EmoteLoadingA               bool `json:"emote_loading_a,omitempty"`
@@ -1090,7 +1123,7 @@ type ArenaUnlocks struct {
 	TitleTitleD                 bool `json:"rwd_title_title_d,omitempty"`
 	TitleTitleDefault           bool `json:"rwd_title_title_default,omitempty"`
 	TitleTitleE                 bool `json:"rwd_title_title_e,omitempty"`
-	XPBoostGroupS0101           bool `json:"rwd_xp_boost_group_s01_01" validate:"restricted"`
+	XPBoostGroupS0101           bool `json:"rwd_xp_boost_group_s01_01,omitempty" validate:"restricted"`
 	XPBoostGroupS0102           bool `json:"rwd_xp_boost_group_s01_02,omitempty"`
 	XPBoostGroupS0103           bool `json:"rwd_xp_boost_group_s01_03,omitempty"`
 	XPBoostGroupS0104           bool `json:"rwd_xp_boost_group_s01_04,omitempty"`
@@ -1254,7 +1287,7 @@ func NewClientProfile() ClientProfile {
 			HeraldryTabSeen:   Versioned{Version: 1},
 			OrangeTintTabSeen: Versioned{Version: 1},
 		},
-		Customization: Customization{
+		Customization: &Customization{
 			BattlePassSeasonPoiVersion: 0,
 			NewUnlocksPoiVersion:       1,
 			StoreEntryPoiVersion:       0,

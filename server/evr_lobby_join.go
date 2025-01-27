@@ -43,7 +43,7 @@ func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session
 	}
 
 	// Generate a profile for this group
-	profile, err := NewUserServerProfile(ctx, p.db, p.runtimeModule, params.account, params.xpID, groupID, []evr.Symbol{label.Mode}, label.Mode)
+	profile, err := NewUserServerProfile(ctx, logger, p.db, p.runtimeModule, params.account, params.xpID, groupID, []evr.Symbol{label.Mode}, label.Mode)
 	if err != nil {
 		return fmt.Errorf("failed to create user server profile: %w", err)
 	}

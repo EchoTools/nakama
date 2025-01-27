@@ -624,14 +624,14 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 		evr.ModeCombatPublic,
 	}
 
-	serverProfile, err := NewUserServerProfile(ctx, p.db, p.runtimeModule, params.account, params.xpID, params.accountMetadata.GetActiveGroupID().String(), modes, 0)
+	serverProfile, err := NewUserServerProfile(ctx, logger, p.db, p.runtimeModule, params.account, params.xpID, params.accountMetadata.GetActiveGroupID().String(), modes, 0)
 	if err != nil {
 		return fmt.Errorf("failed to get server profile: %w", err)
 	}
 
 	params.profile.Store(serverProfile)
 
-	clientProfile, err := NewClientProfile(ctx, params.accountMetadata, params.xpID)
+	clientProfile, err := NewClientProfile(ctx, params.accountMetadata, serverProfile)
 	if err != nil {
 		return fmt.Errorf("failed to get client profile: %w", err)
 	}
@@ -721,6 +721,7 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 	metadata.GhostedPlayers = update.GhostedPlayers.Players
 	metadata.MutedPlayers = update.MutedPlayers.Players
 	metadata.NewUnlocks = update.NewUnlocks
+	metadata.CustomizationPOIs = update.Customization
 
 	if err := AccountMetadataSet(ctx, p.runtimeModule, session.userID.String(), metadata); err != nil {
 		return fmt.Errorf("failed to update account metadata: %w", err)
