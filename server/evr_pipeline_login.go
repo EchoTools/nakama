@@ -693,7 +693,9 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 					return fmt.Errorf("error updating group: %w", err)
 				}
 
-				p.appBot.LogMessageToChannel(fmt.Sprintf("User <@%s> has accepted the community values.", params.DiscordID()), gg.AuditChannelID)
+				if _, err := p.appBot.LogAuditMessage(ctx, gg.ID().String(), fmt.Sprintf("User <@%s> has accepted the community values.", params.DiscordID()), false); err != nil {
+					logger.Warn("Failed to log audit message", zap.Error(err))
+				}
 			}
 		}
 	}
