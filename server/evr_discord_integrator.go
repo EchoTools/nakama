@@ -421,6 +421,9 @@ func (d *DiscordIntegrator) updateGuild(ctx context.Context, logger *zap.Logger,
 	}
 
 	if ownerAccount.GetDisableTime() != nil {
+		message := fmt.Sprintf("The owner of the guild `%s` (ID: %s) owned by <@%s> is globally banned. The guild will be removed.", guild.Name, guild.ID, guild.OwnerID)
+		d.LogServiceAuditMessage(ctx, message, false)
+
 		logger.Warn("Guild owner is globally banned. Leaving guild.", zap.String("guild_id", guild.ID), zap.String("owner_id", guild.OwnerID))
 		if err := d.dg.GuildLeave(guild.ID); err != nil {
 			return fmt.Errorf("error leaving guild: %w", err)
@@ -443,6 +446,7 @@ func (d *DiscordIntegrator) updateGuild(ctx context.Context, logger *zap.Logger,
 			return fmt.Errorf("error creating group: %w", err)
 		}
 
+		d.LogServiceAuditMessage(ctx, fmt.Sprintf("Created guild `%s` (ID: %s) owned by <@%s>", guild.Name, guild.ID, guild.OwnerID), false)
 		// Invite the owner to the game service guild.
 	} else {
 
@@ -487,6 +491,7 @@ func (d *DiscordIntegrator) handleGuildUpdate(logger *zap.Logger, s *discordgo.S
 
 func (d *DiscordIntegrator) handleGuildDelete(logger *zap.Logger, s *discordgo.Session, e *discordgo.GuildDelete) error {
 
+	d.LogServiceAuditMessage(d.ctx, fmt.Sprintf("Deleted guild `%s` (ID: %s), owned by <@%s>", e.Guild.ID, e.Guild.ID, e.Guild.OwnerID), false)
 	logger.Info("Guild Delete", zap.Any("guild", e.Guild.ID))
 	groupID := d.GuildIDToGroupID(e.Guild.ID)
 	if groupID == "" {
@@ -904,6 +909,17 @@ func (d *DiscordIntegrator) ReplaceMentions(message string) string {
 	return replacedMessage
 }
 
+func (d *DiscordIntegrator) LogServiceAuditMessage(ctx context.Context, message string, replaceMentions bool) (*discordgo.Message, error) {
+	// replace all <@uuid> mentions with <@discordID>
+
+	if settings := ServiceSettings(); settings.ServiceGuildID != "" {
+		if replaceMentions {
+			message = d.ReplaceMentions(message)
+		}
+		return d.dg.ChannelMessageSend(settings.ServiceGuildID, message)
+	}
+	return nil, nil
+}
 func HasLoggedIntoEcho(ctx context.Context, nk runtime.NakamaModule, userID string) (bool, error) {
 	// If the member hasn't ever logged into echo, then don't sync them.
 	objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
