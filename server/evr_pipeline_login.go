@@ -987,36 +987,38 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 	}
 
 	groupIDStr := label.GetGroupID().String()
+	if !ServiceSettings().Matchmaking.DisableSBMM {
 
-	if !serviceSettings.Load().DisableStatisticsUpdates && metadata.GroupDisplayNames[groupIDStr] != "" {
+		if !serviceSettings.Load().DisableStatisticsUpdates && metadata.GroupDisplayNames[groupIDStr] != "" {
 
-		userSettings, err := LoadMatchmakingSettings(ctx, p.runtimeModule, playerInfo.UserID)
-		if err != nil {
-			logger.Warn("Failed to load matchmaking settings", zap.Error(err))
-		} else {
-
-			// Determine winning team
-			blueWins := playerInfo.Team == BlueTeam && payload.IsWinner()
-
-			if rating, err := CalculateNewPlayerRating(playerInfo.EvrID, label.Players, label.TeamSize, blueWins); err != nil {
-				logger.Error("Failed to calculate new player rating", zap.Error(err))
+			userSettings, err := LoadMatchmakingSettings(ctx, p.runtimeModule, playerInfo.UserID)
+			if err != nil {
+				logger.Warn("Failed to load matchmaking settings", zap.Error(err))
 			} else {
-				playerInfo.RatingMu = rating.Mu
-				playerInfo.RatingSigma = rating.Sigma
-				if err := MatchmakingRatingStore(ctx, p.runtimeModule, playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, rating); err != nil {
+
+				// Determine winning team
+				blueWins := playerInfo.Team == BlueTeam && payload.IsWinner()
+
+				if rating, err := CalculateNewPlayerRating(playerInfo.EvrID, label.Players, label.TeamSize, blueWins); err != nil {
+					logger.Error("Failed to calculate new player rating", zap.Error(err))
+				} else {
+					playerInfo.RatingMu = rating.Mu
+					playerInfo.RatingSigma = rating.Sigma
+					if err := MatchmakingRatingStore(ctx, p.runtimeModule, playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, rating); err != nil {
+						logger.Warn("Failed to record percentile to leaderboard", zap.Error(err))
+					}
+				}
+
+				// Calculate a new rank percentile
+				if rankPercentile, err := CalculateSmoothedPlayerRankPercentile(ctx, logger, p.db, p.runtimeModule, playerInfo.UserID, groupIDStr, label.Mode); err != nil {
+					logger.Error("Failed to calculate new player rank percentile", zap.Error(err))
+				} else if err := MatchmakingRankPercentileStore(ctx, p.runtimeModule, playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, rankPercentile); err != nil {
 					logger.Warn("Failed to record percentile to leaderboard", zap.Error(err))
 				}
-			}
 
-			// Calculate a new rank percentile
-			if rankPercentile, err := CalculateSmoothedPlayerRankPercentile(ctx, logger, p.db, p.runtimeModule, playerInfo.UserID, groupIDStr, label.Mode); err != nil {
-				logger.Error("Failed to calculate new player rank percentile", zap.Error(err))
-			} else if err := MatchmakingRankPercentileStore(ctx, p.runtimeModule, playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, rankPercentile); err != nil {
-				logger.Warn("Failed to record percentile to leaderboard", zap.Error(err))
-			}
-
-			if err := StoreMatchmakingSettings(ctx, p.runtimeModule, playerInfo.UserID, userSettings); err != nil {
-				logger.Warn("Failed to save matchmaking settings", zap.Error(err))
+				if err := StoreMatchmakingSettings(ctx, p.runtimeModule, playerInfo.UserID, userSettings); err != nil {
+					logger.Warn("Failed to save matchmaking settings", zap.Error(err))
+				}
 			}
 		}
 	}
