@@ -125,6 +125,7 @@ type AccountMetadata struct {
 	NewUnlocks                 []int64                    `json:"new_unlocks"`               // The new unlocks
 	GameSettings               *evr.RemoteLogGameSettings `json:"game_settings"`             // The game settings
 	LegalConsents              evr.LegalConsents          `json:"legal_consents"`            // The legal consents
+	CustomizationPOIs          *evr.Customization         `json:"customization_pois"`        // The customization POIs
 	sessionDisplayNameOverride string                     // The display name override for this session
 }
 
