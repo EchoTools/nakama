@@ -524,6 +524,10 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		}
 	}
 
+	for _, gg := range params.guildGroups {
+		p.discordCache.QueueSyncMember(gg.GuildID, params.account.CustomId)
+	}
+
 	s := session
 	// Register initial status tracking and presence(s) for this session.
 	s.statusRegistry.Follow(s.id, map[uuid.UUID]struct{}{s.userID: {}})
