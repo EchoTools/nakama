@@ -41,6 +41,7 @@ type GlobalMatchmakingSettings struct {
 	QueryAddons            QueryAddons            `json:"query_addons"`             // Additional queries to add to matchmaking queries
 	MaxServerRTT           int                    `json:"max_server_rtt"`           // The maximum RTT to allow
 	RankPercentile         RankPercentileSettings `json:"rank_percentile"`          // The rank percentile settings
+	DisableSBMM            bool                   `json:"disable_skill_based_mm"`   // Disable SBMM
 	ServerRatings          ServerRatings          `json:"server_ratings"`           // The server ratings
 }
 

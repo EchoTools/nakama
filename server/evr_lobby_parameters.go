@@ -287,31 +287,35 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 	}
 
 	rankPercentileMaxDelta := 1.0
+	rankPercentile := globalSettings.RankPercentile.Default
 
-	if globalSettings.RankPercentile.MaxDelta > 0 {
-		rankPercentileMaxDelta = globalSettings.RankPercentile.MaxDelta
-	}
+	if !globalSettings.DisableSBMM {
 
-	rankPercentile, err := MatchmakingRankPercentileLoad(ctx, p.runtimeModule, userID, groupID.String(), mode)
-	if err != nil {
-		logger.Warn("Failed to load user rank percentile", zap.Error(err))
-		rankPercentile = globalSettings.RankPercentile.Default
-	}
+		if globalSettings.RankPercentile.MaxDelta > 0 {
+			rankPercentileMaxDelta = globalSettings.RankPercentile.MaxDelta
+		}
 
-	if userSettings.StaticBaseRankPercentile > 0 {
-		rankPercentile = userSettings.StaticBaseRankPercentile
-	} else {
-		rankPercentile, err = CalculateSmoothedPlayerRankPercentile(ctx, logger, p.db, p.runtimeModule, userID, groupID.String(), mode)
+		rankPercentile, err = MatchmakingRankPercentileLoad(ctx, p.runtimeModule, userID, groupID.String(), mode)
 		if err != nil {
-			return nil, fmt.Errorf("failed to calculate smoothed player rank percentile: %w", err)
+			logger.Warn("Failed to load user rank percentile", zap.Error(err))
+			rankPercentile = globalSettings.RankPercentile.Default
 		}
 
-		if err := MatchmakingRankPercentileStore(ctx, p.runtimeModule, userID, session.Username(), groupID.String(), mode, rankPercentile); err != nil {
-			logger.Warn("Failed to store user rank percentile", zap.Error(err))
-		}
+		if userSettings.StaticBaseRankPercentile > 0 {
+			rankPercentile = userSettings.StaticBaseRankPercentile
+		} else {
+			rankPercentile, err = CalculateSmoothedPlayerRankPercentile(ctx, logger, p.db, p.runtimeModule, userID, groupID.String(), mode)
+			if err != nil {
+				return nil, fmt.Errorf("failed to calculate smoothed player rank percentile: %w", err)
+			}
 
-		if err := StoreMatchmakingSettings(ctx, p.runtimeModule, userID, userSettings); err != nil {
-			logger.Warn("Failed to store user matchmaking settings", zap.Error(err))
+			if err := MatchmakingRankPercentileStore(ctx, p.runtimeModule, userID, session.Username(), groupID.String(), mode, rankPercentile); err != nil {
+				logger.Warn("Failed to store user rank percentile", zap.Error(err))
+			}
+
+			if err := StoreMatchmakingSettings(ctx, p.runtimeModule, userID, userSettings); err != nil {
+				logger.Warn("Failed to store user matchmaking settings", zap.Error(err))
+			}
 		}
 	}
 
