@@ -76,7 +76,7 @@ type LoginHistory struct {
 	version                string                             // storage record version
 }
 
-func NewLoginHistory() *LoginHistory {
+func NewLoginHistory(userID string) *LoginHistory {
 	return &LoginHistory{
 		History:                make(map[string]*LoginHistoryEntry),
 		Cache:                  make([]string, 0),
@@ -87,6 +87,7 @@ func NewLoginHistory() *LoginHistory {
 		SecondDegreeAlternates: make([]string, 0),
 		AlternateMap:           make(map[string][]*AlternateSearchMatch),
 		NotifiedGroups:         make(map[string][]string),
+		userID:                 userID,
 	}
 }
 
@@ -301,6 +302,10 @@ func (h *LoginHistory) Store(ctx context.Context, nk runtime.NakamaModule) error
 }
 
 func LoginHistoryLoad(ctx context.Context, nk runtime.NakamaModule, userID string) (*LoginHistory, error) {
+	if userID == "" || userID == SystemUserID {
+		return nil, fmt.Errorf("invalid user ID: %s", userID)
+	}
+
 	objects, err := nk.StorageRead(ctx, []*runtime.StorageRead{
 		{
 			Collection: LoginStorageCollection,
@@ -313,7 +318,7 @@ func LoginHistoryLoad(ctx context.Context, nk runtime.NakamaModule, userID strin
 	}
 
 	if len(objects) == 0 {
-		return NewLoginHistory(), nil
+		return NewLoginHistory(userID), nil
 	}
 
 	var history LoginHistory

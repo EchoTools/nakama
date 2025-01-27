@@ -319,7 +319,11 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 		metricsTags["error"] = "failed_load_login_history"
 		return fmt.Errorf("failed to load login history: %w", err)
 	}
-	defer loginHistory.Store(ctx, p.runtimeModule)
+	defer func() {
+		if err := loginHistory.Store(ctx, p.runtimeModule); err != nil {
+			logger.Warn("Failed to store login history", zap.Error(err))
+		}
+	}()
 
 	// The account is now authenticated. Authorize the session.
 
@@ -362,6 +366,7 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 			if p.appBot != nil && p.appBot.dg != nil && p.appBot.dg.State != nil && p.appBot.dg.State.User != nil {
 
 				if err := p.appBot.SendIPApprovalRequest(ctx, params.account.User.Id, entry, params.ipqs); err != nil {
+					logger.Debug("Failed to send IP approval request", zap.Error(err))
 					// The user has DMs from non-friends disabled. Tell them to use the slash command.
 					metricsTags["error"] = "failed_send_ip_approval_request"
 					return fmt.Errorf("\nPlease authorize this new location by typing:\n/verify\nand select code >>> %s <<< in a guild with the @%s bot.", twoFactorCode, p.appBot.dg.State.User.Username)
