@@ -194,15 +194,23 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 		case *evr.RemoteLogSessionStarted:
 
 		case *evr.RemoteLogGameSettings:
+			if request.EvrID.IsNil() {
+				continue
+			}
 
-			metadata, err := AccountMetadataLoad(ctx, p.runtimeModule, session.userID.String())
+			userID, err := GetUserIDByEvrID(ctx, p.db, request.EvrID.String())
+			if err != nil {
+				logger.Error("Failed to get user ID by evr ID", zap.Error(err))
+				continue
+			}
+			metadata, err := AccountMetadataLoad(ctx, p.runtimeModule, userID)
 			if err != nil {
 				logger.Error("Failed to load account metadata", zap.Error(err))
 				continue
 			}
 
 			metadata.GameSettings = msg
-			if err := AccountMetadataSet(ctx, p.runtimeModule, session.userID.String(), metadata); err != nil {
+			if err := AccountMetadataSet(ctx, p.runtimeModule, userID, metadata); err != nil {
 				logger.Error("Failed to set account metadata", zap.Error(err))
 			}
 
