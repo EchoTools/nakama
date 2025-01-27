@@ -301,7 +301,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 	if userSettings.StaticBaseRankPercentile > 0 {
 		rankPercentile = userSettings.StaticBaseRankPercentile
 	} else {
-		rankPercentile, err = CalculateSmoothedPlayerRankPercentile(ctx, logger, p.runtimeModule, userID, groupID.String(), mode)
+		rankPercentile, err = CalculateSmoothedPlayerRankPercentile(ctx, logger, p.db, p.runtimeModule, userID, groupID.String(), mode)
 		if err != nil {
 			return nil, fmt.Errorf("failed to calculate smoothed player rank percentile: %w", err)
 		}
