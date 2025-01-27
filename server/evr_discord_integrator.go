@@ -31,7 +31,7 @@ type QueueEntry struct {
 }
 
 // Responsible for caching and synchronizing data with Discord.
-type DiscordCache struct {
+type DiscordIntegrator struct {
 	ctx      context.Context
 	cancelFn context.CancelFunc
 	logger   *zap.Logger
@@ -45,13 +45,13 @@ type DiscordCache struct {
 	idcache *MapOf[string, string]
 }
 
-func NewDiscordCache(ctx context.Context, logger *zap.Logger, config Config, metrics Metrics, nk runtime.NakamaModule, db *sql.DB, dg *discordgo.Session) *DiscordCache {
+func NewDiscordIntegrator(ctx context.Context, logger *zap.Logger, config Config, metrics Metrics, nk runtime.NakamaModule, db *sql.DB, dg *discordgo.Session) *DiscordIntegrator {
 	ctx, cancelFn := context.WithCancel(ctx)
 
 	guildGroups := &atomic.Value{}
 	guildGroups.Store(make(map[string]*GuildGroup))
 
-	return &DiscordCache{
+	return &DiscordIntegrator{
 		ctx:      ctx,
 		cancelFn: cancelFn,
 		logger:   logger,
@@ -66,11 +66,11 @@ func NewDiscordCache(ctx context.Context, logger *zap.Logger, config Config, met
 	}
 }
 
-func (c *DiscordCache) Stop() {
+func (c *DiscordIntegrator) Stop() {
 	c.cancelFn()
 }
 
-func (c *DiscordCache) Start() {
+func (c *DiscordIntegrator) Start() {
 	dg := c.dg
 	logger := c.logger.With(zap.String("module", "discord_cache"))
 
@@ -161,7 +161,7 @@ func (c *DiscordCache) Start() {
 }
 
 // Queue a user for caching/updating.
-func (c *DiscordCache) QueueSyncMember(guildID, discordID string) {
+func (c *DiscordIntegrator) QueueSyncMember(guildID, discordID string) {
 	select {
 	case c.queueCh <- QueueEntry{GuildID: guildID, DiscordID: discordID}:
 		// Success
@@ -172,7 +172,7 @@ func (c *DiscordCache) QueueSyncMember(guildID, discordID string) {
 }
 
 // Purge removes both the reference and the reverse from the cache.
-func (d *DiscordCache) Purge(id string) bool {
+func (d *DiscordIntegrator) Purge(id string) bool {
 	value, loaded := d.idcache.LoadAndDelete(id)
 	if !loaded {
 		return false
@@ -182,7 +182,7 @@ func (d *DiscordCache) Purge(id string) bool {
 }
 
 // Discord ID to Nakama UserID, with a lookup cache
-func (d *DiscordCache) DiscordIDToUserID(discordID string) string {
+func (d *DiscordIntegrator) DiscordIDToUserID(discordID string) string {
 	userID, ok := d.idcache.Load(discordID)
 	if !ok {
 		var err error
@@ -196,7 +196,7 @@ func (d *DiscordCache) DiscordIDToUserID(discordID string) string {
 	return userID
 }
 
-func (d *DiscordCache) UserIDToDiscordID(userID string) string {
+func (d *DiscordIntegrator) UserIDToDiscordID(userID string) string {
 	discordID, ok := d.idcache.Load(userID)
 	if !ok {
 		var err error
@@ -211,7 +211,7 @@ func (d *DiscordCache) UserIDToDiscordID(userID string) string {
 }
 
 // Guild ID to Nakama Group ID, with a lookup cache
-func (d *DiscordCache) GuildIDToGroupID(guildID string) string {
+func (d *DiscordIntegrator) GuildIDToGroupID(guildID string) string {
 	groupID, ok := d.idcache.Load(guildID)
 	if !ok {
 		var err error
@@ -226,7 +226,7 @@ func (d *DiscordCache) GuildIDToGroupID(guildID string) string {
 	return groupID
 }
 
-func (c *DiscordCache) GroupIDToGuildID(groupID string) string {
+func (c *DiscordIntegrator) GroupIDToGuildID(groupID string) string {
 	guildID, ok := c.idcache.Load(groupID)
 	if !ok {
 		var err error
@@ -241,7 +241,7 @@ func (c *DiscordCache) GroupIDToGuildID(groupID string) string {
 }
 
 // Sync's a user to all of their guilds.
-func (c *DiscordCache) syncMember(ctx context.Context, logger *zap.Logger, discordID, guildID string) error {
+func (c *DiscordIntegrator) syncMember(ctx context.Context, logger *zap.Logger, discordID, guildID string) error {
 	if guildID == "" {
 		return fmt.Errorf("guild not specified")
 	}
@@ -362,7 +362,7 @@ func InGameName(m *discordgo.Member) string {
 }
 
 // Loads/Adds a user to the cache.
-func (c *DiscordCache) GuildMember(guildID, discordID string) (member *discordgo.Member, err error) {
+func (c *DiscordIntegrator) GuildMember(guildID, discordID string) (member *discordgo.Member, err error) {
 	// Check the cache first.
 	if member, err = c.dg.State.Member(guildID, discordID); err == nil && member != nil {
 		return member, nil
@@ -377,7 +377,7 @@ func (c *DiscordCache) GuildMember(guildID, discordID string) (member *discordgo
 	return member, nil
 }
 
-func (d *DiscordCache) updateGuild(ctx context.Context, logger *zap.Logger, guild *discordgo.Guild) error {
+func (d *DiscordIntegrator) updateGuild(ctx context.Context, logger *zap.Logger, guild *discordgo.Guild) error {
 
 	var err error
 	botUserID := d.DiscordIDToUserID(d.dg.State.User.ID)
@@ -469,7 +469,7 @@ func (d *DiscordCache) updateGuild(ctx context.Context, logger *zap.Logger, guil
 	return nil
 }
 
-func (d *DiscordCache) handleGuildCreate(logger *zap.Logger, s *discordgo.Session, e *discordgo.GuildCreate) error {
+func (d *DiscordIntegrator) handleGuildCreate(logger *zap.Logger, s *discordgo.Session, e *discordgo.GuildCreate) error {
 	logger.Info("Guild Create", zap.Any("guild", e.Guild.ID))
 	if err := d.updateGuild(d.ctx, logger, e.Guild); err != nil {
 		return fmt.Errorf("failed to update guild: %w", err)
@@ -477,7 +477,7 @@ func (d *DiscordCache) handleGuildCreate(logger *zap.Logger, s *discordgo.Sessio
 	return nil
 }
 
-func (d *DiscordCache) handleGuildUpdate(logger *zap.Logger, s *discordgo.Session, e *discordgo.GuildUpdate) error {
+func (d *DiscordIntegrator) handleGuildUpdate(logger *zap.Logger, s *discordgo.Session, e *discordgo.GuildUpdate) error {
 	logger.Info("Guild Update", zap.Any("guild", e.Guild.ID))
 	if err := d.updateGuild(d.ctx, logger, e.Guild); err != nil {
 		return fmt.Errorf("failed to update guild: %w", err)
@@ -485,7 +485,7 @@ func (d *DiscordCache) handleGuildUpdate(logger *zap.Logger, s *discordgo.Sessio
 	return nil
 }
 
-func (d *DiscordCache) handleGuildDelete(logger *zap.Logger, s *discordgo.Session, e *discordgo.GuildDelete) error {
+func (d *DiscordIntegrator) handleGuildDelete(logger *zap.Logger, s *discordgo.Session, e *discordgo.GuildDelete) error {
 
 	logger.Info("Guild Delete", zap.Any("guild", e.Guild.ID))
 	groupID := d.GuildIDToGroupID(e.Guild.ID)
@@ -501,7 +501,7 @@ func (d *DiscordCache) handleGuildDelete(logger *zap.Logger, s *discordgo.Sessio
 	return nil
 }
 
-func (d *DiscordCache) handleMemberAdd(logger *zap.Logger, s *discordgo.Session, e *discordgo.GuildMemberAdd) error {
+func (d *DiscordIntegrator) handleMemberAdd(logger *zap.Logger, s *discordgo.Session, e *discordgo.GuildMemberAdd) error {
 	/*
 		logger.Info("Member Add", zap.Any("member", e))
 
@@ -514,7 +514,7 @@ func (d *DiscordCache) handleMemberAdd(logger *zap.Logger, s *discordgo.Session,
 	return nil
 }
 
-func (d *DiscordCache) handleMemberUpdate(logger *zap.Logger, s *discordgo.Session, e *discordgo.GuildMemberUpdate) error {
+func (d *DiscordIntegrator) handleMemberUpdate(logger *zap.Logger, s *discordgo.Session, e *discordgo.GuildMemberUpdate) error {
 	if e.Member == nil || e.Member.User == nil {
 		return nil
 	}
@@ -648,7 +648,7 @@ func (d *DiscordCache) handleMemberUpdate(logger *zap.Logger, s *discordgo.Sessi
 	return nil
 }
 
-func (d *DiscordCache) deconflictDisplayName(ctx context.Context, displayName string) (string, error) {
+func (d *DiscordIntegrator) deconflictDisplayName(ctx context.Context, displayName string) (string, error) {
 
 	userIDs, err := DisplayNameHistoryActiveList(ctx, d.nk, displayName)
 	if err != nil {
@@ -773,7 +773,7 @@ func (d *DiscordCache) deconflictDisplayName(ctx context.Context, displayName st
 	return users[0].metadata.ID(), nil
 }
 
-func (d *DiscordCache) GuildGroupMemberRemove(ctx context.Context, guildID, discordID string, callerDiscordID string) error {
+func (d *DiscordIntegrator) GuildGroupMemberRemove(ctx context.Context, guildID, discordID string, callerDiscordID string) error {
 	groupID := d.GuildIDToGroupID(guildID)
 	if groupID == "" {
 		return nil
@@ -816,7 +816,7 @@ func (d *DiscordCache) GuildGroupMemberRemove(ctx context.Context, guildID, disc
 	return nil
 }
 
-func (d *DiscordCache) handleGuildBanAdd(ctx context.Context, logger *zap.Logger, s *discordgo.Session, e *discordgo.GuildBanAdd) error {
+func (d *DiscordIntegrator) handleGuildBanAdd(ctx context.Context, logger *zap.Logger, s *discordgo.Session, e *discordgo.GuildBanAdd) error {
 
 	groupID := d.GuildIDToGroupID(e.GuildID)
 	if groupID == "" {
@@ -875,7 +875,7 @@ func (e DisplayNameInUseError) Error() string {
 	return fmt.Sprintf("display name `%s` is already in use by %s", e.DisplayName, e.UserIDs)
 }
 
-func (d *DiscordCache) CheckUser2FA(ctx context.Context, userID uuid.UUID) (bool, error) {
+func (d *DiscordIntegrator) CheckUser2FA(ctx context.Context, userID uuid.UUID) (bool, error) {
 	discordID, err := GetDiscordIDByUserID(ctx, d.db, userID.String())
 	if err != nil {
 		return false, fmt.Errorf("error getting discord id: %w", err)
@@ -887,7 +887,7 @@ func (d *DiscordCache) CheckUser2FA(ctx context.Context, userID uuid.UUID) (bool
 	return user.MFAEnabled, nil
 }
 
-func (d *DiscordCache) ReplaceMentions(message string) string {
+func (d *DiscordIntegrator) ReplaceMentions(message string) string {
 
 	replacedMessage := mentionRegex.ReplaceAllStringFunc(message, func(mention string) string {
 		matches := mentionRegex.FindStringSubmatch(mention)

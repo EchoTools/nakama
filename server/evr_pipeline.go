@@ -65,7 +65,7 @@ type EvrPipeline struct {
 	runtimeLogger        runtime.Logger
 
 	profileCache                 *ProfileCache
-	discordCache                 *DiscordCache
+	discordCache                 *DiscordIntegrator
 	appBot                       *DiscordAppBot
 	statisticsQueue              *StatisticsQueue
 	userRemoteLogJournalRegistry *UserLogJouralRegistry
@@ -162,11 +162,11 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	}
 
 	var appBot *DiscordAppBot
-	var discordCache *DiscordCache
+	var discordCache *DiscordIntegrator
 	if disable, ok := vars["DISABLE_DISCORD_BOT"]; ok && disable == "true" {
 		logger.Info("Discord bot is disabled")
 	} else {
-		discordCache = NewDiscordCache(ctx, logger, config, metrics, nk, db, dg)
+		discordCache = NewDiscordIntegrator(ctx, logger, config, metrics, nk, db, dg)
 		discordCache.Start()
 
 		appBot, err = NewDiscordAppBot(runtimeLogger, nk, db, metrics, pipeline, config, discordCache, profileRegistry, statusRegistry, dg, ipqsClient)
