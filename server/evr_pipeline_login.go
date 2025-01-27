@@ -1009,7 +1009,7 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 			}
 
 			// Calculate a new rank percentile
-			if rankPercentile, err := CalculateSmoothedPlayerRankPercentile(ctx, logger, p.runtimeModule, playerInfo.UserID, groupIDStr, label.Mode); err != nil {
+			if rankPercentile, err := CalculateSmoothedPlayerRankPercentile(ctx, logger, p.db, p.runtimeModule, playerInfo.UserID, groupIDStr, label.Mode); err != nil {
 				logger.Error("Failed to calculate new player rank percentile", zap.Error(err))
 			} else if err := MatchmakingRankPercentileStore(ctx, p.runtimeModule, playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, rankPercentile); err != nil {
 				logger.Warn("Failed to record percentile to leaderboard", zap.Error(err))
@@ -1019,42 +1019,43 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 				logger.Warn("Failed to save matchmaking settings", zap.Error(err))
 			}
 		}
+	}
+	return p.updatePlayerStats(ctx, playerInfo.UserID, groupIDStr, session.Username(), payload.Update, label.Mode)
+}
 
-		var stats evr.Statistics
-		switch label.Mode {
-		case evr.ModeArenaPublic:
-			if payload.Update.Statistics.Arena == nil {
-				return fmt.Errorf("missing arena statistics")
-			}
-			stats = payload.Update.Statistics.Arena
-		case evr.ModeCombatPublic:
-			if payload.Update.Statistics.Combat == nil {
-				return fmt.Errorf("missing combat statistics")
-			}
-			stats = payload.Update.Statistics.Combat
+func (p *EvrPipeline) updatePlayerStats(ctx context.Context, userID, groupID, displayName string, update evr.ServerProfileUpdate, mode evr.Symbol) error {
+	var stats evr.Statistics
+	switch mode {
+	case evr.ModeArenaPublic:
+		if update.Statistics.Arena == nil {
+			return fmt.Errorf("missing arena statistics")
 		}
-
-		// Get the players existing statistics
-		prevPlayerStats, _, err := PlayerStatisticsGetID(ctx, p.db, p.runtimeModule, playerInfo.UserID, groupIDStr, []evr.Symbol{label.Mode}, label.Mode)
-		if err != nil {
-			return fmt.Errorf("failed to get player statistics: %w", err)
+		stats = update.Statistics.Arena
+	case evr.ModeCombatPublic:
+		if update.Statistics.Combat == nil {
+			return fmt.Errorf("missing combat statistics")
 		}
-		g := evr.StatisticsGroup{
-			Mode:          label.Mode,
-			ResetSchedule: evr.ResetScheduleAllTime,
-		}
-
-		prevStats, ok := prevPlayerStats[g]
-		if !ok {
-			prevStats = evr.NewServerProfile().Statistics[g]
-		}
-
-		entries, err := StatisticsToEntries(playerInfo.UserID, playerInfo.DisplayName, label.GetGroupID().String(), label.Mode, prevStats, stats)
-
-		p.statisticsQueue.Add(entries)
+		stats = update.Statistics.Combat
 	}
 
-	return nil
+	// Get the players existing statistics
+	prevPlayerStats, _, err := PlayerStatisticsGetID(ctx, p.db, p.runtimeModule, userID, groupID, []evr.Symbol{mode}, mode)
+	if err != nil {
+		return fmt.Errorf("failed to get player statistics: %w", err)
+	}
+	g := evr.StatisticsGroup{
+		Mode:          mode,
+		ResetSchedule: evr.ResetScheduleAllTime,
+	}
+
+	prevStats, ok := prevPlayerStats[g]
+	if !ok {
+		prevStats = evr.NewServerProfile().Statistics[g]
+	}
+
+	entries, err := StatisticsToEntries(userID, displayName, groupID, mode, prevStats, stats)
+
+	return p.statisticsQueue.Add(entries)
 }
 
 func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {

@@ -37,7 +37,9 @@ func NewStatisticsQueue(logger runtime.Logger, nk runtime.NakamaModule) *Statist
 				if _, err := nk.LeaderboardRecordWrite(ctx, e.BoardMeta.ID(), e.UserID, e.DisplayName, e.Score, e.Subscore, map[string]any{}, &e.Override); err != nil {
 					// Try to create the leaderboard
 					operator, sortOrder, cronSchedule := OperatorToLeaderboardOperator(e.BoardMeta.Operator), "desc", ResetScheduleToCron(e.BoardMeta.ResetSchedule)
+
 					if err = nk.LeaderboardCreate(ctx, e.BoardMeta.ID(), true, sortOrder, operator, cronSchedule, map[string]any{}, true); err != nil {
+
 						logger.WithFields(map[string]interface{}{
 							"leaderboard_id": e.BoardMeta.ID(),
 							"error":          err.Error(),
@@ -47,6 +49,13 @@ func NewStatisticsQueue(logger runtime.Logger, nk runtime.NakamaModule) *Statist
 						logger.WithFields(map[string]interface{}{
 							"leaderboard_id": e.BoardMeta.ID(),
 						}).Debug("Leaderboard created")
+
+						if _, err := nk.LeaderboardRecordWrite(ctx, e.BoardMeta.ID(), e.UserID, e.DisplayName, e.Score, e.Subscore, map[string]any{}, &e.Override); err != nil {
+							logger.WithFields(map[string]interface{}{
+								"leaderboard_id": e.BoardMeta.ID(),
+								"error":          err.Error(),
+							}).Error("Failed to write leaderboard record")
+						}
 
 					}
 				}
@@ -96,17 +105,19 @@ type StatisticsQueueEntry struct {
 	Override    int
 }
 
-func (r *StatisticsQueue) Add(entries []*StatisticsQueueEntry) {
+func (r *StatisticsQueue) Add(entries []*StatisticsQueueEntry) error {
 
 	select {
 	case r.ch <- entries:
 		r.logger.WithFields(map[string]interface{}{
 			"count": len(entries),
 		}).Debug("Leaderboard record queued")
+		return nil
 	default:
 		r.logger.WithFields(map[string]interface{}{
 			"count": len(entries),
 		}).Warn("Leaderboard record write queue full, dropping entry")
+		return fmt.Errorf("queue full")
 	}
 }
 
@@ -328,15 +339,23 @@ func StatisticsToEntries(userID, displayName, groupID string, mode evr.Symbol, p
 
 		if field := updateValue.Elem().Field(i); !field.IsNil() {
 
+			if !prevValue.IsValid() || field.IsNil() {
+				continue
+			}
 			stat := field.Interface().(evr.Statistic)
+			if stat == nil {
+				continue
+			}
 
-			if prevField := prevValue.Elem().Field(i); !prevField.IsNil() {
-
-				switch prevStat := prevField.Interface().(type) {
-				case *evr.StatisticIntegerIncrement:
-					stat.SetValue(stat.GetValue() - prevStat.GetValue())
-				case *evr.StatisticFloatIncrement:
-					stat.SetValue(stat.GetValue() - prevStat.GetValue())
+			if prevValue.IsValid() && !prevValue.IsNil() {
+				prevField := prevValue.Elem().Field(i)
+				if prevField.IsValid() && !prevField.IsNil() {
+					switch prevStat := prevField.Interface().(type) {
+					case *evr.StatisticIntegerIncrement:
+						stat.SetValue(stat.GetValue() - prevStat.GetValue())
+					case *evr.StatisticFloatIncrement:
+						stat.SetValue(stat.GetValue() - prevStat.GetValue())
+					}
 				}
 			}
 		}

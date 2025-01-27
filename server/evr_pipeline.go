@@ -130,7 +130,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 
 	runtimeLogger := NewRuntimeGoLogger(logger)
 
-	leaderboardRegistry := NewStatisticsQueue(runtimeLogger, nk)
+	statisticsQueue := NewStatisticsQueue(runtimeLogger, nk)
 	profileRegistry := NewProfileRegistry(nk, db, runtimeLogger, metrics, sessionRegistry)
 	broadcasterRegistrationBySession := MapOf[string, *MatchBroadcaster]{}
 	lobbyBuilder := NewLobbyBuilder(logger, nk, sessionRegistry, matchRegistry, tracker, metrics, profileRegistry)
@@ -219,7 +219,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		externalIP:   externalIP,
 
 		profileCache:                     profileRegistry,
-		statisticsQueue:                  leaderboardRegistry,
+		statisticsQueue:                  statisticsQueue,
 		broadcasterRegistrationBySession: &broadcasterRegistrationBySession,
 		userRemoteLogJournalRegistry:     userRemoteLogJournalRegistry,
 		ipqsClient:                       ipqsClient,
@@ -743,4 +743,298 @@ func (p *EvrPipeline) relayMatchData(ctx context.Context, logger *zap.Logger, se
 	p.matchRegistry.SendData(matchID.UUID, matchID.Node, session.UserID(), session.ID(), session.Username(), matchID.Node, opCode, requestJson, true, time.Now().UTC().UnixNano()/int64(time.Millisecond))
 
 	return nil
+}
+
+func (p *EvrPipeline) TestServerUpdateRequest() {
+
+	jsonData := `
+		{
+			"sessionid": "628893F0-C384-4BC0-A9A0-619B96948C6A",
+			"matchtype": -3791849610740453517,
+			"update": {
+				"stats": {
+					"arena": {
+						"Goals": {
+							"op": "add",
+							"val": 2
+						},
+						"AverageTopSpeedPerGame": {
+							"op": "rep",
+							"val": 5.3596926
+						},
+						"TopSpeedsTotal": {
+							"op": "add",
+							"val": 10.719385
+						},
+						"HighestArenaWinStreak": {
+							"op": "max",
+							"val": 2
+						},
+						"ArenaWinPercentage": {
+							"op": "rep",
+							"val": 100.0
+						},
+						"ArenaWins": {
+							"op": "add",
+							"val": 2
+						},
+						"GoalsPerGame": {
+							"op": "rep",
+							"val": 1.0
+						},
+						"Points": {
+							"op": "add",
+							"val": 4
+						},
+						"TwoPointGoals": {
+							"op": "add",
+							"val": 2
+						},
+						"ShotsOnGoal": {
+							"op": "add",
+							"val": 2
+						},
+						"HighestPoints": {
+							"op": "max",
+							"val": 2
+						},
+						"GoalScorePercentage": {
+							"op": "rep",
+							"val": 100.0
+						},
+						"AveragePossessionTimePerGame": {
+							"op": "rep",
+							"val": 10.387978
+						},
+						"PossessionTime": {
+							"op": "add",
+							"val": 20.775955
+						},
+						"AveragePointsPerGame": {
+							"op": "rep",
+							"val": 2.0
+						},
+						"ArenaMVPPercentage": {
+							"op": "rep",
+							"val": 50.0
+						},
+						"ArenaMVPs": {
+							"op": "add",
+							"val": 1
+						},
+						"CurrentArenaWinStreak": {
+							"op": "add",
+							"val": 2
+						},
+						"CurrentArenaMVPStreak": {
+							"op": "add",
+							"val": 2
+						},
+						"HighestArenaMVPStreak": {
+							"op": "max",
+							"val": 2
+						},
+						"Level": {
+							"op": "add",
+							"val": 2
+						},
+						"XP": {
+							"op": "add",
+							"val": 1900
+						}
+					},
+					"daily_2025_01_18": {
+						"Goals": {
+							"op": "add",
+							"val": 2
+						},
+						"AverageTopSpeedPerGame": {
+							"op": "rep",
+							"val": 5.3596926
+						},
+						"Level": {
+							"op": "add",
+							"val": 1
+						},
+						"XP": {
+							"op": "add",
+							"val": 2400
+						},
+						"TopSpeedsTotal": {
+							"op": "add",
+							"val": 10.719385
+						},
+						"HighestArenaWinStreak": {
+							"op": "max",
+							"val": 2
+						},
+						"ArenaWinPercentage": {
+							"op": "rep",
+							"val": 100.0
+						},
+						"ArenaWins": {
+							"op": "add",
+							"val": 2
+						},
+						"GoalsPerGame": {
+							"op": "rep",
+							"val": 1.0
+						},
+						"Points": {
+							"op": "add",
+							"val": 4
+						},
+						"TwoPointGoals": {
+							"op": "add",
+							"val": 2
+						},
+						"ShotsOnGoal": {
+							"op": "add",
+							"val": 2
+						},
+						"HighestPoints": {
+							"op": "max",
+							"val": 2
+						},
+						"GoalScorePercentage": {
+							"op": "rep",
+							"val": 100.0
+						},
+						"AveragePossessionTimePerGame": {
+							"op": "rep",
+							"val": 10.387978
+						},
+						"PossessionTime": {
+							"op": "add",
+							"val": 20.775955
+						},
+						"AveragePointsPerGame": {
+							"op": "rep",
+							"val": 2.0
+						},
+						"ArenaMVPPercentage": {
+							"op": "rep",
+							"val": 50.0
+						},
+						"ArenaMVPs": {
+							"op": "add",
+							"val": 1
+						},
+						"CurrentArenaWinStreak": {
+							"op": "add",
+							"val": 2
+						},
+						"CurrentArenaMVPStreak": {
+							"op": "add",
+							"val": 2
+						},
+						"HighestArenaMVPStreak": {
+							"op": "max",
+							"val": 2
+						}
+					},
+					"weekly_2025_01_13": {
+						"XP": {
+							"op": "add",
+							"val": 1450
+						},
+						"TopSpeedsTotal": {
+							"op": "add",
+							"val": 5.0818496
+						},
+						"HighestArenaWinStreak": {
+							"op": "max",
+							"val": 2
+						},
+						"ArenaWinPercentage": {
+							"op": "rep",
+							"val": 100.0
+						},
+						"ArenaWins": {
+							"op": "add",
+							"val": 1
+						},
+						"GoalsPerGame": {
+							"op": "rep",
+							"val": 1.0
+						},
+						"Points": {
+							"op": "add",
+							"val": 2
+						},
+						"TwoPointGoals": {
+							"op": "add",
+							"val": 1
+						},
+						"Goals": {
+							"op": "add",
+							"val": 1
+						},
+						"ShotsOnGoal": {
+							"op": "add",
+							"val": 1
+						},
+						"HighestPoints": {
+							"op": "max",
+							"val": 2
+						},
+						"GoalScorePercentage": {
+							"op": "rep",
+							"val": 100.0
+						},
+						"AveragePossessionTimePerGame": {
+							"op": "rep",
+							"val": 10.387978
+						},
+						"PossessionTime": {
+							"op": "add",
+							"val": 7.9363985
+						},
+						"AverageTopSpeedPerGame": {
+							"op": "rep",
+							"val": 5.3596926
+						},
+						"AveragePointsPerGame": {
+							"op": "rep",
+							"val": 2.0
+						},
+						"ArenaMVPPercentage": {
+							"op": "rep",
+							"val": 50.0
+						},
+						"ArenaMVPs": {
+							"op": "add",
+							"val": 1
+						},
+						"CurrentArenaWinStreak": {
+							"op": "add",
+							"val": 1
+						},
+						"CurrentArenaMVPStreak": {
+							"op": "add",
+							"val": 1
+						},
+						"HighestArenaMVPStreak": {
+							"op": "max",
+							"val": 2
+						}
+					}
+				}
+			}
+		}`
+
+	update := evr.UpdatePayload{}
+
+	if err := json.Unmarshal([]byte(jsonData), &update); err != nil {
+		p.logger.Error("Failed to unmarshal json", zap.Error(err))
+		return
+	}
+	userID := "d0b8d63f-1ffc-4ccc-8602-30146c0e9e69"
+	groupID := "84e8e405-7151-4ad2-8102-c9b7205f55c6"
+	displayName := "sprockee"
+	mode := evr.ModeArenaPublic
+
+	if err := p.updatePlayerStats(context.Background(), userID, groupID, displayName, update.Update, mode); err != nil {
+		p.logger.Error("Failed to update player stats", zap.Error(err))
+	}
 }
