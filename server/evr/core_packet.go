@@ -2,6 +2,7 @@ package evr
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"reflect"
@@ -144,6 +145,13 @@ func (s Symbol) String() string {
 
 func (s Symbol) IsNil() bool {
 	return s == 0
+}
+
+func (s Symbol) Int64() int64 {
+	// Convert from uint64 to int64 correctly handling overflow.
+	b := make([]byte, 8)
+	binary.LittleEndian.PutUint64(b, uint64(s))
+	return int64(binary.LittleEndian.Uint64(b))
 }
 
 // A symbol token is a symbol converted to a string.

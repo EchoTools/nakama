@@ -264,3 +264,34 @@ func TestWrapBytes(t *testing.T) {
 		})
 	}
 }
+func TestSymbol_Int64(t *testing.T) {
+	tests := []struct {
+		name string
+		s    Symbol
+		want int64
+	}{
+		{
+			name: "Negative value",
+			s:    Symbol(0x8000000000000000),
+			want: -9223372036854775808,
+		},
+		{
+			name: "Zero value",
+			s:    Symbol(0),
+			want: 0,
+		},
+		{
+			name: "Max uint64 value",
+			s:    Symbol(0xffffffffffffffff),
+			want: -1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.s.Int64(); got != tt.want {
+				t.Errorf("Symbol.Int64() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
