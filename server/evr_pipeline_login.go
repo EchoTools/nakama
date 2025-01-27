@@ -60,10 +60,7 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 
 		errMessage := formatLoginErrorMessage(request.XPID, err)
 
-		if err := session.SendEvrUnrequire(evr.NewLoginFailure(request.XPID, errMessage)); err != nil {
-			// If there's an error, prefix it with the EchoVR Id
-			return fmt.Errorf("failed to send LoginFailure: %w", err)
-		}
+		return session.SendEvrUnrequire(evr.NewLoginFailure(request.XPID, errMessage))
 	}
 
 	StoreParams(ctx, &params)
