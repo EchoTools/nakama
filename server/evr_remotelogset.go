@@ -194,7 +194,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 		case *evr.RemoteLogSessionStarted:
 
 		case *evr.RemoteLogGameSettings:
-			if request.EvrID.IsNil() {
+			if request.EvrID.PlatformCode == 0 || request.EvrID.AccountId == 0 {
 				continue
 			}
 
