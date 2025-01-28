@@ -76,6 +76,10 @@ func (g *GlobalSettingsData) String() string {
 	return string(data)
 }
 
+func (g GlobalSettingsData) UseSkillBasedMatchmaking() bool {
+	return !g.Matchmaking.DisableSBMM
+}
+
 func LoadGlobalSettingsData(ctx context.Context, nk runtime.NakamaModule) (*GlobalSettingsData, error) {
 
 	objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{

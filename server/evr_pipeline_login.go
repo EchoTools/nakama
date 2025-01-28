@@ -929,22 +929,9 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 	if err := session.SendEvr(evr.NewUserServerProfileUpdateSuccess(request.EvrID)); err != nil {
 		logger.Warn("Failed to send UserServerProfileUpdateSuccess", zap.Error(err))
 	}
+	payload := &evr.UpdatePayload{}
 
-	go func() {
-		ctx, cancel := context.WithTimeout(ctx, time.Second*10)
-		defer cancel()
-
-		if err := p.processUserServerProfileUpdate(ctx, logger, session, request); err != nil {
-			logger.Error("Failed to process user server profile update", zap.Error(err))
-		}
-	}()
-	return nil
-}
-
-func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger *zap.Logger, session *sessionWS, request *evr.UserServerProfileUpdateRequest) error {
-	payload := evr.UpdatePayload{}
-
-	if err := json.Unmarshal(request.Payload, &payload); err != nil {
+	if err := json.Unmarshal(request.Payload, payload); err != nil {
 		return fmt.Errorf("failed to unmarshal update payload: %w", err)
 	}
 
@@ -953,76 +940,97 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 		return nil
 	}
 
-	// Validate the player was in the session
 	matchID, err := NewMatchID(uuid.UUID(payload.SessionID), p.node)
 	if err != nil {
 		return fmt.Errorf("failed to generate matchID: %w", err)
 	}
-
+	// Validate the player was in the session
 	label, err := MatchLabelByID(ctx, p.runtimeModule, matchID)
 	if err != nil {
 		return fmt.Errorf("failed to get match label: %w", err)
 	}
 
-	playerInfo := label.GetPlayerByEvrID(request.EvrID)
+	go func() {
+		ctx, cancel := context.WithTimeout(ctx, time.Second*10)
+		defer cancel()
+
+		if err := p.processUserServerProfileUpdate(ctx, logger, request.EvrID, label, payload); err != nil {
+			logger.Error("Failed to process user server profile update", zap.Error(err))
+		}
+	}()
+	return nil
+}
+
+func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger *zap.Logger, evrID evr.EvrId, label *MatchLabel, payload *evr.UpdatePayload) error {
+	// Get the player's information
+	playerInfo := label.GetPlayerByEvrID(evrID)
 
 	// If the player isn't in the match, or isn't a player, do not update the stats
 	if playerInfo == nil || (playerInfo.Team != BlueTeam && playerInfo.Team != OrangeTeam) {
-		return fmt.Errorf("non-player profile update request: %s", request.EvrID.String())
+		return fmt.Errorf("non-player profile update request: %s", playerInfo.EvrID.String())
 	}
 
+	var metadata *AccountMetadata
 	// Set the player's session to not be an early quitter
 	if playerSession := p.sessionRegistry.Get(uuid.FromStringOrNil(playerInfo.SessionID)); playerSession != nil {
 		if params, ok := LoadParams(playerSession.Context()); ok {
 			params.isEarlyQuitter.Store(false)
+
+			metadata = params.accountMetadata
 		} else {
 			logger.Warn("Failed to load session parameters", zap.String("sessionID", playerInfo.SessionID))
 		}
 	}
 
-	// If the player isn't a member of the group, do not update the stats
-	metadata, err := AccountMetadataLoad(ctx, p.runtimeModule, playerInfo.UserID)
-	if err != nil {
-		return fmt.Errorf("failed to get account metadata: %w", err)
-	}
-
-	groupIDStr := label.GetGroupID().String()
-	if !ServiceSettings().Matchmaking.DisableSBMM {
-
-		if !serviceSettings.Load().DisableStatisticsUpdates && metadata.GroupDisplayNames[groupIDStr] != "" {
-
-			userSettings, err := LoadMatchmakingSettings(ctx, p.runtimeModule, playerInfo.UserID)
-			if err != nil {
-				logger.Warn("Failed to load matchmaking settings", zap.Error(err))
-			} else {
-
-				// Determine winning team
-				blueWins := playerInfo.Team == BlueTeam && payload.IsWinner()
-
-				if rating, err := CalculateNewPlayerRating(playerInfo.EvrID, label.Players, label.TeamSize, blueWins); err != nil {
-					logger.Error("Failed to calculate new player rating", zap.Error(err))
-				} else {
-					playerInfo.RatingMu = rating.Mu
-					playerInfo.RatingSigma = rating.Sigma
-					if err := MatchmakingRatingStore(ctx, p.runtimeModule, playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, rating); err != nil {
-						logger.Warn("Failed to record percentile to leaderboard", zap.Error(err))
-					}
-				}
-
-				// Calculate a new rank percentile
-				if rankPercentile, err := CalculateSmoothedPlayerRankPercentile(ctx, logger, p.db, p.runtimeModule, playerInfo.UserID, groupIDStr, label.Mode); err != nil {
-					logger.Error("Failed to calculate new player rank percentile", zap.Error(err))
-				} else if err := MatchmakingRankPercentileStore(ctx, p.runtimeModule, playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, rankPercentile); err != nil {
-					logger.Warn("Failed to record percentile to leaderboard", zap.Error(err))
-				}
-
-				if err := StoreMatchmakingSettings(ctx, p.runtimeModule, playerInfo.UserID, userSettings); err != nil {
-					logger.Warn("Failed to save matchmaking settings", zap.Error(err))
-				}
-			}
+	var err error
+	if metadata == nil {
+		// If the player isn't a member of the group, do not update the stats
+		metadata, err = AccountMetadataLoad(ctx, p.runtimeModule, playerInfo.UserID)
+		if err != nil {
+			return fmt.Errorf("failed to get account metadata: %w", err)
 		}
 	}
-	return p.updatePlayerStats(ctx, playerInfo.UserID, groupIDStr, session.Username(), payload.Update, label.Mode)
+	groupIDStr := label.GetGroupID().String()
+
+	if _, isMember := metadata.GroupDisplayNames[groupIDStr]; !isMember {
+		logger.Warn("Player is not a member of the group", zap.String("uid", playerInfo.UserID), zap.String("gid", groupIDStr))
+		return nil
+	}
+
+	serviceSettings := ServiceSettings()
+
+	if serviceSettings.UseSkillBasedMatchmaking() {
+
+		// Determine winning team
+		blueWins := playerInfo.Team == BlueTeam && payload.IsWinner()
+
+		if rating, err := CalculateNewPlayerRating(playerInfo.EvrID, label.Players, label.TeamSize, blueWins); err != nil {
+			logger.Error("Failed to calculate new player rating", zap.Error(err))
+		} else {
+			playerInfo.RatingMu = rating.Mu
+			playerInfo.RatingSigma = rating.Sigma
+			if err := MatchmakingRatingStore(ctx, p.runtimeModule, playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, rating); err != nil {
+				logger.Warn("Failed to record percentile to leaderboard", zap.Error(err))
+			}
+		}
+
+		// Calculate a new rank percentile
+		if rankPercentile, err := CalculateSmoothedPlayerRankPercentile(ctx, logger, p.db, p.runtimeModule, playerInfo.UserID, groupIDStr, label.Mode); err != nil {
+			logger.Error("Failed to calculate new player rank percentile", zap.Error(err))
+
+			// Store the rank percentile in the leaderboards.
+		} else if err := MatchmakingRankPercentileStore(ctx, p.runtimeModule, playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, rankPercentile); err != nil {
+			logger.Warn("Failed to record percentile to leaderboard", zap.Error(err))
+		}
+
+	}
+
+	// Update the player's statistics, if the service settings allow it
+	if serviceSettings.DisableStatisticsUpdates {
+		return nil
+	}
+
+	return p.updatePlayerStats(ctx, playerInfo.UserID, groupIDStr, playerInfo.DisplayName, payload.Update, label.Mode)
 }
 
 func (p *EvrPipeline) updatePlayerStats(ctx context.Context, userID, groupID, displayName string, update evr.ServerProfileUpdate, mode evr.Symbol) error {
