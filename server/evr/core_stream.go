@@ -12,8 +12,6 @@ import (
 	"log"
 	"net"
 
-	"github.com/davecgh/go-spew/spew"
-	"github.com/go-playground/validator/v10"
 	"github.com/gofrs/uuid/v5"
 	"github.com/klauspost/compress/zstd"
 )
@@ -36,7 +34,6 @@ const (
 var (
 	errInvalidCompressionMode = errors.New("invalid compression mode")
 	errInvalidMode            = errors.New("invalid mode")
-	structValidate            = validator.New()
 )
 
 type EasyStream struct {
@@ -337,22 +334,6 @@ func RunErrorFunctions(funcs []func() error) error {
 		if err = fn(); err != nil {
 			return err
 		}
-	}
-	return nil
-}
-
-func StringifyStruct(s interface{}) string {
-	return spew.Sdump(s)
-}
-
-func ValidateStruct(s interface{}) error {
-
-	err := structValidate.Struct(s)
-	if err != nil {
-		if _, ok := err.(*validator.InvalidValidationError); ok {
-			return err
-		}
-		return err.(validator.ValidationErrors)
 	}
 	return nil
 }
