@@ -987,23 +987,26 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 
 		for _, f := range settings.RequiredFeatures {
 			if !slices.Contains(state.Broadcaster.Features, f) {
-				return state, SignalResponse{Message: fmt.Sprintf("feature not supported: %v", f)}.String()
+				return state, SignalResponse{Message: fmt.Sprintf("bad request: feature not supported: %v", f)}.String()
 			}
 		}
 
 		if ok, err := CheckSystemGroupMembership(ctx, db, settings.SpawnedBy, GroupGlobalDevelopers); err != nil {
 			return state, SignalResponse{Message: fmt.Sprintf("failed to check group membership: %v", err)}.String()
 		} else if !ok {
+
+			// Validate the mode
 			if levels, ok := evr.LevelsByMode[settings.Mode]; !ok {
-				return state, SignalResponse{Message: fmt.Sprintf("invalid mode: %v", settings.Mode)}.String()
+				return state, SignalResponse{Message: fmt.Sprintf("bad request: invalid mode: %v", settings.Mode)}.String()
+
 			} else {
+				// Set the level to a random level if it is not set.
 				if settings.Level == 0xffffffffffffffff || settings.Level == 0 {
 					settings.Level = levels[rand.Intn(len(levels))]
-				} else {
-					if !slices.Contains(levels, settings.Level) {
-						return state, SignalResponse{Message: fmt.Sprintf("invalid level: %v", settings.Level)}.String()
-					}
 
+					// Validate the level, if provided.
+				} else if !slices.Contains(levels, settings.Level) {
+					return state, SignalResponse{Message: fmt.Sprintf("bad request: invalid level `%v` for mode `%v`", settings.Level, settings.Mode)}.String()
 				}
 			}
 		}
