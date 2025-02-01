@@ -47,22 +47,34 @@ var remoteLogFilters = func() []string {
 	return filterStrings
 }()
 
-func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logger, session *sessionWS, evrID evr.EvrId, request *evr.RemoteLogSet) error {
-
-	// Add the raw logs to the journal.
-	if !session.userID.IsNil() {
-		p.userRemoteLogJournalRegistry.Add(session.id, session.userID, request.Logs)
+func filterRemoteLogs(logs []string) []string {
+	filteredLogs := logs[:0]
+	for _, log := range logs {
+		shouldFilter := false
+		for _, filter := range remoteLogFilters {
+			if strings.Contains(log, filter) {
+				shouldFilter = true
+				break
+			}
+		}
+		if !shouldFilter {
+			filteredLogs = append(filteredLogs, log)
+		}
 	}
+	return filteredLogs
+}
+
+func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logger, session *sessionWS, evrID evr.EvrId, request *evr.RemoteLogSet) error {
 
 	entries := make([]evr.RemoteLog, 0, len(request.Logs))
 
+	// Filter the logs
+
+	if !session.userID.IsNil() {
+		p.userRemoteLogJournalRegistry.Add(session.id, session.userID, filterRemoteLogs(request.Logs))
+	}
+
 	for i := 0; i < len(request.Logs); i++ {
-		// Filter out logs that are not useful.
-		for _, filter := range remoteLogFilters {
-			if strings.Contains(request.Logs[i], filter) {
-				continue
-			}
-		}
 
 		// Parse the useful remote logs from the set.
 		parsed, err := evr.RemoteLogMessageFromLogString([]byte(request.Logs[i]))
