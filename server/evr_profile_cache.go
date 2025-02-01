@@ -195,6 +195,10 @@ func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, n
 
 	var developerFeatures *evr.DeveloperFeatures
 
+	if metadata.EnableGoldDisplayName {
+		developerFeatures = &evr.DeveloperFeatures{}
+	}
+
 	// Default to their main group if they are not a member of the group
 	if groupID == "" || metadata.GroupDisplayNames[groupID] == "" {
 		groupID = metadata.GetActiveGroupID().String()
