@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
 	"math/rand"
 	"reflect"
 	"slices"
@@ -200,13 +199,8 @@ func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, n
 	if groupID == "" || metadata.GroupDisplayNames[groupID] == "" {
 		groupID = metadata.GetActiveGroupID().String()
 
-	} else if md, err := GetGuildGroupMetadata(ctx, db, groupID); err != nil {
-		return nil, fmt.Errorf("failed to get guild group metadata: %w", err)
-
-	} else if md.IsModerator(account.User.Id) {
-		// Give the user a gold name if they are enabled as a moderator in the guild.
-		developerFeatures = &evr.DeveloperFeatures{}
 	}
+
 	if slices.Equal(modes, []evr.Symbol{0}) {
 		modes = []evr.Symbol{evr.ModeArenaPublic, evr.ModeCombatPublic}
 	}
@@ -259,12 +253,6 @@ func NewClientProfile(ctx context.Context, metadata *AccountMetadata, serverProf
 		ghosted = append(ghosted, g...)
 	}
 
-	for g, items := range serverProfile.UnlockedCosmetics {
-		for n := range items {
-			s := fmt.Sprintf("%s|%s", g, n)
-			log.Printf("Unlocked cosmetic %s %d", s, evr.ToSymbol(s).Int64())
-		}
-	}
 	// Remove newunlocks for cosmetics that the user does not have unlocked
 	for i := 0; i < len(metadata.NewUnlocks); i++ {
 		sym := evr.ToSymbol(metadata.NewUnlocks[i])

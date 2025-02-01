@@ -49,6 +49,7 @@ type SessionParameters struct {
 	profile              *atomic.Pointer[evr.ServerProfile] // The server profile
 	guildGroups          map[string]*GuildGroup             // map[string]*GuildGroup
 	isEarlyQuitter       *atomic.Bool                       // The user is an early quitter
+	isGoldNameTag        *atomic.Bool                       // If this user should have a gold name tag
 	lastMatchmakingError *atomic.Error                      // The last matchmaking error
 }
 
