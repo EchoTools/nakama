@@ -279,12 +279,12 @@ func (MatchmakingSettings) GetStorageID() StorageID {
 }
 
 func LoadMatchmakingSettings(ctx context.Context, nk runtime.NakamaModule, userID string) (settings MatchmakingSettings, err error) {
-	_, err = LoadFromStorage(ctx, nk, userID, &settings, true)
+	_, err = StorageRead(ctx, nk, userID, &settings, true)
 	return
 }
 
 func StoreMatchmakingSettings(ctx context.Context, nk runtime.NakamaModule, userID string, settings MatchmakingSettings) error {
-	_, err := SaveToStorage(ctx, nk, userID, settings)
+	_, err := StorageWrite(ctx, nk, userID, settings)
 	return err
 }
 

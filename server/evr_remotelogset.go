@@ -210,7 +210,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 			}
 
 			metadata.GameSettings = msg
-			if err := AccountMetadataSet(ctx, p.runtimeModule, userID, metadata); err != nil {
+			if err := AccountMetadataUpdate(ctx, p.runtimeModule, userID, metadata); err != nil {
 				logger.Error("Failed to set account metadata", zap.Error(err))
 			}
 
@@ -239,7 +239,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				return fmt.Errorf("failed to update equipped item: %w", err)
 			}
 
-			if err := AccountMetadataSet(ctx, p.runtimeModule, session.userID.String(), metadata); err != nil {
+			if err := AccountMetadataUpdate(ctx, p.runtimeModule, session.userID.String(), metadata); err != nil {
 				logger.Error("Failed to set account metadata", zap.Error(err))
 			}
 		case *evr.RemoteLogRepairMatrix:
