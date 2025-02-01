@@ -3130,44 +3130,20 @@ func (d *DiscordAppBot) updateSlashCommands(s *discordgo.Session, logger runtime
 		return
 	}
 
-	// Create a map for comparison
-	registeredCommands := make(map[string]*discordgo.ApplicationCommand, 0)
 	for _, command := range commands {
-		registeredCommands[command.Name] = command
-	}
-
-	add, remove := lo.Difference(lo.Keys(currentCommands), lo.Keys(registeredCommands))
-
-	// Remove any commands that are not in the mainSlashCommands
-	for _, name := range remove {
-		command := registeredCommands[name]
-		logger.Debug("Deleting %s command: %s", guildID, command.Name)
-		if err := s.ApplicationCommandDelete(s.State.Application.ID, guildID, command.ID); err != nil {
-			logger.WithField("err", err).Error("Failed to delete application command.")
-		}
-	}
-
-	// Add any commands that are in the mainSlashCommands
-	for _, name := range add {
-		command := currentCommands[name]
-		logger.Debug("Creating %s command: %s", guildID, command.Name)
-		if _, err := s.ApplicationCommandCreate(s.State.Application.ID, guildID, command); err != nil {
-			logger.WithField("err", err).Error("Failed to create application command: %s", command.Name)
-		}
-	}
-
-	// Edit existing commands
-	for _, command := range currentCommands {
-		if registered, ok := registeredCommands[command.Name]; ok {
-			command.ID = registered.ID
-			if !cmp.Equal(registered, command) {
-				logger.Debug("Updating %s command: %s", guildID, command.Name)
-				if _, err := s.ApplicationCommandEdit(s.State.Application.ID, guildID, registered.ID, command); err != nil {
-					logger.WithField("err", err).Error("Failed to edit application command: %s", command.Name)
-				}
+		if _, ok := currentCommands[command.Name]; !ok {
+			logger.Debug("Deleting %s command: %s", guildID, command.Name)
+			if err := s.ApplicationCommandDelete(s.State.Application.ID, guildID, command.ID); err != nil {
+				logger.WithField("err", err).Error("Failed to delete application command.")
 			}
 		}
 	}
+
+	commands, err = s.ApplicationCommandBulkOverwrite(s.State.Application.ID, guildID, mainSlashCommands)
+	if err != nil {
+		logger.WithField("err", err).Error("Failed to bulk overwrite application commands.")
+	}
+
 }
 
 func (d *DiscordAppBot) getPartyDiscordIds(ctx context.Context, partyHandler *PartyHandler) (map[string]string, error) {
