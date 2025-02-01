@@ -150,29 +150,20 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				continue
 			}
 
-			var displayName string
-			for _, player := range label.Players {
-				if player.EvrID.String() == msg.PlayerEvrID {
-					displayName = player.DisplayName
-					break
-				}
-			}
-
 			for _, resetSchedule := range []evr.ResetSchedule{evr.ResetScheduleAllTime, evr.ResetScheduleDaily, evr.ResetScheduleWeekly} {
 				meta := LeaderboardMeta{
 					GroupID:       label.GroupID.String(),
 					Mode:          evr.ModeArenaPublic,
 					StatName:      EarlyQuitStatisticID,
-					Operator:      LeaderboardOperatorIncrement,
+					Operator:      OperatorIncrement,
 					ResetSchedule: resetSchedule,
 				}
 				entry := &StatisticsQueueEntry{
 					BoardMeta:   meta,
 					UserID:      userID,
-					DisplayName: displayName,
+					DisplayName: msg.PlayerInfoDisplayname,
 					Score:       1,
 					Subscore:    0,
-					Override:    LeaderboardOperatorIncrement,
 				}
 
 				p.statisticsQueue.Add([]*StatisticsQueueEntry{entry})

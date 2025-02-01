@@ -150,7 +150,7 @@ func (v *VRMLVerifier) Start() error {
 			}
 
 			// Assign the cosmetics to the user
-			if err := AssignEntitlements(v.ctx, logger, v.nk, SystemUserID, userID, vrmlUser.ID, entitlements); err != nil {
+			if err := AssignEntitlements(v.ctx, logger, v.nk, SystemUserID, userID, "", vrmlUser.ID, entitlements); err != nil {
 				logger.WithField("error", err).Error("Failed to assign entitlements")
 				continue
 			}

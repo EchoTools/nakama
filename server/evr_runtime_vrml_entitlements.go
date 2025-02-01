@@ -203,7 +203,7 @@ func FetchMatchCountBySeason(vg *vrmlgo.Session) (map[VRMLSeasonID]int, error) {
 	return matchCountBySeasonID, nil
 }
 
-func AssignEntitlements(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, assignerID string, userID string, vrmlUserID string, entitlements []*VRMLEntitlement) error {
+func AssignEntitlements(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, assignerID, assignerUsername, userID, vrmlUserID string, entitlements []*VRMLEntitlement) error {
 
 	// Load the user's wallet
 	account, err := nk.AccountGetId(ctx, userID)
@@ -233,9 +233,10 @@ func AssignEntitlements(ctx context.Context, logger runtime.Logger, nk runtime.N
 	}
 
 	metadata := map[string]interface{}{
-		"assigner_id":  assignerID,
-		"vrml_user_id": vrmlUserID,
-		"entitlements": entitlements,
+		"assigner_username": assignerUsername,
+		"assigner_id":       assignerID,
+		"vrml_user_id":      vrmlUserID,
+		"entitlements":      entitlements,
 	}
 
 	if _, _, err := nk.WalletUpdate(ctx, userID, changeset, metadata, true); err != nil {

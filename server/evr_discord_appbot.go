@@ -1790,7 +1790,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 
 				// Assign the badge to the user
-				if err := AssignEntitlements(ctx, logger, nk, userID, targetUserID, "", entitlements); err != nil {
+				if err := AssignEntitlements(ctx, logger, nk, userID, i.Member.User.Username, targetUserID, "", entitlements); err != nil {
 					return status.Error(codes.Internal, "failed to assign badge")
 				}
 

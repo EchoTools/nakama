@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"os"
 
 	"errors"
 	"fmt"
@@ -1008,7 +1009,7 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 		if rating, err := CalculateNewPlayerRating(playerInfo.EvrID, label.Players, label.TeamSize, blueWins); err != nil {
 			logger.Error("Failed to calculate new player rating", zap.Error(err))
 		} else {
-			playerInfo.RatingMu = rating.Mu
+			playerInfo.RatingMu = max(rating.Mu, 0.0)
 			playerInfo.RatingSigma = rating.Sigma
 			if err := MatchmakingRatingStore(ctx, p.runtimeModule, playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, rating); err != nil {
 				logger.Warn("Failed to record percentile to leaderboard", zap.Error(err))
@@ -1036,6 +1037,8 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 
 func (p *EvrPipeline) updatePlayerStats(ctx context.Context, userID, groupID, displayName string, update evr.ServerProfileUpdate, mode evr.Symbol) error {
 	var stats evr.Statistics
+
+	// Select the correct statistics based on the mode
 	switch mode {
 	case evr.ModeArenaPublic:
 		if update.Statistics.Arena == nil {
