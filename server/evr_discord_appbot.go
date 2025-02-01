@@ -2272,8 +2272,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						// Just disconnect the user, wholesale
 						if _, err := DisconnectUserID(ctx, d.nk, targetUserID, false); err != nil {
 							logger.Warn("Failed to disconnect user", zap.Error(err))
-						} else {
-							_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("(trigger-cv) %s disconnected player %s from match service.", user.Mention(), target.Mention()), false)
 						}
 					}()
 
