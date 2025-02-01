@@ -18,22 +18,22 @@ type slotReservation struct {
 }
 
 type MatchLabel struct {
-	ID             MatchID      `json:"id"`                        // The Session Id used by EVR (the same as match id)
-	Open           bool         `json:"open"`                      // Whether the lobby is open to new players (Matching Only)
-	LockedAt       time.Time    `json:"locked_at,omitempty"`       // The time the match was locked.
-	LobbyType      LobbyType    `json:"lobby_type"`                // The type of lobby (Public, Private, Unassigned) (EVR)
-	Mode           evr.Symbol   `json:"mode,omitempty"`            // The mode of the lobby (Arena, Combat, Social, etc.) (EVR)
-	Level          evr.Symbol   `json:"level,omitempty"`           // The level to play on (EVR).
-	Size           int          `json:"size"`                      // The number of players (including spectators) in the match.
-	PlayerCount    int          `json:"player_count"`              // The number of participants (not including spectators) in the match.
-	Players        []PlayerInfo `json:"players,omitempty"`         // The displayNames of the players (by team name) in the match.
-	RankPercentile float64      `json:"rank_percentile,omitempty"` // The average percentile rank of the players in the match.
-	GameState      *GameState   `json:"game_state,omitempty"`      // The game state for the match.
+	ID             MatchID      `json:"id"`                   // The Session Id used by EVR (the same as match id)
+	Open           bool         `json:"open"`                 // Whether the lobby is open to new players (Matching Only)
+	LockedAt       time.Time    `json:"locked_at,omitempty"`  // The time the match was locked.
+	LobbyType      LobbyType    `json:"lobby_type"`           // The type of lobby (Public, Private, Unassigned) (EVR)
+	Mode           evr.Symbol   `json:"mode,omitempty"`       // The mode of the lobby (Arena, Combat, Social, etc.) (EVR)
+	Level          evr.Symbol   `json:"level,omitempty"`      // The level to play on (EVR).
+	Size           int          `json:"size"`                 // The number of players (including spectators) in the match.
+	PlayerCount    int          `json:"player_count"`         // The number of participants (not including spectators) in the match.
+	Players        []PlayerInfo `json:"players,omitempty"`    // The displayNames of the players (by team name) in the match.
+	RankPercentile float64      `json:"rank_percentile"`      // The average percentile rank of the players in the match.
+	GameState      *GameState   `json:"game_state,omitempty"` // The game state for the match.
 
 	TeamSize         int      `json:"team_size,omitempty"`    // The size of each team in arena/combat (either 4 or 5)
 	MaxSize          int      `json:"limit,omitempty"`        // The total lobby size limit (players + specs)
 	PlayerLimit      int      `json:"player_limit,omitempty"` // The number of players in the match (not including spectators).
-	RequiredFeatures []string `json:"features,omitempty"`     // The required features for the match. map[feature][hmdtype]isRequired
+	RequiredFeatures []string `json:"features,omitempty"`     // The required features for the match.
 
 	GroupID         *uuid.UUID                `json:"group_id,omitempty"`         // The channel id of the broadcaster. (EVR)
 	SpawnedBy       string                    `json:"spawned_by,omitempty"`       // The userId of the player that spawned this match.
