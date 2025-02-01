@@ -123,15 +123,18 @@ func retrieveRankPercentile(ctx context.Context, db *sql.DB, userID string, defa
 		JOIN leaderboard_weights lw
 		ON lr.leaderboard_id = lw.leaderboard_id
 		WHERE lr.leaderboard_id = ANY($1)
-		AND lr.expiry_time > NOW()
+		AND (lr.expiry_time > NOW() OR lr.expiry_time = '1970-01-01 00:00:00+00') -- Include "alltime" records
 	),
 	calculated_percentiles AS (
 		SELECT 
-			leaderboard_id,
-			rank,
-			(1.0 - ((rank::float - 1) / total_records)) * 100 * weight AS weighted_percentile
-		FROM ranked_leaderboard
-		WHERE owner_id = $3
+			lw.leaderboard_id,
+			COALESCE(
+				(1.0 - ((rl.rank::float - 1) / rl.total_records)) * lw.weight,
+				$4 * lw.weight -- Default percentile if no score exists
+			) AS weighted_percentile
+		FROM leaderboard_weights lw
+		LEFT JOIN ranked_leaderboard rl
+		ON lw.leaderboard_id = rl.leaderboard_id AND rl.owner_id = $3
 	)
 	SELECT 
 		COALESCE(AVG(weighted_percentile), 0.0) AS aggregate_percentile
@@ -144,7 +147,7 @@ func retrieveRankPercentile(ctx context.Context, db *sql.DB, userID string, defa
 		weights = append(weights, weight)
 	}
 
-	rows, err := db.QueryContext(ctx, query, boardIDs, weights, userID)
+	rows, err := db.QueryContext(ctx, query, boardIDs, weights, userID, defaultPercentile)
 	if err != nil {
 		return 0.0, fmt.Errorf("failed to query leaderboard ranks: %w", err)
 	}
