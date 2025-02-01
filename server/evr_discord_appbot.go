@@ -90,12 +90,14 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 		debugChannels:             make(map[string]string),
 	}
 
+	discordgo.Logger = appbot.discordGoLogger
+
 	bot := dg
+
 	//bot.LogLevel = discordgo.LogDebug
 	dg.StateEnabled = true
 
 	bot.Identify.Intents |= discordgo.IntentAutoModerationExecution
-	bot.Identify.Intents |= discordgo.IntentMessageContent
 	bot.Identify.Intents |= discordgo.IntentGuilds
 	bot.Identify.Intents |= discordgo.IntentGuildMembers
 	bot.Identify.Intents |= discordgo.IntentGuildBans
@@ -104,10 +106,10 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 	bot.Identify.Intents |= discordgo.IntentGuildInvites
 	//bot.Identify.Intents |= discordgo.IntentGuildPresences
 	bot.Identify.Intents |= discordgo.IntentGuildMessages
-	bot.Identify.Intents |= discordgo.IntentGuildMessageReactions
-	bot.Identify.Intents |= discordgo.IntentDirectMessages
-	bot.Identify.Intents |= discordgo.IntentDirectMessageReactions
 	bot.Identify.Intents |= discordgo.IntentMessageContent
+	//bot.Identify.Intents |= discordgo.IntentGuildMessageReactions
+	bot.Identify.Intents |= discordgo.IntentDirectMessages
+	//bot.Identify.Intents |= discordgo.IntentDirectMessageReactions
 	bot.Identify.Intents |= discordgo.IntentAutoModerationConfiguration
 	bot.Identify.Intents |= discordgo.IntentAutoModerationExecution
 
@@ -177,6 +179,37 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 	}()
 
 	return &appbot, nil
+}
+
+func (e *DiscordAppBot) discordGoLogger(msgL int, caller int, format string, a ...interface{}) {
+
+	pc, file, line, _ := goruntime.Caller(caller)
+
+	files := strings.Split(file, "/")
+	file = files[len(files)-1]
+
+	name := goruntime.FuncForPC(pc).Name()
+	fns := strings.Split(name, ".")
+	name = fns[len(fns)-1]
+
+	logger := e.logger.WithFields(map[string]interface{}{
+		"file": file,
+		"line": line,
+		"func": name,
+	})
+
+	switch msgL {
+	case discordgo.LogError:
+		logger.Error(format, a...)
+	case discordgo.LogWarning:
+		logger.Warn(format, a...)
+	case discordgo.LogInformational:
+		logger.Info(format, a...)
+	case discordgo.LogDebug:
+		logger.Debug(format, a...)
+	default:
+		logger.Info(format, a...)
+	}
 }
 
 func (e *DiscordAppBot) loadPrepareMatchRateLimiter(userID, groupID string) *rate.Limiter {
