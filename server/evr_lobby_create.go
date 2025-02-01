@@ -68,6 +68,11 @@ func (p *EvrPipeline) lobbyCreate(ctx context.Context, logger *zap.Logger, sessi
 	_, err = LobbyPrepareSession(ctx, nk, matchID, &settings)
 	if err != nil {
 		logger.Warn("Failed to prepare session", zap.Error(err), zap.String("mid", matchID.UUID.String()))
+
+		if strings.Contains("bad request:", err.Error()) {
+			err = NewLobbyErrorf(BadRequest, "required features not supported")
+		}
+
 		return MatchID{}, err
 	}
 
