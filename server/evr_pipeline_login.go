@@ -1046,6 +1046,8 @@ func (p *EvrPipeline) updatePlayerStats(ctx context.Context, userID, groupID, di
 			return fmt.Errorf("missing combat statistics")
 		}
 		stats = update.Statistics.Combat
+	default:
+		return fmt.Errorf("unknown mode: %s", mode)
 	}
 
 	// Get the players existing statistics

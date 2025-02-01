@@ -412,6 +412,11 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		return fmt.Errorf("failed to create user server profile: %w", err)
 	}
 
+	if groupMetadata.IsModerator(userID) && params.isGoldNameTag.Load() && profile.DeveloperFeatures == nil {
+		// Give the user a gold name if they are enabled as a moderator in the guild, and want it.
+		profile.DeveloperFeatures = &evr.DeveloperFeatures{}
+	}
+
 	if _, err := p.profileCache.Store(session.ID(), *profile); err != nil {
 		return fmt.Errorf("failed to cache profile: %w", err)
 	}
