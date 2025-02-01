@@ -1433,7 +1433,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			md.LoadoutCosmetics.Loadout.DecalBody = "loadout_number"
 
 			// Save the profile
-			if err := AccountMetadataSet(ctx, nk, userID, md); err != nil {
+			if err := AccountMetadataUpdate(ctx, nk, userID, md); err != nil {
 				return fmt.Errorf("failed to update account metadata: %w", err)
 			}
 
@@ -1663,7 +1663,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 			md.SetActiveGroupID(uuid.FromStringOrNil(groupID))
 
-			if err := AccountMetadataSet(ctx, nk, userIDStr, md); err != nil {
+			if err := AccountMetadataUpdate(ctx, nk, userIDStr, md); err != nil {
 				return err
 			}
 
@@ -2844,7 +2844,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 					metadata.LoadoutCosmetics = *outfits[outfitName]
 
-					if err := AccountMetadataSet(ctx, d.nk, userID, metadata); err != nil {
+					if err := AccountMetadataUpdate(ctx, d.nk, userID, metadata); err != nil {
 						return fmt.Errorf("Failed to set account metadata: %w", err)
 					}
 
@@ -2858,7 +2858,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 					delete(outfits, outfitName)
 
-					if err := AccountMetadataSet(ctx, d.nk, userID, metadata); err != nil {
+					if err := AccountMetadataUpdate(ctx, d.nk, userID, metadata); err != nil {
 						return fmt.Errorf("Failed to set account metadata: %w", err)
 					}
 

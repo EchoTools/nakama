@@ -22,7 +22,7 @@ type StorageID struct {
 func (s StorageID) String() string {
 	return fmt.Sprintf("%s:%s", s.Collection, s.Key)
 }
-func LoadFromStorage(ctx context.Context, nk runtime.NakamaModule, userID string, dst Storable, create bool) (string, error) {
+func StorageRead(ctx context.Context, nk runtime.NakamaModule, userID string, dst Storable, create bool) (string, error) {
 	if dst == nil {
 		return "", status.Errorf(codes.InvalidArgument, "dst is nil")
 	}
@@ -49,7 +49,7 @@ func LoadFromStorage(ctx context.Context, nk runtime.NakamaModule, userID string
 		}
 	} else {
 		if create {
-			if version, err = SaveToStorage(ctx, nk, userID, dst); err != nil {
+			if version, err = StorageWrite(ctx, nk, userID, dst); err != nil {
 				return "", status.Errorf(codes.Internal, "failed to create %s/%s: %s", userID, storageID.String(), err)
 			}
 		} else {
@@ -60,7 +60,7 @@ func LoadFromStorage(ctx context.Context, nk runtime.NakamaModule, userID string
 	return version, nil
 }
 
-func SaveToStorage(ctx context.Context, nk runtime.NakamaModule, userID string, src Storable) (string, error) {
+func StorageWrite(ctx context.Context, nk runtime.NakamaModule, userID string, src Storable) (string, error) {
 	storageID := src.GetStorageID()
 	data, err := json.Marshal(src)
 	if err != nil {
