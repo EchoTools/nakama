@@ -114,7 +114,7 @@ func (e *VRMLEntitlement) UnmarshalText(text []byte) error {
 }
 
 func (e VRMLEntitlement) Cosmetics() []string {
-	return vrmlCosmeticMap[e.SeasonID][e.Prestige]
+	return append(vrmlCosmeticMap[e.SeasonID][e.Prestige], []string{"decal_vrml_a", "emote_vrml_a"}...)
 }
 
 func FetchMatchCountBySeason(vg *vrmlgo.Session) (map[VRMLSeasonID]int, error) {
