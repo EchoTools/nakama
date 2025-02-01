@@ -1066,6 +1066,9 @@ func (p *EvrPipeline) updatePlayerStats(ctx context.Context, userID, groupID, di
 	}
 
 	entries, err := StatisticsToEntries(userID, displayName, groupID, mode, prevStats, stats)
+	if err != nil {
+		return fmt.Errorf("failed to convert statistics to entries: %w", err)
+	}
 
 	return p.statisticsQueue.Add(entries)
 }
