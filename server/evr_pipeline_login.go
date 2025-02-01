@@ -630,6 +630,7 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 	}
 
 	params.profile.Store(serverProfile)
+	p.profileCache.Store(session.id, *serverProfile)
 
 	clientProfile, err := NewClientProfile(ctx, params.accountMetadata, serverProfile)
 	if err != nil {
