@@ -32,8 +32,8 @@ func MatchmakingRatingLoad(ctx context.Context, nk runtime.NakamaModule, userID,
 	var sigma, mu float64
 
 	structMap := map[string]*float64{
-		SkillRatingMuStatisticID: &sigma,
-		"SkillRatingSigma":       &mu,
+		SkillRatingMuStatisticID:    &mu,
+		SkillRatingSigmaStatisticID: &sigma,
 	}
 
 	for statName, ptr := range structMap {

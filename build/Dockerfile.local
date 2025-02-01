@@ -32,7 +32,7 @@ RUN go build -o /go/build-out/nakama -trimpath -mod=vendor -gcflags "-trimpath $
 
 FROM debian:bookworm-slim
 
-MAINTAINER Andrew Bates <andrew@sprock.io>
+LABEL org.opencontainers.image.authors="andrew@sprock.io"
 
 ARG version
 
