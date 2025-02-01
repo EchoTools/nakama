@@ -131,9 +131,9 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 }
 
 func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, [][]runtime.MatchmakerEntry, map[string]int) {
+	globalSettings := ServiceSettings()
 
 	// Write the candidates to a json filed called /tmp/candidates.json
-
 	filterCounts := make(map[string]int)
 
 	// Filter out duplicates
@@ -149,7 +149,7 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.Ma
 	predictions := m.predictOutcomes(candidates)
 
 	m.sortByDraw(predictions)
-	m.sortLimitRankSpread(predictions, MaximumRankDelta)
+	m.sortLimitRankSpread(predictions, MaximumRankDelta, globalSettings.Matchmaking.RankPercentile.Default)
 	m.sortBySize(predictions)
 	m.sortPriority(predictions)
 
@@ -314,7 +314,7 @@ func (m *SkillBasedMatchmaker) sortPriority(predictions []PredictedMatch) {
 
 }
 
-func (m *SkillBasedMatchmaker) sortLimitRankSpread(predictions []PredictedMatch, maximumRankSpread float64) {
+func (m *SkillBasedMatchmaker) sortLimitRankSpread(predictions []PredictedMatch, maximumRankSpread float64, defaultRankPercentile float64) {
 
 	slices.SortStableFunc(predictions, func(a, b PredictedMatch) int {
 		rankAverageByTeamByMatch := make([][]float64, 2)
@@ -322,7 +322,11 @@ func (m *SkillBasedMatchmaker) sortLimitRankSpread(predictions []PredictedMatch,
 			rankAverageByTeamByMatch[i] = make([]float64, len(o.Teams()))
 			for j, team := range o.Teams() {
 				for _, player := range team {
-					rankAverageByTeamByMatch[i][j] += player.Entry.Properties["rank_percentile"].(float64)
+					if rankPercentile, ok := player.Entry.Properties["rank_percentile"].(float64); ok {
+						rankAverageByTeamByMatch[i][j] += rankPercentile
+					} else {
+						rankAverageByTeamByMatch[i][j] += defaultRankPercentile
+					}
 				}
 				rankAverageByTeamByMatch[i][j] /= float64(len(team))
 			}

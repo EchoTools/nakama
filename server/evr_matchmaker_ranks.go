@@ -44,9 +44,12 @@ func RecalculatePlayerRankPercentile(ctx context.Context, logger *zap.Logger, db
 		boardWeights[StatisticBoardID(groupID, mode, boardName, resetSchedule)] = weight
 	}
 
-	percentile, err := retrieveRankPercentile(ctx, db, userID, boardWeights)
+	percentile, err := retrieveRankPercentile(ctx, db, userID, defaultRankPercentile, boardWeights)
 	if err != nil {
-		return defaultRankPercentile, fmt.Errorf("failed to retrieve leaderboard ranks: %w", err)
+		return 0.0, fmt.Errorf("failed to retrieve leaderboard ranks: %w", err)
+	}
+	if percentile == 0.0 {
+		return defaultRankPercentile, nil
 	}
 
 	return percentile, nil
@@ -98,7 +101,7 @@ func retrieveLatestLeaderboardRecords(ctx context.Context, db *sql.DB, userID st
 	return records, nil
 }
 
-func retrieveRankPercentile(ctx context.Context, db *sql.DB, userID string, boardWeights map[string]float64) (float64, error) {
+func retrieveRankPercentile(ctx context.Context, db *sql.DB, userID string, defaultPercentile float64, boardWeights map[string]float64) (float64, error) {
 
 	query := `
 	WITH leaderboard_weights AS (
