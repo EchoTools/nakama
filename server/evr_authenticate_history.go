@@ -70,8 +70,8 @@ type LoginHistory struct {
 	AuthorizedIPs          map[string]time.Time               `json:"authorized_client_ips"`
 	PendingAuthorizations  map[string]*LoginHistoryEntry      `json:"pending_authorizations"`
 	SecondDegreeAlternates []string                           `json:"second_degree"`
-	AlternateMap           map[string][]*AlternateSearchMatch `json:"alternate_accounts"`         // map of alternate user IDs and what they have in common
-	NotifiedGroups         map[string][]string                `json:"group_notification_history"` // list of groups that have been notified of this alternate login
+	AlternateMap           map[string][]*AlternateSearchMatch `json:"alternate_accounts"` // map of alternate user IDs and what they have in common
+	GroupNotifications     map[string]map[string]time.Time    `json:"notified_groups"`    // list of groups that have been notified of this alternate login
 	userID                 string                             // user ID
 	version                string                             // storage record version
 }
@@ -86,7 +86,7 @@ func NewLoginHistory(userID string) *LoginHistory {
 		PendingAuthorizations:  make(map[string]*LoginHistoryEntry),
 		SecondDegreeAlternates: make([]string, 0),
 		AlternateMap:           make(map[string][]*AlternateSearchMatch),
-		NotifiedGroups:         make(map[string][]string),
+		GroupNotifications:     make(map[string]map[string]time.Time),
 		userID:                 userID,
 	}
 }
@@ -202,7 +202,7 @@ func (h *LoginHistory) RemovePendingAuthorizationIP(ip string) {
 	delete(h.PendingAuthorizations, ip)
 }
 
-func (h *LoginHistory) NotifyGroup(groupID string) bool {
+func (h *LoginHistory) NotifyGroup(groupID string, threshold time.Time) bool {
 
 	firstIDs := make([]string, 0, len(h.AlternateMap)+len(h.SecondDegreeAlternates))
 	for k := range h.AlternateMap {
@@ -218,19 +218,24 @@ func (h *LoginHistory) NotifyGroup(groupID string) bool {
 	slices.Sort(userIDs)
 	userIDs = slices.Compact(userIDs)
 
-	if h.NotifiedGroups == nil {
-		h.NotifiedGroups = map[string][]string{
-			groupID: userIDs,
+	if h.GroupNotifications == nil {
+		h.GroupNotifications = make(map[string]map[string]time.Time)
+
+	}
+	if _, found := h.GroupNotifications[groupID]; !found {
+		h.GroupNotifications[groupID] = make(map[string]time.Time)
+	}
+
+	updated := false
+	// Check if the group has already been notified for all of the userIDs within the threshold
+	for _, userID := range userIDs {
+		if t, found := h.GroupNotifications[groupID][userID]; !found || t.Before(threshold) {
+			h.GroupNotifications[groupID][userID] = time.Now()
+			updated = true
 		}
-		return true
 	}
 
-	if currentIDs, found := h.NotifiedGroups[groupID]; !found || !slices.Equal(currentIDs, userIDs) {
-		h.NotifiedGroups[groupID] = userIDs
-		return true
-	}
-
-	return false
+	return updated
 }
 
 func (h *LoginHistory) UpdateAlternates(ctx context.Context, nk runtime.NakamaModule) error {

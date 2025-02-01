@@ -144,7 +144,7 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 			return fmt.Errorf("failed to load login history: %w", err)
 		}
 
-		if updated := loginHistory.NotifyGroup(groupID); updated {
+		if updated := loginHistory.NotifyGroup(groupID, md.AlternateAccountNotificationExpiry); updated {
 
 			firstIDs := make([]string, 0, len(loginHistory.AlternateMap))
 
@@ -167,7 +167,7 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 					if md.IsSuspended(s) {
 						s = s + " (suspended)"
 					} else if a.DisableTime != nil {
-						s = s + " (globally banned)"
+						s = s + " (disabled)"
 					}
 
 					firstDegree = append(firstDegree, s)
@@ -193,7 +193,7 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 					if md.IsSuspended(s) {
 						s = s + " (suspended)"
 					} else if a.DisableTime != nil {
-						s = s + " (globally banned)"
+						s = s + " (disabled)"
 					}
 
 					secondDegree = append(secondDegree, s)
