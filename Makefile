@@ -13,30 +13,23 @@ all: nakama
 
 nakama: $(SRC_FILES)
 	GOWORK=off CGO_ENABLED=1 CGO_CFLAGS="-O0 -g" go build \
-				 -trimpath -mod=vendor -gcflags "-trimpath $(PWD)" -gcflags="all=-N -l" \
-				 -asmflags "-trimpath $(PWD)" \
-				 -ldflags "-s -X main.version=$(GIT_DESCRIBE) -X main.commitID=$(COMMIT)" \
-				 -o nakama
-
-
-dev: $(SRC_FILES)
-	docker build -t echotools/nakama:dev . -f build/Dockerfile.local
+		-trimpath -mod=vendor -gcflags "-trimpath $(PWD)" -gcflags="all=-N -l" \
+		-asmflags "-trimpath $(PWD)" \
+		-ldflags "-s -X main.version=$(GIT_DESCRIBE) -X main.commitID=$(COMMIT)" \
+		-o nakama
 
 build: $(SRC_FILES)
-	docker build -t echotools/nakama:$(TAG) . -f build/Dockerfile.local
+	docker buildx build -t echotools/nakama:$(TAG) . -f build/Dockerfile.local
 	docker tag echotools/nakama:$(TAG) echotools/nakama:latest
-
-push: build
-	docker push echotools/nakama:$(TAG)
-	docker push echotools/nakama:latest
 
 
 release: $(SRC_FILES)
-	@if [ "$(TAG)" != "dev" ]; then \
+	@if [ "$(TAG)" == "dev" ]; then \
 		echo "Not on a tag, not building a release"; \
 		exit 1; \
 	else \
-		docker build -t echotools/nakama:latest -t echotools/nakama:$(TAG) . -f build/Dockerfile; \
+		docker buildx build -t echotools/nakama:latest -t echotools/nakama:$(TAG) . -f build/Dockerfile; \
 	fi
-	docker push echotools/nakama:latest
-	docker push echotools/nakama:$(TAG)
+
+push: release
+	docker push echotools/nakama:$(TAG) echotools/nakama:latest

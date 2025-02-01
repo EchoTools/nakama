@@ -1,18 +1,15 @@
 module github.com/heroiclabs/nakama/v3
 
-go 1.23.3
-
-toolchain go1.23.5
+go 1.23.5
 
 require (
 	github.com/bits-and-blooms/bitset v1.13.0
 	github.com/blugelabs/bluge v0.2.2
 	github.com/blugelabs/bluge_segment_api v0.2.0
 	github.com/blugelabs/query_string v0.3.0
-	github.com/davecgh/go-spew v1.1.1
 	github.com/dgryski/dgoogauth v0.0.0-20190221195224-5a805980a5f3
 	github.com/dop251/goja v0.0.0-20241024094426-79f3a7efcdbd
-	github.com/go-playground/validator/v10 v10.19.0
+	github.com/echotools/vrmlgo v1.0.1
 	github.com/go-restruct/restruct v1.2.0-alpha
 	github.com/gofrs/uuid/v5 v5.3.0
 	github.com/golang-jwt/jwt/v4 v4.5.1
@@ -49,6 +46,7 @@ require (
 
 require (
 	cloud.google.com/go/compute/metadata v0.5.0 // indirect
+	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/golang/mock v1.6.0 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/jackc/pgx/v4 v4.18.3 // indirect
@@ -86,9 +84,6 @@ require (
 	github.com/dgryski/go-metro v0.0.0-20211217172704-adc40b04c140 // indirect
 	github.com/dlclark/regexp2 v1.11.4 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
-	github.com/gabriel-vasile/mimetype v1.4.3 // indirect
-	github.com/go-playground/locales v0.14.1 // indirect
-	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-redis/redis v6.15.9+incompatible
 	github.com/go-sourcemap/sourcemap v2.1.4+incompatible // indirect
 	github.com/google/pprof v0.0.0-20241210010833-40e02aabc2ad // indirect
@@ -96,7 +91,6 @@ require (
 	github.com/jackc/pgio v1.0.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
-	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/mmcloughlin/geohash v0.10.0
 	github.com/mschoch/smat v0.2.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect

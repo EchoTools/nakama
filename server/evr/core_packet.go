@@ -101,7 +101,6 @@ var (
 		0xe5ef595892ea3d99: (*EchoToolsLobbyEntrantRemovedV1)(nil),
 		0xa2a423c894e1b3fd: (*EchoToolsLobbySessionDataV1)(nil),
 		0xb26450c1a5ba5d79: (*EchoToolsLobbyStatusV1)(nil),
-		0xe376236577dbfbbb: (*EchoToolsProtobufMessageV1)(nil),
 	}
 
 	// Create a reverse lookup map for the symbol types.
