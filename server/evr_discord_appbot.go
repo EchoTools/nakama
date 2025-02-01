@@ -365,6 +365,12 @@ var (
 					Description: "Reason for the CV",
 					Required:    true,
 				},
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "timeout_mins",
+					Description: "Timeout in minutes (<= 15)",
+					Required:    false,
+				},
 			},
 		},
 		{
@@ -548,44 +554,14 @@ var (
 				},
 				{
 					Type:        discordgo.ApplicationCommandOptionRole,
-					Name:        "is-linked",
-					Description: "Assigned/Removed by Nakama denoting if an account is linked to a headset.",
-					Required:    true,
-				},
-			},
-		},
-		{
-			Name:        "set-roles",
-			Description: "link roles to Echo VR features. Non-members can only join private matches.",
-			Options: []*discordgo.ApplicationCommandOption{
-				{
-					Type:        discordgo.ApplicationCommandOptionRole,
-					Name:        "member",
-					Description: "If defined, this role allows joining social lobbies, matchmaking, or creating private matches.",
-					Required:    true,
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionRole,
-					Name:        "moderator",
-					Description: "Allowed access to more detailed `/lookup`information and moderation tools.",
-					Required:    true,
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionRole,
-					Name:        "serverhost",
-					Description: "Allowed to host an Echo VR Game Server for the guild.",
-					Required:    true,
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionRole,
 					Name:        "allocator",
 					Description: "Allowed to reserve game servers.",
 					Required:    true,
 				},
 				{
 					Type:        discordgo.ApplicationCommandOptionRole,
-					Name:        "suspension",
-					Description: "Disallowed from joining any guild matches.",
+					Name:        "is-linked",
+					Description: "Assigned/Removed by Nakama denoting if an account is linked to a headset.",
 					Required:    true,
 				},
 			},
@@ -2220,28 +2196,39 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 		},
 		"trigger-cv": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 
-			options := i.ApplicationCommandData().Options
-
-			if len(options) == 0 {
-				return errors.New("no options provided")
-			}
-
 			if user == nil {
 				return nil
 			}
 
-			target := options[0].UserValue(s)
+			if len(i.ApplicationCommandData().Options) < 2 {
+				return errors.New("no options provided")
+			}
 
-			targetUserID := d.cache.DiscordIDToUserID(target.ID)
-			if targetUserID == "" {
-				return errors.New("failed to get target user ID")
+			var target *discordgo.User
+			var targetUserID string
+			var timeoutDuration time.Duration
+			for _, o := range i.ApplicationCommandData().Options {
+				switch o.Name {
+				case "user":
+					target = o.UserValue(s)
+					if target == nil {
+						return errors.New("no user provided")
+					}
+					targetUserID = d.cache.DiscordIDToUserID(target.ID)
+					if targetUserID == "" {
+						return errors.New("failed to get target user ID")
+					}
+				case "timeout_mins":
+					timeoutDuration = time.Duration(o.IntValue()) * time.Minute
+				}
 			}
 
 			metadata, err := GetGuildGroupMetadata(ctx, d.db, groupID)
 			if err != nil {
 				return errors.New("failed to get guild group metadata")
 			}
-			metadata.CommunityValuesUserIDsAdd(targetUserID)
+
+			metadata.CommunityValuesUserIDsAdd(targetUserID, timeoutDuration)
 
 			data, err := metadata.MarshalToMap()
 			if err != nil {
@@ -2276,7 +2263,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						if err := KickPlayerFromMatch(ctx, d.nk, label.ID, targetUserID); err != nil {
 							return err
 						}
-						_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s kicked player %s from [%s](https://echo.taxi/spark://c/%s) match.", user.Mention(), target.Mention(), label.Mode.String(), strings.ToUpper(label.ID.UUID.String())), false)
+						_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("(trigger-cv) %s kicked player %s from [%s](https://echo.taxi/spark://c/%s) match.", user.Mention(), target.Mention(), label.Mode.String(), strings.ToUpper(label.ID.UUID.String())), false)
 						disconnectDelay = 15
 					}
 
@@ -2286,7 +2273,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						if _, err := DisconnectUserID(ctx, d.nk, targetUserID, false); err != nil {
 							logger.Warn("Failed to disconnect user", zap.Error(err))
 						} else {
-							_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s disconnected player %s from match service.", user.Mention(), target.Mention()), false)
+							_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("(trigger-cv) %s disconnected player %s from match service.", user.Mention(), target.Mention()), false)
 						}
 					}()
 
@@ -2294,7 +2281,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 			}
 
-			return simpleInteractionResponse(s, i, fmt.Sprintf("%s is required to complete *Community Values* when entering the next social lobby. (Disconnected %d sessions)", target.Mention(), cnt))
+			return simpleInteractionResponse(s, i, fmt.Sprintf("%s is required to complete *Community Values* when entering the next social lobby, with a timeout of %d minutes. (Disconnected %d sessions)", target.Mention(), int(timeoutDuration.Minutes()), cnt))
 		},
 		"kick-player": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 
@@ -3682,6 +3669,8 @@ func (d *DiscordAppBot) interactionToSignature(prefix string, options []*discord
 			strval = d.interactionToSignature(opt.Name, opt.Options)
 		case discordgo.ApplicationCommandOptionString:
 			strval = opt.StringValue()
+		case discordgo.ApplicationCommandOptionNumber:
+			strval = fmt.Sprintf("%f", opt.FloatValue())
 		case discordgo.ApplicationCommandOptionInteger:
 			strval = fmt.Sprintf("%d", opt.IntValue())
 		case discordgo.ApplicationCommandOptionBoolean:

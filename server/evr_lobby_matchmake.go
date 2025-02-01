@@ -188,7 +188,7 @@ func (p *EvrPipeline) addTicket(ctx context.Context, logger *zap.Logger, session
 
 	query, stringProps, numericProps := lobbyParams.MatchmakingParameters(&ticketConfig)
 
-	// The matchmaker will always prioritize the players that are about to time out.
+	// The matchmaker will always prioritize the players that are about to timeout.
 	priorityThreshold := time.Now().UTC().Add((p.matchmakingTicketTimeout() / 3) * 2)
 
 	stringProps["priority_threshold"] = priorityThreshold.UTC().Format(time.RFC3339)

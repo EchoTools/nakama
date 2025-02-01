@@ -165,11 +165,11 @@ func (m *GroupMetadata) hasCompletedCommunityValues(userID string) bool {
 	return !found
 }
 
-func (m *GroupMetadata) CommunityValuesUserIDsAdd(userID string) {
+func (m *GroupMetadata) CommunityValuesUserIDsAdd(userID string, delay time.Duration) {
 	if m.CommunityValuesUserIDs == nil {
 		m.CommunityValuesUserIDs = make(map[string]time.Time)
 	}
-	m.CommunityValuesUserIDs[userID] = time.Now().UTC()
+	m.CommunityValuesUserIDs[userID] = time.Now().UTC().Add(delay)
 }
 
 func (m *GroupMetadata) CommunityValuesUserIDsRemove(userID string) bool {
@@ -178,6 +178,16 @@ func (m *GroupMetadata) CommunityValuesUserIDsRemove(userID string) bool {
 	}
 	delete(m.CommunityValuesUserIDs, userID)
 	return true
+}
+
+func (m *GroupMetadata) IsCommunityValuesTimedOut(userID string) (bool, time.Time) {
+	if m.CommunityValuesUserIDs == nil {
+		return false, time.Time{}
+	}
+	if expiry, ok := m.CommunityValuesUserIDs[userID]; ok && time.Now().UTC().Before(expiry) {
+		return true, expiry
+	}
+	return false, time.Time{}
 }
 
 func (g *GroupMetadata) MarshalToMap() (map[string]interface{}, error) {
