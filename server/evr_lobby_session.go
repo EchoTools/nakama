@@ -53,7 +53,7 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 				err = NewLobbyErrorf(BadRequest, "spectators are only allowed in arena and combat matches")
 			} else {
 				// Spectators don't matchmake, and they don't have a delay for backfill.
-				// Spectators also don't time out.
+				// Spectators also don't timeout.
 				p.metrics.CustomCounter("lobby_find_spectate", lobbyParams.MetricsTags(), 1)
 				logger.Info("Finding spectate match")
 				return p.lobbyFindSpectate(ctx, logger, session, lobbyParams)
