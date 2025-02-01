@@ -298,7 +298,7 @@ var (
 			Description: "See your throw settings.",
 		},
 		{
-			Name:        "vrml-link",
+			Name:        "vrml-verify",
 			Description: "Link your VRML account.",
 		},
 		{
@@ -3128,7 +3128,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			return discordgo.ErrNilState
 		},
-		"vrml-link": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+		"vrml-verify": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			// accountLinkCommandHandler handles the account link command from Discord
 
 			nk := d.nk
@@ -3216,7 +3216,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						return
 					}
 
-					editResponseFn("Your VRML account has been linked. It may take a few minutes (and up to a few hours) for your cosmetics to appear.")
+					editResponseFn("Your VRML account has been verified. It may take a few minutes (and up to a few hours) for your cosmetics to appear.\nNote: this system does not retain the token.")
 
 				case <-time.After(timeoutDuration):
 					simpleInteractionResponse(s, i, "OAuth flow timed out. Please run the command again.")
@@ -3229,7 +3229,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
-					Flags:   discordgo.MessageFlagsEphemeral,
+					Flags:   discordgo.MessageFlagsEphemeral | discordgo.MessageFlagsSuppressEmbeds,
 					Content: content,
 				},
 			})
