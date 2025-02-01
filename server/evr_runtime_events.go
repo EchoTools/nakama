@@ -18,6 +18,7 @@ const (
 	EventUserLogin              = "user_login"
 	EventAccountUpdated         = "account_updated"
 	EventSessionStart           = "session_start"
+	EventVRMLAccountLinked      = "vrml_account_linked"
 )
 
 type EventDispatch struct {
@@ -28,16 +29,24 @@ type EventDispatch struct {
 	nk     runtime.NakamaModule
 	db     *sql.DB
 
-	cache *sync.Map
+	cache        *sync.Map
+	vrmlVerifier *VRMLVerifier
 }
 
 func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) (*EventDispatch, error) {
+
+	vrmlVerifier, err := NewVRMLVerifier(ctx, logger, db, nk, initializer, dg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create VRML verifier: %w", err)
+	}
+
 	return &EventDispatch{
-		ctx:    ctx,
-		logger: logger,
-		db:     db,
-		nk:     nk,
-		cache:  &sync.Map{},
+		ctx:          ctx,
+		logger:       logger,
+		db:           db,
+		nk:           nk,
+		cache:        &sync.Map{},
+		vrmlVerifier: vrmlVerifier,
 	}, nil
 }
 
@@ -47,6 +56,7 @@ func (h *EventDispatch) eventFn(ctx context.Context, logger runtime.Logger, evt 
 	eventMap := map[string]func(context.Context, runtime.Logger, map[string]string) error{
 		EventLobbySessionAuthorized: h.handleLobbyAuthorized,
 		EventUserLogin:              h.handleUserLogin,
+		EventVRMLAccountLinked:      h.handleVRMLAccountLinked,
 		EventAccountUpdated:         h.eventSessionEnd,
 		EventSessionStart:           h.eventSessionStart,
 	}
@@ -227,4 +237,8 @@ func (h *EventDispatch) handleUserLogin(ctx context.Context, logger runtime.Logg
 	}
 
 	return nil
+}
+
+func (h *EventDispatch) handleVRMLAccountLinked(ctx context.Context, logger runtime.Logger, properties map[string]string) error {
+	return h.vrmlVerifier.VerifyUser(properties["user_id"], properties["token"])
 }

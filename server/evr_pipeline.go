@@ -25,12 +25,7 @@ import (
 	// Import for side effects to enable pprof endpoint
 )
 
-var GlobalConfig = &struct {
-	sync.RWMutex
-	rejectMatchmaking bool
-}{
-	rejectMatchmaking: true,
-}
+var dg *discordgo.Session
 
 var unrequireMessage = evr.NewSTcpConnectionUnrequireEvent()
 
@@ -88,6 +83,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	// Add the bot token to the context
 	vars := config.GetRuntime().Environment
 	ctx := context.WithValue(context.Background(), ctxDiscordBotTokenKey{}, vars["DISCORD_BOT_TOKEN"])
+	ctx = context.WithValue(ctx, runtime.RUNTIME_CTX_ENV, vars)
 
 	// Load the global settings
 	if _, err := LoadGlobalSettingsData(ctx, nk); err != nil {
@@ -118,7 +114,6 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		panic("Bot token is not set in context.")
 	}
 
-	var dg *discordgo.Session
 	var err error
 	if botToken != "" {
 		dg, err = discordgo.New("Bot " + botToken)
@@ -169,7 +164,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		discordCache = NewDiscordIntegrator(ctx, logger, config, metrics, nk, db, dg)
 		discordCache.Start()
 
-		appBot, err = NewDiscordAppBot(runtimeLogger, nk, db, metrics, pipeline, config, discordCache, profileRegistry, statusRegistry, dg, ipqsClient)
+		appBot, err = NewDiscordAppBot(ctx, runtimeLogger, nk, db, metrics, pipeline, config, discordCache, profileRegistry, statusRegistry, dg, ipqsClient)
 		if err != nil {
 			logger.Error("Failed to create app bot", zap.Error(err))
 

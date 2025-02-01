@@ -68,7 +68,6 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		"link":                          LinkingAppRpc,
 		"evr/servicestatus":             ServiceStatusRpc,
 		"importloadouts":                ImportLoadoutsRpc,
-		"setmatchamakerstatus":          setMatchmakingStatusRpc,
 		"matchmaker/stream":             MatchmakerStreamRPC,
 		"matchmaker/candidates":         MatchmakerCandidatesRPCFactory(sbmm),
 		"stream/join":                   StreamJoinRPC,
