@@ -384,9 +384,9 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 	rtts := lobbyParams.latencyHistory.LatestRTTs()
 	rankPercentile := lobbyParams.GetRankPercentile()
 	cycleCount := 0
-	backfillMultipler := 1.25 // Multiplier of matchmaking ticket timeout before starting backfill search
+	//backfillMultipler := 1.25 // Multiplier of matchmaking ticket timeout before starting backfill search
 
-	fallbackTimer := time.NewTimer(time.Duration(backfillMultipler*float64(lobbyParams.FallbackTimeout)) * time.Second)
+	fallbackTimer := time.NewTimer(lobbyParams.FallbackTimeout)
 
 	failsafeTimer := time.NewTimer(lobbyParams.FailsafeTimeout)
 	for {
@@ -505,8 +505,6 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 					team = evr.TeamOrange
 				}
 			}
-
-			// Only join the player to a team that has similar rank
 			if n, err := l.OpenSlotsByRole(team); err != nil {
 				logger.Warn("Failed to get open slots by role", zap.Error(err))
 				continue
