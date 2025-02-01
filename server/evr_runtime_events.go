@@ -198,7 +198,6 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 
 					secondDegree = append(secondDegree, s)
 				}
-
 			}
 
 			if len(firstDegree)+len(secondDegree) > 0 {

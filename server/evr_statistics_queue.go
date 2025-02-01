@@ -27,41 +27,44 @@ func NewStatisticsQueue(logger runtime.Logger, nk runtime.NakamaModule) *Statist
 	}
 
 	go func() {
+
 		ctx := context.Background()
-		select {
-		case <-ctx.Done():
-			return
-		case entries := <-ch:
 
-			for _, e := range entries {
-				if _, err := nk.LeaderboardRecordWrite(ctx, e.BoardMeta.ID(), e.UserID, e.DisplayName, e.Score, e.Subscore, map[string]any{}, &e.Override); err != nil {
-					// Try to create the leaderboard
-					operator, sortOrder, cronSchedule := OperatorToLeaderboardOperator(e.BoardMeta.Operator), "desc", ResetScheduleToCron(e.BoardMeta.ResetSchedule)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case entries := <-ch:
 
-					if err = nk.LeaderboardCreate(ctx, e.BoardMeta.ID(), true, sortOrder, operator, cronSchedule, map[string]any{}, true); err != nil {
+				for _, e := range entries {
+					if _, err := nk.LeaderboardRecordWrite(ctx, e.BoardMeta.ID(), e.UserID, e.DisplayName, e.Score, e.Subscore, map[string]any{}, &e.Override); err != nil {
+						// Try to create the leaderboard
+						operator, sortOrder, cronSchedule := OperatorToLeaderboardOperator(e.BoardMeta.Operator), "desc", ResetScheduleToCron(e.BoardMeta.ResetSchedule)
 
-						logger.WithFields(map[string]interface{}{
-							"leaderboard_id": e.BoardMeta.ID(),
-							"error":          err.Error(),
-						}).Error("Failed to create leaderboard")
+						if err = nk.LeaderboardCreate(ctx, e.BoardMeta.ID(), true, sortOrder, operator, cronSchedule, map[string]any{}, true); err != nil {
 
-					} else {
-						logger.WithFields(map[string]interface{}{
-							"leaderboard_id": e.BoardMeta.ID(),
-						}).Debug("Leaderboard created")
-
-						if _, err := nk.LeaderboardRecordWrite(ctx, e.BoardMeta.ID(), e.UserID, e.DisplayName, e.Score, e.Subscore, map[string]any{}, &e.Override); err != nil {
 							logger.WithFields(map[string]interface{}{
 								"leaderboard_id": e.BoardMeta.ID(),
 								"error":          err.Error(),
-							}).Error("Failed to write leaderboard record")
-						}
+							}).Error("Failed to create leaderboard")
 
+						} else {
+							logger.WithFields(map[string]interface{}{
+								"leaderboard_id": e.BoardMeta.ID(),
+							}).Debug("Leaderboard created")
+
+							if _, err := nk.LeaderboardRecordWrite(ctx, e.BoardMeta.ID(), e.UserID, e.DisplayName, e.Score, e.Subscore, map[string]any{}, &e.Override); err != nil {
+								logger.WithFields(map[string]interface{}{
+									"leaderboard_id": e.BoardMeta.ID(),
+									"error":          err.Error(),
+								}).Error("Failed to write leaderboard record")
+							}
+
+						}
 					}
 				}
 			}
 		}
-
 	}()
 
 	return r
