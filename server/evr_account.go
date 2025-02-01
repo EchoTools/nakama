@@ -127,6 +127,7 @@ type AccountMetadata struct {
 	LegalConsents              evr.LegalConsents          `json:"legal_consents"`            // The legal consents
 	CustomizationPOIs          *evr.Customization         `json:"customization_pois"`        // The customization POIs
 	sessionDisplayNameOverride string                     // The display name override for this session
+	VRMLPlayerID               string                     `json:"vrml_player_id"` // The VRML player ID
 }
 
 func (a *AccountMetadata) ID() string {
@@ -302,7 +303,7 @@ func AccountMetadataLoad(ctx context.Context, nk runtime.NakamaModule, userID st
 	return md, nil
 }
 
-func AccountMetadataSet(ctx context.Context, nk runtime.NakamaModule, userID string, md *AccountMetadata) error {
+func AccountMetadataUpdate(ctx context.Context, nk runtime.NakamaModule, userID string, md *AccountMetadata) error {
 	if userID == SystemUserID {
 		return fmt.Errorf("cannot set metadata for system user")
 	}

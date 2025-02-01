@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
-	"net/http"
 	"regexp"
+	goruntime "runtime"
 	"slices"
 	"sort"
 	"strconv"
@@ -19,8 +19,8 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/echotools/vrmlgo"
 	"github.com/gofrs/uuid/v5"
-	"github.com/google/go-cmp/cmp"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
@@ -52,9 +52,8 @@ type DiscordAppBot struct {
 	db              *sql.DB
 	dg              *discordgo.Session
 
-	cache     *DiscordIntegrator
-	ipqsCache *IPQSClient
-
+	cache         *DiscordIntegrator
+	ipqsCache     *IPQSClient
 	debugChannels map[string]string // map[groupID]channelID
 	userID        string            // Nakama UserID of the bot
 
@@ -63,13 +62,12 @@ type DiscordAppBot struct {
 	prepareMatchRateLimiters  *MapOf[string, *rate.Limiter]
 }
 
-func NewDiscordAppBot(logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, metrics Metrics, pipeline *Pipeline, config Config, discordCache *DiscordIntegrator, profileRegistry *ProfileCache, statusRegistry StatusRegistry, dg *discordgo.Session, ipqsCache *IPQSClient) (*DiscordAppBot, error) {
-	ctx, cancelFn := context.WithCancel(context.Background())
+func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, metrics Metrics, pipeline *Pipeline, config Config, discordCache *DiscordIntegrator, profileRegistry *ProfileCache, statusRegistry StatusRegistry, dg *discordgo.Session, ipqsCache *IPQSClient) (*DiscordAppBot, error) {
+
 	logger = logger.WithField("system", "discordAppBot")
 
 	appbot := DiscordAppBot{
-		ctx:      ctx,
-		cancelFn: cancelFn,
+		ctx: ctx,
 
 		logger:   logger,
 		nk:       nk,
@@ -188,121 +186,6 @@ func (e *DiscordAppBot) loadPrepareMatchRateLimiter(userID, groupID string) *rat
 }
 
 var (
-	VRMLEntitlementMap = map[string][]string{
-		"p": {
-			"rwd_tag_s1_vrml_preseason",
-			"rwd_medal_s1_vrml_preseason",
-		},
-		"1": {
-			"rwd_tag_s1_vrml_s1",
-			"rwd_medal_s1_vrml_s1_user",
-		},
-		"1f": {
-			"rwd_tag_s1_vrml_s1",
-			"rwd_medal_s1_vrml_s1_user",
-			"rwd_medal_s1_vrml_s1_finalist",
-			"rwd_tag_s1_vrml_s1_finalist",
-		},
-		"1c": {
-			"rwd_tag_s1_vrml_s1",
-			"rwd_medal_s1_vrml_s1_user",
-			"rwd_medal_s1_vrml_s1_finalist",
-			"rwd_tag_s1_vrml_s1_finalist",
-			"rwd_medal_s1_vrml_s1_champion",
-			"rwd_tag_s1_vrml_s1_champion",
-		},
-		"2": {
-			"rwd_tag_s1_vrml_s2",
-			"rwd_medal_s1_vrml_s2",
-		},
-		"2f": {
-			"rwd_tag_s1_vrml_s2",
-			"rwd_medal_s1_vrml_s2",
-			"rwd_medal_s1_vrml_s2_finalist",
-			"rwd_tag_s1_vrml_s2_finalist",
-		},
-		"2c": {
-			"rwd_tag_s1_vrml_s2",
-			"rwd_medal_s1_vrml_s2",
-			"rwd_medal_s1_vrml_s2_finalist",
-			"rwd_tag_s1_vrml_s2_finalist",
-			"rwd_medal_s1_vrml_s2_champion",
-			"rwd_tag_s1_vrml_s2_champion",
-		},
-		"3": {
-			"rwd_medal_s1_vrml_s3",
-			"rwd_tag_s1_vrml_s3",
-		},
-		"3f": {
-			"rwd_medal_s1_vrml_s3",
-			"rwd_tag_s1_vrml_s3",
-			"rwd_medal_s1_vrml_s3_finalist",
-			"rwd_tag_s1_vrml_s3_finalist",
-		},
-		"3c": {
-			"rwd_medal_s1_vrml_s3",
-			"rwd_tag_s1_vrml_s3",
-			"rwd_medal_s1_vrml_s3_finalist",
-			"rwd_tag_s1_vrml_s3_finalist",
-			"rwd_medal_s1_vrml_s3_champion",
-			"rwd_tag_s1_vrml_s3_champion",
-		},
-		"4": {
-			"rwd_tag_0008",
-			"rwd_medal_0006",
-		},
-		"4f": {
-			"rwd_tag_0008",
-			"rwd_medal_0006",
-			"rwd_tag_0009",
-			"rwd_medal_0007",
-		},
-		"4c": {
-			"rwd_tag_0008",
-			"rwd_medal_0006",
-			"rwd_tag_0009",
-			"rwd_medal_0007",
-			"rwd_tag_0010",
-			"rwd_medal_0008",
-		},
-		"5": {
-			"rwd_tag_0035",
-		},
-		"5f": {
-			"rwd_tag_0035",
-			"rwd_tag_0036",
-		},
-		"5c": {
-			"rwd_tag_0035",
-			"rwd_tag_0036",
-			"rwd_tag_0037",
-		},
-		"6": {
-			"rwd_tag_0040",
-		},
-		"6f": {
-			"rwd_tag_0040",
-			"rwd_tag_0041",
-		},
-		"6c": {
-			"rwd_tag_0040",
-			"rwd_tag_0041",
-			"rwd_tag_0042",
-		},
-		"7": {
-			"rwd_tag_0043",
-		},
-		"7f": {
-			"rwd_tag_0043",
-			"rwd_tag_0044",
-		},
-		"7c": {
-			"rwd_tag_0043",
-			"rwd_tag_0044",
-			"rwd_tag_0045",
-		},
-	}
-
 	partyGroupIDPattern = regexp.MustCompile("^[a-z0-9]+$")
 	vrmlIDPattern       = regexp.MustCompile("^[-a-zA-Z0-9]{24}$")
 
@@ -376,6 +259,10 @@ var (
 		{
 			Name:        "throw-settings",
 			Description: "See your throw settings.",
+		},
+		{
+			Name:        "vrml-link",
+			Description: "Link your VRML account.",
 		},
 		{
 			Name:        "set-lobby",
@@ -1600,7 +1487,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				badgeCodestr := options[1].StringValue()
 				badgeCodes := strings.Split(strings.ToLower(badgeCodestr), ",")
 
-				changeset := make(map[string]int64, len(badgeCodes))
+				entitlements := make([]*VRMLEntitlement, 0, len(badgeCodes))
 
 				for _, c := range badgeCodes {
 
@@ -1608,35 +1495,48 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					if c == "" {
 						continue
 					}
-					if _, ok := VRMLEntitlementMap[c]; !ok {
-						return status.Error(codes.InvalidArgument, "invalid badge code")
+
+					if len(c) > 2 {
+						return status.Error(codes.InvalidArgument, "invalid badge code, it must be one or two characters")
 					}
-					for _, name := range VRMLEntitlementMap[c] {
-						name := "cosmetic:arena:" + name
-						if v, ok := wallet[name]; !ok || v != 1 {
-							changeset[name] = v*-1 + 1
-						}
+
+					seasonCode, prestigeCode := c[:1], c[1:]
+
+					var seasonMap = map[string]VRMLSeasonID{
+						"p": VRMLPreSeason,
+						"1": VRMLSeason1,
+						"2": VRMLSeason2,
+						"3": VRMLSeason3,
+						"4": VRMLSeason4,
+						"5": VRMLSeason5,
+						"6": VRMLSeason6,
+						"7": VRMLSeason7,
 					}
+
+					seasonID, ok := seasonMap[seasonCode]
+					if !ok {
+						return status.Error(codes.InvalidArgument, "invalid season code (p, 1-7)")
+					}
+
+					switch prestigeCode {
+					case "c":
+						entitlements = append(entitlements, &VRMLEntitlement{seasonID, VRMLChampion})
+					case "f":
+						entitlements = append(entitlements, &VRMLEntitlement{seasonID, VRMLFinalist})
+					case "":
+						entitlements = append(entitlements, &VRMLEntitlement{seasonID, VRMLPlayer})
+					default:
+						return status.Error(codes.InvalidArgument, "invalid prestige code; it must be 'c' or 'f'")
+					}
+
 				}
 
-				assignerID := d.cache.DiscordIDToUserID(user.ID)
-				metadata := map[string]interface{}{
-					"assigner_id": assignerID,
-					"discord_id":  target.ID,
+				// Assign the badge to the user
+				if err := AssignEntitlements(ctx, logger, nk, userID, targetUserID, "", entitlements); err != nil {
+					return status.Error(codes.Internal, "failed to assign badge")
 				}
-
-				nk.WalletUpdate(ctx, targetUserID, changeset, metadata, true)
-
-				// Log the action
-				logger.WithFields(map[string]interface{}{
-					"badges":     badgeCodestr,
-					"user":       target.Username,
-					"discord_id": target.ID,
-					"assigner":   user.ID,
-				}).Debug("assign badges")
 
 				// Send a message to the channel
-
 				channel := "1232462244797874247"
 				_, err = s.ChannelMessageSend(channel, fmt.Sprintf("%s assigned VRML cosmetics `%s` to user `%s`", user.Mention(), badgeCodestr, target.Username))
 				if err != nil {
@@ -1645,105 +1545,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					}).Error("Failed to send badge channel update message")
 				}
 				simpleInteractionResponse(s, i, fmt.Sprintf("Assigned VRML cosmetics `%s` to user `%s`", badgeCodestr, target.Username))
-
-			case "set-vrml-username":
-				options = options[0].Options
-				// Get the user's discord ID
-				user := getScopedUser(i)
-				if user == nil {
-					return nil
-				}
-				vrmlUsername := options[0].StringValue()
-
-				// Check the vlaue against vrmlIDPattern
-				if !vrmlIDPattern.MatchString(vrmlUsername) {
-					return fmt.Errorf("invalid VRML username: `%s`", vrmlUsername)
-				}
-
-				// Access the VRML HTTP API
-				url := fmt.Sprintf("https://api.vrmasterleague.com/EchoArena/Players/Search?name=%s", vrmlUsername)
-				var req *http.Request
-				req, err = http.NewRequest("GET", url, nil)
-				if err != nil {
-					return status.Error(codes.Internal, "failed to create request")
-				}
-
-				req.Header.Set("User-Agent", "EchoVRCE Discord Bot (contact: @sprockee)")
-
-				// Make the request
-				var resp *http.Response
-				resp, err = http.DefaultClient.Do(req)
-				if err != nil {
-					return status.Error(codes.Internal, "failed to make request")
-				}
-
-				// Parse the response as JSON...
-				// [{"id":"4rPCIjBhKhGpG4uDnfHlfg2","name":"sprockee","image":"/images/logos/users/25d45af7-f6a8-40ef-a035-879a61869c8f.png"}]
-				var players []struct {
-					ID   string `json:"id"`
-					Name string `json:"name"`
-				}
-
-				if err = json.NewDecoder(resp.Body).Decode(&players); err != nil {
-					return status.Error(codes.Internal, "failed to decode response: "+err.Error())
-				}
-
-				// Check if the player was found
-				if len(players) == 0 {
-					return status.Error(codes.NotFound, "player not found")
-				}
-
-				// Ensure that only one was returned
-				if len(players) > 1 {
-					return status.Error(codes.Internal, "multiple players found")
-				}
-
-				// Get the player's ID
-				playerID := players[0].ID
-
-				type VRMLUser struct {
-					UserID        string      `json:"userID"`
-					UserName      string      `json:"userName"`
-					UserLogo      string      `json:"userLogo"`
-					Country       string      `json:"country"`
-					Nationality   string      `json:"nationality"`
-					DateJoinedUTC string      `json:"dateJoinedUTC"`
-					StreamURL     interface{} `json:"streamUrl"`
-					DiscordID     float64     `json:"discordID"`
-					DiscordTag    string      `json:"discordTag"`
-					SteamID       interface{} `json:"steamID"`
-					IsTerminated  bool        `json:"isTerminated"`
-				}
-				type Game struct {
-					GameID         string `json:"gameID"`
-					GameName       string `json:"gameName"`
-					TeamMode       string `json:"teamMode"`
-					MatchMode      string `json:"matchMode"`
-					URL            string `json:"url"`
-					URLShort       string `json:"urlShort"`
-					URLComplete    string `json:"urlComplete"`
-					HasSubstitutes bool   `json:"hasSubstitutes"`
-					HasTies        bool   `json:"hasTies"`
-					HasCasters     bool   `json:"hasCasters"`
-					HasCameraman   bool   `json:"hasCameraman"`
-				}
-
-				type ThisGame struct {
-					PlayerID   string `json:"playerID"`
-					PlayerName string `json:"playerName"`
-					UserLogo   string `json:"userLogo"`
-					Game       Game   `json:"game"`
-				}
-
-				type playerDetailed struct {
-					User     VRMLUser `json:"user"`
-					ThisGame ThisGame `json:"thisGame"`
-				}
-
-				logger.Info("set vrml id", zap.String("discord_id", user.ID), zap.String("discord_username", user.Username), zap.String("vrml_id", playerID))
-
-				return simpleInteractionResponse(s, i, fmt.Sprintf("set VRML username `%s` for user `%s`", vrmlUsername, user.Username))
 			}
+
 			return nil
 		},
 		"whoami": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
@@ -3057,6 +2860,113 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			return discordgo.ErrNilState
+		},
+		"vrml-link": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+			// accountLinkCommandHandler handles the account link command from Discord
+
+			nk := d.nk
+			db := d.db
+
+			// Check if the user is already linked
+			userID, err := GetUserIDByDiscordID(ctx, db, user.ID)
+			if err != nil {
+				return fmt.Errorf("failed to get userID by DiscordID: %w", err)
+			}
+
+			if objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
+				{
+					Collection: StorageCollectionSocial,
+					Key:        StorageKeyVRMLUser,
+					UserID:     userID,
+				},
+			}); err != nil {
+				return fmt.Errorf("failed to read storage: %w", err)
+			} else {
+				if len(objs) > 0 {
+					return simpleInteractionResponse(s, i, fmt.Sprintf("Your VRML account is already linked. Contact EchoVRCE %s if you need to unlink it.", ServiceSettings().ReportURL))
+				}
+			}
+
+			vars, _ := ctx.Value(runtime.RUNTIME_CTX_ENV).(map[string]string)
+
+			// Start the OAuth flow
+			timeoutDuration := 5 * time.Minute
+			flow, err := NewVRMLOAuthFlow(vars["VRML_OAUTH_CLIENT_ID"], vars["VRML_OAUTH_REDIRECT_URL"], timeoutDuration)
+			if err != nil {
+				return fmt.Errorf("failed to start OAuth flow: %w", err)
+			}
+
+			editResponseFn := func(content string) error {
+				_, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+					Content: &content,
+				})
+				return err
+			}
+
+			go func() {
+				<-time.After(1 * time.Second)
+				// Wait for the token to be returned
+				select {
+				case token := <-flow.tokenCh:
+					logger := logger.WithFields(map[string]interface{}{
+						"user_id":    userID,
+						"discord_id": i.Member.User.ID,
+					})
+
+					vg := vrmlgo.New(token)
+
+					vrmlUser, err := vg.Me()
+					if err != nil {
+						logger.Error("Failed to get VRML user data")
+						return
+					}
+					logger = logger.WithFields(map[string]interface{}{
+						"vrml_id":         vrmlUser.ID,
+						"vrml_discord_id": vrmlUser.GetDiscordID(),
+					})
+
+					if i.Member.User.ID != vrmlUser.GetDiscordID() {
+						logger.Error("Discord ID mismatch")
+						editResponseFn("Discord ID mismatch. Please make sure your VRML account is linked to the correct Discord account.")
+						return
+					}
+
+					// Check if the account is already owned by another user
+					if ownerID, err := flow.checkCurrentOwner(ctx, nk, vrmlUser.ID); err != nil {
+						logger.Error("Failed to check current owner")
+						editResponseFn("Failed to check current owner")
+						return
+					} else if ownerID != "" && ownerID != userID {
+						content := fmt.Sprintf("Account already owned by another user. [Contact EchoVRCE](%s) if you need to unlink it.", ServiceSettings().ReportURL)
+						logger.WithField("owner_id", ownerID).Error(content)
+						editResponseFn("Account already owned by another user")
+						return
+					}
+
+					// Link the accounts
+					if err := flow.linkAccounts(ctx, nk, vg, userID); err != nil {
+						editResponseFn("Failed to link accounts")
+						return
+					}
+
+					editResponseFn("Your VRML account has been linked. It may take a few minutes (and up to a few hours) for your cosmetics to appear.")
+
+				case <-time.After(timeoutDuration):
+					simpleInteractionResponse(s, i, "OAuth flow timed out. Please run the command again.")
+				}
+			}()
+
+			content := fmt.Sprintf("To assign your cosmetics, [Verify your VRML account](%s)", flow.url)
+
+			// Send the link to the user
+			return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Flags:   discordgo.MessageFlagsEphemeral,
+					Content: content,
+				},
+			})
+
 		},
 	}
 
