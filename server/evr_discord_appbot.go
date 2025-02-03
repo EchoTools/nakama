@@ -3182,7 +3182,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 					vg := vrmlgo.New(token)
 
-					vrmlUser, err := vg.Me()
+					vrmlUser, err := vg.Me(vrmlgo.WithUseCache(false))
 					if err != nil {
 						logger.Error("Failed to get VRML user data")
 						return

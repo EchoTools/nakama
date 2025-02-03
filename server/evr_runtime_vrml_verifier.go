@@ -130,7 +130,7 @@ func (v *VRMLVerifier) Start() error {
 			vg := v.newSession(token)
 
 			// Get the user identity
-			vrmlUser, err := vg.Me()
+			vrmlUser, err := vg.Me(vrmlgo.WithUseCache(false))
 			if err != nil {
 				logger.WithFields(map[string]interface{}{
 					"user_id": userID,

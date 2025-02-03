@@ -88,7 +88,7 @@ func (v *VRMLOAuth) checkCurrentOwner(ctx context.Context, nk runtime.NakamaModu
 // VerifyOwnership verifies that the user owns the VRML account by checking the Discord ID
 func (v *VRMLOAuth) linkAccounts(ctx context.Context, nk runtime.NakamaModule, vg *vrmlgo.Session, userID string) error {
 
-	vrmlUser, err := vg.Me()
+	vrmlUser, err := vg.Me(vrmlgo.WithUseCache(false))
 	if err != nil {
 		return runtime.NewError("Failed to get user data", StatusInternalError)
 	}
