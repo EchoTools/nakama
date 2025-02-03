@@ -264,7 +264,7 @@ type ArenaStatistics struct {
 	ThreePointGoals              *StatisticIntegerIncrement `json:"ThreePointGoals,omitempty"`
 	TopSpeedsTotal               *StatisticFloatIncrement   `json:"TopSpeedsTotal,omitempty"`
 	TwoPointGoals                *StatisticIntegerIncrement `json:"TwoPointGoals,omitempty"`
-	XP                           *StatisticIntegerIncrement `json:"XP,omitempty"`
+	XP                           *StatisticFloatSet         `json:"XP,omitempty"`
 	GamesPlayed                  *StatisticIntegerIncrement `json:"GamesPlayed,omitempty"`
 	SkillRatingMu                *StatisticFloatSet         `json:"SkillRatingMu,omitempty"`
 	SkillRatingSigma             *StatisticFloatSet         `json:"SkillRatingSigma,omitempty"`
@@ -627,6 +627,7 @@ func NewStatistics() PlayerStatistics {
 	}
 }
 
+// Echo normally resets stats on Thursday, so use that as the default
 func mostRecentThursday() time.Time {
 	now := time.Now().UTC()
 	offset := (int(now.Weekday()) - int(time.Thursday) + 7) % 7

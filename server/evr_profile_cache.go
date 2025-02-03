@@ -186,6 +186,7 @@ func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, n
 			}
 		}
 	}
+	cosmetics = walletToCosmetics(wallet, cosmetics)
 
 	cosmeticLoadout := metadata.LoadoutCosmetics.Loadout
 	// If the player has "kissy lips" emote equipped, set their emote to default.
