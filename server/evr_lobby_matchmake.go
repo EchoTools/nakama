@@ -197,8 +197,6 @@ func (p *EvrPipeline) addTicket(ctx context.Context, logger *zap.Logger, session
 	maxCount := ticketConfig.MaxCount
 	countMultiple := ticketConfig.CountMultiple
 
-	stringProps["query"] = query
-
 	ticket := ""
 	otherPresences := []*PresenceID{}
 	sessionID := session.ID().String()
