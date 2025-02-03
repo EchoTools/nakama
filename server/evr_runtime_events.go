@@ -51,7 +51,7 @@ func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 }
 
 func (h *EventDispatch) eventFn(ctx context.Context, logger runtime.Logger, evt *api.Event) {
-	logger.WithField("event", evt).Debug("received event")
+	logger.WithField("event", evt.Name).Debug("received event")
 
 	eventMap := map[string]func(context.Context, runtime.Logger, map[string]string) error{
 		EventLobbySessionAuthorized: h.handleLobbyAuthorized,
@@ -67,6 +67,10 @@ func (h *EventDispatch) eventFn(ctx context.Context, logger runtime.Logger, evt 
 	}
 
 	for k, v := range evt.Properties {
+		if k == "password" || k == "token" {
+			continue
+		}
+
 		fields[k] = v
 	}
 
