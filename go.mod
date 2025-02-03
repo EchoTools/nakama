@@ -9,7 +9,7 @@ require (
 	github.com/blugelabs/query_string v0.3.0
 	github.com/dgryski/dgoogauth v0.0.0-20190221195224-5a805980a5f3
 	github.com/dop251/goja v0.0.0-20241024094426-79f3a7efcdbd
-	github.com/echotools/vrmlgo v1.0.1
+	github.com/echotools/vrmlgo v1.0.2
 	github.com/go-restruct/restruct v1.2.0-alpha
 	github.com/gofrs/uuid/v5 v5.3.0
 	github.com/golang-jwt/jwt/v4 v4.5.1
