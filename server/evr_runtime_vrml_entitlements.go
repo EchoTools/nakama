@@ -120,7 +120,7 @@ func (e VRMLEntitlement) Cosmetics() []string {
 func FetchMatchCountBySeason(vg *vrmlgo.Session) (map[VRMLSeasonID]int, error) {
 
 	// Get the user's account information
-	me, err := vg.Me()
+	me, err := vg.Me(vrmlgo.WithUseCache(false))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user data: %v", err)
 	}
