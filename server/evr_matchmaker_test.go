@@ -489,7 +489,7 @@ func TestMatchmaker(t *testing.T) {
 	m.sortByDraw(predictions)
 
 	writeAsJSONFile(predictions, "/tmp/predictions.json")
-	m.sortLimitRankSpread(predictions, 0.10)
+	m.sortLimitRankSpread(predictions, 0.10, 0.5)
 	m.sortPriority(predictions)
 	rostersByPrediction := make([][]string, 0)
 	for _, c := range predictions {
