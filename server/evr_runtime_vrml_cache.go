@@ -4,28 +4,37 @@ import "github.com/go-redis/redis"
 
 type VRMLCache struct {
 	redisClient *redis.Client
-	cacheKey    string
+	prefix      string
 }
 
-func NewVRMLCache(redisClient *redis.Client, cacheKey string) *VRMLCache {
+func NewVRMLCache(redisClient *redis.Client, keyPrefix string) *VRMLCache {
+	if keyPrefix == "" {
+		keyPrefix = "VRMLCache:"
+	}
+	if keyPrefix[len(keyPrefix)-1] != ':' {
+		keyPrefix += ":"
+	}
+
 	return &VRMLCache{
 		redisClient: redisClient,
-		cacheKey:    cacheKey,
+		prefix:      keyPrefix,
 	}
 }
 
-func (c *VRMLCache) Get(key string) (string, bool, error) {
-	v := c.redisClient.Get(key)
-	if v.Err() != nil {
-		if v.Err() == redis.Nil {
-			return "", false, nil
-		}
+func (c *VRMLCache) Get(url string) (string, bool, error) {
+	v := c.redisClient.Get(c.prefix + url)
+
+	switch v.Err() {
+	case nil:
+	case redis.Nil:
+		return "", false, nil
+	default:
 		return "", false, v.Err()
 	}
 
 	return v.Val(), true, nil
 }
 
-func (c *VRMLCache) Set(key string, value string) error {
-	return c.redisClient.Set(key, value, 0).Err()
+func (c *VRMLCache) Set(url string, value string) error {
+	return c.redisClient.Set(c.prefix+url, value, 0).Err()
 }
