@@ -261,7 +261,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		state.server = joinPresence
 		state.Open = true
 
-		if err := m.updateLabel(dispatcher, state); err != nil {
+		if err := m.updateLabel(logger, dispatcher, state); err != nil {
 			logger.Error("Failed to update label: %v", err)
 		}
 		return state, true, ""
@@ -406,7 +406,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	state.presenceByEvrID[meta.Presence.EvrID] = meta.Presence
 	state.joinTimestamps[sessionID] = time.Now()
 
-	if err := m.updateLabel(dispatcher, state); err != nil {
+	if err := m.updateLabel(logger, dispatcher, state); err != nil {
 		logger.Error("Failed to update label: %v", err)
 	}
 
@@ -474,7 +474,7 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 			nk.MetricsTimerRecord("match_player_join_duration", tags, time.Since(state.joinTimestamps[p.GetSessionId()]))
 		}
 	}
-	//m.updateLabel(dispatcher, state)
+	//m.updateLabel(logger, dispatcher, state)
 	return state
 }
 
@@ -603,7 +603,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 	}
 
 	// Update the label that includes the new player list.
-	if err := m.updateLabel(dispatcher, state); err != nil {
+	if err := m.updateLabel(logger, dispatcher, state); err != nil {
 		return nil
 	}
 
@@ -792,7 +792,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 			logger.Error("failed to start session: %v", err)
 			return nil
 		}
-		if err := m.updateLabel(dispatcher, state); err != nil {
+		if err := m.updateLabel(logger, dispatcher, state); err != nil {
 			logger.Error("failed to update label: %v", err)
 			return nil
 		}
@@ -824,7 +824,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 	}
 
 	if updateLabel {
-		if err := m.updateLabel(dispatcher, state); err != nil {
+		if err := m.updateLabel(logger, dispatcher, state); err != nil {
 			logger.Error("failed to update label: %v", err)
 			return nil
 		}
@@ -882,7 +882,7 @@ func (m *EvrMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db 
 	state.Open = false
 	state.terminateTick = tick + int64(graceSeconds)*state.tickRate
 
-	if err := m.updateLabel(dispatcher, state); err != nil {
+	if err := m.updateLabel(logger, dispatcher, state); err != nil {
 		logger.Error("failed to update label: %v", err)
 		return nil
 	}
@@ -1118,7 +1118,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		return state, SignalResponse{Success: false, Message: "unknown signal"}.String()
 	}
 
-	if err := m.updateLabel(dispatcher, state); err != nil {
+	if err := m.updateLabel(logger, dispatcher, state); err != nil {
 		logger.Error("failed to update label: %v", err)
 		return state, SignalResponse{Message: fmt.Sprintf("failed to update label: %v", err)}.String()
 	}
@@ -1182,10 +1182,15 @@ func (m *EvrMatch) dispatchMessages(_ context.Context, logger runtime.Logger, di
 	return nil
 }
 
-func (m *EvrMatch) updateLabel(dispatcher runtime.MatchDispatcher, state *MatchLabel) error {
+func (m *EvrMatch) updateLabel(logger runtime.Logger, dispatcher runtime.MatchDispatcher, state *MatchLabel) error {
 	state.rebuildCache()
 	if dispatcher != nil {
 		if err := dispatcher.MatchLabelUpdate(state.GetLabel()); err != nil {
+			logger.WithFields(map[string]interface{}{
+				"state": state,
+				"error": err,
+			}).Error("Failed to update label.")
+
 			return fmt.Errorf("could not update label: %w", err)
 		}
 	}
