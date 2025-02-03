@@ -172,10 +172,6 @@ func FetchMatchCountBySeason(vg *vrmlgo.Session) (map[VRMLSeasonID]int, error) {
 	for _, season := range seasons {
 
 		for _, mID := range matchesBySeason[season.Name] {
-			if matchCountBySeasonID[VRMLSeasonID(season.ID)] >= 2 {
-				matchCountBySeasonID[VRMLSeasonID(season.ID)] = 10
-				break
-			}
 
 			// Get the match details
 			matchDetails, err := vg.Match(gameDetails.Game.ShortName, mID)
