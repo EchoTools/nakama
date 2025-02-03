@@ -29,7 +29,7 @@ type VRMLVerifier struct {
 
 	redisClient      *redis.Client
 	cache            *VRMLCache
-	queueKey         string
+	queueKeyPrefix   string
 	oauthRedirectURL string
 	oauthClientID    string
 }
@@ -60,8 +60,8 @@ func NewVRMLVerifier(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		nk:     nk,
 
 		redisClient:      redisClient,
-		cache:            NewVRMLCache(redisClient, "vrml:cache:"),
-		queueKey:         "vrml:queue:",
+		cache:            NewVRMLCache(redisClient, "VRMLCache:cache:"),
+		queueKeyPrefix:   "VRMLVerifier:queue:",
 		oauthRedirectURL: vars["VRML_OAUTH_REDIRECT_URL"],
 		oauthClientID:    vars["VRML_OAUTH_CLIENT_ID"],
 	}
@@ -187,12 +187,12 @@ func (v *VRMLVerifier) VerifyUser(userID string, token string) error {
 
 // Enqueue adds an item to the queue.
 func (v *VRMLVerifier) enqueue(value string) error {
-	return v.redisClient.RPush(v.queueKey, value).Err()
+	return v.redisClient.RPush(v.queueKeyPrefix, value).Err()
 }
 
 // Dequeue removes and returns the first item from the queue.
 func (v *VRMLVerifier) dequeue() (string, error) {
-	val, err := v.redisClient.LPop(v.queueKey).Result()
+	val, err := v.redisClient.LPop(v.queueKeyPrefix).Result()
 	if err == redis.Nil {
 		return "", nil // Queue is empty
 	}
@@ -201,7 +201,7 @@ func (v *VRMLVerifier) dequeue() (string, error) {
 
 // BlockingDequeue waits for an item to be available before returning.
 func (v *VRMLVerifier) blockingDequeue(timeout time.Duration) (string, error) {
-	val, err := v.redisClient.BLPop(timeout, v.queueKey).Result()
+	val, err := v.redisClient.BLPop(timeout, v.queueKeyPrefix).Result()
 	if err == redis.Nil {
 		return "", nil // No item found within timeout
 	}
