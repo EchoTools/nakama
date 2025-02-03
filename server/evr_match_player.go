@@ -25,7 +25,6 @@ type PlayerInfo struct {
 	SessionID      string    `json:"session_id,omitempty"`
 	GeoHash        string    `json:"geohash,omitempty"`
 	PingMillis     int       `json:"ping_ms,omitempty"` // The latency as measured from the ping check.
-	Query          string    `json:"query,omitempty"`
 }
 
 // The player joined after the round clock started

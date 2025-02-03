@@ -560,8 +560,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 					fmt.Sprintf("-properties.rank_percentile_max:<%f", rankPercentile),
 				)
 
-				stringProperties["query"] = strings.Join(sbmmqparts, " ")
-				qparts = append(qparts, stringProperties["query"])
+				qparts = append(qparts, sbmmqparts...)
 			}
 		}
 	}
@@ -598,6 +597,8 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 	}
 
 	query := strings.Trim(strings.Join(qparts, " "), " ")
+
+	stringProperties["query"] = query
 
 	return query, stringProperties, numericProperties
 }
