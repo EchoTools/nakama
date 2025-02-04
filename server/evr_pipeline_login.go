@@ -967,8 +967,8 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 	playerInfo := label.GetPlayerByEvrID(evrID)
 
 	// If the player isn't in the match, or isn't a player, do not update the stats
-	if playerInfo == nil || (playerInfo.Team != BlueTeam && playerInfo.Team != OrangeTeam) {
-		return fmt.Errorf("non-player profile update request: %s", playerInfo.EvrID.String())
+	if playerInfo == nil || playerInfo.Team != BlueTeam && playerInfo.Team != OrangeTeam {
+		return fmt.Errorf("non-player profile update request: %s", evrID.String())
 	}
 
 	var metadata *AccountMetadata
