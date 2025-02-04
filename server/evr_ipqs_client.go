@@ -19,80 +19,80 @@ const (
 )
 
 type IPQSTransactionDetails struct {
-	ValidBillingAddress       bool     `json:"valid_billing_address"`
-	ValidShippingAddress      bool     `json:"valid_shipping_address"`
-	ValidBillingEmail         bool     `json:"valid_billing_email"`
-	ValidShippingEmail        bool     `json:"valid_shipping_email"`
-	RiskyBillingPhone         bool     `json:"risky_billing_phone"`
-	RiskyShippingPhone        bool     `json:"risky_shipping_phone"`
-	BillingPhoneCarrier       string   `json:"billing_phone_carrier"`
-	ShippingPhoneCarrier      string   `json:"shipping_phone_carrier"`
-	BillingPhoneLineType      string   `json:"billing_phone_line_type"`
-	ShippingPhoneLineType     string   `json:"shipping_phone_line_type"`
-	BillingPhoneCountry       string   `json:"billing_phone_country"`
-	BillingPhoneCountryCode   string   `json:"billing_phone_country_code"`
-	ShippingPhoneCountry      string   `json:"shipping_phone_country"`
-	ShippingPhoneCountryCode  string   `json:"shipping_phone_country_code"`
-	FraudulentBehavior        bool     `json:"fraudulent_behavior"`
-	BinCountry                string   `json:"bin_country"`
-	BinType                   string   `json:"bin_type"`
-	BinBankName               string   `json:"bin_bank_name"`
-	RiskScore                 int      `json:"risk_score"`
-	RiskFactors               []string `json:"risk_factors"`
-	IsPrepaidCard             bool     `json:"is_prepaid_card"`
-	RiskyUsername             bool     `json:"risky_username"`
-	ValidBillingPhone         bool     `json:"valid_billing_phone"`
-	ValidShippingPhone        bool     `json:"valid_shipping_phone"`
-	LeakedBillingEmail        bool     `json:"leaked_billing_email"`
-	LeakedShippingEmail       bool     `json:"leaked_shipping_email"`
-	LeakedUserData            bool     `json:"leaked_user_data"`
-	UserActivity              string   `json:"user_activity"`
-	PhoneNameIdentityMatch    string   `json:"phone_name_identity_match"`
-	PhoneEmailIdentityMatch   string   `json:"phone_email_identity_match"`
-	PhoneAddressIdentityMatch string   `json:"phone_address_identity_match"`
-	EmailNameIdentityMatch    string   `json:"email_name_identity_match"`
-	NameAddressIdentityMatch  string   `json:"name_address_identity_match"`
-	AddressEmailIdentityMatch string   `json:"address_email_identity_match"`
+	ValidBillingAddress       bool     `json:"valid_billing_address,omitempty"`
+	ValidShippingAddress      bool     `json:"valid_shipping_address,omitempty"`
+	ValidBillingEmail         bool     `json:"valid_billing_email,omitempty"`
+	ValidShippingEmail        bool     `json:"valid_shipping_email,omitempty"`
+	RiskyBillingPhone         bool     `json:"risky_billing_phone,omitempty"`
+	RiskyShippingPhone        bool     `json:"risky_shipping_phone,omitempty"`
+	BillingPhoneCarrier       string   `json:"billing_phone_carrier,omitempty"`
+	ShippingPhoneCarrier      string   `json:"shipping_phone_carrier,omitempty"`
+	BillingPhoneLineType      string   `json:"billing_phone_line_type,omitempty"`
+	ShippingPhoneLineType     string   `json:"shipping_phone_line_type,omitempty"`
+	BillingPhoneCountry       string   `json:"billing_phone_country,omitempty"`
+	BillingPhoneCountryCode   string   `json:"billing_phone_country_code,omitempty"`
+	ShippingPhoneCountry      string   `json:"shipping_phone_country,omitempty"`
+	ShippingPhoneCountryCode  string   `json:"shipping_phone_country_code,omitempty"`
+	FraudulentBehavior        bool     `json:"fraudulent_behavior,omitempty"`
+	BinCountry                string   `json:"bin_country,omitempty"`
+	BinType                   string   `json:"bin_type,omitempty"`
+	BinBankName               string   `json:"bin_bank_name,omitempty"`
+	RiskScore                 int      `json:"risk_score,omitempty"`
+	RiskFactors               []string `json:"risk_factors,omitempty"`
+	IsPrepaidCard             bool     `json:"is_prepaid_card,omitempty"`
+	RiskyUsername             bool     `json:"risky_username,omitempty"`
+	ValidBillingPhone         bool     `json:"valid_billing_phone,omitempty"`
+	ValidShippingPhone        bool     `json:"valid_shipping_phone,omitempty"`
+	LeakedBillingEmail        bool     `json:"leaked_billing_email,omitempty"`
+	LeakedShippingEmail       bool     `json:"leaked_shipping_email,omitempty"`
+	LeakedUserData            bool     `json:"leaked_user_data,omitempty"`
+	UserActivity              string   `json:"user_activity,omitempty"`
+	PhoneNameIdentityMatch    string   `json:"phone_name_identity_match,omitempty"`
+	PhoneEmailIdentityMatch   string   `json:"phone_email_identity_match,omitempty"`
+	PhoneAddressIdentityMatch string   `json:"phone_address_identity_match,omitempty"`
+	EmailNameIdentityMatch    string   `json:"email_name_identity_match,omitempty"`
+	NameAddressIdentityMatch  string   `json:"name_address_identity_match,omitempty"`
+	AddressEmailIdentityMatch string   `json:"address_email_identity_match,omitempty"`
 }
 
 type IPQSResponse struct {
-	Message            string                 `json:"message"`
-	Success            bool                   `json:"success"`
-	Proxy              bool                   `json:"proxy"`
-	ISP                string                 `json:"ISP"`
-	Organization       string                 `json:"organization"`
-	ASN                int                    `json:"ASN"`
-	Host               string                 `json:"host"`
-	CountryCode        string                 `json:"country_code"`
-	City               string                 `json:"city"`
-	Region             string                 `json:"region"`
-	IsCrawler          bool                   `json:"is_crawler"`
-	ConnectionType     string                 `json:"connection_type"`
-	Latitude           float64                `json:"latitude"`
-	Longitude          float64                `json:"longitude"`
-	ZipCode            string                 `json:"zip_code"`
-	Timezone           string                 `json:"timezone"`
-	VPN                bool                   `json:"vpn"`
-	Tor                bool                   `json:"tor"`
-	ActiveVPN          bool                   `json:"active_vpn"`
-	ActiveTor          bool                   `json:"active_tor"`
-	RecentAbuse        bool                   `json:"recent_abuse"`
-	FrequentAbuser     bool                   `json:"frequent_abuser"`
-	HighRiskAttacks    bool                   `json:"high_risk_attacks"`
-	AbuseVelocity      string                 `json:"abuse_velocity"`
-	BotStatus          bool                   `json:"bot_status"`
-	SharedConnection   bool                   `json:"shared_connection"`
-	DynamicConnection  bool                   `json:"dynamic_connection"`
-	SecurityScanner    bool                   `json:"security_scanner"`
-	TrustedNetwork     bool                   `json:"trusted_network"`
-	Mobile             bool                   `json:"mobile"`
-	FraudScore         int                    `json:"fraud_score"`
-	OperatingSystem    string                 `json:"operating_system"`
-	Browser            string                 `json:"browser"`
-	DeviceModel        string                 `json:"device_model"`
-	DeviceBrand        string                 `json:"device_brand"`
-	TransactionDetails IPQSTransactionDetails `json:"transaction_details"`
-	RequestID          string                 `json:"request_id"`
+	Message            string                 `json:"message,omitempty"`
+	Success            bool                   `json:"success,omitempty"`
+	Proxy              bool                   `json:"proxy,omitempty"`
+	ISP                string                 `json:"ISP,omitempty"`
+	Organization       string                 `json:"organization,omitempty"`
+	ASN                int                    `json:"ASN,omitempty"`
+	Host               string                 `json:"host,omitempty"`
+	CountryCode        string                 `json:"country_code,omitempty"`
+	City               string                 `json:"city,omitempty"`
+	Region             string                 `json:"region,omitempty"`
+	IsCrawler          bool                   `json:"is_crawler,omitempty"`
+	ConnectionType     string                 `json:"connection_type,omitempty"`
+	Latitude           float64                `json:"latitude,omitempty"`
+	Longitude          float64                `json:"longitude,omitempty"`
+	ZipCode            string                 `json:"zip_code,omitempty"`
+	Timezone           string                 `json:"timezone,omitempty"`
+	VPN                bool                   `json:"vpn,omitempty"`
+	Tor                bool                   `json:"tor,omitempty"`
+	ActiveVPN          bool                   `json:"active_vpn,omitempty"`
+	ActiveTor          bool                   `json:"active_tor,omitempty"`
+	RecentAbuse        bool                   `json:"recent_abuse,omitempty"`
+	FrequentAbuser     bool                   `json:"frequent_abuser,omitempty"`
+	HighRiskAttacks    bool                   `json:"high_risk_attacks,omitempty"`
+	AbuseVelocity      string                 `json:"abuse_velocity,omitempty"`
+	BotStatus          bool                   `json:"bot_status,omitempty"`
+	SharedConnection   bool                   `json:"shared_connection,omitempty"`
+	DynamicConnection  bool                   `json:"dynamic_connection,omitempty"`
+	SecurityScanner    bool                   `json:"security_scanner,omitempty"`
+	TrustedNetwork     bool                   `json:"trusted_network,omitempty"`
+	Mobile             bool                   `json:"mobile,omitempty"`
+	FraudScore         int                    `json:"fraud_score,omitempty"`
+	OperatingSystem    string                 `json:"operating_system,omitempty"`
+	Browser            string                 `json:"browser,omitempty"`
+	DeviceModel        string                 `json:"device_model,omitempty"`
+	DeviceBrand        string                 `json:"device_brand,omitempty"`
+	TransactionDetails IPQSTransactionDetails `json:"transaction_details,omitempty"`
+	RequestID          string                 `json:"request_id,omitempty"`
 }
 
 type IPQSClient struct {
@@ -195,7 +195,7 @@ func (s *IPQSClient) Get(ctx context.Context, ip string) (*IPQSResponse, error) 
 	if result, err = s.load(ip); err != nil {
 		metricsTags["result"] = "cache_error"
 		return nil, err
-	} else if result != nil {
+	} else if result != nil && result.Success {
 		return result, nil
 	}
 
@@ -210,12 +210,12 @@ func (s *IPQSClient) Get(ctx context.Context, ip string) (*IPQSResponse, error) 
 			s.logger.Warn("Failed to get IPQS details, failing open.", zap.Error(err))
 			resultCh <- nil
 		}
-
-		// cache the result
-		if err := s.store(ip, result); err != nil {
-			s.logger.Warn("Failed to store IPQS details in cache.", zap.Error(err))
+		if result.Success {
+			// cache the result
+			if err := s.store(ip, result); err != nil {
+				s.logger.Warn("Failed to store IPQS details in cache.", zap.Error(err))
+			}
 		}
-
 		resultCh <- result
 	}()
 
