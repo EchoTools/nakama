@@ -54,6 +54,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		"account/search":                AccountSearchRPC,
 		"account/lookup":                AccountLookupRPC,
 		"account/authenticate/password": AuthenticatePasswordRPC,
+		"leaderboard/records":           UserLeaderboardRecordsRPC,
 		"link/device":                   LinkDeviceRpc,
 		"link/usernamedevice":           LinkUserIdDeviceRpc,
 		"signin/discord":                DiscordSignInRpc,

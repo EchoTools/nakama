@@ -315,7 +315,6 @@ func (s *ArenaStatistics) CalculateFields() {
 					Count: 1,
 				},
 			}
-
 		}
 
 		if s.PossessionTime != nil {
