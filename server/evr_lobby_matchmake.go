@@ -269,10 +269,22 @@ type MatchmakingSettings struct {
 	StaticBaseRankPercentile float64 `json:"static_rank_percentile"`    // The static rank percentile to use
 }
 
-func (MatchmakingSettings) GetStorageID() StorageID {
+func (MatchmakingSettings) StorageID() StorageID {
 	return StorageID{
 		Collection: MatchmakerStorageCollection,
 		Key:        MatchmakingConfigStorageKey,
+	}
+}
+
+func (MatchmakingSettings) StorageIndex() *StorageIndexMeta {
+	return &StorageIndexMeta{
+		Name:           ActivePartyGroupIndex,
+		Collection:     MatchmakerStorageCollection,
+		Key:            MatchmakingConfigStorageKey,
+		Fields:         []string{"group_id"},
+		SortableFields: nil,
+		MaxEntries:     100000,
+		IndexOnly:      false,
 	}
 }
 

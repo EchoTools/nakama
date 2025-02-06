@@ -193,19 +193,6 @@ func createCoreGroups(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 // Register Indexes for the login service
 func RegisterIndexes(initializer runtime.Initializer) error {
 
-	// Register the DisplayName index for avoiding name collisions
-	if err := initializer.RegisterStorageIndex(
-		DisplayNameHistoryCacheIndex,
-		DisplayNameCollection,
-		DisplayNameHistoryKey,
-		[]string{"active", "cache"},
-		nil,
-		1000000,
-		false,
-	); err != nil {
-		return err
-	}
-
 	if err := initializer.RegisterStorageIndex(
 		ActivePartyGroupIndex,
 		MatchmakerStorageCollection,
@@ -218,16 +205,26 @@ func RegisterIndexes(initializer runtime.Initializer) error {
 		return err
 	}
 
-	if err := initializer.RegisterStorageIndex(
-		LoginHistoryCacheIndex,
-		LoginStorageCollection,
-		LoginHistoryStorageKey,
-		[]string{"cache", "xpis", "client_ips", "second_order", "alternate_matches"},
-		nil,
-		1000000,
-		false,
-	); err != nil {
-		return err
+	// Register storage indexes for any Storables
+	storables := []Storable{
+		&DisplayNameHistory{},
+		&LoginHistory{},
+		&DeveloperApplications{},
+	}
+	for _, s := range storables {
+		if idx := s.StorageIndex(); idx != nil {
+			if err := initializer.RegisterStorageIndex(
+				idx.Name,
+				idx.Collection,
+				idx.Key,
+				idx.Fields,
+				idx.SortableFields,
+				idx.MaxEntries,
+				idx.IndexOnly,
+			); err != nil {
+				return err
+			}
+		}
 	}
 
 	return nil
