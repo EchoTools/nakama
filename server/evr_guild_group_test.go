@@ -189,3 +189,95 @@ func TestGuildGroupMembership_asBitSet(t *testing.T) {
 		})
 	}
 }
+func TestGroupMetadata_IsSuspended(t *testing.T) {
+
+	user1 := uuid.Must(uuid.NewV4()).String()
+	user2 := uuid.Must(uuid.NewV4()).String()
+
+	tests := []struct {
+		name      string
+		groupMeta GroupMetadata
+		userID    string
+		xpid      evr.EvrId
+		expected  bool
+	}{
+		{
+			name: "User has suspended role",
+			groupMeta: GroupMetadata{
+				Roles: &GuildGroupRoles{
+					Suspended: "suspended_role",
+				},
+				RoleCache: map[string]map[string]struct{}{
+					"suspended_role": {
+						user1: {},
+					},
+				},
+			},
+			userID:   user1,
+			xpid:     evr.EvrId{PlatformCode: evr.OVR_ORG, AccountId: 12341234},
+			expected: true,
+		},
+		{
+			name: "User is suspended by device",
+			groupMeta: GroupMetadata{
+				Roles: &GuildGroupRoles{
+					Suspended: "suspended_role",
+				},
+				Suspensions: map[evr.EvrId]string{
+					evr.EvrId{PlatformCode: evr.OVR_ORG, AccountId: 12341234}: user1,
+				},
+				RoleCache: map[string]map[string]struct{}{
+					"suspended_role": {
+						user1: {},
+					},
+				},
+			},
+			userID:   user2,
+			xpid:     evr.EvrId{PlatformCode: evr.OVR_ORG, AccountId: 12341234},
+			expected: true,
+		},
+		{
+			name: "User is not suspended",
+			groupMeta: GroupMetadata{
+				Roles: &GuildGroupRoles{
+					Suspended: "suspended_role",
+				},
+				Suspensions: map[evr.EvrId]string{
+					evr.EvrId{PlatformCode: evr.OVR_ORG, AccountId: 12341234}: user2,
+				},
+				RoleCache: map[string]map[string]struct{}{
+					"suspended_role": {
+						user2: {},
+					},
+				},
+			},
+			userID:   user1,
+			xpid:     evr.EvrId{PlatformCode: evr.OVR_ORG, AccountId: 56785678},
+			expected: false,
+		},
+		{
+			name: "User suspension removed",
+			groupMeta: GroupMetadata{
+				Roles: &GuildGroupRoles{
+					Suspended: "suspended_role",
+				},
+				Suspensions: map[evr.EvrId]string{
+					evr.EvrId{PlatformCode: evr.OVR_ORG, AccountId: 12341234}: user1,
+				},
+				RoleCache: map[string]map[string]struct{}{
+					"suspended_role": {},
+				},
+			},
+			userID:   user1,
+			xpid:     evr.EvrId{PlatformCode: evr.OVR_ORG, AccountId: 12341234},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.groupMeta.IsSuspended(tt.userID, &tt.xpid)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}

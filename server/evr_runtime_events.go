@@ -168,7 +168,7 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 						continue
 					}
 					s := "<@" + a.CustomId + ">"
-					if md.IsSuspended(s) {
+					if md.IsSuspended(s, &params.xpID) {
 						s = s + " (suspended)"
 					} else if a.DisableTime != nil {
 						s = s + " (disabled)"
@@ -194,7 +194,7 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 						continue
 					}
 					s := "<@" + a.CustomId + ">"
-					if md.IsSuspended(s) {
+					if md.IsSuspended(s, nil) {
 						s = s + " (suspended)"
 					} else if a.DisableTime != nil {
 						s = s + " (disabled)"

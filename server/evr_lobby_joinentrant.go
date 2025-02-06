@@ -245,7 +245,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 	}
 
 	// User is suspended from the group.
-	if groupMetadata.IsSuspended(userID) {
+	if groupMetadata.IsSuspended(userID, &params.xpID) {
 
 		metricsTags["error"] = "suspended_user"
 		if sendAuditMessage {

@@ -300,11 +300,11 @@ func (c *DiscordIntegrator) syncMember(ctx context.Context, logger *zap.Logger, 
 
 	if member == nil {
 		// Clear the role cache for the user
-		group.RolesCacheUpdate(evrAccount.ID(), nil)
+		group.RoleCacheUpdate(evrAccount, nil)
 		return nil
 	}
 
-	if updated := group.RolesCacheUpdate(evrAccount.ID(), member.Roles); updated {
+	if updated := group.RoleCacheUpdate(evrAccount, member.Roles); updated {
 		// save the group data
 		data, err := group.MarshalToMap()
 		if err != nil {
@@ -599,7 +599,7 @@ func (d *DiscordIntegrator) handleMemberUpdate(logger *zap.Logger, s *discordgo.
 	}
 
 	// Update the role cache
-	if updated := group.RolesCacheUpdate(evrAccount.ID(), e.Member.Roles); updated {
+	if updated := group.RoleCacheUpdate(evrAccount, e.Member.Roles); updated {
 		// save the group data
 		data, err := group.MarshalToMap()
 		if err != nil {

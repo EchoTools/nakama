@@ -155,6 +155,23 @@ func (a *AccountMetadata) AvatarURL() string {
 	return a.account.User.AvatarUrl
 }
 
+func (a *AccountMetadata) XPIDs() []evr.EvrId {
+	if a.account == nil {
+		return nil
+	}
+
+	xpids := make([]evr.EvrId, 0, len(a.account.Devices))
+	for _, d := range a.account.Devices {
+		xpid, err := evr.ParseEvrId(d.Id)
+		if err != nil || xpid == nil {
+			continue
+		}
+
+		xpids = append(xpids, *xpid)
+	}
+
+	return xpids
+}
 func (a *AccountMetadata) DiscordAccountCreationTime() time.Time {
 	t, _ := discordgo.SnowflakeTimestamp(a.DiscordID())
 	return t
