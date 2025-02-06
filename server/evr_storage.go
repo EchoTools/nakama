@@ -11,7 +11,19 @@ import (
 )
 
 type Storable interface {
-	GetStorageID() StorageID
+	StorageID() StorageID
+	StorageIndex() *StorageIndexMeta
+}
+
+// initializer.StorageIndex
+type StorageIndexMeta struct {
+	Name           string
+	Collection     string
+	Key            string
+	Fields         []string
+	SortableFields []string
+	MaxEntries     int
+	IndexOnly      bool
 }
 
 type StorageID struct {
@@ -26,7 +38,7 @@ func StorageRead(ctx context.Context, nk runtime.NakamaModule, userID string, ds
 	if dst == nil {
 		return "", status.Errorf(codes.InvalidArgument, "dst is nil")
 	}
-	storageID := dst.GetStorageID()
+	storageID := dst.StorageID()
 
 	var version string
 	objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
@@ -61,7 +73,7 @@ func StorageRead(ctx context.Context, nk runtime.NakamaModule, userID string, ds
 }
 
 func StorageWrite(ctx context.Context, nk runtime.NakamaModule, userID string, src Storable) (string, error) {
-	storageID := src.GetStorageID()
+	storageID := src.StorageID()
 	data, err := json.Marshal(src)
 	if err != nil {
 		return "", status.Errorf(codes.Internal, "failed to marshal %s/%s: %s", userID, storageID.String(), err.Error())

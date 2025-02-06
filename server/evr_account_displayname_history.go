@@ -31,6 +31,25 @@ type DisplayNameHistory struct {
 	IsActive     bool                            `json:"is_active"` // if the user has an actively linked headset
 }
 
+func (DisplayNameHistory) StorageID() StorageID {
+	return StorageID{
+		Collection: DisplayNameCollection,
+		Key:        DisplayNameHistoryKey,
+	}
+}
+
+func (DisplayNameHistory) StorageIndex() *StorageIndexMeta {
+	return &StorageIndexMeta{
+		Name:           DisplayNameHistoryCacheIndex,
+		Collection:     DisplayNameCollection,
+		Key:            DisplayNameHistoryKey,
+		Fields:         []string{"active", "cache"},
+		SortableFields: nil,
+		MaxEntries:     1000000,
+		IndexOnly:      false,
+	}
+}
+
 func NewDisplayNameHistory() *DisplayNameHistory {
 	return &DisplayNameHistory{
 		Histories:    make(map[string]map[string]time.Time),

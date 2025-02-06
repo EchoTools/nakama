@@ -76,6 +76,25 @@ type LoginHistory struct {
 	version                string                             // storage record version
 }
 
+func (LoginHistory) StorageID() StorageID {
+	return StorageID{
+		Collection: LoginStorageCollection,
+		Key:        LoginHistoryStorageKey,
+	}
+}
+
+func (LoginHistory) StorageIndex() *StorageIndexMeta {
+	return &StorageIndexMeta{
+		Name:           LoginHistoryCacheIndex,
+		Collection:     LoginStorageCollection,
+		Key:            LoginHistoryStorageKey,
+		Fields:         []string{"cache", "xpis", "client_ips", "second_order", "alternate_matches"},
+		SortableFields: nil,
+		MaxEntries:     1000000,
+		IndexOnly:      false,
+	}
+}
+
 func NewLoginHistory(userID string) *LoginHistory {
 	return &LoginHistory{
 		History:                make(map[string]*LoginHistoryEntry),
