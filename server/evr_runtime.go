@@ -109,18 +109,20 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		return err
 	}
 
-	// Register RPC for /api service.
-	if err := initializer.RegisterRpc("evr/api", EvrApiHttpHandler); err != nil {
+	appAcceptorFn := NewAppAPIAcceptor(ctx, logger, db, nk, initializer)
+
+	// Register HTTP Handler for the evr/api service
+	if err := initializer.RegisterHttp("evr/api/(.+)", appAcceptorFn, "GET", "POST"); err != nil {
 		return fmt.Errorf("unable to register /evr/api service: %w", err)
 	}
 
-	// Register the event
-
+	// Register the event dispatch
 	eventDispatch, err := NewEventDispatch(ctx, logger, db, nk, initializer)
 	if err != nil {
 		return fmt.Errorf("unable to create event dispatch: %w", err)
 	}
 
+	// Register the event handler
 	if err := initializer.RegisterEvent(eventDispatch.eventFn); err != nil {
 		return err
 	}
@@ -130,6 +132,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		return fmt.Errorf("unable to register matchmaker override: %w", err)
 	}
 
+	// Migrate any system level data
 	go MigrateSystem(ctx, logger, db, nk)
 
 	// Update the metrics with match data
@@ -228,22 +231,6 @@ func RegisterIndexes(initializer runtime.Initializer) error {
 	}
 
 	return nil
-}
-
-func EvrApiHttpHandler(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
-	var message interface{}
-	if err := json.Unmarshal([]byte(payload), &message); err != nil {
-		return "", err
-	}
-
-	logger.Info("API Service Message: %v", message)
-
-	response, err := json.Marshal(map[string]interface{}{"message": message})
-	if err != nil {
-		return "", fmt.Errorf("error marshalling response: %w", err)
-	}
-
-	return string(response), nil
 }
 
 func GetUserIDByDiscordID(ctx context.Context, db *sql.DB, customID string) (userID string, err error) {
