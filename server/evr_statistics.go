@@ -54,17 +54,17 @@ func (l LeaderboardMeta) ID() string {
 
 func LeaderboardMetaFromID(id string) (LeaderboardMeta, error) {
 	parts := strings.Split(id, ":")
-	if len(parts) != 3 {
+	if len(parts) != 4 {
 		return LeaderboardMeta{}, fmt.Errorf("invalid leaderboard ID: %s", id)
 	}
 
-	mode := evr.Symbol(evr.ToSymbol(parts[0]))
+	mode := evr.Symbol(evr.ToSymbol(parts[1]))
 
 	return LeaderboardMeta{
 		GroupID:       parts[0],
 		Mode:          mode,
-		StatName:      parts[1],
-		ResetSchedule: evr.ResetSchedule(parts[2]),
+		StatName:      parts[2],
+		ResetSchedule: evr.ResetSchedule(parts[3]),
 	}, nil
 }
 
