@@ -4,18 +4,20 @@ import (
 	"testing"
 
 	"github.com/bits-and-blooms/bitset"
+	"github.com/gofrs/uuid/v5"
+	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestGuildGroupMembership_ToUint64(t *testing.T) {
 	tests := []struct {
 		name       string
-		membership GuildGroupMembership
+		membership guildGroupPermissions
 		expected   uint64
 	}{
 		{
 			name: "All flags set",
-			membership: GuildGroupMembership{
+			membership: guildGroupPermissions{
 				IsAllowedMatchmaking: true,
 				IsModerator:          true,
 				IsServerHost:         true,
@@ -29,7 +31,7 @@ func TestGuildGroupMembership_ToUint64(t *testing.T) {
 		},
 		{
 			name: "No flags set",
-			membership: GuildGroupMembership{
+			membership: guildGroupPermissions{
 				IsAllowedMatchmaking: false,
 				IsModerator:          false,
 				IsServerHost:         false,
@@ -43,7 +45,7 @@ func TestGuildGroupMembership_ToUint64(t *testing.T) {
 		},
 		{
 			name: "Some flags set",
-			membership: GuildGroupMembership{
+			membership: guildGroupPermissions{
 				IsAllowedMatchmaking: true,
 				IsModerator:          false,
 				IsServerHost:         true,
@@ -68,12 +70,12 @@ func TestGuildGroupMembership_FromBitSet(t *testing.T) {
 	tests := []struct {
 		name     string
 		bitset   *bitset.BitSet
-		expected GuildGroupMembership
+		expected guildGroupPermissions
 	}{
 		{
 			name:   "All flags set",
 			bitset: bitset.From([]uint64{511}), // 111111111 in binary
-			expected: GuildGroupMembership{
+			expected: guildGroupPermissions{
 				IsAllowedMatchmaking: true,
 				IsModerator:          true,
 				IsServerHost:         true,
@@ -88,7 +90,7 @@ func TestGuildGroupMembership_FromBitSet(t *testing.T) {
 		{
 			name:   "No flags set",
 			bitset: bitset.From([]uint64{0}),
-			expected: GuildGroupMembership{
+			expected: guildGroupPermissions{
 				IsAllowedMatchmaking: false,
 				IsModerator:          false,
 				IsServerHost:         false,
@@ -103,7 +105,7 @@ func TestGuildGroupMembership_FromBitSet(t *testing.T) {
 		{
 			name:   "Some flags set",
 			bitset: bitset.From([]uint64{341}), // 101010101 in binary
-			expected: GuildGroupMembership{
+			expected: guildGroupPermissions{
 				IsAllowedMatchmaking: true,
 				IsModerator:          false,
 				IsServerHost:         true,
@@ -119,7 +121,7 @@ func TestGuildGroupMembership_FromBitSet(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var membership GuildGroupMembership
+			var membership guildGroupPermissions
 			membership.FromBitSet(tt.bitset)
 			assert.Equal(t, tt.expected, membership)
 		})
@@ -128,12 +130,12 @@ func TestGuildGroupMembership_FromBitSet(t *testing.T) {
 func TestGuildGroupMembership_asBitSet(t *testing.T) {
 	tests := []struct {
 		name       string
-		membership GuildGroupMembership
+		membership guildGroupPermissions
 		expected   *bitset.BitSet
 	}{
 		{
 			name: "All flags set",
-			membership: GuildGroupMembership{
+			membership: guildGroupPermissions{
 				IsAllowedMatchmaking: true,
 				IsModerator:          true,
 				IsServerHost:         true,
@@ -148,7 +150,7 @@ func TestGuildGroupMembership_asBitSet(t *testing.T) {
 		},
 		{
 			name: "No flags set",
-			membership: GuildGroupMembership{
+			membership: guildGroupPermissions{
 				IsAllowedMatchmaking: false,
 				IsModerator:          false,
 				IsServerHost:         false,
@@ -163,7 +165,7 @@ func TestGuildGroupMembership_asBitSet(t *testing.T) {
 		},
 		{
 			name: "Some flags set",
-			membership: GuildGroupMembership{
+			membership: guildGroupPermissions{
 				IsAllowedMatchmaking: true,
 				IsModerator:          false,
 				IsServerHost:         true,

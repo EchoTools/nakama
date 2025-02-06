@@ -68,8 +68,6 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(logger runtime.Logge
 		return fmt.Errorf("failed to create guild group: %w", err)
 	}
 
-	perms := group.PermissionsUser(userID)
-
 	// Global security check
 	switch commandName {
 
@@ -87,7 +85,7 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(logger runtime.Logge
 
 	case "allocate":
 
-		if !perms.IsAllocator {
+		if !group.IsAllocator(userID) {
 			return simpleInteractionResponse(s, i, "You must be a guild allocator to use this command.")
 		}
 
@@ -99,7 +97,7 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(logger runtime.Logge
 			}
 		}
 
-		if !perms.IsModerator {
+		if !group.IsModerator(userID) {
 			return simpleInteractionResponse(s, i, "You must be a guild moderator to use this command.")
 		}
 
@@ -353,8 +351,7 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		return nil, 0, status.Error(codes.PermissionDenied, "user is not a member of the guild")
 	}
 
-	perms := group.PermissionsUser(userID)
-	if perms.IsSuspended {
+	if group.IsSuspended(userID, nil) {
 		return nil, 0, status.Error(codes.PermissionDenied, "user is suspended from the guild")
 	}
 

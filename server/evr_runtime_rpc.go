@@ -204,8 +204,8 @@ func (r MatchRpcResponse) String() string {
 	return string(data)
 }
 
-func MembershipsFromSessionVars(vars map[string]string) (map[string]GuildGroupMembership, error) {
-	memberships := make(map[string]GuildGroupMembership)
+func MembershipsFromSessionVars(vars map[string]string) (map[string]guildGroupPermissions, error) {
+	memberships := make(map[string]guildGroupPermissions)
 	if data, ok := vars["memberships"]; ok {
 		var bitsets map[string]uint64
 		if err := json.Unmarshal([]byte(data), &bitsets); err != nil {
@@ -213,7 +213,7 @@ func MembershipsFromSessionVars(vars map[string]string) (map[string]GuildGroupMe
 		}
 
 		for groupID, bitset := range bitsets {
-			m := GuildGroupMembership{}
+			m := guildGroupPermissions{}
 			m.FromUint64(bitset)
 			memberships[groupID] = m
 		}
@@ -1135,7 +1135,7 @@ func AuthenticatePasswordRPC(ctx context.Context, logger runtime.Logger, db *sql
 		varMemberships := make(map[string]uint64)
 
 		for id, gg := range guildGroups {
-			varMemberships[id] = gg.PermissionsUser(userID).ToUint64()
+			varMemberships[id] = gg.MembershipBitSet(userID)
 		}
 
 		data, _ := json.Marshal(varMemberships)
