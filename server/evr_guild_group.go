@@ -12,6 +12,7 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
 type GuildGroupRoles struct {
@@ -78,6 +79,7 @@ type GroupMetadata struct {
 	LogAlternateAccounts               bool                           `json:"log_alternate_accounts"`     // Log alternate accounts
 	AlternateAccountNotificationExpiry time.Time                      `json:"alt_notification_threshold"` // Show alternate notifications newer than this time.
 	CommunityValuesUserIDs             map[string]time.Time           `json:"community_values_user_ids"`  // UserIDs that are required to go to community values when the first join the social lobby
+	Suspensions                        map[evr.EvrId]string           `json:"suspended_devices"`          // map[XPID]UserID
 }
 
 func NewGuildGroupMetadata(guildID string) *GroupMetadata {
@@ -86,6 +88,7 @@ func NewGuildGroupMetadata(guildID string) *GroupMetadata {
 		RoleCache:             make(map[string]map[string]struct{}),
 		Roles:                 &GuildGroupRoles{},
 		MatchmakingChannelIDs: make(map[string]string),
+		Suspensions:           make(map[evr.EvrId]string),
 	}
 }
 
@@ -121,8 +124,34 @@ func (g *GroupMetadata) IsMember(userID string) bool {
 	return g.HasRole(userID, g.Roles.Member)
 }
 
-func (g *GroupMetadata) IsSuspended(userID string) bool {
-	return g.HasRole(userID, g.Roles.Suspended)
+func (g *GroupMetadata) IsSuspended(userID string, xpid *evr.EvrId) bool {
+	if g.HasRole(userID, g.Roles.Suspended) {
+		return true
+	}
+	if xpid == nil {
+		return false
+	}
+
+	if g.Suspensions == nil {
+		return false
+	}
+
+	if userID, ok := g.Suspensions[*xpid]; ok {
+
+		// Check if the user is (still) suspended
+		if g.HasRole(userID, g.Roles.Suspended) {
+			return true
+		}
+
+		// Remove any suspended devices for this user
+		for xpid, uid := range g.Suspensions {
+			if uid == userID {
+				delete(g.Suspensions, xpid)
+			}
+		}
+	}
+
+	return false
 }
 
 func (g *GroupMetadata) IsLimitedAccess(userID string) bool {
@@ -275,7 +304,7 @@ func (g GuildGroup) MembershipBitSet(userID string) uint64 {
 		IsModerator:          g.IsModerator(userID),
 		IsServerHost:         g.IsServerHost(userID),
 		IsAllocator:          g.IsAllocator(userID),
-		IsSuspended:          g.IsSuspended(userID),
+		IsSuspended:          g.IsSuspended(userID, nil),
 		IsLimitedAccess:      g.IsLimitedAccess(userID),
 		IsAPIAccess:          g.IsAPIAccess(userID),
 		IsAccountAgeBypass:   g.IsAccountAgeBypass(userID),
@@ -283,7 +312,7 @@ func (g GuildGroup) MembershipBitSet(userID string) uint64 {
 	}.ToUint64()
 }
 
-func (g *GuildGroup) RolesCacheUpdate(userID string, current []string) bool {
+func (g *GuildGroup) RoleCacheUpdate(account *EVRAccount, current []string) bool {
 
 	// Ensure the role cache has been initialized
 	if g.RoleCache == nil {
@@ -316,13 +345,36 @@ func (g *GuildGroup) RolesCacheUpdate(userID string, current []string) bool {
 	// Update the roles
 	for role, userIDs := range g.RoleCache {
 		_, hasRole := userRoles[role]
-		_, hasUser := userIDs[userID]
+		_, hasUser := userIDs[account.ID()]
 		if hasRole && !hasUser {
-			userIDs[userID] = struct{}{}
+			userIDs[account.ID()] = struct{}{}
 			updated = true
 		} else if !hasRole && hasUser {
-			delete(userIDs, userID)
+			delete(userIDs, account.ID())
 			updated = true
+		}
+	}
+
+	// If this user is suspended, add their devices to the suspension list
+	if g.IsSuspended(account.ID(), nil) {
+		if g.Suspensions == nil {
+			g.Suspensions = make(map[evr.EvrId]string)
+		}
+
+		for _, xpid := range account.XPIDs() {
+			if _, ok := g.Suspensions[xpid]; ok {
+				continue
+			}
+			g.Suspensions[xpid] = account.ID()
+			updated = true
+		}
+	} else {
+		// Remove any suspended devices for this user
+		for xpid, uid := range g.Suspensions {
+			if uid == account.ID() {
+				delete(g.Suspensions, xpid)
+				updated = true
+			}
 		}
 	}
 
