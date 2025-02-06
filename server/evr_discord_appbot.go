@@ -2025,7 +2025,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			isGuildModerator := false
 			if gg, ok := callerGuildGroups[groupID]; ok {
-				isGuildModerator = gg.PermissionsUser(callerUserID).IsModerator
+				isGuildModerator = gg.IsModerator(callerUserID)
 			}
 
 			// Get the caller's nakama user ID

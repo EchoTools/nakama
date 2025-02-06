@@ -321,31 +321,29 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 					continue
 				}
 
-				m := group.PermissionsUser(userID.String())
-
 				roles := make([]string, 0)
-				if m.IsAllowedMatchmaking {
+				if group.IsAllowedMatchmaking(userIDStr) {
 					roles = append(roles, "matchmaking")
 				}
-				if m.IsModerator {
+				if group.IsModerator(userIDStr) {
 					roles = append(roles, "moderator")
 				}
-				if m.IsServerHost {
+				if group.IsServerHost(userIDStr) {
 					roles = append(roles, "server-host")
 				}
-				if m.IsAllocator {
+				if group.IsAllocator(userIDStr) {
 					roles = append(roles, "allocator")
 				}
-				if m.IsAPIAccess {
+				if group.IsAPIAccess(userIDStr) {
 					roles = append(roles, "api-access")
 				}
-				if m.IsSuspended {
+				if group.IsSuspended(userIDStr, nil) {
 					roles = append(roles, "suspended")
 				}
-				if m.IsVPNBypass {
+				if group.IsVPNBypass(userIDStr) {
 					roles = append(roles, "vpn-bypass")
 				}
-				if m.IsLimitedAccess {
+				if group.IsLimitedAccess(userIDStr) {
 					roles = append(roles, "limited-access")
 				}
 				if len(roles) > 0 {

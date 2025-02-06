@@ -52,7 +52,7 @@ func (r *GuildGroupRoles) AsSlice() []string {
 	return slices.Compact(roles)
 }
 
-type GuildGroupMemberships map[string]GuildGroupMembership
+type GuildGroupMemberships map[string]guildGroupPermissions
 
 func (g GuildGroupMemberships) IsMember(groupID string) bool {
 	_, ok := g[groupID]
@@ -269,8 +269,8 @@ func (g *GuildGroup) RolesUserList(userID string) []string {
 	return roles
 }
 
-func (g *GuildGroup) PermissionsUser(userID string) *GuildGroupMembership {
-	return &GuildGroupMembership{
+func (g GuildGroup) MembershipBitSet(userID string) uint64 {
+	return guildGroupPermissions{
 		IsAllowedMatchmaking: g.IsAllowedMatchmaking(userID),
 		IsModerator:          g.IsModerator(userID),
 		IsServerHost:         g.IsServerHost(userID),
@@ -280,7 +280,7 @@ func (g *GuildGroup) PermissionsUser(userID string) *GuildGroupMembership {
 		IsAPIAccess:          g.IsAPIAccess(userID),
 		IsAccountAgeBypass:   g.IsAccountAgeBypass(userID),
 		IsVPNBypass:          g.IsVPNBypass(userID),
-	}
+	}.ToUint64()
 }
 
 func (g *GuildGroup) RolesCacheUpdate(userID string, current []string) bool {
@@ -329,7 +329,7 @@ func (g *GuildGroup) RolesCacheUpdate(userID string, current []string) bool {
 	return updated
 }
 
-type GuildGroupMembership struct {
+type guildGroupPermissions struct {
 	IsAllowedMatchmaking bool
 	IsModerator          bool // Admin
 	IsServerHost         bool // Broadcaster Host
@@ -341,7 +341,7 @@ type GuildGroupMembership struct {
 	IsLimitedAccess      bool
 }
 
-func (m *GuildGroupMembership) ToUint64() uint64 {
+func (m guildGroupPermissions) ToUint64() uint64 {
 	var i uint64 = 0
 	b := m.asBitSet()
 	if len(b.Bytes()) == 0 {
@@ -350,12 +350,12 @@ func (m *GuildGroupMembership) ToUint64() uint64 {
 	return uint64(b.Bytes()[0])
 }
 
-func (m *GuildGroupMembership) FromUint64(v uint64) {
+func (m *guildGroupPermissions) FromUint64(v uint64) {
 	b := bitset.From([]uint64{v})
 	m.FromBitSet(b)
 }
 
-func (m *GuildGroupMembership) FromBitSet(b *bitset.BitSet) {
+func (m *guildGroupPermissions) FromBitSet(b *bitset.BitSet) {
 
 	value := reflect.ValueOf(m).Elem()
 	for i := 0; i < value.NumField(); i++ {
@@ -367,7 +367,7 @@ func (m *GuildGroupMembership) FromBitSet(b *bitset.BitSet) {
 	}
 }
 
-func (m *GuildGroupMembership) asBitSet() *bitset.BitSet {
+func (m guildGroupPermissions) asBitSet() *bitset.BitSet {
 	value := reflect.ValueOf(m).Elem()
 
 	b := bitset.New(uint(value.NumField()))
