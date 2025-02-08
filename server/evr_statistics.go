@@ -81,16 +81,16 @@ func MatchmakingRatingLoad(ctx context.Context, nk runtime.NakamaModule, userID,
 	for statName, ptr := range structMap {
 		boardID := StatisticBoardID(groupID, mode, statName, "alltime")
 
-		_, records, _, _, err := nk.LeaderboardRecordsList(ctx, boardID, []string{userID}, 10000, "", 0)
+		_, ownerRecords, _, _, err := nk.LeaderboardRecordsList(ctx, boardID, []string{userID}, 1, "", 0)
 		if err != nil {
-			continue
+			return NewDefaultRating(), err
 		}
 
-		if len(records) == 0 {
+		if len(ownerRecords) == 0 {
 			return NewDefaultRating(), nil
 		}
 
-		record := records[0]
+		record := ownerRecords[0]
 		*ptr = ScoreToValue(record.Score, record.Subscore)
 	}
 	if sigma == 0 || mu == 0 {
