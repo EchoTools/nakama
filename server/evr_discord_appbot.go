@@ -3805,8 +3805,10 @@ func IPVerificationEmbed(entry *LoginHistoryEntry, ipqs *IPQSResponse) ([]*disco
 
 	codes := []string{code}
 
+	numCodes := 5
+
 	// Generate 3 more random numbers
-	for len(codes) < 4 {
+	for len(codes) < numCodes {
 		s := fmt.Sprintf("%02d", rand.Intn(100))
 		if slices.Contains(codes, s) {
 			continue
@@ -3819,7 +3821,7 @@ func IPVerificationEmbed(entry *LoginHistoryEntry, ipqs *IPQSResponse) ([]*disco
 		codes[i], codes[j] = codes[j], codes[i]
 	})
 
-	options := make([]discordgo.SelectMenuOption, 0, 4)
+	options := make([]discordgo.SelectMenuOption, 0, len(codes))
 
 	for _, code := range codes {
 		options = append(options, discordgo.SelectMenuOption{
