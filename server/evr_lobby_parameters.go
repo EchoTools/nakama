@@ -283,7 +283,11 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 	rankPercentileMaxDelta := 1.0
 	rankPercentile := globalSettings.RankPercentile.Default
 	rating := NewDefaultRating()
+	mmMode := mode
 
+	if mode == evr.ModeSocialPublic {
+		mmMode = evr.ModeArenaPublic
+	}
 	if !globalSettings.DisableSBMM {
 
 		if globalSettings.RankPercentile.MaxDelta > 0 {
@@ -293,21 +297,17 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		if userSettings.StaticBaseRankPercentile > 0 {
 			rankPercentile = userSettings.StaticBaseRankPercentile
 		} else {
-			rankPercentile, err = CalculateSmoothedPlayerRankPercentile(ctx, logger, p.db, p.runtimeModule, userID, groupID.String(), mode)
+			rankPercentile, err = CalculateSmoothedPlayerRankPercentile(ctx, logger, p.db, p.runtimeModule, userID, groupID.String(), mmMode)
 			if err != nil {
 				return nil, fmt.Errorf("failed to calculate smoothed player rank percentile: %w", err)
 			}
 
-			if err := MatchmakingRankPercentileStore(ctx, p.runtimeModule, userID, session.Username(), groupID.String(), mode, rankPercentile); err != nil {
+			if err := MatchmakingRankPercentileStore(ctx, p.runtimeModule, userID, session.Username(), groupID.String(), mmMode, rankPercentile); err != nil {
 				logger.Warn("Failed to store user rank percentile", zap.Error(err))
-			}
-
-			if err := StoreMatchmakingSettings(ctx, p.runtimeModule, userID, userSettings); err != nil {
-				logger.Warn("Failed to store user matchmaking settings", zap.Error(err))
 			}
 		}
 
-		rating, err = MatchmakingRatingLoad(ctx, p.runtimeModule, userID, groupID.String(), mode)
+		rating, err = MatchmakingRatingLoad(ctx, p.runtimeModule, userID, groupID.String(), mmMode)
 		if err != nil {
 			logger.Warn("Failed to load matchmaking rating", zap.Error(err))
 			rating = NewDefaultRating()
