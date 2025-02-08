@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -148,9 +149,9 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 			return fmt.Errorf("failed to load login history: %w", err)
 		}
 
-		if updated := loginHistory.NotifyGroup(groupID, md.AlternateAccountNotificationExpiry); updated {
+		firstIDs := make([]string, 0, len(loginHistory.AlternateMap))
 
-			firstIDs := make([]string, 0, len(loginHistory.AlternateMap))
+		if updated := loginHistory.NotifyGroup(groupID, md.AlternateAccountNotificationExpiry); updated {
 
 			for k := range loginHistory.AlternateMap {
 				firstIDs = append(firstIDs, k)
@@ -190,7 +191,7 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 
 				for _, a := range secondDegreeAccounts {
 					// Check if any are banned, or currently suspended by the guild
-					if a.User.Id == userID {
+					if a.User.Id == userID || slices.Contains(firstIDs, a.User.Id) {
 						continue
 					}
 					s := "<@" + a.CustomId + ">"

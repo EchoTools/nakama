@@ -62,6 +62,14 @@ func (h *LoginHistoryEntry) Items() []string {
 	return []string{h.ClientIP, h.LoginData.HMDSerialNumber, h.XPID.Token(), h.SystemProfile()}
 }
 
+func (h *LoginHistoryEntry) ItemMap() map[string]struct{} {
+	return map[string]struct{}{
+		h.ClientIP:                  {},
+		h.LoginData.HMDSerialNumber: {},
+		h.XPID.Token():              {},
+		h.SystemProfile():           {}}
+}
+
 type LoginHistory struct {
 	History                map[string]*LoginHistoryEntry      `json:"history"` // map[deviceID]DeviceHistoryEntry
 	Cache                  []string                           `json:"cache"`   // list of IP addresses, EvrID's, HMD Serial Numbers, and System Data
@@ -277,7 +285,6 @@ func (h *LoginHistory) UpdateAlternates(ctx context.Context, nk runtime.NakamaMo
 			}
 		}
 		h.AlternateMap[m.otherHistory.userID] = append(h.AlternateMap[m.otherHistory.userID], m)
-
 	}
 
 	slices.Sort(h.SecondDegreeAlternates)
