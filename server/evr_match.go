@@ -810,8 +810,8 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		state.emptyTicks = 0
 	}
 
-	// Update the game clock every second
-	if tick%state.tickRate == 0 && state.GameState != nil {
+	// Update the game clock every three seconds
+	if tick%(state.tickRate*3) == 0 && state.GameState != nil {
 		state.GameState.Update(state.goals)
 		updateLabel = true
 	}
