@@ -420,7 +420,7 @@ func (m *guildGroupPermissions) FromBitSet(b *bitset.BitSet) {
 }
 
 func (m guildGroupPermissions) asBitSet() *bitset.BitSet {
-	value := reflect.ValueOf(m).Elem()
+	value := reflect.ValueOf(m)
 
 	b := bitset.New(uint(value.NumField()))
 	for i := 0; i < value.NumField(); i++ {
