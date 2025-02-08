@@ -602,14 +602,18 @@ func PrepareEntrantPresences(ctx context.Context, logger *zap.Logger, nk runtime
 			logger.Warn("Session not found", zap.String("sid", sessionID.String()))
 			continue
 		}
+		mmMode := lobbyParams.Mode
+		if mmMode == evr.ModeSocialPublic {
+			mmMode = evr.ModeArenaPublic
+		}
 
-		rankPercentile, err := MatchmakingRankPercentileLoad(ctx, nk, session.UserID().String(), lobbyParams.GroupID.String(), lobbyParams.Mode)
+		rankPercentile, err := MatchmakingRankPercentileLoad(ctx, nk, session.UserID().String(), lobbyParams.GroupID.String(), mmMode)
 		if err != nil {
 			logger.Warn("Failed to load rank percentile", zap.String("sid", sessionID.String()), zap.Error(err))
 			rankPercentile = ServiceSettings().Matchmaking.RankPercentile.Default
 		}
 
-		rating, err := MatchmakingRatingLoad(ctx, nk, session.UserID().String(), lobbyParams.GroupID.String(), lobbyParams.Mode)
+		rating, err := MatchmakingRatingLoad(ctx, nk, session.UserID().String(), lobbyParams.GroupID.String(), mmMode)
 		if err != nil {
 			logger.Warn("Failed to load rating", zap.String("sid", sessionID.String()), zap.Error(err))
 			rating = NewDefaultRating()
