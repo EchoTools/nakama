@@ -290,12 +290,6 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 			rankPercentileMaxDelta = globalSettings.RankPercentile.MaxDelta
 		}
 
-		rankPercentile, err = MatchmakingRankPercentileLoad(ctx, p.runtimeModule, userID, groupID.String(), mode)
-		if err != nil {
-			logger.Warn("Failed to load user rank percentile", zap.Error(err))
-			rankPercentile = globalSettings.RankPercentile.Default
-		}
-
 		if userSettings.StaticBaseRankPercentile > 0 {
 			rankPercentile = userSettings.StaticBaseRankPercentile
 		} else {
@@ -313,7 +307,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 			}
 		}
 
-		rating, err = MatchmakingRatingLoad(ctx, p.runtimeModule, userID, r.GetGroupID().String(), mode)
+		rating, err = MatchmakingRatingLoad(ctx, p.runtimeModule, userID, groupID.String(), mode)
 		if err != nil {
 			logger.Warn("Failed to load matchmaking rating", zap.Error(err))
 			rating = NewDefaultRating()
