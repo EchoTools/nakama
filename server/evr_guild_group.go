@@ -70,7 +70,6 @@ type GroupMetadata struct {
 	Roles                              *GuildGroupRoles               `json:"roles"`                      // The roles text displayed on the main menu
 	RoleCache                          map[string]map[string]struct{} `json:"role_cache"`                 // The role cache
 	MatchmakingChannelIDs              map[string]string              `json:"matchmaking_channel_ids"`    // The matchmaking channel IDs
-	DebugChannelID                     string                         `json:"debug_channel_id"`           // The debug channel
 	AuditChannelID                     string                         `json:"audit_channel_id"`           // The audit channel
 	ErrorChannelID                     string                         `json:"error_channel_id"`           // The error channel
 	BlockVPNUsers                      bool                           `json:"block_vpn_users"`            // Block VPN users

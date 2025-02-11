@@ -31,6 +31,8 @@ type GlobalSettingsData struct {
 	defaultCosmetics         map[string]struct{}
 	RemoteLogFilters         map[string][]string `json:"remote_logs_filter"` //	Ignore remote logs from specific servers
 	ReportURL                string              `json:"report_url"`         // URL to report issues
+	GlobalAuditChannelID     string              `json:"global_audit_channel_id"`
+	GlobalErrorChannelID     string              `json:"global_error_channel_id"`
 }
 
 type GlobalMatchmakingSettings struct {

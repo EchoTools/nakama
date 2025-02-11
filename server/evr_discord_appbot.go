@@ -3944,6 +3944,10 @@ func (d *DiscordAppBot) LogAuditMessage(ctx context.Context, groupID string, mes
 	if groupMetadata.AuditChannelID != "" {
 		return d.dg.ChannelMessageSend(groupMetadata.AuditChannelID, message)
 	}
+
+	if cID := ServiceSettings().GlobalAuditChannelID; cID != "" {
+
+	}
 	return nil, nil
 }
 
@@ -3961,6 +3965,11 @@ func (d *DiscordAppBot) LogUserErrorMessage(ctx context.Context, groupID string,
 	if groupMetadata.ErrorChannelID != "" {
 		return d.dg.ChannelMessageSend(groupMetadata.ErrorChannelID, message)
 	}
+
+	if cID := ServiceSettings().GlobalErrorChannelID; cID != "" {
+		return d.dg.ChannelMessageSend(cID, message)
+	}
+
 	return nil, nil
 }
 
