@@ -2,6 +2,7 @@ package server
 
 import (
 	"testing"
+	"time"
 
 	"github.com/bits-and-blooms/bitset"
 	"github.com/gofrs/uuid/v5"
@@ -27,7 +28,7 @@ func TestGuildGroupMembership_ToUint64(t *testing.T) {
 				IsAccountAgeBypass:   true,
 				IsVPNBypass:          true,
 			},
-			expected: uint64(511), // 111111111 in binary
+			expected: uint64(0xff), // 111111111 in binary
 		},
 		{
 			name: "No flags set",
@@ -55,7 +56,7 @@ func TestGuildGroupMembership_ToUint64(t *testing.T) {
 				IsAccountAgeBypass:   true,
 				IsVPNBypass:          false,
 			},
-			expected: uint64(341), // 101010101 in binary
+			expected: uint64(0x55), // 101010101 in binary
 		},
 	}
 
@@ -243,7 +244,7 @@ func TestGroupMetadata_IsSuspended(t *testing.T) {
 					Suspended: "suspended_role",
 				},
 				Suspensions: map[evr.EvrId]string{
-					evr.EvrId{PlatformCode: evr.OVR_ORG, AccountId: 12341234}: user2,
+					{PlatformCode: evr.OVR_ORG, AccountId: 12341234}: user2,
 				},
 				RoleCache: map[string]map[string]struct{}{
 					"suspended_role": {
@@ -262,7 +263,7 @@ func TestGroupMetadata_IsSuspended(t *testing.T) {
 					Suspended: "suspended_role",
 				},
 				Suspensions: map[evr.EvrId]string{
-					evr.EvrId{PlatformCode: evr.OVR_ORG, AccountId: 12341234}: user1,
+					{PlatformCode: evr.OVR_ORG, AccountId: 12341234}: user1,
 				},
 				RoleCache: map[string]map[string]struct{}{
 					"suspended_role": {},
@@ -277,6 +278,41 @@ func TestGroupMetadata_IsSuspended(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := tt.groupMeta.IsSuspended(tt.userID, &tt.xpid)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+func TestGroupMetadata_MarshalToMap(t *testing.T) {
+	tests := []struct {
+		name      string
+		groupMeta GroupMetadata
+		expected  map[string]interface{}
+	}{
+
+		{
+			name: "GroupMetadata with values",
+			groupMeta: GroupMetadata{
+				CommunityValuesUserIDs: map[string]time.Time{
+					"user1": time.Date(2025, 02, 11, 0, 0, 0, 0, time.UTC),
+					"user2": time.Date(2023, 10, 01, 0, 0, 0, 0, time.UTC),
+				},
+			},
+			expected: map[string]interface{}{
+				"community_values_user_ids": map[string]interface{}{
+					"user1": "2025-02-11T00:00:00Z",
+					"user2": "2023-10-01T00:00:00Z",
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := tt.groupMeta.MarshalToMap()
+
+			assert.Equal(t, tt.expected["community_values_user_ids"], result["community_values_user_ids"])
+
+			assert.NoError(t, err)
 			assert.Equal(t, tt.expected, result)
 		})
 	}

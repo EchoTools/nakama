@@ -83,11 +83,13 @@ type GroupMetadata struct {
 
 func NewGuildGroupMetadata(guildID string) *GroupMetadata {
 	return &GroupMetadata{
-		GuildID:               guildID,
-		RoleCache:             make(map[string]map[string]struct{}),
-		Roles:                 &GuildGroupRoles{},
-		MatchmakingChannelIDs: make(map[string]string),
-		Suspensions:           make(map[evr.EvrId]string),
+		GuildID:                guildID,
+		Roles:                  &GuildGroupRoles{},
+		RoleCache:              make(map[string]map[string]struct{}),
+		MatchmakingChannelIDs:  make(map[string]string),
+		AllowedFeatures:        make([]string, 0),
+		CommunityValuesUserIDs: make(map[string]time.Time),
+		Suspensions:            make(map[evr.EvrId]string),
 	}
 }
 
