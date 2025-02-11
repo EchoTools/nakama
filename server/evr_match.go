@@ -576,10 +576,15 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 			}
 
 			// If the round is not over, then add an early quit count to the player.
-			if state.Mode == evr.ModeArenaPublic && time.Since(state.StartTime) >= (time.Second*60) && state.GameState != nil && state.GameState.RoundOver == false {
+			if state.Mode == evr.ModeArenaPublic && time.Since(state.StartTime) >= (time.Second*60) && state.GameState != nil && state.GameState.MatchOver == false {
 
 				for _, p := range presences {
 					if mp, ok := state.presenceMap[p.GetSessionId()]; ok {
+						// Only players
+						if mp.RoleAlignment != evr.TeamBlue && mp.RoleAlignment != evr.TeamOrange {
+							continue
+						}
+
 						logger.WithFields(map[string]interface{}{
 							"uid":          mp.GetUserId(),
 							"username":     mp.Username,
@@ -709,8 +714,9 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 					state.goals = append(state.goals, u.Goals...)
 				}
 
-				if update.RoundOver {
-					state.GameState.RoundOver = true
+				if update.MatchOver {
+
+					state.GameState.MatchOver = true
 				}
 
 				if state.GameState.RoundClock != nil {

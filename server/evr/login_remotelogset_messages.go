@@ -89,7 +89,7 @@ func RemoteLogMessageFromLogString(log []byte) (RemoteLog, error) {
 	case "POST_MATCH_EARNED_AWARD":
 		m = &RemoteLogRepairMatrix{}
 	case "POST_MATCH_MATCH_STATS":
-		m = &RemoteLogRepairMatrix{}
+		m = &RemoteLogPostMatchMatchStats{}
 	case "POST_MATCH_MATCH_TYPE_STATS":
 		m = &RemoteLogRepairMatrix{}
 	case "POST_MATCH_MATCH_TYPE_UNLOCKS":
@@ -829,4 +829,15 @@ type RemoteLogPersonalBubble struct {
 	PlayerUserid      string `json:"[player][userid]"`
 	RoomID            int64  `json:"[room_id]"`
 	SocialGroupID     string `json:"[social_group_id]"`
+}
+
+type RemoteLogPostMatchMatchStats struct {
+	GenericRemoteLog
+	SessionUUIDStr string                 `json:"[session][uuid]"`
+	MatchType      string                 `json:"match_type"`
+	MatchStats     map[string]interface{} `json:"match_stats"`
+}
+
+func (m RemoteLogPostMatchMatchStats) SessionUUID() uuid.UUID {
+	return UUIDFromRemoteLogString(m.SessionUUIDStr)
 }
