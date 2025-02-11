@@ -632,10 +632,11 @@ func AverageLatencyHistories(histories LatencyHistory) map[string]int {
 			rtt += v
 			count++
 		}
-		rtt /= count
-		if rtt == 0 {
+		if count == 0 || rtt == 0 {
 			continue
 		}
+
+		rtt /= count
 
 		rtt = mroundRTT(rtt, 10)
 
