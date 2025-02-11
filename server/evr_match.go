@@ -575,6 +575,28 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 				logger.Warn("Failed to record match time to leaderboard: %v", err)
 			}
 
+			// If the round is not over, then add an early quit count to the player.
+			if state.Mode == evr.ModeArenaPublic && time.Since(state.StartTime) >= (time.Second*60) && state.GameState != nil && state.GameState.RoundOver == false {
+
+				for _, p := range presences {
+					if mp, ok := state.presenceMap[p.GetSessionId()]; ok {
+						logger.WithFields(map[string]interface{}{
+							"uid":          mp.GetUserId(),
+							"username":     mp.Username,
+							"evr_id":       mp.EvrID,
+							"display_name": mp.DisplayName,
+						}).Debug("Incrementing early quit for player.")
+						for _, r := range []evr.ResetSchedule{evr.ResetScheduleDaily, evr.ResetScheduleWeekly, evr.ResetScheduleAllTime} {
+							boardID := StatisticBoardID(state.GetGroupID().String(), state.Mode, EarlyQuitStatisticID, r)
+
+							if _, err := nk.LeaderboardRecordWrite(ctx, boardID, mp.UserID.String(), mp.DisplayName, 1, 0, nil, nil); err != nil {
+								logger.Warn("Failed to write early quit record: %v", err)
+							}
+						}
+					}
+				}
+			}
+
 			delete(state.presenceMap, p.GetSessionId())
 			delete(state.presenceByEvrID, mp.EvrID)
 			delete(state.joinTimestamps, p.GetSessionId())
@@ -685,6 +707,10 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 
 				if len(u.Goals) > 0 {
 					state.goals = append(state.goals, u.Goals...)
+				}
+
+				if update.RoundOver {
+					state.GameState.RoundOver = true
 				}
 
 				if state.GameState.RoundClock != nil {
