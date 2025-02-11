@@ -287,6 +287,7 @@ func (s *MatchLabel) rebuildCache() {
 				DiscordID:   p.DiscordID,
 				SessionID:   p.SessionID.String(),
 				JoinTime:    s.joinTimeMilliseconds[p.SessionID.String()],
+				GeoHash:     p.GeoHash,
 			})
 		} else {
 
@@ -305,8 +306,9 @@ func (s *MatchLabel) rebuildCache() {
 					RatingSigma:    p.Rating.Sigma,
 					RankPercentile: p.RankPercentile,
 					SessionID:      p.SessionID.String(),
-					PingMillis:     p.PingMillis,
 					IsReservation:  s.reservationMap[p.SessionID.String()] != nil,
+					GeoHash:        p.GeoHash,
+					PingMillis:     p.PingMillis,
 				})
 			case evr.ModeCombatPublic, evr.ModeSocialPublic:
 				s.Players = append(s.Players, PlayerInfo{
@@ -324,6 +326,8 @@ func (s *MatchLabel) rebuildCache() {
 					RankPercentile: p.RankPercentile,
 					SessionID:      p.SessionID.String(),
 					IsReservation:  s.reservationMap[p.SessionID.String()] != nil,
+					GeoHash:        p.GeoHash,
+					PingMillis:     p.PingMillis,
 				})
 
 			case evr.ModeArenaPrivate, evr.ModeCombatPrivate:
@@ -338,6 +342,8 @@ func (s *MatchLabel) rebuildCache() {
 					PartyID:       p.PartyID.String(),
 					SessionID:     p.SessionID.String(),
 					IsReservation: s.reservationMap[p.SessionID.String()] != nil,
+					GeoHash:       p.GeoHash,
+					PingMillis:    p.PingMillis,
 				})
 			case evr.ModeSocialPrivate:
 				s.Players = append(s.Players, PlayerInfo{
@@ -351,6 +357,8 @@ func (s *MatchLabel) rebuildCache() {
 					PartyID:       p.PartyID.String(),
 					SessionID:     p.SessionID.String(),
 					IsReservation: s.reservationMap[p.SessionID.String()] != nil,
+					GeoHash:       p.GeoHash,
+					PingMillis:    p.PingMillis,
 				})
 			default:
 				s.Players = append(s.Players, PlayerInfo{
@@ -364,6 +372,8 @@ func (s *MatchLabel) rebuildCache() {
 					PartyID:       p.PartyID.String(),
 					SessionID:     p.SessionID.String(),
 					IsReservation: s.reservationMap[p.SessionID.String()] != nil,
+					GeoHash:       p.GeoHash,
+					PingMillis:    p.PingMillis,
 				})
 			}
 		}
