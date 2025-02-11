@@ -222,10 +222,10 @@ type ArenaStatistics struct {
 	ArenaWinPercentage           *StatisticFloatSet         `json:"ArenaWinPercentage,omitempty"`
 	ArenaWins                    *StatisticIntegerIncrement `json:"ArenaWins,omitempty"`
 	Assists                      *StatisticIntegerIncrement `json:"Assists,omitempty"`
-	AssistsPerGame               *StatisticFloatAverage     `json:"AssistsPerGame,omitempty"`
-	AveragePointsPerGame         *StatisticFloatAverage     `json:"AveragePointsPerGame,omitempty"`
-	AveragePossessionTimePerGame *StatisticFloatAverage     `json:"AveragePossessionTimePerGame,omitempty"`
-	AverageTopSpeedPerGame       *StatisticFloatAverage     `json:"AverageTopSpeedPerGame,omitempty"`
+	AssistsPerGame               *StatisticFloatSet         `json:"AssistsPerGame,omitempty"`
+	AveragePointsPerGame         *StatisticFloatSet         `json:"AveragePointsPerGame,omitempty"`
+	AveragePossessionTimePerGame *StatisticFloatSet         `json:"AveragePossessionTimePerGame,omitempty"`
+	AverageTopSpeedPerGame       *StatisticFloatSet         `json:"AverageTopSpeedPerGame,omitempty"`
 	BlockPercentage              *StatisticFloatSet         `json:"BlockPercentage,omitempty"`
 	Blocks                       *StatisticIntegerIncrement `json:"Blocks,omitempty"`
 	BounceGoals                  *StatisticIntegerIncrement `json:"BounceGoals,omitempty"`
@@ -237,7 +237,7 @@ type ArenaStatistics struct {
 	GoalSavePercentage           *StatisticFloatSet         `json:"GoalSavePercentage,omitempty"`
 	GoalScorePercentage          *StatisticFloatSet         `json:"GoalScorePercentage,omitempty"`
 	Goals                        *StatisticIntegerIncrement `json:"Goals,omitempty"`
-	GoalsPerGame                 *StatisticFloatAverage     `json:"GoalsPerGame,omitempty"`
+	GoalsPerGame                 *StatisticFloatSet         `json:"GoalsPerGame,omitempty"`
 	HatTricks                    *StatisticIntegerIncrement `json:"HatTricks,omitempty"`
 	HeadbuttGoals                *StatisticIntegerIncrement `json:"HeadbuttGoals,omitempty"`
 	HighestArenaMVPStreak        *StatisticIntegerBest      `json:"HighestArenaMVPStreak,omitempty"`
@@ -254,17 +254,17 @@ type ArenaStatistics struct {
 	PossessionTime               *StatisticFloatIncrement   `json:"PossessionTime,omitempty"`
 	PunchesReceived              *StatisticIntegerIncrement `json:"PunchesReceived,omitempty"`
 	Saves                        *StatisticIntegerIncrement `json:"Saves,omitempty"`
-	SavesPerGame                 *StatisticFloatAverage     `json:"SavesPerGame,omitempty"`
+	SavesPerGame                 *StatisticFloatSet         `json:"SavesPerGame,omitempty"`
 	ShotsOnGoal                  *StatisticIntegerIncrement `json:"ShotsOnGoal,omitempty"`
 	ShotsOnGoalAgainst           *StatisticIntegerIncrement `json:"ShotsOnGoalAgainst,omitempty"`
 	Steals                       *StatisticIntegerIncrement `json:"Steals,omitempty"`
 	StunPercentage               *StatisticFloatSet         `json:"StunPercentage,omitempty"`
 	Stuns                        *StatisticIntegerIncrement `json:"Stuns,omitempty"`
-	StunsPerGame                 *StatisticFloatAverage     `json:"StunsPerGame,omitempty"`
+	StunsPerGame                 *StatisticFloatSet         `json:"StunsPerGame,omitempty"`
 	ThreePointGoals              *StatisticIntegerIncrement `json:"ThreePointGoals,omitempty"`
 	TopSpeedsTotal               *StatisticFloatIncrement   `json:"TopSpeedsTotal,omitempty"`
 	TwoPointGoals                *StatisticIntegerIncrement `json:"TwoPointGoals,omitempty"`
-	XP                           *StatisticFloatSet         `json:"XP,omitempty"`
+	XP                           *StatisticFloatIncrement   `json:"XP,omitempty"`
 	GamesPlayed                  *StatisticIntegerIncrement `json:"GamesPlayed,omitempty"`
 	SkillRatingMu                *StatisticFloatSet         `json:"SkillRatingMu,omitempty"`
 	SkillRatingSigma             *StatisticFloatSet         `json:"SkillRatingSigma,omitempty"`
@@ -329,7 +329,7 @@ func (s *ArenaStatistics) CalculateFields() {
 		}
 
 		if s.Assists != nil {
-			s.AssistsPerGame = &StatisticFloatAverage{
+			s.AssistsPerGame = &StatisticFloatSet{
 				FloatStatistic{
 					Value: s.Assists.GetValue() / gamesPlayed,
 					Count: 1,
@@ -338,7 +338,7 @@ func (s *ArenaStatistics) CalculateFields() {
 		}
 
 		if s.Points != nil {
-			s.AveragePointsPerGame = &StatisticFloatAverage{
+			s.AveragePointsPerGame = &StatisticFloatSet{
 				FloatStatistic{
 					Value: float64(s.Points.GetValue()) / gamesPlayed,
 					Count: 1,
@@ -347,7 +347,7 @@ func (s *ArenaStatistics) CalculateFields() {
 		}
 
 		if s.PossessionTime != nil {
-			s.AveragePossessionTimePerGame = &StatisticFloatAverage{
+			s.AveragePossessionTimePerGame = &StatisticFloatSet{
 				FloatStatistic{
 					Value: s.PossessionTime.GetValue() / gamesPlayed,
 					Count: 1,
@@ -356,7 +356,7 @@ func (s *ArenaStatistics) CalculateFields() {
 		}
 
 		if s.TopSpeedsTotal != nil {
-			s.AverageTopSpeedPerGame = &StatisticFloatAverage{
+			s.AverageTopSpeedPerGame = &StatisticFloatSet{
 				FloatStatistic{
 					Value: s.TopSpeedsTotal.GetValue() / gamesPlayed,
 					Count: 1,
@@ -388,7 +388,7 @@ func (s *ArenaStatistics) CalculateFields() {
 		}
 
 		if s.Goals != nil {
-			s.GoalsPerGame = &StatisticFloatAverage{
+			s.GoalsPerGame = &StatisticFloatSet{
 				FloatStatistic{
 					Value: s.Goals.GetValue() / gamesPlayed,
 					Count: 1,
@@ -397,7 +397,7 @@ func (s *ArenaStatistics) CalculateFields() {
 		}
 
 		if s.Saves != nil {
-			s.SavesPerGame = &StatisticFloatAverage{
+			s.SavesPerGame = &StatisticFloatSet{
 				FloatStatistic{
 					Value: s.Saves.GetValue() / gamesPlayed,
 					Count: 1,
@@ -425,7 +425,7 @@ func (s *ArenaStatistics) CalculateFields() {
 		}
 
 		if s.Stuns != nil {
-			s.StunsPerGame = &StatisticFloatAverage{
+			s.StunsPerGame = &StatisticFloatSet{
 				FloatStatistic{
 					Value: s.Stuns.GetValue() / gamesPlayed,
 					Count: 1,
