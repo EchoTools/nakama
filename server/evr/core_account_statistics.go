@@ -270,6 +270,8 @@ type ArenaStatistics struct {
 	SkillRatingSigma             *StatisticFloatSet         `json:"SkillRatingSigma,omitempty"`
 	RankPercentile               *StatisticFloatSet         `json:"RankPercentile,omitempty"`
 	LobbyTime                    *StatisticFloatSet         `json:"LobbyTime,omitempty"`
+	EarlyQuits                   *StatisticIntegerIncrement `json:"EarlyQuits,omitempty"`
+	EarlyQuitPercentage          *StatisticFloatSet         `json:"EarlyQuitPercentage,omitempty"`
 }
 
 func (s *ArenaStatistics) CalculateFields() {
@@ -278,7 +280,16 @@ func (s *ArenaStatistics) CalculateFields() {
 		return
 	}
 
-	gamesPlayed := s.ArenaWins.GetValue() + s.ArenaLosses.GetValue()
+	if s.EarlyQuits == nil {
+		s.ArenaTies = &StatisticIntegerIncrement{
+			IntegerStatistic{
+				Value: 0,
+				Count: 1,
+			},
+		}
+	}
+
+	gamesPlayed := s.ArenaWins.GetValue() + s.ArenaLosses.GetValue() + s.EarlyQuits.GetValue()
 
 	s.GamesPlayed = &StatisticIntegerIncrement{
 		IntegerStatistic{
@@ -289,6 +300,24 @@ func (s *ArenaStatistics) CalculateFields() {
 
 	// ArenaWinPercentage
 	if gamesPlayed > 0 {
+
+		if s.EarlyQuits != nil {
+
+			s.ArenaTies = &StatisticIntegerIncrement{
+				IntegerStatistic{
+					Value: s.EarlyQuits.Value,
+					Count: 1,
+				},
+			}
+
+			s.EarlyQuitPercentage = &StatisticFloatSet{
+				FloatStatistic{
+					Value: s.EarlyQuits.GetValue() / gamesPlayed * 100,
+					Count: 1,
+				},
+			}
+
+		}
 
 		if s.ArenaWins != nil {
 			s.ArenaWinPercentage = &StatisticFloatSet{
