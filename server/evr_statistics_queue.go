@@ -56,14 +56,22 @@ func NewStatisticsQueue(logger runtime.Logger, nk runtime.NakamaModule) *Statist
 			case entries := <-ch:
 
 				for _, e := range entries {
-					if e.Score == 0 && e.Subscore == 0 {
+
+					if e.Score < 0 {
+						logger.WithFields(map[string]interface{}{
+							"leaderboard_id": e.BoardMeta.ID(),
+							"score":          e.Score,
+							"subscore":       e.Subscore,
+						}).Warn("Negative score")
+						continue
+					} else if e.Score == 0 && e.Subscore == 0 {
 						continue
 					}
 
 					if _, err := nk.LeaderboardRecordWrite(ctx, e.BoardMeta.ID(), e.UserID, e.DisplayName, e.Score, e.Subscore, map[string]any{}, e.Override()); err != nil {
-						// Try to create the leaderboard
 
-						if err = nk.LeaderboardCreate(ctx, e.BoardMeta.ID(), true, "desc", string(e.BoardMeta.Operator), ResetScheduleToCron(e.BoardMeta.ResetSchedule), map[string]any{}, true); err != nil {
+						// Try to create the leaderboard
+						if err = nk.LeaderboardCreate(ctx, e.BoardMeta.ID(), true, string(e.BoardMeta.Operator), string(e.BoardMeta.Operator), ResetScheduleToCron(e.BoardMeta.ResetSchedule), map[string]any{}, true); err != nil {
 
 							logger.WithFields(map[string]interface{}{
 								"leaderboard_id": e.BoardMeta.ID(),
