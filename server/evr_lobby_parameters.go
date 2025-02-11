@@ -624,13 +624,15 @@ func AverageLatencyHistories(histories LatencyHistory) map[string]int {
 		if len(history) == 0 {
 			continue
 		}
+		count := 0
 		for ts, v := range history {
 			if ts < threedays {
 				continue
 			}
 			rtt += v
+			count++
 		}
-		rtt /= len(history)
+		rtt /= count
 		if rtt == 0 {
 			continue
 		}
