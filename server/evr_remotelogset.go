@@ -150,25 +150,6 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				continue
 			}
 
-			for _, resetSchedule := range []evr.ResetSchedule{evr.ResetScheduleAllTime, evr.ResetScheduleDaily, evr.ResetScheduleWeekly} {
-				meta := LeaderboardMeta{
-					GroupID:       label.GroupID.String(),
-					Mode:          evr.ModeArenaPublic,
-					StatName:      EarlyQuitStatisticID,
-					Operator:      OperatorIncrement,
-					ResetSchedule: resetSchedule,
-				}
-				entry := &StatisticsQueueEntry{
-					BoardMeta:   meta,
-					UserID:      userID,
-					DisplayName: msg.PlayerInfoDisplayname,
-					Score:       1,
-					Subscore:    0,
-				}
-
-				p.statisticsQueue.Add([]*StatisticsQueueEntry{entry})
-			}
-
 			params, ok := LoadParams(session.Context())
 			if !ok {
 				logger.Error("Failed to load params")
@@ -324,6 +305,12 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 			}
 
 			p.runtimeModule.MetricsCounterAdd("remotelog_error_server_connection_failed_count", tags, 1)
+		case *evr.RemoteLogRoundOver:
+			if msg.GameInfoIsArena && !msg.GameInfoIsPrivate {
+				continue
+			}
+			update, _ = updates.LoadOrStore(msg.SessionUUID(), &MatchGameStateUpdate{})
+			update.RoundOver = true
 		default:
 		}
 	}
@@ -340,6 +327,7 @@ type MatchGameStateUpdate struct {
 	CurrentGameClock time.Duration `json:"current_game_clock,omitempty"`
 	PauseDuration    time.Duration `json:"pause_duration,omitempty"`
 	Goals            []*MatchGoal  `json:"goals,omitempty"`
+	RoundOver        bool          `json:"round_over,omitempty"`
 }
 
 func (u *MatchGameStateUpdate) String() string {
