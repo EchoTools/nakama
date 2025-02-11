@@ -305,12 +305,10 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 			}
 
 			p.runtimeModule.MetricsCounterAdd("remotelog_error_server_connection_failed_count", tags, 1)
-		case *evr.RemoteLogRoundOver:
-			if msg.GameInfoIsArena && !msg.GameInfoIsPrivate {
-				continue
-			}
+		case *evr.RemoteLogPostMatchMatchStats:
+
 			update, _ = updates.LoadOrStore(msg.SessionUUID(), &MatchGameStateUpdate{})
-			update.RoundOver = true
+			update.MatchOver = true
 		default:
 		}
 	}
@@ -327,7 +325,7 @@ type MatchGameStateUpdate struct {
 	CurrentGameClock time.Duration `json:"current_game_clock,omitempty"`
 	PauseDuration    time.Duration `json:"pause_duration,omitempty"`
 	Goals            []*MatchGoal  `json:"goals,omitempty"`
-	RoundOver        bool          `json:"round_over,omitempty"`
+	MatchOver        bool          `json:"match_over,omitempty"`
 }
 
 func (u *MatchGameStateUpdate) String() string {
