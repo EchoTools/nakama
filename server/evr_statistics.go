@@ -448,52 +448,55 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, nk runtime.NakamaMod
 
 func StatisticsToEntries(userID, displayName, groupID string, mode evr.Symbol, prev, update evr.Statistics) ([]*StatisticsQueueEntry, error) {
 
+	// Update the calculated fields
+	if prev != nil {
+		prev.CalculateFields()
+	}
+	update.CalculateFields()
+
 	// Modify the update based on the previous stats
-	updateValue := reflect.ValueOf(update)
+	updateElem := reflect.ValueOf(update).Elem()
 	prevValue := reflect.ValueOf(prev)
-	for i := 0; i < updateValue.Elem().NumField(); i++ {
+	for i := 0; i < updateElem.NumField(); i++ {
 
-		if field := updateValue.Elem().Field(i); !field.IsNil() {
+		if field := updateElem.Field(i); !field.IsNil() && prevValue.IsValid() && !prevValue.IsNil() {
 
-			if !prevValue.IsValid() || field.IsNil() {
-				continue
-			}
 			stat := field.Interface().(evr.Statistic)
 			if stat == nil {
 				continue
 			}
 
-			if prevValue.IsValid() && !prevValue.IsNil() {
-				prevField := prevValue.Elem().Field(i)
-				if prevField.IsValid() && !prevField.IsNil() {
-					switch prevStat := prevField.Interface().(type) {
-					case *evr.StatisticIntegerIncrement:
-						stat.SetValue(stat.GetValue() - prevStat.GetValue())
-					case *evr.StatisticFloatIncrement:
-						stat.SetValue(stat.GetValue() - prevStat.GetValue())
-					}
+			// If the previous field exists, subtract the previous value from the current value
+
+			prevField := prevValue.Elem().Field(i)
+			if prevField.IsValid() && !prevField.IsNil() {
+				switch prevStat := prevField.Interface().(type) {
+				case *evr.StatisticIntegerIncrement:
+					stat.SetValue(stat.GetValue() - prevStat.GetValue())
+				case *evr.StatisticFloatIncrement:
+					stat.SetValue(stat.GetValue() - prevStat.GetValue())
 				}
 			}
+
 		}
 	}
+
 	resetSchedules := []evr.ResetSchedule{evr.ResetScheduleDaily, evr.ResetScheduleWeekly, evr.ResetScheduleAllTime}
+
 	// construct the entries
-	entries := make([]*StatisticsQueueEntry, 0, len(resetSchedules)*reflect.ValueOf(update).Elem().NumField())
+	entries := make([]*StatisticsQueueEntry, 0, len(resetSchedules)*updateElem.NumField())
 
-	for _, r := range resetSchedules {
+	for i := 0; i < updateElem.NumField(); i++ {
+		updateField := updateElem.Field(i)
 
-		for i := 0; i < reflect.ValueOf(update).Elem().NumField(); i++ {
+		for _, r := range resetSchedules {
 
-			if reflect.ValueOf(update).Elem().Field(i).IsNil() {
+			if updateField.IsNil() {
 				continue
 			}
 
-			statName := reflect.ValueOf(update).Elem().Type().Field(i).Tag.Get("json")
-			statName = strings.SplitN(statName, ",", 2)[0]
-			statValue := reflect.ValueOf(update).Elem().Field(i).Interface().(evr.Statistic).GetValue()
-
 			var op LeaderboardOperator
-			switch reflect.ValueOf(update).Elem().Field(i).Interface().(type) {
+			switch updateField.Interface().(type) {
 			case *evr.StatisticFloatIncrement:
 				op = OperatorIncrement
 			case *evr.StatisticIntegerIncrement:
@@ -510,12 +513,23 @@ func StatisticsToEntries(userID, displayName, groupID string, mode evr.Symbol, p
 				op = OperatorSet
 			}
 
+			// Extract the JSON tag from the struct field
+			jsonTag := updateElem.Type().Field(i).Tag.Get("json")
+			statName := strings.SplitN(jsonTag, ",", 2)[0]
+
 			meta := LeaderboardMeta{
 				GroupID:       groupID,
 				Mode:          mode,
 				StatName:      statName,
 				Operator:      op,
 				ResetSchedule: r,
+			}
+
+			statValue := updateField.Interface().(evr.Statistic).GetValue()
+
+			// Skip stats that are not set or negative
+			if statValue <= 0 {
+				continue
 			}
 
 			score, subscore := ValueToScore(statValue)

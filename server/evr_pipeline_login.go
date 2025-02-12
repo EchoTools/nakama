@@ -1064,14 +1064,11 @@ func (p *EvrPipeline) updatePlayerStats(ctx context.Context, userID, groupID, di
 		ResetSchedule: evr.ResetScheduleAllTime,
 	}
 
+	// Use defaults if the player has no existing statistics
 	prevStats, ok := prevPlayerStats[g]
 	if !ok {
 		prevStats = evr.NewServerProfile().Statistics[g]
 	}
-
-	// Update the calculated fields
-	prevStats.CalculateFields()
-	stats.CalculateFields()
 
 	entries, err := StatisticsToEntries(userID, displayName, groupID, mode, prevStats, stats)
 	if err != nil {
