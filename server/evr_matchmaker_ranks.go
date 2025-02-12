@@ -105,9 +105,9 @@ func retrieveRankPercentile(ctx context.Context, db *sql.DB, userID string, defa
 
 	query := `
 	WITH leaderboard_weights AS (
-    SELECT
-        unnest($1::text[]) AS leaderboard_id,
-        unnest($2::float8[]) AS weight
+		SELECT
+			unnest($1::text[]) AS leaderboard_id,
+			unnest($2::float8[]) AS weight
 	),
 	ranked_leaderboard AS (
 		SELECT
@@ -117,8 +117,8 @@ func retrieveRankPercentile(ctx context.Context, db *sql.DB, userID string, defa
 				PARTITION BY lr.leaderboard_id
 				ORDER BY lr.score DESC, lr.subscore DESC, lr.update_time ASC
 			) AS rank,
-			COUNT(*) OVER (PARTITION BY lr.leaderboard_id) AS total_records,
-			lw.weight
+			COUNT(*) OVER (PARTITION BY lr.leaderboard_id) AS total_records, -- Total records in the leaderboard
+			lw.weight -- Weight of the leaderboard
 		FROM leaderboard_record lr
 		JOIN leaderboard_weights lw
 		ON lr.leaderboard_id = lw.leaderboard_id
@@ -128,17 +128,21 @@ func retrieveRankPercentile(ctx context.Context, db *sql.DB, userID string, defa
 	calculated_percentiles AS (
 		SELECT 
 			lw.leaderboard_id,
+			lw.weight,
 			COALESCE(
-				(1.0 - ((rl.rank::float - 1) / rl.total_records)) * lw.weight,
-				$4 * lw.weight -- Default percentile if no score exists
-			) AS weighted_percentile
+				(1.0 - ((rl.rank::float - 1) / rl.total_records)), -- Percentile
+				$4 -- Default percentile if no score exists
+			) AS percentile
 		FROM leaderboard_weights lw
 		LEFT JOIN ranked_leaderboard rl
 		ON lw.leaderboard_id = rl.leaderboard_id AND rl.owner_id = $3
+	),
+	weighted_aggregation AS (
+		SELECT 
+			SUM(percentile * weight) / NULLIF(SUM(weight), 0) AS aggregate_percentile -- Weighted average
+		FROM calculated_percentiles
 	)
-	SELECT 
-		COALESCE(AVG(weighted_percentile), 0.0) AS aggregate_percentile
-	FROM calculated_percentiles;`
+	SELECT COALESCE(aggregate_percentile, 0.0) FROM weighted_aggregation;`
 
 	boardIDs := make([]string, 0, len(boardWeights))
 	weights := make([]float64, 0, len(boardWeights))
