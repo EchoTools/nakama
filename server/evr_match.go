@@ -584,7 +584,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 						if mp.RoleAlignment != evr.TeamBlue && mp.RoleAlignment != evr.TeamOrange {
 							continue
 						}
-
+						nk.MetricsCounterAdd("match_entrant_early_quit", tags, 1)
 						logger.WithFields(map[string]interface{}{
 							"uid":          mp.GetUserId(),
 							"username":     mp.Username,
