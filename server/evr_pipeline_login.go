@@ -968,7 +968,7 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 	playerInfo := label.GetPlayerByEvrID(evrID)
 
 	// If the player isn't in the match, or isn't a player, do not update the stats
-	if playerInfo == nil || playerInfo.Team != BlueTeam && playerInfo.Team != OrangeTeam {
+	if playerInfo == nil || (playerInfo.Team != BlueTeam && playerInfo.Team != OrangeTeam) {
 		return fmt.Errorf("non-player profile update request: %s", evrID.String())
 	}
 
@@ -1068,6 +1068,10 @@ func (p *EvrPipeline) updatePlayerStats(ctx context.Context, userID, groupID, di
 	if !ok {
 		prevStats = evr.NewServerProfile().Statistics[g]
 	}
+
+	// Update the calculated fields
+	prevStats.CalculateFields()
+	stats.CalculateFields()
 
 	entries, err := StatisticsToEntries(userID, displayName, groupID, mode, prevStats, stats)
 	if err != nil {
