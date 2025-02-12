@@ -287,6 +287,12 @@ func (s *ArenaStatistics) CalculateFields() {
 				Count: 1,
 			},
 		}
+		s.EarlyQuits = &StatisticIntegerIncrement{
+			IntegerStatistic{
+				Value: 0,
+				Count: 1,
+			},
+		}
 	}
 
 	gamesPlayed := s.ArenaWins.GetValue() + s.ArenaLosses.GetValue() + s.EarlyQuits.GetValue()
