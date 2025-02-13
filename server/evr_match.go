@@ -581,16 +581,19 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 				for _, p := range presences {
 					if mp, ok := state.presenceMap[p.GetSessionId()]; ok {
 						// Only players
-						if mp.RoleAlignment != evr.TeamBlue && mp.RoleAlignment != evr.TeamOrange {
+						if mp.IsPlayer() == false {
 							continue
 						}
+
 						nk.MetricsCounterAdd("match_entrant_early_quit", tags, 1)
+
 						logger.WithFields(map[string]interface{}{
 							"uid":          mp.GetUserId(),
 							"username":     mp.Username,
 							"evr_id":       mp.EvrID,
 							"display_name": mp.DisplayName,
 						}).Debug("Incrementing early quit for player.")
+
 						for _, r := range []evr.ResetSchedule{evr.ResetScheduleDaily, evr.ResetScheduleWeekly, evr.ResetScheduleAllTime} {
 							boardID := StatisticBoardID(state.GetGroupID().String(), state.Mode, EarlyQuitStatisticID, r)
 
