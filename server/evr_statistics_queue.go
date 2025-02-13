@@ -16,6 +16,7 @@ type StatisticsQueueEntry struct {
 	Metadata    map[string]string
 }
 
+// This converts the operator to the override value for the leaderboard record.
 func (e StatisticsQueueEntry) Override() *int {
 	var o int
 	switch e.BoardMeta.Operator {
@@ -71,7 +72,7 @@ func NewStatisticsQueue(logger runtime.Logger, nk runtime.NakamaModule) *Statist
 					if _, err := nk.LeaderboardRecordWrite(ctx, e.BoardMeta.ID(), e.UserID, e.DisplayName, e.Score, e.Subscore, map[string]any{}, e.Override()); err != nil {
 
 						// Try to create the leaderboard
-						if err = nk.LeaderboardCreate(ctx, e.BoardMeta.ID(), true, string(e.BoardMeta.Operator), string(e.BoardMeta.Operator), ResetScheduleToCron(e.BoardMeta.ResetSchedule), map[string]any{}, true); err != nil {
+						if err = nk.LeaderboardCreate(ctx, e.BoardMeta.ID(), true, "desc", string(e.BoardMeta.Operator), ResetScheduleToCron(e.BoardMeta.ResetSchedule), map[string]any{}, true); err != nil {
 
 							logger.WithFields(map[string]interface{}{
 								"leaderboard_id": e.BoardMeta.ID(),
