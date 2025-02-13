@@ -16,6 +16,7 @@ import (
 
 const (
 	IPQSRedisKeyPrefix = "ipqs:"
+	IPQSRedisKeyTTL    = time.Hour * 24 * 180
 )
 
 type IPQSTransactionDetails struct {
@@ -166,7 +167,7 @@ func (s *IPQSClient) store(ip string, result *IPQSResponse) error {
 		return fmt.Errorf("failed to marshal data: %v", err)
 	}
 
-	err = s.redisClient.Set(IPQSRedisKeyPrefix+ip, data, time.Hour*24*30).Err()
+	err = s.redisClient.Set(IPQSRedisKeyPrefix+ip, data, IPQSRedisKeyTTL).Err()
 	if err != nil {
 		s.metrics.CustomCounter("ipqs_cache_store_error", nil, 1)
 		return fmt.Errorf("failed to set data in redis: %v", err)
