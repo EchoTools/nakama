@@ -24,10 +24,10 @@ type RegionAutocompleteData struct {
 
 func (c RegionAutocompleteData) Description() string {
 	if c.MinPing == c.MaxPing {
-		return fmt.Sprintf("%s -- %dms [%d/%d]", c.Location, c.MinPing, c.Available, c.Total)
+		return fmt.Sprintf("%s -- %dms [%d/%d]", c.Location, c.MinPing, c.Total-c.Available, c.Total)
 	}
 
-	return fmt.Sprintf("%s -- %dms-%dms [%d/%d]", c.Location, c.MinPing, c.MaxPing, c.Available, c.Total)
+	return fmt.Sprintf("%s -- %dms-%dms [%d/%d]", c.Location, c.MinPing, c.MaxPing, c.Total-c.Available, c.Total)
 }
 
 func (d *DiscordAppBot) autocompleteRegions(ctx context.Context, logger runtime.Logger, userID string, groupID string) ([]*discordgo.ApplicationCommandOptionChoice, error) {
