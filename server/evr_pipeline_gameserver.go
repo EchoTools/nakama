@@ -157,6 +157,15 @@ func (p *EvrPipeline) gameserverRegistrationRequest(ctx context.Context, logger 
 	// Configure the region codes to use for finding the game server
 	regionCodes := make([]string, 0, len(params.serverRegions))
 
+	if len(params.serverRegions) == 0 {
+		regionCodes = append(regionCodes, "default")
+	}
+
+	// Add the server regions specified in the config.json
+	for _, r := range params.serverRegions {
+		regionCodes = append(regionCodes, r)
+	}
+
 	switch request.RegionHash {
 
 	// If the region is unspecified, use the default region, otherwise use the region hash passed on the command line
@@ -165,11 +174,6 @@ func (p *EvrPipeline) gameserverRegistrationRequest(ctx context.Context, logger 
 
 	default:
 		regionCodes = append(regionCodes, request.RegionHash.String())
-	}
-
-	// Add the server regions specified in the config.json
-	for _, r := range params.serverRegions {
-		regionCodes = append(regionCodes, r)
 	}
 
 	// Limit to first 10 regions
