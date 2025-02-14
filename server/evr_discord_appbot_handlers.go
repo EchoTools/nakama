@@ -274,7 +274,7 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 		labels = append(labels, &label)
 	}
 
-	if regionCode == evr.DefaultRegion.String() {
+	if regionCode == "default" {
 		// Find the closest to the player.
 		zapLogger := logger.(*RuntimeGoLogger).logger
 		latencyHistory, err := LoadLatencyHistory(ctx, zapLogger, d.db, uuid.FromStringOrNil(userID))
@@ -335,7 +335,7 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 	return label, rtt, nil
 }
 
-func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Logger, userID, guildID string, region, mode, level evr.Symbol, startTime time.Time) (l *MatchLabel, latencyMillis int, err error) {
+func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Logger, userID, guildID, region string, mode, level evr.Symbol, startTime time.Time) (l *MatchLabel, latencyMillis int, err error) {
 
 	// Find a parking match to prepare
 
@@ -380,7 +380,7 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		SpawnedBy: userID,
 	}
 
-	label, err := AllocateGameServer(ctx, logger, d.nk, groupID, extIPs, settings, []string{region.String()}, true, false)
+	label, err := AllocateGameServer(ctx, logger, d.nk, groupID, extIPs, settings, []string{region}, true, false)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to allocate game server: %w", err)
 	}

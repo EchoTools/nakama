@@ -62,7 +62,7 @@ func NewDiscordIntegrator(ctx context.Context, logger *zap.Logger, config Config
 
 		idcache: &MapOf[string, string]{},
 
-		queueCh: make(chan QueueEntry, 250),
+		queueCh: make(chan QueueEntry, 25),
 	}
 }
 
