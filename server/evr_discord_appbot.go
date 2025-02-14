@@ -2196,12 +2196,12 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			mode := evr.ModeArenaPrivate
-			region := evr.DefaultRegion
+			region := "default"
 			level := evr.LevelUnspecified
 			for _, o := range options {
 				switch o.Name {
 				case "region":
-					region = evr.ToSymbol(o.StringValue())
+					region = o.StringValue()
 				case "mode":
 					mode = evr.ToSymbol(o.StringValue())
 				case "level":
@@ -2220,7 +2220,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			logger = logger.WithFields(map[string]interface{}{
 				"userID":    userID,
 				"guildID":   i.GuildID,
-				"region":    region.String(),
+				"region":    region,
 				"mode":      mode.String(),
 				"level":     level.String(),
 				"startTime": startTime,
@@ -2291,7 +2291,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 							},
 							{
 								Name:   "Region Code",
-								Value:  region.String(),
+								Value:  region,
 								Inline: false,
 							},
 							{
