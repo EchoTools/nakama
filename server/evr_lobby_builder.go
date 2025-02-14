@@ -254,10 +254,10 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 
 	// Update the entrant ping to the game server
 	for _, p := range entrantPresences {
-		p.PingMillis = int(latenciesByPlayerByExtIP[label.Broadcaster.Endpoint.ExternalIP.String()][p.GetUserId()])
+		p.PingMillis = int(latenciesByPlayerByExtIP[label.GameServer.Endpoint.ExternalIP.String()][p.GetUserId()])
 	}
 
-	serverSession := b.sessionRegistry.Get(label.Broadcaster.SessionID)
+	serverSession := b.sessionRegistry.Get(label.GameServer.SessionID)
 	if serverSession == nil {
 		return fmt.Errorf("failed to get server session")
 	}
@@ -309,7 +309,7 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 	b.metrics.CustomCounter("lobby_join_match_made", tags, int64(len(successful)))
 	b.metrics.CustomCounter("lobby_error_match_made", tags, int64(len(errored)))
 
-	logger.Info("Match built.", zap.String("mid", label.ID.UUID.String()), zap.Any("teams", ratedMatch), zap.Any("successful", successful), zap.Any("errored", errored), zap.Any("game_server", label.Broadcaster))
+	logger.Info("Match built.", zap.String("mid", label.ID.UUID.String()), zap.Any("teams", ratedMatch), zap.Any("successful", successful), zap.Any("errored", errored), zap.Any("game_server", label.GameServer))
 	return nil
 }
 
@@ -379,7 +379,7 @@ func (b *LobbyBuilder) distributeParties(parties [][]*MatchmakerEntry) [][]*Matc
 func countByExtIP(labels []*MatchLabel) map[string]int {
 	countByExtIP := make(map[string]int, len(labels))
 	for _, label := range labels {
-		k := label.Broadcaster.Endpoint.ExternalIP.String()
+		k := label.GameServer.Endpoint.ExternalIP.String()
 		countByExtIP[k]++
 	}
 	return countByExtIP
@@ -449,7 +449,7 @@ func AllocateGameServer(ctx context.Context, logger runtime.Logger, nk runtime.N
 	}
 
 	if requireDefaultRegion {
-		qparts = append(qparts, "+label.broadcaster.regions:/(default)/")
+		qparts = append(qparts, "+label.broadcaster.region_codes:/(default)/")
 	}
 
 	if len(regions) > 0 {
@@ -458,7 +458,7 @@ func AllocateGameServer(ctx context.Context, logger runtime.Logger, nk runtime.N
 			prefix = "+"
 		}
 
-		qparts = append(qparts, "%slabel.broadcaster.regions:/(%s)/", prefix, Query.Join(regions, "|"))
+		qparts = append(qparts, "%slabel.broadcaster.region_codes:/(%s)/", prefix, Query.Join(regions, "|"))
 	}
 
 	query := strings.Join(qparts, " ")
@@ -484,7 +484,7 @@ func AllocateGameServer(ctx context.Context, logger runtime.Logger, nk runtime.N
 
 	labelsByExternalIP := make(map[string][]*MatchLabel, len(labels))
 	for _, label := range labels {
-		k := label.Broadcaster.Endpoint.ExternalIP.String()
+		k := label.GameServer.Endpoint.ExternalIP.String()
 		labelsByExternalIP[k] = append(labelsByExternalIP[k], label)
 	}
 
@@ -492,7 +492,7 @@ func AllocateGameServer(ctx context.Context, logger runtime.Logger, nk runtime.N
 	availableByExtIP := make(map[string]*MatchLabel, len(labels))
 	countByExtIP := make(map[string]int, len(labels))
 	for _, label := range labels {
-		k := label.Broadcaster.Endpoint.ExternalIP.String()
+		k := label.GameServer.Endpoint.ExternalIP.String()
 		countByExtIP[k]++
 
 		if label.LobbyType == UnassignedLobby {
@@ -504,15 +504,15 @@ func AllocateGameServer(ctx context.Context, logger runtime.Logger, nk runtime.N
 	slices.SortStableFunc(labels, func(a, b *MatchLabel) int {
 
 		// Sort by whether the server is a priority server
-		if a.Broadcaster.IsPriorityFor(settings.Mode) && !b.Broadcaster.IsPriorityFor(settings.Mode) {
+		if a.GameServer.IsPriorityFor(settings.Mode) && !b.GameServer.IsPriorityFor(settings.Mode) {
 			return -1
 		}
-		if a.Broadcaster.IsPriorityFor(settings.Mode) && !b.Broadcaster.IsPriorityFor(settings.Mode) {
+		if a.GameServer.IsPriorityFor(settings.Mode) && !b.GameServer.IsPriorityFor(settings.Mode) {
 			return 1
 		}
 
-		ipA := a.Broadcaster.Endpoint.ExternalIP.String()
-		ipB := b.Broadcaster.Endpoint.ExternalIP.String()
+		ipA := a.GameServer.Endpoint.ExternalIP.String()
+		ipB := b.GameServer.Endpoint.ExternalIP.String()
 
 		rttA := rttsByExternalIP[ipA]
 		rttB := rttsByExternalIP[ipB]
@@ -542,12 +542,12 @@ func AllocateGameServer(ctx context.Context, logger runtime.Logger, nk runtime.N
 			}
 		}
 
-		ratingA, ok := globalSettings.ServerRatings.ByExternalIP[a.Broadcaster.Endpoint.ExternalIP.String()]
+		ratingA, ok := globalSettings.ServerRatings.ByExternalIP[a.GameServer.Endpoint.ExternalIP.String()]
 		if !ok {
 			ratingA = 0
 		}
 
-		ratingB, ok := globalSettings.ServerRatings.ByExternalIP[b.Broadcaster.Endpoint.ExternalIP.String()]
+		ratingB, ok := globalSettings.ServerRatings.ByExternalIP[b.GameServer.Endpoint.ExternalIP.String()]
 		if !ok {
 			ratingB = 0
 		}

@@ -124,7 +124,7 @@ func MatchListPublicRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 	}
 
 	playerCount := 0
-	gameServers := make([]*MatchBroadcaster, 0, len(matches))
+	gameServers := make([]*GameServerPresence, 0, len(matches))
 	labels := make([]*MatchLabel, 0, len(matches))
 	for _, m := range matches {
 		l := &MatchLabel{}
@@ -135,7 +135,7 @@ func MatchListPublicRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		v := l.PublicView()
 
 		playerCount += v.PlayerCount
-		gameServers = append(gameServers, &v.Broadcaster)
+		gameServers = append(gameServers, v.GameServer)
 		if v.LobbyType != UnassignedLobby {
 			labels = append(labels, v)
 		}
@@ -159,7 +159,7 @@ func MatchListPublicRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		PlayerCount                 int                       `json:"player_count"`
 		MatchmakingTicketsByGroupID map[string]map[string]int `json:"active_matchmaking_counts"`
 		Labels                      []*MatchLabel             `json:"labels"`
-		GameServers                 []*MatchBroadcaster       `json:"gameservers"`
+		GameServers                 []*GameServerPresence     `json:"gameservers"`
 	}{
 		Uptime:                      int64(time.Since(nakamaStartTime).Minutes()),
 		UpdateTime:                  TimeRFC3339(time.Now().UTC()),
@@ -290,10 +290,10 @@ func MatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime
 			continue
 		} else {
 			// Remove sensitive data
-			label.Broadcaster.Latitude = 0
-			label.Broadcaster.Longitude = 0
-			label.Broadcaster.ServerID = 0
-			label.Broadcaster.Endpoint = evr.Endpoint{}
+			label.GameServer.Latitude = 0
+			label.GameServer.Longitude = 0
+			label.GameServer.ServerID = 0
+			label.GameServer.Endpoint = evr.Endpoint{}
 			for i, p := range label.Players {
 				p.ClientIP = ""
 				label.Players[i] = p
@@ -301,7 +301,7 @@ func MatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime
 		}
 
 		if label.LobbyType == UnassignedLobby {
-			for _, id := range label.Broadcaster.GroupIDs {
+			for _, id := range label.GameServer.GroupIDs {
 				if m, ok := memberships[id.String()]; ok {
 					if !m.IsAPIAccess {
 						continue
@@ -983,7 +983,7 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 
 	// Operators may signal their own game servers.
 	// Otherwise, the game server must host for the guild.
-	if label.Broadcaster.OperatorID.String() != userID && !slices.Contains(label.Broadcaster.GroupIDs, uuid.FromStringOrNil(groupID)) {
+	if label.GameServer.OperatorID.String() != userID && !slices.Contains(label.GameServer.GroupIDs, uuid.FromStringOrNil(groupID)) {
 		return "", runtime.NewError("game server does not host for that guild.", StatusPermissionDenied)
 	}
 

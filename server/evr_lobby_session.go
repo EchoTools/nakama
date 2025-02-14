@@ -114,7 +114,7 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 
 		LeavePartyStream(session)
 		p.metrics.CustomCounter("lobby_create_session", lobbyParams.MetricsTags(), 1)
-		logger.Info("Creating session", zap.String("mode", lobbyParams.Mode.String()), zap.String("level", lobbyParams.Level.String()), zap.String("region", lobbyParams.Region.String()))
+		logger.Info("Creating session", zap.String("mode", lobbyParams.Mode.String()), zap.String("level", lobbyParams.Level.String()), zap.String("region", lobbyParams.RegionCode))
 		matchID, err = p.lobbyCreate(ctx, logger, session, lobbyParams)
 		if err == nil {
 			return p.lobbyJoin(ctx, logger, session, lobbyParams, matchID)

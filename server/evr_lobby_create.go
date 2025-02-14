@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/heroiclabs/nakama-common/runtime"
-	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
 )
 
@@ -128,12 +127,13 @@ func lobbyListLabels(ctx context.Context, nk runtime.NakamaModule, query string)
 
 func lobbyCreateQuery(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, session Session, params *LobbySessionParameters) (string, error) {
 
-	regions := []string{params.Region.String(), evr.DefaultRegion.String()}
+	// Always include the default region in the query to ensure a fallback.
+	regions := []string{params.RegionCode, "default"}
 	qparts := []string{
 		"+label.open:T",
 		"+label.lobby_type:unassigned",
 		fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/", Query.Escape(params.GroupID.String())),
-		fmt.Sprintf("+label.broadcaster.regions:/(%s)/", Query.Join(regions, "|")),
+		fmt.Sprintf("+label.broadcaster.region_codes:/(%s)/", Query.Join(regions, "|")),
 		//fmt.Sprintf("+label.broadcaster.version_lock:%s", params.VersionLock),
 	}
 
@@ -150,24 +150,27 @@ func lobbyCreateQuery(ctx context.Context, logger *zap.Logger, db *sql.DB, nk ru
 func lobbyCreateSortOptions(labels []*MatchLabel, labelLatencies []int, params *LobbySessionParameters) {
 	// Sort the labels by latency
 	sort.SliceStable(labels, func(i, j int) bool {
-		// Sort by region first
-		a := labels[i].Broadcaster
-		b := labels[j].Broadcaster
 
+		a := labels[i].GameServer
+		b := labels[j].GameServer
+
+		// Sort by priority
 		if a.IsPriorityFor(params.Mode) && !b.IsPriorityFor(params.Mode) {
 			return true
 		}
-		if a.IsPriorityFor(params.Mode) && !b.IsPriorityFor(params.Mode) {
+		if !a.IsPriorityFor(params.Mode) && b.IsPriorityFor(params.Mode) {
 			return false
 		}
 
-		if slices.Contains(a.Regions, params.Region) && !slices.Contains(b.Regions, params.Region) {
+		// Sort by region
+		if slices.Contains(a.RegionCodes, params.RegionCode) && !slices.Contains(b.RegionCodes, params.RegionCode) {
 			return true
 		}
-		if !slices.Contains(a.Regions, params.Region) && slices.Contains(b.Regions, params.Region) {
+		if !slices.Contains(a.RegionCodes, params.RegionCode) && slices.Contains(b.RegionCodes, params.RegionCode) {
 			return false
 		}
 
+		// Sort by latency
 		if labelLatencies[i] == 0 && labelLatencies[j] != 0 {
 			return false
 		}

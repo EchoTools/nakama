@@ -267,7 +267,7 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 	qparts := []string{
 		"+label.open:T",
 		"+label.lobby_type:unassigned",
-		"+label.broadcaster.regions:/(default)/",
+		"+label.broadcaster.region_codes:/(default)/",
 		fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/", Query.Escape(lobbyParams.GroupID.String())),
 		lobbyParams.CreateQueryAddon,
 		//fmt.Sprintf("+label.broadcaster.version_lock:%s", versionLock.String()),
@@ -295,7 +295,7 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 			extIPs := sortByGreatestPlayerAvailability(rttByPlayerByExtIP)
 			for _, extIP := range extIPs {
 				for _, l := range labels {
-					if l.Broadcaster.Endpoint.GetExternalIP() == extIP {
+					if l.GameServer.Endpoint.GetExternalIP() == extIP {
 						label = l
 						break
 					}
@@ -442,10 +442,10 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 		slices.SortFunc(matches, func(a, b *MatchLabelMeta) int {
 
 			// Rank by RTT
-			if rtts[a.State.Broadcaster.Endpoint.GetExternalIP()] > lobbyParams.MaxServerRTT && rtts[b.State.Broadcaster.Endpoint.GetExternalIP()] < lobbyParams.MaxServerRTT {
+			if rtts[a.State.GameServer.Endpoint.GetExternalIP()] > lobbyParams.MaxServerRTT && rtts[b.State.GameServer.Endpoint.GetExternalIP()] < lobbyParams.MaxServerRTT {
 				return -1
 			}
-			if rtts[a.State.Broadcaster.Endpoint.GetExternalIP()] < lobbyParams.MaxServerRTT && rtts[b.State.Broadcaster.Endpoint.GetExternalIP()] > lobbyParams.MaxServerRTT {
+			if rtts[a.State.GameServer.Endpoint.GetExternalIP()] < lobbyParams.MaxServerRTT && rtts[b.State.GameServer.Endpoint.GetExternalIP()] > lobbyParams.MaxServerRTT {
 				return 1
 			}
 
@@ -470,7 +470,7 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 			}
 
 			// If the open slots are the same, sort by latency
-			return rtts[a.State.Broadcaster.Endpoint.GetExternalIP()] - rtts[b.State.Broadcaster.Endpoint.GetExternalIP()]
+			return rtts[a.State.GameServer.Endpoint.GetExternalIP()] - rtts[b.State.GameServer.Endpoint.GetExternalIP()]
 		})
 
 		team := evr.TeamBlue
@@ -568,7 +568,7 @@ func (p *EvrPipeline) CheckServerPing(logger *zap.Logger, session *sessionWS) er
 		// Wait for the client to be ready.
 		<-time.After(1 * time.Second)
 		activeEndpoints := make([]evr.Endpoint, 0, 100)
-		p.broadcasterRegistrationBySession.Range(func(_ string, b *MatchBroadcaster) bool {
+		p.broadcasterRegistrationBySession.Range(func(_ string, b *GameServerPresence) bool {
 			activeEndpoints = append(activeEndpoints, b.Endpoint)
 			return true
 		})

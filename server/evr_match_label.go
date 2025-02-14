@@ -39,7 +39,7 @@ type MatchLabel struct {
 	SpawnedBy       string                    `json:"spawned_by,omitempty"`       // The userId of the player that spawned this match.
 	StartTime       time.Time                 `json:"start_time,omitempty"`       // The time the match was, or will be started.
 	CreatedAt       time.Time                 `json:"created_at,omitempty"`       // The time the match was created.
-	Broadcaster     MatchBroadcaster          `json:"broadcaster,omitempty"`      // The broadcaster's data
+	GameServer      *GameServerPresence       `json:"broadcaster,omitempty"`      // The broadcaster's data
 	SessionSettings *evr.LobbySessionSettings `json:"session_settings,omitempty"` // The session settings for the match (EVR).
 	TeamAlignments  map[string]int            `json:"team_alignments,omitempty"`  // map[userID]TeamIndex
 
@@ -225,11 +225,11 @@ func (s *MatchLabel) GetGroupID() uuid.UUID {
 }
 
 func (s *MatchLabel) GetEndpoint() evr.Endpoint {
-	return s.Broadcaster.Endpoint
+	return s.GameServer.Endpoint
 }
 
 func (s *MatchLabel) GetEntrantConnectMessage(role int, isPCVR bool, disableEncryption bool, disableMAC bool) *evr.LobbySessionSuccessv5 {
-	return evr.NewLobbySessionSuccess(s.Mode, s.ID.UUID, s.GetGroupID(), s.Broadcaster.Endpoint, int16(role), isPCVR, disableEncryption, disableMAC).Version5()
+	return evr.NewLobbySessionSuccess(s.Mode, s.ID.UUID, s.GetGroupID(), s.GameServer.Endpoint, int16(role), isPCVR, disableEncryption, disableMAC).Version5()
 }
 
 func (s *MatchLabel) MetricsTags() map[string]string {
@@ -239,7 +239,7 @@ func (s *MatchLabel) MetricsTags() map[string]string {
 		"level":       s.Level.String(),
 		"type":        s.LobbyType.String(),
 		"group_id":    s.GetGroupID().String(),
-		"operator_id": s.Broadcaster.OperatorID.String(),
+		"operator_id": s.GameServer.OperatorID.String(),
 	}
 
 	if s.server != nil {
@@ -471,13 +471,13 @@ func (l *MatchLabel) PublicView() *MatchLabel {
 		PlayerCount:      l.PlayerCount,
 		PlayerLimit:      l.PlayerLimit,
 		TeamSize:         l.TeamSize,
-		Broadcaster: MatchBroadcaster{
-			OperatorID:  l.Broadcaster.OperatorID,
-			GroupIDs:    l.Broadcaster.GroupIDs,
-			VersionLock: l.Broadcaster.VersionLock,
-			Regions:     l.Broadcaster.Regions,
-			Tags:        l.Broadcaster.Tags,
-			Features:    l.Broadcaster.Features,
+		GameServer: &GameServerPresence{
+			OperatorID:  l.GameServer.OperatorID,
+			GroupIDs:    l.GameServer.GroupIDs,
+			VersionLock: l.GameServer.VersionLock,
+			//RegionCodes: l.GameServer.RegionCodes,
+			Tags:     l.GameServer.Tags,
+			Features: l.GameServer.Features,
 		},
 		Players:        make([]PlayerInfo, 0),
 		RankPercentile: l.RankPercentile,

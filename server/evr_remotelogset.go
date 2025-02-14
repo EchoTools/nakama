@@ -270,9 +270,9 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				MatchID:          matchID,
 				MatchMode:        label.Mode,
 				MatchStartedAt:   label.StartTime,
-				ServerID:         label.Broadcaster.SessionID.String(),
-				MatchOperator:    label.Broadcaster.OperatorID.String(),
-				MatchEndpoint:    label.Broadcaster.Endpoint.String(),
+				ServerID:         label.GameServer.SessionID.String(),
+				MatchOperator:    label.GameServer.OperatorID.String(),
+				MatchEndpoint:    label.GameServer.Endpoint.String(),
 				ClientIsPCVR:     params.IsPCVR(),
 				ClientUserID:     session.userID.String(),
 				ClientUsername:   session.Username(),
@@ -289,17 +289,17 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 
 			logger.Warn("Server connection failed", zap.String("username", session.Username()), zap.String("match_id", msg.SessionUUID().String()), zap.String("evr_id", evrID.String()), zap.Any("remote_log_message", msg))
 
-			acct, err := p.runtimeModule.AccountGetId(ctx, label.Broadcaster.OperatorID.String())
+			acct, err := p.runtimeModule.AccountGetId(ctx, label.GameServer.OperatorID.String())
 			if err != nil {
 				logger.Error("Failed to get account", zap.Error(err))
 				continue
 			}
 
 			tags := map[string]string{
-				"operator_id":       label.Broadcaster.OperatorID.String(),
+				"operator_id":       label.GameServer.OperatorID.String(),
 				"operator_username": acct.User.Username,
-				"ext_ip":            label.Broadcaster.Endpoint.GetExternalIP(),
-				"port":              strconv.Itoa(int(label.Broadcaster.Endpoint.Port)),
+				"ext_ip":            label.GameServer.Endpoint.GetExternalIP(),
+				"port":              strconv.Itoa(int(label.GameServer.Endpoint.Port)),
 				"mode":              label.Mode.String(),
 				"is_pcvr":           strconv.FormatBool(params.IsPCVR()),
 			}
