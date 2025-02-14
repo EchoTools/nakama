@@ -133,7 +133,7 @@ func (h LatencyHistory) LabelsByAverageRTT(labels []*MatchLabel) []LabelWithLate
 
 	labelRTTs := make([]LabelWithLatency, 0, len(labels))
 	for _, label := range labels {
-		if history, ok := h[label.Broadcaster.Endpoint.GetExternalIP()]; ok {
+		if history, ok := h[label.GameServer.Endpoint.GetExternalIP()]; ok {
 			if len(history) == 0 {
 				labelRTTs = append(labelRTTs, LabelWithLatency{Label: label, RTT: 999})
 				continue

@@ -195,37 +195,37 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 		for _, state := range matchStates {
 			groupID := state.State.GetGroupID()
 			groupIDs[groupID.String()] = struct{}{}
-			operatorUsername, ok := operatorUsernames[state.State.Broadcaster.OperatorID]
+			operatorUsername, ok := operatorUsernames[state.State.GameServer.OperatorID]
 			if !ok {
-				account, err := nk.AccountGetId(ctx, state.State.Broadcaster.OperatorID.String())
+				account, err := nk.AccountGetId(ctx, state.State.GameServer.OperatorID.String())
 				if err != nil {
 					logger.Error("Error getting account: %v", err)
 					continue
 				}
 				operatorUsername = account.User.Username
-				operatorUsernames[state.State.Broadcaster.OperatorID] = operatorUsername
+				operatorUsernames[state.State.GameServer.OperatorID] = operatorUsername
 			}
 
 			stateTags := MatchStateTags{
 				Type:             state.State.LobbyType,
 				Mode:             state.State.Mode,
 				Level:            state.State.Level,
-				OperatorID:       state.State.Broadcaster.OperatorID.String(),
+				OperatorID:       state.State.GameServer.OperatorID.String(),
 				OperatorUsername: operatorUsername,
 				Group:            groupID.String(),
-				IPAddress:        state.State.Broadcaster.Endpoint.ExternalIP.String(),
-				Port:             state.State.Broadcaster.Endpoint.Port,
-				Geohash:          state.State.Broadcaster.GeoHash,
-				Latitude:         state.State.Broadcaster.Latitude,
-				Longitude:        state.State.Broadcaster.Longitude,
-				ASNumber:         state.State.Broadcaster.ASNumber,
+				IPAddress:        state.State.GameServer.Endpoint.ExternalIP.String(),
+				Port:             state.State.GameServer.Endpoint.Port,
+				Geohash:          state.State.GameServer.GeoHash,
+				Latitude:         state.State.GameServer.Latitude,
+				Longitude:        state.State.GameServer.Longitude,
+				ASNumber:         state.State.GameServer.ASNumber,
 			}
 			playercounts[stateTags] = append(playercounts[stateTags], len(state.State.Players))
 
 			rank_percentiles := make([]float64, 0, len(state.State.Players))
 
 			for _, player := range state.State.Players {
-				tags := NewPlayerTags(groupID, state.State.Mode, player.GeoHash, state.State.Broadcaster.GeoHash, player.PingMillis)
+				tags := NewPlayerTags(groupID, state.State.Mode, player.GeoHash, state.State.GameServer.GeoHash, player.PingMillis)
 				playerData[tags] += 1
 
 				rank_percentiles = append(rank_percentiles, float64(player.RankPercentile))
@@ -288,12 +288,12 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 		locations := make(map[string][]float64)
 
 		for _, state := range matchStates {
-			if state.State.Broadcaster.Endpoint.GetExternalIP() == "" {
+			if state.State.GameServer.Endpoint.GetExternalIP() == "" {
 				continue
 			}
-			locations[state.State.Broadcaster.Endpoint.GetExternalIP()] = []float64{
-				state.State.Broadcaster.Latitude,
-				state.State.Broadcaster.Longitude,
+			locations[state.State.GameServer.Endpoint.GetExternalIP()] = []float64{
+				state.State.GameServer.Latitude,
+				state.State.GameServer.Longitude,
 			}
 		}
 

@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	anyascii "github.com/anyascii/go"
 	"github.com/bwmarrin/discordgo"
 	"github.com/echotools/vrmlgo"
 	"github.com/gofrs/uuid/v5"
@@ -53,8 +54,9 @@ type DiscordAppBot struct {
 	db              *sql.DB
 	dg              *discordgo.Session
 
-	cache     *DiscordIntegrator
-	ipqsCache *IPQSClient
+	cache       *DiscordIntegrator
+	ipqsCache   *IPQSClient
+	choiceCache *MapOf[string, []*discordgo.ApplicationCommandOptionChoice]
 
 	debugChannels  map[string]string // map[groupID]channelID
 	userID         string            // Nakama UserID of the bot
@@ -82,8 +84,9 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 		profileRegistry: profileRegistry,
 		statusRegistry:  statusRegistry,
 
-		cache:     discordCache,
-		ipqsCache: ipqsCache,
+		cache:       discordCache,
+		ipqsCache:   ipqsCache,
+		choiceCache: &MapOf[string, []*discordgo.ApplicationCommandOptionChoice]{},
 
 		dg: dg,
 
@@ -666,44 +669,11 @@ var (
 					},
 				},
 				{
-					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "region",
-					Description: "Region to allocate the session in (leave blank to use the best server for you)",
-					Required:    false,
-					Choices: []*discordgo.ApplicationCommandOptionChoice{
-						{
-							Name:  "US Central North (Chicago)",
-							Value: "us-central-north",
-						},
-						{
-							Name:  "US Central South (Texas)",
-							Value: "us-central-south",
-						},
-						{
-							Name:  "US Central South",
-							Value: "us-east",
-						},
-						{
-							Name:  "US West",
-							Value: "us-west",
-						},
-						{
-							Name:  "EU West",
-							Value: "eu-west",
-						},
-						{
-							Name:  "Japan",
-							Value: "jp",
-						},
-						{
-							Name:  "Singapore",
-							Value: "sin",
-						},
-						{
-							Name:  "Vibinator",
-							Value: "82be4f8d-7504-4b67-8411-ce80c17bdf65",
-						},
-					},
+					Type:         discordgo.ApplicationCommandOptionString,
+					Name:         "region",
+					Description:  "Region to allocate the session in (leave blank to use the best server for you)",
+					Required:     false,
+					Autocomplete: true,
 				},
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
@@ -2288,7 +2258,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			serverLocation := "Unknown"
 
-			serverExtIP := label.Broadcaster.Endpoint.ExternalIP.String()
+			serverExtIP := label.GameServer.Endpoint.ExternalIP.String()
 			if ipqs, err := d.ipqsCache.Get(ctx, serverExtIP); err != nil {
 				logger.Error("Failed to get IPQS data", zap.Error(err))
 			} else {
@@ -2378,7 +2348,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					// Update the list of players in the interaction response
 					var players strings.Builder
 					for _, p := range presences {
-						if p.GetSessionId() == label.Broadcaster.SessionID.String() {
+						if p.GetSessionId() == label.GameServer.SessionID.String() {
 							continue
 						}
 						players.WriteString(fmt.Sprintf("<@%s>\n", d.cache.UserIDToDiscordID(p.GetUserId())))
@@ -2405,12 +2375,12 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			}
 			mode := evr.ModeArenaPrivate
-			region := evr.DefaultRegion
+			region := "default"
 			level := evr.LevelUnspecified
 			for _, o := range options {
 				switch o.Name {
 				case "region":
-					region = evr.ToSymbol(o.StringValue())
+					region = o.StringValue()
 				case "mode":
 					mode = evr.ToSymbol(o.StringValue())
 				case "level":
@@ -2429,7 +2399,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			logger = logger.WithFields(map[string]interface{}{
 				"userID":    userID,
 				"guildID":   i.GuildID,
-				"region":    region.String(),
+				"region":    region,
 				"mode":      mode.String(),
 				"level":     level.String(),
 				"startTime": startTime,
@@ -2500,7 +2470,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					cnt += 1
 					if label, _ := MatchLabelByID(ctx, d.nk, MatchIDFromStringOrNil(p.GetStatus())); label != nil {
 
-						if label.Broadcaster.SessionID.String() == p.GetSessionId() {
+						if label.GameServer.SessionID.String() == p.GetSessionId() {
 							continue
 						}
 
@@ -2571,7 +2541,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					continue
 				}
 
-				if label.Broadcaster.SessionID.String() == p.GetSessionId() {
+				if label.GameServer.SessionID.String() == p.GetSessionId() {
 					continue
 				}
 
@@ -3299,13 +3269,14 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 		case discordgo.InteractionApplicationCommandAutocomplete:
 
 			data := i.ApplicationCommandData()
-			appCommandName := i.ApplicationCommandData().Name
+
 			logger = logger.WithFields(map[string]any{
-				"app_command_autocomplete": appCommandName,
-				"options":                  i.ApplicationCommandData().Options,
+				"app_command_autocomplete": data.Name,
+				"options":                  data.Options,
+				"data":                     data,
 			})
 
-			switch appCommandName {
+			switch data.Name {
 			case "unlink-headset":
 				userID := d.cache.DiscordIDToUserID(user.ID)
 				if userID == "" {
@@ -3349,8 +3320,70 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}); err != nil {
 					logger.Error("Failed to respond to interaction", zap.Error(err))
 				}
-			}
 
+			case "create":
+
+				partial := ""
+
+				for _, o := range data.Options {
+					if o.Name == "region" {
+
+						// Only response if the region is focused
+						if !o.Focused {
+							return
+						}
+
+						partial = o.StringValue()
+					}
+				}
+
+				var found bool
+				var err error
+				var choices []*discordgo.ApplicationCommandOptionChoice
+
+				if choices, found = d.choiceCache.Load(user.ID); !found {
+
+					groupID := d.cache.GuildIDToGroupID(i.GuildID)
+					if groupID == "" {
+						return
+					}
+
+					userID := d.cache.DiscordIDToUserID(user.ID)
+					if userID == "" {
+						return
+					}
+
+					choices, err = d.autocompleteRegions(ctx, logger, userID, groupID)
+					if err != nil {
+						logger.Error("Failed to get regions", zap.Error(err))
+						return
+					}
+					d.choiceCache.Store(user.ID, choices)
+
+					go func() {
+						<-time.After(20 * time.Second)
+						d.choiceCache.Delete(user.ID)
+					}()
+				}
+
+				partial = strings.ToLower(partial)
+				partialCode := anyascii.Transliterate(partial)
+				for i := 0; i < len(choices); i++ {
+					if !strings.Contains(strings.ToLower(choices[i].Name), partial) && !strings.Contains(strings.ToLower(choices[i].Name), partialCode) {
+						choices = append(choices[:i], choices[i+1:]...)
+						i--
+					}
+				}
+
+				if err := d.dg.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+					Type: discordgo.InteractionApplicationCommandAutocompleteResult,
+					Data: &discordgo.InteractionResponseData{
+						Choices: choices, // This is basically the whole purpose of autocomplete interaction - return custom options to the user.
+					},
+				}); err != nil {
+					logger.Error("Failed to respond to interaction", zap.Error(err))
+				}
+			}
 		default:
 			logger.Info("Unhandled interaction type: %v", i.Type)
 		}
@@ -3635,7 +3668,7 @@ func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runt
 		return err
 	}
 
-	regionSymbol := evr.ToSymbol(regionStr)
+	regionHash := evr.ToSymbol(regionStr).String()
 
 	tracked := make([]*MatchLabel, 0, len(matches))
 
@@ -3647,13 +3680,14 @@ func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runt
 			continue
 		}
 
-		for _, r := range state.Broadcaster.Regions {
-			if regionSymbol == r {
+		for _, r := range state.GameServer.RegionCodes {
+			if regionStr == r || regionHash == r {
 				tracked = append(tracked, state)
 				continue
 			}
 		}
 	}
+
 	if len(tracked) == 0 {
 		return fmt.Errorf("no matches found in region %s", regionStr)
 	}
@@ -3693,7 +3727,7 @@ func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runt
 		}
 
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-			Name:   strconv.FormatUint(state.Broadcaster.ServerID, 10),
+			Name:   strconv.FormatUint(state.GameServer.ServerID, 10),
 			Value:  status,
 			Inline: false,
 		})

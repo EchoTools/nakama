@@ -54,7 +54,7 @@ func (s *EarlyQuitStatistics) ApplyEarlyQuitPenalty(logger *zap.Logger, userID s
 		return
 	}
 
-	if userID == label.Broadcaster.OperatorID.String() {
+	if userID == label.GameServer.OperatorID.String() {
 		// The broadcaster is not penalized
 		return
 	}

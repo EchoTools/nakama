@@ -580,7 +580,7 @@ func TestEvrMatch_MatchLoop(t *testing.T) {
 
 func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 	now := time.Now()
-	serverConfig := MatchBroadcaster{
+	serverConfig := GameServerPresence{
 		SessionID:  uuid.Must(uuid.NewV4()),
 		OperatorID: uuid.Must(uuid.NewV4()),
 		ServerID:   12341234,
@@ -589,14 +589,13 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 			ExternalIP: net.ParseIP("2.2.2.2"),
 			Port:       12345,
 		},
-		Regions:       []evr.Symbol{},
+		RegionCodes:   []string{},
 		VersionLock:   evr.ToSymbol(1234451234),
 		GroupIDs:      []uuid.UUID{uuid.Must(uuid.NewV4())},
 		Features:      []string{},
 		GeoHash:       "asdf",
 		Latitude:      1,
 		Longitude:     2,
-		Location:      "Somewhere",
 		ASNumber:      1234,
 		TimeStepUsecs: 12000,
 		NativeSupport: true,
@@ -606,7 +605,7 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 
 		state := &MatchLabel{
 			CreatedAt:        now,
-			Broadcaster:      serverConfig,
+			GameServer:       &serverConfig,
 			Open:             false,
 			LobbyType:        UnassignedLobby,
 			Mode:             evr.ModeUnloaded,
@@ -911,7 +910,7 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 }
 func TestEvrMatch_MatchJoinAttempt_Counts(t *testing.T) {
 	now := time.Now()
-	serverConfig := MatchBroadcaster{
+	serverConfig := GameServerPresence{
 		SessionID:  uuid.Must(uuid.NewV4()),
 		OperatorID: uuid.Must(uuid.NewV4()),
 		ServerID:   12341234,
@@ -920,14 +919,13 @@ func TestEvrMatch_MatchJoinAttempt_Counts(t *testing.T) {
 			ExternalIP: net.ParseIP("2.2.2.2"),
 			Port:       12345,
 		},
-		Regions:       []evr.Symbol{},
+		RegionCodes:   []string{},
 		VersionLock:   evr.ToSymbol(1234451234),
 		GroupIDs:      []uuid.UUID{uuid.Must(uuid.NewV4())},
 		Features:      []string{},
 		GeoHash:       "asdf",
 		Latitude:      1,
 		Longitude:     2,
-		Location:      "Somewhere",
 		ASNumber:      1234,
 		TimeStepUsecs: 12000,
 		NativeSupport: true,
@@ -937,7 +935,7 @@ func TestEvrMatch_MatchJoinAttempt_Counts(t *testing.T) {
 
 		state := &MatchLabel{
 			CreatedAt:        now,
-			Broadcaster:      serverConfig,
+			GameServer:       &serverConfig,
 			Open:             false,
 			LobbyType:        UnassignedLobby,
 			Mode:             evr.ModeUnloaded,

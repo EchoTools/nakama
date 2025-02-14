@@ -30,7 +30,7 @@ type LobbySessionParameters struct {
 	VersionLock            evr.Symbol                    `json:"version_lock"`
 	AppID                  evr.Symbol                    `json:"app_id"`
 	GroupID                uuid.UUID                     `json:"group_id"`
-	Region                 evr.Symbol                    `json:"region"`
+	RegionCode             string                        `json:"region_code"`
 	Mode                   evr.Symbol                    `json:"mode"`
 	Level                  evr.Symbol                    `json:"level"`
 	SupportedFeatures      []string                      `json:"supported_features"`
@@ -108,14 +108,14 @@ func (s LobbySessionParameters) MetricsTags() map[string]string {
 	}
 }
 
-func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, r evr.LobbySessionRequest) (*LobbySessionParameters, error) {
+func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, request evr.LobbySessionRequest) (*LobbySessionParameters, error) {
 	p := session.evrPipeline
 
 	userID := session.userID.String()
-	mode := r.GetMode()
-	level := r.GetLevel()
-	versionLock := r.GetVersionLock()
-	appID := r.GetAppID()
+	mode := request.GetMode()
+	level := request.GetLevel()
+	versionLock := request.GetVersionLock()
+	appID := request.GetAppID()
 
 	sessionParams, ok := LoadParams(ctx)
 	if !ok {
@@ -154,7 +154,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		}
 	}
 
-	entrantRole := r.GetEntrantRole(0)
+	entrantRole := request.GetEntrantRole(0)
 
 	nextMatchID := MatchID{}
 
@@ -245,23 +245,24 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 	requiredFeatures := sessionParams.requiredFeatures
 	supportedFeatures := sessionParams.supportedFeatures
 
-	if r.GetFeatures() != nil {
-		supportedFeatures = append(supportedFeatures, r.GetFeatures()...)
+	if request.GetFeatures() != nil {
+		supportedFeatures = append(supportedFeatures, request.GetFeatures()...)
 	}
 
-	groupID := r.GetGroupID()
-	if r.GetGroupID() == uuid.Nil {
+	groupID := request.GetGroupID()
+	if request.GetGroupID() == uuid.Nil {
 		groupID = sessionParams.accountMetadata.GetActiveGroupID()
 	}
 
-	region := r.GetRegion()
-	if region == evr.UnspecifiedRegion {
-		region = evr.DefaultRegion
+	region := "default"
+
+	if r := request.GetRegion(); r != evr.UnspecifiedRegion {
+		region = r.String()
 	}
 
 	currentMatchID := MatchID{}
-	if r.GetCurrentLobbyID() != uuid.Nil {
-		currentMatchID = MatchID{UUID: r.GetCurrentLobbyID(), Node: node}
+	if request.GetCurrentLobbyID() != uuid.Nil {
+		currentMatchID = MatchID{UUID: request.GetCurrentLobbyID(), Node: node}
 	}
 
 	// Add blocked players who are online to the Matchmaking Query Addon
@@ -347,7 +348,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 		VersionLock:            versionLock,
 		AppID:                  appID,
 		GroupID:                groupID,
-		Region:                 region,
+		RegionCode:             region,
 		Mode:                   mode,
 		Level:                  level,
 		SupportedFeatures:      supportedFeatures,

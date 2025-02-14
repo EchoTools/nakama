@@ -281,7 +281,7 @@ type Region evr.Symbol
 func (r Region) Query(o QueryOperator, b int) string {
 	return Label{
 		Op:    rune(o),
-		Name:  "broadcaster.regions",
+		Name:  "broadcaster.region_codes",
 		Value: evr.Symbol(r).Token().String(),
 		boost: b,
 	}.Escaped()
@@ -304,7 +304,7 @@ func (c Regions) Query(o QueryOperator, b int) string {
 	s = fmt.Sprintf("/(%s)/", s)
 	return Label{
 		Op:    rune(o),
-		Name:  "broadcaster.regions",
+		Name:  "broadcaster.region_codes",
 		Value: s,
 		boost: b,
 	}.Unescaped()

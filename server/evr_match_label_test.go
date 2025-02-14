@@ -14,7 +14,7 @@ func TestMatchLabel_GetPlayerCount(t *testing.T) {
 		ID                   MatchID
 		Open                 bool
 		LobbyType            LobbyType
-		Broadcaster          MatchBroadcaster
+		Broadcaster          *GameServerPresence
 		StartTime            time.Time
 		SpawnedBy            string
 		GroupID              *uuid.UUID
@@ -57,7 +57,7 @@ func TestMatchLabel_GetPlayerCount(t *testing.T) {
 				ID:                   tt.fields.ID,
 				Open:                 tt.fields.Open,
 				LobbyType:            tt.fields.LobbyType,
-				Broadcaster:          tt.fields.Broadcaster,
+				GameServer:           tt.fields.Broadcaster,
 				StartTime:            tt.fields.StartTime,
 				SpawnedBy:            tt.fields.SpawnedBy,
 				GroupID:              tt.fields.GroupID,

@@ -77,7 +77,7 @@ const (
 )
 
 type EvrMatchMeta struct {
-	MatchBroadcaster
+	GameServerPresence
 	Players []EvrMatchPresence `json:"players,omitempty"` // The displayNames of the players (by team name) in the match.
 	// Stats
 }
@@ -85,31 +85,6 @@ type EvrMatchMeta struct {
 type MatchGameMode struct {
 	Mode       evr.Symbol `json:"mode"`
 	Visibility LobbyType  `json:"visibility"`
-}
-
-type MatchBroadcaster struct {
-	SessionID       uuid.UUID    `json:"sid,omitempty"`              // The broadcaster's Session ID
-	OperatorID      uuid.UUID    `json:"oper,omitempty"`             // The user id of the broadcaster.
-	GroupIDs        []uuid.UUID  `json:"group_ids,omitempty"`        // The channels this broadcaster will host matches for.
-	Endpoint        evr.Endpoint `json:"endpoint,omitempty"`         // The endpoint data used for connections.
-	VersionLock     evr.Symbol   `json:"version_lock,omitempty"`     // The game build version. (EVR)
-	AppId           string       `json:"app_id,omitempty"`           // The game app id. (EVR)
-	Regions         []evr.Symbol `json:"regions,omitempty"`          // The region the match is hosted in. (Matching Only) (EVR)
-	ServerID        uint64       `json:"server_id,omitempty"`        // The server id of the broadcaster. (EVR)
-	Features        []string     `json:"features,omitempty"`         // The features of the broadcaster.
-	TimeStepUsecs   uint32       `json:"time_step_usecs,omitempty"`  // The time step in microseconds.
-	Tags            []string     `json:"tags,omitempty"`             // The tags given on the urlparam for the match.
-	DesignatedModes []evr.Symbol `json:"designated_modes,omitempty"` // The priority modes for the broadcaster.
-	Location        string       `json:"location,omitempty"`         // The location of the broadcaster.
-	GeoHash         string       `json:"geohash,omitempty"`          // The geohash of the broadcaster.
-	Latitude        float64      `json:"latitude,omitempty"`         // The latitude of the broadcaster.
-	Longitude       float64      `json:"longitude,omitempty"`        // The longitude of the broadcaster.
-	ASNumber        int          `json:"asn,omitempty"`              // The ASN of the broadcaster.
-	NativeSupport   bool         `json:"native,omitempty"`           // The native support of the broadcaster.
-}
-
-func (g *MatchBroadcaster) IsPriorityFor(mode evr.Symbol) bool {
-	return slices.Contains(g.DesignatedModes, mode)
 }
 
 type MatchSettings struct {
@@ -153,7 +128,7 @@ const (
 // MatchInit is called when the match is created.
 func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, params map[string]interface{}) (interface{}, int, string) {
 
-	gameserverConfig := MatchBroadcaster{}
+	gameserverConfig := GameServerPresence{}
 	if err := json.Unmarshal([]byte(params["gameserver"].(string)), &gameserverConfig); err != nil {
 		logger.Error("Failed to unmarshal gameserver config: %v", err)
 		return nil, 0, ""
@@ -161,7 +136,7 @@ func (m *EvrMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql
 
 	state := MatchLabel{
 		CreatedAt:        time.Now().UTC(),
-		Broadcaster:      gameserverConfig,
+		GameServer:       &gameserverConfig,
 		Open:             false,
 		LobbyType:        UnassignedLobby,
 		Mode:             evr.ModeUnloaded,
@@ -255,7 +230,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		"uid":      joinPresence.GetUserId(),
 		"username": joinPresence.GetUsername()})
 
-	if joinPresence.GetSessionId() == state.Broadcaster.SessionID.String() {
+	if joinPresence.GetSessionId() == state.GameServer.SessionID.String() {
 
 		logger.Debug("Broadcaster joining the match.")
 		state.server = joinPresence
@@ -434,7 +409,7 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 
 	for _, p := range presences {
 		// Game servers don't get added to the presence map.
-		if p.GetSessionId() == state.Broadcaster.SessionID.String() {
+		if p.GetSessionId() == state.GameServer.SessionID.String() {
 			continue
 		}
 
@@ -502,7 +477,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 
 	// if the broadcaster is in the presences, then shut down.
 	for _, p := range presences {
-		if p.GetSessionId() == state.Broadcaster.SessionID.String() {
+		if p.GetSessionId() == state.GameServer.SessionID.String() {
 			state.server = nil
 
 			logger.Debug("Broadcaster left the match. Shutting down.")
@@ -991,7 +966,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 			return nil, SignalResponse{Success: true}.String()
 		}
 	case SignalGetEndpoint:
-		jsonData, err := json.Marshal(state.Broadcaster.Endpoint)
+		jsonData, err := json.Marshal(state.GameServer.Endpoint)
 		if err != nil {
 			return state, fmt.Sprintf("failed to marshal endpoint: %v", err)
 		}
@@ -1021,7 +996,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		}
 
 		for _, f := range settings.RequiredFeatures {
-			if !slices.Contains(state.Broadcaster.Features, f) {
+			if !slices.Contains(state.GameServer.Features, f) {
 				return state, SignalResponse{Message: fmt.Sprintf("bad request: feature not supported: %v", f)}.String()
 			}
 		}
@@ -1183,7 +1158,7 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk run
 
 	state.StartTime = time.Now().UTC()
 	entrants := make([]evr.EvrId, 0)
-	message := evr.NewGameServerSessionStart(state.ID.UUID, groupID, uint8(state.MaxSize), uint8(state.LobbyType), state.Broadcaster.AppId, state.Mode, state.Level, state.RequiredFeatures, entrants)
+	message := evr.NewGameServerSessionStart(state.ID.UUID, groupID, uint8(state.MaxSize), uint8(state.LobbyType), state.GameServer.AppID, state.Mode, state.Level, state.RequiredFeatures, entrants)
 
 	logger.WithField("message", message).Info("Starting session.")
 

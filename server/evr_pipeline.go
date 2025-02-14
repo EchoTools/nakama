@@ -68,7 +68,7 @@ type EvrPipeline struct {
 	matchLogManager              *MatchLogManager
 
 	createLobbyMu                    sync.Mutex
-	broadcasterRegistrationBySession *MapOf[string, *MatchBroadcaster] // sessionID -> MatchBroadcaster
+	broadcasterRegistrationBySession *MapOf[string, *GameServerPresence] // sessionID -> GameServerPresence
 
 	placeholderEmail string
 	linkDeviceURL    string
@@ -127,7 +127,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 
 	statisticsQueue := NewStatisticsQueue(runtimeLogger, nk)
 	profileRegistry := NewProfileRegistry(nk, db, runtimeLogger, metrics, sessionRegistry)
-	broadcasterRegistrationBySession := MapOf[string, *MatchBroadcaster]{}
+	broadcasterRegistrationBySession := MapOf[string, *GameServerPresence]{}
 	lobbyBuilder := NewLobbyBuilder(logger, nk, sessionRegistry, matchRegistry, tracker, metrics, profileRegistry)
 	matchmaker.OnMatchedEntries(lobbyBuilder.handleMatchedEntries)
 	userRemoteLogJournalRegistry := NewUserRemoteLogJournalRegistry(ctx, logger, nk, sessionRegistry)
@@ -240,7 +240,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 
 			case <-ticker.C:
 
-				evrPipeline.broadcasterRegistrationBySession.Range(func(key string, value *MatchBroadcaster) bool {
+				evrPipeline.broadcasterRegistrationBySession.Range(func(key string, value *GameServerPresence) bool {
 					if sessionRegistry.Get(value.SessionID) == nil {
 						logger.Debug("Housekeeping: Session not found for broadcaster", zap.String("sessionID", value.SessionID.String()))
 						evrPipeline.broadcasterRegistrationBySession.Delete(key)

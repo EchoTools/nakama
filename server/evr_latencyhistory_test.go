@@ -20,14 +20,14 @@ func TestLatencyHistory_LabelsByAverageRTT(t *testing.T) {
 
 	labels := []*MatchLabel{
 		{
-			Broadcaster: MatchBroadcaster{
+			GameServer: &GameServerPresence{
 				Endpoint: evr.Endpoint{
 					ExternalIP: net.ParseIP("1.1.1.1"),
 				},
 			},
 		},
 		{
-			Broadcaster: MatchBroadcaster{
+			GameServer: &GameServerPresence{
 				Endpoint: evr.Endpoint{
 					ExternalIP: net.ParseIP("3.3.3.3"),
 				},
@@ -35,12 +35,12 @@ func TestLatencyHistory_LabelsByAverageRTT(t *testing.T) {
 		},
 
 		{
-			Broadcaster: MatchBroadcaster{
+			GameServer: &GameServerPresence{
 				Endpoint: evr.Endpoint{ExternalIP: net.ParseIP("100.100.100.100")},
 			},
 		},
 		{
-			Broadcaster: MatchBroadcaster{
+			GameServer: &GameServerPresence{
 				Endpoint: evr.Endpoint{
 					ExternalIP: net.ParseIP("2.2.2.2"),
 				},

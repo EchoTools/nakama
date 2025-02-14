@@ -221,7 +221,7 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(logger runtime.Logger,
 	return nil
 }
 
-func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.Logger, userID, guildID string, region, mode, level evr.Symbol, startTime time.Time) (l *MatchLabel, rtt float64, err error) {
+func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.Logger, userID, guildID string, regionCode string, mode, level evr.Symbol, startTime time.Time) (l *MatchLabel, rtt float64, err error) {
 
 	// Find a parking match to prepare
 
@@ -252,7 +252,7 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 		return nil, 0, status.Error(codes.ResourceExhausted, fmt.Sprintf("rate limit exceeded (%0.0f requests per minute)", limiter.Limit()*60))
 	}
 
-	query := fmt.Sprintf("+label.lobby_type:unassigned +label.broadcaster.group_ids:/(%s)/ +label.broadcaster.regions:/(%s)/", Query.Join(allocatorGroupIDs, "|"), region.String())
+	query := fmt.Sprintf("+label.lobby_type:unassigned +label.broadcaster.group_ids:/(%s)/ +label.broadcaster.region_codes:/(%s)/", Query.Join(allocatorGroupIDs, "|"), regionCode)
 
 	minSize := 1
 	maxSize := 1
@@ -262,7 +262,7 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 	}
 
 	if len(matches) == 0 {
-		return nil, 0, status.Error(codes.NotFound, fmt.Sprintf("no game servers are available in region `%s`", region.String()))
+		return nil, 0, status.Error(codes.NotFound, fmt.Sprintf("no game servers are available in region `%s`", regionCode))
 	}
 
 	labels := make([]*MatchLabel, 0, len(matches))
@@ -274,7 +274,7 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 		labels = append(labels, &label)
 	}
 
-	if region == evr.DefaultRegion {
+	if regionCode == evr.DefaultRegion.String() {
 		// Find the closest to the player.
 		zapLogger := logger.(*RuntimeGoLogger).logger
 		latencyHistory, err := LoadLatencyHistory(ctx, zapLogger, d.db, uuid.FromStringOrNil(userID))
@@ -284,7 +284,7 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 
 		labelLatencies := make([]int, len(labels))
 		for _, label := range labels {
-			if history, ok := latencyHistory[label.Broadcaster.Endpoint.GetExternalIP()]; ok && len(history) != 0 {
+			if history, ok := latencyHistory[label.GameServer.Endpoint.GetExternalIP()]; ok && len(history) != 0 {
 
 				average := 0
 				for _, l := range history {
@@ -300,8 +300,8 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 		}
 
 		params := LobbySessionParameters{
-			Region: region,
-			Mode:   mode,
+			RegionCode: regionCode,
+			Mode:       mode,
 		}
 
 		lobbyCreateSortOptions(labels, labelLatencies, &params)
@@ -389,7 +389,7 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		return nil, 0, fmt.Errorf("failed to allocate game server: label is nil")
 	}
 
-	latencyMillis = latencyHistory.AverageRTT(label.Broadcaster.Endpoint.ExternalIP.String(), true)
+	latencyMillis = latencyHistory.AverageRTT(label.GameServer.Endpoint.ExternalIP.String(), true)
 
 	return label, latencyMillis, nil
 }
