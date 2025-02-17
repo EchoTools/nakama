@@ -233,7 +233,6 @@ func (h *EventDispatch) handleUserLogin(ctx context.Context, logger runtime.Logg
 	}
 	if err := loginHistory.UpdateAlternates(ctx, h.nk); err != nil {
 		return fmt.Errorf("failed to update alternates: %w", err)
-
 	}
 
 	if err := loginHistory.Store(ctx, h.nk); err != nil {
