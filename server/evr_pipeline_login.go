@@ -325,8 +325,9 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 		}
 	}()
 
-	// The account is now authenticated. Authorize the session.
+	loginHistory.Update(params.xpID, session.clientIP, params.loginPayload)
 
+	// The account is now authenticated. Authorize the session.
 	if status.Code(err) == codes.PermissionDenied || params.account.DisableTime != nil {
 
 		p.runtimeModule.MetricsCounterAdd("login_attempt_banned_account", nil, 1)
@@ -382,8 +383,6 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 	} else {
 		loginHistory.AuthorizeIP(session.clientIP)
 	}
-
-	loginHistory.Update(params.xpID, session.clientIP, params.loginPayload)
 
 	// Common error handling
 	if params.account.GetDisableTime() != nil {
