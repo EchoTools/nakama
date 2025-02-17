@@ -169,7 +169,6 @@ func (h *LoginHistory) AuthorizeIPWithCode(ip, code string) error {
 
 	pendingCode := fmt.Sprintf("%02d", entry.CreatedAt.Nanosecond()%100)
 	if pendingCode != code {
-
 		return fmt.Errorf("invalid code %s for IP %s", code, ip)
 	}
 
@@ -297,30 +296,31 @@ func (h *LoginHistory) rebuildCache() {
 	h.Cache = make([]string, 0, len(h.History)*4)
 	h.XPIs = make(map[string]time.Time, len(h.History))
 	h.ClientIPs = make(map[string]time.Time, len(h.History))
-	for _, e := range h.History {
-		h.Cache = append(h.Cache, e.ClientIP)
 
-		h.Cache = append(h.Cache, e.LoginData.HMDSerialNumber)
-		if !e.XPID.IsNil() {
-			h.Cache = append(h.Cache, e.XPID.Token())
-		}
-		h.Cache = append(h.Cache, e.SystemProfile())
+	// Rebuild the cache from each history entry
+	for _, e := range h.History {
+
+		h.Cache = append(h.Cache, e.XPID.Token(), e.ClientIP, e.LoginData.HMDSerialNumber, e.SystemProfile())
 
 		if !e.XPID.IsNil() {
 			evrIDStr := e.XPID.String()
-			if t, found := h.XPIs[evrIDStr]; !found || e.UpdatedAt.After(t) {
+			if t, found := h.XPIs[evrIDStr]; !found || t.Before(e.UpdatedAt) {
 				h.XPIs[evrIDStr] = e.UpdatedAt
 			}
 		}
 
 		if e.ClientIP != "" {
-			if t, found := h.ClientIPs[e.ClientIP]; !found || e.UpdatedAt.After(t) {
+			if t, found := h.ClientIPs[e.ClientIP]; !found || t.Before(e.UpdatedAt) {
 				h.ClientIPs[e.ClientIP] = e.UpdatedAt
 			}
 		}
 	}
+
+	// Sort and compact the cache
 	slices.Sort(h.Cache)
 	h.Cache = slices.Compact(h.Cache)
+
+	// Remove ignored values
 	for i := 0; i < len(h.Cache); i++ {
 		if _, ok := IgnoredLoginValues[h.Cache[i]]; ok {
 			h.Cache = append(h.Cache[:i], h.Cache[i+1:]...)
@@ -333,19 +333,22 @@ func (h *LoginHistory) StorageWriteOp() (*runtime.StorageWrite, error) {
 	if h.userID == "" {
 		return nil, fmt.Errorf("missing user ID")
 	}
+
+	// Rebuild the cache
+	h.rebuildCache()
+
 	// Clear authorized IPs that haven't been used in over 30 days
-	for ip, _ := range h.AuthorizedIPs {
+	for ip := range h.AuthorizedIPs {
 		lastUse, found := h.ClientIPs[ip]
 		if !found || time.Since(lastUse) > 30*24*time.Hour {
 			delete(h.AuthorizedIPs, ip)
 		}
 	}
-
 	// Keep the history size under 5MB
 	bytes := make([]byte, 0)
 	var err error
 	for {
-		h.rebuildCache()
+
 		bytes, err = json.Marshal(h)
 		if err != nil {
 			return nil, fmt.Errorf("error marshalling display name history: %w", err)
@@ -356,7 +359,7 @@ func (h *LoginHistory) StorageWriteOp() (*runtime.StorageWrite, error) {
 		}
 
 		// Remove the oldest entries
-		for i := 0; i < 15; i++ {
+		for i := 0; i < 5; i++ {
 			oldest := time.Now()
 			oldestKey := ""
 			for k, e := range h.History {
@@ -366,6 +369,7 @@ func (h *LoginHistory) StorageWriteOp() (*runtime.StorageWrite, error) {
 				}
 			}
 			delete(h.History, oldestKey)
+			h.rebuildCache()
 		}
 	}
 	return &runtime.StorageWrite{
