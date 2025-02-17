@@ -257,14 +257,14 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		return ErrSuspended
 	}
 
-	if found, ts := groupMetadata.IsCommunityValuesTimedOut(userID); found {
+	if found, expiry := groupMetadata.IsTimedOut(userID); found {
 		metricsTags["error"] = "timed_out_user"
 		if sendAuditMessage {
-			if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("Rejected timed out community values user <@%s> (timeout expires <t:%d:R>)", userID, ts.Unix()), true); err != nil {
+			if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("Rejected timed out user <@%s> (timeout expires <t:%d:R>)", userID, expiry.Unix()), true); err != nil {
 				p.logger.Warn("Failed to send audit message", zap.String("channel_id", groupMetadata.AuditChannelID), zap.Error(err))
 			}
 		}
-		return NewLobbyError(KickedFromLobbyGroup, fmt.Sprintf("timeout will expire in %d minutes.", int(ts.Sub(time.Now()).Minutes()+0.50)))
+		return NewLobbyError(KickedFromLobbyGroup, fmt.Sprintf("Timeout will expire in %d minutes.", int(expiry.Sub(time.Now()).Minutes()+0.50)))
 	}
 
 	if groupMetadata.IsLimitedAccess(userID) {

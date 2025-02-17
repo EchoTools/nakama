@@ -423,6 +423,12 @@ var (
 					Description: "Reason for the kick",
 					Required:    true,
 				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "timeout",
+					Description: "Timeout in minutes",
+					Required:    false,
+				},
 			},
 		},
 		{
@@ -2511,15 +2517,22 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return errors.New("error checking global moderator status")
 			}
 
-			options := i.ApplicationCommandData().Options
-			if len(options) == 0 {
-				return errors.New("no options provided")
-			}
-
-			target := options[0].UserValue(s)
-			targetUserID := d.cache.DiscordIDToUserID(target.ID)
-			if targetUserID == "" {
-				return errors.New("failed to get target user ID")
+			var target *discordgo.User
+			var targetUserID, reason string
+			var timeout time.Duration
+			for _, o := range i.ApplicationCommandData().Options {
+				switch o.Name {
+				case "user":
+					target := o.UserValue(s)
+					targetUserID = d.cache.DiscordIDToUserID(target.ID)
+					if targetUserID == "" {
+						return errors.New("failed to get target user ID")
+					}
+				case "reason":
+					reason = o.StringValue()
+				case "timeout":
+					timeout = time.Duration(o.IntValue()) * time.Minute
+				}
 			}
 
 			presences, err := d.nk.StreamUserList(StreamModeService, targetUserID, "", StreamLabelMatchService, false, true)
@@ -2528,6 +2541,24 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			cnt := 0
+
+			if timeout > 0 {
+				metadata, err := GetGuildGroupMetadata(ctx, d.db, groupID)
+				if err != nil {
+					return errors.New("failed to get guild group metadata")
+				}
+
+				metadata.TimeoutAdd(targetUserID, timeout)
+
+				data, err := metadata.MarshalToMap()
+				if err != nil {
+					return fmt.Errorf("error marshalling group data: %w", err)
+				}
+
+				if err := nk.GroupUpdate(ctx, groupID, SystemUserID, "", "", "", "", "", false, data, 1000000); err != nil {
+					return fmt.Errorf("error updating group: %w", err)
+				}
+			}
 
 			result := ""
 			for _, p := range presences {
@@ -2554,10 +2585,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 				// Kick the player from the match
 				if err := KickPlayerFromMatch(ctx, d.nk, label.ID, targetUserID); err != nil {
-					result = fmt.Sprintf("failed to kick player from [%s](https://echo.taxi/spark://c/%s) lobby: %v", label.Mode.String(), strings.ToUpper(label.ID.UUID.String()), err)
+					result = fmt.Sprintf("failed to kick player from [%s](https://echo.taxi/spark://c/%s) (error: %s)", label.Mode.String(), strings.ToUpper(label.ID.UUID.String()), err.Error())
 					continue
 				}
-				result := fmt.Sprintf("kicked player %s from [%s](https://echo.taxi/spark://c/%s) match.", target.Mention(), label.Mode.String(), strings.ToUpper(label.ID.UUID.String()))
+				result := fmt.Sprintf("kicked player %s from [%s](https://echo.taxi/spark://c/%s) match. (%s)", target.Mention(), label.Mode.String(), strings.ToUpper(label.ID.UUID.String()), reason)
 				_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> %s", user.Mention(), result), false)
 
 				cnt++

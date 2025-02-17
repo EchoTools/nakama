@@ -77,6 +77,7 @@ type GroupMetadata struct {
 	AllowedFeatures                    []string                       `json:"allowed_features"`           // Allowed features
 	LogAlternateAccounts               bool                           `json:"log_alternate_accounts"`     // Log alternate accounts
 	AlternateAccountNotificationExpiry time.Time                      `json:"alt_notification_threshold"` // Show alternate notifications newer than this time.
+	TimedOutUserIDs                    map[string]time.Time           `json:"timed_out_user_ids"`         // UserIDs that are required to go to community values when the first join the social lobby
 	CommunityValuesUserIDs             map[string]time.Time           `json:"community_values_user_ids"`  // UserIDs that are required to go to community values when the first join the social lobby
 	Suspensions                        map[evr.EvrId]string           `json:"suspended_devices"`          // map[XPID]UserID
 }
@@ -198,7 +199,11 @@ func (m *GroupMetadata) CommunityValuesUserIDsAdd(userID string, delay time.Dura
 	if m.CommunityValuesUserIDs == nil {
 		m.CommunityValuesUserIDs = make(map[string]time.Time)
 	}
-	m.CommunityValuesUserIDs[userID] = time.Now().UTC().Add(delay)
+	m.CommunityValuesUserIDs[userID] = time.Now().UTC()
+
+	if delay > 0 {
+		m.TimeoutAdd(userID, delay)
+	}
 }
 
 func (m *GroupMetadata) CommunityValuesUserIDsRemove(userID string) bool {
@@ -209,14 +214,29 @@ func (m *GroupMetadata) CommunityValuesUserIDsRemove(userID string) bool {
 	return true
 }
 
-func (m *GroupMetadata) IsCommunityValuesTimedOut(userID string) (bool, time.Time) {
-	if m.CommunityValuesUserIDs == nil {
-		return false, time.Time{}
+func (m *GroupMetadata) TimeoutAdd(userID string, delay time.Duration) {
+	if m.TimedOutUserIDs == nil {
+		m.TimedOutUserIDs = make(map[string]time.Time)
 	}
-	if expiry, ok := m.CommunityValuesUserIDs[userID]; ok && time.Now().UTC().Before(expiry) {
+	m.TimedOutUserIDs[userID] = time.Now().UTC().Add(delay)
+}
+
+func (m *GroupMetadata) IsTimedOut(userID string) (bool, time.Time) {
+	if expiry, ok := m.TimedOutUserIDs[userID]; ok && time.Now().UTC().Before(expiry) {
 		return true, expiry
 	}
 	return false, time.Time{}
+}
+
+func (m *GroupMetadata) IsCommunityValues(userID string) bool {
+	if m.CommunityValuesUserIDs == nil {
+		return false
+	}
+
+	if expiry, ok := m.CommunityValuesUserIDs[userID]; ok && time.Now().UTC().Before(expiry) {
+		return true
+	}
+	return false
 }
 
 func (g *GroupMetadata) MarshalToMap() (map[string]interface{}, error) {
