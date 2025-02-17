@@ -34,12 +34,12 @@ func Test_lobbyCreateSortOptions(t *testing.T) {
 	}
 
 	params := LobbySessionParameters{
-		Mode:   evr.ModeArenaPrivate,
-		Region: evr.DefaultRegion,
+		Mode:       evr.ModeArenaPrivate,
+		RegionCode: "default",
 	}
 
 	for i := range labels {
-		t.Errorf("%3d %v", labelLatencies[i], labels[i].Broadcaster.Endpoint.GetExternalIP())
+		t.Errorf("%3d %v", labelLatencies[i], labels[i].GameServer.Endpoint.GetExternalIP())
 	}
 
 	lobbyCreateSortOptions(labels, labelLatencies, &params)
