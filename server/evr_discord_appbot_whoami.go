@@ -394,9 +394,17 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		})
 	}
 
-	// Remove any blank fields
+	// Remove any blank fields, and truncate to 800 characters
 	fields = lo.Filter(fields, func(f *discordgo.MessageEmbedField, _ int) bool {
-		return f != nil && f.Name != "" && f.Value != ""
+		if f == nil || f.Name == "" || f.Value == "" {
+			return false
+		}
+
+		if len(f.Value) > 800 {
+			f.Value = f.Value[:800]
+		}
+
+		return true
 	})
 
 	// Send the response
