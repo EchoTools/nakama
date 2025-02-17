@@ -115,6 +115,7 @@ func NewLoginHistory(userID string) *LoginHistory {
 		AlternateMap:           make(map[string][]*AlternateSearchMatch),
 		GroupNotifications:     make(map[string]map[string]time.Time),
 		userID:                 userID,
+		version:                "*", // don't overwrite existing data
 	}
 }
 
@@ -328,6 +329,54 @@ func (h *LoginHistory) rebuildCache() {
 	}
 }
 
+func (h *LoginHistory) StorageWriteOp() (*runtime.StorageWrite, error) {
+	if h.userID == "" {
+		return nil, fmt.Errorf("missing user ID")
+	}
+	// Clear authorized IPs that haven't been used in over 30 days
+	for ip, _ := range h.AuthorizedIPs {
+		lastUse, found := h.ClientIPs[ip]
+		if !found || time.Since(lastUse) > 30*24*time.Hour {
+			delete(h.AuthorizedIPs, ip)
+		}
+	}
+
+	// Keep the history size under 5MB
+	bytes := make([]byte, 0)
+	var err error
+	for {
+		h.rebuildCache()
+		bytes, err = json.Marshal(h)
+		if err != nil {
+			return nil, fmt.Errorf("error marshalling display name history: %w", err)
+		}
+
+		if len(bytes) < 5*1024*1024 {
+			break
+		}
+
+		// Remove the oldest entries
+		for i := 0; i < 15; i++ {
+			oldest := time.Now()
+			oldestKey := ""
+			for k, e := range h.History {
+				if e.UpdatedAt.Before(oldest) {
+					oldest = e.UpdatedAt
+					oldestKey = k
+				}
+			}
+			delete(h.History, oldestKey)
+		}
+	}
+	return &runtime.StorageWrite{
+		Collection: LoginStorageCollection,
+		Key:        LoginHistoryStorageKey,
+		Value:      string(bytes),
+		UserID:     h.userID,
+		Version:    h.version,
+	}, nil
+}
+
 func (h *LoginHistory) Store(ctx context.Context, nk runtime.NakamaModule) error {
 	return LoginHistoryStore(ctx, nk, h.userID, h)
 }
@@ -364,49 +413,13 @@ func LoginHistoryLoad(ctx context.Context, nk runtime.NakamaModule, userID strin
 
 func LoginHistoryStore(ctx context.Context, nk runtime.NakamaModule, userID string, history *LoginHistory) error {
 
-	// Clear authorized IPs that haven't been used in over 30 days
-	for ip, t := range history.AuthorizedIPs {
-		if time.Since(t) > 30*24*time.Hour {
-			delete(history.AuthorizedIPs, ip)
-		}
-	}
-
-	// Keep the history size under 5MB
-	bytes := make([]byte, 0)
-	var err error
-	for {
-		history.rebuildCache()
-		bytes, err = json.Marshal(history)
-		if err != nil {
-			return fmt.Errorf("error marshalling display name history: %w", err)
-		}
-
-		if len(bytes) < 5*1024*1024 {
-			break
-		}
-
-		// Remove the oldest entries
-		for i := 0; i < 3; i++ {
-			oldest := time.Now()
-			oldestKey := ""
-			for k, e := range history.History {
-				if e.UpdatedAt.Before(oldest) {
-					oldest = e.UpdatedAt
-					oldestKey = k
-				}
-			}
-			delete(history.History, oldestKey)
-		}
+	op, err := history.StorageWriteOp()
+	if err != nil {
+		return fmt.Errorf("error creating storage operation: %w", err)
 	}
 
 	acks, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{
-		{
-			Collection: LoginStorageCollection,
-			Key:        LoginHistoryStorageKey,
-			Value:      string(bytes),
-			UserID:     userID,
-			Version:    history.version,
-		},
+		op,
 	})
 
 	if err != nil {
