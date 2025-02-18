@@ -395,6 +395,10 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 
 		metricsTags["error"] = "account_disabled"
 
+		if params.accountMetadata.DisabledAccountMessage != "" {
+			return fmt.Errorf("Account disabled by EchoVRCE Admins: %s\nVisit %s", params.accountMetadata.DisabledAccountMessage, ServiceSettings().ReportURL)
+		}
+
 		return fmt.Errorf("Account disabled by EchoVRCE Admins.")
 	}
 
