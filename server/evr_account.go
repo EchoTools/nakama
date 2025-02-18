@@ -107,6 +107,7 @@ type AccountMetadata struct {
 
 	Debug                      bool                       `json:"debug"`                     // Enable debug mode
 	GlobalBanReason            string                     `json:"global_ban_reason"`         // The global ban reason
+	DisabledAccountMessage     string                     `json:"disabled_account_message"`  // The disabled account message that the user will see.
 	DisplayNameOverride        string                     `json:"display_name_override"`     // The display name override
 	GroupDisplayNames          map[string]string          `json:"group_display_names"`       // The display names for each guild map[groupID]displayName
 	ActiveGroupID              string                     `json:"active_group_id"`           // The active group ID
