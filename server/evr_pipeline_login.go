@@ -639,9 +639,10 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 	if err != nil {
 		return fmt.Errorf("failed to get client profile: %w", err)
 	}
-	gg, err := GetGuildGroupMetadata(ctx, p.db, params.accountMetadata.GetActiveGroupID().String())
-	if err != nil {
-		return fmt.Errorf("failed to get guild group metadata: %w", err)
+
+	gg, ok := params.guildGroups[params.accountMetadata.GetActiveGroupID().String()]
+	if !ok {
+		return fmt.Errorf("guild group not found: %s", params.accountMetadata.GetActiveGroupID().String())
 	}
 
 	// Check if the user is required to go through community values
