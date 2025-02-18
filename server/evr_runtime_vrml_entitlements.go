@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/echotools/vrmlgo"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -33,6 +32,17 @@ const (
 
 	VRMLEchoArenaShortName = "EchoArena"
 )
+
+var vrmlSeasonDescriptionMap = map[VRMLSeasonID]string{
+	VRMLPreSeason: "Pre-Season",
+	VRMLSeason1:   "Season 1",
+	VRMLSeason2:   "Season 2",
+	VRMLSeason3:   "Season 3",
+	VRMLSeason4:   "Season 4",
+	VRMLSeason5:   "Season 5",
+	VRMLSeason6:   "Season 6",
+	VRMLSeason7:   "Season 7",
+}
 
 var vrmlCosmeticMap = map[VRMLSeasonID]map[VRMLPrestige][]string{
 	VRMLPreSeason: {
@@ -115,88 +125,6 @@ func (e *VRMLEntitlement) UnmarshalText(text []byte) error {
 
 func (e VRMLEntitlement) Cosmetics() []string {
 	return append(vrmlCosmeticMap[e.SeasonID][e.Prestige], []string{"decal_vrml_a", "emote_vrml_a"}...)
-}
-
-func FetchMatchCountBySeason(vg *vrmlgo.Session) (map[VRMLSeasonID]int, error) {
-
-	// Get the user's account information
-	me, err := vg.Me(vrmlgo.WithUseCache(false))
-	if err != nil {
-		return nil, fmt.Errorf("failed to get user data: %v", err)
-	}
-
-	// Get the account information
-	account, err := vg.Member(me.ID, vrmlgo.WithUseCache(false))
-	if err != nil {
-		return nil, fmt.Errorf("failed to get member data: %v", err)
-	}
-
-	// Get the game details
-	gameDetails, err := vg.GameSearch(VRMLEchoArenaShortName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get game details: %v", err)
-	}
-
-	// Get the seasons for the game
-	seasons, err := vg.Seasons(gameDetails.Game.ShortName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get seasons: %v", err)
-	}
-
-	// Create a map of seasons
-	seasonNameMap := make(map[string]*vrmlgo.Season)
-	for _, s := range seasons {
-		seasonNameMap[s.Name] = s
-	}
-
-	// Get the player ID for this game
-	playerID := account.PlayerID(gameDetails.Game.ShortName)
-
-	// Get the match history for each team
-	matchesBySeason := make(map[string][]string)
-	for _, t := range account.Teams(gameDetails.Game.ShortName) {
-
-		history, err := vg.TeamMatchesHistory(t)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get team match history: %v", err)
-		}
-
-		// Create a map of matches by season
-		for _, h := range history {
-			matchesBySeason[h.SeasonName] = append(matchesBySeason[h.SeasonName], h.MatchID)
-		}
-	}
-
-	// Get the match details for the first two matches of each season
-	matchCountBySeasonID := make(map[VRMLSeasonID]int)
-	for _, season := range seasons {
-
-		for _, mID := range matchesBySeason[season.Name] {
-
-			// Get the match details
-			matchDetails, err := vg.Match(gameDetails.Game.ShortName, mID)
-			if err != nil {
-				return nil, fmt.Errorf("failed to get match details: %v", err)
-			}
-
-			// Skip forfeits
-			if matchDetails.Match.IsForfeit {
-				continue
-			}
-
-			// Count the number of matches the player is in
-			for _, p := range matchDetails.Players() {
-
-				// Check if the player is in the match
-				if p.ID == playerID {
-					season := seasonNameMap[matchDetails.Match.SeasonName]
-					matchCountBySeasonID[VRMLSeasonID(season.ID)]++
-				}
-			}
-		}
-	}
-
-	return matchCountBySeasonID, nil
 }
 
 func AssignEntitlements(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, assignerID, assignerUsername, userID, vrmlUserID string, entitlements []*VRMLEntitlement) error {

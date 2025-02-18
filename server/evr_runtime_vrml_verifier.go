@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -18,6 +19,7 @@ import (
 const (
 	StorageCollectionVRML            = "VRML"
 	StorageKeyVRMLVerificationLedger = "EntitlementLedger"
+	StorageKeyVRMLSummary            = "summary"
 	StorageIndexVRMLUserID           = "Index_VRMLUserID"
 )
 
@@ -133,21 +135,57 @@ func (v *VRMLVerifier) Start() error {
 			vrmlUser, err := vg.Me(vrmlgo.WithUseCache(false))
 			if err != nil {
 				logger.WithFields(map[string]interface{}{
-					"user_id": userID,
-					"error":   err,
+					"error": err,
 				}).Error("Failed to get @Me data")
 				continue
 			}
 
-			// Count the number of matches played by season
-			entitlements, err := v.retrieveEntitlements(vg)
+			// Get the user's account information
+			me, err := vg.Me(vrmlgo.WithUseCache(false))
 			if err != nil {
 				logger.WithFields(map[string]interface{}{
-					"error":   err,
-					"user_id": userID,
-				}).Error("Failed to process verification")
+					"error": err,
+				}).Error("Failed to get user data")
 				continue
 			}
+
+			// Get the player summary
+			summary, err := v.playerSummary(vg, me.ID)
+			if err != nil {
+				logger.WithFields(map[string]interface{}{
+					"error": err,
+				}).Error("Failed to get player summary")
+				continue
+
+			}
+
+			// Store the summary
+			data, err := json.Marshal(summary)
+			if err != nil {
+				logger.WithFields(map[string]interface{}{
+					"error": err,
+				}).Error("Failed to marshal player summary")
+				continue
+			}
+
+			// Store the VRML user data in the database (effectively linking the account)
+			if _, err := v.nk.StorageWrite(v.ctx, []*runtime.StorageWrite{
+				{
+					Collection:      StorageCollectionVRML,
+					Key:             StorageKeyVRMLSummary,
+					UserID:          userID,
+					Value:           string(data),
+					PermissionRead:  1,
+					PermissionWrite: 0,
+				},
+			}); err != nil {
+				logger.WithFields(map[string]interface{}{
+					"error": err,
+				}).Error("Failed to store user")
+				continue
+			}
+			// Count the number of matches played by season
+			entitlements := summary.Entitlements()
 
 			// Assign the cosmetics to the user
 			if err := AssignEntitlements(v.ctx, logger, v.nk, SystemUserID, "", userID, vrmlUser.ID, entitlements); err != nil {
@@ -195,39 +233,4 @@ func (v *VRMLVerifier) dequeue() (string, error) {
 		return "", nil // Queue is empty
 	}
 	return val, err
-}
-
-func (v *VRMLVerifier) retrieveEntitlements(vg *vrmlgo.Session) ([]*VRMLEntitlement, error) {
-
-	// Fetch the match count by season
-	matchCountBySeason, err := FetchMatchCountBySeason(vg)
-	if err != nil {
-		return nil, fmt.Errorf("Failed to fetch match count by season: %v", err)
-	}
-
-	// Validate match counts
-	entitlements := make([]*VRMLEntitlement, 0)
-
-	for seasonID, matchCount := range matchCountBySeason {
-
-		switch seasonID {
-
-		// Pre-season and Season 1 have different requirements
-		case VRMLPreSeason, VRMLSeason1:
-			if matchCount > 0 {
-				entitlements = append(entitlements, &VRMLEntitlement{
-					SeasonID: seasonID,
-				})
-			}
-
-		default:
-			if matchCount >= 10 {
-				entitlements = append(entitlements, &VRMLEntitlement{
-					SeasonID: seasonID,
-				})
-			}
-		}
-	}
-
-	return entitlements, nil
 }
