@@ -690,17 +690,29 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 
 			if hasCompleted {
 				if md, err := GetGuildGroupMetadata(ctx, p.db, groupID); err != nil {
+					return fmt.Errorf("failed to get guild group metadata: %w", err)
+				} else {
+
+					// Remove them from the list
 					md.CommunityValuesUserIDsRemove(userID)
 
-					md, err := gg.MarshalToMap()
-					if err != nil {
-						return fmt.Errorf("failed to marshal guild group: %w", err)
-					}
+					// Update the group
 
-					if err := p.runtimeModule.GroupUpdate(ctx, groupID, SystemUserID, "", "", "", "", "", false, md, 1000000); err != nil {
+					if md, err := gg.MarshalToMap(); err != nil {
+						return fmt.Errorf("failed to marshal guild group: %w", err)
+					} else if err := p.runtimeModule.GroupUpdate(ctx, groupID, SystemUserID, "", "", "", "", "", false, md, 1000000); err != nil {
 						return fmt.Errorf("error updating group: %w", err)
 					}
 
+					// Update params too
+					params.guildGroups, err = GuildUserGroupsList(ctx, p.runtimeModule, params.account.User.Id)
+					if err != nil {
+						return fmt.Errorf("failed to get guild user groups: %w", err)
+					} else {
+						StoreParams(ctx, &params)
+					}
+
+					// Log the audit message
 					if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("User <@%s> has accepted the community values.", params.DiscordID()), false); err != nil {
 						logger.Warn("Failed to log audit message", zap.Error(err))
 					}
