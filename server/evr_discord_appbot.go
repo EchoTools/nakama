@@ -424,7 +424,7 @@ var (
 					Required:    true,
 				},
 				{
-					Type:        discordgo.ApplicationCommandOptionString,
+					Type:        discordgo.ApplicationCommandOptionInteger,
 					Name:        "timeout",
 					Description: "Timeout in minutes",
 					Required:    false,
@@ -2523,7 +2523,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			for _, o := range i.ApplicationCommandData().Options {
 				switch o.Name {
 				case "user":
-					target := o.UserValue(s)
+					target = o.UserValue(s)
 					targetUserID = d.cache.DiscordIDToUserID(target.ID)
 					if targetUserID == "" {
 						return errors.New("failed to get target user ID")
