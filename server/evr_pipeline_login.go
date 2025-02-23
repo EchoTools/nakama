@@ -698,9 +698,12 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 
 					// Update the group
 
-					if md, err := gg.MarshalToMap(); err != nil {
+					md, err := md.MarshalToMap()
+					if err != nil {
 						return fmt.Errorf("failed to marshal guild group: %w", err)
-					} else if err := p.runtimeModule.GroupUpdate(ctx, groupID, SystemUserID, "", "", "", "", "", false, md, 1000000); err != nil {
+					}
+
+					if err := p.runtimeModule.GroupUpdate(ctx, groupID, SystemUserID, "", "", "", "", "", false, md, 1000000); err != nil {
 						return fmt.Errorf("error updating group: %w", err)
 					}
 

@@ -191,6 +191,9 @@ func (m *GroupMetadata) IsAllowedMatchmaking(userID string) bool {
 }
 
 func (m *GroupMetadata) hasCompletedCommunityValues(userID string) bool {
+	if m.CommunityValuesUserIDs == nil {
+		return false
+	}
 	_, found := m.CommunityValuesUserIDs[userID]
 	return !found
 }
@@ -240,6 +243,14 @@ func (m *GroupMetadata) IsCommunityValues(userID string) bool {
 }
 
 func (g *GroupMetadata) MarshalToMap() (map[string]interface{}, error) {
+
+	// Remove expired timeouts
+	for userID, expiry := range g.TimedOutUserIDs {
+		if time.Now().UTC().After(expiry) {
+			delete(g.TimedOutUserIDs, userID)
+		}
+	}
+
 	guildGroupBytes, err := json.Marshal(g)
 	if err != nil {
 		return nil, err
