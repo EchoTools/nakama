@@ -755,7 +755,7 @@ type RemoteLogRoundOver struct {
 	GameInfoOrangeMatchScore int64   `json:"[game_info][orange_match_score]"`
 	GameInfoRoundWinningTeam int64   `json:"[game_info][round_winning_team]"`
 	ObjectivePossession      string  `json:"[objective][possession]"`
-	ObjectiveBlueProgress    int64   `json:"[objective][blue_progress]"`
+	ObjectiveBlueProgress    float64 `json:"[objective][blue_progress]"`
 	ObjectiveOrangeProgress  float64 `json:"[objective][orange_progress]"`
 }
 
