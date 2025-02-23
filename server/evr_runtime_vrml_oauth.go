@@ -14,7 +14,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/echotools/vrmlgo"
+	"github.com/echotools/vrmlgo/v3"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
