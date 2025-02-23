@@ -190,12 +190,12 @@ func (m *GroupMetadata) IsAllowedMatchmaking(userID string) bool {
 	return false
 }
 
-func (m *GroupMetadata) hasCompletedCommunityValues(userID string) bool {
+func (m *GroupMetadata) MustCompleteCommunityValues(userID string) bool {
 	if m.CommunityValuesUserIDs == nil {
 		return false
 	}
 	_, found := m.CommunityValuesUserIDs[userID]
-	return !found
+	return found
 }
 
 func (m *GroupMetadata) CommunityValuesUserIDsAdd(userID string, delay time.Duration) {

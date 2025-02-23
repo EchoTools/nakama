@@ -646,7 +646,7 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 	}
 
 	// Check if the user is required to go through community values
-	if !gg.hasCompletedCommunityValues(session.userID.String()) {
+	if gg.MustCompleteCommunityValues(session.userID.String()) {
 		clientProfile.Social.CommunityValuesVersion = 0
 	}
 
@@ -684,7 +684,7 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 			return fmt.Errorf("guild group not found: %s", params.accountMetadata.GetActiveGroupID().String())
 		}
 
-		if !gg.hasCompletedCommunityValues(userID) {
+		if gg.MustCompleteCommunityValues(userID) {
 
 			hasCompleted := update.Social.CommunityValuesVersion != 0
 
