@@ -191,32 +191,39 @@ func (s *IPQSClient) Get(ctx context.Context, ip string) (*IPQSResponse, error) 
 		s.metrics.CustomTimer("ipqs_request_duration", metricsTags, time.Since(startTime))
 	}()
 
-	var err error
-	var result *IPQSResponse
-	if result, err = s.load(ip); err != nil {
-		metricsTags["result"] = "cache_error"
-		return nil, err
-	} else if result != nil && result.Success {
-		return result, nil
-	}
-
 	ctx, cancelFn := context.WithTimeout(ctx, time.Second*1)
 	defer cancelFn()
 
 	resultCh := make(chan *IPQSResponse)
 
 	go func() {
-		result, err := s.retrieve(ip)
-		if err != nil {
-			s.logger.Warn("Failed to get IPQS details, failing open.", zap.Error(err))
-			resultCh <- nil
-		}
-		if result.Success {
-			// cache the result
-			if err := s.store(ip, result); err != nil {
-				s.logger.Warn("Failed to store IPQS details in cache.", zap.Error(err))
+		var err error
+		var result *IPQSResponse
+
+		if result, err = s.load(ip); err != nil {
+			metricsTags["result"] = "cache_error"
+
+		} else if result != nil && result.Success {
+			metricsTags["result"] = "cache_hit"
+
+		} else {
+
+			if result, err = s.retrieve(ip); err != nil || !result.Success {
+
+				metricsTags["result"] = "request_error"
+				s.logger.Warn("Failed to get IPQS details, failing open.", zap.Error(err))
+
+			} else {
+
+				metricsTags["result"] = "cache_miss"
+
+				// cache the result
+				if err = s.store(ip, result); err != nil {
+					s.logger.Warn("Failed to store IPQS details in cache.", zap.Error(err))
+				}
 			}
 		}
+
 		resultCh <- result
 	}()
 
