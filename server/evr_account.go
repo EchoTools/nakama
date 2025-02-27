@@ -105,31 +105,31 @@ func (e *EVRAccount) IsLinked() bool {
 type AccountMetadata struct {
 	account *api.Account
 
-	Debug                      bool                       `json:"debug"`                     // Enable debug mode
-	GlobalBanReason            string                     `json:"global_ban_reason"`         // The global ban reason
-	DisabledAccountMessage     string                     `json:"disabled_account_message"`  // The disabled account message that the user will see.
-	DisplayNameOverride        string                     `json:"display_name_override"`     // The display name override
-	GroupDisplayNames          map[string]string          `json:"group_display_names"`       // The display names for each guild map[groupID]displayName
-	ActiveGroupID              string                     `json:"active_group_id"`           // The active group ID
-	DiscordDebugMessages       bool                       `json:"discord_debug_messages"`    // Enable debug messages in Discord
-	RelayMessagesToDiscord     bool                       `json:"relay_messages_to_discord"` // Relay messages to Discord
-	TeamName                   string                     `json:"team_name"`                 // The team name
-	DisableAFKTimeout          bool                       `json:"disable_afk_timeout"`       // Disable AFK detection
-	AllowBrokenCosmetics       bool                       `json:"allow_broken_cosmetics"`    // Allow broken cosmetics
-	EnableAllCosmetics         bool                       `json:"enable_all_cosmetics"`      // Enable all cosmetics
-	IsGlobalDeveloper          bool                       `json:"is_global_developer"`       // Is a global developer
-	IsGlobalModerator          bool                       `json:"is_global_moderator"`       // Is a global moderator
-	EnableGoldDisplayName      bool                       `json:"enable_gold_display_name"`  // The gold name display name
-	LoadoutCosmetics           AccountCosmetics           `json:"cosmetic_loadout"`          // The equipped cosmetics
-	CombatLoadout              CombatLoadout              `json:"combat_loadout"`            // The combat loadout
-	MutedPlayers               []evr.EvrId                `json:"muted_players"`             // The muted players
-	GhostedPlayers             []evr.EvrId                `json:"ghosted_players"`           // The ghosted players
-	NewUnlocks                 []int64                    `json:"new_unlocks"`               // The new unlocks
-	GameSettings               *evr.RemoteLogGameSettings `json:"game_settings"`             // The game settings
-	LegalConsents              evr.LegalConsents          `json:"legal_consents"`            // The legal consents
-	CustomizationPOIs          *evr.Customization         `json:"customization_pois"`        // The customization POIs
-	sessionDisplayNameOverride string                     // The display name override for this session
-	VRMLPlayerID               string                     `json:"vrml_player_id"` // The VRML player ID
+	Debug                      bool                        `json:"debug"`                     // Enable debug mode
+	GlobalBanReason            string                      `json:"global_ban_reason"`         // The global ban reason
+	DisabledAccountMessage     string                      `json:"disabled_account_message"`  // The disabled account message that the user will see.
+	DisplayNameOverride        string                      `json:"display_name_override"`     // The display name override
+	GroupDisplayNames          map[string]string           `json:"group_display_names"`       // The display names for each guild map[groupID]displayName
+	ActiveGroupID              string                      `json:"active_group_id"`           // The active group ID
+	DiscordDebugMessages       bool                        `json:"discord_debug_messages"`    // Enable debug messages in Discord
+	RelayMessagesToDiscord     bool                        `json:"relay_messages_to_discord"` // Relay messages to Discord
+	TeamName                   string                      `json:"team_name"`                 // The team name
+	DisableAFKTimeout          bool                        `json:"disable_afk_timeout"`       // Disable AFK detection
+	AllowBrokenCosmetics       bool                        `json:"allow_broken_cosmetics"`    // Allow broken cosmetics
+	EnableAllCosmetics         bool                        `json:"enable_all_cosmetics"`      // Enable all cosmetics
+	IsGlobalDeveloper          bool                        `json:"is_global_developer"`       // Is a global developer
+	IsGlobalModerator          bool                        `json:"is_global_moderator"`       // Is a global moderator
+	EnableGoldDisplayName      bool                        `json:"enable_gold_display_name"`  // The gold name display name
+	LoadoutCosmetics           AccountCosmetics            `json:"cosmetic_loadout"`          // The equipped cosmetics
+	CombatLoadout              CombatLoadout               `json:"combat_loadout"`            // The combat loadout
+	MutedPlayers               []evr.EvrId                 `json:"muted_players"`             // The muted players
+	GhostedPlayers             []evr.EvrId                 `json:"ghosted_players"`           // The ghosted players
+	NewUnlocks                 []int64                     `json:"new_unlocks"`               // The new unlocks
+	GameSettings               *evr.RemoteLogPauseSettings `json:"game_settings"`             // The game settings
+	LegalConsents              evr.LegalConsents           `json:"legal_consents"`            // The legal consents
+	CustomizationPOIs          *evr.Customization          `json:"customization_pois"`        // The customization POIs
+	sessionDisplayNameOverride string                      // The display name override for this session
+	VRMLPlayerID               string                      `json:"vrml_player_id"` // The VRML player ID
 }
 
 func (a *AccountMetadata) ID() string {
