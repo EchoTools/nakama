@@ -357,8 +357,11 @@ func DisplayNameCacheRegexSearch(ctx context.Context, nk runtime.NakamaModule, d
 		return s == p
 	}
 
+	const globalGroupID = ""
+
 	for userID, history := range histories {
 		matches[userID] = make(map[string]map[string]time.Time)
+		matches[userID][globalGroupID] = make(map[string]time.Time)
 
 		for groupID, e := range history.Histories {
 			matches[userID][groupID] = make(map[string]time.Time)
@@ -373,16 +376,13 @@ func DisplayNameCacheRegexSearch(ctx context.Context, nk runtime.NakamaModule, d
 
 		// Add exact matches for usernames
 		if strings.ToLower(history.Username) == displayName {
-			if _, ok := matches[userID][""]; !ok {
-				matches[userID][""] = make(map[string]time.Time)
-			}
-			matches[userID][""][history.Username] = time.Time{}
+			matches[userID][globalGroupID][history.Username] = time.Time{}
 		}
 
 		// Add exact matches for reserved names
-		for n := range history.Reserved {
-			if strings.ToLower(n) == displayName {
-				matches[userID][""][n] = time.Time{}
+		for name := range history.Reserved {
+			if strings.ToLower(name) == displayName {
+				matches[userID][globalGroupID][name] = time.Time{}
 			}
 		}
 	}
