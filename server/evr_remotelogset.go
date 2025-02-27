@@ -193,7 +193,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				continue
 			}
 
-			metadata.GameSettings = msg
+			metadata.GamePauseSettings = &msg.Settings
 			if err := AccountMetadataUpdate(ctx, p.runtimeModule, userID, metadata); err != nil {
 				logger.Error("Failed to set account metadata", zap.Error(err))
 			}
