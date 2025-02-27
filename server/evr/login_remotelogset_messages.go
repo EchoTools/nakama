@@ -113,7 +113,7 @@ func RemoteLogMessageFromLogString(log []byte) (RemoteLog, error) {
 	case "FIND_NEW_LOBBY":
 		m = &RemoteLogFindNewLobby{}
 	case "GAME_SETTINGS":
-		m = &RemoteLogGameSettings{}
+		m = &RemoteLogPauseSettings{}
 	case "GHOST_ALL":
 		m = &RemoteLogGhostAll{}
 	case "GHOST_USER":
@@ -139,8 +139,12 @@ func RemoteLogMessageFromLogString(log []byte) (RemoteLog, error) {
 }
 
 // GAME_SETTINGS
-type RemoteLogGameSettings struct {
+type RemoteLogPauseSettings struct {
 	GenericRemoteLog
+	Settings GamePauseSettings `json:"game_settings"`
+}
+
+type GamePauseSettings struct {
 	EnableAPIAccess      bool    `json:"EnableAPIAccess"`
 	EnableGhostAll       bool    `json:"EnableGhostAll"`
 	EnableMaxLoudness    bool    `json:"EnableMaxLoudness"`
