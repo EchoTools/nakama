@@ -25,7 +25,7 @@ type WhoAmI struct {
 	HasPassword          bool                 `json:"has_password"`
 	RecentLogins         map[string]time.Time `json:"recent_logins,omitempty"`
 	GuildGroups          []*GuildGroup        `json:"guild_groups,omitempty"`
-	VRMLSeasons          []string             `json:"vrml_seasons"`
+	MatchCountsBySeason  map[string]int       `json:"vrml_seasons"`
 	MatchLabels          []*MatchLabel        `json:"match_labels"`
 	DefaultLobbyGroup    string               `json:"active_lobby_group,omitempty"`
 	GhostedPlayers       []string             `json:"ghosted_discord_ids,omitempty"`
@@ -223,6 +223,28 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		whoami.GhostedPlayers = ghostedDiscordIDs
 	}
 
+	if includePriviledged {
+
+		// Get VRML Summary
+		summary := &VRMLPlayerSummary{}
+		if _, err := StorageRead(ctx, nk, userID.String(), summary, false); err == nil {
+
+			whoami.MatchCountsBySeason = make(map[string]int, 0)
+
+			for sID, teams := range summary.MatchCountsBySeasonByTeam {
+				for _, n := range teams {
+					seasonName, ok := vrmlSeasonDescriptionMap[sID]
+					if !ok {
+						seasonName = string(sID)
+					}
+
+					whoami.MatchCountsBySeason[seasonName] += n
+				}
+			}
+		}
+
+	}
+
 	if includeSystem {
 		for altUserID, matches := range loginHistory.AlternateMap {
 			altAccount, err := nk.AccountGetId(ctx, altUserID)
@@ -298,6 +320,17 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 					return fmt.Sprintf("<t:%d:R> - %s", v.Unix(), k)
 				}
 			})
+			slices.Sort(lines)
+			slices.Reverse(lines)
+			return strings.Join(lines, "\n")
+		}(), Inline: false},
+		{Name: "VRML Match Counts", Value: func() string {
+
+			lines := make([]string, 0, len(whoami.MatchCountsBySeason))
+			for season, count := range whoami.MatchCountsBySeason {
+				lines = append(lines, fmt.Sprintf("%s: %d", season, count))
+			}
+
 			slices.Sort(lines)
 			slices.Reverse(lines)
 			return strings.Join(lines, "\n")
