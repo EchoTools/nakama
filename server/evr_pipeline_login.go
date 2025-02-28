@@ -84,10 +84,10 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 		}
 	}
 
-	p.runtimeModule.metrics.CustomCounter("login_success", tags, 1)
-	p.runtimeModule.metrics.CustomTimer("login_process_latency", params.MetricsTags(), time.Since(timer))
+	p.nk.metrics.CustomCounter("login_success", tags, 1)
+	p.nk.metrics.CustomTimer("login_process_latency", params.MetricsTags(), time.Since(timer))
 
-	p.runtimeModule.Event(ctx, &api.Event{
+	p.nk.Event(ctx, &api.Event{
 		Name: EventUserLogin,
 		Properties: map[string]string{
 			"user_id": session.userID.String(),
@@ -178,11 +178,11 @@ func (p *EvrPipeline) processLoginRequest(ctx context.Context, logger *zap.Logge
 	if err = p.authenticateSession(ctx, logger, session, params); err != nil {
 		return err
 	}
-	if err = MigrateUser(ctx, logger, p.runtimeModule, p.db, session.userID.String()); err != nil {
+	if err = MigrateUser(ctx, logger, p.nk, p.db, session.userID.String()); err != nil {
 		return fmt.Errorf("failed to migrate user: %w", err)
 	}
 
-	if params.account, err = p.runtimeModule.AccountGetId(ctx, session.userID.String()); err != nil {
+	if params.account, err = p.nk.AccountGetId(ctx, session.userID.String()); err != nil {
 		return fmt.Errorf("failed to get account: %w", err)
 	}
 
@@ -203,7 +203,7 @@ func (p *EvrPipeline) authenticateSession(ctx context.Context, logger *zap.Logge
 	metricsTags := params.MetricsTags()
 
 	defer func() {
-		p.runtimeModule.MetricsCounterAdd("session_authenticate", metricsTags, 1)
+		p.nk.MetricsCounterAdd("session_authenticate", metricsTags, 1)
 	}()
 
 	// Validate the XPID
@@ -223,7 +223,7 @@ func (p *EvrPipeline) authenticateSession(ctx context.Context, logger *zap.Logge
 	}
 
 	// Get the user for this device
-	params.account, err = AccountGetDeviceID(ctx, p.db, p.runtimeModule, params.xpID.String())
+	params.account, err = AccountGetDeviceID(ctx, p.db, p.nk, params.xpID.String())
 	switch status.Code(err) {
 	// The device is not linked to an account.
 	case codes.NotFound:
@@ -232,7 +232,7 @@ func (p *EvrPipeline) authenticateSession(ctx context.Context, logger *zap.Logge
 
 		// the session is authenticated. Automatically link the device.
 		if !session.userID.IsNil() {
-			if err := p.runtimeModule.LinkDevice(ctx, session.UserID().String(), params.xpID.String()); err != nil {
+			if err := p.nk.LinkDevice(ctx, session.UserID().String(), params.xpID.String()); err != nil {
 				metricsTags["error"] = "failed_link_device"
 				return fmt.Errorf("failed to link device: %w", err)
 			}
@@ -303,7 +303,7 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 
 	metricsTags := params.MetricsTags()
 	defer func() {
-		p.runtimeModule.MetricsCounterAdd("session_authorize", metricsTags, 1)
+		p.nk.MetricsCounterAdd("session_authorize", metricsTags, 1)
 	}()
 
 	// Get the IPQS Data
@@ -313,13 +313,13 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 	}
 
 	// Load the login history for audit purposes.
-	loginHistory, err := LoginHistoryLoad(ctx, p.runtimeModule, params.account.User.Id)
+	loginHistory, err := LoginHistoryLoad(ctx, p.nk, params.account.User.Id)
 	if err != nil {
 		metricsTags["error"] = "failed_load_login_history"
 		return fmt.Errorf("failed to load login history: %w", err)
 	}
 	defer func() {
-		if err := loginHistory.Store(ctx, p.runtimeModule); err != nil {
+		if err := loginHistory.Store(ctx, p.nk); err != nil {
 			logger.Warn("Failed to store login history", zap.Error(err))
 		}
 	}()
@@ -329,7 +329,7 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 	// The account is now authenticated. Authorize the session.
 	if status.Code(err) == codes.PermissionDenied || params.account.DisableTime != nil {
 
-		p.runtimeModule.MetricsCounterAdd("login_attempt_banned_account", nil, 1)
+		p.nk.MetricsCounterAdd("login_attempt_banned_account", nil, 1)
 
 		logger.Info("Attempted login to banned account.",
 			zap.String("xpid", params.xpID.Token()),
@@ -412,7 +412,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 
 	metricsTags := params.MetricsTags()
 	defer func() {
-		p.runtimeModule.MetricsCounterAdd("session_initialize", metricsTags, 1)
+		p.nk.MetricsCounterAdd("session_initialize", metricsTags, 1)
 	}()
 	params.accountMetadata = &AccountMetadata{}
 
@@ -427,7 +427,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	metadataUpdated := false
 
 	// Get the GroupID from the user's metadata
-	params.guildGroups, err = GuildUserGroupsList(ctx, p.runtimeModule, params.account.User.Id)
+	params.guildGroups, err = GuildUserGroupsList(ctx, p.nk, params.account.User.Id)
 	if err != nil {
 		metricsTags["error"] = "failed_get_guild_groups"
 		return fmt.Errorf("failed to get guild groups: %w", err)
@@ -495,18 +495,18 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		params.accountMetadata.sessionDisplayNameOverride = params.userDisplayNameOverride
 	}
 
-	params.displayNames, err = DisplayNameHistoryLoad(ctx, p.runtimeModule, session.userID.String())
+	params.displayNames, err = DisplayNameHistoryLoad(ctx, p.nk, session.userID.String())
 	if err != nil {
 		logger.Warn("Failed to load display name history", zap.Error(err))
 		return fmt.Errorf("failed to load display name history: %w", err)
 	}
 	params.displayNames.Update(params.accountMetadata.ActiveGroupID, params.accountMetadata.GetActiveGroupDisplayName(), params.account.User.Username, true)
 
-	if err := DisplayNameHistoryStore(ctx, p.runtimeModule, session.userID.String(), params.displayNames); err != nil {
+	if err := DisplayNameHistoryStore(ctx, p.nk, session.userID.String(), params.displayNames); err != nil {
 		logger.Warn("Failed to store display name history", zap.Error(err))
 	}
 
-	if settings, err := LoadMatchmakingSettings(ctx, p.runtimeModule, session.userID.String()); err != nil {
+	if settings, err := LoadMatchmakingSettings(ctx, p.nk, session.userID.String()); err != nil {
 		logger.Warn("Failed to load matchmaking settings", zap.Error(err))
 		return fmt.Errorf("failed to load matchmaking settings: %w", err)
 	} else {
@@ -520,7 +520,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	}
 
 	if metadataUpdated {
-		if err := p.runtimeModule.AccountUpdateId(ctx, params.account.User.Id, "", params.accountMetadata.MarshalMap(), params.accountMetadata.GetActiveGroupDisplayName(), "", "", "", ""); err != nil {
+		if err := p.nk.AccountUpdateId(ctx, params.account.User.Id, "", params.accountMetadata.MarshalMap(), params.accountMetadata.GetActiveGroupDisplayName(), "", "", "", ""); err != nil {
 			metricsTags["error"] = "failed_update_metadata"
 			return fmt.Errorf("failed to update user metadata: %w", err)
 		}
@@ -614,7 +614,7 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 	request := in.(*evr.LoggedInUserProfileRequest)
 	// Start a timer to add to the metrics
 	timer := time.Now()
-	defer func() { p.runtimeModule.metrics.CustomTimer("loggedInUserProfileRequest", nil, time.Since(timer)) }()
+	defer func() { p.nk.metrics.CustomTimer("loggedInUserProfileRequest", nil, time.Since(timer)) }()
 
 	params, ok := LoadParams(ctx)
 	if !ok {
@@ -626,7 +626,7 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 		evr.ModeCombatPublic,
 	}
 
-	serverProfile, err := NewUserServerProfile(ctx, logger, p.db, p.runtimeModule, params.account, params.xpID, params.accountMetadata.GetActiveGroupID().String(), modes, 0)
+	serverProfile, err := NewUserServerProfile(ctx, logger, p.db, p.nk, params.account, params.xpID, params.accountMetadata.GetActiveGroupID().String(), modes, 0)
 	if err != nil {
 		return fmt.Errorf("failed to get server profile: %w", err)
 	}
@@ -702,12 +702,12 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 						return fmt.Errorf("failed to marshal guild group: %w", err)
 					}
 
-					if err := p.runtimeModule.GroupUpdate(ctx, groupID, SystemUserID, "", "", "", "", "", false, md, 1000000); err != nil {
+					if err := p.nk.GroupUpdate(ctx, groupID, SystemUserID, "", "", "", "", "", false, md, 1000000); err != nil {
 						return fmt.Errorf("error updating group: %w", err)
 					}
 
 					// Update params too
-					params.guildGroups, err = GuildUserGroupsList(ctx, p.runtimeModule, params.account.User.Id)
+					params.guildGroups, err = GuildUserGroupsList(ctx, p.nk, params.account.User.Id)
 					if err != nil {
 						return fmt.Errorf("failed to get guild user groups: %w", err)
 					} else {
@@ -723,7 +723,7 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 		}
 	}
 
-	metadata, err := AccountMetadataLoad(ctx, p.runtimeModule, session.userID.String())
+	metadata, err := AccountMetadataLoad(ctx, p.nk, session.userID.String())
 	if err != nil {
 		return fmt.Errorf("failed to load account metadata: %w", err)
 	}
@@ -742,7 +742,7 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 	metadata.NewUnlocks = update.NewUnlocks
 	metadata.CustomizationPOIs = update.Customization
 
-	if err := AccountMetadataUpdate(ctx, p.runtimeModule, session.userID.String(), metadata); err != nil {
+	if err := AccountMetadataUpdate(ctx, p.nk, session.userID.String(), metadata); err != nil {
 		return fmt.Errorf("failed to update account metadata: %w", err)
 	}
 
@@ -810,7 +810,7 @@ func (p *EvrPipeline) generateEULA(ctx context.Context, logger *zap.Logger, lang
 
 	var ts time.Time
 
-	if objs, err := p.runtimeModule.StorageRead(ctx, []*runtime.StorageRead{{
+	if objs, err := p.nk.StorageRead(ctx, []*runtime.StorageRead{{
 		Collection: DocumentStorageCollection,
 		Key:        key,
 		UserID:     SystemUserID,
@@ -828,7 +828,7 @@ func (p *EvrPipeline) generateEULA(ctx context.Context, logger *zap.Logger, lang
 			return document, fmt.Errorf("failed to marshal EULA: %w", err)
 		}
 
-		if _, err = p.runtimeModule.StorageWrite(ctx, []*runtime.StorageWrite{{
+		if _, err = p.nk.StorageWrite(ctx, []*runtime.StorageWrite{{
 			Collection:      DocumentStorageCollection,
 			Key:             key,
 			Value:           string(jsonBytes),
@@ -940,7 +940,7 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 		return fmt.Errorf("failed to generate matchID: %w", err)
 	}
 	// Validate the player was in the session
-	label, err := MatchLabelByID(ctx, p.runtimeModule, matchID)
+	label, err := MatchLabelByID(ctx, p.nk, matchID)
 	if err != nil {
 		return fmt.Errorf("failed to get match label: %w", err)
 	}
@@ -967,7 +967,7 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 
 	var metadata *AccountMetadata
 	// Set the player's session to not be an early quitter
-	if playerSession := p.runtimeModule.sessionRegistry.Get(uuid.FromStringOrNil(playerInfo.SessionID)); playerSession != nil {
+	if playerSession := p.nk.sessionRegistry.Get(uuid.FromStringOrNil(playerInfo.SessionID)); playerSession != nil {
 		if params, ok := LoadParams(playerSession.Context()); ok {
 			params.isEarlyQuitter.Store(false)
 
@@ -980,7 +980,7 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 	var err error
 	if metadata == nil {
 		// If the player isn't a member of the group, do not update the stats
-		metadata, err = AccountMetadataLoad(ctx, p.runtimeModule, playerInfo.UserID)
+		metadata, err = AccountMetadataLoad(ctx, p.nk, playerInfo.UserID)
 		if err != nil {
 			return fmt.Errorf("failed to get account metadata: %w", err)
 		}
@@ -1004,17 +1004,17 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 		} else {
 			playerInfo.RatingMu = max(rating.Mu, 0.0)
 			playerInfo.RatingSigma = rating.Sigma
-			if err := MatchmakingRatingStore(ctx, p.runtimeModule, playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, rating); err != nil {
+			if err := MatchmakingRatingStore(ctx, p.nk, playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, rating); err != nil {
 				logger.Warn("Failed to record percentile to leaderboard", zap.Error(err))
 			}
 		}
 
 		// Calculate a new rank percentile
-		if rankPercentile, err := CalculateSmoothedPlayerRankPercentile(ctx, logger, p.db, p.runtimeModule, playerInfo.UserID, groupIDStr, label.Mode); err != nil {
+		if rankPercentile, err := CalculateSmoothedPlayerRankPercentile(ctx, logger, p.db, p.nk, playerInfo.UserID, groupIDStr, label.Mode); err != nil {
 			logger.Error("Failed to calculate new player rank percentile", zap.Error(err))
 
 			// Store the rank percentile in the leaderboards.
-		} else if err := MatchmakingRankPercentileStore(ctx, p.runtimeModule, playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, rankPercentile); err != nil {
+		} else if err := MatchmakingRankPercentileStore(ctx, p.nk, playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, rankPercentile); err != nil {
 			logger.Warn("Failed to record percentile to leaderboard", zap.Error(err))
 		}
 
@@ -1048,7 +1048,7 @@ func (p *EvrPipeline) updatePlayerStats(ctx context.Context, userID, groupID, di
 	}
 
 	// Get the players existing statistics
-	prevPlayerStats, _, err := PlayerStatisticsGetID(ctx, p.db, p.runtimeModule, userID, groupID, []evr.Symbol{mode}, mode)
+	prevPlayerStats, _, err := PlayerStatisticsGetID(ctx, p.db, p.nk, userID, groupID, []evr.Symbol{mode}, mode)
 	if err != nil {
 		return fmt.Errorf("failed to get player statistics: %w", err)
 	}
@@ -1080,8 +1080,8 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 	startTime := time.Now()
 
 	defer func() {
-		p.runtimeModule.metrics.CustomCounter("profile_request_count", tags, 1)
-		p.runtimeModule.metrics.CustomTimer("profile_request_latency", tags, time.Since(startTime))
+		p.nk.metrics.CustomCounter("profile_request_count", tags, 1)
+		p.nk.metrics.CustomTimer("profile_request_latency", tags, time.Since(startTime))
 	}()
 
 	var ok bool
@@ -1097,7 +1097,7 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 		ServerProfileJSON: data,
 	}
 
-	p.runtimeModule.metrics.CustomGauge("profile_size_bytes", nil, float64(len(data)))
+	p.nk.metrics.CustomGauge("profile_size_bytes", nil, float64(len(data)))
 
 	if err := session.SendEvrUnrequire(response); err != nil {
 		tags["error"] = "failed_send_profile"

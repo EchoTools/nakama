@@ -133,7 +133,7 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 	go func() {
 
 		stream := lobbyParams.GuildGroupStream()
-		count, err := p.runtimeModule.StreamCount(stream.Mode, stream.Subject.String(), "", stream.Label)
+		count, err := p.nk.StreamCount(stream.Mode, stream.Subject.String(), "", stream.Label)
 		if err != nil {
 			logger.Error("Failed to get stream count", zap.Error(err))
 		}

@@ -132,7 +132,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 	globalSettings := serviceSettings.Matchmaking
 
 	// Load the user's matchmaking config
-	userSettings, err := LoadMatchmakingSettings(ctx, p.runtimeModule, userID)
+	userSettings, err := LoadMatchmakingSettings(ctx, p.nk, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load user matchmaking settings: %w", err)
 	}
@@ -145,7 +145,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		if hostUserID := uuid.FromStringOrNil(hostUserIDStr); !hostUserID.IsNil() {
 
 			// Get the MatchIDs for the user from it's presence
-			presences, _ := p.runtimeModule.StreamUserList(StreamModeService, hostUserID.String(), "", StreamLabelMatchService, false, true)
+			presences, _ := p.nk.StreamUserList(StreamModeService, hostUserID.String(), "", StreamLabelMatchService, false, true)
 			for _, presence := range presences {
 				matchID := MatchIDFromStringOrNil(presence.GetStatus())
 				if !matchID.IsNil() {
@@ -162,7 +162,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 	if !userSettings.NextMatchID.IsNil() {
 
 		// Check that the match exists
-		if _, err := p.runtimeModule.MatchGet(ctx, userSettings.NextMatchID.String()); err != nil {
+		if _, err := p.nk.MatchGet(ctx, userSettings.NextMatchID.String()); err != nil {
 			logger.Warn("Next match not found", zap.String("mid", userSettings.NextMatchID.String()))
 		} else {
 			nextMatchID = userSettings.NextMatchID
@@ -190,7 +190,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 			userSettings.NextMatchID = MatchID{}
 			userSettings.NextMatchRole = ""
 			userSettings.NextMatchDiscordID = ""
-			if _, err := StorageWrite(ctx, p.runtimeModule, userID, userSettings); err != nil {
+			if _, err := StorageWrite(ctx, p.nk, userID, userSettings); err != nil {
 				logger.Warn("Failed to clear next match metadata", zap.Error(err))
 			}
 		}()
@@ -301,17 +301,17 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		if userSettings.StaticBaseRankPercentile > 0 {
 			rankPercentile = userSettings.StaticBaseRankPercentile
 		} else {
-			rankPercentile, err = CalculateSmoothedPlayerRankPercentile(ctx, logger, p.db, p.runtimeModule, userID, groupID.String(), mmMode)
+			rankPercentile, err = CalculateSmoothedPlayerRankPercentile(ctx, logger, p.db, p.nk, userID, groupID.String(), mmMode)
 			if err != nil {
 				return nil, fmt.Errorf("failed to calculate smoothed player rank percentile: %w", err)
 			}
 
-			if err := MatchmakingRankPercentileStore(ctx, p.runtimeModule, userID, session.Username(), groupID.String(), mmMode, rankPercentile); err != nil {
+			if err := MatchmakingRankPercentileStore(ctx, p.nk, userID, session.Username(), groupID.String(), mmMode, rankPercentile); err != nil {
 				logger.Warn("Failed to store user rank percentile", zap.Error(err))
 			}
 		}
 
-		rating, err = MatchmakingRatingLoad(ctx, p.runtimeModule, userID, groupID.String(), mmMode)
+		rating, err = MatchmakingRatingLoad(ctx, p.nk, userID, groupID.String(), mmMode)
 		if err != nil {
 			logger.Warn("Failed to load matchmaking rating", zap.Error(err))
 			rating = NewDefaultRating()

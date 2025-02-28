@@ -138,7 +138,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				continue
 			}
 
-			label, err := MatchLabelByID(ctx, p.runtimeModule, matchID)
+			label, err := MatchLabelByID(ctx, p.nk, matchID)
 			if err != nil || label == nil {
 				logger.Error("Failed to get match label", zap.Error(err))
 				continue
@@ -187,14 +187,14 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				logger.Error("Failed to get user ID by evr ID", zap.Error(err))
 				continue
 			}
-			metadata, err := AccountMetadataLoad(ctx, p.runtimeModule, userID)
+			metadata, err := AccountMetadataLoad(ctx, p.nk, userID)
 			if err != nil {
 				logger.Error("Failed to load account metadata", zap.Error(err))
 				continue
 			}
 
 			metadata.GamePauseSettings = &msg.Settings
-			if err := AccountMetadataUpdate(ctx, p.runtimeModule, userID, metadata); err != nil {
+			if err := AccountMetadataUpdate(ctx, p.nk, userID, metadata); err != nil {
 				logger.Error("Failed to set account metadata", zap.Error(err))
 			}
 
@@ -212,7 +212,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				logger.Error("Equipped customization is empty")
 				continue
 			}
-			metadata, err := AccountMetadataLoad(ctx, p.runtimeModule, session.userID.String())
+			metadata, err := AccountMetadataLoad(ctx, p.nk, session.userID.String())
 			if err != nil {
 				logger.Error("Failed to load account metadata", zap.Error(err))
 				continue
@@ -223,7 +223,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				return fmt.Errorf("failed to update equipped item: %w", err)
 			}
 
-			if err := AccountMetadataUpdate(ctx, p.runtimeModule, session.userID.String(), metadata); err != nil {
+			if err := AccountMetadataUpdate(ctx, p.nk, session.userID.String(), metadata); err != nil {
 				logger.Error("Failed to set account metadata", zap.Error(err))
 			}
 		case *evr.RemoteLogRepairMatrix:
@@ -247,7 +247,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				continue
 			}
 			// Get the match label
-			label, err := MatchLabelByID(ctx, p.runtimeModule, matchID)
+			label, err := MatchLabelByID(ctx, p.nk, matchID)
 			if err != nil || label == nil {
 				logger.Error("Failed to get match label", zap.Error(err))
 				continue
@@ -289,7 +289,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 
 			logger.Warn("Server connection failed", zap.String("username", session.Username()), zap.String("match_id", msg.SessionUUID().String()), zap.String("evr_id", evrID.String()), zap.Any("remote_log_message", msg))
 
-			acct, err := p.runtimeModule.AccountGetId(ctx, label.GameServer.OperatorID.String())
+			acct, err := p.nk.AccountGetId(ctx, label.GameServer.OperatorID.String())
 			if err != nil {
 				logger.Error("Failed to get account", zap.Error(err))
 				continue
@@ -304,7 +304,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				"is_pcvr":           strconv.FormatBool(params.IsPCVR()),
 			}
 
-			p.runtimeModule.MetricsCounterAdd("remotelog_error_server_connection_failed_count", tags, 1)
+			p.nk.MetricsCounterAdd("remotelog_error_server_connection_failed_count", tags, 1)
 		case *evr.RemoteLogPostMatchMatchStats:
 
 			update, _ = updates.LoadOrStore(msg.SessionUUID(), &MatchGameStateUpdate{})
@@ -314,7 +314,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 	}
 
 	updates.Range(func(key uuid.UUID, value *MatchGameStateUpdate) bool {
-		p.runtimeModule.matchRegistry.SendData(key, p.node, session.userID, session.id, session.Username(), p.node, OpCodeMatchGameStateUpdate, value.Bytes(), false, time.Now().Unix())
+		p.nk.matchRegistry.SendData(key, p.node, session.userID, session.id, session.Username(), p.node, OpCodeMatchGameStateUpdate, value.Bytes(), false, time.Now().Unix())
 		return true
 	})
 
