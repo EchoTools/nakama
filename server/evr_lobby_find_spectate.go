@@ -43,7 +43,7 @@ func (p *EvrPipeline) lobbyFindSpectate(ctx context.Context, logger *zap.Logger,
 		}
 
 		// list existing matches
-		matches, err := listMatches(ctx, p.runtimeModule, limit, minSize+1, maxSize+1, query)
+		matches, err := listMatches(ctx, p.nk, limit, minSize+1, maxSize+1, query)
 		if err != nil {
 			return fmt.Errorf("failed to find spectate match: %w", err)
 		}

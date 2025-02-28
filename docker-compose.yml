@@ -57,6 +57,7 @@ services:
       - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./_local:/_local
   prometheus:
     image: prom/prometheus:latest
     restart: unless-stopped

@@ -38,7 +38,7 @@ func (p *EvrPipeline) lobbySessionRequest(ctx context.Context, logger *zap.Logge
 
 	go func() {
 
-		lobbyParams, err := NewLobbyParametersFromRequest(ctx, logger, p.runtimeModule, session, in.(evr.LobbySessionRequest))
+		lobbyParams, err := NewLobbyParametersFromRequest(ctx, logger, p.nk, session, in.(evr.LobbySessionRequest))
 		if err != nil {
 			logger.Error("Failed to create lobby parameters", zap.Error(err))
 			if err := session.SendEvr(LobbySessionFailureFromError(request.GetMode(), request.GetGroupID(), err)); err != nil {
@@ -181,7 +181,7 @@ func (p *EvrPipeline) lobbyPlayerSessionsRequest(ctx context.Context, logger *za
 	}
 	entrantID := NewEntrantID(matchID, message.EvrId)
 
-	presence, err := PresenceByEntrantID(p.runtimeModule, matchID, entrantID)
+	presence, err := PresenceByEntrantID(p.nk, matchID, entrantID)
 	if err != nil {
 		return fmt.Errorf("failed to get lobby presence for entrant `%s`: %w", entrantID.String(), err)
 	}

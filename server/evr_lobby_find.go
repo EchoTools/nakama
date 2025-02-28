@@ -90,7 +90,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		}
 	}
 
-	p.runtimeModule.metrics.CustomCounter("lobby_find_match", lobbyParams.MetricsTags(), int64(lobbyParams.GetPartySize()))
+	p.nk.metrics.CustomCounter("lobby_find_match", lobbyParams.MetricsTags(), int64(lobbyParams.GetPartySize()))
 	logger.Info("Finding match", zap.String("mode", lobbyParams.Mode.String()), zap.Int("party_size", lobbyParams.GetPartySize()))
 
 	defer func() {
@@ -108,13 +108,13 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		tags := lobbyParams.MetricsTags()
 		tags["is_leader"] = strconv.FormatBool(isLeader)
 		tags["party_size"] = strconv.Itoa(lobbyParams.GetPartySize())
-		p.runtimeModule.metrics.CustomTimer("lobby_find_duration", tags, time.Since(startTime))
+		p.nk.metrics.CustomTimer("lobby_find_duration", tags, time.Since(startTime))
 
 		logger.Debug("Lobby find complete", zap.String("group_id", lobbyParams.GroupID.String()), zap.Int("party_size", lobbyParams.GetPartySize()), zap.String("mode", lobbyParams.Mode.String()), zap.Int("role", lobbyParams.Role), zap.Bool("leader", isLeader), zap.Int("duration", int(time.Since(startTime).Seconds())))
 	}()
 
 	// Construct the entrant presences for the party members.
-	entrants, err := PrepareEntrantPresences(ctx, logger, p.runtimeModule, p.runtimeModule.sessionRegistry, lobbyParams, entrantSessionIDs...)
+	entrants, err := PrepareEntrantPresences(ctx, logger, p.nk, p.nk.sessionRegistry, lobbyParams, entrantSessionIDs...)
 	if err != nil {
 		return fmt.Errorf("failed to be party leader.: %w", err)
 	}
@@ -173,12 +173,12 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 			}
 			memberUsernames = append(memberUsernames, member.Presence.GetUsername())
 
-			meta, err := p.runtimeModule.StreamUserGet(stream.Mode, stream.Subject.String(), stream.Subcontext.String(), stream.Label, member.Presence.GetUserId(), member.Presence.GetSessionId())
+			meta, err := p.nk.StreamUserGet(stream.Mode, stream.Subject.String(), stream.Subcontext.String(), stream.Label, member.Presence.GetUserId(), member.Presence.GetSessionId())
 			if err != nil {
 				return nil, nil, false, fmt.Errorf("failed to get party stream: %w", err)
 			} else if meta == nil {
 				logger.Warn("Party member is not following the leader", zap.String("uid", member.Presence.GetUserId()), zap.String("sid", member.Presence.GetSessionId()), zap.String("leader_sid", session.id.String()))
-				if err := p.runtimeModule.StreamUserKick(stream.Mode, stream.Subject.String(), stream.Subcontext.String(), stream.Label, member.Presence); err != nil {
+				if err := p.nk.StreamUserKick(stream.Mode, stream.Subject.String(), stream.Subcontext.String(), stream.Label, member.Presence); err != nil {
 					return nil, nil, false, fmt.Errorf("failed to kick party member: %w", err)
 				}
 			} else {
@@ -263,7 +263,7 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 		"mode":         lobbyParams.Mode.String(),
 	}
 
-	p.runtimeModule.metrics.CustomCounter("lobby_new", metricsTags, 1)
+	p.nk.metrics.CustomCounter("lobby_new", metricsTags, 1)
 
 	qparts := []string{
 		"+label.open:T",
@@ -276,7 +276,7 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 
 	query := strings.Join(qparts, " ")
 
-	labels, err := lobbyListGameServers(ctx, p.runtimeModule, query)
+	labels, err := lobbyListGameServers(ctx, p.nk, query)
 	if err != nil {
 		return nil, err
 	}
@@ -289,7 +289,7 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 
 	switch lobbyParams.Mode {
 	case evr.ModeSocialPublic:
-		rttByPlayerByExtIP, err := rttByPlayerByExtIP(ctx, logger, p.db, p.runtimeModule, lobbyParams.GroupID.String())
+		rttByPlayerByExtIP, err := rttByPlayerByExtIP(ctx, logger, p.db, p.nk, lobbyParams.GroupID.String())
 		if err != nil {
 			logger.Warn("Failed to get RTT by player by extIP", zap.Error(err))
 		} else {
@@ -324,7 +324,7 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 		GroupID:   lobbyParams.GroupID,
 		StartTime: time.Now().UTC(),
 	}
-	label, err = LobbyPrepareSession(ctx, p.runtimeModule, matchID, settings)
+	label, err = LobbyPrepareSession(ctx, p.nk, matchID, settings)
 	if err != nil {
 		logger.Error("Failed to prepare session", zap.Error(err), zap.String("mid", matchID.String()))
 		return nil, err
@@ -366,7 +366,7 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 	}
 
 	stream := lobbyParams.GuildGroupStream()
-	count, err := p.runtimeModule.StreamCount(stream.Mode, stream.Subject.String(), "", stream.Label)
+	count, err := p.nk.StreamCount(stream.Mode, stream.Subject.String(), "", stream.Label)
 	if err != nil {
 		logger.Error("Failed to get stream count", zap.Error(err))
 	}
@@ -424,7 +424,7 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 		}
 
 		// List all matches that are open and have available slots.
-		matches, err := ListMatchStates(ctx, p.runtimeModule, query)
+		matches, err := ListMatchStates(ctx, p.nk, query)
 		if err != nil {
 			return fmt.Errorf("failed to list matches: %w", err)
 		}
@@ -521,7 +521,7 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 			logger := logger.With(zap.String("mid", l.ID.UUID.String()))
 
 			logger.Debug("Joining backfill match.")
-			p.runtimeModule.metrics.CustomCounter("lobby_join_backfill", lobbyParams.MetricsTags(), int64(lobbyParams.GetPartySize()))
+			p.nk.metrics.CustomCounter("lobby_join_backfill", lobbyParams.MetricsTags(), int64(lobbyParams.GetPartySize()))
 
 			// Player members will detect the join.
 			if err := p.LobbyJoinEntrants(logger, l, entrants...); err != nil {
@@ -570,7 +570,7 @@ func (p *EvrPipeline) CheckServerPing(logger *zap.Logger, session *sessionWS, gr
 		<-time.After(1 * time.Second)
 		activeEndpoints := make([]evr.Endpoint, 0, 100)
 
-		presences, err := p.runtimeModule.StreamUserList(StreamModeGameServer, groupID, "", "", false, true)
+		presences, err := p.nk.StreamUserList(StreamModeGameServer, groupID, "", "", false, true)
 		if err != nil {
 			doneCh <- err
 		}
@@ -717,7 +717,7 @@ func (p *EvrPipeline) PartyFollow(ctx context.Context, logger *zap.Logger, sessi
 			continue
 		} else {
 			// If the leader is in a different public lobby, try to join it.
-			label, err := MatchLabelByID(ctx, p.runtimeModule, leaderMatchID)
+			label, err := MatchLabelByID(ctx, p.nk, leaderMatchID)
 			if err != nil {
 				return fmt.Errorf("failed to get match by session id: %w", err)
 			} else if label == nil {

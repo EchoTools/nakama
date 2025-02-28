@@ -44,7 +44,7 @@ type EvrPipeline struct {
 	version string
 
 	runtime       *Runtime
-	runtimeModule *RuntimeGoNakamaModule
+	nk            *RuntimeGoNakamaModule
 	runtimeLogger runtime.Logger
 
 	profileCache                 *ProfileCache
@@ -180,7 +180,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		version: version,
 
 		runtime:       _runtime,
-		runtimeModule: nk.(*RuntimeGoNakamaModule),
+		nk:            nk.(*RuntimeGoNakamaModule),
 		runtimeLogger: runtimeLogger,
 
 		discordCache: discordCache,
@@ -253,7 +253,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 		}
 
 	case *evr.BroadcasterPlayerSessionsLocked:
-		matchID, _, err := GameServerBySessionID(p.runtimeModule, session.ID())
+		matchID, _, err := GameServerBySessionID(p.nk, session.ID())
 		if err != nil {
 			logger.Error("Failed to get broadcaster's match by session ID", zap.Error(err))
 			return true
@@ -261,7 +261,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 		in = &evr.EchoToolsLobbySessionLockV1{LobbySessionID: matchID.UUID}
 
 	case *evr.BroadcasterPlayerSessionsUnlocked:
-		matchID, _, err := GameServerBySessionID(p.runtimeModule, session.ID())
+		matchID, _, err := GameServerBySessionID(p.nk, session.ID())
 		if err != nil {
 			logger.Error("Failed to get broadcaster's match by session ID", zap.Error(err))
 			return true
@@ -269,7 +269,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 		in = &evr.EchoToolsLobbySessionUnlockV1{LobbySessionID: matchID.UUID}
 
 	case *evr.GameServerJoinAttempt:
-		matchID, _, err := GameServerBySessionID(p.runtimeModule, session.ID())
+		matchID, _, err := GameServerBySessionID(p.nk, session.ID())
 		if err != nil {
 			logger.Error("Failed to get broadcaster's match by session ID", zap.Error(err))
 			return true
@@ -277,7 +277,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 		in = &evr.EchoToolsLobbyEntrantNewV1{LobbySessionID: matchID.UUID, EntrantIDs: msg.EntrantIDs}
 
 	case *evr.GameServerPlayerRemoved:
-		matchID, _, err := GameServerBySessionID(p.runtimeModule, session.ID())
+		matchID, _, err := GameServerBySessionID(p.nk, session.ID())
 		if err != nil {
 			logger.Error("Failed to get broadcaster's match by session ID", zap.Error(err))
 			return true
@@ -286,7 +286,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 		in = &evr.EchoToolsLobbyEntrantRemovedV1{EntrantID: msg.EntrantID, LobbySessionID: matchID.UUID}
 
 	case *evr.BroadcasterSessionStarted:
-		matchID, _, err := GameServerBySessionID(p.runtimeModule, session.ID())
+		matchID, _, err := GameServerBySessionID(p.nk, session.ID())
 		if err != nil {
 			logger.Error("Failed to get broadcaster's match by session ID", zap.Error(err))
 			return true
@@ -294,7 +294,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 		in = &evr.EchoToolsLobbySessionStartedV1{LobbySessionID: matchID.UUID}
 
 	case *evr.BroadcasterSessionEnded:
-		matchID, _, err := GameServerBySessionID(p.runtimeModule, session.ID())
+		matchID, _, err := GameServerBySessionID(p.nk, session.ID())
 		if err != nil {
 			logger.Error("Failed to get broadcaster's match by session ID", zap.Error(err))
 			return true
@@ -662,7 +662,7 @@ func (p *EvrPipeline) relayMatchData(ctx context.Context, logger *zap.Logger, se
 		if matchID, err = NewMatchID(message.LobbyID(), p.node); err != nil {
 			return fmt.Errorf("failed to create match ID: %w", err)
 		}
-	} else if matchID, _, err = GameServerBySessionID(p.runtimeModule, session.id); err != nil {
+	} else if matchID, _, err = GameServerBySessionID(p.nk, session.id); err != nil {
 		return fmt.Errorf("failed to get match by session ID: %w", err)
 	} else if matchID.IsNil() {
 		return fmt.Errorf("no match found for session ID: %s", session.id)
@@ -675,7 +675,7 @@ func (p *EvrPipeline) relayMatchData(ctx context.Context, logger *zap.Logger, se
 	// Set the OpCode to the symbol of the message.
 	opCode := int64(evr.SymbolOf(in))
 	// Send the data to the match.
-	p.runtimeModule.matchRegistry.SendData(matchID.UUID, matchID.Node, session.UserID(), session.ID(), session.Username(), matchID.Node, opCode, requestJson, true, time.Now().UTC().UnixNano()/int64(time.Millisecond))
+	p.nk.matchRegistry.SendData(matchID.UUID, matchID.Node, session.UserID(), session.ID(), session.Username(), matchID.Node, opCode, requestJson, true, time.Now().UTC().UnixNano()/int64(time.Millisecond))
 
 	return nil
 }

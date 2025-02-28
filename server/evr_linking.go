@@ -83,13 +83,13 @@ func (p *EvrPipeline) linkTicket(ctx context.Context, logger *zap.Logger, xpid e
 		return nil, fmt.Errorf("loginData is nil")
 	}
 
-	linkTickets, err := LoadLinkTickets(ctx, p.runtimeModule)
+	linkTickets, err := LoadLinkTickets(ctx, p.nk)
 	if err != nil {
 		return nil, err
 	}
 	linkTicket := generateLinkTicket(linkTickets, xpid, clientIP, loginData)
 	// Store the link ticket
-	if err := StoreLinkTickets(ctx, p.runtimeModule, linkTickets); err != nil {
+	if err := StoreLinkTickets(ctx, p.nk, linkTickets); err != nil {
 		return nil, err
 	}
 

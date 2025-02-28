@@ -19,17 +19,17 @@ func (p *EvrPipeline) LobbyJoinEntrants(logger *zap.Logger, label *MatchLabel, p
 		return errors.New("no presences")
 	}
 
-	session := p.runtimeModule.sessionRegistry.Get(presences[0].SessionID)
+	session := p.nk.sessionRegistry.Get(presences[0].SessionID)
 	if session == nil {
 		return errors.New("session not found")
 	}
 
-	serverSession := p.runtimeModule.sessionRegistry.Get(label.GameServer.SessionID)
+	serverSession := p.nk.sessionRegistry.Get(label.GameServer.SessionID)
 	if serverSession == nil {
 		return errors.New("server session not found")
 	}
 
-	return LobbyJoinEntrants(logger, p.runtimeModule.matchRegistry, p.runtimeModule.tracker, session, serverSession, label, presences...)
+	return LobbyJoinEntrants(logger, p.nk.matchRegistry, p.nk.tracker, session, serverSession, label, presences...)
 }
 func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker Tracker, session Session, serverSession Session, label *MatchLabel, entrants ...*EvrMatchPresence) error {
 	if session == nil || serverSession == nil {
@@ -179,7 +179,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 	}
 
 	defer func() {
-		p.runtimeModule.MetricsCounterAdd("lobby_authorization", metricsTags, 1)
+		p.nk.MetricsCounterAdd("lobby_authorization", metricsTags, 1)
 	}()
 
 	userID := session.UserID().String()
@@ -370,7 +370,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 	}
 
 	displayName := params.accountMetadata.GetGroupDisplayNameOrDefault(groupID)
-	p.runtimeModule.Event(ctx, &api.Event{
+	p.nk.Event(ctx, &api.Event{
 		Name: EventLobbySessionAuthorized,
 		Properties: map[string]string{
 			"session_id":   session.ID().String(),
@@ -383,7 +383,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 	})
 
 	// Generate a profile for this group
-	profile, err := NewUserServerProfile(ctx, logger, p.db, p.runtimeModule, params.account, params.xpID, groupID, []evr.Symbol{lobbyParams.Mode}, lobbyParams.Mode)
+	profile, err := NewUserServerProfile(ctx, logger, p.db, p.nk, params.account, params.xpID, groupID, []evr.Symbol{lobbyParams.Mode}, lobbyParams.Mode)
 	if err != nil {
 		return fmt.Errorf("failed to create user server profile: %w", err)
 	}

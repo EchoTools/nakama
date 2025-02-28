@@ -117,6 +117,18 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		return fmt.Errorf("unable to register /evr/api service: %w", err)
 	}
 
+	// Register the socket acceptor for EVR clients
+
+	/*
+		zapLogger := RuntimeLoggerToZapLogger(logger)
+		_nk := nk.(*RuntimeGoNakamaModule)
+
+		evrSocketAcceptor := NewEvrSocketWsAcceptor(zapLogger, _nk.config, _nk.sessionRegistry, evrPipeline)
+		if err := initializer.RegisterHttp("evr/ws", evrSocketAcceptor); err != nil {
+			return fmt.Errorf("unable to register evr socket acceptor: %w", err)
+		}
+	*/
+
 	// Register the event dispatch
 	eventDispatch, err := NewEventDispatch(ctx, logger, db, nk, initializer)
 	if err != nil {

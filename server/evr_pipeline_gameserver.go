@@ -60,7 +60,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(ctx context.Context, logger 
 
 		logger.Info("Game server registration request", zap.String("login_session_id", request.LoginSessionID.String()), zap.Uint64("server_id", request.ServerID), zap.String("internal_ip", request.InternalIP.String()), zap.Uint16("port", request.Port), zap.String("region", request.RegionHash.String()), zap.Uint64("version_lock", request.VersionLock), zap.Uint32("time_step_usecs", request.TimeStepUsecs))
 		// Get the login session ID
-		loginSession := p.runtimeModule.sessionRegistry.Get(request.LoginSessionID)
+		loginSession := p.nk.sessionRegistry.Get(request.LoginSessionID)
 		if loginSession == nil {
 			return errFailedRegistration(session, logger, errors.New("failed to get login session"), evr.BroadcasterRegistration_Unknown)
 		}
@@ -88,7 +88,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(ctx context.Context, logger 
 	logger = logger.With(zap.String("uid", userIDStr), zap.String("discord_id", params.DiscordID()))
 
 	// Get a list of the user's guild memberships and set to the largest one
-	guildGroups, err := GuildUserGroupsList(ctx, p.runtimeModule, userIDStr)
+	guildGroups, err := GuildUserGroupsList(ctx, p.nk, userIDStr)
 	if err != nil {
 		return fmt.Errorf("failed to get guild groups: %w", err)
 	}
@@ -247,7 +247,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(ctx context.Context, logger 
 	status := config.GetStatus()
 	// Join the game server to the game server pool streams
 	for _, gID := range config.GroupIDs {
-		if err := p.runtimeModule.StreamUserUpdate(StreamModeGameServer, gID.String(), "", "", config.GetUserId(), config.GetSessionId(), false, false, status); err != nil {
+		if err := p.nk.StreamUserUpdate(StreamModeGameServer, gID.String(), "", "", config.GetUserId(), config.GetSessionId(), false, false, status); err != nil {
 			logger.Warn("Failed to update game server stream", zap.Error(err))
 			return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_Failure)
 		}
@@ -273,18 +273,18 @@ func (p *EvrPipeline) newParkingMatch(logger *zap.Logger, session *sessionWS, co
 	}
 
 	// Create the match
-	matchIDStr, err := p.runtimeModule.matchRegistry.CreateMatch(context.Background(), p.runtime.matchCreateFunction, EvrMatchmakerModule, params)
+	matchIDStr, err := p.nk.matchRegistry.CreateMatch(context.Background(), p.runtime.matchCreateFunction, EvrMatchmakerModule, params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create parking match: %w", err)
 	}
 
 	matchID := MatchIDFromStringOrNil(matchIDStr)
 
-	if err := UpdateGameServerBySessionID(p.runtimeModule, session.userID, session.id, matchID); err != nil {
+	if err := UpdateGameServerBySessionID(p.nk, session.userID, session.id, matchID); err != nil {
 		return nil, fmt.Errorf("failed to update game server by session ID: %w", err)
 	}
 
-	found, allowed, _, reason, _, _ := p.runtimeModule.matchRegistry.JoinAttempt(session.Context(), matchID.UUID, matchID.Node, session.UserID(), session.ID(), session.Username(), session.Expiry(), session.Vars(), session.ClientIP(), session.ClientPort(), p.node, nil)
+	found, allowed, _, reason, _, _ := p.nk.matchRegistry.JoinAttempt(session.Context(), matchID.UUID, matchID.Node, session.UserID(), session.ID(), session.Username(), session.Expiry(), session.Vars(), session.ClientIP(), session.ClientPort(), p.node, nil)
 	if !found {
 		return nil, fmt.Errorf("match not found: %s", matchID.String())
 	}
@@ -298,7 +298,7 @@ func (p *EvrPipeline) newParkingMatch(logger *zap.Logger, session *sessionWS, co
 		Username: session.Username(),
 		Format:   session.Format(),
 	}
-	if success, _ := p.runtimeModule.tracker.Track(session.Context(), session.ID(), stream, session.UserID(), m); success {
+	if success, _ := p.nk.tracker.Track(session.Context(), session.ID(), stream, session.UserID(), m); success {
 		// Kick the user from any other matches they may be part of.
 		// WARNING This cannot be used during transition. It will kick the player from their current match.
 		//p.tracker.UntrackLocalByModes(session.ID(), matchStreamModes, stream)
@@ -492,7 +492,7 @@ func (p *EvrPipeline) gameserverLobbySessionStarted(_ context.Context, logger *z
 
 func (p *EvrPipeline) gameserverLobbySessionEnded(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.EchoToolsLobbySessionEndedV1)
-	if err := p.runtimeModule.StreamUserLeave(StreamModeMatchAuthoritative, request.LobbySessionID.String(), "", p.node, session.UserID().String(), session.ID().String()); err != nil {
+	if err := p.nk.StreamUserLeave(StreamModeMatchAuthoritative, request.LobbySessionID.String(), "", p.node, session.UserID().String(), session.ID().String()); err != nil {
 		logger.Warn("Failed to leave match stream", zap.Error(err))
 	}
 
@@ -504,7 +504,7 @@ func (p *EvrPipeline) gameserverLobbySessionEnded(ctx context.Context, logger *z
 		}
 
 		// Get the broadcaster registration from the stream.
-		presence, err := p.runtimeModule.StreamUserGet(StreamModeGameServer, session.ID().String(), "", "", session.UserID().String(), session.ID().String())
+		presence, err := p.nk.StreamUserGet(StreamModeGameServer, session.ID().String(), "", "", session.UserID().String(), session.ID().String())
 		if err != nil {
 			logger.Error("Failed to get broadcaster presence", zap.Error(err))
 			session.Close("Failed to get broadcaster presence", runtime.PresenceReasonUnknown)
@@ -536,7 +536,7 @@ func (p *EvrPipeline) gameserverLobbyEntrantNew(ctx context.Context, logger *zap
 	for _, entrantID := range message.EntrantIDs {
 		logger := baseLogger.With(zap.String("entrant_id", entrantID.String()))
 
-		presence, err := PresenceByEntrantID(p.runtimeModule, matchID, entrantID)
+		presence, err := PresenceByEntrantID(p.nk, matchID, entrantID)
 		if err != nil || presence == nil {
 			logger.Warn("Failed to get player presence by entrant ID", zap.Error(err))
 			rejected = append(rejected, entrantID)
@@ -545,7 +545,7 @@ func (p *EvrPipeline) gameserverLobbyEntrantNew(ctx context.Context, logger *zap
 
 		logger = logger.With(zap.String("entrant_uid", presence.GetUserId()))
 
-		s := p.runtimeModule.sessionRegistry.Get(uuid.FromStringOrNil(presence.GetSessionId()))
+		s := p.nk.sessionRegistry.Get(uuid.FromStringOrNil(presence.GetSessionId()))
 		if s == nil {
 			logger.Warn("Failed to get session by ID")
 			rejected = append(rejected, entrantID)
@@ -565,7 +565,7 @@ func (p *EvrPipeline) gameserverLobbyEntrantNew(ctx context.Context, logger *zap
 			Status:   presence.GetStatus(),
 		}
 
-		if success, _ := p.runtimeModule.tracker.Track(s.Context(), s.ID(), stream, s.UserID(), m); success {
+		if success, _ := p.nk.tracker.Track(s.Context(), s.ID(), stream, s.UserID(), m); success {
 			// Kick the user from any other matches they may be part of.
 			// WARNING This cannot be used during transition. It will kick the player from their current match.
 			//p.tracker.UntrackLocalByModes(session.ID(), matchStreamModes, stream)
@@ -597,7 +597,7 @@ func (p *EvrPipeline) gameserverLobbyEntrantRemoved(ctx context.Context, logger 
 	message := in.(*evr.EchoToolsLobbyEntrantRemovedV1)
 
 	matchID, _ := NewMatchID(message.LobbySessionID, p.node)
-	presence, err := PresenceByEntrantID(p.runtimeModule, matchID, message.EntrantID)
+	presence, err := PresenceByEntrantID(p.nk, matchID, message.EntrantID)
 	if err != nil {
 		if err != ErrEntrantNotFound {
 			logger.Warn("Failed to get player session by ID", zap.Error(err))
@@ -606,11 +606,11 @@ func (p *EvrPipeline) gameserverLobbyEntrantRemoved(ctx context.Context, logger 
 	}
 	if presence != nil {
 		// Trigger MatchLeave.
-		if err := p.runtimeModule.StreamUserLeave(StreamModeMatchAuthoritative, matchID.UUID.String(), "", matchID.Node, presence.GetUserId(), presence.GetSessionId()); err != nil {
+		if err := p.nk.StreamUserLeave(StreamModeMatchAuthoritative, matchID.UUID.String(), "", matchID.Node, presence.GetUserId(), presence.GetSessionId()); err != nil {
 			logger.Warn("Failed to leave match stream", zap.Error(err))
 		}
 
-		if err := p.runtimeModule.StreamUserLeave(StreamModeEntrant, message.EntrantID.String(), "", matchID.Node, presence.GetUserId(), presence.GetSessionId()); err != nil {
+		if err := p.nk.StreamUserLeave(StreamModeEntrant, message.EntrantID.String(), "", matchID.Node, presence.GetUserId(), presence.GetSessionId()); err != nil {
 			logger.Warn("Failed to leave entrant session stream", zap.Error(err))
 		}
 	}
@@ -625,7 +625,7 @@ func (p *EvrPipeline) gameserverLobbySessionLock(ctx context.Context, logger *za
 
 	// Signal the match to lock the session
 	signal := NewSignalEnvelope(session.userID.String(), SignalLockSession, nil)
-	if _, err := p.runtimeModule.matchRegistry.Signal(ctx, matchID.String(), signal.String()); err != nil {
+	if _, err := p.nk.matchRegistry.Signal(ctx, matchID.String(), signal.String()); err != nil {
 		logger.Warn("Failed to signal match", zap.Error(err))
 	}
 
@@ -639,7 +639,7 @@ func (p *EvrPipeline) gameserverLobbySessionUnlock(ctx context.Context, logger *
 
 	// Signal the match to lock the session
 	signal := NewSignalEnvelope(session.userID.String(), SignalUnlockSession, nil)
-	if _, err := p.runtimeModule.matchRegistry.Signal(ctx, matchID.String(), signal.String()); err != nil {
+	if _, err := p.nk.matchRegistry.Signal(ctx, matchID.String(), signal.String()); err != nil {
 		logger.Warn("Failed to signal match", zap.Error(err))
 	}
 
@@ -678,7 +678,7 @@ func (p *EvrPipeline) gameserverLobbySessionStatus(ctx context.Context, logger *
 		return fmt.Errorf("failed to marshal lobby status: %w", err)
 	}
 
-	p.runtimeModule.matchRegistry.SendData(request.LobbySessionID, p.node, session.userID, session.id, session.Username(), p.node, OpCodeGameServerLobbyStatus, data, false, time.Now().UTC().Unix())
+	p.nk.matchRegistry.SendData(request.LobbySessionID, p.node, session.userID, session.id, session.Username(), p.node, OpCodeGameServerLobbyStatus, data, false, time.Now().UTC().Unix())
 
 	return nil
 }

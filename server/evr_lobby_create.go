@@ -15,7 +15,7 @@ import (
 )
 
 func (p *EvrPipeline) lobbyCreate(ctx context.Context, logger *zap.Logger, session Session, params *LobbySessionParameters) (MatchID, error) {
-	nk := p.runtimeModule
+	nk := p.nk
 	db := p.db
 
 	// Do authorization checks related to the guild.
