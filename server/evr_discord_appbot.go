@@ -3172,7 +3172,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			go func() {
-				<-time.After(1 * time.Second)
 				// Wait for the token to be returned
 				select {
 				case token := <-flow.tokenCh:
