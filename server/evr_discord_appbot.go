@@ -3457,29 +3457,6 @@ func (d *DiscordAppBot) updateSlashCommands(s *discordgo.Session, logger runtime
 
 }
 
-func (d *DiscordAppBot) getPartyDiscordIds(ctx context.Context, partyHandler *PartyHandler) (map[string]string, error) {
-	partyHandler.RLock()
-	defer partyHandler.RUnlock()
-	memberMap := make(map[string]string, len(partyHandler.members.presences)+1)
-	leaderID, err := GetDiscordIDByUserID(ctx, d.db, partyHandler.leader.UserPresence.GetUserId())
-	if err != nil {
-		return nil, err
-	}
-	memberMap[leaderID] = partyHandler.leader.UserPresence.GetUserId()
-
-	for _, presence := range partyHandler.members.presences {
-		if presence.UserPresence.GetUserId() == partyHandler.leader.UserPresence.GetUserId() {
-			continue
-		}
-		discordID, err := GetDiscordIDByUserID(ctx, d.db, presence.UserPresence.GetUserId())
-		if err != nil {
-			return nil, err
-		}
-		memberMap[discordID] = presence.UserPresence.UserId
-	}
-	return memberMap, nil
-}
-
 func (d *DiscordAppBot) ManageUserGroups(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer, callerUsername string, action string, usernames []string, groupNames []string) error {
 	// FIXME validate the discord caller has rights to add to this group (i.e. is a admin of the group)
 	// lookup the nakama group
