@@ -13,6 +13,17 @@ type VRMLPlayerSummary struct {
 	MatchCountsBySeasonByTeam map[VRMLSeasonID]map[string]int `json:"match_counts"` // map[seasonID]map[teamID]matchCount
 }
 
+func (VRMLPlayerSummary) StorageID() StorageID {
+	return StorageID{
+		Collection: StorageCollectionVRML,
+		Key:        StorageKeyVRMLSummary,
+	}
+}
+
+func (VRMLPlayerSummary) StorageIndex() *StorageIndexMeta {
+	return nil
+}
+
 func (s *VRMLPlayerSummary) Entitlements() []*VRMLEntitlement {
 
 	matchCountBySeason := make(map[VRMLSeasonID]int)
