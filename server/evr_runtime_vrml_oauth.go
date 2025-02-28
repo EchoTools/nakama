@@ -73,9 +73,9 @@ func NewVRMLOAuthFlow(clientID, redirectURL string, timeout time.Duration) (*VRM
 
 func (v *VRMLOAuth) checkCurrentOwner(ctx context.Context, nk runtime.NakamaModule, vrmlUserID string) (string, error) {
 	// Check if the account is already owned by another user
-	objs, _, err := nk.StorageIndexList(ctx, SystemUserID, ActivePartyGroupIndex, fmt.Sprintf("+value.userID:%s", vrmlUserID), 100, nil, "")
+	objs, _, err := nk.StorageIndexList(ctx, SystemUserID, StorageIndexVRMLUserID, fmt.Sprintf("+value.userID:%s", vrmlUserID), 100, nil, "")
 	if err != nil {
-		return "", fmt.Errorf("error listing party group users: %w", err)
+		return "", fmt.Errorf("error checking ownership: %w", err)
 	}
 
 	if len(objs.Objects) == 0 {
