@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -89,7 +90,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		}
 	}
 
-	p.metrics.CustomCounter("lobby_find_match", lobbyParams.MetricsTags(), int64(lobbyParams.GetPartySize()))
+	p.runtimeModule.metrics.CustomCounter("lobby_find_match", lobbyParams.MetricsTags(), int64(lobbyParams.GetPartySize()))
 	logger.Info("Finding match", zap.String("mode", lobbyParams.Mode.String()), zap.Int("party_size", lobbyParams.GetPartySize()))
 
 	defer func() {
@@ -107,13 +108,13 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		tags := lobbyParams.MetricsTags()
 		tags["is_leader"] = strconv.FormatBool(isLeader)
 		tags["party_size"] = strconv.Itoa(lobbyParams.GetPartySize())
-		p.metrics.CustomTimer("lobby_find_duration", tags, time.Since(startTime))
+		p.runtimeModule.metrics.CustomTimer("lobby_find_duration", tags, time.Since(startTime))
 
 		logger.Debug("Lobby find complete", zap.String("group_id", lobbyParams.GroupID.String()), zap.Int("party_size", lobbyParams.GetPartySize()), zap.String("mode", lobbyParams.Mode.String()), zap.Int("role", lobbyParams.Role), zap.Bool("leader", isLeader), zap.Int("duration", int(time.Since(startTime).Seconds())))
 	}()
 
 	// Construct the entrant presences for the party members.
-	entrants, err := PrepareEntrantPresences(ctx, logger, p.runtimeModule, p.sessionRegistry, lobbyParams, entrantSessionIDs...)
+	entrants, err := PrepareEntrantPresences(ctx, logger, p.runtimeModule, p.runtimeModule.sessionRegistry, lobbyParams, entrantSessionIDs...)
 	if err != nil {
 		return fmt.Errorf("failed to be party leader.: %w", err)
 	}
@@ -121,7 +122,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	// Ping for matches, not social lobbies.
 	if lobbyParams.Mode != evr.ModeSocialPublic {
 		// Check latency to active game servers.
-		if err := p.CheckServerPing(logger, session); err != nil {
+		if err := p.CheckServerPing(logger, session, lobbyParams.GroupID.String()); err != nil {
 			return fmt.Errorf("failed to check server ping: %w", err)
 		}
 
@@ -262,7 +263,7 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 		"mode":         lobbyParams.Mode.String(),
 	}
 
-	p.metrics.CustomCounter("lobby_new", metricsTags, 1)
+	p.runtimeModule.metrics.CustomCounter("lobby_new", metricsTags, 1)
 
 	qparts := []string{
 		"+label.open:T",
@@ -520,7 +521,7 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 			logger := logger.With(zap.String("mid", l.ID.UUID.String()))
 
 			logger.Debug("Joining backfill match.")
-			p.metrics.CustomCounter("lobby_join_backfill", lobbyParams.MetricsTags(), int64(lobbyParams.GetPartySize()))
+			p.runtimeModule.metrics.CustomCounter("lobby_join_backfill", lobbyParams.MetricsTags(), int64(lobbyParams.GetPartySize()))
 
 			// Player members will detect the join.
 			if err := p.LobbyJoinEntrants(logger, l, entrants...); err != nil {
@@ -556,7 +557,7 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 	}
 }
 
-func (p *EvrPipeline) CheckServerPing(logger *zap.Logger, session *sessionWS) error {
+func (p *EvrPipeline) CheckServerPing(logger *zap.Logger, session *sessionWS, groupID string) error {
 	// Check latency to active game servers.
 	doneCh := make(chan error)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -568,10 +569,20 @@ func (p *EvrPipeline) CheckServerPing(logger *zap.Logger, session *sessionWS) er
 		// Wait for the client to be ready.
 		<-time.After(1 * time.Second)
 		activeEndpoints := make([]evr.Endpoint, 0, 100)
-		p.broadcasterRegistrationBySession.Range(func(_ string, b *GameServerPresence) bool {
-			activeEndpoints = append(activeEndpoints, b.Endpoint)
-			return true
-		})
+
+		presences, err := p.runtimeModule.StreamUserList(StreamModeGameServer, groupID, "", "", false, true)
+		if err != nil {
+			doneCh <- err
+		}
+
+		for _, presence := range presences {
+			gPresence := &GameServerPresence{}
+			if err := json.Unmarshal([]byte(presence.GetStatus()), gPresence); err != nil {
+				logger.Warn("Failed to unmarshal game server presence", zap.Error(err))
+				continue
+			}
+			activeEndpoints = append(activeEndpoints, gPresence.Endpoint)
+		}
 
 		if err := PingGameServers(ctx, logger, session, p.db, activeEndpoints); err != nil {
 			doneCh <- err

@@ -19,7 +19,6 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 const (
@@ -85,8 +84,8 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 		}
 	}
 
-	p.metrics.CustomCounter("login_success", tags, 1)
-	p.metrics.CustomTimer("login_process_latency", params.MetricsTags(), time.Since(timer))
+	p.runtimeModule.metrics.CustomCounter("login_success", tags, 1)
+	p.runtimeModule.metrics.CustomTimer("login_process_latency", params.MetricsTags(), time.Since(timer))
 
 	p.runtimeModule.Event(ctx, &api.Event{
 		Name: EventUserLogin,
@@ -615,7 +614,7 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 	request := in.(*evr.LoggedInUserProfileRequest)
 	// Start a timer to add to the metrics
 	timer := time.Now()
-	defer func() { p.metrics.CustomTimer("loggedInUserProfileRequest", nil, time.Since(timer)) }()
+	defer func() { p.runtimeModule.metrics.CustomTimer("loggedInUserProfileRequest", nil, time.Since(timer)) }()
 
 	params, ok := LoadParams(ctx)
 	if !ok {
@@ -808,9 +807,37 @@ func (p *EvrPipeline) generateEULA(ctx context.Context, logger *zap.Logger, lang
 	// Retrieve the contents from storage
 	key := fmt.Sprintf("eula,%s", language)
 	document := evr.DefaultEULADocument(language)
-	ts, err := p.StorageLoadOrStore(ctx, logger, uuid.Nil, DocumentStorageCollection, key, &document)
-	if err != nil {
-		return document, fmt.Errorf("failed to load or store EULA: %w", err)
+
+	var ts time.Time
+
+	if objs, err := p.runtimeModule.StorageRead(ctx, []*runtime.StorageRead{{
+		Collection: DocumentStorageCollection,
+		Key:        key,
+		UserID:     SystemUserID,
+	}}); err != nil {
+		return document, fmt.Errorf("failed to read EULA: %w", err)
+	} else if len(objs) > 0 {
+		if err := json.Unmarshal([]byte(objs[0].Value), &document); err != nil {
+			return document, fmt.Errorf("failed to unmarshal EULA: %w", err)
+		}
+		ts = objs[0].UpdateTime.AsTime().UTC()
+	} else {
+		// If the document doesn't exist, store the object
+		jsonBytes, err := json.Marshal(document)
+		if err != nil {
+			return document, fmt.Errorf("failed to marshal EULA: %w", err)
+		}
+
+		if _, err = p.runtimeModule.StorageWrite(ctx, []*runtime.StorageWrite{{
+			Collection:      DocumentStorageCollection,
+			Key:             key,
+			Value:           string(jsonBytes),
+			PermissionRead:  0,
+			PermissionWrite: 0,
+		}}); err != nil {
+			return document, fmt.Errorf("failed to write EULA: %w", err)
+		}
+		ts = time.Now().UTC()
 	}
 
 	msg := document.Text
@@ -844,58 +871,6 @@ func (p *EvrPipeline) generateEULA(ctx context.Context, logger *zap.Logger, lang
 
 	document.Text = msg
 	return document, nil
-}
-
-// StorageLoadOrDefault loads an object from storage or store the given object if it doesn't exist.
-func (p *EvrPipeline) StorageLoadOrStore(ctx context.Context, logger *zap.Logger, userID uuid.UUID, collection, key string, dst any) (time.Time, error) {
-	ts := time.Now().UTC()
-	objs, err := StorageReadObjects(ctx, logger, p.db, uuid.Nil, []*api.ReadStorageObjectId{
-		{
-			Collection: collection,
-			Key:        key,
-			UserId:     userID.String(),
-		},
-	})
-	if err != nil {
-		return ts, fmt.Errorf("SNSDocumentRequest: failed to read objects: %w", err)
-	}
-
-	if len(objs.Objects) > 0 {
-
-		// unmarshal the document
-		if err := json.Unmarshal([]byte(objs.Objects[0].Value), dst); err != nil {
-			return ts, fmt.Errorf("error unmarshalling document %s: %w", key, err)
-		}
-
-		ts = objs.Objects[0].UpdateTime.AsTime()
-
-	} else {
-
-		// If the document doesn't exist, store the object
-		jsonBytes, err := json.Marshal(dst)
-		if err != nil {
-			return ts, fmt.Errorf("error marshalling document: %w", err)
-		}
-
-		// write the document to storage
-		ops := StorageOpWrites{
-			{
-				OwnerID: userID.String(),
-				Object: &api.WriteStorageObject{
-					Collection:      collection,
-					Key:             key,
-					Value:           string(jsonBytes),
-					PermissionRead:  &wrapperspb.Int32Value{Value: int32(0)},
-					PermissionWrite: &wrapperspb.Int32Value{Value: int32(0)},
-				},
-			},
-		}
-		if _, _, err = StorageWriteObjects(ctx, logger, p.db, p.metrics, p.storageIndex, false, ops); err != nil {
-			return ts, fmt.Errorf("failed to write objects: %w", err)
-		}
-	}
-
-	return ts, nil
 }
 
 func (p *EvrPipeline) genericMessage(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
@@ -992,7 +967,7 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 
 	var metadata *AccountMetadata
 	// Set the player's session to not be an early quitter
-	if playerSession := p.sessionRegistry.Get(uuid.FromStringOrNil(playerInfo.SessionID)); playerSession != nil {
+	if playerSession := p.runtimeModule.sessionRegistry.Get(uuid.FromStringOrNil(playerInfo.SessionID)); playerSession != nil {
 		if params, ok := LoadParams(playerSession.Context()); ok {
 			params.isEarlyQuitter.Store(false)
 
@@ -1105,8 +1080,8 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 	startTime := time.Now()
 
 	defer func() {
-		p.metrics.CustomCounter("profile_request_count", tags, 1)
-		p.metrics.CustomTimer("profile_request_latency", tags, time.Since(startTime))
+		p.runtimeModule.metrics.CustomCounter("profile_request_count", tags, 1)
+		p.runtimeModule.metrics.CustomTimer("profile_request_latency", tags, time.Since(startTime))
 	}()
 
 	var ok bool
@@ -1122,7 +1097,7 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 		ServerProfileJSON: data,
 	}
 
-	p.metrics.CustomGauge("profile_size_bytes", nil, float64(len(data)))
+	p.runtimeModule.metrics.CustomGauge("profile_size_bytes", nil, float64(len(data)))
 
 	if err := session.SendEvrUnrequire(response); err != nil {
 		tags["error"] = "failed_send_profile"
