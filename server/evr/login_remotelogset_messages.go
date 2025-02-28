@@ -164,19 +164,19 @@ type GamePauseSettings struct {
 	MatchTagDisplay      bool    `json:"MatchTagDisplay"`
 	Announcer            int64   `json:"announcer"`
 	Dynamicmusicmode     int64   `json:"dynamicmusicmode"`
-	Grabdeadzone         float64 `json:"grabdeadzone"`
+	GrabDeadZone         float64 `json:"grabdeadzone"`
 	Music                int64   `json:"music"`
 	Personalbubblemode   int64   `json:"personalbubblemode"`
 	Personalbubbleradius float64 `json:"personalbubbleradius"`
 	Personalspacemode    int64   `json:"personalspacemode"`
-	Releasedistance      float64 `json:"releasedistance"`
+	ReleaseDistance      float64 `json:"releasedistance"`
 	Sfx                  int64   `json:"sfx"`
 	Smoothrotationspeed  float64 `json:"smoothrotationspeed"`
 	Voip                 int64   `json:"voip"`
 	Voiploudnesslevel    float64 `json:"voiploudnesslevel"`
 	Voipmode             int64   `json:"voipmode"`
 	Voipmodeffect        int64   `json:"voipmodeffect"`
-	Wristangleoffset     float64 `json:"wristangleoffset"`
+	WristAngleOffset     float64 `json:"wristangleoffset"`
 }
 
 // SESSION_STARTED

@@ -1846,17 +1846,17 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				Fields: []*discordgo.MessageEmbedField{
 					{
 						Name:   "Grab Deadzone",
-						Value:  strconv.FormatFloat(metadata.GamePauseSettings.Grabdeadzone, 'f', -1, 64),
+						Value:  strconv.FormatFloat(metadata.GamePauseSettings.GrabDeadZone, 'f', -1, 64),
 						Inline: true,
 					},
 					{
 						Name:   "Release Distance",
-						Value:  strconv.FormatFloat(metadata.GamePauseSettings.Releasedistance, 'f', -1, 64),
+						Value:  strconv.FormatFloat(metadata.GamePauseSettings.ReleaseDistance, 'f', -1, 64),
 						Inline: true,
 					},
 					{
 						Name:   "Wrist Angle Offset",
-						Value:  strconv.FormatFloat(metadata.GamePauseSettings.Wristangleoffset, 'f', -1, 64),
+						Value:  strconv.FormatFloat(metadata.GamePauseSettings.WristAngleOffset, 'f', -1, 64),
 						Inline: true,
 					},
 				},
