@@ -22,7 +22,7 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 		// If a "next match ID" is set, send the user to that match. (i.e. Echo Taxi)
 		if !lobbyParams.NextMatchID.IsNil() {
 			LeavePartyStream(session)
-			p.metrics.CustomCounter("lobby_join_next_match", lobbyParams.MetricsTags(), 1)
+			p.runtimeModule.metrics.CustomCounter("lobby_join_next_match", lobbyParams.MetricsTags(), 1)
 			logger.Info("Joining next match", zap.String("mid", matchID.String()))
 			return p.lobbyJoin(ctx, logger, session, lobbyParams, lobbyParams.NextMatchID)
 		}
@@ -54,7 +54,7 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 			} else {
 				// Spectators don't matchmake, and they don't have a delay for backfill.
 				// Spectators also don't timeout.
-				p.metrics.CustomCounter("lobby_find_spectate", lobbyParams.MetricsTags(), 1)
+				p.runtimeModule.metrics.CustomCounter("lobby_find_spectate", lobbyParams.MetricsTags(), 1)
 				logger.Info("Finding spectate match")
 				return p.lobbyFindSpectate(ctx, logger, session, lobbyParams)
 			}
@@ -88,7 +88,7 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 				tags["error_code"] = strconv.Itoa(int(code))
 				tags["error_str"] = code.String()
 
-				p.metrics.CustomCounter("lobby_find_match_error", tags, int64(lobbyParams.GetPartySize()))
+				p.runtimeModule.metrics.CustomCounter("lobby_find_match_error", tags, int64(lobbyParams.GetPartySize()))
 				// On error, leave any party the user might be a member of.
 				LeavePartyStream(session)
 			}
@@ -98,7 +98,7 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 
 	case *evr.LobbyJoinSessionRequest:
 		LeavePartyStream(session)
-		p.metrics.CustomCounter("lobby_join_session", lobbyParams.MetricsTags(), 1)
+		p.runtimeModule.metrics.CustomCounter("lobby_join_session", lobbyParams.MetricsTags(), 1)
 		logger.Info("Joining session", zap.String("mid", lobbyParams.CurrentMatchID.String()), zap.String("role", TeamIndex(lobbyParams.Role).String()))
 
 		return p.lobbyJoin(ctx, logger, session, lobbyParams, lobbyParams.CurrentMatchID)
@@ -113,7 +113,7 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 		}
 
 		LeavePartyStream(session)
-		p.metrics.CustomCounter("lobby_create_session", lobbyParams.MetricsTags(), 1)
+		p.runtimeModule.metrics.CustomCounter("lobby_create_session", lobbyParams.MetricsTags(), 1)
 		logger.Info("Creating session", zap.String("mode", lobbyParams.Mode.String()), zap.String("level", lobbyParams.Level.String()), zap.String("region", lobbyParams.RegionCode))
 		matchID, err = p.lobbyCreate(ctx, logger, session, lobbyParams)
 		if err == nil {

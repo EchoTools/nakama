@@ -12,6 +12,7 @@ import (
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
+	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/intinig/go-openskill/rating"
 	"github.com/intinig/go-openskill/types"
@@ -108,7 +109,7 @@ func (s LobbySessionParameters) MetricsTags() map[string]string {
 	}
 }
 
-func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, request evr.LobbySessionRequest) (*LobbySessionParameters, error) {
+func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, session *sessionWS, request evr.LobbySessionRequest) (*LobbySessionParameters, error) {
 	p := session.evrPipeline
 
 	userID := session.userID.String()
@@ -161,7 +162,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 	if !userSettings.NextMatchID.IsNil() {
 
 		// Check that the match exists
-		if _, _, err := p.matchRegistry.GetMatch(ctx, userSettings.NextMatchID.String()); err != nil {
+		if _, err := p.runtimeModule.MatchGet(ctx, userSettings.NextMatchID.String()); err != nil {
 			logger.Warn("Next match not found", zap.String("mid", userSettings.NextMatchID.String()))
 		} else {
 			nextMatchID = userSettings.NextMatchID
@@ -213,16 +214,18 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, sess
 	// Load friends to get blocked (ghosted) players
 	cursor := ""
 	friends := make([]*api.Friend, 0)
+
 	for {
-		users, err := ListFriends(ctx, logger, p.db, p.statusRegistry, session.userID, 100, nil, cursor)
+
+		var users []*api.Friend
+		users, cursor, err = nk.FriendsList(ctx, session.UserID().String(), 100, nil, cursor)
 		if err != nil {
 			return nil, fmt.Errorf("failed to list friends: %w", err)
 		}
 
-		friends = append(friends, users.Friends...)
+		friends = append(friends, users...)
 
-		cursor = users.Cursor
-		if users.Cursor == "" {
+		if cursor == "" {
 			break
 		}
 	}

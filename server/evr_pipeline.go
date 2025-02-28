@@ -38,26 +38,14 @@ type EvrPipeline struct {
 	internalIP        net.IP
 	externalIP        net.IP // Server's external IP for external connections
 
-	logger               *zap.Logger
-	db                   *sql.DB
-	config               Config
-	version              string
-	socialClient         *social.Client
-	storageIndex         StorageIndex
-	leaderboardCache     LeaderboardCache
-	leaderboardRankCache LeaderboardRankCache
-	sessionCache         SessionCache
-	apiServer            *ApiServer
-	sessionRegistry      SessionRegistry
-	statusRegistry       StatusRegistry
-	matchRegistry        MatchRegistry
-	tracker              Tracker
-	router               MessageRouter
-	streamManager        StreamManager
-	metrics              Metrics
-	runtime              *Runtime
-	runtimeModule        *RuntimeGoNakamaModule
-	runtimeLogger        runtime.Logger
+	logger  *zap.Logger
+	db      *sql.DB
+	config  Config
+	version string
+
+	runtime       *Runtime
+	runtimeModule *RuntimeGoNakamaModule
+	runtimeLogger runtime.Logger
 
 	profileCache                 *ProfileCache
 	discordCache                 *DiscordIntegrator
@@ -67,8 +55,7 @@ type EvrPipeline struct {
 	ipqsClient                   *IPQSClient
 	matchLogManager              *MatchLogManager
 
-	createLobbyMu                    sync.Mutex
-	broadcasterRegistrationBySession *MapOf[string, *GameServerPresence] // sessionID -> GameServerPresence
+	createLobbyMu sync.Mutex
 
 	placeholderEmail string
 	linkDeviceURL    string
@@ -127,7 +114,6 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 
 	statisticsQueue := NewStatisticsQueue(runtimeLogger, nk)
 	profileRegistry := NewProfileRegistry(nk, db, runtimeLogger, metrics, sessionRegistry)
-	broadcasterRegistrationBySession := MapOf[string, *GameServerPresence]{}
 	lobbyBuilder := NewLobbyBuilder(logger, nk, sessionRegistry, matchRegistry, tracker, metrics, profileRegistry)
 	matchmaker.OnMatchedEntries(lobbyBuilder.handleMatchedEntries)
 	userRemoteLogJournalRegistry := NewUserRemoteLogJournalRegistry(ctx, logger, nk, sessionRegistry)
@@ -186,71 +172,33 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	}
 
 	evrPipeline := &EvrPipeline{
-		ctx:                  ctx,
-		node:                 config.GetName(),
-		logger:               logger,
-		db:                   db,
-		config:               config,
-		version:              version,
-		socialClient:         socialClient,
-		leaderboardCache:     leaderboardCache,
-		leaderboardRankCache: leaderboardRankCache,
-		storageIndex:         storageIndex,
-		sessionCache:         sessionCache,
-		sessionRegistry:      sessionRegistry,
-		statusRegistry:       statusRegistry,
-		matchRegistry:        matchRegistry,
-		tracker:              tracker,
-		router:               router,
-		streamManager:        streamManager,
-		metrics:              metrics,
-		runtime:              _runtime,
-		runtimeModule:        nk.(*RuntimeGoNakamaModule),
-		runtimeLogger:        runtimeLogger,
+		ctx:     ctx,
+		node:    config.GetName(),
+		logger:  logger,
+		db:      db,
+		config:  config,
+		version: version,
+
+		runtime:       _runtime,
+		runtimeModule: nk.(*RuntimeGoNakamaModule),
+		runtimeLogger: runtimeLogger,
 
 		discordCache: discordCache,
 		appBot:       appBot,
 		internalIP:   internalIP,
 		externalIP:   externalIP,
 
-		profileCache:                     profileRegistry,
-		statisticsQueue:                  statisticsQueue,
-		broadcasterRegistrationBySession: &broadcasterRegistrationBySession,
-		userRemoteLogJournalRegistry:     userRemoteLogJournalRegistry,
-		ipqsClient:                       ipqsClient,
-		matchLogManager:                  matchLogManager,
+		profileCache:                 profileRegistry,
+		statisticsQueue:              statisticsQueue,
+		userRemoteLogJournalRegistry: userRemoteLogJournalRegistry,
+		ipqsClient:                   ipqsClient,
+		matchLogManager:              matchLogManager,
 
 		placeholderEmail: config.GetRuntime().Environment["PLACEHOLDER_EMAIL_DOMAIN"],
 		linkDeviceURL:    config.GetRuntime().Environment["LINK_DEVICE_URL"],
 
 		messageCache: &MapOf[string, evr.Message]{},
 	}
-
-	go func() {
-		interval := 3 * time.Minute
-
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-evrPipeline.ctx.Done():
-				ticker.Stop()
-				return
-
-			case <-ticker.C:
-
-				evrPipeline.broadcasterRegistrationBySession.Range(func(key string, value *GameServerPresence) bool {
-					if sessionRegistry.Get(value.SessionID) == nil {
-						logger.Debug("Housekeeping: Session not found for broadcaster", zap.String("sessionID", value.SessionID.String()))
-						evrPipeline.broadcasterRegistrationBySession.Delete(key)
-					}
-					return true
-				})
-
-			}
-		}
-	}()
 
 	return evrPipeline
 }
@@ -268,10 +216,6 @@ func DetermineServiceIPs() (net.IP, net.IP, error) {
 	}
 
 	return intIP, extIP, nil
-}
-
-func (p *EvrPipeline) SetApiServer(apiServer *ApiServer) {
-	p.apiServer = apiServer
 }
 
 func (p *EvrPipeline) Stop() {}
@@ -731,7 +675,7 @@ func (p *EvrPipeline) relayMatchData(ctx context.Context, logger *zap.Logger, se
 	// Set the OpCode to the symbol of the message.
 	opCode := int64(evr.SymbolOf(in))
 	// Send the data to the match.
-	p.matchRegistry.SendData(matchID.UUID, matchID.Node, session.UserID(), session.ID(), session.Username(), matchID.Node, opCode, requestJson, true, time.Now().UTC().UnixNano()/int64(time.Millisecond))
+	p.runtimeModule.matchRegistry.SendData(matchID.UUID, matchID.Node, session.UserID(), session.ID(), session.Username(), matchID.Node, opCode, requestJson, true, time.Now().UTC().UnixNano()/int64(time.Millisecond))
 
 	return nil
 }

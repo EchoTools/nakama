@@ -14,46 +14,22 @@ import (
 	"go.uber.org/zap"
 )
 
-func (p *EvrPipeline) LobbySessionGet(ctx context.Context, logger *zap.Logger, matchID MatchID) (*MatchLabel, Session, error) {
-	return LobbySessionGet(ctx, logger, p.matchRegistry, p.tracker, p.profileCache, p.sessionRegistry, matchID)
-}
-
-func LobbySessionGet(ctx context.Context, logger *zap.Logger, matchRegistry MatchRegistry, tracker Tracker, profileRegistry *ProfileCache, sessionRegistry SessionRegistry, matchID MatchID) (*MatchLabel, Session, error) {
-
-	match, _, err := matchRegistry.GetMatch(ctx, matchID.String())
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get match: %w", err)
-	}
-
-	label := &MatchLabel{}
-	if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), label); err != nil {
-		return nil, nil, fmt.Errorf("failed to unmarshal match label: %w", err)
-	}
-
-	serverSession := sessionRegistry.Get(label.GameServer.SessionID)
-	if serverSession == nil {
-		return nil, nil, fmt.Errorf("failed to get server session")
-	}
-
-	return label, serverSession, nil
-}
-
 func (p *EvrPipeline) LobbyJoinEntrants(logger *zap.Logger, label *MatchLabel, presences ...*EvrMatchPresence) error {
 	if len(presences) == 0 {
 		return errors.New("no presences")
 	}
 
-	session := p.sessionRegistry.Get(presences[0].SessionID)
+	session := p.runtimeModule.sessionRegistry.Get(presences[0].SessionID)
 	if session == nil {
 		return errors.New("session not found")
 	}
 
-	serverSession := p.sessionRegistry.Get(label.GameServer.SessionID)
+	serverSession := p.runtimeModule.sessionRegistry.Get(label.GameServer.SessionID)
 	if serverSession == nil {
 		return errors.New("server session not found")
 	}
 
-	return LobbyJoinEntrants(logger, p.matchRegistry, p.tracker, session, serverSession, label, presences...)
+	return LobbyJoinEntrants(logger, p.runtimeModule.matchRegistry, p.runtimeModule.tracker, session, serverSession, label, presences...)
 }
 func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker Tracker, session Session, serverSession Session, label *MatchLabel, entrants ...*EvrMatchPresence) error {
 	if session == nil || serverSession == nil {
