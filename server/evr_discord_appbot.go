@@ -2588,7 +2588,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					result = fmt.Sprintf("failed to kick player from [%s](https://echo.taxi/spark://c/%s) (error: %s)", label.Mode.String(), strings.ToUpper(label.ID.UUID.String()), err.Error())
 					continue
 				}
-				result := fmt.Sprintf("kicked player %s from [%s](https://echo.taxi/spark://c/%s) match. (%s)", target.Mention(), label.Mode.String(), strings.ToUpper(label.ID.UUID.String()), reason)
+				result := fmt.Sprintf("%s kicked player %s from [%s](https://echo.taxi/spark://c/%s) match. (%s)", user.Mention(), target.Mention(), label.Mode.String(), strings.ToUpper(label.ID.UUID.String()), reason)
 				_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> %s", user.Mention(), result), false)
 
 				cnt++
@@ -2609,7 +2609,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				if _, err := DisconnectUserID(ctx, d.nk, targetUserID, false); err != nil {
 					logger.Warn("Failed to disconnect user", zap.Error(err))
 				} else {
-					_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> disconnected player <@%s> from match service.", user.ID, target.ID), false)
+					_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s disconnected player %s from match service.", user.Mention(), target.Mention()), false)
 				}
 			}()
 
