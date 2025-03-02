@@ -382,8 +382,12 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 				if group.IsLimitedAccess(userIDStr) {
 					roles = append(roles, "limited-access")
 				}
+
 				if len(roles) > 0 {
 					groupStr += fmt.Sprintf(" (%s)", strings.Join(roles, ", "))
+					if ok, expiry := group.IsTimedOut(userIDStr); ok {
+						groupStr += fmt.Sprintf("\n-  timeout expires <t:%d:R>", expiry.UTC().Unix())
+					}
 				}
 				output = append(output, groupStr)
 			}
