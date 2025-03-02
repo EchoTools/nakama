@@ -32,6 +32,8 @@ var (
 		"unknown":         {},
 		"1PASH5D1P17365":  {}, // Quest Link
 		"WMHD315M3010GV":  {}, // Quest link
+		"VRLINKHMDQUEST":  {}, // Quest link
+		"VRLINKHMDQUEST2": {}, // Quest link
 		"VRLINKHMDQUEST3": {}, // Quest link
 	}
 )
