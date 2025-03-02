@@ -369,7 +369,7 @@ func (c *DiscordIntegrator) GuildMember(guildID, discordID string) (member *disc
 	if member, err = c.dg.State.Member(guildID, discordID); err == nil && member != nil {
 		return member, nil
 	} else if member, err = c.dg.GuildMember(guildID, discordID); err != nil {
-		if restError, _ := err.(*discordgo.RESTError); errors.As(err, &restError) && restError.Message != nil && restError.Message.Code == discordgo.ErrCodeUnknownMember {
+		if IsDiscordErrorCode(err, discordgo.ErrCodeUnknownMember) {
 			return nil, ErrMemberNotFound
 		}
 		return nil, fmt.Errorf("error getting guild member: %w", err)
