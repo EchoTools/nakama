@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"maps"
+
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -180,11 +182,7 @@ func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, n
 	cosmetics := make(map[string]map[string]bool)
 	for m, c := range cosmeticDefaults(metadata.EnableAllCosmetics) {
 		cosmetics[m] = make(map[string]bool, len(c))
-		for k, v := range c {
-			if v {
-				cosmetics[m][k] = v
-			}
-		}
+		maps.Copy(cosmetics[m], c)
 	}
 	cosmetics = walletToCosmetics(wallet, cosmetics)
 
@@ -192,6 +190,7 @@ func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, n
 	// If the player has "kissy lips" emote equipped, set their emote to default.
 	if cosmeticLoadout.Emote == "emote_kissy_lips_a" {
 		cosmeticLoadout.Emote = "emote_blink_smiley_a"
+		cosmeticLoadout.SecondEmote = "emote_blink_smiley_a"
 	}
 
 	var developerFeatures *evr.DeveloperFeatures
@@ -263,9 +262,14 @@ func NewClientProfile(ctx context.Context, metadata *AccountMetadata, serverProf
 		sym := evr.ToSymbol(metadata.NewUnlocks[i])
 		name := sym.String()
 		if !serverProfile.IsUnlocked(name) {
-			metadata.NewUnlocks = append(metadata.NewUnlocks[:i], metadata.NewUnlocks[i+1:]...)
+			metadata.NewUnlocks = slices.Delete(metadata.NewUnlocks, i, i+1)
 			i--
 		}
+	}
+
+	// Remove kissy lips from new unlocks
+	if i := slices.Index(metadata.NewUnlocks, -6079176325296842000); i != -1 {
+		metadata.NewUnlocks = slices.Delete(metadata.NewUnlocks, i, i+1)
 	}
 
 	var customizationPOIs *evr.Customization
