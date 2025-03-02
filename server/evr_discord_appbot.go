@@ -1290,12 +1290,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return fmt.Errorf("failed to load params")
 			}
 
-			isGold := params.isGoldNameTag.Load()
-
-			params.isGoldNameTag.Store(!isGold)
+			wasGold := params.isGoldNameTag.Toggle()
 
 			content := "You are now using the gold name tag."
-			if !isGold {
+			if wasGold {
 				content = "You are no longer using the gold name tag."
 			}
 
