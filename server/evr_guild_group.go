@@ -18,6 +18,7 @@ import (
 type GuildGroupRoles struct {
 	Member           string `json:"member"`
 	Moderator        string `json:"moderator"`
+	Auditor          string `json:"auditor"`
 	ServerHost       string `json:"server_host"`
 	Allocator        string `json:"allocator"`
 	Suspended        string `json:"suspended"`
@@ -116,6 +117,13 @@ func (g *GroupMetadata) IsServerHost(userID string) bool {
 
 func (g *GroupMetadata) IsAllocator(userID string) bool {
 	return g.HasRole(userID, g.Roles.Allocator)
+}
+
+func (g *GroupMetadata) IsAuditor(userID string) bool {
+	if g.Roles.Auditor == "" {
+		return g.HasRole(userID, g.Roles.Moderator)
+	}
+	return g.HasRole(userID, g.Roles.Auditor)
 }
 
 func (g *GroupMetadata) IsModerator(userID string) bool {
@@ -415,8 +423,9 @@ func (g *GuildGroup) RoleCacheUpdate(account *EVRAccount, current []string) bool
 
 type guildGroupPermissions struct {
 	IsAllowedMatchmaking bool
-	IsModerator          bool // Admin
-	IsServerHost         bool // Broadcaster Host
+	IsModerator          bool // Has kick/join/trigger-cv/etc. access
+	IsAuditor            bool // Can view audit logs and see extra info in /lookup
+	IsServerHost         bool
 	IsAllocator          bool // Can allocate servers with slash command
 	IsSuspended          bool
 	IsAPIAccess          bool

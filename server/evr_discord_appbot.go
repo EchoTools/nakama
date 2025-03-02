@@ -1997,9 +1997,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			isSelf := caller.ID == target.ID
 
-			isGuildModerator := false
+			isGuildAuditor := false
 			if gg, ok := callerGuildGroups[groupID]; ok {
-				isGuildModerator = gg.IsModerator(callerUserID)
+				isGuildAuditor = gg.IsAuditor(callerUserID)
 			}
 
 			// Get the caller's nakama user ID
@@ -2010,11 +2010,11 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			d.cache.Purge(target.ID)
-			if isGuildModerator {
+			if isGuildAuditor {
 				d.cache.QueueSyncMember(i.GuildID, target.ID)
 			}
 			includePrivate := isSelf || isGlobalModerator
-			includePriviledged := includePrivate || isGuildModerator
+			includePriviledged := includePrivate || isGuildAuditor
 			includeSystem := isGlobalModerator
 
 			return d.handleProfileRequest(ctx, logger, nk, s, i, target.ID, target.Username, includePriviledged, includePrivate, includeSystem)

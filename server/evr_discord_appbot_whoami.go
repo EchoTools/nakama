@@ -358,6 +358,9 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 				if group.IsAllowedMatchmaking(userIDStr) {
 					roles = append(roles, "matchmaking")
 				}
+				if group.IsAuditor(userIDStr) {
+					roles = append(roles, "auditor")
+				}
 				if group.IsModerator(userIDStr) {
 					roles = append(roles, "moderator")
 				}
