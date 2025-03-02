@@ -10,6 +10,8 @@ import (
 
 	"go.uber.org/atomic"
 
+	"slices"
+
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -589,12 +591,12 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 	// Remove blanks from qparts
 	for i := 0; i < len(qparts); i++ {
 		if qparts[i] == "" {
-			qparts = append(qparts[:i], qparts[i+1:]...)
+			qparts = slices.Delete(qparts, i, i+1)
 			i--
 		}
 	}
 
-	query := strings.Trim(strings.Join(qparts, " "), " ")
+	query := strings.Join(qparts, " ")
 
 	stringProperties["query"] = query
 
