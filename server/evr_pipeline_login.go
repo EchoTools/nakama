@@ -162,7 +162,7 @@ func formatLoginErrorMessage(xpID evr.EvrId, err error) string {
 	}
 
 	// Format the error message with the XPID prefix
-	errContent = fmt.Sprintf("%s: %s", xpID.String(), errContent)
+	errContent = fmt.Sprintf("[%s]\n %s", xpID.String(), errContent)
 
 	// Replace ": " with ":\n" for better readability
 	errContent = strings.Replace(errContent, ": ", ":\n", 2)
@@ -363,23 +363,34 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 					logger.Warn("Failed to send IP authorization notification", zap.Error(err))
 				}
 			}
+
 		} else {
 
 			// IP is not authorized. Add a pending authorization entry.
 			entry := loginHistory.AddPendingAuthorizationIP(params.xpID, session.clientIP, params.loginPayload)
 
-			// Use the last two digits of the nanos seconds as a random code.
-			// This is used to verify the user's location.
-
+			// Use the last two digits of the nanos seconds as the 2FA code.
 			twoFactorCode := fmt.Sprintf("%02d", entry.CreatedAt.Nanosecond()%100)
 
 			if p.appBot != nil && p.appBot.dg != nil && p.appBot.dg.State != nil && p.appBot.dg.State.User != nil {
 
 				if err := p.appBot.SendIPApprovalRequest(ctx, params.account.User.Id, entry, params.ipqs); err != nil {
-					logger.Debug("Failed to send IP approval request", zap.Error(err))
-					// The user has DMs from non-friends disabled. Tell them to use the slash command.
-					metricsTags["error"] = "failed_send_ip_approval_request"
-					return fmt.Errorf("\nPlease authorize this new location by typing:\n/verify\nand select code >>> %s <<< in a guild with the @%s bot.", twoFactorCode, p.appBot.dg.State.User.Username)
+
+					if !IsDiscordErrorCode(err, discordgo.ErrCodeCannotSendMessagesToThisUser) {
+						metricsTags["error"] = "failed_send_ip_approval_request"
+						return fmt.Errorf("Failed to send IP approval request: %w", err)
+					}
+					// The user has DMs from non-friends disabled. Tell them to use the slash command instead.
+
+					// Use the guild name if it's available
+					if guildID := p.discordCache.GroupIDToGuildID(params.accountMetadata.ActiveGroupID); guildID != "" {
+
+						if guild, err := p.discordCache.dg.Guild(guildID); err == nil {
+							return fmt.Errorf("Authorize new location:\n Go to %s in Discord, then type /verify\nWhen prompted, select code >>> %s <<<", guild.Name, twoFactorCode)
+						}
+					}
+					return fmt.Errorf("Please authorize this new location by typing:\n/verify\nand select code >>> %s <<< in a guild with the @%s bot.", twoFactorCode, p.appBot.dg.State.User.Username)
+
 				}
 
 				metricsTags["error"] = "ip_verification_required"

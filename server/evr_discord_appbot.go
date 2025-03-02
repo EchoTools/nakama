@@ -1322,8 +1322,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			response := &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
-					Content: "Select a player to kick",
 					Flags:   discordgo.MessageFlagsEphemeral,
+					Content: "Select a player to kick",
 					Components: []discordgo.MessageComponent{
 						discordgo.ActionsRow{
 							Components: components,
@@ -1390,8 +1390,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				response := &discordgo.InteractionResponse{
 					Type: discordgo.InteractionResponseChannelMessageWithSource,
 					Data: &discordgo.InteractionResponseData{
-						Content: "Select a device to unlink",
 						Flags:   discordgo.MessageFlagsEphemeral,
+						Content: "Select a device to unlink",
 						Components: []discordgo.MessageComponent{
 							discordgo.ActionsRow{
 								Components: []discordgo.MessageComponent{
@@ -3343,6 +3343,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 					Type: discordgo.InteractionApplicationCommandAutocompleteResult,
 					Data: &discordgo.InteractionResponseData{
+						Flags:   discordgo.MessageFlagsEphemeral,
 						Choices: choices, // This is basically the whole purpose of autocomplete interaction - return custom options to the user.
 					},
 				}); err != nil {
@@ -3406,6 +3407,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				if err := d.dg.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 					Type: discordgo.InteractionApplicationCommandAutocompleteResult,
 					Data: &discordgo.InteractionResponseData{
+						Flags:   discordgo.MessageFlagsEphemeral,
 						Choices: choices, // This is basically the whole purpose of autocomplete interaction - return custom options to the user.
 					},
 				}); err != nil {
@@ -3831,11 +3833,8 @@ func (d *DiscordAppBot) SendIPApprovalRequest(ctx context.Context, userID string
 		Embeds:     embeds,
 		Components: components,
 	})
-	if err != nil {
-		return err
-	}
 
-	return nil
+	return err
 }
 
 func IPVerificationEmbed(entry *LoginHistoryEntry, ipqs *IPQSResponse) ([]*discordgo.MessageEmbed, []discordgo.MessageComponent) {
@@ -4064,4 +4063,12 @@ func (d *DiscordAppBot) SendIPAuthorizationNotification(userID string, ip string
 	}
 
 	return nil
+}
+
+func IsDiscordErrorCode(err error, code int) bool {
+	var restError *discordgo.RESTError
+	if errors.As(err, &restError) && restError.Message != nil && restError.Message.Code == code {
+		return true
+	}
+	return false
 }
