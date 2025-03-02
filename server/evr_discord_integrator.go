@@ -87,6 +87,8 @@ func (c *DiscordIntegrator) Start() {
 				logger := logger.With(
 					zap.String("discord_id", entry.DiscordID),
 					zap.String("guild_id", entry.GuildID),
+					zap.String("gid", c.GuildIDToGroupID(entry.GuildID)),
+					zap.String("uid", c.DiscordIDToUserID(entry.DiscordID)),
 				)
 				if _, ok := queueCooldowns[entry]; ok {
 					continue
