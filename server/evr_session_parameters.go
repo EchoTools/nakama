@@ -6,7 +6,6 @@ import (
 
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama/v3/server/evr"
-	"github.com/mmcloughlin/geohash"
 	"go.uber.org/atomic"
 )
 
@@ -22,10 +21,10 @@ type SessionParameters struct {
 	authPassword             string // The Password use for authentication
 	userDisplayNameOverride  string // The display name override (user-defined)
 
-	externalServerAddr string        // The external server address (IP:port)
-	geoHashPrecision   int           // The geohash precision
-	isVPN              bool          // The user is using a VPN
-	ipqs               *IPQSResponse // The IPQS data
+	externalServerAddr string // The external server address (IP:port)
+	geoHashPrecision   int    // The geohash precision
+	isVPN              bool   // The user is using a VPN
+	ipInfo             IPInfo // The IPQS data
 
 	supportedFeatures []string          // features from the urlparam
 	requiredFeatures  []string          // required_features from the urlparam
@@ -99,10 +98,10 @@ func (s *SessionParameters) DiscordID() string {
 }
 
 func (s *SessionParameters) GeoHash() string {
-	if s.ipqs == nil {
+	if s.ipInfo == nil {
 		return ""
 	}
-	return geohash.EncodeWithPrecision(s.ipqs.Latitude, s.ipqs.Longitude, 2)
+	return s.ipInfo.GeoHash(2)
 }
 
 func StoreParams(ctx context.Context, params *SessionParameters) {

@@ -317,7 +317,7 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 	}()
 
 	// Get the IPQS Data
-	params.ipqs, err = p.ipqsClient.Get(ctx, session.clientIP)
+	params.ipInfo, err = p.ipInfoCache.Get(ctx, session.clientIP)
 	if err != nil {
 		logger.Debug("Failed to get IPQS details", zap.Error(err))
 	}
@@ -374,7 +374,7 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 
 			if p.appBot != nil && p.appBot.dg != nil && p.appBot.dg.State != nil && p.appBot.dg.State.User != nil {
 
-				if err := p.appBot.SendIPApprovalRequest(ctx, params.account.User.Id, entry, params.ipqs); err != nil {
+				if err := p.appBot.SendIPApprovalRequest(ctx, params.account.User.Id, entry, params.ipInfo); err != nil {
 
 					if !IsDiscordErrorCode(err, discordgo.ErrCodeCannotSendMessagesToThisUser) {
 						metricsTags["error"] = "failed_send_ip_approval_request"

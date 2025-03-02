@@ -52,7 +52,7 @@ type EvrPipeline struct {
 	appBot                       *DiscordAppBot
 	statisticsQueue              *StatisticsQueue
 	userRemoteLogJournalRegistry *UserLogJouralRegistry
-	ipqsClient                   *IPQSClient
+	ipInfoCache                  *IPInfoCache
 	matchLogManager              *MatchLogManager
 
 	createLobbyMu sync.Mutex
@@ -137,9 +137,19 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		logger.Info("Connected to Redis", zap.String("addr", redisOptions.Addr))
 	}
 
-	ipqsClient, err := NewIPQS(logger, db, metrics, storageIndex, redisClient, vars["IPQS_API_KEY"])
+	ipqsClient, err := NewIPQSClient(logger, metrics, redisClient, vars["IPQS_API_KEY"])
 	if err != nil {
 		logger.Fatal("Failed to create IPQS client", zap.Error(err))
+	}
+
+	ipapiClient, err := NewIPAPIClient(logger, metrics, redisClient)
+	if err != nil {
+		logger.Fatal("Failed to create IPAPI client", zap.Error(err))
+	}
+
+	ipInfoCache, err := NewIPInfoCache(logger, metrics, ipapiClient, ipqsClient)
+	if err != nil {
+		logger.Fatal("Failed to create IP info cache", zap.Error(err))
 	}
 
 	var appBot *DiscordAppBot
@@ -150,7 +160,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		discordCache = NewDiscordIntegrator(ctx, logger, config, metrics, nk, db, dg)
 		discordCache.Start()
 
-		appBot, err = NewDiscordAppBot(ctx, runtimeLogger, nk, db, metrics, pipeline, config, discordCache, profileRegistry, statusRegistry, dg, ipqsClient)
+		appBot, err = NewDiscordAppBot(ctx, runtimeLogger, nk, db, metrics, pipeline, config, discordCache, profileRegistry, statusRegistry, dg, ipInfoCache)
 		if err != nil {
 			logger.Error("Failed to create app bot", zap.Error(err))
 
@@ -191,7 +201,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		profileCache:                 profileRegistry,
 		statisticsQueue:              statisticsQueue,
 		userRemoteLogJournalRegistry: userRemoteLogJournalRegistry,
-		ipqsClient:                   ipqsClient,
+		ipInfoCache:                  ipInfoCache,
 		matchLogManager:              matchLogManager,
 
 		placeholderEmail: config.GetRuntime().Environment["PLACEHOLDER_EMAIL_DOMAIN"],
