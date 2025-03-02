@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -11,6 +10,7 @@ import (
 	"time"
 
 	"github.com/go-redis/redis"
+	"github.com/mmcloughlin/geohash"
 	"go.uber.org/zap"
 )
 
@@ -96,46 +96,108 @@ type IPQSResponse struct {
 	RequestID          string                 `json:"request_id,omitempty"`
 }
 
+var _ = IPInfo(&IPQSData{})
+
+type IPQSData struct {
+	Response IPQSResponse `json:"response,omitempty"`
+}
+
+func (r *IPQSData) DataProvider() string {
+	return "IPQS"
+}
+
+func (r *IPQSData) IsVPN() bool {
+	return r.Response.VPN
+}
+
+func (r *IPQSData) Latitude() float64 {
+	return r.Response.Latitude
+}
+func (r *IPQSData) Longitude() float64 {
+	return r.Response.Longitude
+}
+
+func (r *IPQSData) City() string {
+	return r.Response.City
+}
+
+func (r *IPQSData) Region() string {
+	return r.Response.Region
+}
+
+func (r *IPQSData) CountryCode() string {
+	return r.Response.CountryCode
+}
+
+func (r *IPQSData) GeoHash(geoPrecision uint) string {
+	return geohash.EncodeWithPrecision(r.Latitude(), r.Longitude(), 2)
+}
+
+func (r *IPQSData) ASN() int {
+	return r.Response.ASN
+}
+
+func (r *IPQSData) FraudScore() int {
+	return r.Response.FraudScore
+}
+
+func (r *IPQSData) ISP() string {
+	return r.Response.ISP
+}
+
+func (r *IPQSData) Organization() string {
+	return r.Response.Organization
+}
+
+var _ = IPInfoProvider(&IPQSClient{})
+
 type IPQSClient struct {
 	ctx      context.Context
 	cancelFn context.CancelFunc
 
-	logger       *zap.Logger
-	metrics      Metrics
-	db           *sql.DB
-	storageIndex StorageIndex
+	logger  *zap.Logger
+	metrics Metrics
 
 	redisClient *redis.Client
 
-	url        string
 	apiKey     string
-	parameters map[string]string
+	parameters string
 }
 
-func NewIPQS(logger *zap.Logger, db *sql.DB, metrics Metrics, storageIndex StorageIndex, redisClient *redis.Client, apiKey string) (*IPQSClient, error) {
+func NewIPQSClient(logger *zap.Logger, metrics Metrics, redisClient *redis.Client, apiKey string) (*IPQSClient, error) {
 	ctx, cancelFn := context.WithCancel(context.Background())
+
+	// Build the URL format
+	q := url.Values{}
+	for k, v := range map[string]string{
+		"strictness":                 "0",
+		"allow_public_access_points": "true",
+		"lighter_penalties":          "false",
+	} {
+		q.Set(k, v)
+	}
 
 	ipqs := IPQSClient{
 		ctx:      ctx,
 		cancelFn: cancelFn,
 
-		logger:       logger,
-		metrics:      metrics,
-		db:           db,
-		storageIndex: storageIndex,
+		logger:  logger,
+		metrics: metrics,
 
 		redisClient: redisClient,
-
-		apiKey: apiKey,
-		url:    "https://www.ipqualityscore.com/api/json/ip/" + apiKey,
-		parameters: map[string]string{
-			"strictness":                 "0",
-			"allow_public_access_points": "true",
-			"lighter_penalties":          "false",
-		},
+		parameters:  q.Encode(),
+		apiKey:      apiKey,
 	}
 
 	return &ipqs, nil
+}
+
+func (s *IPQSClient) url(ip string) string {
+	return "https://www.ipqualityscore.com/api/json/ip/" + s.apiKey + "/" + ip + "?" + s.parameters
+}
+
+func (s *IPQSClient) Name() string {
+	return "IPQS"
 }
 
 func (s *IPQSClient) load(ip string) (*IPQSResponse, error) {
@@ -176,13 +238,13 @@ func (s *IPQSClient) store(ip string, result *IPQSResponse) error {
 	return nil
 }
 
-func (s *IPQSClient) Get(ctx context.Context, ip string) (*IPQSResponse, error) {
+func (s *IPQSClient) Get(ctx context.Context, ip string) (IPInfo, error) {
 	if s == nil {
 		return nil, nil
 	}
 	// ignore reserved IPs
 	if ip := net.ParseIP(ip); ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsPrivate() {
-		return nil, nil
+		return &StubIPInfo{}, nil
 	}
 	startTime := time.Now()
 	metricsTags := map[string]string{"result": "cache_hit"}
@@ -241,25 +303,14 @@ func (s *IPQSClient) Get(ctx context.Context, ip string) (*IPQSResponse, error) 
 			return nil, nil
 		}
 		metricsTags["result"] = "cache_miss"
-		return result, nil
+		return &IPQSData{Response: *result}, nil
 	}
 
 }
 
 func (s *IPQSClient) retrieve(ip string) (*IPQSResponse, error) {
 
-	u, err := url.Parse(s.url + "/" + ip)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse URL: %w", err)
-	}
-
-	q := u.Query()
-	for k, v := range s.parameters {
-		q.Set(k, v)
-	}
-	u.RawQuery = q.Encode()
-
-	resp, err := http.Get(u.String())
+	resp, err := http.Get(s.url(ip))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get response: %w", err)
 	}
@@ -284,5 +335,5 @@ func (s *IPQSClient) IsVPN(ip string) bool {
 	if result == nil {
 		return false
 	}
-	return result.VPN
+	return result.IsVPN()
 }

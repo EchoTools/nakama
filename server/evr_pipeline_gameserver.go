@@ -193,21 +193,21 @@ func (p *EvrPipeline) gameserverRegistrationRequest(ctx context.Context, logger 
 	// Add the server id, as displayed by the game server once registered (i.e. "0x5A700FE2D34D5B6D")
 	regionCodes = append(regionCodes, fmt.Sprintf("0x%x", request.ServerID))
 
-	ipqsData, err := p.ipqsClient.Get(ctx, externalIP.String())
+	ipInfo, err := p.ipInfoCache.Get(ctx, externalIP.String())
 	if err != nil {
 		logger.Warn("Failed to get IPQS data", zap.Error(err))
 	}
 
 	if slices.Contains(regionCodes, "default") {
 		regionCodes = append(regionCodes,
-			LocationToRegionCode(ipqsData.CountryCode, ipqsData.Region, ipqsData.City),
-			LocationToRegionCode(ipqsData.CountryCode, ipqsData.Region, ""),
-			LocationToRegionCode(ipqsData.CountryCode, "", ""),
+			LocationToRegionCode(ipInfo.CountryCode(), ipInfo.Region(), ipInfo.City()),
+			LocationToRegionCode(ipInfo.CountryCode(), ipInfo.Region(), ""),
+			LocationToRegionCode(ipInfo.CountryCode(), "", ""),
 		)
 	}
 
 	// Create the broadcaster config
-	config := NewGameServerPresence(session.UserID(), session.id, request.ServerID, request.InternalIP, externalIP, externalPort, hostingGroupIDs, regionCodes, request.VersionLock, params.serverTags, params.supportedFeatures, request.TimeStepUsecs, ipqsData, params.geoHashPrecision, isNative)
+	config := NewGameServerPresence(session.UserID(), session.id, request.ServerID, request.InternalIP, externalIP, externalPort, hostingGroupIDs, regionCodes, request.VersionLock, params.serverTags, params.supportedFeatures, request.TimeStepUsecs, ipInfo, params.geoHashPrecision, isNative)
 
 	logger = logger.With(zap.String("internal_ip", request.InternalIP.String()), zap.String("external_ip", externalIP.String()), zap.Uint16("port", externalPort))
 

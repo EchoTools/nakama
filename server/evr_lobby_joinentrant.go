@@ -286,10 +286,10 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		}
 	}
 
-	if groupMetadata.BlockVPNUsers && params.isVPN && !groupMetadata.IsVPNBypass(userID) && params.ipqs != nil {
+	if groupMetadata.BlockVPNUsers && params.isVPN && !groupMetadata.IsVPNBypass(userID) && params.ipInfo != nil {
 		metricsTags["error"] = "vpn_user"
 
-		if params.ipqs.FraudScore >= groupMetadata.FraudScoreThreshold {
+		if params.ipInfo.FraudScore() >= groupMetadata.FraudScoreThreshold {
 
 			var fields []*discordgo.MessageEmbedField
 
@@ -307,38 +307,43 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 						Inline: true,
 					},
 					{
+						Name:   "Data Provider",
+						Value:  params.ipInfo.DataProvider(),
+						Inline: true,
+					},
+					{
 						Name:   "Score",
-						Value:  fmt.Sprintf("%d", params.ipqs.FraudScore),
+						Value:  fmt.Sprintf("%d", params.ipInfo.FraudScore()),
 						Inline: true,
 					},
 					{
 						Name:   "ISP",
-						Value:  params.ipqs.ISP,
+						Value:  params.ipInfo.ISP(),
 						Inline: true,
 					},
 					{
 						Name:   "Organization",
-						Value:  params.ipqs.Organization,
+						Value:  params.ipInfo.Organization(),
 						Inline: true,
 					},
 					{
 						Name:   "ASN",
-						Value:  fmt.Sprintf("%d", params.ipqs.ASN),
+						Value:  fmt.Sprintf("%d", params.ipInfo.ASN()),
 						Inline: true,
 					},
 					{
 						Name:   "City",
-						Value:  params.ipqs.City,
+						Value:  params.ipInfo.City(),
 						Inline: true,
 					},
 					{
 						Name:   "Region",
-						Value:  params.ipqs.Region,
+						Value:  params.ipInfo.Region(),
 						Inline: true,
 					},
 					{
 						Name:   "Country",
-						Value:  params.ipqs.CountryCode,
+						Value:  params.ipInfo.CountryCode(),
 						Inline: true,
 					},
 				}

@@ -55,7 +55,7 @@ type DiscordAppBot struct {
 	dg              *discordgo.Session
 
 	cache       *DiscordIntegrator
-	ipqsCache   *IPQSClient
+	ipInfoCache *IPInfoCache
 	choiceCache *MapOf[string, []*discordgo.ApplicationCommandOptionChoice]
 
 	debugChannels  map[string]string // map[groupID]channelID
@@ -67,7 +67,7 @@ type DiscordAppBot struct {
 	prepareMatchRateLimiters  *MapOf[string, *rate.Limiter]
 }
 
-func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, metrics Metrics, pipeline *Pipeline, config Config, discordCache *DiscordIntegrator, profileRegistry *ProfileCache, statusRegistry StatusRegistry, dg *discordgo.Session, ipqsCache *IPQSClient) (*DiscordAppBot, error) {
+func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, metrics Metrics, pipeline *Pipeline, config Config, discordCache *DiscordIntegrator, profileRegistry *ProfileCache, statusRegistry StatusRegistry, dg *discordgo.Session, ipInfoCache *IPInfoCache) (*DiscordAppBot, error) {
 
 	logger = logger.WithField("system", "discordAppBot")
 
@@ -85,7 +85,7 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 		statusRegistry:  statusRegistry,
 
 		cache:       discordCache,
-		ipqsCache:   ipqsCache,
+		ipInfoCache: ipInfoCache,
 		choiceCache: &MapOf[string, []*discordgo.ApplicationCommandOptionChoice]{},
 
 		dg: dg,
@@ -1940,9 +1940,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			// Show the first one.
 			request := requests[0]
 
-			ipqs, _ := d.ipqsCache.Get(ctx, request.ClientIP)
+			ipInfo, _ := d.ipInfoCache.Get(ctx, request.ClientIP)
 
-			embeds, components := IPVerificationEmbed(request, ipqs)
+			embeds, components := IPVerificationEmbed(request, ipInfo)
 			// Send it as the interaction response
 			if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -2263,10 +2263,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			serverLocation := "Unknown"
 
 			serverExtIP := label.GameServer.Endpoint.ExternalIP.String()
-			if ipqs, err := d.ipqsCache.Get(ctx, serverExtIP); err != nil {
+			if ipInfo, err := d.ipInfoCache.Get(ctx, serverExtIP); err != nil {
 				logger.Error("Failed to get IPQS data", zap.Error(err))
 			} else {
-				serverLocation = ipqs.Region
+				serverLocation = ipInfo.Region()
 			}
 
 			// local the guild name
@@ -3814,7 +3814,7 @@ func EscapeDiscordMarkdown(s string) string {
 	return discordMarkdownEscapeReplacer.Replace(s)
 }
 
-func (d *DiscordAppBot) SendIPApprovalRequest(ctx context.Context, userID string, e *LoginHistoryEntry, ipqs *IPQSResponse) error {
+func (d *DiscordAppBot) SendIPApprovalRequest(ctx context.Context, userID string, e *LoginHistoryEntry, ipInfo IPInfo) error {
 	// Get the user's discord ID
 	discordID, err := GetDiscordIDByUserID(ctx, d.db, userID)
 	if err != nil {
@@ -3828,7 +3828,7 @@ func (d *DiscordAppBot) SendIPApprovalRequest(ctx context.Context, userID string
 	}
 
 	// Send the message
-	embeds, components := IPVerificationEmbed(e, ipqs)
+	embeds, components := IPVerificationEmbed(e, ipInfo)
 	_, err = d.dg.ChannelMessageSendComplex(channel.ID, &discordgo.MessageSend{
 		Embeds:     embeds,
 		Components: components,
@@ -3837,7 +3837,7 @@ func (d *DiscordAppBot) SendIPApprovalRequest(ctx context.Context, userID string
 	return err
 }
 
-func IPVerificationEmbed(entry *LoginHistoryEntry, ipqs *IPQSResponse) ([]*discordgo.MessageEmbed, []discordgo.MessageComponent) {
+func IPVerificationEmbed(entry *LoginHistoryEntry, ipInfo IPInfo) ([]*discordgo.MessageEmbed, []discordgo.MessageComponent) {
 
 	code := fmt.Sprintf("%02d", entry.CreatedAt.Nanosecond()%100)
 
@@ -3880,10 +3880,10 @@ func IPVerificationEmbed(entry *LoginHistoryEntry, ipqs *IPQSResponse) ([]*disco
 			}},
 	}
 
-	if ipqs != nil {
+	if ipInfo != nil {
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
 			Name:   "Location (may be inaccurate)",
-			Value:  fmt.Sprintf("%s, %s", ipqs.City, ipqs.Region),
+			Value:  fmt.Sprintf("%s, %s, %s", ipInfo.City(), ipInfo.Region(), ipInfo.CountryCode()),
 			Inline: true,
 		})
 

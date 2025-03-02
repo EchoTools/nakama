@@ -178,7 +178,7 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 
 		externalServerAddr: parseUserQueryFunc(&request, "serveraddr", 64, nil),
 		geoHashPrecision:   geoPrecision,
-		isVPN:              evrPipeline.ipqsClient.IsVPN(clientIP),
+		isVPN:              evrPipeline.ipInfoCache.IsVPN(clientIP),
 
 		isGlobalDeveloper:    false,
 		isGlobalModerator:    false,

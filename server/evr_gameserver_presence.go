@@ -94,22 +94,22 @@ func (g *GameServerPresence) IsPriorityFor(mode evr.Symbol) bool {
 	return slices.Contains(g.DesignatedModes, mode)
 }
 
-func NewGameServerPresence(userId, sessionId uuid.UUID, serverId uint64, internalIP, externalIP net.IP, port uint16, groupIDs []uuid.UUID, regionCodes []string, versionLock uint64, tags, features []string, timeStepUsecs uint32, ipqs *IPQSResponse, geoPrecision int, isNative bool) *GameServerPresence {
+func NewGameServerPresence(userId, sessionId uuid.UUID, serverId uint64, internalIP, externalIP net.IP, port uint16, groupIDs []uuid.UUID, regionCodes []string, versionLock uint64, tags, features []string, timeStepUsecs uint32, ipInfo IPInfo, geoPrecision int, isNative bool) *GameServerPresence {
 
 	var asn int
 	var lat, lon float64
 	var geoHash, city, region, countryCode string
 
-	if geoPrecision > 0 && ipqs != nil {
+	if geoPrecision > 0 && ipInfo != nil {
 
-		lat = ipqs.Latitude
-		lon = ipqs.Longitude
-		asn = ipqs.ASN
+		lat = ipInfo.Latitude()
+		lon = ipInfo.Longitude()
+		asn = ipInfo.ASN()
 
 		geoHash = geohash.EncodeWithPrecision(lat, lon, uint(geoPrecision))
-		city = ipqs.City
-		region = ipqs.Region
-		countryCode = ipqs.CountryCode
+		city = ipInfo.City()
+		region = ipInfo.Region()
+		countryCode = ipInfo.CountryCode()
 
 	}
 
