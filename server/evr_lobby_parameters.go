@@ -292,7 +292,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 	if mode == evr.ModeSocialPublic {
 		mmMode = evr.ModeArenaPublic
 	}
-	if !globalSettings.DisableSBMM {
+	if !globalSettings.DisableSBMM && groupID != uuid.Nil {
 
 		if globalSettings.RankPercentile.MaxDelta > 0 {
 			rankPercentileMaxDelta = globalSettings.RankPercentile.MaxDelta
