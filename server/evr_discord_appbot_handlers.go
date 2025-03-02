@@ -156,8 +156,31 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(logger runtime.Logger,
 				if err := LoginHistoryStore(ctx, nk, userID, history); err != nil {
 					return fmt.Errorf("failed to save login history: %w", err)
 				}
+				if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+					Type: discordgo.InteractionResponseDeferredMessageUpdate,
+				}); err != nil {
+					return fmt.Errorf("failed to respond to interaction: %w", err)
+				}
 
-				return simpleInteractionResponse(s, i, fmt.Sprintf("Invalid: %v", err))
+				if _, err := s.ChannelMessageEditComplex(&discordgo.MessageEdit{
+					Channel: i.Message.ChannelID,
+					ID:      i.Message.ID,
+					Components: &[]discordgo.MessageComponent{
+						discordgo.ActionsRow{
+							Components: []discordgo.MessageComponent{
+								discordgo.Button{
+									Label:    "Incorrect Code",
+									Style:    discordgo.DangerButton,
+									CustomID: "nil",
+									Disabled: true,
+								},
+							},
+						},
+					},
+				}); err != nil {
+					return fmt.Errorf("failed to edit message: %w", err)
+				}
+
 			}
 		}
 
@@ -165,34 +188,38 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(logger runtime.Logger,
 			return fmt.Errorf("failed to save login history: %w", err)
 		}
 
-		// Modify the interaction
+		// Modify the message
 
 		if i.Message == nil {
 			return fmt.Errorf("message is nil")
 		}
 
-		i.Message.Components = []discordgo.MessageComponent{
-			discordgo.ActionsRow{
-				Components: []discordgo.MessageComponent{
-					discordgo.Button{
-						Label:    "Approved",
-						Style:    discordgo.SuccessButton,
-						CustomID: "nil",
-						Disabled: true,
-					},
-				},
-			},
-		}
-
 		if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: fmt.Sprintf("Approved IP address.\n### Please restart the game to play."),
-			},
+			Type: discordgo.InteractionResponseDeferredMessageUpdate,
 		}); err != nil {
 			return fmt.Errorf("failed to respond to interaction: %w", err)
 		}
-		return err
+
+		if _, err := s.ChannelMessageEditComplex(&discordgo.MessageEdit{
+			Channel: i.Message.ChannelID,
+			ID:      i.Message.ID,
+			Components: &[]discordgo.MessageComponent{
+				discordgo.ActionsRow{
+					Components: []discordgo.MessageComponent{
+						discordgo.Button{
+							Label:    "Approved",
+							Style:    discordgo.SuccessButton,
+							CustomID: "nil",
+							Disabled: true,
+						},
+					},
+				},
+			},
+		}); err != nil {
+			return fmt.Errorf("failed to edit message: %w", err)
+		}
+		return nil
+
 	case "unlink-headset":
 		data := i.Interaction.MessageComponentData()
 		if len(data.Values) == 0 {
@@ -206,11 +233,12 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(logger runtime.Logger,
 		if err := nk.UnlinkDevice(ctx, userID, value); err != nil {
 			return fmt.Errorf("failed to unlink device ID: %w", err)
 		}
-		// Modify the interaction response
 
+		// Modify the interaction response
 		if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
+				Flags:   discordgo.MessageFlagsEphemeral,
 				Content: fmt.Sprintf("Unlinked device ID `%s`.", value),
 			},
 		}); err != nil {
