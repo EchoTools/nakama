@@ -245,6 +245,13 @@ func (p *EvrPipeline) gameserverRegistrationRequest(ctx context.Context, logger 
 	}
 
 	status := config.GetStatus()
+
+	// Join the monitoring stream
+	if err := p.nk.StreamUserUpdate(StreamModeGameServer, session.ID().String(), "", "", config.GetUserId(), config.GetSessionId(), false, false, status); err != nil {
+		logger.Warn("Failed to update game server stream", zap.Error(err))
+		return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_Failure)
+	}
+
 	// Join the game server to the game server pool streams
 	for _, gID := range config.GroupIDs {
 		if err := p.nk.StreamUserUpdate(StreamModeGameServer, gID.String(), "", "", config.GetUserId(), config.GetSessionId(), false, false, status); err != nil {
@@ -508,6 +515,10 @@ func (p *EvrPipeline) gameserverLobbySessionEnded(ctx context.Context, logger *z
 		if err != nil {
 			logger.Error("Failed to get broadcaster presence", zap.Error(err))
 			session.Close("Failed to get broadcaster presence", runtime.PresenceReasonUnknown)
+		}
+		if presence == nil {
+			logger.Error("Broadcaster presence not found")
+			session.Close("Broadcaster presence not found", runtime.PresenceReasonUnknown)
 		}
 		config := &GameServerPresence{}
 		if err := json.Unmarshal([]byte(presence.GetStatus()), config); err != nil {
