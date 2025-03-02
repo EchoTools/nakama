@@ -2587,7 +2587,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					continue
 				}
 				result := fmt.Sprintf("%s kicked player %s from [%s](https://echo.taxi/spark://c/%s) match. (%s)", user.Mention(), target.Mention(), label.Mode.String(), strings.ToUpper(label.ID.UUID.String()), reason)
-				_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> %s", user.Mention(), result), false)
+				_, _ = d.LogAuditMessage(ctx, groupID, result, false)
 
 				cnt++
 
