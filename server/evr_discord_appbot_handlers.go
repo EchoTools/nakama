@@ -222,6 +222,7 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(logger runtime.Logger,
 		}); err != nil {
 			return fmt.Errorf("failed to edit message: %w", err)
 		}
+
 		return nil
 
 	case "unlink-headset":
