@@ -195,7 +195,11 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(logger runtime.Logger,
 		}
 
 		if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseDeferredMessageUpdate,
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Flags:   discordgo.MessageFlagsEphemeral,
+				Content: ":greentick: IP address approved.\n\n## **Restart your game.**",
+			},
 		}); err != nil {
 			return fmt.Errorf("failed to respond to interaction: %w", err)
 		}
