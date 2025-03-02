@@ -361,7 +361,12 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 				}
 			}
 
-			return NewLobbyError(KickedFromLobbyGroup, "this guild does not allow VPN users")
+			guildName := "This guild"
+			if gg := params.guildGroups[groupID]; gg != nil {
+				guildName = gg.Group.Name
+			}
+
+			return NewLobbyError(KickedFromLobbyGroup, fmt.Sprintf("%s does not allow VPN users.", guildName))
 		}
 	}
 
