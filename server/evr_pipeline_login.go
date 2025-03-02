@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bwmarrin/discordgo"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -276,6 +277,15 @@ func (p *EvrPipeline) authenticateSession(ctx context.Context, logger *zap.Logge
 			}
 		}
 	}
+
+	// Load the user's metadata from the storage
+	params.accountMetadata = &AccountMetadata{}
+
+	if err := json.Unmarshal([]byte(params.account.User.Metadata), params.accountMetadata); err != nil {
+		metricsTags["error"] = "failed_unmarshal_metadata"
+		return fmt.Errorf("failed to unmarshal metadata: %w", err)
+	}
+	params.accountMetadata.account = params.account
 
 	// Replace the session context with a derived one that includes the login session ID and the EVR ID
 	ctx = session.Context()
