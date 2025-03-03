@@ -206,14 +206,14 @@ func (m *GroupMetadata) MustCompleteCommunityValues(userID string) bool {
 	return found
 }
 
-func (m *GroupMetadata) CommunityValuesUserIDsAdd(userID string, delay time.Duration) {
+func (m *GroupMetadata) CommunityValuesUserIDsAdd(userID string, timeoutExpiry time.Time) {
 	if m.CommunityValuesUserIDs == nil {
 		m.CommunityValuesUserIDs = make(map[string]time.Time)
 	}
 	m.CommunityValuesUserIDs[userID] = time.Now().UTC()
 
-	if delay > 0 {
-		m.TimeoutAdd(userID, delay)
+	if !timeoutExpiry.IsZero() {
+		m.TimeoutAdd(userID, timeoutExpiry)
 	}
 }
 
@@ -225,11 +225,15 @@ func (m *GroupMetadata) CommunityValuesUserIDsRemove(userID string) bool {
 	return true
 }
 
-func (m *GroupMetadata) TimeoutAdd(userID string, delay time.Duration) {
+func (m *GroupMetadata) TimeoutAdd(userID string, expiry time.Time) {
 	if m.TimedOutUserIDs == nil {
 		m.TimedOutUserIDs = make(map[string]time.Time)
 	}
-	m.TimedOutUserIDs[userID] = time.Now().UTC().Add(delay)
+	if time.Now().After(expiry) {
+		delete(m.TimedOutUserIDs, userID)
+		return
+	}
+	m.TimedOutUserIDs[userID] = expiry
 }
 
 func (m *GroupMetadata) IsTimedOut(userID string) (bool, time.Time) {
