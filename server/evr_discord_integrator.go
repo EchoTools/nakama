@@ -946,3 +946,15 @@ func SendUserMessage(ctx context.Context, dg *discordgo.Session, userID, message
 
 	return dg.ChannelMessageSend(channel.ID, message)
 }
+
+func (d *DiscordIntegrator) GuildGroupName(groupID string) string {
+	guildID := d.GroupIDToGuildID(groupID)
+	if guildID == "" {
+		return ""
+	}
+	guild, err := d.dg.Guild(guildID)
+	if err != nil {
+		return ""
+	}
+	return guild.Name
+}
