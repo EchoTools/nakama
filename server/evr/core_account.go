@@ -992,9 +992,9 @@ type ArenaUnlocks struct {
 	TagStub0052                 bool `json:"rwd_tag_0052" validate:"blocked"`
 	TagStub0053                 bool `json:"rwd_tag_0053" validate:"blocked"`
 	TagStub0054                 bool `json:"rwd_tag_0054" validate:"blocked"`
-	TagTagUnreleased0024        bool `json:"rwd_tag_0024" validate:"blocked"`
+	TagCitrus                   bool `json:"rwd_tag_0024"`
 	TagToriA                    bool `json:"rwd_tag_tori_a,omitempty"`
-	TagUnreleased0022           bool `json:"rwd_tag_0022" validate:"blocked"`
+	TagSpectrum                 bool `json:"rwd_tag_0022" validate:"restricted"`
 	TagVRMLPreseason            bool `json:"rwd_tag_s1_vrml_preseason" validate:"restricted"`
 	TagVRMLS1                   bool `json:"rwd_tag_s1_vrml_s1" validate:"restricted"`
 	TagVRMLS1Champion           bool `json:"rwd_tag_s1_vrml_s1_champion" validate:"restricted"`

@@ -1254,9 +1254,13 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 		"igp": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 
 			// find the user in the streams
-			presences, err := nk.StreamUserList(StreamModeService, userID, "", StreamLabelMatchService, false, true)
+			presences, err := nk.StreamUserList(StreamModeService, userID, "", StreamLabelLoginService, false, true)
 			if err != nil {
 				return fmt.Errorf("failed to list igp users: %w", err)
+			}
+
+			if len(presences) == 0 {
+				return fmt.Errorf("You are not currently in game.")
 			}
 
 			var presence runtime.Presence
@@ -1265,10 +1269,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					presence = p
 					break
 				}
-			}
-
-			if presence == nil {
-				return fmt.Errorf("You are not currently in game.")
 			}
 
 			_nk := d.nk.(*RuntimeGoNakamaModule)
