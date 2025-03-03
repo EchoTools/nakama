@@ -19,11 +19,6 @@ type NextMatchMetadata struct {
 // lobbyJoinSessionRequest is a request to join a specific existing session.
 func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters, matchID MatchID) error {
 
-	params, ok := LoadParams(session.Context())
-	if !ok {
-		return fmt.Errorf("failed to get session parameters")
-	}
-
 	label, err := MatchLabelByID(ctx, p.nk, matchID)
 	if err != nil {
 		return fmt.Errorf("failed to load match label: %w", err)
@@ -35,21 +30,9 @@ func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session
 	lobbyParams.GroupID = label.GetGroupID()
 	lobbyParams.Mode = label.Mode
 
-	groupID := label.GetGroupID().String()
-
 	// Do authorization checks related to the lobby's guild.
 	if err := p.lobbyAuthorize(ctx, logger, session, lobbyParams); err != nil {
 		return err
-	}
-
-	// Generate a profile for this group
-	profile, err := NewUserServerProfile(ctx, logger, p.db, p.nk, params.account, params.xpID, groupID, []evr.Symbol{label.Mode}, label.Mode)
-	if err != nil {
-		return fmt.Errorf("failed to create user server profile: %w", err)
-	}
-
-	if _, err := p.profileCache.Store(session.ID(), *profile); err != nil {
-		return fmt.Errorf("failed to cache profile: %w", err)
 	}
 
 	presence, err := EntrantPresenceFromSession(session, lobbyParams.PartyID, lobbyParams.Role, lobbyParams.GetRating(), lobbyParams.GetRankPercentile(), label.GetGroupID().String(), 0, "")

@@ -194,7 +194,6 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 		guildGroups:          make(map[string]*GuildGroup),
 		account:              &api.Account{},
 		accountMetadata:      &AccountMetadata{},
-		profile:              atomic.NewPointer((*evr.ServerProfile)(nil)),
 
 		loginSession:   nil,
 		lobbySession:   nil,
