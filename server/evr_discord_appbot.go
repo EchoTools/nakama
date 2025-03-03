@@ -2420,7 +2420,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			var target *discordgo.User
 			var targetUserID string
-			var timeoutDuration time.Duration
+			var timeoutExpiry time.Time
+
 			for _, o := range i.ApplicationCommandData().Options {
 				switch o.Name {
 				case "user":
@@ -2433,7 +2434,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						return errors.New("failed to get target user ID")
 					}
 				case "timeout_mins":
-					timeoutDuration = time.Duration(o.IntValue()) * time.Minute
+					timeoutExpiry = time.Now().Add(time.Duration(o.IntValue()) * time.Minute)
 				}
 			}
 
@@ -2442,7 +2443,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return errors.New("failed to get guild group metadata")
 			}
 
-			metadata.CommunityValuesUserIDsAdd(targetUserID, timeoutDuration)
+			metadata.CommunityValuesUserIDsAdd(targetUserID, timeoutExpiry)
 
 			data, err := metadata.MarshalToMap()
 			if err != nil {
@@ -2493,7 +2494,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 			}
 
-			return simpleInteractionResponse(s, i, fmt.Sprintf("%s is required to complete *Community Values* when entering the next social lobby, with a timeout of %d minutes. (Disconnected %d sessions)", target.Mention(), int(timeoutDuration.Minutes()), cnt))
+			return simpleInteractionResponse(s, i, fmt.Sprintf("%s is required to complete *Community Values* when entering the next social lobby, with a timeout of %d minutes. (Disconnected %d sessions)", target.Mention(), int(timeoutExpiry.Sub(time.Now()).Minutes()), cnt))
 		},
 		"kick-player": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 
@@ -2508,7 +2509,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			var target *discordgo.User
 			var targetUserID, reason string
-			var timeout time.Duration
+			var timeoutExpiry time.Time
+
 			for _, o := range i.ApplicationCommandData().Options {
 				switch o.Name {
 				case "user":
@@ -2519,8 +2521,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					}
 				case "reason":
 					reason = o.StringValue()
-				case "timeout":
-					timeout = time.Duration(o.IntValue()) * time.Minute
+				case "timeout_mins":
+					timeoutExpiry = time.Now().Add(time.Duration(o.IntValue()) * time.Minute)
 				}
 			}
 
@@ -2531,13 +2533,13 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			cnt := 0
 
-			if timeout > 0 {
+			if !timeoutExpiry.IsZero() {
 				metadata, err := GetGuildGroupMetadata(ctx, d.db, groupID)
 				if err != nil {
 					return errors.New("failed to get guild group metadata")
 				}
 
-				metadata.TimeoutAdd(targetUserID, timeout)
+				metadata.TimeoutAdd(targetUserID, timeoutExpiry)
 
 				data, err := metadata.MarshalToMap()
 				if err != nil {
