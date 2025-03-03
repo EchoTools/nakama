@@ -195,7 +195,7 @@ func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, n
 
 	var developerFeatures *evr.DeveloperFeatures
 
-	if metadata.EnableGoldDisplayName {
+	if metadata.GoldDisplayNameActive {
 		developerFeatures = &evr.DeveloperFeatures{}
 	}
 

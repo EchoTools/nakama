@@ -119,7 +119,7 @@ type AccountMetadata struct {
 	EnableAllCosmetics         bool                   `json:"enable_all_cosmetics"`      // Enable all cosmetics
 	IsGlobalDeveloper          bool                   `json:"is_global_developer"`       // Is a global developer
 	IsGlobalModerator          bool                   `json:"is_global_moderator"`       // Is a global moderator
-	EnableGoldDisplayName      bool                   `json:"enable_gold_display_name"`  // The gold name display name
+	GoldDisplayNameActive      bool                   `json:"gold_display_name"`         // The gold name display name
 	LoadoutCosmetics           AccountCosmetics       `json:"cosmetic_loadout"`          // The equipped cosmetics
 	CombatLoadout              CombatLoadout          `json:"combat_loadout"`            // The combat loadout
 	MutedPlayers               []evr.EvrId            `json:"muted_players"`             // The muted players
