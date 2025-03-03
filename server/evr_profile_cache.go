@@ -167,12 +167,11 @@ func walletToCosmetics(wallet map[string]int64, unlocks map[string]map[string]bo
 	return unlocks
 }
 
-func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, account *api.Account, xpID evr.EvrId, groupID string, modes []evr.Symbol, dailyWeeklyMode evr.Symbol) (*evr.ServerProfile, error) {
+func UserServerProfileFromParameters(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, params SessionParameters, groupID string, modes []evr.Symbol, dailyWeeklyMode evr.Symbol) (*evr.ServerProfile, error) {
+	return NewUserServerProfile(ctx, logger, db, nk, params.account, params.accountMetadata, params.xpID, groupID, modes, dailyWeeklyMode)
+}
 
-	metadata := AccountMetadata{}
-	if err := json.Unmarshal([]byte(account.User.Metadata), &metadata); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal account metadata: %w", err)
-	}
+func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, account *api.Account, metadata *AccountMetadata, xpID evr.EvrId, groupID string, modes []evr.Symbol, dailyWeeklyMode evr.Symbol) (*evr.ServerProfile, error) {
 
 	var wallet map[string]int64
 	if err := json.Unmarshal([]byte(account.Wallet), &wallet); err != nil {

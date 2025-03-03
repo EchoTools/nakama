@@ -1880,7 +1880,12 @@ func UserServerProfileRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 		evr.ModeSocialPrivate,
 	}
 
-	serverProfile, err := NewUserServerProfile(ctx, RuntimeLoggerToZapLogger(logger), db, nk, account, request.XPID, request.GroupID.String(), modes, 0)
+	metadata := &AccountMetadata{}
+	if err := json.Unmarshal([]byte(account.User.Metadata), metadata); err != nil {
+		return "", fmt.Errorf("failed to unmarshal account metadata: %w", err)
+	}
+
+	serverProfile, err := NewUserServerProfile(ctx, RuntimeLoggerToZapLogger(logger), db, nk, account, metadata, request.XPID, request.GroupID.String(), modes, 0)
 	if err != nil {
 		return "", fmt.Errorf("failed to get server profile: %w", err)
 	}

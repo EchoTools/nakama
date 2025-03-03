@@ -647,12 +647,11 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 		evr.ModeCombatPublic,
 	}
 
-	serverProfile, err := NewUserServerProfile(ctx, logger, p.db, p.nk, params.account, params.xpID, params.accountMetadata.GetActiveGroupID().String(), modes, 0)
+	serverProfile, err := UserServerProfileFromParameters(ctx, logger, p.db, p.nk, params, params.accountMetadata.GetActiveGroupID().String(), modes, 0)
 	if err != nil {
 		return fmt.Errorf("failed to get server profile: %w", err)
 	}
 
-	params.profile.Store(serverProfile)
 	p.profileCache.Store(session.id, *serverProfile)
 
 	clientProfile, err := NewClientProfile(ctx, params.accountMetadata, serverProfile)
