@@ -275,14 +275,7 @@ var (
 		{
 			Name:        "whoami",
 			Description: "Receive your account information (privately).",
-			Options: []*discordgo.ApplicationCommandOption{
-				{
-					Type:        discordgo.ApplicationCommandOptionBoolean,
-					Name:        "include-detail",
-					Description: "Include extra details",
-					Required:    false,
-				},
-			},
+			Options:     []*discordgo.ApplicationCommandOption{},
 		},
 		{
 			Name:        "next-match",
