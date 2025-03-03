@@ -394,12 +394,13 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 			return output
 		}(), "\n"), Inline: false},
 		{Name: "Match List", Value: strings.Join(lo.Map(whoami.MatchLabels, func(l *MatchLabel, index int) string {
-			link := fmt.Sprintf("`%s`: https://echo.taxi/spark://c/%s", l.Mode.String(), strings.ToUpper(l.ID.UUID.String()))
+			link := fmt.Sprintf("https://echo.taxi/spark://c/%s", strings.ToUpper(l.ID.UUID.String()))
 			players := make([]string, 0, len(l.Players))
 			for _, p := range l.Players {
 				players = append(players, fmt.Sprintf("<@%s>", p.DiscordID))
 			}
-			return fmt.Sprintf("%s - %s\n%s", l.Mode.String(), link, strings.Join(players, ", "))
+
+			return fmt.Sprintf("%s (%s)- %s\n%s", d.cache.GuildGroupName(l.GetGroupID().String()), l.Mode.String(), link, strings.Join(players, ", "))
 		}), "\n"), Inline: false},
 	}
 
