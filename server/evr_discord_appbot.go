@@ -418,7 +418,7 @@ var (
 				},
 				{
 					Type:        discordgo.ApplicationCommandOptionInteger,
-					Name:        "timeout",
+					Name:        "timeout_mins",
 					Description: "Timeout in minutes",
 					Required:    false,
 				},
@@ -1967,6 +1967,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			caller := user
 			target := options[0].UserValue(s)
 
+			if target.Bot {
+				return simpleInteractionResponse(s, i, "Bots don't have accounts")
+			}
+
 			// Clear the cache of the caller and target
 			d.cache.Purge(caller.ID)
 			d.cache.Purge(target.ID)
@@ -1981,7 +1985,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return errors.New("player not found")
 			}
 
-			// Get the caller's nakama user ID
 			callerGuildGroups := make(map[string]*GuildGroup)
 			callerGuildGroups, err := GuildUserGroupsList(ctx, d.nk, callerUserID)
 			if err != nil {
@@ -1991,24 +1994,19 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			isSelf := caller.ID == target.ID
 
 			isGuildAuditor := false
-			if gg, ok := callerGuildGroups[groupID]; ok {
-				isGuildAuditor = gg.IsAuditor(callerUserID)
+			if gg, ok := callerGuildGroups[groupID]; ok && gg.IsAuditor(callerUserID) {
+				isGuildAuditor = true
+				d.cache.QueueSyncMember(i.GuildID, target.ID)
 			}
-
-			// Get the caller's nakama user ID
 
 			isGlobalModerator, err := CheckSystemGroupMembership(ctx, db, userIDStr, GroupGlobalModerators)
 			if err != nil {
 				return errors.New("error checking global moderator status")
 			}
 
-			d.cache.Purge(target.ID)
-			if isGuildAuditor {
-				d.cache.QueueSyncMember(i.GuildID, target.ID)
-			}
-			includePrivate := isSelf || isGlobalModerator
-			includePriviledged := includePrivate || isGuildAuditor
 			includeSystem := isGlobalModerator
+			includePrivate := isSelf || isGlobalModerator
+			includePriviledged := isSelf || isGlobalModerator || isGuildAuditor
 
 			return d.handleProfileRequest(ctx, logger, nk, s, i, target.ID, target.Username, includePriviledged, includePrivate, includeSystem)
 		},
