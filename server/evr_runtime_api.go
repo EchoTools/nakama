@@ -3,9 +3,11 @@ package server
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/heroiclabs/nakama-common/runtime"
 )
@@ -28,6 +30,12 @@ func NewAppAPI(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtim
 		logger: logger,
 		db:     db,
 		nk:     nk,
+		handlers: map[string]func(context.Context, http.ResponseWriter, *http.Request){
+			"/": func(ctx context.Context, w http.ResponseWriter, r *http.Request) {
+				// Respond to the request
+				w.Write([]byte("Hello, World!"))
+			},
+		},
 	}
 }
 
@@ -40,6 +48,14 @@ func NewAppAPIAcceptor(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 	node := config.GetName()
 	env := config.GetRuntime().Environment
 
+	var authErrorBody string
+
+	if data, err := json.Marshal(APIErrorMessage{Code: 0, Message: "Missing or invalid token"}); err != nil {
+		panic(err)
+	} else {
+		authErrorBody = string(data)
+	}
+
 	// This handler will be attached to the API Gateway server.
 	return func(w http.ResponseWriter, r *http.Request) {
 
@@ -49,7 +65,7 @@ func NewAppAPIAcceptor(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 			// Attempt header based authentication.
 			const prefix = "Bearer "
 			if !strings.HasPrefix(auth[0], prefix) {
-				http.Error(w, "Missing or invalid token", 401)
+				http.Error(w, authErrorBody, 401)
 				return
 			}
 			token = auth[0][len(prefix):]
@@ -58,13 +74,12 @@ func NewAppAPIAcceptor(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 			token = r.URL.Query().Get("token")
 		}
 		if token == "" {
-			http.Error(w, "Missing or invalid token", 401)
+			http.Error(w, authErrorBody, 401)
 			return
 		}
-
-		applicationID, userID, username, vars, _, _, _, ok := parseApplicationToken([]byte(signingKey), token)
-		if !ok {
-			http.Error(w, "Missing or invalid token", 401)
+		userID, username, vars, expiry, _, _, ok := parseToken([]byte(signingKey), token)
+		if !ok || expiry < time.Now().Unix() {
+			http.Error(w, authErrorBody, 401)
 			return
 		}
 
@@ -74,8 +89,11 @@ func NewAppAPIAcceptor(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 			clientIP = r.RemoteAddr
 			clientPort = ""
 		}
-
-		ctx := NewDeveloperAppContext(r.Context(), node, "", env, r.Header, r.URL.Query(), userID.String(), username, vars, clientIP, clientPort, applicationID.String())
+		appID, ok := vars[DEVAPP_CTX_APP_ID]
+		if !ok {
+			http.Error(w, authErrorBody, 401)
+		}
+		ctx := NewDeveloperAppContext(r.Context(), node, "", env, r.Header, r.URL.Query(), userID.String(), username, vars, clientIP, clientPort, appID)
 
 		// Get the api path from the request
 		path := r.URL.Path

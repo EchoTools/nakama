@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/gofrs/uuid/v5"
@@ -113,10 +114,15 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	appAcceptorFn := NewAppAPIAcceptor(ctx, logger, db, nk, initializer)
 
 	// Register HTTP Handler for the evr/api service
-	if err := initializer.RegisterHttp("evr/api/(.+)", appAcceptorFn, "GET", "POST"); err != nil {
+	if err := initializer.RegisterHttp("/apievr/v1/{id:.*}", appAcceptorFn, http.MethodGet, http.MethodPost); err != nil {
 		return fmt.Errorf("unable to register /evr/api service: %w", err)
 	}
 
+	if err := initializer.RegisterHttp("/test", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("You hit the new endpoint!"))
+	}); err != nil {
+		return err
+	}
 	// Register the socket acceptor for EVR clients
 
 	/*

@@ -12,24 +12,29 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 )
 
+const (
+	StorageCollectionDeveloper = "Developer"
+	StorageKeyApplications     = "applications"
+)
+
 var _ = Storable(&DeveloperApplications{})
 
 type DeveloperApplications struct {
-	Applications []DeveloperApplication `json:"applications"`
+	Applications []DeveloperApplication `json:StorageKeyApplications`
 }
 
 func (DeveloperApplications) StorageID() StorageID {
 	return StorageID{
-		Collection: "Developer",
-		Key:        "applications",
+		Collection: StorageCollectionDeveloper,
+		Key:        StorageKeyApplications,
 	}
 }
 
 func (DeveloperApplications) StorageIndex() *StorageIndexMeta {
 	return &StorageIndexMeta{
 		Name:       "developerApplicationTokens",
-		Collection: "Developer",
-		Key:        "applications",
+		Collection: StorageCollectionDeveloper,
+		Key:        StorageKeyApplications,
 		Fields:     []string{"value.applications.token"},
 		MaxEntries: 10000,
 		IndexOnly:  true,
