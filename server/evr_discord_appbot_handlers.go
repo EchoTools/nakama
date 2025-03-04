@@ -83,7 +83,7 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(logger runtime.Logge
 			return simpleInteractionResponse(s, i, "You must be a guild allocator to use this command.")
 		}
 
-	case "trigger-cv", "kick-player", "join-player", "igp":
+	case "trigger-cv", "kick-player", "join-player", "igp", "ign":
 
 		gg := d.guildGroupRegistry.Get(uuid.FromStringOrNil(groupID))
 		if gg == nil {

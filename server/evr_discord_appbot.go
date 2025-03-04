@@ -411,6 +411,18 @@ var (
 			Description: "Use the mod panel.",
 		},
 		{
+			Name:        "ign",
+			Description: "Set in-game-name override.",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "display-name",
+					Description: "Your in-game name.",
+					Required:    true,
+				},
+			},
+		},
+		{
 			Name:        "kick-player",
 			Description: "Kick a player's sessions.",
 			Options: []*discordgo.ApplicationCommandOption{
@@ -1251,6 +1263,37 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			return nil
 
 		},
+		"ign": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+
+			options := i.ApplicationCommandData().Options
+			if len(options) == 0 {
+				return errors.New("no options provided")
+			}
+			displayName := options[0].StringValue()
+
+			md, err := AccountMetadataLoad(ctx, nk, userID)
+			if err != nil {
+				return fmt.Errorf("failed to load account metadata: %w", err)
+			}
+
+			if displayName == "" || displayName == "-" || displayName == user.Username {
+				delete(md.GuildDisplayNameOverrides, groupID)
+			} else {
+				if md.GuildDisplayNameOverrides == nil {
+					md.GuildDisplayNameOverrides = make(map[string]string)
+				}
+				md.GuildDisplayNameOverrides[groupID] = displayName
+			}
+
+			return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Flags:   discordgo.MessageFlagsEphemeral,
+					Content: "Your display name has been updated.",
+				},
+			})
+		},
+
 		"igp": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 
 			// find the user in the streams
