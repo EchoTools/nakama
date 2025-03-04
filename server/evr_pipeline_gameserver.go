@@ -88,7 +88,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(ctx context.Context, logger 
 	logger = logger.With(zap.String("uid", userIDStr), zap.String("discord_id", params.DiscordID()))
 
 	// Get a list of the user's guild memberships and set to the largest one
-	guildGroups, err := GuildUserGroupsList(ctx, p.nk, userIDStr)
+	guildGroups, err := GuildUserGroupsList(ctx, p.nk, p.guildGroupRegistry, userIDStr)
 	if err != nil {
 		return fmt.Errorf("failed to get guild groups: %w", err)
 	}

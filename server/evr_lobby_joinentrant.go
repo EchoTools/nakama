@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
@@ -189,75 +190,69 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		return errors.New("failed to get session parameters")
 	}
 	var err error
-	var groupMetadata *GroupMetadata
 
 	isMember := false
 
-	if guildGroup, ok := params.guildGroups[groupID]; ok {
-		groupMetadata = &guildGroup.GroupMetadata
-
+	gg, ok := params.guildGroups[groupID]
+	if ok {
 		// If there is no member role, the user is considered a member if they are in the discord guild.
-		isMember = groupMetadata.Roles.Member == "" || groupMetadata.IsMember(userID)
-
+		isMember = gg.RoleMap.Member == "" || gg.IsMember(userID)
 	} else {
-		groupMetadata, err = GetGuildGroupMetadata(ctx, p.db, groupID)
-		if err != nil {
-			return fmt.Errorf("failed to get guild group metadata: %w", err)
-		}
+		gg = p.guildGroupRegistry.Get(uuid.FromStringOrNil(groupID))
 	}
 
-	sendAuditMessage := groupMetadata.AuditChannelID != ""
+	sendAuditMessage := gg.AuditChannelID != ""
 
 	// User is not a member of the group.
-	if groupMetadata.MembersOnlyMatchmaking && !isMember {
+	if gg.MembersOnlyMatchmaking && !isMember {
 
 		metricsTags["error"] = "not_member"
 		if sendAuditMessage {
 			if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("Rejected non-member <@%s>", userID), true); err != nil {
-				p.logger.Warn("Failed to send audit message", zap.String("channel_id", groupMetadata.AuditChannelID), zap.Error(err))
+				p.logger.Warn("Failed to send audit message", zap.String("channel_id", gg.AuditChannelID), zap.Error(err))
 			}
 		}
 		return NewLobbyError(KickedFromLobbyGroup, "user does not have member role")
 	}
 
 	// User is suspended from the group.
-	if groupMetadata.IsSuspended(userID, &params.xpID) {
+	if gg.IsSuspended(userID, &params.xpID) {
 
 		metricsTags["error"] = "suspended_user"
 		if sendAuditMessage {
 			if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("Rejected suspended user <@%s>", userID), true); err != nil {
-				p.logger.Warn("Failed to send audit message", zap.String("channel_id", groupMetadata.AuditChannelID), zap.Error(err))
+				p.logger.Warn("Failed to send audit message", zap.String("channel_id", gg.AuditChannelID), zap.Error(err))
 			}
 		}
 
 		return ErrSuspended
 	}
 
-	if found, expiry := groupMetadata.IsTimedOut(userID); found {
+	if found, expiry := gg.IsTimedOut(userID); found {
 		metricsTags["error"] = "timed_out_user"
 		if sendAuditMessage {
 			if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("Rejected timed out user <@%s> (timeout expires <t:%d:R>)", userID, expiry.Unix()), true); err != nil {
-				p.logger.Warn("Failed to send audit message", zap.String("channel_id", groupMetadata.AuditChannelID), zap.Error(err))
+				p.logger.Warn("Failed to send audit message", zap.String("channel_id", gg.AuditChannelID), zap.Error(err))
 			}
 		}
 		return NewLobbyError(KickedFromLobbyGroup, fmt.Sprintf("Timeout will expire in %d minutes.", int(expiry.Sub(time.Now()).Minutes()+0.50)))
 	}
 
-	if groupMetadata.IsLimitedAccess(userID) {
+	if gg.IsLimitedAccess(userID) {
 
 		switch lobbyParams.Mode {
 		case evr.ModeArenaPublic, evr.ModeCombatPublic, evr.ModeSocialPublic:
 			metricsTags["error"] = "limited_access_user"
 			if sendAuditMessage {
 				if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("Rejected limited access user <@%s>", userID), true); err != nil {
-					p.logger.Warn("Failed to send audit message", zap.String("channel_id", groupMetadata.AuditChannelID), zap.Error(err))
+					p.logger.Warn("Failed to send audit message", zap.String("channel_id", gg.AuditChannelID), zap.Error(err))
 				}
 			}
 			return NewLobbyError(KickedFromLobbyGroup, "user does not have access social lobbies or matchmaking.")
 		}
 	}
 
-	if groupMetadata.MinimumAccountAgeDays > 0 && groupMetadata.IsAccountAgeBypass(userID) {
+	if gg.MinimumAccountAgeDays > 0 && gg.IsAccountAgeBypass(userID) {
 		// Check the account creation date.
 		discordID, err := GetDiscordIDByUserID(ctx, p.db, userID)
 		if err != nil {
@@ -269,7 +264,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 			return fmt.Errorf("failed to get discord snowflake timestamp: %w", err)
 		}
 
-		if t.After(time.Now().AddDate(0, 0, -groupMetadata.MinimumAccountAgeDays)) {
+		if t.After(time.Now().AddDate(0, 0, -gg.MinimumAccountAgeDays)) {
 
 			if sendAuditMessage {
 
@@ -277,8 +272,8 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 
 				metricsTags["error"] = "account_age"
 
-				if _, err := p.appBot.dg.ChannelMessageSend(groupMetadata.AuditChannelID, fmt.Sprintf("Rejected user <@%s> because of account age (%d days).", discordID, int(accountAge))); err != nil {
-					p.logger.Warn("Failed to send audit message", zap.String("channel_id", groupMetadata.AuditChannelID), zap.Error(err))
+				if _, err := p.appBot.dg.ChannelMessageSend(gg.AuditChannelID, fmt.Sprintf("Rejected user <@%s> because of account age (%d days).", discordID, int(accountAge))); err != nil {
+					p.logger.Warn("Failed to send audit message", zap.String("channel_id", gg.AuditChannelID), zap.Error(err))
 				}
 			}
 
@@ -286,10 +281,10 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		}
 	}
 
-	if groupMetadata.BlockVPNUsers && params.isVPN && !groupMetadata.IsVPNBypass(userID) && params.ipInfo != nil {
+	if gg.BlockVPNUsers && params.isVPN && !gg.IsVPNBypass(userID) && params.ipInfo != nil {
 		metricsTags["error"] = "vpn_user"
 
-		if params.ipInfo.FraudScore() >= groupMetadata.FraudScoreThreshold {
+		if params.ipInfo.FraudScore() >= gg.FraudScoreThreshold {
 
 			var fields []*discordgo.MessageEmbedField
 
@@ -356,8 +351,8 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 				message := &discordgo.MessageSend{
 					Embeds: []*discordgo.MessageEmbed{embed},
 				}
-				if _, err := p.appBot.dg.ChannelMessageSendComplex(groupMetadata.AuditChannelID, message); err != nil {
-					p.logger.Warn("Failed to send audit message", zap.String("channel_id", groupMetadata.AuditChannelID), zap.Error(err))
+				if _, err := p.appBot.dg.ChannelMessageSendComplex(gg.AuditChannelID, message); err != nil {
+					p.logger.Warn("Failed to send audit message", zap.String("channel_id", gg.AuditChannelID), zap.Error(err))
 				}
 			}
 
@@ -370,8 +365,8 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		}
 	}
 
-	if len(groupMetadata.AllowedFeatures) > 0 {
-		allowedFeatures := groupMetadata.AllowedFeatures
+	if len(gg.AllowedFeatures) > 0 {
+		allowedFeatures := gg.AllowedFeatures
 		for _, feature := range params.supportedFeatures {
 			if !slices.Contains(allowedFeatures, feature) {
 				return NewLobbyError(KickedFromLobbyGroup, "This guild does not allow clients with `feature DLLs`.")
@@ -398,7 +393,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		return fmt.Errorf("failed to create user server profile: %w", err)
 	}
 
-	if groupMetadata.IsModerator(userID) && params.isGoldNameTag.Load() && profile.DeveloperFeatures == nil {
+	if gg.IsModerator(userID) && params.isGoldNameTag.Load() && profile.DeveloperFeatures == nil {
 		// Give the user a gold name if they are enabled as a moderator in the guild, and want it.
 		profile.DeveloperFeatures = &evr.DeveloperFeatures{}
 	}

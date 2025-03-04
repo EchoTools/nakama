@@ -21,6 +21,10 @@ func ServiceSettings() *GlobalSettingsData {
 	return serviceSettings.Load()
 }
 
+func ServiceSettingsUpdate(data *GlobalSettingsData) {
+	serviceSettings.Store(data)
+}
+
 type GlobalSettingsData struct {
 	DisableLoginMessage      string                    `json:"disable_login_message"` // Disable the login, and show this message
 	ServiceGuildID           string                    `json:"service_guild_id"`      // Central/Support guild ID
@@ -33,6 +37,7 @@ type GlobalSettingsData struct {
 	ReportURL                string              `json:"report_url"`         // URL to report issues
 	GlobalAuditChannelID     string              `json:"global_audit_channel_id"`
 	GlobalErrorChannelID     string              `json:"global_error_channel_id"`
+	DiscordBotUserID         string              `json:"discord_bot_user_id"`
 }
 
 type GlobalMatchmakingSettings struct {
@@ -69,10 +74,6 @@ type ServerRatings struct {
 	ByOperatorID map[string]float64 `json:"by_operator_id"`
 }
 
-func GlobalSettings() *GlobalSettingsData {
-	return serviceSettings.Load()
-}
-
 func (g *GlobalSettingsData) String() string {
 	data, _ := json.Marshal(g)
 	return string(data)
@@ -82,7 +83,7 @@ func (g GlobalSettingsData) UseSkillBasedMatchmaking() bool {
 	return !g.Matchmaking.DisableSBMM
 }
 
-func LoadGlobalSettingsData(ctx context.Context, nk runtime.NakamaModule) (*GlobalSettingsData, error) {
+func ServiceSettingsLoad(ctx context.Context, nk runtime.NakamaModule) (*GlobalSettingsData, error) {
 
 	objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
 		{
@@ -195,4 +196,23 @@ func LoadGlobalSettingsData(ctx context.Context, nk runtime.NakamaModule) (*Glob
 	serviceSettings.Store(&data)
 
 	return &data, nil
+}
+
+func ServiceSettingsSave(ctx context.Context, nk runtime.NakamaModule) error {
+	data := ServiceSettings()
+	data.version = ""
+
+	_, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{{
+		Collection:      GlobalSettingsStorageCollection,
+		Key:             GlobalSettingsKey,
+		UserID:          SystemUserID,
+		PermissionRead:  0,
+		PermissionWrite: 0,
+		Value:           data.String(),
+	}})
+	if err != nil {
+		return fmt.Errorf("failed to write global settings: %w", err)
+	}
+
+	return nil
 }

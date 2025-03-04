@@ -45,14 +45,16 @@ type DiscordAppBot struct {
 	cancelFn context.CancelFunc
 	logger   runtime.Logger
 
-	config          Config
-	metrics         Metrics
-	pipeline        *Pipeline
-	profileRegistry *ProfileCache
-	statusRegistry  StatusRegistry
-	nk              runtime.NakamaModule
-	db              *sql.DB
-	dg              *discordgo.Session
+	nk runtime.NakamaModule
+	db *sql.DB
+	dg *discordgo.Session
+
+	config             Config
+	metrics            Metrics
+	pipeline           *Pipeline
+	profileRegistry    *ProfileCache
+	statusRegistry     StatusRegistry
+	guildGroupRegistry *GuildGroupRegistry
 
 	cache       *DiscordIntegrator
 	ipInfoCache *IPInfoCache
@@ -67,7 +69,7 @@ type DiscordAppBot struct {
 	prepareMatchRateLimiters  *MapOf[string, *rate.Limiter]
 }
 
-func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, metrics Metrics, pipeline *Pipeline, config Config, discordCache *DiscordIntegrator, profileRegistry *ProfileCache, statusRegistry StatusRegistry, dg *discordgo.Session, ipInfoCache *IPInfoCache) (*DiscordAppBot, error) {
+func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, metrics Metrics, pipeline *Pipeline, config Config, discordCache *DiscordIntegrator, profileRegistry *ProfileCache, statusRegistry StatusRegistry, dg *discordgo.Session, ipInfoCache *IPInfoCache, guildGroupRegistry *GuildGroupRegistry) (*DiscordAppBot, error) {
 
 	logger = logger.WithField("system", "discordAppBot")
 
@@ -81,12 +83,12 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 		metrics:  metrics,
 		config:   config,
 
-		profileRegistry: profileRegistry,
-		statusRegistry:  statusRegistry,
-
-		cache:       discordCache,
-		ipInfoCache: ipInfoCache,
-		choiceCache: &MapOf[string, []*discordgo.ApplicationCommandOptionChoice]{},
+		profileRegistry:    profileRegistry,
+		statusRegistry:     statusRegistry,
+		guildGroupRegistry: guildGroupRegistry,
+		cache:              discordCache,
+		ipInfoCache:        ipInfoCache,
+		choiceCache:        &MapOf[string, []*discordgo.ApplicationCommandOptionChoice]{},
 
 		dg: dg,
 
@@ -127,6 +129,15 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 		if err != nil {
 			logger.Error("Error creating discordbot user: %s", err)
 		}
+
+		// Update the global settings with the bots ID
+		settings := *ServiceSettings()
+		settings.DiscordBotUserID = userID
+		ServiceSettingsUpdate(&settings)
+		if err := ServiceSettingsSave(ctx, nk); err != nil {
+			logger.Error("Error saving global settings: %s", err)
+		}
+
 		appbot.userID = userID
 		// Synchronize the guilds with nakama groups
 
@@ -875,17 +886,6 @@ var (
 		},
 	}
 )
-
-// InitializeDiscordBot initializes the discord bot and synchronizes the guilds with nakama groups. It also registers the bot's handlers.
-func (d *DiscordAppBot) InitializeDiscordBot() error {
-
-	bot := d.dg
-	if bot == nil {
-		return nil
-	}
-
-	return nil
-}
 
 func (d *DiscordAppBot) UnregisterCommandsAll(ctx context.Context, logger runtime.Logger, dg *discordgo.Session) {
 	guilds, err := dg.UserGuilds(100, "", "", false)
@@ -1986,7 +1986,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			callerGuildGroups := make(map[string]*GuildGroup)
-			callerGuildGroups, err := GuildUserGroupsList(ctx, d.nk, callerUserID)
+			callerGuildGroups, err := GuildUserGroupsList(ctx, d.nk, d.guildGroupRegistry, callerUserID)
 			if err != nil {
 				return fmt.Errorf("failed to get guild groups: %w", err)
 			}
@@ -2437,21 +2437,15 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					timeoutExpiry = time.Now().Add(time.Duration(o.IntValue()) * time.Minute)
 				}
 			}
-
-			metadata, err := GetGuildGroupMetadata(ctx, d.db, groupID)
-			if err != nil {
-				return errors.New("failed to get guild group metadata")
+			gg := d.guildGroupRegistry.Get(uuid.FromStringOrNil(groupID))
+			if gg == nil {
+				return errors.New("failed to get guild group")
 			}
 
-			metadata.CommunityValuesUserIDsAdd(targetUserID, timeoutExpiry)
+			gg.CommunityValuesUserIDsAdd(targetUserID, timeoutExpiry)
 
-			data, err := metadata.MarshalToMap()
-			if err != nil {
-				return fmt.Errorf("error marshalling group data: %w", err)
-			}
-
-			if err := nk.GroupUpdate(ctx, groupID, SystemUserID, "", "", "", "", "", false, data, 1000000); err != nil {
-				return fmt.Errorf("error updating group: %w", err)
+			if err := GuildGroupStore(ctx, nk, gg); err != nil {
+				return errors.New("failed to store guild group")
 			}
 
 			presences, err := d.nk.StreamUserList(StreamModeService, targetUserID, "", StreamLabelMatchService, false, true)
@@ -2534,21 +2528,17 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			cnt := 0
 
 			if !timeoutExpiry.IsZero() {
-				metadata, err := GetGuildGroupMetadata(ctx, d.db, groupID)
-				if err != nil {
-					return errors.New("failed to get guild group metadata")
+				gg := d.guildGroupRegistry.Get(uuid.FromStringOrNil(groupID))
+				if gg == nil {
+					return errors.New("failed to get guild group")
 				}
 
-				metadata.TimeoutAdd(targetUserID, timeoutExpiry)
+				gg.TimeoutAdd(targetUserID, timeoutExpiry)
 
-				data, err := metadata.MarshalToMap()
-				if err != nil {
-					return fmt.Errorf("error marshalling group data: %w", err)
+				if err := GuildGroupStore(ctx, nk, gg); err != nil {
+					return errors.New("failed to store guild group")
 				}
 
-				if err := nk.GroupUpdate(ctx, groupID, SystemUserID, "", "", "", "", "", false, data, 1000000); err != nil {
-					return fmt.Errorf("error updating group: %w", err)
-				}
 			}
 
 			result := ""
@@ -2672,12 +2662,12 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			// Get the metadata
-			metadata, err := GetGuildGroupMetadata(ctx, d.db, groupID)
+			metadata, err := GroupMetadataLoad(ctx, d.db, groupID)
 			if err != nil {
 				return errors.New("failed to get guild group metadata")
 
 			}
-			roles := metadata.Roles
+			roles := metadata.RoleMap
 			for _, o := range options {
 				roleID := o.RoleValue(s, guild.ID).ID
 				switch o.Name {
@@ -2704,6 +2694,12 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			if err := nk.GroupUpdate(ctx, groupID, SystemUserID, "", "", "", "", "", false, data, 1000000); err != nil {
 				return fmt.Errorf("error updating group: %w", err)
 			}
+
+			gg, err := GuildGroupLoad(ctx, nk, groupID)
+			if err != nil {
+				return errors.New("failed to load guild group")
+			}
+			d.guildGroupRegistry.Add(gg)
 
 			return simpleInteractionResponse(s, i, "roles set!")
 		},
@@ -3967,13 +3963,13 @@ func (d *DiscordAppBot) LogAuditMessage(ctx context.Context, groupID string, mes
 		message = d.cache.ReplaceMentions(message)
 	}
 
-	groupMetadata, err := GetGuildGroupMetadata(ctx, d.db, groupID)
-	if err != nil {
-		return nil, err
+	gg := d.guildGroupRegistry.Get(uuid.FromStringOrNil(groupID))
+	if gg == nil {
+		return nil, fmt.Errorf("group not found")
 	}
 
-	if groupMetadata.AuditChannelID != "" {
-		return d.dg.ChannelMessageSend(groupMetadata.AuditChannelID, message)
+	if gg.AuditChannelID != "" {
+		return d.dg.ChannelMessageSend(gg.AuditChannelID, message)
 	}
 
 	if cID := ServiceSettings().GlobalAuditChannelID; cID != "" {
@@ -3988,13 +3984,13 @@ func (d *DiscordAppBot) LogUserErrorMessage(ctx context.Context, groupID string,
 		message = d.cache.ReplaceMentions(message)
 	}
 
-	groupMetadata, err := GetGuildGroupMetadata(ctx, d.db, groupID)
-	if err != nil {
-		return nil, err
+	gg := d.guildGroupRegistry.Get(uuid.FromStringOrNil(groupID))
+	if gg == nil {
+		return nil, fmt.Errorf("group not found")
 	}
 
-	if groupMetadata.ErrorChannelID != "" {
-		return d.dg.ChannelMessageSend(groupMetadata.ErrorChannelID, message)
+	if gg.ErrorChannelID != "" {
+		return d.dg.ChannelMessageSend(gg.ErrorChannelID, message)
 	}
 
 	if cID := ServiceSettings().GlobalErrorChannelID; cID != "" {

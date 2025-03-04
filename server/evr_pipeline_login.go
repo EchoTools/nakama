@@ -448,7 +448,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	metadataUpdated := false
 
 	// Get the GroupID from the user's metadata
-	params.guildGroups, err = GuildUserGroupsList(ctx, p.nk, params.account.User.Id)
+	params.guildGroups, err = GuildUserGroupsList(ctx, p.nk, p.guildGroupRegistry, params.account.User.Id)
 	if err != nil {
 		metricsTags["error"] = "failed_get_guild_groups"
 		return fmt.Errorf("failed to get guild groups: %w", err)
@@ -506,7 +506,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	// Update in-memory account metadata for guilds that the user has
 	// the force username role.
 	for groupID, gg := range params.guildGroups {
-		if gg.HasRole(session.userID.String(), gg.Roles.UsernameOnly) {
+		if gg.HasRole(session.userID.String(), gg.RoleMap.UsernameOnly) {
 			params.accountMetadata.GroupDisplayNames[groupID] = params.account.User.Username
 		}
 	}
@@ -616,7 +616,7 @@ func (p *EvrPipeline) channelInfoRequest(ctx context.Context, logger *zap.Logger
 			ChannelUuid:  strings.ToUpper(g.ID().String()),
 			Name:         g.Name(),
 			Description:  g.Description(),
-			Rules:        g.Description() + "\n" + g.RulesText,
+			Rules:        g.Description() + "\n" + g.State.RulesText,
 			RulesVersion: 1,
 			Link:         fmt.Sprintf("https://discord.gg/channel/%s", g.GuildID),
 			Priority:     uint64(i),
@@ -693,52 +693,33 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 		return errors.New("session parameters not found")
 	}
 
-	guildGroups := params.guildGroups
-
 	userID := session.userID.String()
-	for groupID := range guildGroups {
 
-		gg, found := guildGroups[groupID]
-		if !found {
-			return fmt.Errorf("guild group not found: %s", params.accountMetadata.GetActiveGroupID().String())
-		}
+	gg := p.guildGroupRegistry.Get(params.accountMetadata.GetActiveGroupID())
+	if gg == nil {
+		return fmt.Errorf("guild group not found: %s", params.accountMetadata.GetActiveGroupID().String())
+	}
 
-		if gg.MustCompleteCommunityValues(userID) {
+	if gg.MustCompleteCommunityValues(userID) {
 
-			hasCompleted := update.Social.CommunityValuesVersion != 0
+		hasCompleted := update.Social.CommunityValuesVersion != 0
 
-			if hasCompleted {
-				if md, err := GetGuildGroupMetadata(ctx, p.db, groupID); err != nil {
-					return fmt.Errorf("failed to get guild group metadata: %w", err)
-				} else {
+		if hasCompleted {
 
-					// Remove them from the list
-					md.CommunityValuesUserIDsRemove(userID)
+			// Remove them from the list
+			gg.CommunityValuesUserIDsRemove(userID)
 
-					// Update the group
+			// Update the group
 
-					md, err := md.MarshalToMap()
-					if err != nil {
-						return fmt.Errorf("failed to marshal guild group: %w", err)
-					}
+			if err := GuildGroupStore(ctx, p.nk, gg); err != nil {
+				return fmt.Errorf("failed to store guild group: %w", err)
+			}
 
-					if err := p.nk.GroupUpdate(ctx, groupID, SystemUserID, "", "", "", "", "", false, md, 1000000); err != nil {
-						return fmt.Errorf("error updating group: %w", err)
-					}
+			params.guildGroups[gg.ID().String()] = gg
 
-					// Update params too
-					params.guildGroups, err = GuildUserGroupsList(ctx, p.nk, params.account.User.Id)
-					if err != nil {
-						return fmt.Errorf("failed to get guild user groups: %w", err)
-					} else {
-						StoreParams(ctx, &params)
-					}
-
-					// Log the audit message
-					if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("User <@%s> has accepted the community values.", params.DiscordID()), false); err != nil {
-						logger.Warn("Failed to log audit message", zap.Error(err))
-					}
-				}
+			// Log the audit message
+			if _, err := p.appBot.LogAuditMessage(ctx, gg.IDStr(), fmt.Sprintf("User <@%s> has accepted the community values.", params.DiscordID()), false); err != nil {
+				logger.Warn("Failed to log audit message", zap.Error(err))
 			}
 		}
 	}

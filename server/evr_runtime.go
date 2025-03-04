@@ -222,7 +222,7 @@ func RegisterIndexes(initializer runtime.Initializer) error {
 	}
 
 	// Register storage indexes for any Storables
-	storables := []Storable{
+	storables := []IndexedStorable{
 		&DisplayNameHistory{},
 		&LoginHistory{},
 		&DeveloperApplications{},
@@ -323,30 +323,6 @@ func GetGuildIDByGroupID(ctx context.Context, db *sql.DB, groupID string) (guild
 	}
 
 	return dbGuildID, nil
-}
-
-func GetGuildGroupMetadata(ctx context.Context, db *sql.DB, groupID string) (*GroupMetadata, error) {
-	// Look for an existing account.
-	query := "SELECT metadata FROM groups WHERE id = $1"
-	var dbGuildMetadataJSON string
-	var found = true
-	var err error
-	if err = db.QueryRowContext(ctx, query, groupID).Scan(&dbGuildMetadataJSON); err != nil {
-		if err == sql.ErrNoRows {
-			found = false
-		} else {
-			return nil, fmt.Errorf("error finding guild metadata: %w", err)
-		}
-	}
-	if !found {
-		return nil, status.Error(codes.NotFound, "guild ID not found")
-	}
-
-	metadata := &GroupMetadata{}
-	if err := json.Unmarshal([]byte(dbGuildMetadataJSON), metadata); err != nil {
-		return nil, status.Error(codes.Internal, "error unmarshalling guild metadata")
-	}
-	return metadata, nil
 }
 
 func MatchLabelByID(ctx context.Context, nk runtime.NakamaModule, matchID MatchID) (*MatchLabel, error) {

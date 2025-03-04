@@ -107,7 +107,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		whoami.HasPassword = account.GetEmail() != ""
 	}
 
-	guildGroups, err := GuildUserGroupsList(ctx, nk, userID.String())
+	guildGroups, err := GuildUserGroupsList(ctx, nk, d.guildGroupRegistry, userID.String())
 	if err != nil {
 		return fmt.Errorf("error getting guild groups: %w", err)
 	}
@@ -343,54 +343,54 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 			})
 
 			for _, group := range whoami.GuildGroups {
+
+				sameGuild := group.GuildID == i.GuildID
 				groupStr := group.Name()
 
-				if group.GuildID != i.GuildID && !includePriviledged {
-					output = append(output, groupStr)
-					continue
-				}
+				if includePrivate || (includePriviledged && sameGuild) {
 
-				if !includePrivate {
-					continue
-				}
+					// Add the roles
+					activeRoleMap := map[string]bool{
+						"matchmaking":    group.IsAllowedMatchmaking(userIDStr),
+						"auditor":        group.IsAuditor(userIDStr),
+						"moderator":      group.IsModerator(userIDStr),
+						"server-host":    group.IsServerHost(userIDStr),
+						"allocator":      group.IsAllocator(userIDStr),
+						"api-access":     group.IsAPIAccess(userIDStr),
+						"suspended":      group.IsSuspended(userIDStr, nil),
+						"vpn-bypass":     group.IsVPNBypass(userIDStr),
+						"limited-access": group.IsLimitedAccess(userIDStr),
+					}
 
-				roles := make([]string, 0)
-				if group.IsAllowedMatchmaking(userIDStr) {
-					roles = append(roles, "matchmaking")
-				}
-				if group.IsAuditor(userIDStr) {
-					roles = append(roles, "auditor")
-				}
-				if group.IsModerator(userIDStr) {
-					roles = append(roles, "moderator")
-				}
-				if group.IsServerHost(userIDStr) {
-					roles = append(roles, "server-host")
-				}
-				if group.IsAllocator(userIDStr) {
-					roles = append(roles, "allocator")
-				}
-				if group.IsAPIAccess(userIDStr) {
-					roles = append(roles, "api-access")
-				}
-				if group.IsSuspended(userIDStr, nil) {
-					roles = append(roles, "suspended")
-				}
-				if group.IsVPNBypass(userIDStr) {
-					roles = append(roles, "vpn-bypass")
-				}
-				if group.IsLimitedAccess(userIDStr) {
-					roles = append(roles, "limited-access")
-				}
+					if g, err := dg.State.Guild(group.GuildID); err == nil {
+						if whoami.DiscordID == g.OwnerID {
+							activeRoleMap["owner"] = true
+						}
+					}
 
-				if len(roles) > 0 {
-					groupStr += fmt.Sprintf(" (%s)", strings.Join(roles, ", "))
+					roles := make([]string, 0, len(activeRoleMap))
+					for role, ok := range activeRoleMap {
+						if ok {
+							roles = append(roles, role)
+						}
+					}
+
+					slices.SortStableFunc(roles, func(a, b string) int {
+						return int(slices.Index([]string{"owner", "moderator", "auditor", "server-host", "allocator", "matchmaking", "api-access", "vpn-bypass", "limited-access", "suspended"}, a) - slices.Index([]string{"owner", "moderator", "auditor", "server-host", "allocator", "api-access", "suspended", "vpn-bypass", "limited-access", "matchmaking"}, b))
+					})
+
+					if len(roles) > 0 {
+						groupStr += fmt.Sprintf(" (%s)", strings.Join(roles, ", "))
+					}
+
 					if ok, expiry := group.IsTimedOut(userIDStr); ok {
 						groupStr += fmt.Sprintf("\n-  timeout expires <t:%d:R>", expiry.UTC().Unix())
 					}
 				}
+
 				output = append(output, groupStr)
 			}
+
 			return output
 		}(), "\n"), Inline: false},
 		{Name: "Match List", Value: strings.Join(lo.Map(whoami.MatchLabels, func(l *MatchLabel, index int) string {
