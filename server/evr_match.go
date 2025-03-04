@@ -437,7 +437,9 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 			logger.WithFields(map[string]interface{}{
 				"username": p.GetUsername(),
 				"uid":      p.GetUserId(),
-			}).Info("Join complete.")
+				"sid":      p.GetSessionId(),
+				"role":     fmt.Sprintf("%d", mp.RoleAlignment),
+			}).Info("Player joining the match.")
 			tags := map[string]string{
 				"mode":     state.Mode.String(),
 				"level":    state.Level.String(),
@@ -466,7 +468,14 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 	node := ctx.Value(runtime.RUNTIME_CTX_NODE).(string)
 
 	for _, p := range presences {
-		logger.WithField("presence", p).Debug("Player leaving the match.")
+
+		logger.WithFields(map[string]interface{}{
+			"username": p.GetUsername(),
+			"uid":      p.GetUserId(),
+			"sid":      p.GetSessionId(),
+			"reason":   p.GetReason(),
+			"duration": time.Since(state.joinTimestamps[p.GetSessionId()]),
+		}).Debug("Player leaving the match.")
 	}
 
 	if state.Started() && state.server == nil && len(state.presenceMap) == 0 {
