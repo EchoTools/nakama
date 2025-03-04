@@ -4,300 +4,22 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"reflect"
 	"slices"
 	"time"
 
-	"github.com/bits-and-blooms/bitset"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
-type GuildGroupRoles struct {
-	Member           string `json:"member"`
-	Moderator        string `json:"moderator"`
-	Auditor          string `json:"auditor"`
-	ServerHost       string `json:"server_host"`
-	Allocator        string `json:"allocator"`
-	Suspended        string `json:"suspended"`
-	LimitedAccess    string `json:"limited_access"` // Can Access Private matches only
-	APIAccess        string `json:"api_access"`
-	AccountAgeBypass string `json:"account_age_bypass"`
-	VPNBypass        string `json:"vpn_bypass"`
-	AccountLinked    string `json:"headset_linked"`
-	UsernameOnly     string `json:"username_only"`
-}
-
-// Roles returns a slice of role IDs
-func (r *GuildGroupRoles) AsSlice() []string {
-	roles := make([]string, 0)
-	for _, r := range []string{
-		r.Member,
-		r.Moderator,
-		r.ServerHost,
-		r.Allocator,
-		r.Suspended,
-		r.APIAccess,
-		r.AccountAgeBypass,
-		r.VPNBypass,
-		r.AccountLinked,
-		r.LimitedAccess,
-		r.UsernameOnly,
-	} {
-		if r != "" {
-			roles = append(roles, r)
-		}
-	}
-	slices.Sort(roles)
-	return slices.Compact(roles)
-}
-
-type GuildGroupMemberships map[string]guildGroupPermissions
-
-func (g GuildGroupMemberships) IsMember(groupID string) bool {
-	_, ok := g[groupID]
-	return ok
-}
-
-type GroupMetadata struct {
-	GuildID                            string                         `json:"guild_id"`                   // The guild ID
-	RulesText                          string                         `json:"rules_text"`                 // The rules text displayed on the main menu
-	MinimumAccountAgeDays              int                            `json:"minimum_account_age_days"`   // The minimum account age in days to be able to play echo on this guild's sessions
-	MembersOnlyMatchmaking             bool                           `json:"members_only_matchmaking"`   // Restrict matchmaking to members only (when this group is the active one)
-	DisableCreateCommand               bool                           `json:"disable_create_command"`     // Disable the public allocate command
-	ModeratorsHaveGoldNames            bool                           `json:"moderators_have_gold_names"` // Moderators have gold display names
-	Roles                              *GuildGroupRoles               `json:"roles"`                      // The roles text displayed on the main menu
-	RoleCache                          map[string]map[string]struct{} `json:"role_cache"`                 // The role cache
-	MatchmakingChannelIDs              map[string]string              `json:"matchmaking_channel_ids"`    // The matchmaking channel IDs
-	AuditChannelID                     string                         `json:"audit_channel_id"`           // The audit channel
-	ErrorChannelID                     string                         `json:"error_channel_id"`           // The error channel
-	BlockVPNUsers                      bool                           `json:"block_vpn_users"`            // Block VPN users
-	FraudScoreThreshold                int                            `json:"fraud_score_threshold"`      // The fraud score threshold
-	AllowedFeatures                    []string                       `json:"allowed_features"`           // Allowed features
-	LogAlternateAccounts               bool                           `json:"log_alternate_accounts"`     // Log alternate accounts
-	AlternateAccountNotificationExpiry time.Time                      `json:"alt_notification_threshold"` // Show alternate notifications newer than this time.
-	TimedOutUserIDs                    map[string]time.Time           `json:"timed_out_user_ids"`         // UserIDs that are required to go to community values when the first join the social lobby
-	CommunityValuesUserIDs             map[string]time.Time           `json:"community_values_user_ids"`  // UserIDs that are required to go to community values when the first join the social lobby
-	Suspensions                        map[evr.EvrId]string           `json:"suspended_devices"`          // map[XPID]UserID
-}
-
-func NewGuildGroupMetadata(guildID string) *GroupMetadata {
-	return &GroupMetadata{
-		GuildID:                guildID,
-		Roles:                  &GuildGroupRoles{},
-		RoleCache:              make(map[string]map[string]struct{}),
-		MatchmakingChannelIDs:  make(map[string]string),
-		AllowedFeatures:        make([]string, 0),
-		CommunityValuesUserIDs: make(map[string]time.Time),
-		Suspensions:            make(map[evr.EvrId]string),
-	}
-}
-
-func (g *GroupMetadata) MarshalMap() map[string]any {
-	m := make(map[string]any)
-	data, _ := json.Marshal(g)
-	_ = json.Unmarshal(data, &m)
-	return m
-}
-
-func (g *GroupMetadata) HasRole(userID string, role string) bool {
-	if userIDs, ok := g.RoleCache[role]; ok {
-		if _, ok := userIDs[userID]; ok {
-			return true
-		}
-	}
-	return false
-}
-
-func (g *GroupMetadata) IsServerHost(userID string) bool {
-	return g.HasRole(userID, g.Roles.ServerHost)
-}
-
-func (g *GroupMetadata) IsAllocator(userID string) bool {
-	return g.HasRole(userID, g.Roles.Allocator)
-}
-
-func (g *GroupMetadata) IsAuditor(userID string) bool {
-	if g.Roles.Auditor == "" {
-		return g.HasRole(userID, g.Roles.Moderator)
-	}
-	return g.HasRole(userID, g.Roles.Auditor)
-}
-
-func (g *GroupMetadata) IsModerator(userID string) bool {
-	return g.HasRole(userID, g.Roles.Moderator)
-}
-
-func (g *GroupMetadata) IsMember(userID string) bool {
-	return g.HasRole(userID, g.Roles.Member)
-}
-
-func (g *GroupMetadata) IsSuspended(userID string, xpid *evr.EvrId) bool {
-	if g.HasRole(userID, g.Roles.Suspended) {
-		return true
-	}
-	if xpid == nil {
-		return false
-	}
-
-	if g.Suspensions == nil {
-		return false
-	}
-
-	if userID, ok := g.Suspensions[*xpid]; ok {
-
-		// Check if the user is (still) suspended
-		if g.HasRole(userID, g.Roles.Suspended) {
-			return true
-		}
-
-		// Remove any suspended devices for this user
-		for xpid, uid := range g.Suspensions {
-			if uid == userID {
-				delete(g.Suspensions, xpid)
-			}
-		}
-	}
-
-	return false
-}
-
-func (g *GroupMetadata) IsLimitedAccess(userID string) bool {
-	return g.HasRole(userID, g.Roles.LimitedAccess)
-}
-
-func (g *GroupMetadata) IsAPIAccess(userID string) bool {
-	return g.HasRole(userID, g.Roles.APIAccess)
-}
-
-func (g *GroupMetadata) IsAccountAgeBypass(userID string) bool {
-	return g.HasRole(userID, g.Roles.AccountAgeBypass)
-}
-
-func (g *GroupMetadata) IsVPNBypass(userID string) bool {
-	return g.HasRole(userID, g.Roles.VPNBypass)
-}
-
-func (m *GroupMetadata) IsAllowedFeature(feature string) bool {
-	return slices.Contains(m.AllowedFeatures, feature)
-}
-
-func (m *GroupMetadata) IsAllowedMatchmaking(userID string) bool {
-	if !m.MembersOnlyMatchmaking {
-		return true
-	}
-
-	if userIDs, ok := m.RoleCache[m.Roles.Member]; ok {
-		if _, ok := userIDs[userID]; ok {
-			return true
-		}
-	}
-
-	return false
-}
-
-func (m *GroupMetadata) MustCompleteCommunityValues(userID string) bool {
-	if m.CommunityValuesUserIDs == nil {
-		return false
-	}
-	_, found := m.CommunityValuesUserIDs[userID]
-	return found
-}
-
-func (m *GroupMetadata) CommunityValuesUserIDsAdd(userID string, timeoutExpiry time.Time) {
-	if m.CommunityValuesUserIDs == nil {
-		m.CommunityValuesUserIDs = make(map[string]time.Time)
-	}
-	m.CommunityValuesUserIDs[userID] = time.Now().UTC()
-
-	if !timeoutExpiry.IsZero() {
-		m.TimeoutAdd(userID, timeoutExpiry)
-	}
-}
-
-func (m *GroupMetadata) CommunityValuesUserIDsRemove(userID string) bool {
-	if _, ok := m.CommunityValuesUserIDs[userID]; !ok {
-		return false
-	}
-	delete(m.CommunityValuesUserIDs, userID)
-	return true
-}
-
-func (m *GroupMetadata) TimeoutAdd(userID string, expiry time.Time) {
-	if m.TimedOutUserIDs == nil {
-		m.TimedOutUserIDs = make(map[string]time.Time)
-	}
-	if time.Now().After(expiry) {
-		delete(m.TimedOutUserIDs, userID)
-		return
-	}
-	m.TimedOutUserIDs[userID] = expiry
-}
-
-func (m *GroupMetadata) IsTimedOut(userID string) (bool, time.Time) {
-	if expiry, ok := m.TimedOutUserIDs[userID]; ok && time.Now().UTC().Before(expiry) {
-		return true, expiry
-	}
-	return false, time.Time{}
-}
-
-func (m *GroupMetadata) IsCommunityValues(userID string) bool {
-	if m.CommunityValuesUserIDs == nil {
-		return false
-	}
-
-	if expiry, ok := m.CommunityValuesUserIDs[userID]; ok && time.Now().UTC().Before(expiry) {
-		return true
-	}
-	return false
-}
-
-func (g *GroupMetadata) MarshalToMap() (map[string]interface{}, error) {
-
-	// Remove expired timeouts
-	for userID, expiry := range g.TimedOutUserIDs {
-		if time.Now().UTC().After(expiry) {
-			delete(g.TimedOutUserIDs, userID)
-		}
-	}
-
-	guildGroupBytes, err := json.Marshal(g)
-	if err != nil {
-		return nil, err
-	}
-
-	var guildGroupMap map[string]interface{}
-	err = json.Unmarshal(guildGroupBytes, &guildGroupMap)
-	if err != nil {
-		return nil, err
-	}
-
-	return guildGroupMap, nil
-}
-
-func UnmarshalGuildGroupMetadataFromMap(guildGroupMap map[string]interface{}) (*GroupMetadata, error) {
-	guildGroupBytes, err := json.Marshal(guildGroupMap)
-	if err != nil {
-		return nil, err
-	}
-
-	var g GroupMetadata
-	err = json.Unmarshal(guildGroupBytes, &g)
-	if err != nil {
-		return nil, err
-	}
-
-	return &g, nil
-}
-
 type GuildGroup struct {
 	GroupMetadata
+	State *GuildGroupState
 	Group *api.Group
 }
 
-func NewGuildGroup(group *api.Group) (*GuildGroup, error) {
+func NewGuildGroup(group *api.Group, state *GuildGroupState) (*GuildGroup, error) {
 
 	md := &GroupMetadata{}
 	if err := json.Unmarshal([]byte(group.Metadata), md); err != nil {
@@ -311,6 +33,7 @@ func NewGuildGroup(group *api.Group) (*GuildGroup, error) {
 
 	return &GuildGroup{
 		GroupMetadata: *md,
+		State:         state,
 		Group:         group,
 	}, nil
 }
@@ -327,25 +50,19 @@ func (g *GuildGroup) ID() uuid.UUID {
 	return uuid.FromStringOrNil(g.Group.Id)
 }
 
-func (g *GuildGroup) Size() int {
-	return int(g.Group.EdgeCount)
+func (g *GuildGroup) IDStr() string {
+	return g.Group.Id
 }
 
-// Roles returns a slice of role IDs
-func (g *GuildGroup) RolesUserList(userID string) []string {
-	roles := make([]string, 0, len(g.RoleCache))
-	for role, userIDs := range g.RoleCache {
-		if _, ok := userIDs[userID]; ok {
-			roles = append(roles, role)
-		}
-	}
-	return roles
+func (g *GuildGroup) Size() int {
+	return int(g.Group.EdgeCount)
 }
 
 func (g GuildGroup) MembershipBitSet(userID string) uint64 {
 	return guildGroupPermissions{
 		IsAllowedMatchmaking: g.IsAllowedMatchmaking(userID),
 		IsModerator:          g.IsModerator(userID),
+		IsAuditor:            g.IsAuditor(userID),
 		IsServerHost:         g.IsServerHost(userID),
 		IsAllocator:          g.IsAllocator(userID),
 		IsSuspended:          g.IsSuspended(userID, nil),
@@ -356,143 +73,282 @@ func (g GuildGroup) MembershipBitSet(userID string) uint64 {
 	}.ToUint64()
 }
 
-func (g *GuildGroup) RoleCacheUpdate(account *EVRAccount, current []string) bool {
+func (g GuildGroup) HasRole(userID, role string) bool {
+	g.State.RLock()
+	defer g.State.RUnlock()
+	return g.State.hasRole(userID, role)
+}
 
+func (g *GuildGroup) RoleCacheUpdate(account *EVRAccount, roles []string) bool {
+	g.State.Lock()
+	defer g.State.Unlock()
 	// Ensure the role cache has been initialized
-	if g.RoleCache == nil {
-		g.RoleCache = make(map[string]map[string]struct{})
-	}
-	relevantRoles := make(map[string]struct{}, len(g.Roles.AsSlice()))
-	for _, r := range g.Roles.AsSlice() {
-		relevantRoles[r] = struct{}{}
-		if _, ok := g.RoleCache[r]; !ok {
-			g.RoleCache[r] = make(map[string]struct{})
-		}
+	if g.State.RoleCache == nil {
+		g.State.RoleCache = make(map[string]map[string]struct{})
 	}
 
-	updated := false
+	g.State.updated = false
 
-	// Remove any roles that are not relevant
-	for role := range g.RoleCache {
-		if _, ok := relevantRoles[role]; !ok {
-			delete(g.RoleCache, role)
-			updated = true
+	roleSet := g.RoleMap.AsSet()
+	// Ignore irrelevant roles
+	for i := 0; i < len(roles); i++ {
+		if _, ok := roleSet[roles[i]]; !ok {
+			roles = slices.Delete(roles, i, i+1)
+			i--
 		}
 	}
 
 	// Add the user to the roles
-	userRoles := make(map[string]struct{}, len(current))
-	for _, r := range current {
-		userRoles[r] = struct{}{}
+	updatedRoles := make(map[string]struct{}, len(roleSet))
+	for _, r := range roles {
+		updatedRoles[r] = struct{}{}
 	}
 
 	// Update the roles
-	for role, userIDs := range g.RoleCache {
-		_, hasRole := userRoles[role]
-		_, hasUser := userIDs[account.ID()]
-		if hasRole && !hasUser {
-			userIDs[account.ID()] = struct{}{}
-			updated = true
-		} else if !hasRole && hasUser {
-			delete(userIDs, account.ID())
-			updated = true
+	for _, rID := range g.RoleMap.AsSlice() {
+		if _, ok := updatedRoles[rID]; ok {
+			if userIDs, ok := g.State.RoleCache[rID]; !ok {
+				g.State.RoleCache[rID] = map[string]struct{}{account.ID(): {}}
+				g.State.updated = true
+			} else {
+				if _, ok := userIDs[account.ID()]; !ok {
+					userIDs[account.ID()] = struct{}{}
+					g.State.updated = true
+				}
+			}
+		} else if userIDs, ok := g.State.RoleCache[rID]; ok {
+			if _, ok := userIDs[account.ID()]; ok {
+				delete(userIDs, account.ID())
+				g.State.updated = true
+			}
 		}
 	}
 
 	// If this user is suspended, add their devices to the suspension list
-	if g.IsSuspended(account.ID(), nil) {
-		if g.Suspensions == nil {
-			g.Suspensions = make(map[evr.EvrId]string)
+	if g.State.hasRole(account.ID(), g.RoleMap.Suspended) {
+		if g.State.SuspendedXPIDs == nil {
+			g.State.SuspendedXPIDs = make(map[evr.EvrId]string)
 		}
-
 		for _, xpid := range account.XPIDs() {
-			if _, ok := g.Suspensions[xpid]; ok {
-				continue
-			}
-			g.Suspensions[xpid] = account.ID()
-			updated = true
+			g.State.SuspendedXPIDs[xpid] = account.ID()
+			g.State.updated = true
 		}
 	} else {
-		// Remove any suspended devices for this user
-		for xpid, uid := range g.Suspensions {
-			if uid == account.ID() {
-				delete(g.Suspensions, xpid)
-				updated = true
+
+		// If this user is no longer suspended, remove their devices from the suspension list
+		if g.State.SuspendedXPIDs != nil {
+			for _, xpid := range account.XPIDs() {
+				if _, ok := g.State.SuspendedXPIDs[xpid]; ok {
+					delete(g.State.SuspendedXPIDs, xpid)
+					g.State.updated = true
+				}
 			}
 		}
 	}
 
-	return updated
+	return g.State.updated
 }
 
-type guildGroupPermissions struct {
-	IsAllowedMatchmaking bool
-	IsModerator          bool // Has kick/join/trigger-cv/etc. access
-	IsAuditor            bool // Can view audit logs and see extra info in /lookup
-	IsServerHost         bool
-	IsAllocator          bool // Can allocate servers with slash command
-	IsSuspended          bool
-	IsAPIAccess          bool
-	IsAccountAgeBypass   bool
-	IsVPNBypass          bool
-	IsLimitedAccess      bool
+func (g *GuildGroup) IsServerHost(userID string) bool {
+	return g.HasRole(userID, g.RoleMap.ServerHost)
 }
 
-func (m guildGroupPermissions) ToUint64() uint64 {
-	var i uint64 = 0
-	b := m.asBitSet()
-	if len(b.Bytes()) == 0 {
-		return i
+func (g *GuildGroup) IsAllocator(userID string) bool {
+	return g.HasRole(userID, g.RoleMap.Allocator)
+}
+
+func (g *GuildGroup) IsAuditor(userID string) bool {
+	if g.RoleMap.Auditor == "" {
+		return g.HasRole(userID, g.RoleMap.Moderator)
 	}
-	return uint64(b.Bytes()[0])
+	return g.HasRole(userID, g.RoleMap.Auditor)
 }
 
-func (m *guildGroupPermissions) FromUint64(v uint64) {
-	b := bitset.From([]uint64{v})
-	m.FromBitSet(b)
+func (g *GuildGroup) IsModerator(userID string) bool {
+	return g.HasRole(userID, g.RoleMap.Moderator)
 }
 
-func (m *guildGroupPermissions) FromBitSet(b *bitset.BitSet) {
+func (g *GuildGroup) IsMember(userID string) bool {
+	return g.HasRole(userID, g.RoleMap.Member)
+}
 
-	value := reflect.ValueOf(m).Elem()
-	for i := 0; i < value.NumField(); i++ {
-		field := value.Field(i)
-		if field.Kind() != reflect.Bool {
-			continue
-		}
-		field.SetBool(b.Test(uint(i)))
+func (g *GuildGroup) IsSuspended(userID string, xpid *evr.EvrId) bool {
+	g.State.RLock()
+	defer g.State.RUnlock()
+
+	if g.State.hasRole(userID, g.RoleMap.Suspended) {
+		return true
 	}
-}
+	if xpid == nil || g.State.SuspendedXPIDs == nil {
+		return false
+	}
 
-func (m guildGroupPermissions) asBitSet() *bitset.BitSet {
-	value := reflect.ValueOf(m)
-
-	b := bitset.New(uint(value.NumField()))
-	for i := 0; i < value.NumField(); i++ {
-		field := value.Field(i)
-		if field.Kind() != reflect.Bool {
-			continue
-		}
-		if field.Bool() {
-			b.Set(uint(i))
+	if userID, ok := g.State.SuspendedXPIDs[*xpid]; ok && userID == userID {
+		// Check if the user is (still) suspended
+		if g.State.hasRole(userID, g.RoleMap.Suspended) {
+			return true
 		}
 	}
 
-	return b
+	return false
 }
 
-func GuildGroupGetID(ctx context.Context, nk runtime.NakamaModule, groupID string) (*GuildGroup, error) {
-	g, err := nk.GroupsGetId(ctx, []string{groupID})
+func (g *GuildGroup) IsLimitedAccess(userID string) bool {
+	return g.HasRole(userID, g.RoleMap.LimitedAccess)
+}
+
+func (g *GuildGroup) IsAPIAccess(userID string) bool {
+	return g.HasRole(userID, g.RoleMap.APIAccess)
+}
+
+func (g *GuildGroup) IsAccountAgeBypass(userID string) bool {
+	return g.HasRole(userID, g.RoleMap.AccountAgeBypass)
+}
+
+func (g *GuildGroup) IsVPNBypass(userID string) bool {
+	return g.HasRole(userID, g.RoleMap.VPNBypass)
+}
+
+func (g *GuildGroup) IsAllowedFeature(feature string) bool {
+	return slices.Contains(g.AllowedFeatures, feature)
+}
+
+func (g *GuildGroup) IsAllowedMatchmaking(userID string) bool {
+	if !g.MembersOnlyMatchmaking {
+		return true
+	}
+
+	g.State.RLock()
+	defer g.State.RUnlock()
+
+	if g.State.RoleCache == nil {
+		return false
+	}
+
+	if userIDs, ok := g.State.RoleCache[g.RoleMap.Member]; ok {
+		if _, ok := userIDs[userID]; ok {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (g *GuildGroup) MustCompleteCommunityValues(userID string) bool {
+	g.State.RLock()
+	defer g.State.RUnlock()
+	if g.State.CommunityValuesUserIDs == nil {
+		return false
+	}
+	_, found := g.State.CommunityValuesUserIDs[userID]
+	return found
+}
+
+func (g *GuildGroup) CommunityValuesUserIDsAdd(userID string, timeoutExpiry time.Time) {
+	g.State.Lock()
+	defer g.State.Unlock()
+	if g.State.CommunityValuesUserIDs == nil {
+		g.State.CommunityValuesUserIDs = make(map[string]time.Time)
+	}
+	g.State.CommunityValuesUserIDs[userID] = time.Now().UTC()
+
+	if !timeoutExpiry.IsZero() {
+		g.TimeoutAdd(userID, timeoutExpiry)
+	}
+	g.State.updated = true
+}
+
+func (g *GuildGroup) CommunityValuesUserIDsRemove(userID string) bool {
+	g.State.Lock()
+	defer g.State.Unlock()
+	if _, ok := g.State.CommunityValuesUserIDs[userID]; !ok {
+		return false
+	}
+	delete(g.State.CommunityValuesUserIDs, userID)
+	g.State.updated = true
+	return true
+}
+
+func (g *GuildGroup) TimeoutAdd(userID string, expiry time.Time) {
+	g.State.Lock()
+	defer g.State.Unlock()
+	if g.State.TimedOutUserIDs == nil {
+		g.State.TimedOutUserIDs = make(map[string]time.Time)
+	}
+	if time.Now().After(expiry) {
+		delete(g.State.TimedOutUserIDs, userID)
+		g.State.updated = true
+		return
+	}
+	g.State.TimedOutUserIDs[userID] = expiry
+	g.State.updated = true
+}
+
+func (g *GuildGroup) IsTimedOut(userID string) (bool, time.Time) {
+	g.State.RLock()
+	defer g.State.RUnlock()
+	if expiry, ok := g.State.TimedOutUserIDs[userID]; ok && time.Now().UTC().Before(expiry) {
+		return true, expiry
+	}
+	return false, time.Time{}
+}
+
+func (g *GuildGroup) IsCommunityValues(userID string) bool {
+	g.State.RLock()
+	defer g.State.RUnlock()
+	if g.State.CommunityValuesUserIDs == nil {
+		return false
+	}
+
+	if expiry, ok := g.State.CommunityValuesUserIDs[userID]; ok && time.Now().UTC().Before(expiry) {
+		return true
+	}
+	return false
+}
+
+func GuildGroupLoad(ctx context.Context, nk runtime.NakamaModule, groupID string) (*GuildGroup, error) {
+	groups, err := nk.GroupsGetId(ctx, []string{groupID})
 	if err != nil {
-		return nil, fmt.Errorf("error getting group: %w", err)
+		return nil, fmt.Errorf("failed to get group: %v", err)
 	}
-	if g == nil {
+	if len(groups) == 0 {
 		return nil, fmt.Errorf("group not found")
 	}
-	return NewGuildGroup(g[0])
+
+	state, err := GuildGroupStateLoad(ctx, nk, ServiceSettings().DiscordBotUserID, groupID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load guild group state: %v", err)
+	}
+
+	return NewGuildGroup(groups[0], state)
 }
 
-func GuildUserGroupsList(ctx context.Context, nk runtime.NakamaModule, userID string) (map[string]*GuildGroup, error) {
+func GuildGroupStore(ctx context.Context, nk runtime.NakamaModule, group *GuildGroup) error {
+
+	group.State.Lock()
+	defer group.State.Unlock()
+
+	_nk, ok := nk.(*RuntimeGoNakamaModule)
+	if !ok {
+		return fmt.Errorf("failed to cast nakama module")
+	}
+
+	// Store the State
+	version, err := StorageWrite(ctx, nk, ServiceSettings().DiscordBotUserID, group.State)
+	if err != nil {
+		return fmt.Errorf("failed to write guild group state: %v", err)
+	}
+	group.State.version = version
+
+	// Store the metadata
+	if err := GroupMetadataSave(ctx, _nk.db, group.Group.Id, &group.GroupMetadata); err != nil {
+		return fmt.Errorf("failed to save guild group metadata: %v", err)
+	}
+
+	return nil
+}
+
+func GuildUserGroupsList(ctx context.Context, nk runtime.NakamaModule, guildGroupRegistry *GuildGroupRegistry, userID string) (map[string]*GuildGroup, error) {
 	guildGroups := make(map[string]*GuildGroup, 0)
 	cursor := ""
 	for {
@@ -507,12 +363,18 @@ func GuildUserGroupsList(ctx context.Context, nk runtime.NakamaModule, userID st
 			}
 			switch ug.Group.GetLangTag() {
 			case "guild":
-				gg, err := NewGuildGroup(ug.Group)
-				if err != nil {
-					return nil, fmt.Errorf("error creating guild group: %w", err)
-				}
-				guildGroups[ug.Group.GetId()] = gg
 
+				if guildGroupRegistry != nil {
+					if gg := guildGroupRegistry.Get(uuid.FromStringOrNil(ug.Group.Id)); gg != nil {
+						guildGroups[ug.Group.Id] = gg
+					}
+				} else {
+					group, err := GuildGroupLoad(ctx, nk, ug.Group.Id)
+					if err != nil {
+						return nil, fmt.Errorf("error loading guild group: %w", err)
+					}
+					guildGroups[ug.Group.Id] = group
+				}
 			}
 		}
 		if cursor == "" {

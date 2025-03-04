@@ -343,7 +343,7 @@ func KickPlayerRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk ru
 		return "", runtime.NewError("authentication required", StatusUnauthenticated)
 	}
 
-	guildGroups, err := GuildUserGroupsList(ctx, nk, callerID)
+	guildGroups, err := GuildUserGroupsList(ctx, nk, nil, callerID)
 	if err != nil {
 		return "", err
 	}
@@ -966,13 +966,13 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 	}
 
 	// Validate that this userID has permission to signal this match
-	md, err := GetGuildGroupMetadata(ctx, db, groupID)
+	gg, err := GuildGroupLoad(ctx, nk, groupID)
 	if err != nil {
-		return "", runtime.NewError("Failed to get group metadata: "+err.Error(), StatusInternalError)
+		return "", runtime.NewError(err.Error(), StatusInternalError)
 	}
 
 	// Validate that the user has permissions to allocate for the guild
-	if !md.HasRole(userID, md.Roles.Allocator) {
+	if !gg.HasRole(userID, gg.RoleMap.Allocator) {
 		return "", runtime.NewError("user must have the `allocator` in the guild.", StatusPermissionDenied)
 	}
 
@@ -1127,7 +1127,7 @@ func AuthenticatePasswordRPC(ctx context.Context, logger runtime.Logger, db *sql
 		}
 		tokenID = uuid.Must(uuid.NewV4()).String()
 
-		guildGroups, err := GuildUserGroupsList(ctx, nk, userID)
+		guildGroups, err := GuildUserGroupsList(ctx, nk, nil, userID)
 		if err != nil {
 			return "", err
 		}

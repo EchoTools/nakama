@@ -94,12 +94,24 @@ func NewEVRAccount(account *api.Account) (*EVRAccount, error) {
 	return a, nil
 }
 
-func (e *EVRAccount) IsDisabled() bool {
+func (e EVRAccount) IsDisabled() bool {
 	return !e.DisableTime.IsZero()
 }
 
-func (e *EVRAccount) IsLinked() bool {
+func (e EVRAccount) IsLinked() bool {
 	return len(e.Devices) > 0
+}
+
+func (e EVRAccount) XPIDs() []evr.EvrId {
+	xpids := make([]evr.EvrId, 0, len(e.Devices))
+	for _, d := range e.Devices {
+		xpid, err := evr.ParseEvrId(d.Id)
+		if err != nil || xpid == nil {
+			continue
+		}
+		xpids = append(xpids, *xpid)
+	}
+	return xpids
 }
 
 type AccountMetadata struct {
@@ -338,52 +350,4 @@ type CombatLoadout struct {
 type AccountCosmetics struct {
 	JerseyNumber int64               `json:"number"`           // The loadout number (jersey number)
 	Loadout      evr.CosmeticLoadout `json:"cosmetic_loadout"` // The loadout
-}
-
-func GetDisplayNameByGroupID(ctx context.Context, nk runtime.NakamaModule, userID, groupID string) (string, error) {
-	md, err := AccountMetadataLoad(ctx, nk, userID)
-	if err != nil {
-		return md.account.GetUser().GetDisplayName(), fmt.Errorf("error unmarshalling account user metadata: %w", err)
-	}
-
-	if dn := md.GetGroupDisplayNameOrDefault(groupID); dn != "" {
-		return dn, nil
-	}
-	if dn := md.account.GetUser().GetDisplayName(); dn != "" {
-		return dn, nil
-	} else {
-		return md.account.GetUser().GetUsername(), nil
-	}
-}
-
-func UserGuildGroupsList(ctx context.Context, nk runtime.NakamaModule, userID string) (map[string]*GuildGroup, []*api.Group, error) {
-	guildGroups := make(map[string]*GuildGroup, 0)
-	systemGroups := make([]*api.Group, 0)
-	cursor := ""
-	for {
-		// Fetch the groups using the provided userId
-		userGroups, _, err := nk.UserGroupsList(ctx, userID, 100, nil, cursor)
-		if err != nil {
-			return nil, nil, fmt.Errorf("error getting user groups: %w", err)
-		}
-
-		for _, ug := range userGroups {
-			g := ug.GetGroup()
-			switch g.GetLangTag() {
-			case "guild":
-				gg, err := NewGuildGroup(g)
-				if err != nil {
-					return nil, nil, fmt.Errorf("error creating guild group: %w", err)
-				}
-				guildGroups[g.GetId()] = gg
-			case "system":
-				systemGroups = append(systemGroups, g)
-			}
-
-		}
-		if cursor == "" {
-			break
-		}
-	}
-	return guildGroups, systemGroups, nil
 }

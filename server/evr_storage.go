@@ -12,6 +12,10 @@ import (
 
 type Storable interface {
 	StorageID() StorageID
+}
+
+type IndexedStorable interface {
+	Storable
 	StorageIndex() *StorageIndexMeta
 }
 

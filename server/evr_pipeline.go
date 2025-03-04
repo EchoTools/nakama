@@ -52,6 +52,7 @@ type EvrPipeline struct {
 	appBot                       *DiscordAppBot
 	statisticsQueue              *StatisticsQueue
 	userRemoteLogJournalRegistry *UserLogJouralRegistry
+	guildGroupRegistry           *GuildGroupRegistry
 	ipInfoCache                  *IPInfoCache
 	matchLogManager              *MatchLogManager
 
@@ -73,7 +74,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	ctx = context.WithValue(ctx, runtime.RUNTIME_CTX_ENV, vars)
 
 	// Load the global settings
-	if _, err := LoadGlobalSettingsData(ctx, nk); err != nil {
+	if _, err := ServiceSettingsLoad(ctx, nk); err != nil {
 		logger.Error("Failed to load global settings", zap.Error(err))
 	}
 
@@ -89,7 +90,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 				ticker.Stop()
 				return
 			case <-ticker.C:
-				if _, err := LoadGlobalSettingsData(ctx, nk); err != nil {
+				if _, err := ServiceSettingsLoad(ctx, nk); err != nil {
 					logger.Error("Failed to load global settings", zap.Error(err))
 				}
 			}
@@ -114,6 +115,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 
 	statisticsQueue := NewStatisticsQueue(runtimeLogger, nk)
 	profileRegistry := NewProfileRegistry(nk, db, runtimeLogger, metrics, sessionRegistry)
+	guildGroupRegistry := NewGuildGroupRegistry()
 	lobbyBuilder := NewLobbyBuilder(logger, nk, sessionRegistry, matchRegistry, tracker, metrics, profileRegistry)
 	matchmaker.OnMatchedEntries(lobbyBuilder.handleMatchedEntries)
 	userRemoteLogJournalRegistry := NewUserRemoteLogJournalRegistry(ctx, logger, nk, sessionRegistry)
@@ -157,19 +159,30 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	if disable, ok := vars["DISABLE_DISCORD_BOT"]; ok && disable == "true" {
 		logger.Info("Discord bot is disabled")
 	} else {
-		discordCache = NewDiscordIntegrator(ctx, logger, config, metrics, nk, db, dg)
+		discordCache = NewDiscordIntegrator(ctx, logger, config, metrics, nk, db, dg, guildGroupRegistry)
 		discordCache.Start()
 
-		appBot, err = NewDiscordAppBot(ctx, runtimeLogger, nk, db, metrics, pipeline, config, discordCache, profileRegistry, statusRegistry, dg, ipInfoCache)
+		appBot, err = NewDiscordAppBot(ctx, runtimeLogger, nk, db, metrics, pipeline, config, discordCache, profileRegistry, statusRegistry, dg, ipInfoCache, guildGroupRegistry)
 		if err != nil {
 			logger.Error("Failed to create app bot", zap.Error(err))
 
 		}
-		if err := appBot.InitializeDiscordBot(); err != nil {
-			logger.Error("Failed to initialize app bot", zap.Error(err))
-		}
-		if err = appBot.dg.Open(); err != nil {
+
+		// Add a once handler to wait for the bot to connect
+		readyCh := make(chan struct{})
+		dg.AddHandlerOnce(func(s *discordgo.Session, r *discordgo.Ready) {
+			close(readyCh)
+		})
+
+		if err = dg.Open(); err != nil {
 			logger.Warn("Failed to open discord bot connection: %w", zap.Error(err))
+		}
+
+		select {
+		case <-readyCh:
+			logger.Info("Discord bot is ready")
+		case <-time.After(10 * time.Second):
+			logger.Warn("Discord bot is not ready after 10 seconds")
 		}
 	}
 
@@ -201,6 +214,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		profileCache:                 profileRegistry,
 		statisticsQueue:              statisticsQueue,
 		userRemoteLogJournalRegistry: userRemoteLogJournalRegistry,
+		guildGroupRegistry:           guildGroupRegistry,
 		ipInfoCache:                  ipInfoCache,
 		matchLogManager:              matchLogManager,
 

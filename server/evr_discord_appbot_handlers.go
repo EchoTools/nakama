@@ -26,7 +26,6 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(logger runtime.Logge
 		return fmt.Errorf("user is nil")
 	}
 
-	var err error
 	userID := d.cache.DiscordIDToUserID(user.ID)
 	groupID := d.cache.GuildIDToGroupID(i.GuildID)
 
@@ -54,50 +53,50 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(logger runtime.Logge
 		return simpleInteractionResponse(s, i, "This command can only be used in a guild.")
 	}
 
-	groups, err := d.nk.GroupsGetId(ctx, []string{groupID})
-	if err != nil {
-		return fmt.Errorf("failed to get group: %w", err)
-	}
-	if len(groups) == 0 {
-		logger.Warn("Guild not registered", zap.String("group_id", groupID), zap.String("guild_id", i.GuildID))
-		return simpleInteractionResponse(s, i, "This guild is not registered.")
-	}
-
-	group, err := NewGuildGroup(groups[0])
-	if err != nil {
-		return fmt.Errorf("failed to create guild group: %w", err)
-	}
-
 	// Global security check
 	switch commandName {
 
 	case "create":
 
-		if group.AuditChannelID != "" {
-			if err := d.LogInteractionToChannel(i, group.AuditChannelID); err != nil {
+		gg := d.guildGroupRegistry.Get(uuid.FromStringOrNil(groupID))
+		if gg == nil {
+			return simpleInteractionResponse(s, i, "This guild is not registered.")
+		}
+
+		if gg.AuditChannelID != "" {
+			if err := d.LogInteractionToChannel(i, gg.AuditChannelID); err != nil {
 				logger.Warn("Failed to log interaction to channel")
 			}
 		}
 
-		if group.DisableCreateCommand {
+		if gg.DisableCreateCommand {
 			return simpleInteractionResponse(s, i, "This guild does not allow public allocation.")
 		}
 
 	case "allocate":
+		gg := d.guildGroupRegistry.Get(uuid.FromStringOrNil(groupID))
+		if gg == nil {
+			return simpleInteractionResponse(s, i, "This guild is not registered.")
+		}
 
-		if !group.IsAllocator(userID) {
+		if !gg.IsAllocator(userID) {
 			return simpleInteractionResponse(s, i, "You must be a guild allocator to use this command.")
 		}
 
 	case "trigger-cv", "kick-player", "join-player", "igp":
 
-		if group.AuditChannelID != "" {
-			if err := d.LogInteractionToChannel(i, group.AuditChannelID); err != nil {
+		gg := d.guildGroupRegistry.Get(uuid.FromStringOrNil(groupID))
+		if gg == nil {
+			return simpleInteractionResponse(s, i, "This guild is not registered.")
+		}
+
+		if gg.AuditChannelID != "" {
+			if err := d.LogInteractionToChannel(i, gg.AuditChannelID); err != nil {
 				logger.Warn("Failed to log interaction to channel")
 			}
 		}
 
-		if !group.IsModerator(userID) {
+		if !gg.IsModerator(userID) {
 			return simpleInteractionResponse(s, i, "You must be a guild moderator to use this command.")
 		}
 
@@ -261,7 +260,7 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 	groupID := d.cache.GuildIDToGroupID(guildID)
 
 	// Get a list of the groups that this user has allocate access to
-	guildGroups, err := GuildUserGroupsList(ctx, d.nk, userID)
+	guildGroups, err := GuildUserGroupsList(ctx, d.nk, d.guildGroupRegistry, userID)
 	if err != nil {
 		return nil, 0, status.Errorf(codes.Internal, "failed to get guild group memberships: %v", err)
 	}
@@ -374,7 +373,7 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 
 	groupID := d.cache.GuildIDToGroupID(guildID)
 
-	guildGroups, err := GuildUserGroupsList(ctx, d.nk, userID)
+	guildGroups, err := GuildUserGroupsList(ctx, d.nk, d.guildGroupRegistry, userID)
 	if err != nil {
 		return nil, 0, status.Errorf(codes.Internal, "failed to get guild groups: %v", err)
 	}
