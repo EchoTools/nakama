@@ -165,7 +165,24 @@ func (g *GuildGroup) IsAuditor(userID string) bool {
 }
 
 func (g *GuildGroup) IsModerator(userID string) bool {
+	if g.IsNegatedModerator(userID) {
+		return false
+	}
 	return g.HasRole(userID, g.RoleMap.Moderator)
+}
+
+func (g *GuildGroup) IsNegatedModerator(userID string) bool {
+	g.State.RLock()
+	defer g.State.RUnlock()
+	if g.State.NegatedModeratorUserIDs == nil {
+		return false
+	}
+
+	if slices.Contains(g.State.NegatedModeratorUserIDs, userID) {
+		return true
+	}
+
+	return false
 }
 
 func (g *GuildGroup) IsMember(userID string) bool {
