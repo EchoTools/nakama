@@ -16,13 +16,14 @@ const (
 
 // This allows the system to operate correctly even when discord is down
 type GuildGroupState struct {
-	sync.RWMutex                                          // for storage operations
-	GroupID                string                         `json:"group_id"`
-	TimedOutUserIDs        map[string]time.Time           `json:"timed_out_user_ids"`        // UserIDs that are required to go to community values when the first join the social lobby
-	CommunityValuesUserIDs map[string]time.Time           `json:"community_values_user_ids"` // UserIDs that are required to go to community values when the first join the social lobby
-	RoleCache              map[string]map[string]struct{} `json:"role_cache"`                // map[RoleID]map[UserID]struct{}
-	SuspendedXPIDs         map[evr.EvrId]string           `json:"suspended_devices"`         // map[XPID]UserID
-	RulesText              string                         `json:"rules_text"`                // The rules text displayed on the main menu
+	sync.RWMutex                                           // for storage operations
+	GroupID                 string                         `json:"group_id"`
+	TimedOutUserIDs         map[string]time.Time           `json:"timed_out_user_ids"`         // UserIDs that are required to go to community values when the first join the social lobby
+	CommunityValuesUserIDs  map[string]time.Time           `json:"community_values_user_ids"`  // UserIDs that are required to go to community values when the first join the social lobby
+	RoleCache               map[string]map[string]struct{} `json:"role_cache"`                 // map[RoleID]map[UserID]struct{}
+	SuspendedXPIDs          map[evr.EvrId]string           `json:"suspended_devices"`          // map[XPID]UserID
+	NegatedModeratorUserIDs []string                       `json:"negated_moderator_user_ids"` // UserIDs that are negated from moderator roles
+	RulesText               string                         `json:"rules_text"`                 // The rules text displayed on the main menu
 
 	updated bool
 	version string

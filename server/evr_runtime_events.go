@@ -117,7 +117,7 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 		gg = v.(*GuildGroup)
 	} else {
 		// Notify the group of the login, if it's an alternate
-		gg, err := GuildGroupLoad(ctx, h.nk, groupID)
+		gg, err = GuildGroupLoad(ctx, h.nk, groupID)
 		if err != nil {
 			return fmt.Errorf("failed to load guild group: %w", err)
 		}
