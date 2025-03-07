@@ -1,6 +1,6 @@
 package evr
 
-func generateSymbolSeed() [0x100]uint64 {
+func generateHashLookupArray() [0x100]uint64 {
 	seed := [0x100]uint64{}
 	i := uint64(0)
 	s := uint64(0x95ac9329ac4bc9b5)
@@ -54,7 +54,7 @@ func generateSymbolSeed() [0x100]uint64 {
 	return seed
 }
 
-var symbolSeed [0x100]uint64 = generateSymbolSeed()
+var hashLookupArray [0x100]uint64 = generateHashLookupArray()
 
 var SymbolCache = map[Symbol]SymbolToken{
 	0xc8c33e482f601dbe: "uscn",

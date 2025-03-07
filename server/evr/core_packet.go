@@ -194,17 +194,7 @@ func ToSymbol(v any) Symbol {
 				return Symbol(s)
 			}
 		}
-		// Convert it to a symbol
-		symbol := uint64(0xffffffffffffffff)
-		// lowercase the string
-		for i := range str {
-			a := str[i] + ' '
-			if str[i] < 'A' || str[i] >= '[' {
-				a = str[i]
-			}
-			symbol = uint64(a) ^ symbolSeed[symbol>>0x38&0xff] ^ symbol<<8
-		}
-		return Symbol(symbol)
+		return Symbol(HashString(str, hashLookupArray))
 	default:
 		panic(fmt.Errorf("invalid type: %T", v))
 	}
