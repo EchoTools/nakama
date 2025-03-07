@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/bwmarrin/discordgo"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/rtapi"
@@ -47,20 +48,37 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 			return fmt.Errorf("unable to register API guards: %w", err)
 		}
 	*/
+	_nk := nk.(*RuntimeGoNakamaModule)
 
-	sbmm := NewSkillBasedMatchmaker()
+	var (
+		sbmm = NewSkillBasedMatchmaker()
+		vars = _nk.config.GetRuntime().Environment
+	)
+	botToken, ok := vars["DISCORD_BOT_TOKEN"]
+	if !ok {
+		panic("Bot token is not set in context.")
+	}
+
+	dg, err = discordgo.New("Bot " + botToken)
+	if err != nil {
+		logger.Error("Unable to create bot")
+	}
+	dg.StateEnabled = true
+	dg.Identify.Intents = 0 // No Intents
+
+	rpcHandler := NewRPCHandler(ctx, db, dg)
 
 	// Register RPC's for device linking
 	rpcs := map[string]func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error){
 		"account/search":                AccountSearchRPC,
-		"account/lookup":                AccountLookupRPC,
+		"account/lookup":                rpcHandler.AccountLookupRPC,
 		"account/authenticate/password": AuthenticatePasswordRPC,
-		"leaderboard/records":           LeaderboardRecordsRPC,
-		"leaderboard/haystack":          LeaderboardHaystackRPC,
+		"leaderboard/haystack":          rpcHandler.LeaderboardHaystackRPC,
+		"leaderboard/records":           rpcHandler.LeaderboardRecordsListRPC,
 		"link/device":                   LinkDeviceRpc,
 		"link/usernamedevice":           LinkUserIdDeviceRpc,
 		"signin/discord":                DiscordSignInRpc,
-		"match/public":                  MatchListPublicRPC,
+		"match/public":                  rpcHandler.MatchListPublicRPC,
 		"match":                         MatchRPC,
 		"match/prepare":                 PrepareMatchRPC,
 		"match/terminate":               shutdownMatchRpc,
@@ -69,7 +87,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		"player/kick":                   KickPlayerRPC,
 		"player/profile":                UserServerProfileRPC,
 		"link":                          LinkingAppRpc,
-		"evr/servicestatus":             ServiceStatusRpc,
+		"evr/servicestatus":             rpcHandler.ServiceStatusRpc,
 		"importloadouts":                ImportLoadoutsRpc,
 		"matchmaker/stream":             MatchmakerStreamRPC,
 		"matchmaker/candidates":         MatchmakerCandidatesRPCFactory(sbmm),

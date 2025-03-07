@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"net/url"
+	"reflect"
 	"slices"
 	"sort"
 	"strconv"
@@ -58,15 +60,9 @@ func (t *TimeRFC3339) UnmarshalText(data []byte) error {
 	return nil
 }
 
-var rpcResponseCache *Cache
-
-func init() {
-	rpcResponseCache = NewCache()
-}
-
-func MatchListPublicRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+func (h *RPCHandler) MatchListPublicRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 	// The public view is cached.
-	cachedResponse, _, found := rpcResponseCache.Get("match:public")
+	cachedResponse, _, found := h.responseCache.Get("match:public")
 	if found {
 		return cachedResponse.(string), nil
 	}
@@ -179,7 +175,7 @@ func MatchListPublicRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 	payload = string(data)
 
 	// Update the cache
-	rpcResponseCache.Set("match:public", payload, 3*time.Second)
+	h.responseCache.Set("match:public", payload, 3*time.Second)
 
 	return payload, nil
 
@@ -412,7 +408,7 @@ func KickPlayerRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk ru
 /*
 func MatchmakingStatusRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk_ runtime.NakamaModule, payload string) (string, error) {
 	// The public view is cached for 5 seconds.
-	cachedResponse, _, found := rpcResponseCache.Get("matchmaking:status")
+	cachedResponse, _, found := h.responseCache.Get("matchmaking:status")
 	if found {
 		return cachedResponse.(string), nil
 	}
@@ -446,7 +442,7 @@ func MatchmakingStatusRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 	}
 
 	// Update the cache
-	rpcResponseCache.Set("matchmaking:status", string(jsonData), 5*time.Second)
+	h.responseCache.Set("matchmaking:status", string(jsonData), 5*time.Second)
 
 	return string(jsonData), nil
 }
@@ -713,9 +709,9 @@ type ServiceStatusService struct {
 	Message   string `json:"message"`
 }
 
-func ServiceStatusRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+func (h *RPCHandler) ServiceStatusRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 
-	if cachedResponse, _, found := rpcResponseCache.Get("server-status"); found {
+	if cachedResponse, _, found := h.responseCache.Get("server-status"); found {
 		return cachedResponse.(string), nil
 	}
 
@@ -762,7 +758,7 @@ func ServiceStatusRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		return "", nil
 	}
 
-	rpcResponseCache.Set("server-status", objs[0].Value, 60*time.Second)
+	h.responseCache.Set("server-status", objs[0].Value, 60*time.Second)
 
 	return objs[0].Value, nil
 }
@@ -1175,7 +1171,7 @@ func (r *AccountLookupRequest) CacheKey() string {
 	return fmt.Sprintf("%s:%s:%s:%s", r.Username, r.UserID, r.DiscordID, r.DisplayName)
 }
 
-func AccountLookupRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+func (h *RPCHandler) AccountLookupRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 
 	request := AccountLookupRequest{}
 	if payload != "" {
@@ -1218,7 +1214,7 @@ func AccountLookupRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 
 	if !includePrivate {
 		// check the cache
-		if cachedResponse, _, found := rpcResponseCache.Get(request.CacheKey()); found {
+		if cachedResponse, _, found := h.responseCache.Get(request.CacheKey()); found {
 			return cachedResponse.(string), nil
 		}
 	}
@@ -1279,30 +1275,101 @@ func AccountLookupRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 
 	if !includePrivate {
 		// Cache the response
-		rpcResponseCache.Set(request.CacheKey(), string(jsonResponse), 5*time.Minute)
+		h.responseCache.Set(request.CacheKey(), string(jsonResponse), 5*time.Minute)
 	}
 
 	return string(jsonResponse), nil
 }
 
-type PlayerStatsRPCRequest struct {
-	UserID    string     `json:"user_id"`
-	GroupID   string     `json:"group_id"`
-	GuildID   string     `json:"guild_id"`
-	DiscordID string     `json:"discord_id"`
-	Mode      evr.Symbol `json:"mode"`
-}
+func parseURLParams(params url.Values, target any) error {
+	val := reflect.ValueOf(target).Elem()
+	typ := val.Type()
 
-type PlayerStatsRPCResponse struct {
-	Stats evr.PlayerStatistics `json:"stats"`
-}
+	for i := range typ.NumField() {
+		field := typ.Field(i)
 
-func (r *PlayerStatsRPCResponse) String() string {
-	data, err := json.MarshalIndent(r, "", "  ")
-	if err != nil {
-		return ""
+		// Use the json tag if it exists, otherwise use the field name
+
+		paramName := field.Tag.Get("json")
+		paramName, _, _ = strings.Cut(paramName, ",")
+		if paramName == "" {
+			paramName = field.Name
+		}
+		paramValue := params.Get(paramName)
+
+		if paramValue == "" {
+			continue
+		}
+
+		fieldValue := val.Field(i)
+		switch fieldValue.Kind() {
+		case reflect.String:
+			fieldValue.SetString(paramValue)
+		case reflect.Int, reflect.Int64:
+			intValue, err := strconv.ParseInt(paramValue, 10, 64)
+			if err != nil {
+				return fmt.Errorf("failed to parse int field %s: %w", field.Name, err)
+			}
+			fieldValue.SetInt(intValue)
+		case reflect.Int32:
+			intValue, err := strconv.ParseInt(paramValue, 10, 32)
+			if err != nil {
+				return fmt.Errorf("failed to parse int field %s: %w", field.Name, err)
+			}
+			fieldValue.SetInt(intValue)
+		case reflect.Float64:
+			floatValue, err := strconv.ParseFloat(paramValue, 64)
+			if err != nil {
+				return fmt.Errorf("failed to parse float field %s: %w", field.Name, err)
+			}
+			fieldValue.SetFloat(floatValue)
+		case reflect.Bool:
+			boolValue, err := strconv.ParseBool(paramValue)
+			if err != nil {
+				return fmt.Errorf("failed to parse bool field %s: %w", field.Name, err)
+			}
+			fieldValue.SetBool(boolValue)
+		default:
+			// Get the underlying type of the field
+			fieldType := fieldValue.Type()
+			if fieldType.Kind() == reflect.Ptr {
+				fieldType = fieldType.Elem()
+			}
+
+			switch fieldValue.Interface().(type) {
+			case time.Time:
+				// Parse the field as a string and then convert it to a time.Time
+				timeValue, err := time.Parse(time.RFC3339, paramValue)
+				if err != nil {
+					return fmt.Errorf("failed to parse time field %s: %w", field.Name, err)
+				}
+				fieldValue.Set(reflect.ValueOf(timeValue))
+			case evr.Symbol:
+				// Parse the field as a string and then convert it to a Symbol
+				symbolValue := evr.ToSymbol(paramValue)
+				if symbolValue.IsNil() {
+					return fmt.Errorf("failed to parse symbol field %s", field.Name)
+				}
+				// Set the field value
+				fieldValue.Set(reflect.ValueOf(symbolValue))
+
+			case evr.EvrId:
+				// Parse the field as a string and then convert it to an EvrId
+				evrIdValue, err := evr.ParseEvrId(paramValue)
+				if err != nil {
+					return fmt.Errorf("failed to parse evr id field %s: %w", field.Name, err)
+				}
+
+				fieldValue.Set(reflect.ValueOf(evrIdValue))
+
+			default:
+				return fmt.Errorf("unsupported field type %s", fieldType.Name())
+			}
+
+		}
 	}
-	return string(data)
+
+	return nil
 }
 
 func parseRequest(ctx context.Context, payload string, request any) error {
@@ -1315,80 +1382,13 @@ func parseRequest(ctx context.Context, payload string, request any) error {
 
 		// Parse Query Parameters
 	} else if params := ctx.Value(runtime.RUNTIME_CTX_QUERY_PARAMS).(map[string][]string); len(params) > 0 {
-		pmap := make(map[string]any)
-		for k, v := range params {
-			pmap[k] = v[0]
-		}
 
-		if data, err := json.Marshal(pmap); err != nil {
-			return fmt.Errorf("error marshalling query parameters: %w", err)
-		} else if err := json.Unmarshal(data, request); err != nil {
-			return fmt.Errorf("error unmarshalling query parameters: %w", err)
+		if err := parseURLParams(params, request); err != nil {
+			return fmt.Errorf("error parsing query parameters: %w", err)
 		}
 	}
 
 	return nil
-}
-
-func PlayerStatisticsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
-	request := &PlayerStatsRPCRequest{}
-	if err := parseRequest(ctx, payload, request); err != nil {
-		return "", err
-	}
-
-	switch {
-	case request.UserID != "":
-	case request.DiscordID != "":
-		if userID, err := GetUserIDByDiscordID(ctx, db, request.DiscordID); err != nil {
-			return "", fmt.Errorf("failed to get user ID by discord ID: %w", err)
-		} else {
-			request.UserID = userID
-		}
-	}
-
-	if request.UserID == "" {
-		return "", runtime.NewError("user not found", StatusNotFound)
-	}
-
-	switch {
-	case request.GroupID != "":
-	case request.GuildID != "":
-		if groupID, err := GetGroupIDByGuildID(ctx, db, request.GuildID); err != nil {
-			return "", fmt.Errorf("failed to get group ID by guild ID: %w", err)
-		} else {
-			request.GroupID = groupID
-		}
-	}
-
-	if request.GroupID == "" {
-		return "", runtime.NewError("guild group not found", StatusNotFound)
-	}
-
-	var modes []evr.Symbol
-
-	if request.Mode.IsNil() {
-		modes = []evr.Symbol{
-			evr.ModeArenaPublic,
-			evr.ModeCombatPublic,
-			evr.ModeCombatPrivate,
-			evr.ModeArenaPrivate,
-			evr.ModeSocialPublic,
-			evr.ModeSocialPrivate,
-		}
-	} else {
-		modes = []evr.Symbol{request.Mode}
-	}
-
-	stats, _, err := PlayerStatisticsGetID(ctx, db, nk, request.UserID, request.GroupID, modes, request.Mode)
-	if err != nil {
-		return "", err
-	}
-
-	response := &PlayerStatsRPCResponse{
-		Stats: stats,
-	}
-
-	return response.String(), nil
 }
 
 type AccountSearchRequest struct {
@@ -1575,7 +1575,7 @@ func MatchmakerCandidatesRPCFactory(sbmm *SkillBasedMatchmaker) func(ctx context
 	return func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 
 		/*
-			if data, _, found := rpcResponseCache.Get("matchmaker_candidates"); found {
+			if data, _, found := h.responseCache.Get("matchmaker_candidates"); found {
 				return data.(string), nil
 			}
 		*/
@@ -1602,7 +1602,7 @@ func MatchmakerCandidatesRPCFactory(sbmm *SkillBasedMatchmaker) func(ctx context
 		// Cache the result
 
 		/*
-			rpcResponseCache.Set("matchmaker_candidates", data, 30*time.Second)
+			h.responseCache.Set("matchmaker_candidates", data, 30*time.Second)
 		*/
 		return string(data), nil
 	}
