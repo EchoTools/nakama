@@ -40,6 +40,17 @@ const (
 	OperatorDecrement LeaderboardOperator = "decr"
 )
 
+var (
+	ValidLeaderboardModes = []evr.Symbol{
+		evr.ModeCombatPublic,
+		evr.ModeArenaPublic,
+		evr.ModeCombatPrivate,
+		evr.ModeArenaPrivate,
+		evr.ModeSocialPublic,
+		evr.ModeSocialPrivate,
+	}
+)
+
 type LeaderboardMeta struct {
 	GroupID       string
 	Mode          evr.Symbol

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/heroiclabs/nakama-common/runtime"
 )
@@ -66,6 +67,10 @@ func NewStatisticsQueue(logger runtime.Logger, nk runtime.NakamaModule) *Statist
 						}).Warn("Negative score")
 						continue
 					} else if e.Score == 0 && e.Subscore == 0 {
+						continue
+					}
+
+					if !slices.Contains(ValidLeaderboardModes, e.BoardMeta.Mode) == false {
 						continue
 					}
 

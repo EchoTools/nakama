@@ -1006,7 +1006,9 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 
 	serviceSettings := ServiceSettings()
 
-	if serviceSettings.UseSkillBasedMatchmaking() {
+	validModes := []evr.Symbol{evr.ModeArenaPublic, evr.ModeCombatPublic}
+
+	if serviceSettings.UseSkillBasedMatchmaking() && slices.Contains(validModes, label.Mode) {
 
 		// Determine winning team
 		blueWins := playerInfo.Team == BlueTeam && payload.IsWinner()
