@@ -1203,6 +1203,174 @@ func TestFilterWithinMaxRTT(t *testing.T) {
 	}
 }
 
+func TestSortLimitRankSpread(t *testing.T) {
+	tests := []struct {
+		name                  string
+		predictions           []PredictedMatch
+		maximumRankSpread     float64
+		defaultRankPercentile float64
+		want                  []PredictedMatch
+	}{
+		{
+			name: "Sort by rank spread within limit",
+			predictions: []PredictedMatch{
+				{
+					Team1: RatedEntryTeam{
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.8}}},
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.7}}},
+					},
+					Team2: RatedEntryTeam{
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.6}}},
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.5}}},
+					},
+				},
+				{
+					Team1: RatedEntryTeam{
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.9}}},
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.85}}},
+					},
+					Team2: RatedEntryTeam{
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.4}}},
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.35}}},
+					},
+				},
+			},
+			maximumRankSpread:     0.2,
+			defaultRankPercentile: 0.5,
+			want: []PredictedMatch{
+				{
+					Team1: RatedEntryTeam{
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.8}}},
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.7}}},
+					},
+					Team2: RatedEntryTeam{
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.6}}},
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.5}}},
+					},
+				},
+				{
+					Team1: RatedEntryTeam{
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.9}}},
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.85}}},
+					},
+					Team2: RatedEntryTeam{
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.4}}},
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.35}}},
+					},
+				},
+			},
+		},
+		{
+			name: "Sort by rank spread exceeding limit",
+			predictions: []PredictedMatch{
+				{
+					Team1: RatedEntryTeam{
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.9}}},
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.85}}},
+					},
+					Team2: RatedEntryTeam{
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.4}}},
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.35}}},
+					},
+				},
+				{
+					Team1: RatedEntryTeam{
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.8}}},
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.7}}},
+					},
+					Team2: RatedEntryTeam{
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.6}}},
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.5}}},
+					},
+				},
+			},
+			maximumRankSpread:     0.1,
+			defaultRankPercentile: 0.5,
+			want: []PredictedMatch{
+				{
+					Team1: RatedEntryTeam{
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.8}}},
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.7}}},
+					},
+					Team2: RatedEntryTeam{
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.6}}},
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.5}}},
+					},
+				},
+				{
+					Team1: RatedEntryTeam{
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.9}}},
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.85}}},
+					},
+					Team2: RatedEntryTeam{
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.4}}},
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.35}}},
+					},
+				},
+			},
+		},
+		{
+			name: "Sort with default rank percentile",
+			predictions: []PredictedMatch{
+				{
+					Team1: RatedEntryTeam{
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{}}},
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{}}},
+					},
+					Team2: RatedEntryTeam{
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{}}},
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{}}},
+					},
+				},
+				{
+					Team1: RatedEntryTeam{
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.9}}},
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.85}}},
+					},
+					Team2: RatedEntryTeam{
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.4}}},
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.35}}},
+					},
+				},
+			},
+			maximumRankSpread:     0.2,
+			defaultRankPercentile: 0.5,
+			want: []PredictedMatch{
+				{
+					Team1: RatedEntryTeam{
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.9}}},
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.85}}},
+					},
+					Team2: RatedEntryTeam{
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.4}}},
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.35}}},
+					},
+				},
+				{
+					Team1: RatedEntryTeam{
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{}}},
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{}}},
+					},
+					Team2: RatedEntryTeam{
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{}}},
+						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{}}},
+					},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := NewSkillBasedMatchmaker()
+			m.sortLimitRankSpread(tt.predictions, tt.maximumRankSpread, tt.defaultRankPercentile)
+			if !reflect.DeepEqual(tt.predictions, tt.want) {
+				t.Errorf("sortLimitRankSpread() = %v, want %v", tt.predictions, tt.want)
+			}
+		})
+	}
+}
+
 func splitProperties(props map[string]interface{}) (map[string]string, map[string]float64) {
 	// Split the properties into string and numeric
 	stringProperties := make(map[string]string)

@@ -146,14 +146,20 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 				ticketConfig.IncludeEarlyQuitPenalty = false
 			}
 		}
+		mmInterval := time.Duration(p.config.GetMatchmaker().IntervalSec) * time.Second
 
-		timer := time.NewTimer(lobbyParams.MatchmakingTimeout)
-		ticker := time.NewTicker(max(p.matchmakingTicketTimeout(), lobbyParams.FallbackTimeout))
+		matchmakingTicketTimeout := time.Duration(p.config.GetMatchmaker().MaxIntervals) * mmInterval
+
+		timeoutTimer := time.NewTimer(lobbyParams.MatchmakingTimeout)
+		fallbackTimer := time.NewTimer(min(lobbyParams.FallbackTimeout, matchmakingTicketTimeout-mmInterval))
+		ticketTicker := time.NewTicker(matchmakingTicketTimeout)
+
+		startingMax := ticketConfig.MaxCount
 		cycle := 0
 		for {
 
 			// Reduce the matchmaking precision after the first cycle
-			if cycle > 1 {
+			if cycle > 0 {
 				ticketConfig.IncludeRankRange = false
 				ticketConfig.IncludeEarlyQuitPenalty = false
 			}
@@ -161,21 +167,27 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 			// Remove the ticket
 
 			var ticket string
-
-			ticket, err = p.addTicket(ctx, logger, session, lobbyParams, lobbyGroup, ticketConfig)
-			if err != nil {
-				logger.Error("Failed to add ticket", zap.Error(err))
-				return
+			// Put tickets in that has maxCount two less
+			for i := startingMax; i > startingMax-(cycle*2); i -= 2 {
+				ticketConfig.MaxCount = i
+				if ticket, err = p.addTicket(ctx, logger, session, lobbyParams, lobbyGroup, ticketConfig); err != nil {
+					logger.Error("Failed to add ticket", zap.Error(err))
+					return
+				}
+				tickets = append(tickets, ticket)
 			}
-			tickets = append(tickets, ticket)
+
 			select {
 			case <-ctx.Done():
 				return
-			case <-timer.C:
+			case <-timeoutTimer.C:
 				logger.Debug("Matchmaking timeout")
 				return
-			case <-ticker.C:
+			case <-ticketTicker.C:
 				logger.Debug("Matchmaking ticket timeout", zap.Int("cycle", cycle))
+			case <-fallbackTimer.C:
+				logger.Debug("Matchmaking fallback")
+
 			}
 			cycle++
 		}
@@ -233,7 +245,7 @@ func (p *EvrPipeline) addTicket(ctx context.Context, logger *zap.Logger, session
 		session.matchmaker.Remove([]string{ticket})
 	}()
 
-	logger.Debug("Matchmaking ticket added", zap.String("query", query), zap.Any("string_properties", stringProps), zap.Any("numeric_properties", numericProps), zap.String("ticket", ticket), zap.Any("presences", otherPresences))
+	logger.Debug("Matchmaking ticket added", zap.String("query", query), zap.Any("string_properties", stringProps), zap.Any("numeric_properties", numericProps), zap.Any("ticket_config", ticketConfig), zap.String("ticket", ticket), zap.Any("presences", otherPresences))
 
 	return ticket, nil
 }

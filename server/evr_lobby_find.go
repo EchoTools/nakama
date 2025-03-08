@@ -86,6 +86,8 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 				entrantSessionIDs = append(entrantSessionIDs, memberSessionIDs)
 			}
 		}
+	} else {
+		lobbyParams.SetPartySize(1)
 	}
 
 	p.nk.metrics.CustomCounter("lobby_find_match", lobbyParams.MetricsTags(), int64(lobbyParams.GetPartySize()))

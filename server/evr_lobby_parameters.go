@@ -341,6 +341,10 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 
 	isEarlyQuitter := sessionParams.isEarlyQuitter.Load()
 
+	if serviceSettings.Matchmaking.DisableEarlyQuitPenalty {
+		isEarlyQuitter = false
+	}
+
 	maximumFailsafeSecs := globalSettings.MatchmakingTimeoutSecs - p.config.GetMatchmaker().IntervalSec*2
 	failsafeTimeoutSecs := min(maximumFailsafeSecs, globalSettings.FailsafeTimeoutSecs)
 
@@ -522,15 +526,8 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 	}
 
 	// If the user has an early quit penalty, only match them with players who have submitted after now
-	if ticketParams.IncludeEarlyQuitPenalty {
-		// Only match with players who have submitted after this player starts matchmaking
-		qparts = append(qparts, fmt.Sprintf(`-properties.submission_time:>="%s"`, submissionTime))
-		// Until the match clock is correct, this has to be disabled
-		/*
-			if p.EarlyQuitPenaltyExpiry.After(time.Now()) {
-				qparts = append(qparts, fmt.Sprintf(`-properties.submission_time:<"%s"`, submissionTime))
-			}
-		*/
+	if p.IsEarlyQuitter && ticketParams.IncludeEarlyQuitPenalty {
+		qparts = append(qparts, fmt.Sprintf(`-properties.submission_time:<="%s"`, submissionTime))
 	}
 
 	if p.EnableSBMM {
@@ -540,7 +537,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 		numericProperties["rating_sigma"] = rating.Sigma
 
 		if rankPercentile := p.GetRankPercentile(); rankPercentile > 0.0 {
-			numericProperties["rank_percentile"] = p.GetRankPercentile()
+			numericProperties["rank_percentile"] = rankPercentile
 
 			if ticketParams.IncludeRankRange && p.RankPercentileMaxDelta > 0 {
 				rankLower := min(rankPercentile-p.RankPercentileMaxDelta, 1.0-2.0*p.RankPercentileMaxDelta)
@@ -550,7 +547,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 				numericProperties["rank_percentile_min"] = rankLower
 				numericProperties["rank_percentile_max"] = rankUpper
 
-				sbmmqparts := append(qparts,
+				qparts = append(qparts,
 					// Exclusion
 					fmt.Sprintf("-properties.rank_percentile:<%f", rankLower),
 					fmt.Sprintf("-properties.rank_percentile:>%f", rankUpper),
@@ -559,8 +556,6 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 					fmt.Sprintf("-properties.rank_percentile_min:>%f", rankPercentile),
 					fmt.Sprintf("-properties.rank_percentile_max:<%f", rankPercentile),
 				)
-
-				qparts = append(qparts, sbmmqparts...)
 			}
 		}
 	}
@@ -590,7 +585,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 
 	// Remove blanks from qparts
 	for i := 0; i < len(qparts); i++ {
-		if qparts[i] == "" {
+		if strings.TrimSpace(qparts[i]) == "" {
 			qparts = slices.Delete(qparts, i, i+1)
 			i--
 		}
