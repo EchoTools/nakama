@@ -291,7 +291,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 	rating := NewDefaultRating()
 	mmMode := mode
 
-	if mode == evr.ModeSocialPublic {
+	if mode == evr.ModeSocialPublic || mode == evr.ModeArenaPublicAI {
 		mmMode = evr.ModeArenaPublic
 	}
 	if !globalSettings.DisableSBMM && groupID != uuid.Nil {

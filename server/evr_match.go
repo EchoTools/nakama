@@ -893,7 +893,7 @@ func (m *EvrMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db 
 	nk.MetricsCounterAdd("match_shutdown_count", state.MetricsTags(), 1)
 
 	nk.MetricsTimerRecord("lobby_session_duration", state.MetricsTags(), time.Since(state.StartTime))
-	if state.server != nil {
+	if state.server != nil && slices.Contains(ValidLeaderboardModes, state.Mode) {
 		if err := recordGameServerTimeToLeaderboard(ctx, nk, state.server.GetUserId(), state.server.GetUsername(), state.GetGroupID().String(), state.Mode, int64(time.Since(state.StartTime).Seconds())); err != nil {
 			logger.Warn("Failed to record game server time to leaderboard: %v", err)
 		}
