@@ -1042,7 +1042,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				if err != nil {
 					return fmt.Errorf("failed to load login history: %w", err)
 				}
-
+				history.Update(ticket.XPID, ticket.ClientIP, ticket.LoginProfile)
 				history.AuthorizeIP(ticket.ClientIP)
 
 				if err := LoginHistoryStore(ctx, nk, userID, history); err != nil {
