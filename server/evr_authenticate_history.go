@@ -292,25 +292,6 @@ func (h *LoginHistory) UpdateAlternates(ctx context.Context, nk runtime.NakamaMo
 	slices.Sort(h.SecondDegreeAlternates)
 	h.SecondDegreeAlternates = slices.Compact(h.SecondDegreeAlternates)
 
-	excludeUserIDs = append(excludeUserIDs, h.userID)
-
-	// Recursively update the alternates
-	for id := range h.AlternateMap {
-		if slices.Contains(excludeUserIDs, id) {
-			continue
-		}
-		otherHistory, err := LoginHistoryLoad(ctx, nk, id)
-		if err != nil {
-			return fmt.Errorf("error loading alternate login history: %w", err)
-		}
-		if err := otherHistory.UpdateAlternates(ctx, nk, excludeUserIDs...); err != nil {
-			return fmt.Errorf("error updating alternate login history: %w", err)
-		}
-		if err := otherHistory.Store(ctx, nk); err != nil {
-			return fmt.Errorf("error storing alternate login history: %w", err)
-		}
-	}
-
 	return nil
 }
 
@@ -367,7 +348,7 @@ func (h *LoginHistory) StorageWriteOp() (*runtime.StorageWrite, error) {
 		}
 	}
 	// Keep the history size under 5MB
-	bytes := make([]byte, 0)
+	var bytes []byte
 	var err error
 	for {
 
@@ -381,7 +362,7 @@ func (h *LoginHistory) StorageWriteOp() (*runtime.StorageWrite, error) {
 		}
 
 		// Remove the oldest entries
-		for i := 0; i < 5; i++ {
+		for range 5 {
 			oldest := time.Now()
 			oldestKey := ""
 			for k, e := range h.History {
@@ -394,6 +375,7 @@ func (h *LoginHistory) StorageWriteOp() (*runtime.StorageWrite, error) {
 			h.rebuildCache()
 		}
 	}
+
 	return &runtime.StorageWrite{
 		Collection: LoginStorageCollection,
 		Key:        LoginHistoryStorageKey,
