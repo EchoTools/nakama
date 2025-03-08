@@ -31,13 +31,15 @@ type GlobalSettingsData struct {
 	DisableStatisticsUpdates bool                      `json:"disable_statistics_updates"`
 	DisableRatingsUpdates    bool                      `json:"disable_ratings_updates"`
 	Matchmaking              GlobalMatchmakingSettings `json:"matchmaking"`
-	version                  string
-	defaultCosmetics         map[string]struct{}
-	RemoteLogFilters         map[string][]string `json:"remote_logs_filter"` //	Ignore remote logs from specific servers
-	ReportURL                string              `json:"report_url"`         // URL to report issues
-	GlobalAuditChannelID     string              `json:"global_audit_channel_id"`
-	GlobalErrorChannelID     string              `json:"global_error_channel_id"`
-	DiscordBotUserID         string              `json:"discord_bot_user_id"`
+	RemoteLogFilters         map[string][]string       `json:"remote_logs_filter"` //	Ignore remote logs from specific servers
+	ReportURL                string                    `json:"report_url"`         // URL to report issues
+	ServiceAuditChannelID    string                    `json:"service_audit_channel_id"`
+	ServiceDebugChannelID    string                    `json:"service_debug_channel_id"`
+	GlobalErrorChannelID     string                    `json:"service_error_channel_id"`
+	CommandLogChannelID      string                    `json:"service_command_log_channel_id"`
+	DiscordBotUserID         string                    `json:"discord_bot_user_id"`
+
+	version string
 }
 
 type GlobalMatchmakingSettings struct {

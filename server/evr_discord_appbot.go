@@ -1198,17 +1198,20 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 							if member, ok = memberCache[discordIDs[j]]; !ok {
 								if member, err = d.cache.GuildMember(i.GuildID, discordIDs[j]); err != nil {
 									logger.Error("Failed to get guild member", zap.Error(err))
-									embeds[j].Title = fmt.Sprintf("*Unknown User*")
+									embeds[j].Title = "*Unknown User*"
 									continue
 								} else if member != nil {
 									memberCache[discordIDs[j]] = member
 								} else {
-									embeds[j].Title = fmt.Sprintf("*Unknown User*")
+									embeds[j].Title = "*Unknown User*"
 									continue
 								}
 							}
-
-							embeds[j].Title = member.DisplayName()
+							displayName := member.DisplayName()
+							if displayName == "" {
+								displayName = member.User.Username
+							}
+							embeds[j].Title = displayName
 							embeds[j].Thumbnail = &discordgo.MessageEmbedThumbnail{
 								URL: member.User.AvatarURL(""),
 							}
@@ -1223,7 +1226,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 								embeds[j].Description = "In Party"
 							}
 						} else {
-							embeds[j].Title = fmt.Sprintf("*Empty Slot*")
+							embeds[j].Title = "*Empty Slot*"
 							embeds[j].Color = 0xCCCCCC
 						}
 					}
@@ -3137,7 +3140,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					delete(outfits, outfitName)
 
 					if err := AccountMetadataUpdate(ctx, d.nk, userID, metadata); err != nil {
-						return fmt.Errorf("Failed to set account metadata: %w", err)
+						return fmt.Errorf("failed to set account metadata: %w", err)
 					}
 
 					return simpleInteractionResponse(s, i, fmt.Sprintf("Deleted loadout profile `%s`", outfitName))
@@ -4000,6 +4003,19 @@ func (d *DiscordAppBot) LogInteractionToChannel(i *discordgo.InteractionCreate, 
 	return nil
 }
 
+func (d *DiscordAppBot) LogServiceAuditMessage(message string, replaceMentions bool) error {
+	// replace all <@uuid> mentions with <@discordID>
+	if replaceMentions {
+		message = d.cache.ReplaceMentions(message)
+	}
+	if cID := ServiceSettings().ServiceAuditChannelID; cID != "" {
+		if _, err := d.dg.ChannelMessageSend(cID, message); err != nil {
+			return fmt.Errorf("failed to send service audit message: %w", err)
+		}
+	}
+	return nil
+}
+
 func (d *DiscordAppBot) LogAuditMessage(ctx context.Context, groupID string, message string, replaceMentions bool) (*discordgo.Message, error) {
 	// replace all <@uuid> mentions with <@discordID>
 	if replaceMentions {
@@ -4011,13 +4027,14 @@ func (d *DiscordAppBot) LogAuditMessage(ctx context.Context, groupID string, mes
 		return nil, fmt.Errorf("group not found")
 	}
 
+	if err := d.LogServiceAuditMessage(fmt.Sprintf("[`%s/%s`] %s", gg.Name(), gg.GuildID, message), false); err != nil {
+		return nil, err
+	}
+
 	if gg.AuditChannelID != "" {
 		return d.dg.ChannelMessageSend(gg.AuditChannelID, message)
 	}
 
-	if cID := ServiceSettings().GlobalAuditChannelID; cID != "" {
-
-	}
 	return nil, nil
 }
 
