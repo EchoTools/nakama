@@ -432,7 +432,7 @@ func (c *DiscordIntegrator) GuildMember(guildID, discordID string) (member *disc
 	return member, nil
 }
 
-func (d *DiscordIntegrator) updateGuild(ctx context.Context, logger *zap.Logger, guild *discordgo.Guild) error {
+func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, guild *discordgo.Guild) error {
 	logger = logger.With(zap.String("guild_id", guild.ID), zap.String("guild_name", guild.Name))
 
 	var err error
@@ -452,6 +452,7 @@ func (d *DiscordIntegrator) updateGuild(ctx context.Context, logger *zap.Logger,
 		}
 	}
 
+	// Ensure the guild owner is in the system.
 	ownerUserID := d.DiscordIDToUserID(guild.OwnerID)
 	if ownerUserID == "" {
 		ownerMember, err := d.dg.GuildMember(guild.ID, guild.OwnerID)
@@ -537,7 +538,7 @@ func (d *DiscordIntegrator) updateGuild(ctx context.Context, logger *zap.Logger,
 
 func (d *DiscordIntegrator) handleGuildCreate(logger *zap.Logger, s *discordgo.Session, e *discordgo.GuildCreate) error {
 	logger.Info("Guild Create", zap.Any("guild", e.Guild.ID))
-	if err := d.updateGuild(d.ctx, logger, e.Guild); err != nil {
+	if err := d.guildSync(d.ctx, logger, e.Guild); err != nil {
 		return fmt.Errorf("failed to update guild: %w", err)
 	}
 	return nil
@@ -545,7 +546,7 @@ func (d *DiscordIntegrator) handleGuildCreate(logger *zap.Logger, s *discordgo.S
 
 func (d *DiscordIntegrator) handleGuildUpdate(logger *zap.Logger, s *discordgo.Session, e *discordgo.GuildUpdate) error {
 	logger.Info("Guild Update", zap.Any("guild", e.Guild.ID))
-	if err := d.updateGuild(d.ctx, logger, e.Guild); err != nil {
+	if err := d.guildSync(d.ctx, logger, e.Guild); err != nil {
 		return fmt.Errorf("failed to update guild: %w", err)
 	}
 	return nil
@@ -662,14 +663,8 @@ func (d *DiscordIntegrator) handleMemberUpdate(logger *zap.Logger, s *discordgo.
 
 	// Update the role cache
 	if updated := group.RoleCacheUpdate(evrAccount, e.Member.Roles); updated {
-		// save the group data
-		data, err := group.MarshalToMap()
-		if err != nil {
-			return fmt.Errorf("error marshalling group data: %w", err)
-		}
-
-		if err := d.nk.GroupUpdate(ctx, group.ID().String(), SystemUserID, "", "", "", "", "", false, data, 1000000); err != nil {
-			return fmt.Errorf("error updating group: %w", err)
+		if err := GuildGroupStore(ctx, d.nk, group); err != nil {
+			return fmt.Errorf("error storing guild group: %w", err)
 		}
 	}
 

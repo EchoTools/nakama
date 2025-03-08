@@ -117,33 +117,33 @@ func (e EVRAccount) XPIDs() []evr.EvrId {
 type AccountMetadata struct {
 	account *api.Account
 
-	Debug                     bool                   `json:"debug"`                        // Enable debug mode
-	GlobalBanReason           string                 `json:"global_ban_reason"`            // The global ban reason
-	DisabledAccountMessage    string                 `json:"disabled_account_message"`     // The disabled account message that the user will see.
-	DisplayNameOverride       string                 `json:"display_name_override"`        // The display name override
-	GuildDisplayNameOverrides map[string]string      `json:"guild_display_name_overrides"` // The display name overrides for each guild map[groupID]displayName
-	GroupDisplayNames         map[string]string      `json:"group_display_names"`          // The display names for each guild map[groupID]displayName
-	ActiveGroupID             string                 `json:"active_group_id"`              // The active group ID
-	DiscordDebugMessages      bool                   `json:"discord_debug_messages"`       // Enable debug messages in Discord
-	RelayMessagesToDiscord    bool                   `json:"relay_messages_to_discord"`    // Relay messages to Discord
-	TeamName                  string                 `json:"team_name"`                    // The team name
-	DisableAFKTimeout         bool                   `json:"disable_afk_timeout"`          // Disable AFK detection
-	AllowBrokenCosmetics      bool                   `json:"allow_broken_cosmetics"`       // Allow broken cosmetics
-	EnableAllCosmetics        bool                   `json:"enable_all_cosmetics"`         // Enable all cosmetics
-	IsGlobalDeveloper         bool                   `json:"is_global_developer"`          // Is a global developer
-	IsGlobalModerator         bool                   `json:"is_global_moderator"`          // Is a global moderator
-	GoldDisplayNameActive     bool                   `json:"gold_display_name"`            // The gold name display name
-	LoadoutCosmetics          AccountCosmetics       `json:"cosmetic_loadout"`             // The equipped cosmetics
-	CombatLoadout             CombatLoadout          `json:"combat_loadout"`               // The combat loadout
-	MutedPlayers              []evr.EvrId            `json:"muted_players"`                // The muted players
-	GhostedPlayers            []evr.EvrId            `json:"ghosted_players"`              // The ghosted players
-	NewUnlocks                []int64                `json:"new_unlocks"`                  // The new unlocks
-	GamePauseSettings         *evr.GamePauseSettings `json:"game_pause_settings"`          // The game settings
-	LegalConsents             evr.LegalConsents      `json:"legal_consents"`               // The legal consents
-	CustomizationPOIs         *evr.Customization     `json:"customization_pois"`           // The customization POIs
-	VRMLPlayerID              string                 `json:"vrml_player_id"`               // The VRML player ID
-
-	sessionDisplayNameOverride string // The display name override for this session
+	Debug                      bool                   `json:"debug"`                        // Enable debug mode
+	GlobalBanReason            string                 `json:"global_ban_reason"`            // The global ban reason
+	DisabledAccountMessage     string                 `json:"disabled_account_message"`     // The disabled account message that the user will see.
+	DisplayNameOverride        string                 `json:"display_name_override"`        // The display name override
+	GuildDisplayNameOverrides  map[string]string      `json:"guild_display_name_overrides"` // The display name overrides for each guild map[groupID]displayName
+	GroupDisplayNames          map[string]string      `json:"group_display_names"`          // The display names for each guild map[groupID]displayName
+	ActiveGroupID              string                 `json:"active_group_id"`              // The active group ID
+	DiscordDebugMessages       bool                   `json:"discord_debug_messages"`       // Enable debug messages in Discord
+	RelayMessagesToDiscord     bool                   `json:"relay_messages_to_discord"`    // Relay messages to Discord
+	TeamName                   string                 `json:"team_name"`                    // The team name
+	DisableAFKTimeout          bool                   `json:"disable_afk_timeout"`          // Disable AFK detection
+	AllowBrokenCosmetics       bool                   `json:"allow_broken_cosmetics"`       // Allow broken cosmetics
+	EnableAllCosmetics         bool                   `json:"enable_all_cosmetics"`         // Enable all cosmetics
+	IsGlobalDeveloper          bool                   `json:"is_global_developer"`          // Is a global developer
+	IsGlobalModerator          bool                   `json:"is_global_moderator"`          // Is a global moderator
+	GoldDisplayNameActive      bool                   `json:"gold_display_name"`            // The gold name display name
+	LoadoutCosmetics           AccountCosmetics       `json:"cosmetic_loadout"`             // The equipped cosmetics
+	CombatLoadout              CombatLoadout          `json:"combat_loadout"`               // The combat loadout
+	MutedPlayers               []evr.EvrId            `json:"muted_players"`                // The muted players
+	GhostedPlayers             []evr.EvrId            `json:"ghosted_players"`              // The ghosted players
+	NewUnlocks                 []int64                `json:"new_unlocks"`                  // The new unlocks
+	GamePauseSettings          *evr.GamePauseSettings `json:"game_pause_settings"`          // The game settings
+	LegalConsents              evr.LegalConsents      `json:"legal_consents"`               // The legal consents
+	CustomizationPOIs          *evr.Customization     `json:"customization_pois"`           // The customization POIs
+	VRMLPlayerID               string                 `json:"vrml_player_id"`               // The VRML player ID
+	MatchmakingDivision        string                 `json:"matchmaking_division"`         // The matchmaking division (e.g. bronze, silver, gold, etc.)
+	sessionDisplayNameOverride string                 // The display name override for this session
 }
 
 func (a *AccountMetadata) ID() string {
