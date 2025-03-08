@@ -42,8 +42,13 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(logger runtime.Logge
 			if displayName == "" {
 				displayName = member.User.Username
 			}
-			content := fmt.Sprintf("[`%s`/`%s`] `%s`/`%s` used %s", guild.ID, member.User.ID, guild.Name, displayName, signature)
-			if _, err := d.dg.ChannelMessageSend(cID, content); err != nil {
+
+			content := fmt.Sprintf("<@!%s> (%s) used %s in `%s`", member.User.ID, displayName, signature, guild.Name)
+
+			if _, err := d.dg.ChannelMessageSendComplex(cID, &discordgo.MessageSend{
+				Content:         content,
+				AllowedMentions: &discordgo.MessageAllowedMentions{},
+			}); err != nil {
 				logger.WithField("error", err).Warn("Failed to log interaction to channel")
 			}
 		}

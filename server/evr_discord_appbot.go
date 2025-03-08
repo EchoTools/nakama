@@ -1845,7 +1845,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return nil
 			}
 			if len(i.ApplicationCommandData().Options) == 0 {
-				return errors.New("no match provided.")
+				return errors.New("no match provided")
 			}
 
 			matchIDStr := i.ApplicationCommandData().Options[0].StringValue()
@@ -2155,7 +2155,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						IconURL: r.account.User.AvatarUrl,
 						Name:    r.account.User.DisplayName,
 					},
-					Description: fmt.Sprintf("<@%s>", r.account.CustomId),
+					Description: fmt.Sprintf("<@!%s>", r.account.CustomId),
 					Color:       color,
 					Fields:      make([]*discordgo.MessageEmbedField, 0, 2),
 					Footer: &discordgo.MessageEmbedFooter{
@@ -3995,7 +3995,7 @@ func (d *DiscordAppBot) interactionToSignature(prefix string, options []*discord
 		case discordgo.ApplicationCommandOptionSubCommandGroup:
 			strval = d.interactionToSignature(opt.Name, opt.Options)
 		case discordgo.ApplicationCommandOptionString:
-			strval = opt.StringValue()
+			strval = "`" + opt.StringValue() + "`"
 		case discordgo.ApplicationCommandOptionNumber:
 			strval = fmt.Sprintf("%f", opt.FloatValue())
 		case discordgo.ApplicationCommandOptionInteger:
@@ -4014,17 +4014,23 @@ func (d *DiscordAppBot) interactionToSignature(prefix string, options []*discord
 			strval = fmt.Sprintf("unknown type %d", opt.Type)
 		}
 		if strval != "" {
-			args = append(args, opt.Name+sep+strval)
+			args = append(args, fmt.Sprintf("`%s`%s%s", opt.Name, sep, strval))
 		}
 	}
-	return fmt.Sprintf("`/%s` { %s }", prefix, strings.Join(args, ", "))
+
+	content := fmt.Sprintf("`/%s`", prefix)
+	if len(args) > 0 {
+		content += " { " + strings.Join(args, ", ") + " }"
+	}
+
+	return content
 }
 
 func (d *DiscordAppBot) LogInteractionToChannel(i *discordgo.InteractionCreate, channelID string) error {
 	data := i.ApplicationCommandData()
 	signature := d.interactionToSignature(data.Name, data.Options)
 
-	content := fmt.Sprintf("<@%s> used %s", i.Member.User.ID, signature)
+	content := fmt.Sprintf("<@!%s> used %s", i.Member.User.ID, signature)
 	d.dg.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
 		Content:         content,
 		AllowedMentions: &discordgo.MessageAllowedMentions{},
@@ -4032,17 +4038,29 @@ func (d *DiscordAppBot) LogInteractionToChannel(i *discordgo.InteractionCreate, 
 	return nil
 }
 
-func (d *DiscordAppBot) LogServiceAuditMessage(message string, replaceMentions bool) error {
+func ServiceMessageLog(dg *discordgo.Session, channelID, content string) error {
 	// replace all <@uuid> mentions with <@discordID>
-	if replaceMentions {
-		message = d.cache.ReplaceMentions(message)
-	}
-	if cID := ServiceSettings().ServiceAuditChannelID; cID != "" {
-		if _, err := d.dg.ChannelMessageSend(cID, message); err != nil {
+	if channelID != "" {
+		if _, err := dg.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
+			Content:         content,
+			AllowedMentions: &discordgo.MessageAllowedMentions{},
+		}); err != nil {
 			return fmt.Errorf("failed to send service audit message: %w", err)
 		}
 	}
 	return nil
+}
+
+func (d *DiscordAppBot) LogServiceAuditMessage(message string) error {
+	return ServiceMessageLog(d.dg, ServiceSettings().ServiceAuditChannelID, message)
+}
+
+func (d *DiscordAppBot) LogServiceDebugMessage(message string) error {
+	return ServiceMessageLog(d.dg, ServiceSettings().ServiceDebugChannelID, message)
+}
+
+func (d *DiscordAppBot) LogServiceUserErrorMessage(message string) error {
+	return ServiceMessageLog(d.dg, ServiceSettings().ServiceDebugChannelID, message)
 }
 
 func (d *DiscordAppBot) LogAuditMessage(ctx context.Context, groupID string, message string, replaceMentions bool) (*discordgo.Message, error) {
@@ -4056,12 +4074,15 @@ func (d *DiscordAppBot) LogAuditMessage(ctx context.Context, groupID string, mes
 		return nil, fmt.Errorf("group not found")
 	}
 
-	if err := d.LogServiceAuditMessage(fmt.Sprintf("[`%s/%s`] %s", gg.Name(), gg.GuildID, message), false); err != nil {
+	if err := d.LogServiceAuditMessage(fmt.Sprintf("[`%s/%s`] %s", gg.Name(), gg.GuildID, message)); err != nil {
 		return nil, err
 	}
 
 	if gg.AuditChannelID != "" {
-		return d.dg.ChannelMessageSend(gg.AuditChannelID, message)
+		return d.dg.ChannelMessageSendComplex(gg.AuditChannelID, &discordgo.MessageSend{
+			Content:         message,
+			AllowedMentions: &discordgo.MessageAllowedMentions{},
+		})
 	}
 
 	return nil, nil
@@ -4073,17 +4094,20 @@ func (d *DiscordAppBot) LogUserErrorMessage(ctx context.Context, groupID string,
 		message = d.cache.ReplaceMentions(message)
 	}
 
+	if err := d.LogServiceUserErrorMessage(message); err != nil {
+		return nil, err
+	}
+
 	gg := d.guildGroupRegistry.Get(uuid.FromStringOrNil(groupID))
 	if gg == nil {
 		return nil, fmt.Errorf("group not found")
 	}
 
 	if gg.ErrorChannelID != "" {
-		return d.dg.ChannelMessageSend(gg.ErrorChannelID, message)
-	}
-
-	if cID := ServiceSettings().GlobalErrorChannelID; cID != "" {
-		return d.dg.ChannelMessageSend(cID, message)
+		return d.dg.ChannelMessageSendComplex(gg.ErrorChannelID, &discordgo.MessageSend{
+			Content:         message,
+			AllowedMentions: &discordgo.MessageAllowedMentions{},
+		})
 	}
 
 	return nil, nil
