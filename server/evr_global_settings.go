@@ -131,7 +131,7 @@ func ServiceSettingsLoad(ctx context.Context, nk runtime.NakamaModule) (*GlobalS
 	}
 
 	if data.Matchmaking.MaxServerRTT == 0 {
-		data.Matchmaking.MaxServerRTT = 150
+		data.Matchmaking.MaxServerRTT = 180
 	}
 
 	if data.Matchmaking.RankPercentile.Default == 0 {

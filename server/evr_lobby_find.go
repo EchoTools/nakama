@@ -6,9 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"math/rand"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -119,13 +117,12 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		return fmt.Errorf("failed to be party leader.: %w", err)
 	}
 
-	// Ping for matches, not social lobbies.
-	if lobbyParams.Mode != evr.ModeSocialPublic {
-		// Check latency to active game servers.
-		if err := p.CheckServerPing(logger, session, lobbyParams.GroupID.String()); err != nil {
-			return fmt.Errorf("failed to check server ping: %w", err)
-		}
+	// Check latency to active game servers.
+	if err := p.CheckServerPing(ctx, logger, session, lobbyParams.GroupID.String()); err != nil {
+		return fmt.Errorf("failed to check server ping: %w", err)
+	}
 
+	if lobbyParams.Mode != evr.ModeSocialPublic {
 		// Submit the matchmaking ticket
 		if err := p.lobbyMatchMakeWithFallback(ctx, logger, session, lobbyParams, lobbyGroup); err != nil {
 			return fmt.Errorf("failed to matchmake: %w", err)
@@ -382,13 +379,9 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 
 	query := lobbyParams.BackfillSearchQuery(includeRankPercentile, includeMaxRTT)
 
-	rtts := lobbyParams.latencyHistory.LatestRTTs()
-	rankPercentile := lobbyParams.GetRankPercentile()
 	cycleCount := 0
-	//backfillMultipler := 1.25 // Multiplier of matchmaking ticket timeout before starting backfill search
 
 	fallbackTimer := time.NewTimer(lobbyParams.FallbackTimeout)
-
 	failsafeTimer := time.NewTimer(lobbyParams.FailsafeTimeout)
 	for {
 		var err error
@@ -397,10 +390,13 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 			return fmt.Errorf("context canceled: %w", ctx.Err())
 
 		case <-fallbackTimer.C:
+
+			// The fallback timer has expired. Reduce the search query.
 			query = lobbyParams.BackfillSearchQuery(false, false)
 
 		case <-failsafeTimer.C:
 
+			// The failsafe timer has expired. Create a match.
 			query = lobbyParams.BackfillSearchQuery(false, false)
 
 			// The failsafe timer has expired.
@@ -438,41 +434,13 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 				continue
 			}
 		}
+		partySize := lobbyParams.GetPartySize()
+		if partySize == 0 {
+			logger.Warn("party size is 0")
+			lobbyParams.SetPartySize(1)
+		}
 
-		// Sort the matches by open slots and then by latency
-		slices.SortFunc(matches, func(a, b *MatchLabelMeta) int {
-
-			// Rank by RTT
-			if rtts[a.State.GameServer.Endpoint.GetExternalIP()] > lobbyParams.MaxServerRTT && rtts[b.State.GameServer.Endpoint.GetExternalIP()] < lobbyParams.MaxServerRTT {
-				return -1
-			}
-			if rtts[a.State.GameServer.Endpoint.GetExternalIP()] < lobbyParams.MaxServerRTT && rtts[b.State.GameServer.Endpoint.GetExternalIP()] > lobbyParams.MaxServerRTT {
-				return 1
-			}
-
-			// By rank percentile difference
-			rankPercentileDifferenceA := math.Abs(a.State.RankPercentile - rankPercentile)
-			rankPercentileDifferenceB := math.Abs(b.State.RankPercentile - rankPercentile)
-
-			if rankPercentileDifferenceA < lobbyParams.RankPercentileMaxDelta && rankPercentileDifferenceB > lobbyParams.RankPercentileMaxDelta {
-				return -1
-			}
-			if rankPercentileDifferenceA > rankPercentile && rankPercentileDifferenceB < rankPercentile {
-				return 1
-			}
-
-			// Sort by largest population
-			if s := b.State.PlayerCount - a.State.PlayerCount; s != 0 {
-				return s
-			}
-
-			if s := b.State.PlayerCount - a.State.PlayerCount; s != 0 {
-				return s
-			}
-
-			// If the open slots are the same, sort by latency
-			return rtts[a.State.GameServer.Endpoint.GetExternalIP()] - rtts[b.State.GameServer.Endpoint.GetExternalIP()]
-		})
+		matches = p.sortBackfillOptions(matches, lobbyParams)
 
 		team := evr.TeamBlue
 
@@ -484,16 +452,6 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 			}
 
 			l := labelMeta.State
-
-			// if the match is too new, skip it. (except social lobbies)
-			if lobbyParams.Mode != evr.ModeSocialPublic && time.Since(l.CreatedAt) < 10*time.Second {
-				continue
-			}
-
-			// Check if the match is full
-			if l.OpenPlayerSlots() < len(entrants) {
-				continue
-			}
 
 			// Social lobbies can only have one team
 			if lobbyParams.Mode == evr.ModeSocialPublic {
@@ -557,48 +515,43 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 	}
 }
 
-func (p *EvrPipeline) CheckServerPing(logger *zap.Logger, session *sessionWS, groupID string) error {
-	// Check latency to active game servers.
-	doneCh := make(chan error)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+func (p *EvrPipeline) CheckServerPing(ctx context.Context, logger *zap.Logger, session *sessionWS, groupID string) error {
 
-	go func() {
-		defer close(doneCh)
+	latencyHistory, err := LoadLatencyHistory(ctx, logger, p.db, session.UserID())
+	if err != nil {
+		return fmt.Errorf("Error loading latency history: %v", err)
+	}
 
-		// Wait for the client to be ready.
-		<-time.After(1 * time.Second)
-		activeEndpoints := make([]evr.Endpoint, 0, 100)
+	presences, err := p.nk.StreamUserList(StreamModeGameServer, groupID, "", "", false, true)
+	if err != nil {
+		return fmt.Errorf("Error listing game servers: %v", err)
+	}
 
-		presences, err := p.nk.StreamUserList(StreamModeGameServer, groupID, "", "", false, true)
-		if err != nil {
-			doneCh <- err
+	endpointMap := make(map[string]evr.Endpoint, len(presences))
+	hostIPs := make([]string, 0, len(presences))
+	for _, presence := range presences {
+		gPresence := &GameServerPresence{}
+		if err := json.Unmarshal([]byte(presence.GetStatus()), gPresence); err != nil {
+			logger.Warn("Failed to unmarshal game server presence", zap.Error(err))
+			continue
 		}
+		hostIPs = append(hostIPs, gPresence.Endpoint.GetExternalIP())
+		endpointMap[gPresence.Endpoint.GetExternalIP()] = gPresence.Endpoint
+	}
 
-		for _, presence := range presences {
-			gPresence := &GameServerPresence{}
-			if err := json.Unmarshal([]byte(presence.GetStatus()), gPresence); err != nil {
-				logger.Warn("Failed to unmarshal game server presence", zap.Error(err))
-				continue
-			}
-			activeEndpoints = append(activeEndpoints, gPresence.Endpoint)
-		}
+	sortPingCandidatesByLatencyHistory(hostIPs, latencyHistory)
 
-		if err := PingGameServers(ctx, logger, session, p.db, activeEndpoints); err != nil {
-			doneCh <- err
-		}
-		doneCh <- nil
-	}()
+	candidates := make([]evr.Endpoint, 0, len(hostIPs))
 
-	// Wait for the ping response to complete
-	var err error
-	select {
-	case <-time.After(5 * time.Second):
-		logger.Warn("Timed out waiting for ping responses message.")
-	case err = <-doneCh:
-		if err != nil {
-			return fmt.Errorf("failed to ping game servers: %v", err)
+	for _, ip := range hostIPs {
+		candidates = append(candidates, endpointMap[ip])
+		if len(candidates) >= 16 {
+			break
 		}
+	}
+
+	if err := SendEVRMessages(session, false, evr.NewLobbyPingRequest(275, candidates)); err != nil {
+		return fmt.Errorf("Failed to send ping request: %v", err)
 	}
 
 	return nil

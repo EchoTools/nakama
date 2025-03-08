@@ -1,15 +1,11 @@
 package server
 
 import (
-	"context"
-	"database/sql"
-	"fmt"
 	"math/rand"
 	"net"
 	"slices"
 
 	"github.com/heroiclabs/nakama/v3/server/evr"
-	"go.uber.org/zap"
 )
 
 const (
@@ -40,46 +36,6 @@ func (e *endpointCompact) Endpoint() evr.Endpoint {
 		ExternalIP: e.ExternalIP(),
 		InternalIP: e.InternalIP(),
 		Port:       e.Port()}
-}
-
-func PingGameServers(ctx context.Context, logger *zap.Logger, session Session, db *sql.DB, activeEndpoints []evr.Endpoint) error {
-	latencyHistory, err := LoadLatencyHistory(ctx, logger, db, session.UserID())
-	if err != nil {
-		return fmt.Errorf("Error loading latency history: %v", err)
-	}
-
-	if len(activeEndpoints) == 0 {
-		logger.Warn("No active endpoints to ping")
-
-	}
-
-	hostIPs := make([]string, 0, len(activeEndpoints))
-	hostMap := make(map[string]evr.Endpoint, len(activeEndpoints))
-	for _, endpoint := range activeEndpoints {
-		ip := endpoint.GetExternalIP()
-		hostIPs = append(hostIPs, ip)
-		hostMap[ip] = endpoint
-	}
-
-	// Remove Duplicates
-	slices.Sort(hostIPs)
-	hostIPs = slices.Compact(hostIPs)
-
-	// Sort the candidates by latency history
-	sortPingCandidatesByLatencyHistory(hostIPs, latencyHistory)
-
-	candidates := make([]evr.Endpoint, 0, len(hostIPs))
-
-	for i := 0; i < len(hostIPs) && i < 16; i++ {
-		candidates = append(candidates, hostMap[hostIPs[i]])
-	}
-
-	if err := SendEVRMessages(session, false, evr.NewLobbyPingRequest(350, candidates)); err != nil {
-		return fmt.Errorf("Error sending ping request: %v", err)
-	}
-
-	logger.Debug("Sent ping request", zap.Any("candidates", candidates))
-	return nil
 }
 
 func sortPingCandidatesByLatencyHistory(hostIPs []string, latencyHistory map[string]map[int64]int) {
