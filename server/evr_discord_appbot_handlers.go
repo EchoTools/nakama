@@ -29,6 +29,26 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(logger runtime.Logge
 	userID := d.cache.DiscordIDToUserID(user.ID)
 	groupID := d.cache.GuildIDToGroupID(i.GuildID)
 
+	// Log the interaction
+	if cID := ServiceSettings().CommandLogChannelID; cID != "" {
+		data := i.ApplicationCommandData()
+		if guild, err := d.dg.State.Guild(i.GuildID); err != nil {
+			logger.WithField("error", err).Warn("Failed to get guild")
+		} else if member, err := d.dg.GuildMember(i.GuildID, user.ID); err != nil {
+			logger.WithField("error", err).Warn("Failed to get guild member")
+		} else {
+			signature := d.interactionToSignature(data.Name, data.Options)
+			displayName := member.DisplayName()
+			if displayName == "" {
+				displayName = member.User.Username
+			}
+			content := fmt.Sprintf("[`%s`/`%s`] `%s`/`%s` used %s", guild.ID, member.User.ID, guild.Name, displayName, signature)
+			if _, err := d.dg.ChannelMessageSend(cID, content); err != nil {
+				logger.WithField("error", err).Warn("Failed to log interaction to channel")
+			}
+		}
+	}
+
 	switch commandName {
 	case "link-headset":
 
