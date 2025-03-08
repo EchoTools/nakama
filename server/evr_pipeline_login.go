@@ -58,7 +58,12 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 	// Process the login request and populate the session parameters.
 	if err := p.processLoginRequest(ctx, logger, session, &params); err != nil {
 
-		errMessage := formatLoginErrorMessage(request.XPID, err)
+		discordID := ""
+		if userID, err := GetUserIDByEvrID(ctx, p.db, request.XPID.String()); err != nil {
+			discordID = p.discordCache.UserIDToDiscordID(userID)
+		}
+
+		errMessage := formatLoginErrorMessage(request.XPID, discordID, err)
 
 		return session.SendEvrUnrequire(evr.NewLoginFailure(request.XPID, errMessage))
 	}
@@ -153,7 +158,7 @@ func normalizeHeadsetType(headset string) string {
 	return headset
 }
 
-func formatLoginErrorMessage(xpID evr.EvrId, err error) string {
+func formatLoginErrorMessage(xpID evr.EvrId, discordID string, err error) string {
 	errContent := ""
 	if e, ok := status.FromError(err); ok {
 		errContent = e.Message()
@@ -162,7 +167,11 @@ func formatLoginErrorMessage(xpID evr.EvrId, err error) string {
 	}
 
 	// Format the error message with the XPID prefix
-	errContent = fmt.Sprintf("[%s]\n %s", xpID.String(), errContent)
+	if discordID == "" {
+		errContent = fmt.Sprintf("[%s]\n %s", xpID.String(), errContent)
+	} else {
+		errContent = fmt.Sprintf("[XPID: %s, Discord ID: %s]\n %s", xpID.String(), discordID, errContent)
+	}
 
 	// Replace ": " with ":\n" for better readability
 	errContent = strings.Replace(errContent, ": ", ":\n", 2)
