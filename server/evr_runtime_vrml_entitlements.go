@@ -21,6 +21,45 @@ const (
 )
 
 const (
+	MedalVRMLPreseason  = "rwd_medal_s1_vrml_preseason"
+	MedalVRMLS1         = "rwd_medal_s1_vrml_s1_user"
+	MedalVRMLS1Champion = "rwd_medal_s1_vrml_s1_champion"
+	MedalVRMLS1Finalist = "rwd_medal_s1_vrml_s1_finalist"
+	MedalVRMLS2         = "rwd_medal_s1_vrml_s2"
+	MedalVRMLS2Champion = "rwd_medal_s1_vrml_s2_champion"
+	MedalVRMLS2Finalist = "rwd_medal_s1_vrml_s2_finalist"
+	MedalVRMLS3         = "rwd_medal_s1_vrml_s3"
+	MedalVRMLS3Champion = "rwd_medal_s1_vrml_s3_champion"
+	MedalVRMLS3Finalist = "rwd_medal_s1_vrml_s3_finalist"
+	MedalVRMLS4         = "rwd_medal_0006"
+	MedalVRMLS4Finalist = "rwd_medal_0007"
+	MedalVRMLS4Champion = "rwd_medal_0008"
+
+	TagVRMLPreseason  = "rwd_tag_s1_vrml_preseason"
+	TagVRMLS1         = "rwd_tag_s1_vrml_s1"
+	TagVRMLS1Champion = "rwd_tag_s1_vrml_s1_champion"
+	TagVRMLS1Finalist = "rwd_tag_s1_vrml_s1_finalist"
+	TagVRMLS2         = "rwd_tag_s1_vrml_s2"
+	TagVRMLS2Champion = "rwd_tag_s1_vrml_s2_champion"
+	TagVRMLS2Finalist = "rwd_tag_s1_vrml_s2_finalist"
+	TagVRMLS3         = "rwd_tag_s1_vrml_s3"
+	TagVRMLS3Champion = "rwd_tag_s1_vrml_s3_champion"
+	TagVRMLS3Finalist = "rwd_tag_s1_vrml_s3_finalist"
+	TagVRMLS4         = "rwd_tag_0008"
+	TagVRMLS4Champion = "rwd_tag_0010"
+	TagVRMLS4Finalist = "rwd_tag_0009"
+	TagVRMLS5         = "rwd_tag_0035"
+	TagVRMLS5Champion = "rwd_tag_0037"
+	TagVRMLS5Finalist = "rwd_tag_0036"
+	TagVRMLS6         = "rwd_tag_0040"
+	TagVRMLS6Champion = "rwd_tag_0042"
+	TagVRMLS6Finalist = "rwd_tag_0041"
+	TagVRMLS7         = "rwd_tag_0043"
+	TagVRMLS7Champion = "rwd_tag_0045"
+	TagVRMLS7Finalist = "rwd_tag_0044"
+)
+
+const (
 	VRMLPreSeason VRMLSeasonID = "b-VHi9XjGIR0Pv17C7P_Tw2"
 	VRMLSeason1   VRMLSeasonID = "PS5eV-VOdnRPCAxRix9xlQ2"
 	VRMLSeason2   VRMLSeasonID = "NLQNdfR3j0lyy6eLpLhIYw2"
@@ -46,42 +85,42 @@ var vrmlSeasonDescriptionMap = map[VRMLSeasonID]string{
 
 var vrmlCosmeticMap = map[VRMLSeasonID]map[VRMLPrestige][]string{
 	VRMLPreSeason: {
-		VRMLPlayer: {"rwd_tag_s1_vrml_preseason", "rwd_medal_s1_vrml_preseason"},
+		VRMLPlayer: {TagVRMLPreseason, MedalVRMLPreseason},
 	},
 	VRMLSeason1: {
-		VRMLPlayer:   {"rwd_tag_s1_vrml_s1", "rwd_medal_s1_vrml_s1_user"},
-		VRMLFinalist: {"rwd_medal_s1_vrml_s1_finalist", "rwd_tag_s1_vrml_s1_finalist", "rwd_tag_s1_vrml_s1", "rwd_medal_s1_vrml_s1_user"},
-		VRMLChampion: {"rwd_medal_s1_vrml_s1_champion", "rwd_tag_s1_vrml_s1_champion", "rwd_medal_s1_vrml_s1_finalist", "rwd_tag_s1_vrml_s1_finalist", "rwd_tag_s1_vrml_s1", "rwd_medal_s1_vrml_s1_user"},
+		VRMLPlayer:   {TagVRMLS1, MedalVRMLS1},
+		VRMLFinalist: {MedalVRMLS1Finalist, TagVRMLS1Finalist, TagVRMLS1, MedalVRMLS1},
+		VRMLChampion: {MedalVRMLS1Champion, TagVRMLS1Champion, MedalVRMLS1Finalist, TagVRMLS1Finalist, TagVRMLS1, MedalVRMLS1},
 	},
 	VRMLSeason2: {
-		VRMLPlayer:   {"rwd_tag_s1_vrml_s2", "rwd_medal_s1_vrml_s2"},
-		VRMLFinalist: {"rwd_medal_s1_vrml_s2_finalist", "rwd_tag_s1_vrml_s2_finalist", "rwd_tag_s1_vrml_s2", "rwd_medal_s1_vrml_s2"},
-		VRMLChampion: {"rwd_medal_s1_vrml_s2_champion", "rwd_tag_s1_vrml_s2_champion", "rwd_medal_s1_vrml_s2_finalist", "rwd_tag_s1_vrml_s2_finalist", "rwd_tag_s1_vrml_s2", "rwd_medal_s1_vrml_s2"},
+		VRMLPlayer:   {TagVRMLS2, MedalVRMLS2},
+		VRMLFinalist: {MedalVRMLS2Finalist, TagVRMLS2Finalist, TagVRMLS2, MedalVRMLS2},
+		VRMLChampion: {MedalVRMLS2Champion, TagVRMLS2Champion, MedalVRMLS2Finalist, TagVRMLS2Finalist, TagVRMLS2, MedalVRMLS2},
 	},
 	VRMLSeason3: {
-		VRMLPlayer:   {"rwd_tag_s1_vrml_s3", "rwd_medal_s1_vrml_s3"},
-		VRMLFinalist: {"rwd_medal_s1_vrml_s3_finalist", "rwd_tag_s1_vrml_s3_finalist", "rwd_tag_s1_vrml_s3", "rwd_medal_s1_vrml_s3"},
-		VRMLChampion: {"rwd_medal_s1_vrml_s3_champion", "rwd_tag_s1_vrml_s3_champion", "rwd_medal_s1_vrml_s3_finalist", "rwd_tag_s1_vrml_s3_finalist", "rwd_tag_s1_vrml_s3", "rwd_medal_s1_vrml_s3"},
+		VRMLPlayer:   {TagVRMLS3, MedalVRMLS3},
+		VRMLFinalist: {MedalVRMLS3Finalist, TagVRMLS3Finalist, TagVRMLS3, MedalVRMLS3},
+		VRMLChampion: {TagVRMLS3Champion, MedalVRMLS3Champion, MedalVRMLS3Finalist, TagVRMLS3Finalist, TagVRMLS3, MedalVRMLS3},
 	},
 	VRMLSeason4: {
-		VRMLPlayer:   {"rwd_tag_0006", "rwd_medal_0006"},
-		VRMLFinalist: {"rwd_tag_0007", "rwd_medal_0007", "rwd_tag_0006", "rwd_medal_0006"},
-		VRMLChampion: {"rwd_tag_0008", "rwd_medal_0008", "rwd_tag_0007", "rwd_medal_0007", "rwd_tag_0006", "rwd_medal_0006"},
+		VRMLPlayer:   {TagVRMLS4, MedalVRMLS4},
+		VRMLFinalist: {TagVRMLS4Finalist, MedalVRMLS4Finalist, TagVRMLS4, MedalVRMLS4},
+		VRMLChampion: {TagVRMLS4Champion, MedalVRMLS4Champion, TagVRMLS4Finalist, MedalVRMLS4Finalist, TagVRMLS4, MedalVRMLS4},
 	},
 	VRMLSeason5: {
-		VRMLPlayer:   {"rwd_tag_0035"},
-		VRMLFinalist: {"rwd_tag_0036", "rwd_tag_0035"},
-		VRMLChampion: {"rwd_tag_0037", "rwd_tag_0036", "rwd_tag_0035"},
+		VRMLPlayer:   {TagVRMLS5},
+		VRMLFinalist: {TagVRMLS5Finalist, TagVRMLS5},
+		VRMLChampion: {TagVRMLS5Champion, TagVRMLS5Finalist, TagVRMLS5},
 	},
 	VRMLSeason6: {
-		VRMLPlayer:   {"rwd_tag_0040"},
-		VRMLFinalist: {"rwd_tag_0041", "rwd_tag_0040"},
-		VRMLChampion: {"rwd_tag_0042", "rwd_tag_0041", "rwd_tag_0040"},
+		VRMLPlayer:   {TagVRMLS6},
+		VRMLFinalist: {TagVRMLS6Finalist, TagVRMLS6},
+		VRMLChampion: {TagVRMLS6Champion, TagVRMLS6Finalist, TagVRMLS6},
 	},
 	VRMLSeason7: {
-		VRMLPlayer:   {"rwd_tag_0043"},
-		VRMLFinalist: {"rwd_tag_0044", "rwd_tag_0043"},
-		VRMLChampion: {"rwd_tag_0045", "rwd_tag_0044", "rwd_tag_0043"},
+		VRMLPlayer:   {TagVRMLS7},
+		VRMLFinalist: {TagVRMLS7Finalist, TagVRMLS7},
+		VRMLChampion: {TagVRMLS7Champion, TagVRMLS7Finalist, TagVRMLS7},
 	},
 }
 

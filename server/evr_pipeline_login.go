@@ -59,7 +59,7 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 	if err := p.processLoginRequest(ctx, logger, session, &params); err != nil {
 
 		discordID := ""
-		if userID, err := GetUserIDByEvrID(ctx, p.db, request.XPID.String()); err != nil {
+		if userID, err := GetUserIDByDeviceID(ctx, p.db, request.XPID.String()); err != nil {
 			discordID = p.discordCache.UserIDToDiscordID(userID)
 		}
 

@@ -26,7 +26,7 @@ const (
 )
 
 var (
-	ErrDiscordIDMismatch = errors.New("Discord ID mismatch")
+	ErrDiscordIDMismatch = errors.New("discord ID mismatch")
 )
 
 var oauthFlows = &MapOf[string, *VRMLOAuth]{}
@@ -69,68 +69,6 @@ func NewVRMLOAuthFlow(clientID, redirectURL string, timeout time.Duration) (*VRM
 	}()
 
 	return oauthData, nil
-}
-
-func (v *VRMLOAuth) checkCurrentOwner(ctx context.Context, nk runtime.NakamaModule, vrmlUserID string) (string, error) {
-	// Check if the account is already owned by another user
-	objs, _, err := nk.StorageIndexList(ctx, SystemUserID, StorageIndexVRMLUserID, fmt.Sprintf("+value.userID:%s", vrmlUserID), 100, nil, "")
-	if err != nil {
-		return "", fmt.Errorf("error checking ownership: %w", err)
-	}
-
-	if len(objs.Objects) == 0 {
-		return "", nil
-	}
-
-	return objs.Objects[0].UserId, nil
-}
-
-// VerifyOwnership verifies that the user owns the VRML account by checking the Discord ID
-func (v *VRMLOAuth) linkAccounts(ctx context.Context, nk runtime.NakamaModule, vg *vrmlgo.Session, userID string) error {
-
-	vrmlUser, err := vg.Me(vrmlgo.WithUseCache(false))
-	if err != nil {
-		return runtime.NewError("Failed to get user data", StatusInternalError)
-	}
-
-	data, err := json.Marshal(vrmlUser)
-	if err != nil {
-		return runtime.NewError("Failed to marshal user data", StatusInternalError)
-	}
-
-	// Store the VRML user data in the database (effectively linking the account)
-	if _, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{
-		{
-			Collection:      StorageCollectionSocial,
-			Key:             StorageKeyVRMLUser,
-			UserID:          userID,
-			Value:           string(data),
-			PermissionRead:  0,
-			PermissionWrite: 0,
-		},
-	}); err != nil {
-		return runtime.NewError("Failed to store user", StatusInternalError)
-	}
-
-	// Set the VRML player ID in the account metadata
-	metadata, err := AccountMetadataLoad(ctx, nk, userID)
-	metadata.VRMLPlayerID = vrmlUser.ID
-	if err := AccountMetadataUpdate(ctx, nk, userID, metadata); err != nil {
-		return runtime.NewError("Failed to save account metadata", StatusInternalError)
-	}
-
-	// Queue the event to count matches and assign entitlements
-	if err := nk.Event(ctx, &api.Event{
-		Name: EventVRMLAccountLinked,
-		Properties: map[string]string{
-			"user_id": userID,
-			"token":   vg.Token,
-		},
-		External: true,
-	}); err != nil {
-		return runtime.NewError("Failed to queue event", StatusInternalError)
-	}
-	return nil
 }
 
 // RedirectRPC is called by the client after they have authenticated with VRML
@@ -206,4 +144,45 @@ func (v *VRMLVerifier) RedirectRPC(ctx context.Context, logger runtime.Logger, d
 		}
 	}
 	return "VRML Account Linked, you can close this window", nil
+}
+
+// VerifyOwnership verifies that the user owns the VRML account by checking the Discord ID
+func LinkVRMLAccount(ctx context.Context, nk runtime.NakamaModule, userID string, vrmlUser *vrmlgo.User) error {
+
+	// Set the device ID for the account
+	if err := nk.LinkDevice(ctx, userID, DeviceIDPrefixVRML+vrmlUser.ID); err != nil {
+		return fmt.Errorf("failed to link device ID for VRML account: %w", err)
+	}
+
+	data, err := json.Marshal(vrmlUser)
+	if err != nil {
+		return fmt.Errorf("failed to marshal VRML user data: %w", err)
+	}
+
+	// Store the VRML user data in the database (effectively linking the account)
+	if _, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{
+		{
+			Collection:      StorageCollectionSocial,
+			Key:             StorageKeyVRMLUser,
+			UserID:          userID,
+			Value:           string(data),
+			PermissionRead:  0,
+			PermissionWrite: 0,
+		},
+	}); err != nil {
+		return fmt.Errorf("failed to write VRML user data: %w", err)
+	}
+
+	// Queue the event to count matches and assign entitlements
+	if err := nk.Event(ctx, &api.Event{
+		Name: EventVRMLAccountLinked,
+		Properties: map[string]string{
+			"user_id": userID,
+			"token":   "",
+		},
+		External: true,
+	}); err != nil {
+		return fmt.Errorf("failed to queue VRML account linked event: %w", err)
+	}
+	return nil
 }
