@@ -267,7 +267,7 @@ func (h *LoginHistory) NotifyGroup(groupID string, threshold time.Time) bool {
 	return updated
 }
 
-func (h *LoginHistory) UpdateAlternates(ctx context.Context, nk runtime.NakamaModule) error {
+func (h *LoginHistory) UpdateAlternates(ctx context.Context, nk runtime.NakamaModule, excludeUserIDs ...string) error {
 	matches, err := LoginAlternateSearch(ctx, nk, h)
 	if err != nil {
 		return fmt.Errorf("error searching for alternate logins: %w", err)
@@ -291,6 +291,26 @@ func (h *LoginHistory) UpdateAlternates(ctx context.Context, nk runtime.NakamaMo
 
 	slices.Sort(h.SecondDegreeAlternates)
 	h.SecondDegreeAlternates = slices.Compact(h.SecondDegreeAlternates)
+
+	excludeUserIDs = append(excludeUserIDs, h.userID)
+
+	// Recursively update the alternates
+	for id := range h.AlternateMap {
+		if slices.Contains(excludeUserIDs, id) {
+			continue
+		}
+		otherHistory, err := LoginHistoryLoad(ctx, nk, id)
+		if err != nil {
+			return fmt.Errorf("error loading alternate login history: %w", err)
+		}
+		if err := otherHistory.UpdateAlternates(ctx, nk, excludeUserIDs...); err != nil {
+			return fmt.Errorf("error updating alternate login history: %w", err)
+		}
+		if err := otherHistory.Store(ctx, nk); err != nil {
+			return fmt.Errorf("error storing alternate login history: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -454,26 +474,31 @@ func LoginHistoryUpdate(ctx context.Context, nk runtime.NakamaModule, userID str
 	return nil
 }
 
-func DeviceCacheRegexSearch(ctx context.Context, nk runtime.NakamaModule, pattern string, limit int, cursor string) (map[string]*LoginHistory, error) {
+func LoginHistoryRegexSearch(ctx context.Context, nk runtime.NakamaModule, pattern string, limit int) (map[string]*LoginHistory, error) {
 
 	query := fmt.Sprintf("+value.cache:/%s/", pattern)
 	// Perform the storage list operation
 
-	result, cursor, err := nk.StorageIndexList(ctx, SystemUserID, LoginHistoryCacheIndex, query, limit, []string{"value.active"}, cursor)
-	if err != nil {
-		return nil, fmt.Errorf("error listing display name history: %w", err)
-	}
-
-	histories := make(map[string]*LoginHistory, len(result.Objects))
-
-	for _, obj := range result.Objects {
-		var history LoginHistory
-		if err := json.Unmarshal([]byte(obj.Value), &history); err != nil {
-			return nil, fmt.Errorf("error unmarshalling display name history: %w", err)
+	cursor := ""
+	histories := make(map[string]*LoginHistory)
+	for {
+		result, cursor, err := nk.StorageIndexList(ctx, SystemUserID, LoginHistoryCacheIndex, query, limit, nil, cursor)
+		if err != nil {
+			return nil, fmt.Errorf("error listing display name history: %w", err)
 		}
-		histories[obj.UserId] = &history
-	}
 
+		for _, obj := range result.Objects {
+			var history LoginHistory
+			if err := json.Unmarshal([]byte(obj.Value), &history); err != nil {
+				return nil, fmt.Errorf("error unmarshalling display name history: %w", err)
+			}
+			histories[obj.UserId] = &history
+		}
+
+		if cursor == "" {
+			break
+		}
+	}
 	return histories, nil
 }
 
