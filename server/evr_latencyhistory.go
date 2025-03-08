@@ -47,11 +47,11 @@ func (h LatencyHistory) Add(extIP string, rtt int) {
 func (h LatencyHistory) LatestRTTs() map[string]int {
 	latestRTTs := make(map[string]int)
 	for extIP, history := range h {
-		latestRTTs[extIP] = 0
+		latestRTTs[extIP] = 999
 		latestTS := int64(0)
 		for ts, rtt := range history {
-			if rtt == 0 || rtt == 999 {
-				rtt = 999
+			if rtt == 0 {
+				continue
 			}
 			if ts > latestTS {
 				latestTS = ts

@@ -320,10 +320,10 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		}
 	}
 
-	maxServerRTT := 180
+	maxServerRTT := globalSettings.MaxServerRTT
 
-	if globalSettings.MaxServerRTT > 0 {
-		maxServerRTT = globalSettings.MaxServerRTT
+	if globalSettings.MaxServerRTT <= 60 {
+		maxServerRTT = 180
 	}
 
 	// Set the maxRTT to at least the average of the player's latency history
