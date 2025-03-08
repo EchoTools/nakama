@@ -588,12 +588,12 @@ func DisconnectUserID(ctx context.Context, nk runtime.NakamaModule, userID strin
 	return cnt, nil
 }
 
-func GetUserIDByEvrID(ctx context.Context, db *sql.DB, evrID string) (string, error) {
+func GetUserIDByDeviceID(ctx context.Context, db *sql.DB, deviceID string) (string, error) {
 	query := `
 	SELECT ud.user_id FROM user_device ud WHERE ud.id = $1`
 	var dbUserID string
 	var found = true
-	err := db.QueryRowContext(ctx, query, evrID).Scan(&dbUserID)
+	err := db.QueryRowContext(ctx, query, deviceID).Scan(&dbUserID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			found = false

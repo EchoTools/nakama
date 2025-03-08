@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -141,7 +142,6 @@ type AccountMetadata struct {
 	GamePauseSettings          *evr.GamePauseSettings `json:"game_pause_settings"`          // The game settings
 	LegalConsents              evr.LegalConsents      `json:"legal_consents"`               // The legal consents
 	CustomizationPOIs          *evr.Customization     `json:"customization_pois"`           // The customization POIs
-	VRMLPlayerID               string                 `json:"vrml_player_id"`               // The VRML player ID
 	MatchmakingDivision        string                 `json:"matchmaking_division"`         // The matchmaking division (e.g. bronze, silver, gold, etc.)
 	sessionDisplayNameOverride string                 // The display name override for this session
 }
@@ -187,6 +187,16 @@ func (a *AccountMetadata) XPIDs() []evr.EvrId {
 
 	return xpids
 }
+
+func (a *AccountMetadata) VRMLUserID() string {
+	for _, d := range a.account.Devices {
+		if vrmlUserID, found := strings.CutPrefix(d.Id, DeviceIDPrefixVRML); found {
+			return vrmlUserID
+		}
+	}
+	return ""
+}
+
 func (a *AccountMetadata) DiscordAccountCreationTime() time.Time {
 	t, _ := discordgo.SnowflakeTimestamp(a.DiscordID())
 	return t

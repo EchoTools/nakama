@@ -3165,108 +3165,137 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 		"vrml-verify": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			// accountLinkCommandHandler handles the account link command from Discord
 
-			nk := d.nk
-			db := d.db
-
-			// Check if the user is already linked
-			userID, err := GetUserIDByDiscordID(ctx, db, user.ID)
-			if err != nil {
-				return fmt.Errorf("failed to get userID by DiscordID: %w", err)
-			}
-
-			if objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
-				{
-					Collection: StorageCollectionSocial,
-					Key:        StorageKeyVRMLUser,
-					UserID:     userID,
-				},
-			}); err != nil {
-				return fmt.Errorf("failed to read storage: %w", err)
-			} else {
-				if len(objs) > 0 {
-					return simpleInteractionResponse(s, i, fmt.Sprintf("Your VRML account is already linked. Contact EchoVRCE %s if you need to unlink it.", ServiceSettings().ReportURL))
+			var (
+				nk             = d.nk
+				db             = d.db
+				vrmlUser       *vrmlgo.User
+				editResponseFn = func(content string) error {
+					_, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+						Content: &content,
+					})
+					return err
 				}
-			}
+			)
 
-			vars, _ := ctx.Value(runtime.RUNTIME_CTX_ENV).(map[string]string)
+			// Try to load the user's existing VRML account data
+			if account, err := nk.AccountGetId(ctx, userID); err != nil {
+				return fmt.Errorf("failed to get account: %w", err)
+			} else {
 
-			// Start the OAuth flow
-			timeoutDuration := 5 * time.Minute
-			flow, err := NewVRMLOAuthFlow(vars["VRML_OAUTH_CLIENT_ID"], vars["VRML_OAUTH_REDIRECT_URL"], timeoutDuration)
-			if err != nil {
-				return fmt.Errorf("failed to start OAuth flow: %w", err)
-			}
-
-			editResponseFn := func(content string) error {
-				_, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-					Content: &content,
-				})
-				return err
+				// Search the user's devices for a VRML userID
+				for _, d := range account.Devices {
+					if vrmlUserID, found := strings.CutPrefix(d.Id, DeviceIDPrefixVRML); found {
+						vg := vrmlgo.New("")
+						if m, err := vg.Member(vrmlUserID); err != nil {
+							return fmt.Errorf("failed to get VRML user: %w", err)
+						} else {
+							vrmlUser = m.User
+						}
+						break
+					}
+				}
 			}
 
 			go func() {
-				// Wait for the token to be returned
-				select {
-				case token := <-flow.tokenCh:
-					logger := logger.WithFields(map[string]interface{}{
-						"user_id":    userID,
-						"discord_id": i.Member.User.ID,
-					})
 
-					vg := vrmlgo.New(token)
+				if vrmlUser == nil {
 
-					vrmlUser, err := vg.Me(vrmlgo.WithUseCache(false))
+					vars, _ := ctx.Value(runtime.RUNTIME_CTX_ENV).(map[string]string)
+
+					// Start the OAuth flow
+					timeoutDuration := 5 * time.Minute
+					flow, err := NewVRMLOAuthFlow(vars["VRML_OAUTH_CLIENT_ID"], vars["VRML_OAUTH_REDIRECT_URL"], timeoutDuration)
 					if err != nil {
-						logger.Error("Failed to get VRML user data")
-						return
-					}
-					logger = logger.WithFields(map[string]interface{}{
-						"vrml_id":         vrmlUser.ID,
-						"vrml_discord_id": vrmlUser.GetDiscordID(),
-					})
-
-					if i.Member.User.ID != vrmlUser.GetDiscordID() {
-						logger.Error("Discord ID mismatch")
-						editResponseFn("Discord ID mismatch. Please make sure your VRML account is linked to the correct Discord account.")
+						logger.Error("Failed to start OAuth flow", zap.Error(err))
 						return
 					}
 
-					// Check if the account is already owned by another user
-					if ownerID, err := flow.checkCurrentOwner(ctx, nk, vrmlUser.ID); err != nil {
-						logger.Error("Failed to check current owner")
-						editResponseFn("Failed to check current owner")
-						return
-					} else if ownerID != "" && ownerID != userID {
-						content := fmt.Sprintf("Account already owned by another user. [Contact EchoVRCE](%s) if you need to unlink it.", ServiceSettings().ReportURL)
-						logger.WithField("owner_id", ownerID).Error(content)
-						editResponseFn("Account already owned by another user")
-						return
-					}
-
-					// Link the accounts
-					if err := flow.linkAccounts(ctx, nk, vg, userID); err != nil {
-						editResponseFn("Failed to link accounts")
+					// Send the link to the user
+					if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+						Type: discordgo.InteractionResponseChannelMessageWithSource,
+						Data: &discordgo.InteractionResponseData{
+							Flags:   discordgo.MessageFlagsEphemeral | discordgo.MessageFlagsSuppressEmbeds,
+							Content: fmt.Sprintf("To assign your cosmetics, [Verify your VRML account](%s)", flow.url),
+						},
+					}); err != nil {
+						logger.Error("Failed to send interaction response", zap.Error(err))
 						return
 					}
 
-					editResponseFn("Your VRML account has been verified. It may take a few minutes (and up to a few hours) for your cosmetics to appear.\nNote: this system does not retain the token.")
+					// Wait for the token to be returned
+					select {
+					case <-time.After(timeoutDuration):
+						simpleInteractionResponse(s, i, "OAuth flow timed out. Please run the command again.")
+						return // Timeout
+					case token := <-flow.tokenCh:
+						logger := logger.WithFields(map[string]any{
+							"user_id":    userID,
+							"discord_id": i.Member.User.ID,
+						})
 
-				case <-time.After(timeoutDuration):
-					simpleInteractionResponse(s, i, "OAuth flow timed out. Please run the command again.")
+						vg := vrmlgo.New(token)
+
+						vrmlUser, err = vg.Me(vrmlgo.WithUseCache(false))
+						if err != nil {
+							logger.Error("Failed to get VRML user data")
+							return
+						}
+						logger = logger.WithFields(map[string]any{
+							"vrml_id":         vrmlUser.ID,
+							"vrml_discord_id": vrmlUser.GetDiscordID(),
+						})
+
+						if vrmlUser.GetDiscordID() != i.Member.User.ID {
+							logger.Error("Discord ID mismatch")
+							vrmlLink := fmt.Sprintf("[%s](https://vrmasterleague.com/EchoArena/Users/%s)", vrmlUser.UserName, vrmlUser.ID)
+							thisDiscordTag := fmt.Sprintf("%s#%s", user.Username, user.Discriminator)
+							editResponseFn(fmt.Sprintf("VRML account %s is currently linked to %s. Please relink the VRML account to this Discord account (%s).", vrmlLink, vrmlUser.DiscordTag, thisDiscordTag))
+							return
+						}
+					}
+				} else {
+
+					// Send the link to the user
+					if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+						Type: discordgo.InteractionResponseChannelMessageWithSource,
+						Data: &discordgo.InteractionResponseData{
+							Flags:   discordgo.MessageFlagsEphemeral | discordgo.MessageFlagsSuppressEmbeds,
+							Content: fmt.Sprintf("Your VRML account (`%s`) is already linked. Reverifying your entitlements...", vrmlUser.UserName),
+						},
+					}); err != nil {
+						logger.Error("Failed to send interaction response", zap.Error(err))
+						return
+					}
 				}
+
+				// Check if the account is already owned by another user
+				ownerID, err := GetUserIDByDeviceID(ctx, db, DeviceIDPrefixVRML+vrmlUser.ID)
+				if err != nil && status.Code(err) != codes.NotFound {
+					logger.Error("Failed to check current owner")
+				} else if ownerID != "" && ownerID != userID {
+					content := fmt.Sprintf("Account already owned by another user. [Contact EchoVRCE](%s) if you need to unlink it.", ServiceSettings().ReportURL)
+					logger.WithField("owner_id", ownerID).Error(content)
+					editResponseFn("Account already owned by another user")
+					return
+				}
+
+				// Link the accounts
+				if err := LinkVRMLAccount(ctx, nk, userID, vrmlUser); err != nil {
+					if err := editResponseFn("Failed to link accounts"); err != nil {
+						logger.Error("Failed to edit response", zap.Error(err))
+					}
+					logger.Error("Failed to link accounts", zap.Error(err))
+					return
+				}
+
+				if err := editResponseFn(fmt.Sprintf("Your VRML account (`%s`) has been verified/linked. It will take a few minutes--up to a few hours--to update your entitlements.", vrmlUser.UserName)); err != nil {
+					logger.Error("Failed to edit response", zap.Error(err))
+					return
+				}
+
 			}()
 
-			content := fmt.Sprintf("To assign your cosmetics, [Verify your VRML account](%s)", flow.url)
-
-			// Send the link to the user
-			return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-				Type: discordgo.InteractionResponseChannelMessageWithSource,
-				Data: &discordgo.InteractionResponseData{
-					Flags:   discordgo.MessageFlagsEphemeral | discordgo.MessageFlagsSuppressEmbeds,
-					Content: content,
-				},
-			})
-
+			return nil
 		},
 	}
 

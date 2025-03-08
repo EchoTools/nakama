@@ -20,6 +20,7 @@ const (
 	EventAccountUpdated         = "account_updated"
 	EventSessionStart           = "session_start"
 	EventVRMLAccountLinked      = "vrml_account_linked"
+	EventVRMLAccountResync      = "vrml_account_resync"
 )
 
 type EventDispatch struct {
@@ -58,6 +59,7 @@ func (h *EventDispatch) eventFn(ctx context.Context, logger runtime.Logger, evt 
 		EventLobbySessionAuthorized: h.handleLobbyAuthorized,
 		EventUserLogin:              h.handleUserLogin,
 		EventVRMLAccountLinked:      h.handleVRMLAccountLinked,
+		EventVRMLAccountResync:      h.handleVRMLAccountLinked,
 		EventAccountUpdated:         h.eventSessionEnd,
 		EventSessionStart:           h.eventSessionStart,
 	}

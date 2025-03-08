@@ -1830,7 +1830,7 @@ func UserServerProfileRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 	case !request.UserID.IsNil():
 
 	case !request.XPID.IsNil():
-		if userID, err := GetUserIDByEvrID(ctx, db, request.XPID.String()); err != nil {
+		if userID, err := GetUserIDByDeviceID(ctx, db, request.XPID.String()); err != nil {
 			return "", fmt.Errorf("failed to get user ID by xp_id: %w", err)
 		} else {
 			request.UserID = uuid.FromStringOrNil(userID)

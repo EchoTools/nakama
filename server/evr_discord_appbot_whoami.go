@@ -223,15 +223,15 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		whoami.GhostedPlayers = ghostedDiscordIDs
 	}
 
+	vrmlPlayerSummary := &VRMLPlayerSummary{}
 	if includePriviledged {
 
 		// Get VRML Summary
-		summary := &VRMLPlayerSummary{}
-		if _, err := StorageRead(ctx, nk, userID.String(), summary, false); err == nil {
+		if _, err := StorageRead(ctx, nk, userID.String(), vrmlPlayerSummary, false); err == nil {
 
 			whoami.MatchCountsBySeason = make(map[string]int, 0)
 
-			for sID, teams := range summary.MatchCountsBySeasonByTeam {
+			for sID, teams := range vrmlPlayerSummary.MatchCountsBySeasonByTeam {
 				for _, n := range teams {
 					seasonName, ok := vrmlSeasonDescriptionMap[sID]
 					if !ok {
@@ -324,6 +324,16 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 			slices.Reverse(lines)
 			return strings.Join(lines, "\n")
 		}(), Inline: false},
+		{Name: "VRML Player", Value: func() string {
+			if vrmlPlayerSummary == nil {
+				return ""
+			}
+			if vrmlPlayerSummary.Player == nil {
+				return ""
+			}
+
+			return fmt.Sprintf("[%s](https://vrmasterleague.com/EchoArena/Players/%s)", vrmlPlayerSummary.Player.PlayerName, vrmlPlayerSummary.Player.ID)
+		}(), Inline: true},
 		{Name: "VRML Match Counts", Value: func() string {
 
 			lines := make([]string, 0, len(whoami.MatchCountsBySeason))

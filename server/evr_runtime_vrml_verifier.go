@@ -21,6 +21,7 @@ const (
 	StorageKeyVRMLVerificationLedger = "EntitlementLedger"
 	StorageKeyVRMLSummary            = "summary"
 	StorageIndexVRMLUserID           = "Index_VRMLUserID"
+	DeviceIDPrefixVRML               = "vrml:"
 )
 
 type VRMLVerifier struct {
@@ -94,12 +95,12 @@ func (v *VRMLVerifier) Start() error {
 
 	_, err := v.redisClient.Ping().Result()
 	if err != nil {
-		return fmt.Errorf("Failed to connect to Redis: %v", err)
+		return fmt.Errorf("failed to connect to Redis: %v", err)
 	}
 
 	ledger, err := VRMLEntitlementLedgerLoad(v.ctx, v.nk)
 	if err != nil {
-		return fmt.Errorf("Failed to load VRML entitlement ledger: %v", err)
+		return fmt.Errorf("failed to load VRML entitlement ledger: %v", err)
 	}
 
 	go func() {
@@ -126,43 +127,52 @@ func (v *VRMLVerifier) Start() error {
 				v.logger.Error("Invalid queue item", zap.String("item", val))
 				continue
 			}
-			logger := v.logger.WithFields(map[string]interface{}{
+			logger := v.logger.WithFields(map[string]any{
 				"user_id": userID,
 			})
-			vg := v.newSession(token)
 
-			// Get the user identity
-			vrmlUser, err := vg.Me(vrmlgo.WithUseCache(false))
-			if err != nil {
-				logger.WithFields(map[string]interface{}{
-					"error": err,
-				}).Error("Failed to get @Me data")
-				continue
-			}
+			var (
+				vg         = v.newSession(token)
+				vrmlUserID string
+			)
 
-			// Get the user's account information
-			me, err := vg.Me(vrmlgo.WithUseCache(false))
-			if err != nil {
-				logger.WithFields(map[string]interface{}{
-					"error": err,
-				}).Error("Failed to get user data")
-				continue
+			if token == "" {
+				// Get the user's VRML ID from their account metadata
+				metadata, err := AccountMetadataLoad(v.ctx, v.nk, userID)
+				if err != nil {
+					logger.WithField("error", err).Error("Failed to load account metadata")
+					continue
+				}
+				vrmlUserID = metadata.VRMLUserID()
+				member, err := vg.Member(vrmlUserID, vrmlgo.WithUseCache(false))
+				if err != nil {
+					logger.WithField("error", err).Error("Failed to get member data")
+				}
+				vrmlUserID = member.User.ID
+
+			} else {
+				// Get the vrmlUserID from the token
+				vrmlUser, err := vg.Me(vrmlgo.WithUseCache(false))
+				if err != nil {
+					logger.WithField("error", err).Error("Failed to get @Me data")
+					continue
+				}
+				vrmlUserID = vrmlUser.ID
 			}
 
 			// Get the player summary
-			summary, err := v.playerSummary(vg, me.ID)
+			summary, err := v.playerSummary(vg, vrmlUserID)
 			if err != nil {
-				logger.WithFields(map[string]interface{}{
+				logger.WithFields(map[string]any{
 					"error": err,
 				}).Error("Failed to get player summary")
 				continue
-
 			}
 
 			// Store the summary
 			data, err := json.Marshal(summary)
 			if err != nil {
-				logger.WithFields(map[string]interface{}{
+				logger.WithFields(map[string]any{
 					"error": err,
 				}).Error("Failed to marshal player summary")
 				continue
@@ -179,7 +189,7 @@ func (v *VRMLVerifier) Start() error {
 					PermissionWrite: 0,
 				},
 			}); err != nil {
-				logger.WithFields(map[string]interface{}{
+				logger.WithFields(map[string]any{
 					"error": err,
 				}).Error("Failed to store user")
 				continue
@@ -188,7 +198,7 @@ func (v *VRMLVerifier) Start() error {
 			entitlements := summary.Entitlements()
 
 			// Assign the cosmetics to the user
-			if err := AssignEntitlements(v.ctx, logger, v.nk, SystemUserID, "", userID, vrmlUser.ID, entitlements); err != nil {
+			if err := AssignEntitlements(v.ctx, logger, v.nk, SystemUserID, "", userID, vrmlUserID, entitlements); err != nil {
 				logger.WithField("error", err).Error("Failed to assign entitlements")
 				continue
 			}
@@ -196,7 +206,7 @@ func (v *VRMLVerifier) Start() error {
 			// Store the entitlements in the ledger
 			ledger.Entries = append(ledger.Entries, &VRMLEntitlementLedgerEntry{
 				UserID:       userID,
-				VRMLUserID:   vrmlUser.ID,
+				VRMLUserID:   vrmlUserID,
 				Entitlements: entitlements,
 			})
 
@@ -233,4 +243,18 @@ func (v *VRMLVerifier) dequeue() (string, error) {
 		return "", nil // Queue is empty
 	}
 	return val, err
+}
+
+func GetVRMLAccountOwner(ctx context.Context, nk runtime.NakamaModule, vrmlUserID string) (string, error) {
+	// Check if the account is already owned by another user
+	objs, _, err := nk.StorageIndexList(ctx, SystemUserID, StorageIndexVRMLUserID, fmt.Sprintf("+value.userID:%s", vrmlUserID), 100, nil, "")
+	if err != nil {
+		return "", fmt.Errorf("error checking ownership: %w", err)
+	}
+
+	if len(objs.Objects) == 0 {
+		return "", nil
+	}
+
+	return objs.Objects[0].UserId, nil
 }
