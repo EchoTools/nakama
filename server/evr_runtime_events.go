@@ -191,7 +191,7 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 		return fmt.Errorf("failed to get session")
 	}
 
-	params, ok := LoadParams(ctx)
+	params, ok := LoadParams(s.Context())
 	if !ok {
 		return fmt.Errorf("failed to load params")
 	}
