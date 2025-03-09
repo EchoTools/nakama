@@ -43,12 +43,12 @@ func NewVRMLVerifier(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 	// Connect to the redis server for the queue and cache
 	redisUri := vars["VRML_REDIS_URI"]
 	if redisUri == "" {
-		return nil, errors.New("Missing VRML_REDIS_URI in server config")
+		return nil, errors.New("missing VRML_REDIS_URI in server config")
 	}
 
 	redisOptions, err := redis.ParseURL(redisUri)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to parse Redis URI: %v", err)
+		return nil, fmt.Errorf("failed to parse Redis URI: %v", err)
 	}
 
 	redisClient := redis.NewClient(redisOptions)
@@ -147,6 +147,7 @@ func (v *VRMLVerifier) Start() error {
 				member, err := vg.Member(vrmlUserID, vrmlgo.WithUseCache(false))
 				if err != nil {
 					logger.WithField("error", err).Error("Failed to get member data")
+					continue
 				}
 				vrmlUserID = member.User.ID
 

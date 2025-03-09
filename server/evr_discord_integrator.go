@@ -362,6 +362,7 @@ func (c *DiscordIntegrator) syncMember(ctx context.Context, logger *zap.Logger, 
 	if member == nil {
 		// Clear the role cache for the user
 		updated = group.RoleCacheUpdate(evrAccount, nil)
+
 	} else {
 		updated = group.RoleCacheUpdate(evrAccount, member.Roles)
 	}
@@ -370,6 +371,9 @@ func (c *DiscordIntegrator) syncMember(ctx context.Context, logger *zap.Logger, 
 		if err := GuildGroupStore(ctx, c.nk, group); err != nil {
 			return fmt.Errorf("error storing guild group: %w", err)
 		}
+	}
+	if member == nil {
+		return fmt.Errorf("member not found")
 	}
 
 	if updated := evrAccount.SetGroupDisplayName(groupID, InGameName(member)); updated {
