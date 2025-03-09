@@ -3,7 +3,7 @@ package server
 import (
 	"fmt"
 
-	"github.com/echotools/vrmlgo/v3"
+	"github.com/echotools/vrmlgo/v5"
 )
 
 var (
