@@ -124,7 +124,10 @@ func testEvrMatchmakerOverrideFn(ctx context.Context, candidateMatches [][]*Matc
 	log.Printf("Processing %d tickets", len(tickets))
 
 	startTime := time.Now()
-	filteredCandidates, returnedEntries, _ := sbmm.processPotentialMatches(runtimeCombinations)
+
+	globalSettings := &GlobalSettingsData{}
+	FixDefaultServiceSettings(globalSettings)
+	filteredCandidates, returnedEntries, _ := sbmm.processPotentialMatches(runtimeCombinations, globalSettings)
 	log.Printf("Processing %d candidate matches in %s", len(runtimeCombinations), time.Since(startTime))
 	_ = filteredCandidates
 	combinations := make([][]*MatchmakerEntry, len(returnedEntries))
@@ -484,17 +487,16 @@ func TestMatchmaker(t *testing.T) {
 	_ = m.filterOddSizedTeams(candidates)
 
 	// Create a list of balanced matches with predictions
-	predictions := m.predictOutcomes(candidates)
+	predictions := m.predictOutcomes(candidates, 0.5)
 
-	m.sortByDraw(predictions)
+	m.sortPredictions(predictions, 0.3, true)
 
 	writeAsJSONFile(predictions, "/tmp/predictions.json")
-	m.sortedLimitRankSpread(predictions, 0.10, 0.5)
-	m.sortedPriority(predictions)
+
 	rostersByPrediction := make([][]string, 0)
 	for _, c := range predictions {
 		rosters := make([]string, 0)
-		for _, team := range []RatedEntryTeam{c.Team1, c.Team2} {
+		for _, team := range []RatedEntryTeam{c.TeamA, c.TeamB} {
 			roster := make([]string, 0)
 			for _, player := range team {
 				roster = append(roster, player.Entry.GetPresence().GetSessionId())
@@ -555,14 +557,14 @@ func TestSortPriority(t *testing.T) {
 		{
 			name: "Mixed priority thresholds",
 			predictions: []PredictedMatch{
-				{Team1: team1, Team2: team5},
-				{Team1: team3, Team2: team4},
-				{Team1: team3, Team2: team2},
+				{TeamA: team1, TeamB: team5},
+				{TeamA: team3, TeamB: team4},
+				{TeamA: team3, TeamB: team2},
 			},
 			want: []PredictedMatch{
-				{Team1: team3, Team2: team2},
-				{Team1: team3, Team2: team4},
-				{Team1: team1, Team2: team5},
+				{TeamA: team3, TeamB: team2},
+				{TeamA: team3, TeamB: team4},
+				{TeamA: team1, TeamB: team5},
 			},
 		},
 	}
@@ -575,7 +577,7 @@ func TestSortPriority(t *testing.T) {
 			for i, got := range tt.predictions {
 				want := tt.want[i]
 				if !reflect.DeepEqual(got, want) {
-					t.Errorf("sortPriority() =\nTeam1: %v\nTeam2: %v\nwant\nTeam1: %v\nTeam2: %v", getTeamTickets(got.Team1), getTeamTickets(got.Team2), getTeamTickets(want.Team1), getTeamTickets(want.Team2))
+					t.Errorf("sortPriority() =\nTeam1: %v\nTeam2: %v\nwant\nTeam1: %v\nTeam2: %v", getTeamTickets(got.TeamA), getTeamTickets(got.TeamB), getTeamTickets(want.TeamA), getTeamTickets(want.TeamB))
 				}
 			}
 		})
@@ -662,7 +664,9 @@ func TestOverrideFn(t *testing.T) {
 
 	t.Logf("Processing %d candidate matches", len(runtimeCombinations))
 	startTime := time.Now()
-	_, returnedEntries, _ := sbmm.processPotentialMatches(runtimeCombinations)
+	globalSettings := &GlobalSettingsData{}
+	FixDefaultServiceSettings(globalSettings)
+	_, returnedEntries, _ := sbmm.processPotentialMatches(runtimeCombinations, globalSettings)
 	t.Logf("Matched %d candidate matches in %s", len(returnedEntries), time.Since(startTime))
 
 	t.Errorf("autofail")
@@ -679,15 +683,7 @@ func TestCharacterizationMatchmaker1v1(t *testing.T) {
 	downloadLiveData := false
 	saveCopy := true
 	candidatesFilenames := []string{
-		"../_matches/m5.json",
-		"../_matches/m6.json",
-		"../_matches/m7.json",
-		"../_matches/m8.json",
-		"../_matches/m9.json",
-		"../_matches/live-2024-12-09-22-55-03.json",
-		"../_matches/live-2024-12-09-21-54-20.json",
-		"../_matches/live-2024-12-09-23-23-56.json",
-		"../_matches/live-2024-12-09-23-16-44.json",
+		"../_local/candidates.json",
 	}
 
 	reconstruct := true
@@ -1030,18 +1026,18 @@ func TestAssembleUniqueMatches(t *testing.T) {
 			name: "No duplicates",
 			ratedMatches: []PredictedMatch{
 				{
-					Team1: RatedEntryTeam{
+					TeamA: RatedEntryTeam{
 						&RatedEntry{Entry: &MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "1"}}},
 					},
-					Team2: RatedEntryTeam{
+					TeamB: RatedEntryTeam{
 						&RatedEntry{Entry: &MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "2"}}},
 					},
 				},
 				{
-					Team1: RatedEntryTeam{
+					TeamA: RatedEntryTeam{
 						&RatedEntry{Entry: &MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "3"}}},
 					},
-					Team2: RatedEntryTeam{
+					TeamB: RatedEntryTeam{
 						&RatedEntry{Entry: &MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "4"}}},
 					},
 				},
@@ -1061,18 +1057,18 @@ func TestAssembleUniqueMatches(t *testing.T) {
 			name: "With duplicates",
 			ratedMatches: []PredictedMatch{
 				{
-					Team1: RatedEntryTeam{
+					TeamA: RatedEntryTeam{
 						&RatedEntry{Entry: &MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "1"}}},
 					},
-					Team2: RatedEntryTeam{
+					TeamB: RatedEntryTeam{
 						&RatedEntry{Entry: &MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "2"}}},
 					},
 				},
 				{
-					Team1: RatedEntryTeam{
+					TeamA: RatedEntryTeam{
 						&RatedEntry{Entry: &MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "1"}}},
 					},
-					Team2: RatedEntryTeam{
+					TeamB: RatedEntryTeam{
 						&RatedEntry{Entry: &MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "3"}}},
 					},
 				},
@@ -1088,18 +1084,18 @@ func TestAssembleUniqueMatches(t *testing.T) {
 			name: "All duplicates",
 			ratedMatches: []PredictedMatch{
 				{
-					Team1: RatedEntryTeam{
+					TeamA: RatedEntryTeam{
 						&RatedEntry{Entry: &MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "1"}}},
 					},
-					Team2: RatedEntryTeam{
+					TeamB: RatedEntryTeam{
 						&RatedEntry{Entry: &MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "2"}}},
 					},
 				},
 				{
-					Team1: RatedEntryTeam{
+					TeamA: RatedEntryTeam{
 						&RatedEntry{Entry: &MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "1"}}},
 					},
-					Team2: RatedEntryTeam{
+					TeamB: RatedEntryTeam{
 						&RatedEntry{Entry: &MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "2"}}},
 					},
 				},
@@ -1198,174 +1194,6 @@ func TestFilterWithinMaxRTT(t *testing.T) {
 			}
 			if !reflect.DeepEqual(tt.candidates, tt.want) {
 				t.Errorf("filterWithinMaxRTT() candidates = %v, want %v", tt.candidates, tt.want)
-			}
-		})
-	}
-}
-
-func TestSortLimitRankSpread(t *testing.T) {
-	tests := []struct {
-		name                  string
-		predictions           []PredictedMatch
-		maximumRankSpread     float64
-		defaultRankPercentile float64
-		want                  []PredictedMatch
-	}{
-		{
-			name: "Sort by rank spread within limit",
-			predictions: []PredictedMatch{
-				{
-					Team1: RatedEntryTeam{
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.8}}},
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.7}}},
-					},
-					Team2: RatedEntryTeam{
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.6}}},
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.5}}},
-					},
-				},
-				{
-					Team1: RatedEntryTeam{
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.9}}},
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.85}}},
-					},
-					Team2: RatedEntryTeam{
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.4}}},
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.35}}},
-					},
-				},
-			},
-			maximumRankSpread:     0.2,
-			defaultRankPercentile: 0.5,
-			want: []PredictedMatch{
-				{
-					Team1: RatedEntryTeam{
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.8}}},
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.7}}},
-					},
-					Team2: RatedEntryTeam{
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.6}}},
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.5}}},
-					},
-				},
-				{
-					Team1: RatedEntryTeam{
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.9}}},
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.85}}},
-					},
-					Team2: RatedEntryTeam{
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.4}}},
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.35}}},
-					},
-				},
-			},
-		},
-		{
-			name: "Sort by rank spread exceeding limit",
-			predictions: []PredictedMatch{
-				{
-					Team1: RatedEntryTeam{
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.9}}},
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.85}}},
-					},
-					Team2: RatedEntryTeam{
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.4}}},
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.35}}},
-					},
-				},
-				{
-					Team1: RatedEntryTeam{
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.8}}},
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.7}}},
-					},
-					Team2: RatedEntryTeam{
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.6}}},
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.5}}},
-					},
-				},
-			},
-			maximumRankSpread:     0.1,
-			defaultRankPercentile: 0.5,
-			want: []PredictedMatch{
-				{
-					Team1: RatedEntryTeam{
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.8}}},
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.7}}},
-					},
-					Team2: RatedEntryTeam{
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.6}}},
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.5}}},
-					},
-				},
-				{
-					Team1: RatedEntryTeam{
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.9}}},
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.85}}},
-					},
-					Team2: RatedEntryTeam{
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.4}}},
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.35}}},
-					},
-				},
-			},
-		},
-		{
-			name: "Sort with default rank percentile",
-			predictions: []PredictedMatch{
-				{
-					Team1: RatedEntryTeam{
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{}}},
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{}}},
-					},
-					Team2: RatedEntryTeam{
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{}}},
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{}}},
-					},
-				},
-				{
-					Team1: RatedEntryTeam{
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.9}}},
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.85}}},
-					},
-					Team2: RatedEntryTeam{
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.4}}},
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.35}}},
-					},
-				},
-			},
-			maximumRankSpread:     0.2,
-			defaultRankPercentile: 0.5,
-			want: []PredictedMatch{
-				{
-					Team1: RatedEntryTeam{
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.9}}},
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.85}}},
-					},
-					Team2: RatedEntryTeam{
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.4}}},
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"rank_percentile": 0.35}}},
-					},
-				},
-				{
-					Team1: RatedEntryTeam{
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{}}},
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{}}},
-					},
-					Team2: RatedEntryTeam{
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{}}},
-						&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{}}},
-					},
-				},
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			m := NewSkillBasedMatchmaker()
-			m.sortedLimitRankSpread(tt.predictions, tt.maximumRankSpread, tt.defaultRankPercentile)
-			if !reflect.DeepEqual(tt.predictions, tt.want) {
-				t.Errorf("sortLimitRankSpread() = %v, want %v", tt.predictions, tt.want)
 			}
 		})
 	}
