@@ -17,7 +17,7 @@ type GroupMetadata struct {
 	MembersOnlyMatchmaking             bool              `json:"members_only_matchmaking"`   // Restrict matchmaking to members only (when this group is the active one)
 	DisableCreateCommand               bool              `json:"disable_create_command"`     // Disable the public allocate command
 	LogAlternateAccounts               bool              `json:"log_alternate_accounts"`     // Log alternate accounts
-	ModeratorsHaveGoldNames            bool              `json:"moderators_have_gold_names"` // Moderators have gold display names
+	EnforcersHaveGoldNames             bool              `json:"moderators_have_gold_names"` // Enforcers have gold display names
 	RoleMap                            GuildGroupRoles   `json:"roles"`                      // The roles text displayed on the main menu
 	MatchmakingChannelIDs              map[string]string `json:"matchmaking_channel_ids"`    // The matchmaking channel IDs
 	AuditChannelID                     string            `json:"audit_channel_id"`           // The audit channel

@@ -17,7 +17,7 @@ func TestGuildGroupMembership_ToUint64(t *testing.T) {
 			name: "All flags set",
 			membership: guildGroupPermissions{
 				IsAllowedMatchmaking: true,
-				IsModerator:          true,
+				IsEnforcer:           true,
 				IsServerHost:         true,
 				IsAllocator:          true,
 				IsSuspended:          true,
@@ -31,7 +31,7 @@ func TestGuildGroupMembership_ToUint64(t *testing.T) {
 			name: "No flags set",
 			membership: guildGroupPermissions{
 				IsAllowedMatchmaking: false,
-				IsModerator:          false,
+				IsEnforcer:           false,
 				IsServerHost:         false,
 				IsAllocator:          false,
 				IsSuspended:          false,
@@ -45,7 +45,7 @@ func TestGuildGroupMembership_ToUint64(t *testing.T) {
 			name: "Some flags set",
 			membership: guildGroupPermissions{
 				IsAllowedMatchmaking: true,
-				IsModerator:          false,
+				IsEnforcer:           false,
 				IsServerHost:         true,
 				IsAllocator:          false,
 				IsSuspended:          true,
@@ -75,7 +75,7 @@ func TestGuildGroupMembership_FromBitSet(t *testing.T) {
 			bitset: bitset.From([]uint64{511}), // 111111111 in binary
 			expected: guildGroupPermissions{
 				IsAllowedMatchmaking: true,
-				IsModerator:          true,
+				IsEnforcer:           true,
 				IsServerHost:         true,
 				IsAllocator:          true,
 				IsSuspended:          true,
@@ -90,7 +90,7 @@ func TestGuildGroupMembership_FromBitSet(t *testing.T) {
 			bitset: bitset.From([]uint64{0}),
 			expected: guildGroupPermissions{
 				IsAllowedMatchmaking: false,
-				IsModerator:          false,
+				IsEnforcer:           false,
 				IsServerHost:         false,
 				IsAllocator:          false,
 				IsSuspended:          false,
@@ -105,7 +105,7 @@ func TestGuildGroupMembership_FromBitSet(t *testing.T) {
 			bitset: bitset.From([]uint64{341}), // 101010101 in binary
 			expected: guildGroupPermissions{
 				IsAllowedMatchmaking: true,
-				IsModerator:          false,
+				IsEnforcer:           false,
 				IsServerHost:         true,
 				IsAllocator:          false,
 				IsSuspended:          true,
@@ -135,7 +135,7 @@ func TestGuildGroupMembership_asBitSet(t *testing.T) {
 			name: "All flags set",
 			membership: guildGroupPermissions{
 				IsAllowedMatchmaking: true,
-				IsModerator:          true,
+				IsEnforcer:           true,
 				IsServerHost:         true,
 				IsAllocator:          true,
 				IsSuspended:          true,
@@ -150,7 +150,7 @@ func TestGuildGroupMembership_asBitSet(t *testing.T) {
 			name: "No flags set",
 			membership: guildGroupPermissions{
 				IsAllowedMatchmaking: false,
-				IsModerator:          false,
+				IsEnforcer:           false,
 				IsServerHost:         false,
 				IsAllocator:          false,
 				IsSuspended:          false,
@@ -165,7 +165,7 @@ func TestGuildGroupMembership_asBitSet(t *testing.T) {
 			name: "Some flags set",
 			membership: guildGroupPermissions{
 				IsAllowedMatchmaking: true,
-				IsModerator:          false,
+				IsEnforcer:           false,
 				IsServerHost:         true,
 				IsAllocator:          false,
 				IsSuspended:          true,

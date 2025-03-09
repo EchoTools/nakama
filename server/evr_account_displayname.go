@@ -15,16 +15,16 @@ var (
 )
 
 type SuspensionStatus struct {
-	GuildId            string        `json:"guild_id"`
-	GuildName          string        `json:"guild_name"`
-	UserId             string        `json:"userId"`
-	UserDiscordId      string        `json:"discordId"`
-	ModeratorDiscordId string        `json:"moderatorId"`
-	Expiry             time.Time     `json:"expiry"`
-	Duration           time.Duration `json:"duration"`
-	RoleId             string        `json:"role"`
-	RoleName           string        `json:"role_name"`
-	Reason             string        `json:"reason"`
+	GuildId           string        `json:"guild_id"`
+	GuildName         string        `json:"guild_name"`
+	UserId            string        `json:"userId"`
+	UserDiscordId     string        `json:"discordId"`
+	EnforcerDiscordId string        `json:"moderatorId"`
+	Expiry            time.Time     `json:"expiry"`
+	Duration          time.Duration `json:"duration"`
+	RoleId            string        `json:"role"`
+	RoleName          string        `json:"role_name"`
+	Reason            string        `json:"reason"`
 }
 
 func (s *SuspensionStatus) Valid() bool {

@@ -33,7 +33,7 @@ var (
 
 const (
 	GroupGlobalDevelopers        = "Global Developers"
-	GroupGlobalModerators        = "Global Moderators"
+	GroupGlobalOperators         = "Global Operators"
 	GroupGlobalTesters           = "Global Testers"
 	GroupGlobalBots              = "Global Bots"
 	GroupGlobalBadgeAdmins       = "Global Badge Admins"
@@ -207,7 +207,7 @@ func createCoreGroups(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 
 	coreGroups := []string{
 		GroupGlobalDevelopers,
-		GroupGlobalModerators,
+		GroupGlobalOperators,
 		GroupGlobalTesters,
 		GroupGlobalBadgeAdmins,
 		GroupGlobalBots,

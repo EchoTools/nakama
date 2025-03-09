@@ -347,7 +347,7 @@ func KickPlayerRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk ru
 	// Get a slice of groupIDs that this user is a moderator for
 	var groupIDs []string
 	for groupID, g := range guildGroups {
-		if g.IsModerator(callerID) {
+		if g.IsEnforcer(callerID) {
 			groupIDs = append(groupIDs, groupID)
 		}
 	}

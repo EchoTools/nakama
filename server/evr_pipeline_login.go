@@ -516,13 +516,13 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		return fmt.Errorf("failed to check system group membership: %w", err)
 	} else if ismember {
 		params.isGlobalDeveloper = true
-		params.isGlobalModerator = true
+		params.isGlobalOperator = true
 
-	} else if ismember, err := CheckSystemGroupMembership(ctx, p.db, session.userID.String(), GroupGlobalModerators); err != nil {
+	} else if ismember, err := CheckSystemGroupMembership(ctx, p.db, session.userID.String(), GroupGlobalOperators); err != nil {
 		metricsTags["error"] = "group_check_failed"
 		return fmt.Errorf("failed to check system group membership: %w", err)
 	} else if ismember {
-		params.isGlobalModerator = true
+		params.isGlobalOperator = true
 	}
 
 	// Update in-memory account metadata for guilds that the user has
