@@ -126,6 +126,7 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 	go func() {
 
 		tickets := make([]string, 0)
+
 		defer func() {
 			// Remove the tickets when the function exits
 			session.matchmaker.Remove(tickets)
