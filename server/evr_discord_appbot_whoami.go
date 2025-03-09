@@ -332,7 +332,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 				return ""
 			}
 
-			return fmt.Sprintf("[%s](https://vrmasterleague.com/EchoArena/Players/%s)", vrmlPlayerSummary.Player.PlayerName, vrmlPlayerSummary.Player.ID)
+			return fmt.Sprintf("[%s](https://vrmasterleague.com/EchoArena/Players/%s)", vrmlPlayerSummary.Player.User.UserName, vrmlPlayerSummary.Player.ThisGame.PlayerID)
 		}(), Inline: true},
 		{Name: "VRML Match Counts", Value: func() string {
 

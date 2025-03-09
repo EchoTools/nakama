@@ -6,6 +6,10 @@ import (
 	"github.com/echotools/vrmlgo/v3"
 )
 
+var (
+	ErrPlayerNotFound = fmt.Errorf("player not found")
+)
+
 type VRMLPlayerSummary struct {
 	User                      *vrmlgo.User                    `json:"user"`
 	Player                    *vrmlgo.Player                  `json:"player"`
@@ -68,24 +72,38 @@ func (v *VRMLVerifier) playerSummary(vg *vrmlgo.Session, memberID string) (*VRML
 		return nil, fmt.Errorf("failed to get member data: %v", err)
 	}
 
-	// Get the game details
-	gameDetails, err := vg.GameSearch(VRMLEchoArenaShortName)
+	// Get the seasons for the game
+	seasons, err := vg.GameSeasons(VRMLEchoArenaShortName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get game details: %v", err)
+		return nil, fmt.Errorf("failed to get seasons: %v", err)
 	}
 
 	// Get the player ID for this game
-	playerID := account.PlayerID(gameDetails.Game.ShortName)
 
-	player, err := vg.Player(playerID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get player: %v", err)
-	}
+	var (
+		player  *vrmlgo.Player
+		teamIDs []string
+		teams   = make(map[string]*vrmlgo.Team)
+	)
 
-	// Get the seasons for the game
-	seasons, err := vg.Seasons(gameDetails.Game.ShortName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get seasons: %v", err)
+	if playerID := account.PlayerID(VRMLEchoArenaShortName); playerID != "" {
+		// Get the player details
+		player, err = vg.Player(playerID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get player: %v", err)
+		}
+
+		teamIDs = account.TeamIDs(VRMLEchoArenaShortName)
+
+	} else {
+		// Try to discover the player ID if it is not found
+
+		player, err = v.searchPlayerBySeasons(vg, seasons, memberID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to find player: %v", err)
+		}
+
+		teamIDs = player.ThisGame.TeamIDs()
 	}
 
 	// Create a map of seasons
@@ -95,8 +113,8 @@ func (v *VRMLVerifier) playerSummary(vg *vrmlgo.Session, memberID string) (*VRML
 	}
 
 	// Get the teams for the player
-	teams := make(map[string]*vrmlgo.Team)
-	for _, teamID := range account.Teams(gameDetails.Game.ShortName) {
+
+	for _, teamID := range teamIDs {
 
 		details, err := vg.Team(teamID)
 		if err != nil {
@@ -108,7 +126,7 @@ func (v *VRMLVerifier) playerSummary(vg *vrmlgo.Session, memberID string) (*VRML
 
 	// Get the match history for each team
 	matchesByTeamBySeason := make(map[VRMLSeasonID]map[string][]string)
-	for _, teamID := range account.Teams(gameDetails.Game.ShortName) {
+	for _, teamID := range teamIDs {
 
 		details, err := vg.Team(teamID)
 		if err != nil {
@@ -147,7 +165,7 @@ func (v *VRMLVerifier) playerSummary(vg *vrmlgo.Session, memberID string) (*VRML
 			for _, mID := range matchIDs {
 
 				// Get the match details
-				matchDetails, err := vg.Match(gameDetails.Game.ShortName, mID)
+				matchDetails, err := vg.GameMatch(VRMLEchoArenaShortName, mID)
 				if err != nil {
 					return nil, fmt.Errorf("failed to get match details: %v", err)
 				}
@@ -161,7 +179,7 @@ func (v *VRMLVerifier) playerSummary(vg *vrmlgo.Session, memberID string) (*VRML
 				for _, p := range matchDetails.Players() {
 
 					// Check if the player is in the match
-					if p.ID == playerID {
+					if p.ID == player.ThisGame.PlayerID {
 						if _, ok := matchCountsBySeasonID[sID]; !ok {
 							matchCountsBySeasonID[sID] = make(map[string]int)
 						}
@@ -182,4 +200,34 @@ func (v *VRMLVerifier) playerSummary(vg *vrmlgo.Session, memberID string) (*VRML
 		Teams:                     teams,
 		MatchCountsBySeasonByTeam: matchCountsBySeasonID,
 	}, nil
+}
+
+// Use a brute force search for the player ID, by searching for the player name in all seasons
+func (*VRMLVerifier) searchPlayerBySeasons(vg *vrmlgo.Session, seasons []*vrmlgo.Season, vrmlID string) (*vrmlgo.Player, error) {
+
+	member, err := vg.Member(vrmlID, vrmlgo.WithUseCache(false))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get member data: %v", err)
+	}
+
+	for _, s := range seasons {
+
+		players, err := vg.GamePlayersSearch(s.GameURLShort, s.ID, member.User.UserName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to search for player: %v", err)
+		}
+
+		for _, p := range players {
+			player, err := vg.Player(p.ID)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get player: %v", err)
+			}
+
+			if player.User.UserID == member.User.ID {
+				return player, nil
+			}
+		}
+	}
+
+	return nil, ErrPlayerNotFound
 }
