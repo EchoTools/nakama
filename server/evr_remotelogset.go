@@ -89,6 +89,39 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 		entries = append(entries, parsed)
 	}
 
+	// Send the remote logs to the match data event.
+	if matchDatas := make(map[MatchID][]evr.RemoteLog, len(entries)); len(entries) > 0 {
+		for _, e := range entries {
+			if m, ok := e.(evr.SessionIdentifier); ok {
+				if m.SessionUUID().IsNil() {
+					continue
+				}
+				matchID, err := NewMatchID(m.SessionUUID(), p.node)
+				if err != nil {
+					continue
+				}
+
+				if _, ok := matchDatas[matchID]; !ok {
+					matchDatas[matchID] = make([]evr.RemoteLog, 0, len(entries))
+				}
+
+				matchDatas[matchID] = append(matchDatas[matchID], e)
+
+			}
+		}
+
+		for matchID, matchData := range matchDatas {
+			entry := MatchDataRemoteLogSet{
+				UserID:    session.userID.String(),
+				SessionID: matchID.String(),
+				Logs:      matchData,
+			}
+			if err := MatchDataEvent(ctx, p.nk, matchID, entry); err != nil {
+				logger.Error("Failed to process match data event", zap.Error(err))
+			}
+		}
+	}
+
 	// Collect the updates to the match's game metadata (e.g. game clock)
 	updates := MapOf[uuid.UUID, *MatchGameStateUpdate]{}
 

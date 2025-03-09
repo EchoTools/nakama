@@ -450,7 +450,13 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 			nk.MetricsCounterAdd("match_entrant_join_count", tags, 1)
 			nk.MetricsTimerRecord("match_player_join_duration", tags, time.Since(state.joinTimestamps[p.GetSessionId()]))
 		}
+
+		MatchDataEvent(ctx, nk, state.ID, MatchDataPlayerJoin{
+			Presence: state.presenceMap[p.GetSessionId()],
+			State:    state,
+		})
 	}
+
 	//m.updateLabel(logger, dispatcher, state)
 	return state
 }
@@ -550,6 +556,14 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 
 			nk.MetricsCounterAdd("match_entrant_leave_count", tags, 1)
 
+			if err := MatchDataEvent(ctx, nk, state.ID, MatchDataPlayerLeave{
+				State:    state,
+				Presence: mp,
+				Reason:   reason,
+			}); err != nil {
+				logger.Error("Failed to send match data event: %v", err)
+			}
+
 			ts := state.joinTimestamps[mp.GetSessionId()]
 			nk.MetricsTimerRecord("match_player_session_duration", tags, time.Since(ts))
 
@@ -565,7 +579,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 				for _, p := range presences {
 					if mp, ok := state.presenceMap[p.GetSessionId()]; ok {
 						// Only players
-						if mp.IsPlayer() == false {
+						if !mp.IsPlayer() {
 							continue
 						}
 
@@ -1181,6 +1195,10 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk run
 		return state, fmt.Errorf("failed to dispatch message: %w", err)
 	}
 	state.levelLoaded = true
+
+	MatchDataEvent(ctx, nk, state.ID, MatchDataStarted{
+		State: state,
+	})
 	return state, nil
 }
 
