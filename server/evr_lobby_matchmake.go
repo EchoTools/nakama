@@ -122,15 +122,14 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 		return fmt.Errorf("matchmaking ticket config not found for mode %s", lobbyParams.Mode)
 	}
 
-	tickets := make([]string, 0)
-
-	defer func() {
-		// Remove the tickets when the function exits
-		session.matchmaker.Remove(tickets)
-	}()
-
 	// Continue to enter tickets until the context is cancelled.
 	go func() {
+
+		tickets := make([]string, 0)
+		defer func() {
+			// Remove the tickets when the function exits
+			session.matchmaker.Remove(tickets)
+		}()
 
 		stream := lobbyParams.GuildGroupStream()
 		count, err := p.nk.StreamCount(stream.Mode, stream.Subject.String(), "", stream.Label)
