@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"go.mongodb.org/mongo-driver/mongo"
 )
 
 const (
@@ -21,6 +23,9 @@ const (
 	EventSessionStart           = "session_start"
 	EventVRMLAccountLinked      = "vrml_account_linked"
 	EventVRMLAccountResync      = "vrml_account_resync"
+	EventMatchData              = "match_data"
+	matchDataDatabaseName       = "nevr"
+	matchDataCollectionName     = "match_data"
 )
 
 type EventDispatch struct {
@@ -30,38 +35,90 @@ type EventDispatch struct {
 	logger runtime.Logger
 	nk     runtime.NakamaModule
 	db     *sql.DB
+	mongo  *mongo.Client
 
-	cache        *sync.Map
-	vrmlVerifier *VRMLVerifier
+	queue         chan *api.Event
+	matchJournals map[MatchID]*MatchDataJournal
+	cache         *sync.Map
+	vrmlVerifier  *VRMLVerifier
 }
 
-func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) (*EventDispatch, error) {
+func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer, mongoClient *mongo.Client) (*EventDispatch, error) {
 
 	vrmlVerifier, err := NewVRMLVerifier(ctx, logger, db, nk, initializer, dg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create VRML verifier: %w", err)
 	}
 
-	return &EventDispatch{
-		ctx:          ctx,
-		logger:       logger,
-		db:           db,
-		nk:           nk,
-		cache:        &sync.Map{},
-		vrmlVerifier: vrmlVerifier,
-	}, nil
+	dispatch := &EventDispatch{
+		ctx:    ctx,
+		logger: logger,
+		db:     db,
+		mongo:  mongoClient,
+		nk:     nk,
+
+		queue:         make(chan *api.Event, 100),
+		matchJournals: make(map[MatchID]*MatchDataJournal),
+		cache:         &sync.Map{},
+		vrmlVerifier:  vrmlVerifier,
+	}
+
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case evt := <-dispatch.queue:
+
+				dispatch.processEvent(ctx, logger, evt)
+
+			case <-time.After(30 * time.Second):
+
+				inserts := make([]any, 0, len(dispatch.matchJournals))
+
+				for k, v := range dispatch.matchJournals {
+					if time.Since(v.UpdatedAt) > 1*time.Minute {
+						delete(dispatch.matchJournals, k)
+						inserts = append(inserts, v)
+					}
+				}
+				if len(inserts) == 0 {
+					continue
+				}
+				// Push to mongo
+				collection := dispatch.mongo.Database(matchDataDatabaseName).Collection(matchDataCollectionName)
+				if _, err := collection.InsertMany(ctx, inserts); err != nil {
+					logger.Error("failed to insert match data: %v", err)
+				}
+			}
+		}
+	}()
+
+	return dispatch, nil
+
 }
 
 func (h *EventDispatch) eventFn(ctx context.Context, logger runtime.Logger, evt *api.Event) {
 	logger.WithField("event", evt.Name).Debug("received event")
+	select {
+	case h.queue <- evt:
+	case <-ctx.Done():
+		logger.Warn("context cancelled")
+	case <-time.After(3 * time.Second):
+		logger.Warn("event queue full")
+	}
+}
 
-	eventMap := map[string]func(context.Context, runtime.Logger, map[string]string) error{
+func (h *EventDispatch) processEvent(ctx context.Context, logger runtime.Logger, evt *api.Event) {
+
+	eventMap := map[string]func(context.Context, runtime.Logger, *api.Event) error{
 		EventLobbySessionAuthorized: h.handleLobbyAuthorized,
 		EventUserLogin:              h.handleUserLogin,
 		EventVRMLAccountLinked:      h.handleVRMLAccountLinked,
 		EventVRMLAccountResync:      h.handleVRMLAccountLinked,
 		EventAccountUpdated:         h.eventSessionEnd,
 		EventSessionStart:           h.eventSessionStart,
+		EventMatchData:              h.handleMatchEvent,
 	}
 
 	fields := map[string]any{
@@ -80,35 +137,30 @@ func (h *EventDispatch) eventFn(ctx context.Context, logger runtime.Logger, evt 
 	logger = logger.WithFields(fields)
 
 	if fn, ok := eventMap[evt.Name]; ok {
-		go func() {
-			if err := fn(ctx, logger, evt.Properties); err != nil {
-				logger.Error("error processing event: %v", err)
-			}
-			logger.Debug("processed event")
-		}()
-
+		if err := fn(ctx, logger, evt); err != nil {
+			logger.Error("failed to handle event: %v", err)
+		}
 	} else {
 		logger.Warn("unhandled event: %s", evt.Name)
 	}
-
 }
 
-func (h *EventDispatch) eventSessionStart(ctx context.Context, logger runtime.Logger, properties map[string]string) error {
-	logger.Debug("process event session start: %+v", properties)
+func (h *EventDispatch) eventSessionStart(ctx context.Context, logger runtime.Logger, evt *api.Event) error {
+	logger.Debug("process event session start: %+v", evt.Properties)
 	return nil
 }
 
-func (h *EventDispatch) eventSessionEnd(ctx context.Context, logger runtime.Logger, properties map[string]string) error {
-	logger.Debug("process event session end: %+v", properties)
+func (h *EventDispatch) eventSessionEnd(ctx context.Context, logger runtime.Logger, evt *api.Event) error {
+	logger.Debug("process event session end: %+v", evt.Properties)
 	return nil
 }
 
-func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtime.Logger, properties map[string]string) error {
+func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtime.Logger, evt *api.Event) error {
 	h.Lock()
 	defer h.Unlock()
-	groupID := properties["group_id"]
-	userID := properties["user_id"]
-	sessionID := properties["session_id"]
+	groupID := evt.Properties["group_id"]
+	userID := evt.Properties["user_id"]
+	sessionID := evt.Properties["session_id"]
 
 	var err error
 	var gg *GuildGroup
@@ -233,10 +285,10 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 	return nil
 }
 
-func (h *EventDispatch) handleUserLogin(ctx context.Context, logger runtime.Logger, properties map[string]string) error {
+func (h *EventDispatch) handleUserLogin(ctx context.Context, logger runtime.Logger, evt *api.Event) error {
 	h.Lock()
 	defer h.Unlock()
-	userID := properties["user_id"]
+	userID := evt.Properties["user_id"]
 
 	loginHistory, err := LoginHistoryLoad(ctx, h.nk, userID)
 	if err != nil {
@@ -253,6 +305,35 @@ func (h *EventDispatch) handleUserLogin(ctx context.Context, logger runtime.Logg
 	return nil
 }
 
-func (h *EventDispatch) handleVRMLAccountLinked(ctx context.Context, logger runtime.Logger, properties map[string]string) error {
-	return h.vrmlVerifier.VerifyUser(properties["user_id"], properties["token"])
+func (h *EventDispatch) handleVRMLAccountLinked(ctx context.Context, logger runtime.Logger, evt *api.Event) error {
+
+	return h.vrmlVerifier.VerifyUser(evt.Properties["user_id"], evt.Properties["token"])
+}
+
+func (h *EventDispatch) handleMatchEvent(ctx context.Context, logger runtime.Logger, evt *api.Event) error {
+
+	matchID, err := MatchIDFromString(evt.Properties["match_id"])
+	if err != nil {
+		return fmt.Errorf("failed to parse match ID: %w", err)
+	}
+
+	var data = map[string]any{}
+
+	if err := json.Unmarshal([]byte(evt.Properties["payload"]), &data); err != nil {
+		return fmt.Errorf("failed to unmarshal data: %w", err)
+	}
+
+	j, ok := h.matchJournals[matchID]
+	if !ok {
+		h.matchJournals[matchID] = NewMatchDataJournal(matchID)
+		j = h.matchJournals[matchID]
+	}
+
+	j.Events = append(j.Events, &MatchDataJournalEntry{
+		CreatedAt: time.Now().UTC(),
+		Data:      data,
+	})
+	j.UpdatedAt = time.Now().UTC()
+
+	return nil
 }

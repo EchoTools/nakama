@@ -54,9 +54,6 @@ type EvrPipeline struct {
 	userRemoteLogJournalRegistry *UserLogJouralRegistry
 	guildGroupRegistry           *GuildGroupRegistry
 	ipInfoCache                  *IPInfoCache
-	matchLogManager              *MatchLogManager
-
-	createLobbyMu sync.Mutex
 
 	placeholderEmail string
 	linkDeviceURL    string
@@ -186,9 +183,6 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		}
 	}
 
-	matchLogManager := NewMatchLogManager(ctx, logger, vars["MONGO_URI"])
-	matchLogManager.Start()
-
 	internalIP, externalIP, err := DetermineServiceIPs()
 	if err != nil {
 		logger.Fatal("Unable to determine service IPs", zap.Error(err))
@@ -216,7 +210,6 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		userRemoteLogJournalRegistry: userRemoteLogJournalRegistry,
 		guildGroupRegistry:           guildGroupRegistry,
 		ipInfoCache:                  ipInfoCache,
-		matchLogManager:              matchLogManager,
 
 		placeholderEmail: config.GetRuntime().Environment["PLACEHOLDER_EMAIL_DOMAIN"],
 		linkDeviceURL:    config.GetRuntime().Environment["LINK_DEVICE_URL"],

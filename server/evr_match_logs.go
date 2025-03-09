@@ -2,81 +2,55 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"sync"
 
-	"github.com/gofrs/uuid/v5"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
-	"go.uber.org/zap"
+	"github.com/heroiclabs/nakama-common/api"
+	"github.com/heroiclabs/nakama-common/runtime"
 )
 
-const (
-	matchLogDatabaseName   = "match_data"
-	matchLogCollectionName = "log_entries"
-)
-
-type SessionRemoteLog interface {
-	SessionUUID() uuid.UUID
+type EventEnvelopeMatchData struct {
+	MatchID MatchID         `json:"match_uuid"`
+	Payload json.RawMessage `json:"data"`
 }
 
-type MatchLogEntry struct {
-	MatchUUID string           `json:"match_uuid"`
-	Message   SessionRemoteLog `json:"message"`
-}
-
-type MatchLogManager struct {
-	sync.Mutex
-
-	ctx    context.Context
-	logger *zap.Logger
-
-	entries    []MatchLogEntry
-	client     *mongo.Client
-	mongoURI   string
-	collection *mongo.Collection
-}
-
-func NewMatchLogManager(ctx context.Context, logger *zap.Logger, mongoURI string) *MatchLogManager {
-
-	return &MatchLogManager{
-		ctx:      ctx,
-		logger:   logger,
-		entries:  make([]MatchLogEntry, 0),
-		mongoURI: mongoURI,
-	}
-}
-
-func (m *MatchLogManager) Start() {
-	var err error
-	m.client, err = mongo.Connect(m.ctx, options.Client().ApplyURI(m.mongoURI))
+func NewEventEnvelopeMatchData(matchID MatchID, payload any) (*EventEnvelopeMatchData, error) {
+	data, err := json.Marshal(payload)
 	if err != nil {
-		m.logger.Error("Failed to connect to MongoDB", zap.Error(err))
-		return
+		return nil, fmt.Errorf("failed to marshal match data: %w", err)
 	}
-	m.logger.Info("Connected to MongoDB")
-	m.collection = m.client.Database(matchLogDatabaseName).Collection(matchLogCollectionName)
+	return &EventEnvelopeMatchData{
+		MatchID: matchID,
+		Payload: data,
+	}, nil
 }
 
-func (m *MatchLogManager) AddLog(message SessionRemoteLog) error {
-	m.Lock()
-	defer m.Unlock()
+func (m *EventEnvelopeMatchData) MarshalEvent() (*api.Event, error) {
+	return &api.Event{
+		Name: EventMatchData,
+		Properties: map[string]string{
+			"match_id": m.MatchID.String(),
+			"payload":  string(m.Payload),
+		},
+		External: true,
+	}, nil
+}
 
-	if m.collection == nil {
-		return fmt.Errorf("log manager not started")
+func MatchDataEvent(ctx context.Context, nk runtime.NakamaModule, matchID MatchID, data any) error {
+
+	entry, err := NewEventEnvelopeMatchData(matchID, data)
+	if err != nil {
+		return fmt.Errorf("failed to create match data event: %w", err)
 	}
 
-	_, err := m.collection.InsertOne(m.ctx, MatchLogEntry{
-		MatchUUID: message.SessionUUID().String(),
-		Message:   message,
-	})
+	evt, err := entry.MarshalEvent()
 	if err != nil {
-		return fmt.Errorf("failed to insert log entry: %w", err)
+		return fmt.Errorf("failed to marshal match data event: %w", err)
+	}
+
+	if err := nk.Event(ctx, evt); err != nil {
+		return fmt.Errorf("failed to add match data event: %w", err)
 	}
 
 	return nil
-}
-
-func (m *MatchLogManager) Close() error {
-	return m.client.Disconnect(m.ctx)
 }
