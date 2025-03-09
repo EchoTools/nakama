@@ -22,7 +22,7 @@ import (
 
 type TeamAlignments map[string]int // map[UserID]Role
 
-var createLobbyMu = sync.Mutex{}
+var createLobbyMu = &sync.Mutex{}
 
 var LobbyTestCounter = 0
 
