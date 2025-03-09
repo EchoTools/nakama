@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/echotools/vrmlgo/v3"
+	"github.com/echotools/vrmlgo/v5"
 	"github.com/go-redis/redis"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"go.uber.org/zap"

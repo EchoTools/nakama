@@ -47,6 +47,7 @@ require (
 require (
 	cloud.google.com/go/compute/metadata v0.5.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/echotools/vrmlgo/v5 v5.0.1 // indirect
 	github.com/golang/mock v1.6.0 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/jackc/pgx/v4 v4.18.3 // indirect
