@@ -53,6 +53,7 @@ type GlobalMatchmakingSettings struct {
 	DisableSBMM             bool                   `json:"disable_skill_based_mm"`     // Disable SBMM
 	DisableEarlyQuitPenalty bool                   `json:"disable_early_quit_penalty"` // Disable early quit penalty
 	ServerRatings           ServerRatings          `json:"server_ratings"`             // The server ratings
+	DisableDivisions        bool                   `json:"disable_divisions"`          // Disable divisions
 }
 
 type QueryAddons struct {

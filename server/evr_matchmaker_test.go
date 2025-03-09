@@ -489,8 +489,8 @@ func TestMatchmaker(t *testing.T) {
 	m.sortByDraw(predictions)
 
 	writeAsJSONFile(predictions, "/tmp/predictions.json")
-	m.sortLimitRankSpread(predictions, 0.10, 0.5)
-	m.sortPriority(predictions)
+	m.sortedLimitRankSpread(predictions, 0.10, 0.5)
+	m.sortedPriority(predictions)
 	rostersByPrediction := make([][]string, 0)
 	for _, c := range predictions {
 		rosters := make([]string, 0)
@@ -570,7 +570,7 @@ func TestSortPriority(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := NewSkillBasedMatchmaker()
-			m.sortPriority(tt.predictions)
+			m.sortedPriority(tt.predictions)
 
 			for i, got := range tt.predictions {
 				want := tt.want[i]
@@ -1363,7 +1363,7 @@ func TestSortLimitRankSpread(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := NewSkillBasedMatchmaker()
-			m.sortLimitRankSpread(tt.predictions, tt.maximumRankSpread, tt.defaultRankPercentile)
+			m.sortedLimitRankSpread(tt.predictions, tt.maximumRankSpread, tt.defaultRankPercentile)
 			if !reflect.DeepEqual(tt.predictions, tt.want) {
 				t.Errorf("sortLimitRankSpread() = %v, want %v", tt.predictions, tt.want)
 			}

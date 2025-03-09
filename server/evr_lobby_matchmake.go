@@ -279,6 +279,7 @@ type MatchmakingSettings struct {
 	NextMatchRole            string  `json:"next_match_role"`           // The role to join the next match as
 	NextMatchDiscordID       string  `json:"next_match_discord_id"`     // The discord ID to join the next match as
 	StaticBaseRankPercentile float64 `json:"static_rank_percentile"`    // The static rank percentile to use
+	Division                 string  `json:"division"`                  // The division to use
 }
 
 func (MatchmakingSettings) StorageID() StorageID {
