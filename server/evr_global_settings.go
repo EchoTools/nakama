@@ -109,6 +109,31 @@ func ServiceSettingsLoad(ctx context.Context, nk runtime.NakamaModule) (*GlobalS
 			return nil, fmt.Errorf("failed to unmarshal global settings: %w", err)
 		}
 	}
+	FixDefaultServiceSettings(&data)
+
+	// If the object doesn't exist, or this is the first start
+	// write the settings to the storage
+	if serviceSettings.Load() == nil || data.version == "" {
+
+		_, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{{
+			Collection:      GlobalSettingsStorageCollection,
+			Key:             GlobalSettingsKey,
+			UserID:          SystemUserID,
+			PermissionRead:  0,
+			PermissionWrite: 0,
+			Value:           data.String(),
+		}})
+		if err != nil {
+			return nil, fmt.Errorf("failed to write global settings: %w", err)
+		}
+	}
+
+	serviceSettings.Store(&data)
+
+	return &data, nil
+}
+
+func FixDefaultServiceSettings(data *GlobalSettingsData) {
 
 	if data.Matchmaking.ServerRatings.ByExternalIP == nil {
 		data.Matchmaking.ServerRatings.ByExternalIP = make(map[string]float64)
@@ -179,27 +204,6 @@ func ServiceSettingsLoad(ctx context.Context, nk runtime.NakamaModule) (*GlobalS
 			},
 		}
 	}
-
-	// If the object doesn't exist, or this is the first start
-	// write the settings to the storage
-	if serviceSettings.Load() == nil || data.version == "" {
-
-		_, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{{
-			Collection:      GlobalSettingsStorageCollection,
-			Key:             GlobalSettingsKey,
-			UserID:          SystemUserID,
-			PermissionRead:  0,
-			PermissionWrite: 0,
-			Value:           data.String(),
-		}})
-		if err != nil {
-			return nil, fmt.Errorf("failed to write global settings: %w", err)
-		}
-	}
-
-	serviceSettings.Store(&data)
-
-	return &data, nil
 }
 
 func ServiceSettingsSave(ctx context.Context, nk runtime.NakamaModule) error {
