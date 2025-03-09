@@ -363,7 +363,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 					activeRoleMap := map[string]bool{
 						"matchmaking":    group.IsAllowedMatchmaking(userIDStr),
 						"auditor":        group.IsAuditor(userIDStr),
-						"moderator":      group.IsModerator(userIDStr),
+						"enforcer":       group.IsEnforcer(userIDStr),
 						"server-host":    group.IsServerHost(userIDStr),
 						"allocator":      group.IsAllocator(userIDStr),
 						"api-access":     group.IsAPIAccess(userIDStr),
@@ -386,7 +386,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 					}
 
 					slices.SortStableFunc(roles, func(a, b string) int {
-						return int(slices.Index([]string{"owner", "moderator", "auditor", "server-host", "allocator", "matchmaking", "api-access", "vpn-bypass", "limited-access", "suspended"}, a) - slices.Index([]string{"owner", "moderator", "auditor", "server-host", "allocator", "api-access", "suspended", "vpn-bypass", "limited-access", "matchmaking"}, b))
+						return int(slices.Index([]string{"owner", "enforcer", "auditor", "server-host", "allocator", "matchmaking", "api-access", "vpn-bypass", "limited-access", "suspended"}, a) - slices.Index([]string{"owner", "enforcer", "auditor", "server-host", "allocator", "api-access", "suspended", "vpn-bypass", "limited-access", "matchmaking"}, b))
 					})
 
 					if len(roles) > 0 {

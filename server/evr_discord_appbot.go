@@ -1700,7 +1700,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					return errors.New("no match ID provided")
 				}
 
-				// Verify that the match is owned by the user, or is a guild moderator
+				// Verify that the match is owned by the user, or is a guild enforcer
 				label, err := MatchLabelByID(ctx, nk, matchID)
 				if err != nil {
 					return fmt.Errorf("failed to get match label: %w", err)
@@ -2154,14 +2154,14 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				d.cache.QueueSyncMember(i.GuildID, target.ID)
 			}
 
-			isGlobalModerator, err := CheckSystemGroupMembership(ctx, db, userIDStr, GroupGlobalModerators)
+			isGlobalOperator, err := CheckSystemGroupMembership(ctx, db, userIDStr, GroupGlobalOperators)
 			if err != nil {
-				return errors.New("error checking global moderator status")
+				return errors.New("error checking global operator status")
 			}
 
-			includeSystem := isGlobalModerator
-			includePrivate := isSelf || isGlobalModerator
-			includePriviledged := isSelf || isGlobalModerator || isGuildAuditor
+			includeSystem := isGlobalOperator
+			includePrivate := isSelf || isGlobalOperator
+			includePriviledged := isSelf || isGlobalOperator || isGuildAuditor
 
 			return d.handleProfileRequest(ctx, logger, nk, s, i, target.ID, target.Username, includePriviledged, includePrivate, includeSystem)
 		},
@@ -2651,9 +2651,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return nil
 			}
 
-			isGlobalModerator, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalModerators)
+			isGlobalOperator, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalOperators)
 			if err != nil {
-				return errors.New("error checking global moderator status")
+				return errors.New("error checking global operator status")
 			}
 
 			var target *discordgo.User
@@ -2712,7 +2712,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					continue
 				}
 
-				if label.GetGroupID().String() != groupID && !isGlobalModerator {
+				if label.GetGroupID().String() != groupID && !isGlobalOperator {
 					result = "user's lobby is not from this guild"
 					continue
 				}
@@ -2827,7 +2827,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				roleID := o.RoleValue(s, guild.ID).ID
 				switch o.Name {
 				case "moderator":
-					roles.Moderator = roleID
+					roles.Enforcer = roleID
 				case "serverhost":
 					roles.ServerHost = roleID
 				case "suspension":

@@ -32,7 +32,7 @@ type SessionParameters struct {
 	disableMAC        bool              // The user has disabled MAC
 	loginPayload      *evr.LoginProfile // The login payload
 	isGlobalDeveloper bool              // The user is a developer
-	isGlobalModerator bool              // The user is a moderator
+	isGlobalOperator  bool              // The user is a moderator
 
 	relayOutgoing bool                // The user wants (some) outgoing messages relayed to them via discord
 	debug         bool                // The user wants debug information

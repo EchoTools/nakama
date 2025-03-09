@@ -9,7 +9,7 @@ import (
 
 type GuildGroupRoles struct {
 	Member           string `json:"member"`
-	Moderator        string `json:"moderator"`
+	Enforcer         string `json:"moderator"`
 	Auditor          string `json:"auditor"`
 	ServerHost       string `json:"server_host"`
 	Allocator        string `json:"allocator"`
@@ -51,7 +51,7 @@ func (r *GuildGroupRoles) AsSet() map[string]struct{} {
 
 type guildGroupPermissions struct {
 	IsAllowedMatchmaking bool
-	IsModerator          bool // Has kick/join/trigger-cv/etc. access
+	IsEnforcer           bool // Has kick/join/trigger-cv/etc. access
 	IsAuditor            bool // Can view audit logs and see extra info in /lookup
 	IsServerHost         bool
 	IsAllocator          bool // Can allocate servers with slash command

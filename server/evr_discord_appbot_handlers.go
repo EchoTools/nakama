@@ -121,8 +121,8 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(logger runtime.Logge
 			}
 		}
 
-		if !gg.IsModerator(userID) {
-			return simpleInteractionResponse(s, i, "You must be a guild moderator to use this command.")
+		if !gg.IsEnforcer(userID) {
+			return simpleInteractionResponse(s, i, "You must be a guild enforcer to use this command.")
 		}
 
 	}

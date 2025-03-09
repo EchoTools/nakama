@@ -61,7 +61,7 @@ func (g *GuildGroup) Size() int {
 func (g GuildGroup) MembershipBitSet(userID string) uint64 {
 	return guildGroupPermissions{
 		IsAllowedMatchmaking: g.IsAllowedMatchmaking(userID),
-		IsModerator:          g.IsModerator(userID),
+		IsEnforcer:           g.IsEnforcer(userID),
 		IsAuditor:            g.IsAuditor(userID),
 		IsServerHost:         g.IsServerHost(userID),
 		IsAllocator:          g.IsAllocator(userID),
@@ -159,26 +159,26 @@ func (g *GuildGroup) IsAllocator(userID string) bool {
 
 func (g *GuildGroup) IsAuditor(userID string) bool {
 	if g.RoleMap.Auditor == "" {
-		return g.HasRole(userID, g.RoleMap.Moderator)
+		return g.HasRole(userID, g.RoleMap.Enforcer)
 	}
 	return g.HasRole(userID, g.RoleMap.Auditor)
 }
 
-func (g *GuildGroup) IsModerator(userID string) bool {
-	if g.IsNegatedModerator(userID) {
+func (g *GuildGroup) IsEnforcer(userID string) bool {
+	if g.IsNegatedEnforcer(userID) {
 		return false
 	}
-	return g.HasRole(userID, g.RoleMap.Moderator)
+	return g.HasRole(userID, g.RoleMap.Enforcer)
 }
 
-func (g *GuildGroup) IsNegatedModerator(userID string) bool {
+func (g *GuildGroup) IsNegatedEnforcer(userID string) bool {
 	g.State.RLock()
 	defer g.State.RUnlock()
-	if g.State.NegatedModeratorUserIDs == nil {
+	if g.State.NegatedEnforcerUserIDs == nil {
 		return false
 	}
 
-	if slices.Contains(g.State.NegatedModeratorUserIDs, userID) {
+	if slices.Contains(g.State.NegatedEnforcerUserIDs, userID) {
 		return true
 	}
 

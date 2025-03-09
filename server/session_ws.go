@@ -181,7 +181,7 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 		isVPN:              evrPipeline.ipInfoCache.IsVPN(clientIP),
 
 		isGlobalDeveloper:    false,
-		isGlobalModerator:    false,
+		isGlobalOperator:     false,
 		supportedFeatures:    parseUserQueryCommaDelimited(&request, "features", 32, featurePattern),
 		requiredFeatures:     parseUserQueryCommaDelimited(&request, "requires", 32, featurePattern),
 		serverTags:           parseUserQueryCommaDelimited(&request, "tags", 32, tagsPattern),
