@@ -33,7 +33,7 @@ func (p *EvrPipeline) sortBackfillOptions(filteredMatches []*MatchLabelMeta, lob
 	for _, m := range filteredMatches {
 		rtt := rtts[m.State.GameServer.Endpoint.GetExternalIP()]
 		if rtt == 0 {
-			rtt = 999
+			rtt = lobbyParams.MaxServerRTT - 20
 		}
 
 		rankDelta := math.Abs(m.State.RankPercentile - rankPercentile)
@@ -51,12 +51,11 @@ func (p *EvrPipeline) sortBackfillOptions(filteredMatches []*MatchLabelMeta, lob
 			continue
 		}
 
-		/*
-			// Skip matches with no RTT or RTT above the max allowed
-			if !item.withinRTTRange {
-				continue
-			}
-		*/
+		// Skip matches with no RTT or RTT above the max allowed
+		if !item.withinRTTRange {
+			continue
+		}
+
 		// Skip matches that are too new
 		if lobbyParams.Mode != evr.ModeSocialPublic && time.Since(m.State.CreatedAt) < 10*time.Second {
 			continue
