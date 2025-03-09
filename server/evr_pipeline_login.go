@@ -170,7 +170,7 @@ func formatLoginErrorMessage(xpID evr.EvrId, discordID string, err error) string
 	if discordID == "" {
 		errContent = fmt.Sprintf("[%s]\n %s", xpID.String(), errContent)
 	} else {
-		errContent = fmt.Sprintf("[XPID: %s, Discord ID: %s]\n %s", xpID.String(), discordID, errContent)
+		errContent = fmt.Sprintf("[XPID:%s, Discord:%s]\n %s", xpID.String(), discordID, errContent)
 	}
 
 	// Replace ": " with ":\n" for better readability

@@ -55,6 +55,7 @@ type LobbySessionParameters struct {
 	EnableSBMM             bool                          `json:"disable_sbmm"`
 	RankPercentile         *atomic.Float64               `json:"rank_percentile"` // Updated when party is created
 	RankPercentileMaxDelta float64                       `json:"rank_percentile_max_delta"`
+	MatchmakingDivision    string                        `json:"division"`
 	MaxServerRTT           int                           `json:"max_server_rtt"`
 	MatchmakingTimestamp   time.Time                     `json:"matchmaking_timestamp"`
 	MatchmakingTimeout     time.Duration                 `json:"matchmaking_timeout"`
@@ -379,6 +380,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		EnableSBMM:             !globalSettings.DisableSBMM,
 		RankPercentile:         atomic.NewFloat64(rankPercentile),
 		RankPercentileMaxDelta: rankPercentileMaxDelta,
+		MatchmakingDivision:    userSettings.Division,
 		MaxServerRTT:           maxServerRTT,
 		MatchmakingTimestamp:   time.Now().UTC(),
 		MatchmakingTimeout:     time.Duration(globalSettings.MatchmakingTimeoutSecs) * time.Second,
@@ -509,6 +511,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 		"blocked_ids":     strings.Join(p.BlockedIDs, " "),
 		"display_name":    p.DisplayName,
 		"submission_time": submissionTime,
+		"division":        p.MatchmakingDivision,
 	}
 
 	numericProperties := map[string]float64{
@@ -530,6 +533,8 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 		qparts = append(qparts, fmt.Sprintf(`-properties.submission_time:<="%s"`, submissionTime))
 	}
 
+	// If the user has a matchmaking Division, use it instead of SBMM
+
 	if p.EnableSBMM {
 
 		rating := p.GetRating()
@@ -539,23 +544,27 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 		if rankPercentile := p.GetRankPercentile(); rankPercentile > 0.0 {
 			numericProperties["rank_percentile"] = rankPercentile
 
-			if ticketParams.IncludeRankRange && p.RankPercentileMaxDelta > 0 {
-				rankLower := min(rankPercentile-p.RankPercentileMaxDelta, 1.0-2.0*p.RankPercentileMaxDelta)
-				rankUpper := max(rankPercentile+p.RankPercentileMaxDelta, 2.0*p.RankPercentileMaxDelta)
-				rankLower = max(rankLower, 0.0)
-				rankUpper = min(rankUpper, 1.0)
-				numericProperties["rank_percentile_min"] = rankLower
-				numericProperties["rank_percentile_max"] = rankUpper
+			if ticketParams.IncludeRankRange {
+				if p.MatchmakingDivision != "" {
+					qparts = append(qparts, fmt.Sprintf("+properties.division:%s", p.MatchmakingDivision))
+				} else if p.RankPercentileMaxDelta > 0 {
+					rankLower := min(rankPercentile-p.RankPercentileMaxDelta, 1.0-2.0*p.RankPercentileMaxDelta)
+					rankUpper := max(rankPercentile+p.RankPercentileMaxDelta, 2.0*p.RankPercentileMaxDelta)
+					rankLower = max(rankLower, 0.0)
+					rankUpper = min(rankUpper, 1.0)
+					numericProperties["rank_percentile_min"] = rankLower
+					numericProperties["rank_percentile_max"] = rankUpper
 
-				qparts = append(qparts,
-					// Exclusion
-					fmt.Sprintf("-properties.rank_percentile:<%f", rankLower),
-					fmt.Sprintf("-properties.rank_percentile:>%f", rankUpper),
+					qparts = append(qparts,
+						// Exclusion
+						fmt.Sprintf("-properties.rank_percentile:<%f", rankLower),
+						fmt.Sprintf("-properties.rank_percentile:>%f", rankUpper),
 
-					// Reverse
-					fmt.Sprintf("-properties.rank_percentile_min:>%f", rankPercentile),
-					fmt.Sprintf("-properties.rank_percentile_max:<%f", rankPercentile),
-				)
+						// Reverse
+						fmt.Sprintf("-properties.rank_percentile_min:>%f", rankPercentile),
+						fmt.Sprintf("-properties.rank_percentile_max:<%f", rankPercentile),
+					)
+				}
 			}
 		}
 	}
