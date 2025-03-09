@@ -154,7 +154,6 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 		fallbackTimer := time.NewTimer(min(lobbyParams.FallbackTimeout, matchmakingTicketTimeout-mmInterval))
 		ticketTicker := time.NewTicker(matchmakingTicketTimeout)
 
-		startingMax := ticketConfig.MaxCount
 		cycle := 0
 		for {
 
@@ -167,15 +166,12 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 			// Remove the ticket
 
 			var ticket string
-			// Put tickets in that has maxCount two less
-			for i := startingMax; i > startingMax-(cycle*2); i -= 2 {
-				ticketConfig.MaxCount = i
-				if ticket, err = p.addTicket(ctx, logger, session, lobbyParams, lobbyGroup, ticketConfig); err != nil {
-					logger.Error("Failed to add ticket", zap.Error(err))
-					return
-				}
-				tickets = append(tickets, ticket)
+			// Put tickets, reducing the max count by 2 each time
+			if ticket, err = p.addTicket(ctx, logger, session, lobbyParams, lobbyGroup, ticketConfig); err != nil {
+				logger.Error("Failed to add ticket", zap.Error(err))
+				return
 			}
+			tickets = append(tickets, ticket)
 
 			select {
 			case <-ctx.Done():
