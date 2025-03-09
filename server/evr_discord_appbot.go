@@ -280,6 +280,36 @@ var (
 			},
 		},
 		{
+			Name:        "shutdown-match",
+			Description: "Shutdown a match or game server.",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "match-id",
+					Description: "Match ID or Game Server ID",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionBoolean,
+					Name:        "disconnect-game-server",
+					Description: "Disconnect the game server instead of just removing it from match listing",
+					Required:    false,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionBoolean,
+					Name:        "grace-seconds",
+					Description: "Seconds to wait before forcing the shutdown.",
+					Required:    false,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "reason",
+					Description: "Reason for the shutdown.",
+					Required:    true,
+				},
+			},
+		},
+		{
 			Name:        "reset-password",
 			Description: "Clear your echo password.",
 		},
@@ -1634,6 +1664,85 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			}
 		},
+		"shutdown-match": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+			if user == nil {
+				return nil
+			}
+
+			var (
+				err              error
+				options          = i.ApplicationCommandData().Options
+				reason           string
+				matchID          MatchID
+				disconnectServer bool
+				graceSeconds     int
+			)
+
+			for _, option := range options {
+				switch option.Name {
+				case "match-id":
+					matchID, err = MatchIDFromString(option.StringValue())
+					if err != nil {
+						return fmt.Errorf("invalid match ID: %w", err)
+					}
+				case "disconnect-game-server":
+					disconnectServer = option.BoolValue()
+				case "graceful":
+					graceSeconds = int(option.IntValue())
+				case "reason":
+					reason = option.StringValue()
+				}
+
+			}
+			_ = reason
+			if err := func() error {
+				if matchID.IsNil() {
+					return errors.New("no match ID provided")
+				}
+
+				// Verify that the match is owned by the user, or is a guild moderator
+				label, err := MatchLabelByID(ctx, nk, matchID)
+				if err != nil {
+					return fmt.Errorf("failed to get match label: %w", err)
+				}
+
+				if label.GetGroupID().String() != groupID && label.GameServer.OperatorID.String() != userID {
+					return errors.New("you do not have permission to shut down this match")
+				}
+
+				signal := SignalShutdownPayload{
+					GraceSeconds:         graceSeconds,
+					DisconnectGameServer: disconnectServer,
+					DisconnectUsers:      false,
+				}
+
+				data := NewSignalEnvelope(userID, SignalShutdown, signal).String()
+
+				// Signal the match to lock the session
+				if _, err := nk.MatchSignal(ctx, matchID.String(), data); err != nil {
+					return fmt.Errorf("failed to signal match: %w", err)
+				}
+				return nil
+			}(); err != nil {
+				return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+					Type: discordgo.InteractionResponseChannelMessageWithSource,
+					Data: &discordgo.InteractionResponseData{
+						Flags:   discordgo.MessageFlagsEphemeral,
+						Content: err.Error(),
+					},
+				})
+			}
+
+			// Send the response
+			return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Flags:   discordgo.MessageFlagsEphemeral,
+					Content: "The match has been shut down.",
+				},
+			})
+		},
+
 		"reset-password": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 
 			if user == nil {
