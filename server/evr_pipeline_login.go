@@ -60,6 +60,8 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 
 		discordID := ""
 		if userID, err := GetUserIDByDeviceID(ctx, p.db, request.XPID.String()); err != nil {
+			logger.Warn("Failed to get Discord ID", zap.Error(err))
+		} else {
 			discordID = p.discordCache.UserIDToDiscordID(userID)
 		}
 
@@ -170,7 +172,7 @@ func formatLoginErrorMessage(xpID evr.EvrId, discordID string, err error) string
 	if discordID == "" {
 		errContent = fmt.Sprintf("[%s]\n %s", xpID.String(), errContent)
 	} else {
-		errContent = fmt.Sprintf("[XPID:%s, Discord:%s]\n %s", xpID.String(), discordID, errContent)
+		errContent = fmt.Sprintf("[XPID:%s / Discord:%s]\n %s", xpID.String(), discordID, errContent)
 	}
 
 	// Replace ": " with ":\n" for better readability
