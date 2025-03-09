@@ -596,6 +596,11 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 							boardID := StatisticBoardID(state.GetGroupID().String(), state.Mode, EarlyQuitStatisticID, r)
 
 							if _, err := nk.LeaderboardRecordWrite(ctx, boardID, mp.UserID.String(), mp.DisplayName, 1, 0, nil, nil); err != nil {
+								if errors.Is(err, ErrLeaderboardNotFound) {
+									if err = nk.LeaderboardCreate(ctx, boardID, true, "desc", "incr", ResetScheduleToCron(r), nil, true); err != nil {
+										logger.Warn("Failed to create early quit leaderboard: %v", err)
+									}
+								}
 								logger.Warn("Failed to write early quit record: %v", err)
 							}
 						}
