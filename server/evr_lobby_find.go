@@ -93,6 +93,14 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	p.nk.metrics.CustomCounter("lobby_find_match", lobbyParams.MetricsTags(), int64(lobbyParams.GetPartySize()))
 	logger.Info("Finding match", zap.String("mode", lobbyParams.Mode.String()), zap.Int("party_size", lobbyParams.GetPartySize()))
 
+	// Construct the entrant presences for the party members.
+	entrants, err := PrepareEntrantPresences(ctx, logger, p.nk, p.nk.sessionRegistry, lobbyParams, entrantSessionIDs...)
+	if err != nil {
+		return fmt.Errorf("failed to be party leader.: %w", err)
+	}
+
+	lobbyParams.SetPartySize(len(entrants))
+
 	defer func() {
 
 		isLeader := true
@@ -112,12 +120,6 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 
 		logger.Debug("Lobby find complete", zap.String("group_id", lobbyParams.GroupID.String()), zap.Int("party_size", lobbyParams.GetPartySize()), zap.String("mode", lobbyParams.Mode.String()), zap.Int("role", lobbyParams.Role), zap.Bool("leader", isLeader), zap.Int("duration", int(time.Since(startTime).Seconds())))
 	}()
-
-	// Construct the entrant presences for the party members.
-	entrants, err := PrepareEntrantPresences(ctx, logger, p.nk, p.nk.sessionRegistry, lobbyParams, entrantSessionIDs...)
-	if err != nil {
-		return fmt.Errorf("failed to be party leader.: %w", err)
-	}
 
 	// Check latency to active game servers.
 	if err := p.CheckServerPing(ctx, logger, session, lobbyParams.GroupID.String()); err != nil {
@@ -440,6 +442,7 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 		if partySize == 0 {
 			logger.Warn("party size is 0")
 			lobbyParams.SetPartySize(1)
+			partySize = 1
 		}
 
 		matches = p.sortBackfillOptions(matches, lobbyParams)
