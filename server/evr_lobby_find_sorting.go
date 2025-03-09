@@ -51,11 +51,12 @@ func (p *EvrPipeline) sortBackfillOptions(filteredMatches []*MatchLabelMeta, lob
 			continue
 		}
 
-		// Skip matches with no RTT or RTT above the max allowed
-		if !item.withinRTTRange {
-			continue
-		}
-
+		/*
+			// Skip matches with no RTT or RTT above the max allowed
+			if !item.withinRTTRange {
+				continue
+			}
+		*/
 		// Skip matches that are too new
 		if lobbyParams.Mode != evr.ModeSocialPublic && time.Since(m.State.CreatedAt) < 10*time.Second {
 			continue
