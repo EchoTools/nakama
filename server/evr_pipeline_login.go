@@ -266,24 +266,37 @@ func (p *EvrPipeline) authenticateSession(ctx context.Context, logger *zap.Logge
 
 		metricsTags["device_linked"] = "true"
 
-		// if the account has a password, authenticate it.
-		if params.account.Email != "" {
+		var (
+			requiresPasswordAuth    = params.account.Email != ""
+			authenticatedViaSession = !session.userID.IsNil()
+			isAccountMismatched     = params.account.User.Id != session.userID.String()
+			passwordProvided        = params.authPassword != ""
+		)
 
-			// If this session was already authorized, verify it matches with the device's account.
+		if requiresPasswordAuth {
 
-			if !session.userID.IsNil() && params.account.User.Id != session.userID.String() {
+			if !authenticatedViaSession {
+				// The session authentication was not successful.
+				metricsTags["error"] = "session_auth_failed"
+				return errors.New("session authentication failed: account requires password authentication")
+			}
+		} else {
+
+			if authenticatedViaSession && isAccountMismatched {
+				// The device is linked to a different account.
 				metricsTags["error"] = "device_link_mismatch"
 				logger.Error("Device is linked to a different account.", zap.String("device_user_id", params.account.User.Id), zap.String("session_user_id", session.userID.String()))
 				return fmt.Errorf("device linked to a different account. (%s)", params.account.User.Username)
 			}
-		} else if params.authPassword != "" {
 
-			// Set the provided password on the account, if the user has provided one.
-
-			if err := LinkEmail(ctx, logger, p.db, uuid.FromStringOrNil(params.account.User.Id), params.account.User.Username+"@"+p.placeholderEmail, params.authPassword); err != nil {
-				metricsTags["error"] = "failed_link_email"
-				return fmt.Errorf("failed to link email: %w", err)
+			if passwordProvided {
+				// This is the first time setting the password.
+				if err := LinkEmail(ctx, logger, p.db, uuid.FromStringOrNil(params.account.User.Id), params.account.User.Id+"@"+p.placeholderEmail, params.authPassword); err != nil {
+					metricsTags["error"] = "failed_link_email"
+					return fmt.Errorf("failed to link email: %w", err)
+				}
 			}
+
 		}
 	}
 
