@@ -7,7 +7,6 @@ import (
 	"slices"
 	"sort"
 	"strings"
-
 	"time"
 
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -82,8 +81,8 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 	var filterCounts map[string]int
 
 	originalCount := len(candidates)
-
-	candidates, matches, filterCounts = m.processPotentialMatches(candidates)
+	globalSettings := ServiceSettings()
+	candidates, matches, filterCounts = m.processPotentialMatches(candidates, globalSettings)
 
 	// Extract all players from the candidates
 	allPlayers := make(map[string]struct{}, 0)
@@ -130,8 +129,7 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 	return matches
 }
 
-func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, [][]runtime.MatchmakerEntry, map[string]int) {
-	globalSettings := ServiceSettings()
+func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.MatchmakerEntry, globalSettings *GlobalSettingsData) ([][]runtime.MatchmakerEntry, [][]runtime.MatchmakerEntry, map[string]int) {
 
 	// Write the candidates to a json filed called /tmp/candidates.json
 	filterCounts := make(map[string]int)
@@ -146,68 +144,12 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.Ma
 	filterCounts["max_rtt"] = m.filterWithinMaxRTT(candidates)
 
 	// Create a list of balanced matches with predictions
-	predictions := m.predictOutcomes(candidates)
+	predictions := m.predictOutcomes(candidates, globalSettings.Matchmaking.RankPercentile.Default)
 
-	m.sortByDraw(predictions)
-	predictions = m.sortedLimitRankSpread(predictions, MaximumRankDelta, globalSettings.Matchmaking.RankPercentile.Default)
-	predictions = m.sortedBySize(predictions)
-	m.sortedPriority(predictions)
+	ignorePriority := false
 
-	if !globalSettings.Matchmaking.DisableDivisions {
-		// divide all of the players into divisions
-		playersByDivision := make(map[string]map[string]struct{})
-
-		// First find all of the match candidates with a common division
-	OuterLoop:
-		for _, c := range candidates {
-			division := ""
-			for _, e := range c {
-
-				// If the player has a division, add them to the division map
-				for _, e := range c {
-					if _, ok := playersByDivision[division]; !ok {
-						playersByDivision[division] = make(map[string]struct{})
-					}
-					playersByDivision[division][e.GetPresence().GetUserId()] = struct{}{}
-				}
-
-				if entrantDivision, ok := e.GetProperties()["division"]; !ok {
-					continue
-				} else if division == "" {
-					division = entrantDivision.(string)
-				} else {
-					if division != entrantDivision {
-						continue OuterLoop
-					}
-				}
-			}
-		}
-
-		selectedPredictions := make([]PredictedMatch, 0, len(predictions))
-
-		// Add any matches with a common division to the selected predictions
-	OuterLoopDivision:
-		for _, p := range m.sortedByDivison(predictions[:]) {
-			matchDivision := ""
-			for _, team := range p.Teams() {
-				for _, player := range team {
-					if division, ok := player.Entry.GetProperties()["division"].(string); ok {
-						if _, ok := playersByDivision[division]; ok {
-							if matchDivision == "" {
-								matchDivision = division
-							}
-							if matchDivision != division {
-								continue OuterLoopDivision
-							}
-						}
-					}
-				}
-			}
-			selectedPredictions = append(selectedPredictions, p)
-		}
-
-		predictions = append(selectedPredictions, predictions...)
-	}
+	// Sort the predictions
+	m.sortPredictions(predictions, globalSettings.Matchmaking.RankPercentile.MaxDelta, ignorePriority)
 
 	madeMatches := m.assembleUniqueMatches(predictions)
 
@@ -329,201 +271,6 @@ func (*SkillBasedMatchmaker) predictDraw(teams []RatedEntryTeam) float64 {
 	return rating.PredictDraw([]types.Team{team1, team2}, nil)
 }
 
-func (m *SkillBasedMatchmaker) sortedPriority(predictions []PredictedMatch) []PredictedMatch {
-
-	type item struct {
-		priorityThreshold string
-		match             PredictedMatch
-	}
-
-	items := make([]item, 0, len(predictions))
-
-	for _, o := range predictions {
-		item := item{
-			match: o,
-		}
-
-		for _, team := range o.Teams() {
-			for _, player := range team {
-				if th, ok := player.Entry.GetProperties()["priority_threshold"].(string); ok {
-					if item.priorityThreshold == "" || th < item.priorityThreshold {
-						item.priorityThreshold = th
-					}
-				}
-			}
-		}
-		items = append(items, item)
-	}
-
-	now := time.Now().UTC().Format(time.RFC3339)
-
-	slices.SortStableFunc(items, func(a, b item) int {
-		// If a player has a priority_threshold set, and it's less than "now" it should be sorted to the top
-		if a.priorityThreshold < now && b.priorityThreshold > now {
-			return -1
-		}
-		if a.priorityThreshold > now && b.priorityThreshold < now {
-			return 1
-		}
-
-		// If both players have a priority_threshold set, sort by the lowest value
-		if a.priorityThreshold < b.priorityThreshold {
-			return -1
-		}
-		if a.priorityThreshold > b.priorityThreshold {
-			return 1
-		}
-
-		return 0
-	})
-
-	for i := range items {
-		predictions[i] = items[i].match
-	}
-
-	return predictions
-}
-
-func (m *SkillBasedMatchmaker) sortedLimitRankSpread(predictions []PredictedMatch, maximumRankSpread float64, defaultRankPercentile float64) []PredictedMatch {
-
-	type item struct {
-		rankSpread float64
-		match      PredictedMatch
-	}
-
-	items := make([]item, 0, len(predictions))
-
-	for _, o := range predictions {
-
-		rankAverageByTeamByMatch := make([][]float64, 2)
-		for i, team := range o.Teams() {
-			rankAverageByTeamByMatch[i] = make([]float64, len(team))
-			for j, player := range team {
-				if rankPercentile, ok := player.Entry.Properties["rank_percentile"].(float64); ok {
-					rankAverageByTeamByMatch[i][j] = rankPercentile
-				} else {
-					rankAverageByTeamByMatch[i][j] = defaultRankPercentile
-				}
-			}
-		}
-
-		items = append(items, item{
-			match:      o,
-			rankSpread: math.Abs(rankAverageByTeamByMatch[0][0] - rankAverageByTeamByMatch[0][1]),
-		})
-	}
-
-	slices.SortStableFunc(items, func(a, b item) int {
-
-		// get the delta between the two teams
-
-		if a.rankSpread < maximumRankSpread && b.rankSpread > maximumRankSpread {
-			return -1
-		} else if a.rankSpread > maximumRankSpread && b.rankSpread < maximumRankSpread {
-			return 1
-		}
-
-		return 0
-	})
-
-	for i := range items {
-		predictions[i] = items[i].match
-	}
-
-	return predictions
-}
-
-func (m *SkillBasedMatchmaker) sortedBySize(predictions []PredictedMatch) []PredictedMatch {
-
-	type item struct {
-		size  int
-		match PredictedMatch
-	}
-
-	items := make([]item, 0, len(predictions))
-	for _, o := range predictions {
-		items = append(items, item{
-			size:  len(o.Entrants()),
-			match: o,
-		})
-	}
-
-	// Sort by size, then by prediction of a draw
-	slices.SortStableFunc(items, func(a, b item) int {
-		return b.size - a.size
-	})
-
-	for i := range items {
-		predictions[i] = items[i].match
-	}
-
-	return predictions
-}
-
-func (m *SkillBasedMatchmaker) sortByDraw(predictions []PredictedMatch) {
-	slices.SortStableFunc(predictions, func(a, b PredictedMatch) int {
-		if a.Draw > b.Draw {
-			return -1
-		}
-		if a.Draw < b.Draw {
-			return 1
-		}
-		return 0
-	})
-}
-
-func (m *SkillBasedMatchmaker) sortedByDivison(predictions []PredictedMatch) []PredictedMatch {
-
-	type item struct {
-		divisionCount int
-		match         PredictedMatch
-	}
-
-	items := make([]item, 0, len(predictions))
-
-	for _, o := range predictions {
-		item := item{
-			match: o,
-		}
-
-		divisions := make(map[string]struct{}, 1)
-
-		for _, team := range o.Teams() {
-			for _, player := range team {
-				if p, ok := player.Entry.GetProperties()["division"].(string); !ok || p == "" {
-					// Add a random division to the player (the session id)
-					divisions[player.Entry.Presence.SessionId] = struct{}{}
-				} else {
-					divisions[p] = struct{}{}
-				}
-			}
-		}
-
-		item.divisionCount = len(divisions)
-		items = append(items, item)
-	}
-
-	slices.SortStableFunc(items, func(a, b item) int {
-
-		// Sort by the number of divisions in common, excluding where candiate have no division
-
-		if a.divisionCount > b.divisionCount {
-			return -1
-		}
-		if a.divisionCount < b.divisionCount {
-			return 1
-		}
-
-		return 0
-	})
-
-	for i := range items {
-		predictions[i] = items[i].match
-	}
-
-	return predictions
-}
-
 func (m *SkillBasedMatchmaker) createBalancedMatch(groups [][]*RatedEntry, teamSize int) (RatedEntryTeam, RatedEntryTeam) {
 	// Split out the solo players
 
@@ -594,7 +341,19 @@ func (m *SkillBasedMatchmaker) balanceByTicket(candidate []runtime.MatchmakerEnt
 	return RatedMatch{team1, team2}
 }
 
-func (m *SkillBasedMatchmaker) predictOutcomes(candidates [][]runtime.MatchmakerEntry) []PredictedMatch {
+func (m *SkillBasedMatchmaker) averageRankPercentile(team RatedEntryTeam, defaultRankPercentile float64) float64 {
+	var sum float64
+	for _, player := range team {
+		if rankPercentile, ok := player.Entry.Properties["rank_percentile"].(float64); ok {
+			sum += rankPercentile
+		} else {
+			sum += defaultRankPercentile
+		}
+	}
+	return sum / float64(len(team))
+}
+
+func (m *SkillBasedMatchmaker) predictOutcomes(candidates [][]runtime.MatchmakerEntry, defaultRankPercentile float64) []PredictedMatch {
 	predictions := make([]PredictedMatch, 0, len(candidates))
 
 	for _, match := range candidates {
@@ -603,10 +362,45 @@ func (m *SkillBasedMatchmaker) predictOutcomes(candidates [][]runtime.Matchmaker
 		}
 		ratedMatch := m.balanceByTicket(match)
 
+		var (
+			percentileA     = m.averageRankPercentile(ratedMatch[0], defaultRankPercentile)
+			percentileB     = m.averageRankPercentile(ratedMatch[1], defaultRankPercentile)
+			percentileDelta = math.Abs(percentileA - percentileB)
+			divisions       = make(map[string]struct{}, 1)
+			priorityExpiry  = time.Now().UTC().Format(time.RFC3339)
+		)
+
+		for _, team := range ratedMatch {
+			for _, player := range team {
+				if p, ok := player.Entry.GetProperties()["division"].(string); !ok || p == "" {
+					// Add a random division to the player (the session id)
+					divisions[player.Entry.Presence.SessionId] = struct{}{}
+				} else {
+					divisions[p] = struct{}{}
+				}
+			}
+		}
+
+		for i := range predictions {
+			for _, player := range predictions[i].Entrants() {
+				if th, ok := player.Entry.GetProperties()["priority_threshold"].(string); ok {
+					if th < priorityExpiry {
+						priorityExpiry = th
+					}
+				}
+			}
+		}
+
 		predictions = append(predictions, PredictedMatch{
-			Team1: ratedMatch[0],
-			Team2: ratedMatch[1],
-			Draw:  m.predictDraw(ratedMatch),
+			TeamA:              ratedMatch[0],
+			TeamB:              ratedMatch[1],
+			Draw:               m.predictDraw(ratedMatch),
+			Size:               len(match),
+			RankDelta:          percentileDelta,
+			AvgRankPercentileA: percentileA,
+			AvgRankPercentileB: percentileB,
+			DivisionCount:      len(divisions),
+			PriorityExpiry:     priorityExpiry,
 		})
 	}
 

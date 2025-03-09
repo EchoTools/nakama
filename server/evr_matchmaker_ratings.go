@@ -85,20 +85,6 @@ func (t RatedTeam) Ordinal() float64 {
 	return rating.Ordinal(t.Rating())
 }
 
-type PredictedMatch struct {
-	Team1 RatedEntryTeam `json:"team1"`
-	Team2 RatedEntryTeam `json:"team2"`
-	Draw  float64        `json:"draw"`
-}
-
-func (p PredictedMatch) Entrants() RatedEntryTeam {
-	return append(p.Team1, p.Team2...)
-}
-
-func (p PredictedMatch) Teams() []RatedEntryTeam {
-	return []RatedEntryTeam{p.Team1, p.Team2}
-}
-
 func NewDefaultRating() types.Rating {
 	return rating.NewWithOptions(&types.OpenSkillOptions{
 		Mu:    ptr.Float64(25.0),
