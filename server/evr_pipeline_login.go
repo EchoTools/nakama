@@ -484,17 +484,17 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		guildID := p.discordCache.GroupIDToGuildID(params.accountMetadata.ActiveGroupID)
 		p.discordCache.QueueSyncMember(guildID, params.account.CustomId)
 
-		return fmt.Errorf("user is not in any groups. try again in 30 seconds.")
+		return fmt.Errorf("user is not in any groups, try again in 30 seconds")
 	}
 
-	if _, ok := params.guildGroups[params.accountMetadata.ActiveGroupID]; !ok {
+	if _, ok := params.guildGroups[params.accountMetadata.ActiveGroupID]; !ok && params.accountMetadata.GetActiveGroupID() != uuid.Nil {
 		// User is not in the active group
 		logger.Warn("User is not in the active group", zap.String("uid", params.account.User.Id), zap.String("gid", params.accountMetadata.ActiveGroupID))
-		params.accountMetadata.ActiveGroupID = uuid.Nil.String()
+		params.accountMetadata.SetActiveGroupID(uuid.Nil)
 	}
 
 	// If the user is not in a group, set the active group to the group with the most members
-	if params.accountMetadata.ActiveGroupID == "" || params.accountMetadata.ActiveGroupID == uuid.Nil.String() {
+	if params.accountMetadata.GetActiveGroupID() == uuid.Nil {
 		// Active group is not set.
 
 		groupIDs := make([]string, 0, len(params.guildGroups))
