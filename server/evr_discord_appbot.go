@@ -2264,7 +2264,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						IconURL: r.account.User.AvatarUrl,
 						Name:    r.account.User.DisplayName,
 					},
-					Description: fmt.Sprintf("<@!%s>", r.account.CustomId),
+					Description: fmt.Sprintf("<@%s>", r.account.CustomId),
 					Color:       color,
 					Fields:      make([]*discordgo.MessageEmbedField, 0, 2),
 					Footer: &discordgo.MessageEmbedFooter{
@@ -4139,7 +4139,7 @@ func (d *DiscordAppBot) LogInteractionToChannel(i *discordgo.InteractionCreate, 
 	data := i.ApplicationCommandData()
 	signature := d.interactionToSignature(data.Name, data.Options)
 
-	content := fmt.Sprintf("<@!%s> used %s", i.Member.User.ID, signature)
+	content := fmt.Sprintf("<@%s> used %s", i.Member.User.ID, signature)
 	d.dg.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
 		Content:         content,
 		AllowedMentions: &discordgo.MessageAllowedMentions{},

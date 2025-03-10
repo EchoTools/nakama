@@ -43,7 +43,7 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(logger runtime.Logge
 				displayName = member.User.Username
 			}
 
-			content := fmt.Sprintf("<@!%s> (%s) used %s in `%s`", member.User.ID, displayName, signature, guild.Name)
+			content := fmt.Sprintf("<@%s> (%s) used %s in `%s`", member.User.ID, displayName, signature, guild.Name)
 
 			if _, err := d.dg.ChannelMessageSendComplex(cID, &discordgo.MessageSend{
 				Content:         content,
