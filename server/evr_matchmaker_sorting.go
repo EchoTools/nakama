@@ -30,20 +30,20 @@ func (p PredictedMatch) Teams() []RatedEntryTeam {
 }
 
 func (m *SkillBasedMatchmaker) sortPredictions(predictions []PredictedMatch, maxDelta float64, ignorePriority bool) {
+
 	// Sort the predictions by the draw probability
-
 	m.sortByDraw(predictions)
-
-	// Sort by size
-	m.sortBySize(predictions)
 
 	// Sort by rank delta
 	m.sortLimitRankDelta(predictions, maxDelta)
 
+	// Sort by size
+	m.sortBySize(predictions)
+
 	// Sort by division count
 	m.sortedByDivison(predictions)
 
-	// Sort by priority
+	// Sort by priority (players that have been waiting the longest)
 	m.sortedPriority(predictions)
 }
 

@@ -233,7 +233,7 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 
 			if a.DisableTime != nil {
 				s = s + " (disabled)"
-				displayAuditMessage = true
+				displayAuditMessage = false
 			}
 			if ok, expiry := gg.IsTimedOut(s); ok {
 				s = fmt.Sprintf("%s (timeout expires <t:%d:R>", s, expiry.UTC().Unix())
