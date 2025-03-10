@@ -142,7 +142,7 @@ func (h *RPCHandler) LeaderboardHaystackRPC(ctx context.Context, logger runtime.
 	var err error
 
 	if request.DiscordID != "" {
-		if request.OwnerID = h.UserIDToDiscordID(request.DiscordID); request.OwnerID == "" {
+		if request.OwnerID = h.DiscordIDToUserID(request.DiscordID); request.OwnerID == "" {
 			return "", errors.New("failed to get user ID by discord ID")
 		}
 	}
