@@ -60,6 +60,14 @@ func NewSkillBasedMatchmaker() *SkillBasedMatchmaker {
 // Function to be used as a matchmaker function in Nakama (RegisterMatchmakerOverride)
 func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, candidates [][]runtime.MatchmakerEntry) [][]runtime.MatchmakerEntry {
 
+	startTime := time.Now()
+	defer func() {
+		nk.MetricsGaugeSet("matchmaker_evr_candidate_count", nil, float64(len(candidates)))
+
+		// Divide the time by the number of candidates
+		nk.MetricsTimerRecord("matchmaker_evr_per_candidate", nil, time.Since(startTime)/time.Duration(len(candidates)))
+	}()
+
 	if len(candidates) == 0 || len(candidates[0]) == 0 {
 		logger.Error("No candidates found. Matchmaker cannot run.")
 		return nil
@@ -77,48 +85,50 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 		return nil
 	}
 
-	var matches [][]runtime.MatchmakerEntry
-	var filterCounts map[string]int
+	var (
+		matches        [][]runtime.MatchmakerEntry
+		filterCounts   map[string]int
+		originalCount  = len(candidates)
+		globalSettings = ServiceSettings()
+	)
 
-	originalCount := len(candidates)
-	globalSettings := ServiceSettings()
 	candidates, matches, filterCounts = m.processPotentialMatches(candidates, globalSettings)
 
 	// Extract all players from the candidates
-	allPlayers := make(map[string]struct{}, 0)
-	tickets := make(map[string]struct{}, len(candidates))
+	playerSet := make(map[string]struct{}, 0)
+	ticketSet := make(map[string]struct{}, len(candidates))
 	for _, c := range candidates {
 		for _, e := range c {
-			tickets[e.GetTicket()] = struct{}{}
-			allPlayers[e.GetPresence().GetUserId()] = struct{}{}
+			ticketSet[e.GetTicket()] = struct{}{}
+			playerSet[e.GetPresence().GetUserId()] = struct{}{}
 		}
 	}
 
 	// Extract all players from the matches
-	matchedPlayerMap := make(map[string]struct{}, 0)
+	matchedPlayerSet := make(map[string]struct{}, 0)
 	for _, c := range matches {
 		for _, e := range c {
-			matchedPlayerMap[e.GetPresence().GetUserId()] = struct{}{}
+			matchedPlayerSet[e.GetPresence().GetUserId()] = struct{}{}
 		}
 	}
 
-	matchedPlayers := lo.Keys(matchedPlayerMap)
+	matchedPlayers := lo.Keys(matchedPlayerSet)
 
 	// Create a list of excluded players
-	unmatchedPlayers := lo.FilterMap(lo.Keys(allPlayers), func(p string, _ int) (string, bool) {
-		_, ok := matchedPlayerMap[p]
+	unmatchedPlayers := lo.FilterMap(lo.Keys(playerSet), func(p string, _ int) (string, bool) {
+		_, ok := matchedPlayerSet[p]
 		return p, !ok
 	})
 
 	logger.WithFields(map[string]interface{}{
 		"mode":                 modestr,
-		"num_player_total":     len(allPlayers),
-		"num_tickets":          len(tickets),
+		"num_player_total":     len(playerSet),
+		"num_tickets":          len(ticketSet),
 		"num_players_matched":  len(matchedPlayers),
 		"num_match_candidates": originalCount,
 		"num_matches_made":     len(matches),
 		"filter_counts":        filterCounts,
-		"matched_players":      matchedPlayerMap,
+		"matched_players":      matchedPlayerSet,
 		"unmatched_players":    unmatchedPlayers,
 	}).Info("Skill-based matchmaker completed.")
 
@@ -146,10 +156,8 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.Ma
 	// Create a list of balanced matches with predictions
 	predictions := m.predictOutcomes(candidates, globalSettings.Matchmaking.RankPercentile.Default)
 
-	ignorePriority := false
-
 	// Sort the predictions
-	m.sortPredictions(predictions, globalSettings.Matchmaking.RankPercentile.MaxDelta, ignorePriority)
+	m.sortPredictions(predictions, globalSettings.Matchmaking.RankPercentile.MaxDelta, false)
 
 	madeMatches := m.assembleUniqueMatches(predictions)
 
@@ -378,11 +386,6 @@ func (m *SkillBasedMatchmaker) predictOutcomes(candidates [][]runtime.Matchmaker
 				} else {
 					divisions[p] = struct{}{}
 				}
-			}
-		}
-
-		for i := range predictions {
-			for _, player := range predictions[i].Entrants() {
 				if th, ok := player.Entry.GetProperties()["priority_threshold"].(string); ok {
 					if th < priorityExpiry {
 						priorityExpiry = th
