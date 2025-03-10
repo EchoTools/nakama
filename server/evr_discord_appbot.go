@@ -3094,17 +3094,15 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			case "group":
 
 				options := options[0].Options
-				groupName := options[0].StringValue()
+				groupName := strings.ToLower(options[0].StringValue())
+
 				// Validate the group is 1 to 12 characters long
-				if len(groupName) < 1 || len(groupName) > 12 {
-					return errors.New("invalid group ID. It must be between one (1) and eight (8) characters long")
+				if !partyGroupIDPattern.MatchString(groupName) || len(groupName) < 1 || len(groupName) > 12 {
+					return errors.New("invalid party group name. It must be 1-12 alphanumeric characters (a-z, A-Z, 0-9, _)")
 				}
-				// Validate the group is alphanumeric
-				if !partyGroupIDPattern.MatchString(groupName) {
-					return errors.New("invalid group ID. It must be alphanumeric")
-				}
+
 				// Validate the group is not a reserved group
-				if lo.Contains([]string{"admin", "moderator", "verified", "serverhosts"}, groupName) {
+				if lo.Contains([]string{"admin", "moderator", "verified"}, groupName) {
 					return errors.New("invalid group ID. It is a reserved group")
 				}
 				// lowercase the group
