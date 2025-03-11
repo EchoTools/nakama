@@ -113,14 +113,17 @@ func (s LobbySessionParameters) MetricsTags() map[string]string {
 }
 
 func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, session *sessionWS, request evr.LobbySessionRequest) (*LobbySessionParameters, error) {
-	p := session.evrPipeline
 
-	userID := session.userID.String()
-	mode := request.GetMode()
-	level := request.GetLevel()
-	versionLock := request.GetVersionLock()
-	appID := request.GetAppID()
-
+	var (
+		p               = session.evrPipeline
+		userID          = session.userID.String()
+		mode            = request.GetMode()
+		level           = request.GetLevel()
+		versionLock     = request.GetVersionLock()
+		appID           = request.GetAppID()
+		serviceSettings = ServiceSettings()
+		globalSettings  = serviceSettings.Matchmaking
+	)
 	sessionParams, ok := LoadParams(ctx)
 	if !ok {
 		return nil, fmt.Errorf("failed to load session parameters")
@@ -129,10 +132,6 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 	if sessionParams.accountMetadata == nil {
 		return nil, fmt.Errorf("failed to load session parameters")
 	}
-
-	// Load the global matchmaking config
-	serviceSettings := ServiceSettings()
-	globalSettings := serviceSettings.Matchmaking
 
 	// Load the user's matchmaking config
 	userSettings, err := LoadMatchmakingSettings(ctx, p.nk, userID)
@@ -164,10 +163,12 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 
 	if !userSettings.NextMatchID.IsNil() {
 
-		// Check that the match exists
-		if _, err := p.nk.MatchGet(ctx, userSettings.NextMatchID.String()); err != nil {
+		if label, err := MatchLabelByID(ctx, nk, userSettings.NextMatchID); err != nil {
 			logger.Warn("Next match not found", zap.String("mid", userSettings.NextMatchID.String()))
 		} else {
+			mode = label.Mode
+
+			// Match exists, set the next match ID and role
 			nextMatchID = userSettings.NextMatchID
 
 			if userSettings.NextMatchRole != "" {
@@ -186,6 +187,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 			}
 
 			userSettings.NextMatchRole = ""
+
 		}
 
 		// Always clear the settings
@@ -197,6 +199,17 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 				logger.Warn("Failed to clear next match metadata", zap.Error(err))
 			}
 		}()
+	}
+
+	if _, isJoinRequest := request.(*evr.LobbyJoinSessionRequest); isJoinRequest {
+
+		// Set mode based on the match to join.
+		label, err := MatchLabelByID(ctx, nk, nextMatchID)
+		if err != nil {
+			logger.Warn("Failed to load next match", zap.Error(err))
+		} else {
+			mode = label.Mode
+		}
 	}
 
 	matchmakingQueryAddons := []string{
