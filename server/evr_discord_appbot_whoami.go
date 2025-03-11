@@ -49,10 +49,9 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		MatchLabels:  make([]*MatchLabel, 0),
 	}
 
-	// Get the user's ID
-	member, err := s.GuildMember(i.GuildID, targetID)
-	if err != nil || member == nil || member.User == nil {
-		return fmt.Errorf("failed to get guild member: %w", err)
+	user, err := s.User(targetID)
+	if err != nil {
+		return fmt.Errorf("failed to get user: %w", err)
 	}
 
 	// Create the account if the user doesn't exist
@@ -60,7 +59,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	userIDStr, err := GetUserIDByDiscordID(ctx, d.db, targetID)
 	if err != nil {
 		if i.Member.User.ID == targetID {
-			userIDStr, _, _, err = d.nk.AuthenticateCustom(ctx, targetID, member.User.Username, true)
+			userIDStr, _, _, err = d.nk.AuthenticateCustom(ctx, targetID, user.Username, true)
 			if err != nil {
 				return fmt.Errorf("failed to authenticate (or create) user %s: %w", targetID, err)
 			}
