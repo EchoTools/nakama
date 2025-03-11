@@ -127,14 +127,17 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	}
 
 	if lobbyParams.Mode != evr.ModeSocialPublic {
-		// Submit the matchmaking ticket
-		if err := p.lobbyMatchMakeWithFallback(ctx, logger, session, lobbyParams, lobbyGroup); err != nil {
-			return fmt.Errorf("failed to matchmake: %w", err)
-		}
+		// Start the matchmaking process.
+		go func() {
+			if err := p.lobbyMatchMakeWithFallback(ctx, logger, session, lobbyParams, lobbyGroup, entrants...); err != nil {
+				logger.Error("Failed to matchmake", zap.Error(err))
+			}
+		}()
 	}
 
 	// Attempt to backfill until the timeout.
-	return p.lobbyBackfill(ctx, logger, lobbyParams, entrants...)
+	enableFailsafe := true
+	return p.lobbyBackfill(ctx, logger, lobbyParams, enableFailsafe, entrants...)
 
 }
 
@@ -334,7 +337,7 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 	return label, nil
 }
 
-func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lobbyParams *LobbySessionParameters, entrants ...*EvrMatchPresence) error {
+func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lobbyParams *LobbySessionParameters, enableFailsafe bool, entrants ...*EvrMatchPresence) error {
 
 	// Default backfill interval
 	interval := 10 * time.Second
@@ -399,26 +402,27 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 			query = lobbyParams.BackfillSearchQuery(false, false)
 
 		case <-failsafeTimer.C:
+			if enableFailsafe {
+				// The failsafe timer has expired. Create a match.
+				query = lobbyParams.BackfillSearchQuery(false, false)
 
-			// The failsafe timer has expired. Create a match.
-			query = lobbyParams.BackfillSearchQuery(false, false)
+				// The failsafe timer has expired.
+				// Create a match.
+				logger.Warn("Failsafe timer expired. Creating a new match.")
+				_, err := p.newLobby(ctx, logger, lobbyParams)
+				if err != nil {
+					// If the error is a lock error, just try again.
+					if err == ErrFailedToAcquireLock {
+						// Wait until after the "avoidance time" to give time for the server to be created.
+						<-time.After(20 * time.Second)
+						continue
+					}
 
-			// The failsafe timer has expired.
-			// Create a match.
-			logger.Warn("Failsafe timer expired. Creating a new match.")
-			_, err := p.newLobby(ctx, logger, lobbyParams)
-			if err != nil {
-				// If the error is a lock error, just try again.
-				if err == ErrFailedToAcquireLock {
-					// Wait until after the "avoidance time" to give time for the server to be created.
-					<-time.After(20 * time.Second)
-					continue
+					// This should't happen unless there's no servers available.
+					return NewLobbyErrorf(ServerFindFailed, "failed to create new lobby failsafe: %w", err)
 				}
-
-				// This should't happen unless there's no servers available.
-				return NewLobbyErrorf(ServerFindFailed, "failed to create new lobby failsafe: %w", err)
+				<-time.After(2 * time.Second)
 			}
-			<-time.After(2 * time.Second)
 		case <-time.After(interval):
 
 		}
@@ -556,7 +560,7 @@ func (p *EvrPipeline) CheckServerPing(ctx context.Context, logger *zap.Logger, s
 	}
 
 	if err := SendEVRMessages(session, false, evr.NewLobbyPingRequest(275, candidates)); err != nil {
-		return fmt.Errorf("Failed to send ping request: %v", err)
+		return fmt.Errorf("failed to send ping request: %v", err)
 	}
 
 	return nil

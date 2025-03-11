@@ -115,80 +115,69 @@ func (p *EvrPipeline) matchmakingTicketTimeout() time.Duration {
 	return time.Duration(maxIntervals*intervalSecs) * time.Second
 }
 
-func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters, lobbyGroup *LobbyGroup) (err error) {
+func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters, lobbyGroup *LobbyGroup, entrants ...*EvrMatchPresence) (err error) {
 
 	ticketConfig, ok := DefaultMatchmakerTicketConfigs[lobbyParams.Mode]
 	if !ok {
 		return fmt.Errorf("matchmaking ticket config not found for mode %s", lobbyParams.Mode)
 	}
 
-	// Continue to enter tickets until the context is cancelled.
+	stream := lobbyParams.GuildGroupStream()
+	count, err := p.nk.StreamCount(stream.Mode, stream.Subject.String(), "", stream.Label)
+	if err != nil {
+		logger.Error("Failed to get stream count", zap.Error(err))
+	}
+
+	// If there are fewer players online, reduce the fallback delay
+	if !strings.Contains(p.node, "dev") {
+		// If there are fewer than 16 players online, reduce the fallback delay
+		if count < 24 {
+			ticketConfig.IncludeRankRange = false
+			ticketConfig.IncludeEarlyQuitPenalty = false
+		}
+	}
+	mmInterval := time.Duration(p.config.GetMatchmaker().IntervalSec) * time.Second
+
+	matchmakingTicketTimeout := time.Duration(p.config.GetMatchmaker().MaxIntervals) * mmInterval
+
+	timeoutTimer := time.NewTimer(lobbyParams.MatchmakingTimeout)
+	fallbackTimer := time.NewTimer(min(lobbyParams.FallbackTimeout, matchmakingTicketTimeout-mmInterval))
+	ticketTicker := time.NewTicker(matchmakingTicketTimeout)
+
+	tickets := make([]string, 0, 2)
 	go func() {
-
-		tickets := make([]string, 0)
-
-		defer func() {
-			// Remove the tickets when the function exits
-			session.matchmaker.Remove(tickets)
-		}()
-
-		stream := lobbyParams.GuildGroupStream()
-		count, err := p.nk.StreamCount(stream.Mode, stream.Subject.String(), "", stream.Label)
-		if err != nil {
-			logger.Error("Failed to get stream count", zap.Error(err))
-		}
-
-		// If there are fewer players online, reduce the fallback delay
-		if !strings.Contains(p.node, "dev") {
-			// If there are fewer than 16 players online, reduce the fallback delay
-			if count < 24 {
-				ticketConfig.IncludeRankRange = false
-				ticketConfig.IncludeEarlyQuitPenalty = false
-			}
-		}
-		mmInterval := time.Duration(p.config.GetMatchmaker().IntervalSec) * time.Second
-
-		matchmakingTicketTimeout := time.Duration(p.config.GetMatchmaker().MaxIntervals) * mmInterval
-
-		timeoutTimer := time.NewTimer(lobbyParams.MatchmakingTimeout)
-		fallbackTimer := time.NewTimer(min(lobbyParams.FallbackTimeout, matchmakingTicketTimeout-mmInterval))
-		ticketTicker := time.NewTicker(matchmakingTicketTimeout)
-
-		cycle := 0
-		for {
-
-			// Reduce the matchmaking precision after the first cycle
-			if cycle > 0 {
-				ticketConfig.IncludeRankRange = false
-				ticketConfig.IncludeEarlyQuitPenalty = false
-			}
-
-			// Remove the ticket
-
-			var ticket string
-			// Put tickets, reducing the max count by 2 each time
-			if ticket, err = p.addTicket(ctx, logger, session, lobbyParams, lobbyGroup, ticketConfig); err != nil {
-				logger.Error("Failed to add ticket", zap.Error(err))
-				return
-			}
-			tickets = append(tickets, ticket)
-
-			select {
-			case <-ctx.Done():
-				return
-			case <-timeoutTimer.C:
-				logger.Debug("Matchmaking timeout")
-				return
-			case <-ticketTicker.C:
-				logger.Debug("Matchmaking ticket timeout", zap.Int("cycle", cycle))
-			case <-fallbackTimer.C:
-				logger.Debug("Matchmaking fallback")
-
-			}
-			cycle++
-		}
+		<-ctx.Done()
+		session.matchmaker.Remove(tickets)
 	}()
-	return nil
+
+	cycle := 0
+	for {
+
+		// Reduce the matchmaking precision after the first cycle
+		if cycle > 0 {
+			ticketConfig.IncludeRankRange = false
+			ticketConfig.IncludeEarlyQuitPenalty = false
+		}
+
+		if ticket, err := p.addTicket(ctx, logger, session, lobbyParams, lobbyGroup, ticketConfig); err != nil {
+			return fmt.Errorf("failed to add ticket: %w", err)
+		} else {
+			tickets = append(tickets, ticket)
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-timeoutTimer.C:
+			logger.Debug("Matchmaking timeout")
+			return ErrMatchmakingTimeout
+		case <-ticketTicker.C:
+			logger.Debug("Matchmaking ticket timeout", zap.Int("cycle", cycle))
+		case <-fallbackTimer.C:
+			logger.Debug("Matchmaking fallback")
+		}
+		cycle++
+	}
 }
 
 func (p *EvrPipeline) addTicket(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters, lobbyGroup *LobbyGroup, ticketConfig MatchmakingTicketParameters) (string, error) {
@@ -236,10 +225,6 @@ func (p *EvrPipeline) addTicket(ctx context.Context, logger *zap.Logger, session
 		}
 
 	}
-	go func() {
-		<-ctx.Done()
-		session.matchmaker.Remove([]string{ticket})
-	}()
 
 	logger.Debug("Matchmaking ticket added", zap.String("query", query), zap.Any("string_properties", stringProps), zap.Any("numeric_properties", numericProps), zap.Any("ticket_config", ticketConfig), zap.String("ticket", ticket), zap.Any("presences", otherPresences))
 
