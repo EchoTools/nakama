@@ -387,7 +387,7 @@ func (s *MatchLabel) rebuildCache() {
 			}
 
 			meta := make(map[TeamIndex]TeamMetadata, 2)
-			for _, t := range []TeamIndex{BlueTeam, OrangeTeam} {
+			for _, t := range [...]TeamIndex{BlueTeam, OrangeTeam} {
 				meta[t] = TeamMetadata{
 					Strength: teams[t].Strength(),
 				}

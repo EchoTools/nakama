@@ -87,7 +87,7 @@ func (m MatchMeta) PlayerLimit() int {
 		return m.SizeLimit()
 	}
 	count := 0
-	for _, r := range []int{BlueRole, OrangeRole, SocialRole} {
+	for _, r := range [...]int{BlueRole, OrangeRole, SocialRole} {
 		count += roleLimits[m.Mode][r]
 	}
 	return count
