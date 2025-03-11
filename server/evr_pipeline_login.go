@@ -121,13 +121,6 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 	tags["app_id"] = strconv.FormatInt(int64(params.loginPayload.AppId), 10)
 	tags["publisher_lock"] = strings.TrimSpace(params.loginPayload.PublisherLock)
 
-	// Remove blank tags
-	for k, v := range tags {
-		if v == "" {
-			delete(tags, k)
-		}
-	}
-
 	p.nk.metrics.CustomCounter("login_success", tags, 1)
 	p.nk.metrics.CustomTimer("login_process_latency", params.MetricsTags(), time.Since(timer))
 

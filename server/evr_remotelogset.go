@@ -179,7 +179,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 
 			userID, err := GetUserIDByDeviceID(ctx, p.db, msg.PlayerEvrID)
 			if err != nil || userID == "" {
-				logger.Error("Failed to get user ID by evr ID", zap.Error(err))
+				logger.Debug("Failed to get user ID by evr ID", zap.Error(err))
 				continue
 			}
 
