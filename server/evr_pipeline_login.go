@@ -26,6 +26,42 @@ const (
 	DocumentStorageCollection = "GameDocuments"
 )
 
+type DeviceNotLinkedError struct {
+	code        string
+	botUsername string
+}
+
+func (e DeviceNotLinkedError) Error() string {
+	return strings.Join([]string{
+		"Enter this code:",
+		fmt.Sprintf(">>> %s <<<", e.code),
+		fmt.Sprintf("using '/link-headset %s' on the @%s bot.", e.code, e.botUsername),
+	}, "\n")
+}
+
+func (e DeviceNotLinkedError) Is(target error) bool {
+	_, ok := target.(DeviceNotLinkedError)
+	return ok
+}
+
+type AccountDisabledError struct {
+	message   string
+	reportURL string
+}
+
+func (e AccountDisabledError) Error() string {
+	return strings.Join([]string{
+		"Account disabled by EchoVRCE Admins",
+		e.message,
+		"Report issues at " + e.reportURL,
+	}, "\n")
+}
+
+func (e AccountDisabledError) Is(target error) bool {
+	_, ok := target.(AccountDisabledError)
+	return ok
+}
+
 // loginRequest handles the login request from the client.
 func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.LoginRequest)
@@ -59,10 +95,10 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 	if err := p.processLoginRequest(ctx, logger, session, &params); err != nil {
 
 		discordID := ""
-		if userID, err := GetUserIDByDeviceID(ctx, p.db, request.XPID.String()); err != nil {
-			logger.Warn("Failed to get Discord ID", zap.Error(err))
-		} else {
+		if userID, err := GetUserIDByDeviceID(ctx, p.db, request.XPID.String()); err == nil {
 			discordID = p.discordCache.UserIDToDiscordID(userID)
+		} else if !errors.Is(err, DeviceNotLinkedError{}) {
+			logger.Warn("Failed to get user ID by device ID", zap.Error(err))
 		}
 
 		errMessage := formatLoginErrorMessage(request.XPID, discordID, err)
@@ -259,7 +295,10 @@ func (p *EvrPipeline) authenticateSession(ctx context.Context, logger *zap.Logge
 				return fmt.Errorf("error creating link ticket: %s", err)
 			} else {
 
-				return fmt.Errorf("\nEnter this code:\n  \n>>> %s <<<\nusing '/link-headset %s' on the @%s bot.", linkTicket.Code, linkTicket.Code, p.appBot.dg.State.User.Username)
+				return DeviceNotLinkedError{
+					code:        linkTicket.Code,
+					botUsername: p.appBot.dg.State.User.Username,
+				}
 			}
 		}
 
@@ -361,7 +400,7 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 	loginHistory.Update(params.xpID, session.clientIP, params.loginPayload)
 
 	// The account is now authenticated. Authorize the session.
-	if status.Code(err) == codes.PermissionDenied || params.account.DisableTime != nil {
+	if params.account.GetDisableTime() != nil {
 
 		p.nk.MetricsCounterAdd("login_attempt_banned_account", nil, 1)
 
@@ -373,7 +412,10 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 
 		metricsTags["error"] = "account_disabled"
 
-		return fmt.Errorf("Account disabled by EchoVRCE Admins.")
+		return AccountDisabledError{
+			message:   params.accountMetadata.DisabledAccountMessage,
+			reportURL: ServiceSettings().ReportURL,
+		}
 	}
 
 	// Require IP verification, if the session is not authenticated.
@@ -384,6 +426,7 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 
 			if isNew := loginHistory.AuthorizeIP(session.clientIP); isNew {
 				if err := p.appBot.SendIPAuthorizationNotification(params.account.User.Id, session.clientIP); err != nil {
+					// Log the error, but don't return it.
 					logger.Warn("Failed to send IP authorization notification", zap.Error(err))
 				}
 			}
@@ -402,7 +445,7 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 
 					if !IsDiscordErrorCode(err, discordgo.ErrCodeCannotSendMessagesToThisUser) {
 						metricsTags["error"] = "failed_send_ip_approval_request"
-						return fmt.Errorf("Failed to send IP approval request: %w", err)
+						return fmt.Errorf("failed to send IP approval request: %w", err)
 					}
 					// The user has DMs from non-friends disabled. Tell them to use the slash command instead.
 
@@ -426,24 +469,6 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 		}
 	} else {
 		loginHistory.AuthorizeIP(session.clientIP)
-	}
-
-	// Common error handling
-	if params.account.GetDisableTime() != nil {
-		// The account is banned. log the attempt.
-		logger.Info("Attempted login to banned account.",
-			zap.String("xpid", params.xpID.Token()),
-			zap.String("client_ip", session.clientIP),
-			zap.String("uid", params.account.User.Id),
-			zap.Any("login_payload", params.loginPayload))
-
-		metricsTags["error"] = "account_disabled"
-
-		if params.accountMetadata.DisabledAccountMessage != "" {
-			return fmt.Errorf("Account disabled by EchoVRCE Admins: %s\nVisit %s", params.accountMetadata.DisabledAccountMessage, ServiceSettings().ReportURL)
-		}
-
-		return fmt.Errorf("Account disabled by EchoVRCE Admins.")
 	}
 
 	metricsTags["error"] = "nil"
