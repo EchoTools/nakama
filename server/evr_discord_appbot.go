@@ -1336,7 +1336,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			if len(presences) == 0 {
-				return fmt.Errorf("You are not currently in game.")
+				return errors.New("you must be in the game to use this command.")
 			}
 
 			var presence runtime.Presence
@@ -1351,12 +1351,12 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			session := _nk.sessionRegistry.Get(uuid.FromStringOrNil(presence.GetSessionId()))
 			if session == nil {
-				return fmt.Errorf("You are not currently in game.")
+				return errors.New("you must be in the game to use this command.")
 			}
 
 			params, ok := LoadParams(session.Context())
 			if !ok {
-				return fmt.Errorf("failed to load params")
+				return errors.New("failed to load params")
 			}
 
 			wasGold := params.isGoldNameTag.Toggle()
