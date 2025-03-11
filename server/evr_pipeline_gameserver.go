@@ -564,7 +564,7 @@ func (p *EvrPipeline) gameserverLobbyEntrantNew(ctx context.Context, logger *zap
 		}
 
 		ctx := s.Context()
-		for _, subject := range []uuid.UUID{presence.SessionID, presence.UserID, presence.EvrID.UUID()} {
+		for _, subject := range [...]uuid.UUID{presence.SessionID, presence.UserID, presence.EvrID.UUID()} {
 			session.tracker.Update(ctx, s.ID(), PresenceStream{Mode: StreamModeService, Subject: subject, Label: StreamLabelMatchService}, s.UserID(), PresenceMeta{Format: s.Format(), Hidden: false, Status: matchID.String()})
 		}
 

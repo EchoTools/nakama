@@ -24,7 +24,7 @@ func LoginAlternateSearch(ctx context.Context, nk runtime.NakamaModule, loginHis
 
 	for _, e := range loginHistory.History {
 
-		for _, s := range []string{
+		for _, s := range [...]string{
 			e.XPID.Token(),
 			e.ClientIP,
 			e.LoginData.HMDSerialNumber,

@@ -496,7 +496,7 @@ func TestMatchmaker(t *testing.T) {
 	rostersByPrediction := make([][]string, 0)
 	for _, c := range predictions {
 		rosters := make([]string, 0)
-		for _, team := range []RatedEntryTeam{c.TeamA, c.TeamB} {
+		for _, team := range [...]RatedEntryTeam{c.TeamA, c.TeamB} {
 			roster := make([]string, 0)
 			for _, player := range team {
 				roster = append(roster, player.Entry.GetPresence().GetSessionId())

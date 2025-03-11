@@ -9,10 +9,11 @@ const (
 	DivisionGold
 	DivisionSilver
 	DivisionBronze
+	DivisionGreen
 )
 
 func (d Division) String() string {
-	return [...]string{"Master", "Diamond", "Platinum", "Gold", "Silver", "Bronze"}[d]
+	return [...]string{"master", "diamond", "platinum", "gold", "silver", "bronze", "green"}[d]
 }
 
 func (d Division) Value() int {
