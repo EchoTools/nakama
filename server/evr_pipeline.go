@@ -9,6 +9,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -28,6 +29,8 @@ import (
 var dg *discordgo.Session
 
 var unrequireMessage = evr.NewSTcpConnectionUnrequireEvent()
+
+var globalMatchmaker = &atomic.Pointer[LocalMatchmaker]{}
 
 type EvrPipeline struct {
 	sync.RWMutex
@@ -65,6 +68,8 @@ type ctxDiscordBotTokenKey struct{}
 
 func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, config Config, version string, socialClient *social.Client, storageIndex StorageIndex, leaderboardScheduler LeaderboardScheduler, leaderboardCache LeaderboardCache, leaderboardRankCache LeaderboardRankCache, sessionRegistry SessionRegistry, sessionCache SessionCache, statusRegistry StatusRegistry, matchRegistry MatchRegistry, matchmaker Matchmaker, tracker Tracker, router MessageRouter, streamManager StreamManager, metrics Metrics, pipeline *Pipeline, _runtime *Runtime) *EvrPipeline {
 	nk := _runtime.nk
+	globalMatchmaker.Store(matchmaker.(*LocalMatchmaker))
+
 	// Add the bot token to the context
 	vars := config.GetRuntime().Environment
 	ctx := context.WithValue(context.Background(), ctxDiscordBotTokenKey{}, vars["DISCORD_BOT_TOKEN"])

@@ -83,3 +83,26 @@ func MatchmakerStreamRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 
 	return response.String(), nil
 }
+
+func MatchmakerStateRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+
+	matchmaker := globalMatchmaker.Load()
+	if matchmaker == nil {
+		return "", runtime.NewError("Matchmaker not initialized", StatusInternalError)
+	}
+
+	stats := matchmaker.GetStats()
+	extracted := matchmaker.Extract()
+
+	response := map[string]interface{}{
+		"stats": stats,
+		"index": extracted,
+	}
+
+	data, err := json.Marshal(response)
+	if err != nil {
+		return "", err
+	}
+
+	return string(data), nil
+}
