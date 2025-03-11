@@ -562,20 +562,20 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 					qparts = append(qparts, fmt.Sprintf("+properties.division:%s", p.MatchmakingDivision))
 				} else if p.RankPercentileMaxDelta > 0 {
 					rankLower := min(rankPercentile-p.RankPercentileMaxDelta, 1.0-2.0*p.RankPercentileMaxDelta)
-					rankUpper := max(rankPercentile+p.RankPercentileMaxDelta, 2.0*p.RankPercentileMaxDelta)
+					//rankUpper := max(rankPercentile+p.RankPercentileMaxDelta, 2.0*p.RankPercentileMaxDelta)
 					rankLower = max(rankLower, 0.0)
-					rankUpper = min(rankUpper, 1.0)
+					//rankUpper = min(rankUpper, 1.0)
 					numericProperties["rank_percentile_min"] = rankLower
-					numericProperties["rank_percentile_max"] = rankUpper
+					//numericProperties["rank_percentile_max"] = rankUpper
 
 					qparts = append(qparts,
 						// Exclusion
 						fmt.Sprintf("-properties.rank_percentile:<%f", rankLower),
-						fmt.Sprintf("-properties.rank_percentile:>%f", rankUpper),
+						//fmt.Sprintf("-properties.rank_percentile:>%f", rankUpper),
 
 						// Reverse
 						fmt.Sprintf("-properties.rank_percentile_min:>%f", rankPercentile),
-						fmt.Sprintf("-properties.rank_percentile_max:<%f", rankPercentile),
+						//fmt.Sprintf("-properties.rank_percentile_max:<%f", rankPercentile),
 					)
 				}
 			}
