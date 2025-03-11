@@ -34,27 +34,30 @@ func DivisionFromValue(value int) Division {
 		return DivisionSilver
 	case 5:
 		return DivisionBronze
+	case 6:
+		return DivisionGreen
 	default:
-		return DivisionMaster
+		return DivisionGreen
 	}
 }
-
 func DivisionFromName(name string) Division {
 	switch name {
-	case "Master":
+	case "master":
 		return DivisionMaster
-	case "Diamond":
+	case "diamond":
 		return DivisionDiamond
-	case "Platinum":
+	case "platinum":
 		return DivisionPlatinum
-	case "Gold":
+	case "gold":
 		return DivisionGold
-	case "Silver":
+	case "silver":
 		return DivisionSilver
-	case "Bronze":
+	case "bronze":
 		return DivisionBronze
+	case "green":
+		return DivisionGreen
 	default:
-		return DivisionMaster
+		return DivisionGreen
 	}
 }
 
@@ -69,7 +72,9 @@ func DivisionFromScore(rankPercentile float64) Division {
 		return DivisionGold
 	} else if rankPercentile >= 0.50 {
 		return DivisionSilver
-	} else {
+	} else if rankPercentile >= 0.25 {
 		return DivisionBronze
+	} else {
+		return DivisionGreen
 	}
 }
