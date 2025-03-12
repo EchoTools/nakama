@@ -225,19 +225,23 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 				continue
 			}
 
-			s := "<@" + a.CustomId + ">"
-			if gg.IsSuspended(s, &params.xpID) {
-				s = s + " (suspended)"
-				displayAuditMessage = true
-			}
+			states := make([]string, 0)
 
-			if a.DisableTime != nil {
-				s = s + " (disabled)"
-				displayAuditMessage = false
-			}
-			if ok, expiry := gg.IsTimedOut(s); ok {
-				s = fmt.Sprintf("%s (timeout expires <t:%d:R>", s, expiry.UTC().Unix())
+			if gg.IsSuspended(a.User.Id, nil) {
+				states = append(states, "suspended")
 				displayAuditMessage = true
+			}
+			if a.DisableTime != nil {
+				states = append(states, "disabled")
+			}
+			if ok, expiry := gg.IsTimedOut(a.User.Id); ok {
+				states = append(states, fmt.Sprintf("timeout expires <t:%d:R>", expiry.UTC().Unix()))
+				displayAuditMessage = true
+			}
+			s := fmt.Sprintf("<@%s> (%s)", a.CustomId, a.User.Username)
+
+			if len(states) > 0 {
+				s = s + fmt.Sprintf(" *[%s]*", strings.Join(states, ", "))
 			}
 
 			firstDegree = append(firstDegree, s)
@@ -257,19 +261,35 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 				if a.User.Id == userID || slices.Contains(firstIDs, a.User.Id) {
 					continue
 				}
-				s := "<@" + a.CustomId + ">"
-				if gg.IsSuspended(s, nil) {
-					s = s + " (suspended)"
-				} else if a.DisableTime != nil {
-					s = s + " (disabled)"
-				}
+				states := make([]string, 0)
 
+				if gg.IsSuspended(a.User.Id, nil) {
+					states = append(states, "suspended")
+				}
+				if a.DisableTime != nil {
+					states = append(states, "disabled")
+				}
+				if ok, expiry := gg.IsTimedOut(a.User.Id); ok {
+					states = append(states, fmt.Sprintf("timeout expires <t:%d:R>", expiry.UTC().Unix()))
+				}
+				s := fmt.Sprintf("<@%s> (%s)", a.CustomId, a.User.Username)
+
+				if len(states) > 0 {
+					s = s + fmt.Sprintf(" *[%s]*", strings.Join(states, ", "))
+				}
 				secondDegree = append(secondDegree, s)
 			}
 		}
 
 		if len(firstDegree)+len(secondDegree) > 0 && displayAuditMessage {
-			content := fmt.Sprintf("<@%s> detected as a likely alternate of: %s", params.DiscordID(), strings.Join(firstDegree, ", "))
+			users, err := h.nk.AccountsGetId(ctx, []string{userID})
+			if err != nil {
+				return fmt.Errorf("failed to get alternate accounts: %w", err)
+			} else if len(users) == 0 {
+				return fmt.Errorf("failed to get user")
+			}
+
+			content := fmt.Sprintf("<@%s> (%s) detected as a likely alternate of: %s", params.DiscordID(), users[0].User.Username, strings.Join(firstDegree, ", "))
 
 			if len(secondDegree) > 0 {
 				content += fmt.Sprintf("\nSecond degree (possible) alternates: %s\n", strings.Join(secondDegree, ", "))
