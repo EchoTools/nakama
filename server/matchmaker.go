@@ -269,6 +269,8 @@ type LocalMatchmaker struct {
 	// Reverse lookup cache for mutual matching.
 	revCache       *MapOf[string, map[string]bool]
 	revThresholdFn func() *time.Timer
+
+	processMu *sync.Mutex
 }
 
 func NewLocalMatchmaker(logger, startupLogger *zap.Logger, config Config, router MessageRouter, metrics Metrics, runtime *Runtime) Matchmaker {
@@ -301,6 +303,7 @@ func NewLocalMatchmaker(logger, startupLogger *zap.Logger, config Config, router
 		indexes:          make(map[string]*MatchmakerIndex),
 		activeIndexes:    make(map[string]*MatchmakerIndex),
 		revCache:         &MapOf[string, map[string]bool]{},
+		processMu:        &sync.Mutex{},
 	}
 
 	if revThreshold := m.config.GetMatchmaker().RevThreshold; revThreshold > 0 && m.config.GetMatchmaker().RevPrecision {
@@ -361,6 +364,12 @@ func (m *LocalMatchmaker) OnStatsUpdate(fn func(*api.MatchmakerStats)) {
 }
 
 func (m *LocalMatchmaker) Process() {
+	if !m.processMu.TryLock() {
+		m.logger.Warn("Matchmaker process skipped due to lock contention")
+		return
+	}
+	defer m.processMu.Unlock()
+
 	startTime := time.Now()
 	var activeIndexCount, indexCount int
 	defer func() {
