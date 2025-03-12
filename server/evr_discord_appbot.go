@@ -1941,7 +1941,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			d.cache.Purge(user.ID)
 			d.cache.QueueSyncMember(i.GuildID, user.ID)
 
-			err := d.handleProfileRequest(ctx, logger, nk, s, i, user.ID, user.Username, true, true, false)
+			err := d.handleProfileRequest(ctx, logger, nk, s, i, user, user.Username, true, true, false)
 			logger.WithFields(map[string]interface{}{
 				"discord_id":       user.ID,
 				"discord_username": user.Username,
@@ -2163,7 +2163,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			includePrivate := isSelf || isGlobalOperator
 			includePriviledged := isSelf || isGlobalOperator || isGuildAuditor
 
-			return d.handleProfileRequest(ctx, logger, nk, s, i, target.ID, target.Username, includePriviledged, includePrivate, includeSystem)
+			return d.handleProfileRequest(ctx, logger, nk, s, i, target, target.Username, includePriviledged, includePrivate, includeSystem)
 		},
 		"search": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userIDStr string, groupID string) error {
 
