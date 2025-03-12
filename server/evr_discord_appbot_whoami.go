@@ -39,9 +39,9 @@ type EvrIdLogins struct {
 	DisplayName   string `json:"display_name,omitempty"`
 }
 
-func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, s *discordgo.Session, i *discordgo.InteractionCreate, targetID string, username string, includePriviledged bool, includePrivate bool, includeSystem bool) error {
+func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, s *discordgo.Session, i *discordgo.InteractionCreate, target *discordgo.User, username string, includePriviledged bool, includePrivate bool, includeSystem bool) error {
 	whoami := &WhoAmI{
-		DiscordID:    targetID,
+		DiscordID:    target.ID,
 		RecentLogins: make(map[string]time.Time),
 		DisplayNames: make([]string, 0),
 		DeviceLinks:  make([]string, 0),
@@ -49,19 +49,14 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		MatchLabels:  make([]*MatchLabel, 0),
 	}
 
-	user, err := s.User(targetID)
-	if err != nil {
-		return fmt.Errorf("failed to get user: %w", err)
-	}
-
 	// Create the account if the user doesn't exist
 
-	userIDStr, err := GetUserIDByDiscordID(ctx, d.db, targetID)
+	userIDStr, err := GetUserIDByDiscordID(ctx, d.db, target.ID)
 	if err != nil {
-		if i.Member.User.ID == targetID {
-			userIDStr, _, _, err = d.nk.AuthenticateCustom(ctx, targetID, user.Username, true)
+		if i.Member.User.ID == target.ID {
+			userIDStr, _, _, err = d.nk.AuthenticateCustom(ctx, target.ID, target.Username, true)
 			if err != nil {
-				return fmt.Errorf("failed to authenticate (or create) user %s: %w", targetID, err)
+				return fmt.Errorf("failed to authenticate (or create) user %s: %w", target.ID, err)
 			}
 		} else {
 			return fmt.Errorf("player does not exist")
