@@ -95,19 +95,22 @@ func (p *EvrPipeline) lobbyPingResponse(ctx context.Context, logger *zap.Logger,
 	response := in.(*evr.LobbyPingResponse)
 	results := response.Results
 	pipeline := session.pipeline
+	now := time.Now().UTC().Unix()
 
 	latencyHistory, err := LoadLatencyHistory(ctx, logger, pipeline.db, session.userID)
 	if err != nil {
 		return status.Errorf(codes.Internal, "failed to load latency history: %v", err)
 	}
 
-	for _, r := range results {
-		if h, ok := latencyHistory[r.GetExternalIP()]; ok {
-			h[time.Now().UTC().Unix()] = int(r.PingMilliseconds)
-		} else {
-			latencyHistory[r.GetExternalIP()] = map[int64]int{time.Now().UTC().Unix(): int(r.PingMilliseconds)}
-		}
+	// The ping response will only return successful pings.
 
+	for _, r := range results {
+		extIP := r.GetExternalIP()
+		if h, ok := latencyHistory[extIP]; ok {
+			h[now] = int(r.PingMilliseconds)
+		} else {
+			latencyHistory[extIP] = map[int64]int{now: int(r.PingMilliseconds)}
+		}
 	}
 
 	if err := StoreLatencyHistory(ctx, logger, pipeline.db, session.metrics, session.storageIndex, session.userID, latencyHistory); err != nil {
