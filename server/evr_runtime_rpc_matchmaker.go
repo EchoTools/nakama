@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 
+	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 )
 
@@ -84,6 +85,11 @@ func MatchmakerStreamRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 	return response.String(), nil
 }
 
+type MatchmakerStateResponse struct {
+	Stats *api.MatchmakerStats `json:"stats"`
+	Index []*MatchmakerExtract `json:"index"`
+}
+
 func MatchmakerStateRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 
 	matchmaker := globalMatchmaker.Load()
@@ -91,12 +97,9 @@ func MatchmakerStateRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		return "", runtime.NewError("Matchmaker not initialized", StatusInternalError)
 	}
 
-	stats := matchmaker.GetStats()
-	extracted := matchmaker.Extract()
-
-	response := map[string]interface{}{
-		"stats": stats,
-		"index": extracted,
+	response := MatchmakerStateResponse{
+		Stats: matchmaker.GetStats(),
+		Index: matchmaker.Extract(),
 	}
 
 	data, err := json.Marshal(response)
