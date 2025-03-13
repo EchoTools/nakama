@@ -86,6 +86,12 @@ func (h *RPCHandler) LeaderboardRecordsListRPC(ctx context.Context, logger runti
 		}).Error("Leaderboard record haystack error.")
 		return "", err
 	}
+
+	// Sort the records by rank
+	slices.SortStableFunc(records, func(a, b *api.LeaderboardRecord) int {
+		return int(a.Rank - b.Rank)
+	})
+
 	response := LeaderboardRecordsListResponse{
 		Records:    records,
 		NextCursor: nextCursor,
