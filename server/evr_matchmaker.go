@@ -130,6 +130,7 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 		"filter_counts":        filterCounts,
 		"matched_players":      matchedPlayerSet,
 		"unmatched_players":    unmatchedPlayers,
+		"duration":             time.Since(startTime),
 	}).Info("Skill-based matchmaker completed.")
 
 	if candidates != nil && matches != nil && len(candidates) > 0 {
@@ -259,177 +260,218 @@ OuterLoop:
 	return filteredCount
 }
 
-func (*SkillBasedMatchmaker) teamStrength(team RatedEntryTeam) float64 {
-	s := 0.0
-	for _, p := range team {
-		s += p.Rating.Mu
-	}
-	return s
-}
+func (m *SkillBasedMatchmaker) createBalancedMatch(parties []*MatchmakingTicket, teamSize int) [2][]*MatchmakingTicket {
 
-func (*SkillBasedMatchmaker) predictDraw(teams []RatedEntryTeam) float64 {
-	team1 := make(types.Team, 0, len(teams[0]))
-	team2 := make(types.Team, 0, len(teams[1]))
-	for _, e := range teams[0] {
-		team1 = append(team1, e.Rating)
-	}
-	for _, e := range teams[1] {
-		team2 = append(team2, e.Rating)
-	}
-	return rating.PredictDraw([]types.Team{team1, team2}, nil)
-}
-
-func (m *SkillBasedMatchmaker) createBalancedMatch(groups [][]*RatedEntry, teamSize int) (RatedEntryTeam, RatedEntryTeam) {
-	// Split out the solo players
-
-	team1 := make(RatedEntryTeam, 0, teamSize)
-	team2 := make(RatedEntryTeam, 0, teamSize)
-
-	// Sort the groups by party size, largest first.
-
-	slices.SortStableFunc(groups, func(a, b []*RatedEntry) int {
-		if len(a) > len(b) {
-			return -1
+	// Sort the groups by party size, largest first, then by strength (descending)
+	slices.SortStableFunc(parties, func(a, b *MatchmakingTicket) int {
+		if a.Length != b.Length {
+			return b.Length - a.Length
 		}
-
-		if len(a) < len(b) {
-			return 1
-		}
-
-		if m.teamStrength(a) > m.teamStrength(b) {
-			return -1
-		}
-
-		if m.teamStrength(a) < m.teamStrength(b) {
-			return 1
-		}
-
-		return 0
+		return int(b.Strength - a.Strength)
 	})
 
+	teamA := make([]*MatchmakingTicket, 0, teamSize)
+	teamB := make([]*MatchmakingTicket, 0, teamSize)
+
+	var lenA, lenB int
 	// Organize groups onto teams, balancing by strength
-	for _, group := range groups {
-		if len(team1)+len(group) <= teamSize && (len(team2)+len(group) > teamSize || m.teamStrength(team1) <= m.teamStrength(team2)) {
-			team1 = append(team1, group...)
-		} else if len(team2)+len(group) <= teamSize {
-			team2 = append(team2, group...)
+	var strengthA, strengthB float64
+	for _, p := range parties {
+		if lenA+p.Length <= teamSize && (lenB+p.Length > teamSize || strengthA <= strengthB) {
+			teamA = append(teamA, p)
+			strengthA += p.Strength
+			lenA += p.Length
+		} else if lenB+p.Length <= teamSize {
+			teamB = append(teamB, p)
+			strengthB += p.Strength
+			lenB += p.Length
 		}
 	}
-
-	// Sort the players on the team by their rating
-	sort.Slice(team1, func(i, j int) bool {
-		return team1[i].Rating.Mu > team1[j].Rating.Mu
-	})
-	sort.Slice(team2, func(i, j int) bool {
-		return team2[i].Rating.Mu > team2[j].Rating.Mu
-	})
 
 	// Sort so that team1 (blue) is the stronger team
-	if m.teamStrength(team1) < m.teamStrength(team2) {
-		team1, team2 = team2, team1
+	if strengthA < strengthB {
+		teamA, teamB = teamB, teamA
 	}
 
-	return team1, team2
+	return [2][]*MatchmakingTicket{teamA, teamB}
 }
 
-func (m *SkillBasedMatchmaker) balanceByTicket(candidate []runtime.MatchmakerEntry) RatedMatch {
-	// Group based on ticket
-
-	ticketMap := make(map[string][]*RatedEntry)
-	for _, e := range candidate {
-		ticketMap[e.GetTicket()] = append(ticketMap[e.GetTicket()], NewRatedEntryFromMatchmakerEntry(e))
-	}
-
-	byTicket := make([][]*RatedEntry, 0)
-	for _, entries := range ticketMap {
-		byTicket = append(byTicket, entries)
-	}
-
-	team1, team2 := m.createBalancedMatch(byTicket, len(candidate)/2)
-	return RatedMatch{team1, team2}
-}
-
-func (m *SkillBasedMatchmaker) averageRankPercentile(team RatedEntryTeam, defaultRankPercentile float64) float64 {
+func (m *SkillBasedMatchmaker) averageRankPercentile(team []*MatchmakingTicket) float64 {
 	var sum float64
-	for _, player := range team {
-		if rankPercentile, ok := player.Entry.Properties["rank_percentile"].(float64); ok {
-			sum += rankPercentile
-		} else {
-			sum += defaultRankPercentile
-		}
+	var count int
+	for _, party := range team {
+		sum += party.RankPercentileAverage
+		count += party.Length
 	}
-	return sum / float64(len(team))
+	return sum / float64(count)
+}
+
+type MatchmakingPartyMember struct {
+	Entry          *MatchmakerEntry
+	Rating         types.Rating
+	RankPercentile float64
+}
+
+type MatchmakingTicket struct {
+	Members               []MatchmakingPartyMember
+	Strength              float64
+	Length                int
+	Timestamp             float64
+	RankPercentileAverage float64
+}
+
+type MatchmakingTeam struct {
+	Parties   []*MatchmakingTicket
+	Strength  float64
+	Timestamp float64
 }
 
 func (m *SkillBasedMatchmaker) predictOutcomes(candidates [][]runtime.MatchmakerEntry, defaultRankPercentile float64) []PredictedMatch {
-	predictions := make([]PredictedMatch, 0, len(candidates))
 
-	for _, match := range candidates {
-		if match == nil {
+	// count the number of valid candidates
+	var validCandidates int
+	for _, c := range candidates {
+		if c != nil {
+			validCandidates++
+		}
+	}
+
+	// Create a mapping of all players by their ticket IDs
+	playersByTicket := make(map[string]map[string]MatchmakingPartyMember, 32)
+
+	// Create a list of all tickets in each candidate
+	candidateTickets := make([]map[string]struct{}, 0, len(candidates))
+
+	for _, c := range candidates {
+		if c == nil {
 			continue
 		}
-		ratedMatch := m.balanceByTicket(match)
+		ticketSet := make(map[string]struct{}, len(c))
+		for _, e := range c {
+			tID := e.GetTicket()
 
-		var (
-			percentileA     = m.averageRankPercentile(ratedMatch[0], defaultRankPercentile)
-			percentileB     = m.averageRankPercentile(ratedMatch[1], defaultRankPercentile)
-			percentileDelta = math.Abs(percentileA - percentileB)
-			divisions       = make(map[string]struct{}, 1)
-			priorityExpiry  = time.Now().UTC().Format(time.RFC3339)
-		)
+			ticketSet[tID] = struct{}{}
+			ticket, ok := playersByTicket[tID]
+			if !ok {
+				ticket = make(map[string]MatchmakingPartyMember, 4)
+				playersByTicket[tID] = ticket
+			}
 
-		for _, team := range ratedMatch {
-			for _, player := range team {
-				if p, ok := player.Entry.GetProperties()["division"].(string); !ok || p == "" {
-					// Add a random division to the player (the session id)
-					divisions[player.Entry.Presence.SessionId] = struct{}{}
-				} else {
-					divisions[p] = struct{}{}
-				}
-				if th, ok := player.Entry.GetProperties()["priority_threshold"].(string); ok {
-					if th < priorityExpiry {
-						priorityExpiry = th
-					}
+			if _, ok := ticket[e.GetPresence().GetSessionId()]; ok {
+				continue
+			}
+
+			ticket[e.GetPresence().GetSessionId()] = MatchmakingPartyMember{
+				Entry: e.(*MatchmakerEntry),
+				Rating: types.Rating{
+					Mu:    e.GetProperties()["rating_mu"].(float64),
+					Sigma: e.GetProperties()["rating_sigma"].(float64),
+				},
+				RankPercentile: e.GetProperties()["rank_percentile"].(float64),
+			}
+		}
+
+		candidateTickets = append(candidateTickets, ticketSet)
+	}
+
+	// Create a party for each ticket
+	partyByTicketID := make(map[string]*MatchmakingTicket, len(playersByTicket))
+
+	for ticketID, players := range playersByTicket {
+		party := &MatchmakingTicket{
+			Members:   make([]MatchmakingPartyMember, 0, len(players)),
+			Length:    len(players),
+			Timestamp: float64(time.Now().Unix()),
+		}
+		for _, p := range players {
+			party.Members = append(party.Members, p)
+			party.Strength += p.Rating.Mu
+
+			// If the rank percentile is 0, set it to the default
+			if p.RankPercentile == 0 {
+				p.RankPercentile = defaultRankPercentile
+			}
+			party.RankPercentileAverage += p.RankPercentile
+
+			// Update the party timestamp if this player has a lower timestamp
+			if party.Timestamp > p.Entry.Properties["timestamp"].(float64) {
+				party.Timestamp = p.Entry.Properties["timestamp"].(float64)
+			}
+		}
+		partyByTicketID[ticketID] = party
+	}
+
+	// Create a list of all possible 4v4 matches, with predictions
+	predictions := make([]PredictedMatch, 0, validCandidates)
+
+	for _, tickets := range candidateTickets {
+
+		parties := make([]*MatchmakingTicket, 0, len(tickets))
+		size := 0
+		for t := range tickets {
+			p, ok := partyByTicketID[t]
+			if !ok {
+				continue
+			}
+			parties = append(parties, p)
+			size += p.Length
+		}
+
+		teams := m.createBalancedMatch(parties, size/2)
+		if len(teams[0]) != len(teams[1]) {
+			continue
+		}
+		// Calculate the draw probability
+		ratingsByTeam := make([]types.Team, 2)
+		for i, team := range teams {
+			ratingsByTeam[i] = make(types.Team, 0, size/2)
+			for _, p := range team {
+				for _, e := range p.Members {
+					ratingsByTeam[i] = append(ratingsByTeam[i], e.Rating)
 				}
 			}
 		}
 
+		var (
+			percentileA = m.averageRankPercentile(teams[0])
+			percentileB = m.averageRankPercentile(teams[1])
+		)
+
 		predictions = append(predictions, PredictedMatch{
-			TeamA:              ratedMatch[0],
-			TeamB:              ratedMatch[1],
-			Draw:               m.predictDraw(ratedMatch),
-			Size:               len(match),
-			RankDelta:          percentileDelta,
+			TeamA:              teams[0],
+			TeamB:              teams[1],
+			Draw:               rating.PredictDraw(ratingsByTeam, nil),
+			Size:               size,
+			RankDelta:          math.Abs(percentileA - percentileB),
 			AvgRankPercentileA: percentileA,
 			AvgRankPercentileB: percentileB,
-			DivisionCount:      len(divisions),
-			PriorityExpiry:     priorityExpiry,
 		})
 	}
 
 	return predictions
 }
 
-func (m *SkillBasedMatchmaker) assembleUniqueMatches(ratedMatches []PredictedMatch) [][]runtime.MatchmakerEntry {
+func (m *SkillBasedMatchmaker) assembleUniqueMatches(sortedCandidates []PredictedMatch) [][]runtime.MatchmakerEntry {
 
-	matches := make([][]runtime.MatchmakerEntry, 0, len(ratedMatches))
+	matches := make([][]runtime.MatchmakerEntry, 0, len(sortedCandidates))
 
 	matchedPlayers := make(map[string]struct{}, 0)
 
 OuterLoop:
-	for _, r := range ratedMatches {
+	for _, r := range sortedCandidates {
 
-		match := make([]runtime.MatchmakerEntry, 0, 8)
+		match := make([]runtime.MatchmakerEntry, 0, r.Size)
 
+		// Check if any players in the match have already been matched
 		for _, e := range r.Entrants() {
-			if _, ok := matchedPlayers[e.Entry.Presence.SessionId]; ok {
+			if _, ok := matchedPlayers[e.Presence.SessionId]; ok {
 				continue OuterLoop
 			}
 		}
 
 		for _, e := range r.Entrants() {
-			match = append(match, e.Entry)
-			matchedPlayers[e.Entry.Presence.SessionId] = struct{}{}
+			match = append(match, e)
+			matchedPlayers[e.Presence.SessionId] = struct{}{}
 		}
 
 		matches = append(matches, match)

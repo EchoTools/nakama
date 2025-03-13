@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"net/http"
 	"os"
 	"reflect"
@@ -19,7 +20,6 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
-	"github.com/intinig/go-openskill/types"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/encoding/protojson"
 	"gopkg.in/yaml.v3"
@@ -258,92 +258,6 @@ func TestHasEligibleServers(t *testing.T) {
 	}
 }
 
-func TestCreateBalancedMatch(t *testing.T) {
-	tests := []struct {
-		name      string
-		groups    [][]*RatedEntry
-		teamSize  int
-		wantTeam1 RatedEntryTeam
-		wantTeam2 RatedEntryTeam
-	}{
-		{
-			name: "Balanced teams with solo players",
-			groups: [][]*RatedEntry{
-				{&RatedEntry{Rating: types.Rating{Mu: 25, Sigma: 8.111}}},
-				{&RatedEntry{Rating: types.Rating{Mu: 30, Sigma: 8.222}}},
-				{&RatedEntry{Rating: types.Rating{Mu: 35, Sigma: 8.333}}},
-				{&RatedEntry{Rating: types.Rating{Mu: 40, Sigma: 8.444}}},
-			},
-			teamSize: 2,
-			wantTeam1: RatedEntryTeam{
-				&RatedEntry{Rating: types.Rating{Mu: 40, Sigma: 8.444}},
-				&RatedEntry{Rating: types.Rating{Mu: 25, Sigma: 8.111}},
-			},
-			wantTeam2: RatedEntryTeam{
-				&RatedEntry{Rating: types.Rating{Mu: 35, Sigma: 8.333}},
-				&RatedEntry{Rating: types.Rating{Mu: 30, Sigma: 8.222}},
-			},
-		},
-		{
-			name: "Balanced teams with parties",
-			groups: [][]*RatedEntry{
-				{
-					&RatedEntry{Rating: types.Rating{Mu: 25, Sigma: 8.3331}},
-					&RatedEntry{Rating: types.Rating{Mu: 30, Sigma: 8.3332}},
-				},
-				{
-					&RatedEntry{Rating: types.Rating{Mu: 40, Sigma: 8.3334}},
-					&RatedEntry{Rating: types.Rating{Mu: 35, Sigma: 8.3333}},
-				},
-			},
-			teamSize: 2,
-			wantTeam1: RatedEntryTeam{
-				&RatedEntry{Rating: types.Rating{Mu: 40, Sigma: 8.3334}},
-				&RatedEntry{Rating: types.Rating{Mu: 35, Sigma: 8.3333}},
-			},
-			wantTeam2: RatedEntryTeam{
-				&RatedEntry{Rating: types.Rating{Mu: 30, Sigma: 8.3332}},
-				&RatedEntry{Rating: types.Rating{Mu: 25, Sigma: 8.3331}},
-			},
-		},
-		{
-			name: "Mixed solo players and parties",
-			groups: [][]*RatedEntry{
-				{&RatedEntry{Rating: types.Rating{Mu: 25, Sigma: 8.333}}},
-				{&RatedEntry{Rating: types.Rating{Mu: 40, Sigma: 8.333}}, &RatedEntry{Rating: types.Rating{Mu: 35, Sigma: 8.333}}},
-				{&RatedEntry{Rating: types.Rating{Mu: 30, Sigma: 8.333}}},
-			},
-			teamSize: 2,
-			wantTeam1: RatedEntryTeam{
-				&RatedEntry{Rating: types.Rating{Mu: 40, Sigma: 8.333}},
-				&RatedEntry{Rating: types.Rating{Mu: 35, Sigma: 8.333}},
-			},
-			wantTeam2: RatedEntryTeam{
-				&RatedEntry{Rating: types.Rating{Mu: 30, Sigma: 8.333}},
-				&RatedEntry{Rating: types.Rating{Mu: 25, Sigma: 8.333}},
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			m := NewSkillBasedMatchmaker()
-			gotTeam1, gotTeam2 := m.createBalancedMatch(tt.groups, tt.teamSize)
-
-			t.Logf("Team 1 Strength: %f", gotTeam1.Strength())
-			t.Logf("Team 2 Strength: %f", gotTeam2.Strength())
-
-			if cmp.Diff(gotTeam1, tt.wantTeam1) != "" {
-				t.Errorf("CreateBalancedMatch() team1 (- want / + got) = %s", cmp.Diff(gotTeam1, tt.wantTeam1))
-			}
-			if !reflect.DeepEqual(gotTeam2, tt.wantTeam2) {
-				t.Errorf("CreateBalancedMatch() team2 (- want / + got) = %s", cmp.Diff(gotTeam2, tt.wantTeam2))
-			}
-
-		})
-	}
-}
-
 func TestRemoveOddSizedTeams(t *testing.T) {
 	m := NewSkillBasedMatchmaker()
 
@@ -496,10 +410,12 @@ func TestMatchmaker(t *testing.T) {
 	rostersByPrediction := make([][]string, 0)
 	for _, c := range predictions {
 		rosters := make([]string, 0)
-		for _, team := range [...]RatedEntryTeam{c.TeamA, c.TeamB} {
+		for _, team := range [...][]*MatchmakingTicket{c.TeamA, c.TeamB} {
 			roster := make([]string, 0)
-			for _, player := range team {
-				roster = append(roster, player.Entry.GetPresence().GetSessionId())
+			for _, party := range team {
+				for _, m := range party.Members {
+					roster = append(roster, m.Entry.GetPresence().GetSessionId())
+				}
 			}
 			slices.Sort(roster)
 			rosters = append(rosters, strings.Join(roster, ","))
@@ -531,57 +447,6 @@ func TestMatchmaker(t *testing.T) {
 	}
 
 	//t.Errorf("Candidates: %v", candidates)
-}
-func TestSortPriority(t *testing.T) {
-	team1 := RatedEntryTeam{
-		&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"priority_threshold": time.Now().UTC().Add(-10 * time.Minute).Unix()}, Ticket: "ticket1"}},
-	}
-	team2 := RatedEntryTeam{
-		&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{}}},
-	}
-	team3 := RatedEntryTeam{
-		&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"priority_threshold": time.Now().UTC().Add(-1 * time.Minute).Format(time.RFC3339)}, Ticket: "ticket3"}},
-	}
-	team4 := RatedEntryTeam{
-		&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{"priority_threshold": time.Now().UTC().Add(-2 * time.Minute).Format(time.RFC3339)}, Ticket: "ticket4"}},
-	}
-	team5 := RatedEntryTeam{
-		&RatedEntry{Entry: &MatchmakerEntry{Properties: map[string]interface{}{}, Ticket: "ticket5"}},
-	}
-
-	tests := []struct {
-		name        string
-		predictions []PredictedMatch
-		want        []PredictedMatch
-	}{
-		{
-			name: "Mixed priority thresholds",
-			predictions: []PredictedMatch{
-				{TeamA: team1, TeamB: team5},
-				{TeamA: team3, TeamB: team4},
-				{TeamA: team3, TeamB: team2},
-			},
-			want: []PredictedMatch{
-				{TeamA: team3, TeamB: team2},
-				{TeamA: team3, TeamB: team4},
-				{TeamA: team1, TeamB: team5},
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			m := NewSkillBasedMatchmaker()
-			m.sortedPriority(tt.predictions)
-
-			for i, got := range tt.predictions {
-				want := tt.want[i]
-				if !reflect.DeepEqual(got, want) {
-					t.Errorf("sortPriority() =\nTeam1: %v\nTeam2: %v\nwant\nTeam1: %v\nTeam2: %v", getTeamTickets(got.TeamA), getTeamTickets(got.TeamB), getTeamTickets(want.TeamA), getTeamTickets(want.TeamB))
-				}
-			}
-		})
-	}
 }
 
 func getTeamTickets(team RatedEntryTeam) []string {
@@ -1016,115 +881,6 @@ func TestCharacterizationMatchmaker1v1(t *testing.T) {
 	t.Errorf("autofail")
 }
 
-func TestAssembleUniqueMatches(t *testing.T) {
-	tests := []struct {
-		name         string
-		ratedMatches []PredictedMatch
-		want         [][]runtime.MatchmakerEntry
-	}{
-		{
-			name: "No duplicates",
-			ratedMatches: []PredictedMatch{
-				{
-					TeamA: RatedEntryTeam{
-						&RatedEntry{Entry: &MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "1"}}},
-					},
-					TeamB: RatedEntryTeam{
-						&RatedEntry{Entry: &MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "2"}}},
-					},
-				},
-				{
-					TeamA: RatedEntryTeam{
-						&RatedEntry{Entry: &MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "3"}}},
-					},
-					TeamB: RatedEntryTeam{
-						&RatedEntry{Entry: &MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "4"}}},
-					},
-				},
-			},
-			want: [][]runtime.MatchmakerEntry{
-				{
-					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "1"}},
-					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "2"}},
-				},
-				{
-					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "3"}},
-					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "4"}},
-				},
-			},
-		},
-		{
-			name: "With duplicates",
-			ratedMatches: []PredictedMatch{
-				{
-					TeamA: RatedEntryTeam{
-						&RatedEntry{Entry: &MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "1"}}},
-					},
-					TeamB: RatedEntryTeam{
-						&RatedEntry{Entry: &MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "2"}}},
-					},
-				},
-				{
-					TeamA: RatedEntryTeam{
-						&RatedEntry{Entry: &MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "1"}}},
-					},
-					TeamB: RatedEntryTeam{
-						&RatedEntry{Entry: &MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "3"}}},
-					},
-				},
-			},
-			want: [][]runtime.MatchmakerEntry{
-				{
-					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "1"}},
-					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "2"}},
-				},
-			},
-		},
-		{
-			name: "All duplicates",
-			ratedMatches: []PredictedMatch{
-				{
-					TeamA: RatedEntryTeam{
-						&RatedEntry{Entry: &MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "1"}}},
-					},
-					TeamB: RatedEntryTeam{
-						&RatedEntry{Entry: &MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "2"}}},
-					},
-				},
-				{
-					TeamA: RatedEntryTeam{
-						&RatedEntry{Entry: &MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "1"}}},
-					},
-					TeamB: RatedEntryTeam{
-						&RatedEntry{Entry: &MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "2"}}},
-					},
-				},
-			},
-			want: [][]runtime.MatchmakerEntry{
-				{
-					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "1"}},
-					&MatchmakerEntry{Presence: &MatchmakerPresence{SessionId: "2"}},
-				},
-			},
-		},
-		{
-			name:         "Empty rated matches",
-			ratedMatches: []PredictedMatch{},
-			want:         [][]runtime.MatchmakerEntry{},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			m := NewSkillBasedMatchmaker()
-			got := m.assembleUniqueMatches(tt.ratedMatches)
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("assembleUniqueMatches() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestFilterWithinMaxRTT(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -1196,6 +952,99 @@ func TestFilterWithinMaxRTT(t *testing.T) {
 				t.Errorf("filterWithinMaxRTT() candidates = %v, want %v", tt.candidates, tt.want)
 			}
 		})
+	}
+}
+
+func BenchmarkPredictOutcomes(b *testing.B) {
+
+	entries := make([]runtime.MatchmakerEntry, 0)
+	for i := range 32 {
+		var (
+			dn        = RandomDisplayName()
+			sessionID = uuid.NewV5(uuid.Nil, fmt.Sprintf("%d", i))
+		)
+		entries = append(entries, &MatchmakerEntry{
+			Ticket: uuid.NewV5(uuid.Nil, fmt.Sprintf("%d", i)).String(),
+			Presence: &MatchmakerPresence{
+				UserId:    uuid.NewV5(uuid.Nil, fmt.Sprintf("%d", i)).String(),
+				SessionId: sessionID.String(),
+				Username:  dn + "username",
+				SessionID: sessionID,
+			},
+			Properties: map[string]any{
+				"rating_mu":                 float64(20 + rand.Intn(9)),              // random between 20 and 28
+				"rating_sigma":              float64(7 + rand.Intn(3)),               // random between 7 and 10
+				"rank_percentile":           float64(float64(rand.Intn(8))/10 + 0.1), // random between 0.1 and 0.9
+				"rank_percentile_max":       0.6,
+				"rank_percentile_max_delta": 0.3,
+				"rank_percentile_min":       0,
+				"timestamp":                 float64(time.Now().UTC().Add(-time.Duration(rand.Intn(10)) * time.Minute).Unix()),
+				"blocked_ids":               "",
+				"display_name":              dn,
+				"division":                  "",
+				"game_mode":                 "echo_arena",
+				"group_id":                  "147afc9d-2819-4197-926d-5b3f92790edc",
+				"priority_threshold":        "2025-03-13T18:34:54Z",
+				"query":                     "+properties.game_mode:echo_arena +properties.group_id:147afc9d\\-2819\\-4197\\-926d\\-5b3f92790edc -properties.blocked_ids:/.*28e070c2\\-acb5\\-4e96\\-b53b\\-92c955edeb31.*/ -properties.rank_percentile:<0.000000 -properties.rank_percentile:>0.600000 -properties.rank_percentile_min:>0.200000 -properties.rank_percentile_max:<0.200000",
+				"submission_time":           "2025-03-13T18:18:54Z",
+				"version_lock":              "0x134b1272e1c4c0b7",
+				"max_rtt":                   300,
+				"rtt_116.203.155.106":       float64(160),
+				"rtt_166.0.130.5":           float64(30),
+				"rtt_166.0.130.6":           float64(30),
+				"rtt_216.137.230.85":        float64(120),
+				"rtt_45.92.36.210":          float64(140),
+				"rtt_49.191.142.22":         float64(250),
+				"rtt_5.42.134.192":          float64(140),
+				"rtt_50.24.115.211":         float64(50),
+				"rtt_68.235.129.88":         float64(40),
+				"rtt_68.72.133.63":          float64(60),
+				"rtt_69.234.156.212":        float64(50),
+				"rtt_71.15.39.215":          float64(60),
+				"rtt_98.117.251.89":         float64(80),
+				"rtt_99.251.100.24":         float64(90),
+			},
+			NumericProperties: map[string]float64{},
+		})
+
+	}
+
+	// Create all combinations of 8 players from the entries
+	candidates := make([][]runtime.MatchmakerEntry, 0)
+	for i := range entries {
+		for j := i + 1; j < len(entries); j++ {
+			for k := j + 1; k < len(entries); k++ {
+				for l := k + 1; l < len(entries); l++ {
+					for m := l + 1; m < len(entries); m++ {
+						for n := m + 1; n < len(entries); n++ {
+							for o := n + 1; o < len(entries); o++ {
+								for p := o + 1; p < len(entries); p++ {
+									candidates = append(candidates, []runtime.MatchmakerEntry{
+										entries[i],
+										entries[j],
+										entries[k],
+										entries[l],
+										entries[m],
+										entries[n],
+										entries[o],
+										entries[p],
+									})
+
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	b.Logf("candidate count: %d", len(candidates))
+	m := NewSkillBasedMatchmaker()
+	for b.Loop() {
+		b.ReportMetric(float64(len(candidates)), "candidates")
+		predictions := m.predictOutcomes(candidates, 0.5)
+		b.ReportMetric(float64(len(predictions)), "predictions")
 	}
 }
 

@@ -2,7 +2,6 @@ package server
 
 import (
 	"slices"
-	"time"
 )
 
 type PredictMatchKeys struct {
@@ -10,23 +9,25 @@ type PredictMatchKeys struct {
 }
 
 type PredictedMatch struct {
-	TeamA              RatedEntryTeam `json:"team1"`
-	TeamB              RatedEntryTeam `json:"team2"`
-	Draw               float64        `json:"draw"`
-	Size               int            `json:"size"`
-	AvgRankPercentileA float64        `json:"rank_percentile_a"`
-	AvgRankPercentileB float64        `json:"rank_percentile_b"`
-	RankDelta          float64        `json:"rank_percentile_delta"`
-	DivisionCount      int            `json:"division_count"`
-	PriorityExpiry     string         `json:"priority_expiry"`
+	TeamA              []*MatchmakingTicket `json:"team1"`
+	TeamB              []*MatchmakingTicket `json:"team2"`
+	Draw               float64              `json:"draw"`
+	Size               int                  `json:"size"`
+	AvgRankPercentileA float64              `json:"rank_percentile_a"`
+	AvgRankPercentileB float64              `json:"rank_percentile_b"`
+	RankDelta          float64              `json:"rank_percentile_delta"`
 }
 
-func (p PredictedMatch) Entrants() RatedEntryTeam {
-	return append(p.TeamA, p.TeamB...)
-}
-
-func (p PredictedMatch) Teams() []RatedEntryTeam {
-	return []RatedEntryTeam{p.TeamA, p.TeamB}
+func (p PredictedMatch) Entrants() []*MatchmakerEntry {
+	entrants := make([]*MatchmakerEntry, 0, len(p.TeamA)+len(p.TeamB))
+	for _, team := range [...][]*MatchmakingTicket{p.TeamA, p.TeamB} {
+		for _, party := range team {
+			for _, member := range party.Members {
+				entrants = append(entrants, member.Entry)
+			}
+		}
+	}
+	return entrants
 }
 
 func (m *SkillBasedMatchmaker) sortPredictions(predictions []PredictedMatch, maxDelta float64, ignorePriority bool) {
@@ -39,12 +40,6 @@ func (m *SkillBasedMatchmaker) sortPredictions(predictions []PredictedMatch, max
 
 	// Sort by size
 	m.sortBySize(predictions)
-
-	// Sort by division count
-	m.sortedByDivison(predictions)
-
-	// Sort by priority (players that have been waiting the longest)
-	m.sortedPriority(predictions)
 }
 
 func (m *SkillBasedMatchmaker) sortByDraw(predictions []PredictedMatch) {
@@ -54,7 +49,6 @@ func (m *SkillBasedMatchmaker) sortByDraw(predictions []PredictedMatch) {
 }
 
 func (m *SkillBasedMatchmaker) sortBySize(predictions []PredictedMatch) {
-
 	// Sort by size, then by prediction of a draw
 	slices.SortStableFunc(predictions, func(a, b PredictedMatch) int {
 		return b.Size - a.Size
@@ -66,49 +60,17 @@ func (m *SkillBasedMatchmaker) sortLimitRankDelta(predictions []PredictedMatch, 
 	slices.SortStableFunc(predictions, func(a, b PredictedMatch) int {
 
 		if a.RankDelta > maxDelta && b.RankDelta > maxDelta {
-			return 0
-		}
-
-		if a.RankDelta > maxDelta {
 			return 1
 		}
 
-		if b.RankDelta > maxDelta {
+		if a.RankDelta < maxDelta {
 			return -1
 		}
 
-		return 0
-	})
-}
-
-func (m *SkillBasedMatchmaker) sortedByDivison(predictions []PredictedMatch) {
-
-	slices.SortStableFunc(predictions, func(a, b PredictedMatch) int {
-		// Sort by the number of divisions in common, excluding where candiate have no division
-		if a.DivisionCount < b.DivisionCount {
-			return -1
-		}
-		if a.DivisionCount > b.DivisionCount {
-			return 1
-		}
-		return 0
-	})
-}
-
-func (m *SkillBasedMatchmaker) sortedPriority(predictions []PredictedMatch) {
-
-	now := time.Now().UTC().Format(time.RFC3339)
-
-	slices.SortStableFunc(predictions, func(a, b PredictedMatch) int {
-		// If a player has a priority_threshold set, and it's less than "now" it should be sorted to the top
-		if a.PriorityExpiry < now && b.PriorityExpiry > now {
-			return -1
-		}
-		if a.PriorityExpiry > now && b.PriorityExpiry < now {
+		if b.RankDelta < maxDelta {
 			return 1
 		}
 
 		return 0
 	})
-
 }
