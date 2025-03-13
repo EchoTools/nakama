@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/intinig/go-openskill/rating"
 	"github.com/intinig/go-openskill/types"
@@ -12,7 +11,7 @@ import (
 )
 
 type (
-	RatedMatch []RatedEntryTeam
+	RatedMatch [2]RatedEntryTeam
 )
 
 type RatedEntry struct {
@@ -20,26 +19,7 @@ type RatedEntry struct {
 	Rating types.Rating
 }
 
-func NewRatedEntryFromMatchmakerEntry(e runtime.MatchmakerEntry) *RatedEntry {
-	props := e.GetProperties()
-	mu, ok := props["rating_mu"].(float64)
-	if !ok {
-		mu = 25.0
-	}
-	sigma, ok := props["rating_sigma"].(float64)
-	if !ok {
-		sigma = 8.333
-	}
-	return &RatedEntry{
-		Entry: e.(*MatchmakerEntry),
-		Rating: rating.NewWithOptions(&types.OpenSkillOptions{
-			Mu:    ptr.Float64(mu),
-			Sigma: ptr.Float64(sigma),
-		}),
-	}
-}
-
-type RatedEntryTeam []*RatedEntry
+type RatedEntryTeam []RatedEntry
 
 func (t RatedEntryTeam) Len() int {
 	return len(t)

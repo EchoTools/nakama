@@ -160,8 +160,6 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 		return fmt.Errorf("not enough entrants to build a match")
 	}
 
-	sbmm := NewSkillBasedMatchmaker()
-
 	groupID, err := b.groupIDFromEntrants(entrants)
 
 	matchmakerEntrants := make([]runtime.MatchmakerEntry, 0, len(entrants))
@@ -169,41 +167,48 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 		matchmakerEntrants = append(matchmakerEntrants, e)
 	}
 
-	ratedMatch := sbmm.balanceByTicket(matchmakerEntrants)
+	// Divide the entrants into two equal-sized teams
+	teamSize := len(entrants) / 2
+	teams := [2][]*MatchmakerEntry{}
+	for i, e := range entrants {
+		teams[i/teamSize] = append(teams[i/teamSize], e)
+	}
+
+	// Split the entrants into teams, half and half
 
 	entrantPresences := make([]*EvrMatchPresence, 0, len(entrants))
 	sessions := make([]Session, 0, len(entrants))
-	for teamIndex, players := range ratedMatch {
+	for teamIndex, players := range teams {
 
 		// Assign each player in the team to the match
 		for _, entry := range players {
 
-			session := b.sessionRegistry.Get(uuid.FromStringOrNil(entry.Entry.Presence.GetSessionId()))
+			session := b.sessionRegistry.Get(uuid.FromStringOrNil(entry.Presence.GetSessionId()))
 			if session == nil {
-				logger.Warn("Failed to get session from session registry", zap.String("sid", entry.Entry.Presence.GetSessionId()))
+				logger.Warn("Failed to get session from session registry", zap.String("sid", entry.Presence.GetSessionId()))
 				continue
 			}
 
-			mu := entry.Entry.NumericProperties["rating_mu"]
-			sigma := entry.Entry.NumericProperties["rating_sigma"]
+			mu := entry.NumericProperties["rating_mu"]
+			sigma := entry.NumericProperties["rating_sigma"]
 			rating := rating.NewWithOptions(&types.OpenSkillOptions{
 				Mu:    &mu,
 				Sigma: &sigma,
 			})
 
-			percentile, ok := entry.Entry.NumericProperties["rank_percentile"]
+			percentile, ok := entry.NumericProperties["rank_percentile"]
 			if !ok {
 				percentile = 0.0
 			}
 
-			query, ok := entry.Entry.StringProperties["query"]
+			query, ok := entry.StringProperties["query"]
 			if !ok {
 				query = ""
 			}
 
 			sessions = append(sessions, session)
 
-			if entrant, err := EntrantPresenceFromSession(session, MatchIDFromStringOrNil(entry.Entry.GetPartyId()).UUID, teamIndex, rating, percentile, groupID.String(), 0, query); err != nil {
+			if entrant, err := EntrantPresenceFromSession(session, MatchIDFromStringOrNil(entry.GetPartyId()).UUID, teamIndex, rating, percentile, groupID.String(), 0, query); err != nil {
 				logger.Error("Failed to create entrant presence", zap.String("sid", session.ID().String()), zap.Error(err))
 				continue
 			} else {
@@ -309,7 +314,7 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 	b.metrics.CustomCounter("lobby_join_match_made", tags, int64(len(successful)))
 	b.metrics.CustomCounter("lobby_error_match_made", tags, int64(len(errored)))
 
-	logger.Info("Match built.", zap.String("mid", label.ID.UUID.String()), zap.Any("teams", ratedMatch), zap.Any("successful", successful), zap.Any("errored", errored), zap.Any("game_server", label.GameServer))
+	logger.Info("Match built.", zap.String("mid", label.ID.UUID.String()), zap.Any("teams", teams), zap.Any("successful", successful), zap.Any("errored", errored), zap.Any("game_server", label.GameServer))
 	return nil
 }
 
