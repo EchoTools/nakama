@@ -390,20 +390,54 @@ func (c *DiscordIntegrator) syncMember(ctx context.Context, logger *zap.Logger, 
 
 	// Update headset linked role
 	if r := group.RoleMap.AccountLinked; r != "" {
-		if len(evrAccount.Devices) == 0 {
-			if slices.Contains(member.Roles, r) {
-				// Remove the role
-				if err := c.dg.GuildMemberRoleRemove(guildID, discordID, r); err != nil {
-					logger.Warn("Error removing headset-linked role from member", zap.String("role", r), zap.Error(err))
-				}
+		if evrAccount.IsLinked() && !evrAccount.IsDisabled() && !slices.Contains(member.Roles, r) {
+			// Assign the role
+			if err := c.dg.GuildMemberRoleAdd(guildID, discordID, r); err != nil {
+				logger.Warn("Error adding headset-linked role to member", zap.String("role", r), zap.Error(err))
 			}
-		} else {
-			if !slices.Contains(member.Roles, r) {
-				// Assign the role
-				if err := c.dg.GuildMemberRoleAdd(guildID, discordID, r); err != nil {
-					logger.Warn("Error adding headset-linked role to member", zap.String("role", r), zap.Error(err))
-				}
+		} else if slices.Contains(member.Roles, r) {
+			// Remove the role
+			if err := c.dg.GuildMemberRoleRemove(guildID, discordID, r); err != nil {
+				logger.Warn("Error removing headset-linked role from member", zap.String("role", r), zap.Error(err))
 			}
+		}
+	}
+
+	return nil
+}
+
+func (d *DiscordIntegrator) updateLinkStatus(ctx context.Context, discordID string) error {
+	userID := d.DiscordIDToUserID(discordID)
+	if userID == "" {
+		return fmt.Errorf("failed to get user ID by discord ID")
+	}
+	account, err := d.nk.AccountGetId(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("error getting account: %w", err)
+	}
+
+	evrAccount, err := NewEVRAccount(account)
+	if err != nil {
+		return fmt.Errorf("error building evr account: %w", err)
+	}
+	// Get the GroupID from the user's metadata
+	guildGroups, err := GuildUserGroupsList(ctx, d.nk, d.guildGroupRegistry, userID)
+	if err != nil {
+		return fmt.Errorf("failed to get guild group memberships: %w", err)
+	}
+
+	isLinked := evrAccount.IsLinked()
+
+	for gid, g := range guildGroups {
+		member, err := d.GuildMember(gid, discordID)
+		if err != nil {
+			d.logger.Warn("Error getting guild member", zap.String("guild_id", gid), zap.String("discord_id", discordID), zap.Error(err))
+			continue
+		}
+		// If the guild has a linked role, update it.
+		if err := d.updateMemberRole(member, g.RoleMap.AccountLinked, isLinked); err != nil {
+			d.logger.Warn("Error updating headset-linked role", zap.String("discord_id", discordID), zap.String("guild_id", gid), zap.String("role", g.RoleMap.AccountLinked), zap.Error(err))
+			continue
 		}
 	}
 
@@ -609,7 +643,7 @@ func (d *DiscordIntegrator) handleMemberUpdate(logger *zap.Logger, s *discordgo.
 	}
 
 	// Ensure the user is in the guild group
-	account, err := d.nk.AccountGetId(ctx, d.DiscordIDToUserID(e.Member.User.ID))
+	account, err := d.nk.AccountGetId(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("error getting account: %w", err)
 	}
@@ -619,7 +653,7 @@ func (d *DiscordIntegrator) handleMemberUpdate(logger *zap.Logger, s *discordgo.
 		return fmt.Errorf("error building evr account: %w", err)
 	}
 
-	groups, err := GuildUserGroupsList(ctx, d.nk, d.guildGroupRegistry, d.DiscordIDToUserID(e.Member.User.ID))
+	groups, err := GuildUserGroupsList(ctx, d.nk, d.guildGroupRegistry, userID)
 	if err != nil {
 		return fmt.Errorf("error getting user guild groups: %w", err)
 	}
@@ -632,7 +666,7 @@ func (d *DiscordIntegrator) handleMemberUpdate(logger *zap.Logger, s *discordgo.
 		}
 
 		// Get the group data again
-		groups, err = GuildUserGroupsList(ctx, d.nk, d.guildGroupRegistry, d.DiscordIDToUserID(e.Member.User.ID))
+		groups, err = GuildUserGroupsList(ctx, d.nk, d.guildGroupRegistry, userID)
 		if err != nil {
 			return fmt.Errorf("error getting user guild groups: %w", err)
 		}
@@ -646,23 +680,8 @@ func (d *DiscordIntegrator) handleMemberUpdate(logger *zap.Logger, s *discordgo.
 	isActive := evrAccount.IsLinked() && !evrAccount.IsDisabled()
 
 	// If the guild has a linked role, update it.
-	if r := group.RoleMap.AccountLinked; r != "" {
-
-		if isActive {
-			if !slices.Contains(e.Member.Roles, r) {
-				// Assign the role
-				if err := d.dg.GuildMemberRoleAdd(e.GuildID, e.Member.User.ID, r); err != nil {
-					logger.Warn("Error adding headset-linked role to member", zap.String("role", r), zap.Error(err))
-				}
-			}
-		} else {
-			if slices.Contains(e.Member.Roles, r) {
-				// Remove the role
-				if err := d.dg.GuildMemberRoleRemove(e.GuildID, e.Member.User.ID, r); err != nil {
-					logger.Warn("Error removing headset-linked role from member", zap.String("role", r), zap.Error(err))
-				}
-			}
-		}
+	if err := d.updateMemberRole(e.Member, group.RoleMap.AccountLinked, isActive); err != nil {
+		logger.Warn("Error updating headset-linked role", zap.String("role", group.RoleMap.AccountLinked), zap.Error(err))
 	}
 
 	// Update the role cache
@@ -711,6 +730,22 @@ func (d *DiscordIntegrator) handleMemberUpdate(logger *zap.Logger, s *discordgo.
 
 	logger.Info("Member Updated", zap.Any("member", e))
 
+	return nil
+}
+
+func (d *DiscordIntegrator) updateMemberRole(member *discordgo.Member, roleID string, hasRole bool) error {
+	if roleID == "" || member == nil {
+		return nil
+	}
+	if hasRole && !slices.Contains(member.Roles, roleID) {
+		if err := d.dg.GuildMemberRoleAdd(member.GuildID, member.User.ID, roleID); err != nil {
+			return fmt.Errorf("error adding role to member: %w", err)
+		}
+	} else if !hasRole && slices.Contains(member.Roles, roleID) {
+		if err := d.dg.GuildMemberRoleRemove(member.GuildID, member.User.ID, roleID); err != nil {
+			return fmt.Errorf("error removing role from member: %w", err)
+		}
+	}
 	return nil
 }
 

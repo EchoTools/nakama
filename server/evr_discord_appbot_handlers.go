@@ -263,6 +263,10 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(logger runtime.Logger,
 			return fmt.Errorf("failed to unlink device ID: %w", err)
 		}
 
+		if err := d.cache.updateLinkStatus(ctx, i.Member.User.ID); err != nil {
+			return fmt.Errorf("failed to update link status: %w", err)
+		}
+
 		// Modify the interaction response
 		if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
