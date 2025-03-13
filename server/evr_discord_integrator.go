@@ -93,15 +93,12 @@ func (c *DiscordIntegrator) Start() {
 			// Log the queue length every time it empties
 			switch len(c.queueCh) {
 			case 0:
-				if queueEmpty {
-					break
+				if !queueEmpty {
+					if maxQueueLength > 0 {
+						logger.Debug("Sync queue is empty", zap.Duration("uptime", time.Since(started)), zap.Int("max_queue_len", maxQueueLength), zap.Int("processed", processed))
+					}
+					queueEmpty = true
 				}
-
-				if maxQueueLength > 0 {
-					logger.Debug("Sync queue is empty", zap.Duration("uptime", time.Since(started)), zap.Int("max_queue_len", maxQueueLength), zap.Int("processed", processed))
-				}
-				queueEmpty = true
-
 			case 1:
 				if queueEmpty {
 					queueEmpty = false
@@ -117,6 +114,7 @@ func (c *DiscordIntegrator) Start() {
 
 			select {
 			case <-c.ctx.Done():
+				logger.Warn("Stopping Discord integrator syncing")
 				return
 			case entry := <-c.queueCh:
 				logger := logger.With(
