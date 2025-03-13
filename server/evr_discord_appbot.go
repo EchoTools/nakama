@@ -2140,7 +2140,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return errors.New("player not found")
 			}
 
-			callerGuildGroups := make(map[string]*GuildGroup)
 			callerGuildGroups, err := GuildUserGroupsList(ctx, d.nk, d.guildGroupRegistry, callerUserID)
 			if err != nil {
 				return fmt.Errorf("failed to get guild groups: %w", err)
