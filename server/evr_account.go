@@ -100,7 +100,12 @@ func (e EVRAccount) IsDisabled() bool {
 }
 
 func (e EVRAccount) IsLinked() bool {
-	return len(e.Devices) > 0
+	for _, d := range e.Devices {
+		if _, err := evr.ParseEvrId(d.Id); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func (e EVRAccount) XPIDs() []evr.EvrId {

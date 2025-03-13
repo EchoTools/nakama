@@ -1501,6 +1501,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			content := "Your headset has been unlinked. Restart EchoVR."
 			d.cache.QueueSyncMember(i.GuildID, user.ID)
 
+			if err := d.cache.updateLinkStatus(ctx, user.ID); err != nil {
+				return fmt.Errorf("failed to update link status: %w", err)
+			}
+
 			return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
@@ -3496,7 +3500,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					// User is typing a custom device name
 					for i := 0; i < len(devices); i++ {
 						if !strings.Contains(strings.ToLower(devices[i]), strings.ToLower(data.Options[0].StringValue())) {
-							devices = append(devices[:i], devices[i+1:]...)
+							devices = slices.Delete(devices, i, i+1)
 							i--
 						}
 					}
