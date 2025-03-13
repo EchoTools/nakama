@@ -3,59 +3,44 @@ package server
 type Division int
 
 const (
-	DivisionMaster Division = iota
-	DivisionDiamond
-	DivisionPlatinum
-	DivisionGold
-	DivisionSilver
+	DivisionGreen Division = iota
 	DivisionBronze
-	DivisionGreen
+	DivisionSilver
+	DivisionGold
+	DivisionPlatinum
+	DivisionDiamond
+	DivisionMaster
 )
 
 func (d Division) String() string {
-	return [...]string{"master", "diamond", "platinum", "gold", "silver", "bronze", "green"}[d]
+	return [...]string{"green", "bronze", "silver", "gold", "platinum", "diamond", "master"}[d]
 }
 
-func (d Division) Value() int {
-	return int(d)
+func (d Division) MarshalText() ([]byte, error) {
+	return []byte(d.String()), nil
 }
 
-func DivisionFromValue(value int) Division {
-	switch value {
-	case 0:
-		return DivisionMaster
-	case 1:
-		return DivisionDiamond
-	case 2:
-		return DivisionPlatinum
-	case 3:
-		return DivisionGold
-	case 4:
-		return DivisionSilver
-	case 5:
-		return DivisionBronze
-	case 6:
-		return DivisionGreen
-	default:
-		return DivisionGreen
-	}
+func (d *Division) UnmarshalText(text []byte) error {
+	*d = DivisionFromName(string(text))
+	return nil
 }
+
 func DivisionFromName(name string) Division {
 	switch name {
-	case "master":
-		return DivisionMaster
-	case "diamond":
-		return DivisionDiamond
-	case "platinum":
-		return DivisionPlatinum
-	case "gold":
-		return DivisionGold
-	case "silver":
-		return DivisionSilver
-	case "bronze":
-		return DivisionBronze
 	case "green":
 		return DivisionGreen
+	case "bronze":
+		return DivisionBronze
+	case "silver":
+		return DivisionSilver
+	case "gold":
+		return DivisionGold
+	case "platinum":
+		return DivisionPlatinum
+	case "diamond":
+		return DivisionDiamond
+	case "master":
+		return DivisionMaster
 	default:
 		return DivisionGreen
 	}
