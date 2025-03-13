@@ -395,7 +395,6 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Logger, userID, guildID, region string, mode, level evr.Symbol, startTime time.Time) (l *MatchLabel, latencyMillis int, err error) {
 
 	// Find a parking match to prepare
-
 	groupID := d.cache.GuildIDToGroupID(guildID)
 
 	guildGroups, err := GuildUserGroupsList(ctx, d.nk, d.guildGroupRegistry, userID)
@@ -427,7 +426,7 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		return nil, 0, fmt.Errorf("failed to load latency history: %w", err)
 	}
 
-	extIPs := latencyHistory.AverageRTTs(true, true)
+	extIPs := latencyHistory.AverageRTTs(true, false)
 
 	settings := &MatchSettings{
 		Mode:      mode,
