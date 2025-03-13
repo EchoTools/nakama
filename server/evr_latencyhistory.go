@@ -64,23 +64,19 @@ func (h LatencyHistory) LatestRTTs() map[string]int {
 
 // Return the average rtt for a single external IP
 func (h LatencyHistory) AverageRTT(extIP string, roundRTT bool) int {
-	if history, ok := h[extIP]; ok {
-		if len(history) == 0 {
-			return 999
-		}
+	if history, ok := h[extIP]; !ok || len(history) == 0 {
+		return 0
+	} else {
 		average := 0
 		for _, l := range history {
 			average += l
 		}
 		average /= len(history)
-
 		if roundRTT {
 			average = (average + 5) / 10 * 10
 		}
-
 		return average
 	}
-	return 999
 }
 
 // RTTs by external IP
