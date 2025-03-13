@@ -126,11 +126,11 @@ type LeaderboardHaystackRecord struct {
 }
 
 type LeaderboardHaystackResponse struct {
-	PrevCursor   string                       `json:"prev_cursor"`
-	NextCursor   string                       `json:"next_cursor"`
-	RankCount    int64                        `json:"rank_count,omitempty"`
-	OwnerRecords []*LeaderboardHaystackRecord `json:"owner_records"`
-	Records      []*LeaderboardHaystackRecord `json:"records"`
+	PrevCursor   string                      `json:"prev_cursor"`
+	NextCursor   string                      `json:"next_cursor"`
+	RankCount    int64                       `json:"rank_count,omitempty"`
+	OwnerRecords []LeaderboardHaystackRecord `json:"owner_records"`
+	Records      []LeaderboardHaystackRecord `json:"records"`
 }
 
 func (h *RPCHandler) LeaderboardHaystackRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
@@ -161,9 +161,9 @@ func (h *RPCHandler) LeaderboardHaystackRPC(ctx context.Context, logger runtime.
 		return "", runtime.NewError("No game mode specified", StatusInvalidArgument)
 	}
 
-	var meta LeaderboardMeta
+	var leaderboardID string
 	if request.LeaderboardID != "" {
-		meta, err = LeaderboardMetaFromID(request.LeaderboardID)
+		meta, err := LeaderboardMetaFromID(request.LeaderboardID)
 		if err != nil {
 			return "", fmt.Errorf("failed to parse leaderboard ID: %w", err)
 		}
@@ -172,6 +172,7 @@ func (h *RPCHandler) LeaderboardHaystackRPC(ctx context.Context, logger runtime.
 		request.Mode = meta.Mode
 		request.StatName = meta.StatName
 		request.ResetSchedule = meta.ResetSchedule
+		leaderboardID = meta.ID()
 
 	} else {
 
@@ -189,54 +190,36 @@ func (h *RPCHandler) LeaderboardHaystackRPC(ctx context.Context, logger runtime.
 			request.Mode = evr.ModeArenaPublic
 		}
 
-		meta = LeaderboardMeta{
+		leaderboardID = LeaderboardMeta{
 			GroupID:       request.GroupID,
 			Mode:          request.Mode,
 			StatName:      request.StatName,
 			ResetSchedule: request.ResetSchedule,
-		}
+		}.ID()
 	}
 
-	id := meta.ID()
-
-	if request.Limit < 1 || request.Limit > 10 {
+	// Set the default limit if not provided.
+	if request.Limit < 1 || request.Limit > 100 {
 		request.Limit = 10
 	}
 
-	var (
-		response = &LeaderboardHaystackResponse{
-			OwnerRecords: make([]*LeaderboardHaystackRecord, 0),
-			Records:      make([]*LeaderboardHaystackRecord, 0),
-		}
-	)
+	var ()
 
 	// Get the records around the user
-	recordsList, err := nk.LeaderboardRecordsHaystack(ctx, id, request.OwnerID, request.Limit, request.Cursor, 0)
+	recordsList, err := nk.LeaderboardRecordsHaystack(ctx, leaderboardID, request.OwnerID, request.Limit, request.Cursor, 0)
 	if err != nil {
 		return "", fmt.Errorf("failed to get leaderboard haystack records: %w", err)
 	}
-
-	response.RankCount = recordsList.RankCount
-	response.PrevCursor = recordsList.PrevCursor
-	response.NextCursor = recordsList.NextCursor
-
-	for _, r := range recordsList.OwnerRecords {
-		response.OwnerRecords = append(response.OwnerRecords, &LeaderboardHaystackRecord{
-			OwnerID:     r.OwnerId,
-			DiscordID:   h.UserIDToDiscordID(r.OwnerId),
-			DisplayName: r.Username.Value,
-			NumScore:    r.NumScore,
-			Score:       ScoreToValue(r.Score, r.Subscore),
-			Rank:        r.Rank,
-			CreateTime:  r.CreateTime.GetSeconds(),
-			UpdateTime:  r.CreateTime.GetSeconds(),
-			ExpiryTime:  r.ExpiryTime.GetSeconds(),
-			Metadata:    json.RawMessage(r.Metadata),
-		})
+	response := &LeaderboardHaystackResponse{
+		OwnerRecords: make([]LeaderboardHaystackRecord, len(recordsList.OwnerRecords)),
+		Records:      make([]LeaderboardHaystackRecord, len(recordsList.Records)),
+		RankCount:    recordsList.RankCount,
+		PrevCursor:   recordsList.PrevCursor,
+		NextCursor:   recordsList.NextCursor,
 	}
 
-	for _, r := range recordsList.Records {
-		response.Records = append(response.Records, &LeaderboardHaystackRecord{
+	for i, r := range recordsList.OwnerRecords {
+		response.OwnerRecords[i] = LeaderboardHaystackRecord{
 			OwnerID:     r.OwnerId,
 			DiscordID:   h.UserIDToDiscordID(r.OwnerId),
 			DisplayName: r.Username.Value,
@@ -247,7 +230,22 @@ func (h *RPCHandler) LeaderboardHaystackRPC(ctx context.Context, logger runtime.
 			UpdateTime:  r.CreateTime.GetSeconds(),
 			ExpiryTime:  r.ExpiryTime.GetSeconds(),
 			Metadata:    json.RawMessage(r.Metadata),
-		})
+		}
+	}
+
+	for i, r := range recordsList.Records {
+		response.Records[i] = LeaderboardHaystackRecord{
+			OwnerID:     r.OwnerId,
+			DiscordID:   h.UserIDToDiscordID(r.OwnerId),
+			DisplayName: r.Username.Value,
+			NumScore:    r.NumScore,
+			Score:       ScoreToValue(r.Score, r.Subscore),
+			Rank:        r.Rank,
+			CreateTime:  r.CreateTime.GetSeconds(),
+			UpdateTime:  r.CreateTime.GetSeconds(),
+			ExpiryTime:  r.ExpiryTime.GetSeconds(),
+			Metadata:    json.RawMessage(r.Metadata),
+		}
 	}
 
 	data, err := json.MarshalIndent(response, "", "  ")
