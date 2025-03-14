@@ -10,6 +10,8 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"github.com/intinig/go-openskill/rating"
+	"github.com/intinig/go-openskill/types"
 )
 
 type slotReservation struct {
@@ -380,10 +382,15 @@ func (s *MatchLabel) rebuildCache() {
 
 		switch s.Mode {
 		case evr.ModeArenaPublic:
+			teamRatings := make([]types.Team, 2)
 
 			teams := make(map[TeamIndex]RatedTeam, 2)
 			for _, p := range s.Players {
+				if p.Team != BlueTeam && p.Team != OrangeTeam {
+					continue
+				}
 				teams[p.Team] = append(teams[p.Team], p.Rating())
+				teamRatings[p.Team] = append(teamRatings[p.Team], p.Rating())
 			}
 
 			// Calculate the average rank percentile for each team
@@ -401,11 +408,13 @@ func (s *MatchLabel) rebuildCache() {
 				}
 			}
 
+			winPredictions := rating.PredictWin(teamRatings, nil)
 			meta := make(map[TeamIndex]TeamMetadata, 2)
 			for _, t := range [...]TeamIndex{BlueTeam, OrangeTeam} {
 				meta[t] = TeamMetadata{
 					Strength:              teams[t].Strength(),
 					RankPercentileAverage: rankPercentileAverages[t],
+					PredictWin:            winPredictions[t],
 				}
 			}
 
