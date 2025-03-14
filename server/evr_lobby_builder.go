@@ -28,13 +28,12 @@ type LobbyBuilder struct {
 	sessionRegistry SessionRegistry
 	matchRegistry   MatchRegistry
 	tracker         Tracker
-	profileRegistry *ProfileCache
 	metrics         Metrics
 
 	mapQueue map[evr.Symbol][]evr.Symbol // map[mode][]level
 }
 
-func NewLobbyBuilder(logger *zap.Logger, nk runtime.NakamaModule, sessionRegistry SessionRegistry, matchRegistry MatchRegistry, tracker Tracker, metrics Metrics, profileRegistry *ProfileCache) *LobbyBuilder {
+func NewLobbyBuilder(logger *zap.Logger, nk runtime.NakamaModule, sessionRegistry SessionRegistry, matchRegistry MatchRegistry, tracker Tracker, metrics Metrics) *LobbyBuilder {
 	logger = logger.With(zap.String("module", "lobby_builder"))
 
 	return &LobbyBuilder{
@@ -45,7 +44,6 @@ func NewLobbyBuilder(logger *zap.Logger, nk runtime.NakamaModule, sessionRegistr
 		matchRegistry:   matchRegistry,
 		tracker:         tracker,
 		metrics:         metrics,
-		profileRegistry: profileRegistry,
 
 		mapQueue: make(map[evr.Symbol][]evr.Symbol),
 	}
@@ -54,7 +52,7 @@ func NewLobbyBuilder(logger *zap.Logger, nk runtime.NakamaModule, sessionRegistr
 func (b *LobbyBuilder) handleMatchedEntries(entries [][]*MatchmakerEntry) {
 	// build matches one at a time.
 	for _, entrants := range entries {
-		if err := b.buildMatch(b.logger, entrants); err != nil {
+		if _, err := b.buildMatch(b.logger, entrants); err != nil {
 			b.logger.With(zap.Any("entries", entries)).Error("Failed to build match", zap.Error(err))
 			return
 		}
@@ -146,7 +144,7 @@ func (b *LobbyBuilder) groupByTicket(entrants []*MatchmakerEntry) [][]*Matchmake
 	return parties
 }
 
-func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntry) (err error) {
+func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntry) (matchID *MatchID, err error) {
 	// Build matches one at a time.
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -157,15 +155,10 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 	logger.Debug("Building match", zap.Any("entrants", entrants))
 
 	if len(entrants) < 2 {
-		return fmt.Errorf("not enough entrants to build a match")
+		return nil, fmt.Errorf("not enough entrants to build a match")
 	}
 
 	groupID, err := b.groupIDFromEntrants(entrants)
-
-	matchmakerEntrants := make([]runtime.MatchmakerEntry, 0, len(entrants))
-	for _, e := range entrants {
-		matchmakerEntrants = append(matchmakerEntrants, e)
-	}
 
 	// Divide the entrants into two equal-sized teams
 	teamSize := len(entrants) / 2
@@ -222,7 +215,7 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 
 	modestr, ok := entrants[0].StringProperties["game_mode"]
 	if !ok {
-		return fmt.Errorf("missing mode property")
+		return nil, fmt.Errorf("missing mode property")
 	}
 
 	mode := evr.ToSymbol(modestr)
@@ -242,9 +235,9 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return nil, ctx.Err()
 		case <-timeout:
-			return ErrMatchmakingNoAvailableServers
+			return nil, ErrMatchmakingNoAvailableServers
 		default:
 		}
 
@@ -264,7 +257,7 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 
 	serverSession := b.sessionRegistry.Get(label.GameServer.SessionID)
 	if serverSession == nil {
-		return fmt.Errorf("failed to get server session")
+		return nil, fmt.Errorf("failed to get server session")
 	}
 
 	successful := make([]*EvrMatchPresence, 0, len(entrants))
@@ -315,7 +308,7 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 	b.metrics.CustomCounter("lobby_error_match_made", tags, int64(len(errored)))
 
 	logger.Info("Match built.", zap.String("mid", label.ID.UUID.String()), zap.Any("teams", teams), zap.Any("successful", successful), zap.Any("errored", errored), zap.Any("game_server", label.GameServer))
-	return nil
+	return &label.ID, nil
 }
 
 func (b *LobbyBuilder) groupIDFromEntrants(entrants []*MatchmakerEntry) (uuid.UUID, error) {

@@ -152,17 +152,19 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 
 	cycle := 0
 	for {
-
+		previousTicketConfig := ticketConfig
 		// Reduce the matchmaking precision after the first cycle
 		if cycle > 0 {
 			ticketConfig.IncludeRankRange = false
 			ticketConfig.IncludeEarlyQuitPenalty = false
 		}
 
-		if ticket, err := p.addTicket(ctx, logger, session, lobbyParams, lobbyGroup, ticketConfig); err != nil {
-			return fmt.Errorf("failed to add ticket: %w", err)
-		} else {
-			tickets = append(tickets, ticket)
+		if previousTicketConfig != ticketConfig {
+			if ticket, err := p.addTicket(ctx, logger, session, lobbyParams, lobbyGroup, ticketConfig); err != nil {
+				return fmt.Errorf("failed to add ticket: %w", err)
+			} else {
+				tickets = append(tickets, ticket)
+			}
 		}
 
 		select {

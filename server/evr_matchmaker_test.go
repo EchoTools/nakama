@@ -127,7 +127,7 @@ func testEvrMatchmakerOverrideFn(ctx context.Context, candidateMatches [][]*Matc
 
 	globalSettings := &GlobalSettingsData{}
 	FixDefaultServiceSettings(globalSettings)
-	filteredCandidates, returnedEntries, _ := sbmm.processPotentialMatches(runtimeCombinations, globalSettings)
+	filteredCandidates, returnedEntries, _ := sbmm.processPotentialMatches(runtimeCombinations)
 	log.Printf("Processing %d candidate matches in %s", len(runtimeCombinations), time.Since(startTime))
 	_ = filteredCandidates
 	combinations := make([][]*MatchmakerEntry, len(returnedEntries))
@@ -448,7 +448,7 @@ func TestOverrideFn(t *testing.T) {
 	startTime := time.Now()
 	globalSettings := &GlobalSettingsData{}
 	FixDefaultServiceSettings(globalSettings)
-	_, returnedEntries, _ := sbmm.processPotentialMatches(runtimeCombinations, globalSettings)
+	_, returnedEntries, _ := sbmm.processPotentialMatches(runtimeCombinations)
 	t.Logf("Matched %d candidate matches in %s", len(returnedEntries), time.Since(startTime))
 
 	t.Errorf("autofail")
@@ -798,6 +798,157 @@ func TestCharacterizationMatchmaker1v1(t *testing.T) {
 	t.Errorf("autofail")
 }
 
+func TestCharacterizationMatchmaker(t *testing.T) {
+
+	var (
+		stateFilename = "../_local/matchmaker-state.json"
+	)
+	state := MatchmakerStateResponse{}
+
+	// Load the candidate data from the json file
+	reader, err := os.Open(stateFilename)
+	if err != nil {
+		t.Error("Error opening file")
+	}
+
+	// read in the file
+	decoder := json.NewDecoder(reader)
+	err = decoder.Decode(&state)
+	if err != nil {
+		t.Errorf("Error decoding file: %v", err)
+	}
+
+	entries := make([]runtime.MatchmakerEntry, 0)
+	for _, e := range state.Index {
+		for _, p := range e.Presences {
+			properties := make(map[string]any)
+			for k, v := range e.StringProperties {
+				properties[k] = v
+			}
+			for k, v := range e.NumericProperties {
+				properties[k] = v
+			}
+
+			e := &MatchmakerEntry{
+				Ticket:            e.Ticket,
+				Presence:          p,
+				Properties:        properties,
+				PartyId:           e.PartyId,
+				CreateTime:        e.CreatedAt,
+				StringProperties:  e.StringProperties,
+				NumericProperties: e.NumericProperties,
+			}
+
+			entries = append(entries, e)
+		}
+	}
+
+	t.Logf("Entry count: %d", len(entries))
+
+	playerNames := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		playerNames = append(playerNames, entry.GetPresence().GetUsername())
+	}
+
+	t.Logf("Players: %v", strings.Join(playerNames, ", "))
+
+	// Find parties in the entries
+	parties := make(map[string][]runtime.MatchmakerEntry)
+	for i := 0; i < len(entries); i++ {
+		if entries[i].GetPartyId() != "" {
+			if _, ok := parties[entries[i].GetPartyId()]; !ok {
+				parties[entries[i].GetPartyId()] = make([]runtime.MatchmakerEntry, 0)
+			}
+			parties[entries[i].GetPartyId()] = append(parties[entries[i].GetPartyId()], entries[i])
+		}
+	}
+	t.Logf("Found %d parties and %d solo players", len(parties), len(entries))
+
+	var (
+		consoleLogger     = loggerForTest(t)
+		logger            = NewRuntimeGoLogger(consoleLogger)
+		sbmm              = NewSkillBasedMatchmaker()
+		candidates        = allCombinations(entries, 8)
+		matchedPlayersSet = make(map[string]struct{}, 0)
+		count             = 0
+	)
+
+	matches := sbmm.EvrMatchmakerFn(context.Background(), logger, nil, nil, candidates)
+
+	for _, match := range matches {
+
+		// Create a map of partyID's to alpha numeric characters
+		partyMap := make(map[string]string)
+		partyMap[""] = "-"
+		for _, entry := range entries {
+			if _, ok := partyMap[entry.GetPartyId()]; ok {
+				continue
+			}
+			partyMap[entry.GetPartyId()] = string('A' + rune(len(partyMap)))
+		}
+
+		// get the players in the match
+		playerIds := make([]string, 0, len(match))
+		for _, p := range match {
+			matchedPlayersSet[p.GetPresence().GetUsername()] = struct{}{}
+			playerName := fmt.Sprintf("%s:%s", partyMap[match[0].GetPartyId()], p.GetPresence().GetUsername())
+			playerIds = append(playerIds, playerName)
+		}
+
+		t.Logf("  Match %d: %s", count, strings.Join(playerIds, ", "))
+		count++
+	}
+	// count the total matches
+	t.Logf("Total matches: %d", count)
+	for _, m := range matches {
+		matchUsernames := make([]string, 0, len(m))
+		for _, p := range m {
+			matchUsernames = append(matchUsernames, p.GetPresence().GetUsername())
+		}
+		slices.Sort(matchUsernames)
+		t.Logf("Match: %v", matchUsernames)
+	}
+
+	unmatched := make([]runtime.MatchmakerEntry, 0, len(entries))
+
+	for _, entry := range entries {
+		if _, ok := matchedPlayersSet[entry.GetPresence().GetUsername()]; !ok {
+			unmatched = append(unmatched, entry)
+
+		}
+	}
+
+	t.Logf("Unmatched count: %d", len(unmatched))
+	for _, e := range unmatched {
+		entryJson, _ := json.MarshalIndent(e, "", "  ")
+		t.Logf("Unmatched: %s", string(entryJson))
+	}
+
+	t.Errorf("autofail")
+}
+
+// Create all combinations of the given items
+func allCombinations[T any](items []T, size int) [][]T {
+	if size == 0 || len(items) < size {
+		return nil
+	}
+	if size == 1 {
+		result := make([][]T, len(items))
+		for i, item := range items {
+			result[i] = []T{item}
+		}
+		return result
+	}
+
+	var result [][]T
+	for i := 0; i <= len(items)-size; i++ {
+		for _, combo := range allCombinations(items[i+1:], size-1) {
+			result = append(result, append([]T{items[i]}, combo...))
+		}
+	}
+	return result
+}
+
 func TestFilterWithinMaxRTT(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -970,7 +1121,7 @@ func BenchmarkPredictOutcomes(b *testing.B) {
 	m := NewSkillBasedMatchmaker()
 	for b.Loop() {
 		b.ReportMetric(float64(len(candidates)), "candidates")
-		predictions := m.predictOutcomes(candidates, 0.5)
+		predictions := m.predictOutcomes(candidates)
 		b.ReportMetric(float64(len(predictions)), "predictions")
 	}
 }

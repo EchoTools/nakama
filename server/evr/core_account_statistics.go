@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -508,6 +507,17 @@ func statisticMarshalJSON[T int64 | float64 | float32](op string, cnt int64, val
 	return []byte(fmt.Sprintf("{\"val\":%v,\"op\":\"%s\",\"cnt\":%d}", float32(val), op, cnt)), nil
 }
 
+func Float64ToInt64Pair(f float64) (int64, int64) {
+	whole := int64(f)                        // Extract whole number part
+	fraction := f - float64(whole)           // Extract fractional part
+	scaledFraction := int64(fraction * 1e18) // Scale to preserve precision
+	return whole, scaledFraction
+}
+
+func Int64PairToFloat64(whole, fraction int64) float64 {
+	return float64(whole) + float64(fraction)/1e18
+}
+
 type Statistics interface {
 	CalculateFields()
 }
@@ -580,8 +590,7 @@ func (s *FloatStatistic) SetValue(v float64) {
 }
 
 func (s *FloatStatistic) FromScore(score, subscore int64) {
-	v, _ := strconv.ParseFloat(fmt.Sprintf("%d.%d", score, subscore), 32)
-	s.Value = float64(v)
+	s.Value = Int64PairToFloat64(score, subscore)
 }
 
 type StatisticIntegerIncrement struct {

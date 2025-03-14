@@ -3,7 +3,10 @@ package server
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"log"
 	"math"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -58,19 +61,21 @@ func NewSkillBasedMatchmaker() *SkillBasedMatchmaker {
 
 // Function to be used as a matchmaker function in Nakama (RegisterMatchmakerOverride)
 func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, candidates [][]runtime.MatchmakerEntry) [][]runtime.MatchmakerEntry {
+	if len(candidates) == 0 || len(candidates[0]) == 0 {
+		logger.Error("No candidates found. Matchmaker cannot run.")
+		return nil
+	}
 
 	startTime := time.Now()
 	defer func() {
+		if nk == nil {
+			return
+		}
 		nk.MetricsGaugeSet("matchmaker_evr_candidate_count", nil, float64(len(candidates)))
 
 		// Divide the time by the number of candidates
 		nk.MetricsTimerRecord("matchmaker_evr_per_candidate", nil, time.Since(startTime)/time.Duration(len(candidates)))
 	}()
-
-	if len(candidates) == 0 || len(candidates[0]) == 0 {
-		logger.Error("No candidates found. Matchmaker cannot run.")
-		return nil
-	}
 
 	groupID, ok := candidates[0][0].GetProperties()["group_id"].(string)
 	if !ok || groupID == "" {
@@ -85,13 +90,12 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 	}
 
 	var (
-		matches        [][]runtime.MatchmakerEntry
-		filterCounts   map[string]int
-		originalCount  = len(candidates)
-		globalSettings = ServiceSettings()
+		matches       [][]runtime.MatchmakerEntry
+		filterCounts  map[string]int
+		originalCount = len(candidates)
 	)
 
-	candidates, matches, filterCounts = m.processPotentialMatches(candidates, globalSettings)
+	candidates, matches, filterCounts = m.processPotentialMatches(candidates)
 
 	// Extract all players from the candidates
 	playerSet := make(map[string]struct{}, 0)
@@ -139,7 +143,7 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 	return matches
 }
 
-func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.MatchmakerEntry, globalSettings *GlobalSettingsData) ([][]runtime.MatchmakerEntry, [][]runtime.MatchmakerEntry, map[string]int) {
+func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, [][]runtime.MatchmakerEntry, map[string]int) {
 
 	// Write the candidates to a json filed called /tmp/candidates.json
 	filterCounts := make(map[string]int)
@@ -154,7 +158,8 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.Ma
 	filterCounts["max_rtt"] = m.filterWithinMaxRTT(candidates)
 
 	// Create a list of balanced matches with predictions
-	predictions := m.predictOutcomes(candidates, globalSettings.Matchmaking.RankPercentile.Default)
+
+	predictions := m.predictOutcomes(candidates)
 
 	slices.SortStableFunc(predictions, func(a, b PredictedMatch) int {
 		if a.Size != b.Size {
@@ -268,62 +273,7 @@ OuterLoop:
 	return filteredCount
 }
 
-func (m *SkillBasedMatchmaker) createBalancedMatch(parties []*MatchmakingTicket, teamSize int) [2][5]*MatchmakingTicket {
-
-	// Sort the groups by party size, largest first, then by strength (descending)
-	slices.SortStableFunc(parties, func(a, b *MatchmakingTicket) int {
-		if a.Length != b.Length {
-			return b.Length - a.Length
-		}
-		return int(b.Strength - a.Strength)
-	})
-
-	teams := [2][5]*MatchmakingTicket{}
-
-	var lenA, lenB int
-	// Organize groups onto teams, balancing by strength
-	var strengthA, strengthB float64
-	for _, p := range parties {
-		if lenA+p.Length <= teamSize && (lenB+p.Length > teamSize || strengthA <= strengthB) {
-			teams[0][lenA] = p
-			strengthA += p.Strength
-			lenA += p.Length
-		} else if lenB+p.Length <= teamSize {
-			teams[1][lenB] = p
-			strengthB += p.Strength
-			lenB += p.Length
-		}
-	}
-
-	// Sort so that team1 (blue) is the stronger team
-	if strengthA < strengthB {
-		teams[0], teams[1] = teams[1], teams[0]
-	}
-
-	return teams
-}
-
-type MatchmakingPartyMember struct {
-	Entry          *MatchmakerEntry
-	Rating         types.Rating
-	RankPercentile float64
-}
-
-type MatchmakingTicket struct {
-	Members               []MatchmakingPartyMember
-	Strength              float64
-	Length                int
-	Timestamp             float64
-	RankPercentileAverage float64
-}
-
-type MatchmakingTeam struct {
-	Parties   []*MatchmakingTicket
-	Strength  float64
-	Timestamp float64
-}
-
-func (m *SkillBasedMatchmaker) predictOutcomes(candidates [][]runtime.MatchmakerEntry, defaultRankPercentile float64) []PredictedMatch {
+func (m *SkillBasedMatchmaker) predictOutcomes(candidates [][]runtime.MatchmakerEntry) []PredictedMatch {
 
 	// count the number of valid candidates
 	var validCandidates int
@@ -333,17 +283,18 @@ func (m *SkillBasedMatchmaker) predictOutcomes(candidates [][]runtime.Matchmaker
 		}
 	}
 
-	predictions := make([]PredictedMatch, 0, validCandidates)
-
 	type player struct {
 		entry   runtime.MatchmakerEntry
 		rating  types.Rating
 		ordinal float64
 	}
 
-	playersBySessionIDbyTicketID := make(map[string]map[string]player, 0)
-	ticketIDs := make([]string, 0, 8)
-	ticketStrengths := make(map[string]float64, 10)
+	var (
+		predictions                  = make([]PredictedMatch, 0, validCandidates)
+		playersBySessionIDbyTicketID = make(map[string]map[string]player, 0)
+		ticketIDs                    = make([]string, 0, 8)
+		ticketStrengths              = make(map[string]float64, 10)
+	)
 
 	for _, c := range candidates {
 		if c == nil {
@@ -351,34 +302,47 @@ func (m *SkillBasedMatchmaker) predictOutcomes(candidates [][]runtime.Matchmaker
 		}
 
 		candidateTicketSet := make(map[string]struct{}, len(c))
-		ticketIDs = ticketIDs[:0]
 		teamSize := len(c) / 2
 
 		for _, e := range c {
 			tID := e.GetTicket()
+
+			if _, ok := candidateTicketSet[tID]; !ok {
+				ticketIDs = append(ticketIDs, tID)
+			}
 			candidateTicketSet[tID] = struct{}{}
 
 			if _, ok := playersBySessionIDbyTicketID[tID]; !ok {
 				playersBySessionIDbyTicketID[tID] = make(map[string]player, 0)
 			}
 
-			sID := e.GetPresence().GetSessionId()
-			if _, ok := playersBySessionIDbyTicketID[tID]; !ok {
-				playersBySessionIDbyTicketID[tID][sID] = player{
-					entry: e,
-					rating: types.Rating{
-						Mu:    e.GetProperties()["rating_mu"].(float64),
-						Sigma: e.GetProperties()["rating_sigma"].(float64),
-					},
-					ordinal: e.GetProperties()["rating_ordinal"].(float64),
+			// Add the player once
+			if _, ok := playersBySessionIDbyTicketID[tID][e.GetPresence().GetSessionId()]; !ok {
+
+				// Extract the player's rating
+				r := types.Rating{Mu: 25.0, Sigma: 8.333}
+				if mu, ok := e.GetProperties()["rating_mu"].(float64); ok {
+					if sigma, ok := e.GetProperties()["rating_sigma"].(float64); ok {
+						r.Mu = mu
+						r.Sigma = sigma
+					}
+				}
+				playersBySessionIDbyTicketID[tID][e.GetPresence().GetSessionId()] = player{
+					entry:   e,
+					rating:  r,
+					ordinal: rating.Ordinal(r),
 				}
 			}
 		}
 
-		// sort the ticket IDs by size
-		ticketIDs = make([]string, 0, len(candidateTicketSet))
+		// Calculate the strength of each ticket
+		ticketIDs = ticketIDs[:0]
 		for tID := range candidateTicketSet {
+
+			// Add the ticket to the list
 			ticketIDs = append(ticketIDs, tID)
+
+			// Calculate the strength of the ticket (once)
 			if _, ok := ticketStrengths[tID]; !ok {
 				count := 0
 				for _, p := range playersBySessionIDbyTicketID[tID] {
@@ -427,11 +391,12 @@ func (m *SkillBasedMatchmaker) predictOutcomes(candidates [][]runtime.Matchmaker
 			},
 		}
 
+		// Assign players to teams
 		for _, tID := range ticketIDs {
-			teamIdx := 1
+			teamIdx := 0
 			ticketLength := len(playersBySessionIDbyTicketID[tID])
-			if teams[0].length+ticketLength <= teamSize && (teams[1].length+ticketLength > teamSize || teams[0].strength <= teams[1].strength) {
-				teamIdx = 0
+			if teams[0].length+ticketLength >= teamSize && (teams[1].length+ticketLength < teamSize || teams[0].strength > teams[1].strength) {
+				teamIdx = 1
 			}
 
 			for _, p := range playersBySessionIDbyTicketID[tID] {
@@ -480,8 +445,6 @@ func (m *SkillBasedMatchmaker) assembleUniqueMatches(sortedCandidates []Predicte
 OuterLoop:
 	for _, r := range sortedCandidates {
 
-		match := make([]runtime.MatchmakerEntry, 0, r.Size)
-
 		// Check if any players in the match have already been matched
 		for _, e := range r.Candidate {
 			if _, ok := matchedPlayers[e.GetPresence().GetSessionId()]; ok {
@@ -490,11 +453,10 @@ OuterLoop:
 		}
 
 		for _, e := range r.Candidate {
-			match = append(match, e)
 			matchedPlayers[e.GetPresence().GetSessionId()] = struct{}{}
 		}
 
-		matches = append(matches, match)
+		matches = append(matches, r.Candidate)
 	}
 
 	return matches

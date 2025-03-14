@@ -1,10 +1,10 @@
 package server
 
 import (
-	"fmt"
 	"math"
 
-	"github.com/heroiclabs/nakama/v3/server/evr"
+	"slices"
+
 	"github.com/intinig/go-openskill/rating"
 	"github.com/intinig/go-openskill/types"
 	"go.uber.org/thriftrw/ptr"
@@ -72,55 +72,63 @@ func NewDefaultRating() types.Rating {
 	})
 }
 
-func CalculateNewPlayerRating(evrID evr.EvrId, players []PlayerInfo, teamSize int, blueWins bool) (types.Rating, error) {
+func CalculateNewPlayerRatings(players []PlayerInfo, blueWins bool) map[string]types.Rating {
+
+	winningTeam := BlueTeam
+	if !blueWins {
+		winningTeam = OrangeTeam
+	}
 
 	// copy the players slice so as to not modify the original
 	players = players[:]
 
+	// Remove players that are not on blue/orange
 	for i := 0; i < len(players); i++ {
-
-		// Remove players that are not on blue/orange
 		if !players[i].IsCompetitor() {
-			players = append(players[:i], players[i+1:]...)
+			players = slices.Delete(players, i, i+1)
 			i--
 			continue
 		}
-
-		// Move the target player to the front of the list
-		if players[i].EvrID == evrID {
-			// Move the player to the front of the list
-			players[0], players[i] = players[i], players[0]
-		}
 	}
 
-	if len(players) == 0 || players[0].EvrID != evrID {
-		return NewDefaultRating(), fmt.Errorf("player not found in players list")
-	}
-
-	// Sort the roster by team
-	teams := make(map[TeamIndex]types.Team, 2)
+	// Create a map of player scores
+	playerScores := make(map[string]int, len(players))
 	for _, p := range players {
-		teams[p.Team] = append(teams[p.Team], p.Rating())
+		playerScores[p.SessionID] = p.RatingScore
 	}
 
-	// Pad the teams to the team size
-	for i := range teams {
-		for j := len(teams[i]); j < teamSize; j++ {
-			teams[i] = append(teams[i], NewDefaultRating())
+	// Sort the players by score
+	slices.SortStableFunc(players, func(a, b PlayerInfo) int {
+		// Sort winning team first
+		if a.Team == winningTeam && b.Team != winningTeam {
+			return -1
 		}
+		if a.Team != winningTeam && b.Team == winningTeam {
+			return 1
+		}
+		// Sort by score (descending)
+		return playerScores[b.SessionID] - playerScores[a.SessionID]
+	})
+
+	// Split the roster by teamRatings
+	teamRatings := make([]types.Team, len(players))
+	for i, p := range players {
+		teamRatings[i] = types.Team{p.Rating()}
 	}
 
-	// Swap the teams if the orangeTeam won
-	if blueWins {
-		new := rating.Rate([]types.Team{teams[BlueTeam], teams[OrangeTeam]}, nil)
-		teams[BlueTeam] = new[0]
-		teams[OrangeTeam] = new[1]
-	} else {
-		new := rating.Rate([]types.Team{teams[OrangeTeam], teams[BlueTeam]}, nil)
-		teams[OrangeTeam] = new[0]
-		teams[BlueTeam] = new[1]
+	scores := make([]int, len(players))
+	for i, p := range players {
+		scores[i] = playerScores[p.SessionID]
+	}
+
+	teamRatings = rating.Rate(teamRatings, &types.OpenSkillOptions{Score: scores})
+
+	ratingMap := make(map[string]types.Rating, len(players))
+	for i, team := range teamRatings {
+		sID := players[i].SessionID
+		ratingMap[sID] = team[0]
 	}
 
 	// Return the new rating for the target player
-	return teams[players[0].Team][0], nil
+	return ratingMap
 }
