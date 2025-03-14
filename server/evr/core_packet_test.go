@@ -43,7 +43,7 @@ func TestMultipleUnmarshal(t *testing.T) {
 	for _, tt := range tests {
 		if got := tt.got; !bytes.Equal(got, tt.want) {
 			t.Errorf("got %v, want %v", got, tt.want)
-			t.Errorf(cmp.Diff(got, tt.want))
+			t.Error(cmp.Diff(got, tt.want))
 		}
 	}
 }
@@ -76,7 +76,7 @@ func TestMarshal(t *testing.T) {
 	for _, tt := range tests {
 		if got := tt.got; !bytes.Equal(got, tt.want) {
 			t.Errorf("got %v, want %v", got, tt.want)
-			t.Errorf(cmp.Diff(got, tt.want))
+			t.Error(cmp.Diff(got, tt.want))
 		}
 	}
 
@@ -105,7 +105,7 @@ func TestMultipleMarshal(t *testing.T) {
 	for _, tt := range tests {
 		if got := tt.got; !bytes.Equal(got, tt.want) {
 			t.Errorf("got %v, want %v", got, tt.want)
-			t.Errorf(cmp.Diff(got, tt.want))
+			t.Error(cmp.Diff(got, tt.want))
 		}
 	}
 }

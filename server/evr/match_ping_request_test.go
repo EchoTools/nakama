@@ -55,7 +55,7 @@ func TestLobbyPingRequest_Marshal(t *testing.T) {
 	}
 
 	if !cmp.Equal(result, expectedResult) {
-		t.Errorf(cmp.Diff(result, expectedResult))
+		t.Error(cmp.Diff(result, expectedResult))
 	}
 }
 
