@@ -472,10 +472,10 @@ type RemoteLogGoal struct {
 	GoalType               string  `json:"[goal_type]"`
 	PlayerInfoDisplayName  string  `json:"[player_info][displayname]"`
 	PlayerInfoTeamID       int64   `json:"[player_info][teamid]"`
-	PlayerInfoEvrID        string  `json:"[player_info][userid]"`
+	PlayerInfoEvrID        EvrId   `json:"[player_info][userid]"`
 	PrevPlayerDisplayname  string  `json:"[prev_player][displayname]"`
 	PrevPlayerTeamID       int64   `json:"[prev_player][teamid]"`
-	PrevPlayerEvrID        string  `json:"[prev_player][userid]"`
+	PrevPlayerEvrID        EvrId   `json:"[prev_player][userid]"`
 	SessionUUIDStr         string  `json:"[session][uuid]"`
 	WasHeadbutt            bool    `json:"[was_headbutt]"`
 }
@@ -486,6 +486,33 @@ func (m RemoteLogGoal) SessionUUID() uuid.UUID {
 
 func (m RemoteLogGoal) GameTime() time.Duration {
 	return time.Duration(m.GameInfoGameTime) * time.Second
+}
+
+func (m RemoteLogGoal) Points() int {
+	switch m.GoalType {
+	case "SLAM DUNK":
+		return 2
+	case "BOUNCE SHOT":
+		return 2
+	case "BUMPER SHOT":
+		return 2
+	case "HEADBUTT":
+		return 2
+	case "INSIDE SHOT":
+		return 2
+	case "LONG BOUNCE SHOT":
+		return 3
+	case "LONG BUMPER SHOT":
+		return 3
+	case "LONG HEADBUTT":
+		return 3
+	case "LONG SHOT":
+		return 3
+	case "SELF GOAL":
+		return 2
+	default:
+		return 0
+	}
 }
 
 type RemoteLogLoadStats struct {
