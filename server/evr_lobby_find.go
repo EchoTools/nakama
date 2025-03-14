@@ -17,6 +17,8 @@ import (
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"github.com/intinig/go-openskill/rating"
+	"github.com/intinig/go-openskill/types"
 	"go.uber.org/zap"
 )
 
@@ -154,7 +156,6 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 	}
 	logger.Debug("Joined party group", zap.String("partyID", lobbyGroup.IDStr()))
 
-	rankPercentiles := make([]float64, 0, lobbyGroup.Size())
 	// If this is the leader, then set the presence status to the current match ID.
 	if isLeader {
 		if !lobbyParams.CurrentMatchID.IsNil() && lobbyParams.Mode != evr.ModeSocialPublic {
@@ -167,15 +168,13 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 				}
 			}
 		}
-		stream := lobbyParams.MatchmakingStream()
 
-		memberUsernames := make([]string, 0, lobbyGroup.Size())
+		stream := lobbyParams.MatchmakingStream()
 
 		for _, member := range lobbyGroup.List() {
 			if member.Presence.GetSessionId() == session.id.String() {
 				continue
 			}
-			memberUsernames = append(memberUsernames, member.Presence.GetUsername())
 
 			meta, err := p.nk.StreamUserGet(stream.Mode, stream.Subject.String(), stream.Subcontext.String(), stream.Label, member.Presence.GetUserId(), member.Presence.GetSessionId())
 			if err != nil {
@@ -187,18 +186,38 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 				}
 			} else {
 				/*
-					memberParams := &LobbySessionParameters{}
-					if err := json.Unmarshal([]byte(member.Presence.GetStatus()), &memberParams); err != nil {
-						return nil, nil, false, fmt.Errorf("failed to unmarshal member params: %w", err)
-					}
 
 					rankPercentiles = append(rankPercentiles, memberParams.GetRankPercentile())
 				*/
 			}
 		}
 
-		partySize := lobbyGroup.Size()
-		logger.Debug("Party is ready", zap.String("leader", session.id.String()), zap.Int("size", partySize), zap.Strings("members", memberUsernames))
+		var (
+			partySize       = lobbyGroup.Size()
+			usernames       = make([]string, 0, partySize)
+			rankPercentiles = make([]float64, 0, partySize)
+			ratings         = make([]types.Rating, 0, partySize)
+		)
+
+		for _, member := range lobbyGroup.List() {
+
+			memberParams := &LobbySessionParameters{}
+			if err := json.Unmarshal([]byte(member.Presence.GetStatus()), &memberParams); err != nil {
+				logger.Warn("Failed to unmarshal member params", zap.Error(err))
+				continue
+			}
+
+			rankPercentiles = append(rankPercentiles, memberParams.GetRankPercentile())
+			ratings = append(ratings, memberParams.GetRating())
+			usernames = append(usernames, member.Presence.GetUsername())
+
+			partyOrdinal := rating.TeamOrdinal(types.TeamRating{
+				Team: types.Team(ratings),
+			})
+			lobbyParams.SetOrdinal(partyOrdinal)
+		}
+
+		logger.Debug("Party is ready", zap.String("leader", session.id.String()), zap.Int("size", partySize), zap.Strings("members", usernames))
 
 		if len(rankPercentiles) > 0 {
 			// Average the rank percentiles
@@ -728,7 +747,7 @@ func rttByPlayerByExtIP(ctx context.Context, logger *zap.Logger, db *sql.DB, nk 
 
 	query := strings.Join(qparts, " ")
 
-	pubLabels, err := lobbyListLabels(ctx, nk, query)
+	pubLabels, err := LobbyListLabels(ctx, nk, query)
 	if err != nil {
 		return nil, err
 	}
