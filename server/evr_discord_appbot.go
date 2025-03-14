@@ -409,7 +409,7 @@ var (
 				{
 					Type:        discordgo.ApplicationCommandOptionInteger,
 					Name:        "timeout_mins",
-					Description: "Timeout in minutes (<= 15)",
+					Description: "Timeout in minutes",
 					Required:    false,
 				},
 			},
@@ -2567,7 +2567,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			return simpleInteractionResponse(s, i, fmt.Sprintf("Match prepared with label ```json\n%s\n```\nhttps://echo.taxi/spark://c/%s", label.GetLabelIndented(), strings.ToUpper(label.ID.UUID.String())))
 		},
 		"trigger-cv": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
-
 			if user == nil {
 				return nil
 			}
@@ -2592,7 +2591,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						return errors.New("failed to get target user ID")
 					}
 				case "timeout_mins":
-					timeoutExpiry = time.Now().Add(time.Duration(o.IntValue()) * time.Minute)
+					if d := o.IntValue(); d > 0 {
+						timeoutExpiry = time.Now().Add(time.Duration(d) * time.Minute)
+					}
 				}
 			}
 			gg := d.guildGroupRegistry.Get(uuid.FromStringOrNil(groupID))
@@ -2600,7 +2601,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return errors.New("failed to get guild group")
 			}
 
-			gg.CommunityValuesUserIDsAdd(targetUserID, timeoutExpiry)
+			gg.TimeoutAdd(targetUserID, timeoutExpiry, true)
 
 			if err := GuildGroupStore(ctx, nk, gg); err != nil {
 				return errors.New("failed to store guild group")
@@ -2684,14 +2685,20 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			cnt := 0
-
+			results := make([]string, 0, len(presences))
+			var timeoutMessage string
 			if !timeoutExpiry.IsZero() {
+				if time.Now().After(timeoutExpiry) {
+					results = append(results, "timeout removed")
+				} else {
+					results = append(results, fmt.Sprintf("timeout set to <t:%d:R>", timeoutExpiry.UTC().Unix()))
+				}
 				gg := d.guildGroupRegistry.Get(uuid.FromStringOrNil(groupID))
 				if gg == nil {
 					return errors.New("failed to get guild group")
 				}
 
-				gg.TimeoutAdd(targetUserID, timeoutExpiry)
+				gg.TimeoutAdd(targetUserID, timeoutExpiry, false)
 
 				if err := GuildGroupStore(ctx, nk, gg); err != nil {
 					return errors.New("failed to store guild group")
@@ -2699,7 +2706,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			}
 
-			result := ""
 			for _, p := range presences {
 
 				if p.GetUserId() != targetUserID {
@@ -2716,7 +2722,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 
 				if label.GetGroupID().String() != groupID && !isGlobalOperator {
-					result = "user's lobby is not from this guild"
+					results = append(results, "user's lobby is not from this guild")
 					continue
 				}
 
@@ -2724,35 +2730,27 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 				// Kick the player from the match
 				if err := KickPlayerFromMatch(ctx, d.nk, label.ID, targetUserID); err != nil {
-					result = fmt.Sprintf("failed to kick player from [%s](https://echo.taxi/spark://c/%s) (error: %s)", label.Mode.String(), strings.ToUpper(label.ID.UUID.String()), err.Error())
+					results = append(results, fmt.Sprintf("failed to kick player from [%s](https://echo.taxi/spark://c/%s) (error: %s)", label.Mode.String(), strings.ToUpper(label.ID.UUID.String()), err.Error()))
 					continue
 				}
-				result := fmt.Sprintf("%s kicked player %s from [%s](https://echo.taxi/spark://c/%s) match. (%s)", user.Mention(), target.Mention(), label.Mode.String(), strings.ToUpper(label.ID.UUID.String()), reason)
-				_, _ = d.LogAuditMessage(ctx, groupID, result, false)
+
+				results = append(results, fmt.Sprintf("kicked player %s from [%s](https://echo.taxi/spark://c/%s) match. (%s)", target.Mention(), label.Mode.String(), strings.ToUpper(label.ID.UUID.String()), reason))
 
 				cnt++
 
 			}
 
-			if result != "" {
-				return simpleInteractionResponse(s, i, result)
-			}
-
-			if cnt == 0 {
-				return simpleInteractionResponse(s, i, "No sessions found.")
-			}
-
 			go func() {
-				<-time.After(time.Second * 15)
+				<-time.After(time.Second * 5)
 				// Just disconnect the user, wholesale
-				if _, err := DisconnectUserID(ctx, d.nk, targetUserID, false); err != nil {
+				if count, err := DisconnectUserID(ctx, d.nk, targetUserID, false); err != nil {
 					logger.Warn("Failed to disconnect user", zap.Error(err))
-				} else {
-					_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s disconnected player %s from match service.", user.Mention(), target.Mention()), false)
+				} else if count > 0 {
+					_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s disconnected player %s from match service (%d sessions).", user.Mention(), target.Mention(), count), false)
 				}
 			}()
-
-			return simpleInteractionResponse(s, i, fmt.Sprintf("%s (%d sessions)", result, cnt))
+			_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s actions: %s", target.Mention(), strings.Join(results, "; ")), false)
+			return simpleInteractionResponse(s, i, fmt.Sprintf("[%d sessions found]%s\n%s", cnt, timeoutMessage, strings.Join(results, "\n")))
 
 		},
 		"join-player": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {

@@ -174,6 +174,7 @@ func (g *GuildGroup) IsEnforcer(userID string) bool {
 func (g *GuildGroup) IsNegatedEnforcer(userID string) bool {
 	g.State.RLock()
 	defer g.State.RUnlock()
+
 	if g.State.NegatedEnforcerUserIDs == nil {
 		return false
 	}
@@ -200,7 +201,7 @@ func (g *GuildGroup) IsSuspended(userID string, xpid *evr.EvrId) bool {
 		return false
 	}
 
-	if userID, ok := g.State.SuspendedXPIDs[*xpid]; ok && userID == userID {
+	if _, ok := g.State.SuspendedXPIDs[*xpid]; ok {
 		// Check if the user is (still) suspended
 		if g.State.hasRole(userID, g.RoleMap.Suspended) {
 			return true
@@ -234,7 +235,6 @@ func (g *GuildGroup) IsAllowedMatchmaking(userID string) bool {
 	if !g.MembersOnlyMatchmaking {
 		return true
 	}
-
 	g.State.RLock()
 	defer g.State.RUnlock()
 
@@ -261,20 +261,6 @@ func (g *GuildGroup) MustCompleteCommunityValues(userID string) bool {
 	return found
 }
 
-func (g *GuildGroup) CommunityValuesUserIDsAdd(userID string, timeoutExpiry time.Time) {
-	g.State.Lock()
-	defer g.State.Unlock()
-	if g.State.CommunityValuesUserIDs == nil {
-		g.State.CommunityValuesUserIDs = make(map[string]time.Time)
-	}
-	g.State.CommunityValuesUserIDs[userID] = time.Now().UTC()
-
-	if !timeoutExpiry.IsZero() {
-		g.TimeoutAdd(userID, timeoutExpiry)
-	}
-	g.State.updated = true
-}
-
 func (g *GuildGroup) CommunityValuesUserIDsRemove(userID string) bool {
 	g.State.Lock()
 	defer g.State.Unlock()
@@ -286,17 +272,23 @@ func (g *GuildGroup) CommunityValuesUserIDsRemove(userID string) bool {
 	return true
 }
 
-func (g *GuildGroup) TimeoutAdd(userID string, expiry time.Time) {
-	g.State.Lock()
-	defer g.State.Unlock()
+func (g *GuildGroup) TimeoutAdd(userID string, expiry time.Time, requireCommunityValues bool) {
+	if requireCommunityValues {
+		if g.State.CommunityValuesUserIDs == nil {
+			g.State.CommunityValuesUserIDs = make(map[string]time.Time)
+		}
+		g.State.CommunityValuesUserIDs[userID] = time.Now().UTC()
+	}
 	if g.State.TimedOutUserIDs == nil {
 		g.State.TimedOutUserIDs = make(map[string]time.Time)
 	}
+
 	if time.Now().After(expiry) {
 		delete(g.State.TimedOutUserIDs, userID)
 		g.State.updated = true
 		return
 	}
+
 	g.State.TimedOutUserIDs[userID] = expiry
 	g.State.updated = true
 }
