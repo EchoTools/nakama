@@ -50,7 +50,8 @@ type LobbySessionParameters struct {
 	CreateQueryAddon       string                        `json:"create_query_addon"`
 	Verbose                bool                          `json:"verbose"`
 	BlockedIDs             []string                      `json:"blocked_ids"`
-	Rating                 *atomic.Pointer[types.Rating] `json:"rating"`
+	MatchmakingRating      *atomic.Pointer[types.Rating] `json:"matchmaking_rating"`
+	MatchmakingOrdinal     *atomic.Float64               `json:"matchmaking_ordinal"`
 	IsEarlyQuitter         bool                          `json:"quit_last_game_early"`
 	EnableSBMM             bool                          `json:"disable_sbmm"`
 	RankPercentile         *atomic.Float64               `json:"rank_percentile"` // Updated when party is created
@@ -81,17 +82,32 @@ func (p *LobbySessionParameters) GetRankPercentile() float64 {
 }
 
 func (p *LobbySessionParameters) GetRating() types.Rating {
-	if p.Rating == nil {
+	if p.MatchmakingRating == nil {
 		return NewDefaultRating()
 	}
-	return *p.Rating.Load()
+	return *p.MatchmakingRating.Load()
 }
 
 func (p *LobbySessionParameters) SetRating(rating types.Rating) {
-	if p.Rating == nil {
-		p.Rating = atomic.NewPointer(&rating)
+	if p.MatchmakingRating == nil {
+		p.MatchmakingRating = atomic.NewPointer(&rating)
 	} else {
-		p.Rating.Store(&rating)
+		p.MatchmakingRating.Store(&rating)
+	}
+}
+
+func (p *LobbySessionParameters) GetOrdinal() float64 {
+	if p.MatchmakingOrdinal == nil {
+		return 0.0
+	}
+	return p.MatchmakingOrdinal.Load()
+}
+
+func (p *LobbySessionParameters) SetOrdinal(ordinal float64) {
+	if p.MatchmakingOrdinal == nil {
+		p.MatchmakingOrdinal = atomic.NewFloat64(ordinal)
+	} else {
+		p.MatchmakingOrdinal.Store(ordinal)
 	}
 }
 
@@ -302,7 +318,8 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 	}
 	rankPercentileMaxDelta := 1.0
 	rankPercentile := globalSettings.RankPercentile.Default
-	rating := NewDefaultRating()
+	matchmakingRating := NewDefaultRating()
+	matchmakingOrdinal := 0.0
 	mmMode := mode
 
 	if mode == evr.ModeSocialPublic || mode == evr.ModeArenaPublicAI {
@@ -327,11 +344,13 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 			}
 		}
 
-		rating, err = MatchmakingRatingLoad(ctx, p.nk, userID, groupID.String(), mmMode)
+		matchmakingRating, err = MatchmakingRatingLoad(ctx, p.nk, userID, groupID.String(), mmMode)
 		if err != nil {
 			logger.Warn("Failed to load matchmaking rating", zap.Error(err))
-			rating = NewDefaultRating()
+			matchmakingRating = NewDefaultRating()
 		}
+
+		matchmakingOrdinal = rating.Ordinal(matchmakingRating)
 	}
 
 	maxServerRTT := globalSettings.MaxServerRTT
@@ -387,7 +406,8 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		NextMatchID:            nextMatchID,
 		latencyHistory:         latencyHistory,
 		BlockedIDs:             blockedIDs,
-		Rating:                 atomic.NewPointer(&rating),
+		MatchmakingRating:      atomic.NewPointer(&matchmakingRating),
+		MatchmakingOrdinal:     atomic.NewFloat64(matchmakingOrdinal),
 		Verbose:                sessionParams.accountMetadata.DiscordDebugMessages,
 		IsEarlyQuitter:         isEarlyQuitter,
 		EnableSBMM:             !globalSettings.DisableSBMM,
@@ -553,7 +573,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 		rating := p.GetRating()
 		numericProperties["rating_mu"] = rating.Mu
 		numericProperties["rating_sigma"] = rating.Sigma
-
+		numericProperties["rating_ordinal"] = p.GetOrdinal()
 		if rankPercentile := p.GetRankPercentile(); rankPercentile > 0.0 {
 			numericProperties["rank_percentile"] = rankPercentile
 

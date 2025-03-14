@@ -102,7 +102,7 @@ func lobbyListGameServers(ctx context.Context, nk runtime.NakamaModule, query st
 	return labels, nil
 }
 
-func lobbyListLabels(ctx context.Context, nk runtime.NakamaModule, query string) ([]*MatchLabel, error) {
+func LobbyListLabels(ctx context.Context, nk runtime.NakamaModule, query string) ([]*MatchLabel, error) {
 	limit := 200
 	minSize, maxSize := 1, MatchLobbyMaxSize // the game server counts as one.
 	matches, err := listMatches(ctx, nk, limit, minSize, maxSize, query)
