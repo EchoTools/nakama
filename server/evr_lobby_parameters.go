@@ -56,6 +56,7 @@ type LobbySessionParameters struct {
 	EnableSBMM                bool                          `json:"disable_sbmm"`
 	EnableRankPercentileRange bool                          `json:"enable_rank_percentile_range"`
 	EnableOrdinalRange        bool                          `json:"enable_ordinal_range"`
+	MatchmakingOrdinalRange   float64                       `json:"ordinal_range"`
 	RankPercentile            *atomic.Float64               `json:"rank_percentile"` // Updated when party is created
 	RankPercentileMaxDelta    float64                       `json:"rank_percentile_max_delta"`
 	MatchmakingDivision       string                        `json:"division"`
@@ -327,7 +328,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 	if mode == evr.ModeSocialPublic || mode == evr.ModeArenaPublicAI {
 		mmMode = evr.ModeArenaPublic
 	}
-	if !globalSettings.DisableSBMM && groupID != uuid.Nil {
+	if globalSettings.EnableSBMM && groupID != uuid.Nil {
 
 		if globalSettings.RankPercentile.MaxDelta > 0 {
 			rankPercentileMaxDelta = globalSettings.RankPercentile.MaxDelta
@@ -376,7 +377,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 
 	isEarlyQuitter := sessionParams.isEarlyQuitter.Load()
 
-	if serviceSettings.Matchmaking.DisableEarlyQuitPenalty {
+	if !serviceSettings.Matchmaking.EnableEarlyQuitPenalty {
 		isEarlyQuitter = false
 	}
 
@@ -384,44 +385,45 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 	failsafeTimeoutSecs := min(maximumFailsafeSecs, globalSettings.FailsafeTimeoutSecs)
 
 	return &LobbySessionParameters{
-		Node:                   node,
-		UserID:                 session.userID,
-		SessionID:              session.id,
-		DiscordID:              sessionParams.DiscordID(),
-		CurrentMatchID:         currentMatchID,
-		VersionLock:            versionLock,
-		AppID:                  appID,
-		GroupID:                groupID,
-		RegionCode:             region,
-		Mode:                   mode,
-		Level:                  level,
-		SupportedFeatures:      supportedFeatures,
-		RequiredFeatures:       requiredFeatures,
-		Role:                   entrantRole,
-		DisableArenaBackfill:   globalSettings.DisableArenaBackfill || userSettings.DisableArenaBackfill,
-		BackfillQueryAddon:     strings.Join(backfillQueryAddons, " "),
-		MatchmakingQueryAddon:  strings.Join(matchmakingQueryAddons, " "),
-		CreateQueryAddon:       strings.Join(createQueryAddons, " "),
-		PartyGroupName:         lobbyGroupName,
-		PartyID:                partyID,
-		PartySize:              atomic.NewInt64(1),
-		NextMatchID:            nextMatchID,
-		latencyHistory:         latencyHistory,
-		BlockedIDs:             blockedIDs,
-		MatchmakingRating:      atomic.NewPointer(&matchmakingRating),
-		MatchmakingOrdinal:     atomic.NewFloat64(matchmakingOrdinal),
-		Verbose:                sessionParams.accountMetadata.DiscordDebugMessages,
-		IsEarlyQuitter:         isEarlyQuitter,
-		EnableSBMM:             !globalSettings.DisableSBMM,
-		RankPercentile:         atomic.NewFloat64(rankPercentile),
-		RankPercentileMaxDelta: rankPercentileMaxDelta,
-		MatchmakingDivision:    userSettings.Division,
-		MaxServerRTT:           maxServerRTT,
-		MatchmakingTimestamp:   time.Now().UTC(),
-		MatchmakingTimeout:     time.Duration(globalSettings.MatchmakingTimeoutSecs) * time.Second,
-		FailsafeTimeout:        time.Duration(failsafeTimeoutSecs) * time.Second,
-		FallbackTimeout:        time.Duration(globalSettings.FallbackTimeoutSecs) * time.Second,
-		DisplayName:            sessionParams.accountMetadata.GetGroupDisplayNameOrDefault(groupID.String()),
+		Node:                    node,
+		UserID:                  session.userID,
+		SessionID:               session.id,
+		DiscordID:               sessionParams.DiscordID(),
+		CurrentMatchID:          currentMatchID,
+		VersionLock:             versionLock,
+		AppID:                   appID,
+		GroupID:                 groupID,
+		RegionCode:              region,
+		Mode:                    mode,
+		Level:                   level,
+		SupportedFeatures:       supportedFeatures,
+		RequiredFeatures:        requiredFeatures,
+		Role:                    entrantRole,
+		DisableArenaBackfill:    globalSettings.DisableArenaBackfill || userSettings.DisableArenaBackfill,
+		BackfillQueryAddon:      strings.Join(backfillQueryAddons, " "),
+		MatchmakingQueryAddon:   strings.Join(matchmakingQueryAddons, " "),
+		CreateQueryAddon:        strings.Join(createQueryAddons, " "),
+		PartyGroupName:          lobbyGroupName,
+		PartyID:                 partyID,
+		PartySize:               atomic.NewInt64(1),
+		NextMatchID:             nextMatchID,
+		latencyHistory:          latencyHistory,
+		BlockedIDs:              blockedIDs,
+		MatchmakingRating:       atomic.NewPointer(&matchmakingRating),
+		MatchmakingOrdinal:      atomic.NewFloat64(matchmakingOrdinal),
+		MatchmakingOrdinalRange: globalSettings.OrdinalRange,
+		Verbose:                 sessionParams.accountMetadata.DiscordDebugMessages,
+		IsEarlyQuitter:          isEarlyQuitter,
+		EnableSBMM:              globalSettings.EnableSBMM,
+		RankPercentile:          atomic.NewFloat64(rankPercentile),
+		RankPercentileMaxDelta:  rankPercentileMaxDelta,
+		MatchmakingDivision:     userSettings.Division,
+		MaxServerRTT:            maxServerRTT,
+		MatchmakingTimestamp:    time.Now().UTC(),
+		MatchmakingTimeout:      time.Duration(globalSettings.MatchmakingTimeoutSecs) * time.Second,
+		FailsafeTimeout:         time.Duration(failsafeTimeoutSecs) * time.Second,
+		FallbackTimeout:         time.Duration(globalSettings.FallbackTimeoutSecs) * time.Second,
+		DisplayName:             sessionParams.accountMetadata.GetGroupDisplayNameOrDefault(groupID.String()),
 	}, nil
 }
 
@@ -606,9 +608,9 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 			}
 		}
 		if p.EnableOrdinalRange && ticketParams.IncludeRankRange {
-			if ordinal := p.GetOrdinal(); ordinal > 0.0 {
-				ordinalLower := max(ordinal-1.0, 0.0)
-				ordinalUpper := min(ordinal+1.0, 1.0)
+			if ordinal := p.GetOrdinal(); ordinal != 0.0 {
+				ordinalLower := ordinal - p.MatchmakingOrdinalRange
+				ordinalUpper := ordinal + p.MatchmakingOrdinalRange
 				numericProperties["rating_ordinal_min"] = ordinalLower
 				numericProperties["rating_ordinal_max"] = ordinalUpper
 

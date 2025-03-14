@@ -1045,12 +1045,8 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 
 		// Determine winning team
 		blueWins := playerInfo.Team == BlueTeam && payload.IsWinner()
-
-		if rating, err := CalculateNewPlayerRating(playerInfo.EvrID, label.Players, label.TeamSize, blueWins); err != nil {
-			logger.Error("Failed to calculate new player rating", zap.Error(err))
-		} else {
-			playerInfo.RatingMu = max(rating.Mu, 0.0)
-			playerInfo.RatingSigma = rating.Sigma
+		ratings := CalculateNewPlayerRatings(label.Players, blueWins)
+		if rating, ok := ratings[playerInfo.SessionID]; ok {
 			if err := MatchmakingRatingStore(ctx, p.nk, playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, rating); err != nil {
 				logger.Warn("Failed to record percentile to leaderboard", zap.Error(err))
 			}

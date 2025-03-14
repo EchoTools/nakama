@@ -26,9 +26,14 @@ type LeaderboardRecordsListRequest struct {
 }
 
 type LeaderboardRecordsListResponse struct {
-	NextCursor string                   `json:"next_cursor"`
-	PrevCursor string                   `json:"prev_cursor"`
-	Records    []*api.LeaderboardRecord `json:"records"`
+	NextCursor string                        `json:"next_cursor"`
+	PrevCursor string                        `json:"prev_cursor"`
+	Records    []*LeaderboardRecordsListItem `json:"records"`
+}
+
+type LeaderboardRecordsListItem struct {
+	*api.LeaderboardRecord
+	ScoreFloat float64 `json:"score_float"`
 }
 
 func (h *RPCHandler) LeaderboardRecordsListRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
@@ -92,8 +97,16 @@ func (h *RPCHandler) LeaderboardRecordsListRPC(ctx context.Context, logger runti
 		return int(a.Rank - b.Rank)
 	})
 
+	items := make([]*LeaderboardRecordsListItem, 0, len(records))
+	for _, r := range records {
+		items = append(items, &LeaderboardRecordsListItem{
+			LeaderboardRecord: r,
+			ScoreFloat:        Int64PairToFloat64(r.Score, r.Subscore),
+		})
+	}
+
 	response := LeaderboardRecordsListResponse{
-		Records:    records,
+		Records:    items,
 		NextCursor: nextCursor,
 		PrevCursor: prevCursor,
 	}
