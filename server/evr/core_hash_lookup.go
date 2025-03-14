@@ -1,56 +1,29 @@
 package evr
 
-func generateHashLookupArray() [0x100]uint64 {
-	seed := [0x100]uint64{}
-	i := uint64(0)
+func generateHashLookupArray() [256]uint64 {
+	var seed [256]uint64
 	s := uint64(0x95ac9329ac4bc9b5)
-	for i < 0x100 {
-		num1 := uint64(0)
-		if (i & 0x80) != 0 {
-			num1 = 0x2b5926535897936a
+	for i := 0; i < 256; i++ {
+		var v uint64
+		if i&0x40 != 0 {
+			if i&0x80 != 0 {
+				v = 0xbef5b57af4dc5adf
+			} else {
+				v = s
+			}
+		} else if i&0x80 != 0 {
+			v = 0x2b5926535897936a
 		}
 
-		if (i & 0x40) != 0 {
-			num1 = 0xbef5b57af4dc5adf
-			if (i & 0x80) == 0 {
-				num1 = s
+		for _, mask := range []int{0x20, 0x10, 0x8, 0x4, 0x2, 0x1} {
+			if i&mask != 0 {
+				v = (v * 2) ^ s
+			} else {
+				v *= 2
 			}
 		}
-
-		num2 := num1*2 ^ s
-		if (i & 0x20) == 0 {
-			num2 = num1 * 2
-		}
-
-		num1 = num2*2 ^ s
-		if (i & 0x10) == 0 {
-			num1 = num2 * 2
-		}
-
-		num2 = num1*2 ^ s
-		if (i & 8) == 0 {
-			num2 = num1 * 2
-		}
-
-		num1 = num2*2 ^ s
-		if (i & 4) == 0 {
-			num1 = num2 * 2
-		}
-
-		num2 = num1*2 ^ s
-		if (i & 2) == 0 {
-			num2 = num1 * 2
-		}
-
-		num1 = num2*2 ^ s
-		if (i & 1) == 0 {
-			num1 = num2 * 2
-		}
-
-		seed[i] = num1 * 2
-		i += 1
+		seed[i] = v * 2
 	}
-
 	return seed
 }
 
