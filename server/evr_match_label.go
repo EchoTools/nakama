@@ -292,7 +292,7 @@ func (s *MatchLabel) rebuildCache() {
 				GeoHash:     p.GeoHash,
 			})
 		} else {
-
+			ordinal := rating.Ordinal(p.Rating)
 			switch s.Mode {
 			case evr.ModeArenaPublic:
 				s.Players = append(s.Players, PlayerInfo{
@@ -306,6 +306,7 @@ func (s *MatchLabel) rebuildCache() {
 					PartyID:        p.PartyID.String(),
 					RatingMu:       p.Rating.Mu,
 					RatingSigma:    p.Rating.Sigma,
+					RatingOrdinal:  ordinal,
 					RankPercentile: p.RankPercentile,
 					SessionID:      p.SessionID.String(),
 					IsReservation:  s.reservationMap[p.SessionID.String()] != nil,
@@ -325,6 +326,7 @@ func (s *MatchLabel) rebuildCache() {
 					JoinTime:       s.joinTimeMilliseconds[p.SessionID.String()],
 					RatingMu:       p.Rating.Mu,
 					RatingSigma:    p.Rating.Sigma,
+					RatingOrdinal:  ordinal,
 					RankPercentile: p.RankPercentile,
 					SessionID:      p.SessionID.String(),
 					IsReservation:  s.reservationMap[p.SessionID.String()] != nil,
@@ -464,6 +466,43 @@ func (s *MatchLabel) rebuildCache() {
 	}
 }
 
+func (l *MatchLabel) CalculateRatingWeights() map[evr.EvrId]int {
+	// Calculate the weight of each player's rating in the match
+	scoresByPlayerByTeam := make(map[TeamIndex]map[evr.EvrId]int)
+	teamScores := make(map[TeamIndex]int)
+
+	for _, g := range l.goals {
+
+		if _, ok := scoresByPlayerByTeam[g.TeamID]; !ok {
+			scoresByPlayerByTeam[g.TeamID] = make(map[evr.EvrId]int)
+		}
+
+		scoresByPlayerByTeam[g.TeamID][g.XPID] += g.PointsValue // Add extra point for scoring
+		if !g.PrevPlayerXPID.IsNil() && g.PrevPlayerXPID != g.XPID {
+			scoresByPlayerByTeam[g.TeamID][g.PrevPlayerXPID] += g.PointsValue - 1 // Assist gets the points - 1
+		}
+
+		teamScores[g.TeamID] += g.PointsValue
+	}
+
+	winningTeam := BlueTeam
+	if teamScores[BlueTeam] < teamScores[OrangeTeam] {
+		winningTeam = OrangeTeam
+	}
+
+	scores := make(map[evr.EvrId]int)
+	for _, p := range l.Players {
+
+		if p.Team == winningTeam {
+			scores[p.EvrID] += 4
+		}
+
+		scores[p.EvrID] += scoresByPlayerByTeam[p.Team][p.EvrID]
+	}
+
+	return scores
+}
+
 func (l *MatchLabel) PublicView() *MatchLabel {
 	// Remove private data
 	var gs *GameState
@@ -528,6 +567,7 @@ func (l *MatchLabel) PublicView() *MatchLabel {
 				JoinTime:       l.Players[i].JoinTime,
 				RatingMu:       l.Players[i].RatingMu,
 				RatingSigma:    l.Players[i].RatingSigma,
+				RatingOrdinal:  l.Players[i].RatingOrdinal,
 				RankPercentile: l.Players[i].RankPercentile,
 			})
 		}

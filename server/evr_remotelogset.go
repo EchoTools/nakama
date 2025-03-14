@@ -394,12 +394,13 @@ func (u *MatchGameStateUpdate) FromGoal(goal *evr.RemoteLogGoal) {
 	u.Goals = append(u.Goals, &MatchGoal{
 		GoalTime:              goal.GameInfoGameTime,
 		GoalType:              goal.GoalType,
-		Displayname:           goal.PlayerInfoDisplayName,
-		Teamid:                goal.PlayerInfoTeamID,
-		EvrID:                 goal.PlayerInfoEvrID,
+		DisplayName:           goal.PlayerInfoDisplayName,
+		TeamID:                TeamIndex(goal.PlayerInfoTeamID),
+		XPID:                  goal.PlayerInfoEvrID,
 		PrevPlayerDisplayName: goal.PrevPlayerDisplayname,
-		PrevPlayerTeamID:      goal.PrevPlayerTeamID,
-		PrevPlayerEvrID:       goal.PrevPlayerEvrID,
+		PrevPlayerTeamID:      TeamIndex(goal.PrevPlayerTeamID),
+		PrevPlayerXPID:        goal.PrevPlayerEvrID,
 		WasHeadbutt:           goal.WasHeadbutt,
+		PointsValue:           GoalTypeToPoints(goal.GoalType),
 	})
 }

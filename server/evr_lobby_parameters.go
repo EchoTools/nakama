@@ -26,44 +26,46 @@ type (
 )
 
 type LobbySessionParameters struct {
-	Node                   string                        `json:"node"`
-	UserID                 uuid.UUID                     `json:"user_id"`
-	SessionID              uuid.UUID                     `json:"session_id"`
-	DiscordID              string                        `json:"discord_id"`
-	VersionLock            evr.Symbol                    `json:"version_lock"`
-	AppID                  evr.Symbol                    `json:"app_id"`
-	GroupID                uuid.UUID                     `json:"group_id"`
-	RegionCode             string                        `json:"region_code"`
-	Mode                   evr.Symbol                    `json:"mode"`
-	Level                  evr.Symbol                    `json:"level"`
-	SupportedFeatures      []string                      `json:"supported_features"`
-	RequiredFeatures       []string                      `json:"required_features"`
-	CurrentMatchID         MatchID                       `json:"current_match_id"`
-	NextMatchID            MatchID                       `json:"next_match_id"`
-	Role                   int                           `json:"role"`
-	PartySize              *atomic.Int64                 `json:"party_size"`
-	PartyID                uuid.UUID                     `json:"party_id"`
-	PartyGroupName         string                        `json:"party_group_name"`
-	DisableArenaBackfill   bool                          `json:"disable_arena_backfill"`
-	BackfillQueryAddon     string                        `json:"backfill_query_addon"`
-	MatchmakingQueryAddon  string                        `json:"matchmaking_query_addon"`
-	CreateQueryAddon       string                        `json:"create_query_addon"`
-	Verbose                bool                          `json:"verbose"`
-	BlockedIDs             []string                      `json:"blocked_ids"`
-	MatchmakingRating      *atomic.Pointer[types.Rating] `json:"matchmaking_rating"`
-	MatchmakingOrdinal     *atomic.Float64               `json:"matchmaking_ordinal"`
-	IsEarlyQuitter         bool                          `json:"quit_last_game_early"`
-	EnableSBMM             bool                          `json:"disable_sbmm"`
-	RankPercentile         *atomic.Float64               `json:"rank_percentile"` // Updated when party is created
-	RankPercentileMaxDelta float64                       `json:"rank_percentile_max_delta"`
-	MatchmakingDivision    string                        `json:"division"`
-	MaxServerRTT           int                           `json:"max_server_rtt"`
-	MatchmakingTimestamp   time.Time                     `json:"matchmaking_timestamp"`
-	MatchmakingTimeout     time.Duration                 `json:"matchmaking_timeout"`
-	FailsafeTimeout        time.Duration                 `json:"failsafe_timeout"` // The failsafe timeout
-	FallbackTimeout        time.Duration                 `json:"fallback_timeout"` // The fallback timeout
-	DisplayName            string                        `json:"display_name"`
-	latencyHistory         LatencyHistory
+	Node                      string                        `json:"node"`
+	UserID                    uuid.UUID                     `json:"user_id"`
+	SessionID                 uuid.UUID                     `json:"session_id"`
+	DiscordID                 string                        `json:"discord_id"`
+	VersionLock               evr.Symbol                    `json:"version_lock"`
+	AppID                     evr.Symbol                    `json:"app_id"`
+	GroupID                   uuid.UUID                     `json:"group_id"`
+	RegionCode                string                        `json:"region_code"`
+	Mode                      evr.Symbol                    `json:"mode"`
+	Level                     evr.Symbol                    `json:"level"`
+	SupportedFeatures         []string                      `json:"supported_features"`
+	RequiredFeatures          []string                      `json:"required_features"`
+	CurrentMatchID            MatchID                       `json:"current_match_id"`
+	NextMatchID               MatchID                       `json:"next_match_id"`
+	Role                      int                           `json:"role"`
+	PartySize                 *atomic.Int64                 `json:"party_size"`
+	PartyID                   uuid.UUID                     `json:"party_id"`
+	PartyGroupName            string                        `json:"party_group_name"`
+	DisableArenaBackfill      bool                          `json:"disable_arena_backfill"`
+	BackfillQueryAddon        string                        `json:"backfill_query_addon"`
+	MatchmakingQueryAddon     string                        `json:"matchmaking_query_addon"`
+	CreateQueryAddon          string                        `json:"create_query_addon"`
+	Verbose                   bool                          `json:"verbose"`
+	BlockedIDs                []string                      `json:"blocked_ids"`
+	MatchmakingRating         *atomic.Pointer[types.Rating] `json:"matchmaking_rating"`
+	MatchmakingOrdinal        *atomic.Float64               `json:"matchmaking_ordinal"`
+	IsEarlyQuitter            bool                          `json:"quit_last_game_early"`
+	EnableSBMM                bool                          `json:"disable_sbmm"`
+	EnableRankPercentileRange bool                          `json:"enable_rank_percentile_range"`
+	EnableOrdinalRange        bool                          `json:"enable_ordinal_range"`
+	RankPercentile            *atomic.Float64               `json:"rank_percentile"` // Updated when party is created
+	RankPercentileMaxDelta    float64                       `json:"rank_percentile_max_delta"`
+	MatchmakingDivision       string                        `json:"division"`
+	MaxServerRTT              int                           `json:"max_server_rtt"`
+	MatchmakingTimestamp      time.Time                     `json:"matchmaking_timestamp"`
+	MatchmakingTimeout        time.Duration                 `json:"matchmaking_timeout"`
+	FailsafeTimeout           time.Duration                 `json:"failsafe_timeout"` // The failsafe timeout
+	FallbackTimeout           time.Duration                 `json:"fallback_timeout"` // The fallback timeout
+	DisplayName               string                        `json:"display_name"`
+	latencyHistory            LatencyHistory
 }
 
 func (p *LobbySessionParameters) GetPartySize() int {
@@ -574,33 +576,55 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 		numericProperties["rating_mu"] = rating.Mu
 		numericProperties["rating_sigma"] = rating.Sigma
 		numericProperties["rating_ordinal"] = p.GetOrdinal()
-		if rankPercentile := p.GetRankPercentile(); rankPercentile > 0.0 {
-			numericProperties["rank_percentile"] = rankPercentile
 
-			if ticketParams.IncludeRankRange {
-				if p.MatchmakingDivision != "" {
-					qparts = append(qparts, fmt.Sprintf("+properties.division:%s", p.MatchmakingDivision))
-				} else if p.RankPercentileMaxDelta > 0 {
-					rankLower := min(rankPercentile-p.RankPercentileMaxDelta, 1.0-2.0*p.RankPercentileMaxDelta)
-					rankUpper := max(rankPercentile+p.RankPercentileMaxDelta, 2.0*p.RankPercentileMaxDelta)
-					rankLower = max(rankLower, 0.0)
-					rankUpper = min(rankUpper, 1.0)
-					numericProperties["rank_percentile_min"] = rankLower
-					numericProperties["rank_percentile_max"] = rankUpper
+		if p.EnableRankPercentileRange {
+			if rankPercentile := p.GetRankPercentile(); rankPercentile > 0.0 {
+				numericProperties["rank_percentile"] = rankPercentile
 
-					qparts = append(qparts,
-						// Exclusion
-						fmt.Sprintf("-properties.rank_percentile:<%f", rankLower),
-						fmt.Sprintf("-properties.rank_percentile:>%f", rankUpper),
+				if ticketParams.IncludeRankRange {
+					if p.MatchmakingDivision != "" {
+						qparts = append(qparts, fmt.Sprintf("+properties.division:%s", p.MatchmakingDivision))
+					} else if p.RankPercentileMaxDelta > 0 {
+						rankLower := min(rankPercentile-p.RankPercentileMaxDelta, 1.0-2.0*p.RankPercentileMaxDelta)
+						rankUpper := max(rankPercentile+p.RankPercentileMaxDelta, 2.0*p.RankPercentileMaxDelta)
+						rankLower = max(rankLower, 0.0)
+						rankUpper = min(rankUpper, 1.0)
+						numericProperties["rank_percentile_min"] = rankLower
+						numericProperties["rank_percentile_max"] = rankUpper
 
-						// Reverse
-						fmt.Sprintf("-properties.rank_percentile_min:>%f", rankPercentile),
-						fmt.Sprintf("-properties.rank_percentile_max:<%f", rankPercentile),
-					)
+						qparts = append(qparts,
+							// Exclusion
+							fmt.Sprintf("-properties.rank_percentile:<%f", rankLower),
+							fmt.Sprintf("-properties.rank_percentile:>%f", rankUpper),
+
+							// Reverse
+							fmt.Sprintf("-properties.rank_percentile_min:>%f", rankPercentile),
+							fmt.Sprintf("-properties.rank_percentile_max:<%f", rankPercentile),
+						)
+					}
 				}
 			}
 		}
+		if p.EnableOrdinalRange && ticketParams.IncludeRankRange {
+			if ordinal := p.GetOrdinal(); ordinal > 0.0 {
+				ordinalLower := max(ordinal-1.0, 0.0)
+				ordinalUpper := min(ordinal+1.0, 1.0)
+				numericProperties["rating_ordinal_min"] = ordinalLower
+				numericProperties["rating_ordinal_max"] = ordinalUpper
+
+				qparts = append(qparts,
+					// Exclusion
+					fmt.Sprintf("-properties.rating_ordinal:<%f", ordinalLower),
+					fmt.Sprintf("-properties.rating_ordinal:>%f", ordinalUpper),
+
+					// Reverse
+					fmt.Sprintf("-properties.rating_ordinal_min:>%f", ordinal),
+					fmt.Sprintf("-properties.rating_ordinal_max:<%f", ordinal),
+				)
+			}
+		}
 	}
+
 	//maxDelta := 60 // milliseconds
 	for k, v := range AverageLatencyHistories(p.latencyHistory) {
 		numericProperties[RTTPropertyPrefix+k] = float64(v)
