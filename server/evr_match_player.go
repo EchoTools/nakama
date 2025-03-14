@@ -17,6 +17,8 @@ type PlayerInfo struct {
 	RankPercentile float64   `json:"rank_percentile,omitempty"`
 	RatingMu       float64   `json:"rating_mu,omitempty"`
 	RatingSigma    float64   `json:"rating_sigma,omitempty"`
+	RatingOrdinal  float64   `json:"rating_ordinal,omitempty"`
+	RatingScore    float64   `json:"rating_score,omitempty"`
 	Username       string    `json:"username,omitempty"`
 	DiscordID      string    `json:"discord_id,omitempty"`
 	UserID         string    `json:"user_id,omitempty"`

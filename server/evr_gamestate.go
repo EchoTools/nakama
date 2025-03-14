@@ -35,7 +35,7 @@ func (g *GameState) Update(goals []*MatchGoal) {
 			continue
 		}
 
-		if goal.Teamid == 0 {
+		if goal.TeamID == 0 {
 			g.BlueScore += points
 		} else {
 			g.OrangeScore += points

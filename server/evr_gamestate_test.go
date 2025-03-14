@@ -21,7 +21,7 @@ func TestGameState_Update(t *testing.T) {
 		{
 			name: "Single goal for blue team",
 			goals: []*MatchGoal{
-				{GoalType: "SLAM DUNK", Teamid: 0},
+				{GoalType: "SLAM DUNK", TeamID: 0},
 			},
 			wantBlue:   2,
 			wantOrange: 0,
@@ -29,7 +29,7 @@ func TestGameState_Update(t *testing.T) {
 		{
 			name: "Single goal for orange team",
 			goals: []*MatchGoal{
-				{GoalType: "SLAM DUNK", Teamid: 1},
+				{GoalType: "SLAM DUNK", TeamID: 1},
 			},
 			wantBlue:   0,
 			wantOrange: 2,
@@ -37,9 +37,9 @@ func TestGameState_Update(t *testing.T) {
 		{
 			name: "Multiple goals for both teams",
 			goals: []*MatchGoal{
-				{GoalType: "SLAM DUNK", Teamid: 0},
-				{GoalType: "LONG SHOT", Teamid: 1},
-				{GoalType: "BOUNCE SHOT", Teamid: 0},
+				{GoalType: "SLAM DUNK", TeamID: 0},
+				{GoalType: "LONG SHOT", TeamID: 1},
+				{GoalType: "BOUNCE SHOT", TeamID: 0},
 			},
 			wantBlue:   4,
 			wantOrange: 3,
@@ -47,7 +47,7 @@ func TestGameState_Update(t *testing.T) {
 		{
 			name: "Unknown goal type",
 			goals: []*MatchGoal{
-				{GoalType: "UNKNOWN", Teamid: 0},
+				{GoalType: "UNKNOWN", TeamID: 0},
 			},
 			wantBlue:   0,
 			wantOrange: 0,

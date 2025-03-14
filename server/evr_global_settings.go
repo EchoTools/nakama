@@ -43,17 +43,19 @@ type GlobalSettingsData struct {
 }
 
 type GlobalMatchmakingSettings struct {
-	MatchmakingTimeoutSecs  int                    `json:"matchmaking_timeout_secs"`   // The matchmaking timeout
-	FailsafeTimeoutSecs     int                    `json:"failsafe_timeout_secs"`      // The failsafe timeout
-	FallbackTimeoutSecs     int                    `json:"fallback_timeout_secs"`      // The fallback timeout
-	DisableArenaBackfill    bool                   `json:"disable_arena_backfill"`     // Disable backfilling for arena matches
-	QueryAddons             QueryAddons            `json:"query_addons"`               // Additional queries to add to matchmaking queries
-	MaxServerRTT            int                    `json:"max_server_rtt"`             // The maximum RTT to allow
-	RankPercentile          RankPercentileSettings `json:"rank_percentile"`            // The rank percentile settings
-	DisableSBMM             bool                   `json:"disable_skill_based_mm"`     // Disable SBMM
-	DisableEarlyQuitPenalty bool                   `json:"disable_early_quit_penalty"` // Disable early quit penalty
-	ServerRatings           ServerRatings          `json:"server_ratings"`             // The server ratings
-	DisableDivisions        bool                   `json:"disable_divisions"`          // Disable divisions
+	MatchmakingTimeoutSecs    int                    `json:"matchmaking_timeout_secs"`     // The matchmaking timeout
+	FailsafeTimeoutSecs       int                    `json:"failsafe_timeout_secs"`        // The failsafe timeout
+	FallbackTimeoutSecs       int                    `json:"fallback_timeout_secs"`        // The fallback timeout
+	DisableArenaBackfill      bool                   `json:"disable_arena_backfill"`       // Disable backfilling for arena matches
+	QueryAddons               QueryAddons            `json:"query_addons"`                 // Additional queries to add to matchmaking queries
+	MaxServerRTT              int                    `json:"max_server_rtt"`               // The maximum RTT to allow
+	RankPercentile            RankPercentileSettings `json:"rank_percentile"`              // The rank percentile settings
+	DisableSBMM               bool                   `json:"disable_skill_based_mm"`       // Disable SBMM
+	DisableEarlyQuitPenalty   bool                   `json:"disable_early_quit_penalty"`   // Disable early quit penalty
+	ServerRatings             ServerRatings          `json:"server_ratings"`               // The server ratings
+	DisableDivisions          bool                   `json:"disable_divisions"`            // Disable divisions
+	EnableRankPercentileRange bool                   `json:"enable_rank_percentile_range"` // Enable rank percentile range
+	EnableOrdinalRange        bool                   `json:"enable_ordinal_range"`         // Enable ordinal range
 }
 
 type QueryAddons struct {

@@ -88,7 +88,7 @@ require (
 	github.com/go-redis/redis v6.15.9+incompatible
 	github.com/go-sourcemap/sourcemap v2.1.4+incompatible // indirect
 	github.com/google/pprof v0.0.0-20241210010833-40e02aabc2ad // indirect
-	github.com/intinig/go-openskill v0.0.0-20240619100423-fcdc459e6631
+	github.com/intinig/go-openskill v0.0.0-20250225115741-61b0d678d1b9
 	github.com/jackc/pgio v1.0.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect

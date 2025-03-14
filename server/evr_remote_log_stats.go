@@ -1,5 +1,7 @@
 package server
 
+import "github.com/heroiclabs/nakama/v3/server/evr"
+
 type PostMatchStats struct {
 	SessionUUID string     `json:"[session][uuid]"`
 	MatchStats  MatchStats `json:"match_stats"`
@@ -10,15 +12,16 @@ type PostMatchStats struct {
 }
 
 type MatchGoal struct {
-	GoalTime              float64 `json:"round_clock_secs"`
-	GoalType              string  `json:"goal_type"`
-	Displayname           string  `json:"player_display_name"`
-	Teamid                int64   `json:"player_team_id"`
-	EvrID                 string  `json:"player_user_id"`
-	PrevPlayerDisplayName string  `json:"prev_player_display_name"`
-	PrevPlayerTeamID      int64   `json:"prev_player_team_id"`
-	PrevPlayerEvrID       string  `json:"prev_player_user_id"`
-	WasHeadbutt           bool    `json:"was_headbutt"`
+	GoalTime              float64   `json:"round_clock_secs"`
+	GoalType              string    `json:"goal_type"`
+	DisplayName           string    `json:"player_display_name"`
+	TeamID                TeamIndex `json:"player_team_id"`
+	XPID                  evr.EvrId `json:"player_user_id"`
+	PrevPlayerDisplayName string    `json:"prev_player_display_name"`
+	PrevPlayerTeamID      TeamIndex `json:"prev_player_team_id"`
+	PrevPlayerXPID        evr.EvrId `json:"prev_player_user_id"`
+	WasHeadbutt           bool      `json:"was_headbutt"`
+	PointsValue           int       `json:"points_value"`
 }
 
 type MatchStats struct {
