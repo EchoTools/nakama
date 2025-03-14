@@ -73,7 +73,7 @@ func TestGameServerSessionParsers(t *testing.T) {
 
 			messages, err := ParsePacket(data)
 			if err != nil {
-				t.Fatalf(err.Error())
+				t.Fatal(err.Error())
 			}
 
 			if diff := cmp.Diff(tc.want, messages[0]); diff != "" {
@@ -115,7 +115,7 @@ func TestGameServerEntrantDataEncoding(t *testing.T) {
 			var m EntrantData
 			err := m.Stream(s)
 			if err != nil {
-				t.Fatalf(err.Error())
+				t.Fatal(err.Error())
 			}
 
 			if diff := cmp.Diff(tc.want, m); diff != "" {
