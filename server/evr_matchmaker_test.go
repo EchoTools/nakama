@@ -341,7 +341,7 @@ func TestRemoveOddSizedTeams(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotCount := m.filterOddSizedTeams(tt.candidates)
+			gotCount := m.filterOddSizedMatches(tt.candidates)
 			if gotCount != tt.wantCount {
 				t.Errorf("removeOddSizedTeams() gotCount = %v, want %v", gotCount, tt.wantCount)
 			}
@@ -364,89 +364,6 @@ func (c CandidateData) mm() [][]runtime.MatchmakerEntry {
 		candidates = append(candidates, matchmakerEntries)
 	}
 	return candidates
-}
-
-func TestMatchmaker(t *testing.T) {
-	// disable for now
-	//t.SkipNow()
-	// open /tmp/possible-matches.json
-	file, err := os.Open("/tmp/candidates.json")
-	if err != nil {
-		t.Error("Error opening file")
-	}
-	defer file.Close()
-
-	var data CandidateData
-	// read in the file
-	decoder := json.NewDecoder(file)
-	err = decoder.Decode(&data)
-	if err != nil {
-		t.Errorf("Error decoding file: %v", err)
-	}
-	m := NewSkillBasedMatchmaker()
-
-	candidates := data.mm()
-
-	// Get teh sizes of the candidate matches
-	sizes := make(map[int]int, 0)
-	for _, c := range candidates {
-		sizes[len(c)]++
-	}
-
-	t.Errorf("Sizes: %v", sizes)
-
-	_ = m.filterWithinMaxRTT(candidates)
-
-	// Remove odd sized teams
-	_ = m.filterOddSizedTeams(candidates)
-
-	// Create a list of balanced matches with predictions
-	predictions := m.predictOutcomes(candidates, 0.5)
-
-	m.sortPredictions(predictions, 0.3, true)
-
-	writeAsJSONFile(predictions, "/tmp/predictions.json")
-
-	rostersByPrediction := make([][]string, 0)
-	for _, c := range predictions {
-		rosters := make([]string, 0)
-		for _, team := range [...][]*MatchmakingTicket{c.TeamA, c.TeamB} {
-			roster := make([]string, 0)
-			for _, party := range team {
-				for _, m := range party.Members {
-					roster = append(roster, m.Entry.GetPresence().GetSessionId())
-				}
-			}
-			slices.Sort(roster)
-			rosters = append(rosters, strings.Join(roster, ","))
-		}
-		slices.Sort(rosters)
-		rostersByPrediction = append(rostersByPrediction, rosters)
-	}
-
-	madeMatches := m.assembleUniqueMatches(predictions)
-
-	t.Errorf("length: %v", len(madeMatches))
-
-	for _, match := range madeMatches {
-		teams := make([]string, 0)
-
-		teamSize := len(match) / 2
-		team1 := make([]string, 0)
-		for _, player := range match[0:teamSize] {
-			team1 = append(team1, player.GetPresence().GetUsername())
-		}
-		team2 := make([]string, 0)
-		for _, player := range match[teamSize:] {
-			team2 = append(team2, player.GetPresence().GetUsername())
-		}
-		teams = append(teams, strings.Join(team1, ","))
-		teams = append(teams, strings.Join(team2, ","))
-
-		t.Errorf("Match: %v", strings.Join(teams, " vs "))
-	}
-
-	//t.Errorf("Candidates: %v", candidates)
 }
 
 func getTeamTickets(team RatedEntryTeam) []string {
@@ -955,10 +872,10 @@ func TestFilterWithinMaxRTT(t *testing.T) {
 	}
 }
 
-func BenchmarkPredictOutcomes(b *testing.B) {
-
-	entries := make([]runtime.MatchmakerEntry, 0)
-	for i := range 32 {
+func generateMatchmakerEntries(count int) []*MatchmakerEntry {
+	groupID := uuid.Must(uuid.NewV4()).String()
+	entries := make([]*MatchmakerEntry, 0, count)
+	for i := range count {
 		var (
 			dn        = RandomDisplayName()
 			sessionID = uuid.NewV5(uuid.Nil, fmt.Sprintf("%d", i))
@@ -983,7 +900,7 @@ func BenchmarkPredictOutcomes(b *testing.B) {
 				"display_name":              dn,
 				"division":                  "",
 				"game_mode":                 "echo_arena",
-				"group_id":                  "147afc9d-2819-4197-926d-5b3f92790edc",
+				"group_id":                  groupID,
 				"priority_threshold":        "2025-03-13T18:34:54Z",
 				"query":                     "+properties.game_mode:echo_arena +properties.group_id:147afc9d\\-2819\\-4197\\-926d\\-5b3f92790edc -properties.blocked_ids:/.*28e070c2\\-acb5\\-4e96\\-b53b\\-92c955edeb31.*/ -properties.rank_percentile:<0.000000 -properties.rank_percentile:>0.600000 -properties.rank_percentile_min:>0.200000 -properties.rank_percentile_max:<0.200000",
 				"submission_time":           "2025-03-13T18:18:54Z",
@@ -1008,9 +925,13 @@ func BenchmarkPredictOutcomes(b *testing.B) {
 		})
 
 	}
+	return entries
+}
 
-	// Create all combinations of 8 players from the entries
+func generateMatchmakerCandidates(count int) [][]runtime.MatchmakerEntry {
+	entries := generateMatchmakerEntries(count)
 	candidates := make([][]runtime.MatchmakerEntry, 0)
+	// Create all combinations of 8 players from the entries
 	for i := range entries {
 		for j := i + 1; j < len(entries); j++ {
 			for k := j + 1; k < len(entries); k++ {
@@ -1038,7 +959,13 @@ func BenchmarkPredictOutcomes(b *testing.B) {
 			}
 		}
 	}
+	return candidates
+}
 
+func BenchmarkPredictOutcomes(b *testing.B) {
+
+	// Create all combinations of 8 players from the entries
+	candidates := generateMatchmakerCandidates(24)
 	b.Logf("candidate count: %d", len(candidates))
 	m := NewSkillBasedMatchmaker()
 	for b.Loop() {
