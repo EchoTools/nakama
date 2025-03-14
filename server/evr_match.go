@@ -1137,20 +1137,29 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		}
 
 	case SignalLockSession:
-		logger.Debug("Locking session")
-		// Lock hte sesion 60 seconds later.
-		state.LockedAt = time.Now().UTC()
+
+		switch state.Mode {
+		case evr.ModeCombatPublic:
+			logger.Debug("Ignoring lock signal for combat public match.")
+			state.LockedAt = time.Now().UTC().Add(30 * time.Second)
+		default:
+			logger.Debug("Locking session")
+			state.LockedAt = time.Now().UTC()
+		}
 
 	case SignalUnlockSession:
 
-		if state.Mode != evr.ModeArenaPublic {
+		switch state.Mode {
+		case evr.ModeArenaPublic:
+			logger.Debug("Ignoring unlock signal for arena public match.")
+		default:
 			logger.Debug("Unlocking session")
-
 			if state.GameState != nil {
 				state.LockedAt = time.Time{}
 			}
 			state.Open = true
 		}
+
 	default:
 		logger.Warn("Unknown signal: %v", signal.OpCode)
 		return state, SignalResponse{Success: false, Message: "unknown signal"}.String()
