@@ -109,3 +109,43 @@ func MatchmakerStateRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 
 	return string(data), nil
 }
+
+type BuildMatchRequest struct {
+	Entries []*MatchmakerEntry `json:"entries"`
+}
+
+type BuildMatchResponse struct {
+	Label json.RawMessage `json:"label"`
+}
+
+func BuildMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	_nk := nk.(*RuntimeGoNakamaModule)
+
+	request := &BuildMatchRequest{}
+	if err := json.Unmarshal([]byte(payload), request); err != nil {
+		return "", err
+	}
+
+	lobbyBuilder := NewLobbyBuilder(RuntimeLoggerToZapLogger(logger), nk, _nk.sessionRegistry, _nk.matchRegistry, _nk.tracker, _nk.metrics)
+
+	matchID, err := lobbyBuilder.buildMatch(lobbyBuilder.logger, request.Entries)
+	if err != nil {
+		return "", err
+	}
+
+	match, err := nk.MatchGet(ctx, matchID.String())
+	if err != nil {
+		return "", err
+	}
+
+	response := BuildMatchResponse{
+		Label: []byte(match.GetLabel().GetValue()),
+	}
+
+	data, err := json.Marshal(response)
+	if err != nil {
+		return "", err
+	}
+
+	return string(data), nil
+}
