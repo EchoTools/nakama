@@ -407,9 +407,9 @@ var (
 					Required:    true,
 				},
 				{
-					Type:        discordgo.ApplicationCommandOptionInteger,
-					Name:        "timeout_mins",
-					Description: "Timeout in minutes",
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "timeout_duration",
+					Description: "Timeout duration (e.g. 1m, 2h, 3d, 4w)",
 					Required:    false,
 				},
 			},
@@ -2624,7 +2624,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						}
 
 						if label.GetGroupID().String() != groupID {
-							return errors.New("user's match is not from this guild")
+							return errors.New("user's lobby is not from this guild")
 						}
 
 						// Kick the player from the match
@@ -2674,8 +2674,28 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					}
 				case "reason":
 					reason = o.StringValue()
-				case "timeout_mins":
-					timeoutExpiry = time.Now().Add(time.Duration(o.IntValue()) * time.Minute)
+				case "timeout_duration":
+					duration := o.StringValue()
+
+					// Parse minutes, hours, days, and weeks (m, h, d, w)
+					if duration != "" {
+						unit := time.Minute
+						switch duration[len(duration)-1] {
+						case 'm':
+							unit = time.Minute
+						case 'h':
+							unit = time.Hour
+						case 'd':
+							unit = 24 * time.Hour
+						case 'w':
+							unit = 7 * 24 * time.Hour
+						}
+						if d, err := strconv.Atoi(duration[:len(duration)-1]); err == nil {
+							timeoutExpiry = time.Now().Add(time.Duration(d) * unit)
+						} else {
+							return fmt.Errorf("invalid duration format: %w", err)
+						}
+					}
 				}
 			}
 
@@ -2691,7 +2711,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				if time.Now().After(timeoutExpiry) {
 					results = append(results, "timeout removed")
 				} else {
-					results = append(results, fmt.Sprintf("timeout set to <t:%d:R>", timeoutExpiry.UTC().Unix()))
+					results = append(results, fmt.Sprintf("timeout expires on <t:%d:F> (<t:%d:R>)", timeoutExpiry.UTC().Unix(), timeoutExpiry.UTC().Unix()))
 				}
 				gg := d.guildGroupRegistry.Get(uuid.FromStringOrNil(groupID))
 				if gg == nil {
@@ -2722,7 +2742,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 
 				if label.GetGroupID().String() != groupID && !isGlobalOperator {
-					results = append(results, "user's lobby is not from this guild")
+					results = append(results, "user's lobby is not from this guild.")
 					continue
 				}
 
@@ -2734,7 +2754,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					continue
 				}
 
-				results = append(results, fmt.Sprintf("kicked player %s from [%s](https://echo.taxi/spark://c/%s) match. (%s)", target.Mention(), label.Mode.String(), strings.ToUpper(label.ID.UUID.String()), reason))
+				results = append(results, fmt.Sprintf("kicked from [%s](https://echo.taxi/spark://c/%s) session. (%s)", label.Mode.String(), strings.ToUpper(label.ID.UUID.String()), reason))
 
 				cnt++
 
