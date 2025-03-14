@@ -7,7 +7,6 @@ import (
 	"log"
 	"reflect"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -102,7 +101,7 @@ func MatchmakingRatingLoad(ctx context.Context, nk runtime.NakamaModule, userID,
 		}
 
 		record := ownerRecords[0]
-		*ptr = ScoreToValue(record.Score, record.Subscore)
+		*ptr = Int64PairToFloat64(record.Score, record.Subscore)
 	}
 	if sigma == 0 || mu == 0 {
 		return NewDefaultRating(), nil
@@ -121,7 +120,7 @@ func MatchmakingRatingStore(ctx context.Context, nk runtime.NakamaModule, userID
 	}
 
 	for id, value := range scores {
-		score, subscore := ValueToScore(value)
+		score, subscore := Float64ToInt64Pair(value)
 		if score == 0 && subscore == 0 {
 			continue
 		}
@@ -158,14 +157,14 @@ func MatchmakingRankPercentileLoad(ctx context.Context, nk runtime.NakamaModule,
 		return ServiceSettings().Matchmaking.RankPercentile.Default, nil
 	}
 
-	return ScoreToValue(records[0].Score, records[0].Subscore), nil
+	return Int64PairToFloat64(records[0].Score, records[0].Subscore), nil
 }
 
 func MatchmakingRankPercentileStore(ctx context.Context, nk runtime.NakamaModule, userID, username, groupID string, mode evr.Symbol, percentile float64) error {
 
 	id := StatisticBoardID(groupID, mode, RankPercentileStatisticID, "alltime")
 
-	score, subscore := ValueToScore(percentile)
+	score, subscore := Float64ToInt64Pair(percentile)
 
 	if score == 0 && subscore == 0 {
 		return nil
@@ -191,32 +190,15 @@ func MatchmakingRankPercentileStore(ctx context.Context, nk runtime.NakamaModule
 	return nil
 }
 
-func ValueToScore(v float64) (int64, int64) {
-	// If it's a whole number, return it as such.
-	if v == float64(int64(v)) {
-		return int64(v), 0
-	}
-
-	// Otherwise, split the float into whole and fractional parts.
-	str := strconv.FormatFloat(float64(v), 'f', -1, 64)
-	s := strings.Split(str, ".")
-
-	// Parse the whole and fractional parts as integers.
-	whole, _ := strconv.ParseInt(s[0], 10, 64)
-	fractional, _ := strconv.ParseInt(s[1], 10, 64)
-
-	return whole, fractional
+func Float64ToInt64Pair(f float64) (int64, int64) {
+	whole := int64(f)                        // Extract whole number part
+	fraction := f - float64(whole)           // Extract fractional part
+	scaledFraction := int64(fraction * 1e18) // Scale to preserve precision
+	return whole, scaledFraction
 }
 
-func ScoreToValue(score int64, subscore int64) float64 {
-	// If there's no subscore, return the score as a whole number.
-	if subscore == 0 {
-		return float64(score)
-	}
-
-	// Otherwise, combine the score and subscore as a float.
-	f, _ := strconv.ParseFloat(fmt.Sprintf("%d.%d", score, subscore), 64)
-	return f
+func Int64PairToFloat64(whole, fraction int64) float64 {
+	return float64(whole) + float64(fraction)/1e18
 }
 
 func StatisticBoardID(groupID string, mode evr.Symbol, statName string, resetSchedule evr.ResetSchedule) string {
@@ -543,7 +525,7 @@ func StatisticsToEntries(userID, displayName, groupID string, mode evr.Symbol, p
 				continue
 			}
 
-			score, subscore := ValueToScore(statValue)
+			score, subscore := Float64ToInt64Pair(statValue)
 
 			entries = append(entries, &StatisticsQueueEntry{
 				BoardMeta:   meta,

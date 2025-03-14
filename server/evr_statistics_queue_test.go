@@ -8,44 +8,44 @@ import (
 	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
-func TestValueToScore(t *testing.T) {
+func TestFloat64ToInt64Pair(t *testing.T) {
 	tests := []struct {
 		input              float64
 		expectedWhole      int64
 		expectedFractional int64
 	}{
-		{6.6134934, 6, 6134934},
-		{8.1665173, 8, 1665173},
+		{6.6134934, 6, 613493400000000256},
+		{8.1665173, 8, 166517300000000640},
 		{650, 650, 0},
-		{6.25, 6, 25},
+		{6.25, 6, 250000000000000000},
 	}
 
 	for _, test := range tests {
 
-		whole, fractional := ValueToScore(test.input)
+		whole, fractional := Float64ToInt64Pair(test.input)
 
 		if whole != test.expectedWhole || fractional != test.expectedFractional {
-			t.Errorf("splitFloat64(%f) = (%d, %d); expected (%d, %d)", test.input, whole, fractional, test.expectedWhole, test.expectedFractional)
+			t.Errorf("Float64ToInt64Pair(%f) = (%d, %d); expected (%d, %d)", test.input, whole, fractional, test.expectedWhole, test.expectedFractional)
 		}
 	}
 }
-func TestScoreToValue(t *testing.T) {
+func TestInt64PairToFloat64(t *testing.T) {
 	tests := []struct {
 		score    int64
 		subscore int64
 		expected float64
 	}{
-		{6, 6134934, 6.6134934},
-		{8, 1665173, 8.1665173},
+		{6, 613493400000000256, 6.6134934},
+		{8, 166517300000000640, 8.1665173},
 		{650, 0, 650.0},
-		{6, 25, 6.25},
+		{6, 250000000000000000, 6.25},
 	}
 
 	for _, test := range tests {
-		result := ScoreToValue(test.score, test.subscore)
+		result := Int64PairToFloat64(test.score, test.subscore)
 
 		if result != test.expected {
-			t.Errorf("ScoreToValue(%d, %d) = %f; expected %f", test.score, test.subscore, result, test.expected)
+			t.Errorf("Int64PairToFloat64(%d, %d) = %f; expected %f", test.score, test.subscore, result, test.expected)
 		}
 	}
 }

@@ -94,7 +94,7 @@ func retrieveLatestLeaderboardRecords(ctx context.Context, db *sql.DB, userID st
 			return nil, fmt.Errorf("failed to scan latest leaderboard record: %w", err)
 		}
 
-		records[leaderboardID] = ScoreToValue(score, subscore)
+		records[leaderboardID] = Int64PairToFloat64(score, subscore)
 
 	}
 
