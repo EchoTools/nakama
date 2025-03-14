@@ -272,7 +272,7 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 
 		// Remove existing players from the reservation entrants
 		if _, found := state.presenceMap[s]; found {
-			meta.Reservations = append(meta.Reservations[:i], meta.Reservations[i+1:]...)
+			meta.Reservations = slices.Delete(meta.Reservations, i, i+1)
 			i--
 		}
 
@@ -721,7 +721,6 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 				}
 
 				if update.MatchOver {
-
 					state.GameState.MatchOver = true
 				}
 
@@ -854,7 +853,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 		updateLabel = true
 	}
 
-	// If the arena score is close, then lock later than usual.
+	// Lock the match if it is open and the lock time has passed.
 	if state.Open && !state.LockedAt.IsZero() && time.Now().After(state.LockedAt) {
 		logger.Info("Closing the match in response to a lock.")
 		state.Open = false
