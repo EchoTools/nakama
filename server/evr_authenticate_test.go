@@ -174,11 +174,18 @@ func Test_sanitizeDisplayName(t *testing.T) {
 			"408-111-1111",
 			"",
 		},
+		{
+			"Enclosed-emojis in name",
+			"❄ ℝ𝕒𝕞𝕤𝕖𝕪 ❄",
+			"Ramsey",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := sanitizeDisplayName(tt.displayName); got != tt.want {
 				t.Errorf("sanitizeDisplayName() = `%v`, want `%v`", got, tt.want)
+			} else {
+				t.Errorf("sanitizeDisplayName() = `%v`", got)
 			}
 		})
 	}

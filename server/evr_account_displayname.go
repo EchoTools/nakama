@@ -9,9 +9,10 @@ import (
 )
 
 var (
-	DisplayNameFilterRegex       = regexp.MustCompile(`[^-0-9A-Za-z_\[\] ]`)
-	DisplayNameMatchRegex        = regexp.MustCompile(`[A-Za-z]`)
-	DisplayNameFilterScoreSuffix = regexp.MustCompile(`\s\(\d+\)\s\[\d+\.\d+%]`)
+	DisplayNameFilterRegex  = regexp.MustCompile(`[^-0-9A-Za-z_\[\] ]`)
+	emojiFilterPattern      = regexp.MustCompile(`:[a-zA-Z0-9_]+:`)
+	displayNameMatchPattern = regexp.MustCompile(`[A-Za-z]`)
+	displayNameScorePattern = regexp.MustCompile(`\s\(\d+\)\s\[\d+\.\d+%]`)
 )
 
 type SuspensionStatus struct {
@@ -49,7 +50,7 @@ func sanitizeDisplayName(displayName string) string {
 	}
 
 	// Removes the discord score (i.e. ` (71) [62.95%]`) suffix from display names
-	displayName = DisplayNameFilterScoreSuffix.ReplaceAllLiteralString(displayName, "")
+	displayName = displayNameScorePattern.ReplaceAllLiteralString(displayName, "")
 
 	// Treat the unicode NBSP as a terminator
 	displayName, _, _ = strings.Cut(displayName, "\u00a0")
@@ -57,7 +58,10 @@ func sanitizeDisplayName(displayName string) string {
 	// Convert unicode characters to their closest ascii representation
 	displayName = anyascii.Transliterate(displayName)
 
-	// Filter the string using the regular expression
+	// Remove emojis
+	displayName = emojiFilterPattern.ReplaceAllLiteralString(displayName, "")
+
+	// Require a minimum matching pattern
 	displayName = DisplayNameFilterRegex.ReplaceAllLiteralString(displayName, "")
 
 	// twenty characters maximum
@@ -65,7 +69,7 @@ func sanitizeDisplayName(displayName string) string {
 		displayName = displayName[:20]
 	}
 
-	if !DisplayNameMatchRegex.MatchString(displayName) {
+	if !displayNameMatchPattern.MatchString(displayName) {
 		return ""
 	}
 
