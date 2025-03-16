@@ -22,12 +22,12 @@ func CalculateSmoothedPlayerRankPercentile(ctx context.Context, logger *zap.Logg
 		mode = evr.ModeArenaPublic
 	}
 
-	dampingPercentile, err := RecalculatePlayerRankPercentile(ctx, logger, db, nk, userID, groupID, mode, settings.ResetScheduleDamper, settings.Default, settings.LeaderboardWeights[mode])
+	dampingPercentile, err := RecalculatePlayerRankPercentile(ctx, logger, db, nk, userID, groupID, mode, settings.ResetScheduleDamper, settings.Default, 20, settings.LeaderboardWeights[mode])
 	if err != nil {
 		return 0.0, fmt.Errorf("failed to get damping percentile: %w", err)
 	}
 
-	activePercentile, err := RecalculatePlayerRankPercentile(ctx, logger, db, nk, userID, groupID, mode, settings.ResetSchedule, dampingPercentile, settings.LeaderboardWeights[mode])
+	activePercentile, err := RecalculatePlayerRankPercentile(ctx, logger, db, nk, userID, groupID, mode, settings.ResetSchedule, dampingPercentile, 3, settings.LeaderboardWeights[mode])
 	if err != nil {
 		return 0.0, fmt.Errorf("failed to get active percentile: %w", err)
 	}
@@ -37,14 +37,14 @@ func CalculateSmoothedPlayerRankPercentile(ctx context.Context, logger *zap.Logg
 	return percentile, nil
 }
 
-func RecalculatePlayerRankPercentile(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, userID, groupID string, mode evr.Symbol, resetSchedule evr.ResetSchedule, defaultRankPercentile float64, boardNameWeights map[string]float64) (float64, error) {
+func RecalculatePlayerRankPercentile(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, userID, groupID string, mode evr.Symbol, resetSchedule evr.ResetSchedule, defaultRankPercentile float64, recordCountMin int, boardNameWeights map[string]float64) (float64, error) {
 
 	boardWeights := make(map[string]float64)
 	for boardName, weight := range boardNameWeights {
 		boardWeights[StatisticBoardID(groupID, mode, boardName, resetSchedule)] = weight
 	}
 
-	percentile, err := retrieveRankPercentile(ctx, db, userID, defaultRankPercentile, boardWeights)
+	percentile, err := retrieveRankPercentile(ctx, db, userID, defaultRankPercentile, boardWeights, recordCountMin)
 	if err != nil {
 		return 0.0, fmt.Errorf("failed to retrieve leaderboard ranks: %w", err)
 	}
@@ -101,7 +101,7 @@ func retrieveLatestLeaderboardRecords(ctx context.Context, db *sql.DB, userID st
 	return records, nil
 }
 
-func retrieveRankPercentile(ctx context.Context, db *sql.DB, userID string, defaultPercentile float64, boardWeights map[string]float64) (float64, error) {
+func retrieveRankPercentile(ctx context.Context, db *sql.DB, userID string, defaultPercentile float64, boardWeights map[string]float64, recordCountMin int) (float64, error) {
 
 	query := `
 	WITH leaderboard_weights AS (
@@ -123,6 +123,7 @@ func retrieveRankPercentile(ctx context.Context, db *sql.DB, userID string, defa
 		JOIN leaderboard_weights lw
 		ON lr.leaderboard_id = lw.leaderboard_id
 		WHERE lr.leaderboard_id = ANY($1)
+		AND (lr.num_scores > $5) -- Only include records with more than $5 scores
 		AND (lr.expiry_time > NOW() OR lr.expiry_time = '1970-01-01 00:00:00+00') -- Include "alltime" records
 	),
 	calculated_percentiles AS (
@@ -151,7 +152,7 @@ func retrieveRankPercentile(ctx context.Context, db *sql.DB, userID string, defa
 		weights = append(weights, weight)
 	}
 
-	rows, err := db.QueryContext(ctx, query, boardIDs, weights, userID, defaultPercentile)
+	rows, err := db.QueryContext(ctx, query, boardIDs, weights, userID, defaultPercentile, recordCountMin)
 	if err != nil {
 		return 0.0, fmt.Errorf("failed to query leaderboard ranks: %w", err)
 	}
