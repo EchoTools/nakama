@@ -47,7 +47,6 @@ func (h LatencyHistory) Add(extIP string, rtt int) {
 func (h LatencyHistory) LatestRTTs() map[string]int {
 	latestRTTs := make(map[string]int)
 	for extIP, history := range h {
-		latestRTTs[extIP] = 999
 		latestTS := int64(0)
 		for ts, rtt := range history {
 			if rtt == 0 {
@@ -60,6 +59,25 @@ func (h LatencyHistory) LatestRTTs() map[string]int {
 		}
 	}
 	return latestRTTs
+}
+
+func (h LatencyHistory) LatestRTT(extIP string) int {
+	if history, ok := h[extIP]; !ok || len(history) == 0 {
+		return 0
+	} else {
+		latestTS := int64(0)
+		latestRTT := 999
+		for ts, rtt := range history {
+			if rtt == 0 {
+				continue
+			}
+			if ts > latestTS {
+				latestTS = ts
+				latestRTT = rtt
+			}
+		}
+		return latestRTT
+	}
 }
 
 // Return the average rtt for a single external IP
