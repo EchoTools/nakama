@@ -219,11 +219,12 @@ func MembershipsFromSessionVars(vars map[string]string) (map[string]guildGroupPe
 
 func MatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 	var err error
+	var userID string
 
-	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
-	if !ok {
-		return "", runtime.NewError("authentication required", StatusUnauthenticated)
+	if u, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string); ok {
+		userID = u
 	}
+
 	// Unpack the bitsets from the session token
 	vars, ok := ctx.Value(runtime.RUNTIME_CTX_VARS).(map[string]string)
 	if !ok {
@@ -237,8 +238,10 @@ func MatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime
 
 	fullAccess := false
 
-	if fullAccess, err = CheckSystemGroupMembership(ctx, db, userID, GroupGlobalPrivateDataAccess); err != nil {
-		return "", fmt.Errorf("failed to check system group membership: %s", err.Error())
+	if userID != "" {
+		if fullAccess, err = CheckSystemGroupMembership(ctx, db, userID, GroupGlobalPrivateDataAccess); err != nil {
+			return "", fmt.Errorf("failed to check system group membership: %s", err.Error())
+		}
 	}
 
 	request := &MatchRpcRequest{}
