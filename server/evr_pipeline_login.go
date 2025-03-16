@@ -316,7 +316,7 @@ func (p *EvrPipeline) authenticateSession(ctx context.Context, logger *zap.Logge
 			// The session is not authenticated. Create a link ticket.
 		} else {
 
-			if linkTicket, err := p.linkTicket(ctx, logger, params.xpID, session.clientIP, params.loginPayload); err != nil {
+			if linkTicket, err := p.linkTicket(ctx, params.xpID, session.clientIP, params.loginPayload); err != nil {
 
 				metricsTags["error"] = "link_ticket_error"
 
