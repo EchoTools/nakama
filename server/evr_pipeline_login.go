@@ -62,6 +62,41 @@ func (e AccountDisabledError) Is(target error) bool {
 	return ok
 }
 
+type NewLocationError struct {
+	guildName   string
+	code        string
+	botUsername string
+	useDMs      bool
+}
+
+func (e NewLocationError) Error() string {
+	if e.useDMs {
+		// DM was successful
+		return strings.Join([]string{
+			"Please authorize this new location.",
+			fmt.Sprintf("Check your Discord DMs from @%s.", e.botUsername),
+			fmt.Sprintf("Select code >>> %s <<<.", e.code),
+		}, "\n")
+	} else if e.guildName != "" {
+		// DMs were blocked, Use the guild name if it's available
+		return strings.Join([]string{
+			"Authorize new location:",
+			fmt.Sprintf("Go to %s in Discord, then type /verify", e.guildName),
+			fmt.Sprintf("When prompted, select code >>> %s <<<", e.code),
+		}, "\n")
+	} else if e.botUsername != "" {
+		// DMs were blocked, Use the bot username if it's available
+		return strings.Join([]string{
+			"Authorize this new location by typing:",
+			"/verify",
+			fmt.Sprintf("and select code >>> %s <<< in a guild with the @%s bot.", e.code, e.botUsername),
+		}, "\n")
+	} else {
+		// DMs were blocked, but no bot username was provided
+		return "New location detected. Please contact EchoVRCE support."
+	}
+}
+
 // loginRequest handles the login request from the client.
 func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.LoginRequest)
@@ -412,56 +447,62 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 	}
 
 	// Require IP verification, if the session is not authenticated.
-	if authorized := loginHistory.IsAuthorizedIP(session.clientIP); !authorized {
+	if authorized := loginHistory.IsAuthorizedIP(session.clientIP); authorized || params.IsWebsocketAuthenticated {
 
-		// Automatically validate the IP if the session is authenticated.
-		if params.IsWebsocketAuthenticated {
-
-			if isNew := loginHistory.AuthorizeIP(session.clientIP); isNew {
-				if err := p.appBot.SendIPAuthorizationNotification(params.account.User.Id, session.clientIP); err != nil {
-					// Log the error, but don't return it.
-					logger.Warn("Failed to send IP authorization notification", zap.Error(err))
-				}
+		// Update the last used time.
+		if isNew := loginHistory.AuthorizeIP(session.clientIP); isNew {
+			if err := p.appBot.SendIPAuthorizationNotification(params.account.User.Id, session.clientIP); err != nil {
+				// Log the error, but don't return it.
+				logger.Warn("Failed to send IP authorization notification", zap.Error(err))
 			}
+		}
 
-		} else {
+	} else {
 
-			// IP is not authorized. Add a pending authorization entry.
-			entry := loginHistory.AddPendingAuthorizationIP(params.xpID, session.clientIP, params.loginPayload)
+		// IP is not authorized. Add a pending authorization entry.
+		entry := loginHistory.AddPendingAuthorizationIP(params.xpID, session.clientIP, params.loginPayload)
 
-			// Use the last two digits of the nanos seconds as the 2FA code.
-			twoFactorCode := fmt.Sprintf("%02d", entry.CreatedAt.Nanosecond()%100)
+		// Use the last two digits of the nanos seconds as the 2FA code.
+		twoFactorCode := fmt.Sprintf("%02d", entry.CreatedAt.Nanosecond()%100)
+		metricsTags["error"] = "ip_verification_required"
+		if p.appBot != nil && p.appBot.dg != nil && p.appBot.dg.State != nil && p.appBot.dg.State.User != nil {
+			botUsername := p.appBot.dg.State.User.Username
+			if err := p.appBot.SendIPApprovalRequest(ctx, params.account.User.Id, entry, params.ipInfo); err == nil {
+				return NewLocationError{
+					code:        twoFactorCode,
+					botUsername: botUsername,
+					useDMs:      true,
+				}
+			} else {
+				if !IsDiscordErrorCode(err, discordgo.ErrCodeCannotSendMessagesToThisUser) {
+					metricsTags["error"] = "failed_send_ip_approval_request"
+					return fmt.Errorf("failed to send IP approval request: %w", err)
+				}
+				// The user has DMs from non-friends disabled. Tell them to use the slash command instead.
 
-			if p.appBot != nil && p.appBot.dg != nil && p.appBot.dg.State != nil && p.appBot.dg.State.User != nil {
-
-				if err := p.appBot.SendIPApprovalRequest(ctx, params.account.User.Id, entry, params.ipInfo); err != nil {
-
-					if !IsDiscordErrorCode(err, discordgo.ErrCodeCannotSendMessagesToThisUser) {
-						metricsTags["error"] = "failed_send_ip_approval_request"
-						return fmt.Errorf("failed to send IP approval request: %w", err)
-					}
-					// The user has DMs from non-friends disabled. Tell them to use the slash command instead.
-
-					// Use the guild name if it's available
-					if guildID := p.discordCache.GroupIDToGuildID(params.accountMetadata.ActiveGroupID); guildID != "" {
-
-						if guild, err := p.discordCache.dg.Guild(guildID); err == nil {
-							return fmt.Errorf("Authorize new location:\n Go to %s in Discord, then type /verify\nWhen prompted, select code >>> %s <<<", guild.Name, twoFactorCode)
+				if guildID := p.discordCache.GroupIDToGuildID(params.accountMetadata.ActiveGroupID); guildID != "" {
+					// Use the guild name
+					if guild, err := p.discordCache.dg.Guild(guildID); err == nil {
+						return NewLocationError{
+							guildName: guild.Name,
+							code:      twoFactorCode,
 						}
 					}
-					return fmt.Errorf("Please authorize this new location by typing:\n/verify\nand select code >>> %s <<< in a guild with the @%s bot.", twoFactorCode, p.appBot.dg.State.User.Username)
-
+				} else if p.appBot.dg.State.User.Username != "" {
+					// Use the bot name
+					return NewLocationError{
+						botUsername: p.appBot.dg.State.User.Username,
+						code:        twoFactorCode,
+					}
+				} else {
+					// Just return an error, since there's no way to verify the user.
+					metricsTags["error"] = "ip_verification_failed"
+					return NewLocationError{
+						code: twoFactorCode,
+					}
 				}
-
-				metricsTags["error"] = "ip_verification_required"
-				return fmt.Errorf("Please authorize this new location.\nCheck your Discord DMs from @%s. \nSelect code >>> %s <<<.", p.appBot.dg.State.User.Username, twoFactorCode)
 			}
-
-			metricsTags["error"] = "ip_verification_failed"
-			return errors.New("New location detected. Please contact EchoVRCE support.")
 		}
-	} else {
-		loginHistory.AuthorizeIP(session.clientIP)
 	}
 
 	metricsTags["error"] = "nil"
