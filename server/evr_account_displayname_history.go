@@ -278,42 +278,7 @@ func DisplayNameHistoryUpdate(ctx context.Context, nk runtime.NakamaModule, user
 	return nil
 }
 
-func DisplayNameCacheRegexSearch(ctx context.Context, nk runtime.NakamaModule, displayName string, limit int) (map[string]map[string]map[string]time.Time, error) {
-
-	var useWildcardPrefix, useWildcardSuffix bool
-
-	// Check if the display name has a wildcard prefix or suffix
-	if strings.HasPrefix(displayName, "*") {
-		displayName = displayName[1:]
-		useWildcardPrefix = true
-	}
-	if strings.HasSuffix(displayName, "*") {
-		displayName = displayName[:len(displayName)-1]
-		useWildcardSuffix = true
-	}
-
-	// Sanitize the display name
-	displayName = strings.ToLower(sanitizeDisplayName(displayName))
-
-	// If the display name is empty, return nil
-	if len(displayName) == 0 {
-		return nil, fmt.Errorf("search string is empty")
-	}
-
-	// If the display name is less than 3 characters, don't use wildcards
-	if len(displayName) < 3 && (useWildcardPrefix || useWildcardSuffix) {
-		return nil, fmt.Errorf("search string is too short for wildcards")
-	}
-
-	pattern := Query.Escape(displayName)
-
-	// Check if the display name is a partial match
-	if useWildcardPrefix {
-		pattern = fmt.Sprintf(".*%s", pattern)
-	}
-	if useWildcardSuffix {
-		pattern = fmt.Sprintf("%s.*", pattern)
-	}
+func DisplayNameCacheRegexSearch(ctx context.Context, nk runtime.NakamaModule, pattern string, limit int) (map[string]map[string]map[string]time.Time, error) {
 
 	query := fmt.Sprintf(`+value.cache:/%s/`, pattern)
 
@@ -343,19 +308,7 @@ func DisplayNameCacheRegexSearch(ctx context.Context, nk runtime.NakamaModule, d
 		}
 	}
 
-	matches := make(map[string]map[string]map[string]time.Time, len(histories)) // map[userID]map[groupID]map[displayName]lastUsedTime'
-
-	matchFn := func(s string, p string) bool {
-		s = strings.ToLower(s)
-		if useWildcardPrefix && useWildcardSuffix {
-			return strings.Contains(s, p)
-		} else if useWildcardPrefix {
-			return strings.HasSuffix(s, p)
-		} else if useWildcardSuffix {
-			return strings.HasPrefix(s, p)
-		}
-		return s == p
-	}
+	matches := make(map[string]map[string]map[string]time.Time, len(histories)) // map[userID]map[groupID]map[displayName]lastUsedTime
 
 	const globalGroupID = ""
 
@@ -367,21 +320,18 @@ func DisplayNameCacheRegexSearch(ctx context.Context, nk runtime.NakamaModule, d
 			matches[userID][groupID] = make(map[string]time.Time)
 
 			for name, lastUsed := range e {
-
-				if matchFn(name, displayName) {
-					matches[userID][groupID][name] = lastUsed
-				}
+				matches[userID][groupID][name] = lastUsed
 			}
 		}
 
 		// Add exact matches for usernames
-		if strings.ToLower(history.Username) == displayName {
+		if strings.ToLower(history.Username) == pattern {
 			matches[userID][globalGroupID][history.Username] = time.Time{}
 		}
 
 		// Add exact matches for reserved names
 		for name := range history.Reserved {
-			if strings.ToLower(name) == displayName {
+			if strings.ToLower(name) == pattern {
 				matches[userID][globalGroupID][name] = time.Time{}
 			}
 		}
@@ -459,6 +409,7 @@ func DisplayNameCacheRegexSearch(ctx context.Context, nk runtime.NakamaModule, d
 }
 
 func DisplayNameHistoryActiveList(ctx context.Context, nk runtime.NakamaModule, displayName string) ([]string, error) {
+	displayName = strings.ToLower(displayName)
 
 	query := fmt.Sprintf("+value.active:%s", Query.Escape(displayName))
 
