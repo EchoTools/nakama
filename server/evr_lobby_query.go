@@ -89,6 +89,7 @@ var queryStringReplacer = strings.NewReplacer(
 	`\\`, `\\`,
 	`/`, `\/`,
 	` `, `\ `,
+	`.`, `\.`,
 )
 
 func (query) escapeString(input string) string {
