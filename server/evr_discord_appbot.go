@@ -22,7 +22,6 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/echotools/vrmlgo/v5"
 	"github.com/gofrs/uuid/v5"
-	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/samber/lo"
@@ -296,7 +295,7 @@ var (
 					Required:    false,
 				},
 				{
-					Type:        discordgo.ApplicationCommandOptionBoolean,
+					Type:        discordgo.ApplicationCommandOptionInteger,
 					Name:        "grace-seconds",
 					Description: "Seconds to wait before forcing the shutdown.",
 					Required:    false,
