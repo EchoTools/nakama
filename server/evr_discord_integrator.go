@@ -150,29 +150,6 @@ func (c *DiscordIntegrator) Start() {
 		}
 	}()
 
-	// Regularly update the guild groups from the database.
-	go func() {
-		ctx := c.ctx
-		nk := c.nk
-		ticker := time.NewTicker(time.Minute * 1)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-c.ctx.Done():
-				return
-			case <-ticker.C:
-				c.guildGroupRegistry.Range(func(gg *GuildGroup) bool {
-					if gg, err := GuildGroupLoad(ctx, nk, gg.ID().String()); err != nil {
-						logger.Warn("Error loading guild group", zap.Error(err))
-					} else {
-						c.guildGroupRegistry.Add(gg)
-					}
-					return true
-				})
-			}
-		}
-	}()
-
 	dg.AddHandler(func(s *discordgo.Session, m *discordgo.GuildCreate) {
 		if err := c.handleGuildCreate(logger, s, m); err != nil {
 			logger.Error("Error handling guild create", zap.Error(err))

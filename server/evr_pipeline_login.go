@@ -739,7 +739,7 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 
 	userID := session.userID.String()
 
-	gg := p.guildGroupRegistry.Get(params.accountMetadata.GetActiveGroupID())
+	gg := p.guildGroupRegistry.Get(params.accountMetadata.GetActiveGroupID().String())
 	if gg == nil {
 		return fmt.Errorf("guild group not found: %s", params.accountMetadata.GetActiveGroupID().String())
 	}

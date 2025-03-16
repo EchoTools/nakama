@@ -2427,7 +2427,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					}
 				}
 			}
-			gg := d.guildGroupRegistry.Get(uuid.FromStringOrNil(groupID))
+			gg := d.guildGroupRegistry.Get(groupID)
 			if gg == nil {
 				return errors.New("failed to get guild group")
 			}
@@ -2544,7 +2544,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				} else {
 					results = append(results, fmt.Sprintf("timeout expires on <t:%d:F> (<t:%d:R>)", timeoutExpiry.UTC().Unix(), timeoutExpiry.UTC().Unix()))
 				}
-				gg := d.guildGroupRegistry.Get(uuid.FromStringOrNil(groupID))
+				gg := d.guildGroupRegistry.Get(groupID)
 				if gg == nil {
 					return errors.New("failed to get guild group")
 				}
@@ -2672,8 +2672,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			metadata, err := GroupMetadataLoad(ctx, d.db, groupID)
 			if err != nil {
 				return errors.New("failed to get guild group metadata")
-
 			}
+
 			roles := metadata.RoleMap
 			for _, o := range options {
 				roleID := o.RoleValue(s, guild.ID).ID
@@ -4028,7 +4028,7 @@ func (d *DiscordAppBot) LogAuditMessage(ctx context.Context, groupID string, mes
 		message = d.cache.ReplaceMentions(message)
 	}
 
-	gg := d.guildGroupRegistry.Get(uuid.FromStringOrNil(groupID))
+	gg := d.guildGroupRegistry.Get(groupID)
 	if gg == nil {
 		return nil, fmt.Errorf("group not found")
 	}
@@ -4057,7 +4057,7 @@ func (d *DiscordAppBot) LogUserErrorMessage(ctx context.Context, groupID string,
 		return nil, err
 	}
 
-	gg := d.guildGroupRegistry.Get(uuid.FromStringOrNil(groupID))
+	gg := d.guildGroupRegistry.Get(groupID)
 	if gg == nil {
 		return nil, fmt.Errorf("group not found")
 	}
