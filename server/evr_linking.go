@@ -28,6 +28,7 @@ type LinkTicket struct {
 	XPID         evr.EvrId         `json:"xp_id"`              // the xplatform ID used by EchoVR
 	ClientIP     string            `json:"client_ip"`          // the client IP address that generated this link ticket
 	LoginProfile *evr.LoginProfile `json:"game_login_request"` // the login request payload that generated this link ticket
+	CreatedAt    time.Time         `json:"created_at"`         // the time the link ticket was created
 }
 
 func LoadLinkTickets(ctx context.Context, nk runtime.NakamaModule) (map[string]*LinkTicket, error) {
@@ -76,7 +77,7 @@ func StoreLinkTickets(ctx context.Context, nk runtime.NakamaModule, linkTickets 
 }
 
 // linkTicket generates a link ticket for the provided xplatformId and hmdSerialNumber.
-func (p *EvrPipeline) linkTicket(ctx context.Context, logger *zap.Logger, xpid evr.EvrId, clientIP string, loginData *evr.LoginProfile) (*LinkTicket, error) {
+func (p *EvrPipeline) linkTicket(ctx context.Context, xpid evr.EvrId, clientIP string, loginData *evr.LoginProfile) (*LinkTicket, error) {
 
 	if loginData == nil {
 		// This should't happen. A login request is required to create a link ticket.
@@ -124,6 +125,7 @@ func generateLinkTicket(linkTickets map[string]*LinkTicket, xpid evr.EvrId, clie
 		XPID:         xpid,
 		ClientIP:     clientIP,
 		LoginProfile: loginData,
+		CreatedAt:    time.Now(),
 	}
 	linkTickets[ticket.Code] = ticket
 
