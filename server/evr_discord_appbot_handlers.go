@@ -83,7 +83,7 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(logger runtime.Logge
 
 	case "create":
 
-		gg := d.guildGroupRegistry.Get(uuid.FromStringOrNil(groupID))
+		gg := d.guildGroupRegistry.Get(groupID)
 		if gg == nil {
 			return simpleInteractionResponse(s, i, "This guild is not registered.")
 		}
@@ -99,7 +99,7 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(logger runtime.Logge
 		}
 
 	case "allocate":
-		gg := d.guildGroupRegistry.Get(uuid.FromStringOrNil(groupID))
+		gg := d.guildGroupRegistry.Get(groupID)
 		if gg == nil {
 			return simpleInteractionResponse(s, i, "This guild is not registered.")
 		}
@@ -110,7 +110,7 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(logger runtime.Logge
 
 	case "trigger-cv", "kick-player", "join-player", "igp", "ign", "shutdown-match":
 
-		gg := d.guildGroupRegistry.Get(uuid.FromStringOrNil(groupID))
+		gg := d.guildGroupRegistry.Get(groupID)
 		if gg == nil {
 			return simpleInteractionResponse(s, i, "This guild is not registered.")
 		}

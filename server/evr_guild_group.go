@@ -374,7 +374,7 @@ func GuildUserGroupsList(ctx context.Context, nk runtime.NakamaModule, guildGrou
 			case "guild":
 
 				if guildGroupRegistry != nil {
-					if gg := guildGroupRegistry.Get(uuid.FromStringOrNil(ug.Group.Id)); gg != nil {
+					if gg := guildGroupRegistry.Get(ug.Group.Id); gg != nil {
 						guildGroups[ug.Group.Id] = gg
 					}
 				} else {

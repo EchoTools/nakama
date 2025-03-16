@@ -15,27 +15,97 @@
 package server
 
 import (
+	"context"
+	"database/sql"
+	"fmt"
+	"sync"
+	"time"
+
 	"github.com/gofrs/uuid/v5"
+	"github.com/heroiclabs/nakama-common/runtime"
+	"go.uber.org/zap"
 )
 
 type GuildGroupRegistry struct {
-	guildGroups *MapOf[uuid.UUID, *GuildGroup]
+	sync.RWMutex
+	ctx    context.Context
+	logger runtime.Logger
+	nk     runtime.NakamaModule
+	db     *sql.DB
+
+	guildGroups map[uuid.UUID]*GuildGroup
 }
 
-func NewGuildGroupRegistry() *GuildGroupRegistry {
-	return &GuildGroupRegistry{
-		guildGroups: &MapOf[uuid.UUID, *GuildGroup]{},
+func NewGuildGroupRegistry(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB) *GuildGroupRegistry {
+
+	registry := &GuildGroupRegistry{
+		ctx:    ctx,
+		logger: logger,
+		nk:     nk,
+		db:     db,
+
+		guildGroups: make(map[uuid.UUID]*GuildGroup),
 	}
+
+	// Regularly update the guild groups from the database.
+	go func() {
+		ctx := ctx
+		ticker := time.NewTicker(time.Minute * 1)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				registry.Lock()
+				// Load all guild groups from the database.
+				registry.guildGroups = make(map[uuid.UUID]*GuildGroup)
+
+				cursor := ""
+				for {
+
+					// List all guild groups.
+					groups, cursor, err := nk.GroupsList(ctx, "", "guild", nil, nil, 100, cursor)
+					if err != nil {
+						logger.Warn("Error listing guild groups", zap.Error(err))
+						break
+					}
+
+					for _, group := range groups {
+
+						// Load the state
+						if state, err := GuildGroupStateLoad(ctx, nk, ServiceSettings().DiscordBotUserID, group.Id); err != nil {
+							logger.Warn("Error loading guild group state", zap.Error(err))
+							continue
+						} else if registry.guildGroups[uuid.FromStringOrNil(group.Id)], err = NewGuildGroup(group, state); err != nil {
+							logger.Warn("Error creating guild group", zap.Error(err))
+							continue
+						}
+					}
+					if cursor == "" {
+						break
+					}
+				}
+				registry.Unlock()
+			}
+		}
+	}()
+
+	return registry
 }
 
 func (r *GuildGroupRegistry) Stop() {}
 
-func (r *GuildGroupRegistry) Get(groupID uuid.UUID) *GuildGroup {
-	if groupID.IsNil() {
+func (r *GuildGroupRegistry) Get(groupID string) *GuildGroup {
+	gid := uuid.FromStringOrNil(groupID)
+	if gid == uuid.Nil {
+		// Return nil
 		return nil
 	}
 
-	gg, ok := r.guildGroups.Load(groupID)
+	r.RLock()
+	defer r.RUnlock()
+	gg, ok := r.guildGroups[gid]
 	if !ok {
 		return nil
 	}
@@ -46,15 +116,38 @@ func (r *GuildGroupRegistry) Add(gg *GuildGroup) {
 	if gg.ID().IsNil() {
 		return
 	}
-	r.guildGroups.Store(gg.ID(), gg)
+	r.Lock()
+	defer r.Unlock()
+	r.guildGroups[gg.ID()] = gg
 }
 
 func (r *GuildGroupRegistry) Remove(groupID uuid.UUID) {
-	r.guildGroups.Delete(groupID)
+	r.Lock()
+	defer r.Unlock()
+	delete(r.guildGroups, groupID)
 }
 
-func (r *GuildGroupRegistry) Range(fn func(*GuildGroup) bool) {
-	r.guildGroups.Range(func(id uuid.UUID, gg *GuildGroup) bool {
-		return fn(gg)
-	})
+// MetadataLoad retrieves the metadata for a guild group from the database.
+func (r *GuildGroupRegistry) MetadataLoad(ctx context.Context, groupID string) (*GroupMetadata, error) {
+	r.Lock()
+	defer r.Unlock()
+	metadata, err := GroupMetadataLoad(ctx, r.db, groupID)
+	if err != nil {
+		return nil, fmt.Errorf("error loading group metadata: %w", err)
+	}
+	return metadata, nil
+}
+
+// MetadataStore writes the metadata for a guild group to the database.
+func (r *GuildGroupRegistry) MetadataStore(ctx context.Context, groupID uuid.UUID, metadata *GroupMetadata) error {
+	r.Lock()
+	defer r.Unlock()
+	data, err := metadata.MarshalToMap()
+	if err != nil {
+		return fmt.Errorf("error marshalling group data: %w", err)
+	}
+	if err := r.nk.GroupUpdate(ctx, groupID.String(), SystemUserID, "", "", "", "", "", false, data, 1000000); err != nil {
+		return fmt.Errorf("error updating group: %w", err)
+	}
+	return nil
 }

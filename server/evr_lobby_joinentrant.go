@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
@@ -47,7 +46,10 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 	}
 
 	// Additional entrants are considered reservations
-	metadata := EntrantMetadata{Presence: entrants[0], Reservations: entrants[1:]}.ToMatchMetadata()
+	metadata := EntrantMetadata{
+		Presence:     entrants[0],
+		Reservations: entrants[1:],
+	}.ToMatchMetadata()
 
 	e := entrants[0]
 
@@ -198,7 +200,10 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		// If there is no member role, the user is considered a member if they are in the discord guild.
 		isMember = gg.RoleMap.Member == "" || gg.IsMember(userID)
 	} else {
-		gg = p.guildGroupRegistry.Get(uuid.FromStringOrNil(groupID))
+		gg = p.guildGroupRegistry.Get(groupID)
+		if gg == nil {
+			return fmt.Errorf("failed to get guild group: %s", groupID)
+		}
 	}
 
 	sendAuditMessage := gg.AuditChannelID != ""
