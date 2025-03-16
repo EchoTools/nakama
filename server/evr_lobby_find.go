@@ -409,6 +409,7 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 
 	fallbackTimer := time.NewTimer(lobbyParams.FallbackTimeout)
 	failsafeTimer := time.NewTimer(lobbyParams.FailsafeTimeout)
+	rtts := lobbyParams.latencyHistory.LatestRTTs()
 	for {
 		var err error
 		select {
@@ -480,6 +481,7 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 			}
 
 			l := labelMeta.State
+			entrants[0].PingMillis = rtts[l.GameServer.Endpoint.GetExternalIP()]
 
 			// Social lobbies can only have one team
 			if lobbyParams.Mode == evr.ModeSocialPublic {
