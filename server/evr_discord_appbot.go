@@ -2572,8 +2572,20 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					continue
 				}
 
-				if label.GetGroupID().String() != groupID && !isGlobalOperator {
-					results = append(results, "user's lobby is not from this guild.")
+				var allowed bool
+
+				if isGlobalOperator || label.SpawnedBy == userID || label.GameServer.OperatorID.String() == userID {
+					allowed = true
+				} else {
+					if gg, err := GuildGroupLoad(ctx, nk, label.GetGroupID().String()); err != nil {
+						return errors.New("failed to load guild group")
+					} else if gg.IsEnforcer(userID) {
+						allowed = true
+					}
+				}
+
+				if !allowed {
+					results = append(results, "user's match is not from this guild")
 					continue
 				}
 
