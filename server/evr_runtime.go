@@ -187,7 +187,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	// Update the metrics with match data
 	go func() {
 		<-time.After(15 * time.Second)
-		metricsUpdateLoop(ctx, logger, nk.(*RuntimeGoNakamaModule))
+		metricsUpdateLoop(ctx, logger, nk.(*RuntimeGoNakamaModule), db)
 	}()
 
 	logger.Info("Initialized runtime module.")

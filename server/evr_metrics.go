@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"strconv"
 	"time"
@@ -155,7 +156,7 @@ func ListMatchStates(ctx context.Context, nk runtime.NakamaModule, query string)
 	return matchStates, nil
 }
 
-func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGoNakamaModule) {
+func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGoNakamaModule, db *sql.DB) {
 
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
@@ -284,6 +285,14 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 
 		previouslySeenMatches = seenMatches
 
+		// Update linked headset counts
+		linkedUsers, err := CountLinkedUsers(ctx, nk, db)
+		if err != nil {
+			logger.Error("Error counting linked users: %v", err)
+		} else {
+			nk.metrics.CustomGauge("linked_users_gauge", nil, float64(linkedUsers))
+		}
+
 		// Update the geomap data
 		locations := make(map[string][]float64)
 
@@ -339,4 +348,21 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 		}
 		previouslySeenMatchmaking = seenMatchmaking
 	}
+}
+
+func CountLinkedUsers(ctx context.Context, nk runtime.NakamaModule, db *sql.DB) (int, error) {
+	query := "SELECT count(user_id) FROM user_device WHERE id LIKE 'OVR-%' OR id LIKE 'DMO-%'"
+	rows, err := db.QueryContext(ctx, query)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	var count int
+	for rows.Next() {
+		if err := rows.Scan(&count); err != nil {
+			return 0, err
+		}
+	}
+	return count, nil
 }
