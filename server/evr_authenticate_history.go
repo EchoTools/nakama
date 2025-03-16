@@ -474,6 +474,8 @@ func LoginHistoryRegexSearch(ctx context.Context, nk runtime.NakamaModule, patte
 			if err := json.Unmarshal([]byte(obj.Value), &history); err != nil {
 				return nil, fmt.Errorf("error unmarshalling display name history: %w", err)
 			}
+			history.userID = obj.UserId
+			history.version = obj.Version
 			histories[obj.UserId] = &history
 		}
 
