@@ -3,6 +3,7 @@ package server
 import (
 	"math"
 	"slices"
+	"sort"
 
 	"maps"
 
@@ -10,6 +11,21 @@ import (
 	"github.com/intinig/go-openskill/rating"
 	"github.com/intinig/go-openskill/types"
 )
+
+type PredictedMatch struct {
+	Candidate           []runtime.MatchmakerEntry `json:"match"`
+	Draw                float64                   `json:"draw"`
+	Size                int                       `json:"size"`
+	TeamRankPercentileA float64                   `json:"rank_percentile_a"`
+	TeamRankPercentileB float64                   `json:"rank_percentile_b"`
+	RankPercentileDelta float64                   `json:"rank_percentile_delta"`
+	TeamOrdinalA        float64                   `json:"team_ordinal_a"`
+	TeamOrdinalB        float64                   `json:"team_ordinal_b"`
+	TeamStrengthA       float64                   `json:"team_strength_a"`
+	TeamStrengthB       float64                   `json:"team_strength_b"`
+	OrdinalDelta        float64                   `json:"ordinal_delta"`
+	MuDelta             float64                   `json:"mu_delta"`
+}
 
 type CandidateList []runtime.MatchmakerEntry
 
@@ -33,7 +49,7 @@ func (g CandidateList) TeamRating() types.TeamRating {
 	return types.TeamRating{Team: g.Ratings()}
 }
 
-func (g CandidateList) Ordinal() float64 {
+func (g CandidateList) TeamOrdinal() float64 {
 	return rating.TeamOrdinal(g.TeamRating())
 }
 
@@ -45,7 +61,7 @@ func (g CandidateList) Strength() float64 {
 	return strength
 }
 
-func HashMatchmakerEntries(entries []runtime.MatchmakerEntry) uint64 {
+func HashMatchmakerEntries[E runtime.MatchmakerEntry](entries []E) uint64 {
 	var hash uint64
 	tickets := make([]string, len(entries))
 	for i, entry := range entries {
@@ -60,7 +76,7 @@ func HashMatchmakerEntries(entries []runtime.MatchmakerEntry) uint64 {
 	return hash
 }
 
-func predictMatchOutcomes(candidates [][]runtime.MatchmakerEntry) []PredictedMatch {
+func predictCandidateOutcomes(candidates [][]runtime.MatchmakerEntry) []PredictedMatch {
 
 	// count the number of valid candidates
 	var validCandidates int
@@ -97,53 +113,58 @@ func predictMatchOutcomes(candidates [][]runtime.MatchmakerEntry) []PredictedMat
 
 		maps.Copy(tickets, ticketSet)
 
-		// Check if the players are able to reach each other.
-
-		// Sort the candidates by size, largest first, then by strength (descending)
-		slices.SortStableFunc(c, func(a, b runtime.MatchmakerEntry) int {
-			ticketA := a.GetTicket()
-			ticketB := b.GetTicket()
-			if ticketA == ticketB {
-				return 0
-			}
-			candidatesA := tickets[ticketA]
-			candidatesB := tickets[ticketB]
-			if candidatesA.Len() != candidatesB.Len() {
-				return candidatesB.Len() - candidatesA.Len()
-			}
-			return int(candidatesA.Strength() - candidatesB.Strength())
-		})
-
-		teamSize := len(c) / 2
-		teamA, teamB := make(CandidateList, 0, teamSize), make(CandidateList, 0, teamSize)
-
+		// Put the strongest players on team A
+		groups := make([]CandidateList, 0, len(ticketSet))
 		for _, entries := range ticketSet {
-			if len(teamA) > len(teamB) || teamA.Strength() > teamB.Strength() {
-				teamB = append(teamB, entries...)
-			} else {
-				teamA = append(teamA, entries...)
-			}
+			groups = append(groups, entries)
 		}
+		sortByRanks(groups)
 
-		strengthA := teamA.Strength()
-		strengthB := teamB.Strength()
-		// Sort so that team1 (blue) is the stronger team
-		if strengthA < strengthB {
-			teamA, teamB = teamB, teamA
+		teamA, teamB := organizeAsTeams(groups, len(c)/2)
+		// If the teams are not balanced, continue to the next candidate
+		if len(teamA) != len(teamB) {
+			continue
 		}
-
 		// copy the teams into the candidate
 		copy(c, append(teamA, teamB...))
 
 		predictions = append(predictions, PredictedMatch{
-			Candidate:    c,
-			Draw:         rating.PredictDraw([]types.Team{teamA.Ratings(), teamB.Ratings()}, nil),
-			Size:         len(c),
-			TeamOrdinalA: strengthA,
-			TeamOrdinalB: strengthB,
-			OrdinalDelta: math.Abs(teamA.Ordinal() - teamB.Ordinal()),
+			Candidate:     c,
+			Draw:          rating.PredictDraw([]types.Team{teamA.Ratings(), teamB.Ratings()}, nil),
+			Size:          len(c),
+			TeamOrdinalA:  teamA.TeamOrdinal(),
+			TeamOrdinalB:  teamB.TeamOrdinal(),
+			TeamStrengthA: teamA.Strength(),
+			TeamStrengthB: teamB.Strength(),
+			OrdinalDelta:  math.Abs(teamA.TeamOrdinal() - teamB.TeamOrdinal()),
 		})
 	}
 
 	return predictions
+}
+
+func organizeAsTeams(groups []CandidateList, teamSize int) (CandidateList, CandidateList) {
+	teamA, teamB := make(CandidateList, 0, teamSize), make(CandidateList, 0, teamSize)
+	for _, entries := range groups {
+		if len(teamA) <= len(teamB) {
+			teamA = append(teamA, entries...)
+		} else {
+			teamB = append(teamB, entries...)
+		}
+	}
+	return teamA, teamB
+}
+
+func sortByRanks(groups []CandidateList) {
+
+	ratings := make([]types.Team, 0, len(groups))
+	for _, entries := range groups {
+		ratings = append(ratings, entries.Ratings())
+	}
+
+	ranks, _ := rating.PredictRank(ratings, nil)
+
+	sort.SliceStable(groups, func(i, j int) bool {
+		return ranks[i] < ranks[j]
+	})
 }

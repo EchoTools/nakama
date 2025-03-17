@@ -17,9 +17,7 @@ package server
 import (
 	"math"
 	"math/bits"
-	"slices"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/blugelabs/bluge"
@@ -351,7 +349,8 @@ func (m *LocalMatchmaker) processCustom(activeIndexesCopy map[string]*Matchmaker
 		index.Intervals++
 	}
 
-	seenMatches := make(map[string]struct{}, len(activeIndexesCopy))
+	seenCandidateSet := make(map[uint64]struct{}, len(activeIndexesCopy))
+	duplicateCount := 0
 
 	for ticket, index := range activeIndexesCopy {
 		if !threshold && timer != nil {
@@ -558,18 +557,13 @@ func (m *LocalMatchmaker) processCustom(activeIndexesCopy map[string]*Matchmaker
 			}
 
 			// Avoid duplicate matches.
-			tickets := make([]string, 0, hitCount)
-			for _, hitIndex := range hitIndexes {
-				for _, entry := range hitIndex.Entries {
-					tickets = append(tickets, entry.Ticket)
-				}
-			}
-			slices.Sort(tickets)
-			rosterKey := strings.Join(tickets, "")
-			if _, found := seenMatches[rosterKey]; found {
+
+			rosterKey := HashMatchmakerEntries(index.Entries)
+			if _, found := seenCandidateSet[rosterKey]; found {
+				duplicateCount++
 				continue
 			} else {
-				seenMatches[rosterKey] = struct{}{}
+				seenCandidateSet[rosterKey] = struct{}{}
 			}
 
 			// Hit is valid, collect all its entries.
@@ -583,6 +577,7 @@ func (m *LocalMatchmaker) processCustom(activeIndexesCopy map[string]*Matchmaker
 			matchedEntries = append(matchedEntries, matchedEntry)
 		}
 	}
+	m.logger.Debug("Matchmaker process custom", zap.Int("duplicate_count", duplicateCount))
 
 	if len(matchedEntries) == 0 {
 		return matchedEntries, expiredActiveIndexes
