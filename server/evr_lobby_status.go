@@ -55,7 +55,7 @@ func JoinMatchmakingStream(logger *zap.Logger, s *sessionWS, lobbyParams *LobbyS
 	ticketConfig, ok := DefaultMatchmakerTicketConfigs[lobbyParams.Mode]
 	if !ok {
 		ticketConfig = MatchmakingTicketParameters{
-			IncludeRankRange:        true,
+			IncludeSBMMRanges:       true,
 			IncludeEarlyQuitPenalty: true,
 		}
 	}
