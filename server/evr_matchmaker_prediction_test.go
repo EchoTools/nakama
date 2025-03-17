@@ -15,6 +15,8 @@ import (
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/intinig/go-openskill/rating"
+	"github.com/intinig/go-openskill/types"
 	"gopkg.in/yaml.v3"
 )
 
@@ -111,7 +113,7 @@ func generateMatchmakerEntries(count int) []*MatchmakerEntry {
 }
 func generateMatchmakerCandidates(count int) [][]runtime.MatchmakerEntry {
 	entries := generateMatchmakerEntries(count)
-	candidates := make([][]runtime.MatchmakerEntry, 0)
+	candidates := make([][]runtime.MatchmakerEntry, 0, count*8)
 	// Create all combinations of 8 players from the entries
 	for i := range entries {
 		for j := i + 1; j < len(entries); j++ {
@@ -159,19 +161,19 @@ func BenchmarkPredictOutcomes(b *testing.B) {
 		defer pprof.WriteHeapProfile(memProfile)
 	}
 	// Create all combinations of 8 players from the entries
-	candidates := generateMatchmakerCandidates(24)
+	candidates := generateMatchmakerCandidates(32)
 	b.Logf("candidate count: %d", len(candidates))
 
 	for b.Loop() {
 		b.ReportMetric(float64(len(candidates)), "candidates")
-		predictions := predictMatchOutcomes(candidates)
+		predictions := predictCandidateOutcomes(candidates)
 		b.ReportMetric(float64(len(predictions)), "predictions")
 	}
 }
 func TestCharacterizationMatchmaker(t *testing.T) {
 
 	var (
-		downloadLiveData = false
+		downloadLiveData = true
 		stateFilename    = "../_local/matchmaker-state.json"
 	)
 	state := MatchmakerStateResponse{}
@@ -210,6 +212,7 @@ func TestCharacterizationMatchmaker(t *testing.T) {
 	for _, e := range state.Index {
 		for _, p := range e.Presences {
 			properties := make(map[string]any)
+
 			for k, v := range e.StringProperties {
 				properties[k] = v
 			}
@@ -280,13 +283,61 @@ func TestCharacterizationMatchmaker(t *testing.T) {
 
 		// get the players in the match
 		playerIds := make([]string, 0, len(match))
-		for _, p := range match {
-			matchedPlayersSet[p.GetPresence().GetUsername()] = struct{}{}
-			playerIds = append(playerIds, playerIDMap[p.GetPresence().GetUsername()])
+		for _, e := range match {
+			matchedPlayersSet[e.GetPresence().GetUsername()] = struct{}{}
+			playerIds = append(playerIds, playerIDMap[e.GetPresence().GetUsername()])
 		}
 
 		t.Logf("  Match %d: %s", count, strings.Join(playerIds, ", "))
 		count++
+
+		c := CandidateList(match)
+		teams := make([]types.Team, 0, 2)
+		teams = append(teams, c[:4].Ratings())
+		teams = append(teams, c[4:].Ratings())
+
+		ordinals := make([]float64, 0, 8)
+		for _, r := range c.Ratings() {
+			ordinals = append(ordinals, rating.Ordinal(r))
+		}
+
+		groups := make(map[string]CandidateList, 2)
+		for _, e := range c {
+			groups[e.GetTicket()] = append(groups[e.GetTicket()], e)
+		}
+		groupRatings := make([]types.Team, 0, 2)
+		groupOrdinals := make([]float64, 0, 8)
+		for _, entries := range groups {
+			groupRatings = append(groupRatings, entries.Ratings())
+			groupOrdinals = append(groupOrdinals, entries.TeamOrdinal())
+		}
+
+		teamRatingA := c[:4].TeamRating()
+		teamRatingB := c[4:].TeamRating()
+
+		ranks, probabilities := rating.PredictRank(groupRatings, nil)
+		teamOrdinalA := rating.TeamOrdinal(teamRatingA)
+		teamOrdinalB := rating.TeamOrdinal(teamRatingB)
+
+		playerMus := make([]int, 0, 8)
+		playerSigmas := make([]int, 0, 8)
+		for _, r := range c.Ratings() {
+			playerMus = append(playerMus, int(r.Mu))
+			playerSigmas = append(playerSigmas, int(r.Sigma*100))
+		}
+
+		//t.Logf("    Team Ratings: %v", []types.TeamRating{teamRatingA, teamRatingB})
+		t.Logf("    Team Ordinals: %v", []float64{teamOrdinalA, teamOrdinalB})
+		t.Logf("    Player Mus: %v", playerMus)
+		t.Logf("    Player Sigmas: %v", playerSigmas)
+		t.Logf("    Player Ordinals: %v", ordinals)
+		t.Logf("    Player Ranks: %v", ranks)
+		t.Logf("    Player Rank Probabilities: %v", probabilities)
+		t.Logf("    Group Ordinals: %v", groupOrdinals)
+		t.Logf("    Group Ratings: %v", groupRatings)
+
+		draw := rating.PredictDraw(teams, nil)
+		t.Logf("    Draw: %v", draw)
 	}
 	// count the total matches
 	t.Logf("Total matches: %d", count)

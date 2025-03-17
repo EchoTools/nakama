@@ -110,7 +110,7 @@ func CalculateNewPlayerRatings(players []PlayerInfo, blueWins bool) map[string]t
 		return playerScores[b.SessionID] - playerScores[a.SessionID]
 	})
 
-	// Split the roster by teamRatings
+	// Split the roster by teamRatings (all players are separated on their own team)
 	teamRatings := make([]types.Team, len(players))
 	for i, p := range players {
 		teamRatings[i] = types.Team{p.Rating()}

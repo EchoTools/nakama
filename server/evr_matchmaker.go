@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"log"
 	"os"
-	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -150,7 +150,7 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.Ma
 
 	// Create a list of balanced matches with predictions
 
-	predictions := predictMatchOutcomes(candidates)
+	predictions := predictCandidateOutcomes(candidates)
 
 	f, err := os.Create("/tmp/predictions.json")
 	if err != nil {
@@ -159,13 +159,12 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.Ma
 	defer f.Close()
 	json.NewEncoder(f).Encode(predictions)
 
-	slices.SortStableFunc(predictions, func(a, b PredictedMatch) int {
-		if a.Size != b.Size {
-			return b.Size - a.Size
+	sort.SliceStable(predictions, func(i, j int) bool {
+		if predictions[i].Size != predictions[j].Size {
+			return predictions[i].Size > predictions[j].Size
 		}
 
-		// Sort by the draw difference
-		return int((b.Draw - a.Draw) * 10000)
+		return predictions[i].OrdinalDelta < predictions[j].OrdinalDelta
 	})
 
 	madeMatches := m.assembleUniqueMatches(predictions)
