@@ -192,7 +192,7 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 			} else {
 
 				memberParams := &LobbySessionParameters{}
-				if err := json.Unmarshal([]byte(member.Presence.GetStatus()), &memberParams); err != nil {
+				if err := json.Unmarshal([]byte(member.Presence.GetStatus()), memberParams); err != nil {
 					logger.Warn("Failed to unmarshal member params", zap.Error(err))
 					continue
 				}

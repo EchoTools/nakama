@@ -245,6 +245,13 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				logger.Error("Equipped customization is empty")
 				continue
 			}
+
+			params, ok := LoadParams(session.Context())
+			if !ok {
+				logger.Error("Failed to load params")
+				continue
+			}
+
 			metadata, err := AccountMetadataLoad(ctx, p.nk, session.userID.String())
 			if err != nil {
 				logger.Error("Failed to load account metadata", zap.Error(err))
@@ -259,6 +266,35 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 			if err := AccountMetadataUpdate(ctx, p.nk, session.userID.String(), metadata); err != nil {
 				logger.Error("Failed to set account metadata", zap.Error(err))
 			}
+
+			// swap the metadata in the session parameters
+			metadata.account = params.accountMetadata.account
+			params.accountMetadata = metadata
+
+			StoreParams(session.Context(), &params)
+
+			modes := []evr.Symbol{
+				evr.ModeArenaPublic,
+				evr.ModeCombatPublic,
+			}
+
+			groupID := params.accountMetadata.GetActiveGroupID().String()
+			serverProfile, err := UserServerProfileFromParameters(ctx, logger, p.db, p.nk, params, groupID, modes, 0)
+			if err != nil {
+				return fmt.Errorf("failed to get server profile: %w", err)
+			}
+
+			if gg, ok := params.guildGroups[groupID]; ok {
+				if gg.IsEnforcer(session.userID.String()) && params.isGoldNameTag.Load() && serverProfile.DeveloperFeatures == nil {
+					// Give the user a gold name if they are enabled as a moderator in the guild, and want it.
+					serverProfile.DeveloperFeatures = &evr.DeveloperFeatures{}
+				}
+			}
+
+			if _, err := p.profileCache.Store(session.ID(), *serverProfile); err != nil {
+				return fmt.Errorf("failed to cache profile: %w", err)
+			}
+
 		case *evr.RemoteLogRepairMatrix:
 
 		case *evr.RemoteLogServerConnectionFailed:
