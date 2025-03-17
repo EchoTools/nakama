@@ -169,7 +169,12 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 			}
 		}
 
-		stream := lobbyParams.MatchmakingStream()
+		var (
+			stream          = lobbyParams.MatchmakingStream()
+			rankPercentiles = make([]float64, 0, 4)
+			ratings         = make([]types.Rating, 0, 4)
+			usernames       = make([]string, 0, 4)
+		)
 
 		for _, member := range lobbyGroup.List() {
 			if member.Presence.GetSessionId() == session.id.String() {
@@ -185,6 +190,21 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 					return nil, nil, false, fmt.Errorf("failed to kick party member: %w", err)
 				}
 			} else {
+
+				memberParams := &LobbySessionParameters{}
+				if err := json.Unmarshal([]byte(member.Presence.GetStatus()), &memberParams); err != nil {
+					logger.Warn("Failed to unmarshal member params", zap.Error(err))
+					continue
+				}
+
+				rankPercentiles = append(rankPercentiles, memberParams.GetRankPercentile())
+				ratings = append(ratings, memberParams.GetRating())
+				usernames = append(usernames, member.Presence.GetUsername())
+
+				partyOrdinal := rating.TeamOrdinal(types.TeamRating{
+					Team: types.Team(ratings),
+				})
+				lobbyParams.SetOrdinal(partyOrdinal)
 				/*
 
 					rankPercentiles = append(rankPercentiles, memberParams.GetRankPercentile())
@@ -192,30 +212,7 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 			}
 		}
 
-		var (
-			partySize       = lobbyGroup.Size()
-			usernames       = make([]string, 0, partySize)
-			rankPercentiles = make([]float64, 0, partySize)
-			ratings         = make([]types.Rating, 0, partySize)
-		)
-
-		for _, member := range lobbyGroup.List() {
-
-			memberParams := &LobbySessionParameters{}
-			if err := json.Unmarshal([]byte(member.Presence.GetStatus()), &memberParams); err != nil {
-				logger.Warn("Failed to unmarshal member params", zap.Error(err))
-				continue
-			}
-
-			rankPercentiles = append(rankPercentiles, memberParams.GetRankPercentile())
-			ratings = append(ratings, memberParams.GetRating())
-			usernames = append(usernames, member.Presence.GetUsername())
-
-			partyOrdinal := rating.TeamOrdinal(types.TeamRating{
-				Team: types.Team(ratings),
-			})
-			lobbyParams.SetOrdinal(partyOrdinal)
-		}
+		partySize := lobbyGroup.Size()
 
 		logger.Debug("Party is ready", zap.String("leader", session.id.String()), zap.Int("size", partySize), zap.Strings("members", usernames))
 
@@ -609,7 +606,7 @@ func PrepareEntrantPresences(ctx context.Context, logger *zap.Logger, nk runtime
 
 		rating, err := MatchmakingRatingLoad(ctx, nk, session.UserID().String(), lobbyParams.GroupID.String(), mmMode)
 		if err != nil {
-			logger.Warn("Failed to load rating", zap.String("sid", sessionID.String()), zap.Error(err))
+			logger.Warn("Failed to load rating", zap.String("sid", sessionID.String()), zap.Error(err), zap.String("group_id", lobbyParams.GroupID.String()), zap.String("mode", mmMode.String()))
 			rating = NewDefaultRating()
 		}
 
