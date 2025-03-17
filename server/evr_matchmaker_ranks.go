@@ -123,7 +123,7 @@ func retrieveRankPercentile(ctx context.Context, db *sql.DB, userID string, defa
 		JOIN leaderboard_weights lw
 		ON lr.leaderboard_id = lw.leaderboard_id
 		WHERE lr.leaderboard_id = ANY($1)
-		AND (lr.num_scores > $5) -- Only include records with more than $5 scores
+		AND (lr.num_score > $5) -- Only include records with more than $5 scores
 		AND (lr.expiry_time > NOW() OR lr.expiry_time = '1970-01-01 00:00:00+00') -- Include "alltime" records
 	),
 	calculated_percentiles AS (
