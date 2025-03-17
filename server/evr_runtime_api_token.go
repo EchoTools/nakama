@@ -3,12 +3,11 @@ package server
 import (
 	"context"
 	"crypto"
-	"errors"
 	"fmt"
 	"time"
 
 	"github.com/gofrs/uuid/v5"
-	"github.com/golang-jwt/jwt/v4"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 )
 
@@ -20,7 +19,7 @@ const (
 var _ = Storable(&DeveloperApplications{})
 
 type DeveloperApplications struct {
-	Applications []DeveloperApplication `json:StorageKeyApplications`
+	Applications []DeveloperApplication `json:"Applications"`
 }
 
 func (DeveloperApplications) StorageID() StorageID {
@@ -70,6 +69,8 @@ func ApplicationTokenAuthenticate(ctx context.Context, nk runtime.NakamaModule, 
 	return objs.Objects[0].UserId, nil
 }
 
+var _ = jwt.Claims(&ApplicationTokenClaims{})
+
 type ApplicationTokenClaims struct {
 	TokenID       string            `json:"tid,omitempty"`
 	UserID        string            `json:"uid,omitempty"`
@@ -78,17 +79,65 @@ type ApplicationTokenClaims struct {
 	Vars          map[string]string `json:"vrs,omitempty"`
 	ExpiresAt     int64             `json:"exp,omitempty"`
 	IssuedAt      int64             `json:"iat,omitempty"`
+	NotBefore     int64             `json:"nbf,omitempty"`
+	Issuer        string            `json:"iss,omitempty"`
+	Subject       string            `json:"sub,omitempty"`
+	Audience      []string          `json:"aud,omitempty"`
 }
 
 func (stc *ApplicationTokenClaims) Valid() error {
 	// Verify expiry.
 	if stc.ExpiresAt <= time.Now().UTC().Unix() {
-		vErr := new(jwt.ValidationError)
-		vErr.Inner = errors.New("Token is expired")
-		vErr.Errors |= jwt.ValidationErrorExpired
-		return vErr
+		return jwt.ErrTokenExpired
 	}
+	// Verify not before.
+	if stc.NotBefore > time.Now().UTC().Unix() {
+		return jwt.ErrTokenNotValidYet
+	}
+
 	return nil
+}
+
+func (stc *ApplicationTokenClaims) GetExpirationTime() (*jwt.NumericDate, error) {
+	if stc.ExpiresAt == 0 {
+		return nil, jwt.ErrTokenExpired
+	}
+	return jwt.NewNumericDate(time.Unix(stc.ExpiresAt, 0)), nil
+}
+
+func (stc *ApplicationTokenClaims) GetIssuedAt() (*jwt.NumericDate, error) {
+	if stc.IssuedAt == 0 {
+		return nil, jwt.ErrTokenUsedBeforeIssued
+	}
+	return jwt.NewNumericDate(time.Unix(stc.IssuedAt, 0)), nil
+}
+
+func (stc *ApplicationTokenClaims) GetNotBefore() (*jwt.NumericDate, error) {
+	if stc.NotBefore == 0 {
+		return nil, jwt.ErrTokenNotValidYet
+	}
+	return jwt.NewNumericDate(time.Unix(stc.NotBefore, 0)), nil
+}
+
+func (stc *ApplicationTokenClaims) GetIssuer() (string, error) {
+	if stc.Issuer == "" {
+		return "", jwt.ErrTokenInvalidIssuer
+	}
+	return stc.Issuer, nil
+}
+
+func (stc *ApplicationTokenClaims) GetSubject() (string, error) {
+	if stc.Subject == "" {
+		return "", jwt.ErrTokenInvalidSubject
+	}
+	return stc.Subject, nil
+}
+
+func (stc *ApplicationTokenClaims) GetAudience() (jwt.ClaimStrings, error) {
+	if len(stc.Audience) == 0 {
+		return nil, jwt.ErrTokenInvalidAudience
+	}
+	return stc.Audience, nil
 }
 
 func parseApplicationToken(hmacSecretByte []byte, tokenString string) (applicationID uuid.UUID, userID uuid.UUID, username string, vars map[string]string, exp int64, tokenID string, issuedAt int64, ok bool) {
