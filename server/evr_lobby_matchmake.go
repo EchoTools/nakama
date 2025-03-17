@@ -153,11 +153,6 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 	cycle := 0
 	for {
 		previousTicketConfig := ticketConfig
-		// Reduce the matchmaking precision after the first cycle
-		if cycle > 0 {
-			ticketConfig.IncludeRankRange = false
-			ticketConfig.IncludeEarlyQuitPenalty = false
-		}
 
 		if previousTicketConfig != ticketConfig {
 			if ticket, err := p.addTicket(ctx, logger, session, lobbyParams, lobbyGroup, ticketConfig); err != nil {
@@ -175,8 +170,14 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 			return ErrMatchmakingTimeout
 		case <-ticketTicker.C:
 			logger.Debug("Matchmaking ticket timeout", zap.Int("cycle", cycle))
+			ticketConfig.IncludeRankRange = false
+			ticketConfig.IncludeEarlyQuitPenalty = false
+			ticketConfig.MinCount = 2
 		case <-fallbackTimer.C:
 			logger.Debug("Matchmaking fallback")
+			ticketConfig.IncludeRankRange = false
+			ticketConfig.IncludeEarlyQuitPenalty = false
+			ticketConfig.MinCount = 2
 		}
 		cycle++
 	}
