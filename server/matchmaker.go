@@ -17,20 +17,18 @@ package server
 import (
 	"context"
 	"fmt"
+	"google.golang.org/protobuf/types/known/timestamppb"
 	"sync"
 	"time"
 
-	"google.golang.org/protobuf/types/known/timestamppb"
-
 	"github.com/blugelabs/bluge"
 	"github.com/gofrs/uuid/v5"
-	"github.com/golang-jwt/jwt/v4"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
 
 type MatchmakerPresence struct {
@@ -269,8 +267,6 @@ type LocalMatchmaker struct {
 	// Reverse lookup cache for mutual matching.
 	revCache       *MapOf[string, map[string]bool]
 	revThresholdFn func() *time.Timer
-
-	processMu *sync.Mutex
 }
 
 func NewLocalMatchmaker(logger, startupLogger *zap.Logger, config Config, router MessageRouter, metrics Metrics, runtime *Runtime) Matchmaker {
@@ -303,7 +299,6 @@ func NewLocalMatchmaker(logger, startupLogger *zap.Logger, config Config, router
 		indexes:          make(map[string]*MatchmakerIndex),
 		activeIndexes:    make(map[string]*MatchmakerIndex),
 		revCache:         &MapOf[string, map[string]bool]{},
-		processMu:        &sync.Mutex{},
 	}
 
 	if revThreshold := m.config.GetMatchmaker().RevThreshold; revThreshold > 0 && m.config.GetMatchmaker().RevPrecision {
@@ -319,27 +314,12 @@ func NewLocalMatchmaker(logger, startupLogger *zap.Logger, config Config, router
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				//DumpMatchmakerData(m)
 				m.Process()
 			}
 		}
 	}()
 
 	return m
-}
-
-func DumpMatchmakerData(m *LocalMatchmaker) {
-	m.Lock()
-	defer m.Unlock()
-
-	if m.logger.Core().Enabled(zapcore.DebugLevel) {
-		m.logger.Debug("Matchmaker data",
-			zap.Int("active_indexes", len(m.activeIndexes)),
-			zap.Int("indexes", len(m.indexes)),
-			zap.Int("session_tickets", len(m.sessionTickets)),
-			zap.Int("party_tickets", len(m.partyTickets)),
-		)
-	}
 }
 
 func (m *LocalMatchmaker) Pause() {
@@ -364,12 +344,6 @@ func (m *LocalMatchmaker) OnStatsUpdate(fn func(*api.MatchmakerStats)) {
 }
 
 func (m *LocalMatchmaker) Process() {
-	if !m.processMu.TryLock() {
-		m.logger.Warn("Matchmaker process skipped due to lock contention")
-		return
-	}
-	defer m.processMu.Unlock()
-
 	startTime := time.Now()
 	var activeIndexCount, indexCount int
 	defer func() {
