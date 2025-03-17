@@ -88,10 +88,6 @@ github.com/dlclark/regexp2 v1.11.4 h1:rPYF9/LECdNymJufQKmri9gV604RvvABwgOA8un7yA
 github.com/dlclark/regexp2 v1.11.4/go.mod h1:DHkYz0B9wPfa6wondMfaivmHpzrQ3v9q8cnmRbL6yW8=
 github.com/dop251/goja v0.0.0-20241024094426-79f3a7efcdbd h1:QMSNEh9uQkDjyPwu/J541GgSH+4hw+0skJDIj9HJ3mE=
 github.com/dop251/goja v0.0.0-20241024094426-79f3a7efcdbd/go.mod h1:MxLav0peU43GgvwVgNbLAj1s/bSGboKkhuULvq/7hx4=
-github.com/echotools/vrmlgo v1.0.2 h1:yJOwxv+hAUesjC1Fd8i/jHP6Kce5S+7qj9UVF01k3vs=
-github.com/echotools/vrmlgo v1.0.2/go.mod h1:VvcoBlELrnfA3XKOtFX1YFyZ33JuPasr839BdNNmwHw=
-github.com/echotools/vrmlgo/v3 v3.0.1 h1:kcRFCSGvikz7ojxY6x/YY6ND2ZQV8pJfQ0ERM8RElnQ=
-github.com/echotools/vrmlgo/v3 v3.0.1/go.mod h1:1KGibGiZiGi2DqvEsGpIT1W4Qd2fVj2TbDeTQXyR424=
 github.com/echotools/vrmlgo/v5 v5.0.1 h1:xdG88swr3ZsdDaYXvn/yCRNiH1U+bJAGZe6X2hJ0eaw=
 github.com/echotools/vrmlgo/v5 v5.0.1/go.mod h1:G6cajh/3UYgy1eRkez8qnvAwBWsO/dc7yGKJVmPbXNc=
 github.com/felixge/httpsnoop v1.0.4 h1:NFTV2Zj1bL4mc9sqWACXbQFVBBg2W3GPvqp8/ESS2Wg=
