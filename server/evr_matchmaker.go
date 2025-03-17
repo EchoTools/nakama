@@ -3,9 +3,6 @@ package server
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
-	"log"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -151,13 +148,6 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.Ma
 	// Create a list of balanced matches with predictions
 
 	predictions := predictCandidateOutcomes(candidates)
-
-	f, err := os.Create("/tmp/predictions.json")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer f.Close()
-	json.NewEncoder(f).Encode(predictions)
 
 	sort.SliceStable(predictions, func(i, j int) bool {
 		if predictions[i].Size != predictions[j].Size {
