@@ -289,6 +289,12 @@ var (
 					Required:    true,
 				},
 				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "reason",
+					Description: "Reason for the shutdown.",
+					Required:    true,
+				},
+				{
 					Type:        discordgo.ApplicationCommandOptionBoolean,
 					Name:        "disconnect-game-server",
 					Description: "Disconnect the game server instead of just removing it from match listing",
@@ -299,12 +305,6 @@ var (
 					Name:        "grace-seconds",
 					Description: "Seconds to wait before forcing the shutdown.",
 					Required:    false,
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "reason",
-					Description: "Reason for the shutdown.",
-					Required:    true,
 				},
 			},
 		},
@@ -469,9 +469,9 @@ var (
 					Required:    true,
 				},
 				{
-					Type:        discordgo.ApplicationCommandOptionInteger,
-					Name:        "timeout_mins",
-					Description: "Timeout in minutes",
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "timeout_duration",
+					Description: "Timeout duration (e.g. 1m, 2h, 3d, 4w)",
 					Required:    false,
 				},
 			},
@@ -2421,9 +2421,27 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					if targetUserID == "" {
 						return errors.New("failed to get target user ID")
 					}
-				case "timeout_mins":
-					if d := o.IntValue(); d > 0 {
-						timeoutExpiry = time.Now().Add(time.Duration(d) * time.Minute)
+				case "timeout_duration":
+					duration := o.StringValue()
+
+					// Parse minutes, hours, days, and weeks (m, h, d, w)
+					if duration != "" {
+						unit := time.Minute
+						switch duration[len(duration)-1] {
+						case 'm':
+							unit = time.Minute
+						case 'h':
+							unit = time.Hour
+						case 'd':
+							unit = 24 * time.Hour
+						case 'w':
+							unit = 7 * 24 * time.Hour
+						}
+						if d, err := strconv.Atoi(duration[:len(duration)-1]); err == nil {
+							timeoutExpiry = time.Now().Add(time.Duration(d) * unit)
+						} else {
+							return fmt.Errorf("invalid duration format: %w", err)
+						}
 					}
 				}
 			}
