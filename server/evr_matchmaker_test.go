@@ -842,7 +842,7 @@ func newMatchmakingEntryFromExisting(entry *MatchmakerEntry, minCount, maxCount,
 		MinCount:                   minCount,
 		MaxCount:                   maxCount,
 		CountMultiple:              countMultiple,
-		IncludeRankRange:           true,
+		IncludeSBMMRanges:          true,
 		IncludeEarlyQuitPenalty:    true,
 		IncludeRequireCommonServer: true,
 	}

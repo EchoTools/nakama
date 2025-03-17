@@ -47,14 +47,14 @@ type MatchmakingTicketParameters struct {
 	MinCount                   int
 	MaxCount                   int
 	CountMultiple              int
-	IncludeRankRange           bool
+	IncludeSBMMRanges          bool
 	IncludeEarlyQuitPenalty    bool
 	IncludeRequireCommonServer bool
 }
 
 func (m *MatchmakingTicketParameters) MarshalText() ([]byte, error) {
 	// encode it as minCount/maxCount/countMultiple/includeRankRange/includeEarlyQuitPenalty
-	s := fmt.Sprintf("%d/%d/%d/%t/%t", m.MinCount, m.MaxCount, m.CountMultiple, m.IncludeRankRange, m.IncludeEarlyQuitPenalty)
+	s := fmt.Sprintf("%d/%d/%d/%t/%t", m.MinCount, m.MaxCount, m.CountMultiple, m.IncludeSBMMRanges, m.IncludeEarlyQuitPenalty)
 	return []byte(s), nil
 }
 
@@ -86,7 +86,7 @@ func (m *MatchmakingTicketParameters) UnmarshalText(text []byte) error {
 	m.MinCount = minCount
 	m.MaxCount = maxCount
 	m.CountMultiple = countMultiple
-	m.IncludeRankRange = includeRankRange
+	m.IncludeSBMMRanges = includeRankRange
 	m.IncludeEarlyQuitPenalty = includeEarlyQuitPenalty
 
 	return nil
@@ -97,14 +97,14 @@ var DefaultMatchmakerTicketConfigs = map[evr.Symbol]MatchmakingTicketParameters{
 		MinCount:                1,
 		MaxCount:                8,
 		CountMultiple:           2,
-		IncludeRankRange:        true,
+		IncludeSBMMRanges:       true,
 		IncludeEarlyQuitPenalty: true,
 	},
 	evr.ModeCombatPublic: {
 		MinCount:                1,
 		MaxCount:                10,
 		CountMultiple:           2,
-		IncludeRankRange:        false,
+		IncludeSBMMRanges:       false,
 		IncludeEarlyQuitPenalty: false,
 	},
 }
@@ -117,11 +117,6 @@ func (p *EvrPipeline) matchmakingTicketTimeout() time.Duration {
 
 func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters, lobbyGroup *LobbyGroup, entrants ...*EvrMatchPresence) (err error) {
 
-	ticketConfig, ok := DefaultMatchmakerTicketConfigs[lobbyParams.Mode]
-	if !ok {
-		return fmt.Errorf("matchmaking ticket config not found for mode %s", lobbyParams.Mode)
-	}
-
 	stream := lobbyParams.GuildGroupStream()
 	count, err := p.nk.StreamCount(stream.Mode, stream.Subject.String(), "", stream.Label)
 	if err != nil {
@@ -129,22 +124,29 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 	}
 
 	// If there are fewer players online, reduce the fallback delay
+
+	var (
+		mmInterval               = time.Duration(p.config.GetMatchmaker().IntervalSec) * time.Second
+		matchmakingTicketTimeout = time.Duration(p.config.GetMatchmaker().MaxIntervals) * mmInterval
+		timeoutTimer             = time.NewTimer(lobbyParams.MatchmakingTimeout)
+		fallbackTimer            = time.NewTimer(min(lobbyParams.FallbackTimeout, matchmakingTicketTimeout-mmInterval))
+		ticketTicker             = time.NewTicker(matchmakingTicketTimeout)
+		tickets                  = make([]string, 0, 2)
+	)
+
+	ticketConfig, ok := DefaultMatchmakerTicketConfigs[lobbyParams.Mode]
+	if !ok {
+		return fmt.Errorf("matchmaking ticket config not found for mode %s", lobbyParams.Mode)
+	}
+
 	if !strings.Contains(p.node, "dev") {
 		// If there are fewer than 16 players online, reduce the fallback delay
 		if count < 24 {
-			ticketConfig.IncludeRankRange = false
+			ticketConfig.IncludeSBMMRanges = false
 			ticketConfig.IncludeEarlyQuitPenalty = false
 		}
 	}
-	mmInterval := time.Duration(p.config.GetMatchmaker().IntervalSec) * time.Second
 
-	matchmakingTicketTimeout := time.Duration(p.config.GetMatchmaker().MaxIntervals) * mmInterval
-
-	timeoutTimer := time.NewTimer(lobbyParams.MatchmakingTimeout)
-	fallbackTimer := time.NewTimer(min(lobbyParams.FallbackTimeout, matchmakingTicketTimeout-mmInterval))
-	ticketTicker := time.NewTicker(matchmakingTicketTimeout)
-
-	tickets := make([]string, 0, 2)
 	go func() {
 		<-ctx.Done()
 		session.matchmaker.Remove(tickets)
@@ -152,14 +154,11 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 
 	cycle := 0
 	for {
-		previousTicketConfig := ticketConfig
 
-		if previousTicketConfig != ticketConfig {
-			if ticket, err := p.addTicket(ctx, logger, session, lobbyParams, lobbyGroup, ticketConfig); err != nil {
-				return fmt.Errorf("failed to add ticket: %w", err)
-			} else {
-				tickets = append(tickets, ticket)
-			}
+		if ticket, err := p.addTicket(ctx, logger, session, lobbyParams, lobbyGroup, ticketConfig); err != nil {
+			return fmt.Errorf("failed to add ticket: %w", err)
+		} else {
+			tickets = append(tickets, ticket)
 		}
 
 		select {
@@ -170,14 +169,19 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 			return ErrMatchmakingTimeout
 		case <-ticketTicker.C:
 			logger.Debug("Matchmaking ticket timeout", zap.Int("cycle", cycle))
-			ticketConfig.IncludeRankRange = false
-			ticketConfig.IncludeEarlyQuitPenalty = false
-			ticketConfig.MinCount = 2
+			return ErrMatchmakingTimeout
 		case <-fallbackTimer.C:
 			logger.Debug("Matchmaking fallback")
-			ticketConfig.IncludeRankRange = false
+
+			// add a ticket with a smaller count, and no rank range
+			ticketConfig.IncludeSBMMRanges = false
 			ticketConfig.IncludeEarlyQuitPenalty = false
 			ticketConfig.MinCount = 2
+			if ticket, err := p.addTicket(ctx, logger, session, lobbyParams, lobbyGroup, ticketConfig); err != nil {
+				return fmt.Errorf("failed to add ticket: %w", err)
+			} else {
+				tickets = append(tickets, ticket)
+			}
 		}
 		cycle++
 	}

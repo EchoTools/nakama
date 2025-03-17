@@ -581,11 +581,30 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 		numericProperties["rating_sigma"] = rating.Sigma
 		numericProperties["rating_ordinal"] = p.GetOrdinal()
 
+		if p.EnableOrdinalRange && ticketParams.IncludeSBMMRanges {
+			if ordinal := p.GetOrdinal(); ordinal != 0.0 {
+				ordinalLower := ordinal - p.MatchmakingOrdinalRange
+				ordinalUpper := ordinal + p.MatchmakingOrdinalRange
+				numericProperties["rating_ordinal_min"] = ordinalLower
+				numericProperties["rating_ordinal_max"] = ordinalUpper
+
+				qparts = append(qparts,
+					// Exclusion
+					fmt.Sprintf("-properties.rating_ordinal:<%f", ordinalLower),
+					fmt.Sprintf("-properties.rating_ordinal:>%f", ordinalUpper),
+
+					// Reverse
+					fmt.Sprintf("-properties.rating_ordinal_min:>%f", ordinal),
+					fmt.Sprintf("-properties.rating_ordinal_max:<%f", ordinal),
+				)
+			}
+		}
+
 		if p.EnableRankPercentileRange {
 			if rankPercentile := p.GetRankPercentile(); rankPercentile > 0.0 {
 				numericProperties["rank_percentile"] = rankPercentile
 
-				if ticketParams.IncludeRankRange {
+				if ticketParams.IncludeSBMMRanges {
 					if p.MatchmakingDivision != "" {
 						qparts = append(qparts, fmt.Sprintf("+properties.division:%s", p.MatchmakingDivision))
 					} else if p.RankPercentileMaxDelta > 0 {
@@ -609,24 +628,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 				}
 			}
 		}
-		if p.EnableOrdinalRange && ticketParams.IncludeRankRange {
-			if ordinal := p.GetOrdinal(); ordinal != 0.0 {
-				ordinalLower := ordinal - p.MatchmakingOrdinalRange
-				ordinalUpper := ordinal + p.MatchmakingOrdinalRange
-				numericProperties["rating_ordinal_min"] = ordinalLower
-				numericProperties["rating_ordinal_max"] = ordinalUpper
 
-				qparts = append(qparts,
-					// Exclusion
-					fmt.Sprintf("-properties.rating_ordinal:<%f", ordinalLower),
-					fmt.Sprintf("-properties.rating_ordinal:>%f", ordinalUpper),
-
-					// Reverse
-					fmt.Sprintf("-properties.rating_ordinal_min:>%f", ordinal),
-					fmt.Sprintf("-properties.rating_ordinal_max:<%f", ordinal),
-				)
-			}
-		}
 	}
 
 	//maxDelta := 60 // milliseconds
