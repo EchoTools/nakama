@@ -433,11 +433,11 @@ var (
 		},
 		{
 			Name:        "igp",
-			Description: "Use the mod panel.",
+			Description: "Enable the gold nametag for your current session as a moderator.",
 		},
 		{
 			Name:        "party-status",
-			Description: "Use the mod panel.",
+			Description: "Show the members of your party.",
 		},
 		{
 			Name:        "ign",
