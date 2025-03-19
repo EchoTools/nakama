@@ -68,9 +68,9 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 			}
 			code := InternalError
 
-			if errors.Is(err, context.Canceled) {
-				logger.Debug("Matchmaking context canceled")
-				return nil
+			if errors.Is(err, context.DeadlineExceeded) {
+				// Check the context to see if it was canceled or timed out
+				err = ctx.Err()
 			}
 			if errors.Is(err, ErrMatchmakingTimeout) {
 				logger.Warn("Matchmaking timed out", zap.String("mode", lobbyParams.Mode.String()), zap.Error(err))

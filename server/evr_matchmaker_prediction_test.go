@@ -359,3 +359,60 @@ func TestCharacterizationMatchmaker(t *testing.T) {
 
 	t.Errorf("autofail")
 }
+
+func TestHashMatchmakerEntries(t *testing.T) {
+	// Mock implementation of runtime.MatchmakerEntry
+
+	// Test cases
+	tests := []struct {
+		name     string
+		entries  []runtime.MatchmakerEntry
+		expected uint64
+	}{
+		{
+			name:     "Empty entries",
+			entries:  []runtime.MatchmakerEntry{},
+			expected: 0,
+		},
+		{
+			name: "Single entry",
+			entries: []runtime.MatchmakerEntry{
+				&MatchmakerEntry{Ticket: "ticket1"},
+			},
+			expected: HashMatchmakerEntries([]*MatchmakerEntry{{Ticket: "ticket1"}}),
+		},
+		{
+			name: "Multiple entries, same order",
+			entries: []runtime.MatchmakerEntry{
+				&MatchmakerEntry{Ticket: "ticket1"},
+				&MatchmakerEntry{Ticket: "ticket2"},
+			},
+			expected: HashMatchmakerEntries([]*MatchmakerEntry{
+				{Ticket: "ticket1"},
+				{Ticket: "ticket2"},
+			}),
+		},
+		{
+			name: "Multiple entries, different order",
+			entries: []runtime.MatchmakerEntry{
+				&MatchmakerEntry{Ticket: "ticket2"},
+				&MatchmakerEntry{Ticket: "ticket1"},
+			},
+			expected: HashMatchmakerEntries([]*MatchmakerEntry{
+				{Ticket: "ticket1"},
+				{Ticket: "ticket2"},
+			}),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hash := HashMatchmakerEntries(tt.entries)
+			if hash != tt.expected {
+				t.Logf("HashMatchmakerEntries() = %v, expected %v", hash, tt.expected)
+				t.Errorf("HashMatchmakerEntries() = %v, expected %v", hash, tt.expected)
+			}
+		})
+	}
+	t.Fail()
+}

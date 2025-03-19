@@ -146,9 +146,7 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 			ticketConfig.IncludeEarlyQuitPenalty = false
 		}
 	}
-
-	go func() {
-		<-ctx.Done()
+	defer func() {
 		session.matchmaker.Remove(tickets)
 	}()
 
@@ -169,7 +167,6 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 			return ErrMatchmakingTimeout
 		case <-ticketTicker.C:
 			logger.Debug("Matchmaking ticket timeout", zap.Int("cycle", cycle))
-			return ErrMatchmakingTimeout
 		case <-fallbackTimer.C:
 			logger.Debug("Matchmaking fallback")
 

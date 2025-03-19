@@ -236,6 +236,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 			if msg.EventType != "item_equipped" {
 				continue
 			}
+
 			category, name, err := msg.GetEquippedCustomization()
 			if err != nil {
 				logger.Error("Failed to get equipped customization", zap.Error(err))
