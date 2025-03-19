@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -44,6 +45,7 @@ type EvrMatchPresence struct {
 	RankPercentile    float64      `json:"rank_percentile,omitempty"`
 	Rating            types.Rating `json:"rating,omitempty"`
 	PingMillis        int          `json:"ping_ms,omitempty"`
+	MatchmakingAt     *time.Time   `json:"matchmaking_at,omitempty"` // Whether the player is matchmaking
 }
 
 func (p EvrMatchPresence) EntrantID(matchID MatchID) uuid.UUID {

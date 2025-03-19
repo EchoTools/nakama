@@ -164,10 +164,8 @@ github.com/heroiclabs/sql-migrate v0.0.0-20241125131053-95a7949783b0/go.mod h1:u
 github.com/hpcloud/tail v1.0.0/go.mod h1:ab1qPbhIpdTxEkNHXyeSf5vhxWSCs/tWer42PpOxQnU=
 github.com/inconshreveable/mousetrap v1.0.0/go.mod h1:PxqpIevigyE2G7u3NXJIT2ANytuPF1OarO4DADm73n8=
 github.com/influxdata/influxdb v1.7.6/go.mod h1:qZna6X/4elxqT3yI9iZYdZrWWdeFOOprn86kgg4+IzY=
-github.com/intinig/go-openskill v0.0.0-20240619100423-fcdc459e6631 h1:TYOiJbFrUeVTejxyGVU762BLrpk77esckPZsQTlhCLY=
-github.com/intinig/go-openskill v0.0.0-20240619100423-fcdc459e6631/go.mod h1:/19Lc6Ltcx88OroPQuJ6Jns5OXgrnJeIWNSgV5xSr1s=
-github.com/intinig/go-openskill v0.0.0-20250225115741-61b0d678d1b9 h1:nTyscwRv8Z60IXCD1Rh6MSn64OTqM3nQ0yIe1ccAgQY=
-github.com/intinig/go-openskill v0.0.0-20250225115741-61b0d678d1b9/go.mod h1:xHBK+8n+7lLAFJRQxZjEZUjC6kKGTrYP1fM20psPv5A=
+github.com/intinig/go-openskill v0.0.0-20250317061834-3ab631e2df1e h1:gPtmIbM7KaH5+pukDKWNuxUXajSuEjVV+tVc0tAQ6NM=
+github.com/intinig/go-openskill v0.0.0-20250317061834-3ab631e2df1e/go.mod h1:xHBK+8n+7lLAFJRQxZjEZUjC6kKGTrYP1fM20psPv5A=
 github.com/jackc/chunkreader v1.0.0 h1:4s39bBR8ByfqH+DKm8rQA3E1LHZWB9XWcrz8fqaZbe0=
 github.com/jackc/chunkreader v1.0.0/go.mod h1:RT6O25fNZIuasFJRyZ4R/Y2BbhasbmZXF9QQ7T3kePo=
 github.com/jackc/chunkreader/v2 v2.0.0/go.mod h1:odVSm741yZoC3dpHEUXIqA9tQRhFrgOHwnPIn9lDKlk=
