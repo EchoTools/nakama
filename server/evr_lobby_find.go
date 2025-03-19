@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math/rand"
 	"sort"
@@ -26,10 +25,6 @@ import (
 type TeamAlignments map[string]int // map[UserID]Role
 
 var createLobbyMu = &sync.Mutex{}
-
-var LobbyTestCounter = 0
-
-var ErrCreateLock = errors.New("failed to acquire create lock")
 
 // lobbyJoinSessionRequest is a request to join a specific existing session.
 func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters) error {
@@ -195,7 +190,7 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 			} else {
 
 				memberParams := &LobbySessionParameters{}
-				if err := json.Unmarshal([]byte(member.Presence.GetStatus()), memberParams); err != nil {
+				if err := json.Unmarshal([]byte(meta.GetStatus()), memberParams); err != nil {
 					logger.Warn("Failed to unmarshal member params", zap.Error(err))
 					continue
 				}
