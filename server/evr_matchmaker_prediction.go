@@ -69,7 +69,7 @@ func HashMatchmakerEntries[E runtime.MatchmakerEntry](entries []E) uint64 {
 	}
 	slices.Sort(tickets) // Ensure the order of tickets doesn't matter
 	for _, ticket := range tickets {
-		for i := 0; i < len(ticket); i++ {
+		for i := range len(ticket) {
 			hash = hash*31 + uint64(ticket[i])
 		}
 	}
@@ -146,7 +146,7 @@ func predictCandidateOutcomes(candidates [][]runtime.MatchmakerEntry) []Predicte
 func organizeAsTeams(groups []CandidateList, teamSize int) (CandidateList, CandidateList) {
 	teamA, teamB := make(CandidateList, 0, teamSize), make(CandidateList, 0, teamSize)
 	for _, entries := range groups {
-		if len(teamA) <= len(teamB) {
+		if len(teamA) <= len(teamB) && len(teamA)+len(entries) <= teamSize {
 			teamA = append(teamA, entries...)
 		} else {
 			teamB = append(teamB, entries...)

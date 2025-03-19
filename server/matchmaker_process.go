@@ -577,7 +577,7 @@ func (m *LocalMatchmaker) processCustom(activeIndexesCopy map[string]*Matchmaker
 			matchedEntries = append(matchedEntries, matchedEntry)
 		}
 	}
-	m.logger.Debug("Matchmaker process custom", zap.Int("duplicate_count", duplicateCount))
+	m.logger.Debug("Matchmaker process custom", zap.Int("duplicate_count", duplicateCount), zap.Int("seen_count", len(seenCandidateSet)))
 
 	if len(matchedEntries) == 0 {
 		return matchedEntries, expiredActiveIndexes
