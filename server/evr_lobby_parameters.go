@@ -85,7 +85,7 @@ func (p *LobbySessionParameters) GetRankPercentile() float64 {
 }
 
 func (p *LobbySessionParameters) GetRating() types.Rating {
-	if p.MatchmakingRating == nil {
+	if p.MatchmakingRating == nil || p.MatchmakingRating.Load() == nil {
 		return NewDefaultRating()
 	}
 	return *p.MatchmakingRating.Load()
