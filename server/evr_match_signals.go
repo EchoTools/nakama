@@ -22,6 +22,7 @@ const (
 	SignalReserveSlots
 	SignalPruneUnderutilized
 	SignalShutdown
+	SignalPlayerUpdate
 )
 
 type SignalEnvelope struct {

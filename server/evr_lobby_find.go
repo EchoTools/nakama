@@ -19,6 +19,7 @@ import (
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/intinig/go-openskill/rating"
 	"github.com/intinig/go-openskill/types"
+	"go.uber.org/thriftrw/ptr"
 	"go.uber.org/zap"
 )
 
@@ -55,6 +56,8 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	if err := JoinMatchmakingStream(logger, session, lobbyParams); err != nil {
 		return fmt.Errorf("failed to join matchmaking stream: %w", err)
 	}
+
+	// Send PlayerUpdate to current match
 
 	// Monitor the matchmaking status stream, canceling the context if the stream is closed.
 	go p.monitorMatchmakingStream(ctx, logger, session, lobbyParams, cancel)
@@ -247,6 +250,28 @@ func (p *EvrPipeline) monitorMatchmakingStream(ctx context.Context, logger *zap.
 	// Monitor the stream and cancel the context (and matchmaking) if the stream is closed.
 	// This stream tracks the user's matchmaking status.
 	// This stream is untracked when the user cancels matchmaking.
+
+	if !lobbyParams.CurrentMatchID.IsNil() {
+		// Send update to current match.
+		data := NewSignalEnvelope(session.UserID().String(), SignalPlayerUpdate, &MatchPlayerUpdate{
+			SessionID:     session.id.String(),
+			IsMatchmaking: ptr.Bool(true),
+		})
+
+		if _, err := p.nk.MatchSignal(ctx, lobbyParams.CurrentMatchID.String(), data.String()); err != nil {
+			logger.Warn("Failed to signal match", zap.Error(err), zap.String("mid", lobbyParams.CurrentMatchID.String()))
+		}
+
+		defer func() {
+			data := NewSignalEnvelope(session.UserID().String(), SignalPlayerUpdate, &MatchPlayerUpdate{
+				SessionID:     session.id.String(),
+				IsMatchmaking: ptr.Bool(false),
+			})
+			if _, err := p.nk.MatchSignal(ctx, lobbyParams.CurrentMatchID.String(), data.String()); err != nil {
+				logger.Warn("Failed to signal match", zap.Error(err), zap.String("mid", lobbyParams.CurrentMatchID.String()))
+			}
+		}()
+	}
 
 	stream := lobbyParams.MatchmakingStream()
 	defer LeaveMatchmakingStream(logger, session)

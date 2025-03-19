@@ -1158,6 +1158,25 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 			state.Open = true
 		}
 
+	case SignalPlayerUpdate:
+		update := MatchPlayerUpdate{}
+		if err := json.Unmarshal(signal.Payload, &update); err != nil {
+			return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal player update: %v", err)}.String()
+		}
+		if mp, ok := state.presenceMap[update.SessionID]; ok {
+			if update.RoleAlignment != nil {
+				mp.RoleAlignment = int(*update.RoleAlignment)
+			}
+			if update.IsMatchmaking != nil {
+				if *update.IsMatchmaking {
+					t := time.Now().UTC()
+					mp.MatchmakingAt = &t
+				} else {
+					mp.MatchmakingAt = nil
+				}
+			}
+		}
+
 	default:
 		logger.Warn("Unknown signal: %v", signal.OpCode)
 		return state, SignalResponse{Success: false, Message: "unknown signal"}.String()
