@@ -2630,7 +2630,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s disconnected player %s from match service (%d sessions).", user.Mention(), target.Mention(), count), false)
 				}
 			}()
-			_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s actions: %s", target.Mention(), strings.Join(results, "; ")), false)
+			_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("action on %s (%s): %s", target.Mention(), target.Username, strings.Join(results, "; ")), false)
 			return simpleInteractionResponse(s, i, fmt.Sprintf("[%d sessions found]%s\n%s", cnt, timeoutMessage, strings.Join(results, "\n")))
 
 		},
