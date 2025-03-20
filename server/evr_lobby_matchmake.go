@@ -173,7 +173,7 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 			// add a ticket with a smaller count, and no rank range
 			ticketConfig.IncludeSBMMRanges = false
 			ticketConfig.IncludeEarlyQuitPenalty = false
-			ticketConfig.MinCount = 2
+			ticketConfig.MaxCount = 2
 			if ticket, err := p.addTicket(ctx, logger, session, lobbyParams, lobbyGroup, ticketConfig); err != nil {
 				return fmt.Errorf("failed to add ticket: %w", err)
 			} else {

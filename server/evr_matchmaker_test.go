@@ -378,7 +378,7 @@ func TestCharacterizationMatchmaker1v1(t *testing.T) {
 
 	reconstruct := true
 	useOverrideFn := true
-	minCount := 2
+	minCount := 1
 	maxCount := 8
 	countMultiple := 2
 
