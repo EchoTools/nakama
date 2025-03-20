@@ -126,6 +126,8 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 	params.xpID = request.XPID
 	params.loginPayload = &request.Payload
 
+	logger = logger.With(zap.String("xpid", request.XPID.String()))
+
 	// Process the login request and populate the session parameters.
 	if err := p.processLoginRequest(ctx, logger, session, &params); err != nil {
 
@@ -133,7 +135,7 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 		if userID, err := GetUserIDByDeviceID(ctx, p.db, request.XPID.String()); err == nil {
 			discordID = p.discordCache.UserIDToDiscordID(userID)
 		} else if !errors.Is(err, DeviceNotLinkedError{}) {
-			logger.Warn("Failed to get user ID by device ID", zap.Error(err))
+			logger.Debug("Failed to get user ID by device ID", zap.Error(err))
 		}
 
 		errMessage := formatLoginErrorMessage(request.XPID, discordID, err)
@@ -1050,7 +1052,7 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 	if playerInfo == nil || (playerInfo.Team != BlueTeam && playerInfo.Team != OrangeTeam) {
 		return fmt.Errorf("non-player profile update request: %s", evrID.String())
 	}
-
+	logger = logger.With(zap.String("player_uid", playerInfo.UserID), zap.String("player_sid", playerInfo.SessionID), zap.String("player_xpid", playerInfo.EvrID.String()))
 	var metadata *AccountMetadata
 	// Set the player's session to not be an early quitter
 	if playerSession := p.nk.sessionRegistry.Get(uuid.FromStringOrNil(playerInfo.SessionID)); playerSession != nil {
@@ -1096,7 +1098,6 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 		// Calculate a new rank percentile
 		if rankPercentile, err := CalculateSmoothedPlayerRankPercentile(ctx, logger, p.db, p.nk, playerInfo.UserID, groupIDStr, label.Mode); err != nil {
 			logger.Error("Failed to calculate new player rank percentile", zap.Error(err))
-
 			// Store the rank percentile in the leaderboards.
 		} else if err := MatchmakingRankPercentileStore(ctx, p.nk, playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, rankPercentile); err != nil {
 			logger.Warn("Failed to record percentile to leaderboard", zap.Error(err))
