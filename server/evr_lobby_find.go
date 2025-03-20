@@ -255,17 +255,18 @@ func (p *EvrPipeline) monitorMatchmakingStream(ctx context.Context, logger *zap.
 
 		if _, err := p.nk.MatchSignal(ctx, lobbyParams.CurrentMatchID.String(), data.String()); err != nil {
 			logger.Warn("Failed to signal match", zap.Error(err), zap.String("mid", lobbyParams.CurrentMatchID.String()))
-		}
 
-		defer func() {
-			data := NewSignalEnvelope(session.UserID().String(), SignalPlayerUpdate, &MatchPlayerUpdate{
-				SessionID:     session.id.String(),
-				IsMatchmaking: ptr.Bool(false),
-			})
-			if _, err := p.nk.MatchSignal(ctx, lobbyParams.CurrentMatchID.String(), data.String()); err != nil {
-				logger.Warn("Failed to signal match", zap.Error(err), zap.String("mid", lobbyParams.CurrentMatchID.String()))
-			}
-		}()
+		} else {
+			defer func() {
+				data := NewSignalEnvelope(session.UserID().String(), SignalPlayerUpdate, &MatchPlayerUpdate{
+					SessionID:     session.id.String(),
+					IsMatchmaking: ptr.Bool(false),
+				})
+				if _, err := p.nk.MatchSignal(ctx, lobbyParams.CurrentMatchID.String(), data.String()); err != nil {
+					logger.Warn("Failed to signal match", zap.Error(err), zap.String("mid", lobbyParams.CurrentMatchID.String()))
+				}
+			}()
+		}
 	}
 
 	stream := lobbyParams.MatchmakingStream()
