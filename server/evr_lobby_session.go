@@ -67,8 +67,9 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 				return nil
 			}
 			code := InternalError
-
-			if errors.Is(err, context.DeadlineExceeded) {
+			if ctx.Err() == context.Canceled || errors.Is(err, context.Canceled) {
+				return nil
+			} else if errors.Is(err, context.DeadlineExceeded) {
 				// Check the context to see if it was canceled or timed out
 				err = ctx.Err()
 			}
