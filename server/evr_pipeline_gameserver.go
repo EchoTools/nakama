@@ -130,7 +130,6 @@ func (p *EvrPipeline) gameserverRegistrationRequest(ctx context.Context, logger 
 	if isPrivateIP(externalIP) {
 		externalIP = p.externalIP
 		logger.Warn("Game server is on a private IP, using this systems external IP", zap.String("private_ip", request.InternalIP.String()), zap.String("external_ip", externalIP.String()), zap.String("port", fmt.Sprintf("%d", externalPort)))
-
 	}
 
 	// Include all guilds by default, or if "any" is in the list
