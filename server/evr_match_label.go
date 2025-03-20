@@ -280,17 +280,16 @@ func (s *MatchLabel) rebuildCache() {
 
 		if p.RoleAlignment == evr.TeamSpectator {
 			s.Players = append(s.Players, PlayerInfo{
-				UserID:        p.UserID.String(),
-				Username:      p.Username,
-				DisplayName:   p.DisplayName,
-				EvrID:         p.EvrID,
-				Team:          TeamIndex(p.RoleAlignment),
-				ClientIP:      p.ClientIP,
-				DiscordID:     p.DiscordID,
-				SessionID:     p.SessionID.String(),
-				JoinTime:      s.joinTimeMilliseconds[p.SessionID.String()],
-				GeoHash:       p.GeoHash,
-				MatchmakingAt: p.MatchmakingAt,
+				UserID:      p.UserID.String(),
+				Username:    p.Username,
+				DisplayName: p.DisplayName,
+				EvrID:       p.EvrID,
+				Team:        TeamIndex(p.RoleAlignment),
+				ClientIP:    p.ClientIP,
+				DiscordID:   p.DiscordID,
+				SessionID:   p.SessionID.String(),
+				JoinTime:    s.joinTimeMilliseconds[p.SessionID.String()],
+				GeoHash:     p.GeoHash,
 			})
 		} else {
 			ordinal := rating.Ordinal(p.Rating)
@@ -314,7 +313,6 @@ func (s *MatchLabel) rebuildCache() {
 					IsReservation:  s.reservationMap[p.SessionID.String()] != nil,
 					GeoHash:        p.GeoHash,
 					PingMillis:     p.PingMillis,
-					MatchmakingAt:  p.MatchmakingAt,
 				})
 			case evr.ModeCombatPublic, evr.ModeSocialPublic:
 				s.Players = append(s.Players, PlayerInfo{
