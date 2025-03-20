@@ -187,9 +187,9 @@ type MatchRpcRequest struct {
 }
 
 type MatchRpcResponse struct {
-	SystemStartTime string        `json:"system_start_time"`
-	Timestamp       string        `json:"timestamp"`
-	Labels          []*MatchLabel `json:"labels"`
+	SystemStartTime string            `json:"system_start_time"`
+	Timestamp       string            `json:"timestamp"`
+	Labels          []json.RawMessage `json:"labels"`
 }
 
 func (r MatchRpcResponse) String() string {
@@ -218,29 +218,25 @@ func MembershipsFromSessionVars(vars map[string]string) (map[string]guildGroupPe
 }
 
 func MatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
-	var err error
-	var userID string
+	var (
+		err         error
+		memberships map[string]guildGroupPermissions
+		fullAccess  bool = false
+	)
 
-	if u, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string); ok {
-		userID = u
-	}
-
-	// Unpack the bitsets from the session token
-	vars, ok := ctx.Value(runtime.RUNTIME_CTX_VARS).(map[string]string)
-	if !ok {
-		return "", fmt.Errorf("failed to get session vars")
-	}
-
-	memberships, err := MembershipsFromSessionVars(vars)
-	if err != nil {
-		return "", fmt.Errorf("failed to get memberships from session vars: %s", err.Error())
-	}
-
-	fullAccess := false
-
-	if userID != "" {
+	if userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string); ok {
 		if fullAccess, err = CheckSystemGroupMembership(ctx, db, userID, GroupGlobalPrivateDataAccess); err != nil {
 			return "", fmt.Errorf("failed to check system group membership: %s", err.Error())
+		} else {
+			// Unpack the bitsets from the session token
+			vars, ok := ctx.Value(runtime.RUNTIME_CTX_VARS).(map[string]string)
+			if !ok {
+				return "", fmt.Errorf("failed to get session vars")
+			}
+			memberships, err = MembershipsFromSessionVars(vars)
+			if err != nil {
+				return "", fmt.Errorf("failed to get memberships from session vars: %s", err.Error())
+			}
 		}
 	}
 
@@ -276,18 +272,18 @@ func MatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime
 		}
 	}
 
-	labels := make([]*MatchLabel, 0, len(matches))
+	labels := make([]json.RawMessage, 0, len(matches))
+	var data json.RawMessage
 	for _, match := range matches {
-		// "any" avoids some reflection overhead
-		label := &MatchLabel{}
-		if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), label); err != nil {
-			return "", fmt.Errorf("failed to unmarshal match label: %s", err.Error())
-		}
-
 		if fullAccess {
-			labels = append(labels, label)
+			labels = append(labels, json.RawMessage(match.GetLabel().GetValue()))
 			continue
 		} else {
+			label := &MatchLabel{}
+			if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), label); err != nil {
+				return "", fmt.Errorf("failed to unmarshal match label: %s", err.Error())
+			}
+
 			// Remove sensitive data
 			label.GameServer.Latitude = 0
 			label.GameServer.Longitude = 0
@@ -297,27 +293,29 @@ func MatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime
 				p.ClientIP = ""
 				label.Players[i] = p
 			}
-		}
 
-		if label.LobbyType == UnassignedLobby {
-			for _, id := range label.GameServer.GroupIDs {
-				if m, ok := memberships[id.String()]; ok {
+			if label.LobbyType == UnassignedLobby {
+				for _, id := range label.GameServer.GroupIDs {
+					if m, ok := memberships[id.String()]; ok {
+						if !m.IsAPIAccess {
+							continue
+						}
+					}
+				}
+			} else {
+				if m, ok := memberships[label.GetGroupID().String()]; ok {
 					if !m.IsAPIAccess {
 						continue
 					}
 				}
 			}
-		} else {
-			if m, ok := memberships[label.GetGroupID().String()]; ok {
-				if !m.IsAPIAccess {
-					continue
-				}
+			data, err = json.Marshal(label.PublicView())
+			if err != nil {
+				return "", fmt.Errorf("failed to marshal match label: %s", err.Error())
 			}
+			labels = append(labels, data)
 		}
-
-		labels = append(labels, label.PublicView())
 	}
-
 	response := MatchRpcResponse{
 		SystemStartTime: nakamaStartTime.UTC().Format(time.RFC3339),
 		Timestamp:       time.Now().UTC().Format(time.RFC3339),
