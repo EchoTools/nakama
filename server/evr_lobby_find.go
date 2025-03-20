@@ -183,9 +183,14 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 			if err != nil {
 				return nil, nil, false, fmt.Errorf("failed to get party stream: %w", err)
 			} else if meta == nil {
-				logger.Warn("Party member is not following the leader", zap.String("uid", member.Presence.GetUserId()), zap.String("sid", member.Presence.GetSessionId()), zap.String("leader_sid", session.id.String()))
-				if err := p.nk.StreamUserKick(stream.Mode, stream.Subject.String(), stream.Subcontext.String(), stream.Label, member.Presence); err != nil {
-					return nil, nil, false, fmt.Errorf("failed to kick party member: %w", err)
+				switch lobbyParams.Mode {
+				case evr.ModeSocialPublic, evr.ModeSocialPrivate:
+					// Keep the party together when joining a social lobby.
+				default:
+					logger.Warn("Party member is not following the leader", zap.String("uid", member.Presence.GetUserId()), zap.String("sid", member.Presence.GetSessionId()), zap.String("leader_sid", session.id.String()))
+					if err := p.nk.StreamUserKick(stream.Mode, stream.Subject.String(), stream.Subcontext.String(), stream.Label, member.Presence); err != nil {
+						return nil, nil, false, fmt.Errorf("failed to kick party member: %w", err)
+					}
 				}
 			} else {
 
