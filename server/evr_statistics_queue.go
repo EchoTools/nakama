@@ -60,7 +60,7 @@ func NewStatisticsQueue(logger runtime.Logger, nk runtime.NakamaModule) *Statist
 				for _, e := range entries {
 
 					if e.Score < 0 {
-						logger.WithFields(map[string]interface{}{
+						logger.WithFields(map[string]any{
 							"leaderboard_id": e.BoardMeta.ID(),
 							"score":          e.Score,
 							"subscore":       e.Subscore,
@@ -70,7 +70,7 @@ func NewStatisticsQueue(logger runtime.Logger, nk runtime.NakamaModule) *Statist
 						continue
 					}
 
-					if !slices.Contains(ValidLeaderboardModes, e.BoardMeta.Mode) == false {
+					if !slices.Contains(ValidLeaderboardModes, e.BoardMeta.Mode) {
 						continue
 					}
 
@@ -79,18 +79,18 @@ func NewStatisticsQueue(logger runtime.Logger, nk runtime.NakamaModule) *Statist
 						// Try to create the leaderboard
 						if err = nk.LeaderboardCreate(ctx, e.BoardMeta.ID(), true, "desc", string(e.BoardMeta.Operator), ResetScheduleToCron(e.BoardMeta.ResetSchedule), map[string]any{}, true); err != nil {
 
-							logger.WithFields(map[string]interface{}{
+							logger.WithFields(map[string]any{
 								"leaderboard_id": e.BoardMeta.ID(),
 								"error":          err.Error(),
 							}).Error("Failed to create leaderboard")
 
 						} else {
-							logger.WithFields(map[string]interface{}{
+							logger.WithFields(map[string]any{
 								"leaderboard_id": e.BoardMeta.ID(),
 							}).Debug("Leaderboard created")
 
 							if _, err := nk.LeaderboardRecordWrite(ctx, e.BoardMeta.ID(), e.UserID, e.DisplayName, e.Score, e.Subscore, map[string]any{}, e.Override()); err != nil {
-								logger.WithFields(map[string]interface{}{
+								logger.WithFields(map[string]any{
 									"leaderboard_id": e.BoardMeta.ID(),
 									"error":          err.Error(),
 								}).Error("Failed to write leaderboard record")
@@ -110,12 +110,12 @@ func (r *StatisticsQueue) Add(entries []*StatisticsQueueEntry) error {
 
 	select {
 	case r.ch <- entries:
-		r.logger.WithFields(map[string]interface{}{
+		r.logger.WithFields(map[string]any{
 			"count": len(entries),
 		}).Debug("Leaderboard record queued")
 		return nil
 	default:
-		r.logger.WithFields(map[string]interface{}{
+		r.logger.WithFields(map[string]any{
 			"count": len(entries),
 		}).Warn("Leaderboard record write queue full, dropping entry")
 		return fmt.Errorf("queue full")
