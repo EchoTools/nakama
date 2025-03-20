@@ -308,6 +308,7 @@ func (s *MatchLabel) rebuildCache() {
 					RatingSigma:    p.Rating.Sigma,
 					RatingOrdinal:  ordinal,
 					RatingScore:    ratingScores[p.EvrID],
+					JoinTime:       s.joinTimeMilliseconds[p.SessionID.String()],
 					RankPercentile: p.RankPercentile,
 					SessionID:      p.SessionID.String(),
 					IsReservation:  s.reservationMap[p.SessionID.String()] != nil,
@@ -573,6 +574,7 @@ func (l *MatchLabel) PublicView() *MatchLabel {
 				RatingSigma:    l.Players[i].RatingSigma,
 				RatingOrdinal:  l.Players[i].RatingOrdinal,
 				RankPercentile: l.Players[i].RankPercentile,
+				RatingScore:    l.Players[i].RatingScore,
 			})
 		}
 

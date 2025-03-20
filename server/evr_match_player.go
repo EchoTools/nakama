@@ -13,8 +13,8 @@ import (
 type PlayerInfo struct {
 	DisplayName    string     `json:"display_name,omitempty"`
 	PartyID        string     `json:"party_id,omitempty"`
-	Team           TeamIndex  `json:"team"`
 	IsReservation  bool       `json:"is_reservation,omitempty"`
+	Team           TeamIndex  `json:"team"`
 	JoinTime       int64      `json:"join_time_ms,omitempty"` // The time on the round clock that the player joined
 	RankPercentile float64    `json:"rank_percentile,omitempty"`
 	RatingMu       float64    `json:"rating_mu,omitempty"`
