@@ -368,10 +368,15 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		p.RoleAlignment = meta.Presence.RoleAlignment
 
 		// Add the reservation
-		state.reservationMap[sessionID] = &slotReservation{
+		reservation := &slotReservation{
 			Presence: p,
 			Expiry:   time.Now().Add(time.Second * 15),
 		}
+		if state.Mode == evr.ModeSocialPublic {
+			// Reserve spots for party members for 5 minutes
+			reservation.Expiry = time.Now().Add(time.Minute * 5)
+		}
+		state.reservationMap[sessionID] = reservation
 		state.joinTimestamps[sessionID] = time.Now()
 	}
 
