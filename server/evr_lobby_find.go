@@ -426,13 +426,13 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 		}
 	}
 
-	query := lobbyParams.BackfillSearchQuery(includeRankPercentile, includeMaxRTT)
-
-	cycleCount := 0
-
-	fallbackTimer := time.NewTimer(lobbyParams.FallbackTimeout)
-	failsafeTimer := time.NewTimer(lobbyParams.FailsafeTimeout)
-	rtts := lobbyParams.latencyHistory.LatestRTTs()
+	var (
+		query         = lobbyParams.BackfillSearchQuery(includeRankPercentile, includeMaxRTT)
+		fallbackTimer = time.NewTimer(lobbyParams.FallbackTimeout)
+		failsafeTimer = time.NewTimer(lobbyParams.FailsafeTimeout)
+		cycleCount    = 0
+		rtts          = lobbyParams.latencyHistory.LatestRTTs()
+	)
 	for {
 		var err error
 		select {
@@ -494,8 +494,6 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 
 		matches = p.sortBackfillOptions(matches, lobbyParams)
 
-		team := evr.TeamBlue
-
 		for _, labelMeta := range matches {
 			select {
 			case <-ctx.Done():
@@ -506,17 +504,20 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 			l := labelMeta.State
 			entrants[0].PingMillis = rtts[l.GameServer.Endpoint.GetExternalIP()]
 
-			// Social lobbies can only have one team
-			if lobbyParams.Mode == evr.ModeSocialPublic {
+			team := evr.TeamBlue
+			switch lobbyParams.Mode {
+			case evr.ModeSocialPublic, evr.ModeSocialPrivate:
+				// Social lobbies can only have one team
 				team = evr.TeamSocial
-			} else {
-
+			default:
 				// Determine which team has the least players
 				team = evr.TeamBlue
 				if l.RoleCount(evr.TeamOrange) < l.RoleCount(evr.TeamBlue) {
 					team = evr.TeamOrange
 				}
 			}
+
+			// Ensure the team has enough open slots for the party size
 			if n, err := l.OpenSlotsByRole(team); err != nil {
 				logger.Warn("Failed to get open slots by role", zap.Error(err))
 				continue
@@ -544,12 +545,15 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 				}
 				return fmt.Errorf("failed to join backfill match: %w", err)
 			}
+
+			// Join complete
 			return nil
 		}
 
 		// If the lobby is social, create a new social lobby.
 		if lobbyParams.Mode == evr.ModeSocialPublic {
 			// Create a new social lobby
+			logger.Debug("Attempting to create social lobby")
 			_, err = p.newLobby(ctx, logger, lobbyParams)
 			if err != nil {
 				// If the error is a lock error, just try again.
