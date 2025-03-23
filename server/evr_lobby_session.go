@@ -63,17 +63,13 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 			// This is also responsible for creation of social lobbies.
 
 			err = p.lobbyFind(ctx, logger, session, lobbyParams)
-			if err == nil {
+			if err == nil || ctx.Err() == context.Canceled {
+				// If the context was canceled, ignore this error.
 				return nil
 			}
+
 			code := InternalError
-			if ctx.Err() == context.Canceled || errors.Is(err, context.Canceled) {
-				return nil
-			} else if errors.Is(err, context.DeadlineExceeded) {
-				// Check the context to see if it was canceled or timed out
-				err = ctx.Err()
-			}
-			if errors.Is(err, ErrMatchmakingTimeout) {
+			if ctx.Err() == context.DeadlineExceeded || errors.Is(err, ErrMatchmakingTimeout) {
 				logger.Warn("Matchmaking timed out", zap.String("mode", lobbyParams.Mode.String()), zap.Error(err))
 				err = NewLobbyError(Timeout, "matchmaking timed out")
 			} else {
@@ -81,7 +77,7 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 				if errors.As(err, &lobbyErr) {
 					code = lobbyErr.code
 				} else {
-					logger.Warn("Unexpected error while finding match", zap.Error(err))
+					logger.Warn("Unknown error while finding match", zap.Error(err))
 					code = InternalError
 				}
 
