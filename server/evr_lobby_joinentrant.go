@@ -240,6 +240,11 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 				p.logger.Warn("Failed to send audit message", zap.String("channel_id", gg.AuditChannelID), zap.Error(err))
 			}
 		}
+		timeoutDuration := time.Until(expiry)
+		if timeoutDuration < 0 {
+			timeoutDuration = 0
+		}
+
 		return NewLobbyError(KickedFromLobbyGroup, fmt.Sprintf("Timeout will expire in %d minutes.", int(expiry.Sub(time.Now()).Minutes()+0.50)))
 	}
 
