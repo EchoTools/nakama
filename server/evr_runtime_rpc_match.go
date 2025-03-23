@@ -21,6 +21,8 @@ type shutdownMatchResponse struct {
 
 func shutdownMatchRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 
+	r := NewRuntimeContext(ctx)
+
 	request := &shutdownMatchRequest{}
 	if err := json.Unmarshal([]byte(payload), request); err != nil {
 		return "", err
@@ -38,15 +40,13 @@ func shutdownMatchRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		request.GraceSeconds = 10
 	}
 
-	signalMessage := &SignalShutdownPayload{
-		GraceSeconds: request.GraceSeconds,
-	}
+	env := NewSignalEnvelope(r.UserID, SignalShutdown, SignalShutdownPayload{
+		GraceSeconds:         request.GraceSeconds,
+		DisconnectGameServer: false,
+		DisconnectUsers:      false,
+	})
 
-	signalJson, err := json.Marshal(signalMessage)
-	if err != nil {
-		return "", err
-	}
-	signalResponse, err := nk.MatchSignal(ctx, request.MatchID.String(), string(signalJson))
+	signalResponse, err := nk.MatchSignal(ctx, request.MatchID.String(), env.String())
 	if err != nil {
 		return "", err
 	}
