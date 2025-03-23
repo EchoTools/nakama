@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
 	"sort"
@@ -16,15 +17,16 @@ import (
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
-	"github.com/intinig/go-openskill/rating"
-	"github.com/intinig/go-openskill/types"
-	"go.uber.org/thriftrw/ptr"
 	"go.uber.org/zap"
 )
 
 type TeamAlignments map[string]int // map[UserID]Role
 
 var createLobbyMu = &sync.Mutex{}
+
+var LobbyTestCounter = 0
+
+var ErrCreateLock = errors.New("failed to acquire create lock")
 
 // lobbyJoinSessionRequest is a request to join a specific existing session.
 func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters) error {
@@ -51,8 +53,6 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 	if err := JoinMatchmakingStream(logger, session, lobbyParams); err != nil {
 		return fmt.Errorf("failed to join matchmaking stream: %w", err)
 	}
-
-	// Send PlayerUpdate to current match
 
 	// Monitor the matchmaking status stream, canceling the context if the stream is closed.
 	go p.monitorMatchmakingStream(ctx, logger, session, lobbyParams, cancel)
@@ -154,6 +154,7 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 	}
 	logger.Debug("Joined party group", zap.String("partyID", lobbyGroup.IDStr()))
 
+	rankPercentiles := make([]float64, 0, lobbyGroup.Size())
 	// If this is the leader, then set the presence status to the current match ID.
 	if isLeader {
 		if !lobbyParams.CurrentMatchID.IsNil() && lobbyParams.Mode != evr.ModeSocialPublic {
@@ -166,49 +167,30 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 				}
 			}
 		}
+		stream := lobbyParams.MatchmakingStream()
 
-		var (
-			stream          = lobbyParams.MatchmakingStream()
-			rankPercentiles = make([]float64, 0, 4)
-			ratings         = make([]types.Rating, 0, 4)
-			usernames       = make([]string, 0, 4)
-		)
+		memberUsernames := make([]string, 0, lobbyGroup.Size())
 
 		for _, member := range lobbyGroup.List() {
 			if member.Presence.GetSessionId() == session.id.String() {
 				continue
 			}
+			memberUsernames = append(memberUsernames, member.Presence.GetUsername())
 
 			meta, err := p.nk.StreamUserGet(stream.Mode, stream.Subject.String(), stream.Subcontext.String(), stream.Label, member.Presence.GetUserId(), member.Presence.GetSessionId())
 			if err != nil {
 				return nil, nil, false, fmt.Errorf("failed to get party stream: %w", err)
 			} else if meta == nil {
-				switch lobbyParams.Mode {
-				case evr.ModeSocialPublic, evr.ModeSocialPrivate:
-					// Keep the party together when joining a social lobby.
-				default:
-					logger.Warn("Party member is not following the leader", zap.String("uid", member.Presence.GetUserId()), zap.String("sid", member.Presence.GetSessionId()), zap.String("leader_sid", session.id.String()))
-					if err := p.nk.StreamUserKick(stream.Mode, stream.Subject.String(), stream.Subcontext.String(), stream.Label, member.Presence); err != nil {
-						return nil, nil, false, fmt.Errorf("failed to kick party member: %w", err)
-					}
+				logger.Warn("Party member is not following the leader", zap.String("uid", member.Presence.GetUserId()), zap.String("sid", member.Presence.GetSessionId()), zap.String("leader_sid", session.id.String()))
+				if err := p.nk.StreamUserKick(stream.Mode, stream.Subject.String(), stream.Subcontext.String(), stream.Label, member.Presence); err != nil {
+					return nil, nil, false, fmt.Errorf("failed to kick party member: %w", err)
 				}
 			} else {
-
-				memberParams := &LobbySessionParameters{}
-				if err := json.Unmarshal([]byte(meta.GetStatus()), memberParams); err != nil {
-					logger.Warn("Failed to unmarshal member params", zap.Error(err))
-					continue
-				}
-
-				rankPercentiles = append(rankPercentiles, memberParams.GetRankPercentile())
-				ratings = append(ratings, memberParams.GetRating())
-				usernames = append(usernames, member.Presence.GetUsername())
-
-				partyOrdinal := rating.TeamOrdinal(types.TeamRating{
-					Team: types.Team(ratings),
-				})
-				lobbyParams.SetOrdinal(partyOrdinal)
 				/*
+					memberParams := &LobbySessionParameters{}
+					if err := json.Unmarshal([]byte(member.Presence.GetStatus()), &memberParams); err != nil {
+						return nil, nil, false, fmt.Errorf("failed to unmarshal member params: %w", err)
+					}
 
 					rankPercentiles = append(rankPercentiles, memberParams.GetRankPercentile())
 				*/
@@ -216,8 +198,7 @@ func (p *EvrPipeline) configureParty(ctx context.Context, logger *zap.Logger, se
 		}
 
 		partySize := lobbyGroup.Size()
-
-		logger.Debug("Party is ready", zap.String("leader", session.id.String()), zap.Int("size", partySize), zap.Strings("members", usernames))
+		logger.Debug("Party is ready", zap.String("leader", session.id.String()), zap.Int("size", partySize), zap.Strings("members", memberUsernames))
 
 		if len(rankPercentiles) > 0 {
 			// Average the rank percentiles
@@ -250,29 +231,6 @@ func (p *EvrPipeline) monitorMatchmakingStream(ctx context.Context, logger *zap.
 	// Monitor the stream and cancel the context (and matchmaking) if the stream is closed.
 	// This stream tracks the user's matchmaking status.
 	// This stream is untracked when the user cancels matchmaking.
-
-	if !lobbyParams.CurrentMatchID.IsNil() {
-		// Send update to current match.
-		data := NewSignalEnvelope(session.UserID().String(), SignalPlayerUpdate, &MatchPlayerUpdate{
-			SessionID:     session.id.String(),
-			IsMatchmaking: ptr.Bool(true),
-		})
-
-		if _, err := p.nk.MatchSignal(ctx, lobbyParams.CurrentMatchID.String(), data.String()); err != nil {
-			logger.Warn("Failed to signal match", zap.Error(err), zap.String("mid", lobbyParams.CurrentMatchID.String()))
-
-		} else {
-			defer func() {
-				data := NewSignalEnvelope(session.UserID().String(), SignalPlayerUpdate, &MatchPlayerUpdate{
-					SessionID:     session.id.String(),
-					IsMatchmaking: ptr.Bool(false),
-				})
-				if _, err := p.nk.MatchSignal(ctx, lobbyParams.CurrentMatchID.String(), data.String()); err != nil {
-					logger.Warn("Failed to signal match", zap.Error(err), zap.String("mid", lobbyParams.CurrentMatchID.String()))
-				}
-			}()
-		}
-	}
 
 	stream := lobbyParams.MatchmakingStream()
 	defer LeaveMatchmakingStream(logger, session)
@@ -426,13 +384,12 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 		}
 	}
 
-	var (
-		query         = lobbyParams.BackfillSearchQuery(includeRankPercentile, includeMaxRTT)
-		fallbackTimer = time.NewTimer(lobbyParams.FallbackTimeout)
-		failsafeTimer = time.NewTimer(lobbyParams.FailsafeTimeout)
-		cycleCount    = 0
-		rtts          = lobbyParams.latencyHistory.LatestRTTs()
-	)
+	query := lobbyParams.BackfillSearchQuery(includeRankPercentile, includeMaxRTT)
+
+	cycleCount := 0
+
+	fallbackTimer := time.NewTimer(lobbyParams.FallbackTimeout)
+	failsafeTimer := time.NewTimer(lobbyParams.FailsafeTimeout)
 	for {
 		var err error
 		select {
@@ -494,6 +451,8 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 
 		matches = p.sortBackfillOptions(matches, lobbyParams)
 
+		team := evr.TeamBlue
+
 		for _, labelMeta := range matches {
 			select {
 			case <-ctx.Done():
@@ -502,22 +461,18 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 			}
 
 			l := labelMeta.State
-			entrants[0].PingMillis = rtts[l.GameServer.Endpoint.GetExternalIP()]
 
-			team := evr.TeamBlue
-			switch lobbyParams.Mode {
-			case evr.ModeSocialPublic, evr.ModeSocialPrivate:
-				// Social lobbies can only have one team
+			// Social lobbies can only have one team
+			if lobbyParams.Mode == evr.ModeSocialPublic {
 				team = evr.TeamSocial
-			default:
+			} else {
+
 				// Determine which team has the least players
 				team = evr.TeamBlue
 				if l.RoleCount(evr.TeamOrange) < l.RoleCount(evr.TeamBlue) {
 					team = evr.TeamOrange
 				}
 			}
-
-			// Ensure the team has enough open slots for the party size
 			if n, err := l.OpenSlotsByRole(team); err != nil {
 				logger.Warn("Failed to get open slots by role", zap.Error(err))
 				continue
@@ -545,15 +500,12 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 				}
 				return fmt.Errorf("failed to join backfill match: %w", err)
 			}
-
-			// Join complete
 			return nil
 		}
 
 		// If the lobby is social, create a new social lobby.
 		if lobbyParams.Mode == evr.ModeSocialPublic {
 			// Create a new social lobby
-			logger.Debug("Attempting to create social lobby")
 			_, err = p.newLobby(ctx, logger, lobbyParams)
 			if err != nil {
 				// If the error is a lock error, just try again.
@@ -636,7 +588,7 @@ func PrepareEntrantPresences(ctx context.Context, logger *zap.Logger, nk runtime
 
 		rating, err := MatchmakingRatingLoad(ctx, nk, session.UserID().String(), lobbyParams.GroupID.String(), mmMode)
 		if err != nil {
-			logger.Warn("Failed to load rating", zap.String("sid", sessionID.String()), zap.Error(err), zap.String("group_id", lobbyParams.GroupID.String()), zap.String("mode", mmMode.String()))
+			logger.Warn("Failed to load rating", zap.String("sid", sessionID.String()), zap.Error(err))
 			rating = NewDefaultRating()
 		}
 
@@ -776,7 +728,7 @@ func rttByPlayerByExtIP(ctx context.Context, logger *zap.Logger, db *sql.DB, nk 
 
 	query := strings.Join(qparts, " ")
 
-	pubLabels, err := LobbyListLabels(ctx, nk, query)
+	pubLabels, err := lobbyListLabels(ctx, nk, query)
 	if err != nil {
 		return nil, err
 	}
