@@ -121,6 +121,15 @@ type BuildMatchResponse struct {
 func BuildMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 	_nk := nk.(*RuntimeGoNakamaModule)
 
+	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	if !ok {
+		return "", runtime.NewError("No user ID in context", StatusUnauthenticated)
+	}
+
+	logger.WithFields(map[string]any{
+		"user_id": userID,
+	}).Debug("Creating match via RPC")
+
 	request := &BuildMatchRequest{}
 	if err := json.Unmarshal([]byte(payload), request); err != nil {
 		return "", err
