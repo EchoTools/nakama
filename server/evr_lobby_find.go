@@ -563,7 +563,48 @@ func (p *EvrPipeline) CheckServerPing(ctx context.Context, logger *zap.Logger, s
 		return fmt.Errorf("failed to send ping request: %v", err)
 	}
 
+	go func() {
+		now := time.Now().UTC().Unix()
+		<-time.After(5 * time.Second)
+		if latencyHistory, err := LoadLatencyHistory(ctx, logger, p.db, session.UserID()); err != nil {
+			logger.Error(fmt.Sprintf("Error loading latency history: %v", err))
+		} else {
+
+			// Add latency history entries for any candidates that are not in the latency history.
+			latencyHistory = p.setMissingPingHistories(latencyHistory, candidates, now)
+
+			if err := StoreLatencyHistory(ctx, logger, p.db, p.nk.metrics, p.nk.storageIndex, session.UserID(), latencyHistory); err != nil {
+				logger.Error(fmt.Sprintf("Error saving latency history: %v", err))
+			}
+		}
+	}()
 	return nil
+}
+
+func (p *EvrPipeline) setMissingPingHistories(history LatencyHistory, candidates []evr.Endpoint, ts int64) LatencyHistory {
+
+OuterLoop:
+	for _, e := range candidates {
+		// If the candidate has not had a ping response, then add on at 999ms.
+
+		if _, ok := history[e.GetExternalIP()]; !ok {
+			// The candidate is not in the latency history, so add it.
+			history[e.GetExternalIP()] = map[int64]int{
+				ts: 999,
+			}
+		} else {
+			for t := range history[e.GetExternalIP()] {
+				if t > ts {
+					// There is a timestamp is greater than the threshold; skip this candidate.
+					continue OuterLoop
+				}
+			}
+
+			// The candidate is in the latency history, so add a new entry
+			history[e.GetExternalIP()][ts] = 999
+		}
+	}
+	return history
 }
 
 func PrepareEntrantPresences(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, sessionRegistry SessionRegistry, lobbyParams *LobbySessionParameters, sessionIDs ...uuid.UUID) ([]*EvrMatchPresence, error) {
