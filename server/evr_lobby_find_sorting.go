@@ -42,8 +42,8 @@ func (p *EvrPipeline) sortBackfillOptions(filteredMatches []*MatchLabelMeta, lob
 			continue
 		}
 
-		// Skip matches that are unreachable or have a high RTT
-		if !isReachable || rtt == 0 || rtt > lobbyParams.MaxServerRTT {
+		// Skip matches that are unreachable or have a high RTT (as long as the player has a latency catch)
+		if len(rtts) != 0 && (!isReachable || rtt > lobbyParams.MaxServerRTT) {
 			continue
 		}
 
