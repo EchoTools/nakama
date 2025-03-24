@@ -103,7 +103,7 @@ func (h *EventDispatch) eventFn(ctx context.Context, logger runtime.Logger, evt 
 	select {
 	case h.queue <- evt:
 	case <-ctx.Done():
-		logger.Warn("context cancelled")
+		logger.Warn("context canceled")
 	case <-time.After(3 * time.Second):
 		logger.Warn("event queue full")
 	}
