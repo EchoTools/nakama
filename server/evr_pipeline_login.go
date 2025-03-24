@@ -1034,7 +1034,7 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 	}
 
 	go func() {
-		ctx, cancel := context.WithTimeout(ctx, time.Second*10)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
 		defer cancel()
 
 		if err := p.processUserServerProfileUpdate(ctx, logger, request.EvrID, label, payload); err != nil {

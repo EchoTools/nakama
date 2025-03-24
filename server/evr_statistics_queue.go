@@ -91,8 +91,11 @@ func NewStatisticsQueue(logger runtime.Logger, nk runtime.NakamaModule) *Statist
 
 							if _, err := nk.LeaderboardRecordWrite(ctx, e.BoardMeta.ID(), e.UserID, e.DisplayName, e.Score, e.Subscore, map[string]any{}, e.Override()); err != nil {
 								logger.WithFields(map[string]any{
-									"leaderboard_id": e.BoardMeta.ID(),
 									"error":          err.Error(),
+									"leaderboard_id": e.BoardMeta.ID(),
+									"user_id":        e.UserID,
+									"score":          e.Score,
+									"subscore":       e.Subscore,
 								}).Error("Failed to write leaderboard record")
 							}
 
