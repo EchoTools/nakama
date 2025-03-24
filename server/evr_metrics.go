@@ -286,11 +286,10 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 		previouslySeenMatches = seenMatches
 
 		// Update linked headset counts
-		linkedUsers, err := CountLinkedUsers(ctx, nk, db)
-		if err != nil {
+		if linkedUsers, err := CountLinkedUsers(ctx, nk, db); err != nil {
 			logger.Error("Error counting linked users: %v", err)
 		} else {
-			nk.metrics.CustomGauge("linked_users_gauge", nil, float64(linkedUsers))
+			nk.metrics.CustomGauge("linked_users_count_gauge", nil, float64(linkedUsers))
 		}
 
 		// Update the geomap data
@@ -351,7 +350,11 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 }
 
 func CountLinkedUsers(ctx context.Context, nk runtime.NakamaModule, db *sql.DB) (int, error) {
-	query := "SELECT count(user_id) FROM user_device WHERE id LIKE 'OVR-%' OR id LIKE 'DMO-%'"
+	query := `
+	SELECT COUNT(DISTINCT user_id) 
+	FROM user_device 
+	WHERE id LIKE 'OVR-%' OR id LIKE 'DMO-%';
+	`
 	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		return 0, err
