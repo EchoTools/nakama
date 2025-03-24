@@ -377,30 +377,53 @@ func TestHashMatchmakerEntries(t *testing.T) {
 		{
 			name: "Single entry",
 			entries: []runtime.MatchmakerEntry{
-				&MatchmakerEntry{Ticket: "ticket1"},
+				&MatchmakerEntry{Ticket: "11111111-1111-1111-1111-111111111111"},
 			},
-			expected: HashMatchmakerEntries([]*MatchmakerEntry{{Ticket: "ticket1"}}),
+			expected: HashMatchmakerEntries([]*MatchmakerEntry{{Ticket: "11111111-1111-1111-1111-111111111111"}}),
 		},
 		{
 			name: "Multiple entries, same order",
 			entries: []runtime.MatchmakerEntry{
-				&MatchmakerEntry{Ticket: "ticket1"},
-				&MatchmakerEntry{Ticket: "ticket2"},
+				&MatchmakerEntry{Ticket: "11111111-1111-1111-1111-111111111111"},
+				&MatchmakerEntry{Ticket: "22222222-2222-2222-2222-222222222222"},
 			},
 			expected: HashMatchmakerEntries([]*MatchmakerEntry{
-				{Ticket: "ticket1"},
-				{Ticket: "ticket2"},
+				{Ticket: "11111111-1111-1111-1111-111111111111"},
+				{Ticket: "22222222-2222-2222-2222-222222222222"},
 			}),
 		},
 		{
 			name: "Multiple entries, different order",
 			entries: []runtime.MatchmakerEntry{
-				&MatchmakerEntry{Ticket: "ticket2"},
-				&MatchmakerEntry{Ticket: "ticket1"},
+				&MatchmakerEntry{Ticket: "22222222-2222-2222-2222-222222222222"},
+				&MatchmakerEntry{Ticket: "11111111-1111-1111-1111-111111111111"},
 			},
 			expected: HashMatchmakerEntries([]*MatchmakerEntry{
-				{Ticket: "ticket1"},
-				{Ticket: "ticket2"},
+				{Ticket: "11111111-1111-1111-1111-111111111111"},
+				{Ticket: "22222222-2222-2222-2222-222222222222"},
+			}),
+		},
+		{
+			name: "Lots of entries, different order",
+			entries: []runtime.MatchmakerEntry{
+				&MatchmakerEntry{Ticket: "22222222-2222-2222-2222-222222222222"},
+				&MatchmakerEntry{Ticket: "11111111-1111-1111-1111-111111111111"},
+				&MatchmakerEntry{Ticket: "33333333-3333-3333-3333-333333333333"},
+				&MatchmakerEntry{Ticket: "66666666-6666-6666-6666-666666666666"},
+				&MatchmakerEntry{Ticket: "55555555-5555-5555-5555-555555555555"},
+				&MatchmakerEntry{Ticket: "77777777-7777-7777-7777-777777777777"},
+				&MatchmakerEntry{Ticket: "44444444-4444-4444-4444-444444444444"},
+				&MatchmakerEntry{Ticket: "88888888-8888-8888-8888-888888888888"},
+			},
+			expected: HashMatchmakerEntries([]*MatchmakerEntry{
+				{Ticket: "11111111-1111-1111-1111-111111111111"},
+				{Ticket: "22222222-2222-2222-2222-222222222222"},
+				{Ticket: "33333333-3333-3333-3333-333333333333"},
+				{Ticket: "44444444-4444-4444-4444-444444444444"},
+				{Ticket: "55555555-5555-5555-5555-555555555555"},
+				{Ticket: "66666666-6666-6666-6666-666666666666"},
+				{Ticket: "77777777-7777-7777-7777-777777777777"},
+				{Ticket: "88888888-8888-8888-8888-888888888888"},
 			}),
 		},
 	}
@@ -408,11 +431,177 @@ func TestHashMatchmakerEntries(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			hash := HashMatchmakerEntries(tt.entries)
+			//t.Errorf("HashMatchmakerEntries() = %v, expected %v", hash, tt.expected)
 			if hash != tt.expected {
-				t.Logf("HashMatchmakerEntries() = %v, expected %v", hash, tt.expected)
 				t.Errorf("HashMatchmakerEntries() = %v, expected %v", hash, tt.expected)
 			}
 		})
 	}
-	t.Fail()
+}
+func TestSortByRanks(t *testing.T) {
+	tests := []struct {
+		name     string
+		groups   []CandidateList
+		expected []CandidateList
+	}{
+		{
+			name: "Single group",
+			groups: []CandidateList{
+				{
+					&MatchmakerEntry{Properties: map[string]any{"rating_mu": 25.0, "rating_sigma": 8.0}},
+				},
+			},
+			expected: []CandidateList{
+				{
+					&MatchmakerEntry{Properties: map[string]any{"rating_mu": 25.0, "rating_sigma": 8.0}},
+				},
+			},
+		},
+		{
+			name: "Multiple groups, already sorted",
+			groups: []CandidateList{
+				{
+					&MatchmakerEntry{Properties: map[string]any{"rating_mu": 30.0, "rating_sigma": 7.0}},
+				},
+				{
+					&MatchmakerEntry{Properties: map[string]any{"rating_mu": 25.0, "rating_sigma": 8.0}},
+				},
+			},
+			expected: []CandidateList{
+				{
+					&MatchmakerEntry{Properties: map[string]any{"rating_mu": 30.0, "rating_sigma": 7.0}},
+				},
+				{
+					&MatchmakerEntry{Properties: map[string]any{"rating_mu": 25.0, "rating_sigma": 8.0}},
+				},
+			},
+		},
+		{
+			name: "Multiple groups, unsorted",
+			groups: []CandidateList{
+				{
+					&MatchmakerEntry{Properties: map[string]any{"rating_mu": 25.0, "rating_sigma": 8.0}},
+				},
+				{
+					&MatchmakerEntry{Properties: map[string]any{"rating_mu": 30.0, "rating_sigma": 7.0}},
+				},
+			},
+			expected: []CandidateList{
+				{
+					&MatchmakerEntry{Properties: map[string]any{"rating_mu": 30.0, "rating_sigma": 7.0}},
+				},
+				{
+					&MatchmakerEntry{Properties: map[string]any{"rating_mu": 25.0, "rating_sigma": 8.0}},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sortByRanks(tt.groups)
+
+			for i, group := range tt.groups {
+				expectedGroup := tt.expected[i]
+				if len(group) != len(expectedGroup) {
+					t.Errorf("Group %d length mismatch: got %d, expected %d", i, len(group), len(expectedGroup))
+					continue
+				}
+
+				for j, entry := range group {
+					expectedEntry := expectedGroup[j]
+					if entry.GetProperties()["rating_mu"] != expectedEntry.GetProperties()["rating_mu"] ||
+						entry.GetProperties()["rating_sigma"] != expectedEntry.GetProperties()["rating_sigma"] {
+						t.Errorf("Group %d, Entry %d mismatch: got %+v, expected %+v", i, j, entry.GetProperties(), expectedEntry.GetProperties())
+					}
+				}
+			}
+		})
+	}
+}
+func TestOrganizeAsTeams(t *testing.T) {
+	tests := []struct {
+		name      string
+		groups    []CandidateList
+		teamSize  int
+		expectedA CandidateList
+		expectedB CandidateList
+	}{
+		{
+			name: "Even distribution",
+			groups: []CandidateList{
+				{
+					&MatchmakerEntry{Ticket: "1"},
+					&MatchmakerEntry{Ticket: "2"},
+				},
+				{
+					&MatchmakerEntry{Ticket: "3"},
+					&MatchmakerEntry{Ticket: "4"},
+				},
+			},
+			teamSize: 2,
+			expectedA: CandidateList{
+				&MatchmakerEntry{Ticket: "1"},
+				&MatchmakerEntry{Ticket: "2"},
+			},
+			expectedB: CandidateList{
+				&MatchmakerEntry{Ticket: "3"},
+				&MatchmakerEntry{Ticket: "4"},
+			},
+		},
+		{
+			name: "Exceeding team size",
+			groups: []CandidateList{
+				{
+					&MatchmakerEntry{Ticket: "1"},
+					&MatchmakerEntry{Ticket: "2"},
+					&MatchmakerEntry{Ticket: "3"},
+				},
+				{
+					&MatchmakerEntry{Ticket: "4"},
+					&MatchmakerEntry{Ticket: "5"},
+					&MatchmakerEntry{Ticket: "6"},
+				},
+				{
+					&MatchmakerEntry{Ticket: "7"},
+					&MatchmakerEntry{Ticket: "8"},
+				},
+			},
+			teamSize: 4,
+			expectedA: CandidateList{
+				&MatchmakerEntry{Ticket: "1"},
+				&MatchmakerEntry{Ticket: "2"},
+				&MatchmakerEntry{Ticket: "3"},
+			},
+			expectedB: CandidateList{
+				&MatchmakerEntry{Ticket: "4"},
+				&MatchmakerEntry{Ticket: "5"},
+				&MatchmakerEntry{Ticket: "6"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			teamA, teamB := organizeAsTeams(tt.groups, tt.teamSize)
+
+			if len(teamA) != len(tt.expectedA) || len(teamB) != len(tt.expectedB) {
+				t.Errorf("Team size mismatch: got teamA=%d, teamB=%d, expected teamA=%d, teamB=%d",
+					len(teamA), len(teamB), len(tt.expectedA), len(tt.expectedB))
+				return
+			}
+
+			for i, entry := range teamA {
+				if entry.GetTicket() != tt.expectedA[i].GetTicket() {
+					t.Errorf("Team A mismatch at index %d: got %v, expected %v", i, entry.GetTicket(), tt.expectedA[i].GetTicket())
+				}
+			}
+
+			for i, entry := range teamB {
+				if entry.GetTicket() != tt.expectedB[i].GetTicket() {
+					t.Errorf("Team B mismatch at index %d: got %v, expected %v", i, entry.GetTicket(), tt.expectedB[i].GetTicket())
+				}
+			}
+		})
+	}
 }
