@@ -121,7 +121,10 @@ func CalculateNewPlayerRatings(players []PlayerInfo, blueWins bool) map[string]t
 		scores[i] = playerScores[p.SessionID]
 	}
 
-	teamRatings = rating.Rate(teamRatings, &types.OpenSkillOptions{Score: scores})
+	teamRatings = rating.Rate(teamRatings, &types.OpenSkillOptions{
+		Score: scores,
+		Tau:   ptr.Float64(0.3), // Limit the sigma
+	})
 
 	ratingMap := make(map[string]types.Rating, len(players))
 	for i, team := range teamRatings {

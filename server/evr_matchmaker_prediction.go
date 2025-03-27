@@ -121,7 +121,7 @@ func predictCandidateOutcomes(candidates [][]runtime.MatchmakerEntry) []Predicte
 		sortByRanks(groups)
 
 		teamA, teamB := organizeAsTeams(groups, len(c)/2)
-		// If the teams are not balanced, continue to the next candidate
+		// If the teams are not balanced (i.e. a party is split up), continue to the next candidate
 		if len(teamA) != len(teamB) {
 			continue
 		}
