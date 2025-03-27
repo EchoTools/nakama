@@ -72,6 +72,7 @@ func NewDefaultRating() types.Rating {
 	})
 }
 
+// CalculateNewPlayerRatings calculates the new player ratings based on the match outcome.
 func CalculateNewPlayerRatings(players []PlayerInfo, blueWins bool) map[string]types.Rating {
 
 	winningTeam := BlueTeam
@@ -116,14 +117,16 @@ func CalculateNewPlayerRatings(players []PlayerInfo, blueWins bool) map[string]t
 		teamRatings[i] = types.Team{p.Rating()}
 	}
 
+	// Create a map of player scores; used to weight the new ratings
 	scores := make([]int, len(players))
 	for i, p := range players {
 		scores[i] = playerScores[p.SessionID]
 	}
 
+	// Calculate the new ratings
 	teamRatings = rating.Rate(teamRatings, &types.OpenSkillOptions{
 		Score: scores,
-		Tau:   ptr.Float64(0.3), // Limit the sigma
+		Tau:   ptr.Float64(0.3), // prevent sigma from dropping too low
 	})
 
 	ratingMap := make(map[string]types.Rating, len(players))
