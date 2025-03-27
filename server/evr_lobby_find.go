@@ -769,7 +769,7 @@ func rttByPlayerByExtIP(ctx context.Context, logger *zap.Logger, db *sql.DB, nk 
 
 	query := strings.Join(qparts, " ")
 
-	pubLabels, err := lobbyListLabels(ctx, nk, query)
+	pubLabels, err := LobbyListLabels(ctx, nk, query)
 	if err != nil {
 		return nil, err
 	}
