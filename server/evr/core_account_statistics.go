@@ -7,6 +7,9 @@ import (
 	"reflect"
 	"strings"
 	"time"
+
+	"github.com/intinig/go-openskill/rating"
+	"github.com/intinig/go-openskill/types"
 )
 
 type ResetSchedule string
@@ -216,7 +219,7 @@ func (s *PlayerStatistics) UnmarshalJSON(data []byte) error {
 type ArenaStatistics struct {
 	ArenaLosses                  *StatisticIntegerIncrement `json:"ArenaLosses,omitempty"`
 	ArenaMVPPercentage           *StatisticFloatSet         `json:"ArenaMVPPercentage,omitempty"`
-	ArenaMVPS                    *StatisticIntegerIncrement `json:"ArenaMVPs,omitempty"`
+	ArenaMVPs                    *StatisticIntegerIncrement `json:"ArenaMVPs,omitempty"`
 	ArenaTies                    *StatisticIntegerIncrement `json:"ArenaTies,omitempty"`
 	ArenaWinPercentage           *StatisticFloatSet         `json:"ArenaWinPercentage,omitempty"`
 	ArenaWins                    *StatisticIntegerIncrement `json:"ArenaWins,omitempty"`
@@ -267,6 +270,7 @@ type ArenaStatistics struct {
 	GamesPlayed                  *StatisticIntegerIncrement `json:"GamesPlayed,omitempty"`
 	SkillRatingMu                *StatisticFloatSet         `json:"SkillRatingMu,omitempty"`
 	SkillRatingSigma             *StatisticFloatSet         `json:"SkillRatingSigma,omitempty"`
+	SkillRatingOrdinal           *StatisticFloatSet         `json:"SkillRatingOrdinal,omitempty"`
 	RankPercentile               *StatisticFloatSet         `json:"RankPercentile,omitempty"`
 	LobbyTime                    *StatisticFloatSet         `json:"LobbyTime,omitempty"`
 	EarlyQuits                   *StatisticIntegerIncrement `json:"EarlyQuits,omitempty"`
@@ -437,6 +441,21 @@ func (s *ArenaStatistics) CalculateFields() {
 				},
 			}
 		}
+
+		if s.SkillRatingMu != nil && s.SkillRatingSigma != nil {
+			r := types.Rating{
+				Sigma: s.SkillRatingSigma.GetValue(),
+				Mu:    s.SkillRatingMu.GetValue(),
+				Z:     3,
+			}
+
+			s.SkillRatingOrdinal = &StatisticFloatSet{
+				FloatStatistic{
+					Value: rating.Ordinal(r),
+					Count: 1,
+				},
+			}
+		}
 	}
 }
 
@@ -454,7 +473,6 @@ type CombatStatistics struct {
 	CombatHillCaptures                 *StatisticIntegerIncrement `json:"CombatHillCaptures"`
 	CombatHillDefends                  *StatisticIntegerIncrement `json:"CombatHillDefends"`
 	CombatKills                        *StatisticIntegerIncrement `json:"CombatKills"`
-	CombatLosses                       *StatisticIntegerIncrement `json:"CombatLosses"`
 	CombatMVPs                         *StatisticIntegerIncrement `json:"CombatMVPs"`
 	CombatObjectiveDamage              *StatisticFloatIncrement   `json:"CombatObjectiveDamage"`
 	CombatObjectiveEliminations        *StatisticIntegerIncrement `json:"CombatObjectiveEliminations"`
@@ -468,13 +486,16 @@ type CombatStatistics struct {
 	CombatSoloKills                    *StatisticIntegerIncrement `json:"CombatSoloKills"`
 	CombatStuns                        *StatisticIntegerIncrement `json:"CombatStuns"`
 	CombatTeammateHealing              *StatisticFloatIncrement   `json:"CombatTeammateHealing"`
-	CombatWinPercentage                *StatisticFloatSet         `json:"CombatWinPercentage"`
 	CombatWins                         *StatisticIntegerIncrement `json:"CombatWins"`
+	CombatLosses                       *StatisticIntegerIncrement `json:"CombatLosses"`
+	CombatGamesPlayed                  *StatisticIntegerIncrement `json:"CombatGamesPlayed"`
+	CombatWinPercentage                *StatisticFloatSet         `json:"CombatWinPercentage"`
 	Level                              *StatisticIntegerIncrement `json:"Level"`
 	XP                                 *StatisticFloatSet         `json:"XP"`
 	GamesPlayed                        *StatisticIntegerIncrement `json:"GamesPlayed"`
 	SkillRatingMu                      *StatisticFloatSet         `json:"SkillRatingMu"`
 	SkillRatingSigma                   *StatisticFloatSet         `json:"SkillRatingSigma"`
+	SkillRatingOrdinal                 *StatisticFloatSet         `json:"SkillRatingOrdinal"`
 	RankPercentile                     *StatisticFloatSet         `json:"RankPercentile"`
 	LobbyTime                          *StatisticFloatSet         `json:"LobbyTime"`
 }
@@ -495,6 +516,22 @@ func (s *CombatStatistics) CalculateFields() {
 	if s.CombatPointCaptureWins != nil && s.CombatPointCaptureGamesPlayed != nil && s.CombatPointCaptureGamesPlayed.Value != 0 {
 		s.CombatPointCaptureWinPercentage.Value = float64(s.CombatPointCaptureWins.Value) / float64(s.CombatPointCaptureGamesPlayed.Value) * 100
 	}
+
+	if s.SkillRatingMu != nil && s.SkillRatingSigma != nil {
+		r := types.Rating{
+			Sigma: s.SkillRatingSigma.GetValue(),
+			Mu:    s.SkillRatingMu.GetValue(),
+			Z:     3,
+		}
+
+		s.SkillRatingOrdinal = &StatisticFloatSet{
+			FloatStatistic{
+				Value: rating.Ordinal(r),
+				Count: 1,
+			},
+		}
+	}
+
 }
 
 type GenericStats struct { // Privates and Social Lobby
@@ -507,17 +544,6 @@ func statisticMarshalJSON[T int64 | float64 | float32](op string, cnt int64, val
 	return []byte(fmt.Sprintf("{\"val\":%v,\"op\":\"%s\",\"cnt\":%d}", float32(val), op, cnt)), nil
 }
 
-func Float64ToInt64Pair(f float64) (int64, int64) {
-	whole := int64(f)                        // Extract whole number part
-	fraction := f - float64(whole)           // Extract fractional part
-	scaledFraction := int64(fraction * 1e18) // Scale to preserve precision
-	return whole, scaledFraction
-}
-
-func Int64PairToFloat64(whole, fraction int64) float64 {
-	return float64(whole) + float64(fraction)/1e18
-}
-
 type Statistics interface {
 	CalculateFields()
 }
@@ -527,7 +553,6 @@ type Statistic interface {
 	SetValue(float64)
 	GetCount() int64
 	SetCount(int64)
-	FromScore(int64, int64)
 	MarshalJSON() ([]byte, error)
 }
 
@@ -587,10 +612,6 @@ func (s *FloatStatistic) GetValue() float64 {
 
 func (s *FloatStatistic) SetValue(v float64) {
 	s.Value = float64(v)
-}
-
-func (s *FloatStatistic) FromScore(score, subscore int64) {
-	s.Value = Int64PairToFloat64(score, subscore)
 }
 
 type StatisticIntegerIncrement struct {
