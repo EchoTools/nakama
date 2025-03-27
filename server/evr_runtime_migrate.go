@@ -25,11 +25,17 @@ func MigrateSystem(ctx context.Context, logger runtime.Logger, db *sql.DB, nk ru
 		&MigrationDevicesHistory{},
 		//&MigrationGuildGroups{},
 		//&MigrationLeaderboardPrune{},
+		&MigrationLeaderboardRecords{},
 	}
 
 	for _, m := range migrations {
+		startTime := time.Now()
+		logger := logger.WithField("migration", fmt.Sprintf("%T", m))
+
 		if err := m.MigrateSystem(ctx, logger, db, nk); err != nil {
 			logger.WithField("error", err).Error("Error migrating system data")
+		} else {
+			logger.WithField("duration", time.Since(startTime)).Info("Migrated complete.")
 		}
 	}
 

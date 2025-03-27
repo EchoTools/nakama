@@ -21,13 +21,16 @@ const (
 	TabletStatisticIntegerValue = iota
 	TabletStatisticFloatValue
 
-	GamesPlayedStatisticID      = "GamesPlayed"
-	RankPercentileStatisticID   = "RankPercentile"
-	SkillRatingMuStatisticID    = "SkillRatingMu"
-	SkillRatingSigmaStatisticID = "SkillRatingSigma"
-	LobbyTimeStatisticID        = "LobbyTime"
-	GameServerTimeStatisticsID  = "GameServerTime"
-	EarlyQuitStatisticID        = "EarlyQuits"
+	GamesPlayedStatisticID        = "GamesPlayed"
+	RankPercentileStatisticID     = "RankPercentile"
+	SkillRatingMuStatisticID      = "SkillRatingMu"
+	SkillRatingSigmaStatisticID   = "SkillRatingSigma"
+	SkillRatingOrdinalStatisticID = "SkillRatingOrdinal"
+	LobbyTimeStatisticID          = "LobbyTime"
+	GameServerTimeStatisticsID    = "GameServerTime"
+	EarlyQuitStatisticID          = "EarlyQuits"
+
+	LeaderboardScoreScalingFactor = float64(1000000000)
 )
 
 type LeaderboardOperator string
@@ -49,6 +52,32 @@ var (
 		evr.ModeSocialPrivate,
 	}
 )
+
+const ()
+
+// Float64ToInt64Pair converts a float64 into a leaderboard score.
+// It uses a fixed scaling factor to preserve precision.
+func Float64ToScore(f float64) (int64, error) {
+	if f < 0 {
+		return 0, fmt.Errorf("negative value: %f", f)
+	}
+	// Limit the float to a maximum of 2^32
+	if f > float64(1<<32) {
+		return 0, fmt.Errorf("value too large: %f", f)
+	}
+
+	// The fraction part is the scaled float
+	return int64(f * float64(LeaderboardScoreScalingFactor)), nil
+}
+
+// Int64PairToFloat64 converts a leaderboard score into a float64.
+func ScoreToFloat64(score int64) float64 {
+	if score == 0 {
+		return 0
+	}
+	// The fraction part is the scaled float
+	return float64(score) / LeaderboardScoreScalingFactor
+}
 
 type LeaderboardMeta struct {
 	GroupID       string
@@ -101,7 +130,7 @@ func MatchmakingRatingLoad(ctx context.Context, nk runtime.NakamaModule, userID,
 		}
 
 		record := ownerRecords[0]
-		*ptr = Int64PairToFloat64(record.Score, record.Subscore)
+		*ptr = ScoreToFloat64(record.Score)
 	}
 	if sigma == 0 || mu == 0 {
 		return NewDefaultRating(), nil
@@ -112,28 +141,29 @@ func MatchmakingRatingLoad(ctx context.Context, nk runtime.NakamaModule, userID,
 	}), nil
 }
 
-func MatchmakingRatingStore(ctx context.Context, nk runtime.NakamaModule, userID, displayName, groupID string, mode evr.Symbol, rating types.Rating) error {
+func MatchmakingRatingStore(ctx context.Context, nk runtime.NakamaModule, userID, displayName, groupID string, mode evr.Symbol, r types.Rating) error {
 
 	scores := map[string]float64{
-		StatisticBoardID(groupID, mode, SkillRatingSigmaStatisticID, "alltime"): rating.Sigma,
-		StatisticBoardID(groupID, mode, SkillRatingMuStatisticID, "alltime"):    rating.Mu,
+		StatisticBoardID(groupID, mode, SkillRatingSigmaStatisticID, "alltime"):   r.Sigma,
+		StatisticBoardID(groupID, mode, SkillRatingMuStatisticID, "alltime"):      r.Mu,
+		StatisticBoardID(groupID, mode, SkillRatingOrdinalStatisticID, "alltime"): rating.Ordinal(r),
 	}
 
 	for id, value := range scores {
-		score, subscore := Float64ToInt64Pair(value)
-		if score == 0 && subscore == 0 {
-			continue
+		score, err := Float64ToScore(value)
+		if err != nil {
+			return fmt.Errorf("failed to convert float64 to int64 pair: %w", err)
 		}
 
 		// Write the record
-		if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, displayName, score, subscore, nil, nil); err != nil {
+		if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, displayName, score, 0, nil, nil); err != nil {
 			// Try to create the leaderboard
 			err = nk.LeaderboardCreate(ctx, id, true, "desc", "set", "", nil, true)
 			if err != nil {
 				return fmt.Errorf("Leaderboard create error: %w", err)
 			} else {
 				// Retry the write
-				_, err := nk.LeaderboardRecordWrite(ctx, id, userID, displayName, score, subscore, nil, nil)
+				_, err := nk.LeaderboardRecordWrite(ctx, id, userID, displayName, score, 0, nil, nil)
 				if err != nil {
 					return fmt.Errorf("Leaderboard record write error: %w", err)
 				}
@@ -157,22 +187,23 @@ func MatchmakingRankPercentileLoad(ctx context.Context, nk runtime.NakamaModule,
 		return ServiceSettings().Matchmaking.RankPercentile.Default, nil
 	}
 
-	return Int64PairToFloat64(records[0].Score, records[0].Subscore), nil
+	return ScoreToFloat64(records[0].Score), nil
 }
 
 func MatchmakingRankPercentileStore(ctx context.Context, nk runtime.NakamaModule, userID, username, groupID string, mode evr.Symbol, percentile float64) error {
 
 	id := StatisticBoardID(groupID, mode, RankPercentileStatisticID, "alltime")
 
-	score, subscore := Float64ToInt64Pair(percentile)
+	score, err := Float64ToScore(percentile)
+	if err != nil {
+		return fmt.Errorf("failed to convert float64 to int64 pair: %w", err)
+	}
 
-	if score == 0 && subscore == 0 {
+	if score == 0 {
 		return nil
 	}
 	// Write the record
-	_, err := nk.LeaderboardRecordWrite(ctx, id, userID, username, score, subscore, nil, nil)
-
-	if err != nil {
+	if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, username, score, 0, nil, nil); err != nil {
 		// Try to create the leaderboard
 		err = nk.LeaderboardCreate(ctx, id, true, "asc", "set", "", nil, true)
 
@@ -180,7 +211,7 @@ func MatchmakingRankPercentileStore(ctx context.Context, nk runtime.NakamaModule
 			return fmt.Errorf("Leaderboard create error: %w", err)
 		} else {
 			// Retry the write
-			_, err := nk.LeaderboardRecordWrite(ctx, id, userID, username, score, subscore, nil, nil)
+			_, err := nk.LeaderboardRecordWrite(ctx, id, userID, username, score, 0, nil, nil)
 			if err != nil {
 				return fmt.Errorf("Leaderboard record write error: %w", err)
 			}
@@ -188,17 +219,6 @@ func MatchmakingRankPercentileStore(ctx context.Context, nk runtime.NakamaModule
 	}
 
 	return nil
-}
-
-func Float64ToInt64Pair(f float64) (int64, int64) {
-	whole := int64(f)                        // Extract whole number part
-	fraction := f - float64(whole)           // Extract fractional part
-	scaledFraction := int64(fraction * 1e18) // Scale to preserve precision
-	return whole, scaledFraction
-}
-
-func Int64PairToFloat64(whole, fraction int64) float64 {
-	return float64(whole) + float64(fraction)/1e18
 }
 
 func StatisticBoardID(groupID string, mode evr.Symbol, statName string, resetSchedule evr.ResetSchedule) string {
@@ -360,7 +380,7 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, nk runtime.NakamaMod
 			continue
 		}
 		v.SetCount(1)
-		v.FromScore(dbScore, dbSubscore)
+		v.SetValue(ScoreToFloat64(dbScore))
 
 	}
 
@@ -525,14 +545,17 @@ func StatisticsToEntries(userID, displayName, groupID string, mode evr.Symbol, p
 				continue
 			}
 
-			score, subscore := Float64ToInt64Pair(statValue)
+			score, err := Float64ToScore(statValue)
+			if err != nil {
+				return nil, fmt.Errorf("failed to convert float64 to int64 pair: %w", err)
+			}
 
 			entries = append(entries, &StatisticsQueueEntry{
 				BoardMeta:   meta,
 				UserID:      userID,
 				DisplayName: displayName,
 				Score:       score,
-				Subscore:    subscore,
+				Subscore:    0,
 				Metadata:    nil,
 			})
 		}
