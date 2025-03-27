@@ -278,8 +278,7 @@ type ArenaStatistics struct {
 }
 
 func (s *ArenaStatistics) CalculateFields() {
-
-	if s == nil || s.ArenaWins == nil || s.ArenaLosses == nil {
+	if s == nil {
 		return
 	}
 
@@ -298,7 +297,13 @@ func (s *ArenaStatistics) CalculateFields() {
 		}
 	}
 
-	gamesPlayed := s.ArenaWins.GetValue() + s.ArenaLosses.GetValue() + s.EarlyQuits.GetValue()
+	gamesPlayed := 0.0
+	if s.ArenaWins != nil {
+		gamesPlayed += s.ArenaWins.GetValue()
+	}
+	if s.ArenaLosses != nil {
+		gamesPlayed += s.ArenaLosses.GetValue()
+	}
 
 	s.GamesPlayed = &StatisticIntegerIncrement{
 		IntegerStatistic{
@@ -488,7 +493,6 @@ type CombatStatistics struct {
 	CombatTeammateHealing              *StatisticFloatIncrement   `json:"CombatTeammateHealing"`
 	CombatWins                         *StatisticIntegerIncrement `json:"CombatWins"`
 	CombatLosses                       *StatisticIntegerIncrement `json:"CombatLosses"`
-	CombatGamesPlayed                  *StatisticIntegerIncrement `json:"CombatGamesPlayed"`
 	CombatWinPercentage                *StatisticFloatSet         `json:"CombatWinPercentage"`
 	Level                              *StatisticIntegerIncrement `json:"Level"`
 	XP                                 *StatisticFloatSet         `json:"XP"`
@@ -501,6 +505,22 @@ type CombatStatistics struct {
 }
 
 func (s *CombatStatistics) CalculateFields() {
+	gamesPlayed := 0
+	if s.CombatWins != nil {
+		gamesPlayed += int(s.CombatWins.GetValue())
+	}
+
+	if s.CombatLosses != nil {
+		gamesPlayed += int(s.CombatLosses.GetValue())
+	}
+
+	s.GamesPlayed = &StatisticIntegerIncrement{
+		IntegerStatistic{
+			Value: int64(gamesPlayed),
+			Count: 1,
+		},
+	}
+
 	if s.CombatWins != nil && s.GamesPlayed != nil && s.GamesPlayed.Value != 0 {
 		s.CombatWinPercentage.Value = float64(s.CombatWins.Value) / float64(s.GamesPlayed.Value) * 100
 	}
