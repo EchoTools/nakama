@@ -84,7 +84,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 
 	// Load the global settings
 	if _, err := ServiceSettingsLoad(ctx, nk); err != nil {
-		logger.Error("Failed to load global settings", zap.Error(err))
+		logger.Fatal("Failed to load global settings", zap.Error(err))
 	}
 
 	go func() {
