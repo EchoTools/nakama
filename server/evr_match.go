@@ -1147,7 +1147,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 			logger.Debug("Ignoring lock signal for combat public match.")
 		default:
 			logger.Debug("Locking session")
-			state.LockedAt = time.Now().UTC().Add(30 * time.Second)
+			state.LockedAt = time.Now().UTC()
 		}
 
 	case SignalUnlockSession:
