@@ -26,34 +26,31 @@ type LeaderboardRecordsListRequest struct {
 }
 
 type LeaderboardRecordsListResponse struct {
-	NextCursor string                        `json:"next_cursor"`
-	PrevCursor string                        `json:"prev_cursor"`
-	Records    []*LeaderboardRecordsListItem `json:"records"`
+	LeaderboardID string                        `json:"leaderboard_id"`
+	NextCursor    string                        `json:"next_cursor"`
+	PrevCursor    string                        `json:"prev_cursor"`
+	Records       []*LeaderboardRecordsListItem `json:"records"`
 }
 
 type LeaderboardRecordsListItem struct {
 	*api.LeaderboardRecord
-	ScoreFloat float64 `json:"score_float"`
+	Metadata json.RawMessage `json:"metadata"`
 }
 
 func (h *RPCHandler) LeaderboardRecordsListRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
-	request := &LeaderboardRecordsListRequest{}
+
+	var (
+		request = &LeaderboardRecordsListRequest{}
+		err     error
+		boardID string
+	)
+
 	if err := parseRequest(ctx, payload, request); err != nil {
 		return "", err
 	}
 
-	var meta LeaderboardMeta
-	var err error
 	if request.LeaderboardID != "" {
-		meta, err = LeaderboardMetaFromID(request.LeaderboardID)
-		if err != nil {
-			return "", fmt.Errorf("failed to parse leaderboard ID: %w", err)
-		}
-
-		request.GroupID = meta.GroupID
-		request.Mode = meta.Mode
-		request.StatName = meta.StatName
-		request.ResetSchedule = meta.ResetSchedule
+		boardID = request.LeaderboardID
 	} else {
 
 		if request.GuildID != "" {
@@ -68,27 +65,31 @@ func (h *RPCHandler) LeaderboardRecordsListRPC(ctx context.Context, logger runti
 		if request.ResetSchedule == "" {
 			request.ResetSchedule = evr.ResetScheduleAllTime
 		}
-		meta = LeaderboardMeta{
+		meta := LeaderboardMeta{
 			GroupID:       request.GroupID,
 			Mode:          request.Mode,
 			StatName:      request.StatName,
 			ResetSchedule: request.ResetSchedule,
 		}
+		boardID = meta.ID()
 	}
 
 	if request.Cursor == "" && request.FromRank > 0 {
-		request.Cursor, err = nk.LeaderboardRecordsListCursorFromRank(meta.ID(), request.FromRank, 0)
+		request.Cursor, err = nk.LeaderboardRecordsListCursorFromRank(boardID, request.FromRank, 0)
 		if err != nil {
 			return "", fmt.Errorf("failed to get cursor from rank: %w", err)
 		}
 	}
+	if request.Limit < 1 || request.Limit > 100 {
+		request.Limit = 25
+	}
 
-	records, _, nextCursor, prevCursor, err := nk.LeaderboardRecordsList(ctx, meta.ID(), nil, request.Limit, request.Cursor, 0)
+	records, _, nextCursor, prevCursor, err := nk.LeaderboardRecordsList(ctx, boardID, nil, request.Limit, request.Cursor, 0)
 	if err != nil {
 		logger.WithFields(map[string]any{
-			"leaderboard_id": meta.ID(),
+			"leaderboard_id": boardID,
 			"err":            err,
-		}).Error("Leaderboard record haystack error.")
+		}).Error("Leaderboard record error.")
 		return "", err
 	}
 
@@ -99,16 +100,18 @@ func (h *RPCHandler) LeaderboardRecordsListRPC(ctx context.Context, logger runti
 
 	items := make([]*LeaderboardRecordsListItem, 0, len(records))
 	for _, r := range records {
+		r.LeaderboardId = ""
 		items = append(items, &LeaderboardRecordsListItem{
 			LeaderboardRecord: r,
-			ScoreFloat:        Int64PairToFloat64(r.Score, r.Subscore),
+			Metadata:          json.RawMessage(r.Metadata),
 		})
 	}
 
 	response := LeaderboardRecordsListResponse{
-		Records:    items,
-		NextCursor: nextCursor,
-		PrevCursor: prevCursor,
+		LeaderboardID: boardID,
+		Records:       items,
+		NextCursor:    nextCursor,
+		PrevCursor:    prevCursor,
 	}
 	data, err := json.MarshalIndent(response, "", "  ")
 	if err != nil {
@@ -134,13 +137,13 @@ type LeaderboardHaystackRequest struct {
 type LeaderboardHaystackRecord struct {
 	DisplayName string          `json:"display_name"`
 	OwnerID     string          `json:"owner_id"`
-	DiscordID   string          `json:"owner_discord_id"`
 	Rank        int64           `json:"rank,omitempty"`
-	Score       float64         `json:"score"`
+	Score       int64           `json:"score"`
+	Subscore    int64           `json:"subscore,omitempty"`
 	NumScore    int32           `json:"num_score"`
 	CreateTime  int64           `json:"create_time"`
 	UpdateTime  int64           `json:"update_time"`
-	ExpiryTime  int64           `json:"expire_time"`
+	ExpiryTime  int64           `json:"expire_time,omitempty"`
 	Metadata    json.RawMessage `json:"metadata"`
 }
 
@@ -229,21 +232,31 @@ func (h *RPCHandler) LeaderboardHaystackRPC(ctx context.Context, logger runtime.
 	if err != nil {
 		return "", fmt.Errorf("failed to get leaderboard haystack records: %w", err)
 	}
+
+	if len(recordsList.OwnerRecords) == 0 && len(recordsList.Records) == 0 {
+		// No records found, return an empty response.
+		return "{}", nil
+	}
+
+	if len(recordsList.OwnerRecords) == 0 && len(recordsList.Records) == 0 {
+		// No records found, return an empty response.
+		return "{}", nil
+	}
+
 	response := &LeaderboardHaystackResponse{
-		OwnerRecords: make([]LeaderboardHaystackRecord, len(recordsList.OwnerRecords)),
-		Records:      make([]LeaderboardHaystackRecord, len(recordsList.Records)),
-		RankCount:    recordsList.RankCount,
-		PrevCursor:   recordsList.PrevCursor,
-		NextCursor:   recordsList.NextCursor,
+		Records:    make([]LeaderboardHaystackRecord, len(recordsList.Records)),
+		RankCount:  recordsList.RankCount,
+		PrevCursor: recordsList.PrevCursor,
+		NextCursor: recordsList.NextCursor,
 	}
 
 	for i, r := range recordsList.OwnerRecords {
 		response.OwnerRecords[i] = LeaderboardHaystackRecord{
 			OwnerID:     r.OwnerId,
-			DiscordID:   h.UserIDToDiscordID(r.OwnerId),
 			DisplayName: r.Username.Value,
 			NumScore:    r.NumScore,
-			Score:       Int64PairToFloat64(r.Score, r.Subscore),
+			Score:       r.Score,
+			Subscore:    r.Subscore,
 			Rank:        r.Rank,
 			CreateTime:  r.CreateTime.GetSeconds(),
 			UpdateTime:  r.CreateTime.GetSeconds(),
@@ -255,10 +268,10 @@ func (h *RPCHandler) LeaderboardHaystackRPC(ctx context.Context, logger runtime.
 	for i, r := range recordsList.Records {
 		response.Records[i] = LeaderboardHaystackRecord{
 			OwnerID:     r.OwnerId,
-			DiscordID:   h.UserIDToDiscordID(r.OwnerId),
 			DisplayName: r.Username.Value,
 			NumScore:    r.NumScore,
-			Score:       Int64PairToFloat64(r.Score, r.Subscore),
+			Score:       r.Score,
+			Subscore:    r.Subscore,
 			Rank:        r.Rank,
 			CreateTime:  r.CreateTime.GetSeconds(),
 			UpdateTime:  r.CreateTime.GetSeconds(),
@@ -267,10 +280,9 @@ func (h *RPCHandler) LeaderboardHaystackRPC(ctx context.Context, logger runtime.
 		}
 	}
 
-	data, err := json.MarshalIndent(response, "", "  ")
+	data, err := json.Marshal(response)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal records: %w", err)
+		return "", fmt.Errorf("failed to marshal leaderboard haystack records: %w", err)
 	}
-
 	return string(data), nil
 }
