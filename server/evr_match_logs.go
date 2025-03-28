@@ -38,6 +38,7 @@ func (m *EventEnvelopeMatchData) MarshalEvent() (*api.Event, error) {
 
 func MatchDataEvent(ctx context.Context, nk runtime.NakamaModule, matchID MatchID, data any) error {
 
+	return nil // Disable for now
 	entry, err := NewEventEnvelopeMatchData(matchID, data)
 	if err != nil {
 		return fmt.Errorf("failed to create match data event: %w", err)
