@@ -1,4 +1,4 @@
-# EchoVR Protocol
+# Protocol
 
 ## Main Menu
 

@@ -25,7 +25,7 @@ import (
 // TODO move this to evr-common
 type LinkTicket struct {
 	Code         string            `json:"link_code"`          // the code the user will exchange to link the account
-	XPID         evr.EvrId         `json:"xp_id"`              // the xplatform ID used by EchoVR
+	XPID         evr.EvrId         `json:"xp_id"`              // the xplatform ID used by the client/server
 	ClientIP     string            `json:"client_ip"`          // the client IP address that generated this link ticket
 	LoginProfile *evr.LoginProfile `json:"game_login_request"` // the login request payload that generated this link ticket
 	CreatedAt    time.Time         `json:"created_at"`         // the time the link ticket was created

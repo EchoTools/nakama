@@ -173,7 +173,7 @@ func (p *EvrPipeline) lobbyPendingSessionCancel(ctx context.Context, logger *zap
 	return session.SendEvrUnrequire()
 }
 
-// lobbyPlayerSessionsRequest is called when a client requests the player sessions for a list of EchoVR IDs.
+// lobbyPlayerSessionsRequest is called when a client requests the player sessions for a list of XP IDs.
 // Player Sessions are UUIDv5 of the MatchID and EVR-ID
 func (p *EvrPipeline) lobbyPlayerSessionsRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	message := in.(*evr.LobbyPlayerSessionsRequest)
