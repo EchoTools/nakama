@@ -125,7 +125,7 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(logger runtime.Logge
 			return simpleInteractionResponse(s, i, "You must be a guild enforcer to use this command.")
 		}
 
-	case "set-command-channel", "link-button":
+	case "set-command-channel", "generate-button":
 
 		gg := d.guildGroupRegistry.Get(groupID)
 		if gg == nil {
