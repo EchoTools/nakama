@@ -25,7 +25,6 @@ func MigrateSystem(ctx context.Context, logger runtime.Logger, db *sql.DB, nk ru
 		&MigrationDevicesHistory{},
 		//&MigrationGuildGroups{},
 		//&MigrationLeaderboardPrune{},
-		&MigrationLeaderboardRecords{},
 	}
 
 	for _, m := range migrations {
