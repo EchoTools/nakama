@@ -121,7 +121,7 @@ func generateLinkTicket(linkTickets map[string]*LinkTicket, xpid evr.EvrId, clie
 
 	// Create a new link ticket
 	ticket = &LinkTicket{
-		Code:         generateLinkCode(),
+		Code:         code,
 		XPID:         xpid,
 		ClientIP:     clientIP,
 		LoginProfile: loginData,

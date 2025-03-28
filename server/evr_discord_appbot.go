@@ -240,7 +240,31 @@ var (
 	vrmlIDPattern       = regexp.MustCompile("^[-a-zA-Z0-9]{24}$")
 
 	mainSlashCommands = []*discordgo.ApplicationCommand{
-
+		{
+			Name:        "link",
+			Description: "Link your headset device to your discord account.",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "link-code",
+					Description: "Your four character link code.",
+					Required:    true,
+				},
+			},
+		},
+		{
+			Name:        "unlink",
+			Description: "Unlink a headset from your discord account.",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:         discordgo.ApplicationCommandOptionString,
+					Name:         "device-link",
+					Description:  "device link from /whoami",
+					Required:     false,
+					Autocomplete: true,
+				},
+			},
+		},
 		{
 			Name:        "link-headset",
 			Description: "Link your headset device to your discord account.",
@@ -380,6 +404,14 @@ var (
 					Required:    true,
 				},
 			},
+		},
+		{
+			Name:        "set-command-channel",
+			Description: "Set the command channel for this guild.",
+		},
+		{
+			Name:        "link-button",
+			Description: "Place a link button in this channel.",
 		},
 		/*
 			{
@@ -968,6 +1000,97 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 	commandHandlers := map[string]DiscordCommandHandlerFn{
 
+		"set-command-channel": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+
+			// Needs to have a green button that says link
+			components := []discordgo.MessageComponent{
+				discordgo.ActionsRow{
+					Components: []discordgo.MessageComponent{
+						&discordgo.Button{
+							Label:    "Link EchoVRCE",
+							Style:    discordgo.PrimaryButton,
+							CustomID: "link-headset-modal",
+							Emoji:    &discordgo.ComponentEmoji{Name: "🔗"},
+						},
+					},
+				},
+			}
+
+			/// Create the channel message
+			if _, err := d.dg.ChannelMessageSendComplex(i.ChannelID, &discordgo.MessageSend{
+				Components: components,
+			}); err != nil {
+				return fmt.Errorf("failed to send message: %w", err)
+			}
+
+			// Set the command channel in the guild group metadata
+
+			if md, err := GuildGroupLoad(ctx, nk, groupID); err != nil {
+				return fmt.Errorf("failed to load guild group metadata: %w", err)
+			} else {
+				md.CommandChannelID = i.ChannelID
+				if err := GuildGroupStore(ctx, nk, md); err != nil {
+					return fmt.Errorf("failed to save guild group metadata: %w", err)
+				}
+			}
+
+			// Respond to the interaction
+
+			if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Flags:   discordgo.MessageFlagsEphemeral,
+					Content: "Command channel set to this channel.",
+				},
+			}); err != nil {
+				return fmt.Errorf("failed to respond to interaction: %w", err)
+			}
+
+			return nil
+		},
+		"link-button": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+
+			// Needs to have a green button that says link
+			components := []discordgo.MessageComponent{
+				discordgo.ActionsRow{
+					Components: []discordgo.MessageComponent{
+						&discordgo.Button{
+							Label:    "Link EchoVRCE",
+							Style:    discordgo.PrimaryButton,
+							CustomID: "link-headset-modal",
+							Emoji:    &discordgo.ComponentEmoji{Name: "🔗"},
+						},
+					},
+				},
+			}
+
+			if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Flags:   discordgo.MessageFlagsEphemeral,
+					Content: "Added link button",
+				},
+			}); err != nil {
+				return fmt.Errorf("failed to respond to interaction: %w", err)
+			}
+
+			/// Create the channel message
+			if message, err := d.dg.ChannelMessageSendComplex(i.ChannelID, &discordgo.MessageSend{
+				Components: components,
+			}); err != nil {
+				return fmt.Errorf("failed to send message: %w", err)
+			} else {
+				go func() {
+					<-time.After(10 * time.Minute)
+					// Delete the message after 5 minutes
+					if err := s.ChannelMessageDelete(i.ChannelID, message.ID); err != nil {
+						logger.Error("Failed to delete message", zap.Error(err))
+					}
+				}()
+			}
+
+			return nil
+		},
 		"hash": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			options := i.ApplicationCommandData().Options
 			if len(options) == 0 {
@@ -1018,88 +1141,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			})
 		},
 
-		"link-headset": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
-			options := i.ApplicationCommandData().Options
-			if len(options) == 0 {
-				return errors.New("no options provided")
-			}
-			linkCode := options[0].StringValue()
-
-			if user == nil {
-				return nil
-			}
-
-			// Validate the link code as a 4 character string
-			if len(linkCode) != 4 {
-				return errors.New("invalid link code: link code must be (4) letters long (i.e. ABCD)")
-			}
-
-			if err := func() error {
-
-				// Exchange the link code for a device auth.
-				ticket, err := ExchangeLinkCode(ctx, nk, logger, linkCode)
-				if err != nil {
-					return fmt.Errorf("failed to exchange link code: %w", err)
-				}
-
-				tags := map[string]string{
-					"group_id":     groupID,
-					"headset_type": normalizeHeadsetType(ticket.LoginProfile.SystemInfo.HeadsetType),
-					"is_pcvr":      fmt.Sprintf("%t", ticket.LoginProfile.BuildNumber != evr.StandaloneBuildNumber),
-					"new_account":  "false",
-				}
-
-				// Authenticate/create an account.
-				if userID == "" {
-					tags["new_account"] = "true"
-					userID, _, _, err = d.nk.AuthenticateCustom(ctx, user.ID, user.Username, true)
-					if err != nil {
-						return fmt.Errorf("failed to authenticate (or create) user %s: %w", user.ID, err)
-					}
-				}
-
-				if err := d.nk.GroupUsersAdd(ctx, SystemUserID, groupID, []string{userID}); err != nil {
-					return fmt.Errorf("error joining group: %w", err)
-				}
-
-				if err := nk.LinkDevice(ctx, userID, ticket.XPID.Token()); err != nil {
-					return fmt.Errorf("failed to link headset: %w", err)
-				}
-				d.metrics.CustomCounter("link_headset", tags, 1)
-				// Set the client IP as authorized in the LoginHistory
-				history, err := LoginHistoryLoad(ctx, nk, userID)
-				if err != nil {
-					return fmt.Errorf("failed to load login history: %w", err)
-				}
-				history.Update(ticket.XPID, ticket.ClientIP, ticket.LoginProfile)
-				history.AuthorizeIP(ticket.ClientIP)
-
-				if err := LoginHistoryStore(ctx, nk, userID, history); err != nil {
-					return fmt.Errorf("failed to save login history: %w", err)
-				}
-				return nil
-			}(); err != nil {
-				logger.WithFields(map[string]interface{}{
-					"discord_id": user.ID,
-					"link_code":  linkCode,
-					"error":      err,
-				}).Error("Failed to link headset")
-				return err
-			}
-
-			content := "Your headset has been linked. Restart EchoVR."
-
-			d.cache.QueueSyncMember(i.GuildID, user.ID)
-
-			// Send the response
-			return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-				Type: discordgo.InteractionResponseChannelMessageWithSource,
-				Data: &discordgo.InteractionResponseData{
-					Flags:   discordgo.MessageFlagsEphemeral,
-					Content: content,
-				},
-			})
-		},
 		"party-status": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 
 			// Check if this user is online and currently in a party.
@@ -1401,117 +1442,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 			return s.InteractionRespond(i.Interaction, response)
 		},
-		"unlink-headset": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
-			options := i.ApplicationCommandData().Options
-			if len(options) == 0 {
-
-				account, err := nk.AccountGetId(ctx, userID)
-				if err != nil {
-					logger.Error("Failed to get account", zap.Error(err))
-					return err
-				}
-				if len(account.Devices) == 0 {
-					return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-						Type: discordgo.InteractionResponseChannelMessageWithSource,
-						Data: &discordgo.InteractionResponseData{
-							Flags:   discordgo.MessageFlagsEphemeral,
-							Content: "No headsets are linked to this account.",
-						},
-					})
-				}
-
-				loginHistory, err := LoginHistoryLoad(ctx, nk, userID)
-				if err != nil {
-					return err
-				}
-
-				options := make([]discordgo.SelectMenuOption, 0, len(account.Devices))
-				for _, device := range account.Devices {
-
-					description := ""
-					if ts, ok := loginHistory.XPIs[device.GetId()]; ok {
-						hours := int(time.Since(ts).Hours())
-						if hours < 1 {
-							minutes := int(time.Since(ts).Minutes())
-							if minutes < 1 {
-								description = "Just now"
-							} else {
-								description = fmt.Sprintf("%d minutes ago", minutes)
-							}
-						} else if hours < 24 {
-							description = fmt.Sprintf("%d hours ago", hours)
-						} else {
-							description = fmt.Sprintf("%d days ago", int(time.Since(ts).Hours()/24))
-						}
-					}
-
-					options = append(options, discordgo.SelectMenuOption{
-						Label: device.GetId(),
-						Value: device.GetId(),
-						Emoji: &discordgo.ComponentEmoji{
-							Name: "🔗",
-						},
-						Description: description,
-					})
-				}
-
-				response := &discordgo.InteractionResponse{
-					Type: discordgo.InteractionResponseChannelMessageWithSource,
-					Data: &discordgo.InteractionResponseData{
-						Flags:   discordgo.MessageFlagsEphemeral,
-						Content: "Select a device to unlink",
-						Components: []discordgo.MessageComponent{
-							discordgo.ActionsRow{
-								Components: []discordgo.MessageComponent{
-									discordgo.SelectMenu{
-										// Select menu, as other components, must have a customID, so we set it to this value.
-										CustomID:    "unlink-headset",
-										Placeholder: "<select a device to unlink>",
-										Options:     options,
-									},
-								},
-							},
-						},
-					},
-				}
-				return s.InteractionRespond(i.Interaction, response)
-			}
-			xpid := options[0].StringValue()
-			// Validate the link code as a 4 character string
-
-			if user == nil {
-				return nil
-			}
-
-			if err := func() error {
-
-				return nk.UnlinkDevice(ctx, userID, xpid)
-
-			}(); err != nil {
-				return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-					Type: discordgo.InteractionResponseChannelMessageWithSource,
-					Data: &discordgo.InteractionResponseData{
-						Flags:   discordgo.MessageFlagsEphemeral,
-						Content: err.Error(),
-					},
-				})
-			}
-			d.metrics.CustomCounter("unlink_headset", nil, 1)
-			content := "Your headset has been unlinked. Restart EchoVR."
-			d.cache.QueueSyncMember(i.GuildID, user.ID)
-
-			if err := d.cache.updateLinkStatus(ctx, user.ID); err != nil {
-				return fmt.Errorf("failed to update link status: %w", err)
-			}
-
-			return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-				Type: discordgo.InteractionResponseChannelMessageWithSource,
-				Data: &discordgo.InteractionResponseData{
-					Flags:   discordgo.MessageFlagsEphemeral,
-					Content: content,
-				},
-			})
-		},
+		"link":           d.handleLinkHeadset,
+		"unlink":         d.handleUnlinkHeadset,
+		"link-headset":   d.handleLinkHeadset,
+		"unlink-headset": d.handleUnlinkHeadset,
 		"check-server": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 
 			options := i.ApplicationCommandData().Options
@@ -3457,6 +3391,36 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					},
 				}); err != nil {
 					logger.Error("Failed to respond to interaction", zap.Error(err))
+				}
+			}
+
+		case discordgo.InteractionModalSubmit:
+
+			switch i.ModalSubmitData().CustomID {
+			case "linkcode_modal":
+				data := i.ModalSubmitData()
+				member, err := d.dg.GuildMember(i.GuildID, i.Member.User.ID)
+				if err != nil {
+					logger.Error("Failed to get guild member", zap.Error(err))
+					return
+				}
+				code := data.Components[0].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+				if err := d.linkHeadset(ctx, logger, member, code); err != nil {
+					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+						Type: discordgo.InteractionResponseChannelMessageWithSource,
+						Data: &discordgo.InteractionResponseData{
+							Content: "❌ Invalid code! Reopen your game and double check your code.",
+							Flags:   discordgo.MessageFlagsEphemeral,
+						},
+					})
+				} else {
+					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+						Type: discordgo.InteractionResponseChannelMessageWithSource,
+						Data: &discordgo.InteractionResponseData{
+							Content: "✅ Your are now linked. Restart your game.",
+							Flags:   discordgo.MessageFlagsEphemeral,
+						},
+					})
 				}
 			}
 		default:

@@ -55,9 +55,9 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(logger runtime.Logge
 	}
 
 	switch commandName {
-	case "link-headset":
+	case "link", "link-headset":
 
-	case "unlink-headset":
+	case "unlink", "unlink-headset":
 
 		account, err := d.nk.AccountGetId(ctx, userID)
 		if err != nil {
@@ -125,8 +125,23 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(logger runtime.Logge
 			return simpleInteractionResponse(s, i, "You must be a guild enforcer to use this command.")
 		}
 
-	}
+	case "set-command-channel", "link-button":
 
+		gg := d.guildGroupRegistry.Get(groupID)
+		if gg == nil {
+			return simpleInteractionResponse(s, i, "This guild is not registered.")
+		}
+
+		if gg.AuditChannelID != "" {
+			if err := d.LogInteractionToChannel(i, gg.AuditChannelID); err != nil {
+				logger.Warn("Failed to log interaction to channel")
+			}
+		}
+
+		if !gg.IsAuditor(userID) {
+			return simpleInteractionResponse(s, i, "You must be a guild auditor to use this command.")
+		}
+	}
 	return commandFn(logger, s, i, user, member, userID, groupID)
 }
 
@@ -248,8 +263,35 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(logger runtime.Logger,
 		}
 
 		return nil
+	case "link-headset-modal":
 
-	case "unlink-headset":
+		modal := &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseModal,
+			Data: &discordgo.InteractionResponseData{
+				CustomID: "linkcode_modal",
+				Title:    "Link EchoVRCE",
+				Content:  "Enter your 4-letter link code.",
+				Components: []discordgo.MessageComponent{
+					discordgo.ActionsRow{
+						Components: []discordgo.MessageComponent{
+							discordgo.TextInput{
+								CustomID:    "linkcode_input",
+								Label:       "Link Code",
+								Placeholder: "Enter your 4-letter link code",
+								Style:       discordgo.TextInputShort,
+								MinLength:   4,
+								MaxLength:   4,
+								Required:    true,
+							},
+						},
+					},
+				},
+			},
+		}
+		s.InteractionRespond(i.Interaction, modal)
+		return nil
+
+	case "unlink", "unlink-headset":
 		data := i.Interaction.MessageComponentData()
 		if len(data.Values) == 0 {
 			return simpleInteractionResponse(s, i, "Invalid device ID.")
