@@ -221,7 +221,16 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 				Longitude:        state.State.GameServer.Longitude,
 				ASNumber:         state.State.GameServer.ASNumber,
 			}
-			playercounts[stateTags] = append(playercounts[stateTags], len(state.State.Players))
+
+			activePlayerCount := 0
+			for _, p := range state.State.Players {
+				if p.IsReservation {
+					continue
+				}
+				activePlayerCount += 1
+			}
+
+			playercounts[stateTags] = append(playercounts[stateTags], activePlayerCount)
 
 			rank_percentiles := make([]float64, 0, len(state.State.Players))
 

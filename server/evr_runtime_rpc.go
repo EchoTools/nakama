@@ -130,7 +130,13 @@ func (h *RPCHandler) MatchListPublicRPC(ctx context.Context, logger runtime.Logg
 
 		v := l.PublicView()
 
-		playerCount += v.PlayerCount
+		for _, p := range v.Players {
+			if p.IsReservation {
+				continue
+			}
+			playerCount++
+		}
+
 		gameServers = append(gameServers, v.GameServer)
 		if v.LobbyType != UnassignedLobby {
 			labels = append(labels, v)
