@@ -93,7 +93,7 @@ func (m *MigrationLeaderboardRecords) MigrateSystem(ctx context.Context, logger 
 
 	leaderboardQuery := `
 	UPDATE leaderboard AS l
-	SET metadata = jsonb_set(metadata, '{scaling_factor}', 1000000000)
+	SET metadata = jsonb_set(metadata, '{scaling_factor}', to_jsonb(2))
 	WHERE l.id = $1;
 	  `
 
