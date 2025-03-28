@@ -378,7 +378,7 @@ func TestCharacterizationMatchmaker1v1(t *testing.T) {
 
 	reconstruct := true
 	useOverrideFn := true
-	minCount := 1
+	minCount := 8
 	maxCount := 8
 	countMultiple := 2
 
@@ -870,4 +870,182 @@ func newMatchmakingEntryFromExisting(entry *MatchmakerEntry, minCount, maxCount,
 	}
 
 	return newEntry
+}
+
+// TestMatchmakerOverload is a test function that simulates a matchmaker overload scenario.
+// It creates a large number of matchmaker entries and adds them to the matchmaker.
+// It then processes the matchmaker and checks for matches.
+
+func TestCharacterizeMatchmakerOverload(t *testing.T) {
+
+	EvrRuntimeModuleFns = nil // Avoid initializing the runtime module functions
+
+	// read the yml config file
+
+	indexFilenames := []string{
+		"../_local/mm-all-indexes.json",
+	}
+
+	var (
+		useOverrideFn = true
+		reader        io.ReadCloser
+		err           error
+		data          CandidateData
+		extracts      = make([]*MatchmakerExtract, 0)
+	)
+
+	for _, candidatesFilename := range indexFilenames {
+
+		type MatchmakerIndex struct {
+			Index []*MatchmakerExtract `json:"index"`
+		}
+
+		// Load the candidate data from the json file
+		reader, err = os.Open(candidatesFilename)
+		if err != nil {
+			t.Error("Error opening file")
+		}
+
+		// read in the file
+		d := MatchmakerIndex{}
+		decoder := json.NewDecoder(reader)
+		err = decoder.Decode(&d)
+		if err != nil {
+			t.Errorf("Error decoding file: %v", err)
+		}
+
+		extracts = append(extracts, d.Index...)
+
+	}
+
+	consoleLogger := loggerForTest(t)
+	matchesSeen := make(map[string]*rtapi.MatchmakerMatched)
+	mu := sync.Mutex{}
+	var matchmaker *LocalMatchmaker
+	var cleanup func() error
+
+	if useOverrideFn {
+		matchmaker, cleanup, err = createTestMatchmakerWithOverride(t, consoleLogger, true, func(presences []*PresenceID, envelope *rtapi.Envelope) {
+			id := envelope.GetMatchmakerMatched().GetToken()
+
+			mu.Lock()
+			defer mu.Unlock()
+			matchesSeen[id] = envelope.GetMatchmakerMatched()
+		},
+			testEvrMatchmakerOverrideFn,
+		)
+		if err != nil {
+			t.Fatalf("Error creating matchmaker: %v", err)
+		}
+	} else {
+
+		matchmaker, cleanup, err = createTestMatchmaker(t, consoleLogger, true, func(presences []*PresenceID, envelope *rtapi.Envelope) {
+
+			mu.Lock()
+			defer mu.Unlock()
+			if len(presences) == 1 {
+				matched := envelope.GetMatchmakerMatched()
+				id := matched.GetToken()
+				matchesSeen[id] = matched
+			}
+		})
+		if err != nil {
+			t.Fatalf("Error creating matchmaker: %v", err)
+		}
+
+	}
+
+	defer cleanup()
+
+	t.Logf("Entry count: %d", len(extracts))
+
+	// If the /tmp/unmatched.json exists, load it as the entries
+
+	if err := matchmaker.Insert(extracts); err != nil {
+		t.Fatalf("error inserting entries: %v", err)
+	}
+
+	startTime := time.Now()
+	matchmaker.Process()
+	t.Logf("Matchmaker process time: %v", time.Since(startTime))
+
+	count := 0
+
+	playerNamesByMatch := make([]string, 0, len(matchesSeen))
+
+	matches := make(map[string]*rtapi.MatchmakerMatched, 0)
+	playerIds := make([]string, 0, len(matchesSeen))
+	// output the matches that were created
+
+	for _, match := range matchesSeen {
+
+		// Create a map of partyID's to alpha numeric characters
+		partyMap := make(map[string]string)
+		partyMap[""] = "-"
+		for _, entry := range extracts {
+			if _, ok := partyMap[entry.PartyId]; ok {
+				continue
+			}
+			partyMap[entry.PartyId] = string('A' - 1 + rune(len(partyMap)))
+		}
+
+		// get the players in the match
+		playerIds = make([]string, 0, len(match.GetUsers()))
+		playerUsernames := make([]string, 0, len(match.GetUsers()))
+		for _, p := range match.GetUsers() {
+			playerName := fmt.Sprintf("%s:%s", partyMap[match.GetUsers()[0].PartyId], p.Presence.GetUsername())
+			playerIds = append(playerIds, playerName)
+			playerUsernames = append(playerUsernames, p.Presence.GetUsername())
+		}
+
+		slices.Sort(playerUsernames)
+		playerNamesByMatch = append(playerNamesByMatch, strings.Join(playerUsernames, ", "))
+		t.Logf("  Match %d: %s", count, strings.Join(playerIds, ", "))
+		matches[match.GetToken()] = match
+
+		count++
+	}
+
+	// count the total matches
+	t.Logf("Total matches: %d", count)
+
+	unmatched := make([]string, 0, len(extracts))
+
+	for _, entry := range extracts {
+		if _, ok := matches[entry.Ticket]; !ok {
+			unmatched = append(unmatched, entry.Ticket)
+
+		}
+	}
+
+	t.Logf("Unmatched count: %d", len(unmatched))
+	for _, e := range unmatched {
+		entryJson, _ := json.MarshalIndent(e, "", "  ")
+		t.Logf("Unmatched: %s", string(entryJson))
+	}
+	// Compare the player lists of the data.Matches with the matchesSeen
+
+	livePlayerNamesByMatch := make([]string, 0, len(data.Matches))
+	for _, match := range data.Matches {
+
+		// Create a map of ticketID's to alpha numeric characters
+
+		playerUsernames := make([]string, 0, len(match))
+		for _, p := range match {
+			playerUsernames = append(playerUsernames, p.Presence.Username)
+		}
+
+		slices.Sort(playerUsernames)
+
+		livePlayerNamesByMatch = append(livePlayerNamesByMatch, strings.Join(playerUsernames, ", "))
+	}
+
+	slices.Sort(playerNamesByMatch)
+	slices.Sort(livePlayerNamesByMatch)
+
+	// compare the player names
+	if cmp.Diff(playerNamesByMatch, livePlayerNamesByMatch) != "" {
+		t.Errorf("Player names mismatch")
+	}
+	t.Errorf("autofail")
 }

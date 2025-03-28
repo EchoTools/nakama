@@ -361,7 +361,7 @@ func (m *LocalMatchmaker) processCustom(activeIndexesCopy map[string]*Matchmaker
 			}
 		}
 
-		lastInterval := index.Intervals >= m.config.GetMatchmaker().MaxIntervals || index.MinCount == index.MaxCount
+		lastInterval := index.Intervals >= m.config.GetMatchmaker().MaxIntervals
 		if lastInterval {
 			// Drop from active indexes if it has reached its max intervals, or if its min/max counts are equal. In the
 			// latter case keeping it active would have the same result as leaving it in the pool, so this saves work.
@@ -470,6 +470,16 @@ func (m *LocalMatchmaker) processCustom(activeIndexesCopy map[string]*Matchmaker
 			hitIndexes = append(hitIndexes, hitIndex)
 		}
 
+		// Sort the hit indexes by their created_at timestamp, so that we can
+		// prioritize newer tickets
+		sort.Slice(hitIndexes, func(i, j int) bool {
+			return hitIndexes[i].CreatedAt > hitIndexes[j].CreatedAt
+		})
+		// Limit the number of hit indexes to 24, to avoid excessive processing time.
+		if len(hitIndexes) > 28 {
+			hitIndexes = hitIndexes[:28]
+		}
+
 		for hitIndexes := range combineIndexes(hitIndexes, index.MinCount-index.Count, index.MaxCount-index.Count) {
 			// Check the min and max counts are met across the hit.
 			var hitCount int
@@ -557,7 +567,6 @@ func (m *LocalMatchmaker) processCustom(activeIndexesCopy map[string]*Matchmaker
 			}
 
 			// Avoid duplicate matches.
-
 			rosterKey := HashMatchmakerEntries(index.Entries)
 			if _, found := seenCandidateSet[rosterKey]; found {
 				duplicateCount++

@@ -94,14 +94,14 @@ func (m *MatchmakingTicketParameters) UnmarshalText(text []byte) error {
 
 var DefaultMatchmakerTicketConfigs = map[evr.Symbol]MatchmakingTicketParameters{
 	evr.ModeArenaPublic: {
-		MinCount:                1,
+		MinCount:                8,
 		MaxCount:                8,
 		CountMultiple:           2,
 		IncludeSBMMRanges:       true,
 		IncludeEarlyQuitPenalty: true,
 	},
 	evr.ModeCombatPublic: {
-		MinCount:                1,
+		MinCount:                8,
 		MaxCount:                10,
 		CountMultiple:           2,
 		IncludeSBMMRanges:       false,
@@ -173,7 +173,8 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 			// add a ticket with a smaller count, and no rank range
 			ticketConfig.IncludeSBMMRanges = false
 			ticketConfig.IncludeEarlyQuitPenalty = false
-			ticketConfig.MaxCount = 2
+			ticketConfig.MinCount = 2
+			ticketConfig.MaxCount = 8
 			if ticket, err := p.addTicket(ctx, logger, session, lobbyParams, lobbyGroup, ticketConfig); err != nil {
 				return fmt.Errorf("failed to add ticket: %w", err)
 			} else {

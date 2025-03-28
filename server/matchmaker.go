@@ -22,6 +22,8 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"maps"
+
 	"github.com/blugelabs/bluge"
 	"github.com/gofrs/uuid/v5"
 	"github.com/golang-jwt/jwt/v5"
@@ -357,9 +359,7 @@ func (m *LocalMatchmaker) Process() {
 	indexCount = len(m.indexes)
 
 	activeIndexesCopy := make(map[string]*MatchmakerIndex, activeIndexCount)
-	for ticket, activeIndex := range m.activeIndexes {
-		activeIndexesCopy[ticket] = activeIndex
-	}
+	maps.Copy(activeIndexesCopy, m.activeIndexes)
 	var oldestTicketCreatedAt int64
 	indexesCopy := make(map[string]*MatchmakerIndex, indexCount)
 	for ticket, index := range m.indexes {
