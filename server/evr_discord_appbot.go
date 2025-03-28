@@ -2509,6 +2509,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			}
 
+			doDisconnect := false
+
 			for _, p := range presences {
 
 				if p.GetUserId() != targetUserID {
@@ -2526,14 +2528,25 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 				var allowed bool
 
-				if isGlobalOperator || label.SpawnedBy == userID || label.GameServer.OperatorID.String() == userID {
+				var isEnforcer bool
+				if gg, err := GuildGroupLoad(ctx, nk, label.GetGroupID().String()); err != nil {
+					return errors.New("failed to load guild group")
+				} else if gg.IsEnforcer(userID) {
+					isEnforcer = true
+				}
+
+				if label.SpawnedBy == userID && label.Mode != evr.ModeSocialPublic {
 					allowed = true
-				} else {
-					if gg, err := GuildGroupLoad(ctx, nk, label.GetGroupID().String()); err != nil {
-						return errors.New("failed to load guild group")
-					} else if gg.IsEnforcer(userID) {
-						allowed = true
-					}
+				}
+
+				// Check if the user is the game server operator
+				if label.GameServer.OperatorID.String() == userID {
+					allowed = true
+				}
+
+				if isEnforcer || isGlobalOperator {
+					doDisconnect = true
+					allowed = true
 				}
 
 				if !allowed {
@@ -2555,16 +2568,18 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			}
 
-			go func() {
-				<-time.After(time.Second * 5)
-				// Just disconnect the user, wholesale
-				if count, err := DisconnectUserID(ctx, d.nk, targetUserID, false); err != nil {
-					logger.Warn("Failed to disconnect user", zap.Error(err))
-				} else if count > 0 {
-					_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s disconnected player %s from match service (%d sessions).", user.Mention(), target.Mention(), count), false)
-				}
-			}()
-			_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("action on %s (%s): %s", target.Mention(), target.Username, strings.Join(results, "; ")), false)
+			if doDisconnect {
+				go func() {
+					<-time.After(time.Second * 5)
+					// Just disconnect the user, wholesale
+					if count, err := DisconnectUserID(ctx, d.nk, targetUserID, false); err != nil {
+						logger.Warn("Failed to disconnect user", zap.Error(err))
+					} else if count > 0 {
+						_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s disconnected player %s from match service (%d sessions).", user.Mention(), target.Mention(), count), false)
+					}
+				}()
+			}
+			_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s used actions summary for %s (%s): %s", user.Mention(), target.Mention(), target.Username, strings.Join(results, "; ")), false)
 			return simpleInteractionResponse(s, i, fmt.Sprintf("[%d sessions found]%s\n%s", cnt, timeoutMessage, strings.Join(results, "\n")))
 
 		},
