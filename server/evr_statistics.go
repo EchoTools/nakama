@@ -144,9 +144,8 @@ func MatchmakingRatingLoad(ctx context.Context, nk runtime.NakamaModule, userID,
 func MatchmakingRatingStore(ctx context.Context, nk runtime.NakamaModule, userID, displayName, groupID string, mode evr.Symbol, r types.Rating) error {
 
 	scores := map[string]float64{
-		StatisticBoardID(groupID, mode, SkillRatingSigmaStatisticID, "alltime"):   r.Sigma,
-		StatisticBoardID(groupID, mode, SkillRatingMuStatisticID, "alltime"):      r.Mu,
-		StatisticBoardID(groupID, mode, SkillRatingOrdinalStatisticID, "alltime"): rating.Ordinal(r),
+		StatisticBoardID(groupID, mode, SkillRatingSigmaStatisticID, "alltime"): r.Sigma,
+		StatisticBoardID(groupID, mode, SkillRatingMuStatisticID, "alltime"):    r.Mu,
 	}
 
 	for id, value := range scores {
