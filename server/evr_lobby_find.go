@@ -564,6 +564,8 @@ func (p *EvrPipeline) CheckServerPing(ctx context.Context, logger *zap.Logger, s
 	}
 
 	go func() {
+
+		ctx := context.Background()
 		now := time.Now().UTC().Unix()
 		<-time.After(5 * time.Second)
 		if latencyHistory, err := LoadLatencyHistory(ctx, logger, p.db, session.UserID()); err != nil {
