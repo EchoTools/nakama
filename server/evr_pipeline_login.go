@@ -33,9 +33,8 @@ type DeviceNotLinkedError struct {
 
 func (e DeviceNotLinkedError) Error() string {
 	return strings.Join([]string{
-		"Enter this code:",
-		fmt.Sprintf(">>> %s <<<", e.code),
-		fmt.Sprintf("using '/link-headset %s' on the @%s bot.", e.code, e.botUsername),
+		fmt.Sprintf("Your Code is: >>> %s <<<", e.code),
+		ServiceSettings().LinkInstructions,
 	}, "\n")
 }
 

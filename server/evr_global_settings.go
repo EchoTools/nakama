@@ -26,6 +26,7 @@ func ServiceSettingsUpdate(data *GlobalSettingsData) {
 }
 
 type GlobalSettingsData struct {
+	LinkInstructions         string                    `json:"link_instructions"`     // Instructions for linking the headset
 	DisableLoginMessage      string                    `json:"disable_login_message"` // Disable the login, and show this message
 	ServiceGuildID           string                    `json:"service_guild_id"`      // Central/Support guild ID
 	DisableStatisticsUpdates bool                      `json:"disable_statistics_updates"`
