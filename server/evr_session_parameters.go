@@ -11,7 +11,7 @@ import (
 
 type SessionParameters struct {
 	node          string     // The node name
-	xpID          evr.EvrId  // The EchoVR ID
+	xpID          evr.EvrId  // The Cross-Platform ID
 	loginSession  *sessionWS // The login session
 	lobbySession  *sessionWS // The match session
 	serverSession *sessionWS // The server session

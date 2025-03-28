@@ -15,7 +15,7 @@ const (
 	CosmeticLoadoutKey           = "loadouts"
 	VRMLStorageCollection        = "VRML"
 
-	// The Application ID for Echo VR
+	// The Application IDs for the default clients
 	NoOvrAppId uint64 = 0x0
 	QuestAppId uint64 = 0x7de88f07bd07a
 	PcvrAppId  uint64 = 0x4dd2b684a47fa

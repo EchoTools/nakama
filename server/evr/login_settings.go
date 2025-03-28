@@ -14,10 +14,10 @@ var (
 )
 
 type GameSettings struct {
-	ConfigData          ConfigData `json:"config_data"`           // SeasonPassConfigs is a map that stores configuration data for the EchoVR client.
-	Env                 string     `json:"env"`                   // Env represents the environment in which the EchoVR client is running.
-	IapUnlocked         bool       `json:"iap_unlocked"`          // IapUnlocked indicates whether in-app purchases are unlocked for the EchoVR client.
-	MatchmakerQueueMode string     `json:"matchmaker_queue_mode"` // MatchmakerQueueMode specifies the queue mode for the EchoVR client's matchmaker.
+	ConfigData          ConfigData `json:"config_data"`           // SeasonPassConfigs is a map that stores configuration data for the game client.
+	Env                 string     `json:"env"`                   // Env represents the environment in which the game client is running.
+	IapUnlocked         bool       `json:"iap_unlocked"`          // IapUnlocked indicates whether in-app purchases are unlocked for the game client.
+	MatchmakerQueueMode string     `json:"matchmaker_queue_mode"` // MatchmakerQueueMode specifies the queue mode for the game client's matchmaker.
 
 	RemoteLogErrors       bool `json:"remote_log_errors"`        // send remote logs for errors
 	RemoteLogMetrics      bool `json:"remote_log_metrics"`       // send remote logs for metrics

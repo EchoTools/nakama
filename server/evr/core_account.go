@@ -1209,7 +1209,7 @@ type CombatUnlocks struct {
 }
 
 func NewServerProfile() ServerProfile {
-	// This is the default server profile that EchoVR shipped with.
+	// This is the default server profile that echo shipped with.
 	return ServerProfile{
 		PurchasedCombat: 1,
 		SchemaVersion:   4,

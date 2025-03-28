@@ -460,6 +460,7 @@ func (m *EvrMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql
 			Presence: state.presenceMap[p.GetSessionId()],
 			State:    state,
 		})
+
 	}
 
 	//m.updateLabel(logger, dispatcher, state)

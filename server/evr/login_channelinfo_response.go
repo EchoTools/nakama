@@ -56,10 +56,10 @@ func NewChannelGroup() ChannelGroup {
 	return ChannelGroup{
 		ChannelUuid:  strings.ToUpper(uuid.Must(uuid.NewV4()).String()),
 		Name:         "PLAYGROUND",
-		Description:  "Classic Echo VR social lobbies.",
+		Description:  "Classic social lobbies.",
 		Rules:        "1. Only use this channel for testing.\n2. Act responsibly.\n3. Act legally.",
 		RulesVersion: 1,
-		Link:         "https://en.wikipedia.org/wiki/Lone_Echo",
+		Link:         "https://github.com/echotools",
 		Priority:     0,
 		RAD:          true,
 	}

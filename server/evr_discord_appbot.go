@@ -621,7 +621,7 @@ var (
 		},
 		{
 			Name:        "set-roles",
-			Description: "link roles to Echo VR features. Non-members can only join private matches.",
+			Description: "link roles to EchoVRCE features. Non-members can only join private matches.",
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Type:        discordgo.ApplicationCommandOptionRole,
@@ -638,7 +638,7 @@ var (
 				{
 					Type:        discordgo.ApplicationCommandOptionRole,
 					Name:        "serverhost",
-					Description: "Allowed to host an Echo VR Game Server for the guild.",
+					Description: "Allowed to host a game server for the guild.",
 					Required:    true,
 				},
 				{
@@ -790,7 +790,7 @@ var (
 		},
 		{
 			Name:        "party",
-			Description: "Manage EchoVR parties.",
+			Description: "Manage EchoVRCE parties.",
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Name:        "group",
@@ -1986,7 +1986,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				Data: &discordgo.InteractionResponseData{
 					Flags: discordgo.MessageFlagsEphemeral,
 					Content: strings.Join([]string{
-						fmt.Sprintf("EchoVR lobby changed to **%s**.", guild.Name),
+						fmt.Sprintf("EchoVRCE lobby changed to **%s**.", guild.Name),
 						"- Matchmaking will prioritize members",
 						"- Social lobbies will contain only members",
 						"- Private matches that you create will prioritize guild's game servers.",

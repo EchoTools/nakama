@@ -102,7 +102,7 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 
 	if s := ServiceSettings(); s.DisableLoginMessage != "" {
 		if err := session.SendEvrUnrequire(evr.NewLoginFailure(request.XPID, "System is Temporarily Unavailable:\n"+s.DisableLoginMessage)); err != nil {
-			// If there's an error, prefix it with the EchoVR Id
+			// If there's an error, prefix it with the XPID
 			return fmt.Errorf("failed to send LoginFailure: %w", err)
 		}
 	}
