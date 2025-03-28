@@ -605,3 +605,13 @@ func TestOrganizeAsTeams(t *testing.T) {
 		})
 	}
 }
+func BenchmarkHashMatchmakerEntries(b *testing.B) {
+	// Generate a slice of MatchmakerEntry for benchmarking
+	entries := generateMatchmakerEntries(8)
+
+	// Run the benchmark
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		HashMatchmakerEntries(entries)
+	}
+}

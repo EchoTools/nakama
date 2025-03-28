@@ -2,7 +2,6 @@ package server
 
 import (
 	"math"
-	"slices"
 	"sort"
 
 	"maps"
@@ -62,15 +61,19 @@ func (g CandidateList) Strength() float64 {
 }
 
 func HashMatchmakerEntries[E runtime.MatchmakerEntry](entries []E) uint64 {
-	var hash uint64
-	tickets := make([]string, len(entries))
-	for i, entry := range entries {
-		tickets[i] = entry.GetTicket()
-	}
-	slices.Sort(tickets) // Ensure the order of tickets doesn't matter
-	for _, ticket := range tickets {
-		for i := range len(ticket) {
-			hash = hash*31 + uint64(ticket[i])
+
+	// Sort entries based on their ticket strings directly.
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].GetTicket() < entries[j].GetTicket()
+	})
+	var hash uint64 = 5381 // Start with a non-zero initial hash value
+
+	for _, entry := range entries {
+		ticket := entry.GetTicket()
+
+		// Use FNV-1a hash.
+		for i := range 8 {
+			hash = (hash * 33) ^ uint64(ticket[i])
 		}
 	}
 	return hash
