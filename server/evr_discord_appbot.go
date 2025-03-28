@@ -410,7 +410,7 @@ var (
 			Description: "Set the command channel for this guild.",
 		},
 		{
-			Name:        "link-button",
+			Name:        "generate-button",
 			Description: "Place a link button in this channel.",
 		},
 		/*
@@ -1048,7 +1048,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			return nil
 		},
-		"link-button": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+		"generate-button": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 
 			// Needs to have a green button that says link
 			components := []discordgo.MessageComponent{
