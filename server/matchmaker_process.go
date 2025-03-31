@@ -476,8 +476,8 @@ func (m *LocalMatchmaker) processCustom(activeIndexesCopy map[string]*Matchmaker
 			return hitIndexes[i].CreatedAt > hitIndexes[j].CreatedAt
 		})
 		// Limit the number of hit indexes to 24, to avoid excessive processing time.
-		if len(hitIndexes) > 28 {
-			hitIndexes = hitIndexes[:28]
+		if len(hitIndexes) > 24 {
+			hitIndexes = hitIndexes[:24]
 		}
 
 		for hitIndexes := range combineIndexes(hitIndexes, index.MinCount-index.Count, index.MaxCount-index.Count) {
