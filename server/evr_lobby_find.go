@@ -361,13 +361,12 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 	// Backfill search query
 	// Maximum RTT for a server to be considered for backfill
 
-	includeRankPercentile := false
+	includeMMR := false
 	includeMaxRTT := false
 
 	// Only use rank percentile for arena matches.
 	if lobbyParams.Mode == evr.ModeArenaPublic {
-		includeRankPercentile = true
-		includeMaxRTT = true
+		includeMMR = true
 	}
 
 	stream := lobbyParams.GuildGroupStream()
@@ -380,13 +379,12 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 	if !strings.Contains(p.node, "dev") {
 		// If there are fewer than 16 players online, reduce the fallback delay
 		if count < 24 {
-			includeRankPercentile = false
-			includeMaxRTT = false
+			includeMMR = false
 		}
 	}
 
 	var (
-		query         = lobbyParams.BackfillSearchQuery(includeRankPercentile, includeMaxRTT)
+		query         = lobbyParams.BackfillSearchQuery(includeMMR, includeMaxRTT)
 		fallbackTimer = time.NewTimer(lobbyParams.FallbackTimeout)
 		failsafeTimer = time.NewTimer(lobbyParams.FailsafeTimeout)
 		cycleCount    = 0

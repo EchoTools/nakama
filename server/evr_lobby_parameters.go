@@ -91,10 +91,6 @@ func (p *LobbySessionParameters) GetRating() types.Rating {
 	return *p.MatchmakingRating.Load()
 }
 
-func (p *LobbySessionParameters) GetRatingOrdinal() float64 {
-	return rating.Ordinal(p.GetRating())
-}
-
 func (p *LobbySessionParameters) SetRating(rating types.Rating) {
 	if p.MatchmakingRating == nil {
 		p.MatchmakingRating = atomic.NewPointer(&rating)
@@ -441,7 +437,7 @@ func (p LobbySessionParameters) String() string {
 	return string(data)
 }
 
-func (p *LobbySessionParameters) BackfillSearchQuery(includeRankRange bool, includeMaxRTT bool) string {
+func (p *LobbySessionParameters) BackfillSearchQuery(includeMMR bool, includeMaxRTT bool) string {
 	qparts := []string{
 		"+label.open:T",
 		fmt.Sprintf("+label.mode:%s", p.Mode.String()),
@@ -450,13 +446,12 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeRankRange bool, incl
 		p.BackfillQueryAddon,
 	}
 
-	if includeRankRange {
-		rankLower := min(p.GetRankPercentile()-p.RankPercentileMaxDelta, 1.0-2.0*p.RankPercentileMaxDelta)
-		rankUpper := max(p.GetRankPercentile()+p.RankPercentileMaxDelta, 2.0*p.RankPercentileMaxDelta)
-		rankLower = max(rankLower, 0.0)
-		rankUpper = min(rankUpper, 1.0)
-
-		qparts = append(qparts, fmt.Sprintf("+label.rank_percentile:>=%f +label.rank_percentile:<=%f", rankLower, rankUpper))
+	if includeMMR {
+		qparts = append(qparts,
+			// Exclusion
+			fmt.Sprintf("-label.rating_ordinal:<%f", p.GetOrdinal()-p.MatchmakingOrdinalRange),
+			fmt.Sprintf("-label.rating_ordinal:>%f", p.GetOrdinal()+p.MatchmakingOrdinalRange),
+		)
 	}
 
 	if len(p.RequiredFeatures) > 0 {

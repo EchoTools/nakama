@@ -26,7 +26,7 @@ func (p *EvrPipeline) sortBackfillOptions(filteredMatches []*MatchLabelMeta, lob
 	)
 
 	if lobbyParams.Mode == evr.ModeArenaPublic || lobbyParams.Mode == evr.ModeCombatPublic {
-		ratingOrdinal = lobbyParams.GetRatingOrdinal()
+		ratingOrdinal = lobbyParams.GetOrdinal()
 	}
 
 	for _, m := range filteredMatches {
@@ -34,7 +34,7 @@ func (p *EvrPipeline) sortBackfillOptions(filteredMatches []*MatchLabelMeta, lob
 		var (
 			rtt, isReachable = rtts[m.State.GameServer.Endpoint.GetExternalIP()]
 			openSlots        = m.State.OpenPlayerSlots()
-			ratingDelta      = math.Abs(m.State.RatingOrdinal() - ratingOrdinal)
+			ratingDelta      = math.Abs(m.State.RatingOrdinal - ratingOrdinal)
 		)
 
 		// Skip matches that are full

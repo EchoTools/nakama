@@ -34,6 +34,7 @@ type MatchLabel struct {
 	PlayerCount    int          `json:"player_count"`         // The number of participants (not including spectators) in the match.
 	Players        []PlayerInfo `json:"players,omitempty"`    // The displayNames of the players (by team name) in the match.
 	RankPercentile float64      `json:"rank_percentile"`      // The average percentile rank of the players in the match.
+	RatingOrdinal  float64      `json:"rating_ordinal"`       // The average rating ordinal of the players in the match.
 	GameState      *GameState   `json:"game_state,omitempty"` // The game state for the match.
 
 	TeamSize         int      `json:"team_size,omitempty"`    // The size of each team in arena/combat (either 4 or 5)
@@ -254,7 +255,7 @@ func (s *MatchLabel) MetricsTags() map[string]string {
 	return tags
 }
 
-func (s *MatchLabel) RatingOrdinal() float64 {
+func (s *MatchLabel) ratingOrdinal() float64 {
 	ordinals := make([]float64, 0, len(s.Players))
 	for _, p := range s.Players {
 		if p.RatingOrdinal != 0 || !p.IsCompetitor() {
@@ -471,6 +472,8 @@ func (s *MatchLabel) rebuildCache() {
 
 	// Recalculate the match's aggregate rank percentile
 	s.RankPercentile = 0.0
+
+	s.RatingOrdinal = s.ratingOrdinal()
 
 	count := 0
 	if len(s.Players) > 0 {
