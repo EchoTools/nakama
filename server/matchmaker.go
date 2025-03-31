@@ -272,6 +272,8 @@ type LocalMatchmaker struct {
 	revThresholdFn func() *time.Timer
 }
 
+var matchmakerProcessMu = &sync.Mutex{}
+
 func NewLocalMatchmaker(logger, startupLogger *zap.Logger, config Config, router MessageRouter, metrics Metrics, runtime *Runtime) Matchmaker {
 	cfg := BlugeInMemoryConfig()
 	indexWriter, err := bluge.OpenWriter(cfg)
@@ -317,7 +319,10 @@ func NewLocalMatchmaker(logger, startupLogger *zap.Logger, config Config, router
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+				matchmakerProcessMu.Lock()
+				// Check if the matchmaker is active.
 				m.Process()
+				matchmakerProcessMu.Unlock()
 			}
 		}
 	}()

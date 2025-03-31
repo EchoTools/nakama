@@ -145,16 +145,18 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.Ma
 	// Filter out players who are too far away from each other
 	filterCounts["max_rtt"] = m.filterWithinMaxRTT(candidates)
 
-	// Create a list of balanced matches with predictions
-
-	predictions := predictCandidateOutcomes(candidates)
+	// predict the outcome of the matches
+	predictions := make([]PredictedMatch, 0, len(candidates))
+	for c := range predictCandidateOutcomes(candidates) {
+		predictions = append(predictions, c)
+	}
 
 	sort.SliceStable(predictions, func(i, j int) bool {
 		if predictions[i].Size != predictions[j].Size {
 			return predictions[i].Size > predictions[j].Size
 		}
 
-		return predictions[i].OrdinalDelta < predictions[j].OrdinalDelta
+		return predictions[i].Draw > predictions[j].Draw
 	})
 
 	madeMatches := m.assembleUniqueMatches(predictions)

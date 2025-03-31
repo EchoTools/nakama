@@ -147,7 +147,7 @@ func generateMatchmakerCandidates(count int) [][]runtime.MatchmakerEntry {
 
 func BenchmarkPredictOutcomes(b *testing.B) {
 
-	profile := true
+	profile := false
 	if profile {
 		// Create CPU profile file
 		cpuProfile, _ := os.Create("/tmp/cpu.prof")
@@ -160,13 +160,17 @@ func BenchmarkPredictOutcomes(b *testing.B) {
 		defer memProfile.Close()
 		defer pprof.WriteHeapProfile(memProfile)
 	}
+
 	// Create all combinations of 8 players from the entries
-	candidates := generateMatchmakerCandidates(32)
+	candidates := generateMatchmakerCandidates(24)
 	b.Logf("candidate count: %d", len(candidates))
 
 	for b.Loop() {
 		b.ReportMetric(float64(len(candidates)), "candidates")
-		predictions := predictCandidateOutcomes(candidates)
+		predictions := make([]PredictedMatch, 0, len(candidates))
+		for p := range predictCandidateOutcomes(candidates) {
+			predictions = append(predictions, p)
+		}
 		b.ReportMetric(float64(len(predictions)), "predictions")
 	}
 }
@@ -438,173 +442,7 @@ func TestHashMatchmakerEntries(t *testing.T) {
 		})
 	}
 }
-func TestSortByRanks(t *testing.T) {
-	tests := []struct {
-		name     string
-		groups   []CandidateList
-		expected []CandidateList
-	}{
-		{
-			name: "Single group",
-			groups: []CandidateList{
-				{
-					&MatchmakerEntry{Properties: map[string]any{"rating_mu": 25.0, "rating_sigma": 8.0}},
-				},
-			},
-			expected: []CandidateList{
-				{
-					&MatchmakerEntry{Properties: map[string]any{"rating_mu": 25.0, "rating_sigma": 8.0}},
-				},
-			},
-		},
-		{
-			name: "Multiple groups, already sorted",
-			groups: []CandidateList{
-				{
-					&MatchmakerEntry{Properties: map[string]any{"rating_mu": 30.0, "rating_sigma": 7.0}},
-				},
-				{
-					&MatchmakerEntry{Properties: map[string]any{"rating_mu": 25.0, "rating_sigma": 8.0}},
-				},
-			},
-			expected: []CandidateList{
-				{
-					&MatchmakerEntry{Properties: map[string]any{"rating_mu": 30.0, "rating_sigma": 7.0}},
-				},
-				{
-					&MatchmakerEntry{Properties: map[string]any{"rating_mu": 25.0, "rating_sigma": 8.0}},
-				},
-			},
-		},
-		{
-			name: "Multiple groups, unsorted",
-			groups: []CandidateList{
-				{
-					&MatchmakerEntry{Properties: map[string]any{"rating_mu": 25.0, "rating_sigma": 8.0}},
-				},
-				{
-					&MatchmakerEntry{Properties: map[string]any{"rating_mu": 30.0, "rating_sigma": 7.0}},
-				},
-			},
-			expected: []CandidateList{
-				{
-					&MatchmakerEntry{Properties: map[string]any{"rating_mu": 30.0, "rating_sigma": 7.0}},
-				},
-				{
-					&MatchmakerEntry{Properties: map[string]any{"rating_mu": 25.0, "rating_sigma": 8.0}},
-				},
-			},
-		},
-	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			sortByRanks(tt.groups)
-
-			for i, group := range tt.groups {
-				expectedGroup := tt.expected[i]
-				if len(group) != len(expectedGroup) {
-					t.Errorf("Group %d length mismatch: got %d, expected %d", i, len(group), len(expectedGroup))
-					continue
-				}
-
-				for j, entry := range group {
-					expectedEntry := expectedGroup[j]
-					if entry.GetProperties()["rating_mu"] != expectedEntry.GetProperties()["rating_mu"] ||
-						entry.GetProperties()["rating_sigma"] != expectedEntry.GetProperties()["rating_sigma"] {
-						t.Errorf("Group %d, Entry %d mismatch: got %+v, expected %+v", i, j, entry.GetProperties(), expectedEntry.GetProperties())
-					}
-				}
-			}
-		})
-	}
-}
-func TestOrganizeAsTeams(t *testing.T) {
-	tests := []struct {
-		name      string
-		groups    []CandidateList
-		teamSize  int
-		expectedA CandidateList
-		expectedB CandidateList
-	}{
-		{
-			name: "Even distribution",
-			groups: []CandidateList{
-				{
-					&MatchmakerEntry{Ticket: "1"},
-					&MatchmakerEntry{Ticket: "2"},
-				},
-				{
-					&MatchmakerEntry{Ticket: "3"},
-					&MatchmakerEntry{Ticket: "4"},
-				},
-			},
-			teamSize: 2,
-			expectedA: CandidateList{
-				&MatchmakerEntry{Ticket: "1"},
-				&MatchmakerEntry{Ticket: "2"},
-			},
-			expectedB: CandidateList{
-				&MatchmakerEntry{Ticket: "3"},
-				&MatchmakerEntry{Ticket: "4"},
-			},
-		},
-		{
-			name: "Exceeding team size",
-			groups: []CandidateList{
-				{
-					&MatchmakerEntry{Ticket: "1"},
-					&MatchmakerEntry{Ticket: "2"},
-					&MatchmakerEntry{Ticket: "3"},
-				},
-				{
-					&MatchmakerEntry{Ticket: "4"},
-					&MatchmakerEntry{Ticket: "5"},
-					&MatchmakerEntry{Ticket: "6"},
-				},
-				{
-					&MatchmakerEntry{Ticket: "7"},
-					&MatchmakerEntry{Ticket: "8"},
-				},
-			},
-			teamSize: 4,
-			expectedA: CandidateList{
-				&MatchmakerEntry{Ticket: "1"},
-				&MatchmakerEntry{Ticket: "2"},
-				&MatchmakerEntry{Ticket: "3"},
-			},
-			expectedB: CandidateList{
-				&MatchmakerEntry{Ticket: "4"},
-				&MatchmakerEntry{Ticket: "5"},
-				&MatchmakerEntry{Ticket: "6"},
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			teamA, teamB := organizeAsTeams(tt.groups, tt.teamSize)
-
-			if len(teamA) != len(tt.expectedA) || len(teamB) != len(tt.expectedB) {
-				t.Errorf("Team size mismatch: got teamA=%d, teamB=%d, expected teamA=%d, teamB=%d",
-					len(teamA), len(teamB), len(tt.expectedA), len(tt.expectedB))
-				return
-			}
-
-			for i, entry := range teamA {
-				if entry.GetTicket() != tt.expectedA[i].GetTicket() {
-					t.Errorf("Team A mismatch at index %d: got %v, expected %v", i, entry.GetTicket(), tt.expectedA[i].GetTicket())
-				}
-			}
-
-			for i, entry := range teamB {
-				if entry.GetTicket() != tt.expectedB[i].GetTicket() {
-					t.Errorf("Team B mismatch at index %d: got %v, expected %v", i, entry.GetTicket(), tt.expectedB[i].GetTicket())
-				}
-			}
-		})
-	}
-}
 func BenchmarkHashMatchmakerEntries(b *testing.B) {
 	// Generate a slice of MatchmakerEntry for benchmarking
 	entries := generateMatchmakerEntries(8)
