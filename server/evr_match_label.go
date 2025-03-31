@@ -103,11 +103,11 @@ func (s *MatchLabel) IsMatch() bool {
 }
 
 func (s *MatchLabel) IsPrivateMatch() bool {
-	return s.Mode == evr.ModeArenaPrivate || s.Mode == evr.ModeCombatPrivate
+	return s.Mode == evr.ModeArenaPrivate || s.Mode == evr.ModeCombatPrivate || s.Mode == evr.ModeSocialPrivate
 }
 
 func (s *MatchLabel) IsPublicMatch() bool {
-	return s.Mode == evr.ModeArenaPublic || s.Mode == evr.ModeCombatPublic
+	return s.Mode == evr.ModeArenaPublic || s.Mode == evr.ModeCombatPublic || s.Mode == evr.ModeSocialPublic
 }
 
 func (s *MatchLabel) IsLocked() bool {
