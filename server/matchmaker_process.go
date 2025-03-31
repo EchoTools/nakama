@@ -17,6 +17,7 @@ package server
 import (
 	"math"
 	"math/bits"
+	"slices"
 	"sort"
 	"time"
 
@@ -472,12 +473,17 @@ func (m *LocalMatchmaker) processCustom(activeIndexesCopy map[string]*Matchmaker
 
 		// Sort the hit indexes by their created_at timestamp, so that we can
 		// prioritize newer tickets
-		sort.Slice(hitIndexes, func(i, j int) bool {
-			return hitIndexes[i].CreatedAt > hitIndexes[j].CreatedAt
+
+		slices.SortFunc(hitIndexes, func(a, b *MatchmakerIndex) int {
+			return int(b.CreatedAt - a.CreatedAt)
 		})
-		// Limit the number of hit indexes to 24, to avoid excessive processing time.
+
 		if len(hitIndexes) > 24 {
-			hitIndexes = hitIndexes[:24]
+
+			// take the oldest 8 hits, and the newest 16 hits, without overlapping
+			indexes := hitIndexes[:8]
+			indexes = append(indexes, hitIndexes[len(hitIndexes)-16:]...)
+			hitIndexes = indexes
 		}
 
 		for hitIndexes := range combineIndexes(hitIndexes, index.MinCount-index.Count, index.MaxCount-index.Count) {
@@ -566,15 +572,6 @@ func (m *LocalMatchmaker) processCustom(activeIndexesCopy map[string]*Matchmaker
 				continue
 			}
 
-			// Avoid duplicate matches.
-			rosterKey := HashMatchmakerEntries(index.Entries)
-			if _, found := seenCandidateSet[rosterKey]; found {
-				duplicateCount++
-				continue
-			} else {
-				seenCandidateSet[rosterKey] = struct{}{}
-			}
-
 			// Hit is valid, collect all its entries.
 			matchedEntry := make([]*MatchmakerEntry, 0, hitCount)
 			for _, hitIndex := range hitIndexes {
@@ -582,6 +579,15 @@ func (m *LocalMatchmaker) processCustom(activeIndexesCopy map[string]*Matchmaker
 			}
 			// Include the active index that was the root of this potential match.
 			matchedEntry = append(matchedEntry, index.Entries...)
+
+			// Avoid duplicate matches.
+			rosterKey := HashMatchmakerEntries(matchedEntry)
+			if _, found := seenCandidateSet[rosterKey]; found {
+				duplicateCount++
+				continue
+			} else {
+				seenCandidateSet[rosterKey] = struct{}{}
+			}
 
 			matchedEntries = append(matchedEntries, matchedEntry)
 		}

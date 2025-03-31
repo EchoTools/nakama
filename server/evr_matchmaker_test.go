@@ -420,7 +420,7 @@ func TestCharacterizationMatchmaker1v1(t *testing.T) {
 			// Create a timestamp for the file
 			timestamp := time.Now().Format("2006-01-02-15-04-05")
 			fn := fmt.Sprintf("../_matches/live-%s.json", timestamp)
-			err = os.WriteFile(fn, jsonBytes, 0644)
+			_ = os.WriteFile(fn, jsonBytes, 0644)
 			t.Logf("Saved %d bytes of live data to %s", len(jsonBytes), fn)
 		}
 
@@ -872,7 +872,8 @@ func newMatchmakingEntryFromExisting(entry *MatchmakerEntry, minCount, maxCount,
 	return newEntry
 }
 
-// TestMatchmakerOverload is a test function that simulates a matchmaker overload scenario.
+// TestMatchmakerOverload is a debugging/troubleshooting test function that simulates
+// a matchmaker overload scenario.
 // It creates a large number of matchmaker entries and adds them to the matchmaker.
 // It then processes the matchmaker and checks for matches.
 
@@ -916,6 +917,17 @@ func TestCharacterizeMatchmakerOverload(t *testing.T) {
 
 		extracts = append(extracts, d.Index...)
 
+	}
+
+OuterLoop:
+	for i := 0; i < len(extracts); i++ {
+		for _, p := range extracts[i].Presences {
+			if slices.Contains(skipUsernames, p.Username) {
+				extracts = slices.Delete(extracts, i, i+1)
+				i--
+				continue OuterLoop
+			}
+		}
 	}
 
 	consoleLogger := loggerForTest(t)
@@ -974,9 +986,10 @@ func TestCharacterizeMatchmakerOverload(t *testing.T) {
 	playerNamesByMatch := make([]string, 0, len(matchesSeen))
 
 	matches := make(map[string]*rtapi.MatchmakerMatched, 0)
-	playerIds := make([]string, 0, len(matchesSeen))
 	// output the matches that were created
-
+	matchedEntries := make(map[string]struct{}, 0)
+	matchedUsernameSet := make(map[string]struct{}, 0)
+	matchedUsernames := make([]string, 0, len(matchedEntries))
 	for _, match := range matchesSeen {
 
 		// Create a map of partyID's to alpha numeric characters
@@ -990,12 +1003,18 @@ func TestCharacterizeMatchmakerOverload(t *testing.T) {
 		}
 
 		// get the players in the match
-		playerIds = make([]string, 0, len(match.GetUsers()))
+		playerIds := make([]string, 0, len(match.GetUsers()))
 		playerUsernames := make([]string, 0, len(match.GetUsers()))
 		for _, p := range match.GetUsers() {
+			matchedEntries[p.Presence.GetUsername()] = struct{}{}
 			playerName := fmt.Sprintf("%s:%s", partyMap[match.GetUsers()[0].PartyId], p.Presence.GetUsername())
 			playerIds = append(playerIds, playerName)
 			playerUsernames = append(playerUsernames, p.Presence.GetUsername())
+
+			if _, ok := matchedUsernameSet[p.Presence.GetUsername()]; !ok {
+				matchedUsernames = append(matchedUsernames, p.Presence.GetUsername())
+				matchedUsernameSet[p.Presence.GetUsername()] = struct{}{}
+			}
 		}
 
 		slices.Sort(playerUsernames)
@@ -1009,20 +1028,24 @@ func TestCharacterizeMatchmakerOverload(t *testing.T) {
 	// count the total matches
 	t.Logf("Total matches: %d", count)
 
-	unmatched := make([]string, 0, len(extracts))
+	unmatchedUsernameSet := make(map[string]struct{}, 0)
+	unmatchedUsernames := make([]string, 0, len(extracts))
 
 	for _, entry := range extracts {
-		if _, ok := matches[entry.Ticket]; !ok {
-			unmatched = append(unmatched, entry.Ticket)
-
+		for _, p := range entry.Presences {
+			if _, ok := matchedEntries[p.Username]; ok {
+				continue
+			}
+			if _, ok := unmatchedUsernameSet[p.Username]; ok {
+				continue
+			}
+			unmatchedUsernames = append(unmatchedUsernames, p.Username)
 		}
 	}
 
-	t.Logf("Unmatched count: %d", len(unmatched))
-	for _, e := range unmatched {
-		entryJson, _ := json.MarshalIndent(e, "", "  ")
-		t.Logf("Unmatched: %s", string(entryJson))
-	}
+	t.Logf("Matched (%d): %s", len(matchedEntries), strings.Join(matchedUsernames, ", "))
+	t.Logf("Unmatched (%d): %s", len(unmatchedUsernames), strings.Join(unmatchedUsernames, ", "))
+
 	// Compare the player lists of the data.Matches with the matchesSeen
 
 	livePlayerNamesByMatch := make([]string, 0, len(data.Matches))

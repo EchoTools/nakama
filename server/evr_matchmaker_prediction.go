@@ -1,10 +1,7 @@
 package server
 
 import (
-	"math"
 	"sort"
-
-	"maps"
 
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/intinig/go-openskill/rating"
@@ -12,18 +9,9 @@ import (
 )
 
 type PredictedMatch struct {
-	Candidate           []runtime.MatchmakerEntry `json:"match"`
-	Draw                float64                   `json:"draw"`
-	Size                int                       `json:"size"`
-	TeamRankPercentileA float64                   `json:"rank_percentile_a"`
-	TeamRankPercentileB float64                   `json:"rank_percentile_b"`
-	RankPercentileDelta float64                   `json:"rank_percentile_delta"`
-	TeamOrdinalA        float64                   `json:"team_ordinal_a"`
-	TeamOrdinalB        float64                   `json:"team_ordinal_b"`
-	TeamStrengthA       float64                   `json:"team_strength_a"`
-	TeamStrengthB       float64                   `json:"team_strength_b"`
-	OrdinalDelta        float64                   `json:"ordinal_delta"`
-	MuDelta             float64                   `json:"mu_delta"`
+	Candidate []runtime.MatchmakerEntry `json:"match"`
+	Draw      float32                   `json:"draw"`
+	Size      int8                      `json:"size"`
 }
 
 type CandidateList []runtime.MatchmakerEntry
@@ -79,95 +67,118 @@ func HashMatchmakerEntries[E runtime.MatchmakerEntry](entries []E) uint64 {
 	return hash
 }
 
-func predictCandidateOutcomes(candidates [][]runtime.MatchmakerEntry) []PredictedMatch {
+func predictCandidateOutcomes(candidates [][]runtime.MatchmakerEntry) <-chan PredictedMatch {
+	predictCh := make(chan PredictedMatch)
 
-	// count the number of valid candidates
-	var validCandidates int
-	for _, c := range candidates {
-		if c != nil {
-			validCandidates++
+	go func() {
+		defer close(predictCh)
+		// Count valid candidates
+		validCandidates := 0
+		for _, c := range candidates {
+			if c != nil {
+				validCandidates++
+			}
 		}
-	}
 
-	var (
-		predictions = make([]PredictedMatch, 0, validCandidates)
-		tickets     = make(map[string]CandidateList, 0)
-		hashSet     = make(map[uint64]struct{}, 0)
-	)
+		var (
+			allTickets       = make(map[string]CandidateList, validCandidates) // Preallocate
+			candidateHashSet = make(map[uint64]struct{}, validCandidates)      // Preallocate
+			ratingsByGroup   = make([]types.Team, 0, 10)
+			candidateTickets = make(map[string]CandidateList, 10) // Preallocate
+			groups           = make([]CandidateList, 0, 10)       // Preallocate
+			teamA            = make(CandidateList, 0, 10)
+			teamB            = make(CandidateList, 0, 10)
+			teamRatingsA     = make([]types.Rating, 0, 5)
+			teamRatingsB     = make([]types.Rating, 0, 5)
 
-	for _, c := range candidates {
-		if c == nil {
-			continue
-		}
-		// Skip over duplicate candidates
-		if _, ok := hashSet[HashMatchmakerEntries(c)]; ok {
-			continue
-		}
-		hashSet[HashMatchmakerEntries(c)] = struct{}{}
+			ratingsByTicket = make(map[string]types.Team, 10) // Preallocate
+		)
 
-		ticketSet := make(map[string]CandidateList, 0)
-		for _, e := range c {
-			// skip over duplicate tickets
-			if _, found := tickets[e.GetTicket()]; found {
+		for _, c := range candidates {
+			if c == nil {
 				continue
 			}
-			ticketSet[e.GetTicket()] = append(ticketSet[e.GetTicket()], e)
+
+			// Skip duplicate candidates
+			hash := HashMatchmakerEntries(c)
+			if _, found := candidateHashSet[hash]; found {
+				continue
+			}
+			candidateHashSet[hash] = struct{}{}
+
+			// Clear candidateTickets map
+			for k := range candidateTickets {
+				delete(candidateTickets, k)
+			}
+
+			// Collect tickets efficiently
+			for _, e := range c {
+				ticket := e.GetTicket()
+				if existing, found := allTickets[ticket]; found {
+					candidateTickets[ticket] = existing
+				} else {
+					continue
+				}
+				candidateTickets[ticket] = append(candidateTickets[ticket], e)
+			}
+
+			// Update allTickets selectively
+			for k, v := range candidateTickets {
+				allTickets[k] = v
+			}
+
+			for ticket, entries := range candidateTickets {
+				ratingsByTicket[ticket] = entries.Ratings()
+			}
+			// Reuse groups slice
+			groups = groups[:0]
+			for _, entries := range candidateTickets {
+				groups = append(groups, entries)
+			}
+
+			// Sort groups by their predicted ranks
+			ratingsByGroup = ratingsByGroup[:0]
+			for _, entries := range groups {
+				ratingsByGroup = append(ratingsByGroup, ratingsByTicket[entries[0].GetTicket()])
+			}
+
+			ranks, _ := rating.PredictRank(ratingsByGroup, nil)
+
+			sort.SliceStable(groups, func(i, j int) bool {
+				return ranks[i] < ranks[j]
+			})
+
+			// Create teams
+
+			teamSize := len(c) / 2
+			teamA, teamB = teamA[:0], teamB[:0]
+			teamRatingsA, teamRatingsB = teamRatingsA[:0], teamRatingsB[:0]
+
+			for _, entries := range groups {
+				if len(teamA)+len(entries) <= teamSize {
+					teamA = append(teamA, entries...)
+					teamRatingsA = append(teamRatingsA, ratingsByTicket[entries[0].GetTicket()]...)
+				} else {
+					teamB = append(teamB, entries...)
+					teamRatingsB = append(teamRatingsB, ratingsByTicket[entries[0].GetTicket()]...)
+				}
+			}
+
+			if len(teamA) != len(teamB) {
+				continue
+			}
+
+			// Copy teams into candidate slice
+			copy(c[:len(teamA)], teamA)
+			copy(c[len(teamA):], teamB)
+
+			predictCh <- PredictedMatch{
+				Candidate: c,
+				Draw:      float32(rating.PredictDraw([]types.Team{teamRatingsA, teamRatingsB}, nil)),
+				Size:      int8(len(c)),
+			}
 		}
 
-		maps.Copy(tickets, ticketSet)
-
-		// Put the strongest players on team A
-		groups := make([]CandidateList, 0, len(ticketSet))
-		for _, entries := range ticketSet {
-			groups = append(groups, entries)
-		}
-		sortByRanks(groups)
-
-		teamA, teamB := organizeAsTeams(groups, len(c)/2)
-		// If the teams are not balanced (i.e. a party is split up), continue to the next candidate
-		if len(teamA) != len(teamB) {
-			continue
-		}
-		// copy the teams into the candidate
-		copy(c, append(teamA, teamB...))
-
-		predictions = append(predictions, PredictedMatch{
-			Candidate:     c,
-			Draw:          rating.PredictDraw([]types.Team{teamA.Ratings(), teamB.Ratings()}, nil),
-			Size:          len(c),
-			TeamOrdinalA:  teamA.TeamOrdinal(),
-			TeamOrdinalB:  teamB.TeamOrdinal(),
-			TeamStrengthA: teamA.Strength(),
-			TeamStrengthB: teamB.Strength(),
-			OrdinalDelta:  math.Abs(teamA.TeamOrdinal() - teamB.TeamOrdinal()),
-		})
-	}
-
-	return predictions
-}
-
-func organizeAsTeams(groups []CandidateList, teamSize int) (CandidateList, CandidateList) {
-	teamA, teamB := make(CandidateList, 0, teamSize), make(CandidateList, 0, teamSize)
-	for _, entries := range groups {
-		if len(teamA) <= len(teamB) && len(teamA)+len(entries) <= teamSize {
-			teamA = append(teamA, entries...)
-		} else {
-			teamB = append(teamB, entries...)
-		}
-	}
-	return teamA, teamB
-}
-
-func sortByRanks(groups []CandidateList) {
-
-	ratings := make([]types.Team, 0, len(groups))
-	for _, entries := range groups {
-		ratings = append(ratings, entries.Ratings())
-	}
-
-	ranks, _ := rating.PredictRank(ratings, nil)
-
-	sort.SliceStable(groups, func(i, j int) bool {
-		return ranks[i] < ranks[j]
-	})
+	}()
+	return predictCh
 }
