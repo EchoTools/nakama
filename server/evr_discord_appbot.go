@@ -2527,15 +2527,16 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 
 				var allowed bool
-
 				var isEnforcer bool
+
 				if gg, err := GuildGroupLoad(ctx, nk, label.GetGroupID().String()); err != nil {
 					return errors.New("failed to load guild group")
 				} else if gg.IsEnforcer(userID) {
 					isEnforcer = true
 				}
 
-				if label.SpawnedBy == userID && label.Mode != evr.ModeSocialPublic {
+				// Check if the user is the match owner of a private match
+				if label.SpawnedBy == userID && label.IsPrivate() {
 					allowed = true
 				}
 
