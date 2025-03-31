@@ -91,6 +91,10 @@ func (p *LobbySessionParameters) GetRating() types.Rating {
 	return *p.MatchmakingRating.Load()
 }
 
+func (p *LobbySessionParameters) GetRatingOrdinal() float64 {
+	return rating.Ordinal(p.GetRating())
+}
+
 func (p *LobbySessionParameters) SetRating(rating types.Rating) {
 	if p.MatchmakingRating == nil {
 		p.MatchmakingRating = atomic.NewPointer(&rating)

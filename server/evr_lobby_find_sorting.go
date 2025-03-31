@@ -9,24 +9,24 @@ import (
 )
 
 type backfillSortItem struct {
-	match               *MatchLabelMeta
-	rtt                 int
-	rankPercentileDelta float64
-	openSlots           int
-	withinRankRange     bool
+	match             *MatchLabelMeta
+	rtt               int
+	ratingDelta       float64
+	openSlots         int
+	withinRatingRange bool
 }
 
 func (p *EvrPipeline) sortBackfillOptions(filteredMatches []*MatchLabelMeta, lobbyParams *LobbySessionParameters) []*MatchLabelMeta {
 
 	var (
-		partySize      = lobbyParams.GetPartySize()
-		rtts           = lobbyParams.latencyHistory.LatestRTTs()
-		rankPercentile = 0.5
-		items          = make([]backfillSortItem, 0, len(filteredMatches))
+		partySize     = lobbyParams.GetPartySize()
+		rtts          = lobbyParams.latencyHistory.LatestRTTs()
+		ratingOrdinal = 0.5
+		items         = make([]backfillSortItem, 0, len(filteredMatches))
 	)
 
 	if lobbyParams.Mode == evr.ModeArenaPublic || lobbyParams.Mode == evr.ModeCombatPublic {
-		rankPercentile = lobbyParams.RankPercentile.Load()
+		ratingOrdinal = lobbyParams.GetRatingOrdinal()
 	}
 
 	for _, m := range filteredMatches {
@@ -34,11 +34,15 @@ func (p *EvrPipeline) sortBackfillOptions(filteredMatches []*MatchLabelMeta, lob
 		var (
 			rtt, isReachable = rtts[m.State.GameServer.Endpoint.GetExternalIP()]
 			openSlots        = m.State.OpenPlayerSlots()
-			rankDelta        = math.Abs(m.State.RankPercentile - rankPercentile)
+			ratingDelta      = math.Abs(m.State.RatingOrdinal() - ratingOrdinal)
 		)
 
 		// Skip matches that are full
 		if openSlots < partySize {
+			continue
+		}
+		// Skip matches that are too new
+		if lobbyParams.Mode != evr.ModeSocialPublic && time.Since(m.State.CreatedAt) < 10*time.Second {
 			continue
 		}
 
@@ -47,17 +51,12 @@ func (p *EvrPipeline) sortBackfillOptions(filteredMatches []*MatchLabelMeta, lob
 			continue
 		}
 
-		// Skip matches that are too new
-		if lobbyParams.Mode != evr.ModeSocialPublic && time.Since(m.State.CreatedAt) < 10*time.Second {
-			continue
-		}
-
 		item := backfillSortItem{
-			match:               m,
-			rtt:                 rtt,
-			rankPercentileDelta: rankDelta,
-			openSlots:           openSlots,
-			withinRankRange:     rankDelta <= lobbyParams.RankPercentileMaxDelta,
+			match:             m,
+			rtt:               rtt,
+			ratingDelta:       ratingDelta,
+			openSlots:         openSlots,
+			withinRatingRange: ratingDelta <= lobbyParams.MatchmakingOrdinalRange,
 		}
 
 		items = append(items, item)
@@ -72,16 +71,16 @@ func (p *EvrPipeline) sortBackfillOptions(filteredMatches []*MatchLabelMeta, lob
 		}
 
 		// If the rank delta is within the acceptable range, sort by population
-		if a.withinRankRange && !b.withinRankRange {
+		if a.withinRatingRange && !b.withinRatingRange {
 			return -1
 		}
-		if !a.withinRankRange && b.withinRankRange {
+		if !a.withinRatingRange && b.withinRatingRange {
 			return 1
 		}
 
 		// If the rtt's are below 100 and within 30ms of each other, sort by rank percentile
 		if a.rtt < 100 && b.rtt < 100 && math.Abs(float64(a.rtt-b.rtt)) < 30 {
-			return int((a.rankPercentileDelta - b.rankPercentileDelta) * 100)
+			return int((a.ratingDelta - b.ratingDelta) * 100)
 		}
 
 		// Sort by RTT
