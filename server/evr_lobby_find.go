@@ -250,7 +250,7 @@ func (p *EvrPipeline) monitorMatchmakingStream(ctx context.Context, logger *zap.
 	}
 }
 
-func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyParams *LobbySessionParameters) (*MatchLabel, error) {
+func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyParams *LobbySessionParameters, entrants ...*EvrMatchPresence) (*MatchLabel, error) {
 	if createLobbyMu.TryLock() {
 		go func() {
 			// Hold the lock for enough time to create the server
@@ -322,11 +322,12 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 
 	matchID := label.ID
 	settings := &MatchSettings{
-		Mode:      lobbyParams.Mode,
-		Level:     evr.LevelUnspecified,
-		SpawnedBy: lobbyParams.UserID.String(),
-		GroupID:   lobbyParams.GroupID,
-		StartTime: time.Now().UTC(),
+		Mode:         lobbyParams.Mode,
+		Level:        evr.LevelUnspecified,
+		SpawnedBy:    lobbyParams.UserID.String(),
+		GroupID:      lobbyParams.GroupID,
+		StartTime:    time.Now().UTC(),
+		Reservations: entrants,
 	}
 	label, err = LobbyPrepareSession(ctx, p.nk, matchID, settings)
 	if err != nil {
@@ -384,14 +385,13 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 		}
 	}
 
-	query := lobbyParams.BackfillSearchQuery(includeRankPercentile, includeMaxRTT)
-
-	cycleCount := 0
-
-	fallbackTimer := time.NewTimer(lobbyParams.FallbackTimeout)
-	failsafeTimer := time.NewTimer(lobbyParams.FailsafeTimeout)
+	var (
+		query         = lobbyParams.BackfillSearchQuery(includeRankPercentile, includeMaxRTT)
+		fallbackTimer = time.NewTimer(lobbyParams.FallbackTimeout)
+		failsafeTimer = time.NewTimer(lobbyParams.FailsafeTimeout)
+		cycleCount    = 0
+	)
 	for {
-		var err error
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("context canceled: %w", ctx.Err())
@@ -506,7 +506,7 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 		// If the lobby is social, create a new social lobby.
 		if lobbyParams.Mode == evr.ModeSocialPublic {
 			// Create a new social lobby
-			_, err = p.newLobby(ctx, logger, lobbyParams)
+			label, err := p.newLobby(ctx, logger, lobbyParams, entrants...)
 			if err != nil {
 				// If the error is a lock error, just try again.
 				if err == ErrFailedToAcquireLock {
@@ -519,6 +519,16 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 				return NewLobbyErrorf(ServerFindFailed, "failed to create social lobby: %w", err)
 			} else {
 				<-time.After(1 * time.Second)
+				// Player members will detect the join.
+				if err := p.LobbyJoinEntrants(logger, label, entrants...); err != nil {
+					// Send the error to the client
+					// If it's full just try again.
+					if LobbyErrorCode(err) == ServerIsFull {
+						logger.Warn("Server is full, ignoring.")
+						continue
+					}
+					return fmt.Errorf("failed to join backfill match: %w", err)
+				}
 			}
 		}
 	}
