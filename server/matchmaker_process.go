@@ -479,7 +479,6 @@ func (m *LocalMatchmaker) processCustom(activeIndexesCopy map[string]*Matchmaker
 		})
 
 		if len(hitIndexes) > 24 {
-
 			// take the oldest 8 hits, and the newest 16 hits, without overlapping
 			indexes := hitIndexes[:8]
 			indexes = append(indexes, hitIndexes[len(hitIndexes)-16:]...)
@@ -592,7 +591,6 @@ func (m *LocalMatchmaker) processCustom(activeIndexesCopy map[string]*Matchmaker
 			matchedEntries = append(matchedEntries, matchedEntry)
 		}
 	}
-	m.logger.Debug("Matchmaker process custom", zap.Int("duplicate_count", duplicateCount), zap.Int("seen_count", len(seenCandidateSet)))
 
 	if len(matchedEntries) == 0 {
 		return matchedEntries, expiredActiveIndexes

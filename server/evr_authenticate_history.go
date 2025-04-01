@@ -267,16 +267,30 @@ func (h *LoginHistory) NotifyGroup(groupID string, threshold time.Time) bool {
 	return updated
 }
 
-func (h *LoginHistory) UpdateAlternates(ctx context.Context, nk runtime.NakamaModule, excludeUserIDs ...string) error {
+func (h *LoginHistory) UpdateAlternates(ctx context.Context, nk runtime.NakamaModule, excludeUserIDs ...string) (hasDisabledAlts bool, err error) {
 	matches, err := LoginAlternateSearch(ctx, nk, h)
 	if err != nil {
-		return fmt.Errorf("error searching for alternate logins: %w", err)
+		return false, fmt.Errorf("error searching for alternate logins: %w", err)
 	}
 
 	h.AlternateMap = make(map[string][]*AlternateSearchMatch, len(matches))
 	h.SecondDegreeAlternates = make([]string, 0)
 
 	for _, m := range matches {
+		account, err := nk.AccountGetId(ctx, m.otherHistory.userID)
+		if err != nil {
+			return false, fmt.Errorf("error getting account for user ID %s: %w", m.otherHistory.userID, err)
+		}
+		if account == nil {
+			continue
+		}
+
+		if account.GetDisableTime() != nil {
+			hasDisabledAlts = true
+		}
+
+		h.AlternateMap[m.otherHistory.userID] = append(h.AlternateMap[m.otherHistory.userID], m)
+
 		if _, found := h.AlternateMap[m.otherHistory.userID]; !found {
 			// add second-level alternates
 			for id := range m.otherHistory.AlternateMap {
@@ -286,13 +300,12 @@ func (h *LoginHistory) UpdateAlternates(ctx context.Context, nk runtime.NakamaMo
 				h.SecondDegreeAlternates = append(h.SecondDegreeAlternates, id)
 			}
 		}
-		h.AlternateMap[m.otherHistory.userID] = append(h.AlternateMap[m.otherHistory.userID], m)
 	}
 
 	slices.Sort(h.SecondDegreeAlternates)
 	h.SecondDegreeAlternates = slices.Compact(h.SecondDegreeAlternates)
 
-	return nil
+	return hasDisabledAlts, nil
 }
 
 func (h *LoginHistory) rebuildCache() {
