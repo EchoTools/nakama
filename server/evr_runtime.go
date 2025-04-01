@@ -165,8 +165,24 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	if err := mongoClient.Ping(ctx, nil); err != nil {
 		logger.WithField("error", err).Error("Failed to ping MongoDB")
 	}
+
+	ctx = context.WithValue(ctx, runtime.RUNTIME_CTX_ENV, vars)
+
+	botToken, ok = vars["DISCORD_BOT_TOKEN"]
+	if !ok {
+		return fmt.Errorf("missing bot token in env vars")
+	}
+
+	if botToken != "" {
+		dg, err = discordgo.New("Bot " + botToken)
+		if err != nil {
+			logger.Error("Unable to create bot")
+		}
+		dg.StateEnabled = false
+	}
+
 	// Register the event dispatch
-	eventDispatch, err := NewEventDispatch(ctx, logger, db, nk, initializer, mongoClient)
+	eventDispatch, err := NewEventDispatch(ctx, logger, db, nk, initializer, mongoClient, dg)
 	if err != nil {
 		return fmt.Errorf("unable to create event dispatch: %w", err)
 	}

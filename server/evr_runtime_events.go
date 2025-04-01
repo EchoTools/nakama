@@ -5,11 +5,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"slices"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/bwmarrin/discordgo"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -36,6 +38,7 @@ type EventDispatch struct {
 	nk     runtime.NakamaModule
 	db     *sql.DB
 	mongo  *mongo.Client
+	dg     *discordgo.Session
 
 	queue         chan *api.Event
 	matchJournals map[MatchID]*MatchDataJournal
@@ -43,7 +46,7 @@ type EventDispatch struct {
 	vrmlVerifier  *VRMLVerifier
 }
 
-func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer, mongoClient *mongo.Client) (*EventDispatch, error) {
+func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer, mongoClient *mongo.Client, dg *discordgo.Session) (*EventDispatch, error) {
 
 	vrmlVerifier, err := NewVRMLVerifier(ctx, logger, db, nk, initializer, dg)
 	if err != nil {
@@ -56,6 +59,7 @@ func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		db:     db,
 		mongo:  mongoClient,
 		nk:     nk,
+		dg:     dg,
 
 		queue:         make(chan *api.Event, 100),
 		matchJournals: make(map[MatchID]*MatchDataJournal),
@@ -314,8 +318,58 @@ func (h *EventDispatch) handleUserLogin(ctx context.Context, logger runtime.Logg
 	if err != nil {
 		return fmt.Errorf("failed to load login history: %w", err)
 	}
-	if err := loginHistory.UpdateAlternates(ctx, h.nk); err != nil {
-		return fmt.Errorf("failed to update alternates: %w", err)
+
+	if serviceSettings := ServiceSettings(); serviceSettings != nil && serviceSettings.KickPlayersWithDisabledAlternates {
+		if hasDiabledAlts, err := loginHistory.UpdateAlternates(ctx, h.nk); err != nil {
+			return fmt.Errorf("failed to update alternates: %w", err)
+		} else if hasDiabledAlts {
+
+			go func() {
+
+				// Set random time to disable and kick player
+				delayMin, delayMax := 1, 4
+				kickDelay := time.Duration(delayMin+rand.Intn(delayMax)) * time.Minute
+
+				alternateUsernames := make([]string, 0, len(loginHistory.AlternateMap))
+				for _, a := range loginHistory.AlternateMap {
+					for _, m := range a {
+
+						account, err := h.nk.AccountGetId(ctx, m.otherHistory.userID)
+						if err != nil || account == nil {
+							logger.Error("failed to get alternate account: %v", err)
+							continue
+						}
+						if account.User.Id == userID {
+							continue
+						}
+						s := fmt.Sprintf("<@%s> (%s)", account.CustomId, account.User.Username)
+
+						if account.DisableTime != nil {
+							s += " *[disabled]*"
+						}
+
+						alternateUsernames = append(alternateUsernames, s)
+					}
+				}
+				account, err := h.nk.AccountGetId(ctx, userID)
+				if err != nil || account == nil {
+					logger.Error("failed to get user account: %v", err)
+					return
+				}
+
+				// Send audit log message
+				content := fmt.Sprintf("<@%s> (%s) has disabled alternates, disconnecting session(s) in %d seconds.\n%s", account.CustomId, account.User.Username, int(kickDelay.Seconds()), strings.Join(alternateUsernames, ", "))
+				ServiceMessageLog(dg, serviceSettings.ServiceAuditChannelID, content)
+
+				logger.WithField("delay", kickDelay).Info("kicking (with delay) user %s has disabled alternates", userID)
+				<-time.After(kickDelay)
+				if c, err := DisconnectUserID(ctx, h.nk, userID, false); err != nil {
+					logger.Error("failed to disconnect user: %v", err)
+				} else {
+					logger.Info("user %s disconnected: %v sessions", userID, c)
+				}
+			}()
+		}
 	}
 
 	if err := loginHistory.Store(ctx, h.nk); err != nil {

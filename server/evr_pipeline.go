@@ -236,12 +236,12 @@ func DetermineServiceIPs() (net.IP, net.IP, error) {
 
 	intIP, err := DetermineLocalIPAddress()
 	if err != nil {
-		return nil, nil, fmt.Errorf("Unable to determine internal IP: %w", err)
+		return nil, nil, fmt.Errorf("unable to determine internal IP: %w", err)
 	}
 
 	extIP, err := DetermineExternalIPAddress()
 	if err != nil {
-		return nil, nil, fmt.Errorf("Unable to determine external IP: %w", err)
+		return nil, nil, fmt.Errorf("unable to determine external IP: %w", err)
 	}
 
 	return intIP, extIP, nil
