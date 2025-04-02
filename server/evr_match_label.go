@@ -258,7 +258,7 @@ func (s *MatchLabel) MetricsTags() map[string]string {
 func (s *MatchLabel) ratingOrdinal() float64 {
 	ordinals := make([]float64, 0, len(s.Players))
 	for _, p := range s.Players {
-		if p.RatingOrdinal != 0 || !p.IsCompetitor() {
+		if p.RatingOrdinal == 0 || !p.IsCompetitor() {
 			continue
 		}
 		ordinals = append(ordinals, p.RatingOrdinal)
@@ -571,6 +571,7 @@ func (l *MatchLabel) PublicView() *MatchLabel {
 		},
 		Players:        make([]PlayerInfo, 0),
 		RankPercentile: l.RankPercentile,
+		RatingOrdinal:  l.RatingOrdinal,
 	}
 	if l.LobbyType == PrivateLobby || l.LobbyType == UnassignedLobby {
 		// Set the last bytes to FF to hide the ID
