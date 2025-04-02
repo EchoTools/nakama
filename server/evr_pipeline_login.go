@@ -74,7 +74,7 @@ func (e NewLocationError) Error() string {
 		return strings.Join([]string{
 			"Please authorize this new location.",
 			fmt.Sprintf("Check your Discord DMs from @%s.", e.botUsername),
-			fmt.Sprintf("Select code >>> %s <<<.", e.code),
+			fmt.Sprintf("Select code >>> %s <<<", e.code),
 		}, "\n")
 	} else if e.guildName != "" {
 		// DMs were blocked, Use the guild name if it's available
