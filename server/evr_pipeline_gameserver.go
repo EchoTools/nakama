@@ -1,12 +1,14 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"slices"
@@ -22,6 +24,10 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
+)
+
+var (
+	ErrGameServerPresenceNotFound = errors.New("game server presence not found")
 )
 
 // sendDiscordError sends an error message to the user on discord
@@ -264,6 +270,10 @@ func (p *EvrPipeline) gameserverRegistrationRequest(ctx context.Context, logger 
 		return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_Failure)
 	}
 
+	if ServiceSettings().EnableContinuousGameserverHealthCheck {
+		go HealthCheckStart(session.Context(), logger, p.nk, session, p.internalIP, config.Endpoint.ExternalIP, int(config.Endpoint.Port), 500*time.Millisecond)
+	}
+
 	// Send the registration success message
 	return session.SendEvrUnrequire(evr.NewBroadcasterRegistrationSuccess(config.ServerID, config.Endpoint.ExternalIP))
 }
@@ -274,7 +284,7 @@ func (p *EvrPipeline) newParkingMatch(logger *zap.Logger, session *sessionWS, co
 		return nil, fmt.Errorf("failed to marshal game server config: %w", err)
 	}
 
-	params := map[string]interface{}{
+	params := map[string]any{
 		"gameserver": string(data),
 	}
 
@@ -313,6 +323,129 @@ func (p *EvrPipeline) newParkingMatch(logger *zap.Logger, session *sessionWS, co
 	logger.Debug("New parking match", zap.String("mid", matchIDStr))
 
 	return &matchID, nil
+}
+
+func HealthCheckStart(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, session Session, localIP net.IP, remoteIP net.IP, port int, timeout time.Duration) {
+	const (
+		pingRequestSymbol               uint64 = 0x997279DE065A03B0
+		RawPingAcknowledgeMessageSymbol uint64 = 0x4F7AE556E0B77891
+	)
+
+	var (
+		sessionID  = session.ID()
+		localAddr  = &net.UDPAddr{IP: net.ParseIP("0.0.0.0"), Port: 0}
+		remoteAddr = &net.UDPAddr{IP: remoteIP, Port: int(port)}
+
+		baseMetricsTags = map[string]string{
+			"mode":              "unassigned",
+			"operator_id":       session.UserID().String(),
+			"operator_username": strings.TrimPrefix("broadcaster:", session.Username()),
+			"external_ip":       remoteAddr.String(),
+		}
+	)
+
+	logger = logger.With(zap.String("external_ip", remoteAddr.String()))
+
+	// Establish a UDP connection to the specified address
+	conn, err := net.DialUDP("udp", localAddr, remoteAddr)
+	if err != nil {
+		logger.Error("could not establish connection", zap.Error(err))
+		return
+	}
+	defer conn.Close() // Ensure the connection is closed when the function ends
+
+	var (
+
+		// Construct the raw ping request message
+		request       = make([]byte, 16)
+		response      = make([]byte, 16)
+		pingAckPrefix = make([]byte, 8)
+	)
+	binary.LittleEndian.PutUint64(request[:8], pingRequestSymbol) // Add the ping request symbol
+	binary.LittleEndian.PutUint64(pingAckPrefix, RawPingAcknowledgeMessageSymbol)
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		// Generate a random 8-byte number for the ping request
+		if _, err := rand.Read(request[8:]); err != nil {
+			logger.Error("could not generate random number for ping request", zap.Error(err))
+			return
+		}
+
+		// Clone the metrics tags
+		tags := maps.Clone(baseMetricsTags)
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			// Get the current match ID
+			matchID, _, err := GameServerBySessionID(nk, sessionID)
+			if err != nil {
+				logger.Warn("Failed to get game server presence by session ID", zap.Error(err))
+				continue
+			} else if matchID.IsNil() || errors.Is(err, ErrGameServerPresenceNotFound) {
+				continue
+			}
+
+			// Get the match label
+			if l, err := MatchLabelByID(ctx, nk, matchID); err != nil {
+				logger.Warn("Failed to get match label by ID", zap.Error(err))
+			} else if l != nil {
+				if l.LobbyType != UnassignedLobby {
+					// match is active. add metadata.
+					maps.Copy(tags, map[string]string{
+						"mode":     l.Mode.String(),
+						"level":    l.Level.String(),
+						"type":     l.LobbyType.String(),
+						"group_id": l.GetGroupID().String(),
+					})
+					ticker.Reset(500 * time.Millisecond)
+				} else {
+					ticker.Reset(2 * time.Second)
+				}
+			}
+		}
+		// Start the timer
+		start := time.Now()
+
+		// Set a deadline for the connection to prevent hanging indefinitely
+		if err := conn.SetDeadline(start.Add(timeout)); err != nil {
+			logger.Error("could not set deadline for connection to %v", zap.Error(err))
+			return
+		}
+
+		// Send the ping request to the broadcaster
+		if _, err := conn.Write(request); err != nil {
+			logger.Error("could not send ping request to %v", zap.Error(err))
+			return
+		}
+
+		// Read the response from the broadcaster
+		if _, err := conn.Read(response); err != nil {
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				logger.Warn("ping request timed out", zap.String("remote_addr", remoteAddr.String()), zap.Int("timeout_ms", int(timeout.Milliseconds())))
+			}
+			logger.Error("could not read ping response from %v", zap.Error(err))
+			return
+		}
+
+		// Calculate the round trip time
+		rtt := time.Since(start)
+
+		// Check if the response's number matches the sent number, indicating a successful ping
+		if ok := bytes.Equal(response, append(pingAckPrefix, request[8:]...)); !ok {
+			logger.Error("received unexpected response.",
+				zap.String("remote_addr", remoteAddr.String()),
+				zap.String("request", fmt.Sprintf("%x", request)),
+				zap.String("response", fmt.Sprintf("%x", response)))
+			return
+		}
+
+		nk.MetricsTimerRecord("gameserver_rtt_duration", tags, rtt)
+	}
 }
 
 func BroadcasterHealthcheck(localIP net.IP, remoteIP net.IP, port int, timeout time.Duration) (rtt time.Duration, err error) {
@@ -670,7 +803,7 @@ func GameServerBySessionID(nk runtime.NakamaModule, sessionID uuid.UUID) (MatchI
 	}
 
 	if len(presences) == 0 {
-		return MatchID{}, nil, fmt.Errorf("no game server presence found")
+		return MatchID{}, nil, ErrGameServerPresenceNotFound
 	}
 
 	presence := presences[0]

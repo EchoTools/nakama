@@ -65,10 +65,9 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 		if nk == nil {
 			return
 		}
-		nk.MetricsGaugeSet("matchmaker_evr_candidate_count", nil, float64(len(candidates)))
-
+		nk.MetricsTimerRecord("matchmaker_process_duration", nil, time.Since(startTime))
 		// Divide the time by the number of candidates
-		nk.MetricsTimerRecord("matchmaker_evr_per_candidate", nil, time.Since(startTime)/time.Duration(len(candidates)))
+		nk.MetricsTimerRecord("matchmaker_per_candidate_duration", nil, time.Since(startTime)/time.Duration(len(candidates)))
 	}()
 
 	groupID, ok := candidates[0][0].GetProperties()["group_id"].(string)
@@ -116,6 +115,12 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 		_, ok := matchedPlayerSet[p]
 		return p, !ok
 	})
+
+	nk.MetricsCounterAdd("matchmaker_candidate_count", nil, int64(len(candidates)))
+	nk.MetricsCounterAdd("matchmaker_match_count", nil, int64(len(matches)))
+	nk.MetricsCounterAdd("matchmaker_ticket_count", nil, int64(len(ticketSet)))
+	nk.MetricsCounterAdd("matchmaker_unmatched_player_count", nil, int64(len(unmatchedPlayers)))
+	nk.MetricsCounterAdd("matchmaker_matched_player_count", nil, int64(len(matchedPlayers)))
 
 	logger.WithFields(map[string]interface{}{
 		"mode":                 modestr,

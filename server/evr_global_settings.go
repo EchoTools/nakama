@@ -26,21 +26,22 @@ func ServiceSettingsUpdate(data *GlobalSettingsData) {
 }
 
 type GlobalSettingsData struct {
-	LinkInstructions                  string                    `json:"link_instructions"`     // Instructions for linking the headset
-	DisableLoginMessage               string                    `json:"disable_login_message"` // Disable the login, and show this message
-	ServiceGuildID                    string                    `json:"service_guild_id"`      // Central/Support guild ID
-	DisableStatisticsUpdates          bool                      `json:"disable_statistics_updates"`
-	DisableRatingsUpdates             bool                      `json:"disable_ratings_updates"`
-	Matchmaking                       GlobalMatchmakingSettings `json:"matchmaking"`
-	RemoteLogFilters                  map[string][]string       `json:"remote_logs_filter"` //	Ignore remote logs from specific servers
-	ReportURL                         string                    `json:"report_url"`         // URL to report issues
-	ServiceAuditChannelID             string                    `json:"service_audit_channel_id"`
-	ServiceDebugChannelID             string                    `json:"service_debug_channel_id"`
-	GlobalErrorChannelID              string                    `json:"service_error_channel_id"`
-	CommandLogChannelID               string                    `json:"service_command_log_channel_id"`
-	DiscordBotUserID                  string                    `json:"discord_bot_user_id"`
-	KickPlayersWithDisabledAlternates bool                      `json:"kick_players_with_disabled_alts"` // Kick players with disabled alts
-	version                           string
+	LinkInstructions                      string                    `json:"link_instructions"`     // Instructions for linking the headset
+	DisableLoginMessage                   string                    `json:"disable_login_message"` // Disable the login, and show this message
+	ServiceGuildID                        string                    `json:"service_guild_id"`      // Central/Support guild ID
+	DisableStatisticsUpdates              bool                      `json:"disable_statistics_updates"`
+	DisableRatingsUpdates                 bool                      `json:"disable_ratings_updates"`
+	Matchmaking                           GlobalMatchmakingSettings `json:"matchmaking"`
+	RemoteLogFilters                      map[string][]string       `json:"remote_logs_filter"` //	Ignore remote logs from specific servers
+	ReportURL                             string                    `json:"report_url"`         // URL to report issues
+	ServiceAuditChannelID                 string                    `json:"service_audit_channel_id"`
+	ServiceDebugChannelID                 string                    `json:"service_debug_channel_id"`
+	GlobalErrorChannelID                  string                    `json:"service_error_channel_id"`
+	CommandLogChannelID                   string                    `json:"service_command_log_channel_id"`
+	DiscordBotUserID                      string                    `json:"discord_bot_user_id"`
+	KickPlayersWithDisabledAlternates     bool                      `json:"kick_players_with_disabled_alts"` // Kick players with disabled alts
+	EnableContinuousGameserverHealthCheck bool                      `json:"enable_continuous_gameserver_health_check"`
+	version                               string
 }
 
 type GlobalMatchmakingSettings struct {
