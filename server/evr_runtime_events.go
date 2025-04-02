@@ -357,6 +357,9 @@ func (h *EventDispatch) handleUserLogin(ctx context.Context, logger runtime.Logg
 					return
 				}
 
+				slices.Sort(alternateUsernames)
+				alternateUsernames = slices.Compact(alternateUsernames)
+
 				// Send audit log message
 				content := fmt.Sprintf("<@%s> (%s) has disabled alternates, disconnecting session(s) in %d seconds.\n%s", account.CustomId, account.User.Username, int(kickDelay.Seconds()), strings.Join(alternateUsernames, ", "))
 				ServiceMessageLog(dg, serviceSettings.ServiceAuditChannelID, content)
