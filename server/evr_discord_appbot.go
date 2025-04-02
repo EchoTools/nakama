@@ -2585,7 +2585,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				go func() {
 					<-time.After(time.Second * 5)
 					// Just disconnect the user, wholesale
-					if count, err := DisconnectUserID(ctx, d.nk, targetUserID, false, false, false); err != nil {
+					if count, err := DisconnectUserID(ctx, d.nk, targetUserID, true, true, false); err != nil {
 						logger.Warn("Failed to disconnect user", zap.Error(err))
 					} else if count > 0 {
 						_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s disconnected player %s from match service (%d sessions).", user.Mention(), target.Mention(), count), false)
