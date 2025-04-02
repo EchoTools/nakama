@@ -33,7 +33,7 @@ func (m *LoginFailure) Stream(s *EasyStream) error {
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.UserId.PlatformCode) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.UserId.AccountId) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.StatusCode) },
-		func() error { return s.StreamString(&m.ErrorMessage, 160) },
+		func() error { return s.StreamNullTerminatedString(&m.ErrorMessage) },
 	})
 }
 
