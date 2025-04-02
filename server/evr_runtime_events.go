@@ -363,7 +363,7 @@ func (h *EventDispatch) handleUserLogin(ctx context.Context, logger runtime.Logg
 
 				logger.WithField("delay", kickDelay).Info("kicking (with delay) user %s has disabled alternates", userID)
 				<-time.After(kickDelay)
-				if c, err := DisconnectUserID(ctx, h.nk, userID, false); err != nil {
+				if c, err := DisconnectUserID(ctx, h.nk, userID, true, true, false); err != nil {
 					logger.Error("failed to disconnect user: %v", err)
 				} else {
 					logger.Info("user %s disconnected: %v sessions", userID, c)
