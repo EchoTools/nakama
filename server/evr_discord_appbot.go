@@ -2176,12 +2176,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			serverLocation := "Unknown"
 
-			serverExtIP := label.GameServer.Endpoint.ExternalIP.String()
-			if ipInfo, err := d.ipInfoCache.Get(ctx, serverExtIP); err != nil {
-				logger.Error("Failed to get IPQS data", zap.Error(err))
-			} else {
-				serverLocation = ipInfo.Region()
-			}
+			serverLocation = label.GameServer.LocationRegionCode(true, true)
 
 			// local the guild name
 			guild, err := s.Guild(i.GuildID)
