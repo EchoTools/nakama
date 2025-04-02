@@ -78,6 +78,7 @@ type LoginHistory struct {
 	XPIs                   map[string]time.Time               `json:"xpis"`    // list of XPIs
 	ClientIPs              map[string]time.Time               `json:"client_ips"`
 	AuthorizedIPs          map[string]time.Time               `json:"authorized_client_ips"`
+	DeniedClientAddresses  []string                           `json:"denied_client_addrs"` // list of denied IPs
 	PendingAuthorizations  map[string]*LoginHistoryEntry      `json:"pending_authorizations"`
 	SecondDegreeAlternates []string                           `json:"second_degree"`
 	AlternateMap           map[string][]*AlternateSearchMatch `json:"alternate_accounts"` // map of alternate user IDs and what they have in common
@@ -98,7 +99,7 @@ func (LoginHistory) StorageIndex() *StorageIndexMeta {
 		Name:           LoginHistoryCacheIndex,
 		Collection:     LoginStorageCollection,
 		Key:            LoginHistoryStorageKey,
-		Fields:         []string{"cache", "xpis", "client_ips", "second_order", "alternate_matches"},
+		Fields:         []string{"cache", "xpis", "client_ips", "second_order", "alternate_matches", "denied_client_addrs"},
 		SortableFields: nil,
 		MaxEntries:     1000000,
 		IndexOnly:      false,
@@ -112,6 +113,7 @@ func NewLoginHistory(userID string) *LoginHistory {
 		XPIs:                   make(map[string]time.Time),
 		ClientIPs:              make(map[string]time.Time),
 		AuthorizedIPs:          make(map[string]time.Time),
+		DeniedClientAddresses:  make([]string, 0),
 		PendingAuthorizations:  make(map[string]*LoginHistoryEntry),
 		SecondDegreeAlternates: make([]string, 0),
 		AlternateMap:           make(map[string][]*AlternateSearchMatch),
@@ -193,12 +195,15 @@ func (h *LoginHistory) AuthorizeIP(ip string) bool {
 	return isNew
 }
 
-func (h *LoginHistory) IsAuthorizedIP(ip string) bool {
-	if h.AuthorizedIPs == nil {
-		return false
+func (h *LoginHistory) IsAuthorizedIP(ip string) (isAuthorized bool) {
+
+	if h.AuthorizedIPs != nil {
+		if _, found := h.AuthorizedIPs[ip]; found {
+			isAuthorized = true
+		}
 	}
-	_, found := h.AuthorizedIPs[ip]
-	return found
+
+	return isAuthorized
 }
 
 func (h *LoginHistory) AddPendingAuthorizationIP(xpid evr.EvrId, clientIP string, loginData *evr.LoginProfile) *LoginHistoryEntry {
@@ -331,6 +336,10 @@ func (h *LoginHistory) rebuildCache() {
 			}
 		}
 	}
+	if h.DeniedClientAddresses == nil {
+		h.DeniedClientAddresses = make([]string, 0)
+	}
+	h.Cache = append(h.Cache, h.DeniedClientAddresses...)
 
 	// Sort and compact the cache
 	slices.Sort(h.Cache)

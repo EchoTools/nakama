@@ -95,6 +95,10 @@ func NewEVRAccount(account *api.Account) (*EVRAccount, error) {
 	return a, nil
 }
 
+func (e EVRAccount) UserID() string {
+	return e.User.Id
+}
+
 func (e EVRAccount) IsDisabled() bool {
 	return !e.DisableTime.IsZero()
 }
