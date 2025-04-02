@@ -615,14 +615,16 @@ func (p *EvrPipeline) gameserverLobbyEntrantRemoved(ctx context.Context, logger 
 		return nil
 	}
 	if presence != nil {
+		// Leave the entrant first
+		if err := p.nk.StreamUserLeave(StreamModeEntrant, message.EntrantID.String(), "", matchID.Node, presence.GetUserId(), presence.GetSessionId()); err != nil {
+			logger.Warn("Failed to leave entrant session stream", zap.Error(err))
+		}
+
 		// Trigger MatchLeave.
 		if err := p.nk.StreamUserLeave(StreamModeMatchAuthoritative, matchID.UUID.String(), "", matchID.Node, presence.GetUserId(), presence.GetSessionId()); err != nil {
 			logger.Warn("Failed to leave match stream", zap.Error(err))
 		}
 
-		if err := p.nk.StreamUserLeave(StreamModeEntrant, message.EntrantID.String(), "", matchID.Node, presence.GetUserId(), presence.GetSessionId()); err != nil {
-			logger.Warn("Failed to leave entrant session stream", zap.Error(err))
-		}
 	}
 
 	return nil

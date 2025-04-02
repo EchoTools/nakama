@@ -931,14 +931,24 @@ func (m *EvrMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db 
 	}
 
 	if state.server != nil {
+		entrantIDs := make([]uuid.UUID, 0, len(state.presenceMap))
+
 		for _, mp := range state.presenceMap {
 			logger := logger.WithFields(map[string]any{
 				"uid": mp.GetUserId(),
 				"sid": mp.GetSessionId(),
 			})
 			logger.Warn("Match shutting down, disconnecting player.")
-			if err := nk.StreamUserKick(StreamModeMatchAuthoritative, mp.EntrantID(state.ID).String(), "", mp.GetNodeId(), mp); err != nil {
-				logger.Error("Failed to kick user from stream.")
+			for _, p := range state.presenceMap {
+				if mp.EvrID.Equals(p.EvrID) {
+					entrantIDs = append(entrantIDs, p.EntrantID(state.ID))
+				}
+			}
+		}
+
+		if len(entrantIDs) > 0 {
+			if err := m.kickEntrants(ctx, logger, dispatcher, state, entrantIDs...); err != nil {
+				logger.Error("Failed to kick player: %v", err)
 			}
 		}
 	}
@@ -962,6 +972,32 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 	}
 
 	switch signal.OpCode {
+	case SignalKickEntrants:
+		var data SignalKickEntrantsPayload
+
+		if err := json.Unmarshal(signal.Payload, &data); err != nil {
+			return state, SignalResponse{Message: fmt.Sprintf("failed to unmarshal shutdown payload: %v", err)}.String()
+		}
+		entrantIDs := make([]uuid.UUID, 0, len(data.UserIDs))
+		for _, e := range data.UserIDs {
+			for _, p := range state.presenceMap {
+				if p.UserID == e {
+					entrantIDs = append(entrantIDs, p.EntrantID(state.ID))
+				}
+			}
+		}
+
+		if len(entrantIDs) > 0 {
+			if err := m.kickEntrants(ctx, logger, dispatcher, state, entrantIDs...); err != nil {
+				return state, SignalResponse{Message: fmt.Sprintf("failed to kick player: %v", err)}.String()
+			}
+		}
+
+		logger.WithFields(map[string]any{
+			"requested_user_ids": data.UserIDs,
+			"entrant_ids":        entrantIDs,
+		}).Debug("Kicking players from the match.")
+
 	case SignalShutdown:
 
 		var data SignalShutdownPayload
@@ -978,15 +1014,24 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		}
 
 		if data.DisconnectUsers {
+			entrantIDs := make([]uuid.UUID, 0, len(state.presenceMap))
 			for _, mp := range state.presenceMap {
 				logger := logger.WithFields(map[string]any{
 					"uid": mp.GetUserId(),
 					"sid": mp.GetSessionId(),
 				})
-				logger.Warn("Match shutting down, disconnecting player.")
-				if err := nk.StreamUserKick(StreamModeMatchAuthoritative, mp.EntrantID(state.ID).String(), "", mp.GetNodeId(), mp); err != nil {
-					logger.Error("Failed to kick user from stream.")
+
+				for _, p := range state.presenceMap {
+					entrantIDs = append(entrantIDs, p.EntrantID(state.ID))
 				}
+
+				if len(entrantIDs) > 0 {
+					if err := m.kickEntrants(ctx, logger, dispatcher, state, entrantIDs...); err != nil {
+						return state, SignalResponse{Message: fmt.Sprintf("failed to kick player: %v", err)}.String()
+					}
+				}
+
+				logger.Warn("Match shutting down, disconnecting players.")
 			}
 		}
 

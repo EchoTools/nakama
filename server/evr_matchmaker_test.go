@@ -922,6 +922,7 @@ func TestCharacterizeMatchmakerOverload(t *testing.T) {
 OuterLoop:
 	for i := 0; i < len(extracts); i++ {
 		for _, p := range extracts[i].Presences {
+			skipUsernames := []string{}
 			if slices.Contains(skipUsernames, p.Username) {
 				extracts = slices.Delete(extracts, i, i+1)
 				i--
