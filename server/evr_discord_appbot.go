@@ -2490,26 +2490,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			cnt := 0
 			results := make([]string, 0, len(presences))
 			var timeoutMessage string
-			if !timeoutExpiry.IsZero() {
-				if time.Now().After(timeoutExpiry) {
-					results = append(results, "timeout removed")
-				} else {
-					results = append(results, fmt.Sprintf("timeout expires on <t:%d:F> (<t:%d:R>)", timeoutExpiry.UTC().Unix(), timeoutExpiry.UTC().Unix()))
-				}
-				gg := d.guildGroupRegistry.Get(groupID)
-				if gg == nil {
-					return errors.New("failed to get guild group")
-				}
-
-				gg.TimeoutAdd(targetUserID, timeoutExpiry, false)
-
-				if err := GuildGroupStore(ctx, nk, gg); err != nil {
-					return errors.New("failed to store guild group")
-				}
-
-			}
 
 			doDisconnect := false
+			timeoutApplied := false
 
 			for _, p := range presences {
 
@@ -2529,7 +2512,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				var allowed bool
 				var isEnforcer bool
 
-				if gg, err := GuildGroupLoad(ctx, nk, label.GetGroupID().String()); err != nil {
+				gg, err := GuildGroupLoad(ctx, nk, label.GetGroupID().String())
+				if err != nil {
 					return errors.New("failed to load guild group")
 				} else if gg.IsEnforcer(userID) {
 					isEnforcer = true
@@ -2548,6 +2532,21 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				if isEnforcer || isGlobalOperator {
 					doDisconnect = true
 					allowed = true
+
+					// Only add the timeout once
+					if !timeoutExpiry.IsZero() && !timeoutApplied {
+						if time.Now().After(timeoutExpiry) {
+							results = append(results, "timeout removed")
+						} else {
+							results = append(results, fmt.Sprintf("timeout expires on <t:%d:F> (<t:%d:R>)", timeoutExpiry.UTC().Unix(), timeoutExpiry.UTC().Unix()))
+						}
+
+						gg.TimeoutAdd(targetUserID, timeoutExpiry, false)
+
+						if err := GuildGroupStore(ctx, nk, gg); err != nil {
+							return errors.New("failed to store guild group")
+						}
+					}
 				}
 
 				if !allowed {
