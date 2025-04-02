@@ -262,7 +262,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		}
 	}
 
-	if gg.MinimumAccountAgeDays > 0 && gg.IsAccountAgeBypass(userID) {
+	if gg.MinimumAccountAgeDays > 0 && !gg.IsAccountAgeBypass(userID) {
 		// Check the account creation date.
 		discordID, err := GetDiscordIDByUserID(ctx, p.db, userID)
 		if err != nil {
