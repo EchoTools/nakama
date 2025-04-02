@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"math/rand"
 	"slices"
 	"sort"
@@ -498,38 +499,61 @@ func AllocateGameServer(ctx context.Context, logger runtime.Logger, nk runtime.N
 		}
 	}
 
+	// Get all the game servers with matching regions
+	regionSet := make(map[string]struct{}, len(regions))
+	for _, region := range regions {
+		regionSet[region] = struct{}{}
+	}
+
+	regionMatches := make(map[MatchID]bool, len(labels))
+OuterLabelLoop:
+	for _, label := range labels {
+		for _, region := range label.GameServer.RegionCodes {
+			if region == "default" {
+				continue
+			}
+			if _, ok := regionSet[region]; ok {
+				regionMatches[label.ID] = true
+				continue OuterLabelLoop
+			}
+		}
+	}
+
+	// Remove labels with a rating of -999
+	for i := 0; i < len(labels); i++ {
+		label := labels[i]
+		rating, ok := globalSettings.ServerRatings.ByExternalIP[label.GameServer.Endpoint.ExternalIP.String()]
+		if ok && rating == -999 {
+			labels = slices.Delete(labels, i, i+1)
+			i--
+		}
+	}
+
 	// Sort the labels
 	slices.SortStableFunc(labels, func(a, b *MatchLabel) int {
 
-		// Sort by whether the server is a priority server
-		if a.GameServer.IsPriorityFor(settings.Mode) && !b.GameServer.IsPriorityFor(settings.Mode) {
-			return -1
-		}
-		if a.GameServer.IsPriorityFor(settings.Mode) && !b.GameServer.IsPriorityFor(settings.Mode) {
-			return 1
-		}
-
-		ipA := a.GameServer.Endpoint.ExternalIP.String()
-		ipB := b.GameServer.Endpoint.ExternalIP.String()
-
-		rttA := rttsByExternalIP[ipA]
-		rttB := rttsByExternalIP[ipB]
-
-		// Sort whether it's on the list or not
-		if rttA != 0 && rttB == 0 {
-			return -1
-		}
-
-		if rttA == 0 && rttB != 0 {
-			return 1
-		}
-
-		// Only apply the next sort if the servers are more than 40ms from each other.
-		if rttA > rttB+40 || rttA < rttB-40 {
+		var (
+			ipA = a.GameServer.Endpoint.ExternalIP.String()
+			ipB = b.GameServer.Endpoint.ExternalIP.String()
 
 			// Round to the nearest 20ms
-			rttA = (rttA + 10) / 20 * 20
-			rttB = (rttB + 10) / 20 * 20
+			rttA = (rttsByExternalIP[ipA] + 10) / 20 * 20
+			rttB = (rttsByExternalIP[ipB] + 10) / 20 * 20
+
+			regionMatchesA = regionMatches[a.ID]
+			regionMatchesB = regionMatches[b.ID]
+		)
+
+		// Sort by whether the server is in the region
+		if regionMatchesA && !regionMatchesB {
+			return -1
+		}
+		if !regionMatchesA && regionMatchesB {
+			return 1
+		}
+
+		// If there is a large difference in RTT, sort by RTT
+		if math.Abs(float64(rttA-rttB)) > 30 {
 
 			if rttA < rttB {
 				return -1
@@ -540,14 +564,22 @@ func AllocateGameServer(ctx context.Context, logger runtime.Logger, nk runtime.N
 			}
 		}
 
+		// Sort by static rating of servers
 		ratingA, ok := globalSettings.ServerRatings.ByExternalIP[a.GameServer.Endpoint.ExternalIP.String()]
 		if !ok {
-			ratingA = 0
+			// Check for a rating by operator ID
+			ratingA, ok = globalSettings.ServerRatings.ByOperatorID[a.GameServer.OperatorID.String()]
+			if !ok {
+				ratingA = 0
+			}
 		}
 
 		ratingB, ok := globalSettings.ServerRatings.ByExternalIP[b.GameServer.Endpoint.ExternalIP.String()]
 		if !ok {
-			ratingB = 0
+			ratingB, ok = globalSettings.ServerRatings.ByOperatorID[b.GameServer.OperatorID.String()]
+			if !ok {
+				ratingB = 0
+			}
 		}
 
 		if ratingA > ratingB {
@@ -555,6 +587,23 @@ func AllocateGameServer(ctx context.Context, logger runtime.Logger, nk runtime.N
 		}
 
 		if ratingA < ratingB {
+			return 1
+		}
+
+		// Sort by whether the server is a priority server
+		if a.GameServer.IsPriorityFor(settings.Mode) && !b.GameServer.IsPriorityFor(settings.Mode) {
+			return -1
+		}
+		if a.GameServer.IsPriorityFor(settings.Mode) && !b.GameServer.IsPriorityFor(settings.Mode) {
+			return 1
+		}
+
+		// Sort by whether the server is reachable or not
+		if rttA != 0 && rttB == 0 {
+			return -1
+		}
+
+		if rttA == 0 && rttB != 0 {
 			return 1
 		}
 
