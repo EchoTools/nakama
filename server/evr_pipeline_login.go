@@ -447,8 +447,28 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 		}
 	}
 
+	// Check if the IP is on the deny list.
+	if histories, err := LoginDeniedClientIPAddressSearch(ctx, p.nk, session.clientIP); err != nil {
+		metricsTags["error"] = "failed_ip_denylist_search"
+		return fmt.Errorf("failed to search for denied client address: %w", err)
+	} else if len(histories) > 0 {
+
+		// The IP is on the deny list.
+		logger.Info("Attempted login with IP address that is on the deny list.",
+			zap.String("xpid", params.xpID.Token()),
+			zap.String("client_ip", session.clientIP),
+			zap.String("uid", params.account.User.Id),
+			zap.Any("login_payload", params.loginPayload))
+
+		metricsTags["error"] = "ip_deny_list"
+		return AccountDisabledError{
+			message:   params.accountMetadata.DisabledAccountMessage,
+			reportURL: ServiceSettings().ReportURL,
+		}
+	}
+
 	// Require IP verification, if the session is not authenticated.
-	if authorized := loginHistory.IsAuthorizedIP(session.clientIP); authorized || params.IsWebsocketAuthenticated {
+	if isAuthorized := loginHistory.IsAuthorizedIP(session.clientIP); isAuthorized || params.IsWebsocketAuthenticated {
 
 		// Update the last used time.
 		if isNew := loginHistory.AuthorizeIP(session.clientIP); isNew {

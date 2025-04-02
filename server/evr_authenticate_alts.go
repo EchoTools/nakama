@@ -79,6 +79,37 @@ func LoginAlternateSearch(ctx context.Context, nk runtime.NakamaModule, loginHis
 	return matches, nil
 }
 
+func LoginDeniedClientIPAddressSearch(ctx context.Context, nk runtime.NakamaModule, clientIPAddress string) (map[string]*LoginHistory, error) {
+
+	query := fmt.Sprintf("+value.denied_client_addrs:/%s/", Query.Escape(clientIPAddress))
+	// Perform the storage list operation
+
+	cursor := ""
+	histories := make(map[string]*LoginHistory)
+	for {
+		result, cursor, err := nk.StorageIndexList(ctx, SystemUserID, LoginHistoryCacheIndex, query, 10, nil, cursor)
+		if err != nil {
+			return nil, fmt.Errorf("error listing display name history: %w", err)
+		}
+
+		for _, obj := range result.Objects {
+			var history LoginHistory
+			if err := json.Unmarshal([]byte(obj.Value), &history); err != nil {
+				return nil, fmt.Errorf("error unmarshalling display name history: %w", err)
+			}
+			history.userID = obj.UserId
+			history.version = obj.Version
+			histories[obj.UserId] = &history
+		}
+
+		if cursor == "" {
+			break
+		}
+	}
+	return histories, nil
+
+}
+
 func loginHistoryCompare(a, b *LoginHistory) []*AlternateSearchMatch {
 	matches := make([]*AlternateSearchMatch, 0)
 	for _, aEntry := range a.History {
