@@ -461,6 +461,7 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 			zap.Any("login_payload", params.loginPayload))
 
 		metricsTags["error"] = "ip_deny_list"
+
 		return AccountDisabledError{
 			message:   params.accountMetadata.DisabledAccountMessage,
 			reportURL: ServiceSettings().ReportURL,

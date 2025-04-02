@@ -2360,21 +2360,28 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 					// Parse minutes, hours, days, and weeks (m, h, d, w)
 					if duration != "" {
-						unit := time.Minute
-						switch duration[len(duration)-1] {
-						case 'm':
-							unit = time.Minute
-						case 'h':
-							unit = time.Hour
-						case 'd':
-							unit = 24 * time.Hour
-						case 'w':
-							unit = 7 * 24 * time.Hour
-						}
-						if d, err := strconv.Atoi(duration[:len(duration)-1]); err == nil {
-							timeoutExpiry = time.Now().Add(time.Duration(d) * unit)
+						var unit time.Duration
+						if duration == "0" {
+							timeoutExpiry = time.Now()
 						} else {
-							return fmt.Errorf("invalid duration format: %w", err)
+							switch duration[len(duration)-1] {
+							case 'm':
+								unit = time.Minute
+							case 'h':
+								unit = time.Hour
+							case 'd':
+								unit = 24 * time.Hour
+							case 'w':
+								unit = 7 * 24 * time.Hour
+							default:
+								duration += "m"
+								unit = time.Minute
+							}
+							if d, err := strconv.Atoi(duration[:len(duration)-1]); err == nil {
+								timeoutExpiry = time.Now().Add(time.Duration(d) * unit)
+							} else {
+								return fmt.Errorf("invalid duration format: %w", err)
+							}
 						}
 					}
 				}
@@ -2415,7 +2422,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 							return err
 						}
 						_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("(trigger-cv) %s kicked player %s from [%s](https://echo.taxi/spark://c/%s) match.", user.Mention(), target.Mention(), label.Mode.String(), strings.ToUpper(label.ID.UUID.String())), false)
-						disconnectDelay = 15
+						disconnectDelay = 3
 					}
 
 					go func() {
@@ -2462,21 +2469,28 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 					// Parse minutes, hours, days, and weeks (m, h, d, w)
 					if duration != "" {
-						unit := time.Minute
-						switch duration[len(duration)-1] {
-						case 'm':
-							unit = time.Minute
-						case 'h':
-							unit = time.Hour
-						case 'd':
-							unit = 24 * time.Hour
-						case 'w':
-							unit = 7 * 24 * time.Hour
-						}
-						if d, err := strconv.Atoi(duration[:len(duration)-1]); err == nil {
-							timeoutExpiry = time.Now().Add(time.Duration(d) * unit)
+						var unit time.Duration
+						if duration == "0" {
+							timeoutExpiry = time.Now()
 						} else {
-							return fmt.Errorf("invalid duration format: %w", err)
+							switch duration[len(duration)-1] {
+							case 'm':
+								unit = time.Minute
+							case 'h':
+								unit = time.Hour
+							case 'd':
+								unit = 24 * time.Hour
+							case 'w':
+								unit = 7 * 24 * time.Hour
+							default:
+								duration += "m"
+								unit = time.Minute
+							}
+							if d, err := strconv.Atoi(duration[:len(duration)-1]); err == nil {
+								timeoutExpiry = time.Now().Add(time.Duration(d) * unit)
+							} else {
+								return fmt.Errorf("invalid duration format: %w", err)
+							}
 						}
 					}
 				}
@@ -2509,8 +2523,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					continue
 				}
 
-				var allowed bool
 				var isEnforcer bool
+				permissions := make([]string, 0)
 
 				gg, err := GuildGroupLoad(ctx, nk, label.GetGroupID().String())
 				if err != nil {
@@ -2521,18 +2535,24 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 				// Check if the user is the match owner of a private match
 				if label.SpawnedBy == userID && label.IsPrivate() {
-					allowed = true
+					permissions = append(permissions, "match owner")
 				}
 
 				// Check if the user is the game server operator
 				if label.GameServer.OperatorID.String() == userID {
-					allowed = true
+					permissions = append(permissions, "game server operator")
+				}
+
+				if isGlobalOperator {
+					doDisconnect = true
+					permissions = append(permissions, "global operator")
+				}
+				if isEnforcer {
+					doDisconnect = true
+					permissions = append(permissions, "enforcer")
 				}
 
 				if isEnforcer || isGlobalOperator {
-					doDisconnect = true
-					allowed = true
-
 					// Only add the timeout once
 					if !timeoutExpiry.IsZero() && !timeoutApplied {
 						if time.Now().After(timeoutExpiry) {
@@ -2549,12 +2569,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					}
 				}
 
-				if !allowed {
+				if len(permissions) == 0 {
 					results = append(results, "user's match is not from this guild")
 					continue
 				}
-
-				cnt += 1
 
 				// Kick the player from the match
 				if err := KickPlayerFromMatch(ctx, d.nk, label.ID, targetUserID); err != nil {
@@ -2562,7 +2580,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					continue
 				}
 
-				results = append(results, fmt.Sprintf("kicked from [%s](https://echo.taxi/spark://c/%s) session. (%s)", label.Mode.String(), strings.ToUpper(label.ID.UUID.String()), reason))
+				results = append(results, fmt.Sprintf("kicked from [%s](https://echo.taxi/spark://c/%s) session. (%s) [%s]", label.Mode.String(), strings.ToUpper(label.ID.UUID.String()), reason, strings.Join(permissions, ", ")))
 
 				cnt++
 
@@ -2580,7 +2598,11 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}()
 			}
 
-			_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s used actions summary for %s (%s): %s", user.Mention(), target.Mention(), target.Username, strings.Join(results, "; ")), false)
+			if cnt == 0 {
+				return simpleInteractionResponse(s, i, "No sessions found.")
+			}
+
+			_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s `kick-player` actions summary for %s (%s): %s", user.Mention(), target.Mention(), target.Username, strings.Join(results, ";\n ")), false)
 			return simpleInteractionResponse(s, i, fmt.Sprintf("[%d sessions found]%s\n%s", cnt, timeoutMessage, strings.Join(results, "\n")))
 
 		},

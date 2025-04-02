@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 )
 
@@ -23,6 +24,7 @@ const (
 	SignalPruneUnderutilized
 	SignalShutdown
 	SignalPlayerUpdate
+	SignalKickEntrants
 )
 
 type SignalEnvelope struct {
@@ -85,6 +87,10 @@ type SignalShutdownPayload struct {
 	GraceSeconds         int  `json:"grace_seconds"`
 	DisconnectGameServer bool `json:"disconnect_game_server"`
 	DisconnectUsers      bool `json:"disconnect_users"`
+}
+
+type SignalKickEntrantsPayload struct {
+	UserIDs []uuid.UUID `json:"user_ids"`
 }
 
 type SignalReserveSlotsPayload struct {

@@ -581,10 +581,16 @@ func KickPlayerFromMatch(ctx context.Context, nk runtime.NakamaModule, matchID M
 			continue
 		}
 
-		if err = nk.StreamUserKick(StreamModeMatchAuthoritative, matchID.UUID.String(), "", matchID.Node, presence); err != nil {
-			return fmt.Errorf("failed to disconnect session `%s`: %w", presence.GetSessionId(), err)
+		signal := SignalKickEntrantsPayload{
+			UserIDs: []uuid.UUID{uuid.FromStringOrNil(userID)},
 		}
 
+		data := NewSignalEnvelope(userID, SignalKickEntrants, signal).String()
+
+		// Signal the match to kick the entrants
+		if _, err := nk.MatchSignal(ctx, matchID.String(), data); err != nil {
+			return fmt.Errorf("failed to signal match: %w", err)
+		}
 	}
 
 	return nil
