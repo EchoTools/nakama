@@ -73,18 +73,19 @@ func (h *LoginHistoryEntry) ItemMap() map[string]struct{} {
 }
 
 type LoginHistory struct {
-	History                map[string]*LoginHistoryEntry      `json:"history"` // map[deviceID]DeviceHistoryEntry
-	Cache                  []string                           `json:"cache"`   // list of IP addresses, EvrID's, HMD Serial Numbers, and System Data
-	XPIs                   map[string]time.Time               `json:"xpis"`    // list of XPIs
-	ClientIPs              map[string]time.Time               `json:"client_ips"`
-	AuthorizedIPs          map[string]time.Time               `json:"authorized_client_ips"`
-	DeniedClientAddresses  []string                           `json:"denied_client_addrs"` // list of denied IPs
-	PendingAuthorizations  map[string]*LoginHistoryEntry      `json:"pending_authorizations"`
-	SecondDegreeAlternates []string                           `json:"second_degree"`
-	AlternateMap           map[string][]*AlternateSearchMatch `json:"alternate_accounts"` // map of alternate user IDs and what they have in common
-	GroupNotifications     map[string]map[string]time.Time    `json:"notified_groups"`    // list of groups that have been notified of this alternate login
-	userID                 string                             // user ID
-	version                string                             // storage record version
+	History                  map[string]*LoginHistoryEntry      `json:"history"` // map[deviceID]DeviceHistoryEntry
+	Cache                    []string                           `json:"cache"`   // list of IP addresses, EvrID's, HMD Serial Numbers, and System Data
+	XPIs                     map[string]time.Time               `json:"xpis"`    // list of XPIs
+	ClientIPs                map[string]time.Time               `json:"client_ips"`
+	AuthorizedIPs            map[string]time.Time               `json:"authorized_client_ips"`
+	DeniedClientAddresses    []string                           `json:"denied_client_addrs"` // list of denied IPs
+	PendingAuthorizations    map[string]*LoginHistoryEntry      `json:"pending_authorizations"`
+	SecondDegreeAlternates   []string                           `json:"second_degree"`
+	AlternateMap             map[string][]*AlternateSearchMatch `json:"alternate_accounts"`         // map of alternate user IDs and what they have in common
+	GroupNotifications       map[string]map[string]time.Time    `json:"notified_groups"`            // list of groups that have been notified of this alternate login
+	IgnoreDisabledAlternates bool                               `json:"ignore_disabled_alternates"` // Ignore disabled alternates
+	userID                   string                             // user ID
+	version                  string                             // storage record version
 }
 
 func (LoginHistory) StorageID() StorageID {
@@ -309,6 +310,10 @@ func (h *LoginHistory) UpdateAlternates(ctx context.Context, nk runtime.NakamaMo
 
 	slices.Sort(h.SecondDegreeAlternates)
 	h.SecondDegreeAlternates = slices.Compact(h.SecondDegreeAlternates)
+
+	if h.IgnoreDisabledAlternates {
+		hasDisabledAlts = false
+	}
 
 	return hasDisabledAlts, nil
 }
