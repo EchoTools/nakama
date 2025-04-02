@@ -590,12 +590,28 @@ func KickPlayerFromMatch(ctx context.Context, nk runtime.NakamaModule, matchID M
 	return nil
 }
 
-func DisconnectUserID(ctx context.Context, nk runtime.NakamaModule, userID string, includeGameServers bool) (int, error) {
-	// Get the user's presences
+func DisconnectUserID(ctx context.Context, nk runtime.NakamaModule, userID string, kickFirst bool, includeLogin bool, includeGameserver bool) (int, error) {
 
+	if kickFirst {
+		// Kick the user from any matches they are in
+		matchID, _, err := GetMatchIDBySessionID(nk, uuid.FromStringOrNil(userID))
+		if err != nil {
+			return 0, fmt.Errorf("failed to get match ID: %w", err)
+		}
+
+		if !matchID.IsNil() {
+			if err := KickPlayerFromMatch(ctx, nk, matchID, userID); err != nil {
+				return 0, fmt.Errorf("failed to kick player from match: %w", err)
+			}
+		}
+	}
+
+	// Get the user's presences
 	labels := []string{StreamLabelMatchService}
-	if includeGameServers {
-		labels = append(labels, StreamLabelGameServerService, StreamLabelLoginService)
+	if includeLogin {
+		labels = append(labels, StreamLabelLoginService)
+	} else if includeGameserver {
+		labels = append(labels, StreamLabelGameServerService)
 	}
 
 	cnt := 0
@@ -607,9 +623,15 @@ func DisconnectUserID(ctx context.Context, nk runtime.NakamaModule, userID strin
 		}
 
 		for _, presence := range presences {
-			if err = nk.SessionDisconnect(ctx, presence.GetSessionId(), runtime.PresenceReasonDisconnect); err != nil {
-				return cnt, fmt.Errorf("failed to disconnect session `%s`: %w", presence.GetSessionId(), err)
-			}
+
+			// Add a delay to allow the match to process the kick
+			go func() {
+				if kickFirst {
+					<-time.After(5 * time.Second)
+				}
+				_ = nk.SessionDisconnect(ctx, presence.GetSessionId(), runtime.PresenceReasonDisconnect)
+			}()
+
 			cnt++
 		}
 	}

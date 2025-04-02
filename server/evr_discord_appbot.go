@@ -2421,7 +2421,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					go func() {
 						<-time.After(time.Second * time.Duration(disconnectDelay))
 						// Just disconnect the user, wholesale
-						if _, err := DisconnectUserID(ctx, d.nk, targetUserID, false); err != nil {
+						if _, err := DisconnectUserID(ctx, d.nk, targetUserID, false, false, false); err != nil {
 							logger.Warn("Failed to disconnect user", zap.Error(err))
 						}
 					}()
@@ -2573,13 +2573,14 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				go func() {
 					<-time.After(time.Second * 5)
 					// Just disconnect the user, wholesale
-					if count, err := DisconnectUserID(ctx, d.nk, targetUserID, false); err != nil {
+					if count, err := DisconnectUserID(ctx, d.nk, targetUserID, false, false, false); err != nil {
 						logger.Warn("Failed to disconnect user", zap.Error(err))
 					} else if count > 0 {
 						_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s disconnected player %s from match service (%d sessions).", user.Mention(), target.Mention(), count), false)
 					}
 				}()
 			}
+
 			_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s used actions summary for %s (%s): %s", user.Mention(), target.Mention(), target.Username, strings.Join(results, "; ")), false)
 			return simpleInteractionResponse(s, i, fmt.Sprintf("[%d sessions found]%s\n%s", cnt, timeoutMessage, strings.Join(results, "\n")))
 
