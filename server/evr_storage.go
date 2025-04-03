@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 
 	"github.com/heroiclabs/nakama-common/runtime"
 	"google.golang.org/grpc/codes"
@@ -55,24 +56,30 @@ func StorageRead(ctx context.Context, nk runtime.NakamaModule, userID string, ds
 	if dst == nil {
 		return status.Errorf(codes.InvalidArgument, "dst is nil")
 	}
-	storageID := dst.StorageMeta()
+
+	// Check if the object is a pointer.
+	if dstValue := reflect.ValueOf(dst); dstValue.Kind() != reflect.Ptr {
+		return status.Errorf(codes.InvalidArgument, "dst is not a pointer")
+	}
+
+	meta := dst.StorageMeta()
 
 	var version string
 	objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
 		{
-			Collection: storageID.Collection,
-			Key:        storageID.Key,
+			Collection: meta.Collection,
+			Key:        meta.Key,
 			UserID:     userID,
 		},
 	})
 	if err != nil {
-		return status.Errorf(codes.Internal, "failed to read %s/%s: %s", userID, storageID.String(), err)
+		return status.Errorf(codes.Internal, "failed to read %s/%s: %w", userID, meta.String(), err)
 	}
 
 	if len(objs) != 0 {
 
 		if err = json.Unmarshal([]byte(objs[0].GetValue()), dst); err != nil {
-			return status.Errorf(codes.Internal, "failed to unmarshal %s/%s: %s", userID, storageID.String(), err)
+			return status.Errorf(codes.Internal, "failed to unmarshal %s/%s: %w", userID, meta.String(), err)
 		}
 
 		version = objs[0].GetVersion()
@@ -86,16 +93,19 @@ func StorageRead(ctx context.Context, nk runtime.NakamaModule, userID string, ds
 			}
 
 			if version, err = StorageWrite(ctx, nk, userID, dst); err != nil {
-				return status.Errorf(codes.Internal, "failed to create %s/%s: %s", userID, storageID.String(), err)
+				return status.Errorf(codes.Internal, "failed to create %s/%s: %w", userID, meta.String(), err)
 			}
 
 		} else {
-			return status.Errorf(codes.NotFound, "no %s/%s found", userID, storageID.String())
+			return status.Errorf(codes.NotFound, "no %s/%s found", userID, meta.String())
 		}
 	}
 
 	// Set the new object version
 	if obj, ok := dst.(VersionedStorable); ok {
+		if version == "" {
+			version = "*" // This is a special value that indicates the object is new and has no version.
+		}
 		obj.SetStorageVersion(version)
 	}
 
@@ -121,7 +131,7 @@ func StorageWrite(ctx context.Context, nk runtime.NakamaModule, userID string, s
 		},
 	})
 	if err != nil {
-		return "", status.Errorf(codes.Internal, "failed to write %s/%s: %s", userID, meta.String(), err.Error())
+		return "", status.Errorf(codes.Internal, "failed to write %s/%s: %w", userID, meta.String(), err.Error())
 	}
 
 	if obj, ok := src.(VersionedStorable); ok {
