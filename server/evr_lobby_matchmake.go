@@ -255,17 +255,17 @@ func LatencyCmp[T int | time.Duration](i, j T, mround T) bool {
 }
 
 type MatchmakingSettings struct {
-	DisableArenaBackfill     bool    `json:"disable_arena_backfill"`    // Disable backfilling for arena matches
-	BackfillQueryAddon       string  `json:"backfill_query_addon"`      // Additional query to add to the matchmaking query
-	LobbyBuilderQueryAddon   string  `json:"lobby_builder_query_addon"` // Additional query to add to the matchmaking query
-	CreateQueryAddon         string  `json:"create_query_addon"`        // Additional query to add to the matchmaking query
-	MatchmakerQueryAddon     string  `json:"matchmaker_query_addon"`    // Additional query to add to the matchmaking query
-	LobbyGroupName           string  `json:"group_id"`                  // Group ID to matchmake with
-	NextMatchID              MatchID `json:"next_match_id"`             // Try to join this match immediately when finding a match
-	NextMatchRole            string  `json:"next_match_role"`           // The role to join the next match as
-	NextMatchDiscordID       string  `json:"next_match_discord_id"`     // The discord ID to join the next match as
-	StaticBaseRankPercentile float64 `json:"static_rank_percentile"`    // The static rank percentile to use
-	Division                 string  `json:"division"`                  // The division to use
+	DisableArenaBackfill     bool     `json:"disable_arena_backfill"`    // Disable backfilling for arena matches
+	BackfillQueryAddon       string   `json:"backfill_query_addon"`      // Additional query to add to the matchmaking query
+	LobbyBuilderQueryAddon   string   `json:"lobby_builder_query_addon"` // Additional query to add to the matchmaking query
+	CreateQueryAddon         string   `json:"create_query_addon"`        // Additional query to add to the matchmaking query
+	MatchmakerQueryAddon     string   `json:"matchmaker_query_addon"`    // Additional query to add to the matchmaking query
+	LobbyGroupName           string   `json:"group_id"`                  // Group ID to matchmake with
+	NextMatchID              MatchID  `json:"next_match_id"`             // Try to join this match immediately when finding a match
+	NextMatchRole            string   `json:"next_match_role"`           // The role to join the next match as
+	NextMatchDiscordID       string   `json:"next_match_discord_id"`     // The discord ID to join the next match as
+	StaticBaseRankPercentile float64  `json:"static_rank_percentile"`    // The static rank percentile to use
+	Divisions                []string `json:"divisions"`                 // The division to use
 }
 
 func (MatchmakingSettings) StorageMeta() StorageMeta {
