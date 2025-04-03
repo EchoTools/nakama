@@ -462,6 +462,13 @@ func AllocateGameServer(ctx context.Context, logger runtime.Logger, nk runtime.N
 
 	query := strings.Join(qparts, " ")
 
+	// Create a set of regions for fast lookup
+	regionSet := make(map[string]struct{}, len(regions))
+	for _, region := range regions {
+		regionSet[region] = struct{}{}
+	}
+
+	// Get the list of matches
 	matches, err := nk.MatchList(ctx, 100, true, "", nil, nil, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find matches: %w", err)
@@ -481,155 +488,65 @@ func AllocateGameServer(ctx context.Context, logger runtime.Logger, nk runtime.N
 		labels = append(labels, label)
 	}
 
-	labelsByExternalIP := make(map[string][]*MatchLabel, len(labels))
-	for _, label := range labels {
-		k := label.GameServer.Endpoint.ExternalIP.String()
-		labelsByExternalIP[k] = append(labelsByExternalIP[k], label)
-	}
-
 	// Count the number of active matches by extIP
-	availableByExtIP := make(map[string]*MatchLabel, len(labels))
 	countByExtIP := make(map[string]int, len(labels))
 	for _, label := range labels {
 		k := label.GameServer.Endpoint.ExternalIP.String()
 		countByExtIP[k]++
-
-		if label.LobbyType == UnassignedLobby {
-			availableByExtIP[k] = label
-		}
 	}
 
-	// Get all the game servers with matching regions
-	regionSet := make(map[string]struct{}, len(regions))
-	for _, region := range regions {
-		regionSet[region] = struct{}{}
-	}
+	// Create a slice of LabelIndex structs
+	// and populate it with the labels and their properties
+	indexes := make([]labelIndex, len(labels))
+	for i, label := range labels {
 
-	regionMatches := make(map[MatchID]bool, len(labels))
-OuterLabelLoop:
-	for _, label := range labels {
+		regionMatch := false
 		for _, region := range label.GameServer.RegionCodes {
 			if region == "default" {
 				continue
 			}
 			if _, ok := regionSet[region]; ok {
-				regionMatches[label.ID] = true
-				continue OuterLabelLoop
+				regionMatch = true
 			}
 		}
-	}
 
-	// Remove labels with a rating of -999
-	for i := 0; i < len(labels); i++ {
-		label := labels[i]
 		rating, ok := globalSettings.ServerRatings.ByExternalIP[label.GameServer.Endpoint.ExternalIP.String()]
-		if ok && rating == -999 {
-			labels = slices.Delete(labels, i, i+1)
-			i--
-		}
-	}
-
-	// Sort the labels
-	slices.SortStableFunc(labels, func(a, b *MatchLabel) int {
-
-		var (
-			ipA = a.GameServer.Endpoint.ExternalIP.String()
-			ipB = b.GameServer.Endpoint.ExternalIP.String()
-
-			// Round to the nearest 20ms
-			rttA = (rttsByExternalIP[ipA] + 10) / 20 * 20
-			rttB = (rttsByExternalIP[ipB] + 10) / 20 * 20
-
-			regionMatchesA = regionMatches[a.ID]
-			regionMatchesB = regionMatches[b.ID]
-		)
-
-		// Sort by whether the server is in the region
-		if regionMatchesA && !regionMatchesB {
-			return -1
-		}
-		if !regionMatchesA && regionMatchesB {
-			return 1
-		}
-
-		// If there is a large difference in RTT, sort by RTT
-		if math.Abs(float64(rttA-rttB)) > 30 {
-
-			if rttA < rttB {
-				return -1
-			}
-
-			if rttA > rttB {
-				return 1
-			}
-		}
-
-		// Sort by static rating of servers
-		ratingA, ok := globalSettings.ServerRatings.ByExternalIP[a.GameServer.Endpoint.ExternalIP.String()]
 		if !ok {
-			// Check for a rating by operator ID
-			ratingA, ok = globalSettings.ServerRatings.ByOperatorID[a.GameServer.OperatorID.String()]
-			if !ok {
-				ratingA = 0
+			if rating, ok = globalSettings.ServerRatings.ByOperatorID[label.GameServer.OperatorID.String()]; !ok {
+				rating = 0
 			}
 		}
 
-		ratingB, ok := globalSettings.ServerRatings.ByExternalIP[b.GameServer.Endpoint.ExternalIP.String()]
-		if !ok {
-			ratingB, ok = globalSettings.ServerRatings.ByOperatorID[b.GameServer.OperatorID.String()]
-			if !ok {
-				ratingB = 0
-			}
-		}
-
-		if ratingA > ratingB {
-			return -1
-		}
-
-		if ratingA < ratingB {
-			return 1
-		}
-
-		// Sort by whether the server is a priority server
-		if a.GameServer.IsPriorityFor(settings.Mode) && !b.GameServer.IsPriorityFor(settings.Mode) {
-			return -1
-		}
-		if a.GameServer.IsPriorityFor(settings.Mode) && !b.GameServer.IsPriorityFor(settings.Mode) {
-			return 1
-		}
-
-		// Sort by whether the server is reachable or not
-		if rttA != 0 && rttB == 0 {
-			return -1
-		}
-
-		if rttA == 0 && rttB != 0 {
-			return 1
-		}
-
-		// Sort by the number of active game servers
-		if countByExtIP[ipA] < countByExtIP[ipB] {
-			return -1
-		}
-
-		if countByExtIP[ipA] > countByExtIP[ipB] {
-			return 1
-		}
-
-		return 0
-	})
-
-	// Find the first available game server
-	var label *MatchLabel
-	for _, l := range labels {
-		if l.LobbyType != UnassignedLobby {
+		// Skip servers with a rating of -999
+		if rating == -999 {
 			continue
 		}
 
-		label, err = LobbyPrepareSession(ctx, nk, l.ID, settings)
+		indexes[i] = labelIndex{
+			label:             label,
+			rtt:               (rttsByExternalIP[label.GameServer.Endpoint.ExternalIP.String()] + 10) / 20 * 20,
+			isReachable:       rttsByExternalIP[label.GameServer.Endpoint.ExternalIP.String()] != 0,
+			extIP:             label.GameServer.Endpoint.ExternalIP.String(),
+			rating:            rating,
+			isPriorityForMode: slices.Contains(label.GameServer.DesignatedModes, settings.Mode),
+			activeCount:       countByExtIP[label.GameServer.Endpoint.ExternalIP.String()],
+			regionMatches:     regionMatch,
+		}
+	}
+
+	sortLabelIndexes(indexes)
+
+	// Find the first available game server
+	var label *MatchLabel
+	for _, index := range indexes {
+		if index.label.LobbyType != UnassignedLobby {
+			continue
+		}
+
+		label, err = LobbyPrepareSession(ctx, nk, index.label.ID, settings)
 		if err != nil {
 			logger.WithFields(map[string]interface{}{
-				"mid": l.ID.UUID.String(),
+				"mid": index.label.ID.UUID.String(),
 				"err": err,
 			}).Warn("Failed to prepare session")
 			continue
@@ -639,4 +556,77 @@ OuterLabelLoop:
 	}
 
 	return nil, ErrMatchmakingNoAvailableServers
+}
+
+type labelIndex struct {
+	label             *MatchLabel
+	rtt               int
+	isReachable       bool
+	extIP             string
+	rating            float64
+	isPriorityForMode bool
+	activeCount       int
+	regionMatches     bool
+}
+
+func sortLabelIndexes(labels []labelIndex) {
+	// Sort the labels
+	slices.SortStableFunc(labels, func(a, b labelIndex) int {
+
+		// Sort by whether the server is in the region
+		if a.regionMatches && !b.regionMatches {
+			return -1
+		}
+		if !a.regionMatches && b.regionMatches {
+			return 1
+		}
+
+		// If there is a large difference in RTT, sort by RTT
+		if math.Abs(float64(a.rtt-b.rtt)) > 30 {
+
+			if a.rtt < b.rtt {
+				return -1
+			}
+
+			if a.rtt > b.rtt {
+				return 1
+			}
+		}
+
+		if a.rating > b.rating {
+			return -1
+		}
+
+		if a.rating < b.rating {
+			return 1
+		}
+
+		// Sort by whether the server is a priority server
+		if a.isPriorityForMode && !b.isPriorityForMode {
+			return -1
+		}
+		if !a.isPriorityForMode && b.isPriorityForMode {
+			return 1
+		}
+
+		// Sort by whether the server is reachable or not
+		if a.isReachable && !b.isReachable {
+			return -1
+		}
+
+		if !a.isReachable && b.isReachable {
+			return 1
+		}
+
+		// Sort by the number of active game servers
+		if a.activeCount < b.activeCount {
+			return -1
+		}
+
+		if a.activeCount > b.activeCount {
+			return 1
+		}
+
+		return 0
+	})
 }

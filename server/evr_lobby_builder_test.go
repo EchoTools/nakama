@@ -166,3 +166,113 @@ func TestGroupByTicket(t *testing.T) {
 		})
 	}
 }
+func TestSortLabelIndexes(t *testing.T) {
+	tests := []struct {
+		name     string
+		labels   []labelIndex
+		expected []labelIndex
+	}{
+		{
+			name: "Sort by regionMatches",
+			labels: []labelIndex{
+				{regionMatches: false},
+				{regionMatches: true},
+			},
+			expected: []labelIndex{
+				{regionMatches: true},
+				{regionMatches: false},
+			},
+		},
+		{
+			name: "Sort by rtt",
+			labels: []labelIndex{
+				{rtt: 100},
+				{rtt: 50},
+			},
+			expected: []labelIndex{
+				{rtt: 50},
+				{rtt: 100},
+			},
+		},
+		{
+			name: "Sort by rating",
+			labels: []labelIndex{
+				{rating: 100},
+				{rating: 50},
+			},
+			expected: []labelIndex{
+				{rating: 100},
+				{rating: 50},
+			},
+		},
+		{
+			name: "Sort by isPriorityForMode",
+			labels: []labelIndex{
+				{isPriorityForMode: false},
+				{isPriorityForMode: true},
+			},
+			expected: []labelIndex{
+				{isPriorityForMode: true},
+				{isPriorityForMode: false},
+			},
+		},
+		{
+			name: "Sort by isReachable",
+			labels: []labelIndex{
+				{isReachable: false},
+				{isReachable: true},
+			},
+			expected: []labelIndex{
+				{isReachable: true},
+				{isReachable: false},
+			},
+		},
+		{
+			name: "Sort by activeCount",
+			labels: []labelIndex{
+				{activeCount: 2},
+				{activeCount: 1},
+			},
+			expected: []labelIndex{
+				{activeCount: 1},
+				{activeCount: 2},
+			},
+		},
+		{
+			name: "Complex sorting",
+			labels: []labelIndex{
+				{regionMatches: false, rtt: 100, rating: 50, isPriorityForMode: false, isReachable: false, activeCount: 2},
+				{regionMatches: true, rtt: 50, rating: 100, isPriorityForMode: true, isReachable: true, activeCount: 1},
+				{regionMatches: false, rtt: 50, rating: 50, isPriorityForMode: true, isReachable: true, activeCount: 2},
+				{regionMatches: true, rtt: 100, rating: 100, isPriorityForMode: false, isReachable: false, activeCount: 1},
+			},
+			expected: []labelIndex{
+				{regionMatches: true, rtt: 50, rating: 100, isPriorityForMode: true, isReachable: true, activeCount: 1},
+				{regionMatches: true, rtt: 100, rating: 100, isPriorityForMode: false, isReachable: false, activeCount: 1},
+				{regionMatches: false, rtt: 50, rating: 50, isPriorityForMode: true, isReachable: true, activeCount: 2},
+				{regionMatches: false, rtt: 100, rating: 50, isPriorityForMode: false, isReachable: false, activeCount: 2},
+			},
+		},
+		{
+			name: "RTT difference less than 30",
+			labels: []labelIndex{
+				{rtt: 60},
+				{rtt: 50},
+			},
+			expected: []labelIndex{
+				{rtt: 60},
+				{rtt: 50},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			labelsCopy := make([]labelIndex, len(tt.labels))
+			copy(labelsCopy, tt.labels)
+
+			sortLabelIndexes(labelsCopy)
+			assert.Equal(t, tt.expected, labelsCopy)
+		})
+	}
+}
