@@ -63,7 +63,7 @@ type DiscordAppBot struct {
 	userID         string            // Nakama UserID of the bot
 	partyStatusChs *MapOf[string, chan error]
 
-	prepareMatchRatePerMinute rate.Limit
+	prepareMatchRatePerSecond rate.Limit
 	prepareMatchBurst         int
 	prepareMatchRateLimiters  *MapOf[string, *rate.Limiter]
 }
@@ -91,7 +91,7 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 
 		dg: dg,
 
-		prepareMatchRatePerMinute: 1,
+		prepareMatchRatePerSecond: 1 / 60,
 		prepareMatchBurst:         1,
 		prepareMatchRateLimiters:  &MapOf[string, *rate.Limiter]{},
 		partyStatusChs:            &MapOf[string, chan error]{},
@@ -231,7 +231,7 @@ func (e *DiscordAppBot) discordGoLogger(msgL int, caller int, format string, a .
 
 func (e *DiscordAppBot) loadPrepareMatchRateLimiter(userID, groupID string) *rate.Limiter {
 	key := strings.Join([]string{userID, groupID}, ":")
-	limiter, _ := e.prepareMatchRateLimiters.LoadOrStore(key, rate.NewLimiter(e.prepareMatchRatePerMinute, e.prepareMatchBurst))
+	limiter, _ := e.prepareMatchRateLimiters.LoadOrStore(key, rate.NewLimiter(e.prepareMatchRatePerSecond, e.prepareMatchBurst))
 	return limiter
 }
 
