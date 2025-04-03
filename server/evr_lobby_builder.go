@@ -457,7 +457,7 @@ func AllocateGameServer(ctx context.Context, logger runtime.Logger, nk runtime.N
 			prefix = "+"
 		}
 
-		qparts = append(qparts, "%slabel.broadcaster.region_codes:/(%s)/", prefix, Query.Join(regions, "|"))
+		qparts = append(qparts, "%slabel.broadcaster.region_codes:%s", prefix, Query.Or(regions))
 	}
 
 	query := strings.Join(qparts, " ")

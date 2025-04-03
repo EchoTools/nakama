@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -11,12 +12,12 @@ var Query query
 
 type query struct{}
 
-func (query) Join(elems []string, sep string) string {
+func (query) Or(elems []string) string {
 	strs := make([]string, len(elems))
 	for i, elem := range elems {
 		strs[i] = Query.Escape(elem)
 	}
-	return strings.Join(strs, sep)
+	return fmt.Sprintf("/.*\b(%s)\b.*/", strings.Join(strs, "|"))
 }
 
 func (query) JoinUUIDs(elems []uuid.UUID, sep string) string {

@@ -649,7 +649,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 
 		// Add the acceptable servers to the query
 		if len(acceptableServers) > 0 {
-			qparts = append(qparts, fmt.Sprintf("+properties.servers:/.*(%s).*/", Query.Join(acceptableServers, "|")))
+			qparts = append(qparts, fmt.Sprintf("+properties.servers:%s", Query.Or(acceptableServers)))
 		}
 
 	}
