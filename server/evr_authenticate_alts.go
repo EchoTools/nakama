@@ -38,7 +38,7 @@ func LoginAlternateSearch(ctx context.Context, nk runtime.NakamaModule, loginHis
 		}
 	}
 
-	query := fmt.Sprintf("+value.cache:/(%s)/", Query.Join(patterns, "|"))
+	query := fmt.Sprintf("+value.cache:%s", Query.Or(patterns))
 
 	matches := make([]*AlternateSearchMatch, 0)
 

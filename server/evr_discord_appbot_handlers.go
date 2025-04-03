@@ -355,7 +355,7 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 		return nil, 0, status.Error(codes.ResourceExhausted, fmt.Sprintf("rate limit exceeded (%0.0f requests per minute)", limiter.Limit()*60))
 	}
 
-	query := fmt.Sprintf("+label.lobby_type:unassigned +label.broadcaster.group_ids:/(%s)/ +label.broadcaster.region_codes:/(%s)/", Query.Join(allocatorGroupIDs, "|"), regionCode)
+	query := fmt.Sprintf("+label.lobby_type:unassigned +label.broadcaster.group_ids:%s +label.broadcaster.region_codes:%s", Query.Or(allocatorGroupIDs), regionCode)
 
 	minSize := 1
 	maxSize := 1
