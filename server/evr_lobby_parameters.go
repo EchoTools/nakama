@@ -313,12 +313,6 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		}
 	}
 
-	// Add each blocked user that is online to the backfill query addon
-	if len(blockedIDs) > 0 && mode != evr.ModeSocialPublic {
-
-		// Avoid backfilling matches with players that this player blocks.
-		backfillQueryAddons = append(backfillQueryAddons, fmt.Sprintf(`-label.players.user_id:/(%s)/`, Query.Join(blockedIDs, "|")))
-	}
 	rankPercentileMaxDelta := 1.0
 	rankPercentile := globalSettings.RankPercentile.Default
 	matchmakingRating := NewDefaultRating()
@@ -441,9 +435,15 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeMMR bool, includeMax
 	qparts := []string{
 		"+label.open:T",
 		fmt.Sprintf("+label.mode:%s", p.Mode.String()),
-		fmt.Sprintf("+label.group_id:/%s/", Query.Escape(p.GroupID.String())),
+		fmt.Sprintf("+label.group_id:%s", Query.Escape(p.GroupID.String())),
 		//fmt.Sprintf("label.version_lock:%s", p.VersionLock.String()),
 		p.BackfillQueryAddon,
+	}
+
+	if len(p.BlockedIDs) > 0 && p.Mode != evr.ModeSocialPublic {
+		// Add each blocked user that is online to the backfill query addon
+		// Avoid backfilling matches with players that this player blocks.
+		qparts = append(qparts, fmt.Sprintf("-label.players.user_id:%s", Query.MatchItem(p.BlockedIDs)))
 	}
 
 	if includeMMR {
