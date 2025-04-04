@@ -20,7 +20,7 @@ func LoginAlternateSearch(ctx context.Context, nk runtime.NakamaModule, loginHis
 
 	// Build a list of patterns to search for in the index.
 	seen := make(map[string]struct{}, 0)
-	patterns := make([]string, 0, len(loginHistory.History)*3)
+	items := make([]string, 0, len(loginHistory.History)*3)
 
 	for _, e := range loginHistory.History {
 
@@ -31,14 +31,14 @@ func LoginAlternateSearch(ctx context.Context, nk runtime.NakamaModule, loginHis
 		} {
 			if _, found := seen[s]; !found {
 				if _, found := IgnoredLoginValues[s]; !found {
-					patterns = append(patterns, s)
+					items = append(items, s)
 				}
 				seen[s] = struct{}{}
 			}
 		}
 	}
 
-	query := fmt.Sprintf("+value.cache:%s", Query.Or(patterns))
+	query := fmt.Sprintf("+value.cache:%s", Query.MatchItem(items))
 
 	matches := make([]*AlternateSearchMatch, 0)
 

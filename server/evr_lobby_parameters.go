@@ -543,7 +543,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 		"blocked_ids":     strings.Join(p.BlockedIDs, " "),
 		"display_name":    p.DisplayName,
 		"submission_time": submissionTime,
-		"divisions":       strings.Join(p.MatchmakingDivisions, "\n"),
+		"divisions":       strings.Join(p.MatchmakingDivisions, ","),
 	}
 
 	numericProperties := map[string]float64{
@@ -651,7 +651,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 
 		// Add the acceptable servers to the query
 		if len(acceptableServers) > 0 {
-			qparts = append(qparts, fmt.Sprintf("+properties.servers:%s", Query.Or(acceptableServers)))
+			qparts = append(qparts, fmt.Sprintf("+properties.servers:%s", Query.MatchItem(acceptableServers)))
 		}
 
 	}
