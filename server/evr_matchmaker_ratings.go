@@ -67,7 +67,7 @@ func (t RatedTeam) Ordinal() float64 {
 
 func NewDefaultRating() types.Rating {
 	return rating.NewWithOptions(&types.OpenSkillOptions{
-		Mu:    ptr.Float64(25.0),
+		Mu:    ptr.Float64(22.0),
 		Sigma: ptr.Float64(8.333),
 	})
 }
