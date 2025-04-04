@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gofrs/uuid/v5"
+	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/intinig/go-openskill/rating"
@@ -242,7 +244,8 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 		default:
 		}
 
-		label, err = AllocateGameServer(ctx, NewRuntimeGoLogger(logger), b.nk, groupID.String(), meanRTTByExtIP, settings, nil, true, false)
+		queryAddon := ServiceSettings().Matchmaking.QueryAddons.LobbyBuilder
+		label, err = LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), b.nk, groupID.String(), meanRTTByExtIP, settings, nil, true, false, queryAddon)
 		if err != nil || label == nil {
 			logger.Error("Failed to allocate game server.", zap.Error(err))
 			<-time.After(5 * time.Second)
@@ -435,7 +438,75 @@ func CompactedFrequencySort[T comparable](s []T, desc bool) []T {
 	return slices.Compact(s)
 }
 
-func AllocateGameServer(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, groupID string, rttsByExternalIP map[string]int, settings *MatchSettings, regions []string, requireDefaultRegion bool, requireRegion bool) (*MatchLabel, error) {
+func rttByPlayerByExtIP(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, groupID string) (map[string]map[string]int, error) {
+	qparts := []string{
+		fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/", Query.Escape(groupID)),
+	}
+
+	query := strings.Join(qparts, " ")
+
+	pubLabels, err := LobbyGameServerList(ctx, nk, query)
+	if err != nil {
+		return nil, err
+	}
+
+	rttByPlayerByExtIP := make(map[string]map[string]int)
+
+	totalPlayers := 0
+	for _, label := range pubLabels {
+		for _, p := range label.Players {
+			history := &LatencyHistory{}
+			if _, err := StorageRead(ctx, nk, p.UserID, history, true); err != nil {
+				logger.Warn("Failed to load latency history", zap.Error(err))
+				continue
+			}
+
+			rtts := history.LatestRTTs()
+			if len(rtts) > 0 {
+				totalPlayers++
+			}
+
+			for extIP, rtt := range rtts {
+				if _, ok := rttByPlayerByExtIP[p.UserID]; !ok {
+					rttByPlayerByExtIP[p.UserID] = make(map[string]int)
+				}
+				rttByPlayerByExtIP[p.UserID][extIP] = rtt
+			}
+		}
+	}
+
+	return rttByPlayerByExtIP, nil
+}
+
+// Wrapper for the matchRegistry.ListMatches function.
+func LobbyList(ctx context.Context, nk runtime.NakamaModule, limit int, minSize int, maxSize int, query string) ([]*api.Match, error) {
+	return nk.MatchList(ctx, limit, true, "", &minSize, &maxSize, query)
+}
+
+func LobbyGameServerList(ctx context.Context, nk runtime.NakamaModule, query string) ([]*MatchLabel, error) {
+	limit := 200
+	minSize, maxSize := 1, MatchLobbyMaxSize // the game server counts as one.
+	matches, err := LobbyList(ctx, nk, limit, minSize, maxSize, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list matches: %w", err)
+	}
+
+	if len(matches) == 0 {
+		return nil, ErrMatchmakingNoAvailableServers
+	}
+
+	labels := make([]*MatchLabel, 0, len(matches))
+	for _, match := range matches {
+		label := &MatchLabel{}
+		if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), label); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal match label: %w", err)
+		}
+		labels = append(labels, label)
+	}
+	return labels, nil
+}
+
+func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, groupID string, rttsByExternalIP map[string]int, settings *MatchSettings, regions []string, requireDefaultRegion bool, requireRegion bool, queryAddon string) (*MatchLabel, error) {
 
 	// Load the server ratings storage object
 	globalSettings := ServiceSettings().Matchmaking
@@ -444,7 +515,7 @@ func AllocateGameServer(ctx context.Context, logger runtime.Logger, nk runtime.N
 		"+label.open:T",
 		"+label.lobby_type:unassigned",
 		fmt.Sprintf("+label.broadcaster.group_ids:%s", Query.Escape(groupID)),
-		globalSettings.QueryAddons.LobbyBuilder,
+		queryAddon,
 	}
 
 	if requireDefaultRegion {

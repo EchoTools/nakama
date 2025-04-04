@@ -2,11 +2,9 @@ package server
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/rand"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,7 +12,6 @@ import (
 	"time"
 
 	"github.com/gofrs/uuid/v5"
-	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
@@ -269,69 +266,18 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 
 	p.nk.metrics.CustomCounter("lobby_new", metricsTags, 1)
 
-	qparts := []string{
-		"+label.open:T",
-		"+label.lobby_type:unassigned",
-		"+label.broadcaster.region_codes:/(default)/",
-		fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/", Query.Escape(lobbyParams.GroupID.String())),
-		lobbyParams.CreateQueryAddon,
-		//fmt.Sprintf("+label.broadcaster.version_lock:%s", versionLock.String()),
-	}
-
-	query := strings.Join(qparts, " ")
-
-	labels, err := lobbyListGameServers(ctx, p.nk, query)
-	if err != nil {
-		return nil, err
-	}
-
-	// Retrieve the latency history of all online public players.
-	// Identify servers where the majority of players have a ping other than 999 (or 0).
-	// Sort servers by those with a ping less than 250 for all players.
-	// Select the server with the best average ping for the highest number of players.
-	label := &MatchLabel{}
-
-	switch lobbyParams.Mode {
-	case evr.ModeSocialPublic:
-		rttByPlayerByExtIP, err := rttByPlayerByExtIP(ctx, logger, p.db, p.nk, lobbyParams.GroupID.String())
-		if err != nil {
-			logger.Warn("Failed to get RTT by player by extIP", zap.Error(err))
-		} else {
-			extIPs := sortByGreatestPlayerAvailability(rttByPlayerByExtIP)
-			for _, extIP := range extIPs {
-				for _, l := range labels {
-					if l.GameServer.Endpoint.GetExternalIP() == extIP {
-						label = l
-						break
-					}
-				}
-			}
-		}
-	default:
-
-		// Create a lobby that is closest to the player requesting
-		withLatency := lobbyParams.latencyHistory.LabelsByAverageRTT(labels)
-		if len(withLatency) > 0 {
-			label = withLatency[0].Label
-		}
-	}
-	// If no label was found, just pick a random one
-	if label.ID.IsNil() {
-		label = labels[rand.Intn(len(labels))]
-	}
-
-	matchID := label.ID
 	settings := &MatchSettings{
 		Mode:         lobbyParams.Mode,
-		Level:        evr.LevelUnspecified,
+		Level:        lobbyParams.Level,
 		SpawnedBy:    lobbyParams.UserID.String(),
 		GroupID:      lobbyParams.GroupID,
 		StartTime:    time.Now().UTC(),
 		Reservations: entrants,
 	}
-	label, err = LobbyPrepareSession(ctx, p.nk, matchID, settings)
+
+	label, err := LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), p.nk, lobbyParams.GroupID.String(), lobbyParams.latencyHistory.LatestRTTs(), settings, []string{lobbyParams.RegionCode}, false, false, ServiceSettings().Matchmaking.QueryAddons.Create)
 	if err != nil {
-		logger.Error("Failed to prepare session", zap.Error(err), zap.String("mid", matchID.String()))
+		logger.Warn("Failed to allocate game server", zap.Error(err), zap.Any("settings", settings))
 		return nil, err
 	}
 

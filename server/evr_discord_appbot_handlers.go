@@ -349,89 +349,32 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 		return nil, 0, status.Error(codes.PermissionDenied, "user does not have the allocator role in this guild.")
 	}
 
-	limiter := d.loadPrepareMatchRateLimiter(userID, groupID)
-	if !limiter.Allow() {
-		return nil, 0, status.Error(codes.ResourceExhausted, fmt.Sprintf("rate limit exceeded (%0.0f requests per minute)", limiter.Limit()*60))
+	// Load the latency history for this user
+	latencyHistory := &LatencyHistory{}
+	if v, err := StorageRead(ctx, d.nk, userID, latencyHistory, false); err != nil {
+		return nil, 0, status.Errorf(codes.Internal, "failed to read latency history: %v", err)
+	} else if v == "" {
+		latencyHistory = NewLatencyHistory()
 	}
 
-	query := fmt.Sprintf("+label.lobby_type:unassigned +label.broadcaster.group_ids:%s +label.broadcaster.region_codes:%s", Query.Or(allocatorGroupIDs), regionCode)
+	latestRTTs := latencyHistory.LatestRTTs()
 
-	minSize := 1
-	maxSize := 1
-	matches, err := d.nk.MatchList(ctx, 100, true, "", &minSize, &maxSize, query)
-	if err != nil {
-		return nil, 0, status.Errorf(codes.Internal, "failed to list matches `%s`: %v", query, err)
-	}
-
-	if len(matches) == 0 {
-		return nil, 0, status.Error(codes.NotFound, fmt.Sprintf("no game servers are available in region `%s`", regionCode))
-	}
-
-	labels := make([]*MatchLabel, 0, len(matches))
-	for _, match := range matches {
-		label := MatchLabel{}
-		if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), &label); err != nil {
-			return nil, 0, status.Errorf(codes.Internal, "failed to unmarshal match label: %v", err)
-		}
-		labels = append(labels, &label)
-	}
-
-	if regionCode == "default" {
-		// Find the closest to the player.
-		zapLogger := logger.(*RuntimeGoLogger).logger
-		latencyHistory, err := LoadLatencyHistory(ctx, zapLogger, d.db, uuid.FromStringOrNil(userID))
-		if err != nil {
-			return nil, 0, fmt.Errorf("failed to load latency history: %w", err)
-		}
-
-		labelLatencies := make([]int, len(labels))
-		for _, label := range labels {
-			if history, ok := latencyHistory[label.GameServer.Endpoint.GetExternalIP()]; ok && len(history) != 0 {
-
-				average := 0
-				for _, l := range history {
-					average += l
-				}
-				average /= len(history)
-				labelLatencies = append(labelLatencies, average)
-
-			} else {
-
-				labelLatencies = append(labelLatencies, 0)
-			}
-		}
-
-		params := LobbySessionParameters{
-			RegionCode: regionCode,
-			Mode:       mode,
-		}
-
-		lobbyCreateSortOptions(labels, labelLatencies, &params)
-	}
-
-	match := matches[0]
-	matchID := MatchIDFromStringOrNil(match.GetMatchId())
-	gid := uuid.FromStringOrNil(groupID)
 	// Prepare the session for the match.
-
-	if membership.IsAllocator(userID) {
-		startTime = startTime.UTC().Add(10 * time.Minute)
-	} else {
-		startTime.UTC().Add(1 * time.Minute)
-	}
-
-	settings := MatchSettings{
+	settings := &MatchSettings{
 		Mode:      mode,
 		Level:     level,
-		GroupID:   gid,
-		StartTime: startTime.UTC().Add(1 * time.Minute),
+		GroupID:   uuid.FromStringOrNil(groupID),
+		StartTime: startTime.UTC().Add(10 * time.Minute),
 		SpawnedBy: userID,
 	}
-
-	label, err := LobbyPrepareSession(ctx, d.nk, matchID, &settings)
+	queryAddon := ServiceSettings().Matchmaking.QueryAddons.Create
+	label, err := LobbyGameServerAllocate(ctx, logger, d.nk, groupID, latestRTTs, settings, []string{regionCode}, false, true, queryAddon)
 	if err != nil {
-		logger.Warn("Failed to prepare session", zap.Error(err), zap.String("mid", matchID.UUID.String()))
-		return nil, -1, fmt.Errorf("failed to prepare session: %w", err)
+		if strings.Contains("bad request:", err.Error()) {
+			err = NewLobbyErrorf(BadRequest, "required features not supported")
+		}
+		logger.Warn("Failed to allocate game server", zap.Error(err), zap.Any("settings", settings))
+		return nil, 0, fmt.Errorf("failed to allocate game server: %w", err)
 	}
 
 	return label, rtt, nil
@@ -456,7 +399,7 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		return nil, 0, status.Error(codes.PermissionDenied, "user is suspended from the guild")
 	}
 
-	if group.DisableCreateCommand {
+	if group.DisableCreateCommand && !group.IsAllocator(userID) {
 		return nil, 0, status.Error(codes.PermissionDenied, "guild does not allow public match creation")
 	}
 
@@ -482,7 +425,8 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		SpawnedBy: userID,
 	}
 
-	label, err := AllocateGameServer(ctx, logger, d.nk, groupID, extIPs, settings, []string{region}, true, false)
+	queryAddon := ServiceSettings().Matchmaking.QueryAddons.Create
+	label, err := LobbyGameServerAllocate(ctx, logger, d.nk, groupID, extIPs, settings, []string{region}, true, false, queryAddon)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to allocate game server: %w", err)
 	}
