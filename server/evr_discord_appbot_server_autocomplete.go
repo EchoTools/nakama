@@ -7,7 +7,6 @@ import (
 	"slices"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
@@ -31,24 +30,21 @@ func (c RegionAutocompleteData) Description() string {
 }
 
 func (d *DiscordAppBot) autocompleteRegions(ctx context.Context, logger runtime.Logger, userID string, groupID string) ([]*discordgo.ApplicationCommandOptionChoice, error) {
-	nk := d.nk
-	db := d.db
 
-	// Load the users latency history
-	latencyHistory, err := LoadLatencyHistory(ctx, RuntimeLoggerToZapLogger(logger), db, uuid.FromStringOrNil(userID))
-	if err != nil {
-
+	latencyHistory := &LatencyHistory{}
+	if _, err := StorageRead(ctx, d.nk, userID, latencyHistory, false); err != nil {
+		logger.Error("Failed to read latency history", zap.Error(err))
 		return nil, err
 	}
 
-	rtts := latencyHistory.AverageRTTs(true, false)
+	rtts := latencyHistory.AverageRTTs(true)
 
 	// Get the available servers
 	minSize := 0
 	maxSize := 100
 	query := fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/ +label.broadcaster.region_codes:default", Query.Escape(groupID))
 
-	matches, err := nk.MatchList(ctx, 100, true, "", &minSize, &maxSize, query)
+	matches, err := d.nk.MatchList(ctx, 100, true, "", &minSize, &maxSize, query)
 	if err != nil {
 		logger.Error("Failed to list servers", zap.Error(err))
 		return nil, err

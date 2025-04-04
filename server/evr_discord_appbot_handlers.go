@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
 	"strings"
@@ -466,13 +465,14 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		return nil, 0, status.Error(codes.ResourceExhausted, fmt.Sprintf("rate limit exceeded (%0.0f requests per minute)", limiter.Limit()*60))
 	}
 
-	zapLogger := logger.(*RuntimeGoLogger).logger
-	latencyHistory, err := LoadLatencyHistory(ctx, zapLogger, d.db, uuid.FromStringOrNil(userID))
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to load latency history: %w", err)
+	latencyHistory := &LatencyHistory{}
+	if v, err := StorageRead(ctx, d.nk, userID, latencyHistory, false); err != nil {
+		return nil, 0, status.Errorf(codes.Internal, "failed to read latency history: %v", err)
+	} else if v == "" {
+		latencyHistory = NewLatencyHistory()
 	}
 
-	extIPs := latencyHistory.AverageRTTs(true, false)
+	extIPs := latencyHistory.AverageRTTs(true)
 
 	settings := &MatchSettings{
 		Mode:      mode,

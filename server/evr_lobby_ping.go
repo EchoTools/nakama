@@ -4,6 +4,7 @@ import (
 	"math/rand"
 	"net"
 	"slices"
+	"time"
 
 	"github.com/heroiclabs/nakama/v3/server/evr"
 )
@@ -38,7 +39,7 @@ func (e *endpointCompact) Endpoint() evr.Endpoint {
 		Port:       e.Port()}
 }
 
-func sortPingCandidatesByLatencyHistory(hostIPs []string, latencyHistory map[string]map[int64]int) {
+func sortPingCandidatesByLatencyHistory(hostIPs []string, latencyHistory *LatencyHistory) {
 
 	// Shuffle the candidates
 	for i := len(hostIPs) - 1; i > 0; i-- {
@@ -46,46 +47,49 @@ func sortPingCandidatesByLatencyHistory(hostIPs []string, latencyHistory map[str
 		hostIPs[i], hostIPs[j] = hostIPs[j], hostIPs[i]
 	}
 
+	type item struct {
+		hostIP          string
+		latestTimestamp time.Time
+		inCache         bool
+		rtt             time.Duration
+	}
+
+	index := make([]item, len(hostIPs))
+	for _, hostIP := range hostIPs {
+		// Get the latest timestamp and RTT for each host IP
+		item := item{
+			hostIP: hostIP,
+		}
+		if history, inCache := latencyHistory.Get(hostIP); inCache {
+			item.inCache = true
+			latest := history[len(history)-1]
+			item.latestTimestamp = latest.Timestamp
+			item.rtt = latest.RTT
+		}
+	}
+
 	// Sort the active endpoints
-	slices.SortStableFunc(hostIPs, func(a, b string) int {
+	slices.SortStableFunc(index, func(a, b item) int {
 
-		// by whether the endpoint is in the cache
-		var aHistory, bHistory map[int64]int
-		var aInCache, bInCache bool
-		var aOldest, bOldest int64
-
-		aHistory, aInCache = latencyHistory[a]
-		bHistory, bInCache = latencyHistory[b]
-
-		if !aInCache && bInCache {
+		if a.inCache && !b.inCache {
 			return -1
 		}
-
-		if aInCache && !bInCache {
+		if !a.inCache && b.inCache {
 			return 1
 		}
 
-		if !aInCache && !bInCache {
-			return 0
-		}
-
-		for ts := range aHistory {
-			if ts < aOldest {
-				aOldest = ts
-			}
-		}
-
-		for ts := range bHistory {
-			if ts < bOldest {
-				bOldest = ts
-			}
-		}
-
-		if aOldest < bOldest {
+		if a.latestTimestamp.Before(b.latestTimestamp) {
 			return -1
 		}
 
-		if aOldest > bOldest {
+		if a.latestTimestamp.After(b.latestTimestamp) {
+			return 1
+		}
+
+		if a.rtt < b.rtt {
+			return -1
+		}
+		if a.rtt > b.rtt {
 			return 1
 		}
 

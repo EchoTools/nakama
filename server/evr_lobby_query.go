@@ -12,12 +12,34 @@ var Query query
 
 type query struct{}
 
-func (query) Or(elems []string) string {
+func (query) MatchItem(elems []string) string {
+	if len(elems) == 0 {
+		return ""
+	}
+
 	strs := make([]string, len(elems))
 	for i, elem := range elems {
 		strs[i] = Query.Escape(elem)
 	}
-	return fmt.Sprintf("/.*\b(%s)\b.*/", strings.Join(strs, "|"))
+
+	return fmt.Sprintf("/(%s)/", strings.Join(strs, "|"))
+}
+
+// MatchDelimitedItem returns a regex pattern that matches any of the provided elements
+// delimited by a comma, caret, or dollar sign. The elements are escaped to ensure
+// that special characters are treated literally in the regex pattern.
+// The pattern is designed to match an item in a string that is delimited
+func (query) MatchDelimitedItem(elems []string, sep string) string {
+	if len(elems) == 0 {
+		return ""
+	}
+
+	strs := make([]string, len(elems))
+	for i, elem := range elems {
+		strs[i] = Query.Escape(elem)
+	}
+
+	return fmt.Sprintf("/(^|%s)(%s)(%s|$)/", sep, strings.Join(strs, "|"), sep)
 }
 
 func (query) JoinUUIDs(elems []uuid.UUID, sep string) string {

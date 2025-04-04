@@ -1781,13 +1781,12 @@ func ServerScoresRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 			return "", err
 		}
 
-		zapLogger := RuntimeLoggerToZapLogger(logger)
-		latencyHistory, err := LoadLatencyHistory(ctx, zapLogger, db, uuid.FromStringOrNil(userID))
-		if err != nil {
-			return "", err
+		latencyHistory := &LatencyHistory{}
+		if _, err := StorageRead(ctx, nk, userID, latencyHistory, false); err != nil {
+			return "", fmt.Errorf("failed to read latency history: %w", err)
 		}
 
-		for ip, latency := range latencyHistory.AverageRTTs(false, true) {
+		for ip, latency := range latencyHistory.AverageRTTs(false) {
 			latencies[ip] = append(latencies[ip], latency)
 		}
 	}

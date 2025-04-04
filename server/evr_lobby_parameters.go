@@ -66,7 +66,7 @@ type LobbySessionParameters struct {
 	FailsafeTimeout           time.Duration                 `json:"failsafe_timeout"` // The failsafe timeout
 	FallbackTimeout           time.Duration                 `json:"fallback_timeout"` // The fallback timeout
 	DisplayName               string                        `json:"display_name"`
-	latencyHistory            LatencyHistory
+	latencyHistory            *LatencyHistory
 }
 
 func (p *LobbySessionParameters) GetPartySize() int {
@@ -265,9 +265,9 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		}
 	}
 
-	latencyHistory, err := LoadLatencyHistory(ctx, logger, p.db, session.userID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load latency history: %w", err)
+	latencyHistory := &LatencyHistory{}
+	if _, err := StorageRead(ctx, nk, userID, latencyHistory, true); err != nil {
+		return nil, fmt.Errorf("failed to load latency history: %v", err)
 	}
 
 	var lobbyGroupName string
@@ -357,17 +357,17 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 	}
 
 	// Set the maxRTT to at least the average of the player's latency history
-	averageRTT := 0
-	count := 0
-	if avgRTT := AverageLatencyHistories(latencyHistory); len(avgRTT) > 0 {
-		for _, rtt := range avgRTT {
+
+	if averages := latencyHistory.AverageRTTs(false); len(averages) > 0 {
+		averageRTT := 0
+		count := 0
+		for _, rtt := range averages {
 			averageRTT += rtt
 			count++
 		}
 		averageRTT /= count
+		maxServerRTT = max(maxServerRTT, averageRTT)
 	}
-
-	maxServerRTT = max(maxServerRTT, averageRTT)
 
 	isEarlyQuitter := sessionParams.isEarlyQuitter.Load()
 
@@ -531,12 +531,6 @@ func (p *LobbySessionParameters) FromMatchmakerEntry(entry *MatchmakerEntry) {
 		}
 	}
 
-	// Rebuild the latency history
-	p.latencyHistory = make(LatencyHistory)
-	for ip, rtt := range serverRTTs {
-		p.latencyHistory[ip] = make(map[int64]int)
-		p.latencyHistory[ip][time.Now().UTC().Unix()] = rtt
-	}
 }
 
 func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *MatchmakingTicketParameters) (string, map[string]string, map[string]float64) {
@@ -639,7 +633,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 	}
 
 	//maxDelta := 60 // milliseconds
-	for k, v := range AverageLatencyHistories(p.latencyHistory) {
+	for k, v := range p.latencyHistory.AverageRTTs(true) {
 		numericProperties[RTTPropertyPrefix+k] = float64(v)
 		//qparts = append(qparts, fmt.Sprintf("properties.%s:<=%d", k, v+maxDelta))
 	}
@@ -689,39 +683,4 @@ func (p LobbySessionParameters) PresenceMeta() PresenceMeta {
 	return PresenceMeta{
 		Status: p.String(),
 	}
-}
-
-func AverageLatencyHistories(histories LatencyHistory) map[string]int {
-	averages := make(map[string]int)
-
-	// Only consider the last 3 days of latency data
-	threedays := time.Now().Add(-time.Hour * 72).UTC().Unix()
-
-	for ip, history := range histories {
-		// Average the RTT
-		rtt := 0
-
-		if len(history) == 0 {
-			continue
-		}
-		count := 0
-		for ts, v := range history {
-			if ts < threedays {
-				continue
-			}
-			rtt += v
-			count++
-		}
-		if count == 0 || rtt == 0 {
-			continue
-		}
-
-		rtt /= count
-
-		rtt = mroundRTT(rtt, 10)
-
-		averages[ip] = rtt
-	}
-
-	return averages
 }
