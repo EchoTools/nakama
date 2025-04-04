@@ -1,35 +1,45 @@
 package server
 
 import (
-	"context"
-	"database/sql"
 	"encoding/json"
-	"slices"
+	"net"
 	"time"
-
-	"github.com/gofrs/uuid/v5"
-	"github.com/heroiclabs/nakama-common/api"
-	"go.uber.org/zap"
-	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
-type LabelWithLatency struct {
-	Label *MatchLabel
-	RTT   int
+var _ = VersionedStorable(&LatencyHistory{})
+
+type LatencyHistoryItem struct {
+	Timestamp time.Time     `json:"timestamp"`
+	RTT       time.Duration `json:"rtt"`
 }
 
-func (l LabelWithLatency) AsDuration() time.Duration {
-	return time.Duration(l.RTT) * time.Millisecond
+type LatencyHistory struct {
+	GameServerLatencies map[string][]LatencyHistoryItem `json:"game_server_latencies"`
+	version             string
 }
 
-// map[externalIP]map[timestamp]latency
-type LatencyHistory map[string]map[int64]int // map[externalIP]map[timestamp]latency
-
-func NewLatencyHistory() LatencyHistory {
-	return make(LatencyHistory)
+func NewLatencyHistory() *LatencyHistory {
+	return &LatencyHistory{
+		GameServerLatencies: make(map[string][]LatencyHistoryItem),
+	}
 }
 
-func (h LatencyHistory) String() string {
+func (*LatencyHistory) StorageID() StorageID {
+	return StorageID{
+		Collection: StorageCollectionDeveloper,
+		Key:        StorageKeyApplications,
+	}
+}
+
+func (h *LatencyHistory) GetVersion() string {
+	return h.version
+}
+
+func (h *LatencyHistory) SetVersion(version string) {
+	h.version = version
+}
+
+func (h *LatencyHistory) String() string {
 	data, err := json.Marshal(h)
 	if err != nil {
 		return ""
@@ -37,98 +47,97 @@ func (h LatencyHistory) String() string {
 	return string(data)
 }
 
-func (h LatencyHistory) Add(extIP string, rtt int) {
-	if _, ok := h[extIP]; !ok {
-		h[extIP] = make(map[int64]int)
+// Add adds a new RTT to the history for the given external IP
+func (h *LatencyHistory) Add(extIP net.IP, rtt int, limit int, expiry time.Time) {
+	history, ok := h.GameServerLatencies[extIP.String()]
+	if !ok {
+		history = make([]LatencyHistoryItem, 0)
+		h.GameServerLatencies[extIP.String()] = history
 	}
-	h[extIP][time.Now().UTC().Unix()] = rtt
+
+	// Add the new RTT to the history
+	history = append(history, LatencyHistoryItem{
+		Timestamp: time.Now(),
+		RTT:       time.Duration(rtt) * time.Millisecond,
+	})
+
+	if len(history) > limit {
+		// Remove the oldest entries
+		history = history[len(history)-limit:]
+	}
+
+	// Remove entries older than the expiry time
+	for i := range history {
+		if history[i].Timestamp.Before(expiry) {
+			history = history[:i]
+			break
+		}
+	}
+
+	// Set the updated history back
+	h.GameServerLatencies[extIP.String()] = history
 }
 
-func (h LatencyHistory) LatestRTTs() map[string]int {
+// LatestRTTs returns the latest RTTs for all game servers
+func (h *LatencyHistory) LatestRTTs() map[string]int {
 	latestRTTs := make(map[string]int)
-	for extIP, history := range h {
-		latestTS := int64(0)
-		for ts, rtt := range history {
-			if rtt == 0 {
-				continue
-			}
-			if ts > latestTS {
-				latestTS = ts
-				latestRTTs[extIP] = rtt
+	for extIP, history := range h.GameServerLatencies {
+		for i := len(history) - 1; i >= 0; i-- {
+			if history[i].RTT > 0 {
+				latestRTTs[extIP] = int(history[i].RTT.Milliseconds())
+				break
 			}
 		}
 	}
 	return latestRTTs
 }
 
-func (h LatencyHistory) LatestRTT(extIP string) int {
-	if history, ok := h[extIP]; !ok || len(history) == 0 {
+// LatestRTT returns the latest RTT for a single external IP
+func (h *LatencyHistory) LatestRTT(extIP net.IP) int {
+	if history, ok := h.GameServerLatencies[extIP.String()]; !ok || len(history) == 0 {
 		return 0
 	} else {
-		latestTS := int64(0)
-		latestRTT := 999
-		for ts, rtt := range history {
-			if rtt == 0 {
-				continue
-			}
-			if ts > latestTS {
-				latestTS = ts
-				latestRTT = rtt
+		for i := len(history) - 1; i >= 0; i-- {
+			if history[i].RTT > 0 {
+				return int(history[i].RTT.Milliseconds())
 			}
 		}
-		return latestRTT
+		return 0
 	}
 }
 
-// Return the average rtt for a single external IP
-func (h LatencyHistory) AverageRTT(extIP string, roundRTT bool) int {
-	if history, ok := h[extIP]; !ok || len(history) == 0 {
+// AverageRTT returns the average RTT for a single external IP
+func (h *LatencyHistory) AverageRTT(extIP string, roundRTT bool) int {
+	history, ok := h.GameServerLatencies[extIP]
+	if !ok || len(history) == 0 {
 		return 0
-	} else {
-		average := 0
-		for _, l := range history {
-			average += l
-		}
-		average /= len(history)
-		if roundRTT {
-			average = (average + 5) / 10 * 10
-		}
-		return average
 	}
+
+	average := 0
+	for _, l := range history {
+		average += int(l.RTT.Milliseconds())
+	}
+	average /= len(history)
+
+	if roundRTT {
+		average = (average + 5) / 10 * 10
+	}
+
+	return average
 }
 
-// RTTs by external IP
-func (h LatencyHistory) AverageRTTs(roundRTTs, includeUnreachable bool) map[string]int {
-	rttByIP := make(map[string][]int)
+// AverageRTTs returns the average RTTs for all game servers
+func (h *LatencyHistory) AverageRTTs(roundRTTs bool) map[string]int {
 	averageRTTs := make(map[string]int)
-
-	for extIP, history := range h {
-
-		for _, rtt := range history {
-			if rtt == 0 || rtt == 999 {
-				if !includeUnreachable {
-					continue
-				}
-				rtt = 999
-			}
-
-			rttByIP[extIP] = append(rttByIP[extIP], rtt)
-		}
-	}
-
-	for extIP, rtt := range rttByIP {
-		if len(rtt) == 0 {
-			if !includeUnreachable {
-				continue
-			}
-			averageRTTs[extIP] = 999
+	for extIP, history := range h.GameServerLatencies {
+		if len(history) == 0 {
 			continue
 		}
 		average := 0
-		for _, l := range rtt {
-			average += l
+		for _, l := range history {
+			average += int(l.RTT.Milliseconds())
 		}
-		average /= len(rtt)
+		average /= len(history)
 
 		if roundRTTs {
 			average = (average + 5) / 10 * 10
@@ -136,96 +145,13 @@ func (h LatencyHistory) AverageRTTs(roundRTTs, includeUnreachable bool) map[stri
 
 		averageRTTs[extIP] = average
 	}
-
 	return averageRTTs
 }
 
-func (h LatencyHistory) LabelsByAverageRTT(labels []*MatchLabel) []LabelWithLatency {
-	if len(labels) == 0 {
-		return make([]LabelWithLatency, 0)
+func (h *LatencyHistory) Get(extIP string) ([]LatencyHistoryItem, bool) {
+	history, ok := h.GameServerLatencies[extIP]
+	if !ok || len(history) == 0 {
+		return nil, false
 	}
-
-	labelRTTs := make([]LabelWithLatency, 0, len(labels))
-	for _, label := range labels {
-		if history, ok := h[label.GameServer.Endpoint.GetExternalIP()]; ok {
-			if len(history) == 0 {
-				labelRTTs = append(labelRTTs, LabelWithLatency{Label: label, RTT: 999})
-				continue
-			}
-			average := 0
-			for _, l := range history {
-				average += l
-			}
-			average /= len(history)
-			labelRTTs = append(labelRTTs, LabelWithLatency{Label: label, RTT: average})
-		} else {
-			labelRTTs = append(labelRTTs, LabelWithLatency{Label: label, RTT: 999})
-		}
-	}
-
-	slices.SortStableFunc(labelRTTs, func(a, b LabelWithLatency) int {
-		if a.RTT == 0 || a.RTT > 250 {
-			return 999
-		}
-		return a.RTT - b.RTT
-	})
-	return labelRTTs
-}
-
-// map[externalIP]map[timestamp]latency
-func LoadLatencyHistory(ctx context.Context, logger *zap.Logger, db *sql.DB, userID uuid.UUID) (LatencyHistory, error) {
-
-	result, err := StorageReadObjects(ctx, logger, db, userID, []*api.ReadStorageObjectId{
-		{
-			Collection: LatencyHistoryStorageCollection,
-			Key:        LatencyHistoryStorageKey,
-			UserId:     userID.String(),
-		},
-	})
-	if err != nil {
-		return nil, err
-	}
-	objs := result.GetObjects()
-	if len(objs) == 0 {
-		return make(LatencyHistory), nil
-	}
-	var latencyHistory LatencyHistory
-	if err := json.Unmarshal([]byte(objs[0].GetValue()), &latencyHistory); err != nil {
-		return nil, err
-	}
-
-	return latencyHistory, nil
-}
-
-func StoreLatencyHistory(ctx context.Context, logger *zap.Logger, db *sql.DB, metrics Metrics, storageIndex StorageIndex, userID uuid.UUID, latencyHistory LatencyHistory) error {
-	// Delete any records older than 1 week
-	twoWeeksAgo := time.Now().AddDate(0, 0, -7).Unix()
-	for _, history := range latencyHistory {
-		for ts := range history {
-			if ts < twoWeeksAgo {
-				delete(history, ts)
-			}
-		}
-	}
-
-	for ip, history := range latencyHistory {
-		if len(history) == 0 {
-			delete(latencyHistory, ip)
-		}
-	}
-
-	ops := StorageOpWrites{&StorageOpWrite{
-		OwnerID: userID.String(),
-		Object: &api.WriteStorageObject{
-			Collection:      LatencyHistoryStorageCollection,
-			Key:             LatencyHistoryStorageKey,
-			Value:           latencyHistory.String(),
-			PermissionRead:  &wrapperspb.Int32Value{Value: int32(1)},
-			PermissionWrite: &wrapperspb.Int32Value{Value: int32(0)},
-		},
-	}}
-	if _, _, err := StorageWriteObjects(ctx, logger, db, metrics, storageIndex, true, ops); err != nil {
-		return err
-	}
-	return nil
+	return history, true
 }

@@ -93,30 +93,32 @@ func (p *EvrPipeline) lobbySessionRequest(ctx context.Context, logger *zap.Logge
 // lobbyPingResponse is a message responding to a ping request.
 func (p *EvrPipeline) lobbyPingResponse(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	response := in.(*evr.LobbyPingResponse)
-	results := response.Results
-	pipeline := session.pipeline
-	now := time.Now().UTC().Unix()
 
-	latencyHistory, err := LoadLatencyHistory(ctx, logger, pipeline.db, session.userID)
-	if err != nil {
-		return status.Errorf(codes.Internal, "failed to load latency history: %v", err)
+	var (
+		now            = time.Now().UTC()
+		expiry         = now.Add(-14 * 24 * time.Hour)
+		latencyHistory = &LatencyHistory{}
+		limit          = 25
+	)
+
+	if v, err := StorageRead(ctx, p.nk, session.UserID().String(), latencyHistory, false); err != nil {
+		return status.Errorf(codes.Internal, "failed to read latency history: %v", err)
+	} else if v == "" {
+		latencyHistory = NewLatencyHistory()
 	}
 
-	// The ping response will only return successful pings.
-
-	for _, r := range results {
-		extIP := r.GetExternalIP()
-		if h, ok := latencyHistory[extIP]; ok {
-			h[now] = int(r.PingMilliseconds)
-		} else {
-			latencyHistory[extIP] = map[int64]int{now: int(r.PingMilliseconds)}
+	for _, result := range response.Results {
+		ip := result.ExternalIP
+		if result.ExternalIP.IsUnspecified() {
+			ip = result.InternalIP
 		}
+
+		latencyHistory.Add(ip, int(result.PingMilliseconds), limit, expiry)
 	}
 
-	if err := StoreLatencyHistory(ctx, logger, pipeline.db, session.metrics, session.storageIndex, session.userID, latencyHistory); err != nil {
-		return status.Errorf(codes.Internal, "failed to store latency history: %v", err)
+	if _, err := StorageWrite(ctx, p.nk, session.UserID().String(), latencyHistory); err != nil {
+		return status.Errorf(codes.Internal, "failed to write latency history: %v", err)
 	}
-
 	return session.SendEvrUnrequire()
 }
 
