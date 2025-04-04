@@ -358,7 +358,7 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 					// If the error is a lock error, just try again.
 					if err == ErrFailedToAcquireLock {
 						// Wait until after the "avoidance time" to give time for the server to be created.
-						<-time.After(20 * time.Second)
+						<-time.After(3 * time.Second)
 						continue
 					}
 
