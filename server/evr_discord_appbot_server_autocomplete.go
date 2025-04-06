@@ -32,7 +32,7 @@ func (c RegionAutocompleteData) Description() string {
 func (d *DiscordAppBot) autocompleteRegions(ctx context.Context, logger runtime.Logger, userID string, groupID string) ([]*discordgo.ApplicationCommandOptionChoice, error) {
 
 	latencyHistory := &LatencyHistory{}
-	if _, err := StorageRead(ctx, d.nk, userID, latencyHistory, false); err != nil {
+	if err := StorageRead(ctx, d.nk, userID, latencyHistory, false); err != nil {
 		logger.Error("Failed to read latency history", zap.Error(err))
 		return nil, err
 	}

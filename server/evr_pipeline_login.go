@@ -748,13 +748,15 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 	if !ok {
 		return errors.New("session parameters not found")
 	}
+	userID := session.userID.String()
+	groupID := params.accountMetadata.GetActiveGroupID().String()
 
 	modes := []evr.Symbol{
 		evr.ModeArenaPublic,
 		evr.ModeCombatPublic,
 	}
 
-	serverProfile, err := UserServerProfileFromParameters(ctx, logger, p.db, p.nk, params, params.accountMetadata.GetActiveGroupID().String(), modes, 0)
+	serverProfile, err := UserServerProfileFromParameters(ctx, logger, p.db, p.nk, params, groupID, modes, 0)
 	if err != nil {
 		return fmt.Errorf("failed to get server profile: %w", err)
 	}
@@ -767,9 +769,9 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 	}
 
 	// Check if the user is required to go through community values
-	if records, err := EnforcementCommunityValuesSearch(ctx, p.nk, clientProfile.Social.Channel.String(), session.userID.String()); err != nil {
+	if isRequired, err := EnforcementCommunityValuesSearch(ctx, p.nk, groupID, userID); err != nil {
 		logger.Warn("Failed to search for community values", zap.Error(err))
-	} else if len(records) > 0 {
+	} else if isRequired {
 		clientProfile.Social.CommunityValuesVersion = 0
 	}
 
@@ -796,31 +798,42 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 	if !ok {
 		return errors.New("session parameters not found")
 	}
-
-	gg := p.guildGroupRegistry.Get(params.accountMetadata.GetActiveGroupID().String())
+	userID := session.userID.String()
+	groupID := params.accountMetadata.GetActiveGroupID().String()
+	gg := p.guildGroupRegistry.Get(groupID)
 	if gg == nil {
-		return fmt.Errorf("guild group not found: %s", params.accountMetadata.GetActiveGroupID().String())
+		return fmt.Errorf("guild group not found: %s", groupID)
 	}
 
 	hasCompleted := update.Social.CommunityValuesVersion != 0
-
-	if guildRecords, err := EnforcementCommunityValuesSearch(ctx, p.nk, update.Social.Channel.String(), session.userID.String()); err != nil {
+	hasCompleted = false
+	if isRequired, err := EnforcementCommunityValuesSearch(ctx, p.nk, groupID, userID); err != nil {
 		logger.Warn("Failed to search for community values", zap.Error(err))
-	} else if hasCompleted && len(guildRecords) > 0 {
-		for _, records := range guildRecords {
-			for _, r := range records.Records {
-				if r.CommunityValuesRequired {
-					r.CommunityValuesCompletedAt = time.Now()
-				}
+	} else if isRequired && hasCompleted {
+		// get teh guildRecords
+		guildRecords, err := EnforcementSearch(ctx, p.nk, groupID, []string{userID})
+		if err != nil {
+			logger.Warn("Failed to search for community values", zap.Error(err))
+			return fmt.Errorf("failed to search for community values: %w", err)
+		}
+
+		if records, ok := guildRecords[groupID]; ok {
+			records.CommunityValuesCompletedAt = time.Now().UTC()
+			records.IsCommunityValuesRequired = false
+
+			if _, err := StorageWrite(ctx, p.nk, userID, records); err != nil {
+				logger.Warn("Failed to write community values", zap.Error(err))
+			}
+
+			// Log the audit message
+			if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("User <@%s> has accepted the community values.", params.DiscordID()), false); err != nil {
+				logger.Warn("Failed to log audit message", zap.Error(err))
 			}
 		}
-		// Log the audit message
-		if _, err := p.appBot.LogAuditMessage(ctx, gg.IDStr(), fmt.Sprintf("User <@%s> has accepted the community values.", params.DiscordID()), false); err != nil {
-			logger.Warn("Failed to log audit message", zap.Error(err))
-		}
+
 	}
 
-	metadata, err := AccountMetadataLoad(ctx, p.nk, session.userID.String())
+	metadata, err := AccountMetadataLoad(ctx, p.nk, userID)
 	if err != nil {
 		return fmt.Errorf("failed to load account metadata: %w", err)
 	}
@@ -839,7 +852,7 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 	metadata.NewUnlocks = update.NewUnlocks
 	metadata.CustomizationPOIs = update.Customization
 
-	if err := AccountMetadataUpdate(ctx, p.nk, session.userID.String(), metadata); err != nil {
+	if err := AccountMetadataUpdate(ctx, p.nk, userID, metadata); err != nil {
 		return fmt.Errorf("failed to update account metadata: %w", err)
 	}
 
@@ -1124,6 +1137,49 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 	if data, ok = p.profileCache.Load(request.EvrId); !ok {
 		logger.Error("Profile does not exist in cache.", zap.String("evrId", request.EvrId.String()))
 		return nil
+	}
+
+	// If this user is an Enforcer let them see how many times that player has been reported in the past week
+	params, ok := LoadParams(ctx)
+	if !ok {
+		return errors.New("session parameters not found")
+	}
+
+	var err error
+	userID := session.userID.String()
+	groupID := params.accountMetadata.GetActiveGroupID().String()
+
+	if gg := p.guildGroupRegistry.Get(groupID); gg != nil {
+		if gg.IsEnforcer(userID) {
+			serverProfile := &evr.ServerProfile{}
+			if err := json.Unmarshal(data, serverProfile); err != nil {
+				logger.Error("Failed to unmarshal server profile", zap.Error(err))
+				return fmt.Errorf("failed to unmarshal server profile: %w", err)
+			}
+
+			count := 0
+			// Get the number of reports for this user in the last week
+			if guildRecords, err := EnforcementSearch(ctx, p.nk, groupID, []string{userID}); err != nil {
+				logger.Error("Failed to search for enforcement records", zap.Error(err))
+			} else if len(guildRecords) > 0 {
+				for _, records := range guildRecords {
+					for _, r := range records.Records {
+						// SHow all reports for the past week
+						if r.CreatedAt.After(time.Now().Add(-time.Hour * 24 * 7)) {
+							count += 1
+						}
+					}
+				}
+			}
+			// Add the count to the players display name
+			serverProfile.DisplayName = fmt.Sprintf("%s [%d]", serverProfile.DisplayName, count)
+
+			data, err = json.Marshal(serverProfile)
+			if err != nil {
+				logger.Error("Failed to marshal server profile", zap.Error(err))
+				return fmt.Errorf("failed to marshal server profile: %w", err)
+			}
+		}
 	}
 
 	response := &evr.OtherUserProfileSuccess{

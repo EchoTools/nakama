@@ -229,15 +229,17 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 
 		return ErrSuspended
 	}
-	if recordsByGuild, err := EnforcementSuspensionSearch(ctx, p.nk, groupID, userID, false); err != nil {
+	if recordsByGuild, err := EnforcementSuspensionSearch(ctx, p.nk, groupID, []string{userID}, false); err != nil {
 		logger.Warn("Unable to read enforcement records", zap.Error(err))
 	} else if len(recordsByGuild) > 0 {
 		var latestRecord *GuildEnforcementRecord
 
-		for _, records := range recordsByGuild {
-			for _, r := range records.Records {
-				if latestRecord == nil || r.CreatedAt.After(latestRecord.CreatedAt) && time.Now().Before(r.SuspensionExpiry) {
-					latestRecord = r
+		for _, byUserID := range recordsByGuild {
+			for _, records := range byUserID {
+				for _, r := range records.Records {
+					if latestRecord == nil || r.CreatedAt.After(latestRecord.CreatedAt) && time.Now().Before(r.SuspensionExpiry) {
+						latestRecord = r
+					}
 				}
 			}
 		}
@@ -245,13 +247,18 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		if latestRecord != nil {
 			// User has an active suspension
 			metricsTags["error"] = "suspended_user"
-			if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("Rejected suspended user <@%s> (%s) (timeout expires <t:%d:R>)", userID, latestRecord.SuspensionNotice, latestRecord.SuspensionExpiry.Unix()), true); err != nil {
+			if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("Rejected suspended user <@%s> (%s) (expires <t:%d:R>)", userID, latestRecord.SuspensionNotice, latestRecord.SuspensionExpiry.Unix()), true); err != nil {
 				p.logger.Warn("Failed to send audit message", zap.String("channel_id", gg.AuditChannelID), zap.Error(err))
 			}
+			const maxMessageLength = 60
+			message := latestRecord.SuspensionNotice
+			expires := fmt.Sprintf(" [exp: %s]", formatDuration(time.Until(latestRecord.SuspensionExpiry), false))
 
-			duration := formatDuration(latestRecord.SuspensionExpiry.Sub(time.Now()))
-
-			return NewLobbyError(KickedFromLobbyGroup, fmt.Sprintf("%s (expires in %s)", latestRecord.SuspensionNotice, duration))
+			if len(message)+len(expires) > maxMessageLength {
+				message = message[:maxMessageLength-len(expires)-3] + "..."
+			}
+			message = message + expires
+			return NewLobbyError(KickedFromLobbyGroup, message)
 		}
 	}
 
@@ -418,32 +425,48 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 	return nil
 }
 
-func formatDuration(d time.Duration) string {
+func formatDuration(d time.Duration, withSeconds bool) string {
 	// Format the duration as a string in the format "1d1h2m3s"
 	// if it's more than 1 day, it's "1d1h" (the hour is rounded up)
 	// if it's more than 1 minute, it's "1h15m" (the minute is rounded up)
 	// if it's more than 1 seconds, it's "30s" (the seconds are rounded up)
 
-	days := int(d.Hours() / 24)
-	hours := int(d.Hours()) % 24
-	minutes := int(d.Minutes()) % 60
-	seconds := int(d.Seconds()) % 60
+	isNegative := d < 0
+	if isNegative {
+		d = -d
+	}
+	// Calculate the number of days, hours, minutes, and seconds
+	var (
+		days    = int(d.Hours() / 24)
+		hours   = int(d.Hours()) % 24
+		minutes = int(d.Minutes()) % 60
+		seconds = int(d.Seconds()) % 60
+	)
+
+	if !withSeconds && seconds > 0 {
+		minutes++
+	}
 
 	var result string
 	if days > 0 {
 		result += fmt.Sprintf("%dd", days)
 	}
-	if hours > 0 {
+	if days > 0 || hours > 0 {
 		result += fmt.Sprintf("%dh", hours)
 	}
-	if minutes > 0 {
+
+	if days > 0 || hours > 0 || minutes > 0 {
 		result += fmt.Sprintf("%dm", minutes)
 	}
-	if seconds > 0 {
+	if seconds > 0 && withSeconds {
 		result += fmt.Sprintf("%ds", seconds)
 	}
+
 	if result == "" {
 		result = "0s"
+	}
+	if isNegative {
+		result = "-" + result
 	}
 	return result
 }

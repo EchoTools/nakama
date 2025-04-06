@@ -206,86 +206,93 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 		return fmt.Errorf("failed to load login history: %w", err)
 	}
 
-	firstIDs := make([]string, 0, len(loginHistory.AlternateMap))
-
 	displayAuditMessage := false
 	if updated := loginHistory.NotifyGroup(groupID, gg.AlternateAccountNotificationExpiry); updated {
 		displayAuditMessage = true
 	}
 
+	var (
+		firstIDs     = make([]string, 0, len(loginHistory.AlternateMap))
+		secondaryIDs = make([]string, 0, len(loginHistory.SecondDegreeAlternates))
+		alternateIDs = make([]string, 0, len(loginHistory.AlternateMap)+len(loginHistory.SecondDegreeAlternates))
+	)
+
 	for k := range loginHistory.AlternateMap {
 		firstIDs = append(firstIDs, k)
 	}
 
-	firstDegree := make([]string, 0, len(firstIDs))
-	if len(firstIDs) > 0 {
-		firstDegreeAccounts, err := h.nk.AccountsGetId(ctx, firstIDs)
+	for _, v := range loginHistory.SecondDegreeAlternates {
+		secondaryIDs = append(secondaryIDs, v)
+	}
+
+	alternateIDs = append(secondaryIDs, firstIDs...)
+
+	slices.Sort(alternateIDs)
+	alternateIDs = slices.Compact(alternateIDs)
+
+	addonStrs := make(map[string][]string, len(alternateIDs))
+
+	if len(alternateIDs) > 0 {
+
+		accountMap := make(map[string]*api.Account, len(alternateIDs))
+		accounts, err := h.nk.AccountsGetId(ctx, alternateIDs)
 		if err != nil {
 			return fmt.Errorf("failed to get alternate accounts: %w", err)
 		}
 
-		for _, a := range firstDegreeAccounts {
-			if a.User.Id == userID {
+		for _, a := range accounts {
+			accountMap[a.User.Id] = a
+			if a.DisableTime != nil {
+				addonStrs[a.User.Id] = append(addonStrs[a.User.Id], "disabled")
+				displayAuditMessage = true
+			}
+		}
+
+		if guildRecords, err := EnforcementSearch(ctx, h.nk, groupID, append(alternateIDs, userID)); err != nil && len(guildRecords) > 0 {
+			for _, records := range guildRecords {
+				if len(records.ActiveSuspensions()) > 0 {
+					addonStrs[records.UserID] = append(addonStrs[records.UserID], fmt.Sprintf("suspended until <t:%d:R>", records.ActiveSuspensions()[0].SuspensionExpiry.UTC().Unix()))
+					displayAuditMessage = true
+				}
+			}
+		}
+
+		for _, u := range firstIDs {
+			if u == userID {
+				continue
+			}
+		}
+
+		var (
+			firstDegreeStrs  = make([]string, 0, len(firstIDs))
+			secondDegreeStrs = make([]string, 0, len(secondaryIDs))
+		)
+
+		for _, a := range firstIDs {
+			// Check if any are banned, or currently suspended by the guild
+			s := fmt.Sprintf("<@%s> (%s)", a, accountMap[a].User.Username)
+			if addons, ok := addonStrs[a]; ok {
+				s += " *[" + strings.Join(addons, ", ") + "]*"
+			}
+			firstDegreeStrs = append(firstDegreeStrs, s)
+		}
+
+		for _, a := range secondaryIDs {
+			if a == userID {
+				continue
+			}
+			if slices.Contains(firstIDs, a) {
 				continue
 			}
 
-			states := make([]string, 0)
-
-			if gg.IsSuspended(a.User.Id, nil) {
-				states = append(states, "suspended")
-				displayAuditMessage = true
+			s := fmt.Sprintf("<@%s> (%s)", a, accountMap[a].User.Username)
+			if addons, ok := addonStrs[a]; ok {
+				s += " *[" + strings.Join(addons, ", ") + "]*"
 			}
-			if a.DisableTime != nil {
-				states = append(states, "disabled")
-			}
-			if ok, expiry := gg.IsTimedOut(a.User.Id); ok {
-				states = append(states, fmt.Sprintf("timeout expires <t:%d:R>", expiry.UTC().Unix()))
-				displayAuditMessage = true
-			}
-			s := fmt.Sprintf("<@%s> (%s)", a.CustomId, a.User.Username)
-
-			if len(states) > 0 {
-				s = s + fmt.Sprintf(" *[%s]*", strings.Join(states, ", "))
-			}
-
-			firstDegree = append(firstDegree, s)
+			secondDegreeStrs = append(secondDegreeStrs, s)
 		}
 
-		secondDegree := make([]string, 0, len(loginHistory.SecondDegreeAlternates))
-
-		if len(loginHistory.SecondDegreeAlternates) > 0 {
-
-			secondDegreeAccounts, err := h.nk.AccountsGetId(ctx, loginHistory.SecondDegreeAlternates)
-			if err != nil {
-				return fmt.Errorf("failed to get alternate accounts: %w", err)
-			}
-
-			for _, a := range secondDegreeAccounts {
-				// Check if any are banned, or currently suspended by the guild
-				if a.User.Id == userID || slices.Contains(firstIDs, a.User.Id) {
-					continue
-				}
-				states := make([]string, 0)
-
-				if gg.IsSuspended(a.User.Id, nil) {
-					states = append(states, "suspended")
-				}
-				if a.DisableTime != nil {
-					states = append(states, "disabled")
-				}
-				if ok, expiry := gg.IsTimedOut(a.User.Id); ok {
-					states = append(states, fmt.Sprintf("timeout expires <t:%d:R>", expiry.UTC().Unix()))
-				}
-				s := fmt.Sprintf("<@%s> (%s)", a.CustomId, a.User.Username)
-
-				if len(states) > 0 {
-					s = s + fmt.Sprintf(" *[%s]*", strings.Join(states, ", "))
-				}
-				secondDegree = append(secondDegree, s)
-			}
-		}
-
-		if len(firstDegree)+len(secondDegree) > 0 && displayAuditMessage {
+		if (len(firstDegreeStrs)+len(secondDegreeStrs)) > 0 && displayAuditMessage {
 			users, err := h.nk.AccountsGetId(ctx, []string{userID})
 			if err != nil {
 				return fmt.Errorf("failed to get alternate accounts: %w", err)
@@ -293,10 +300,10 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 				return fmt.Errorf("failed to get user")
 			}
 
-			content := fmt.Sprintf("<@%s> (%s) detected as a likely alternate of: %s", params.DiscordID(), users[0].User.Username, strings.Join(firstDegree, ", "))
+			content := fmt.Sprintf("<@%s> (%s) detected as a likely alternate of: %s", params.DiscordID(), users[0].User.Username, strings.Join(firstDegreeStrs, ", "))
 
-			if len(secondDegree) > 0 {
-				content += fmt.Sprintf("\nSecond degree (possible) alternates: %s\n", strings.Join(secondDegree, ", "))
+			if len(secondDegreeStrs) > 0 {
+				content += fmt.Sprintf("\nSecond degree (possible) alternates: %s\n", strings.Join(secondDegreeStrs, ", "))
 			}
 			_, _ = s.(*sessionWS).evrPipeline.appBot.LogAuditMessage(ctx, groupID, content, false)
 		}

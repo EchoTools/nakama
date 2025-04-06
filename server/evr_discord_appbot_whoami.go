@@ -386,17 +386,33 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 					if len(roles) > 0 {
 						groupStr += fmt.Sprintf(" (%s)", strings.Join(roles, ", "))
 					}
-
-					if ok, expiry := group.IsTimedOut(userIDStr); ok {
-						groupStr += fmt.Sprintf("\n-  timeout expires <t:%d:R>", expiry.UTC().Unix())
-					}
 				}
 
 				output = append(output, groupStr)
 			}
-
 			return output
 		}(), "\n"), Inline: false},
+		{Name: "Active Suspensions", Value: func() string {
+			s := ""
+			if guildRecords, err := EnforcementSuspensionSearch(ctx, nk, "", []string{userID.String()}, false); err == nil {
+				for groupID, byUserID := range guildRecords {
+					for _, records := range byUserID {
+						for _, r := range records.Records {
+							if r.IsSuspended() {
+								gg, ok := guildGroups[groupID]
+								if !ok {
+									continue
+								}
+
+								s += fmt.Sprintf("%s - %s (expires %s)\n", gg.Group.Name, r.SuspensionNotice, formatDuration(time.Until(r.SuspensionExpiry), true))
+							}
+						}
+					}
+				}
+
+			}
+			return s
+		}(), Inline: false},
 		{Name: "Match List", Value: strings.Join(lo.Map(whoami.MatchLabels, func(l *MatchLabel, index int) string {
 			link := fmt.Sprintf("https://echo.taxi/spark://c/%s", strings.ToUpper(l.ID.UUID.String()))
 			players := make([]string, 0, len(l.Players))

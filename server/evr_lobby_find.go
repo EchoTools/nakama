@@ -481,7 +481,7 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 func (p *EvrPipeline) CheckServerPing(ctx context.Context, logger *zap.Logger, session *sessionWS, groupID string) error {
 
 	latencyHistory := &LatencyHistory{}
-	if _, err := StorageRead(ctx, p.nk, session.UserID().String(), latencyHistory, false); err != nil {
+	if err := StorageRead(ctx, p.nk, session.UserID().String(), latencyHistory, false); err != nil {
 		logger.Warn("Failed to read latency history", zap.Error(err))
 		return fmt.Errorf("failed to read latency history: %w", err)
 	} else {

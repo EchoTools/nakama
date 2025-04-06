@@ -19,15 +19,20 @@ const (
 var _ = IndexedVersionedStorable(&GuildEnforcementRecords{})
 
 type GuildEnforcementRecords struct {
-	UserID  string
-	GroupID string                    `json:"group_id"`
-	Records []*GuildEnforcementRecord `json:"records"`
+	SuspensionExpiry           time.Time                 `json:"suspension_expiry"`
+	CommunityValuesCompletedAt time.Time                 `json:"community_values_completed_at"`
+	IsCommunityValuesRequired  bool                      `json:"is_community_values_required"`
+	UserID                     string                    `json:"user_id"`
+	GroupID                    string                    `json:"group_id"`
+	Records                    []*GuildEnforcementRecord `json:"records"`
 
 	version string
 }
 
-func NewGuildEnforcementRecords() *GuildEnforcementRecords {
+func NewGuildEnforcementRecords(userID, groupID string) *GuildEnforcementRecords {
 	return &GuildEnforcementRecords{
+		UserID:  userID,
+		GroupID: groupID,
 		Records: []*GuildEnforcementRecord{},
 	}
 }
@@ -50,7 +55,9 @@ func (s GuildEnforcementRecords) StorageIndex() *StorageIndexMeta {
 	return &StorageIndexMeta{
 		Name:       StorageCollectionEnforcementJournalIndex,
 		Collection: StorageCollectionEnforcementJournal,
-		Fields:     []string{"records.user_id", "records.guild_id", "records.suspension_expiry", "records.community_values_required", "records.community_values_completed"},
+		Fields:     []string{"user_id", "group_id", "suspension_expiry", "is_community_values_required"},
+		MaxEntries: 10000000,
+		IndexOnly:  true,
 	}
 }
 
@@ -72,27 +79,48 @@ func (s *GuildEnforcementRecords) ActiveSuspensions() []*GuildEnforcementRecord 
 	return active
 }
 
-func (s *GuildEnforcementRecords) RequiresCommunityValues() bool {
-	for _, r := range s.Records {
-		if r.CommunityValuesRequired && r.CommunityValuesCompletedAt.IsZero() {
-			return true
+func (s *GuildEnforcementRecords) MarshalJSON() ([]byte, error) {
+
+	for i := len(s.Records) - 1; i >= 0; i-- {
+		if s.Records[i].IsSuspended() && s.Records[i].SuspensionExpiry.After(s.SuspensionExpiry) {
+			s.SuspensionExpiry = s.Records[i].SuspensionExpiry
 		}
 	}
-	return false
+
+	s.IsCommunityValuesRequired = false
+	for i := len(s.Records) - 1; i >= 0; i-- {
+		if s.Records[i].CommunityValuesRequired && s.Records[i].CreatedAt.After(s.CommunityValuesCompletedAt) {
+			// Set the flag to true if any record requires community values
+			s.IsCommunityValuesRequired = true
+			break
+		}
+	}
+
+	// Use the default JSON marshaler for the struct
+	type Alias GuildEnforcementRecords
+	b, err := json.Marshal(&struct {
+		*Alias
+	}{
+		Alias: (*Alias)(s),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return b, nil
 }
 
 type GuildEnforcementRecord struct {
-	ID                         string    `json:"id"`
-	EnforcerUserID             string    `json:"enforcer_id"`
-	CreatedAt                  time.Time `json:"created_at"`
-	SuspensionNotice           string    `json:"suspension_notice"`
-	SuspensionExpiry           time.Time `json:"suspension_expiry"`
-	CommunityValuesRequired    bool      `json:"community_values_required"`
-	CommunityValuesCompletedAt time.Time `json:"community_values_completed_at"`
-	Notes                      string    `json:"notes"`
+	ID                      string    `json:"id"`
+	EnforcerUserID          string    `json:"enforcer_id"`
+	CreatedAt               time.Time `json:"created_at"`
+	SuspensionNotice        string    `json:"suspension_notice"`
+	SuspensionExpiry        time.Time `json:"suspension_expiry"`
+	CommunityValuesRequired bool      `json:"community_values_required"`
+	Notes                   string    `json:"notes"`
 }
 
-func NewEnforcementGuildEntry(guildID, enforcerUserID string, suspensionNotice, notes string, suspensionExpiry time.Time) *GuildEnforcementRecord {
+func NewGuildEnforcementRecord(enforcerUserID string, suspensionNotice, notes string, requireCommunityValues bool, suspensionExpiry time.Time) *GuildEnforcementRecord {
 	return &GuildEnforcementRecord{
 		ID:               uuid.Must(uuid.NewV4()).String(),
 		EnforcerUserID:   enforcerUserID,
@@ -108,22 +136,64 @@ func (s *GuildEnforcementRecord) IsSuspended() bool {
 }
 
 func (s *GuildEnforcementRecord) RequiresCommunityValues() bool {
-	return s.CommunityValuesRequired && s.CommunityValuesCompletedAt.IsZero()
+	return s.CommunityValuesRequired
 }
 
-func EnforcementSuspensionSearch(ctx context.Context, nk runtime.NakamaModule, groupID string, userIDs []string, includeExpired bool) (map[string]*GuildEnforcementRecords, error) {
+func EnforcementSuspensionSearch(ctx context.Context, nk runtime.NakamaModule, groupID string, userIDs []string, includeExpired bool) (map[string]map[string]*GuildEnforcementRecords, error) {
 
 	qparts := make([]string, 1)
 	if !includeExpired {
 		qparts = append(qparts, fmt.Sprintf(`+value.suspension_expiry:>="%s"`, time.Now().Format(time.RFC3339)))
 	}
 
-	for _, userID := range userIDs {
-		qparts = append(qparts, fmt.Sprintf(`+value.user_id:%s`, Query.Join())
+	if groupID != "" {
+		qparts = append(qparts, fmt.Sprintf("+value.group_id:%s", Query.Escape(groupID)))
 	}
 
-	if groupID != "" {
-		qparts = append(qparts, "+value.group_id:%s", Query.Escape(groupID))
+	if len(userIDs) > 0 {
+		qparts = append(qparts, fmt.Sprintf(`+value.user_id:%s`, Query.MatchItem(userIDs)))
+	}
+
+	query := strings.Join(qparts, " ")
+	orderBy := []string{"value.created_at"}
+
+	objs, _, err := nk.StorageIndexList(ctx, SystemUserID, StorageCollectionEnforcementJournalIndex, query, 100, orderBy, "")
+	if err != nil {
+		return nil, err
+	}
+
+	if len(objs.GetObjects()) == 0 {
+		return nil, nil
+	}
+
+	allRecords := make(map[string]map[string]*GuildEnforcementRecords, len(objs.GetObjects()))
+
+	for _, obj := range objs.GetObjects() {
+
+		records := NewGuildEnforcementRecords(obj.GetUserId(), obj.GetKey())
+
+		if err := StorageRead(ctx, nk, records.UserID, records, false); err != nil {
+			return nil, err
+		}
+		if _, ok := allRecords[records.GroupID]; !ok {
+			allRecords[records.GroupID] = make(map[string]*GuildEnforcementRecords, len(userIDs))
+		}
+		allRecords[records.GroupID][records.UserID] = records
+	}
+
+	// Load the entire record
+	return allRecords, nil
+}
+
+func EnforcementSearch(ctx context.Context, nk runtime.NakamaModule, groupID string, userIDs []string) (map[string]*GuildEnforcementRecords, error) {
+
+	qparts := []string{
+		fmt.Sprintf("+value.group_id:%s", Query.Escape(groupID)),
+		"value.is_community_values_required:T",
+	}
+
+	if len(userIDs) > 0 {
+		qparts = append(qparts, fmt.Sprintf(`+value.user_id:%s`, Query.MatchItem(userIDs)))
 	}
 
 	query := strings.Join(qparts, " ")
@@ -144,12 +214,13 @@ func EnforcementSuspensionSearch(ctx context.Context, nk runtime.NakamaModule, g
 	}
 	return allRecords, nil
 }
-func EnforcementCommunityValuesSearch(ctx context.Context, nk runtime.NakamaModule, groupID, userID string) (map[string]*GuildEnforcementRecords, error) {
+
+func EnforcementCommunityValuesSearch(ctx context.Context, nk runtime.NakamaModule, groupID, userID string) (bool, error) {
 
 	qparts := []string{
-		fmt.Sprintf(`+value.records.user_id:%s`, Query.Escape(userID)),
-		fmt.Sprintf("+value.records.group_id:%s", Query.Escape(groupID)),
-		"+value.records.community_values_required:true",
+		fmt.Sprintf(`+value.user_id:%s`, Query.Escape(userID)),
+		fmt.Sprintf("+value.group_id:%s", Query.Escape(groupID)),
+		"+value.is_community_values_required:T",
 	}
 
 	query := strings.Join(qparts, " ")
@@ -157,16 +228,10 @@ func EnforcementCommunityValuesSearch(ctx context.Context, nk runtime.NakamaModu
 
 	objs, _, err := nk.StorageIndexList(ctx, SystemUserID, StorageCollectionEnforcementJournalIndex, query, 100, orderBy, "")
 	if err != nil {
-		return nil, err
+		return false, err
 	}
-	allRecords := make(map[string]*GuildEnforcementRecords, len(objs.GetObjects()))
-
-	for _, obj := range objs.GetObjects() {
-
-		allRecords[obj.GetKey()] = &GuildEnforcementRecords{}
-		if err := json.Unmarshal([]byte(obj.GetValue()), allRecords[obj.GetKey()]); err != nil {
-			return nil, err
-		}
+	if len(objs.GetObjects()) == 0 {
+		return false, nil
 	}
-	return allRecords, nil
+	return true, nil
 }

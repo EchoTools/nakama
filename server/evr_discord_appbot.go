@@ -40,9 +40,8 @@ const (
 type DiscordAppBot struct {
 	sync.Mutex
 
-	ctx      context.Context
-	cancelFn context.CancelFunc
-	logger   runtime.Logger
+	ctx    context.Context
+	logger runtime.Logger
 
 	nk runtime.NakamaModule
 	db *sql.DB
@@ -237,7 +236,6 @@ func (e *DiscordAppBot) loadPrepareMatchRateLimiter(userID, groupID string) *rat
 
 var (
 	partyGroupIDPattern = regexp.MustCompile("^[a-z0-9]+$")
-	vrmlIDPattern       = regexp.MustCompile("^[-a-zA-Z0-9]{24}$")
 
 	mainSlashCommands = []*discordgo.ApplicationCommand{
 		{
@@ -339,7 +337,6 @@ var (
 		{
 			Name:        "whoami",
 			Description: "Receive your account information (privately).",
-			Options:     []*discordgo.ApplicationCommandOption{},
 		},
 		{
 			Name:        "next-match",
@@ -413,13 +410,6 @@ var (
 			Name:        "generate-button",
 			Description: "Place a link button in this channel.",
 		},
-		/*
-			{
-				Name:        "kick",
-				Description: "Force user to go through community values in the social lobby.",
-				Options:     []*discordgo.ApplicationCommandOption{},
-			},
-		*/
 		{
 			Name:        "join-player",
 			Description: "Join a player's session as a moderator.",
@@ -471,14 +461,26 @@ var (
 				},
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "reason",
-					Description: "Reason for the kick",
+					Name:        "user_notice",
+					Description: "Reason for the kick (displayed to the user; 48 character max)",
 					Required:    true,
 				},
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "timeout_duration",
-					Description: "Timeout duration (e.g. 1m, 2h, 3d, 4w)",
+					Name:        "suspension_duration",
+					Description: "Suspension duration (e.g. 1m, 2h, 3d, 4w)",
+					Required:    false,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionBoolean,
+					Name:        "require_community_values",
+					Description: "Require the user to accept the community values before they can rejoin.",
+					Required:    false,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "moderator_notes",
+					Description: "Notes for the audit log (other moderators)",
 					Required:    false,
 				},
 			},
@@ -785,109 +787,8 @@ var (
 					Description: "See members of your party.",
 					Type:        discordgo.ApplicationCommandOptionSubCommand,
 				},
-				/*
-					{
-						Name:        "invite",
-						Description: "Invite a user to your party.",
-						Type:        discordgo.ApplicationCommandOptionSubCommand,
-						Options: []*discordgo.ApplicationCommandOption{
-							{
-								Type:        discordgo.ApplicationCommandOptionUser,
-								Name:        "user-option",
-								Description: "User to invite to your party.",
-								Required:    false,
-							},
-						},
-					},
-
-					{
-						Name:        "invite",
-						Description: "Invite a user to your party.",
-						Type:        discordgo.ApplicationCommandOptionSubCommand,
-						Options: []*discordgo.ApplicationCommandOption{
-							{
-								Type:        discordgo.ApplicationCommandOptionUser,
-								Name:        "user-option",
-								Description: "User to invite to your party.",
-								Required:    false,
-							},
-						},
-					},
-					{
-						Name:        "cancel",
-						Description: "cancel a party invite (or leave blank to cancel all).",
-						Type:        discordgo.ApplicationCommandOptionSubCommand,
-						Options: []*discordgo.ApplicationCommandOption{
-							{
-								Type:        discordgo.ApplicationCommandOptionUser,
-								Name:        "user-option",
-								Description: "User to cancel invite for.",
-								Required:    false,
-							},
-						},
-					},
-					{
-						Name:        "transfer",
-						Description: "Make another user the party leader.",
-						Type:        discordgo.ApplicationCommandOptionSubCommand,
-						Options: []*discordgo.ApplicationCommandOption{
-							{
-								Type:        discordgo.ApplicationCommandOptionUser,
-								Name:        "user-option",
-								Description: "User to transfer party to.",
-								Required:    true,
-							},
-						},
-					},
-					{
-						Name:        "help",
-						Description: "Help with party commands.",
-						Type:        discordgo.ApplicationCommandOptionSubCommand,
-					},
-					{
-						Name:        "status",
-						Description: "Status of your party.",
-						Type:        discordgo.ApplicationCommandOptionSubCommand,
-					},
-					{
-						Name:        "warp",
-						Description: "Warp your party to your lobby.",
-						Type:        discordgo.ApplicationCommandOptionSubCommand,
-					},
-					{
-						Name:        "leave",
-						Description: "Leave the party.",
-						Type:        discordgo.ApplicationCommandOptionSubCommand,
-					},
-				*/
 			},
 		},
-
-		/*
-			{
-				Name:        "responses",
-				Description: "Interaction responses testing initiative",
-				Options: []*discordgo.ApplicationCommandOption{
-					{
-						Name:        "resp-type",
-						Description: "Response type",
-						Type:        discordgo.ApplicationCommandOptionInteger,
-						Choices: []*discordgo.ApplicationCommandOptionChoice{
-							{
-								Name:  "Channel message with source",
-								Value: 4,
-							},
-							{
-								Name:  "Deferred response With Source",
-								Value: 5,
-							},
-						},
-						Required: true,
-					},
-				},
-			},
-		*/
-
 		{
 			Name:        "outfits",
 			Description: "Manage user-defined cosmetic loadouts.",
@@ -2238,9 +2139,14 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return errors.New("error checking global operator status")
 			}
 
-			var target *discordgo.User
-			var targetUserID, reason string
-			var timeoutExpiry time.Time
+			var (
+				target                 *discordgo.User
+				targetUserID           string
+				userNotice             string
+				suspensionExpiry       time.Time
+				notes                  string
+				requireCommunityValues bool
+			)
 
 			for _, o := range i.ApplicationCommandData().Options {
 				switch o.Name {
@@ -2250,16 +2156,24 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					if targetUserID == "" {
 						return errors.New("failed to get target user ID")
 					}
-				case "reason":
-					reason = o.StringValue()
-				case "timeout_duration":
+				case "user_notice":
+					userNotice = o.StringValue()
+					if len(userNotice) > 48 {
+						return errors.New("user notice must be less than 48 characters")
+					}
+
+				case "moderator_notes":
+					notes = o.StringValue()
+				case "require_community_values":
+					requireCommunityValues = o.BoolValue()
+				case "suspension_duration":
 					duration := o.StringValue()
 
 					// Parse minutes, hours, days, and weeks (m, h, d, w)
 					if duration != "" {
 						var unit time.Duration
 						if duration == "0" {
-							timeoutExpiry = time.Now()
+							suspensionExpiry = time.Now()
 						} else {
 							switch duration[len(duration)-1] {
 							case 'm':
@@ -2275,7 +2189,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 								unit = time.Minute
 							}
 							if d, err := strconv.Atoi(duration[:len(duration)-1]); err == nil {
-								timeoutExpiry = time.Now().Add(time.Duration(d) * unit)
+								suspensionExpiry = time.Now().Add(time.Duration(d) * unit)
 							} else {
 								return fmt.Errorf("invalid duration format: %w", err)
 							}
@@ -2289,12 +2203,43 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return err
 			}
 
-			cnt := 0
-			results := make([]string, 0, len(presences))
-			var timeoutMessage string
+			var (
+				cnt            = 0
+				timeoutMessage string
+				actions        = make([]string, 0, len(presences))
+				doDisconnect   = false
+				isEnforcer     = false
+			)
 
-			doDisconnect := false
-			timeoutApplied := false
+			gg, err := GuildGroupLoad(ctx, nk, groupID)
+			if err != nil {
+				return errors.New("failed to load guild group")
+			} else if gg.IsEnforcer(userID) {
+				isEnforcer = true
+			}
+
+			if isEnforcer || isGlobalOperator {
+				if !suspensionExpiry.IsZero() {
+					if time.Now().After(suspensionExpiry) {
+						actions = append(actions, "suspension removed")
+					} else {
+						actions = append(actions, fmt.Sprintf("suspension expires <t:%d:R>", suspensionExpiry.UTC().Unix()))
+					}
+
+					guildRecords := NewGuildEnforcementRecords(targetUserID, groupID)
+					if err := StorageRead(ctx, nk, targetUserID, guildRecords, false); err != nil && status.Code(err) != codes.NotFound {
+						return fmt.Errorf("failed to read storage: %w", err)
+					}
+
+					record := NewGuildEnforcementRecord(userID, userNotice, notes, requireCommunityValues, suspensionExpiry)
+					guildRecords.AddRecord(record)
+
+					if _, err := StorageWrite(ctx, nk, targetUserID, guildRecords); err != nil {
+						return fmt.Errorf("failed to write storage: %w", err)
+					}
+
+				}
+			}
 
 			for _, p := range presences {
 
@@ -2314,13 +2259,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				var isEnforcer bool
 				permissions := make([]string, 0)
 
-				gg, err := GuildGroupLoad(ctx, nk, label.GetGroupID().String())
-				if err != nil {
-					return errors.New("failed to load guild group")
-				} else if gg.IsEnforcer(userID) {
-					isEnforcer = true
-				}
-
 				// Check if the user is the match owner of a private match
 				if label.SpawnedBy == userID && label.IsPrivate() {
 					permissions = append(permissions, "match owner")
@@ -2335,40 +2273,23 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					doDisconnect = true
 					permissions = append(permissions, "global operator")
 				}
-				if isEnforcer {
+				if isEnforcer && label.GetGroupID().String() == groupID {
 					doDisconnect = true
 					permissions = append(permissions, "enforcer")
 				}
 
-				if isEnforcer || isGlobalOperator {
-					// Only add the timeout once
-					if !timeoutExpiry.IsZero() && !timeoutApplied {
-						if time.Now().After(timeoutExpiry) {
-							results = append(results, "timeout removed")
-						} else {
-							results = append(results, fmt.Sprintf("timeout expires on <t:%d:F> (<t:%d:R>)", timeoutExpiry.UTC().Unix(), timeoutExpiry.UTC().Unix()))
-						}
-
-						gg.TimeoutAdd(targetUserID, timeoutExpiry, false)
-
-						if err := GuildGroupStore(ctx, nk, gg); err != nil {
-							return errors.New("failed to store guild group")
-						}
-					}
-				}
-
 				if len(permissions) == 0 {
-					results = append(results, "user's match is not from this guild")
+					actions = append(actions, "user's match is not from this guild")
 					continue
 				}
 
 				// Kick the player from the match
 				if err := KickPlayerFromMatch(ctx, d.nk, label.ID, targetUserID); err != nil {
-					results = append(results, fmt.Sprintf("failed to kick player from [%s](https://echo.taxi/spark://c/%s) (error: %s)", label.Mode.String(), strings.ToUpper(label.ID.UUID.String()), err.Error()))
+					actions = append(actions, fmt.Sprintf("failed to kick player from [%s](https://echo.taxi/spark://c/%s) (error: %s)", label.Mode.String(), strings.ToUpper(label.ID.UUID.String()), err.Error()))
 					continue
 				}
 
-				results = append(results, fmt.Sprintf("kicked from [%s](https://echo.taxi/spark://c/%s) session. (%s) [%s]", label.Mode.String(), strings.ToUpper(label.ID.UUID.String()), reason, strings.Join(permissions, ", ")))
+				actions = append(actions, fmt.Sprintf("kicked from [%s](https://echo.taxi/spark://c/%s) session. (%s) [%s]", label.Mode.String(), strings.ToUpper(label.ID.UUID.String()), userNotice, strings.Join(permissions, ", ")))
 
 				cnt++
 
@@ -2376,7 +2297,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			if doDisconnect {
 				go func() {
-					<-time.After(time.Second * 5)
+					<-time.After(time.Second * 10)
 					// Just disconnect the user, wholesale
 					if count, err := DisconnectUserID(ctx, d.nk, targetUserID, true, true, false); err != nil {
 						logger.Warn("Failed to disconnect user", zap.Error(err))
@@ -2387,11 +2308,11 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			if cnt == 0 {
-				return simpleInteractionResponse(s, i, "No sessions found.")
+				actions = append(actions, "no active sessions found")
 			}
 
-			_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s `kick-player` actions summary for %s (%s): %s", user.Mention(), target.Mention(), target.Username, strings.Join(results, ";\n ")), false)
-			return simpleInteractionResponse(s, i, fmt.Sprintf("[%d sessions found]%s\n%s", cnt, timeoutMessage, strings.Join(results, "\n")))
+			_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s `kick-player` actions summary for %s (%s): %s", user.Mention(), target.Mention(), target.Username, strings.Join(actions, ";\n ")), false)
+			return simpleInteractionResponse(s, i, fmt.Sprintf("[%d sessions found]%s\n%s", cnt, timeoutMessage, strings.Join(actions, "\n")))
 
 		},
 		"join-player": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
@@ -3284,9 +3205,18 @@ func (d *DiscordAppBot) updateSlashCommands(s *discordgo.Session, logger runtime
 		}
 	}
 
-	commands, err = s.ApplicationCommandBulkOverwrite(s.State.Application.ID, guildID, mainSlashCommands)
+	_, err = s.ApplicationCommandBulkOverwrite(s.State.Application.ID, guildID, mainSlashCommands)
 	if err != nil {
-		logger.WithField("err", err).Error("Failed to bulk overwrite application commands.")
+		commandNames := make([]string, 0, len(mainSlashCommands))
+		for _, command := range mainSlashCommands {
+			commandNames = append(commandNames, command.Name)
+		}
+		logger.WithFields(map[string]any{
+			"guild_id":      guildID,
+			"command_names": commandNames,
+			"command_count": len(mainSlashCommands),
+			"error":         err,
+		}).Error("Failed to bulk overwrite application commands.")
 	}
 
 }

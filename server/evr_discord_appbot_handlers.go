@@ -107,7 +107,7 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(logger runtime.Logge
 			return simpleInteractionResponse(s, i, "You must be a guild allocator to use this command.")
 		}
 
-	case "trigger-cv", "join-player", "igp", "ign", "shutdown-match":
+	case "join-player", "igp", "ign", "shutdown-match":
 
 		gg := d.guildGroupRegistry.Get(groupID)
 		if gg == nil {
@@ -350,11 +350,9 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 	}
 
 	// Load the latency history for this user
-	latencyHistory := &LatencyHistory{}
-	if v, err := StorageRead(ctx, d.nk, userID, latencyHistory, false); err != nil {
+	latencyHistory := NewLatencyHistory()
+	if err := StorageRead(ctx, d.nk, userID, latencyHistory, false); err != nil {
 		return nil, 0, status.Errorf(codes.Internal, "failed to read latency history: %v", err)
-	} else if v == "" {
-		latencyHistory = NewLatencyHistory()
 	}
 
 	latestRTTs := latencyHistory.LatestRTTs()
@@ -408,13 +406,10 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		return nil, 0, status.Error(codes.ResourceExhausted, fmt.Sprintf("rate limit exceeded (%0.0f requests per minute)", limiter.Limit()*60))
 	}
 
-	latencyHistory := &LatencyHistory{}
-	if v, err := StorageRead(ctx, d.nk, userID, latencyHistory, false); err != nil {
+	latencyHistory := NewLatencyHistory()
+	if err := StorageRead(ctx, d.nk, userID, latencyHistory, false); err != nil {
 		return nil, 0, status.Errorf(codes.Internal, "failed to read latency history: %v", err)
-	} else if v == "" {
-		latencyHistory = NewLatencyHistory()
 	}
-
 	extIPs := latencyHistory.AverageRTTs(true)
 
 	settings := &MatchSettings{

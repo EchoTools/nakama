@@ -74,9 +74,9 @@ type Versioned struct {
 }
 
 type ClientSocial struct {
-	CommunityValuesVersion int64 `json:"community_values_version,omitempty"`
-	SetupVersion           int64 `json:"setup_version,omitempty"`
-	Channel                GUID  `json:"group,omitempty"` // The channel. It is a GUID, uppercase.
+	CommunityValuesVersion int64 `json:"community_values_version"`
+	SetupVersion           int64 `json:"setup_version"`
+	Channel                GUID  `json:"group"` // The channel. It is a GUID, uppercase.
 }
 
 type ServerSocial struct {

@@ -1782,7 +1782,7 @@ func ServerScoresRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		}
 
 		latencyHistory := &LatencyHistory{}
-		if _, err := StorageRead(ctx, nk, userID, latencyHistory, false); err != nil {
+		if err := StorageRead(ctx, nk, userID, latencyHistory, false); err != nil {
 			return "", fmt.Errorf("failed to read latency history: %w", err)
 		}
 

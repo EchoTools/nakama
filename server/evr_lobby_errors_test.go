@@ -107,7 +107,7 @@ func TestLobbySessionFailureFromError(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := LobbySessionFailureFromError(tt.args.mode, tt.args.groupID, tt.args.err); got != nil && tt.want != nil {
+			if got := LobbySessionFailureFromError(tt.args.mode, tt.args.groupID, tt.args.err).(*evr.LobbySessionFailurev4); got != nil && tt.want != nil {
 				if got.ErrorCode != tt.want.ErrorCode || got.Message != tt.want.Message {
 					t.Errorf("LobbySessionFailureFromError() = %v, want %v", got, tt.want)
 				}
