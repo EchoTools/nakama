@@ -88,8 +88,8 @@ type LoginHistory struct {
 	version                  string                             // storage record version
 }
 
-func (LoginHistory) StorageID() StorageID {
-	return StorageID{
+func (LoginHistory) StorageMeta() StorageMeta {
+	return StorageMeta{
 		Collection: LoginStorageCollection,
 		Key:        LoginHistoryStorageKey,
 	}

@@ -28,8 +28,8 @@ type GroupProfile struct {
 	UpdateTime    time.Time    `json:"update_time"`
 }
 
-func (p GroupProfile) StorageID() StorageID {
-	return StorageID{Collection: StorageCollectionGroupProfile, Key: p.GroupID}
+func (p GroupProfile) StorageMeta() StorageMeta {
+	return StorageMeta{Collection: StorageCollectionGroupProfile, Key: p.GroupID}
 
 }
 

@@ -31,8 +31,8 @@ type DisplayNameHistory struct {
 	IsActive     bool                            `json:"is_active"` // if the user has an actively linked headset
 }
 
-func (DisplayNameHistory) StorageID() StorageID {
-	return StorageID{
+func (DisplayNameHistory) StorageMeta() StorageMeta {
+	return StorageMeta{
 		Collection: DisplayNameCollection,
 		Key:        DisplayNameHistoryKey,
 	}
