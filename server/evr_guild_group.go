@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
-	"time"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
@@ -165,25 +164,7 @@ func (g *GuildGroup) IsAuditor(userID string) bool {
 }
 
 func (g *GuildGroup) IsEnforcer(userID string) bool {
-	if g.IsNegatedEnforcer(userID) {
-		return false
-	}
 	return g.HasRole(userID, g.RoleMap.Enforcer)
-}
-
-func (g *GuildGroup) IsNegatedEnforcer(userID string) bool {
-	g.State.RLock()
-	defer g.State.RUnlock()
-
-	if g.State.NegatedEnforcerUserIDs == nil {
-		return false
-	}
-
-	if slices.Contains(g.State.NegatedEnforcerUserIDs, userID) {
-		return true
-	}
-
-	return false
 }
 
 func (g *GuildGroup) IsMember(userID string) bool {
@@ -248,70 +229,6 @@ func (g *GuildGroup) IsAllowedMatchmaking(userID string) bool {
 		}
 	}
 
-	return false
-}
-
-func (g *GuildGroup) MustCompleteCommunityValues(userID string) bool {
-	g.State.RLock()
-	defer g.State.RUnlock()
-	if g.State.CommunityValuesUserIDs == nil {
-		return false
-	}
-	_, found := g.State.CommunityValuesUserIDs[userID]
-	return found
-}
-
-func (g *GuildGroup) CommunityValuesUserIDsRemove(userID string) bool {
-	g.State.Lock()
-	defer g.State.Unlock()
-	if _, ok := g.State.CommunityValuesUserIDs[userID]; !ok {
-		return false
-	}
-	delete(g.State.CommunityValuesUserIDs, userID)
-	g.State.updated = true
-	return true
-}
-
-func (g *GuildGroup) TimeoutAdd(userID string, expiry time.Time, requireCommunityValues bool) {
-	if requireCommunityValues {
-		if g.State.CommunityValuesUserIDs == nil {
-			g.State.CommunityValuesUserIDs = make(map[string]time.Time)
-		}
-		g.State.CommunityValuesUserIDs[userID] = time.Now().UTC()
-	}
-	if g.State.TimedOutUserIDs == nil {
-		g.State.TimedOutUserIDs = make(map[string]time.Time)
-	}
-
-	if time.Now().After(expiry) {
-		delete(g.State.TimedOutUserIDs, userID)
-		g.State.updated = true
-		return
-	}
-
-	g.State.TimedOutUserIDs[userID] = expiry
-	g.State.updated = true
-}
-
-func (g *GuildGroup) IsTimedOut(userID string) (bool, time.Time) {
-	g.State.RLock()
-	defer g.State.RUnlock()
-	if expiry, ok := g.State.TimedOutUserIDs[userID]; ok && time.Now().UTC().Before(expiry) {
-		return true, expiry
-	}
-	return false, time.Time{}
-}
-
-func (g *GuildGroup) IsCommunityValues(userID string) bool {
-	g.State.RLock()
-	defer g.State.RUnlock()
-	if g.State.CommunityValuesUserIDs == nil {
-		return false
-	}
-
-	if expiry, ok := g.State.CommunityValuesUserIDs[userID]; ok && time.Now().UTC().Before(expiry) {
-		return true
-	}
 	return false
 }
 

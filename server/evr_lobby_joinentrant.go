@@ -206,17 +206,15 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		}
 	}
 
-	sendAuditMessage := gg.AuditChannelID != ""
-
 	// User is not a member of the group.
 	if gg.MembersOnlyMatchmaking && !isMember {
 
 		metricsTags["error"] = "not_member"
-		if sendAuditMessage {
-			if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("Rejected non-member <@%s>", userID), true); err != nil {
-				p.logger.Warn("Failed to send audit message", zap.String("channel_id", gg.AuditChannelID), zap.Error(err))
-			}
+
+		if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("Rejected non-member <@%s>", userID), true); err != nil {
+			p.logger.Warn("Failed to send audit message", zap.String("channel_id", gg.AuditChannelID), zap.Error(err))
 		}
+
 		return NewLobbyError(KickedFromLobbyGroup, "user does not have member role")
 	}
 
@@ -224,28 +222,37 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 	if gg.IsSuspended(userID, &params.xpID) {
 
 		metricsTags["error"] = "suspended_user"
-		if sendAuditMessage {
-			if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("Rejected suspended user <@%s>", userID), true); err != nil {
-				p.logger.Warn("Failed to send audit message", zap.String("channel_id", gg.AuditChannelID), zap.Error(err))
-			}
+
+		if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("Rejected suspended user <@%s>", userID), true); err != nil {
+			p.logger.Warn("Failed to send audit message", zap.String("channel_id", gg.AuditChannelID), zap.Error(err))
 		}
 
 		return ErrSuspended
 	}
+	if recordsByGuild, err := EnforcementSuspensionSearch(ctx, p.nk, groupID, userID, false); err != nil {
+		logger.Warn("Unable to read enforcement records", zap.Error(err))
+	} else if len(recordsByGuild) > 0 {
+		var latestRecord *GuildEnforcementRecord
 
-	if found, expiry := gg.IsTimedOut(userID); found {
-		metricsTags["error"] = "timed_out_user"
-		if sendAuditMessage {
-			if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("Rejected timed out user <@%s> (timeout expires <t:%d:R>)", userID, expiry.Unix()), true); err != nil {
-				p.logger.Warn("Failed to send audit message", zap.String("channel_id", gg.AuditChannelID), zap.Error(err))
+		for _, records := range recordsByGuild {
+			for _, r := range records.Records {
+				if latestRecord == nil || r.CreatedAt.After(latestRecord.CreatedAt) && time.Now().Before(r.SuspensionExpiry) {
+					latestRecord = r
+				}
 			}
 		}
-		timeoutDuration := time.Until(expiry)
-		if timeoutDuration < 0 {
-			timeoutDuration = 0
-		}
 
-		return NewLobbyError(KickedFromLobbyGroup, fmt.Sprintf("Timeout will expire in %d minutes.", int(expiry.Sub(time.Now()).Minutes()+0.50)))
+		if latestRecord != nil {
+			// User has an active suspension
+			metricsTags["error"] = "suspended_user"
+			if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("Rejected suspended user <@%s> (%s) (timeout expires <t:%d:R>)", userID, latestRecord.SuspensionNotice, latestRecord.SuspensionExpiry.Unix()), true); err != nil {
+				p.logger.Warn("Failed to send audit message", zap.String("channel_id", gg.AuditChannelID), zap.Error(err))
+			}
+
+			duration := formatDuration(latestRecord.SuspensionExpiry.Sub(time.Now()))
+
+			return NewLobbyError(KickedFromLobbyGroup, fmt.Sprintf("%s (expires in %s)", latestRecord.SuspensionNotice, duration))
+		}
 	}
 
 	if gg.IsLimitedAccess(userID) {
@@ -253,11 +260,11 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		switch lobbyParams.Mode {
 		case evr.ModeArenaPublic, evr.ModeCombatPublic, evr.ModeSocialPublic:
 			metricsTags["error"] = "limited_access_user"
-			if sendAuditMessage {
-				if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("Rejected limited access user <@%s>", userID), true); err != nil {
-					p.logger.Warn("Failed to send audit message", zap.String("channel_id", gg.AuditChannelID), zap.Error(err))
-				}
+
+			if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("Rejected limited access user <@%s>", userID), true); err != nil {
+				p.logger.Warn("Failed to send audit message", zap.String("channel_id", gg.AuditChannelID), zap.Error(err))
 			}
+
 			return NewLobbyError(KickedFromLobbyGroup, "user does not have access social lobbies or matchmaking.")
 		}
 	}
@@ -276,15 +283,12 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 
 		if t.After(time.Now().AddDate(0, 0, -gg.MinimumAccountAgeDays)) {
 
-			if sendAuditMessage {
+			accountAge := time.Since(t).Hours() / 24
 
-				accountAge := time.Since(t).Hours() / 24
+			metricsTags["error"] = "account_age"
 
-				metricsTags["error"] = "account_age"
-
-				if _, err := p.appBot.dg.ChannelMessageSend(gg.AuditChannelID, fmt.Sprintf("Rejected user <@%s> because of account age (%d days).", discordID, int(accountAge))); err != nil {
-					p.logger.Warn("Failed to send audit message", zap.String("channel_id", gg.AuditChannelID), zap.Error(err))
-				}
+			if _, err := p.appBot.dg.ChannelMessageSend(gg.AuditChannelID, fmt.Sprintf("Rejected user <@%s> because of account age (%d days).", discordID, int(accountAge))); err != nil {
+				p.logger.Warn("Failed to send audit message", zap.String("channel_id", gg.AuditChannelID), zap.Error(err))
 			}
 
 			return NewLobbyErrorf(KickedFromLobbyGroup, "account is too new to join this guild")
@@ -298,72 +302,69 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 
 			var fields []*discordgo.MessageEmbedField
 
-			if sendAuditMessage {
+			fields = []*discordgo.MessageEmbedField{
+				{
+					Name:   "Player",
+					Value:  fmt.Sprintf("<@%s>", lobbyParams.DiscordID),
+					Inline: false,
+				},
+				{
+					Name:   "IP Address",
+					Value:  session.ClientIP(),
+					Inline: true,
+				},
+				{
+					Name:   "Data Provider",
+					Value:  params.ipInfo.DataProvider(),
+					Inline: true,
+				},
+				{
+					Name:   "Score",
+					Value:  fmt.Sprintf("%d", params.ipInfo.FraudScore()),
+					Inline: true,
+				},
+				{
+					Name:   "ISP",
+					Value:  params.ipInfo.ISP(),
+					Inline: true,
+				},
+				{
+					Name:   "Organization",
+					Value:  params.ipInfo.Organization(),
+					Inline: true,
+				},
+				{
+					Name:   "ASN",
+					Value:  fmt.Sprintf("%d", params.ipInfo.ASN()),
+					Inline: true,
+				},
+				{
+					Name:   "City",
+					Value:  params.ipInfo.City(),
+					Inline: true,
+				},
+				{
+					Name:   "Region",
+					Value:  params.ipInfo.Region(),
+					Inline: true,
+				},
+				{
+					Name:   "Country",
+					Value:  params.ipInfo.CountryCode(),
+					Inline: true,
+				},
+			}
 
-				fields = []*discordgo.MessageEmbedField{
-					{
-						Name:   "Player",
-						Value:  fmt.Sprintf("<@%s>", lobbyParams.DiscordID),
-						Inline: false,
-					},
-					{
-						Name:   "IP Address",
-						Value:  session.ClientIP(),
-						Inline: true,
-					},
-					{
-						Name:   "Data Provider",
-						Value:  params.ipInfo.DataProvider(),
-						Inline: true,
-					},
-					{
-						Name:   "Score",
-						Value:  fmt.Sprintf("%d", params.ipInfo.FraudScore()),
-						Inline: true,
-					},
-					{
-						Name:   "ISP",
-						Value:  params.ipInfo.ISP(),
-						Inline: true,
-					},
-					{
-						Name:   "Organization",
-						Value:  params.ipInfo.Organization(),
-						Inline: true,
-					},
-					{
-						Name:   "ASN",
-						Value:  fmt.Sprintf("%d", params.ipInfo.ASN()),
-						Inline: true,
-					},
-					{
-						Name:   "City",
-						Value:  params.ipInfo.City(),
-						Inline: true,
-					},
-					{
-						Name:   "Region",
-						Value:  params.ipInfo.Region(),
-						Inline: true,
-					},
-					{
-						Name:   "Country",
-						Value:  params.ipInfo.CountryCode(),
-						Inline: true,
-					},
-				}
-
-				embed := &discordgo.MessageEmbed{
-					Title:  "VPN User Rejected",
-					Fields: fields,
-					Color:  0xff0000, // Red color
-				}
-				message := &discordgo.MessageSend{
-					Embeds: []*discordgo.MessageEmbed{embed},
-				}
-				if _, err := p.appBot.dg.ChannelMessageSendComplex(gg.AuditChannelID, message); err != nil {
-					p.logger.Warn("Failed to send audit message", zap.String("channel_id", gg.AuditChannelID), zap.Error(err))
-				}
+			embed := &discordgo.MessageEmbed{
+				Title:  "VPN User Rejected",
+				Fields: fields,
+				Color:  0xff0000, // Red color
+			}
+			message := &discordgo.MessageSend{
+				Embeds: []*discordgo.MessageEmbed{embed},
+			}
+			if _, err := p.appBot.dg.ChannelMessageSendComplex(gg.AuditChannelID, message); err != nil {
+				p.logger.Warn("Failed to send audit message", zap.String("channel_id", gg.AuditChannelID), zap.Error(err))
 			}
 
 			guildName := "This guild"
@@ -415,4 +416,34 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 	session.Logger().Info("Authorized access to lobby session", zap.String("gid", groupID), zap.String("display_name", displayName))
 
 	return nil
+}
+
+func formatDuration(d time.Duration) string {
+	// Format the duration as a string in the format "1d1h2m3s"
+	// if it's more than 1 day, it's "1d1h" (the hour is rounded up)
+	// if it's more than 1 minute, it's "1h15m" (the minute is rounded up)
+	// if it's more than 1 seconds, it's "30s" (the seconds are rounded up)
+
+	days := int(d.Hours() / 24)
+	hours := int(d.Hours()) % 24
+	minutes := int(d.Minutes()) % 60
+	seconds := int(d.Seconds()) % 60
+
+	var result string
+	if days > 0 {
+		result += fmt.Sprintf("%dd", days)
+	}
+	if hours > 0 {
+		result += fmt.Sprintf("%dh", hours)
+	}
+	if minutes > 0 {
+		result += fmt.Sprintf("%dm", minutes)
+	}
+	if seconds > 0 {
+		result += fmt.Sprintf("%ds", seconds)
+	}
+	if result == "" {
+		result = "0s"
+	}
+	return result
 }

@@ -766,13 +766,10 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 		return fmt.Errorf("failed to get client profile: %w", err)
 	}
 
-	gg, ok := params.guildGroups[params.accountMetadata.GetActiveGroupID().String()]
-	if !ok {
-		return fmt.Errorf("guild group not found: %s", params.accountMetadata.GetActiveGroupID().String())
-	}
-
 	// Check if the user is required to go through community values
-	if gg.MustCompleteCommunityValues(session.userID.String()) {
+	if records, err := EnforcementCommunityValuesSearch(ctx, p.nk, clientProfile.Social.Channel.String(), session.userID.String()); err != nil {
+		logger.Warn("Failed to search for community values", zap.Error(err))
+	} else if len(records) > 0 {
 		clientProfile.Social.CommunityValuesVersion = 0
 	}
 
@@ -800,34 +797,26 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 		return errors.New("session parameters not found")
 	}
 
-	userID := session.userID.String()
-
 	gg := p.guildGroupRegistry.Get(params.accountMetadata.GetActiveGroupID().String())
 	if gg == nil {
 		return fmt.Errorf("guild group not found: %s", params.accountMetadata.GetActiveGroupID().String())
 	}
 
-	if gg.MustCompleteCommunityValues(userID) {
+	hasCompleted := update.Social.CommunityValuesVersion != 0
 
-		hasCompleted := update.Social.CommunityValuesVersion != 0
-
-		if hasCompleted {
-
-			// Remove them from the list
-			gg.CommunityValuesUserIDsRemove(userID)
-
-			// Update the group
-
-			if err := GuildGroupStore(ctx, p.nk, gg); err != nil {
-				return fmt.Errorf("failed to store guild group: %w", err)
+	if guildRecords, err := EnforcementCommunityValuesSearch(ctx, p.nk, update.Social.Channel.String(), session.userID.String()); err != nil {
+		logger.Warn("Failed to search for community values", zap.Error(err))
+	} else if hasCompleted && len(guildRecords) > 0 {
+		for _, records := range guildRecords {
+			for _, r := range records.Records {
+				if r.CommunityValuesRequired {
+					r.CommunityValuesCompletedAt = time.Now()
+				}
 			}
-
-			params.guildGroups[gg.ID().String()] = gg
-
-			// Log the audit message
-			if _, err := p.appBot.LogAuditMessage(ctx, gg.IDStr(), fmt.Sprintf("User <@%s> has accepted the community values.", params.DiscordID()), false); err != nil {
-				logger.Warn("Failed to log audit message", zap.Error(err))
-			}
+		}
+		// Log the audit message
+		if _, err := p.appBot.LogAuditMessage(ctx, gg.IDStr(), fmt.Sprintf("User <@%s> has accepted the community values.", params.DiscordID()), false); err != nil {
+			logger.Warn("Failed to log audit message", zap.Error(err))
 		}
 	}
 
@@ -999,23 +988,6 @@ func (p *EvrPipeline) genericMessage(ctx context.Context, logger *zap.Logger, se
 
 	*/
 	return nil
-}
-
-func generateSuspensionNotice(statuses []*SuspensionStatus) string {
-	msgs := []string{
-		"Current Suspensions:",
-	}
-	for _, s := range statuses {
-		// The user is suspended from this channel.
-		// Get the message from the suspension
-		msgs = append(msgs, s.GuildName)
-	}
-	// Ensure that every line is padded to 40 characters on the right.
-	for i, m := range msgs {
-		msgs[i] = fmt.Sprintf("%-40s", m)
-	}
-	msgs = append(msgs, "\n\nContact the Guild's moderators for more information.")
-	return strings.Join(msgs, "\n")
 }
 
 func mostRecentThursday() time.Time {
