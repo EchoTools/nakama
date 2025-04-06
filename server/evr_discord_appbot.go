@@ -91,7 +91,7 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 
 		dg: dg,
 
-		prepareMatchRatePerSecond: 1 / 60,
+		prepareMatchRatePerSecond: 1.0 / 60,
 		prepareMatchBurst:         1,
 		prepareMatchRateLimiters:  &MapOf[string, *rate.Limiter]{},
 		partyStatusChs:            &MapOf[string, chan error]{},
