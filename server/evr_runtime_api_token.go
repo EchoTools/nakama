@@ -22,8 +22,8 @@ type DeveloperApplications struct {
 	Applications []DeveloperApplication `json:"Applications"`
 }
 
-func (DeveloperApplications) StorageID() StorageID {
-	return StorageID{
+func (DeveloperApplications) StorageMeta() StorageMeta {
+	return StorageMeta{
 		Collection: StorageCollectionDeveloper,
 		Key:        StorageKeyApplications,
 	}

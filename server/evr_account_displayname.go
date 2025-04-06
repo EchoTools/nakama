@@ -3,7 +3,6 @@ package server
 import (
 	"regexp"
 	"strings"
-	"time"
 
 	anyascii "github.com/anyascii/go"
 )
@@ -14,27 +13,6 @@ var (
 	displayNameMatchPattern = regexp.MustCompile(`[A-Za-z]`)
 	displayNameScorePattern = regexp.MustCompile(`\s\(\d+\)\s\[\d+\.\d+%]`)
 )
-
-type SuspensionStatus struct {
-	GuildId           string        `json:"guild_id"`
-	GuildName         string        `json:"guild_name"`
-	UserId            string        `json:"userId"`
-	UserDiscordId     string        `json:"discordId"`
-	EnforcerDiscordId string        `json:"moderatorId"`
-	Expiry            time.Time     `json:"expiry"`
-	Duration          time.Duration `json:"duration"`
-	RoleId            string        `json:"role"`
-	RoleName          string        `json:"role_name"`
-	Reason            string        `json:"reason"`
-}
-
-func (s *SuspensionStatus) Valid() bool {
-	/// TODO use validator package
-	if s.Expiry.IsZero() || s.Expiry.Before(time.Now()) || s.Duration <= 0 || s.UserId == "" || s.GuildId == "" || s.RoleId == "" {
-		return false
-	}
-	return true
-}
 
 // sanitizeDisplayName filters the provided displayName to ensure it is valid.
 func sanitizeDisplayName(displayName string) string {

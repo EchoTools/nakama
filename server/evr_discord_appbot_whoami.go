@@ -221,7 +221,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	if includePriviledged {
 
 		// Get VRML Summary
-		if _, err := StorageRead(ctx, nk, userID.String(), vrmlPlayerSummary, false); err == nil {
+		if err := StorageRead(ctx, nk, userID.String(), vrmlPlayerSummary, false); err == nil {
 
 			whoami.MatchCountsBySeason = make(map[string]int, 0)
 

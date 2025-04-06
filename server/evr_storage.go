@@ -11,12 +11,22 @@ import (
 )
 
 type Storable interface {
-	StorageID() StorageID
+	StorageMeta() StorageMeta
 }
 
 type IndexedStorable interface {
 	Storable
 	StorageIndex() *StorageIndexMeta
+}
+
+type VersionedStorable interface {
+	Storable
+	SetStorageVersion(version string)
+}
+
+type IndexedVersionedStorable interface {
+	IndexedStorable
+	VersionedStorable
 }
 
 // initializer.StorageIndex
@@ -30,19 +40,22 @@ type StorageIndexMeta struct {
 	IndexOnly      bool
 }
 
-type StorageID struct {
-	Collection string
-	Key        string
+type StorageMeta struct {
+	Collection      string
+	Key             string
+	PermissionRead  int
+	PermissionWrite int
+	Version         string
 }
 
-func (s StorageID) String() string {
+func (s StorageMeta) String() string {
 	return fmt.Sprintf("%s:%s", s.Collection, s.Key)
 }
-func StorageRead(ctx context.Context, nk runtime.NakamaModule, userID string, dst Storable, create bool) (string, error) {
+func StorageRead(ctx context.Context, nk runtime.NakamaModule, userID string, dst Storable, create bool) error {
 	if dst == nil {
-		return "", status.Errorf(codes.InvalidArgument, "dst is nil")
+		return status.Errorf(codes.InvalidArgument, "dst is nil")
 	}
-	storageID := dst.StorageID()
+	storageID := dst.StorageMeta()
 
 	var version string
 	objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
@@ -53,48 +66,67 @@ func StorageRead(ctx context.Context, nk runtime.NakamaModule, userID string, ds
 		},
 	})
 	if err != nil {
-		return "", status.Errorf(codes.Internal, "failed to read %s/%s: %s", userID, storageID.String(), err)
+		return status.Errorf(codes.Internal, "failed to read %s/%s: %s", userID, storageID.String(), err)
 	}
 
-	var data string
 	if len(objs) != 0 {
-		data = objs[0].Value
-		version = objs[0].Version
-		if err = json.Unmarshal([]byte(data), dst); err != nil {
-			return "", status.Errorf(codes.Internal, "failed to unmarshal %s/%s: %s", userID, storageID.String(), err)
+
+		if err = json.Unmarshal([]byte(objs[0].GetValue()), dst); err != nil {
+			return status.Errorf(codes.Internal, "failed to unmarshal %s/%s: %s", userID, storageID.String(), err)
 		}
+
+		version = objs[0].GetVersion()
+
 	} else {
 		if create {
-			if version, err = StorageWrite(ctx, nk, userID, dst); err != nil {
-				return "", status.Errorf(codes.Internal, "failed to create %s/%s: %s", userID, storageID.String(), err)
+
+			// Ensure that the object does not exist
+			if obj, ok := dst.(VersionedStorable); ok {
+				obj.SetStorageVersion("*")
 			}
+
+			if version, err = StorageWrite(ctx, nk, userID, dst); err != nil {
+				return status.Errorf(codes.Internal, "failed to create %s/%s: %s", userID, storageID.String(), err)
+			}
+
 		} else {
-			return "", status.Errorf(codes.NotFound, "no %s/%s found", userID, storageID.String())
+			return status.Errorf(codes.NotFound, "no %s/%s found", userID, storageID.String())
 		}
 	}
 
-	return version, nil
+	// Set the new object version
+	if obj, ok := dst.(VersionedStorable); ok {
+		obj.SetStorageVersion(version)
+	}
+
+	return nil
 }
 
 func StorageWrite(ctx context.Context, nk runtime.NakamaModule, userID string, src Storable) (string, error) {
-	storageID := src.StorageID()
+	meta := src.StorageMeta()
 	data, err := json.Marshal(src)
 	if err != nil {
-		return "", status.Errorf(codes.Internal, "failed to marshal %s/%s: %s", userID, storageID.String(), err.Error())
+		return "", status.Errorf(codes.Internal, "failed to marshal %s/%s: %s", userID, meta.String(), err.Error())
 	}
 
 	acks, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{
 		{
+			Collection:      meta.Collection,
+			Key:             meta.Key,
 			UserID:          userID,
-			Collection:      storageID.Collection,
-			Key:             storageID.Key,
 			Value:           string(data),
-			PermissionRead:  0,
-			PermissionWrite: 0,
+			Version:         meta.Version,
+			PermissionRead:  meta.PermissionRead,
+			PermissionWrite: meta.PermissionWrite,
 		},
 	})
 	if err != nil {
-		return "", status.Errorf(codes.Internal, "failed to write %s/%s: %s", userID, storageID.String(), err.Error())
+		return "", status.Errorf(codes.Internal, "failed to write %s/%s: %s", userID, meta.String(), err.Error())
 	}
+
+	if obj, ok := src.(VersionedStorable); ok {
+		obj.SetStorageVersion(acks[0].GetVersion())
+	}
+
 	return acks[0].Version, nil
 }

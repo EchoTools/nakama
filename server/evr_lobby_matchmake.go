@@ -268,8 +268,8 @@ type MatchmakingSettings struct {
 	Division                 string  `json:"division"`                  // The division to use
 }
 
-func (MatchmakingSettings) StorageID() StorageID {
-	return StorageID{
+func (MatchmakingSettings) StorageMeta() StorageMeta {
+	return StorageMeta{
 		Collection: MatchmakerStorageCollection,
 		Key:        MatchmakingConfigStorageKey,
 	}
@@ -288,7 +288,7 @@ func (MatchmakingSettings) StorageIndex() *StorageIndexMeta {
 }
 
 func LoadMatchmakingSettings(ctx context.Context, nk runtime.NakamaModule, userID string) (settings MatchmakingSettings, err error) {
-	_, err = StorageRead(ctx, nk, userID, &settings, true)
+	err = StorageRead(ctx, nk, userID, &settings, true)
 	return
 }
 
