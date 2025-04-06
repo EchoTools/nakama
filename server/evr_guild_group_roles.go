@@ -51,7 +51,7 @@ func (r *GuildGroupRoles) AsSet() map[string]struct{} {
 
 type guildGroupPermissions struct {
 	IsAllowedMatchmaking bool
-	IsEnforcer           bool // Has kick/join/trigger-cv/etc. access
+	IsEnforcer           bool // Has kick/join/tc. access
 	IsAuditor            bool // Can view audit logs and see extra info in /lookup
 	IsServerHost         bool
 	IsAllocator          bool // Can allocate servers with slash command

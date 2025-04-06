@@ -3,6 +3,7 @@ package server
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama/v3/server/evr"
@@ -42,7 +43,7 @@ const (
 	ServerIsFull
 	InternalError
 	MissingEntitlement
-	BannedFromLobbyGroup
+	SuspendedFromLobbyGroup
 	KickedFromLobbyGroup
 	NotALobbyGroupMod
 )
@@ -59,7 +60,7 @@ var LobbyErrorMessages = map[LobbyErrorCodeValue]string{
 	ServerIsFull:            "server_is_full",
 	InternalError:           "internal_error",
 	MissingEntitlement:      "missing_entitlement",
-	BannedFromLobbyGroup:    "banned_from_lobby_group",
+	SuspendedFromLobbyGroup: "suspended_from_lobby_group",
 	KickedFromLobbyGroup:    "kicked_from_lobby_group",
 	NotALobbyGroupMod:       "not_a_lobby_group_mod",
 }
@@ -68,6 +69,7 @@ var LobbyErrorMessages = map[LobbyErrorCodeValue]string{
 type LobbyError struct {
 	code       LobbyErrorCodeValue
 	message    string
+	expiry     time.Time
 	wrappedErr error
 }
 
@@ -79,9 +81,17 @@ func NewLobbyError(code LobbyErrorCodeValue, message string) LobbyError {
 	}
 }
 
+func NewLobbyErrorWithExpiry(code LobbyErrorCodeValue, message string, expiry time.Time) LobbyError {
+	return LobbyError{
+		code:    code,
+		message: message,
+		expiry:  expiry,
+	}
+}
+
 // NewLobbyErrorf creates a new LobbyError with the given code and message.
-func NewLobbyErrorf(code LobbyErrorCodeValue, message string, a ...any) LobbyError {
-	err := fmt.Errorf(message, a...)
+func NewLobbyErrorf(code LobbyErrorCodeValue, format string, a ...any) LobbyError {
+	err := fmt.Errorf(format, a...)
 	return LobbyError{
 		code:       code,
 		message:    err.Error(),
@@ -115,8 +125,8 @@ func (e LobbyError) Error() string {
 		message = "internal error: " + message
 	case MissingEntitlement:
 		message = "missing entitlement: " + message
-	case BannedFromLobbyGroup:
-		message = "banned: " + message
+	case SuspendedFromLobbyGroup:
+		message = "suspended: " + message
 	case KickedFromLobbyGroup:
 		message = "kicked: " + message
 	case NotALobbyGroupMod:
@@ -131,6 +141,24 @@ func (e LobbyError) Message() string {
 	return e.message
 }
 
+func (e LobbyError) Expiry() time.Time {
+	return e.expiry
+}
+func (e LobbyError) Code() LobbyErrorCodeValue {
+	return e.code
+}
+
+func (e LobbyError) Is(target error) bool {
+	if t, ok := target.(LobbyError); ok {
+		return e.code == t.code
+	}
+	return false
+}
+
+func (e LobbyError) WrappedErr() error {
+	return e.wrappedErr
+}
+
 func (e LobbyError) String() string {
 	return e.Error()
 }
@@ -140,7 +168,7 @@ func (e LobbyError) Unwrap() []error {
 }
 
 // LobbySessionFailureFromError converts an error into a LobbySessionFailure message.
-func LobbySessionFailureFromError(mode evr.Symbol, groupID uuid.UUID, err error) *evr.LobbySessionFailurev4 {
+func LobbySessionFailureFromError(mode evr.Symbol, groupID uuid.UUID, err error) evr.Message {
 	if err == nil {
 		return nil
 	}

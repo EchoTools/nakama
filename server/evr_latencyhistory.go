@@ -24,18 +24,14 @@ func NewLatencyHistory() *LatencyHistory {
 	}
 }
 
-func (*LatencyHistory) StorageID() StorageID {
-	return StorageID{
+func (*LatencyHistory) StorageMeta() StorageMeta {
+	return StorageMeta{
 		Collection: StorageCollectionDeveloper,
 		Key:        StorageKeyApplications,
 	}
 }
 
-func (h *LatencyHistory) GetVersion() string {
-	return h.version
-}
-
-func (h *LatencyHistory) SetVersion(version string) {
+func (h *LatencyHistory) SetStorageVersion(version string) {
 	h.version = version
 }
 
@@ -49,6 +45,10 @@ func (h *LatencyHistory) String() string {
 
 // Add adds a new RTT to the history for the given external IP
 func (h *LatencyHistory) Add(extIP net.IP, rtt int, limit int, expiry time.Time) {
+	if h.GameServerLatencies == nil {
+		h.GameServerLatencies = make(map[string][]LatencyHistoryItem)
+	}
+
 	history, ok := h.GameServerLatencies[extIP.String()]
 	if !ok {
 		history = make([]LatencyHistoryItem, 0)

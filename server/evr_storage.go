@@ -73,13 +73,13 @@ func StorageRead(ctx context.Context, nk runtime.NakamaModule, userID string, ds
 		},
 	})
 	if err != nil {
-		return status.Errorf(codes.Internal, "failed to read %s/%s: %w", userID, meta.String(), err)
+		return status.Errorf(codes.Internal, "failed to read %s/%s: %v", userID, meta.String(), err)
 	}
 
 	if len(objs) != 0 {
 
 		if err = json.Unmarshal([]byte(objs[0].GetValue()), dst); err != nil {
-			return status.Errorf(codes.Internal, "failed to unmarshal %s/%s: %w", userID, meta.String(), err)
+			return status.Errorf(codes.Internal, "failed to unmarshal %s/%s: %v", userID, meta.String(), err)
 		}
 
 		version = objs[0].GetVersion()
@@ -93,7 +93,7 @@ func StorageRead(ctx context.Context, nk runtime.NakamaModule, userID string, ds
 			}
 
 			if version, err = StorageWrite(ctx, nk, userID, dst); err != nil {
-				return status.Errorf(codes.Internal, "failed to create %s/%s: %w", userID, meta.String(), err)
+				return status.Errorf(codes.Internal, "failed to create %s/%s: %v", userID, meta.String(), err)
 			}
 
 		} else {
@@ -131,7 +131,7 @@ func StorageWrite(ctx context.Context, nk runtime.NakamaModule, userID string, s
 		},
 	})
 	if err != nil {
-		return "", status.Errorf(codes.Internal, "failed to write %s/%s: %w", userID, meta.String(), err.Error())
+		return "", status.Errorf(codes.Internal, "failed to write %s/%s: %v", userID, meta.String(), err.Error())
 	}
 
 	if obj, ok := src.(VersionedStorable); ok {

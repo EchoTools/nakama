@@ -48,11 +48,6 @@ type StarterCosmeticLoadouts struct {
 	Loadouts []*StoredCosmeticLoadout `json:"loadouts"`
 }
 
-type cacheID struct {
-	XPID      evr.EvrId
-	SessionID uuid.UUID
-}
-
 // ProfileCache is a registry of user evr profiles.
 type ProfileCache struct {
 	sync.RWMutex

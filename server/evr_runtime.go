@@ -277,6 +277,7 @@ func RegisterIndexes(initializer runtime.Initializer) error {
 		&DisplayNameHistory{},
 		&LoginHistory{},
 		&DeveloperApplications{},
+		&GuildEnforcementRecords{},
 	}
 	for _, s := range storables {
 		if idx := s.StorageIndex(); idx != nil {

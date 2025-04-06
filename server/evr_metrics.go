@@ -186,12 +186,13 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 
 		playerData := make(map[PlayerTags]int)
 
-		playercounts := make(map[MatchStateTags][]int)
+		matchPlayerCounts := make(map[MatchStateTags][]int)
 
 		groupIDs := make(map[string]struct{})
 
 		percentileVariances := make(map[MatchStateTags][]float64)
 		matchRankPercentiles := make(map[MatchStateTags][]float64)
+		playerSet := make(map[string]struct{})
 
 		for _, state := range matchStates {
 			groupID := state.State.GetGroupID()
@@ -224,13 +225,13 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 
 			activePlayerCount := 0
 			for _, p := range state.State.Players {
-				if p.IsReservation {
-					continue
+				if _, ok := playerSet[p.UserID]; !ok {
+					activePlayerCount++
+					playerSet[p.UserID] = struct{}{}
 				}
-				activePlayerCount += 1
 			}
 
-			playercounts[stateTags] = append(playercounts[stateTags], activePlayerCount)
+			matchPlayerCounts[stateTags] = append(matchPlayerCounts[stateTags], activePlayerCount)
 
 			rank_percentiles := make([]float64, 0, len(state.State.Players))
 
@@ -264,18 +265,18 @@ func metricsUpdateLoop(ctx context.Context, logger runtime.Logger, nk *RuntimeGo
 		previouslySeenPlayers = seenPlayers
 
 		// Update the metrics
-		for tags, matches := range playercounts {
+		for tags, matchCounts := range matchPlayerCounts {
 
 			seenMatches[tags] = struct{}{}
 
 			playerCount := 0
-			for _, match := range matches {
+			for _, match := range matchCounts {
 				playerCount += match
 			}
 
 			tagMap := tags.AsMap()
 
-			nk.metrics.CustomGauge("match_active_gauge", tagMap, float64(len(matches)))
+			nk.metrics.CustomGauge("match_active_gauge", tagMap, float64(len(matchCounts)))
 			nk.metrics.CustomGauge("player_active_gauge", tagMap, float64(playerCount))
 			nk.metrics.CustomGauge("match_rank_percentile_average_variance", tagMap, stat.Mean(percentileVariances[tags], nil))
 			nk.metrics.CustomGauge("match_rank_percentile_average", tagMap, stat.Mean(matchRankPercentiles[tags], nil))

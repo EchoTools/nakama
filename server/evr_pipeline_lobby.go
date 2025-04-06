@@ -97,14 +97,12 @@ func (p *EvrPipeline) lobbyPingResponse(ctx context.Context, logger *zap.Logger,
 	var (
 		now            = time.Now().UTC()
 		expiry         = now.Add(-14 * 24 * time.Hour)
-		latencyHistory = &LatencyHistory{}
+		latencyHistory = NewLatencyHistory()
 		limit          = 25
 	)
 
-	if v, err := StorageRead(ctx, p.nk, session.UserID().String(), latencyHistory, false); err != nil {
+	if err := StorageRead(ctx, p.nk, session.UserID().String(), latencyHistory, false); err != nil {
 		return status.Errorf(codes.Internal, "failed to read latency history: %v", err)
-	} else if v == "" {
-		latencyHistory = NewLatencyHistory()
 	}
 
 	for _, result := range response.Results {

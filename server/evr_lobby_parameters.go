@@ -266,7 +266,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 	}
 
 	latencyHistory := &LatencyHistory{}
-	if _, err := StorageRead(ctx, nk, userID, latencyHistory, true); err != nil {
+	if err := StorageRead(ctx, nk, userID, latencyHistory, true); err != nil {
 		return nil, fmt.Errorf("failed to load latency history: %v", err)
 	}
 

@@ -456,7 +456,7 @@ func rttByPlayerByExtIP(ctx context.Context, logger *zap.Logger, db *sql.DB, nk 
 	for _, label := range pubLabels {
 		for _, p := range label.Players {
 			history := &LatencyHistory{}
-			if _, err := StorageRead(ctx, nk, p.UserID, history, true); err != nil {
+			if err := StorageRead(ctx, nk, p.UserID, history, true); err != nil {
 				logger.Warn("Failed to load latency history", zap.Error(err))
 				continue
 			}
