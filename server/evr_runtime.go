@@ -149,7 +149,6 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 
 	/*
 		zapLogger := RuntimeLoggerToZapLogger(logger)
-		_nk := nk.(*RuntimeGoNakamaModule)
 
 		evrSocketAcceptor := NewEvrSocketWsAcceptor(zapLogger, _nk.config, _nk.sessionRegistry, evrPipeline)
 		if err := initializer.RegisterHttp("evr/ws", evrSocketAcceptor); err != nil {

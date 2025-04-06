@@ -71,7 +71,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(ctx context.Context, logger 
 			return errFailedRegistration(session, logger, errors.New("failed to get login session"), evr.BroadcasterRegistration_Unknown)
 		}
 
-		if err := session.Secondary(loginSession.(*sessionWS), true, false); err != nil {
+		if err := Secondary(session, loginSession.(*sessionWS), true, false); err != nil {
 			return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_Unknown)
 		}
 	}
@@ -87,7 +87,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(ctx context.Context, logger 
 
 	userIDStr := session.userID.String()
 
-	if err := session.BroadcasterSession(session.userID, "broadcaster:"+session.Username(), request.ServerID); err != nil {
+	if err := BroadcasterSession(session, session.userID, "broadcaster:"+session.Username(), request.ServerID); err != nil {
 		return fmt.Errorf("failed to create broadcaster session: %w", err)
 	}
 
