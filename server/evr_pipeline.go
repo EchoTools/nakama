@@ -47,9 +47,10 @@ type EvrPipeline struct {
 	config  Config
 	version string
 
-	runtime       *Runtime
-	nk            *RuntimeGoNakamaModule
-	runtimeLogger runtime.Logger
+	sessionRegistry SessionRegistry
+	runtime         *Runtime
+	nk              *RuntimeGoNakamaModule
+	runtimeLogger   runtime.Logger
 
 	profileCache                 *ProfileCache
 	discordCache                 *DiscordIntegrator
@@ -208,9 +209,10 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		config:  config,
 		version: version,
 
-		runtime:       _runtime,
-		nk:            nk.(*RuntimeGoNakamaModule),
-		runtimeLogger: runtimeLogger,
+		sessionRegistry: sessionRegistry,
+		runtime:         _runtime,
+		nk:              nk.(*RuntimeGoNakamaModule),
+		runtimeLogger:   runtimeLogger,
 
 		discordCache: discordCache,
 		appBot:       appBot,
@@ -263,7 +265,7 @@ func (p *EvrPipeline) MessageCacheLoad(key string) evr.Message {
 	return nil
 }
 
-func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, in evr.Message) bool {
+func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in evr.Message) bool {
 
 	// Handle legacy messages
 
@@ -412,7 +414,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 		}
 	}
 
-	if isAuthenticationRequired && session.userID.IsNil() {
+	if isAuthenticationRequired && session.UserID().IsNil() {
 
 		// set/validate the login session
 		if idmessage, ok := in.(evr.LoginIdentifier); ok {
@@ -434,7 +436,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 				case evr.LobbySessionRequest:
 					// associate lobby session with login session
 					// If the message is an identifying message, validate the session and evr id.
-					if err := session.LobbySession(idmessage.GetLoginSessionID()); err != nil {
+					if err := LobbySession(session.(*sessionWS), p.sessionRegistry, idmessage.GetLoginSessionID()); err != nil {
 						logger.Error("Invalid session", zap.Error(err))
 						// Disconnect the client if the session is invalid.
 						return false
@@ -472,7 +474,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 			logger.Warn("Received unauthenticated message", zap.Any("message", in))
 
 			// Send an unrequire
-			if err := session.SendEvr(unrequireMessage); err != nil {
+			if err := SendEVRMessages(session, false, unrequireMessage); err != nil {
 				logger.Error("Failed to send unrequire message", zap.Error(err))
 				return false
 			}
@@ -489,7 +491,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session *sessionWS, 
 		logger = logger.With(zap.String("uid", session.UserID().String()), zap.String("sid", session.ID().String()), zap.String("username", session.Username()), zap.String("evrid", params.xpID.String()))
 	}
 
-	if err := pipelineFn(session.Context(), logger, session, in); err != nil {
+	if err := pipelineFn(session.Context(), logger, session.(*sessionWS), in); err != nil {
 		// Unwrap the error
 		logger.Error("Pipeline error", zap.Error(err))
 		// TODO: Handle errors and close the connection
