@@ -15,6 +15,8 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type TeamAlignments map[string]int // map[UserID]Role
@@ -480,8 +482,8 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 
 func (p *EvrPipeline) CheckServerPing(ctx context.Context, logger *zap.Logger, session *sessionWS, groupID string) error {
 
-	latencyHistory := &LatencyHistory{}
-	if err := StorageRead(ctx, p.nk, session.UserID().String(), latencyHistory, false); err != nil {
+	latencyHistory := NewLatencyHistory()
+	if err := StorageRead(ctx, p.nk, session.UserID().String(), latencyHistory, false); err != nil && status.Code(err) != codes.NotFound {
 		logger.Warn("Failed to read latency history", zap.Error(err))
 		return fmt.Errorf("failed to read latency history: %w", err)
 	} else {
@@ -502,6 +504,9 @@ func (p *EvrPipeline) CheckServerPing(ctx context.Context, logger *zap.Logger, s
 			continue
 		}
 		hostIPs = append(hostIPs, gPresence.Endpoint.GetExternalIP())
+		if _, ok := endpointMap[gPresence.Endpoint.GetExternalIP()]; ok {
+			continue
+		}
 		endpointMap[gPresence.Endpoint.GetExternalIP()] = gPresence.Endpoint
 	}
 

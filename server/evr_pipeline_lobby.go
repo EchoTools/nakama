@@ -101,7 +101,7 @@ func (p *EvrPipeline) lobbyPingResponse(ctx context.Context, logger *zap.Logger,
 		limit          = 25
 	)
 
-	if err := StorageRead(ctx, p.nk, session.UserID().String(), latencyHistory, false); err != nil {
+	if err := StorageRead(ctx, p.nk, session.UserID().String(), latencyHistory, false); err != nil && status.Code(err) != codes.NotFound {
 		return status.Errorf(codes.Internal, "failed to read latency history: %v", err)
 	}
 

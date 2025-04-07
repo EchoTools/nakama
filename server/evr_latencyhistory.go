@@ -2,8 +2,15 @@ package server
 
 import (
 	"encoding/json"
+	"math/rand"
 	"net"
+	"slices"
 	"time"
+)
+
+const (
+	LatencyHistoryStorageCollection = "LatencyHistory"
+	LatencyHistoryStorageKey        = "store"
 )
 
 var _ = VersionedStorable(&LatencyHistory{})
@@ -41,6 +48,29 @@ func (h *LatencyHistory) String() string {
 		return ""
 	}
 	return string(data)
+}
+
+func (h *LatencyHistory) MarshalJSON() ([]byte, error) {
+	// Remove all zero and 999 entries
+	for extIP, history := range h.GameServerLatencies {
+		for i := len(history) - 1; i >= 0; i-- {
+			if history[i].RTT == 0 || history[i].RTT == 999*time.Millisecond {
+				history = append(history[:i], history[i+1:]...)
+				i--
+			}
+		}
+		if len(history) == 0 {
+			delete(h.GameServerLatencies, extIP)
+		} else {
+			h.GameServerLatencies[extIP] = history
+		}
+	}
+
+	data, err := json.Marshal(h)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
 }
 
 // Add adds a new RTT to the history for the given external IP
@@ -154,4 +184,62 @@ func (h *LatencyHistory) Get(extIP string) ([]LatencyHistoryItem, bool) {
 		return nil, false
 	}
 	return history, true
+}
+
+func sortPingCandidatesByLatencyHistory(hostIPs []string, latencyHistory *LatencyHistory) {
+
+	// Shuffle the candidates
+	for i := len(hostIPs) - 1; i > 0; i-- {
+		j := rand.Intn(i + 1)
+		hostIPs[i], hostIPs[j] = hostIPs[j], hostIPs[i]
+	}
+
+	type item struct {
+		hostIP          string
+		latestTimestamp time.Time
+		inCache         bool
+		rtt             time.Duration
+	}
+
+	index := make([]item, len(hostIPs))
+	for _, hostIP := range hostIPs {
+		// Get the latest timestamp and RTT for each host IP
+		item := item{
+			hostIP: hostIP,
+		}
+		if history, inCache := latencyHistory.Get(hostIP); inCache {
+			item.inCache = true
+			latest := history[len(history)-1]
+			item.latestTimestamp = latest.Timestamp
+			item.rtt = latest.RTT
+		}
+	}
+
+	// Sort the active endpoints
+	slices.SortStableFunc(index, func(a, b item) int {
+
+		if !a.inCache && b.inCache {
+			return -1
+		}
+		if a.inCache && !b.inCache {
+			return 1
+		}
+		// sort older entries first
+		if a.latestTimestamp.Before(b.latestTimestamp) {
+			return -1
+		}
+
+		if a.latestTimestamp.After(b.latestTimestamp) {
+			return 1
+		}
+
+		if a.rtt < b.rtt {
+			return -1
+		}
+		if a.rtt > b.rtt {
+			return 1
+		}
+
+		return 0
+	})
 }
