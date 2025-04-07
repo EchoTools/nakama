@@ -3,6 +3,7 @@ package evr
 import (
 	"encoding/binary"
 	"fmt"
+	"time"
 
 	"github.com/gofrs/uuid/v5"
 )
@@ -33,6 +34,7 @@ type LobbySessionFailure struct {
 	ErrorCode      LobbySessionFailureErrorCode // The error code to return with the failure.
 	Unk0           uint32                       // TODO: Add description
 	Message        string                       // The message sent with the failure.
+	Expiry         time.Time                    // The time the failure expires.
 }
 
 func (m *LobbySessionFailure) String() string {
@@ -152,6 +154,16 @@ func (m *LobbySessionFailurev4) Stream(s *EasyStream) error {
 		func() error { return s.StreamGUID(&m.ChannelUUID) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.ErrorCode) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Unk0) },
-		func() error { return s.StreamString(&m.Message, 72) },
+		func() error { return s.StreamString(&m.Message, 64) },
+		func() error {
+			ts := m.Expiry.Unix()
+			if err := s.StreamNumber(binary.LittleEndian, &ts); err != nil {
+				return err
+			}
+			if s.Mode == DecodeMode {
+				m.Expiry = time.Unix(ts, 0)
+			}
+			return nil
+		},
 	})
 }
