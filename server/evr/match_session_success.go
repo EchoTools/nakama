@@ -242,7 +242,6 @@ func PacketEncoderSettingsFromFlags(flags uint64) *PacketEncoderSettings {
 		MACKeySize:              int((flags >> 26) & 0xFFF),
 		EncryptionKeySize:       int((flags >> 38) & 0xFFF),
 		RandomKeySize:           int((flags >> 50) & 0xFFF),
-		isPCVR:                  int((flags>>62)&0x03) == 0,
 	}
 }
 
@@ -253,11 +252,6 @@ func (p *PacketEncoderSettings) ToFlags() uint64 {
 	}
 	if p.MACEnabled {
 		flags |= 2
-	}
-	if p.isPCVR {
-		flags |= uint64(0&0x03) << 62
-	} else {
-		flags |= uint64(1&0x03) << 62
 	}
 	flags |= uint64(p.MACDigestSize&0xFFF) << 2
 	flags |= uint64(p.MACPBKDF2IterationCount&0xFFF) << 14
