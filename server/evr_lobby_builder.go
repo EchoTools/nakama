@@ -20,6 +20,8 @@ import (
 	"github.com/intinig/go-openskill/rating"
 	"github.com/intinig/go-openskill/types"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // Builds the match after the matchmaker has created it
@@ -455,8 +457,8 @@ func rttByPlayerByExtIP(ctx context.Context, logger *zap.Logger, db *sql.DB, nk 
 	totalPlayers := 0
 	for _, label := range pubLabels {
 		for _, p := range label.Players {
-			history := &LatencyHistory{}
-			if err := StorageRead(ctx, nk, p.UserID, history, true); err != nil {
+			history := NewLatencyHistory()
+			if err := StorageRead(ctx, nk, p.UserID, history, true); err != nil && status.Code(err) != codes.NotFound {
 				logger.Warn("Failed to load latency history", zap.Error(err))
 				continue
 			}

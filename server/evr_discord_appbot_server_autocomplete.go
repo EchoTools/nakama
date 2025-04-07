@@ -10,6 +10,8 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type RegionAutocompleteData struct {
@@ -32,7 +34,7 @@ func (c RegionAutocompleteData) Description() string {
 func (d *DiscordAppBot) autocompleteRegions(ctx context.Context, logger runtime.Logger, userID string, groupID string) ([]*discordgo.ApplicationCommandOptionChoice, error) {
 
 	latencyHistory := &LatencyHistory{}
-	if err := StorageRead(ctx, d.nk, userID, latencyHistory, false); err != nil {
+	if err := StorageRead(ctx, d.nk, userID, latencyHistory, false); err != nil && status.Code(err) != codes.NotFound {
 		logger.Error("Failed to read latency history", zap.Error(err))
 		return nil, err
 	}
