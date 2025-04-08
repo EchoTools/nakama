@@ -136,7 +136,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 
 	// Attempt to backfill until the timeout.
 	enableFailsafe := true
-	return p.lobbyBackfill(ctx, logger, lobbyParams, enableFailsafe, entrants...)
+	return p.lobbyBackfill(ctx, logger, session, lobbyParams, enableFailsafe, entrants...)
 
 }
 
@@ -286,7 +286,7 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 	return label, nil
 }
 
-func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lobbyParams *LobbySessionParameters, enableFailsafe bool, entrants ...*EvrMatchPresence) error {
+func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, session Session, lobbyParams *LobbySessionParameters, enableFailsafe bool, entrants ...*EvrMatchPresence) error {
 
 	// Default backfill interval
 	interval := 10 * time.Second
@@ -355,19 +355,31 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, lob
 				// The failsafe timer has expired.
 				// Create a match.
 				logger.Warn("Failsafe timer expired. Creating a new match.")
-				_, err := p.newLobby(ctx, logger, lobbyParams)
+				label, err := p.newLobby(ctx, logger, lobbyParams)
 				if err != nil {
 					// If the error is a lock error, just try again.
 					if err == ErrFailedToAcquireLock {
 						// Wait until after the "avoidance time" to give time for the server to be created.
-						<-time.After(3 * time.Second)
+						<-time.After(5 * time.Second)
 						continue
 					}
 
 					// This should't happen unless there's no servers available.
 					return NewLobbyErrorf(ServerFindFailed, "failed to create new lobby failsafe: %w", err)
+				} else {
+					<-time.After(1 * time.Second)
+					// Player members will detect the join.
+					if err := p.LobbyJoinEntrants(logger, label, entrants...); err != nil {
+						// Send the error to the client
+						// If it's full just try again.
+						if LobbyErrorCode(err) == ServerIsFull {
+							logger.Warn("Server is full, ignoring.")
+							continue
+						}
+						return fmt.Errorf("failed to join backfill match: %w", err)
+					}
+					return nil
 				}
-				<-time.After(2 * time.Second)
 			}
 		case <-time.After(interval):
 
