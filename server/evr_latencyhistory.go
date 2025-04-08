@@ -33,8 +33,8 @@ func NewLatencyHistory() *LatencyHistory {
 
 func (*LatencyHistory) StorageMeta() StorageMeta {
 	return StorageMeta{
-		Collection: StorageCollectionDeveloper,
-		Key:        StorageKeyApplications,
+		Collection: LatencyHistoryStorageCollection,
+		Key:        LatencyHistoryStorageKey,
 	}
 }
 
@@ -48,29 +48,6 @@ func (h *LatencyHistory) String() string {
 		return ""
 	}
 	return string(data)
-}
-
-func (h *LatencyHistory) MarshalJSON() ([]byte, error) {
-	// Remove all zero and 999 entries
-	for extIP, history := range h.GameServerLatencies {
-		for i := len(history) - 1; i >= 0; i-- {
-			if history[i].RTT == 0 || history[i].RTT == 999*time.Millisecond {
-				history = append(history[:i], history[i+1:]...)
-				i--
-			}
-		}
-		if len(history) == 0 {
-			delete(h.GameServerLatencies, extIP)
-		} else {
-			h.GameServerLatencies[extIP] = history
-		}
-	}
-
-	data, err := json.Marshal(h)
-	if err != nil {
-		return nil, err
-	}
-	return data, nil
 }
 
 // Add adds a new RTT to the history for the given external IP
@@ -94,6 +71,13 @@ func (h *LatencyHistory) Add(extIP net.IP, rtt int, limit int, expiry time.Time)
 	if len(history) > limit {
 		// Remove the oldest entries
 		history = history[len(history)-limit:]
+	}
+
+	// Remove 0's
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].RTT == 0 {
+			history = slices.Delete(history, i, i+1)
+		}
 	}
 
 	// Remove entries older than the expiry time
