@@ -30,7 +30,7 @@ func (p *EvrPipeline) lobbyCreate(ctx context.Context, logger *zap.Logger, sessi
 	latestRTTs := params.latencyHistory.LatestRTTs()
 
 	queryAddon := ServiceSettings().Matchmaking.QueryAddons.Create
-	label, err := LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), nk, params.GroupID.String(), latestRTTs, settings, []string{params.RegionCode}, false, false, queryAddon)
+	label, err := LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), nk, []string{params.GroupID.String()}, latestRTTs, settings, []string{params.RegionCode}, false, false, queryAddon)
 	if err != nil {
 		if strings.Contains("bad request:", err.Error()) {
 			err = NewLobbyErrorf(BadRequest, "required features not supported")

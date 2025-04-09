@@ -247,7 +247,7 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 		}
 
 		queryAddon := ServiceSettings().Matchmaking.QueryAddons.LobbyBuilder
-		label, err = LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), b.nk, groupID.String(), meanRTTByExtIP, settings, nil, true, false, queryAddon)
+		label, err = LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), b.nk, []string{groupID.String()}, meanRTTByExtIP, settings, nil, true, false, queryAddon)
 		if err != nil || label == nil {
 			logger.Error("Failed to allocate game server.", zap.Error(err))
 			<-time.After(5 * time.Second)
@@ -508,15 +508,18 @@ func LobbyGameServerList(ctx context.Context, nk runtime.NakamaModule, query str
 	return labels, nil
 }
 
-func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, groupID string, rttsByExternalIP map[string]int, settings *MatchSettings, regions []string, requireDefaultRegion bool, requireRegion bool, queryAddon string) (*MatchLabel, error) {
+func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, groupIDs []string, rttsByExternalIP map[string]int, settings *MatchSettings, regions []string, requireDefaultRegion bool, requireRegion bool, queryAddon string) (*MatchLabel, error) {
 
+	if len(groupIDs) == 0 {
+		return nil, fmt.Errorf("no group IDs provided")
+	}
 	// Load the server ratings storage object
 	globalSettings := ServiceSettings().Matchmaking
 
 	qparts := []string{
 		"+label.open:T",
 		"+label.lobby_type:unassigned",
-		fmt.Sprintf("+label.broadcaster.group_ids:%s", Query.Escape(groupID)),
+		fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/", Query.MatchItem(groupIDs)),
 		queryAddon,
 	}
 
@@ -530,7 +533,7 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 			prefix = "+"
 		}
 
-		qparts = append(qparts, "%slabel.broadcaster.region_codes:%s", prefix, Query.MatchItem(regions))
+		qparts = append(qparts, fmt.Sprintf("%slabel.broadcaster.region_codes:%s", prefix, Query.MatchItem(regions)))
 	}
 
 	query := strings.Join(qparts, " ")
