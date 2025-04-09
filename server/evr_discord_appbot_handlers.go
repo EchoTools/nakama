@@ -365,7 +365,7 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 		SpawnedBy: userID,
 	}
 	queryAddon := ServiceSettings().Matchmaking.QueryAddons.Create
-	label, err := LobbyGameServerAllocate(ctx, logger, d.nk, groupID, latestRTTs, settings, []string{regionCode}, false, true, queryAddon)
+	label, err := LobbyGameServerAllocate(ctx, logger, d.nk, []string{groupID}, latestRTTs, settings, []string{regionCode}, false, true, queryAddon)
 	if err != nil {
 		if strings.Contains("bad request:", err.Error()) {
 			err = NewLobbyErrorf(BadRequest, "required features not supported")
@@ -420,7 +420,7 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 	}
 
 	queryAddon := ServiceSettings().Matchmaking.QueryAddons.Create
-	label, err := LobbyGameServerAllocate(ctx, logger, d.nk, groupID, extIPs, settings, []string{region}, true, false, queryAddon)
+	label, err := LobbyGameServerAllocate(ctx, logger, d.nk, []string{groupID}, extIPs, settings, []string{region}, true, false, queryAddon)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to allocate game server: %w", err)
 	}
