@@ -1417,6 +1417,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				graceSeconds     int
 			)
 
+			matchID = strings.ToLower(matchID) + ".nakama2-us_east"
+
 			for _, option := range options {
 				switch option.Name {
 				case "match-id":
