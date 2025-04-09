@@ -1680,7 +1680,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			d.cache.Purge(user.ID)
 			d.cache.QueueSyncMember(i.GuildID, user.ID)
 
-			err := d.handleProfileRequest(ctx, logger, nk, s, i, user, user.Username, true, true, false)
+			err := d.handleProfileRequest(ctx, logger, nk, s, i, user, user.Username, true, true, false, false)
 			logger.WithFields(map[string]interface{}{
 				"discord_id":       user.ID,
 				"discord_username": user.Username,
@@ -1900,8 +1900,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			includeSystem := isGlobalOperator
 			includePrivate := isSelf || isGlobalOperator
 			includePriviledged := isSelf || isGlobalOperator || isGuildAuditor
+			includeGuildAuditor := isGlobalOperator || isGuildAuditor
 
-			return d.handleProfileRequest(ctx, logger, nk, s, i, target, target.Username, includePriviledged, includePrivate, includeSystem)
+			return d.handleProfileRequest(ctx, logger, nk, s, i, target, target.Username, includePriviledged, includePrivate, includeGuildAuditor, includeSystem)
 		},
 		"search": d.handleSearch,
 		"create": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
@@ -2243,6 +2244,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			for _, p := range presences {
 
+				// Match only the target user
 				if p.GetUserId() != targetUserID {
 					continue
 				}
@@ -2252,11 +2254,11 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					continue
 				}
 
+				// Don't kick game servers
 				if label.GameServer.SessionID.String() == p.GetSessionId() {
 					continue
 				}
 
-				var isEnforcer bool
 				permissions := make([]string, 0)
 
 				// Check if the user is the match owner of a private match
@@ -2273,6 +2275,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					doDisconnect = true
 					permissions = append(permissions, "global operator")
 				}
+
 				if isEnforcer && label.GetGroupID().String() == groupID {
 					doDisconnect = true
 					permissions = append(permissions, "enforcer")
@@ -3552,6 +3555,10 @@ func (d *DiscordAppBot) interactionToSignature(prefix string, options []*discord
 }
 
 func (d *DiscordAppBot) LogInteractionToChannel(i *discordgo.InteractionCreate, channelID string) error {
+	if channelID == "" {
+		return nil
+	}
+
 	data := i.ApplicationCommandData()
 	signature := d.interactionToSignature(data.Name, data.Options)
 

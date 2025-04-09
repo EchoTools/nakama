@@ -87,10 +87,8 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(logger runtime.Logge
 			return simpleInteractionResponse(s, i, "This guild is not registered.")
 		}
 
-		if gg.AuditChannelID != "" {
-			if err := d.LogInteractionToChannel(i, gg.AuditChannelID); err != nil {
-				logger.Warn("Failed to log interaction to channel")
-			}
+		if err := d.LogInteractionToChannel(i, gg.AuditChannelID); err != nil {
+			logger.Warn("Failed to log interaction to channel")
 		}
 
 		if gg.DisableCreateCommand {
@@ -101,6 +99,10 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(logger runtime.Logge
 		gg := d.guildGroupRegistry.Get(groupID)
 		if gg == nil {
 			return simpleInteractionResponse(s, i, "This guild is not registered.")
+		}
+
+		if err := d.LogInteractionToChannel(i, gg.AuditChannelID); err != nil {
+			logger.Warn("Failed to log interaction to channel")
 		}
 
 		if !gg.IsAllocator(userID) {
@@ -114,10 +116,8 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(logger runtime.Logge
 			return simpleInteractionResponse(s, i, "This guild is not registered.")
 		}
 
-		if gg.AuditChannelID != "" {
-			if err := d.LogInteractionToChannel(i, gg.AuditChannelID); err != nil {
-				logger.Warn("Failed to log interaction to channel")
-			}
+		if err := d.LogInteractionToChannel(i, gg.AuditChannelID); err != nil {
+			logger.Warn("Failed to log interaction to channel")
 		}
 
 		if !gg.IsEnforcer(userID) {
@@ -131,10 +131,8 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(logger runtime.Logge
 			return simpleInteractionResponse(s, i, "This guild is not registered.")
 		}
 
-		if gg.AuditChannelID != "" {
-			if err := d.LogInteractionToChannel(i, gg.AuditChannelID); err != nil {
-				logger.Warn("Failed to log interaction to channel")
-			}
+		if err := d.LogInteractionToChannel(i, gg.AuditChannelID); err != nil {
+			logger.Warn("Failed to log interaction to channel")
 		}
 
 		if !gg.IsAuditor(userID) {
@@ -334,7 +332,8 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 	if err != nil {
 		return nil, 0, status.Errorf(codes.Internal, "failed to get guild group memberships: %v", err)
 	}
-	membership, ok := guildGroups[groupID]
+
+	gg, ok := guildGroups[groupID]
 	if !ok {
 		return nil, 0, status.Error(codes.PermissionDenied, "user is not a member of the guild")
 	}
@@ -345,7 +344,7 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 		}
 	}
 
-	if !membership.IsAllocator(userID) {
+	if !gg.IsAllocator(userID) {
 		return nil, 0, status.Error(codes.PermissionDenied, "user does not have the allocator role in this guild.")
 	}
 

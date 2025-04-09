@@ -39,7 +39,7 @@ type EvrIdLogins struct {
 	DisplayName   string `json:"display_name,omitempty"`
 }
 
-func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, s *discordgo.Session, i *discordgo.InteractionCreate, target *discordgo.User, username string, includePriviledged bool, includePrivate bool, includeSystem bool) error {
+func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, s *discordgo.Session, i *discordgo.InteractionCreate, target *discordgo.User, username string, includePriviledged bool, includePrivate bool, includeGuildAuditor bool, includeSystem bool) error {
 	whoami := &WhoAmI{
 		DiscordID:    target.ID,
 		RecentLogins: make(map[string]time.Time),
@@ -393,6 +393,9 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 			return output
 		}(), "\n"), Inline: false},
 		{Name: "Active Suspensions", Value: func() string {
+			if !includeGuildAuditor {
+				return ""
+			}
 			s := ""
 			if guildRecords, err := EnforcementSuspensionSearch(ctx, nk, "", []string{userID.String()}, false); err == nil {
 				for groupID, byUserID := range guildRecords {
@@ -412,6 +415,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 
 			}
 			return s
+
 		}(), Inline: false},
 		{Name: "Match List", Value: strings.Join(lo.Map(whoami.MatchLabels, func(l *MatchLabel, index int) string {
 			link := fmt.Sprintf("https://echo.taxi/spark://c/%s", strings.ToUpper(l.ID.UUID.String()))
