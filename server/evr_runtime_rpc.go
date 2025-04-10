@@ -705,9 +705,20 @@ func LinkingAppRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk ru
 	return "Hello Sir.", nil
 }
 
-type ServiceStatusResponse struct {
-	Services []ServiceStatusService `json:"14466474907882883491"`
-	News     []string               `json:"-3980269165826668125"`
+type ServiceStatusData struct {
+	Statuses []ServiceStatusService `json:"statuses"`
+}
+
+func (s ServiceStatusData) StorageMeta() StorageMeta {
+	return StorageMeta{
+		Collection: "Service",
+		Key:        "status",
+	}
+}
+
+func (s ServiceStatusData) String() string {
+	data, _ := json.Marshal(s.Statuses)
+	return string(data)
 }
 
 type ServiceStatusService struct {
@@ -725,35 +736,10 @@ func (h *RPCHandler) ServiceStatusRpc(ctx context.Context, logger runtime.Logger
 	// /status/services,news?env=live&projectid=rad14
 	// Get the serviceStatus object from storage
 
-	/*
-		 `{
-			2731580513406714229: [
-			  {
-				"serviceid": 1,
-				"available": true,
-				"message": "Service 1 operational."
-			  },
-			  {
-				"serviceid": 2,
-				"available": false,
-				"message": "Service 2 under maintenance."
-			  }
-			],
-			-3980269165826668125: [
-			  {
-				"message": "New feature release next week."
-			  },
-			  {
-				"message": "Scheduled downtime for maintenance."
-			  }
-			]
-		  }`
-	*/
-
 	objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
 		{
-			Collection: "serviceStatus",
-			Key:        "services",
+			Collection: "Service",
+			Key:        "status",
 			UserID:     uuid.Nil.String(),
 		},
 	})
@@ -764,10 +750,17 @@ func (h *RPCHandler) ServiceStatusRpc(ctx context.Context, logger runtime.Logger
 	if len(objs) == 0 {
 		return "", nil
 	}
+	statusData := &ServiceStatusData{}
 
-	h.responseCache.Set("server-status", objs[0].Value, 60*time.Second)
+	if err := StorageRead(ctx, nk, SystemUserID, statusData, true); err != nil {
+		return "", err
+	}
 
-	return objs[0].Value, nil
+	response := statusData.String()
+
+	h.responseCache.Set("server-status", response, 60*time.Second)
+
+	return response, nil
 }
 
 type ImportLoadoutRpcRequest struct {
