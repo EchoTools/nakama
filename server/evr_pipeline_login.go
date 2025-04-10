@@ -1139,49 +1139,50 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 		return nil
 	}
 
-	// If this user is an Enforcer let them see how many times that player has been reported in the past week
-	params, ok := LoadParams(ctx)
-	if !ok {
-		return errors.New("session parameters not found")
-	}
+	/*
+		// If this user is an Enforcer let them see how many times that player has been reported in the past week
+		params, ok := LoadParams(ctx)
+		if !ok {
+			return errors.New("session parameters not found")
+		}
 
-	var err error
-	userID := session.userID.String()
-	groupID := params.accountMetadata.GetActiveGroupID().String()
+			var err error
+			userID := session.userID.String()
+			groupID := params.accountMetadata.GetActiveGroupID().String()
 
-	if gg := p.guildGroupRegistry.Get(groupID); gg != nil {
-		if gg.IsEnforcer(userID) {
-			serverProfile := &evr.ServerProfile{}
-			if err := json.Unmarshal(data, serverProfile); err != nil {
-				logger.Error("Failed to unmarshal server profile", zap.Error(err))
-				return fmt.Errorf("failed to unmarshal server profile: %w", err)
-			}
+				if gg := p.guildGroupRegistry.Get(groupID); gg != nil {
+					if gg.IsEnforcer(userID) {
+						serverProfile := &evr.ServerProfile{}
+						if err := json.Unmarshal(data, serverProfile); err != nil {
+							logger.Error("Failed to unmarshal server profile", zap.Error(err))
+							return fmt.Errorf("failed to unmarshal server profile: %w", err)
+						}
 
-			count := 0
-			// Get the number of reports for this user in the last week
-			if guildRecords, err := EnforcementSearch(ctx, p.nk, groupID, []string{userID}); err != nil {
-				logger.Error("Failed to search for enforcement records", zap.Error(err))
-			} else if len(guildRecords) > 0 {
-				for _, records := range guildRecords {
-					for _, r := range records.Records {
-						// SHow all reports for the past week
-						if r.CreatedAt.After(time.Now().Add(-time.Hour * 24 * 7)) {
-							count += 1
+						count := 0
+						// Get the number of reports for this user in the last week
+						if guildRecords, err := EnforcementSearch(ctx, p.nk, groupID, []string{userID}); err != nil {
+							logger.Error("Failed to search for enforcement records", zap.Error(err))
+						} else if len(guildRecords) > 0 {
+							for _, records := range guildRecords {
+								for _, r := range records.Records {
+									// SHow all reports for the past week
+									if r.CreatedAt.After(time.Now().Add(-time.Hour * 24 * 7)) {
+										count += 1
+									}
+								}
+							}
+						}
+						// Add the count to the players display name
+						serverProfile.DisplayName = fmt.Sprintf("%s [%d]", serverProfile.DisplayName, count)
+
+						data, err = json.Marshal(serverProfile)
+						if err != nil {
+							logger.Error("Failed to marshal server profile", zap.Error(err))
+							return fmt.Errorf("failed to marshal server profile: %w", err)
 						}
 					}
 				}
-			}
-			// Add the count to the players display name
-			serverProfile.DisplayName = fmt.Sprintf("%s [%d]", serverProfile.DisplayName, count)
-
-			data, err = json.Marshal(serverProfile)
-			if err != nil {
-				logger.Error("Failed to marshal server profile", zap.Error(err))
-				return fmt.Errorf("failed to marshal server profile: %w", err)
-			}
-		}
-	}
-
+	*/
 	response := &evr.OtherUserProfileSuccess{
 		EvrId:             request.EvrId,
 		ServerProfileJSON: data,

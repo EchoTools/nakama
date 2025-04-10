@@ -365,7 +365,7 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 		SpawnedBy: userID,
 	}
 	queryAddon := ServiceSettings().Matchmaking.QueryAddons.Create
-	label, err := LobbyGameServerAllocate(ctx, logger, d.nk, []string{groupID}, latestRTTs, settings, []string{regionCode}, false, true, queryAddon)
+	label, err := LobbyGameServerAllocate(ctx, logger, d.nk, allocatorGroupIDs, latestRTTs, settings, []string{regionCode}, false, true, queryAddon)
 	if err != nil {
 		if strings.Contains("bad request:", err.Error()) {
 			err = NewLobbyErrorf(BadRequest, "required features not supported")
