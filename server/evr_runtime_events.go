@@ -221,9 +221,7 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 		firstIDs = append(firstIDs, k)
 	}
 
-	for _, v := range loginHistory.SecondDegreeAlternates {
-		secondaryIDs = append(secondaryIDs, v)
-	}
+	secondaryIDs = append(secondaryIDs, loginHistory.SecondDegreeAlternates...)
 
 	alternateIDs = append(secondaryIDs, firstIDs...)
 
@@ -270,7 +268,7 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 
 		for _, a := range firstIDs {
 			// Check if any are banned, or currently suspended by the guild
-			s := fmt.Sprintf("<@%s> (%s)", a, accountMap[a].User.Username)
+			s := fmt.Sprintf("<@%s> (%s)", accountMap[a].CustomId, accountMap[a].User.Username)
 			if addons, ok := addonStrs[a]; ok {
 				s += " *[" + strings.Join(addons, ", ") + "]*"
 			}
@@ -285,7 +283,7 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 				continue
 			}
 
-			s := fmt.Sprintf("<@%s> (%s)", a, accountMap[a].User.Username)
+			s := fmt.Sprintf("<@%s> (%s)", accountMap[a].CustomId, accountMap[a].User.Username)
 			if addons, ok := addonStrs[a]; ok {
 				s += " *[" + strings.Join(addons, ", ") + "]*"
 			}
