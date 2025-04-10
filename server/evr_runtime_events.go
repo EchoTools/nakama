@@ -21,8 +21,8 @@ import (
 const (
 	EventLobbySessionAuthorized = "lobby_session_authorized"
 	EventUserLogin              = "user_login"
-	EventAccountUpdated         = "account_updated"
 	EventSessionStart           = "session_start"
+	EventSessionEnd             = "session_end"
 	EventVRMLAccountLinked      = "vrml_account_linked"
 	EventVRMLAccountResync      = "vrml_account_resync"
 	EventMatchData              = "match_data"
@@ -40,10 +40,11 @@ type EventDispatch struct {
 	mongo  *mongo.Client
 	dg     *discordgo.Session
 
-	queue         chan *api.Event
-	matchJournals map[MatchID]*MatchDataJournal
-	cache         *sync.Map
-	vrmlVerifier  *VRMLVerifier
+	queue                chan *api.Event
+	matchJournals        map[MatchID]*MatchDataJournal
+	cache                *sync.Map
+	playerAuthorizations map[string]map[string]struct{} // map[sessionID]map[groupID]struct{}
+	vrmlVerifier         *VRMLVerifier
 }
 
 func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer, mongoClient *mongo.Client, dg *discordgo.Session) (*EventDispatch, error) {
@@ -61,10 +62,11 @@ func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		nk:     nk,
 		dg:     dg,
 
-		queue:         make(chan *api.Event, 100),
-		matchJournals: make(map[MatchID]*MatchDataJournal),
-		cache:         &sync.Map{},
-		vrmlVerifier:  vrmlVerifier,
+		queue:                make(chan *api.Event, 100),
+		matchJournals:        make(map[MatchID]*MatchDataJournal),
+		cache:                &sync.Map{},
+		vrmlVerifier:         vrmlVerifier,
+		playerAuthorizations: make(map[string]map[string]struct{}),
 	}
 
 	go func() {
@@ -116,12 +118,12 @@ func (h *EventDispatch) eventFn(ctx context.Context, logger runtime.Logger, evt 
 func (h *EventDispatch) processEvent(ctx context.Context, logger runtime.Logger, evt *api.Event) {
 
 	eventMap := map[string]func(context.Context, runtime.Logger, *api.Event) error{
-		EventLobbySessionAuthorized: h.handleLobbyAuthorized,
+		EventSessionStart:           h.eventSessionStart,
+		EventSessionEnd:             h.eventSessionEnd,
 		EventUserLogin:              h.handleUserLogin,
+		EventLobbySessionAuthorized: h.handleLobbyAuthorized,
 		EventVRMLAccountLinked:      h.handleVRMLAccountLinked,
 		EventVRMLAccountResync:      h.handleVRMLAccountLinked,
-		EventAccountUpdated:         h.eventSessionEnd,
-		EventSessionStart:           h.eventSessionStart,
 		EventMatchData:              h.handleMatchEvent,
 	}
 
@@ -155,36 +157,64 @@ func (h *EventDispatch) eventSessionStart(ctx context.Context, logger runtime.Lo
 }
 
 func (h *EventDispatch) eventSessionEnd(ctx context.Context, logger runtime.Logger, evt *api.Event) error {
+	h.Lock()
+	defer h.Unlock()
+
+	delete(h.playerAuthorizations, evt.Properties["session_id"])
+
 	logger.Debug("process event session end: %+v", evt.Properties)
 	return nil
+}
+
+func (h *EventDispatch) guildGroup(ctx context.Context, groupID string) (*GuildGroup, error) {
+	var (
+		key = groupID + ":*GuildGroup"
+		gg  *GuildGroup
+	)
+	if v, ok := h.cache.Load(key); ok && v != nil {
+		gg = v.(*GuildGroup)
+	} else {
+		// Notify the group of the login, if it's an alternate
+		gg, err := GuildGroupLoad(ctx, h.nk, groupID)
+		if err != nil || gg == nil {
+			return nil, fmt.Errorf("failed to load guild group: %w", err)
+		}
+		h.cache.Store(key, gg)
+		go time.AfterFunc(30*time.Second, func() { h.cache.Delete(key) }) // Cleanup cache after 30 seconds
+	}
+	return gg, nil
+}
+
+// auditedSession marks the session as audited for the group
+// and returns true if it was a new session.
+func (h *EventDispatch) auditedSession(groupID, sessionID string) bool {
+	if h.playerAuthorizations[sessionID] == nil {
+		h.playerAuthorizations[sessionID] = make(map[string]struct{})
+	}
+	_, found := h.playerAuthorizations[sessionID][groupID]
+	if !found {
+		h.playerAuthorizations[sessionID][groupID] = struct{}{}
+	}
+	return !found
 }
 
 func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtime.Logger, evt *api.Event) error {
 	h.Lock()
 	defer h.Unlock()
-	groupID := evt.Properties["group_id"]
-	userID := evt.Properties["user_id"]
-	sessionID := evt.Properties["session_id"]
 
-	var err error
-	var gg *GuildGroup
+	var (
+		groupID   = evt.Properties["group_id"]
+		userID    = evt.Properties["user_id"]
+		sessionID = evt.Properties["session_id"]
+	)
 
-	key := groupID + ":*GuildGroup"
+	if isNew := h.auditedSession(groupID, sessionID); !isNew {
+		return nil
+	}
 
-	if v, ok := h.cache.Load(key); ok {
-		gg = v.(*GuildGroup)
-	} else {
-		// Notify the group of the login, if it's an alternate
-		gg, err = GuildGroupLoad(ctx, h.nk, groupID)
-		if err != nil {
-			return fmt.Errorf("failed to load guild group: %w", err)
-		}
-		// Clear it after thirty seconds
-		go func() {
-			h.cache.Store(key, gg)
-			<-time.After(30 * time.Second)
-			h.cache.Delete(key)
-		}()
+	gg, err := h.guildGroup(ctx, groupID)
+	if err != nil {
+		return fmt.Errorf("failed to load guild group: %w", err)
 	}
 
 	// Get the users session
@@ -279,6 +309,8 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 			if a == userID {
 				continue
 			}
+
+			// Skip if already in first degree
 			if slices.Contains(firstIDs, a) {
 				continue
 			}
