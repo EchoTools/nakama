@@ -171,7 +171,7 @@ func (p *EvrPipeline) lobbyMatchMakeWithFallback(ctx context.Context, logger *za
 			logger.Debug("Matchmaking fallback")
 
 			// add a ticket with a smaller count, and no rank range
-			ticketConfig.IncludeSBMMRanges = false
+			//ticketConfig.IncludeSBMMRanges = false
 			ticketConfig.IncludeEarlyQuitPenalty = false
 			ticketConfig.MinCount = 2
 			ticketConfig.MaxCount = 8

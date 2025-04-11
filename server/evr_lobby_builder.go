@@ -575,7 +575,7 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 	// and populate it with the labels and their properties
 	indexes := make([]labelIndex, len(labels))
 	for i, label := range labels {
-
+		extIP := label.GameServer.Endpoint.ExternalIP.String()
 		regionMatch := false
 		for _, region := range label.GameServer.RegionCodes {
 			if region == "default" {
@@ -586,9 +586,9 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 			}
 		}
 
-		rating, ok := globalSettings.ServerRatings.ByExternalIP[label.GameServer.Endpoint.ExternalIP.String()]
+		rating, ok := globalSettings.ServerRatings.ByExternalIP[extIP]
 		if !ok {
-			if rating, ok = globalSettings.ServerRatings.ByOperatorID[label.GameServer.OperatorID.String()]; !ok {
+			if rating, ok = globalSettings.ServerRatings.ByOperatorID[extIP]; !ok {
 				rating = 0
 			}
 		}
@@ -600,12 +600,12 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 
 		indexes[i] = labelIndex{
 			label:             label,
-			rtt:               (rttsByExternalIP[label.GameServer.Endpoint.ExternalIP.String()] + 10) / 20 * 20,
-			isReachable:       rttsByExternalIP[label.GameServer.Endpoint.ExternalIP.String()] != 0,
-			extIP:             label.GameServer.Endpoint.ExternalIP.String(),
+			rtt:               (rttsByExternalIP[extIP] + 10) / 20 * 20,
+			isReachable:       rttsByExternalIP[extIP] != 0,
+			extIP:             extIP,
 			rating:            rating,
 			isPriorityForMode: slices.Contains(label.GameServer.DesignatedModes, settings.Mode),
-			activeCount:       countByExtIP[label.GameServer.Endpoint.ExternalIP.String()],
+			activeCount:       countByExtIP[extIP],
 			regionMatches:     regionMatch,
 		}
 	}
@@ -621,7 +621,7 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 
 		label, err = LobbyPrepareSession(ctx, nk, index.label.ID, settings)
 		if err != nil {
-			logger.WithFields(map[string]interface{}{
+			logger.WithFields(map[string]any{
 				"mid": index.label.ID.UUID.String(),
 				"err": err,
 			}).Warn("Failed to prepare session")
@@ -648,6 +648,15 @@ type labelIndex struct {
 func sortLabelIndexes(labels []labelIndex) {
 	// Sort the labels
 	slices.SortStableFunc(labels, func(a, b labelIndex) int {
+
+		// Sort by whether the server is reachable or not
+		if a.isReachable && !b.isReachable {
+			return -1
+		}
+
+		if !a.isReachable && b.isReachable {
+			return 1
+		}
 
 		// Sort by whether the server is in the region
 		if a.regionMatches && !b.regionMatches {
@@ -682,15 +691,6 @@ func sortLabelIndexes(labels []labelIndex) {
 			return -1
 		}
 		if !a.isPriorityForMode && b.isPriorityForMode {
-			return 1
-		}
-
-		// Sort by whether the server is reachable or not
-		if a.isReachable && !b.isReachable {
-			return -1
-		}
-
-		if !a.isReachable && b.isReachable {
 			return 1
 		}
 
