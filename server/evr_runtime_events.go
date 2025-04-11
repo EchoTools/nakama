@@ -167,6 +167,7 @@ func (h *EventDispatch) eventSessionEnd(ctx context.Context, logger runtime.Logg
 
 func (h *EventDispatch) guildGroup(ctx context.Context, groupID string) (*GuildGroup, error) {
 	var (
+		err error
 		key = groupID + ":*GuildGroup"
 		gg  *GuildGroup
 	)
@@ -174,7 +175,7 @@ func (h *EventDispatch) guildGroup(ctx context.Context, groupID string) (*GuildG
 		gg = v.(*GuildGroup)
 	} else {
 		// Notify the group of the login, if it's an alternate
-		gg, err := GuildGroupLoad(ctx, h.nk, groupID)
+		gg, err = GuildGroupLoad(ctx, h.nk, groupID)
 		if err != nil || gg == nil {
 			return nil, fmt.Errorf("failed to load guild group: %w", err)
 		}
@@ -222,13 +223,13 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 		err          error
 		groupID      = evt.Properties["group_id"]
 		userID       = evt.Properties["user_id"]
-		loginHistory *LoginHistory
+		loginHistory = &LoginHistory{}
 		gg           *GuildGroup
 
 		displayAuditMessage = false
 	)
 
-	if gg, err = h.guildGroup(ctx, groupID); err != nil {
+	if gg, err = h.guildGroup(ctx, groupID); err != nil || gg == nil {
 		return fmt.Errorf("failed to load guild group: %w", err)
 	}
 

@@ -35,7 +35,7 @@ func NewLatencyHistory() *LatencyHistory {
 
 func (h *LatencyHistory) StorageMeta() StorageMeta {
 	version := "*"
-	if h == nil && h.version != "" {
+	if h != nil && h.version != "" {
 		version = h.version
 	}
 
@@ -46,7 +46,7 @@ func (h *LatencyHistory) StorageMeta() StorageMeta {
 	}
 }
 
-func (h *LatencyHistory) SetStorageVersion(version string) {
+func (h *LatencyHistory) SetStorageVersion(userID, version string) {
 	h.version = version
 }
 

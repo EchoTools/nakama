@@ -127,7 +127,8 @@ func (LoginHistory) StorageIndex() *StorageIndexMeta {
 	}
 }
 
-func (h *LoginHistory) SetStorageVersion(version string) {
+func (h *LoginHistory) SetStorageVersion(userID, version string) {
+	h.userID = userID
 	h.version = version
 }
 
@@ -205,11 +206,10 @@ func (h *LoginHistory) Insert(entry *LoginHistoryEntry) {
 }
 
 func (h *LoginHistory) AuthorizeIPWithCode(ip, code string) error {
-	var pendingEntry *LoginHistoryEntry
 	for _, e := range h.PendingAuthorizations {
 		if e.ClientIP == ip {
 
-			if pendingEntry.PendingCode() != code {
+			if e.PendingCode() != code {
 				return fmt.Errorf("invalid code %s for IP %s", code, ip)
 			}
 
