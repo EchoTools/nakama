@@ -66,7 +66,7 @@ type LobbySessionParameters struct {
 	FailsafeTimeout           time.Duration                 `json:"failsafe_timeout"` // The failsafe timeout
 	FallbackTimeout           time.Duration                 `json:"fallback_timeout"` // The fallback timeout
 	DisplayName               string                        `json:"display_name"`
-	latencyHistory            *LatencyHistory
+	latencyHistory            *atomic.Pointer[LatencyHistory]
 }
 
 func (p *LobbySessionParameters) GetPartySize() int {
@@ -265,11 +265,6 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		}
 	}
 
-	latencyHistory := &LatencyHistory{}
-	if err := StorageRead(ctx, nk, userID, latencyHistory, true); err != nil {
-		return nil, fmt.Errorf("failed to load latency history: %v", err)
-	}
-
 	var lobbyGroupName string
 	var partyID uuid.UUID
 
@@ -356,8 +351,9 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		maxServerRTT = 180
 	}
 
-	// Set the maxRTT to at least the average of the player's latency history
+	latencyHistory := sessionParams.latencyHistory.Load()
 
+	// Set the maxRTT to at least the average of the player's latency history
 	if averages := latencyHistory.AverageRTTs(false); len(averages) > 0 {
 		averageRTT := 0
 		count := 0
@@ -377,6 +373,8 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 
 	maximumFailsafeSecs := globalSettings.MatchmakingTimeoutSecs - p.config.GetMatchmaker().IntervalSec*2
 	failsafeTimeoutSecs := min(maximumFailsafeSecs, globalSettings.FailsafeTimeoutSecs)
+
+	params, _ := LoadParams(ctx)
 
 	return &LobbySessionParameters{
 		Node:                      node,
@@ -401,7 +399,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		PartyID:                   partyID,
 		PartySize:                 atomic.NewInt64(1),
 		NextMatchID:               nextMatchID,
-		latencyHistory:            latencyHistory,
+		latencyHistory:            params.latencyHistory,
 		BlockedIDs:                blockedIDs,
 		MatchmakingRating:         atomic.NewPointer(&matchmakingRating),
 		MatchmakingOrdinal:        atomic.NewFloat64(matchmakingOrdinal),
@@ -482,7 +480,7 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeMMR bool, includeMax
 
 	if includeMaxRTT {
 		// Ignore all matches with too high latency
-		for ip, rtt := range p.latencyHistory.LatestRTTs() {
+		for ip, rtt := range p.latencyHistory.Load().LatestRTTs() {
 			if rtt > p.MaxServerRTT {
 				qparts = append(qparts, fmt.Sprintf("-label.broadcaster.endpoint:/.*%s.*/", Query.Escape(ip)))
 			}
@@ -633,7 +631,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 	}
 
 	//maxDelta := 60 // milliseconds
-	for k, v := range p.latencyHistory.AverageRTTs(true) {
+	for k, v := range p.latencyHistory.Load().AverageRTTs(true) {
 		numericProperties[RTTPropertyPrefix+k] = float64(v)
 		//qparts = append(qparts, fmt.Sprintf("properties.%s:<=%d", k, v+maxDelta))
 	}
@@ -641,7 +639,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 	if ticketParams.IncludeRequireCommonServer {
 		// Create a string list of validRTTs
 		acceptableServers := make([]string, 0)
-		for ip, rtt := range p.latencyHistory.LatestRTTs() {
+		for ip, rtt := range p.latencyHistory.Load().LatestRTTs() {
 			if rtt <= p.MaxServerRTT {
 				acceptableServers = append(acceptableServers, ip)
 			}

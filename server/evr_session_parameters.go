@@ -41,14 +41,15 @@ type SessionParameters struct {
 	serverRegions []string            // []string of the server regions
 	urlParameters map[string][]string // The URL parameters
 
-	account              *api.Account           // The account
-	accountMetadata      *AccountMetadata       // The account metadata
-	matchmakingSettings  *MatchmakingSettings   // The matchmaking settings
-	displayNames         *DisplayNameHistory    // The display name history
-	guildGroups          map[string]*GuildGroup // map[string]*GuildGroup
-	isEarlyQuitter       *atomic.Bool           // The user is an early quitter
-	isGoldNameTag        *atomic.Bool           // If this user should have a gold name tag
-	lastMatchmakingError *atomic.Error          // The last matchmaking error
+	account              *api.Account                    // The account
+	accountMetadata      *AccountMetadata                // The account metadata
+	matchmakingSettings  *MatchmakingSettings            // The matchmaking settings
+	displayNames         *DisplayNameHistory             // The display name history
+	guildGroups          map[string]*GuildGroup          // map[string]*GuildGroup
+	isEarlyQuitter       *atomic.Bool                    // The user is an early quitter
+	isGoldNameTag        *atomic.Bool                    // If this user should have a gold name tag
+	lastMatchmakingError *atomic.Error                   // The last matchmaking error
+	latencyHistory       *atomic.Pointer[LatencyHistory] // The latency history
 
 }
 

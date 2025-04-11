@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"net"
 	"slices"
+	"sync"
 	"time"
 )
 
@@ -21,6 +22,7 @@ type LatencyHistoryItem struct {
 }
 
 type LatencyHistory struct {
+	sync.RWMutex
 	GameServerLatencies map[string][]LatencyHistoryItem `json:"game_server_latencies"`
 	version             string
 }
@@ -31,10 +33,16 @@ func NewLatencyHistory() *LatencyHistory {
 	}
 }
 
-func (*LatencyHistory) StorageMeta() StorageMeta {
+func (h *LatencyHistory) StorageMeta() StorageMeta {
+	version := "*"
+	if h == nil && h.version != "" {
+		version = h.version
+	}
+
 	return StorageMeta{
 		Collection: LatencyHistoryStorageCollection,
 		Key:        LatencyHistoryStorageKey,
+		Version:    version,
 	}
 }
 
@@ -43,6 +51,8 @@ func (h *LatencyHistory) SetStorageVersion(version string) {
 }
 
 func (h *LatencyHistory) String() string {
+	h.RLock()
+	defer h.RUnlock()
 	data, err := json.Marshal(h)
 	if err != nil {
 		return ""
@@ -52,6 +62,8 @@ func (h *LatencyHistory) String() string {
 
 // Add adds a new RTT to the history for the given external IP
 func (h *LatencyHistory) Add(extIP net.IP, rtt int, limit int, expiry time.Time) {
+	h.Lock()
+	defer h.Unlock()
 	if h.GameServerLatencies == nil {
 		h.GameServerLatencies = make(map[string][]LatencyHistoryItem)
 	}
@@ -94,6 +106,8 @@ func (h *LatencyHistory) Add(extIP net.IP, rtt int, limit int, expiry time.Time)
 
 // LatestRTTs returns the latest RTTs for all game servers
 func (h *LatencyHistory) LatestRTTs() map[string]int {
+	h.RLock()
+	defer h.RUnlock()
 	latestRTTs := make(map[string]int)
 	for extIP, history := range h.GameServerLatencies {
 		for i := len(history) - 1; i >= 0; i-- {
@@ -108,6 +122,8 @@ func (h *LatencyHistory) LatestRTTs() map[string]int {
 
 // LatestRTT returns the latest RTT for a single external IP
 func (h *LatencyHistory) LatestRTT(extIP net.IP) int {
+	h.RLock()
+	defer h.RUnlock()
 	if history, ok := h.GameServerLatencies[extIP.String()]; !ok || len(history) == 0 {
 		return 0
 	} else {
@@ -122,6 +138,9 @@ func (h *LatencyHistory) LatestRTT(extIP net.IP) int {
 
 // AverageRTT returns the average RTT for a single external IP
 func (h *LatencyHistory) AverageRTT(extIP string, roundRTT bool) int {
+	h.RLock()
+	defer h.RUnlock()
+
 	history, ok := h.GameServerLatencies[extIP]
 	if !ok || len(history) == 0 {
 		return 0
@@ -142,6 +161,8 @@ func (h *LatencyHistory) AverageRTT(extIP string, roundRTT bool) int {
 
 // AverageRTTs returns the average RTTs for all game servers
 func (h *LatencyHistory) AverageRTTs(roundRTTs bool) map[string]int {
+	h.RLock()
+	defer h.RUnlock()
 	averageRTTs := make(map[string]int)
 	for extIP, history := range h.GameServerLatencies {
 		if len(history) == 0 {
@@ -156,13 +177,14 @@ func (h *LatencyHistory) AverageRTTs(roundRTTs bool) map[string]int {
 		if roundRTTs {
 			average = (average + 5) / 10 * 10
 		}
-
 		averageRTTs[extIP] = average
 	}
 	return averageRTTs
 }
 
 func (h *LatencyHistory) Get(extIP string) ([]LatencyHistoryItem, bool) {
+	h.RLock()
+	defer h.RUnlock()
 	history, ok := h.GameServerLatencies[extIP]
 	if !ok || len(history) == 0 {
 		return nil, false

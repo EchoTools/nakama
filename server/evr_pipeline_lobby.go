@@ -97,13 +97,15 @@ func (p *EvrPipeline) lobbyPingResponse(ctx context.Context, logger *zap.Logger,
 	var (
 		now            = time.Now().UTC()
 		expiry         = now.Add(-14 * 24 * time.Hour)
-		latencyHistory = NewLatencyHistory()
+		latencyHistory *LatencyHistory
 		limit          = 25
 	)
 
-	if err := StorageRead(ctx, p.nk, session.UserID().String(), latencyHistory, false); err != nil && status.Code(err) != codes.NotFound {
-		return status.Errorf(codes.Internal, "failed to read latency history: %v", err)
+	params, ok := LoadParams(ctx)
+	if !ok {
+		return fmt.Errorf("failed to load params from context")
 	}
+	latencyHistory = params.latencyHistory.Load()
 
 	for _, result := range response.Results {
 		ip := result.ExternalIP
