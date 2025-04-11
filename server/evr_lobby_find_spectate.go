@@ -18,15 +18,19 @@ import (
 
 func (p *EvrPipeline) lobbyFindSpectate(ctx context.Context, logger *zap.Logger, session *sessionWS, params *LobbySessionParameters) error {
 
-	limit := 100
-	minSize := 1
-	maxSize := MatchLobbyMaxSize - 1
-	qparts := []string{
-		"+label.open:T",
-		"+label.lobby_type:public",
-		fmt.Sprintf("+label.mode:%s", params.Mode.String()),
-		fmt.Sprintf("+label.size:>=%d +label.size:<=%d", minSize, maxSize),
-	}
+	var (
+		limit   = 100
+		minSize = 1
+		maxSize = MatchLobbyMaxSize - 1
+		qparts  = []string{
+			"+label.open:T",
+			"+label.lobby_type:public",
+			fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/", Query.Escape(params.GroupID)),
+			fmt.Sprintf("+label.mode:%s", params.Mode.String()),
+			fmt.Sprintf("+label.size:>=%d +label.size:<=%d", minSize, maxSize),
+		}
+	)
+
 	if params.Level != evr.LevelUnspecified {
 		qparts = append(qparts, fmt.Sprintf("+label.level:%s", params.Level.String()))
 	}
@@ -61,21 +65,32 @@ func (p *EvrPipeline) lobbyFindSpectate(ctx context.Context, logger *zap.Logger,
 			})
 			slices.Reverse(matches)
 
+			labels := make([]*MatchLabel, 0, len(matches))
 			for _, match := range matches {
 				matchID := MatchIDFromStringOrNil(match.GetMatchId())
 				if matchID.IsNil() {
 					continue
 				}
-				label := MatchLabel{}
-				if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), &label); err != nil {
+				label := &MatchLabel{}
+				if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), label); err != nil {
 					logger.Debug("Failed to parse match label", zap.Error(err))
 					continue
 				}
-				// If there are already spectators in the match, skip it.
-				if label.RoleCount(SpectatorRole) > 0 {
-					continue
-				}
 
+				labels = append(labels, label)
+			}
+
+			// Sort the labels by whether there's spectators, then by size
+			slices.SortStableFunc(labels, func(a, b *MatchLabel) int {
+				if a.RoleCount(SpectatorRole) == 0 && b.RoleCount(SpectatorRole) > 0 {
+					return -1
+				} else if a.RoleCount(SpectatorRole) > 0 && b.RoleCount(SpectatorRole) == 0 {
+					return 1
+				}
+				return int(a.Size - b.Size)
+			})
+
+			for _, label := range labels {
 				entrant, err := EntrantPresenceFromSession(session, uuid.Nil, SpectatorRole, types.Rating{}, 0, label.GetGroupID().String(), 0, "")
 				if err != nil {
 					logger.Warn("Failed to create entrant presence", zap.String("session_id", session.ID().String()), zap.Error(err))
@@ -84,10 +99,11 @@ func (p *EvrPipeline) lobbyFindSpectate(ctx context.Context, logger *zap.Logger,
 
 				entrant.RoleAlignment = SpectatorRole
 
-				if err := p.LobbyJoinEntrants(logger, &label, entrant); err != nil {
+				if err := p.LobbyJoinEntrants(logger, label, entrant); err != nil {
 					// Send the error to the client
 					if err := SendEVRMessages(session, false, LobbySessionFailureFromError(label.Mode, label.GetGroupID(), err)); err != nil {
 						logger.Debug("Failed to send error message", zap.Error(err))
+						return err
 					}
 				}
 				return nil
