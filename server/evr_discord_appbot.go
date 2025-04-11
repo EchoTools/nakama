@@ -1800,10 +1800,12 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			if member == nil {
 				return fmt.Errorf("this command must be used from a guild")
 			}
-			loginHistory, err := LoginHistoryLoad(ctx, nk, userIDStr)
-			if err != nil {
+
+			loginHistory := &LoginHistory{}
+			if err := StorageRead(ctx, nk, userIDStr, loginHistory, false); err != nil {
 				return fmt.Errorf("failed to load login history: %w", err)
 			}
+
 			if len(loginHistory.PendingAuthorizations) == 0 {
 				return simpleInteractionResponse(s, i, "No pending IP verifications")
 			}
@@ -3570,29 +3572,16 @@ func (d *DiscordAppBot) LogInteractionToChannel(i *discordgo.InteractionCreate, 
 	return nil
 }
 
-func ServiceMessageLog(dg *discordgo.Session, channelID, content string) error {
-	// replace all <@uuid> mentions with <@discordID>
-	if channelID != "" {
-		if _, err := dg.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
-			Content:         content,
-			AllowedMentions: &discordgo.MessageAllowedMentions{},
-		}); err != nil {
-			return fmt.Errorf("failed to send service audit message: %w", err)
-		}
-	}
-	return nil
-}
-
 func (d *DiscordAppBot) LogServiceAuditMessage(message string) error {
-	return ServiceMessageLog(d.dg, ServiceSettings().ServiceAuditChannelID, message)
+	return AuditLogSend(d.dg, ServiceSettings().ServiceAuditChannelID, message)
 }
 
 func (d *DiscordAppBot) LogServiceDebugMessage(message string) error {
-	return ServiceMessageLog(d.dg, ServiceSettings().ServiceDebugChannelID, message)
+	return AuditLogSend(d.dg, ServiceSettings().ServiceDebugChannelID, message)
 }
 
 func (d *DiscordAppBot) LogServiceUserErrorMessage(message string) error {
-	return ServiceMessageLog(d.dg, ServiceSettings().ServiceDebugChannelID, message)
+	return AuditLogSend(d.dg, ServiceSettings().ServiceDebugChannelID, message)
 }
 
 func (d *DiscordAppBot) LogAuditMessage(ctx context.Context, groupID string, message string, replaceMentions bool) (*discordgo.Message, error) {

@@ -112,8 +112,8 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		}
 	}
 
-	loginHistory, err := LoginHistoryLoad(ctx, nk, userID.String())
-	if err != nil {
+	loginHistory := &LoginHistory{}
+	if err := StorageRead(ctx, nk, userID.String(), loginHistory, true); err != nil {
 		return fmt.Errorf("error getting device history: %w", err)
 	}
 

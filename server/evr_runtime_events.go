@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -351,8 +350,8 @@ func (h *EventDispatch) handleUserLogin(ctx context.Context, logger runtime.Logg
 	defer h.Unlock()
 	userID := evt.Properties["user_id"]
 
-	loginHistory, err := LoginHistoryLoad(ctx, h.nk, userID)
-	if err != nil {
+	loginHistory := NewLoginHistory(userID)
+	if err := StorageRead(ctx, h.nk, userID, loginHistory, true); err != nil {
 		return fmt.Errorf("failed to load login history: %w", err)
 	}
 
@@ -410,10 +409,6 @@ func (h *EventDispatch) handleUserLogin(ctx context.Context, logger runtime.Logg
 				}
 			}()
 		}
-	}
-
-	if err := loginHistory.Store(ctx, h.nk); err != nil {
-		return fmt.Errorf("failed to store login history: %w", err)
 	}
 
 	return nil
