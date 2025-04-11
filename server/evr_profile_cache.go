@@ -250,7 +250,9 @@ func NewClientProfile(ctx context.Context, metadata *AccountMetadata, serverProf
 	if g := metadata.GetGhosted(); len(g) > 0 {
 		ghosted = append(ghosted, g...)
 	}
-
+	if metadata.NewUnlocks == nil {
+		metadata.NewUnlocks = []int64{}
+	}
 	// Remove newunlocks for cosmetics that the user does not have unlocked
 	for i := 0; i < len(metadata.NewUnlocks); i++ {
 		sym := evr.ToSymbol(metadata.NewUnlocks[i])
