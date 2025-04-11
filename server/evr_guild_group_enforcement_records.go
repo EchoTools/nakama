@@ -65,7 +65,8 @@ func (s GuildEnforcementRecords) GetStorageVersion() string {
 	return s.version
 }
 
-func (s *GuildEnforcementRecords) SetStorageVersion(version string) {
+func (s *GuildEnforcementRecords) SetStorageVersion(userID, version string) {
+	s.UserID = userID
 	s.version = version
 }
 

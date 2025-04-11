@@ -60,15 +60,15 @@ func LoginAlternateSearch(ctx context.Context, nk runtime.NakamaModule, loginHis
 			}
 
 			// Unmarshal the alternate history.
-			otherHistory := LoginHistory{}
-			if err := json.Unmarshal([]byte(obj.Value), &otherHistory); err != nil {
+			otherHistory := NewLoginHistory(obj.UserId)
+			if err := json.Unmarshal([]byte(obj.Value), otherHistory); err != nil {
 				return nil, fmt.Errorf("error unmarshalling alt history: %w", err)
 			}
 			// Set the user ID based on the object owner.
 			otherHistory.userID = obj.UserId
 
 			// Compare the entries.
-			matches = append(matches, loginHistoryCompare(loginHistory, &otherHistory)...)
+			matches = append(matches, loginHistoryCompare(loginHistory, otherHistory)...)
 		}
 
 		if cursor == "" {

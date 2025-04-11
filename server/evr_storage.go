@@ -22,7 +22,7 @@ type IndexedStorable interface {
 
 type VersionedStorable interface {
 	Storable
-	SetStorageVersion(version string)
+	SetStorageVersion(userID string, version string)
 }
 
 type IndexedVersionedStorable interface {
@@ -89,7 +89,7 @@ func StorageRead(ctx context.Context, nk runtime.NakamaModule, userID string, ds
 
 			// Ensure that the object does not exist
 			if obj, ok := dst.(VersionedStorable); ok {
-				obj.SetStorageVersion("*")
+				obj.SetStorageVersion(userID, "*")
 			}
 
 			if version, err = StorageWrite(ctx, nk, userID, dst); err != nil {
@@ -106,7 +106,7 @@ func StorageRead(ctx context.Context, nk runtime.NakamaModule, userID string, ds
 		if version == "" {
 			version = "*" // This is a special value that indicates the object is new and has no version.
 		}
-		obj.SetStorageVersion(version)
+		obj.SetStorageVersion(userID, version)
 	}
 
 	return nil
@@ -135,7 +135,7 @@ func StorageWrite(ctx context.Context, nk runtime.NakamaModule, userID string, s
 	}
 
 	if obj, ok := src.(VersionedStorable); ok {
-		obj.SetStorageVersion(acks[0].GetVersion())
+		obj.SetStorageVersion(userID, acks[0].GetVersion())
 	}
 
 	return acks[0].Version, nil
