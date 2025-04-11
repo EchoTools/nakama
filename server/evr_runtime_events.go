@@ -197,152 +197,138 @@ func (h *EventDispatch) auditedSession(groupID, sessionID string) bool {
 	return !found
 }
 
+type compactAlternate struct {
+	userID           string
+	username         string
+	discordID        string
+	isDisabled       bool
+	suspensionExpiry time.Time
+	isFirstDegree    bool
+}
+
+func (c compactAlternate) String() string {
+	return fmt.Sprintf("suspended until <t:%d:R>", c.suspensionExpiry.Unix())
+}
+
 func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtime.Logger, evt *api.Event) error {
 	h.Lock()
 	defer h.Unlock()
 
-	var (
-		groupID   = evt.Properties["group_id"]
-		userID    = evt.Properties["user_id"]
-		sessionID = evt.Properties["session_id"]
-	)
-
-	if isNew := h.auditedSession(groupID, sessionID); !isNew {
+	if isNew := h.auditedSession(evt.Properties["group_id"], evt.Properties["session_id"]); !isNew {
 		return nil
 	}
 
-	gg, err := h.guildGroup(ctx, groupID)
-	if err != nil {
+	var (
+		err          error
+		groupID      = evt.Properties["group_id"]
+		userID       = evt.Properties["user_id"]
+		loginHistory *LoginHistory
+		gg           *GuildGroup
+
+		displayAuditMessage = false
+	)
+
+	if gg, err = h.guildGroup(ctx, groupID); err != nil {
 		return fmt.Errorf("failed to load guild group: %w", err)
 	}
 
-	// Get the users session
-	_nk := h.nk.(*RuntimeGoNakamaModule)
-
-	s := _nk.sessionRegistry.Get(uuid.FromStringOrNil(sessionID))
-	if s == nil {
-		return fmt.Errorf("failed to get session")
-	}
-
-	params, ok := LoadParams(s.Context())
-	if !ok {
-		return fmt.Errorf("failed to load params")
-	}
-
-	loginHistory, err := LoginHistoryLoad(ctx, h.nk, userID)
-	if err != nil {
-		logger.Error("error loading login history: %v", err)
+	if err = StorageRead(ctx, h.nk, userID, loginHistory, true); err != nil {
 		return fmt.Errorf("failed to load login history: %w", err)
 	}
 
-	displayAuditMessage := false
 	if updated := loginHistory.NotifyGroup(groupID, gg.AlternateAccountNotificationExpiry); updated {
 		displayAuditMessage = true
-	}
-
-	var (
-		firstIDs     = make([]string, 0, len(loginHistory.AlternateMap))
-		secondaryIDs = make([]string, 0, len(loginHistory.SecondDegreeAlternates))
-		alternateIDs = make([]string, 0, len(loginHistory.AlternateMap)+len(loginHistory.SecondDegreeAlternates))
-	)
-
-	for k := range loginHistory.AlternateMap {
-		firstIDs = append(firstIDs, k)
-	}
-
-	secondaryIDs = append(secondaryIDs, loginHistory.SecondDegreeAlternates...)
-
-	alternateIDs = append(secondaryIDs, firstIDs...)
-
-	slices.Sort(alternateIDs)
-	alternateIDs = slices.Compact(alternateIDs)
-
-	addonStrs := make(map[string][]string, len(alternateIDs))
-
-	if len(alternateIDs) > 0 {
-
-		accountMap := make(map[string]*api.Account, len(alternateIDs))
-		accounts, err := h.nk.AccountsGetId(ctx, alternateIDs)
-		if err != nil {
-			return fmt.Errorf("failed to get alternate accounts: %w", err)
-		}
-
-		for _, a := range accounts {
-			accountMap[a.User.Id] = a
-			if a.DisableTime != nil {
-				addonStrs[a.User.Id] = append(addonStrs[a.User.Id], "disabled")
-				displayAuditMessage = true
-			}
-		}
-
-		if guildRecords, err := EnforcementSearch(ctx, h.nk, groupID, append(alternateIDs, userID)); err != nil && len(guildRecords) > 0 {
-			for _, records := range guildRecords {
-				if len(records.ActiveSuspensions()) > 0 {
-					addonStrs[records.UserID] = append(addonStrs[records.UserID], fmt.Sprintf("suspended until <t:%d:R>", records.ActiveSuspensions()[0].SuspensionExpiry.UTC().Unix()))
-					displayAuditMessage = true
-				}
-			}
-		}
-
-		for _, u := range firstIDs {
-			if u == userID {
-				continue
-			}
-		}
-
-		var (
-			firstDegreeStrs  = make([]string, 0, len(firstIDs))
-			secondDegreeStrs = make([]string, 0, len(secondaryIDs))
-		)
-
-		for _, a := range firstIDs {
-			// Check if any are banned, or currently suspended by the guild
-			s := fmt.Sprintf("<@%s> (%s)", accountMap[a].CustomId, accountMap[a].User.Username)
-			if addons, ok := addonStrs[a]; ok {
-				s += " *[" + strings.Join(addons, ", ") + "]*"
-			}
-			firstDegreeStrs = append(firstDegreeStrs, s)
-		}
-
-		for _, a := range secondaryIDs {
-			if a == userID {
-				continue
-			}
-
-			// Skip if already in first degree
-			if slices.Contains(firstIDs, a) {
-				continue
-			}
-
-			s := fmt.Sprintf("<@%s> (%s)", accountMap[a].CustomId, accountMap[a].User.Username)
-			if addons, ok := addonStrs[a]; ok {
-				s += " *[" + strings.Join(addons, ", ") + "]*"
-			}
-			secondDegreeStrs = append(secondDegreeStrs, s)
-		}
-
-		if (len(firstDegreeStrs)+len(secondDegreeStrs)) > 0 && displayAuditMessage {
-			users, err := h.nk.AccountsGetId(ctx, []string{userID})
-			if err != nil {
-				return fmt.Errorf("failed to get alternate accounts: %w", err)
-			} else if len(users) == 0 {
-				return fmt.Errorf("failed to get user")
-			}
-
-			content := fmt.Sprintf("<@%s> (%s) detected as a likely alternate of: %s", params.DiscordID(), users[0].User.Username, strings.Join(firstDegreeStrs, ", "))
-
-			if len(secondDegreeStrs) > 0 {
-				content += fmt.Sprintf("\nSecond degree (possible) alternates: %s\n", strings.Join(secondDegreeStrs, ", "))
-			}
-			_, _ = s.(*sessionWS).evrPipeline.appBot.LogAuditMessage(ctx, groupID, content, false)
-		}
-
-		if err := loginHistory.Store(ctx, h.nk); err != nil {
+		if _, err := StorageWrite(ctx, h.nk, userID, loginHistory); err != nil {
 			return fmt.Errorf("failed to store login history: %w", err)
 		}
 	}
 
+	var (
+		firstIDs, secondaryIDs = loginHistory.AlternateIDs()
+		alternateIDs           = append(append(firstIDs, secondaryIDs...), userID)
+		suspendedUserIDs       = make(map[string]time.Time, 0)
+		alternates             = make(map[string]*compactAlternate, len(alternateIDs))
+	)
+
+	if len(alternateIDs) == 0 {
+		return nil
+	}
+
+	// Check for guild suspensions
+	if guildRecords, err := EnforcementSearch(ctx, h.nk, groupID, alternateIDs); err != nil && len(guildRecords) > 0 {
+		for _, records := range guildRecords {
+			if suspensions := records.ActiveSuspensions(); len(suspensions) > 0 {
+				suspendedUserIDs[records.UserID] = suspensions[0].SuspensionExpiry
+				displayAuditMessage = true
+			}
+		}
+	}
+
+	// Get the accounts for the alternates, and check if they are disabled
+	if accounts, err := h.nk.AccountsGetId(ctx, alternateIDs); err != nil {
+		return fmt.Errorf("failed to get alternate accounts: %w", err)
+	} else {
+		for _, a := range accounts {
+			_, isFirstDegree := loginHistory.AlternateMap[a.User.Id]
+			alternates[a.User.Id] = &compactAlternate{
+				userID:           a.User.Id,
+				username:         a.User.Username,
+				discordID:        a.CustomId,
+				suspensionExpiry: suspendedUserIDs[a.User.Id],
+				isFirstDegree:    isFirstDegree,
+				isDisabled:       a.GetDisableTime() != nil && !a.GetDisableTime().AsTime().IsZero(),
+			}
+		}
+	}
+
+	content := h.alternateLogLineFormatter(userID, alternates)
+
+	if displayAuditMessage {
+		if _, err := AuditLogSendGuild(h.dg, gg, content); err != nil {
+			return fmt.Errorf("failed to send audit message: %w", err)
+		}
+	}
+
 	return nil
+}
+
+func (h *EventDispatch) alternateLogLineFormatter(userID string, alternates map[string]*compactAlternate) string {
+	var (
+		firstDegreeStrs  = make([]string, 0, len(alternates))
+		secondDegreeStrs = make([]string, 0, len(alternates))
+	)
+
+	for _, a := range alternates {
+		// Check if any are banned, or currently suspended by the guild
+		s := fmt.Sprintf("<@%s> (%s)", a.discordID, a.username)
+		addons := make([]string, 0, 2)
+		if a.isDisabled {
+			addons = append(addons, "disabled")
+		}
+		if !a.suspensionExpiry.IsZero() {
+			addons = append(addons, a.String())
+		}
+
+		s += " *[" + strings.Join(addons, ", ") + "]*"
+
+		if a.isFirstDegree {
+			firstDegreeStrs = append(firstDegreeStrs, s)
+		} else {
+			secondDegreeStrs = append(secondDegreeStrs, s)
+		}
+	}
+
+	main := alternates[userID]
+	if main == nil {
+		return ""
+	}
+	content := fmt.Sprintf("<@%s> (%s) detected as a likely alternate of: %s", main.discordID, main.username, strings.Join(firstDegreeStrs, ", "))
+
+	if len(secondDegreeStrs) > 0 {
+		content += fmt.Sprintf("\nSecond degree (possible) alternates: %s\n", strings.Join(secondDegreeStrs, ", "))
+	}
+
+	return content
 }
 
 func (h *EventDispatch) handleUserLogin(ctx context.Context, logger runtime.Logger, evt *api.Event) error {
@@ -363,42 +349,29 @@ func (h *EventDispatch) handleUserLogin(ctx context.Context, logger runtime.Logg
 			go func() {
 
 				// Set random time to disable and kick player
-				delayMin, delayMax := 1, 4
-				kickDelay := time.Duration(delayMin+rand.Intn(delayMax)) * time.Minute
+				var (
+					firstIDs, _        = loginHistory.AlternateIDs()
+					altNames           = make([]string, 0, len(loginHistory.AlternateMap))
+					accountMap         = make(map[string]*api.Account, len(loginHistory.AlternateMap))
+					delayMin, delayMax = 1, 4
+					kickDelay          = time.Duration(delayMin+rand.Intn(delayMax)) * time.Minute
+				)
 
-				alternateUsernames := make([]string, 0, len(loginHistory.AlternateMap))
-				for _, a := range loginHistory.AlternateMap {
-					for _, m := range a {
-
-						account, err := h.nk.AccountGetId(ctx, m.otherHistory.userID)
-						if err != nil || account == nil {
-							logger.Error("failed to get alternate account: %v", err)
-							continue
-						}
-						if account.User.Id == userID {
-							continue
-						}
-						s := fmt.Sprintf("<@%s> (%s)", account.CustomId, account.User.Username)
-
-						if account.DisableTime != nil {
-							s += " *[disabled]*"
-						}
-
-						alternateUsernames = append(alternateUsernames, s)
+				if accounts, err := h.nk.AccountsGetId(ctx, firstIDs); err != nil {
+					logger.Error("failed to get alternate accounts: %v", err)
+				} else {
+					for _, a := range accounts {
+						accountMap[a.User.Id] = a
+						altNames = append(altNames, fmt.Sprintf("<@%s> (%s)", a.CustomId, a.User.Username))
 					}
 				}
-				account, err := h.nk.AccountGetId(ctx, userID)
-				if err != nil || account == nil {
-					logger.Error("failed to get user account: %v", err)
-					return
-				}
 
-				slices.Sort(alternateUsernames)
-				alternateUsernames = slices.Compact(alternateUsernames)
+				slices.Sort(altNames)
+				altNames = slices.Compact(altNames)
 
 				// Send audit log message
-				content := fmt.Sprintf("<@%s> (%s) has disabled alternates, disconnecting session(s) in %d seconds.\n%s", account.CustomId, account.User.Username, int(kickDelay.Seconds()), strings.Join(alternateUsernames, ", "))
-				ServiceMessageLog(dg, serviceSettings.ServiceAuditChannelID, content)
+				content := fmt.Sprintf("<@%s> (%s) has disabled alternates, disconnecting session(s) in %d seconds.\n%s", accountMap[userID].CustomId, accountMap[userID].User.Username, int(kickDelay.Seconds()), strings.Join(altNames, ", "))
+				AuditLogSend(dg, serviceSettings.ServiceAuditChannelID, content)
 
 				logger.WithField("delay", kickDelay).Info("kicking (with delay) user %s has disabled alternates", userID)
 				<-time.After(kickDelay)
@@ -444,5 +417,32 @@ func (h *EventDispatch) handleMatchEvent(ctx context.Context, logger runtime.Log
 	})
 	j.UpdatedAt = time.Now().UTC()
 
+	return nil
+}
+
+func AuditLogSendGuild(dg *discordgo.Session, gg *GuildGroup, message string) (*discordgo.Message, error) {
+
+	content := fmt.Sprintf("[`%s/%s`] %s", gg.Name())
+	if err := AuditLogSend(dg, ServiceSettings().ServiceAuditChannelID, content); err != nil {
+		return nil, fmt.Errorf("failed to send service audit message: %w", err)
+	}
+
+	if err := AuditLogSend(dg, gg.AuditChannelID, content); err != nil {
+		return nil, fmt.Errorf("failed to send service audit message: %w", err)
+	}
+
+	return nil, nil
+}
+
+func AuditLogSend(dg *discordgo.Session, channelID, content string) error {
+	// replace all <@uuid> mentions with <@discordID>
+	if channelID != "" {
+		if _, err := dg.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
+			Content:         content,
+			AllowedMentions: &discordgo.MessageAllowedMentions{},
+		}); err != nil {
+			return fmt.Errorf("failed to send service audit message: %w", err)
+		}
+	}
 	return nil
 }
