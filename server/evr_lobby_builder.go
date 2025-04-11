@@ -519,7 +519,7 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 	qparts := []string{
 		"+label.open:T",
 		"+label.lobby_type:unassigned",
-		fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/", Query.MatchItem(groupIDs)),
+		fmt.Sprintf("+label.broadcaster.group_ids:%s", Query.MatchItem(groupIDs)),
 		queryAddon,
 	}
 
