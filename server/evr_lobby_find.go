@@ -278,7 +278,7 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 		Reservations: entrants,
 	}
 
-	label, err := LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), p.nk, []string{lobbyParams.GroupID.String()}, lobbyParams.latencyHistory.Load().LatestRTTs(), settings, []string{lobbyParams.RegionCode}, false, false, ServiceSettings().Matchmaking.QueryAddons.Create)
+	label, err := LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), p.nk, []string{lobbyParams.GroupID.String()}, lobbyParams.latencyHistory.Load().LatestRTTs(), settings, []string{lobbyParams.RegionCode}, true, false, ServiceSettings().Matchmaking.QueryAddons.Create)
 	if err != nil {
 		logger.Warn("Failed to allocate game server", zap.Error(err), zap.Any("settings", settings))
 		return nil, err
