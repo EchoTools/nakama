@@ -15,8 +15,6 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 type TeamAlignments map[string]int // map[UserID]Role
@@ -277,7 +275,7 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 		Reservations: entrants,
 	}
 
-	label, err := LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), p.nk, []string{lobbyParams.GroupID.String()}, lobbyParams.latencyHistory.LatestRTTs(), settings, []string{lobbyParams.RegionCode}, false, false, ServiceSettings().Matchmaking.QueryAddons.Create)
+	label, err := LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), p.nk, []string{lobbyParams.GroupID.String()}, lobbyParams.latencyHistory.Load().LatestRTTs(), settings, []string{lobbyParams.RegionCode}, false, false, ServiceSettings().Matchmaking.QueryAddons.Create)
 	if err != nil {
 		logger.Warn("Failed to allocate game server", zap.Error(err), zap.Any("settings", settings))
 		return nil, err
@@ -494,13 +492,12 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, ses
 
 func (p *EvrPipeline) CheckServerPing(ctx context.Context, logger *zap.Logger, session *sessionWS, groupID string) error {
 
-	latencyHistory := NewLatencyHistory()
-	if err := StorageRead(ctx, p.nk, session.UserID().String(), latencyHistory, false); err != nil && status.Code(err) != codes.NotFound {
-		logger.Warn("Failed to read latency history", zap.Error(err))
-		return fmt.Errorf("failed to read latency history: %w", err)
-	} else {
-		latencyHistory = NewLatencyHistory()
+	params, ok := LoadParams(session.Context())
+	if !ok {
+		return fmt.Errorf("failed to load lobby session parameters")
 	}
+
+	latencyHistory := params.latencyHistory.Load()
 
 	presences, err := p.nk.StreamUserList(StreamModeGameServer, groupID, "", "", false, true)
 	if err != nil {

@@ -27,7 +27,7 @@ func (p *EvrPipeline) lobbyCreate(ctx context.Context, logger *zap.Logger, sessi
 		TeamAlignments:   map[string]int{session.UserID().String(): params.Role},
 	}
 
-	latestRTTs := params.latencyHistory.LatestRTTs()
+	latestRTTs := params.latencyHistory.Load().LatestRTTs()
 
 	queryAddon := ServiceSettings().Matchmaking.QueryAddons.Create
 	label, err := LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), nk, []string{params.GroupID.String()}, latestRTTs, settings, []string{params.RegionCode}, false, false, queryAddon)

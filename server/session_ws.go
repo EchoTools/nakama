@@ -199,6 +199,7 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 		serverSession:  nil,
 		isEarlyQuitter: atomic.NewBool(false),
 		isGoldNameTag:  atomic.NewBool(false),
+		latencyHistory: atomic.NewPointer[LatencyHistory](nil),
 	}
 
 	ctx = context.WithValue(ctx, ctxSessionParametersKey{}, atomic.NewPointer(&params))

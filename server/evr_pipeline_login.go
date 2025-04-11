@@ -617,6 +617,13 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		}
 	}
 
+	latencyHistory := &LatencyHistory{}
+	if err := StorageRead(ctx, p.nk, session.userID.String(), latencyHistory, true); err != nil {
+		metricsTags["error"] = "failed_load_latency_history"
+		return fmt.Errorf("failed to load latency history: %w", err)
+	}
+	params.latencyHistory.Store(latencyHistory)
+
 	if params.userDisplayNameOverride != "" {
 		// This will be picked up by GetActiveGroupDisplayName and other functions
 		params.accountMetadata.sessionDisplayNameOverride = params.userDisplayNameOverride

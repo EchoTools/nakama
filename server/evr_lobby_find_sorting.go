@@ -20,7 +20,7 @@ func (p *EvrPipeline) sortBackfillOptions(filteredMatches []*MatchLabelMeta, lob
 
 	var (
 		partySize     = lobbyParams.GetPartySize()
-		rtts          = lobbyParams.latencyHistory.LatestRTTs()
+		rtts          = lobbyParams.latencyHistory.Load().LatestRTTs()
 		ratingOrdinal = 0.5
 		items         = make([]backfillSortItem, 0, len(filteredMatches))
 	)
