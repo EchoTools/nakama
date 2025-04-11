@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -36,6 +37,8 @@ var (
 		"VRLINKHMDQUEST2": {}, // Quest link
 		"VRLINKHMDQUEST3": {}, // Quest link
 	}
+
+	ErrPendingAuthorizationNotFound = errors.New("pending authorization not found")
 )
 
 type LoginHistoryEntry struct {
@@ -46,8 +49,16 @@ type LoginHistoryEntry struct {
 	LoginData *evr.LoginProfile `json:"login_data"`
 }
 
-func (h *LoginHistoryEntry) Key() string {
-	return h.XPID.Token() + ":" + h.ClientIP
+func (e *LoginHistoryEntry) Key() string {
+	return loginHistoryEntryKey(e.XPID, e.ClientIP)
+}
+
+func loginHistoryEntryKey(xpid evr.EvrId, clientIP string) string {
+	return xpid.Token() + ":" + clientIP
+}
+
+func (e *LoginHistoryEntry) PendingCode() string {
+	return fmt.Sprintf("%02d", e.CreatedAt.Nanosecond()%100)
 }
 
 func (h *LoginHistoryEntry) SystemProfile() string {
@@ -72,15 +83,17 @@ func (h *LoginHistoryEntry) ItemMap() map[string]struct{} {
 		h.SystemProfile():           {}}
 }
 
+var _ = IndexedVersionedStorable(&LoginHistory{})
+
 type LoginHistory struct {
-	History                  map[string]*LoginHistoryEntry      `json:"history"` // map[deviceID]DeviceHistoryEntry
-	Cache                    []string                           `json:"cache"`   // list of IP addresses, EvrID's, HMD Serial Numbers, and System Data
-	XPIs                     map[string]time.Time               `json:"xpis"`    // list of XPIs
-	ClientIPs                map[string]time.Time               `json:"client_ips"`
-	AuthorizedIPs            map[string]time.Time               `json:"authorized_client_ips"`
-	DeniedClientAddresses    []string                           `json:"denied_client_addrs"` // list of denied IPs
-	PendingAuthorizations    map[string]*LoginHistoryEntry      `json:"pending_authorizations"`
-	SecondDegreeAlternates   []string                           `json:"second_degree"`
+	History                  map[string]*LoginHistoryEntry      `json:"history"`                    // map[deviceID]DeviceHistoryEntry
+	Cache                    []string                           `json:"cache"`                      // list of IP addresses, EvrID's, HMD Serial Numbers, and System Data
+	XPIs                     map[string]time.Time               `json:"xpis"`                       // list of XPIs
+	ClientIPs                map[string]time.Time               `json:"client_ips"`                 // map[clientIP]time.Time
+	AuthorizedIPs            map[string]time.Time               `json:"authorized_client_ips"`      // map[clientIP]time.Time
+	DeniedClientAddresses    []string                           `json:"denied_client_addrs"`        // list of denied IPs
+	PendingAuthorizations    map[string]*LoginHistoryEntry      `json:"pending_authorizations"`     // map[XPID:ClientIP]LoginHistoryEntry
+	SecondDegreeAlternates   []string                           `json:"second_degree"`              // []userID
 	AlternateMap             map[string][]*AlternateSearchMatch `json:"alternate_accounts"`         // map of alternate user IDs and what they have in common
 	GroupNotifications       map[string]map[string]time.Time    `json:"notified_groups"`            // list of groups that have been notified of this alternate login
 	IgnoreDisabledAlternates bool                               `json:"ignore_disabled_alternates"` // Ignore disabled alternates
@@ -88,10 +101,17 @@ type LoginHistory struct {
 	version                  string                             // storage record version
 }
 
-func (LoginHistory) StorageMeta() StorageMeta {
+func (h *LoginHistory) StorageMeta() StorageMeta {
+	version := "*"
+	if h != nil && h.version != "" {
+		version = h.version
+	}
 	return StorageMeta{
-		Collection: LoginStorageCollection,
-		Key:        LoginHistoryStorageKey,
+		Collection:      LoginStorageCollection,
+		Key:             LoginHistoryStorageKey,
+		PermissionRead:  runtime.STORAGE_PERMISSION_NO_READ,
+		PermissionWrite: runtime.STORAGE_PERMISSION_NO_WRITE,
+		Version:         version,
 	}
 }
 
@@ -105,6 +125,10 @@ func (LoginHistory) StorageIndex() *StorageIndexMeta {
 		MaxEntries:     1000000,
 		IndexOnly:      false,
 	}
+}
+
+func (h *LoginHistory) SetStorageVersion(version string) {
+	h.version = version
 }
 
 func NewLoginHistory(userID string) *LoginHistory {
@@ -124,87 +148,97 @@ func NewLoginHistory(userID string) *LoginHistory {
 	}
 }
 
+func (h *LoginHistory) AlternateIDs() (firstDegree []string, secondDegree []string) {
+	var (
+		firstIDs  = make([]string, 0, len(h.AlternateMap))
+		secondIDs = make([]string, 0, len(h.SecondDegreeAlternates))
+	)
+
+	for userID := range h.AlternateMap {
+		firstIDs = append(firstIDs, userID)
+	}
+
+	for _, userID := range h.SecondDegreeAlternates {
+		if _, found := h.AlternateMap[userID]; !found {
+			secondIDs = append(secondIDs, userID)
+		}
+	}
+
+	slices.Sort(firstIDs)
+	slices.Sort(secondIDs)
+
+	return slices.Compact(firstIDs), slices.Compact(secondIDs)
+}
+
 func (h *LoginHistory) Update(xpid evr.EvrId, clientIP string, loginData *evr.LoginProfile) {
+	if e := h.Get(xpid, clientIP); e != nil {
+		e.UpdatedAt = time.Now().UTC()
+		e.LoginData = loginData
+		return
+	} else {
+		h.Insert(&LoginHistoryEntry{
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+			XPID:      xpid,
+			ClientIP:  clientIP,
+			LoginData: loginData,
+		})
+	}
+}
+
+func (h *LoginHistory) Get(xpid evr.EvrId, clientIP string) *LoginHistoryEntry {
 	if h.History == nil {
-		h.History = make(map[string]*LoginHistoryEntry)
+		return nil
 	}
-
-	e := &LoginHistoryEntry{
-		UpdatedAt: time.Now(),
-		XPID:      xpid,
-		ClientIP:  clientIP,
-		LoginData: loginData,
+	key := loginHistoryEntryKey(xpid, clientIP)
+	if e, found := h.History[key]; found {
+		return e
 	}
-
-	if h.History[e.Key()] != nil {
-		e.CreatedAt = h.History[e.Key()].CreatedAt
-	}
-
-	h.History[e.Key()] = e
+	return nil
 }
 
 func (h *LoginHistory) Insert(entry *LoginHistoryEntry) {
 	if h.History == nil {
 		h.History = make(map[string]*LoginHistoryEntry)
 	}
-
 	h.History[entry.Key()] = entry
 }
 
 func (h *LoginHistory) AuthorizeIPWithCode(ip, code string) error {
-	if h.AuthorizedIPs == nil {
-		h.AuthorizedIPs = make(map[string]time.Time)
-	}
-
-	found := false
-	var entry *LoginHistoryEntry
-	for k, e := range h.PendingAuthorizations {
+	var pendingEntry *LoginHistoryEntry
+	for _, e := range h.PendingAuthorizations {
 		if e.ClientIP == ip {
-			found = true
-			// Always delete the entry
-			delete(h.PendingAuthorizations, k)
-			entry = e
-			break
+
+			if pendingEntry.PendingCode() != code {
+				return fmt.Errorf("invalid code %s for IP %s", code, ip)
+			}
+
+			_ = h.AuthorizeIP(ip)
+			return nil
 		}
 	}
 
-	if !found {
-		return fmt.Errorf("no pending authorization found for IP %s", ip)
-	}
-
-	pendingCode := fmt.Sprintf("%02d", entry.CreatedAt.Nanosecond()%100)
-	if pendingCode != code {
-		return fmt.Errorf("invalid code %s for IP %s", code, ip)
-	}
-
-	h.AuthorizedIPs[ip] = time.Now().UTC()
-	return nil
+	return ErrPendingAuthorizationNotFound
 }
 
 func (h *LoginHistory) AuthorizeIP(ip string) bool {
 	if h.AuthorizedIPs == nil {
 		h.AuthorizedIPs = make(map[string]time.Time)
 	}
-	isNew := false
-	if _, found := h.AuthorizedIPs[ip]; !found {
-		isNew = true
-	}
+	h.RemovePendingAuthorizationIP(ip)
+	_, found := h.AuthorizedIPs[ip]
 	h.AuthorizedIPs[ip] = time.Now().UTC()
-	if h.PendingAuthorizations != nil {
-		delete(h.PendingAuthorizations, ip)
-	}
-	return isNew
+
+	return !found
 }
 
 func (h *LoginHistory) IsAuthorizedIP(ip string) (isAuthorized bool) {
-
 	if h.AuthorizedIPs != nil {
 		if _, found := h.AuthorizedIPs[ip]; found {
-			isAuthorized = true
+			return true
 		}
 	}
-
-	return isAuthorized
+	return false
 }
 
 func (h *LoginHistory) AddPendingAuthorizationIP(xpid evr.EvrId, clientIP string, loginData *evr.LoginProfile) *LoginHistoryEntry {
@@ -239,12 +273,14 @@ func (h *LoginHistory) RemovePendingAuthorizationIP(ip string) {
 
 func (h *LoginHistory) NotifyGroup(groupID string, threshold time.Time) bool {
 
-	firstIDs := make([]string, 0, len(h.AlternateMap)+len(h.SecondDegreeAlternates))
+	userIDs := make([]string, 0, len(h.AlternateMap)+len(h.SecondDegreeAlternates))
 	for k := range h.AlternateMap {
-		firstIDs = append(firstIDs, k)
+		userIDs = append(userIDs, k)
 	}
 
-	userIDs := append(firstIDs, h.SecondDegreeAlternates...)
+	if len(h.SecondDegreeAlternates) > 0 {
+		userIDs = append(userIDs, h.SecondDegreeAlternates...)
+	}
 
 	if len(userIDs) == 0 {
 		return false
@@ -282,38 +318,57 @@ func (h *LoginHistory) UpdateAlternates(ctx context.Context, nk runtime.NakamaMo
 	h.AlternateMap = make(map[string][]*AlternateSearchMatch, len(matches))
 	h.SecondDegreeAlternates = make([]string, 0)
 
+	userIDs := make([]string, 0, len(matches))
 	for _, m := range matches {
-		account, err := nk.AccountGetId(ctx, m.otherHistory.userID)
-		if err != nil {
-			return false, fmt.Errorf("error getting account for user ID %s: %w", m.otherHistory.userID, err)
+		userIDs = append(userIDs, m.otherHistory.userID)
+	}
+	slices.Sort(userIDs)
+	userIDs = slices.Compact(userIDs)
+	// Remove excluded user IDs
+	for i := 0; i < len(userIDs); i++ {
+		if slices.Contains(excludeUserIDs, userIDs[i]) {
+			userIDs = slices.Delete(userIDs, i, i+1)
+			i--
 		}
-		if account == nil {
-			continue
-		}
+	}
 
-		if account.GetDisableTime() != nil {
-			hasDisabledAlts = true
-		}
-
-		h.AlternateMap[m.otherHistory.userID] = append(h.AlternateMap[m.otherHistory.userID], m)
-
-		if _, found := h.AlternateMap[m.otherHistory.userID]; !found {
-			// add second-level alternates
-			for id := range m.otherHistory.AlternateMap {
-				if id == h.userID {
-					continue
-				}
-				h.SecondDegreeAlternates = append(h.SecondDegreeAlternates, id)
+	if accounts, err := nk.AccountsGetId(ctx, userIDs); err != nil {
+		return false, fmt.Errorf("error getting accounts for user IDs %v: %w", userIDs, err)
+	} else {
+		for _, a := range accounts {
+			if !h.IgnoreDisabledAlternates && a.GetDisableTime() != nil && !a.GetDisableTime().AsTime().IsZero() {
+				hasDisabledAlts = true
 			}
 		}
 	}
 
-	slices.Sort(h.SecondDegreeAlternates)
-	h.SecondDegreeAlternates = slices.Compact(h.SecondDegreeAlternates)
+	secondMap := make(map[string]struct{}, len(matches))
+	for _, m := range matches {
 
-	if h.IgnoreDisabledAlternates {
-		hasDisabledAlts = false
+		h.AlternateMap[m.otherHistory.userID] = append(h.AlternateMap[m.otherHistory.userID], m)
+		// add second-level alternates
+		for id := range m.otherHistory.AlternateMap {
+			secondMap[id] = struct{}{}
+		}
 	}
+
+	// Filter the second-degree alternates
+	h.SecondDegreeAlternates = make([]string, 0, len(secondMap))
+
+	for userID := range h.AlternateMap {
+
+		if userID == h.userID {
+			continue
+		}
+
+		if _, found := h.AlternateMap[userID]; found {
+			continue
+		}
+
+		h.SecondDegreeAlternates = append(h.SecondDegreeAlternates, userID)
+	}
+
+	slices.Sort(h.SecondDegreeAlternates)
 
 	return hasDisabledAlts, nil
 }
@@ -359,13 +414,11 @@ func (h *LoginHistory) rebuildCache() {
 	}
 }
 
-func (h *LoginHistory) StorageWriteOp() (*runtime.StorageWrite, error) {
+func (h *LoginHistory) MarshalJSON() ([]byte, error) {
+
 	if h.userID == "" {
 		return nil, fmt.Errorf("missing user ID")
 	}
-
-	// Rebuild the cache
-	h.rebuildCache()
 
 	// Clear authorized IPs that haven't been used in over 30 days
 	for ip := range h.AuthorizedIPs {
@@ -374,18 +427,30 @@ func (h *LoginHistory) StorageWriteOp() (*runtime.StorageWrite, error) {
 			delete(h.AuthorizedIPs, ip)
 		}
 	}
+
+	// Alias to avoid recursion during marshaling
+	type Alias LoginHistory
+	aux := &struct {
+		*Alias
+	}{
+		Alias: (*Alias)(h),
+	}
+
 	// Keep the history size under 5MB
 	var bytes []byte
 	var err error
 	for {
 
-		bytes, err = json.Marshal(h)
+		// Rebuild the cache
+		h.rebuildCache()
+
+		bytes, err = json.Marshal(aux)
 		if err != nil {
 			return nil, fmt.Errorf("error marshalling display name history: %w", err)
 		}
 
 		if len(bytes) < 5*1024*1024 {
-			break
+			return bytes, nil
 		}
 
 		// Remove the oldest entries
@@ -402,85 +467,6 @@ func (h *LoginHistory) StorageWriteOp() (*runtime.StorageWrite, error) {
 			h.rebuildCache()
 		}
 	}
-
-	return &runtime.StorageWrite{
-		Collection: LoginStorageCollection,
-		Key:        LoginHistoryStorageKey,
-		Value:      string(bytes),
-		UserID:     h.userID,
-		Version:    h.version,
-	}, nil
-}
-
-func (h *LoginHistory) Store(ctx context.Context, nk runtime.NakamaModule) error {
-	return LoginHistoryStore(ctx, nk, h.userID, h)
-}
-
-func LoginHistoryLoad(ctx context.Context, nk runtime.NakamaModule, userID string) (*LoginHistory, error) {
-	if userID == "" || userID == SystemUserID {
-		return nil, fmt.Errorf("invalid user ID: %s", userID)
-	}
-
-	objects, err := nk.StorageRead(ctx, []*runtime.StorageRead{
-		{
-			Collection: LoginStorageCollection,
-			Key:        LoginHistoryStorageKey,
-			UserID:     userID,
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("error reading display name cache: %w", err)
-	}
-
-	if len(objects) == 0 {
-		return NewLoginHistory(userID), nil
-	}
-
-	var history LoginHistory
-	if err := json.Unmarshal([]byte(objects[0].Value), &history); err != nil {
-		return nil, fmt.Errorf("error unmarshalling display name cache: %w", err)
-	}
-	history.userID = userID
-	history.version = objects[0].Version
-
-	return &history, nil
-}
-
-func LoginHistoryStore(ctx context.Context, nk runtime.NakamaModule, userID string, history *LoginHistory) error {
-
-	op, err := history.StorageWriteOp()
-	if err != nil {
-		return fmt.Errorf("error creating storage operation: %w", err)
-	}
-
-	acks, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{
-		op,
-	})
-
-	if err != nil {
-		return fmt.Errorf("error writing display name history: %w", err)
-	}
-
-	if acks[0].Version != history.version {
-		history.version = acks[0].Version
-	}
-
-	return nil
-}
-
-func LoginHistoryUpdate(ctx context.Context, nk runtime.NakamaModule, userID string, xpi evr.EvrId, clientIP string, loginData *evr.LoginProfile) error {
-	history, err := LoginHistoryLoad(ctx, nk, userID)
-	if err != nil {
-		return fmt.Errorf("error getting display name history: %w", err)
-	}
-
-	history.Update(xpi, clientIP, loginData)
-
-	if err := LoginHistoryStore(ctx, nk, userID, history); err != nil {
-		return fmt.Errorf("error storing display name history: %w", err)
-	}
-
-	return nil
 }
 
 func LoginHistoryRegexSearch(ctx context.Context, nk runtime.NakamaModule, pattern string, limit int) (map[string]*LoginHistory, error) {

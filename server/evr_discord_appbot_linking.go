@@ -60,16 +60,17 @@ func (d *DiscordAppBot) linkHeadset(ctx context.Context, logger runtime.Logger, 
 		}
 		d.metrics.CustomCounter("link_headset", tags, 1)
 		// Set the client IP as authorized in the LoginHistory
-		history, err := LoginHistoryLoad(ctx, nk, userID)
-		if err != nil {
+		history := &LoginHistory{}
+		if err := StorageRead(ctx, nk, userID, history, true); err != nil {
 			return fmt.Errorf("failed to load login history: %w", err)
 		}
 		history.Update(ticket.XPID, ticket.ClientIP, ticket.LoginProfile)
 		history.AuthorizeIP(ticket.ClientIP)
 
-		if err := LoginHistoryStore(ctx, nk, userID, history); err != nil {
+		if _, err := StorageWrite(ctx, nk, userID, history); err != nil {
 			return fmt.Errorf("failed to save login history: %w", err)
 		}
+
 		return nil
 	}(); err != nil {
 		logger.WithFields(map[string]interface{}{
@@ -144,8 +145,9 @@ func (d *DiscordAppBot) handleUnlinkHeadset(logger runtime.Logger, s *discordgo.
 			})
 		}
 
-		loginHistory, err := LoginHistoryLoad(ctx, nk, userID)
-		if err != nil {
+		loginHistory := &LoginHistory{}
+		if err := StorageRead(ctx, nk, userID, loginHistory, true); err != nil {
+			logger.Error("Failed to load login history", zap.Error(err))
 			return err
 		}
 
