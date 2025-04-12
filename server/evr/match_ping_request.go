@@ -142,6 +142,12 @@ func (e Endpoint) ExternalAddress() string {
 	return fmt.Sprintf("%s:%d", e.ExternalIP.String(), e.Port)
 }
 
+// GetHostID returns a string of "internalIP:externalIP"
+// This is used to identify the host in the game server selection process.
+func (e Endpoint) GetHostID() string {
+	return e.InternalIP.String() + ":" + e.ExternalIP.String()
+}
+
 func (e Endpoint) GetExternalIP() string {
 	return e.ExternalIP.String()
 }

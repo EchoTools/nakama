@@ -565,10 +565,10 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 	}
 
 	// Count the number of active matches by extIP
-	countByExtIP := make(map[string]int, len(labels))
+	countByHostID := make(map[string]int, len(labels))
 	for _, label := range labels {
-		k := label.GameServer.Endpoint.ExternalIP.String()
-		countByExtIP[k]++
+		hostID := label.GameServer.Endpoint.GetHostID()
+		countByHostID[hostID]++
 	}
 
 	// Create a slice of LabelIndex structs
@@ -576,6 +576,7 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 	indexes := make([]labelIndex, len(labels))
 	for i, label := range labels {
 		extIP := label.GameServer.Endpoint.ExternalIP.String()
+		hostID := label.GameServer.Endpoint.GetHostID()
 		regionMatch := false
 		for _, region := range label.GameServer.RegionCodes {
 			if region == "default" {
@@ -602,10 +603,9 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 			label:             label,
 			rtt:               (rttsByExternalIP[extIP] + 10) / 20 * 20,
 			isReachable:       rttsByExternalIP[extIP] != 0,
-			extIP:             extIP,
 			rating:            rating,
 			isPriorityForMode: slices.Contains(label.GameServer.DesignatedModes, settings.Mode),
-			activeCount:       countByExtIP[extIP],
+			activeCount:       countByHostID[hostID],
 			regionMatches:     regionMatch,
 		}
 	}
@@ -638,7 +638,6 @@ type labelIndex struct {
 	label             *MatchLabel
 	rtt               int
 	isReachable       bool
-	extIP             string
 	rating            float64
 	isPriorityForMode bool
 	activeCount       int
