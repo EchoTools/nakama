@@ -722,34 +722,18 @@ func (s ServiceStatusData) String() string {
 }
 
 type ServiceStatusService struct {
-	ServiceId int    `json:"serviceid"`
+	ServiceID string `json:"serviceid"` // "services" or "news"
 	Available bool   `json:"available"`
 	Message   string `json:"message"`
 }
 
-func (h *RPCHandler) ServiceStatusRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+func (h *RPCHandler) ServiceStatusRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 
 	if cachedResponse, _, found := h.responseCache.Get("server-status"); found {
 		return cachedResponse.(string), nil
 	}
 
 	// /status/services,news?env=live&projectid=rad14
-	// Get the serviceStatus object from storage
-
-	objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
-		{
-			Collection: "Service",
-			Key:        "status",
-			UserID:     uuid.Nil.String(),
-		},
-	})
-	if err != nil {
-		return "", err
-	}
-
-	if len(objs) == 0 {
-		return "", nil
-	}
 	statusData := &ServiceStatusData{}
 
 	if err := StorageRead(ctx, nk, SystemUserID, statusData, true); err != nil {
