@@ -429,12 +429,12 @@ func (h *EventDispatch) handleMatchEvent(ctx context.Context, logger runtime.Log
 
 func AuditLogSendGuild(dg *discordgo.Session, gg *GuildGroup, message string) (*discordgo.Message, error) {
 
-	content := fmt.Sprintf("[`%s/%s`] %s", gg.Name())
+	content := fmt.Sprintf("[`%s/%s`] %s", gg.Name(), gg.ID(), message)
 	if err := AuditLogSend(dg, ServiceSettings().ServiceAuditChannelID, content); err != nil {
 		return nil, fmt.Errorf("failed to send service audit message: %w", err)
 	}
 
-	if err := AuditLogSend(dg, gg.AuditChannelID, content); err != nil {
+	if err := AuditLogSend(dg, gg.AuditChannelID, message); err != nil {
 		return nil, fmt.Errorf("failed to send service audit message: %w", err)
 	}
 
