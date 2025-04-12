@@ -27,7 +27,7 @@ type GroupMetadata struct {
 	FraudScoreThreshold                int               `json:"fraud_score_threshold"`      // The fraud score threshold
 	AllowedFeatures                    []string          `json:"allowed_features"`           // Allowed features
 	AlternateAccountNotificationExpiry time.Time         `json:"alt_notification_threshold"` // Show alternate notifications newer than this time.
-
+	EnableEnforcementCountInNames      bool              `json:"enable_enforcement_count_in_names"`
 }
 
 func NewGuildGroupMetadata(guildID string) *GroupMetadata {
