@@ -90,7 +90,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		"player/kick":                   KickPlayerRPC,
 		"player/profile":                UserServerProfileRPC,
 		"link":                          LinkingAppRpc,
-		"evr/servicestatus":             rpcHandler.ServiceStatusRpc,
+		"evr/servicestatus":             rpcHandler.ServiceStatusRPC,
 		"importloadouts":                ImportLoadoutsRpc,
 		"matchmaker/stream":             MatchmakerStreamRPC,
 		"matchmaker/state":              MatchmakerStateRPC,
