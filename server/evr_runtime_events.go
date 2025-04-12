@@ -357,13 +357,19 @@ func (h *EventDispatch) handleUserLogin(ctx context.Context, logger runtime.Logg
 					kickDelay          = time.Duration(delayMin+rand.Intn(delayMax)) * time.Minute
 				)
 
-				if accounts, err := h.nk.AccountsGetId(ctx, firstIDs); err != nil {
+				if accounts, err := h.nk.AccountsGetId(ctx, append(firstIDs, userID)); err != nil {
 					logger.Error("failed to get alternate accounts: %v", err)
+					return
 				} else {
 					for _, a := range accounts {
 						accountMap[a.User.Id] = a
 						altNames = append(altNames, fmt.Sprintf("<@%s> (%s)", a.CustomId, a.User.Username))
 					}
+				}
+
+				if len(altNames) == 0 || accountMap[userID] == nil {
+					logger.Error("failed to get alternate accounts: %v", err)
+					return
 				}
 
 				slices.Sort(altNames)
