@@ -26,47 +26,49 @@ type (
 )
 
 type LobbySessionParameters struct {
-	Node                      string                        `json:"node"`
-	UserID                    uuid.UUID                     `json:"user_id"`
-	SessionID                 uuid.UUID                     `json:"session_id"`
-	DiscordID                 string                        `json:"discord_id"`
-	VersionLock               evr.Symbol                    `json:"version_lock"`
-	AppID                     evr.Symbol                    `json:"app_id"`
-	GroupID                   uuid.UUID                     `json:"group_id"`
-	RegionCode                string                        `json:"region_code"`
-	Mode                      evr.Symbol                    `json:"mode"`
-	Level                     evr.Symbol                    `json:"level"`
-	SupportedFeatures         []string                      `json:"supported_features"`
-	RequiredFeatures          []string                      `json:"required_features"`
-	CurrentMatchID            MatchID                       `json:"current_match_id"`
-	NextMatchID               MatchID                       `json:"next_match_id"`
-	Role                      int                           `json:"role"`
-	PartySize                 *atomic.Int64                 `json:"party_size"`
-	PartyID                   uuid.UUID                     `json:"party_id"`
-	PartyGroupName            string                        `json:"party_group_name"`
-	DisableArenaBackfill      bool                          `json:"disable_arena_backfill"`
-	BackfillQueryAddon        string                        `json:"backfill_query_addon"`
-	MatchmakingQueryAddon     string                        `json:"matchmaking_query_addon"`
-	CreateQueryAddon          string                        `json:"create_query_addon"`
-	Verbose                   bool                          `json:"verbose"`
-	BlockedIDs                []string                      `json:"blocked_ids"`
-	MatchmakingRating         *atomic.Pointer[types.Rating] `json:"matchmaking_rating"`
-	MatchmakingOrdinal        *atomic.Float64               `json:"matchmaking_ordinal"`
-	IsEarlyQuitter            bool                          `json:"quit_last_game_early"`
-	EnableSBMM                bool                          `json:"disable_sbmm"`
-	EnableRankPercentileRange bool                          `json:"enable_rank_percentile_range"`
-	EnableOrdinalRange        bool                          `json:"enable_ordinal_range"`
-	MatchmakingOrdinalRange   float64                       `json:"ordinal_range"`
-	RankPercentile            *atomic.Float64               `json:"rank_percentile"` // Updated when party is created
-	RankPercentileMaxDelta    float64                       `json:"rank_percentile_max_delta"`
-	MatchmakingDivisions      []string                      `json:"divisions"`
-	MaxServerRTT              int                           `json:"max_server_rtt"`
-	MatchmakingTimestamp      time.Time                     `json:"matchmaking_timestamp"`
-	MatchmakingTimeout        time.Duration                 `json:"matchmaking_timeout"`
-	FailsafeTimeout           time.Duration                 `json:"failsafe_timeout"` // The failsafe timeout
-	FallbackTimeout           time.Duration                 `json:"fallback_timeout"` // The fallback timeout
-	DisplayName               string                        `json:"display_name"`
-	latencyHistory            *atomic.Pointer[LatencyHistory]
+	Node                         string                        `json:"node"`
+	UserID                       uuid.UUID                     `json:"user_id"`
+	SessionID                    uuid.UUID                     `json:"session_id"`
+	DiscordID                    string                        `json:"discord_id"`
+	VersionLock                  evr.Symbol                    `json:"version_lock"`
+	AppID                        evr.Symbol                    `json:"app_id"`
+	GroupID                      uuid.UUID                     `json:"group_id"`
+	RegionCode                   string                        `json:"region_code"`
+	Mode                         evr.Symbol                    `json:"mode"`
+	Level                        evr.Symbol                    `json:"level"`
+	SupportedFeatures            []string                      `json:"supported_features"`
+	RequiredFeatures             []string                      `json:"required_features"`
+	CurrentMatchID               MatchID                       `json:"current_match_id"`
+	NextMatchID                  MatchID                       `json:"next_match_id"`
+	Role                         int                           `json:"role"`
+	PartySize                    *atomic.Int64                 `json:"party_size"`
+	PartyID                      uuid.UUID                     `json:"party_id"`
+	PartyGroupName               string                        `json:"party_group_name"`
+	DisableArenaBackfill         bool                          `json:"disable_arena_backfill"`
+	BackfillQueryAddon           string                        `json:"backfill_query_addon"`
+	MatchmakingQueryAddon        string                        `json:"matchmaking_query_addon"`
+	CreateQueryAddon             string                        `json:"create_query_addon"`
+	Verbose                      bool                          `json:"verbose"`
+	BlockedIDs                   []string                      `json:"blocked_ids"`
+	MatchmakingRating            *atomic.Pointer[types.Rating] `json:"matchmaking_rating"`
+	MatchmakingOrdinal           *atomic.Float64               `json:"matchmaking_ordinal"`
+	IsEarlyQuitter               bool                          `json:"quit_last_game_early"`
+	EnableSBMM                   bool                          `json:"disable_sbmm"`
+	EnableRankPercentileRange    bool                          `json:"enable_rank_percentile_range"`
+	EnableOrdinalRange           bool                          `json:"enable_ordinal_range"`
+	EnableDivisions              bool                          `json:"enable_divisions"`
+	MatchmakingOrdinalRange      float64                       `json:"ordinal_range"`
+	RankPercentile               *atomic.Float64               `json:"rank_percentile"` // Updated when party is created
+	RankPercentileMaxDelta       float64                       `json:"rank_percentile_max_delta"`
+	MatchmakingDivisions         []string                      `json:"divisions"`
+	MatchmakingExcludedDivisions []string                      `json:"excluded_divisions"`
+	MaxServerRTT                 int                           `json:"max_server_rtt"`
+	MatchmakingTimestamp         time.Time                     `json:"matchmaking_timestamp"`
+	MatchmakingTimeout           time.Duration                 `json:"matchmaking_timeout"`
+	FailsafeTimeout              time.Duration                 `json:"failsafe_timeout"` // The failsafe timeout
+	FallbackTimeout              time.Duration                 `json:"fallback_timeout"` // The fallback timeout
+	DisplayName                  string                        `json:"display_name"`
+	latencyHistory               *atomic.Pointer[LatencyHistory]
 }
 
 func (p *LobbySessionParameters) GetPartySize() int {
@@ -377,47 +379,49 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 	params, _ := LoadParams(ctx)
 
 	return &LobbySessionParameters{
-		Node:                      node,
-		UserID:                    session.userID,
-		SessionID:                 session.id,
-		DiscordID:                 sessionParams.DiscordID(),
-		CurrentMatchID:            currentMatchID,
-		VersionLock:               versionLock,
-		AppID:                     appID,
-		GroupID:                   groupID,
-		RegionCode:                region,
-		Mode:                      mode,
-		Level:                     level,
-		SupportedFeatures:         supportedFeatures,
-		RequiredFeatures:          requiredFeatures,
-		Role:                      entrantRole,
-		DisableArenaBackfill:      globalSettings.DisableArenaBackfill || userSettings.DisableArenaBackfill,
-		BackfillQueryAddon:        strings.Join(backfillQueryAddons, " "),
-		MatchmakingQueryAddon:     strings.Join(matchmakingQueryAddons, " "),
-		CreateQueryAddon:          strings.Join(createQueryAddons, " "),
-		PartyGroupName:            lobbyGroupName,
-		PartyID:                   partyID,
-		PartySize:                 atomic.NewInt64(1),
-		NextMatchID:               nextMatchID,
-		latencyHistory:            params.latencyHistory,
-		BlockedIDs:                blockedIDs,
-		MatchmakingRating:         atomic.NewPointer(&matchmakingRating),
-		MatchmakingOrdinal:        atomic.NewFloat64(matchmakingOrdinal),
-		MatchmakingOrdinalRange:   globalSettings.OrdinalRange,
-		EnableOrdinalRange:        globalSettings.EnableOrdinalRange,
-		EnableRankPercentileRange: globalSettings.EnableRankPercentileRange,
-		Verbose:                   sessionParams.accountMetadata.DiscordDebugMessages,
-		IsEarlyQuitter:            isEarlyQuitter,
-		EnableSBMM:                globalSettings.EnableSBMM,
-		RankPercentile:            atomic.NewFloat64(rankPercentile),
-		RankPercentileMaxDelta:    rankPercentileMaxDelta,
-		MatchmakingDivisions:      userSettings.Divisions,
-		MaxServerRTT:              maxServerRTT,
-		MatchmakingTimestamp:      time.Now().UTC(),
-		MatchmakingTimeout:        time.Duration(globalSettings.MatchmakingTimeoutSecs) * time.Second,
-		FailsafeTimeout:           time.Duration(failsafeTimeoutSecs) * time.Second,
-		FallbackTimeout:           time.Duration(globalSettings.FallbackTimeoutSecs) * time.Second,
-		DisplayName:               sessionParams.accountMetadata.GetGroupDisplayNameOrDefault(groupID.String()),
+		Node:                         node,
+		UserID:                       session.userID,
+		SessionID:                    session.id,
+		DiscordID:                    sessionParams.DiscordID(),
+		CurrentMatchID:               currentMatchID,
+		VersionLock:                  versionLock,
+		AppID:                        appID,
+		GroupID:                      groupID,
+		RegionCode:                   region,
+		Mode:                         mode,
+		Level:                        level,
+		SupportedFeatures:            supportedFeatures,
+		RequiredFeatures:             requiredFeatures,
+		Role:                         entrantRole,
+		DisableArenaBackfill:         globalSettings.DisableArenaBackfill || userSettings.DisableArenaBackfill,
+		BackfillQueryAddon:           strings.Join(backfillQueryAddons, " "),
+		MatchmakingQueryAddon:        strings.Join(matchmakingQueryAddons, " "),
+		CreateQueryAddon:             strings.Join(createQueryAddons, " "),
+		PartyGroupName:               lobbyGroupName,
+		PartyID:                      partyID,
+		PartySize:                    atomic.NewInt64(1),
+		NextMatchID:                  nextMatchID,
+		latencyHistory:               params.latencyHistory,
+		BlockedIDs:                   blockedIDs,
+		EnableSBMM:                   globalSettings.EnableSBMM,
+		EnableDivisions:              globalSettings.EnableDivisions,
+		EnableRankPercentileRange:    globalSettings.EnableRankPercentileRange,
+		EnableOrdinalRange:           globalSettings.EnableOrdinalRange,
+		MatchmakingRating:            atomic.NewPointer(&matchmakingRating),
+		MatchmakingOrdinal:           atomic.NewFloat64(matchmakingOrdinal),
+		MatchmakingOrdinalRange:      globalSettings.OrdinalRange,
+		Verbose:                      sessionParams.accountMetadata.DiscordDebugMessages,
+		IsEarlyQuitter:               isEarlyQuitter,
+		RankPercentile:               atomic.NewFloat64(rankPercentile),
+		RankPercentileMaxDelta:       rankPercentileMaxDelta,
+		MatchmakingDivisions:         userSettings.Divisions,
+		MatchmakingExcludedDivisions: userSettings.ExcludedDivisions,
+		MaxServerRTT:                 maxServerRTT,
+		MatchmakingTimestamp:         time.Now().UTC(),
+		MatchmakingTimeout:           time.Duration(globalSettings.MatchmakingTimeoutSecs) * time.Second,
+		FailsafeTimeout:              time.Duration(failsafeTimeoutSecs) * time.Second,
+		FallbackTimeout:              time.Duration(globalSettings.FallbackTimeoutSecs) * time.Second,
+		DisplayName:                  sessionParams.accountMetadata.GetGroupDisplayNameOrDefault(groupID.String()),
 	}, nil
 }
 
@@ -535,13 +539,14 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 
 	submissionTime := time.Now().UTC().Format(time.RFC3339)
 	stringProperties := map[string]string{
-		"game_mode":       p.Mode.String(),
-		"group_id":        p.GroupID.String(),
-		"version_lock":    p.VersionLock.String(),
-		"blocked_ids":     strings.Join(p.BlockedIDs, " "),
-		"display_name":    p.DisplayName,
-		"submission_time": submissionTime,
-		"divisions":       strings.Join(p.MatchmakingDivisions, ","),
+		"game_mode":          p.Mode.String(),
+		"group_id":           p.GroupID.String(),
+		"version_lock":       p.VersionLock.String(),
+		"blocked_ids":        strings.Join(p.BlockedIDs, " "),
+		"display_name":       p.DisplayName,
+		"submission_time":    submissionTime,
+		"divisions":          strings.Join(p.MatchmakingDivisions, ","),
+		"excluded_divisions": strings.Join(p.MatchmakingExcludedDivisions, ","),
 	}
 
 	numericProperties := map[string]float64{
@@ -595,13 +600,15 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 			}
 		}
 
-		if p.EnableRankPercentileRange {
-
-			if len(p.MatchmakingDivisions) != 0 {
+		/*
+			if p.EnableDivisions && len(p.MatchmakingDivisions) != 0 {
 				qparts = append(qparts,
 					fmt.Sprintf("+properties.divisions:%s", Query.MatchItem(p.MatchmakingDivisions)),
 					fmt.Sprintf(`-properties.excluded_divisions:%s`, Query.MatchItem(p.MatchmakingDivisions)))
 			}
+		*/
+
+		if p.EnableRankPercentileRange {
 
 			if rankPercentile := p.GetRankPercentile(); rankPercentile > 0.0 {
 				numericProperties["rank_percentile"] = rankPercentile
