@@ -1140,9 +1140,11 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 		blueWins := playerInfo.Team == BlueTeam && payload.IsWinner()
 		ratings := CalculateNewPlayerRatings(label.Players, blueWins)
 		if rating, ok := ratings[playerInfo.SessionID]; ok {
-			if err := MatchmakingRatingStore(ctx, p.nk, playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, rating); err != nil {
+			if err := MatchmakingRatingStore(ctx, p.nk, playerInfo.UserID, playerInfo.DiscordID, playerInfo.DisplayName, groupIDStr, label.Mode, rating); err != nil {
 				logger.Warn("Failed to record percentile to leaderboard", zap.Error(err))
 			}
+		} else {
+			logger.Warn("Failed to get player rating", zap.String("sessionID", playerInfo.SessionID))
 		}
 
 		// Calculate a new rank percentile
@@ -1152,7 +1154,6 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 		} else if err := MatchmakingRankPercentileStore(ctx, p.nk, playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, rankPercentile); err != nil {
 			logger.Warn("Failed to record percentile to leaderboard", zap.Error(err))
 		}
-
 	}
 
 	// Update the player's statistics, if the service settings allow it

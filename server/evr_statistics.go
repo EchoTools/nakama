@@ -141,13 +141,15 @@ func MatchmakingRatingLoad(ctx context.Context, nk runtime.NakamaModule, userID,
 	}), nil
 }
 
-func MatchmakingRatingStore(ctx context.Context, nk runtime.NakamaModule, userID, displayName, groupID string, mode evr.Symbol, r types.Rating) error {
+func MatchmakingRatingStore(ctx context.Context, nk runtime.NakamaModule, userID, discordID, displayName, groupID string, mode evr.Symbol, r types.Rating) error {
 
 	scores := map[string]float64{
 		StatisticBoardID(groupID, mode, SkillRatingSigmaStatisticID, "alltime"): r.Sigma,
 		StatisticBoardID(groupID, mode, SkillRatingMuStatisticID, "alltime"):    r.Mu,
 	}
-
+	metadata := map[string]any{
+		"discord_id": discordID,
+	}
 	for id, value := range scores {
 		score, err := Float64ToScore(value)
 		if err != nil {
@@ -155,17 +157,13 @@ func MatchmakingRatingStore(ctx context.Context, nk runtime.NakamaModule, userID
 		}
 
 		// Write the record
-		if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, displayName, score, 0, nil, nil); err != nil {
+		if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, displayName, score, 0, metadata, nil); err != nil {
 			// Try to create the leaderboard
 			err = nk.LeaderboardCreate(ctx, id, true, "desc", "set", "", nil, true)
 			if err != nil {
 				return fmt.Errorf("Leaderboard create error: %w", err)
-			} else {
-				// Retry the write
-				_, err := nk.LeaderboardRecordWrite(ctx, id, userID, displayName, score, 0, nil, nil)
-				if err != nil {
-					return fmt.Errorf("Leaderboard record write error: %w", err)
-				}
+			} else if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, displayName, score, 0, metadata, nil); err != nil {
+				return fmt.Errorf("Leaderboard record write error: %w", err)
 			}
 		}
 	}
