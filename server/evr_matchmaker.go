@@ -161,6 +161,10 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.Ma
 			return predictions[i].Size > predictions[j].Size
 		}
 
+		if predictions[i].DivisionCount != predictions[j].DivisionCount {
+			return predictions[i].DivisionCount < predictions[j].DivisionCount
+		}
+
 		return predictions[i].Draw > predictions[j].Draw
 	})
 

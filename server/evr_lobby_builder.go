@@ -237,6 +237,7 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 
 	var label *MatchLabel
 	timeout := time.After(60 * time.Second)
+	queryAddon := ServiceSettings().Matchmaking.QueryAddons.LobbyBuilder
 	for {
 		select {
 		case <-ctx.Done():
@@ -245,8 +246,6 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 			return nil, ErrMatchmakingNoAvailableServers
 		default:
 		}
-
-		queryAddon := ServiceSettings().Matchmaking.QueryAddons.LobbyBuilder
 		label, err = LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), b.nk, []string{groupID.String()}, meanRTTByExtIP, settings, nil, true, false, queryAddon)
 		if err != nil || label == nil {
 			logger.Error("Failed to allocate game server.", zap.Error(err))

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -123,10 +124,12 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		return fmt.Errorf("failed to check server ping: %w", err)
 	}
 
-	if lobbyParams.Mode != evr.ModeSocialPublic && !lobbyParams.CurrentMatchID.IsNil() {
+	if !lobbyParams.CurrentMatchID.IsNil() {
 		// Sometimes the client doesn't respond to the ping request, so delay for a few seconds.
 		<-time.After(3 * time.Second)
+	}
 
+	if slices.Contains([]evr.Symbol{evr.ModeArenaPublic, evr.ModeCombatPublic}, lobbyParams.Mode) {
 		// Start the matchmaking process.
 		go func() {
 			if err := p.lobbyMatchMakeWithFallback(ctx, logger, session, lobbyParams, lobbyGroup, entrants...); err != nil {

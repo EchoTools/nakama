@@ -642,10 +642,47 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		logger.Warn("Failed to store display name history", zap.Error(err))
 	}
 
+	globalSettings := ServiceSettings()
 	if settings, err := LoadMatchmakingSettings(ctx, p.nk, session.userID.String()); err != nil {
 		logger.Warn("Failed to load matchmaking settings", zap.Error(err))
 		return fmt.Errorf("failed to load matchmaking settings: %w", err)
 	} else {
+		updated := false
+		// If the player account is less than 7 days old, then assign the "green" division to the player.
+		if time.Since(params.accountMetadata.account.User.CreateTime.AsTime()) < time.Duration(globalSettings.Matchmaking.GreenDivisionMaxAccountAgeDays)*24*time.Hour {
+			if !slices.Contains(settings.Divisions, "green") {
+				settings.Divisions = append(settings.Divisions, "green")
+				updated = true
+			}
+			if slices.Contains(settings.ExcludedDivisions, "green") {
+				// Remove the "green" division from the excluded divisions.
+				settings.ExcludedDivisions = slices.Delete(settings.ExcludedDivisions, 0, 1)
+				updated = true
+			}
+
+		} else {
+			for i := range settings.Divisions {
+				// Remove the "green" division from the divisions.
+				if settings.Divisions[i] == "green" {
+					settings.Divisions = slices.Delete(settings.Divisions, i, i+1)
+					updated = true
+				}
+			}
+
+			if !slices.Contains(settings.ExcludedDivisions, "green") {
+				// Add the "green" division to the excluded divisions.
+				settings.ExcludedDivisions = append(settings.ExcludedDivisions, "green")
+				updated = true
+			}
+		}
+
+		if updated {
+			if err := StoreMatchmakingSettings(ctx, p.nk, session.userID.String(), settings); err != nil {
+				logger.Warn("Failed to save matchmaking settings", zap.Error(err))
+				return fmt.Errorf("failed to save matchmaking settings: %w", err)
+			}
+		}
+
 		params.matchmakingSettings = &settings
 	}
 

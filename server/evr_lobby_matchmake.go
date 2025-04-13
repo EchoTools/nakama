@@ -266,6 +266,7 @@ type MatchmakingSettings struct {
 	NextMatchDiscordID       string   `json:"next_match_discord_id"`     // The discord ID to join the next match as
 	StaticBaseRankPercentile float64  `json:"static_rank_percentile"`    // The static rank percentile to use
 	Divisions                []string `json:"divisions"`                 // The division to use
+	ExcludedDivisions        []string `json:"excluded_divisions"`        // The division to use
 }
 
 func (MatchmakingSettings) StorageMeta() StorageMeta {
