@@ -46,7 +46,6 @@ func LoginAlternateSearch(ctx context.Context, nk runtime.NakamaModule, loginHis
 	var err error
 	var result *api.StorageObjects
 	for {
-
 		result, cursor, err = nk.StorageIndexList(ctx, SystemUserID, LoginHistoryCacheIndex, query, 100, nil, cursor)
 		if err != nil {
 			return nil, fmt.Errorf("error listing alt index: %w", err)
