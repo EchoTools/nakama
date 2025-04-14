@@ -120,9 +120,9 @@ func (LoginHistory) StorageIndex() *StorageIndexMeta {
 		Name:           LoginHistoryCacheIndex,
 		Collection:     LoginStorageCollection,
 		Key:            LoginHistoryStorageKey,
-		Fields:         []string{"cache", "xpis", "client_ips", "second_order", "alternate_matches", "denied_client_addrs"},
+		Fields:         []string{"cache", "xpis", "client_ips", "second_degree", "alternate_matches", "denied_client_addrs"},
 		SortableFields: nil,
-		MaxEntries:     1000000,
+		MaxEntries:     10000000,
 		IndexOnly:      false,
 	}
 }
@@ -316,7 +316,7 @@ func (h *LoginHistory) UpdateAlternates(ctx context.Context, nk runtime.NakamaMo
 	}
 
 	h.AlternateMap = make(map[string][]*AlternateSearchMatch, len(matches))
-	h.SecondDegreeAlternates = make([]string, 0)
+	h.SecondDegreeAlternates = make([]string, 0, len(matches))
 
 	userIDs := make([]string, 0, len(matches))
 	for _, m := range matches {
@@ -324,6 +324,7 @@ func (h *LoginHistory) UpdateAlternates(ctx context.Context, nk runtime.NakamaMo
 	}
 	slices.Sort(userIDs)
 	userIDs = slices.Compact(userIDs)
+
 	// Remove excluded user IDs
 	for i := 0; i < len(userIDs); i++ {
 		if slices.Contains(excludeUserIDs, userIDs[i]) {
@@ -369,6 +370,11 @@ func (h *LoginHistory) UpdateAlternates(ctx context.Context, nk runtime.NakamaMo
 	}
 
 	slices.Sort(h.SecondDegreeAlternates)
+
+	// Remove duplicates
+	h.SecondDegreeAlternates = slices.Compact(h.SecondDegreeAlternates)
+
+	// Check if the alternates have changed
 
 	return hasDisabledAlts, nil
 }
