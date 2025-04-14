@@ -118,7 +118,7 @@ func MatchmakingRatingLoad(ctx context.Context, nk runtime.NakamaModule, userID,
 	}
 
 	for statName, ptr := range structMap {
-		boardID := StatisticBoardID(groupID, mode, statName, "alltime")
+		boardID := StatisticBoardID(groupID, mode, statName, evr.ResetScheduleAllTime)
 
 		_, ownerRecords, _, _, err := nk.LeaderboardRecordsList(ctx, boardID, []string{userID}, 1, "", 0)
 		if err != nil {
