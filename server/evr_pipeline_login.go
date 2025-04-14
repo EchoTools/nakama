@@ -415,19 +415,19 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 	}
 
 	// Load the login history for audit purposes.
-	loginHistory := &LoginHistory{}
+	loginHistory := NewLoginHistory(session.userID.String())
 	if err := StorageRead(ctx, p.nk, params.account.User.Id, loginHistory, true); err != nil {
 		metricsTags["error"] = "failed_load_login_history"
 		return fmt.Errorf("failed to load login history: %w", err)
 	}
+
+	loginHistory.Update(params.xpID, session.clientIP, params.loginPayload)
 
 	defer func(userID string) {
 		if _, err := StorageWrite(context.Background(), p.nk, userID, loginHistory); err != nil {
 			logger.Warn("Failed to store login history", zap.Error(err))
 		}
 	}(params.account.User.Id)
-
-	loginHistory.Update(params.xpID, session.clientIP, params.loginPayload)
 
 	// The account is now authenticated. Authorize the session.
 	if params.account.GetDisableTime() != nil {

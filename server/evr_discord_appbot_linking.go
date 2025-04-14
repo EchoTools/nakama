@@ -145,7 +145,7 @@ func (d *DiscordAppBot) handleUnlinkHeadset(logger runtime.Logger, s *discordgo.
 			})
 		}
 
-		loginHistory := &LoginHistory{}
+		loginHistory := NewLoginHistory(userID)
 		if err := StorageRead(ctx, nk, userID, loginHistory, true); err != nil {
 			logger.Error("Failed to load login history", zap.Error(err))
 			return err
