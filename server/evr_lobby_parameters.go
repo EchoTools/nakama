@@ -483,11 +483,14 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeMMR bool, includeMax
 	}
 
 	if includeMaxRTT {
-		// Ignore all matches with too high latency
+		validRTTs := make([]string, 0)
 		for ip, rtt := range p.latencyHistory.Load().LatestRTTs() {
-			if rtt > p.MaxServerRTT {
-				qparts = append(qparts, fmt.Sprintf("-label.broadcaster.endpoint:/.*%s.*/", Query.Escape(ip)))
+			if rtt <= p.MaxServerRTT {
+				validRTTs = append(validRTTs, ip)
 			}
+		}
+		if len(validRTTs) > 0 {
+			qparts = append(qparts, fmt.Sprintf("+label.broadcaster.endpoint:%s", Query.MatchItem(validRTTs)))
 		}
 	}
 	return strings.Join(qparts, " ")
