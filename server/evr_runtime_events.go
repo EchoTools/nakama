@@ -223,7 +223,7 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 		err          error
 		groupID      = evt.Properties["group_id"]
 		userID       = evt.Properties["user_id"]
-		loginHistory = &LoginHistory{}
+		loginHistory = NewLoginHistory(userID)
 		gg           *GuildGroup
 
 		displayAuditMessage = false
@@ -342,53 +342,57 @@ func (h *EventDispatch) handleUserLogin(ctx context.Context, logger runtime.Logg
 		return fmt.Errorf("failed to load login history: %w", err)
 	}
 
-	if serviceSettings := ServiceSettings(); serviceSettings != nil && serviceSettings.KickPlayersWithDisabledAlternates {
-		if hasDiabledAlts, err := loginHistory.UpdateAlternates(ctx, h.nk); err != nil {
-			return fmt.Errorf("failed to update alternates: %w", err)
-		} else if hasDiabledAlts {
+	hasDiabledAlts, err := loginHistory.UpdateAlternates(ctx, h.nk)
+	if err != nil {
+		return fmt.Errorf("failed to update alternates: %w", err)
+	}
 
-			go func() {
+	if _, err := StorageWrite(ctx, h.nk, userID, loginHistory); err != nil {
+		return fmt.Errorf("failed to store login history: %w", err)
+	}
 
-				// Set random time to disable and kick player
-				var (
-					firstIDs, _        = loginHistory.AlternateIDs()
-					altNames           = make([]string, 0, len(loginHistory.AlternateMap))
-					accountMap         = make(map[string]*api.Account, len(loginHistory.AlternateMap))
-					delayMin, delayMax = 1, 4
-					kickDelay          = time.Duration(delayMin+rand.Intn(delayMax)) * time.Minute
-				)
+	if hasDiabledAlts && ServiceSettings().KickPlayersWithDisabledAlternates {
+		go func() {
 
-				if accounts, err := h.nk.AccountsGetId(ctx, append(firstIDs, userID)); err != nil {
-					logger.Error("failed to get alternate accounts: %v", err)
-					return
-				} else {
-					for _, a := range accounts {
-						accountMap[a.User.Id] = a
-						altNames = append(altNames, fmt.Sprintf("<@%s> (%s)", a.CustomId, a.User.Username))
-					}
+			// Set random time to disable and kick player
+			var (
+				firstIDs, _        = loginHistory.AlternateIDs()
+				altNames           = make([]string, 0, len(loginHistory.AlternateMap))
+				accountMap         = make(map[string]*api.Account, len(loginHistory.AlternateMap))
+				delayMin, delayMax = 1, 4
+				kickDelay          = time.Duration(delayMin+rand.Intn(delayMax)) * time.Minute
+			)
+
+			if accounts, err := h.nk.AccountsGetId(ctx, append(firstIDs, userID)); err != nil {
+				logger.Error("failed to get alternate accounts: %v", err)
+				return
+			} else {
+				for _, a := range accounts {
+					accountMap[a.User.Id] = a
+					altNames = append(altNames, fmt.Sprintf("<@%s> (%s)", a.CustomId, a.User.Username))
 				}
+			}
 
-				if len(altNames) == 0 || accountMap[userID] == nil {
-					logger.Error("failed to get alternate accounts: %v", err)
-					return
-				}
+			if len(altNames) == 0 || accountMap[userID] == nil {
+				logger.Error("failed to get alternate accounts: %v", err)
+				return
+			}
 
-				slices.Sort(altNames)
-				altNames = slices.Compact(altNames)
+			slices.Sort(altNames)
+			altNames = slices.Compact(altNames)
 
-				// Send audit log message
-				content := fmt.Sprintf("<@%s> (%s) has disabled alternates, disconnecting session(s) in %d seconds.\n%s", accountMap[userID].CustomId, accountMap[userID].User.Username, int(kickDelay.Seconds()), strings.Join(altNames, ", "))
-				AuditLogSend(dg, serviceSettings.ServiceAuditChannelID, content)
+			// Send audit log message
+			content := fmt.Sprintf("<@%s> (%s) has disabled alternates, disconnecting session(s) in %d seconds.\n%s", accountMap[userID].CustomId, accountMap[userID].User.Username, int(kickDelay.Seconds()), strings.Join(altNames, ", "))
+			AuditLogSend(dg, ServiceSettings().ServiceAuditChannelID, content)
 
-				logger.WithField("delay", kickDelay).Info("kicking (with delay) user %s has disabled alternates", userID)
-				<-time.After(kickDelay)
-				if c, err := DisconnectUserID(ctx, h.nk, userID, true, true, false); err != nil {
-					logger.Error("failed to disconnect user: %v", err)
-				} else {
-					logger.Info("user %s disconnected: %v sessions", userID, c)
-				}
-			}()
-		}
+			logger.WithField("delay", kickDelay).Info("kicking (with delay) user %s has disabled alternates", userID)
+			<-time.After(kickDelay)
+			if c, err := DisconnectUserID(ctx, h.nk, userID, true, true, false); err != nil {
+				logger.Error("failed to disconnect user: %v", err)
+			} else {
+				logger.Info("user %s disconnected: %v sessions", userID, c)
+			}
+		}()
 	}
 
 	return nil
@@ -429,7 +433,7 @@ func (h *EventDispatch) handleMatchEvent(ctx context.Context, logger runtime.Log
 
 func AuditLogSendGuild(dg *discordgo.Session, gg *GuildGroup, message string) (*discordgo.Message, error) {
 
-	content := fmt.Sprintf("[`%s/%s`] %s", gg.Name(), gg.ID(), message)
+	content := fmt.Sprintf("[`%s/%s`] %s", gg.Name(), gg.GuildID, message)
 	if err := AuditLogSend(dg, ServiceSettings().ServiceAuditChannelID, content); err != nil {
 		return nil, fmt.Errorf("failed to send service audit message: %w", err)
 	}
