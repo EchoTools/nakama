@@ -12,8 +12,9 @@ import (
 )
 
 const (
-	StorageCollectionDeveloper = "Developer"
-	StorageKeyApplications     = "applications"
+	StorageCollectionDeveloper     = "Developer"
+	StorageKeyApplications         = "applications"
+	StorageIndexDeveloperAppTokens = "developerApplicationTokens"
 )
 
 var _ = Storable(&DeveloperApplications{})
@@ -31,7 +32,7 @@ func (DeveloperApplications) StorageMeta() StorageMeta {
 
 func (DeveloperApplications) StorageIndex() *StorageIndexMeta {
 	return &StorageIndexMeta{
-		Name:       "developerApplicationTokens",
+		Name:       StorageIndexDeveloperAppTokens,
 		Collection: StorageCollectionDeveloper,
 		Key:        StorageKeyApplications,
 		Fields:     []string{"value.applications.token"},

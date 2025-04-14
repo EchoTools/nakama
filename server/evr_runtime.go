@@ -260,24 +260,14 @@ func createCoreGroups(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 // Register Indexes for the login service
 func RegisterIndexes(initializer runtime.Initializer) error {
 
-	if err := initializer.RegisterStorageIndex(
-		ActivePartyGroupIndex,
-		MatchmakerStorageCollection,
-		MatchmakingConfigStorageKey,
-		[]string{"group_id"},
-		nil,
-		100000,
-		false,
-	); err != nil {
-		return err
-	}
-
 	// Register storage indexes for any Storables
 	storables := []IndexedStorable{
 		&DisplayNameHistory{},
 		&LoginHistory{},
 		&DeveloperApplications{},
 		&GuildEnforcementRecords{},
+		&MatchmakingSettings{},
+		&VRMLPlayerSummary{},
 	}
 	for _, s := range storables {
 		if idx := s.StorageIndex(); idx != nil {
