@@ -706,6 +706,7 @@ func LinkingAppRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk ru
 }
 
 type ServiceStatusData struct {
+	IsActive bool                   `json:"is_active"`
 	Statuses []ServiceStatusService `json:"statuses"`
 }
 
@@ -727,20 +728,24 @@ type ServiceStatusService struct {
 	Message   string `json:"message"`
 }
 
+// the this format is for the `/status/services,news?env=live&projectid=rad14` request
 func (h *RPCHandler) ServiceStatusRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 
 	if cachedResponse, _, found := h.responseCache.Get("server-status"); found {
 		return cachedResponse.(string), nil
 	}
 
-	// /status/services,news?env=live&projectid=rad14
 	statusData := &ServiceStatusData{}
 
 	if err := StorageRead(ctx, nk, SystemUserID, statusData, true); err != nil {
 		return "", err
 	}
-
-	response := statusData.String()
+	response := ""
+	if statusData.IsActive {
+		response = statusData.String()
+	} else {
+		response = ServiceSettings().serviceStatusMessage
+	}
 
 	h.responseCache.Set("server-status", response, 60*time.Second)
 

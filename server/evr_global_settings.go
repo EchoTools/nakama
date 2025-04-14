@@ -42,6 +42,7 @@ type GlobalSettingsData struct {
 	KickPlayersWithDisabledAlternates     bool                      `json:"kick_players_with_disabled_alts"` // Kick players with disabled alts
 	EnableContinuousGameserverHealthCheck bool                      `json:"enable_continuous_gameserver_health_check"`
 	version                               string
+	serviceStatusMessage                  string
 }
 
 type GlobalMatchmakingSettings struct {
