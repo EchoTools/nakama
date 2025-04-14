@@ -1427,9 +1427,16 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			for _, option := range options {
 				switch option.Name {
 				case "match-id":
-					matchID, err = MatchIDFromString(option.StringValue())
+
+					matchIDStr := option.StringValue()
+					matchIDStr = MatchUUIDPattern.FindString(strings.ToLower(matchIDStr))
+					if matchIDStr == "" {
+						return fmt.Errorf("invalid match ID: %s", matchIDStr)
+					}
+
+					matchID, err = MatchIDFromString(matchIDStr + "." + d.pipeline.node)
 					if err != nil {
-						return fmt.Errorf("invalid match ID: %w", err)
+						return fmt.Errorf("failed to parse match ID: %w", err)
 					}
 				case "disconnect-game-server":
 					disconnectServer = option.BoolValue()
