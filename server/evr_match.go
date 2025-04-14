@@ -311,7 +311,9 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 
 	// If this is a reservation, load the reservation
 	if e, found := state.LoadAndDeleteReservation(meta.Presence.GetSessionId()); found {
-		meta.Presence = e
+		meta.Presence.PartyID = e.PartyID
+		meta.Presence.RoleAlignment = e.RoleAlignment
+
 		state.rebuildCache()
 		logger = logger.WithField("has_reservation", true)
 	}
