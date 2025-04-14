@@ -851,7 +851,7 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 	}
 
 	hasCompleted := update.Social.CommunityValuesVersion != 0
-	hasCompleted = false
+
 	if isRequired, err := EnforcementCommunityValuesSearch(ctx, p.nk, groupID, userID); err != nil {
 		logger.Warn("Failed to search for community values", zap.Error(err))
 	} else if isRequired && hasCompleted {
