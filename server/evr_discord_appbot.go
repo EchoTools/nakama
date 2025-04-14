@@ -181,10 +181,17 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 					matchCount++
 
 				}
-				status := fmt.Sprintf("with %d players in %d matches", playerCount, matchCount)
-				if err := bot.UpdateGameStatus(0, status); err != nil {
+				statusMessage := fmt.Sprintf("%d players in %d matches", playerCount, matchCount)
+				if err := bot.UpdateGameStatus(0, "with "+statusMessage); err != nil {
 					logger.WithField("err", err).Warn("Failed to update status")
 					continue
+				}
+
+				// Update the service status
+				settings := *ServiceSettings()
+				if settings.serviceStatusMessage != statusMessage {
+					settings.serviceStatusMessage = statusMessage
+					ServiceSettingsUpdate(&settings)
 				}
 
 			case <-ctx.Done():
