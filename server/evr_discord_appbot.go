@@ -445,7 +445,7 @@ var (
 		},
 		{
 			Name:        "ign",
-			Description: "Set in-game-name override.",
+			Description: "Set in-game-name override. (use `-` to reset)",
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
