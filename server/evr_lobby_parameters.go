@@ -288,7 +288,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 	if request.GetGroupID() == uuid.Nil {
 		groupID = sessionParams.accountMetadata.GetActiveGroupID()
 	}
-
+	groupIDStr := groupID.String()
 	region := "default"
 
 	if r := request.GetRegion(); r != evr.UnspecifiedRegion {
@@ -328,19 +328,19 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		if userSettings.StaticBaseRankPercentile > 0 {
 			rankPercentile = userSettings.StaticBaseRankPercentile
 		} else {
-			rankPercentile, err = CalculateSmoothedPlayerRankPercentile(ctx, logger, p.db, p.nk, userID, groupID.String(), mmMode)
+			rankPercentile, err = CalculateSmoothedPlayerRankPercentile(ctx, logger, p.db, p.nk, userID, groupIDStr, mmMode)
 			if err != nil {
 				return nil, fmt.Errorf("failed to calculate smoothed player rank percentile: %w", err)
 			}
 
-			if err := MatchmakingRankPercentileStore(ctx, p.nk, userID, session.Username(), groupID.String(), mmMode, rankPercentile); err != nil {
+			if err := MatchmakingRankPercentileStore(ctx, p.nk, userID, session.Username(), groupIDStr, mmMode, rankPercentile); err != nil {
 				logger.Warn("Failed to store user rank percentile", zap.Error(err))
 			}
 		}
 
-		matchmakingRating, err = MatchmakingRatingLoad(ctx, p.nk, userID, groupID.String(), mmMode)
+		matchmakingRating, err = MatchmakingRatingLoad(ctx, p.nk, userID, groupIDStr, mmMode)
 		if err != nil {
-			logger.Warn("Failed to load matchmaking rating", zap.Error(err))
+			logger.Warn("Failed to load matchmaking rating", zap.String("group_id", groupIDStr), zap.String("mode", mmMode.String()), zap.Error(err))
 			matchmakingRating = NewDefaultRating()
 		}
 
@@ -421,7 +421,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		MatchmakingTimeout:           time.Duration(globalSettings.MatchmakingTimeoutSecs) * time.Second,
 		FailsafeTimeout:              time.Duration(failsafeTimeoutSecs) * time.Second,
 		FallbackTimeout:              time.Duration(globalSettings.FallbackTimeoutSecs) * time.Second,
-		DisplayName:                  sessionParams.accountMetadata.GetGroupDisplayNameOrDefault(groupID.String()),
+		DisplayName:                  sessionParams.accountMetadata.GetGroupDisplayNameOrDefault(groupIDStr),
 	}, nil
 }
 
