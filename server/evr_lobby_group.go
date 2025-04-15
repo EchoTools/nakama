@@ -99,24 +99,31 @@ func JoinPartyGroup(session *sessionWS, groupName string, partyID uuid.UUID, cur
 	// Check if the party already exists
 	ph, found := partyRegistry.parties.Load(partyID)
 	if !found {
-
-		maxSize := 4
+		maxSize := 2
 		open := true
-
 		// Create the party
 		ph = NewPartyHandler(partyRegistry.logger, partyRegistry, partyRegistry.matchmaker, partyRegistry.tracker, partyRegistry.streamManager, partyRegistry.router, partyID, partyRegistry.node, open, maxSize, userPresence)
 		partyRegistry.parties.Store(partyID, ph)
 
 	} else {
-
-		// Join the party
-		success, err := ph.JoinRequest(&presence)
-		if err != nil && err != runtime.ErrPartyJoinRequestAlreadyMember {
-			return nil, false, err
+		isMember := false
+		// Check if the player is already a member of the party
+		for _, member := range ph.members.List() {
+			if member.Presence.GetUserId() == session.UserID().String() {
+				isMember = true
+			}
 		}
 
-		if !success {
-			return nil, false, errors.New("failed to join party")
+		if !isMember {
+			// Join the party
+			success, err := ph.JoinRequest(&presence)
+			if err != nil && err != runtime.ErrPartyJoinRequestAlreadyMember {
+				return nil, false, err
+			}
+
+			if !success {
+				return nil, false, errors.New("failed to join party")
+			}
 		}
 	}
 
