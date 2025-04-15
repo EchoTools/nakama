@@ -314,7 +314,7 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, ses
 	// Maximum RTT for a server to be considered for backfill
 
 	includeMMR := false
-	includeMaxRTT := true
+	includeMaxRTT := false
 
 	// Only use rank percentile for arena matches.
 	if lobbyParams.Mode == evr.ModeArenaPublic {
