@@ -18,7 +18,7 @@ func (d *DiscordAppBot) ModPanelMessageEmbed(ctx context.Context, logger runtime
 	// Get the list of players in the match
 	presences, err := nk.StreamUserList(StreamModeService, userID, "", StreamLabelMatchService, false, true)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to get stream presences: %w", err)
+		return nil, fmt.Errorf("failed to get stream presences: %w", err)
 	}
 
 	if len(presences) == 0 {
@@ -28,9 +28,9 @@ func (d *DiscordAppBot) ModPanelMessageEmbed(ctx context.Context, logger runtime
 	// Get the match label
 	label, err := MatchLabelByID(ctx, d.nk, MatchIDFromStringOrNil(presences[0].GetStatus()))
 	if err != nil {
-		return nil, fmt.Errorf("Failed to get match label: %w", err)
+		return nil, fmt.Errorf("failed to get match label: %w", err)
 	} else if label == nil {
-		return nil, errors.New("Failed to get match label")
+		return nil, errors.New("failed to get match label")
 	}
 
 	options := make([]discordgo.SelectMenuOption, 0)
