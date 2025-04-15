@@ -814,9 +814,9 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 	}
 
 	// Check if the user is required to go through community values
-	if isRequired, err := EnforcementCommunityValuesSearch(ctx, p.nk, groupID, userID); err != nil {
+	if records, err := EnforcementCommunityValuesSearch(ctx, p.nk, groupID, userID); err != nil {
 		logger.Warn("Failed to search for community values", zap.Error(err))
-	} else if isRequired {
+	} else if len(records) > 0 {
 		clientProfile.Social.CommunityValuesVersion = 0
 	}
 
@@ -852,17 +852,12 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 
 	hasCompleted := update.Social.CommunityValuesVersion != 0
 
-	if isRequired, err := EnforcementCommunityValuesSearch(ctx, p.nk, groupID, userID); err != nil {
+	if records, err := EnforcementCommunityValuesSearch(ctx, p.nk, groupID, userID); err != nil {
 		logger.Warn("Failed to search for community values", zap.Error(err))
-	} else if isRequired && hasCompleted {
-		// get teh guildRecords
-		guildRecords, err := EnforcementSearch(ctx, p.nk, groupID, []string{userID})
-		if err != nil {
-			logger.Warn("Failed to search for community values", zap.Error(err))
-			return fmt.Errorf("failed to search for community values: %w", err)
-		}
+	} else if len(records) > 0 && hasCompleted {
+		// get the records
 
-		if records, ok := guildRecords[groupID]; ok {
+		if records, ok := records[groupID]; ok {
 			records.CommunityValuesCompletedAt = time.Now().UTC()
 			records.IsCommunityValuesRequired = false
 
@@ -891,6 +886,7 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 		CombatDominantHand: update.CombatDominantHand,
 		CombatAbility:      update.CombatAbility,
 	}
+
 	metadata.LegalConsents = update.LegalConsents
 	metadata.GhostedPlayers = update.GhostedPlayers.Players
 	metadata.MutedPlayers = update.MutedPlayers.Players
