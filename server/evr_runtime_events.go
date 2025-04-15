@@ -256,7 +256,7 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 	}
 
 	// Check for guild suspensions
-	if guildRecords, err := EnforcementSearch(ctx, h.nk, groupID, alternateIDs); err != nil && len(guildRecords) > 0 {
+	if guildRecords, err := EnforcementJournalSearch(ctx, h.nk, groupID, alternateIDs...); err != nil && len(guildRecords) > 0 {
 		for _, records := range guildRecords {
 			if suspensions := records.ActiveSuspensions(); len(suspensions) > 0 {
 				suspendedUserIDs[records.UserID] = suspensions[0].SuspensionExpiry
