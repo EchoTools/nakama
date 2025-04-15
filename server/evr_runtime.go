@@ -156,7 +156,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		}
 	*/
 
-	mongoClient, err := mongo.Connect(ctx, options.Client().ApplyURI(vars["MONGO_URI"]))
+	mongoClient, err := mongo.Connect(ctx, options.Client().ApplyURI(vars["MONGO_URI"]).SetTimeout(3*time.Second))
 	if err != nil {
 		logger.WithField("error", err).Error("Failed to connect to MongoDB")
 		return
