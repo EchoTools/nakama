@@ -1187,16 +1187,12 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 		return errors.New("session parameters not found")
 	}
 
+	var err error
 	userID := session.userID.String()
 	groupID := params.accountMetadata.GetActiveGroupID().String()
 
-	if gg := p.guildGroupRegistry.Get(groupID); gg != nil && gg.EnableEnforcementCountInNames && gg.IsEnforcer(userID) {
-		// Get the current match of the user
-		if matchIDs, err := MatchIDsByEvrID(ctx, p.nk, request.EvrId); err != nil {
-			logger.Error("Failed to get match IDs", zap.Error(err))
-		} else if label, err := MatchLabelByID(ctx, p.nk, matchIDs[0]); err != nil {
-			logger.Error("Failed to get match label", zap.Error(err))
-		} else if label.GroupID.String() == groupID && slices.Contains([]evr.Symbol{evr.ModeArenaPublic, evr.ModeCombatPublic}, label.Mode) {
+	if gg := p.guildGroupRegistry.Get(groupID); gg != nil {
+		if gg.EnableEnforcementCountInNames && gg.IsEnforcer(userID) {
 			serverProfile := &evr.ServerProfile{}
 			if err := json.Unmarshal(data, serverProfile); err != nil {
 				logger.Error("Failed to unmarshal server profile", zap.Error(err))
@@ -1205,35 +1201,25 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 
 			count := 0
 			// Get the number of reports for this user in the last week
-			if guildRecords, err := EnforcementJournalSearch(ctx, p.nk, groupID, userID); err != nil {
+			if guildRecords, err := EnforcementCommunityValuesSearch(ctx, p.nk, groupID, userID); err != nil {
 				logger.Error("Failed to search for enforcement records", zap.Error(err))
 			} else if len(guildRecords) > 0 {
 				for _, records := range guildRecords {
 					for _, r := range records.Records {
-						// Show all reports for the past week
+						// SHow all reports for the past week
 						if r.CreatedAt.After(time.Now().Add(-time.Hour * 24 * 7)) {
 							count += 1
 						}
 					}
 				}
 			}
+			// Add the count to the players display name
+			serverProfile.DisplayName = fmt.Sprintf("%s [%d]", serverProfile.DisplayName, count)
 
-			if count > 0 {
-				// Add the count to the players display name, padded to 28 characters
-				suffix := fmt.Sprintf(" [%d]", count)
-				maxIGNLength := 24 - len(suffix)
-
-				if len(serverProfile.DisplayName) > maxIGNLength {
-					serverProfile.DisplayName = serverProfile.DisplayName[:maxIGNLength]
-				}
-
-				serverProfile.DisplayName = serverProfile.DisplayName + suffix
-
-				data, err = json.Marshal(serverProfile)
-				if err != nil {
-					logger.Error("Failed to marshal server profile", zap.Error(err))
-					return fmt.Errorf("failed to marshal server profile: %w", err)
-				}
+			data, err = json.Marshal(serverProfile)
+			if err != nil {
+				logger.Error("Failed to marshal server profile", zap.Error(err))
+				return fmt.Errorf("failed to marshal server profile: %w", err)
 			}
 		}
 	}

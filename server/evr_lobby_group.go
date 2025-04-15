@@ -99,7 +99,7 @@ func JoinPartyGroup(session *sessionWS, groupName string, partyID uuid.UUID, cur
 	// Check if the party already exists
 	ph, found := partyRegistry.parties.Load(partyID)
 	if !found {
-		maxSize := 2
+		maxSize := 4
 		open := true
 		// Create the party
 		ph = NewPartyHandler(partyRegistry.logger, partyRegistry, partyRegistry.matchmaker, partyRegistry.tracker, partyRegistry.streamManager, partyRegistry.router, partyID, partyRegistry.node, open, maxSize, userPresence)
