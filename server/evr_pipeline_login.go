@@ -852,25 +852,27 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 
 	hasCompleted := update.Social.CommunityValuesVersion != 0
 
-	if records, err := EnforcementCommunityValuesSearch(ctx, p.nk, groupID, userID); err != nil {
-		logger.Warn("Failed to search for community values", zap.Error(err))
-	} else if len(records) > 0 && hasCompleted {
-		// get the records
+	if hasCompleted {
 
-		if records, ok := records[groupID]; ok {
-			records.CommunityValuesCompletedAt = time.Now().UTC()
-			records.IsCommunityValuesRequired = false
+		if records, err := EnforcementCommunityValuesSearch(ctx, p.nk, groupID, userID); err != nil {
+			logger.Warn("Failed to search for community values", zap.Error(err))
+		} else if len(records) > 0 {
+			// get the records
 
-			if _, err := StorageWrite(ctx, p.nk, userID, records); err != nil {
-				logger.Warn("Failed to write community values", zap.Error(err))
-			}
+			if records, ok := records[groupID]; ok {
+				records.CommunityValuesCompletedAt = time.Now().UTC()
+				records.IsCommunityValuesRequired = false
 
-			// Log the audit message
-			if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("User <@%s> has accepted the community values.", params.DiscordID()), false); err != nil {
-				logger.Warn("Failed to log audit message", zap.Error(err))
+				if _, err := StorageWrite(ctx, p.nk, userID, records); err != nil {
+					logger.Warn("Failed to write community values", zap.Error(err))
+				}
+
+				// Log the audit message
+				if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("User <@%s> has accepted the community values.", params.DiscordID()), false); err != nil {
+					logger.Warn("Failed to log audit message", zap.Error(err))
+				}
 			}
 		}
-
 	}
 
 	metadata, err := AccountMetadataLoad(ctx, p.nk, userID)
@@ -1201,12 +1203,12 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 
 			count := 0
 			// Get the number of reports for this user in the last week
-			if guildRecords, err := EnforcementCommunityValuesSearch(ctx, p.nk, groupID, userID); err != nil {
+			if guildRecords, err := EnforcementJournalSearch(ctx, p.nk, groupID, userID); err != nil {
 				logger.Error("Failed to search for enforcement records", zap.Error(err))
 			} else if len(guildRecords) > 0 {
 				for _, records := range guildRecords {
 					for _, r := range records.Records {
-						// SHow all reports for the past week
+						// Show all reports for the past week
 						if r.CreatedAt.After(time.Now().Add(-time.Hour * 24 * 7)) {
 							count += 1
 						}
