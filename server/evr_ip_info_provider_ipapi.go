@@ -231,7 +231,7 @@ func (s *ipapiClient) Get(ctx context.Context, ip string) (IPInfo, error) {
 
 		} else {
 
-			if result, err = s.retrieve(ip); err != nil && result.Status == "success" {
+			if result, err = s.retrieve(ip); err != nil {
 
 				metricsTags["result"] = "request_error"
 				s.logger.Warn("Failed to get ipapi details, failing open.", zap.Error(err))
