@@ -166,9 +166,14 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 		}
 	}
 
+	discordID := parseUserQueryFunc(&request, "discordid", 20, discordIDPattern)
+	if v := parseUserQueryFunc(&request, "discord_id", 20, discordIDPattern); v != "" {
+		discordID = v
+	}
+
 	params := SessionParameters{
 		node:                    pipeline.node,
-		authDiscordID:           parseUserQueryFunc(&request, "discordid", 20, discordIDPattern),
+		authDiscordID:           discordID,
 		authPassword:            parseUserQueryFunc(&request, "password", 32, nil),
 		userDisplayNameOverride: ign,
 
