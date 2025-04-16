@@ -120,6 +120,7 @@ type GuildEnforcementRecord struct {
 	SuspensionExpiry        time.Time `json:"suspension_expiry"`
 	CommunityValuesRequired bool      `json:"community_values_required"`
 	Notes                   string    `json:"notes"`
+	IsVoid                  bool      `json:"is_void"`
 }
 
 func NewGuildEnforcementRecord(enforcerUserID string, suspensionNotice, notes string, requireCommunityValues bool, suspensionExpiry time.Time) *GuildEnforcementRecord {
@@ -133,6 +134,10 @@ func NewGuildEnforcementRecord(enforcerUserID string, suspensionNotice, notes st
 	}
 }
 
+func (s *GuildEnforcementRecord) IsExpired() bool {
+	return time.Now().After(s.SuspensionExpiry)
+}
+
 func (s *GuildEnforcementRecord) IsSuspended() bool {
 	return time.Now().Before(s.SuspensionExpiry)
 }
@@ -143,7 +148,10 @@ func (s *GuildEnforcementRecord) RequiresCommunityValues() bool {
 
 func EnforcementSuspensionSearch(ctx context.Context, nk runtime.NakamaModule, groupID string, userIDs []string, includeExpired bool) (map[string]map[string]*GuildEnforcementRecords, error) {
 
-	qparts := make([]string, 1)
+	qparts := []string{
+		"+value.is_void:F",
+	}
+
 	if !includeExpired {
 		qparts = append(qparts, fmt.Sprintf(`+value.suspension_expiry:>="%s"`, time.Now().Format(time.RFC3339)))
 	}
@@ -190,7 +198,8 @@ func EnforcementSuspensionSearch(ctx context.Context, nk runtime.NakamaModule, g
 func EnforcementCommunityValuesSearch(ctx context.Context, nk runtime.NakamaModule, groupID string, userIDs ...string) (map[string]*GuildEnforcementRecords, error) {
 
 	qparts := []string{
-		"value.is_community_values_required:T",
+		"+value.is_community_values_required:T",
+		"+value.is_void:F",
 	}
 
 	if groupID != "" {
@@ -222,7 +231,7 @@ func EnforcementCommunityValuesSearch(ctx context.Context, nk runtime.NakamaModu
 
 func EnforcementJournalSearch(ctx context.Context, nk runtime.NakamaModule, groupID string, userIDs ...string) (map[string]*GuildEnforcementRecords, error) {
 
-	qparts := []string{}
+	qparts := make([]string, 0, 3)
 
 	if groupID != "" {
 		qparts = append(qparts, fmt.Sprintf("+value.group_id:%s", Query.Escape(groupID)))

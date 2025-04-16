@@ -2237,8 +2237,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			if isEnforcer || isGlobalOperator {
 				if !suspensionExpiry.IsZero() {
+					remove := false
 					if time.Now().After(suspensionExpiry) {
 						actions = append(actions, "suspension removed")
+						remove = true
 					} else {
 						actions = append(actions, fmt.Sprintf("suspension expires <t:%d:R>", suspensionExpiry.UTC().Unix()))
 					}
@@ -2248,8 +2250,17 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						return fmt.Errorf("failed to read storage: %w", err)
 					}
 
-					record := NewGuildEnforcementRecord(userID, userNotice, notes, requireCommunityValues, suspensionExpiry)
-					guildRecords.AddRecord(record)
+					if remove {
+						for _, record := range guildRecords.Records {
+							if !record.IsSuspended() {
+								continue
+							}
+							record.IsVoid = true
+						}
+					} else {
+						record := NewGuildEnforcementRecord(userID, userNotice, notes, requireCommunityValues, suspensionExpiry)
+						guildRecords.AddRecord(record)
+					}
 
 					if _, err := StorageWrite(ctx, nk, targetUserID, guildRecords); err != nil {
 						return fmt.Errorf("failed to write storage: %w", err)
