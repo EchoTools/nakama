@@ -397,22 +397,28 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 				return ""
 			}
 			s := ""
-			if guildRecords, err := EnforcementSuspensionSearch(ctx, nk, "", []string{userID.String()}, true); err == nil {
+			if guildRecords, err := EnforcementSuspensionSearch(ctx, nk, "", []string{userID.String()}, true, true); err == nil {
 				for groupID, byUserID := range guildRecords {
 					gg, ok := guildGroups[groupID]
 					if !ok {
 						continue
 					}
+					if len(byUserID) == 0 {
+						continue
+					}
+
+					s += gg.Group.Name + "\n"
 					for _, records := range byUserID {
 						for _, r := range records.Records {
-							if r.IsSuspended() {
-
-								s += fmt.Sprintf("%s - %s (expires %s)\n", gg.Group.Name, r.SuspensionNotice, formatDuration(time.Until(r.SuspensionExpiry), true))
-							} else {
-								// Not suspended, but still has a record
-								s += fmt.Sprintf("%s - <t:%d:R> - %s\n", gg.Group.Name, r.CreatedAt.Unix(), r.SuspensionNotice)
+							s += fmt.Sprintf("- <t:%d:R>:  %s", r.CreatedAt.UTC().Unix(), r.SuspensionNotice)
+							if r.IsVoid {
+								s += " (voided)"
+							} else if r.IsSuspended() {
+								s += fmt.Sprintf("  [expires <t:%d:R>]", r.SuspensionExpiry.UTC().Unix())
 							}
 						}
+
+						s += "\n"
 					}
 				}
 

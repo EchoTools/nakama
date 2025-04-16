@@ -146,10 +146,11 @@ func (s *GuildEnforcementRecord) RequiresCommunityValues() bool {
 	return s.CommunityValuesRequired
 }
 
-func EnforcementSuspensionSearch(ctx context.Context, nk runtime.NakamaModule, groupID string, userIDs []string, includeExpired bool) (map[string]map[string]*GuildEnforcementRecords, error) {
+func EnforcementSuspensionSearch(ctx context.Context, nk runtime.NakamaModule, groupID string, userIDs []string, includeExpired bool, includeVoided bool) (map[string]map[string]*GuildEnforcementRecords, error) {
+	qparts := []string{}
 
-	qparts := []string{
-		"+value.is_void:F",
+	if !includeVoided {
+		qparts = append(qparts, "+value.is_void:F")
 	}
 
 	if !includeExpired {
@@ -210,20 +211,29 @@ func EnforcementCommunityValuesSearch(ctx context.Context, nk runtime.NakamaModu
 		qparts = append(qparts, fmt.Sprintf(`+value.user_id:%s`, Query.MatchItem(userIDs)))
 	}
 
-	query := strings.Join(qparts, " ")
-	orderBy := []string{"value.created_at"}
+	var (
+		query      = strings.Join(qparts, " ")
+		orderBy    = []string{"value.created_at"}
+		allRecords = make(map[string]*GuildEnforcementRecords, 3)
+		cursor     = ""
+	)
 
-	objs, _, err := nk.StorageIndexList(ctx, SystemUserID, StorageCollectionEnforcementJournalIndex, query, 100, orderBy, "")
-	if err != nil {
-		return nil, err
-	}
-	allRecords := make(map[string]*GuildEnforcementRecords, len(objs.GetObjects()))
-
-	for _, obj := range objs.GetObjects() {
-
-		allRecords[obj.GetKey()] = &GuildEnforcementRecords{}
-		if err := json.Unmarshal([]byte(obj.GetValue()), allRecords[obj.GetKey()]); err != nil {
+	for {
+		objs, cursor, err := nk.StorageIndexList(ctx, SystemUserID, StorageCollectionEnforcementJournalIndex, query, 100, orderBy, cursor)
+		if err != nil {
 			return nil, err
+		}
+
+		for _, obj := range objs.GetObjects() {
+
+			allRecords[obj.GetKey()] = &GuildEnforcementRecords{}
+			if err := json.Unmarshal([]byte(obj.GetValue()), allRecords[obj.GetKey()]); err != nil {
+				return nil, err
+			}
+		}
+
+		if len(objs.GetObjects()) == 0 || cursor == "" {
+			break
 		}
 	}
 	return allRecords, nil
