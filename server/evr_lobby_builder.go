@@ -516,8 +516,6 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 	globalSettings := ServiceSettings().Matchmaking
 
 	qparts := []string{
-		"+label.open:T",
-		"+label.lobby_type:unassigned",
 		fmt.Sprintf("+label.broadcaster.group_ids:%s", Query.MatchItem(groupIDs)),
 		queryAddon,
 	}
@@ -554,26 +552,33 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 	}
 
 	// Create a slice containing the match labels
-	labels := make([]*MatchLabel, 0, len(matches))
+	var (
+		allServers          = make([]*MatchLabel, 0, len(matches))
+		availableServers    = make([]*MatchLabel, 0, len(matches))
+		activeCountByHostID = make(map[string]int, len(matches))
+	)
 	for _, match := range matches {
 		label := &MatchLabel{}
 		if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), label); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal match label: %w", err)
 		}
-		labels = append(labels, label)
+		if label.GameServer == nil {
+			continue
+		}
+		allServers = append(allServers, label)
+		if label.LobbyType == UnassignedLobby {
+			availableServers = append(availableServers, label)
+		} else {
+			activeCountByHostID[label.GameServer.Endpoint.GetHostID()]++
+		}
 	}
 
-	// Count the number of active matches by extIP
-	countByHostID := make(map[string]int, len(labels))
-	for _, label := range labels {
-		hostID := label.GameServer.Endpoint.GetHostID()
-		countByHostID[hostID]++
+	if len(availableServers) == 0 {
+		return nil, ErrMatchmakingNoAvailableServers
 	}
 
-	// Create a slice of LabelIndex structs
-	// and populate it with the labels and their properties
-	indexes := make([]labelIndex, len(labels))
-	for i, label := range labels {
+	indexes := make([]labelIndex, len(availableServers))
+	for i, label := range availableServers {
 		extIP := label.GameServer.Endpoint.ExternalIP.String()
 		hostID := label.GameServer.Endpoint.GetHostID()
 		regionMatch := false
@@ -604,7 +609,7 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 			isReachable:       rttsByExternalIP[extIP] != 0,
 			rating:            rating,
 			isPriorityForMode: slices.Contains(label.GameServer.DesignatedModes, settings.Mode),
-			activeCount:       countByHostID[hostID],
+			activeCount:       activeCountByHostID[hostID],
 			regionMatches:     regionMatch,
 		}
 	}
