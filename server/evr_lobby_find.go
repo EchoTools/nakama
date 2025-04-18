@@ -273,12 +273,13 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 	p.nk.metrics.CustomCounter("lobby_new", metricsTags, 1)
 
 	settings := &MatchSettings{
-		Mode:         lobbyParams.Mode,
-		Level:        lobbyParams.Level,
-		SpawnedBy:    lobbyParams.UserID.String(),
-		GroupID:      lobbyParams.GroupID,
-		StartTime:    time.Now().UTC(),
-		Reservations: entrants,
+		Mode:                lobbyParams.Mode,
+		Level:               lobbyParams.Level,
+		SpawnedBy:           lobbyParams.UserID.String(),
+		GroupID:             lobbyParams.GroupID,
+		StartTime:           time.Now().UTC(),
+		Reservations:        entrants,
+		ReservationLifetime: 30 * time.Second,
 	}
 
 	label, err := LobbyGameServerAllocate(ctx, NewRuntimeGoLogger(logger), p.nk, []string{lobbyParams.GroupID.String()}, lobbyParams.latencyHistory.Load().LatestRTTs(), settings, []string{lobbyParams.RegionCode}, true, false, ServiceSettings().Matchmaking.QueryAddons.Create)
