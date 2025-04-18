@@ -23,4 +23,4 @@ EXPOSE 6798
 EXPOSE 6799
 
 # Command to run the application
-CMD ["${M_STARTUP}"]
+CMD ["/entrypoint.sh"]
