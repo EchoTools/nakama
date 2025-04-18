@@ -196,7 +196,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		}
 	}
 
-	internalIP, externalIP, err := DetermineServiceIPs()
+	internalIP, externalIP, err := DetermineServiceIPs(ctx)
 	if err != nil {
 		logger.Fatal("Unable to determine service IPs", zap.Error(err))
 	}
@@ -234,16 +234,37 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	return evrPipeline
 }
 
-func DetermineServiceIPs() (net.IP, net.IP, error) {
+func DetermineServiceIPs(ctx context.Context) (intIP net.IP, extIP net.IP, err error) {
 
-	intIP, err := DetermineLocalIPAddress()
-	if err != nil {
-		return nil, nil, fmt.Errorf("unable to determine internal IP: %w", err)
+	if vars, ok := ctx.Value(runtime.RUNTIME_CTX_ENV).(map[string]string); ok {
+		// Check if the internal IP is set in the environment
+		if ip := vars["IP_ADDRESS_INTERNAL"]; ip != "" {
+			intIP = net.ParseIP(ip)
+			if intIP == nil {
+				return nil, nil, fmt.Errorf("invalid internal IP from environment: %s", ip)
+			}
+		}
+
+		if ip := vars["IP_ADDRESS_EXTERNAL"]; ip != "" {
+			extIP = net.ParseIP(ip)
+			if extIP == nil {
+				return nil, nil, fmt.Errorf("invalid external IP from environment: %s", ip)
+			}
+		}
 	}
 
-	extIP, err := DetermineExternalIPAddress()
-	if err != nil {
-		return nil, nil, fmt.Errorf("unable to determine external IP: %w", err)
+	if intIP == nil {
+		intIP, err = DetermineLocalIPAddress()
+		if err != nil {
+			return nil, nil, fmt.Errorf("unable to determine internal IP: %w", err)
+		}
+	}
+
+	if extIP == nil {
+		extIP, err = DetermineExternalIPAddress()
+		if err != nil {
+			return nil, nil, fmt.Errorf("unable to determine external IP: %w", err)
+		}
 	}
 
 	return intIP, extIP, nil

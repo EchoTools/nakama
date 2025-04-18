@@ -104,21 +104,25 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 	//bot.LogLevel = discordgo.LogDebug
 	dg.StateEnabled = true
 
-	bot.Identify.Intents |= discordgo.IntentAutoModerationExecution
+	/*
+		The bot requires priviledged intents to function correctly.
+			- GUILD_MEMBERS
+	*/
+
 	bot.Identify.Intents |= discordgo.IntentGuilds
 	bot.Identify.Intents |= discordgo.IntentGuildMembers
 	bot.Identify.Intents |= discordgo.IntentGuildBans
-	bot.Identify.Intents |= discordgo.IntentGuildEmojis
-	bot.Identify.Intents |= discordgo.IntentGuildWebhooks
-	bot.Identify.Intents |= discordgo.IntentGuildInvites
+	//bot.Identify.Intents |= discordgo.IntentGuildEmojis
+	//bot.Identify.Intents |= discordgo.IntentGuildWebhooks
+	//bot.Identify.Intents |= discordgo.IntentGuildInvites
 	//bot.Identify.Intents |= discordgo.IntentGuildPresences
-	bot.Identify.Intents |= discordgo.IntentGuildMessages
-	bot.Identify.Intents |= discordgo.IntentMessageContent
+	//bot.Identify.Intents |= discordgo.IntentGuildMessages
+	//bot.Identify.Intents |= discordgo.IntentMessageContent
 	//bot.Identify.Intents |= discordgo.IntentGuildMessageReactions
-	bot.Identify.Intents |= discordgo.IntentDirectMessages
+	//bot.Identify.Intents |= discordgo.IntentDirectMessages
 	//bot.Identify.Intents |= discordgo.IntentDirectMessageReactions
-	bot.Identify.Intents |= discordgo.IntentAutoModerationConfiguration
-	bot.Identify.Intents |= discordgo.IntentAutoModerationExecution
+	//bot.Identify.Intents |= discordgo.IntentAutoModerationConfiguration
+	//bot.Identify.Intents |= discordgo.IntentAutoModerationExecution
 
 	bot.AddHandlerOnce(func(s *discordgo.Session, m *discordgo.Ready) {
 
@@ -137,7 +141,6 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 		}
 
 		appbot.userID = userID
-		// Synchronize the guilds with nakama groups
 
 		displayName := bot.State.User.GlobalName
 		if displayName == "" {
@@ -1670,7 +1673,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 
 				// Send a message to the channel
-				channel := "1232462244797874247"
+				channel := ServiceSettings().VRMLEntitlementNotifyChannelID
 				_, err = s.ChannelMessageSend(channel, fmt.Sprintf("%s assigned VRML cosmetics `%s` to user `%s`", user.Mention(), badgeCodestr, target.Username))
 				if err != nil {
 					logger.WithFields(map[string]interface{}{
@@ -2237,8 +2240,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			if isEnforcer || isGlobalOperator {
 				if !suspensionExpiry.IsZero() {
+					remove := false
 					if time.Now().After(suspensionExpiry) {
 						actions = append(actions, "suspension removed")
+						remove = true
 					} else {
 						actions = append(actions, fmt.Sprintf("suspension expires <t:%d:R>", suspensionExpiry.UTC().Unix()))
 					}
@@ -2248,8 +2253,17 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						return fmt.Errorf("failed to read storage: %w", err)
 					}
 
-					record := NewGuildEnforcementRecord(userID, userNotice, notes, requireCommunityValues, suspensionExpiry)
-					guildRecords.AddRecord(record)
+					if remove {
+						for _, record := range guildRecords.Records {
+							if !record.IsSuspended() {
+								continue
+							}
+							record.IsVoid = true
+						}
+					} else {
+						record := NewGuildEnforcementRecord(userID, userNotice, notes, requireCommunityValues, suspensionExpiry)
+						guildRecords.AddRecord(record)
+					}
 
 					if _, err := StorageWrite(ctx, nk, targetUserID, guildRecords); err != nil {
 						return fmt.Errorf("failed to write storage: %w", err)

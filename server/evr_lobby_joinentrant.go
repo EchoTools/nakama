@@ -229,7 +229,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 
 		return ErrSuspended
 	}
-	if recordsByGuild, err := EnforcementSuspensionSearch(ctx, p.nk, groupID, []string{userID}, false); err != nil {
+	if recordsByGuild, err := EnforcementSuspensionSearch(ctx, p.nk, groupID, []string{userID}, false, false); err != nil {
 		logger.Warn("Unable to read enforcement records", zap.Error(err))
 	} else if len(recordsByGuild) > 0 {
 		var latestRecord *GuildEnforcementRecord

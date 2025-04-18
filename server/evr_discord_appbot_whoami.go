@@ -392,24 +392,33 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 			}
 			return output
 		}(), "\n"), Inline: false},
-		{Name: "Active Suspensions", Value: func() string {
-			if !includeGuildAuditor {
+		{Name: "Suspensions", Value: func() string {
+			if !includePriviledged && !includeGuildAuditor {
 				return ""
 			}
 			s := ""
-			if guildRecords, err := EnforcementSuspensionSearch(ctx, nk, "", []string{userID.String()}, false); err == nil {
+			if guildRecords, err := EnforcementSuspensionSearch(ctx, nk, "", []string{userID.String()}, true, true); err == nil {
 				for groupID, byUserID := range guildRecords {
+					gg, ok := guildGroups[groupID]
+					if !ok {
+						continue
+					}
+					if len(byUserID) == 0 {
+						continue
+					}
+
+					s += gg.Group.Name + "\n"
 					for _, records := range byUserID {
 						for _, r := range records.Records {
-							if r.IsSuspended() {
-								gg, ok := guildGroups[groupID]
-								if !ok {
-									continue
-								}
-
-								s += fmt.Sprintf("%s - %s (expires %s)\n", gg.Group.Name, r.SuspensionNotice, formatDuration(time.Until(r.SuspensionExpiry), true))
+							s += fmt.Sprintf("- <t:%d:R>:  %s", r.CreatedAt.UTC().Unix(), r.SuspensionNotice)
+							if r.IsVoid {
+								s += " (voided)"
+							} else if r.IsSuspended() {
+								s += fmt.Sprintf("  [expires <t:%d:R>]", r.SuspensionExpiry.UTC().Unix())
 							}
 						}
+
+						s += "\n"
 					}
 				}
 

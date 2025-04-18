@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gofrs/uuid/v5"
+	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 )
 
@@ -119,6 +120,7 @@ type GuildEnforcementRecord struct {
 	SuspensionExpiry        time.Time `json:"suspension_expiry"`
 	CommunityValuesRequired bool      `json:"community_values_required"`
 	Notes                   string    `json:"notes"`
+	IsVoid                  bool      `json:"is_void"`
 }
 
 func NewGuildEnforcementRecord(enforcerUserID string, suspensionNotice, notes string, requireCommunityValues bool, suspensionExpiry time.Time) *GuildEnforcementRecord {
@@ -132,6 +134,10 @@ func NewGuildEnforcementRecord(enforcerUserID string, suspensionNotice, notes st
 	}
 }
 
+func (s *GuildEnforcementRecord) IsExpired() bool {
+	return time.Now().After(s.SuspensionExpiry)
+}
+
 func (s *GuildEnforcementRecord) IsSuspended() bool {
 	return time.Now().Before(s.SuspensionExpiry)
 }
@@ -140,9 +146,13 @@ func (s *GuildEnforcementRecord) RequiresCommunityValues() bool {
 	return s.CommunityValuesRequired
 }
 
-func EnforcementSuspensionSearch(ctx context.Context, nk runtime.NakamaModule, groupID string, userIDs []string, includeExpired bool) (map[string]map[string]*GuildEnforcementRecords, error) {
+func EnforcementSuspensionSearch(ctx context.Context, nk runtime.NakamaModule, groupID string, userIDs []string, includeExpired bool, includeVoided bool) (map[string]map[string]*GuildEnforcementRecords, error) {
+	qparts := []string{}
 
-	qparts := make([]string, 1)
+	if !includeVoided {
+		qparts = append(qparts, "+value.is_void:F")
+	}
+
 	if !includeExpired {
 		qparts = append(qparts, fmt.Sprintf(`+value.suspension_expiry:>="%s"`, time.Now().Format(time.RFC3339)))
 	}
@@ -186,53 +196,93 @@ func EnforcementSuspensionSearch(ctx context.Context, nk runtime.NakamaModule, g
 	return allRecords, nil
 }
 
-func EnforcementSearch(ctx context.Context, nk runtime.NakamaModule, groupID string, userIDs []string) (map[string]*GuildEnforcementRecords, error) {
+func EnforcementCommunityValuesSearch(ctx context.Context, nk runtime.NakamaModule, groupID string, userIDs ...string) (map[string]*GuildEnforcementRecords, error) {
 
 	qparts := []string{
-		fmt.Sprintf("+value.group_id:%s", Query.Escape(groupID)),
-		"value.is_community_values_required:T",
+		"+value.is_community_values_required:T",
+		"+value.is_void:F",
+	}
+
+	if groupID != "" {
+		qparts = append(qparts, fmt.Sprintf("+value.group_id:%s", Query.Escape(groupID)))
 	}
 
 	if len(userIDs) > 0 {
 		qparts = append(qparts, fmt.Sprintf(`+value.user_id:%s`, Query.MatchItem(userIDs)))
 	}
 
-	query := strings.Join(qparts, " ")
-	orderBy := []string{"value.created_at"}
+	var (
+		query      = strings.Join(qparts, " ")
+		orderBy    = []string{"value.created_at"}
+		allRecords = make(map[string]*GuildEnforcementRecords, 3)
+		cursor     = ""
+	)
 
-	objs, _, err := nk.StorageIndexList(ctx, SystemUserID, StorageCollectionEnforcementJournalIndex, query, 100, orderBy, "")
-	if err != nil {
-		return nil, err
-	}
-	allRecords := make(map[string]*GuildEnforcementRecords, len(objs.GetObjects()))
-
-	for _, obj := range objs.GetObjects() {
-
-		allRecords[obj.GetKey()] = &GuildEnforcementRecords{}
-		if err := json.Unmarshal([]byte(obj.GetValue()), allRecords[obj.GetKey()]); err != nil {
+	for {
+		objs, cursor, err := nk.StorageIndexList(ctx, SystemUserID, StorageCollectionEnforcementJournalIndex, query, 100, orderBy, cursor)
+		if err != nil {
 			return nil, err
+		}
+
+		for _, obj := range objs.GetObjects() {
+
+			allRecords[obj.GetKey()] = &GuildEnforcementRecords{}
+			if err := json.Unmarshal([]byte(obj.GetValue()), allRecords[obj.GetKey()]); err != nil {
+				return nil, err
+			}
+		}
+
+		if len(objs.GetObjects()) == 0 || cursor == "" {
+			break
 		}
 	}
 	return allRecords, nil
 }
 
-func EnforcementCommunityValuesSearch(ctx context.Context, nk runtime.NakamaModule, groupID, userID string) (bool, error) {
+func EnforcementJournalSearch(ctx context.Context, nk runtime.NakamaModule, groupID string, userIDs ...string) (map[string]*GuildEnforcementRecords, error) {
 
-	qparts := []string{
-		fmt.Sprintf(`+value.user_id:%s`, Query.Escape(userID)),
-		fmt.Sprintf("+value.group_id:%s", Query.Escape(groupID)),
-		"+value.is_community_values_required:T",
+	qparts := make([]string, 0, 3)
+
+	if groupID != "" {
+		qparts = append(qparts, fmt.Sprintf("+value.group_id:%s", Query.Escape(groupID)))
 	}
 
-	query := strings.Join(qparts, " ")
-	orderBy := []string{"value.created_at"}
+	if len(userIDs) > 0 {
+		qparts = append(qparts, fmt.Sprintf(`+value.user_id:%s`, Query.MatchItem(userIDs)))
+	}
 
-	objs, _, err := nk.StorageIndexList(ctx, SystemUserID, StorageCollectionEnforcementJournalIndex, query, 100, orderBy, "")
-	if err != nil {
-		return false, err
+	if len(qparts) == 0 {
+		return nil, fmt.Errorf("no search criteria provided")
 	}
-	if len(objs.GetObjects()) == 0 {
-		return false, nil
+
+	var (
+		err        error
+		query      = strings.Join(qparts, " ")
+		orderBy    = []string{"value.created_at"}
+		objs       *api.StorageObjects
+		cursor     = ""
+		allRecords = make(map[string]*GuildEnforcementRecords, 0)
+	)
+
+	for {
+		objs, cursor, err = nk.StorageIndexList(ctx, SystemUserID, StorageCollectionEnforcementJournalIndex, query, 100, orderBy, cursor)
+		if err != nil {
+			return nil, err
+		}
+		allRecords = make(map[string]*GuildEnforcementRecords, len(objs.GetObjects()))
+
+		for _, obj := range objs.GetObjects() {
+
+			allRecords[obj.GetKey()] = &GuildEnforcementRecords{}
+			if err := json.Unmarshal([]byte(obj.GetValue()), allRecords[obj.GetKey()]); err != nil {
+				return nil, err
+			}
+		}
+
+		if len(objs.GetObjects()) == 0 || cursor == "" {
+			break
+		}
 	}
-	return true, nil
+
+	return allRecords, nil
 }
