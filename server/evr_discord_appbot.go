@@ -2820,8 +2820,19 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 					delete(outfits, outfitName)
 
-					if err := AccountMetadataUpdate(ctx, d.nk, userID, metadata); err != nil {
-						return fmt.Errorf("failed to set account metadata: %w", err)
+					data, err := json.Marshal(outfits)
+					if err != nil {
+						return fmt.Errorf("Failed to marshal outfits: %w", err)
+					}
+					if _, err := d.nk.StorageWrite(ctx, []*runtime.StorageWrite{
+						{
+							Collection: CustomizationStorageCollection,
+							Key:        SavedOutfitsStorageKey,
+							UserID:     userID,
+							Value:      string(data),
+						},
+					}); err != nil {
+						return fmt.Errorf("Failed to save outfits: %w", err)
 					}
 
 					return simpleInteractionResponse(s, i, fmt.Sprintf("Deleted loadout profile `%s`", outfitName))
