@@ -11,21 +11,21 @@ import (
 )
 
 const (
-	GlobalSettingsStorageCollection = "Global"
-	GlobalSettingsKey               = "settings"
+	ServiceSettingsStorageCollection = "Global"
+	ServiceSettingStorageKey         = "settings"
 )
 
-var serviceSettings = atomic.NewPointer((*GlobalSettingsData)(nil))
+var serviceSettings = atomic.NewPointer((*ServiceSettingsData)(nil))
 
-func ServiceSettings() *GlobalSettingsData {
+func ServiceSettings() *ServiceSettingsData {
 	return serviceSettings.Load()
 }
 
-func ServiceSettingsUpdate(data *GlobalSettingsData) {
+func ServiceSettingsUpdate(data *ServiceSettingsData) {
 	serviceSettings.Store(data)
 }
 
-type GlobalSettingsData struct {
+type ServiceSettingsData struct {
 	LinkInstructions                      string                    `json:"link_instructions"`     // Instructions for linking the headset
 	DisableLoginMessage                   string                    `json:"disable_login_message"` // Disable the login, and show this message
 	ServiceGuildID                        string                    `json:"service_guild_id"`      // Central/Support guild ID
@@ -40,6 +40,7 @@ type GlobalSettingsData struct {
 	CommandLogChannelID                   string                    `json:"service_command_log_channel_id"`
 	DiscordBotUserID                      string                    `json:"discord_bot_user_id"`
 	KickPlayersWithDisabledAlternates     bool                      `json:"kick_players_with_disabled_alts"` // Kick players with disabled alts
+	VRMLEntitlementNotifyChannelID        string                    `json:"vrml_entitlement_notify_channel_id"`
 	EnableContinuousGameserverHealthCheck bool                      `json:"enable_continuous_gameserver_health_check"`
 	version                               string
 	serviceStatusMessage                  string
@@ -85,21 +86,21 @@ type ServerRatings struct {
 	ByOperatorID map[string]float64 `json:"by_operator_id"`
 }
 
-func (g *GlobalSettingsData) String() string {
+func (g *ServiceSettingsData) String() string {
 	data, _ := json.Marshal(g)
 	return string(data)
 }
 
-func (g GlobalSettingsData) UseSkillBasedMatchmaking() bool {
+func (g ServiceSettingsData) UseSkillBasedMatchmaking() bool {
 	return g.Matchmaking.EnableSBMM
 }
 
-func ServiceSettingsLoad(ctx context.Context, nk runtime.NakamaModule) (*GlobalSettingsData, error) {
+func ServiceSettingsLoad(ctx context.Context, nk runtime.NakamaModule) (*ServiceSettingsData, error) {
 
 	objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
 		{
-			Collection: GlobalSettingsStorageCollection,
-			Key:        GlobalSettingsKey,
+			Collection: ServiceSettingsStorageCollection,
+			Key:        ServiceSettingStorageKey,
 			UserID:     SystemUserID,
 		},
 	})
@@ -107,7 +108,7 @@ func ServiceSettingsLoad(ctx context.Context, nk runtime.NakamaModule) (*GlobalS
 		return nil, fmt.Errorf("failed to read global settings: %w", err)
 	}
 
-	data := GlobalSettingsData{}
+	data := ServiceSettingsData{}
 
 	// Always write back on first load
 	if len(objs) > 0 {
@@ -123,8 +124,8 @@ func ServiceSettingsLoad(ctx context.Context, nk runtime.NakamaModule) (*GlobalS
 	if serviceSettings.Load() == nil || data.version == "" {
 
 		_, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{{
-			Collection:      GlobalSettingsStorageCollection,
-			Key:             GlobalSettingsKey,
+			Collection:      ServiceSettingsStorageCollection,
+			Key:             ServiceSettingStorageKey,
 			UserID:          SystemUserID,
 			PermissionRead:  0,
 			PermissionWrite: 0,
@@ -140,7 +141,7 @@ func ServiceSettingsLoad(ctx context.Context, nk runtime.NakamaModule) (*GlobalS
 	return &data, nil
 }
 
-func FixDefaultServiceSettings(data *GlobalSettingsData) {
+func FixDefaultServiceSettings(data *ServiceSettingsData) {
 
 	if data.Matchmaking.ServerRatings.ByExternalIP == nil {
 		data.Matchmaking.ServerRatings.ByExternalIP = make(map[string]float64)
@@ -218,8 +219,8 @@ func ServiceSettingsSave(ctx context.Context, nk runtime.NakamaModule) error {
 	data.version = ""
 
 	_, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{{
-		Collection:      GlobalSettingsStorageCollection,
-		Key:             GlobalSettingsKey,
+		Collection:      ServiceSettingsStorageCollection,
+		Key:             ServiceSettingStorageKey,
 		UserID:          SystemUserID,
 		PermissionRead:  0,
 		PermissionWrite: 0,
