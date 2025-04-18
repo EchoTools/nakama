@@ -15,9 +15,8 @@ COPY . .
 RUN go build -o ../nakama-app/nakama
 
 # Extra stuff for preperation
+WORKDIR /nakama-app
 RUN mkdir -p /nakama-app/data
-COPY ./container/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
 
 # Expose the application port (change if necessary)
 EXPOSE 6798
