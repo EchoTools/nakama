@@ -124,7 +124,7 @@ func testEvrMatchmakerOverrideFn(ctx context.Context, candidateMatches [][]*Matc
 
 	startTime := time.Now()
 
-	globalSettings := &GlobalSettingsData{}
+	globalSettings := &ServiceSettingsData{}
 	FixDefaultServiceSettings(globalSettings)
 	filteredCandidates, returnedEntries, _ := sbmm.processPotentialMatches(runtimeCombinations)
 	log.Printf("Processing %d candidate matches in %s", len(runtimeCombinations), time.Since(startTime))
@@ -354,7 +354,7 @@ func TestOverrideFn(t *testing.T) {
 
 	t.Logf("Processing %d candidate matches", len(runtimeCombinations))
 	startTime := time.Now()
-	globalSettings := &GlobalSettingsData{}
+	globalSettings := &ServiceSettingsData{}
 	FixDefaultServiceSettings(globalSettings)
 	_, returnedEntries, _ := sbmm.processPotentialMatches(runtimeCombinations)
 	t.Logf("Matched %d candidate matches in %s", len(returnedEntries), time.Since(startTime))
