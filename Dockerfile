@@ -23,4 +23,4 @@ EXPOSE 6798
 EXPOSE 6799
 
 # Command to run the application
-CMD ["${STARTUP}"]
+CMD ["${M_STARTUP}"]
