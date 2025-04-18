@@ -74,7 +74,7 @@ func (c *DiscordIntegrator) Stop() {
 
 func (c *DiscordIntegrator) Start() {
 	dg := c.dg
-	logger := c.logger.With(zap.String("module", "discord_cache"))
+	logger := c.logger.With(zap.String("module", "discord_integration"))
 
 	// Start the cache worker.
 	go func() {
@@ -152,7 +152,7 @@ func (c *DiscordIntegrator) Start() {
 
 	dg.AddHandler(func(s *discordgo.Session, m *discordgo.GuildCreate) {
 		if err := c.handleGuildCreate(logger, s, m); err != nil {
-			logger.Error("Error handling guild create", zap.Error(err))
+			logger.Error("Error handling guild create", zap.Any("guildCreate", m), zap.Error(err))
 		}
 	})
 

@@ -9,7 +9,7 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 )
 
-var ErrNotInAMatch = errors.New("You are not in a match")
+var ErrNotInAMatch = errors.New("not in a match")
 
 func (d *DiscordAppBot) ModPanelMessageEmbed(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, discordID string) ([]discordgo.MessageComponent, error) {
 
@@ -131,5 +131,9 @@ func (d *DiscordAppBot) ModPanelMessageEmbed(ctx context.Context, logger runtime
 			},
 		},
 	}, nil
+
+}
+
+func EnforcementJournalEmbeds() {
 
 }
