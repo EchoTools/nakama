@@ -38,6 +38,7 @@ func (d *DiscordAppBot) handleInGamePanel(logger runtime.Logger, s *discordgo.Se
 		return errors.New("you must be in the game to use this command")
 	}
 
+	// IGP: Potential error causing code
 	params, ok := LoadParams(session.Context())
 	if !ok {
 		return errors.New("failed to load params")
