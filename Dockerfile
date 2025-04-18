@@ -14,12 +14,13 @@ COPY . .
 # Build the Go application
 RUN go build -o ../nakama-app/nakama
 
-# Create data dir
+# Extra stuff for preperation
 RUN mkdir -p /nakama-app/data
+COPY ./container/entrypoint.sh /entrypoint.sh
 
 # Expose the application port (change if necessary)
-EXPOSE 7350
-EXPOSE 7351
+EXPOSE 6798
+EXPOSE 6799
 
 # Command to run the application
 CMD ["${STARTUP}"]
