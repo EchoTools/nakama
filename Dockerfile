@@ -22,4 +22,4 @@ EXPOSE 7350
 EXPOSE 7351
 
 # Command to run the application
-CMD ["/aurago"]
+CMD ["/bin/bash", "-c", "${STARTUP}"]
