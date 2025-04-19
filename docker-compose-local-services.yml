@@ -1,0 +1,14 @@
+version: '3'
+services:
+ postgres:
+    image: postgres:latest
+    restart: unless-stopped
+    container_name: postgres
+    environment:
+      POSTGRES_USER: nakama
+      POSTGRES_PASSWORD: sodVenLef7
+      POSTGRES_DB: nakama
+    ports:
+      - "127.0.0.1:5432:5432"
+volumes:
+  data:
