@@ -436,6 +436,12 @@ var (
 					Description: "Reason for joining the player's session.",
 					Required:    true,
 				},
+				{
+					Type:        discordgo.ApplicationCommandOptionBoolean,
+					Name:        "join-as-player",
+					Description: "Join as a regular visible player, instead of a moderator (social lobbies only).",
+					Required:    false,
+				},
 			},
 		},
 		{
@@ -2380,7 +2386,20 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					return errors.New("user's match is not from this guild")
 				}
 
-				if err := SetNextMatchID(ctx, d.nk, userID, label.ID, Moderator, ""); err != nil {
+				var tIndex TeamIndex
+
+				// Allow player to join social lobby as regular player, otherwise join as a moderator.
+				if options[2].BoolValue() {
+					if (label.Mode == evr.ModeSocialPublic) || (label.Mode == evr.ModeSocialPrivate) || (label.Mode == evr.ModeSocialNPE) {
+						tIndex = SocialLobbyParticipant
+					} else {
+						tIndex = Spectator
+					}
+				} else {
+					tIndex = Moderator
+				}
+
+				if err := SetNextMatchID(ctx, d.nk, userID, label.ID, tIndex, ""); err != nil {
 					return fmt.Errorf("failed to set next match ID: %w", err)
 				}
 
@@ -2826,6 +2845,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 					return simpleInteractionResponse(s, i, fmt.Sprintf("Applied outfit `%s`. If the changes do not take effect in your next match, Please re-open your game.", outfitName))
 
+				// Thank you Goopsie for the fix
 				case "delete":
 					if _, ok := outfits[outfitName]; !ok {
 						simpleInteractionResponse(s, i, fmt.Sprintf("Outfit `%s` does not exist.", outfitName))
@@ -2834,8 +2854,19 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 					delete(outfits, outfitName)
 
-					if err := AccountMetadataUpdate(ctx, d.nk, userID, metadata); err != nil {
-						return fmt.Errorf("failed to set account metadata: %w", err)
+					data, err := json.Marshal(outfits)
+					if err != nil {
+						return fmt.Errorf("Failed to marshal outfits: %w", err)
+					}
+					if _, err := d.nk.StorageWrite(ctx, []*runtime.StorageWrite{
+						{
+							Collection: CustomizationStorageCollection,
+							Key:        SavedOutfitsStorageKey,
+							UserID:     userID,
+							Value:      string(data),
+						},
+					}); err != nil {
+						return fmt.Errorf("Failed to save outfits: %w", err)
 					}
 
 					return simpleInteractionResponse(s, i, fmt.Sprintf("Deleted loadout profile `%s`", outfitName))

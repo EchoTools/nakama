@@ -168,6 +168,8 @@ func (s *ipapiClient) load(ip string) (*IPAPIResponse, error) {
 }
 
 func (s *ipapiClient) store(ip string, result *IPAPIResponse) error {
+	// Uncomment this to fix local IPs for testing.
+	// return nil
 	data, err := json.Marshal(result)
 	if err != nil {
 		return fmt.Errorf("failed to marshal data: %v", err)
