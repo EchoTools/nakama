@@ -2845,6 +2845,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 					return simpleInteractionResponse(s, i, fmt.Sprintf("Applied outfit `%s`. If the changes do not take effect in your next match, Please re-open your game.", outfitName))
 
+				// Thank you Goopsie for the fix
 				case "delete":
 					if _, ok := outfits[outfitName]; !ok {
 						simpleInteractionResponse(s, i, fmt.Sprintf("Outfit `%s` does not exist.", outfitName))
