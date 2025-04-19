@@ -436,6 +436,12 @@ var (
 					Description: "Reason for joining the player's session.",
 					Required:    true,
 				},
+				{
+					Type:        discordgo.ApplicationCommandOptionBoolean,
+					Name:        "join-as-player",
+					Description: "Join as a regular visible player, instead of a moderator (social lobbies only).",
+					Required:    false,
+				},
 			},
 		},
 		{
@@ -2380,8 +2386,21 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					return errors.New("user's match is not from this guild")
 				}
 
-				if err := SetNextMatchID(ctx, d.nk, userID, label.ID, Moderator, ""); err != nil {
-					return fmt.Errorf("failed to set next match ID: %w", err)
+				// Allow player to join social lobby as regular player, otherwise join as a moderator.
+				if options[2].BoolValue() {
+					if (label.Mode == evr.ModeSocialPublic) || (label.Mode == evr.ModeSocialPrivate) || (label.Mode == evr.ModeSocialNPE) {
+						if err := SetNextMatchID(ctx, d.nk, userID, label.ID, SocialLobbyParticipant, ""); err != nil {
+							return fmt.Errorf("failed to set next match ID: %w", err)
+						}
+					} else {
+						if err := SetNextMatchID(ctx, d.nk, userID, label.ID, Spectator, ""); err != nil {
+							return fmt.Errorf("failed to set next match ID: %w", err)
+						}
+					}
+				} else {
+					if err := SetNextMatchID(ctx, d.nk, userID, label.ID, Moderator, ""); err != nil {
+						return fmt.Errorf("failed to set next match ID: %w", err)
+					}
 				}
 
 				_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("<@%s> join player <@%s> at [%s](https://echo.taxi/spark://c/%s) match.", user.ID, target.ID, label.Mode.String(), strings.ToUpper(label.ID.UUID.String())), false)
