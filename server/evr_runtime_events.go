@@ -90,10 +90,12 @@ func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 				if len(inserts) == 0 {
 					continue
 				}
-				// Push to mongo
-				collection := dispatch.mongo.Database(matchDataDatabaseName).Collection(matchDataCollectionName)
-				if _, err := collection.InsertMany(ctx, inserts); err != nil {
-					logger.Error("failed to insert match data: %v", err)
+				if dispatch.mongo != nil {
+					// Push to mongo
+					collection := dispatch.mongo.Database(matchDataDatabaseName).Collection(matchDataCollectionName)
+					if _, err := collection.InsertMany(ctx, inserts); err != nil {
+						logger.Error("failed to insert match data: %v", err)
+					}
 				}
 			}
 		}

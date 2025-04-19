@@ -14,8 +14,6 @@ import (
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/jackc/pgtype"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.uber.org/zap"
 
 	"google.golang.org/grpc/codes"
@@ -156,15 +154,16 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		}
 	*/
 
-	mongoClient, err := mongo.Connect(ctx, options.Client().ApplyURI(vars["MONGO_URI"]).SetTimeout(3*time.Second))
-	if err != nil {
-		logger.WithField("error", err).Error("Failed to connect to MongoDB")
-		return
-	}
-	if err := mongoClient.Ping(ctx, nil); err != nil {
-		logger.WithField("error", err).Error("Failed to ping MongoDB")
-	}
-
+	/*
+		mongoClient, err := mongo.Connect(ctx, options.Client().ApplyURI(vars["MONGO_URI"]).SetTimeout(3*time.Second))
+		if err != nil {
+			logger.WithField("error", err).Error("Failed to connect to MongoDB")
+			return
+		}
+		if err := mongoClient.Ping(ctx, nil); err != nil {
+			logger.WithField("error", err).Error("Failed to ping MongoDB")
+		}
+	*/
 	ctx = context.WithValue(ctx, runtime.RUNTIME_CTX_ENV, vars)
 
 	botToken, ok = vars["DISCORD_BOT_TOKEN"]
@@ -181,7 +180,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	}
 
 	// Register the event dispatch
-	eventDispatch, err := NewEventDispatch(ctx, logger, db, nk, initializer, mongoClient, dg)
+	eventDispatch, err := NewEventDispatch(ctx, logger, db, nk, initializer, nil, dg)
 	if err != nil {
 		return fmt.Errorf("unable to create event dispatch: %w", err)
 	}
