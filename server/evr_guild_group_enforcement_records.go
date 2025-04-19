@@ -150,7 +150,7 @@ func EnforcementSuspensionSearch(ctx context.Context, nk runtime.NakamaModule, g
 	qparts := []string{}
 
 	if !includeVoided {
-		qparts = append(qparts, "+value.is_void:F")
+		qparts = append(qparts, "-value.is_void:F")
 	}
 
 	if !includeExpired {
