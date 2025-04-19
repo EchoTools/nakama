@@ -69,7 +69,7 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		}
 
 		if !isLeader {
-			// Skip following the party leader if the member is not in a match (and going to a social lobby)
+			// Skip following the party leader if the member is not in a match (and headed to a social lobby)
 			if lobbyParams.Mode != evr.ModeSocialPublic || !lobbyParams.CurrentMatchID.IsNil() {
 				return p.PartyFollow(ctx, logger, session, lobbyParams, lobbyGroup)
 			}
