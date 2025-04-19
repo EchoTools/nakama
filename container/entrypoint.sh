@@ -1,1 +1,0 @@
-/nakama-app/nakama --database.address "postgresql://techside:yfy1Rzv7OPTsMx016MOIFw@arparec-us-central-5949.jxf.gcp-us-central1.cockroachlabs.cloud:26257/nakama-evr-dev?sslmode=verify-full" --config /nakama-app/data/local.yml
