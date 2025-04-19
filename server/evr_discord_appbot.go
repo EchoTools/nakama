@@ -2261,6 +2261,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 							record.IsVoid = true
 						}
 					} else {
+						actions = append(actions, fmt.Sprintf("kicked for %s", userNotice))
+						// Add a new record
 						record := NewGuildEnforcementRecord(userID, userNotice, notes, requireCommunityValues, suspensionExpiry)
 						guildRecords.AddRecord(record)
 					}
@@ -2344,7 +2346,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				actions = append(actions, "no active sessions found")
 			}
 
-			_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s `kick-player` actions summary for %s (%s): %s", user.Mention(), target.Mention(), target.Username, strings.Join(actions, ";\n ")), false)
+			_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s `kick-player` actions summary for %s (%s):\n %s", user.Mention(), target.Mention(), target.Username, strings.Join(actions, ";\n ")), false)
 			return simpleInteractionResponse(s, i, fmt.Sprintf("[%d sessions found]%s\n%s", cnt, timeoutMessage, strings.Join(actions, "\n")))
 
 		},
