@@ -2258,12 +2258,12 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 							if !record.IsActive() {
 								continue
 							}
-							if record.Notes != "" {
-								record.Notes += "\n"
+							if record.AuditorNotes != "" {
+								record.AuditorNotes += "\n"
 							}
-							record.Notes = fmt.Sprintf("voided <t:%d:R> by <@%s>", time.Now().UTC().Unix(), user.ID)
+							record.AuditorNotes = fmt.Sprintf("voided <t:%d:R> by <@%s>", time.Now().UTC().Unix(), user.ID)
 
-							record.Notes += "\n" + notes
+							record.AuditorNotes += "\n" + notes
 							record.IsVoid = true
 						}
 					} else {
