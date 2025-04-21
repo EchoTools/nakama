@@ -272,6 +272,9 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 		return fmt.Errorf("failed to get alternate accounts: %w", err)
 	} else {
 		for _, a := range accounts {
+			if a.User.Id == userID {
+				continue
+			}
 			_, isFirstDegree := loginHistory.AlternateMap[a.User.Id]
 			alternates[a.User.Id] = &compactAlternate{
 				userID:           a.User.Id,
