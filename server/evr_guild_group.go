@@ -157,9 +157,6 @@ func (g *GuildGroup) IsAllocator(userID string) bool {
 }
 
 func (g *GuildGroup) IsAuditor(userID string) bool {
-	if g.RoleMap.Auditor == "" {
-		return g.HasRole(userID, g.RoleMap.Enforcer)
-	}
 	return g.HasRole(userID, g.RoleMap.Auditor)
 }
 
