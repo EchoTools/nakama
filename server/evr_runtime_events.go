@@ -210,7 +210,7 @@ type compactAlternate struct {
 }
 
 func (c compactAlternate) String() string {
-	return fmt.Sprintf("suspended until <t:%d:R>", c.suspensionExpiry.Unix())
+	return fmt.Sprintf("suspension expires <t:%d:R>", c.suspensionExpiry.Unix())
 }
 
 func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtime.Logger, evt *api.Event) error {
@@ -312,7 +312,9 @@ func (h *EventDispatch) alternateLogLineFormatter(userID string, alternates map[
 			addons = append(addons, a.String())
 		}
 
-		s += " *[" + strings.Join(addons, ", ") + "]*"
+		if len(addons) > 0 {
+			s += " *[" + strings.Join(addons, ", ") + "]*"
+		}
 
 		if a.isFirstDegree {
 			firstDegreeStrs = append(firstDegreeStrs, s)

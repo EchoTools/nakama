@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bwmarrin/discordgo"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -74,7 +75,7 @@ func (s *GuildEnforcementRecords) SetStorageVersion(userID, version string) {
 func (s *GuildEnforcementRecords) ActiveSuspensions() []*GuildEnforcementRecord {
 	active := make([]*GuildEnforcementRecord, 0)
 	for _, r := range s.Records {
-		if time.Now().Before(r.SuspensionExpiry) {
+		if r.IsActive() {
 			active = append(active, r)
 		}
 	}
@@ -83,8 +84,9 @@ func (s *GuildEnforcementRecords) ActiveSuspensions() []*GuildEnforcementRecord 
 
 func (s *GuildEnforcementRecords) MarshalJSON() ([]byte, error) {
 
+	s.SuspensionExpiry = time.Time{}
 	for i := len(s.Records) - 1; i >= 0; i-- {
-		if s.Records[i].IsSuspended() && s.Records[i].SuspensionExpiry.After(s.SuspensionExpiry) {
+		if s.Records[i].IsActive() && s.Records[i].SuspensionExpiry.After(s.SuspensionExpiry) {
 			s.SuspensionExpiry = s.Records[i].SuspensionExpiry
 		}
 	}
@@ -114,7 +116,8 @@ func (s *GuildEnforcementRecords) MarshalJSON() ([]byte, error) {
 
 type GuildEnforcementRecord struct {
 	ID                      string    `json:"id"`
-	EnforcerUserID          string    `json:"enforcer_id"`
+	EnforcerUserID          string    `json:"enforcer_user_id"`
+	EnforcerDiscordID       string    `json:"enforcer_discord_id"`
 	CreatedAt               time.Time `json:"created_at"`
 	SuspensionNotice        string    `json:"suspension_notice"`
 	SuspensionExpiry        time.Time `json:"suspension_expiry"`
@@ -123,37 +126,34 @@ type GuildEnforcementRecord struct {
 	IsVoid                  bool      `json:"is_void"`
 }
 
-func NewGuildEnforcementRecord(enforcerUserID string, suspensionNotice, notes string, requireCommunityValues bool, suspensionExpiry time.Time) *GuildEnforcementRecord {
+func NewGuildEnforcementRecord(enforcerUserID, enforcerDiscordID string, suspensionNotice, notes string, requireCommunityValues bool, suspensionExpiry time.Time) *GuildEnforcementRecord {
 	return &GuildEnforcementRecord{
-		ID:               uuid.Must(uuid.NewV4()).String(),
-		EnforcerUserID:   enforcerUserID,
-		CreatedAt:        time.Now(),
-		SuspensionNotice: suspensionNotice,
-		SuspensionExpiry: suspensionExpiry,
-		Notes:            notes,
+		ID:                uuid.Must(uuid.NewV4()).String(),
+		EnforcerUserID:    enforcerUserID,
+		EnforcerDiscordID: enforcerDiscordID,
+		CreatedAt:         time.Now(),
+		SuspensionNotice:  suspensionNotice,
+		SuspensionExpiry:  suspensionExpiry,
+		Notes:             notes,
 	}
 }
 
-func (s *GuildEnforcementRecord) IsExpired() bool {
-	return time.Now().After(s.SuspensionExpiry)
+func (r *GuildEnforcementRecord) IsActive() bool {
+	return time.Now().Before(r.SuspensionExpiry) && !r.IsVoid
 }
 
-func (s *GuildEnforcementRecord) IsSuspended() bool {
-	return time.Now().Before(s.SuspensionExpiry)
+func (r *GuildEnforcementRecord) IsExpired() bool {
+	return time.Now().After(r.SuspensionExpiry)
 }
 
-func (s *GuildEnforcementRecord) RequiresCommunityValues() bool {
-	return s.CommunityValuesRequired
+func (r *GuildEnforcementRecord) RequiresCommunityValues() bool {
+	return r.CommunityValuesRequired
 }
 
-func EnforcementSuspensionSearch(ctx context.Context, nk runtime.NakamaModule, groupID string, userIDs []string, includeExpired bool, includeVoided bool) (map[string]map[string]*GuildEnforcementRecords, error) {
+func EnforcementSuspensionSearch(ctx context.Context, nk runtime.NakamaModule, groupID string, userIDs []string, activeOnly bool) (map[string]map[string]*GuildEnforcementRecords, error) {
 	qparts := []string{}
 
-	if !includeVoided {
-		qparts = append(qparts, "-value.is_void:F")
-	}
-
-	if !includeExpired {
+	if activeOnly {
 		qparts = append(qparts, fmt.Sprintf(`+value.suspension_expiry:>="%s"`, time.Now().Format(time.RFC3339)))
 	}
 
@@ -186,6 +186,13 @@ func EnforcementSuspensionSearch(ctx context.Context, nk runtime.NakamaModule, g
 		if err := StorageRead(ctx, nk, records.UserID, records, false); err != nil {
 			return nil, err
 		}
+
+		for _, record := range records.Records {
+			if activeOnly && !record.IsActive() {
+				continue
+			}
+		}
+
 		if _, ok := allRecords[records.GroupID]; !ok {
 			allRecords[records.GroupID] = make(map[string]*GuildEnforcementRecords, len(userIDs))
 		}
@@ -200,7 +207,6 @@ func EnforcementCommunityValuesSearch(ctx context.Context, nk runtime.NakamaModu
 
 	qparts := []string{
 		"+value.is_community_values_required:T",
-		"+value.is_void:F",
 	}
 
 	if groupID != "" {
@@ -285,4 +291,48 @@ func EnforcementJournalSearch(ctx context.Context, nk runtime.NakamaModule, grou
 	}
 
 	return allRecords, nil
+}
+
+func createSuspensionDetailsEmbedField(guildName string, record []*GuildEnforcementRecord, includeNotes bool) *discordgo.MessageEmbedField {
+
+	parts := make([]string, 0, 3)
+	if len(record) == 0 {
+		return nil
+	}
+	for _, r := range record {
+		if r == nil {
+			continue
+		}
+
+		expiry := ""
+		if r.IsVoid {
+			expiry = "voided"
+		} else if r.IsExpired() {
+			expiry = "expired"
+		} else {
+			expiry = fmt.Sprintf("expires <t:%d:R>", r.SuspensionExpiry.UTC().Unix())
+		}
+		duration := r.SuspensionExpiry.Sub(r.CreatedAt)
+
+		parts = append(parts, fmt.Sprintf("- <t:%d:R>: `%s` [%s, %s]", r.CreatedAt.UTC().Unix(), r.SuspensionNotice, formatDuration(duration), expiry))
+
+		if includeNotes {
+			details := ""
+			if r.EnforcerDiscordID != "" {
+				details = fmt.Sprintf(" - by <@%s>", r.EnforcerDiscordID)
+			}
+			if r.Notes != "" {
+				details += fmt.Sprintf(": %s", r.Notes)
+			}
+			if details != "" {
+				parts = append(parts, details)
+			}
+		}
+	}
+	field := &discordgo.MessageEmbedField{
+		Name:   guildName,
+		Value:  strings.Join(parts, "\n"),
+		Inline: false,
+	}
+	return field
 }
