@@ -122,7 +122,7 @@ type GuildEnforcementRecord struct {
 	SuspensionNotice        string    `json:"suspension_notice"`
 	SuspensionExpiry        time.Time `json:"suspension_expiry"`
 	CommunityValuesRequired bool      `json:"community_values_required"`
-	Notes                   string    `json:"notes"`
+	AuditorNotes            string    `json:"notes"`
 	IsVoid                  bool      `json:"is_void"`
 }
 
@@ -134,7 +134,7 @@ func NewGuildEnforcementRecord(enforcerUserID, enforcerDiscordID string, suspens
 		CreatedAt:         time.Now(),
 		SuspensionNotice:  suspensionNotice,
 		SuspensionExpiry:  suspensionExpiry,
-		Notes:             notes,
+		AuditorNotes:      notes,
 	}
 }
 
@@ -314,15 +314,15 @@ func createSuspensionDetailsEmbedField(guildName string, record []*GuildEnforcem
 		}
 		duration := r.SuspensionExpiry.Sub(r.CreatedAt)
 
-		parts = append(parts, fmt.Sprintf("- <t:%d:R>: `%s` [%s, %s]", r.CreatedAt.UTC().Unix(), r.SuspensionNotice, formatDuration(duration), expiry))
+		parts = append(parts, fmt.Sprintf("- <t:%d:R>: `%s` [%s, %s]", r.CreatedAt.UTC().Unix(), r.SuspensionNotice, FormatDuration(duration), expiry))
 
 		if includeNotes {
 			details := ""
 			if r.EnforcerDiscordID != "" {
 				details = fmt.Sprintf(" - by <@%s>", r.EnforcerDiscordID)
 			}
-			if r.Notes != "" {
-				details += fmt.Sprintf(": %s", r.Notes)
+			if r.AuditorNotes != "" {
+				details += fmt.Sprintf(": %s", r.AuditorNotes)
 			}
 			if details != "" {
 				parts = append(parts, details)
@@ -335,4 +335,46 @@ func createSuspensionDetailsEmbedField(guildName string, record []*GuildEnforcem
 		Inline: false,
 	}
 	return field
+}
+
+func FormatDuration(d time.Duration) string {
+
+	if d == 0 {
+		return "0s"
+	}
+
+	prefix := ""
+	if d < 0 {
+		d = -d
+		prefix = "-"
+	}
+
+	days := int(d.Hours() / 24)
+	hours := int(d.Hours()) % 24
+	minutes := int(d.Minutes()) % 60
+	seconds := int(d.Seconds()) % 60
+
+	if days > 0 {
+		d = d.Round(time.Hour)
+		if hours := int(d.Hours()) % 24; hours > 0 {
+			return fmt.Sprintf("%s%dd%dh", prefix, int(d.Hours()/24), hours)
+		}
+		return fmt.Sprintf("%s%dd", prefix, int(d.Hours())/24)
+	} else if hours > 0 {
+		d = d.Round(time.Minute)
+		if minutes := int(d.Minutes()) % 60; minutes > 0 {
+			return fmt.Sprintf("%s%dh%dm", prefix, hours, minutes)
+		}
+		return fmt.Sprintf("%s%dh", prefix, int(d.Hours()))
+	} else if minutes > 0 {
+
+		if seconds > 0 {
+			return fmt.Sprintf("%s%dm%ds", prefix, minutes, seconds)
+		}
+		return fmt.Sprintf("%s%dm", prefix, minutes)
+	} else if seconds > 0 {
+		return fmt.Sprintf("%s%ds", prefix, seconds)
+	}
+
+	return "0s"
 }
