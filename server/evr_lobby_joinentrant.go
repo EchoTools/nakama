@@ -229,7 +229,9 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 
 		return ErrSuspended
 	}
-	if recordsByGuild, err := EnforcementSuspensionSearch(ctx, p.nk, groupID, []string{userID}, false, false); err != nil {
+
+	// Check for an active suspension in the enforcement journal.
+	if recordsByGuild, err := EnforcementSuspensionSearch(ctx, p.nk, groupID, []string{userID}, true); err != nil {
 		logger.Warn("Unable to read enforcement records", zap.Error(err))
 	} else if len(recordsByGuild) > 0 {
 		var latestRecord *GuildEnforcementRecord
@@ -426,10 +428,6 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 }
 
 func formatDuration(d time.Duration) string {
-	// Format the duration as a string in the format "1d1h2m3s"
-	// if it's more than 1 day, it's "1d1h" (the hour is rounded up)
-	// if it's more than 1 minute, it's "1h15m" (the minute is rounded up)
-	// if it's more than 1 seconds, it's "30s" (the seconds are rounded up)
 
 	if d == 0 {
 		return "0s"
@@ -460,8 +458,6 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%s%dh", prefix, int(d.Hours()))
 	} else if minutes > 0 {
 
-		d = d.Round(time.Minute)
-
 		if seconds > 0 {
 			return fmt.Sprintf("%s%dm%ds", prefix, minutes, seconds)
 		}
@@ -471,5 +467,4 @@ func formatDuration(d time.Duration) string {
 	}
 
 	return "0s"
-
 }

@@ -299,7 +299,7 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, ses
 	// Early quitters have a shorter backfill interval.
 	if lobbyParams.IsEarlyQuitter {
 		interval = 90 * time.Second
-		// send a sarcastic message to teh player berating them for early quitting
+
 		message := "Backfill is taking longer than expected (increased from 3 seconds to 90 seconds). Maybe you should try not quitting so early next time?"
 		if _, err := SendUserMessage(ctx, dg, lobbyParams.DiscordID, message); err != nil {
 			logger.Error("Failed to send message to user", zap.Error(err))

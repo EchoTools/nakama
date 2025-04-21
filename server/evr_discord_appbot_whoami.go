@@ -267,7 +267,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		}
 	}
 
-	fields := []*discordgo.MessageEmbedField{
+	accountFields := []*discordgo.MessageEmbedField{
 		{Name: "Nakama ID", Value: whoami.NakamaID.String(), Inline: true},
 		{Name: "Username", Value: whoami.Username, Inline: true},
 		{Name: "Discord ID", Value: whoami.DiscordID, Inline: true},
@@ -392,40 +392,6 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 			}
 			return output
 		}(), "\n"), Inline: false},
-		{Name: "Suspensions", Value: func() string {
-			if !includePriviledged && !includeGuildAuditor {
-				return ""
-			}
-			s := ""
-			if guildRecords, err := EnforcementSuspensionSearch(ctx, nk, "", []string{userID.String()}, true, true); err == nil {
-				for groupID, byUserID := range guildRecords {
-					gg, ok := guildGroups[groupID]
-					if !ok {
-						continue
-					}
-					if len(byUserID) == 0 {
-						continue
-					}
-
-					s += gg.Group.Name + "\n"
-					for _, records := range byUserID {
-						for _, r := range records.Records {
-							s += fmt.Sprintf("- <t:%d:R>:  %s", r.CreatedAt.UTC().Unix(), r.SuspensionNotice)
-							if r.IsVoid {
-								s += " (voided)"
-							} else if r.IsSuspended() {
-								s += fmt.Sprintf("  [expires <t:%d:R>]", r.SuspensionExpiry.UTC().Unix())
-							}
-						}
-
-						s += "\n"
-					}
-				}
-
-			}
-			return s
-
-		}(), Inline: false},
 		{Name: "Match List", Value: strings.Join(lo.Map(whoami.MatchLabels, func(l *MatchLabel, index int) string {
 			link := fmt.Sprintf("https://echo.taxi/spark://c/%s", strings.ToUpper(l.ID.UUID.String()))
 			players := make([]string, 0, len(l.Players))
@@ -438,14 +404,14 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	}
 
 	if len(whoami.PotentialAlternates) > 0 {
-		fields = append(fields, &discordgo.MessageEmbedField{
+		accountFields = append(accountFields, &discordgo.MessageEmbedField{
 			Name:   "Potential Alternate Accounts",
 			Value:  strings.Join(whoami.PotentialAlternates, "\n"),
 			Inline: false,
 		})
 	}
 
-	fields = append(fields, &discordgo.MessageEmbedField{
+	accountFields = append(accountFields, &discordgo.MessageEmbedField{
 		Name: "Default Matchmaking Guild",
 		Value: func() string {
 			if whoami.DefaultLobbyGroup != "" {
@@ -461,7 +427,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	})
 
 	if whoami.LastMatchmakingError != nil {
-		fields = append(fields, &discordgo.MessageEmbedField{
+		accountFields = append(accountFields, &discordgo.MessageEmbedField{
 			Name:   "Last Matchmaking Error",
 			Value:  whoami.LastMatchmakingError.Error(),
 			Inline: false,
@@ -469,7 +435,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	}
 
 	// Remove any blank fields, and truncate to 800 characters
-	fields = lo.Filter(fields, func(f *discordgo.MessageEmbedField, _ int) bool {
+	accountFields = lo.Filter(accountFields, func(f *discordgo.MessageEmbedField, _ int) bool {
 		if f == nil || f.Name == "" || f.Value == "" {
 			return false
 		}
@@ -481,18 +447,59 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		return true
 	})
 
+	embeds := []*discordgo.MessageEmbed{
+		{
+			Title:  "EchoVRCE Account",
+			Color:  0xCCCCCC,
+			Fields: accountFields,
+		},
+	}
+
+	callerUserID := d.cache.DiscordIDToUserID(i.Member.User.ID)
+
+	// Add Suspension Embed
+	if includePriviledged || includeGuildAuditor || includeSystem {
+		fields := make([]*discordgo.MessageEmbedField, 0, len(whoami.GuildGroups))
+		if guildRecords, err := EnforcementSuspensionSearch(ctx, nk, "", []string{userID.String()}, false); err == nil {
+			for groupID, byUserID := range guildRecords {
+				gg, ok := guildGroups[groupID]
+				if !ok {
+					continue
+				}
+				if len(byUserID) == 0 {
+					continue
+				}
+
+				includeNotes := false
+				if includeSystem || gg.IsEnforcer(callerUserID) {
+					includeNotes = true
+				}
+
+				for _, records := range byUserID {
+					field := createSuspensionDetailsEmbedField(gg.Name(), records.Records, includeNotes)
+
+					fields = append(fields, field)
+
+				}
+
+			}
+		}
+
+		if len(fields) > 0 {
+			embeds = append(embeds, &discordgo.MessageEmbed{
+				Title:  "Suspensions",
+				Color:  0xFF0000,
+				Fields: fields,
+			})
+		}
+	}
+
 	// Send the response
 	return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
-			Flags: discordgo.MessageFlagsEphemeral,
-			Embeds: []*discordgo.MessageEmbed{
-				{
-					Title:  "EchoVRCE Account",
-					Color:  0xCCCCCC,
-					Fields: fields,
-				},
-			},
+			Flags:  discordgo.MessageFlagsEphemeral,
+			Embeds: embeds,
 		},
 	})
 }
