@@ -35,7 +35,7 @@ func TestFormatDuration(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.duration.String(), func(t *testing.T) {
-			actual := formatDuration(tc.duration)
+			actual := FormatDuration(tc.duration)
 			if actual != tc.expected {
 				t.Errorf("Expected %s, but got %s", tc.expected, actual)
 			}

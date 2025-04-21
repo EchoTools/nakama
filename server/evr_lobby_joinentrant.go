@@ -254,7 +254,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 			}
 			const maxMessageLength = 60
 			message := latestRecord.SuspensionNotice
-			expires := fmt.Sprintf(" [exp: %s]", formatDuration(time.Until(latestRecord.SuspensionExpiry)))
+			expires := fmt.Sprintf(" [exp: %s]", FormatDuration(time.Until(latestRecord.SuspensionExpiry)))
 
 			if len(message)+len(expires) > maxMessageLength {
 				message = message[:maxMessageLength-len(expires)-3] + "..."
@@ -309,9 +309,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 
 		if params.ipInfo.FraudScore() >= gg.FraudScoreThreshold {
 
-			var fields []*discordgo.MessageEmbedField
-
-			fields = []*discordgo.MessageEmbedField{
+			fields := []*discordgo.MessageEmbedField{
 				{
 					Name:   "Player",
 					Value:  fmt.Sprintf("<@%s>", lobbyParams.DiscordID),
@@ -425,46 +423,4 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 	session.Logger().Info("Authorized access to lobby session", zap.String("gid", groupID), zap.String("display_name", displayName))
 
 	return nil
-}
-
-func formatDuration(d time.Duration) string {
-
-	if d == 0 {
-		return "0s"
-	}
-
-	prefix := ""
-	if d < 0 {
-		d = -d
-		prefix = "-"
-	}
-
-	days := int(d.Hours() / 24)
-	hours := int(d.Hours()) % 24
-	minutes := int(d.Minutes()) % 60
-	seconds := int(d.Seconds()) % 60
-
-	if days > 0 {
-		d = d.Round(time.Hour)
-		if hours := int(d.Hours()) % 24; hours > 0 {
-			return fmt.Sprintf("%s%dd%dh", prefix, int(d.Hours()/24), hours)
-		}
-		return fmt.Sprintf("%s%dd", prefix, int(d.Hours())/24)
-	} else if hours > 0 {
-		d = d.Round(time.Minute)
-		if minutes := int(d.Minutes()) % 60; minutes > 0 {
-			return fmt.Sprintf("%s%dh%dm", prefix, hours, minutes)
-		}
-		return fmt.Sprintf("%s%dh", prefix, int(d.Hours()))
-	} else if minutes > 0 {
-
-		if seconds > 0 {
-			return fmt.Sprintf("%s%dm%ds", prefix, minutes, seconds)
-		}
-		return fmt.Sprintf("%s%dm", prefix, minutes)
-	} else if seconds > 0 {
-		return fmt.Sprintf("%s%ds", prefix, seconds)
-	}
-
-	return "0s"
 }
