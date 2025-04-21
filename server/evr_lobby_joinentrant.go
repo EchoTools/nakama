@@ -14,26 +14,39 @@ import (
 	"go.uber.org/zap"
 )
 
+var (
+	ErrFailedToTrackSessionID     = errors.New("failed to track session ID")
+	ErrFailedToGetEntrantMetadata = errors.New("failed to get entrant metadata")
+	ErrNoPresences                = errors.New("no presences")
+	ErrServerSessionNotFound      = errors.New("server session not found")
+	LobbyErrMatchNotFound         = NewLobbyError(ServerDoesNotExist, "match not found")
+	LobbyErrMatchLabelEmpty       = NewLobbyError(ServerDoesNotExist, "match label empty")
+	LobbyErrDuplicateEvrID        = NewLobbyError(BadRequest, "duplicate evr ID")
+	LobbyErrMatchClosed           = NewLobbyError(ServerIsLocked, "match closed")
+	LobbyErrJoinNotAllowed        = NewLobbyError(ServerIsFull, "join not allowed")
+	ErrFailedToTrackEntrantStream = errors.New("failed to track entrant stream")
+)
+
 func (p *EvrPipeline) LobbyJoinEntrants(logger *zap.Logger, label *MatchLabel, presences ...*EvrMatchPresence) error {
 	if len(presences) == 0 {
-		return errors.New("no presences")
+		return ErrNoPresences
 	}
 
 	session := p.nk.sessionRegistry.Get(presences[0].SessionID)
 	if session == nil {
-		return errors.New("session not found")
+		return ErrSessionNotFound
 	}
 
 	serverSession := p.nk.sessionRegistry.Get(label.GameServer.SessionID)
 	if serverSession == nil {
-		return errors.New("server session not found")
+		return ErrServerSessionNotFound
 	}
 
 	return LobbyJoinEntrants(logger, p.nk.matchRegistry, p.nk.tracker, session, serverSession, label, presences...)
 }
 func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker Tracker, session Session, serverSession Session, label *MatchLabel, entrants ...*EvrMatchPresence) error {
 	if session == nil || serverSession == nil {
-		return errors.New("session is nil")
+		return ErrSessionNotFound
 	}
 
 	for _, e := range entrants {
@@ -62,21 +75,22 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 
 	// Trigger MatchJoinAttempt
 	found, allowed, isNew, reason, labelStr, _ = matchRegistry.JoinAttempt(sessionCtx, label.ID.UUID, label.ID.Node, e.UserID, e.SessionID, e.Username, e.SessionExpiry, nil, e.ClientIP, e.ClientPort, label.ID.Node, metadata)
+	// Define these errors at the package level or where appropriate
+
 	switch {
 	case !found:
-		err = NewLobbyErrorf(ServerDoesNotExist, "join attempt failed: match not found")
-
+		err = LobbyErrMatchNotFound
 	case labelStr == "":
-		err = NewLobbyErrorf(ServerDoesNotExist, "join attempt failed: match label empty")
-
+		err = LobbyErrMatchLabelEmpty
 	case reason == ErrJoinRejectDuplicateEvrID.Error():
-		err = NewLobbyErrorf(BadRequest, "join attempt failed: duplicate evr ID")
-
+		// Assuming ErrJoinRejectDuplicateEvrID is defined elsewhere and its Error() method returns the specific string
+		err = LobbyErrDuplicateEvrID
 	case reason == ErrJoinRejectReasonMatchClosed.Error():
-		err = NewLobbyErrorf(ServerIsLocked, "join attempt failed: match closed")
-
+		// Assuming ErrJoinRejectReasonMatchClosed is defined elsewhere and its Error() method returns the specific string
+		err = LobbyErrMatchClosed
 	case !allowed:
-		err = NewLobbyErrorf(ServerIsFull, "join attempt failed: not allowed: %s", reason)
+		// Wrap the base error with the specific reason provided by JoinAttempt
+		err = fmt.Errorf("%w: %s", LobbyErrJoinNotAllowed, reason)
 	}
 
 	if err != nil {
@@ -88,18 +102,17 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 
 	if isNew {
 
+		// The match handler will return an updated entrant presence.
 		e = &EvrMatchPresence{}
 		if err := json.Unmarshal([]byte(reason), e); err != nil {
-			err = fmt.Errorf("failed to unmarshal match presence: %w", err)
-			return err
+			return fmt.Errorf("failed to unmarshal match presence: %w", err)
 		}
 
 		// Update the presence stream for the entrant.
 		entrantMeta := PresenceMeta{Format: SessionFormatEVR, Username: e.Username, Status: e.String(), Hidden: false}
 
-		success := tracker.Update(sessionCtx, e.SessionID, entrantStream, e.UserID, entrantMeta)
-		if !success {
-			return errors.New("failed to track session ID")
+		if success := tracker.Update(sessionCtx, e.SessionID, entrantStream, e.UserID, entrantMeta); !success {
+			return ErrFailedToTrackEntrantStream
 		}
 
 	} else {
@@ -158,7 +171,6 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 	// Send the lobby session success message to the game server.
 	if err := SendEVRMessages(serverSession, false, connectionSettings); err != nil {
 		logger.Error("failed to send lobby session success to game server", zap.Error(err))
-
 		return errors.New("failed to send lobby session success to game server")
 	}
 
