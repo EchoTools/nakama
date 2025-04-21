@@ -252,7 +252,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 			}
 			const maxMessageLength = 60
 			message := latestRecord.SuspensionNotice
-			expires := fmt.Sprintf(" [exp: %s]", formatDuration(time.Until(latestRecord.SuspensionExpiry), false))
+			expires := fmt.Sprintf(" [exp: %s]", formatDuration(time.Until(latestRecord.SuspensionExpiry)))
 
 			if len(message)+len(expires) > maxMessageLength {
 				message = message[:maxMessageLength-len(expires)-3] + "..."
@@ -425,48 +425,51 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 	return nil
 }
 
-func formatDuration(d time.Duration, withSeconds bool) string {
+func formatDuration(d time.Duration) string {
 	// Format the duration as a string in the format "1d1h2m3s"
 	// if it's more than 1 day, it's "1d1h" (the hour is rounded up)
 	// if it's more than 1 minute, it's "1h15m" (the minute is rounded up)
 	// if it's more than 1 seconds, it's "30s" (the seconds are rounded up)
 
-	isNegative := d < 0
-	if isNegative {
+	if d == 0 {
+		return "0s"
+	}
+
+	prefix := ""
+	if d < 0 {
 		d = -d
-	}
-	// Calculate the number of days, hours, minutes, and seconds
-	var (
-		days    = int(d.Hours() / 24)
-		hours   = int(d.Hours()) % 24
-		minutes = int(d.Minutes()) % 60
-		seconds = int(d.Seconds()) % 60
-	)
-
-	if !withSeconds && seconds > 0 {
-		minutes++
+		prefix = "-"
 	}
 
-	var result string
+	days := int(d.Hours() / 24)
+	hours := int(d.Hours()) % 24
+	minutes := int(d.Minutes()) % 60
+	seconds := int(d.Seconds()) % 60
+
 	if days > 0 {
-		result += fmt.Sprintf("%dd", days)
-	}
-	if days > 0 || hours > 0 {
-		result += fmt.Sprintf("%dh", hours)
+		d = d.Round(time.Hour)
+		if hours := int(d.Hours()) % 24; hours > 0 {
+			return fmt.Sprintf("%s%dd%dh", prefix, int(d.Hours()/24), hours)
+		}
+		return fmt.Sprintf("%s%dd", prefix, int(d.Hours())/24)
+	} else if hours > 0 {
+		d = d.Round(time.Minute)
+		if minutes := int(d.Minutes()) % 60; minutes > 0 {
+			return fmt.Sprintf("%s%dh%dm", prefix, hours, minutes)
+		}
+		return fmt.Sprintf("%s%dh", prefix, int(d.Hours()))
+	} else if minutes > 0 {
+
+		d = d.Round(time.Minute)
+
+		if seconds > 0 {
+			return fmt.Sprintf("%s%dm%ds", prefix, minutes, seconds)
+		}
+		return fmt.Sprintf("%s%dm", prefix, minutes)
+	} else if seconds > 0 {
+		return fmt.Sprintf("%s%ds", prefix, seconds)
 	}
 
-	if days > 0 || hours > 0 || minutes > 0 {
-		result += fmt.Sprintf("%dm", minutes)
-	}
-	if seconds > 0 && withSeconds {
-		result += fmt.Sprintf("%ds", seconds)
-	}
+	return "0s"
 
-	if result == "" {
-		result = "0s"
-	}
-	if isNegative {
-		result = "-" + result
-	}
-	return result
 }
