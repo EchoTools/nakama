@@ -2252,18 +2252,24 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					if err := StorageRead(ctx, nk, targetUserID, guildRecords, false); err != nil && status.Code(err) != codes.NotFound {
 						return fmt.Errorf("failed to read storage: %w", err)
 					}
-
+					var record *GuildEnforcementRecord
 					if remove {
-						for _, record := range guildRecords.Records {
-							if !record.IsSuspended() {
+						for _, record = range guildRecords.Records {
+							if !record.IsActive() {
 								continue
 							}
+							if record.Notes != "" {
+								record.Notes += "\n"
+							}
+							record.Notes = fmt.Sprintf("voided <t:%d:R> by <@%s>", time.Now().UTC().Unix(), user.ID)
+
+							record.Notes += "\n" + notes
 							record.IsVoid = true
 						}
 					} else {
 						actions = append(actions, fmt.Sprintf("kicked for %s", userNotice))
 						// Add a new record
-						record := NewGuildEnforcementRecord(userID, userNotice, notes, requireCommunityValues, suspensionExpiry)
+						record = NewGuildEnforcementRecord(userID, member.User.ID, userNotice, notes, requireCommunityValues, suspensionExpiry)
 						guildRecords.AddRecord(record)
 					}
 
@@ -2271,6 +2277,24 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						return fmt.Errorf("failed to write storage: %w", err)
 					}
 
+					if gg.EnforcementNoticeChannelID != "" {
+						field := createSuspensionDetailsEmbedField(gg.Name(), []*GuildEnforcementRecord{record}, true)
+						embed := &discordgo.MessageEmbed{
+							Title:       "Enforcement Notice",
+							Description: fmt.Sprintf("Enforcement notice for %s", target.Mention()),
+							Color:       0x9656ce,
+							Fields: []*discordgo.MessageEmbedField{
+								field,
+							},
+						}
+						_, err := s.ChannelMessageSendEmbed(gg.EnforcementNoticeChannelID, embed)
+						if err != nil {
+							logger.WithFields(map[string]interface{}{
+								"error": err,
+							}).Error("Failed to send enforcement notice")
+						}
+
+					}
 				}
 			}
 

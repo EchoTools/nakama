@@ -1189,7 +1189,6 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 		return errors.New("session parameters not found")
 	}
 
-	var err error
 	userID := session.userID.String()
 	groupID := params.accountMetadata.GetActiveGroupID().String()
 
@@ -1201,27 +1200,31 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 				return fmt.Errorf("failed to unmarshal server profile: %w", err)
 			}
 
-			count := 0
-			// Get the number of reports for this user in the last week
-			if guildRecords, err := EnforcementJournalSearch(ctx, p.nk, groupID, userID); err != nil {
-				logger.Error("Failed to search for enforcement records", zap.Error(err))
-			} else if len(guildRecords) > 0 {
-				for _, records := range guildRecords {
-					for _, r := range records.Records {
-						// Show all reports for the past week
-						if r.CreatedAt.After(time.Now().Add(-time.Hour * 24 * 7)) {
-							count += 1
+			if targetUserID, err := GetUserIDByDeviceID(ctx, p.db, request.EvrId.String()); err != nil {
+				logger.Error("Failed to get user ID by device ID", zap.Error(err))
+			} else if targetUserID != "" {
+				count := 0
+				// Get the number of reports for this user in the last week
+				if guildRecords, err := EnforcementJournalSearch(ctx, p.nk, groupID, targetUserID); err != nil {
+					logger.Error("Failed to search for enforcement records", zap.Error(err))
+				} else if len(guildRecords) > 0 {
+					for _, records := range guildRecords {
+						for _, r := range records.Records {
+							// Show all reports for the past week
+							if r.CreatedAt.After(time.Now().Add(-time.Hour * 24 * 7)) {
+								count += 1
+							}
 						}
 					}
 				}
-			}
-			// Add the count to the players display name
-			serverProfile.DisplayName = fmt.Sprintf("%s [%d]", serverProfile.DisplayName, count)
+				// Add the count to the players display name
+				serverProfile.DisplayName = fmt.Sprintf("%s [%d]", serverProfile.DisplayName, count)
 
-			data, err = json.Marshal(serverProfile)
-			if err != nil {
-				logger.Error("Failed to marshal server profile", zap.Error(err))
-				return fmt.Errorf("failed to marshal server profile: %w", err)
+				data, err = json.Marshal(serverProfile)
+				if err != nil {
+					logger.Error("Failed to marshal server profile", zap.Error(err))
+					return fmt.Errorf("failed to marshal server profile: %w", err)
+				}
 			}
 		}
 	}
