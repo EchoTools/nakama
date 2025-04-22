@@ -304,6 +304,8 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, ses
 		if _, err := SendUserMessage(ctx, dg, lobbyParams.DiscordID, message); err != nil {
 			logger.Error("Failed to send message to user", zap.Error(err))
 		}
+		content := fmt.Sprintf("notified early quitter: <@%s> ", lobbyParams.DiscordID)
+		_ = AuditLogSend(p.appBot.dg, ServiceSettings().ServiceAuditChannelID, content)
 	}
 
 	if lobbyParams.Mode == evr.ModeSocialPublic {
