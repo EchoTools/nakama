@@ -13,6 +13,7 @@ import (
 
 type GroupMetadata struct {
 	GuildID                            string            `json:"guild_id"`                      // The guild ID
+	OwnerID                            string            `json:"owner_id"`                      // The owner ID
 	MinimumAccountAgeDays              int               `json:"minimum_account_age_days"`      // The minimum account age in days to be able to play echo on this guild's sessions
 	MembersOnlyMatchmaking             bool              `json:"members_only_matchmaking"`      // Restrict matchmaking to members only (when this group is the active one)
 	DisableCreateCommand               bool              `json:"disable_create_command"`        // Disable the public allocate command
