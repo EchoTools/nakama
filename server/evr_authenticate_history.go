@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"google.golang.org/grpc/codes"
@@ -171,9 +170,23 @@ func (h *LoginHistory) AlternateIDs() (firstDegree []string, secondDegree []stri
 	return slices.Compact(firstIDs), slices.Compact(secondIDs)
 }
 
+func (h *LoginHistory) LastSeen() time.Time {
+	if len(h.History) == 0 {
+		return time.Time{}
+	}
+
+	lastSeen := time.Time{}
+	for _, e := range h.History {
+		if e.UpdatedAt.After(lastSeen) {
+			lastSeen = e.UpdatedAt
+		}
+	}
+	return lastSeen
+}
+
 func (h *LoginHistory) Update(xpid evr.EvrId, clientIP string, loginData *evr.LoginProfile) {
 	if e := h.Get(xpid, clientIP); e != nil {
-		e.UpdatedAt = time.Now().UTC()
+		e.UpdatedAt = time.Now()
 		e.LoginData = loginData
 		return
 	} else {
@@ -459,7 +472,6 @@ func (h *LoginHistory) MarshalJSON() ([]byte, error) {
 			return bytes, nil
 		}
 
-		// Remove the oldest entries
 		for range 5 {
 			oldest := time.Now()
 			oldestKey := ""
@@ -470,7 +482,6 @@ func (h *LoginHistory) MarshalJSON() ([]byte, error) {
 				}
 			}
 			delete(h.History, oldestKey)
-			h.rebuildCache()
 		}
 	}
 }

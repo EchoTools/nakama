@@ -134,6 +134,32 @@ func (h *DisplayNameHistory) compile() {
 	}
 }
 
+// LatestByGroupID returns the latest display names for each groupID.
+func (h *DisplayNameHistory) LatestByGroupID() map[string]string {
+	if h.Histories == nil {
+		h.Histories = make(map[string]map[string]time.Time)
+	}
+
+	latestMap := make(map[string]time.Time)
+
+	latest := make(map[string]string)
+	for groupID, names := range h.Histories {
+		for name, lastUsed := range names {
+			if lastUsed.Before(latestMap[groupID]) || time.Since(lastUsed) > MaximumDisplayNameAge {
+				// Ignore old display names
+				// Ignore display names that are not the latest
+				continue
+			}
+			latestMap[groupID] = lastUsed
+			latest[groupID] = name
+
+		}
+	}
+
+	return latest
+}
+
+// GetAll returns all display names for the given groupID, and when they were last used.
 func (h *DisplayNameHistory) GetAll(displayName string) (map[string]time.Time, bool) {
 	if h.Histories == nil {
 		h.Histories = make(map[string]map[string]time.Time)
