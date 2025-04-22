@@ -148,6 +148,10 @@ func (g *GuildGroup) RoleCacheUpdate(account *EVRProfile, roles []string) bool {
 	return g.State.updated
 }
 
+func (g *GuildGroup) IsOwner(userID string) bool {
+	return g.OwnerID == userID
+}
+
 func (g *GuildGroup) IsServerHost(userID string) bool {
 	return g.HasRole(userID, g.RoleMap.ServerHost)
 }
