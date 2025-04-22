@@ -505,7 +505,7 @@ func LoginHistoryRegexSearch(ctx context.Context, nk runtime.NakamaModule, patte
 	return histories, nil
 }
 
-func AccountGetDeviceID(ctx context.Context, db *sql.DB, nk runtime.NakamaModule, deviceID string) (*api.Account, error) {
+func AccountGetDeviceID(ctx context.Context, db *sql.DB, nk runtime.NakamaModule, deviceID string) (*EVRProfile, error) {
 	found := true
 
 	// Look for an existing account.
@@ -521,7 +521,11 @@ func AccountGetDeviceID(ctx context.Context, db *sql.DB, nk runtime.NakamaModule
 	}
 
 	if found {
-		return nk.AccountGetId(ctx, dbUserID)
+		if account, err := nk.AccountGetId(ctx, dbUserID); err != nil {
+			return nil, status.Error(codes.Internal, "Error finding user account by device id.")
+		} else {
+			return BuildEVRProfileFromAccount(account)
+		}
 	}
 
 	return nil, status.Error(codes.NotFound, "User account not found.")

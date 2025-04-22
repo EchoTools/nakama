@@ -220,14 +220,14 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				logger.Error("Failed to get user ID by evr ID", zap.Error(err))
 				continue
 			}
-			metadata, err := AccountMetadataLoad(ctx, p.nk, userID)
+			metadata, err := EVRProfileLoad(ctx, p.nk, userID)
 			if err != nil {
 				logger.Error("Failed to load account metadata", zap.Error(err))
 				continue
 			}
 
 			metadata.GamePauseSettings = &msg.Settings
-			if err := AccountMetadataUpdate(ctx, p.nk, userID, metadata); err != nil {
+			if err := EVRProfileUpdate(ctx, p.nk, userID, metadata); err != nil {
 				logger.Error("Failed to set account metadata", zap.Error(err))
 			}
 
@@ -253,24 +253,24 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				continue
 			}
 
-			metadata, err := AccountMetadataLoad(ctx, p.nk, session.userID.String())
+			profile, err := EVRProfileLoad(ctx, p.nk, session.userID.String())
 			if err != nil {
 				logger.Error("Failed to load account metadata", zap.Error(err))
 				continue
 			}
 
 			// Update the equipped item in the profile.
-			if metadata.LoadoutCosmetics.Loadout, err = LoadoutEquipItem(metadata.LoadoutCosmetics.Loadout, category, name); err != nil {
+			if profile.LoadoutCosmetics.Loadout, err = LoadoutEquipItem(profile.LoadoutCosmetics.Loadout, category, name); err != nil {
 				return fmt.Errorf("failed to update equipped item: %w", err)
 			}
 
-			if err := AccountMetadataUpdate(ctx, p.nk, session.userID.String(), metadata); err != nil {
+			if err := EVRProfileUpdate(ctx, p.nk, session.userID.String(), profile); err != nil {
 				logger.Error("Failed to set account metadata", zap.Error(err))
 			}
 
 			// swap the metadata in the session parameters
-			metadata.account = params.accountMetadata.account
-			params.accountMetadata = metadata
+
+			params.profile = profile
 
 			StoreParams(session.Context(), &params)
 
@@ -279,7 +279,7 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				evr.ModeCombatPublic,
 			}
 
-			groupID := params.accountMetadata.GetActiveGroupID().String()
+			groupID := params.profile.GetActiveGroupID().String()
 			serverProfile, err := UserServerProfileFromParameters(ctx, logger, p.db, p.nk, params, groupID, modes, 0)
 			if err != nil {
 				return fmt.Errorf("failed to get server profile: %w", err)
