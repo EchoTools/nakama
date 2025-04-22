@@ -2281,16 +2281,22 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					}
 
 					if gg.EnforcementNoticeChannelID != "" {
+						evrAccount, err := EVRProfileLoad(ctx, nk, targetUserID)
+						if err != nil {
+							return fmt.Errorf("failed to load account metadata: %w", err)
+						}
+
+						displayName := evrAccount.GetGroupDisplayNameOrDefault(groupID)
 						field := createSuspensionDetailsEmbedField(gg.Name(), []*GuildEnforcementRecord{record}, true)
 						embed := &discordgo.MessageEmbed{
 							Title:       "Enforcement Notice",
-							Description: fmt.Sprintf("Enforcement notice for %s", target.Mention()),
+							Description: fmt.Sprintf("Enforcement notice for %s (%s)", displayName, target.Mention()),
 							Color:       0x9656ce,
 							Fields: []*discordgo.MessageEmbedField{
 								field,
 							},
 						}
-						_, err := s.ChannelMessageSendEmbed(gg.EnforcementNoticeChannelID, embed)
+						_, err = s.ChannelMessageSendEmbed(gg.EnforcementNoticeChannelID, embed)
 						if err != nil {
 							logger.WithFields(map[string]interface{}{
 								"error": err,
