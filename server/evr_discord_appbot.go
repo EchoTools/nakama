@@ -165,9 +165,12 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 		for {
 			select {
 			case <-updateTicker.C:
+				bot.Lock()
 				if !bot.DataReady {
 					continue
+					bot.Unlock()
 				}
+				bot.Unlock()
 
 				// Get all the matches
 				minSize := 2
