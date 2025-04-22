@@ -1921,7 +1921,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			includePriviledged := isSelf || isGlobalOperator || isGuildAuditor
 			includeGuildAuditor := isGlobalOperator || isGuildAuditor
 
-			return d.handleProfileRequest(ctx, logger, nk, s, i, target, target.Username, includePriviledged, includePrivate, includeGuildAuditor, includeSystem)
+			return d.handleProfileRequest(ctx, logger, nk, s, i, target, includePriviledged, includePrivate, includeGuildAuditor, includeSystem)
 		},
 		"search": d.handleSearch,
 		"create": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
