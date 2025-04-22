@@ -78,7 +78,7 @@ func (g GuildGroup) HasRole(userID, role string) bool {
 	return g.State.hasRole(userID, role)
 }
 
-func (g *GuildGroup) RoleCacheUpdate(account *EVRAccount, roles []string) bool {
+func (g *GuildGroup) RoleCacheUpdate(account *EVRProfile, roles []string) bool {
 	g.State.Lock()
 	defer g.State.Unlock()
 	// Ensure the role cache has been initialized
