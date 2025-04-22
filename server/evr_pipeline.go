@@ -505,7 +505,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 	}
 
 	if params, ok := LoadParams(session.Context()); ok && !params.xpID.IsNil() {
-		if !params.accountMetadata.Debug {
+		if !params.profile.Debug {
 			//logger = logger.WithOptions(zap.IncreaseLevel(zap.InfoLevel))
 		}
 

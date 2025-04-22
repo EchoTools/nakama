@@ -59,74 +59,7 @@ func (p *GroupProfile) UpdateUnlockedItems(updated []evr.Symbol) {
 	p.UpdateTime = time.Now()
 }
 
-type EVRAccount struct {
-	AccountMetadata
-	User        *api.User
-	Wallet      string
-	Email       string
-	Devices     []*api.AccountDevice
-	CustomId    string
-	VerifyTime  time.Time
-	DisableTime time.Time
-}
-
-func NewEVRAccount(account *api.Account) (*EVRAccount, error) {
-	md := AccountMetadata{}
-	if err := json.Unmarshal([]byte(account.User.Metadata), &md); err != nil {
-		return nil, fmt.Errorf("error unmarshalling account metadata: %w", err)
-	}
-	md.account = account
-
-	a := &EVRAccount{
-		AccountMetadata: md,
-		User:            account.User,
-		Wallet:          account.Wallet,
-		Email:           account.Email,
-		Devices:         account.Devices,
-		CustomId:        account.CustomId,
-	}
-	if account.VerifyTime != nil {
-		a.VerifyTime = account.VerifyTime.AsTime()
-	}
-	if account.DisableTime != nil {
-		a.DisableTime = account.DisableTime.AsTime()
-	}
-
-	return a, nil
-}
-
-func (e EVRAccount) UserID() string {
-	return e.User.Id
-}
-
-func (e EVRAccount) IsDisabled() bool {
-	return !e.DisableTime.IsZero()
-}
-
-func (e EVRAccount) IsLinked() bool {
-	for _, d := range e.Devices {
-		if _, err := evr.ParseEvrId(d.Id); err == nil {
-			return true
-		}
-	}
-	return false
-}
-
-func (e EVRAccount) XPIDs() []evr.EvrId {
-	xpids := make([]evr.EvrId, 0, len(e.Devices))
-	for _, d := range e.Devices {
-		xpid, err := evr.ParseEvrId(d.Id)
-		if err != nil || xpid == nil {
-			continue
-		}
-		xpids = append(xpids, *xpid)
-	}
-	return xpids
-}
-
-type AccountMetadata struct {
-	account *api.Account
-
+type EVRProfile struct {
 	Debug                      bool                   `json:"debug"`                        // Enable debug mode
 	GlobalBanReason            string                 `json:"global_ban_reason"`            // The global ban reason
 	DisabledAccountMessage     string                 `json:"disabled_account_message"`     // The disabled account message that the user will see.
@@ -153,51 +86,110 @@ type AccountMetadata struct {
 	CustomizationPOIs          *evr.Customization     `json:"customization_pois"`           // The customization POIs
 	MatchmakingDivision        string                 `json:"matchmaking_division"`         // The matchmaking division (e.g. bronze, silver, gold, etc.)
 	sessionDisplayNameOverride string                 // The display name override for this session
+	account                    *api.Account
 }
 
-func (a *AccountMetadata) ID() string {
-	return a.account.User.Id
-}
-
-func (a *AccountMetadata) DiscordID() string {
-	return a.account.CustomId
-}
-
-func (a *AccountMetadata) Username() string {
-	return a.account.User.Username
-}
-
-func (a *AccountMetadata) DisplayName() string {
-	return a.account.User.DisplayName
-}
-
-func (a *AccountMetadata) LangTag() string {
-	return a.account.User.LangTag
-}
-
-func (a *AccountMetadata) AvatarURL() string {
-	return a.account.User.AvatarUrl
-}
-
-func (a *AccountMetadata) XPIDs() []evr.EvrId {
-	if a.account == nil {
-		return nil
+func BuildEVRProfileFromAccount(account *api.Account) (*EVRProfile, error) {
+	a := &EVRProfile{}
+	if err := json.Unmarshal([]byte(account.User.Metadata), &a); err != nil {
+		return nil, fmt.Errorf("error unmarshalling account metadata: %w", err)
 	}
+	a.account = account
+	return a, nil
+}
 
-	xpids := make([]evr.EvrId, 0, len(a.account.Devices))
-	for _, d := range a.account.Devices {
+func (e EVRProfile) UserID() string {
+	return e.account.User.Id
+}
+
+func (e EVRProfile) IsDisabled() bool {
+	return e.account.DisableTime != nil && e.account.DisableTime.GetSeconds() > 0
+}
+
+func (e EVRProfile) DisabledAt() time.Time {
+	t := time.Time{}
+	if e.account.DisableTime != nil {
+		t = e.account.DisableTime.AsTime()
+	}
+	return t
+}
+
+func (e EVRProfile) IsLinked() bool {
+	for _, d := range e.account.Devices {
+		if _, err := evr.ParseEvrId(d.Id); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func (e EVRProfile) XPIDs() []evr.EvrId {
+	xpids := make([]evr.EvrId, 0, len(e.account.Devices))
+	for _, d := range e.account.Devices {
 		xpid, err := evr.ParseEvrId(d.Id)
 		if err != nil || xpid == nil {
 			continue
 		}
-
 		xpids = append(xpids, *xpid)
 	}
-
 	return xpids
 }
 
-func (a *AccountMetadata) VRMLUserID() string {
+func (e EVRProfile) HasPasswordSet() bool {
+	return e.account.GetEmail() != ""
+}
+
+func (e EVRProfile) IsOnline() bool {
+	return e.account.User.GetOnline()
+}
+
+func (e EVRProfile) DiscordID() string {
+	return e.account.GetCustomId()
+}
+
+func (e EVRProfile) CreatedAt() time.Time {
+	return e.account.User.GetCreateTime().AsTime()
+}
+
+func (e EVRProfile) UpdatedAt() time.Time {
+	return e.account.User.GetUpdateTime().AsTime()
+}
+
+func (e EVRProfile) LinkedXPIDs() []evr.EvrId {
+	devices := make([]evr.EvrId, 0, len(e.account.Devices))
+	for _, d := range e.account.Devices {
+		if xpid, err := evr.ParseEvrId(d.Id); err == nil && xpid != nil {
+			devices = append(devices, *xpid)
+		}
+	}
+	return devices
+}
+
+func (a EVRProfile) ID() string {
+	return a.account.User.Id
+}
+
+func (a EVRProfile) Username() string {
+	return a.account.User.Username
+}
+
+func (a EVRProfile) DisplayName() string {
+	return a.account.User.DisplayName
+}
+
+func (a EVRProfile) Wallet() string {
+	return a.account.Wallet
+}
+
+func (a EVRProfile) LangTag() string {
+	return a.account.User.LangTag
+}
+
+func (a EVRProfile) AvatarURL() string {
+	return a.account.User.AvatarUrl
+}
+
+func (a EVRProfile) VRMLUserID() string {
 	for _, d := range a.account.Devices {
 		if vrmlUserID, found := strings.CutPrefix(d.Id, DeviceIDPrefixVRML); found {
 			return vrmlUserID
@@ -206,26 +198,26 @@ func (a *AccountMetadata) VRMLUserID() string {
 	return ""
 }
 
-func (a *AccountMetadata) DiscordAccountCreationTime() time.Time {
+func (a EVRProfile) DiscordAccountCreationTime() time.Time {
 	t, _ := discordgo.SnowflakeTimestamp(a.DiscordID())
 	return t
 }
 
-func (a *AccountMetadata) GetActiveGroupID() uuid.UUID {
+func (a EVRProfile) GetActiveGroupID() uuid.UUID {
 	if a.ActiveGroupID == "" {
 		return uuid.Nil
 	}
 	return uuid.FromStringOrNil(a.ActiveGroupID)
 }
 
-func (a *AccountMetadata) SetActiveGroupID(id uuid.UUID) {
+func (a EVRProfile) SetActiveGroupID(id uuid.UUID) {
 	if a.ActiveGroupID == id.String() {
 		return
 	}
 	a.ActiveGroupID = id.String()
 }
 
-func (a *AccountMetadata) GetDisplayName(groupID string) string {
+func (a EVRProfile) GetDisplayName(groupID string) string {
 	if a.GroupDisplayNames == nil {
 		a.GroupDisplayNames = make(map[string]string)
 	}
@@ -235,7 +227,7 @@ func (a *AccountMetadata) GetDisplayName(groupID string) string {
 	return ""
 }
 
-func (a *AccountMetadata) GetGroupDisplayNameOrDefault(groupID string) string {
+func (a EVRProfile) GetGroupDisplayNameOrDefault(groupID string) string {
 
 	if a.GroupDisplayNames == nil {
 		a.GroupDisplayNames = make(map[string]string)
@@ -269,7 +261,7 @@ func (a *AccountMetadata) GetGroupDisplayNameOrDefault(groupID string) string {
 	}
 }
 
-func (a *AccountMetadata) SetGroupDisplayName(groupID, displayName string) bool {
+func (a EVRProfile) SetGroupDisplayName(groupID, displayName string) bool {
 	if a.GroupDisplayNames == nil {
 		a.GroupDisplayNames = make(map[string]string)
 	}
@@ -280,32 +272,32 @@ func (a *AccountMetadata) SetGroupDisplayName(groupID, displayName string) bool 
 	return true
 }
 
-func (a *AccountMetadata) GetActiveGroupDisplayName() string {
+func (a EVRProfile) GetActiveGroupDisplayName() string {
 	return a.GetGroupDisplayNameOrDefault(a.ActiveGroupID)
 }
 
-func (a *AccountMetadata) MarshalMap() map[string]interface{} {
+func (a EVRProfile) MarshalMap() map[string]interface{} {
 	b, _ := json.Marshal(a)
 	var m map[string]interface{}
 	_ = json.Unmarshal(b, &m)
 	return m
 }
 
-func (a *AccountMetadata) GetMuted() []evr.EvrId {
+func (a EVRProfile) GetMuted() []evr.EvrId {
 	if a.MutedPlayers == nil {
 		return make([]evr.EvrId, 0)
 	}
 	return a.MutedPlayers
 }
 
-func (a *AccountMetadata) GetGhosted() []evr.EvrId {
+func (a EVRProfile) GetGhosted() []evr.EvrId {
 	if a.GhostedPlayers == nil {
 		return make([]evr.EvrId, 0)
 	}
 	return a.GhostedPlayers
 }
 
-func (a *AccountMetadata) FixBrokenCosmetics() bool {
+func (a EVRProfile) FixBrokenCosmetics() bool {
 
 	d := evr.DefaultCosmeticLoadout()
 
@@ -343,23 +335,20 @@ func (a *AccountMetadata) FixBrokenCosmetics() bool {
 	return updated
 }
 
-func AccountMetadataLoad(ctx context.Context, nk runtime.NakamaModule, userID string) (*AccountMetadata, error) {
+func EVRProfileLoad(ctx context.Context, nk runtime.NakamaModule, userID string) (*EVRProfile, error) {
 	account, err := nk.AccountGetId(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
-
-	md := &AccountMetadata{}
-	if err := json.Unmarshal([]byte(account.GetUser().GetMetadata()), md); err != nil {
-		return nil, err
-	}
-	md.account = account
-	return md, nil
+	return BuildEVRProfileFromAccount(account)
 }
 
-func AccountMetadataUpdate(ctx context.Context, nk runtime.NakamaModule, userID string, md *AccountMetadata) error {
+func EVRProfileUpdate(ctx context.Context, nk runtime.NakamaModule, userID string, md *EVRProfile) error {
 	if userID == SystemUserID {
 		return fmt.Errorf("cannot set metadata for system user")
+	}
+	if md == nil {
+		return fmt.Errorf("metadata cannot be nil")
 	}
 	return nk.AccountUpdateId(ctx, userID, "", md.MarshalMap(), "", "", "", "", "")
 }

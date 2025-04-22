@@ -404,7 +404,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		}
 	}
 
-	displayName := params.accountMetadata.GetGroupDisplayNameOrDefault(groupID)
+	displayName := params.profile.GetGroupDisplayNameOrDefault(groupID)
 	p.nk.Event(ctx, &api.Event{
 		Name: EventLobbySessionAuthorized,
 		Properties: map[string]string{

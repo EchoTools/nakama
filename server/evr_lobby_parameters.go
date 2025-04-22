@@ -150,7 +150,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		return nil, fmt.Errorf("failed to load session parameters")
 	}
 
-	if sessionParams.accountMetadata == nil {
+	if sessionParams.profile == nil {
 		return nil, fmt.Errorf("failed to load session parameters")
 	}
 
@@ -286,7 +286,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 
 	groupID := request.GetGroupID()
 	if request.GetGroupID() == uuid.Nil {
-		groupID = sessionParams.accountMetadata.GetActiveGroupID()
+		groupID = sessionParams.profile.GetActiveGroupID()
 	}
 	groupIDStr := groupID.String()
 	region := "default"
@@ -410,7 +410,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		MatchmakingRating:            atomic.NewPointer(&matchmakingRating),
 		MatchmakingOrdinal:           atomic.NewFloat64(matchmakingOrdinal),
 		MatchmakingOrdinalRange:      globalSettings.OrdinalRange,
-		Verbose:                      sessionParams.accountMetadata.DiscordDebugMessages,
+		Verbose:                      sessionParams.profile.DiscordDebugMessages,
 		IsEarlyQuitter:               isEarlyQuitter,
 		RankPercentile:               atomic.NewFloat64(rankPercentile),
 		RankPercentileMaxDelta:       rankPercentileMaxDelta,
@@ -421,7 +421,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		MatchmakingTimeout:           time.Duration(globalSettings.MatchmakingTimeoutSecs) * time.Second,
 		FailsafeTimeout:              time.Duration(failsafeTimeoutSecs) * time.Second,
 		FallbackTimeout:              time.Duration(globalSettings.FallbackTimeoutSecs) * time.Second,
-		DisplayName:                  sessionParams.accountMetadata.GetGroupDisplayNameOrDefault(groupIDStr),
+		DisplayName:                  sessionParams.profile.GetGroupDisplayNameOrDefault(groupIDStr),
 	}, nil
 }
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/atomic"
 )
@@ -41,8 +40,7 @@ type SessionParameters struct {
 	serverRegions []string            // []string of the server regions
 	urlParameters map[string][]string // The URL parameters
 
-	account              *api.Account                    // The account
-	accountMetadata      *AccountMetadata                // The account metadata
+	profile              *EVRProfile                     // The account
 	matchmakingSettings  *MatchmakingSettings            // The matchmaking settings
 	displayNames         *DisplayNameHistory             // The display name history
 	guildGroups          map[string]*GuildGroup          // map[string]*GuildGroup
@@ -92,10 +90,10 @@ func (s *SessionParameters) DeviceType() string {
 }
 
 func (s *SessionParameters) DiscordID() string {
-	if s.account == nil {
+	if s.profile == nil {
 		return ""
 	}
-	return s.account.GetCustomId()
+	return s.profile.DiscordID()
 }
 
 func (s *SessionParameters) GeoHash() string {

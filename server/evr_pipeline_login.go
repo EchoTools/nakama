@@ -259,7 +259,7 @@ func (p *EvrPipeline) processLoginRequest(ctx context.Context, logger *zap.Logge
 		return fmt.Errorf("failed to migrate user: %w", err)
 	}
 
-	if params.account, err = p.nk.AccountGetId(ctx, session.userID.String()); err != nil {
+	if params.profile, err = EVRProfileLoad(ctx, p.nk, params.profile.ID()); err != nil {
 		return fmt.Errorf("failed to get account: %w", err)
 	}
 
@@ -300,7 +300,7 @@ func (p *EvrPipeline) authenticateSession(ctx context.Context, logger *zap.Logge
 	}
 
 	// Get the user for this device
-	params.account, err = AccountGetDeviceID(ctx, p.db, p.nk, params.xpID.String())
+	params.profile, err = AccountGetDeviceID(ctx, p.db, p.nk, params.xpID.String())
 	switch status.Code(err) {
 	// The device is not linked to an account.
 	case codes.NotFound:
@@ -337,9 +337,9 @@ func (p *EvrPipeline) authenticateSession(ctx context.Context, logger *zap.Logge
 		metricsTags["device_linked"] = "true"
 
 		var (
-			requiresPasswordAuth    = params.account.Email != ""
+			requiresPasswordAuth    = params.profile.HasPasswordSet()
 			authenticatedViaSession = !session.userID.IsNil()
-			isAccountMismatched     = params.account.User.Id != session.userID.String()
+			isAccountMismatched     = params.profile.ID() != session.userID.String()
 			passwordProvided        = params.authPassword != ""
 		)
 
@@ -355,13 +355,13 @@ func (p *EvrPipeline) authenticateSession(ctx context.Context, logger *zap.Logge
 			if authenticatedViaSession && isAccountMismatched {
 				// The device is linked to a different account.
 				metricsTags["error"] = "device_link_mismatch"
-				logger.Error("Device is linked to a different account.", zap.String("device_user_id", params.account.User.Id), zap.String("session_user_id", session.userID.String()))
-				return fmt.Errorf("device linked to a different account. (%s)", params.account.User.Username)
+				logger.Error("Device is linked to a different account.", zap.String("device_user_id", params.profile.ID()), zap.String("session_user_id", session.userID.String()))
+				return fmt.Errorf("device linked to a different account. (%s)", params.profile.Username())
 			}
 
 			if passwordProvided {
 				// This is the first time setting the password.
-				if err := LinkEmail(ctx, logger, p.db, uuid.FromStringOrNil(params.account.User.Id), params.account.User.Id+"@"+p.placeholderEmail, params.authPassword); err != nil {
+				if err := LinkEmail(ctx, logger, p.db, uuid.FromStringOrNil(params.profile.ID()), params.profile.ID()+"@"+p.placeholderEmail, params.authPassword); err != nil {
 					metricsTags["error"] = "failed_link_email"
 					return fmt.Errorf("failed to link email: %w", err)
 				}
@@ -370,24 +370,15 @@ func (p *EvrPipeline) authenticateSession(ctx context.Context, logger *zap.Logge
 		}
 	}
 
-	// Load the user's metadata from the storage
-	params.accountMetadata = &AccountMetadata{}
-
-	if err := json.Unmarshal([]byte(params.account.User.Metadata), params.accountMetadata); err != nil {
-		metricsTags["error"] = "failed_unmarshal_metadata"
-		return fmt.Errorf("failed to unmarshal metadata: %w", err)
-	}
-	params.accountMetadata.account = params.account
-
 	// Replace the session context with a derived one that includes the login session ID and the EVR ID
 	ctx = session.Context()
 	session.Lock()
-	if params.account == nil {
+	if params.profile == nil {
 		session.Unlock()
 		return errors.New("account is nil")
 	}
-	session.userID = uuid.FromStringOrNil(params.account.User.Id)
-	session.SetUsername(params.account.User.Username)
+	session.userID = uuid.FromStringOrNil(params.profile.ID())
+	session.SetUsername(params.profile.Username())
 	session.logger = session.logger.With(zap.String("loginsid", session.id.String()), zap.String("uid", session.userID.String()), zap.String("evrid", params.xpID.String()), zap.String("username", session.Username()))
 
 	ctx = context.WithValue(ctx, ctxUserIDKey{}, session.userID)     // apiServer compatibility
@@ -416,7 +407,7 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 
 	// Load the login history for audit purposes.
 	loginHistory := NewLoginHistory(session.userID.String())
-	if err := StorageRead(ctx, p.nk, params.account.User.Id, loginHistory, true); err != nil {
+	if err := StorageRead(ctx, p.nk, params.profile.ID(), loginHistory, true); err != nil {
 		metricsTags["error"] = "failed_load_login_history"
 		return fmt.Errorf("failed to load login history: %w", err)
 	}
@@ -427,23 +418,23 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 		if _, err := StorageWrite(context.Background(), p.nk, userID, loginHistory); err != nil {
 			logger.Warn("Failed to store login history", zap.Error(err))
 		}
-	}(params.account.User.Id)
+	}(session.UserID().String())
 
 	// The account is now authenticated. Authorize the session.
-	if params.account.GetDisableTime() != nil {
+	if params.profile.IsDisabled() {
 
 		p.nk.MetricsCounterAdd("login_attempt_banned_account", nil, 1)
 
 		logger.Info("Attempted login to banned account.",
 			zap.String("xpid", params.xpID.Token()),
 			zap.String("client_ip", session.clientIP),
-			zap.String("uid", params.account.User.Id),
+			zap.String("uid", params.profile.ID()),
 			zap.Any("login_payload", params.loginPayload))
 
 		metricsTags["error"] = "account_disabled"
 
 		return AccountDisabledError{
-			message:   params.accountMetadata.DisabledAccountMessage,
+			message:   params.profile.DisabledAccountMessage,
 			reportURL: ServiceSettings().ReportURL,
 		}
 	}
@@ -458,13 +449,13 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 		logger.Info("Attempted login with IP address that is on the deny list.",
 			zap.String("xpid", params.xpID.Token()),
 			zap.String("client_ip", session.clientIP),
-			zap.String("uid", params.account.User.Id),
+			zap.String("uid", params.profile.ID()),
 			zap.Any("login_payload", params.loginPayload))
 
 		metricsTags["error"] = "ip_deny_list"
 
 		return AccountDisabledError{
-			message:   params.accountMetadata.DisabledAccountMessage,
+			message:   params.profile.DisabledAccountMessage,
 			reportURL: ServiceSettings().ReportURL,
 		}
 	}
@@ -474,7 +465,7 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 
 		// Update the last used time.
 		if isNew := loginHistory.AuthorizeIP(session.clientIP); isNew {
-			if err := p.appBot.SendIPAuthorizationNotification(params.account.User.Id, session.clientIP); err != nil {
+			if err := p.appBot.SendIPAuthorizationNotification(params.profile.ID(), session.clientIP); err != nil {
 				// Log the error, but don't return it.
 				logger.Warn("Failed to send IP authorization notification", zap.Error(err))
 			}
@@ -490,7 +481,7 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 		metricsTags["error"] = "ip_verification_required"
 		if p.appBot != nil && p.appBot.dg != nil && p.appBot.dg.State != nil && p.appBot.dg.State.User != nil {
 			botUsername := p.appBot.dg.State.User.Username
-			if err := p.appBot.SendIPApprovalRequest(ctx, params.account.User.Id, entry, params.ipInfo); err == nil {
+			if err := p.appBot.SendIPApprovalRequest(ctx, params.profile.ID(), entry, params.ipInfo); err == nil {
 				return NewLocationError{
 					code:        twoFactorCode,
 					botUsername: botUsername,
@@ -503,7 +494,7 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 				}
 				// The user has DMs from non-friends disabled. Tell them to use the slash command instead.
 
-				if guildID := p.discordCache.GroupIDToGuildID(params.accountMetadata.ActiveGroupID); guildID != "" {
+				if guildID := p.discordCache.GroupIDToGuildID(params.profile.ActiveGroupID); guildID != "" {
 					// Use the guild name
 					if guild, err := p.discordCache.dg.Guild(guildID); err == nil {
 						return NewLocationError{
@@ -541,20 +532,11 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	defer func() {
 		p.nk.MetricsCounterAdd("session_initialize", metricsTags, 1)
 	}()
-	params.accountMetadata = &AccountMetadata{}
-
-	// Get the user's metadata from the storage
-
-	if err := json.Unmarshal([]byte(params.account.User.Metadata), params.accountMetadata); err != nil {
-		metricsTags["error"] = "failed_unmarshal_metadata"
-		return fmt.Errorf("failed to unmarshal metadata: %w", err)
-	}
-	params.accountMetadata.account = params.account
 
 	metadataUpdated := false
 
 	// Get the GroupID from the user's metadata
-	params.guildGroups, err = GuildUserGroupsList(ctx, p.nk, p.guildGroupRegistry, params.account.User.Id)
+	params.guildGroups, err = GuildUserGroupsList(ctx, p.nk, p.guildGroupRegistry, params.profile.ID())
 	if err != nil {
 		metricsTags["error"] = "failed_get_guild_groups"
 		return fmt.Errorf("failed to get guild groups: %w", err)
@@ -563,20 +545,20 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	if len(params.guildGroups) == 0 {
 		// User is not in any groups
 		metricsTags["error"] = "user_not_in_any_groups"
-		guildID := p.discordCache.GroupIDToGuildID(params.accountMetadata.ActiveGroupID)
-		p.discordCache.QueueSyncMember(guildID, params.account.CustomId)
+		guildID := p.discordCache.GroupIDToGuildID(params.profile.ActiveGroupID)
+		p.discordCache.QueueSyncMember(guildID, params.profile.DiscordID())
 
 		return fmt.Errorf("user is not in any groups, try again in 30 seconds")
 	}
 
-	if _, ok := params.guildGroups[params.accountMetadata.ActiveGroupID]; !ok && params.accountMetadata.GetActiveGroupID() != uuid.Nil {
+	if _, ok := params.guildGroups[params.profile.ActiveGroupID]; !ok && params.profile.GetActiveGroupID() != uuid.Nil {
 		// User is not in the active group
-		logger.Warn("User is not in the active group", zap.String("uid", params.account.User.Id), zap.String("gid", params.accountMetadata.ActiveGroupID))
-		params.accountMetadata.SetActiveGroupID(uuid.Nil)
+		logger.Warn("User is not in the active group", zap.String("uid", params.profile.ID()), zap.String("gid", params.profile.ActiveGroupID))
+		params.profile.SetActiveGroupID(uuid.Nil)
 	}
 
 	// If the user is not in a group, set the active group to the group with the most members
-	if params.accountMetadata.GetActiveGroupID() == uuid.Nil {
+	if params.profile.GetActiveGroupID() == uuid.Nil {
 		// Active group is not set.
 
 		groupIDs := make([]string, 0, len(params.guildGroups))
@@ -590,8 +572,8 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		})
 		slices.Reverse(groupIDs)
 
-		params.accountMetadata.SetActiveGroupID(uuid.FromStringOrNil(groupIDs[0]))
-		logger.Debug("Set active group", zap.String("uid", params.account.User.Id), zap.String("gid", params.accountMetadata.ActiveGroupID))
+		params.profile.SetActiveGroupID(uuid.FromStringOrNil(groupIDs[0]))
+		logger.Debug("Set active group", zap.String("uid", params.profile.ID()), zap.String("gid", params.profile.ActiveGroupID))
 		metadataUpdated = true
 	}
 
@@ -613,7 +595,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	// the force username role.
 	for groupID, gg := range params.guildGroups {
 		if gg.HasRole(session.userID.String(), gg.RoleMap.UsernameOnly) {
-			params.accountMetadata.GroupDisplayNames[groupID] = params.account.User.Username
+			params.profile.GroupDisplayNames[groupID] = params.profile.Username()
 		}
 	}
 
@@ -626,9 +608,9 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 
 	if params.userDisplayNameOverride != "" {
 		// This will be picked up by GetActiveGroupDisplayName and other functions
-		params.accountMetadata.sessionDisplayNameOverride = params.userDisplayNameOverride
-	} else if params.accountMetadata.GuildDisplayNameOverrides != nil && params.accountMetadata.GuildDisplayNameOverrides[params.accountMetadata.ActiveGroupID] != "" {
-		params.accountMetadata.sessionDisplayNameOverride = params.accountMetadata.GuildDisplayNameOverrides[params.accountMetadata.ActiveGroupID]
+		params.profile.sessionDisplayNameOverride = params.userDisplayNameOverride
+	} else if params.profile.GuildDisplayNameOverrides != nil && params.profile.GuildDisplayNameOverrides[params.profile.ActiveGroupID] != "" {
+		params.profile.sessionDisplayNameOverride = params.profile.GuildDisplayNameOverrides[params.profile.ActiveGroupID]
 	}
 
 	params.displayNames, err = DisplayNameHistoryLoad(ctx, p.nk, session.userID.String())
@@ -636,7 +618,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		logger.Warn("Failed to load display name history", zap.Error(err))
 		return fmt.Errorf("failed to load display name history: %w", err)
 	}
-	params.displayNames.Update(params.accountMetadata.ActiveGroupID, params.accountMetadata.GetActiveGroupDisplayName(), params.account.User.Username, true)
+	params.displayNames.Update(params.profile.ActiveGroupID, params.profile.GetActiveGroupDisplayName(), params.profile.Username(), true)
 
 	if err := DisplayNameHistoryStore(ctx, p.nk, session.userID.String(), params.displayNames); err != nil {
 		logger.Warn("Failed to store display name history", zap.Error(err))
@@ -649,7 +631,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	} else {
 		updated := false
 		// If the player account is less than 7 days old, then assign the "green" division to the player.
-		if time.Since(params.accountMetadata.account.User.CreateTime.AsTime()) < time.Duration(globalSettings.Matchmaking.GreenDivisionMaxAccountAgeDays)*24*time.Hour {
+		if time.Since(params.profile.account.User.CreateTime.AsTime()) < time.Duration(globalSettings.Matchmaking.GreenDivisionMaxAccountAgeDays)*24*time.Hour {
 			if !slices.Contains(settings.Divisions, "green") {
 				settings.Divisions = append(settings.Divisions, "green")
 				updated = true
@@ -686,21 +668,25 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		params.matchmakingSettings = &settings
 	}
 
-	if !params.accountMetadata.AllowBrokenCosmetics {
-		if u := params.accountMetadata.FixBrokenCosmetics(); u {
+	if !params.profile.AllowBrokenCosmetics {
+		if u := params.profile.FixBrokenCosmetics(); u {
 			metadataUpdated = true
 		}
 	}
 
 	if metadataUpdated {
-		if err := p.nk.AccountUpdateId(ctx, params.account.User.Id, "", params.accountMetadata.MarshalMap(), params.accountMetadata.GetActiveGroupDisplayName(), "", "", "", ""); err != nil {
+		if err := EVRProfileUpdate(ctx, p.nk, session.userID.String(), params.profile); err != nil {
 			metricsTags["error"] = "failed_update_metadata"
-			return fmt.Errorf("failed to update user metadata: %w", err)
+			return fmt.Errorf("failed to update profile: %w", err)
+		}
+		if err := p.nk.AccountUpdateId(ctx, params.profile.ID(), "", params.profile.MarshalMap(), params.profile.GetActiveGroupDisplayName(), "", "", "", ""); err != nil {
+			metricsTags["error"] = "failed_update_profile"
+			return fmt.Errorf("failed to update user profile: %w", err)
 		}
 	}
 
 	for _, gg := range params.guildGroups {
-		p.discordCache.QueueSyncMember(gg.GuildID, params.account.CustomId)
+		p.discordCache.QueueSyncMember(gg.GuildID, params.profile.DiscordID())
 	}
 
 	s := session
@@ -744,7 +730,7 @@ func (p *EvrPipeline) channelInfoRequest(ctx context.Context, logger *zap.Logger
 	}
 
 	groupID := uuid.Nil
-	if groupID = params.accountMetadata.GetActiveGroupID(); groupID.IsNil() {
+	if groupID = params.profile.GetActiveGroupID(); groupID.IsNil() {
 		return fmt.Errorf("active group is nil")
 	}
 
@@ -794,7 +780,7 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 		return errors.New("session parameters not found")
 	}
 	userID := session.userID.String()
-	groupID := params.accountMetadata.GetActiveGroupID().String()
+	groupID := params.profile.GetActiveGroupID().String()
 
 	modes := []evr.Symbol{
 		evr.ModeArenaPublic,
@@ -808,7 +794,7 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 
 	p.profileCache.Store(session.id, *serverProfile)
 
-	clientProfile, err := NewClientProfile(ctx, params.accountMetadata, serverProfile)
+	clientProfile, err := NewClientProfile(ctx, params.profile, serverProfile)
 	if err != nil {
 		return fmt.Errorf("failed to get client profile: %w", err)
 	}
@@ -844,7 +830,7 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 		return errors.New("session parameters not found")
 	}
 	userID := session.userID.String()
-	groupID := params.accountMetadata.GetActiveGroupID().String()
+	groupID := params.profile.GetActiveGroupID().String()
 	gg := p.guildGroupRegistry.Get(groupID)
 	if gg == nil {
 		return fmt.Errorf("guild group not found: %s", groupID)
@@ -875,31 +861,31 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 		}
 	}
 
-	metadata, err := AccountMetadataLoad(ctx, p.nk, userID)
+	profile, err := EVRProfileLoad(ctx, p.nk, userID)
 	if err != nil {
-		return fmt.Errorf("failed to load account metadata: %w", err)
+		return fmt.Errorf("failed to load account profile: %w", err)
 	}
 
-	metadata.TeamName = update.TeamName
+	profile.TeamName = update.TeamName
 
-	metadata.CombatLoadout = CombatLoadout{
+	profile.CombatLoadout = CombatLoadout{
 		CombatWeapon:       update.CombatWeapon,
 		CombatGrenade:      update.CombatGrenade,
 		CombatDominantHand: update.CombatDominantHand,
 		CombatAbility:      update.CombatAbility,
 	}
 
-	metadata.LegalConsents = update.LegalConsents
-	metadata.GhostedPlayers = update.GhostedPlayers.Players
-	metadata.MutedPlayers = update.MutedPlayers.Players
-	metadata.NewUnlocks = update.NewUnlocks
-	metadata.CustomizationPOIs = update.Customization
+	profile.LegalConsents = update.LegalConsents
+	profile.GhostedPlayers = update.GhostedPlayers.Players
+	profile.MutedPlayers = update.MutedPlayers.Players
+	profile.NewUnlocks = update.NewUnlocks
+	profile.CustomizationPOIs = update.Customization
 
-	if err := AccountMetadataUpdate(ctx, p.nk, userID, metadata); err != nil {
-		return fmt.Errorf("failed to update account metadata: %w", err)
+	if err := EVRProfileUpdate(ctx, p.nk, userID, profile); err != nil {
+		return fmt.Errorf("failed to update account profile: %w", err)
 	}
 
-	params.accountMetadata = metadata
+	params.profile = profile
 	StoreParams(ctx, &params)
 	return nil
 }
@@ -931,8 +917,8 @@ func (p *EvrPipeline) documentRequest(ctx context.Context, logger *zap.Logger, s
 
 		if !params.IsVR() {
 
-			eulaVersion := params.accountMetadata.LegalConsents.EulaVersion
-			gaVersion := params.accountMetadata.LegalConsents.GameAdminVersion
+			eulaVersion := params.profile.LegalConsents.EulaVersion
+			gaVersion := params.profile.LegalConsents.GameAdminVersion
 			document = evr.NewEULADocument(int(eulaVersion), int(gaVersion), request.Language, "https://github.com/EchoTools", "Blank EULA for NoVR clients. You should only see this once.")
 			return session.SendEvrUnrequire(evr.NewDocumentSuccess(document))
 		}
@@ -1101,29 +1087,30 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 		return fmt.Errorf("non-player profile update request: %s", evrID.String())
 	}
 	logger = logger.With(zap.String("player_uid", playerInfo.UserID), zap.String("player_sid", playerInfo.SessionID), zap.String("player_xpid", playerInfo.EvrID.String()))
-	var metadata *AccountMetadata
+
+	var profile *EVRProfile
 	// Set the player's session to not be an early quitter
 	if playerSession := p.nk.sessionRegistry.Get(uuid.FromStringOrNil(playerInfo.SessionID)); playerSession != nil {
 		if params, ok := LoadParams(playerSession.Context()); ok {
 			params.isEarlyQuitter.Store(false)
 
-			metadata = params.accountMetadata
+			profile = params.profile
 		} else {
 			logger.Warn("Failed to load session parameters", zap.String("sessionID", playerInfo.SessionID))
 		}
 	}
 
 	var err error
-	if metadata == nil {
+	if profile == nil {
 		// If the player isn't a member of the group, do not update the stats
-		metadata, err = AccountMetadataLoad(ctx, p.nk, playerInfo.UserID)
+		profile, err = EVRProfileLoad(ctx, p.nk, playerInfo.UserID)
 		if err != nil {
-			return fmt.Errorf("failed to get account metadata: %w", err)
+			return fmt.Errorf("failed to get account profile: %w", err)
 		}
 	}
 	groupIDStr := label.GetGroupID().String()
 
-	if _, isMember := metadata.GroupDisplayNames[groupIDStr]; !isMember {
+	if _, isMember := profile.GroupDisplayNames[groupIDStr]; !isMember {
 		logger.Warn("Player is not a member of the group", zap.String("uid", playerInfo.UserID), zap.String("gid", groupIDStr))
 		return nil
 	}
@@ -1190,7 +1177,7 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 	}
 
 	userID := session.userID.String()
-	groupID := params.accountMetadata.GetActiveGroupID().String()
+	groupID := params.profile.GetActiveGroupID().String()
 
 	if gg := p.guildGroupRegistry.Get(groupID); gg != nil {
 		if gg.EnableEnforcementCountInNames && gg.IsEnforcer(userID) {
