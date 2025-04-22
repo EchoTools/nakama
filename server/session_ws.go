@@ -28,7 +28,6 @@ import (
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/gorilla/websocket"
-	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
@@ -196,8 +195,6 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 		urlParameters:        urlParams,
 		lastMatchmakingError: atomic.NewError(nil),
 		guildGroups:          make(map[string]*GuildGroup),
-		account:              &api.Account{},
-		accountMetadata:      &AccountMetadata{},
 
 		loginSession:   nil,
 		lobbySession:   nil,
@@ -247,7 +244,10 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 					username = account.User.Username
 					userID = uuid.FromStringOrNil(userIDStr)
 					params.IsWebsocketAuthenticated = true
-					params.account = account
+					params.profile, err = BuildEVRProfileFromAccount(account)
+					if err != nil {
+						logger.Warn("Failed to build profile from account", zap.Error(err))
+					}
 				}
 			}
 		}

@@ -1230,7 +1230,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 			displayName := options[0].StringValue()
 
-			md, err := AccountMetadataLoad(ctx, nk, userID)
+			md, err := EVRProfileLoad(ctx, nk, userID)
 			if err != nil {
 				return fmt.Errorf("failed to load account metadata: %w", err)
 			}
@@ -1548,7 +1548,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 			// Get the user's profile
 
-			md, err := AccountMetadataLoad(ctx, nk, userID)
+			md, err := EVRProfileLoad(ctx, nk, userID)
 			if err != nil {
 				return fmt.Errorf("failed to get account metadata: %w", err)
 			}
@@ -1560,7 +1560,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			md.LoadoutCosmetics.Loadout.DecalBody = "loadout_number"
 
 			// Save the profile
-			if err := AccountMetadataUpdate(ctx, nk, userID, md); err != nil {
+			if err := EVRProfileUpdate(ctx, nk, userID, md); err != nil {
 				return fmt.Errorf("failed to update account metadata: %w", err)
 			}
 
@@ -1697,7 +1697,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			d.cache.Purge(user.ID)
 			d.cache.QueueSyncMember(i.GuildID, user.ID)
 
-			err := d.handleProfileRequest(ctx, logger, nk, s, i, user, user.Username, true, true, false, false)
+			err := d.handleProfileRequest(ctx, logger, nk, s, i, user, true, true, false, false)
 			logger.WithFields(map[string]interface{}{
 				"discord_id":       user.ID,
 				"discord_username": user.Username,
@@ -1737,7 +1737,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			return simpleInteractionResponse(s, i, fmt.Sprintf("Next match set to `%s`", matchID))
 		},
 		"throw-settings": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userIDStr string, groupID string) error {
-			metadata, err := AccountMetadataLoad(ctx, nk, userIDStr)
+			metadata, err := EVRProfileLoad(ctx, nk, userIDStr)
 			if err != nil {
 				return fmt.Errorf("failed to get account metadata: %w", err)
 			}
@@ -1784,13 +1784,13 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			d.cache.QueueSyncMember(i.GuildID, member.User.ID)
 
 			// Set the metadata
-			md, err := AccountMetadataLoad(ctx, nk, userIDStr)
+			md, err := EVRProfileLoad(ctx, nk, userIDStr)
 			if err != nil {
 				return err
 			}
 			md.SetActiveGroupID(uuid.FromStringOrNil(groupID))
 
-			if err := AccountMetadataUpdate(ctx, nk, userIDStr, md); err != nil {
+			if err := EVRProfileUpdate(ctx, nk, userIDStr, md); err != nil {
 				return err
 			}
 
@@ -2800,7 +2800,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 			}
 
-			metadata, err := AccountMetadataLoad(ctx, d.nk, userID)
+			metadata, err := EVRProfileLoad(ctx, d.nk, userID)
 			if err != nil {
 				return fmt.Errorf("Failed to get account metadata: %w", err)
 			}
@@ -2846,7 +2846,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 					metadata.LoadoutCosmetics = *outfits[outfitName]
 
-					if err := AccountMetadataUpdate(ctx, d.nk, userID, metadata); err != nil {
+					if err := EVRProfileUpdate(ctx, d.nk, userID, metadata); err != nil {
 						return fmt.Errorf("Failed to set account metadata: %w", err)
 					}
 
@@ -2860,7 +2860,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 					delete(outfits, outfitName)
 
-					if err := AccountMetadataUpdate(ctx, d.nk, userID, metadata); err != nil {
+					if err := EVRProfileUpdate(ctx, d.nk, userID, metadata); err != nil {
 						return fmt.Errorf("failed to set account metadata: %w", err)
 					}
 

@@ -300,7 +300,7 @@ func (c *DiscordIntegrator) syncMember(ctx context.Context, logger *zap.Logger, 
 		return fmt.Errorf("error getting account: %w", err)
 	}
 
-	evrAccount, err := NewEVRAccount(account)
+	evrAccount, err := BuildEVRProfileFromAccount(account)
 	if err != nil {
 		return fmt.Errorf("error building evr account: %w", err)
 	}
@@ -354,11 +354,11 @@ func (c *DiscordIntegrator) syncMember(ctx context.Context, logger *zap.Logger, 
 	if updated := evrAccount.SetGroupDisplayName(groupID, InGameName(member)); updated {
 		// Update the display name
 		if displayName := InGameName(member); displayName != evrAccount.GetActiveGroupDisplayName() {
-			if err := DisplayNameHistoryUpdate(ctx, c.nk, evrAccount.ID(), groupID, displayName, evrAccount.User.Username, evrAccount.IsLinked() && !evrAccount.IsDisabled()); err != nil {
+			if err := DisplayNameHistoryUpdate(ctx, c.nk, evrAccount.ID(), groupID, displayName, evrAccount.Username(), evrAccount.IsLinked() && !evrAccount.IsDisabled()); err != nil {
 				return fmt.Errorf("error adding display name history entry: %w", err)
 			}
 		}
-		if err := c.nk.AccountUpdateId(ctx, evrAccount.ID(), evrAccount.User.Username, evrAccount.MarshalMap(), evrAccount.GetActiveGroupDisplayName(), "", "", member.User.Locale, ""); err != nil {
+		if err := c.nk.AccountUpdateId(ctx, evrAccount.ID(), evrAccount.Username(), evrAccount.MarshalMap(), evrAccount.GetActiveGroupDisplayName(), "", "", member.User.Locale, ""); err != nil {
 			return fmt.Errorf("failed to update account: %w", err)
 		}
 	}
@@ -391,7 +391,7 @@ func (d *DiscordIntegrator) updateLinkStatus(ctx context.Context, discordID stri
 		return fmt.Errorf("error getting account: %w", err)
 	}
 
-	evrAccount, err := NewEVRAccount(account)
+	evrAccount, err := BuildEVRProfileFromAccount(account)
 	if err != nil {
 		return fmt.Errorf("error building evr account: %w", err)
 	}
@@ -623,7 +623,7 @@ func (d *DiscordIntegrator) handleMemberUpdate(logger *zap.Logger, s *discordgo.
 		return fmt.Errorf("error getting account: %w", err)
 	}
 
-	evrAccount, err := NewEVRAccount(account)
+	evrAccount, err := BuildEVRProfileFromAccount(account)
 	if err != nil {
 		return fmt.Errorf("error building evr account: %w", err)
 	}
@@ -669,7 +669,7 @@ func (d *DiscordIntegrator) handleMemberUpdate(logger *zap.Logger, s *discordgo.
 	// Update the display name
 	if displayName := InGameName(e.Member); displayName != evrAccount.GetDisplayName(groupID) {
 
-		if err := DisplayNameHistoryUpdate(ctx, d.nk, evrAccount.ID(), groupID, displayName, evrAccount.User.Username, isActive); err != nil {
+		if err := DisplayNameHistoryUpdate(ctx, d.nk, evrAccount.ID(), groupID, displayName, evrAccount.Username(), isActive); err != nil {
 			return fmt.Errorf("error adding display name history entry: %w", err)
 		}
 
@@ -699,7 +699,7 @@ func (d *DiscordIntegrator) handleMemberUpdate(logger *zap.Logger, s *discordgo.
 		avatarURL = e.Member.AvatarURL("512")
 	}
 
-	if err := d.nk.AccountUpdateId(ctx, evrAccount.ID(), evrAccount.User.Username, evrAccount.MarshalMap(), evrAccount.GetActiveGroupDisplayName(), "", "", e.Member.User.Locale, avatarURL); err != nil {
+	if err := d.nk.AccountUpdateId(ctx, evrAccount.ID(), evrAccount.Username(), evrAccount.MarshalMap(), evrAccount.GetActiveGroupDisplayName(), "", "", e.Member.User.Locale, avatarURL); err != nil {
 		return fmt.Errorf("failed to update account: %w", err)
 	}
 
@@ -741,7 +741,7 @@ func (d *DiscordIntegrator) deconflictDisplayName(ctx context.Context, displayNa
 
 	type user struct {
 		userID     string
-		metadata   *AccountMetadata
+		metadata   *EVRProfile
 		used       time.Time
 		isReserved bool
 		isUsername bool
@@ -757,7 +757,7 @@ func (d *DiscordIntegrator) deconflictDisplayName(ctx context.Context, displayNa
 			return "", fmt.Errorf("error getting display name history: %w", err)
 		}
 
-		md, err := AccountMetadataLoad(ctx, d.nk, userID)
+		md, err := EVRProfileLoad(ctx, d.nk, userID)
 		if err != nil {
 			return "", fmt.Errorf("error getting account metadata: %w", err)
 		}
@@ -865,7 +865,7 @@ func (d *DiscordIntegrator) GuildGroupMemberRemove(ctx context.Context, guildID,
 		callerID = d.DiscordIDToUserID(callerDiscordID)
 	}
 
-	md, err := AccountMetadataLoad(ctx, d.nk, userID)
+	md, err := EVRProfileLoad(ctx, d.nk, userID)
 	if err != nil {
 		return fmt.Errorf("error getting account metadata: %w", err)
 	}

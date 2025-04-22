@@ -1814,6 +1814,11 @@ func UserServerProfileRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 		return "", err
 	}
 
+	var (
+		evrProfile *EVRProfile
+		err        error
+	)
+
 	switch {
 	case !request.UserID.IsNil():
 
@@ -1833,16 +1838,16 @@ func UserServerProfileRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 		return "", runtime.NewError("No user ID specified", StatusInvalidArgument)
 	}
 
-	account, err := nk.AccountGetId(ctx, request.UserID.String())
+	evrProfile, err = EVRProfileLoad(ctx, nk, request.UserID.String())
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to load EVR profile: %w", err)
 	}
 
-	if request.XPID.IsNil() && len(account.Devices) == 0 {
+	if request.XPID.IsNil() && len(evrProfile.account.Devices) == 0 {
 		return "", runtime.NewError("No devices found for user", StatusNotFound)
 	} else {
-		if xpid, err := evr.ParseEvrId(account.Devices[0].Id); err != nil {
-			return "", fmt.Errorf("failed to parse xp_id `%s`: %w", account.Devices[0].Id, err)
+		if xpid, err := evr.ParseEvrId(evrProfile.account.Devices[0].Id); err != nil {
+			return "", fmt.Errorf("failed to parse xp_id `%s`: %w", evrProfile.account.Devices[0].Id, err)
 		} else {
 			request.XPID = *xpid
 		}
@@ -1868,12 +1873,7 @@ func UserServerProfileRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 		evr.ModeSocialPrivate,
 	}
 
-	metadata := &AccountMetadata{}
-	if err := json.Unmarshal([]byte(account.User.Metadata), metadata); err != nil {
-		return "", fmt.Errorf("failed to unmarshal account metadata: %w", err)
-	}
-
-	serverProfile, err := NewUserServerProfile(ctx, RuntimeLoggerToZapLogger(logger), db, nk, account, metadata, request.XPID, request.GroupID.String(), modes, 0)
+	serverProfile, err := NewUserServerProfile(ctx, RuntimeLoggerToZapLogger(logger), db, nk, evrProfile, request.XPID, request.GroupID.String(), modes, 0)
 	if err != nil {
 		return "", fmt.Errorf("failed to get server profile: %w", err)
 	}

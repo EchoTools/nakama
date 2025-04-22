@@ -15,7 +15,6 @@ import (
 	"maps"
 
 	"github.com/gofrs/uuid/v5"
-	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/samber/lo"
@@ -163,24 +162,24 @@ func walletToCosmetics(wallet map[string]int64, unlocks map[string]map[string]bo
 }
 
 func UserServerProfileFromParameters(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, params SessionParameters, groupID string, modes []evr.Symbol, dailyWeeklyMode evr.Symbol) (*evr.ServerProfile, error) {
-	return NewUserServerProfile(ctx, logger, db, nk, params.account, params.accountMetadata, params.xpID, groupID, modes, dailyWeeklyMode)
+	return NewUserServerProfile(ctx, logger, db, nk, params.profile, params.xpID, groupID, modes, dailyWeeklyMode)
 }
 
-func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, account *api.Account, metadata *AccountMetadata, xpID evr.EvrId, groupID string, modes []evr.Symbol, dailyWeeklyMode evr.Symbol) (*evr.ServerProfile, error) {
+func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, evrProfile *EVRProfile, xpID evr.EvrId, groupID string, modes []evr.Symbol, dailyWeeklyMode evr.Symbol) (*evr.ServerProfile, error) {
 
 	var wallet map[string]int64
-	if err := json.Unmarshal([]byte(account.Wallet), &wallet); err != nil {
+	if err := json.Unmarshal([]byte(evrProfile.Wallet()), &wallet); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal wallet: %w", err)
 	}
 
 	cosmetics := make(map[string]map[string]bool)
-	for m, c := range cosmeticDefaults(metadata.EnableAllCosmetics) {
+	for m, c := range cosmeticDefaults(evrProfile.EnableAllCosmetics) {
 		cosmetics[m] = make(map[string]bool, len(c))
 		maps.Copy(cosmetics[m], c)
 	}
 	cosmetics = walletToCosmetics(wallet, cosmetics)
 
-	cosmeticLoadout := metadata.LoadoutCosmetics.Loadout
+	cosmeticLoadout := evrProfile.LoadoutCosmetics.Loadout
 	// If the player has "kissy lips" emote equipped, set their emote to default.
 	if cosmeticLoadout.Emote == "emote_kissy_lips_a" {
 		cosmeticLoadout.Emote = "emote_blink_smiley_a"
@@ -189,13 +188,13 @@ func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, n
 
 	var developerFeatures *evr.DeveloperFeatures
 
-	if metadata.GoldDisplayNameActive {
+	if evrProfile.GoldDisplayNameActive {
 		developerFeatures = &evr.DeveloperFeatures{}
 	}
 
 	// Default to their main group if they are not a member of the group
-	if groupID == "" || metadata.GroupDisplayNames[groupID] == "" {
-		groupID = metadata.GetActiveGroupID().String()
+	if groupID == "" || evrProfile.GroupDisplayNames[groupID] == "" {
+		groupID = evrProfile.GetActiveGroupID().String()
 
 	}
 
@@ -203,19 +202,19 @@ func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, n
 		modes = []evr.Symbol{evr.ModeArenaPublic, evr.ModeCombatPublic}
 	}
 
-	statsBySchedule, _, err := PlayerStatisticsGetID(ctx, db, nk, account.User.Id, groupID, modes, dailyWeeklyMode)
+	statsBySchedule, _, err := PlayerStatisticsGetID(ctx, db, nk, evrProfile.ID(), groupID, modes, dailyWeeklyMode)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user tablet statistics: %w", err)
 	}
 
-	if metadata.DisableAFKTimeout {
+	if evrProfile.DisableAFKTimeout {
 		developerFeatures = &evr.DeveloperFeatures{
 			DisableAfkTimeout: true,
 		}
 	}
 
 	return &evr.ServerProfile{
-		DisplayName:       metadata.GetGroupDisplayNameOrDefault(groupID),
+		DisplayName:       evrProfile.GetGroupDisplayNameOrDefault(groupID),
 		EvrID:             xpID,
 		SchemaVersion:     4,
 		PublisherLock:     "echovrce",
@@ -224,8 +223,8 @@ func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, n
 		Statistics:        statsBySchedule,
 		UnlockedCosmetics: cosmetics,
 		EquippedCosmetics: evr.EquippedCosmetics{
-			Number:     int(metadata.LoadoutCosmetics.JerseyNumber),
-			NumberBody: int(metadata.LoadoutCosmetics.JerseyNumber),
+			Number:     int(evrProfile.LoadoutCosmetics.JerseyNumber),
+			NumberBody: int(evrProfile.LoadoutCosmetics.JerseyNumber),
 			Instances: evr.CosmeticInstances{
 				Unified: evr.UnifiedCosmeticInstance{
 					Slots: cosmeticLoadout,
@@ -234,43 +233,43 @@ func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, n
 		},
 
 		Social: evr.ServerSocial{
-			Channel: evr.GUID(metadata.GetActiveGroupID()),
+			Channel: evr.GUID(evrProfile.GetActiveGroupID()),
 		},
 		DeveloperFeatures: developerFeatures,
 	}, nil
 }
 
-func NewClientProfile(ctx context.Context, metadata *AccountMetadata, serverProfile *evr.ServerProfile) (*evr.ClientProfile, error) {
+func NewClientProfile(ctx context.Context, evrProfile *EVRProfile, serverProfile *evr.ServerProfile) (*evr.ClientProfile, error) {
 	// Load friends to get blocked (ghosted) players
 	muted := make([]evr.EvrId, 0)
 	ghosted := make([]evr.EvrId, 0)
-	if m := metadata.GetMuted(); len(m) > 0 {
+	if m := evrProfile.GetMuted(); len(m) > 0 {
 		muted = append(muted, m...)
 	}
-	if g := metadata.GetGhosted(); len(g) > 0 {
+	if g := evrProfile.GetGhosted(); len(g) > 0 {
 		ghosted = append(ghosted, g...)
 	}
-	if metadata.NewUnlocks == nil {
-		metadata.NewUnlocks = []int64{}
+	if evrProfile.NewUnlocks == nil {
+		evrProfile.NewUnlocks = []int64{}
 	}
 	// Remove newunlocks for cosmetics that the user does not have unlocked
-	for i := 0; i < len(metadata.NewUnlocks); i++ {
-		sym := evr.ToSymbol(metadata.NewUnlocks[i])
+	for i := 0; i < len(evrProfile.NewUnlocks); i++ {
+		sym := evr.ToSymbol(evrProfile.NewUnlocks[i])
 		name := sym.String()
 		if !serverProfile.IsUnlocked(name) {
-			metadata.NewUnlocks = slices.Delete(metadata.NewUnlocks, i, i+1)
+			evrProfile.NewUnlocks = slices.Delete(evrProfile.NewUnlocks, i, i+1)
 			i--
 		}
 	}
 
 	// Remove kissy lips from new unlocks
-	if i := slices.Index(metadata.NewUnlocks, -6079176325296842000); i != -1 {
-		metadata.NewUnlocks = slices.Delete(metadata.NewUnlocks, i, i+1)
+	if i := slices.Index(evrProfile.NewUnlocks, -6079176325296842000); i != -1 {
+		evrProfile.NewUnlocks = slices.Delete(evrProfile.NewUnlocks, i, i+1)
 	}
 
 	var customizationPOIs *evr.Customization
-	if metadata.CustomizationPOIs != nil {
-		customizationPOIs = metadata.CustomizationPOIs
+	if evrProfile.CustomizationPOIs != nil {
+		customizationPOIs = evrProfile.CustomizationPOIs
 	} else {
 		customizationPOIs = &evr.Customization{
 			BattlePassSeasonPoiVersion: 3246,
@@ -284,18 +283,18 @@ func NewClientProfile(ctx context.Context, metadata *AccountMetadata, serverProf
 		ModifyTime:         time.Now().UTC().Unix(),
 		DisplayName:        serverProfile.DisplayName,
 		EvrID:              serverProfile.EvrID,
-		TeamName:           metadata.TeamName,
-		CombatWeapon:       metadata.CombatLoadout.CombatWeapon,
-		CombatGrenade:      metadata.CombatLoadout.CombatGrenade,
-		CombatDominantHand: metadata.CombatLoadout.CombatDominantHand,
-		CombatAbility:      metadata.CombatLoadout.CombatAbility,
+		TeamName:           evrProfile.TeamName,
+		CombatWeapon:       evrProfile.CombatLoadout.CombatWeapon,
+		CombatGrenade:      evrProfile.CombatLoadout.CombatGrenade,
+		CombatDominantHand: evrProfile.CombatLoadout.CombatDominantHand,
+		CombatAbility:      evrProfile.CombatLoadout.CombatAbility,
 		MutedPlayers: evr.Players{
 			Players: muted,
 		},
 		GhostedPlayers: evr.Players{
 			Players: ghosted,
 		},
-		LegalConsents: metadata.LegalConsents,
+		LegalConsents: evrProfile.LegalConsents,
 		NewPlayerProgress: evr.NewPlayerProgress{
 			Lobby: evr.NpeMilestone{Completed: true},
 
@@ -314,7 +313,7 @@ func NewClientProfile(ctx context.Context, metadata *AccountMetadata, serverProf
 			SetupVersion:           1,
 			Channel:                serverProfile.Social.Channel,
 		},
-		NewUnlocks: metadata.NewUnlocks, // This could pull from the wallet ledger
+		NewUnlocks: evrProfile.NewUnlocks, // This could pull from the wallet ledger
 	}, nil
 }
 

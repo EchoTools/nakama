@@ -138,7 +138,7 @@ func (v *VRMLVerifier) Start() error {
 
 			if token == "" {
 				// Get the user's VRML ID from their account metadata
-				metadata, err := AccountMetadataLoad(v.ctx, v.nk, userID)
+				metadata, err := EVRProfileLoad(v.ctx, v.nk, userID)
 				if err != nil {
 					logger.WithField("error", err).Error("Failed to load account metadata")
 					continue
