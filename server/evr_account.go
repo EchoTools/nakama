@@ -210,7 +210,7 @@ func (a EVRProfile) GetActiveGroupID() uuid.UUID {
 	return uuid.FromStringOrNil(a.ActiveGroupID)
 }
 
-func (a EVRProfile) SetActiveGroupID(id uuid.UUID) {
+func (a *EVRProfile) SetActiveGroupID(id uuid.UUID) {
 	if a.ActiveGroupID == id.String() {
 		return
 	}
@@ -219,7 +219,10 @@ func (a EVRProfile) SetActiveGroupID(id uuid.UUID) {
 
 func (a EVRProfile) GetDisplayName(groupID string) string {
 	if a.GroupDisplayNames == nil {
-		a.GroupDisplayNames = make(map[string]string)
+		if a.account != nil {
+			return a.account.User.Username
+		}
+		return ""
 	}
 	if dn, ok := a.GroupDisplayNames[groupID]; ok {
 		return dn
@@ -229,9 +232,6 @@ func (a EVRProfile) GetDisplayName(groupID string) string {
 
 func (a EVRProfile) GetGroupDisplayNameOrDefault(groupID string) string {
 
-	if a.GroupDisplayNames == nil {
-		a.GroupDisplayNames = make(map[string]string)
-	}
 	if a.DisplayNameOverride != "" {
 		return a.DisplayNameOverride
 	} else if a.GuildDisplayNameOverrides != nil && a.GuildDisplayNameOverrides[groupID] != "" {
@@ -240,28 +240,31 @@ func (a EVRProfile) GetGroupDisplayNameOrDefault(groupID string) string {
 		return a.sessionDisplayNameOverride
 	}
 
-	if dn, ok := a.GroupDisplayNames[groupID]; ok && dn != "" {
-		return dn
-	}
-	if dn, ok := a.GroupDisplayNames[a.ActiveGroupID]; ok && dn != "" {
-		return dn
-	} else {
-		if len(a.GroupDisplayNames) > 0 {
-			for _, dn := range a.GroupDisplayNames {
-				if dn != "" {
-					return dn
+	if a.GroupDisplayNames != nil {
+		if dn, ok := a.GroupDisplayNames[groupID]; ok && dn != "" {
+			return dn
+		}
+		if dn, ok := a.GroupDisplayNames[a.ActiveGroupID]; ok && dn != "" {
+			return dn
+		} else {
+			if len(a.GroupDisplayNames) > 0 {
+				for _, dn := range a.GroupDisplayNames {
+					if dn != "" {
+						return dn
+					}
 				}
 			}
 		}
-		if a.account != nil {
-			return a.account.User.Username
-		} else {
-			return ""
-		}
+	}
+
+	if a.account != nil {
+		return a.account.User.Username
+	} else {
+		return ""
 	}
 }
 
-func (a EVRProfile) SetGroupDisplayName(groupID, displayName string) bool {
+func (a *EVRProfile) SetGroupDisplayName(groupID, displayName string) bool {
 	if a.GroupDisplayNames == nil {
 		a.GroupDisplayNames = make(map[string]string)
 	}
@@ -276,9 +279,9 @@ func (a EVRProfile) GetActiveGroupDisplayName() string {
 	return a.GetGroupDisplayNameOrDefault(a.ActiveGroupID)
 }
 
-func (a EVRProfile) MarshalMap() map[string]interface{} {
+func (a EVRProfile) MarshalMap() map[string]any {
 	b, _ := json.Marshal(a)
-	var m map[string]interface{}
+	var m map[string]any
 	_ = json.Unmarshal(b, &m)
 	return m
 }
@@ -297,7 +300,7 @@ func (a EVRProfile) GetGhosted() []evr.EvrId {
 	return a.GhostedPlayers
 }
 
-func (a EVRProfile) FixBrokenCosmetics() bool {
+func (a *EVRProfile) FixBrokenCosmetics() bool {
 
 	d := evr.DefaultCosmeticLoadout()
 
