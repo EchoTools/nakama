@@ -54,7 +54,7 @@ func LobbySession(s *sessionWS, sessionRegistry SessionRegistry, loginSessionID 
 		lobbyCtx = context.WithValue(lobbyCtx, ctxUsernameKey{}, loginSession.Username()) // apiServer compatibility
 
 		// Set the session information
-
+		s.Lock()
 		s.ctx = lobbyCtx
 		s.userID = loginSession.UserID()
 		s.SetUsername(loginSession.Username())
@@ -69,7 +69,7 @@ func LobbySession(s *sessionWS, sessionRegistry SessionRegistry, loginSessionID 
 			<-loginCtx.Done()
 			s.Close("echovr login session closed", runtime.PresenceReasonDisconnect)
 		}()
-
+		s.Unlock()
 	}
 	return nil
 }
@@ -95,11 +95,11 @@ func BroadcasterSession(s *sessionWS, userID uuid.UUID, username string, serverI
 	ctx = context.WithValue(ctx, ctxUsernameKey{}, username)      // apiServer compatibility
 
 	s.SetUsername(username)
-
+	s.Lock()
 	s.ctx = ctx
 	s.userID = userID
 	s.logger = s.logger.With(zap.String("operator_id", userID.String()), zap.String("server_id", fmt.Sprintf("%d", serverID)))
-
+	s.Unlock()
 	s.tracker.TrackMulti(ctx, s.id, []*TrackerOp{
 		// EVR packet data stream for the login session by Session ID and broadcaster ID
 		{
