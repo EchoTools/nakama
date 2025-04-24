@@ -31,14 +31,6 @@ func (w *WhoAmI) createUserAccountDetailsEmbed(a *EVRProfile, loginHistory *Logi
 		lastSeen = loginHistory.LastSeen()
 	}
 
-	// Build a list of the players linked devices/XPIDs
-	xpidStrs := make([]string, 0, len(a.LinkedXPIDs()))
-	for _, xpid := range a.LinkedXPIDs() {
-		if stripIPAddresses {
-			xpidStrs = append(xpidStrs, xpid.String())
-		}
-	}
-
 	// Build a list of the players active display names, by guild group
 	activeDisplayNames := make([]string, 0, len(currentDisplayNameByGroupID))
 	for gid, dn := range currentDisplayNameByGroupID {
@@ -50,16 +42,33 @@ func (w *WhoAmI) createUserAccountDetailsEmbed(a *EVRProfile, loginHistory *Logi
 	}
 	slices.Sort(activeDisplayNames)
 
+	partyGroupName := ""
 	defaultMatchmakingGuildName := ""
-	if gg, ok := guildGroups[a.GetActiveGroupID().String()]; ok {
-		defaultMatchmakingGuildName = EscapeDiscordMarkdown(gg.Name())
-	}
+	recentLogins := ""
+	linkedDevices := ""
 
-	partyGroupName := "`" + matchmakingSettings.LobbyGroupName + "`"
-	if partyGroupName == "" {
+	if includePriviledged {
+
+		// Build a list of the players linked devices/XPIDs
+		xpidStrs := make([]string, 0, len(a.LinkedXPIDs()))
+		for _, xpid := range a.LinkedXPIDs() {
+			if stripIPAddresses {
+				xpidStrs = append(xpidStrs, xpid.String())
+			}
+		}
+		linkedDevices = strings.Join(xpidStrs, "\n")
+
+		if gg, ok := guildGroups[a.GetActiveGroupID().String()]; ok {
+			defaultMatchmakingGuildName = EscapeDiscordMarkdown(gg.Name())
+		}
+
 		partyGroupName = "not set"
-	}
+		if matchmakingSettings != nil && matchmakingSettings.LobbyGroupName != "" {
+			partyGroupName = "`" + matchmakingSettings.LobbyGroupName + "`"
+		}
 
+		recentLogins = w.createRecentLoginsFieldValue(loginHistory, stripIPAddresses, showLoginsSince)
+	}
 	embed := &discordgo.MessageEmbed{
 		Description: fmt.Sprintf("<@%s>", a.DiscordID()),
 		Color:       0x0000CC,
@@ -104,12 +113,12 @@ func (w *WhoAmI) createUserAccountDetailsEmbed(a *EVRProfile, loginHistory *Logi
 			},
 			{
 				Name:   "Linked Devices",
-				Value:  strings.Join(xpidStrs, "\n"),
+				Value:  linkedDevices,
 				Inline: false,
 			},
 			{
 				Name:   "Recent Logins",
-				Value:  w.createRecentLoginsFieldValue(loginHistory, stripIPAddresses, showLoginsSince),
+				Value:  recentLogins,
 				Inline: false,
 			},
 			{
@@ -377,16 +386,17 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		} else {
 			matchmakingSettings = &ms
 		}
-		loginHistory = NewLoginHistory(targetID)
-		if err := StorageRead(ctx, nk, targetID, loginHistory, true); err != nil {
-			return fmt.Errorf("error getting device history: %w", err)
-		}
 
-		if displayNameHistory, err = DisplayNameHistoryLoad(ctx, nk, targetID); err != nil {
-			return fmt.Errorf("failed to load display name history: %w", err)
-		}
 	}
 
+	loginHistory = NewLoginHistory(targetID)
+	if err := StorageRead(ctx, nk, targetID, loginHistory, true); err != nil {
+		return fmt.Errorf("error getting device history: %w", err)
+	}
+
+	if displayNameHistory, err = DisplayNameHistoryLoad(ctx, nk, targetID); err != nil {
+		return fmt.Errorf("failed to load display name history: %w", err)
+	}
 	guildGroups, err := GuildUserGroupsList(ctx, nk, d.guildGroupRegistry, targetID)
 	if err != nil {
 		return fmt.Errorf("error getting guild groups: %w", err)
