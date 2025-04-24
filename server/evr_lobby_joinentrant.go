@@ -251,7 +251,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		for _, byUserID := range recordsByGuild {
 			for _, records := range byUserID {
 				for _, r := range records.Records {
-					if latestRecord == nil || r.CreatedAt.After(latestRecord.CreatedAt) && time.Now().Before(r.SuspensionExpiry) {
+					if latestRecord == nil || r.SuspensionExpiry.After(latestRecord.SuspensionExpiry) && time.Now().Before(r.SuspensionExpiry) {
 						latestRecord = r
 					}
 				}
