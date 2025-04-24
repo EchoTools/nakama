@@ -326,6 +326,9 @@ func (*WhoAmI) createSuspensionsEmbed(guildGroups map[string]*GuildGroup, caller
 		}
 
 		field := createSuspensionDetailsEmbedField(gg.Name(), records.Records, includeNotes)
+		if field == nil {
+			continue
+		}
 		fields = append(fields, field)
 	}
 
