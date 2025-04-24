@@ -57,6 +57,7 @@ type DiscordAppBot struct {
 	cache       *DiscordIntegrator
 	ipInfoCache *IPInfoCache
 	choiceCache *MapOf[string, []*discordgo.ApplicationCommandOptionChoice]
+	igpRegistry *MapOf[string, *InGamePanel]
 
 	debugChannels  map[string]string // map[groupID]channelID
 	userID         string            // Nakama UserID of the bot
@@ -84,6 +85,7 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 		profileRegistry:    profileRegistry,
 		statusRegistry:     statusRegistry,
 		guildGroupRegistry: guildGroupRegistry,
+		igpRegistry:        &MapOf[string, *InGamePanel]{},
 		cache:              discordCache,
 		ipInfoCache:        ipInfoCache,
 		choiceCache:        &MapOf[string, []*discordgo.ApplicationCommandOptionChoice]{},
@@ -1296,7 +1298,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 				if remoteIP == nil {
 					return errors.New("failed to resolve address to an ipv4 address")
-
 				}
 			}
 
@@ -1430,6 +1431,11 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				graceSeconds     int
 			)
 
+			isGlobalOperator, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalOperators)
+			if err != nil {
+				return errors.New("error checking global operator status")
+			}
+
 			for _, option := range options {
 				switch option.Name {
 				case "match-id":
@@ -1465,7 +1471,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					return fmt.Errorf("failed to get match label: %w", err)
 				}
 
-				if label.GetGroupID().String() != groupID && label.GameServer.OperatorID.String() != userID {
+				if !isGlobalOperator && label.GetGroupID().String() != groupID && label.GameServer.OperatorID.String() != userID {
 					return errors.New("you do not have permission to shut down this match")
 				}
 
@@ -2151,24 +2157,19 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			logger.WithField("label", label).Info("Match prepared")
 			return simpleInteractionResponse(s, i, fmt.Sprintf("Match prepared with label ```json\n%s\n```\nhttps://echo.taxi/spark://c/%s", label.GetLabelIndented(), strings.ToUpper(label.ID.UUID.String())))
 		},
-		"kick-player": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+		"kick-player": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, callerMember *discordgo.Member, userID string, groupID string) error {
 
 			if user == nil {
 				return nil
-			}
-
-			isGlobalOperator, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalOperators)
-			if err != nil {
-				return errors.New("error checking global operator status")
 			}
 
 			var (
 				target                 *discordgo.User
 				targetUserID           string
 				userNotice             string
-				suspensionExpiry       time.Time
 				notes                  string
 				requireCommunityValues bool
+				duration               string
 			)
 
 			for _, o := range i.ApplicationCommandData().Options {
@@ -2190,198 +2191,11 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				case "require_community_values":
 					requireCommunityValues = o.BoolValue()
 				case "suspension_duration":
-					duration := o.StringValue()
-
-					// Parse minutes, hours, days, and weeks (m, h, d, w)
-					if duration != "" {
-						var unit time.Duration
-						if duration == "0" {
-							suspensionExpiry = time.Now()
-						} else {
-							switch duration[len(duration)-1] {
-							case 'm':
-								unit = time.Minute
-							case 'h':
-								unit = time.Hour
-							case 'd':
-								unit = 24 * time.Hour
-							case 'w':
-								unit = 7 * 24 * time.Hour
-							default:
-								duration += "m"
-								unit = time.Minute
-							}
-							if d, err := strconv.Atoi(duration[:len(duration)-1]); err == nil {
-								suspensionExpiry = time.Now().Add(time.Duration(d) * unit)
-							} else {
-								return fmt.Errorf("invalid duration format: %w", err)
-							}
-						}
-					}
+					duration = o.StringValue()
 				}
 			}
 
-			presences, err := d.nk.StreamUserList(StreamModeService, targetUserID, "", StreamLabelMatchService, false, true)
-			if err != nil {
-				return err
-			}
-
-			var (
-				cnt            = 0
-				timeoutMessage string
-				actions        = make([]string, 0, len(presences))
-				doDisconnect   = false
-				isEnforcer     = false
-			)
-
-			gg, err := GuildGroupLoad(ctx, nk, groupID)
-			if err != nil {
-				return errors.New("failed to load guild group")
-			} else if gg.IsEnforcer(userID) {
-				isEnforcer = true
-			}
-
-			if isEnforcer || isGlobalOperator {
-				if !suspensionExpiry.IsZero() {
-					remove := false
-					if time.Now().After(suspensionExpiry) {
-						actions = append(actions, "suspension removed")
-						remove = true
-					} else {
-						actions = append(actions, fmt.Sprintf("suspension expires <t:%d:R>", suspensionExpiry.UTC().Unix()))
-					}
-
-					guildRecords := NewGuildEnforcementRecords(targetUserID, groupID)
-					if err := StorageRead(ctx, nk, targetUserID, guildRecords, false); err != nil && status.Code(err) != codes.NotFound {
-						return fmt.Errorf("failed to read storage: %w", err)
-					}
-					var record *GuildEnforcementRecord
-					if remove {
-						for _, record = range guildRecords.Records {
-							if !record.IsActive() {
-								continue
-							}
-							if record.AuditorNotes != "" {
-								record.AuditorNotes += "\n"
-							}
-							record.AuditorNotes = fmt.Sprintf("voided <t:%d:R> by <@%s>", time.Now().UTC().Unix(), user.ID)
-
-							record.AuditorNotes += "\n" + notes
-							record.IsVoid = true
-						}
-					} else {
-						actions = append(actions, fmt.Sprintf("kicked for %s", userNotice))
-						// Add a new record
-						record = NewGuildEnforcementRecord(userID, member.User.ID, userNotice, notes, requireCommunityValues, suspensionExpiry)
-						guildRecords.AddRecord(record)
-					}
-
-					if _, err := StorageWrite(ctx, nk, targetUserID, guildRecords); err != nil {
-						return fmt.Errorf("failed to write storage: %w", err)
-					}
-
-					if gg.EnforcementNoticeChannelID != "" {
-						evrAccount, err := EVRProfileLoad(ctx, nk, targetUserID)
-						if err != nil {
-							return fmt.Errorf("failed to load account metadata: %w", err)
-						}
-
-						displayName := evrAccount.GetGroupDisplayNameOrDefault(groupID)
-						field := createSuspensionDetailsEmbedField(gg.Name(), []*GuildEnforcementRecord{record}, true)
-						embed := &discordgo.MessageEmbed{
-							Title:       "Enforcement Notice",
-							Description: fmt.Sprintf("Enforcement notice for %s (%s)", displayName, target.Mention()),
-							Color:       0x9656ce,
-							Fields: []*discordgo.MessageEmbedField{
-								field,
-							},
-						}
-						_, err = s.ChannelMessageSendEmbed(gg.EnforcementNoticeChannelID, embed)
-						if err != nil {
-							logger.WithFields(map[string]interface{}{
-								"error": err,
-							}).Error("Failed to send enforcement notice")
-						}
-
-					}
-				}
-			}
-
-			for _, p := range presences {
-
-				// Match only the target user
-				if p.GetUserId() != targetUserID {
-					continue
-				}
-
-				label, _ := MatchLabelByID(ctx, d.nk, MatchIDFromStringOrNil(p.GetStatus()))
-				if label == nil {
-					continue
-				}
-
-				// Don't kick game servers
-				if label.GameServer.SessionID.String() == p.GetSessionId() {
-					continue
-				}
-
-				permissions := make([]string, 0)
-
-				// Check if the user is the match owner of a private match
-				if label.SpawnedBy == userID && label.IsPrivate() {
-					permissions = append(permissions, "match owner")
-				}
-
-				// Check if the user is the game server operator
-				if label.GameServer.OperatorID.String() == userID {
-					permissions = append(permissions, "game server operator")
-				}
-
-				if isGlobalOperator {
-					doDisconnect = true
-					permissions = append(permissions, "global operator")
-				}
-
-				if isEnforcer && label.GetGroupID().String() == groupID {
-					doDisconnect = true
-					permissions = append(permissions, "enforcer")
-				}
-
-				if len(permissions) == 0 {
-					actions = append(actions, "user's match is not from this guild")
-					continue
-				}
-
-				// Kick the player from the match
-				if err := KickPlayerFromMatch(ctx, d.nk, label.ID, targetUserID); err != nil {
-					actions = append(actions, fmt.Sprintf("failed to kick player from [%s](https://echo.taxi/spark://c/%s) (error: %s)", label.Mode.String(), strings.ToUpper(label.ID.UUID.String()), err.Error()))
-					continue
-				}
-
-				actions = append(actions, fmt.Sprintf("kicked from [%s](https://echo.taxi/spark://c/%s) session. (%s) [%s]", label.Mode.String(), strings.ToUpper(label.ID.UUID.String()), userNotice, strings.Join(permissions, ", ")))
-
-				cnt++
-
-			}
-
-			if doDisconnect {
-				go func() {
-					<-time.After(time.Second * 10)
-					// Just disconnect the user, wholesale
-					if count, err := DisconnectUserID(ctx, d.nk, targetUserID, true, true, false); err != nil {
-						logger.Warn("Failed to disconnect user", zap.Error(err))
-					} else if count > 0 {
-						_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s disconnected player %s from match service (%d sessions).", user.Mention(), target.Mention(), count), false)
-					}
-				}()
-			}
-
-			if cnt == 0 {
-				actions = append(actions, "no active sessions found")
-			}
-
-			_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s `kick-player` actions summary for %s (%s):\n %s", user.Mention(), target.Mention(), target.Username, strings.Join(actions, ";\n ")), false)
-			return simpleInteractionResponse(s, i, fmt.Sprintf("[%d sessions found]%s\n%s", cnt, timeoutMessage, strings.Join(actions, "\n")))
-
+			return d.kickPlayer(logger, i, callerMember, target, duration, userNotice, notes, requireCommunityValues)
 		},
 		"join-player": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 
@@ -3210,8 +3024,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 		case discordgo.InteractionModalSubmit:
+			customID := i.ModalSubmitData().CustomID
+			group, value, _ := strings.Cut(customID, ":")
 
-			switch i.ModalSubmitData().CustomID {
+			switch group {
 			case "linkcode_modal":
 				data := i.ModalSubmitData()
 				member, err := d.dg.GuildMember(i.GuildID, i.Member.User.ID)
@@ -3237,6 +3053,20 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						},
 					})
 				}
+			case "igp":
+				if err := d.handleModalSubmit(logger, i, value); err != nil {
+					logger.Error("Failed to handle modal submit", zap.Error(err))
+					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+						Type: discordgo.InteractionResponseChannelMessageWithSource,
+						Data: &discordgo.InteractionResponseData{
+							Content: "Failed to handle modal submit: %s" + err.Error(),
+							Flags:   discordgo.MessageFlagsEphemeral,
+						},
+					})
+				}
+
+			default:
+				logger.Info("Unhandled modal submit: %v", i.ModalSubmitData().CustomID)
 			}
 		default:
 			logger.Info("Unhandled interaction type: %v", i.Type)
