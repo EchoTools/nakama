@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -154,7 +155,7 @@ func EnforcementSuspensionSearch(ctx context.Context, nk runtime.NakamaModule, g
 	qparts := []string{}
 
 	if activeOnly {
-		qparts = append(qparts, fmt.Sprintf(`+value.suspension_expiry:>="%s"`, time.Now().Format(time.RFC3339)))
+		qparts = append(qparts, fmt.Sprintf(`+value.suspension_expiry:>"%s"`, time.Now().UTC().Format(time.RFC3339)))
 	}
 
 	if groupID != "" {
@@ -187,9 +188,13 @@ func EnforcementSuspensionSearch(ctx context.Context, nk runtime.NakamaModule, g
 			return nil, err
 		}
 
-		for _, record := range records.Records {
-			if activeOnly && !record.IsActive() {
-				continue
+		// Check if the record is active, if not, remove it
+		if activeOnly {
+			for i := 0; i < len(records.Records); i++ {
+				if !records.Records[i].IsActive() {
+					records.Records = slices.Delete(records.Records, i, i+1)
+					i--
+				}
 			}
 		}
 
