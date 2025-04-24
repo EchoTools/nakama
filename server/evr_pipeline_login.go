@@ -675,10 +675,6 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	}
 
 	if metadataUpdated {
-		if err := EVRProfileUpdate(ctx, p.nk, session.userID.String(), params.profile); err != nil {
-			metricsTags["error"] = "failed_update_metadata"
-			return fmt.Errorf("failed to update profile: %w", err)
-		}
 		if err := p.nk.AccountUpdateId(ctx, params.profile.ID(), "", params.profile.MarshalMap(), params.profile.GetActiveGroupDisplayName(), "", "", "", ""); err != nil {
 			metricsTags["error"] = "failed_update_profile"
 			return fmt.Errorf("failed to update user profile: %w", err)
