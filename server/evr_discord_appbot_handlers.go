@@ -2,8 +2,10 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -44,12 +46,14 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(logger runtime.Logge
 
 			content := fmt.Sprintf("<@%s> (%s) used %s in `%s`", member.User.ID, displayName, signature, guild.Name)
 
-			if _, err := d.dg.ChannelMessageSendComplex(cID, &discordgo.MessageSend{
-				Content:         content,
-				AllowedMentions: &discordgo.MessageAllowedMentions{},
-			}); err != nil {
-				logger.WithField("error", err).Warn("Failed to log interaction to channel")
-			}
+			go func() {
+				if _, err := d.dg.ChannelMessageSendComplex(cID, &discordgo.MessageSend{
+					Content:         content,
+					AllowedMentions: &discordgo.MessageAllowedMentions{},
+				}); err != nil {
+					logger.WithField("error", err).Warn("Failed to log interaction to channel")
+				}
+			}()
 		}
 	}
 
@@ -315,6 +319,9 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(logger runtime.Logger,
 		}); err != nil {
 			return fmt.Errorf("failed to respond to interaction: %w", err)
 		}
+	case "igp":
+
+		return d.handleInGamePanelInteraction(i, value)
 	}
 
 	return nil
@@ -431,4 +438,228 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 	latencyMillis = latencyHistory.AverageRTT(label.GameServer.Endpoint.ExternalIP.String(), true)
 
 	return label, latencyMillis, nil
+}
+
+func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.InteractionCreate, caller *discordgo.Member, target *discordgo.User, duration, userNotice, notes string, requireCommunityValues bool) error {
+	var (
+		ctx              = d.ctx
+		nk               = d.nk
+		db               = d.db
+		suspensionExpiry time.Time
+	)
+
+	callerUserID := d.cache.DiscordIDToUserID(caller.User.ID)
+	if callerUserID == "" {
+		return errors.New("failed to get target user ID")
+	}
+	targetUserID := d.cache.DiscordIDToUserID(target.ID)
+	if targetUserID == "" {
+		return errors.New("failed to get target user ID")
+	}
+	groupID := d.cache.GuildIDToGroupID(i.GuildID)
+	if groupID == "" {
+		return errors.New("failed to get group ID")
+	}
+
+	isGlobalOperator, err := CheckSystemGroupMembership(ctx, db, callerUserID, GroupGlobalOperators)
+	if err != nil {
+		return errors.New("error checking global operator status")
+	}
+
+	// Parse minutes, hours, days, and weeks (m, h, d, w)
+	if duration != "" {
+		var unit time.Duration
+		if duration == "0" {
+			suspensionExpiry = time.Now()
+		} else {
+			switch duration[len(duration)-1] {
+			case 'm':
+				unit = time.Minute
+			case 'h':
+				unit = time.Hour
+			case 'd':
+				unit = 24 * time.Hour
+			case 'w':
+				unit = 7 * 24 * time.Hour
+			default:
+				duration += "m"
+				unit = time.Minute
+			}
+			if d, err := strconv.Atoi(duration[:len(duration)-1]); err == nil {
+				suspensionExpiry = time.Now().Add(time.Duration(d) * unit)
+			} else {
+				return fmt.Errorf("invalid duration format: %w", err)
+			}
+		}
+	}
+	presences, err := d.nk.StreamUserList(StreamModeService, targetUserID, "", StreamLabelMatchService, false, true)
+	if err != nil {
+		return err
+	}
+
+	var (
+		cnt            = 0
+		timeoutMessage string
+		actions        = make([]string, 0, len(presences))
+		isRemoval      = false
+		doDisconnect   = false
+		isEnforcer     = false
+	)
+
+	gg, err := GuildGroupLoad(ctx, nk, groupID)
+	if err != nil {
+		return errors.New("failed to load guild group")
+	} else if gg.IsEnforcer(callerUserID) {
+		isEnforcer = true
+	}
+
+	if isEnforcer || isGlobalOperator {
+		if !suspensionExpiry.IsZero() {
+			if time.Now().After(suspensionExpiry) {
+				actions = append(actions, "suspension removed")
+				isRemoval = true
+			} else {
+				actions = append(actions, fmt.Sprintf("suspension expires <t:%d:R>", suspensionExpiry.UTC().Unix()))
+			}
+
+			guildRecords := NewGuildEnforcementRecords(targetUserID, groupID)
+			if err := StorageRead(ctx, nk, targetUserID, guildRecords, false); err != nil && status.Code(err) != codes.NotFound {
+				return fmt.Errorf("failed to read storage: %w", err)
+			}
+			var record *GuildEnforcementRecord
+			if isRemoval {
+				for _, record = range guildRecords.Records {
+					if !record.IsActive() {
+						continue
+					}
+					if record.AuditorNotes != "" {
+						record.AuditorNotes += "\n"
+					}
+					record.AuditorNotes = fmt.Sprintf("voided <t:%d:R> by <@%s>", time.Now().UTC().Unix(), caller.User.ID)
+
+					record.AuditorNotes += "\n" + notes
+					record.IsVoid = true
+				}
+			} else {
+				actions = append(actions, fmt.Sprintf("kicked for %s", userNotice))
+				// Add a new record
+				record = NewGuildEnforcementRecord(callerUserID, caller.User.ID, userNotice, notes, requireCommunityValues, suspensionExpiry)
+				guildRecords.AddRecord(record)
+			}
+
+			if _, err := StorageWrite(ctx, nk, targetUserID, guildRecords); err != nil {
+				return fmt.Errorf("failed to write storage: %w", err)
+			}
+
+			if gg.EnforcementNoticeChannelID != "" {
+				evrAccount, err := EVRProfileLoad(ctx, nk, targetUserID)
+				if err != nil {
+					return fmt.Errorf("failed to load account metadata: %w", err)
+				}
+				suffix := ""
+				if isRemoval {
+					suffix = " (voided)"
+				}
+				displayName := evrAccount.GetGroupDisplayNameOrDefault(groupID)
+				displayName = EscapeDiscordMarkdown(displayName)
+				field := createSuspensionDetailsEmbedField(gg.Name(), []*GuildEnforcementRecord{record}, true)
+				embed := &discordgo.MessageEmbed{
+					Title:       "Enforcement Notice" + suffix,
+					Description: fmt.Sprintf("Enforcement notice for %s (%s)", displayName, target.Mention()),
+					Color:       0x9656ce,
+					Fields: []*discordgo.MessageEmbedField{
+						field,
+					},
+				}
+				_, err = d.dg.ChannelMessageSendEmbed(gg.EnforcementNoticeChannelID, embed)
+				if err != nil {
+					logger.WithFields(map[string]interface{}{
+						"error": err,
+					}).Error("Failed to send enforcement notice")
+				}
+
+			}
+		}
+	}
+
+	if !isRemoval {
+		for _, p := range presences {
+
+			// Match only the target user
+			if p.GetUserId() != targetUserID {
+				continue
+			}
+
+			label, _ := MatchLabelByID(ctx, d.nk, MatchIDFromStringOrNil(p.GetStatus()))
+			if label == nil {
+				continue
+			}
+
+			// Don't kick game servers
+			if label.GameServer.SessionID.String() == p.GetSessionId() {
+				continue
+			}
+
+			permissions := make([]string, 0)
+
+			// Check if the user is the match owner of a private match
+			if label.SpawnedBy == callerUserID && label.IsPrivate() {
+				permissions = append(permissions, "match owner")
+			}
+
+			// Check if the user is the game server operator
+			if label.GameServer.OperatorID.String() == callerUserID {
+				permissions = append(permissions, "game server operator")
+			}
+
+			if isGlobalOperator {
+				doDisconnect = true
+				permissions = append(permissions, "global operator")
+			}
+
+			if isEnforcer && label.GetGroupID().String() == groupID {
+				doDisconnect = true
+				permissions = append(permissions, "enforcer")
+			}
+
+			if len(permissions) == 0 {
+				actions = append(actions, "user's match is not from this guild")
+				continue
+			}
+
+			// Kick the player from the match
+			if err := KickPlayerFromMatch(ctx, d.nk, label.ID, targetUserID); err != nil {
+				actions = append(actions, fmt.Sprintf("failed to kick player from [%s](https://echo.taxi/spark://c/%s) (error: %s)", label.Mode.String(), strings.ToUpper(label.ID.UUID.String()), err.Error()))
+				continue
+			}
+
+			actions = append(actions, fmt.Sprintf("kicked from [%s](https://echo.taxi/spark://c/%s) session. (%s) [%s]", label.Mode.String(), strings.ToUpper(label.ID.UUID.String()), userNotice, strings.Join(permissions, ", ")))
+
+			cnt++
+
+		}
+
+		if doDisconnect {
+			go func() {
+				<-time.After(time.Second * 10)
+				// Just disconnect the user, wholesale
+				if count, err := DisconnectUserID(ctx, d.nk, targetUserID, true, true, false); err != nil {
+					logger.Warn("Failed to disconnect user", zap.Error(err))
+				} else if count > 0 {
+					_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s disconnected player %s from match service (%d sessions).", caller.Mention(), target.Mention(), count), false)
+				}
+			}()
+		}
+
+		if cnt == 0 {
+			actions = append(actions, "no active sessions found")
+		}
+	}
+
+	_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s's `kick-player` actions summary for %s (%s):\n %s", caller.Mention(), target.Mention(), target.Username, strings.Join(actions, ";\n ")), false)
+
+	if i != nil {
+		return simpleInteractionResponse(d.dg, i, fmt.Sprintf("[%d sessions found]%s\n%s", cnt, timeoutMessage, strings.Join(actions, "\n")))
+	}
+	return nil
 }
