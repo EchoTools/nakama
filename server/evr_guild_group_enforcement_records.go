@@ -60,7 +60,7 @@ func (s GuildEnforcementRecords) StorageIndex() *StorageIndexMeta {
 		Collection: StorageCollectionEnforcementJournal,
 		Fields:     []string{"user_id", "group_id", "suspension_expiry", "is_community_values_required"},
 		MaxEntries: 10000000,
-		IndexOnly:  true,
+		IndexOnly:  false,
 	}
 }
 
@@ -140,7 +140,7 @@ func NewGuildEnforcementRecord(enforcerUserID, enforcerDiscordID string, suspens
 }
 
 func (r *GuildEnforcementRecord) IsActive() bool {
-	return time.Now().Before(r.SuspensionExpiry) && !r.IsVoid
+	return !r.IsVoid && r.SuspensionExpiry.After(time.Now())
 }
 
 func (r *GuildEnforcementRecord) IsExpired() bool {

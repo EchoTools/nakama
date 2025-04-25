@@ -214,8 +214,6 @@ func (c compactAlternate) String() string {
 }
 
 func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtime.Logger, evt *api.Event) error {
-	h.Lock()
-	defer h.Unlock()
 
 	if isNew := h.auditedSession(evt.Properties["group_id"], evt.Properties["session_id"]); !isNew {
 		return nil
@@ -258,11 +256,15 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 	}
 
 	// Check for guild suspensions
-	if guildRecords, err := EnforcementJournalSearch(ctx, h.nk, groupID, alternateIDs...); err != nil && len(guildRecords) > 0 {
-		for _, records := range guildRecords {
-			if suspensions := records.ActiveSuspensions(); len(suspensions) > 0 {
-				suspendedUserIDs[records.UserID] = suspensions[0].SuspensionExpiry
-				displayAuditMessage = true
+	if guildRecords, err := EnforcementJournalSearch(ctx, h.nk, groupID, alternateIDs...); err != nil {
+		return fmt.Errorf("failed to get guild records: %w", err)
+	} else {
+		if len(guildRecords) > 0 {
+			for _, records := range guildRecords {
+				if suspensions := records.ActiveSuspensions(); len(suspensions) > 0 {
+					suspendedUserIDs[records.UserID] = suspensions[0].SuspensionExpiry
+					displayAuditMessage = true
+				}
 			}
 		}
 	}
@@ -272,9 +274,6 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 		return fmt.Errorf("failed to get alternate accounts: %w", err)
 	} else {
 		for _, a := range accounts {
-			if a.User.Id == userID {
-				continue
-			}
 			_, isFirstDegree := loginHistory.AlternateMap[a.User.Id]
 			alternates[a.User.Id] = &compactAlternate{
 				userID:           a.User.Id,
@@ -305,6 +304,9 @@ func (h *EventDispatch) alternateLogLineFormatter(userID string, alternates map[
 	)
 
 	for _, a := range alternates {
+		if a.userID == userID {
+			continue
+		}
 		// Check if any are banned, or currently suspended by the guild
 		s := fmt.Sprintf("<@%s> (%s)", a.discordID, a.username)
 		addons := make([]string, 0, 2)
@@ -342,6 +344,7 @@ func (h *EventDispatch) alternateLogLineFormatter(userID string, alternates map[
 func (h *EventDispatch) handleUserLogin(ctx context.Context, logger runtime.Logger, evt *api.Event) error {
 	h.Lock()
 	defer h.Unlock()
+
 	userID := evt.Properties["user_id"]
 
 	loginHistory := NewLoginHistory(userID)
