@@ -348,23 +348,22 @@ func (*WhoAmI) createSuspensionsEmbed(guildGroups map[string]*GuildGroup, caller
 	}
 }
 
-func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, s *discordgo.Session, i *discordgo.InteractionCreate, target *discordgo.User, includePriviledged bool, includePrivate bool, includeGuildAuditor bool, includeSystem bool) error {
+func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, s *discordgo.Session, i *discordgo.InteractionCreate, target *discordgo.User, includePriviledged bool, includePrivate bool, includeGuildAuditor bool, includeSystem bool, includeSuspensions bool, includePastSuspensions bool, includeCurrentMatches bool) error {
 
 	var (
-		callerID              = d.cache.DiscordIDToUserID(i.Member.User.ID)
-		targetID              = d.cache.DiscordIDToUserID(target.ID)
-		whoami                = &WhoAmI{}
-		err                   error
-		evrAccount            *EVRProfile
-		matchmakingSettings   *MatchmakingSettings
-		loginHistory          *LoginHistory
-		displayNameHistory    *DisplayNameHistory
-		embeds                = make([]*discordgo.MessageEmbed, 0, 4)
-		groupID               = d.cache.GuildIDToGroupID(i.GuildID)
-		showLoginsSince       = time.Now().Add(time.Hour * 24 * -30) // 30 days
-		stripIPAddresses      = !includePrivate
-		activeSuspensionsOnly = !includeGuildAuditor
-		matchmakingEmbed      *discordgo.MessageEmbed
+		callerID            = d.cache.DiscordIDToUserID(i.Member.User.ID)
+		targetID            = d.cache.DiscordIDToUserID(target.ID)
+		whoami              = &WhoAmI{}
+		err                 error
+		evrAccount          *EVRProfile
+		matchmakingSettings *MatchmakingSettings
+		loginHistory        *LoginHistory
+		displayNameHistory  *DisplayNameHistory
+		embeds              = make([]*discordgo.MessageEmbed, 0, 4)
+		groupID             = d.cache.GuildIDToGroupID(i.GuildID)
+		showLoginsSince     = time.Now().Add(time.Hour * 24 * -30) // 30 days
+		stripIPAddresses    = !includePrivate
+		matchmakingEmbed    *discordgo.MessageEmbed
 	)
 
 	if includeSystem {
@@ -381,15 +380,6 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		return fmt.Errorf("account is disabled")
 	} else if evrAccount, err = BuildEVRProfileFromAccount(a); err != nil {
 		return fmt.Errorf("failed to get account by ID: %w", err)
-	}
-
-	if includePriviledged {
-		if ms, err := LoadMatchmakingSettings(ctx, nk, targetID); err != nil {
-			return fmt.Errorf("failed to load matchmaking settings: %w", err)
-		} else {
-			matchmakingSettings = &ms
-		}
-
 	}
 
 	loginHistory = NewLoginHistory(targetID)
@@ -416,8 +406,8 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 
 	enforcementsByGroupID := make(map[string]*GuildEnforcementRecords, 0)
 
-	if includePriviledged {
-		if results, err := EnforcementSuspensionSearch(ctx, nk, "", []string{targetID}, activeSuspensionsOnly); err == nil {
+	if includeSuspensions {
+		if results, err := EnforcementSuspensionSearch(ctx, nk, "", []string{targetID}, !includePastSuspensions); err == nil {
 			for groupID, byUserID := range results {
 				_, ok := guildGroups[groupID]
 				if !ok || len(byUserID) == 0 {
@@ -437,7 +427,9 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 			return fmt.Errorf("failed to load matchmaking settings: %w", err)
 		}
 		matchmakingSettings = &settings
+	}
 
+	if includeCurrentMatches {
 		// Get the players current lobby sessions
 		presences, err := d.nk.StreamUserList(StreamModeService, targetID, "", StreamLabelMatchService, false, true)
 		if err != nil {

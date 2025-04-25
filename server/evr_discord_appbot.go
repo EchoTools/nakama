@@ -1706,7 +1706,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			d.cache.Purge(user.ID)
 			d.cache.QueueSyncMember(i.GuildID, user.ID)
 
-			err := d.handleProfileRequest(ctx, logger, nk, s, i, user, true, true, false, false)
+			includeSuspensions := true
+			includePastSuspensions := false
+			includeCurrentMatches := true
+			err := d.handleProfileRequest(ctx, logger, nk, s, i, user, true, true, false, false, includeSuspensions, includePastSuspensions, includeCurrentMatches)
 			logger.WithFields(map[string]interface{}{
 				"discord_id":       user.ID,
 				"discord_username": user.Username,
@@ -1920,6 +1923,11 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				d.cache.QueueSyncMember(i.GuildID, target.ID)
 			}
 
+			isGuildEnforcer := false
+			if gg, ok := callerGuildGroups[groupID]; ok && gg.IsEnforcer(callerUserID) {
+				isGuildEnforcer = true
+			}
+
 			isGlobalOperator, err := CheckSystemGroupMembership(ctx, db, userIDStr, GroupGlobalOperators)
 			if err != nil {
 				return errors.New("error checking global operator status")
@@ -1929,8 +1937,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			includePrivate := isSelf || isGlobalOperator
 			includePriviledged := isSelf || isGlobalOperator || isGuildAuditor
 			includeGuildAuditor := isGlobalOperator || isGuildAuditor
-
-			return d.handleProfileRequest(ctx, logger, nk, s, i, target, includePriviledged, includePrivate, includeGuildAuditor, includeSystem)
+			includeSuspensions := isSelf || isGlobalOperator || isGuildAuditor || isGuildEnforcer
+			includePastSuspensions := isGlobalOperator || isGuildAuditor || isGuildEnforcer
+			includeCurrentMatches := isSelf || isGlobalOperator || isGuildAuditor || isGuildEnforcer
+			return d.handleProfileRequest(ctx, logger, nk, s, i, target, includePriviledged, includePrivate, includeGuildAuditor, includeSystem, includeSuspensions, includePastSuspensions, includeCurrentMatches)
 		},
 		"search": d.handleSearch,
 		"create": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
