@@ -26,6 +26,9 @@ func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session
 		logger.Warn("Match not found", zap.String("mid", matchID.UUID.String()))
 		return ErrMatchNotFound
 	}
+	if label.Mode != evr.ModeArenaPublic && label.Mode != evr.ModeCombatPublic {
+		LeavePartyStream(session)
+	}
 
 	lobbyParams.GroupID = label.GetGroupID()
 	lobbyParams.Mode = label.Mode
