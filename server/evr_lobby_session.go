@@ -21,7 +21,7 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 
 		// If a "next match ID" is set, send the user to that match. (i.e. Echo Taxi)
 		if !lobbyParams.NextMatchID.IsNil() {
-			LeavePartyStream(session)
+
 			p.nk.metrics.CustomCounter("lobby_join_next_match", lobbyParams.MetricsTags(), 1)
 			logger.Info("Joining next match", zap.String("mid", matchID.String()))
 			return p.lobbyJoin(ctx, logger, session, lobbyParams, lobbyParams.NextMatchID)
