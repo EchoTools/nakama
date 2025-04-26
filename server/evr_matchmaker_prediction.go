@@ -3,6 +3,7 @@ package server
 import (
 	"sort"
 	"strings"
+	"time"
 
 	"maps"
 
@@ -12,10 +13,11 @@ import (
 )
 
 type PredictedMatch struct {
-	Candidate     []runtime.MatchmakerEntry `json:"match"`
-	Draw          float32                   `json:"draw"`
-	Size          int8                      `json:"size"`
-	DivisionCount int8                      `json:"division_count"`
+	Candidate             []runtime.MatchmakerEntry `json:"match"`
+	Draw                  float32                   `json:"draw"`
+	Size                  int8                      `json:"size"`
+	DivisionCount         int8                      `json:"division_count"`
+	OldestTicketTimestamp int64                     `json:"oldest_ticket"`
 }
 
 type CandidateList []runtime.MatchmakerEntry
@@ -105,6 +107,7 @@ func predictCandidateOutcomes(candidates [][]runtime.MatchmakerEntry) <-chan Pre
 			teamRatingsB        = make([]types.Rating, 0, 5)
 			ratingsByTicket     = make(map[string]types.Team, 10)
 			divisionSetByTicket = make(map[string]map[string]struct{}, 10)
+			ageByTicket         = make(map[string]float64, 10)
 			divisionSet         = make(map[string]struct{}, 10)
 		)
 
@@ -142,6 +145,13 @@ func predictCandidateOutcomes(candidates [][]runtime.MatchmakerEntry) <-chan Pre
 			for ticket, entries := range candidateTickets {
 				ratingsByTicket[ticket] = entries.Ratings()
 				divisionSetByTicket[ticket] = entries.DivisionSet()
+				oldest := float64(time.Now().UTC().Unix())
+				for _, entry := range entries {
+					if entry.GetProperties()["submission_time"].(float64) < oldest {
+						oldest = entry.GetProperties()["submission_time"].(float64)
+					}
+				}
+				ageByTicket[ticket] = oldest
 			}
 
 			// Reuse groups slice
@@ -150,7 +160,6 @@ func predictCandidateOutcomes(candidates [][]runtime.MatchmakerEntry) <-chan Pre
 				groups = append(groups, entries)
 			}
 
-			// Sort groups by their predicted ranks
 			ratingsByGroup = ratingsByGroup[:0]
 			for _, entries := range groups {
 				ratingsByGroup = append(ratingsByGroup, ratingsByTicket[entries[0].GetTicket()])
@@ -191,10 +200,11 @@ func predictCandidateOutcomes(candidates [][]runtime.MatchmakerEntry) <-chan Pre
 			copy(c[len(teamA):], teamB)
 
 			predictCh <- PredictedMatch{
-				Candidate:     c,
-				Draw:          float32(rating.PredictDraw([]types.Team{teamRatingsA, teamRatingsB}, nil)),
-				Size:          int8(len(c)),
-				DivisionCount: int8(len(divisionSet)),
+				Candidate:             c,
+				Draw:                  float32(rating.PredictDraw([]types.Team{teamRatingsA, teamRatingsB}, nil)),
+				Size:                  int8(len(c)),
+				DivisionCount:         int8(len(divisionSet)),
+				OldestTicketTimestamp: int64(ageByTicket[c[0].GetTicket()]),
 			}
 		}
 

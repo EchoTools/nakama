@@ -151,14 +151,27 @@ func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.Ma
 	filterCounts["max_rtt"] = m.filterWithinMaxRTT(candidates)
 
 	// predict the outcome of the matches
+	oldestTicket := ""
+	oldestTicketTimestamp := time.Now().UTC().Unix()
 	predictions := make([]PredictedMatch, 0, len(candidates))
 	for c := range predictCandidateOutcomes(candidates) {
 		predictions = append(predictions, c)
+		if oldestTicket == "" || c.OldestTicketTimestamp < oldestTicketTimestamp {
+			oldestTicket = c.Candidate[0].GetTicket()
+			oldestTicketTimestamp = c.OldestTicketTimestamp
+		}
 	}
 
 	sort.SliceStable(predictions, func(i, j int) bool {
 		if predictions[i].Size != predictions[j].Size {
 			return predictions[i].Size > predictions[j].Size
+		}
+
+		// Always allow the player matchmaking the longest to have priority
+		if predictions[i].OldestTicketTimestamp == oldestTicketTimestamp && predictions[j].OldestTicketTimestamp != oldestTicketTimestamp {
+			return true
+		} else if predictions[i].OldestTicketTimestamp != oldestTicketTimestamp && predictions[j].OldestTicketTimestamp == oldestTicketTimestamp {
+			return false
 		}
 
 		if predictions[i].DivisionCount != predictions[j].DivisionCount {
