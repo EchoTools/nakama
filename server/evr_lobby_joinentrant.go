@@ -261,7 +261,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		if latestRecord != nil {
 			// User has an active suspension
 			metricsTags["error"] = "suspended_user"
-			if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("Rejected suspended user <@%s> (%s) (expires <t:%d:R>)", userID, latestRecord.SuspensionNotice, latestRecord.SuspensionExpiry.Unix()), true); err != nil {
+			if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("Rejected suspended user <@!%s> (%s) (%s) (expires <t:%d:R>)", lobbyParams.DiscordID, lobbyParams.DisplayName, latestRecord.SuspensionNotice, latestRecord.SuspensionExpiry.Unix()), false); err != nil {
 				p.logger.Warn("Failed to send audit message", zap.String("channel_id", gg.AuditChannelID), zap.Error(err))
 			}
 			const maxMessageLength = 60
