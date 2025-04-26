@@ -26,10 +26,12 @@ var InGamePanelRecentPlayerTTL = 3 * time.Minute
 
 type InGamePanel struct {
 	sync.Mutex
-	nk     runtime.NakamaModule
-	logger runtime.Logger
-	cache  *DiscordIntegrator
-	dg     *discordgo.Session
+	ctx      context.Context
+	cancelFn context.CancelFunc
+	nk       runtime.NakamaModule
+	logger   runtime.Logger
+	cache    *DiscordIntegrator
+	dg       *discordgo.Session
 
 	userID            string
 	interactionCreate *atomic.Pointer[discordgo.InteractionCreate]
@@ -42,8 +44,11 @@ type InGamePanel struct {
 
 func NewInGamePanel(nk runtime.NakamaModule, logger runtime.Logger, dg *discordgo.Session, cache *DiscordIntegrator, userID string) *InGamePanel {
 
+	ctx, cancel := context.WithCancel(context.Background())
 	logger = logger.WithFields(map[string]any{"uid": userID})
 	return &InGamePanel{
+		ctx:               ctx,
+		cancelFn:          cancel,
 		nk:                nk,
 		logger:            logger,
 		dg:                dg,
@@ -58,6 +63,10 @@ func NewInGamePanel(nk runtime.NakamaModule, logger runtime.Logger, dg *discordg
 func (p *InGamePanel) Stop() {
 	if p == nil {
 		return
+	}
+	p.cancelFn()
+	if p.dg.InteractionResponseDelete(p.Interaction()) != nil {
+		p.logger.WithField("error", "failed to delete interaction").Warn("Failed to delete interaction")
 	}
 	p.isStopped.Store(true)
 }
@@ -158,6 +167,9 @@ func (p *InGamePanel) Start() {
 SessionLoop:
 	for {
 		select {
+		case <-p.ctx.Done():
+			// If the context is done, stop the loop
+			return
 		case <-timeoutTimer.C:
 			// If the timeout timer expires, send a message and return
 			if _, err := p.displayMessage("Session timed out. Please reopen the IGP."); err != nil {
@@ -208,6 +220,9 @@ SessionLoop:
 	MatchLoop:
 		for {
 			select {
+			case <-p.ctx.Done():
+				// If the context is done, stop the loop
+				return
 			case <-sessionCtx.Done():
 				// If the session is closed, try to find a new session
 				if _, err := p.displayMessage("Waiting for player session..."); err != nil {
@@ -640,15 +655,18 @@ func (d *DiscordAppBot) handleInGamePanel(logger runtime.Logger, s *discordgo.Se
 		igp *InGamePanel
 		ok  bool
 	)
-	// Check if there is already a panel for this user, delete it and move to this interaction
-	if igp, ok = d.igpRegistry.Load(userID); !ok {
-		// Create a new InGamePanel instance
-		igp = NewInGamePanel(d.nk, logger, s, d.cache, userID)
 
-		// Start a goroutine to handle the interaction, and keep it updated
-		go igp.Start()
-		d.igpRegistry.Store(userID, igp)
+	if igp, ok = d.igpRegistry.Load(userID); ok {
+		igp.Stop()
 	}
+
+	// Check if there is already a panel for this user, delete it and move to this interaction
+	// Create a new InGamePanel instance
+	igp = NewInGamePanel(d.nk, logger, s, d.cache, userID)
+
+	// Start a goroutine to handle the interaction, and keep it updated
+	go igp.Start()
+	d.igpRegistry.Store(userID, igp)
 
 	if prevInteraction, err := igp.NewInteraction(i); err != nil {
 		return fmt.Errorf("failed to create new interaction: %w", err)
@@ -658,5 +676,11 @@ func (d *DiscordAppBot) handleInGamePanel(logger runtime.Logger, s *discordgo.Se
 			logger.WithField("error", err).Error("Failed to delete previous interaction")
 		}
 	}
+
+	go func() {
+		<-igp.ctx.Done()
+		d.igpRegistry.Delete(userID)
+	}()
+
 	return nil
 }
