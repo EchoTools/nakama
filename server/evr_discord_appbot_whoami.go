@@ -503,7 +503,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	embeds = append(embeds,
 		whoami.createUserAccountDetailsEmbed(evrAccount, loginHistory, matchmakingSettings, displayNameHistory, guildGroups, groupID, showLoginsSince, stripIPAddresses, includePriviledged),
 		whoami.createSuspensionsEmbed(guildGroups, callerID, enforcementsByGroupID),
-		//whoami.createPastDisplayNameEmbed(displayNameHistory, groupID, false),
+		whoami.createPastDisplayNameEmbed(displayNameHistory, groupID, false),
 		matchmakingEmbed,
 	)
 
