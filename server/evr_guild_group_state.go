@@ -13,6 +13,8 @@ const (
 	StorageCollectionState = "GuildGroupState"
 )
 
+var _ = VersionedStorable(&GuildGroupState{})
+
 // This allows the system to operate correctly even when discord is down
 type GuildGroupState struct {
 	sync.RWMutex                                  // for storage operations
@@ -44,6 +46,13 @@ func (s *GuildGroupState) StorageIndex() *StorageIndexMeta {
 	return nil
 }
 
+func (s *GuildGroupState) SetStorageVersion(userID string, version string) {
+	s.Lock()
+	defer s.Unlock()
+	s.version = version
+	s.updated = false
+}
+
 func GuildGroupStateLoad(ctx context.Context, nk runtime.NakamaModule, botUserID, groupID string) (*GuildGroupState, error) {
 	var (
 		err   error
@@ -58,12 +67,10 @@ func GuildGroupStateLoad(ctx context.Context, nk runtime.NakamaModule, botUserID
 
 func GuildGroupStateSave(ctx context.Context, nk runtime.NakamaModule, botUserID string, state *GuildGroupState) error {
 	// Store the State
-	version, err := StorageWrite(ctx, nk, ServiceSettings().DiscordBotUserID, state)
+	err := StorageWrite(ctx, nk, ServiceSettings().DiscordBotUserID, state)
 	if err != nil {
 		return fmt.Errorf("failed to write guild group state: %v", err)
 	}
-
-	state.version = version
 
 	return nil
 }

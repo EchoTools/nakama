@@ -261,11 +261,10 @@ func GuildGroupStore(ctx context.Context, nk runtime.NakamaModule, group *GuildG
 	}
 
 	// Store the State
-	version, err := StorageWrite(ctx, nk, ServiceSettings().DiscordBotUserID, group.State)
+	err := StorageWrite(ctx, nk, ServiceSettings().DiscordBotUserID, group.State)
 	if err != nil {
 		return fmt.Errorf("failed to write guild group state: %v", err)
 	}
-	group.State.version = version
 
 	// Store the metadata
 	if err := GroupMetadataSave(ctx, _nk.db, group.Group.Id, &group.GroupMetadata); err != nil {

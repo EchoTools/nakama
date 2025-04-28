@@ -294,7 +294,7 @@ func LoadMatchmakingSettings(ctx context.Context, nk runtime.NakamaModule, userI
 }
 
 func StoreMatchmakingSettings(ctx context.Context, nk runtime.NakamaModule, userID string, settings MatchmakingSettings) error {
-	_, err := StorageWrite(ctx, nk, userID, settings)
+	err := StorageWrite(ctx, nk, userID, settings)
 	return err
 }
 

@@ -216,7 +216,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 			userSettings.NextMatchID = MatchID{}
 			userSettings.NextMatchRole = ""
 			userSettings.NextMatchDiscordID = ""
-			if _, err := StorageWrite(ctx, p.nk, userID, userSettings); err != nil {
+			if err := StorageWrite(ctx, p.nk, userID, userSettings); err != nil {
 				logger.Warn("Failed to clear next match metadata", zap.Error(err))
 			}
 		}()
