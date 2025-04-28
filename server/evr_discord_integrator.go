@@ -505,12 +505,19 @@ func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, g
 	groupID := d.GuildIDToGroupID(guild.ID)
 	if groupID == "" {
 		// This is a new guild.
-		gm, err := NewGuildGroupMetadata(guild.ID).MarshalToMap()
-		if err != nil {
-			return fmt.Errorf("error marshalling group metadata: %w", err)
+		gm := NewGuildGroupMetadata(guild.ID)
+
+		if guildID := ServiceSettings().ServiceGuildID; d.GuildIDToGroupID(guildID) == "" {
+			// add the service guild ID to the list of inherited groups (global suspensions)
+			gm.SuspensionInheritanceGroupIDs = []string{guildID}
 		}
 
-		_, err = d.nk.GroupCreate(ctx, ownerUserID, guild.Name, botUserID, GuildGroupLangTag, guild.Description, guild.IconURL("512"), false, gm, 100000)
+		metadataMap, err := gm.MarshalToMap()
+		if err != nil {
+			return fmt.Errorf("error marshalling guild group metadata: %w", err)
+		}
+
+		_, err = d.nk.GroupCreate(ctx, ownerUserID, guild.Name, botUserID, GuildGroupLangTag, guild.Description, guild.IconURL("512"), false, metadataMap, 100000)
 		if err != nil {
 			return fmt.Errorf("error creating group: %w", err)
 		}

@@ -237,6 +237,11 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 		return fmt.Errorf("failed to load login history: %w", err)
 	}
 
+	searchGroupIDs := []string{groupID}
+	if gg.SuspensionInheritanceGroupIDs != nil {
+		searchGroupIDs = append(searchGroupIDs, gg.SuspensionInheritanceGroupIDs...)
+	}
+
 	if updated := loginHistory.NotifyGroup(groupID, gg.AlternateAccountNotificationExpiry); updated {
 		displayAuditMessage = true
 		if _, err := StorageWrite(ctx, h.nk, userID, loginHistory); err != nil {
@@ -256,7 +261,7 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 	}
 
 	// Check for guild suspensions
-	if guildRecords, err := EnforcementJournalSearch(ctx, h.nk, groupID, alternateIDs...); err != nil {
+	if guildRecords, err := EnforcementJournalSearch(ctx, h.nk, searchGroupIDs, alternateIDs...); err != nil {
 		return fmt.Errorf("failed to get guild records: %w", err)
 	} else {
 		if len(guildRecords) > 0 {

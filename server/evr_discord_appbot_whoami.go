@@ -2,7 +2,9 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"slices"
 	"sort"
 	"strings"
@@ -310,22 +312,15 @@ func (*WhoAmI) createGuildMembershipsEmbedFieldValue(guildGroupMap map[string]*G
 
 }
 
-func (*WhoAmI) createSuspensionsEmbed(guildGroups map[string]*GuildGroup, callerID string, recordsByGroupID map[string]*GuildEnforcementRecords) *discordgo.MessageEmbed {
+func (*WhoAmI) createSuspensionsEmbed(enforcementRecordsByGroupName map[string][]*GuildEnforcementRecord) *discordgo.MessageEmbed {
+	if enforcementRecordsByGroupName == nil {
+		return nil
+	}
 
-	fields := make([]*discordgo.MessageEmbedField, 0, len(recordsByGroupID))
-	for gid, records := range recordsByGroupID {
-		gg, ok := guildGroups[gid]
-		if !ok {
-			continue
-		}
+	fields := make([]*discordgo.MessageEmbedField, 0, len(enforcementRecordsByGroupName))
+	for gName, records := range enforcementRecordsByGroupName {
 
-		// Only include moderator notes if the caller is an auditor or enforcer
-		includeNotes := false
-		if gg.IsAuditor(callerID) || gg.IsEnforcer(callerID) {
-			includeNotes = true
-		}
-
-		field := createSuspensionDetailsEmbedField(gg.Name(), records.Records, includeNotes)
+		field := createSuspensionDetailsEmbedField(gName, records)
 		if field == nil {
 			continue
 		}
@@ -348,7 +343,7 @@ func (*WhoAmI) createSuspensionsEmbed(guildGroups map[string]*GuildGroup, caller
 	}
 }
 
-func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, s *discordgo.Session, i *discordgo.InteractionCreate, target *discordgo.User, includePriviledged bool, includePrivate bool, includeGuildAuditor bool, includeSystem bool, includeSuspensions bool, includePastSuspensions bool, includeCurrentMatches bool) error {
+func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, s *discordgo.Session, i *discordgo.InteractionCreate, target *discordgo.User, includePriviledged bool, includePrivate bool, includeGuildAuditor bool, includeSystem bool, includeSuspensions bool, includeInactiveSuspensions bool, includeCurrentMatches bool) error {
 
 	var (
 		callerID            = d.cache.DiscordIDToUserID(i.Member.User.ID)
@@ -404,19 +399,92 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		}
 	}
 
-	enforcementsByGroupID := make(map[string]*GuildEnforcementRecords, 0)
+	enforcementRecordsByGroupName := make(map[string][]*GuildEnforcementRecord, 0)
 
 	if includeSuspensions {
-		if results, err := EnforcementSuspensionSearch(ctx, nk, "", []string{targetID}, !includePastSuspensions); err == nil {
-			for groupID, byUserID := range results {
-				_, ok := guildGroups[groupID]
-				if !ok || len(byUserID) == 0 {
+
+		enforcementGroupIDs := make([]string, 0, len(guildGroups))
+		for _, g := range guildGroups {
+			enforcementGroupIDs = append(enforcementGroupIDs, g.GuildID)
+			if len(g.SuspensionInheritanceGroupIDs) > 0 {
+				enforcementGroupIDs = append(enforcementGroupIDs, g.SuspensionInheritanceGroupIDs...)
+			}
+		}
+
+		if results, err := EnforcementJournalSearch(ctx, nk, enforcementGroupIDs, targetID); err != nil {
+			logger.Warn("failed to get enforcement records", "error", err)
+		} else {
+
+			enforcementRecordsByID := make(map[string][]*GuildEnforcementRecord, 0)
+
+			for _, journal := range results {
+				for _, record := range journal.Records {
+					if r, ok := enforcementRecordsByID[record.ID]; !ok {
+						enforcementRecordsByID[record.ID] = []*GuildEnforcementRecord{record}
+					} else {
+						enforcementRecordsByID[record.ID] = append(r, record)
+					}
+				}
+			}
+
+			// Merge the records by ID
+			enforcementRecords := make([]*GuildEnforcementRecord, 0, len(enforcementRecordsByID))
+			for _, records := range enforcementRecordsByID {
+				if len(records) == 0 {
 					continue
 				}
-
-				if records, ok := byUserID[targetID]; ok {
-					enforcementsByGroupID[groupID] = records
+				record := records[0]
+				for _, r := range records[1:] {
+					record.Merge(r)
 				}
+
+				enforcementRecords = append(enforcementRecords, record)
+			}
+
+			if !includeInactiveSuspensions {
+				for i := 0; i < len(enforcementRecords); i++ {
+					r := enforcementRecords[i]
+					if !r.IsActive() {
+						enforcementRecords = append(enforcementRecords[:i], enforcementRecords[i+1:]...)
+						i--
+					}
+				}
+			}
+
+			if !includeGuildAuditor {
+				for _, journal := range results {
+					// clear the notes
+					for _, r := range journal.Records {
+						r.EnforcerDiscordID = ""
+						r.EnforcerUserID = ""
+						r.AuditorNotes = ""
+					}
+				}
+			}
+
+			// Sort by updated time
+			sort.SliceStable(enforcementRecords, func(i, j int) bool {
+				return enforcementRecords[i].UpdatedAt.Before(enforcementRecords[j].UpdatedAt)
+			})
+
+			// Build the map
+			for _, record := range enforcementRecords {
+				gName := ""
+				if gg, ok := guildGroups[record.GroupID]; ok {
+					gName = EscapeDiscordMarkdown(gg.Name())
+				} else {
+					if gg := d.guildGroupRegistry.Get(record.GroupID); gg != nil {
+						gName = EscapeDiscordMarkdown(gg.Name())
+					} else {
+						gName = record.GroupID
+					}
+				}
+
+				// Add the records to the map
+				if _, ok := enforcementRecordsByGroupName[gName]; !ok {
+					enforcementRecordsByGroupName[gName] = []*GuildEnforcementRecord{}
+				}
+				enforcementRecordsByGroupName[gName] = append(enforcementRecordsByGroupName[gName], enforcementRecords...)
 			}
 		}
 	}
@@ -502,7 +570,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	// Create the account details embed
 	embeds = append(embeds,
 		whoami.createUserAccountDetailsEmbed(evrAccount, loginHistory, matchmakingSettings, displayNameHistory, guildGroups, groupID, showLoginsSince, stripIPAddresses, includePriviledged),
-		whoami.createSuspensionsEmbed(guildGroups, callerID, enforcementsByGroupID),
+		whoami.createSuspensionsEmbed(enforcementRecordsByGroupName),
 		whoami.createPastDisplayNameEmbed(displayNameHistory, groupID, false),
 		matchmakingEmbed,
 	)

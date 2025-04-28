@@ -1188,7 +1188,7 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 			} else if targetUserID != "" {
 				count := 0
 				// Get the number of reports for this user in the last week
-				if guildRecords, err := EnforcementJournalSearch(ctx, p.nk, groupID, targetUserID); err != nil {
+				if guildRecords, err := EnforcementJournalSearch(ctx, p.nk, []string{groupID}, targetUserID); err != nil {
 					logger.Error("Failed to search for enforcement records", zap.Error(err))
 				} else if len(guildRecords) > 0 {
 					for _, records := range guildRecords {
