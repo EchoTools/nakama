@@ -14,18 +14,23 @@ type SystemMigrator interface {
 	MigrateSystem(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule) error
 }
 
-type UserMigrator interface {
+type UserMigrater interface {
 	MigrateUser(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, userID string) error
 }
 
 func MigrateSystem(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule) {
 	// Combine the loadouts into one storage object
 
-	migrations := []SystemMigrator{
+	systemMigrations := []SystemMigrator{
+		&MigrationEnforcementJournals{},
 		//&MigrationLeaderboardPrune{},
 	}
 
-	for _, m := range migrations {
+	allUserMigrations := []UserMigrater{
+		//&MigrationLoadouts{},
+	}
+
+	for _, m := range systemMigrations {
 		startTime := time.Now()
 		logger := logger.WithField("migration", fmt.Sprintf("%T", m))
 
@@ -36,13 +41,15 @@ func MigrateSystem(ctx context.Context, logger runtime.Logger, db *sql.DB, nk ru
 		}
 	}
 
-	if err := MigrateAllUsers(ctx, logger, nk, db); err != nil {
-		logger.WithField("error", err).Error("Error migrating all users")
+	if len(allUserMigrations) != 0 {
+		if err := MigrateAllUsers(ctx, logger, nk, db, allUserMigrations); err != nil {
+			logger.WithField("error", err).Error("Error migrating all users")
+		}
 	}
 
 }
 
-func MigrateAllUsers(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB) error {
+func MigrateAllUsers(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, migrations []UserMigrater) error {
 	query := `
 	SELECT
 		user_id
@@ -71,7 +78,7 @@ func MigrateAllUsers(ctx context.Context, logger runtime.Logger, nk runtime.Naka
 
 	for _, userID := range userIDs {
 		startTime := time.Now()
-		if err := MigrateUser(ctx, RuntimeLoggerToZapLogger(logger), nk, db, userID); err != nil {
+		if err := MigrateUser(ctx, RuntimeLoggerToZapLogger(logger), nk, db, userID, migrations); err != nil {
 			return fmt.Errorf("error migrating user data: %w", err)
 		}
 		<-time.After(time.Since(startTime)) // Give the system time to recover
@@ -82,10 +89,9 @@ func MigrateAllUsers(ctx context.Context, logger runtime.Logger, nk runtime.Naka
 	return nil
 }
 
-func MigrateUser(ctx context.Context, zapLogger *zap.Logger, nk runtime.NakamaModule, db *sql.DB, userID string) error {
+func MigrateUser(ctx context.Context, zapLogger *zap.Logger, nk runtime.NakamaModule, db *sql.DB, userID string, migrations []UserMigrater) error {
 	logger := NewRuntimeGoLogger(zapLogger)
 
-	migrations := []UserMigrator{}
 	startTime := time.Now()
 
 	for _, m := range migrations {

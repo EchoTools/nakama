@@ -102,6 +102,9 @@ func (s *GuildEnforcementJournal) MarshalJSON() ([]byte, error) {
 		if r.GroupID == "" {
 			r.GroupID = s.GroupID
 		}
+		if r.UserID == "" {
+			r.UserID = s.UserID
+		}
 	}
 
 	// Use the default JSON marshaler for the struct
