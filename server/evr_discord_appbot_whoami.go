@@ -334,9 +334,19 @@ func (*WhoAmI) createSuspensionsEmbed(enforcementRecordsByGroupName map[string][
 		return nil
 	}
 
+	seenIDs := make(map[string]bool, 0)
 	fields := make([]*discordgo.MessageEmbedField, 0, len(enforcementRecordsByGroupName))
 	for gName, records := range enforcementRecordsByGroupName {
 
+		// Don't duplicate records
+		for i := 0; i < len(records); i++ {
+			if seenIDs[records[i].ID] {
+				records = append(records[:i], records[i+1:]...)
+				i--
+				continue
+			}
+			seenIDs[records[i].ID] = true
+		}
 		field := createSuspensionDetailsEmbedField(gName, records)
 		if field == nil {
 			continue

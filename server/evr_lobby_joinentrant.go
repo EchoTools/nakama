@@ -245,7 +245,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 	inheritedGroupIDs := append(gg.SuspensionInheritanceGroupIDs, groupID)
 
 	// Check for an active suspension in the enforcement journal.
-	if latestRecord, err := EnforcementActiveSuspensionSearch(ctx, p.nk, groupID, inheritedGroupIDs, userID); err != nil {
+	if latestRecord, err := EnforcementActiveSuspensionSearch(ctx, p.nk, userID, groupID, inheritedGroupIDs, []string{userID}); err != nil {
 		logger.Warn("Unable to read enforcement records", zap.Error(err))
 	} else if latestRecord != nil {
 
