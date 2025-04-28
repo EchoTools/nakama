@@ -12,24 +12,27 @@ import (
 )
 
 type GroupMetadata struct {
-	GuildID                            string            `json:"guild_id"`                      // The guild ID
-	OwnerID                            string            `json:"owner_id"`                      // The owner ID
-	MinimumAccountAgeDays              int               `json:"minimum_account_age_days"`      // The minimum account age in days to be able to play echo on this guild's sessions
-	MembersOnlyMatchmaking             bool              `json:"members_only_matchmaking"`      // Restrict matchmaking to members only (when this group is the active one)
-	DisableCreateCommand               bool              `json:"disable_create_command"`        // Disable the public allocate command
-	LogAlternateAccounts               bool              `json:"log_alternate_accounts"`        // Log alternate accounts
-	EnforcersHaveGoldNames             bool              `json:"moderators_have_gold_names"`    // Enforcers have gold display names
-	RoleMap                            GuildGroupRoles   `json:"roles"`                         // The roles text displayed on the main menu
-	MatchmakingChannelIDs              map[string]string `json:"matchmaking_channel_ids"`       // The matchmaking channel IDs
-	EnforcementNoticeChannelID         string            `json:"enforcement_notice_channel_id"` // The enforcement notice channel
-	AuditChannelID                     string            `json:"audit_channel_id"`              // The audit channel
-	ErrorChannelID                     string            `json:"error_channel_id"`              // The error channel
-	CommandChannelID                   string            `json:"command_channel_id"`            // The command channel
-	BlockVPNUsers                      bool              `json:"block_vpn_users"`               // Block VPN users
-	FraudScoreThreshold                int               `json:"fraud_score_threshold"`         // The fraud score threshold
-	AllowedFeatures                    []string          `json:"allowed_features"`              // Allowed features
-	AlternateAccountNotificationExpiry time.Time         `json:"alt_notification_threshold"`    // Show alternate notifications newer than this time.
-	EnableEnforcementCountInNames      bool              `json:"enable_enforcement_count_in_names"`
+	GuildID                              string            `json:"guild_id"`                      // The guild ID
+	OwnerID                              string            `json:"owner_id"`                      // The owner ID
+	MinimumAccountAgeDays                int               `json:"minimum_account_age_days"`      // The minimum account age in days to be able to play echo on this guild's sessions
+	MembersOnlyMatchmaking               bool              `json:"members_only_matchmaking"`      // Restrict matchmaking to members only (when this group is the active one)
+	DisableCreateCommand                 bool              `json:"disable_create_command"`        // Disable the public allocate command
+	LogAlternateAccounts                 bool              `json:"log_alternate_accounts"`        // Log alternate accounts
+	EnforcersHaveGoldNames               bool              `json:"moderators_have_gold_names"`    // Enforcers have gold display names
+	RoleMap                              GuildGroupRoles   `json:"roles"`                         // The roles text displayed on the main menu
+	MatchmakingChannelIDs                map[string]string `json:"matchmaking_channel_ids"`       // The matchmaking channel IDs
+	EnforcementNoticeChannelID           string            `json:"enforcement_notice_channel_id"` // The enforcement notice channel
+	AuditChannelID                       string            `json:"audit_channel_id"`              // The audit channel
+	ErrorChannelID                       string            `json:"error_channel_id"`              // The error channel
+	CommandChannelID                     string            `json:"command_channel_id"`            // The command channel
+	BlockVPNUsers                        bool              `json:"block_vpn_users"`               // Block VPN users
+	FraudScoreThreshold                  int               `json:"fraud_score_threshold"`         // The fraud score threshold
+	AllowedFeatures                      []string          `json:"allowed_features"`              // Allowed features
+	AlternateAccountNotificationExpiry   time.Time         `json:"alt_notification_threshold"`    // Show alternate notifications newer than this time.
+	EnableEnforcementCountInNames        bool              `json:"enable_enforcement_count_in_names"`
+	NegatedEnforcerIDs                   []string          `json:"negated_enforcer_ids"`                     // Enforcers that are not allowed to enforce this group
+	RejectPlayersWithSuspendedAlternates bool              `json:"reject_players_with_suspended_alternates"` // Reject players with suspended alternate accounts
+	SuspensionInheritanceGroupIDs        []string          `json:"suspension_inheritence_group_ids"`         // Groups that this group inherits suspensions from
 }
 
 func NewGuildGroupMetadata(guildID string) *GroupMetadata {

@@ -242,38 +242,28 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		return ErrSuspended
 	}
 
+	inheritedGroupIDs := append(gg.SuspensionInheritanceGroupIDs, groupID)
+
 	// Check for an active suspension in the enforcement journal.
-	if recordsByGuild, err := EnforcementSuspensionSearch(ctx, p.nk, groupID, []string{userID}, true); err != nil {
+	if latestRecord, err := EnforcementActiveSuspensionSearch(ctx, p.nk, groupID, inheritedGroupIDs, userID); err != nil {
 		logger.Warn("Unable to read enforcement records", zap.Error(err))
-	} else if len(recordsByGuild) > 0 {
-		var latestRecord *GuildEnforcementRecord
+	} else if latestRecord != nil {
 
-		for _, byUserID := range recordsByGuild {
-			for _, records := range byUserID {
-				for _, r := range records.Records {
-					if latestRecord == nil || r.SuspensionExpiry.After(latestRecord.SuspensionExpiry) && time.Now().Before(r.SuspensionExpiry) {
-						latestRecord = r
-					}
-				}
-			}
+		// User has an active suspension
+		metricsTags["error"] = "suspended_user"
+		if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("Rejected suspended user <@!%s> (%s) (%s) (expires <t:%d:R>)", lobbyParams.DiscordID, lobbyParams.DisplayName, latestRecord.SuspensionNotice, latestRecord.SuspensionExpiry.Unix()), false); err != nil {
+			p.logger.Warn("Failed to send audit message", zap.String("channel_id", gg.AuditChannelID), zap.Error(err))
 		}
+		const maxMessageLength = 60
+		message := latestRecord.SuspensionNotice
+		expires := fmt.Sprintf(" [exp: %s]", FormatDuration(time.Until(latestRecord.SuspensionExpiry)))
 
-		if latestRecord != nil {
-			// User has an active suspension
-			metricsTags["error"] = "suspended_user"
-			if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("Rejected suspended user <@!%s> (%s) (%s) (expires <t:%d:R>)", lobbyParams.DiscordID, lobbyParams.DisplayName, latestRecord.SuspensionNotice, latestRecord.SuspensionExpiry.Unix()), false); err != nil {
-				p.logger.Warn("Failed to send audit message", zap.String("channel_id", gg.AuditChannelID), zap.Error(err))
-			}
-			const maxMessageLength = 60
-			message := latestRecord.SuspensionNotice
-			expires := fmt.Sprintf(" [exp: %s]", FormatDuration(time.Until(latestRecord.SuspensionExpiry)))
-
-			if len(message)+len(expires) > maxMessageLength {
-				message = message[:maxMessageLength-len(expires)-3] + "..."
-			}
-			message = message + expires
-			return NewLobbyError(KickedFromLobbyGroup, message)
+		if len(message)+len(expires) > maxMessageLength {
+			message = message[:maxMessageLength-len(expires)-3] + "..."
 		}
+		message = message + expires
+		return NewLobbyError(KickedFromLobbyGroup, message)
+
 	}
 
 	if gg.IsLimitedAccess(userID) {

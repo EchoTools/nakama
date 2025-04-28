@@ -522,28 +522,53 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 				actions = append(actions, fmt.Sprintf("suspension expires <t:%d:R>", suspensionExpiry.UTC().Unix()))
 			}
 
-			guildRecords := NewGuildEnforcementRecords(targetUserID, groupID)
+			guildRecords := NewGuildEnforcementJournal(targetUserID, groupID)
 			if err := StorageRead(ctx, nk, targetUserID, guildRecords, false); err != nil && status.Code(err) != codes.NotFound {
 				return fmt.Errorf("failed to read storage: %w", err)
 			}
+
 			var record *GuildEnforcementRecord
 			if isRemoval {
-				for _, record = range guildRecords.Records {
-					if !record.IsActive() {
-						continue
-					}
-					if record.AuditorNotes != "" {
-						record.AuditorNotes += "\n"
-					}
-					record.AuditorNotes = fmt.Sprintf("voided <t:%d:R> by <@%s>", time.Now().UTC().Unix(), caller.User.ID)
 
-					record.AuditorNotes += "\n" + notes
-					record.IsVoid = true
+				// Get all the applicable journals
+				journals := make(map[string]*GuildEnforcementJournal, 0)
+
+				groupIDs := []string{groupID}
+				if gg.SuspensionInheritanceGroupIDs != nil {
+					groupIDs = append(groupIDs, gg.SuspensionInheritanceGroupIDs...)
 				}
+
+				for _, gid := range groupIDs {
+					journal := NewGuildEnforcementJournal(targetUserID, gid)
+					if err := StorageRead(ctx, nk, targetUserID, journal, false); err != nil && status.Code(err) != codes.NotFound {
+						return fmt.Errorf("failed to read storage: %w", err)
+					}
+					journals[gid] = journal
+				}
+
+				for _, journal := range journals {
+
+					for _, record = range journal.Records {
+						if !record.IsActive() {
+							continue
+						}
+
+						// If this is an inherited suspension, create a new one for this guild that is voided
+						if record.GroupID != groupID {
+							record = record.Clone()
+							record.GroupID = groupID
+							guildRecords.AddRecord(record)
+						}
+
+						notes := fmt.Sprintf("voided <t:%d:R> by <@%s>", time.Now().UTC().Unix(), caller.User.ID)
+						record.Void(notes)
+					}
+				}
+
 			} else {
 				actions = append(actions, fmt.Sprintf("kicked for %s", userNotice))
 				// Add a new record
-				record = NewGuildEnforcementRecord(callerUserID, caller.User.ID, userNotice, notes, requireCommunityValues, suspensionExpiry)
+				record = NewGuildEnforcementRecord(callerUserID, caller.User.ID, groupID, userNotice, notes, requireCommunityValues, suspensionExpiry)
 				guildRecords.AddRecord(record)
 			}
 
@@ -562,7 +587,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 				}
 				displayName := evrAccount.GetGroupDisplayNameOrDefault(groupID)
 				displayName = EscapeDiscordMarkdown(displayName)
-				field := createSuspensionDetailsEmbedField(gg.Name(), []*GuildEnforcementRecord{record}, true)
+				field := createSuspensionDetailsEmbedField(gg.Name(), []*GuildEnforcementRecord{record})
 				embed := &discordgo.MessageEmbed{
 					Title:       "Enforcement Notice" + suffix,
 					Description: fmt.Sprintf("Enforcement notice for %s (%s)", displayName, target.Mention()),
