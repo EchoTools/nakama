@@ -229,6 +229,13 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 		displayAuditMessage = false
 	)
 
+	account, err := h.nk.AccountGetId(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("failed to get account: %w", err)
+	}
+	mainDiscordID := account.CustomId
+	mainUsername := account.User.Username
+
 	if gg, err = h.guildGroup(ctx, groupID); err != nil || gg == nil {
 		return fmt.Errorf("failed to load guild group: %w", err)
 	}
@@ -252,7 +259,6 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 	var (
 		firstIDs, secondaryIDs = loginHistory.AlternateIDs()
 		alternateIDs           = append(append(firstIDs, secondaryIDs...), userID)
-		suspendedUserIDs       = make(map[string]time.Time, 0)
 		alternates             = make(map[string]*compactAlternate, len(alternateIDs))
 	)
 
@@ -260,35 +266,28 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 		return nil
 	}
 
+	var activeRecord *GuildEnforcementRecord
 	// Check for guild suspensions
-	if guildRecords, err := EnforcementJournalSearch(ctx, h.nk, searchGroupIDs, alternateIDs...); err != nil {
+	searchUserIDs := append(firstIDs, userID)
+	if latestRecord, err := EnforcementActiveSuspensionSearch(ctx, h.nk, userID, groupID, searchGroupIDs, searchUserIDs); err != nil {
 		return fmt.Errorf("failed to get guild records: %w", err)
 	} else {
-		if len(guildRecords) > 0 {
-			for _, records := range guildRecords {
-				if suspensions := records.ActiveSuspensions(); len(suspensions) > 0 {
-					suspendedUserIDs[records.UserID] = suspensions[0].SuspensionExpiry
-					displayAuditMessage = true
-				}
-			}
-		}
+		activeRecord = latestRecord
 	}
 
 	// Get the accounts for the alternates, and check if they are disabled
-	if accounts, err := h.nk.AccountsGetId(ctx, alternateIDs); err != nil {
-		return fmt.Errorf("failed to get alternate accounts: %w", err)
-	} else {
-		for _, a := range accounts {
-			_, isFirstDegree := loginHistory.AlternateMap[a.User.Id]
-			alternates[a.User.Id] = &compactAlternate{
-				userID:           a.User.Id,
-				username:         a.User.Username,
-				discordID:        a.CustomId,
-				suspensionExpiry: suspendedUserIDs[a.User.Id],
-				isFirstDegree:    isFirstDegree,
-				isDisabled:       a.GetDisableTime() != nil && !a.GetDisableTime().AsTime().IsZero(),
-			}
-		}
+	activeRecordAccount, err := h.nk.AccountGetId(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("failed to get account: %w", err)
+	}
+
+	if gg.RejectPlayersWithSuspendedAlternates && (activeRecord.UserID != userID) {
+		minMinutes := 1
+		maxMinutes := 3
+		delay := time.Duration(minMinutes+rand.Intn(maxMinutes)) * time.Minute
+		ScheduleKick(ctx, h.nk, logger, h.dg, loginHistory, userID, gg, delay)
+		AuditLogSendGuild(h.dg, gg, fmt.Sprintf("<@!%s> (%s) has suspended alt (%s). Kicking from match in %d seconds.", mainDiscordID, mainUsername, activeRecordAccount.User.Id, int(delay.Seconds())))
+
 	}
 
 	content := h.alternateLogLineFormatter(userID, alternates)
@@ -471,4 +470,103 @@ func AuditLogSend(dg *discordgo.Session, channelID, content string) error {
 		}
 	}
 	return nil
+}
+
+func ScheduleKick(ctx context.Context, nk runtime.NakamaModule, logger runtime.Logger, dg *discordgo.Session, loginHistory *LoginHistory, userID string, guildGroup *GuildGroup, delay time.Duration) {
+	go func() {
+		// Set random time to disable and kick player
+		var (
+			firstIDs, _ = loginHistory.AlternateIDs()
+			altNames    = make([]string, 0, len(loginHistory.AlternateMap))
+			accountMap  = make(map[string]*api.Account, len(loginHistory.AlternateMap))
+			err         error
+		)
+
+		if accounts, err := nk.AccountsGetId(ctx, append(firstIDs, userID)); err != nil {
+			logger.Error("failed to get alternate accounts: %v", err)
+			return
+		} else {
+			for _, a := range accounts {
+				accountMap[a.User.Id] = a
+				altNames = append(altNames, fmt.Sprintf("<@%s> (%s)", a.CustomId, a.User.Username))
+			}
+		}
+
+		if len(altNames) == 0 || accountMap[userID] == nil {
+			logger.Error("failed to get alternate accounts: %v", err)
+			return
+		}
+
+		slices.Sort(altNames)
+		altNames = slices.Compact(altNames)
+
+		// Send audit log message
+		content := fmt.Sprintf("<@%s> (%s) has disabled alternates, disconnecting session(s) in %d seconds.\n%s", accountMap[userID].CustomId, accountMap[userID].User.Username, int(delay.Seconds()), strings.Join(altNames, ", "))
+		AuditLogSendGuild(dg, guildGroup, content)
+
+		logger.WithField("delay", delay).Info("kicking (with delay) user %s has disabled alternates", userID)
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+		}
+
+		presences, err := nk.StreamUserList(StreamModeService, userID, "", StreamLabelMatchService, false, true)
+		if err != nil {
+			logger.Warn("failed to get user presences: %v", err)
+			return
+		}
+
+		matchLabels := make([]*MatchLabel, 0, len(presences))
+		for _, p := range presences {
+			if p.GetStatus() != "" {
+				mid := MatchIDFromStringOrNil(p.GetStatus())
+				if mid.IsNil() {
+					continue
+				}
+				label, err := MatchLabelByID(ctx, nk, mid)
+				if err != nil {
+					logger.Warn("failed to get match label", "error", err)
+					continue
+				}
+
+				matchLabels = append(matchLabels, label)
+			}
+		}
+
+		suspendedGroupIDs := []string{
+			guildGroup.Group.Id,
+		}
+		if guildGroup.SuspensionInheritanceGroupIDs != nil {
+			suspendedGroupIDs = append(suspendedGroupIDs, guildGroup.SuspensionInheritanceGroupIDs...)
+		}
+
+		doDisconnect := false
+		for _, label := range matchLabels {
+			actions := make([]string, 0, len(matchLabels))
+			// Kick the player from the match
+			if slices.Contains(suspendedGroupIDs, label.GetGroupID().String()) {
+				doDisconnect = true
+				actions = append(actions, fmt.Sprintf("kicked from [%s](https://echo.taxi/spark://c/%s) session.", label.Mode.String(), strings.ToUpper(label.ID.UUID.String())))
+				if err := KickPlayerFromMatch(ctx, nk, label.ID, userID); err != nil {
+					actions = append(actions, fmt.Sprintf("failed to kick player from [%s](https://echo.taxi/spark://c/%s) (error: %s)", label.Mode.String(), strings.ToUpper(label.ID.UUID.String()), err.Error()))
+					continue
+				}
+			}
+		}
+
+		if doDisconnect {
+			// Disconnect the user from the session
+			if c, err := DisconnectUserID(ctx, nk, userID, true, true, false); err != nil {
+				logger.Error("failed to disconnect user: %v", err)
+			} else {
+				logger.Info("user %s disconnected: %v sessions", userID, c)
+			}
+		}
+
+		// Send audit log message
+		AuditLogSend(dg, ServiceSettings().ServiceAuditChannelID, fmt.Sprintf("Disconnected user %s (%s) from %d sessions", userID, accountMap[userID].User.Username, len(matchLabels)))
+
+	}()
 }

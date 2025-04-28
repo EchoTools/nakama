@@ -123,6 +123,7 @@ func (s *GuildEnforcementJournal) MarshalJSON() ([]byte, error) {
 
 type GuildEnforcementRecord struct {
 	ID                      string    `json:"id"`
+	UserID                  string    `json:"user_id"`
 	GroupID                 string    `json:"group_id"`
 	EnforcerUserID          string    `json:"enforcer_user_id"`
 	EnforcerDiscordID       string    `json:"enforcer_discord_id"`
@@ -135,7 +136,7 @@ type GuildEnforcementRecord struct {
 	IsVoid                  bool      `json:"is_void"`
 }
 
-func NewGuildEnforcementRecord(enforcerUserID, enforcerDiscordID string, groupID string, suspensionNotice, notes string, requireCommunityValues bool, suspensionExpiry time.Time) *GuildEnforcementRecord {
+func NewGuildEnforcementRecord(enforcerUserID, enforcerDiscordID string, userID string, groupID string, suspensionNotice, notes string, requireCommunityValues bool, suspensionExpiry time.Time) *GuildEnforcementRecord {
 	return &GuildEnforcementRecord{
 		ID:                      uuid.Must(uuid.NewV4()).String(),
 		GroupID:                 groupID,
@@ -154,6 +155,7 @@ func NewGuildEnforcementRecord(enforcerUserID, enforcerDiscordID string, groupID
 func (r GuildEnforcementRecord) Clone() *GuildEnforcementRecord {
 	return &GuildEnforcementRecord{
 		ID:                      r.ID,
+		UserID:                  r.UserID,
 		GroupID:                 r.GroupID,
 		EnforcerUserID:          r.EnforcerUserID,
 		EnforcerDiscordID:       r.EnforcerDiscordID,
@@ -217,7 +219,7 @@ func (r *GuildEnforcementRecord) RequiresCommunityValues() bool {
 	return r.CommunityValuesRequired
 }
 
-func EnforcementActiveSuspensionSearch(ctx context.Context, nk runtime.NakamaModule, targetGroupID string, inheritedGroupIDs []string, userID string) (*GuildEnforcementRecord, error) {
+func EnforcementActiveSuspensionSearch(ctx context.Context, nk runtime.NakamaModule, targetUserID, targetGroupID string, inheritedGroupIDs, userIDs []string) (*GuildEnforcementRecord, error) {
 
 	groupIDs := []string{targetGroupID}
 	if len(inheritedGroupIDs) > 0 {
@@ -227,7 +229,7 @@ func EnforcementActiveSuspensionSearch(ctx context.Context, nk runtime.NakamaMod
 	qparts := []string{
 		fmt.Sprintf(`+value.suspension_expiry:>"%s"`, time.Now().UTC().Format(time.RFC3339)),
 		fmt.Sprintf("+value.group_id:%s", Query.MatchItem(groupIDs)),
-		fmt.Sprintf(`+value.user_id:%s`, Query.MatchItem([]string{userID})),
+		fmt.Sprintf(`+value.user_id:%s`, Query.MatchItem(userIDs)),
 	}
 
 	query := strings.Join(qparts, " ")
@@ -241,8 +243,9 @@ func EnforcementActiveSuspensionSearch(ctx context.Context, nk runtime.NakamaMod
 		return nil, nil
 	}
 
-	journal := NewGuildEnforcementJournal(userID, targetGroupID)
-	if err := StorageRead(ctx, nk, userID, journal, false); err != nil && status.Code(err) != codes.NotFound {
+	primrayUserID := userIDs[0]
+	journal := NewGuildEnforcementJournal(primrayUserID, targetGroupID)
+	if err := StorageRead(ctx, nk, primrayUserID, journal, false); err != nil && status.Code(err) != codes.NotFound {
 		return nil, err
 	}
 

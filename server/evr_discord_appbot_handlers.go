@@ -568,7 +568,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 			} else {
 				actions = append(actions, fmt.Sprintf("kicked for %s", userNotice))
 				// Add a new record
-				record = NewGuildEnforcementRecord(callerUserID, caller.User.ID, groupID, userNotice, notes, requireCommunityValues, suspensionExpiry)
+				record = NewGuildEnforcementRecord(callerUserID, caller.User.ID, targetUserID, groupID, userNotice, notes, requireCommunityValues, suspensionExpiry)
 				guildRecords.AddRecord(record)
 			}
 
