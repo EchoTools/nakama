@@ -161,10 +161,16 @@ func (g *GuildGroup) IsAllocator(userID string) bool {
 }
 
 func (g *GuildGroup) IsAuditor(userID string) bool {
+	if slices.Contains(g.NegatedEnforcerIDs, userID) {
+		return false
+	}
 	return g.HasRole(userID, g.RoleMap.Auditor)
 }
 
 func (g *GuildGroup) IsEnforcer(userID string) bool {
+	if slices.Contains(g.NegatedEnforcerIDs, userID) {
+		return false
+	}
 	return g.HasRole(userID, g.RoleMap.Enforcer)
 }
 
