@@ -22,15 +22,19 @@ func (w *WhoAmI) createUserAccountDetailsEmbed(a *EVRProfile, loginHistory *Logi
 
 	var (
 		currentDisplayNameByGroupID = displayNameHistory.LatestByGroupID()
-		lastSeen                    time.Time
+		lastSeen                    string
+		partyGroupName              string
+		defaultMatchmakingGuildName string
+		recentLogins                string
+		linkedDevices               string
 	)
 
 	// If the player is online, set the last seen time to now.
 	// If the player is offline, set the last seen time to the last login time.
 	if a.IsOnline() {
-		lastSeen = time.Now()
+		lastSeen = "Now"
 	} else {
-		lastSeen = loginHistory.LastSeen()
+		lastSeen = fmt.Sprintf("<t:%d:R>", loginHistory.LastSeen().UTC().Unix())
 	}
 
 	// Build a list of the players active display names, by guild group
@@ -43,11 +47,6 @@ func (w *WhoAmI) createUserAccountDetailsEmbed(a *EVRProfile, loginHistory *Logi
 		}
 	}
 	slices.Sort(activeDisplayNames)
-
-	partyGroupName := ""
-	defaultMatchmakingGuildName := ""
-	recentLogins := ""
-	linkedDevices := ""
 
 	if includePriviledged {
 
@@ -71,6 +70,16 @@ func (w *WhoAmI) createUserAccountDetailsEmbed(a *EVRProfile, loginHistory *Logi
 
 		recentLogins = w.createRecentLoginsFieldValue(loginHistory, stripIPAddresses, showLoginsSince)
 	}
+
+	passwordState := ""
+	if includePriviledged {
+		if a.HasPasswordSet() {
+			passwordState = "Yes"
+		} else {
+			passwordState = "No"
+		}
+	}
+
 	embed := &discordgo.MessageEmbed{
 		Description: fmt.Sprintf("<@%s>", a.DiscordID()),
 		Color:       0x0000CC,
@@ -90,7 +99,7 @@ func (w *WhoAmI) createUserAccountDetailsEmbed(a *EVRProfile, loginHistory *Logi
 			},
 			{
 				Name:   "Password Set",
-				Value:  fmt.Sprintf("%v", a.HasPasswordSet()),
+				Value:  passwordState,
 				Inline: true,
 			},
 			{
@@ -100,7 +109,7 @@ func (w *WhoAmI) createUserAccountDetailsEmbed(a *EVRProfile, loginHistory *Logi
 			},
 			{
 				Name:   "Last Seen",
-				Value:  fmt.Sprintf("<t:%d:R>", lastSeen.UTC().Unix()),
+				Value:  lastSeen,
 				Inline: true,
 			},
 			{
@@ -195,6 +204,10 @@ func (WhoAmI) createMatchmakingEmbed(account *EVRProfile, guildGroups map[string
 	if len(matchList) == 0 && lastMatchmakingError == nil {
 		return nil
 	}
+	lastMatchmakingErrorStr := ""
+	if lastMatchmakingError != nil {
+		lastMatchmakingErrorStr = lastMatchmakingError.Error()
+	}
 
 	embed := &discordgo.MessageEmbed{
 		Title: "Matchmaking",
@@ -207,7 +220,7 @@ func (WhoAmI) createMatchmakingEmbed(account *EVRProfile, guildGroups map[string
 			},
 			{
 				Name:   "Last Matchmaking Error",
-				Value:  fmt.Sprintf("%v", lastMatchmakingError),
+				Value:  lastMatchmakingErrorStr,
 				Inline: true,
 			},
 		},
@@ -246,6 +259,10 @@ func (WhoAmI) createPastDisplayNameEmbed(history *DisplayNameHistory, groupID st
 
 	if len(displayNames) > 10 {
 		displayNames = displayNames[len(displayNames)-10:]
+	}
+
+	if len(displayNames) == 0 {
+		return nil
 	}
 
 	return &discordgo.MessageEmbed{
@@ -489,13 +506,11 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		}
 	}
 
-	if includePriviledged {
-		settings, err := LoadMatchmakingSettings(ctx, nk, targetID)
-		if err != nil {
-			return fmt.Errorf("failed to load matchmaking settings: %w", err)
-		}
-		matchmakingSettings = &settings
+	settings, err := LoadMatchmakingSettings(ctx, nk, targetID)
+	if err != nil {
+		return fmt.Errorf("failed to load matchmaking settings: %w", err)
 	}
+	matchmakingSettings = &settings
 
 	if includeCurrentMatches {
 		// Get the players current lobby sessions
