@@ -417,7 +417,7 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 	loginHistory.Update(params.xpID, session.clientIP, params.loginPayload)
 
 	defer func(userID string) {
-		if _, err := StorageWrite(context.Background(), p.nk, userID, loginHistory); err != nil {
+		if err := StorageWrite(context.Background(), p.nk, userID, loginHistory); err != nil {
 			logger.Warn("Failed to store login history", zap.Error(err))
 		}
 	}(session.UserID().String())
@@ -847,7 +847,7 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 				records.CommunityValuesCompletedAt = time.Now().UTC()
 				records.IsCommunityValuesRequired = false
 
-				if _, err := StorageWrite(ctx, p.nk, userID, records); err != nil {
+				if err := StorageWrite(ctx, p.nk, userID, records); err != nil {
 					logger.Warn("Failed to write community values", zap.Error(err))
 				}
 

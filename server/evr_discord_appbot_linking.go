@@ -67,7 +67,7 @@ func (d *DiscordAppBot) linkHeadset(ctx context.Context, logger runtime.Logger, 
 		history.Update(ticket.XPID, ticket.ClientIP, ticket.LoginProfile)
 		history.AuthorizeIP(ticket.ClientIP)
 
-		if _, err := StorageWrite(ctx, nk, userID, history); err != nil {
+		if err := StorageWrite(ctx, nk, userID, history); err != nil {
 			return fmt.Errorf("failed to save login history: %w", err)
 		}
 

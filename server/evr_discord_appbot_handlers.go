@@ -193,7 +193,7 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(logger runtime.Logger,
 			if err := history.AuthorizeIPWithCode(strs[0], strs[1]); err != nil {
 
 				// Store the history
-				if _, err := StorageWrite(ctx, nk, userID, history); err != nil {
+				if err := StorageWrite(ctx, nk, userID, history); err != nil {
 					return fmt.Errorf("failed to save login history: %w", err)
 				}
 
@@ -225,7 +225,7 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(logger runtime.Logger,
 			}
 		}
 
-		if _, err := StorageWrite(ctx, nk, userID, history); err != nil {
+		if err := StorageWrite(ctx, nk, userID, history); err != nil {
 			return fmt.Errorf("failed to save login history: %w", err)
 		}
 
@@ -572,7 +572,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 				guildRecords.AddRecord(record)
 			}
 
-			if _, err := StorageWrite(ctx, nk, targetUserID, guildRecords); err != nil {
+			if err := StorageWrite(ctx, nk, targetUserID, guildRecords); err != nil {
 				return fmt.Errorf("failed to write storage: %w", err)
 			}
 

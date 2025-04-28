@@ -64,7 +64,6 @@ func StorageRead(ctx context.Context, nk runtime.NakamaModule, userID string, ds
 
 	meta := dst.StorageMeta()
 
-	var version string
 	objs, err := nk.StorageRead(ctx, []*runtime.StorageRead{
 		{
 			Collection: meta.Collection,
@@ -82,7 +81,10 @@ func StorageRead(ctx context.Context, nk runtime.NakamaModule, userID string, ds
 			return status.Errorf(codes.Internal, "failed to unmarshal %s/%s: %v", userID, meta.String(), err)
 		}
 
-		version = objs[0].GetVersion()
+		// Ensure that the object does not exist
+		if obj, ok := dst.(VersionedStorable); ok {
+			obj.SetStorageVersion(userID, objs[0].GetVersion())
+		}
 
 	} else {
 		if create {
@@ -92,7 +94,7 @@ func StorageRead(ctx context.Context, nk runtime.NakamaModule, userID string, ds
 				obj.SetStorageVersion(userID, "*")
 			}
 
-			if version, err = StorageWrite(ctx, nk, userID, dst); err != nil {
+			if err = StorageWrite(ctx, nk, userID, dst); err != nil {
 				return status.Errorf(codes.Internal, "failed to create %s/%s: %v", userID, meta.String(), err)
 			}
 
@@ -101,22 +103,14 @@ func StorageRead(ctx context.Context, nk runtime.NakamaModule, userID string, ds
 		}
 	}
 
-	// Set the new object version
-	if obj, ok := dst.(VersionedStorable); ok {
-		if version == "" {
-			version = "*" // This is a special value that indicates the object is new and has no version.
-		}
-		obj.SetStorageVersion(userID, version)
-	}
-
 	return nil
 }
 
-func StorageWrite(ctx context.Context, nk runtime.NakamaModule, userID string, src Storable) (string, error) {
+func StorageWrite(ctx context.Context, nk runtime.NakamaModule, userID string, src Storable) error {
 	meta := src.StorageMeta()
 	data, err := json.Marshal(src)
 	if err != nil {
-		return "", status.Errorf(codes.Internal, "failed to marshal %s/%s: %s", userID, meta.String(), err.Error())
+		return status.Errorf(codes.Internal, "failed to marshal %s/%s: %s", userID, meta.String(), err.Error())
 	}
 
 	acks, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{
@@ -131,12 +125,12 @@ func StorageWrite(ctx context.Context, nk runtime.NakamaModule, userID string, s
 		},
 	})
 	if err != nil {
-		return "", status.Errorf(codes.Internal, "failed to write %s/%s: %v", userID, meta.String(), err.Error())
+		return status.Errorf(codes.Internal, "failed to write %s/%s: %v", userID, meta.String(), err.Error())
 	}
 
 	if obj, ok := src.(VersionedStorable); ok {
 		obj.SetStorageVersion(userID, acks[0].GetVersion())
 	}
 
-	return acks[0].Version, nil
+	return nil
 }

@@ -244,7 +244,7 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 
 	if updated := loginHistory.NotifyGroup(groupID, gg.AlternateAccountNotificationExpiry); updated {
 		displayAuditMessage = true
-		if _, err := StorageWrite(ctx, h.nk, userID, loginHistory); err != nil {
+		if err := StorageWrite(ctx, h.nk, userID, loginHistory); err != nil {
 			return fmt.Errorf("failed to store login history: %w", err)
 		}
 	}
@@ -362,7 +362,7 @@ func (h *EventDispatch) handleUserLogin(ctx context.Context, logger runtime.Logg
 		return fmt.Errorf("failed to update alternates: %w", err)
 	}
 
-	if _, err := StorageWrite(ctx, h.nk, userID, loginHistory); err != nil {
+	if err := StorageWrite(ctx, h.nk, userID, loginHistory); err != nil {
 		return fmt.Errorf("failed to store login history: %w", err)
 	}
 
