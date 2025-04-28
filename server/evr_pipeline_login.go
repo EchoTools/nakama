@@ -255,7 +255,9 @@ func (p *EvrPipeline) processLoginRequest(ctx context.Context, logger *zap.Logge
 	if err = p.authenticateSession(ctx, logger, session, params); err != nil {
 		return err
 	}
-	if err = MigrateUser(ctx, logger, p.nk, p.db, session.userID.String()); err != nil {
+
+	loginMigrations := []UserMigrater{}
+	if err = MigrateUser(ctx, logger, p.nk, p.db, session.userID.String(), loginMigrations); err != nil {
 		return fmt.Errorf("failed to migrate user: %w", err)
 	}
 

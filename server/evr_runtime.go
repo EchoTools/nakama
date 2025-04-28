@@ -262,11 +262,11 @@ func RegisterIndexes(initializer runtime.Initializer) error {
 	// Register storage indexes for any Storables
 	storables := []IndexedStorable{
 		&DisplayNameHistory{},
-		&LoginHistory{},
+		&GuildEnforcementJournal{},
 		&DeveloperApplications{},
-		&GuildEnforcementRecords{},
 		&MatchmakingSettings{},
 		&VRMLPlayerSummary{},
+		&LoginHistory{},
 	}
 	for _, s := range storables {
 		if idx := s.StorageIndex(); idx != nil {
