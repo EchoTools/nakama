@@ -22,9 +22,11 @@ var (
 	MaximumDisplayNameAge = time.Hour * 24 * 30 * 2 // 2 months
 )
 
+var _ = IndexedStorable(&DisplayNameHistory{})
+
 type DisplayNameHistory struct {
 	Histories    map[string]map[string]time.Time `json:"history"`   // map[groupID]map[displayName]lastUsedTime
-	Reserved     map[string]struct{}             `json:"reserved"`  // staticly reserved names
+	Reserved     []string                        `json:"reserves"`  // staticly reserved names
 	Username     string                          `json:"username"`  // the user's username
 	ActiveCache  []string                        `json:"active"`    // (lowercased) names that the user has active/reserved
 	HistoryCache []string                        `json:"cache"`     // (lowercased) used for searching
@@ -43,7 +45,7 @@ func (DisplayNameHistory) StorageIndex() *StorageIndexMeta {
 		Name:           DisplayNameHistoryCacheIndex,
 		Collection:     DisplayNameCollection,
 		Key:            DisplayNameHistoryKey,
-		Fields:         []string{"active", "cache", "reserved", "username"},
+		Fields:         []string{"is_active", "active", "cache", "reserves", "username"},
 		SortableFields: nil,
 		MaxEntries:     1000000,
 		IndexOnly:      false,
@@ -55,7 +57,7 @@ func NewDisplayNameHistory() *DisplayNameHistory {
 		Histories:    make(map[string]map[string]time.Time),
 		ActiveCache:  make([]string, 0),
 		HistoryCache: make([]string, 0),
-		Reserved:     make(map[string]struct{}),
+		Reserved:     make([]string, 0),
 	}
 }
 
@@ -102,7 +104,7 @@ func (h *DisplayNameHistory) compile() {
 	}
 
 	// Add the reserved names to the cache
-	for name := range h.Reserved {
+	for _, name := range h.Reserved {
 		if name == "" {
 			continue
 		}
@@ -231,18 +233,23 @@ func (h *DisplayNameHistory) Latest(groupID string) (string, time.Time) {
 
 func (h *DisplayNameHistory) AddReserved(displayName string) {
 	if h.Reserved == nil {
-		h.Reserved = make(map[string]struct{})
+		h.Reserved = make([]string, 1)
 	}
 
-	h.Reserved[displayName] = struct{}{}
+	h.Reserved = append(h.Reserved, displayName)
 }
 
 func (h *DisplayNameHistory) RemoveReserved(displayName string) {
 	if h.Reserved == nil {
-		h.Reserved = make(map[string]struct{})
+		h.Reserved = make([]string, 0)
 	}
 
-	delete(h.Reserved, displayName)
+	for i, name := range h.Reserved {
+		if name == displayName {
+			h.Reserved = append(h.Reserved[:i], h.Reserved[i+1:]...)
+			break
+		}
+	}
 }
 
 func DisplayNameHistoryLoad(ctx context.Context, nk runtime.NakamaModule, userID string) (*DisplayNameHistory, error) {
@@ -356,7 +363,7 @@ func DisplayNameCacheRegexSearch(ctx context.Context, nk runtime.NakamaModule, p
 		}
 
 		// Add exact matches for reserved names
-		for name := range history.Reserved {
+		for _, name := range history.Reserved {
 			if strings.ToLower(name) == pattern {
 				matches[userID][globalGroupID][name] = time.Time{}
 			}
@@ -438,13 +445,16 @@ func DisplayNameHistoryActiveList(ctx context.Context, nk runtime.NakamaModule, 
 
 	displayName = strings.ToLower(displayName)
 	displayName = Query.Escape(displayName)
-	query := fmt.Sprintf("value.active:%s value.reserved:%s value.username:%s", displayName, displayName, displayName)
+	query := fmt.Sprintf("value.active:%s value.reserves:%s value.username:%s", displayName, displayName, displayName)
 
-	cursor := ""
-	var results []*api.StorageObject
+	var (
+		cursor  string
+		err     error
+		results []*api.StorageObject
+		result  *api.StorageObjects
+	)
 	for {
-
-		result, cursor, err := nk.StorageIndexList(ctx, SystemUserID, DisplayNameHistoryCacheIndex, query, 100, nil, cursor)
+		result, cursor, err = nk.StorageIndexList(ctx, SystemUserID, DisplayNameHistoryCacheIndex, query, 100, nil, cursor)
 		if err != nil {
 			return nil, fmt.Errorf("error listing display name history: %w", err)
 		}

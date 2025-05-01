@@ -781,7 +781,7 @@ func (d *DiscordIntegrator) deconflictDisplayName(ctx context.Context, displayNa
 
 		users = append(users, user)
 
-		if _, ok := history.Reserved[displayName]; ok {
+		if slices.Contains(history.Reserved, displayName) {
 			// this user has reserved the name, remove all other users
 			user.isReserved = true
 			continue
