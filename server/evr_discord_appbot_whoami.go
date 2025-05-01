@@ -40,7 +40,9 @@ func (w *WhoAmI) createUserAccountDetailsEmbed(a *EVRProfile, loginHistory *Logi
 	for gid, dn := range currentDisplayNameByGroupID {
 		if gg, ok := guildGroups[gid]; ok {
 			guildName := EscapeDiscordMarkdown(gg.Name())
-			activeDisplayNames = append(activeDisplayNames, fmt.Sprintf("%s: `%s`", guildName, EscapeDiscordMarkdown(dn)))
+			// Replace `'s with `\'s`
+			dn = strings.ReplaceAll(dn, "`", "\\`")
+			activeDisplayNames = append(activeDisplayNames, fmt.Sprintf("%s: `%s`", guildName, dn))
 
 		}
 	}
