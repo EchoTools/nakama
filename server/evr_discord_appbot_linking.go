@@ -83,8 +83,7 @@ func (d *DiscordAppBot) linkHeadset(ctx context.Context, logger runtime.Logger, 
 	return nil
 }
 
-func (d *DiscordAppBot) handleLinkHeadset(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
-	ctx := d.ctx
+func (d *DiscordAppBot) handleLinkHeadset(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 
 	options := i.ApplicationCommandData().Options
 	if len(options) == 0 {
@@ -124,8 +123,7 @@ func (d *DiscordAppBot) handleLinkHeadset(logger runtime.Logger, s *discordgo.Se
 	})
 }
 
-func (d *DiscordAppBot) handleUnlinkHeadset(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
-	ctx := d.ctx
+func (d *DiscordAppBot) handleUnlinkHeadset(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 	nk := d.nk
 	options := i.ApplicationCommandData().Options
 	if len(options) == 0 {

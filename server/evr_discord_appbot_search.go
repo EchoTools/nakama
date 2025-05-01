@@ -83,10 +83,9 @@ func parseCommandOption[E CommandOption](s *discordgo.Session, i *discordgo.Inte
 	return nil
 }
 
-func (d *DiscordAppBot) handleSearch(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userIDStr string, groupID string) error {
+func (d *DiscordAppBot) handleSearch(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userIDStr string, groupID string) error {
 
 	var (
-		ctx               = context.Background()
 		nk                = d.nk
 		db                = d.db
 		partial           string

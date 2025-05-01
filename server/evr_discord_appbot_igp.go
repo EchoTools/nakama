@@ -649,7 +649,7 @@ func (d *DiscordAppBot) handleModalSubmit(logger runtime.Logger, i *discordgo.In
 	}
 }
 
-func (d *DiscordAppBot) handleInGamePanel(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+func (d *DiscordAppBot) handleInGamePanel(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 
 	var (
 		igp *InGamePanel

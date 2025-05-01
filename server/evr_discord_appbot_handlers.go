@@ -18,9 +18,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-func (d *DiscordAppBot) handleInteractionApplicationCommand(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, commandName string, commandFn DiscordCommandHandlerFn) error {
-	ctx := d.ctx
-
+func (d *DiscordAppBot) handleInteractionApplicationCommand(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, commandName string, commandFn DiscordCommandHandlerFn) error {
 	user, member := getScopedUserMember(i)
 
 	if user == nil {
@@ -143,11 +141,10 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(logger runtime.Logge
 			return simpleInteractionResponse(s, i, "You must be a guild auditor to use this command.")
 		}
 	}
-	return commandFn(logger, s, i, user, member, userID, groupID)
+	return commandFn(ctx, logger, s, i, user, member, userID, groupID)
 }
 
-func (d *DiscordAppBot) handleInteractionMessageComponent(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, commandName, value string) error {
-	ctx := d.ctx
+func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, commandName, value string) error {
 	nk := d.nk
 	user, member := getScopedUserMember(i)
 
