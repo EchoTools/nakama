@@ -47,8 +47,16 @@ type SessionParameters struct {
 	isEarlyQuitter       *atomic.Bool                    // The user is an early quitter
 	isGoldNameTag        *atomic.Bool                    // If this user should have a gold name tag
 	lastMatchmakingError *atomic.Error                   // The last matchmaking error
-	latencyHistory       *atomic.Pointer[LatencyHistory] // The latency history
+	latencyHistory       *atomic.Pointer[LatencyHistory] // The latency history\
+	isIGPOpen            *atomic.Bool                    // The user has IGPU open
 
+}
+
+func (s *SessionParameters) IsIGPOpen() bool {
+	if s.isIGPOpen == nil {
+		return false
+	}
+	return s.isIGPOpen.Load()
 }
 
 func (s *SessionParameters) MetricsTags() map[string]string {

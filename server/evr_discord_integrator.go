@@ -135,6 +135,7 @@ func (c *DiscordIntegrator) Start() {
 				logger.Debug("Synced guild group member")
 
 			case <-cooldownTicker.C:
+
 				c.queueCooldowns.Range(func(entry QueueEntry, t time.Time) bool {
 					if time.Now().After(t) {
 						logger := logger.With(
