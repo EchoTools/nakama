@@ -368,6 +368,11 @@ func (p *InGamePanel) createUpdateEdit(guildID string, label *MatchLabel, recent
 	components = append(components,
 		discordgo.ActionsRow{
 			Components: []discordgo.MessageComponent{
+				discordgo.Button{
+					Label:    "Set IGN",
+					Style:    discordgo.SecondaryButton,
+					CustomID: "igp:" + p.userID + ":set_ign",
+				},
 				discordgo.SelectMenu{
 					MenuType:      discordgo.StringSelectMenu,
 					CustomID:      "igp:" + p.userID + ":select_player",
@@ -565,6 +570,29 @@ func (p *InGamePanel) createSuspendPlayerModal(targetDiscordID, displayName stri
 	}
 }
 
+func (p *InGamePanel) createSetIGNModal(currentDisplayName string) *discordgo.InteractionResponse {
+	return &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseModal,
+		Data: &discordgo.InteractionResponseData{
+			CustomID: "igp:set_ign_modal",
+			Title:    "Set IGN",
+			Components: []discordgo.MessageComponent{
+				discordgo.ActionsRow{
+					Components: []discordgo.MessageComponent{
+						discordgo.TextInput{
+							CustomID: "display_name_input",
+							Label:    "Display Name",
+							Value:    currentDisplayName,
+							Style:    discordgo.TextInputShort,
+							Required: true,
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
 func (p *InGamePanel) HandleInteraction(i *discordgo.InteractionCreate, command string) error {
 	if p.IsStopped() {
 		return fmt.Errorf("panel is stopped")
@@ -575,8 +603,32 @@ func (p *InGamePanel) HandleInteraction(i *discordgo.InteractionCreate, command 
 	data := i.Interaction.MessageComponentData()
 
 	switch action {
+	case "set_ign":
+
+		userID := p.cache.DiscordIDToUserID(i.Member.User.ID)
+		if userID == "" {
+			return fmt.Errorf("failed to get user ID")
+		}
+		groupID := p.cache.GuildIDToGroupID(i.GuildID)
+		if groupID == "" {
+			return fmt.Errorf("failed to get group ID")
+		}
+
+		var evrProfile *EVRProfile
+		if a, err := p.nk.AccountGetId(p.ctx, userID); err != nil {
+			return fmt.Errorf("failed to get account by ID: %w", err)
+		} else if a.GetDisableTime() != nil {
+			return fmt.Errorf("account is disabled")
+		} else if evrProfile, err = BuildEVRProfileFromAccount(a); err != nil {
+			return fmt.Errorf("failed to get account by ID: %w", err)
+		}
+
+		// Get the selected user ID
+		modal := p.createSetIGNModal(evrProfile.GetGroupDisplayNameOrDefault(groupID))
+		return p.dg.InteractionRespond(i.Interaction, modal)
 
 	case "select_player":
+
 		// Get the selected user ID
 		selectedUserID := data.Values[0]
 		var player PlayerInfo
