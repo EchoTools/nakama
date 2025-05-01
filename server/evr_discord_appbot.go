@@ -20,7 +20,6 @@ import (
 
 	anyascii "github.com/anyascii/go"
 	"github.com/bwmarrin/discordgo"
-	"github.com/echotools/vrmlgo/v5"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
@@ -881,7 +880,7 @@ func (d *DiscordAppBot) UnregisterCommands(ctx context.Context, logger runtime.L
 	}
 }
 
-type DiscordCommandHandlerFn func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error
+type DiscordCommandHandlerFn func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error
 
 func (d *DiscordAppBot) RegisterSlashCommands() error {
 	ctx := d.ctx
@@ -891,7 +890,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 	commandHandlers := map[string]DiscordCommandHandlerFn{
 
-		"set-command-channel": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+		"set-command-channel": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 
 			// Needs to have a green button that says link
 			components := []discordgo.MessageComponent{
@@ -939,7 +938,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			return nil
 		},
-		"generate-button": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+		"generate-button": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 
 			// Needs to have a green button that says link
 			components := []discordgo.MessageComponent{
@@ -982,7 +981,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			return nil
 		},
-		"hash": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+		"hash": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			options := i.ApplicationCommandData().Options
 			if len(options) == 0 {
 				return errors.New("no options provided")
@@ -1032,7 +1031,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			})
 		},
 
-		"party-status": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+		"party-status": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 
 			// Check if this user is online and currently in a party.
 			groupName, partyUUID, err := GetLobbyGroupID(ctx, d.db, userID)
@@ -1227,7 +1226,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			return nil
 
 		},
-		"ign": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+		"ign": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 
 			options := i.ApplicationCommandData().Options
 			if len(options) == 0 {
@@ -1263,7 +1262,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 		"unlink":         d.handleUnlinkHeadset,
 		"link-headset":   d.handleLinkHeadset,
 		"unlink-headset": d.handleUnlinkHeadset,
-		"check-server": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+		"check-server": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 
 			options := i.ApplicationCommandData().Options
 			if len(options) == 0 {
@@ -1417,7 +1416,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			}
 		},
-		"shutdown-match": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+		"shutdown-match": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			if user == nil {
 				return nil
 			}
@@ -1508,7 +1507,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			})
 		},
 
-		"reset-password": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+		"reset-password": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 
 			if user == nil {
 				return nil
@@ -1543,7 +1542,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 		},
 
-		"jersey-number": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+		"jersey-number": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			options := i.ApplicationCommandData().Options
 			if len(options) == 0 {
 				return errors.New("no options provided")
@@ -1583,7 +1582,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			})
 		},
 
-		"badges": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+		"badges": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			options := i.ApplicationCommandData().Options
 			var err error
 
@@ -1694,7 +1693,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			return nil
 		},
-		"whoami": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+		"whoami": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 
 			if user == nil {
 				return nil
@@ -1717,7 +1716,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}).Debug("whoami")
 			return err
 		},
-		"next-match": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+		"next-match": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			if user == nil {
 				return nil
 			}
@@ -1748,7 +1747,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			return simpleInteractionResponse(s, i, fmt.Sprintf("Next match set to `%s`", matchID))
 		},
-		"throw-settings": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userIDStr string, groupID string) error {
+		"throw-settings": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userIDStr string, groupID string) error {
 			metadata, err := EVRProfileLoad(ctx, nk, userIDStr)
 			if err != nil {
 				return fmt.Errorf("failed to get account metadata: %w", err)
@@ -1788,7 +1787,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			return nil
 		},
 
-		"set-lobby": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userIDStr string, groupID string) error {
+		"set-lobby": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userIDStr string, groupID string) error {
 			if member == nil {
 				return fmt.Errorf("this command must be used from a guild")
 			}
@@ -1825,7 +1824,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				},
 			})
 		},
-		"verify": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userIDStr string, groupID string) error {
+		"verify": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userIDStr string, groupID string) error {
 			if member == nil {
 				return fmt.Errorf("this command must be used from a guild")
 			}
@@ -1877,7 +1876,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			return nil
 
 		},
-		"lookup": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userIDStr string, groupID string) error {
+		"lookup": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userIDStr string, groupID string) error {
 
 			if user == nil {
 				return nil
@@ -1943,7 +1942,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			return d.handleProfileRequest(ctx, logger, nk, s, i, target, includePriviledged, includePrivate, includeGuildAuditor, includeSystem, includeSuspensions, includePastSuspensions, includeCurrentMatches)
 		},
 		"search": d.handleSearch,
-		"create": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+		"create": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			options := i.ApplicationCommandData().Options
 
 			if member == nil {
@@ -2121,7 +2120,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			return s.InteractionRespond(i.Interaction, responseContent)
 		},
-		"allocate": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+		"allocate": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			options := i.ApplicationCommandData().Options
 
 			if member == nil {
@@ -2167,7 +2166,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			logger.WithField("label", label).Info("Match prepared")
 			return simpleInteractionResponse(s, i, fmt.Sprintf("Match prepared with label ```json\n%s\n```\nhttps://echo.taxi/spark://c/%s", label.GetLabelIndented(), strings.ToUpper(label.ID.UUID.String())))
 		},
-		"kick-player": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, callerMember *discordgo.Member, userID string, groupID string) error {
+		"kick-player": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, callerMember *discordgo.Member, userID string, groupID string) error {
 
 			if user == nil {
 				return nil
@@ -2207,7 +2206,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			return d.kickPlayer(logger, i, callerMember, target, duration, userNotice, notes, requireCommunityValues)
 		},
-		"join-player": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+		"join-player": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 
 			if user == nil {
 				return nil
@@ -2249,7 +2248,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 			return simpleInteractionResponse(s, i, "No match found.")
 		},
-		"set-roles": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+		"set-roles": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			options := i.ApplicationCommandData().Options
 
 			// Ensure the user is the owner of the guild
@@ -2314,7 +2313,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			return simpleInteractionResponse(s, i, "roles set!")
 		},
 
-		"region-status": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+		"region-status": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			options := i.ApplicationCommandData().Options
 
 			if user == nil {
@@ -2328,7 +2327,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			return d.createRegionStatusEmbed(ctx, logger, regionStr, i.Interaction.ChannelID, nil)
 		},
-		"stream-list": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+		"stream-list": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			options := i.ApplicationCommandData().Options
 
 			if user == nil {
@@ -2435,7 +2434,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			return nil
 		},
 
-		"party": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+		"party": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 
 			if user == nil {
 				return nil
@@ -2603,7 +2602,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 			return discordgo.ErrNilState
 		},
-		"outfits": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
+		"outfits": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 			if user == nil {
 				return nil
 			}
@@ -2716,141 +2715,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			return discordgo.ErrNilState
 		},
-		"vrml-verify": func(logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
-			// accountLinkCommandHandler handles the account link command from Discord
-
-			var (
-				nk             = d.nk
-				db             = d.db
-				vrmlUser       *vrmlgo.User
-				editResponseFn = func(content string) error {
-					_, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-						Content: &content,
-					})
-					return err
-				}
-			)
-
-			// Try to load the user's existing VRML account data
-			if account, err := nk.AccountGetId(ctx, userID); err != nil {
-				return fmt.Errorf("failed to get account: %w", err)
-			} else {
-
-				// Search the user's devices for a VRML userID
-				for _, d := range account.Devices {
-					if vrmlUserID, found := strings.CutPrefix(d.Id, DeviceIDPrefixVRML); found {
-						vg := vrmlgo.New("")
-						if m, err := vg.Member(vrmlUserID); err != nil {
-							return fmt.Errorf("failed to get VRML user: %w", err)
-						} else {
-							vrmlUser = m.User
-						}
-						break
-					}
-				}
-			}
-
-			go func() {
-
-				if vrmlUser == nil {
-
-					vars, _ := ctx.Value(runtime.RUNTIME_CTX_ENV).(map[string]string)
-
-					// Start the OAuth flow
-					timeoutDuration := 5 * time.Minute
-					flow, err := NewVRMLOAuthFlow(vars["VRML_OAUTH_CLIENT_ID"], vars["VRML_OAUTH_REDIRECT_URL"], timeoutDuration)
-					if err != nil {
-						logger.Error("Failed to start OAuth flow", zap.Error(err))
-						return
-					}
-
-					// Send the link to the user
-					if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-						Type: discordgo.InteractionResponseChannelMessageWithSource,
-						Data: &discordgo.InteractionResponseData{
-							Flags:   discordgo.MessageFlagsEphemeral | discordgo.MessageFlagsSuppressEmbeds,
-							Content: fmt.Sprintf("To assign your cosmetics, [Verify your VRML account](%s)", flow.url),
-						},
-					}); err != nil {
-						logger.Error("Failed to send interaction response", zap.Error(err))
-						return
-					}
-
-					// Wait for the token to be returned
-					select {
-					case <-time.After(timeoutDuration):
-						simpleInteractionResponse(s, i, "OAuth flow timed out. Please run the command again.")
-						return // Timeout
-					case token := <-flow.tokenCh:
-						logger := logger.WithFields(map[string]any{
-							"user_id":    userID,
-							"discord_id": i.Member.User.ID,
-						})
-
-						vg := vrmlgo.New(token)
-
-						vrmlUser, err = vg.Me(vrmlgo.WithUseCache(false))
-						if err != nil {
-							logger.Error("Failed to get VRML user data")
-							return
-						}
-						logger = logger.WithFields(map[string]any{
-							"vrml_id":         vrmlUser.ID,
-							"vrml_discord_id": vrmlUser.GetDiscordID(),
-						})
-
-						if vrmlUser.GetDiscordID() != i.Member.User.ID {
-							logger.Error("Discord ID mismatch")
-							vrmlLink := fmt.Sprintf("[%s](https://vrmasterleague.com/EchoArena/Users/%s)", vrmlUser.UserName, vrmlUser.ID)
-							thisDiscordTag := fmt.Sprintf("%s#%s", user.Username, user.Discriminator)
-							editResponseFn(fmt.Sprintf("VRML account %s is currently linked to %s. Please relink the VRML account to this Discord account (%s).", vrmlLink, vrmlUser.DiscordTag, thisDiscordTag))
-							return
-						}
-					}
-				} else {
-
-					// Send the link to the user
-					if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-						Type: discordgo.InteractionResponseChannelMessageWithSource,
-						Data: &discordgo.InteractionResponseData{
-							Flags:   discordgo.MessageFlagsEphemeral | discordgo.MessageFlagsSuppressEmbeds,
-							Content: fmt.Sprintf("Your VRML account (`%s`) is already linked. Reverifying your entitlements...", vrmlUser.UserName),
-						},
-					}); err != nil {
-						logger.Error("Failed to send interaction response", zap.Error(err))
-						return
-					}
-				}
-
-				// Check if the account is already owned by another user
-				ownerID, err := GetUserIDByDeviceID(ctx, db, DeviceIDPrefixVRML+vrmlUser.ID)
-				if err != nil && status.Code(err) != codes.NotFound {
-					logger.Error("Failed to check current owner")
-				} else if ownerID != "" && ownerID != userID {
-					content := fmt.Sprintf("Account already owned by another user. [Contact EchoVRCE](%s) if you need to unlink it.", ServiceSettings().ReportURL)
-					logger.WithField("owner_id", ownerID).Error(content)
-					editResponseFn("Account already owned by another user")
-					return
-				}
-
-				// Link the accounts
-				if err := LinkVRMLAccount(ctx, nk, userID, vrmlUser); err != nil {
-					if err := editResponseFn("Failed to link accounts"); err != nil {
-						logger.Error("Failed to edit response", zap.Error(err))
-					}
-					logger.Error("Failed to link accounts", zap.Error(err))
-					return
-				}
-
-				if err := editResponseFn(fmt.Sprintf("Your VRML account (`%s`) has been verified/linked. It will take a few minutes--up to a few hours--to update your entitlements.", vrmlUser.UserName)); err != nil {
-					logger.Error("Failed to edit response", zap.Error(err))
-					return
-				}
-
-			}()
-
-			return nil
-		},
+		"vrml-verify": d.handleVRMLVerify,
 	}
 
 	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -2877,7 +2742,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			logger.Info("Handling application command.")
 			if handler, ok := commandHandlers[appCommandName]; ok {
-				err := d.handleInteractionApplicationCommand(logger, s, i, appCommandName, handler)
+				err := d.handleInteractionApplicationCommand(ctx, logger, s, i, appCommandName, handler)
 				if err != nil {
 					logger.WithField("err", err).Error("Failed to handle interaction")
 					// Queue the user to be updated in the cache
@@ -2905,7 +2770,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			logger.Info("Handling interaction message component.")
 
-			err := d.handleInteractionMessageComponent(logger, s, i, commandName, value)
+			err := d.handleInteractionMessageComponent(ctx, logger, s, i, commandName, value)
 			if err != nil {
 				logger.WithField("err", err).Error("Failed to handle interaction message component")
 				if err := simpleInteractionResponse(s, i, err.Error()); err != nil {
