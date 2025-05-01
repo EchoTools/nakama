@@ -42,8 +42,8 @@ type DiscordIntegrator struct {
 
 	guildGroupRegistry *GuildGroupRegistry
 	queueCh            chan QueueEntry
-
-	idcache *MapOf[string, string]
+	queueCooldowns     *MapOf[QueueEntry, time.Time]
+	idcache            *MapOf[string, string]
 }
 
 func NewDiscordIntegrator(ctx context.Context, logger *zap.Logger, config Config, metrics Metrics, nk runtime.NakamaModule, db *sql.DB, dg *discordgo.Session, guildGroupRegistry *GuildGroupRegistry) *DiscordIntegrator {
@@ -62,6 +62,7 @@ func NewDiscordIntegrator(ctx context.Context, logger *zap.Logger, config Config
 		dg: dg,
 
 		guildGroupRegistry: guildGroupRegistry,
+		queueCooldowns:     &MapOf[QueueEntry, time.Time]{},
 		idcache:            &MapOf[string, string]{},
 
 		queueCh: make(chan QueueEntry, 25),
@@ -78,7 +79,6 @@ func (c *DiscordIntegrator) Start() {
 
 	// Start the cache worker.
 	go func() {
-		queueCooldowns := make(map[QueueEntry]time.Time)
 		cooldownTicker := time.NewTicker(time.Second * 3)
 		defer cooldownTicker.Stop()
 
@@ -117,17 +117,13 @@ func (c *DiscordIntegrator) Start() {
 				logger.Warn("Stopping Discord integrator syncing")
 				return
 			case entry := <-c.queueCh:
+				processed++
 				logger := logger.With(
 					zap.String("discord_id", entry.DiscordID),
 					zap.String("guild_id", entry.GuildID),
 					zap.String("gid", c.GuildIDToGroupID(entry.GuildID)),
 					zap.String("uid", c.DiscordIDToUserID(entry.DiscordID)),
 				)
-				if _, ok := queueCooldowns[entry]; ok {
-					continue
-				}
-
-				queueCooldowns[entry] = time.Now().Add(time.Second * 30)
 
 				if err := c.syncMember(c.ctx, logger, entry.DiscordID, entry.GuildID); err != nil {
 					logger.Warn("Error syncing guild group member", zap.Error(err))
@@ -135,17 +131,19 @@ func (c *DiscordIntegrator) Start() {
 				logger.Debug("Synced guild group member")
 
 			case <-cooldownTicker.C:
-
-				for entry, t := range queueCooldowns {
+				c.queueCooldowns.Range(func(entry QueueEntry, t time.Time) bool {
 					if time.Now().After(t) {
-						delete(queueCooldowns, entry)
+
+						processed++
 						if err := c.syncMember(c.ctx, logger, entry.DiscordID, entry.GuildID); err != nil {
 							logger.Warn("Error syncing guild group member", zap.Error(err))
-							continue
+							return true
 						}
 						logger.Debug("Synced guild group member")
+						c.queueCooldowns.Delete(entry)
 					}
-				}
+					return true
+				})
 			}
 		}
 	}()
@@ -197,6 +195,13 @@ func (c *DiscordIntegrator) Start() {
 
 // Queue a user for caching/updating.
 func (c *DiscordIntegrator) QueueSyncMember(guildID, discordID string) {
+	entry := QueueEntry{GuildID: guildID, DiscordID: discordID}
+	_, exists := c.queueCooldowns.LoadOrStore(entry, time.Now().Add(time.Second*30))
+	if exists {
+		// Already in the queue, no need to add it again.
+		return
+	}
+
 	select {
 	case c.queueCh <- QueueEntry{GuildID: guildID, DiscordID: discordID}:
 		// Success
