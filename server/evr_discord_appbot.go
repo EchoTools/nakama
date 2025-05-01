@@ -2098,15 +2098,15 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						}
 					}
 
-					// Update the list of players in the interaction response
-					var players strings.Builder
+					// Update the list of playerListStr in the interaction response
+					var playerListStr strings.Builder
 					for _, p := range presences {
 						if p.GetSessionId() == label.GameServer.SessionID.String() {
 							continue
 						}
-						players.WriteString(fmt.Sprintf("<@%s>\n", d.cache.UserIDToDiscordID(p.GetUserId())))
+						playerListStr.WriteString(fmt.Sprintf("<@!%s>\n", d.cache.UserIDToDiscordID(p.GetUserId())))
 					}
-					responseContent.Data.Embeds[0].Fields[4].Value = players.String()
+					responseContent.Data.Embeds[0].Fields[4].Value = playerListStr.String()
 
 					if _, err = s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
 						Embeds: &responseContent.Data.Embeds,
