@@ -117,6 +117,10 @@ func (c *DiscordIntegrator) Start() {
 				logger.Warn("Stopping Discord integrator syncing")
 				return
 			case entry := <-c.queueCh:
+				if entry.GuildID == "" || entry.DiscordID == "" {
+					logger.Warn("Invalid queue entry", zap.String("discord_id", entry.DiscordID), zap.String("guild_id", entry.GuildID))
+					continue
+				}
 				processed++
 				logger := logger.With(
 					zap.String("discord_id", entry.DiscordID),
@@ -702,6 +706,11 @@ func (d *DiscordIntegrator) handleMemberUpdate(logger *zap.Logger, s *discordgo.
 			message := fmt.Sprintf("The display name `%s` is already in use/reserved by <@%s>. Your in-game name will be your username: `%s`", EscapeDiscordMarkdown(displayName), otherDiscordID, EscapeDiscordMarkdown(e.Member.User.Username))
 			if _, err := SendUserMessage(ctx, d.dg, e.Member.User.ID, message); err != nil {
 				return fmt.Errorf("error sending message: %w", err)
+			}
+
+			// Set their display name to their username
+			if err := d.dg.GuildMemberNickname(e.GuildID, e.Member.User.ID, e.Member.User.Username); err != nil {
+				return fmt.Errorf("error setting guild member nickname: %w", err)
 			}
 
 		} else {
