@@ -353,6 +353,18 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		maxServerRTT = 180
 	}
 
+	matchmakingDivisions := make([]string, 0)
+	matchmakingExcludedDivisions := make([]string, 0)
+
+	if globalSettings.EnableDivisions && userSettings.Divisions != nil {
+		matchmakingDivisions = userSettings.Divisions
+	}
+
+	if sessionParams.IsIGPOpen() {
+		matchmakingDivisions = []string{"green"}
+		matchmakingExcludedDivisions = []string{}
+	}
+
 	latencyHistory := sessionParams.latencyHistory.Load()
 
 	// Set the maxRTT to at least the average of the player's latency history
@@ -414,8 +426,8 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		IsEarlyQuitter:               isEarlyQuitter,
 		RankPercentile:               atomic.NewFloat64(rankPercentile),
 		RankPercentileMaxDelta:       rankPercentileMaxDelta,
-		MatchmakingDivisions:         userSettings.Divisions,
-		MatchmakingExcludedDivisions: userSettings.ExcludedDivisions,
+		MatchmakingDivisions:         matchmakingDivisions,
+		MatchmakingExcludedDivisions: matchmakingExcludedDivisions,
 		MaxServerRTT:                 maxServerRTT,
 		MatchmakingTimestamp:         time.Now().UTC(),
 		MatchmakingTimeout:           time.Duration(globalSettings.MatchmakingTimeoutSecs) * time.Second,

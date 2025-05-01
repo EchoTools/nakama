@@ -199,7 +199,8 @@ SessionLoop:
 			logger.Error("Failed to load params from session context")
 			return
 		}
-		_ = params
+
+		params.isIGPOpen.Store(true)
 
 		timeoutTimer.Reset(InGamePanelTimeout)
 

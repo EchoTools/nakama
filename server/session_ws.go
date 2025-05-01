@@ -195,13 +195,13 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 		urlParameters:        urlParams,
 		lastMatchmakingError: atomic.NewError(nil),
 		guildGroups:          make(map[string]*GuildGroup),
-
-		loginSession:   nil,
-		lobbySession:   nil,
-		serverSession:  nil,
-		isEarlyQuitter: atomic.NewBool(false),
-		isGoldNameTag:  atomic.NewBool(false),
-		latencyHistory: atomic.NewPointer[LatencyHistory](nil),
+		isIGPOpen:            atomic.NewBool(false),
+		loginSession:         nil,
+		lobbySession:         nil,
+		serverSession:        nil,
+		isEarlyQuitter:       atomic.NewBool(false),
+		isGoldNameTag:        atomic.NewBool(false),
+		latencyHistory:       atomic.NewPointer[LatencyHistory](nil),
 	}
 
 	ctx = context.WithValue(ctx, ctxSessionParametersKey{}, atomic.NewPointer(&params))
