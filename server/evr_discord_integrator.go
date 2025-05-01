@@ -848,11 +848,12 @@ func (d *DiscordIntegrator) deconflictDisplayName(ctx context.Context, displayNa
 	// Remove the display name from all but the owner
 	for _, u := range users[1:] {
 
-		for groupID, displayName := range u.metadata.GroupDisplayNames {
-			if displayName == displayName {
-				delete(u.metadata.GroupDisplayNames, groupID)
+		for gID, dn := range u.metadata.GroupDisplayNames {
+			if dn == displayName {
+				delete(u.metadata.GroupDisplayNames, gID)
 			}
 		}
+
 		if err := d.nk.AccountUpdateId(ctx, u.userID, u.metadata.Username(), u.metadata.MarshalMap(), u.metadata.GetActiveGroupDisplayName(), "", "", "", ""); err != nil {
 			return "", fmt.Errorf("failed to update account: %w", err)
 		}

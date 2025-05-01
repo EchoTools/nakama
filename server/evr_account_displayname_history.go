@@ -43,7 +43,7 @@ func (DisplayNameHistory) StorageIndex() *StorageIndexMeta {
 		Name:           DisplayNameHistoryCacheIndex,
 		Collection:     DisplayNameCollection,
 		Key:            DisplayNameHistoryKey,
-		Fields:         []string{"active", "cache"},
+		Fields:         []string{"active", "cache", "reserved", "username"},
 		SortableFields: nil,
 		MaxEntries:     1000000,
 		IndexOnly:      false,
@@ -316,7 +316,7 @@ func DisplayNameCacheRegexSearch(ctx context.Context, nk runtime.NakamaModule, p
 
 	cursor := ""
 	for {
-		result, cursor, err = nk.StorageIndexList(ctx, SystemUserID, DisplayNameHistoryCacheIndex, query, 200, nil, cursor)
+		result, cursor, err = nk.StorageIndexList(ctx, SystemUserID, DisplayNameHistoryCacheIndex, query, 100, nil, cursor)
 		if err != nil {
 			return nil, fmt.Errorf("error listing display name history: %w", err)
 		}
@@ -435,9 +435,10 @@ func DisplayNameCacheRegexSearch(ctx context.Context, nk runtime.NakamaModule, p
 }
 
 func DisplayNameHistoryActiveList(ctx context.Context, nk runtime.NakamaModule, displayName string) ([]string, error) {
-	displayName = strings.ToLower(displayName)
 
-	query := fmt.Sprintf("+value.active:%s", Query.Escape(displayName))
+	displayName = strings.ToLower(displayName)
+	displayName = Query.Escape(displayName)
+	query := fmt.Sprintf("value.active:%s value.reserved:%s value.username:%s", displayName, displayName, displayName)
 
 	cursor := ""
 	var results []*api.StorageObject
