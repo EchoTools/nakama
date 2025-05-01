@@ -133,7 +133,12 @@ func (c *DiscordIntegrator) Start() {
 			case <-cooldownTicker.C:
 				c.queueCooldowns.Range(func(entry QueueEntry, t time.Time) bool {
 					if time.Now().After(t) {
-
+						logger := logger.With(
+							zap.String("discord_id", entry.DiscordID),
+							zap.String("guild_id", entry.GuildID),
+							zap.String("gid", c.GuildIDToGroupID(entry.GuildID)),
+							zap.String("uid", c.DiscordIDToUserID(entry.DiscordID)),
+						)
 						processed++
 						if err := c.syncMember(c.ctx, logger, entry.DiscordID, entry.GuildID); err != nil {
 							logger.Warn("Error syncing guild group member", zap.Error(err))
