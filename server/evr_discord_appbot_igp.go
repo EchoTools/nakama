@@ -719,7 +719,12 @@ func (d *DiscordAppBot) handleInGamePanel(ctx context.Context, logger runtime.Lo
 
 	// Start a goroutine to handle the interaction, and keep it updated
 	go igp.Start()
+
 	d.igpRegistry.Store(userID, igp)
+	go func() {
+		<-igp.ctx.Done()
+		d.igpRegistry.Delete(userID)
+	}()
 
 	if prevInteraction, err := igp.NewInteraction(i); err != nil {
 		return fmt.Errorf("failed to create new interaction: %w", err)
@@ -729,11 +734,6 @@ func (d *DiscordAppBot) handleInGamePanel(ctx context.Context, logger runtime.Lo
 			logger.WithField("error", err).Error("Failed to delete previous interaction")
 		}
 	}
-
-	go func() {
-		<-igp.ctx.Done()
-		d.igpRegistry.Delete(userID)
-	}()
 
 	return nil
 }
