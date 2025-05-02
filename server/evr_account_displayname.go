@@ -17,10 +17,11 @@ var (
 // sanitizeDisplayName filters the provided displayName to ensure it is valid.
 func sanitizeDisplayName(displayName string) string {
 	mapping := map[string]string{
-		"๒": "b",
-		"ɭ": "l",
-		"ย": "u",
-		"є": "e",
+		"๒":      "b",
+		"ɭ":      "l",
+		"ย":      "u",
+		"є":      "e",
+		"femboy": "",
 	}
 
 	for k, v := range mapping {
