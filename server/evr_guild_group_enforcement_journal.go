@@ -18,6 +18,7 @@ import (
 const (
 	StorageCollectionEnforcementJournal      = "EnforcementJournal"
 	StorageCollectionEnforcementJournalIndex = "EnforcementJournalIndex"
+	StorageCollectionActiveSuspensionIndex   = "ActiveSuspensionIndex"
 )
 
 var _ = IndexedVersionedStorable(&GuildEnforcementJournal{})
@@ -55,13 +56,23 @@ func (s GuildEnforcementJournal) StorageMeta() StorageMeta {
 	}
 }
 
-func (s GuildEnforcementJournal) StorageIndex() *StorageIndexMeta {
-	return &StorageIndexMeta{
-		Name:       StorageCollectionEnforcementJournalIndex,
-		Collection: StorageCollectionEnforcementJournal,
-		Fields:     []string{"user_id", "group_id", "suspension_expiry", "is_community_values_required"},
-		MaxEntries: 10000000,
-		IndexOnly:  false,
+func (s GuildEnforcementJournal) StorageIndexes() []StorageIndexMeta {
+	return []StorageIndexMeta{
+		{
+			Name:           StorageCollectionActiveSuspensionIndex,
+			Collection:     StorageCollectionEnforcementJournal,
+			Fields:         []string{"user_id", "group_id", "suspension_expiry", "is_community_values_required"},
+			MaxEntries:     10000000,
+			SortableFields: []string{"suspension_expiry"},
+			IndexOnly:      true,
+		},
+		{
+			Name:       StorageCollectionEnforcementJournalIndex,
+			Collection: StorageCollectionEnforcementJournal,
+			Fields:     []string{"user_id", "group_id", "suspension_expiry", "is_community_values_required"},
+			MaxEntries: 10000000,
+			IndexOnly:  false,
+		},
 	}
 }
 
