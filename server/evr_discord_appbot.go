@@ -1706,7 +1706,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			includeSuspensions := true
 			includePastSuspensions := false
 			includeCurrentMatches := true
-			err := d.handleProfileRequest(ctx, logger, nk, s, i, user, true, true, false, false, includeSuspensions, includePastSuspensions, includeCurrentMatches)
+			includeVRMLHistory := true
+			includePastDisplayNames := true
+			err := d.handleProfileRequest(ctx, logger, nk, s, i, user, true, true, false, false, includeSuspensions, includePastSuspensions, includeCurrentMatches, includeVRMLHistory, includePastDisplayNames)
 			logger.WithFields(map[string]interface{}{
 				"discord_id":       user.ID,
 				"discord_username": user.Username,
@@ -1937,7 +1939,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			includeSuspensions := isSelf || isGlobalOperator || isGuildAuditor || isGuildEnforcer
 			includePastSuspensions := isGlobalOperator || isGuildAuditor || isGuildEnforcer
 			includeCurrentMatches := isSelf || isGlobalOperator || isGuildAuditor || isGuildEnforcer
-			return d.handleProfileRequest(ctx, logger, nk, s, i, target, includePriviledged, includePrivate, includeGuildAuditor, includeSystem, includeSuspensions, includePastSuspensions, includeCurrentMatches)
+			includePastDisplayNames := isSelf || isGlobalOperator || isGuildAuditor || isGuildEnforcer
+			includeVRMLHistory := true
+			return d.handleProfileRequest(ctx, logger, nk, s, i, target, includePriviledged, includePrivate, includeGuildAuditor, includeSystem, includeSuspensions, includePastSuspensions, includeCurrentMatches, includeVRMLHistory, includePastDisplayNames)
 		},
 		"search": d.handleSearch,
 		"create": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
