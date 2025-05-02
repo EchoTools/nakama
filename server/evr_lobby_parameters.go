@@ -267,6 +267,16 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		}
 	}
 
+	// Add blocked players who are online to the Matchmaking Query Addon
+	blockedIDs := make([]string, 0)
+	for _, f := range friends {
+		if api.Friend_State(f.GetState().Value) == api.Friend_BLOCKED {
+			if f.GetUser().GetOnline() {
+				blockedIDs = append(blockedIDs, f.GetUser().GetId())
+			}
+		}
+	}
+
 	var lobbyGroupName string
 	var partyID uuid.UUID
 
@@ -298,16 +308,6 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 	currentMatchID := MatchID{}
 	if request.GetCurrentLobbyID() != uuid.Nil {
 		currentMatchID = MatchID{UUID: request.GetCurrentLobbyID(), Node: node}
-	}
-
-	// Add blocked players who are online to the Matchmaking Query Addon
-	blockedIDs := make([]string, 0)
-	for _, f := range friends {
-		if api.Friend_State(f.GetState().Value) == api.Friend_BLOCKED {
-			if f.GetUser().GetOnline() {
-				blockedIDs = append(blockedIDs, f.GetUser().GetId())
-			}
-		}
 	}
 
 	rankPercentileMaxDelta := 1.0
@@ -454,7 +454,7 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeMMR bool, includeMax
 		p.BackfillQueryAddon,
 	}
 
-	if len(p.BlockedIDs) > 0 && p.Mode != evr.ModeSocialPublic {
+	if len(p.BlockedIDs) > 0 && slices.Contains([]evr.Symbol{evr.ModeSocialPublic, evr.ModeCombatPublic}, p.Mode) {
 		// Add each blocked user that is online to the backfill query addon
 		// Avoid backfilling matches with players that this player blocks.
 		qparts = append(qparts, fmt.Sprintf("-label.players.user_id:%s", Query.MatchItem(p.BlockedIDs)))
@@ -557,7 +557,6 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 		"game_mode":          p.Mode.String(),
 		"group_id":           p.GroupID.String(),
 		"version_lock":       p.VersionLock.String(),
-		"blocked_ids":        strings.Join(p.BlockedIDs, " "),
 		"display_name":       p.DisplayName,
 		"submission_time":    submissionTime,
 		"divisions":          strings.Join(p.MatchmakingDivisions, ","),
@@ -580,6 +579,10 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 
 	if len(p.MatchmakingDivisions) > 0 {
 
+	}
+
+	if !slices.Contains([]evr.Symbol{evr.ModeCombatPublic}, p.Mode) {
+		stringProperties["blocked_ids"] = strings.Join(p.BlockedIDs, " ")
 	}
 
 	// If the user has an early quit penalty, only match them with players who have submitted after now
