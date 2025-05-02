@@ -81,16 +81,16 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 		metrics:  metrics,
 		config:   config,
 
-		profileRegistry:    profileRegistry,
-		statusRegistry:     statusRegistry,
+		profileRegistry: profileRegistry,
+		statusRegistry:  statusRegistry,
+
+		dg:                 dg,
 		guildGroupRegistry: guildGroupRegistry,
-		igpRegistry:        &MapOf[string, *InGamePanel]{},
 		cache:              discordCache,
 		ipInfoCache:        ipInfoCache,
 		choiceCache:        &MapOf[string, []*discordgo.ApplicationCommandOptionChoice]{},
 
-		dg: dg,
-
+		igpRegistry:               &MapOf[string, *InGamePanel]{},
 		prepareMatchRatePerSecond: 1.0 / 60,
 		prepareMatchBurst:         1,
 		prepareMatchRateLimiters:  &MapOf[string, *rate.Limiter]{},
@@ -100,8 +100,6 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 
 	discordgo.Logger = appbot.discordGoLogger
 
-	bot := dg
-
 	//bot.LogLevel = discordgo.LogDebug
 	dg.StateEnabled = true
 
@@ -110,9 +108,9 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 			- GUILD_MEMBERS
 	*/
 
-	bot.Identify.Intents |= discordgo.IntentGuilds
-	bot.Identify.Intents |= discordgo.IntentGuildMembers
-	bot.Identify.Intents |= discordgo.IntentGuildBans
+	dg.Identify.Intents |= discordgo.IntentGuilds
+	dg.Identify.Intents |= discordgo.IntentGuildMembers
+	dg.Identify.Intents |= discordgo.IntentGuildBans
 	//bot.Identify.Intents |= discordgo.IntentGuildEmojis
 	//bot.Identify.Intents |= discordgo.IntentGuildWebhooks
 	//bot.Identify.Intents |= discordgo.IntentGuildInvites
@@ -125,7 +123,7 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 	//bot.Identify.Intents |= discordgo.IntentAutoModerationConfiguration
 	//bot.Identify.Intents |= discordgo.IntentAutoModerationExecution
 
-	bot.AddHandlerOnce(func(s *discordgo.Session, m *discordgo.Ready) {
+	dg.AddHandlerOnce(func(s *discordgo.Session, m *discordgo.Ready) {
 
 		// Create a user for the bot based on it's discord profile
 		userID, _, _, err := nk.AuthenticateCustom(ctx, m.User.ID, s.State.User.Username, true)
@@ -143,19 +141,19 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 
 		appbot.userID = userID
 
-		displayName := bot.State.User.GlobalName
+		displayName := dg.State.User.GlobalName
 		if displayName == "" {
-			displayName = bot.State.User.Username
+			displayName = dg.State.User.Username
 		}
 
 		if err := appbot.RegisterSlashCommands(); err != nil {
 			logger.Error("Failed to register slash commands: %w", err)
 		}
 
-		logger.Info("Bot `%s` ready in %d guilds", displayName, len(bot.State.Guilds))
+		logger.Info("Bot `%s` ready in %d guilds", displayName, len(dg.State.Guilds))
 	})
 
-	bot.AddHandler(func(s *discordgo.Session, m *discordgo.RateLimit) {
+	dg.AddHandler(func(s *discordgo.Session, m *discordgo.RateLimit) {
 		logger.WithField("rate_limit", m).Warn("Discord rate limit")
 	})
 
@@ -166,12 +164,12 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 		for {
 			select {
 			case <-updateTicker.C:
-				bot.Lock()
-				if !bot.DataReady {
+				dg.Lock()
+				if !dg.DataReady {
+					dg.Unlock()
 					continue
-					bot.Unlock()
 				}
-				bot.Unlock()
+				dg.Unlock()
 
 				// Get all the matches
 				minSize := 2
@@ -189,7 +187,7 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 
 				}
 				statusMessage := fmt.Sprintf("%d players in %d matches", playerCount, matchCount)
-				if err := bot.UpdateGameStatus(0, "with "+statusMessage); err != nil {
+				if err := dg.UpdateGameStatus(0, "with "+statusMessage); err != nil {
 					logger.WithField("err", err).Warn("Failed to update status")
 					continue
 				}
