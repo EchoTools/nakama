@@ -144,7 +144,6 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 
 func (m *SkillBasedMatchmaker) processPotentialMatches(candidates [][]runtime.MatchmakerEntry) ([][]runtime.MatchmakerEntry, [][]runtime.MatchmakerEntry, map[string]int) {
 
-	// Write the candidates to a json filed called /tmp/candidates.json
 	filterCounts := make(map[string]int)
 
 	// Filter out players who are too far away from each other

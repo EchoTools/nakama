@@ -12,6 +12,7 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
 const (
@@ -171,14 +172,22 @@ func (WhoAmI) createRecentLoginsFieldValue(loginHistory *LoginHistory, stripIPAd
 	if loginHistory == nil || len(loginHistory.History) == 0 {
 		return ""
 	}
-	// Include the recent logins
-	lines := make([]string, 0, len(loginHistory.History))
+
+	loginsByXPID := make(map[evr.EvrId]time.Time, 0)
+
+	// Only include the latest login for each XPID
 	for _, e := range loginHistory.History {
 		if e.UpdatedAt.Before(since) {
 			continue
 		}
+		if ts, ok := loginsByXPID[e.XPID]; !ok || ts.Before(e.UpdatedAt) {
+			loginsByXPID[e.XPID] = e.UpdatedAt
+		}
+	}
 
-		lines = append(lines, fmt.Sprintf("<t:%d:R> - `%s`", e.UpdatedAt.UTC().Unix(), e.XPID.String()))
+	lines := make([]string, 0, len(loginHistory.History))
+	for xpid, ts := range loginsByXPID {
+		lines = append(lines, fmt.Sprintf("<t:%d:R> - `%s`", ts.UTC().Unix(), xpid.String()))
 	}
 	slices.Sort(lines)
 	slices.Reverse(lines)
@@ -248,7 +257,7 @@ func (WhoAmI) createPastDisplayNameEmbed(history *DisplayNameHistory, groupID st
 			continue
 		}
 		for dn, ts := range items {
-			dn = EscapeDiscordMarkdown(dn)
+			dn = fmt.Sprintf("`%s`", EscapeDiscordMarkdown(dn))
 			if e, ok := displayNameMap[dn]; !ok || e.After(ts) {
 				displayNameMap[dn] = e
 			}
@@ -612,12 +621,10 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		return fmt.Errorf("error getting device history: %w", err)
 	}
 
-	if includePastDisplayNames {
-		if displayNameHistory, err = DisplayNameHistoryLoad(ctx, nk, targetID); err != nil {
-			return fmt.Errorf("failed to load display name history: %w", err)
-		} else {
-			pastDisplayNameEmbed = whoami.createPastDisplayNameEmbed(displayNameHistory, groupID)
-		}
+	if displayNameHistory, err = DisplayNameHistoryLoad(ctx, nk, targetID); err != nil {
+		return fmt.Errorf("failed to load display name history: %w", err)
+	} else {
+		pastDisplayNameEmbed = whoami.createPastDisplayNameEmbed(displayNameHistory, groupID)
 	}
 
 	guildGroups, err := GuildUserGroupsList(ctx, nk, d.guildGroupRegistry, targetID)
