@@ -30,15 +30,15 @@ func (DeveloperApplications) StorageMeta() StorageMeta {
 	}
 }
 
-func (DeveloperApplications) StorageIndex() *StorageIndexMeta {
-	return &StorageIndexMeta{
+func (DeveloperApplications) StorageIndexes() []StorageIndexMeta {
+	return []StorageIndexMeta{{
 		Name:       StorageIndexDeveloperAppTokens,
 		Collection: StorageCollectionDeveloper,
 		Key:        StorageKeyApplications,
 		Fields:     []string{"value.applications.token"},
 		MaxEntries: 10000,
 		IndexOnly:  true,
-	}
+	}}
 }
 
 type DeveloperApplication struct {
@@ -57,9 +57,8 @@ func NewDeveloperApplicationToken(app DeveloperApplication, signingKey string) s
 }
 
 func ApplicationTokenAuthenticate(ctx context.Context, nk runtime.NakamaModule, token string) (string, error) {
-	idx := DeveloperApplications{}.StorageIndex()
 	query := fmt.Sprintf("+value.applications.token:%s", Query.Escape(token))
-	objs, _, err := nk.StorageIndexList(ctx, SystemUserID, idx.Name, query, 1, nil, "")
+	objs, _, err := nk.StorageIndexList(ctx, SystemUserID, StorageIndexDeveloperAppTokens, query, 1, nil, "")
 	if err != nil {
 		return "", err
 	}

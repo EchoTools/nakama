@@ -114,8 +114,8 @@ func (h *LoginHistory) StorageMeta() StorageMeta {
 	}
 }
 
-func (LoginHistory) StorageIndex() *StorageIndexMeta {
-	return &StorageIndexMeta{
+func (LoginHistory) StorageIndexes() []StorageIndexMeta {
+	return []StorageIndexMeta{{
 		Name:           LoginHistoryCacheIndex,
 		Collection:     LoginStorageCollection,
 		Key:            LoginHistoryStorageKey,
@@ -123,7 +123,7 @@ func (LoginHistory) StorageIndex() *StorageIndexMeta {
 		SortableFields: nil,
 		MaxEntries:     10000000,
 		IndexOnly:      false,
-	}
+	}}
 }
 
 func (h *LoginHistory) SetStorageVersion(userID, version string) {

@@ -107,9 +107,12 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	}
 
 	if db != nil {
-		if err := RegisterIndexes(initializer); err != nil {
-			return fmt.Errorf("unable to register indexes: %w", err)
-		}
+
+		go func() {
+			if err := RegisterIndexes(initializer); err != nil {
+				panic(fmt.Errorf("unable to register indexes: %v", err))
+			}
+		}()
 
 		// Remove all LinkTickets
 		if err := nk.StorageDelete(ctx, []*runtime.StorageDelete{{
@@ -269,7 +272,7 @@ func RegisterIndexes(initializer runtime.Initializer) error {
 		&LoginHistory{},
 	}
 	for _, s := range storables {
-		if idx := s.StorageIndex(); idx != nil {
+		for _, idx := range s.StorageIndexes() {
 			if err := initializer.RegisterStorageIndex(
 				idx.Name,
 				idx.Collection,

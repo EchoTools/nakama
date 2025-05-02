@@ -276,8 +276,8 @@ func (MatchmakingSettings) StorageMeta() StorageMeta {
 	}
 }
 
-func (MatchmakingSettings) StorageIndex() *StorageIndexMeta {
-	return &StorageIndexMeta{
+func (MatchmakingSettings) StorageIndexes() []StorageIndexMeta {
+	return []StorageIndexMeta{{
 		Name:           ActivePartyGroupIndex,
 		Collection:     MatchmakerStorageCollection,
 		Key:            MatchmakingConfigStorageKey,
@@ -285,7 +285,7 @@ func (MatchmakingSettings) StorageIndex() *StorageIndexMeta {
 		SortableFields: nil,
 		MaxEntries:     100000,
 		IndexOnly:      false,
-	}
+	}}
 }
 
 func LoadMatchmakingSettings(ctx context.Context, nk runtime.NakamaModule, userID string) (settings MatchmakingSettings, err error) {

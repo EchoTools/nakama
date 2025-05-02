@@ -24,7 +24,7 @@ func (VRMLPlayerSummary) StorageMeta() StorageMeta {
 	}
 }
 
-func (VRMLPlayerSummary) StorageIndex() *StorageIndexMeta {
+func (VRMLPlayerSummary) StorageIndexes() []StorageIndexMeta {
 	return nil
 }
 

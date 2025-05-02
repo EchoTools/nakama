@@ -281,7 +281,7 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 		return fmt.Errorf("failed to get account: %w", err)
 	}
 
-	if gg.RejectPlayersWithSuspendedAlternates && (activeRecord.UserID != userID) {
+	if gg.RejectPlayersWithSuspendedAlternates && activeRecord != nil && (activeRecord.UserID != userID) {
 		minMinutes := 1
 		maxMinutes := 3
 		delay := time.Duration(minMinutes+rand.Intn(maxMinutes)) * time.Minute

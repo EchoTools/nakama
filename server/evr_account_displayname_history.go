@@ -40,8 +40,8 @@ func (DisplayNameHistory) StorageMeta() StorageMeta {
 	}
 }
 
-func (DisplayNameHistory) StorageIndex() *StorageIndexMeta {
-	return &StorageIndexMeta{
+func (DisplayNameHistory) StorageIndexes() []StorageIndexMeta {
+	return []StorageIndexMeta{{
 		Name:           DisplayNameHistoryCacheIndex,
 		Collection:     DisplayNameCollection,
 		Key:            DisplayNameHistoryKey,
@@ -49,7 +49,7 @@ func (DisplayNameHistory) StorageIndex() *StorageIndexMeta {
 		SortableFields: nil,
 		MaxEntries:     1000000,
 		IndexOnly:      false,
-	}
+	}}
 }
 
 func NewDisplayNameHistory() *DisplayNameHistory {

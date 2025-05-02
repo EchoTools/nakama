@@ -17,7 +17,7 @@ type Storable interface {
 
 type IndexedStorable interface {
 	Storable
-	StorageIndex() *StorageIndexMeta
+	StorageIndexes() []StorageIndexMeta
 }
 
 type VersionedStorable interface {
