@@ -241,17 +241,21 @@ func (a EVRProfile) GetGroupDisplayNameOrDefault(groupID string) string {
 	}
 
 	if a.GroupDisplayNames != nil {
+
 		if dn, ok := a.GroupDisplayNames[groupID]; ok && dn != "" {
-			return dn
-		}
-		if dn, ok := a.GroupDisplayNames[a.ActiveGroupID]; ok && dn != "" {
-			return dn
+			// Use the group display name, if it exists
+			return sanitizeDisplayName(dn)
+
+		} else if dn, ok := a.GroupDisplayNames[a.ActiveGroupID]; ok && dn != "" {
+			// Otherwise, usethe active group display name
+			return sanitizeDisplayName(dn)
+
 		} else {
-			if len(a.GroupDisplayNames) > 0 {
-				for _, dn := range a.GroupDisplayNames {
-					if dn != "" {
-						return dn
-					}
+			// Fallback to the first non-empty group display name
+			for _, dn = range a.GroupDisplayNames {
+				dn = sanitizeDisplayName(dn)
+				if dn != "" {
+					return dn
 				}
 			}
 		}
