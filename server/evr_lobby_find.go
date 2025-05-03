@@ -129,6 +129,42 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 		<-time.After(3 * time.Second)
 	}
 
+	// Only Apply the early quit penalty if it's a public arena match.
+	if lobbyParams.Mode == evr.ModeArenaPublic {
+
+		if lobbyParams.EarlyQuitPenaltyLevel > 0 {
+			// Default backfill interval
+			interval := 1 * time.Second
+
+			// Early quitters have a shorter backfill interval.
+			switch lobbyParams.EarlyQuitPenaltyLevel {
+			case 1:
+				interval = 60 * time.Second
+			case 2:
+				interval = 120 * time.Second
+			case 3:
+				interval = 240 * time.Second
+			}
+
+			// Notify the user that they are an early quitter.
+			message := fmt.Sprintf("Your early quit penalty is active (level %d), your matchmaking has been delayed by %d seconds.", lobbyParams.EarlyQuitPenaltyLevel, int(interval.Seconds()))
+			if _, err := SendUserMessage(ctx, dg, lobbyParams.DiscordID, message); err != nil {
+				logger.Warn("Failed to send message to user", zap.Error(err))
+			}
+			if guildGroup := p.guildGroupRegistry.Get(lobbyParams.GroupID.String()); guildGroup != nil {
+				// Send an audit log message to the guild group.
+				content := fmt.Sprintf("notified early quitter <@!%s> (%s): %s ", lobbyParams.DiscordID, session.Username(), message)
+				if _, err = AuditLogSendGuild(p.appBot.dg, guildGroup, content); err != nil {
+					logger.Warn("Failed to send audit log message", zap.Error(err))
+				}
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(interval):
+			}
+		}
+	}
 	if slices.Contains([]evr.Symbol{evr.ModeArenaPublic, evr.ModeCombatPublic}, lobbyParams.Mode) {
 		// Start the matchmaking process.
 		go func() {
@@ -292,22 +328,7 @@ func (p *EvrPipeline) newLobby(ctx context.Context, logger *zap.Logger, lobbyPar
 }
 
 func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, session Session, lobbyParams *LobbySessionParameters, enableFailsafe bool, entrants ...*EvrMatchPresence) error {
-
-	// Default backfill interval
-	interval := 10 * time.Second
-
-	// Early quitters have a shorter backfill interval.
-	if lobbyParams.IsEarlyQuitter {
-		interval = 90 * time.Second
-
-		message := "Backfill is taking longer than expected (increased from 3 seconds to 90 seconds). Maybe you should try not quitting so early next time?"
-		if _, err := SendUserMessage(ctx, dg, lobbyParams.DiscordID, message); err != nil {
-			logger.Error("Failed to send message to user", zap.Error(err))
-		}
-		content := fmt.Sprintf("notified early quitter: <@%s> ", lobbyParams.DiscordID)
-		_ = AuditLogSend(p.appBot.dg, ServiceSettings().ServiceAuditChannelID, content)
-	}
-
+	interval := 3 * time.Second
 	if lobbyParams.Mode == evr.ModeSocialPublic {
 		interval = 1 * time.Second
 	}

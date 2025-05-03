@@ -165,30 +165,25 @@ func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logg
 				continue
 			}
 
-			matchID, err := NewMatchID(msg.SessionUUID(), p.node)
-			if err != nil {
-				logger.Error("Failed to create match ID", zap.Error(err))
-				continue
-			}
+			/*
+				matchID, err := NewMatchID(msg.SessionUUID(), p.node)
+				if err != nil {
+					logger.Error("Failed to create match ID", zap.Error(err))
+					continue
+				}
 
-			label, err := MatchLabelByID(ctx, p.nk, matchID)
-			if err != nil || label == nil {
-				logger.Error("Failed to get match label", zap.Error(err))
-				continue
-			}
+				label, err := MatchLabelByID(ctx, p.nk, matchID)
+				if err != nil || label == nil {
+					logger.Error("Failed to get match label", zap.Error(err))
+					continue
+				}
 
-			userID, err := GetUserIDByDeviceID(ctx, p.db, msg.PlayerEvrID)
-			if err != nil || userID == "" {
-				logger.Debug("Failed to get user ID by evr ID", zap.Error(err))
-				continue
-			}
-
-			params, ok := LoadParams(session.Context())
-			if !ok {
-				logger.Error("Failed to load params")
-				continue
-			}
-			params.isEarlyQuitter.Store(true)
+				userID, err := GetUserIDByDeviceID(ctx, p.db, msg.PlayerEvrID)
+				if err != nil || userID == "" {
+					logger.Debug("Failed to get user ID by evr ID", zap.Error(err))
+					continue
+				}
+			*/
 
 		case *evr.RemoteLogGoal:
 
