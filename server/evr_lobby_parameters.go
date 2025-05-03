@@ -52,7 +52,7 @@ type LobbySessionParameters struct {
 	BlockedIDs                   []string                      `json:"blocked_ids"`
 	MatchmakingRating            *atomic.Pointer[types.Rating] `json:"matchmaking_rating"`
 	MatchmakingOrdinal           *atomic.Float64               `json:"matchmaking_ordinal"`
-	IsEarlyQuitter               bool                          `json:"quit_last_game_early"`
+	EarlyQuitPenaltyLevel        int                           `json:"early_quit_penalty_level"`
 	EnableSBMM                   bool                          `json:"disable_sbmm"`
 	EnableRankPercentileRange    bool                          `json:"enable_rank_percentile_range"`
 	EnableOrdinalRange           bool                          `json:"enable_ordinal_range"`
@@ -128,7 +128,7 @@ func (s LobbySessionParameters) MetricsTags() map[string]string {
 	return map[string]string{
 		"mode":             s.Mode.String(),
 		"group_id":         s.GroupID.String(),
-		"is_early_quitter": strconv.FormatBool(s.IsEarlyQuitter),
+		"early_quit_level": strconv.Itoa(s.EarlyQuitPenaltyLevel),
 		"role":             strconv.Itoa(s.Role),
 	}
 }
@@ -379,10 +379,11 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		maxServerRTT = max(maxServerRTT, averageRTT)
 	}
 
-	isEarlyQuitter := sessionParams.isEarlyQuitter.Load()
-
+	earlyQuitPenaltyLevel := 0
 	if !serviceSettings.Matchmaking.EnableEarlyQuitPenalty {
-		isEarlyQuitter = false
+		if config := sessionParams.earlyQuitConfig.Load(); config != nil {
+			earlyQuitPenaltyLevel = config.GetPenaltyLevel()
+		}
 	}
 
 	maximumFailsafeSecs := globalSettings.MatchmakingTimeoutSecs - p.config.GetMatchmaker().IntervalSec*2
@@ -423,7 +424,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		MatchmakingOrdinal:           atomic.NewFloat64(matchmakingOrdinal),
 		MatchmakingOrdinalRange:      globalSettings.OrdinalRange,
 		Verbose:                      sessionParams.profile.DiscordDebugMessages,
-		IsEarlyQuitter:               isEarlyQuitter,
+		EarlyQuitPenaltyLevel:        earlyQuitPenaltyLevel,
 		RankPercentile:               atomic.NewFloat64(rankPercentile),
 		RankPercentileMaxDelta:       rankPercentileMaxDelta,
 		MatchmakingDivisions:         matchmakingDivisions,
@@ -586,9 +587,11 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 	}
 
 	// If the user has an early quit penalty, only match them with players who have submitted after now
-	if p.IsEarlyQuitter && ticketParams.IncludeEarlyQuitPenalty {
-		qparts = append(qparts, fmt.Sprintf(`-properties.submission_time:<="%s"`, submissionTime))
-	}
+	/*
+		if p.IsEarlyQuitter && ticketParams.IncludeEarlyQuitPenalty {
+			qparts = append(qparts, fmt.Sprintf(`-properties.submission_time:<="%s"`, submissionTime))
+		}
+	*/
 
 	// If the user has a matchmaking Division, use it instead of SBMM
 
