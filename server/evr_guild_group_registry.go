@@ -1,17 +1,3 @@
-// Copyright 2018 The Nakama Authors
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-// http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package server
 
 import (
@@ -51,43 +37,47 @@ func NewGuildGroupRegistry(ctx context.Context, logger runtime.Logger, nk runtim
 	go func() {
 		ctx := ctx
 		ticker := time.NewTicker(time.Minute * 1)
+		timer := time.NewTimer(time.Second * 1)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				registry.Lock()
-				// Load all guild groups from the database.
-				registry.guildGroups = make(map[uuid.UUID]*GuildGroup)
+			case <-timer.C:
+				// Initial delay before starting the ticker
+			}
 
-				cursor := ""
-				for {
+			registry.Lock()
+			// Load all guild groups from the database.
+			registry.guildGroups = make(map[uuid.UUID]*GuildGroup)
 
-					// List all guild groups.
-					groups, cursor, err := nk.GroupsList(ctx, "", "guild", nil, nil, 100, cursor)
-					if err != nil {
-						logger.Warn("Error listing guild groups", zap.Error(err))
-						break
-					}
+			cursor := ""
+			for {
 
-					for _, group := range groups {
+				// List all guild groups.
+				groups, cursor, err := nk.GroupsList(ctx, "", "guild", nil, nil, 100, cursor)
+				if err != nil {
+					logger.Warn("Error listing guild groups", zap.Error(err))
+					break
+				}
 
-						// Load the state
-						if state, err := GuildGroupStateLoad(ctx, nk, ServiceSettings().DiscordBotUserID, group.Id); err != nil {
-							logger.Warn("Error loading guild group state", zap.Error(err))
-							continue
-						} else if registry.guildGroups[uuid.FromStringOrNil(group.Id)], err = NewGuildGroup(group, state); err != nil {
-							logger.Warn("Error creating guild group", zap.Error(err))
-							continue
-						}
-					}
-					if cursor == "" {
-						break
+				for _, group := range groups {
+					// Load the state
+					if state, err := GuildGroupStateLoad(ctx, nk, ServiceSettings().DiscordBotUserID, group.Id); err != nil {
+						logger.Warn("Error loading guild group state", zap.Error(err))
+						continue
+					} else if registry.guildGroups[uuid.FromStringOrNil(group.Id)], err = NewGuildGroup(group, state); err != nil {
+						logger.Warn("Error creating guild group", zap.Error(err))
+						continue
 					}
 				}
-				registry.Unlock()
+				if cursor == "" {
+					break
+				}
 			}
+			registry.Unlock()
+			logger.Debug("Guild group registry updated")
 		}
 	}()
 
