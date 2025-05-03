@@ -211,7 +211,7 @@ func (WhoAmI) createMatchmakingEmbed(account *EVRProfile, guildGroups map[string
 		link := fmt.Sprintf("https://echo.taxi/spark://c/%s", strings.ToUpper(l.ID.UUID.String()))
 		players := make([]string, 0, len(l.Players))
 		for _, p := range l.Players {
-			players = append(players, fmt.Sprintf("<@%s>", p.DiscordID))
+			players = append(players, fmt.Sprintf("<@!%s>", p.DiscordID))
 		}
 		line := fmt.Sprintf("%s (%s)- %s\n%s", guildName, l.Mode.String(), link, strings.Join(players, ", "))
 		matchList = append(matchList, line)
@@ -257,7 +257,7 @@ func (WhoAmI) createPastDisplayNameEmbed(history *DisplayNameHistory, groupID st
 			continue
 		}
 		for dn, ts := range items {
-			dn = fmt.Sprintf("`%s`", EscapeDiscordMarkdown(dn))
+			dn = fmt.Sprintf("`%s`", dn)
 			if e, ok := displayNameMap[dn]; !ok || e.After(ts) {
 				displayNameMap[dn] = e
 			}
@@ -746,9 +746,9 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 
 	if len(potentialAlternates) > 0 {
 		embeds = append(embeds, &discordgo.MessageEmbed{
-			Title:  "Potential Alternate Accounts",
+			Title:  "Suspected Alternate Accounts",
 			Color:  WhoAmISystemColor,
-			Fields: []*discordgo.MessageEmbedField{{Name: "Potential Alternates", Value: strings.Join(potentialAlternates, "\n"), Inline: false}},
+			Fields: []*discordgo.MessageEmbedField{{Name: "Account / Match Items", Value: strings.Join(potentialAlternates, "\n"), Inline: false}},
 		})
 	}
 
