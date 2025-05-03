@@ -679,18 +679,9 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	if err := StorageRead(ctx, p.nk, params.profile.ID(), eqconfig, true); err != nil {
 		logger.Warn("Failed to load early quitter config", zap.Error(err))
 	} else {
-		// Increment the early quitter count.
-		eqconfig.IncrementEarlyQuit()
-
-		// Write it back and store it in the session.
-		if err := StorageWrite(ctx, p.nk, params.profile.ID(), eqconfig); err != nil {
-			logger.Warn("Failed to load early quitter config", zap.Error(err))
-		} else if params, ok := LoadParams(session.Context()); !ok {
-			logger.Error("Failed to load params")
-		} else {
-			params.earlyQuitConfig.Store(eqconfig)
-		}
+		params.earlyQuitConfig.Store(eqconfig)
 	}
+
 	if metadataUpdated {
 		if err := p.nk.AccountUpdateId(ctx, params.profile.ID(), "", params.profile.MarshalMap(), params.profile.GetActiveGroupDisplayName(), "", "", "", ""); err != nil {
 			metricsTags["error"] = "failed_update_profile"
@@ -1107,13 +1098,10 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 			eqconfig.IncrementCompletedMatches()
 			if err := StorageWrite(ctx, p.nk, playerInfo.UserID, eqconfig); err != nil {
 				logger.Warn("Failed to store early quitter config", zap.Error(err))
-			}
-			if session := p.sessionRegistry.Get(playerSession.ID()); session != nil {
-				params, ok := LoadParams(session.Context())
-				if ok {
+			} else if session := p.sessionRegistry.Get(playerSession.ID()); session != nil {
+				if params, ok := LoadParams(session.Context()); ok {
 					params.earlyQuitConfig.Store(eqconfig)
 				}
-
 			}
 
 		}
