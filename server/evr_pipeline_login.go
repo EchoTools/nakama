@@ -521,6 +521,50 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 		}
 	}
 
+	// Get the GroupID from the user's metadata
+	params.guildGroups, err = GuildUserGroupsList(ctx, p.nk, p.guildGroupRegistry, params.profile.ID())
+	if err != nil {
+		metricsTags["error"] = "failed_get_guild_groups"
+		return fmt.Errorf("failed to get guild groups: %w", err)
+	}
+
+	// Create a map of active suspension records by group ID.
+	guildEnforcementInheritenceMap := make(map[string][]string) // map[parentGroupID][]childGroupID
+	for _, gg := range params.guildGroups {
+		if len(gg.SuspensionInheritanceGroupIDs) > 0 {
+			for _, parentID := range gg.SuspensionInheritanceGroupIDs {
+				guildEnforcementInheritenceMap[parentID] = append(guildEnforcementInheritenceMap[parentID], gg.IDStr())
+			}
+		}
+	}
+
+	// Check for suspensions for this user and thier first tier alts.
+	params.activeSuspensionRecords = make(map[string]map[string]GuildEnforcementRecord)
+	firstIDs, _ := loginHistory.AlternateIDs()
+
+	if loginHistory.IgnoreDisabledAlternates {
+		firstIDs = []string{}
+	}
+
+	if journals, err := EnforcementJournalSearch(ctx, p.nk, append(firstIDs, params.UserID())); err != nil {
+		logger.Warn("Unable to read enforcement journal", zap.Error(err))
+	} else {
+		for uID, journal := range journals {
+			suspensions := journal.ActiveSuspensions()
+			if len(suspensions) == 0 {
+				continue
+			}
+			for parent, children := range guildEnforcementInheritenceMap {
+				for _, child := range children {
+					if suspensions[parent].SuspensionExpiry.After(suspensions[child].SuspensionExpiry) {
+						suspensions[child] = suspensions[parent]
+					}
+				}
+			}
+			params.activeSuspensionRecords[uID] = suspensions
+		}
+	}
+
 	metricsTags["error"] = "nil"
 
 	return nil
@@ -537,13 +581,6 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 
 	metadataUpdated := false
 
-	// Get the GroupID from the user's metadata
-	params.guildGroups, err = GuildUserGroupsList(ctx, p.nk, p.guildGroupRegistry, params.profile.ID())
-	if err != nil {
-		metricsTags["error"] = "failed_get_guild_groups"
-		return fmt.Errorf("failed to get guild groups: %w", err)
-	}
-
 	if len(params.guildGroups) == 0 {
 		// User is not in any groups
 		metricsTags["error"] = "user_not_in_any_groups"
@@ -555,7 +592,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 
 	if _, ok := params.guildGroups[params.profile.ActiveGroupID]; !ok && params.profile.GetActiveGroupID() != uuid.Nil {
 		// User is not in the active group
-		logger.Warn("User is not in the active group", zap.String("uid", params.profile.ID()), zap.String("gid", params.profile.ActiveGroupID))
+		logger.Warn("User is not in the active group", zap.String("uid", params.profile.UserID()), zap.String("gid", params.profile.ActiveGroupID))
 		params.profile.SetActiveGroupID(uuid.Nil)
 	}
 
@@ -575,7 +612,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		slices.Reverse(groupIDs)
 
 		params.profile.SetActiveGroupID(uuid.FromStringOrNil(groupIDs[0]))
-		logger.Debug("Set active group", zap.String("uid", params.profile.ID()), zap.String("gid", params.profile.ActiveGroupID))
+		logger.Debug("Set active group", zap.String("uid", params.profile.UserID()), zap.String("gid", params.profile.ActiveGroupID))
 		metadataUpdated = true
 	}
 
@@ -586,7 +623,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		params.isGlobalDeveloper = true
 		params.isGlobalOperator = true
 
-	} else if ismember, err := CheckSystemGroupMembership(ctx, p.db, session.userID.String(), GroupGlobalOperators); err != nil {
+	} else if ismember, err := CheckSystemGroupMembership(ctx, p.db, params.UserID(), GroupGlobalOperators); err != nil {
 		metricsTags["error"] = "group_check_failed"
 		return fmt.Errorf("failed to check system group membership: %w", err)
 	} else if ismember {
@@ -800,9 +837,10 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 	}
 
 	// Check if the user is required to go through community values
-	if records, err := EnforcementCommunityValuesSearch(ctx, p.nk, groupID, userID); err != nil {
+	journal := NewGuildEnforcementJournal(userID)
+	if err := StorageRead(ctx, p.nk, userID, journal, true); err != nil {
 		logger.Warn("Failed to search for community values", zap.Error(err))
-	} else if len(records) > 0 {
+	} else if journal.CommunityValuesCompletedAt.IsZero() {
 		clientProfile.Social.CommunityValuesVersion = 0
 	}
 
@@ -840,25 +878,24 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 
 	if hasCompleted {
 
-		if records, err := EnforcementCommunityValuesSearch(ctx, p.nk, groupID, userID); err != nil {
+		// Check if the user is required to go through community values
+		journal := NewGuildEnforcementJournal(userID)
+		if err := StorageRead(ctx, p.nk, userID, journal, true); err != nil {
 			logger.Warn("Failed to search for community values", zap.Error(err))
-		} else if len(records) > 0 {
-			// get the records
+		} else if journal.CommunityValuesCompletedAt.IsZero() {
 
-			if records, ok := records[groupID]; ok {
-				records.CommunityValuesCompletedAt = time.Now().UTC()
-				records.IsCommunityValuesRequired = false
+			journal.CommunityValuesCompletedAt = time.Now().UTC()
 
-				if err := StorageWrite(ctx, p.nk, userID, records); err != nil {
-					logger.Warn("Failed to write community values", zap.Error(err))
-				}
+			if err := StorageWrite(ctx, p.nk, userID, journal); err != nil {
+				logger.Warn("Failed to write community values", zap.Error(err))
+			}
 
-				// Log the audit message
-				if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("User <@%s> has accepted the community values.", params.DiscordID()), false); err != nil {
-					logger.Warn("Failed to log audit message", zap.Error(err))
-				}
+			// Log the audit message
+			if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("User <@%s> has accepted the community values.", params.DiscordID()), false); err != nil {
+				logger.Warn("Failed to log audit message", zap.Error(err))
 			}
 		}
+
 	}
 
 	profile, err := EVRProfileLoad(ctx, p.nk, userID)
@@ -1200,11 +1237,14 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 			} else if targetUserID != "" {
 				count := 0
 				// Get the number of reports for this user in the last week
-				if guildRecords, err := EnforcementJournalSearch(ctx, p.nk, []string{groupID}, targetUserID); err != nil {
+				if journals, err := EnforcementJournalSearch(ctx, p.nk, []string{targetUserID}); err != nil {
 					logger.Error("Failed to search for enforcement records", zap.Error(err))
-				} else if len(guildRecords) > 0 {
-					for _, records := range guildRecords {
-						for _, r := range records.Records {
+				} else if len(journals) > 0 {
+					for _, journal := range journals {
+						for _, r := range journal.GroupRecords(groupID) {
+							if journal.IsVoid(groupID, r.ID) {
+								continue
+							}
 							// Show all reports for the past week
 							if r.CreatedAt.After(time.Now().Add(-time.Hour * 24 * 7)) {
 								count += 1
@@ -1212,13 +1252,15 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 						}
 					}
 				}
-				// Add the count to the players display name
-				serverProfile.DisplayName = fmt.Sprintf("%s [%d]", serverProfile.DisplayName, count)
+				if count > 0 {
+					// Add the count to the players display name
+					serverProfile.DisplayName = fmt.Sprintf("%s [%d]", serverProfile.DisplayName, count)
 
-				data, err = json.Marshal(serverProfile)
-				if err != nil {
-					logger.Error("Failed to marshal server profile", zap.Error(err))
-					return fmt.Errorf("failed to marshal server profile: %w", err)
+					data, err = json.Marshal(serverProfile)
+					if err != nil {
+						logger.Error("Failed to marshal server profile", zap.Error(err))
+						return fmt.Errorf("failed to marshal server profile: %w", err)
+					}
 				}
 			}
 		}
