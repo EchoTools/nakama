@@ -7,8 +7,10 @@ import (
 	anyascii "github.com/anyascii/go"
 )
 
+const DisplayNameMaxLength = 20
+
 var (
-	DisplayNameFilterRegex  = regexp.MustCompile(`[^-0-9A-Za-z_\[\] ]`)
+	DisplayNameFilterRegex  = regexp.MustCompile(`[^-0-9A-Za-z_\[\]]`)
 	emojiFilterPattern      = regexp.MustCompile(`:[a-zA-Z0-9_]+:`)
 	displayNameMatchPattern = regexp.MustCompile(`[A-Za-z]`)
 	displayNameScorePattern = regexp.MustCompile(`\s\(\d+\)\s\[\d+\.\d+%]`)
@@ -17,11 +19,10 @@ var (
 // sanitizeDisplayName filters the provided displayName to ensure it is valid.
 func sanitizeDisplayName(displayName string) string {
 	mapping := map[string]string{
-		"๒":      "b",
-		"ɭ":      "l",
-		"ย":      "u",
-		"є":      "e",
-		"femboy": "",
+		"๒": "b",
+		"ɭ": "l",
+		"ย": "u",
+		"є": "e",
 	}
 
 	for k, v := range mapping {

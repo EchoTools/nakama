@@ -696,7 +696,10 @@ func (d *DiscordIntegrator) handleMemberUpdate(logger *zap.Logger, s *discordgo.
 		}
 
 		if ownerID, err := d.deconflictDisplayName(ctx, displayName); err != nil {
-			return fmt.Errorf("error deconflicting display name: %w", err)
+			// If it errors, set the display name to their username
+			logger.Error("Error deconflicting display name", zap.String("display_name", displayName), zap.Error(err))
+			evrAccount.SetGroupDisplayName(groupID, e.Member.User.Username)
+
 		} else if ownerID != "" && ownerID != evrAccount.ID() {
 
 			logger.Warn("Display name in use", zap.String("owner_id", ownerID), zap.String("display_name", displayName), zap.String("caller_user_id", evrAccount.ID()))
@@ -726,7 +729,7 @@ func (d *DiscordIntegrator) handleMemberUpdate(logger *zap.Logger, s *discordgo.
 		avatarURL = e.Member.AvatarURL("512")
 	}
 
-	if err := d.nk.AccountUpdateId(ctx, evrAccount.ID(), evrAccount.Username(), evrAccount.MarshalMap(), evrAccount.GetActiveGroupDisplayName(), "", "", e.Member.User.Locale, avatarURL); err != nil {
+	if err := d.nk.AccountUpdateId(ctx, evrAccount.ID(), e.Member.User.Username, evrAccount.MarshalMap(), evrAccount.GetActiveGroupDisplayName(), "", "", e.Member.User.Locale, avatarURL); err != nil {
 		return fmt.Errorf("failed to update account: %w", err)
 	}
 
