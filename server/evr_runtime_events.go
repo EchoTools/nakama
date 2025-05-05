@@ -201,16 +201,10 @@ func (h *EventDispatch) auditedSession(groupID, sessionID string) bool {
 }
 
 type compactAlternate struct {
-	userID           string
-	username         string
-	discordID        string
-	isDisabled       bool
-	suspensionExpiry time.Time
-	isFirstDegree    bool
-}
-
-func (c compactAlternate) String() string {
-	return fmt.Sprintf("suspension expires <t:%d:R>", c.suspensionExpiry.Unix())
+	userID        string
+	username      string
+	discordID     string
+	isFirstDegree bool
 }
 
 func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtime.Logger, evt *api.Event) error {
@@ -225,16 +219,7 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 		userID       = evt.Properties["user_id"]
 		loginHistory = NewLoginHistory(userID)
 		gg           *GuildGroup
-
-		displayAuditMessage = false
 	)
-
-	account, err := h.nk.AccountGetId(ctx, userID)
-	if err != nil {
-		return fmt.Errorf("failed to get account: %w", err)
-	}
-	mainDiscordID := account.CustomId
-	mainUsername := account.User.Username
 
 	if gg, err = h.guildGroup(ctx, groupID); err != nil || gg == nil {
 		return fmt.Errorf("failed to load guild group: %w", err)
@@ -244,55 +229,34 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 		return fmt.Errorf("failed to load login history: %w", err)
 	}
 
-	searchGroupIDs := []string{groupID}
-	if gg.SuspensionInheritanceGroupIDs != nil {
-		searchGroupIDs = append(searchGroupIDs, gg.SuspensionInheritanceGroupIDs...)
-	}
-
 	if updated := loginHistory.NotifyGroup(groupID, gg.AlternateAccountNotificationExpiry); updated {
-		displayAuditMessage = true
+
 		if err := StorageWrite(ctx, h.nk, userID, loginHistory); err != nil {
 			return fmt.Errorf("failed to store login history: %w", err)
 		}
-	}
 
-	var (
-		firstIDs, secondaryIDs = loginHistory.AlternateIDs()
-		alternateIDs           = append(append(firstIDs, secondaryIDs...), userID)
-		alternates             = make(map[string]*compactAlternate, len(alternateIDs))
-	)
+		// Check for guild suspensions on alts
+		var (
+			firstIDs, secondIDs = loginHistory.AlternateIDs()
+		)
 
-	if len(alternateIDs) == 0 {
-		return nil
-	}
+		accounts, err := h.nk.AccountsGetId(ctx, append(firstIDs, secondIDs...))
+		if err != nil {
+			return fmt.Errorf("failed to get alternate accounts: %w", err)
+		}
 
-	var activeRecord *GuildEnforcementRecord
-	// Check for guild suspensions
-	searchUserIDs := append(firstIDs, userID)
-	if latestRecord, err := EnforcementActiveSuspensionSearch(ctx, h.nk, userID, groupID, searchGroupIDs, searchUserIDs); err != nil {
-		return fmt.Errorf("failed to get guild records: %w", err)
-	} else {
-		activeRecord = latestRecord
-	}
+		alternates := make(map[string]*compactAlternate, len(accounts))
+		for _, a := range accounts {
+			alternates[a.User.Id] = &compactAlternate{
+				userID:        a.User.Id,
+				username:      a.User.Username,
+				discordID:     a.CustomId,
+				isFirstDegree: slices.Contains(firstIDs, a.User.Id),
+			}
+		}
 
-	// Get the accounts for the alternates, and check if they are disabled
-	activeRecordAccount, err := h.nk.AccountGetId(ctx, userID)
-	if err != nil {
-		return fmt.Errorf("failed to get account: %w", err)
-	}
+		content := h.alternateLogLineFormatter(userID, alternates)
 
-	if gg.RejectPlayersWithSuspendedAlternates && activeRecord != nil && (activeRecord.UserID != userID) {
-		minMinutes := 1
-		maxMinutes := 3
-		delay := time.Duration(minMinutes+rand.Intn(maxMinutes)) * time.Minute
-		ScheduleKick(ctx, h.nk, logger, h.dg, loginHistory, userID, gg, delay)
-		AuditLogSendGuild(h.dg, gg, fmt.Sprintf("<@!%s> (%s) has suspended alt (%s). Kicking from match in %d seconds.", mainDiscordID, mainUsername, activeRecordAccount.User.Id, int(delay.Seconds())))
-
-	}
-
-	content := h.alternateLogLineFormatter(userID, alternates)
-
-	if displayAuditMessage {
 		if _, err := AuditLogSendGuild(h.dg, gg, content); err != nil {
 			return fmt.Errorf("failed to send audit message: %w", err)
 		}
@@ -314,12 +278,6 @@ func (h *EventDispatch) alternateLogLineFormatter(userID string, alternates map[
 		// Check if any are banned, or currently suspended by the guild
 		s := fmt.Sprintf("<@%s> (%s)", a.discordID, a.username)
 		addons := make([]string, 0, 2)
-		if a.isDisabled {
-			addons = append(addons, "disabled")
-		}
-		if !a.suspensionExpiry.IsZero() {
-			addons = append(addons, a.String())
-		}
 
 		if len(addons) > 0 {
 			s += " *[" + strings.Join(addons, ", ") + "]*"

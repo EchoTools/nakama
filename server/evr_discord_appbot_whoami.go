@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"sort"
@@ -346,44 +347,56 @@ func (*WhoAmI) createGuildMembershipsEmbedFieldValue(guildGroupMap map[string]*G
 
 }
 
-func (*WhoAmI) createSuspensionsEmbed(enforcementRecordsByGroupName map[string][]*GuildEnforcementRecord) *discordgo.MessageEmbed {
-	if enforcementRecordsByGroupName == nil {
+func (*WhoAmI) createSuspensionsEmbed(journal *GuildEnforcementJournal, guildGroups map[string]*GuildGroup, groupIDs []string, includeInactive, includeAuditNotes bool) *discordgo.MessageEmbed {
+	if journal == nil {
 		return nil
 	}
+	voids := journal.GroupVoids(groupIDs...)
+	for {
+		// Loop until the embed size is less than 1024 bytes
+		fields := make([]*discordgo.MessageEmbedField, 0, len(journal.RecordsByGroupID))
 
-	seenIDs := make(map[string]struct{}, 0)
-	fields := make([]*discordgo.MessageEmbedField, 0, len(enforcementRecordsByGroupName))
-	for gName, records := range enforcementRecordsByGroupName {
-
-		// Don't duplicate records
-		records = slices.DeleteFunc(records, func(r *GuildEnforcementRecord) bool {
-			_, seen := seenIDs[r.ID]
-			if !seen {
-				seenIDs[r.ID] = struct{}{}
+		for groupID, records := range journal.RecordsByGroupID {
+			if !slices.Contains(groupIDs, groupID) {
+				continue
 			}
-			return seen
+
+			gName := groupID
+			if gg, ok := guildGroups[groupID]; ok {
+				gName = EscapeDiscordMarkdown(gg.Name())
+			}
+			if field := createSuspensionDetailsEmbedField(gName, records, voids, includeInactive, includeAuditNotes); field != nil {
+				if field.Value != "" {
+					fields = append(fields, field)
+				}
+			}
+		}
+
+		if len(fields) == 0 {
+			return nil
+		}
+
+		// Sort the fields by group name
+		sort.SliceStable(fields, func(i, j int) bool {
+			return fields[i].Name < fields[j].Name
 		})
 
-		field := createSuspensionDetailsEmbedField(gName, records)
-		if field == nil {
+		embed := &discordgo.MessageEmbed{
+			Title:  "Suspensions",
+			Color:  0xCC0000,
+			Fields: fields,
+		}
+
+		data, err := json.Marshal(embed)
+		if err != nil {
+			return nil
+		}
+		if includeInactive && len(data) > 1024 {
+			// Only show active
+			includeInactive = false
 			continue
 		}
-		fields = append(fields, field)
-	}
-
-	if len(fields) == 0 {
-		return nil
-	}
-
-	// Sort the fields by group name
-	sort.SliceStable(fields, func(i, j int) bool {
-		return fields[i].Name < fields[j].Name
-	})
-
-	return &discordgo.MessageEmbed{
-		Title:  "Suspensions",
-		Color:  0xCC0000,
-		Fields: fields,
+		return embed
 	}
 }
 
@@ -488,116 +501,58 @@ func (*WhoAmI) collectedBlockedFriends(ctx context.Context, logger runtime.Logge
 	return blockedUsers, nil
 }
 
-func (*WhoAmI) collectEnforcementRecords(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, guildGroupRegistry *GuildGroupRegistry, guildGroups map[string]*GuildGroup, targetID string, includeInactive bool, includeAuditNotes bool) (map[string][]*GuildEnforcementRecord, error) {
-	enforcementRecordsByGroupName := make(map[string][]*GuildEnforcementRecord, 0)
-	enforcementGroupIDs := make([]string, 0, len(guildGroups))
+func (w *WhoAmI) collectEnforcementRecords(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, guildGroupRegistry *GuildGroupRegistry, guildGroups map[string]*GuildGroup, targetID string, includeInactive, includeAuditNotes bool) (*discordgo.MessageEmbed, error) {
+	groupIDs := make([]string, 0, len(guildGroups))
 	for _, g := range guildGroups {
-		enforcementGroupIDs = append(enforcementGroupIDs, g.GuildID)
+		groupIDs = append(groupIDs, g.Group.Id)
+
 		if len(g.SuspensionInheritanceGroupIDs) > 0 {
-			enforcementGroupIDs = append(enforcementGroupIDs, g.SuspensionInheritanceGroupIDs...)
+			groupIDs = append(groupIDs, g.SuspensionInheritanceGroupIDs...)
 		}
 	}
 
-	if results, err := EnforcementJournalSearch(ctx, nk, enforcementGroupIDs, targetID); err != nil {
-		logger.Warn("failed to get enforcement records", "error", err)
-	} else {
-
-		enforcementRecordsByID := make(map[string][]*GuildEnforcementRecord, 0)
-
-		for _, journal := range results {
-			for _, record := range journal.Records {
-				if r, ok := enforcementRecordsByID[record.ID]; !ok {
-					enforcementRecordsByID[record.ID] = []*GuildEnforcementRecord{record}
-				} else {
-					enforcementRecordsByID[record.ID] = append(r, record)
-				}
+	// Ensure the guild groups are loaded
+	for _, gID := range groupIDs {
+		if _, ok := guildGroups[gID]; !ok {
+			if gg := guildGroupRegistry.Get(gID); gg != nil {
+				guildGroups[gID] = gg
 			}
-		}
-
-		// Merge the records by ID (this displays inhereted records as a single record)
-		enforcementRecords := make([]*GuildEnforcementRecord, 0, len(enforcementRecordsByID))
-		for _, records := range enforcementRecordsByID {
-			if len(records) == 0 {
-				continue
-			}
-			record := records[0]
-			for _, r := range records[1:] {
-				record.Merge(r)
-			}
-
-			enforcementRecords = append(enforcementRecords, record)
-		}
-
-		if !includeInactive {
-			for i := 0; i < len(enforcementRecords); i++ {
-				r := enforcementRecords[i]
-				if !r.IsActive() {
-					enforcementRecords = append(enforcementRecords[:i], enforcementRecords[i+1:]...)
-					i--
-				}
-			}
-		}
-
-		if includeAuditNotes {
-			for _, journal := range results {
-				// clear the notes
-				for _, r := range journal.Records {
-					r.EnforcerDiscordID = ""
-					r.EnforcerUserID = ""
-					r.AuditorNotes = ""
-				}
-			}
-		}
-
-		// Sort by updated time
-		sort.SliceStable(enforcementRecords, func(i, j int) bool {
-			return enforcementRecords[i].UpdatedAt.Before(enforcementRecords[j].UpdatedAt)
-		})
-
-		// Build the map
-		for _, record := range enforcementRecords {
-			gName := ""
-			if gg, ok := guildGroups[record.GroupID]; ok {
-				gName = EscapeDiscordMarkdown(gg.Name())
-			} else {
-				if gg := guildGroupRegistry.Get(record.GroupID); gg != nil {
-					gName = EscapeDiscordMarkdown(gg.Name())
-				} else {
-					gName = record.GroupID
-				}
-			}
-
-			// Add the records to the map
-			if _, ok := enforcementRecordsByGroupName[gName]; !ok {
-				enforcementRecordsByGroupName[gName] = []*GuildEnforcementRecord{}
-			}
-			enforcementRecordsByGroupName[gName] = append(enforcementRecordsByGroupName[gName], enforcementRecords...)
 		}
 	}
 
-	return enforcementRecordsByGroupName, nil
+	journals, err := EnforcementJournalSearch(ctx, nk, []string{targetID})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get enforcement journals: %w", err)
+	}
+
+	if len(journals) == 0 || journals[targetID] == nil {
+		return nil, nil
+	}
+	journal := journals[targetID]
+
+	return w.createSuspensionsEmbed(journal, guildGroups, groupIDs, includeInactive, includeAuditNotes), nil
+
 }
 
 func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, s *discordgo.Session, i *discordgo.InteractionCreate, target *discordgo.User, includePriviledged bool, includePrivate bool, includeGuildAuditor bool, includeSystem bool, includeSuspensions bool, includeInactiveSuspensions bool, includeCurrentMatches bool, includeVRMLHistory bool, includePastDisplayNames bool) error {
 
 	var (
-		err                           error
-		whoami                        = &WhoAmI{}
-		callerID                      = d.cache.DiscordIDToUserID(i.Member.User.ID)
-		targetID                      = d.cache.DiscordIDToUserID(target.ID)
-		evrAccount                    *EVRProfile
-		matchmakingSettings           *MatchmakingSettings
-		loginHistory                  *LoginHistory
-		displayNameHistory            *DisplayNameHistory
-		enforcementRecordsByGroupName map[string][]*GuildEnforcementRecord
-		embeds                        = make([]*discordgo.MessageEmbed, 0, 4)
-		groupID                       = d.cache.GuildIDToGroupID(i.GuildID)
-		showLoginsSince               = time.Now().Add(time.Hour * 24 * -30) // 30 days
-		stripIPAddresses              = !includePrivate
-		matchmakingEmbed              *discordgo.MessageEmbed
-		vrmlEmbed                     *discordgo.MessageEmbed
-		suspensionsEmbed              *discordgo.MessageEmbed
-		pastDisplayNameEmbed          *discordgo.MessageEmbed
+		err                  error
+		whoami               = &WhoAmI{}
+		callerID             = d.cache.DiscordIDToUserID(i.Member.User.ID)
+		targetID             = d.cache.DiscordIDToUserID(target.ID)
+		evrAccount           *EVRProfile
+		matchmakingSettings  *MatchmakingSettings
+		loginHistory         *LoginHistory
+		displayNameHistory   *DisplayNameHistory
+		embeds               = make([]*discordgo.MessageEmbed, 0, 4)
+		groupID              = d.cache.GuildIDToGroupID(i.GuildID)
+		showLoginsSince      = time.Now().Add(time.Hour * 24 * -30) // 30 days
+		stripIPAddresses     = !includePrivate
+		matchmakingEmbed     *discordgo.MessageEmbed
+		vrmlEmbed            *discordgo.MessageEmbed
+		suspensionsEmbed     *discordgo.MessageEmbed
+		pastDisplayNameEmbed *discordgo.MessageEmbed
 	)
 
 	if includeSystem {
@@ -658,10 +613,12 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	}
 
 	if includeSuspensions {
-		if enforcementRecordsByGroupName, err = whoami.collectEnforcementRecords(ctx, logger, nk, d.guildGroupRegistry, guildGroups, targetID, includeInactiveSuspensions, includeGuildAuditor); err != nil {
+
+		if embed, err := whoami.collectEnforcementRecords(ctx, logger, nk, d.guildGroupRegistry, guildGroups, targetID, includeInactiveSuspensions, includeGuildAuditor); err != nil {
 			logger.Warn("failed to get enforcement records", "error", err)
 		} else {
-			suspensionsEmbed = whoami.createSuspensionsEmbed(enforcementRecordsByGroupName)
+			suspensionsEmbed = embed
+
 		}
 	}
 

@@ -40,16 +40,23 @@ type SessionParameters struct {
 	serverRegions []string            // []string of the server regions
 	urlParameters map[string][]string // The URL parameters
 
-	profile              *EVRProfile                      // The account
-	matchmakingSettings  *MatchmakingSettings             // The matchmaking settings
-	displayNames         *DisplayNameHistory              // The display name history
-	guildGroups          map[string]*GuildGroup           // map[string]*GuildGroup
-	earlyQuitConfig      *atomic.Pointer[EarlyQuitConfig] // The early quit config
-	isGoldNameTag        *atomic.Bool                     // If this user should have a gold name tag
-	lastMatchmakingError *atomic.Error                    // The last matchmaking error
-	latencyHistory       *atomic.Pointer[LatencyHistory]  // The latency history\
-	isIGPOpen            *atomic.Bool                     // The user has IGPU open
+	profile                 *EVRProfile                                  // The account
+	matchmakingSettings     *MatchmakingSettings                         // The matchmaking settings
+	displayNames            *DisplayNameHistory                          // The display name history
+	guildGroups             map[string]*GuildGroup                       // map[string]*GuildGroup
+	earlyQuitConfig         *atomic.Pointer[EarlyQuitConfig]             // The early quit config
+	isGoldNameTag           *atomic.Bool                                 // If this user should have a gold name tag
+	lastMatchmakingError    *atomic.Error                                // The last matchmaking error
+	latencyHistory          *atomic.Pointer[LatencyHistory]              // The latency history
+	isIGPOpen               *atomic.Bool                                 // The user has IGPU open
+	activeSuspensionRecords map[string]map[string]GuildEnforcementRecord // The active suspension records map[groupID]map[userID]GuildEnforcementRecord
+}
 
+func (s SessionParameters) UserID() string {
+	if s.profile == nil {
+		return ""
+	}
+	return s.profile.UserID()
 }
 
 func (s *SessionParameters) IsIGPOpen() bool {
