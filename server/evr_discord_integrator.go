@@ -419,7 +419,7 @@ func (d *DiscordIntegrator) updateLinkStatus(ctx context.Context, discordID stri
 	isLinked := evrAccount.IsLinked()
 
 	for gid, g := range guildGroups {
-		member, err := d.GuildMember(gid, discordID)
+		member, err := d.GuildMember(g.GuildID, discordID)
 		if err != nil {
 			d.logger.Warn("Error getting guild member", zap.String("guild_id", gid), zap.String("discord_id", discordID), zap.Error(err))
 			continue
