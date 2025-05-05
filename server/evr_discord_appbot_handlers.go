@@ -439,10 +439,11 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 
 func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.InteractionCreate, caller *discordgo.Member, target *discordgo.User, duration, userNotice, notes string, requireCommunityValues bool) error {
 	var (
-		ctx              = d.ctx
-		nk               = d.nk
-		db               = d.db
-		suspensionExpiry time.Time
+		ctx                = d.ctx
+		nk                 = d.nk
+		db                 = d.db
+		suspensionExpiry   time.Time
+		suspensionDuration time.Duration
 	)
 
 	callerUserID := d.cache.DiscordIDToUserID(caller.User.ID)
@@ -483,6 +484,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 				unit = time.Minute
 			}
 			if d, err := strconv.Atoi(duration[:len(duration)-1]); err == nil {
+				suspensionDuration = time.Duration(d) * unit
 				suspensionExpiry = time.Now().Add(time.Duration(d) * unit)
 			} else {
 				return fmt.Errorf("invalid duration format: %w", err)
@@ -495,12 +497,16 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 	}
 
 	var (
-		cnt            = 0
-		timeoutMessage string
-		actions        = make([]string, 0, len(presences))
-		isRemoval      = false
-		doDisconnect   = false
-		isEnforcer     = false
+		cnt                   = 0
+		timeoutMessage        string
+		actions               = make([]string, 0, len(presences))
+		doDisconnect          = false
+		isEnforcer            = false
+		kickPlayer            = false
+		voidActiveSuspensions = !suspensionExpiry.IsZero() && time.Now().After(suspensionExpiry)
+		addSuspension         = !suspensionExpiry.IsZero() && time.Now().Before(suspensionExpiry)
+		recordsByGroupID      = make(map[string][]GuildEnforcementRecord, 1)
+		voids                 = make(map[string]GuildEnforcementRecordVoid, 0)
 	)
 
 	gg, err := GuildGroupLoad(ctx, nk, groupID)
@@ -511,100 +517,134 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 	}
 
 	if isEnforcer || isGlobalOperator {
-		if !suspensionExpiry.IsZero() {
-			if time.Now().After(suspensionExpiry) {
-				actions = append(actions, "suspension removed")
-				isRemoval = true
-			} else {
-				actions = append(actions, fmt.Sprintf("suspension expires <t:%d:R>", suspensionExpiry.UTC().Unix()))
+		if !voidActiveSuspensions {
+			kickPlayer = true
+		}
+
+		journal := NewGuildEnforcementJournal(targetUserID)
+		if err := StorageRead(ctx, nk, targetUserID, journal, false); err != nil && status.Code(err) != codes.NotFound {
+			return fmt.Errorf("failed to read storage: %w", err)
+		}
+
+		if addSuspension {
+			// Add a new record
+			actions = append(actions, fmt.Sprintf("suspension expires <t:%d:R>", suspensionExpiry.UTC().Unix()))
+			record := journal.AddRecord(groupID, callerUserID, caller.User.ID, userNotice, notes, requireCommunityValues, suspensionDuration)
+			recordsByGroupID[groupID] = append(recordsByGroupID[groupID], record)
+
+		} else if voidActiveSuspensions {
+
+			thisGroupID := groupID
+
+			groupIDs := []string{thisGroupID}
+			if gg.SuspensionInheritanceGroupIDs != nil {
+				groupIDs = append(groupIDs, gg.SuspensionInheritanceGroupIDs...)
 			}
 
-			guildRecords := NewGuildEnforcementJournal(targetUserID, groupID)
-			if err := StorageRead(ctx, nk, targetUserID, guildRecords, false); err != nil && status.Code(err) != codes.NotFound {
-				return fmt.Errorf("failed to read storage: %w", err)
-			}
-
-			var record *GuildEnforcementRecord
-			if isRemoval {
-
-				// Get all the applicable journals
-				journals := make(map[string]*GuildEnforcementJournal, 0)
-
-				groupIDs := []string{groupID}
-				if gg.SuspensionInheritanceGroupIDs != nil {
-					groupIDs = append(groupIDs, gg.SuspensionInheritanceGroupIDs...)
+			// Void any inherited suspensions
+			for _, groupID := range groupIDs {
+				if recordsByGroupID[groupID] == nil {
+					recordsByGroupID[groupID] = make([]GuildEnforcementRecord, 0)
 				}
 
-				for _, gid := range groupIDs {
-					journal := NewGuildEnforcementJournal(targetUserID, gid)
-					if err := StorageRead(ctx, nk, targetUserID, journal, false); err != nil && status.Code(err) != codes.NotFound {
-						return fmt.Errorf("failed to read storage: %w", err)
+				for _, record := range journal.GroupRecords(groupID) {
+					if record.IsExpired() || journal.IsVoid(groupID, record.ID) || journal.IsVoid(thisGroupID, record.ID) {
+						continue
 					}
-					journals[gid] = journal
-				}
+					// Void the suspension
+					actions = append(actions, fmt.Sprintf("suspension removed: <t:%d:R> by <@%s> (expires <t:%d:R>): %s", record.CreatedAt.Unix(), record.EnforcerDiscordID, record.SuspensionExpiry.Unix(), record.UserNoticeText))
+					recordsByGroupID[groupID] = append(recordsByGroupID[groupID], record)
 
-				for _, journal := range journals {
-
-					for _, record = range journal.Records {
-						if !record.IsActive() {
-							continue
-						}
-
-						// If this is an inherited suspension, create a new one for this guild that is voided
-						if record.GroupID != groupID {
-							record = record.Clone()
-							record.GroupID = groupID
-							guildRecords.AddRecord(record)
-						}
-
-						notes := fmt.Sprintf("voided <t:%d:R> by <@%s>", time.Now().UTC().Unix(), caller.User.ID)
-						record.Void(notes)
+					details := userNotice
+					if notes != "" {
+						details += "\n" + notes
 					}
+					void := journal.VoidRecord(thisGroupID, record.ID, callerUserID, caller.User.ID, details)
+					voids[void.RecordID] = void
 				}
+			}
+		}
 
-			} else {
-				actions = append(actions, fmt.Sprintf("kicked for %s", userNotice))
-				// Add a new record
-				record = NewGuildEnforcementRecord(callerUserID, caller.User.ID, targetUserID, groupID, userNotice, notes, requireCommunityValues, suspensionExpiry)
-				guildRecords.AddRecord(record)
+		if err := StorageWrite(ctx, nk, targetUserID, journal); err != nil {
+			return fmt.Errorf("failed to write storage: %w", err)
+		}
+
+		if gg.EnforcementNoticeChannelID != "" {
+			evrAccount, err := EVRProfileLoad(ctx, nk, targetUserID)
+			if err != nil {
+				return fmt.Errorf("failed to load account metadata: %w", err)
 			}
 
-			if err := StorageWrite(ctx, nk, targetUserID, guildRecords); err != nil {
-				return fmt.Errorf("failed to write storage: %w", err)
+			title := "Kicked Player"
+			if len(voids) > 0 {
+				title = "Voided Suspension(s)"
+			} else if len(recordsByGroupID) > 0 {
+				title = "Added Suspension"
 			}
-
-			if gg.EnforcementNoticeChannelID != "" {
-				evrAccount, err := EVRProfileLoad(ctx, nk, targetUserID)
-				if err != nil {
-					return fmt.Errorf("failed to load account metadata: %w", err)
-				}
-				suffix := ""
-				if isRemoval {
-					suffix = " (voided)"
-				}
-				displayName := evrAccount.GetGroupDisplayNameOrDefault(groupID)
-				displayName = EscapeDiscordMarkdown(displayName)
-				field := createSuspensionDetailsEmbedField(gg.Name(), []*GuildEnforcementRecord{record})
-				embed := &discordgo.MessageEmbed{
-					Title:       "Enforcement Notice" + suffix,
-					Description: fmt.Sprintf("Enforcement notice for %s (%s)", displayName, target.Mention()),
-					Color:       0x9656ce,
-					Fields: []*discordgo.MessageEmbedField{
-						field,
+			targetDN := evrAccount.GetGroupDisplayNameOrDefault(groupID)
+			targetDN = EscapeDiscordMarkdown(targetDN)
+			callerDN := caller.DisplayName()
+			if callerDN == "" {
+				callerDN = caller.User.Username
+			}
+			embed := &discordgo.MessageEmbed{
+				Author: &discordgo.MessageEmbedAuthor{
+					Name:    fmt.Sprintf("%s (%s)", callerDN, caller.User.Username),
+					IconURL: caller.AvatarURL(""),
+				},
+				Title: title,
+				Color: 0x9656ce,
+				Fields: []*discordgo.MessageEmbedField{
+					{
+						Name:   "Target User",
+						Value:  fmt.Sprintf("%s (%s)", targetDN, target.Mention()),
+						Inline: false,
 					},
+				},
+			}
+			if len(recordsByGroupID) == 0 {
+				// this is just a kick.
+				parts := []string{
+					fmt.Sprintf("<t:%d:R> by <@!%s>:", time.Now().UTC().Unix(), caller.User.ID),
+					fmt.Sprintf("- `%s`", userNotice),
 				}
-				_, err = d.dg.ChannelMessageSendEmbed(gg.EnforcementNoticeChannelID, embed)
-				if err != nil {
-					logger.WithFields(map[string]interface{}{
-						"error": err,
-					}).Error("Failed to send enforcement notice")
+				if notes != "" {
+					parts = append(parts,
+						fmt.Sprintf("- *%s*", notes),
+					)
+				}
+				embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+					Name:   "Kick Details",
+					Value:  strings.Join(parts, "\n"),
+					Inline: true,
+				})
+			}
+
+			for groupID, records := range recordsByGroupID {
+				if len(records) == 0 {
+					continue
+				}
+				// Get the group name
+				gn := groupID
+				if gg := d.guildGroupRegistry.Get(groupID); gg != nil {
+					gn = gg.Name()
 				}
 
+				// Create a field for each group
+				field := createSuspensionDetailsEmbedField(gn, records, voids, true, true)
+				embed.Fields = append(embed.Fields, field)
 			}
+			_, err = d.dg.ChannelMessageSendEmbed(gg.EnforcementNoticeChannelID, embed)
+			if err != nil {
+				logger.WithFields(map[string]interface{}{
+					"error": err,
+				}).Error("Failed to send enforcement notice")
+			}
+
 		}
 	}
 
-	if !isRemoval {
+	if kickPlayer {
 		for _, p := range presences {
 
 			// Match only the target user
@@ -663,12 +703,12 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 
 		if doDisconnect {
 			go func() {
-				<-time.After(time.Second * 10)
+				<-time.After(time.Second * 5)
 				// Just disconnect the user, wholesale
 				if count, err := DisconnectUserID(ctx, d.nk, targetUserID, true, true, false); err != nil {
 					logger.Warn("Failed to disconnect user", zap.Error(err))
 				} else if count > 0 {
-					_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s disconnected player %s from match service (%d sessions).", caller.Mention(), target.Mention(), count), false)
+					_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s disconnected player %s from login/match service (%d sessions).", caller.Mention(), target.Mention(), count), false)
 				}
 			}()
 		}
