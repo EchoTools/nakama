@@ -592,12 +592,7 @@ func DisconnectUserID(ctx context.Context, nk runtime.NakamaModule, userID strin
 
 	if kickFirst {
 		// Kick the user from any matches they are in
-		matchID, _, err := GetMatchIDBySessionID(nk, uuid.FromStringOrNil(userID))
-		if err != nil {
-			return 0, fmt.Errorf("failed to get match ID: %w", err)
-		}
-
-		if !matchID.IsNil() {
+		if matchID, _, err := GetMatchIDBySessionID(nk, uuid.FromStringOrNil(userID)); err == nil && !matchID.IsNil() {
 			if err := KickPlayerFromMatch(ctx, nk, matchID, userID); err != nil {
 				return 0, fmt.Errorf("failed to kick player from match: %w", err)
 			}
@@ -627,7 +622,10 @@ func DisconnectUserID(ctx context.Context, nk runtime.NakamaModule, userID strin
 				if kickFirst {
 					<-time.After(5 * time.Second)
 				}
-				_ = nk.SessionDisconnect(ctx, presence.GetSessionId(), runtime.PresenceReasonDisconnect)
+				if err := nk.SessionDisconnect(ctx, presence.GetSessionId(), runtime.PresenceReasonDisconnect); err != nil {
+					// Ignore the error
+					return
+				}
 			}()
 
 			cnt++

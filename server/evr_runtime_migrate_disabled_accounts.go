@@ -3,119 +3,166 @@ package server
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"time"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
-	"github.com/jackc/pgx/v5/pgtype"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
-type disabledAccount struct {
-	UserID     string    `json:"user_id"`
-	Reason     string    `json:"reason"`
-	DisabledAt time.Time `json:"disabled_at"`
-}
+var _ = SystemMigrator(&MigrationSuspensions{})
 
-var _ = SystemMigrator(&MigrationDisabledAccountsToSuspensions{})
+type MigrationSuspensions struct{}
 
-type MigrationDisabledAccountsToSuspensions struct{}
-
-func (m *MigrationDisabledAccountsToSuspensions) MigrateSystem(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule) error {
+func (m MigrationSuspensions) MigrateSystem(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule) error {
 
 	// Load all enforcement journals and store the
-	disabledAccounts, err := retrieveAllDisabledUserIDs(ctx, db)
+	byGroupIDbyUserID, err := retrieveAllLegacySuspensionUserIDs(ctx, db)
 	if err != nil {
 		return err
 	}
-
-	// Wait for the service settings to load
-	var settings *ServiceSettingsData
-	for {
-		if s := serviceSettings.Load(); s != nil {
-			settings = s
-			break
-		}
-		<-time.After(1 * time.Second)
+	if len(byGroupIDbyUserID) == 0 {
+		return nil
 	}
 
-	groupID := "c67fa242-31d8-4cb1-937a-ad6763343e21"
-	enforcerUserID := settings.DiscordBotUserID
-	enforcerDiscordID := "1180461747488956496"
-	expiry := time.Now().AddDate(100, 0, 0)
 	count := 0
-	userUUIDs := make([]uuid.UUID, 0, len(disabledAccounts))
+	for userID, byGroupID := range byGroupIDbyUserID {
+		for groupID, data := range byGroupID {
+			logger = logger.WithFields(map[string]any{
+				"user_id":  userID,
+				"group_id": groupID,
+			})
+			// Convert the legacy data to the new format
+			journal := NewGuildEnforcementJournal(userID)
+			if err := StorageRead(ctx, nk, userID, journal, false); err != nil && status.Code(err) != codes.NotFound {
+				logger.Warn("Failed to read enforcement journal", err)
+				continue
+			}
+			if err := convertLegacySuspensionToJournal(journal, groupID, data); err != nil {
+				logger.Warn("Failed to convert legacy suspension to journal", err)
+				continue
+			}
+			if err := StorageWrite(ctx, nk, userID, journal); err != nil {
+				logger.WithFields(map[string]any{
+					"error":    err,
+					"user_id":  userID,
+					"group_id": groupID,
+				}).Error("Failed to write enforcement journal")
+				continue
+			}
+			count++
 
-	for _, a := range disabledAccounts {
-		count++
-		journal := NewGuildEnforcementJournal(a.UserID, groupID)
-		if err := StorageRead(ctx, nk, a.UserID, journal, false); err != nil && status.Code(err) != codes.NotFound {
-			return err
+			// Remove the legacy data
+			if err := nk.StorageDelete(ctx, []*runtime.StorageDelete{
+				{
+					Collection: "EnforcementJournal",
+					Key:        groupID,
+					UserID:     userID,
+				},
+			}); err != nil {
+				logger.WithFields(map[string]any{
+					"error":    err,
+					"user_id":  userID,
+					"group_id": groupID,
+				}).Error("Failed to delete legacy enforcement journal")
+				continue
+			}
 		}
-
-		record := NewGuildEnforcementRecord(enforcerUserID, enforcerDiscordID, a.UserID, groupID, "Account is Globally Banned", a.Reason, false, expiry)
-		journal.AddRecord(record)
-
-		if err := StorageWrite(ctx, nk, a.UserID, journal); err != nil {
-			logger.WithFields(map[string]any{
-				"error":       err,
-				"user_id":     a.UserID,
-				"reason":      a.Reason,
-				"disabled_at": a.DisabledAt,
-			}).Error("Failed to write enforcement journal")
-			continue
-		}
-
-		userUUIDs = append(userUUIDs, uuid.FromStringOrNil(a.UserID))
 	}
-	sessionCache := NewLocalSessionCache(100, 100)
-
-	if err := UnbanUsers(ctx, RuntimeLoggerToZapLogger(logger), db, sessionCache, userUUIDs); err != nil {
-		logger.WithFields(map[string]any{
-			"error": err,
-		}).Error("Failed to unban users")
-		return err
-	}
-
-	sessionCache.Stop()
 	logger.WithFields(map[string]any{
 		"count": count,
-	}).Info("Migrated disabled accounts to suspensions")
+		"total": len(byGroupIDbyUserID),
+	}).Info("Migrated all legacy suspensions to the new format")
+
 	return nil
 }
 
-func retrieveAllDisabledUserIDs(ctx context.Context, db *sql.DB) ([]disabledAccount, error) {
-	query := "SELECT id, disable_time, metadata->>'global_ban_reason' FROM users WHERE disable_time != '1970-01-01 00:00:00+00';"
+func convertLegacySuspensionToJournal(j *GuildEnforcementJournal, groupID, data string) error {
 
+	type legacyFormat struct {
+		Records []struct {
+			ID                      string    `json:"id"`
+			Notes                   string    `json:"notes"`
+			IsVoid                  bool      `json:"is_void"`
+			UserID                  string    `json:"user_id"`
+			GroupID                 string    `json:"group_id"`
+			CreatedAt               time.Time `json:"created_at"`
+			UpdatedAt               time.Time `json:"updated_at"`
+			EnforcerUserID          string    `json:"enforcer_user_id"`
+			SuspensionExpiry        time.Time `json:"suspension_expiry"`
+			SuspensionNotice        string    `json:"suspension_notice"`
+			EnforcerDiscordID       string    `json:"enforcer_discord_id"`
+			CommunityValuesRequired bool      `json:"community_values_required"`
+		} `json:"records"`
+		UserID                     string    `json:"user_id"`
+		GroupID                    string    `json:"group_id"`
+		SuspensionExpiry           time.Time `json:"suspension_expiry"`
+		IsCommunityValuesRequired  bool      `json:"is_community_values_required"`
+		CommunityValuesCompletedAt time.Time `json:"community_values_completed_at"`
+	}
+
+	var legacyData legacyFormat
+	if err := json.Unmarshal([]byte(data), &legacyData); err != nil {
+		return err
+	}
+	// Convert to the new format
+
+	for _, r := range legacyData.Records {
+
+		record := GuildEnforcementRecord{
+			ID:                      r.ID,
+			EnforcerUserID:          r.EnforcerUserID,
+			EnforcerDiscordID:       r.EnforcerDiscordID,
+			CreatedAt:               r.CreatedAt,
+			UpdatedAt:               r.UpdatedAt,
+			UserNoticeText:          r.SuspensionNotice,
+			SuspensionExpiry:        r.SuspensionExpiry,
+			AuditorNotes:            r.Notes,
+			CommunityValuesRequired: false,
+		}
+
+		if j.RecordsByGroupID == nil {
+			j.RecordsByGroupID = make(map[string][]GuildEnforcementRecord)
+		}
+
+		if j.RecordsByGroupID[r.GroupID] == nil {
+			j.RecordsByGroupID[r.GroupID] = make([]GuildEnforcementRecord, 0)
+		}
+
+		j.RecordsByGroupID[legacyData.GroupID] = append(j.RecordsByGroupID[legacyData.GroupID], record)
+
+		if r.IsVoid {
+			// Add Voided record
+			j.VoidRecord(legacyData.GroupID, record.ID, r.EnforcerUserID, r.EnforcerDiscordID, "")
+		}
+	}
+
+	return nil
+}
+
+func retrieveAllLegacySuspensionUserIDs(ctx context.Context, db *sql.DB) (map[string]map[string]string, error) {
+	query := "SELECT user_id, key, value FROM storage WHERE collection = 'EnforcementJournal';"
+
+	results := make(map[string]map[string]string, 100)
 	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	accounts := make([]disabledAccount, 0)
 	for rows.Next() {
-		var userID string
-		var disable_time pgtype.Timestamptz
-		var reasonStr sql.NullString
-		if err := rows.Scan(&userID, &disable_time, &reasonStr); err != nil {
+		var userID, groupID, value string
+
+		if err := rows.Scan(&userID, &groupID, &value); err != nil {
 			return nil, err
 		}
-		var reason string
-		if reasonStr.Valid {
-			reason = reasonStr.String
-		} else {
-			reason = "No reason provided"
+
+		if _, ok := results[userID]; !ok {
+			results[userID] = make(map[string]string)
 		}
-
-		accounts = append(accounts, disabledAccount{
-			UserID:     userID,
-			Reason:     reason,
-			DisabledAt: disable_time.Time,
-		})
-
+		results[userID][groupID] = value
 	}
 
-	return accounts, nil
+	return results, nil
 }
