@@ -1214,57 +1214,58 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 		logger.Error("Profile does not exist in cache.", zap.String("evrId", request.EvrId.String()))
 		return nil
 	}
+	/*
+		// If this user is an Enforcer let them see how many times that player has been reported in the past week
+		params, ok := LoadParams(ctx)
+		if !ok {
+			return errors.New("session parameters not found")
+		}
 
-	// If this user is an Enforcer let them see how many times that player has been reported in the past week
-	params, ok := LoadParams(ctx)
-	if !ok {
-		return errors.New("session parameters not found")
-	}
+		userID := session.userID.String()
+		groupID := params.profile.GetActiveGroupID().String()
 
-	userID := session.userID.String()
-	groupID := params.profile.GetActiveGroupID().String()
+		if gg := p.guildGroupRegistry.Get(groupID); gg != nil {
+			if gg.EnableEnforcementCountInNames && gg.IsEnforcer(userID) {
+				serverProfile := &evr.ServerProfile{}
+				if err := json.Unmarshal(data, serverProfile); err != nil {
+					logger.Error("Failed to unmarshal server profile", zap.Error(err))
+					return fmt.Errorf("failed to unmarshal server profile: %w", err)
+				}
 
-	if gg := p.guildGroupRegistry.Get(groupID); gg != nil {
-		if gg.EnableEnforcementCountInNames && gg.IsEnforcer(userID) {
-			serverProfile := &evr.ServerProfile{}
-			if err := json.Unmarshal(data, serverProfile); err != nil {
-				logger.Error("Failed to unmarshal server profile", zap.Error(err))
-				return fmt.Errorf("failed to unmarshal server profile: %w", err)
-			}
-
-			if targetUserID, err := GetUserIDByDeviceID(ctx, p.db, request.EvrId.String()); err != nil {
-				logger.Error("Failed to get user ID by device ID", zap.Error(err))
-			} else if targetUserID != "" {
-				count := 0
-				// Get the number of reports for this user in the last week
-				if journals, err := EnforcementJournalSearch(ctx, p.nk, []string{targetUserID}); err != nil {
-					logger.Error("Failed to search for enforcement records", zap.Error(err))
-				} else if len(journals) > 0 {
-					for _, journal := range journals {
-						for _, r := range journal.GroupRecords(groupID) {
-							if journal.IsVoid(groupID, r.ID) {
-								continue
-							}
-							// Show all reports for the past week
-							if r.CreatedAt.After(time.Now().Add(-time.Hour * 24 * 7)) {
-								count += 1
+				if targetUserID, err := GetUserIDByDeviceID(ctx, p.db, request.EvrId.String()); err != nil {
+					logger.Error("Failed to get user ID by device ID", zap.Error(err))
+				} else if targetUserID != "" {
+					count := 0
+					// Get the number of reports for this user in the last week
+					if journals, err := EnforcementJournalSearch(ctx, p.nk, []string{targetUserID}); err != nil {
+						logger.Error("Failed to search for enforcement records", zap.Error(err))
+					} else if len(journals) > 0 {
+						for _, journal := range journals {
+							for _, r := range journal.GroupRecords(groupID) {
+								if journal.IsVoid(groupID, r.ID) {
+									continue
+								}
+								// Show all reports for the past week
+								if r.CreatedAt.After(time.Now().Add(-time.Hour * 24 * 7)) {
+									count += 1
+								}
 							}
 						}
 					}
-				}
-				if count > 0 {
-					// Add the count to the players display name
-					serverProfile.DisplayName = fmt.Sprintf("%s [%d]", serverProfile.DisplayName, count)
+					if count > 0 {
+						// Add the count to the players display name
+						serverProfile.DisplayName = fmt.Sprintf("%s [%d]", serverProfile.DisplayName, count)
 
-					data, err = json.Marshal(serverProfile)
-					if err != nil {
-						logger.Error("Failed to marshal server profile", zap.Error(err))
-						return fmt.Errorf("failed to marshal server profile: %w", err)
+						data, err = json.Marshal(serverProfile)
+						if err != nil {
+							logger.Error("Failed to marshal server profile", zap.Error(err))
+							return fmt.Errorf("failed to marshal server profile: %w", err)
+						}
 					}
 				}
 			}
 		}
-	}
+	*/
 
 	response := &evr.OtherUserProfileSuccess{
 		EvrId:             request.EvrId,
