@@ -33,6 +33,7 @@ type GroupMetadata struct {
 	NegatedEnforcerIDs                   []string          `json:"negated_enforcer_ids"`                     // Enforcers that are not allowed to enforce this group
 	RejectPlayersWithSuspendedAlternates bool              `json:"reject_players_with_suspended_alternates"` // Reject players with suspended alternate accounts
 	SuspensionInheritanceGroupIDs        []string          `json:"suspension_inheritence_group_ids"`         // Groups that this group inherits suspensions from
+	ForceDisplayNameToMatchIGN           bool              `json:"force_display_name_to_match_ign"`          // Force the display name to match the IGN
 }
 
 func NewGuildGroupMetadata(guildID string) *GroupMetadata {

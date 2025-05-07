@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
-	"sort"
 	"sync/atomic"
 	"time"
 
@@ -366,15 +365,10 @@ func (c *DiscordIntegrator) syncMember(ctx context.Context, logger *zap.Logger, 
 		return fmt.Errorf("member not found")
 	}
 
-	if updated := evrAccount.SetGroupDisplayName(groupID, InGameName(member)); updated {
-		// Update the display name
-		if displayName := InGameName(member); displayName != evrAccount.GetActiveGroupDisplayName() {
-			if err := DisplayNameHistoryUpdate(ctx, c.nk, evrAccount.ID(), groupID, displayName, evrAccount.Username(), evrAccount.IsLinked() && !evrAccount.IsDisabled()); err != nil {
-				return fmt.Errorf("error adding display name history entry: %w", err)
-			}
-		}
-		if err := c.nk.AccountUpdateId(ctx, evrAccount.ID(), evrAccount.Username(), evrAccount.MarshalMap(), evrAccount.GetActiveGroupDisplayName(), "", "", member.User.Locale, ""); err != nil {
-			return fmt.Errorf("failed to update account: %w", err)
+	// Update the display name history. do not update the account because it will be done when the player logs in to the game.
+	if displayName := InGameName(member); displayName != evrAccount.GetGroupDisplayNameOrDefault(groupID) {
+		if err := c.syncDisplayName(ctx, logger, evrAccount, groupID, displayName); err != nil {
+			return fmt.Errorf("error syncing display name: %w", err)
 		}
 	}
 
@@ -688,52 +682,68 @@ func (d *DiscordIntegrator) handleMemberUpdate(logger *zap.Logger, s *discordgo.
 		}
 	}
 
-	// Update the display name
-	if displayName := InGameName(e.Member); displayName != evrAccount.GetDisplayName(groupID) {
-
-		if err := DisplayNameHistoryUpdate(ctx, d.nk, evrAccount.ID(), groupID, displayName, evrAccount.Username(), isActive); err != nil {
-			return fmt.Errorf("error adding display name history entry: %w", err)
-		}
-
-		if ownerID, err := d.deconflictDisplayName(ctx, displayName); err != nil {
-			// If it errors, set the display name to their username
-			logger.Error("Error deconflicting display name", zap.String("display_name", displayName), zap.Error(err))
-			evrAccount.SetGroupDisplayName(groupID, e.Member.User.Username)
-
-		} else if ownerID != "" && ownerID != evrAccount.ID() {
-
-			logger.Warn("Display name in use", zap.String("owner_id", ownerID), zap.String("display_name", displayName), zap.String("caller_user_id", evrAccount.ID()))
-
-			evrAccount.SetGroupDisplayName(groupID, e.Member.User.Username)
-
-			otherDiscordID := d.UserIDToDiscordID(ownerID)
-			message := fmt.Sprintf("The display name `%s` is already in use/reserved by <@%s>. Your in-game name will be your username: `%s`", EscapeDiscordMarkdown(displayName), otherDiscordID, EscapeDiscordMarkdown(e.Member.User.Username))
-			if _, err := SendUserMessage(ctx, d.dg, e.Member.User.ID, message); err != nil {
-				return fmt.Errorf("error sending message: %w", err)
-			}
-
-			// Set their display name to their username
-			if err := d.dg.GuildMemberNickname(e.GuildID, e.Member.User.ID, e.Member.User.Username); err != nil {
-				return fmt.Errorf("error setting guild member nickname: %w", err)
-			}
-
-		} else {
-			// Update the display name
-			evrAccount.SetGroupDisplayName(groupID, displayName)
-		}
-	}
-
+	accountUpdate := false
+	username := e.User.Username
+	locale := e.User.Locale
 	avatarURL := ""
 	// If this is there active group, update the account with this guild
 	if groupID == evrAccount.GetActiveGroupID().String() {
 		avatarURL = e.Member.AvatarURL("512")
 	}
 
-	if err := d.nk.AccountUpdateId(ctx, evrAccount.ID(), e.Member.User.Username, evrAccount.MarshalMap(), evrAccount.GetActiveGroupDisplayName(), "", "", e.Member.User.Locale, avatarURL); err != nil {
-		return fmt.Errorf("failed to update account: %w", err)
+	if e.BeforeUpdate != nil && e.BeforeUpdate.User != nil {
+		if e.BeforeUpdate.User.Username != e.User.Username {
+			accountUpdate = true
+			username = e.User.Username
+		}
+
+		if displayName := InGameName(e.Member); displayName != InGameName(e.BeforeUpdate) {
+			accountUpdate = true
+			if err := d.syncDisplayName(ctx, logger, evrAccount, groupID, displayName); err != nil {
+				return fmt.Errorf("error syncing display name: %w", err)
+			}
+		}
 	}
 
+	if accountUpdate {
+		if err := d.nk.AccountUpdateId(ctx, evrAccount.ID(), username, evrAccount.MarshalMap(), evrAccount.GetActiveGroupDisplayName(), "", "", locale, avatarURL); err != nil {
+			return fmt.Errorf("failed to update account: %w", err)
+		}
+	}
 	logger.Info("Member Updated", zap.Any("member", e))
+
+	return nil
+}
+func (d *DiscordIntegrator) syncDisplayName(ctx context.Context, logger *zap.Logger, profile *EVRProfile, groupID, displayName string) error {
+
+	userIDs, err := DisplayNameOwnerSearch(ctx, d.nk, displayName)
+	if err != nil {
+		// If it errors, set the display name to their username
+		logger.Error("Error deconflicting display name", zap.String("display_name", displayName), zap.Error(err))
+		return err
+	}
+
+	if len(userIDs) > 1 {
+		logger.Warn("Display name in use by multiple users", zap.String("display_name", displayName), zap.Strings("user_ids", userIDs))
+	}
+
+	// the display name is already set to this user, so do nothing
+	if len(userIDs) == 0 || userIDs[0] == profile.ID() {
+		// Update the display name history. do not update the account because it will be done when the player logs in to the game.
+		if err := DisplayNameHistoryUpdate(ctx, d.nk, profile.ID(), groupID, displayName, profile.Username()); err != nil {
+			return fmt.Errorf("error adding display name history entry: %w", err)
+		}
+		return nil
+	}
+
+	ownerID := userIDs[0]
+	logger.Warn("Display name in use", zap.String("owner_id", ownerID), zap.String("display_name", displayName), zap.String("caller_user_id", profile.ID()))
+
+	otherDiscordID := d.UserIDToDiscordID(ownerID)
+	message := fmt.Sprintf("The display name `%s` is already in use/reserved by <@%s>. Your in-game name will be your username: `%s`", EscapeDiscordMarkdown(displayName), otherDiscordID, EscapeDiscordMarkdown(profile.Username()))
+	if _, err := SendUserMessage(ctx, d.dg, profile.DiscordID(), message); err != nil {
+		return fmt.Errorf("error sending message: %w", err)
+	}
 
 	return nil
 }
@@ -752,132 +762,6 @@ func (d *DiscordIntegrator) updateMemberRole(member *discordgo.Member, roleID st
 		}
 	}
 	return nil
-}
-
-func (d *DiscordIntegrator) deconflictDisplayName(ctx context.Context, displayName string) (string, error) {
-
-	userIDs, err := DisplayNameHistoryActiveList(ctx, d.nk, displayName)
-	if err != nil {
-		return "", fmt.Errorf("error getting display name history: %w", err)
-	}
-
-	switch len(userIDs) {
-	case 0:
-		return "", nil
-	case 1:
-		return userIDs[0], nil
-	default:
-	}
-
-	type user struct {
-		userID     string
-		metadata   *EVRProfile
-		used       time.Time
-		isReserved bool
-		isUsername bool
-	}
-
-	users := make([]*user, 0, len(userIDs))
-
-	// Only include users that have used the name in game
-	for _, userID := range userIDs {
-
-		history, err := DisplayNameHistoryLoad(ctx, d.nk, userID)
-		if err != nil {
-			return "", fmt.Errorf("error getting display name history: %w", err)
-		}
-
-		md, err := EVRProfileLoad(ctx, d.nk, userID)
-		if err != nil {
-			return "", fmt.Errorf("error getting account metadata: %w", err)
-		}
-
-		user := &user{
-			userID:   userID,
-			metadata: md,
-		}
-
-		users = append(users, user)
-
-		if slices.Contains(history.Reserved, displayName) {
-			// this user has reserved the name, remove all other users
-			user.isReserved = true
-			continue
-		}
-
-		if md.Username() == displayName {
-			user.isUsername = true
-		}
-
-		usedInGame := false
-		for _, name := range md.GroupDisplayNames {
-			if name == displayName {
-				usedInGame = true
-			}
-		}
-
-		// They have not used it in game.
-		if !usedInGame {
-			continue
-		}
-
-		byGroup, found := history.GetAll(displayName)
-		if !found {
-			continue
-		}
-
-		for _, t := range byGroup {
-			if t.After(user.used) {
-				user.used = t
-			}
-		}
-	}
-
-	// sort by reserved, username, and then earliest use
-	sort.Slice(users, func(i, j int) bool {
-		a, b := users[i], users[j]
-
-		// Reserved users take priority
-		if a.isReserved && !b.isReserved {
-			return true
-		}
-		if !a.isReserved && b.isReserved {
-			return false
-		}
-
-		if a.isUsername && !b.isUsername {
-			return true
-		}
-		if !a.isUsername && b.isUsername {
-			return false
-		}
-
-		return a.used.After(b.used)
-	})
-
-	if len(users) == 0 {
-		return "", nil
-	}
-
-	if len(users) == 1 {
-		return users[0].metadata.ID(), nil
-	}
-
-	// Remove the display name from all but the owner
-	for _, u := range users[1:] {
-
-		for gID, dn := range u.metadata.GroupDisplayNames {
-			if dn == displayName {
-				delete(u.metadata.GroupDisplayNames, gID)
-			}
-		}
-
-		if err := d.nk.AccountUpdateId(ctx, u.userID, u.metadata.Username(), u.metadata.MarshalMap(), u.metadata.GetActiveGroupDisplayName(), "", "", "", ""); err != nil {
-			return "", fmt.Errorf("failed to update account: %w", err)
-		}
-	}
-
-	return users[0].metadata.ID(), nil
 }
 
 func (d *DiscordIntegrator) GuildGroupMemberRemove(ctx context.Context, guildID, discordID string, callerDiscordID string) error {
@@ -911,7 +795,7 @@ func (d *DiscordIntegrator) GuildGroupMemberRemove(ctx context.Context, guildID,
 		}
 	}
 
-	delete(md.GroupDisplayNames, groupID)
+	delete(md.DisplayNames, groupID)
 	if md.GetActiveGroupID().String() == groupID {
 		md.SetActiveGroupID(uuid.Nil)
 	}
