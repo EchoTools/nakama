@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"math/rand"
 	"slices"
 	"strings"
 	"sync"
@@ -19,7 +18,6 @@ import (
 
 const (
 	EventLobbySessionAuthorized = "lobby_session_authorized"
-	EventUserLogin              = "user_login"
 	EventSessionStart           = "session_start"
 	EventSessionEnd             = "session_end"
 	EventVRMLAccountLinked      = "vrml_account_linked"
@@ -29,7 +27,26 @@ const (
 	matchDataCollectionName     = "match_data"
 )
 
-type EventDispatch struct {
+type Event interface {
+	Process(ctx context.Context, logger runtime.Logger, dispatcher *EventDispatcher) error
+}
+
+func SendEvent(ctx context.Context, nk runtime.NakamaModule, e Event) error {
+	payloadBytes, err := json.Marshal(e)
+	if err != nil {
+		return fmt.Errorf("failed to marshal login event payload: %v", err)
+	}
+	nk.Event(ctx, &api.Event{
+		Name: EventTypeUserAuthenticated,
+		Properties: map[string]string{
+			"payload": string(payloadBytes),
+		},
+		External: true,
+	})
+	return nil
+}
+
+type EventDispatcher struct {
 	sync.Mutex
 
 	ctx    context.Context
@@ -46,14 +63,14 @@ type EventDispatch struct {
 	vrmlVerifier         *VRMLVerifier
 }
 
-func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer, mongoClient *mongo.Client, dg *discordgo.Session) (*EventDispatch, error) {
+func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer, mongoClient *mongo.Client, dg *discordgo.Session) (*EventDispatcher, error) {
 
 	vrmlVerifier, err := NewVRMLVerifier(ctx, logger, db, nk, initializer, dg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create VRML verifier: %w", err)
 	}
 
-	dispatch := &EventDispatch{
+	dispatch := &EventDispatcher{
 		ctx:    ctx,
 		logger: logger,
 		db:     db,
@@ -105,7 +122,7 @@ func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 
 }
 
-func (h *EventDispatch) eventFn(ctx context.Context, logger runtime.Logger, evt *api.Event) {
+func (h *EventDispatcher) eventFn(ctx context.Context, logger runtime.Logger, evt *api.Event) {
 	logger.WithField("event", evt.Name).Debug("received event")
 	select {
 	case h.queue <- evt:
@@ -116,12 +133,45 @@ func (h *EventDispatch) eventFn(ctx context.Context, logger runtime.Logger, evt 
 	}
 }
 
-func (h *EventDispatch) processEvent(ctx context.Context, logger runtime.Logger, evt *api.Event) {
+func (h *EventDispatcher) unmarshalEvent(event *api.Event) (Event, error) {
+
+	type eventEvelope struct {
+		Name string `json:"name"`
+	}
+
+	e := &eventEvelope{}
+	if err := json.Unmarshal([]byte(event.Properties["payload"]), e); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal login event payload: %v", err)
+	}
+	if e.Name == "" {
+		return nil, fmt.Errorf("event type is empty")
+	}
+
+	switch event.Name {
+	case EventTypeUserAuthenticated:
+		e := &EventUserAuthenticated{}
+		if err := json.Unmarshal([]byte(event.Properties["payload"]), e); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal login event payload: %v", err)
+		}
+		return e, nil
+	}
+	return nil, fmt.Errorf("unknown event type: %s", event.Name)
+}
+
+func (h *EventDispatcher) processEvent(ctx context.Context, logger runtime.Logger, evt *api.Event) {
+
+	if e, err := h.unmarshalEvent(evt); err != nil {
+		logger.Error("failed to unmarshal event: %v", err)
+	} else {
+		if err := e.Process(ctx, logger, h); err != nil {
+			logger.Error("failed to process event: %v", err)
+		}
+		return
+	}
 
 	eventMap := map[string]func(context.Context, runtime.Logger, *api.Event) error{
 		EventSessionStart:           h.eventSessionStart,
 		EventSessionEnd:             h.eventSessionEnd,
-		EventUserLogin:              h.handleUserLogin,
 		EventLobbySessionAuthorized: h.handleLobbyAuthorized,
 		EventVRMLAccountLinked:      h.handleVRMLAccountLinked,
 		EventVRMLAccountResync:      h.handleVRMLAccountLinked,
@@ -152,12 +202,12 @@ func (h *EventDispatch) processEvent(ctx context.Context, logger runtime.Logger,
 	}
 }
 
-func (h *EventDispatch) eventSessionStart(ctx context.Context, logger runtime.Logger, evt *api.Event) error {
+func (h *EventDispatcher) eventSessionStart(ctx context.Context, logger runtime.Logger, evt *api.Event) error {
 	logger.Debug("process event session start: %+v", evt.Properties)
 	return nil
 }
 
-func (h *EventDispatch) eventSessionEnd(ctx context.Context, logger runtime.Logger, evt *api.Event) error {
+func (h *EventDispatcher) eventSessionEnd(ctx context.Context, logger runtime.Logger, evt *api.Event) error {
 	h.Lock()
 	defer h.Unlock()
 
@@ -167,7 +217,7 @@ func (h *EventDispatch) eventSessionEnd(ctx context.Context, logger runtime.Logg
 	return nil
 }
 
-func (h *EventDispatch) guildGroup(ctx context.Context, groupID string) (*GuildGroup, error) {
+func (h *EventDispatcher) guildGroup(ctx context.Context, groupID string) (*GuildGroup, error) {
 	var (
 		err error
 		key = groupID + ":*GuildGroup"
@@ -189,7 +239,7 @@ func (h *EventDispatch) guildGroup(ctx context.Context, groupID string) (*GuildG
 
 // auditedSession marks the session as audited for the group
 // and returns true if it was a new session.
-func (h *EventDispatch) auditedSession(groupID, sessionID string) bool {
+func (h *EventDispatcher) auditedSession(groupID, sessionID string) bool {
 	if h.playerAuthorizations[sessionID] == nil {
 		h.playerAuthorizations[sessionID] = make(map[string]struct{})
 	}
@@ -207,7 +257,7 @@ type compactAlternate struct {
 	isFirstDegree bool
 }
 
-func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtime.Logger, evt *api.Event) error {
+func (h *EventDispatcher) handleLobbyAuthorized(ctx context.Context, logger runtime.Logger, evt *api.Event) error {
 
 	if isNew := h.auditedSession(evt.Properties["group_id"], evt.Properties["session_id"]); !isNew {
 		return nil
@@ -232,7 +282,7 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 	if updated := loginHistory.NotifyGroup(groupID, gg.AlternateAccountNotificationExpiry); updated {
 
 		if err := StorageWrite(ctx, h.nk, userID, loginHistory); err != nil {
-			return fmt.Errorf("failed to store login history: %w", err)
+			logger.Warn("failed to store login history after notify group update: %v", err)
 		}
 
 		// Check for guild suspensions on alts
@@ -265,7 +315,7 @@ func (h *EventDispatch) handleLobbyAuthorized(ctx context.Context, logger runtim
 	return nil
 }
 
-func (h *EventDispatch) alternateLogLineFormatter(userID string, alternates map[string]*compactAlternate) string {
+func (h *EventDispatcher) alternateLogLineFormatter(userID string, alternates map[string]*compactAlternate) string {
 	var (
 		firstDegreeStrs  = make([]string, 0, len(alternates))
 		secondDegreeStrs = make([]string, 0, len(alternates))
@@ -303,79 +353,12 @@ func (h *EventDispatch) alternateLogLineFormatter(userID string, alternates map[
 	return content
 }
 
-func (h *EventDispatch) handleUserLogin(ctx context.Context, logger runtime.Logger, evt *api.Event) error {
-	h.Lock()
-	defer h.Unlock()
-
-	userID := evt.Properties["user_id"]
-
-	loginHistory := NewLoginHistory(userID)
-	if err := StorageRead(ctx, h.nk, userID, loginHistory, true); err != nil {
-		return fmt.Errorf("failed to load login history: %w", err)
-	}
-
-	hasDiabledAlts, err := loginHistory.UpdateAlternates(ctx, h.nk)
-	if err != nil {
-		return fmt.Errorf("failed to update alternates: %w", err)
-	}
-
-	if err := StorageWrite(ctx, h.nk, userID, loginHistory); err != nil {
-		return fmt.Errorf("failed to store login history: %w", err)
-	}
-
-	if hasDiabledAlts && ServiceSettings().KickPlayersWithDisabledAlternates {
-		go func() {
-
-			// Set random time to disable and kick player
-			var (
-				firstIDs, _        = loginHistory.AlternateIDs()
-				altNames           = make([]string, 0, len(loginHistory.AlternateMap))
-				accountMap         = make(map[string]*api.Account, len(loginHistory.AlternateMap))
-				delayMin, delayMax = 1, 4
-				kickDelay          = time.Duration(delayMin+rand.Intn(delayMax)) * time.Minute
-			)
-
-			if accounts, err := h.nk.AccountsGetId(ctx, append(firstIDs, userID)); err != nil {
-				logger.Error("failed to get alternate accounts: %v", err)
-				return
-			} else {
-				for _, a := range accounts {
-					accountMap[a.User.Id] = a
-					altNames = append(altNames, fmt.Sprintf("<@%s> (%s)", a.CustomId, a.User.Username))
-				}
-			}
-
-			if len(altNames) == 0 || accountMap[userID] == nil {
-				logger.Error("failed to get alternate accounts: %v", err)
-				return
-			}
-
-			slices.Sort(altNames)
-			altNames = slices.Compact(altNames)
-
-			// Send audit log message
-			content := fmt.Sprintf("<@%s> (%s) has disabled alternates, disconnecting session(s) in %d seconds.\n%s", accountMap[userID].CustomId, accountMap[userID].User.Username, int(kickDelay.Seconds()), strings.Join(altNames, ", "))
-			AuditLogSend(dg, ServiceSettings().ServiceAuditChannelID, content)
-
-			logger.WithField("delay", kickDelay).Info("kicking (with delay) user %s has disabled alternates", userID)
-			<-time.After(kickDelay)
-			if c, err := DisconnectUserID(ctx, h.nk, userID, true, true, false); err != nil {
-				logger.Error("failed to disconnect user: %v", err)
-			} else {
-				logger.Info("user %s disconnected: %v sessions", userID, c)
-			}
-		}()
-	}
-
-	return nil
-}
-
-func (h *EventDispatch) handleVRMLAccountLinked(ctx context.Context, logger runtime.Logger, evt *api.Event) error {
+func (h *EventDispatcher) handleVRMLAccountLinked(ctx context.Context, logger runtime.Logger, evt *api.Event) error {
 
 	return h.vrmlVerifier.VerifyUser(evt.Properties["user_id"], evt.Properties["token"])
 }
 
-func (h *EventDispatch) handleMatchEvent(ctx context.Context, logger runtime.Logger, evt *api.Event) error {
+func (h *EventDispatcher) handleMatchEvent(ctx context.Context, logger runtime.Logger, evt *api.Event) error {
 
 	matchID, err := MatchIDFromString(evt.Properties["match_id"])
 	if err != nil {
