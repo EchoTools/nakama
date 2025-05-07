@@ -3,6 +3,7 @@ package server
 import (
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -175,93 +176,108 @@ func TestSortLabelIndexes(t *testing.T) {
 		{
 			name: "Sort by regionMatches",
 			labels: []labelIndex{
-				{regionMatches: false},
-				{regionMatches: true},
+				{IsRegionMatch: false},
+				{IsRegionMatch: true},
 			},
 			expected: []labelIndex{
-				{regionMatches: true},
-				{regionMatches: false},
+				{IsRegionMatch: true},
+				{IsRegionMatch: false},
 			},
 		},
 		{
 			name: "Sort by rtt",
 			labels: []labelIndex{
-				{rtt: 100},
-				{rtt: 50},
+				{RTT: 100},
+				{RTT: 50},
 			},
 			expected: []labelIndex{
-				{rtt: 50},
-				{rtt: 100},
+				{RTT: 50},
+				{RTT: 100},
 			},
 		},
 		{
 			name: "Sort by rating",
 			labels: []labelIndex{
-				{rating: 100},
-				{rating: 50},
+				{Rating: 100},
+				{Rating: 50},
 			},
 			expected: []labelIndex{
-				{rating: 100},
-				{rating: 50},
+				{Rating: 100},
+				{Rating: 50},
 			},
 		},
 		{
 			name: "Sort by isPriorityForMode",
 			labels: []labelIndex{
-				{isPriorityForMode: false},
-				{isPriorityForMode: true},
+				{IsPriorityForMode: false},
+				{IsPriorityForMode: true},
 			},
 			expected: []labelIndex{
-				{isPriorityForMode: true},
-				{isPriorityForMode: false},
+				{IsPriorityForMode: true},
+				{IsPriorityForMode: false},
 			},
 		},
 		{
 			name: "Sort by isReachable",
 			labels: []labelIndex{
-				{isReachable: false},
-				{isReachable: true},
+				{IsReachable: false},
+				{IsReachable: true},
 			},
 			expected: []labelIndex{
-				{isReachable: true},
-				{isReachable: false},
+				{IsReachable: true},
+				{IsReachable: false},
 			},
 		},
 		{
 			name: "Sort by activeCount",
 			labels: []labelIndex{
-				{activeCount: 2},
-				{activeCount: 1},
+				{ActiveCount: 2},
+				{ActiveCount: 1},
 			},
 			expected: []labelIndex{
-				{activeCount: 1},
-				{activeCount: 2},
+				{ActiveCount: 1},
+				{ActiveCount: 2},
+			},
+		},
+		{
+			name: "Sort by activeCount and rtt",
+			labels: []labelIndex{
+				{IsRegionMatch: true, RTT: 50, IsReachable: true, ActiveCount: 2},
+				{IsRegionMatch: true, RTT: 40, IsReachable: true, ActiveCount: 3},
+				{IsRegionMatch: true, RTT: 55, IsReachable: true, ActiveCount: 2},
+				{IsRegionMatch: true, RTT: 70, IsReachable: true, ActiveCount: 1},
+			},
+			expected: []labelIndex{
+				{IsRegionMatch: true, RTT: 70, IsReachable: true, ActiveCount: 1},
+				{IsRegionMatch: true, RTT: 50, IsReachable: true, ActiveCount: 2},
+				{IsRegionMatch: true, RTT: 55, IsReachable: true, ActiveCount: 2},
+				{IsRegionMatch: true, RTT: 40, IsReachable: true, ActiveCount: 3},
 			},
 		},
 		{
 			name: "Complex sorting",
 			labels: []labelIndex{
-				{regionMatches: false, rtt: 100, rating: 50, isPriorityForMode: false, isReachable: false, activeCount: 2},
-				{regionMatches: true, rtt: 50, rating: 100, isPriorityForMode: true, isReachable: true, activeCount: 1},
-				{regionMatches: false, rtt: 50, rating: 50, isPriorityForMode: true, isReachable: true, activeCount: 2},
-				{regionMatches: true, rtt: 100, rating: 100, isPriorityForMode: false, isReachable: false, activeCount: 1},
+				{IsRegionMatch: true, RTT: 100, IsPriorityForMode: false, IsReachable: false, ActiveCount: 2},
+				{IsRegionMatch: true, RTT: 50, IsPriorityForMode: true, IsReachable: true, ActiveCount: 1},
+				{IsRegionMatch: true, RTT: 50, IsPriorityForMode: true, IsReachable: true, ActiveCount: 2},
+				{IsRegionMatch: true, RTT: 100, IsPriorityForMode: false, IsReachable: false, ActiveCount: 1},
 			},
 			expected: []labelIndex{
-				{regionMatches: true, rtt: 50, rating: 100, isPriorityForMode: true, isReachable: true, activeCount: 1},
-				{regionMatches: true, rtt: 100, rating: 100, isPriorityForMode: false, isReachable: false, activeCount: 1},
-				{regionMatches: false, rtt: 50, rating: 50, isPriorityForMode: true, isReachable: true, activeCount: 2},
-				{regionMatches: false, rtt: 100, rating: 50, isPriorityForMode: false, isReachable: false, activeCount: 2},
+				{IsRegionMatch: true, RTT: 50, IsPriorityForMode: true, IsReachable: true, ActiveCount: 1},
+				{IsRegionMatch: true, RTT: 50, IsPriorityForMode: true, IsReachable: true, ActiveCount: 2},
+				{IsRegionMatch: true, RTT: 100, IsPriorityForMode: false, IsReachable: false, ActiveCount: 1},
+				{IsRegionMatch: true, RTT: 100, IsPriorityForMode: false, IsReachable: false, ActiveCount: 2},
 			},
 		},
 		{
 			name: "RTT difference less than 30",
 			labels: []labelIndex{
-				{rtt: 60},
-				{rtt: 50},
+				{RTT: 60},
+				{RTT: 50},
 			},
 			expected: []labelIndex{
-				{rtt: 60},
-				{rtt: 50},
+				{RTT: 60},
+				{RTT: 50},
 			},
 		},
 	}
@@ -272,7 +288,9 @@ func TestSortLabelIndexes(t *testing.T) {
 			copy(labelsCopy, tt.labels)
 
 			sortLabelIndexes(labelsCopy)
-			assert.Equal(t, tt.expected, labelsCopy)
+			if diff := cmp.Diff(labelsCopy, tt.expected); diff != "" {
+				t.Errorf("sortLabelIndexes() mismatch (-got +want):\n%s", diff)
+			}
 		})
 	}
 }

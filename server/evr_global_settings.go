@@ -82,8 +82,8 @@ type RankPercentileSettings struct {
 }
 
 type ServerRatings struct {
-	ByExternalIP map[string]float64 `json:"by_external_ip"`
-	ByOperatorID map[string]float64 `json:"by_operator_id"`
+	ByExternalIP       map[string]float64 `json:"by_external_ip"`
+	ByOperatorUsername map[string]float64 `json:"by_operator_id"`
 }
 
 func (g *ServiceSettingsData) String() string {
@@ -146,8 +146,8 @@ func FixDefaultServiceSettings(data *ServiceSettingsData) {
 	if data.Matchmaking.ServerRatings.ByExternalIP == nil {
 		data.Matchmaking.ServerRatings.ByExternalIP = make(map[string]float64)
 	}
-	if data.Matchmaking.ServerRatings.ByOperatorID == nil {
-		data.Matchmaking.ServerRatings.ByOperatorID = make(map[string]float64)
+	if data.Matchmaking.ServerRatings.ByOperatorUsername == nil {
+		data.Matchmaking.ServerRatings.ByOperatorUsername = make(map[string]float64)
 	}
 	if data.Matchmaking.RankPercentile.LeaderboardWeights == nil {
 		data.Matchmaking.RankPercentile.LeaderboardWeights = make(map[evr.Symbol]map[string]float64)
