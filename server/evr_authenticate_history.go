@@ -85,6 +85,7 @@ func (h *LoginHistoryEntry) ItemMap() map[string]struct{} {
 var _ = IndexedVersionedStorable(&LoginHistory{})
 
 type LoginHistory struct {
+	Active                   map[string]*LoginHistoryEntry      `json:"active"`                     // map[deviceID]DeviceHistoryEntry
 	History                  map[string]*LoginHistoryEntry      `json:"history"`                    // map[deviceID]DeviceHistoryEntry
 	Cache                    []string                           `json:"cache"`                      // list of IP addresses, EvrID's, HMD Serial Numbers, and System Data
 	XPIs                     map[string]time.Time               `json:"xpis"`                       // list of XPIs
@@ -119,10 +120,10 @@ func (LoginHistory) StorageIndexes() []StorageIndexMeta {
 		Name:           LoginHistoryCacheIndex,
 		Collection:     LoginStorageCollection,
 		Key:            LoginHistoryStorageKey,
-		Fields:         []string{"cache", "xpis", "client_ips", "second_degree", "alternate_matches", "denied_client_addrs"},
+		Fields:         []string{"cache", "denied_client_addrs"},
 		SortableFields: nil,
 		MaxEntries:     10000000,
-		IndexOnly:      false,
+		IndexOnly:      true,
 	}}
 }
 
@@ -133,22 +134,18 @@ func (h *LoginHistory) SetStorageVersion(userID, version string) {
 
 func NewLoginHistory(userID string) *LoginHistory {
 	return &LoginHistory{
-		History:                make(map[string]*LoginHistoryEntry),
-		Cache:                  make([]string, 0),
-		XPIs:                   make(map[string]time.Time),
-		ClientIPs:              make(map[string]time.Time),
-		AuthorizedIPs:          make(map[string]time.Time),
-		DeniedClientAddresses:  make([]string, 0),
-		PendingAuthorizations:  make(map[string]*LoginHistoryEntry),
-		SecondDegreeAlternates: make([]string, 0),
-		AlternateMap:           make(map[string][]*AlternateSearchMatch),
-		GroupNotifications:     make(map[string]map[string]time.Time),
-		userID:                 userID,
-		version:                "*", // don't overwrite existing data
+		userID:  userID,
+		version: "*", // don't overwrite existing data
 	}
 }
 
 func (h *LoginHistory) AlternateIDs() (firstDegree []string, secondDegree []string) {
+	if len(h.AlternateMap) == 0 && len(h.SecondDegreeAlternates) == 0 {
+		return nil, nil
+	}
+
+	h.AlternateMap = make(map[string][]*AlternateSearchMatch, len(h.AlternateMap))
+
 	var (
 		firstIDs  = make([]string, 0, len(h.AlternateMap))
 		secondIDs = make([]string, 0, len(h.SecondDegreeAlternates))
@@ -184,38 +181,57 @@ func (h *LoginHistory) LastSeen() time.Time {
 	return lastSeen
 }
 
-func (h *LoginHistory) Update(xpid evr.EvrId, clientIP string, loginData *evr.LoginProfile) {
-	if e := h.Get(xpid, clientIP); e != nil {
-		e.UpdatedAt = time.Now()
-		e.LoginData = loginData
-		return
-	} else {
-		h.Insert(&LoginHistoryEntry{
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
-			XPID:      xpid,
-			ClientIP:  clientIP,
-			LoginData: loginData,
-		})
+func (h *LoginHistory) Update(xpid evr.EvrId, ip string, loginData *evr.LoginProfile, isAuthenticated bool) (isNew, allowed bool) {
+	allowed = h.IsAuthorizedIP(ip)
+
+	if isAuthenticated {
+		isNew = h.AuthorizeIP(ip)
+		allowed = true
 	}
+
+	for _, addr := range h.DeniedClientAddresses {
+		if addr == ip {
+			allowed = false
+			break
+		}
+	}
+
+	entry := &LoginHistoryEntry{
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		XPID:      xpid,
+		ClientIP:  ip,
+		LoginData: loginData,
+	}
+
+	h.update(entry, isAuthenticated)
+
+	return isNew, allowed
 }
 
-func (h *LoginHistory) Get(xpid evr.EvrId, clientIP string) *LoginHistoryEntry {
-	if h.History == nil {
-		return nil
-	}
-	key := loginHistoryEntryKey(xpid, clientIP)
-	if e, found := h.History[key]; found {
-		return e
-	}
-	return nil
-}
-
-func (h *LoginHistory) Insert(entry *LoginHistoryEntry) {
+func (h *LoginHistory) update(entry *LoginHistoryEntry, active bool) {
 	if h.History == nil {
 		h.History = make(map[string]*LoginHistoryEntry)
 	}
-	h.History[entry.Key()] = entry
+	if e, found := h.History[entry.Key()]; found {
+		e.UpdatedAt = time.Now()
+		e.LoginData = entry.LoginData
+	} else {
+		h.History[entry.Key()] = entry
+	}
+
+	// If the entry is active, add it to the active history
+	if active {
+		if h.Active == nil {
+			h.Active = make(map[string]*LoginHistoryEntry)
+		}
+		if e, found := h.Active[entry.Key()]; found {
+			e.UpdatedAt = time.Now()
+			e.LoginData = entry.LoginData
+		} else {
+			h.Active[entry.Key()] = entry
+		}
+	}
 }
 
 func (h *LoginHistory) AuthorizeIPWithCode(ip, code string) error {
@@ -278,9 +294,6 @@ func (h *LoginHistory) GetPendingAuthorizationIP(ip string) *LoginHistoryEntry {
 }
 
 func (h *LoginHistory) RemovePendingAuthorizationIP(ip string) {
-	if h.PendingAuthorizations == nil {
-		return
-	}
 	delete(h.PendingAuthorizations, ip)
 }
 
@@ -304,7 +317,6 @@ func (h *LoginHistory) NotifyGroup(groupID string, threshold time.Time) bool {
 
 	if h.GroupNotifications == nil {
 		h.GroupNotifications = make(map[string]map[string]time.Time)
-
 	}
 	if _, found := h.GroupNotifications[groupID]; !found {
 		h.GroupNotifications[groupID] = make(map[string]time.Time)
@@ -326,6 +338,9 @@ func (h *LoginHistory) UpdateAlternates(ctx context.Context, nk runtime.NakamaMo
 	matches, err := LoginAlternateSearch(ctx, nk, h)
 	if err != nil {
 		return false, fmt.Errorf("error searching for alternate logins: %w", err)
+	}
+	if len(matches) == 0 {
+		return false, nil
 	}
 
 	h.AlternateMap = make(map[string][]*AlternateSearchMatch, len(matches))
@@ -392,6 +407,15 @@ func (h *LoginHistory) UpdateAlternates(ctx context.Context, nk runtime.NakamaMo
 	return hasDisabledAlts, nil
 }
 
+func (h *LoginHistory) GetXPI(xpid evr.EvrId) (time.Time, bool) {
+	if h.XPIs != nil {
+		if t, found := h.XPIs[xpid.String()]; found {
+			return t, true
+		}
+	}
+	return time.Time{}, false
+}
+
 func (h *LoginHistory) rebuildCache() {
 	h.Cache = make([]string, 0, len(h.History)*4)
 	h.XPIs = make(map[string]time.Time, len(h.History))
@@ -415,10 +439,9 @@ func (h *LoginHistory) rebuildCache() {
 			}
 		}
 	}
-	if h.DeniedClientAddresses == nil {
-		h.DeniedClientAddresses = make([]string, 0)
+	if h.DeniedClientAddresses != nil {
+		h.Cache = append(h.Cache, h.DeniedClientAddresses...)
 	}
-	h.Cache = append(h.Cache, h.DeniedClientAddresses...)
 
 	// Sort and compact the cache
 	slices.Sort(h.Cache)
@@ -441,6 +464,10 @@ func (h *LoginHistory) MarshalJSON() ([]byte, error) {
 
 	// Clear authorized IPs that haven't been used in over 30 days
 	for ip := range h.AuthorizedIPs {
+		if len(h.ClientIPs) == 0 {
+			break
+		}
+		// Check if the IP is still in use
 		lastUse, found := h.ClientIPs[ip]
 		if !found || time.Since(lastUse) > 30*24*time.Hour {
 			delete(h.AuthorizedIPs, ip)
@@ -486,13 +513,14 @@ func (h *LoginHistory) MarshalJSON() ([]byte, error) {
 	}
 }
 
-func LoginHistoryRegexSearch(ctx context.Context, nk runtime.NakamaModule, pattern string, limit int) (map[string]*LoginHistory, error) {
+func LoginHistoryRegexSearch(ctx context.Context, nk runtime.NakamaModule, pattern string, limit int) ([]string, error) {
 
 	query := fmt.Sprintf("+value.cache:/%s/", pattern)
 	// Perform the storage list operation
 
 	cursor := ""
-	histories := make(map[string]*LoginHistory)
+
+	userIDs := make([]string, 0, limit)
 	for {
 		result, cursor, err := nk.StorageIndexList(ctx, SystemUserID, LoginHistoryCacheIndex, query, limit, nil, cursor)
 		if err != nil {
@@ -500,20 +528,14 @@ func LoginHistoryRegexSearch(ctx context.Context, nk runtime.NakamaModule, patte
 		}
 
 		for _, obj := range result.Objects {
-			var history LoginHistory
-			if err := json.Unmarshal([]byte(obj.Value), &history); err != nil {
-				return nil, fmt.Errorf("error unmarshalling display name history: %w", err)
-			}
-			history.userID = obj.UserId
-			history.version = obj.Version
-			histories[obj.UserId] = &history
+			userIDs = append(userIDs, obj.UserId)
 		}
 
 		if cursor == "" {
 			break
 		}
 	}
-	return histories, nil
+	return userIDs, nil
 }
 
 func AccountGetDeviceID(ctx context.Context, db *sql.DB, nk runtime.NakamaModule, deviceID string) (*EVRProfile, error) {
