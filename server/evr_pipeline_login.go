@@ -13,7 +13,6 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/gofrs/uuid/v5"
-	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/muesli/reflow/wordwrap"
@@ -159,14 +158,6 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 
 	p.nk.metrics.CustomCounter("login_success", tags, 1)
 	p.nk.metrics.CustomTimer("login_process_latency", params.MetricsTags(), time.Since(timer))
-
-	p.nk.Event(ctx, &api.Event{
-		Name: EventUserLogin,
-		Properties: map[string]string{
-			"user_id": session.userID.String(),
-		},
-		External: true,
-	})
 
 	return session.SendEvr(
 		evr.NewLoginSuccess(session.id, request.XPID),
@@ -397,30 +388,13 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 	var err error
 
 	metricsTags := params.MetricsTags()
-	defer func() {
-		p.nk.MetricsCounterAdd("session_authorize", metricsTags, 1)
-	}()
+
+	p.nk.MetricsCounterAdd("session_authorize", metricsTags, 1)
 
 	// Get the IPQS Data
-	params.ipInfo, err = p.ipInfoCache.Get(ctx, session.clientIP)
-	if err != nil {
+	if params.ipInfo, err = p.ipInfoCache.Get(ctx, session.clientIP); err != nil {
 		logger.Debug("Failed to get IPQS details", zap.Error(err))
 	}
-
-	// Load the login history for audit purposes.
-	loginHistory := NewLoginHistory(session.userID.String())
-	if err := StorageRead(ctx, p.nk, params.profile.ID(), loginHistory, true); err != nil {
-		metricsTags["error"] = "failed_load_login_history"
-		return fmt.Errorf("failed to load login history: %w", err)
-	}
-
-	loginHistory.Update(params.xpID, session.clientIP, params.loginPayload)
-
-	defer func(userID string) {
-		if err := StorageWrite(context.Background(), p.nk, userID, loginHistory); err != nil {
-			logger.Warn("Failed to store login history", zap.Error(err))
-		}
-	}(session.UserID().String())
 
 	// The account is now authenticated. Authorize the session.
 	if params.profile.IsDisabled() {
@@ -442,16 +416,16 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 	}
 
 	// Check if the IP is on the deny list.
-	if histories, err := LoginDeniedClientIPAddressSearch(ctx, p.nk, session.clientIP); err != nil {
+	if userIDs, err := LoginDeniedClientIPAddressSearch(ctx, p.nk, session.clientIP); err != nil {
 		metricsTags["error"] = "failed_ip_denylist_search"
 		return fmt.Errorf("failed to search for denied client address: %w", err)
-	} else if len(histories) > 0 {
-
+	} else if len(userIDs) > 0 {
 		// The IP is on the deny list.
 		logger.Info("Attempted login with IP address that is on the deny list.",
 			zap.String("xpid", params.xpID.Token()),
 			zap.String("client_ip", session.clientIP),
 			zap.String("uid", params.profile.ID()),
+			zap.Any("denied_ip_owner", userIDs),
 			zap.Any("login_payload", params.loginPayload))
 
 		metricsTags["error"] = "ip_deny_list"
@@ -462,21 +436,20 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 		}
 	}
 
+	loginHistory := NewLoginHistory(params.profile.ID())
+	if err := StorageRead(ctx, p.nk, params.profile.ID(), loginHistory, true); err != nil {
+		return fmt.Errorf("failed to load login history: %w", err)
+	}
+
 	// Require IP verification, if the session is not authenticated.
-	if isAuthorized := loginHistory.IsAuthorizedIP(session.clientIP); isAuthorized || params.IsWebsocketAuthenticated {
-
-		// Update the last used time.
-		if isNew := loginHistory.AuthorizeIP(session.clientIP); isNew {
-			if err := p.appBot.SendIPAuthorizationNotification(params.profile.ID(), session.clientIP); err != nil {
-				// Log the error, but don't return it.
-				logger.Warn("Failed to send IP authorization notification", zap.Error(err))
-			}
-		}
-
-	} else {
+	if !params.IsWebsocketAuthenticated && !loginHistory.IsAuthorizedIP(session.clientIP) {
 
 		// IP is not authorized. Add a pending authorization entry.
 		entry := loginHistory.AddPendingAuthorizationIP(params.xpID, session.clientIP, params.loginPayload)
+
+		if err := StorageWrite(ctx, p.nk, params.profile.ID(), loginHistory); err != nil {
+			return fmt.Errorf("failed to load login history: %w", err)
+		}
 
 		// Use the last two digits of the nanos seconds as the 2FA code.
 		twoFactorCode := fmt.Sprintf("%02d", entry.CreatedAt.Nanosecond()%100)
@@ -495,7 +468,6 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 					return fmt.Errorf("failed to send IP approval request: %w", err)
 				}
 				// The user has DMs from non-friends disabled. Tell them to use the slash command instead.
-
 				if guildID := p.discordCache.GroupIDToGuildID(params.profile.ActiveGroupID); guildID != "" {
 					// Use the guild name
 					if guild, err := p.discordCache.dg.Guild(guildID); err == nil {
@@ -538,7 +510,7 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 		}
 	}
 
-	// Check for suspensions for this user and thier first tier alts.
+	// Check for suspensions for this user and their first tier alts.
 	params.activeSuspensionRecords = make(map[string]map[string]GuildEnforcementRecord)
 	firstIDs, _ := loginHistory.AlternateIDs()
 
@@ -566,6 +538,13 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 	}
 
 	metricsTags["error"] = "nil"
+
+	SendEvent(ctx, p.nk, &EventUserAuthenticated{
+		XPID:                     params.xpID,
+		ClientIP:                 session.clientIP,
+		LoginPayload:             params.loginPayload,
+		IsWebSocketAuthenticated: params.IsWebsocketAuthenticated,
+	})
 
 	return nil
 }
@@ -634,7 +613,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	// the force username role.
 	for groupID, gg := range params.guildGroups {
 		if gg.HasRole(session.userID.String(), gg.RoleMap.UsernameOnly) {
-			params.profile.GroupDisplayNames[groupID] = params.profile.Username()
+			params.profile.SetGroupDisplayName(groupID, params.profile.Username())
 		}
 	}
 
@@ -657,7 +636,29 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		logger.Warn("Failed to load display name history", zap.Error(err))
 		return fmt.Errorf("failed to load display name history: %w", err)
 	}
-	params.displayNames.Update(params.profile.ActiveGroupID, params.profile.GetActiveGroupDisplayName(), params.profile.Username(), true)
+
+	// Set the in-game display name to the current display name for each group
+
+	for groupID, gg := range params.guildGroups {
+		displayName, _ := params.displayNames.LatestGroup(groupID)
+		if displayName == "" {
+			displayName = params.profile.Username()
+		}
+		if params.profile.SetGroupDisplayName(groupID, displayName) {
+			metadataUpdated = true
+		}
+		if gg.ForceDisplayNameToMatchIGN {
+			go func() {
+				if member, err := p.discordCache.GuildMember(gg.GuildID, params.DiscordID()); err == nil && member != nil && InGameName(member) != displayName {
+					// Set their display name to their current in-game name
+					if err := p.discordCache.dg.GuildMemberNickname(gg.GuildID, params.DiscordID(), params.profile.GetGroupDisplayNameOrDefault(groupID)); err != nil {
+						logger.Warn("Failed to set display name", zap.Error(err))
+					}
+				}
+			}()
+		}
+		params.displayNames.Update(groupID, displayName, params.profile.Username(), true)
+	}
 
 	if err := DisplayNameHistoryStore(ctx, p.nk, session.userID.String(), params.displayNames); err != nil {
 		logger.Warn("Failed to store display name history", zap.Error(err))
@@ -1155,9 +1156,11 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 	}
 	groupIDStr := label.GetGroupID().String()
 
-	if _, isMember := profile.GroupDisplayNames[groupIDStr]; !isMember {
-		logger.Warn("Player is not a member of the group", zap.String("uid", playerInfo.UserID), zap.String("gid", groupIDStr))
-		return nil
+	if len(profile.DisplayNames) != 0 {
+		if _, isMember := profile.DisplayNames[groupIDStr]; !isMember {
+			logger.Warn("Player is not a member of the group", zap.String("uid", playerInfo.UserID), zap.String("gid", groupIDStr))
+			return nil
+		}
 	}
 
 	serviceSettings := ServiceSettings()

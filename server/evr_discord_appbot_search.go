@@ -231,8 +231,8 @@ func (d *DiscordAppBot) handleSearch(ctx context.Context, logger runtime.Logger,
 
 		if len(loginHistoryResults) > 0 {
 			pattern := strings.ToLower(partial)
-			for _, h := range loginHistoryResults {
-				account, err := nk.AccountGetId(ctx, h.userID)
+			for _, userID := range loginHistoryResults {
+				account, err := nk.AccountGetId(ctx, userID)
 				if err != nil {
 					logger.WithFields(map[string]any{}).Warn("Failed to get account")
 					continue
@@ -243,7 +243,11 @@ func (d *DiscordAppBot) handleSearch(ctx context.Context, logger runtime.Logger,
 					matches: make(map[string]time.Time),
 				}
 
-				for _, e := range h.History {
+				loginHistory := NewLoginHistory(userID)
+				if err := StorageRead(ctx, nk, userID, loginHistory, false); err != nil {
+					logger.WithField("error", err).Error("Failed to read login history")
+				}
+				for _, e := range loginHistory.History {
 					for _, item := range e.Items() {
 						if strings.Contains(item, pattern) {
 							r.matches[item] = e.UpdatedAt

@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/heroiclabs/nakama-common/api"
@@ -45,6 +44,7 @@ func LoginAlternateSearch(ctx context.Context, nk runtime.NakamaModule, loginHis
 	var cursor string
 	var err error
 	var result *api.StorageObjects
+
 	for {
 		result, cursor, err = nk.StorageIndexList(ctx, SystemUserID, LoginHistoryCacheIndex, query, 100, nil, cursor)
 		if err != nil {
@@ -60,12 +60,9 @@ func LoginAlternateSearch(ctx context.Context, nk runtime.NakamaModule, loginHis
 
 			// Unmarshal the alternate history.
 			otherHistory := NewLoginHistory(obj.UserId)
-			if err := json.Unmarshal([]byte(obj.Value), otherHistory); err != nil {
-				return nil, fmt.Errorf("error unmarshalling alt history: %w", err)
+			if err := StorageRead(ctx, nk, obj.UserId, otherHistory, false); err != nil {
+				return nil, fmt.Errorf("error reading alt history: %w", err)
 			}
-			// Set the user ID based on the object owner.
-			otherHistory.userID = obj.UserId
-
 			// Compare the entries.
 			matches = append(matches, loginHistoryCompare(loginHistory, otherHistory)...)
 		}
@@ -78,13 +75,13 @@ func LoginAlternateSearch(ctx context.Context, nk runtime.NakamaModule, loginHis
 	return matches, nil
 }
 
-func LoginDeniedClientIPAddressSearch(ctx context.Context, nk runtime.NakamaModule, clientIPAddress string) (map[string]*LoginHistory, error) {
+func LoginDeniedClientIPAddressSearch(ctx context.Context, nk runtime.NakamaModule, clientIPAddress string) ([]string, error) {
 
 	query := fmt.Sprintf("+value.denied_client_addrs:/%s/", Query.Escape(clientIPAddress))
 	// Perform the storage list operation
 
 	cursor := ""
-	histories := make(map[string]*LoginHistory)
+	userIDs := make([]string, 0)
 	for {
 		result, cursor, err := nk.StorageIndexList(ctx, SystemUserID, LoginHistoryCacheIndex, query, 10, nil, cursor)
 		if err != nil {
@@ -92,20 +89,14 @@ func LoginDeniedClientIPAddressSearch(ctx context.Context, nk runtime.NakamaModu
 		}
 
 		for _, obj := range result.Objects {
-			var history LoginHistory
-			if err := json.Unmarshal([]byte(obj.Value), &history); err != nil {
-				return nil, fmt.Errorf("error unmarshalling display name history: %w", err)
-			}
-			history.userID = obj.UserId
-			history.version = obj.Version
-			histories[obj.UserId] = &history
+			userIDs = append(userIDs, obj.UserId)
 		}
 
 		if cursor == "" {
 			break
 		}
 	}
-	return histories, nil
+	return userIDs, nil
 
 }
 

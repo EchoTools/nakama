@@ -28,7 +28,7 @@ type WhoAmI struct{}
 func (w *WhoAmI) createUserAccountDetailsEmbed(a *EVRProfile, loginHistory *LoginHistory, matchmakingSettings *MatchmakingSettings, displayNameHistory *DisplayNameHistory, guildGroups map[string]*GuildGroup, groupID string, showLoginsSince time.Time, stripIPAddresses bool, includePriviledged bool) *discordgo.MessageEmbed {
 
 	var (
-		currentDisplayNameByGroupID = displayNameHistory.LatestByGroupID()
+		currentDisplayNameByGroupID = a.DisplayNamesByGroupID()
 		lastSeen                    string
 		partyGroupName              string
 		defaultMatchmakingGuildName string

@@ -8,6 +8,7 @@ import (
 )
 
 const DisplayNameMaxLength = 20
+const DisplayNameMinLength = 1
 
 var (
 	DisplayNameFilterRegex  = regexp.MustCompile(`[^-0-9A-Za-z_\[\]]`)
@@ -45,8 +46,8 @@ func sanitizeDisplayName(displayName string) string {
 	displayName = DisplayNameFilterRegex.ReplaceAllLiteralString(displayName, "")
 
 	// twenty characters maximum
-	if len(displayName) > 20 {
-		displayName = displayName[:20]
+	if len(displayName) > DisplayNameMaxLength {
+		displayName = displayName[:DisplayNameMaxLength]
 	}
 
 	if !displayNameMatchPattern.MatchString(displayName) {

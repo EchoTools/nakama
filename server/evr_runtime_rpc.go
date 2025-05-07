@@ -1229,7 +1229,7 @@ func (h *RPCHandler) AccountLookupRPC(ctx context.Context, logger runtime.Logger
 			return "", err
 		}
 	case request.DisplayName != "":
-		userIDs, err := DisplayNameHistoryActiveList(ctx, nk, request.DisplayName)
+		userIDs, err := DisplayNameOwnerSearch(ctx, nk, request.DisplayName)
 		if err != nil {
 			return "", err
 		}

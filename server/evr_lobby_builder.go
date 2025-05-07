@@ -553,7 +553,6 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 
 	// Create a slice containing the match labels
 	var (
-		allServers          = make([]*MatchLabel, 0, len(matches))
 		availableServers    = make([]*MatchLabel, 0, len(matches))
 		activeCountByHostID = make(map[string]int, len(matches))
 	)

@@ -64,8 +64,7 @@ func (d *DiscordAppBot) linkHeadset(ctx context.Context, logger runtime.Logger, 
 		if err := StorageRead(ctx, nk, userID, history, true); err != nil {
 			return fmt.Errorf("failed to load login history: %w", err)
 		}
-		history.Update(ticket.XPID, ticket.ClientIP, ticket.LoginProfile)
-		history.AuthorizeIP(ticket.ClientIP)
+		history.Update(ticket.XPID, ticket.ClientIP, ticket.LoginProfile, true)
 
 		if err := StorageWrite(ctx, nk, userID, history); err != nil {
 			return fmt.Errorf("failed to save login history: %w", err)
@@ -153,7 +152,11 @@ func (d *DiscordAppBot) handleUnlinkHeadset(ctx context.Context, logger runtime.
 		for _, device := range account.Devices {
 
 			description := ""
-			if ts, ok := loginHistory.XPIs[device.GetId()]; ok {
+			xpid, err := evr.ParseEvrId(device.GetId())
+			if err != nil {
+				continue
+			}
+			if ts, ok := loginHistory.GetXPI(*xpid); ok {
 				hours := int(time.Since(ts).Hours())
 				if hours < 1 {
 					minutes := int(time.Since(ts).Minutes())
