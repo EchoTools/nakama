@@ -564,7 +564,7 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 		if label.GameServer == nil {
 			continue
 		}
-		allServers = append(allServers, label)
+
 		if label.LobbyType == UnassignedLobby {
 			availableServers = append(availableServers, label)
 		} else {
@@ -592,7 +592,7 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 
 		rating, ok := globalSettings.ServerRatings.ByExternalIP[extIP]
 		if !ok {
-			if rating, ok = globalSettings.ServerRatings.ByOperatorID[extIP]; !ok {
+			if rating, ok = globalSettings.ServerRatings.ByOperatorUsername[label.GameServer.Username]; !ok {
 				rating = 0
 			}
 		}
@@ -603,13 +603,14 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 		}
 
 		indexes[i] = labelIndex{
-			label:             label,
-			rtt:               (rttsByExternalIP[extIP] + 10) / 20 * 20,
-			isReachable:       rttsByExternalIP[extIP] != 0,
-			rating:            rating,
-			isPriorityForMode: slices.Contains(label.GameServer.DesignatedModes, settings.Mode),
-			activeCount:       activeCountByHostID[hostID],
-			regionMatches:     regionMatch,
+			Label:             label,
+			RTT:               (rttsByExternalIP[extIP] + 10) / 20 * 20,
+			IsReachable:       rttsByExternalIP[extIP] != 0,
+			Rating:            rating,
+			IsPriorityForMode: slices.Contains(label.GameServer.DesignatedModes, settings.Mode),
+			ActiveCount:       activeCountByHostID[hostID],
+			IsRegionMatch:     regionMatch,
+			IsHighLatency:     rttsByExternalIP[extIP] > 100,
 		}
 	}
 
@@ -618,14 +619,14 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 	// Find the first available game server
 	var label *MatchLabel
 	for _, index := range indexes {
-		if index.label.LobbyType != UnassignedLobby {
+		if index.Label.LobbyType != UnassignedLobby {
 			continue
 		}
 
-		label, err = LobbyPrepareSession(ctx, nk, index.label.ID, settings)
+		label, err = LobbyPrepareSession(ctx, nk, index.Label.ID, settings)
 		if err != nil {
 			logger.WithFields(map[string]any{
-				"mid": index.label.ID.UUID.String(),
+				"mid": index.Label.ID.UUID.String(),
 				"err": err,
 			}).Warn("Failed to prepare session")
 			continue
@@ -638,13 +639,14 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 }
 
 type labelIndex struct {
-	label             *MatchLabel
-	rtt               int
-	isReachable       bool
-	rating            float64
-	isPriorityForMode bool
-	activeCount       int
-	regionMatches     bool
+	Label             *MatchLabel
+	RTT               int
+	IsReachable       bool
+	Rating            float64
+	IsHighLatency     bool
+	IsPriorityForMode bool
+	ActiveCount       int
+	IsRegionMatch     bool
 }
 
 func sortLabelIndexes(labels []labelIndex) {
@@ -652,56 +654,64 @@ func sortLabelIndexes(labels []labelIndex) {
 	slices.SortStableFunc(labels, func(a, b labelIndex) int {
 
 		// Sort by whether the server is reachable or not
-		if a.isReachable && !b.isReachable {
+		if a.IsReachable && !b.IsReachable {
 			return -1
 		}
 
-		if !a.isReachable && b.isReachable {
+		if !a.IsReachable && b.IsReachable {
 			return 1
 		}
 
 		// Sort by whether the server is in the region
-		if a.regionMatches && !b.regionMatches {
+		if a.IsRegionMatch && !b.IsRegionMatch {
 			return -1
 		}
-		if !a.regionMatches && b.regionMatches {
+		if !a.IsRegionMatch && b.IsRegionMatch {
 			return 1
 		}
 
-		// If there is a large difference in RTT, sort by RTT
-		if math.Abs(float64(a.rtt-b.rtt)) > 30 {
-
-			if a.rtt < b.rtt {
-				return -1
-			}
-
-			if a.rtt > b.rtt {
-				return 1
-			}
+		// Sort by whether the server high latency
+		if a.IsHighLatency && !b.IsHighLatency {
+			return -1
+		} else if !a.IsHighLatency && b.IsHighLatency {
+			return 1
 		}
 
-		if a.rating > b.rating {
+		// Sort by the server rating
+		if a.Rating > b.Rating {
 			return -1
 		}
 
-		if a.rating < b.rating {
+		if a.Rating < b.Rating {
 			return 1
 		}
 
 		// Sort by whether the server is a priority server
-		if a.isPriorityForMode && !b.isPriorityForMode {
+		if a.IsPriorityForMode && !b.IsPriorityForMode {
 			return -1
 		}
-		if !a.isPriorityForMode && b.isPriorityForMode {
+		if !a.IsPriorityForMode && b.IsPriorityForMode {
 			return 1
 		}
 
+		// If there is a large difference in RTT, sort by RTT
+		if math.Abs(float64(a.RTT-b.RTT)) > 50 {
+
+			if a.RTT < b.RTT {
+				return -1
+			}
+
+			if a.RTT > b.RTT {
+				return 1
+			}
+		}
+
 		// Sort by the number of active game servers
-		if a.activeCount < b.activeCount {
+		if a.ActiveCount < b.ActiveCount {
 			return -1
 		}
 
-		if a.activeCount > b.activeCount {
+		if a.ActiveCount > b.ActiveCount {
 			return 1
 		}
 
