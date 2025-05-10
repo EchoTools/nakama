@@ -1229,15 +1229,16 @@ func (h *RPCHandler) AccountLookupRPC(ctx context.Context, logger runtime.Logger
 			return "", err
 		}
 	case request.DisplayName != "":
-		userIDs, err := DisplayNameOwnerSearch(ctx, nk, request.DisplayName)
+		ownerMap, err := DisplayNameOwnerSearch(ctx, nk, []string{request.DisplayName})
 		if err != nil {
 			return "", err
 		}
+		if len(ownerMap) == 0 || len(ownerMap[request.DisplayName]) == 0 {
+			return "", nil
+		}
+		userIDs := ownerMap[request.DisplayName]
 		if len(userIDs) > 1 {
 			return "", fmt.Errorf("multiple users found with display name %s", request.DisplayName)
-		}
-		if len(userIDs) == 0 {
-			return "", nil
 		}
 		userID = userIDs[0]
 	}

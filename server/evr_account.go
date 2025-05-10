@@ -65,7 +65,7 @@ type EVRProfile struct {
 	DisabledAccountMessage     string                 `json:"disabled_account_message"`     // The disabled account message that the user will see.
 	DisplayNameOverride        string                 `json:"display_name_override"`        // The display name override
 	GuildDisplayNameOverrides  map[string]string      `json:"guild_display_name_overrides"` // The display name overrides for each guild map[groupID]displayName
-	DisplayNames               map[string]string      `json:"group_display_names"`          // The display names for each guild map[groupID]displayName
+	InGameNames                map[string]string      `json:"group_display_names"`          // The display names for each guild map[groupID]displayName
 	ActiveGroupID              string                 `json:"active_group_id"`              // The active group ID
 	DiscordDebugMessages       bool                   `json:"discord_debug_messages"`       // Enable debug messages in Discord
 	RelayMessagesToDiscord     bool                   `json:"relay_messages_to_discord"`    // Relay messages to Discord
@@ -218,10 +218,10 @@ func (a *EVRProfile) SetActiveGroupID(id uuid.UUID) {
 }
 
 func (a EVRProfile) DisplayNamesByGroupID() map[string]string {
-	if a.DisplayNames == nil {
+	if a.InGameNames == nil {
 		return make(map[string]string)
 	}
-	return a.DisplayNames
+	return a.InGameNames
 }
 
 func (a EVRProfile) GetGroupDisplayNameOrDefault(groupID string) string {
@@ -234,19 +234,19 @@ func (a EVRProfile) GetGroupDisplayNameOrDefault(groupID string) string {
 		return a.sessionDisplayNameOverride
 	}
 
-	if a.DisplayNames != nil {
+	if a.InGameNames != nil {
 
-		if dn, ok := a.DisplayNames[groupID]; ok && dn != "" {
+		if dn, ok := a.InGameNames[groupID]; ok && dn != "" {
 			// Use the group display name, if it exists
 			return sanitizeDisplayName(dn)
 
-		} else if dn, ok := a.DisplayNames[a.ActiveGroupID]; ok && dn != "" {
+		} else if dn, ok := a.InGameNames[a.ActiveGroupID]; ok && dn != "" {
 			// Otherwise, usethe active group display name
 			return sanitizeDisplayName(dn)
 
 		} else {
 			// Fallback to the first non-empty group display name
-			for _, dn = range a.DisplayNames {
+			for _, dn = range a.InGameNames {
 				dn = sanitizeDisplayName(dn)
 				if dn != "" {
 					return dn
@@ -263,13 +263,13 @@ func (a EVRProfile) GetGroupDisplayNameOrDefault(groupID string) string {
 }
 
 func (a *EVRProfile) SetGroupDisplayName(groupID, displayName string) (updated bool) {
-	if a.DisplayNames == nil {
-		a.DisplayNames = make(map[string]string)
+	if a.InGameNames == nil {
+		a.InGameNames = make(map[string]string)
 	}
-	if a.DisplayNames[groupID] == displayName {
+	if a.InGameNames[groupID] == displayName {
 		return false
 	}
-	a.DisplayNames[groupID] = displayName
+	a.InGameNames[groupID] = displayName
 	return true
 }
 

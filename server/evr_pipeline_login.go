@@ -632,78 +632,80 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		params.profile.sessionDisplayNameOverride = params.profile.GuildDisplayNameOverrides[params.profile.ActiveGroupID]
 	}
 
-	params.displayNames, err = DisplayNameHistoryLoad(ctx, p.nk, session.userID.String())
+	params.ignHistory, err = DisplayNameHistoryLoad(ctx, p.nk, session.userID.String())
 	if err != nil {
 		logger.Warn("Failed to load display name history", zap.Error(err))
 		return fmt.Errorf("failed to load display name history: %w", err)
 	}
 
-	// Set the in-game display name to the current display name for each group
-	ownershipState := make(map[string]string)
-	for groupID, gg := range params.guildGroups {
-		displayName, _ := params.displayNames.LatestGroup(groupID)
-		if displayName == "" {
-			displayName = params.profile.Username()
+	// Collect all of the in-game names for the player.
+	displayNames := make([]string, 0, len(params.profile.InGameNames))
+	for _, dn := range params.profile.InGameNames {
+		if dn == "" {
+			delete(params.profile.InGameNames, dn)
+		} else {
+			displayNames = append(displayNames, dn)
 		}
+	}
 
-		ownerID, checked := ownershipState[displayName]
-		if !checked {
-			if strings.EqualFold(displayName, params.profile.Username()) {
-				// The display name is the same as the username, so set the owner ID to this user.
-				ownerID = params.profile.ID()
-			} else {
-				// Check if the display name is owned by this user
-				if userIDs, err := DisplayNameCheckOwner(ctx, p.nk, displayName); err != nil {
-					logger.Warn("Failed to check display name owner", zap.Error(err))
-					ownerID = uuid.Nil.String()
-				} else if len(userIDs) > 0 && !slices.Contains(userIDs, params.profile.ID()) {
-					// This display name is owned by someone else.
-					ownerID = userIDs[0]
-					if gg.DisplayNameInUseNotifications {
-						// Notify the player that this display name is in use.
-						ownerDiscordID := p.discordCache.UserIDToDiscordID(ownerID)
-						go func() {
-							if err := p.discordCache.SendDisplayNameInUseNotification(ctx, params.profile.DiscordID(), ownerDiscordID, displayName, params.profile.Username()); err != nil {
-								logger.Warn("Failed to send display name in use notification", zap.Error(err))
-							}
-						}()
+	globalSettings := ServiceSettings()
+	if ownerMap, err := DisplayNameOwnerSearch(ctx, p.nk, displayNames); err != nil {
+		logger.Warn("Failed to check display name owner", zap.Error(err))
+	} else {
+		// Prune the in-game names that are owned by someone else.
+		for _, dn := range displayNames {
+			if ownerIDs, ok := ownerMap[dn]; ok && !slices.Contains(ownerIDs, params.profile.ID()) {
+				// This display name is owned by someone else.
+				for gID, gn := range params.profile.InGameNames {
+					if strings.EqualFold(gn, dn) {
+						// This display name is owned by someone else.
+						delete(params.profile.InGameNames, gID)
+						if globalSettings.DisplayNameInUseNotifications {
+							// Notify the player that this display name is in use.
+							ownerDiscordID := p.discordCache.UserIDToDiscordID(ownerIDs[0])
+							go func() {
+								if err := p.discordCache.SendDisplayNameInUseNotification(ctx, params.profile.DiscordID(), ownerDiscordID, dn, params.profile.Username()); err != nil {
+									logger.Warn("Failed to send display name in use notification", zap.Error(err))
+								}
+							}()
+						}
 					}
-				} else {
-					// The display name is not owned by anyone, or this user is the owner.
-					ownerID = params.profile.ID()
 				}
 			}
-			ownershipState[displayName] = ownerID
 		}
-		if ownerID != params.profile.ID() {
-			// This display name is owned by someone else, so set the display name to the username.
-			displayName = params.profile.Username()
-		}
+	}
 
-		// Assign/Update ownership of the display name to this user
-		params.displayNames.Update(groupID, displayName, params.profile.Username(), true)
+	// Update the In-Game names for the player.
+	igns := make([]string, 0, len(params.profile.InGameNames))
+	for _, ign := range params.profile.InGameNames {
+		igns = append(igns, ign)
+	}
+	params.ignHistory.ReplaceInGameNames(igns)
 
-		if params.profile.SetGroupDisplayName(groupID, displayName) {
-			metadataUpdated = true
-		}
-
+	// Set the active group's display name to the current in-game name.
+	activeGroupDisplayName := params.profile.InGameNames[params.profile.ActiveGroupID]
+	if activeGroupDisplayName == "" {
+		activeGroupDisplayName = params.profile.Username()
+	}
+	params.ignHistory.Update(params.profile.ActiveGroupID, activeGroupDisplayName, params.profile.Username(), true)
+	if gg := params.guildGroups[params.profile.ActiveGroupID]; gg != nil {
 		if gg.DisplayNameForceNickToIGN || gg.DisplayNameSetNickToIGNAtLogin {
 			// If the name is forced, then set the display name to the current in-game name when the player logs in.
 			go func() {
-				if member, err := p.discordCache.GuildMember(gg.GuildID, params.DiscordID()); err == nil && member != nil && InGameName(member) != displayName {
+				if member, err := p.discordCache.GuildMember(gg.GuildID, params.DiscordID()); err == nil && member != nil && InGameName(member) != activeGroupDisplayName {
 					// Set their display name to their current in-game name
-					if err := p.discordCache.dg.GuildMemberNickname(gg.GuildID, params.DiscordID(), params.profile.GetGroupDisplayNameOrDefault(groupID)); err != nil {
+					if err := p.discordCache.dg.GuildMemberNickname(gg.GuildID, params.DiscordID(), activeGroupDisplayName); err != nil {
 						logger.Warn("Failed to set display name", zap.Error(err))
 					}
 				}
 			}()
 		}
 	}
-	if err := DisplayNameHistoryStore(ctx, p.nk, session.userID.String(), params.displayNames); err != nil {
+
+	if err := DisplayNameHistoryStore(ctx, p.nk, session.userID.String(), params.ignHistory); err != nil {
 		logger.Warn("Failed to store display name history", zap.Error(err))
 	}
 
-	globalSettings := ServiceSettings()
 	if settings, err := LoadMatchmakingSettings(ctx, p.nk, session.userID.String()); err != nil {
 		logger.Warn("Failed to load matchmaking settings", zap.Error(err))
 		return fmt.Errorf("failed to load matchmaking settings: %w", err)
@@ -1205,8 +1207,8 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 	}
 	groupIDStr := label.GetGroupID().String()
 
-	if len(profile.DisplayNames) != 0 {
-		if _, isMember := profile.DisplayNames[groupIDStr]; !isMember {
+	if len(profile.InGameNames) != 0 {
+		if _, isMember := profile.InGameNames[groupIDStr]; !isMember {
 			logger.Warn("Player is not a member of the group", zap.String("uid", playerInfo.UserID), zap.String("gid", groupIDStr))
 			return nil
 		}
