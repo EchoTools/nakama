@@ -222,7 +222,7 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 				}); err != nil {
 					return fmt.Errorf("failed to edit message: %w", err)
 				}
-
+				return nil
 			}
 		}
 
