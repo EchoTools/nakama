@@ -42,6 +42,7 @@ type ServiceSettingsData struct {
 	KickPlayersWithDisabledAlternates     bool                      `json:"kick_players_with_disabled_alts"` // Kick players with disabled alts
 	VRMLEntitlementNotifyChannelID        string                    `json:"vrml_entitlement_notify_channel_id"`
 	EnableContinuousGameserverHealthCheck bool                      `json:"enable_continuous_gameserver_health_check"`
+	DisplayNameInUseNotifications         bool                      `json:"display_name_in_use_notifications"` // Display name in use notifications
 	version                               string
 	serviceStatusMessage                  string
 }

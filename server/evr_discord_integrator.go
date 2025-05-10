@@ -716,33 +716,27 @@ func (d *DiscordIntegrator) handleMemberUpdate(logger *zap.Logger, s *discordgo.
 }
 
 func (d *DiscordIntegrator) syncDisplayName(ctx context.Context, logger *zap.Logger, profile *EVRProfile, groupID, displayName string) error {
-	userIDs, err := DisplayNameCheckOwner(ctx, d.nk, displayName)
+	ownerMap, err := DisplayNameOwnerSearch(ctx, d.nk, []string{displayName})
 	if err != nil {
 		// If it errors, set the display name to their username
 		logger.Error("Error checking owner of display name.", zap.String("display_name", displayName), zap.Error(err))
 		return err
 	}
-	if len(userIDs) == 0 {
+	if len(ownerMap) == 0 || len(ownerMap[displayName]) == 0 {
 		// Do not assign display names to players until they login.
 		return nil
 	}
+
 	gg := d.guildGroupRegistry.Get(groupID)
 	if gg == nil {
 		return fmt.Errorf("guild group not found")
 	}
-
-	if gg.DisplayNameInUseNotifications || gg.DisplayNameForceNickToIGN {
+	if gg.DisplayNameInUseNotifications {
 		// Notify the user that the display name they have chosen is in use.
-		ownerID := userIDs[0]
+		ownerID := ownerMap[displayName][0]
 		logger.Warn("Display name in use", zap.String("owner_id", ownerID), zap.String("display_name", displayName), zap.String("caller_user_id", profile.ID()))
 		if err := d.SendDisplayNameInUseNotification(ctx, profile.DiscordID(), d.UserIDToDiscordID(ownerID), displayName, profile.Username()); err != nil {
 			logger.Debug("Error sending display name in use notification", zap.String("owner_id", ownerID), zap.String("display_name", displayName), zap.Error(err))
-		}
-	}
-	if gg.DisplayNameForceNickToIGN {
-		// Force the display name to be the in-game name.
-		if err := d.dg.GuildMemberNickname(groupID, profile.DiscordID(), profile.Username()); err != nil {
-			return fmt.Errorf("error setting nickname: %w", err)
 		}
 	}
 	return nil
@@ -803,7 +797,7 @@ func (d *DiscordIntegrator) GuildGroupMemberRemove(ctx context.Context, guildID,
 		}
 	}
 
-	delete(md.DisplayNames, groupID)
+	delete(md.InGameNames, groupID)
 	if md.GetActiveGroupID().String() == groupID {
 		md.SetActiveGroupID(uuid.Nil)
 	}

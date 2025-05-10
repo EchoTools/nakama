@@ -22,18 +22,20 @@ const (
 )
 
 var (
-	MaximumDisplayNameAge = time.Hour * 24 * 30 * 2 // 2 months
+	MaximumDisplayNameHistoryAge = time.Hour * 24 * 30 * 3 // 1 months
+	MaximumDisplayNameActiveAge  = time.Hour * 24 * 30 * 1 // 1 months
 )
 
 var _ = IndexedStorable(&DisplayNameHistory{})
 
 type DisplayNameHistory struct {
-	Username     string                          `json:"username"` // the user's username
-	Reserved     []string                        `json:"reserves"` // staticly reserved names
-	InGameNames  []string                        `json:"igns"`     // (lowercased) names that the user has in-game
-	Histories    map[string]map[string]time.Time `json:"history"`  // map[groupID]map[displayName]lastUsedTime
-	ActiveCache  []string                        `json:"active"`   // (lowercased) names that the user has active/reserved
-	HistoryCache []string                        `json:"cache"`    // (lowercased) used for searching
+	Username     string                          `json:"username"`      // the user's username
+	Reserved     []string                        `json:"reserves"`      // staticly reserved names
+	InGameNames  []string                        `json:"in_game_names"` // (lowercased) names that the user has in-game
+	Histories    map[string]map[string]time.Time `json:"history"`       // map[groupID]map[displayName]lastUsedTime
+	LastUsed     map[string]time.Time            `json:"last_used"`     // map[displayName]lastUsedTime
+	ActiveCache  []string                        `json:"active"`        // (lowercased) names that the user has active/reserved
+	HistoryCache []string                        `json:"cache"`         // (lowercased) used for searching
 }
 
 func (DisplayNameHistory) StorageMeta() StorageMeta {
@@ -51,13 +53,15 @@ func (DisplayNameHistory) StorageIndexes() []StorageIndexMeta {
 		Fields:         []string{"active", "cache", "reserves", "username", "igns"},
 		SortableFields: nil,
 		MaxEntries:     1000000,
-		IndexOnly:      false,
+		IndexOnly:      true,
 	}}
 }
 
 func NewDisplayNameHistory() *DisplayNameHistory {
 	return &DisplayNameHistory{
 		Histories:    make(map[string]map[string]time.Time),
+		InGameNames:  make([]string, 0),
+		LastUsed:     make(map[string]time.Time),
 		ActiveCache:  make([]string, 0),
 		HistoryCache: make([]string, 0),
 		Reserved:     make([]string, 0),
@@ -108,18 +112,34 @@ func (h *DisplayNameHistory) compile() {
 		}
 	}
 
+	h.LastUsed = make(map[string]time.Time)
+
 	for groupID, names := range h.Histories {
-
-		for name, _ := range names {
-
+		for name, ts := range names {
+			s := strings.ToLower(name)
+			if time.Since(ts) > MaximumDisplayNameHistoryAge {
+				// Remove old display name records
+				delete(h.Histories[groupID], name)
+			}
 			// Remove any invalid display names
 			if name == "" {
 				delete(h.Histories[groupID], name)
 				continue
 			}
-
+			if ts.After(h.LastUsed[s]) {
+				h.LastUsed[s] = ts
+			}
 			// Add it to the cache
-			cache[strings.ToLower(name)] = struct{}{}
+			cache[s] = struct{}{}
+		}
+	}
+
+	// Remove expired in-game names
+	for i := 0; i < len(h.InGameNames); i++ {
+		s := strings.ToLower(h.InGameNames[i])
+		if time.Since(h.LastUsed[s]) > MaximumDisplayNameActiveAge {
+			h.InGameNames = slices.Delete(h.InGameNames, i, i+1)
+			i--
 		}
 	}
 
@@ -139,45 +159,6 @@ func (h *DisplayNameHistory) compile() {
 	// Sort the caches
 	sort.Strings(h.HistoryCache)
 	sort.Strings(h.ActiveCache)
-}
-
-// LatestByGroupID returns the latest display names for each groupID.
-func (h *DisplayNameHistory) LatestByGroupID() map[string]string {
-	if h.Histories == nil {
-		h.Histories = make(map[string]map[string]time.Time)
-	}
-
-	latestMap := make(map[string]time.Time)
-
-	latest := make(map[string]string)
-	for groupID, names := range h.Histories {
-		for name, lastUsed := range names {
-			if lastUsed.Before(latestMap[groupID]) || time.Since(lastUsed) > MaximumDisplayNameAge {
-				// Ignore old display names
-				// Ignore display names that are not the latest
-				continue
-			}
-			latestMap[groupID] = lastUsed
-			latest[groupID] = name
-
-		}
-	}
-
-	return latest
-}
-
-func (h *DisplayNameHistory) Set(groupID, displayName string, lastUsed time.Time, username string) {
-	if h.Histories == nil {
-		h.Histories = make(map[string]map[string]time.Time)
-	}
-	if _, ok := h.Histories[groupID]; !ok {
-		h.Histories[groupID] = make(map[string]time.Time)
-	}
-	h.Histories[groupID][displayName] = lastUsed
-
-	if username != "" {
-		h.Username = username
-	}
 }
 
 // Set the display name for the given groupID
@@ -235,6 +216,16 @@ func (h *DisplayNameHistory) RemoveReserved(displayName string) {
 			break
 		}
 	}
+}
+
+func (h *DisplayNameHistory) ReplaceInGameNames(names []string) {
+	if h.InGameNames == nil {
+		h.InGameNames = make([]string, 0)
+	}
+
+	h.InGameNames = names[:]
+	slices.Sort(h.InGameNames)
+	h.InGameNames = slices.Compact(h.InGameNames)
 }
 
 func DisplayNameHistoryLoad(ctx context.Context, nk runtime.NakamaModule, userID string) (*DisplayNameHistory, error) {
@@ -425,18 +416,23 @@ func DisplayNameCacheRegexSearch(ctx context.Context, nk runtime.NakamaModule, p
 	return matches, nil
 }
 
-func DisplayNameOwnerSearch(ctx context.Context, nk runtime.NakamaModule, displayName string) ([]string, error) {
-	displayName = sanitizeDisplayName(displayName)
-	displayName = strings.ToLower(displayName)
-	displayName = Query.Escape(displayName)
+func DisplayNameOwnerSearch(ctx context.Context, nk runtime.NakamaModule, displayNames []string) (map[string][]string, error) {
+	nameMap := make(map[string]string, len(displayNames))
+	sanitized := make([]string, len(displayNames))
+	for _, dn := range displayNames {
+		s := sanitizeDisplayName(dn)
+		s = strings.ToLower(s)
+		sanitized = append(sanitized, s)
+		nameMap[s] = dn
+	}
 
-	query := fmt.Sprintf("+value.active:%s", displayName)
+	query := fmt.Sprintf("+value.active:%s", Query.MatchItem(sanitized))
 
 	var (
-		err     error
-		result  *api.StorageObjects
-		cursor  string
-		userIDs = make([]string, 0, 1)
+		err      error
+		result   *api.StorageObjects
+		cursor   string
+		ownerMap = make(map[string][]string, len(displayNames))
 	)
 	for {
 
@@ -444,75 +440,72 @@ func DisplayNameOwnerSearch(ctx context.Context, nk runtime.NakamaModule, displa
 		if err != nil {
 			return nil, fmt.Errorf("error listing display name history: %w", err)
 		}
-
+		updates := make(map[string]*DisplayNameHistory, len(result.Objects))
 		for _, obj := range result.Objects {
-			userIDs = append(userIDs, obj.UserId)
+			// Ignore old records
+			if time.Since(obj.UpdateTime.AsTime()) > MaximumDisplayNameActiveAge {
+				continue
+			}
+			history := &DisplayNameHistory{}
+			if err := json.Unmarshal([]byte(obj.Value), history); err != nil {
+				return nil, fmt.Errorf("error unmarshalling display name history: %w", err)
+			}
+			for s, dn := range nameMap {
+				if time.Since(history.LastUsed[s]) > MaximumDisplayNameActiveAge {
+					// Store the history back to prune it.
+					updates[obj.UserId] = history
+					continue
+				}
+				// Add the display name to the owner map
+				if _, ok := ownerMap[dn]; !ok {
+					ownerMap[dn] = make([]string, 0, 1)
+				}
+				ownerMap[dn] = append(ownerMap[dn], obj.UserId)
+			}
+		}
+		// Store the history back to prune it.
+		for userID, history := range updates {
+			if err := DisplayNameHistoryStore(ctx, nk, userID, history); err != nil {
+				return nil, fmt.Errorf("error storing display name history: %w", err)
+			}
 		}
 
 		if cursor == "" {
 			break
 		}
 	}
-	return userIDs, nil
+	return ownerMap, nil
 }
 
 // Attempt to assign a display name to a user, as the exclusive owner of the name.
 func DisplayNameAssignOwner(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, userID, groupID, displayName, username string) error {
-	userIDs, err := DisplayNameCheckOwner(ctx, nk, displayName)
+	ownerMap, err := DisplayNameOwnerSearch(ctx, nk, []string{displayName})
 	if err != nil {
 		// If it errors, set the display name to their username
 		logger.Error("Error deconflicting display name", zap.String("display_name", displayName), zap.Error(err))
 		return err
 	}
+	if len(ownerMap) > 0 {
+		userIDs := ownerMap[displayName]
+		// No one owns the display name, so assign it to this user
+		if len(userIDs) > 1 {
+			logger.Warn("Display name in use by multiple users", zap.String("display_name", displayName), zap.Strings("user_ids", userIDs))
+		}
 
-	if len(userIDs) > 1 {
-		logger.Warn("Display name in use by multiple users", zap.String("display_name", displayName), zap.Strings("user_ids", userIDs))
+		if len(userIDs) > 0 && !slices.Contains(userIDs, userID) {
+			// Display name is in use by another user, so do not assign it
+			logger.Debug("Display name already assigned to another user.", zap.String("display_name", displayName), zap.Strings("user_ids", userIDs))
+			return fmt.Errorf("display name already assigned to another user: %s", displayName)
+		}
+
+		if len(userIDs) == 0 {
+			// the display name is not in use, so assign it to this user
+			logger.Debug("Assigning display name to user.", zap.String("display_name", displayName), zap.String("user_id", userID))
+		}
 	}
-
-	if len(userIDs) > 0 && !slices.Contains(userIDs, userID) {
-		// Display name is in use by another user, so do not assign it
-		logger.Debug("Display name already assigned to another user.", zap.String("display_name", displayName), zap.Strings("user_ids", userIDs))
-		return fmt.Errorf("display name already assigned to another user: %s", displayName)
-	}
-
-	if len(userIDs) == 0 {
-		// the display name is not in use, so assign it to this user
-		logger.Debug("Assigning display name to user.", zap.String("display_name", displayName), zap.String("user_id", userID))
-	}
-
 	// Update the display name history. do not update the account because it will be done when the player logs in to the game.
 	if err := DisplayNameHistoryUpdate(ctx, nk, userID, groupID, displayName, username, true); err != nil {
 		return fmt.Errorf("error adding display name history entry: %w", err)
 	}
 	return nil
-}
-
-func DisplayNameCheckOwner(ctx context.Context, nk runtime.NakamaModule, displayName string) ([]string, error) {
-	displayName = sanitizeDisplayName(displayName)
-	displayName = strings.ToLower(displayName)
-	displayName = Query.Escape(displayName)
-
-	query := fmt.Sprintf("+value.active:%s", displayName)
-
-	var (
-		err     error
-		result  *api.StorageObjects
-		cursor  string
-		userIDs = make([]string, 0, 1)
-	)
-	for {
-		result, cursor, err = nk.StorageIndexList(ctx, SystemUserID, DisplayNameHistoryCacheIndex, query, 100, nil, cursor)
-		if err != nil {
-			return nil, fmt.Errorf("error listing display name history: %w", err)
-		}
-
-		for _, obj := range result.Objects {
-			userIDs = append(userIDs, obj.UserId)
-		}
-
-		if cursor == "" {
-			break
-		}
-	}
-	return userIDs, nil
 }
