@@ -20,8 +20,6 @@ const (
 	EventLobbySessionAuthorized = "lobby_session_authorized"
 	EventSessionStart           = "session_start"
 	EventSessionEnd             = "session_end"
-	EventVRMLAccountLinked      = "vrml_account_linked"
-	EventVRMLAccountResync      = "vrml_account_resync"
 	EventMatchData              = "match_data"
 	matchDataDatabaseName       = "nevr"
 	matchDataCollectionName     = "match_data"
@@ -60,12 +58,12 @@ type EventDispatcher struct {
 	matchJournals        map[MatchID]*MatchDataJournal
 	cache                *sync.Map
 	playerAuthorizations map[string]map[string]struct{} // map[sessionID]map[groupID]struct{}
-	vrmlVerifier         *VRMLVerifier
+	vrmlVerifier         *VRMLScanQueue
 }
 
 func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer, mongoClient *mongo.Client, dg *discordgo.Session) (*EventDispatcher, error) {
 
-	vrmlVerifier, err := NewVRMLVerifier(ctx, logger, db, nk, initializer, dg)
+	vrmlVerifier, err := NewVRMLScanQueue(ctx, logger, db, nk, initializer, dg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create VRML verifier: %w", err)
 	}
@@ -139,6 +137,8 @@ func (h *EventDispatcher) unmarshalEvent(event *api.Event) (Event, error) {
 	switch event.Name {
 	case fmt.Sprintf("%T", &EventUserAuthenticated{}):
 		e = &EventUserAuthenticated{}
+	case fmt.Sprintf("%T", &EventVRMLAccountLink{}):
+		e = &EventVRMLAccountLink{}
 	default:
 		return nil, nil // Unknown event type
 	}
@@ -164,8 +164,6 @@ func (h *EventDispatcher) processEvent(ctx context.Context, logger runtime.Logge
 		EventSessionStart:           h.eventSessionStart,
 		EventSessionEnd:             h.eventSessionEnd,
 		EventLobbySessionAuthorized: h.handleLobbyAuthorized,
-		EventVRMLAccountLinked:      h.handleVRMLAccountLinked,
-		EventVRMLAccountResync:      h.handleVRMLAccountLinked,
 		EventMatchData:              h.handleMatchEvent,
 	}
 
@@ -342,11 +340,6 @@ func (h *EventDispatcher) alternateLogLineFormatter(userID string, alternates ma
 	}
 
 	return content
-}
-
-func (h *EventDispatcher) handleVRMLAccountLinked(ctx context.Context, logger runtime.Logger, evt *api.Event) error {
-
-	return h.vrmlVerifier.VerifyUser(evt.Properties["user_id"], evt.Properties["token"])
 }
 
 func (h *EventDispatcher) handleMatchEvent(ctx context.Context, logger runtime.Logger, evt *api.Event) error {

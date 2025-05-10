@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -187,15 +186,6 @@ func (a EVRProfile) LangTag() string {
 
 func (a EVRProfile) AvatarURL() string {
 	return a.account.User.AvatarUrl
-}
-
-func (a EVRProfile) VRMLUserID() string {
-	for _, d := range a.account.Devices {
-		if vrmlUserID, found := strings.CutPrefix(d.Id, DeviceIDPrefixVRML); found {
-			return vrmlUserID
-		}
-	}
-	return ""
 }
 
 func (a EVRProfile) DiscordAccountCreationTime() time.Time {
