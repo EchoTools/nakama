@@ -722,23 +722,33 @@ func (d *DiscordIntegrator) syncDisplayName(ctx context.Context, logger *zap.Log
 		logger.Error("Error checking owner of display name.", zap.String("display_name", displayName), zap.Error(err))
 		return err
 	}
-	if len(ownerMap) == 0 || len(ownerMap[displayName]) == 0 {
-		// Do not assign display names to players until they login.
+	if len(ownerMap) > 0 && !slices.Contains(ownerMap[displayName], profile.ID()) {
+		// The display name is owned by some one else.
+		gg := d.guildGroupRegistry.Get(groupID)
+		if gg == nil {
+			return fmt.Errorf("guild group not found")
+		}
+		if gg.DisplayNameInUseNotifications {
+			// Notify the user that the display name they have chosen is in use.
+			ownerID := ownerMap[displayName][0]
+			logger.Warn("Display name in use", zap.String("owner_id", ownerID), zap.String("display_name", displayName), zap.String("caller_user_id", profile.ID()))
+			if err := d.SendDisplayNameInUseNotification(ctx, profile.DiscordID(), d.UserIDToDiscordID(ownerID), displayName, profile.Username()); err != nil {
+				logger.Debug("Error sending display name in use notification", zap.String("owner_id", ownerID), zap.String("display_name", displayName), zap.Error(err))
+			}
+		}
 		return nil
 	}
+	// This user may use this display name.
+	history, err := DisplayNameHistoryLoad(ctx, d.nk, profile.ID())
+	if err != nil {
+		return fmt.Errorf("error loading display name history: %w", err)
+	}
+	history.Update(groupID, displayName, profile.Username(), false)
+	err = DisplayNameHistoryStore(ctx, d.nk, profile.ID(), history)
+	if err != nil {
+		return fmt.Errorf("error storing display name history: %w", err)
+	}
 
-	gg := d.guildGroupRegistry.Get(groupID)
-	if gg == nil {
-		return fmt.Errorf("guild group not found")
-	}
-	if gg.DisplayNameInUseNotifications {
-		// Notify the user that the display name they have chosen is in use.
-		ownerID := ownerMap[displayName][0]
-		logger.Warn("Display name in use", zap.String("owner_id", ownerID), zap.String("display_name", displayName), zap.String("caller_user_id", profile.ID()))
-		if err := d.SendDisplayNameInUseNotification(ctx, profile.DiscordID(), d.UserIDToDiscordID(ownerID), displayName, profile.Username()); err != nil {
-			logger.Debug("Error sending display name in use notification", zap.String("owner_id", ownerID), zap.String("display_name", displayName), zap.Error(err))
-		}
-	}
 	return nil
 }
 

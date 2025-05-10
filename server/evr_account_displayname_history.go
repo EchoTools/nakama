@@ -33,7 +33,7 @@ type DisplayNameHistory struct {
 	Reserved     []string                        `json:"reserves"`      // staticly reserved names
 	InGameNames  []string                        `json:"in_game_names"` // (lowercased) names that the user has in-game
 	Histories    map[string]map[string]time.Time `json:"history"`       // map[groupID]map[displayName]lastUsedTime
-	LastUsed     map[string]time.Time            `json:"last_used"`     // map[displayName]lastUsedTime
+	LastUsed     map[string]time.Time            `json:"ign_last_used"` // map[displayName]lastUsedTime
 	ActiveCache  []string                        `json:"active"`        // (lowercased) names that the user has active/reserved
 	HistoryCache []string                        `json:"cache"`         // (lowercased) used for searching
 }
@@ -112,32 +112,10 @@ func (h *DisplayNameHistory) compile() {
 		}
 	}
 
-	h.LastUsed = make(map[string]time.Time)
-
-	for groupID, names := range h.Histories {
-		for name, ts := range names {
-			s := strings.ToLower(name)
-			if time.Since(ts) > MaximumDisplayNameHistoryAge {
-				// Remove old display name records
-				delete(h.Histories[groupID], name)
-			}
-			// Remove any invalid display names
-			if name == "" {
-				delete(h.Histories[groupID], name)
-				continue
-			}
-			if ts.After(h.LastUsed[s]) {
-				h.LastUsed[s] = ts
-			}
-			// Add it to the cache
-			cache[s] = struct{}{}
-		}
-	}
-
 	// Remove expired in-game names
 	for i := 0; i < len(h.InGameNames); i++ {
-		s := strings.ToLower(h.InGameNames[i])
-		if time.Since(h.LastUsed[s]) > MaximumDisplayNameActiveAge {
+		lastUsed := h.LastUsed[h.InGameNames[i]]
+		if time.Since(lastUsed) > MaximumDisplayNameActiveAge {
 			h.InGameNames = slices.Delete(h.InGameNames, i, i+1)
 			i--
 		}
@@ -176,6 +154,10 @@ func (h *DisplayNameHistory) Update(groupID, displayName string, username string
 	}
 	if isInGame {
 		h.InGameNames = append(h.InGameNames, displayName)
+		if h.LastUsed == nil {
+			h.LastUsed = make(map[string]time.Time)
+		}
+		h.LastUsed[displayName] = time.Now()
 	}
 }
 
