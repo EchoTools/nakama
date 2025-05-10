@@ -12,6 +12,7 @@ import (
 
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"go.uber.org/zap"
 )
 
 const (
@@ -276,13 +277,13 @@ func DisplayNameHistoryStore(ctx context.Context, nk runtime.NakamaModule, userI
 	return nil
 }
 
-func DisplayNameHistoryUpdate(ctx context.Context, nk runtime.NakamaModule, userID string, groupID string, displayName string, username string) error {
+func DisplayNameHistoryUpdate(ctx context.Context, nk runtime.NakamaModule, userID string, groupID string, displayName string, username string, isInGame bool) error {
 	history, err := DisplayNameHistoryLoad(ctx, nk, userID)
 	if err != nil {
 		return fmt.Errorf("error getting display name history: %w", err)
 	}
 
-	history.Update(groupID, displayName, username, false)
+	history.Update(groupID, displayName, username, isInGame)
 
 	if err := DisplayNameHistoryStore(ctx, nk, userID, history); err != nil {
 		return fmt.Errorf("error storing display name history: %w", err)
@@ -292,7 +293,6 @@ func DisplayNameHistoryUpdate(ctx context.Context, nk runtime.NakamaModule, user
 }
 
 func DisplayNameCacheRegexSearch(ctx context.Context, nk runtime.NakamaModule, pattern string, limit int) (map[string]map[string]map[string]time.Time, error) {
-
 	query := fmt.Sprintf(`+value.cache:/%s/`, pattern)
 
 	// Perform the storage list operation
@@ -436,6 +436,67 @@ func DisplayNameOwnerSearch(ctx context.Context, nk runtime.NakamaModule, displa
 	)
 	for {
 
+		result, cursor, err = nk.StorageIndexList(ctx, SystemUserID, DisplayNameHistoryCacheIndex, query, 100, nil, cursor)
+		if err != nil {
+			return nil, fmt.Errorf("error listing display name history: %w", err)
+		}
+
+		for _, obj := range result.Objects {
+			userIDs = append(userIDs, obj.UserId)
+		}
+
+		if cursor == "" {
+			break
+		}
+	}
+	return userIDs, nil
+}
+
+// Attempt to assign a display name to a user, as the exclusive owner of the name.
+func DisplayNameAssignOwner(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, userID, groupID, displayName, username string) error {
+	userIDs, err := DisplayNameCheckOwner(ctx, nk, displayName)
+	if err != nil {
+		// If it errors, set the display name to their username
+		logger.Error("Error deconflicting display name", zap.String("display_name", displayName), zap.Error(err))
+		return err
+	}
+
+	if len(userIDs) > 1 {
+		logger.Warn("Display name in use by multiple users", zap.String("display_name", displayName), zap.Strings("user_ids", userIDs))
+	}
+
+	if len(userIDs) > 0 && !slices.Contains(userIDs, userID) {
+		// Display name is in use by another user, so do not assign it
+		logger.Debug("Display name already assigned to another user.", zap.String("display_name", displayName), zap.Strings("user_ids", userIDs))
+		return fmt.Errorf("display name already assigned to another user: %s", displayName)
+	}
+
+	if len(userIDs) == 0 {
+		// the display name is not in use, so assign it to this user
+		logger.Debug("Assigning display name to user.", zap.String("display_name", displayName), zap.String("user_id", userID))
+	}
+
+	// Update the display name history. do not update the account because it will be done when the player logs in to the game.
+	if err := DisplayNameHistoryUpdate(ctx, nk, userID, groupID, displayName, username, true); err != nil {
+		return fmt.Errorf("error adding display name history entry: %w", err)
+	}
+	return nil
+}
+
+func DisplayNameCheckOwner(ctx context.Context, nk runtime.NakamaModule, displayName string) ([]string, error) {
+	displayName = sanitizeDisplayName(displayName)
+	displayName = strings.ToLower(displayName)
+	displayName = Query.Escape(displayName)
+
+	query := fmt.Sprintf("+value.active:%s", displayName)
+
+	var (
+		err     error
+		result  *api.StorageObjects
+		cursor  string
+		userIDs = make([]string, 0, 1)
+	)
+	for {
 		result, cursor, err = nk.StorageIndexList(ctx, SystemUserID, DisplayNameHistoryCacheIndex, query, 100, nil, cursor)
 		if err != nil {
 			return nil, fmt.Errorf("error listing display name history: %w", err)
