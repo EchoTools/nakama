@@ -123,6 +123,10 @@ func (h *DisplayNameHistory) compile() {
 		}
 	}
 
+	// Remove any duplicate in-game names
+	sort.Strings(h.InGameNames)
+	h.InGameNames = slices.Compact(h.InGameNames)
+
 	// Build the caches
 	h.HistoryCache = make([]string, 0, len(cache))
 	for name := range cache {
