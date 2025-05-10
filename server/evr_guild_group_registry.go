@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -38,6 +39,7 @@ func NewGuildGroupRegistry(ctx context.Context, logger runtime.Logger, nk runtim
 		ctx := ctx
 		ticker := time.NewTicker(time.Minute * 1)
 		timer := time.NewTimer(time.Second * 1)
+		firstRun := true
 		defer ticker.Stop()
 		for {
 			select {
@@ -61,7 +63,19 @@ func NewGuildGroupRegistry(ctx context.Context, logger runtime.Logger, nk runtim
 					logger.Warn("Error listing guild groups", zap.Error(err))
 					break
 				}
-
+				if firstRun {
+					firstRun = false
+					for _, group := range groups {
+						md := &GroupMetadata{}
+						if err := json.Unmarshal([]byte(group.Metadata), md); err != nil {
+							logger.Warn("Error unmarshalling group metadata", zap.Error(err))
+						} else if err := nk.GroupUpdate(ctx, group.Id, "", "", "", "", "", "", group.Open.Value, md.MarshalMap(), int(group.MaxCount)); err != nil {
+							logger.Warn("Error updating guild group", zap.Error(err))
+							continue
+						}
+					}
+				}
+				// Store the guild groups back to ensure all the fields are set.
 				for _, group := range groups {
 					// Load the state
 					if state, err := GuildGroupStateLoad(ctx, nk, ServiceSettings().DiscordBotUserID, group.Id); err != nil {
@@ -75,6 +89,7 @@ func NewGuildGroupRegistry(ctx context.Context, logger runtime.Logger, nk runtim
 				if cursor == "" {
 					break
 				}
+
 			}
 			registry.Unlock()
 			logger.Debug("Guild group registry updated")
