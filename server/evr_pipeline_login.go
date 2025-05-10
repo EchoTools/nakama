@@ -540,6 +540,7 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 	metricsTags["error"] = "nil"
 
 	SendEvent(ctx, p.nk, &EventUserAuthenticated{
+		UserID:                   params.profile.ID(),
 		XPID:                     params.xpID,
 		ClientIP:                 session.clientIP,
 		LoginPayload:             params.loginPayload,

@@ -19,16 +19,16 @@ var _ = Event(&EventUserAuthenticated{})
 const EventTypeUserAuthenticated = "user_authenticated"
 
 type EventUserAuthenticated struct {
-	Profile                  *EVRProfile       `json:"profile"`
+	UserID                   string            `json:"user_id"`
 	XPID                     evr.EvrId         `json:"xpid"`
 	ClientIP                 string            `json:"client_ip"`
 	LoginPayload             *evr.LoginProfile `json:"login_data"`
 	IsWebSocketAuthenticated bool              `json:"is_websocket_authenticated"`
 }
 
-func NewUserAuthenticatedEvent(profile *EVRProfile, xpid evr.EvrId, clientIP string, loginPayload *evr.LoginProfile, isWebSocketAuthenticated bool) *EventUserAuthenticated {
+func NewUserAuthenticatedEvent(userID string, xpid evr.EvrId, clientIP string, loginPayload *evr.LoginProfile, isWebSocketAuthenticated bool) *EventUserAuthenticated {
 	return &EventUserAuthenticated{
-		Profile:                  profile,
+		UserID:                   userID,
 		XPID:                     xpid,
 		ClientIP:                 clientIP,
 		LoginPayload:             loginPayload,
@@ -36,22 +36,16 @@ func NewUserAuthenticatedEvent(profile *EVRProfile, xpid evr.EvrId, clientIP str
 	}
 }
 
-func (e EventUserAuthenticated) UserID() string {
-	if e.Profile == nil {
-		return ""
-	}
-	return e.Profile.ID()
-}
-
 func (e *EventUserAuthenticated) Process(ctx context.Context, logger runtime.Logger, dispatcher *EventDispatcher) error {
-	userID := e.UserID()
-	if userID == "" {
+
+	if e.UserID == "" {
 		return fmt.Errorf("user ID is empty")
 	}
 	var (
-		err error
-		nk  = dispatcher.nk
-		dg  = dispatcher.dg
+		err    error
+		nk     = dispatcher.nk
+		dg     = dispatcher.dg
+		userID = e.UserID
 	)
 
 	loginHistory := NewLoginHistory(userID)
@@ -63,7 +57,7 @@ func (e *EventUserAuthenticated) Process(ctx context.Context, logger runtime.Log
 	isNew, allowed := loginHistory.Update(e.XPID, e.ClientIP, e.LoginPayload, e.IsWebSocketAuthenticated)
 
 	if allowed && isNew {
-		if err := SendIPAuthorizationNotification(dg, e.Profile.ID(), e.ClientIP); err != nil {
+		if err := SendIPAuthorizationNotification(dg, userID, e.ClientIP); err != nil {
 			// Log the error, but don't return it.
 			logger.Warn("Failed to send IP authorization notification", zap.Error(err))
 		}
