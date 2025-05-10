@@ -111,7 +111,7 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(ctx context.Context,
 			logger.Warn("Failed to log interaction to channel")
 		}
 
-		if !isGlobalOperator || !gg.IsAllocator(userID) {
+		if !isGlobalOperator && !gg.IsAllocator(userID) {
 			return simpleInteractionResponse(s, i, "You must be a guild allocator to use this command.")
 		}
 
@@ -126,7 +126,7 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(ctx context.Context,
 			logger.Warn("Failed to log interaction to channel")
 		}
 
-		if !isGlobalOperator || !gg.IsEnforcer(userID) {
+		if !isGlobalOperator && !gg.IsEnforcer(userID) {
 			return simpleInteractionResponse(s, i, "You must be a guild enforcer to use this command.")
 		}
 
@@ -141,7 +141,7 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(ctx context.Context,
 			logger.Warn("Failed to log interaction to channel")
 		}
 
-		if !isGlobalOperator || !gg.IsAuditor(userID) {
+		if !isGlobalOperator && !gg.IsAuditor(userID) {
 			return simpleInteractionResponse(s, i, "You must be a guild auditor to use this command.")
 		}
 	}
