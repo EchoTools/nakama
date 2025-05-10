@@ -446,7 +446,6 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 
 		// IP is not authorized. Add a pending authorization entry.
 		entry := loginHistory.AddPendingAuthorizationIP(params.xpID, session.clientIP, params.loginPayload)
-
 		if err := StorageWrite(ctx, p.nk, params.profile.ID(), loginHistory); err != nil {
 			return fmt.Errorf("failed to load login history: %w", err)
 		}

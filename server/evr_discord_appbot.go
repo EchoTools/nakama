@@ -12,7 +12,6 @@ import (
 	"regexp"
 	goruntime "runtime"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -1838,24 +1837,21 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return simpleInteractionResponse(s, i, "No pending IP verifications")
 			}
 
-			requests := make([]*LoginHistoryEntry, 0, len(loginHistory.PendingAuthorizations))
-			for ip, e := range loginHistory.PendingAuthorizations {
+			var request *LoginHistoryEntry
+			var latestTime time.Time
+			for _, e := range loginHistory.PendingAuthorizations {
 				if time.Since(e.UpdatedAt) > 10*time.Minute {
-					delete(loginHistory.PendingAuthorizations, ip)
+					continue
 				}
-				requests = append(requests, e)
+				if e.UpdatedAt.After(latestTime) {
+					latestTime = e.UpdatedAt
+					request = e
+				}
 			}
 
-			if len(requests) == 0 {
+			if request == nil {
 				return simpleInteractionResponse(s, i, "No pending IP verifications")
 			}
-
-			// Sort by time
-			sort.Slice(requests, func(i, j int) bool {
-				return requests[i].UpdatedAt.After(requests[j].UpdatedAt)
-			})
-			// Show the first one.
-			request := requests[0]
 
 			ipInfo, _ := d.ipInfoCache.Get(ctx, request.ClientIP)
 

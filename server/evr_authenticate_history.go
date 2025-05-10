@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"slices"
 	"strings"
 	"time"
@@ -255,10 +256,10 @@ func (h *LoginHistory) AuthorizeIP(ip string) bool {
 		h.AuthorizedIPs = make(map[string]time.Time)
 	}
 	h.RemovePendingAuthorizationIP(ip)
-	_, found := h.AuthorizedIPs[ip]
+	_, isExisting := h.AuthorizedIPs[ip]
 	h.AuthorizedIPs[ip] = time.Now().UTC()
 
-	return !found
+	return !isExisting
 }
 
 func (h *LoginHistory) IsAuthorizedIP(ip string) (isAuthorized bool) {
@@ -282,7 +283,7 @@ func (h *LoginHistory) AddPendingAuthorizationIP(xpid evr.EvrId, clientIP string
 		LoginData: loginData,
 	}
 
-	h.PendingAuthorizations[e.Key()] = e
+	h.PendingAuthorizations[clientIP] = e
 	return e
 }
 
@@ -450,7 +451,7 @@ func (h *LoginHistory) rebuildCache() {
 	// Remove ignored values
 	for i := 0; i < len(h.Cache); i++ {
 		if _, ok := IgnoredLoginValues[h.Cache[i]]; ok {
-			h.Cache = append(h.Cache[:i], h.Cache[i+1:]...)
+			h.Cache = slices.Delete(h.Cache, i, i+1)
 			i--
 		}
 	}
@@ -460,18 +461,6 @@ func (h *LoginHistory) MarshalJSON() ([]byte, error) {
 
 	if h.userID == "" {
 		return nil, fmt.Errorf("missing user ID")
-	}
-
-	// Clear authorized IPs that haven't been used in over 30 days
-	for ip := range h.AuthorizedIPs {
-		if len(h.ClientIPs) == 0 {
-			break
-		}
-		// Check if the IP is still in use
-		lastUse, found := h.ClientIPs[ip]
-		if !found || time.Since(lastUse) > 30*24*time.Hour {
-			delete(h.AuthorizedIPs, ip)
-		}
 	}
 
 	// Alias to avoid recursion during marshaling
@@ -489,6 +478,23 @@ func (h *LoginHistory) MarshalJSON() ([]byte, error) {
 
 		// Rebuild the cache
 		h.rebuildCache()
+
+		// Clear authorized IPs that haven't been used in over 30 days
+		for ip := range h.AuthorizedIPs {
+			// Check if the IP is still in use
+			lastUse, found := h.ClientIPs[ip]
+			if !found || time.Since(lastUse) > 30*24*time.Hour {
+				delete(h.AuthorizedIPs, ip)
+			}
+		}
+
+		for ip, e := range h.PendingAuthorizations {
+			if net.ParseIP(ip) == nil {
+				delete(h.PendingAuthorizations, ip)
+			} else if time.Since(e.CreatedAt) > 10*time.Minute {
+				delete(h.PendingAuthorizations, ip)
+			}
+		}
 
 		bytes, err = json.Marshal(aux)
 		if err != nil {
