@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"slices"
+
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 )
@@ -405,7 +407,7 @@ func DisplayNameCacheRegexSearch(ctx context.Context, nk runtime.NakamaModule, p
 			if sorted[i].lastUsed.IsZero() {
 				matches[sorted[i].userID] = sorted[i].names
 			}
-			sorted = append(sorted[:i], sorted[i+1:]...)
+			sorted = slices.Delete(sorted, i, i+1)
 			i--
 		}
 

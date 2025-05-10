@@ -638,7 +638,6 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	}
 
 	// Set the in-game display name to the current display name for each group
-
 	for groupID, gg := range params.guildGroups {
 		displayName, _ := params.displayNames.LatestGroup(groupID)
 		if displayName == "" {
@@ -677,24 +676,34 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 				updated = true
 			}
 			if slices.Contains(settings.ExcludedDivisions, "green") {
-				// Remove the "green" division from the excluded divisions.
-				settings.ExcludedDivisions = slices.Delete(settings.ExcludedDivisions, 0, 1)
 				updated = true
+				// Remove the "green" division from the excluded divisions.
+				for i := 0; i < len(settings.ExcludedDivisions); i++ {
+					if settings.ExcludedDivisions[i] == "green" {
+						settings.ExcludedDivisions = slices.Delete(settings.ExcludedDivisions, i, i+1)
+						i--
+					}
+				}
+
 			}
 
 		} else {
-			for i := range settings.Divisions {
+			if slices.Contains(settings.Divisions, "green") {
 				// Remove the "green" division from the divisions.
-				if settings.Divisions[i] == "green" {
-					settings.Divisions = slices.Delete(settings.Divisions, i, i+1)
-					updated = true
+				updated = true
+				for i := 0; i < len(settings.Divisions); i++ {
+					// Remove the "green" division from the divisions.
+					if settings.Divisions[i] == "green" {
+						settings.Divisions = slices.Delete(settings.Divisions, i, i+1)
+						i--
+					}
 				}
 			}
-
 			if !slices.Contains(settings.ExcludedDivisions, "green") {
+				updated = true
 				// Add the "green" division to the excluded divisions.
 				settings.ExcludedDivisions = append(settings.ExcludedDivisions, "green")
-				updated = true
+
 			}
 		}
 
