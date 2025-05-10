@@ -37,7 +37,7 @@ func SendEvent(ctx context.Context, nk runtime.NakamaModule, e Event) error {
 		return fmt.Errorf("failed to marshal login event payload: %v", err)
 	}
 	nk.Event(ctx, &api.Event{
-		Name: EventTypeUserAuthenticated,
+		Name: fmt.Sprintf("%T", e),
 		Properties: map[string]string{
 			"payload": string(payloadBytes),
 		},
@@ -135,34 +135,25 @@ func (h *EventDispatcher) eventFn(ctx context.Context, logger runtime.Logger, ev
 
 func (h *EventDispatcher) unmarshalEvent(event *api.Event) (Event, error) {
 
-	type eventEvelope struct {
-		Name string `json:"name"`
+	var e Event
+	switch event.Name {
+	case fmt.Sprintf("%T", &EventUserAuthenticated{}):
+		e = &EventUserAuthenticated{}
+	default:
+		return nil, nil // Unknown event type
 	}
-
-	e := &eventEvelope{}
 	if err := json.Unmarshal([]byte(event.Properties["payload"]), e); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal login event payload: %v", err)
 	}
-	if e.Name == "" {
-		return nil, fmt.Errorf("event type is empty")
-	}
+	return e, nil
 
-	switch event.Name {
-	case EventTypeUserAuthenticated:
-		e := &EventUserAuthenticated{}
-		if err := json.Unmarshal([]byte(event.Properties["payload"]), e); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal login event payload: %v", err)
-		}
-		return e, nil
-	}
-	return nil, fmt.Errorf("unknown event type: %s", event.Name)
 }
 
 func (h *EventDispatcher) processEvent(ctx context.Context, logger runtime.Logger, evt *api.Event) {
 
 	if e, err := h.unmarshalEvent(evt); err != nil {
-		logger.Error("failed to unmarshal event: %v", err)
-	} else {
+		logger.Warn("failed to unmarshal event: %v", err)
+	} else if e != nil {
 		if err := e.Process(ctx, logger, h); err != nil {
 			logger.Error("failed to process event: %v", err)
 		}
