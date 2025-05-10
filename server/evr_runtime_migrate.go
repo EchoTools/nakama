@@ -25,7 +25,7 @@ func MigrateSystem(ctx context.Context, logger runtime.Logger, db *sql.DB, nk ru
 		//&MigrationDisabledAccountsToSuspensions{},
 		//&MigrationEnforcementJournals{},
 		//&MigrationLeaderboardPrune{},
-		MigrationSuspensions{},
+		//MigrationSuspensions{},
 	}
 
 	allUserMigrations := []UserMigrater{
