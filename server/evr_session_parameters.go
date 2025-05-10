@@ -42,7 +42,7 @@ type SessionParameters struct {
 
 	profile                 *EVRProfile                                  // The account
 	matchmakingSettings     *MatchmakingSettings                         // The matchmaking settings
-	ignHistory              *DisplayNameHistory                          // The display name history
+	displayNameHistory      *DisplayNameHistory                          // The display name history
 	guildGroups             map[string]*GuildGroup                       // map[string]*GuildGroup
 	earlyQuitConfig         *atomic.Pointer[EarlyQuitConfig]             // The early quit config
 	isGoldNameTag           *atomic.Bool                                 // If this user should have a gold name tag
