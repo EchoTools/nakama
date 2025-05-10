@@ -16,8 +16,6 @@ import (
 
 var _ = Event(&EventUserAuthenticated{})
 
-const EventTypeUserAuthenticated = "user_authenticated"
-
 type EventUserAuthenticated struct {
 	UserID                   string            `json:"user_id"`
 	XPID                     evr.EvrId         `json:"xpid"`

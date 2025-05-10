@@ -19,6 +19,7 @@ import (
 
 	anyascii "github.com/anyascii/go"
 	"github.com/bwmarrin/discordgo"
+	"github.com/echotools/vrmlgo/v5"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
@@ -528,6 +529,31 @@ var (
 							Name:        "badges",
 							Description: "comma seperated list of badges (i.e p,1,2,5c,6f)",
 							Required:    true,
+						},
+					},
+				},
+				{
+					Name:        "link-player",
+					Description: "manually link a vrml player page to a player",
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Options: []*discordgo.ApplicationCommandOption{
+						{
+							Type:        discordgo.ApplicationCommandOptionUser,
+							Name:        "user",
+							Description: "target user",
+							Required:    true,
+						},
+						{
+							Type:        discordgo.ApplicationCommandOptionString,
+							Name:        "player-id",
+							Description: "e.g. 4rPCIjBhKhGpG4uDnfHlfg2",
+							Required:    true,
+						},
+						{
+							Type:        discordgo.ApplicationCommandOptionBoolean,
+							Name:        "force",
+							Description: "force the link even if the discord ID doesn't match",
+							Required:    false,
 						},
 					},
 				},
@@ -1679,15 +1705,110 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 				// Send a message to the channel
 				channel := ServiceSettings().VRMLEntitlementNotifyChannelID
-				_, err = s.ChannelMessageSend(channel, fmt.Sprintf("%s assigned VRML cosmetics `%s` to user `%s`", user.Mention(), badgeCodestr, target.Username))
-				if err != nil {
-					logger.WithFields(map[string]interface{}{
-						"error": err,
-					}).Error("Failed to send badge channel update message")
+				if channel != "" {
+					_, err = s.ChannelMessageSend(channel, fmt.Sprintf("%s assigned VRML cosmetics `%s` to user `%s`", user.Mention(), badgeCodestr, target.Username))
+					if err != nil {
+						logger.WithFields(map[string]interface{}{
+							"error": err,
+						}).Error("Failed to send badge channel update message")
+					}
 				}
 				simpleInteractionResponse(s, i, fmt.Sprintf("Assigned VRML cosmetics `%s` to user `%s`", badgeCodestr, target.Username))
-			}
+			case "link-player":
+				// Link the player page directly
+				options = options[0].Options
+				if len(options) == 0 {
+					return errors.New("no options provided")
+				}
+				var (
+					target    *discordgo.User
+					playerID  string
+					forceLink bool
+				)
+				for _, option := range options {
+					switch option.Name {
+					case "user":
+						target = option.UserValue(s)
+					case "player-id":
+						playerID = option.StringValue()
+					case "force":
+						forceLink = option.BoolValue()
+					}
+				}
 
+				if target == nil {
+					return status.Error(codes.InvalidArgument, "you must specify a user")
+				}
+				if playerID == "" {
+					return status.Error(codes.InvalidArgument, "you must specify a player ID")
+				}
+
+				targetUserID := d.cache.DiscordIDToUserID(target.ID)
+				if targetUserID == "" {
+					return status.Error(codes.NotFound, "target user not found")
+				}
+				vg := vrmlgo.New("")
+
+				vrmlPlayer, err := vg.Player(playerID)
+				if err != nil {
+					return fmt.Errorf("failed to get player: %w", err)
+				} else if vrmlPlayer == nil {
+					return fmt.Errorf("failed to get player: %w", err)
+				}
+				vrmlUser := vrmlPlayer.User
+				if vrmlUser.UserID == "" {
+					return fmt.Errorf("failed to get player's user")
+				}
+				playerURL := "https://vrmasterleague.com/EchoArena/Player/" + playerID
+
+				vrmlDiscordID := strconv.FormatUint(vrmlUser.DiscordID, 10)
+				if vrmlDiscordID != target.ID && !forceLink {
+					return fmt.Errorf("VRML player [%s](%s) is not linked to discord user %s", vrmlUser.UserName, playerURL, target.Mention())
+				}
+				if err := LinkVRMLAccount(ctx, db, nk, targetUserID, vrmlUser.UserID, ""); err != nil {
+					if err, ok := err.(*AccountAlreadyLinkedError); ok {
+						ownerID := d.cache.UserIDToDiscordID(err.OwnerUserID)
+						return fmt.Errorf("VRML player [%s](%s) is already linked to <@%s>", vrmlUser.UserName, playerURL, ownerID)
+					}
+				}
+
+				logger.WithFields(map[string]any{
+					"discord_id":      user.ID,
+					"username":        user.Username,
+					"target_id":       target.ID,
+					"target_username": target.Username,
+					"vrml_player_id":  playerID,
+					"vrml_user_id":    vrmlUser.UserID,
+					"vrml_username":   vrmlUser.UserName,
+				}).Debug("Manually linked VRML account")
+
+				// Send the response
+				if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+					Type: discordgo.InteractionResponseChannelMessageWithSource,
+					Data: &discordgo.InteractionResponseData{
+						Flags:   discordgo.MessageFlagsEphemeral,
+						Content: fmt.Sprintf("Linked VRML player [%s](%s) to discord user %s", vrmlUser.UserName, playerURL, target.Mention()),
+					},
+				}); err != nil {
+					return fmt.Errorf("failed to send interaction response: %w", err)
+				}
+
+				// Send a message to the channel
+				channel := ServiceSettings().VRMLEntitlementNotifyChannelID
+				if channel != "" {
+					content := fmt.Sprintf("%s manually linked %s to VRML player [%s](%s)", user.Mention(), target.Mention(), vrmlUser.UserName, playerURL)
+					if forceLink {
+						content += " (forced)"
+					}
+					_, err = s.ChannelMessageSend(channel, content)
+					if err != nil {
+						logger.WithFields(map[string]any{
+							"error": err,
+						}).Error("Failed to send badge channel update message")
+					}
+				}
+
+			}
 			return nil
 		},
 		"whoami": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
@@ -1708,7 +1829,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			includeVRMLHistory := true
 			includePastDisplayNames := true
 			err := d.handleProfileRequest(ctx, logger, nk, s, i, user, true, true, false, false, includeSuspensions, includePastSuspensions, includeCurrentMatches, includeVRMLHistory, includePastDisplayNames)
-			logger.WithFields(map[string]interface{}{
+			logger.WithFields(map[string]any{
 				"discord_id":       user.ID,
 				"discord_username": user.Username,
 				"error":            err,

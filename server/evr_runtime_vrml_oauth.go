@@ -8,7 +8,6 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,17 +15,7 @@ import (
 
 	"github.com/echotools/vrmlgo/v5"
 	"github.com/gofrs/uuid/v5"
-	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
-)
-
-const (
-	StorageCollectionSocial = "Social"
-	StorageKeyVRMLUser      = "VRMLUser"
-)
-
-var (
-	ErrDiscordIDMismatch = errors.New("discord ID mismatch")
 )
 
 var oauthFlows = &MapOf[string, *VRMLOAuth]{}
@@ -72,7 +61,7 @@ func NewVRMLOAuthFlow(clientID, redirectURL string, timeout time.Duration) (*VRM
 }
 
 // RedirectRPC is called by the client after they have authenticated with VRML
-func (v *VRMLVerifier) RedirectRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+func (v *VRMLScanQueue) RedirectRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 	envVars, _ := ctx.Value(runtime.RUNTIME_CTX_ENV).(map[string]string)
 
 	if envVars == nil || envVars["VRML_OAUTH_CLIENT_ID"] == "" || envVars["VRML_OAUTH_REDIRECT_URL"] == "" {
@@ -144,45 +133,4 @@ func (v *VRMLVerifier) RedirectRPC(ctx context.Context, logger runtime.Logger, d
 		}
 	}
 	return "VRML Account Linked, you can close this window", nil
-}
-
-// VerifyOwnership verifies that the user owns the VRML account by checking the Discord ID
-func LinkVRMLAccount(ctx context.Context, nk runtime.NakamaModule, userID string, vrmlUser *vrmlgo.User) error {
-
-	// Set the device ID for the account
-	if err := nk.LinkDevice(ctx, userID, DeviceIDPrefixVRML+vrmlUser.ID); err != nil {
-		return fmt.Errorf("failed to link device ID for VRML account: %w", err)
-	}
-
-	data, err := json.Marshal(vrmlUser)
-	if err != nil {
-		return fmt.Errorf("failed to marshal VRML user data: %w", err)
-	}
-
-	// Store the VRML user data in the database (effectively linking the account)
-	if _, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{
-		{
-			Collection:      StorageCollectionSocial,
-			Key:             StorageKeyVRMLUser,
-			UserID:          userID,
-			Value:           string(data),
-			PermissionRead:  0,
-			PermissionWrite: 0,
-		},
-	}); err != nil {
-		return fmt.Errorf("failed to write VRML user data: %w", err)
-	}
-
-	// Queue the event to count matches and assign entitlements
-	if err := nk.Event(ctx, &api.Event{
-		Name: EventVRMLAccountLinked,
-		Properties: map[string]string{
-			"user_id": userID,
-			"token":   "",
-		},
-		External: true,
-	}); err != nil {
-		return fmt.Errorf("failed to queue VRML account linked event: %w", err)
-	}
-	return nil
 }
