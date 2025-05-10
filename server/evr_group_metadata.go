@@ -33,7 +33,9 @@ type GroupMetadata struct {
 	NegatedEnforcerIDs                   []string          `json:"negated_enforcer_ids"`                     // Enforcers that are not allowed to enforce this group
 	RejectPlayersWithSuspendedAlternates bool              `json:"reject_players_with_suspended_alternates"` // Reject players with suspended alternate accounts
 	SuspensionInheritanceGroupIDs        []string          `json:"suspension_inheritence_group_ids"`         // Groups that this group inherits suspensions from
-	ForceDisplayNameToMatchIGN           bool              `json:"force_display_name_to_match_ign"`          // Force the display name to match the IGN
+	DisplayNameForceNickToIGN            bool              `json:"force_nick_to_ign"`                        // Force nicknames to be the same as the in-game name
+	DisplayNameSetNickToIGNAtLogin       bool              `json:"set_nick_to_ign_at_login"`                 // Set nicknames to be the same as the in-game name at login
+	DisplayNameInUseNotifications        bool              `json:"display_name_in_use_notifications"`        // Display name in use notification on nick change
 }
 
 func NewGuildGroupMetadata(guildID string) *GroupMetadata {

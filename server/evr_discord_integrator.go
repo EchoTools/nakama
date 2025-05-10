@@ -714,40 +714,48 @@ func (d *DiscordIntegrator) handleMemberUpdate(logger *zap.Logger, s *discordgo.
 
 	return nil
 }
-func (d *DiscordIntegrator) syncDisplayName(ctx context.Context, logger *zap.Logger, profile *EVRProfile, groupID, displayName string) error {
 
-	userIDs, err := DisplayNameOwnerSearch(ctx, d.nk, displayName)
+func (d *DiscordIntegrator) syncDisplayName(ctx context.Context, logger *zap.Logger, profile *EVRProfile, groupID, displayName string) error {
+	userIDs, err := DisplayNameCheckOwner(ctx, d.nk, displayName)
 	if err != nil {
 		// If it errors, set the display name to their username
-		logger.Error("Error deconflicting display name", zap.String("display_name", displayName), zap.Error(err))
+		logger.Error("Error checking owner of display name.", zap.String("display_name", displayName), zap.Error(err))
 		return err
 	}
-
-	if len(userIDs) > 1 {
-		logger.Warn("Display name in use by multiple users", zap.String("display_name", displayName), zap.Strings("user_ids", userIDs))
-	}
-
-	// the display name is already set to this user, so do nothing
-	if len(userIDs) == 0 || userIDs[0] == profile.ID() {
-		// Update the display name history. do not update the account because it will be done when the player logs in to the game.
-		if err := DisplayNameHistoryUpdate(ctx, d.nk, profile.ID(), groupID, displayName, profile.Username()); err != nil {
-			return fmt.Errorf("error adding display name history entry: %w", err)
-		}
+	if len(userIDs) == 0 {
+		// Do not assign display names to players until they login.
 		return nil
 	}
-
-	ownerID := userIDs[0]
-	logger.Warn("Display name in use", zap.String("owner_id", ownerID), zap.String("display_name", displayName), zap.String("caller_user_id", profile.ID()))
-
-	otherDiscordID := d.UserIDToDiscordID(ownerID)
-	message := fmt.Sprintf("The display name `%s` is already in use/reserved by <@%s>. Your in-game name will be your username: `%s`", EscapeDiscordMarkdown(displayName), otherDiscordID, EscapeDiscordMarkdown(profile.Username()))
-	if _, err := SendUserMessage(ctx, d.dg, profile.DiscordID(), message); err != nil {
-		return fmt.Errorf("error sending message: %w", err)
+	gg := d.guildGroupRegistry.Get(groupID)
+	if gg == nil {
+		return fmt.Errorf("guild group not found")
 	}
 
+	if gg.DisplayNameInUseNotifications || gg.DisplayNameForceNickToIGN {
+		// Notify the user that the display name they have chosen is in use.
+		ownerID := userIDs[0]
+		logger.Warn("Display name in use", zap.String("owner_id", ownerID), zap.String("display_name", displayName), zap.String("caller_user_id", profile.ID()))
+		if err := d.SendDisplayNameInUseNotification(ctx, profile.DiscordID(), d.UserIDToDiscordID(ownerID), displayName, profile.Username()); err != nil {
+			logger.Debug("Error sending display name in use notification", zap.String("owner_id", ownerID), zap.String("display_name", displayName), zap.Error(err))
+		}
+	}
+	if gg.DisplayNameForceNickToIGN {
+		// Force the display name to be the in-game name.
+		if err := d.dg.GuildMemberNickname(groupID, profile.DiscordID(), profile.Username()); err != nil {
+			return fmt.Errorf("error setting nickname: %w", err)
+		}
+	}
 	return nil
 }
 
+func (d *DiscordIntegrator) SendDisplayNameInUseNotification(ctx context.Context, discordID, ownerDiscordID, displayName string, fallbackDisplayName string) error {
+	// Only notify the user if the force display name to match IGN is set.
+	message := fmt.Sprintf("The display name `%s` is already in use/reserved by <@%s>. Your in-game name will be your username: `%s`", displayName, ownerDiscordID, fallbackDisplayName)
+	if _, err := SendUserMessage(ctx, d.dg, discordID, message); err != nil {
+		return fmt.Errorf("error sending message: %w", err)
+	}
+	return nil
+}
 func (d *DiscordIntegrator) updateMemberRole(member *discordgo.Member, roleID string, hasRole bool) error {
 	if roleID == "" || member == nil {
 		return nil
