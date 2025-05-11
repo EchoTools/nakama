@@ -84,7 +84,7 @@ type RankPercentileSettings struct {
 
 type ServerRatings struct {
 	ByExternalIP       map[string]float64 `json:"by_external_ip"`
-	ByOperatorUsername map[string]float64 `json:"by_operator_id"`
+	ByOperatorUsername map[string]float64 `json:"by_operator_username"`
 }
 
 func (g *ServiceSettingsData) String() string {
