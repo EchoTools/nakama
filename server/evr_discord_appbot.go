@@ -2760,14 +2760,14 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			case "manage":
 				outfitName := options[0].Options[1].StringValue()
 				if len(outfitName) > 72 {
-					return errors.New("Invalid profile name. It must be less than 72 characters long.")
+					return errors.New("invalid profile name. It must be less than 72 characters long")
 				}
 
 				switch options[0].Options[0].StringValue() {
 				case "save":
 					// limit set arbitrarily
 					if len(outfits) >= 25 {
-						return fmt.Errorf("Cannot save more than 25 outfits.")
+						return fmt.Errorf("cannot save more than 25 outfits")
 
 					}
 
@@ -2775,7 +2775,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 					data, err := json.Marshal(outfits)
 					if err != nil {
-						return fmt.Errorf("Failed to marshal outfits: %w", err)
+						return fmt.Errorf("failed to marshal outfits: %w", err)
 					}
 					if _, err := d.nk.StorageWrite(ctx, []*runtime.StorageWrite{
 						{
@@ -2785,7 +2785,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 							Value:      string(data),
 						},
 					}); err != nil {
-						return fmt.Errorf("Failed to save outfits: %w", err)
+						return fmt.Errorf("failed to save outfits: %w", err)
 					}
 
 					return simpleInteractionResponse(s, i, fmt.Sprintf("Saved current outfit as `%s`", outfitName))
