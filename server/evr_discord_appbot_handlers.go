@@ -371,7 +371,7 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 		StartTime: startTime.UTC().Add(10 * time.Minute),
 		SpawnedBy: userID,
 	}
-	queryAddon := ServiceSettings().Matchmaking.QueryAddons.Create
+	queryAddon := ServiceSettings().Matchmaking.QueryAddons.Allocate
 	label, err := LobbyGameServerAllocate(ctx, logger, d.nk, allocatorGroupIDs, latestRTTs, settings, []string{regionCode}, false, true, queryAddon)
 	if err != nil {
 		if strings.Contains("bad request:", err.Error()) {

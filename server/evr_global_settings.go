@@ -69,6 +69,7 @@ type QueryAddons struct {
 	Backfill     string `json:"lobby_backfill"`
 	LobbyBuilder string `json:"matchmaker_server_allocation"`
 	Create       string `json:"lobby_create"`
+	Allocate     string `json:"allocate"`
 	Matchmaking  string `json:"matchmaking_ticket"`
 }
 
