@@ -159,7 +159,7 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 
 	// Update the status with the number of matches and players
 	go func() {
-		updateTicker := time.NewTicker(1 * time.Minute)
+		updateTicker := time.NewTicker(15 * time.Second)
 		defer updateTicker.Stop()
 		for {
 			select {
