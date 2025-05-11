@@ -10,6 +10,8 @@ import (
 
 	"slices"
 
+	"maps"
+
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"go.uber.org/zap"
@@ -53,7 +55,7 @@ func (DisplayNameHistory) StorageIndexes() []StorageIndexMeta {
 		Fields:         []string{"active", "cache", "reserves", "username", "igns"},
 		SortableFields: nil,
 		MaxEntries:     1000000,
-		IndexOnly:      true,
+		IndexOnly:      false,
 	}}
 }
 
@@ -286,11 +288,11 @@ func DisplayNameCacheRegexSearch(ctx context.Context, nk runtime.NakamaModule, p
 		}
 
 		for _, obj := range result.Objects {
-			var history DisplayNameHistory
-			if err := json.Unmarshal([]byte(obj.Value), &history); err != nil {
+			history := &DisplayNameHistory{}
+			if err := json.Unmarshal([]byte(obj.Value), history); err != nil {
 				return nil, fmt.Errorf("error unmarshalling display name history: %w", err)
 			}
-			histories[obj.UserId] = &history
+			histories[obj.UserId] = history
 		}
 
 		if cursor == "" {
@@ -309,9 +311,7 @@ func DisplayNameCacheRegexSearch(ctx context.Context, nk runtime.NakamaModule, p
 		for groupID, e := range history.Histories {
 			matches[userID][groupID] = make(map[string]time.Time)
 
-			for name, lastUsed := range e {
-				matches[userID][groupID][name] = lastUsed
-			}
+			maps.Copy(matches[userID][groupID], e)
 		}
 
 		// Add exact matches for usernames
