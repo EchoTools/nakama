@@ -671,9 +671,9 @@ func sortLabelIndexes(labels []labelIndex) {
 		}
 
 		// Sort by whether the server high latency
-		if a.IsHighLatency && !b.IsHighLatency {
+		if !a.IsHighLatency && b.IsHighLatency {
 			return -1
-		} else if !a.IsHighLatency && b.IsHighLatency {
+		} else if a.IsHighLatency && !b.IsHighLatency {
 			return 1
 		}
 
@@ -696,7 +696,6 @@ func sortLabelIndexes(labels []labelIndex) {
 
 		// If there is a large difference in RTT, sort by RTT
 		if math.Abs(float64(a.RTT-b.RTT)) > 50 {
-
 			if a.RTT < b.RTT {
 				return -1
 			}
