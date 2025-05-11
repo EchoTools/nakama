@@ -1761,7 +1761,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 				playerURL := "https://vrmasterleague.com/EchoArena/Player/" + playerID
 
-				vrmlDiscordID := strconv.FormatUint(vrmlUser.DiscordID, 10)
+				vrmlDiscordID := strconv.FormatUint(uint64(vrmlUser.DiscordID), 10)
 				if vrmlDiscordID != target.ID && !forceLink {
 					return fmt.Errorf("VRML player [%s](%s) is not linked to discord user %s", vrmlUser.UserName, playerURL, target.Mention())
 				}
