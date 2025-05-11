@@ -188,22 +188,26 @@ func TestSortLabelIndexes(t *testing.T) {
 			name: "Sort by rtt",
 			labels: []labelIndex{
 				{RTT: 100},
-				{RTT: 50},
+				{RTT: 30},
 			},
 			expected: []labelIndex{
-				{RTT: 50},
+				{RTT: 30},
 				{RTT: 100},
 			},
 		},
 		{
 			name: "Sort by rating",
 			labels: []labelIndex{
-				{Rating: 100},
 				{Rating: 50},
+				{Rating: 100},
+				{Rating: 25},
+				{Rating: 75},
 			},
 			expected: []labelIndex{
 				{Rating: 100},
+				{Rating: 75},
 				{Rating: 50},
+				{Rating: 25},
 			},
 		},
 		{
@@ -215,6 +219,23 @@ func TestSortLabelIndexes(t *testing.T) {
 			expected: []labelIndex{
 				{IsPriorityForMode: true},
 				{IsPriorityForMode: false},
+			},
+		},
+		{
+			name: "Sort by isHighLatency",
+			labels: []labelIndex{
+				{IsHighLatency: false},
+				{IsHighLatency: true},
+				{IsHighLatency: false},
+				{IsHighLatency: true},
+				{IsHighLatency: false},
+			},
+			expected: []labelIndex{
+				{IsHighLatency: false},
+				{IsHighLatency: false},
+				{IsHighLatency: false},
+				{IsHighLatency: true},
+				{IsHighLatency: true},
 			},
 		},
 		{
