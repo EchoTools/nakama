@@ -255,7 +255,11 @@ func (h *LoginHistory) AuthorizeIP(ip string) bool {
 	if h.AuthorizedIPs == nil {
 		h.AuthorizedIPs = make(map[string]time.Time)
 	}
-	h.RemovePendingAuthorizationIP(ip)
+
+	entry := h.RemovePendingAuthorizationIP(ip)
+	if entry != nil {
+		h.update(entry, true)
+	}
 	_, isExisting := h.AuthorizedIPs[ip]
 	h.AuthorizedIPs[ip] = time.Now().UTC()
 
@@ -294,8 +298,15 @@ func (h *LoginHistory) GetPendingAuthorizationIP(ip string) *LoginHistoryEntry {
 	return h.PendingAuthorizations[ip]
 }
 
-func (h *LoginHistory) RemovePendingAuthorizationIP(ip string) {
-	delete(h.PendingAuthorizations, ip)
+func (h *LoginHistory) RemovePendingAuthorizationIP(ip string) *LoginHistoryEntry {
+	if h.PendingAuthorizations == nil {
+		return nil
+	}
+	if e, found := h.PendingAuthorizations[ip]; found {
+		delete(h.PendingAuthorizations, ip)
+		return e
+	}
+	return nil
 }
 
 func (h *LoginHistory) NotifyGroup(groupID string, threshold time.Time) bool {
