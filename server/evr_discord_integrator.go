@@ -25,8 +25,9 @@ var (
 var mentionRegex = regexp.MustCompile(`<@([-0-9A-Fa-f]+?)>`)
 
 type QueueEntry struct {
-	DiscordID string
-	GuildID   string
+	DiscordID    string
+	GuildID      string
+	DoFullUpdate bool
 }
 
 // Responsible for caching and synchronizing data with Discord.
@@ -128,7 +129,7 @@ func (c *DiscordIntegrator) Start() {
 					zap.String("uid", c.DiscordIDToUserID(entry.DiscordID)),
 				)
 
-				if err := c.syncMember(c.ctx, logger, entry.DiscordID, entry.GuildID); err != nil {
+				if err := c.syncMember(c.ctx, logger, entry.DiscordID, entry.GuildID, entry.DoFullUpdate); err != nil {
 					logger.Warn("Error syncing guild group member", zap.Error(err))
 				}
 				logger.Debug("Synced guild group member")
@@ -144,7 +145,7 @@ func (c *DiscordIntegrator) Start() {
 							zap.String("uid", c.DiscordIDToUserID(entry.DiscordID)),
 						)
 						processed++
-						if err := c.syncMember(c.ctx, logger, entry.DiscordID, entry.GuildID); err != nil {
+						if err := c.syncMember(c.ctx, logger, entry.DiscordID, entry.GuildID, entry.DoFullUpdate); err != nil {
 							logger.Warn("Error syncing guild group member", zap.Error(err))
 							return true
 						}
@@ -203,7 +204,7 @@ func (c *DiscordIntegrator) Start() {
 }
 
 // Queue a user for caching/updating.
-func (c *DiscordIntegrator) QueueSyncMember(guildID, discordID string) {
+func (c *DiscordIntegrator) QueueSyncMember(guildID, discordID string, full bool) {
 	entry := QueueEntry{GuildID: guildID, DiscordID: discordID}
 	_, exists := c.queueCooldowns.LoadOrStore(entry, time.Now().Add(time.Second*30))
 	if exists {
@@ -212,7 +213,7 @@ func (c *DiscordIntegrator) QueueSyncMember(guildID, discordID string) {
 	}
 
 	select {
-	case c.queueCh <- QueueEntry{GuildID: guildID, DiscordID: discordID}:
+	case c.queueCh <- QueueEntry{GuildID: guildID, DiscordID: discordID, DoFullUpdate: full}:
 		// Success
 	default:
 		// Queue is full
@@ -290,7 +291,7 @@ func (c *DiscordIntegrator) GroupIDToGuildID(groupID string) string {
 }
 
 // Sync's a user to all of their guilds.
-func (c *DiscordIntegrator) syncMember(ctx context.Context, logger *zap.Logger, discordID, guildID string) error {
+func (c *DiscordIntegrator) syncMember(ctx context.Context, logger *zap.Logger, discordID, guildID string, full bool) error {
 	if guildID == "" {
 		return fmt.Errorf("guild not specified")
 	}
@@ -312,6 +313,12 @@ func (c *DiscordIntegrator) syncMember(ctx context.Context, logger *zap.Logger, 
 	account, err := c.nk.AccountGetId(ctx, c.DiscordIDToUserID(discordID))
 	if err != nil {
 		return fmt.Errorf("error getting account: %w", err)
+	}
+
+	// Store a copy of the member in the cache.
+	obj := NewGuildMemberCacheData(member)
+	if err := StorageWrite(ctx, c.nk, account.User.Id, obj); err != nil {
+		return fmt.Errorf("error writing guild member cache: %w", err)
 	}
 
 	evrAccount, err := BuildEVRProfileFromAccount(account)
@@ -365,9 +372,9 @@ func (c *DiscordIntegrator) syncMember(ctx context.Context, logger *zap.Logger, 
 		return fmt.Errorf("member not found")
 	}
 
-	// Update the display name history. do not update the account because it will be done when the player logs in to the game.
-	if displayName := InGameName(member); displayName != evrAccount.GetGroupDisplayNameOrDefault(groupID) {
-		if err := c.syncDisplayName(ctx, logger, evrAccount, groupID, displayName); err != nil {
+	// Update the display name
+	if full || InGameName(member) != evrAccount.GetGroupDisplayName(groupID) {
+		if err := c.syncDisplayName(ctx, logger, account.User.Id, discordID, member.User.Username, groupID, InGameName(member)); err != nil {
 			return fmt.Errorf("error syncing display name: %w", err)
 		}
 	}
@@ -627,6 +634,12 @@ func (d *DiscordIntegrator) handleMemberUpdate(logger *zap.Logger, s *discordgo.
 		return nil
 	}
 
+	// Store a copy of the member in the cache.
+	obj := NewGuildMemberCacheData(e.Member)
+	if err := StorageWrite(ctx, d.nk, userID, obj); err != nil {
+		return fmt.Errorf("error writing guild member cache: %w", err)
+	}
+
 	// Ignore unknown guilds
 	groupID := d.GuildIDToGroupID(e.GuildID)
 	if groupID == "" {
@@ -697,9 +710,8 @@ func (d *DiscordIntegrator) handleMemberUpdate(logger *zap.Logger, s *discordgo.
 			username = e.User.Username
 		}
 
-		if displayName := InGameName(e.Member); displayName != InGameName(e.BeforeUpdate) {
-			accountUpdate = true
-			if err := d.syncDisplayName(ctx, logger, evrAccount, groupID, displayName); err != nil {
+		if InGameName(e.Member) != InGameName(e.BeforeUpdate) {
+			if err := d.syncDisplayName(ctx, logger, evrAccount.UserID(), evrAccount.DiscordID(), evrAccount.Username(), groupID, InGameName(e.Member)); err != nil {
 				return fmt.Errorf("error syncing display name: %w", err)
 			}
 		}
@@ -710,19 +722,20 @@ func (d *DiscordIntegrator) handleMemberUpdate(logger *zap.Logger, s *discordgo.
 			return fmt.Errorf("failed to update account: %w", err)
 		}
 	}
-	logger.Info("Member Updated", zap.Any("member", e))
+
+	logger.Info("Member Updated", zap.Any("before_update", e.BeforeUpdate), zap.Any("member", e.Member))
 
 	return nil
 }
 
-func (d *DiscordIntegrator) syncDisplayName(ctx context.Context, logger *zap.Logger, profile *EVRProfile, groupID, displayName string) error {
+func (d *DiscordIntegrator) syncDisplayName(ctx context.Context, logger *zap.Logger, userID, discordID, username, groupID, displayName string) error {
 	ownerMap, err := DisplayNameOwnerSearch(ctx, d.nk, []string{displayName})
 	if err != nil {
 		// If it errors, set the display name to their username
 		logger.Error("Error checking owner of display name.", zap.String("display_name", displayName), zap.Error(err))
 		return err
 	}
-	if len(ownerMap) > 0 && !slices.Contains(ownerMap[displayName], profile.ID()) {
+	if len(ownerMap) > 0 && !slices.Contains(ownerMap[displayName], userID) {
 		// The display name is owned by some one else.
 		gg := d.guildGroupRegistry.Get(groupID)
 		if gg == nil {
@@ -731,20 +744,20 @@ func (d *DiscordIntegrator) syncDisplayName(ctx context.Context, logger *zap.Log
 		if gg.DisplayNameInUseNotifications {
 			// Notify the user that the display name they have chosen is in use.
 			ownerID := ownerMap[displayName][0]
-			logger.Warn("Display name in use", zap.String("owner_id", ownerID), zap.String("display_name", displayName), zap.String("caller_user_id", profile.ID()))
-			if err := d.SendDisplayNameInUseNotification(ctx, profile.DiscordID(), d.UserIDToDiscordID(ownerID), displayName, profile.Username()); err != nil {
+			logger.Warn("Display name in use", zap.String("owner_id", ownerID), zap.String("display_name", displayName), zap.String("caller_user_id", userID))
+			if err := d.SendDisplayNameInUseNotification(ctx, discordID, d.UserIDToDiscordID(ownerID), displayName, username); err != nil {
 				logger.Debug("Error sending display name in use notification", zap.String("owner_id", ownerID), zap.String("display_name", displayName), zap.Error(err))
 			}
 		}
 		return nil
 	}
 	// This user may use this display name.
-	history, err := DisplayNameHistoryLoad(ctx, d.nk, profile.ID())
+	history, err := DisplayNameHistoryLoad(ctx, d.nk, userID)
 	if err != nil {
 		return fmt.Errorf("error loading display name history: %w", err)
 	}
-	history.Update(groupID, displayName, profile.Username(), false)
-	err = DisplayNameHistoryStore(ctx, d.nk, profile.ID(), history)
+	history.Update(groupID, displayName, username, false)
+	err = DisplayNameHistoryStore(ctx, d.nk, userID, history)
 	if err != nil {
 		return fmt.Errorf("error storing display name history: %w", err)
 	}

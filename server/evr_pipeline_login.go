@@ -564,7 +564,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		// User is not in any groups
 		metricsTags["error"] = "user_not_in_any_groups"
 		guildID := p.discordCache.GroupIDToGuildID(params.profile.ActiveGroupID)
-		p.discordCache.QueueSyncMember(guildID, params.profile.DiscordID())
+		p.discordCache.QueueSyncMember(guildID, params.profile.DiscordID(), true)
 
 		return fmt.Errorf("user is not in any groups, try again in 30 seconds")
 	}

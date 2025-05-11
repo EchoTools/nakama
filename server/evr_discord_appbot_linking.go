@@ -110,7 +110,7 @@ func (d *DiscordAppBot) handleLinkHeadset(ctx context.Context, logger runtime.Lo
 
 	content := "Your headset has been linked. Restart your game."
 
-	d.cache.QueueSyncMember(i.GuildID, user.ID)
+	d.cache.QueueSyncMember(i.GuildID, user.ID, true)
 
 	// Send the response
 	return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -225,7 +225,7 @@ func (d *DiscordAppBot) handleUnlinkHeadset(ctx context.Context, logger runtime.
 	}
 	d.metrics.CustomCounter("unlink_headset", nil, 1)
 	content := "Your headset has been unlinked. Restart your game."
-	d.cache.QueueSyncMember(i.GuildID, user.ID)
+	d.cache.QueueSyncMember(i.GuildID, user.ID, false)
 
 	if err := d.cache.updateLinkStatus(ctx, user.ID); err != nil {
 		return fmt.Errorf("failed to update link status: %w", err)
