@@ -251,6 +251,12 @@ func (a EVRProfile) GetGroupDisplayNameOrDefault(groupID string) string {
 		return ""
 	}
 }
+func (a *EVRProfile) GetGroupDisplayName(groupID string) string {
+	if a.InGameNames == nil {
+		return ""
+	}
+	return a.InGameNames[groupID]
+}
 
 func (a *EVRProfile) SetGroupDisplayName(groupID, displayName string) (updated bool) {
 	if a.InGameNames == nil {

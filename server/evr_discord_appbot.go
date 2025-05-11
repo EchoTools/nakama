@@ -1821,7 +1821,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 			// check for the with-detail boolean option
 			d.cache.Purge(user.ID)
-			d.cache.QueueSyncMember(i.GuildID, user.ID)
+			d.cache.QueueSyncMember(i.GuildID, user.ID, true)
 
 			includeSuspensions := true
 			includePastSuspensions := false
@@ -1912,7 +1912,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return fmt.Errorf("this command must be used from a guild")
 			}
 
-			d.cache.QueueSyncMember(i.GuildID, member.User.ID)
+			d.cache.QueueSyncMember(i.GuildID, member.User.ID, true)
 
 			// Set the metadata
 			md, err := EVRProfileLoad(ctx, nk, userIDStr)
@@ -2036,7 +2036,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			isGuildAuditor := false
 			if gg, ok := callerGuildGroups[groupID]; ok && gg.IsAuditor(callerUserID) {
 				isGuildAuditor = true
-				d.cache.QueueSyncMember(i.GuildID, target.ID)
+				d.cache.QueueSyncMember(i.GuildID, target.ID, true)
 			}
 
 			isGuildEnforcer := false
@@ -2868,7 +2868,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					userID := d.cache.DiscordIDToUserID(user.ID)
 					groupID := d.cache.GuildIDToGroupID(i.GuildID)
 					if userID != "" && groupID != "" {
-						d.cache.QueueSyncMember(i.GuildID, user.ID)
+						d.cache.QueueSyncMember(i.GuildID, user.ID, false)
 					}
 					if err := simpleInteractionResponse(s, i, err.Error()); err != nil {
 						return
