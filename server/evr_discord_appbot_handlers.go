@@ -574,7 +574,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 		}
 
 		if gg.EnforcementNoticeChannelID != "" {
-			evrAccount, err := EVRProfileLoad(ctx, nk, targetUserID)
+			profile, err := EVRProfileLoad(ctx, nk, targetUserID)
 			if err != nil {
 				return fmt.Errorf("failed to load account metadata: %w", err)
 			}
@@ -583,9 +583,9 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 			if len(voids) > 0 {
 				title = "Voided Suspension(s)"
 			} else if len(recordsByGroupID) > 0 {
-				title = "Added Suspension"
+				title = fmt.Sprintf("Suspension: *%s*", Query.Escape(profile.GetGroupDisplayNameOrDefault(groupID)))
 			}
-			targetDN := evrAccount.GetGroupDisplayNameOrDefault(groupID)
+			targetDN := profile.GetGroupDisplayNameOrDefault(groupID)
 			targetDN = EscapeDiscordMarkdown(targetDN)
 			callerDN := caller.DisplayName()
 			if callerDN == "" {
@@ -601,9 +601,12 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 				Fields: []*discordgo.MessageEmbedField{
 					{
 						Name:   "Target User",
-						Value:  fmt.Sprintf("%s (%s)", targetDN, target.Mention()),
+						Value:  fmt.Sprintf("%s (<@!%s>)", targetDN, target.ID),
 						Inline: false,
 					},
+				},
+				Footer: &discordgo.MessageEmbedFooter{
+					Text: fmt.Sprintf("Confidential. Do not share."),
 				},
 			}
 			if len(recordsByGroupID) == 0 {
@@ -638,7 +641,10 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 				field := createSuspensionDetailsEmbedField(gn, records, voids, true, true)
 				embed.Fields = append(embed.Fields, field)
 			}
-			_, err = d.dg.ChannelMessageSendEmbed(gg.EnforcementNoticeChannelID, embed)
+			_, err = d.dg.ChannelMessageSendComplex(gg.EnforcementNoticeChannelID, &discordgo.MessageSend{
+				Embed:           embed,
+				AllowedMentions: &discordgo.MessageAllowedMentions{},
+			})
 			if err != nil {
 				logger.WithFields(map[string]interface{}{
 					"error": err,

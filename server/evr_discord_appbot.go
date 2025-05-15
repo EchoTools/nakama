@@ -3498,6 +3498,9 @@ func (d *DiscordAppBot) LogAuditMessage(ctx context.Context, groupID string, mes
 }
 
 func (d *DiscordAppBot) LogUserErrorMessage(ctx context.Context, groupID string, message string, replaceMentions bool) (*discordgo.Message, error) {
+	if d == nil {
+		return nil, fmt.Errorf("discord session is not initialized")
+	}
 	// replace all <@uuid> mentions with <@discordID>
 	if replaceMentions {
 		message = d.cache.ReplaceMentions(message)

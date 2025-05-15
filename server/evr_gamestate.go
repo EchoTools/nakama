@@ -2,6 +2,8 @@ package server
 
 import (
 	"log"
+
+	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
 type TeamMetadata struct {
@@ -23,7 +25,7 @@ func NewGameState() *GameState {
 	return &GameState{}
 }
 
-func (g *GameState) Update(goals []*MatchGoal) {
+func (g *GameState) Update(goals []*evr.MatchGoal) {
 
 	g.BlueScore = 0
 	g.OrangeScore = 0

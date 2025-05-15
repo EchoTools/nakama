@@ -9,8 +9,9 @@ import (
 	"net"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
+
+	"go.uber.org/atomic"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/go-redis/redis"
@@ -31,7 +32,8 @@ var dg *discordgo.Session
 
 var unrequireMessage = evr.NewSTcpConnectionUnrequireEvent()
 
-var globalMatchmaker = &atomic.Pointer[LocalMatchmaker]{}
+var globalMatchmaker = atomic.NewPointer[LocalMatchmaker](nil)
+var globalAppBot = atomic.NewPointer[DiscordAppBot](nil)
 
 type EvrPipeline struct {
 	sync.RWMutex
@@ -52,10 +54,10 @@ type EvrPipeline struct {
 	nk              *RuntimeGoNakamaModule
 	runtimeLogger   runtime.Logger
 
-	profileCache                 *ProfileCache
-	discordCache                 *DiscordIntegrator
-	appBot                       *DiscordAppBot
-	statisticsQueue              *StatisticsQueue
+	profileCache *ProfileCache
+	discordCache *DiscordIntegrator
+	appBot       *DiscordAppBot
+
 	userRemoteLogJournalRegistry *UserLogJouralRegistry
 	guildGroupRegistry           *GuildGroupRegistry
 	ipInfoCache                  *IPInfoCache
@@ -123,7 +125,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 
 	runtimeLogger := NewRuntimeGoLogger(logger)
 	guildGroupRegistry := NewGuildGroupRegistry(ctx, runtimeLogger, nk, db)
-	statisticsQueue := NewStatisticsQueue(runtimeLogger, nk)
+
 	profileRegistry := NewProfileRegistry(nk, db, runtimeLogger, metrics, sessionRegistry)
 	lobbyBuilder := NewLobbyBuilder(logger, nk, sessionRegistry, matchRegistry, tracker, metrics)
 	matchmaker.OnMatchedEntries(lobbyBuilder.handleMatchedEntries)
@@ -176,7 +178,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 			logger.Error("Failed to create app bot", zap.Error(err))
 
 		}
-
+		globalAppBot.Store(appBot)
 		// Add a once handler to wait for the bot to connect
 		readyCh := make(chan struct{})
 		dg.AddHandlerOnce(func(s *discordgo.Session, r *discordgo.Ready) {
@@ -219,7 +221,6 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		externalIP:   externalIP,
 
 		profileCache:                 profileRegistry,
-		statisticsQueue:              statisticsQueue,
 		userRemoteLogJournalRegistry: userRemoteLogJournalRegistry,
 		guildGroupRegistry:           guildGroupRegistry,
 		ipInfoCache:                  ipInfoCache,

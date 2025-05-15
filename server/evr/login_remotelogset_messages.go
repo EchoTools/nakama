@@ -10,18 +10,19 @@ import (
 	"github.com/gofrs/uuid/v5"
 )
 
-type SessionIdentifier interface {
+type RemoteLog interface {
+	MessageType() string
+}
+
+type SessionIdentifierRemoteLog interface {
+	RemoteLog
 	SessionUUID() uuid.UUID
 }
 
 // Provides the current game clock time.
 type GameTimer interface {
-	SessionUUID() uuid.UUID
+	SessionIdentifierRemoteLog
 	GameTime() time.Duration
-}
-
-type RemoteLog interface {
-	MessageType() string
 }
 
 type GenericRemoteLog struct {
@@ -45,7 +46,7 @@ var (
 	ErrRemoteLogIsNotJSON          = errors.New("remote log is not JSON")
 )
 
-func RemoteLogMessageFromLogString(log []byte) (RemoteLog, error) {
+func UnmarshalRemoteLog(log []byte) (RemoteLog, error) {
 
 	var m RemoteLog
 
@@ -91,7 +92,7 @@ func RemoteLogMessageFromLogString(log []byte) (RemoteLog, error) {
 	case "POST_MATCH_MATCH_STATS":
 		m = &RemoteLogPostMatchMatchStats{}
 	case "POST_MATCH_MATCH_TYPE_STATS":
-		m = &RemoteLogRepairMatrix{}
+		m = &RemoteLogPostMatchTypeStats{}
 	case "POST_MATCH_MATCH_TYPE_UNLOCKS":
 		m = &RemoteLogRepairMatrix{}
 	case "POST_MATCH_MATCH_TYPE_XP":
@@ -857,18 +858,33 @@ type RemoteLogPersonalBubble struct {
 	GameType          string `json:"[game_type]"`
 	Map               string `json:"[map]"`
 	PlayerDisplayname string `json:"[player][displayname]"`
-	PlayerUserid      string `json:"[player][userid]"`
-	RoomID            int64  `json:"[room_id]"`
+	PlayerXPID        string `json:"[player][userid]"`
+	RoomID            uint64 `json:"[room_id]"`
 	SocialGroupID     string `json:"[social_group_id]"`
 }
 
 type RemoteLogPostMatchMatchStats struct {
 	GenericRemoteLog
-	SessionUUIDStr string                 `json:"[session][uuid]"`
-	MatchType      string                 `json:"match_type"`
-	MatchStats     map[string]interface{} `json:"match_stats"`
+	SessionUUIDStr string     `json:"[session][uuid]"`
+	MatchType      string     `json:"match_type"`
+	MatchStats     MatchStats `json:"match_stats"`
 }
 
 func (m RemoteLogPostMatchMatchStats) SessionUUID() uuid.UUID {
 	return UUIDFromRemoteLogString(m.SessionUUIDStr)
+}
+
+type RemoteLogPostMatchTypeStats struct {
+	GenericRemoteLog
+	SessionUUIDStr string         `json:"[session][uuid]"`
+	MatchType      string         `json:"match_type"`
+	Stats          MatchTypeStats `json:"stats"`
+}
+
+func (m RemoteLogPostMatchTypeStats) SessionUUID() uuid.UUID {
+	return UUIDFromRemoteLogString(m.SessionUUIDStr)
+}
+
+func (m RemoteLogPostMatchTypeStats) IsWinner() bool {
+	return m.Stats.ArenaWins > 0
 }

@@ -62,7 +62,7 @@ type MatchLabel struct {
 	tickRate             int64                // The number of ticks per second.
 	emptyTicks           int64                // The number of ticks the match has been empty.
 	terminateTick        int64                // The tick count at which the match will be shut down.
-	goals                []*MatchGoal         // The goals scored in the match.
+	goals                []*evr.MatchGoal     // The goals scored in the match.
 }
 
 func (s *MatchLabel) LoadAndDeleteReservation(sessionID string) (*EvrMatchPresence, bool) {
@@ -492,39 +492,27 @@ func (s *MatchLabel) rebuildCache() {
 
 func (l *MatchLabel) CalculateRatingWeights() map[evr.EvrId]int {
 	// Calculate the weight of each player's rating in the match
-	scoresByPlayerByTeam := make(map[TeamIndex]map[evr.EvrId]int)
-	teamScores := make(map[TeamIndex]int)
-
+	byPlayer := make(map[evr.EvrId]int)
+	byTeam := make(map[TeamIndex]int)
 	for _, g := range l.goals {
-
-		if _, ok := scoresByPlayerByTeam[g.TeamID]; !ok {
-			scoresByPlayerByTeam[g.TeamID] = make(map[evr.EvrId]int)
-		}
-
-		scoresByPlayerByTeam[g.TeamID][g.XPID] += g.PointsValue // Add extra point for scoring
+		byPlayer[g.XPID] += g.PointsValue            // Shooter gets the points
+		byTeam[TeamIndex(g.TeamID)] += g.PointsValue // Team gets the points
 		if !g.PrevPlayerXPID.IsNil() && g.PrevPlayerXPID != g.XPID {
-			scoresByPlayerByTeam[g.TeamID][g.PrevPlayerXPID] += g.PointsValue - 1 // Assist gets the points - 1
+			byPlayer[g.PrevPlayerXPID] += g.PointsValue - 1 // Assist gets the points - 1
 		}
-
-		teamScores[g.TeamID] += g.PointsValue
 	}
 
 	winningTeam := BlueTeam
-	if teamScores[BlueTeam] < teamScores[OrangeTeam] {
+	if byTeam[BlueTeam] < byTeam[OrangeTeam] {
 		winningTeam = OrangeTeam
 	}
 
-	scores := make(map[evr.EvrId]int)
 	for _, p := range l.Players {
-
 		if p.Team == winningTeam {
-			scores[p.EvrID] += 4
+			byPlayer[p.EvrID] += 4
 		}
-
-		scores[p.EvrID] += scoresByPlayerByTeam[p.Team][p.EvrID]
 	}
-
-	return scores
+	return byPlayer
 }
 
 func (l *MatchLabel) PublicView() *MatchLabel {

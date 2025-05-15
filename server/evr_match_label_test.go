@@ -222,7 +222,7 @@ func TestMatchLabel_CalculateRatingWeights(t *testing.T) {
 
 	type fields struct {
 		Players []PlayerInfo
-		goals   []*MatchGoal
+		goals   []*evr.MatchGoal
 	}
 	tests := []struct {
 		name   string
@@ -236,8 +236,8 @@ func TestMatchLabel_CalculateRatingWeights(t *testing.T) {
 					{EvrID: evr.EvrId{PlatformCode: evr.DMO, AccountId: 1}, Team: BlueTeam},
 					{EvrID: evr.EvrId{PlatformCode: evr.DMO, AccountId: 2}, Team: OrangeTeam},
 				},
-				goals: []*MatchGoal{
-					{TeamID: BlueTeam, XPID: evr.EvrId{PlatformCode: evr.DMO, AccountId: 1}, PointsValue: 10},
+				goals: []*evr.MatchGoal{
+					{TeamID: int64(BlueTeam), XPID: evr.EvrId{PlatformCode: evr.DMO, AccountId: 1}, PointsValue: 10},
 				},
 			},
 			want: map[evr.EvrId]int{
@@ -253,10 +253,10 @@ func TestMatchLabel_CalculateRatingWeights(t *testing.T) {
 					{EvrID: evr.EvrId{PlatformCode: evr.DMO, AccountId: 2}, Team: OrangeTeam},
 					{EvrID: evr.EvrId{PlatformCode: evr.DMO, AccountId: 3}, Team: OrangeTeam},
 				},
-				goals: []*MatchGoal{
-					{TeamID: OrangeTeam, XPID: evr.EvrId{PlatformCode: evr.DMO, AccountId: 2}, PointsValue: 5},
-					{TeamID: OrangeTeam, XPID: evr.EvrId{PlatformCode: evr.DMO, AccountId: 3}, PointsValue: 10},
-					{TeamID: BlueTeam, XPID: evr.EvrId{PlatformCode: evr.DMO, AccountId: 1}, PointsValue: 8},
+				goals: []*evr.MatchGoal{
+					{TeamID: int64(OrangeTeam), XPID: evr.EvrId{PlatformCode: evr.DMO, AccountId: 2}, PointsValue: 5},
+					{TeamID: int64(OrangeTeam), XPID: evr.EvrId{PlatformCode: evr.DMO, AccountId: 3}, PointsValue: 10},
+					{TeamID: int64(BlueTeam), XPID: evr.EvrId{PlatformCode: evr.DMO, AccountId: 1}, PointsValue: 8},
 				},
 			},
 			want: map[evr.EvrId]int{
@@ -272,7 +272,7 @@ func TestMatchLabel_CalculateRatingWeights(t *testing.T) {
 					{EvrID: evr.EvrId{PlatformCode: evr.DMO, AccountId: 1}, Team: BlueTeam},
 					{EvrID: evr.EvrId{PlatformCode: evr.DMO, AccountId: 2}, Team: OrangeTeam},
 				},
-				goals: []*MatchGoal{},
+				goals: []*evr.MatchGoal{},
 			},
 			want: map[evr.EvrId]int{
 				evr.EvrId{PlatformCode: evr.DMO, AccountId: 1}: 4,
@@ -287,8 +287,8 @@ func TestMatchLabel_CalculateRatingWeights(t *testing.T) {
 					{EvrID: evr.EvrId{PlatformCode: evr.DMO, AccountId: 2}, Team: BlueTeam},
 					{EvrID: evr.EvrId{PlatformCode: evr.DMO, AccountId: 3}, Team: OrangeTeam},
 				},
-				goals: []*MatchGoal{
-					{TeamID: BlueTeam, XPID: evr.EvrId{PlatformCode: evr.DMO, AccountId: 1}, PrevPlayerXPID: evr.EvrId{PlatformCode: evr.DMO, AccountId: 2}, PointsValue: 3},
+				goals: []*evr.MatchGoal{
+					{TeamID: int64(BlueTeam), XPID: evr.EvrId{PlatformCode: evr.DMO, AccountId: 1}, PrevPlayerXPID: evr.EvrId{PlatformCode: evr.DMO, AccountId: 2}, PointsValue: 3},
 				},
 			},
 			want: map[evr.EvrId]int{
@@ -304,9 +304,9 @@ func TestMatchLabel_CalculateRatingWeights(t *testing.T) {
 					{EvrID: evr.EvrId{PlatformCode: evr.DMO, AccountId: 1}, Team: BlueTeam},
 					{EvrID: evr.EvrId{PlatformCode: evr.DMO, AccountId: 2}, Team: OrangeTeam},
 				},
-				goals: []*MatchGoal{
-					{TeamID: BlueTeam, XPID: evr.EvrId{PlatformCode: evr.DMO, AccountId: 1}, PointsValue: 10},
-					{TeamID: OrangeTeam, XPID: evr.EvrId{PlatformCode: evr.DMO, AccountId: 2}, PointsValue: 10},
+				goals: []*evr.MatchGoal{
+					{TeamID: int64(BlueTeam), XPID: evr.EvrId{PlatformCode: evr.DMO, AccountId: 1}, PointsValue: 10},
+					{TeamID: int64(OrangeTeam), XPID: evr.EvrId{PlatformCode: evr.DMO, AccountId: 2}, PointsValue: 10},
 				},
 			},
 			want: map[evr.EvrId]int{

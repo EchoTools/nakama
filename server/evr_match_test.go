@@ -615,7 +615,7 @@ func TestEvrMatch_MatchJoinAttempt(t *testing.T) {
 			presenceMap:      make(map[string]*EvrMatchPresence, SocialLobbyMaxSize),
 			reservationMap:   make(map[string]*slotReservation, 2),
 			presenceByEvrID:  make(map[evr.EvrId]*EvrMatchPresence, SocialLobbyMaxSize),
-			goals:            make([]*MatchGoal, 0),
+			goals:            make([]*evr.MatchGoal, 0),
 
 			TeamAlignments:       make(map[string]int, SocialLobbyMaxSize),
 			joinTimestamps:       make(map[string]time.Time, SocialLobbyMaxSize),
@@ -945,7 +945,7 @@ func TestEvrMatch_MatchJoinAttempt_Counts(t *testing.T) {
 			presenceMap:      make(map[string]*EvrMatchPresence, SocialLobbyMaxSize),
 			reservationMap:   make(map[string]*slotReservation, 2),
 			presenceByEvrID:  make(map[evr.EvrId]*EvrMatchPresence, SocialLobbyMaxSize),
-			goals:            make([]*MatchGoal, 0),
+			goals:            make([]*evr.MatchGoal, 0),
 
 			TeamAlignments:       make(map[string]int, SocialLobbyMaxSize),
 			joinTimestamps:       make(map[string]time.Time, SocialLobbyMaxSize),

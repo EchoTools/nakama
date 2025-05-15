@@ -181,9 +181,9 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		}
 		dg.StateEnabled = false
 	}
-
+	statisticsQueue := NewStatisticsQueue(logger, nk)
 	// Register the event dispatch
-	eventDispatch, err := NewEventDispatch(ctx, logger, db, nk, initializer, nil, dg)
+	eventDispatch, err := NewEventDispatch(ctx, logger, db, nk, initializer, nil, dg, statisticsQueue)
 	if err != nil {
 		return fmt.Errorf("unable to create event dispatch: %w", err)
 	}

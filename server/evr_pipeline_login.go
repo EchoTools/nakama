@@ -1132,6 +1132,15 @@ func mostRecentThursday() time.Time {
 func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
 	request := in.(*evr.UserServerProfileUpdateRequest)
 
+	if data, err := json.MarshalIndent(in, "", "  "); err != nil {
+		logger.Warn("Failed to marshal profile update request", zap.Error(err))
+	} else if len(data) > 0 {
+		logger.Debug("Received user server profile update request", zap.Any("update", in))
+		if err := os.WriteFile("/tmp/evr_profile_update.json", data, 0644); err != nil {
+			logger.Warn("Failed to write profile update request to file", zap.Error(err))
+		}
+	}
+
 	if err := session.SendEvr(evr.NewUserServerProfileUpdateSuccess(request.EvrID)); err != nil {
 		logger.Warn("Failed to send UserServerProfileUpdateSuccess", zap.Error(err))
 	}
@@ -1143,6 +1152,12 @@ func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger
 
 	// Ignore anything but statistics updates.
 	if payload.Update.Statistics == nil {
+		return nil
+	}
+
+	mode := evr.Symbol(payload.MatchType)
+	if mode == evr.ModeArenaPublic || mode == evr.ModeArenaPrivate {
+		// Arena match stats are handled by EventRemoteLogSet
 		return nil
 	}
 
@@ -1243,7 +1258,13 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 		return nil
 	}
 
-	return p.updatePlayerStats(ctx, playerInfo.UserID, groupIDStr, playerInfo.DisplayName, payload.Update, label.Mode)
+	return SendEvent(ctx, p.nk, &EventServerProfileUpdate{
+		UserID:      playerInfo.UserID,
+		GroupID:     groupIDStr,
+		DisplayName: playerInfo.DisplayName,
+		Mode:        label.Mode,
+		Update:      payload.Update,
+	})
 }
 
 func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
