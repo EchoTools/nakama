@@ -169,7 +169,7 @@ func TestParseRemoteLog(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 
-			got, err := RemoteLogMessageFromLogString([]byte(tt.message))
+			got, err := UnmarshalRemoteLog([]byte(tt.message))
 
 			if err != nil && !tt.wantError {
 				t.Errorf("ParseRemoteLog() error = %v", err)

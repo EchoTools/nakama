@@ -3,24 +3,26 @@ package server
 import (
 	"testing"
 	"time"
+
+	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
 func TestGameState_Update(t *testing.T) {
 	tests := []struct {
 		name       string
-		goals      []*MatchGoal
+		goals      []*evr.MatchGoal
 		wantBlue   int
 		wantOrange int
 	}{
 		{
 			name:       "No goals",
-			goals:      []*MatchGoal{},
+			goals:      []*evr.MatchGoal{},
 			wantBlue:   0,
 			wantOrange: 0,
 		},
 		{
 			name: "Single goal for blue team",
-			goals: []*MatchGoal{
+			goals: []*evr.MatchGoal{
 				{GoalType: "SLAM DUNK", TeamID: 0},
 			},
 			wantBlue:   2,
@@ -28,7 +30,7 @@ func TestGameState_Update(t *testing.T) {
 		},
 		{
 			name: "Single goal for orange team",
-			goals: []*MatchGoal{
+			goals: []*evr.MatchGoal{
 				{GoalType: "SLAM DUNK", TeamID: 1},
 			},
 			wantBlue:   0,
@@ -36,7 +38,7 @@ func TestGameState_Update(t *testing.T) {
 		},
 		{
 			name: "Multiple goals for both teams",
-			goals: []*MatchGoal{
+			goals: []*evr.MatchGoal{
 				{GoalType: "SLAM DUNK", TeamID: 0},
 				{GoalType: "LONG SHOT", TeamID: 1},
 				{GoalType: "BOUNCE SHOT", TeamID: 0},
@@ -46,7 +48,7 @@ func TestGameState_Update(t *testing.T) {
 		},
 		{
 			name: "Unknown goal type",
-			goals: []*MatchGoal{
+			goals: []*evr.MatchGoal{
 				{GoalType: "UNKNOWN", TeamID: 0},
 			},
 			wantBlue:   0,

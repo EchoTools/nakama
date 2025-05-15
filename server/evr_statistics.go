@@ -244,7 +244,7 @@ func ResetScheduleToCron(resetSchedule evr.ResetSchedule) string {
 	}
 }
 
-func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, nk runtime.NakamaModule, ownerID, groupID string, modes []evr.Symbol, dailyWeeklyStatMode evr.Symbol) (evr.PlayerStatistics, map[string]evr.Statistic, error) {
+func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, nk runtime.NakamaModule, ownerID, groupID string, modes []evr.Symbol, dailyWeeklyStatMode evr.Symbol) (evr.PlayerStatistics, map[string]*evr.StatisticValue, error) {
 
 	startTime := time.Now()
 
@@ -271,7 +271,7 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, nk runtime.NakamaMod
 
 	playerStatistics := evr.NewStatistics()
 
-	boardMap := make(map[string]evr.Statistic)
+	boardMap := make(map[string]*evr.StatisticValue)
 	boardIDs := make([]string, 0, len(boardMap))
 	gamesPlayedBoardIDs := make(map[evr.StatisticsGroup]string)
 
@@ -320,7 +320,7 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, nk runtime.NakamaMod
 
 				fieldValue := statsValue.Elem().Field(i)
 				fieldValue.Set(reflect.New(fieldType.Type.Elem()))
-				boardMap[boardID] = fieldValue.Interface().(evr.Statistic)
+				boardMap[boardID] = fieldValue.Interface().(*evr.StatisticValue)
 			}
 		}
 
@@ -390,19 +390,14 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, nk runtime.NakamaMod
 				ResetSchedule: r,
 			}]
 			if stat, ok := boardMap[gamesPlayedID]; ok {
-				if gamesPlayed, ok := stat.(*evr.StatisticIntegerIncrement); ok {
-					for _, boardID := range boardIDs {
-						if v, ok := boardMap[boardID]; ok {
-
-							// If the board's value is 0, remove it.
-							if boardMap[boardID].GetValue() == 0 {
-								delete(boardMap, boardID)
-								continue
-							}
-							if _, ok := v.(*evr.StatisticFloatAverage); ok {
-								boardMap[boardID].SetCount(int64(gamesPlayed.GetValue()))
-							}
+				for _, boardID := range boardIDs {
+					if v, ok := boardMap[boardID]; ok {
+						// If the board's value is 0, remove it.
+						if v.GetValue() == 0 {
+							delete(boardMap, boardID)
+							continue
 						}
+						v.SetCount(int64(stat.GetValue()))
 					}
 				}
 			}
@@ -415,11 +410,9 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, nk runtime.NakamaMod
 		ResetSchedule: evr.ResetScheduleAllTime,
 	}].(*evr.ArenaStatistics); s != nil {
 		if s.Level == nil {
-			s.Level = &evr.StatisticIntegerIncrement{
-				IntegerStatistic: evr.IntegerStatistic{
-					Count: 1,
-					Value: 1,
-				},
+			s.Level = &evr.StatisticValue{
+				Count: 1,
+				Value: 1,
 			}
 		} else {
 			if s.Level.GetCount() <= 0 {
@@ -437,11 +430,9 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, nk runtime.NakamaMod
 		ResetSchedule: evr.ResetScheduleAllTime,
 	}].(*evr.CombatStatistics); s != nil {
 		if s.Level == nil {
-			s.Level = &evr.StatisticIntegerIncrement{
-				IntegerStatistic: evr.IntegerStatistic{
-					Count: 1,
-					Value: 1,
-				},
+			s.Level = &evr.StatisticValue{
+				Count: 1,
+				Value: 1,
 			}
 		} else {
 			if s.Level.GetCount() <= 0 {
@@ -454,109 +445,4 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, nk runtime.NakamaMod
 	}
 
 	return playerStatistics, boardMap, nil
-}
-
-func StatisticsToEntries(userID, displayName, groupID string, mode evr.Symbol, prev, update evr.Statistics) ([]*StatisticsQueueEntry, error) {
-
-	// Update the calculated fields
-	if prev != nil {
-		prev.CalculateFields()
-	}
-	update.CalculateFields()
-
-	// Modify the update based on the previous stats
-	updateElem := reflect.ValueOf(update).Elem()
-	prevValue := reflect.ValueOf(prev)
-	for i := 0; i < updateElem.NumField(); i++ {
-
-		if field := updateElem.Field(i); !field.IsNil() && prevValue.IsValid() && !prevValue.IsNil() {
-
-			stat := field.Interface().(evr.Statistic)
-			if stat == nil {
-				continue
-			}
-
-			// If the previous field exists, subtract the previous value from the current value
-
-			prevField := prevValue.Elem().Field(i)
-			if prevField.IsValid() && !prevField.IsNil() {
-				switch prevStat := prevField.Interface().(type) {
-				case *evr.StatisticIntegerIncrement:
-					stat.SetValue(stat.GetValue() - prevStat.GetValue())
-				case *evr.StatisticFloatIncrement:
-					stat.SetValue(stat.GetValue() - prevStat.GetValue())
-				}
-			}
-
-		}
-	}
-
-	resetSchedules := []evr.ResetSchedule{evr.ResetScheduleDaily, evr.ResetScheduleWeekly, evr.ResetScheduleAllTime}
-
-	// construct the entries
-	entries := make([]*StatisticsQueueEntry, 0, len(resetSchedules)*updateElem.NumField())
-
-	for i := 0; i < updateElem.NumField(); i++ {
-		updateField := updateElem.Field(i)
-
-		for _, r := range resetSchedules {
-
-			if updateField.IsNil() {
-				continue
-			}
-
-			var op LeaderboardOperator
-			switch updateField.Interface().(type) {
-			case *evr.StatisticFloatIncrement:
-				op = OperatorIncrement
-			case *evr.StatisticIntegerIncrement:
-				op = OperatorIncrement
-			case *evr.StatisticFloatBest:
-				op = OperatorBest
-			case *evr.StatisticIntegerBest:
-				op = OperatorBest
-			case *evr.StatisticFloatSet:
-				op = OperatorSet
-			case *evr.StatisticIntegerSet:
-				op = OperatorSet
-			default:
-				op = OperatorSet
-			}
-
-			// Extract the JSON tag from the struct field
-			jsonTag := updateElem.Type().Field(i).Tag.Get("json")
-			statName := strings.SplitN(jsonTag, ",", 2)[0]
-
-			meta := LeaderboardMeta{
-				GroupID:       groupID,
-				Mode:          mode,
-				StatName:      statName,
-				Operator:      op,
-				ResetSchedule: r,
-			}
-
-			statValue := updateField.Interface().(evr.Statistic).GetValue()
-
-			// Skip stats that are not set or negative
-			if statValue <= 0 {
-				continue
-			}
-
-			score, err := Float64ToScore(statValue)
-			if err != nil {
-				return nil, fmt.Errorf("failed to convert float64 to int64 pair: %w", err)
-			}
-
-			entries = append(entries, &StatisticsQueueEntry{
-				BoardMeta:   meta,
-				UserID:      userID,
-				DisplayName: displayName,
-				Score:       score,
-				Subscore:    0,
-				Metadata:    nil,
-			})
-		}
-	}
-
-	return entries, nil
 }

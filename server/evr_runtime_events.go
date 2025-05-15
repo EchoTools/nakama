@@ -47,21 +47,26 @@ func SendEvent(ctx context.Context, nk runtime.NakamaModule, e Event) error {
 type EventDispatcher struct {
 	sync.Mutex
 
-	ctx    context.Context
-	logger runtime.Logger
-	nk     runtime.NakamaModule
-	db     *sql.DB
-	mongo  *mongo.Client
-	dg     *discordgo.Session
+	ctx             context.Context
+	logger          runtime.Logger
+	nk              runtime.NakamaModule
+	db              *sql.DB
+	mongo           *mongo.Client
+	dg              *discordgo.Session
+	sessionRegistry SessionRegistry
+	matchRegistry   MatchRegistry
 
+	statisticsQueue *StatisticsQueue
+	vrmlVerifier    *VRMLScanQueue
+
+	eventUnmarshaler     func(event *api.Event) (Event, error)
 	queue                chan *api.Event
 	matchJournals        map[MatchID]*MatchDataJournal
 	cache                *sync.Map
 	playerAuthorizations map[string]map[string]struct{} // map[sessionID]map[groupID]struct{}
-	vrmlVerifier         *VRMLScanQueue
 }
 
-func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer, mongoClient *mongo.Client, dg *discordgo.Session) (*EventDispatcher, error) {
+func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer, mongoClient *mongo.Client, dg *discordgo.Session, statisticsQueue *StatisticsQueue) (*EventDispatcher, error) {
 
 	vrmlVerifier, err := NewVRMLScanQueue(ctx, logger, db, nk, initializer, dg)
 	if err != nil {
@@ -69,18 +74,32 @@ func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	}
 
 	dispatch := &EventDispatcher{
-		ctx:    ctx,
-		logger: logger,
-		db:     db,
-		mongo:  mongoClient,
-		nk:     nk,
-		dg:     dg,
+		ctx:             ctx,
+		logger:          logger,
+		db:              db,
+		mongo:           mongoClient,
+		nk:              nk,
+		dg:              dg,
+		sessionRegistry: nk.(*RuntimeGoNakamaModule).sessionRegistry,
+		matchRegistry:   nk.(*RuntimeGoNakamaModule).matchRegistry,
+
+		vrmlVerifier:    vrmlVerifier,
+		statisticsQueue: statisticsQueue,
 
 		queue:                make(chan *api.Event, 100),
 		matchJournals:        make(map[MatchID]*MatchDataJournal),
 		cache:                &sync.Map{},
-		vrmlVerifier:         vrmlVerifier,
 		playerAuthorizations: make(map[string]map[string]struct{}),
+	}
+
+	dispatch.eventUnmarshaler = dispatch.unmarshalEventFactory([]Event{
+		&EventUserAuthenticated{},
+		&EventVRMLAccountLink{},
+		&EventRemoteLogSet{},
+		&EventServerProfileUpdate{},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create unmarshal event function: %w", err)
 	}
 
 	go func() {
@@ -126,32 +145,30 @@ func (h *EventDispatcher) eventFn(ctx context.Context, logger runtime.Logger, ev
 	case h.queue <- evt:
 	case <-ctx.Done():
 		logger.Warn("context canceled")
-	case <-time.After(3 * time.Second):
+	default:
 		logger.Warn("event queue full")
 	}
 }
 
-func (h *EventDispatcher) unmarshalEvent(event *api.Event) (Event, error) {
-
-	var e Event
-	switch event.Name {
-	case fmt.Sprintf("%T", &EventUserAuthenticated{}):
-		e = &EventUserAuthenticated{}
-	case fmt.Sprintf("%T", &EventVRMLAccountLink{}):
-		e = &EventVRMLAccountLink{}
-	default:
-		return nil, nil // Unknown event type
+func (h *EventDispatcher) unmarshalEventFactory(events []Event) func(event *api.Event) (Event, error) {
+	eventMap := make(map[string]Event)
+	for _, e := range events {
+		eventMap[fmt.Sprintf("%T", e)] = e
 	}
-	if err := json.Unmarshal([]byte(event.Properties["payload"]), e); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal login event payload: %v", err)
+	return func(event *api.Event) (Event, error) {
+		if e, ok := eventMap[event.Name]; ok {
+			if err := json.Unmarshal([]byte(event.Properties["payload"]), e); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal event payload: %v", err)
+			}
+			return e, nil
+		}
+		return nil, fmt.Errorf("unknown event type: %s", event.Name)
 	}
-	return e, nil
-
 }
 
 func (h *EventDispatcher) processEvent(ctx context.Context, logger runtime.Logger, evt *api.Event) {
 
-	if e, err := h.unmarshalEvent(evt); err != nil {
+	if e, err := h.eventUnmarshaler(evt); err != nil {
 		logger.Warn("failed to unmarshal event: %v", err)
 	} else if e != nil {
 		if err := e.Process(ctx, logger, h); err != nil {
