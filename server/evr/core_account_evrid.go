@@ -120,7 +120,7 @@ func (xpi EvrId) IsNotNil() bool {
 }
 
 func (xpi EvrId) IsValid() bool {
-	return xpi.PlatformCode > STM && xpi.PlatformCode < TEN && xpi.AccountId > 0
+	return xpi.PlatformCode >= STM && xpi.PlatformCode <= TEN && xpi.AccountId > 0
 }
 
 func (xpi *EvrId) Stream(s *EasyStream) error {
