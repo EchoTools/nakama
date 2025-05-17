@@ -162,10 +162,10 @@ func walletToCosmetics(wallet map[string]int64, unlocks map[string]map[string]bo
 }
 
 func UserServerProfileFromParameters(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, params SessionParameters, groupID string, modes []evr.Symbol, dailyWeeklyMode evr.Symbol) (*evr.ServerProfile, error) {
-	return NewUserServerProfile(ctx, logger, db, nk, params.profile, params.xpID, groupID, modes, dailyWeeklyMode)
+	return NewUserServerProfile(ctx, logger, db, nk, params.profile, params.xpID, groupID, modes, dailyWeeklyMode, params.DisplayName(groupID))
 }
 
-func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, evrProfile *EVRProfile, xpID evr.EvrId, groupID string, modes []evr.Symbol, dailyWeeklyMode evr.Symbol) (*evr.ServerProfile, error) {
+func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, evrProfile *EVRProfile, xpID evr.EvrId, groupID string, modes []evr.Symbol, dailyWeeklyMode evr.Symbol, displayName string) (*evr.ServerProfile, error) {
 
 	var wallet map[string]int64
 	if err := json.Unmarshal([]byte(evrProfile.Wallet()), &wallet); err != nil {
@@ -214,7 +214,7 @@ func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, n
 	}
 
 	return &evr.ServerProfile{
-		DisplayName:       evrProfile.GetGroupDisplayNameOrDefault(groupID),
+		DisplayName:       displayName,
 		EvrID:             xpID,
 		SchemaVersion:     4,
 		PublisherLock:     "echovrce",

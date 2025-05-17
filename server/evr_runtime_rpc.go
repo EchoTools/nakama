@@ -1874,7 +1874,7 @@ func UserServerProfileRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 		evr.ModeSocialPrivate,
 	}
 
-	serverProfile, err := NewUserServerProfile(ctx, RuntimeLoggerToZapLogger(logger), db, nk, evrProfile, request.XPID, request.GroupID.String(), modes, 0)
+	serverProfile, err := NewUserServerProfile(ctx, RuntimeLoggerToZapLogger(logger), db, nk, evrProfile, request.XPID, request.GroupID.String(), modes, 0, evrProfile.GetActiveGroupDisplayName())
 	if err != nil {
 		return "", fmt.Errorf("failed to get server profile: %w", err)
 	}
