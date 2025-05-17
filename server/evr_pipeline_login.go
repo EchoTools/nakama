@@ -626,9 +626,8 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 
 	if params.userDisplayNameOverride != "" {
 		// This will be picked up by GetActiveGroupDisplayName and other functions
-		params.profile.sessionDisplayNameOverride = params.userDisplayNameOverride
 	} else if params.profile.GuildDisplayNameOverrides != nil && params.profile.GuildDisplayNameOverrides[params.profile.ActiveGroupID] != "" {
-		params.profile.sessionDisplayNameOverride = params.profile.GuildDisplayNameOverrides[params.profile.ActiveGroupID]
+		params.userDisplayNameOverride = params.profile.GuildDisplayNameOverrides[params.profile.ActiveGroupID]
 	}
 
 	params.displayNameHistory, err = DisplayNameHistoryLoad(ctx, p.nk, session.userID.String())

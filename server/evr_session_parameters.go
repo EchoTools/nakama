@@ -59,6 +59,16 @@ func (s SessionParameters) UserID() string {
 	return s.profile.UserID()
 }
 
+func (s SessionParameters) DisplayName(groupID string) string {
+	if s.profile == nil {
+		return ""
+	}
+	if s.userDisplayNameOverride != "" {
+		return s.userDisplayNameOverride
+	}
+	return s.profile.GetGroupDisplayNameOrDefault(groupID)
+}
+
 func (s *SessionParameters) IsIGPOpen() bool {
 	if s.isIGPOpen == nil {
 		return false

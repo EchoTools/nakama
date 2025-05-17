@@ -219,8 +219,6 @@ func (a EVRProfile) GetGroupDisplayNameOrDefault(groupID string) string {
 		return a.DisplayNameOverride
 	} else if a.GuildDisplayNameOverrides != nil && a.GuildDisplayNameOverrides[groupID] != "" {
 		return a.GuildDisplayNameOverrides[groupID]
-	} else if a.sessionDisplayNameOverride != "" {
-		return a.sessionDisplayNameOverride
 	}
 
 	if a.InGameNames != nil {

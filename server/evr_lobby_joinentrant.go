@@ -436,7 +436,7 @@ OuterLoop:
 		}
 	}
 
-	displayName := params.profile.GetGroupDisplayNameOrDefault(groupID)
+	displayName := params.DisplayName(groupID)
 	p.nk.Event(ctx, &api.Event{
 		Name: EventLobbySessionAuthorized,
 		Properties: map[string]string{
