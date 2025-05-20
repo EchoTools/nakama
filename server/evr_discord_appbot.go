@@ -942,7 +942,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return fmt.Errorf("failed to load guild group metadata: %w", err)
 			} else {
 				md.CommandChannelID = i.ChannelID
-				if err := GuildGroupStore(ctx, nk, md); err != nil {
+				if err := GuildGroupStore(ctx, nk, d.guildGroupRegistry, md); err != nil {
 					return fmt.Errorf("failed to save guild group metadata: %w", err)
 				}
 			}

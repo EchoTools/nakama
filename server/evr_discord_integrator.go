@@ -364,7 +364,7 @@ func (c *DiscordIntegrator) syncMember(ctx context.Context, logger *zap.Logger, 
 	}
 
 	if updated {
-		if err := GuildGroupStore(ctx, c.nk, group); err != nil {
+		if err := GuildGroupStore(ctx, c.nk, c.guildGroupRegistry, group); err != nil {
 			return fmt.Errorf("error storing guild group: %w", err)
 		}
 	}
@@ -562,7 +562,7 @@ func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, g
 		}
 	}
 
-	if err := GuildGroupStore(ctx, d.nk, gg); err != nil {
+	if err := GuildGroupStore(ctx, d.nk, d.guildGroupRegistry, gg); err != nil {
 		logger.Error("Error storing guild group", zap.Error(err))
 		return fmt.Errorf("error storing guild group: %w", err)
 	}
@@ -690,7 +690,7 @@ func (d *DiscordIntegrator) handleMemberUpdate(logger *zap.Logger, s *discordgo.
 
 	// Update the role cache
 	if updated := group.RoleCacheUpdate(evrAccount, e.Member.Roles); updated {
-		if err := GuildGroupStore(ctx, d.nk, group); err != nil {
+		if err := GuildGroupStore(ctx, d.nk, d.guildGroupRegistry, group); err != nil {
 			return fmt.Errorf("error storing guild group: %w", err)
 		}
 	}

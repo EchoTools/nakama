@@ -256,7 +256,7 @@ func GuildGroupLoad(ctx context.Context, nk runtime.NakamaModule, groupID string
 	return NewGuildGroup(groups[0], state)
 }
 
-func GuildGroupStore(ctx context.Context, nk runtime.NakamaModule, group *GuildGroup) error {
+func GuildGroupStore(ctx context.Context, nk runtime.NakamaModule, guildGroupRegistry *GuildGroupRegistry, group *GuildGroup) error {
 
 	group.State.Lock()
 	defer group.State.Unlock()
@@ -276,7 +276,9 @@ func GuildGroupStore(ctx context.Context, nk runtime.NakamaModule, group *GuildG
 	if err := GroupMetadataSave(ctx, _nk.db, group.Group.Id, &group.GroupMetadata); err != nil {
 		return fmt.Errorf("failed to save guild group metadata: %v", err)
 	}
-
+	if guildGroupRegistry != nil {
+		guildGroupRegistry.Add(group)
+	}
 	return nil
 }
 

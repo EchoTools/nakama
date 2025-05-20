@@ -523,6 +523,12 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 
 	metadataUpdated := false
 
+	params.guildGroups, err = GuildUserGroupsList(ctx, p.nk, p.guildGroupRegistry, params.profile.ID())
+	if err != nil {
+		metricsTags["error"] = "failed_get_groups"
+		return fmt.Errorf("failed to get groups: %w", err)
+	}
+
 	if len(params.guildGroups) == 0 {
 		// User is not in any groups
 		metricsTags["error"] = "user_not_in_any_groups"
