@@ -845,10 +845,7 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 
 	p.profileCache.Store(session.id, *serverProfile)
 
-	clientProfile, err := NewClientProfile(ctx, params.profile, serverProfile)
-	if err != nil {
-		return fmt.Errorf("failed to get client profile: %w", err)
-	}
+	clientProfile := NewClientProfile(ctx, params.profile, serverProfile)
 
 	// Check if the user is required to go through community values
 	journal := NewGuildEnforcementJournal(userID)

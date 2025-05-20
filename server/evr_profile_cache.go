@@ -239,7 +239,7 @@ func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, n
 	}, nil
 }
 
-func NewClientProfile(ctx context.Context, evrProfile *EVRProfile, serverProfile *evr.ServerProfile) (*evr.ClientProfile, error) {
+func NewClientProfile(ctx context.Context, evrProfile *EVRProfile, serverProfile *evr.ServerProfile) *evr.ClientProfile {
 	// Load friends to get blocked (ghosted) players
 	muted := make([]evr.EvrId, 0)
 	ghosted := make([]evr.EvrId, 0)
@@ -314,7 +314,7 @@ func NewClientProfile(ctx context.Context, evrProfile *EVRProfile, serverProfile
 			Channel:                serverProfile.Social.Channel,
 		},
 		NewUnlocks: evrProfile.NewUnlocks, // This could pull from the wallet ledger
-	}, nil
+	}
 }
 
 func GetFieldByJSONProperty(i interface{}, fieldName string) (bool, error) {
