@@ -419,8 +419,8 @@ func ScheduleKick(ctx context.Context, nk runtime.NakamaModule, logger runtime.L
 		// Set random time to disable and kick player
 		var (
 			firstIDs, _ = loginHistory.AlternateIDs()
-			altNames    = make([]string, 0, len(loginHistory.AlternateMap))
-			accountMap  = make(map[string]*api.Account, len(loginHistory.AlternateMap))
+			altNames    = make([]string, 0, len(loginHistory.AlternateMatches))
+			accountMap  = make(map[string]*api.Account, len(loginHistory.AlternateMatches))
 			err         error
 		)
 

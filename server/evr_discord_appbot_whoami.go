@@ -520,7 +520,7 @@ func (w *WhoAmI) collectEnforcementRecords(ctx context.Context, logger runtime.L
 		}
 	}
 
-	journals, err := EnforcementJournalSearch(ctx, nk, []string{targetID})
+	journals, err := EnforcementJournalsLoad(ctx, nk, []string{targetID})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get enforcement journals: %w", err)
 	}
@@ -664,8 +664,8 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	var potentialAlternates []string
 
 	if includeSystem {
-		potentialAlternates = make([]string, 0, len(loginHistory.AlternateMap))
-		for altUserID, matches := range loginHistory.AlternateMap {
+		potentialAlternates = make([]string, 0, len(loginHistory.AlternateMatches))
+		for altUserID, matches := range loginHistory.AlternateMatches {
 			altAccount, err := nk.AccountGetId(ctx, altUserID)
 			if err != nil {
 				return fmt.Errorf("failed to get account by ID: %w", err)
