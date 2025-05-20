@@ -20,7 +20,7 @@ import (
 const (
 	LoginStorageCollection = "Login"
 	LoginHistoryStorageKey = "history"
-	LoginHistoryCacheIndex = "Index_LoginHistory"
+	LoginHistoryCacheIndex = "index_login_cache"
 )
 
 var (
@@ -40,6 +40,26 @@ var (
 
 	ErrPendingAuthorizationNotFound = errors.New("pending authorization not found")
 )
+
+func filterAltSearchPatterns(patterns []string) []string {
+	// Remove ignored values
+	for i := 0; i < len(patterns); i++ {
+		remove := false
+		if _, ok := IgnoredLoginValues[patterns[i]]; ok {
+			remove = true
+		} else if ip := net.ParseIP(patterns[i]); ip != nil {
+			// Check if the IP is a private IP address
+			if ip.IsPrivate() {
+				remove = true
+			}
+		}
+		if remove {
+			patterns = slices.Delete(patterns, i, i+1)
+			i--
+		}
+	}
+	return patterns
+}
 
 type LoginHistoryEntry struct {
 	CreatedAt time.Time         `json:"create_time"`
@@ -71,16 +91,12 @@ func (h *LoginHistoryEntry) SystemProfile() string {
 	return strings.Join(components, "::")
 }
 
-func (h *LoginHistoryEntry) Items() []string {
-	return []string{h.ClientIP, h.LoginData.HMDSerialNumber, h.XPID.Token(), h.SystemProfile()}
+func (h *LoginHistoryEntry) Patterns() []string {
+	return []string{h.ClientIP, h.LoginData.HMDSerialNumber, h.XPID.Token()}
 }
 
-func (h *LoginHistoryEntry) ItemMap() map[string]struct{} {
-	return map[string]struct{}{
-		h.ClientIP:                  {},
-		h.LoginData.HMDSerialNumber: {},
-		h.XPID.Token():              {},
-		h.SystemProfile():           {}}
+func (h *LoginHistoryEntry) Items() []string {
+	return []string{h.ClientIP, h.LoginData.HMDSerialNumber, h.XPID.Token(), h.SystemProfile()}
 }
 
 var _ = IndexedVersionedStorable(&LoginHistory{})
@@ -95,7 +111,7 @@ type LoginHistory struct {
 	DeniedClientAddresses    []string                           `json:"denied_client_addrs"`        // list of denied IPs
 	PendingAuthorizations    map[string]*LoginHistoryEntry      `json:"pending_authorizations"`     // map[XPID:ClientIP]LoginHistoryEntry
 	SecondDegreeAlternates   []string                           `json:"second_degree"`              // []userID
-	AlternateMap             map[string][]*AlternateSearchMatch `json:"alternate_accounts"`         // map of alternate user IDs and what they have in common
+	AlternateMatches         map[string][]*AlternateSearchMatch `json:"alternate_accounts"`         // map of alternate user IDs and what they have in common
 	GroupNotifications       map[string]map[string]time.Time    `json:"notified_groups"`            // list of groups that have been notified of this alternate login
 	IgnoreDisabledAlternates bool                               `json:"ignore_disabled_alternates"` // Ignore disabled alternates
 	userID                   string                             // user ID
@@ -140,24 +156,20 @@ func NewLoginHistory(userID string) *LoginHistory {
 	}
 }
 
-func (h *LoginHistory) AlternateIDs() (firstDegree []string, secondDegree []string) {
-	if len(h.AlternateMap) == 0 && len(h.SecondDegreeAlternates) == 0 {
+func (h *LoginHistory) AlternateIDs() (firstDegree, secondDegree []string) {
+	if len(h.AlternateMatches) == 0 && len(h.SecondDegreeAlternates) == 0 {
 		return nil, nil
 	}
 
-	h.AlternateMap = make(map[string][]*AlternateSearchMatch, len(h.AlternateMap))
+	firstIDs := make([]string, 0, len(h.AlternateMatches))
+	secondIDs := make([]string, 0, len(h.SecondDegreeAlternates))
 
-	var (
-		firstIDs  = make([]string, 0, len(h.AlternateMap))
-		secondIDs = make([]string, 0, len(h.SecondDegreeAlternates))
-	)
-
-	for userID := range h.AlternateMap {
+	for userID := range h.AlternateMatches {
 		firstIDs = append(firstIDs, userID)
 	}
 
 	for _, userID := range h.SecondDegreeAlternates {
-		if _, found := h.AlternateMap[userID]; !found {
+		if _, found := h.AlternateMatches[userID]; !found {
 			secondIDs = append(secondIDs, userID)
 		}
 	}
@@ -166,6 +178,38 @@ func (h *LoginHistory) AlternateIDs() (firstDegree []string, secondDegree []stri
 	slices.Sort(secondIDs)
 
 	return slices.Compact(firstIDs), slices.Compact(secondIDs)
+}
+
+func (h *LoginHistory) AlternateMaps() (firstDegree map[string]map[string]bool, secondDegree map[string]bool) {
+	if len(h.AlternateMatches) == 0 && len(h.SecondDegreeAlternates) == 0 {
+		return nil, nil
+	}
+
+	h.AlternateMatches = make(map[string][]*AlternateSearchMatch, len(h.AlternateMatches))
+
+	var (
+		firstIDs  = make(map[string]map[string]bool, len(h.AlternateMatches))
+		secondIDs = make(map[string]bool, len(h.SecondDegreeAlternates))
+	)
+
+	for userID := range h.AlternateMatches {
+		for _, m := range h.AlternateMatches[userID] {
+			for _, item := range m.Items {
+				if _, found := firstIDs[userID]; !found {
+					firstIDs[userID] = make(map[string]bool, len(h.AlternateMatches[userID]))
+				}
+				firstIDs[userID][item] = true
+			}
+		}
+	}
+
+	for _, userID := range h.SecondDegreeAlternates {
+		if _, found := h.AlternateMatches[userID]; !found {
+			secondIDs[userID] = true
+		}
+	}
+
+	return firstIDs, secondIDs
 }
 
 func (h *LoginHistory) LastSeen() time.Time {
@@ -311,8 +355,8 @@ func (h *LoginHistory) RemovePendingAuthorizationIP(ip string) *LoginHistoryEntr
 
 func (h *LoginHistory) NotifyGroup(groupID string, threshold time.Time) bool {
 
-	userIDs := make([]string, 0, len(h.AlternateMap)+len(h.SecondDegreeAlternates))
-	for k := range h.AlternateMap {
+	userIDs := make([]string, 0, len(h.AlternateMatches)+len(h.SecondDegreeAlternates))
+	for k := range h.AlternateMatches {
 		userIDs = append(userIDs, k)
 	}
 
@@ -346,8 +390,25 @@ func (h *LoginHistory) NotifyGroup(groupID string, threshold time.Time) bool {
 	return updated
 }
 
+func (h *LoginHistory) SearchPatterns() (patterns []string) {
+	patternSet := make(map[string]struct{}, len(h.History)*3)
+	for _, e := range h.History {
+		for _, s := range e.Patterns() {
+			if _, found := patternSet[s]; !found {
+				if _, found := IgnoredLoginValues[s]; !found {
+					patterns = append(patterns, s)
+				}
+				patternSet[s] = struct{}{}
+			}
+		}
+	}
+	return patterns
+}
+
 func (h *LoginHistory) UpdateAlternates(ctx context.Context, nk runtime.NakamaModule, excludeUserIDs ...string) (hasDisabledAlts bool, err error) {
-	matches, err := LoginAlternateSearch(ctx, nk, h)
+
+	// Update alternates
+	matches, otherHistories, err := LoginAlternateSearch(ctx, nk, h, true)
 	if err != nil {
 		return false, fmt.Errorf("error searching for alternate logins: %w", err)
 	}
@@ -355,57 +416,51 @@ func (h *LoginHistory) UpdateAlternates(ctx context.Context, nk runtime.NakamaMo
 		return false, nil
 	}
 
-	h.AlternateMap = make(map[string][]*AlternateSearchMatch, len(matches))
-	h.SecondDegreeAlternates = make([]string, 0, len(matches))
-
-	userIDs := make([]string, 0, len(matches))
+	// Rebuild it
+	h.AlternateMatches = make(map[string][]*AlternateSearchMatch, len(matches))
+	secondMap := make(map[string]bool, len(matches))
 	for _, m := range matches {
-		userIDs = append(userIDs, m.otherHistory.userID)
-	}
-	slices.Sort(userIDs)
-	userIDs = slices.Compact(userIDs)
-
-	// Remove excluded user IDs
-	for i := 0; i < len(userIDs); i++ {
-		if slices.Contains(excludeUserIDs, userIDs[i]) {
-			userIDs = slices.Delete(userIDs, i, i+1)
-			i--
-		}
-	}
-
-	if accounts, err := nk.AccountsGetId(ctx, userIDs); err != nil {
-		return false, fmt.Errorf("error getting accounts for user IDs %v: %w", userIDs, err)
-	} else {
-		for _, a := range accounts {
-			if !h.IgnoreDisabledAlternates && a.GetDisableTime() != nil && !a.GetDisableTime().AsTime().IsZero() {
-				hasDisabledAlts = true
+		h.AlternateMatches[m.OtherUserID] = append(h.AlternateMatches[m.OtherUserID], m)
+		if otherHistory, found := otherHistories[m.OtherUserID]; found {
+			// add second-level alternates
+			for id := range otherHistory.AlternateMatches {
+				secondMap[id] = true
 			}
 		}
 	}
 
-	secondMap := make(map[string]struct{}, len(matches))
-	for _, m := range matches {
+	// prune the second degree alts
+	delete(secondMap, h.userID)
+	h.SecondDegreeAlternates = make([]string, 0, len(matches))
+	for userID := range h.AlternateMatches {
+		delete(secondMap, userID)
+	}
 
-		h.AlternateMap[m.otherHistory.userID] = append(h.AlternateMap[m.otherHistory.userID], m)
-		// add second-level alternates
-		for id := range m.otherHistory.AlternateMap {
-			secondMap[id] = struct{}{}
+	// Remove excluded user IDs
+	for _, userID := range append(excludeUserIDs, h.userID) {
+		delete(secondMap, userID)
+		delete(h.AlternateMatches, userID)
+	}
+
+	// Check if the player has disabled alternates
+	if !h.IgnoreDisabledAlternates {
+		userIDs := make([]string, 0, len(matches))
+		for userID := range h.AlternateMatches {
+			userIDs = append(userIDs, userID)
+		}
+		if accounts, err := nk.AccountsGetId(ctx, userIDs); err != nil {
+			return false, fmt.Errorf("error getting accounts for user IDs %v: %w", userIDs, err)
+		} else {
+			for _, a := range accounts {
+				if a.GetDisableTime() != nil && !a.GetDisableTime().AsTime().IsZero() {
+					hasDisabledAlts = true
+				}
+			}
 		}
 	}
 
-	// Filter the second-degree alternates
-	h.SecondDegreeAlternates = make([]string, 0, len(secondMap))
-
-	for userID := range h.AlternateMap {
-
-		if userID == h.userID {
-			continue
-		}
-
-		if _, found := h.AlternateMap[userID]; found {
-			continue
-		}
-
+	// Rebuild the second degree alternates
+	for userID := range secondMap {
 		h.SecondDegreeAlternates = append(h.SecondDegreeAlternates, userID)
 	}
 
@@ -415,7 +470,6 @@ func (h *LoginHistory) UpdateAlternates(ctx context.Context, nk runtime.NakamaMo
 	h.SecondDegreeAlternates = slices.Compact(h.SecondDegreeAlternates)
 
 	// Check if the alternates have changed
-
 	return hasDisabledAlts, nil
 }
 
@@ -433,10 +487,16 @@ func (h *LoginHistory) rebuildCache() {
 	h.XPIs = make(map[string]time.Time, len(h.History))
 	h.ClientIPs = make(map[string]time.Time, len(h.History))
 
+	cacheSet := make(map[string]bool, len(h.History)*4)
 	// Rebuild the cache from each history entry
 	for _, e := range h.History {
 
-		h.Cache = append(h.Cache, e.XPID.Token(), e.ClientIP, e.LoginData.HMDSerialNumber, e.SystemProfile())
+		for _, s := range e.Items() {
+			if _, found := cacheSet[s]; !found {
+				h.Cache = append(h.Cache, s)
+				cacheSet[s] = true
+			}
+		}
 
 		if !e.XPID.IsNil() {
 			evrIDStr := e.XPID.String()
@@ -460,12 +520,7 @@ func (h *LoginHistory) rebuildCache() {
 	h.Cache = slices.Compact(h.Cache)
 
 	// Remove ignored values
-	for i := 0; i < len(h.Cache); i++ {
-		if _, ok := IgnoredLoginValues[h.Cache[i]]; ok {
-			h.Cache = slices.Delete(h.Cache, i, i+1)
-			i--
-		}
-	}
+	h.Cache = filterAltSearchPatterns(h.Cache)
 }
 
 func (h *LoginHistory) MarshalJSON() ([]byte, error) {

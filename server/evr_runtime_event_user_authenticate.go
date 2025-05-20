@@ -76,8 +76,8 @@ func (e *EventUserAuthenticated) Process(ctx context.Context, logger runtime.Log
 			// Set random time to disable and kick player
 			var (
 				firstIDs, _        = loginHistory.AlternateIDs()
-				altNames           = make([]string, 0, len(loginHistory.AlternateMap))
-				accountMap         = make(map[string]*api.Account, len(loginHistory.AlternateMap))
+				altNames           = make([]string, 0, len(loginHistory.AlternateMatches))
+				accountMap         = make(map[string]*api.Account, len(loginHistory.AlternateMatches))
 				delayMin, delayMax = 1, 4
 				kickDelay          = time.Duration(delayMin+rand.Intn(delayMax)) * time.Minute
 			)
