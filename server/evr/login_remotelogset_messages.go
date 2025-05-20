@@ -12,6 +12,7 @@ import (
 
 type RemoteLog interface {
 	MessageType() string
+	Message() string
 }
 
 type SessionIdentifierRemoteLog interface {
@@ -26,15 +27,19 @@ type GameTimer interface {
 }
 
 type GenericRemoteLog struct {
-	Message string `json:"message,omitempty"`
-	Type    string `json:"message_type,omitempty"`
+	MessageData string `json:"message,omitempty"`
+	Type        string `json:"message_type,omitempty"`
 }
 
 func (m GenericRemoteLog) MessageType() string {
 	if m.Type != "" {
 		return m.Type
 	}
-	return m.Message
+	return m.MessageData
+}
+
+func (m GenericRemoteLog) Message() string {
+	return m.MessageData
 }
 
 func UUIDFromRemoteLogString(s string) uuid.UUID {
@@ -194,7 +199,6 @@ func (m RemoteLogSessionStarted) SessionUUID() uuid.UUID {
 // CUSTOMIZATION_METRICS_PAYLOAD
 type RemoteLogCustomizationMetricsPayload struct {
 	GenericRemoteLog
-	Message        string `json:"message"`
 	SessionUUIDStr string `json:"[session][uuid]"`
 	PanelID        string `json:"[panel_id]"`
 	EventType      string `json:"[event_type]"`
@@ -244,7 +248,6 @@ func (m *RemoteLogCustomizationMetricsPayload) GetEquippedCustomization() (categ
 // PODIUM_INTERACTION
 type RemoteLogInteractionEvent struct {
 	GenericRemoteLog
-	Message     string        `json:"message"`
 	Ds          string        `json:"ds"`
 	PanelName   string        `json:"panel_name"`
 	PanelType   string        `json:"panel_type"`
@@ -254,7 +257,7 @@ type RemoteLogInteractionEvent struct {
 }
 
 func (m RemoteLogCustomizationMetricsPayload) MessageString() string {
-	return m.Message
+	return m.Message()
 }
 
 type RLEventDetail struct {
