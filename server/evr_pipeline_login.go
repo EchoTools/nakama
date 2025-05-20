@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"os"
 
 	"errors"
 	"fmt"
@@ -492,48 +493,10 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 		}
 	}
 
-	// Get the GroupID from the user's metadata
-	params.guildGroups, err = GuildUserGroupsList(ctx, p.nk, p.guildGroupRegistry, params.profile.ID())
-	if err != nil {
-		metricsTags["error"] = "failed_get_guild_groups"
-		return fmt.Errorf("failed to get guild groups: %w", err)
-	}
-
-	// Create a map of active suspension records by group ID.
-	guildEnforcementInheritenceMap := make(map[string][]string) // map[parentGroupID][]childGroupID
-	for _, gg := range params.guildGroups {
-		if len(gg.SuspensionInheritanceGroupIDs) > 0 {
-			for _, parentID := range gg.SuspensionInheritanceGroupIDs {
-				guildEnforcementInheritenceMap[parentID] = append(guildEnforcementInheritenceMap[parentID], gg.IDStr())
-			}
-		}
-	}
-
-	// Check for suspensions for this user and their first tier alts.
-	params.activeSuspensionRecords = make(map[string]map[string]GuildEnforcementRecord)
 	firstIDs, _ := loginHistory.AlternateIDs()
-
-	if loginHistory.IgnoreDisabledAlternates {
-		firstIDs = []string{}
-	}
-
-	if journals, err := EnforcementJournalSearch(ctx, p.nk, append(firstIDs, params.UserID())); err != nil {
-		logger.Warn("Unable to read enforcement journal", zap.Error(err))
-	} else {
-		for uID, journal := range journals {
-			suspensions := journal.ActiveSuspensions()
-			if len(suspensions) == 0 {
-				continue
-			}
-			for parent, children := range guildEnforcementInheritenceMap {
-				for _, child := range children {
-					if suspensions[parent].SuspensionExpiry.After(suspensions[child].SuspensionExpiry) {
-						suspensions[child] = suspensions[parent]
-					}
-				}
-			}
-			params.activeSuspensionRecords[uID] = suspensions
-		}
+	if params.activeSuspensionRecords, err = CheckEnforcementSuspensions(ctx, p.nk, p.guildGroupRegistry, params.profile.ID(), firstIDs); err != nil {
+		metricsTags["error"] = "failed_check_suspensions"
+		return fmt.Errorf("failed to check suspensions: %w", err)
 	}
 
 	metricsTags["error"] = "nil"
