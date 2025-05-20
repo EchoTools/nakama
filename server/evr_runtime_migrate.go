@@ -20,12 +20,14 @@ type UserMigrater interface {
 
 func MigrateSystem(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule) {
 	// Combine the loadouts into one storage object
-
+	<-time.After(20 * time.Second)
 	systemMigrations := []SystemMigrator{
 		//&MigrationDisabledAccountsToSuspensions{},
 		//&MigrationEnforcementJournals{},
 		//&MigrationLeaderboardPrune{},
 		//MigrationSuspensions{},
+		&MigrationRebuildLoginHistory{},
+		//&MigrationCheckAltSuspensions{},
 	}
 
 	allUserMigrations := []UserMigrater{
