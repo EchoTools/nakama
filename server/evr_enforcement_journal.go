@@ -135,6 +135,7 @@ func (s *GuildEnforcementJournal) GroupRecords(groupID string) []GuildEnforcemen
 	return []GuildEnforcementRecord{}
 }
 
+// map[groupID]GuildEnforcementRecord
 func (s *GuildEnforcementJournal) ActiveSuspensions() map[string]GuildEnforcementRecord {
 	active := make(map[string]GuildEnforcementRecord, 0)
 	for groupID, records := range s.RecordsByGroupID {
@@ -252,7 +253,7 @@ func (l GuildEnforcementJournalList) Latest(groupIDs []string) (string, string, 
 	return latest.GroupID, latest.UserID, latest.Record
 }
 
-func EnforcementJournalSearch(ctx context.Context, nk runtime.NakamaModule, userIDs []string) (GuildEnforcementJournalList, error) {
+func EnforcementJournalsLoad(ctx context.Context, nk runtime.NakamaModule, userIDs []string) (GuildEnforcementJournalList, error) {
 
 	ops := make([]*runtime.StorageRead, 0, len(userIDs))
 	for _, userID := range userIDs {
@@ -279,6 +280,54 @@ func EnforcementJournalSearch(ctx context.Context, nk runtime.NakamaModule, user
 	}
 
 	return journals, nil
+}
+
+// map[GroupID]map[UserID]GuildEnforcementRecord
+func CheckEnforcementSuspensions(ctx context.Context, nk runtime.NakamaModule, guildGroupRegistry *GuildGroupRegistry, userID string, firstAltIDs []string) (map[string]map[string]GuildEnforcementRecord, error) {
+
+	// Get the GroupID from the user's metadata
+	guildGroups, err := GuildUserGroupsList(ctx, nk, guildGroupRegistry, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create a map of guild inheritence by parent/child group ID.
+	guildEnforcementInheritenceMap := make(map[string][]string) // map[parentGroupID][]childGroupID
+	for _, gg := range guildGroups {
+		if len(gg.SuspensionInheritanceGroupIDs) > 0 {
+			for _, parentID := range gg.SuspensionInheritanceGroupIDs {
+				guildEnforcementInheritenceMap[parentID] = append(guildEnforcementInheritenceMap[parentID], gg.IDStr())
+			}
+		}
+	}
+
+	// Check for suspensions for this user and their first degree alts.
+	activeSuspensionRecords := make(map[string]map[string]GuildEnforcementRecord)
+
+	if journals, err := EnforcementJournalsLoad(ctx, nk, append(firstAltIDs, userID)); err != nil {
+		return nil, fmt.Errorf("failed to load enforcement journals: %w", err)
+	} else {
+		for uID, journal := range journals {
+			activeSuspensionRecords[uID] = applySuspensionInheritence(journal, guildEnforcementInheritenceMap)
+		}
+	}
+
+	return activeSuspensionRecords, nil
+
+}
+
+func applySuspensionInheritence(journal *GuildEnforcementJournal, inheritenceMap map[string][]string) map[string]GuildEnforcementRecord {
+	activeSuspensions := journal.ActiveSuspensions()
+	for parent, children := range inheritenceMap {
+		for _, child := range children {
+			if parentSuspension, ok := activeSuspensions[parent]; ok {
+				if _, ok := activeSuspensions[child]; !ok || parentSuspension.SuspensionExpiry.After(activeSuspensions[child].SuspensionExpiry) {
+					activeSuspensions[child] = parentSuspension
+				}
+			}
+		}
+	}
+	return activeSuspensions
 }
 
 func FormatDuration(d time.Duration) string {
