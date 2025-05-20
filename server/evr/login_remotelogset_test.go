@@ -47,7 +47,9 @@ func TestRemoteLogCustomizationMetricsPayload_GetCategory(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &RemoteLogCustomizationMetricsPayload{
-				Message:        tt.fields.Message,
+				GenericRemoteLog: GenericRemoteLog{
+					MessageData: tt.fields.Message,
+				},
 				SessionUUIDStr: tt.fields.SessionUUID,
 				PanelID:        tt.fields.PanelID,
 				EventType:      tt.fields.EventType,
@@ -75,8 +77,8 @@ func TestParseRemoteLog(t *testing.T) {
 			message: `{"[game_info][game_time]": 36.913235, "[game_info][is_arena]": true, "[game_info][is_capture_point]": false, "[game_info][is_combat]": false, "[game_info][is_payload]": false, "[game_info][is_private]": true, "[game_info][is_social]": false, "[game_info][level]": "mpl_arena_a", "[game_info][match_type]": "Echo_Arena_Private", "[player_info][displayname]": "sprockee", "[player_info][teamid]": 1, "[player_info][userid]": "OVR-ORG-123412341234", "[session][uuid]": "{CC09F341-AF21-4BDF-AB77-1083AD1B3C1E}", "message": "User disconnected while game still playing", "message_type": "USER_DISCONNECT"}`,
 			want: &RemoteLogUserDisconnected{
 				GenericRemoteLog: GenericRemoteLog{
-					Message: "User disconnected while game still playing",
-					Type:    "USER_DISCONNECT",
+					MessageData: "User disconnected while game still playing",
+					Type:        "USER_DISCONNECT",
 				},
 				GameInfoGameTime:       36.913235,
 				GameInfoIsArena:        true,
@@ -107,7 +109,9 @@ func TestParseRemoteLog(t *testing.T) {
 						"[user_id]": "OVR-ORG-1139"
 					}`,
 			want: &RemoteLogCustomizationMetricsPayload{
-				Message:        "CUSTOMIZATION_METRICS_PAYLOAD",
+				GenericRemoteLog: GenericRemoteLog{
+					MessageData: "CUSTOMIZATION_METRICS_PAYLOAD",
+				},
 				SessionUUIDStr: "{20616A2A-ED52-43EF-93F0-4558D1147550}",
 				PanelID:        "item_panel",
 				EventType:      "item_equipped",
@@ -124,8 +128,8 @@ func TestParseRemoteLog(t *testing.T) {
 			message: `{"message":"Game Pause Settings","message_type":"GAME_SETTINGS","game_settings":{"announcer":1,"music":0,"sfx":8,"voip":10,"wristangleoffset":21.000000,"smoothrotationspeed":10.000000,"personalbubbleradius":2.000000,"grabdeadzone":7.000000,"releasedistance":7.500000,"personalbubblemode":0,"personalspacemode":2,"voipmode":3,"voipmodeffect":0,"voiploudnesslevel":0,"dynamicmusicmode":0,"HUD":false,"EnableYaw":true,"EnablePitch":true,"EnableRoll":false,"EnableSmoothRotation":true,"EnablePersonalBubble":false,"EnablePersonalSpace":true,"EnableNetStatusHUD":false,"EnableNetStatusPause":true,"EnableAPIAccess":true,"EnableGhostAll":false,"EnableMuteAll":false,"EnableMuteEnemyTeam":false,"MatchTagDisplay":true,"EnableVoipLoudness":true,"EnableMaxLoudness":false,"EnableStreamerMode":false}}`,
 			want: &RemoteLogPauseSettings{
 				GenericRemoteLog: GenericRemoteLog{
-					Message: "Game Pause Settings",
-					Type:    "GAME_SETTINGS",
+					MessageData: "Game Pause Settings",
+					Type:        "GAME_SETTINGS",
 				},
 				Settings: GamePauseSettings{
 					EnableAPIAccess:      true,

@@ -70,7 +70,7 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 			}
 			continue
 		}
-
+		logger.WithField("message", parsed).Debug("Parsed remote log message")
 		entries = append(entries, parsed)
 	}
 	// Send the remote logs to the match data event.
