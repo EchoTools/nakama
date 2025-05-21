@@ -168,20 +168,22 @@ func (h *EventDispatcher) unmarshalEventFactory(events []Event) func(event *api.
 
 func (h *EventDispatcher) processEvent(ctx context.Context, logger runtime.Logger, evt *api.Event) {
 
-	if e, err := h.eventUnmarshaler(evt); err != nil {
-		logger.Warn("failed to unmarshal event: %v", err)
-	} else if e != nil {
-		if err := e.Process(ctx, logger, h); err != nil {
-			logger.Error("failed to process event: %v", err)
-		}
-		return
-	}
-
 	eventMap := map[string]func(context.Context, runtime.Logger, *api.Event) error{
 		EventSessionStart:           h.eventSessionStart,
 		EventSessionEnd:             h.eventSessionEnd,
 		EventLobbySessionAuthorized: h.handleLobbyAuthorized,
 		EventMatchData:              h.handleMatchEvent,
+	}
+
+	if _, ok := eventMap[evt.Name]; !ok {
+		if e, err := h.eventUnmarshaler(evt); err != nil {
+			logger.Warn("failed to unmarshal event: %v", err)
+		} else if e != nil {
+			if err := e.Process(ctx, logger, h); err != nil {
+				logger.Error("failed to process event: %v", err)
+			}
+			return
+		}
 	}
 
 	fields := map[string]any{
