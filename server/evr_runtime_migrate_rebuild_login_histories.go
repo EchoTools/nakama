@@ -30,26 +30,6 @@ func (m *MigrationRebuildLoginHistory) MigrateSystem(ctx context.Context, logger
 
 	var numAccounts, totalPrevNumAlts, totalCurNumAlts, numActive, numErrors int
 
-	type AlternateSearchMatchCompact struct {
-		MatchEntry *LoginHistoryEntry `json:"entry"`
-		Items      []string           `json:"items"`
-	}
-
-	type LoginCompact struct {
-		Active                   map[string]*LoginHistoryEntry             `json:"active"`                     // map[deviceID]DeviceHistoryEntry
-		History                  map[string]*LoginHistoryEntry             `json:"history"`                    // map[deviceID]DeviceHistoryEntry
-		Cache                    []string                                  `json:"cache"`                      // list of IP addresses, EvrID's, HMD Serial Numbers, and System Data
-		XPIs                     map[string]time.Time                      `json:"xpis"`                       // list of XPIs
-		ClientIPs                map[string]time.Time                      `json:"client_ips"`                 // map[clientIP]time.Time
-		AuthorizedIPs            map[string]time.Time                      `json:"authorized_client_ips"`      // map[clientIP]time.Time
-		DeniedClientAddresses    []string                                  `json:"denied_client_addrs"`        // list of denied IPs
-		PendingAuthorizations    map[string]*LoginHistoryEntry             `json:"pending_authorizations"`     // map[XPID:ClientIP]LoginHistoryEntry
-		SecondDegreeAlternates   []string                                  `json:"second_degree"`              // []userID
-		AlternateMatches         map[string][]*AlternateSearchMatchCompact `json:"alternate_accounts"`         // map of alternate user IDs and what they have in common
-		GroupNotifications       map[string]map[string]time.Time           `json:"notified_groups"`            // list of groups that have been notified of this alternate login
-		IgnoreDisabledAlternates bool                                      `json:"ignore_disabled_alternates"` // Ignore disabled alternates
-	}
-
 	for {
 
 		groups, groupCursor, err = nk.GroupsList(ctx, "", "", nil, nil, 100, groupCursor)
