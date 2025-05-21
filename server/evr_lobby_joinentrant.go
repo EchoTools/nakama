@@ -280,7 +280,9 @@ OuterLoop:
 		message = message + expires
 		return NewLobbyError(KickedFromLobbyGroup, message)
 
-	} else if suspendedUserID != "" && gg.RejectPlayersWithSuspendedAlternates {
+	} else if suspendedUserID != "" && gg.RejectPlayersWithSuspendedAlternates && !params.ignoreDisabledAlternates {
+		// This is an alternate account of a suspended user.
+		metricsTags["error"] = "suspended_alternate"
 		author := discordgo.MessageEmbedAuthor{
 			Name:    fmt.Sprintf("%s (%s)", lobbyParams.DisplayName, session.Username()),
 			IconURL: params.profile.AvatarURL(),
