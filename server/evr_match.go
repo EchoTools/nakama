@@ -484,14 +484,19 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 	node := ctx.Value(runtime.RUNTIME_CTX_NODE).(string)
 
 	for _, p := range presences {
-
+		class := "Player"
+		sessionStartTime := state.joinTimestamps[p.GetSessionId()]
+		if sessionStartTime.IsZero() {
+			sessionStartTime = state.StartTime
+			class = "Server"
+		}
 		logger.WithFields(map[string]interface{}{
 			"username": p.GetUsername(),
 			"uid":      p.GetUserId(),
 			"sid":      p.GetSessionId(),
 			"reason":   p.GetReason(),
-			"duration": time.Since(state.joinTimestamps[p.GetSessionId()]),
-		}).Debug("Player leaving the match.")
+			"duration": time.Since(sessionStartTime),
+		}).Debug(class + " leaving the match.")
 	}
 
 	if state.Started() && state.server == nil && len(state.presenceMap) == 0 {
