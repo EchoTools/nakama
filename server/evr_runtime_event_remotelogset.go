@@ -150,7 +150,6 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 			if msg.GameInfoGameTime == 0 {
 				continue
 			}
-
 			/*
 				matchID, err := NewMatchID(msg.SessionUUID(), p.node)
 				if err != nil {
