@@ -122,6 +122,7 @@ func (h *RPCHandler) MatchListPublicRPC(ctx context.Context, logger runtime.Logg
 	playerCount := 0
 	gameServers := make([]*GameServerPresence, 0, len(matches))
 	labels := make([]*MatchLabel, 0, len(matches))
+	playerSet := make(map[string]bool) // To avoid counting players multiple times
 	for _, m := range matches {
 		l := &MatchLabel{}
 		if err := json.Unmarshal([]byte(m.GetLabel().GetValue()), l); err != nil {
@@ -131,10 +132,10 @@ func (h *RPCHandler) MatchListPublicRPC(ctx context.Context, logger runtime.Logg
 		v := l.PublicView()
 
 		for _, p := range v.Players {
-			if p.IsReservation {
-				continue
+			if _, exists := playerSet[p.UserID]; !exists {
+				playerSet[p.UserID] = true
+				playerCount++
 			}
-			playerCount++
 		}
 
 		gameServers = append(gameServers, v.GameServer)
