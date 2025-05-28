@@ -383,7 +383,11 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 		case *evr.RemoteLogPostMatchTypeStats:
 			// Process the post match stats into the player's statistics
 			if err := s.processPostMatchTypeStats(ctx, logger, db, nk, sessionRegistry, statisticsQueue, msg); err != nil {
-				logger.WithField("error", err).Warn("Failed to process post match stats")
+				logger.WithFields(map[string]any{
+					"error": err,
+					"msg":   msg,
+				}).Warn("Failed to process post match type stats")
+
 				continue
 			}
 
