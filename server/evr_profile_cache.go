@@ -193,7 +193,7 @@ func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, n
 	}
 
 	// Default to their main group if they are not a member of the group
-	if groupID == "" || len(evrProfile.InGameNames) == 0 || evrProfile.InGameNames[groupID] == "" {
+	if _, ok := evrProfile.GetGroupDisplayName(groupID); !ok || groupID == "" {
 		groupID = evrProfile.GetActiveGroupID().String()
 
 	}

@@ -594,44 +594,46 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	}
 	params.latencyHistory.Store(latencyHistory)
 
-	if params.userDisplayNameOverride != "" {
-		// This will be picked up by GetActiveGroupDisplayName and other functions
-	} else if params.profile.GuildDisplayNameOverrides != nil && params.profile.GuildDisplayNameOverrides[params.profile.ActiveGroupID] != "" {
-		params.userDisplayNameOverride = params.profile.GuildDisplayNameOverrides[params.profile.ActiveGroupID]
-	}
-
+	// Load the display name history for the player.
 	params.displayNameHistory, err = DisplayNameHistoryLoad(ctx, p.nk, session.userID.String())
 	if err != nil {
 		logger.Warn("Failed to load display name history", zap.Error(err))
 		return fmt.Errorf("failed to load display name history: %w", err)
 	}
 
-	// Update the player's active group display name.
-	displayName, _ := params.displayNameHistory.LatestGroup(params.profile.ActiveGroupID)
-	params.profile.SetGroupDisplayName(params.profile.ActiveGroupID, displayName)
-
-	// Collect all of the in-game names for the player.
-	displayNames := make([]string, 0, len(params.profile.InGameNames))
-	for _, dn := range params.profile.InGameNames {
-		if dn == "" {
-			delete(params.profile.InGameNames, dn)
-		} else {
-			displayNames = append(displayNames, dn)
-		}
+	// Update the player's active group (default) display name.
+	defaultDisplayName, _ := params.displayNameHistory.LatestGroup(params.profile.ActiveGroupID)
+	if defaultDisplayName == "" {
+		// If the active group display name is empty, set it to the username.
+		defaultDisplayName = params.profile.Username()
+	} else if params.userDisplayNameOverride != "" {
+		// If the user has provided a display name override, use that.
+		defaultDisplayName = params.userDisplayNameOverride
+	} else if dn := params.profile.GetDisplayNameOverride(params.profile.ActiveGroupID); dn != "" {
+		// If the profile has a display name override for the active group, use that.
+		defaultDisplayName = dn
 	}
+	// Set the default (active group) display name in the profile.
+	params.profile.SetGroupDisplayName(params.profile.ActiveGroupID, defaultDisplayName)
 
+	// Check if any of the player's current in-game names are owned by someone else.
+	displayNames := make([]string, 0)
+	for _, dn := range params.profile.DisplayNamesByGroupID() {
+		displayNames = append(displayNames, dn)
+	}
+	// If the display name is owned by someone else, then remove it from the player's profile.
 	globalSettings := ServiceSettings()
 	if ownerMap, err := DisplayNameOwnerSearch(ctx, p.nk, displayNames); err != nil {
 		logger.Warn("Failed to check display name owner", zap.Any("display_names", displayNames), zap.Error(err))
 	} else {
 		// Prune the in-game names that are owned by someone else.
-		for _, dn := range displayNames {
+		for _, dn := range params.profile.DisplayNamesByGroupID() {
 			if ownerIDs, ok := ownerMap[dn]; ok && !slices.Contains(ownerIDs, params.profile.ID()) {
 				// This display name is owned by someone else.
-				for gID, gn := range params.profile.InGameNames {
+				for gID, gn := range params.profile.DisplayNamesByGroupID() {
 					if strings.EqualFold(gn, dn) {
 						// This display name is owned by someone else.
-						delete(params.profile.InGameNames, gID)
+						params.profile.DeleteGroupDisplayName(gID)
 						if globalSettings.DisplayNameInUseNotifications {
 							// Notify the player that this display name is in use.
 							ownerDiscordID := p.discordCache.UserIDToDiscordID(ownerIDs[0])
@@ -647,10 +649,10 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		}
 	}
 
-	// Update the In-Game names for the player.
-	igns := make([]string, 0, len(params.profile.InGameNames))
-	for _, ign := range params.profile.InGameNames {
-		igns = append(igns, ign)
+	// Update the in-game names for the player (in the display name history).
+	igns := make([]string, 0, len(params.profile.DisplayNamesByGroupID()))
+	for groupID := range params.profile.DisplayNamesByGroupID() {
+		igns = append(igns, params.profile.GetGroupDisplayNameOrDefault(groupID))
 	}
 	params.displayNameHistory.ReplaceInGameNames(igns)
 
@@ -1186,11 +1188,9 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 	}
 	groupIDStr := label.GetGroupID().String()
 
-	if len(profile.InGameNames) != 0 {
-		if _, isMember := profile.InGameNames[groupIDStr]; !isMember {
-			logger.Warn("Player is not a member of the group", zap.String("uid", playerInfo.UserID), zap.String("gid", groupIDStr))
-			return nil
-		}
+	if _, ok := profile.GetGroupDisplayName(groupIDStr); !ok {
+		logger.Warn("Player is not a member of the group", zap.String("uid", playerInfo.UserID), zap.String("gid", groupIDStr))
+		return nil
 	}
 
 	serviceSettings := ServiceSettings()
