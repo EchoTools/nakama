@@ -301,11 +301,12 @@ func (c *DiscordIntegrator) syncMember(ctx context.Context, logger *zap.Logger, 
 	}
 
 	member, err := c.GuildMember(guildID, discordID)
-	if err == ErrMemberNotFound {
+	if err == ErrMemberNotFound || member == nil {
 		// Remove the user from the guild group.
 		if err := c.GuildGroupMemberRemove(ctx, guildID, discordID, ""); err != nil {
 			return fmt.Errorf("failed to remove guild group member: %w", err)
 		}
+		logger.Info("Member not found, removed from guild group", zap.String("discord_id", discordID), zap.String("guild_id", guildID))
 	} else if err != nil {
 		return fmt.Errorf("error getting guild member: %w", err)
 	}
