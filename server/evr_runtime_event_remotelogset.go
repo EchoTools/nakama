@@ -435,15 +435,15 @@ func (s *EventRemoteLogSet) processPostMatchTypeStats(ctx context.Context, logge
 	}
 
 	// Get the player's information
-	playerInfo := label.GetPlayerByEvrID(s.XPID)
+	playerInfo := label.GetPlayerByEvrID(msg.XPID)
 	if playerInfo == nil {
 		// If the player isn't in the match, do not update the stats
-		return fmt.Errorf("player not in match: %s", s.XPID)
+		return fmt.Errorf("player not in match: %s", msg.XPID)
 	}
 
 	// If the player isn't in the match, or isn't a player, do not update the stats
 	if playerInfo == nil || (playerInfo.Team != BlueTeam && playerInfo.Team != OrangeTeam) {
-		return fmt.Errorf("non-player profile update request: %s", s.XPID)
+		return fmt.Errorf("non-player profile update request: %s", msg.XPID)
 	}
 	logger = logger.WithFields(map[string]any{
 		"player_uid":  playerInfo.UserID,

@@ -29,6 +29,7 @@ type GameTimer interface {
 type GenericRemoteLog struct {
 	MessageData string `json:"message,omitempty"`
 	Type        string `json:"message_type,omitempty"`
+	XPID        EvrId  `json:"userid"`
 }
 
 func (m GenericRemoteLog) MessageType() string {
