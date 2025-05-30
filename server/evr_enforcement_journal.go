@@ -285,35 +285,59 @@ func EnforcementJournalsLoad(ctx context.Context, nk runtime.NakamaModule, userI
 // map[GroupID]map[UserID]GuildEnforcementRecord
 func CheckEnforcementSuspensions(ctx context.Context, nk runtime.NakamaModule, guildGroupRegistry *GuildGroupRegistry, userID string, firstAltIDs []string) (map[string]map[string]GuildEnforcementRecord, error) {
 
-	// Get the GroupID from the user's metadata
-	guildGroups, err := GuildUserGroupsList(ctx, nk, guildGroupRegistry, userID)
+	journals, err := EnforcementJournalsLoad(ctx, nk, append(firstAltIDs, userID))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to load enforcement journals: %w", err)
 	}
 
-	// Create a map of guild inheritence by parent/child group ID.
-	guildEnforcementInheritenceMap := make(map[string][]string) // map[parentGroupID][]childGroupID
-	for _, gg := range guildGroups {
-		if len(gg.SuspensionInheritanceGroupIDs) > 0 {
-			for _, parentID := range gg.SuspensionInheritanceGroupIDs {
-				guildEnforcementInheritenceMap[parentID] = append(guildEnforcementInheritenceMap[parentID], gg.IDStr())
+	type record struct {
+		UserID          string
+		GroupID         string
+		OriginalGroupID string
+		GuildEnforcementRecord
+	}
+
+	// Collect all active suspensions for the user and their alts
+	// Only the longest suspension for each group is kept
+	recordsByGroupID := make(map[string]record, len(journals))
+	for uID, journal := range journals {
+		for gID, r := range journal.ActiveSuspensions() {
+			if r.SuspensionExpiry.After(recordsByGroupID[gID].GuildEnforcementRecord.SuspensionExpiry) {
+				recordsByGroupID[gID] = record{
+					UserID:                 uID,
+					GroupID:                gID,
+					OriginalGroupID:        gID,
+					GuildEnforcementRecord: r,
+				}
 			}
 		}
 	}
 
-	// Check for suspensions for this user and their first degree alts.
-	activeSuspensionRecords := make(map[string]map[string]GuildEnforcementRecord)
-
-	if journals, err := EnforcementJournalsLoad(ctx, nk, append(firstAltIDs, userID)); err != nil {
-		return nil, fmt.Errorf("failed to load enforcement journals: %w", err)
-	} else {
-		for uID, journal := range journals {
-			activeSuspensionRecords[uID] = applySuspensionInheritence(journal, guildEnforcementInheritenceMap)
+	for child, parents := range guildGroupRegistry.InheretanceMap() {
+		childStr := child.String()
+		for parent := range parents {
+			if parentRecord, ok := recordsByGroupID[parent.String()]; ok {
+				if childRecord, ok := recordsByGroupID[childStr]; !ok || parentRecord.SuspensionExpiry.After(childRecord.SuspensionExpiry) {
+					recordsByGroupID[childStr] = record{
+						UserID:                 parentRecord.UserID,
+						GroupID:                childStr,
+						OriginalGroupID:        parentRecord.OriginalGroupID,
+						GuildEnforcementRecord: parentRecord.GuildEnforcementRecord,
+					}
+				}
+			}
 		}
 	}
 
-	return activeSuspensionRecords, nil
-
+	// Build the final map of records by group ID and user ID
+	activeSuspensions := make(map[string]map[string]GuildEnforcementRecord, len(recordsByGroupID))
+	for _, r := range recordsByGroupID {
+		if _, ok := activeSuspensions[r.GroupID]; !ok {
+			activeSuspensions[r.GroupID] = make(map[string]GuildEnforcementRecord)
+		}
+		activeSuspensions[r.GroupID][r.UserID] = r.GuildEnforcementRecord
+	}
+	return activeSuspensions, nil
 }
 
 func applySuspensionInheritence(journal *GuildEnforcementJournal, inheritenceMap map[string][]string) map[string]GuildEnforcementRecord {
