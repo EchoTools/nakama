@@ -26,7 +26,7 @@ func MigrateSystem(ctx context.Context, logger runtime.Logger, db *sql.DB, nk ru
 		//&MigrationEnforcementJournals{},
 		//&MigrationLeaderboardPrune{},
 		//MigrationSuspensions{},
-		&MigrationRebuildLoginHistory{},
+		//&MigrationRebuildLoginHistory{},
 		//&MigrationCheckAltSuspensions{},
 	}
 
