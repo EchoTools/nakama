@@ -622,7 +622,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 
 	globalSettings := ServiceSettings()
 	if ownerMap, err := DisplayNameOwnerSearch(ctx, p.nk, displayNames); err != nil {
-		logger.Warn("Failed to check display name owner", zap.Error(err))
+		logger.Warn("Failed to check display name owner", zap.Any("display_names", displayNames), zap.Error(err))
 	} else {
 		// Prune the in-game names that are owned by someone else.
 		for _, dn := range displayNames {
