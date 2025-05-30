@@ -664,6 +664,14 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	var potentialAlternates []string
 
 	if includeSystem {
+		firstIDs, _ := loginHistory.AlternateIDs()
+		// Check for any suspensions on alternate accounts
+		activeSuspensions, err := CheckEnforcementSuspensions(ctx, nk, d.guildGroupRegistry, evrAccount.ID(), firstIDs)
+		if err != nil {
+			return fmt.Errorf("failed to check enforcement suspensions: %w", err)
+		}
+		thisGroupSuspensions := activeSuspensions[groupID]
+
 		potentialAlternates = make([]string, 0, len(loginHistory.AlternateMatches))
 		for altUserID, matches := range loginHistory.AlternateMatches {
 			altAccount, err := nk.AccountGetId(ctx, altUserID)
@@ -681,8 +689,11 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 			}
 			slices.Sort(items)
 			items = slices.Compact(items)
-
-			s := fmt.Sprintf("<@%s> [%s] %s <t:%d:R>\n", altAccount.CustomId, altAccount.User.Username, state, altAccount.User.UpdateTime.AsTime().UTC().Unix())
+			suspendedText := ""
+			if suspenpension, ok := thisGroupSuspensions[altUserID]; ok {
+				suspendedText = fmt.Sprintf(" (suspended until <t:%d:R>)", suspenpension.SuspensionExpiry.UTC().Unix())
+			}
+			s := fmt.Sprintf("<@%s> [%s] %s <t:%d:R>%s\n", altAccount.CustomId, altAccount.User.Username, state, altAccount.User.UpdateTime.AsTime().UTC().Unix(), suspendedText)
 
 			for _, item := range items {
 				s += fmt.Sprintf("-  `%s`\n", item)
