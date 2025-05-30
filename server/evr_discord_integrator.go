@@ -374,7 +374,7 @@ func (c *DiscordIntegrator) syncMember(ctx context.Context, logger *zap.Logger, 
 	}
 
 	// Update the display name
-	if full || InGameName(member) != evrAccount.GetGroupDisplayName(groupID) {
+	if currentDisplayName, _ := evrAccount.GetGroupDisplayName(groupID); full || currentDisplayName != InGameName(member) {
 		if err := c.syncDisplayName(ctx, logger, account.User.Id, discordID, member.User.Username, groupID, InGameName(member)); err != nil {
 			return fmt.Errorf("error syncing display name: %w", err)
 		}
@@ -821,7 +821,7 @@ func (d *DiscordIntegrator) GuildGroupMemberRemove(ctx context.Context, guildID,
 		}
 	}
 
-	delete(md.InGameNames, groupID)
+	md.DeleteGroupDisplayName(groupID)
 	if md.GetActiveGroupID().String() == groupID {
 		md.SetActiveGroupID(uuid.Nil)
 	}

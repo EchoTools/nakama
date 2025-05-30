@@ -213,12 +213,19 @@ func (a EVRProfile) DisplayNamesByGroupID() map[string]string {
 	return a.InGameNames
 }
 
-func (a EVRProfile) GetGroupDisplayNameOrDefault(groupID string) string {
-
+func (a EVRProfile) GetDisplayNameOverride(groupID string) string {
 	if a.DisplayNameOverride != "" {
 		return a.DisplayNameOverride
 	} else if a.GuildDisplayNameOverrides != nil && a.GuildDisplayNameOverrides[groupID] != "" {
 		return a.GuildDisplayNameOverrides[groupID]
+	}
+	return ""
+}
+
+func (a EVRProfile) GetGroupDisplayNameOrDefault(groupID string) string {
+
+	if dn := a.GetDisplayNameOverride(groupID); dn != "" {
+		return sanitizeDisplayName(dn)
 	}
 
 	if a.InGameNames != nil {
@@ -248,14 +255,19 @@ func (a EVRProfile) GetGroupDisplayNameOrDefault(groupID string) string {
 		return ""
 	}
 }
-func (a *EVRProfile) GetGroupDisplayName(groupID string) string {
+func (a *EVRProfile) GetGroupDisplayName(groupID string) (string, bool) {
 	if a.InGameNames == nil {
-		return ""
+		return "", false
 	}
-	return a.InGameNames[groupID]
+	dn, found := a.InGameNames[groupID]
+	return dn, found
 }
 
 func (a *EVRProfile) SetGroupDisplayName(groupID, displayName string) (updated bool) {
+	displayName = sanitizeDisplayName(displayName)
+	if groupID == "" || displayName == "" {
+		return false
+	}
 	if a.InGameNames == nil {
 		a.InGameNames = make(map[string]string)
 	}
@@ -263,6 +275,17 @@ func (a *EVRProfile) SetGroupDisplayName(groupID, displayName string) (updated b
 		return false
 	}
 	a.InGameNames[groupID] = displayName
+	return true
+}
+
+func (a *EVRProfile) DeleteGroupDisplayName(groupID string) (updated bool) {
+	if a.InGameNames == nil {
+		return false
+	}
+	if _, found := a.InGameNames[groupID]; !found {
+		return false
+	}
+	delete(a.InGameNames, groupID)
 	return true
 }
 
