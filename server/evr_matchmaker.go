@@ -59,7 +59,6 @@ func (m *SkillBasedMatchmaker) EvrMatchmakerFn(ctx context.Context, logger runti
 		logger.Error("No candidates found. Matchmaker cannot run.")
 		return nil
 	}
-
 	startTime := time.Now()
 	defer func() {
 		if nk == nil {

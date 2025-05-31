@@ -452,6 +452,7 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeMMR bool, includeMax
 		fmt.Sprintf("+label.mode:%s", p.Mode.String()),
 		fmt.Sprintf("+label.group_id:%s", Query.Escape(p.GroupID.String())),
 		//fmt.Sprintf("label.version_lock:%s", p.VersionLock.String()),
+		fmt.Sprintf("-label.start_time:<=%d", time.Now().UTC().Add(30*time.Second).Unix()),
 		p.BackfillQueryAddon,
 	}
 
