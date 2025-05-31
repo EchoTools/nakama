@@ -1759,13 +1759,13 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				if vrmlUser.UserID == "" {
 					return fmt.Errorf("failed to get player's user")
 				}
-				playerURL := "https://vrmasterleague.com/EchoArena/Player/" + playerID
+				playerURL := "https://vrmasterleague.com/EchoArena/Players/" + playerID
 
 				vrmlDiscordID := strconv.FormatUint(uint64(vrmlUser.DiscordID), 10)
 				if vrmlDiscordID != target.ID && !forceLink {
 					return fmt.Errorf("VRML player [%s](%s) is not linked to discord user %s", vrmlUser.UserName, playerURL, target.Mention())
 				}
-				if err := LinkVRMLAccount(ctx, db, nk, targetUserID, vrmlUser.UserID, ""); err != nil {
+				if err := LinkVRMLAccount(ctx, db, nk, targetUserID, vrmlUser.UserID, playerID, ""); err != nil {
 					if err, ok := err.(*AccountAlreadyLinkedError); ok {
 						ownerID := d.cache.UserIDToDiscordID(err.OwnerUserID)
 						return fmt.Errorf("VRML player [%s](%s) is already linked to <@%s>", vrmlUser.UserName, playerURL, ownerID)

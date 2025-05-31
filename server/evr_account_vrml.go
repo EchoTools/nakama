@@ -40,7 +40,7 @@ func (a EVRProfile) VRMLUserID() string {
 }
 
 // VerifyOwnership verifies that the user owns the VRML account by checking the Discord ID
-func LinkVRMLAccount(ctx context.Context, db *sql.DB, nk runtime.NakamaModule, userID string, vrmlUserID, token string) error {
+func LinkVRMLAccount(ctx context.Context, db *sql.DB, nk runtime.NakamaModule, userID, vrmlUserID, vrmlPlayerID, token string) error {
 	// Link the vrml account to the user
 	if ownerID, err := GetUserIDByDeviceID(ctx, db, VRMLDeviceID(vrmlUserID)); err != nil {
 		if status.Code(err) != codes.NotFound {

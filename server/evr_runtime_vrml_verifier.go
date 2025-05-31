@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -16,9 +15,24 @@ import (
 	"go.uber.org/zap"
 )
 
+var (
+	ErrQueueEmpty = errors.New("VRML scan queue is empty")
+)
+
 const (
 	StorageKeyVRMLVerificationLedger = "EntitlementLedger"
 )
+
+type VRMLScanQueueEntry struct {
+	UserID   string `json:"user_id"`
+	Token    string `json:"token"`               // Will only be set if the user is new
+	PlayerID string `json:"player_id,omitempty"` // Optional, used for VRML player ID
+}
+
+func (e *VRMLScanQueueEntry) String() string {
+	data, _ := json.Marshal(e)
+	return string(data)
+}
 
 type VRMLScanQueue struct {
 	ctx    context.Context
@@ -95,33 +109,28 @@ func (v *VRMLScanQueue) Start() error {
 			case <-time.After(1 * time.Second):
 			}
 
-			val, err := v.dequeue()
+			entry, err := v.dequeue()
 			if err != nil {
+				if errors.Is(err, ErrQueueEmpty) {
+					continue
+				}
 				v.logger.Error("Failed to dequeue item", zap.Error(err))
 				continue
 			}
 
-			if val == "" {
-				continue
-			}
-
-			userID, token, found := strings.Cut(val, ":")
-			if !found {
-				v.logger.Error("Invalid queue item", zap.String("item", val))
-				continue
-			}
 			logger := v.logger.WithFields(map[string]any{
-				"user_id": userID,
+				"user_id":   entry.UserID,
+				"player_id": entry.PlayerID,
 			})
 
 			var (
-				vg         = v.newSession(token)
+				vg         = v.newSession(entry.Token)
 				vrmlUserID string
 			)
 
-			if token == "" {
+			if entry.Token == "" {
 				// Get the user's VRML ID from their account metadata
-				metadata, err := EVRProfileLoad(v.ctx, v.nk, userID)
+				metadata, err := EVRProfileLoad(v.ctx, v.nk, entry.UserID)
 				if err != nil {
 					logger.WithField("error", err).Error("Failed to load account metadata")
 					continue
@@ -133,32 +142,27 @@ func (v *VRMLScanQueue) Start() error {
 					continue
 				}
 				vrmlUserID = member.User.ID
-
 			} else {
 				// Get the vrmlUserID from the token
 				vrmlUser, err := vg.Me(vrmlgo.WithUseCache(false))
 				if err != nil {
-					logger.WithField("error", err).Error("Failed to get @Me data")
+					logger.WithField("error", err).Warn("Failed to get @Me data")
 					continue
 				}
 				vrmlUserID = vrmlUser.ID
 			}
 
 			// Get the player summary
-			summary, err := v.playerSummary(vg, vrmlUserID)
+			summary, err := v.playerSummary(vg, vrmlUserID, entry.PlayerID)
 			if err != nil {
-				logger.WithFields(map[string]any{
-					"error": err,
-				}).Error("Failed to get player summary")
+				logger.WithField("error", err).Warn("Failed to get player summary")
 				continue
 			}
 
 			// Store the summary
 			data, err := json.Marshal(summary)
 			if err != nil {
-				logger.WithFields(map[string]any{
-					"error": err,
-				}).Error("Failed to marshal player summary")
+				logger.WithField("error", err).Warn("Failed to marshal player summary")
 				continue
 			}
 
@@ -167,29 +171,27 @@ func (v *VRMLScanQueue) Start() error {
 				{
 					Collection:      StorageCollectionVRML,
 					Key:             StorageKeyVRMLSummary,
-					UserID:          userID,
+					UserID:          entry.UserID,
 					Value:           string(data),
 					PermissionRead:  1,
 					PermissionWrite: 0,
 				},
 			}); err != nil {
-				logger.WithFields(map[string]any{
-					"error": err,
-				}).Error("Failed to store user")
+				logger.WithField("error", err).Error("Failed to store user")
 				continue
 			}
 			// Count the number of matches played by season
 			entitlements := summary.Entitlements()
 
 			// Assign the cosmetics to the user
-			if err := AssignEntitlements(v.ctx, logger, v.nk, SystemUserID, "", userID, vrmlUserID, entitlements); err != nil {
+			if err := AssignEntitlements(v.ctx, logger, v.nk, SystemUserID, "", entry.UserID, vrmlUserID, entitlements); err != nil {
 				logger.WithField("error", err).Error("Failed to assign entitlements")
 				continue
 			}
 
 			// Store the entitlements in the ledger
 			ledger.Entries = append(ledger.Entries, &VRMLEntitlementLedgerEntry{
-				UserID:       userID,
+				UserID:       entry.UserID,
 				VRMLUserID:   vrmlUserID,
 				Entitlements: entitlements,
 			})
@@ -212,83 +214,89 @@ func (v *VRMLScanQueue) newSession(token string) *vrmlgo.Session {
 	return vg
 }
 
-func (v *VRMLScanQueue) Add(userID string, token string) error {
+func (v *VRMLScanQueue) Add(userID, token, playerID string) error {
 	if userID == "" && token == "" {
 		return fmt.Errorf("userID and token cannot both be empty")
 	}
 	// Send it to the queue channel
-	return v.enqueue(fmt.Sprintf("%s:%s", userID, token))
+	return v.enqueue(VRMLScanQueueEntry{
+		UserID:   userID,
+		Token:    token,
+		PlayerID: playerID,
+	})
 }
 
-func (v *VRMLScanQueue) enqueue(value string) error {
-	return v.redisClient.RPush(v.queueKey, value).Err()
+func (v *VRMLScanQueue) enqueue(entry VRMLScanQueueEntry) error {
+	return v.redisClient.RPush(v.queueKey, entry.String()).Err()
 }
 
-func (v *VRMLScanQueue) dequeue() (string, error) {
-	val, err := v.redisClient.LPop(v.queueKey).Result()
-	if err == redis.Nil {
-		return "", nil // Queue is empty
+func (v *VRMLScanQueue) dequeue() (VRMLScanQueueEntry, error) {
+	val, err := v.redisClient.LPop(v.queueKey).Bytes()
+	if err == ErrQueueEmpty {
+		return VRMLScanQueueEntry{}, redis.Nil // Queue is empty
 	}
-	return val, err
+	entry := VRMLScanQueueEntry{}
+	if err := json.Unmarshal(val, &entry); err != nil {
+		return VRMLScanQueueEntry{}, fmt.Errorf("failed to unmarshal queue entry: %v", err)
+	}
+	return entry, err
 }
 
-func (v *VRMLScanQueue) playerSummary(vg *vrmlgo.Session, memberID string) (*VRMLPlayerSummary, error) {
-
-	// Get the account information
-	account, err := vg.Member(memberID, vrmlgo.WithUseCache(false))
-	if err != nil {
-		return nil, fmt.Errorf("failed to get member data: %v", err)
-	}
-
+func (v *VRMLScanQueue) playerSummary(vg *vrmlgo.Session, memberID string, playerID string) (*VRMLPlayerSummary, error) {
+	var (
+		err     error
+		player  *vrmlgo.Player
+		teamIDs []string
+		teams   = make(map[string]*vrmlgo.Team)
+	)
 	// Get the seasons for the game
 	seasons, err := vg.GameSeasons(VRMLEchoArenaShortName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get seasons: %v", err)
 	}
-
-	// Get the player ID for this game
-
-	var (
-		player  *vrmlgo.Player
-		teamIDs []string
-		teams   = make(map[string]*vrmlgo.Team)
-	)
-
-	if playerID := account.PlayerID(VRMLEchoArenaShortName); playerID != "" {
-		// Get the player details
-		player, err = vg.Player(playerID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get player: %v", err)
-		}
-
-		teamIDs = account.TeamIDs(VRMLEchoArenaShortName)
-
-	} else {
-		// Try to discover the player ID if it is not found
-
-		player, err = v.searchPlayerBySeasons(vg, seasons, memberID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to find player: %v", err)
-		}
-
-		teamIDs = player.ThisGame.TeamIDs()
-	}
-
 	// Create a map of seasons
 	seasonNameMap := make(map[string]*vrmlgo.Season)
 	for _, s := range seasons {
 		seasonNameMap[s.Name] = s
 	}
 
-	// Get the teams for the player
+	if playerID != "" {
+		// If a player ID is provided, skip the search
+		player, err = vg.Player(playerID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get player: %v", err)
+		}
+		teamIDs = player.ThisGame.TeamIDs()
+	} else {
+		// If no player ID is provided, try to find the player by member ID
+		account, err := vg.Member(memberID, vrmlgo.WithUseCache(false))
+		if err != nil {
+			return nil, fmt.Errorf("failed to get member data: %v", err)
+		}
+		if playerID := account.PlayerID(VRMLEchoArenaShortName); playerID != "" {
+			// Get the player details
+			player, err = vg.Player(playerID)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get player: %v", err)
+			}
+			teamIDs = account.TeamIDs(VRMLEchoArenaShortName)
+		} else {
+			// Try to discover the player ID if it is not found
+			player, err = v.searchPlayerBySeasons(vg, seasons, memberID)
+			if err != nil {
+				return nil, fmt.Errorf("failed to find player: %v", err)
+			}
+			teamIDs = player.ThisGame.TeamIDs()
+		}
+	}
 
+	// Get the teams for the player
 	for _, teamID := range teamIDs {
 
 		details, err := vg.Team(teamID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get team details: %v", err)
 		}
-
 		teams[teamID] = details.Team
 	}
 
@@ -509,7 +517,7 @@ func (d *DiscordAppBot) handleVRMLVerify(ctx context.Context, logger runtime.Log
 		}
 
 		// Link the accounts
-		if err := LinkVRMLAccount(ctx, db, nk, userID, vrmlUser.ID, token); err != nil {
+		if err := LinkVRMLAccount(ctx, db, nk, userID, vrmlUser.ID, "", token); err != nil {
 			if err, ok := err.(*AccountAlreadyLinkedError); ok {
 				// Account is already linked to another user
 				logger.WithField("owner_user_id", err.OwnerUserID).Error("Account already linked to another user.")
