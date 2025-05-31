@@ -383,8 +383,13 @@ func (*WhoAmI) createSuspensionsEmbed(journal *GuildEnforcementJournal, guildGro
 
 		embed := &discordgo.MessageEmbed{
 			Title:  "Suspensions",
-			Color:  0xCC0000,
+			Color:  WhoAmISecondaryColor,
 			Fields: fields,
+		}
+		// If any of the suspensions are active, set the color to red
+
+		if len(journal.ActiveSuspensions()) > 0 {
+			embed.Color = 0xCC0000 // Red if there are active suspensions
 		}
 
 		data, err := json.Marshal(embed)
