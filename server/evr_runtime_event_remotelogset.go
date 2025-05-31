@@ -197,7 +197,7 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 
 			userID, err := GetUserIDByDeviceID(ctx, db, s.XPID.String())
 			if err != nil {
-				logger.WithField("error", err).Warn("Failed to get user ID by evr ID")
+				logger.WithField("error", err).Debug("Failed to get user ID by evr ID")
 				continue
 			}
 			metadata, err := EVRProfileLoad(ctx, nk, userID)
