@@ -661,8 +661,10 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		matchmakingEmbed = whoami.createMatchmakingEmbed(evrAccount, guildGroups, matchmakingSettings, matchLabels, lastMatchmakingError)
 	}
 
-	var potentialAlternates []string
-
+	var (
+		alternatesEmbed *discordgo.MessageEmbed
+		hasSuspendedAlt bool
+	)
 	if includeSystem {
 		firstIDs, _ := loginHistory.AlternateIDs()
 		// Check for any suspensions on alternate accounts
@@ -672,7 +674,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		}
 		thisGroupSuspensions := activeSuspensions[groupID]
 
-		potentialAlternates = make([]string, 0, len(loginHistory.AlternateMatches))
+		potentialAlternates := make([]string, 0, len(loginHistory.AlternateMatches))
 		for altUserID, matches := range loginHistory.AlternateMatches {
 			altAccount, err := nk.AccountGetId(ctx, altUserID)
 			if err != nil {
@@ -690,8 +692,9 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 			slices.Sort(items)
 			items = slices.Compact(items)
 			suspendedText := ""
-			if suspenpension, ok := thisGroupSuspensions[altUserID]; ok {
-				suspendedText = fmt.Sprintf(" (suspended until <t:%d:R>)", suspenpension.SuspensionExpiry.UTC().Unix())
+			if s, ok := thisGroupSuspensions[altUserID]; ok {
+				suspendedText = fmt.Sprintf(" (suspended until <t:%d:R>)", s.SuspensionExpiry.UTC().Unix())
+				hasSuspendedAlt = true
 			}
 			s := fmt.Sprintf("<@%s> [%s] %s <t:%d:R>%s\n", altAccount.CustomId, altAccount.User.Username, state, altAccount.User.UpdateTime.AsTime().UTC().Unix(), suspendedText)
 
@@ -701,24 +704,35 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 
 			potentialAlternates = append(potentialAlternates, s)
 		}
+
+		if len(potentialAlternates) > 0 {
+
+			alternatesEmbed = &discordgo.MessageEmbed{
+				Title:  "Suspected Alternate Accounts",
+				Color:  WhoAmISystemColor,
+				Fields: []*discordgo.MessageEmbedField{{Name: "Account / Match Items", Value: strings.Join(potentialAlternates, "\n"), Inline: false}},
+			}
+
+			if loginHistory.IgnoreDisabledAlternates {
+				alternatesEmbed.Footer = &discordgo.MessageEmbedFooter{
+					Text: "Note: Suspended alternates do not carry-over for this player.",
+				}
+			}
+			if hasSuspendedAlt {
+				alternatesEmbed.Color = 0xCC0000 // Red if there are suspended alternates
+			}
+		}
 	}
 
 	// Create the account details embed
 	embeds = append(embeds,
 		whoami.createUserAccountDetailsEmbed(evrAccount, loginHistory, matchmakingSettings, displayNameHistory, guildGroups, groupID, showLoginsSince, stripIPAddresses, includePriviledged),
+		alternatesEmbed,
 		suspensionsEmbed,
 		pastDisplayNameEmbed,
 		vrmlEmbed,
 		matchmakingEmbed,
 	)
-
-	if len(potentialAlternates) > 0 {
-		embeds = append(embeds, &discordgo.MessageEmbed{
-			Title:  "Suspected Alternate Accounts",
-			Color:  WhoAmISystemColor,
-			Fields: []*discordgo.MessageEmbedField{{Name: "Account / Match Items", Value: strings.Join(potentialAlternates, "\n"), Inline: false}},
-		})
-	}
 
 	// Remove any nil or blank embeds/fields
 	for i := 0; i < len(embeds); i++ {
