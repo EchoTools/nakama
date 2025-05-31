@@ -1823,12 +1823,32 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			d.cache.Purge(user.ID)
 			d.cache.QueueSyncMember(i.GuildID, user.ID, true)
 
-			includeSuspensions := true
-			includePastSuspensions := false
-			includeCurrentMatches := true
-			includeVRMLHistory := true
-			includePastDisplayNames := true
-			err := d.handleProfileRequest(ctx, logger, nk, s, i, user, true, true, false, false, includeSuspensions, includePastSuspensions, includeCurrentMatches, includeVRMLHistory, includePastDisplayNames)
+			// Default options
+
+			opts := UserProfileRequestOptions{
+				IncludeSuspensionsEmbed:      true,
+				IncludePastSuspensions:       false,
+				IncludeCurrentMatchesEmbed:   true,
+				IncludeVRMLHistoryEmbed:      true,
+				IncludePastDisplayNamesEmbed: false,
+				IncludeAlternatesEmbed:       false,
+
+				IncludeDiscordDisplayName:      true,
+				IncludeSuspensionAuditorNotes:  false,
+				IncludeInactiveSuspensions:     false,
+				ErrorIfAccountDisabled:         true,
+				DisplayAllGuildMemberships:     true,
+				IncludePartyGroupName:          true,
+				IncludeDefaultMatchmakingGuild: true,
+				IncludeLinkedDevices:           true,
+				StripIPAddresses:               false,
+				IncludeRecentLogins:            true,
+				IncludePasswordSetState:        true,
+				IncludeGuildRoles:              true,
+				IncludeAllGuilds:               true,
+				ShowLoginsSince:                time.Now().Add(-30 * 24 * time.Hour),
+			}
+			err := d.handleProfileRequest(ctx, logger, nk, s, i, user, opts)
 			logger.WithFields(map[string]any{
 				"discord_id":       user.ID,
 				"discord_username": user.Username,
@@ -2031,8 +2051,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return fmt.Errorf("failed to get guild groups: %w", err)
 			}
 
-			isSelf := caller.ID == target.ID
-
 			isGuildAuditor := false
 			if gg, ok := callerGuildGroups[groupID]; ok && gg.IsAuditor(callerUserID) {
 				isGuildAuditor = true
@@ -2049,16 +2067,39 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return errors.New("error checking global operator status")
 			}
 
-			includeSystem := isGlobalOperator
-			includePrivate := isSelf || isGlobalOperator
-			includePriviledged := isSelf || isGlobalOperator || isGuildAuditor
-			includeGuildAuditor := isGlobalOperator || isGuildAuditor
-			includeSuspensions := isSelf || isGlobalOperator || isGuildAuditor || isGuildEnforcer
-			includePastSuspensions := isGlobalOperator || isGuildAuditor || isGuildEnforcer
-			includeCurrentMatches := isSelf || isGlobalOperator || isGuildAuditor || isGuildEnforcer
-			includePastDisplayNames := isSelf || isGlobalOperator || isGuildAuditor || isGuildEnforcer
-			includeVRMLHistory := true
-			return d.handleProfileRequest(ctx, logger, nk, s, i, target, includePriviledged, includePrivate, includeGuildAuditor, includeSystem, includeSuspensions, includePastSuspensions, includeCurrentMatches, includeVRMLHistory, includePastDisplayNames)
+			isGuildAuditor = isGuildAuditor || isGlobalOperator
+			isGuildEnforcer = isGuildEnforcer || isGuildAuditor
+
+			loginsSince := time.Now().Add(-30 * 24 * time.Hour)
+			if !isGlobalOperator {
+				loginsSince = time.Time{}
+			}
+
+			opts := UserProfileRequestOptions{
+				IncludeSuspensionsEmbed:      true,
+				IncludePastSuspensions:       isGuildEnforcer,
+				IncludeCurrentMatchesEmbed:   isGuildEnforcer,
+				IncludeVRMLHistoryEmbed:      isGlobalOperator,
+				IncludePastDisplayNamesEmbed: isGuildEnforcer,
+				IncludeAlternatesEmbed:       isGlobalOperator,
+
+				IncludeDiscordDisplayName:      isGuildEnforcer,
+				IncludeSuspensionAuditorNotes:  isGuildEnforcer,
+				IncludeInactiveSuspensions:     isGuildEnforcer,
+				ErrorIfAccountDisabled:         !isGuildEnforcer,
+				DisplayAllGuildMemberships:     isGlobalOperator,
+				IncludePartyGroupName:          isGuildAuditor,
+				IncludeDefaultMatchmakingGuild: isGuildAuditor,
+				IncludeLinkedDevices:           isGuildAuditor,
+				StripIPAddresses:               !isGlobalOperator,
+				IncludeRecentLogins:            isGuildAuditor,
+				IncludePasswordSetState:        isGuildAuditor,
+				IncludeGuildRoles:              isGuildAuditor,
+				IncludeAllGuilds:               isGlobalOperator,
+				ShowLoginsSince:                loginsSince,
+			}
+
+			return d.handleProfileRequest(ctx, logger, nk, s, i, target, opts)
 		},
 		"search": d.handleSearch,
 		"create": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {

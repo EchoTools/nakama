@@ -16,19 +16,73 @@ import (
 	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
+type UserProfileRequestOptions struct {
+	IncludeSuspensionsEmbed      bool
+	IncludePastSuspensions       bool
+	IncludeCurrentMatchesEmbed   bool
+	IncludeVRMLHistoryEmbed      bool
+	IncludePastDisplayNamesEmbed bool
+	IncludeAlternatesEmbed       bool
+
+	IncludeDiscordDisplayName      bool
+	IncludeSuspensionAuditorNotes  bool
+	IncludeInactiveSuspensions     bool
+	ErrorIfAccountDisabled         bool
+	DisplayAllGuildMemberships     bool
+	IncludePartyGroupName          bool
+	IncludeDefaultMatchmakingGuild bool
+	IncludeLinkedDevices           bool
+	StripIPAddresses               bool
+	IncludeRecentLogins            bool
+	IncludePasswordSetState        bool
+	IncludeGuildRoles              bool
+	IncludeAllGuilds               bool
+	ShowLoginsSince                time.Time
+}
+
 const (
 	WhoAmISecondaryColor = 0x00CC00 // Green
 	WhoAmIBaseColor      = 0xFFA500 // Orange
 	WhoAmISystemColor    = 0x800080 // Purple
 )
 
-type WhoAmI struct{}
+type WhoAmI struct {
+	GroupID string
+
+	loginHistory        *LoginHistory
+	profile             *EVRProfile
+	guildGroups         map[string]*GuildGroup
+	matchmakingSettings *MatchmakingSettings
+	displayNameHistory  *DisplayNameHistory
+	journal             *GuildEnforcementJournal
+	activeSuspensions   map[string]map[string]GuildEnforcementRecord
+	potentialAlternates map[string]*api.Account
+	opts                UserProfileRequestOptions
+}
+
+func NewWhoAmI(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, guildGroupRegistry *GuildGroupRegistry, cache *DiscordIntegrator, profile *EVRProfile, loginHistory *LoginHistory, matchmakingSettings *MatchmakingSettings, guildGroups map[string]*GuildGroup, displayNameHistory *DisplayNameHistory, journal *GuildEnforcementJournal, potentialAlternates map[string]*api.Account, activeSuspensions map[string]map[string]GuildEnforcementRecord, opts UserProfileRequestOptions, // nolint: lll
+	groupID string) *WhoAmI {
+
+	return &WhoAmI{
+		GroupID: groupID,
+
+		loginHistory:        loginHistory,
+		profile:             profile,
+		guildGroups:         guildGroups,
+		matchmakingSettings: matchmakingSettings,
+		displayNameHistory:  displayNameHistory,
+		journal:             journal,
+		activeSuspensions:   activeSuspensions,
+		potentialAlternates: potentialAlternates,
+		opts:                opts,
+	}
+}
 
 // basic account Detail
-func (w *WhoAmI) createUserAccountDetailsEmbed(a *EVRProfile, loginHistory *LoginHistory, matchmakingSettings *MatchmakingSettings, displayNameHistory *DisplayNameHistory, guildGroups map[string]*GuildGroup, groupID string, showLoginsSince time.Time, stripIPAddresses bool, includePriviledged bool) *discordgo.MessageEmbed {
+func (w *WhoAmI) createUserAccountDetailsEmbed() *discordgo.MessageEmbed {
 
 	var (
-		currentDisplayNameByGroupID = a.DisplayNamesByGroupID()
+		currentDisplayNameByGroupID = w.profile.DisplayNamesByGroupID()
 		lastSeen                    string
 		partyGroupName              string
 		defaultMatchmakingGuildName string
@@ -38,16 +92,16 @@ func (w *WhoAmI) createUserAccountDetailsEmbed(a *EVRProfile, loginHistory *Logi
 
 	// If the player is online, set the last seen time to now.
 	// If the player is offline, set the last seen time to the last login time.
-	if a.IsOnline() {
+	if w.profile.IsOnline() {
 		lastSeen = "Now"
 	} else {
-		lastSeen = fmt.Sprintf("<t:%d:R>", loginHistory.LastSeen().UTC().Unix())
+		lastSeen = fmt.Sprintf("<t:%d:R>", w.loginHistory.LastSeen().UTC().Unix())
 	}
 
 	// Build a list of the players active display names, by guild group
 	activeDisplayNames := make([]string, 0, len(currentDisplayNameByGroupID))
 	for gid, dn := range currentDisplayNameByGroupID {
-		if gg, ok := guildGroups[gid]; ok {
+		if gg, ok := w.guildGroups[gid]; ok {
 			guildName := EscapeDiscordMarkdown(gg.Name())
 			// Replace `'s with `\'s`
 			dn = strings.ReplaceAll(dn, "`", "\\`")
@@ -57,32 +111,36 @@ func (w *WhoAmI) createUserAccountDetailsEmbed(a *EVRProfile, loginHistory *Logi
 	}
 	slices.Sort(activeDisplayNames)
 
-	if includePriviledged {
-
+	if w.opts.IncludeLinkedDevices {
 		// Build a list of the players linked devices/XPIDs
-		xpidStrs := make([]string, 0, len(a.LinkedXPIDs()))
-		for _, xpid := range a.LinkedXPIDs() {
-			if stripIPAddresses {
+		xpidStrs := make([]string, 0, len(w.profile.LinkedXPIDs()))
+		for _, xpid := range w.profile.LinkedXPIDs() {
+			if w.opts.StripIPAddresses {
 				xpidStrs = append(xpidStrs, xpid.String())
 			}
 		}
 		linkedDevices = strings.Join(xpidStrs, "\n")
+	}
 
-		if gg, ok := guildGroups[a.GetActiveGroupID().String()]; ok {
+	if w.opts.IncludeDefaultMatchmakingGuild {
+		if gg, ok := w.guildGroups[w.profile.GetActiveGroupID().String()]; ok {
 			defaultMatchmakingGuildName = EscapeDiscordMarkdown(gg.Name())
 		}
-
+	}
+	if w.opts.IncludePartyGroupName {
 		partyGroupName = "not set"
-		if matchmakingSettings != nil && matchmakingSettings.LobbyGroupName != "" {
-			partyGroupName = "`" + matchmakingSettings.LobbyGroupName + "`"
+		if w.matchmakingSettings != nil && w.matchmakingSettings.LobbyGroupName != "" {
+			partyGroupName = "`" + w.matchmakingSettings.LobbyGroupName + "`"
 		}
+	}
 
-		recentLogins = w.createRecentLoginsFieldValue(loginHistory, stripIPAddresses, showLoginsSince)
+	if w.opts.IncludeRecentLogins {
+		recentLogins = w.createRecentLoginsFieldValue()
 	}
 
 	passwordState := ""
-	if includePriviledged {
-		if a.HasPasswordSet() {
+	if w.opts.IncludePasswordSetState {
+		if w.profile.HasPasswordSet() {
 			passwordState = "Yes"
 		} else {
 			passwordState = "No"
@@ -90,7 +148,7 @@ func (w *WhoAmI) createUserAccountDetailsEmbed(a *EVRProfile, loginHistory *Logi
 	}
 
 	embed := &discordgo.MessageEmbed{
-		Description: fmt.Sprintf("<@%s>", a.DiscordID()),
+		Description: fmt.Sprintf("<@%s>", w.profile.DiscordID()),
 		Color:       WhoAmIBaseColor,
 		Author: &discordgo.MessageEmbedAuthor{
 			Name: "EchoVRCE Account",
@@ -98,12 +156,12 @@ func (w *WhoAmI) createUserAccountDetailsEmbed(a *EVRProfile, loginHistory *Logi
 		Fields: []*discordgo.MessageEmbedField{
 			{
 				Name:   "Username",
-				Value:  a.Username(),
+				Value:  w.profile.Username(),
 				Inline: true,
 			},
 			{
 				Name:   "Discord ID",
-				Value:  a.DiscordID(),
+				Value:  w.profile.DiscordID(),
 				Inline: true,
 			},
 			{
@@ -113,7 +171,7 @@ func (w *WhoAmI) createUserAccountDetailsEmbed(a *EVRProfile, loginHistory *Logi
 			},
 			{
 				Name:   "Created",
-				Value:  fmt.Sprintf("<t:%d:R>", a.CreatedAt().UTC().Unix()),
+				Value:  fmt.Sprintf("<t:%d:R>", w.profile.CreatedAt().UTC().Unix()),
 				Inline: true,
 			},
 			{
@@ -148,16 +206,16 @@ func (w *WhoAmI) createUserAccountDetailsEmbed(a *EVRProfile, loginHistory *Logi
 			},
 			{
 				Name:   "Guild Memberships",
-				Value:  w.createGuildMembershipsEmbedFieldValue(guildGroups, a.UserID(), includePriviledged),
+				Value:  w.createGuildMembershipsEmbedFieldValue(),
 				Inline: false,
 			},
 		},
 		Footer: &discordgo.MessageEmbedFooter{
-			Text: fmt.Sprintf("Nakama ID: %s", a.UserID()),
+			Text: fmt.Sprintf("Nakama ID: %s", w.profile.UserID()),
 		},
 	}
 
-	if a.IsDisabled() {
+	if w.profile.IsDisabled() {
 		embed.Color = 0xCC0000
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
 			Name:   "Account Status",
@@ -169,16 +227,13 @@ func (w *WhoAmI) createUserAccountDetailsEmbed(a *EVRProfile, loginHistory *Logi
 	return embed
 }
 
-func (WhoAmI) createRecentLoginsFieldValue(loginHistory *LoginHistory, stripIPAddresses bool, since time.Time) string {
-	if loginHistory == nil || len(loginHistory.History) == 0 {
-		return ""
-	}
+func (w *WhoAmI) createRecentLoginsFieldValue() string {
 
 	loginsByXPID := make(map[evr.EvrId]time.Time, 0)
 
 	// Only include the latest login for each XPID
-	for _, e := range loginHistory.History {
-		if e.UpdatedAt.Before(since) {
+	for _, e := range w.loginHistory.History {
+		if e.UpdatedAt.Before(w.opts.ShowLoginsSince) {
 			continue
 		}
 		if ts, ok := loginsByXPID[e.XPID]; !ok || ts.Before(e.UpdatedAt) {
@@ -186,7 +241,7 @@ func (WhoAmI) createRecentLoginsFieldValue(loginHistory *LoginHistory, stripIPAd
 		}
 	}
 
-	lines := make([]string, 0, len(loginHistory.History))
+	lines := make([]string, 0, len(w.loginHistory.History))
 	for xpid, ts := range loginsByXPID {
 		lines = append(lines, fmt.Sprintf("<t:%d:R> - `%s`", ts.UTC().Unix(), xpid.String()))
 	}
@@ -289,13 +344,13 @@ func (WhoAmI) createPastDisplayNameEmbed(history *DisplayNameHistory, groupID st
 	}
 }
 
-func (*WhoAmI) createGuildMembershipsEmbedFieldValue(guildGroupMap map[string]*GuildGroup, userIDStr string, includePriviledged bool) string {
-	if len(guildGroupMap) == 0 {
+func (w *WhoAmI) createGuildMembershipsEmbedFieldValue() string {
+	if len(w.guildGroups) == 0 {
 		return ""
 	}
 
-	guildGroups := make([]*GuildGroup, 0, len(guildGroupMap))
-	for _, group := range guildGroupMap {
+	guildGroups := make([]*GuildGroup, 0, len(w.guildGroups))
+	for _, group := range w.guildGroups {
 		guildGroups = append(guildGroups, group)
 	}
 
@@ -308,8 +363,8 @@ func (*WhoAmI) createGuildMembershipsEmbedFieldValue(guildGroupMap map[string]*G
 	for _, group := range guildGroups {
 
 		groupStr := group.Name()
-
-		if includePriviledged {
+		userIDStr := w.profile.UserID()
+		if w.opts.IncludeGuildRoles {
 			// Add the roles
 			activeRoleMap := map[string]bool{
 				"owner":          group.IsOwner(userIDStr),
@@ -347,25 +402,27 @@ func (*WhoAmI) createGuildMembershipsEmbedFieldValue(guildGroupMap map[string]*G
 
 }
 
-func (*WhoAmI) createSuspensionsEmbed(journal *GuildEnforcementJournal, guildGroups map[string]*GuildGroup, groupIDs []string, includeInactive, includeAuditNotes bool) *discordgo.MessageEmbed {
-	if journal == nil {
-		return nil
+func (w *WhoAmI) createSuspensionsEmbed() *discordgo.MessageEmbed {
+	groupIDs := make([]string, 0, len(w.guildGroups))
+	for _, g := range w.guildGroups {
+		groupIDs = append(groupIDs, g.Group.Id)
 	}
-	voids := journal.GroupVoids(groupIDs...)
+
+	voids := w.journal.GroupVoids(groupIDs...)
 	for {
 		// Loop until the embed size is less than 1024 bytes
-		fields := make([]*discordgo.MessageEmbedField, 0, len(journal.RecordsByGroupID))
+		fields := make([]*discordgo.MessageEmbedField, 0, len(w.journal.RecordsByGroupID))
 
-		for groupID, records := range journal.RecordsByGroupID {
+		for groupID, records := range w.journal.RecordsByGroupID {
 			if !slices.Contains(groupIDs, groupID) {
 				continue
 			}
 
 			gName := groupID
-			if gg, ok := guildGroups[groupID]; ok {
+			if gg, ok := w.guildGroups[groupID]; ok {
 				gName = EscapeDiscordMarkdown(gg.Name())
 			}
-			if field := createSuspensionDetailsEmbedField(gName, records, voids, includeInactive, includeAuditNotes); field != nil {
+			if field := createSuspensionDetailsEmbedField(gName, records, voids, w.opts.IncludeInactiveSuspensions, w.opts.IncludeSuspensionAuditorNotes); field != nil {
 				if field.Value != "" {
 					fields = append(fields, field)
 				}
@@ -388,7 +445,7 @@ func (*WhoAmI) createSuspensionsEmbed(journal *GuildEnforcementJournal, guildGro
 		}
 		// If any of the suspensions are active, set the color to red
 
-		if len(journal.ActiveSuspensions()) > 0 {
+		if len(w.journal.ActiveSuspensions()) > 0 {
 			embed.Color = 0xCC0000 // Red if there are active suspensions
 		}
 
@@ -396,9 +453,9 @@ func (*WhoAmI) createSuspensionsEmbed(journal *GuildEnforcementJournal, guildGro
 		if err != nil {
 			return nil
 		}
-		if includeInactive && len(data) > 1024 {
+		if w.opts.IncludeInactiveSuspensions && len(data) > 1024 {
 			// Only show active
-			includeInactive = false
+			w.opts.IncludeInactiveSuspensions = false
 			continue
 		}
 		return embed
@@ -475,7 +532,70 @@ func (*WhoAmI) createVRMLHistoryEmbed(s *VRMLPlayerSummary) *discordgo.MessageEm
 	return embed
 }
 
-func (*WhoAmI) collectedBlockedFriends(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, cache *DiscordIntegrator, userID string) ([]*api.User, error) {
+func (w *WhoAmI) createAlternatesEmbed() *discordgo.MessageEmbed {
+	var (
+		alternatesEmbed *discordgo.MessageEmbed
+		hasSuspendedAlt bool
+	)
+
+	// Check for any suspensions on alternate accounts
+
+	thisGroupSuspensions := w.activeSuspensions[w.GroupID]
+	potentialAlternates := make([]string, 0, len(w.loginHistory.AlternateMatches))
+
+	for altUserID, matches := range w.loginHistory.AlternateMatches {
+		altAccount, ok := w.potentialAlternates[altUserID]
+		if !ok {
+			continue // Skip if the alternate account is not found
+		}
+
+		state := ""
+		if altAccount.GetDisableTime() != nil {
+			state = "disabled"
+		}
+
+		items := make([]string, 0, len(matches))
+		for _, m := range matches {
+			items = append(items, m.Items...)
+		}
+		slices.Sort(items)
+		items = slices.Compact(items)
+		suspendedText := ""
+		if s, ok := thisGroupSuspensions[altUserID]; ok {
+			suspendedText = fmt.Sprintf(" (suspended until <t:%d:R>)", s.SuspensionExpiry.UTC().Unix())
+			hasSuspendedAlt = true
+		}
+		s := fmt.Sprintf("<@%s> [%s] %s <t:%d:R>%s\n", altAccount.CustomId, altAccount.User.Username, state, altAccount.User.UpdateTime.AsTime().UTC().Unix(), suspendedText)
+
+		for _, item := range items {
+			s += fmt.Sprintf("-  `%s`\n", item)
+		}
+
+		potentialAlternates = append(potentialAlternates, s)
+	}
+
+	if len(potentialAlternates) > 0 {
+
+		alternatesEmbed = &discordgo.MessageEmbed{
+			Title:  "Suspected Alternate Accounts",
+			Color:  WhoAmISystemColor,
+			Fields: []*discordgo.MessageEmbedField{{Name: "Account / Match Items", Value: strings.Join(potentialAlternates, "\n"), Inline: false}},
+		}
+
+		if w.loginHistory.IgnoreDisabledAlternates {
+			alternatesEmbed.Footer = &discordgo.MessageEmbedFooter{
+				Text: "Note: Suspended alternates do not carry-over for this player.",
+			}
+		}
+		if hasSuspendedAlt {
+			alternatesEmbed.Color = 0xCC0000 // Red if there are suspended alternates
+		}
+	}
+
+	return alternatesEmbed
+}
+
+func (w *WhoAmI) collectedBlockedFriends(ctx context.Context, nk runtime.NakamaModule) ([]*api.User, error) {
 
 	var (
 		err             error
@@ -487,7 +607,7 @@ func (*WhoAmI) collectedBlockedFriends(ctx context.Context, logger runtime.Logge
 	)
 	// Get the friends list
 	for {
-		friends, cursor, err = nk.FriendsList(ctx, userID, 100, blockedStatePtr, cursor)
+		friends, cursor, err = nk.FriendsList(ctx, w.profile.ID(), 100, blockedStatePtr, cursor)
 		if err != nil {
 			return nil, err
 		}
@@ -506,63 +626,25 @@ func (*WhoAmI) collectedBlockedFriends(ctx context.Context, logger runtime.Logge
 	return blockedUsers, nil
 }
 
-func (w *WhoAmI) collectEnforcementRecords(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, guildGroupRegistry *GuildGroupRegistry, guildGroups map[string]*GuildGroup, targetID string, includeInactive, includeAuditNotes bool) (*discordgo.MessageEmbed, error) {
-	groupIDs := make([]string, 0, len(guildGroups))
-	for _, g := range guildGroups {
-		groupIDs = append(groupIDs, g.Group.Id)
-
-		if len(g.SuspensionInheritanceGroupIDs) > 0 {
-			groupIDs = append(groupIDs, g.SuspensionInheritanceGroupIDs...)
-		}
-	}
-
-	// Ensure the guild groups are loaded
-	for _, gID := range groupIDs {
-		if _, ok := guildGroups[gID]; !ok {
-			if gg := guildGroupRegistry.Get(gID); gg != nil {
-				guildGroups[gID] = gg
-			}
-		}
-	}
-
-	journals, err := EnforcementJournalsLoad(ctx, nk, []string{targetID})
-	if err != nil {
-		return nil, fmt.Errorf("failed to get enforcement journals: %w", err)
-	}
-
-	if len(journals) == 0 || journals[targetID] == nil {
-		return nil, nil
-	}
-	journal := journals[targetID]
-
-	return w.createSuspensionsEmbed(journal, guildGroups, groupIDs, includeInactive, includeAuditNotes), nil
-
-}
-
-func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, s *discordgo.Session, i *discordgo.InteractionCreate, target *discordgo.User, includePriviledged bool, includePrivate bool, includeGuildAuditor bool, includeSystem bool, includeSuspensions bool, includeInactiveSuspensions bool, includeCurrentMatches bool, includeVRMLHistory bool, includePastDisplayNames bool) error {
+func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, s *discordgo.Session, i *discordgo.InteractionCreate, target *discordgo.User, opts UserProfileRequestOptions) error {
 
 	var (
-		err                  error
-		whoami               = &WhoAmI{}
+		err error
+
 		callerID             = d.cache.DiscordIDToUserID(i.Member.User.ID)
 		targetID             = d.cache.DiscordIDToUserID(target.ID)
-		evrAccount           *EVRProfile
+		profile              *EVRProfile
 		matchmakingSettings  *MatchmakingSettings
 		loginHistory         *LoginHistory
 		displayNameHistory   *DisplayNameHistory
 		embeds               = make([]*discordgo.MessageEmbed, 0, 4)
 		groupID              = d.cache.GuildIDToGroupID(i.GuildID)
-		showLoginsSince      = time.Now().Add(time.Hour * 24 * -30) // 30 days
-		stripIPAddresses     = !includePrivate
 		matchmakingEmbed     *discordgo.MessageEmbed
 		vrmlEmbed            *discordgo.MessageEmbed
 		suspensionsEmbed     *discordgo.MessageEmbed
 		pastDisplayNameEmbed *discordgo.MessageEmbed
+		alternatesEmbed      *discordgo.MessageEmbed
 	)
-
-	if includeSystem {
-		showLoginsSince = time.Time{}
-	}
 
 	if callerID == "" || targetID == "" {
 		return fmt.Errorf("invalid user ID")
@@ -570,9 +652,9 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 
 	if a, err := nk.AccountGetId(ctx, targetID); err != nil {
 		return fmt.Errorf("failed to get account by ID: %w", err)
-	} else if a.GetDisableTime() != nil && !includePriviledged {
+	} else if a.GetDisableTime() != nil && opts.ErrorIfAccountDisabled {
 		return fmt.Errorf("account is disabled")
-	} else if evrAccount, err = BuildEVRProfileFromAccount(a); err != nil {
+	} else if profile, err = BuildEVRProfileFromAccount(a); err != nil {
 		return fmt.Errorf("failed to get account by ID: %w", err)
 	}
 
@@ -583,17 +665,44 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 
 	if displayNameHistory, err = DisplayNameHistoryLoad(ctx, nk, targetID); err != nil {
 		return fmt.Errorf("failed to load display name history: %w", err)
-	} else {
-		pastDisplayNameEmbed = whoami.createPastDisplayNameEmbed(displayNameHistory, groupID)
+	}
+	potentialAlternates := make(map[string]*api.Account, len(loginHistory.AlternateMatches))
+	for altUserID := range loginHistory.AlternateMatches {
+		altAccount, err := nk.AccountGetId(ctx, altUserID)
+		if err != nil {
+			return fmt.Errorf("failed to get account by ID: %w", err)
+		}
+		potentialAlternates[altUserID] = altAccount
 	}
 
+	firstIDs, _ := loginHistory.AlternateIDs()
+	activeSuspensions, err := CheckEnforcementSuspensions(ctx, nk, d.guildGroupRegistry, profile.ID(), firstIDs)
+	if err != nil {
+		return fmt.Errorf("failed to check enforcement suspensions: %w", err)
+	}
 	guildGroups, err := GuildUserGroupsList(ctx, nk, d.guildGroupRegistry, targetID)
 	if err != nil {
 		return fmt.Errorf("error getting guild groups: %w", err)
 	}
 
+	journals, err := EnforcementJournalsLoad(ctx, nk, []string{targetID})
+	if err != nil {
+		return fmt.Errorf("failed to load enforcement journals: %w", err)
+	}
+
+	journal := NewGuildEnforcementJournal(profile.ID())
+	if len(journals) > 0 && journals[targetID] == nil {
+
+	}
+
+	w := NewWhoAmI(ctx, logger, nk, d.guildGroupRegistry, d.cache, profile, loginHistory, matchmakingSettings, guildGroups, displayNameHistory, journal, potentialAlternates, activeSuspensions, opts, groupID)
+
+	if w.opts.IncludePastDisplayNamesEmbed {
+		pastDisplayNameEmbed = w.createPastDisplayNameEmbed(displayNameHistory, groupID)
+	}
+
 	// Filter the guild groups based on the includePrivate flag
-	if !includePrivate {
+	if !w.opts.IncludeAllGuilds {
 		for gid, g := range guildGroups {
 			if g.GuildID != i.GuildID {
 				delete(guildGroups, gid)
@@ -607,27 +716,21 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	}
 	matchmakingSettings = &settings
 
-	if includeVRMLHistory {
+	if w.opts.IncludeVRMLHistoryEmbed {
 		vrmlSummary := &VRMLPlayerSummary{}
 		// Get VRML Summary
 		if err := StorageRead(ctx, nk, targetID, vrmlSummary, false); err != nil {
 			logger.Warn("failed to get VRML summary", "error", err)
 		} else {
-			vrmlEmbed = whoami.createVRMLHistoryEmbed(vrmlSummary)
+			vrmlEmbed = w.createVRMLHistoryEmbed(vrmlSummary)
 		}
 	}
 
-	if includeSuspensions {
-
-		if embed, err := whoami.collectEnforcementRecords(ctx, logger, nk, d.guildGroupRegistry, guildGroups, targetID, includeInactiveSuspensions, includeGuildAuditor); err != nil {
-			logger.Warn("failed to get enforcement records", "error", err)
-		} else {
-			suspensionsEmbed = embed
-
-		}
+	if w.opts.IncludeSuspensionsEmbed {
+		suspensionsEmbed = w.createSuspensionsEmbed()
 	}
 
-	if includeCurrentMatches {
+	if w.opts.IncludeCurrentMatchesEmbed {
 		// Get the players current lobby sessions
 		presences, err := d.nk.StreamUserList(StreamModeService, targetID, "", StreamLabelMatchService, false, true)
 		if err != nil {
@@ -663,75 +766,19 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 			}
 		}
 
-		matchmakingEmbed = whoami.createMatchmakingEmbed(evrAccount, guildGroups, matchmakingSettings, matchLabels, lastMatchmakingError)
+		matchmakingEmbed = w.createMatchmakingEmbed(profile, guildGroups, matchmakingSettings, matchLabels, lastMatchmakingError)
 	}
 
-	var (
-		alternatesEmbed *discordgo.MessageEmbed
-		hasSuspendedAlt bool
-	)
-	if includeSystem {
-		firstIDs, _ := loginHistory.AlternateIDs()
-		// Check for any suspensions on alternate accounts
-		activeSuspensions, err := CheckEnforcementSuspensions(ctx, nk, d.guildGroupRegistry, evrAccount.ID(), firstIDs)
-		if err != nil {
-			return fmt.Errorf("failed to check enforcement suspensions: %w", err)
-		}
-		thisGroupSuspensions := activeSuspensions[groupID]
-
-		potentialAlternates := make([]string, 0, len(loginHistory.AlternateMatches))
-		for altUserID, matches := range loginHistory.AlternateMatches {
-			altAccount, err := nk.AccountGetId(ctx, altUserID)
-			if err != nil {
-				return fmt.Errorf("failed to get account by ID: %w", err)
-			}
-			state := ""
-			if altAccount.GetDisableTime() != nil {
-				state = "disabled"
-			}
-
-			items := make([]string, 0, len(matches))
-			for _, m := range matches {
-				items = append(items, m.Items...)
-			}
-			slices.Sort(items)
-			items = slices.Compact(items)
-			suspendedText := ""
-			if s, ok := thisGroupSuspensions[altUserID]; ok {
-				suspendedText = fmt.Sprintf(" (suspended until <t:%d:R>)", s.SuspensionExpiry.UTC().Unix())
-				hasSuspendedAlt = true
-			}
-			s := fmt.Sprintf("<@%s> [%s] %s <t:%d:R>%s\n", altAccount.CustomId, altAccount.User.Username, state, altAccount.User.UpdateTime.AsTime().UTC().Unix(), suspendedText)
-
-			for _, item := range items {
-				s += fmt.Sprintf("-  `%s`\n", item)
-			}
-
-			potentialAlternates = append(potentialAlternates, s)
-		}
-
-		if len(potentialAlternates) > 0 {
-
-			alternatesEmbed = &discordgo.MessageEmbed{
-				Title:  "Suspected Alternate Accounts",
-				Color:  WhoAmISystemColor,
-				Fields: []*discordgo.MessageEmbedField{{Name: "Account / Match Items", Value: strings.Join(potentialAlternates, "\n"), Inline: false}},
-			}
-
-			if loginHistory.IgnoreDisabledAlternates {
-				alternatesEmbed.Footer = &discordgo.MessageEmbedFooter{
-					Text: "Note: Suspended alternates do not carry-over for this player.",
-				}
-			}
-			if hasSuspendedAlt {
-				alternatesEmbed.Color = 0xCC0000 // Red if there are suspended alternates
-			}
-		}
+	if w.opts.IncludeAlternatesEmbed {
+		// Create the alternates embed
+		alternatesEmbed = w.createAlternatesEmbed()
 	}
 
-	// Create the account details embed
+	accountDetailsEmbed := w.createUserAccountDetailsEmbed()
+
+	// Combine the embeds into a message
 	embeds = append(embeds,
-		whoami.createUserAccountDetailsEmbed(evrAccount, loginHistory, matchmakingSettings, displayNameHistory, guildGroups, groupID, showLoginsSince, stripIPAddresses, includePriviledged),
+		accountDetailsEmbed,
 		alternatesEmbed,
 		suspensionsEmbed,
 		pastDisplayNameEmbed,
