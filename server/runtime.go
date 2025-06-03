@@ -25,12 +25,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/heroiclabs/nakama/v3/internal/satori"
-
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/heroiclabs/nakama/v3/internal/satori"
 	"github.com/heroiclabs/nakama/v3/social"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -553,7 +552,6 @@ type Runtime struct {
 
 	fleetManager runtime.FleetManager
 	nk           runtime.NakamaModule
-	nk           runtime.NakamaModule
 }
 
 type MatchNamesListFunction func() []string
@@ -663,12 +661,6 @@ func NewRuntime(ctx context.Context, logger, startupLogger *zap.Logger, db *sql.
 		return nil, nil, err
 	}
 
-	startupLogger.Info("Initialising runtime event queue processor")
-	eventQueue := NewRuntimeEventQueue(logger, config, metrics)
-	startupLogger.Info("Runtime event queue processor started", zap.Int("size", config.GetRuntime().EventQueueSize), zap.Int("workers", config.GetRuntime().EventQueueWorkers))
-
-	matchProvider := NewMatchProvider()
-
 	satoriClient := satori.NewSatoriClient(
 		ctx,
 		logger,
@@ -680,7 +672,13 @@ func NewRuntime(ctx context.Context, logger, startupLogger *zap.Logger, db *sql.
 		config.GetSatori().CacheEnabled,
 	)
 
-	goModules, goRPCFns, goBeforeRtFns, goAfterRtFns, goBeforeReqFns, goAfterReqFns, goMatchmakerMatchedFn, goMatchmakerCustomMatchingFn, goTournamentEndFn, goTournamentResetFn, goLeaderboardResetFn, goShutdownFn, goPurchaseNotificationAppleFn, goSubscriptionNotificationAppleFn, goPurchaseNotificationGoogleFn, goSubscriptionNotificationGoogleFn, goIndexFilterFns, fleetManager, httpHandlers, allEventFns, goMatchNamesListFn, err := NewRuntimeProviderGo(ctx, logger, startupLogger, db, protojsonMarshaler, config, version, socialClient, leaderboardCache, leaderboardRankCache, leaderboardScheduler, sessionRegistry, sessionCache, statusRegistry, matchRegistry, tracker, metrics, streamManager, router, storageIndex, satoriClient, runtimeConfig.Path, paths, eventQueue, matchProvider, fmCallbackHandler)
+	startupLogger.Info("Initialising runtime event queue processor")
+	eventQueue := NewRuntimeEventQueue(logger, config, metrics)
+	startupLogger.Info("Runtime event queue processor started", zap.Int("size", config.GetRuntime().EventQueueSize), zap.Int("workers", config.GetRuntime().EventQueueWorkers))
+
+	matchProvider := NewMatchProvider()
+
+	goModules, goRPCFns, goBeforeRtFns, goAfterRtFns, goBeforeReqFns, goAfterReqFns, goMatchmakerMatchedFn, goMatchmakerCustomMatchingFn, goTournamentEndFn, goTournamentResetFn, goLeaderboardResetFn, goShutdownFn, goPurchaseNotificationAppleFn, goSubscriptionNotificationAppleFn, goPurchaseNotificationGoogleFn, goSubscriptionNotificationGoogleFn, goIndexFilterFns, fleetManager, httpHandlers, allEventFns, goMatchNamesListFn, nk, err := NewRuntimeProviderGo(ctx, logger, startupLogger, db, protojsonMarshaler, config, version, socialClient, leaderboardCache, leaderboardRankCache, leaderboardScheduler, sessionRegistry, sessionCache, statusRegistry, matchRegistry, tracker, metrics, streamManager, router, storageIndex, satoriClient, runtimeConfig.Path, paths, eventQueue, matchProvider, fmCallbackHandler)
 	if err != nil {
 		startupLogger.Error("Error initialising Go runtime provider", zap.Error(err))
 		return nil, nil, err
@@ -2721,7 +2719,6 @@ func NewRuntime(ctx context.Context, logger, startupLogger *zap.Logger, db *sql.
 		fleetManager: fleetManager,
 
 		eventFunctions: allEventFns,
-		nk:             nk,
 		nk:             nk,
 	}, rInfo, nil
 }
