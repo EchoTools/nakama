@@ -5,6 +5,45 @@ The format is based on [keep a changelog](http://keepachangelog.com) and this pr
 
 ## [Unreleased]
 
+## [3.27.1] - 2025-05-22
+### Changed
+- Minor dependency updates.
+
+## [3.27.0] - 2025-05-12
+### Added
+- Add Satori client API to list Flags Overrides.
+
+### Changed
+- Change Facebook Limited Login validation keys URL.
+- Update Facebook Graph API to v22.
+- Enable Satori FlagsList to return all default flags.
+- Reduce In-App Purchase validation logged errors to debug level.
+- Increase default timeout for Apple In-App Purchase verification.
+- Build with Go 1.24.3.
+
+### Fixed
+- Fix chat message listing pagination issue.
+- Ensure In-App Purchase validation for Google always rejects pending or cancelled receipts.
+- Fix Lua runtime storage index filter registration function.
+- Fix context issue when calling Satori runtime APIs via socket operations.
+- Fix an issue with message timestamp precision in returned channel messages.
+
+## [3.26.0] - 2025-01-25
+### Added
+- Allow account filtering by email in the Console.
+- Add friend metadata support.
+- Add optional caching of Satori client requests.
+
+### Changed
+- Build with Go 1.23.5.
+
+### Fixed
+- Ensure persisted chat messages listing returns correct order.
+- Return correct tournament details in console API leaderboard details endpoint.
+- Do not report invalid http RPC ids to prometheus counts.
+- Fix Lua runtime short day format option.
+- Fix group listing with open and count filters.
+
 ## [3.25.0] - 2024-11-25
 ### Added
 - Add new runtime function to get a list of user's friend status.

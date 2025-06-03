@@ -18,7 +18,6 @@ import (
 	"compress/flate"
 	"compress/gzip"
 	"context"
-	"crypto"
 	"crypto/tls"
 	"crypto/x509"
 	"database/sql"
@@ -33,7 +32,7 @@ import (
 	"time"
 
 	"github.com/gofrs/uuid/v5"
-	"github.com/golang-jwt/jwt/v4"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	grpcgw "github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
@@ -438,7 +437,7 @@ func securityInterceptorFunc(logger *zap.Logger, config Config, sessionCache Ses
 		if !sessionCache.IsValidSession(userID, exp, tokenId) {
 			return nil, status.Error(codes.Unauthenticated, "Auth token invalid")
 		}
-		ctx = context.WithValue(context.WithValue(context.WithValue(context.WithValue(context.WithValue(context.WithValue(ctx, ctxUserIDKey{}, userID), ctxUsernameKey{}, username), ctxVarsKey{}, vars), ctxExpiryKey{}, exp), ctxTokenIDKey{}, tokenId), ctxTokenIssuedAtKey{}, tokenIssuedAt)
+		ctx = populateCtx(ctx, userID, username, tokenId, vars, exp, tokenIssuedAt)
 	default:
 		// Unless explicitly defined above, handlers require full user authentication.
 		md, ok := metadata.FromIncomingContext(ctx)
@@ -466,9 +465,20 @@ func securityInterceptorFunc(logger *zap.Logger, config Config, sessionCache Ses
 		if !sessionCache.IsValidSession(userID, exp, tokenId) {
 			return nil, status.Error(codes.Unauthenticated, "Auth token invalid")
 		}
-		ctx = context.WithValue(context.WithValue(context.WithValue(context.WithValue(context.WithValue(context.WithValue(ctx, ctxUserIDKey{}, userID), ctxUsernameKey{}, username), ctxVarsKey{}, vars), ctxExpiryKey{}, exp), ctxTokenIDKey{}, tokenId), ctxTokenIssuedAtKey{}, tokenIssuedAt)
+		ctx = populateCtx(ctx, userID, username, tokenId, vars, exp, tokenIssuedAt)
 	}
 	return context.WithValue(ctx, ctxFullMethodKey{}, info.FullMethod), nil
+}
+
+func populateCtx(ctx context.Context, userId uuid.UUID, username, tokenId string, vars map[string]string, tokenExpiry, tokenIssuedAt int64) context.Context {
+	ctx = context.WithValue(ctx, ctxUserIDKey{}, userId)
+	ctx = context.WithValue(ctx, ctxUsernameKey{}, username)
+	ctx = context.WithValue(ctx, ctxTokenIDKey{}, tokenId)
+	ctx = context.WithValue(ctx, ctxVarsKey{}, vars)
+	ctx = context.WithValue(ctx, ctxExpiryKey{}, tokenExpiry)
+	ctx = context.WithValue(ctx, ctxTokenIssuedAtKey{}, tokenIssuedAt)
+
+	return ctx
 }
 
 func parseBasicAuth(auth string) (username, password string, ok bool) {
@@ -504,11 +514,8 @@ func parseBearerAuth(hmacSecretByte []byte, auth string) (userID uuid.UUID, user
 
 func parseToken(hmacSecretByte []byte, tokenString string) (userID uuid.UUID, username string, vars map[string]string, exp int64, tokenId string, issuedAt int64, ok bool) {
 	jwtToken, err := jwt.ParseWithClaims(tokenString, &SessionTokenClaims{}, func(token *jwt.Token) (interface{}, error) {
-		if s, ok := token.Method.(*jwt.SigningMethodHMAC); !ok || s.Hash != crypto.SHA256 {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-		}
 		return hmacSecretByte, nil
-	})
+	}, jwt.WithExpirationRequired(), jwt.WithValidMethods([]string{"HS256"}))
 	if err != nil {
 		return
 	}

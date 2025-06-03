@@ -62,9 +62,13 @@ type channelMessageListCursor struct {
 func ChannelMessagesList(ctx context.Context, logger *zap.Logger, db *sql.DB, caller uuid.UUID, stream PresenceStream, channelID string, limit int, forward bool, cursor string) (*api.ChannelMessageList, error) {
 	var incomingCursor *channelMessageListCursor
 	if cursor != "" {
-		cb, err := base64.StdEncoding.DecodeString(cursor)
+		cb, err := base64.URLEncoding.DecodeString(cursor)
 		if err != nil {
-			return nil, runtime.ErrChannelCursorInvalid
+			// Attempt to decode with StdEncoding for backwards compatibility.
+			cb, err = base64.StdEncoding.DecodeString(cursor)
+			if err != nil {
+				return nil, runtime.ErrChannelCursorInvalid
+			}
 		}
 		incomingCursor = &channelMessageListCursor{}
 		if err := gob.NewDecoder(bytes.NewReader(cb)).Decode(incomingCursor); err != nil {
@@ -133,7 +137,7 @@ WHERE stream_mode = $1 AND stream_subject = $2::UUID AND stream_descriptor = $3:
 	query += " LIMIT $5"
 	params := []interface{}{stream.Mode, stream.Subject, stream.Subcontext, stream.Label, limit + 1}
 	if incomingCursor != nil {
-		params = append(params, time.Unix(incomingCursor.CreateTime, 0).UTC(), incomingCursor.Id)
+		params = append(params, time.Unix(0, incomingCursor.CreateTime).UTC(), incomingCursor.Id)
 	}
 
 	rows, err := db.QueryContext(ctx, query, params...)
@@ -162,7 +166,7 @@ WHERE stream_mode = $1 AND stream_subject = $2::UUID AND stream_descriptor = $3:
 				StreamSubject:    stream.Subject.String(),
 				StreamSubcontext: stream.Subcontext.String(),
 				StreamLabel:      stream.Label,
-				CreateTime:       dbCreateTime.Time.Unix(),
+				CreateTime:       dbCreateTime.Time.UnixNano(),
 				Id:               dbID,
 				Forward:          forward,
 				IsNext:           true,
@@ -184,8 +188,8 @@ WHERE stream_mode = $1 AND stream_subject = $2::UUID AND stream_descriptor = $3:
 			SenderId:   dbSenderID,
 			Username:   dbUsername,
 			Content:    dbContent,
-			CreateTime: &timestamppb.Timestamp{Seconds: dbCreateTime.Time.Unix()},
-			UpdateTime: &timestamppb.Timestamp{Seconds: dbUpdateTime.Time.Unix()},
+			CreateTime: timestamppb.New(dbCreateTime.Time),
+			UpdateTime: timestamppb.New(dbUpdateTime.Time),
 			Persistent: &wrapperspb.BoolValue{Value: true},
 		}
 		switch stream.Mode {
@@ -207,7 +211,7 @@ WHERE stream_mode = $1 AND stream_subject = $2::UUID AND stream_descriptor = $3:
 				StreamSubject:    stream.Subject.String(),
 				StreamSubcontext: stream.Subcontext.String(),
 				StreamLabel:      stream.Label,
-				CreateTime:       dbCreateTime.Time.Unix(),
+				CreateTime:       dbCreateTime.Time.UnixNano(),
 				Id:               dbID,
 				Forward:          forward,
 				IsNext:           false,
@@ -239,7 +243,7 @@ WHERE stream_mode = $1 AND stream_subject = $2::UUID AND stream_descriptor = $3:
 			StreamSubject:    stream.Subject.String(),
 			StreamSubcontext: stream.Subcontext.String(),
 			StreamLabel:      stream.Label,
-			CreateTime:       messages[l-1].CreateTime.Seconds,
+			CreateTime:       messages[l-1].CreateTime.AsTime().UnixNano(),
 			Id:               messages[l-1].MessageId,
 			Forward:          true,
 			IsNext:           true,
@@ -261,7 +265,7 @@ WHERE stream_mode = $1 AND stream_subject = $2::UUID AND stream_descriptor = $3:
 			logger.Error("Error creating channel messages list next cursor", zap.Error(err))
 			return nil, err
 		}
-		nextCursorStr = base64.StdEncoding.EncodeToString(cursorBuf.Bytes())
+		nextCursorStr = base64.URLEncoding.EncodeToString(cursorBuf.Bytes())
 	}
 	var prevCursorStr string
 	if prevCursor != nil {
@@ -270,7 +274,7 @@ WHERE stream_mode = $1 AND stream_subject = $2::UUID AND stream_descriptor = $3:
 			logger.Error("Error creating channel messages list previous cursor", zap.Error(err))
 			return nil, err
 		}
-		prevCursorStr = base64.StdEncoding.EncodeToString(cursorBuf.Bytes())
+		prevCursorStr = base64.URLEncoding.EncodeToString(cursorBuf.Bytes())
 	}
 	var cacheableCursorStr string
 	if cacheableCursor != nil {
@@ -279,7 +283,7 @@ WHERE stream_mode = $1 AND stream_subject = $2::UUID AND stream_descriptor = $3:
 			logger.Error("Error creating channel messages list cacheable cursor", zap.Error(err))
 			return nil, err
 		}
-		cacheableCursorStr = base64.StdEncoding.EncodeToString(cursorBuf.Bytes())
+		cacheableCursorStr = base64.URLEncoding.EncodeToString(cursorBuf.Bytes())
 	}
 
 	return &api.ChannelMessageList{
@@ -291,7 +295,7 @@ WHERE stream_mode = $1 AND stream_subject = $2::UUID AND stream_descriptor = $3:
 }
 
 func ChannelMessageSend(ctx context.Context, logger *zap.Logger, db *sql.DB, router MessageRouter, channelStream PresenceStream, channelId, content, senderId, senderUsername string, persist bool) (*rtapi.ChannelMessageAck, error) {
-	ts := time.Now().Unix()
+	ts := timestamppb.New(time.Now().UTC())
 	message := &api.ChannelMessage{
 		ChannelId:  channelId,
 		MessageId:  uuid.Must(uuid.NewV4()).String(),
@@ -299,8 +303,8 @@ func ChannelMessageSend(ctx context.Context, logger *zap.Logger, db *sql.DB, rou
 		SenderId:   senderId,
 		Username:   senderUsername,
 		Content:    content,
-		CreateTime: &timestamppb.Timestamp{Seconds: ts},
-		UpdateTime: &timestamppb.Timestamp{Seconds: ts},
+		CreateTime: ts,
+		UpdateTime: ts,
 		Persistent: &wrapperspb.BoolValue{Value: persist},
 	}
 
@@ -326,10 +330,9 @@ func ChannelMessageSend(ctx context.Context, logger *zap.Logger, db *sql.DB, rou
 	if persist {
 		query := `INSERT INTO message (id, code, sender_id, username, stream_mode, stream_subject, stream_descriptor, stream_label, content, create_time, update_time)
 VALUES ($1, $2, $3, $4, $5, $6::UUID, $7::UUID, $8, $9, $10, $10)`
-		_, err := db.ExecContext(ctx, query, message.MessageId, message.Code.Value, message.SenderId, message.Username, channelStream.Mode, channelStream.Subject, channelStream.Subcontext, channelStream.Label, message.Content, time.Unix(message.CreateTime.Seconds, 0).UTC())
+		_, err := db.ExecContext(ctx, query, message.MessageId, message.Code.Value, message.SenderId, message.Username, channelStream.Mode, channelStream.Subject, channelStream.Subcontext, channelStream.Label, message.Content, message.CreateTime.AsTime())
 		if err != nil {
 			logger.Error("Error persisting channel message", zap.Error(err))
-
 			return nil, errChannelMessagePersist
 		}
 	}
@@ -340,7 +343,7 @@ VALUES ($1, $2, $3, $4, $5, $6::UUID, $7::UUID, $8, $9, $10, $10)`
 }
 
 func ChannelMessageUpdate(ctx context.Context, logger *zap.Logger, db *sql.DB, router MessageRouter, channelStream PresenceStream, channelId, messageId, content, senderId, senderUsername string, persist bool) (*rtapi.ChannelMessageAck, error) {
-	ts := time.Now().Unix()
+	ts := time.Now().UTC()
 	message := &api.ChannelMessage{
 		ChannelId:  channelId,
 		MessageId:  messageId,
@@ -348,8 +351,8 @@ func ChannelMessageUpdate(ctx context.Context, logger *zap.Logger, db *sql.DB, r
 		SenderId:   senderId,
 		Username:   senderUsername,
 		Content:    content,
-		CreateTime: &timestamppb.Timestamp{Seconds: ts},
-		UpdateTime: &timestamppb.Timestamp{Seconds: ts},
+		CreateTime: timestamppb.New(ts),
+		UpdateTime: timestamppb.New(ts),
 		Persistent: &wrapperspb.BoolValue{Value: persist},
 	}
 
@@ -377,7 +380,7 @@ func ChannelMessageUpdate(ctx context.Context, logger *zap.Logger, db *sql.DB, r
 		// First find and update the referenced message.
 		var dbCreateTime pgtype.Timestamptz
 		query := "UPDATE message SET update_time = $5, username = $4, content = $3 WHERE id = $1 AND sender_id = $2 RETURNING create_time"
-		err := db.QueryRowContext(ctx, query, messageId, message.SenderId, message.Content, message.Username, time.Unix(message.UpdateTime.Seconds, 0).UTC()).Scan(&dbCreateTime)
+		err := db.QueryRowContext(ctx, query, messageId, message.SenderId, message.Content, message.Username, message.UpdateTime.AsTime()).Scan(&dbCreateTime)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				return nil, errChannelMessageNotFound
@@ -386,7 +389,7 @@ func ChannelMessageUpdate(ctx context.Context, logger *zap.Logger, db *sql.DB, r
 			return nil, errChannelMessagePersist
 		}
 		// Replace the message create time with the real one from DB.
-		message.CreateTime = &timestamppb.Timestamp{Seconds: dbCreateTime.Time.Unix()}
+		*message.CreateTime = *timestamppb.New(dbCreateTime.Time)
 	}
 
 	router.SendToStream(logger, channelStream, &rtapi.Envelope{Message: &rtapi.Envelope_ChannelMessage{ChannelMessage: message}}, true)
@@ -395,7 +398,7 @@ func ChannelMessageUpdate(ctx context.Context, logger *zap.Logger, db *sql.DB, r
 }
 
 func ChannelMessageRemove(ctx context.Context, logger *zap.Logger, db *sql.DB, router MessageRouter, channelStream PresenceStream, channelId, messageId, senderId, senderUsername string, persist bool) (*rtapi.ChannelMessageAck, error) {
-	ts := time.Now().Unix()
+	ts := time.Now().UTC()
 	message := &api.ChannelMessage{
 		ChannelId:  channelId,
 		MessageId:  messageId,
@@ -403,8 +406,8 @@ func ChannelMessageRemove(ctx context.Context, logger *zap.Logger, db *sql.DB, r
 		SenderId:   senderId,
 		Username:   senderUsername,
 		Content:    "{}",
-		CreateTime: &timestamppb.Timestamp{Seconds: ts},
-		UpdateTime: &timestamppb.Timestamp{Seconds: ts},
+		CreateTime: timestamppb.New(ts),
+		UpdateTime: timestamppb.New(ts),
 		Persistent: &wrapperspb.BoolValue{Value: persist},
 	}
 
@@ -430,9 +433,9 @@ func ChannelMessageRemove(ctx context.Context, logger *zap.Logger, db *sql.DB, r
 
 	if persist {
 		// First find and remove the referenced message.
-		var dbCreateTime pgtype.Timestamptz
-		query := "DELETE FROM message WHERE id = $1 AND sender_id = $2 RETURNING create_time"
-		err := db.QueryRowContext(ctx, query, messageId, message.SenderId).Scan(&dbCreateTime)
+		var dbCreateTime, dbUpdateTime pgtype.Timestamptz
+		query := "DELETE FROM message WHERE id = $1 AND sender_id = $2 RETURNING create_time, update_time"
+		err := db.QueryRowContext(ctx, query, messageId, message.SenderId).Scan(&dbCreateTime, &dbUpdateTime)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				return nil, errChannelMessageNotFound
@@ -441,7 +444,8 @@ func ChannelMessageRemove(ctx context.Context, logger *zap.Logger, db *sql.DB, r
 			return nil, errChannelMessagePersist
 		}
 		// Replace the message create time with the real one from DB.
-		message.CreateTime = &timestamppb.Timestamp{Seconds: dbCreateTime.Time.Unix()}
+		*message.CreateTime = *timestamppb.New(dbCreateTime.Time)
+		*message.UpdateTime = *timestamppb.New(dbUpdateTime.Time)
 	}
 
 	router.SendToStream(logger, channelStream, &rtapi.Envelope{Message: &rtapi.Envelope_ChannelMessage{ChannelMessage: message}}, true)
@@ -494,8 +498,8 @@ func GetChannelMessages(ctx context.Context, logger *zap.Logger, db *sql.DB, use
 			SenderId:   userID.String(),
 			Username:   dbUsername,
 			Content:    dbContent,
-			CreateTime: &timestamppb.Timestamp{Seconds: dbCreateTime.Time.Unix()},
-			UpdateTime: &timestamppb.Timestamp{Seconds: dbUpdateTime.Time.Unix()},
+			CreateTime: timestamppb.New(dbCreateTime.Time),
+			UpdateTime: timestamppb.New(dbUpdateTime.Time),
 			Persistent: &wrapperspb.BoolValue{Value: true},
 		})
 	}

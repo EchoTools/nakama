@@ -1516,6 +1516,13 @@
               "type": "string"
             },
             "collectionFormat": "multi"
+          },
+          {
+            "name": "metadata",
+            "description": "Optional metadata to add to friends.",
+            "in": "query",
+            "required": false,
+            "type": "string"
           }
         ],
         "tags": [
@@ -2634,7 +2641,7 @@
     },
     "/v2/leaderboard/{leaderboardId}/owner/{ownerId}": {
       "get": {
-        "summary": "List leaderboard records that belong to a user.",
+        "summary": "List leaderboard records around the target ownerId.",
         "operationId": "Nakama_ListLeaderboardRecordsAroundOwner",
         "responses": {
           "200": {
@@ -4169,6 +4176,10 @@
           "type": "string",
           "format": "date-time",
           "description": "Time of the latest relationship update."
+        },
+        "metadata": {
+          "type": "string",
+          "description": "Metadata."
         }
       },
       "description": "A friend of a user."
