@@ -1,5 +1,19 @@
 package evr
 
+type EchoToolsProtobufMessageV1 struct {
+	Payload []byte
+}
+
+func (m *EchoToolsProtobufMessageV1) Stream(s *EasyStream) error {
+	if s.Mode == DecodeMode {
+		m.Payload = make([]byte, s.Len())
+	}
+
+	return RunErrorFunctions([]func() error{
+		func() error { return s.StreamBytes(&m.Payload, len(m.Payload)) },
+	})
+}
+
 func MessageTypeHash(msg Message) uint64 {
 
 	switch msg.(type) {
@@ -309,6 +323,9 @@ func NewMessageFromHash(hash uint64) Message {
 		return &EchoToolsLobbySessionDataV1{}
 	case 0xb26450c1a5ba5d79:
 		return &EchoToolsLobbyStatusV1{}
+	case 0xe376236577dbfbbb:
+		return &EchoToolsProtobufMessageV1{}
+
 	default:
 		return nil
 	}
