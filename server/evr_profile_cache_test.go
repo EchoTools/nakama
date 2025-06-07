@@ -19,7 +19,7 @@ func createTestProfileRegistry(t *testing.T, logger *zap.Logger) (*ProfileCache,
 	runtimeLogger := NewRuntimeGoLogger(logger)
 
 	db := NewDB(t)
-	nk := NewRuntimeGoNakamaModule(logger, db, nil, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	nk := NewRuntimeGoNakamaModule(logger, db, nil, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	profileRegistry := NewProfileRegistry(nk, db, runtimeLogger, metrics, nil)
 
