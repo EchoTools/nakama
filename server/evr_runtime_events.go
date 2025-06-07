@@ -248,6 +248,8 @@ func (h *EventDispatcher) guildGroup(ctx context.Context, groupID string) (*Guil
 // auditedSession marks the session as audited for the group
 // and returns true if it was a new session.
 func (h *EventDispatcher) auditedSession(groupID, sessionID string) bool {
+	h.Lock()
+	defer h.Unlock()
 	if h.playerAuthorizations[sessionID] == nil {
 		h.playerAuthorizations[sessionID] = make(map[string]struct{})
 	}
@@ -362,7 +364,8 @@ func (h *EventDispatcher) alternateLogLineFormatter(userID string, alternates ma
 }
 
 func (h *EventDispatcher) handleMatchEvent(ctx context.Context, logger runtime.Logger, evt *api.Event) error {
-
+	h.Lock()
+	defer h.Unlock()
 	matchID, err := MatchIDFromString(evt.Properties["match_id"])
 	if err != nil {
 		return fmt.Errorf("failed to parse match ID: %w", err)
