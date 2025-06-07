@@ -361,6 +361,17 @@ func TestParseEvrId(t *testing.T) {
 		wantErr bool
 	}{
 		{
+			name: "empty",
+			args: args{
+				s: "",
+			},
+			want: &EvrId{
+				PlatformCode: 0,
+				AccountId:    0,
+			},
+			wantErr: false,
+		},
+		{
 			name: "valid",
 			args: args{
 				s: "STM-1",

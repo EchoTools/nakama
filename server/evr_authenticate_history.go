@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -41,24 +42,17 @@ var (
 	ErrPendingAuthorizationNotFound = errors.New("pending authorization not found")
 )
 
-func filterAltSearchPatterns(patterns []string) []string {
+func matchIgnoredAltPattern(pattern string) bool {
 	// Remove ignored values
-	for i := 0; i < len(patterns); i++ {
-		remove := false
-		if _, ok := IgnoredLoginValues[patterns[i]]; ok {
-			remove = true
-		} else if ip := net.ParseIP(patterns[i]); ip != nil {
-			// Check if the IP is a private IP address
-			if ip.IsPrivate() {
-				remove = true
-			}
-		}
-		if remove {
-			patterns = slices.Delete(patterns, i, i+1)
-			i--
+	if _, ok := IgnoredLoginValues[pattern]; ok {
+		return true
+	} else if ip := net.ParseIP(pattern); ip != nil {
+		// Check if the IP is a private IP address
+		if ip.IsPrivate() {
+			return true
 		}
 	}
-	return patterns
+	return false
 }
 
 type LoginHistoryEntry struct {
@@ -82,12 +76,16 @@ func (e *LoginHistoryEntry) PendingCode() string {
 }
 
 func (h *LoginHistoryEntry) SystemProfile() string {
-	components := []string{normalizeHeadsetType(h.LoginData.SystemInfo.HeadsetType), h.LoginData.SystemInfo.NetworkType, h.LoginData.SystemInfo.VideoCard, h.LoginData.SystemInfo.CPUModel, fmt.Sprintf("%d", h.LoginData.SystemInfo.NumPhysicalCores), fmt.Sprintf("%d", h.LoginData.SystemInfo.NumLogicalCores), fmt.Sprintf("%d", h.LoginData.SystemInfo.MemoryTotal), fmt.Sprintf("%d", h.LoginData.SystemInfo.DedicatedGPUMemory)}
-
-	for i := range components {
-		components[i] = strings.ReplaceAll(components[i], "::", ";")
+	components := []string{
+		normalizeHeadsetType(h.LoginData.SystemInfo.HeadsetType),
+		h.LoginData.SystemInfo.NetworkType,
+		h.LoginData.SystemInfo.VideoCard,
+		h.LoginData.SystemInfo.CPUModel,
+		strconv.FormatInt(h.LoginData.SystemInfo.NumPhysicalCores, 10),
+		strconv.FormatInt(h.LoginData.SystemInfo.NumLogicalCores, 10),
+		strconv.FormatInt(h.LoginData.SystemInfo.MemoryTotal, 10),
+		strconv.FormatInt(h.LoginData.SystemInfo.DedicatedGPUMemory, 10),
 	}
-
 	return strings.Join(components, "::")
 }
 
@@ -520,7 +518,12 @@ func (h *LoginHistory) rebuildCache() {
 	h.Cache = slices.Compact(h.Cache)
 
 	// Remove ignored values
-	h.Cache = filterAltSearchPatterns(h.Cache)
+	for i := 0; i < len(h.Cache); i++ {
+		if matchIgnoredAltPattern(h.Cache[i]) {
+			h.Cache = slices.Delete(h.Cache, i, i+1)
+			i--
+		}
+	}
 }
 
 func (h *LoginHistory) MarshalJSON() ([]byte, error) {

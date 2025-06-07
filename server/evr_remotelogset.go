@@ -112,15 +112,24 @@ func (u *MatchGameStateUpdate) FromGoal(goal *evr.RemoteLogGoal) {
 	if u.Goals == nil {
 		u.Goals = make([]*evr.MatchGoal, 0, 1)
 	}
+
+	playerInfoXPID, err := evr.ParseEvrId(goal.PlaterInfoXPID)
+	if err != nil {
+		return // Invalid XPID, skip this goal
+	}
+	prevPlayerXPID, err := evr.ParseEvrId(goal.PrevPlayerXPID)
+	if err != nil {
+		return // Invalid previous player XPID, skip this goal
+	}
 	u.Goals = append(u.Goals, &evr.MatchGoal{
 		GoalTime:              goal.GameInfoGameTime,
 		GoalType:              goal.GoalType,
 		DisplayName:           goal.PlayerInfoDisplayName,
 		TeamID:                int64(goal.PlayerInfoTeamID),
-		XPID:                  goal.PlayerInfoEvrID,
+		XPID:                  *playerInfoXPID,
 		PrevPlayerDisplayName: goal.PrevPlayerDisplayname,
 		PrevPlayerTeamID:      int64(goal.PrevPlayerTeamID),
-		PrevPlayerXPID:        goal.PrevPlayerEvrID,
+		PrevPlayerXPID:        *prevPlayerXPID,
 		WasHeadbutt:           goal.WasHeadbutt,
 		PointsValue:           GoalTypeToPoints(goal.GoalType),
 	})
