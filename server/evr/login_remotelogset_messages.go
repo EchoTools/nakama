@@ -29,7 +29,7 @@ type GameTimer interface {
 type GenericRemoteLog struct {
 	MessageData string `json:"message,omitempty"`
 	Type        string `json:"message_type,omitempty"`
-	XPID        EvrId  `json:"userid"`
+	XPID        string `json:"userid"`
 }
 
 func (m GenericRemoteLog) MessageType() string {
@@ -477,10 +477,10 @@ type RemoteLogGoal struct {
 	GoalType               string  `json:"[goal_type]"`
 	PlayerInfoDisplayName  string  `json:"[player_info][displayname]"`
 	PlayerInfoTeamID       int64   `json:"[player_info][teamid]"`
-	PlayerInfoEvrID        EvrId   `json:"[player_info][userid]"`
+	PlaterInfoXPID         string  `json:"[player_info][userid]"`
 	PrevPlayerDisplayname  string  `json:"[prev_player][displayname]"`
 	PrevPlayerTeamID       int64   `json:"[prev_player][teamid]"`
-	PrevPlayerEvrID        EvrId   `json:"[prev_player][userid]"`
+	PrevPlayerXPID         string  `json:"[prev_player][userid]"`
 	SessionUUIDStr         string  `json:"[session][uuid]"`
 	WasHeadbutt            bool    `json:"[was_headbutt]"`
 }
@@ -560,7 +560,7 @@ type RemoteLogUserDisconnected struct {
 	GameInfoMatchType      string  `json:"[game_info][match_type]"`
 	PlayerInfoDisplayname  string  `json:"[player_info][displayname]"`
 	PlayerInfoTeamid       int64   `json:"[player_info][teamid]"`
-	PlayerEvrID            string  `json:"[player_info][userid]"`
+	PlayerXPID             string  `json:"[player_info][userid]"`
 	SessionUUIDStr         string  `json:"[session][uuid]"`
 }
 

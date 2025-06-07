@@ -5,40 +5,45 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 )
 
 type AlternateSearchMatch struct {
-	OtherUserID string             `json:"other_user_id"`
-	OtherEntry  *LoginHistoryEntry `json:"other_entry"`
-	Items       []string           `json:"items"`
+	OtherUserID string   `json:"other_user_id"`
+	Items       []string `json:"items"`
 }
 
 func LoginAlternateSearch(ctx context.Context, nk runtime.NakamaModule, loginHistory *LoginHistory, skipSelf bool) ([]*AlternateSearchMatch, map[string]*LoginHistory, error) {
 
 	// Build a list of patterns to search for in the index.
-	seen := make(map[string]struct{}, 0)
-	items := make([]string, 0, len(loginHistory.History)*3)
+
 	//items := loginHistory.SearchPatterns()
 	// Compile all of the users identifiers
-
+	items := make([]string, 0, len(loginHistory.History)*3)
 	for _, e := range loginHistory.History {
 		for _, s := range [...]string{
-			e.XPID.Token(),
 			e.ClientIP,
 			e.LoginData.HMDSerialNumber,
 		} {
-			if _, found := seen[s]; !found {
-				// Add the item to the list of items to search for.
-				items = append(items, s)
-				seen[s] = struct{}{}
-			}
+			items = append(items, s)
 		}
 	}
-	items = filterAltSearchPatterns(items)
-	// Sort the items to ensure that the search is consistent.
+	for xpi := range loginHistory.XPIs {
+		items = append(items, xpi)
+	}
+
 	slices.Sort(items)
+	items = slices.Compact(items)
+
+	// Filter out any items that are ignored by the pattern.
+	for i := 0; i < len(items); i++ {
+		if matchIgnoredAltPattern(items[i]) {
+			items = slices.Delete(items, i, i+1)
+			i-- // Adjust index since we removed an item.
+		}
+	}
 
 	if len(items) == 0 {
 		return nil, nil, nil
@@ -55,6 +60,9 @@ func LoginAlternatePatternSearch(ctx context.Context, nk runtime.NakamaModule, l
 	var err error
 	var result *api.StorageObjects
 	var cursor string
+
+	seen := make(map[string]struct{}, 0)
+
 	for {
 		result, cursor, err = nk.StorageIndexList(ctx, SystemUserID, LoginHistoryCacheIndex, query, 100, nil, cursor)
 		if err != nil {
@@ -68,7 +76,11 @@ func LoginAlternatePatternSearch(ctx context.Context, nk runtime.NakamaModule, l
 				continue
 			}
 
-			// Unmarshal the alternate history.
+			if _, found := seen[obj.UserId]; found {
+				continue
+			}
+			seen[obj.UserId] = struct{}{}
+
 			otherHistory := NewLoginHistory(obj.UserId)
 			if err := StorageRead(ctx, nk, obj.UserId, otherHistory, false); err != nil {
 				return nil, nil, fmt.Errorf("error reading alt history: %w", err)
@@ -112,28 +124,53 @@ func LoginDeniedClientIPAddressSearch(ctx context.Context, nk runtime.NakamaModu
 
 func loginHistoryCompare(a, b *LoginHistory) []*AlternateSearchMatch {
 	matches := make([]*AlternateSearchMatch, 0)
+
+	aEntries := make([][]string, 0, len(a.History)*3)
+	bEntries := make([][]string, 0, len(b.History)*3)
+
 	for _, aEntry := range a.History {
-		for _, bEntry := range b.History {
+		itemsA := []string{
+			aEntry.XPID.String(),
+			aEntry.ClientIP,
+			aEntry.SystemProfile(),
+		}
+		if aEntry.LoginData.HMDSerialNumber != "" {
+			itemsA = append(itemsA, aEntry.LoginData.HMDSerialNumber)
+		} else {
+			itemsA = append(itemsA, uuid.Must(uuid.NewV4()).String())
+		}
+		aEntries = append(aEntries, itemsA)
+	}
 
-			items := make([]string, 0)
+	for _, bEntry := range b.History {
+		itemsB := []string{
+			bEntry.XPID.String(),
+			bEntry.ClientIP,
+			bEntry.SystemProfile(),
+		}
+		if bEntry.LoginData.HMDSerialNumber != "" {
+			itemsB = append(itemsB, bEntry.LoginData.HMDSerialNumber)
+		} else {
+			itemsB = append(itemsB, uuid.Must(uuid.NewV4()).String())
+		}
+		bEntries = append(bEntries, itemsB)
+	}
 
-			for k, v := range map[string]string{
-				aEntry.XPID.String():             bEntry.XPID.String(),
-				aEntry.LoginData.HMDSerialNumber: bEntry.LoginData.HMDSerialNumber,
-				aEntry.ClientIP:                  bEntry.ClientIP,
-				aEntry.SystemProfile():           bEntry.SystemProfile(),
-			} {
-				if k == v {
-					items = append(items, k)
+	for _, aEntry := range aEntries {
+		for _, bEntry := range bEntries {
+
+			matchingItems := make([]string, 0, len(aEntry))
+			for i := range aEntry {
+				if aEntry[i] == bEntry[i] {
+					matchingItems = append(matchingItems, aEntry[i])
 				}
 			}
-			items = filterAltSearchPatterns(items)
-			if len(items) > 0 {
-				slices.Sort(items)
+
+			if len(matchingItems) > 0 {
+				slices.Sort(matchingItems)
 				matches = append(matches, &AlternateSearchMatch{
 					OtherUserID: b.userID,
-					OtherEntry:  bEntry,
-					Items:       items,
+					Items:       matchingItems,
 				})
 			}
 		}

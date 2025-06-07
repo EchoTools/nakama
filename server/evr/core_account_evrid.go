@@ -104,7 +104,7 @@ func (xpi EvrId) String() string {
 }
 
 func (xpi EvrId) Token() string {
-	return fmt.Sprintf("%s-%d", xpi.PlatformCode.String(), xpi.AccountId)
+	return xpi.PlatformCode.Abbrevation() + "-" + strconv.FormatUint(xpi.AccountId, 10)
 }
 
 func (xpi EvrId) Equals(other EvrId) bool {

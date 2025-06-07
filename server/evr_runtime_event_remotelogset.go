@@ -40,22 +40,9 @@ func NewEventPostMatchRemoteLog(userID, sessionID string, xpid evr.EvrId, userna
 	}
 }
 
-func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, dispatcher *EventDispatcher) error {
-	var (
-		db              = dispatcher.db
-		nk              = dispatcher.nk
-		sessionRegistry = dispatcher.sessionRegistry
-		matchRegistry   = dispatcher.matchRegistry
-		statisticsQueue = dispatcher.statisticsQueue
-	)
-
-	entries := make([]evr.RemoteLog, 0, len(s.RemoteLogSet.Logs))
-	logger = logger.WithFields(map[string]any{
-		"sender_uid": s.UserID,
-		"sender_sid": s.SessionID,
-	})
-
-	for _, logStr := range s.RemoteLogSet.Logs {
+func (s *EventRemoteLogSet) unmarshalLogs(logger runtime.Logger, logStrs []string) ([]evr.RemoteLog, error) {
+	entries := make([]evr.RemoteLog, 0, len(logStrs))
+	for _, logStr := range logStrs {
 		// Parse the useful remote logs from the set.
 		parsed, err := evr.UnmarshalRemoteLog([]byte(logStr))
 		if err != nil {
@@ -66,13 +53,31 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 			if errors.Is(err, evr.ErrUnknownRemoteLogMessageType) {
 				logger.Warn("Unknown remote log message type")
 			} else if !errors.Is(err, evr.ErrRemoteLogIsNotJSON) {
-				logger.Error("Failed to parse remote log message")
+				logger.Warn("Failed to parse remote log message")
 			}
 			continue
 		}
 		logger.WithField("message", parsed).Debug("Parsed remote log message")
 		entries = append(entries, parsed)
 	}
+	return entries, nil
+}
+
+func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, dispatcher *EventDispatcher) error {
+	var (
+		db              = dispatcher.db
+		nk              = dispatcher.nk
+		sessionRegistry = dispatcher.sessionRegistry
+		matchRegistry   = dispatcher.matchRegistry
+		statisticsQueue = dispatcher.statisticsQueue
+	)
+
+	entries, err := s.unmarshalLogs(logger, s.RemoteLogSet.Logs)
+	if err != nil {
+		logger.WithField("error", err).Warn("Failed to unmarshal remote logs")
+		return fmt.Errorf("failed to unmarshal remote logs: %w", err)
+	}
+
 	// Send the remote logs to the match data event.
 	if matchDatas := make(map[MatchID][]evr.RemoteLog, len(entries)); len(entries) > 0 {
 		for _, e := range entries {
@@ -84,13 +89,10 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 				if err != nil {
 					continue
 				}
-
 				if _, ok := matchDatas[matchID]; !ok {
 					matchDatas[matchID] = make([]evr.RemoteLog, 0, len(entries))
 				}
-
 				matchDatas[matchID] = append(matchDatas[matchID], e)
-
 			}
 		}
 
@@ -111,17 +113,6 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 
 	for _, e := range entries {
 		logger := logger.WithField("message_type", fmt.Sprintf("%T", e))
-
-		/*
-			// If this is a session remote log, add it to the match manager.
-			if m, ok := e.Parsed.(SessionRemoteLog); ok {
-				if p.matchLogManager != nil {
-					if err := p.matchLogManager.AddLog(m); err != nil {
-						logger.Warn("Failed to add log", zap.Error(err))
-					}
-				}
-			}
-		*/
 
 		var update *MatchGameStateUpdate
 		if msg, ok := e.(evr.GameTimer); ok {
@@ -433,9 +424,12 @@ func (s *EventRemoteLogSet) processPostMatchTypeStats(ctx context.Context, logge
 	if err != nil || label == nil {
 		return fmt.Errorf("failed to get match label: %w", err)
 	}
-
+	xpid, err := evr.ParseEvrId(msg.XPID)
+	if err != nil {
+		return fmt.Errorf("failed to parse evr ID: %w", err)
+	}
 	// Get the player's information
-	playerInfo := label.GetPlayerByEvrID(msg.XPID)
+	playerInfo := label.GetPlayerByEvrID(*xpid)
 	if playerInfo == nil {
 		// If the player isn't in the match, do not update the stats
 		return fmt.Errorf("player not in match: %s", msg.XPID)

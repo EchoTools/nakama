@@ -98,9 +98,6 @@ func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		&EventRemoteLogSet{},
 		&EventServerProfileUpdate{},
 	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create unmarshal event function: %w", err)
-	}
 
 	go func() {
 		for {
@@ -109,8 +106,24 @@ func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 				return
 			case evt := <-dispatch.queue:
 
-				dispatch.processEvent(ctx, logger, evt)
+				doneCh := make(chan struct{})
 
+				logger.WithField("event", evt.Name).Debug("processing event")
+				go func() {
+					defer close(doneCh)
+					dispatch.processEvent(ctx, logger, evt)
+					doneCh <- struct{}{}
+				}()
+				select {
+				case <-ctx.Done():
+					logger.Warn("context canceled while processing event")
+					return
+				case <-doneCh:
+					logger.WithField("event", evt.Name).Debug("processed event")
+				case <-time.After(5 * time.Second):
+					logger.WithField("event", evt.Name).Debug("event processing took too long, skipping")
+					continue
+				}
 			case <-time.After(30 * time.Second):
 
 				inserts := make([]any, 0, len(dispatch.matchJournals))
@@ -143,6 +156,7 @@ func (h *EventDispatcher) eventFn(ctx context.Context, logger runtime.Logger, ev
 	logger.WithField("event", evt.Name).Debug("received event")
 	select {
 	case h.queue <- evt:
+		logger.WithField("event", evt.Name).Debug("event queued for processing")
 	case <-ctx.Done():
 		logger.Warn("context canceled")
 	default:
