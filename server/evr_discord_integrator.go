@@ -144,13 +144,16 @@ func (c *DiscordIntegrator) Start() {
 							zap.String("gid", c.GuildIDToGroupID(entry.GuildID)),
 							zap.String("uid", c.DiscordIDToUserID(entry.DiscordID)),
 						)
-						processed++
-						if err := c.syncMember(c.ctx, logger, entry.DiscordID, entry.GuildID, entry.DoFullUpdate); err != nil {
-							logger.Warn("Error syncing guild group member", zap.Error(err))
-							return true
-						}
-						logger.Debug("Synced guild group member")
 						c.queueCooldowns.Delete(entry)
+						processed++
+						if entry.GuildID == "" || entry.DiscordID == "" {
+							logger.Warn("Invalid queue entry", zap.String("discord_id", entry.DiscordID), zap.String("guild_id", entry.GuildID))
+							return true
+						} else if err := c.syncMember(c.ctx, logger, entry.DiscordID, entry.GuildID, entry.DoFullUpdate); err != nil {
+							logger.Warn("Error syncing guild group member", zap.Error(err))
+						} else {
+							logger.Debug("Synced guild group member")
+						}
 					}
 					return true
 				})
