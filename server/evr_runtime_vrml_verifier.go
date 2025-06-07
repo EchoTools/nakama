@@ -114,7 +114,7 @@ func (v *VRMLScanQueue) Start() error {
 				if errors.Is(err, ErrQueueEmpty) {
 					continue
 				}
-				v.logger.Error("Failed to dequeue item", zap.Error(err))
+				v.logger.Error("Failed to dequeue item %v", err)
 				continue
 			}
 
@@ -232,8 +232,8 @@ func (v *VRMLScanQueue) enqueue(entry VRMLScanQueueEntry) error {
 
 func (v *VRMLScanQueue) dequeue() (VRMLScanQueueEntry, error) {
 	val, err := v.redisClient.LPop(v.queueKey).Bytes()
-	if err == ErrQueueEmpty {
-		return VRMLScanQueueEntry{}, redis.Nil // Queue is empty
+	if err == redis.Nil {
+		return VRMLScanQueueEntry{}, ErrQueueEmpty
 	}
 	entry := VRMLScanQueueEntry{}
 	if err := json.Unmarshal(val, &entry); err != nil {
