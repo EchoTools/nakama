@@ -173,7 +173,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		discordCache = NewDiscordIntegrator(ctx, logger, config, metrics, nk, db, dg, guildGroupRegistry)
 		discordCache.Start()
 
-		appBot, err = NewDiscordAppBot(ctx, runtimeLogger, nk, db, metrics, pipeline, config, discordCache, profileRegistry, statusRegistry, dg, ipInfoCache, guildGroupRegistry)
+		appBot, err = NewDiscordAppBot(ctx, runtimeLogger, nk, db, metrics, pipeline, config, discordCache, profileRegistry, statusRegistry, dg, ipInfoCache, guildGroupRegistry, redisClient)
 		if err != nil {
 			logger.Error("Failed to create app bot", zap.Error(err))
 

@@ -10,6 +10,7 @@ import (
 type VRMLEntitlementLedgerEntry struct {
 	UserID       string             `json:"user_id"`
 	VRMLUserID   string             `json:"vrml_user_id"`
+	VRMLPlayerID string             `json:"vrml_player_id"`
 	Entitlements []*VRMLEntitlement `json:"entitlements"`
 }
 

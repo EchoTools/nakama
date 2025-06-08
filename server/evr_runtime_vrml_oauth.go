@@ -50,12 +50,8 @@ func NewVRMLOAuthFlow(clientID, redirectURL string, timeout time.Duration) (*VRM
 	// Store the verifier and channel for the RPC to use
 	oauthFlows.Store(key, oauthData)
 
-	go func() {
-		select {
-		case <-time.After(timeout):
-			oauthFlows.Delete(key)
-		}
-	}()
+	// Set a timeout to delete the flow after the specified duration
+	time.AfterFunc(timeout, func() { oauthFlows.Delete(key) })
 
 	return oauthData, nil
 }
