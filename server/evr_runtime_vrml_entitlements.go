@@ -195,7 +195,7 @@ func AssignEntitlements(ctx context.Context, logger runtime.Logger, nk runtime.N
 		}
 	}
 
-	metadata := map[string]interface{}{
+	metadata := map[string]any{
 		"assigner_username": assignerUsername,
 		"assigner_id":       assignerID,
 		"vrml_user_id":      vrmlUserID,
@@ -207,7 +207,7 @@ func AssignEntitlements(ctx context.Context, logger runtime.Logger, nk runtime.N
 	}
 
 	// Log the action
-	logger.WithFields(map[string]interface{}{
+	logger.WithFields(map[string]any{
 		"assigner_id":      assignerID,
 		"user_id":          userID,
 		"vrml_user_id":     vrmlUserID,

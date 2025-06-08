@@ -32,15 +32,15 @@ func (e *AccountAlreadyLinkedError) Error() string {
 
 func (a EVRProfile) VRMLUserID() string {
 	for _, d := range a.account.Devices {
-		if vrmlUserID, found := strings.CutPrefix(d.Id, DeviceIDPrefixVRML); found {
-			return vrmlUserID
+		if playerID, found := strings.CutPrefix(d.Id, DeviceIDPrefixVRML); found {
+			return playerID
 		}
 	}
 	return ""
 }
 
 // VerifyOwnership verifies that the user owns the VRML account by checking the Discord ID
-func LinkVRMLAccount(ctx context.Context, db *sql.DB, nk runtime.NakamaModule, userID, vrmlUserID, vrmlPlayerID, token string) error {
+func LinkVRMLAccount(ctx context.Context, db *sql.DB, nk runtime.NakamaModule, userID string, vrmlUserID string) error {
 	// Link the vrml account to the user
 	if ownerID, err := GetUserIDByDeviceID(ctx, db, VRMLDeviceID(vrmlUserID)); err != nil {
 		if status.Code(err) != codes.NotFound {
@@ -54,8 +54,8 @@ func LinkVRMLAccount(ctx context.Context, db *sql.DB, nk runtime.NakamaModule, u
 	}
 	// Queue the event to count matches and assign entitlements
 	if err := SendEvent(ctx, nk, &EventVRMLAccountLink{
-		UserID: userID,
-		Token:  token,
+		UserID:     userID,
+		VRMLUserID: vrmlUserID,
 	}); err != nil {
 		return fmt.Errorf("failed to queue VRML account linked event: %w", err)
 	}
