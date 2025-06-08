@@ -2100,6 +2100,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				IncludeGuildRoles:              isGuildAuditor,
 				IncludeAllGuilds:               isGlobalOperator,
 				ShowLoginsSince:                loginsSince,
+				SendFileOnError:                isGlobalOperator,
 			}
 
 			return d.handleProfileRequest(ctx, logger, nk, s, i, target, opts)
