@@ -682,8 +682,8 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	}
 
 	journal := NewGuildEnforcementJournal(profile.ID())
-	if len(journals) > 0 && journals[targetID] == nil {
-
+	if len(journals) > 0 && journals[targetID] != nil {
+		journal = journals[targetID]
 	}
 
 	w := NewWhoAmI(ctx, logger, nk, d.guildGroupRegistry, d.cache, profile, loginHistory, matchmakingSettings, guildGroups, displayNameHistory, journal, potentialAlternates, activeSuspensions, opts, groupID)
