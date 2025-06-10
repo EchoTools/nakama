@@ -481,7 +481,6 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, ses
 			logger.Debug("Joining backfill match.")
 			p.nk.metrics.CustomCounter("lobby_join_backfill", lobbyParams.MetricsTags(), int64(lobbyParams.GetPartySize()))
 
-			// Player members will detect the join.
 			if err := p.LobbyJoinEntrants(logger, l, entrants...); err != nil {
 				// Send the error to the client
 				// If it's full just try again.
@@ -520,6 +519,7 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, ses
 					}
 					return fmt.Errorf("failed to join backfill match: %w", err)
 				}
+				return nil
 			}
 		}
 	}
