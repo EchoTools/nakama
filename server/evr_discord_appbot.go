@@ -1844,7 +1844,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				IncludeSuspensionAuditorNotes:  false,
 				IncludeInactiveSuspensions:     false,
 				ErrorIfAccountDisabled:         true,
-				DisplayAllGuildMemberships:     true,
 				IncludePartyGroupName:          true,
 				IncludeDefaultMatchmakingGuild: true,
 				IncludeLinkedDevices:           true,
@@ -2087,14 +2086,13 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				IncludePastSuspensions:       isGuildEnforcer,
 				IncludeCurrentMatchesEmbed:   isGuildEnforcer,
 				IncludeVRMLHistoryEmbed:      isGlobalOperator,
-				IncludePastDisplayNamesEmbed: isGuildEnforcer,
+				IncludePastDisplayNamesEmbed: true,
 				IncludeAlternatesEmbed:       isGlobalOperator,
 
 				IncludeDiscordDisplayName:      isGuildEnforcer,
 				IncludeSuspensionAuditorNotes:  isGuildEnforcer,
 				IncludeInactiveSuspensions:     isGuildEnforcer,
 				ErrorIfAccountDisabled:         !isGuildEnforcer,
-				DisplayAllGuildMemberships:     isGlobalOperator,
 				IncludePartyGroupName:          isGuildAuditor,
 				IncludeDefaultMatchmakingGuild: isGuildAuditor,
 				IncludeLinkedDevices:           isGuildAuditor,
@@ -2143,7 +2141,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			startTime := time.Now().Add(90 * time.Second)
 
-			logger = logger.WithFields(map[string]interface{}{
+			logger = logger.WithFields(map[string]any{
 				"userID":    userID,
 				"guildID":   i.GuildID,
 				"region":    region,

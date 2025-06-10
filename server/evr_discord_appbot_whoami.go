@@ -28,7 +28,6 @@ type UserProfileRequestOptions struct {
 	IncludeSuspensionAuditorNotes  bool
 	IncludeInactiveSuspensions     bool
 	ErrorIfAccountDisabled         bool
-	DisplayAllGuildMemberships     bool
 	IncludePartyGroupName          bool
 	IncludeDefaultMatchmakingGuild bool
 	IncludeLinkedDevices           bool
