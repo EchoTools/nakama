@@ -449,15 +449,6 @@ func (w *WhoAmI) createSuspensionsEmbed() *discordgo.MessageEmbed {
 			embed.Color = 0xCC0000 // Red if there are active suspensions
 		}
 
-		data, err := json.Marshal(embed)
-		if err != nil {
-			return nil
-		}
-		if w.opts.IncludeInactiveSuspensions && len(data) > 1024 {
-			// Only show active
-			w.opts.IncludeInactiveSuspensions = false
-			continue
-		}
 		return embed
 	}
 }
