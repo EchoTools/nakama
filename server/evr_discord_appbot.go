@@ -1274,6 +1274,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				md.GuildDisplayNameOverrides[groupID] = displayName
 			}
 
+			if err := EVRProfileUpdate(ctx, nk, userID, md); err != nil {
+				return fmt.Errorf("failed to store account metadata: %w", err)
+			}
+
 			return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
