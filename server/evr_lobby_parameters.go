@@ -456,6 +456,11 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeMMR bool, includeMax
 		p.BackfillQueryAddon,
 	}
 
+	if !p.CurrentMatchID.IsNil() {
+		// Do not backfill into the same match
+		qparts = append(qparts, fmt.Sprintf("-label.id:%s", Query.Escape(p.CurrentMatchID.String())))
+	}
+
 	if len(p.BlockedIDs) > 0 && slices.Contains([]evr.Symbol{evr.ModeSocialPublic, evr.ModeCombatPublic}, p.Mode) {
 		// Add each blocked user that is online to the backfill query addon
 		// Avoid backfilling matches with players that this player blocks.
