@@ -58,7 +58,7 @@ func errFailedRegistration(session *sessionWS, logger *zap.Logger, err error, co
 }
 
 func (p *EvrPipeline) gameserverRegistrationRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	request := in.(*evr.EchoToolsGameServerRegistrationRequestV1)
+	request := in.(*evr.NEVRRegistrationRequestV1)
 
 	isNative := false
 	if request.LoginSessionID != uuid.Nil {
@@ -622,7 +622,7 @@ func isPrivateIP(ip net.IP) bool {
 }
 
 func (p *EvrPipeline) gameserverLobbySessionStarted(_ context.Context, logger *zap.Logger, _ *sessionWS, in evr.Message) error {
-	request := in.(*evr.EchoToolsLobbySessionStartedV1)
+	request := in.(*evr.NEVRLobbySessionStartedV1)
 
 	logger.Info("Game session started", zap.String("mid", request.LobbySessionID.String()))
 
@@ -630,7 +630,7 @@ func (p *EvrPipeline) gameserverLobbySessionStarted(_ context.Context, logger *z
 }
 
 func (p *EvrPipeline) gameserverLobbySessionEnded(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	request := in.(*evr.EchoToolsLobbySessionEndedV1)
+	request := in.(*evr.NEVRLobbySessionEndedV1)
 	if err := p.nk.StreamUserLeave(StreamModeMatchAuthoritative, request.LobbySessionID.String(), "", p.node, session.UserID().String(), session.ID().String()); err != nil {
 		logger.Warn("Failed to leave match stream", zap.Error(err))
 	}
@@ -667,7 +667,7 @@ func (p *EvrPipeline) gameserverLobbySessionEnded(ctx context.Context, logger *z
 }
 
 func (p *EvrPipeline) gameserverLobbyEntrantNew(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	message := in.(*evr.EchoToolsLobbyEntrantNewV1)
+	message := in.(*evr.NEVRLobbyEntrantNewV1)
 
 	baseLogger := logger.With(zap.String("mid", message.LobbySessionID.String()))
 
@@ -737,7 +737,7 @@ func (p *EvrPipeline) gameserverLobbyEntrantNew(ctx context.Context, logger *zap
 }
 
 func (p *EvrPipeline) gameserverLobbyEntrantRemoved(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	message := in.(*evr.EchoToolsLobbyEntrantRemovedV1)
+	message := in.(*evr.NEVRLobbyEntrantRemovedV1)
 
 	matchID, _ := NewMatchID(message.LobbySessionID, p.node)
 	presence, err := PresenceByEntrantID(p.nk, matchID, message.EntrantID)
@@ -764,7 +764,7 @@ func (p *EvrPipeline) gameserverLobbyEntrantRemoved(ctx context.Context, logger 
 }
 
 func (p *EvrPipeline) gameserverLobbySessionLock(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	message := in.(*evr.EchoToolsLobbySessionLockV1)
+	message := in.(*evr.NEVRLobbySessionLockV1)
 
 	matchID, _ := NewMatchID(message.LobbySessionID, p.node)
 
@@ -778,7 +778,7 @@ func (p *EvrPipeline) gameserverLobbySessionLock(ctx context.Context, logger *za
 }
 
 func (p *EvrPipeline) gameserverLobbySessionUnlock(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
-	message := in.(*evr.EchoToolsLobbySessionUnlockV1)
+	message := in.(*evr.NEVRLobbySessionUnlockV1)
 
 	matchID, _ := NewMatchID(message.LobbySessionID, p.node)
 

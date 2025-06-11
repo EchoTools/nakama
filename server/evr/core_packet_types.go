@@ -139,32 +139,32 @@ func MessageTypeHash(msg Message) uint64 {
 		return 0xfcced6f169822bb8
 	case *LobbyEntrantsV0:
 		return 0xff71856af7e0fbd9
-	case *EchoToolsGameServerRegistrationRequestV1:
-		return 0xe581ba9febf68535
-	case *EchoToolsLobbySessionStartV1:
+	case *NEVRLobbySessionStartV1:
 		return 0x353172e01aa544a5
-	case *EchoToolsLobbySessionStartedV1:
+	case *NEVRLobbySessionStartedV1:
 		return 0x350d1070be48ebcb
-	case *EchoToolsLobbySessionEndedV1:
+	case *NEVRLobbySessionEndedV1:
 		return 0x352768e50db544a5
-	case *EchoToolsLobbySessionErroredV1:
+	case *NEVRLobbySessionErroredV1:
 		return 0x7d5abda8e440b617
-	case *EchoToolsLobbySessionLockV1:
+	case *NEVRLobbySessionLockV1:
 		return 0xa2a42bc683ebb3fd
-	case *EchoToolsLobbySessionUnlockV1:
+	case *NEVRLobbySessionUnlockV1:
 		return 0x6fe3fd47131b6713
-	case *EchoToolsLobbyEntrantNewV1:
+	case *NEVRLobbyEntrantNewV1:
 		return 0x66b54df504afebcd
-	case *EchoToolsLobbyEntrantAllowV1:
+	case *NEVRLobbyEntrantAllowV1:
 		return 0x174e85ca13e1a637
-	case *EchoToolsLobbyEntrantRejectV1:
+	case *NEVRLobbyEntrantRejectV1:
 		return 0x04488cca00e1a637
-	case *EchoToolsLobbyEntrantRemovedV1:
+	case *NEVRLobbyEntrantRemovedV1:
 		return 0xe5ef595892ea3d99
 	case *EchoToolsLobbySessionDataV1:
 		return 0xa2a423c894e1b3fd
 	case *EchoToolsLobbyStatusV1:
 		return 0xb26450c1a5ba5d79
+	case *NEVRRegistrationRequestV1:
+		return 0x802806fd6110d2bd
 	default:
 		return 0
 	}
@@ -296,36 +296,34 @@ func NewMessageFromHash(hash uint64) Message {
 		return &DocumentRequest{}
 	case 0xff71856af7e0fbd9:
 		return &LobbyEntrantsV0{}
-	case 0xe581ba9febf68535:
-		return &EchoToolsGameServerRegistrationRequestV1{}
-
 	case 0x353172e01aa544a5:
-		return &EchoToolsLobbySessionStartV1{}
+		return &NEVRLobbySessionStartV1{}
 	case 0x350d1070be48ebcb:
-		return &EchoToolsLobbySessionStartedV1{}
+		return &NEVRLobbySessionStartedV1{}
 	case 0x352768e50db544a5:
-		return &EchoToolsLobbySessionEndedV1{}
+		return &NEVRLobbySessionEndedV1{}
 	case 0x7d5abda8e440b617:
-		return &EchoToolsLobbySessionErroredV1{}
+		return &NEVRLobbySessionErroredV1{}
 	case 0xa2a42bc683ebb3fd:
-		return &EchoToolsLobbySessionLockV1{}
+		return &NEVRLobbySessionLockV1{}
 	case 0x6fe3fd47131b6713:
-		return &EchoToolsLobbySessionUnlockV1{}
+		return &NEVRLobbySessionUnlockV1{}
 	case 0x66b54df504afebcd:
-		return &EchoToolsLobbyEntrantNewV1{}
+		return &NEVRLobbyEntrantNewV1{}
 	case 0x174e85ca13e1a637:
-		return &EchoToolsLobbyEntrantAllowV1{}
+		return &NEVRLobbyEntrantAllowV1{}
 	case 0x04488cca00e1a637:
-		return &EchoToolsLobbyEntrantRejectV1{}
+		return &NEVRLobbyEntrantRejectV1{}
 	case 0xe5ef595892ea3d99:
-		return &EchoToolsLobbyEntrantRemovedV1{}
+		return &NEVRLobbyEntrantRemovedV1{}
 	case 0xa2a423c894e1b3fd:
 		return &EchoToolsLobbySessionDataV1{}
 	case 0xb26450c1a5ba5d79:
 		return &EchoToolsLobbyStatusV1{}
 	case 0xe376236577dbfbbb:
 		return &EchoToolsProtobufMessageV1{}
-
+	case 0x802806fd6110d2bd:
+		return &NEVRRegistrationRequestV1{}
 	default:
 		return nil
 	}
