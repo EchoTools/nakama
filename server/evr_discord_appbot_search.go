@@ -100,7 +100,7 @@ func (d *DiscordAppBot) handleSearch(ctx context.Context, logger runtime.Logger,
 
 	isGuildAuditor := false
 	if isGlobalOperator, err := CheckSystemGroupMembership(ctx, db, userIDStr, GroupGlobalOperators); err != nil {
-		return errors.New("error checking global operator status")
+		return fmt.Errorf("error checking global operator status: %w", err)
 	} else if isGlobalOperator {
 		isGuildAuditor = true
 	} else if gg, ok := callerGuildGroups[groupID]; ok && gg.IsAuditor(userIDStr) {

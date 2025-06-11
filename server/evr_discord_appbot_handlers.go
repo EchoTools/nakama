@@ -29,7 +29,7 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(ctx context.Context,
 	groupID := d.cache.GuildIDToGroupID(i.GuildID)
 	isGlobalOperator, err := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
 	if err != nil {
-		return errors.New("error checking global operator status")
+		return fmt.Errorf("error checking global operator status: %w", err)
 	}
 
 	// Log the interaction
@@ -465,7 +465,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 
 	isGlobalOperator, err := CheckSystemGroupMembership(ctx, db, callerUserID, GroupGlobalOperators)
 	if err != nil {
-		return errors.New("error checking global operator status")
+		return fmt.Errorf("error checking global operator status: %w", err)
 	}
 
 	// Parse minutes, hours, days, and weeks (m, h, d, w)

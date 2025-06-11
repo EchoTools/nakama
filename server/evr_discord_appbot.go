@@ -1462,7 +1462,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			isGlobalOperator, err := CheckSystemGroupMembership(ctx, db, userID, GroupGlobalOperators)
 			if err != nil {
-				return errors.New("error checking global operator status")
+				return fmt.Errorf("error checking global operator status: %w", err)
 			}
 
 			for _, option := range options {
@@ -2070,7 +2070,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			isGlobalOperator, err := CheckSystemGroupMembership(ctx, db, userIDStr, GroupGlobalOperators)
 			if err != nil {
-				return errors.New("error checking global operator status")
+				return fmt.Errorf("error checking global operator status: %w", err)
 			}
 
 			isGuildAuditor = isGuildAuditor || isGlobalOperator
