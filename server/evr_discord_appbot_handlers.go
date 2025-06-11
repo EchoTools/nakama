@@ -27,11 +27,15 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(ctx context.Context,
 
 	userID := d.cache.DiscordIDToUserID(user.ID)
 	groupID := d.cache.GuildIDToGroupID(i.GuildID)
-	isGlobalOperator, err := CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
-	if err != nil {
-		return fmt.Errorf("error checking global operator status: %w", err)
-	}
 
+	isGlobalOperator := false
+	var err error
+	if userID != "" {
+		isGlobalOperator, err = CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalOperators)
+		if err != nil {
+			return fmt.Errorf("error checking global operator status: %w", err)
+		}
+	}
 	// Log the interaction
 	if cID := ServiceSettings().CommandLogChannelID; cID != "" {
 		data := i.ApplicationCommandData()
