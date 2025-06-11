@@ -294,7 +294,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 
 	case *evr.BroadcasterRegistrationRequest:
 
-		in = &evr.EchoToolsGameServerRegistrationRequestV1{
+		in = &evr.NEVRRegistrationRequestV1{
 			LoginSessionID: uuid.Nil,
 			ServerID:       msg.ServerId,
 			InternalIP:     msg.InternalIP,
@@ -310,7 +310,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 			logger.Error("Failed to get broadcaster's match by session ID", zap.Error(err))
 			return true
 		}
-		in = &evr.EchoToolsLobbySessionLockV1{LobbySessionID: matchID.UUID}
+		in = &evr.NEVRLobbySessionLockV1{LobbySessionID: matchID.UUID}
 
 	case *evr.BroadcasterPlayerSessionsUnlocked:
 		matchID, _, err := GameServerBySessionID(p.nk, session.ID())
@@ -318,7 +318,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 			logger.Error("Failed to get broadcaster's match by session ID", zap.Error(err))
 			return true
 		}
-		in = &evr.EchoToolsLobbySessionUnlockV1{LobbySessionID: matchID.UUID}
+		in = &evr.NEVRLobbySessionUnlockV1{LobbySessionID: matchID.UUID}
 
 	case *evr.GameServerJoinAttempt:
 		matchID, _, err := GameServerBySessionID(p.nk, session.ID())
@@ -326,7 +326,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 			logger.Error("Failed to get broadcaster's match by session ID", zap.Error(err))
 			return true
 		}
-		in = &evr.EchoToolsLobbyEntrantNewV1{LobbySessionID: matchID.UUID, EntrantIDs: msg.EntrantIDs}
+		in = &evr.NEVRLobbyEntrantNewV1{LobbySessionID: matchID.UUID, EntrantIDs: msg.EntrantIDs}
 
 	case *evr.GameServerPlayerRemoved:
 		matchID, _, err := GameServerBySessionID(p.nk, session.ID())
@@ -335,7 +335,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 			return true
 		}
 
-		in = &evr.EchoToolsLobbyEntrantRemovedV1{EntrantID: msg.EntrantID, LobbySessionID: matchID.UUID}
+		in = &evr.NEVRLobbyEntrantRemovedV1{EntrantID: msg.EntrantID, LobbySessionID: matchID.UUID}
 
 	case *evr.BroadcasterSessionStarted:
 		matchID, _, err := GameServerBySessionID(p.nk, session.ID())
@@ -343,7 +343,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 			logger.Error("Failed to get broadcaster's match by session ID", zap.Error(err))
 			return true
 		}
-		in = &evr.EchoToolsLobbySessionStartedV1{LobbySessionID: matchID.UUID}
+		in = &evr.NEVRLobbySessionStartedV1{LobbySessionID: matchID.UUID}
 
 	case *evr.BroadcasterSessionEnded:
 		matchID, _, err := GameServerBySessionID(p.nk, session.ID())
@@ -351,7 +351,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 			logger.Error("Failed to get broadcaster's match by session ID", zap.Error(err))
 			return true
 		}
-		in = &evr.EchoToolsLobbySessionEndedV1{LobbySessionID: matchID.UUID}
+		in = &evr.NEVRLobbySessionEndedV1{LobbySessionID: matchID.UUID}
 
 	}
 
@@ -410,22 +410,22 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 		pipelineFn = p.lobbyPendingSessionCancel
 
 	// ServerDB service
-	case *evr.EchoToolsGameServerRegistrationRequestV1:
+	case *evr.NEVRRegistrationRequestV1:
 		isAuthenticationRequired = false
 		pipelineFn = p.gameserverRegistrationRequest
-	case *evr.EchoToolsLobbySessionStartedV1:
+	case *evr.NEVRLobbySessionStartedV1:
 		pipelineFn = p.gameserverLobbySessionStarted
 	case *evr.EchoToolsLobbyStatusV1:
 		pipelineFn = p.gameserverLobbySessionStatus
-	case *evr.EchoToolsLobbyEntrantNewV1:
+	case *evr.NEVRLobbyEntrantNewV1:
 		pipelineFn = p.gameserverLobbyEntrantNew
-	case *evr.EchoToolsLobbySessionEndedV1:
+	case *evr.NEVRLobbySessionEndedV1:
 		pipelineFn = p.gameserverLobbySessionEnded
-	case *evr.EchoToolsLobbySessionLockV1:
+	case *evr.NEVRLobbySessionLockV1:
 		pipelineFn = p.gameserverLobbySessionLock
-	case *evr.EchoToolsLobbySessionUnlockV1:
+	case *evr.NEVRLobbySessionUnlockV1:
 		pipelineFn = p.gameserverLobbySessionUnlock
-	case *evr.EchoToolsLobbyEntrantRemovedV1:
+	case *evr.NEVRLobbyEntrantRemovedV1:
 		pipelineFn = p.gameserverLobbyEntrantRemoved
 
 	default:
