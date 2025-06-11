@@ -968,8 +968,8 @@ func (m *EvrMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db 
 		}
 
 		if len(entrantIDs) > 0 {
-			if err := m.kickEntrants(ctx, logger, dispatcher, state, entrantIDs...); err != nil {
-				logger.Error("Failed to kick player: %v", err)
+			if err := m.sendEntrantReject(ctx, logger, dispatcher, state, evr.PlayerRejectionReasonLobbyEnding, entrantIDs...); err != nil {
+				logger.Error("Failed to send entrant reject: %v", err)
 			}
 		}
 	}
