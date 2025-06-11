@@ -810,19 +810,24 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 			if err != nil {
 				return fmt.Errorf("failed to marshal embeds: %w", err)
 			}
-			if _, err := s.ChannelMessageSendComplex(i.ChannelID, &discordgo.MessageSend{
-				Content: "The profile is too large to display in an embed. Here is the raw data.",
-				Flags:   discordgo.MessageFlagsEphemeral,
-				Files: []*discordgo.File{
-					{
-						Name:        targetID + "_lookup.json",
-						ContentType: "application/json",
-						Reader:      strings.NewReader(string(embedData)),
+
+			if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: "The profile is too large to display in an embed. Here is the raw data.",
+					Flags:   discordgo.MessageFlagsEphemeral,
+					Files: []*discordgo.File{
+						{
+							Name:        targetID + "_lookup.json",
+							ContentType: "application/json",
+							Reader:      strings.NewReader(string(embedData)),
+						},
 					},
 				},
 			}); err != nil {
 				return fmt.Errorf("failed to send message with embeds: %w", err)
 			}
+
 		} else {
 			return fmt.Errorf("failed to respond to interaction: %w", err)
 		}
