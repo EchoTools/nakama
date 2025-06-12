@@ -7,11 +7,11 @@ import (
 	anyascii "github.com/anyascii/go"
 )
 
-const DisplayNameMaxLength = 20
+const DisplayNameMaxLength = 24
 const DisplayNameMinLength = 1
 
 var (
-	DisplayNameFilterRegex  = regexp.MustCompile(`[^-0-9A-Za-z_\[\]]`)
+	DisplayNameFilterRegex  = regexp.MustCompile(`[^-0-9A-Za-z_\[\]#!?@%&=+|:;,.(){}<>~\s]`)
 	emojiFilterPattern      = regexp.MustCompile(`:[a-zA-Z0-9_]+:`)
 	displayNameMatchPattern = regexp.MustCompile(`[A-Za-z]`)
 	displayNameScorePattern = regexp.MustCompile(`\s\(\d+\)\s\[\d+\.\d+%]`)
@@ -45,7 +45,7 @@ func sanitizeDisplayName(displayName string) string {
 	// Require a minimum matching pattern
 	displayName = DisplayNameFilterRegex.ReplaceAllLiteralString(displayName, "")
 
-	// twenty characters maximum
+	// limit the character length
 	if len(displayName) > DisplayNameMaxLength {
 		displayName = displayName[:DisplayNameMaxLength]
 	}
