@@ -86,11 +86,9 @@ func parseCommandOption[E CommandOption](s *discordgo.Session, i *discordgo.Inte
 func (d *DiscordAppBot) handleSearch(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userIDStr string, groupID string) error {
 
 	var (
-		nk                = d.nk
-		db                = d.db
-		partial           string
-		useWildcardPrefix bool
-		useWildcardSuffix bool
+		nk      = d.nk
+		db      = d.db
+		partial string
 	)
 
 	callerGuildGroups, err := GuildUserGroupsList(ctx, d.nk, d.guildGroupRegistry, userIDStr)
@@ -123,11 +121,14 @@ func (d *DiscordAppBot) handleSearch(ctx context.Context, logger runtime.Logger,
 	}
 
 	var (
-		results = make([]result, 0)
-		embeds  = make([]*discordgo.MessageEmbed, 0)
+		results           = make([]result, 0)
+		embeds            = make([]*discordgo.MessageEmbed, 0)
+		useWildcardPrefix bool
+		useWildcardSuffix bool
 	)
 
 	// Check if the display name has a wildcard prefix or suffix
+	// Remove it from the search string
 	if strings.HasPrefix(partial, "*") {
 		partial = partial[1:]
 		useWildcardPrefix = true
@@ -155,7 +156,12 @@ func (d *DiscordAppBot) handleSearch(ctx context.Context, logger runtime.Logger,
 
 		displayNameMatches, err := DisplayNameCacheRegexSearch(ctx, nk, pattern, 5)
 		if err != nil {
-			logger.WithField("error", err).Error("Failed to search display name history")
+			logger.WithFields(map[string]any{
+				"partial":   partial,
+				"sanitized": displayName,
+				"pattern":   pattern,
+				"error":     err,
+			}).Error("Failed to search display name history")
 			return fmt.Errorf("failed to search display name history: %w", err)
 		}
 		for userID, byGroup := range displayNameMatches {

@@ -560,7 +560,8 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 						continue
 					}
 					// Void the suspension
-					actions = append(actions, fmt.Sprintf("suspension removed: <t:%d:R> by <@%s> (expires <t:%d:R>): %s", record.CreatedAt.Unix(), record.EnforcerDiscordID, record.SuspensionExpiry.Unix(), record.UserNoticeText))
+					actions = append(actions, fmt.Sprintf("suspension removed:\n  <t:%d:R> by <@%s> (expires <t:%d:R>): %s", record.CreatedAt.Unix(), record.EnforcerDiscordID, record.SuspensionExpiry.Unix(), record.UserNoticeText))
+
 					recordsByGroupID[groupID] = append(recordsByGroupID[groupID], record)
 
 					details := userNotice
@@ -610,7 +611,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 					},
 				},
 				Footer: &discordgo.MessageEmbedFooter{
-					Text: fmt.Sprintf("Confidential. Do not share."),
+					Text: "Confidential. Do not share.",
 				},
 			}
 			if len(recordsByGroupID) == 0 {
@@ -722,7 +723,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 				if count, err := DisconnectUserID(ctx, d.nk, targetUserID, true, true, false); err != nil {
 					logger.Warn("Failed to disconnect user", zap.Error(err))
 				} else if count > 0 {
-					_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s disconnected player %s from login/match service (%d sessions).", caller.Mention(), target.Mention(), count), false)
+					_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s disconnected player %s (%s) from login/match service (%d sessions).", caller.Mention(), target.Mention(), target.Username, count), false)
 				}
 			}()
 		}
