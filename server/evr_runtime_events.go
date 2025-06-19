@@ -108,7 +108,6 @@ func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 
 				doneCh := make(chan struct{})
 
-				logger.WithField("event", evt.Name).Debug("processing event")
 				go func() {
 					defer close(doneCh)
 					dispatch.processEvent(ctx, logger, evt)
@@ -153,7 +152,6 @@ func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 }
 
 func (h *EventDispatcher) eventFn(ctx context.Context, logger runtime.Logger, evt *api.Event) {
-	logger.WithField("event", evt.Name).Debug("received event")
 	select {
 	case h.queue <- evt:
 		logger.WithField("event", evt.Name).Debug("event queued for processing")
