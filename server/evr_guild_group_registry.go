@@ -38,8 +38,7 @@ func NewGuildGroupRegistry(ctx context.Context, logger runtime.Logger, nk runtim
 	// Regularly update the guild groups from the database.
 	go func() {
 		ctx := ctx
-		ticker := time.NewTicker(time.Minute * 1)
-		timer := time.NewTimer(time.Second * 1)
+		ticker := time.NewTicker(time.Second * 1)
 		firstRun := true
 		defer ticker.Stop()
 		for {
@@ -47,9 +46,8 @@ func NewGuildGroupRegistry(ctx context.Context, logger runtime.Logger, nk runtim
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-			case <-timer.C:
 				// Initial delay before starting the ticker
-				timer.Reset(time.Minute * 1)
+				ticker.Reset(time.Minute * 1)
 			}
 			registry.writeMu.Lock()
 			registry.rebuildGuildGroups()
