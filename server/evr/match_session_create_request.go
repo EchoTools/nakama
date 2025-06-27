@@ -183,7 +183,7 @@ func (m *LobbyCreateSessionRequest) GetLevel() Symbol {
 }
 
 func (m *LobbyCreateSessionRequest) GetFeatures() []string {
-	return m.SessionSettings.Features
+	return m.SessionSettings.SupportedFeatures
 }
 
 func (m *LobbyCreateSessionRequest) GetCurrentLobbyID() uuid.UUID {

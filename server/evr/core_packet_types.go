@@ -1,174 +1,65 @@
 package evr
 
-type EchoToolsProtobufMessageV1 struct {
+import (
+	"fmt"
+
+	"github.com/echotools/nevr-common/rtapi"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
+)
+
+type NEVRProtobufJSONMessageV1 struct {
 	Payload []byte
 }
 
-func (m *EchoToolsProtobufMessageV1) Stream(s *EasyStream) error {
+func (NEVRProtobufJSONMessageV1) String() string {
+	return "NEVRProtobufJSONMessageV1"
+}
+
+func (m *NEVRProtobufJSONMessageV1) Stream(s *EasyStream) error {
 	if s.Mode == DecodeMode {
 		m.Payload = make([]byte, s.Len())
 	}
-
 	return RunErrorFunctions([]func() error{
 		func() error { return s.StreamBytes(&m.Payload, len(m.Payload)) },
 	})
 }
 
-func MessageTypeHash(msg Message) uint64 {
-
-	switch msg.(type) {
-	case *ReconcileIAPResult:
-		return 0x0dabc24265508a82
-	case *OtherUserProfileFailure:
-		return 0x1225133828150da3
-	case *OtherUserProfileSuccess:
-		return 0x1230073227050cb5
-	case *OtherUserProfileRequest:
-		return 0x1231172031050cb2
-	case *LobbyMatchmakerStatusRequest:
-		return 0x128b777ae0ebb650
-	case *ReconcileIAP:
-		return 0x1bd0fc454c85573c
-	case *RemoteLogSet:
-		return 0x244b47685187eae1
-	case *LobbyJoinSessionRequest:
-		return 0x2f03468f77ffb211
-	case *LobbyFindSessionRequest:
-		return 0x312c2a01819aa3f5
-	case *STcpConnectionUnrequireEvent:
-		return 0x43e6963ac76beee4
-	case *LobbySessionFailurev1:
-		return 0xb99f11d6ea5cb1f1
-	case *LobbySessionFailurev2:
-		return 0x4ae8365ebc45f96a
-	case *LobbySessionFailurev3:
-		return 0x4ae8365ebc45f96b
-	case *LobbySessionFailurev4:
-		return 0x4ae8365ebc45f96c
-	case *LobbyCreateSessionRequest:
-		return 0x599a6b1bbda3cc13
-	case *LobbyPingRequest:
-		return 0xfabf5f8719bfebf3
-	case *LobbyPingResponse:
-		return 0x6047d0043033ae4f
-	case *ChannelInfoResponse:
-		return 0x6c8f16cd9f8964c5
-	case *LobbySessionSuccessv4:
-		return 0x6d4de3650ee3110e
-	case *LobbySessionSuccessv5:
-		return 0x6d4de3650ee3110f
-	case *UpdateClientProfile:
-		return 0x6d54a19a3ff24415
-	case *GameServerSessionStart:
-		return 0x7777777777770000
-	case *BroadcasterSessionStarted:
-		return 0x7777777777770100
-	case *BroadcasterSessionEnded:
-		return 0x7777777777770200
-	case *BroadcasterPlayerSessionsLocked:
-		return 0x7777777777770300
-	case *BroadcasterPlayerSessionsUnlocked:
-		return 0x7777777777770400
-	case *GameServerJoinAttempt:
-		return 0x7777777777770500
-	case *GameServerJoinAllowed:
-		return 0x7777777777770600
-	case *GameServerJoinRejected:
-		return 0x7777777777770700
-	case *GameServerPlayerRemoved:
-		return 0x7777777777770800
-	case *BroadcasterChallengeRequest:
-		return 0x7777777777770900
-	case *GameServerChallengeResponse:
-		return 0x7777777777770a00
-	case *BroadcasterRegistrationRequest:
-		return 0x7777777777777777
-	case *ConfigRequest:
-		return 0x82869f0b37eb4378
-	case *ConfigSuccess:
-		return 0xb9cdaf586f7bd012
-	case *ConfigFailure:
-		return 0x9e687a63dddd3870
-	case *FindServerRegionInfo:
-		return 0x8d5ad3c4f2166c6c
-	case *LobbyPendingSessionCancel:
-		return 0x8da9eb83ffee9fd6
-	case *LobbyMatchmakerStatus:
-		return 0x8f28cf33dabfbecb
-	case *ChannelInfoRequest:
-		return 0x90758e58515724e0
-	case *LobbyPlayerSessionsRequest:
-		return 0x9af2fab2a0c81a05
-	case *LobbyEntrantsV2:
-		return 0xa1b9cae1f8588968
-	case *LobbyEntrantsV3:
-		return 0xa1b9cae1f8588969
-	case *LoginRequest:
-		return 0xbdb41ea9e67b200a
-	case *LoginSuccess:
-		return 0xa5acc1a90d0cce47
-	case *LoginFailure:
-		return 0xa5b9d5a3021ccf51
-	case *BroadcasterRegistrationFailure:
-		return 0xb56f25c7dfe6ffc9
-	case *BroadcasterRegistrationSuccess:
-		return 0xb57a31cdd0f6fedf
-	case *DocumentFailure:
-		return 0xd06ae97220a7b41f
-	case *DocumentSuccess:
-		return 0xd07ffd782fb7b509
-	case *UserServerProfileUpdateRequest:
-		return 0xd2986849b36b9c72
-	case *UserServerProfileUpdateSuccess:
-		return 0xd299785ba56b9c75
-	case *LobbyStatusNotify:
-		return 0xe4b9b1cab57e8988
-	case *GameSettings:
-		return 0xed5be2c3632155f1
-	case *UpdateProfileFailure:
-		return 0xf24185da0edef641
-	case *UpdateProfileSuccess:
-		return 0xf25491d001cef757
-	case *LoggedInUserProfileFailure:
-		return 0xfb632e5a38ec8c61
-	case *LoggedInUserProfileSuccess:
-		return 0xfb763a5037fc8d77
-	case *LoggedInUserProfileRequest:
-		return 0xfb772a4221fc8d70
-	case *DocumentRequest:
-		return 0xfcced6f169822bb8
-	case *LobbyEntrantsV0:
-		return 0xff71856af7e0fbd9
-	case *NEVRLobbySessionStartV1:
-		return 0x353172e01aa544a5
-	case *NEVRLobbySessionStartedV1:
-		return 0x350d1070be48ebcb
-	case *NEVRLobbySessionEndedV1:
-		return 0x352768e50db544a5
-	case *NEVRLobbySessionErroredV1:
-		return 0x7d5abda8e440b617
-	case *NEVRLobbySessionLockV1:
-		return 0xa2a42bc683ebb3fd
-	case *NEVRLobbySessionUnlockV1:
-		return 0x6fe3fd47131b6713
-	case *NEVRLobbyEntrantNewV1:
-		return 0x66b54df504afebcd
-	case *NEVRLobbyEntrantAllowV1:
-		return 0x174e85ca13e1a637
-	case *NEVRLobbyEntrantRejectV1:
-		return 0x04488cca00e1a637
-	case *NEVRLobbyEntrantRemovedV1:
-		return 0xe5ef595892ea3d99
-	case *EchoToolsLobbySessionDataV1:
-		return 0xa2a423c894e1b3fd
-	case *EchoToolsLobbyStatusV1:
-		return 0xb26450c1a5ba5d79
-	case *NEVRRegistrationRequestV1:
-		return 0x802806fd6110d2bd
-	default:
-		return 0
+func NewNEVRProtobufJSONMessageV1(envelope *rtapi.Envelope) (*NEVRProtobufJSONMessageV1, error) {
+	data, err := protojson.Marshal(envelope)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal GameServerEntrantAcceptMessage: %w", err)
 	}
+	return &NEVRProtobufJSONMessageV1{
+		Payload: data,
+	}, nil
+}
 
+type NEVRProtobufMessageV1 struct {
+	Payload []byte
+}
+
+func (NEVRProtobufMessageV1) String() string {
+	return "NEVRProtobufMessageV1"
+}
+
+func (m *NEVRProtobufMessageV1) Stream(s *EasyStream) error {
+	if s.Mode == DecodeMode {
+		m.Payload = make([]byte, s.Len())
+	}
+	return RunErrorFunctions([]func() error{
+		func() error { return s.StreamBytes(&m.Payload, len(m.Payload)) },
+	})
+}
+
+func NewNEVRProtobufMessageV1(envelope *rtapi.Envelope) (*NEVRProtobufMessageV1, error) {
+	data, err := proto.Marshal(envelope)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal GameServerEntrantAcceptMessage: %w", err)
+	}
+	return &NEVRProtobufMessageV1{
+		Payload: data,
+	}, nil
 }
 
 func NewMessageFromHash(hash uint64) Message {
@@ -218,8 +109,6 @@ func NewMessageFromHash(hash uint64) Message {
 		return &UpdateClientProfile{}
 	case 0x7777777777770000:
 		return &GameServerSessionStart{}
-	case 0x7777777777770100:
-		return &BroadcasterSessionStarted{}
 	case 0x7777777777770200:
 		return &BroadcasterSessionEnded{}
 	case 0x7777777777770300:
@@ -234,10 +123,6 @@ func NewMessageFromHash(hash uint64) Message {
 		return &GameServerJoinRejected{}
 	case 0x7777777777770800:
 		return &GameServerPlayerRemoved{}
-	case 0x7777777777770900:
-		return &BroadcasterChallengeRequest{}
-	case 0x7777777777770a00:
-		return &GameServerChallengeResponse{}
 	case 0x7777777777777777:
 		return &BroadcasterRegistrationRequest{}
 	case 0x82869f0b37eb4378:
@@ -296,34 +181,10 @@ func NewMessageFromHash(hash uint64) Message {
 		return &DocumentRequest{}
 	case 0xff71856af7e0fbd9:
 		return &LobbyEntrantsV0{}
-	case 0x353172e01aa544a5:
-		return &NEVRLobbySessionStartV1{}
-	case 0x350d1070be48ebcb:
-		return &NEVRLobbySessionStartedV1{}
-	case 0x352768e50db544a5:
-		return &NEVRLobbySessionEndedV1{}
-	case 0x7d5abda8e440b617:
-		return &NEVRLobbySessionErroredV1{}
-	case 0xa2a42bc683ebb3fd:
-		return &NEVRLobbySessionLockV1{}
-	case 0x6fe3fd47131b6713:
-		return &NEVRLobbySessionUnlockV1{}
-	case 0x66b54df504afebcd:
-		return &NEVRLobbyEntrantNewV1{}
-	case 0x174e85ca13e1a637:
-		return &NEVRLobbyEntrantAllowV1{}
-	case 0x04488cca00e1a637:
-		return &NEVRLobbyEntrantRejectV1{}
-	case 0xe5ef595892ea3d99:
-		return &NEVRLobbyEntrantRemovedV1{}
-	case 0xa2a423c894e1b3fd:
-		return &EchoToolsLobbySessionDataV1{}
-	case 0xb26450c1a5ba5d79:
-		return &EchoToolsLobbyStatusV1{}
-	case 0xe376236577dbfbbb:
-		return &EchoToolsProtobufMessageV1{}
-	case 0x802806fd6110d2bd:
-		return &NEVRRegistrationRequestV1{}
+	case 0x9ee5107d9e29fd63:
+		return &NEVRProtobufMessageV1{}
+	case 0xc6b3710cd9c4ef47:
+		return &NEVRProtobufJSONMessageV1{}
 	default:
 		return nil
 	}

@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/echotools/nevr-common/rtapi"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
@@ -73,8 +74,8 @@ type MatchStatGroup string
 type MatchLevelSelection string
 
 const (
-	EvrMatchmakerModule = "evrmatchmaker"
-	EvrBackfillModule   = "evrbackfill"
+	EVRLobbySessionMatchModule = "evrmatch"
+	EvrBackfillModule          = "evrbackfill"
 )
 
 type EvrMatchMeta struct {
@@ -763,27 +764,27 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 				updateLabel = true
 			}
 		case OpCodeGameServerLobbyStatus:
-
-			lobbyStatus := evr.EchoToolsLobbyStatusV1{}
-			if err := json.Unmarshal(in.GetData(), &lobbyStatus); err != nil {
-				logger.Error("Failed to unmarshal lobby status: %v", err)
-				continue
-			}
-			for _, s := range lobbyStatus.Slots {
-				if s == nil {
+			/*
+				lobbyStatus := evr.NEVRLobbyStatusV1{}
+				if err := json.Unmarshal(in.GetData(), &lobbyStatus); err != nil {
+					logger.Error("Failed to unmarshal lobby status: %v", err)
 					continue
 				}
+				for _, s := range lobbyStatus.Slots {
+					if s == nil {
+						continue
+					}
 
-				// Find the player in the match
-				presence := state.presenceByEvrID[s.XPlatformId]
-				if presence == nil {
-					logger.Warn("Player not found in match: %s", s.XPlatformId)
-					continue
+					// Find the player in the match
+					presence := state.presenceByEvrID[s.XPlatformId]
+					if presence == nil {
+						logger.Warn("Player not found in match: %s", s.XPlatformId)
+						continue
+					}
+					presence.PingMillis = int(s.Ping)
+					presence.RoleAlignment = int(s.TeamIndex)
 				}
-				presence.PingMillis = int(s.Ping)
-				presence.RoleAlignment = int(s.TeamIndex)
-			}
-
+			*/
 		default:
 			typ, found := evr.SymbolTypes[uint64(in.GetOpCode())]
 			if !found {
@@ -952,6 +953,18 @@ func (m *EvrMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db 
 	}
 
 	if state.server != nil {
+
+		/*
+			// Send return to lobby message.
+			if s := nk.(*RuntimeGoNakamaModule).sessionRegistry.Get(uuid.FromStringOrNil(state.GameServer.GetSessionId())); s != nil {
+				if err := SendEVRMessages(s, false, &evr.NEVRLobbyReturnToLobbyV1{}); err != nil {
+					logger.Warn("Failed to send return to lobby message: %v", err)
+				} else {
+					logger.Debug("Sent return to lobby message to game server.")
+				}
+			}
+		*/
+
 		entrantIDs := make([]uuid.UUID, 0, len(state.presenceMap))
 
 		for _, mp := range state.presenceMap {
@@ -968,9 +981,12 @@ func (m *EvrMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db 
 		}
 
 		if len(entrantIDs) > 0 {
-			if err := m.sendEntrantReject(ctx, logger, dispatcher, state, evr.PlayerRejectionReasonLobbyEnding, entrantIDs...); err != nil {
-				logger.Error("Failed to send entrant reject: %v", err)
-			}
+			go func(server runtime.Presence, entrantIDs []uuid.UUID) {
+				<-time.After(time.Second * 5) // Give the game server time to process the return to lobby message.
+				if err := m.sendEntrantReject(ctx, logger, dispatcher, server, evr.PlayerRejectionReasonLobbyEnding, entrantIDs...); err != nil {
+					logger.Error("Failed to send entrant reject: %v", err)
+				}
+			}(state.server, entrantIDs)
 		}
 	}
 
@@ -1123,7 +1139,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		state.Mode = settings.Mode
 		state.Level = settings.Level
 		state.RequiredFeatures = settings.RequiredFeatures
-		state.SessionSettings = evr.NewSessionSettings(strconv.FormatUint(PcvrAppId, 10), state.Mode, state.Level, state.RequiredFeatures)
+		state.SessionSettings = evr.NewSessionSettings(strconv.FormatUint(PcvrAppId, 10), state.Mode, state.Level, settings.RequiredFeatures)
 		state.GroupID = &settings.GroupID
 
 		state.CreatedAt = time.Now().UTC()
@@ -1202,6 +1218,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 	case SignalStartSession:
 
 		if !state.Started() {
+			// Set the start time to now will trigger the match to start.
 			state.StartTime = time.Now().UTC()
 		} else {
 			return state, SignalResponse{Message: "failed to start session: already started"}.String()
@@ -1228,6 +1245,13 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 				state.LockedAt = time.Time{}
 			}
 			state.Open = true
+		}
+
+	case SignalEndedSession:
+		// Trigger the MatchLeave event for the game server.
+		if err := nk.StreamUserLeave(StreamModeMatchAuthoritative, state.ID.UUID.String(), "", state.ID.Node, state.GameServer.GetUserId(), state.GameServer.GetSessionId()); err != nil {
+			logger.Warn("Failed to leave match stream", zap.Error(err))
+			return nil, SignalResponse{Message: fmt.Sprintf("failed to leave match stream: %v", err)}.String()
 		}
 
 	case SignalPlayerUpdate:
@@ -1283,13 +1307,29 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, nk run
 	}
 
 	state.StartTime = time.Now().UTC()
-	entrants := make([]evr.EvrId, 0)
-	message := evr.NewGameServerSessionStart(state.ID.UUID, groupID, uint8(state.MaxSize), uint8(state.LobbyType), state.GameServer.AppID, state.Mode, state.Level, state.RequiredFeatures, entrants)
 
-	logger.WithField("message", message).Info("Starting session.")
+	envelope := &rtapi.Envelope{
+		Message: &rtapi.Envelope_LobbySessionCreate{
+			LobbySessionCreate: &rtapi.LobbySessionCreateMessage{
+				LobbySessionId: state.ID.UUID.String(),
+				LobbyType:      int32(state.LobbyType),
+				GroupId:        groupID.String(),
+				MaxEntrants:    int32(state.MaxSize),
+				SettingsJson:   state.SessionSettings.String(),
+				Features:       state.RequiredFeatures,
+			},
+		},
+	}
+	logger.WithField("message", envelope.Message).Info("Starting session.")
+
+	message, err := evr.NewNEVRProtobufMessageV1(envelope)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create protobuf message: %w", err)
+	}
 
 	messages := []evr.Message{
 		message,
+		evr.NewGameServerSessionStart(state.ID.UUID, groupID, uint8(state.MaxSize), uint8(state.LobbyType), state.GameServer.AppID, state.Mode, state.Level, state.RequiredFeatures, []evr.EvrId{}), // Legacy Message for the game server.
 	}
 
 	nk.MetricsCounterAdd("match_start_count", state.MetricsTags(), 1)
@@ -1338,12 +1378,12 @@ func (m *EvrMatch) updateLabel(logger runtime.Logger, dispatcher runtime.MatchDi
 }
 
 func (m *EvrMatch) kickEntrants(ctx context.Context, logger runtime.Logger, dispatcher runtime.MatchDispatcher, state *MatchLabel, entrantIDs ...uuid.UUID) error {
-	return m.sendEntrantReject(ctx, logger, dispatcher, state, evr.PlayerRejectionReasonKickedFromServer, entrantIDs...)
+	return m.sendEntrantReject(ctx, logger, dispatcher, state.server, evr.PlayerRejectionReasonKickedFromServer, entrantIDs...)
 }
 
-func (m *EvrMatch) sendEntrantReject(ctx context.Context, logger runtime.Logger, dispatcher runtime.MatchDispatcher, state *MatchLabel, reason evr.PlayerRejectionReason, entrantIDs ...uuid.UUID) error {
+func (m *EvrMatch) sendEntrantReject(ctx context.Context, logger runtime.Logger, dispatcher runtime.MatchDispatcher, server runtime.Presence, reason evr.PlayerRejectionReason, entrantIDs ...uuid.UUID) error {
 	msg := evr.NewGameServerEntrantRejected(reason, entrantIDs...)
-	if err := m.dispatchMessages(ctx, logger, dispatcher, []evr.Message{msg}, []runtime.Presence{state.server}, nil); err != nil {
+	if err := m.dispatchMessages(ctx, logger, dispatcher, []evr.Message{msg}, []runtime.Presence{server}, nil); err != nil {
 		return fmt.Errorf("failed to dispatch message: %w", err)
 	}
 	return nil

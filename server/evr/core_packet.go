@@ -24,7 +24,6 @@ var (
 			0x4c1fed6cb4d96c64: (*SNSLobbySmiteEntrant)(nil),
 			0x013e99cb47eb3669: (*GenericMessage)(nil),
 			0x35d810572a230837: (*GenericMessageNotify)(nil),
-			0x80119c19ac72d695: (*MatchEnded)(nil),
 		*/
 		0x0dabc24265508a82: (*ReconcileIAPResult)(nil),
 		0x1225133828150da3: (*OtherUserProfileFailure)(nil),
@@ -47,18 +46,15 @@ var (
 		0x6d4de3650ee3110e: (*LobbySessionSuccessv4)(nil),
 		0x6d4de3650ee3110f: (*LobbySessionSuccessv5)(nil),
 		0x6d54a19a3ff24415: (*UpdateClientProfile)(nil),
-		0x7777777777770000: (*GameServerSessionStart)(nil),
-		0x7777777777770100: (*BroadcasterSessionStarted)(nil),
-		0x7777777777770200: (*BroadcasterSessionEnded)(nil),
-		0x7777777777770300: (*BroadcasterPlayerSessionsLocked)(nil),
-		0x7777777777770400: (*BroadcasterPlayerSessionsUnlocked)(nil),
-		0x7777777777770500: (*GameServerJoinAttempt)(nil),
-		0x7777777777770600: (*GameServerJoinAllowed)(nil),
-		0x7777777777770700: (*GameServerJoinRejected)(nil),
-		0x7777777777770800: (*GameServerPlayerRemoved)(nil),
-		0x7777777777770900: (*BroadcasterChallengeRequest)(nil),
-		0x7777777777770a00: (*GameServerChallengeResponse)(nil),
-		0x7777777777777777: (*BroadcasterRegistrationRequest)(nil),
+		0x7777777777770000: (*GameServerSessionStart)(nil),            // Legacy message
+		0x7777777777770200: (*BroadcasterSessionEnded)(nil),           // Legacy message
+		0x7777777777770300: (*BroadcasterPlayerSessionsLocked)(nil),   // Legacy message
+		0x7777777777770400: (*BroadcasterPlayerSessionsUnlocked)(nil), // Legacy message
+		0x7777777777770500: (*GameServerJoinAttempt)(nil),             // Legacy message
+		0x7777777777770600: (*GameServerJoinAllowed)(nil),             // Legacy message
+		0x7777777777770700: (*GameServerJoinRejected)(nil),            // Legacy message
+		0x7777777777770800: (*GameServerPlayerRemoved)(nil),           // Legacy message
+		0x7777777777777777: (*BroadcasterRegistrationRequest)(nil),    // Legacy message
 		0x82869f0b37eb4378: (*ConfigRequest)(nil),
 		0xb9cdaf586f7bd012: (*ConfigSuccess)(nil),
 		0x9e687a63dddd3870: (*ConfigFailure)(nil),
@@ -88,19 +84,10 @@ var (
 		0xfcced6f169822bb8: (*DocumentRequest)(nil),
 		0xff71856af7e0fbd9: (*LobbyEntrantsV0)(nil),
 		//0x080495a43a6b7251: (*EarlyQuitConfig)(nil),
-		0x353172e01aa544a5: (*NEVRLobbySessionStartV1)(nil),
-		0x350d1070be48ebcb: (*NEVRLobbySessionStartedV1)(nil),
-		0x352768e50db544a5: (*NEVRLobbySessionEndedV1)(nil),
-		0x7d5abda8e440b617: (*NEVRLobbySessionErroredV1)(nil),
-		0xa2a42bc683ebb3fd: (*NEVRLobbySessionLockV1)(nil),
-		0x6fe3fd47131b6713: (*NEVRLobbySessionUnlockV1)(nil),
-		0x66b54df504afebcd: (*NEVRLobbyEntrantNewV1)(nil),
-		0x174e85ca13e1a637: (*NEVRLobbyEntrantAllowV1)(nil),
-		0x04488cca00e1a637: (*NEVRLobbyEntrantRejectV1)(nil),
-		0xe5ef595892ea3d99: (*NEVRLobbyEntrantRemovedV1)(nil),
-		0xa2a423c894e1b3fd: (*EchoToolsLobbySessionDataV1)(nil),
-		0xb26450c1a5ba5d79: (*EchoToolsLobbyStatusV1)(nil),
-		0x802806fd6110d2bd: (*NEVRRegistrationRequestV1)(nil),
+
+		// Custom messages
+		0x9ee5107d9e29fd63: (*NEVRProtobufMessageV1)(nil),
+		0xc6b3710cd9c4ef47: (*NEVRProtobufJSONMessageV1)(nil),
 	}
 
 	// Create a reverse lookup map for the symbol types.

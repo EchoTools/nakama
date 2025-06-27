@@ -177,8 +177,7 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 	// Send the lobby session success message to the game client.
 	<-time.After(250 * time.Millisecond)
 
-	err = SendEVRMessages(session, false, connectionSettings)
-	if err != nil {
+	if err := SendEVRMessages(session, false, connectionSettings); err != nil {
 		logger.Error("failed to send lobby session success to game client", zap.Error(err))
 		return errors.New("failed to send lobby session success to game client")
 	}
