@@ -39,7 +39,6 @@ type Chunk struct {
 		LobbySessionSuccessv5              *LobbySessionSuccessv5             `struct-case:"0x6d4de3650ee3110f" json:",omitempty"`
 		UpdateProfile                      *UpdateClientProfile               `struct-case:"0x6d54a19a3ff24415" json:",omitempty"`
 		BroadcasterStartSession            *GameServerSessionStart            `struct-case:"0x7777777777770000" json:",omitempty"`
-		GameServerSessionStarted           *BroadcasterSessionStarted         `struct-case:"0x7777777777770100" json:",omitempty"`
 		BroadcasterSessionEnded            *BroadcasterSessionEnded           `struct-case:"0x7777777777770200" json:",omitempty"`
 		GameServerPlayerSessionsLocked     *BroadcasterPlayerSessionsLocked   `struct-case:"0x7777777777770300" json:",omitempty"`
 		ERGameServerPlayerSessionsUnlocked *BroadcasterPlayerSessionsUnlocked `struct-case:"0x7777777777770400" json:",omitempty"`
@@ -47,8 +46,6 @@ type Chunk struct {
 		BroadcasterPlayersAccepted         *GameServerJoinAllowed             `struct-case:"0x7777777777770600" json:",omitempty"`
 		BroadcasterPlayersRejected         *GameServerJoinRejected            `struct-case:"0x7777777777770700" json:",omitempty"`
 		BroadcasterPlayerRemoved           *GameServerPlayerRemoved           `struct-case:"0x7777777777770800" json:",omitempty"`
-		GameServerChallengeRequest         *BroadcasterChallengeRequest       `struct-case:"0x7777777777770900" json:",omitempty"`
-		GameServerChallengeResponse        *GameServerChallengeResponse       `struct-case:"0x7777777777770a00" json:",omitempty"`
 		BroadcasterRegistrationRequest     *BroadcasterRegistrationRequest    `struct-case:"0x7777777777777777" json:",omitempty"`
 		ConfigRequest                      *ConfigRequest                     `struct-case:"0x82869f0b37eb4378" json:",omitempty"`
 		ConfigSuccess                      *ConfigSuccess                     `struct-case:"0xb9cdaf586f7bd012" json:",omitempty"`

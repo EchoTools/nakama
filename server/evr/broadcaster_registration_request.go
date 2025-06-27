@@ -13,16 +13,16 @@ const (
 // BroadcasterRegistrationRequest is a message from game server to server, requesting game server registration so clients can match with it.
 // NOTE: This is an unofficial message created for Echo Relay.
 type BroadcasterRegistrationRequest struct {
-	ServerId    uint64
+	ServerID    uint64
 	InternalIP  net.IP
 	Port        uint16
 	Region      Symbol
-	VersionLock uint64
+	VersionLock Symbol
 }
 
-func NewBroadcasterRegistrationRequest(serverId uint64, internalAddress net.IP, port uint16, regionSymbol Symbol, versionLock uint64) *BroadcasterRegistrationRequest {
+func NewBroadcasterRegistrationRequest(serverId uint64, internalAddress net.IP, port uint16, regionSymbol Symbol, versionLock Symbol) *BroadcasterRegistrationRequest {
 	return &BroadcasterRegistrationRequest{
-		ServerId:    serverId,
+		ServerID:    serverId,
 		InternalIP:  internalAddress,
 		Port:        port,
 		Region:      regionSymbol,
@@ -33,7 +33,7 @@ func NewBroadcasterRegistrationRequest(serverId uint64, internalAddress net.IP, 
 func (m *BroadcasterRegistrationRequest) Stream(s *EasyStream) error {
 	return RunErrorFunctions([]func() error{
 
-		func() error { return s.StreamNumber(binary.LittleEndian, &m.ServerId) },
+		func() error { return s.StreamNumber(binary.LittleEndian, &m.ServerID) },
 		func() error { return s.StreamIpAddress(&m.InternalIP) },
 		func() error { return s.StreamNumber(binary.LittleEndian, &m.Port) },
 		func() error {
@@ -51,7 +51,7 @@ func (m *BroadcasterRegistrationRequest) Stream(s *EasyStream) error {
 func (m BroadcasterRegistrationRequest) String() string {
 	return fmt.Sprintf("%T(server_id=%d, internal_ip=%s, port=%d, region=%d, version_lock=%d)",
 		ModeSocialPrivate,
-		m.ServerId,
+		m.ServerID,
 		m.InternalIP,
 		m.Port,
 		m.Region,

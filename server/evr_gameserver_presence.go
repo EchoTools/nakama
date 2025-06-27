@@ -31,6 +31,7 @@ type GameServerPresence struct {
 	DesignatedModes []evr.Symbol `json:"designated_modes,omitempty"` // The priority modes for the server.
 	TimeStepUsecs   uint32       `json:"time_step_usecs,omitempty"`  // The time step in microseconds.
 	NativeSupport   bool         `json:"native,omitempty"`           // The native support of the server.
+	NativeVersion   string       `json:"native_version,omitempty"`   // The native version of the server.
 	City            string       `json:"city,omitempty"`             // The city of the server.
 	Region          string       `json:"region,omitempty"`           // The region of the server.
 	CountryCode     string       `json:"country_code,omitempty"`     // The country of the server.
@@ -94,7 +95,7 @@ func (g *GameServerPresence) IsPriorityFor(mode evr.Symbol) bool {
 	return slices.Contains(g.DesignatedModes, mode)
 }
 
-func NewGameServerPresence(userId, sessionId uuid.UUID, serverId uint64, internalIP, externalIP net.IP, port uint16, groupIDs []uuid.UUID, regionCodes []string, versionLock uint64, tags, features []string, timeStepUsecs uint32, ipInfo IPInfo, geoPrecision int, isNative bool) *GameServerPresence {
+func NewGameServerPresence(userId, sessionId uuid.UUID, serverId uint64, internalIP, externalIP net.IP, port uint16, groupIDs []uuid.UUID, regionCodes []string, versionLock evr.Symbol, tags, features []string, timeStepUsecs uint32, ipInfo IPInfo, geoPrecision int, isNative bool, nativeVersion string) *GameServerPresence {
 
 	var asn int
 	var lat, lon float64
@@ -126,7 +127,7 @@ func NewGameServerPresence(userId, sessionId uuid.UUID, serverId uint64, interna
 			Port:       port,
 		},
 		RegionCodes:   regionCodes,
-		VersionLock:   evr.ToSymbol(versionLock),
+		VersionLock:   versionLock,
 		GroupIDs:      groupIDs,
 		Features:      features,
 		GeoHash:       geoHash,
@@ -138,6 +139,7 @@ func NewGameServerPresence(userId, sessionId uuid.UUID, serverId uint64, interna
 		ASNumber:      asn,
 		TimeStepUsecs: timeStepUsecs,
 		NativeSupport: isNative,
+		NativeVersion: nativeVersion,
 
 		Tags: make([]string, 0),
 	}

@@ -128,10 +128,10 @@ func NewGameServerSessionStart(sessionID uuid.UUID, channel uuid.UUID, playerLim
 }
 
 type LobbySessionSettings struct {
-	AppID    string   `json:"appid"`
-	Mode     int64    `json:"gametype"`
-	Level    int64    `json:"level"`
-	Features []string `json:"features,omitempty"`
+	AppID             string   `json:"appid"`
+	Mode              int64    `json:"gametype"`
+	Level             int64    `json:"level"`
+	SupportedFeatures []string `json:"features,omitempty"` // Optional supported features for the session
 }
 
 func (s *LobbySessionSettings) MarshalJSON() ([]byte, error) {
@@ -159,9 +159,9 @@ func (s *LobbySessionSettings) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	s.Level = aux.Level
-	s.Features = aux.Features
 	s.AppID = aux.AppID
 	s.Mode = aux.Mode
+	s.SupportedFeatures = aux.SupportedFeatures
 	return nil
 }
 
@@ -170,10 +170,10 @@ func NewSessionSettings(appID string, mode Symbol, level Symbol, features []stri
 		level = LevelUnspecified
 	}
 	settings := LobbySessionSettings{
-		AppID:    appID,
-		Mode:     int64(mode),
-		Level:    int64(level),
-		Features: features,
+		AppID:             appID,
+		Mode:              int64(mode),
+		Level:             int64(level),
+		SupportedFeatures: features,
 	}
 	if level != 0 {
 		l := int64(level)
@@ -245,5 +245,4 @@ func (m *GameServerSessionStart) Stream(s *EasyStream) error {
 			return nil
 		},
 	})
-
 }

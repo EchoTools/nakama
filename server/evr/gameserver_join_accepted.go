@@ -7,7 +7,7 @@ import (
 	"github.com/gofrs/uuid/v5"
 )
 
-// Game Server -> Nakama: player sessions that have been accepted.
+// Gmae Service -> Game Server: sessions to be accepted.
 type GameServerJoinAllowed struct {
 	EntrantIDs []uuid.UUID
 }

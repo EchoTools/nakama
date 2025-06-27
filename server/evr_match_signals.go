@@ -15,9 +15,10 @@ type SignalOpCode int
 const (
 	SignalPrepareSession SignalOpCode = iota
 	SignalStartSession
-	SignalEndSession
 	SignalLockSession
 	SignalUnlockSession
+	SignalStartedSession
+	SignalEndedSession
 	SignalGetEndpoint
 	SignalGetPresences
 	SignalReserveSlots

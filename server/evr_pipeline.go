@@ -12,16 +12,19 @@ import (
 	"time"
 
 	"go.uber.org/atomic"
+	"go.uber.org/zap"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/echotools/nevr-common/rtapi"
 	"github.com/go-redis/redis"
 	"github.com/gofrs/uuid/v5"
-	"github.com/heroiclabs/nakama-common/rtapi"
+
+	nkrtapi "github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/heroiclabs/nakama/v3/social"
-	"go.uber.org/zap"
-	"google.golang.org/protobuf/encoding/protojson"
 
 	"net/http"
 	_ "net/http/pprof"
@@ -290,69 +293,127 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 
 	// Handle legacy messages
 
+	var envelope *rtapi.Envelope
+
 	switch msg := in.(type) {
+	// EVR Encapsulated Protobuf message (NEVR protocol)
 
-	case *evr.BroadcasterRegistrationRequest:
-
-		in = &evr.NEVRRegistrationRequestV1{
-			LoginSessionID: uuid.Nil,
-			ServerID:       msg.ServerId,
-			InternalIP:     msg.InternalIP,
-			Port:           msg.Port,
-			RegionHash:     msg.Region,
-			VersionLock:    msg.VersionLock,
-			TimeStepUsecs:  0,
-		}
-
-	case *evr.BroadcasterPlayerSessionsLocked:
-		matchID, _, err := GameServerBySessionID(p.nk, session.ID())
+	case *evr.NEVRProtobufJSONMessageV1:
+		envelope = &rtapi.Envelope{}
+		err := protojson.Unmarshal(msg.Payload, envelope)
 		if err != nil {
-			logger.Error("Failed to get broadcaster's match by session ID", zap.Error(err))
-			return true
+			logger.Error("Failed to unmarshal protobuf message", zap.String("format", "json"), zap.Error(err), zap.String("data", string(msg.Payload)))
+			return false
 		}
-		in = &evr.NEVRLobbySessionLockV1{LobbySessionID: matchID.UUID}
 
-	case *evr.BroadcasterPlayerSessionsUnlocked:
-		matchID, _, err := GameServerBySessionID(p.nk, session.ID())
+	case *evr.NEVRProtobufMessageV1:
+		envelope = &rtapi.Envelope{}
+		err := proto.Unmarshal(msg.Payload, envelope)
 		if err != nil {
-			logger.Error("Failed to get broadcaster's match by session ID", zap.Error(err))
-			return true
-		}
-		in = &evr.NEVRLobbySessionUnlockV1{LobbySessionID: matchID.UUID}
-
-	case *evr.GameServerJoinAttempt:
-		matchID, _, err := GameServerBySessionID(p.nk, session.ID())
-		if err != nil {
-			logger.Error("Failed to get broadcaster's match by session ID", zap.Error(err))
-			return true
-		}
-		in = &evr.NEVRLobbyEntrantNewV1{LobbySessionID: matchID.UUID, EntrantIDs: msg.EntrantIDs}
-
-	case *evr.GameServerPlayerRemoved:
-		matchID, _, err := GameServerBySessionID(p.nk, session.ID())
-		if err != nil {
-			logger.Error("Failed to get broadcaster's match by session ID", zap.Error(err))
-			return true
+			logger.Error("Failed to unmarshal protobuf message", zap.String("format", "binary"), zap.Error(err), zap.Binary("data", msg.Payload))
+			return false
 		}
 
-		in = &evr.NEVRLobbyEntrantRemovedV1{EntrantID: msg.EntrantID, LobbySessionID: matchID.UUID}
+	}
 
-	case *evr.BroadcasterSessionStarted:
-		matchID, _, err := GameServerBySessionID(p.nk, session.ID())
-		if err != nil {
-			logger.Error("Failed to get broadcaster's match by session ID", zap.Error(err))
-			return true
+	if envelope == nil {
+		// Handle legacy messages that are not encapsulated in NEVR protobuf messages
+		switch msg := in.(type) {
+		case *evr.BroadcasterRegistrationRequest: // Legacy message
+			envelope = &rtapi.Envelope{
+				Message: &rtapi.Envelope_GameServerRegistrationRequest{
+					GameServerRegistrationRequest: &rtapi.GameServerRegistrationMessage{
+						ServerId:          msg.ServerID,
+						InternalIpAddress: msg.InternalIP.String(),
+						Port:              uint32(msg.Port),
+						Region:            uint64(msg.Region),
+						VersionLock:       uint64(msg.VersionLock),
+					},
+				},
+			}
+		case *evr.GameServerJoinAttempt: // Legacy message
+			matchID, _, err := GameServerBySessionID(p.nk, session.ID())
+			if err != nil {
+				logger.Error("Failed to get broadcaster's match by session ID", zap.Error(err))
+				return true
+			}
+			entrantIDStrs := make([]string, 0, len(msg.EntrantIDs))
+			for _, id := range msg.EntrantIDs {
+				entrantIDStrs = append(entrantIDStrs, id.String())
+			}
+			envelope = &rtapi.Envelope{
+				Message: &rtapi.Envelope_LobbyEntrantConnected{
+					LobbyEntrantConnected: &rtapi.LobbyEntrantsConnectedMessage{
+						LobbySessionId: matchID.UUID.String(),
+						EntrantIds:     entrantIDStrs,
+					},
+				},
+			}
+		case *evr.GameServerPlayerRemoved: // Legacy message
+			matchID, _, err := GameServerBySessionID(p.nk, session.ID())
+			if err != nil {
+				logger.Error("Failed to get broadcaster's match by session ID", zap.Error(err))
+				return true
+			}
+			envelope = &rtapi.Envelope{
+				Message: &rtapi.Envelope_LobbyEntrantRemoved{
+					LobbyEntrantRemoved: &rtapi.LobbyEntrantRemovedMessage{
+						LobbySessionId: matchID.UUID.String(),
+						EntrantId:      msg.EntrantID.String(),
+					},
+				},
+			}
+		case *evr.BroadcasterPlayerSessionsLocked: // Legacy message
+			matchID, _, err := GameServerBySessionID(p.nk, session.ID())
+			if err != nil {
+				logger.Error("Failed to get broadcaster's match by session ID", zap.Error(err))
+				return true
+			}
+			envelope = &rtapi.Envelope{
+				Message: &rtapi.Envelope_LobbySessionEvent{
+					LobbySessionEvent: &rtapi.LobbySessionEventMessage{
+						LobbySessionId: matchID.UUID.String(),
+						Code:           int32(rtapi.LobbySessionEventMessage_LOCKED),
+					},
+				},
+			}
+		case *evr.BroadcasterPlayerSessionsUnlocked: // Legacy message
+			matchID, _, err := GameServerBySessionID(p.nk, session.ID())
+			if err != nil {
+				logger.Error("Failed to get broadcaster's match by session ID", zap.Error(err))
+				return true
+			}
+			envelope = &rtapi.Envelope{
+				Message: &rtapi.Envelope_LobbySessionEvent{
+					LobbySessionEvent: &rtapi.LobbySessionEventMessage{
+						LobbySessionId: matchID.UUID.String(),
+						Code:           int32(rtapi.LobbySessionEventMessage_UNLOCKED),
+					},
+				},
+			}
+		case *evr.BroadcasterSessionEnded: // Legacy message
+			matchID, _, err := GameServerBySessionID(p.nk, session.ID())
+			if err != nil {
+				logger.Error("Failed to get broadcaster's match by session ID", zap.Error(err))
+				return true
+			}
+			envelope = &rtapi.Envelope{
+				Message: &rtapi.Envelope_LobbySessionEvent{
+					LobbySessionEvent: &rtapi.LobbySessionEventMessage{
+						LobbySessionId: matchID.UUID.String(),
+						Code:           int32(rtapi.LobbySessionEventMessage_ENDED),
+					},
+				},
+			}
 		}
-		in = &evr.NEVRLobbySessionStartedV1{LobbySessionID: matchID.UUID}
-
-	case *evr.BroadcasterSessionEnded:
-		matchID, _, err := GameServerBySessionID(p.nk, session.ID())
-		if err != nil {
-			logger.Error("Failed to get broadcaster's match by session ID", zap.Error(err))
-			return true
+	}
+	if envelope != nil {
+		// This is a legacy message that has been converted to a protobuf message
+		if err := p.ProcessProtobufRequest(logger, session, envelope); err != nil {
+			logger.Error("Failed to process protobuf message", zap.Any("envelope", envelope), zap.Error(err))
+			return false
 		}
-		in = &evr.NEVRLobbySessionEndedV1{LobbySessionID: matchID.UUID}
-
+		return true
 	}
 
 	var pipelineFn func(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error
@@ -366,12 +427,12 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 		isAuthenticationRequired = false
 		pipelineFn = p.configRequest
 
-	// Transaction (IAP) service
+	// Transaction (IAP) service (unused)
 	case *evr.ReconcileIAP:
 		isAuthenticationRequired = false
 		pipelineFn = p.reconcileIAP
 
-	// Login Service
+	// Login/Profile Service
 	case *evr.RemoteLogSet:
 		isAuthenticationRequired = false
 		pipelineFn = p.remoteLogSetv3
@@ -393,7 +454,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 	case *evr.GenericMessage:
 		pipelineFn = p.genericMessage
 
-	// Match service
+	// Matchmaker service
 	case *evr.LobbyFindSessionRequest:
 		pipelineFn = p.lobbySessionRequest
 	case *evr.LobbyCreateSessionRequest:
@@ -408,25 +469,6 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 		pipelineFn = p.lobbyPlayerSessionsRequest
 	case *evr.LobbyPendingSessionCancel:
 		pipelineFn = p.lobbyPendingSessionCancel
-
-	// ServerDB service
-	case *evr.NEVRRegistrationRequestV1:
-		isAuthenticationRequired = false
-		pipelineFn = p.gameserverRegistrationRequest
-	case *evr.NEVRLobbySessionStartedV1:
-		pipelineFn = p.gameserverLobbySessionStarted
-	case *evr.EchoToolsLobbyStatusV1:
-		pipelineFn = p.gameserverLobbySessionStatus
-	case *evr.NEVRLobbyEntrantNewV1:
-		pipelineFn = p.gameserverLobbyEntrantNew
-	case *evr.NEVRLobbySessionEndedV1:
-		pipelineFn = p.gameserverLobbySessionEnded
-	case *evr.NEVRLobbySessionLockV1:
-		pipelineFn = p.gameserverLobbySessionLock
-	case *evr.NEVRLobbySessionUnlockV1:
-		pipelineFn = p.gameserverLobbySessionUnlock
-	case *evr.NEVRLobbyEntrantRemovedV1:
-		pipelineFn = p.gameserverLobbyEntrantRemoved
 
 	default:
 		pipelineFn = func(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
@@ -522,19 +564,19 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 }
 
 // Process outgoing protobuf envelopes and translate them to Evr messages
-func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope) ([]evr.Message, error) {
+func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *nkrtapi.Envelope) ([]evr.Message, error) {
 	p := session.evrPipeline
 
 	switch in.Message.(type) {
 
-	case *rtapi.Envelope_StreamData:
+	case *nkrtapi.Envelope_StreamData:
 		// EVR binary protocol data
 		payload := []byte(in.GetStreamData().GetData())
 		if bytes.HasPrefix(payload, evr.MessageMarker) {
 			return nil, session.SendBytes(payload, true)
 		}
 
-	case *rtapi.Envelope_MatchData:
+	case *nkrtapi.Envelope_MatchData:
 		// EVR binary protocol data
 		if in.GetMatchData().GetOpCode() == OpCodeEVRPacketData {
 			return nil, session.SendBytes(in.GetMatchData().GetData(), true)
@@ -551,12 +593,12 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 	if !strings.HasPrefix(session.Username(), "broadcaster:") && params.relayOutgoing {
 		content := ""
 		switch msg := in.Message.(type) {
-		case *rtapi.Envelope_StreamData:
+		case *nkrtapi.Envelope_StreamData:
 
 			discordMessage := struct {
-				Stream  *rtapi.Stream       `json:"stream"`
-				Sender  *rtapi.UserPresence `json:"sender"`
-				Content json.RawMessage     `json:"content"`
+				Stream  *nkrtapi.Stream       `json:"stream"`
+				Sender  *nkrtapi.UserPresence `json:"sender"`
+				Content json.RawMessage       `json:"content"`
 			}{
 				msg.StreamData.Stream,
 				msg.StreamData.Sender,
@@ -572,7 +614,7 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 				}
 			}
 
-		case *rtapi.Envelope_Error:
+		case *nkrtapi.Envelope_Error:
 
 			// Json the message
 			data, err := json.MarshalIndent(in.GetError(), "", "  ")
@@ -582,13 +624,13 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 				content = string("```json\n" + string(data) + "\n```")
 			}
 
-		case *rtapi.Envelope_StatusPresenceEvent, *rtapi.Envelope_MatchPresenceEvent, *rtapi.Envelope_StreamPresenceEvent:
+		case *nkrtapi.Envelope_StatusPresenceEvent, *nkrtapi.Envelope_MatchPresenceEvent, *nkrtapi.Envelope_StreamPresenceEvent:
 
 			// Json the message
 			data, _ := json.MarshalIndent(in.GetMessage(), "", "  ")
 			content = string("```json\n" + string(data) + "\n```")
 
-		case *rtapi.Envelope_Party:
+		case *nkrtapi.Envelope_Party:
 			discordIDs := make([]string, 0)
 			leader := in.GetParty().GetLeader()
 			userIDs := make([]string, 0)
@@ -622,7 +664,7 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 
 			content = fmt.Sprintf("Active party `%s`: %s", partyGroupName, strings.Join(discordIDs, ", "))
 
-		case *rtapi.Envelope_PartyLeader:
+		case *nkrtapi.Envelope_PartyLeader:
 			if discordID, err := GetDiscordIDByUserID(session.Context(), session.pipeline.db, in.GetPartyLeader().GetPresence().GetUserId()); err != nil {
 				logger.Warn("Failed to get discord ID", zap.Error(err))
 				content = fmt.Sprintf("Party leader: %s", in.GetPartyLeader().GetPresence().GetUsername())
@@ -630,9 +672,9 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 				content = fmt.Sprintf("New party leader: <@%s>", discordID)
 			}
 
-		case *rtapi.Envelope_PartyJoinRequest:
+		case *nkrtapi.Envelope_PartyJoinRequest:
 
-		case *rtapi.Envelope_PartyPresenceEvent:
+		case *nkrtapi.Envelope_PartyPresenceEvent:
 			event := in.GetPartyPresenceEvent()
 			joins := make([]string, 0)
 
@@ -704,4 +746,33 @@ func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope)
 		}
 	}
 	return nil, nil
+}
+
+func (p *EvrPipeline) ProcessProtobufRequest(logger *zap.Logger, session Session, in *rtapi.Envelope) error {
+	if in.Message == nil {
+		return fmt.Errorf("received empty protobuf message")
+	}
+
+	var pipelineFn func(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope) error
+
+	// Process the request based on its type
+	switch in.Message.(type) {
+	case *rtapi.Envelope_GameServerRegistrationRequest:
+		pipelineFn = p.gameserverRegistrationRequest
+	case *rtapi.Envelope_LobbyEntrantConnected:
+		pipelineFn = p.lobbyEntrantConnected
+	case *rtapi.Envelope_LobbySessionEvent:
+		pipelineFn = p.lobbySessionEvent
+	case *rtapi.Envelope_LobbyEntrantRemoved:
+		pipelineFn = p.lobbyEntrantRemoved
+	default:
+		// For all other messages, use the generic protobuf handler
+		return fmt.Errorf("unhandled protobuf message type: %T", in.Message)
+	}
+
+	if err := pipelineFn(logger, session.(*sessionWS), in); err != nil {
+		logger.Error("Failed to process protobuf message", zap.Any("envelope", in), zap.Error(err))
+		return err
+	}
+	return nil
 }

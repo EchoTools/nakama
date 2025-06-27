@@ -181,7 +181,7 @@ func (m *LobbyJoinSessionRequest) GetLevel() Symbol {
 }
 
 func (m *LobbyJoinSessionRequest) GetFeatures() []string {
-	return m.SessionSettings.Features
+	return m.SessionSettings.SupportedFeatures
 }
 
 func (m *LobbyJoinSessionRequest) GetCurrentLobbyID() uuid.UUID {
