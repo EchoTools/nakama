@@ -27,7 +27,7 @@ func TestNewSessionParametersFromLobbySessionRequest(t *testing.T) {
 			AppID: "1369078409873402",
 			Mode:  int64(evr.ModeSocialPublic),
 			Level: int64(evr.LevelUnspecified),
-			Features: []string{
+			SupportedFeatures: []string{
 				"testfeature",
 			},
 		},
@@ -63,7 +63,7 @@ func TestNewSessionParametersFromLobbySessionRequest(t *testing.T) {
 				GroupID:           request.GroupID,
 				Mode:              request.Mode,
 				Level:             request.Level,
-				SupportedFeatures: request.SessionSettings.Features,
+				SupportedFeatures: request.SessionSettings.SupportedFeatures,
 				CurrentMatchID:    matchID,
 				Role:              evr.TeamUnassigned,
 			},
