@@ -911,7 +911,7 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 			}
 
 			// Log the audit message
-			if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("User <@%s> has accepted the community values.", params.DiscordID()), false); err != nil {
+			if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("User <@%s> (%s) has accepted the community values.", params.DiscordID(), params.profile.Username()), false); err != nil {
 				logger.Warn("Failed to log audit message", zap.Error(err))
 			}
 		}
