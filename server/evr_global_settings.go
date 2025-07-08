@@ -31,6 +31,7 @@ type ServiceSettingsData struct {
 	ServiceGuildID                        string                    `json:"service_guild_id"`      // Central/Support guild ID
 	DisableStatisticsUpdates              bool                      `json:"disable_statistics_updates"`
 	DisableRatingsUpdates                 bool                      `json:"disable_ratings_updates"`
+	PruneSettings                         PruneSettings             `json:"prune_settings"` // Settings for pruning Discord guilds and Nakama groups
 	Matchmaking                           GlobalMatchmakingSettings `json:"matchmaking"`
 	RemoteLogFilters                      map[string][]string       `json:"remote_logs_filter"` //	Ignore remote logs from specific servers
 	ReportURL                             string                    `json:"report_url"`         // URL to report issues
@@ -45,6 +46,12 @@ type ServiceSettingsData struct {
 	DisplayNameInUseNotifications         bool                      `json:"display_name_in_use_notifications"` // Display name in use notifications
 	version                               string
 	serviceStatusMessage                  string
+}
+
+type PruneSettings struct {
+	LeaveOrphanedGuilds  bool `json:"leave_orphan_guilds"` // Prune Discord guilds that do not have a corresponding Nakama group
+	DeleteOrphanedGroups bool `json:"leave_orphan_groups"` // Prune Nakama groups that do not have a corresponding Discord guild
+	SafetyLimit          int  `json:"safety_limit"`        // The maximum number of orphaned groups or guilds that can be deleted/left before the pruning operation is aborted
 }
 
 type GlobalMatchmakingSettings struct {

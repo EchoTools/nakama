@@ -79,15 +79,17 @@ func (c *DiscordIntegrator) Start() {
 
 	// Start the cache worker.
 	go func() {
-		cooldownTicker := time.NewTicker(time.Second * 3)
-		defer cooldownTicker.Stop()
 
 		var (
 			queueEmpty     bool
 			started        time.Time
 			maxQueueLength int
 			processed      int
+			cooldownTicker = time.NewTicker(time.Second * 3)
+			pruneTicker    = time.NewTicker(time.Second * 30) // Sets itself to 15 after the first run.
+			runtimeLogger  = NewRuntimeGoLogger(c.logger)
 		)
+
 		for {
 
 			// Log the queue length every time it empties
@@ -157,6 +159,19 @@ func (c *DiscordIntegrator) Start() {
 					}
 					return true
 				})
+
+			case <-pruneTicker.C:
+				// Adjust the prune ticker to run every 15 minutes after the first run.
+
+				pruneTicker.Reset(time.Minute * 15)
+
+				// Prune the guild groups
+				doLeaves := ServiceSettings().PruneSettings.LeaveOrphanedGuilds
+				doDeletes := ServiceSettings().PruneSettings.DeleteOrphanedGroups
+				pruneSafetyThreshold := ServiceSettings().PruneSettings.SafetyLimit
+				if err := c.pruneGuildGroups(c.ctx, runtimeLogger, doLeaves, doDeletes, pruneSafetyThreshold); err != nil {
+					logger.Error("Error pruning guild groups", zap.Error(err), zap.Bool("do_leaves", doLeaves), zap.Bool("do_deletes", doDeletes), zap.Int("prune_safety_threshold", pruneSafetyThreshold))
+				}
 			}
 		}
 	}()
