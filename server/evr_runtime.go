@@ -82,6 +82,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		"match/public":                  rpcHandler.MatchListPublicRPC,
 		"match":                         MatchRPC,
 		"match/prepare":                 PrepareMatchRPC,
+		"match/allocate":                AllocateMatchRPC,
 		"match/terminate":               shutdownMatchRpc,
 		"match/build":                   BuildMatchRPC,
 		"player/setnextmatch":           SetNextMatchRPC,

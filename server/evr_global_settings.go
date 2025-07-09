@@ -78,6 +78,7 @@ type QueryAddons struct {
 	Create       string `json:"lobby_create"`
 	Allocate     string `json:"allocate"`
 	Matchmaking  string `json:"matchmaking_ticket"`
+	RPCAllocate  string `json:"rpc_allocate"`
 }
 
 type RankPercentileSettings struct {
