@@ -1,180 +1,52 @@
 services:
-  nakama:
-    image: echotools/nakama:latest
-    restart: unless-stopped
-    volumes:
-      - ./nakama:/data
-      - ./nakama.yml:/data/nakama.yml
-      - ./logs:/logs
-    entrypoint:
-      - "/bin/sh"
-      - "-ecx"
-      - >
-        DBURI="postgresql://nakama:sodVenLef7@postgres:5432/nakama?sslmode=disable"
-          /nakama/nakama migrate up --database.address $DBURI &&
-          exec /nakama/nakama --name nakama2_us-east --database.address $DBURI --config=/data/nakama.yml
-    depends_on:
-      - postgres
-    networks:
-      - backend
-    ports:
-      - "127.0.0.1:6060:6060"
-  echotaxi:
-    image: echotools/echotaxi:latest
-    restart: unless-stopped
-    volumes:
-      - ./echotaxi.yml:/echotaxi.yml
-      - ./logs/echotaxi.log:/echotaxi.log
-    entrypoint:
-      - "/bin/sh"
-      - "-ecx"
-      - >
-        exec /echotaxi/echotaxi -config /echotaxi.yml -logger.level debug
-    networks:
-      - backend
-  echommbot:
-    image: echotools/echommbot:latest
-    restart: never
-    volumes:
-      - ./echommbot.yml:/echommbot.yml
-      - ./logs/echommbot.log:/echommbot.log
-    entrypoint:
-      - "/bin/sh"
-      - "-ecx"
-      - >
-        exec /echommbot/echommbot -config /echommbot.yml -logger.level info
   postgres:
-    image: postgres:latest
-    restart: unless-stopped
     container_name: postgres
+    image: postgres:16.8-alpine
     environment:
-      POSTGRES_USER: nakama
-      POSTGRES_PASSWORD: sodVenLef7
-      POSTGRES_DB: nakama
-    networks:
-      - backend
+      - POSTGRES_DB=nakama
+      - POSTGRES_PASSWORD=localdb
+    volumes:
+      - data:/var/lib/postgresql/data
+    expose:
+      - "8080"
+      - "5432"
     ports:
-      - "127.0.0.1:5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./_local:/_local
-  prometheus:
-    image: prom/prometheus:latest
-    restart: unless-stopped
-    volumes:
-      - prometheus_data:/prometheus
-      - ./prometheus.yml:/prometheus/prometheus.yml
-    command: --config.file=/prometheus/prometheus.yml --storage.tsdb.retention.time=5y
-    networks:
-      - backend
-    ports:
-      - "127.0.0.1:9090:9090"
-  node_exporter:
-    restart: unless-stopped
-    image: quay.io/prometheus/node-exporter:latest
-    container_name: node_exporter
-    command:
-      - '--path.rootfs=/host'
-    pid: host
-    volumes:
-      - '/:/host:ro,rslave'
-    networks:
-      - backend
-  redis:
-    image: redis:latest
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:6379:6379"
-    volumes:
-      - ./redis_conf:/usr/local/etc/redis
-      - redis_data:/data # Mounts a volume for data persistence
+      - "5432:5432"
+      - "8080:8080"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "nakama"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+  nakama:
+    container_name: nakama
+    image: echotools/nakama:latest
+    entrypoint:
+      - "/bin/sh"
+      - "-ecx"
+      - >
+          /nakama/nakama migrate up --database.address postgres:localdb@postgres:5432/nakama &&
+          exec /nakama/nakama --name nakama1 --database.address postgres:localdb@postgres:5432/nakama --config=/data/nakama.yml --logger.level DEBUG --session.token_expiry_sec 7200
+   
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./:/nakama/data
+    expose:
+      - "7349"
+      - "7350"
+      - "7351"
+    ports:
+      - "7349:7349"
+      - "7350:7350"
+      - "7351:7351"
+    healthcheck:
+      test: ["CMD", "/nakama/nakama", "healthcheck"]
       interval: 10s
       timeout: 5s
       retries: 5
-    networks:
-      - backend
-  mongo:
-    image: mongo:latest
-    volumes:
-      - mongo_data:/data/db
-    ports:
-      - "127.0.0.1:27017:27017"
-    networks:
-      - backend
-  grafana:
-    restart: unless-stopped
-    image: grafana/grafana-oss:latest
-    volumes:
-      - ./grafana_conf.d:/etc/grafana
-      - grafana_data:/var/lib/grafana
-    environment:
-      GF_SECURITY_ADMIN_PASSWORD: 'ghifHiadAld8'
-      GF_SECURITY_ADMIN_USER: 'admin'
-      GF_RENDERING_SERVER_URL: http://renderer:8081/render
-      GF_RENDERING_CALLBACK_URL: http://grafana:3000/
-      GF_LOG_FILTERS: rendering:debug
-      GF_SERVER_ROOT_URL: https://g.echovrce.com/grafana/
-    networks:
-      - backend
-    depends_on:
-      - loki
-
-  renderer:
-    restart: unless-stopped
-    image: grafana/grafana-image-renderer:latest
-    ports:
-      - 8081
-  loki:
-    image: grafana/loki:latest
-    restart: unless-stopped
-    volumes:
-      - loki_data:/loki
-      - ./loki-config.yaml:/etc/loki/local-config.yaml
-    command: --config.file=/etc/loki/local-config.yaml
-    networks:
-      - backend
-    ports:
-      - 127.0.0.1:3100:3100
-      - 127.0.0.1:9096:9096
-  promtail:
-    image: grafana/promtail:latest
-    container_name: promtail
-    volumes:
-      - ./promtail-config.yaml:/etc/promtail/config.yaml
-      - ./logs:/var/log/nakama
-    command: -config.file=/etc/promtail/config.yaml
-    networks:
-      - backend
-  nginx:
-    image: jonasal/nginx-certbot:latest
-    restart: unless-stopped
-    volumes:
-      - ./nginx_secrets:/etc/letsencrypt
-      - ./nginx_conf.d:/etc/nginx/user_conf.d
-      - ./nginx_conf.d/redirector.conf:/etc/nginx/conf.d/redirector.conf
-      - ./logs/nginx:/var/log/nginx
-    environment:
-      # This will depend on your authenticator method.
-      # see https://github.com/JonasAlfredsson/docker-nginx-certbot
-      CERTBOT_EMAIL: "andrew@sprock.io"
-      CERTBOT_AUTHENTICATOR: "dns-cloudflare"
-      CERTBOT_DNS_PROPAGATION_SECONDS: "60"
-    ports:
-      # Nakama websockets and HTTP API
-      - "80:80"
-      - "443:443"
-      - "7348-7354:7348-7354"
-    networks:
-      - backend
 volumes:
-  loki_data:
-  prometheus_data:
-  grafana_data:
-  mongo_data:
-  redis_data:
-  cockroachdb_data:
-  postgres_data:
-networks:
-  backend:
+  data:
+
