@@ -298,12 +298,8 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 				return
 			case <-time.After(5 * time.Second):
 				// Check if the game server is still alive
-				rtt, err := BroadcasterHealthcheck(p.internalIP, config.Endpoint.ExternalIP, int(config.Endpoint.Port), 500*time.Millisecond)
-				if err != nil {
-					// Try the internal IP
-					rtt, err = BroadcasterHealthcheck(p.internalIP, config.Endpoint.InternalIP, int(config.Endpoint.Port), 500*time.Millisecond)
-				}
-				if err != nil || rtt < 0 {
+				rtts, err := BroadcasterRTTcheck(p.internalIP, config.Endpoint.ExternalIP, int(config.Endpoint.Port), 5, 500*time.Millisecond)
+				if err != nil || len(rtts) == 0 {
 					logger.Warn("Game server is not responding", zap.Error(err), zap.String("endpoint", config.Endpoint.String()))
 					// Send the discord error
 					errorMessage := fmt.Sprintf("Game server (Endpoint ID: %s, Server ID: %d) is not responding. Error: %v", config.Endpoint.ExternalAddress(), config.ServerID, err)
@@ -610,22 +606,19 @@ func BroadcasterPortScan(lIP net.IP, rIP net.IP, startPort, endPort int, timeout
 	return rtts, errs
 }
 
-func BroadcasterRTTcheck(lIP net.IP, rIP net.IP, port, count int, interval, timeout time.Duration) (rtts []time.Duration, err error) {
+func BroadcasterRTTcheck(lIP net.IP, rIP net.IP, port, count int, timeout time.Duration) (rtts []time.Duration, err error) {
 	// Create a slice to store round trip times (rtts)
 	rtts = make([]time.Duration, count)
 	// Set a timeout duration
 
-	// Create a WaitGroup to manage concurrency
-	var wg sync.WaitGroup
-	// Add a task to the WaitGroup
-	wg.Add(1)
+	doneCh := make(chan struct{})
 
 	// Start a goroutine
 	go func() {
 		// Ensure the task is marked done on return
-		defer wg.Done()
+		defer close(doneCh)
 		// Loop 5 times
-		for i := 0; i < count; i++ {
+		for i := range count {
 			// Perform a health check on the broadcaster
 			rtt, err := BroadcasterHealthcheck(lIP, rIP, port, timeout)
 			if err != nil {
@@ -635,12 +628,18 @@ func BroadcasterRTTcheck(lIP net.IP, rIP net.IP, port, count int, interval, time
 			}
 			// Record the rtt
 			rtts[i] = rtt
-			// Sleep for the duration of the ping interval before the next iteration
-			time.Sleep(interval)
+			// Sleep for the duration of the latency before the next iteration
+			<-time.After(min(500, rtt))
 		}
 	}()
-
-	wg.Wait()
+	// Wait for the goroutine to finish
+	select {
+	case <-doneCh:
+		// Goroutine finished successfully
+	case <-time.After(10 * time.Second):
+		// Timeout occurred, return an error
+		return nil, fmt.Errorf("broadcaster RTT check timed out after %v", timeout)
+	}
 	return rtts, nil
 }
 
