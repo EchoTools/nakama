@@ -134,70 +134,67 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	matchmaker.OnMatchedEntries(lobbyBuilder.handleMatchedEntries)
 	userRemoteLogJournalRegistry := NewUserRemoteLogJournalRegistry(ctx, logger, nk, sessionRegistry)
 
-	var redisClient *redis.Client
-
 	// Connect to the redis server
-	redisUri := vars["REDIS_URI"]
-	if redisUri != "" {
-		redisOptions, err := redis.ParseURL(redisUri)
-		if err != nil {
-			logger.Fatal("Failed to parse Redis URI", zap.Error(err))
-		}
-
-		redisClient = redis.NewClient(redisOptions)
-		_, err = redisClient.Ping().Result()
+	var redisClient *redis.Client
+	if vars["REDIS_URI"] != "" {
+		redisClient, err = connectRedis(ctx, vars["REDIS_URI"])
 		if err != nil {
 			logger.Fatal("Failed to connect to Redis", zap.Error(err))
 		}
-
-		logger.Info("Connected to Redis", zap.String("addr", redisOptions.Addr))
 	}
 
-	ipqsClient, err := NewIPQSClient(logger, metrics, redisClient, vars["IPQS_API_KEY"])
-	if err != nil {
-		logger.Fatal("Failed to create IPQS client", zap.Error(err))
-	}
+	var ipInfoCache *IPInfoCache
+	if redisClient != nil {
+		var providers []IPInfoProvider
+		if vars["IPAPI_API_KEY"] != "" {
+			ipqsClient, err := NewIPQSClient(logger, metrics, redisClient, vars["IPQS_API_KEY"])
+			if err != nil {
+				logger.Fatal("Failed to create IPQS client", zap.Error(err))
+			}
+			providers = append(providers, ipqsClient)
+		}
 
-	ipapiClient, err := NewIPAPIClient(logger, metrics, redisClient)
-	if err != nil {
-		logger.Fatal("Failed to create IPAPI client", zap.Error(err))
-	}
+		ipapiClient, err := NewIPAPIClient(logger, metrics, redisClient)
+		if err != nil {
+			logger.Fatal("Failed to create IPAPI client", zap.Error(err))
+		}
+		providers = append(providers, ipapiClient)
 
-	ipInfoCache, err := NewIPInfoCache(logger, metrics, ipapiClient, ipqsClient)
-	if err != nil {
-		logger.Fatal("Failed to create IP info cache", zap.Error(err))
+		ipInfoCache, err = NewIPInfoCache(logger, metrics, providers...)
+		if err != nil {
+			logger.Fatal("Failed to create IP info cache", zap.Error(err))
+		}
 	}
 
 	var appBot *DiscordAppBot
-	var discordCache *DiscordIntegrator
-	if disable, ok := vars["DISABLE_DISCORD_BOT"]; ok && disable == "true" {
-		logger.Info("Discord bot is disabled")
-	} else {
-		discordCache = NewDiscordIntegrator(ctx, logger, config, metrics, nk, db, dg, guildGroupRegistry)
-		discordCache.Start()
+	var discordIntegrator *DiscordIntegrator
 
-		appBot, err = NewDiscordAppBot(ctx, runtimeLogger, nk, db, metrics, pipeline, config, discordCache, profileRegistry, statusRegistry, dg, ipInfoCache, guildGroupRegistry, redisClient)
-		if err != nil {
-			logger.Error("Failed to create app bot", zap.Error(err))
+	discordIntegrator = NewDiscordIntegrator(ctx, logger, config, metrics, nk, db, dg, guildGroupRegistry)
+	discordIntegrator.Start()
 
-		}
-		globalAppBot.Store(appBot)
-		// Add a once handler to wait for the bot to connect
-		readyCh := make(chan struct{})
-		dg.AddHandlerOnce(func(s *discordgo.Session, r *discordgo.Ready) {
-			close(readyCh)
-		})
+	appBot, err = NewDiscordAppBot(ctx, runtimeLogger, nk, db, metrics, pipeline, config, discordIntegrator, profileRegistry, statusRegistry, dg, ipInfoCache, guildGroupRegistry)
+	if err != nil {
+		logger.Error("Failed to create app bot", zap.Error(err))
 
-		if err = dg.Open(); err != nil {
-			logger.Warn("Failed to open discord bot connection: %w", zap.Error(err))
-		}
+	}
+	// Store the app bot in a global variable for later use
+	globalAppBot.Store(appBot) // TODO: This is a temporary solution, we should refactor this to avoid global state
 
-		select {
-		case <-readyCh:
-			logger.Info("Discord bot is ready")
-		case <-time.After(10 * time.Second):
-			logger.Warn("Discord bot is not ready after 10 seconds")
-		}
+	// Add a once handler to wait for the bot to connect
+	readyCh := make(chan struct{})
+	dg.AddHandlerOnce(func(s *discordgo.Session, r *discordgo.Ready) {
+		close(readyCh)
+	})
+
+	if err = dg.Open(); err != nil {
+		logger.Fatal("Failed to open discord bot connection: %w", zap.Error(err))
+	}
+
+	select {
+	case <-readyCh:
+		logger.Info("Discord bot is ready")
+	case <-time.After(10 * time.Second):
+		logger.Fatal("Discord bot is not ready after 10 seconds")
 	}
 
 	internalIP, externalIP, err := DetermineServiceIPs(ctx)
@@ -218,7 +215,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		nk:              nk.(*RuntimeGoNakamaModule),
 		runtimeLogger:   runtimeLogger,
 
-		discordCache: discordCache,
+		discordCache: discordIntegrator,
 		appBot:       appBot,
 		internalIP:   internalIP,
 		externalIP:   externalIP,

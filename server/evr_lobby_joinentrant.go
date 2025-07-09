@@ -159,7 +159,7 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 	// Update the statuses. This is looked up by the pipeline when the game server sends the new entrant message.
 	for _, op := range ops {
 		if ok := tracker.Update(sessionCtx, e.SessionID, op.Stream, e.UserID, op.Meta); !ok {
-			return errors.New("failed to track session ID")
+			return ErrFailedToTrackSessionID
 		}
 	}
 

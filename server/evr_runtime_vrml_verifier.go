@@ -53,21 +53,7 @@ type VRMLScanQueue struct {
 	seasons          []*vrmlgo.Season
 }
 
-func NewVRMLScanQueue(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer, appBot *discordgo.Session) (*VRMLScanQueue, error) {
-	vars := ctx.Value(runtime.RUNTIME_CTX_ENV).(map[string]string)
-
-	// Connect to the redis server for the queue and cache
-	redisUri := vars["VRML_REDIS_URI"]
-	if redisUri == "" {
-		return nil, errors.New("missing VRML_REDIS_URI in server config")
-	}
-
-	redisOptions, err := redis.ParseURL(redisUri)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse Redis URI: %v", err)
-	}
-
-	redisClient := redis.NewClient(redisOptions)
+func NewVRMLScanQueue(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer, appBot *discordgo.Session, redisClient *redis.Client, oauthRedirectURL, oauthCLientID string) (*VRMLScanQueue, error) {
 
 	ctx = context.Background()
 
@@ -81,13 +67,13 @@ func NewVRMLScanQueue(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		redisClient:      redisClient,
 		cache:            NewVRMLCache(redisClient, "VRMLCache:cache:"),
 		queueKey:         "VRMLVerifier:queue",
-		oauthRedirectURL: vars["VRML_OAUTH_REDIRECT_URL"],
-		oauthClientID:    vars["VRML_OAUTH_CLIENT_ID"],
+		oauthRedirectURL: oauthRedirectURL,
+		oauthClientID:    oauthCLientID,
 	}
 
 	// Register the RPC function
-	if err = initializer.RegisterRpc("oauth/vrml_redirect", verifier.RedirectRPC); err != nil {
-		return nil, errors.New("unable to register rpc")
+	if err := initializer.RegisterRpc("oauth/vrml_redirect", verifier.RedirectRPC); err != nil {
+		return nil, fmt.Errorf("failed to register VRML redirect RPC: %v", err)
 	}
 
 	verifier.Start()
@@ -95,11 +81,6 @@ func NewVRMLScanQueue(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	return verifier, nil
 }
 func (v *VRMLScanQueue) Start() error {
-
-	_, err := v.redisClient.Ping().Result()
-	if err != nil {
-		return fmt.Errorf("failed to connect to Redis: %v", err)
-	}
 
 	ledger, err := VRMLEntitlementLedgerLoad(v.ctx, v.nk)
 	if err != nil {
