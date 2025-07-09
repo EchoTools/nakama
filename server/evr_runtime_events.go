@@ -155,8 +155,6 @@ func (h *EventDispatcher) eventFn(ctx context.Context, logger runtime.Logger, ev
 	select {
 	case h.queue <- evt:
 		logger.WithField("event", evt.Name).Debug("event queued for processing")
-	case <-ctx.Done():
-		logger.Warn("context canceled")
 	default:
 		logger.Warn("event queue full")
 	}
