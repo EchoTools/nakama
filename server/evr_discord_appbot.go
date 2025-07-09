@@ -1832,6 +1832,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				IncludeGuildRoles:              true,
 				IncludeAllGuilds:               true,
 				ShowLoginsSince:                time.Now().Add(-30 * 24 * time.Hour),
+				SendFileOnError:                false,
 			}
 			err := d.handleProfileRequest(ctx, logger, nk, s, i, user, opts)
 			logger.WithFields(map[string]any{
