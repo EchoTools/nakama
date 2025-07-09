@@ -90,12 +90,10 @@ func (d *DiscordIntegrator) pruneGuildGroups(ctx context.Context, logger runtime
 				"guild_id":       guild.ID,
 				"guild_metadata": guild,
 			}).Info("Leaving orphaned discord guild")
-			/*
-				if err := d.dg.GuildLeave(guild.ID); err != nil {
-					logger.WithField("error", err).Warn("Failed to leave orphaned discord guild")
-					continue
-				}
-			*/
+			if err := d.dg.GuildLeave(guild.ID); err != nil {
+				logger.WithField("error", err).Warn("Failed to leave orphaned discord guild")
+				continue
+			}
 		}
 	}
 
@@ -107,12 +105,10 @@ func (d *DiscordIntegrator) pruneGuildGroups(ctx context.Context, logger runtime
 				"group_name": g.GetName(),
 				"metadata":   g.GetMetadata(),
 			}).Info("Deleting orphaned group from Nakama")
-			/*
-				if err := d.nk.GroupDelete(ctx, g.GetId()); err != nil {
-					logger.WithField("error", err).Warn("Failed to delete orphaned group from Nakama")
-					continue
-				}
-			*/
+			if err := d.nk.GroupDelete(ctx, g.GetId()); err != nil {
+				logger.WithField("error", err).Warn("Failed to delete orphaned group from Nakama")
+				continue
+			}
 		}
 	}
 
