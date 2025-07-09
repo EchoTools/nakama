@@ -486,9 +486,10 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 
 	for _, p := range presences {
 		class := "Player"
-		sessionStartTime := state.joinTimestamps[p.GetSessionId()]
-		if sessionStartTime.IsZero() {
-			sessionStartTime = state.StartTime
+
+		joinTime := state.joinTimestamps[p.GetSessionId()]
+		if joinTime.IsZero() {
+			joinTime = state.CreatedAt
 			class = "Server"
 		}
 		logger.WithFields(map[string]interface{}{
@@ -496,22 +497,21 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 			"uid":      p.GetUserId(),
 			"sid":      p.GetSessionId(),
 			"reason":   p.GetReason(),
-			"duration": time.Since(sessionStartTime),
+			"duration": time.Since(joinTime),
 		}).Debug(class + " leaving the match.")
 	}
 
-	if state.Started() && state.server == nil && len(state.presenceMap) == 0 {
-		// If the match is empty, and the broadcaster has left, then shut down.
+	if state.Started() && len(state.presenceMap) == 0 {
+		// If the match is empty, and the server has left, then shut down.
 		logger.Debug("Match is empty. Shutting down.")
 		return nil
 	}
 
-	// if the broadcaster is in the presences, then shut down.
+	// if the server is in the presences, then shut down.
 	for _, p := range presences {
 		if p.GetSessionId() == state.GameServer.SessionID.String() {
+			logger.Debug("Server left the match. Shutting down.")
 			state.server = nil
-
-			logger.Debug("Broadcaster left the match. Shutting down.")
 			return m.MatchShutdown(ctx, logger, db, nk, dispatcher, tick, state, 2)
 		}
 	}

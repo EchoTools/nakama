@@ -284,6 +284,13 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 
 	// Monitor the game server and create new parking matches as needed.
 	go func() {
+		// Create the initial parking match for the game server.
+		if _, err = newGameServerParkingMatch(NewRuntimeGoLogger(logger), p.nk, config); err != nil {
+			errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_Failure)
+			session.Close("Game server match lookup error", runtime.PresenceReasonDisconnect)
+			return
+		}
+		// Start monitoring the game server presence.
 		for {
 			select {
 			case <-session.Context().Done():
@@ -312,26 +319,22 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 				}
 			} else {
 				// Check if the match is still active
-				if match, err := p.nk.MatchGet(session.Context(), matchID.String()); err == nil && match != nil {
-					// If the match is still active, continue monitoring
-					continue
-				} else if errors.Is(err, runtime.ErrMatchNotFound) {
+				if match, err := p.nk.MatchGet(session.Context(), matchID.String()); err != nil {
+					// Close the session if the match lookup failed
+					logger.Warn("Game server match lookup error.", zap.Error(err), zap.String("match_id", matchID.String()), zap.String("session_id", session.ID().String()))
+					session.Close("Game server match lookup error", runtime.PresenceReasonDisconnect)
+				} else if match == nil {
 					logger.Debug("Game server match not found, creating a new parking match")
 					// Create a new parking match
 					if _, err = newGameServerParkingMatch(NewRuntimeGoLogger(logger), p.nk, config); err != nil {
-						errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_Failure)
 						session.Close("Game server match lookup error", runtime.PresenceReasonDisconnect)
 						return
 					}
 				} else {
-					// Close the session if the match lookup failed
-					logger.Warn("Game server match lookup error.", zap.Error(err), zap.String("match_id", matchID.String()), zap.String("session_id", session.ID().String()))
-					errorMessage := fmt.Sprintf("Game server (Endpoint ID: %s, Server ID: %d) match lookup error: %v", config.Endpoint.ExternalAddress(), config.ServerID, err)
-					go sendDiscordError(errors.New(errorMessage), params.DiscordID(), logger, p.discordCache.dg)
-					session.Close("Game server match lookup error", runtime.PresenceReasonDisconnect)
+					// If the match is still active, continue monitoring
+					continue
 				}
 			}
-
 		}
 	}()
 
@@ -382,7 +385,7 @@ func newGameServerParkingMatch(logger runtime.Logger, nk runtime.NakamaModule, p
 			}
 		}
 	}
-	logger.WithField("mid", matchIDStr).Info("New parking match", zap.String("mid", matchIDStr))
+	logger.WithField("mid", matchIDStr).Info("New parking match")
 	return &matchID, nil
 }
 

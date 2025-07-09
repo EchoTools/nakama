@@ -168,7 +168,7 @@ func (s *MatchLabel) OpenSlotsByRole(role int) (int, error) {
 }
 
 func (s *MatchLabel) String() string {
-	return s.GetLabel()
+	return s.GetLabelIndented()
 }
 
 func (s *MatchLabel) roleLimit(role int) int {
