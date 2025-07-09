@@ -541,10 +541,11 @@ func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, g
 	if groupID == "" {
 		// This is a new guild.
 		gm := NewGuildGroupMetadata(guild.ID)
-
-		if guildID := ServiceSettings().ServiceGuildID; d.GuildIDToGroupID(guildID) == "" {
-			// add the service guild ID to the list of inherited groups (global suspensions)
-			gm.SuspensionInheritanceGroupIDs = []string{guildID}
+		if serviceGuildID := ServiceSettings().ServiceGuildID; serviceGuildID != "" && serviceGuildID != guild.ID {
+			if serviceGroupID := d.GuildIDToGroupID(serviceGuildID); serviceGroupID != "" {
+				// add the service guild ID to the list of inherited groups (global suspensions)
+				gm.SuspensionInheritanceGroupIDs = []string{serviceGroupID}
+			}
 		}
 
 		metadataMap, err := gm.MarshalToMap()
