@@ -16,7 +16,6 @@ import (
 	"github.com/echotools/vrmlgo/v5"
 	"github.com/go-redis/redis"
 	"github.com/heroiclabs/nakama-common/runtime"
-	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 )
 
@@ -111,12 +110,12 @@ func (v *VRMLScanQueue) Start() error {
 		vg := vrmlgo.New("")
 		seasons, err := vg.GameSeasons(VRMLEchoArenaShortName)
 		if err != nil {
-			v.logger.Error("Failed to get seasons", zap.Error(err))
+			v.logger.WithField("error", err).Error("Failed to get seasons")
 		}
 		v.seasons = seasons
 
 		if err := v.cachePlayerLists(); err != nil {
-			v.logger.Error("Failed to cache player lists", zap.Error(err))
+			v.logger.WithField("error", err).Error("Failed to cache player lists")
 			return
 		}
 
@@ -413,7 +412,7 @@ func (v *VRMLScanQueue) enqueue(entry VRMLScanQueueEntry) error {
 		return fmt.Errorf("failed to check if entry exists in queue: %v", err)
 	}
 	if exists {
-		v.logger.Debug("Entry already exists in queue, skipping enqueue", zap.String("entry", entry.String()))
+		v.logger.WithField("entry", entry.String()).Debug("Entry already exists in queue, skipping enqueue")
 		return nil
 	}
 	// Add the entry to the queue
@@ -601,7 +600,7 @@ func (d *DiscordAppBot) handleVRMLVerify(ctx context.Context, logger runtime.Log
 			Flags: discordgo.MessageFlagsLoading | discordgo.MessageFlagsEphemeral,
 		},
 	}); err != nil {
-		logger.Error("Failed to send interaction response", zap.Error(err))
+		logger.WithField("error", err).Error("Failed to send interaction response")
 	}
 
 	if profile.VRMLUserID() != "" {
@@ -645,13 +644,13 @@ func (d *DiscordAppBot) handleVRMLVerify(ctx context.Context, logger runtime.Log
 		timeoutDuration := 5 * time.Minute
 		flow, err := NewVRMLOAuthFlow(vars["VRML_OAUTH_CLIENT_ID"], vars["VRML_OAUTH_REDIRECT_URL"], timeoutDuration)
 		if err != nil {
-			logger.Error("Failed to start OAuth flow", zap.Error(err))
+			logger.WithField("error", err).Error("Failed to start OAuth flow")
 			return
 		}
 
 		// Send the link to the user
 		if err := editResponseFn(fmt.Sprintf("To assign your cosmetics, [Verify your VRML account](%s)", flow.url)); err != nil {
-			logger.Error("Failed to edit response", zap.Error(err))
+			logger.WithField("error", err).Error("Failed to edit response")
 		}
 
 		var token string
@@ -683,7 +682,7 @@ func (d *DiscordAppBot) handleVRMLVerify(ctx context.Context, logger runtime.Log
 			vrmlLink := fmt.Sprintf("[%s](https://vrmasterleague.com/EchoArena/Users/%s)", vrmlUser.UserName, vrmlUser.ID)
 			thisDiscordTag := fmt.Sprintf("%s#%s", user.Username, user.Discriminator)
 			if err := editResponseFn(fmt.Sprintf("VRML account %s is currently linked to %s. Please relink the VRML account to this Discord account (%s).", vrmlLink, vrmlUser.DiscordTag, thisDiscordTag)); err != nil {
-				logger.Error("Failed to edit response", zap.Error(err))
+				logger.WithField("error", err).Error("Failed to edit response")
 			}
 			return
 		}
@@ -694,19 +693,19 @@ func (d *DiscordAppBot) handleVRMLVerify(ctx context.Context, logger runtime.Log
 				// Account is already linked to another user
 				logger.WithField("owner_user_id", err.OwnerUserID).Error("Account already linked to another user.")
 				if err := editResponseFn("Account already owned by another user, [Contact EchoVRCE](%s) if you need to unlink it.", ServiceSettings().ReportURL); err != nil {
-					logger.Error("Failed to edit response", zap.Error(err))
+					logger.WithField("error", err).Error("Failed to edit response")
 				}
 				return
 			}
-			logger.Error("Failed to link accounts", zap.Error(err))
+			logger.WithField("error", err).Error("Failed to link accounts")
 			if err := editResponseFn("Failed to link accounts"); err != nil {
-				logger.Error("Failed to edit response", zap.Error(err))
+				logger.WithField("error", err).Error("Failed to edit response")
 			}
 			return
 		}
 		logger.Info("Linked VRML account")
 		if err := editResponseFn(fmt.Sprintf("Your VRML account (`%s`) has been verified/linked. It will take a few minutes--up to a few hours--to update your entitlements.", vrmlUser.UserName)); err != nil {
-			logger.Error("Failed to edit response", zap.Error(err))
+			logger.WithField("error", err).Error("Failed to edit response")
 			return
 		}
 

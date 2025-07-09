@@ -15,7 +15,6 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
-	"go.uber.org/zap"
 )
 
 var _ = Event(&EventRemoteLogSet{})
@@ -118,7 +117,11 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 		if msg, ok := e.(evr.GameTimer); ok {
 			matchID, err := NewMatchID(msg.SessionUUID(), s.Node)
 			if err != nil {
-				logger.Warn("Failed to create match ID", zap.Error(err), zap.Any("msg", msg))
+				logger.WithFields(map[string]any{
+					"error": err,
+					"msg":   msg,
+				}).Warn("Failed to parse match ID")
+				continue
 			} else {
 				update, _ = updates.LoadOrStore(matchID.UUID, &MatchGameStateUpdate{})
 				update.CurrentGameClock = time.Duration(msg.GameTime()) * time.Second
@@ -128,7 +131,11 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 		switch msg := e.(type) {
 
 		case *evr.RemoteLogDisconnectedDueToTimeout:
-			logger.Warn("Disconnected due to timeout", zap.String("username", s.Username), zap.String("xp_id", s.XPID.String()), zap.Any("remote_log_message", msg))
+			logger.WithFields(map[string]any{
+				"username": s.Username,
+				"xp_id":    s.XPID.String(),
+				"msg":      msg,
+			}).Warn("Disconnected due to timeout")
 
 		case *evr.RemoteLogUserDisconnected:
 
@@ -156,7 +163,7 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 
 				userID, err := GetUserIDByDeviceID(ctx, db, msg.PlayerEvrID)
 				if err != nil || userID == "" {
-					logger.Debug("Failed to get user ID by evr ID", zap.Error(err))
+				logger.WithField("error", err).Debug("Failed to get user ID by evr ID")
 					continue
 				}
 			*/
@@ -342,7 +349,12 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 
 			globalAppBot.Load().LogUserErrorMessage(ctx, label.GetGroupID().String(), fmt.Sprintf("```json\n%s\n```", string(contentData)), false)
 
-			logger.Warn("Server connection failed", zap.String("username", session.Username()), zap.String("match_id", msg.SessionUUID().String()), zap.String("evr_id", s.XPID.String()), zap.Any("remote_log_message", msg))
+			logger.WithFields(map[string]any{
+				"username":       session.Username(),
+				"match_id":       msg.SessionUUID().String(),
+				"evr_id":         s.XPID.String(),
+				"remote_log_msg": msg,
+			}).Warn("Server connection failed")
 
 			acct, err := nk.AccountGetId(ctx, label.GameServer.OperatorID.String())
 			if err != nil {
@@ -398,11 +410,11 @@ func (s *EventRemoteLogSet) incrementCompletedMatches(ctx context.Context, logge
 	// Decrease the early quitter count for the player
 	eqconfig := NewEarlyQuitConfig()
 	if err := StorageRead(ctx, nk, userID, eqconfig, true); err != nil {
-		logger.Warn("Failed to load early quitter config", zap.Error(err))
+		logger.WithField("error", err).Warn("Failed to load early quitter config")
 	} else {
 		eqconfig.IncrementCompletedMatches()
 		if err := StorageWrite(ctx, nk, userID, eqconfig); err != nil {
-			logger.Warn("Failed to store early quitter config", zap.Error(err))
+			logger.WithField("error", err).Warn("Failed to store early quitter config")
 		}
 	}
 	if playerSession := sessionRegistry.Get(uuid.FromStringOrNil(sessionID)); playerSession != nil {
@@ -456,10 +468,10 @@ func (s *EventRemoteLogSet) processPostMatchTypeStats(ctx context.Context, logge
 		ratings := CalculateNewPlayerRatings(label.Players, blueWins)
 		if rating, ok := ratings[playerInfo.SessionID]; ok {
 			if err := MatchmakingRatingStore(ctx, nk, playerInfo.UserID, playerInfo.DiscordID, playerInfo.DisplayName, groupIDStr, label.Mode, rating); err != nil {
-				logger.Warn("Failed to record percentile to leaderboard", zap.Error(err))
+				logger.WithField("error", err).Warn("Failed to record rating to leaderboard")
 			}
 		} else {
-			logger.Warn("Failed to get player rating", zap.String("sessionID", playerInfo.SessionID))
+			logger.WithField("session_id", playerInfo.SessionID).Warn("No rating found for player in matchmaking ratings")
 		}
 
 		zapLogger := RuntimeLoggerToZapLogger(logger)
@@ -468,7 +480,7 @@ func (s *EventRemoteLogSet) processPostMatchTypeStats(ctx context.Context, logge
 			logger.WithField("error", err).Warn("Failed to calculate new player rank percentile")
 			// Store the rank percentile in the leaderboards.
 		} else if err := MatchmakingRankPercentileStore(ctx, nk, playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, rankPercentile); err != nil {
-			logger.Warn("Failed to record percentile to leaderboard", zap.Error(err))
+			logger.WithField("error", err).Warn("Failed to record rank percentile to leaderboard")
 		}
 	}
 

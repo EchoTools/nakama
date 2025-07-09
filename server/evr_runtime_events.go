@@ -140,7 +140,7 @@ func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 					// Push to mongo
 					collection := dispatch.mongo.Database(matchDataDatabaseName).Collection(matchDataCollectionName)
 					if _, err := collection.InsertMany(ctx, inserts); err != nil {
-						logger.Error("failed to insert match data: %v", err)
+						logger.WithField("error", err).Error("failed to insert match data")
 					}
 				}
 			}
@@ -187,10 +187,10 @@ func (h *EventDispatcher) processEvent(ctx context.Context, logger runtime.Logge
 
 	if _, ok := eventMap[evt.Name]; !ok {
 		if e, err := h.eventUnmarshaler(evt); err != nil {
-			logger.Warn("failed to unmarshal event: %v", err)
+			logger.WithField("error", err).Warn("failed to unmarshal event")
 		} else if e != nil {
 			if err := e.Process(ctx, logger, h); err != nil {
-				logger.Error("failed to process event: %v", err)
+				logger.WithField("error", err).Error("failed to process event")
 			}
 			return
 		}
@@ -213,7 +213,7 @@ func (h *EventDispatcher) processEvent(ctx context.Context, logger runtime.Logge
 
 	if fn, ok := eventMap[evt.Name]; ok {
 		if err := fn(ctx, logger, evt); err != nil {
-			logger.Error("failed to handle event: %v", err)
+			logger.WithField("error", err).Error("failed to handle event")
 		}
 	} else {
 		logger.Warn("unhandled event: %s", evt.Name)
@@ -302,7 +302,7 @@ func (h *EventDispatcher) handleLobbyAuthorized(ctx context.Context, logger runt
 	if updated := loginHistory.NotifyGroup(groupID, gg.AlternateAccountNotificationExpiry); updated {
 
 		if err := StorageWrite(ctx, h.nk, userID, loginHistory); err != nil {
-			logger.Warn("failed to store login history after notify group update: %v", err)
+			logger.WithField("error", err).Warn("failed to store login history after notify group update")
 		}
 
 		// Check for guild suspensions on alts
@@ -440,7 +440,7 @@ func ScheduleKick(ctx context.Context, nk runtime.NakamaModule, logger runtime.L
 		)
 
 		if accounts, err := nk.AccountsGetId(ctx, append(firstIDs, userID)); err != nil {
-			logger.Error("failed to get alternate accounts: %v", err)
+			logger.WithField("error", err).Error("failed to get alternate accounts")
 			return
 		} else {
 			for _, a := range accounts {
@@ -450,7 +450,7 @@ func ScheduleKick(ctx context.Context, nk runtime.NakamaModule, logger runtime.L
 		}
 
 		if len(altNames) == 0 || accountMap[userID] == nil {
-			logger.Error("failed to get alternate accounts: %v", err)
+			logger.WithField("error", err).Error("failed to get alternate accounts")
 			return
 		}
 
@@ -471,7 +471,7 @@ func ScheduleKick(ctx context.Context, nk runtime.NakamaModule, logger runtime.L
 
 		presences, err := nk.StreamUserList(StreamModeService, userID, "", StreamLabelMatchService, false, true)
 		if err != nil {
-			logger.Warn("failed to get user presences: %v", err)
+			logger.WithField("error", err).Warn("failed to get user presences")
 			return
 		}
 
@@ -516,7 +516,7 @@ func ScheduleKick(ctx context.Context, nk runtime.NakamaModule, logger runtime.L
 		if doDisconnect {
 			// Disconnect the user from the session
 			if c, err := DisconnectUserID(ctx, nk, userID, true, true, false); err != nil {
-				logger.Error("failed to disconnect user: %v", err)
+				logger.WithField("error", err).Error("failed to disconnect user")
 			} else {
 				logger.Info("user %s disconnected: %v sessions", userID, c)
 			}

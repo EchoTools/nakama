@@ -11,7 +11,6 @@ import (
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
-	"go.uber.org/zap"
 )
 
 var _ = Event(&EventUserAuthenticated{})
@@ -57,7 +56,7 @@ func (e *EventUserAuthenticated) Process(ctx context.Context, logger runtime.Log
 	if allowed && isNew {
 		if err := SendIPAuthorizationNotification(dg, userID, e.ClientIP); err != nil {
 			// Log the error, but don't return it.
-			logger.Warn("Failed to send IP authorization notification", zap.Error(err))
+			logger.WithField("error", err).Warn("Failed to send IP authorization notification")
 		}
 	}
 

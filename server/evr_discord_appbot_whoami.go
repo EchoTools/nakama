@@ -661,7 +661,12 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	for altUserID := range loginHistory.AlternateMatches {
 		altAccount, err := nk.AccountGetId(ctx, altUserID)
 		if err != nil {
-			return fmt.Errorf("failed to get account by ID: %w", err)
+			logger.WithFields(map[string]any{
+				"error":       err,
+				"user_id":     altUserID,
+				"alt_user_id": altUserID,
+			}).Warn("failed to get alternate account by ID")
+			continue // Skip if the alternate account cannot be found
 		}
 		potentialAlternates[altUserID] = altAccount
 	}
