@@ -408,6 +408,17 @@ func DisplayNameOwnerSearch(ctx context.Context, nk runtime.NakamaModule, displa
 		nameMap[s] = dn
 	}
 
+	// Remove duplicates from the display names.
+	slices.Sort(sanitized)
+	displayNames = slices.Compact(sanitized)
+	for i := 0; i < len(sanitized); i++ {
+		// Remove any display names that are empty.
+		if sanitized[i] == "" {
+			sanitized = slices.Delete(sanitized, i, i+1)
+			i--
+		}
+	}
+
 	query := fmt.Sprintf("+value.active:%s", Query.MatchItem(sanitized))
 
 	var (
