@@ -2,8 +2,10 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/heroiclabs/nakama-common/runtime"
 )
@@ -40,7 +42,7 @@ type StatisticsQueue struct {
 	ch     chan []*StatisticsQueueEntry
 }
 
-func NewStatisticsQueue(logger runtime.Logger, nk runtime.NakamaModule) *StatisticsQueue {
+func NewStatisticsQueue(logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule) *StatisticsQueue {
 	ch := make(chan []*StatisticsQueueEntry, 8*3*100) // three matches ending at the same time, 100 records per player
 	r := &StatisticsQueue{
 		logger: logger,
@@ -51,10 +53,17 @@ func NewStatisticsQueue(logger runtime.Logger, nk runtime.NakamaModule) *Statist
 
 		ctx := context.Background()
 
+		pruneTicker := time.NewTicker(24 * time.Hour)
+
 		for {
 			select {
 			case <-ctx.Done():
 				return
+
+			case <-pruneTicker.C:
+				if err := pruneExpiredLeaderboardRecords(ctx, db); err != nil {
+					logger.WithField("error", err).Error("Failed to prune expired leaderboard records")
+				}
 			case entries := <-ch:
 
 				for _, e := range entries {
@@ -123,4 +132,22 @@ func (r *StatisticsQueue) Add(entries []*StatisticsQueueEntry) error {
 		}).Warn("Leaderboard record write queue full, dropping entry")
 		return fmt.Errorf("queue full")
 	}
+}
+
+// prune any expired statistics from the database
+func pruneExpiredLeaderboardRecords(ctx context.Context, db *sql.DB) error {
+	// it must have an expiration date
+	query := `
+	DELETE 
+		FROM 
+			leaderboard_record 
+		WHERE 
+			expiry_time != '1970-01-01 00:00:00+00'
+			AND expiry_time < NOW() - INTERVAL '7 day'
+		`
+
+	if _, err := db.ExecContext(ctx, query); err != nil {
+		return fmt.Errorf("failed to prune expired leaderboard records: %w", err)
+	}
+	return nil
 }

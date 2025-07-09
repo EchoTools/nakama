@@ -181,7 +181,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		}
 		dg.StateEnabled = false
 	}
-	statisticsQueue := NewStatisticsQueue(logger, nk)
+	statisticsQueue := NewStatisticsQueue(logger, db, nk)
 	// Register the event dispatch
 	eventDispatch, err := NewEventDispatch(ctx, logger, db, nk, initializer, nil, dg, statisticsQueue)
 	if err != nil {
