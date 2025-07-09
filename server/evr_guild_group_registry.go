@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -58,7 +57,7 @@ func NewGuildGroupRegistry(ctx context.Context, logger runtime.Logger, nk runtim
 				for _, gg := range registry.GuildGroups() {
 					// Store the guild groups back to ensure all the fields are set.
 					if err := nk.GroupUpdate(ctx, gg.IDStr(), "", "", "", "", "", "", gg.Group.Open.Value, gg.MarshalMap(), int(gg.Group.MaxCount)); err != nil {
-						logger.Warn("Error updating guild group", zap.Error(err))
+						logger.WithField("error", err).Warn("Error updating guild group")
 						continue
 					}
 				}
@@ -85,7 +84,7 @@ func (r *GuildGroupRegistry) rebuildGuildGroups() {
 		// List all guild groups.
 		groups, cursor, err := nk.GroupsList(ctx, "", "guild", nil, nil, 100, cursor)
 		if err != nil {
-			logger.Warn("Error listing guild groups", zap.Error(err))
+			logger.WithField("error", err).Warn("Error listing guild groups")
 			break
 		}
 
@@ -93,13 +92,13 @@ func (r *GuildGroupRegistry) rebuildGuildGroups() {
 			// Load the state
 			state, err := GuildGroupStateLoad(ctx, nk, ServiceSettings().DiscordBotUserID, group.Id)
 			if err != nil {
-				logger.Warn("Error loading guild group state", zap.Error(err))
+				logger.WithField("error", err).Warn("Error loading guild group state")
 				continue
 			}
 			gUUID := uuid.FromStringOrNil(group.Id)
 			gg, err := NewGuildGroup(group, state)
 			if err != nil {
-				logger.Warn("Error creating guild group", zap.Error(err))
+				logger.WithField("error", err).Warn("Error creating guild group")
 				continue
 			}
 			// Add the group to the registry.
@@ -111,7 +110,11 @@ func (r *GuildGroupRegistry) rebuildGuildGroups() {
 				// Ensure the parent ID is valid.
 				pUUID, err := uuid.FromString(parentID)
 				if err != nil {
-					logger.Warn("Invalid parent group ID in metadata", zap.String("parentID", parentID), zap.Error(err))
+					logger.WithFields(map[string]any{
+						"parent_id": parentID,
+						"group_id":  group.Id,
+						"error":     err,
+					}).Warn("Invalid parent group ID in guild group")
 					continue
 				}
 				// Add the parent ID to the inheritance map.
