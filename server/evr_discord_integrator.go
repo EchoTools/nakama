@@ -574,6 +574,7 @@ func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, g
 		return fmt.Errorf("error loading guild group: %w", err)
 	}
 
+	gg.OwnerID = ownerUserID
 	gg.State.RulesText = "No #rules channel found. Please create the channel and set the topic to the rules."
 
 	for _, channel := range guild.Channels {
