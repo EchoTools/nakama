@@ -491,11 +491,15 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 				duration += "m"
 				unit = time.Minute
 			}
-			if d, err := strconv.Atoi(duration[:len(duration)-1]); err == nil {
-				suspensionDuration = time.Duration(d) * unit
-				suspensionExpiry = time.Now().Add(time.Duration(d) * unit)
+			if duration, err := strconv.Atoi(duration[:len(duration)-1]); err == nil {
+				suspensionDuration = time.Duration(duration) * unit
+				suspensionExpiry = time.Now().Add(time.Duration(duration) * unit)
 			} else {
-				return fmt.Errorf("invalid duration format: %w", err)
+				helpMessage := fmt.Sprintf("Duration parse error (`%s`).\n\n**Use a number followed by m, h, d, or w (e.g., 30m, 1h, 2d, 1w)**", err.Error())
+				if i != nil {
+					return simpleInteractionResponse(d.dg, i, helpMessage)
+				}
+				return errors.New(helpMessage) // Return an error if the duration is invalid
 			}
 		}
 	}
