@@ -1357,7 +1357,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			localIP, err := DetermineLocalIPAddress()
 			if startPort == endPort {
 				count := 5
-				interval := 100 * time.Millisecond
 				timeout := 500 * time.Millisecond
 
 				if err != nil {
@@ -1365,7 +1364,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 
 				// If a single port is specified, do not scan
-				rtts, err := BroadcasterRTTcheck(localIP, remoteIP, startPort, count, interval, timeout)
+				rtts, err := BroadcasterRTTcheck(localIP, remoteIP, startPort, count, timeout)
 				if err != nil {
 					return fmt.Errorf("failed to healthcheck game server: %w", err)
 				}
