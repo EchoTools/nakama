@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	nevrapi "github.com/echotools/nevr-common/api"
+	nevrapi "github.com/echotools/nevr-common/v3/api"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
