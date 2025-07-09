@@ -414,7 +414,7 @@ func (w *WhoAmI) createSuspensionsEmbed() *discordgo.MessageEmbed {
 		fields := make([]*discordgo.MessageEmbedField, 0, len(w.journal.RecordsByGroupID))
 
 		for groupID, records := range w.journal.RecordsByGroupID {
-			if !slices.Contains(groupIDs, groupID) {
+			if !w.opts.IncludeAllGuilds && !slices.Contains(groupIDs, groupID) {
 				continue
 			}
 
@@ -676,6 +676,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	if err != nil {
 		return fmt.Errorf("failed to check enforcement suspensions: %w", err)
 	}
+
 	guildGroups, err := GuildUserGroupsList(ctx, nk, d.guildGroupRegistry, targetID)
 	if err != nil {
 		return fmt.Errorf("error getting guild groups: %w", err)
@@ -691,14 +692,28 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		journal = journals[targetID]
 	}
 
-	w := NewWhoAmI(ctx, logger, nk, d.guildGroupRegistry, d.cache, profile, loginHistory, matchmakingSettings, guildGroups, displayNameHistory, journal, potentialAlternates, activeSuspensions, opts, groupID)
+	settings, err := LoadMatchmakingSettings(ctx, nk, targetID)
+	if err != nil {
+		return fmt.Errorf("failed to load matchmaking settings: %w", err)
+	}
+	matchmakingSettings = &settings
 
-	if w.opts.IncludePastDisplayNamesEmbed {
-		pastDisplayNameEmbed = w.createPastDisplayNameEmbed(displayNameHistory, groupID)
+	// Make sure that all guilds with enforcement records are included in the guildGroups
+	for groupID := range journal.RecordsByGroupID {
+		if _, ok := guildGroups[groupID]; !ok {
+			// If the guild group is not in the guildGroups, add it
+			if gg := d.guildGroupRegistry.Get(groupID); gg != nil {
+				guildGroups[groupID] = gg
+			} else {
+				logger.WithFields(map[string]any{
+					"error":    err,
+					"group_id": groupID,
+				}).Warn("failed to get guild group for enforcement record")
+			}
+		}
 	}
 
-	// Filter the guild groups based on the includePrivate flag
-	if !w.opts.IncludeAllGuilds {
+	if !opts.IncludeAllGuilds {
 		for gid, g := range guildGroups {
 			if g.GuildID != i.GuildID {
 				delete(guildGroups, gid)
@@ -706,11 +721,11 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		}
 	}
 
-	settings, err := LoadMatchmakingSettings(ctx, nk, targetID)
-	if err != nil {
-		return fmt.Errorf("failed to load matchmaking settings: %w", err)
+	w := NewWhoAmI(ctx, logger, nk, d.guildGroupRegistry, d.cache, profile, loginHistory, matchmakingSettings, guildGroups, displayNameHistory, journal, potentialAlternates, activeSuspensions, opts, groupID)
+
+	if w.opts.IncludePastDisplayNamesEmbed {
+		pastDisplayNameEmbed = w.createPastDisplayNameEmbed(displayNameHistory, groupID)
 	}
-	matchmakingSettings = &settings
 
 	if w.opts.IncludeVRMLHistoryEmbed {
 		vrmlSummary := &VRMLPlayerSummary{}
