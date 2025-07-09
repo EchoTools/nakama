@@ -409,7 +409,7 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, ses
 							logger.Warn("Server is full, ignoring.")
 							continue
 						}
-						return fmt.Errorf("failed to join backfill match: %w", err)
+						return fmt.Errorf("failed to join failsafe-generated match: %w", err)
 					}
 					return nil
 				}
@@ -488,7 +488,7 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, ses
 					logger.Warn("Server is full, ignoring.")
 					continue
 				}
-				return fmt.Errorf("failed to join backfill match: %w", err)
+				return fmt.Errorf("failed to backfill existing match: %w", err)
 			}
 			return nil
 		}
@@ -517,7 +517,7 @@ func (p *EvrPipeline) lobbyBackfill(ctx context.Context, logger *zap.Logger, ses
 						logger.Warn("Server is full, ignoring.")
 						continue
 					}
-					return fmt.Errorf("failed to join backfill match: %w", err)
+					return fmt.Errorf("failed to join auto-created lobby: %w", err)
 				}
 				return nil
 			}
