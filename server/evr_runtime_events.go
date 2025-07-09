@@ -57,7 +57,7 @@ type EventDispatcher struct {
 	matchRegistry   MatchRegistry
 
 	statisticsQueue *StatisticsQueue
-	vrmlVerifier    *VRMLScanQueue
+	vrmlScanQueue   *VRMLScanQueue
 
 	eventUnmarshaler     func(event *api.Event) (Event, error)
 	queue                chan *api.Event
@@ -66,12 +66,7 @@ type EventDispatcher struct {
 	playerAuthorizations map[string]map[string]struct{} // map[sessionID]map[groupID]struct{}
 }
 
-func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer, mongoClient *mongo.Client, dg *discordgo.Session, statisticsQueue *StatisticsQueue) (*EventDispatcher, error) {
-
-	vrmlVerifier, err := NewVRMLScanQueue(ctx, logger, db, nk, initializer, dg)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create VRML verifier: %w", err)
-	}
+func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer, mongoClient *mongo.Client, dg *discordgo.Session, statisticsQueue *StatisticsQueue, vrmlScanQueue *VRMLScanQueue) (*EventDispatcher, error) {
 
 	dispatch := &EventDispatcher{
 		ctx:             ctx,
@@ -83,7 +78,7 @@ func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		sessionRegistry: nk.(*RuntimeGoNakamaModule).sessionRegistry,
 		matchRegistry:   nk.(*RuntimeGoNakamaModule).matchRegistry,
 
-		vrmlVerifier:    vrmlVerifier,
+		vrmlScanQueue:   vrmlScanQueue,
 		statisticsQueue: statisticsQueue,
 
 		queue:                make(chan *api.Event, 100),

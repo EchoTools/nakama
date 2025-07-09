@@ -8,10 +8,17 @@ import (
 	"time"
 
 	"github.com/gofrs/uuid/v5"
+	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"gonum.org/v1/gonum/stat"
 )
+
+type MatchLabelMeta struct {
+	TickRate  int
+	Presences []*rtapi.UserPresence
+	State     *MatchLabel
+}
 
 type PlayerTags struct {
 	Group             uuid.UUID

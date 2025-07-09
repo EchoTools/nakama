@@ -20,7 +20,6 @@ import (
 	anyascii "github.com/anyascii/go"
 	"github.com/bwmarrin/discordgo"
 	"github.com/echotools/vrmlgo/v5"
-	"github.com/go-redis/redis"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
@@ -58,7 +57,6 @@ type DiscordAppBot struct {
 	ipInfoCache *IPInfoCache
 	choiceCache *MapOf[string, []*discordgo.ApplicationCommandOptionChoice]
 	igpRegistry *MapOf[string, *InGamePanel]
-	redisClient *redis.Client
 
 	debugChannels  map[string]string // map[groupID]channelID
 	userID         string            // Nakama UserID of the bot
@@ -69,7 +67,7 @@ type DiscordAppBot struct {
 	prepareMatchRateLimiters  *MapOf[string, *rate.Limiter]
 }
 
-func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, metrics Metrics, pipeline *Pipeline, config Config, discordCache *DiscordIntegrator, profileRegistry *ProfileCache, statusRegistry StatusRegistry, dg *discordgo.Session, ipInfoCache *IPInfoCache, guildGroupRegistry *GuildGroupRegistry, redisClient *redis.Client) (*DiscordAppBot, error) {
+func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, metrics Metrics, pipeline *Pipeline, config Config, discordCache *DiscordIntegrator, profileRegistry *ProfileCache, statusRegistry StatusRegistry, dg *discordgo.Session, ipInfoCache *IPInfoCache, guildGroupRegistry *GuildGroupRegistry) (*DiscordAppBot, error) {
 
 	logger = logger.WithField("system", "discordAppBot")
 
@@ -85,7 +83,6 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 
 		profileRegistry: profileRegistry,
 		statusRegistry:  statusRegistry,
-		redisClient:     redisClient,
 
 		dg:                 dg,
 		guildGroupRegistry: guildGroupRegistry,
@@ -106,25 +103,7 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 	//bot.LogLevel = discordgo.LogDebug
 	dg.StateEnabled = true
 
-	/*
-		The bot requires priviledged intents to function correctly.
-			- GUILD_MEMBERS
-	*/
-
-	dg.Identify.Intents |= discordgo.IntentGuilds
-	dg.Identify.Intents |= discordgo.IntentGuildMembers
-	dg.Identify.Intents |= discordgo.IntentGuildBans
-	//bot.Identify.Intents |= discordgo.IntentGuildEmojis
-	//bot.Identify.Intents |= discordgo.IntentGuildWebhooks
-	//bot.Identify.Intents |= discordgo.IntentGuildInvites
-	//bot.Identify.Intents |= discordgo.IntentGuildPresences
-	//bot.Identify.Intents |= discordgo.IntentGuildMessages
-	//bot.Identify.Intents |= discordgo.IntentMessageContent
-	//bot.Identify.Intents |= discordgo.IntentGuildMessageReactions
-	//bot.Identify.Intents |= discordgo.IntentDirectMessages
-	//bot.Identify.Intents |= discordgo.IntentDirectMessageReactions
-	//bot.Identify.Intents |= discordgo.IntentAutoModerationConfiguration
-	//bot.Identify.Intents |= discordgo.IntentAutoModerationExecution
+	dg.Identify.Intents = discordgo.IntentsAllWithoutPrivileged
 
 	dg.AddHandlerOnce(func(s *discordgo.Session, m *discordgo.Ready) {
 

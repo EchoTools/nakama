@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/go-redis/redis"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
-	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/jackc/pgtype"
 	"go.uber.org/zap"
@@ -42,33 +42,34 @@ const (
 )
 
 func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) (err error) {
+	// Add the environment variables to the context
 
 	/*
 		if err := registerAPIGuards(initializer); err != nil {
 			return fmt.Errorf("unable to register API guards: %w", err)
 		}
 	*/
-	_nk := nk.(*RuntimeGoNakamaModule)
 
 	var (
+		vars = nk.(*RuntimeGoNakamaModule).config.GetRuntime().Environment
 		sbmm = NewSkillBasedMatchmaker()
-		vars = _nk.config.GetRuntime().Environment
 	)
-	botToken, ok := vars["DISCORD_BOT_TOKEN"]
-	if !ok {
-		panic("Bot token is not set in context.")
-	}
 
-	dg, err = discordgo.New("Bot " + botToken)
-	if err != nil {
-		logger.Error("Unable to create bot")
+	ctx = context.WithValue(ctx, runtime.RUNTIME_CTX_ENV, vars)
+	// Initialize the discord bot if the token is set
+	if appBotToken, ok := vars["DISCORD_BOT_TOKEN"]; !ok || appBotToken == "" {
+		logger.Warn("DISCORD_BOT_TOKEN is not set, Discord bot will not be used")
+		panic("Bot token is not set in context.") // TODO: remove bot dependency
+	} else {
+		if dg, err = discordgo.New("Bot " + appBotToken); err != nil {
+			logger.Error("Unable to create bot", zap.Error(err))
+			return fmt.Errorf("unable to create discord bot: %w", err)
+		}
+		dg.StateEnabled = true
 	}
-	dg.StateEnabled = true
-	dg.Identify.Intents = 0 // No Intents
-
-	rpcHandler := NewRPCHandler(ctx, db, dg)
 
 	// Register RPC's for device linking
+	rpcHandler := NewRPCHandler(ctx, db, dg)
 	rpcs := map[string]func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error){
 		"account/search":                AccountSearchRPC,
 		"account/lookup":                rpcHandler.AccountLookupRPC,
@@ -99,15 +100,13 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		"forcecheck":                    CheckForceUserRPC,
 		//"/v1/storage/game/sourcedb/rad15/json/r14/loading_tips.json": StorageLoadingTipsRPC,
 	}
-
 	for name, rpc := range rpcs {
 		if err = initializer.RegisterRpc(name, rpc); err != nil {
 			return fmt.Errorf("unable to register %s: %w", name, err)
 		}
 	}
 
-	if db != nil {
-
+	if db != nil && nk != nil { // Avoid panic's during some automated tests
 		go func() {
 			if err := RegisterIndexes(initializer); err != nil {
 				panic(fmt.Errorf("unable to register indexes: %v", err))
@@ -127,6 +126,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 			return fmt.Errorf("unable to create core groups: %w", err)
 		}
 	}
+
 	// Register the "matchmaking" handler
 	if err := initializer.RegisterMatch(EVRLobbySessionMatchModule, func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule) (runtime.Match, error) {
 		return &EvrMatch{}, nil
@@ -134,56 +134,34 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		return err
 	}
 
-	appAcceptorFn := NewAppAPIAcceptor(ctx, logger, db, nk, initializer)
-
 	// Register HTTP Handler for the evr/api service
+	appAcceptorFn := NewAppAPIAcceptor(ctx, logger, db, nk, initializer)
 	if err := initializer.RegisterHttp("/apievr/v1/{id:.*}", appAcceptorFn, http.MethodGet, http.MethodPost); err != nil {
 		return fmt.Errorf("unable to register /evr/api service: %w", err)
 	}
 
-	if err := initializer.RegisterHttp("/test", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("You hit the new endpoint!"))
-	}); err != nil {
-		return err
-	}
-	// Register the socket acceptor for EVR clients
-
-	/*
-		zapLogger := RuntimeLoggerToZapLogger(logger)
-
-		evrSocketAcceptor := NewEvrSocketWsAcceptor(zapLogger, _nk.config, _nk.sessionRegistry, evrPipeline)
-		if err := initializer.RegisterHttp("evr/ws", evrSocketAcceptor); err != nil {
-			return fmt.Errorf("unable to register evr socket acceptor: %w", err)
-		}
-	*/
-
-	/*
-		mongoClient, err := mongo.Connect(ctx, options.Client().ApplyURI(vars["MONGO_URI"]).SetTimeout(3*time.Second))
-		if err != nil {
-			logger.WithField("error", err).Error("Failed to connect to MongoDB")
-			return
-		}
-		if err := mongoClient.Ping(ctx, nil); err != nil {
-			logger.WithField("error", err).Error("Failed to ping MongoDB")
-		}
-	*/
-	ctx = context.WithValue(ctx, runtime.RUNTIME_CTX_ENV, vars)
-
-	botToken, ok = vars["DISCORD_BOT_TOKEN"]
-	if !ok {
-		return fmt.Errorf("missing bot token in env vars")
-	}
-
-	if botToken != "" {
-		dg, err = discordgo.New("Bot " + botToken)
-		if err != nil {
-			logger.Error("Unable to create bot")
-		}
-		dg.StateEnabled = false
-	}
+	// The statistics queue handles inserting match statistics into the leaderboard records
 	statisticsQueue := NewStatisticsQueue(logger, db, nk)
+
+	// Initialize the VRML scan queue if the configuration is set
+	var vrmlScanQueue *VRMLScanQueue
+	if vars["VRML_REDIS_URI"] == "" || vars["VRML_OAUTH_REDIRECT_URL"] == "" || vars["VRML_OAUTH_CLIENT_ID"] == "" {
+		logger.Warn("VRML OAuth configuration is not set, VRML verification will not be available.")
+	} else {
+		redisURI := vars["VRML_REDIS_URI"]
+		vrmlOAuthRedirectURL := vars["VRML_OAUTH_REDIRECT_URL"]
+		vrmlOAuthClientID := vars["VRML_OAUTH_CLIENT_ID"]
+		redisClient, err := connectRedis(ctx, redisURI)
+		if err != nil {
+			return fmt.Errorf("failed to connect to Redis for VRML scan queue: %w", err)
+		}
+		if vrmlScanQueue, err = NewVRMLScanQueue(ctx, logger, db, nk, initializer, dg, redisClient, vrmlOAuthRedirectURL, vrmlOAuthClientID); err != nil {
+			return fmt.Errorf("failed to create VRML scan queue: %w", err)
+		}
+	}
+
 	// Register the event dispatch
-	eventDispatch, err := NewEventDispatch(ctx, logger, db, nk, initializer, nil, dg, statisticsQueue)
+	eventDispatch, err := NewEventDispatch(ctx, logger, db, nk, initializer, nil, dg, statisticsQueue, vrmlScanQueue)
 	if err != nil {
 		return fmt.Errorf("unable to create event dispatch: %w", err)
 	}
@@ -211,10 +189,19 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	return nil
 }
 
-type MatchLabelMeta struct {
-	TickRate  int
-	Presences []*rtapi.UserPresence
-	State     *MatchLabel
+// connectRedis connects to the Redis server using the provided URL and returns a redis.Client.
+func connectRedis(ctx context.Context, redisURL string) (*redis.Client, error) {
+	redisOptions, err := redis.ParseURL(redisURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse Redis URI: %v", err)
+	}
+	redisClient := redis.NewClient(redisOptions)
+	if err := redisClient.WithContext(ctx).Ping().Err(); err != nil {
+		// If the connection fails, return an error
+		redisClient.Close()
+		return nil, fmt.Errorf("failed to connect to Redis: %v", err)
+	}
+	return redisClient, nil
 }
 
 func createCoreGroups(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) error {

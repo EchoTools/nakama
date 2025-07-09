@@ -12,5 +12,9 @@ type EventVRMLAccountLink struct {
 }
 
 func (e *EventVRMLAccountLink) Process(ctx context.Context, logger runtime.Logger, dispatcher *EventDispatcher) error {
-	return dispatcher.vrmlVerifier.Add(e.UserID, e.VRMLUserID)
+	if dispatcher.vrmlScanQueue == nil {
+		logger.Warn("VRML scan queue is not initialized, skipping VRML account link event")
+		return nil
+	}
+	return dispatcher.vrmlScanQueue.Add(e.UserID, e.VRMLUserID)
 }

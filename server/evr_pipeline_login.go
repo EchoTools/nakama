@@ -393,10 +393,12 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 	p.nk.MetricsCounterAdd("session_authorize", metricsTags, 1)
 
 	// Get the IPQS Data
-	if params.ipInfo, err = p.ipInfoCache.Get(ctx, session.clientIP); err != nil {
-		logger.Debug("Failed to get IPQS details", zap.Error(err))
-	}
 
+	if p.ipInfoCache != nil {
+		if params.ipInfo, err = p.ipInfoCache.Get(ctx, session.clientIP); err != nil {
+			logger.Debug("Failed to get IPQS details", zap.Error(err))
+		}
+	}
 	// The account is now authenticated. Authorize the session.
 	if params.profile.IsDisabled() {
 
