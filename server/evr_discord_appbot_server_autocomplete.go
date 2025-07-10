@@ -44,7 +44,7 @@ func (d *DiscordAppBot) autocompleteRegions(ctx context.Context, logger runtime.
 	// Get the available servers
 	minSize := 0
 	maxSize := 100
-	query := fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/ +label.broadcaster.region_codes:default", Query.Escape(groupID))
+	query := fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/ +label.broadcaster.region_codes:default", Query.QuoteStringValue(groupID))
 
 	matches, err := d.nk.MatchList(ctx, 100, true, "", &minSize, &maxSize, query)
 	if err != nil {

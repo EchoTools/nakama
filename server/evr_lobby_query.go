@@ -4,58 +4,43 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-
-	"github.com/gofrs/uuid/v5"
 )
 
-var Query query
+const SpecialCharacters = "`~!@#$%^&*()-_=+[{]}\\|;:'\",.<>/?`"
 
-type query struct{}
+type query struct {
+	replacer *strings.Replacer
+}
 
-func (query) MatchItem(elems []string) string {
+var Query query = func() query {
+	replacements := make([]string, 0, len(SpecialCharacters)*2)
+	for _, char := range SpecialCharacters {
+		// Escape each character with a backslash
+		replacements = append(replacements, string(char), "\\"+string(char))
+	}
+	replacer := strings.NewReplacer(replacements...)
+	return query{
+		replacer: replacer,
+	}
+}()
+
+// CreateMatchPattern returns a regex pattern that matches any of the provided elements.
+func (query) CreateMatchPattern(elems []string) string {
 	if len(elems) == 0 {
 		return ""
 	}
-
 	strs := make([]string, len(elems))
 	for i, elem := range elems {
-		strs[i] = Query.Escape(elem)
+		strs[i] = Query.QuoteStringValue(elem)
 	}
-
 	return fmt.Sprintf("/(%s)/", strings.Join(strs, "|"))
 }
 
-// MatchDelimitedItem returns a regex pattern that matches any of the provided elements
-// delimited by a comma, caret, or dollar sign. The elements are escaped to ensure
-// that special characters are treated literally in the regex pattern.
-// The pattern is designed to match an item in a string that is delimited
-func (query) MatchDelimitedItem(elems []string, sep string) string {
-	if len(elems) == 0 {
-		return ""
-	}
-
-	strs := make([]string, len(elems))
-	for i, elem := range elems {
-		strs[i] = Query.Escape(elem)
-	}
-
-	return fmt.Sprintf("/(^|%s)(%s)(%s|$)/", sep, strings.Join(strs, "|"), sep)
-}
-
-func (query) JoinUUIDs(elems []uuid.UUID, sep string) string {
-	strs := make([]string, len(elems))
-	for i, elem := range elems {
-		strs[i] = Query.Escape(elem)
-	}
-	return strings.Join(strs, sep)
-}
-
-func (query) Escape(input any) string {
-
+// QuoteStringValue returns a quoted string representation of the input value.
+func (q query) QuoteStringValue(input any) string {
 	type stringer interface {
 		String() string
 	}
-
 	s := ""
 	switch v := input.(type) {
 	case string:
@@ -85,39 +70,5 @@ func (query) Escape(input any) string {
 	default:
 		panic("unsupported type")
 	}
-
-	return Query.escapeString(s)
-}
-
-var queryStringReplacer = strings.NewReplacer(
-	`-`, `\-`,
-	`[`, `\[`,
-	`+`, `\+`,
-	`=`, `\=`,
-	`&`, `\&`,
-	`|`, `\|`,
-	`>`, `\>`,
-	`<`, `\<`,
-	`!`, `\!`,
-	`(`, `\(`,
-	`)`, `\)`,
-	`{`, `\{`,
-	`}`, `\}`,
-	`^`, `\^`,
-	`"`, `\"`,
-	`~`, `\~`,
-	`*`, `\*`,
-	`?`, `\?`,
-	`:`, `\:`,
-	`\\`, `\\`,
-	`/`, `\/`,
-	` `, `\ `,
-	`.`, `\.`,
-)
-
-func (query) escapeString(input string) string {
-
-	// escape `[-+=&|><!(){}\[\]^"~*?:\\/ ]`
-
-	return queryStringReplacer.Replace(input)
+	return q.replacer.Replace(s)
 }

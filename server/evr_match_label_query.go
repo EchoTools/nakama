@@ -36,7 +36,7 @@ func (l Label) Escaped() string {
 	if l.boost != 0 {
 		b = fmt.Sprintf("^%d", l.boost)
 	}
-	return fmt.Sprintf("%clabel.%s:%s%s", l.Op, l.Name, Query.Escape(l.Value), b)
+	return fmt.Sprintf("%clabel.%s:%s%s", l.Op, l.Name, Query.QuoteStringValue(l.Value), b)
 }
 
 // Escaped returns the label as a query string (e.g. "+label.mode:social_2\.0^2")
@@ -54,7 +54,7 @@ func (l Label) Property() string {
 	if l.boost != 0 {
 		b = fmt.Sprintf("^%d", l.boost)
 	}
-	return fmt.Sprintf("%cproperties.%s:%s%s", l.Op, l.Name, Query.Escape(l.Value), b)
+	return fmt.Sprintf("%cproperties.%s:%s%s", l.Op, l.Name, Query.QuoteStringValue(l.Value), b)
 }
 
 // Label returns the label as a label string (e.g. "lobbytype=0")
@@ -264,11 +264,11 @@ func (l Level) Label(o QueryOperator, b int) Label {
 	}
 }
 func (l *MatchStatGroup) Query(o QueryOperator, b int) string {
-	return fmt.Sprintf("%clabel.statgroup:%s^%d", o, Query.Escape(string(*l)), b)
+	return fmt.Sprintf("%clabel.statgroup:%s^%d", o, Query.QuoteStringValue(string(*l)), b)
 }
 
 func (l *MatchLevelSelection) Query(o QueryOperator, b int) string {
-	return fmt.Sprintf("%clabel.levelselect:%s^%d", o, Query.Escape(string(*l)), b)
+	return fmt.Sprintf("%clabel.levelselect:%s^%d", o, Query.QuoteStringValue(string(*l)), b)
 }
 
 // The Match Region is the region the match is hosted in.

@@ -25,7 +25,7 @@ func (p *EvrPipeline) lobbyFindSpectate(ctx context.Context, logger *zap.Logger,
 		qparts  = []string{
 			"+label.open:T",
 			"+label.lobby_type:public",
-			fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/", Query.Escape(params.GroupID)),
+			fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/", Query.QuoteStringValue(params.GroupID)),
 			fmt.Sprintf("+label.mode:%s", params.Mode.String()),
 			fmt.Sprintf("+label.size:>=%d +label.size:<=%d", minSize, maxSize),
 		}
