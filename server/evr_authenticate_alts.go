@@ -54,7 +54,7 @@ func LoginAlternateSearch(ctx context.Context, nk runtime.NakamaModule, loginHis
 
 func LoginAlternatePatternSearch(ctx context.Context, nk runtime.NakamaModule, loginHistory *LoginHistory, items []string, skipSelf bool) ([]*AlternateSearchMatch, map[string]*LoginHistory, error) {
 
-	query := fmt.Sprintf("+value.cache:%s", Query.MatchItem(items))
+	query := fmt.Sprintf("+value.cache:%s", Query.CreateMatchPattern(items))
 	otherHistories := make(map[string]*LoginHistory)
 	matches := make([]*AlternateSearchMatch, 0)
 	var err error
@@ -99,7 +99,7 @@ func LoginAlternatePatternSearch(ctx context.Context, nk runtime.NakamaModule, l
 
 func LoginDeniedClientIPAddressSearch(ctx context.Context, nk runtime.NakamaModule, clientIPAddress string) ([]string, error) {
 
-	query := fmt.Sprintf("+value.denied_client_addrs:/%s/", Query.Escape(clientIPAddress))
+	query := fmt.Sprintf("+value.denied_client_addrs:/%s/", Query.QuoteStringValue(clientIPAddress))
 	// Perform the storage list operation
 
 	cursor := ""

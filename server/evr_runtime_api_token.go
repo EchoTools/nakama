@@ -57,7 +57,7 @@ func NewDeveloperApplicationToken(app DeveloperApplication, signingKey string) s
 }
 
 func ApplicationTokenAuthenticate(ctx context.Context, nk runtime.NakamaModule, token string) (string, error) {
-	query := fmt.Sprintf("+value.applications.token:%s", Query.Escape(token))
+	query := fmt.Sprintf("+value.applications.token:%s", Query.QuoteStringValue(token))
 	objs, _, err := nk.StorageIndexList(ctx, SystemUserID, StorageIndexDeveloperAppTokens, query, 1, nil, "")
 	if err != nil {
 		return "", err

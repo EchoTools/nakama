@@ -144,7 +144,7 @@ func (d *DiscordAppBot) handleSearch(ctx context.Context, logger runtime.Logger,
 	} else if len(partial) < 3 && (useWildcardPrefix || useWildcardSuffix) {
 		return fmt.Errorf("search string is too short for wildcards")
 	} else {
-		pattern := Query.Escape(displayName)
+		pattern := Query.QuoteStringValue(displayName)
 
 		// Check if the display name is a partial match
 		if useWildcardPrefix {
@@ -220,7 +220,7 @@ func (d *DiscordAppBot) handleSearch(ctx context.Context, logger runtime.Logger,
 		if len(partial) > 2 && partial[0] == '/' && partial[len(partial)-1] == '/' {
 			pattern = partial[1 : len(partial)-1]
 		} else {
-			pattern = Query.Escape(partial)
+			pattern = Query.QuoteStringValue(partial)
 			if useWildcardPrefix {
 				pattern = fmt.Sprintf(".*%s", pattern)
 			}

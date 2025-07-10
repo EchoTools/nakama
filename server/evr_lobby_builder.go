@@ -441,7 +441,7 @@ func CompactedFrequencySort[T comparable](s []T, desc bool) []T {
 
 func rttByPlayerByExtIP(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, groupID string) (map[string]map[string]int, error) {
 	qparts := []string{
-		fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/", Query.Escape(groupID)),
+		fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/", Query.QuoteStringValue(groupID)),
 	}
 
 	query := strings.Join(qparts, " ")
@@ -516,7 +516,7 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 	globalSettings := ServiceSettings().Matchmaking
 
 	qparts := []string{
-		fmt.Sprintf("+label.broadcaster.group_ids:%s", Query.MatchItem(groupIDs)),
+		fmt.Sprintf("+label.broadcaster.group_ids:%s", Query.CreateMatchPattern(groupIDs)),
 		queryAddon,
 	}
 
@@ -530,7 +530,7 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 			prefix = "+"
 		}
 
-		qparts = append(qparts, fmt.Sprintf("%slabel.broadcaster.region_codes:%s", prefix, Query.MatchItem(regions)))
+		qparts = append(qparts, fmt.Sprintf("%slabel.broadcaster.region_codes:%s", prefix, Query.CreateMatchPattern(regions)))
 	}
 
 	query := strings.Join(qparts, " ")

@@ -450,7 +450,7 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeMMR bool, includeMax
 	qparts := []string{
 		"+label.open:T",
 		fmt.Sprintf("+label.mode:%s", p.Mode.String()),
-		fmt.Sprintf("+label.group_id:%s", Query.Escape(p.GroupID.String())),
+		fmt.Sprintf("+label.group_id:%s", Query.QuoteStringValue(p.GroupID.String())),
 		//fmt.Sprintf("label.version_lock:%s", p.VersionLock.String()),
 		fmt.Sprintf("-label.start_time:>=%d", time.Now().UTC().Add(-30*time.Second).Unix()),
 		p.BackfillQueryAddon,
@@ -458,13 +458,13 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeMMR bool, includeMax
 
 	if !p.CurrentMatchID.IsNil() {
 		// Do not backfill into the same match
-		qparts = append(qparts, fmt.Sprintf("-label.id:%s", Query.Escape(p.CurrentMatchID.String())))
+		qparts = append(qparts, fmt.Sprintf("-label.id:%s", Query.QuoteStringValue(p.CurrentMatchID.String())))
 	}
 
 	if len(p.BlockedIDs) > 0 && slices.Contains([]evr.Symbol{evr.ModeSocialPublic, evr.ModeCombatPublic}, p.Mode) {
 		// Add each blocked user that is online to the backfill query addon
 		// Avoid backfilling matches with players that this player blocks.
-		qparts = append(qparts, fmt.Sprintf("-label.players.user_id:%s", Query.MatchItem(p.BlockedIDs)))
+		qparts = append(qparts, fmt.Sprintf("-label.players.user_id:%s", Query.CreateMatchPattern(p.BlockedIDs)))
 	}
 
 	if includeMMR {
@@ -477,13 +477,13 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeMMR bool, includeMax
 
 	if len(p.RequiredFeatures) > 0 {
 		for _, f := range p.RequiredFeatures {
-			qparts = append(qparts, fmt.Sprintf("+label.features:/.*%s.*/", Query.Escape(f)))
+			qparts = append(qparts, fmt.Sprintf("+label.features:/.*%s.*/", Query.QuoteStringValue(f)))
 		}
 	}
 
 	// Do not backfill into the same match
 	if !p.CurrentMatchID.IsNil() {
-		qparts = append(qparts, fmt.Sprintf("-label.id:%s", Query.Escape(p.CurrentMatchID.String())))
+		qparts = append(qparts, fmt.Sprintf("-label.id:%s", Query.QuoteStringValue(p.CurrentMatchID.String())))
 	}
 
 	// Ensure the match is not full
@@ -509,7 +509,7 @@ func (p *LobbySessionParameters) BackfillSearchQuery(includeMMR bool, includeMax
 			}
 		}
 		if len(validRTTs) > 0 {
-			qparts = append(qparts, fmt.Sprintf("+label.broadcaster.endpoint:%s", Query.MatchItem(validRTTs)))
+			qparts = append(qparts, fmt.Sprintf("+label.broadcaster.endpoint:%s", Query.CreateMatchPattern(validRTTs)))
 		}
 	}
 	return strings.Join(qparts, " ")
@@ -578,8 +578,8 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 
 	qparts := []string{
 		"+properties.game_mode:" + p.Mode.String(),
-		fmt.Sprintf("+properties.group_id:%s", Query.Escape(p.GroupID.String())),
-		fmt.Sprintf(`-properties.blocked_ids:/.*%s.*/`, Query.Escape(p.UserID.String())),
+		fmt.Sprintf("+properties.group_id:%s", Query.QuoteStringValue(p.GroupID.String())),
+		fmt.Sprintf(`-properties.blocked_ids:/.*%s.*/`, Query.QuoteStringValue(p.UserID.String())),
 		//"+properties.version_lock:" + p.VersionLock.String(),
 		p.MatchmakingQueryAddon,
 	}
@@ -683,7 +683,7 @@ func (p *LobbySessionParameters) MatchmakingParameters(ticketParams *Matchmaking
 
 		// Add the acceptable servers to the query
 		if len(acceptableServers) > 0 {
-			qparts = append(qparts, fmt.Sprintf("+properties.servers:%s", Query.MatchItem(acceptableServers)))
+			qparts = append(qparts, fmt.Sprintf("+properties.servers:%s", Query.CreateMatchPattern(acceptableServers)))
 		}
 
 	}
