@@ -65,7 +65,7 @@ func NewDiscordIntegrator(ctx context.Context, logger *zap.Logger, config Config
 		queueCooldowns:     &MapOf[QueueEntry, time.Time]{},
 		idcache:            &MapOf[string, string]{},
 
-		queueCh: make(chan QueueEntry, 25),
+		queueCh: make(chan QueueEntry, 50),
 	}
 }
 
@@ -123,18 +123,20 @@ func (c *DiscordIntegrator) Start() {
 					logger.Warn("Invalid queue entry", zap.String("discord_id", entry.DiscordID), zap.String("guild_id", entry.GuildID))
 					continue
 				}
+				started = time.Now()
 				processed++
 				logger := logger.With(
 					zap.String("discord_id", entry.DiscordID),
 					zap.String("guild_id", entry.GuildID),
 					zap.String("gid", c.GuildIDToGroupID(entry.GuildID)),
 					zap.String("uid", c.DiscordIDToUserID(entry.DiscordID)),
+					zap.Bool("full_update", entry.DoFullUpdate),
 				)
 
 				if err := c.syncMember(c.ctx, logger, entry.DiscordID, entry.GuildID, entry.DoFullUpdate); err != nil {
 					logger.Warn("Error syncing guild group member", zap.Error(err))
 				}
-				logger.Debug("Synced guild group member")
+				logger.Debug("Synced guild group member", zap.Duration("duration", time.Since(started)))
 
 			case <-cooldownTicker.C:
 
@@ -223,18 +225,27 @@ func (c *DiscordIntegrator) Start() {
 
 // Queue a user for caching/updating.
 func (c *DiscordIntegrator) QueueSyncMember(guildID, discordID string, full bool) {
+	metricsTags := map[string]string{
+		"guild_id": guildID,
+		"group_id": c.GuildIDToGroupID(guildID),
+	}
+	defer func() { c.nk.MetricsCounterAdd("discord_integrator_queue_sync_member", metricsTags, 1) }()
+
 	entry := QueueEntry{GuildID: guildID, DiscordID: discordID}
 	_, exists := c.queueCooldowns.LoadOrStore(entry, time.Now().Add(time.Second*30))
 	if exists {
 		// Already in the queue, no need to add it again.
+		metricsTags["result"] = "on_cooldown"
 		return
 	}
 
 	select {
 	case c.queueCh <- QueueEntry{GuildID: guildID, DiscordID: discordID, DoFullUpdate: full}:
 		// Success
+		metricsTags["result"] = "queued"
 	default:
 		// Queue is full
+		metricsTags["result"] = "queue_full"
 		c.logger.Warn("Queue is full; dropping entry", zap.String("discord_id", discordID), zap.String("guild_id", guildID))
 	}
 }
@@ -352,7 +363,7 @@ func (c *DiscordIntegrator) syncMember(ctx context.Context, logger *zap.Logger, 
 	}
 
 	group, ok := groups[groupID]
-	if !ok {
+	if !ok || group == nil {
 		// Add the player to the group
 		if err := c.nk.GroupUsersAdd(ctx, SystemUserID, groupID, []string{evrAccount.ID()}); err != nil {
 			return fmt.Errorf("error joining group: %w", err)
@@ -370,26 +381,11 @@ func (c *DiscordIntegrator) syncMember(ctx context.Context, logger *zap.Logger, 
 		}
 	}
 
-	if group == nil {
-		return fmt.Errorf("guild group not found")
-	}
-
-	updated := false
-	if member == nil {
-		// Clear the role cache for the user
-		updated = group.RoleCacheUpdate(evrAccount, nil)
-
-	} else {
-		updated = group.RoleCacheUpdate(evrAccount, member.Roles)
-	}
-
-	if updated {
+	// Update the group state with the member's roles.
+	if group.RoleCacheUpdate(evrAccount, member.Roles) {
 		if err := GuildGroupStore(ctx, c.nk, c.guildGroupRegistry, group); err != nil {
 			return fmt.Errorf("error storing guild group: %w", err)
 		}
-	}
-	if member == nil {
-		return fmt.Errorf("member not found")
 	}
 
 	// Update the display name
@@ -487,20 +483,10 @@ func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, g
 	var err error
 	botUserID := d.DiscordIDToUserID(d.dg.State.User.ID)
 	if botUserID == "" {
-		var created bool
-
-		botUserID, _, created, err = d.nk.AuthenticateCustom(ctx, d.dg.State.User.ID, d.dg.State.User.Username, true)
-		if err != nil {
-			return fmt.Errorf("failed to authenticate (or create) bot user %s: %w", d.dg.State.User.ID, err)
-		}
-		if created {
-			// Add to the global bots group
-			if err := d.nk.GroupUsersAdd(ctx, SystemUserID, GroupGlobalBots, []string{botUserID}); err != nil {
-				return fmt.Errorf("error adding bot to global bots group: %w", err)
-			}
-		}
+		return fmt.Errorf("failed to get bot user ID from state")
 	}
 
+	var groupID string
 	// Ensure the guild owner is in the system.
 	ownerUserID := d.DiscordIDToUserID(guild.OwnerID)
 	if ownerUserID == "" {
@@ -508,7 +494,8 @@ func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, g
 		if err != nil {
 			return fmt.Errorf("failed to get guild owner: %w", err)
 		}
-		ownerUserID, _, _, err = d.nk.AuthenticateCustom(ctx, guild.OwnerID, ownerMember.User.Username, true)
+
+		ownerUserID, _, _, err = AuthenticateCustom(ctx, logger, d.db, ownerMember.User.ID, ownerMember.User.Username, true)
 		if err != nil {
 			// Leave guilds where the owner is globally banned.
 			if status.Code(err) == codes.PermissionDenied {
@@ -519,6 +506,7 @@ func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, g
 			}
 			return fmt.Errorf("failed to authenticate (or create) guild owner %s: %w", guild.OwnerID, err)
 		}
+		defer func() { d.QueueSyncMember(groupID, ownerMember.User.ID, false) }()
 	}
 
 	ownerAccount, err := d.nk.AccountGetId(ctx, ownerUserID)
@@ -538,7 +526,7 @@ func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, g
 		return nil
 	}
 
-	groupID := d.GuildIDToGroupID(guild.ID)
+	groupID = d.GuildIDToGroupID(guild.ID)
 	if groupID == "" {
 		// This is a new guild.
 		gm := NewGuildGroupMetadata(guild.ID)
@@ -554,18 +542,19 @@ func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, g
 			return fmt.Errorf("error marshalling guild group metadata: %w", err)
 		}
 
-		_, err = d.nk.GroupCreate(ctx, ownerUserID, guild.Name, botUserID, GuildGroupLangTag, guild.Description, guild.IconURL("512"), false, metadataMap, 100000)
+		group, err := d.nk.GroupCreate(ctx, ownerUserID, guild.Name, botUserID, GuildGroupLangTag, guild.Description, guild.IconURL("512"), false, metadataMap, 100000)
 		if err != nil {
 			return fmt.Errorf("error creating group: %w", err)
 		}
 
+		groupID = group.Id
 		d.LogServiceAuditMessage(ctx, fmt.Sprintf("Created guild `%s` (ID: %s) owned by <@%s>", guild.Name, guild.ID, guild.OwnerID), false)
 		// Invite the owner to the game service guild.
-	}
-
-	// Update the group data
-	if err := d.nk.GroupUpdate(ctx, groupID, SystemUserID, guild.Name, botUserID, GuildGroupLangTag, guild.Description, guild.IconURL("512"), true, nil, 100000); err != nil {
-		return fmt.Errorf("error updating group: %w", err)
+	} else {
+		// Update the group data
+		if err := d.nk.GroupUpdate(ctx, groupID, SystemUserID, guild.Name, botUserID, GuildGroupLangTag, guild.Description, guild.IconURL("512"), false, nil, 100000); err != nil {
+			return fmt.Errorf("error updating group: %w", err)
+		}
 	}
 
 	// Load the guild group
@@ -597,7 +586,7 @@ func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, g
 func (d *DiscordIntegrator) handleGuildCreate(logger *zap.Logger, s *discordgo.Session, e *discordgo.GuildCreate) error {
 	logger.Info("Guild Create", zap.Any("guild", e.Guild.ID))
 	if err := d.guildSync(d.ctx, logger, e.Guild); err != nil {
-		return fmt.Errorf("failed to update guild: %w", err)
+		return fmt.Errorf("error during guild sync: %w", err)
 	}
 	return nil
 }
@@ -605,7 +594,7 @@ func (d *DiscordIntegrator) handleGuildCreate(logger *zap.Logger, s *discordgo.S
 func (d *DiscordIntegrator) handleGuildUpdate(logger *zap.Logger, s *discordgo.Session, e *discordgo.GuildUpdate) error {
 	logger.Info("Guild Update", zap.Any("guild", e.Guild.ID))
 	if err := d.guildSync(d.ctx, logger, e.Guild); err != nil {
-		return fmt.Errorf("failed to update guild: %w", err)
+		return fmt.Errorf("error during guild sync: %w", err)
 	}
 	return nil
 }
@@ -619,10 +608,13 @@ func (d *DiscordIntegrator) handleGuildDelete(logger *zap.Logger, s *discordgo.S
 		return nil
 	}
 
+	// Log the metadata of the group before deleting it.
+	gg := d.guildGroupRegistry.Get(groupID)
+	logger.Info("Deleting guild group", zap.String("group_id", groupID), zap.Any("metadata", gg.GroupMetadata))
+
 	if err := d.nk.GroupDelete(d.ctx, groupID); err != nil {
 		return fmt.Errorf("error deleting group: %w", err)
 	}
-
 	d.Purge(e.Guild.ID)
 	return nil
 }
@@ -630,11 +622,9 @@ func (d *DiscordIntegrator) handleGuildDelete(logger *zap.Logger, s *discordgo.S
 func (d *DiscordIntegrator) handleMemberAdd(logger *zap.Logger, s *discordgo.Session, e *discordgo.GuildMemberAdd) error {
 	/*
 		logger.Info("Member Add", zap.Any("member", e))
-
-
-			if err := d.SyncGuildGroupMember(ctx, d.DiscordIDToUserID(e.Member.User.ID), d.GuildIDToGroupID(e.GuildID)); err != nil {
-				return fmt.Errorf("failed to sync guild group member: %w", err)
-			}
+		if err := d.SyncGuildGroupMember(ctx, d.DiscordIDToUserID(e.Member.User.ID), d.GuildIDToGroupID(e.GuildID)); err != nil {
+			return fmt.Errorf("failed to sync guild group member: %w", err)
+		}
 	*/
 
 	return nil
