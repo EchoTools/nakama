@@ -22,7 +22,7 @@ type ClientProfile struct {
 	Customization      *Customization    `json:"customization,omitempty"`
 	Social             ClientSocial      `json:"social,omitempty"`
 	NewUnlocks         []int64           `json:"newunlocks"`
-	EarlyQuitFeatures  EarlyQuitFeatures `json:"earlyquit"` // Early quit features
+	//EarlyQuitFeatures  EarlyQuitFeatures `json:"earlyquit"` // Early quit features
 }
 
 type EarlyQuitFeatures struct {
