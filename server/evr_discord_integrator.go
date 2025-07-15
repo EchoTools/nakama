@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -705,6 +706,38 @@ func (d *DiscordIntegrator) handleMemberUpdate(logger *zap.Logger, s *discordgo.
 		}
 	}
 
+	// If the guild forces IGNs to match discord while online
+	if group.DisplayNameForceNickToIGN {
+		// And the player is online
+		// Search for them in a match from this guild
+		query := fmt.Sprintf("+group_id:%s +players.user_id:%s", groupID, evrAccount.ID())
+		matches, err := d.nk.MatchList(ctx, 100, true, "", nil, nil, query)
+		if err != nil {
+			logger.Warn("Failed to list matches for guild group member", zap.Error(err), zap.String("query", query))
+			return fmt.Errorf("failed to list matches for guild group member: %w", err)
+		}
+		// Check that the player is not just a spectator
+		if len(matches) > 0 {
+			for _, match := range matches {
+				label := MatchLabel{}
+				if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), &label); err != nil {
+					logger.Warn("Failed to unmarshal match label", zap.Error(err), zap.String("string", match.GetLabel().GetValue()))
+					continue
+				}
+				if player := label.GetPlayerByUserID(evrAccount.ID()); player != nil {
+					if player.DisplayName != InGameName(e.Member) {
+						AuditLogSendGuild(s, group, fmt.Sprintf("Setting display name for `%s` to match in-game name: `%s`", e.Member.User.Username, InGameName(e.Member)))
+						// Force the display name to match the in-game name
+						if err := s.GuildMemberNickname(group.GuildID, e.Member.User.ID, player.DisplayName); err != nil {
+							logger.Warn("Failed to set display name", zap.Error(err))
+						}
+					}
+					break
+				}
+			}
+		}
+	}
+
 	logger.Info("Member Updated", zap.Any("before_update", e.BeforeUpdate), zap.Any("member", e.Member))
 
 	return nil
@@ -730,6 +763,7 @@ func (d *DiscordIntegrator) syncMembersIGN(ctx context.Context, logger *zap.Logg
 		}
 		return nil
 	}
+
 	// This user may use this display name.
 	history, err := DisplayNameHistoryLoad(ctx, d.nk, profile.ID())
 	if err != nil {

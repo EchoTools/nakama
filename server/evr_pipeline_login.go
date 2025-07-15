@@ -661,19 +661,6 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	// Update the display name history for the active group, marking this name as an in-game-name.
 	activeGroupDisplayName, _ := params.displayNameHistory.LatestGroup(params.profile.ActiveGroupID)
 	params.displayNameHistory.Update(params.profile.ActiveGroupID, activeGroupDisplayName, params.profile.Username(), true)
-	if gg := params.guildGroups[params.profile.ActiveGroupID]; gg != nil {
-		if gg.DisplayNameForceNickToIGN || gg.DisplayNameSetNickToIGNAtLogin {
-			// If the name is forced, then set the display name to the current in-game name when the player logs in.
-			go func() {
-				if member, err := p.discordCache.GuildMember(gg.GuildID, params.DiscordID()); err == nil && member != nil && InGameName(member) != activeGroupDisplayName {
-					// Set their display name to their current in-game name
-					if err := p.discordCache.dg.GuildMemberNickname(gg.GuildID, params.DiscordID(), activeGroupDisplayName); err != nil {
-						logger.Warn("Failed to set display name", zap.Error(err))
-					}
-				}
-			}()
-		}
-	}
 
 	if err := DisplayNameHistoryStore(ctx, p.nk, session.userID.String(), params.displayNameHistory); err != nil {
 		logger.Warn("Failed to store display name history", zap.Error(err))
