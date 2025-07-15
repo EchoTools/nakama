@@ -455,6 +455,25 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		External: true, // used to denote if the event was generated from the client
 	})
 
+	// Force the players name to match in-game
+	if gg.DisplayNameForceNickToIGN {
+		go func() {
+			// Search for them in a match from this guild
+			member, err := p.discordCache.GuildMember(gg.GuildID, params.DiscordID())
+			if err != nil {
+				logger.Warn("Failed to get guild member", zap.Error(err))
+			} else if member != nil {
+				if displayName != InGameName(member) {
+					AuditLogSendGuild(p.discordCache.dg, gg, fmt.Sprintf("Setting display name for `%s` to match in-game name: `%s`", member.User.Username, displayName))
+					// Force the display name to match the in-game name
+					if err := p.discordCache.dg.GuildMemberNickname(gg.GuildID, member.User.ID, displayName); err != nil {
+						logger.Warn("Failed to set display name", zap.Error(err))
+					}
+				}
+			}
+		}()
+	}
+
 	// Generate a profile for this group
 	profile, err := UserServerProfileFromParameters(ctx, logger, p.db, p.nk, params, groupID, []evr.Symbol{lobbyParams.Mode}, lobbyParams.Mode)
 	if err != nil {
