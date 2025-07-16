@@ -400,24 +400,20 @@ func DisplayNameCacheRegexSearch(ctx context.Context, nk runtime.NakamaModule, p
 
 func DisplayNameOwnerSearch(ctx context.Context, nk runtime.NakamaModule, displayNames []string) (map[string][]string, error) {
 	nameMap := make(map[string]string, len(displayNames))
-	sanitized := make([]string, len(displayNames))
+	sanitized := make([]string, 0, len(displayNames))
 	for _, dn := range displayNames {
 		s := sanitizeDisplayName(dn)
 		s = strings.ToLower(s)
-		sanitized = append(sanitized, s)
-		nameMap[s] = dn
+		// Only add non-empty sanitized names
+		if s != "" {
+			sanitized = append(sanitized, s)
+			nameMap[s] = dn
+		}
 	}
 
 	// Remove duplicates from the display names.
 	slices.Sort(sanitized)
-	displayNames = slices.Compact(sanitized)
-	for i := 0; i < len(sanitized); i++ {
-		// Remove any display names that are empty.
-		if sanitized[i] == "" {
-			sanitized = slices.Delete(sanitized, i, i+1)
-			i--
-		}
-	}
+	sanitized = slices.Compact(sanitized)
 
 	query := fmt.Sprintf("+value.active:%s", Query.MatchItem(sanitized))
 
@@ -425,7 +421,7 @@ func DisplayNameOwnerSearch(ctx context.Context, nk runtime.NakamaModule, displa
 		err      error
 		result   *api.StorageObjects
 		cursor   string
-		ownerMap = make(map[string][]string, len(displayNames))
+		ownerMap = make(map[string][]string, len(sanitized))
 	)
 	for {
 
