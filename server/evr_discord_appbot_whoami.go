@@ -14,6 +14,8 @@ import (
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type UserProfileRequestOptions struct {
@@ -731,7 +733,9 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		vrmlSummary := &VRMLPlayerSummary{}
 		// Get VRML Summary
 		if err := StorageRead(ctx, nk, targetID, vrmlSummary, false); err != nil {
-			logger.Warn("failed to get VRML summary", "error", err)
+			if status.Code(err) != codes.NotFound {
+				logger.WithField("error", err).Warn("failed to get VRML summary")
+			}
 		} else {
 			vrmlEmbed = w.createVRMLHistoryEmbed(vrmlSummary)
 		}
