@@ -164,7 +164,6 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 		evr.NewLoginSuccess(session.id, request.XPID),
 		unrequireMessage,
 		evr.NewDefaultGameSettings(),
-		unrequireMessage,
 	)
 }
 
