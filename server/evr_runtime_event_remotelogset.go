@@ -393,6 +393,30 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 
 				continue
 			}
+		case *evr.RemoteLogLoadStats:
+
+			if msg.LoadTime > 30 {
+
+				var gg *GuildGroup
+				msgJSON, _ := json.MarshalIndent(msg, "", "  ")
+				content := fmt.Sprintf("High load time detected: %ds\n```json\n%s\n```", msg.LoadTime, string(msgJSON))
+
+				matchID, presence, _ := GetMatchIDBySessionID(nk, uuid.FromStringOrNil(s.SessionID))
+
+				if matchID.IsValid() {
+					// Get the match label
+					label, _ := MatchLabelByID(ctx, nk, matchID)
+					if label != nil {
+						presenceJSON, _ := json.MarshalIndent(presence, "", "  ")
+						content = content + fmt.Sprintf("\nPresence:\n```json\n%s\n```", string(presenceJSON))
+						gg, _ = dispatcher.guildGroup(ctx, label.GetGroupID().String())
+					}
+				}
+				if gg != nil {
+					AuditLogSend(dg, gg.ErrorChannelID, content)
+				}
+				AuditLogSend(dg, ServiceSettings().GlobalErrorChannelID, content)
+			}
 
 		default:
 		}
