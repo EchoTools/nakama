@@ -565,7 +565,7 @@ func (p *EvrPipeline) CheckServerPing(ctx context.Context, logger *zap.Logger, s
 		}
 	}
 
-	if err := SendEVRMessages(session, false, evr.NewLobbyPingRequest(275, candidates)); err != nil {
+	if err := SendEVRMessages(session, true, evr.NewLobbyPingRequest(275, candidates)); err != nil {
 		return fmt.Errorf("failed to send ping request: %v", err)
 	}
 

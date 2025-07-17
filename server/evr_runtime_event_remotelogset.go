@@ -395,11 +395,12 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 			}
 		case *evr.RemoteLogLoadStats:
 
-			if msg.LoadTime > 30 {
+			if msg.LoadTime > 45 {
 
 				var gg *GuildGroup
+				metadata := make(map[string]any)
 				msgJSON, _ := json.MarshalIndent(msg, "", "  ")
-				content := fmt.Sprintf("High load time detected: %ds\n```json\n%s\n```", msg.LoadTime, string(msgJSON))
+				content := fmt.Sprintf("High load time detected: %ds\n```json\n%d\n```", int(msg.LoadTime), string(msgJSON))
 
 				matchID, presence, _ := GetMatchIDBySessionID(nk, uuid.FromStringOrNil(s.SessionID))
 
@@ -407,6 +408,13 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 					// Get the match label
 					label, _ := MatchLabelByID(ctx, nk, matchID)
 					if label != nil {
+						discordID, _ := GetDiscordIDByUserID(ctx, db, presence.GetUserId())
+
+						metadata["user_id"] = presence.GetUserId()
+						metadata["match_id"] = matchID.String()
+						metadata["username"] = presence.GetUsername()
+						metadata["session_id"] = presence.GetSessionId()
+						metadata["discord_id"] = discordID
 						presenceJSON, _ := json.MarshalIndent(presence, "", "  ")
 						content = content + fmt.Sprintf("\nPresence:\n```json\n%s\n```", string(presenceJSON))
 						gg, _ = dispatcher.guildGroup(ctx, label.GetGroupID().String())
