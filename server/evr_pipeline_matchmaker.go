@@ -119,7 +119,7 @@ func (p *EvrPipeline) lobbyPingResponse(ctx context.Context, logger *zap.Logger,
 	if err := StorageWrite(ctx, p.nk, session.UserID().String(), latencyHistory); err != nil {
 		return status.Errorf(codes.Internal, "failed to write latency history: %v", err)
 	}
-	return session.SendEvrUnrequire()
+	return nil
 }
 
 func SendEVRMessages(session Session, unrequire bool, messages ...evr.Message) error {
@@ -171,8 +171,7 @@ func (p *EvrPipeline) lobbyPendingSessionCancel(ctx context.Context, logger *zap
 	if err != nil {
 		logger.Warn("Failed to leave lobby group stream", zap.Error(err))
 	}
-
-	return session.SendEvrUnrequire()
+	return nil
 }
 
 // lobbyPlayerSessionsRequest is called when a client requests the player sessions for a list of XP IDs.
