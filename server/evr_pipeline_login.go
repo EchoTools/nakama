@@ -516,7 +516,6 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 }
 
 func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger, session *sessionWS, params *SessionParameters) error {
-
 	var err error
 
 	metricsTags := params.MetricsTags()
@@ -1302,7 +1301,7 @@ func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.L
 
 	p.nk.metrics.CustomGauge("profile_size_bytes", nil, float64(len(data)))
 
-	if err := session.SendEvrUnrequire(response); err != nil {
+	if err := session.SendEvr(response); err != nil {
 		tags["error"] = "failed_send_profile"
 		logger.Warn("Failed to send OtherUserProfileSuccess", zap.Error(err))
 	}
