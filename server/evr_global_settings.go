@@ -44,6 +44,7 @@ type ServiceSettingsData struct {
 	VRMLEntitlementNotifyChannelID        string                    `json:"vrml_entitlement_notify_channel_id"`
 	EnableContinuousGameserverHealthCheck bool                      `json:"enable_continuous_gameserver_health_check"`
 	DisplayNameInUseNotifications         bool                      `json:"display_name_in_use_notifications"` // Display name in use notifications
+	EnableSessionDebug                    bool                      `json:"enable_session_debug"`
 	version                               string
 	serviceStatusMessage                  string
 }

@@ -160,15 +160,25 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 	p.nk.metrics.CustomCounter("login_success", tags, 1)
 	p.nk.metrics.CustomTimer("login_process_latency", params.MetricsTags(), time.Since(timer))
 
+	// Set the game settings based on the service settings
+	gameSettings := evr.NewDefaultGameSettings()
+	if params.debug {
+		gameSettings.IapUnlocked = true
+		gameSettings.RemoteLogSocial = true
+		gameSettings.RemoteLogWarnings = true
+		gameSettings.RemoteLogErrors = true
+		gameSettings.RemoteLogRichPresence = true
+		gameSettings.RemoteLogMetrics = true
+	}
+
 	return session.SendEvr(
 		evr.NewLoginSuccess(session.id, request.XPID),
 		unrequireMessage,
-		evr.NewDefaultGameSettings(),
+		gameSettings,
 	)
 }
 
 // normalizes all the meta headset types to a common format
-
 var headsetMappings = func() map[string]string {
 
 	mappings := map[string][]string{
@@ -516,6 +526,9 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 
 func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger, session *sessionWS, params *SessionParameters) error {
 	var err error
+	serviceSettings := ServiceSettings()
+	// Enable session debugging if the account metadata or global settings have Debug set.
+	params.debug = params.debug || params.profile.Debug || serviceSettings.EnableSessionDebug
 
 	metricsTags := params.MetricsTags()
 	defer func() {
@@ -621,8 +634,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	for _, dn := range params.profile.DisplayNamesByGroupID() {
 		displayNames = append(displayNames, dn)
 	}
-	// If the display name is owned by someone else, then remove it from the player's profile.
-	globalSettings := ServiceSettings()
+
 	if ownerMap, err := DisplayNameOwnerSearch(ctx, p.nk, displayNames); err != nil {
 		logger.Warn("Failed to check display name owner", zap.Any("display_names", displayNames), zap.Error(err))
 	} else {
@@ -634,7 +646,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 					if strings.EqualFold(gn, dn) {
 						// This display name is owned by someone else.
 						params.profile.DeleteGroupDisplayName(gID)
-						if globalSettings.DisplayNameInUseNotifications {
+						if serviceSettings.DisplayNameInUseNotifications {
 							// Notify the player that this display name is in use.
 							ownerDiscordID := p.discordCache.UserIDToDiscordID(ownerIDs[0])
 							go func() {
@@ -670,7 +682,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	} else {
 		updated := false
 		// If the player account is less than 7 days old, then assign the "green" division to the player.
-		if time.Since(params.profile.account.User.CreateTime.AsTime()) < time.Duration(globalSettings.Matchmaking.GreenDivisionMaxAccountAgeDays)*24*time.Hour {
+		if time.Since(params.profile.account.User.CreateTime.AsTime()) < time.Duration(serviceSettings.Matchmaking.GreenDivisionMaxAccountAgeDays)*24*time.Hour {
 			if !slices.Contains(settings.Divisions, "green") {
 				settings.Divisions = append(settings.Divisions, "green")
 				updated = true
@@ -776,8 +788,9 @@ func (p *EvrPipeline) channelInfoRequest(ctx context.Context, logger *zap.Logger
 		return errors.New("session parameters not found")
 	}
 
-	groupID := uuid.Nil
-	if groupID = params.profile.GetActiveGroupID(); groupID.IsNil() {
+	groupID := params.profile.GetActiveGroupID()
+
+	if groupID.IsNil() {
 		return fmt.Errorf("active group is nil")
 	}
 
