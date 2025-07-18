@@ -160,7 +160,7 @@ func (p *EvrPipeline) lobbySessionEvent(logger *zap.Logger, session *sessionWS, 
 	case rtapi.LobbySessionEventMessage_ENDED:
 		opcode = SignalEndedSession
 	default:
-		return fmt.Errorf("unknown lobby session event code: %s", message.Code)
+		return fmt.Errorf("unknown lobby session event code: %d", message.Code)
 	}
 	// Signal the session event to the match.
 	signal := NewSignalEnvelope(session.userID.String(), opcode, nil)

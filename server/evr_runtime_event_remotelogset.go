@@ -400,7 +400,7 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 				var gg *GuildGroup
 				metadata := make(map[string]any)
 				msgJSON, _ := json.MarshalIndent(msg, "", "  ")
-				content := fmt.Sprintf("High load time detected: %ds\n```json\n%d\n```", int(msg.LoadTime), string(msgJSON))
+				content := fmt.Sprintf("High load time detected: %ds\n```json\n%s\n```", int(msg.LoadTime), string(msgJSON))
 
 				matchID, presence, _ := GetMatchIDBySessionID(nk, uuid.FromStringOrNil(s.SessionID))
 
