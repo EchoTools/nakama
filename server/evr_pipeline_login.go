@@ -316,6 +316,11 @@ func (p *EvrPipeline) authenticateSession(ctx context.Context, logger *zap.Logge
 				metricsTags["error"] = "failed_link_device"
 				return fmt.Errorf("failed to link device: %w", err)
 			}
+			params.profile, err = AccountGetDeviceID(ctx, p.db, p.nk, params.xpID.String())
+			if err != nil {
+				logger.Warn("Failed to get account after linking device", zap.Error(err))
+				return fmt.Errorf("failed to get account after linking device: %w", err)
+			}
 
 			// The session is not authenticated. Create a link ticket.
 		} else {
