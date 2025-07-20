@@ -533,7 +533,7 @@ func typeStatsToScoreMap(userID, displayName, groupID string, mode evr.Symbol, s
 	updateElem := reflect.ValueOf(stats)
 	resetSchedules := []evr.ResetSchedule{evr.ResetScheduleDaily, evr.ResetScheduleWeekly, evr.ResetScheduleAllTime}
 
-	statsBaseType := reflect.ValueOf(evr.ArenaStatistics{}).Type()
+	statsBaseType := reflect.ValueOf(stats).Type()
 
 	nameOperatorMap := make(map[string]LeaderboardOperator, statsBaseType.NumField())
 	// Create a map of stat names to their corresponding operator
