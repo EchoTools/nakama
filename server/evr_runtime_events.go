@@ -499,9 +499,9 @@ func ScheduleKick(ctx context.Context, nk runtime.NakamaModule, logger runtime.L
 			suspendedGroupIDs = append(suspendedGroupIDs, guildGroup.SuspensionInheritanceGroupIDs...)
 		}
 
+		actions := make([]string, 0, len(matchLabels))
 		doDisconnect := false
 		for _, label := range matchLabels {
-			actions := make([]string, 0, len(matchLabels))
 			// Kick the player from the match
 			if slices.Contains(suspendedGroupIDs, label.GetGroupID().String()) {
 				doDisconnect = true
@@ -523,7 +523,7 @@ func ScheduleKick(ctx context.Context, nk runtime.NakamaModule, logger runtime.L
 		}
 
 		// Send audit log message
-		AuditLogSend(dg, ServiceSettings().ServiceAuditChannelID, fmt.Sprintf("Disconnected user %s (%s) from %d sessions", userID, accountMap[userID].User.Username, len(matchLabels)))
+		AuditLogSend(dg, ServiceSettings().ServiceAuditChannelID, fmt.Sprintf("Disconnected user %s (%s) from %d sessions:\n%s", userID, accountMap[userID].User.Username, len(matchLabels), strings.Join(actions, "\n")))
 
 	}()
 }
