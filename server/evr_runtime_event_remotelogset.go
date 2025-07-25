@@ -56,7 +56,6 @@ func (s *EventRemoteLogSet) unmarshalLogs(logger runtime.Logger, logStrs []strin
 			}
 			continue
 		}
-		logger.WithField("message", parsed).Debug("Parsed remote log message")
 		entries = append(entries, parsed)
 	}
 	return entries, nil
@@ -431,7 +430,7 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 				}
 				AuditLogSend(dg, ServiceSettings().GlobalErrorChannelID, content)
 			}
-
+			continue
 		default:
 		}
 	}
@@ -486,7 +485,7 @@ func (s *EventRemoteLogSet) processPostMatchTypeStats(ctx context.Context, logge
 	}
 
 	// If the player isn't in the match, or isn't a player, do not update the stats
-	if playerInfo == nil || (playerInfo.Team != BlueTeam && playerInfo.Team != OrangeTeam) {
+	if playerInfo.Team != BlueTeam && playerInfo.Team != OrangeTeam {
 		return fmt.Errorf("non-player profile update request: %s", msg.XPID)
 	}
 	logger = logger.WithFields(map[string]any{
@@ -509,7 +508,7 @@ func (s *EventRemoteLogSet) processPostMatchTypeStats(ctx context.Context, logge
 				logger.WithField("error", err).Warn("Failed to record rating to leaderboard")
 			}
 		} else {
-			logger.WithField("session_id", playerInfo.SessionID).Warn("No rating found for player in matchmaking ratings")
+			logger.WithField("target_sid", playerInfo.SessionID).Warn("No rating found for player in matchmaking ratings")
 		}
 
 		zapLogger := RuntimeLoggerToZapLogger(logger)
@@ -527,7 +526,7 @@ func (s *EventRemoteLogSet) processPostMatchTypeStats(ctx context.Context, logge
 		return nil
 	}
 
-	statEntries, err := typeStatsToScoreMap(s.UserID, s.Username, groupIDStr, label.Mode, msg.Stats)
+	statEntries, err := typeStatsToScoreMap(playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, msg.Stats)
 	if err != nil {
 		return fmt.Errorf("failed to convert type stats to score map: %w", err)
 	}
