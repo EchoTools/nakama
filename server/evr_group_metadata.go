@@ -15,7 +15,7 @@ type GroupMetadata struct {
 	GuildID                              string            `json:"guild_id"`                      // The guild ID
 	OwnerID                              string            `json:"owner_id"`                      // The owner ID
 	MinimumAccountAgeDays                int               `json:"minimum_account_age_days"`      // The minimum account age in days to be able to play echo on this guild's sessions
-	MembersOnlyMatchmaking               bool              `json:"members_only_matchmaking"`      // Restrict matchmaking to members only (when this group is the active one)
+	EnableMembersOnlyMatchmaking         bool              `json:"members_only_matchmaking"`      // Restrict matchmaking to members only (when this group is the active one)
 	DisableCreateCommand                 bool              `json:"disable_create_command"`        // Disable the public allocate command
 	LogAlternateAccounts                 bool              `json:"log_alternate_accounts"`        // Log alternate accounts
 	EnforcersHaveGoldNames               bool              `json:"moderators_have_gold_names"`    // Enforcers have gold display names
@@ -43,6 +43,11 @@ func NewGuildGroupMetadata(guildID string) *GroupMetadata {
 		MatchmakingChannelIDs: make(map[string]string),
 		AllowedFeatures:       make([]string, 0),
 	}
+}
+
+// IsPrivate returns true if the group is private, meaning it has members-only matchmaking enabled.
+func (g *GroupMetadata) IsPrivate() bool {
+	return g.EnableMembersOnlyMatchmaking
 }
 
 func (g *GroupMetadata) MarshalMap() map[string]any {

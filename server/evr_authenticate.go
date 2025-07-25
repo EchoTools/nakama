@@ -7,7 +7,6 @@ const (
 	LinkTicketKey                = "linkTickets"
 	DiscordAccessTokenCollection = "DiscordAccessTokens"
 	DiscordAccessTokenKey        = "accessToken"
-	SuspensionStatusCollection   = "SuspensionStatus"
 	ActivePartyGroupIndex        = "Index_PartyGroup"
 	CacheStorageCollection       = "Cache"
 	IPinfoCacheKey               = "IPinfo"
