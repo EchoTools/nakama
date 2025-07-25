@@ -70,11 +70,17 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 		matchRegistry   = dispatcher.matchRegistry
 		statisticsQueue = dispatcher.statisticsQueue
 	)
-
+	logger = logger.WithFields(map[string]any{
+		"uid":      s.UserID,
+		"username": s.Username,
+		"evrid":    s.XPID.String(),
+	})
 	entries, err := s.unmarshalLogs(logger, s.RemoteLogSet.Logs)
 	if err != nil {
 		logger.WithField("error", err).Warn("Failed to unmarshal remote logs")
 		return fmt.Errorf("failed to unmarshal remote logs: %w", err)
+	} else {
+		logger.WithField("logs", entries).Debug("Unmarshalled remote logs")
 	}
 
 	// Send the remote logs to the match data event.
@@ -133,7 +139,7 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 		case *evr.RemoteLogDisconnectedDueToTimeout:
 			logger.WithFields(map[string]any{
 				"username": s.Username,
-				"xp_id":    s.XPID.String(),
+				"evrid":    s.XPID.String(),
 				"msg":      msg,
 			}).Warn("Disconnected due to timeout")
 
@@ -350,10 +356,10 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 			globalAppBot.Load().LogUserErrorMessage(ctx, label.GetGroupID().String(), fmt.Sprintf("```json\n%s\n```", string(contentData)), false)
 
 			logger.WithFields(map[string]any{
-				"username":       session.Username(),
-				"match_id":       msg.SessionUUID().String(),
-				"evr_id":         s.XPID.String(),
-				"remote_log_msg": msg,
+				"username": session.Username(),
+				"mid":      msg.SessionUUID().String(),
+				"evrid":    s.XPID.String(),
+				"msg":      msg,
 			}).Warn("Server connection failed")
 
 			acct, err := nk.AccountGetId(ctx, label.GameServer.OperatorID.String())
