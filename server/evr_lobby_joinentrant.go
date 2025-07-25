@@ -175,7 +175,7 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 	}
 
 	// Send the lobby session success message to the game client.
-	<-time.After(250 * time.Millisecond)
+	<-time.After(150 * time.Millisecond)
 
 	if err := SendEVRMessages(session, false, connectionSettings); err != nil {
 		logger.Error("failed to send lobby session success to game client", zap.Error(err))
@@ -186,6 +186,7 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 	return nil
 }
 
+// lobbyAuthorize checks if the user is allowed to join the lobby based on various criteria such as guild membership, suspensions, and account age.
 func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, session Session, lobbyParams *LobbySessionParameters) error {
 	groupID := lobbyParams.GroupID.String()
 	metricsTags := map[string]string{
@@ -196,6 +197,21 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		p.nk.MetricsCounterAdd("lobby_authorization", metricsTags, 1)
 	}()
 
+	logAuditMessage := func(message string) {
+		if _, err := p.appBot.LogAuditMessage(ctx, groupID, message, true); err != nil {
+			p.logger.Warn("Failed to send audit message", zap.String("channel_id", groupID), zap.Error(err))
+		}
+	}
+
+	joinRejected := func(metricKey, reason, auditMessage string) error {
+		metricsTags["error"] = metricKey
+		auditMessage = fmt.Sprintf("Rejected lobby join by %s <@%s>[%s] to `%s`: %s", EscapeDiscordMarkdown(lobbyParams.DisplayName), lobbyParams.DiscordID, session.Username(), lobbyParams.Mode, auditMessage)
+		if _, err := p.appBot.LogAuditMessage(ctx, groupID, auditMessage, true); err != nil {
+			p.logger.Warn("Failed to send audit message", zap.String("channel_id", groupID), zap.Error(err))
+		}
+		return NewLobbyErrorf(KickedFromLobbyGroup, reason)
+	}
+
 	userID := session.UserID().String()
 
 	params, ok := LoadParams(ctx)
@@ -204,116 +220,80 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 	}
 	var err error
 
-	isMember := false
-
-	gg, ok := params.guildGroups[groupID]
-	if ok {
-		// If there is no member role, the user is considered a member if they are in the discord guild.
-		isMember = gg.RoleMap.Member == "" || gg.IsMember(userID)
-	} else {
-		gg = p.guildGroupRegistry.Get(groupID)
-		if gg == nil {
-			return fmt.Errorf("failed to get guild group: %s", groupID)
-		}
+	gg := p.guildGroupRegistry.Get(groupID)
+	if gg == nil {
+		return fmt.Errorf("failed to get guild group: %s", groupID)
 	}
 
-	if !isMember {
-		p.logger.Warn("User is not a member of this guild group")
-	}
-	
-	// User is not a member of the group.
-	if gg.MembersOnlyMatchmaking && !isMember {
-
-		metricsTags["error"] = "not_member"
-
-		if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("Rejected non-member <@%s>", userID), true); err != nil {
-			p.logger.Warn("Failed to send audit message", zap.String("channel_id", gg.AuditChannelID), zap.Error(err))
+	// Check if the user is a member of the (private) guild.
+	if gg.IsPrivate() {
+		if gg.RoleMap.Member != "" && !gg.IsMember(userID) {
+			return joinRejected("not_member", "You are not a member of this private guild.", "not a member of private guild")
+		} else {
+			// If the member role is not set, the user must be a member of the guild.
+			if guildMember, err := p.discordCache.GuildMember(gg.GuildID, lobbyParams.DiscordID); err != nil {
+				if err != nil && !IsDiscordErrorCode(err, discordgo.ErrCodeUnknownMember) {
+					p.logger.Warn("Failed to get guild member. failing open.", zap.String("guild_id", gg.GuildID), zap.Error(err))
+				}
+			} else if guildMember == nil || guildMember.Pending == true {
+				return joinRejected("not_member", "You are not a member of this private guild.", "not a member of private guild")
+			}
 		}
-
-		return NewLobbyError(KickedFromLobbyGroup, "user does not have member role")
 	}
 
 	// User is suspended from the group.
 	if gg.IsSuspended(userID, &params.xpID) {
-
-		metricsTags["error"] = "suspended_user"
-
-		if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("Rejected suspended user <@%s>", userID), true); err != nil {
-			p.logger.Warn("Failed to send audit message", zap.String("channel_id", gg.AuditChannelID), zap.Error(err))
-		}
-
-		return ErrSuspended
+		// User is suspended from the group.
+		return joinRejected("suspended_user", "You are suspended from this guild. (role-based)", "is suspended via role")
 	}
 
+	// TODO move this to the session initialization. it's static data.
 	var (
 		suspensionRecord GuildEnforcementRecord
 		suspendedUserID  string
 	)
-	// TODO move this to the session initialization. it's static data.
-
 	if recordsByUserID := params.activeSuspensionRecords[groupID]; len(recordsByUserID) > 0 {
 		for recordUserID, r := range recordsByUserID {
 			// If the record is expired, skip it.
-			if r.IsExpired() {
+			if r.IsExpired() || r.SuspensionExpiry.Before(suspensionRecord.SuspensionExpiry) {
 				continue
 			}
-
-			if recordUserID != userID && !gg.RejectPlayersWithSuspendedAlternates || params.ignoreDisabledAlternates {
-				// If the group does not reject suspended alternates, or the user is ignoring disabled alternates, skip it.
-				continue
-			}
-
-			if r.SuspensionExpiry.After(suspensionRecord.SuspensionExpiry) {
-				suspensionRecord = r
-				suspendedUserID = userID
+			if recordUserID != userID {
+				if params.ignoreDisabledAlternates {
+					// User is excluded from suspension checks if they are ignoring disabled alternates.
+					continue
+				}
+				// Suspension record is for user's alternate account
+				if gg.RejectPlayersWithSuspendedAlternates {
+					suspensionRecord = r
+					suspendedUserID = userID
+				} else {
+					logAuditMessage(fmt.Sprintf("Allowed alternate account <@!%s> (%s) of suspended user <@!%s> (%s): `%s` (expires <t:%d:R>)", lobbyParams.DiscordID, lobbyParams.DisplayName, recordUserID, session.Username(), r.UserNoticeText, r.SuspensionExpiry.Unix()))
+				}
 			}
 		}
-
+		const maxMessageLength = 60
 		if suspendedUserID != "" {
 			if suspendedUserID == userID {
-				// User is suspended from the group.
-				metricsTags["error"] = "suspended_user"
-
 				// User has an active suspension
-				metricsTags["error"] = "suspended_user"
-				if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("Rejected suspended user <@!%s> (%s) (%s) (expires <t:%d:R>)", lobbyParams.DiscordID, lobbyParams.DisplayName, suspensionRecord.UserNoticeText, suspensionRecord.SuspensionExpiry.Unix()), false); err != nil {
-					p.logger.Warn("Failed to send audit message", zap.String("channel_id", gg.AuditChannelID), zap.Error(err))
-				}
-				const maxMessageLength = 60
-				message := suspensionRecord.UserNoticeText
+				reason := suspensionRecord.UserNoticeText
 				expires := fmt.Sprintf(" [exp: %s]", FormatDuration(time.Until(suspensionRecord.SuspensionExpiry)))
-
-				if len(message)+len(expires) > maxMessageLength {
-					message = message[:maxMessageLength-len(expires)-3] + "..."
+				if len(reason)+len(expires) > maxMessageLength {
+					reason = reason[:maxMessageLength-len(expires)-3] + "..."
 				}
-				message = message + expires
-				return NewLobbyError(KickedFromLobbyGroup, message)
+				reason = reason + expires
+				auditLog := fmt.Sprintf("suspended via enforcement record: `%s` (expires <t:%d:R>)", suspensionRecord.UserNoticeText, suspensionRecord.SuspensionExpiry.Unix())
+				return joinRejected("suspended_user", reason, auditLog)
 			} else {
 				// This is an alternate account of a suspended user.
-				metricsTags["error"] = "suspended_alternate"
-				author := discordgo.MessageEmbedAuthor{
-					Name:    fmt.Sprintf("%s (%s)", lobbyParams.DisplayName, session.Username()),
-					IconURL: params.profile.AvatarURL(),
-				}
-
-				if member, err := p.discordCache.GuildMember(gg.GuildID, params.DiscordID()); err != nil {
-					logger.Warn("Error getting guild member", zap.Error(err))
-				} else {
-					author.IconURL = member.User.AvatarURL("")
-				}
-				otherDiscordID := p.discordCache.UserIDToDiscordID(suspendedUserID)
-				if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("Rejected alt (<@!%s> (%s)) of suspended user <@!%s> (%s): `%s` (expires <t:%d:R>)", lobbyParams.DiscordID, lobbyParams.DisplayName, suspendedUserID, otherDiscordID, suspensionRecord.UserNoticeText, suspensionRecord.SuspensionExpiry.Unix()), false); err != nil {
-					p.logger.Warn("Failed to send audit message", zap.String("channel_id", gg.AuditChannelID), zap.Error(err))
-				}
-				const maxMessageLength = 60
-				message := suspensionRecord.UserNoticeText
 				expires := fmt.Sprintf(" [exp: %s]", FormatDuration(time.Until(suspensionRecord.SuspensionExpiry)))
-
-				if len(message)+len(expires) > maxMessageLength {
-					message = message[:maxMessageLength-len(expires)-3] + "..."
+				reason := suspensionRecord.UserNoticeText
+				if len(reason)+len(expires) > maxMessageLength {
+					reason = reason[:maxMessageLength-len(expires)-3] + "..."
 				}
-				message = message + expires
-				return NewLobbyError(KickedFromLobbyGroup, message)
+				reason = reason + expires
+				auditLog := fmt.Sprintf("has suspended alt: <@!%s> `%s` (expires <t:%d:R>)", suspendedUserID, suspensionRecord.UserNoticeText, suspensionRecord.SuspensionExpiry.Unix())
+				return joinRejected("suspended_alternate", reason, auditLog)
 			}
 		}
 	}
@@ -334,33 +314,20 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 
 	if gg.MinimumAccountAgeDays > 0 && !gg.IsAccountAgeBypass(userID) {
 		// Check the account creation date.
-		discordID, err := GetDiscordIDByUserID(ctx, p.db, userID)
-		if err != nil {
-			return fmt.Errorf("failed to get discord ID by user ID: %w", err)
-		}
-
-		t, err := discordgo.SnowflakeTimestamp(discordID)
+		t, err := discordgo.SnowflakeTimestamp(lobbyParams.DiscordID)
 		if err != nil {
 			return fmt.Errorf("failed to get discord snowflake timestamp: %w", err)
 		}
 
 		if t.After(time.Now().AddDate(0, 0, -gg.MinimumAccountAgeDays)) {
-
 			accountAge := time.Since(t).Hours() / 24
-
-			metricsTags["error"] = "account_age"
-
-			if _, err := p.appBot.dg.ChannelMessageSend(gg.AuditChannelID, fmt.Sprintf("Rejected user <@%s> because of account age (%d days).", discordID, int(accountAge))); err != nil {
-				p.logger.Warn("Failed to send audit message", zap.String("channel_id", gg.AuditChannelID), zap.Error(err))
-			}
-
-			return NewLobbyErrorf(KickedFromLobbyGroup, "account is too new to join this guild")
+			reason := fmt.Sprintf("Your account age (%d days) is too new (<%d days) to join this guild. ", int(accountAge), gg.MinimumAccountAgeDays)
+			auditLog := fmt.Sprintf("account age (%d > %d days.", int(accountAge), gg.MinimumAccountAgeDays)
+			return joinRejected("account_age", reason, auditLog)
 		}
 	}
 
 	if gg.BlockVPNUsers && params.isVPN && !gg.IsVPNBypass(userID) && params.ipInfo != nil {
-		metricsTags["error"] = "vpn_user"
-
 		if params.ipInfo.FraudScore() >= gg.FraudScoreThreshold {
 
 			fields := []*discordgo.MessageEmbedField{
@@ -432,8 +399,9 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 			if gg := params.guildGroups[groupID]; gg != nil {
 				guildName = gg.Group.Name
 			}
-
-			return NewLobbyError(KickedFromLobbyGroup, fmt.Sprintf("%s does not allow VPN users.", guildName))
+			reason := fmt.Sprintf("Disable VPN to join %s", guildName)
+			auditLog := fmt.Sprintf("vpn probability score %d >= %d", params.ipInfo.FraudScore(), gg.FraudScoreThreshold)
+			return joinRejected("vpn_user", reason, auditLog)
 		}
 	}
 
@@ -441,7 +409,9 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		allowedFeatures := gg.AllowedFeatures
 		for _, feature := range params.supportedFeatures {
 			if !slices.Contains(allowedFeatures, feature) {
-				return NewLobbyError(KickedFromLobbyGroup, "This guild does not allow clients with `feature DLLs`.")
+				reason := fmt.Sprintf("You are not allowed to join this guild with the feature `%s` enabled.", feature)
+				auditLog := fmt.Sprintf("feature `%s` not allowed in this guild", feature)
+				return joinRejected("feature_not_allowed", reason, auditLog)
 			}
 		}
 	}

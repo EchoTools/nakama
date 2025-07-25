@@ -220,7 +220,7 @@ func (g *GuildGroup) IsAllowedFeature(feature string) bool {
 }
 
 func (g *GuildGroup) IsAllowedMatchmaking(userID string) bool {
-	if !g.MembersOnlyMatchmaking {
+	if !g.EnableMembersOnlyMatchmaking {
 		return true
 	}
 	g.State.RLock()
