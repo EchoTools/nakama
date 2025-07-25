@@ -55,6 +55,11 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		sbmm = NewSkillBasedMatchmaker()
 	)
 
+	// Register hooks
+	if err = initializer.RegisterAfterReadStorageObjects(AfterReadStorageObjectsHook); err != nil {
+		return fmt.Errorf("unable to register AfterReadStorageObjects hook: %w", err)
+	}
+
 	ctx = context.WithValue(ctx, runtime.RUNTIME_CTX_ENV, vars)
 	// Initialize the discord bot if the token is set
 	if appBotToken, ok := vars["DISCORD_BOT_TOKEN"]; !ok || appBotToken == "" {

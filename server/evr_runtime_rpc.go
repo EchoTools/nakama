@@ -237,12 +237,11 @@ func MatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime
 		} else {
 			// Unpack the bitsets from the session token
 			vars, ok := ctx.Value(runtime.RUNTIME_CTX_VARS).(map[string]string)
-			if !ok {
-				return "", fmt.Errorf("failed to get session vars")
-			}
-			memberships, err = MembershipsFromSessionVars(vars)
-			if err != nil {
-				return "", fmt.Errorf("failed to get memberships from session vars: %s", err.Error())
+			if ok {
+				memberships, err = MembershipsFromSessionVars(vars)
+				if err != nil {
+					return "", fmt.Errorf("failed to get memberships from session vars: %s", err.Error())
+				}
 			}
 		}
 	}
@@ -1049,6 +1048,7 @@ type AuthenticatePasswordRequest struct {
 	Username     string `json:"username"`
 	Password     string `json:"password"`
 	RefreshToken string `json:"refresh_token"`
+	IntentStr    string `json:"intents"`
 }
 
 var ErrAuthenticateFailed = runtime.NewError("authentication failed", StatusUnauthenticated)
@@ -1063,14 +1063,13 @@ func AuthenticatePasswordRPC(ctx context.Context, logger runtime.Logger, db *sql
 
 	request := AuthenticatePasswordRequest{}
 	if err := json.Unmarshal([]byte(payload), &request); err != nil {
-		return "", err
+		return "", runtime.NewError(fmt.Sprintf("Failed to unmarshal request: %v", err), StatusInvalidArgument)
 	}
 
 	var err error
 	var userID, username, tokenID string
 	var tokenIssuedAt int64 = time.Now().UTC().Unix()
 	var vars map[string]string
-
 	if request.RefreshToken != "" {
 		var userUUID uuid.UUID
 		userUUID, username, vars, tokenID, tokenIssuedAt, err = SessionRefresh(ctx, nk.logger, db, nk.config, nk.sessionCache, request.RefreshToken)
@@ -1079,7 +1078,7 @@ func AuthenticatePasswordRPC(ctx context.Context, logger runtime.Logger, db *sql
 		}
 		userID = userUUID.String()
 	} else {
-		vars = make(map[string]string)
+
 		switch {
 
 		case request.UserID != "":
@@ -1103,6 +1102,19 @@ func AuthenticatePasswordRPC(ctx context.Context, logger runtime.Logger, db *sql
 		default:
 			return "", RPCErrInvalidRequest
 		}
+
+		sessionVars := SessionVars{}
+
+		// If the user requests intents, they must be a global developer
+		if request.IntentStr != "" {
+			// Check if they have the required intents
+			if isMember, err := CheckGroupMembershipByName(ctx, db, userID, GroupGlobalDevelopers, "system"); err != nil {
+				return "", err
+			} else if isMember {
+				sessionVars.Intents.UnmarshalText([]byte(request.IntentStr))
+			}
+		}
+		vars = sessionVars.MarshalVars()
 
 		var account *api.Account
 		if account, err = nk.AccountGetId(ctx, userID); err != nil || account == nil {
