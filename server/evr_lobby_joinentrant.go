@@ -254,16 +254,16 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 	)
 	if recordsByUserID := params.activeSuspensionRecords[groupID]; len(recordsByUserID) > 0 {
 		for recordUserID, r := range recordsByUserID {
-			// If the record is expired, skip it.
 			if r.IsExpired() || r.SuspensionExpiry.Before(suspensionRecord.SuspensionExpiry) {
+				// Skip expired records.
 				continue
 			}
 			if recordUserID != userID {
+				// The suspension is for an alternate account.
 				if params.ignoreDisabledAlternates {
 					// User is excluded from suspension checks if they are ignoring disabled alternates.
 					continue
 				}
-				// Suspension record is for user's alternate account
 				if gg.RejectPlayersWithSuspendedAlternates {
 					suspensionRecord = r
 					suspendedUserID = userID
@@ -272,43 +272,40 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 				}
 			}
 		}
-		const maxMessageLength = 60
+
 		if suspendedUserID != "" {
+			const maxMessageLength = 64
+			var metricTag, auditLog string
+
 			if suspendedUserID == userID {
 				// User has an active suspension
-				reason := suspensionRecord.UserNoticeText
-				expires := fmt.Sprintf(" [exp: %s]", FormatDuration(time.Until(suspensionRecord.SuspensionExpiry)))
-				if len(reason)+len(expires) > maxMessageLength {
-					reason = reason[:maxMessageLength-len(expires)-3] + "..."
-				}
-				reason = reason + expires
-				auditLog := fmt.Sprintf("suspended via enforcement record: `%s` (expires <t:%d:R>)", suspensionRecord.UserNoticeText, suspensionRecord.SuspensionExpiry.Unix())
-				return joinRejected("suspended_user", reason, auditLog)
+				auditLog = "suspension record"
+				metricTag = "suspended_user"
 			} else {
 				// This is an alternate account of a suspended user.
-				expires := fmt.Sprintf(" [exp: %s]", FormatDuration(time.Until(suspensionRecord.SuspensionExpiry)))
-				reason := suspensionRecord.UserNoticeText
-				if len(reason)+len(expires) > maxMessageLength {
-					reason = reason[:maxMessageLength-len(expires)-3] + "..."
-				}
-				reason = reason + expires
-				auditLog := fmt.Sprintf("has suspended alt: <@!%s> `%s` (expires <t:%d:R>)", suspendedUserID, suspensionRecord.UserNoticeText, suspensionRecord.SuspensionExpiry.Unix())
-				return joinRejected("suspended_alternate", reason, auditLog)
+				auditLog = fmt.Sprintf("suspended alt (<@!%s>)", suspendedUserID)
+				metricTag = "suspended_alt_user"
 			}
+			reason := suspensionRecord.UserNoticeText
+
+			if suspensionRecord.IsLimitedAccess() {
+				reason = "Privates only: " + reason
+			}
+			expires := fmt.Sprintf(" [exp: %s]", FormatDuration(time.Until(suspensionRecord.SuspensionExpiry)))
+			if len(reason)+len(expires) > maxMessageLength {
+				reason = reason[:maxMessageLength-len(expires)-3] + "..."
+			}
+			reason = reason + expires
+			return joinRejected(metricTag, reason, auditLog)
 		}
 	}
 
-	if gg.IsLimitedAccess(userID) {
-
-		switch lobbyParams.Mode {
-		case evr.ModeArenaPublic, evr.ModeCombatPublic, evr.ModeSocialPublic:
-			metricsTags["error"] = "limited_access_user"
-
-			if _, err := p.appBot.LogAuditMessage(ctx, groupID, fmt.Sprintf("Rejected limited access user <@%s>", userID), true); err != nil {
-				p.logger.Warn("Failed to send audit message", zap.String("channel_id", gg.AuditChannelID), zap.Error(err))
-			}
-
-			return NewLobbyError(KickedFromLobbyGroup, "user does not have access social lobbies or matchmaking.")
+	// Check if the user is allowed to join public lobbies.
+	if slices.Contains(evr.PublicModes, lobbyParams.Mode) {
+		if gg.IsLimitedAccess(userID) || suspensionRecord.IsLimitedAccess() {
+			auditLog := fmt.Sprintf("Rejected limited access user <@%s> (%s) from public lobby (%s)", lobbyParams.DiscordID, lobbyParams.DisplayName, lobbyParams.Mode)
+			reason := "You are not allowed to join public lobbies."
+			return joinRejected("limited_access_user", reason, auditLog)
 		}
 	}
 
