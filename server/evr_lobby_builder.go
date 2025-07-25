@@ -17,8 +17,6 @@ import (
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
-	"github.com/intinig/go-openskill/rating"
-	"github.com/intinig/go-openskill/types"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -189,11 +187,7 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 
 			mu := entry.NumericProperties["rating_mu"]
 			sigma := entry.NumericProperties["rating_sigma"]
-			rating := rating.NewWithOptions(&types.OpenSkillOptions{
-				Mu:    &mu,
-				Sigma: &sigma,
-			})
-
+			rating := NewRating(0, mu, sigma)
 			percentile, ok := entry.NumericProperties["rank_percentile"]
 			if !ok {
 				percentile = 0.0

@@ -5,9 +5,7 @@ import (
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama/v3/server/evr"
-	"github.com/intinig/go-openskill/rating"
 	"github.com/intinig/go-openskill/types"
-	"go.uber.org/thriftrw/ptr"
 )
 
 type PlayerInfo struct {
@@ -47,17 +45,5 @@ func (p *PlayerInfo) UUID() uuid.UUID {
 }
 
 func (p *PlayerInfo) Rating() types.Rating {
-	if p.RatingMu == 0.0 && p.RatingSigma == 0.0 {
-		return NewDefaultRating()
-	}
-
-	return rating.NewWithOptions(&types.OpenSkillOptions{
-		Mu:    ptr.Float64(p.RatingMu),
-		Sigma: ptr.Float64(p.RatingSigma),
-	})
-}
-
-func (p *PlayerInfo) SetRating(r types.Rating) {
-	p.RatingMu = r.Mu
-	p.RatingSigma = r.Sigma
+	return NewRating(0, p.RatingMu, p.RatingSigma)
 }

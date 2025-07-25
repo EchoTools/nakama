@@ -532,10 +532,7 @@ func (p *LobbySessionParameters) FromMatchmakerEntry(entry *MatchmakerEntry) {
 
 	mu := numericProperties["rating_mu"]
 	sigma := numericProperties["rating_sigma"]
-	rating := rating.NewWithOptions(&types.OpenSkillOptions{
-		Mu:    &mu,
-		Sigma: &sigma,
-	})
+	rating := NewRating(0, mu, sigma)
 
 	p.Mode = evr.ToSymbol(stringProperties["game_mode"])
 	p.GroupID = uuid.FromStringOrNil(stringProperties["group_id"])

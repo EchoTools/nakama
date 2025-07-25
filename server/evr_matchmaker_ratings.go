@@ -55,10 +55,7 @@ func (t RatedTeam) Rating() types.Rating {
 	averageSigmaSquared := sumSigmaSquared / float64(len(t))
 	rmsSigma := math.Sqrt(averageSigmaSquared)
 
-	return rating.NewWithOptions(&types.OpenSkillOptions{
-		Mu:    ptr.Float64(meanMu),
-		Sigma: ptr.Float64(rmsSigma),
-	})
+	return NewRating(0, meanMu, rmsSigma)
 }
 
 func (t RatedTeam) Ordinal() float64 {
@@ -66,10 +63,11 @@ func (t RatedTeam) Ordinal() float64 {
 }
 
 func NewDefaultRating() types.Rating {
-	return rating.NewWithOptions(&types.OpenSkillOptions{
-		Mu:    ptr.Float64(22.0),
-		Sigma: ptr.Float64(8.333),
-	})
+	return types.Rating{
+		Z:     3,
+		Mu:    22.0,
+		Sigma: 8.333,
+	}
 }
 
 // CalculateNewPlayerRatings calculates the new player ratings based on the match outcome.
