@@ -62,11 +62,27 @@ func (t RatedTeam) Ordinal() float64 {
 	return rating.Ordinal(t.Rating())
 }
 
+func NewRating[T int | int64 | float64](z, mu, sigma T) types.Rating {
+	r := NewDefaultRating()
+	if zInt, ok := any(z).(int); ok {
+		r.Z = zInt
+	}
+	if muFloat := float64(mu); muFloat > 0 {
+		r.Mu = muFloat
+	}
+	if sigmaFloat := float64(sigma); sigmaFloat > 0 {
+		r.Sigma = sigmaFloat
+	} else {
+		r.Sigma = r.Mu / float64(r.Z)
+	}
+	return r
+}
+
 func NewDefaultRating() types.Rating {
 	return types.Rating{
 		Z:     3,
-		Mu:    22.0,
-		Sigma: 8.333,
+		Mu:    10.0,
+		Sigma: 10.0 / 3.0,
 	}
 }
 

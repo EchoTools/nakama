@@ -438,22 +438,3 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, nk runtime.NakamaMod
 
 	return playerStatistics, boardMap, nil
 }
-
-func NewRating[T int | int64 | float64](z, mu, sigma T) (r types.Rating) {
-	if zInt, ok := any(z).(int); ok {
-		r.Z = zInt
-	} else {
-		r.Z = 3
-	}
-	if muFloat := float64(mu); muFloat > 0 {
-		r.Mu = muFloat
-	} else {
-		r.Mu = 25.0
-	}
-	if sigmaFloat := float64(sigma); sigmaFloat > 0 {
-		r.Sigma = sigmaFloat
-	} else {
-		r.Sigma = r.Mu / float64(r.Z)
-	}
-	return r
-}
