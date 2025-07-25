@@ -469,15 +469,20 @@ var (
 					Required:    false,
 				},
 				{
-					Type:        discordgo.ApplicationCommandOptionBoolean,
-					Name:        "require_community_values",
-					Description: "Require the user to accept the community values before they can rejoin.",
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "moderator_notes",
+					Description: "Notes for the audit log (other moderators)",
 					Required:    false,
 				},
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "moderator_notes",
-					Description: "Notes for the audit log (other moderators)",
+					Name:        "allow_private_lobbies",
+					Description: "Limit the user to only joining private lobbies.",
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionBoolean,
+					Name:        "require_community_values",
+					Description: "Require the user to accept the community values before they can rejoin.",
 					Required:    false,
 				},
 			},
@@ -2327,6 +2332,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				notes                  string
 				requireCommunityValues bool
 				duration               string
+				allowPrivateLobbies    bool
 			)
 
 			for _, o := range i.ApplicationCommandData().Options {
@@ -2349,10 +2355,12 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					requireCommunityValues = o.BoolValue()
 				case "suspension_duration":
 					duration = o.StringValue()
+				case "allow_private_lobbies":
+					allowPrivateLobbies = o.BoolValue()
 				}
 			}
 
-			return d.kickPlayer(logger, i, callerMember, target, duration, userNotice, notes, requireCommunityValues)
+			return d.kickPlayer(logger, i, callerMember, target, duration, userNotice, notes, requireCommunityValues, allowPrivateLobbies)
 		},
 		"join-player": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 
