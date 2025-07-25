@@ -217,6 +217,10 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		}
 	}
 
+	if !isMember {
+		p.logger.Warn("User is not a member of this guild group")
+	}
+	
 	// User is not a member of the group.
 	if gg.MembersOnlyMatchmaking && !isMember {
 
