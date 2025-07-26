@@ -29,11 +29,9 @@ func (g CandidateList) Len() int {
 func (g CandidateList) Ratings() []types.Rating {
 	ratings := make([]types.Rating, len(g))
 	for i, e := range g {
-		ratings[i] = types.Rating{
-			Mu:    e.GetProperties()["rating_mu"].(float64),
-			Sigma: e.GetProperties()["rating_sigma"].(float64),
-			Z:     3,
-		}
+		mu := e.GetProperties()["rating_mu"].(float64)
+		sigma := e.GetProperties()["rating_sigma"].(float64)
+		ratings[i] = NewRating(0, mu, sigma)
 	}
 	return ratings
 }
