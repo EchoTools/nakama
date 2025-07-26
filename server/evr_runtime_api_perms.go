@@ -123,7 +123,7 @@ func (s *SessionVars) MarshalVars() map[string]string {
 		}
 	}
 	if len(intentMap) == 0 {
-		return nil // Return nil if there are no intents set.
+		return map[string]string{}
 	}
 
 	return intentMap
