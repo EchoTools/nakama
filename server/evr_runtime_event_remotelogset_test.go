@@ -767,3 +767,185 @@ func TestEventRemoteLogSet_ProcessStatsMessage(t *testing.T) {
 		assert.True(t, statsMsg.IsWinner())
 	})
 }
+
+// Tests for new extracted functions
+
+func TestDefaultStatsProcessor_ConvertStatsToEntries(t *testing.T) {
+	t.Run("correctly processes stats through interface", func(t *testing.T) {
+		processor := &DefaultStatsProcessor{}
+		
+		stats := evr.MatchTypeStats{
+			ArenaWins:   5,
+			ArenaLosses: 2,
+			Goals:       10,
+		}
+		
+		userID := "user123"
+		displayName := "TestUser"
+		groupID := "group456"
+		mode := evr.ModeArenaPublic
+		
+		entries, err := processor.ConvertStatsToEntries(userID, displayName, groupID, mode, stats)
+		
+		assert.NoError(t, err)
+		assert.NotEmpty(t, entries)
+		
+		// Should have 9 entries (3 non-zero stats × 3 reset schedules)
+		assert.Len(t, entries, 9)
+		
+		// Verify all entries have correct structure
+		for _, entry := range entries {
+			assert.Equal(t, userID, entry.UserID)
+			assert.Equal(t, displayName, entry.DisplayName)
+			assert.Equal(t, groupID, entry.BoardMeta.GroupID)
+			assert.Equal(t, mode, entry.BoardMeta.Mode)
+			assert.Greater(t, entry.Score, int64(0))
+		}
+	})
+}
+
+func TestValidatePlayerForStatsUpdate(t *testing.T) {
+	t.Run("validates player successfully", func(t *testing.T) {
+		sessionUUID := uuid.Must(uuid.NewV4())
+		userID := uuid.Must(uuid.NewV4())
+		evrID := evr.EvrId{PlatformCode: 1, AccountId: 12345}
+		
+		// Create a match label with a valid player
+		label := &MatchLabel{
+			Players: []PlayerInfo{
+				{
+					UserID:      userID.String(),
+					DisplayName: "TestPlayer",
+					Team:        BlueTeam,
+					EvrID:       evrID,
+				},
+			},
+		}
+		
+		// Create a stats message
+		msg := &evr.RemoteLogPostMatchTypeStats{
+			GenericRemoteLog: evr.GenericRemoteLog{
+				XPID: evrID.String(),
+			},
+			SessionUUIDStr: sessionUUID.String(),
+		}
+		
+		playerInfo, err := validatePlayerForStatsUpdate(msg, label)
+		
+		assert.NoError(t, err)
+		assert.NotNil(t, playerInfo)
+		assert.Equal(t, userID.String(), playerInfo.UserID)
+		assert.Equal(t, "TestPlayer", playerInfo.DisplayName)
+		assert.Equal(t, BlueTeam, playerInfo.Team)
+	})
+	
+	t.Run("returns error for player not in match", func(t *testing.T) {
+		evrID := evr.EvrId{PlatformCode: 1, AccountId: 12345}
+		
+		label := &MatchLabel{
+			Players: []PlayerInfo{}, // Empty players list
+		}
+		
+		msg := &evr.RemoteLogPostMatchTypeStats{
+			GenericRemoteLog: evr.GenericRemoteLog{
+				XPID: evrID.String(),
+			},
+		}
+		
+		playerInfo, err := validatePlayerForStatsUpdate(msg, label)
+		
+		assert.Error(t, err)
+		assert.Nil(t, playerInfo)
+		assert.Contains(t, err.Error(), "player not in match")
+	})
+	
+	t.Run("returns error for spectator player", func(t *testing.T) {
+		evrID := evr.EvrId{PlatformCode: 1, AccountId: 12345}
+		
+		label := &MatchLabel{
+			Players: []PlayerInfo{
+				{
+					UserID:      uuid.Must(uuid.NewV4()).String(),
+					DisplayName: "SpectatorPlayer",
+					Team:        Spectator, // Spectator team
+					EvrID:       evrID,
+				},
+			},
+		}
+		
+		msg := &evr.RemoteLogPostMatchTypeStats{
+			GenericRemoteLog: evr.GenericRemoteLog{
+				XPID: evrID.String(),
+			},
+		}
+		
+		playerInfo, err := validatePlayerForStatsUpdate(msg, label)
+		
+		assert.Error(t, err)
+		assert.Nil(t, playerInfo)
+		assert.Contains(t, err.Error(), "non-player profile update request")
+	})
+	
+	t.Run("returns error for invalid evr ID", func(t *testing.T) {
+		label := &MatchLabel{
+			Players: []PlayerInfo{},
+		}
+		
+		msg := &evr.RemoteLogPostMatchTypeStats{
+			GenericRemoteLog: evr.GenericRemoteLog{
+				XPID: "invalid-evr-id",
+			},
+		}
+		
+		playerInfo, err := validatePlayerForStatsUpdate(msg, label)
+		
+		assert.Error(t, err)
+		assert.Nil(t, playerInfo)
+		assert.Contains(t, err.Error(), "failed to parse evr ID")
+	})
+}
+
+func TestProcessPlayerStatisticsWithProcessor(t *testing.T) {
+	t.Run("processes stats with custom processor", func(t *testing.T) {
+		// Use real logger to avoid mocking complexity
+		zapLogger := NewConsoleLogger(nil, false)
+		logger := NewRuntimeGoLogger(zapLogger)
+		
+		queue := &StatisticsQueue{
+			logger: logger,
+			ch:     make(chan []*StatisticsQueueEntry, 10),
+		}
+		
+		// Use the default processor
+		processor := &DefaultStatsProcessor{}
+		
+		stats := evr.MatchTypeStats{
+			Goals: 5,
+			Saves: 3,
+		}
+		
+		err := processPlayerStatisticsWithProcessor(
+			context.Background(),
+			logger,
+			queue,
+			"user123",
+			"TestUser",
+			"group456",
+			evr.ModeArenaPublic,
+			stats,
+			processor,
+		)
+		
+		assert.NoError(t, err)
+		
+		// Verify entries were added to queue
+		select {
+		case receivedEntries := <-queue.ch:
+			assert.NotEmpty(t, receivedEntries)
+			// Should have 6 entries (2 non-zero stats × 3 reset schedules)
+			assert.Len(t, receivedEntries, 6)
+		case <-time.After(100 * time.Millisecond):
+			t.Fatal("Expected entries to be in channel")
+		}
+	})
+}
