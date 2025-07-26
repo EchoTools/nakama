@@ -17,6 +17,30 @@ import (
 	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
+// StatsProcessor defines an interface for converting match statistics to leaderboard entries
+type StatsProcessor interface {
+	ConvertStatsToEntries(userID, displayName, groupID string, mode evr.Symbol, stats evr.MatchTypeStats) ([]*StatisticsQueueEntry, error)
+}
+
+// DefaultStatsProcessor implements StatsProcessor with the default logic
+type DefaultStatsProcessor struct{}
+
+func (p *DefaultStatsProcessor) ConvertStatsToEntries(userID, displayName, groupID string, mode evr.Symbol, stats evr.MatchTypeStats) ([]*StatisticsQueueEntry, error) {
+	return typeStatsToScoreMap(userID, displayName, groupID, mode, stats)
+}
+
+// PostMatchStatsProcessorConfig contains configuration for post-match stats processing
+type PostMatchStatsProcessorConfig struct {
+	StatsProcessor StatsProcessor
+}
+
+// NewPostMatchStatsProcessorConfig creates a new configuration with default values
+func NewPostMatchStatsProcessorConfig() *PostMatchStatsProcessorConfig {
+	return &PostMatchStatsProcessorConfig{
+		StatsProcessor: &DefaultStatsProcessor{},
+	}
+}
+
 var _ = Event(&EventRemoteLogSet{})
 
 type EventRemoteLogSet struct {
@@ -468,20 +492,11 @@ func (s *EventRemoteLogSet) processPostMatchTypeStats(ctx context.Context, logge
 	if err != nil || label == nil {
 		return fmt.Errorf("failed to get match label: %w", err)
 	}
-	xpid, err := evr.ParseEvrId(msg.XPID)
+	
+	// Validate player information using extracted function
+	playerInfo, err := validatePlayerForStatsUpdate(msg, label)
 	if err != nil {
-		return fmt.Errorf("failed to parse evr ID: %w", err)
-	}
-	// Get the player's information
-	playerInfo := label.GetPlayerByEvrID(*xpid)
-	if playerInfo == nil {
-		// If the player isn't in the match, do not update the stats
-		return fmt.Errorf("player not in match: %s", msg.XPID)
-	}
-
-	// If the player isn't in the match, or isn't a player, do not update the stats
-	if playerInfo == nil || (playerInfo.Team != BlueTeam && playerInfo.Team != OrangeTeam) {
-		return fmt.Errorf("non-player profile update request: %s", msg.XPID)
+		return err
 	}
 	logger = logger.WithFields(map[string]any{
 		"player_uid":  playerInfo.UserID,
@@ -521,11 +536,50 @@ func (s *EventRemoteLogSet) processPostMatchTypeStats(ctx context.Context, logge
 		return nil
 	}
 
-	statEntries, err := typeStatsToScoreMap(s.UserID, s.Username, groupIDStr, label.Mode, msg.Stats)
+	return s.processPlayerStatistics(ctx, logger, statisticsQueue, s.UserID, s.Username, groupIDStr, label.Mode, msg.Stats)
+}
+
+// processPlayerStatistics extracts the statistics processing logic for better testability
+func (s *EventRemoteLogSet) processPlayerStatistics(ctx context.Context, logger runtime.Logger, statisticsQueue *StatisticsQueue, userID, username, groupID string, mode evr.Symbol, stats evr.MatchTypeStats) error {
+	config := NewPostMatchStatsProcessorConfig()
+	
+	statEntries, err := config.StatsProcessor.ConvertStatsToEntries(userID, username, groupID, mode, stats)
 	if err != nil {
 		return fmt.Errorf("failed to convert type stats to score map: %w", err)
 	}
+	
 	return statisticsQueue.Add(statEntries)
+}
+
+// processPlayerStatisticsWithProcessor allows injecting a custom stats processor for testing
+func processPlayerStatisticsWithProcessor(ctx context.Context, logger runtime.Logger, statisticsQueue *StatisticsQueue, userID, username, groupID string, mode evr.Symbol, stats evr.MatchTypeStats, processor StatsProcessor) error {
+	statEntries, err := processor.ConvertStatsToEntries(userID, username, groupID, mode, stats)
+	if err != nil {
+		return fmt.Errorf("failed to convert type stats to score map: %w", err)
+	}
+	
+	return statisticsQueue.Add(statEntries)
+}
+
+// validatePlayerForStatsUpdate extracts player validation logic for better testability
+func validatePlayerForStatsUpdate(msg *evr.RemoteLogPostMatchTypeStats, label *MatchLabel) (*PlayerInfo, error) {
+	xpid, err := evr.ParseEvrId(msg.XPID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse evr ID: %w", err)
+	}
+	
+	// Get the player's information
+	playerInfo := label.GetPlayerByEvrID(*xpid)
+	if playerInfo == nil {
+		return nil, fmt.Errorf("player not in match: %s", msg.XPID)
+	}
+
+	// If the player isn't in the match, or isn't a player, do not update the stats
+	if playerInfo.Team != BlueTeam && playerInfo.Team != OrangeTeam {
+		return nil, fmt.Errorf("non-player profile update request: %s", msg.XPID)
+	}
+	
+	return playerInfo, nil
 }
 
 func typeStatsToScoreMap(userID, displayName, groupID string, mode evr.Symbol, stats evr.MatchTypeStats) ([]*StatisticsQueueEntry, error) {
