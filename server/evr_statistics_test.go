@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestFloat64ToScore(t *testing.T) {
+func TestFloat64ToScoreLegacy(t *testing.T) {
 	testCases := []struct {
 		name          string
 		input         float64
@@ -39,20 +39,20 @@ func TestFloat64ToScore(t *testing.T) {
 		{
 			name:          "small positive value",
 			input:         0.000000001,
-			expectedScore: 0,
+			expectedScore: 1,
 			expectedError: nil,
 		},
 		{
 			name:          "max positive value",
 			input:         float64(1<<32) - 1,
-			expectedScore: 4294967294000000000,
+			expectedScore: 4294967295000000000,
 			expectedError: nil,
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			score, err := Float64ToScore(tc.input)
+			score, err := Float64ToScoreLegacy(tc.input)
 
 			if tc.expectedError != nil {
 				if err == nil || err.Error() != tc.expectedError.Error() {

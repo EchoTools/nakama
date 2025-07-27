@@ -592,7 +592,7 @@ func typeStatsToScoreMap(userID, displayName, groupID string, mode evr.Symbol, s
 				continue
 			}
 
-			score, err := Float64ToScore(statValue)
+			score, subscore, err := Float64ToScore(statValue)
 			if err != nil {
 				return nil, fmt.Errorf("failed to convert float64 to int64 pair: %w", err)
 			}
@@ -602,7 +602,7 @@ func typeStatsToScoreMap(userID, displayName, groupID string, mode evr.Symbol, s
 				UserID:      userID,
 				DisplayName: displayName,
 				Score:       score,
-				Subscore:    0,
+				Subscore:    subscore,
 				Metadata:    nil,
 			})
 		}
