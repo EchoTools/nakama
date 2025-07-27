@@ -82,6 +82,16 @@ func ScoreToFloat64Legacy(score int64) float64 {
 
 // Float64ToScore converts a float64 (including negative values) into two int64 values for leaderboard storage.
 // Returns (score, subscore, error) where both score and subscore are used to maintain proper sort order.
+// 
+// The encoding algorithm ensures that leaderboard records sort correctly when using standard
+// integer comparison (score first, then subscore), maintaining the same order as the original float64 values.
+//
+// Supported range: -1e15 to +1e15 with ~1e-9 fractional precision.
+// 
+// Examples:
+//   Float64ToScore(-2.5)  -> (-3, 499999999, nil)  // Negative values
+//   Float64ToScore(0.0)   -> (0, 0, nil)           // Zero
+//   Float64ToScore(1.7)   -> (1, 700000000, nil)   // Positive values
 func Float64ToScore(f float64) (int64, int64, error) {
 	// Check for invalid values
 	if math.IsNaN(f) || math.IsInf(f, 0) {
@@ -119,6 +129,18 @@ func Float64ToScore(f float64) (int64, int64, error) {
 }
 
 // ScoreToFloat64 converts two int64 leaderboard values back into a float64, supporting negative numbers.
+// This is the inverse operation of Float64ToScore.
+//
+// Parameters:
+//   score:    The primary leaderboard score field
+//   subscore: The secondary leaderboard score field (must be 0 <= subscore < 1e9)
+//
+// Returns the original float64 value (within precision limits) or an error for invalid inputs.
+//
+// Examples:
+//   ScoreToFloat64(-3, 499999999) -> -2.5
+//   ScoreToFloat64(0, 0)          -> 0.0  
+//   ScoreToFloat64(1, 700000000)  -> 1.7
 func ScoreToFloat64(score int64, subscore int64) (float64, error) {
 	// Validate subscore range
 	if subscore < 0 || subscore >= int64(LeaderboardScoreScalingFactor) {
