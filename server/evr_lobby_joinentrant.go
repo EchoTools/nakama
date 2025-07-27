@@ -209,7 +209,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		if _, err := p.appBot.LogAuditMessage(ctx, groupID, auditMessage, true); err != nil {
 			p.logger.Warn("Failed to send audit message", zap.String("channel_id", groupID), zap.Error(err))
 		}
-		return NewLobbyErrorf(KickedFromLobbyGroup, reason)
+		return NewLobbyError(KickedFromLobbyGroup, reason)
 	}
 
 	userID := session.UserID().String()
@@ -235,7 +235,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 				if err != nil && !IsDiscordErrorCode(err, discordgo.ErrCodeUnknownMember) {
 					p.logger.Warn("Failed to get guild member. failing open.", zap.String("guild_id", gg.GuildID), zap.Error(err))
 				}
-			} else if guildMember == nil || guildMember.Pending == true {
+			} else if guildMember == nil || guildMember.Pending {
 				return joinRejected("not_member", "You are not a member of this private guild.", "not a member of private guild")
 			}
 		}

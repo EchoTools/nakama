@@ -23,7 +23,7 @@ func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap
 		if !lobbyParams.NextMatchID.IsNil() {
 
 			p.nk.metrics.CustomCounter("lobby_join_next_match", lobbyParams.MetricsTags(), 1)
-			logger.Info("Joining next match", zap.String("mid", matchID.String()))
+			logger.Info("Joining next match", zap.String("mid", lobbyParams.NextMatchID.UUID.String()))
 			return p.lobbyJoin(ctx, logger, session, lobbyParams, lobbyParams.NextMatchID)
 		}
 
