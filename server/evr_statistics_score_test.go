@@ -187,11 +187,13 @@ func TestLeaderboardSortingDescending(t *testing.T) {
 
 func TestScoreToFloat64ErrorCases(t *testing.T) {
 	// Test invalid subscore values (should be 0 <= subscore < 1e9)
+	// and invalid score values (should be non-negative)
 	testCases := []struct {
 		name     string
 		score    int64
 		subscore int64
 	}{
+		{"negative score", -1, 0},
 		{"negative subscore", 1, -1},
 		{"subscore too large", 1, 1000000000},
 		{"way too large subscore", 0, 2000000000},

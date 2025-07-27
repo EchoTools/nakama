@@ -85,13 +85,14 @@ func ScoreToFloat64Legacy(score int64) float64 {
 // 
 // The encoding algorithm ensures that leaderboard records sort correctly when using standard
 // integer comparison (score first, then subscore), maintaining the same order as the original float64 values.
+// All score and subscore values are non-negative to comply with Nakama's leaderboard requirements.
 //
 // Supported range: -1e15 to +1e15 with ~1e-9 fractional precision.
 // 
 // Examples:
-//   Float64ToScore(-2.5)  -> (-3, 499999999, nil)  // Negative values
-//   Float64ToScore(0.0)   -> (0, 0, nil)           // Zero
-//   Float64ToScore(1.7)   -> (1, 700000000, nil)   // Positive values
+//   Float64ToScore(-2.5)  -> (999999999999997, 499999999, nil)  // Negative values
+//   Float64ToScore(0.0)   -> (1000000000000000, 0, nil)         // Zero  
+//   Float64ToScore(1.7)   -> (1000000000000001, 700000000, nil) // Positive values
 func Float64ToScore(f float64) (int64, int64, error) {
 	// Check for invalid values
 	if math.IsNaN(f) || math.IsInf(f, 0) {
@@ -104,24 +105,25 @@ func Float64ToScore(f float64) (int64, int64, error) {
 	}
 
 	const fracScale = LeaderboardScoreScalingFactor // 1e9 for fractional precision
+	const scoreOffset = int64(1e15)                 // Offset to ensure all scores are non-negative
 	
 	if f < 0 {
-		// For negative numbers
-		intPart := int64(-f)                              // Get the integer magnitude
-		fracPart := (-f) - float64(intPart)             // Get the fractional part (0.0 to 1.0)
+		// For negative numbers: use lower range [0, scoreOffset)
+		absF := -f
+		intPart := int64(absF)                     // Get the integer magnitude
+		fracPart := absF - float64(intPart)       // Get the fractional part (0.0 to 1.0)
 		
 		// Encode so more negative values have smaller scores
-		score := -intPart - 1                            // -1 for -0.x, -2 for -1.x, -3 for -2.x, etc.
-		// Use fracScale-1 to avoid overflow when fracPart is 0 (integers)
+		score := scoreOffset - 1 - intPart                   // More negative = smaller score
 		subscore := int64((1.0 - fracPart) * float64(fracScale - 1)) // Invert fractional for proper ordering
 		
 		return score, subscore, nil
 	} else {
-		// For zero and positive numbers  
+		// For zero and positive numbers: use upper range [scoreOffset, ∞)
 		intPart := int64(f)                     // Get the integer part
 		fracPart := f - float64(intPart)       // Get the fractional part
 		
-		score := intPart                        // Use integer part directly
+		score := scoreOffset + intPart           // Offset ensures non-negative
 		subscore := int64(fracPart * fracScale) // Scale fractional part
 		
 		return score, subscore, nil
@@ -132,32 +134,37 @@ func Float64ToScore(f float64) (int64, int64, error) {
 // This is the inverse operation of Float64ToScore.
 //
 // Parameters:
-//   score:    The primary leaderboard score field
+//   score:    The primary leaderboard score field (must be non-negative)
 //   subscore: The secondary leaderboard score field (must be 0 <= subscore < 1e9)
 //
 // Returns the original float64 value (within precision limits) or an error for invalid inputs.
 //
 // Examples:
-//   ScoreToFloat64(-3, 499999999) -> -2.5
-//   ScoreToFloat64(0, 0)          -> 0.0  
-//   ScoreToFloat64(1, 700000000)  -> 1.7
+//   ScoreToFloat64(999999999999997, 499999999) -> -2.5
+//   ScoreToFloat64(1000000000000000, 0)        -> 0.0  
+//   ScoreToFloat64(1000000000000001, 700000000) -> 1.7
 func ScoreToFloat64(score int64, subscore int64) (float64, error) {
-	// Validate subscore range
+	// Validate input ranges
+	if score < 0 {
+		return 0, fmt.Errorf("invalid score: %d (must be non-negative)", score)
+	}
 	if subscore < 0 || subscore >= int64(LeaderboardScoreScalingFactor) {
 		return 0, fmt.Errorf("invalid subscore: %d", subscore)
 	}
 
 	const fracScale = LeaderboardScoreScalingFactor
+	const scoreOffset = int64(1e15)
 	
-	if score < 0 {
-		// Negative number
-		intPart := -score - 1                           // Convert back to magnitude
+	if score < scoreOffset {
+		// Negative number: score in range [0, scoreOffset)
+		intPart := scoreOffset - 1 - score             // Convert back to magnitude
 		fracPart := 1.0 - (float64(subscore) / float64(fracScale - 1)) // Uninvert the fractional part
 		return -(float64(intPart) + fracPart), nil
 	} else {
-		// Zero or positive number
+		// Zero or positive number: score in range [scoreOffset, ∞)
+		intPart := score - scoreOffset               // Remove offset
 		fracPart := float64(subscore) / fracScale
-		return float64(score) + fracPart, nil
+		return float64(intPart) + fracPart, nil
 	}
 }
 
