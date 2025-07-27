@@ -696,7 +696,7 @@ func (d *DiscordAppBot) handleModalSubmit(logger runtime.Logger, i *discordgo.In
 		userNotice := data.Components[1].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
 		notes := data.Components[2].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
 
-		return d.kickPlayer(logger, i, caller, target, duration, userNotice, notes, false)
+		return d.kickPlayer(logger, i, caller, target, duration, userNotice, notes, false, false)
 	default:
 		return fmt.Errorf("unknown action: %s", action)
 	}
