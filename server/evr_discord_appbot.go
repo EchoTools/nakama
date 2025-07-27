@@ -31,11 +31,6 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-const (
-	CustomizationStorageCollection = "Customization"
-	SavedOutfitsStorageKey         = "outfits"
-)
-
 type DiscordAppBot struct {
 	sync.Mutex
 
@@ -2769,23 +2764,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return nil
 			}
 
-			outfits := make(map[string]*AccountCosmetics)
+			outfits := make(Wardrobe)
 
-			objs, err := d.nk.StorageRead(ctx, []*runtime.StorageRead{
-				{
-					Collection: CustomizationStorageCollection,
-					Key:        SavedOutfitsStorageKey,
-					UserID:     userID,
-				},
-			})
-			if err != nil {
-				return fmt.Errorf("Failed to read saved outfits: %w", err)
-			}
-
-			if len(objs) != 0 {
-				if err := json.Unmarshal([]byte(objs[0].Value), &outfits); err != nil {
-					return fmt.Errorf("Failed to unmarshal saved outfits: %w", err)
-				}
+			if err := StorageRead(ctx, d.nk, userID, outfits, true); err != nil {
+				return fmt.Errorf("failed to read saved outfits: %w", err)
 			}
 
 			metadata, err := EVRProfileLoad(ctx, d.nk, userID)
@@ -2810,19 +2792,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 					outfits[outfitName] = &metadata.LoadoutCosmetics
 
-					data, err := json.Marshal(outfits)
-					if err != nil {
-						return fmt.Errorf("failed to marshal outfits: %w", err)
-					}
-					if _, err := d.nk.StorageWrite(ctx, []*runtime.StorageWrite{
-						{
-							Collection: CustomizationStorageCollection,
-							Key:        SavedOutfitsStorageKey,
-							UserID:     userID,
-							Value:      string(data),
-						},
-					}); err != nil {
-						return fmt.Errorf("failed to save outfits: %w", err)
+					if err := StorageWrite(ctx, d.nk, userID, outfits); err != nil {
+						return fmt.Errorf("failed to write saved outfits: %w", err)
 					}
 
 					return simpleInteractionResponse(s, i, fmt.Sprintf("Saved current outfit as `%s`", outfitName))
@@ -2835,7 +2806,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					metadata.LoadoutCosmetics = *outfits[outfitName]
 
 					if err := EVRProfileUpdate(ctx, d.nk, userID, metadata); err != nil {
-						return fmt.Errorf("Failed to set account metadata: %w", err)
+						return fmt.Errorf("failed to set account metadata: %w", err)
 					}
 
 					return simpleInteractionResponse(s, i, fmt.Sprintf("Applied outfit `%s`. If the changes do not take effect in your next match, Please re-open your game.", outfitName))
@@ -2848,20 +2819,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 					delete(outfits, outfitName)
 
-					// Thank you Goopsie for the fix
-					data, err := json.Marshal(outfits)
-					if err != nil {
-						return fmt.Errorf("Failed to marshal outfits: %w", err)
-					}
-					if _, err := d.nk.StorageWrite(ctx, []*runtime.StorageWrite{
-						{
-							Collection: CustomizationStorageCollection,
-							Key:        SavedOutfitsStorageKey,
-							UserID:     userID,
-							Value:      string(data),
-						},
-					}); err != nil {
-						return fmt.Errorf("Failed to save outfits: %w", err)
+					if err := StorageWrite(ctx, d.nk, userID, outfits); err != nil {
+						return fmt.Errorf("failed to write saved outfits: %w", err)
 					}
 
 					return simpleInteractionResponse(s, i, fmt.Sprintf("Deleted loadout profile `%s`", outfitName))
@@ -3235,9 +3194,9 @@ func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runt
 		Description: fmt.Sprintf("updated <t:%d:f>", time.Now().UTC().Unix()),
 		Fields:      make([]*discordgo.MessageEmbedField, 0),
 	}
+	var status string
 
 	for _, state := range tracked {
-		var status string
 
 		if state.LobbyType == UnassignedLobby {
 			status = "Unassigned"
