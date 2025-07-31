@@ -56,7 +56,6 @@ func (s *EventRemoteLogSet) unmarshalLogs(logger runtime.Logger, logStrs []strin
 			}
 			continue
 		}
-		logger.WithField("message", parsed).Debug("Parsed remote log message")
 		entries = append(entries, parsed)
 	}
 	return entries, nil
@@ -70,11 +69,17 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 		matchRegistry   = dispatcher.matchRegistry
 		statisticsQueue = dispatcher.statisticsQueue
 	)
-
+	logger = logger.WithFields(map[string]any{
+		"uid":      s.UserID,
+		"username": s.Username,
+		"evrid":    s.XPID.String(),
+	})
 	entries, err := s.unmarshalLogs(logger, s.RemoteLogSet.Logs)
 	if err != nil {
 		logger.WithField("error", err).Warn("Failed to unmarshal remote logs")
 		return fmt.Errorf("failed to unmarshal remote logs: %w", err)
+	} else {
+		logger.WithField("logs", entries).Debug("Unmarshalled remote logs")
 	}
 
 	// Send the remote logs to the match data event.
@@ -133,7 +138,7 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 		case *evr.RemoteLogDisconnectedDueToTimeout:
 			logger.WithFields(map[string]any{
 				"username": s.Username,
-				"xp_id":    s.XPID.String(),
+				"evrid":    s.XPID.String(),
 				"msg":      msg,
 			}).Warn("Disconnected due to timeout")
 
@@ -350,10 +355,10 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 			globalAppBot.Load().LogUserErrorMessage(ctx, label.GetGroupID().String(), fmt.Sprintf("```json\n%s\n```", string(contentData)), false)
 
 			logger.WithFields(map[string]any{
-				"username":       session.Username(),
-				"match_id":       msg.SessionUUID().String(),
-				"evr_id":         s.XPID.String(),
-				"remote_log_msg": msg,
+				"username": session.Username(),
+				"mid":      msg.SessionUUID().String(),
+				"evrid":    s.XPID.String(),
+				"msg":      msg,
 			}).Warn("Server connection failed")
 
 			acct, err := nk.AccountGetId(ctx, label.GameServer.OperatorID.String())
@@ -425,7 +430,7 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 				}
 				AuditLogSend(dg, ServiceSettings().GlobalErrorChannelID, content)
 			}
-
+			continue
 		default:
 		}
 	}
@@ -480,7 +485,7 @@ func (s *EventRemoteLogSet) processPostMatchTypeStats(ctx context.Context, logge
 	}
 
 	// If the player isn't in the match, or isn't a player, do not update the stats
-	if playerInfo == nil || (playerInfo.Team != BlueTeam && playerInfo.Team != OrangeTeam) {
+	if playerInfo.Team != BlueTeam && playerInfo.Team != OrangeTeam {
 		return fmt.Errorf("non-player profile update request: %s", msg.XPID)
 	}
 	logger = logger.WithFields(map[string]any{
@@ -503,7 +508,7 @@ func (s *EventRemoteLogSet) processPostMatchTypeStats(ctx context.Context, logge
 				logger.WithField("error", err).Warn("Failed to record rating to leaderboard")
 			}
 		} else {
-			logger.WithField("session_id", playerInfo.SessionID).Warn("No rating found for player in matchmaking ratings")
+			logger.WithField("target_sid", playerInfo.SessionID).Warn("No rating found for player in matchmaking ratings")
 		}
 
 		zapLogger := RuntimeLoggerToZapLogger(logger)
@@ -521,7 +526,7 @@ func (s *EventRemoteLogSet) processPostMatchTypeStats(ctx context.Context, logge
 		return nil
 	}
 
-	statEntries, err := typeStatsToScoreMap(s.UserID, s.Username, groupIDStr, label.Mode, msg.Stats)
+	statEntries, err := typeStatsToScoreMap(playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, msg.Stats)
 	if err != nil {
 		return fmt.Errorf("failed to convert type stats to score map: %w", err)
 	}

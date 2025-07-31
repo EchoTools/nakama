@@ -60,7 +60,7 @@ func (e *EventUserAuthenticated) Process(ctx context.Context, logger runtime.Log
 		}
 	}
 
-	hasDiabledAlts, err := loginHistory.UpdateAlternates(ctx, nk)
+	hasDiabledAlts, err := loginHistory.UpdateAlternates(ctx, logger, nk)
 	if err != nil {
 		return fmt.Errorf("failed to update alternates: %w", err)
 	}

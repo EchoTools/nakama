@@ -13,9 +13,7 @@ import (
 
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
-	"github.com/intinig/go-openskill/rating"
 	"github.com/intinig/go-openskill/types"
-	"go.uber.org/thriftrw/ptr"
 )
 
 const (
@@ -225,13 +223,7 @@ func MatchmakingRatingLoad(ctx context.Context, nk runtime.NakamaModule, userID,
 		}
 		*ptr = val
 	}
-	if sigma == 0 || mu == 0 {
-		return NewDefaultRating(), nil
-	}
-	return rating.NewWithOptions(&types.OpenSkillOptions{
-		Mu:    ptr.Float64(mu),
-		Sigma: ptr.Float64(sigma),
-	}), nil
+	return NewRating(0, mu, sigma), nil
 }
 
 func MatchmakingRatingStore(ctx context.Context, nk runtime.NakamaModule, userID, discordID, displayName, groupID string, mode evr.Symbol, r types.Rating) error {

@@ -61,7 +61,7 @@ func LobbySession(s *sessionWS, sessionRegistry SessionRegistry, loginSessionID 
 		s.logger = s.logger.With(
 			zap.String("login_sid", loginSessionID.String()),
 			zap.String("uid", s.userID.String()),
-			zap.String("evr_id", loginParams.xpID.Token()),
+			zap.String("evrid", loginParams.xpID.Token()),
 			zap.String("username", s.Username()))
 
 		// cancel/disconnect this session if the login session is cancelled.
