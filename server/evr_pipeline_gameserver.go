@@ -40,10 +40,12 @@ func sendDiscordError(e error, discordId string, logger *zap.Logger, bot *discor
 		channel, err := bot.UserChannelCreate(discordId)
 		if err != nil {
 			logger.Warn("Failed to create user channel", zap.Error(err))
+			return
 		}
 		_, err = bot.ChannelMessageSend(channel.ID, fmt.Sprintf("Failed to register game server: %v", e))
 		if err != nil {
 			logger.Warn("Failed to send message to user", zap.Error(err))
+			return
 		}
 	}
 }
