@@ -68,7 +68,7 @@ func (m *MigrationRebuildLoginHistory) MigrateSystem(ctx context.Context, logger
 						continue
 					}
 					loginHistory.rebuildCache()
-					if _, err := loginHistory.UpdateAlternates(ctx, nk); err != nil {
+					if _, err := loginHistory.UpdateAlternates(ctx, logger, nk); err != nil {
 						logger.WithField("error", err).Warn("Failed to update alternates")
 						continue
 					}
