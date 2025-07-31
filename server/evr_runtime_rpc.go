@@ -1170,7 +1170,7 @@ type AccountLookupRequest struct {
 }
 
 func (r *AccountLookupRequest) CacheKey() string {
-	return fmt.Sprintf("%s:%s:%s:%s", r.Username, r.UserID, r.DiscordID, r.DisplayName)
+	return fmt.Sprintf("%s:%s:%s:%s:%s", r.Username, r.UserID, r.DiscordID, r.XPID, r.DisplayName)
 }
 
 func (h *RPCHandler) AccountLookupRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
@@ -1202,6 +1202,14 @@ func (h *RPCHandler) AccountLookupRPC(ctx context.Context, logger runtime.Logger
 			if p, ok := queryParameters["display_name"]; ok {
 				request.DisplayName = p[0]
 			}
+			// extract the xp_id from the query string
+			if xpID, ok := queryParameters["xp_id"]; ok {
+				if parsedXPID, err := evr.ParseEvrId(xpID[0]); err != nil {
+					return "", runtime.NewError("invalid xp_id", StatusInvalidArgument)
+				} else {
+					request.XPID = parsedXPID.String()
+				}
+			}
 		}
 	}
 
@@ -1226,6 +1234,11 @@ func (h *RPCHandler) AccountLookupRPC(ctx context.Context, logger runtime.Logger
 	switch {
 	case !request.UserID.IsNil():
 		userID = request.UserID.String()
+	case request.XPID != "":
+		userID, err = GetUserIDByDeviceID(ctx, db, request.XPID)
+		if err != nil {
+			return "", err
+		}
 	case request.Username != "":
 		users, err := nk.UsersGetUsername(ctx, []string{request.Username})
 		if err != nil {
