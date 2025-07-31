@@ -217,6 +217,47 @@ go install github.com/go-delve/delve/cmd/dlv@latest
 dlv exec ./nakama -- --database.address "postgres:localdb@localhost:5432/nakama"
 ```
 
+### Troubleshooting
+
+**Database connection issues**:
+- Ensure PostgreSQL container is running: `docker compose ps`
+- Check database logs: `docker compose logs postgres`
+- Verify port 5432 is not blocked by firewall
+
+**Build issues**:
+- Run `go mod vendor` if you see vendor-related errors
+- Ensure Go 1.24+ is installed: `go version`
+- Clear module cache: `go clean -modcache`
+
+**Server startup issues**:
+- Verify database migrations are applied
+- Check for port conflicts (7349, 7350, 7351)
+- Review configuration file syntax and format
+
+### Quick Reference
+
+**Common commands**:
+```shell
+# Clean build
+make clean && make
+
+# Start database only
+docker compose up postgres -d
+
+# Run migrations
+./nakama migrate up --database.address "postgres:localdb@localhost:5432/nakama"
+
+# Start server with config
+./nakama --config nakama.yml
+
+# Run all tests
+docker compose -f ./docker-compose-tests.yml up --build --abort-on-container-exit
+docker compose -f ./docker-compose-tests.yml down -v
+
+# Build Docker image
+make build
+```
+
 ### Configuration for Development
 
 For development, you can use the provided sample configuration:
