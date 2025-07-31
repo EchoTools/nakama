@@ -113,6 +113,138 @@ You can support development, new features, and maintainance of the server by usi
 
 Have a look at our [Heroic Cloud](https://heroiclabs.com/heroic-cloud/) service for more details.
 
+## Development Setup
+
+Setting up a development environment for Nakama requires Go, Docker, and Make. Follow these steps to get started with local development.
+
+### Prerequisites
+
+Before you begin, ensure you have the following installed:
+
+- **Go 1.24+**: [Download and install Go](https://golang.org/doc/install)
+- **Docker**: [Install Docker Desktop](https://docs.docker.com/get-docker/) or Docker Engine with Docker Compose
+- **Make**: Usually pre-installed on Linux/macOS, or available via package managers
+- **Git**: For version control
+
+> **Note**: This guide uses `docker compose` (Docker Compose V2). If you have an older version, you may need to use `docker-compose` instead.
+
+### Development Environment Setup
+
+1. **Clone the repository**:
+   ```shell
+   git clone https://github.com/heroiclabs/nakama.git
+   cd nakama
+   ```
+
+2. **Install dependencies**:
+   ```shell
+   go mod vendor
+   ```
+
+3. **Build the development binary**:
+   ```shell
+   make
+   ```
+
+4. **Verify the build**:
+   ```shell
+   ./nakama --version
+   ```
+
+### Local Development with Database
+
+For development, you'll need a PostgreSQL database. The easiest way is using Docker Compose:
+
+1. **Start the database**:
+   ```shell
+   docker compose up postgres -d
+   ```
+
+2. **Run database migrations**:
+   ```shell
+   ./nakama migrate up --database.address "postgres:localdb@localhost:5432/nakama"
+   ```
+
+3. **Start Nakama in development mode**:
+   ```shell
+   ./nakama --database.address "postgres:localdb@localhost:5432/nakama" --logger.level DEBUG
+   ```
+
+The server will be available at:
+- **HTTP API**: http://localhost:7350
+- **Console**: http://localhost:7351 
+- **gRPC**: localhost:7349
+
+### Development Workflow
+
+**Quick development cycle**:
+```shell
+# Make your changes to the code
+# Rebuild the binary
+make
+
+# Restart the server (Ctrl+C to stop, then restart)
+./nakama --database.address "postgres:localdb@localhost:5432/nakama" --logger.level DEBUG
+```
+
+**Using Docker for full stack development**:
+```shell
+# Build and run everything together
+make build
+docker compose up
+```
+
+**Running tests**:
+```shell
+# Run all tests with Docker (includes database setup)
+docker compose -f ./docker-compose-tests.yml up --build --abort-on-container-exit
+docker compose -f ./docker-compose-tests.yml down -v
+
+# Run specific test packages (requires running database)
+go test ./server -v
+```
+
+### IDE/Editor Setup
+
+**VS Code recommended extensions**:
+- Go extension (Google)
+- Docker extension
+
+**Debugging**:
+The Makefile builds with debug symbols. You can use `dlv` (Delve) or your IDE's debugger:
+```shell
+go install github.com/go-delve/delve/cmd/dlv@latest
+dlv exec ./nakama -- --database.address "postgres:localdb@localhost:5432/nakama"
+```
+
+### Configuration for Development
+
+For development, you can use the provided sample configuration:
+
+1. **Copy the sample config**:
+   ```shell
+   cp nakama.dev.yml nakama.yml
+   ```
+
+2. **Start with configuration file**:
+   ```shell
+   ./nakama --config nakama.yml
+   ```
+
+Or create your own `nakama.yml` with custom development settings:
+```yaml
+logger:
+  level: "DEBUG"
+database:
+  address:
+    - "postgres:localdb@localhost:5432/nakama"
+console:
+  username: "admin"
+  password: "password"
+session:
+  token_expiry_sec: 7200  # 2 hours
+```
+
 ## Contribute
 
 The development roadmap is managed as GitHub issues and pull requests are welcome. If you're interested to add a feature which is not mentioned on the issue tracker please open one to create a discussion or drop in and discuss it in the [community forum](https://forum.heroiclabs.com).
@@ -175,7 +307,7 @@ To build the codebase and generate all sources follow these steps.
 In order to run all the unit and integration tests run:
 
 ```shell
-docker-compose -f ./docker-compose-tests.yml up --build --abort-on-container-exit; docker-compose -f ./docker-compose-tests.yml down -v
+docker compose -f ./docker-compose-tests.yml up --build --abort-on-container-exit; docker compose -f ./docker-compose-tests.yml down -v
 ```
 
 This will create an isolated environment with Nakama and database instances, run

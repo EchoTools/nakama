@@ -1,0 +1,24 @@
+# Sample development configuration for Nakama
+# Copy this to nakama.yml and customize as needed
+
+logger:
+  level: "DEBUG"  # Use DEBUG for development, INFO for less verbose output
+
+database:
+  address:
+    - "postgres:localdb@localhost:5432/nakama"
+
+console:
+  username: "admin"
+  password: "password"
+
+# Development server settings
+socket:
+  server_key: "defaultkey"  # Change this for production
+
+session:
+  token_expiry_sec: 7200  # 2 hours - good for development
+
+# Runtime settings for development
+runtime:
+  http_key: "defaulthttpkey"  # Change this for production
