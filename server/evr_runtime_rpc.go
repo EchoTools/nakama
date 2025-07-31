@@ -1173,43 +1173,106 @@ func (r *AccountLookupRequest) CacheKey() string {
 	return fmt.Sprintf("%s:%s:%s:%s:%s", r.Username, r.UserID, r.DiscordID, r.XPID, r.DisplayName)
 }
 
-func (h *RPCHandler) AccountLookupRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+// parseAccountLookupQueryParams extracts and validates query parameters into an AccountLookupRequest
+func parseAccountLookupQueryParams(queryParams map[string][]string) (*AccountLookupRequest, error) {
+	request := &AccountLookupRequest{}
 
-	request := AccountLookupRequest{}
+	// extract the username from the query string
+	if username, ok := queryParams["username"]; ok && len(username) > 0 {
+		request.Username = username[0]
+	}
+
+	// extract the discordID from the query string
+	if discordID, ok := queryParams["discord_id"]; ok && len(discordID) > 0 {
+		request.DiscordID = discordID[0]
+	}
+
+	// extract the userID from the query string
+	if userID, ok := queryParams["user_id"]; ok && len(userID) > 0 {
+		uid, err := uuid.FromString(userID[0])
+		if err != nil {
+			return nil, runtime.NewError("invalid user id", StatusInvalidArgument)
+		}
+		request.UserID = uid
+	}
+
+	// extract the display_name from the query string
+	if displayName, ok := queryParams["display_name"]; ok && len(displayName) > 0 {
+		request.DisplayName = displayName[0]
+	}
+
+	// extract the xp_id from the query string
+	if xpID, ok := queryParams["xp_id"]; ok && len(xpID) > 0 {
+		if parsedXPID, err := evr.ParseEvrId(xpID[0]); err != nil {
+			return nil, runtime.NewError("invalid xp_id", StatusInvalidArgument)
+		} else {
+			request.XPID = parsedXPID.String()
+		}
+	}
+
+	return request, nil
+}
+
+// lookupUserID performs the actual user lookup based on the request parameters
+func lookupUserID(ctx context.Context, db *sql.DB, nk runtime.NakamaModule, request *AccountLookupRequest) (string, error) {
+	switch {
+	case !request.UserID.IsNil():
+		return request.UserID.String(), nil
+
+	case request.XPID != "":
+		return GetUserIDByDeviceID(ctx, db, request.XPID)
+
+	case request.Username != "":
+		users, err := nk.UsersGetUsername(ctx, []string{request.Username})
+		if err != nil {
+			return "", err
+		}
+		if len(users) != 1 {
+			return "", runtime.NewError("user not found", StatusNotFound)
+		}
+		return users[0].Id, nil
+
+	case request.DiscordID != "":
+		return GetUserIDByDiscordID(ctx, db, request.DiscordID)
+
+	case request.DisplayName != "":
+		ownerMap, err := DisplayNameOwnerSearch(ctx, nk, []string{request.DisplayName})
+		if err != nil {
+			return "", err
+		}
+		if len(ownerMap) == 0 || len(ownerMap[request.DisplayName]) == 0 {
+			return "", runtime.NewError("user not found", StatusNotFound)
+		}
+		userIDs := ownerMap[request.DisplayName]
+		if len(userIDs) > 1 {
+			return "", runtime.NewError(fmt.Sprintf("multiple users found with display name %s", request.DisplayName), StatusInvalidArgument)
+		}
+		return userIDs[0], nil
+
+	default:
+		return "", runtime.NewError("no valid lookup parameter provided", StatusInvalidArgument)
+	}
+}
+
+func (h *RPCHandler) AccountLookupRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	var request *AccountLookupRequest
+	var err error
+
+	// Parse request from JSON payload or query parameters
 	if payload != "" {
-		if err := json.Unmarshal([]byte(payload), &request); err != nil {
+		request = &AccountLookupRequest{}
+		if err := json.Unmarshal([]byte(payload), request); err != nil {
 			return "", err
 		}
 	} else {
+		queryParameters, ok := ctx.Value(runtime.RUNTIME_CTX_QUERY_PARAMS).(map[string][]string)
+		if !ok || len(queryParameters) == 0 {
+			return "", runtime.NewError("no lookup parameters provided", StatusInvalidArgument)
+		}
 
-		queryParameters := ctx.Value(runtime.RUNTIME_CTX_QUERY_PARAMS).(map[string][]string)
-
-		if len(queryParameters) > 0 {
-			// extract the discordID from the query string
-			if discordID, ok := queryParameters["discord_id"]; ok {
-				request.DiscordID = discordID[0]
-			}
-
-			// extract the userID from the query string
-			if userID, ok := queryParameters["user_id"]; ok {
-				uid, err := uuid.FromString(userID[0])
-				if err != nil {
-					return "", runtime.NewError("invalid user id", StatusInvalidArgument)
-				}
-				request.UserID = uid
-			}
-			// extract the p from the query string
-			if p, ok := queryParameters["display_name"]; ok {
-				request.DisplayName = p[0]
-			}
-			// extract the xp_id from the query string
-			if xpID, ok := queryParameters["xp_id"]; ok {
-				if parsedXPID, err := evr.ParseEvrId(xpID[0]); err != nil {
-					return "", runtime.NewError("invalid xp_id", StatusInvalidArgument)
-				} else {
-					request.XPID = parsedXPID.String()
-				}
-			}
+		request, err = parseAccountLookupQueryParams(queryParameters)
+		if err != nil {
+			return "", err
 		}
 	}
 
@@ -1229,44 +1292,10 @@ func (h *RPCHandler) AccountLookupRPC(ctx context.Context, logger runtime.Logger
 		}
 	}
 
-	var err error
-	userID := ""
-	switch {
-	case !request.UserID.IsNil():
-		userID = request.UserID.String()
-	case request.XPID != "":
-		userID, err = GetUserIDByDeviceID(ctx, db, request.XPID)
-		if err != nil {
-			return "", err
-		}
-	case request.Username != "":
-		users, err := nk.UsersGetUsername(ctx, []string{request.Username})
-		if err != nil {
-			return "", err
-		}
-		if len(users) != 1 {
-			return "", nil
-		}
-		userID = users[0].Id
-
-	case request.DiscordID != "":
-		userID, err = GetUserIDByDiscordID(ctx, db, request.DiscordID)
-		if err != nil {
-			return "", err
-		}
-	case request.DisplayName != "":
-		ownerMap, err := DisplayNameOwnerSearch(ctx, nk, []string{request.DisplayName})
-		if err != nil {
-			return "", err
-		}
-		if len(ownerMap) == 0 || len(ownerMap[request.DisplayName]) == 0 {
-			return "", nil
-		}
-		userIDs := ownerMap[request.DisplayName]
-		if len(userIDs) > 1 {
-			return "", fmt.Errorf("multiple users found with display name %s", request.DisplayName)
-		}
-		userID = userIDs[0]
+	// Perform user lookup
+	userID, err := lookupUserID(ctx, db, nk, request)
+	if err != nil {
+		return "", err
 	}
 
 	// Get the user's account data.
