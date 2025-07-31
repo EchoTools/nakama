@@ -53,6 +53,13 @@ var (
 	LevelPebbles      Symbol = ToSymbol("mpl_combat_pebbles")     // Echo Combat
 	LevelPtyPebbles   Symbol = ToSymbol("pty_mpl_combat_pebbles") // Echo Combat
 
+	PublicModes = []Symbol{
+		ModeSocialPublic,
+		ModeArenaPublic,
+		ModeArenaPublicAI,
+		ModeCombatPublic,
+		ModeEchoCombatTournament,
+	}
 	// Valid levels by game mode
 	LevelsByMode = map[Symbol][]Symbol{
 		ModeArenaPublic:          {LevelArena},

@@ -299,8 +299,8 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 		for _, e := range state.presenceMap {
 			if e.EvrID.Equals(p.EvrID) {
 				logger.WithFields(map[string]interface{}{
-					"evr_id": p.EvrID,
-					"uid":    p.GetUserId(),
+					"evrid": p.EvrID,
+					"uid":   p.GetUserId(),
 				}).Error("Duplicate EVR-ID join attempt.")
 				return state, false, ErrJoinRejectDuplicateEvrID.Error()
 			}
@@ -602,9 +602,9 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 						nk.MetricsCounterAdd("match_entrant_early_quit", tags, 1)
 
 						logger.WithFields(map[string]interface{}{
-							"uid":          mp.GetUserId(),
-							"username":     mp.Username,
-							"evr_id":       mp.EvrID,
+							"uid":         mp.GetUserId(),
+							"username":    mp.Username,
+							"evrid":       mp.EvrID,
 							"display_name": mp.DisplayName,
 						}).Debug("Incrementing early quit for player.")
 

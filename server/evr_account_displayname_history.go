@@ -415,7 +415,7 @@ func DisplayNameOwnerSearch(ctx context.Context, nk runtime.NakamaModule, displa
 	slices.Sort(sanitized)
 	sanitized = slices.Compact(sanitized)
 
-	query := fmt.Sprintf("+value.active:%s", Query.MatchItem(sanitized))
+	query := fmt.Sprintf("+value.active:%s", Query.CreateMatchPattern(sanitized))
 
 	var (
 		err      error

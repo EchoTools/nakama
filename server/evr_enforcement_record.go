@@ -14,12 +14,20 @@ type GuildEnforcementRecord struct {
 	SuspensionExpiry        time.Time `json:"suspension_expiry"`
 	CommunityValuesRequired bool      `json:"community_values_required"`
 	AuditorNotes            string    `json:"notes"`
+	AllowPrivateLobbies     bool      `json:"allow_private_lobbies"`
 }
 
 func (r GuildEnforcementRecord) IsSuspension() bool {
 	return !r.SuspensionExpiry.IsZero()
 }
 
+func (r GuildEnforcementRecord) IsLimitedAccess() bool {
+	return r.IsActive() && r.AllowPrivateLobbies
+}
+
+func (r GuildEnforcementRecord) IsActive() bool {
+	return !r.IsExpired()
+}
 func (r GuildEnforcementRecord) IsExpired() bool {
 	return time.Now().After(r.SuspensionExpiry)
 }

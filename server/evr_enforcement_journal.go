@@ -169,7 +169,7 @@ func (s *GuildEnforcementJournal) IsVoid(groupID, recordID string) bool {
 	return found
 }
 
-func (s *GuildEnforcementJournal) AddRecord(groupID, enforcerUserID, enforcerDiscordID, suspensionNotice, notes string, requireCommunityValues bool, suspensionDuration time.Duration) GuildEnforcementRecord {
+func (s *GuildEnforcementJournal) AddRecord(groupID, enforcerUserID, enforcerDiscordID, suspensionNotice, notes string, requireCommunityValues, allowPrivateLobbies bool, suspensionDuration time.Duration) GuildEnforcementRecord {
 	if s.RecordsByGroupID == nil {
 		s.RecordsByGroupID = make(map[string][]GuildEnforcementRecord)
 	}
@@ -187,6 +187,7 @@ func (s *GuildEnforcementJournal) AddRecord(groupID, enforcerUserID, enforcerDis
 		SuspensionExpiry:        now.Add(suspensionDuration),
 		AuditorNotes:            notes,
 		CommunityValuesRequired: requireCommunityValues,
+		AllowPrivateLobbies:     allowPrivateLobbies,
 	}
 	s.RecordsByGroupID[groupID] = append(s.RecordsByGroupID[groupID], record)
 

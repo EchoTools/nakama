@@ -398,7 +398,9 @@ func (h *EventDispatcher) handleMatchEvent(ctx context.Context, logger runtime.L
 }
 
 func AuditLogSendGuild(dg *discordgo.Session, gg *GuildGroup, message string) (*discordgo.Message, error) {
-
+	if message == "" {
+		return nil, nil
+	}
 	content := fmt.Sprintf("[`%s/%s`] %s", gg.Name(), gg.GuildID, message)
 	if err := AuditLogSend(dg, ServiceSettings().ServiceAuditChannelID, content); err != nil {
 		return nil, fmt.Errorf("failed to send service audit message: %w", err)
@@ -412,6 +414,9 @@ func AuditLogSendGuild(dg *discordgo.Session, gg *GuildGroup, message string) (*
 }
 
 func AuditLogSend(dg *discordgo.Session, channelID, content string) error {
+	if content == "" {
+		return nil
+	}
 	// replace all <@uuid> mentions with <@discordID>
 	if channelID != "" {
 		if _, err := dg.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
@@ -494,9 +499,9 @@ func ScheduleKick(ctx context.Context, nk runtime.NakamaModule, logger runtime.L
 			suspendedGroupIDs = append(suspendedGroupIDs, guildGroup.SuspensionInheritanceGroupIDs...)
 		}
 
+		actions := make([]string, 0, len(matchLabels))
 		doDisconnect := false
 		for _, label := range matchLabels {
-			actions := make([]string, 0, len(matchLabels))
 			// Kick the player from the match
 			if slices.Contains(suspendedGroupIDs, label.GetGroupID().String()) {
 				doDisconnect = true
@@ -518,7 +523,7 @@ func ScheduleKick(ctx context.Context, nk runtime.NakamaModule, logger runtime.L
 		}
 
 		// Send audit log message
-		AuditLogSend(dg, ServiceSettings().ServiceAuditChannelID, fmt.Sprintf("Disconnected user %s (%s) from %d sessions", userID, accountMap[userID].User.Username, len(matchLabels)))
+		AuditLogSend(dg, ServiceSettings().ServiceAuditChannelID, fmt.Sprintf("Disconnected user %s (%s) from %d sessions:\n%s", userID, accountMap[userID].User.Username, len(matchLabels), strings.Join(actions, "\n")))
 
 	}()
 }

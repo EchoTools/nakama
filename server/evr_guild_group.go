@@ -220,7 +220,7 @@ func (g *GuildGroup) IsAllowedFeature(feature string) bool {
 }
 
 func (g *GuildGroup) IsAllowedMatchmaking(userID string) bool {
-	if !g.MembersOnlyMatchmaking {
+	if !g.EnableMembersOnlyMatchmaking {
 		return true
 	}
 	g.State.RLock()
@@ -257,10 +257,6 @@ func GuildGroupLoad(ctx context.Context, nk runtime.NakamaModule, groupID string
 }
 
 func GuildGroupStore(ctx context.Context, nk runtime.NakamaModule, guildGroupRegistry *GuildGroupRegistry, group *GuildGroup) error {
-
-	group.State.Lock()
-	defer group.State.Unlock()
-
 	_nk, ok := nk.(*RuntimeGoNakamaModule)
 	if !ok {
 		return fmt.Errorf("failed to cast nakama module")

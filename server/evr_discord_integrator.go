@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -65,7 +66,7 @@ func NewDiscordIntegrator(ctx context.Context, logger *zap.Logger, config Config
 		queueCooldowns:     &MapOf[QueueEntry, time.Time]{},
 		idcache:            &MapOf[string, string]{},
 
-		queueCh: make(chan QueueEntry, 25),
+		queueCh: make(chan QueueEntry, 50),
 	}
 }
 
@@ -123,18 +124,20 @@ func (c *DiscordIntegrator) Start() {
 					logger.Warn("Invalid queue entry", zap.String("discord_id", entry.DiscordID), zap.String("guild_id", entry.GuildID))
 					continue
 				}
+				started = time.Now()
 				processed++
 				logger := logger.With(
 					zap.String("discord_id", entry.DiscordID),
 					zap.String("guild_id", entry.GuildID),
 					zap.String("gid", c.GuildIDToGroupID(entry.GuildID)),
 					zap.String("uid", c.DiscordIDToUserID(entry.DiscordID)),
+					zap.Bool("full_update", entry.DoFullUpdate),
 				)
 
 				if err := c.syncMember(c.ctx, logger, entry.DiscordID, entry.GuildID, entry.DoFullUpdate); err != nil {
 					logger.Warn("Error syncing guild group member", zap.Error(err))
 				}
-				logger.Debug("Synced guild group member")
+				logger.Debug("Synced guild group member", zap.Duration("duration", time.Since(started)))
 
 			case <-cooldownTicker.C:
 
@@ -223,18 +226,27 @@ func (c *DiscordIntegrator) Start() {
 
 // Queue a user for caching/updating.
 func (c *DiscordIntegrator) QueueSyncMember(guildID, discordID string, full bool) {
+	metricsTags := map[string]string{
+		"guild_id": guildID,
+		"group_id": c.GuildIDToGroupID(guildID),
+	}
+	defer func() { c.nk.MetricsCounterAdd("discord_integrator_queue_sync_member", metricsTags, 1) }()
+
 	entry := QueueEntry{GuildID: guildID, DiscordID: discordID}
 	_, exists := c.queueCooldowns.LoadOrStore(entry, time.Now().Add(time.Second*30))
 	if exists {
 		// Already in the queue, no need to add it again.
+		metricsTags["result"] = "on_cooldown"
 		return
 	}
 
 	select {
 	case c.queueCh <- QueueEntry{GuildID: guildID, DiscordID: discordID, DoFullUpdate: full}:
 		// Success
+		metricsTags["result"] = "queued"
 	default:
 		// Queue is full
+		metricsTags["result"] = "queue_full"
 		c.logger.Warn("Queue is full; dropping entry", zap.String("discord_id", discordID), zap.String("guild_id", guildID))
 	}
 }
@@ -308,110 +320,79 @@ func (c *DiscordIntegrator) GroupIDToGuildID(groupID string) string {
 	return guildID
 }
 
-// Sync's a user to all of their guilds.
+// Syncs a user to all of their guilds.
 func (c *DiscordIntegrator) syncMember(ctx context.Context, logger *zap.Logger, discordID, guildID string, full bool) error {
 	if guildID == "" {
-		return fmt.Errorf("guild not specified")
+		return errors.New("guild not specified")
 	}
 	groupID := c.GuildIDToGroupID(guildID)
 	if groupID == "" {
-		return fmt.Errorf("guild group not found")
+		return errors.New("guild group not found")
 	}
 
 	member, err := c.GuildMember(guildID, discordID)
-	if err == ErrMemberNotFound || member == nil {
-		// Remove the user from the guild group.
-		if err := c.GuildGroupMemberRemove(ctx, guildID, discordID, ""); err != nil {
-			return fmt.Errorf("failed to remove guild group member: %w", err)
+	if errors.Is(err, ErrMemberNotFound) || member == nil {
+		if removeErr := c.GuildGroupMemberRemove(ctx, guildID, discordID, ""); removeErr != nil {
+			return fmt.Errorf("failed to remove guild group member: %w", removeErr)
 		}
 		logger.Info("Member not found, removed from guild group", zap.String("discord_id", discordID), zap.String("guild_id", guildID))
 		return nil
-	} else if err != nil {
+	}
+	if err != nil {
 		return fmt.Errorf("error getting guild member: %w", err)
 	}
 
-	account, err := c.nk.AccountGetId(ctx, c.DiscordIDToUserID(discordID))
+	userID := c.DiscordIDToUserID(discordID)
+	account, err := c.nk.AccountGetId(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("error getting account: %w", err)
 	}
 
-	// Store a copy of the member in the cache.
-	obj := NewGuildMemberCacheData(member)
-	if err := StorageWrite(ctx, c.nk, account.User.Id, obj); err != nil {
-		return fmt.Errorf("error writing guild member cache: %w", err)
-	}
-
-	evrAccount, err := BuildEVRProfileFromAccount(account)
+	profile, err := BuildEVRProfileFromAccount(account)
 	if err != nil {
 		return fmt.Errorf("error building evr account: %w", err)
 	}
 
-	groups, err := GuildUserGroupsList(ctx, c.nk, c.guildGroupRegistry, c.DiscordIDToUserID(discordID))
+	groups, err := GuildUserGroupsList(ctx, c.nk, c.guildGroupRegistry, userID)
 	if err != nil {
 		return fmt.Errorf("error getting user guild groups: %w", err)
 	}
 
 	group, ok := groups[groupID]
-	if !ok {
-		// Add the player to the group
-		if err := c.nk.GroupUsersAdd(ctx, SystemUserID, groupID, []string{evrAccount.ID()}); err != nil {
+	if !ok || group == nil {
+		if err := c.nk.GroupUsersAdd(ctx, SystemUserID, groupID, []string{profile.ID()}); err != nil {
 			return fmt.Errorf("error joining group: %w", err)
 		}
-
-		// Get the group data again
-		groups, err = GuildUserGroupsList(ctx, c.nk, c.guildGroupRegistry, c.DiscordIDToUserID(discordID))
+		// Refresh group data
+		groups, err = GuildUserGroupsList(ctx, c.nk, c.guildGroupRegistry, userID)
 		if err != nil {
 			return fmt.Errorf("error getting user guild groups: %w", err)
 		}
-
 		group, ok = groups[groupID]
-		if !ok {
-			return fmt.Errorf("guild group not found")
+		if !ok || group == nil {
+			return errors.New("guild group not found")
 		}
 	}
 
-	if group == nil {
-		return fmt.Errorf("guild group not found")
-	}
-
-	updated := false
-	if member == nil {
-		// Clear the role cache for the user
-		updated = group.RoleCacheUpdate(evrAccount, nil)
-
-	} else {
-		updated = group.RoleCacheUpdate(evrAccount, member.Roles)
-	}
-
-	if updated {
+	// Update the group state with the member's roles.
+	if group.RoleCacheUpdate(profile, member.Roles) {
 		if err := GuildGroupStore(ctx, c.nk, c.guildGroupRegistry, group); err != nil {
 			return fmt.Errorf("error storing guild group: %w", err)
 		}
 	}
-	if member == nil {
-		return fmt.Errorf("member not found")
-	}
 
-	// Update the display name
-	if currentDisplayName, _ := evrAccount.GetGroupDisplayName(groupID); full || currentDisplayName != InGameName(member) {
-		if err := c.syncDisplayName(ctx, logger, account.User.Id, discordID, member.User.Username, groupID, InGameName(member)); err != nil {
+	// Update the display name if needed
+	if currentDisplayName, _ := profile.GetGroupDisplayName(groupID); full || currentDisplayName != InGameName(member) {
+		if err := c.syncMembersIGN(ctx, logger, profile, member, group); err != nil {
 			return fmt.Errorf("error syncing display name: %w", err)
 		}
 	}
 
-	// Update headset linked role
-	if r := group.RoleMap.AccountLinked; r != "" {
-		if evrAccount.IsLinked() && !evrAccount.IsDisabled() && !slices.Contains(member.Roles, r) {
-			// Assign the role
-			if err := c.dg.GuildMemberRoleAdd(guildID, discordID, r); err != nil {
-				logger.Warn("Error adding headset-linked role to member", zap.String("role", r), zap.Error(err))
-			}
-		} else if slices.Contains(member.Roles, r) {
-			// Remove the role
-			if err := c.dg.GuildMemberRoleRemove(guildID, discordID, r); err != nil {
-				logger.Warn("Error removing headset-linked role from member", zap.String("role", r), zap.Error(err))
-			}
-		}
+	// Update headset-linked role
+	roleID := group.RoleMap.AccountLinked
+	hasRole := profile.IsLinked() && !profile.IsDisabled()
+	if err := c.updateMemberRole(member, roleID, hasRole); err != nil {
+		logger.Warn("Error updating headset-linked role", zap.String("role", roleID), zap.Error(err))
 	}
 
 	return nil
@@ -456,13 +437,12 @@ func (d *DiscordIntegrator) updateLinkStatus(ctx context.Context, discordID stri
 }
 
 func InGameName(m *discordgo.Member) string {
-	if n := sanitizeDisplayName(m.Nick); n != "" {
-		return n
+	for _, name := range [...]string{m.Nick, m.User.GlobalName, m.User.Username} {
+		if n := sanitizeDisplayName(name); n != "" {
+			return n
+		}
 	}
-	if n := sanitizeDisplayName(m.User.GlobalName); n != "" {
-		return n
-	}
-	return sanitizeDisplayName(m.User.Username)
+	return ""
 }
 
 // Loads/Adds a user to the cache.
@@ -487,20 +467,10 @@ func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, g
 	var err error
 	botUserID := d.DiscordIDToUserID(d.dg.State.User.ID)
 	if botUserID == "" {
-		var created bool
-
-		botUserID, _, created, err = d.nk.AuthenticateCustom(ctx, d.dg.State.User.ID, d.dg.State.User.Username, true)
-		if err != nil {
-			return fmt.Errorf("failed to authenticate (or create) bot user %s: %w", d.dg.State.User.ID, err)
-		}
-		if created {
-			// Add to the global bots group
-			if err := d.nk.GroupUsersAdd(ctx, SystemUserID, GroupGlobalBots, []string{botUserID}); err != nil {
-				return fmt.Errorf("error adding bot to global bots group: %w", err)
-			}
-		}
+		return fmt.Errorf("failed to get bot user ID from state")
 	}
 
+	var groupID string
 	// Ensure the guild owner is in the system.
 	ownerUserID := d.DiscordIDToUserID(guild.OwnerID)
 	if ownerUserID == "" {
@@ -508,7 +478,8 @@ func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, g
 		if err != nil {
 			return fmt.Errorf("failed to get guild owner: %w", err)
 		}
-		ownerUserID, _, _, err = d.nk.AuthenticateCustom(ctx, guild.OwnerID, ownerMember.User.Username, true)
+
+		ownerUserID, _, _, err = AuthenticateCustom(ctx, logger, d.db, ownerMember.User.ID, ownerMember.User.Username, true)
 		if err != nil {
 			// Leave guilds where the owner is globally banned.
 			if status.Code(err) == codes.PermissionDenied {
@@ -519,6 +490,7 @@ func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, g
 			}
 			return fmt.Errorf("failed to authenticate (or create) guild owner %s: %w", guild.OwnerID, err)
 		}
+		defer func() { d.QueueSyncMember(groupID, ownerMember.User.ID, false) }()
 	}
 
 	ownerAccount, err := d.nk.AccountGetId(ctx, ownerUserID)
@@ -538,7 +510,7 @@ func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, g
 		return nil
 	}
 
-	groupID := d.GuildIDToGroupID(guild.ID)
+	groupID = d.GuildIDToGroupID(guild.ID)
 	if groupID == "" {
 		// This is a new guild.
 		gm := NewGuildGroupMetadata(guild.ID)
@@ -554,18 +526,19 @@ func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, g
 			return fmt.Errorf("error marshalling guild group metadata: %w", err)
 		}
 
-		_, err = d.nk.GroupCreate(ctx, ownerUserID, guild.Name, botUserID, GuildGroupLangTag, guild.Description, guild.IconURL("512"), false, metadataMap, 100000)
+		group, err := d.nk.GroupCreate(ctx, ownerUserID, guild.Name, botUserID, GuildGroupLangTag, guild.Description, guild.IconURL("512"), false, metadataMap, 100000)
 		if err != nil {
 			return fmt.Errorf("error creating group: %w", err)
 		}
 
+		groupID = group.Id
 		d.LogServiceAuditMessage(ctx, fmt.Sprintf("Created guild `%s` (ID: %s) owned by <@%s>", guild.Name, guild.ID, guild.OwnerID), false)
 		// Invite the owner to the game service guild.
-	}
-
-	// Update the group data
-	if err := d.nk.GroupUpdate(ctx, groupID, SystemUserID, guild.Name, botUserID, GuildGroupLangTag, guild.Description, guild.IconURL("512"), true, nil, 100000); err != nil {
-		return fmt.Errorf("error updating group: %w", err)
+	} else {
+		// Update the group data
+		if err := d.nk.GroupUpdate(ctx, groupID, SystemUserID, guild.Name, botUserID, GuildGroupLangTag, guild.Description, guild.IconURL("512"), false, nil, 100000); err != nil {
+			return fmt.Errorf("error updating group: %w", err)
+		}
 	}
 
 	// Load the guild group
@@ -597,7 +570,7 @@ func (d *DiscordIntegrator) guildSync(ctx context.Context, logger *zap.Logger, g
 func (d *DiscordIntegrator) handleGuildCreate(logger *zap.Logger, s *discordgo.Session, e *discordgo.GuildCreate) error {
 	logger.Info("Guild Create", zap.Any("guild", e.Guild.ID))
 	if err := d.guildSync(d.ctx, logger, e.Guild); err != nil {
-		return fmt.Errorf("failed to update guild: %w", err)
+		return fmt.Errorf("error during guild sync: %w", err)
 	}
 	return nil
 }
@@ -605,7 +578,7 @@ func (d *DiscordIntegrator) handleGuildCreate(logger *zap.Logger, s *discordgo.S
 func (d *DiscordIntegrator) handleGuildUpdate(logger *zap.Logger, s *discordgo.Session, e *discordgo.GuildUpdate) error {
 	logger.Info("Guild Update", zap.Any("guild", e.Guild.ID))
 	if err := d.guildSync(d.ctx, logger, e.Guild); err != nil {
-		return fmt.Errorf("failed to update guild: %w", err)
+		return fmt.Errorf("error during guild sync: %w", err)
 	}
 	return nil
 }
@@ -619,10 +592,13 @@ func (d *DiscordIntegrator) handleGuildDelete(logger *zap.Logger, s *discordgo.S
 		return nil
 	}
 
+	// Log the metadata of the group before deleting it.
+	gg := d.guildGroupRegistry.Get(groupID)
+	logger.Info("Deleting guild group", zap.String("group_id", groupID), zap.Any("metadata", gg.GroupMetadata))
+
 	if err := d.nk.GroupDelete(d.ctx, groupID); err != nil {
 		return fmt.Errorf("error deleting group: %w", err)
 	}
-
 	d.Purge(e.Guild.ID)
 	return nil
 }
@@ -630,11 +606,9 @@ func (d *DiscordIntegrator) handleGuildDelete(logger *zap.Logger, s *discordgo.S
 func (d *DiscordIntegrator) handleMemberAdd(logger *zap.Logger, s *discordgo.Session, e *discordgo.GuildMemberAdd) error {
 	/*
 		logger.Info("Member Add", zap.Any("member", e))
-
-
-			if err := d.SyncGuildGroupMember(ctx, d.DiscordIDToUserID(e.Member.User.ID), d.GuildIDToGroupID(e.GuildID)); err != nil {
-				return fmt.Errorf("failed to sync guild group member: %w", err)
-			}
+		if err := d.SyncGuildGroupMember(ctx, d.DiscordIDToUserID(e.Member.User.ID), d.GuildIDToGroupID(e.GuildID)); err != nil {
+			return fmt.Errorf("failed to sync guild group member: %w", err)
+		}
 	*/
 
 	return nil
@@ -644,23 +618,6 @@ func (d *DiscordIntegrator) handleMemberUpdate(logger *zap.Logger, s *discordgo.
 	if e.Member == nil || e.Member.User == nil {
 		return nil
 	}
-	ctx := d.ctx
-	userID := d.DiscordIDToUserID(e.Member.User.ID)
-
-	if userID == "" {
-		return nil
-	}
-
-	// Ignore members who haven't logged into echo.
-	if ok, _ := HasLoggedIntoEcho(ctx, d.nk, userID); !ok {
-		return nil
-	}
-
-	// Store a copy of the member in the cache.
-	obj := NewGuildMemberCacheData(e.Member)
-	if err := StorageWrite(ctx, d.nk, userID, obj); err != nil {
-		return fmt.Errorf("error writing guild member cache: %w", err)
-	}
 
 	// Ignore unknown guilds
 	groupID := d.GuildIDToGroupID(e.GuildID)
@@ -668,46 +625,50 @@ func (d *DiscordIntegrator) handleMemberUpdate(logger *zap.Logger, s *discordgo.
 		return nil
 	}
 
-	// Ensure the user is in the guild group
-	account, err := d.nk.AccountGetId(ctx, userID)
-	if err != nil {
-		return fmt.Errorf("error getting account: %w", err)
+	ctx := d.ctx
+	userID := d.DiscordIDToUserID(e.Member.User.ID)
+
+	if userID == "" {
+		return nil
 	}
 
-	evrAccount, err := BuildEVRProfileFromAccount(account)
-	if err != nil {
-		return fmt.Errorf("error building evr account: %w", err)
+	// Ignore members who haven't logged into echo
+	if ok, _ := HasLoggedIntoEcho(ctx, d.nk, userID); !ok {
+		return nil
 	}
 
-	groups, err := GuildUserGroupsList(ctx, d.nk, d.guildGroupRegistry, userID)
+	// Retrieve the EVR account for the user
+	evrAccount, err := EVRProfileLoad(ctx, d.nk, userID)
 	if err != nil {
+		return fmt.Errorf("error loading evr profile: %w", err)
+	}
+
+	// Get the guild group
+	group := d.guildGroupRegistry.Get(groupID)
+	if group == nil {
+		return nil // No group found, nothing to do.
+	}
+
+	accountUpdate := false
+
+	// If the guild has a linked role, update it.
+	isActive := evrAccount.IsLinked() && !evrAccount.IsDisabled()
+	if err := d.updateMemberRole(e.Member, group.RoleMap.AccountLinked, isActive); err != nil {
+		logger.Warn("Error updating headset-linked role", zap.String("role", group.RoleMap.AccountLinked), zap.Error(err))
+	} else {
+		accountUpdate = true
+	}
+
+	// Ensure the user is in the group
+	if groups, err := GuildUserGroupsList(ctx, d.nk, d.guildGroupRegistry, userID); err != nil {
 		return fmt.Errorf("error getting user guild groups: %w", err)
-	}
-
-	group, ok := groups[groupID]
-	if !ok {
+		// Check if the user is already in the group
+	} else if _, ok := groups[groupID]; !ok {
 		// Add the player to the group
 		if err := d.nk.GroupUsersAdd(ctx, SystemUserID, groupID, []string{evrAccount.ID()}); err != nil {
 			return fmt.Errorf("error joining group: %w", err)
 		}
-
-		// Get the group data again
-		groups, err = GuildUserGroupsList(ctx, d.nk, d.guildGroupRegistry, userID)
-		if err != nil {
-			return fmt.Errorf("error getting user guild groups: %w", err)
-		}
-
-		group, ok = groups[groupID]
-		if !ok {
-			return fmt.Errorf("guild group not found")
-		}
-	}
-
-	isActive := evrAccount.IsLinked() && !evrAccount.IsDisabled()
-
-	// If the guild has a linked role, update it.
-	if err := d.updateMemberRole(e.Member, group.RoleMap.AccountLinked, isActive); err != nil {
-		logger.Warn("Error updating headset-linked role", zap.String("role", group.RoleMap.AccountLinked), zap.Error(err))
+		accountUpdate = true
 	}
 
 	// Update the role cache
@@ -717,31 +678,63 @@ func (d *DiscordIntegrator) handleMemberUpdate(logger *zap.Logger, s *discordgo.
 		}
 	}
 
-	accountUpdate := false
-	username := e.User.Username
 	locale := e.User.Locale
 	avatarURL := ""
 	// If this is there active group, update the account with this guild
 	if groupID == evrAccount.GetActiveGroupID().String() {
 		avatarURL = e.Member.AvatarURL("512")
+		accountUpdate = true
 	}
 
 	if e.BeforeUpdate != nil && e.BeforeUpdate.User != nil {
-		if e.BeforeUpdate.User.Username != e.User.Username {
+		// Update the username if it has changed.
+		if evrAccount.Username() != e.User.Username {
 			accountUpdate = true
-			username = e.User.Username
 		}
 
 		if InGameName(e.Member) != InGameName(e.BeforeUpdate) {
-			if err := d.syncDisplayName(ctx, logger, evrAccount.UserID(), evrAccount.DiscordID(), evrAccount.Username(), groupID, InGameName(e.Member)); err != nil {
+			if err := d.syncMembersIGN(ctx, logger, evrAccount, e.Member, group); err != nil {
 				return fmt.Errorf("error syncing display name: %w", err)
 			}
+			accountUpdate = true
 		}
 	}
 
 	if accountUpdate {
-		if err := d.nk.AccountUpdateId(ctx, evrAccount.ID(), username, evrAccount.MarshalMap(), evrAccount.GetActiveGroupDisplayName(), "", "", locale, avatarURL); err != nil {
+		if err := d.nk.AccountUpdateId(ctx, evrAccount.ID(), e.Member.User.Username, evrAccount.MarshalMap(), evrAccount.GetActiveGroupDisplayName(), "", "", locale, avatarURL); err != nil {
 			return fmt.Errorf("failed to update account: %w", err)
+		}
+	}
+
+	// If the guild forces IGNs to match discord while online
+	if group.DisplayNameForceNickToIGN {
+		// And the player is online
+		// Search for them in a match from this guild
+		query := fmt.Sprintf("+group_id:%s +players.user_id:%s", groupID, evrAccount.ID())
+		matches, err := d.nk.MatchList(ctx, 100, true, "", nil, nil, query)
+		if err != nil {
+			logger.Warn("Failed to list matches for guild group member", zap.Error(err), zap.String("query", query))
+			return fmt.Errorf("failed to list matches for guild group member: %w", err)
+		}
+		// Check that the player is not just a spectator
+		if len(matches) > 0 {
+			for _, match := range matches {
+				label := MatchLabel{}
+				if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), &label); err != nil {
+					logger.Warn("Failed to unmarshal match label", zap.Error(err), zap.String("string", match.GetLabel().GetValue()))
+					continue
+				}
+				if player := label.GetPlayerByUserID(evrAccount.ID()); player != nil {
+					if player.DisplayName != InGameName(e.Member) {
+						AuditLogSendGuild(s, group, fmt.Sprintf("Setting display name for `%s` to match in-game name: `%s`", e.Member.User.Username, InGameName(e.Member)))
+						// Force the display name to match the in-game name
+						if err := s.GuildMemberNickname(group.GuildID, e.Member.User.ID, player.DisplayName); err != nil {
+							logger.Warn("Failed to set display name", zap.Error(err))
+						}
+					}
+					break
+				}
+			}
 		}
 	}
 
@@ -750,36 +743,35 @@ func (d *DiscordIntegrator) handleMemberUpdate(logger *zap.Logger, s *discordgo.
 	return nil
 }
 
-func (d *DiscordIntegrator) syncDisplayName(ctx context.Context, logger *zap.Logger, userID, discordID, username, groupID, displayName string) error {
+func (d *DiscordIntegrator) syncMembersIGN(ctx context.Context, logger *zap.Logger, profile *EVRProfile, member *discordgo.Member, guildGroup *GuildGroup) error {
+	displayName := InGameName(member)
 	ownerMap, err := DisplayNameOwnerSearch(ctx, d.nk, []string{displayName})
 	if err != nil {
 		// If it errors, set the display name to their username
 		logger.Error("Error checking owner of display name.", zap.String("display_name", displayName), zap.Error(err))
 		return err
 	}
-	if len(ownerMap) > 0 && !slices.Contains(ownerMap[displayName], userID) {
+	if len(ownerMap) > 0 && !slices.Contains(ownerMap[displayName], profile.ID()) {
 		// The display name is owned by some one else.
-		gg := d.guildGroupRegistry.Get(groupID)
-		if gg == nil {
-			return fmt.Errorf("guild group not found")
-		}
-		if gg.DisplayNameInUseNotifications {
+		if guildGroup.DisplayNameInUseNotifications {
 			// Notify the user that the display name they have chosen is in use.
 			ownerID := ownerMap[displayName][0]
-			logger.Warn("Display name in use", zap.String("owner_id", ownerID), zap.String("display_name", displayName), zap.String("caller_user_id", userID))
-			if err := d.SendDisplayNameInUseNotification(ctx, discordID, d.UserIDToDiscordID(ownerID), displayName, username); err != nil {
+			logger.Warn("Display name in use", zap.String("owner_id", ownerID), zap.String("display_name", displayName), zap.String("caller_user_id", profile.ID()))
+			if err := d.SendDisplayNameInUseNotification(ctx, member.User.ID, d.UserIDToDiscordID(ownerID), displayName, member.User.Username); err != nil {
 				logger.Debug("Error sending display name in use notification", zap.String("owner_id", ownerID), zap.String("display_name", displayName), zap.Error(err))
 			}
 		}
 		return nil
 	}
+
 	// This user may use this display name.
-	history, err := DisplayNameHistoryLoad(ctx, d.nk, userID)
+	history, err := DisplayNameHistoryLoad(ctx, d.nk, profile.ID())
 	if err != nil {
 		return fmt.Errorf("error loading display name history: %w", err)
 	}
-	history.Update(groupID, displayName, username, false)
-	err = DisplayNameHistoryStore(ctx, d.nk, userID, history)
+	// Update and store the display name history.
+	history.Update(guildGroup.IDStr(), displayName, member.User.Username, false)
+	err = DisplayNameHistoryStore(ctx, d.nk, profile.ID(), history)
 	if err != nil {
 		return fmt.Errorf("error storing display name history: %w", err)
 	}
@@ -848,7 +840,7 @@ func (d *DiscordIntegrator) GuildGroupMemberRemove(ctx context.Context, guildID,
 	}
 
 	// Store the account metadata
-	if err := d.nk.AccountUpdateId(ctx, userID, md.Username(), md.MarshalMap(), md.GetActiveGroupDisplayName(), "", "", "", ""); err != nil {
+	if err := d.nk.AccountUpdateId(ctx, userID, "", md.MarshalMap(), md.GetActiveGroupDisplayName(), "", "", "", ""); err != nil {
 		return fmt.Errorf("failed to update account: %w", err)
 	}
 	return nil

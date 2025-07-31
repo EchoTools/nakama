@@ -445,7 +445,7 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 	return label, latencyMillis, nil
 }
 
-func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.InteractionCreate, caller *discordgo.Member, target *discordgo.User, duration, userNotice, notes string, requireCommunityValues bool) error {
+func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.InteractionCreate, caller *discordgo.Member, target *discordgo.User, duration, userNotice, notes string, requireCommunityValues bool, allowPrivateLobbies bool) error {
 	var (
 		ctx                = d.ctx
 		nk                 = d.nk
@@ -541,7 +541,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 		if addSuspension {
 			// Add a new record
 			actions = append(actions, fmt.Sprintf("suspension expires <t:%d:R>", suspensionExpiry.UTC().Unix()))
-			record := journal.AddRecord(groupID, callerUserID, caller.User.ID, userNotice, notes, requireCommunityValues, suspensionDuration)
+			record := journal.AddRecord(groupID, callerUserID, caller.User.ID, userNotice, notes, requireCommunityValues, allowPrivateLobbies, suspensionDuration)
 			recordsByGroupID[groupID] = append(recordsByGroupID[groupID], record)
 
 		} else if voidActiveSuspensions {
@@ -592,7 +592,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 			if len(voids) > 0 {
 				title = "Voided Suspension(s)"
 			} else if len(recordsByGroupID) > 0 {
-				title = fmt.Sprintf("Suspension: *%s*", Query.Escape(profile.GetGroupDisplayNameOrDefault(groupID)))
+				title = fmt.Sprintf("Suspension: *%s*", Query.QuoteStringValue(profile.GetGroupDisplayNameOrDefault(groupID)))
 			}
 			targetDN := profile.GetGroupDisplayNameOrDefault(groupID)
 			targetDN = EscapeDiscordMarkdown(targetDN)

@@ -17,8 +17,6 @@ import (
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
-	"github.com/intinig/go-openskill/rating"
-	"github.com/intinig/go-openskill/types"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -189,11 +187,7 @@ func (b *LobbyBuilder) buildMatch(logger *zap.Logger, entrants []*MatchmakerEntr
 
 			mu := entry.NumericProperties["rating_mu"]
 			sigma := entry.NumericProperties["rating_sigma"]
-			rating := rating.NewWithOptions(&types.OpenSkillOptions{
-				Mu:    &mu,
-				Sigma: &sigma,
-			})
-
+			rating := NewRating(0, mu, sigma)
 			percentile, ok := entry.NumericProperties["rank_percentile"]
 			if !ok {
 				percentile = 0.0
@@ -441,7 +435,7 @@ func CompactedFrequencySort[T comparable](s []T, desc bool) []T {
 
 func rttByPlayerByExtIP(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, groupID string) (map[string]map[string]int, error) {
 	qparts := []string{
-		fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/", Query.Escape(groupID)),
+		fmt.Sprintf("+label.broadcaster.group_ids:/(%s)/", Query.QuoteStringValue(groupID)),
 	}
 
 	query := strings.Join(qparts, " ")
@@ -516,7 +510,7 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 	globalSettings := ServiceSettings().Matchmaking
 
 	qparts := []string{
-		fmt.Sprintf("+label.broadcaster.group_ids:%s", Query.MatchItem(groupIDs)),
+		fmt.Sprintf("+label.broadcaster.group_ids:%s", Query.CreateMatchPattern(groupIDs)),
 		queryAddon,
 	}
 
@@ -530,7 +524,7 @@ func LobbyGameServerAllocate(ctx context.Context, logger runtime.Logger, nk runt
 			prefix = "+"
 		}
 
-		qparts = append(qparts, fmt.Sprintf("%slabel.broadcaster.region_codes:%s", prefix, Query.MatchItem(regions)))
+		qparts = append(qparts, fmt.Sprintf("%slabel.broadcaster.region_codes:%s", prefix, Query.CreateMatchPattern(regions)))
 	}
 
 	query := strings.Join(qparts, " ")

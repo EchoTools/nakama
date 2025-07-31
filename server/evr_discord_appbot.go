@@ -31,11 +31,6 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-const (
-	CustomizationStorageCollection = "Customization"
-	SavedOutfitsStorageKey         = "outfits"
-)
-
 type DiscordAppBot struct {
 	sync.Mutex
 
@@ -103,7 +98,10 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 	//bot.LogLevel = discordgo.LogDebug
 	dg.StateEnabled = true
 
-	dg.Identify.Intents = discordgo.IntentsAllWithoutPrivileged
+	dg.Identify.Intents = discordgo.IntentsNone
+	dg.Identify.Intents |= discordgo.IntentGuilds
+	dg.Identify.Intents |= discordgo.IntentGuildMembers
+	dg.Identify.Intents |= discordgo.IntentGuildBans
 
 	dg.AddHandlerOnce(func(s *discordgo.Session, m *discordgo.Ready) {
 
@@ -466,15 +464,20 @@ var (
 					Required:    false,
 				},
 				{
-					Type:        discordgo.ApplicationCommandOptionBoolean,
-					Name:        "require_community_values",
-					Description: "Require the user to accept the community values before they can rejoin.",
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "moderator_notes",
+					Description: "Notes for the audit log (other moderators)",
 					Required:    false,
 				},
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "moderator_notes",
-					Description: "Notes for the audit log (other moderators)",
+					Name:        "allow_private_lobbies",
+					Description: "Limit the user to only joining private lobbies.",
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionBoolean,
+					Name:        "require_community_values",
+					Description: "Require the user to accept the community values before they can rejoin.",
 					Required:    false,
 				},
 			},
@@ -2324,6 +2327,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				notes                  string
 				requireCommunityValues bool
 				duration               string
+				allowPrivateLobbies    bool
 			)
 
 			for _, o := range i.ApplicationCommandData().Options {
@@ -2346,10 +2350,12 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					requireCommunityValues = o.BoolValue()
 				case "suspension_duration":
 					duration = o.StringValue()
+				case "allow_private_lobbies":
+					allowPrivateLobbies = o.BoolValue()
 				}
 			}
 
-			return d.kickPlayer(logger, i, callerMember, target, duration, userNotice, notes, requireCommunityValues)
+			return d.kickPlayer(logger, i, callerMember, target, duration, userNotice, notes, requireCommunityValues, allowPrivateLobbies)
 		},
 		"join-player": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
 
@@ -2758,23 +2764,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return nil
 			}
 
-			outfits := make(map[string]*AccountCosmetics)
+			outfits := make(Wardrobe)
 
-			objs, err := d.nk.StorageRead(ctx, []*runtime.StorageRead{
-				{
-					Collection: CustomizationStorageCollection,
-					Key:        SavedOutfitsStorageKey,
-					UserID:     userID,
-				},
-			})
-			if err != nil {
-				return fmt.Errorf("Failed to read saved outfits: %w", err)
-			}
-
-			if len(objs) != 0 {
-				if err := json.Unmarshal([]byte(objs[0].Value), &outfits); err != nil {
-					return fmt.Errorf("Failed to unmarshal saved outfits: %w", err)
-				}
+			if err := StorageRead(ctx, d.nk, userID, outfits, true); err != nil {
+				return fmt.Errorf("failed to read saved outfits: %w", err)
 			}
 
 			metadata, err := EVRProfileLoad(ctx, d.nk, userID)
@@ -2799,19 +2792,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 					outfits[outfitName] = &metadata.LoadoutCosmetics
 
-					data, err := json.Marshal(outfits)
-					if err != nil {
-						return fmt.Errorf("failed to marshal outfits: %w", err)
-					}
-					if _, err := d.nk.StorageWrite(ctx, []*runtime.StorageWrite{
-						{
-							Collection: CustomizationStorageCollection,
-							Key:        SavedOutfitsStorageKey,
-							UserID:     userID,
-							Value:      string(data),
-						},
-					}); err != nil {
-						return fmt.Errorf("failed to save outfits: %w", err)
+					if err := StorageWrite(ctx, d.nk, userID, outfits); err != nil {
+						return fmt.Errorf("failed to write saved outfits: %w", err)
 					}
 
 					return simpleInteractionResponse(s, i, fmt.Sprintf("Saved current outfit as `%s`", outfitName))
@@ -2824,7 +2806,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					metadata.LoadoutCosmetics = *outfits[outfitName]
 
 					if err := EVRProfileUpdate(ctx, d.nk, userID, metadata); err != nil {
-						return fmt.Errorf("Failed to set account metadata: %w", err)
+						return fmt.Errorf("failed to set account metadata: %w", err)
 					}
 
 					return simpleInteractionResponse(s, i, fmt.Sprintf("Applied outfit `%s`. If the changes do not take effect in your next match, Please re-open your game.", outfitName))
@@ -2837,8 +2819,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 					delete(outfits, outfitName)
 
-					if err := EVRProfileUpdate(ctx, d.nk, userID, metadata); err != nil {
-						return fmt.Errorf("failed to set account metadata: %w", err)
+					if err := StorageWrite(ctx, d.nk, userID, outfits); err != nil {
+						return fmt.Errorf("failed to write saved outfits: %w", err)
 					}
 
 					return simpleInteractionResponse(s, i, fmt.Sprintf("Deleted loadout profile `%s`", outfitName))
@@ -3212,9 +3194,9 @@ func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runt
 		Description: fmt.Sprintf("updated <t:%d:f>", time.Now().UTC().Unix()),
 		Fields:      make([]*discordgo.MessageEmbedField, 0),
 	}
+	var status string
 
 	for _, state := range tracked {
-		var status string
 
 		if state.LobbyType == UnassignedLobby {
 			status = "Unassigned"

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 )
@@ -52,9 +51,10 @@ func LoginAlternateSearch(ctx context.Context, nk runtime.NakamaModule, loginHis
 	return LoginAlternatePatternSearch(ctx, nk, loginHistory, items, skipSelf)
 }
 
+// LoginAlternatePatternSearch searches for other users that have logged in with the same patterns as the given login history.
 func LoginAlternatePatternSearch(ctx context.Context, nk runtime.NakamaModule, loginHistory *LoginHistory, items []string, skipSelf bool) ([]*AlternateSearchMatch, map[string]*LoginHistory, error) {
 
-	query := fmt.Sprintf("+value.cache:%s", Query.MatchItem(items))
+	query := fmt.Sprintf("+value.cache:%s", Query.CreateMatchPattern(items))
 	otherHistories := make(map[string]*LoginHistory)
 	matches := make([]*AlternateSearchMatch, 0)
 	var err error
@@ -99,7 +99,7 @@ func LoginAlternatePatternSearch(ctx context.Context, nk runtime.NakamaModule, l
 
 func LoginDeniedClientIPAddressSearch(ctx context.Context, nk runtime.NakamaModule, clientIPAddress string) ([]string, error) {
 
-	query := fmt.Sprintf("+value.denied_client_addrs:/%s/", Query.Escape(clientIPAddress))
+	query := fmt.Sprintf("+value.denied_client_addrs:/%s/", Query.QuoteStringValue(clientIPAddress))
 	// Perform the storage list operation
 
 	cursor := ""
@@ -123,51 +123,40 @@ func LoginDeniedClientIPAddressSearch(ctx context.Context, nk runtime.NakamaModu
 }
 
 func loginHistoryCompare(a, b *LoginHistory) []*AlternateSearchMatch {
+	if a.userID == b.userID {
+		return nil // Skip self-comparison.
+	}
+	if a == nil || b == nil || len(a.History) == 0 || len(b.History) == 0 {
+		return nil // No history to compare.
+	}
 	matches := make([]*AlternateSearchMatch, 0)
 
-	aEntries := make([][]string, 0, len(a.History)*3)
-	bEntries := make([][]string, 0, len(b.History)*3)
-
-	for _, aEntry := range a.History {
-		itemsA := []string{
-			aEntry.XPID.String(),
-			aEntry.ClientIP,
-			aEntry.SystemProfile(),
+	// Collect the authUserData from both histories.
+	authUserData := make([][][]string, 2)
+	for i, h := range []map[string]*LoginHistoryEntry{a.History, b.History} {
+		authUserData[i] = make([][]string, 0, len(h))
+		for _, e := range h {
+			items := []string{
+				e.XPID.String(),
+				e.ClientIP,
+				e.SystemProfile(),
+				e.LoginData.HMDSerialNumber,
+			}
+			authUserData[i] = append(authUserData[i], items)
 		}
-		if aEntry.LoginData.HMDSerialNumber != "" {
-			itemsA = append(itemsA, aEntry.LoginData.HMDSerialNumber)
-		} else {
-			itemsA = append(itemsA, uuid.Must(uuid.NewV4()).String())
-		}
-		aEntries = append(aEntries, itemsA)
 	}
-
-	for _, bEntry := range b.History {
-		itemsB := []string{
-			bEntry.XPID.String(),
-			bEntry.ClientIP,
-			bEntry.SystemProfile(),
-		}
-		if bEntry.LoginData.HMDSerialNumber != "" {
-			itemsB = append(itemsB, bEntry.LoginData.HMDSerialNumber)
-		} else {
-			itemsB = append(itemsB, uuid.Must(uuid.NewV4()).String())
-		}
-		bEntries = append(bEntries, itemsB)
-	}
-
-	for _, aEntry := range aEntries {
-		for _, bEntry := range bEntries {
-
-			matchingItems := make([]string, 0, len(aEntry))
-			for i := range aEntry {
-				if aEntry[i] == bEntry[i] {
-					matchingItems = append(matchingItems, aEntry[i])
+	// Compare the entries from both histories.
+	for _, itemsA := range authUserData[0] {
+		for _, itemsB := range authUserData[1] {
+			matchingItems := make([]string, 0, len(itemsA))
+			for i, item := range itemsA {
+				if item == itemsB[i] && item != "" {
+					// The items match.
+					matchingItems = append(matchingItems, item)
 				}
 			}
-
+			// If there are matching items, create a match entry.
 			if len(matchingItems) > 0 {
-				slices.Sort(matchingItems)
 				matches = append(matches, &AlternateSearchMatch{
 					OtherUserID: b.userID,
 					Items:       matchingItems,
