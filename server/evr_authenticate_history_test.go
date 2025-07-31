@@ -742,7 +742,7 @@ func TestLoginHistory_SearchPatterns(t *testing.T) {
 					"key2": entry2,
 				},
 			},
-			want: []string{"192.168.1.1", "ABC123", "OVR-12345", "192.168.1.2", "XYZ789", "STM-67890"},
+			want: []string{"ABC123", "OVR-12345", "STM-67890", "XYZ789"}, // Private IPs filtered out
 		},
 		{
 			name: "handles duplicate patterns",
@@ -752,7 +752,7 @@ func TestLoginHistory_SearchPatterns(t *testing.T) {
 					"key2": entry1, // Same entry, should deduplicate
 				},
 			},
-			want: []string{"192.168.1.1", "ABC123", "OVR-12345"},
+			want: []string{"ABC123", "OVR-12345"}, // Private IP filtered out
 		},
 		{
 			name: "returns empty for empty history",
@@ -1100,6 +1100,76 @@ func TestLoginHistory_NotifyGroup(t *testing.T) {
 				}
 				if _, exists := tt.history.GroupNotifications[tt.groupID]; !exists {
 					t.Error("Group should be added to GroupNotifications")
+				}
+			}
+		})
+	}
+}
+func TestLoginHistory_AlternateMaps(t *testing.T) {
+	tests := []struct {
+		name            string
+		history         *LoginHistory
+		wantFirstDegree map[string]map[string]bool
+		wantSecondDegree map[string]bool
+	}{
+		{
+			name: "returns alternate maps with items",
+			history: &LoginHistory{
+				AlternateMatches: map[string][]*AlternateSearchMatch{
+					"user1": {{OtherUserID: "user1", Items: []string{"item1", "item2"}}},
+					"user2": {{OtherUserID: "user2", Items: []string{"item2", "item3"}}},
+				},
+				SecondDegreeAlternates: []string{"user3", "user4", "user1"}, // user1 should be filtered out
+			},
+			wantFirstDegree: map[string]map[string]bool{
+				"user1": {"item1": true, "item2": true},
+				"user2": {"item2": true, "item3": true},
+			},
+			wantSecondDegree: map[string]bool{
+				"user3": true,
+				"user4": true,
+			},
+		},
+		{
+			name: "returns nil for no alternates",
+			history: &LoginHistory{
+				AlternateMatches:       map[string][]*AlternateSearchMatch{},
+				SecondDegreeAlternates: []string{},
+			},
+			wantFirstDegree:  nil,
+			wantSecondDegree: nil,
+		},
+		{
+			name:             "returns nil for nil maps",
+			history:          &LoginHistory{},
+			wantFirstDegree:  nil,
+			wantSecondDegree: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Store original data to verify it doesn't get corrupted
+			originalAlternates := make(map[string][]*AlternateSearchMatch)
+			if tt.history.AlternateMatches != nil {
+				for k, v := range tt.history.AlternateMatches {
+					originalAlternates[k] = v
+				}
+			}
+
+			gotFirst, gotSecond := tt.history.AlternateMaps()
+			
+			if !reflect.DeepEqual(gotFirst, tt.wantFirstDegree) {
+				t.Errorf("LoginHistory.AlternateMaps() first degree = %v, want %v", gotFirst, tt.wantFirstDegree)
+			}
+			if !reflect.DeepEqual(gotSecond, tt.wantSecondDegree) {
+				t.Errorf("LoginHistory.AlternateMaps() second degree = %v, want %v", gotSecond, tt.wantSecondDegree)
+			}
+
+			// Verify original data wasn't corrupted (this will fail with the current bug)
+			if tt.history.AlternateMatches != nil && len(originalAlternates) > 0 {
+				if len(tt.history.AlternateMatches) != len(originalAlternates) {
+					t.Errorf("AlternateMaps() corrupted original data: got %d entries, want %d", len(tt.history.AlternateMatches), len(originalAlternates))
 				}
 			}
 		})
