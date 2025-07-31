@@ -22,6 +22,10 @@ Global Operators can use all Discord slash commands without guild-level role res
   - Normally requires Guild Enforcer role
   - Global Operators can force joins across all guilds
 
+- **`/kick-player`** - Remove a player from a match
+  - Normally requires Guild Enforcer role
+  - Global Operators can kick players from matches across all guilds
+
 - **`/igp`** - In-game player commands
   - Normally requires Guild Enforcer role
   - Execute player-related commands during active matches
@@ -34,12 +38,18 @@ Global Operators can use all Discord slash commands without guild-level role res
 
 When viewing user profiles through Discord bot commands, Global Operators have access to:
 
+#### `/lookup` Command
 - **VRML History Embed** - Complete match history and statistics
 - **Alternates Embed** - Information about alternate accounts
 - **Full IP Addresses** - Unredacted IP address information
 - **All Guild Information** - User's membership across all guilds
 - **30-Day Login History** - Detailed login activity
-- **File Export on Error** - Fallback format for `/lookup` errors.
+- **File Export on Error** - Fallback format for `/lookup` errors
+
+#### `/search` Command
+- **Enhanced Search Results** - Access to comprehensive player data across all guilds
+- **Cross-Guild Player Discovery** - Can search for players regardless of guild membership
+- **Advanced Filtering** - Additional search parameters and filters not available to standard users
 
 ### Server and Match Operations
 
@@ -54,11 +64,6 @@ When viewing user profiles through Discord bot commands, Global Operators have a
 - Can perform suspensions and other disciplinary actions across all guilds
 
 ### System-Level Capabilities
-
-#### Account Management
-- Marked in session parameters as `isGlobalOperator`
-- Stored in account metadata for persistent identification
-- Inherits additional permissions if also a Global Developer
 
 #### Cross-Guild Operations
 - Bypass all guild-level role requirements (Allocator, Enforcer, Auditor)
