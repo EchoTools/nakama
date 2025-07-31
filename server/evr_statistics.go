@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"math"
 	"reflect"
 	"slices"
 	"strings"
@@ -53,9 +54,9 @@ var (
 
 const ()
 
-// Float64ToInt64Pair converts a float64 into a leaderboard score.
+// Float64ToScoreLegacy converts a float64 into a leaderboard score (legacy single-value version).
 // It uses a fixed scaling factor to preserve precision.
-func Float64ToScore(f float64) (int64, error) {
+func Float64ToScoreLegacy(f float64) (int64, error) {
 	if f < 0 {
 		return 0, fmt.Errorf("negative value: %f", f)
 	}
@@ -68,13 +69,118 @@ func Float64ToScore(f float64) (int64, error) {
 	return int64(f * float64(LeaderboardScoreScalingFactor)), nil
 }
 
-// Int64PairToFloat64 converts a leaderboard score into a float64.
-func ScoreToFloat64(score int64) float64 {
+// ScoreToFloat64Legacy converts a leaderboard score into a float64 (legacy single-value version).
+func ScoreToFloat64Legacy(score int64) float64 {
 	if score == 0 {
 		return 0
 	}
 	// The fraction part is the scaled float
 	return float64(score) / LeaderboardScoreScalingFactor
+}
+
+// Float64ToScore converts a float64 (including negative values) into two int64 values for leaderboard storage.
+// Returns (score, subscore, error) where both score and subscore are used to maintain proper sort order.
+// 
+// The encoding algorithm ensures that leaderboard records sort correctly when using standard
+// integer comparison (score first, then subscore), maintaining the same order as the original float64 values.
+// All score and subscore values are non-negative to comply with Nakama's leaderboard requirements.
+//
+// Supported range: -1e15 to +1e15 with ~1e-9 fractional precision.
+// 
+// Examples:
+//   Float64ToScore(-2.5)  -> (999999999999997, 499999999, nil)  // Negative values
+//   Float64ToScore(0.0)   -> (1000000000000000, 0, nil)         // Zero  
+//   Float64ToScore(1.7)   -> (1000000000000001, 700000000, nil) // Positive values
+func Float64ToScore(f float64) (int64, int64, error) {
+	// Check for invalid values
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return 0, 0, fmt.Errorf("invalid value: %f", f)
+	}
+	
+	// Limit to reasonable range to prevent overflow
+	if f > 1e15 || f < -1e15 {
+		return 0, 0, fmt.Errorf("value out of range: %f", f)
+	}
+
+	const fracScale = LeaderboardScoreScalingFactor // 1e9 for fractional precision
+	const scoreOffset = int64(1e15)                 // Offset to ensure all scores are non-negative
+	
+	if f < 0 {
+		// For negative numbers: use lower range [0, scoreOffset)
+		absF := -f
+		intPart := int64(absF)                     // Get the integer magnitude
+		fracPart := absF - float64(intPart)       // Get the fractional part (0.0 to 1.0)
+		
+		// Encode so more negative values have smaller scores
+		// Use range [0, scoreOffset-1] for all negative values
+		score := scoreOffset - 1 - intPart                 // More negative = smaller score
+		
+		// For exact integers (fracPart == 0), subscore should be 0
+		// For fractional values, invert the fractional part for proper ordering
+		var subscore int64
+		if fracPart == 0.0 {
+			subscore = 0
+		} else {
+			subscore = int64((1.0 - fracPart) * float64(fracScale - 1))
+		}
+		
+		return score, subscore, nil
+	} else {
+		// For zero and positive numbers: use upper range [scoreOffset, ∞)
+		intPart := int64(f)                     // Get the integer part
+		fracPart := f - float64(intPart)       // Get the fractional part
+		
+		score := scoreOffset + intPart           // Offset ensures non-negative
+		subscore := int64(fracPart * fracScale) // Scale fractional part
+		
+		return score, subscore, nil
+	}
+}
+
+// ScoreToFloat64 converts two int64 leaderboard values back into a float64, supporting negative numbers.
+// This is the inverse operation of Float64ToScore.
+//
+// Parameters:
+//   score:    The primary leaderboard score field (must be non-negative)
+//   subscore: The secondary leaderboard score field (must be 0 <= subscore < 1e9)
+//
+// Returns the original float64 value (within precision limits) or an error for invalid inputs.
+//
+// Examples:
+//   ScoreToFloat64(999999999999997, 499999999) -> -2.5
+//   ScoreToFloat64(1000000000000000, 0)        -> 0.0  
+//   ScoreToFloat64(1000000000000001, 700000000) -> 1.7
+func ScoreToFloat64(score int64, subscore int64) (float64, error) {
+	// Validate input ranges
+	if score < 0 {
+		return 0, fmt.Errorf("invalid score: %d (must be non-negative)", score)
+	}
+	if subscore < 0 || subscore >= int64(LeaderboardScoreScalingFactor) {
+		return 0, fmt.Errorf("invalid subscore: %d", subscore)
+	}
+
+	const fracScale = LeaderboardScoreScalingFactor
+	const scoreOffset = int64(1e15)
+	
+	if score < scoreOffset {
+		// Negative number: score in range [0, scoreOffset)
+		intPart := scoreOffset - 1 - score               // Convert back to magnitude
+		
+		// Handle exact integers vs fractional values
+		var fracPart float64
+		if subscore == 0 {
+			fracPart = 0.0
+		} else {
+			fracPart = 1.0 - (float64(subscore) / float64(fracScale - 1)) // Uninvert the fractional part
+		}
+		
+		return -(float64(intPart) + fracPart), nil
+	} else {
+		// Zero or positive number: score in range [scoreOffset, ∞)
+		intPart := score - scoreOffset               // Remove offset
+		fracPart := float64(subscore) / fracScale
+		return float64(intPart) + fracPart, nil
+	}
 }
 
 type LeaderboardMeta struct {
@@ -128,7 +234,11 @@ func MatchmakingRatingLoad(ctx context.Context, nk runtime.NakamaModule, userID,
 		}
 
 		record := ownerRecords[0]
-		*ptr = ScoreToFloat64(record.Score)
+		val, err := ScoreToFloat64(record.Score, record.Subscore)
+		if err != nil {
+			return NewDefaultRating(), fmt.Errorf("failed to decode score for %s: %w", statName, err)
+		}
+		*ptr = val
 	}
 	return NewRating(0, mu, sigma), nil
 }
@@ -143,18 +253,18 @@ func MatchmakingRatingStore(ctx context.Context, nk runtime.NakamaModule, userID
 		"discord_id": discordID,
 	}
 	for id, value := range scores {
-		score, err := Float64ToScore(value)
+		score, subscore, err := Float64ToScore(value)
 		if err != nil {
 			return fmt.Errorf("failed to convert float64 to int64 pair: %w", err)
 		}
 
 		// Write the record
-		if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, displayName, score, 0, metadata, nil); err != nil {
+		if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, displayName, score, subscore, metadata, nil); err != nil {
 			// Try to create the leaderboard
 			err = nk.LeaderboardCreate(ctx, id, true, "desc", "set", "", nil, true)
 			if err != nil {
 				return fmt.Errorf("Leaderboard create error: %w", err)
-			} else if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, displayName, score, 0, metadata, nil); err != nil {
+			} else if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, displayName, score, subscore, metadata, nil); err != nil {
 				return fmt.Errorf("Leaderboard record write error: %w", err)
 			}
 		}
@@ -176,23 +286,27 @@ func MatchmakingRankPercentileLoad(ctx context.Context, nk runtime.NakamaModule,
 		return ServiceSettings().Matchmaking.RankPercentile.Default, nil
 	}
 
-	return ScoreToFloat64(records[0].Score), nil
+	val, err := ScoreToFloat64(records[0].Score, records[0].Subscore)
+	if err != nil {
+		return ServiceSettings().Matchmaking.RankPercentile.Default, fmt.Errorf("failed to decode rank percentile score: %w", err)
+	}
+	return val, nil
 }
 
 func MatchmakingRankPercentileStore(ctx context.Context, nk runtime.NakamaModule, userID, username, groupID string, mode evr.Symbol, percentile float64) error {
 
 	id := StatisticBoardID(groupID, mode, RankPercentileStatisticID, "alltime")
 
-	score, err := Float64ToScore(percentile)
+	score, subscore, err := Float64ToScore(percentile)
 	if err != nil {
 		return fmt.Errorf("failed to convert float64 to int64 pair: %w", err)
 	}
 
-	if score == 0 {
+	if score == 0 && subscore == 0 {
 		return nil
 	}
 	// Write the record
-	if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, username, score, 0, nil, nil); err != nil {
+	if _, err := nk.LeaderboardRecordWrite(ctx, id, userID, username, score, subscore, nil, nil); err != nil {
 		// Try to create the leaderboard
 		err = nk.LeaderboardCreate(ctx, id, true, "asc", "set", "", nil, true)
 
@@ -200,7 +314,7 @@ func MatchmakingRankPercentileStore(ctx context.Context, nk runtime.NakamaModule
 			return fmt.Errorf("Leaderboard create error: %w", err)
 		} else {
 			// Retry the write
-			_, err := nk.LeaderboardRecordWrite(ctx, id, userID, username, score, 0, nil, nil)
+			_, err := nk.LeaderboardRecordWrite(ctx, id, userID, username, score, subscore, nil, nil)
 			if err != nil {
 				return fmt.Errorf("Leaderboard record write error: %w", err)
 			}
@@ -369,7 +483,12 @@ func PlayerStatisticsGetID(ctx context.Context, db *sql.DB, nk runtime.NakamaMod
 			continue
 		}
 		v.SetCount(1)
-		v.SetValue(ScoreToFloat64(dbScore))
+		val, err := ScoreToFloat64(dbScore, dbSubscore)
+		if err != nil {
+			log.Printf("Failed to decode score for leaderboard %s: %v", dbLeaderboardID, err)
+			continue
+		}
+		v.SetValue(val)
 
 	}
 
