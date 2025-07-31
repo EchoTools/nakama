@@ -60,6 +60,21 @@ func errFailedRegistration(session *sessionWS, logger *zap.Logger, err error, co
 }
 
 // gameserverRegistrationRequest handles the game server registration request from the game server.
+//
+// This function utilizes various URL parameters that are parsed during WebSocket session initialization.
+// For comprehensive documentation of all URL parameters, see: docs/game-server-url-parameters.md
+//
+// Key URL parameters used in this function:
+//   - discordid/discord_id: Discord user ID for authentication
+//   - password: Authentication password
+//   - serveraddr: External server address (IP:port format)
+//   - tags: Comma-delimited server tags
+//   - guilds: Comma-delimited Discord guild IDs
+//   - regions: Comma-delimited geographic regions
+//   - features: Comma-delimited supported features
+//   - geo_precision: Geohash precision (0-12)
+//   - debug: Enable debug mode
+//   - verbose: Enable verbose logging
 func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope) error {
 	request := in.GetGameServerRegistrationRequest()
 	var (
