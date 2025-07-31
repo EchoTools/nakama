@@ -1,9 +1,5 @@
 # Global Operators
 
-Global Operators are special system administrators with elevated permissions across the entire game service. They have the highest level of access and can perform administrative actions across all guilds and servers.
-
-## Overview
-
 Global Operators are members of the `Global Operators` system group. This role provides comprehensive administrative capabilities that bypass normal guild-level restrictions.
 
 ## Permissions and Abilities
@@ -13,7 +9,7 @@ Global Operators are members of the `Global Operators` system group. This role p
 Global Operators can use all Discord slash commands without guild-level role restrictions:
 
 #### Match Management Commands
-- **`/create`** - Allocate new matches
+- **`/allocate`** - Allocate new matches
   - Normally requires Guild Allocator role
   - Global Operators can create matches in any guild
 
@@ -43,17 +39,17 @@ When viewing user profiles through Discord bot commands, Global Operators have a
 - **Full IP Addresses** - Unredacted IP address information
 - **All Guild Information** - User's membership across all guilds
 - **30-Day Login History** - Detailed login activity
-- **File Export on Error** - Download detailed error logs and data
+- **File Export on Error** - Fallback format for `/lookup` errors.
 
 ### Server and Match Operations
 
 #### Match Preparation
-- Can prepare matches on any server through RPC calls
-- Access to `PrepareMatchRPC` function alongside Global Developers and server operators
+- Can `/allocate` matches on any server through RPC calls
+- Access to `PrepareMatchRPC` RPC
 - No restrictions based on server ownership
 
 #### Player Enforcement
-- Can disconnect players from matches with "global operator" permissions
+- Can disconnect players from matches
 - Enforcement actions are logged with global operator attribution
 - Can perform suspensions and other disciplinary actions across all guilds
 
