@@ -467,17 +467,16 @@ func (h *LoginHistory) UpdateAlternates(ctx context.Context, nk runtime.NakamaMo
 	// Remove duplicates
 	h.SecondDegreeAlternates = slices.Compact(h.SecondDegreeAlternates)
 
+	// Convert excludeUserIDs to a map for O(1) lookups
+	excludeUserIDsMap := make(map[string]bool, len(excludeUserIDs))
+	for _, excludeID := range excludeUserIDs {
+		excludeUserIDsMap[excludeID] = true
+	}
+
 	// Update the login histories of first-degree alternates (bidirectional relationship)
 	for alternateUserID := range h.AlternateMatches {
 		// Skip if this userID is in the excluded list
-		isExcluded := false
-		for _, excludeID := range excludeUserIDs {
-			if excludeID == alternateUserID {
-				isExcluded = true
-				break
-			}
-		}
-		if isExcluded {
+		if excludeUserIDsMap[alternateUserID] {
 			continue
 		}
 
