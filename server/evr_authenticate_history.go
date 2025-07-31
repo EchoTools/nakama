@@ -403,7 +403,7 @@ func (h *LoginHistory) SearchPatterns() (patterns []string) {
 	return patterns
 }
 
-func (h *LoginHistory) UpdateAlternates(ctx context.Context, nk runtime.NakamaModule, excludeUserIDs ...string) (hasDisabledAlts bool, err error) {
+func (h *LoginHistory) UpdateAlternates(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, excludeUserIDs ...string) (hasDisabledAlts bool, err error) {
 
 	// Update alternates
 	matches, otherHistories, err := LoginAlternateSearch(ctx, nk, h, true)
@@ -484,6 +484,11 @@ func (h *LoginHistory) UpdateAlternates(ctx context.Context, nk runtime.NakamaMo
 		alternateHistory := NewLoginHistory(alternateUserID)
 		if err := StorageRead(ctx, nk, alternateUserID, alternateHistory, false); err != nil {
 			// Log warning but continue - don't fail the entire operation
+			logger.WithFields(map[string]interface{}{
+				"current_user_id":   h.userID,
+				"alternate_user_id": alternateUserID,
+				"error":            err,
+			}).Warn("Failed to load alternate user's login history for bidirectional update")
 			continue
 		}
 
@@ -501,6 +506,11 @@ func (h *LoginHistory) UpdateAlternates(ctx context.Context, nk runtime.NakamaMo
 			// Save the updated alternate history
 			if err := StorageWrite(ctx, nk, alternateUserID, alternateHistory); err != nil {
 				// Log warning but continue - don't fail the entire operation
+				logger.WithFields(map[string]interface{}{
+					"current_user_id":   h.userID,
+					"alternate_user_id": alternateUserID,
+					"error":            err,
+				}).Warn("Failed to save alternate user's login history for bidirectional update")
 				continue
 			}
 		}
