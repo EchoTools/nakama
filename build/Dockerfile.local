@@ -28,6 +28,8 @@ WORKDIR /go/build/nakama
 
 COPY . .
 
+RUN go mod vendor
+
 RUN go build -o /go/build-out/nakama -trimpath -mod=vendor -gcflags "-trimpath $PWD" -asmflags "-trimpath $PWD" -ldflags "-s -w -X main.version=$(git describe --dirty=+ --tags --always)"
 
 FROM debian:bookworm-slim
