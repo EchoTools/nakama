@@ -33,6 +33,7 @@ RUN apt-get update && \
 
 WORKDIR /go/build/nakama
 COPY . .
+RUN go mod vendor
 RUN go build -o /go/build-out/nakama -trimpath -mod=vendor -gcflags "-trimpath $PWD" -asmflags "-trimpath $PWD" -ldflags "-s -w -X main.version=$VERSION -X main.commitID=$COMMIT"
 
 FROM debian:bookworm-slim
