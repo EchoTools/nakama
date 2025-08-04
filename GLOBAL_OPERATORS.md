@@ -55,7 +55,7 @@ When viewing user profiles through Discord bot commands, Global Operators have a
 
 #### Match Preparation
 - Can `/allocate` matches on any server through RPC calls
-- Access to `PrepareMatchRPC` RPC
+- Access to the `PrepareMatchRPC` service
 - No restrictions based on server ownership
 
 #### Player Enforcement
