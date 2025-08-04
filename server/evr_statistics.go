@@ -112,8 +112,17 @@ func Float64ToScore(f float64) (int64, int64, error) {
 		fracPart := absF - float64(intPart)       // Get the fractional part (0.0 to 1.0)
 		
 		// Encode so more negative values have smaller scores
-		score := scoreOffset - 1 - intPart                   // More negative = smaller score
-		subscore := int64((1.0 - fracPart) * float64(fracScale - 1)) // Invert fractional for proper ordering
+		// Use range [0, scoreOffset-1] for all negative values
+		score := scoreOffset - 1 - intPart                 // More negative = smaller score
+		
+		// For exact integers (fracPart == 0), subscore should be 0
+		// For fractional values, invert the fractional part for proper ordering
+		var subscore int64
+		if fracPart == 0.0 {
+			subscore = 0
+		} else {
+			subscore = int64((1.0 - fracPart) * float64(fracScale - 1))
+		}
 		
 		return score, subscore, nil
 	} else {
@@ -155,8 +164,16 @@ func ScoreToFloat64(score int64, subscore int64) (float64, error) {
 	
 	if score < scoreOffset {
 		// Negative number: score in range [0, scoreOffset)
-		intPart := scoreOffset - 1 - score             // Convert back to magnitude
-		fracPart := 1.0 - (float64(subscore) / float64(fracScale - 1)) // Uninvert the fractional part
+		intPart := scoreOffset - 1 - score               // Convert back to magnitude
+		
+		// Handle exact integers vs fractional values
+		var fracPart float64
+		if subscore == 0 {
+			fracPart = 0.0
+		} else {
+			fracPart = 1.0 - (float64(subscore) / float64(fracScale - 1)) // Uninvert the fractional part
+		}
+		
 		return -(float64(intPart) + fracPart), nil
 	} else {
 		// Zero or positive number: score in range [scoreOffset, ∞)
