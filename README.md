@@ -24,6 +24,10 @@
 
 Build scalable games and apps with a production ready server used by ambitious game studios and app developers [all around the world](https://heroiclabs.com/customers/). Have a look at the [documentation](https://heroiclabs.com/docs) and join the [developer community](https://forum.heroiclabs.com) for more info.
 
+## Documentation
+
+* **[Game Server URL Parameters](docs/game-server-url-parameters.md)** - Complete reference for URL parameters used in game server registration.
+
 ## Getting Started
 
 The server is simple to setup and run for local development and can be deployed to any cloud provider. See the [deployment notes](#deployment) for recommendations on how to deploy the project for production. Nakama server requires CockroachDB or another Postgres wire-compatible server as it's database.
