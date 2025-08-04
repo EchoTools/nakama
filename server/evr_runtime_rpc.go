@@ -1281,6 +1281,8 @@ func (h *RPCHandler) AccountLookupRPC(ctx context.Context, logger runtime.Logger
 	callerID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
 	if ok {
 		if ok, err := CheckSystemGroupMembership(ctx, db, callerID, GroupGlobalPrivateDataAccess); err != nil {
+			logger.Warn("Error checking system group membership for private data access:", err)
+		} else {
 			includePrivate = ok
 		}
 	}
