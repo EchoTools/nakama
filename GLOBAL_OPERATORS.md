@@ -18,7 +18,7 @@ Global Operators can use all Discord slash commands without guild-level role res
   - Global Operators can shut down matches on any server, regardless of ownership
 
 #### Player Management Commands
-- **`/join-player`** - Join a players match
+- **`/join-player`** - Join a player's match
   - Normally requires Guild Enforcer role
   - Global Operators can force joins across all guilds
 
