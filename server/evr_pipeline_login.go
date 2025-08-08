@@ -674,7 +674,8 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	params.displayNameHistory.ReplaceInGameNames(igns)
 
 	// Update the display name history for the active group, marking this name as an in-game-name.
-	activeGroupDisplayName, _ := params.displayNameHistory.LatestGroup(params.profile.ActiveGroupID)
+	// Use the current display name from the profile instead of querying the potentially stale history
+	activeGroupDisplayName := params.profile.GetGroupDisplayNameOrDefault(params.profile.ActiveGroupID)
 	params.displayNameHistory.Update(params.profile.ActiveGroupID, activeGroupDisplayName, params.profile.Username(), true)
 
 	if err := DisplayNameHistoryStore(ctx, p.nk, session.userID.String(), params.displayNameHistory); err != nil {
