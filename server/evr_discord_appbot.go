@@ -470,7 +470,7 @@ var (
 					Required:    false,
 				},
 				{
-					Type:        discordgo.ApplicationCommandOptionString,
+					Type:        discordgo.ApplicationCommandOptionBoolean,
 					Name:        "allow_private_lobbies",
 					Description: "Limit the user to only joining private lobbies.",
 				},
