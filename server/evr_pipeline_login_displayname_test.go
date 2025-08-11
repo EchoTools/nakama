@@ -9,7 +9,7 @@ import (
 
 func TestDisplayNameCurrentValueFix(t *testing.T) {
 	// This test verifies that display names use the current value instead of second-to-last
-	
+
 	groupID := "test-group-id"
 	username := "testuser"
 	oldDisplayName := "OldDisplayName"
@@ -46,10 +46,7 @@ func TestDisplayNameCurrentValueFix(t *testing.T) {
 	// Step 3: Set the group display name in the profile
 	profile.SetGroupDisplayName(groupID, defaultDisplayName)
 
-	// Step 4: BEFORE FIX - this would get the stale value from history
-	// activeGroupDisplayNameBroken, _ := history.LatestGroup(groupID)
-
-	// Step 4: AFTER FIX - get the current value from the profile
+	// Step 4: get the current value from the profile
 	activeGroupDisplayNameFixed := profile.GetGroupDisplayNameOrDefault(groupID)
 
 	// Verify the fix: should use the new display name, not the old one
@@ -90,7 +87,7 @@ func TestDisplayNameCurrentValueFix(t *testing.T) {
 
 func TestDisplayNameHistoryConsistency(t *testing.T) {
 	// Test that profile and history stay consistent after updates
-	
+
 	groupID := "test-group"
 	username := "user123"
 	displayName1 := "FirstName"
@@ -109,27 +106,27 @@ func TestDisplayNameHistoryConsistency(t *testing.T) {
 
 	// Update sequence: 1 -> 2 -> 3
 	sequences := []string{displayName1, displayName2, displayName3}
-	
+
 	for i, name := range sequences {
 		// Set in profile
 		profile.SetGroupDisplayName(groupID, name)
-		
+
 		// Get current name from profile (the fixed approach)
 		currentName := profile.GetGroupDisplayNameOrDefault(groupID)
-		
+
 		// Update history with current name
 		history.Update(groupID, currentName, username, true)
-		
+
 		// Verify consistency
 		latestFromHistory, _ := history.LatestGroup(groupID)
 		if latestFromHistory != name {
 			t.Errorf("Step %d: Expected latest from history to be %s, got %s", i+1, name, latestFromHistory)
 		}
-		
+
 		if currentName != name {
 			t.Errorf("Step %d: Expected current name from profile to be %s, got %s", i+1, name, currentName)
 		}
-		
+
 		// Brief pause to ensure timestamps are different
 		time.Sleep(time.Millisecond)
 	}
@@ -137,15 +134,15 @@ func TestDisplayNameHistoryConsistency(t *testing.T) {
 	// Final verification: latest should be the third name
 	latestFromHistory, _ := history.LatestGroup(groupID)
 	currentFromProfile := profile.GetGroupDisplayNameOrDefault(groupID)
-	
+
 	if latestFromHistory != displayName3 {
 		t.Errorf("Final: Expected latest from history to be %s, got %s", displayName3, latestFromHistory)
 	}
-	
+
 	if currentFromProfile != displayName3 {
 		t.Errorf("Final: Expected current from profile to be %s, got %s", displayName3, currentFromProfile)
 	}
-	
+
 	// Verify all names are in history
 	if len(history.Histories[groupID]) != 3 {
 		t.Errorf("Expected 3 entries in history, got %d", len(history.Histories[groupID]))
