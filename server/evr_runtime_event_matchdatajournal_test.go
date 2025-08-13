@@ -47,7 +47,7 @@ func TestMatchDataJournalEntry_Creation(t *testing.T) {
 	assert.NotNil(t, entry)
 	assert.NotZero(t, entry.CreatedAt)
 	assert.NotNil(t, entry.Data)
-	
+
 	data, ok := entry.Data.(map[string]interface{})
 	assert.True(t, ok)
 	assert.Equal(t, "data", data["test"])

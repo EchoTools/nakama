@@ -12,9 +12,9 @@ import (
 var _ = Event(&EventMatchDataJournal{})
 
 type EventMatchDataJournal struct {
-	MatchID string                   `json:"match_id"`
-	Entry   *MatchDataJournalEntry   `json:"entry"`
-	Journal *MatchDataJournal        `json:"journal,omitempty"` // Full journal for persistence
+	MatchID string                 `json:"match_id"`
+	Entry   *MatchDataJournalEntry `json:"entry"`
+	Journal *MatchDataJournal      `json:"journal,omitempty"` // Full journal for persistence
 }
 
 func NewEventMatchDataJournal(matchID string, entry *MatchDataJournalEntry) *EventMatchDataJournal {
@@ -88,7 +88,7 @@ func (e *EventMatchDataJournal) persistJournal(ctx context.Context, logger runti
 	}
 
 	collection := dispatcher.mongo.Database(matchDataDatabaseName).Collection(matchDataCollectionName)
-	
+
 	if _, err := collection.InsertOne(ctx, e.Journal); err != nil {
 		return fmt.Errorf("failed to insert match journal to MongoDB: %w", err)
 	}
@@ -128,7 +128,7 @@ func (e *EventMatchDataJournal) directMongoPersist(ctx context.Context, logger r
 	}
 
 	collection := dispatcher.mongo.Database(matchDataDatabaseName).Collection(matchDataCollectionName)
-	
+
 	if _, err := collection.InsertOne(ctx, journal); err != nil {
 		return fmt.Errorf("failed to insert journal directly to MongoDB: %w", err)
 	}

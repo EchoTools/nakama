@@ -3,9 +3,9 @@ package server
 import (
 	"context"
 
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"go.mongodb.org/mongo-driver/bson"
 )
 
 // EnsureMatchDataIndexes creates necessary indexes for the match data collection
@@ -18,7 +18,7 @@ func EnsureMatchDataIndexes(ctx context.Context, mongoClient *mongo.Client) erro
 
 	// Create index on match_id for efficient queries
 	matchIDIndex := mongo.IndexModel{
-		Keys: bson.D{{Key: "match_id", Value: 1}},
+		Keys:    bson.D{{Key: "match_id", Value: 1}},
 		Options: options.Index().SetBackground(true).SetName("match_id_1"),
 	}
 
@@ -33,7 +33,7 @@ func EnsureMatchDataIndexes(ctx context.Context, mongoClient *mongo.Client) erro
 
 	// Create index on updated_at for efficient cleanup queries
 	updatedAtIndex := mongo.IndexModel{
-		Keys: bson.D{{Key: "updated_at", Value: -1}},
+		Keys:    bson.D{{Key: "updated_at", Value: -1}},
 		Options: options.Index().SetBackground(true).SetName("updated_at_-1"),
 	}
 
