@@ -14,7 +14,6 @@ type GuildGroupRoles struct {
 	ServerHost       string `json:"server_host"`
 	Allocator        string `json:"allocator"`
 	Suspended        string `json:"suspended"`
-	LimitedAccess    string `json:"limited_access"` // Can Access Private matches only
 	APIAccess        string `json:"api_access"`
 	AccountAgeBypass string `json:"account_age_bypass"`
 	VPNBypass        string `json:"vpn_bypass"`
@@ -59,7 +58,6 @@ type guildGroupPermissions struct {
 	IsAPIAccess          bool
 	IsAccountAgeBypass   bool
 	IsVPNBypass          bool
-	IsLimitedAccess      bool
 }
 
 func (m guildGroupPermissions) ToUint64() uint64 {
