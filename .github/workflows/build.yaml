@@ -26,8 +26,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-
 
-      - name: Download Go modules
-        run: go mod download
-
       - name: Build binary
-        run: make nakama
+        run: |
+          go mod vendor
+          make nakama
