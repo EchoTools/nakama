@@ -57,13 +57,12 @@ type WhoAmI struct {
 	matchmakingSettings *MatchmakingSettings
 	displayNameHistory  *DisplayNameHistory
 	journal             *GuildEnforcementJournal
-	activeSuspensions   map[string]map[string]GuildEnforcementRecord
+	activeSuspensions   ActiveGuildEnforcements
 	potentialAlternates map[string]*api.Account
 	opts                UserProfileRequestOptions
 }
 
-func NewWhoAmI(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, guildGroupRegistry *GuildGroupRegistry, cache *DiscordIntegrator, profile *EVRProfile, loginHistory *LoginHistory, matchmakingSettings *MatchmakingSettings, guildGroups map[string]*GuildGroup, displayNameHistory *DisplayNameHistory, journal *GuildEnforcementJournal, potentialAlternates map[string]*api.Account, activeSuspensions map[string]map[string]GuildEnforcementRecord, opts UserProfileRequestOptions, // nolint: lll
-	groupID string) *WhoAmI {
+func NewWhoAmI(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, guildGroupRegistry *GuildGroupRegistry, cache *DiscordIntegrator, profile *EVRProfile, loginHistory *LoginHistory, matchmakingSettings *MatchmakingSettings, guildGroups map[string]*GuildGroup, displayNameHistory *DisplayNameHistory, journal *GuildEnforcementJournal, potentialAlternates map[string]*api.Account, activeSuspensions ActiveGuildEnforcements, opts UserProfileRequestOptions, groupID string) *WhoAmI {
 
 	return &WhoAmI{
 		GroupID: groupID,
@@ -369,16 +368,15 @@ func (w *WhoAmI) createGuildMembershipsEmbedFieldValue() string {
 		if w.opts.IncludeGuildRoles {
 			// Add the roles
 			activeRoleMap := map[string]bool{
-				"owner":          group.IsOwner(userIDStr),
-				"matchmaking":    group.IsAllowedMatchmaking(userIDStr),
-				"auditor":        group.IsAuditor(userIDStr),
-				"enforcer":       group.IsEnforcer(userIDStr),
-				"server-host":    group.IsServerHost(userIDStr),
-				"allocator":      group.IsAllocator(userIDStr),
-				"api-access":     group.IsAPIAccess(userIDStr),
-				"suspended":      group.IsSuspended(userIDStr, nil),
-				"vpn-bypass":     group.IsVPNBypass(userIDStr),
-				"limited-access": group.IsLimitedAccess(userIDStr),
+				"owner":       group.IsOwner(userIDStr),
+				"matchmaking": group.IsAllowedMatchmaking(userIDStr),
+				"auditor":     group.IsAuditor(userIDStr),
+				"enforcer":    group.IsEnforcer(userIDStr),
+				"server-host": group.IsServerHost(userIDStr),
+				"allocator":   group.IsAllocator(userIDStr),
+				"api-access":  group.IsAPIAccess(userIDStr),
+				"suspended":   group.IsSuspended(userIDStr, nil),
+				"vpn-bypass":  group.IsVPNBypass(userIDStr),
 			}
 
 			roles := make([]string, 0, len(activeRoleMap))
@@ -554,8 +552,22 @@ func (w *WhoAmI) createAlternatesEmbed() *discordgo.MessageEmbed {
 		slices.Sort(items)
 		items = slices.Compact(items)
 		suspendedText := ""
-		if s, ok := thisGroupSuspensions[altUserID]; ok {
-			suspendedText = fmt.Sprintf(" (suspended until <t:%d:R>)", s.SuspensionExpiry.UTC().Unix())
+		var altsRecord GuildEnforcementRecord
+		for _, r := range thisGroupSuspensions {
+			if r.UserID == altUserID {
+				// Collect the worst, or most widely effective suspension.
+				if altsRecord.Expiry.Before(r.Expiry) || !altsRecord.SuspensionExcludesPrivateLobbies() && altsRecord.SuspensionExcludesPrivateLobbies() {
+					altsRecord = r
+				}
+			}
+		}
+
+		if !altsRecord.IsExpired() {
+			if altsRecord.SuspensionExcludesPrivateLobbies() {
+				suspendedText = fmt.Sprintf(" (suspended from private lobbies until <t:%d:R>)", altsRecord.Expiry.UTC().Unix())
+			} else {
+				suspendedText = fmt.Sprintf(" (suspended until <t:%d:R>)", altsRecord.Expiry.UTC().Unix())
+			}
 			hasSuspendedAlt = true
 		}
 		s := fmt.Sprintf("<@%s> [%s] %s <t:%d:R>%s\n", altAccount.CustomId, altAccount.User.Username, state, altAccount.User.UpdateTime.AsTime().UTC().Unix(), suspendedText)

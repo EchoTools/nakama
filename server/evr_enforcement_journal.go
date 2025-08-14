@@ -11,6 +11,7 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
 const (
@@ -75,6 +76,17 @@ func GuildEnforcementJournalFromStorageObject(obj *api.StorageObject) (*GuildEnf
 	}
 	journal.UserID = obj.GetUserId()
 	journal.version = obj.GetVersion()
+
+	for groupID, records := range journal.RecordsByGroupID {
+		for _, r := range records {
+			if r.UserID == "" {
+				r.UserID = journal.UserID
+			}
+			if r.GroupID == "" {
+				r.GroupID = groupID
+			}
+		}
+	}
 	return journal, nil
 }
 
@@ -98,8 +110,8 @@ func (s *GuildEnforcementJournal) updateFields() {
 				continue
 			}
 
-			if e, ok := activeByGroupID[groupID]; !ok || r.SuspensionExpiry.After(e) {
-				activeByGroupID[groupID] = r.SuspensionExpiry
+			if e, ok := activeByGroupID[groupID]; !ok || r.Expiry.After(e) {
+				activeByGroupID[groupID] = r.Expiry
 			}
 		}
 
@@ -144,7 +156,7 @@ func (s *GuildEnforcementJournal) ActiveSuspensions() map[string]GuildEnforcemen
 			if !r.IsSuspension() || s.IsVoid(groupID, r.ID) || r.IsExpired() {
 				continue
 			}
-			if o, ok := active[groupID]; !ok || r.SuspensionExpiry.After(o.SuspensionExpiry) {
+			if o, ok := active[groupID]; !ok || r.Expiry.After(o.Expiry) {
 				active[groupID] = r
 			}
 		}
@@ -184,7 +196,7 @@ func (s *GuildEnforcementJournal) AddRecord(groupID, enforcerUserID, enforcerDis
 		CreatedAt:               now,
 		UpdatedAt:               now,
 		UserNoticeText:          suspensionNotice,
-		SuspensionExpiry:        now.Add(suspensionDuration),
+		Expiry:                  now.Add(suspensionDuration),
 		AuditorNotes:            notes,
 		CommunityValuesRequired: requireCommunityValues,
 		AllowPrivateLobbies:     allowPrivateLobbies,
@@ -240,7 +252,7 @@ func (l GuildEnforcementJournalList) Latest(groupIDs []string) (string, string, 
 				if record.IsExpired() || journal.IsVoid(groupID, record.ID) {
 					continue
 				}
-				if record.SuspensionExpiry.After(latest.Record.SuspensionExpiry) {
+				if record.Expiry.After(latest.Record.Expiry) {
 					latest = recordCompact{
 						GroupID: groupID,
 						UserID:  userID,
@@ -283,76 +295,59 @@ func EnforcementJournalsLoad(ctx context.Context, nk runtime.NakamaModule, userI
 	return journals, nil
 }
 
-// map[GroupID]map[UserID]GuildEnforcementRecord
-func CheckEnforcementSuspensions(ctx context.Context, nk runtime.NakamaModule, guildGroupRegistry *GuildGroupRegistry, userID string, firstAltIDs []string) (map[string]map[string]GuildEnforcementRecord, error) {
+// map[GroupID]map[GameMode]GuildEnforcementRecord
+type ActiveGuildEnforcements map[string]map[evr.Symbol]GuildEnforcementRecord
+
+// map[GroupID]map[GameMode]GuildEnforcementRecord
+func CheckEnforcementSuspensions(ctx context.Context, nk runtime.NakamaModule, guildGroupRegistry *GuildGroupRegistry, userID string, firstAltIDs []string) (ActiveGuildEnforcements, error) {
 
 	journals, err := EnforcementJournalsLoad(ctx, nk, append(firstAltIDs, userID))
 	if err != nil {
 		return nil, fmt.Errorf("failed to load enforcement journals: %w", err)
 	}
 
-	type record struct {
-		UserID          string
-		GroupID         string
-		OriginalGroupID string
-		GuildEnforcementRecord
+	type index struct {
+		GroupID  string
+		GameMode evr.Symbol
 	}
+
+	inheretanceMap := guildGroupRegistry.InheretanceByParentGroupID()
 
 	// Collect all active suspensions for the user and their alts
-	// Only the longest suspension for each group is kept
-	recordsByGroupID := make(map[string]record, len(journals))
-	for uID, journal := range journals {
-		for gID, r := range journal.ActiveSuspensions() {
-			if r.SuspensionExpiry.After(recordsByGroupID[gID].GuildEnforcementRecord.SuspensionExpiry) {
-				recordsByGroupID[gID] = record{
-					UserID:                 uID,
-					GroupID:                gID,
-					OriginalGroupID:        gID,
-					GuildEnforcementRecord: r,
-				}
+	activeRecords := make(map[index]GuildEnforcementRecord, len(journals))
+	for _, journal := range journals {
+		// Check if the user has an active suspension
+		for srcGroupID, r := range journal.ActiveSuspensions() {
+			// Include the groups that will inherit the suspension
+			affectedGroupIDs := append(inheretanceMap[srcGroupID][:], srcGroupID)
+			// Apply the suspension to all affected modes
+			affectedModes := evr.AllModes
+			if r.SuspensionExcludesPrivateLobbies() {
+				affectedModes = evr.PublicModes
 			}
-		}
-	}
-
-	for child, parents := range guildGroupRegistry.InheretanceMap() {
-		childStr := child.String()
-		for parent := range parents {
-			if parentRecord, ok := recordsByGroupID[parent.String()]; ok {
-				if childRecord, ok := recordsByGroupID[childStr]; !ok || parentRecord.SuspensionExpiry.After(childRecord.SuspensionExpiry) {
-					recordsByGroupID[childStr] = record{
-						UserID:                 parentRecord.UserID,
-						GroupID:                childStr,
-						OriginalGroupID:        parentRecord.OriginalGroupID,
-						GuildEnforcementRecord: parentRecord.GuildEnforcementRecord,
+			// Apply the suspension to all affected modes/groups
+			for _, mode := range affectedModes {
+				for _, affectedGroupID := range affectedGroupIDs {
+					idx := index{
+						GroupID:  affectedGroupID,
+						GameMode: mode,
+					}
+					if a := activeRecords[idx]; a.Expiry.Before(r.Expiry) {
+						activeRecords[idx] = r
 					}
 				}
 			}
 		}
 	}
-
 	// Build the final map of records by group ID and user ID
-	activeSuspensions := make(map[string]map[string]GuildEnforcementRecord, len(recordsByGroupID))
-	for _, r := range recordsByGroupID {
-		if _, ok := activeSuspensions[r.GroupID]; !ok {
-			activeSuspensions[r.GroupID] = make(map[string]GuildEnforcementRecord)
+	activeEnforcements := make(ActiveGuildEnforcements, len(activeRecords))
+	for idx, record := range activeRecords {
+		if _, ok := activeEnforcements[idx.GroupID]; !ok {
+			activeEnforcements[idx.GroupID] = make(map[evr.Symbol]GuildEnforcementRecord)
 		}
-		activeSuspensions[r.GroupID][r.UserID] = r.GuildEnforcementRecord
+		activeEnforcements[idx.GroupID][idx.GameMode] = record
 	}
-	return activeSuspensions, nil
-}
-
-func applySuspensionInheritence(journal *GuildEnforcementJournal, inheritenceMap map[string][]string) map[string]GuildEnforcementRecord {
-	activeSuspensions := journal.ActiveSuspensions()
-	for parent, children := range inheritenceMap {
-		for _, child := range children {
-			if parentSuspension, ok := activeSuspensions[parent]; ok {
-				if _, ok := activeSuspensions[child]; !ok || parentSuspension.SuspensionExpiry.After(activeSuspensions[child].SuspensionExpiry) {
-					activeSuspensions[child] = parentSuspension
-				}
-			}
-		}
-	}
-	return activeSuspensions
+	return activeEnforcements, nil
 }
 
 func FormatDuration(d time.Duration) string {
@@ -412,7 +407,7 @@ func createSuspensionDetailsEmbedField(guildName string, records []GuildEnforcem
 		if r.IsExpired() {
 			expWord = "expired"
 		}
-		durationText := fmt.Sprintf("for **%s** (%s <t:%d:R>)", FormatDuration(r.SuspensionExpiry.Sub(r.CreatedAt)), expWord, r.SuspensionExpiry.UTC().Unix())
+		durationText := fmt.Sprintf("for **%s** (%s <t:%d:R>)", FormatDuration(r.Expiry.Sub(r.CreatedAt)), expWord, r.Expiry.UTC().Unix())
 		if voids != nil && !voids[r.ID].VoidedAt.IsZero() {
 			durationText = fmt.Sprintf("~~%s~~", durationText)
 		}
@@ -458,9 +453,9 @@ func createEnforcementActionComponents(record GuildEnforcementRecord, profile *E
 			Inline: true,
 		},
 	}
-	if !record.SuspensionExpiry.IsZero() {
+	if !record.Expiry.IsZero() {
 
-		suspensionText := fmt.Sprintf("%s (expires <t:%d:R>)", FormatDuration(record.SuspensionExpiry.Sub(record.CreatedAt)), record.SuspensionExpiry.UTC().Unix())
+		suspensionText := fmt.Sprintf("%s (expires <t:%d:R>)", FormatDuration(record.Expiry.Sub(record.CreatedAt)), record.Expiry.UTC().Unix())
 
 		if isVoid {
 			suspensionText = fmt.Sprintf("~~%s~~", suspensionText)

@@ -244,21 +244,23 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 	// User is suspended from the group.
 	if gg.IsSuspended(userID, &params.xpID) {
 		// User is suspended from the group.
-		return joinRejected("suspended_user", "You are suspended from this guild. (role-based)", "is suspended via role")
+		return joinRejected("suspended_user", "You are suspended from this guild. (role-based)", "is suspended via role: <@&"+gg.RoleMap.Suspended+">")
 	}
 
-	// TODO move this to the session initialization. it's static data.
 	var (
 		suspensionRecord GuildEnforcementRecord
-		suspendedUserID  string
 	)
-	if recordsByUserID := params.activeSuspensionRecords[groupID]; len(recordsByUserID) > 0 {
-		for recordUserID, r := range recordsByUserID {
-			if r.IsExpired() || r.SuspensionExpiry.Before(suspensionRecord.SuspensionExpiry) {
+	if recordsByGameMode := params.gameModeSuspensionsByGroupID[groupID]; len(recordsByGameMode) > 0 {
+		for gameMode, r := range recordsByGameMode {
+			if gameMode != lobbyParams.Mode {
+				// Skip records for other game modes.
+				continue
+			}
+			if r.IsExpired() || r.Expiry.Before(suspensionRecord.Expiry) {
 				// Skip expired records.
 				continue
 			}
-			if recordUserID != userID {
+			if r.UserID != userID {
 				// The suspension is for an alternate account.
 				if params.ignoreDisabledAlternates {
 					// User is excluded from suspension checks if they are ignoring disabled alternates.
@@ -266,49 +268,43 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 				}
 				if gg.RejectPlayersWithSuspendedAlternates {
 					suspensionRecord = r
-					suspendedUserID = userID
 				} else {
-					logAuditMessage(fmt.Sprintf("Allowed alternate account <@!%s> (%s) of suspended user <@!%s> (%s): `%s` (expires <t:%d:R>)", lobbyParams.DiscordID, lobbyParams.DisplayName, recordUserID, session.Username(), r.UserNoticeText, r.SuspensionExpiry.Unix()))
+					logAuditMessage(fmt.Sprintf("Allowed alternate account <@!%s> (%s) of suspended user <@!%s> (%s): `%s` (expires <t:%d:R>)", lobbyParams.DiscordID, lobbyParams.DisplayName, suspensionRecord.UserID, session.Username(), r.UserNoticeText, r.Expiry.Unix()))
 				}
 			} else {
 				suspensionRecord = r
-				suspendedUserID = recordUserID
 			}
 		}
 
-		if suspendedUserID != "" {
+		if !suspensionRecord.Expiry.IsZero() {
 			const maxMessageLength = 64
 			var metricTag, auditLog string
 
-			if suspendedUserID == userID {
+			reason := suspensionRecord.UserNoticeText
+
+			if suspensionRecord.UserID == userID {
 				// User has an active suspension
-				auditLog = "suspension record"
+				auditLog = fmt.Sprintf("suspension record: `%s` (expires <t:%d:R>)", suspensionRecord.UserNoticeText, suspensionRecord.Expiry.Unix())
 				metricTag = "suspended_user"
 			} else {
 				// This is an alternate account of a suspended user.
-				auditLog = fmt.Sprintf("suspended alt (<@!%s>)", suspendedUserID)
+				auditLog = fmt.Sprintf("suspended alt (<@!%s>)", suspensionRecord.UserID)
 				metricTag = "suspended_alt_user"
 			}
-			reason := suspensionRecord.UserNoticeText
 
-			if suspensionRecord.IsLimitedAccess() {
-				reason = "Privates only: " + reason
+			if suspensionRecord.SuspensionExcludesPrivateLobbies() {
+				auditLog := fmt.Sprintf("Rejected limited access user <@%s> (%s) from public lobby (%s)", lobbyParams.DiscordID, lobbyParams.DisplayName, lobbyParams.Mode)
+				reason = "Public Lobby Access Denied: " + reason
+				return joinRejected("limited_access_user", suspensionRecord.UserNoticeText, auditLog)
 			}
-			expires := fmt.Sprintf(" [exp: %s]", FormatDuration(time.Until(suspensionRecord.SuspensionExpiry)))
+
+			expires := fmt.Sprintf(" [exp: %s]", FormatDuration(time.Until(suspensionRecord.Expiry)))
 			if len(reason)+len(expires) > maxMessageLength {
 				reason = reason[:maxMessageLength-len(expires)-3] + "..."
 			}
+
 			reason = reason + expires
 			return joinRejected(metricTag, reason, auditLog)
-		}
-	}
-
-	// Check if the user is allowed to join public lobbies.
-	if slices.Contains(evr.PublicModes, lobbyParams.Mode) {
-		if gg.IsLimitedAccess(userID) || suspensionRecord.IsLimitedAccess() {
-			auditLog := fmt.Sprintf("Rejected limited access user <@%s> (%s) from public lobby (%s)", lobbyParams.DiscordID, lobbyParams.DisplayName, lobbyParams.Mode)
-			reason := "You are not allowed to join public lobbies."
-			return joinRejected("limited_access_user", reason, auditLog)
 		}
 	}
 
