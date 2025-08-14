@@ -85,7 +85,15 @@ func GuildEnforcementJournalFromStorageObject(obj *api.StorageObject) (*GuildEnf
 			if r.GroupID == "" {
 				r.GroupID = groupID
 			}
+		for i := range records {
+			if records[i].UserID == "" {
+				records[i].UserID = journal.UserID
+			}
+			if records[i].GroupID == "" {
+				records[i].GroupID = groupID
+			}
 		}
+		journal.RecordsByGroupID[groupID] = records
 	}
 	return journal, nil
 }
