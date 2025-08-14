@@ -122,7 +122,7 @@ func EntrantPresenceFromSession(session Session, partyID uuid.UUID, roleAlignmen
 		SessionID:         session.ID(),
 		LoginSessionID:    params.loginSession.ID(),
 		Username:          session.Username(),
-		DisplayName:       params.DisplayName(groupID),
+		DisplayName:       params.profile.GetGroupIGN(groupID),
 		EvrID:             params.xpID,
 		PartyID:           partyID,
 		RoleAlignment:     roleAlignment,

@@ -439,7 +439,7 @@ func createSuspensionDetailsEmbedField(guildName string, records []GuildEnforcem
 func createEnforcementActionComponents(record GuildEnforcementRecord, profile *EVRProfile, gg *GuildGroup, guild *discordgo.Guild, enforcer, target *discordgo.Member, isVoid bool) *discordgo.MessageSend {
 	// Is just a kick
 
-	displayName := profile.GetGroupDisplayNameOrDefault(gg.Group.Id)
+	displayName := profile.GetGroupIGN(gg.Group.Id)
 	displayName = EscapeDiscordMarkdown(displayName)
 
 	fields := []*discordgo.MessageEmbedField{
