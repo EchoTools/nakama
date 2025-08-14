@@ -592,9 +592,9 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 			if len(voids) > 0 {
 				title = "Voided Suspension(s)"
 			} else if len(recordsByGroupID) > 0 {
-				title = fmt.Sprintf("Suspension: *%s*", Query.QuoteStringValue(profile.GetGroupDisplayNameOrDefault(groupID)))
+				title = fmt.Sprintf("Suspension: *%s*", Query.QuoteStringValue(profile.GetGroupIGN(groupID)))
 			}
-			targetDN := profile.GetGroupDisplayNameOrDefault(groupID)
+			targetDN := profile.GetGroupIGN(groupID)
 			targetDN = EscapeDiscordMarkdown(targetDN)
 			callerDN := caller.DisplayName()
 			if callerDN == "" {

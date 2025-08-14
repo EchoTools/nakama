@@ -1248,12 +1248,12 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			if displayName == "" || displayName == "-" || displayName == user.Username {
-				delete(md.GuildDisplayNameOverrides, groupID)
+				delete(md.InGameNameOverrides, groupID)
 			} else {
-				if md.GuildDisplayNameOverrides == nil {
-					md.GuildDisplayNameOverrides = make(map[string]string)
+				if md.InGameNameOverrides == nil {
+					md.InGameNameOverrides = make(map[string]string)
 				}
-				md.GuildDisplayNameOverrides[groupID] = displayName
+				md.InGameNameOverrides[groupID] = sanitizeDisplayName(displayName)
 			}
 
 			if err := EVRProfileUpdate(ctx, nk, userID, md); err != nil {

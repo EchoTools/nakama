@@ -61,33 +61,30 @@ func (p *GroupProfile) UpdateUnlockedItems(updated []evr.Symbol) {
 	p.UpdateTime = time.Now()
 }
 
+type GroupInGameName struct {
+	GroupID     string `json:"group_id"`
+	DisplayName string `json:"display_name"`
+	IsOverride  bool   `json:"is_override"` // If this is an override for the group
+}
+
 type EVRProfile struct {
-	Debug                     bool                   `json:"debug"`                        // Enable debug mode
-	GlobalBanReason           string                 `json:"global_ban_reason"`            // The global ban reason
-	DisabledAccountMessage    string                 `json:"disabled_account_message"`     // The disabled account message that the user will see.
-	DisplayNameOverride       string                 `json:"display_name_override"`        // The display name override
-	GuildDisplayNameOverrides map[string]string      `json:"guild_display_name_overrides"` // The display name overrides for each guild map[groupID]displayName
-	InGameNames               map[string]string      `json:"group_display_names"`          // The display names for each guild map[groupID]displayName
-	ActiveGroupID             string                 `json:"active_group_id"`              // The active group ID
-	DiscordDebugMessages      bool                   `json:"discord_debug_messages"`       // Enable debug messages in Discord
-	RelayMessagesToDiscord    bool                   `json:"relay_messages_to_discord"`    // Relay messages to Discord
-	TeamName                  string                 `json:"team_name"`                    // The team name
-	DisableAFKTimeout         bool                   `json:"disable_afk_timeout"`          // Disable AFK detection
-	AllowBrokenCosmetics      bool                   `json:"allow_broken_cosmetics"`       // Allow broken cosmetics
-	EnableAllCosmetics        bool                   `json:"enable_all_cosmetics"`         // Enable all cosmetics
-	IsGlobalDeveloper         bool                   `json:"is_global_developer"`          // Is a global developer
-	IsGlobalOperator          bool                   `json:"is_global_operator"`           // Is a global operator
-	GoldDisplayNameActive     bool                   `json:"gold_display_name"`            // The gold name display name
-	LoadoutCosmetics          AccountCosmetics       `json:"cosmetic_loadout"`             // The equipped cosmetics
-	CombatLoadout             CombatLoadout          `json:"combat_loadout"`               // The combat loadout
-	MutedPlayers              []evr.EvrId            `json:"muted_players"`                // The muted players
-	GhostedPlayers            []evr.EvrId            `json:"ghosted_players"`              // The ghosted players
-	NewUnlocks                []int64                `json:"new_unlocks"`                  // The new unlocks
-	GamePauseSettings         *evr.GamePauseSettings `json:"game_pause_settings"`          // The game settings
-	LegalConsents             evr.LegalConsents      `json:"legal_consents"`               // The legal consents
-	CustomizationPOIs         *evr.Customization     `json:"customization_pois"`           // The customization POIs
-	MatchmakingDivision       string                 `json:"matchmaking_division"`         // The matchmaking division (e.g. bronze, silver, gold, etc.)
-	account                   *api.Account
+	EnableAllRemoteLogs    bool                       `json:"enable_all_remote_logs"`    // Enable debug mode
+	InGameNames            map[string]GroupInGameName `json:"group_igns"`                // The display names for each group map[groupID]displayName
+	ActiveGroupID          string                     `json:"active_group_id"`           // The active group ID
+	DiscordDebugMessages   bool                       `json:"discord_debug_messages"`    // Enable debug messages in Discord
+	RelayMessagesToDiscord bool                       `json:"relay_messages_to_discord"` // Relay messages to Discord
+	TeamName               string                     `json:"team_name"`                 // The team name
+	Flags                  UserProfileSettings        `json:"flags"`                     // Profile flags
+	LoadoutCosmetics       AccountCosmetics           `json:"cosmetic_loadout"`          // The equipped cosmetics
+	CombatLoadout          CombatLoadout              `json:"combat_loadout"`            // The combat loadout
+	MutedPlayers           []evr.EvrId                `json:"muted_players"`             // The muted players
+	GhostedPlayers         []evr.EvrId                `json:"ghosted_players"`           // The ghosted players
+	NewUnlocks             []int64                    `json:"new_unlocks"`               // The new unlocks
+	GamePauseSettings      *evr.GamePauseSettings     `json:"game_pause_settings"`       // The game settings
+	LegalConsents          evr.LegalConsents          `json:"legal_consents"`            // The legal consents
+	CustomizationPOIs      *evr.Customization         `json:"customization_pois"`        // The customization POIs
+	MatchmakingDivision    string                     `json:"matchmaking_division"`      // The matchmaking division (e.g. bronze, silver, gold, etc.)
+	account                *api.Account
 }
 
 func BuildEVRProfileFromAccount(account *api.Account) (*EVRProfile, error) {
@@ -216,19 +213,45 @@ func (a EVRProfile) DisplayNamesByGroupID() map[string]string {
 	return a.InGameNames
 }
 
-func (a EVRProfile) GetDisplayNameOverride(groupID string) string {
-	if a.DisplayNameOverride != "" {
-		return a.DisplayNameOverride
-	} else if a.GuildDisplayNameOverrides != nil && a.GuildDisplayNameOverrides[groupID] != "" {
-		return a.GuildDisplayNameOverrides[groupID]
+func (a EVRProfile) GetGroupIGNOverride(groupID string) string {
+	if a.InGameNameOverrides != nil {
+		if dn, ok := a.InGameNameOverrides[groupID]; ok && dn != "" {
+			return dn
+		}
 	}
-	return ""
+	return a.DisplayNameOverride
 }
 
-func (a EVRProfile) GetGroupDisplayNameOrDefault(groupID string) string {
+func (a *EVRProfile) SetGroupIGNOverride(groupID, displayName string) (updated bool) {
+	displayName = sanitizeDisplayName(displayName)
+	if groupID == "" {
+		if a.DisplayNameOverride == displayName {
+			return false
+		}
+		a.DisplayNameOverride = displayName
+		return true
+	}
+	if a.InGameNameOverrides == nil {
+		a.InGameNameOverrides = make(map[string]string)
+	}
+	if a.InGameNameOverrides[groupID] == displayName {
+		return false
+	}
+	a.InGameNameOverrides[groupID] = displayName
+	return true
+}
 
+func (a EVRProfile) GetGroupIGN(groupID string, allowOverride bool) (string, error) {
+	if allowOverride {
+		if a.DisplayNameOverride != "" {
+			return a.DisplayNameOverride, nil
+		} else if a.InGameNameOverrides != nil && a.InGameNameOverrides[groupID] != "" {
+			return a.InGameNameOverrides[groupID], nil
+		}
+	}
+	// If the display name override is set, use that
 	if dn := a.GetDisplayNameOverride(groupID); dn != "" {
-		return sanitizeDisplayName(dn)
+		return dn, nil
 	}
 
 	if a.InGameNames != nil {
@@ -236,18 +259,13 @@ func (a EVRProfile) GetGroupDisplayNameOrDefault(groupID string) string {
 		if dn, ok := a.InGameNames[groupID]; ok && dn != "" {
 			// Use the group display name, if it exists
 			return sanitizeDisplayName(dn)
-
 		} else if dn, ok := a.InGameNames[a.ActiveGroupID]; ok && dn != "" {
 			// Otherwise, usethe active group display name
 			return sanitizeDisplayName(dn)
-
 		} else {
-			// Fallback to the first non-empty group display name
-			for _, dn = range a.InGameNames {
-				dn = sanitizeDisplayName(dn)
-				if dn != "" {
-					return dn
-				}
+			// Fallback to the username
+			if a.account != nil && a.account.User != nil && a.account.User.Username != "" {
+				return sanitizeDisplayName(a.account.User.Username)
 			}
 		}
 	}
@@ -293,7 +311,7 @@ func (a *EVRProfile) DeleteGroupDisplayName(groupID string) (updated bool) {
 }
 
 func (a EVRProfile) GetActiveGroupDisplayName() string {
-	return a.GetGroupDisplayNameOrDefault(a.ActiveGroupID)
+	return a.GetGroupIGN(a.ActiveGroupID)
 }
 
 func (a EVRProfile) MarshalMap() map[string]any {

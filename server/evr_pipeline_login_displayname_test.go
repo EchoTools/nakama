@@ -47,7 +47,7 @@ func TestDisplayNameCurrentValueFix(t *testing.T) {
 	profile.SetGroupDisplayName(groupID, defaultDisplayName)
 
 	// Step 4: get the current value from the profile
-	activeGroupDisplayNameFixed := profile.GetGroupDisplayNameOrDefault(groupID)
+	activeGroupDisplayNameFixed := profile.GetGroupIGN(groupID)
 
 	// Verify the fix: should use the new display name, not the old one
 	if activeGroupDisplayNameFixed != newDisplayName {
@@ -112,7 +112,7 @@ func TestDisplayNameHistoryConsistency(t *testing.T) {
 		profile.SetGroupDisplayName(groupID, name)
 
 		// Get current name from profile (the fixed approach)
-		currentName := profile.GetGroupDisplayNameOrDefault(groupID)
+		currentName := profile.GetGroupIGN(groupID)
 
 		// Update history with current name
 		history.Update(groupID, currentName, username, true)
@@ -133,7 +133,7 @@ func TestDisplayNameHistoryConsistency(t *testing.T) {
 
 	// Final verification: latest should be the third name
 	latestFromHistory, _ := history.LatestGroup(groupID)
-	currentFromProfile := profile.GetGroupDisplayNameOrDefault(groupID)
+	currentFromProfile := profile.GetGroupIGN(groupID)
 
 	if latestFromHistory != displayName3 {
 		t.Errorf("Final: Expected latest from history to be %s, got %s", displayName3, latestFromHistory)

@@ -437,6 +437,9 @@ func (d *DiscordIntegrator) updateLinkStatus(ctx context.Context, discordID stri
 }
 
 func InGameName(m *discordgo.Member) string {
+	if m == nil || m.User == nil {
+		return ""
+	}
 	for _, name := range [...]string{m.Nick, m.User.GlobalName, m.User.Username} {
 		if n := sanitizeDisplayName(name); n != "" {
 			return n

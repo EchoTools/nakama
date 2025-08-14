@@ -162,8 +162,7 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 
 	// Set the game settings based on the service settings
 	gameSettings := evr.NewDefaultGameSettings()
-	if params.debug {
-		gameSettings.IapUnlocked = true
+	if params.enableAllRemoteLogs {
 		gameSettings.RemoteLogSocial = true
 		gameSettings.RemoteLogWarnings = true
 		gameSettings.RemoteLogErrors = true
@@ -533,7 +532,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	var err error
 	serviceSettings := ServiceSettings()
 	// Enable session debugging if the account metadata or global settings have Debug set.
-	params.debug = params.debug || params.profile.Debug || serviceSettings.EnableSessionDebug
+	params.enableAllRemoteLogs = params.enableAllRemoteLogs || params.profile.EnableAllRemoteLogs || serviceSettings.EnableSessionDebug
 
 	metricsTags := params.MetricsTags()
 	defer func() {
@@ -590,7 +589,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		params.isGlobalDeveloper = true
 		params.isGlobalOperator = true
 
-	} else if ismember, err := CheckSystemGroupMembership(ctx, p.db, params.UserID(), GroupGlobalOperators); err != nil {
+	} else if ismember, err := CheckSystemGroupMembership(ctx, p.db, params.profile.UserID(), GroupGlobalOperators); err != nil {
 		metricsTags["error"] = "group_check_failed"
 		return fmt.Errorf("failed to check system group membership: %w", err)
 	} else if ismember {
@@ -613,18 +612,41 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	params.latencyHistory.Store(latencyHistory)
 
 	// Load the display name history for the player.
-	params.displayNameHistory, err = DisplayNameHistoryLoad(ctx, p.nk, session.userID.String())
+	displayNameHistory, err := DisplayNameHistoryLoad(ctx, p.nk, session.userID.String())
 	if err != nil {
 		logger.Warn("Failed to load display name history", zap.Error(err))
 		return fmt.Errorf("failed to load display name history: %w", err)
 	}
 
-	// Update the player's active group (default) display name.
-	defaultDisplayName, _ := params.displayNameHistory.LatestGroup(params.profile.ActiveGroupID)
-	if defaultDisplayName == "" {
-		// If the active group display name is empty, set it to the username.
-		defaultDisplayName = params.profile.Username()
-	} else if params.userDisplayNameOverride != "" {
+	// Get/Set the current IGN for each guild group.
+	for groupID, gg := range params.guildGroups {
+		if params.userDisplayNameOverride != "" {
+			// If the user has provided a display name override, use that.
+			params.profile.GetGroupIGN(groupID, true)
+			displayNamePriority = append(displayNamePriority, params.userDisplayNameOverride)
+		} else if dn := params.profile.GetDisplayNameOverride(params.profile.ActiveGroupID); dn != "" {
+			// If the profile has a display name override for the active group, use that.
+			defaultDisplayName = dn
+		}
+
+		// Use the latest in-game name from the display name history.
+		groupIGN, _ := params.displayNameHistory.LatestGroup(groupID)
+		// Update the in-game name for the guild.
+		if member, err := p.discordCache.GuildMember(gg.GuildID, params.profile.DiscordID()); err != nil {
+			logger.Warn("Failed to get guild member", zap.String("guild_id", gg.GuildID), zap.String("discord_id", params.profile.DiscordID()), zap.Error(err))
+		} else if memberNick := InGameName(member); memberNick != "" {
+			// If the member is found, use it as their in-game name.
+			groupIGN = memberNick
+		}
+		if groupIGN == "" {
+			// If the group in-game name is empty, remove it; the active group ID will be used.
+			params.profile.DeleteGroupDisplayName(groupID)
+		}
+		// Use the in-game name from the guild member.
+		params.profile.SetGroupDisplayName(groupID, groupIGN)
+	}
+
+	if params.userDisplayNameOverride != "" {
 		// If the user has provided a display name override, use that.
 		defaultDisplayName = params.userDisplayNameOverride
 	} else if dn := params.profile.GetDisplayNameOverride(params.profile.ActiveGroupID); dn != "" {
@@ -669,13 +691,13 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	// Update the in-game names for the player (in the display name history).
 	igns := make([]string, 0, len(params.profile.DisplayNamesByGroupID()))
 	for groupID := range params.profile.DisplayNamesByGroupID() {
-		igns = append(igns, params.profile.GetGroupDisplayNameOrDefault(groupID))
+		igns = append(igns, params.profile.GetGroupIGN(groupID))
 	}
 	params.displayNameHistory.ReplaceInGameNames(igns)
 
 	// Update the display name history for the active group, marking this name as an in-game-name.
 	// Use the current display name from the profile instead of querying the potentially stale history
-	activeGroupDisplayName := params.profile.GetGroupDisplayNameOrDefault(params.profile.ActiveGroupID)
+	activeGroupDisplayName := params.profile.GetGroupIGN(params.profile.ActiveGroupID)
 	params.displayNameHistory.Update(params.profile.ActiveGroupID, activeGroupDisplayName, params.profile.Username(), true)
 
 	if err := DisplayNameHistoryStore(ctx, p.nk, session.userID.String(), params.displayNameHistory); err != nil {

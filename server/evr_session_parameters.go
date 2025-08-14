@@ -33,12 +33,12 @@ type SessionParameters struct {
 	isGlobalDeveloper bool              // The user is a developer
 	isGlobalOperator  bool              // The user is a moderator
 
-	relayOutgoing bool                // The user wants (some) outgoing messages relayed to them via discord
-	debug         bool                // The user wants debug information
-	serverTags    []string            // []string of the server tags
-	serverGuilds  []string            // []string of the server guilds
-	serverRegions []string            // []string of the server regions
-	urlParameters map[string][]string // The URL parameters
+	relayOutgoing       bool                // The user wants (some) outgoing messages relayed to them via discord
+	enableAllRemoteLogs bool                // The user wants debug information
+	serverTags          []string            // []string of the server tags
+	serverGuilds        []string            // []string of the server guilds
+	serverRegions       []string            // []string of the server regions
+	urlParameters       map[string][]string // The URL parameters
 
 	profile                      *EVRProfile                      // The account
 	matchmakingSettings          *MatchmakingSettings             // The matchmaking settings
