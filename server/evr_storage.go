@@ -11,6 +11,34 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// DEPRECATED: Legacy storage interfaces and functions.
+// Use StorableAdapter from evr_storable.go instead.
+
+// StorageIndexMeta is kept for compatibility with remaining old interface usage
+type StorageIndexMeta struct {
+	Name           string
+	Collection     string
+	Key            string
+	Fields         []string
+	SortableFields []string
+	MaxEntries     int
+	IndexOnly      bool
+}
+
+// StorageMeta is kept for compatibility with remaining old interface usage
+type StorageMeta struct {
+	Collection      string
+	Key             string
+	PermissionRead  int
+	PermissionWrite int
+	Version         string
+}
+
+func (s StorageMeta) String() string {
+	return fmt.Sprintf("%s:%s", s.Collection, s.Key)
+}
+
+// DEPRECATED: These interfaces are deprecated. Use StorableAdapter instead.
 type Storable interface {
 	StorageMeta() StorageMeta
 }
@@ -30,28 +58,9 @@ type IndexedVersionedStorable interface {
 	VersionedStorable
 }
 
-// initializer.StorageIndex
-type StorageIndexMeta struct {
-	Name           string
-	Collection     string
-	Key            string
-	Fields         []string
-	SortableFields []string
-	MaxEntries     int
-	IndexOnly      bool
-}
+// DEPRECATED: These functions are deprecated. Use StorableRead/StorableWrite from evr_storable.go instead.
+// They are kept temporarily for compatibility with remaining old interface usage.
 
-type StorageMeta struct {
-	Collection      string
-	Key             string
-	PermissionRead  int
-	PermissionWrite int
-	Version         string
-}
-
-func (s StorageMeta) String() string {
-	return fmt.Sprintf("%s:%s", s.Collection, s.Key)
-}
 func StorageRead(ctx context.Context, nk runtime.NakamaModule, userID string, dst Storable, create bool) error {
 	if dst == nil {
 		return status.Errorf(codes.InvalidArgument, "dst is nil")
