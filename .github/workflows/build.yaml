@@ -27,4 +27,4 @@ jobs:
             ${{ runner.os }}-go-
 
       - name: Build binary
-        run: go build -trimpath ./...
+        run: make nakama
