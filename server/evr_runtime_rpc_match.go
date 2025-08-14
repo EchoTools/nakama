@@ -126,8 +126,7 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 
 	// Load the latency history for the match owner
 	latencyHistory := &LatencyHistory{}
-	adapter := latencyHistory.CreateStorableAdapter()
-	if err := StorableRead(ctx, nk, request.OwnerId, adapter, true); err != nil {
+	if err := StorableRead(ctx, nk, request.OwnerId, latencyHistory, true); err != nil {
 		return "", runtime.NewError("Failed to read latency history: "+err.Error(), StatusInternalError)
 	}
 

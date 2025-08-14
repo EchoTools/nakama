@@ -31,18 +31,20 @@ func NewLatencyHistory() *LatencyHistory {
 	}
 }
 
-// CreateStorableAdapter creates a StorableAdapter for LatencyHistory
-func (h *LatencyHistory) CreateStorableAdapter() *StorableAdapter {
-	version := "*"
-	if h != nil && h.version != "" {
-		version = h.version
+func (h *LatencyHistory) StorageMeta() StorableMetadata {
+	return StorableMetadata{
+		Collection:      LatencyHistoryStorageCollection,
+		Key:             LatencyHistoryStorageKey,
+		PermissionRead:  0,
+		PermissionWrite: 0,
+		Version:         h.version,
 	}
+}
 
-	return NewStorableAdapter(h, LatencyHistoryStorageCollection, LatencyHistoryStorageKey).
-		WithVersion(version).
-		WithVersionSetter(func(userID, version string) {
-			h.version = version
-		})
+func (h *LatencyHistory) SetStorageMeta(meta StorableMetadata) {
+	h.Lock()
+	defer h.Unlock()
+	h.version = meta.Version
 }
 
 func (h *LatencyHistory) String() string {

@@ -362,8 +362,7 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 
 	// Load the latency history for this user
 	latencyHistory := NewLatencyHistory()
-	adapter := latencyHistory.CreateStorableAdapter()
-	if err := StorableRead(ctx, d.nk, userID, adapter, false); err != nil && status.Code(err) != codes.NotFound {
+	if err := StorableRead(ctx, d.nk, userID, latencyHistory, false); err != nil && status.Code(err) != codes.NotFound {
 		return nil, 0, status.Errorf(codes.Internal, "failed to read latency history: %v", err)
 	}
 
@@ -419,8 +418,7 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 	}
 
 	latencyHistory := NewLatencyHistory()
-	adapter := latencyHistory.CreateStorableAdapter()
-	if err := StorableRead(ctx, d.nk, userID, adapter, false); err != nil && status.Code(err) != codes.NotFound {
+	if err := StorableRead(ctx, d.nk, userID, latencyHistory, false); err != nil && status.Code(err) != codes.NotFound {
 		return nil, 0, status.Errorf(codes.Internal, "failed to read latency history: %v", err)
 	}
 	extIPs := latencyHistory.AverageRTTs(true)
