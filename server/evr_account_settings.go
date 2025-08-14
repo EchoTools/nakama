@@ -13,7 +13,8 @@ type ProfileOptions struct {
 func (h *ProfileOptions) StorageMeta() StorableMetadata {
 	return StorableMetadata{
 		Collection:      LatencyHistoryStorageCollection,
-		Key:             LatencyHistoryStorageKey,
+		Collection:      ProfileOptionsStorageCollection,
+		Key:             ProfileOptionsStorageKey,
 		PermissionRead:  0,
 		PermissionWrite: 0,
 		Version:         h.version,
