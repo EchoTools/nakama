@@ -97,8 +97,6 @@ func (h *LoginHistoryEntry) Items() []string {
 	return []string{h.ClientIP, h.LoginData.HMDSerialNumber, h.XPID.Token(), h.SystemProfile()}
 }
 
-var _ = IndexedVersionedStorable(&LoginHistory{})
-
 type LoginHistory struct {
 	Active                   map[string]*LoginHistoryEntry      `json:"active"`                     // map[deviceID]DeviceHistoryEntry
 	History                  map[string]*LoginHistoryEntry      `json:"history"`                    // map[deviceID]DeviceHistoryEntry
@@ -116,22 +114,23 @@ type LoginHistory struct {
 	version                  string                             // storage record version
 }
 
-func (h *LoginHistory) StorageMeta() StorageMeta {
-	version := "*"
-	if h != nil && h.version != "" {
-		version = h.version
-	}
-	return StorageMeta{
+func (h *LoginHistory) StorageMeta() StorableMetadata {
+	return StorableMetadata{
 		Collection:      LoginStorageCollection,
 		Key:             LoginHistoryStorageKey,
 		PermissionRead:  runtime.STORAGE_PERMISSION_NO_READ,
 		PermissionWrite: runtime.STORAGE_PERMISSION_NO_WRITE,
-		Version:         version,
+		Version:         h.version,
 	}
 }
 
-func (LoginHistory) StorageIndexes() []StorageIndexMeta {
-	return []StorageIndexMeta{{
+func (h *LoginHistory) SetStorageMeta(meta StorableMetadata) {
+	h.userID = meta.UserID
+	h.version = meta.Version
+}
+
+func (h *LoginHistory) StorageIndexes() []StorableIndexMeta {
+	return []StorableIndexMeta{{
 		Name:           LoginHistoryCacheIndex,
 		Collection:     LoginStorageCollection,
 		Key:            LoginHistoryStorageKey,
@@ -140,11 +139,6 @@ func (LoginHistory) StorageIndexes() []StorageIndexMeta {
 		MaxEntries:     10000000,
 		IndexOnly:      true,
 	}}
-}
-
-func (h *LoginHistory) SetStorageVersion(userID, version string) {
-	h.userID = userID
-	h.version = version
 }
 
 func NewLoginHistory(userID string) *LoginHistory {
@@ -482,7 +476,7 @@ func (h *LoginHistory) UpdateAlternates(ctx context.Context, logger runtime.Logg
 
 		// Load the alternate's login history
 		alternateHistory := NewLoginHistory(alternateUserID)
-		if err := StorageRead(ctx, nk, alternateUserID, alternateHistory, false); err != nil {
+		if err := StorableRead(ctx, nk, alternateUserID, alternateHistory, false); err != nil {
 			// Log warning but continue - don't fail the entire operation
 			logger.WithFields(map[string]interface{}{
 				"current_user_id":   h.userID,
@@ -504,7 +498,7 @@ func (h *LoginHistory) UpdateAlternates(ctx context.Context, logger runtime.Logg
 			alternateHistory.AlternateMatches[h.userID] = currentUserMatches
 
 			// Save the updated alternate history
-			if err := StorageWrite(ctx, nk, alternateUserID, alternateHistory); err != nil {
+			if err := StorableWrite(ctx, nk, alternateUserID, alternateHistory); err != nil {
 				// Log warning but continue - don't fail the entire operation
 				logger.WithFields(map[string]interface{}{
 					"current_user_id":   h.userID,
