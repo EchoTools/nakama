@@ -606,7 +606,8 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	}
 
 	latencyHistory := &LatencyHistory{}
-	if err := StorageRead(ctx, p.nk, session.userID.String(), latencyHistory, true); err != nil {
+	adapter := latencyHistory.CreateStorableAdapter()
+	if err := StorableRead(ctx, p.nk, session.userID.String(), adapter, true); err != nil {
 		metricsTags["error"] = "failed_load_latency_history"
 		return fmt.Errorf("failed to load latency history: %w", err)
 	}
