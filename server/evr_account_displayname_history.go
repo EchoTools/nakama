@@ -46,7 +46,7 @@ func (h *DisplayNameHistory) StorageMeta() StorableMetadata {
 		Key:             DisplayNameHistoryKey,
 		PermissionRead:  0,
 		PermissionWrite: 0,
-		Version:         "*", // No version tracking for DisplayNameHistory
+		Version:         "", // No version tracking for DisplayNameHistory
 	}
 }
 
@@ -118,6 +118,46 @@ func (h *DisplayNameHistory) compile() {
 	for name := range active {
 		if name != "" {
 			cache[name] = struct{}{}
+		}
+	}
+
+	type indexedName struct {
+		name string
+		time time.Time
+	}
+
+	historical := make(map[string][]indexedName, 10) // map[groupID]indexedName
+	// Add the historical names to the cache, the most recent 10 from each guild or are less than 7 days old.
+	for gID, group := range h.Histories {
+		historical[gID] = make([]indexedName, 0, len(group))
+		for dn, ts := range group {
+			if dn != "" {
+				historical[gID] = append(historical[gID], indexedName{name: strings.ToLower(dn), time: ts})
+			}
+		}
+	}
+	// Sort the historical names by time, most recent first
+	for gID, historocal := range historical {
+		sort.Slice(historocal, func(i, j int) bool {
+			return historocal[i].time.After(historocal[j].time)
+		})
+		historical[gID] = historocal
+	}
+
+	// Limit the number to 15 most recent per group
+	for gID, group := range historical {
+		if len(group) > 15 {
+			historical[gID] = group[:15]
+		}
+	}
+
+	// Add the historical names to the cache
+	for _, in := range historical {
+		for _, name := range in {
+			// Only add names that are less than MaximumDisplayNameHistoryAge old
+			if time.Since(name.time) < MaximumDisplayNameHistoryAge {
+				cache[name.name] = struct{}{}
+			}
 		}
 	}
 
@@ -221,7 +261,7 @@ func (h *DisplayNameHistory) ReplaceInGameNames(names []string) {
 
 func DisplayNameHistoryLoad(ctx context.Context, nk runtime.NakamaModule, userID string) (*DisplayNameHistory, error) {
 	history := NewDisplayNameHistory()
-	
+
 	if err := StorableRead(ctx, nk, userID, history, false); err != nil {
 		if status.Code(err) == codes.NotFound {
 			return history, nil

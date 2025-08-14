@@ -437,6 +437,9 @@ func (d *DiscordIntegrator) updateLinkStatus(ctx context.Context, discordID stri
 }
 
 func InGameName(m *discordgo.Member) string {
+	if m == nil || m.User == nil {
+		return ""
+	}
 	for _, name := range [...]string{m.Nick, m.User.GlobalName, m.User.Username} {
 		if n := sanitizeDisplayName(name); n != "" {
 			return n
@@ -726,7 +729,7 @@ func (d *DiscordIntegrator) handleMemberUpdate(logger *zap.Logger, s *discordgo.
 				}
 				if player := label.GetPlayerByUserID(evrAccount.ID()); player != nil {
 					if player.DisplayName != InGameName(e.Member) {
-						AuditLogSendGuild(s, group, fmt.Sprintf("Setting display name for `%s` to match in-game name: `%s`", e.Member.User.Username, InGameName(e.Member)))
+						AuditLogSendGuild(s, group, fmt.Sprintf("Forcing guild nick to match in-game name for `%s` (`%s` -> `%s`)", e.Member.User.Username, InGameName(e.Member), player.DisplayName))
 						// Force the display name to match the in-game name
 						if err := s.GuildMemberNickname(group.GuildID, e.Member.User.ID, player.DisplayName); err != nil {
 							logger.Warn("Failed to set display name", zap.Error(err))

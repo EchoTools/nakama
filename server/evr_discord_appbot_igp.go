@@ -625,7 +625,7 @@ func (p *InGamePanel) HandleInteraction(i *discordgo.InteractionCreate, command 
 		}
 
 		// Get the selected user ID
-		modal := p.createSetIGNModal(evrProfile.GetGroupDisplayNameOrDefault(groupID))
+		modal := p.createSetIGNModal(evrProfile.GetGroupIGN(groupID))
 		return p.dg.InteractionRespond(i.Interaction, modal)
 
 	case "select_player":

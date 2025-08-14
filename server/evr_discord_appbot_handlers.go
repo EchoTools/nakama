@@ -118,6 +118,15 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(ctx context.Context,
 		if !isGlobalOperator && !gg.IsAllocator(userID) {
 			return simpleInteractionResponse(s, i, "You must be a guild allocator to use this command.")
 		}
+	case "kick-player":
+		gg := d.guildGroupRegistry.Get(groupID)
+		if gg == nil {
+			return simpleInteractionResponse(s, i, "This guild is not registered.")
+		}
+
+		if err := d.LogInteractionToChannel(i, gg.AuditChannelID); err != nil {
+			logger.Warn("Failed to log interaction to channel")
+		}
 
 	case "join-player", "igp", "ign", "shutdown-match":
 
@@ -592,9 +601,9 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 			if len(voids) > 0 {
 				title = "Voided Suspension(s)"
 			} else if len(recordsByGroupID) > 0 {
-				title = fmt.Sprintf("Suspension: *%s*", Query.QuoteStringValue(profile.GetGroupDisplayNameOrDefault(groupID)))
+				title = fmt.Sprintf("Suspension: *%s*", Query.QuoteStringValue(profile.GetGroupIGN(groupID)))
 			}
-			targetDN := profile.GetGroupDisplayNameOrDefault(groupID)
+			targetDN := profile.GetGroupIGN(groupID)
 			targetDN = EscapeDiscordMarkdown(targetDN)
 			callerDN := caller.DisplayName()
 			if callerDN == "" {

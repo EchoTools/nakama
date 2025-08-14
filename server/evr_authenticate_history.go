@@ -481,7 +481,7 @@ func (h *LoginHistory) UpdateAlternates(ctx context.Context, logger runtime.Logg
 			logger.WithFields(map[string]interface{}{
 				"current_user_id":   h.userID,
 				"alternate_user_id": alternateUserID,
-				"error":            err,
+				"error":             err,
 			}).Warn("Failed to load alternate user's login history for bidirectional update")
 			continue
 		}
@@ -503,7 +503,7 @@ func (h *LoginHistory) UpdateAlternates(ctx context.Context, logger runtime.Logg
 				logger.WithFields(map[string]interface{}{
 					"current_user_id":   h.userID,
 					"alternate_user_id": alternateUserID,
-					"error":            err,
+					"error":             err,
 				}).Warn("Failed to save alternate user's login history for bidirectional update")
 				continue
 			}
