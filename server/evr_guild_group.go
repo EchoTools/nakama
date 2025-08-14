@@ -258,7 +258,7 @@ func GuildGroupStore(ctx context.Context, nk runtime.NakamaModule, guildGroupReg
 	}
 
 	// Store the State
-	err := StorageWrite(ctx, nk, ServiceSettings().DiscordBotUserID, group.State)
+	err := StorableWrite(ctx, nk, ServiceSettings().DiscordBotUserID, group.State)
 	if err != nil {
 		return fmt.Errorf("failed to write guild group state: %v", err)
 	}

@@ -170,7 +170,7 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 	case "approve_ip":
 
 		history := &LoginHistory{}
-		if err := StorageRead(ctx, nk, userID, history, true); err != nil {
+		if err := StorableRead(ctx, nk, userID, history, true); err != nil {
 			return fmt.Errorf("failed to load login history: %w", err)
 		}
 
@@ -198,7 +198,7 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 			if err := history.AuthorizeIPWithCode(strs[0], strs[1]); err != nil {
 
 				// Store the history
-				if err := StorageWrite(ctx, nk, userID, history); err != nil {
+				if err := StorableWrite(ctx, nk, userID, history); err != nil {
 					return fmt.Errorf("failed to save login history: %w", err)
 				}
 
@@ -230,7 +230,7 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 			}
 		}
 
-		if err := StorageWrite(ctx, nk, userID, history); err != nil {
+		if err := StorableWrite(ctx, nk, userID, history); err != nil {
 			return fmt.Errorf("failed to save login history: %w", err)
 		}
 
@@ -361,7 +361,7 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 
 	// Load the latency history for this user
 	latencyHistory := NewLatencyHistory()
-	if err := StorageRead(ctx, d.nk, userID, latencyHistory, false); err != nil && status.Code(err) != codes.NotFound {
+	if err := StorableRead(ctx, d.nk, userID, latencyHistory, false); err != nil && status.Code(err) != codes.NotFound {
 		return nil, 0, status.Errorf(codes.Internal, "failed to read latency history: %v", err)
 	}
 
@@ -417,7 +417,7 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 	}
 
 	latencyHistory := NewLatencyHistory()
-	if err := StorageRead(ctx, d.nk, userID, latencyHistory, false); err != nil && status.Code(err) != codes.NotFound {
+	if err := StorableRead(ctx, d.nk, userID, latencyHistory, false); err != nil && status.Code(err) != codes.NotFound {
 		return nil, 0, status.Errorf(codes.Internal, "failed to read latency history: %v", err)
 	}
 	extIPs := latencyHistory.AverageRTTs(true)
@@ -534,7 +534,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 		}
 
 		journal := NewGuildEnforcementJournal(targetUserID)
-		if err := StorageRead(ctx, nk, targetUserID, journal, false); err != nil && status.Code(err) != codes.NotFound {
+		if err := StorableRead(ctx, nk, targetUserID, journal, false); err != nil && status.Code(err) != codes.NotFound {
 			return fmt.Errorf("failed to read storage: %w", err)
 		}
 
@@ -578,7 +578,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 			}
 		}
 
-		if err := StorageWrite(ctx, nk, targetUserID, journal); err != nil {
+		if err := StorableWrite(ctx, nk, targetUserID, journal); err != nil {
 			return fmt.Errorf("failed to write storage: %w", err)
 		}
 
