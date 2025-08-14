@@ -7,8 +7,6 @@ const (
 	StorageCollectionCacheDiscord = "discord"
 )
 
-var _ = IndexedVersionedStorable(&GuildMemberCacheData{})
-
 type GuildMemberCacheData struct {
 	Member *discordgo.Member `json:"member"`
 
@@ -24,18 +22,17 @@ func NewGuildMemberCacheData(member *discordgo.Member) *GuildMemberCacheData {
 	}
 }
 
-func (GuildMemberCacheData) StorageMeta() StorageMeta {
-	return StorageMeta{
-		Collection: StorageCollectionCache,
-		Key:        StorageCollectionCacheDiscord,
+// CreateStorableAdapter creates a StorableAdapter for GuildMemberCacheData
+func (h *GuildMemberCacheData) CreateStorableAdapter() *StorableAdapter {
+	version := "*"
+	if h != nil && h.version != "" {
+		version = h.version
 	}
-}
 
-func (GuildMemberCacheData) StorageIndexes() []StorageIndexMeta {
-	return nil
-}
-
-func (h *GuildMemberCacheData) SetStorageVersion(userID, version string) {
-	h.userID = userID
-	h.version = version
+	return NewStorableAdapter(h, StorageCollectionCache, StorageCollectionCacheDiscord).
+		WithVersion(version).
+		WithVersionSetter(func(userID, version string) {
+			h.userID = userID
+			h.version = version
+		})
 }

@@ -537,7 +537,8 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 		}
 
 		journal := NewGuildEnforcementJournal(targetUserID)
-		if err := StorageRead(ctx, nk, targetUserID, journal, false); err != nil && status.Code(err) != codes.NotFound {
+		adapter := journal.CreateStorableAdapter()
+		if err := StorableRead(ctx, nk, targetUserID, adapter, false); err != nil && status.Code(err) != codes.NotFound {
 			return fmt.Errorf("failed to read storage: %w", err)
 		}
 
@@ -581,7 +582,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 			}
 		}
 
-		if err := StorageWrite(ctx, nk, targetUserID, journal); err != nil {
+		if err := StorableWrite(ctx, nk, targetUserID, adapter); err != nil {
 			return fmt.Errorf("failed to write storage: %w", err)
 		}
 

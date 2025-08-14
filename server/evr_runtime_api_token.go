@@ -17,28 +17,21 @@ const (
 	StorageIndexDeveloperAppTokens = "developerApplicationTokens"
 )
 
-var _ = Storable(&DeveloperApplications{})
-
 type DeveloperApplications struct {
 	Applications []DeveloperApplication `json:"Applications"`
 }
 
-func (DeveloperApplications) StorageMeta() StorageMeta {
-	return StorageMeta{
-		Collection: StorageCollectionDeveloper,
-		Key:        StorageKeyApplications,
-	}
-}
-
-func (DeveloperApplications) StorageIndexes() []StorageIndexMeta {
-	return []StorageIndexMeta{{
-		Name:       StorageIndexDeveloperAppTokens,
-		Collection: StorageCollectionDeveloper,
-		Key:        StorageKeyApplications,
-		Fields:     []string{"value.applications.token"},
-		MaxEntries: 10000,
-		IndexOnly:  true,
-	}}
+// CreateStorableAdapter creates a StorableAdapter for DeveloperApplications
+func (d *DeveloperApplications) CreateStorableAdapter() *StorableAdapter {
+	return NewStorableAdapter(d, StorageCollectionDeveloper, StorageKeyApplications).
+		WithIndexes([]StorableIndexMeta{{
+			Name:       StorageIndexDeveloperAppTokens,
+			Collection: StorageCollectionDeveloper,
+			Key:        StorageKeyApplications,
+			Fields:     []string{"value.applications.token"},
+			MaxEntries: 10000,
+			IndexOnly:  true,
+		}})
 }
 
 type DeveloperApplication struct {

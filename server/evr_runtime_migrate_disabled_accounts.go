@@ -35,7 +35,8 @@ func (m MigrationSuspensions) MigrateSystem(ctx context.Context, logger runtime.
 			})
 			// Convert the legacy data to the new format
 			journal := NewGuildEnforcementJournal(userID)
-			if err := StorageRead(ctx, nk, userID, journal, false); err != nil && status.Code(err) != codes.NotFound {
+			adapter := journal.CreateStorableAdapter()
+			if err := StorableRead(ctx, nk, userID, adapter, false); err != nil && status.Code(err) != codes.NotFound {
 				logger.Warn("Failed to read enforcement journal", err)
 				continue
 			}
@@ -43,7 +44,7 @@ func (m MigrationSuspensions) MigrateSystem(ctx context.Context, logger runtime.
 				logger.Warn("Failed to convert legacy suspension to journal", err)
 				continue
 			}
-			if err := StorageWrite(ctx, nk, userID, journal); err != nil {
+			if err := StorableWrite(ctx, nk, userID, adapter); err != nil {
 				logger.WithFields(map[string]any{
 					"error":    err,
 					"user_id":  userID,

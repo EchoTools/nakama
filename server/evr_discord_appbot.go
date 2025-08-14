@@ -2766,8 +2766,9 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			outfits := make(Wardrobe)
+			adapter := outfits.CreateStorableAdapter()
 
-			if err := StorageRead(ctx, d.nk, userID, outfits, true); err != nil {
+			if err := StorableRead(ctx, d.nk, userID, adapter, true); err != nil {
 				return fmt.Errorf("failed to read saved outfits: %w", err)
 			}
 
@@ -2793,7 +2794,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 					outfits[outfitName] = &metadata.LoadoutCosmetics
 
-					if err := StorageWrite(ctx, d.nk, userID, outfits); err != nil {
+					if err := StorableWrite(ctx, d.nk, userID, adapter); err != nil {
 						return fmt.Errorf("failed to write saved outfits: %w", err)
 					}
 
@@ -2820,7 +2821,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 					delete(outfits, outfitName)
 
-					if err := StorageWrite(ctx, d.nk, userID, outfits); err != nil {
+					if err := StorableWrite(ctx, d.nk, userID, adapter); err != nil {
 						return fmt.Errorf("failed to write saved outfits: %w", err)
 					}
 

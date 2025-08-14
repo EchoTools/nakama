@@ -867,7 +867,8 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 
 	// Check if the user is required to go through community values
 	journal := NewGuildEnforcementJournal(userID)
-	if err := StorageRead(ctx, p.nk, userID, journal, true); err != nil {
+	adapter := journal.CreateStorableAdapter()
+	if err := StorableRead(ctx, p.nk, userID, adapter, true); err != nil {
 		logger.Warn("Failed to search for community values", zap.Error(err))
 	} else if journal.CommunityValuesCompletedAt.IsZero() {
 		clientProfile.Social.CommunityValuesVersion = 0
@@ -909,13 +910,14 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 
 		// Check if the user is required to go through community values
 		journal := NewGuildEnforcementJournal(userID)
-		if err := StorageRead(ctx, p.nk, userID, journal, true); err != nil {
+		journalAdapter := journal.CreateStorableAdapter()
+		if err := StorableRead(ctx, p.nk, userID, journalAdapter, true); err != nil {
 			logger.Warn("Failed to search for community values", zap.Error(err))
 		} else if journal.CommunityValuesCompletedAt.IsZero() {
 
 			journal.CommunityValuesCompletedAt = time.Now().UTC()
 
-			if err := StorageWrite(ctx, p.nk, userID, journal); err != nil {
+			if err := StorableWrite(ctx, p.nk, userID, journalAdapter); err != nil {
 				logger.Warn("Failed to write community values", zap.Error(err))
 			}
 

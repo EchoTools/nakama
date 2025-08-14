@@ -19,8 +19,6 @@ const (
 	StorageCollectionEnforcementJournalSuspensionIndex = "EnforcementJournalSuspensionsIndex"
 )
 
-var _ = IndexedVersionedStorable(&GuildEnforcementJournal{})
-
 type GuildEnforcementRecordVoid struct {
 	GroupID         string    `json:"group_id"`
 	RecordID        string    `json:"record_id"`
@@ -46,26 +44,24 @@ func NewGuildEnforcementJournal(userID string) *GuildEnforcementJournal {
 	}
 }
 
-func (s GuildEnforcementJournal) StorageMeta() StorageMeta {
-	return StorageMeta{
-		Collection:      StorageCollectionEnforcementJournal,
-		Key:             StorageKeyEnforcementJournal,
-		PermissionRead:  runtime.STORAGE_PERMISSION_NO_READ,
-		PermissionWrite: runtime.STORAGE_PERMISSION_NO_WRITE,
-		Version:         s.version,
+// CreateStorableAdapter creates a StorableAdapter for GuildEnforcementJournal
+func (s *GuildEnforcementJournal) CreateStorableAdapter() *StorableAdapter {
+	version := "*"
+	if s != nil && s.version != "" {
+		version = s.version
 	}
+
+	return NewStorableAdapter(s, StorageCollectionEnforcementJournal, StorageKeyEnforcementJournal).
+		WithPermissions(runtime.STORAGE_PERMISSION_NO_READ, runtime.STORAGE_PERMISSION_NO_WRITE).
+		WithVersion(version).
+		WithVersionSetter(func(userID, version string) {
+			s.UserID = userID
+			s.version = version
+		})
 }
+
 func (s GuildEnforcementJournal) GetStorageVersion() string {
 	return s.version
-}
-
-func (s *GuildEnforcementJournal) SetStorageVersion(userID, version string) {
-	s.UserID = userID
-	s.version = version
-}
-
-func (s GuildEnforcementJournal) StorageIndexes() []StorageIndexMeta {
-	return nil
 }
 
 func GuildEnforcementJournalFromStorageObject(obj *api.StorageObject) (*GuildEnforcementJournal, error) {

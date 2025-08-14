@@ -7,16 +7,10 @@ const (
 	SavedOutfitsStorageKey         = "outfits"
 )
 
-var _ = Storable(&Wardrobe{})
-
 type Wardrobe map[string]*AccountCosmetics
 
-func (w Wardrobe) StorageMeta() StorageMeta {
-	return StorageMeta{
-		Collection:      CustomizationStorageCollection,
-		Key:             SavedOutfitsStorageKey,
-		PermissionRead:  runtime.STORAGE_PERMISSION_NO_READ,
-		PermissionWrite: runtime.STORAGE_PERMISSION_OWNER_WRITE,
-		Version:         "",
-	}
+// CreateStorableAdapter creates a StorableAdapter for Wardrobe
+func (w Wardrobe) CreateStorableAdapter() *StorableAdapter {
+	return NewStorableAdapter(w, CustomizationStorageCollection, SavedOutfitsStorageKey).
+		WithPermissions(runtime.STORAGE_PERMISSION_NO_READ, runtime.STORAGE_PERMISSION_OWNER_WRITE)
 }
