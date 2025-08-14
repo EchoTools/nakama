@@ -284,18 +284,18 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 
 			if suspensionRecord.UserID == userID {
 				// User has an active suspension
-				auditLog = fmt.Sprintf("suspension record: `%s` (expires <t:%d:R>)", suspensionRecord.UserNoticeText, suspensionRecord.Expiry.Unix())
+				auditLog = fmt.Sprintf("suspended (expires <t:%d:R>): `%s`", suspensionRecord.Expiry.Unix(), suspensionRecord.UserNoticeText)
 				metricTag = "suspended_user"
 			} else {
 				// This is an alternate account of a suspended user.
-				auditLog = fmt.Sprintf("suspended alt (<@!%s>)", suspensionRecord.UserID)
+				auditLog = fmt.Sprintf("suspended alternate (<@!%s>) (expires <t:%d:R>): `%s`", suspensionRecord.UserID, suspensionRecord.Expiry.Unix(), suspensionRecord.UserNoticeText)
 				metricTag = "suspended_alt_user"
 			}
 
 			if suspensionRecord.SuspensionExcludesPrivateLobbies() {
-				auditLog := fmt.Sprintf("Rejected limited access user <@%s> (%s) from public lobby (%s)", lobbyParams.DiscordID, lobbyParams.DisplayName, lobbyParams.Mode)
-				reason = "Public Lobby Access Denied: " + reason
-				return joinRejected("limited_access_user", suspensionRecord.UserNoticeText, auditLog)
+				auditLog = fmt.Sprintf("Rejected limited access user (expires <t:%d:R>): `%s`", suspensionRecord.Expiry.Unix(), suspensionRecord.UserNoticeText)
+				reason = "Public Access Denied: " + reason
+				metricTag = "limited_access_user"
 			}
 
 			expires := fmt.Sprintf(" [exp: %s]", FormatDuration(time.Until(suspensionRecord.Expiry)))
