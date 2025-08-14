@@ -117,7 +117,7 @@ func convertLegacySuspensionToJournal(j *GuildEnforcementJournal, groupID, data 
 			CreatedAt:               r.CreatedAt,
 			UpdatedAt:               r.UpdatedAt,
 			UserNoticeText:          r.SuspensionNotice,
-			SuspensionExpiry:        r.SuspensionExpiry,
+			Expiry:                  r.SuspensionExpiry,
 			AuditorNotes:            r.Notes,
 			CommunityValuesRequired: false,
 		}
