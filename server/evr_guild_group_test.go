@@ -82,7 +82,6 @@ func TestGuildGroupMembership_FromBitSet(t *testing.T) {
 				IsAPIAccess:          true,
 				IsAccountAgeBypass:   true,
 				IsVPNBypass:          true,
-				IsLimitedAccess:      true,
 			},
 		},
 		{
@@ -97,7 +96,6 @@ func TestGuildGroupMembership_FromBitSet(t *testing.T) {
 				IsAPIAccess:          false,
 				IsAccountAgeBypass:   false,
 				IsVPNBypass:          false,
-				IsLimitedAccess:      false,
 			},
 		},
 		{
@@ -112,7 +110,6 @@ func TestGuildGroupMembership_FromBitSet(t *testing.T) {
 				IsAPIAccess:          false,
 				IsAccountAgeBypass:   true,
 				IsVPNBypass:          false,
-				IsLimitedAccess:      true,
 			},
 		},
 	}
@@ -142,7 +139,6 @@ func TestGuildGroupMembership_asBitSet(t *testing.T) {
 				IsAPIAccess:          true,
 				IsAccountAgeBypass:   true,
 				IsVPNBypass:          true,
-				IsLimitedAccess:      true,
 			},
 			expected: bitset.From([]uint64{511}), // 111111111 in binary
 		},
@@ -157,7 +153,6 @@ func TestGuildGroupMembership_asBitSet(t *testing.T) {
 				IsAPIAccess:          false,
 				IsAccountAgeBypass:   false,
 				IsVPNBypass:          false,
-				IsLimitedAccess:      false,
 			},
 			expected: bitset.From([]uint64{0}),
 		},
@@ -172,7 +167,6 @@ func TestGuildGroupMembership_asBitSet(t *testing.T) {
 				IsAPIAccess:          false,
 				IsAccountAgeBypass:   true,
 				IsVPNBypass:          false,
-				IsLimitedAccess:      true,
 			},
 			expected: bitset.From([]uint64{341}), // 101010101 in binary
 		},

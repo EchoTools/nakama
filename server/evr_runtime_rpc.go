@@ -85,7 +85,7 @@ func (h *RPCHandler) MatchListPublicRPC(ctx context.Context, logger runtime.Logg
 	var groups []*api.Group
 
 	for {
-		groups, cursor, err = nk.GroupsList(ctx, "", "guild", nil, nil, 100, "")
+		groups, cursor, err = nk.GroupsList(ctx, "", GuildGroupLangTag, nil, nil, 100, "")
 		if err != nil {
 			return "", runtime.NewError("Failed to list guild groups", StatusInternalError)
 		}

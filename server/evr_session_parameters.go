@@ -40,17 +40,17 @@ type SessionParameters struct {
 	serverRegions []string            // []string of the server regions
 	urlParameters map[string][]string // The URL parameters
 
-	profile                  *EVRProfile                                  // The account
-	matchmakingSettings      *MatchmakingSettings                         // The matchmaking settings
-	displayNameHistory       *DisplayNameHistory                          // The display name history
-	guildGroups              map[string]*GuildGroup                       // map[string]*GuildGroup
-	earlyQuitConfig          *atomic.Pointer[EarlyQuitConfig]             // The early quit config
-	isGoldNameTag            *atomic.Bool                                 // If this user should have a gold name tag
-	lastMatchmakingError     *atomic.Error                                // The last matchmaking error
-	latencyHistory           *atomic.Pointer[LatencyHistory]              // The latency history
-	isIGPOpen                *atomic.Bool                                 // The user has IGPU open
-	activeSuspensionRecords  map[string]map[string]GuildEnforcementRecord // The active suspension records map[groupID]map[userID]GuildEnforcementRecord
-	ignoreDisabledAlternates bool                                         // Ignore disabled
+	profile                      *EVRProfile                      // The account
+	matchmakingSettings          *MatchmakingSettings             // The matchmaking settings
+	displayNameHistory           *DisplayNameHistory              // The display name history
+	guildGroups                  map[string]*GuildGroup           // map[string]*GuildGroup
+	earlyQuitConfig              *atomic.Pointer[EarlyQuitConfig] // The early quit config
+	isGoldNameTag                *atomic.Bool                     // If this user should have a gold name tag
+	lastMatchmakingError         *atomic.Error                    // The last matchmaking error
+	latencyHistory               *atomic.Pointer[LatencyHistory]  // The latency history
+	isIGPOpen                    *atomic.Bool                     // The user has IGPU open
+	gameModeSuspensionsByGroupID ActiveGuildEnforcements          // The active suspension records
+	ignoreDisabledAlternates     bool                             // Ignore disabled
 }
 
 func (s SessionParameters) UserID() string {

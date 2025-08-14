@@ -3,12 +3,13 @@ package server
 import (
 	"context"
 	"database/sql"
+	"maps"
 	"sync"
 	"time"
 
 	"go.uber.org/atomic"
 
-	"github.com/gofrs/uuid/v5"
+	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 )
 
@@ -18,9 +19,9 @@ type GuildGroupRegistry struct {
 	nk     runtime.NakamaModule
 	db     *sql.DB
 
-	writeMu        sync.Mutex // Mutex to protect writes to the guildGroups map
-	guildGroups    *atomic.Pointer[map[uuid.UUID]*GuildGroup]
-	inheritanceMap *atomic.Pointer[map[uuid.UUID]map[uuid.UUID]struct{}] // Maps downstream group IDs to upstream group IDs
+	writeMu        sync.Mutex                              // Mutex to protect writes to the guildGroups map
+	guildGroups    *atomic.Pointer[map[string]*GuildGroup] // map[groupID]GuildGroup
+	inheritanceMap *atomic.Pointer[map[string][]string]    // map[srcGroupID][]dstGroupID
 }
 
 func NewGuildGroupRegistry(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB) *GuildGroupRegistry {
@@ -31,8 +32,8 @@ func NewGuildGroupRegistry(ctx context.Context, logger runtime.Logger, nk runtim
 		nk:     nk,
 		db:     db,
 
-		guildGroups:    atomic.NewPointer(&map[uuid.UUID]*GuildGroup{}),
-		inheritanceMap: atomic.NewPointer(&map[uuid.UUID]map[uuid.UUID]struct{}{}),
+		guildGroups:    atomic.NewPointer(&map[string]*GuildGroup{}),
+		inheritanceMap: atomic.NewPointer(&map[string][]string{}),
 	}
 	// Regularly update the guild groups from the database.
 	go func() {
@@ -75,14 +76,17 @@ func (r *GuildGroupRegistry) rebuildGuildGroups() {
 		logger = r.logger
 		nk     = r.nk
 	)
-	// Load all guild groups from the database.
-	guildGroups := make(map[uuid.UUID]*GuildGroup)
-	inheritanceMap := make(map[uuid.UUID]map[uuid.UUID]struct{})
 
-	cursor := ""
+	var (
+		guildGroups    = make(map[string]*GuildGroup, len(*r.guildGroups.Load()))
+		inheritanceMap = make(map[string][]string, len(guildGroups))
+		cursor         string
+	)
 	for {
+		var groups []*api.Group
+		var err error
 		// List all guild groups.
-		groups, cursor, err := nk.GroupsList(ctx, "", "guild", nil, nil, 100, cursor)
+		groups, cursor, err = nk.GroupsList(ctx, "", GuildGroupLangTag, nil, nil, 100, cursor)
 		if err != nil {
 			logger.WithField("error", err).Warn("Error listing guild groups")
 			break
@@ -95,30 +99,18 @@ func (r *GuildGroupRegistry) rebuildGuildGroups() {
 				logger.WithField("error", err).Warn("Error loading guild group state")
 				continue
 			}
-			gUUID := uuid.FromStringOrNil(group.Id)
 			gg, err := NewGuildGroup(group, state)
 			if err != nil {
 				logger.WithField("error", err).Warn("Error creating guild group")
 				continue
 			}
 			// Add the group to the registry.
-			guildGroups[gUUID] = gg
+			guildGroups[group.Id] = gg
 
 			// Build the inheretence map.
-			inheritanceMap[gUUID] = make(map[uuid.UUID]struct{}, len(gg.SuspensionInheritanceGroupIDs))
+
 			for _, parentID := range gg.SuspensionInheritanceGroupIDs {
-				// Ensure the parent ID is valid.
-				pUUID, err := uuid.FromString(parentID)
-				if err != nil {
-					logger.WithFields(map[string]any{
-						"parent_id": parentID,
-						"group_id":  group.Id,
-						"error":     err,
-					}).Warn("Invalid parent group ID in guild group")
-					continue
-				}
-				// Add the parent ID to the inheritance map.
-				inheritanceMap[gUUID][pUUID] = struct{}{}
+				inheritanceMap[parentID] = append(inheritanceMap[parentID], group.Id)
 			}
 		}
 		if cursor == "" {
@@ -130,37 +122,36 @@ func (r *GuildGroupRegistry) rebuildGuildGroups() {
 	r.inheritanceMap.Store(&inheritanceMap)
 }
 
-func (r *GuildGroupRegistry) InheretanceMap() map[uuid.UUID]map[uuid.UUID]struct{} {
+// map[parentGroupID]map[childGroupID]bool
+func (r *GuildGroupRegistry) InheretanceByParentGroupID() map[string][]string {
 	return *r.inheritanceMap.Load()
 }
 
-func (r *GuildGroupRegistry) GuildGroups() map[uuid.UUID]*GuildGroup {
+func (r *GuildGroupRegistry) GuildGroups() map[string]*GuildGroup {
 	return *r.guildGroups.Load()
 }
 
-func (r *GuildGroupRegistry) Stop() {}
-
-func (r *GuildGroupRegistry) Get(groupID string) *GuildGroup {
-	gid := uuid.FromStringOrNil(groupID)
-	if gid == uuid.Nil {
-		// Return nil
-		return nil
-	}
-
-	return r.GuildGroups()[gid]
+// Length returns the number of guild groups in the registry.
+func (r *GuildGroupRegistry) Length() int {
+	return len(*r.guildGroups.Load())
 }
 
+// Get a guild group by its ID.
+func (r *GuildGroupRegistry) Get(groupID string) *GuildGroup {
+	return r.GuildGroups()[groupID]
+}
+
+// Add a guild group to the registry.
 func (r *GuildGroupRegistry) Add(gg *GuildGroup) {
-	if gg.ID().IsNil() {
+	if gg == nil || gg.ID().IsNil() {
 		return
 	}
 	r.writeMu.Lock()
 	defer r.writeMu.Unlock()
 	// Rebuild the guild groups map
-	newGuildGroups := make(map[uuid.UUID]*GuildGroup, len(*r.guildGroups.Load())+1)
-	for id, group := range *r.guildGroups.Load() {
-		newGuildGroups[id] = group
-	}
-	newGuildGroups[gg.ID()] = gg
-	r.guildGroups.Store(&newGuildGroups)
+	newMap := maps.Clone(*r.guildGroups.Load())
+	newMap[gg.IDStr()] = gg
+	r.guildGroups.Store(&newMap)
 }
+
+func (r *GuildGroupRegistry) Stop() {}

@@ -21,7 +21,7 @@ func (d *DiscordIntegrator) pruneGuildGroups(ctx context.Context, logger runtime
 	)
 	// Collect the guild groups from Nakama
 	for {
-		groups, cursor, err = d.nk.GroupsList(ctx, "", "guild", nil, nil, 100, cursor)
+		groups, cursor, err = d.nk.GroupsList(ctx, "", GuildGroupLangTag, nil, nil, 100, cursor)
 		if err != nil {
 			logger.WithField("error", err).Error("Failed to list groups")
 			return err

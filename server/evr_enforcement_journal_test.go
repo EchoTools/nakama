@@ -1,8 +1,12 @@
 package server
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
+
+	"github.com/gofrs/uuid/v5"
+	"github.com/heroiclabs/nakama-common/api"
 )
 
 func TestFormatDuration(t *testing.T) {
@@ -40,5 +44,61 @@ func TestFormatDuration(t *testing.T) {
 				t.Errorf("Expected %s, but got %s", tc.expected, actual)
 			}
 		})
+	}
+}
+func TestGuildEnforcementJournalFromStorageObject_SetsGroupIDAndUserID(t *testing.T) {
+	// Prepare a storage object with a record missing GroupID and UserID
+	groupID := "test-group"
+	userID := "test-user"
+	recordID := "rec-1"
+	records := map[string][]GuildEnforcementRecord{
+		groupID: {
+			{
+				ID:      recordID,
+				UserID:  "", // Should be set to journal.UserID
+				GroupID: "", // Should be set to groupID
+			},
+			{
+				ID:      "rec-2",
+				UserID:  uuid.Nil.String(), // Should be set to journal.UserID
+				GroupID: "",                // Should be set to groupID
+			},
+		},
+	}
+	journal := &GuildEnforcementJournal{
+		RecordsByGroupID: records,
+		UserID:           "", // Will be set from storage object
+	}
+	journalBytes, err := json.Marshal(journal)
+	if err != nil {
+		t.Fatalf("failed to marshal journal: %v", err)
+	}
+
+	storageObj := &api.StorageObject{
+		Collection: StorageCollectionEnforcementJournal,
+		Key:        StorageKeyEnforcementJournal,
+		UserId:     userID,
+		Value:      string(journalBytes),
+		Version:    "v1",
+	}
+
+	got, err := GuildEnforcementJournalFromStorageObject(storageObj)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Check that UserID is set
+	if got.UserID != userID {
+		t.Errorf("expected UserID %q, got %q", userID, got.UserID)
+	}
+
+	// Check that GroupID and UserID are set on each record
+	for _, rec := range got.RecordsByGroupID[groupID] {
+		if rec.GroupID != groupID {
+			t.Errorf("expected GroupID %q, got %q", groupID, rec.GroupID)
+		}
+		if rec.UserID != userID {
+			t.Errorf("expected UserID %q, got %q", userID, rec.UserID)
+		}
 	}
 }
