@@ -511,7 +511,7 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 
 	params.ignoreDisabledAlternates = loginHistory.IgnoreDisabledAlternates
 	firstIDs, _ := loginHistory.AlternateIDs()
-	if params.activeSuspensionRecords, err = CheckEnforcementSuspensions(ctx, p.nk, p.guildGroupRegistry, params.profile.ID(), firstIDs); err != nil {
+	if params.gameModeSuspensionsByGroupID, err = CheckEnforcementSuspensions(ctx, p.nk, p.guildGroupRegistry, params.profile.ID(), firstIDs); err != nil {
 		metricsTags["error"] = "failed_check_suspensions"
 		return fmt.Errorf("failed to check suspensions: %w", err)
 	}

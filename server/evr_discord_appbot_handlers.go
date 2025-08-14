@@ -566,7 +566,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 						continue
 					}
 					// Void the suspension
-					actions = append(actions, fmt.Sprintf("suspension removed:\n  <t:%d:R> by <@%s> (expires <t:%d:R>): %s", record.CreatedAt.Unix(), record.EnforcerDiscordID, record.SuspensionExpiry.Unix(), record.UserNoticeText))
+					actions = append(actions, fmt.Sprintf("suspension removed:\n  <t:%d:R> by <@%s> (expires <t:%d:R>): %s", record.CreatedAt.Unix(), record.EnforcerDiscordID, record.Expiry.Unix(), record.UserNoticeText))
 
 					recordsByGroupID[groupID] = append(recordsByGroupID[groupID], record)
 
