@@ -269,7 +269,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 				if gg.RejectPlayersWithSuspendedAlternates {
 					suspensionRecord = r
 				} else {
-					logAuditMessage(fmt.Sprintf("Allowed alternate account <@!%s> (%s) of suspended user <@!%s> (%s): `%s` (expires <t:%d:R>)", lobbyParams.DiscordID, lobbyParams.DisplayName, suspensionRecord.UserID, session.Username(), r.UserNoticeText, r.Expiry.Unix()))
+					logAuditMessage(fmt.Sprintf("Allowed alternate account <@!%s> (%s) of suspended user <@!%s> (%s): `%s` (expires <t:%d:R>)", lobbyParams.DiscordID, lobbyParams.DisplayName, r.UserID, session.Username(), r.UserNoticeText, r.Expiry.Unix()))
 				}
 			} else {
 				suspensionRecord = r
