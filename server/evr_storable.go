@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -18,6 +17,7 @@ type StorableAdapter interface {
 	SetStorageMeta(meta StorableMetadata)
 }
 
+// StorableMetadata defines the metadata for a storable object.
 type StorableMetadata struct {
 	UserID          string
 	Collection      string
@@ -27,44 +27,26 @@ type StorableMetadata struct {
 	Version         string
 }
 
+// String returns a string representation of the metadata path
 func (s StorableMetadata) String() string {
 	return fmt.Sprintf("%s/%s/%s/%s", s.UserID, s.Collection, s.Key, s.Version)
 }
 
-// StorableData implements the StorageObjectMarshaller/StorageObjectUnmarshaller interfaces
-type StorableData struct {
-	storableMeta StorableMetadata
+// Storable defines the interface for objects that can be indexed within the storage system.
+type StorableIndexer interface {
+	StorableAdapter
+	StorageIndexes() []StorableIndexMeta
 }
 
-func (s *StorableData) MarshalStorageObject() (*api.StorageObject, error) {
-	data, err := json.Marshal(s)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal storage object: %w", err)
-	}
-	return &api.StorageObject{
-		Collection:      s.storableMeta.Collection,
-		Key:             s.storableMeta.Key,
-		UserId:          s.storableMeta.UserID,
-		Value:           string(data),
-		Version:         s.storableMeta.Version,
-		PermissionRead:  int32(s.storableMeta.PermissionRead),
-		PermissionWrite: int32(s.storableMeta.PermissionWrite),
-	}, nil
-}
-
-func (s *StorableData) UnmarshalStorageObject(obj *api.StorageObject) error {
-	if obj == nil {
-		return fmt.Errorf("nil storage object")
-	}
-	s.storableMeta = StorableMetadata{
-		UserID:          obj.UserId,
-		Collection:      obj.Collection,
-		Key:             obj.Key,
-		PermissionRead:  int(obj.PermissionRead),
-		PermissionWrite: int(obj.PermissionWrite),
-		Version:         obj.Version,
-	}
-	return json.Unmarshal([]byte(obj.Value), s)
+// StorableIndexMeta defines the metadata for an index on a storable object. (initializer.StorageIndex)
+type StorableIndexMeta struct {
+	Name           string
+	Collection     string
+	Key            string
+	Fields         []string
+	SortableFields []string
+	MaxEntries     int
+	IndexOnly      bool
 }
 
 func storableErrorf(m StorableMetadata, c codes.Code, format string, a ...any) error {
