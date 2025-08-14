@@ -2,3 +2,4 @@ go.work
 __debug*
 data/
 ./_local
+.git/
