@@ -15,6 +15,8 @@ import (
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -28,8 +30,6 @@ var (
 	MaximumDisplayNameActiveAge  = time.Hour * 24 * 30 * 1 // 1 months
 )
 
-var _ = IndexedStorable(&DisplayNameHistory{})
-
 type DisplayNameHistory struct {
 	Username     string                          `json:"username"`      // the user's username
 	Reserved     []string                        `json:"reserves"`      // staticly reserved names
@@ -40,23 +40,18 @@ type DisplayNameHistory struct {
 	HistoryCache []string                        `json:"cache"`         // (lowercased) used for searching
 }
 
-func (DisplayNameHistory) StorageMeta() StorageMeta {
-	return StorageMeta{
-		Collection: DisplayNameCollection,
-		Key:        DisplayNameHistoryKey,
-	}
-}
-
-func (DisplayNameHistory) StorageIndexes() []StorageIndexMeta {
-	return []StorageIndexMeta{{
-		Name:           DisplayNameHistoryCacheIndex,
-		Collection:     DisplayNameCollection,
-		Key:            DisplayNameHistoryKey,
-		Fields:         []string{"active", "cache", "reserves", "username", "igns"},
-		SortableFields: nil,
-		MaxEntries:     1000000,
-		IndexOnly:      false,
-	}}
+// CreateStorableAdapter creates a StorableAdapter for DisplayNameHistory
+func (h *DisplayNameHistory) CreateStorableAdapter() *StorableAdapter {
+	return NewStorableAdapter(h, DisplayNameCollection, DisplayNameHistoryKey).
+		WithIndexes([]StorableIndexMeta{{
+			Name:           DisplayNameHistoryCacheIndex,
+			Collection:     DisplayNameCollection,
+			Key:            DisplayNameHistoryKey,
+			Fields:         []string{"active", "cache", "reserves", "username", "igns"},
+			SortableFields: nil,
+			MaxEntries:     1000000,
+			IndexOnly:      false,
+		}})
 }
 
 func NewDisplayNameHistory() *DisplayNameHistory {
@@ -213,43 +208,22 @@ func (h *DisplayNameHistory) ReplaceInGameNames(names []string) {
 }
 
 func DisplayNameHistoryLoad(ctx context.Context, nk runtime.NakamaModule, userID string) (*DisplayNameHistory, error) {
-	objects, err := nk.StorageRead(ctx, []*runtime.StorageRead{
-		{
-			Collection: DisplayNameCollection,
-			Key:        DisplayNameHistoryKey,
-			UserID:     userID,
-		},
-	})
-	if err != nil {
+	history := NewDisplayNameHistory()
+	adapter := history.CreateStorableAdapter()
+	
+	if err := StorableRead(ctx, nk, userID, adapter, false); err != nil {
+		if status.Code(err) == codes.NotFound {
+			return history, nil
+		}
 		return nil, fmt.Errorf("error reading display name cache: %w", err)
 	}
 
-	if len(objects) == 0 {
-		return NewDisplayNameHistory(), nil
-	}
-
-	var history DisplayNameHistory
-	if err := json.Unmarshal([]byte(objects[0].Value), &history); err != nil {
-		return nil, fmt.Errorf("error unmarshalling display name cache: %w", err)
-	}
-
-	return &history, nil
+	return history, nil
 }
 
 func DisplayNameHistoryStore(ctx context.Context, nk runtime.NakamaModule, userID string, history *DisplayNameHistory) error {
-	bytes, err := json.Marshal(history)
-	if err != nil {
-		return fmt.Errorf("error marshalling display name history: %w", err)
-	}
-
-	if _, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{
-		{
-			Collection: DisplayNameCollection,
-			Key:        DisplayNameHistoryKey,
-			Value:      string(bytes),
-			UserID:     userID,
-		},
-	}); err != nil {
+	adapter := history.CreateStorableAdapter()
+	if err := StorableWrite(ctx, nk, userID, adapter); err != nil {
 		return fmt.Errorf("error writing display name history: %w", err)
 	}
 

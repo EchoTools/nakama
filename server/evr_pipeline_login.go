@@ -464,7 +464,6 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 
 		// IP is not authorized. Add a pending authorization entry.
 		entry := loginHistory.AddPendingAuthorizationIP(params.xpID, session.clientIP, params.loginPayload)
-		adapter := loginHistory.CreateStorableAdapter()
 		if err := StorableWrite(ctx, p.nk, params.profile.ID(), adapter); err != nil {
 			return fmt.Errorf("failed to load login history: %w", err)
 		}
@@ -608,8 +607,8 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	}
 
 	latencyHistory := &LatencyHistory{}
-	adapter := latencyHistory.CreateStorableAdapter()
-	if err := StorableRead(ctx, p.nk, session.userID.String(), adapter, true); err != nil {
+	latencyAdapter := latencyHistory.CreateStorableAdapter()
+	if err := StorableRead(ctx, p.nk, session.userID.String(), latencyAdapter, true); err != nil {
 		metricsTags["error"] = "failed_load_latency_history"
 		return fmt.Errorf("failed to load latency history: %w", err)
 	}
@@ -744,7 +743,8 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		}
 	}
 	eqconfig := NewEarlyQuitConfig()
-	if err := StorageRead(ctx, p.nk, params.profile.ID(), eqconfig, true); err != nil {
+	eqAdapter := eqconfig.CreateStorableAdapter()
+	if err := StorableRead(ctx, p.nk, params.profile.ID(), eqAdapter, true); err != nil {
 		logger.Warn("Failed to load early quitter config", zap.Error(err))
 	} else {
 		params.earlyQuitConfig.Store(eqconfig)
@@ -1173,11 +1173,12 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 	// Decrease the early quitter count for the player
 	if playerSession := p.nk.sessionRegistry.Get(uuid.FromStringOrNil(playerInfo.SessionID)); playerSession != nil {
 		eqconfig := NewEarlyQuitConfig()
-		if err := StorageRead(ctx, p.nk, playerInfo.UserID, eqconfig, true); err != nil {
+		eqAdapter := eqconfig.CreateStorableAdapter()
+		if err := StorableRead(ctx, p.nk, playerInfo.UserID, eqAdapter, true); err != nil {
 			logger.Warn("Failed to load early quitter config", zap.Error(err))
 		} else {
 			eqconfig.IncrementCompletedMatches()
-			if err := StorageWrite(ctx, p.nk, playerInfo.UserID, eqconfig); err != nil {
+			if err := StorableWrite(ctx, p.nk, playerInfo.UserID, eqAdapter); err != nil {
 				logger.Warn("Failed to store early quitter config", zap.Error(err))
 			} else if session := p.sessionRegistry.Get(playerSession.ID()); session != nil {
 				if params, ok := LoadParams(session.Context()); ok {
