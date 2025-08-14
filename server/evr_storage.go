@@ -3,12 +3,11 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 
 	"github.com/heroiclabs/nakama-common/runtime"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 type Storable interface {
@@ -52,14 +51,21 @@ type StorageMeta struct {
 func (s StorageMeta) String() string {
 	return fmt.Sprintf("%s:%s", s.Collection, s.Key)
 }
+
+var (
+	ErrInvalidArgument = errors.New("invalid argument")
+	ErrInternal        = errors.New("internal error")
+	ErrNotFound        = errors.New("not found")
+)
+
 func StorageRead(ctx context.Context, nk runtime.NakamaModule, userID string, dst Storable, create bool) error {
 	if dst == nil {
-		return status.Errorf(codes.InvalidArgument, "dst is nil")
+		return fmt.Errorf("%w: dst is nil", ErrInvalidArgument)
 	}
 
 	// Check if the object is a pointer.
 	if dstValue := reflect.ValueOf(dst); dstValue.Kind() != reflect.Ptr {
-		return status.Errorf(codes.InvalidArgument, "dst is not a pointer")
+		return fmt.Errorf("%w: dst is not a pointer", ErrInvalidArgument)
 	}
 
 	meta := dst.StorageMeta()
@@ -72,13 +78,13 @@ func StorageRead(ctx context.Context, nk runtime.NakamaModule, userID string, ds
 		},
 	})
 	if err != nil {
-		return status.Errorf(codes.Internal, "failed to read %s/%s: %v", userID, meta.String(), err)
+		return fmt.Errorf("%w: failed to read %s/%s: %v", ErrInternal, userID, meta.String(), err)
 	}
 
 	if len(objs) != 0 {
 
 		if err = json.Unmarshal([]byte(objs[0].GetValue()), dst); err != nil {
-			return status.Errorf(codes.Internal, "failed to unmarshal %s/%s: %v", userID, meta.String(), err)
+			return fmt.Errorf("%w: failed to unmarshal %s/%s: %v", ErrInternal, userID, meta.String(), err)
 		}
 
 		// Ensure that the object does not exist
@@ -95,11 +101,11 @@ func StorageRead(ctx context.Context, nk runtime.NakamaModule, userID string, ds
 			}
 
 			if err = StorageWrite(ctx, nk, userID, dst); err != nil {
-				return status.Errorf(codes.Internal, "failed to create %s/%s: %v", userID, meta.String(), err)
+				return fmt.Errorf("%w: failed to create %s/%s: %v", ErrInternal, userID, meta.String(), err)
 			}
 
 		} else {
-			return status.Errorf(codes.NotFound, "no %s/%s found", userID, meta.String())
+			return fmt.Errorf("%w: no %s/%s found", ErrNotFound, userID, meta.String())
 		}
 	}
 
@@ -110,7 +116,7 @@ func StorageWrite(ctx context.Context, nk runtime.NakamaModule, userID string, s
 	meta := src.StorageMeta()
 	data, err := json.Marshal(src)
 	if err != nil {
-		return status.Errorf(codes.Internal, "failed to marshal %s/%s: %s", userID, meta.String(), err.Error())
+		return fmt.Errorf("%w: failed to marshal %s/%s: %s", ErrInternal, userID, meta.String(), err.Error())
 	}
 
 	acks, err := nk.StorageWrite(ctx, []*runtime.StorageWrite{
@@ -125,7 +131,7 @@ func StorageWrite(ctx context.Context, nk runtime.NakamaModule, userID string, s
 		},
 	})
 	if err != nil {
-		return status.Errorf(codes.Internal, "failed to write %s/%s: %v", userID, meta.String(), err.Error())
+		return fmt.Errorf("%w: failed to write %s/%s: %v", ErrInternal, userID, meta.String(), err.Error())
 	}
 
 	if obj, ok := src.(VersionedStorable); ok {
