@@ -556,7 +556,7 @@ func (w *WhoAmI) createAlternatesEmbed() *discordgo.MessageEmbed {
 		for _, r := range thisGroupSuspensions {
 			if r.UserID == altUserID {
 				// Collect the worst, or most widely effective suspension.
-				if altsRecord.Expiry.Before(r.Expiry) || !altsRecord.SuspensionExcludesPrivateLobbies() && altsRecord.SuspensionExcludesPrivateLobbies() {
+				if altsRecord.Expiry.Before(r.Expiry) || (!altsRecord.SuspensionExcludesPrivateLobbies() && r.SuspensionExcludesPrivateLobbies()) {
 					altsRecord = r
 				}
 			}
