@@ -22,17 +22,17 @@ func NewGuildMemberCacheData(member *discordgo.Member) *GuildMemberCacheData {
 	}
 }
 
-// CreateStorableAdapter creates a StorableAdapter for GuildMemberCacheData
-func (h *GuildMemberCacheData) CreateStorableAdapter() *StorableAdapter {
-	version := "*"
-	if h != nil && h.version != "" {
-		version = h.version
+func (h *GuildMemberCacheData) StorageMeta() StorableMetadata {
+	return StorableMetadata{
+		Collection:      StorageCollectionCache,
+		Key:             StorageCollectionCacheDiscord,
+		PermissionRead:  0,
+		PermissionWrite: 0,
+		Version:         h.version,
 	}
+}
 
-	return NewStorableAdapter(h, StorageCollectionCache, StorageCollectionCacheDiscord).
-		WithVersion(version).
-		WithVersionSetter(func(userID, version string) {
-			h.userID = userID
-			h.version = version
-		})
+func (h *GuildMemberCacheData) SetStorageMeta(meta StorableMetadata) {
+	h.userID = meta.UserID
+	h.version = meta.Version
 }

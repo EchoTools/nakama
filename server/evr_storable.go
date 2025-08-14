@@ -77,8 +77,8 @@ func StorableRead(ctx context.Context, nk runtime.NakamaModule, userID string, d
 	case 0:
 		// No objects found
 		if create {
-			meta.Version = "*"                 // Disallow overwriting existing objects.
-			return StorableWrite(ctx, nk, dst) // Attempt to write the object if it doesn't exist.
+			meta.Version = "*"                           // Disallow overwriting existing objects.
+			return StorableWrite(ctx, nk, userID, dst) // Attempt to write the object if it doesn't exist.
 		}
 		return status.Errorf(codes.NotFound, "no %s/%s found", userID, meta.String())
 	case 1:
@@ -97,8 +97,9 @@ func StorableRead(ctx context.Context, nk runtime.NakamaModule, userID string, d
 	}
 }
 
-func StorableWrite(ctx context.Context, nk runtime.NakamaModule, src StorableAdapter) error {
+func StorableWrite(ctx context.Context, nk runtime.NakamaModule, userID string, src StorableAdapter) error {
 	meta := src.StorageMeta()
+	meta.UserID = userID
 	data, err := json.Marshal(src)
 	if err != nil {
 		return storableErrorf(meta, codes.Internal, "failed to marshal: %v", err)

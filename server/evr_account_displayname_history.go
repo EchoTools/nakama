@@ -40,18 +40,30 @@ type DisplayNameHistory struct {
 	HistoryCache []string                        `json:"cache"`         // (lowercased) used for searching
 }
 
-// CreateStorableAdapter creates a StorableAdapter for DisplayNameHistory
-func (h *DisplayNameHistory) CreateStorableAdapter() *StorableAdapter {
-	return NewStorableAdapter(h, DisplayNameCollection, DisplayNameHistoryKey).
-		WithIndexes([]StorableIndexMeta{{
-			Name:           DisplayNameHistoryCacheIndex,
-			Collection:     DisplayNameCollection,
-			Key:            DisplayNameHistoryKey,
-			Fields:         []string{"active", "cache", "reserves", "username", "igns"},
-			SortableFields: nil,
-			MaxEntries:     1000000,
-			IndexOnly:      false,
-		}})
+func (h *DisplayNameHistory) StorageMeta() StorableMetadata {
+	return StorableMetadata{
+		Collection:      DisplayNameCollection,
+		Key:             DisplayNameHistoryKey,
+		PermissionRead:  0,
+		PermissionWrite: 0,
+		Version:         "*", // No version tracking for DisplayNameHistory
+	}
+}
+
+func (h *DisplayNameHistory) SetStorageMeta(meta StorableMetadata) {
+	// DisplayNameHistory doesn't track version, so nothing to set
+}
+
+func (h *DisplayNameHistory) StorageIndexes() []StorableIndexMeta {
+	return []StorableIndexMeta{{
+		Name:           DisplayNameHistoryCacheIndex,
+		Collection:     DisplayNameCollection,
+		Key:            DisplayNameHistoryKey,
+		Fields:         []string{"active", "cache", "reserves", "username", "igns"},
+		SortableFields: nil,
+		MaxEntries:     1000000,
+		IndexOnly:      false,
+	}}
 }
 
 func NewDisplayNameHistory() *DisplayNameHistory {
@@ -209,9 +221,8 @@ func (h *DisplayNameHistory) ReplaceInGameNames(names []string) {
 
 func DisplayNameHistoryLoad(ctx context.Context, nk runtime.NakamaModule, userID string) (*DisplayNameHistory, error) {
 	history := NewDisplayNameHistory()
-	adapter := history.CreateStorableAdapter()
 	
-	if err := StorableRead(ctx, nk, userID, adapter, false); err != nil {
+	if err := StorableRead(ctx, nk, userID, history, false); err != nil {
 		if status.Code(err) == codes.NotFound {
 			return history, nil
 		}
@@ -222,8 +233,7 @@ func DisplayNameHistoryLoad(ctx context.Context, nk runtime.NakamaModule, userID
 }
 
 func DisplayNameHistoryStore(ctx context.Context, nk runtime.NakamaModule, userID string, history *DisplayNameHistory) error {
-	adapter := history.CreateStorableAdapter()
-	if err := StorableWrite(ctx, nk, userID, adapter); err != nil {
+	if err := StorableWrite(ctx, nk, userID, history); err != nil {
 		return fmt.Errorf("error writing display name history: %w", err)
 	}
 

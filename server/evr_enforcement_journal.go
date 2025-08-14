@@ -44,20 +44,19 @@ func NewGuildEnforcementJournal(userID string) *GuildEnforcementJournal {
 	}
 }
 
-// CreateStorableAdapter creates a StorableAdapter for GuildEnforcementJournal
-func (s *GuildEnforcementJournal) CreateStorableAdapter() *StorableAdapter {
-	version := "*"
-	if s != nil && s.version != "" {
-		version = s.version
+func (s *GuildEnforcementJournal) StorageMeta() StorableMetadata {
+	return StorableMetadata{
+		Collection:      StorageCollectionEnforcementJournal,
+		Key:             StorageKeyEnforcementJournal,
+		PermissionRead:  runtime.STORAGE_PERMISSION_NO_READ,
+		PermissionWrite: runtime.STORAGE_PERMISSION_NO_WRITE,
+		Version:         s.version,
 	}
+}
 
-	return NewStorableAdapter(s, StorageCollectionEnforcementJournal, StorageKeyEnforcementJournal).
-		WithPermissions(runtime.STORAGE_PERMISSION_NO_READ, runtime.STORAGE_PERMISSION_NO_WRITE).
-		WithVersion(version).
-		WithVersionSetter(func(userID, version string) {
-			s.UserID = userID
-			s.version = version
-		})
+func (s *GuildEnforcementJournal) SetStorageMeta(meta StorableMetadata) {
+	s.UserID = meta.UserID
+	s.version = meta.Version
 }
 
 func (s GuildEnforcementJournal) GetStorageVersion() string {

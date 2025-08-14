@@ -25,23 +25,22 @@ func NewEarlyQuitConfig() *EarlyQuitConfig {
 	return &EarlyQuitConfig{}
 }
 
-// CreateStorableAdapter creates a StorableAdapter for EarlyQuitConfig
-func (s *EarlyQuitConfig) CreateStorableAdapter() *StorableAdapter {
+func (s *EarlyQuitConfig) StorageMeta() StorableMetadata {
 	s.Lock()
-	version := s.version
-	if version == "" {
-		version = "*"
+	defer s.Unlock()
+	return StorableMetadata{
+		Collection:      StorageCollectionEarlyQuit,
+		Key:             StorageKeyEarlyQuit,
+		PermissionRead:  runtime.STORAGE_PERMISSION_NO_READ,
+		PermissionWrite: runtime.STORAGE_PERMISSION_NO_WRITE,
+		Version:         s.version,
 	}
-	s.Unlock()
+}
 
-	return NewStorableAdapter(s, StorageCollectionEarlyQuit, StorageKeyEarlyQuit).
-		WithPermissions(runtime.STORAGE_PERMISSION_NO_READ, runtime.STORAGE_PERMISSION_NO_WRITE).
-		WithVersion(version).
-		WithVersionSetter(func(userID, version string) {
-			s.Lock()
-			defer s.Unlock()
-			s.version = version
-		})
+func (s *EarlyQuitConfig) SetStorageMeta(meta StorableMetadata) {
+	s.Lock()
+	defer s.Unlock()
+	s.version = meta.Version
 }
 
 func (s *EarlyQuitConfig) GetStorageVersion() string {

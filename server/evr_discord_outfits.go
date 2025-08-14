@@ -9,8 +9,16 @@ const (
 
 type Wardrobe map[string]*AccountCosmetics
 
-// CreateStorableAdapter creates a StorableAdapter for Wardrobe
-func (w Wardrobe) CreateStorableAdapter() *StorableAdapter {
-	return NewStorableAdapter(w, CustomizationStorageCollection, SavedOutfitsStorageKey).
-		WithPermissions(runtime.STORAGE_PERMISSION_NO_READ, runtime.STORAGE_PERMISSION_OWNER_WRITE)
+func (w Wardrobe) StorageMeta() StorableMetadata {
+	return StorableMetadata{
+		Collection:      CustomizationStorageCollection,
+		Key:             SavedOutfitsStorageKey,
+		PermissionRead:  runtime.STORAGE_PERMISSION_NO_READ,
+		PermissionWrite: runtime.STORAGE_PERMISSION_OWNER_WRITE,
+		Version:         "*", // Always overwrite for maps without version tracking
+	}
+}
+
+func (w Wardrobe) SetStorageMeta(meta StorableMetadata) {
+	// Wardrobe is a map type with no version field, so nothing to set
 }

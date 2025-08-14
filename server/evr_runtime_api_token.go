@@ -21,17 +21,29 @@ type DeveloperApplications struct {
 	Applications []DeveloperApplication `json:"Applications"`
 }
 
-// CreateStorableAdapter creates a StorableAdapter for DeveloperApplications
-func (d *DeveloperApplications) CreateStorableAdapter() *StorableAdapter {
-	return NewStorableAdapter(d, StorageCollectionDeveloper, StorageKeyApplications).
-		WithIndexes([]StorableIndexMeta{{
-			Name:       StorageIndexDeveloperAppTokens,
-			Collection: StorageCollectionDeveloper,
-			Key:        StorageKeyApplications,
-			Fields:     []string{"value.applications.token"},
-			MaxEntries: 10000,
-			IndexOnly:  true,
-		}})
+func (d *DeveloperApplications) StorageMeta() StorableMetadata {
+	return StorableMetadata{
+		Collection:      StorageCollectionDeveloper,
+		Key:             StorageKeyApplications,
+		PermissionRead:  0,
+		PermissionWrite: 0,
+		Version:         "*", // No version tracking for DeveloperApplications
+	}
+}
+
+func (d *DeveloperApplications) SetStorageMeta(meta StorableMetadata) {
+	// DeveloperApplications doesn't track version, so nothing to set
+}
+
+func (d *DeveloperApplications) StorageIndexes() []StorableIndexMeta {
+	return []StorableIndexMeta{{
+		Name:       StorageIndexDeveloperAppTokens,
+		Collection: StorageCollectionDeveloper,
+		Key:        StorageKeyApplications,
+		Fields:     []string{"value.applications.token"},
+		MaxEntries: 10000,
+		IndexOnly:  true,
+	}}
 }
 
 type DeveloperApplication struct {

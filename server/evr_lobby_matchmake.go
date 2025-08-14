@@ -269,15 +269,15 @@ type MatchmakingSettings struct {
 	ExcludedDivisions        []string `json:"excluded_divisions"`        // The division to use
 }
 
-func (MatchmakingSettings) StorageMeta() StorageMeta {
-	return StorageMeta{
+func (MatchmakingSettings) StorageMeta() StorableMetadata {
+	return StorableMetadata{
 		Collection: MatchmakerStorageCollection,
 		Key:        MatchmakingConfigStorageKey,
 	}
 }
 
-func (MatchmakingSettings) StorageIndexes() []StorageIndexMeta {
-	return []StorageIndexMeta{{
+func (MatchmakingSettings) StorageIndexes() []StorableIndexMeta {
+	return []StorableIndexMeta{{
 		Name:           ActivePartyGroupIndex,
 		Collection:     MatchmakerStorageCollection,
 		Key:            MatchmakingConfigStorageKey,

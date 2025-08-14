@@ -2766,9 +2766,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			outfits := make(Wardrobe)
-			adapter := outfits.CreateStorableAdapter()
 
-			if err := StorableRead(ctx, d.nk, userID, adapter, true); err != nil {
+			if err := StorableRead(ctx, d.nk, userID, outfits, true); err != nil {
 				return fmt.Errorf("failed to read saved outfits: %w", err)
 			}
 

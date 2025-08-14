@@ -710,8 +710,8 @@ type ServiceStatusData struct {
 	Statuses []ServiceStatusService `json:"statuses"`
 }
 
-func (s ServiceStatusData) StorageMeta() StorageMeta {
-	return StorageMeta{
+func (s ServiceStatusData) StorageMeta() StorableMetadata {
+	return StorableMetadata{
 		Collection: "Service",
 		Key:        "status",
 	}

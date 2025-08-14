@@ -290,13 +290,13 @@ func (h *EventDispatcher) handleLobbyAuthorized(ctx context.Context, logger runt
 		return fmt.Errorf("failed to load guild group: %w", err)
 	}
 
-	if err = StorableRead(ctx, h.nk, userID, loginHistory.CreateStorableAdapter(), true); err != nil {
+	if err = StorableRead(ctx, h.nk, userID, loginHistory, true); err != nil {
 		return fmt.Errorf("failed to load login history: %w", err)
 	}
 
 	if updated := loginHistory.NotifyGroup(groupID, gg.AlternateAccountNotificationExpiry); updated {
 
-		if err := StorableWrite(ctx, h.nk, userID, loginHistory.CreateStorableAdapter()); err != nil {
+		if err := StorableWrite(ctx, h.nk, userID, loginHistory); err != nil {
 			logger.WithField("error", err).Warn("failed to store login history after notify group update")
 		}
 

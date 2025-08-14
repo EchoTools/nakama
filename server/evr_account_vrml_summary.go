@@ -26,17 +26,17 @@ type VRMLPlayerSummary struct {
 	MatchCountsBySeasonByTeam map[VRMLSeasonID]map[string]int `json:"match_counts"` // map[seasonID]map[teamID]matchCount
 }
 
-func (VRMLPlayerSummary) StorageMeta() StorageMeta {
-	return StorageMeta{
+func (VRMLPlayerSummary) StorageMeta() StorableMetadata {
+	return StorableMetadata{
 		Collection: StorageCollectionVRML,
 		Key:        StorageKeyVRMLSummary,
 	}
 }
 
-func (VRMLPlayerSummary) StorageIndexes() []StorageIndexMeta {
+func (VRMLPlayerSummary) StorageIndexes() []StorableIndexMeta {
 
 	// Register the storage index
-	return []StorageIndexMeta{
+	return []StorableIndexMeta{
 		{
 			Name:       StorageIndexVRMLUserID,
 			Collection: StorageCollectionVRML,
