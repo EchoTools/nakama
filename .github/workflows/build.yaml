@@ -1,6 +1,7 @@
-# every push to a branch: build binary
-name: Build
 on:
+  push:
+    branches:
+      - main
   pull_request:
     types: [opened, synchronize]
 jobs:
