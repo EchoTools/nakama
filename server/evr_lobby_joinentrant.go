@@ -413,9 +413,6 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 	}
 
 	displayName := params.profile.GetGroupIGN(groupID)
-	if err != nil {
-		return fmt.Errorf("failed to get display name: %w", err)
-	}
 
 	p.nk.Event(ctx, &api.Event{
 		Name: EventLobbySessionAuthorized,

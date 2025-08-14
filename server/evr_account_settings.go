@@ -1,6 +1,9 @@
 package server
 
-import "encoding/json"
+var (
+	ProfileOptionsStorageCollection = "ProfileOptions"
+	ProfileOptionsStorageKey        = "store"
+)
 
 type ProfileOptions struct {
 	DisableAFKTimeout     bool   `json:"disable_afk_timeout"`    // Disable AFK detection
@@ -12,7 +15,6 @@ type ProfileOptions struct {
 
 func (h *ProfileOptions) StorageMeta() StorableMetadata {
 	return StorableMetadata{
-		Collection:      LatencyHistoryStorageCollection,
 		Collection:      ProfileOptionsStorageCollection,
 		Key:             ProfileOptionsStorageKey,
 		PermissionRead:  0,
@@ -23,14 +25,4 @@ func (h *ProfileOptions) StorageMeta() StorableMetadata {
 
 func (h *ProfileOptions) SetStorageMeta(meta StorableMetadata) {
 	h.version = meta.Version
-}
-
-func (h *LatencyHistory) String() string {
-	h.RLock()
-	defer h.RUnlock()
-	data, err := json.Marshal(h)
-	if err != nil {
-		return ""
-	}
-	return string(data)
 }
