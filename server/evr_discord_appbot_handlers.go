@@ -170,7 +170,8 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 	case "approve_ip":
 
 		history := &LoginHistory{}
-		if err := StorageRead(ctx, nk, userID, history, true); err != nil {
+		adapter := history.CreateStorableAdapter()
+		if err := StorableRead(ctx, nk, userID, adapter, true); err != nil {
 			return fmt.Errorf("failed to load login history: %w", err)
 		}
 
@@ -198,7 +199,7 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 			if err := history.AuthorizeIPWithCode(strs[0], strs[1]); err != nil {
 
 				// Store the history
-				if err := StorageWrite(ctx, nk, userID, history); err != nil {
+				if err := StorableWrite(ctx, nk, userID, adapter); err != nil {
 					return fmt.Errorf("failed to save login history: %w", err)
 				}
 
@@ -230,7 +231,7 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 			}
 		}
 
-		if err := StorageWrite(ctx, nk, userID, history); err != nil {
+		if err := StorableWrite(ctx, nk, userID, adapter); err != nil {
 			return fmt.Errorf("failed to save login history: %w", err)
 		}
 

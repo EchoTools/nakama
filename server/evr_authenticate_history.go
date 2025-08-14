@@ -97,8 +97,6 @@ func (h *LoginHistoryEntry) Items() []string {
 	return []string{h.ClientIP, h.LoginData.HMDSerialNumber, h.XPID.Token(), h.SystemProfile()}
 }
 
-var _ = IndexedVersionedStorable(&LoginHistory{})
-
 type LoginHistory struct {
 	Active                   map[string]*LoginHistoryEntry      `json:"active"`                     // map[deviceID]DeviceHistoryEntry
 	History                  map[string]*LoginHistoryEntry      `json:"history"`                    // map[deviceID]DeviceHistoryEntry
@@ -116,35 +114,29 @@ type LoginHistory struct {
 	version                  string                             // storage record version
 }
 
-func (h *LoginHistory) StorageMeta() StorageMeta {
+// CreateStorableAdapter creates a StorableAdapter for LoginHistory
+func (h *LoginHistory) CreateStorableAdapter() *StorableAdapter {
 	version := "*"
 	if h != nil && h.version != "" {
 		version = h.version
 	}
-	return StorageMeta{
-		Collection:      LoginStorageCollection,
-		Key:             LoginHistoryStorageKey,
-		PermissionRead:  runtime.STORAGE_PERMISSION_NO_READ,
-		PermissionWrite: runtime.STORAGE_PERMISSION_NO_WRITE,
-		Version:         version,
-	}
-}
-
-func (LoginHistory) StorageIndexes() []StorageIndexMeta {
-	return []StorageIndexMeta{{
-		Name:           LoginHistoryCacheIndex,
-		Collection:     LoginStorageCollection,
-		Key:            LoginHistoryStorageKey,
-		Fields:         []string{"cache", "denied_client_addrs"},
-		SortableFields: nil,
-		MaxEntries:     10000000,
-		IndexOnly:      true,
-	}}
-}
-
-func (h *LoginHistory) SetStorageVersion(userID, version string) {
-	h.userID = userID
-	h.version = version
+	
+	return NewStorableAdapter(h, LoginStorageCollection, LoginHistoryStorageKey).
+		WithPermissions(runtime.STORAGE_PERMISSION_NO_READ, runtime.STORAGE_PERMISSION_NO_WRITE).
+		WithVersion(version).
+		WithIndexes([]StorableIndexMeta{{
+			Name:           LoginHistoryCacheIndex,
+			Collection:     LoginStorageCollection,
+			Key:            LoginHistoryStorageKey,
+			Fields:         []string{"cache", "denied_client_addrs"},
+			SortableFields: nil,
+			MaxEntries:     10000000,
+			IndexOnly:      true,
+		}}).
+		WithVersionSetter(func(userID, version string) {
+			h.userID = userID
+			h.version = version
+		})
 }
 
 func NewLoginHistory(userID string) *LoginHistory {
@@ -482,7 +474,8 @@ func (h *LoginHistory) UpdateAlternates(ctx context.Context, logger runtime.Logg
 
 		// Load the alternate's login history
 		alternateHistory := NewLoginHistory(alternateUserID)
-		if err := StorageRead(ctx, nk, alternateUserID, alternateHistory, false); err != nil {
+		adapter := alternateHistory.CreateStorableAdapter()
+		if err := StorableRead(ctx, nk, alternateUserID, adapter, false); err != nil {
 			// Log warning but continue - don't fail the entire operation
 			logger.WithFields(map[string]interface{}{
 				"current_user_id":   h.userID,
@@ -504,7 +497,7 @@ func (h *LoginHistory) UpdateAlternates(ctx context.Context, logger runtime.Logg
 			alternateHistory.AlternateMatches[h.userID] = currentUserMatches
 
 			// Save the updated alternate history
-			if err := StorageWrite(ctx, nk, alternateUserID, alternateHistory); err != nil {
+			if err := StorableWrite(ctx, nk, alternateUserID, adapter); err != nil {
 				// Log warning but continue - don't fail the entire operation
 				logger.WithFields(map[string]interface{}{
 					"current_user_id":   h.userID,

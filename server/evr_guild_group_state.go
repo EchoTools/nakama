@@ -13,8 +13,6 @@ const (
 	StorageCollectionState = "GuildGroupState"
 )
 
-var _ = VersionedStorable(&GuildGroupState{})
-
 // This allows the system to operate correctly even when discord is down
 type GuildGroupState struct {
 	sync.RWMutex                                  // for storage operations
@@ -38,19 +36,21 @@ func (s *GuildGroupState) hasRole(userID, role string) bool {
 	return false
 }
 
-func (s *GuildGroupState) StorageMeta() StorageMeta {
-	return StorageMeta{Collection: StorageCollectionState, Key: s.GroupID}
-}
+// CreateStorableAdapter creates a StorableAdapter for GuildGroupState
+func (s *GuildGroupState) CreateStorableAdapter() *StorableAdapter {
+	version := "*"
+	if s != nil && s.version != "" {
+		version = s.version
+	}
 
-func (s *GuildGroupState) StorageIndex() *StorageIndexMeta {
-	return nil
-}
-
-func (s *GuildGroupState) SetStorageVersion(userID string, version string) {
-	s.Lock()
-	defer s.Unlock()
-	s.version = version
-	s.updated = false
+	return NewStorableAdapter(s, StorageCollectionState, s.GroupID).
+		WithVersion(version).
+		WithVersionSetter(func(userID, version string) {
+			s.Lock()
+			defer s.Unlock()
+			s.version = version
+			s.updated = false
+		})
 }
 
 func GuildGroupStateLoad(ctx context.Context, nk runtime.NakamaModule, botUserID, groupID string) (*GuildGroupState, error) {
@@ -58,7 +58,8 @@ func GuildGroupStateLoad(ctx context.Context, nk runtime.NakamaModule, botUserID
 		err   error
 		state = &GuildGroupState{GroupID: groupID}
 	)
-	if err = StorageRead(ctx, nk, botUserID, state, true); err != nil {
+	adapter := state.CreateStorableAdapter()
+	if err = StorableRead(ctx, nk, botUserID, adapter, true); err != nil {
 		return nil, err
 	}
 	state.GroupID = groupID
@@ -67,7 +68,8 @@ func GuildGroupStateLoad(ctx context.Context, nk runtime.NakamaModule, botUserID
 
 func GuildGroupStateSave(ctx context.Context, nk runtime.NakamaModule, botUserID string, state *GuildGroupState) error {
 	// Store the State
-	err := StorageWrite(ctx, nk, ServiceSettings().DiscordBotUserID, state)
+	adapter := state.CreateStorableAdapter()
+	err := StorableWrite(ctx, nk, ServiceSettings().DiscordBotUserID, adapter)
 	if err != nil {
 		return fmt.Errorf("failed to write guild group state: %v", err)
 	}

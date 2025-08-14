@@ -262,7 +262,7 @@ func RegisterIndexes(initializer runtime.Initializer) error {
 		&DeveloperApplications{},
 		&MatchmakingSettings{},
 		&VRMLPlayerSummary{},
-		&LoginHistory{},
+		// TODO: Add LoginHistory back with new adapter pattern
 	}
 	for _, s := range storables {
 		for _, idx := range s.StorageIndexes() {

@@ -46,7 +46,8 @@ func (e *EventUserAuthenticated) Process(ctx context.Context, logger runtime.Log
 	)
 
 	loginHistory := NewLoginHistory(userID)
-	if err := StorageRead(ctx, nk, userID, loginHistory, true); err != nil {
+	adapter := loginHistory.CreateStorableAdapter()
+	if err := StorableRead(ctx, nk, userID, adapter, true); err != nil {
 		return fmt.Errorf("failed to load login history: %w", err)
 	}
 
@@ -65,7 +66,7 @@ func (e *EventUserAuthenticated) Process(ctx context.Context, logger runtime.Log
 		return fmt.Errorf("failed to update alternates: %w", err)
 	}
 
-	if err := StorageWrite(ctx, nk, userID, loginHistory); err != nil {
+	if err := StorableWrite(ctx, nk, userID, adapter); err != nil {
 		return fmt.Errorf("failed to store login history: %w", err)
 	}
 

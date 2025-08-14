@@ -1958,7 +1958,8 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			loginHistory := &LoginHistory{}
-			if err := StorageRead(ctx, nk, userIDStr, loginHistory, false); err != nil {
+			adapter := loginHistory.CreateStorableAdapter()
+			if err := StorableRead(ctx, nk, userIDStr, adapter, false); err != nil {
 				return fmt.Errorf("failed to load login history: %w", err)
 			}
 
