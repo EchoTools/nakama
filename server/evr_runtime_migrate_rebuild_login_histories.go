@@ -61,8 +61,8 @@ func (m *MigrationRebuildLoginHistory) MigrateSystem(ctx context.Context, logger
 
 					logger := logger.WithField("user_id", user.User.Id)
 					loginHistory := NewLoginHistory(user.User.Id)
-					adapter := loginHistory.CreateStorableAdapter()
-					if err := StorableRead(ctx, nk, user.User.Id, adapter, false); err != nil {
+					// adapter := loginHistory.CreateStorableAdapter()
+					if err := StorableRead(ctx, nk, user.User.Id, loginHistory, false); err != nil {
 						if status.Code(err) != codes.NotFound {
 							logger.WithField("error", err).Warn("Failed to read login history")
 						}
@@ -74,7 +74,7 @@ func (m *MigrationRebuildLoginHistory) MigrateSystem(ctx context.Context, logger
 						continue
 					}
 					// Save the new login history
-					if err := StorableWrite(ctx, nk, user.User.Id, adapter); err != nil {
+					if err := StorableWrite(ctx, nk, user.User.Id, loginHistory); err != nil {
 						logger.WithField("error", err).Warn("Failed to write login history")
 						continue
 					}

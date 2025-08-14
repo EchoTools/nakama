@@ -31,6 +31,10 @@ func (p GroupProfile) StorageMeta() StorableMetadata {
 	return StorableMetadata{Collection: StorageCollectionGroupProfile, Key: p.GroupID}
 }
 
+func (p GroupProfile) SetStorageMeta(meta StorableMetadata) {
+	// GroupProfile doesn't track version, so nothing to set
+}
+
 func (p *GroupProfile) UpdateUnlockedItems(updated []evr.Symbol) {
 	// Update the unlocked items, adding the new ones to newUnlocks
 	added, removed := lo.Difference(updated, p.UnlockedItems)

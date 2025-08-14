@@ -276,6 +276,10 @@ func (MatchmakingSettings) StorageMeta() StorableMetadata {
 	}
 }
 
+func (m MatchmakingSettings) SetStorageMeta(meta StorableMetadata) {
+	// MatchmakingSettings doesn't track version, so nothing to set
+}
+
 func (MatchmakingSettings) StorageIndexes() []StorableIndexMeta {
 	return []StorableIndexMeta{{
 		Name:           ActivePartyGroupIndex,
@@ -289,12 +293,12 @@ func (MatchmakingSettings) StorageIndexes() []StorableIndexMeta {
 }
 
 func LoadMatchmakingSettings(ctx context.Context, nk runtime.NakamaModule, userID string) (settings MatchmakingSettings, err error) {
-	err = StorageRead(ctx, nk, userID, &settings, true)
+	err = StorableRead(ctx, nk, userID, &settings, true)
 	return
 }
 
 func StoreMatchmakingSettings(ctx context.Context, nk runtime.NakamaModule, userID string, settings MatchmakingSettings) error {
-	err := StorageWrite(ctx, nk, userID, settings)
+	err := StorableWrite(ctx, nk, userID, settings)
 	return err
 }
 

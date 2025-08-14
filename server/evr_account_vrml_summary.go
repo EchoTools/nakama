@@ -33,6 +33,10 @@ func (VRMLPlayerSummary) StorageMeta() StorableMetadata {
 	}
 }
 
+func (v VRMLPlayerSummary) SetStorageMeta(meta StorableMetadata) {
+	// VRMLPlayerSummary doesn't track version, so nothing to set
+}
+
 func (VRMLPlayerSummary) StorageIndexes() []StorableIndexMeta {
 
 	// Register the storage index

@@ -664,8 +664,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	}
 
 	loginHistory = NewLoginHistory(targetID)
-	adapter := loginHistory.CreateStorableAdapter()
-	if err := StorableRead(ctx, nk, targetID, adapter, true); err != nil {
+	if err := StorableRead(ctx, nk, targetID, loginHistory, true); err != nil {
 		return fmt.Errorf("error getting device history: %w", err)
 	}
 
@@ -745,7 +744,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 	if w.opts.IncludeVRMLHistoryEmbed {
 		vrmlSummary := &VRMLPlayerSummary{}
 		// Get VRML Summary
-		if err := StorageRead(ctx, nk, targetID, vrmlSummary, false); err != nil {
+		if err := StorableRead(ctx, nk, targetID, vrmlSummary, false); err != nil {
 			if status.Code(err) != codes.NotFound {
 				logger.WithField("error", err).Warn("failed to get VRML summary")
 			}

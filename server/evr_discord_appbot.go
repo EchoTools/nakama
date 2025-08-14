@@ -1958,8 +1958,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			loginHistory := &LoginHistory{}
-			adapter := loginHistory.CreateStorableAdapter()
-			if err := StorableRead(ctx, nk, userIDStr, adapter, false); err != nil {
+			if err := StorableRead(ctx, nk, userIDStr, loginHistory, false); err != nil {
 				return fmt.Errorf("failed to load login history: %w", err)
 			}
 
@@ -2793,7 +2792,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 					outfits[outfitName] = &metadata.LoadoutCosmetics
 
-					if err := StorableWrite(ctx, d.nk, userID, adapter); err != nil {
+					if err := StorableWrite(ctx, d.nk, userID, outfits); err != nil {
 						return fmt.Errorf("failed to write saved outfits: %w", err)
 					}
 
@@ -2820,7 +2819,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 					delete(outfits, outfitName)
 
-					if err := StorableWrite(ctx, d.nk, userID, adapter); err != nil {
+					if err := StorableWrite(ctx, d.nk, userID, outfits); err != nil {
 						return fmt.Errorf("failed to write saved outfits: %w", err)
 					}
 

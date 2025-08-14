@@ -116,8 +116,7 @@ func (p *EvrPipeline) lobbyPingResponse(ctx context.Context, logger *zap.Logger,
 		latencyHistory.Add(ip, int(result.PingMilliseconds), limit, expiry)
 	}
 
-	adapter := latencyHistory.CreateStorableAdapter()
-	if err := StorableWrite(ctx, p.nk, session.UserID().String(), adapter); err != nil {
+	if err := StorableWrite(ctx, p.nk, session.UserID().String(), latencyHistory); err != nil {
 		return status.Errorf(codes.Internal, "failed to write latency history: %v", err)
 	}
 	return nil

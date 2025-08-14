@@ -498,7 +498,7 @@ func (h *LoginHistory) UpdateAlternates(ctx context.Context, logger runtime.Logg
 			alternateHistory.AlternateMatches[h.userID] = currentUserMatches
 
 			// Save the updated alternate history
-			if err := StorableWrite(ctx, nk, alternateUserID, adapter); err != nil {
+			if err := StorableWrite(ctx, nk, alternateUserID, alternateHistory); err != nil {
 				// Log warning but continue - don't fail the entire operation
 				logger.WithFields(map[string]interface{}{
 					"current_user_id":   h.userID,

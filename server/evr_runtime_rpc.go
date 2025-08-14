@@ -717,6 +717,10 @@ func (s ServiceStatusData) StorageMeta() StorableMetadata {
 	}
 }
 
+func (s ServiceStatusData) SetStorageMeta(meta StorableMetadata) {
+	// ServiceStatusData doesn't track version, so nothing to set
+}
+
 func (s ServiceStatusData) String() string {
 	data, _ := json.Marshal(s.Statuses)
 	return string(data)
@@ -737,7 +741,7 @@ func (h *RPCHandler) ServiceStatusRPC(ctx context.Context, logger runtime.Logger
 
 	statusData := &ServiceStatusData{}
 
-	if err := StorageRead(ctx, nk, SystemUserID, statusData, true); err != nil {
+	if err := StorableRead(ctx, nk, SystemUserID, statusData, true); err != nil {
 		return "", err
 	}
 	response := ""

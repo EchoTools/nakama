@@ -170,8 +170,7 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 	case "approve_ip":
 
 		history := &LoginHistory{}
-		adapter := history.CreateStorableAdapter()
-		if err := StorableRead(ctx, nk, userID, adapter, true); err != nil {
+		if err := StorableRead(ctx, nk, userID, history, true); err != nil {
 			return fmt.Errorf("failed to load login history: %w", err)
 		}
 
@@ -199,7 +198,7 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 			if err := history.AuthorizeIPWithCode(strs[0], strs[1]); err != nil {
 
 				// Store the history
-				if err := StorableWrite(ctx, nk, userID, adapter); err != nil {
+				if err := StorableWrite(ctx, nk, userID, history); err != nil {
 					return fmt.Errorf("failed to save login history: %w", err)
 				}
 
@@ -231,7 +230,7 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 			}
 		}
 
-		if err := StorableWrite(ctx, nk, userID, adapter); err != nil {
+		if err := StorableWrite(ctx, nk, userID, history); err != nil {
 			return fmt.Errorf("failed to save login history: %w", err)
 		}
 
@@ -535,8 +534,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 		}
 
 		journal := NewGuildEnforcementJournal(targetUserID)
-		adapter := journal.CreateStorableAdapter()
-		if err := StorableRead(ctx, nk, targetUserID, adapter, false); err != nil && status.Code(err) != codes.NotFound {
+		if err := StorableRead(ctx, nk, targetUserID, journal, false); err != nil && status.Code(err) != codes.NotFound {
 			return fmt.Errorf("failed to read storage: %w", err)
 		}
 
@@ -580,7 +578,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 			}
 		}
 
-		if err := StorableWrite(ctx, nk, targetUserID, adapter); err != nil {
+		if err := StorableWrite(ctx, nk, targetUserID, journal); err != nil {
 			return fmt.Errorf("failed to write storage: %w", err)
 		}
 
