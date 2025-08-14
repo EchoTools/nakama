@@ -162,7 +162,7 @@ func walletToCosmetics(wallet map[string]int64, unlocks map[string]map[string]bo
 }
 
 func UserServerProfileFromParameters(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, params SessionParameters, groupID string, modes []evr.Symbol, dailyWeeklyMode evr.Symbol) (*evr.ServerProfile, error) {
-	return NewUserServerProfile(ctx, logger, db, nk, params.profile, params.xpID, groupID, modes, dailyWeeklyMode, params.DisplayName(groupID))
+	return NewUserServerProfile(ctx, logger, db, nk, params.profile, params.xpID, groupID, modes, dailyWeeklyMode, params.profile.GetGroupIGN(groupID))
 }
 
 func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, evrProfile *EVRProfile, xpID evr.EvrId, groupID string, modes []evr.Symbol, dailyWeeklyMode evr.Symbol, displayName string) (*evr.ServerProfile, error) {
@@ -173,7 +173,7 @@ func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, n
 	}
 
 	cosmetics := make(map[string]map[string]bool)
-	for m, c := range cosmeticDefaults(evrProfile.EnableAllCosmetics) {
+	for m, c := range cosmeticDefaults(evrProfile.Options.EnableAllCosmetics) {
 		cosmetics[m] = make(map[string]bool, len(c))
 		maps.Copy(cosmetics[m], c)
 	}
@@ -188,7 +188,7 @@ func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, n
 
 	var developerFeatures *evr.DeveloperFeatures
 
-	if evrProfile.GoldDisplayNameActive {
+	if evrProfile.Options.GoldDisplayNameActive {
 		developerFeatures = &evr.DeveloperFeatures{}
 	}
 
@@ -207,7 +207,7 @@ func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, n
 		return nil, fmt.Errorf("failed to get user tablet statistics: %w", err)
 	}
 
-	if evrProfile.DisableAFKTimeout {
+	if evrProfile.Options.DisableAFKTimeout {
 		developerFeatures = &evr.DeveloperFeatures{
 			DisableAfkTimeout: true,
 		}

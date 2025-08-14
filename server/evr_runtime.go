@@ -257,10 +257,11 @@ func RegisterIndexes(initializer runtime.Initializer) error {
 
 	// Register storage indexes for any Storables
 	storables := []StorableIndexer{
-		// TODO: Convert these to use new adapter pattern
+		&DisplayNameHistory{},
+		&DeveloperApplications{},
 		&MatchmakingSettings{},
 		&VRMLPlayerSummary{},
-		// TODO: Add all converted types back with new adapter pattern
+		&LoginHistory{},
 	}
 	for _, s := range storables {
 		for _, idx := range s.StorageIndexes() {
