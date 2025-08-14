@@ -82,7 +82,7 @@ func LoginAlternatePatternSearch(ctx context.Context, nk runtime.NakamaModule, l
 			seen[obj.UserId] = struct{}{}
 
 			otherHistory := NewLoginHistory(obj.UserId)
-			if err := StorageRead(ctx, nk, obj.UserId, otherHistory, false); err != nil {
+			if err := StorableRead(ctx, nk, obj.UserId, otherHistory, false); err != nil {
 				return nil, nil, fmt.Errorf("error reading alt history: %w", err)
 			}
 			// Compare the entries.

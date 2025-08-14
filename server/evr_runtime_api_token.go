@@ -17,21 +17,26 @@ const (
 	StorageIndexDeveloperAppTokens = "developerApplicationTokens"
 )
 
-var _ = Storable(&DeveloperApplications{})
-
 type DeveloperApplications struct {
 	Applications []DeveloperApplication `json:"Applications"`
 }
 
-func (DeveloperApplications) StorageMeta() StorageMeta {
-	return StorageMeta{
-		Collection: StorageCollectionDeveloper,
-		Key:        StorageKeyApplications,
+func (d *DeveloperApplications) StorageMeta() StorableMetadata {
+	return StorableMetadata{
+		Collection:      StorageCollectionDeveloper,
+		Key:             StorageKeyApplications,
+		PermissionRead:  0,
+		PermissionWrite: 0,
+		Version:         "*", // No version tracking for DeveloperApplications
 	}
 }
 
-func (DeveloperApplications) StorageIndexes() []StorageIndexMeta {
-	return []StorageIndexMeta{{
+func (d *DeveloperApplications) SetStorageMeta(meta StorableMetadata) {
+	// DeveloperApplications doesn't track version, so nothing to set
+}
+
+func (d *DeveloperApplications) StorageIndexes() []StorableIndexMeta {
+	return []StorableIndexMeta{{
 		Name:       StorageIndexDeveloperAppTokens,
 		Collection: StorageCollectionDeveloper,
 		Key:        StorageKeyApplications,

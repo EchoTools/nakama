@@ -1958,7 +1958,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			loginHistory := &LoginHistory{}
-			if err := StorageRead(ctx, nk, userIDStr, loginHistory, false); err != nil {
+			if err := StorableRead(ctx, nk, userIDStr, loginHistory, false); err != nil {
 				return fmt.Errorf("failed to load login history: %w", err)
 			}
 
@@ -2766,7 +2766,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			outfits := make(Wardrobe)
 
-			if err := StorageRead(ctx, d.nk, userID, outfits, true); err != nil {
+			if err := StorableRead(ctx, d.nk, userID, outfits, true); err != nil {
 				return fmt.Errorf("failed to read saved outfits: %w", err)
 			}
 
@@ -2792,7 +2792,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 					outfits[outfitName] = &metadata.LoadoutCosmetics
 
-					if err := StorageWrite(ctx, d.nk, userID, outfits); err != nil {
+					if err := StorableWrite(ctx, d.nk, userID, outfits); err != nil {
 						return fmt.Errorf("failed to write saved outfits: %w", err)
 					}
 
@@ -2819,7 +2819,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 					delete(outfits, outfitName)
 
-					if err := StorageWrite(ctx, d.nk, userID, outfits); err != nil {
+					if err := StorableWrite(ctx, d.nk, userID, outfits); err != nil {
 						return fmt.Errorf("failed to write saved outfits: %w", err)
 					}
 

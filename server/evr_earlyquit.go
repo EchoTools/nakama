@@ -14,8 +14,6 @@ const (
 	MaxEarlyQuitPenaltyLevel   = 3
 )
 
-var _ = VersionedStorable(&EarlyQuitConfig{})
-
 type EarlyQuitConfig struct {
 	sync.Mutex
 	EarlyQuitPenaltyLevel int32     `json:"early_quit_penalty_level"`
@@ -27,28 +25,28 @@ func NewEarlyQuitConfig() *EarlyQuitConfig {
 	return &EarlyQuitConfig{}
 }
 
-func (s *EarlyQuitConfig) SetStorageVersion(userID string, version string) {
+func (s *EarlyQuitConfig) StorageMeta() StorableMetadata {
 	s.Lock()
 	defer s.Unlock()
-	s.version = version
-}
-
-func (s *EarlyQuitConfig) GetStorageVersion() string {
-	s.Lock()
-	defer s.Unlock()
-	return s.version
-}
-
-func (s *EarlyQuitConfig) StorageMeta() StorageMeta {
-	s.Lock()
-	defer s.Unlock()
-	return StorageMeta{
+	return StorableMetadata{
 		Collection:      StorageCollectionEarlyQuit,
 		Key:             StorageKeyEarlyQuit,
 		PermissionRead:  runtime.STORAGE_PERMISSION_NO_READ,
 		PermissionWrite: runtime.STORAGE_PERMISSION_NO_WRITE,
 		Version:         s.version,
 	}
+}
+
+func (s *EarlyQuitConfig) SetStorageMeta(meta StorableMetadata) {
+	s.Lock()
+	defer s.Unlock()
+	s.version = meta.Version
+}
+
+func (s *EarlyQuitConfig) GetStorageVersion() string {
+	s.Lock()
+	defer s.Unlock()
+	return s.version
 }
 
 func (s *EarlyQuitConfig) IncrementEarlyQuit() {

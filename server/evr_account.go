@@ -27,9 +27,12 @@ type GroupProfile struct {
 	UpdateTime    time.Time    `json:"update_time"`
 }
 
-func (p GroupProfile) StorageMeta() StorageMeta {
-	return StorageMeta{Collection: StorageCollectionGroupProfile, Key: p.GroupID}
+func (p GroupProfile) StorageMeta() StorableMetadata {
+	return StorableMetadata{Collection: StorageCollectionGroupProfile, Key: p.GroupID}
+}
 
+func (p GroupProfile) SetStorageMeta(meta StorableMetadata) {
+	// GroupProfile doesn't track version, so nothing to set
 }
 
 func (p *GroupProfile) UpdateUnlockedItems(updated []evr.Symbol) {

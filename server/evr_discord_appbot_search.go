@@ -250,7 +250,7 @@ func (d *DiscordAppBot) handleSearch(ctx context.Context, logger runtime.Logger,
 				}
 
 				loginHistory := NewLoginHistory(userID)
-				if err := StorageRead(ctx, nk, userID, loginHistory, false); err != nil {
+				if err := StorableRead(ctx, nk, userID, loginHistory, false); err != nil {
 					logger.WithField("error", err).Error("Failed to read login history")
 				}
 				for _, e := range loginHistory.History {

@@ -256,13 +256,11 @@ func createCoreGroups(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 func RegisterIndexes(initializer runtime.Initializer) error {
 
 	// Register storage indexes for any Storables
-	storables := []IndexedStorable{
-		&DisplayNameHistory{},
-		&GuildEnforcementJournal{},
-		&DeveloperApplications{},
+	storables := []StorableIndexer{
+		// TODO: Convert these to use new adapter pattern
 		&MatchmakingSettings{},
 		&VRMLPlayerSummary{},
-		&LoginHistory{},
+		// TODO: Add all converted types back with new adapter pattern
 	}
 	for _, s := range storables {
 		for _, idx := range s.StorageIndexes() {

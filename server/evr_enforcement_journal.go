@@ -20,8 +20,6 @@ const (
 	StorageCollectionEnforcementJournalSuspensionIndex = "EnforcementJournalSuspensionsIndex"
 )
 
-var _ = IndexedVersionedStorable(&GuildEnforcementJournal{})
-
 type GuildEnforcementRecordVoid struct {
 	GroupID         string    `json:"group_id"`
 	RecordID        string    `json:"record_id"`
@@ -47,8 +45,8 @@ func NewGuildEnforcementJournal(userID string) *GuildEnforcementJournal {
 	}
 }
 
-func (s GuildEnforcementJournal) StorageMeta() StorageMeta {
-	return StorageMeta{
+func (s *GuildEnforcementJournal) StorageMeta() StorableMetadata {
+	return StorableMetadata{
 		Collection:      StorageCollectionEnforcementJournal,
 		Key:             StorageKeyEnforcementJournal,
 		PermissionRead:  runtime.STORAGE_PERMISSION_NO_READ,
@@ -56,17 +54,14 @@ func (s GuildEnforcementJournal) StorageMeta() StorageMeta {
 		Version:         s.version,
 	}
 }
+
+func (s *GuildEnforcementJournal) SetStorageMeta(meta StorableMetadata) {
+	s.UserID = meta.UserID
+	s.version = meta.Version
+}
+
 func (s GuildEnforcementJournal) GetStorageVersion() string {
 	return s.version
-}
-
-func (s *GuildEnforcementJournal) SetStorageVersion(userID, version string) {
-	s.UserID = userID
-	s.version = version
-}
-
-func (s GuildEnforcementJournal) StorageIndexes() []StorageIndexMeta {
-	return nil
 }
 
 func GuildEnforcementJournalFromStorageObject(obj *api.StorageObject) (*GuildEnforcementJournal, error) {

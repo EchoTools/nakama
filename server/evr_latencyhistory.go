@@ -14,8 +14,6 @@ const (
 	LatencyHistoryStorageKey        = "store"
 )
 
-var _ = VersionedStorable(&LatencyHistory{})
-
 type LatencyHistoryItem struct {
 	Timestamp time.Time     `json:"timestamp"`
 	RTT       time.Duration `json:"rtt"`
@@ -33,21 +31,20 @@ func NewLatencyHistory() *LatencyHistory {
 	}
 }
 
-func (h *LatencyHistory) StorageMeta() StorageMeta {
-	version := "*"
-	if h != nil && h.version != "" {
-		version = h.version
-	}
-
-	return StorageMeta{
-		Collection: LatencyHistoryStorageCollection,
-		Key:        LatencyHistoryStorageKey,
-		Version:    version,
+func (h *LatencyHistory) StorageMeta() StorableMetadata {
+	return StorableMetadata{
+		Collection:      LatencyHistoryStorageCollection,
+		Key:             LatencyHistoryStorageKey,
+		PermissionRead:  0,
+		PermissionWrite: 0,
+		Version:         h.version,
 	}
 }
 
-func (h *LatencyHistory) SetStorageVersion(userID, version string) {
-	h.version = version
+func (h *LatencyHistory) SetStorageMeta(meta StorableMetadata) {
+	h.Lock()
+	defer h.Unlock()
+	h.version = meta.Version
 }
 
 func (h *LatencyHistory) String() string {

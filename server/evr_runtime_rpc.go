@@ -710,11 +710,15 @@ type ServiceStatusData struct {
 	Statuses []ServiceStatusService `json:"statuses"`
 }
 
-func (s ServiceStatusData) StorageMeta() StorageMeta {
-	return StorageMeta{
+func (s ServiceStatusData) StorageMeta() StorableMetadata {
+	return StorableMetadata{
 		Collection: "Service",
 		Key:        "status",
 	}
+}
+
+func (s ServiceStatusData) SetStorageMeta(meta StorableMetadata) {
+	// ServiceStatusData doesn't track version, so nothing to set
 }
 
 func (s ServiceStatusData) String() string {
@@ -737,7 +741,7 @@ func (h *RPCHandler) ServiceStatusRPC(ctx context.Context, logger runtime.Logger
 
 	statusData := &ServiceStatusData{}
 
-	if err := StorageRead(ctx, nk, SystemUserID, statusData, true); err != nil {
+	if err := StorableRead(ctx, nk, SystemUserID, statusData, true); err != nil {
 		return "", err
 	}
 	response := ""
@@ -1822,7 +1826,7 @@ func ServerScoresRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		}
 
 		latencyHistory := &LatencyHistory{}
-		if err := StorageRead(ctx, nk, userID, latencyHistory, false); err != nil {
+		if err := StorableRead(ctx, nk, userID, latencyHistory, false); err != nil {
 			return "", fmt.Errorf("failed to read latency history: %w", err)
 		}
 
