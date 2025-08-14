@@ -141,7 +141,11 @@ func (h *DisplayNameHistory) compile() {
 		sort.Slice(historocal, func(i, j int) bool {
 			return historocal[i].time.After(historocal[j].time)
 		})
-		historical[gID] = historocal
+	for gID, historical := range historical {
+		sort.Slice(historical, func(i, j int) bool {
+			return historical[i].time.After(historical[j].time)
+		})
+		historical[gID] = historical
 	}
 
 	// Limit the number to 15 most recent per group
