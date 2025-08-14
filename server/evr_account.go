@@ -11,55 +11,12 @@ import (
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
-	"github.com/samber/lo"
 )
 
 const (
 	StorageCollectionGroupProfile = "GroupProfile"
 	StorageKeyUnlockedItems       = "unlocks"
 )
-
-type GroupProfile struct {
-	UserID        string       `json:"user_id"`
-	GroupID       string       `json:"group_id"`
-	UnlockedItems []evr.Symbol `json:"unlocked_items"`
-	NewUnlocks    []evr.Symbol `json:"new_unlocks"`
-	UpdateTime    time.Time    `json:"update_time"`
-}
-
-func (p GroupProfile) StorageMeta() StorableMetadata {
-	return StorableMetadata{Collection: StorageCollectionGroupProfile, Key: p.GroupID}
-}
-
-func (p GroupProfile) SetStorageMeta(meta StorableMetadata) {
-	// GroupProfile doesn't track version, so nothing to set
-}
-
-func (p *GroupProfile) UpdateUnlockedItems(updated []evr.Symbol) {
-	// Update the unlocked items, adding the new ones to newUnlocks
-	added, removed := lo.Difference(updated, p.UnlockedItems)
-
-	if len(added) == 0 && len(removed) == 0 {
-		return
-	}
-
-	p.UnlockedItems = updated
-	p.NewUnlocks = append(p.NewUnlocks, added...)
-
-	// Ensure that all new unlocks are unique, and exist in the updated list
-	updatedNewUnlocks := make([]evr.Symbol, 0, len(p.NewUnlocks))
-
-	seen := make(map[evr.Symbol]struct{}, len(p.NewUnlocks))
-	for _, unlock := range p.NewUnlocks {
-		if _, ok := seen[unlock]; !ok {
-			seen[unlock] = struct{}{}
-			updatedNewUnlocks = append(updatedNewUnlocks, unlock)
-		}
-	}
-
-	p.NewUnlocks = updatedNewUnlocks
-	p.UpdateTime = time.Now()
-}
 
 type GroupInGameName struct {
 	GroupID     string `json:"group_id"`
@@ -74,7 +31,7 @@ type EVRProfile struct {
 	DiscordDebugMessages   bool                       `json:"discord_debug_messages"`    // Enable debug messages in Discord
 	RelayMessagesToDiscord bool                       `json:"relay_messages_to_discord"` // Relay messages to Discord
 	TeamName               string                     `json:"team_name"`                 // The team name
-	Flags                  UserProfileSettings        `json:"flags"`                     // Profile flags
+	Options                ProfileOptions             `json:"options"`                   // Profile flags
 	LoadoutCosmetics       AccountCosmetics           `json:"cosmetic_loadout"`          // The equipped cosmetics
 	CombatLoadout          CombatLoadout              `json:"combat_loadout"`            // The combat loadout
 	MutedPlayers           []evr.EvrId                `json:"muted_players"`             // The muted players
@@ -210,56 +167,36 @@ func (a EVRProfile) DisplayNamesByGroupID() map[string]string {
 	if a.InGameNames == nil {
 		return make(map[string]string)
 	}
-	return a.InGameNames
+	dnMap := make(map[string]string, len(a.InGameNames))
+	for k, v := range a.InGameNames {
+		dnMap[k] = v.DisplayName
+	}
+	return dnMap
 }
-
-func (a EVRProfile) GetGroupIGNOverride(groupID string) string {
-	if a.InGameNameOverrides != nil {
-		if dn, ok := a.InGameNameOverrides[groupID]; ok && dn != "" {
-			return dn
+func (e EVRProfile) GetGroupIGNData(groupID string) GroupInGameName {
+	if e.InGameNames == nil {
+		return GroupInGameName{
+			GroupID:     groupID,
+			DisplayName: e.Username(),
+			IsOverride:  false,
 		}
 	}
-	return a.DisplayNameOverride
+	return e.InGameNames[groupID]
 }
 
-func (a *EVRProfile) SetGroupIGNOverride(groupID, displayName string) (updated bool) {
-	displayName = sanitizeDisplayName(displayName)
-	if groupID == "" {
-		if a.DisplayNameOverride == displayName {
-			return false
-		}
-		a.DisplayNameOverride = displayName
-		return true
+func (e *EVRProfile) SetGroupIGNData(groupID string, groupIGN GroupInGameName) {
+	if e.InGameNames == nil {
+		e.InGameNames = make(map[string]GroupInGameName)
 	}
-	if a.InGameNameOverrides == nil {
-		a.InGameNameOverrides = make(map[string]string)
-	}
-	if a.InGameNameOverrides[groupID] == displayName {
-		return false
-	}
-	a.InGameNameOverrides[groupID] = displayName
-	return true
+	e.InGameNames[groupID] = groupIGN
 }
 
-func (a EVRProfile) GetGroupIGN(groupID string, allowOverride bool) (string, error) {
-	if allowOverride {
-		if a.DisplayNameOverride != "" {
-			return a.DisplayNameOverride, nil
-		} else if a.InGameNameOverrides != nil && a.InGameNameOverrides[groupID] != "" {
-			return a.InGameNameOverrides[groupID], nil
-		}
-	}
-	// If the display name override is set, use that
-	if dn := a.GetDisplayNameOverride(groupID); dn != "" {
-		return dn, nil
-	}
-
+func (a EVRProfile) GetGroupIGN(groupID string) string {
 	if a.InGameNames != nil {
-
-		if dn, ok := a.InGameNames[groupID]; ok && dn != "" {
+		if dn := a.InGameNames[groupID].DisplayName; dn != "" {
 			// Use the group display name, if it exists
 			return sanitizeDisplayName(dn)
-		} else if dn, ok := a.InGameNames[a.ActiveGroupID]; ok && dn != "" {
+		} else if dn := a.InGameNames[a.ActiveGroupID].DisplayName; dn != "" {
 			// Otherwise, usethe active group display name
 			return sanitizeDisplayName(dn)
 		} else {
@@ -281,7 +218,7 @@ func (a *EVRProfile) GetGroupDisplayName(groupID string) (string, bool) {
 		return "", false
 	}
 	dn, found := a.InGameNames[groupID]
-	return dn, found
+	return dn.DisplayName, found
 }
 
 func (a *EVRProfile) SetGroupDisplayName(groupID, displayName string) (updated bool) {
@@ -290,12 +227,17 @@ func (a *EVRProfile) SetGroupDisplayName(groupID, displayName string) (updated b
 		return false
 	}
 	if a.InGameNames == nil {
-		a.InGameNames = make(map[string]string)
+		a.InGameNames = make(map[string]GroupInGameName)
 	}
-	if a.InGameNames[groupID] == displayName {
+	current, exists := a.InGameNames[groupID]
+	if exists && current.DisplayName == displayName {
 		return false
 	}
-	a.InGameNames[groupID] = displayName
+	a.InGameNames[groupID] = GroupInGameName{
+		GroupID:     groupID,
+		DisplayName: displayName,
+		IsOverride:  current.IsOverride,
+	}
 	return true
 }
 

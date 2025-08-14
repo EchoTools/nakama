@@ -46,7 +46,7 @@ func (h *DisplayNameHistory) StorageMeta() StorableMetadata {
 		Key:             DisplayNameHistoryKey,
 		PermissionRead:  0,
 		PermissionWrite: 0,
-		Version:         "*", // No version tracking for DisplayNameHistory
+		Version:         "", // No version tracking for DisplayNameHistory
 	}
 }
 
@@ -221,7 +221,7 @@ func (h *DisplayNameHistory) ReplaceInGameNames(names []string) {
 
 func DisplayNameHistoryLoad(ctx context.Context, nk runtime.NakamaModule, userID string) (*DisplayNameHistory, error) {
 	history := NewDisplayNameHistory()
-	
+
 	if err := StorableRead(ctx, nk, userID, history, false); err != nil {
 		if status.Code(err) == codes.NotFound {
 			return history, nil

@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"math/rand"
 	"net"
 	"slices"
@@ -45,16 +44,6 @@ func (h *LatencyHistory) SetStorageMeta(meta StorableMetadata) {
 	h.Lock()
 	defer h.Unlock()
 	h.version = meta.Version
-}
-
-func (h *LatencyHistory) String() string {
-	h.RLock()
-	defer h.RUnlock()
-	data, err := json.Marshal(h)
-	if err != nil {
-		return ""
-	}
-	return string(data)
 }
 
 // Add adds a new RTT to the history for the given external IP

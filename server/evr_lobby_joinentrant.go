@@ -205,7 +205,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 
 	joinRejected := func(metricKey, reason, auditMessage string) error {
 		metricsTags["error"] = metricKey
-		auditMessage = fmt.Sprintf("Rejected lobby join by %s <@%s>[%s] to `%s`: %s", EscapeDiscordMarkdown(lobbyparams.profile.GetGroupIGN), lobbyParams.DiscordID, session.Username(), lobbyParams.Mode, auditMessage)
+		auditMessage = fmt.Sprintf("Rejected lobby join by %s <@%s>[%s] to `%s`: %s", EscapeDiscordMarkdown(lobbyParams.DisplayName), lobbyParams.DiscordID, session.Username(), lobbyParams.Mode, auditMessage)
 		if _, err := p.appBot.LogAuditMessage(ctx, groupID, auditMessage, true); err != nil {
 			p.logger.Warn("Failed to send audit message", zap.String("channel_id", groupID), zap.Error(err))
 		}
@@ -413,6 +413,10 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 	}
 
 	displayName := params.profile.GetGroupIGN(groupID)
+	if err != nil {
+		return fmt.Errorf("failed to get display name: %w", err)
+	}
+
 	p.nk.Event(ctx, &api.Event{
 		Name: EventLobbySessionAuthorized,
 		Properties: map[string]string{

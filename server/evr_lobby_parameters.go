@@ -434,7 +434,7 @@ func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk r
 		MatchmakingTimeout:           time.Duration(globalSettings.MatchmakingTimeoutSecs) * time.Second,
 		FailsafeTimeout:              time.Duration(failsafeTimeoutSecs) * time.Second,
 		FallbackTimeout:              time.Duration(globalSettings.FallbackTimeoutSecs) * time.Second,
-		DisplayName:                  sessionparams.profile.GetGroupIGN(groupIDStr),
+		DisplayName:                  sessionParams.profile.GetGroupIGN(groupIDStr),
 	}, nil
 }
 

@@ -28,7 +28,7 @@ func TestDisplayNameCurrentValueFix(t *testing.T) {
 	// Create a profile
 	profile := &EVRProfile{
 		account:     &api.Account{User: &api.User{Username: username}},
-		InGameNames: make(map[string]string),
+		InGameNames: make(map[string]GroupInGameName),
 	}
 
 	// Simulate the scenario where a display name override is applied
@@ -101,7 +101,7 @@ func TestDisplayNameHistoryConsistency(t *testing.T) {
 
 	profile := &EVRProfile{
 		account:     &api.Account{User: &api.User{Username: username}},
-		InGameNames: make(map[string]string),
+		InGameNames: make(map[string]GroupInGameName),
 	}
 
 	// Update sequence: 1 -> 2 -> 3

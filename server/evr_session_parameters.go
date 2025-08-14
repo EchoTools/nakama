@@ -42,7 +42,6 @@ type SessionParameters struct {
 
 	profile                      *EVRProfile                      // The account
 	matchmakingSettings          *MatchmakingSettings             // The matchmaking settings
-	displayNameHistory           *DisplayNameHistory              // The display name history
 	guildGroups                  map[string]*GuildGroup           // map[string]*GuildGroup
 	earlyQuitConfig              *atomic.Pointer[EarlyQuitConfig] // The early quit config
 	isGoldNameTag                *atomic.Bool                     // If this user should have a gold name tag
@@ -67,7 +66,7 @@ func (s SessionParameters) DisplayName(groupID string) string {
 	if s.userDisplayNameOverride != "" {
 		return s.userDisplayNameOverride
 	}
-	return s.profile.GetGroupDisplayNameOrDefault(groupID)
+	return s.profile.GetGroupIGN(groupID)
 }
 
 func (s *SessionParameters) IsIGPOpen() bool {
