@@ -34,6 +34,8 @@ COPY go.mod go.sum ./
 COPY vendor/ ./vendor/
 # Copy the rest of the source code
 COPY . .
+RUN go mod tidy && \
+    go mod vendor
 RUN go build -o /go/build-out/nakama -trimpath -mod=vendor -gcflags "-trimpath $PWD" -asmflags "-trimpath $PWD" -ldflags "-s -w -X main.version=$VERSION"
 
 FROM debian:bookworm-slim
