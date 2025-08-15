@@ -38,8 +38,8 @@ type DiscordSessionService interface {
 // CommandData represents the essential data from a Discord interaction
 type CommandData struct {
 	CommandName string
-	UserID      string  // Discord user ID
-	Username    string  // Discord username
+	UserID      string // Discord user ID
+	Username    string // Discord username
 	Member      *MemberData
 	Guild       *GuildData
 	Options     []CommandDataOption
@@ -54,7 +54,7 @@ type MemberData struct {
 	Permissions int64
 }
 
-// GuildData represents Discord guild information  
+// GuildData represents Discord guild information
 type GuildData struct {
 	ID   string
 	Name string
@@ -100,14 +100,14 @@ type ComponentData struct {
 
 // CommandContext contains all the services and data needed for command processing
 type CommandContext struct {
-	Ctx      context.Context
-	Logger   runtime.Logger
-	Nakama   NakamaService
-	Database DatabaseService
-	Cache    DiscordCache
+	Ctx         context.Context
+	Logger      runtime.Logger
+	Nakama      NakamaService
+	Database    DatabaseService
+	Cache       DiscordCache
 	GuildGroups GuildGroupService
-	Discord  DiscordSessionService
-	Data     CommandData
+	Discord     DiscordSessionService
+	Data        CommandData
 }
 
 // CommandProcessor defines the interface for processing commands

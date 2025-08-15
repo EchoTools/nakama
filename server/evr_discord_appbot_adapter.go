@@ -32,18 +32,18 @@ func NewDiscordAdapter(session *discordgo.Session, cache *DiscordIntegrator, gui
 // ConvertToCommandData converts DiscordGo interaction to our CommandData DTO
 func (a *DiscordAdapter) ConvertToCommandData(i *discordgo.InteractionCreate) (*CommandData, error) {
 	user, member := getScopedUserMember(i)
-	
+
 	if user == nil {
 		return nil, fmt.Errorf("user is nil")
 	}
-	
+
 	data := &CommandData{
 		CommandName: i.ApplicationCommandData().Name,
 		UserID:      user.ID,
 		Username:    user.Username,
 		Options:     convertOptions(i.ApplicationCommandData().Options),
 	}
-	
+
 	// Convert member data if available
 	if member != nil {
 		data.Member = &MemberData{
@@ -54,7 +54,7 @@ func (a *DiscordAdapter) ConvertToCommandData(i *discordgo.InteractionCreate) (*
 			Permissions: int64(member.Permissions),
 		}
 	}
-	
+
 	// Convert guild data if available
 	if i.GuildID != "" {
 		data.Guild = &GuildData{
@@ -62,7 +62,7 @@ func (a *DiscordAdapter) ConvertToCommandData(i *discordgo.InteractionCreate) (*
 			// Name can be filled in if needed
 		}
 	}
-	
+
 	return data, nil
 }
 
@@ -71,12 +71,12 @@ func (a *DiscordAdapter) ConvertToDiscordResponse(response *CommandResponse) *di
 	responseData := &discordgo.InteractionResponseData{
 		Content: response.Content,
 	}
-	
+
 	// Set ephemeral flag
 	if response.Ephemeral {
 		responseData.Flags = discordgo.MessageFlagsEphemeral
 	}
-	
+
 	// Convert embeds
 	if len(response.Embeds) > 0 {
 		responseData.Embeds = make([]*discordgo.MessageEmbed, len(response.Embeds))
@@ -84,12 +84,12 @@ func (a *DiscordAdapter) ConvertToDiscordResponse(response *CommandResponse) *di
 			responseData.Embeds[i] = convertEmbed(embed)
 		}
 	}
-	
+
 	// Convert components (basic support for now)
 	if len(response.Components) > 0 {
 		responseData.Components = convertComponents(response.Components)
 	}
-	
+
 	return &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: responseData,
@@ -115,7 +115,7 @@ func convertOptions(options []*discordgo.ApplicationCommandInteractionDataOption
 	if options == nil {
 		return nil
 	}
-	
+
 	result := make([]CommandDataOption, len(options))
 	for i, opt := range options {
 		result[i] = CommandDataOption{
@@ -134,7 +134,7 @@ func convertEmbed(embed *EmbedData) *discordgo.MessageEmbed {
 		Description: embed.Description,
 		Color:       embed.Color,
 	}
-	
+
 	if len(embed.Fields) > 0 {
 		result.Fields = make([]*discordgo.MessageEmbedField, len(embed.Fields))
 		for i, field := range embed.Fields {
@@ -145,7 +145,7 @@ func convertEmbed(embed *EmbedData) *discordgo.MessageEmbed {
 			}
 		}
 	}
-	
+
 	return result
 }
 

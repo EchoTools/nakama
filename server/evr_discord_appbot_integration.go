@@ -29,20 +29,20 @@ func (h *ModernDiscordHandler) HandleInteractionApplicationCommandModern(ctx con
 		logger.Error("Failed to convert command data", "error", err)
 		return simpleInteractionResponse(s, i, "Failed to process command.")
 	}
-	
+
 	// Create command context
 	commandCtx := h.adapter.CreateCommandContext(ctx, logger, commandData)
-	
+
 	// Process the command
 	response, err := h.processor.ProcessCommand(commandCtx)
 	if err != nil {
 		logger.Error("Failed to process command", "error", err)
 		return simpleInteractionResponse(s, i, "Command processing failed.")
 	}
-	
+
 	// Convert response back to Discord format
 	discordResponse := h.adapter.ConvertToDiscordResponse(response)
-	
+
 	// Send the response
 	return s.InteractionRespond(i.Interaction, discordResponse)
 }

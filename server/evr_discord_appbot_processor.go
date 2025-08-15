@@ -16,7 +16,7 @@ func NewModernCommandProcessor() *ModernCommandProcessor {
 	processor := &ModernCommandProcessor{
 		handlers: make(map[string]CommandHandler),
 	}
-	
+
 	// Register command handlers
 	processor.registerHandlers()
 	return processor
@@ -28,12 +28,12 @@ func (p *ModernCommandProcessor) ProcessCommand(ctx CommandContext) (*CommandRes
 	if err := p.validateCommandContext(ctx); err != nil {
 		return nil, fmt.Errorf("invalid command context: %w", err)
 	}
-	
+
 	handler, exists := p.handlers[ctx.Data.CommandName]
 	if !exists {
 		return nil, fmt.Errorf("command handler not found for: %s", ctx.Data.CommandName)
 	}
-	
+
 	return handler(ctx)
 }
 
@@ -66,7 +66,7 @@ func (p *ModernCommandProcessor) validateCommandContext(ctx CommandContext) erro
 	if ctx.Data.UserID == "" {
 		return fmt.Errorf("user ID is empty")
 	}
-	
+
 	return nil
 }
 
@@ -87,7 +87,7 @@ func (p *ModernCommandProcessor) handleThrowSettings(ctx CommandContext) (*Comma
 			Ephemeral: true,
 		}, nil
 	}
-	
+
 	// Load user profile
 	metadata, err := EVRProfileLoad(ctx.Ctx, ctx.Nakama, nakamaUserID)
 	if err != nil {
@@ -97,7 +97,7 @@ func (p *ModernCommandProcessor) handleThrowSettings(ctx CommandContext) (*Comma
 			Ephemeral: true,
 		}, nil
 	}
-	
+
 	// Check for nil GamePauseSettings with detailed error
 	if metadata == nil {
 		ctx.Logger.Error("User metadata is nil")
@@ -106,7 +106,7 @@ func (p *ModernCommandProcessor) handleThrowSettings(ctx CommandContext) (*Comma
 			Ephemeral: true,
 		}, nil
 	}
-	
+
 	if metadata.GamePauseSettings == nil {
 		ctx.Logger.Warn("GamePauseSettings is nil for user", "userID", nakamaUserID)
 		return &CommandResponse{
@@ -114,7 +114,7 @@ func (p *ModernCommandProcessor) handleThrowSettings(ctx CommandContext) (*Comma
 			Ephemeral: true,
 		}, nil
 	}
-	
+
 	// Build the response embed with safe field access
 	embed := &EmbedData{
 		Title: "Game Settings",
@@ -126,7 +126,7 @@ func (p *ModernCommandProcessor) handleThrowSettings(ctx CommandContext) (*Comma
 				Inline: true,
 			},
 			{
-				Name:   "Release Distance", 
+				Name:   "Release Distance",
 				Value:  strconv.FormatFloat(metadata.GamePauseSettings.ReleaseDistance, 'f', -1, 64),
 				Inline: true,
 			},
@@ -137,7 +137,7 @@ func (p *ModernCommandProcessor) handleThrowSettings(ctx CommandContext) (*Comma
 			},
 		},
 	}
-	
+
 	return &CommandResponse{
 		Embeds:    []*EmbedData{embed},
 		Ephemeral: true,
@@ -154,7 +154,7 @@ func (p *ModernCommandProcessor) handleWhoami(ctx CommandContext) (*CommandRespo
 			Ephemeral: true,
 		}, nil
 	}
-	
+
 	// Get user account info
 	account, err := ctx.Nakama.AccountGetId(ctx.Ctx, nakamaUserID)
 	if err != nil {
@@ -164,25 +164,25 @@ func (p *ModernCommandProcessor) handleWhoami(ctx CommandContext) (*CommandRespo
 			Ephemeral: true,
 		}, nil
 	}
-	
+
 	if account == nil {
 		return &CommandResponse{
 			Content:   "Account not found.",
 			Ephemeral: true,
 		}, nil
 	}
-	
+
 	// Build response with account information
 	username := account.GetUser().GetUsername()
 	displayName := account.GetUser().GetDisplayName()
-	
+
 	content := fmt.Sprintf("**Discord User:** %s\n**Nakama User ID:** %s\n**Username:** %s",
 		ctx.Data.Username, nakamaUserID, username)
-	
+
 	if displayName != "" && displayName != username {
 		content += fmt.Sprintf("\n**Display Name:** %s", displayName)
 	}
-	
+
 	return &CommandResponse{
 		Content:   content,
 		Ephemeral: true,
