@@ -1886,6 +1886,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return fmt.Errorf("failed to get account metadata: %w", err)
 			}
 
+			if metadata.GamePauseSettings == nil {
+				return fmt.Errorf("game settings nil. That would cause crash")
+			}
+
 			embed := &discordgo.MessageEmbed{
 				Title: "Game Settings",
 				Color: 5814783, // A hexadecimal color code
