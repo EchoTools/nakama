@@ -344,7 +344,7 @@ func findMessagesAndEnumerations(reg *descriptor.Registry, message *descriptor.M
 	m[namespace] = msgFields
 }
 
-//Extract swagger options from file
+// Extract swagger options from file
 func extractSwaggerOptionFromFileDescriptor(file *pbdescriptor.FileDescriptorProto) (*swagger_options.Swagger, error) {
 	if file.Options == nil {
 		return nil, nil
@@ -363,7 +363,7 @@ func extractSwaggerOptionFromFileDescriptor(file *pbdescriptor.FileDescriptorPro
 	return opts, nil
 }
 
-//Extract swagger options from method
+// Extract swagger options from method
 func extractOperationOptionFromMethodDescriptor(meth *pbdescriptor.MethodDescriptorProto) (*swagger_options.Operation, error) {
 	if meth.Options == nil {
 		return nil, nil
