@@ -1887,7 +1887,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			if metadata.GamePauseSettings == nil {
-				return fmt.Errorf("game settings nil. That would cause crash")
+				return fmt.Errorf("GamePauseSettings is nil")
 			}
 
 			embed := &discordgo.MessageEmbed{
