@@ -40,6 +40,17 @@ func NewDiscordLinkedRolesHandler(ctx context.Context, logger runtime.Logger, db
 
 // ServeHTTP handles the Discord Linked Roles metadata request
 func (h *DiscordLinkedRolesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Set CORS headers for all requests
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+
+	// Handle OPTIONS preflight request
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	// Only allow GET requests
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -142,7 +153,7 @@ func (h *DiscordLinkedRolesHandler) findUserIDByDiscordID(discordID string) (str
 		OR metadata LIKE '%"discord_id":"' || $1 || '"%'
 		LIMIT 1
 	`
-	
+
 	var userID string
 	err := h.db.QueryRow(query, discordID).Scan(&userID)
 	if err != nil {
@@ -192,9 +203,6 @@ func (h *DiscordLinkedRolesHandler) getUserMetadata(userID string) (DiscordLinke
 // sendJSONResponse sends a JSON response
 func (h *DiscordLinkedRolesHandler) sendJSONResponse(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET")
-	w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
 
 	if err := json.NewEncoder(w).Encode(data); err != nil {
 		h.logger.Error("Failed to encode JSON response", zap.Error(err))
@@ -205,7 +213,7 @@ func (h *DiscordLinkedRolesHandler) sendJSONResponse(w http.ResponseWriter, data
 // RegisterDiscordLinkedRolesHandler registers the Discord Linked Roles HTTP handler
 func RegisterDiscordLinkedRolesHandler(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) error {
 	handler := NewDiscordLinkedRolesHandler(ctx, logger, db, nk)
-	
+
 	// Register the handler for the Discord Linked Roles endpoint
 	return initializer.RegisterHttp("/discord/linked-roles/metadata", handler.ServeHTTP, http.MethodGet, http.MethodOptions)
 }

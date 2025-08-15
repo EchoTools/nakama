@@ -29,11 +29,11 @@ func TestDiscordLinkedRolesHandler_ServeHTTP(t *testing.T) {
 	consoleLogger := NewJSONLogger(os.Stdout, zapcore.ErrorLevel, JSONFormat)
 	logger := NewRuntimeGoLogger(consoleLogger)
 	ctx := context.Background()
-	
+
 	// Create a mock database and nakama module
 	var db *sql.DB // nil for this test
 	nk := &mockNakamaModule{}
-	
+
 	handler := NewDiscordLinkedRolesHandler(ctx, logger, db, nk)
 
 	tests := []struct {
@@ -43,6 +43,13 @@ func TestDiscordLinkedRolesHandler_ServeHTTP(t *testing.T) {
 		expectedStatus int
 		expectedBody   string
 	}{
+		{
+			name:           "OPTIONS preflight request",
+			method:         "OPTIONS",
+			authHeader:     "",
+			expectedStatus: http.StatusOK,
+			expectedBody:   "",
+		},
 		{
 			name:           "Method not allowed",
 			method:         "POST",
@@ -79,7 +86,7 @@ func TestDiscordLinkedRolesHandler_ServeHTTP(t *testing.T) {
 			if tt.authHeader != "" {
 				req.Header.Set("Authorization", tt.authHeader)
 			}
-			
+
 			rr := httptest.NewRecorder()
 			handler.ServeHTTP(rr, req)
 
@@ -115,19 +122,20 @@ func TestDiscordLinkedRolesHandler_CORS(t *testing.T) {
 	consoleLogger := NewJSONLogger(os.Stdout, zapcore.ErrorLevel, JSONFormat)
 	logger := NewRuntimeGoLogger(consoleLogger)
 	ctx := context.Background()
-	
+
 	var db *sql.DB
 	nk := &mockNakamaModule{}
-	
+
 	handler := NewDiscordLinkedRolesHandler(ctx, logger, db, nk)
 
 	// Test OPTIONS request for CORS preflight
 	req := httptest.NewRequest("OPTIONS", "/discord/linked-roles/metadata", nil)
 	rr := httptest.NewRecorder()
-	
-	// Since our handler doesn't handle OPTIONS, it should return method not allowed
-	// but the real implementation would handle CORS in the main server
+
 	handler.ServeHTTP(rr, req)
-	
-	assert.Equal(t, http.StatusMethodNotAllowed, rr.Code)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Equal(t, "*", rr.Header().Get("Access-Control-Allow-Origin"))
+	assert.Equal(t, "GET, OPTIONS", rr.Header().Get("Access-Control-Allow-Methods"))
+	assert.Equal(t, "Authorization, Content-Type", rr.Header().Get("Access-Control-Allow-Headers"))
 }
