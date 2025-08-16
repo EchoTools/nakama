@@ -31,7 +31,10 @@ type EVRProfile struct {
 	DiscordDebugMessages   bool                       `json:"discord_debug_messages"`    // Enable debug messages in Discord
 	RelayMessagesToDiscord bool                       `json:"relay_messages_to_discord"` // Relay messages to Discord
 	TeamName               string                     `json:"team_name"`                 // The team name
-	Options                ProfileOptions             `json:"options"`                   // Profile flags
+	DisableAFKTimeout      bool                       `json:"disable_afk_timeout"`       // Disable AFK detection
+	IgnoreBrokenCosmetics  bool                       `json:"ignore_broken_cosmetics"`   // Allow broken cosmetics
+	EnableAllCosmetics     bool                       `json:"enable_all_cosmetics"`      // Enable all cosmetics
+	GoldDisplayNameActive  bool                       `json:"gold_display_name"`         // The gold name displa
 	LoadoutCosmetics       AccountCosmetics           `json:"cosmetic_loadout"`          // The equipped cosmetics
 	CombatLoadout          CombatLoadout              `json:"combat_loadout"`            // The combat loadout
 	MutedPlayers           []evr.EvrId                `json:"muted_players"`             // The muted players
