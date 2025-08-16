@@ -120,7 +120,7 @@ func (h *DiscordLinkedRolesHandler) getDiscordUserIDFromToken(accessToken string
 	}
 
 	req.Header.Set("Authorization", "Bearer "+accessToken)
-	req.Header.Set("User-Agent", "EchoVR-Nakama-Bot/1.0")
+	req.Header.Set("User-Agent", "EchoTools-Nakama-Bot/1.0")
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
