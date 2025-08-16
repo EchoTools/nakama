@@ -138,44 +138,80 @@ func (sm *SessionsChannelManager) saveTrackedMessages() {
 
 // PostSessionMessage posts a new session message to Discord
 func (sm *SessionsChannelManager) PostSessionMessage(label *MatchLabel, guildGroup *GuildGroup) error {
-	if guildGroup.SessionsChannelID == "" {
-		// No sessions channel configured for this guild
-		return nil
-	}
-	
 	// Create the embed and components
 	embed, components := sm.createSessionEmbed(label, guildGroup)
 	
-	// Send the message
-	message, err := sm.dg.ChannelMessageSendComplex(guildGroup.SessionsChannelID, &discordgo.MessageSend{
-		Embeds:     embed,
-		Components: components,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to send session message: %w", err)
+	var postedMessages []string
+	
+	// Post to guild sessions channel if configured
+	if guildGroup.SessionsChannelID != "" {
+		message, err := sm.dg.ChannelMessageSendComplex(guildGroup.SessionsChannelID, &discordgo.MessageSend{
+			Embeds:     embed,
+			Components: components,
+		})
+		if err != nil {
+			sm.logger.Error("Failed to send session message to guild channel", 
+				zap.String("channel_id", guildGroup.SessionsChannelID),
+				zap.Error(err))
+		} else {
+			// Track the message for updates
+			tracker := &SessionMessageTracker{
+				SessionID:   label.ID.String(),
+				MessageID:   message.ID,
+				ChannelID:   guildGroup.SessionsChannelID,
+				GuildID:     guildGroup.GuildID,
+				LastUpdated: time.Now(),
+				CreatedAt:   time.Now(),
+			}
+			
+			sm.Lock()
+			sm.activeMessages[label.ID.String()] = tracker
+			sm.Unlock()
+			
+			postedMessages = append(postedMessages, fmt.Sprintf("guild:%s", message.ID))
+		}
 	}
 	
-	// Track the message for updates
-	tracker := &SessionMessageTracker{
-		SessionID:   label.ID.String(),
-		MessageID:   message.ID,
-		ChannelID:   guildGroup.SessionsChannelID,
-		GuildID:     guildGroup.GuildID,
-		LastUpdated: time.Now(),
-		CreatedAt:   time.Now(),
+	// Post to service sessions channel if configured
+	if serviceChannelID := ServiceSettings().ServiceSessionsChannelID; serviceChannelID != "" {
+		message, err := sm.dg.ChannelMessageSendComplex(serviceChannelID, &discordgo.MessageSend{
+			Embeds:     embed,
+			Components: components,
+		})
+		if err != nil {
+			sm.logger.Error("Failed to send session message to service channel", 
+				zap.String("channel_id", serviceChannelID),
+				zap.Error(err))
+		} else {
+			// Track the service message separately (use different key)
+			tracker := &SessionMessageTracker{
+				SessionID:   label.ID.String(),
+				MessageID:   message.ID,
+				ChannelID:   serviceChannelID,
+				GuildID:     "service",
+				LastUpdated: time.Now(),
+				CreatedAt:   time.Now(),
+			}
+			
+			sm.Lock()
+			sm.activeMessages[label.ID.String()+"_service"] = tracker
+			sm.Unlock()
+			
+			postedMessages = append(postedMessages, fmt.Sprintf("service:%s", message.ID))
+		}
 	}
 	
-	sm.Lock()
-	sm.activeMessages[label.ID.String()] = tracker
-	sm.Unlock()
+	if len(postedMessages) == 0 {
+		// No sessions channels configured
+		return nil
+	}
 	
 	// Save to storage
 	sm.saveTrackedMessages()
 	
-	sm.logger.Info("Posted session message", 
+	sm.logger.Info("Posted session messages", 
 		zap.String("session_id", label.ID.String()),
-		zap.String("message_id", message.ID),
-		zap.String("channel_id", guildGroup.SessionsChannelID))
+		zap.Strings("messages", postedMessages))
 	
 	return nil
 }
@@ -450,12 +486,26 @@ func (sm *SessionsChannelManager) RemoveSessionMessage(sessionID string) {
 	sm.Lock()
 	defer sm.Unlock()
 	
+	var removedTrackers []string
+	
+	// Remove the primary guild message
 	if tracker, exists := sm.activeMessages[sessionID]; exists {
 		delete(sm.activeMessages, sessionID)
+		removedTrackers = append(removedTrackers, fmt.Sprintf("guild:%s", tracker.MessageID))
+	}
+	
+	// Remove the service message if it exists
+	serviceKey := sessionID + "_service"
+	if tracker, exists := sm.activeMessages[serviceKey]; exists {
+		delete(sm.activeMessages, serviceKey)
+		removedTrackers = append(removedTrackers, fmt.Sprintf("service:%s", tracker.MessageID))
+	}
+	
+	if len(removedTrackers) > 0 {
 		sm.saveTrackedMessages()
 		
-		sm.logger.Info("Removed session message from tracking",
+		sm.logger.Info("Removed session messages from tracking",
 			zap.String("session_id", sessionID),
-			zap.String("message_id", tracker.MessageID))
+			zap.Strings("removed", removedTrackers))
 	}
 }
