@@ -175,73 +175,87 @@ a {
 }
 
 .btn-primary.dropdown-toggle {
-  background-color: lighten($brand-purple, 5%);
+  background-color: var(--accent-color-light);
 
   &[aria-expanded="true"] {
-    background-color: $brand-purple;
-    border-color: $brand-purple;
+    background-color: var(--accent-color);
+    border-color: var(--accent-color);
   }
 
   &:active {
-    background-color: $brand-purple !important;
-    border-color: $brand-purple;
+    background-color: var(--accent-color) !important;
+    border-color: var(--accent-color);
   }
 
   &:focus {
-    background-color: lighten($brand-pink, 5%)!important;
-    border-color: $brand-pink;
+    background-color: var(--accent-color-light) !important;
+    border-color: var(--accent-color-light);
   }
 }
 
 .btn-primary {
-  background-color: $brand-purple;
-  border-color: $brand-purple;
+  background-color: var(--accent-color);
+  border-color: var(--accent-color);
+  color: var(--text-inverse);
 
   &:hover {
-    background-color: lighten($brand-purple, 5%);
-    border-color: $brand-purple;
+    background-color: var(--accent-color-light);
+    border-color: var(--accent-color);
+    color: var(--text-inverse);
   }
 
   &:active {
-    background-color: $brand-purple !important;
-    border-color: $brand-purple;
+    background-color: var(--accent-color) !important;
+    border-color: var(--accent-color);
+    color: var(--text-inverse);
   }
 
   &:focus {
-    background-color: lighten($brand-pink, 5%)!important;
-    border-color: $brand-pink;
+    background-color: var(--accent-color-light) !important;
+    border-color: var(--accent-color-light);
+    color: var(--text-inverse);
   }
 
   &:disabled {
-    border-color: $brand-purple;
+    border-color: var(--accent-color);
+    background-color: var(--accent-color);
+    opacity: 0.6;
+    color: var(--text-inverse);
   }
 }
 
 .btn-outline-primary {
-  border: solid 2px $brand-purple;
-  color: $brand-purple;
+  border: solid 2px var(--accent-color);
+  color: var(--accent-color);
+  background-color: transparent;
   font-family: 'Montserrat', sans-serif;
   text-transform: uppercase;
   letter-spacing: 0.1em;
   font-size: 13px;
 
   &:hover {
-    background-color: lighten($brand-purple, 5%);
-    border-color: $brand-purple;
+    background-color: var(--accent-color-light);
+    border-color: var(--accent-color);
+    color: var(--text-inverse);
   }
 
   &:active {
-    background-color: lighten($brand-pink, 5%)!important;
-    border-color: $brand-pink!important;
+    background-color: var(--accent-color-light) !important;
+    border-color: var(--accent-color-light) !important;
+    color: var(--text-inverse);
   }
 
   &:disabled {
-    border-color: $brand-purple;
+    border-color: var(--accent-color);
+    color: var(--accent-color);
+    opacity: 0.6;
   }
 }
 
 .btn-outline-secondary {
-  border: solid 1px darken($brand-grey, 25%);
+  border: solid 1px var(--border-color);
+  color: var(--text-secondary);
+  background-color: transparent;
   font-size: 10px;
   font-family: 'Montserrat', sans-serif;
   text-transform: uppercase;
@@ -253,51 +267,60 @@ a {
   }*/
 
   &:hover {
-    background-color: darken($brand-grey, 5%);
-    color: $brand-purple;
+    background-color: var(--bg-tertiary);
+    color: var(--accent-color);
+    border-color: var(--border-color);
   }
 
   &:active {
-    background-color: darken($brand-purple, 2%)!important;
+    background-color: var(--accent-color) !important;
+    color: var(--text-inverse);
   }
 }
 
 .btn-outline-dark {
-  border-color: darken($brand-grey, 18%);
+  border-color: var(--border-color);
+  color: var(--text-secondary);
+  background-color: transparent;
   font-size: 10px;
-
 
   img {
     margin-left: -0.5em;
   }
 
   &:hover:not(.disabled) {
-    background-color: $brand-purple;
-    border-color: darken($brand-grey, 8%);
+    background-color: var(--accent-color);
+    border-color: var(--accent-color);
+    color: var(--text-inverse);
   }
 
   &:active {
-    background-color: darken($brand-purple, 2%);
+    background-color: var(--accent-color);
+    color: var(--text-inverse);
   }
 }
 
 .btn-danger {
-  background-color: lighten($brand-red, 20%);
-  color: $brand-red;
-  border-color: $brand-red;
+  background-color: var(--bg-primary);
+  color: var(--danger-color);
+  border-color: var(--danger-color);
 
   &:hover {
-    background-color: $brand-red!important;
-    color: #fff;
+    background-color: var(--danger-color) !important;
+    color: var(--text-inverse);
+    border-color: var(--danger-color);
   }
 }
 
 .btn-danger-icon {
-  background-color: #fff;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  border-color: var(--border-color);
 
   &:hover {
-    color: $brand-red;
-    background-color: lighten($brand-red, 20%)!important;
+    color: var(--danger-color);
+    background-color: var(--bg-secondary) !important;
+    border-color: var(--danger-color);
   }
 }
 
@@ -307,23 +330,54 @@ a {
     }
 }
 
-.btn-warning {
-  background-color: $brand-yellow;
-  background-color: darken($brand-yellow, 2%)!important;
+.btn-secondary {
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+  border-color: var(--border-color);
 
   &:hover {
-    background-color: darken($brand-yellow, 10%)!important;
+    background-color: var(--bg-tertiary);
+    color: var(--text-primary);
+    border-color: var(--border-color);
+  }
+
+  &:active {
+    background-color: var(--accent-color);
+    color: var(--text-inverse);
+    border-color: var(--accent-color);
+  }
+
+  &:disabled {
+    background-color: var(--bg-secondary);
+    color: var(--text-secondary);
+    opacity: 0.6;
+  }
+}
+
+.btn-warning {
+  background-color: var(--warning-color);
+  color: var(--text-inverse);
+  border-color: var(--warning-color);
+
+  &:hover {
+    background-color: var(--warning-color);
+    opacity: 0.8;
+    color: var(--text-inverse);
   }
 }
 
 /* Pagination btns */
 .page-btns {
   .btn:hover {
-    background: #A69BFF!important;
+    background: var(--accent-color-light) !important;
+    color: var(--text-inverse);
   }
 
   .btn {
     padding: 0.3em 0.9em;
+    color: var(--text-primary);
+    background-color: var(--bg-primary);
+    border-color: var(--border-color);
   }
 }
 
