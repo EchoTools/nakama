@@ -173,7 +173,7 @@ func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, n
 	}
 
 	cosmetics := make(map[string]map[string]bool)
-	for m, c := range cosmeticDefaults(evrProfile.Options.EnableAllCosmetics) {
+	for m, c := range cosmeticDefaults(evrProfile.EnableAllCosmetics) {
 		cosmetics[m] = make(map[string]bool, len(c))
 		maps.Copy(cosmetics[m], c)
 	}
@@ -188,7 +188,7 @@ func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, n
 
 	var developerFeatures *evr.DeveloperFeatures
 
-	if evrProfile.Options.GoldDisplayNameActive {
+	if evrProfile.GoldDisplayNameActive {
 		developerFeatures = &evr.DeveloperFeatures{}
 	}
 
@@ -207,7 +207,7 @@ func NewUserServerProfile(ctx context.Context, logger *zap.Logger, db *sql.DB, n
 		return nil, fmt.Errorf("failed to get user tablet statistics: %w", err)
 	}
 
-	if evrProfile.Options.DisableAFKTimeout {
+	if evrProfile.DisableAFKTimeout {
 		developerFeatures = &evr.DeveloperFeatures{
 			DisableAfkTimeout: true,
 		}
