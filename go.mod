@@ -1,6 +1,6 @@
 module github.com/heroiclabs/nakama/v3
 
-go 1.24.3
+go 1.25.0
 
 require (
 	github.com/anyascii/go v0.3.2
