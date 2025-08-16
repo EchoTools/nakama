@@ -72,10 +72,10 @@ export class ThemeService {
 
   private applyThemeToDocument(theme: Theme): void {
     const bodyElement = document.body;
-    
+
     // Remove existing theme classes
     bodyElement.classList.remove('theme-light', 'theme-dark');
-    
+
     // Add new theme class
     bodyElement.classList.add(`theme-${theme}`);
   }
