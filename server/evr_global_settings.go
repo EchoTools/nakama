@@ -36,6 +36,7 @@ type ServiceSettingsData struct {
 	RemoteLogFilters                      map[string][]string       `json:"remote_logs_filter"` //	Ignore remote logs from specific servers
 	ReportURL                             string                    `json:"report_url"`         // URL to report issues
 	ServiceAuditChannelID                 string                    `json:"service_audit_channel_id"`
+	ServiceSessionsChannelID              string                    `json:"service_sessions_channel_id"`  // Service-wide sessions channel
 	ServiceDebugChannelID                 string                    `json:"service_debug_channel_id"`
 	GlobalErrorChannelID                  string                    `json:"service_error_channel_id"`
 	CommandLogChannelID                   string                    `json:"service_command_log_channel_id"`

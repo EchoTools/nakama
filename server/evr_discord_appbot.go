@@ -48,10 +48,11 @@ type DiscordAppBot struct {
 	statusRegistry     StatusRegistry
 	guildGroupRegistry *GuildGroupRegistry
 
-	cache       *DiscordIntegrator
-	ipInfoCache *IPInfoCache
-	choiceCache *MapOf[string, []*discordgo.ApplicationCommandOptionChoice]
-	igpRegistry *MapOf[string, *InGamePanel]
+	cache          *DiscordIntegrator
+	ipInfoCache    *IPInfoCache
+	choiceCache    *MapOf[string, []*discordgo.ApplicationCommandOptionChoice]
+	igpRegistry    *MapOf[string, *InGamePanel]
+	sessionsManager *SessionsChannelManager
 
 	debugChannels  map[string]string // map[groupID]channelID
 	userID         string            // Nakama UserID of the bot
@@ -86,6 +87,7 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 		choiceCache:        &MapOf[string, []*discordgo.ApplicationCommandOptionChoice]{},
 
 		igpRegistry:               &MapOf[string, *InGamePanel]{},
+		sessionsManager:           NewSessionsChannelManager(ctx, logger, nk, dg),
 		prepareMatchRatePerSecond: 1.0 / 60,
 		prepareMatchBurst:         1,
 		prepareMatchRateLimiters:  &MapOf[string, *rate.Limiter]{},

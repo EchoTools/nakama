@@ -40,5 +40,17 @@ func (p *EvrPipeline) lobbyCreate(ctx context.Context, logger *zap.Logger, sessi
 	}
 
 	// Return the prepared session
-	return label.ID, nil
+	matchID := label.ID
+	
+	// Post to Discord sessions channel if available
+	if appBot := globalAppBot.Load(); appBot != nil && appBot.sessionsManager != nil {
+		// Get the guild group for this session
+		if guildGroup := appBot.guildGroupRegistry.Get(params.GroupID.String()); guildGroup != nil {
+			if err := appBot.sessionsManager.PostSessionMessage(label, guildGroup); err != nil {
+				logger.Warn("Failed to post session message to Discord", zap.Error(err))
+			}
+		}
+	}
+	
+	return matchID, nil
 }

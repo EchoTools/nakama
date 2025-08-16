@@ -926,6 +926,11 @@ func (m *EvrMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, db
 		nk.SessionDisconnect(ctx, state.server.GetSessionId(), runtime.PresenceReasonDisconnect)
 	}
 
+	// Cleanup Discord session message if it exists
+	if appBot := globalAppBot.Load(); appBot != nil && appBot.sessionsManager != nil {
+		appBot.sessionsManager.RemoveSessionMessage(state.ID.String())
+	}
+
 	return nil
 }
 
