@@ -1,0 +1,14 @@
+<button 
+  type="button" 
+  class="nav-link theme-toggle" 
+  (click)="toggleTheme()" 
+  [attr.aria-label]="'Switch to ' + (currentTheme === 'dark' ? 'light' : 'dark') + ' mode'"
+  title="Toggle theme">
+  <img 
+    class="link-icon mr-1" 
+    [src]="'/static/svg/' + (currentTheme === 'dark' ? 'sun' : 'moon') + '.svg'" 
+    alt="" 
+    width="24" 
+    height="24">
+  <span class="link-text">{{currentTheme === 'dark' ? 'Light' : 'Dark'}} Mode</span>
+</button>

@@ -32,6 +32,7 @@ import {SegmentService} from 'ngx-segment-analytics';
 import {ConsoleService, UserRole} from '../console.service';
 import {Globals} from '../globals';
 import {environment} from '../../environments/environment';
+import {ThemeService} from '../theme.service';
 
 @Component({
   templateUrl: './base.component.html',
@@ -66,6 +67,7 @@ export class BaseComponent implements OnInit, OnDestroy {
     private readonly router: Router,
     private segment: SegmentService,
     private readonly authService: AuthenticationService,
+    private readonly themeService: ThemeService,
   ) {
     this.loading = false;
     // Buffer router events every 2 seconds, to reduce loading screen jitter

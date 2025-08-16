@@ -14,7 +14,7 @@ $brand-dark-blue: #333564;
 
 /* Nav sidebar */
 .sidebar {
-  background-color: $brand-dark-blue;
+  background-color: var(--bg-sidebar);
   position: fixed;
   top: 0;
   bottom: 0;
@@ -22,13 +22,14 @@ $brand-dark-blue: #333564;
   z-index: 100; /* Behind the nav header */
   font-family: 'Montserrat', sans-serif;
   overflow-y: auto; /* Scrollable contents if viewport is shorter than content. */
+  transition: background-color 0.3s ease;
 
   .nav-item {
     /*background-color: red;*/
   }
 
   .nav-link {
-    color: #fff;
+    color: var(--text-inverse);
     font-size: 12px;
     letter-spacing: 0.1em;
     opacity: 0.6;
@@ -41,7 +42,7 @@ $brand-dark-blue: #333564;
   }
 
   hr {
-    border-color: #fff;
+    border-color: var(--text-inverse);
     opacity: 0.2;
   }
 }
@@ -52,7 +53,7 @@ $brand-dark-blue: #333564;
 
 .nav-link.active {
   opacity: 1;
-  color: $brand-light-purple;
+  color: var(--accent-color-light);
 }
 
 .navbar-collapse {
@@ -89,7 +90,7 @@ $brand-dark-blue: #333564;
 
       .link-icon {
         width: 30px;
-        color: #fff;
+        color: var(--text-inverse);
       }
 
       .link-text {

@@ -3,6 +3,73 @@
 @import "@ng-select/ng-select/themes/default.theme.css";
 @import "vanilla-jsoneditor/themes/jse-theme-default.css";
 
+/* Theme System - CSS Custom Properties */
+:root {
+  /* Light theme (default fallback) */
+  --bg-primary: #FFFFFF;
+  --bg-secondary: #FAFAFC;
+  --bg-tertiary: #F8F9FA;
+  --bg-sidebar: #333564;
+  --text-primary: #333564;
+  --text-secondary: #6C757D;
+  --text-inverse: #FFFFFF;
+  --border-color: #E9ECEF;
+  --border-color-light: #F8F9FA;
+  --accent-color: #7668ED;
+  --accent-color-light: #A69BFF;
+  --success-color: #63C179;
+  --danger-color: #FE756A;
+  --warning-color: #EDD83E;
+  --info-color: #68B8EA;
+  --shadow-color: rgba(0, 0, 0, 0.1);
+}
+
+.theme-light {
+  --bg-primary: #FFFFFF;
+  --bg-secondary: #FAFAFC;
+  --bg-tertiary: #F8F9FA;
+  --bg-sidebar: #333564;
+  --text-primary: #333564;
+  --text-secondary: #6C757D;
+  --text-inverse: #FFFFFF;
+  --border-color: #E9ECEF;
+  --border-color-light: #F8F9FA;
+  --accent-color: #7668ED;
+  --accent-color-light: #A69BFF;
+  --success-color: #63C179;
+  --danger-color: #FE756A;
+  --warning-color: #EDD83E;
+  --info-color: #68B8EA;
+  --shadow-color: rgba(0, 0, 0, 0.1);
+}
+
+.theme-dark {
+  --bg-primary: #1A1B1E;
+  --bg-secondary: #2A2D32;
+  --bg-tertiary: #3A3E47;
+  --bg-sidebar: #1A1B1E;
+  --text-primary: #E9ECEF;
+  --text-secondary: #ADB5BD;
+  --text-inverse: #1A1B1E;
+  --border-color: #495057;
+  --border-color-light: #3A3E47;
+  --accent-color: #8A7EFF;
+  --accent-color-light: #B5ABFF;
+  --success-color: #7DD87F;
+  --danger-color: #FF7A70;
+  --warning-color: #FFE066;
+  --info-color: #7AC3F0;
+  --shadow-color: rgba(0, 0, 0, 0.3);
+}
+
+/* Apply theme variables to body and main elements */
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: 'Source Sans Pro', sans-serif;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
 /* Colors */
 $brand-purple: #7668ED;
 $brand-light-purple: #A69BFF;
@@ -17,37 +84,74 @@ $brand-green: #63C179;
 $font-color: #333564;
 
 .bg-secondary {
-  background-color: lighten($brand-purple, 8%)!important;
+  background-color: var(--bg-secondary) !important;
 }
 
 .bg-success {
-  background-color: $brand-green;
+  background-color: var(--success-color);
 }
 
 /* Type */
 
-body {
-  /*//background-color: #f5f5f5;*/ /* TODO remove */
-  font-family: 'Source Sans Pro', sans-serif;
-}
-
 h1, h2, h3, h4, h5 {
+  color: var(--text-primary);
   /*font-family: 'Montserrat', sans-serif!important;*/
 }
 
 
 /* Button and link stuff */
 a {
-  color: $brand-purple;
+  color: var(--accent-color);
 
   &:hover {
-    color: lighten($brand-purple, 8%);
+    color: var(--accent-color-light);
   }
 }
 
 .custom-control-input:checked~.custom-control-label::before {
-  background-color: $brand-purple;
-  border-color: $brand-purple;
+  background-color: var(--accent-color);
+  border-color: var(--accent-color);
+}
+
+/* Theme-aware UI components */
+.card {
+  background-color: var(--bg-primary);
+  border-color: var(--border-color);
+  color: var(--text-primary);
+}
+
+.table {
+  color: var(--text-primary);
+  background-color: var(--bg-primary);
+  
+  .thead-light th {
+    background-color: var(--bg-secondary);
+    border-color: var(--border-color);
+    color: var(--text-secondary);
+  }
+  
+  tbody tr {
+    border-color: var(--border-color);
+    
+    &:hover td {
+      background-color: var(--bg-tertiary);
+    }
+  }
+}
+
+.form-control {
+  background-color: var(--bg-primary);
+  border-color: var(--border-color);
+  color: var(--text-primary);
+  
+  &:focus {
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 0.2rem rgba(var(--accent-color), 0.25);
+  }
+  
+  &::placeholder {
+    color: var(--text-secondary);
+  }
 }
 
 .btn {
