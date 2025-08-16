@@ -171,7 +171,7 @@ curl "127.0.0.1:7350/v2/account/authenticate/device?create=true" \
 
 ### Build failures
 - Clean vendor directory: `rm -rf vendor && go mod vendor`
-- Check Go version: `go version` (requires Go 1.24+)
+- Check Go version: `go version` (requires Go 1.25.0+)
 - Verify all dependencies downloaded: Look for any network errors
 
 ### Test failures
