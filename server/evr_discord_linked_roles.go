@@ -86,7 +86,7 @@ func (h *DiscordLinkedRolesHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 	}
 
 	// Find the corresponding Nakama user ID
-	userID, err := h.findUserIDByDiscordID(discordUserID)
+	userID, err := GetUserIDByDiscordID(h.ctx, h.db, discordUserID)
 	if err != nil {
 		h.logger.Error("Failed to find user by Discord ID", zap.String("discord_id", discordUserID), zap.Error(err))
 		// Return empty metadata for users not found in our system
@@ -141,29 +141,6 @@ func (h *DiscordLinkedRolesHandler) getDiscordUserIDFromToken(accessToken string
 	}
 
 	return user.ID, nil
-}
-
-// findUserIDByDiscordID finds a Nakama user ID by Discord ID
-func (h *DiscordLinkedRolesHandler) findUserIDByDiscordID(discordID string) (string, error) {
-	// Query the database to find the user by Discord ID
-	// Discord ID is typically stored in custom_id or as part of user metadata
-	query := `
-		SELECT id FROM users 
-		WHERE custom_id = $1 
-		OR metadata LIKE '%"discord_id":"' || $1 || '"%'
-		LIMIT 1
-	`
-
-	var userID string
-	err := h.db.QueryRow(query, discordID).Scan(&userID)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return "", fmt.Errorf("user not found for Discord ID: %s", discordID)
-		}
-		return "", fmt.Errorf("database error: %w", err)
-	}
-
-	return userID, nil
 }
 
 // getUserMetadata gets the metadata for a user to determine role eligibility
