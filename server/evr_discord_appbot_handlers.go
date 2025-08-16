@@ -800,7 +800,30 @@ func (d *DiscordAppBot) handleConfigureRoles(ctx context.Context, logger runtime
 	d.preselectRoleInOptions(roleOptions, roles.ServerHost)
 	d.preselectRoleInOptions(roleOptions, roles.Suspended)
 	d.preselectRoleInOptions(roleOptions, roles.Allocator)
+		baseRoleOptions = append(baseRoleOptions, discordgo.SelectMenuOption{
+			Label:       role.Name,
+			Value:       role.ID,
+			Description: fmt.Sprintf("Role: %s", role.Name),
+		})
+	}
 
+	roles := metadata.RoleMap
+
+	// Helper to clone options and set default
+	cloneAndPreselect := func(options []discordgo.SelectMenuOption, roleID string) []discordgo.SelectMenuOption {
+		cloned := make([]discordgo.SelectMenuOption, len(options))
+		for i, opt := range options {
+			cloned[i] = opt
+			cloned[i].Default = (opt.Value == roleID)
+		}
+		return cloned
+	}
+
+	memberOptions := cloneAndPreselect(baseRoleOptions, roles.Member)
+	enforcerOptions := cloneAndPreselect(baseRoleOptions, roles.Enforcer)
+	serverHostOptions := cloneAndPreselect(baseRoleOptions, roles.ServerHost)
+	suspendedOptions := cloneAndPreselect(baseRoleOptions, roles.Suspended)
+	allocatorOptions := cloneAndPreselect(baseRoleOptions, roles.Allocator)
 	// Build the configuration interface with select menus for each role type
 	components := []discordgo.MessageComponent{
 		discordgo.ActionsRow{
