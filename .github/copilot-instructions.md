@@ -32,11 +32,10 @@ Endpoints: API `http://127.0.0.1:7350`, Socket `ws://127.0.0.1:7349`, default ke
 
 ## Testing
 
-**Only run EVR-specific tests** (full test suite is slow):
-```bash
-go test -short -vet=off ./server/evr/...
-go test -short -vet=off ./server -run ".*evr.*"
-```
+### Build failures
+- Clean vendor directory: `rm -rf vendor && go mod vendor`
+- Check Go version: `go version` (requires Go 1.25.0+)
+- Verify all dependencies downloaded: Look for any network errors
 
 No benchmarks - they take too long. Cancel any test running >10 minutes.
 
