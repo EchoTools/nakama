@@ -831,7 +831,7 @@ func (d *DiscordAppBot) handleConfigureRoles(ctx context.Context, logger runtime
 				discordgo.SelectMenu{
 					CustomID:    "role_select:member",
 					Placeholder: "Select Member Role",
-					Options:     roleOptions,
+					Options:     memberOptions,
 					MaxValues:   1,
 				},
 			},
