@@ -799,7 +799,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		params.matchmakingSettings = &settings
 	}
 
-	if !params.profile.Options.AllowBrokenCosmetics {
+	if !params.profile.IgnoreBrokenCosmetics {
 		if u := params.profile.FixBrokenCosmetics(); u {
 			metadataUpdated = true
 		}
