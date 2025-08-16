@@ -30,6 +30,7 @@
         <a class="nav-link" href="https://heroiclabs.com/blog/?utm_source=NOSS%20Secure&utm_medium=Banner&utm_campaign=NOSS%20Blog%20Secure" target="_blank"><img class="link-icon mr-1" src="/static/svg/blog.svg" alt="" width="24" height=""><span class="link-text">Heroic Labs Blog</span></a>
 
         <hr />
+        <app-theme-toggle></app-theme-toggle>
         <div class="logged-in-as nav-link disabled">Logged in as: {{getUsername()}}</div>
         <ng-container *ngIf="!isMfaEnabled()" [ngbNavItem]="'mfasetup'">
           <a ngbNavLink routerLinkActive="active" [routerLink]="['/settings/mfa']"><img class="mr-1" src="/static/svg/configuration.svg" alt="" width="24" height=""><span class="link-text">MFA Setup</span></a>

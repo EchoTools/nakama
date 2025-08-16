@@ -62,6 +62,7 @@ import {LeaderboardRecordsComponent} from './leaderboard/records/records.compone
 import {ApiExplorerComponent} from './apiexplorer/apiexplorer.component';
 import {SubscriptionsComponent} from './account/subscriptions/subscriptions.component';
 import {DeleteConfirmDialogComponent} from './shared/delete-confirm-dialog/delete-confirm-dialog.component';
+import {ThemeToggleComponent} from './shared/theme-toggle/theme-toggle.component';
 import {SubscriptionsListComponent} from './subscriptions/subscriptions-list.component';
 import {NotificationsComponent} from './account/notifications/notifications.component';
 import {NotificationsListComponent} from './notifications/notifications-list.component';
@@ -101,6 +102,7 @@ import {QRCodeModule} from 'angularx-qrcode';
     GroupListComponent,
     ChatListComponent,
     DeleteConfirmDialogComponent,
+    ThemeToggleComponent,
     PurchasesListComponent,
     SubscriptionsListComponent,
     MfaSetupComponent,
