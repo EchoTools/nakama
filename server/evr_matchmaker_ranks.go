@@ -7,8 +7,8 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/echotools/nakama/v3/server/evr"
 	"github.com/heroiclabs/nakama-common/runtime"
-	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
 func CalculateSmoothedPlayerRankPercentile(ctx context.Context, logger *zap.Logger, db *sql.DB, nk runtime.NakamaModule, userID, groupID string, mode evr.Symbol) (float64, error) {

@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/echotools/nakama/v3/server/evr"
 	"github.com/gofrs/uuid/v5"
 	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
-	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
 	"golang.org/x/oauth2"
 	"google.golang.org/protobuf/types/known/wrapperspb"

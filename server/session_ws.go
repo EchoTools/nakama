@@ -26,11 +26,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/echotools/nakama/v3/server/evr"
 	"github.com/gofrs/uuid/v5"
 	"github.com/gorilla/websocket"
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
-	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/encoding/protojson"

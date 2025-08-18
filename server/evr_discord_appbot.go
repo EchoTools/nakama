@@ -19,10 +19,10 @@ import (
 
 	anyascii "github.com/anyascii/go"
 	"github.com/bwmarrin/discordgo"
+	"github.com/echotools/nakama/v3/server/evr"
 	"github.com/echotools/vrmlgo/v5"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
-	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/samber/lo"
 	"go.uber.org/thriftrw/ptr"
 	"go.uber.org/zap"

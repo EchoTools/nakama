@@ -5,9 +5,9 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/echotools/nakama/v3/server/evr"
 	"github.com/gofrs/uuid/v5"
 	"github.com/google/go-cmp/cmp"
-	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
 func TestNewSessionParametersFromLobbySessionRequest(t *testing.T) {

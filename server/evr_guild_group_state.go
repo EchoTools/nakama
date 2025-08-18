@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/echotools/nakama/v3/server/evr"
 	"github.com/heroiclabs/nakama-common/runtime"
-	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
 const (

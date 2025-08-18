@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/heroiclabs/nakama/v3/server/evr"
+	"github.com/echotools/nakama/v3/server/evr"
 	"go.uber.org/atomic"
 )
 
@@ -21,6 +21,7 @@ type SessionParameters struct {
 	userDisplayNameOverride  string // The display name override (user-defined)
 
 	externalServerAddr string // The external server address (IP:port)
+	geoHash            string // The geohash of the user IP
 	geoHashPrecision   int    // The geohash precision
 	isVPN              bool   // The user is using a VPN
 	ipInfo             IPInfo // The IPQS data

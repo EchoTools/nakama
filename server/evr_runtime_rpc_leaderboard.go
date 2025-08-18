@@ -8,9 +8,9 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/echotools/nakama/v3/server/evr"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
-	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
 type LeaderboardRecordsListRequest struct {

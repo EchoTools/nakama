@@ -7,8 +7,8 @@ import (
 	"slices"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/echotools/nakama/v3/server/evr"
 	"github.com/heroiclabs/nakama-common/runtime"
-	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

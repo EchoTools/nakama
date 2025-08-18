@@ -3,7 +3,7 @@ package server
 import (
 	"testing"
 
-	"github.com/heroiclabs/nakama/v3/server/evr"
+	"github.com/echotools/nakama/v3/server/evr"
 	"github.com/stretchr/testify/assert"
 )
 

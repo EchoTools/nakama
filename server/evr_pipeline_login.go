@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/echotools/nakama/v3/server/evr"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
-	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/muesli/reflow/wordwrap"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"

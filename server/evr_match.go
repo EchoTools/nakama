@@ -12,10 +12,10 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/echotools/nakama/v3/server/evr"
 	"github.com/echotools/nevr-common/v3/rtapi"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
-	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
 )
 
@@ -602,9 +602,9 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 						nk.MetricsCounterAdd("match_entrant_early_quit", tags, 1)
 
 						logger.WithFields(map[string]interface{}{
-							"uid":         mp.GetUserId(),
-							"username":    mp.Username,
-							"evrid":       mp.EvrID,
+							"uid":          mp.GetUserId(),
+							"username":     mp.Username,
+							"evrid":        mp.EvrID,
 							"display_name": mp.DisplayName,
 						}).Debug("Incrementing early quit for player.")
 

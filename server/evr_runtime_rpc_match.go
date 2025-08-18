@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/echotools/nakama/v3/server/evr"
 	nevrapi "github.com/echotools/nevr-common/v3/api"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
-	"github.com/heroiclabs/nakama/v3/server/evr"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )

@@ -3,8 +3,8 @@ package server
 import (
 	"testing"
 
+	"github.com/echotools/nakama/v3/server/evr"
 	"github.com/google/go-cmp/cmp"
-	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
 func TestStatisticsToEntries(t *testing.T) {

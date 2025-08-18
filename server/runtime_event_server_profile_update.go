@@ -6,8 +6,8 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/echotools/nakama/v3/server/evr"
 	"github.com/heroiclabs/nakama-common/runtime"
-	"github.com/heroiclabs/nakama/v3/server/evr"
 )
 
 var _ = Event(&EventServerProfileUpdate{})

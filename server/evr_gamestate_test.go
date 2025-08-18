@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/heroiclabs/nakama/v3/server/evr"
+	"github.com/echotools/nakama/v3/server/evr"
 )
 
 func TestGameState_Update(t *testing.T) {

@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/echotools/nakama/v3/server/evr"
 	"github.com/echotools/nevr-common/v3/rtapi"
 	"github.com/gofrs/uuid/v5"
-	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
 )
 
