@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/echotools/nakama/v3/server/evr"
+	evr "github.com/echotools/nakama/v3/protocol"
 )
 
 type LabelPart interface {

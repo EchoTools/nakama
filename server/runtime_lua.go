@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/heroiclabs/nakama-common/runtime"
 	"os"
 	"path/filepath"
 	"sort"
@@ -29,10 +28,12 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/heroiclabs/nakama-common/runtime"
+
+	lua "github.com/echotools/nakama/v3/internal/gopher-lua"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/rtapi"
-	lua "github.com/heroiclabs/nakama/v3/internal/gopher-lua"
 	"github.com/heroiclabs/nakama/v3/social"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"

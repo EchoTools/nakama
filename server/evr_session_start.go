@@ -6,7 +6,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/echotools/nakama/v3/server/evr"
+	evr "github.com/echotools/nakama/v3/protocol"
 	"github.com/gorilla/websocket"
 	"github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"

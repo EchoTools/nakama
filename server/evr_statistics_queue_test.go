@@ -3,7 +3,7 @@ package server
 import (
 	"testing"
 
-	"github.com/echotools/nakama/v3/server/evr"
+	evr "github.com/echotools/nakama/v3/protocol"
 	"github.com/google/go-cmp/cmp"
 )
 

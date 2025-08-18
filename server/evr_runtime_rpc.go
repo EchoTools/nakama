@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/echotools/nakama/v3/server/evr"
+	evr "github.com/echotools/nakama/v3/protocol"
 	"github.com/gofrs/uuid/v5"
 	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/heroiclabs/nakama-common/api"

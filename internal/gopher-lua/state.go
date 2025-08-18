@@ -16,7 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/heroiclabs/nakama/v3/internal/gopher-lua/parse"
+	"github.com/echotools/nakama/v3/internal/gopher-lua/parse"
 )
 
 const MultRet = -1

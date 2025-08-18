@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/echotools/nakama/v3/server/evr"
+	evr "github.com/echotools/nakama/v3/protocol"
 	"github.com/google/go-cmp/cmp"
 	"go.uber.org/zap"
 )

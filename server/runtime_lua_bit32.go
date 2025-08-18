@@ -18,7 +18,7 @@ import (
 	"math"
 	"math/bits"
 
-	lua "github.com/heroiclabs/nakama/v3/internal/gopher-lua"
+	lua "github.com/echotools/nakama/v3/internal/gopher-lua"
 )
 
 var (

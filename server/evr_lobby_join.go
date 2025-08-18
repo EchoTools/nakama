@@ -6,7 +6,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/echotools/nakama/v3/server/evr"
+	evr "github.com/echotools/nakama/v3/protocol"
 	"go.uber.org/zap"
 )
 

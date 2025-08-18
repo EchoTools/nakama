@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/echotools/nakama/v3/server/evr"
+	evr "github.com/echotools/nakama/v3/protocol"
 	"github.com/gofrs/uuid/v5"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

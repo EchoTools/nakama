@@ -3,7 +3,7 @@ package server
 import (
 	"time"
 
-	"github.com/echotools/nakama/v3/server/evr"
+	evr "github.com/echotools/nakama/v3/protocol"
 )
 
 type MatchDataJournalEntry struct {

@@ -18,7 +18,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/heroiclabs/nakama/v3/internal/cronexpr"
+	"github.com/echotools/nakama/v3/internal/cronexpr"
 )
 
 /******************************************************************************/

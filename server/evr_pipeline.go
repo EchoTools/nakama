@@ -21,7 +21,7 @@ import (
 	"github.com/go-redis/redis"
 	"github.com/gofrs/uuid/v5"
 
-	"github.com/echotools/nakama/v3/server/evr"
+	evr "github.com/echotools/nakama/v3/protocol"
 	nkrtapi "github.com/heroiclabs/nakama-common/rtapi"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/social"

@@ -3,7 +3,7 @@ package server
 import (
 	"log"
 
-	"github.com/echotools/nakama/v3/server/evr"
+	evr "github.com/echotools/nakama/v3/protocol"
 )
 
 type TeamMetadata struct {

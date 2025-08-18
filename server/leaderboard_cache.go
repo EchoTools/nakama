@@ -30,7 +30,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/heroiclabs/nakama/v3/internal/cronexpr"
+	"github.com/echotools/nakama/v3/internal/cronexpr"
 	"github.com/jackc/pgx/v5/pgtype"
 	"go.uber.org/zap"
 )

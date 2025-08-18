@@ -31,6 +31,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/echotools/nakama/v3/internal/ctxkeys"
 	"github.com/gofrs/uuid/v5"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/handlers"
@@ -38,7 +39,6 @@ import (
 	grpcgw "github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama/v3/apigrpc"
-	"github.com/heroiclabs/nakama/v3/internal/ctxkeys"
 	"github.com/heroiclabs/nakama/v3/social"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"

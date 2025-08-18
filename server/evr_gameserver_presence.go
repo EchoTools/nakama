@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	anyascii "github.com/anyascii/go"
-	"github.com/echotools/nakama/v3/server/evr"
+	evr "github.com/echotools/nakama/v3/protocol"
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/mmcloughlin/geohash"

@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/echotools/nakama/v3/server/evr"
+	evr "github.com/echotools/nakama/v3/protocol"
 	"github.com/gofrs/uuid/v5"
 	"github.com/google/go-cmp/cmp"
 )
