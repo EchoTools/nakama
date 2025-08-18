@@ -21,12 +21,14 @@ services:
   nakama:
     container_name: nakama
     image: echotools/nakama:latest
+    env_file:
+      - .env
     entrypoint:
       - "/bin/sh"
       - "-ecx"
       - >
           /nakama/nakama migrate up --database.address postgres:localdb@postgres:5432/nakama &&
-          exec /nakama/nakama --name nakama1 --database.address postgres:localdb@postgres:5432/nakama --config=/data/nakama.yml --logger.level DEBUG --session.token_expiry_sec 7200
+          exec /nakama/nakama --name nakama1 --database.address postgres:localdb@postgres:5432/nakama --logger.level DEBUG --session.token_expiry_sec 7200
    
     restart: unless-stopped
     depends_on:

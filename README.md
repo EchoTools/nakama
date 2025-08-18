@@ -1,190 +1,393 @@
-![Nakama](.github/logo.png?raw=true "Nakama logo")
-======
+# EchoTools Nakama Server
 
-[![GitHub release](https://img.shields.io/github/release/heroiclabs/nakama.svg)](https://heroiclabs.com/docs/nakama/getting-started/install/)
-[![Forum](https://img.shields.io/badge/forum-online-success.svg)](https://forum.heroiclabs.com)
 [![License](https://img.shields.io/github/license/heroiclabs/nakama.svg)](https://github.com/heroiclabs/nakama/blob/master/LICENSE)
 
-> Distributed server for social and realtime games and apps.
+> Customized Nakama game server for Echo VR with Discord integration and enhanced matchmaking capabilities.
+
+EchoTools Nakama is a specialized fork of the [Nakama game server](https://github.com/heroiclabs/nakama) specifically designed for Echo VR gameplay. It includes extensive Discord bot integration, game server registration features, and VR-specific matchmaking capabilities.
 
 ## Features
 
-* **Users** - Register/login new users via social networks, email, or device ID.
-* **Storage** - Store user records, settings, and other objects in collections.
-* **Social** - Users can connect with friends, and join groups. Builtin social graph to see how users can be connected.
-* **Chat** - 1-on-1, group, and global chat between users. Persist messages for chat history.
-* **Multiplayer** - Realtime, or turn-based active and passive multiplayer.
-* **Leaderboards** - Dynamic, seasonal, get top members, or members around a user. Have as many as you need.
-* **Tournaments** - Invite players to compete together over prizes. Link many together to create leagues.
-* **Parties** - Add team play to a game. Users can form a party and communicate with party members.
-* **Purchase Validation** - Validate in-app purchases and subscriptions.
-* **In-App Notifications** - Send messages and notifications to connected client sockets.
-* **Runtime code** - Extend the server with custom logic written in Lua, TypeScript/JavaScript, or native Go code.
-* **Matchmaker**, **dashboard**, **metrics**, and [more](https://heroiclabs.com/docs).
+* **Discord Integration** - Full Discord bot with slash commands, user linking, and community management
+* **Echo VR Support** - Native support for Echo VR game servers and matchmaking
+* **Real-time Multiplayer** - Optimized for VR gameplay with low-latency networking
+* **User Authentication** - Discord-based authentication and user management
+* **Game Server Registry** - Automatic registration and management of Echo VR game servers
+* **Advanced Matchmaking** - Custom matchmaking algorithms for VR gameplay
+* **Web Console** - Administrative interface for server management and monitoring
 
-Build scalable games and apps with a production ready server used by ambitious game studios and app developers [all around the world](https://heroiclabs.com/customers/). Have a look at the [documentation](https://heroiclabs.com/docs) and join the [developer community](https://forum.heroiclabs.com) for more info.
+For complete feature documentation, see the [upstream Nakama documentation](https://heroiclabs.com/docs/).
 
 ## Documentation
 
 * **[Game Server URL Parameters](docs/game-server-url-parameters.md)** - Complete reference for URL parameters used in game server registration.
 
-## Getting Started
+## Prerequisites
 
-The server is simple to setup and run for local development and can be deployed to any cloud provider. See the [deployment notes](#deployment) for recommendations on how to deploy the project for production. Nakama server requires CockroachDB or another Postgres wire-compatible server as it's database.
+Before setting up EchoTools Nakama, ensure you have the following:
 
-### Docker
+### Required Software
 
-<a href="https://heroiclabs.com/docs/install-docker-quickstart/"><img src="https://upload.wikimedia.org/wikipedia/commons/7/79/Docker_%28container_engine%29_logo.png" width="170"></a>
+- **Docker and Docker Compose** - For containerized deployment
+- **Git** - For cloning the repository
 
-The fastest way to run the server and the database is with Docker. Setup Docker and start the daemon.
+### Discord Bot Setup
 
-1. Set up a [docker-compose file](https://heroiclabs.com/docs/nakama/getting-started/install/docker/#running-nakama) and place it in a folder for your project.
+EchoTools Nakama requires a Discord bot for user authentication and community features:
 
-2. Run `docker-compose -f ./docker-compose.yml up` to download container images and run the servers.
+1. **Create a Discord Application**:
+   - Go to the [Discord Developer Portal](https://discord.com/developers/applications)
+   - Click "New Application" and give it a name
+   - Navigate to the "Bot" section and create a bot
+   - Copy the bot token (you'll need this for `DISCORD_BOT_TOKEN`)
 
-For more detailed instructions have a look at our [Docker quickstart](https://heroiclabs.com/docs/nakama/getting-started/install/docker) guide.
+2. **Configure Bot Permissions**:
+   - In the Discord Developer Portal, go to the "OAuth2" > "URL Generator" section
+   - Select "bot" and "applications.commands" scopes
+   - Select the following bot permissions:
+     - Send Messages
+     - Use Slash Commands
+     - Read Message History
+     - Manage Messages
+     - Connect
+     - Speak
+   - Use the generated URL to invite the bot to your Discord server
 
-Nakama Docker images are maintained on [Docker Hub](https://hub.docker.com/r/heroiclabs/nakama/tags) and [prerelease](https://hub.docker.com/r/heroiclabs/nakama-prerelease/tags) images are occasionally published for cutting edge features of the server.
+3. **Get Discord Server ID**:
+   - Enable Developer Mode in Discord (User Settings > Advanced > Developer Mode)
+   - Right-click your Discord server and select "Copy Server ID"
 
-### Binaries
+## Quick Start with Docker Compose
 
-You can run the servers with native binaries for your platform.
+The fastest way to get EchoTools Nakama running locally is with the included Docker Compose configuration.
 
-1. Download the server from our [releases](https://github.com/heroiclabs/nakama/releases) page and the [database](https://www.cockroachlabs.com/docs/stable/install-cockroachdb.html).
+### 1. Clone the Repository
 
-2. Follow the database [instructions](https://www.cockroachlabs.com/docs/stable/start-a-local-cluster.html#before-you-begin) to start it.
+```bash
+git clone https://github.com/EchoTools/nakama.git
+cd nakama
+```
 
-3. Run a migration which will setup or upgrade the database schema:
+### 2. Configure Environment Variables
 
-   ```shell
-   nakama migrate up --database.address "root@127.0.0.1:26257"
-   ```
+Create a `.env` file in the project root with your Discord bot configuration:
 
-4. Start Nakama and connect to the database:
+```bash
+# Required: Discord Bot Token (the server requires this to function)
+DISCORD_BOT_TOKEN=your_discord_bot_token_here
 
-   ```shell
-   nakama --database.address "root@127.0.0.1:26257"
-   ```
+# Optional: Additional configuration
+NAKAMA_TELEMETRY=0  # Disable telemetry
+```
 
-When connected you'll see server output which describes all settings the server uses for [configuration](https://heroiclabs.com/docs/nakama/getting-started/configuration).
+**Important:** EchoTools Nakama requires a valid Discord bot token to run. See the [Discord Bot Setup](#discord-bot-setup) section above for instructions on creating a Discord bot.
 
-> {"level":"info","ts":"2018-04-29T10:14:41.249+0100","msg":"Node","name":"nakama","version":"2.0.0+7e18b09","runtime":"go1.10.1","cpu":4} <br/>
-> {"level":"info","ts":"2018-04-29T10:14:41.249+0100","msg":"Database connections","dsns":["root@127.0.0.1:26257"]} <br/>
-> ...
+### 3. Start the Services
 
-## Usage
+```bash
+# Start PostgreSQL database and Nakama server
+docker compose up -d
 
-Nakama supports a variety of protocols optimized for various gameplay or app use cases. For request/response it can use GRPC or the HTTP1.1+JSON fallback (REST). For realtime communication you can use WebSockets or rUDP.
+# View logs (optional)
+docker compose logs -f nakama
+```
 
-For example with the REST API to authenticate a user account with a device identifier.
+This will:
+- Start a PostgreSQL database on port 5432
+- Run database migrations automatically
+- Start the Nakama server with Discord integration enabled
+- Expose the following services:
+  - **API Server**: http://127.0.0.1:7350
+  - **WebSocket**: ws://127.0.0.1:7349  
+  - **Console**: http://127.0.0.1:7351
 
-```shell
+### 4. Verify the Installation
+
+Test the API server:
+
+```bash
+curl "127.0.0.1:7350/v2/account/authenticate/device?create=true" \
+  --user "defaultkey:" \
+  --data '{"id": "test-device-123"}'
+```
+
+You should receive a JSON response with an authentication token.
+
+## Local Development Setup
+
+For development work, you may want to build and run the server locally instead of using Docker.
+
+### Prerequisites for Local Development
+
+- **Go 1.25+** - Required for building the server
+- **Docker** - For running PostgreSQL database  
+- **Make** - For using the build system
+
+### 1. Setup Dependencies
+
+```bash
+# Clone repository
+git clone https://github.com/EchoTools/nakama.git
+cd nakama
+
+# Download Go dependencies (~1 minute)
+go mod vendor
+
+# Build the server (~1 minute)  
+make nakama
+```
+
+### 2. Start Database
+
+```bash
+# Start PostgreSQL database (~30 seconds)
+docker compose up -d postgres
+
+# Wait for database to be ready
+sleep 30
+
+# Run database migrations
+./nakama-debug migrate up --database.address postgres:localdb@127.0.0.1:5432/nakama
+```
+
+### 3. Configure Environment
+
+Set your Discord bot token:
+
+```bash
+export DISCORD_BOT_TOKEN="your_discord_bot_token_here"
+```
+
+### 4. Start the Server
+
+```bash
+# Set your Discord bot token
+export DISCORD_BOT_TOKEN="your_discord_bot_token_here"
+
+# Start Nakama server
+./nakama-debug --name nakama1 \
+  --database.address postgres:localdb@127.0.0.1:5432/nakama \
+  --logger.level INFO
+```
+
+**Note:** The Discord bot token is required for the server to start successfully. Without it, the server will not function properly due to the integrated Discord features.
+
+## Configuration
+
+### Required Environment Variables
+
+- **`DISCORD_BOT_TOKEN`** - Discord bot token for authentication and community features (required)
+
+### Optional Environment Variables
+
+- **`NAKAMA_TELEMETRY`** - Set to `0` to disable telemetry (default: enabled)
+
+### Configuration Files
+
+EchoTools Nakama can be configured via YAML files. Create a `nakama.yml` file in the `data/` directory for custom configuration:
+
+```yaml
+# Example nakama.yml
+name: "EchoTools-Nakama"
+logger:
+  level: "INFO"
+  format: "JSON"
+session:
+  token_expiry_sec: 7200
+socket:
+  server_key: "defaultkey"
+```
+
+For complete configuration options, see the [Nakama Configuration Documentation](https://heroiclabs.com/docs/nakama/getting-started/configuration/).
+
+## Server Management
+
+### Accessing the Admin Console
+
+The Nakama Console provides a web interface for managing users, data, and server metrics:
+
+1. Navigate to http://127.0.0.1:7351 in your browser
+2. Log in with the default credentials or configure authentication
+
+### Common Commands
+
+```bash
+# View server status
+docker compose ps
+
+# View server logs
+docker compose logs -f nakama
+
+# Restart the server
+docker compose restart nakama
+
+# Stop all services
+docker compose down
+
+# Start with fresh database
+docker compose down -v
+docker compose up -d
+```
+
+### Health Checks
+
+The server includes built-in health check endpoints:
+
+```bash
+# Check server health
+curl http://127.0.0.1:7350/v2/healthcheck
+
+# Check using the binary
+./nakama-debug healthcheck
+```
+
+## Game Server Integration
+
+EchoTools Nakama includes specialized features for Echo VR game servers:
+
+### Game Server Registration
+
+Echo VR game servers can automatically register with Nakama using WebSocket connections with specific URL parameters. See [Game Server URL Parameters](docs/game-server-url-parameters.md) for complete documentation.
+
+### Discord Authentication
+
+Game servers can authenticate using Discord credentials:
+
+```
+wss://your-nakama-server.com/ws?discordid=123456789012345678&password=yourpassword
+```
+
+## API Usage
+
+EchoTools Nakama supports the full Nakama API with additional VR-specific endpoints. The server supports both REST and GRPC protocols.
+
+### Authentication Example
+
+```bash
 curl "127.0.0.1:7350/v2/account/authenticate/device?create=true" \
   --user "defaultkey:" \
   --data '{"id": "someuniqueidentifier"}'
 ```
 
 Response:
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
 
-> { <br>
->     "token":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE1MjQ5OTU2NDksInVpZCI6Ijk5Y2Q1YzUyLWE5ODgtNGI2NC04YThhLTVmMTM5YTg4MTgxMiIsInVzbiI6InhBb1RxTUVSdFgifQ.-3_rXNYx3Q4jKuS7RkxeMWBzMNAm0vl93QxzRI8p_IY" <br>
-> }
+For complete API documentation, see the [Nakama API Reference](https://heroiclabs.com/docs/nakama-api/).
 
-There's a number of official [client libraries](https://github.com/heroiclabs) available on GitHub with [documentation](https://heroiclabs.com/docs). The current platform/language support includes: .NET (in C#), Unity engine, JavaScript, Java (with Android), Unreal engine, Godot, Defold, and Swift (with iOS). If you'd like to contribute a client or request one let us know.
+### Client Libraries
 
-## Nakama Console
+Use the official [Nakama client libraries](https://github.com/heroiclabs) which are compatible with EchoTools Nakama:
 
-The server provides a web UI which teams can use to inspect various data stored through the server APIs, view lightweight service metrics, manage player data, update storage objects, restrict access to production with permission profiles, and gain visibility into realtime features like active multiplayer matches. There is no separate installation required as it is embedded as part of the single server binary.
+- **Unity** - For VR game development
+- **Unreal Engine** - For VR applications  
+- **JavaScript/TypeScript** - For web interfaces
+- **.NET (C#)** - For desktop applications
+- **Java** - For Android VR applications
 
-You can navigate to it on your browser on [http://127.0.0.1:7351](http://127.0.0.1:7351).
+## Troubleshooting
 
-<img src=".github/accounts.jpg?raw=true" title="Account listing" width="1024" align="center">
-<img src=".github/status.jpg?raw=true" title="Status view" width="125" align="left">
-<img src=".github/storage.jpg?raw=true" title="Storage record view" width="125" align="left">
-<img src=".github/match.jpg?raw=true" title="Running matches view" width="125" align="left">
-<img src=".github/users.jpg?raw=true" title="Console users view" width="125" align="left">
-<img src=".github/modules.jpg?raw=true" title="Loaded modules view" width="125">
+### Common Issues
 
-## Deployment
+**Discord bot not responding:**
+- Verify the bot token is correct and properly set in the environment
+- Check the bot has proper permissions in your Discord server
+- Ensure the Discord bot is online and accessible
+- Review server logs: `docker compose logs nakama`
 
-Nakama can be deployed to any cloud provider such as Google Cloud, Azure, AWS, Digital Ocean, Heroku, or your own private cloud. You should setup and provision separate nodes for Nakama and CockroachDB.
+**Server fails to start:**
+- Ensure you have set a valid `DISCORD_BOT_TOKEN` environment variable
+- Verify PostgreSQL is running: `docker compose ps`
+- Check the Discord bot token format is correct
+- Ensure ports 7349, 7350, 7351 are available
 
-The recommended minimum production infrastructure for CockroachDB is outlined in [these docs](https://www.cockroachlabs.com/docs/stable/recommended-production-settings.html#basic-hardware-recommendations) and Nakama can be run on instance types as small as "g1-small" on Google Cloud although we recommend a minimum of "n1-standard-1" in production. The specific hardware requirements will depend on what features of the server are used. Reach out to us for help and advice on what servers to run.
+**Database connection errors:**
+- Ensure PostgreSQL container is healthy: `docker compose ps`
+- Wait for database initialization: `sleep 30` after starting postgres
+- Check database logs: `docker compose logs postgres`
 
-### Heroic Cloud
+### Getting Help
 
-You can support development, new features, and maintainance of the server by using the Heroic Labs' [Heroic Cloud](https://heroiclabs.com/heroic-cloud/) for deployment. This service handles the uptime, replication, backups, logs, data upgrades, and all other tasks involved with production server environments.
+For additional support:
+- Review the [upstream Nakama documentation](https://heroiclabs.com/docs/)
+- Check existing [GitHub issues](https://github.com/EchoTools/nakama/issues)
+- Join the [Heroic Labs community forum](https://forum.heroiclabs.com)
 
-Have a look at our [Heroic Cloud](https://heroiclabs.com/heroic-cloud/) service for more details.
+## Development
 
-## Contribute
+### Building from Source
 
-The development roadmap is managed as GitHub issues and pull requests are welcome. If you're interested to add a feature which is not mentioned on the issue tracker please open one to create a discussion or drop in and discuss it in the [community forum](https://forum.heroiclabs.com).
+EchoTools Nakama includes all dependencies as part of the Go project using Go modules.
 
-### Simple Builds
+```bash
+# Clone the repository
+git clone https://github.com/EchoTools/nakama.git
+cd nakama
 
-All dependencies required for a build are vendored as part of the Go project. We recommend a modern release of the Go toolchain and do not store the codebase in the old GOPATH.
+# Download dependencies
+go mod vendor
 
-1. Download the source tree.
+# Build for development (with debug symbols)
+make nakama
 
-   ```shell
-   git clone "https://github.com/heroiclabs/nakama" nakama
-   cd nakama
-   ```
+# Build Docker image
+make build
 
-2. Build the project from source.
-
-   ```shell
-   go build -trimpath -mod=vendor
-   ./nakama --version
-   ```
-
-### Full Source Builds
-
-The codebase uses Protocol Buffers, GRPC, GRPC-Gateway, and the OpenAPI spec as part of the project. These dependencies are generated as sources and committed to the repository to simplify builds for contributors.
-
-To build the codebase and generate all sources follow these steps.
-
-1. Install the toolchain.
-
-   ```shell
-   go install \
-       "google.golang.org/protobuf/cmd/protoc-gen-go" \
-       "google.golang.org/grpc/cmd/protoc-gen-go-grpc" \
-       "github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway" \
-       "github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2"
-   ```
-
-2. If you've made changes to the embedded Console.
-
-    ```shell
-    cd console/ui
-    ng serve
-    ```
-
-3. Re-generate the protocol buffers, gateway code and console UI.
-
-   ```shell
-   env PATH="$HOME/go/bin:$PATH" go generate -x ./...
-   ```
-
-4. Build the codebase.
-
-   ```shell
-   go build -trimpath -mod=vendor
-   ```
+# Verify build
+./nakama-debug --version
+```
 
 ### Testing
 
-In order to run all the unit and integration tests run:
+Run the EchoTools-specific test suite:
 
-```shell
-docker-compose -f ./docker-compose-tests.yml up --build --abort-on-container-exit; docker-compose -f ./docker-compose-tests.yml down -v
+```bash
+# Run EVR-specific unit tests
+go test -short -vet=off ./server/evr/...
+
+# Run all EVR-related tests
+go test -short -vet=off ./server -run ".*evr.*"
 ```
 
-This will create an isolated environment with Nakama and database instances, run
-all the tests, and drop the environment afterwards.
+For integration testing with database:
 
-### License
+```bash
+# Start test environment
+docker compose -f ./docker-compose-tests.yml up --build --abort-on-container-exit
 
-This project is licensed under the [Apache-2 License](https://github.com/heroiclabs/nakama/blob/master/LICENSE).
+# Clean up
+docker compose -f ./docker-compose-tests.yml down -v
+```
+
+### Code Formatting
+
+```bash
+# Check formatting
+gofmt -l .
+
+# Fix formatting
+gofmt -w .
+```
+
+## Contributing
+
+We welcome contributions to EchoTools Nakama! This project builds upon the excellent foundation provided by [Heroic Labs' Nakama](https://github.com/heroiclabs/nakama).
+
+### Development Workflow
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes with tests
+4. Run formatting and tests
+5. Submit a pull request
+
+### Upstream Relationship
+
+This project is a specialized fork of Nakama. For general Nakama features and documentation, refer to the [upstream project](https://github.com/heroiclabs/nakama). EchoTools-specific features are documented in this repository.
+
+## License
+
+This project is licensed under the [Apache-2 License](https://github.com/heroiclabs/nakama/blob/master/LICENSE), the same as the upstream Nakama project.
