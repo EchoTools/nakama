@@ -32,7 +32,7 @@ type GuildLobbyLabel struct {
 	GroupID string `json:"group_id"`
 }
 
-func JoinMatchmakingStream(logger *zap.Logger, s *sessionWS, lobbyParams *LobbySessionParameters) error {
+func JoinMatchmakingStream(logger *zap.Logger, s *sessionEVR, lobbyParams *LobbySessionParameters) error {
 
 	stream := lobbyParams.MatchmakingStream()
 
@@ -88,7 +88,7 @@ func JoinMatchmakingStream(logger *zap.Logger, s *sessionWS, lobbyParams *LobbyS
 	return nil
 }
 
-func LeaveMatchmakingStream(logger *zap.Logger, s *sessionWS) error {
+func LeaveMatchmakingStream(logger *zap.Logger, s *sessionEVR) error {
 	s.tracker.UntrackLocalByModes(s.id, map[uint8]struct{}{StreamModeMatchmaking: {}}, PresenceStream{})
 	return nil
 }

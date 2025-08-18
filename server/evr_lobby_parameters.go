@@ -133,7 +133,7 @@ func (s LobbySessionParameters) MetricsTags() map[string]string {
 	}
 }
 
-func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, session *sessionWS, request evr.LobbySessionRequest) (*LobbySessionParameters, error) {
+func NewLobbyParametersFromRequest(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, session *sessionEVR, request evr.LobbySessionRequest) (*LobbySessionParameters, error) {
 
 	var (
 		p               = session.evrPipeline

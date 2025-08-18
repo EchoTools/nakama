@@ -68,7 +68,7 @@ func TestProcessOutgoingNotificationConnectionInfo(t *testing.T) {
 
 	type args struct {
 		logger  *zap.Logger
-		session *sessionWS
+		session *sessionEVR
 		in      *rtapi.Envelope
 	}
 	tests := []struct {
@@ -81,7 +81,7 @@ func TestProcessOutgoingNotificationConnectionInfo(t *testing.T) {
 			name: "Connection info",
 			args: args{
 				logger:  testLogger,
-				session: &sessionWS{},
+				session: &sessionEVR{},
 				in: &rtapi.Envelope{
 					Cid: "1",
 					Message: &rtapi.Envelope_Notifications{

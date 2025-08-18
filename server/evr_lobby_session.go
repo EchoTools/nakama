@@ -12,7 +12,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.LobbySessionRequest, lobbyParams *LobbySessionParameters) error {
+func (p *EvrPipeline) handleLobbySessionRequest(ctx context.Context, logger *zap.Logger, session *sessionEVR, in evr.LobbySessionRequest, lobbyParams *LobbySessionParameters) error {
 	var err error
 	var matchID MatchID
 

@@ -9,11 +9,11 @@ import (
 )
 
 type SessionParameters struct {
-	node          string     // The node name
-	xpID          evr.EvrId  // The Cross-Platform ID
-	loginSession  *sessionWS // The login session
-	lobbySession  *sessionWS // The match session
-	serverSession *sessionWS // The server session
+	node          string      // The node name
+	xpID          evr.EvrId   // The Cross-Platform ID
+	loginSession  *sessionEVR // The login session
+	lobbySession  *sessionEVR // The match session
+	serverSession *sessionEVR // The server session
 
 	IsWebsocketAuthenticated bool   // The session was authenticated successfully via HTTP headers or query parameters
 	authDiscordID            string // The Discord ID use for authentication

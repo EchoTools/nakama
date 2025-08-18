@@ -17,7 +17,6 @@ package server
 import (
 	"math"
 	"math/bits"
-	"slices"
 	"sort"
 	"time"
 
@@ -334,7 +333,7 @@ func (m *LocalMatchmaker) processDefault(activeIndexCount int, activeIndexesCopy
 	return matchedEntries, expiredActiveIndexes
 }
 
-func (m *LocalMatchmaker) processCustom(activeIndexesCopy map[string]*MatchmakerIndex, indexCount int, indexesCopy map[string]*MatchmakerIndex) ([][]*MatchmakerEntry, []string) {
+func (m *LocalMatchmaker) processOverride(activeIndexesCopy map[string]*MatchmakerIndex, indexCount int, indexesCopy map[string]*MatchmakerIndex) ([][]*MatchmakerEntry, []string) {
 	matchedEntries := make([][]*MatchmakerEntry, 0, 5)
 	expiredActiveIndexes := make([]string, 0, 10)
 
@@ -350,9 +349,6 @@ func (m *LocalMatchmaker) processCustom(activeIndexesCopy map[string]*Matchmaker
 		index.Intervals++
 	}
 
-	seenCandidateSet := make(map[uint64]struct{}, len(activeIndexesCopy))
-	duplicateCount := 0
-
 	for ticket, index := range activeIndexesCopy {
 		if !threshold && timer != nil {
 			select {
@@ -362,7 +358,7 @@ func (m *LocalMatchmaker) processCustom(activeIndexesCopy map[string]*Matchmaker
 			}
 		}
 
-		lastInterval := index.Intervals >= m.config.GetMatchmaker().MaxIntervals
+		lastInterval := index.Intervals >= m.config.GetMatchmaker().MaxIntervals || index.MinCount == index.MaxCount
 		if lastInterval {
 			// Drop from active indexes if it has reached its max intervals, or if its min/max counts are equal. In the
 			// latter case keeping it active would have the same result as leaving it in the pool, so this saves work.
@@ -471,20 +467,6 @@ func (m *LocalMatchmaker) processCustom(activeIndexesCopy map[string]*Matchmaker
 			hitIndexes = append(hitIndexes, hitIndex)
 		}
 
-		// Sort the hit indexes by their created_at timestamp, so that we can
-		// prioritize newer tickets
-
-		slices.SortFunc(hitIndexes, func(a, b *MatchmakerIndex) int {
-			return int(b.CreatedAt - a.CreatedAt)
-		})
-
-		if len(hitIndexes) > 24 {
-			// take the oldest 8 hits, and the newest 16 hits, without overlapping
-			indexes := hitIndexes[:8]
-			indexes = append(indexes, hitIndexes[len(hitIndexes)-16:]...)
-			hitIndexes = indexes
-		}
-
 		for hitIndexes := range combineIndexes(hitIndexes, index.MinCount-index.Count, index.MaxCount-index.Count) {
 			// Check the min and max counts are met across the hit.
 			var hitCount int
@@ -579,15 +561,6 @@ func (m *LocalMatchmaker) processCustom(activeIndexesCopy map[string]*Matchmaker
 			// Include the active index that was the root of this potential match.
 			matchedEntry = append(matchedEntry, index.Entries...)
 
-			// Avoid duplicate matches.
-			rosterKey := HashMatchmakerEntries(matchedEntry)
-			if _, found := seenCandidateSet[rosterKey]; found {
-				duplicateCount++
-				continue
-			} else {
-				seenCandidateSet[rosterKey] = struct{}{}
-			}
-
 			matchedEntries = append(matchedEntries, matchedEntry)
 		}
 	}
@@ -620,6 +593,40 @@ func (m *LocalMatchmaker) processCustom(activeIndexesCopy map[string]*Matchmaker
 	}
 
 	return matchedEntries, expiredActiveIndexes
+}
+
+func (m *LocalMatchmaker) processCustom(indexesCopy map[string]*MatchmakerIndex) [][]*MatchmakerEntry {
+	entries := make([]*MatchmakerEntry, 0, len(indexesCopy))
+	for _, index := range indexesCopy {
+		index.Intervals++
+
+		entries = append(entries, index.Entries...)
+	}
+
+	matchedEntries := m.runtime.matchmakerProcessorFunction(m.ctx, entries)
+
+	// Allow the custom function to determine which of the matches should be formed. All others will be discarded.
+	var batchSize int
+	var selectedTickets = map[string]string{}
+	batch := bluge.NewBatch()
+	// Mark tickets as unavailable for further use in this process iteration.
+	for _, matchedEntry := range matchedEntries {
+		for _, ticket := range matchedEntry {
+			if _, found := selectedTickets[ticket.Ticket]; found {
+				continue
+			}
+			selectedTickets[ticket.Ticket] = ticket.Ticket
+			batchSize++
+			batch.Delete(bluge.Identifier(ticket.Ticket))
+		}
+	}
+	if batchSize > 0 {
+		if err := m.indexWriter.Batch(batch); err != nil {
+			m.logger.Error("error deleting matchmaker process entries batch", zap.Error(err))
+		}
+	}
+
+	return matchedEntries
 }
 
 func combineIndexes(from []*MatchmakerIndex, min, max int) <-chan []*MatchmakerIndex {

@@ -97,7 +97,7 @@ func (e NewLocationError) Error() string {
 }
 
 // loginRequest handles the login request from the client.
-func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
+func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, session *sessionEVR, in evr.Message) error {
 	request := in.(*evr.LoginRequest)
 
 	if s := ServiceSettings(); s.DisableLoginMessage != "" {
@@ -249,7 +249,7 @@ func formatLoginErrorMessage(xpID evr.EvrId, discordID string, err error) string
 	return errContent
 }
 
-func (p *EvrPipeline) processLoginRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, params *SessionParameters) error {
+func (p *EvrPipeline) processLoginRequest(ctx context.Context, logger *zap.Logger, session *sessionEVR, params *SessionParameters) error {
 
 	var err error
 	if err = p.authenticateSession(ctx, logger, session, params); err != nil {
@@ -277,7 +277,7 @@ func (p *EvrPipeline) processLoginRequest(ctx context.Context, logger *zap.Logge
 }
 
 // authenticateSession handles the authentication of the login connection.
-func (p *EvrPipeline) authenticateSession(ctx context.Context, logger *zap.Logger, session *sessionWS, params *SessionParameters) (err error) {
+func (p *EvrPipeline) authenticateSession(ctx context.Context, logger *zap.Logger, session *sessionEVR, params *SessionParameters) (err error) {
 
 	metricsTags := params.MetricsTags()
 
@@ -397,7 +397,7 @@ func (p *EvrPipeline) authenticateSession(ctx context.Context, logger *zap.Logge
 	return nil
 }
 
-func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, session *sessionWS, params *SessionParameters) error {
+func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, session *sessionEVR, params *SessionParameters) error {
 
 	var err error
 
@@ -528,7 +528,7 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 	return nil
 }
 
-func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger, session *sessionWS, params *SessionParameters) error {
+func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger, session *sessionEVR, params *SessionParameters) error {
 	var err error
 	serviceSettings := ServiceSettings()
 	// Enable session debugging if the account metadata or global settings have Debug set.
@@ -807,7 +807,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	return nil
 }
 
-func (p *EvrPipeline) channelInfoRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
+func (p *EvrPipeline) channelInfoRequest(ctx context.Context, logger *zap.Logger, session *sessionEVR, in evr.Message) error {
 	_ = in.(*evr.ChannelInfoRequest)
 
 	params, ok := LoadParams(ctx)
@@ -856,7 +856,7 @@ func (p *EvrPipeline) channelInfoRequest(ctx context.Context, logger *zap.Logger
 	return session.SendEvrUnrequire(message)
 }
 
-func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) (err error) {
+func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionEVR, in evr.Message) (err error) {
 	request := in.(*evr.LoggedInUserProfileRequest)
 	// Start a timer to add to the metrics
 	timer := time.Now()
@@ -894,7 +894,7 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 	return session.SendEvr(evr.NewLoggedInUserProfileSuccess(request.EvrID, clientProfile, serverProfile))
 }
 
-func (p *EvrPipeline) updateClientProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
+func (p *EvrPipeline) updateClientProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionEVR, in evr.Message) error {
 	request := in.(*evr.UpdateClientProfile)
 
 	if err := p.handleClientProfileUpdate(ctx, logger, session, request.XPID, request.Payload); err != nil {
@@ -906,7 +906,7 @@ func (p *EvrPipeline) updateClientProfileRequest(ctx context.Context, logger *za
 	return session.SendEvrUnrequire(evr.NewUpdateProfileSuccess(&request.XPID))
 }
 
-func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap.Logger, session *sessionWS, evrID evr.EvrId, update evr.ClientProfile) error {
+func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap.Logger, session *sessionEVR, evrID evr.EvrId, update evr.ClientProfile) error {
 	// Set the EVR ID from the context
 	update.EvrID = evrID
 
@@ -974,7 +974,7 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 	return nil
 }
 
-func (p *EvrPipeline) remoteLogSetv3(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
+func (p *EvrPipeline) remoteLogSetv3(ctx context.Context, logger *zap.Logger, session *sessionEVR, in evr.Message) error {
 	request := in.(*evr.RemoteLogSet)
 
 	go func() {
@@ -986,7 +986,7 @@ func (p *EvrPipeline) remoteLogSetv3(ctx context.Context, logger *zap.Logger, se
 	return nil
 }
 
-func (p *EvrPipeline) documentRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
+func (p *EvrPipeline) documentRequest(ctx context.Context, logger *zap.Logger, session *sessionEVR, in evr.Message) error {
 	request := in.(*evr.DocumentRequest)
 
 	params, ok := LoadParams(ctx)
@@ -1096,7 +1096,7 @@ func (p *EvrPipeline) generateEULA(ctx context.Context, logger *zap.Logger, lang
 	return document, nil
 }
 
-func (p *EvrPipeline) genericMessage(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
+func (p *EvrPipeline) genericMessage(ctx context.Context, logger *zap.Logger, session *sessionEVR, in evr.Message) error {
 	request := in.(*evr.GenericMessage)
 	logger.Debug("Received generic message", zap.Any("message", request))
 
@@ -1124,7 +1124,7 @@ func mostRecentThursday() time.Time {
 
 // A profile update request is sent from the game server's login connection.
 // It is sent 45 seconds before the sessionend is sent, right after the match ends.
-func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
+func (p *EvrPipeline) userServerProfileUpdateRequest(ctx context.Context, logger *zap.Logger, session *sessionEVR, in evr.Message) error {
 	request := in.(*evr.UserServerProfileUpdateRequest)
 
 	if data, err := json.MarshalIndent(in, "", "  "); err != nil {
@@ -1260,7 +1260,7 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 	})
 }
 
-func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
+func (p *EvrPipeline) otherUserProfileRequest(ctx context.Context, logger *zap.Logger, session *sessionEVR, in evr.Message) error {
 	request := in.(*evr.OtherUserProfileRequest)
 
 	tags := map[string]string{

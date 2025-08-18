@@ -155,7 +155,7 @@ func generateLinkCode() string {
 	return string(code)
 }
 
-func (p *EvrPipeline) evrStorageObjectDefault(session *sessionWS, collection string, key string, defaultFn func() evr.Document) interface{} {
+func (p *EvrPipeline) evrStorageObjectDefault(session *sessionEVR, collection string, key string, defaultFn func() evr.Document) interface{} {
 	ctx := session.Context()
 	logger := session.logger
 	var document evr.Document

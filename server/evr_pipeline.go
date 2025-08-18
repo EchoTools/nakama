@@ -403,7 +403,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 		return true
 	}
 
-	var pipelineFn func(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error
+	var pipelineFn func(ctx context.Context, logger *zap.Logger, session *sessionEVR, in evr.Message) error
 
 	isAuthenticationRequired := true
 
@@ -458,7 +458,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 		pipelineFn = p.lobbyPendingSessionCancel
 
 	default:
-		pipelineFn = func(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
+		pipelineFn = func(ctx context.Context, logger *zap.Logger, session *sessionEVR, in evr.Message) error {
 			logger.Warn("Received unhandled message", zap.Any("message", in))
 			return nil
 		}
@@ -486,7 +486,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 				case evr.LobbySessionRequest:
 					// associate lobby session with login session
 					// If the message is an identifying message, validate the session and evr id.
-					if err := LobbySession(session.(*sessionWS), p.sessionRegistry, idmessage.GetLoginSessionID()); err != nil {
+					if err := LobbySession(session.(*sessionEVR), p.sessionRegistry, idmessage.GetLoginSessionID()); err != nil {
 						logger.Error("Invalid session", zap.Error(err))
 						// Disconnect the client if the session is invalid.
 						return false
@@ -537,7 +537,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 		logger = logger.With(zap.String("uid", session.UserID().String()), zap.String("sid", session.ID().String()), zap.String("username", session.Username()), zap.String("evrid", params.xpID.String()))
 	}
 
-	if err := pipelineFn(session.Context(), logger, session.(*sessionWS), in); err != nil {
+	if err := pipelineFn(session.Context(), logger, session.(*sessionEVR), in); err != nil {
 		// Unwrap the error
 		logger.Error("Pipeline error", zap.Error(err))
 		// TODO: Handle errors and close the connection
@@ -547,7 +547,7 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 }
 
 // Process outgoing protobuf envelopes and translate them to Evr messages
-func ProcessOutgoing(logger *zap.Logger, session *sessionWS, in *nkrtapi.Envelope) ([]evr.Message, error) {
+func ProcessOutgoing(logger *zap.Logger, session *sessionEVR, in *nkrtapi.Envelope) ([]evr.Message, error) {
 	p := session.evrPipeline
 
 	switch in.Message.(type) {
@@ -736,7 +736,7 @@ func (p *EvrPipeline) ProcessProtobufRequest(logger *zap.Logger, session Session
 		return fmt.Errorf("received empty protobuf message")
 	}
 
-	var pipelineFn func(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope) error
+	var pipelineFn func(logger *zap.Logger, session *sessionEVR, in *rtapi.Envelope) error
 
 	// Process the request based on its type
 	switch in.Message.(type) {
@@ -753,7 +753,7 @@ func (p *EvrPipeline) ProcessProtobufRequest(logger *zap.Logger, session Session
 		return fmt.Errorf("unhandled protobuf message type: %T", in.Message)
 	}
 
-	if err := pipelineFn(logger, session.(*sessionWS), in); err != nil {
+	if err := pipelineFn(logger, session.(*sessionEVR), in); err != nil {
 		logger.Error("Failed to process protobuf message", zap.Any("envelope", in), zap.Error(err))
 		return err
 	}

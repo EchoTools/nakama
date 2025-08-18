@@ -16,7 +16,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func (p *EvrPipeline) lobbyFindSpectate(ctx context.Context, logger *zap.Logger, session *sessionWS, params *LobbySessionParameters) error {
+func (p *EvrPipeline) lobbyFindSpectate(ctx context.Context, logger *zap.Logger, session *sessionEVR, params *LobbySessionParameters) error {
 
 	var (
 		limit   = 100

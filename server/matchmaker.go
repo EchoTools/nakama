@@ -17,12 +17,9 @@ package server
 import (
 	"context"
 	"fmt"
+	"google.golang.org/protobuf/types/known/timestamppb"
 	"sync"
 	"time"
-
-	"google.golang.org/protobuf/types/known/timestamppb"
-
-	"maps"
 
 	"github.com/blugelabs/bluge"
 	"github.com/gofrs/uuid/v5"
@@ -89,6 +86,9 @@ func (m *MatchmakerEntry) GetProperties() map[string]interface{} {
 }
 func (m *MatchmakerEntry) GetPartyId() string {
 	return m.PartyId
+}
+func (m *MatchmakerEntry) GetCreateTime() int64 {
+	return m.CreateTime
 }
 
 type MatchmakerIndex struct {
@@ -272,8 +272,6 @@ type LocalMatchmaker struct {
 	revThresholdFn func() *time.Timer
 }
 
-var matchmakerProcessMu = &sync.Mutex{}
-
 func NewLocalMatchmaker(logger, startupLogger *zap.Logger, config Config, router MessageRouter, metrics Metrics, runtime *Runtime) Matchmaker {
 	cfg := BlugeInMemoryConfig()
 	indexWriter, err := bluge.OpenWriter(cfg)
@@ -319,10 +317,7 @@ func NewLocalMatchmaker(logger, startupLogger *zap.Logger, config Config, router
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				matchmakerProcessMu.Lock()
-				// Check if the matchmaker is active.
 				m.Process()
-				matchmakerProcessMu.Unlock()
 			}
 		}
 	}()
@@ -364,7 +359,9 @@ func (m *LocalMatchmaker) Process() {
 	indexCount = len(m.indexes)
 
 	activeIndexesCopy := make(map[string]*MatchmakerIndex, activeIndexCount)
-	maps.Copy(activeIndexesCopy, m.activeIndexes)
+	for ticket, activeIndex := range m.activeIndexes {
+		activeIndexesCopy[ticket] = activeIndex
+	}
 	var oldestTicketCreatedAt int64
 	indexesCopy := make(map[string]*MatchmakerIndex, indexCount)
 	for ticket, index := range m.indexes {
@@ -410,8 +407,10 @@ func (m *LocalMatchmaker) Process() {
 	// Run the custom matching function if one is registered in the runtime, otherwise use the default process function.
 	var matchedEntries [][]*MatchmakerEntry
 	var expiredActiveIndexes []string
-	if m.runtime.matchmakerOverrideFunction != nil {
-		matchedEntries, expiredActiveIndexes = m.processCustom(activeIndexesCopy, indexCount, indexesCopy)
+	if m.runtime.matchmakerProcessorFunction != nil {
+		matchedEntries = m.processCustom(indexesCopy)
+	} else if m.runtime.matchmakerOverrideFunction != nil {
+		matchedEntries, expiredActiveIndexes = m.processOverride(activeIndexesCopy, indexCount, indexesCopy)
 	} else {
 		matchedEntries, expiredActiveIndexes = m.processDefault(activeIndexCount, activeIndexesCopy, indexCount, indexesCopy)
 	}

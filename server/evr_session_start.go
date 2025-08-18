@@ -14,7 +14,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-func EVRSessionConsume(s *sessionWS) {
+func EVRSessionConsume(s *sessionEVR) {
 	// Fire an event for session start.
 	if fn := s.runtime.EventSessionStart(); fn != nil {
 		fn(s.userID.String(), s.username.Load(), s.vars, s.expiry, s.id.String(), s.clientIP, s.clientPort, s.lang, time.Now().UTC().Unix())

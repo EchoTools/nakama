@@ -60,7 +60,7 @@ func createTestMatchmakerWithOverride(t fatalable, logger *zap.Logger, tickerAct
 		t.Fatalf("error creating test match registry: %v", err)
 	}
 
-	rt, _, err := NewRuntime(context.Background(), logger, logger, nil, jsonpbMarshaler, jsonpbUnmarshaler, cfg, "", nil, nil, nil, nil, sessionRegistry, nil, nil, nil, tracker, metrics, nil, messageRouter, storageIdx, nil)
+	rt, _, err := NewRuntime(context.Background(), logger, logger, nil, jsonpbMarshaler, jsonpbUnmarshaler, cfg, "", nil, nil, nil, nil, sessionRegistry, nil, nil, nil, nil, tracker, metrics, nil, messageRouter, storageIdx, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

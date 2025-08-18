@@ -26,7 +26,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
-func NewSocketWsAcceptor(logger *zap.Logger, config Config, sessionRegistry SessionRegistry, sessionCache SessionCache, statusRegistry StatusRegistry, matchmaker Matchmaker, tracker Tracker, metrics Metrics, runtime *Runtime, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, pipeline *Pipeline, evrPipeline *EvrPipeline, storageIndex StorageIndex) func(http.ResponseWriter, *http.Request) {
+func NewSocketWsAcceptor(logger *zap.Logger, config Config, sessionRegistry SessionRegistry, sessionCache SessionCache, statusRegistry StatusRegistry, matchmaker Matchmaker, tracker Tracker, metrics Metrics, runtime *Runtime, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, pipeline *Pipeline) func(http.ResponseWriter, *http.Request) {
 	upgrader := &websocket.Upgrader{
 		ReadBufferSize:  config.GetSocket().ReadBufferSizeBytes,
 		WriteBufferSize: config.GetSocket().WriteBufferSizeBytes,
@@ -47,8 +47,6 @@ func NewSocketWsAcceptor(logger *zap.Logger, config Config, sessionRegistry Sess
 			format = SessionFormatJson
 		case "protobuf":
 			format = SessionFormatProtobuf
-		case "evr":
-			format = SessionFormatEVR
 		default:
 			// Invalid values are rejected.
 			http.Error(w, "Invalid format parameter", 400)
@@ -73,26 +71,10 @@ func NewSocketWsAcceptor(logger *zap.Logger, config Config, sessionRegistry Sess
 			http.Error(w, "Missing or invalid token", 401)
 			return
 		}
-
-		var (
-			ok       bool              = false
-			userID   uuid.UUID         = uuid.Nil
-			username string            = ""
-			vars     map[string]string = nil
-			expiry   int64             = 0
-		)
-		switch format {
-		case SessionFormatEVR:
-			if token != config.GetSocket().ServerKey {
-				http.Error(w, "Missing or invalid token", 401)
-				return
-			}
-		default:
-			userID, username, vars, expiry, _, _, ok = parseToken([]byte(config.GetSession().EncryptionKey), token)
-			if !ok || !sessionCache.IsValidSession(userID, expiry, token) {
-				http.Error(w, "Missing or invalid token", 401)
-				return
-			}
+		userID, username, vars, expiry, tokenId, issuedAt, ok := parseToken([]byte(config.GetSession().EncryptionKey), token)
+		if !ok || !sessionCache.IsValidSession(userID, expiry, token) {
+			http.Error(w, "Missing or invalid token", 401)
+			return
 		}
 
 		// Extract lang query parameter. Use a default if empty or not present.
@@ -116,41 +98,36 @@ func NewSocketWsAcceptor(logger *zap.Logger, config Config, sessionRegistry Sess
 		// Mark the start of the session.
 		metrics.CountWebsocketOpened(1)
 
-		// TODO Add a preliminary EVR consumer to handle the first "authenticating" messages from the client and then
-		// hands off the authenticated session to the main consumer.
-
 		// Wrap the connection for application handling.
-		session := NewSessionWS(logger, config, format, sessionID, userID, username, vars, expiry, clientIP, clientPort, lang, protojsonMarshaler, protojsonUnmarshaler, conn, sessionRegistry, statusRegistry, matchmaker, tracker, metrics, pipeline, evrPipeline, runtime, *r, storageIndex)
+		session := NewSessionWS(logger, config, format, sessionID, userID, username, tokenId, vars, expiry, issuedAt, clientIP, clientPort, lang, protojsonMarshaler, protojsonUnmarshaler, conn, sessionRegistry, statusRegistry, matchmaker, tracker, metrics, pipeline, runtime)
 
 		// Add to the session registry.
 		sessionRegistry.Add(session)
 
 		// Register initial status tracking and presence(s) for this session.
 		statusRegistry.Follow(sessionID, map[uuid.UUID]struct{}{userID: {}})
-		if format != SessionFormatEVR { // Evr sessions are authenticated in-band.
-
-			if status {
-				// Both notification and status presence.
-				tracker.TrackMulti(session.Context(), sessionID, []*TrackerOp{
-					{
-						Stream: PresenceStream{Mode: StreamModeNotifications, Subject: userID},
-						Meta:   PresenceMeta{Format: format, Username: username, Hidden: true},
-					},
-					{
-						Stream: PresenceStream{Mode: StreamModeStatus, Subject: userID},
-						Meta:   PresenceMeta{Format: format, Username: username, Status: ""},
-					},
-				}, userID)
-			} else {
-				// Only notification presence.
-				tracker.Track(session.Context(), sessionID, PresenceStream{Mode: StreamModeNotifications, Subject: userID}, userID, PresenceMeta{Format: format, Username: username, Hidden: true})
-			}
-
-			if config.GetSession().SingleSocket {
-				// Kick any other sockets for this user.
-				go sessionRegistry.SingleSession(session.Context(), tracker, userID, sessionID)
-			}
+		if status {
+			// Both notification and status presence.
+			tracker.TrackMulti(session.Context(), sessionID, []*TrackerOp{
+				{
+					Stream: PresenceStream{Mode: StreamModeNotifications, Subject: userID},
+					Meta:   PresenceMeta{Format: format, Username: username, Hidden: true},
+				},
+				{
+					Stream: PresenceStream{Mode: StreamModeStatus, Subject: userID},
+					Meta:   PresenceMeta{Format: format, Username: username, Status: ""},
+				},
+			}, userID)
+		} else {
+			// Only notification presence.
+			tracker.Track(session.Context(), sessionID, PresenceStream{Mode: StreamModeNotifications, Subject: userID}, userID, PresenceMeta{Format: format, Username: username, Hidden: true})
 		}
+
+		if config.GetSession().SingleSocket {
+			// Kick any other sockets for this user.
+			go sessionRegistry.SingleSession(session.Context(), tracker, userID, sessionID)
+		}
+
 		// Allow the server to begin processing incoming messages from this session.
 		session.Consume()
 

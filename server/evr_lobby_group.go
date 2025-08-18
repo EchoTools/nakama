@@ -11,7 +11,7 @@ import (
 
 type LobbyGroup struct {
 	sync.RWMutex
-	session *sessionWS
+	session *sessionEVR
 
 	name string
 	ph   *PartyHandler
@@ -67,7 +67,7 @@ func (g *LobbyGroup) PartyStream() PresenceStream {
 	return g.ph.Stream
 }
 
-func JoinPartyGroup(session *sessionWS, groupName string, partyID uuid.UUID, currentMatchID MatchID) (*LobbyGroup, bool, error) {
+func JoinPartyGroup(session *sessionEVR, groupName string, partyID uuid.UUID, currentMatchID MatchID) (*LobbyGroup, bool, error) {
 
 	userPresence := &rtapi.UserPresence{
 		UserId:    session.UserID().String(),

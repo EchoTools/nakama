@@ -142,15 +142,13 @@ func NewLocalStatusRegistry(logger *zap.Logger, config Config, sessionRegistry S
 
 					var err error
 					switch session.Format() {
-					case SessionFormatEVR:
-						err = session.Send(envelope, true)
 					case SessionFormatProtobuf:
 						if payloadProtobuf == nil {
 							// Marshal the payload now that we know this format is needed.
 							payloadProtobuf, err = proto.Marshal(envelope)
 							if err != nil {
 								s.logger.Error("Could not marshal status event", zap.Error(err))
-								continue
+								return
 							}
 						}
 						err = session.SendBytes(payloadProtobuf, true)
@@ -163,7 +161,7 @@ func NewLocalStatusRegistry(logger *zap.Logger, config Config, sessionRegistry S
 								payloadJSON = buf
 							} else {
 								s.logger.Error("Could not marshal status event", zap.Error(err))
-								continue
+								return
 							}
 						}
 						err = session.SendBytes(payloadJSON, true)

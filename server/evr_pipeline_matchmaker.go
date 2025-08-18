@@ -22,7 +22,7 @@ const (
 )
 
 // lobbyMatchmakerStatusRequest is a message requesting the status of the matchmaker.
-func (p *EvrPipeline) lobbyMatchmakerStatusRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
+func (p *EvrPipeline) lobbyMatchmakerStatusRequest(ctx context.Context, logger *zap.Logger, session *sessionEVR, in evr.Message) error {
 	_ = in.(*evr.LobbyMatchmakerStatusRequest)
 
 	// This cannot have an unrequire message, otherwise the client will hang forever with "MATCHMAKING"
@@ -33,7 +33,7 @@ func (p *EvrPipeline) lobbyMatchmakerStatusRequest(ctx context.Context, logger *
 	return nil
 }
 
-func (p *EvrPipeline) lobbySessionRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
+func (p *EvrPipeline) lobbySessionRequest(ctx context.Context, logger *zap.Logger, session *sessionEVR, in evr.Message) error {
 	request := in.(evr.LobbySessionRequest)
 
 	go func() {
@@ -91,7 +91,7 @@ func (p *EvrPipeline) lobbySessionRequest(ctx context.Context, logger *zap.Logge
 }
 
 // lobbyPingResponse is a message responding to a ping request.
-func (p *EvrPipeline) lobbyPingResponse(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
+func (p *EvrPipeline) lobbyPingResponse(ctx context.Context, logger *zap.Logger, session *sessionEVR, in evr.Message) error {
 	response := in.(*evr.LobbyPingResponse)
 
 	var (
@@ -159,12 +159,12 @@ func SendEVRMessages(session Session, unrequire bool, messages ...evr.Message) e
 	return nil
 }
 
-func LeavePartyStream(s *sessionWS) {
+func LeavePartyStream(s *sessionEVR) {
 	s.tracker.UntrackLocalByModes(s.id, map[uint8]struct{}{StreamModeParty: {}}, PresenceStream{})
 }
 
 // LobbyPendingSessionCancel is a message from the server to the client, indicating that the user wishes to cancel matchmaking.
-func (p *EvrPipeline) lobbyPendingSessionCancel(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
+func (p *EvrPipeline) lobbyPendingSessionCancel(ctx context.Context, logger *zap.Logger, session *sessionEVR, in evr.Message) error {
 	// Look up the matching session.
 
 	err := LeaveMatchmakingStream(logger, session)
@@ -176,7 +176,7 @@ func (p *EvrPipeline) lobbyPendingSessionCancel(ctx context.Context, logger *zap
 
 // lobbyPlayerSessionsRequest is called when a client requests the player sessions for a list of XP IDs.
 // Player Sessions are UUIDv5 of the MatchID and EVR-ID
-func (p *EvrPipeline) lobbyPlayerSessionsRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
+func (p *EvrPipeline) lobbyPlayerSessionsRequest(ctx context.Context, logger *zap.Logger, session *sessionEVR, in evr.Message) error {
 	message := in.(*evr.LobbyPlayerSessionsRequest)
 
 	matchID, err := NewMatchID(message.LobbyID, p.node)

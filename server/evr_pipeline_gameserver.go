@@ -51,7 +51,7 @@ func sendDiscordError(e error, discordId string, logger *zap.Logger, bot *discor
 }
 
 // errFailedRegistration sends a failure message to the broadcaster and closes the session
-func errFailedRegistration(session *sessionWS, logger *zap.Logger, err error, code evr.BroadcasterRegistrationFailureCode) error {
+func errFailedRegistration(session *sessionEVR, logger *zap.Logger, err error, code evr.BroadcasterRegistrationFailureCode) error {
 	logger.Warn("Failed to register game server", zap.Error(err))
 	if err := session.SendEvrUnrequire(evr.NewBroadcasterRegistrationFailure(code)); err != nil {
 		return fmt.Errorf("failed to send lobby registration failure: %w", err)
@@ -77,8 +77,8 @@ func errFailedRegistration(session *sessionWS, logger *zap.Logger, err error, co
 //   - geo_precision: Geohash precision (0-12)
 //   - debug: Enable debug mode
 //   - verbose: Enable verbose logging
-func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope) error {
-	request := in.GetGameServerRegistration()
+func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session *sessionEVR, in *rtapi.Envelope) error {
+	request := in.GetGameServerRegistrationRequest()
 	var (
 		loginSessionID = uuid.FromStringOrNil(request.LoginSessionId)
 		serverID       = request.ServerId
@@ -104,7 +104,7 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 			return errFailedRegistration(session, logger, errors.New("failed to get login session"), evr.BroadcasterRegistration_Unknown)
 		}
 
-		if err := Secondary(session, loginSession.(*sessionWS), true, false); err != nil {
+		if err := Secondary(session, loginSession.(*sessionEVR), true, false); err != nil {
 			return errFailedRegistration(session, logger, err, evr.BroadcasterRegistration_Unknown)
 		}
 	}

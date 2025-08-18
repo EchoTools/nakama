@@ -69,8 +69,6 @@ func (r *LocalMessageRouter) SendToPresenceIDs(logger *zap.Logger, presenceIDs [
 
 		var err error
 		switch session.Format() {
-		case SessionFormatEVR:
-			err = session.Send(envelope, true)
 		case SessionFormatProtobuf:
 			if payloadProtobuf == nil {
 				// Marshal the payload now that we know this format is needed.
@@ -120,8 +118,6 @@ func (r *LocalMessageRouter) SendToAll(logger *zap.Logger, envelope *rtapi.Envel
 	r.sessionRegistry.Range(func(session Session) bool {
 		var err error
 		switch session.Format() {
-		case SessionFormatEVR:
-			err = session.Send(envelope, true)
 		case SessionFormatProtobuf:
 			if payloadProtobuf == nil {
 				// Marshal the payload now that we know this format is needed.

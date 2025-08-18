@@ -11,7 +11,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func (p *EvrPipeline) configRequest(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
+func (p *EvrPipeline) configRequest(ctx context.Context, logger *zap.Logger, session *sessionEVR, in evr.Message) error {
 	message := in.(*evr.ConfigRequest)
 
 	// Retrieve the requested object.

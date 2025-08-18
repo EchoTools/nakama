@@ -17,7 +17,7 @@ type NextMatchMetadata struct {
 }
 
 // lobbyJoinSessionRequest is a request to join a specific existing session.
-func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session *sessionWS, lobbyParams *LobbySessionParameters, matchID MatchID) error {
+func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session *sessionEVR, lobbyParams *LobbySessionParameters, matchID MatchID) error {
 
 	label, err := MatchLabelByID(ctx, p.nk, matchID)
 	if err != nil {

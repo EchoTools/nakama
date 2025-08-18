@@ -8,7 +8,7 @@ import (
 )
 
 // ReconcileIAP reconciles an in-app purchase. This is a stub implementation.
-func (p *EvrPipeline) reconcileIAP(ctx context.Context, logger *zap.Logger, session *sessionWS, in evr.Message) error {
+func (p *EvrPipeline) reconcileIAP(ctx context.Context, logger *zap.Logger, session *sessionEVR, in evr.Message) error {
 	request := in.(*evr.ReconcileIAP)
 
 	if err := session.SendEvr(

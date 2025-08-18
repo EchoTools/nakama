@@ -14,7 +14,7 @@ import (
 )
 
 // LobbySession is the matchmaker/lobby connection from the client
-func LobbySession(s *sessionWS, sessionRegistry SessionRegistry, loginSessionID uuid.UUID) error {
+func LobbySession(s *sessionEVR, sessionRegistry SessionRegistry, loginSessionID uuid.UUID) error {
 	if loginSessionID == uuid.Nil {
 		return fmt.Errorf("login session ID is nil")
 	}
@@ -26,7 +26,7 @@ func LobbySession(s *sessionWS, sessionRegistry SessionRegistry, loginSessionID 
 	if s.UserID() == uuid.Nil {
 
 		// Obtain the login session.
-		loginSession, ok := sessionRegistry.Get(loginSessionID).(*sessionWS)
+		loginSession, ok := sessionRegistry.Get(loginSessionID).(*sessionEVR)
 		if !ok || loginSession == nil {
 			return fmt.Errorf("login session not found: %v", loginSessionID)
 		}
@@ -74,18 +74,18 @@ func LobbySession(s *sessionWS, sessionRegistry SessionRegistry, loginSessionID 
 	return nil
 }
 
-func SetSessionWSLogger(s Session, logger *zap.Logger) {
+func SetsessionEVRLogger(s Session, logger *zap.Logger) {
 	if s == nil {
 		return
 	}
-	if ws, ok := s.(*sessionWS); ok {
+	if ws, ok := s.(*sessionEVR); ok {
 		ws.logger = logger
 	} else {
-		s.Logger().Error("SetSessionWSLogger called on non-websocket session")
+		s.Logger().Error("SetsessionEVRLogger called on non-websocket session")
 	}
 }
 
-func BroadcasterSession(s *sessionWS, userID uuid.UUID, username string, serverID uint64) error {
+func BroadcasterSession(s *sessionEVR, userID uuid.UUID, username string, serverID uint64) error {
 	// Broadcaster's are "partial" sessions, and aren't directly associated with the user.
 	// There's no information that directly links this connection to the login connection.
 
@@ -116,7 +116,7 @@ func BroadcasterSession(s *sessionWS, userID uuid.UUID, username string, serverI
 	return nil
 }
 
-func Secondary(s *sessionWS, loginSession *sessionWS, isLobby bool, isServer bool) error {
+func Secondary(s *sessionEVR, loginSession *sessionEVR, isLobby bool, isServer bool) error {
 	// This is a secondary session, so it should inherit the login session's context.
 
 	params, ok := LoadParams(loginSession.Context())

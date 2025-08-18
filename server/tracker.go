@@ -1014,7 +1014,6 @@ func (t *LocalTracker) processEvent(e *PresenceEvent) {
 	// Notify locally hosted authoritative matches of join and leave events.
 	for matchID, joins := range matchJoins {
 		t.matchJoinListener(matchID, joins)
-
 	}
 	for matchID, leaves := range matchLeaves {
 		t.matchLeaveListener(matchID, leaves)
@@ -1137,8 +1136,6 @@ func (t *LocalTracker) processEvent(e *PresenceEvent) {
 
 			var err error
 			switch session.Format() {
-			case SessionFormatEVR:
-				err = session.Send(envelope, true)
 			case SessionFormatProtobuf:
 				if payloadProtobuf == nil {
 					// Marshal the payload now that we know this format is needed.
@@ -1273,15 +1270,13 @@ func (t *LocalTracker) processEvent(e *PresenceEvent) {
 
 			var err error
 			switch session.Format() {
-			case SessionFormatEVR:
-				err = session.Send(envelope, true)
 			case SessionFormatProtobuf:
 				if payloadProtobuf == nil {
 					// Marshal the payload now that we know this format is needed.
 					payloadProtobuf, err = proto.Marshal(envelope)
 					if err != nil {
 						t.logger.Error("Could not marshal presence event", zap.Error(err))
-						continue
+						return
 					}
 				}
 				err = session.SendBytes(payloadProtobuf, true)
@@ -1294,7 +1289,7 @@ func (t *LocalTracker) processEvent(e *PresenceEvent) {
 						payloadJSON = buf
 					} else {
 						t.logger.Error("Could not marshal presence event", zap.Error(err))
-						continue
+						return
 					}
 				}
 				err = session.SendBytes(payloadJSON, true)
