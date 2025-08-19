@@ -22,7 +22,7 @@ const (
 	LoginStorageCollection = "Login"
 	LoginHistoryStorageKey = "history"
 	LoginHistoryCacheIndex = "index_login_cache"
-	MaxCacheSize          = 10000 // Maximum number of cache entries
+	MaxCacheSize           = 10000 // Maximum number of cache entries
 )
 
 var (
@@ -242,12 +242,8 @@ func (h *LoginHistory) Update(xpid evr.EvrId, ip string, loginData *evr.LoginPro
 	}
 
 	h.update(entry, isAuthenticated)
-	
-	// Clean up periodically after every 10 updates
-	h.updateCount++
-	if len(h.PendingAuthorizations) > 0 && (h.updateCount%10) == 0 {
-		h.cleanupPendingAuthorizations()
-	}
+
+	h.cleanupPendingAuthorizations()
 
 	return isNew, allowed
 }
@@ -321,10 +317,10 @@ func (h *LoginHistory) AddPendingAuthorizationIP(xpid evr.EvrId, clientIP string
 	if h.PendingAuthorizations == nil {
 		h.PendingAuthorizations = make(map[string]*LoginHistoryEntry)
 	}
-	
+
 	// Clean up old pending authorizations periodically
 	h.cleanupPendingAuthorizations()
-	
+
 	e := &LoginHistoryEntry{
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
@@ -342,7 +338,7 @@ func (h *LoginHistory) cleanupPendingAuthorizations() {
 	if h.PendingAuthorizations == nil {
 		return
 	}
-	
+
 	cutoff := time.Now().Add(-10 * time.Minute)
 	for ip, e := range h.PendingAuthorizations {
 		if net.ParseIP(ip) == nil || e.CreatedAt.Before(cutoff) {
@@ -410,10 +406,10 @@ func (h *LoginHistory) SearchPatterns() (patterns []string) {
 	if len(h.History) == 0 {
 		return nil
 	}
-	
+
 	patterns = make([]string, 0, len(h.History)*3)
 	seen := make(map[string]struct{}, len(h.History)*3)
-	
+
 	for _, e := range h.History {
 		for _, s := range e.Patterns() {
 			if _, found := seen[s]; !found && !matchIgnoredAltPattern(s) {
@@ -558,7 +554,7 @@ func (h *LoginHistory) rebuildCache() {
 	h.ClientIPs = make(map[string]time.Time, historyLen)
 
 	cacheSet := make(map[string]bool, historyLen*4)
-	
+
 	// Process each history entry in one pass
 	for _, e := range h.History {
 		// Process items for cache
@@ -584,7 +580,7 @@ func (h *LoginHistory) rebuildCache() {
 			}
 		}
 	}
-	
+
 	// Add denied client addresses to cache
 	if h.DeniedClientAddresses != nil {
 		for _, addr := range h.DeniedClientAddresses {
@@ -598,7 +594,7 @@ func (h *LoginHistory) rebuildCache() {
 	// Sort and compact the cache
 	slices.Sort(h.Cache)
 	h.Cache = slices.Compact(h.Cache)
-	
+
 	// Limit cache size to prevent unbounded growth
 	if len(h.Cache) > MaxCacheSize {
 		h.Cache = h.Cache[:MaxCacheSize]
@@ -622,7 +618,7 @@ func (h *LoginHistory) MarshalJSON() ([]byte, error) {
 	var bytes []byte
 	var err error
 	maxSize := 5 * 1024 * 1024
-	
+
 	for {
 		// Rebuild the cache
 		h.rebuildCache()
@@ -657,16 +653,16 @@ func (h *LoginHistory) MarshalJSON() ([]byte, error) {
 		currentSize := len(bytes)
 		excessSize := currentSize - maxSize
 		historyCount := len(h.History)
-		
+
 		if historyCount == 0 {
 			// No more entries to remove, but still too large
 			return bytes, nil
 		}
-		
+
 		// Estimate entries to remove (with safety margin)
 		entriesPerByte := float64(historyCount) / float64(currentSize)
 		entriesToRemove := int(float64(excessSize)*entriesPerByte*1.2) + 1 // 20% safety margin
-		
+
 		if entriesToRemove > historyCount {
 			entriesToRemove = historyCount
 		}
@@ -677,11 +673,11 @@ func (h *LoginHistory) MarshalJSON() ([]byte, error) {
 		// Remove the oldest entries
 		oldestEntries := make([]string, 0, entriesToRemove)
 		oldestTimes := make([]time.Time, 0, entriesToRemove)
-		
+
 		for k, e := range h.History {
 			updateTime := e.UpdatedAt
 			inserted := false
-			
+
 			for i, t := range oldestTimes {
 				if updateTime.Before(t) {
 					// Insert at position i
@@ -691,19 +687,19 @@ func (h *LoginHistory) MarshalJSON() ([]byte, error) {
 					break
 				}
 			}
-			
+
 			if !inserted && len(oldestEntries) < entriesToRemove {
 				oldestEntries = append(oldestEntries, k)
 				oldestTimes = append(oldestTimes, updateTime)
 			}
-			
+
 			// Keep only the entries we need
 			if len(oldestEntries) > entriesToRemove {
 				oldestEntries = oldestEntries[:entriesToRemove]
 				oldestTimes = oldestTimes[:entriesToRemove]
 			}
 		}
-		
+
 		// Remove the oldest entries
 		for _, key := range oldestEntries {
 			delete(h.History, key)
