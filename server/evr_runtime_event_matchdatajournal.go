@@ -68,7 +68,7 @@ func (e *EventMatchDataJournal) addToJournal(ctx context.Context, logger runtime
 	logger.WithField("total_events", len(j.Events)).Debug("Added entry to match data journal")
 
 	// Queue to Redis if we have too many events or the journal is getting old
-	if len(j.Events) >= 100 || time.Since(j.CreatedAt) > 5*time.Minute {
+	if len(j.Events) >= matchDataJournalEventThreshold || time.Since(j.CreatedAt) > matchDataJournalMaxAge {
 		if err := e.queueToRedis(ctx, logger, dispatcher, j); err != nil {
 			logger.WithField("error", err).Warn("Failed to queue journal to Redis")
 		} else {
