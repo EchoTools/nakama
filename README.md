@@ -165,7 +165,7 @@ export DISCORD_BOT_TOKEN="your_discord_bot_token_here"
 export DISCORD_BOT_TOKEN="your_discord_bot_token_here"
 
 # Start Nakama server
-./nakama-debug --name nakama1 \
+./nakama --name nakama1 \
   --database.address postgres:localdb@127.0.0.1:5432/nakama \
   --logger.level INFO
 ```
