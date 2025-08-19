@@ -4,7 +4,7 @@ package evr;
 
 import "google/api/annotations.proto";
 import "evr.proto";
-import "protoc-gen-openapiv2/options/annotations.proto";
+import "github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2/options/annotations.proto";
 
 option go_package = "github.com/heroiclabs/nakama/v3/apigrpc";
 option java_package = "com.heroiclabs.evr.api";
