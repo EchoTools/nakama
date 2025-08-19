@@ -466,215 +466,30 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 	case "igp":
 
 		return d.handleInGamePanelInteraction(i, value)
-
-	case "unlink-vrml-confirm":
-		// Handle VRML unlink confirmation
-		// value format: targetUserID:vrmlUserID
-		parts := strings.SplitN(value, ":", 2)
-		if len(parts) != 2 {
-			return simpleInteractionResponse(s, i, "Invalid button data.")
-		}
-
-		targetUserID := parts[0]
-		vrmlUserID := parts[1]
-
-		// Check that the user clicking the button is a badge admin
-		perms := PermissionsFromContext(ctx)
-		var isMember bool
-		var err error
-		if perms != nil {
-			isMember = perms.IsGlobalBadgeAdmin
-		} else {
-			isMember, err = CheckSystemGroupMembership(ctx, d.db, userID, GroupGlobalBadgeAdmins)
-			if err != nil {
-				return fmt.Errorf("failed to check group membership: %w", err)
-			}
-		}
-		if !isMember {
-			return simpleInteractionResponse(s, i, "You must be a VRML badge admin to perform this action.")
-		}
-
-		// Get the target user's Discord ID for logging
-		targetDiscordID, err := GetDiscordIDByUserID(ctx, d.db, targetUserID)
-		if err != nil {
-			logger.WithField("error", err).Warn("Failed to get target Discord ID")
-			targetDiscordID = "unknown"
-		}
-
-		// Perform the unlink
-		if err := UnlinkVRMLAccount(ctx, nk, targetUserID, vrmlUserID); err != nil {
-			logger.WithFields(map[string]any{
-				"error":            err,
-				"target_user_id":   targetUserID,
-				"vrml_user_id":     vrmlUserID,
-				"admin_discord_id": user.ID,
-			}).Error("Failed to unlink VRML account")
-			return simpleInteractionResponse(s, i, fmt.Sprintf("Failed to unlink VRML account: %v", err))
-		}
-
-		// Log to audit channel
-		auditMessage := fmt.Sprintf("🔓 VRML Account Unlinked\n"+
-			"**Admin:** <@%s> (`%s`)\n"+
-			"**Target:** <@%s> (`%s`)\n"+
-			"**VRML User ID:** `%s`\n"+
-			"**VRML Profile:** https://vrmasterleague.com/Users/%s\n"+
-			"**Time:** <t:%d:F>",
-			user.ID, user.Username,
-			targetDiscordID, targetUserID,
-			vrmlUserID,
-			vrmlUserID,
-			time.Now().Unix(),
-		)
-
-		if err := AuditLogSend(s, ServiceSettings().ServiceAuditChannelID, auditMessage); err != nil {
-			logger.WithField("error", err).Warn("Failed to send audit log")
-		}
-
-		// Send to guild audit channel if available
-		if groupID != "" {
-			gg := d.guildGroupRegistry.Get(groupID)
-			if gg != nil && gg.AuditChannelID != "" {
-				if err := AuditLogSend(s, gg.AuditChannelID, auditMessage); err != nil {
-					logger.WithField("error", err).Warn("Failed to send guild audit log")
-				}
-			}
-		}
-
-		logger.WithFields(map[string]any{
-			"target_user_id":   targetUserID,
-			"vrml_user_id":     vrmlUserID,
-			"admin_discord_id": user.ID,
-			"admin_username":   user.Username,
-		}).Info("VRML account unlinked by admin")
-
-		// Respond to the interaction
-		if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+	case "taxi":
+		// Handle taxi button - create a spark link for the session
+		sessionUUID := strings.ToLower(value)
+		sparkURL := fmt.Sprintf("https://echo.taxi/spark://j/%s", sessionUUID)
+		
+		return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
 				Flags:   discordgo.MessageFlagsEphemeral,
-				Content: fmt.Sprintf("✅ Successfully unlinked VRML account `%s` from <@%s>", vrmlUserID, targetDiscordID),
+				Content: fmt.Sprintf("🚕 **Taxi Link**\n%s", sparkURL),
 			},
-		}); err != nil {
-			return fmt.Errorf("failed to respond to interaction: %w", err)
-		}
-
-		// Disable the button in the original message
-		if i.Message != nil {
-			if _, err := s.ChannelMessageEditComplex(&discordgo.MessageEdit{
-				Channel: i.Message.ChannelID,
-				ID:      i.Message.ID,
-				Components: &[]discordgo.MessageComponent{
-					discordgo.ActionsRow{
-						Components: []discordgo.MessageComponent{
-							discordgo.Button{
-								Label:    "Unlinked",
-								Style:    discordgo.SuccessButton,
-								CustomID: "nil",
-								Disabled: true,
-								Emoji:    &discordgo.ComponentEmoji{Name: "✅"},
-							},
-						},
-					},
-				},
-			}); err != nil {
-				logger.
-					WithField("error", err).
-					WithField("interaction_id", i.ID).
-					WithField("interaction_channel_id", i.ChannelID).
-					WithField("message_channel_id", i.Message.ChannelID).
-					WithField("message_id", i.Message.ID).
-					Warn("Failed to edit message to disable unlink-vrml-confirm button after successful unlink; UI button state may be stale")
-			}
-		}
-
-		return nil
-
-	case "set_ign_override":
-		// Handle set_ign_override button interactions from lookup or IGP
-		// value format: targetDiscordID:targetGuildID
-		parts := strings.SplitN(value, ":", 2)
-		if len(parts) != 2 {
-			return fmt.Errorf("invalid set_ign_override format: expected targetDiscordID:targetGuildID")
-		}
-		targetDiscordID := parts[0]
-		targetGuildID := parts[1]
-
-		targetUserID := d.cache.DiscordIDToUserID(targetDiscordID)
-		targetGroupID := d.cache.GuildIDToGroupID(targetGuildID)
-
-		// Verify caller has permissions
-		callerGuildGroups, err := GuildUserGroupsList(ctx, d.nk, d.guildGroupRegistry, userID)
-		if err != nil {
-			return fmt.Errorf("failed to get guild groups: %w", err)
-		}
-
-		// Resolve caller's guild access with cascade (global ops → auditor → enforcer)
-		access := ResolveCallerGuildAccess(ctx, d.db, userID, targetGroupID, callerGuildGroups)
-		if !access.IsEnforcer {
-			return simpleInteractionResponse(s, i, "You do not have permission to set IGN overrides.")
-		}
-
-		// Load target profile
-		targetProfile, err := EVRProfileLoad(ctx, nk, targetUserID)
-		if err != nil {
-			return fmt.Errorf("failed to load target profile: %w", err)
-		}
-
-		// Get current IGN data
-		groupIGN := targetProfile.GetGroupIGNData(targetGroupID)
-		currentDisplayName := groupIGN.DisplayName
-		if currentDisplayName == "" {
-			// Fallback to username
-			if a, err := nk.AccountGetId(ctx, targetUserID); err == nil {
-				currentDisplayName = a.User.Username
-			}
-		}
-
-		// Show modal with prepopulated data
-		modal := d.createLookupSetIGNModal(currentDisplayName, groupIGN.IsLocked)
-		// Store context in customID for modal submission
-		modal.Data.CustomID = fmt.Sprintf("set_ign_modal:%s:%s", targetDiscordID, targetGuildID)
-		return s.InteractionRespond(i.Interaction, modal)
-
-	case "server_issue_type":
-		// Handle server issue type selection
-		return d.handleServerIssueTypeSelection(ctx, logger, s, i, value)
-
-	case "report_server_issue":
-		// Handle report server issue button clicks
-		// value format: <issue_type>:<matchID>:<serverIP>:<regionCode>
-		parts := strings.SplitN(value, ":", 2)
-		if len(parts) < 2 {
-			return fmt.Errorf("invalid report_server_issue format")
-		}
-		issueType := parts[0]
-		serverContext := parts[1]
-
-		switch issueType {
-		case "lag":
-			return d.handleReportServerIssueLag(ctx, logger, s, i, serverContext)
-		case "other":
-			return d.handleReportServerIssueOther(ctx, logger, s, i, serverContext)
-		default:
-			return fmt.Errorf("unknown issue type: %s", issueType)
-		}
-
-	case "region_fallback":
-		// Handle region fallback button click
-		// Format: region_fallback:<action>:<original_region>:<mode>:<level>:<startTime>:<command_type>
-		return d.handleRegionFallbackInteraction(ctx, logger, s, i, value)
-
-	case "enforcement":
-		// Handle enforcement button interactions (edit, void)
-		return d.handleEnforcementInteraction(ctx, logger, s, i, value)
-	case "enf":
-		// Handle enforcement button interactions (edit, void) - short format
-		return d.handleEnforcementInteraction(ctx, logger, s, i, value)
-
-	case "confirm_shutdown":
-		// Handle shutdown confirmation button click
-		// Format: confirm_shutdown:<matchID>:<disconnectServer>:<graceSeconds>
-		return d.handleConfirmShutdown(ctx, logger, nk, s, i, userID, value)
+		})
+	case "join":
+		// Handle join button - create a direct spark link
+		sessionUUID := strings.ToLower(value)
+		sparkLink := fmt.Sprintf("spark://j/%s", sessionUUID)
+		
+		return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Flags:   discordgo.MessageFlagsEphemeral,
+				Content: fmt.Sprintf("🔗 **Direct Join Link**\n`%s`\n\n*Copy this link and paste it in your browser or EchoVR to join directly*", sparkLink),
+			},
+		})
 	}
 
 	return nil
