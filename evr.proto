@@ -579,7 +579,7 @@ message StreamJoinRequest {
     string session_id = 5;
     string label = 6;
     bool hidden = 7;
-    bool persistance = 8;
+    bool persistence = 8;
     string status = 9;
 }
 
