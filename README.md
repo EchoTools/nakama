@@ -238,7 +238,7 @@ The server includes built-in health check endpoints:
 curl http://127.0.0.1:7350/v2/healthcheck
 
 # Check using the binary
-./nakama-debug healthcheck
+./nakama healthcheck
 ```
 
 ## Game Server Integration
