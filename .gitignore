@@ -2,6 +2,9 @@ nakama
 nakama-debug
 .cookie
 
+# Environment configuration
+.env
+
 vendor/
 go.work
 go.work.sum
@@ -725,4 +728,3 @@ __debug_*
 local.yml
 
 _local/
-

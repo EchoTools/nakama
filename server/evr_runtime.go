@@ -14,6 +14,8 @@ import (
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/jackc/pgtype"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.uber.org/zap"
 
 	"google.golang.org/grpc/codes"
@@ -146,6 +148,11 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		return fmt.Errorf("unable to register /evr/api service: %w", err)
 	}
 
+	// Register HTTP Handler for Discord Linked Roles
+	if err := RegisterDiscordLinkedRolesHandler(ctx, logger, db, nk, initializer); err != nil {
+		return fmt.Errorf("unable to register Discord Linked Roles handler: %w", err)
+	}
+
 	// The statistics queue handles inserting match statistics into the leaderboard records
 	statisticsQueue := NewStatisticsQueue(logger, db, nk)
 
@@ -166,8 +173,58 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		}
 	}
 
+	// Initialize MongoDB client for match summarization
+	var mongoClient *mongo.Client
+	if mongoURI := vars["MONGODB_URI"]; mongoURI != "" {
+		if mongoClient, err = connectMongoDB(ctx, mongoURI); err != nil {
+			logger.Warn("Failed to connect to MongoDB, match summarization will not be available", zap.Error(err))
+		}
+	} else {
+		logger.Info("MongoDB URI not configured, match summarization will not be available")
+	}
+
+	// Initialize event journaling system
+	var eventJournal *EventJournal
+	var telemetryManager *LobbyTelemetryManager
+	var telemetryAPI *TelemetryAPI
+	var matchSummaryStore *MatchSummaryStore
+
+	// Use existing Redis client if available, otherwise try to create a new one
+	var journalRedisClient *redis.Client
+	if vars["JOURNAL_REDIS_URI"] != "" {
+		if journalRedisClient, err = connectRedis(ctx, vars["JOURNAL_REDIS_URI"]); err != nil {
+			logger.Warn("Failed to connect to Redis for event journaling", zap.Error(err))
+		}
+	} else if vars["VRML_REDIS_URI"] != "" {
+		// Reuse VRML Redis connection for journaling if no dedicated URI is provided
+		if journalRedisClient, err = connectRedis(ctx, vars["VRML_REDIS_URI"]); err != nil {
+			logger.Warn("Failed to connect to Redis for event journaling", zap.Error(err))
+		}
+	}
+
+	if journalRedisClient != nil {
+		eventJournal = NewEventJournal(journalRedisClient, logger)
+		telemetryManager = NewLobbyTelemetryManager(nk, logger, eventJournal)
+
+		if mongoClient != nil {
+			matchSummaryStore = NewMatchSummaryStore(mongoClient, "nakama", "match_summaries")
+		}
+
+		telemetryAPI = NewTelemetryAPI(logger, db, nk, telemetryManager, eventJournal, matchSummaryStore)
+
+		// Register telemetry API endpoints
+		if err := telemetryAPI.RegisterTelemetryEndpoints(initializer); err != nil {
+			logger.Warn("Failed to register telemetry API endpoints: %v", err)
+		}
+
+		logger.Info("Event journaling and telemetry systems initialized")
+	} else {
+		logger.Info("Redis not available, event journaling and telemetry systems disabled")
+	}
+
 	// Register the event dispatch
-	eventDispatch, err := NewEventDispatch(ctx, logger, db, nk, initializer, nil, dg, statisticsQueue, vrmlScanQueue)
+
+	eventDispatch, err := NewEventDispatch(ctx, logger, db, nk, initializer, mongoClient, dg, statisticsQueue, vrmlScanQueue)
 	if err != nil {
 		return fmt.Errorf("unable to create event dispatch: %w", err)
 	}
@@ -208,6 +265,22 @@ func connectRedis(ctx context.Context, redisURL string) (*redis.Client, error) {
 		return nil, fmt.Errorf("failed to connect to Redis: %v", err)
 	}
 	return redisClient, nil
+}
+
+// connectMongoDB connects to the MongoDB server using the provided URL and returns a mongo.Client.
+func connectMongoDB(ctx context.Context, mongoURI string) (*mongo.Client, error) {
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI(mongoURI))
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to MongoDB: %v", err)
+	}
+
+	// Ping the database to verify connection
+	if err := client.Ping(ctx, nil); err != nil {
+		client.Disconnect(ctx)
+		return nil, fmt.Errorf("failed to ping MongoDB: %v", err)
+	}
+
+	return client, nil
 }
 
 func createCoreGroups(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) error {

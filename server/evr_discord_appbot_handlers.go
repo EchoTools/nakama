@@ -340,6 +340,30 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 	case "igp":
 
 		return d.handleInGamePanelInteraction(i, value)
+	case "taxi":
+		// Handle taxi button - create a spark link for the session
+		sessionUUID := strings.ToLower(value)
+		sparkURL := fmt.Sprintf("https://echo.taxi/spark://j/%s", sessionUUID)
+		
+		return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Flags:   discordgo.MessageFlagsEphemeral,
+				Content: fmt.Sprintf("🚕 **Taxi Link**\n%s", sparkURL),
+			},
+		})
+	case "join":
+		// Handle join button - create a direct spark link
+		sessionUUID := strings.ToLower(value)
+		sparkLink := fmt.Sprintf("spark://j/%s", sessionUUID)
+		
+		return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Flags:   discordgo.MessageFlagsEphemeral,
+				Content: fmt.Sprintf("🔗 **Direct Join Link**\n`%s`\n\n*Copy this link and paste it in your browser or EchoVR to join directly*", sparkLink),
+			},
+		})
 	}
 
 	return nil
