@@ -218,6 +218,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	}
 
 	// Register the event dispatch
+
 	eventDispatch, err := NewEventDispatch(ctx, logger, db, nk, initializer, mongoClient, dg, statisticsQueue, vrmlScanQueue)
 	if err != nil {
 		return fmt.Errorf("unable to create event dispatch: %w", err)
