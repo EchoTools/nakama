@@ -1,6 +1,6 @@
 module github.com/heroiclabs/nakama/v3
 
-go 1.24.3
+go 1.25.0
 
 require (
 	github.com/anyascii/go v0.3.2
@@ -10,9 +10,8 @@ require (
 	github.com/blugelabs/query_string v0.3.0
 	github.com/dgryski/dgoogauth v0.0.0-20190221195224-5a805980a5f3
 	github.com/dop251/goja v0.0.0-20250309171923-bcd7cc6bf64c
-	github.com/echotools/nevr-common/v3 v3.0.0
+	github.com/echotools/nevr-common/v3 v3.1.0
 	github.com/echotools/vrmlgo/v5 v5.0.1
-	github.com/felixge/httpsnoop v1.0.4
 	github.com/go-redis/redis v6.15.9+incompatible
 	github.com/go-restruct/restruct v1.2.0-alpha
 	github.com/gofrs/uuid/v5 v5.3.2
@@ -47,12 +46,14 @@ require (
 	google.golang.org/genproto/googleapis/api v0.0.0-20250428153025-10db94c68c34
 	google.golang.org/grpc v1.72.0
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.5.1
-	google.golang.org/protobuf v1.36.6
+	google.golang.org/protobuf v1.36.7
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
+	github.com/echotools/nevr-common v1.1.0 // indirect
+	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/jackc/pgio v1.0.0 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/mattn/go-runewidth v0.0.12 // indirect

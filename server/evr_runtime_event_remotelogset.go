@@ -446,11 +446,11 @@ func (s *EventRemoteLogSet) Process(ctx context.Context, logger runtime.Logger, 
 func (s *EventRemoteLogSet) incrementCompletedMatches(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, sessionRegistry SessionRegistry, userID, sessionID string) error {
 	// Decrease the early quitter count for the player
 	eqconfig := NewEarlyQuitConfig()
-	if err := StorageRead(ctx, nk, userID, eqconfig, true); err != nil {
+	if err := StorableRead(ctx, nk, userID, eqconfig, true); err != nil {
 		logger.WithField("error", err).Warn("Failed to load early quitter config")
 	} else {
 		eqconfig.IncrementCompletedMatches()
-		if err := StorageWrite(ctx, nk, userID, eqconfig); err != nil {
+		if err := StorableWrite(ctx, nk, userID, eqconfig); err != nil {
 			logger.WithField("error", err).Warn("Failed to store early quitter config")
 		}
 	}
@@ -597,7 +597,7 @@ func typeStatsToScoreMap(userID, displayName, groupID string, mode evr.Symbol, s
 				continue
 			}
 
-			score, err := Float64ToScore(statValue)
+			score, subscore, err := Float64ToScore(statValue)
 			if err != nil {
 				return nil, fmt.Errorf("failed to convert float64 to int64 pair: %w", err)
 			}
@@ -607,7 +607,7 @@ func typeStatsToScoreMap(userID, displayName, groupID string, mode evr.Symbol, s
 				UserID:      userID,
 				DisplayName: displayName,
 				Score:       score,
-				Subscore:    0,
+				Subscore:    subscore,
 				Metadata:    nil,
 			})
 		}

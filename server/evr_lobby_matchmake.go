@@ -269,15 +269,19 @@ type MatchmakingSettings struct {
 	ExcludedDivisions        []string `json:"excluded_divisions"`        // The division to use
 }
 
-func (MatchmakingSettings) StorageMeta() StorageMeta {
-	return StorageMeta{
+func (MatchmakingSettings) StorageMeta() StorableMetadata {
+	return StorableMetadata{
 		Collection: MatchmakerStorageCollection,
 		Key:        MatchmakingConfigStorageKey,
 	}
 }
 
-func (MatchmakingSettings) StorageIndexes() []StorageIndexMeta {
-	return []StorageIndexMeta{{
+func (m MatchmakingSettings) SetStorageMeta(meta StorableMetadata) {
+	// MatchmakingSettings doesn't track version, so nothing to set
+}
+
+func (MatchmakingSettings) StorageIndexes() []StorableIndexMeta {
+	return []StorableIndexMeta{{
 		Name:           ActivePartyGroupIndex,
 		Collection:     MatchmakerStorageCollection,
 		Key:            MatchmakingConfigStorageKey,
@@ -289,12 +293,12 @@ func (MatchmakingSettings) StorageIndexes() []StorageIndexMeta {
 }
 
 func LoadMatchmakingSettings(ctx context.Context, nk runtime.NakamaModule, userID string) (settings MatchmakingSettings, err error) {
-	err = StorageRead(ctx, nk, userID, &settings, true)
+	err = StorableRead(ctx, nk, userID, &settings, true)
 	return
 }
 
 func StoreMatchmakingSettings(ctx context.Context, nk runtime.NakamaModule, userID string, settings MatchmakingSettings) error {
-	err := StorageWrite(ctx, nk, userID, settings)
+	err := StorableWrite(ctx, nk, userID, settings)
 	return err
 }
 

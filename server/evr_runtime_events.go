@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/go-redis/redis"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -52,6 +53,7 @@ type EventDispatcher struct {
 	nk              runtime.NakamaModule
 	db              *sql.DB
 	mongo           *mongo.Client
+	redis           *redis.Client
 	dg              *discordgo.Session
 	sessionRegistry SessionRegistry
 	matchRegistry   MatchRegistry
@@ -66,13 +68,14 @@ type EventDispatcher struct {
 	playerAuthorizations map[string]map[string]struct{} // map[sessionID]map[groupID]struct{}
 }
 
-func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer, mongoClient *mongo.Client, dg *discordgo.Session, statisticsQueue *StatisticsQueue, vrmlScanQueue *VRMLScanQueue) (*EventDispatcher, error) {
+func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer, mongoClient *mongo.Client, redisClient *redis.Client, dg *discordgo.Session, statisticsQueue *StatisticsQueue, vrmlScanQueue *VRMLScanQueue) (*EventDispatcher, error) {
 
 	dispatch := &EventDispatcher{
 		ctx:             ctx,
 		logger:          logger,
 		db:              db,
 		mongo:           mongoClient,
+		redis:           redisClient,
 		nk:              nk,
 		dg:              dg,
 		sessionRegistry: nk.(*RuntimeGoNakamaModule).sessionRegistry,
@@ -92,6 +95,7 @@ func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		&EventVRMLAccountLink{},
 		&EventRemoteLogSet{},
 		&EventServerProfileUpdate{},
+		&EventMatchDataJournal{},
 	})
 
 	go func() {
@@ -118,8 +122,11 @@ func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 					logger.WithField("event", evt.Name).Debug("event processing took too long, skipping")
 					continue
 				}
-			case <-time.After(30 * time.Second):
+			case <-time.After(eventDispatchTimeout):
+				// Process Redis queue and persist to MongoDB
+				dispatch.processRedisQueue(ctx, logger)
 
+				// Clean up old journals (fallback for any remaining in memory)
 				inserts := make([]any, 0, len(dispatch.matchJournals))
 
 				for k, v := range dispatch.matchJournals {
@@ -128,11 +135,8 @@ func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 						inserts = append(inserts, v)
 					}
 				}
-				if len(inserts) == 0 {
-					continue
-				}
-				if dispatch.mongo != nil {
-					// Push to mongo
+				if len(inserts) > 0 && dispatch.mongo != nil {
+					// Push to mongo directly
 					collection := dispatch.mongo.Database(matchDataDatabaseName).Collection(matchDataCollectionName)
 					if _, err := collection.InsertMany(ctx, inserts); err != nil {
 						logger.WithField("error", err).Error("failed to insert match data")
@@ -177,7 +181,6 @@ func (h *EventDispatcher) processEvent(ctx context.Context, logger runtime.Logge
 		EventSessionStart:           h.eventSessionStart,
 		EventSessionEnd:             h.eventSessionEnd,
 		EventLobbySessionAuthorized: h.handleLobbyAuthorized,
-		EventMatchData:              h.handleMatchEvent,
 	}
 
 	if _, ok := eventMap[evt.Name]; !ok {
@@ -290,13 +293,13 @@ func (h *EventDispatcher) handleLobbyAuthorized(ctx context.Context, logger runt
 		return fmt.Errorf("failed to load guild group: %w", err)
 	}
 
-	if err = StorageRead(ctx, h.nk, userID, loginHistory, true); err != nil {
+	if err = StorableRead(ctx, h.nk, userID, loginHistory, true); err != nil {
 		return fmt.Errorf("failed to load login history: %w", err)
 	}
 
 	if updated := loginHistory.NotifyGroup(groupID, gg.AlternateAccountNotificationExpiry); updated {
 
-		if err := StorageWrite(ctx, h.nk, userID, loginHistory); err != nil {
+		if err := StorableWrite(ctx, h.nk, userID, loginHistory); err != nil {
 			logger.WithField("error", err).Warn("failed to store login history after notify group update")
 		}
 
@@ -366,35 +369,6 @@ func (h *EventDispatcher) alternateLogLineFormatter(userID string, alternates ma
 	}
 
 	return content
-}
-
-func (h *EventDispatcher) handleMatchEvent(ctx context.Context, logger runtime.Logger, evt *api.Event) error {
-	h.Lock()
-	defer h.Unlock()
-	matchID, err := MatchIDFromString(evt.Properties["match_id"])
-	if err != nil {
-		return fmt.Errorf("failed to parse match ID: %w", err)
-	}
-
-	var data = map[string]any{}
-
-	if err := json.Unmarshal([]byte(evt.Properties["payload"]), &data); err != nil {
-		return fmt.Errorf("failed to unmarshal data: %w", err)
-	}
-
-	j, ok := h.matchJournals[matchID]
-	if !ok {
-		h.matchJournals[matchID] = NewMatchDataJournal(matchID)
-		j = h.matchJournals[matchID]
-	}
-
-	j.Events = append(j.Events, &MatchDataJournalEntry{
-		CreatedAt: time.Now().UTC(),
-		Data:      data,
-	})
-	j.UpdatedAt = time.Now().UTC()
-
-	return nil
 }
 
 func AuditLogSendGuild(dg *discordgo.Session, gg *GuildGroup, message string) (*discordgo.Message, error) {
@@ -526,4 +500,51 @@ func ScheduleKick(ctx context.Context, nk runtime.NakamaModule, logger runtime.L
 		AuditLogSend(dg, ServiceSettings().ServiceAuditChannelID, fmt.Sprintf("Disconnected user %s (%s) from %d sessions:\n%s", userID, accountMap[userID].User.Username, len(matchLabels), strings.Join(actions, "\n")))
 
 	}()
+}
+
+func (h *EventDispatcher) getRedisClient() *redis.Client {
+	return h.redis
+}
+
+func (h *EventDispatcher) processRedisQueue(ctx context.Context, logger runtime.Logger) {
+	if h.redis == nil {
+		return
+	}
+
+	queueKey := "match_data_journal_queue"
+	
+	// Process up to 10 items per batch
+	for i := 0; i < redisQueueBatchSize; i++ {
+		result, err := h.redis.BRPop(1*time.Second, queueKey).Result()
+		if err != nil {
+			if err == redis.Nil {
+				// No more items in queue
+				break
+			}
+			logger.WithField("error", err).Warn("Failed to pop from Redis queue")
+			break
+		}
+
+		if len(result) < 2 {
+			logger.Warn("Invalid Redis queue result")
+			continue
+		}
+
+		journalData := result[1]
+		var journal MatchDataJournal
+		if err := json.Unmarshal([]byte(journalData), &journal); err != nil {
+			logger.WithField("error", err).Error("Failed to unmarshal journal from Redis queue")
+			continue
+		}
+
+		// Send persistence event
+		persistEvent := NewEventMatchDataJournalPersist(&journal)
+		if err := SendEvent(ctx, h.nk, persistEvent); err != nil {
+			logger.WithField("error", err).Error("Failed to send persistence event for journal")
+			// Put it back in queue for retry
+			if err := h.redis.LPush(queueKey, journalData).Err(); err != nil {
+				logger.WithField("error", err).Error("Failed to put journal back in queue")
+			}
+		}
+	}
 }

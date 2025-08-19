@@ -44,6 +44,7 @@ const (
 	StreamModeMatchmaking
 	StreamModeGuildGroup
 	StreamModeMatchmaker
+	StreamModeLobbySessionTelemetry
 )
 
 const (
@@ -191,7 +192,7 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 		serverGuilds:         parseUserQueryCommaDelimited(&request, "guilds", 32, guildPattern),
 		serverRegions:        parseUserQueryCommaDelimited(&request, "regions", 32, regionPattern),
 		relayOutgoing:        parseUserQueryFunc(&request, "verbose", 5, nil) == "true",
-		debug:                parseUserQueryFunc(&request, "debug", 5, nil) == "true",
+		enableAllRemoteLogs:  parseUserQueryFunc(&request, "debug", 5, nil) == "true",
 		urlParameters:        urlParams,
 		lastMatchmakingError: atomic.NewError(nil),
 		guildGroups:          make(map[string]*GuildGroup),

@@ -624,9 +624,9 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 
 					eqconfig := NewEarlyQuitConfig()
 					_nk := nk.(*RuntimeGoNakamaModule)
-					if err := StorageRead(ctx, nk, mp.GetUserId(), eqconfig, true); err != nil {
+					if err := StorableRead(ctx, nk, mp.GetUserId(), eqconfig, true); err != nil {
 						logger.Warn("Failed to load early quitter config", zap.Error(err))
-					} else if err := StorageWrite(ctx, nk, mp.GetUserId(), eqconfig); err != nil {
+					} else if err := StorableWrite(ctx, nk, mp.GetUserId(), eqconfig); err != nil {
 						logger.Warn("Failed to write early quitter config", zap.Error(err))
 					} else if s := _nk.sessionRegistry.Get(uuid.FromStringOrNil(mp.GetSessionId())); s != nil {
 						if params, ok := LoadParams(s.Context()); ok {
@@ -924,6 +924,11 @@ func (m *EvrMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, db
 		}).Warn("Match terminating, disconnecting broadcaster.")
 
 		nk.SessionDisconnect(ctx, state.server.GetSessionId(), runtime.PresenceReasonDisconnect)
+	}
+
+	// Cleanup Discord session message if it exists
+	if appBot := globalAppBot.Load(); appBot != nil && appBot.sessionsManager != nil {
+		appBot.sessionsManager.RemoveSessionMessage(state.ID.String())
 	}
 
 	return nil

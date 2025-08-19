@@ -48,10 +48,11 @@ type DiscordAppBot struct {
 	statusRegistry     StatusRegistry
 	guildGroupRegistry *GuildGroupRegistry
 
-	cache       *DiscordIntegrator
-	ipInfoCache *IPInfoCache
-	choiceCache *MapOf[string, []*discordgo.ApplicationCommandOptionChoice]
-	igpRegistry *MapOf[string, *InGamePanel]
+	cache          *DiscordIntegrator
+	ipInfoCache    *IPInfoCache
+	choiceCache    *MapOf[string, []*discordgo.ApplicationCommandOptionChoice]
+	igpRegistry    *MapOf[string, *InGamePanel]
+	sessionsManager *SessionsChannelManager
 
 	debugChannels  map[string]string // map[groupID]channelID
 	userID         string            // Nakama UserID of the bot
@@ -86,6 +87,7 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 		choiceCache:        &MapOf[string, []*discordgo.ApplicationCommandOptionChoice]{},
 
 		igpRegistry:               &MapOf[string, *InGamePanel]{},
+		sessionsManager:           NewSessionsChannelManager(ctx, logger, nk, dg),
 		prepareMatchRatePerSecond: 1.0 / 60,
 		prepareMatchBurst:         1,
 		prepareMatchRateLimiters:  &MapOf[string, *rate.Limiter]{},
@@ -470,7 +472,7 @@ var (
 					Required:    false,
 				},
 				{
-					Type:        discordgo.ApplicationCommandOptionString,
+					Type:        discordgo.ApplicationCommandOptionBoolean,
 					Name:        "allow_private_lobbies",
 					Description: "Limit the user to only joining private lobbies.",
 				},
@@ -620,45 +622,7 @@ var (
 		},
 		{
 			Name:        "set-roles",
-			Description: "link roles to EchoVRCE features. Non-members can only join private matches.",
-			Options: []*discordgo.ApplicationCommandOption{
-				{
-					Type:        discordgo.ApplicationCommandOptionRole,
-					Name:        "member",
-					Description: "If defined, this role allows joining social lobbies, matchmaking, or creating private matches.",
-					Required:    true,
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionRole,
-					Name:        "moderator",
-					Description: "Allowed access to more detailed `/lookup`information and moderation tools.",
-					Required:    true,
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionRole,
-					Name:        "serverhost",
-					Description: "Allowed to host a game server for the guild.",
-					Required:    true,
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionRole,
-					Name:        "suspension",
-					Description: "Disallowed from joining any guild matches.",
-					Required:    true,
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionRole,
-					Name:        "allocator",
-					Description: "Allowed to reserve game servers.",
-					Required:    true,
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionRole,
-					Name:        "is-linked",
-					Description: "Assigned/Removed by Nakama denoting if an account is linked to a headset.",
-					Required:    true,
-				},
-			},
+			Description: "Configure guild roles for EchoVRCE features. Non-members can only join private matches.",
 		},
 		{
 			Name:        "allocate",
@@ -1248,12 +1212,17 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			if displayName == "" || displayName == "-" || displayName == user.Username {
-				delete(md.GuildDisplayNameOverrides, groupID)
+				delete(md.InGameNames, groupID)
 			} else {
-				if md.GuildDisplayNameOverrides == nil {
-					md.GuildDisplayNameOverrides = make(map[string]string)
+				if md.InGameNames == nil {
+					md.InGameNames = make(map[string]GroupInGameName, 1)
 				}
-				md.GuildDisplayNameOverrides[groupID] = displayName
+				// Store the in-game name override for this groupID
+				md.InGameNames[groupID] = GroupInGameName{
+					GroupID:     groupID,
+					DisplayName: displayName,
+					IsOverride:  true,
+				}
 			}
 
 			if err := EVRProfileUpdate(ctx, nk, userID, md); err != nil {
@@ -1881,6 +1850,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return fmt.Errorf("failed to get account metadata: %w", err)
 			}
 
+			if metadata.GamePauseSettings == nil {
+				return fmt.Errorf("GamePauseSettings is nil")
+			}
+
 			embed := &discordgo.MessageEmbed{
 				Title: "Game Settings",
 				Color: 5814783, // A hexadecimal color code
@@ -1958,7 +1931,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			loginHistory := &LoginHistory{}
-			if err := StorageRead(ctx, nk, userIDStr, loginHistory, false); err != nil {
+			if err := StorableRead(ctx, nk, userIDStr, loginHistory, false); err != nil {
 				return fmt.Errorf("failed to load login history: %w", err)
 			}
 
@@ -2400,8 +2373,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			return simpleInteractionResponse(s, i, "No match found.")
 		},
 		"set-roles": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
-			options := i.ApplicationCommandData().Options
-
 			// Ensure the user is the owner of the guild
 			if user == nil || i.Member == nil || i.Member.User.ID == "" || i.GuildID == "" {
 				return nil
@@ -2421,47 +2392,27 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 			}
 
-			// Get the metadata
-			metadata, err := GroupMetadataLoad(ctx, d.db, groupID)
-			if err != nil {
-				return errors.New("failed to get guild group metadata")
+			// Create a message with a "Configure Roles" button
+			response := &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: "Click the button below to configure guild roles for EchoVRCE features.",
+					Components: []discordgo.MessageComponent{
+						discordgo.ActionsRow{
+							Components: []discordgo.MessageComponent{
+								discordgo.Button{
+									Label:    "Configure Roles",
+									Style:    discordgo.PrimaryButton,
+									CustomID: "configure_roles",
+								},
+							},
+						},
+					},
+					Flags: discordgo.MessageFlagsEphemeral,
+				},
 			}
 
-			roles := metadata.RoleMap
-			for _, o := range options {
-				roleID := o.RoleValue(s, guild.ID).ID
-				switch o.Name {
-				case "moderator":
-					roles.Enforcer = roleID
-				case "serverhost":
-					roles.ServerHost = roleID
-				case "suspension":
-					roles.Suspended = roleID
-				case "member":
-					roles.Member = roleID
-				case "allocator":
-					roles.Allocator = roleID
-				case "is_linked":
-					roles.AccountLinked = roleID
-				}
-			}
-
-			data, err := metadata.MarshalToMap()
-			if err != nil {
-				return fmt.Errorf("error marshalling group data: %w", err)
-			}
-
-			if err := nk.GroupUpdate(ctx, groupID, SystemUserID, "", "", "", "", "", false, data, 1000000); err != nil {
-				return fmt.Errorf("error updating group: %w", err)
-			}
-
-			gg, err := GuildGroupLoad(ctx, nk, groupID)
-			if err != nil {
-				return errors.New("failed to load guild group")
-			}
-			d.guildGroupRegistry.Add(gg)
-
-			return simpleInteractionResponse(s, i, "roles set!")
+			return s.InteractionRespond(i.Interaction, response)
 		},
 
 		"region-status": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
@@ -2766,7 +2717,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			outfits := make(Wardrobe)
 
-			if err := StorageRead(ctx, d.nk, userID, outfits, true); err != nil {
+			if err := StorableRead(ctx, d.nk, userID, outfits, true); err != nil {
 				return fmt.Errorf("failed to read saved outfits: %w", err)
 			}
 
@@ -2792,7 +2743,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 					outfits[outfitName] = &metadata.LoadoutCosmetics
 
-					if err := StorageWrite(ctx, d.nk, userID, outfits); err != nil {
+					if err := StorableWrite(ctx, d.nk, userID, outfits); err != nil {
 						return fmt.Errorf("failed to write saved outfits: %w", err)
 					}
 
@@ -2819,7 +2770,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 					delete(outfits, outfitName)
 
-					if err := StorageWrite(ctx, d.nk, userID, outfits); err != nil {
+					if err := StorableWrite(ctx, d.nk, userID, outfits); err != nil {
 						return fmt.Errorf("failed to write saved outfits: %w", err)
 					}
 
@@ -3410,7 +3361,7 @@ func IPVerificationEmbed(entry *LoginHistoryEntry, ipInfo IPInfo) ([]*discordgo.
 
 func (d *DiscordAppBot) interactionToSignature(prefix string, options []*discordgo.ApplicationCommandInteractionDataOption) string {
 	args := make([]string, 0, len(options))
-	sep := ": "
+	sep := "="
 
 	for _, opt := range options {
 		strval := ""
@@ -3420,7 +3371,7 @@ func (d *DiscordAppBot) interactionToSignature(prefix string, options []*discord
 		case discordgo.ApplicationCommandOptionSubCommandGroup:
 			strval = d.interactionToSignature(opt.Name, opt.Options)
 		case discordgo.ApplicationCommandOptionString:
-			strval = "`" + opt.StringValue() + "`"
+			strval = fmt.Sprintf(`"%s"`, EscapeDiscordMarkdown(opt.StringValue()))
 		case discordgo.ApplicationCommandOptionNumber:
 			strval = fmt.Sprintf("%f", opt.FloatValue())
 		case discordgo.ApplicationCommandOptionInteger:
@@ -3439,7 +3390,7 @@ func (d *DiscordAppBot) interactionToSignature(prefix string, options []*discord
 			strval = fmt.Sprintf("unknown type %d", opt.Type)
 		}
 		if strval != "" {
-			args = append(args, fmt.Sprintf("`%s`%s%s", opt.Name, sep, strval))
+			args = append(args, fmt.Sprintf("*%s*%s%s", opt.Name, sep, strval))
 		}
 	}
 
@@ -3459,7 +3410,7 @@ func (d *DiscordAppBot) LogInteractionToChannel(i *discordgo.InteractionCreate, 
 	data := i.ApplicationCommandData()
 	signature := d.interactionToSignature(data.Name, data.Options)
 
-	content := fmt.Sprintf("<@%s> used %s", i.Member.User.ID, signature)
+	content := fmt.Sprintf("%s (<@%s>) used %s", EscapeDiscordMarkdown(InGameName(i.Member)), i.Member.User.ID, signature)
 	d.dg.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
 		Content:         content,
 		AllowedMentions: &discordgo.MessageAllowedMentions{},

@@ -46,7 +46,7 @@ func (e *EventUserAuthenticated) Process(ctx context.Context, logger runtime.Log
 	)
 
 	loginHistory := NewLoginHistory(userID)
-	if err := StorageRead(ctx, nk, userID, loginHistory, true); err != nil {
+	if err := StorableRead(ctx, nk, userID, loginHistory, true); err != nil {
 		return fmt.Errorf("failed to load login history: %w", err)
 	}
 
@@ -60,12 +60,12 @@ func (e *EventUserAuthenticated) Process(ctx context.Context, logger runtime.Log
 		}
 	}
 
-	hasDiabledAlts, err := loginHistory.UpdateAlternates(ctx, nk)
+	hasDiabledAlts, err := loginHistory.UpdateAlternates(ctx, logger, nk)
 	if err != nil {
 		return fmt.Errorf("failed to update alternates: %w", err)
 	}
 
-	if err := StorageWrite(ctx, nk, userID, loginHistory); err != nil {
+	if err := StorableWrite(ctx, nk, userID, loginHistory); err != nil {
 		return fmt.Errorf("failed to store login history: %w", err)
 	}
 

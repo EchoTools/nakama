@@ -1,13 +1,15 @@
 nakama
+nakama-debug
 .cookie
+
+# Environment configuration
+.env
 
 vendor/
 go.work
 go.work.sum
 
 .vscode/
-# Created by https://www.toptal.com/developers/gitignore/api/go,angular,node,intellij+all,visualstudiocode,visualstudio,sublimetext,windows,linux,macos
-# Edit at https://www.toptal.com/developers/gitignore?templates=go,angular,node,intellij+all,visualstudiocode,visualstudio,sublimetext,windows,linux,macos
 
 ### Angular ###
 ## Angular ##
@@ -726,4 +728,3 @@ __debug_*
 local.yml
 
 _local/
-# End of https://www.toptal.com/developers/gitignore/api/go,angular,node,intellij+all,visualstudiocode,visualstudio,sublimetext,windows,linux,macos
