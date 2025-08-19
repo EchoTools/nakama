@@ -78,7 +78,7 @@ func errFailedRegistration(session *sessionWS, logger *zap.Logger, err error, co
 //   - debug: Enable debug mode
 //   - verbose: Enable verbose logging
 func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope) error {
-	request := in.GetGameServerRegistrationRequest()
+	request := in.GetGameServerRegistration()
 	var (
 		loginSessionID = uuid.FromStringOrNil(request.LoginSessionId)
 		serverID       = request.ServerId
