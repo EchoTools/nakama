@@ -112,7 +112,7 @@ func (e *EventMatchDataJournal) queueToRedis(ctx context.Context, logger runtime
 	}
 
 	// Push to Redis queue
-	queueKey := "match_data_journal_queue"
+	queueKey := redisMatchDataJournalQueueKey
 	if err := redisClient.LPush(queueKey, string(journalBytes)).Err(); err != nil {
 		logger.WithField("error", err).Warn("Failed to push to Redis queue, falling back to direct MongoDB")
 		return e.directMongoPersist(ctx, logger, dispatcher, journal)
