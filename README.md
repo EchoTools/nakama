@@ -147,7 +147,7 @@ docker compose up -d postgres
 sleep 30
 
 # Run database migrations
-./nakama-debug migrate up --database.address postgres:localdb@127.0.0.1:5432/nakama
+./nakama migrate up --database.address postgres:localdb@127.0.0.1:5432/nakama
 ```
 
 ### 3. Configure Environment
