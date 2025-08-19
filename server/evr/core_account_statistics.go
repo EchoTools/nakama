@@ -309,14 +309,20 @@ func (s *ArenaStatistics) CalculateFields() {
 	if gamesPlayed > 0 {
 
 		if s.EarlyQuits != nil {
+			// Validate EarlyQuits value to prevent corrupted statistics
+			earlyQuitsValue := s.EarlyQuits.GetValue()
+			if earlyQuitsValue < 0 || earlyQuitsValue > gamesPlayed || earlyQuitsValue > 1e6 {
+				// Invalid value detected, reset to 0
+				earlyQuitsValue = 0
+			}
 
 			s.ArenaTies = &StatisticValue{
-				Value: s.EarlyQuits.Value,
+				Value: earlyQuitsValue,
 				Count: 1,
 			}
 
 			s.EarlyQuitPercentage = &StatisticValue{
-				Value: s.EarlyQuits.GetValue() / gamesPlayed * 100,
+				Value: earlyQuitsValue / gamesPlayed * 100,
 				Count: 1,
 			}
 
