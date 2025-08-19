@@ -337,7 +337,7 @@ make nakama
 make build
 
 # Verify build
-./nakama-debug --version
+./nakama --version
 ```
 
 ### Testing
