@@ -322,7 +322,12 @@ func (sm *SessionsChannelManager) createMatchDetailsEmbed(label *MatchLabel) *di
 			if label.GameState.RoundClock != nil {
 				remainingTime := label.GameState.RoundClock.Duration - label.GameState.RoundClock.Elapsed
 				if remainingTime > 0 {
-					description += fmt.Sprintf("\n2nd Round (~%dm%02ds remaining)", 
+					roundLabel := "Current Round"
+					if label.GameState.RoundNumber > 0 {
+						roundLabel = fmt.Sprintf("%s Round", ordinal(label.GameState.RoundNumber))
+					}
+					description += fmt.Sprintf("\n%s (~%dm%02ds remaining)", 
+						roundLabel, 
 						int(remainingTime.Minutes()), 
 						int(remainingTime.Seconds())%60)
 				}
