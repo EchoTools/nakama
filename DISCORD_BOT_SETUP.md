@@ -35,7 +35,7 @@ Once the bot is in your guild, you need to configure the role mappings using the
 Run the `/set-roles` command and specify the following role mappings:
 
 ```
-/set-roles member:@YourMemberRole moderator:@YourModeratorRole serverhost:@YourServerHostRole suspension:@YourSuspensionRole allocator:@YourAllocatorRole is-linked:@YourLinkedRole
+/set-roles member:YourMemberRole moderator:YourModeratorRole serverhost:YourServerHostRole suspension:YourSuspensionRole allocator:YourAllocatorRole is-linked:YourLinkedRole
 ```
 
 **Role Definitions:**
