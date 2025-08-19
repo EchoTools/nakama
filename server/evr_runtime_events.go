@@ -514,7 +514,7 @@ func (h *EventDispatcher) processRedisQueue(ctx context.Context, logger runtime.
 	queueKey := "match_data_journal_queue"
 	
 	// Process up to 10 items per batch
-	for i := 0; i < 10; i++ {
+	for i := 0; i < redisQueueBatchSize; i++ {
 		result, err := h.redis.BRPop(1*time.Second, queueKey).Result()
 		if err != nil {
 			if err == redis.Nil {
