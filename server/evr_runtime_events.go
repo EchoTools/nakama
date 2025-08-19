@@ -122,7 +122,7 @@ func NewEventDispatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 					logger.WithField("event", evt.Name).Debug("event processing took too long, skipping")
 					continue
 				}
-			case <-time.After(30 * time.Second):
+			case <-time.After(eventDispatchTimeout):
 				// Process Redis queue and persist to MongoDB
 				dispatch.processRedisQueue(ctx, logger)
 
