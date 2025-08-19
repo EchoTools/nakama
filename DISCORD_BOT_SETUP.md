@@ -147,7 +147,7 @@ Users with the **moderator** role have access to additional moderation tools:
 
 - `/badges assign <user> <badges>` - Assign badges to a player (comma-separated list like "p,1,2,5c,6f")
 
-- `/badges link-player <user> <player-id> [force]` - Manually link a VRML player page to a Discord user
+- `/badges link-player <user> <player_id> [force]` - Manually link a VRML player page to a Discord user
 
 - `/stream-list <mode> <subject> [subcontext] [label] [limit]` - List presences for a specific stream (advanced debugging)
 
