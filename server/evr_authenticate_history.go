@@ -243,8 +243,9 @@ func (h *LoginHistory) Update(xpid evr.EvrId, ip string, loginData *evr.LoginPro
 
 	h.update(entry, isAuthenticated)
 	
-	// Clean up periodically (roughly 1 in 10 updates)
-	if len(h.PendingAuthorizations) > 0 && (time.Now().UnixNano()%10) == 0 {
+	// Clean up periodically after every 10 updates
+	h.updateCount++
+	if len(h.PendingAuthorizations) > 0 && (h.updateCount%10) == 0 {
 		h.cleanupPendingAuthorizations()
 	}
 
