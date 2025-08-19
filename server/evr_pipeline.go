@@ -308,8 +308,8 @@ func (p *EvrPipeline) ProcessRequestEVR(logger *zap.Logger, session Session, in 
 		switch msg := in.(type) {
 		case *evr.BroadcasterRegistrationRequest: // Legacy message
 			envelope = &rtapi.Envelope{
-				Message: &rtapi.Envelope_GameServerRegistrationRequest{
-					GameServerRegistrationRequest: &rtapi.GameServerRegistrationMessage{
+				Message: &rtapi.Envelope_GameServerRegistration{
+					GameServerRegistration: &rtapi.GameServerRegistrationMessage{
 						ServerId:          msg.ServerID,
 						InternalIpAddress: msg.InternalIP.String(),
 						Port:              uint32(msg.Port),
@@ -740,14 +740,14 @@ func (p *EvrPipeline) ProcessProtobufRequest(logger *zap.Logger, session Session
 
 	// Process the request based on its type
 	switch in.Message.(type) {
-	case *rtapi.Envelope_GameServerRegistrationRequest:
+	case *rtapi.Envelope_GameServerRegistration:
 		pipelineFn = p.gameserverRegistrationRequest
 	case *rtapi.Envelope_LobbyEntrantConnected:
 		pipelineFn = p.lobbyEntrantConnected
 	case *rtapi.Envelope_LobbySessionEvent:
 		pipelineFn = p.lobbySessionEvent
 	case *rtapi.Envelope_LobbyEntrantRemoved:
-		pipelineFn = p.lobbyEntrantRemoved
+		pipelineFn = p.lobbyEntrantsRemove
 	default:
 		// For all other messages, use the generic protobuf handler
 		return fmt.Errorf("unhandled protobuf message type: %T", in.Message)
