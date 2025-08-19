@@ -42,7 +42,7 @@ func (ej *EventJournal) Journal(ctx context.Context, eventType string, event *Jo
 	}
 
 	streamKey := fmt.Sprintf("events:%s", eventType)
-	
+
 	// Serialize the event
 	eventData, err := json.Marshal(event)
 	if err != nil {
@@ -79,7 +79,7 @@ func (ej *EventJournal) JournalPlayerAction(ctx context.Context, userID, session
 		SessionID: sessionID,
 		MatchID:   matchID,
 		Data: map[string]interface{}{
-			"action": action,
+			"action":  action,
 			"details": data,
 		},
 	}
@@ -108,7 +108,7 @@ func (ej *EventJournal) JournalTelemetry(ctx context.Context, userID, sessionID,
 		UserID:    userID,
 		SessionID: sessionID,
 		Data: map[string]interface{}{
-			"lobby_id": lobbyID,
+			"lobby_id":  lobbyID,
 			"telemetry": telemetryData,
 		},
 	}

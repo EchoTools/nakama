@@ -54,7 +54,7 @@ func (ms *MatchSummaryStore) Store(ctx context.Context, summary *MatchSummary) e
 	if summary.CreatedAt.IsZero() {
 		summary.CreatedAt = summary.UpdatedAt
 	}
-	
+
 	_, err := collection.InsertOne(ctx, summary)
 	return err
 }
@@ -64,7 +64,7 @@ func (ms *MatchSummaryStore) Update(ctx context.Context, matchID string, update 
 	collection := ms.client.Database(ms.database).Collection(ms.collection)
 	filter := bson.M{"match_id": matchID}
 	update["updated_at"] = time.Now()
-	
+
 	_, err := collection.UpdateOne(ctx, filter, bson.M{"$set": update})
 	return err
 }
@@ -73,12 +73,12 @@ func (ms *MatchSummaryStore) Update(ctx context.Context, matchID string, update 
 func (ms *MatchSummaryStore) Get(ctx context.Context, matchID string) (*MatchSummary, error) {
 	collection := ms.client.Database(ms.database).Collection(ms.collection)
 	filter := bson.M{"match_id": matchID}
-	
+
 	var summary MatchSummary
 	err := collection.FindOne(ctx, filter).Decode(&summary)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return &summary, nil
 }

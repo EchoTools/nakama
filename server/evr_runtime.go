@@ -183,7 +183,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	var telemetryManager *LobbyTelemetryManager
 	var telemetryAPI *TelemetryAPI
 	var matchSummaryStore *MatchSummaryStore
-	
+
 	// Use existing Redis client if available, otherwise try to create a new one
 	var journalRedisClient *redis.Client
 	if vars["JOURNAL_REDIS_URI"] != "" {
@@ -200,18 +200,18 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	if journalRedisClient != nil {
 		eventJournal = NewEventJournal(journalRedisClient, logger)
 		telemetryManager = NewLobbyTelemetryManager(nk, logger, eventJournal)
-		
+
 		if mongoClient != nil {
 			matchSummaryStore = NewMatchSummaryStore(mongoClient, "nakama", "match_summaries")
 		}
-		
+
 		telemetryAPI = NewTelemetryAPI(logger, db, nk, telemetryManager, eventJournal, matchSummaryStore)
-		
+
 		// Register telemetry API endpoints
 		if err := telemetryAPI.RegisterTelemetryEndpoints(initializer); err != nil {
 			logger.Warn("Failed to register telemetry API endpoints: %v", err)
 		}
-		
+
 		logger.Info("Event journaling and telemetry systems initialized")
 	} else {
 		logger.Info("Redis not available, event journaling and telemetry systems disabled")
@@ -267,13 +267,13 @@ func connectMongoDB(ctx context.Context, mongoURI string) (*mongo.Client, error)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to MongoDB: %v", err)
 	}
-	
+
 	// Ping the database to verify connection
 	if err := client.Ping(ctx, nil); err != nil {
 		client.Disconnect(ctx)
 		return nil, fmt.Errorf("failed to ping MongoDB: %v", err)
 	}
-	
+
 	return client, nil
 }
 

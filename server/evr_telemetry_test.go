@@ -45,9 +45,9 @@ func (l *testLogger) WithFields(map[string]interface{}) runtime.Logger {
 func TestEventJournal_Journal(t *testing.T) {
 	// Test that event journaling works without Redis (graceful degradation)
 	logger := &testLogger{}
-	
+
 	eventJournal := NewEventJournal(nil, logger)
-	
+
 	event := &JournalEvent{
 		Type:      "test",
 		Timestamp: time.Now(),
@@ -55,12 +55,12 @@ func TestEventJournal_Journal(t *testing.T) {
 		SessionID: "test-session",
 		Data:      map[string]interface{}{"action": "test"},
 	}
-	
+
 	err := eventJournal.Journal(context.Background(), "test_events", event)
 	if err != nil {
 		t.Errorf("Expected no error, got %v", err)
 	}
-	
+
 	// Check that debug message was logged
 	if len(logger.messages) == 0 {
 		t.Error("Expected debug message to be logged")
@@ -82,7 +82,7 @@ func TestMatchSummary_Creation(t *testing.T) {
 		MatchLabel: "arena-public",
 		CreatedAt:  time.Now(),
 	}
-	
+
 	if summary.MatchID != "test-match-123" {
 		t.Errorf("Expected MatchID to be 'test-match-123', got %s", summary.MatchID)
 	}
@@ -115,14 +115,14 @@ func TestTelemetrySubscription_Creation(t *testing.T) {
 	sessionID := uuid.Must(uuid.NewV4())
 	userID := uuid.Must(uuid.NewV4())
 	lobbyID := uuid.Must(uuid.NewV4())
-	
+
 	subscription := &TelemetrySubscription{
 		SessionID: sessionID,
 		UserID:    userID,
 		LobbyID:   lobbyID,
 		Active:    true,
 	}
-	
+
 	if !subscription.Active {
 		t.Error("Expected subscription to be active")
 	}

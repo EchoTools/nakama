@@ -13,12 +13,12 @@ import (
 
 // TelemetryAPI handles telemetry-related HTTP endpoints
 type TelemetryAPI struct {
-	logger             runtime.Logger
-	db                 *sql.DB
-	nk                 runtime.NakamaModule
-	telemetryManager   *LobbyTelemetryManager
-	eventJournal       *EventJournal
-	matchSummaryStore  *MatchSummaryStore
+	logger            runtime.Logger
+	db                *sql.DB
+	nk                runtime.NakamaModule
+	telemetryManager  *LobbyTelemetryManager
+	eventJournal      *EventJournal
+	matchSummaryStore *MatchSummaryStore
 }
 
 // NewTelemetryAPI creates a new TelemetryAPI instance
@@ -219,7 +219,7 @@ func (api *TelemetryAPI) getSessionInfo(r *http.Request) (sessionID, userID uuid
 	// - Session cookies
 	// - JWT tokens
 	// For this implementation, we'll use headers for simplicity
-	
+
 	sessionIDStr := r.Header.Get("X-Session-ID")
 	userIDStr := r.Header.Get("X-User-ID")
 
@@ -244,7 +244,7 @@ func (api *TelemetryAPI) getSessionInfo(r *http.Request) (sessionID, userID uuid
 func (api *TelemetryAPI) writeJSONResponse(w http.ResponseWriter, statusCode int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	
+
 	if err := json.NewEncoder(w).Encode(data); err != nil {
 		api.logger.Error("Failed to encode JSON response: %v", err)
 	}

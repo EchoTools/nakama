@@ -90,7 +90,7 @@ func (ltm *LobbyTelemetryManager) Unsubscribe(ctx context.Context, sessionID, us
 	// Remove subscription
 	if ltm.subscriptions[lobbyID] != nil {
 		delete(ltm.subscriptions[lobbyID], sessionID)
-		
+
 		// Clean up empty lobby subscription map
 		if len(ltm.subscriptions[lobbyID]) == 0 {
 			delete(ltm.subscriptions, lobbyID)
@@ -155,7 +155,7 @@ func (ltm *LobbyTelemetryManager) BroadcastTelemetry(ctx context.Context, lobbyI
 		}
 
 		// Send the telemetry data to the session's stream
-		if err := ltm.nk.StreamUserUpdate(sessionStream.Mode, sessionStream.Subject.String(), sessionStream.Subcontext.String(), sessionStream.Label, 
+		if err := ltm.nk.StreamUserUpdate(sessionStream.Mode, sessionStream.Subject.String(), sessionStream.Subcontext.String(), sessionStream.Label,
 			subscription.UserID.String(), subscription.SessionID.String(), false, false, string(messageBytes)); err != nil {
 			ltm.logger.Warn("Failed to send telemetry to session: session_id=%s, lobby_id=%s, error=%v", sessionID.String(), lobbyID.String(), err)
 			continue
@@ -201,7 +201,7 @@ func (ltm *LobbyTelemetryManager) CleanupSession(ctx context.Context, sessionID,
 	for lobbyID, subscriptions := range ltm.subscriptions {
 		if subscription, exists := subscriptions[sessionID]; exists {
 			delete(subscriptions, sessionID)
-			
+
 			// Clean up empty lobby subscription map
 			if len(subscriptions) == 0 {
 				delete(ltm.subscriptions, lobbyID)
