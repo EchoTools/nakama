@@ -43,7 +43,7 @@ func EnsureMatchDataIndexes(ctx context.Context, mongoClient *mongo.Client) erro
 		Options: options.Index().
 			SetBackground(true).
 			SetName("created_at_ttl").
-			SetExpireAfterSeconds(30 * 24 * 60 * 60), // 30 days
+			SetExpireAfterSeconds(int32(30 * 24 * time.Hour.Seconds())), // 30 days
 	}
 
 	indexes := []mongo.IndexModel{
