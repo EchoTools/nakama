@@ -125,7 +125,7 @@ func (p *EvrPipeline) lobbyEntrantConnected(logger *zap.Logger, session *session
 	return session.SendEvr(messages...)
 }
 
-func (p *EvrPipeline) lobbyEntrantRemoved(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope) error {
+func (p *EvrPipeline) lobbyEntrantsRemove(logger *zap.Logger, session *sessionWS, in *rtapi.Envelope) error {
 	message := in.GetLobbyEntrantRemoved()
 	matchID, _ := NewMatchID(uuid.FromStringOrNil(message.LobbySessionId), p.node)
 	presence, err := PresenceByEntrantID(p.nk, matchID, uuid.FromStringOrNil(message.EntrantId))
