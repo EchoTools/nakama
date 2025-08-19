@@ -136,11 +136,11 @@ Users with the **moderator** role have access to additional moderation tools:
 - `/join-player <user> <reason>` - Join a player's game session as a moderator for supervision or assistance
 
 ### Match Management
-- `/shutdown-match <match-id> <reason> [disconnect-game-server] [grace-seconds]` - Shutdown a match or game server:
-  - **match-id**: Match ID or Game Server ID to shutdown
+- `/shutdown-match <match_id> <reason> [disconnect_game_server] [grace_seconds]` - Shutdown a match or game server:
+  - **match_id**: Match ID or Game Server ID to shutdown
   - **reason**: Reason for the shutdown (logged)
-  - **disconnect-game-server**: Whether to disconnect the server completely
-  - **grace-seconds**: Seconds to wait before forcing shutdown
+  - **disconnect_game_server**: Whether to disconnect the server completely
+  - **grace_seconds**: Seconds to wait before forcing shutdown
 
 ### Advanced Tools
 - `/igp` - Enable the gold nametag (In-Game Panel) for your current session to identify yourself as a moderator in-game
