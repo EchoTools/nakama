@@ -61,7 +61,38 @@ func (ti *TelemetryIntegration) HandleMatchEnd(ctx context.Context, matchID stri
 	}
 
 	// Calculate ping statistics (example implementation)
-	minPing, maxPing, avgPing := 10, 50, 25.5
+// HandleMatchEnd processes match end events and creates match summaries
+// Added playerPings: map from playerID to slice of ping samples (float64)
+func (ti *TelemetryIntegration) HandleMatchEnd(ctx context.Context, matchID string, players []string, duration int, label string, playerPings map[string][]float64) error {
+	if ti.matchSummaryStore == nil {
+		return nil // Graceful degradation when MongoDB is not available
+	}
+
+	// Calculate ping statistics from playerPings
+	var minPing, maxPing, avgPing float64
+	var pingCount int
+	var pingSum float64
+	minPing = -1
+	maxPing = -1
+	for _, pings := range playerPings {
+		for _, ping := range pings {
+			if minPing == -1 || ping < minPing {
+				minPing = ping
+			}
+			if maxPing == -1 || ping > maxPing {
+				maxPing = ping
+			}
+			pingSum += ping
+			pingCount++
+		}
+	}
+	if pingCount > 0 {
+		avgPing = pingSum / float64(pingCount)
+	} else {
+		minPing = 0
+		maxPing = 0
+		avgPing = 0
+	}
 
 	// Extract final scores (example implementation)
 	finalScores := make(map[string]int)
