@@ -1,6 +1,6 @@
 module github.com/heroiclabs/nakama/v3
 
-go 1.24.3
+go 1.25.0
 
 require (
 	github.com/anyascii/go v0.3.2
@@ -12,7 +12,6 @@ require (
 	github.com/dop251/goja v0.0.0-20250309171923-bcd7cc6bf64c
 	github.com/echotools/nevr-common/v3 v3.0.0
 	github.com/echotools/vrmlgo/v5 v5.0.1
-	github.com/felixge/httpsnoop v1.0.4
 	github.com/go-redis/redis v6.15.9+incompatible
 	github.com/go-restruct/restruct v1.2.0-alpha
 	github.com/gofrs/uuid/v5 v5.3.2
@@ -53,6 +52,7 @@ require (
 )
 
 require (
+	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/jackc/pgio v1.0.0 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/mattn/go-runewidth v0.0.12 // indirect

@@ -65,7 +65,6 @@ func (g GuildGroup) MembershipBitSet(userID string) uint64 {
 		IsServerHost:         g.IsServerHost(userID),
 		IsAllocator:          g.IsAllocator(userID),
 		IsSuspended:          g.IsSuspended(userID, nil),
-		IsLimitedAccess:      g.IsLimitedAccess(userID),
 		IsAPIAccess:          g.IsAPIAccess(userID),
 		IsAccountAgeBypass:   g.IsAccountAgeBypass(userID),
 		IsVPNBypass:          g.IsVPNBypass(userID),
@@ -199,10 +198,6 @@ func (g *GuildGroup) IsSuspended(userID string, xpid *evr.EvrId) bool {
 	return false
 }
 
-func (g *GuildGroup) IsLimitedAccess(userID string) bool {
-	return g.HasRole(userID, g.RoleMap.LimitedAccess)
-}
-
 func (g *GuildGroup) IsAPIAccess(userID string) bool {
 	return g.HasRole(userID, g.RoleMap.APIAccess)
 }
@@ -263,7 +258,7 @@ func GuildGroupStore(ctx context.Context, nk runtime.NakamaModule, guildGroupReg
 	}
 
 	// Store the State
-	err := StorageWrite(ctx, nk, ServiceSettings().DiscordBotUserID, group.State)
+	err := StorableWrite(ctx, nk, ServiceSettings().DiscordBotUserID, group.State)
 	if err != nil {
 		return fmt.Errorf("failed to write guild group state: %v", err)
 	}
@@ -292,7 +287,7 @@ func GuildUserGroupsList(ctx context.Context, nk runtime.NakamaModule, guildGrou
 				continue
 			}
 			switch ug.Group.GetLangTag() {
-			case "guild":
+			case GuildGroupLangTag:
 
 				if guildGroupRegistry != nil {
 					if gg := guildGroupRegistry.Get(ug.Group.Id); gg != nil {

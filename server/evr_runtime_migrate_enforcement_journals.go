@@ -22,7 +22,8 @@ func (m *MigrationEnforcementJournals) MigrateSystem(ctx context.Context, logger
 
 	count := 0
 	for _, journal := range journals {
-		if err := StorageWrite(ctx, nk, journal.UserID, journal); err != nil {
+		// adapter := journal.CreateStorableAdapter()
+		if err := StorableWrite(ctx, nk, journal.UserID, journal); err != nil {
 			return err
 		}
 	}

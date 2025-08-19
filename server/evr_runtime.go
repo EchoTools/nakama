@@ -256,9 +256,8 @@ func createCoreGroups(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 func RegisterIndexes(initializer runtime.Initializer) error {
 
 	// Register storage indexes for any Storables
-	storables := []IndexedStorable{
+	storables := []StorableIndexer{
 		&DisplayNameHistory{},
-		&GuildEnforcementJournal{},
 		&DeveloperApplications{},
 		&MatchmakingSettings{},
 		&VRMLPlayerSummary{},

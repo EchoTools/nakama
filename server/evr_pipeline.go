@@ -25,10 +25,6 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/heroiclabs/nakama/v3/social"
-
-	"net/http"
-	_ "net/http/pprof"
-	// Import for side effects to enable pprof endpoint
 )
 
 var dg *discordgo.Session
@@ -74,12 +70,6 @@ type EvrPipeline struct {
 type ctxDiscordBotTokenKey struct{}
 
 func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, config Config, version string, socialClient *social.Client, storageIndex StorageIndex, leaderboardScheduler LeaderboardScheduler, leaderboardCache LeaderboardCache, leaderboardRankCache LeaderboardRankCache, sessionRegistry SessionRegistry, sessionCache SessionCache, statusRegistry StatusRegistry, matchRegistry MatchRegistry, matchmaker Matchmaker, tracker Tracker, router MessageRouter, streamManager StreamManager, metrics Metrics, pipeline *Pipeline, _runtime *Runtime) *EvrPipeline {
-	go func() {
-		if err := http.ListenAndServe("0.0.0.0:6060", nil); err != nil {
-			startupLogger.Fatal("Failed to start pprof server", zap.Error(err))
-		}
-	}()
-
 	nk := _runtime.nk
 	globalMatchmaker.Store(matchmaker.(*LocalMatchmaker))
 

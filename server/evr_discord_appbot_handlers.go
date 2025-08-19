@@ -118,6 +118,15 @@ func (d *DiscordAppBot) handleInteractionApplicationCommand(ctx context.Context,
 		if !isGlobalOperator && !gg.IsAllocator(userID) {
 			return simpleInteractionResponse(s, i, "You must be a guild allocator to use this command.")
 		}
+	case "kick-player":
+		gg := d.guildGroupRegistry.Get(groupID)
+		if gg == nil {
+			return simpleInteractionResponse(s, i, "This guild is not registered.")
+		}
+
+		if err := d.LogInteractionToChannel(i, gg.AuditChannelID); err != nil {
+			logger.Warn("Failed to log interaction to channel")
+		}
 
 	case "join-player", "igp", "ign", "shutdown-match":
 
@@ -170,7 +179,7 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 	case "approve_ip":
 
 		history := &LoginHistory{}
-		if err := StorageRead(ctx, nk, userID, history, true); err != nil {
+		if err := StorableRead(ctx, nk, userID, history, true); err != nil {
 			return fmt.Errorf("failed to load login history: %w", err)
 		}
 
@@ -198,7 +207,7 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 			if err := history.AuthorizeIPWithCode(strs[0], strs[1]); err != nil {
 
 				// Store the history
-				if err := StorageWrite(ctx, nk, userID, history); err != nil {
+				if err := StorableWrite(ctx, nk, userID, history); err != nil {
 					return fmt.Errorf("failed to save login history: %w", err)
 				}
 
@@ -230,7 +239,7 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 			}
 		}
 
-		if err := StorageWrite(ctx, nk, userID, history); err != nil {
+		if err := StorableWrite(ctx, nk, userID, history); err != nil {
 			return fmt.Errorf("failed to save login history: %w", err)
 		}
 
@@ -361,7 +370,7 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 
 	// Load the latency history for this user
 	latencyHistory := NewLatencyHistory()
-	if err := StorageRead(ctx, d.nk, userID, latencyHistory, false); err != nil && status.Code(err) != codes.NotFound {
+	if err := StorableRead(ctx, d.nk, userID, latencyHistory, false); err != nil && status.Code(err) != codes.NotFound {
 		return nil, 0, status.Errorf(codes.Internal, "failed to read latency history: %v", err)
 	}
 
@@ -417,7 +426,7 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 	}
 
 	latencyHistory := NewLatencyHistory()
-	if err := StorageRead(ctx, d.nk, userID, latencyHistory, false); err != nil && status.Code(err) != codes.NotFound {
+	if err := StorableRead(ctx, d.nk, userID, latencyHistory, false); err != nil && status.Code(err) != codes.NotFound {
 		return nil, 0, status.Errorf(codes.Internal, "failed to read latency history: %v", err)
 	}
 	extIPs := latencyHistory.AverageRTTs(true)
@@ -534,7 +543,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 		}
 
 		journal := NewGuildEnforcementJournal(targetUserID)
-		if err := StorageRead(ctx, nk, targetUserID, journal, false); err != nil && status.Code(err) != codes.NotFound {
+		if err := StorableRead(ctx, nk, targetUserID, journal, false); err != nil && status.Code(err) != codes.NotFound {
 			return fmt.Errorf("failed to read storage: %w", err)
 		}
 
@@ -564,7 +573,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 						continue
 					}
 					// Void the suspension
-					actions = append(actions, fmt.Sprintf("suspension removed:\n  <t:%d:R> by <@%s> (expires <t:%d:R>): %s", record.CreatedAt.Unix(), record.EnforcerDiscordID, record.SuspensionExpiry.Unix(), record.UserNoticeText))
+					actions = append(actions, fmt.Sprintf("suspension removed:\n  <t:%d:R> by <@%s> (expires <t:%d:R>): %s", record.CreatedAt.Unix(), record.EnforcerDiscordID, record.Expiry.Unix(), record.UserNoticeText))
 
 					recordsByGroupID[groupID] = append(recordsByGroupID[groupID], record)
 
@@ -578,7 +587,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 			}
 		}
 
-		if err := StorageWrite(ctx, nk, targetUserID, journal); err != nil {
+		if err := StorableWrite(ctx, nk, targetUserID, journal); err != nil {
 			return fmt.Errorf("failed to write storage: %w", err)
 		}
 
@@ -592,9 +601,9 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 			if len(voids) > 0 {
 				title = "Voided Suspension(s)"
 			} else if len(recordsByGroupID) > 0 {
-				title = fmt.Sprintf("Suspension: *%s*", Query.QuoteStringValue(profile.GetGroupDisplayNameOrDefault(groupID)))
+				title = fmt.Sprintf("Suspension: *%s*", Query.QuoteStringValue(profile.GetGroupIGN(groupID)))
 			}
-			targetDN := profile.GetGroupDisplayNameOrDefault(groupID)
+			targetDN := profile.GetGroupIGN(groupID)
 			targetDN = EscapeDiscordMarkdown(targetDN)
 			callerDN := caller.DisplayName()
 			if callerDN == "" {

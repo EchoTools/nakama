@@ -13,8 +13,6 @@ const (
 	StorageCollectionState = "GuildGroupState"
 )
 
-var _ = VersionedStorable(&GuildGroupState{})
-
 // This allows the system to operate correctly even when discord is down
 type GuildGroupState struct {
 	sync.RWMutex                                  // for storage operations
@@ -38,18 +36,23 @@ func (s *GuildGroupState) hasRole(userID, role string) bool {
 	return false
 }
 
-func (s *GuildGroupState) StorageMeta() StorageMeta {
-	return StorageMeta{Collection: StorageCollectionState, Key: s.GroupID}
+// CreateStorableAdapter creates a StorableAdapter for GuildGroupState
+func (s *GuildGroupState) StorageMeta() StorableMetadata {
+	s.RLock()
+	defer s.RUnlock()
+	return StorableMetadata{
+		Collection:      StorageCollectionState,
+		Key:             s.GroupID,
+		PermissionRead:  0,
+		PermissionWrite: 0,
+		Version:         s.version,
+	}
 }
 
-func (s *GuildGroupState) StorageIndex() *StorageIndexMeta {
-	return nil
-}
-
-func (s *GuildGroupState) SetStorageVersion(userID string, version string) {
+func (s *GuildGroupState) SetStorageMeta(meta StorableMetadata) {
 	s.Lock()
 	defer s.Unlock()
-	s.version = version
+	s.version = meta.Version
 	s.updated = false
 }
 
@@ -58,7 +61,7 @@ func GuildGroupStateLoad(ctx context.Context, nk runtime.NakamaModule, botUserID
 		err   error
 		state = &GuildGroupState{GroupID: groupID}
 	)
-	if err = StorageRead(ctx, nk, botUserID, state, true); err != nil {
+	if err = StorableRead(ctx, nk, botUserID, state, true); err != nil {
 		return nil, err
 	}
 	state.GroupID = groupID
@@ -67,7 +70,7 @@ func GuildGroupStateLoad(ctx context.Context, nk runtime.NakamaModule, botUserID
 
 func GuildGroupStateSave(ctx context.Context, nk runtime.NakamaModule, botUserID string, state *GuildGroupState) error {
 	// Store the State
-	err := StorageWrite(ctx, nk, ServiceSettings().DiscordBotUserID, state)
+	err := StorableWrite(ctx, nk, ServiceSettings().DiscordBotUserID, state)
 	if err != nil {
 		return fmt.Errorf("failed to write guild group state: %v", err)
 	}

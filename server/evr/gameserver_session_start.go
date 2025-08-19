@@ -53,6 +53,27 @@ var (
 	LevelPebbles      Symbol = ToSymbol("mpl_combat_pebbles")     // Echo Combat
 	LevelPtyPebbles   Symbol = ToSymbol("pty_mpl_combat_pebbles") // Echo Combat
 
+	AllModes = []Symbol{
+		ModeSocialPublic,
+		ModeSocialPrivate,
+		ModeSocialNPE,
+		ModeArenaPublic,
+		ModeArenaPrivate,
+		ModeArenaTournment,
+		ModeArenaPublicAI,
+		ModeArenaPracticeAI,
+		ModeEchoCombatTournament,
+		ModeCombatPublic,
+		ModeCombatPrivate,
+	}
+	PrivateModes = []Symbol{
+		ModeSocialPrivate,
+		ModeSocialNPE,
+		ModeArenaPrivate,
+		ModeArenaPracticeAI,
+		ModeCombatPrivate,
+	}
+
 	PublicModes = []Symbol{
 		ModeSocialPublic,
 		ModeArenaPublic,

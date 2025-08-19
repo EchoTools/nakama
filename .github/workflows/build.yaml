@@ -1,23 +1,32 @@
-# every push to a branch: build binary
-name: Build
 on:
+  push:
+    branches: [main]
   pull_request:
     types: [opened, synchronize]
+
 jobs:
   build_binary:
     name: Build nakama binary
     runs-on: ubuntu-latest
     steps:
-      - name: Setup Go
+      - uses: actions/checkout@v3
+
+      - name: Set up Go
         uses: actions/setup-go@v4
         with:
-          go-version: "stable"
+          go-version: stable
 
-      - name: Checkout
-        uses: actions/checkout@v3
-
-      - name: Download dependencies
-        run: go mod vendor
+      - name: Cache Go modules
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
 
       - name: Build binary
-        run: go build -trimpath -mod=vendor
+        run: |
+          go mod vendor
+          make nakama

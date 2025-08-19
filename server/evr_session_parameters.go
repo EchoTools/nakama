@@ -33,24 +33,23 @@ type SessionParameters struct {
 	isGlobalDeveloper bool              // The user is a developer
 	isGlobalOperator  bool              // The user is a moderator
 
-	relayOutgoing bool                // The user wants (some) outgoing messages relayed to them via discord
-	debug         bool                // The user wants debug information
-	serverTags    []string            // []string of the server tags
-	serverGuilds  []string            // []string of the server guilds
-	serverRegions []string            // []string of the server regions
-	urlParameters map[string][]string // The URL parameters
+	relayOutgoing       bool                // The user wants (some) outgoing messages relayed to them via discord
+	enableAllRemoteLogs bool                // The user wants debug information
+	serverTags          []string            // []string of the server tags
+	serverGuilds        []string            // []string of the server guilds
+	serverRegions       []string            // []string of the server regions
+	urlParameters       map[string][]string // The URL parameters
 
-	profile                  *EVRProfile                                  // The account
-	matchmakingSettings      *MatchmakingSettings                         // The matchmaking settings
-	displayNameHistory       *DisplayNameHistory                          // The display name history
-	guildGroups              map[string]*GuildGroup                       // map[string]*GuildGroup
-	earlyQuitConfig          *atomic.Pointer[EarlyQuitConfig]             // The early quit config
-	isGoldNameTag            *atomic.Bool                                 // If this user should have a gold name tag
-	lastMatchmakingError     *atomic.Error                                // The last matchmaking error
-	latencyHistory           *atomic.Pointer[LatencyHistory]              // The latency history
-	isIGPOpen                *atomic.Bool                                 // The user has IGPU open
-	activeSuspensionRecords  map[string]map[string]GuildEnforcementRecord // The active suspension records map[groupID]map[userID]GuildEnforcementRecord
-	ignoreDisabledAlternates bool                                         // Ignore disabled
+	profile                      *EVRProfile                      // The account
+	matchmakingSettings          *MatchmakingSettings             // The matchmaking settings
+	guildGroups                  map[string]*GuildGroup           // map[string]*GuildGroup
+	earlyQuitConfig              *atomic.Pointer[EarlyQuitConfig] // The early quit config
+	isGoldNameTag                *atomic.Bool                     // If this user should have a gold name tag
+	lastMatchmakingError         *atomic.Error                    // The last matchmaking error
+	latencyHistory               *atomic.Pointer[LatencyHistory]  // The latency history
+	isIGPOpen                    *atomic.Bool                     // The user has IGPU open
+	gameModeSuspensionsByGroupID ActiveGuildEnforcements          // The active suspension records
+	ignoreDisabledAlternates     bool                             // Ignore disabled
 }
 
 func (s SessionParameters) UserID() string {
@@ -67,7 +66,7 @@ func (s SessionParameters) DisplayName(groupID string) string {
 	if s.userDisplayNameOverride != "" {
 		return s.userDisplayNameOverride
 	}
-	return s.profile.GetGroupDisplayNameOrDefault(groupID)
+	return s.profile.GetGroupIGN(groupID)
 }
 
 func (s *SessionParameters) IsIGPOpen() bool {

@@ -470,7 +470,7 @@ var (
 					Required:    false,
 				},
 				{
-					Type:        discordgo.ApplicationCommandOptionString,
+					Type:        discordgo.ApplicationCommandOptionBoolean,
 					Name:        "allow_private_lobbies",
 					Description: "Limit the user to only joining private lobbies.",
 				},
@@ -1248,12 +1248,17 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			if displayName == "" || displayName == "-" || displayName == user.Username {
-				delete(md.GuildDisplayNameOverrides, groupID)
+				delete(md.InGameNames, groupID)
 			} else {
-				if md.GuildDisplayNameOverrides == nil {
-					md.GuildDisplayNameOverrides = make(map[string]string)
+				if md.InGameNames == nil {
+					md.InGameNames = make(map[string]GroupInGameName, 1)
 				}
-				md.GuildDisplayNameOverrides[groupID] = displayName
+				// Store the in-game name override for this groupID
+				md.InGameNames[groupID] = GroupInGameName{
+					GroupID:     groupID,
+					DisplayName: displayName,
+					IsOverride:  true,
+				}
 			}
 
 			if err := EVRProfileUpdate(ctx, nk, userID, md); err != nil {
@@ -1881,6 +1886,10 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				return fmt.Errorf("failed to get account metadata: %w", err)
 			}
 
+			if metadata.GamePauseSettings == nil {
+				return fmt.Errorf("GamePauseSettings is nil")
+			}
+
 			embed := &discordgo.MessageEmbed{
 				Title: "Game Settings",
 				Color: 5814783, // A hexadecimal color code
@@ -1958,7 +1967,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			}
 
 			loginHistory := &LoginHistory{}
-			if err := StorageRead(ctx, nk, userIDStr, loginHistory, false); err != nil {
+			if err := StorableRead(ctx, nk, userIDStr, loginHistory, false); err != nil {
 				return fmt.Errorf("failed to load login history: %w", err)
 			}
 
@@ -2766,7 +2775,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			outfits := make(Wardrobe)
 
-			if err := StorageRead(ctx, d.nk, userID, outfits, true); err != nil {
+			if err := StorableRead(ctx, d.nk, userID, outfits, true); err != nil {
 				return fmt.Errorf("failed to read saved outfits: %w", err)
 			}
 
@@ -2792,7 +2801,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 					outfits[outfitName] = &metadata.LoadoutCosmetics
 
-					if err := StorageWrite(ctx, d.nk, userID, outfits); err != nil {
+					if err := StorableWrite(ctx, d.nk, userID, outfits); err != nil {
 						return fmt.Errorf("failed to write saved outfits: %w", err)
 					}
 
@@ -2819,7 +2828,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 					delete(outfits, outfitName)
 
-					if err := StorageWrite(ctx, d.nk, userID, outfits); err != nil {
+					if err := StorableWrite(ctx, d.nk, userID, outfits); err != nil {
 						return fmt.Errorf("failed to write saved outfits: %w", err)
 					}
 
@@ -3410,7 +3419,7 @@ func IPVerificationEmbed(entry *LoginHistoryEntry, ipInfo IPInfo) ([]*discordgo.
 
 func (d *DiscordAppBot) interactionToSignature(prefix string, options []*discordgo.ApplicationCommandInteractionDataOption) string {
 	args := make([]string, 0, len(options))
-	sep := ": "
+	sep := "="
 
 	for _, opt := range options {
 		strval := ""
@@ -3420,7 +3429,7 @@ func (d *DiscordAppBot) interactionToSignature(prefix string, options []*discord
 		case discordgo.ApplicationCommandOptionSubCommandGroup:
 			strval = d.interactionToSignature(opt.Name, opt.Options)
 		case discordgo.ApplicationCommandOptionString:
-			strval = "`" + opt.StringValue() + "`"
+			strval = fmt.Sprintf(`"%s"`, EscapeDiscordMarkdown(opt.StringValue()))
 		case discordgo.ApplicationCommandOptionNumber:
 			strval = fmt.Sprintf("%f", opt.FloatValue())
 		case discordgo.ApplicationCommandOptionInteger:
@@ -3439,7 +3448,7 @@ func (d *DiscordAppBot) interactionToSignature(prefix string, options []*discord
 			strval = fmt.Sprintf("unknown type %d", opt.Type)
 		}
 		if strval != "" {
-			args = append(args, fmt.Sprintf("`%s`%s%s", opt.Name, sep, strval))
+			args = append(args, fmt.Sprintf("*%s*%s%s", opt.Name, sep, strval))
 		}
 	}
 
@@ -3459,7 +3468,7 @@ func (d *DiscordAppBot) LogInteractionToChannel(i *discordgo.InteractionCreate, 
 	data := i.ApplicationCommandData()
 	signature := d.interactionToSignature(data.Name, data.Options)
 
-	content := fmt.Sprintf("<@%s> used %s", i.Member.User.ID, signature)
+	content := fmt.Sprintf("%s (<@%s>) used %s", EscapeDiscordMarkdown(InGameName(i.Member)), i.Member.User.ID, signature)
 	d.dg.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
 		Content:         content,
 		AllowedMentions: &discordgo.MessageAllowedMentions{},

@@ -162,8 +162,7 @@ func (p *EvrPipeline) loginRequest(ctx context.Context, logger *zap.Logger, sess
 
 	// Set the game settings based on the service settings
 	gameSettings := evr.NewDefaultGameSettings()
-	if params.debug {
-		gameSettings.IapUnlocked = true
+	if params.enableAllRemoteLogs {
 		gameSettings.RemoteLogSocial = true
 		gameSettings.RemoteLogWarnings = true
 		gameSettings.RemoteLogErrors = true
@@ -427,7 +426,7 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 		metricsTags["error"] = "account_disabled"
 
 		return AccountDisabledError{
-			message:   params.profile.DisabledAccountMessage,
+			message:   "Account Disabled",
 			reportURL: ServiceSettings().ReportURL,
 		}
 	}
@@ -448,13 +447,13 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 		metricsTags["error"] = "ip_deny_list"
 
 		return AccountDisabledError{
-			message:   params.profile.DisabledAccountMessage,
+			message:   "Account Disabled",
 			reportURL: ServiceSettings().ReportURL,
 		}
 	}
 
 	loginHistory := NewLoginHistory(params.profile.ID())
-	if err := StorageRead(ctx, p.nk, params.profile.ID(), loginHistory, true); err != nil {
+	if err := StorableRead(ctx, p.nk, params.profile.ID(), loginHistory, true); err != nil {
 		return fmt.Errorf("failed to load login history: %w", err)
 	}
 
@@ -463,7 +462,7 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 
 		// IP is not authorized. Add a pending authorization entry.
 		entry := loginHistory.AddPendingAuthorizationIP(params.xpID, session.clientIP, params.loginPayload)
-		if err := StorageWrite(ctx, p.nk, params.profile.ID(), loginHistory); err != nil {
+		if err := StorableWrite(ctx, p.nk, params.profile.ID(), loginHistory); err != nil {
 			return fmt.Errorf("failed to load login history: %w", err)
 		}
 
@@ -511,7 +510,7 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 
 	params.ignoreDisabledAlternates = loginHistory.IgnoreDisabledAlternates
 	firstIDs, _ := loginHistory.AlternateIDs()
-	if params.activeSuspensionRecords, err = CheckEnforcementSuspensions(ctx, p.nk, p.guildGroupRegistry, params.profile.ID(), firstIDs); err != nil {
+	if params.gameModeSuspensionsByGroupID, err = CheckEnforcementSuspensions(ctx, p.nk, p.guildGroupRegistry, params.profile.ID(), firstIDs); err != nil {
 		metricsTags["error"] = "failed_check_suspensions"
 		return fmt.Errorf("failed to check suspensions: %w", err)
 	}
@@ -533,7 +532,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	var err error
 	serviceSettings := ServiceSettings()
 	// Enable session debugging if the account metadata or global settings have Debug set.
-	params.debug = params.debug || params.profile.Debug || serviceSettings.EnableSessionDebug
+	params.enableAllRemoteLogs = params.enableAllRemoteLogs || params.profile.EnableAllRemoteLogs || serviceSettings.EnableSessionDebug
 
 	metricsTags := params.MetricsTags()
 	defer func() {
@@ -590,7 +589,7 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		params.isGlobalDeveloper = true
 		params.isGlobalOperator = true
 
-	} else if ismember, err := CheckSystemGroupMembership(ctx, p.db, params.UserID(), GroupGlobalOperators); err != nil {
+	} else if ismember, err := CheckSystemGroupMembership(ctx, p.db, params.profile.UserID(), GroupGlobalOperators); err != nil {
 		metricsTags["error"] = "group_check_failed"
 		return fmt.Errorf("failed to check system group membership: %w", err)
 	} else if ismember {
@@ -606,33 +605,55 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	}
 
 	latencyHistory := &LatencyHistory{}
-	if err := StorageRead(ctx, p.nk, session.userID.String(), latencyHistory, true); err != nil {
+	if err := StorableRead(ctx, p.nk, session.userID.String(), latencyHistory, true); err != nil {
 		metricsTags["error"] = "failed_load_latency_history"
 		return fmt.Errorf("failed to load latency history: %w", err)
 	}
 	params.latencyHistory.Store(latencyHistory)
 
 	// Load the display name history for the player.
-	params.displayNameHistory, err = DisplayNameHistoryLoad(ctx, p.nk, session.userID.String())
+	displayNameHistory, err := DisplayNameHistoryLoad(ctx, p.nk, session.userID.String())
 	if err != nil {
 		logger.Warn("Failed to load display name history", zap.Error(err))
 		return fmt.Errorf("failed to load display name history: %w", err)
 	}
 
-	// Update the player's active group (default) display name.
-	defaultDisplayName, _ := params.displayNameHistory.LatestGroup(params.profile.ActiveGroupID)
-	if defaultDisplayName == "" {
-		// If the active group display name is empty, set it to the username.
-		defaultDisplayName = params.profile.Username()
-	} else if params.userDisplayNameOverride != "" {
-		// If the user has provided a display name override, use that.
-		defaultDisplayName = params.userDisplayNameOverride
-	} else if dn := params.profile.GetDisplayNameOverride(params.profile.ActiveGroupID); dn != "" {
-		// If the profile has a display name override for the active group, use that.
-		defaultDisplayName = dn
+	// Get/Set the current IGN for each guild group.
+	for groupID, gg := range params.guildGroups {
+		// Default to the username, or whatever was last used.
+		groupIGN := params.profile.GetGroupIGNData(groupID)
+
+		if params.userDisplayNameOverride != "" {
+			// If the user has provided a display name override, use that.
+			groupIGN.DisplayName = params.userDisplayNameOverride
+			groupIGN.IsOverride = true
+		}
+
+		if groupIGN.DisplayName == "" {
+			// Use the latest in-game name from the display name history.
+			if dn, _ := displayNameHistory.LatestGroup(groupID); dn != "" {
+				// If the display name history has a name for this group, default to it.
+				groupIGN.GroupID = groupID
+				groupIGN.DisplayName = sanitizeDisplayName(dn)
+				groupIGN.IsOverride = false
+			}
+		}
+
+		if !groupIGN.IsOverride {
+			// Update the in-game name for the guild.
+			if member, err := p.discordCache.GuildMember(gg.GuildID, params.profile.DiscordID()); err != nil {
+				logger.Warn("Failed to get guild member", zap.String("guild_id", gg.GuildID), zap.String("discord_id", params.profile.DiscordID()), zap.Error(err))
+			} else if memberNick := InGameName(member); memberNick != "" {
+				// If the member is found, use it as their in-game name.
+				groupIGN.DisplayName = memberNick
+			} else if memberNick == "" {
+				// If the group in-game name is empty, remove it; the active group ID will be used.
+				params.profile.DeleteGroupDisplayName(groupID)
+			}
+		}
+		// Use the in-game name from the guild member.
+		params.profile.SetGroupIGNData(groupID, groupIGN)
 	}
-	// Set the default (active group) display name in the profile.
-	params.profile.SetGroupDisplayName(params.profile.ActiveGroupID, defaultDisplayName)
 
 	// Check if any of the player's current in-game names are owned by someone else.
 	displayNames := make([]string, 0)
@@ -669,15 +690,16 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 	// Update the in-game names for the player (in the display name history).
 	igns := make([]string, 0, len(params.profile.DisplayNamesByGroupID()))
 	for groupID := range params.profile.DisplayNamesByGroupID() {
-		igns = append(igns, params.profile.GetGroupDisplayNameOrDefault(groupID))
+		igns = append(igns, params.profile.GetGroupIGN(groupID))
 	}
-	params.displayNameHistory.ReplaceInGameNames(igns)
+	displayNameHistory.ReplaceInGameNames(igns)
 
 	// Update the display name history for the active group, marking this name as an in-game-name.
-	activeGroupDisplayName, _ := params.displayNameHistory.LatestGroup(params.profile.ActiveGroupID)
-	params.displayNameHistory.Update(params.profile.ActiveGroupID, activeGroupDisplayName, params.profile.Username(), true)
+	// Use the current display name from the profile instead of querying the potentially stale history
+	activeGroupDisplayName := params.profile.GetGroupIGN(params.profile.ActiveGroupID)
+	displayNameHistory.Update(params.profile.ActiveGroupID, activeGroupDisplayName, params.profile.Username(), true)
 
-	if err := DisplayNameHistoryStore(ctx, p.nk, session.userID.String(), params.displayNameHistory); err != nil {
+	if err := DisplayNameHistoryStore(ctx, p.nk, session.userID.String(), displayNameHistory); err != nil {
 		logger.Warn("Failed to store display name history", zap.Error(err))
 	}
 
@@ -734,13 +756,13 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		params.matchmakingSettings = &settings
 	}
 
-	if !params.profile.AllowBrokenCosmetics {
+	if !params.profile.IgnoreBrokenCosmetics {
 		if u := params.profile.FixBrokenCosmetics(); u {
 			metadataUpdated = true
 		}
 	}
 	eqconfig := NewEarlyQuitConfig()
-	if err := StorageRead(ctx, p.nk, params.profile.ID(), eqconfig, true); err != nil {
+	if err := StorableRead(ctx, p.nk, params.profile.ID(), eqconfig, true); err != nil {
 		logger.Warn("Failed to load early quitter config", zap.Error(err))
 	} else {
 		params.earlyQuitConfig.Store(eqconfig)
@@ -863,7 +885,7 @@ func (p *EvrPipeline) loggedInUserProfileRequest(ctx context.Context, logger *za
 
 	// Check if the user is required to go through community values
 	journal := NewGuildEnforcementJournal(userID)
-	if err := StorageRead(ctx, p.nk, userID, journal, true); err != nil {
+	if err := StorableRead(ctx, p.nk, userID, journal, true); err != nil {
 		logger.Warn("Failed to search for community values", zap.Error(err))
 	} else if journal.CommunityValuesCompletedAt.IsZero() {
 		clientProfile.Social.CommunityValuesVersion = 0
@@ -905,13 +927,13 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 
 		// Check if the user is required to go through community values
 		journal := NewGuildEnforcementJournal(userID)
-		if err := StorageRead(ctx, p.nk, userID, journal, true); err != nil {
+		if err := StorableRead(ctx, p.nk, userID, journal, true); err != nil {
 			logger.Warn("Failed to search for community values", zap.Error(err))
 		} else if journal.CommunityValuesCompletedAt.IsZero() {
 
 			journal.CommunityValuesCompletedAt = time.Now().UTC()
 
-			if err := StorageWrite(ctx, p.nk, userID, journal); err != nil {
+			if err := StorableWrite(ctx, p.nk, userID, journal); err != nil {
 				logger.Warn("Failed to write community values", zap.Error(err))
 			}
 
@@ -1169,11 +1191,11 @@ func (p *EvrPipeline) processUserServerProfileUpdate(ctx context.Context, logger
 	// Decrease the early quitter count for the player
 	if playerSession := p.nk.sessionRegistry.Get(uuid.FromStringOrNil(playerInfo.SessionID)); playerSession != nil {
 		eqconfig := NewEarlyQuitConfig()
-		if err := StorageRead(ctx, p.nk, playerInfo.UserID, eqconfig, true); err != nil {
+		if err := StorableRead(ctx, p.nk, playerInfo.UserID, eqconfig, true); err != nil {
 			logger.Warn("Failed to load early quitter config", zap.Error(err))
 		} else {
 			eqconfig.IncrementCompletedMatches()
-			if err := StorageWrite(ctx, p.nk, playerInfo.UserID, eqconfig); err != nil {
+			if err := StorableWrite(ctx, p.nk, playerInfo.UserID, eqconfig); err != nil {
 				logger.Warn("Failed to store early quitter config", zap.Error(err))
 			} else if session := p.sessionRegistry.Get(playerSession.ID()); session != nil {
 				if params, ok := LoadParams(session.Context()); ok {
