@@ -126,12 +126,12 @@ Users with the **moderator** role have access to additional moderation tools:
   - Device information and linking status
   - Guild membership and roles
 
-- `/kick-player <user> <user_notice> [suspension_duration] [moderator_notes] [allow_private_lobbies] [require_community_values]` - Kick a player's sessions with options for:
-  - **user_notice**: Message displayed to the kicked user (48 character max)
-  - **suspension_duration**: Temporary suspension time (e.g., 1m, 2h, 3d, 4w)
-  - **moderator_notes**: Internal notes for other moderators
-  - **allow_private_lobbies**: Limit user to private lobbies only
-  - **require_community_values**: Require user to accept community values before rejoining
+- `/kick-player <user> <user-notice> [suspension-duration] [moderator-notes] [allow-private-lobbies] [require-community-values]` - Kick a player's sessions with options for:
+  - **user-notice**: Message displayed to the kicked user (48 character max)
+  - **suspension-duration**: Temporary suspension time (e.g., 1m, 2h, 3d, 4w)
+  - **moderator-notes**: Internal notes for other moderators
+  - **allow-private-lobbies**: Limit user to private lobbies only
+  - **require-community-values**: Require user to accept community values before rejoining
 
 - `/join-player <user> <reason>` - Join a player's game session as a moderator for supervision or assistance
 
