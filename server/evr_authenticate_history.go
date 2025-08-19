@@ -22,6 +22,7 @@ const (
 	LoginStorageCollection = "Login"
 	LoginHistoryStorageKey = "history"
 	LoginHistoryCacheIndex = "index_login_cache"
+	MaxCacheSize           = 10000 // Maximum number of cache entries
 )
 
 var (
@@ -177,18 +178,16 @@ func (h *LoginHistory) AlternateMaps() (firstDegree map[string]map[string]bool, 
 		return nil, nil
 	}
 
-	h.AlternateMatches = make(map[string][]*AlternateSearchMatch, len(h.AlternateMatches))
-
 	var (
 		firstIDs  = make(map[string]map[string]bool, len(h.AlternateMatches))
 		secondIDs = make(map[string]bool, len(h.SecondDegreeAlternates))
 	)
 
-	for userID := range h.AlternateMatches {
-		for _, m := range h.AlternateMatches[userID] {
+	for userID, matches := range h.AlternateMatches {
+		for _, m := range matches {
 			for _, item := range m.Items {
 				if _, found := firstIDs[userID]; !found {
-					firstIDs[userID] = make(map[string]bool, len(h.AlternateMatches[userID]))
+					firstIDs[userID] = make(map[string]bool, len(matches))
 				}
 				firstIDs[userID][item] = true
 			}
@@ -226,6 +225,7 @@ func (h *LoginHistory) Update(xpid evr.EvrId, ip string, loginData *evr.LoginPro
 		allowed = true
 	}
 
+	// Check denied addresses
 	for _, addr := range h.DeniedClientAddresses {
 		if addr == ip {
 			allowed = false
@@ -242,6 +242,8 @@ func (h *LoginHistory) Update(xpid evr.EvrId, ip string, loginData *evr.LoginPro
 	}
 
 	h.update(entry, isAuthenticated)
+
+	h.cleanupPendingAuthorizations()
 
 	return isNew, allowed
 }
@@ -315,6 +317,10 @@ func (h *LoginHistory) AddPendingAuthorizationIP(xpid evr.EvrId, clientIP string
 	if h.PendingAuthorizations == nil {
 		h.PendingAuthorizations = make(map[string]*LoginHistoryEntry)
 	}
+
+	// Clean up old pending authorizations periodically
+	h.cleanupPendingAuthorizations()
+
 	e := &LoginHistoryEntry{
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
@@ -325,6 +331,20 @@ func (h *LoginHistory) AddPendingAuthorizationIP(xpid evr.EvrId, clientIP string
 
 	h.PendingAuthorizations[clientIP] = e
 	return e
+}
+
+// cleanupPendingAuthorizations removes expired pending authorizations
+func (h *LoginHistory) cleanupPendingAuthorizations() {
+	if h.PendingAuthorizations == nil {
+		return
+	}
+
+	cutoff := time.Now().Add(-10 * time.Minute)
+	for ip, e := range h.PendingAuthorizations {
+		if net.ParseIP(ip) == nil || e.CreatedAt.Before(cutoff) {
+			delete(h.PendingAuthorizations, ip)
+		}
+	}
 }
 
 func (h *LoginHistory) GetPendingAuthorizationIP(ip string) *LoginHistoryEntry {
@@ -383,14 +403,18 @@ func (h *LoginHistory) NotifyGroup(groupID string, threshold time.Time) bool {
 }
 
 func (h *LoginHistory) SearchPatterns() (patterns []string) {
-	patternSet := make(map[string]struct{}, len(h.History)*3)
+	if len(h.History) == 0 {
+		return nil
+	}
+
+	patterns = make([]string, 0, len(h.History)*3)
+	seen := make(map[string]struct{}, len(h.History)*3)
+
 	for _, e := range h.History {
 		for _, s := range e.Patterns() {
-			if _, found := patternSet[s]; !found {
-				if _, found := IgnoredLoginValues[s]; !found {
-					patterns = append(patterns, s)
-				}
-				patternSet[s] = struct{}{}
+			if _, found := seen[s]; !found && !matchIgnoredAltPattern(s) {
+				patterns = append(patterns, s)
+				seen[s] = struct{}{}
 			}
 		}
 	}
@@ -524,21 +548,24 @@ func (h *LoginHistory) GetXPI(xpid evr.EvrId) (time.Time, bool) {
 }
 
 func (h *LoginHistory) rebuildCache() {
-	h.Cache = make([]string, 0, len(h.History)*4)
-	h.XPIs = make(map[string]time.Time, len(h.History))
-	h.ClientIPs = make(map[string]time.Time, len(h.History))
+	historyLen := len(h.History)
+	h.Cache = make([]string, 0, historyLen*4)
+	h.XPIs = make(map[string]time.Time, historyLen)
+	h.ClientIPs = make(map[string]time.Time, historyLen)
 
-	cacheSet := make(map[string]bool, len(h.History)*4)
-	// Rebuild the cache from each history entry
+	cacheSet := make(map[string]bool, historyLen*4)
+
+	// Process each history entry in one pass
 	for _, e := range h.History {
-
+		// Process items for cache
 		for _, s := range e.Items() {
-			if _, found := cacheSet[s]; !found {
+			if _, found := cacheSet[s]; !found && !matchIgnoredAltPattern(s) {
 				h.Cache = append(h.Cache, s)
 				cacheSet[s] = true
 			}
 		}
 
+		// Process XPIs
 		if !e.XPID.IsNil() {
 			evrIDStr := e.XPID.String()
 			if t, found := h.XPIs[evrIDStr]; !found || t.Before(e.UpdatedAt) {
@@ -546,31 +573,35 @@ func (h *LoginHistory) rebuildCache() {
 			}
 		}
 
+		// Process ClientIPs
 		if e.ClientIP != "" {
 			if t, found := h.ClientIPs[e.ClientIP]; !found || t.Before(e.UpdatedAt) {
 				h.ClientIPs[e.ClientIP] = e.UpdatedAt
 			}
 		}
 	}
+
+	// Add denied client addresses to cache
 	if h.DeniedClientAddresses != nil {
-		h.Cache = append(h.Cache, h.DeniedClientAddresses...)
+		for _, addr := range h.DeniedClientAddresses {
+			if _, found := cacheSet[addr]; !found {
+				h.Cache = append(h.Cache, addr)
+				cacheSet[addr] = true
+			}
+		}
 	}
 
 	// Sort and compact the cache
 	slices.Sort(h.Cache)
 	h.Cache = slices.Compact(h.Cache)
 
-	// Remove ignored values
-	for i := 0; i < len(h.Cache); i++ {
-		if matchIgnoredAltPattern(h.Cache[i]) {
-			h.Cache = slices.Delete(h.Cache, i, i+1)
-			i--
-		}
+	// Limit cache size to prevent unbounded growth
+	if len(h.Cache) > MaxCacheSize {
+		h.Cache = h.Cache[:MaxCacheSize]
 	}
 }
 
 func (h *LoginHistory) MarshalJSON() ([]byte, error) {
-
 	if h.userID == "" {
 		return nil, fmt.Errorf("missing user ID")
 	}
@@ -586,8 +617,9 @@ func (h *LoginHistory) MarshalJSON() ([]byte, error) {
 	// Keep the history size under 5MB
 	var bytes []byte
 	var err error
-	for {
+	maxSize := 5 * 1024 * 1024
 
+	for {
 		// Rebuild the cache
 		h.rebuildCache()
 
@@ -613,20 +645,64 @@ func (h *LoginHistory) MarshalJSON() ([]byte, error) {
 			return nil, fmt.Errorf("error marshalling display name history: %w", err)
 		}
 
-		if len(bytes) < 5*1024*1024 {
+		if len(bytes) < maxSize {
 			return bytes, nil
 		}
 
-		for range 5 {
-			oldest := time.Now()
-			oldestKey := ""
-			for k, e := range h.History {
-				if e.UpdatedAt.Before(oldest) {
-					oldest = e.UpdatedAt
-					oldestKey = k
+		// Estimate how many entries to remove based on current size
+		currentSize := len(bytes)
+		excessSize := currentSize - maxSize
+		historyCount := len(h.History)
+
+		if historyCount == 0 {
+			// No more entries to remove, but still too large
+			return bytes, nil
+		}
+
+		// Estimate entries to remove (with safety margin)
+		entriesPerByte := float64(historyCount) / float64(currentSize)
+		entriesToRemove := int(float64(excessSize)*entriesPerByte*1.2) + 1 // 20% safety margin
+
+		if entriesToRemove > historyCount {
+			entriesToRemove = historyCount
+		}
+		if entriesToRemove < 1 {
+			entriesToRemove = 1
+		}
+
+		// Remove the oldest entries
+		oldestEntries := make([]string, 0, entriesToRemove)
+		oldestTimes := make([]time.Time, 0, entriesToRemove)
+
+		for k, e := range h.History {
+			updateTime := e.UpdatedAt
+			inserted := false
+
+			for i, t := range oldestTimes {
+				if updateTime.Before(t) {
+					// Insert at position i
+					oldestEntries = append(oldestEntries[:i], append([]string{k}, oldestEntries[i:]...)...)
+					oldestTimes = append(oldestTimes[:i], append([]time.Time{updateTime}, oldestTimes[i:]...)...)
+					inserted = true
+					break
 				}
 			}
-			delete(h.History, oldestKey)
+
+			if !inserted && len(oldestEntries) < entriesToRemove {
+				oldestEntries = append(oldestEntries, k)
+				oldestTimes = append(oldestTimes, updateTime)
+			}
+
+			// Keep only the entries we need
+			if len(oldestEntries) > entriesToRemove {
+				oldestEntries = oldestEntries[:entriesToRemove]
+				oldestTimes = oldestTimes[:entriesToRemove]
+			}
+		}
+
+		// Remove the oldest entries
+		for _, key := range oldestEntries {
+			delete(h.History, key)
 		}
 	}
 }
