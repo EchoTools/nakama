@@ -251,7 +251,7 @@ func (sm *SessionsChannelManager) createSessionEmbed(label *MatchLabel, guildGro
 		Color: 2326507, // Blue color
 		Author: &discordgo.MessageEmbedAuthor{
 			Name:    sessionUUID,
-			IconURL: "https://cdn.discordapp.com/icons/1216923249615835156/7df0b1a5204be0c97d24333520eba2e4.png?size=512",
+			IconURL: DefaultDiscordIconURL,
 			URL:     fmt.Sprintf("https://echo.taxi/spark://j/%s", strings.ToLower(sessionUUID)),
 		},
 		Fields: []*discordgo.MessageEmbedField{
