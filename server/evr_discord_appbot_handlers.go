@@ -333,6 +333,10 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 		}); err != nil {
 			return fmt.Errorf("failed to respond to interaction: %w", err)
 		}
+	case "configure_roles":
+		return d.handleConfigureRoles(ctx, logger, s, i, userID, groupID)
+	case "role_select":
+		return d.handleRoleSelect(ctx, logger, s, i, userID, groupID, value)
 	case "igp":
 
 		return d.handleInGamePanelInteraction(i, value)
@@ -776,4 +780,219 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 		return simpleInteractionResponse(d.dg, i, fmt.Sprintf("[%d sessions found]%s\n%s", cnt, timeoutMessage, strings.Join(actions, "\n")))
 	}
 	return nil
+}
+
+func (d *DiscordAppBot) handleConfigureRoles(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, userID string, groupID string) error {
+	// Get the current guild roles
+	metadata, err := GroupMetadataLoad(ctx, d.db, groupID)
+	if err != nil {
+		return fmt.Errorf("failed to get guild group metadata: %w", err)
+	}
+
+	// Get all roles in the guild
+	guild, err := s.Guild(i.GuildID)
+	if err != nil {
+		return fmt.Errorf("failed to get guild: %w", err)
+	}
+
+	// Create select menu options for roles
+	roleOptions := []discordgo.SelectMenuOption{
+		{
+			Label:       "None",
+			Value:       "none",
+			Description: "No role assigned",
+		},
+	}
+
+	// Add all guild roles as options
+	for _, role := range guild.Roles {
+		// Skip @everyone role
+		if role.ID == guild.ID {
+			continue
+		}
+		roleOptions = append(roleOptions, discordgo.SelectMenuOption{
+			Label:       role.Name,
+			Value:       role.ID,
+			Description: fmt.Sprintf("Role: %s", role.Name),
+		})
+	}
+
+	// Pre-select current roles
+	roles := metadata.RoleMap
+	d.preselectRoleInOptions(roleOptions, roles.Member)
+	d.preselectRoleInOptions(roleOptions, roles.Enforcer)
+	d.preselectRoleInOptions(roleOptions, roles.ServerHost)
+	d.preselectRoleInOptions(roleOptions, roles.Suspended)
+	d.preselectRoleInOptions(roleOptions, roles.Allocator)
+		baseRoleOptions = append(baseRoleOptions, discordgo.SelectMenuOption{
+			Label:       role.Name,
+			Value:       role.ID,
+			Description: fmt.Sprintf("Role: %s", role.Name),
+		})
+	}
+
+	roles := metadata.RoleMap
+
+	// Helper to clone options and set default
+	cloneAndPreselect := func(options []discordgo.SelectMenuOption, roleID string) []discordgo.SelectMenuOption {
+		cloned := make([]discordgo.SelectMenuOption, len(options))
+		for i, opt := range options {
+			cloned[i] = opt
+			cloned[i].Default = (opt.Value == roleID)
+		}
+		return cloned
+	}
+
+	memberOptions := cloneAndPreselect(baseRoleOptions, roles.Member)
+	enforcerOptions := cloneAndPreselect(baseRoleOptions, roles.Enforcer)
+	serverHostOptions := cloneAndPreselect(baseRoleOptions, roles.ServerHost)
+	suspendedOptions := cloneAndPreselect(baseRoleOptions, roles.Suspended)
+	allocatorOptions := cloneAndPreselect(baseRoleOptions, roles.Allocator)
+	// Build the configuration interface with select menus for each role type
+	components := []discordgo.MessageComponent{
+		discordgo.ActionsRow{
+			Components: []discordgo.MessageComponent{
+				discordgo.SelectMenu{
+					CustomID:    "role_select:member",
+					Placeholder: "Select Member Role",
+					Options:     memberOptions,
+					MaxValues:   1,
+				},
+			},
+		},
+		discordgo.ActionsRow{
+			Components: []discordgo.MessageComponent{
+				discordgo.SelectMenu{
+					CustomID:    "role_select:moderator",
+					Placeholder: "Select Moderator Role",
+					Options:     roleOptions,
+					MaxValues:   1,
+				},
+			},
+		},
+		discordgo.ActionsRow{
+			Components: []discordgo.MessageComponent{
+				discordgo.SelectMenu{
+					CustomID:    "role_select:serverhost",
+					Placeholder: "Select Server Host Role",
+					Options:     roleOptions,
+					MaxValues:   1,
+				},
+			},
+		},
+		discordgo.ActionsRow{
+			Components: []discordgo.MessageComponent{
+				discordgo.SelectMenu{
+					CustomID:    "role_select:suspension",
+					Placeholder: "Select Suspension Role",
+					Options:     roleOptions,
+					MaxValues:   1,
+				},
+			},
+		},
+		discordgo.ActionsRow{
+			Components: []discordgo.MessageComponent{
+				discordgo.SelectMenu{
+					CustomID:    "role_select:allocator",
+					Placeholder: "Select Allocator Role",
+					Options:     roleOptions,
+					MaxValues:   1,
+				},
+			},
+		},
+	}
+
+	// Create the response
+	content := "**Configure Guild Roles for EchoVRCE**\n\n" +
+		"Select a role for each category below, or choose 'None' to remove the role assignment.\n\n" +
+		"**Role Types:**\n" +
+		"• **Member**: Allows joining social lobbies, matchmaking, or creating private matches\n" +
+		"• **Moderator**: Access to detailed `/lookup` information and moderation tools\n" +
+		"• **Server Host**: Allowed to host a game server for the guild\n" +
+		"• **Suspension**: Disallowed from joining any guild matches\n" +
+		"• **Allocator**: Allowed to allocate matches using the `/allocate` command"
+
+	response := &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseUpdateMessage,
+		Data: &discordgo.InteractionResponseData{
+			Content:    content,
+			Components: components,
+			Flags:      discordgo.MessageFlagsEphemeral,
+		},
+	}
+
+	return s.InteractionRespond(i.Interaction, response)
+}
+
+func (d *DiscordAppBot) handleRoleSelect(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, userID string, groupID string, roleType string) error {
+	nk := d.nk
+
+	data := i.Interaction.MessageComponentData()
+	if len(data.Values) == 0 {
+		return simpleInteractionResponse(s, i, "No role selected.")
+	}
+
+	selectedValue := data.Values[0]
+	var selectedRoleID string
+	if selectedValue != "none" {
+		selectedRoleID = selectedValue
+	}
+
+	// Get the current metadata
+	metadata, err := GroupMetadataLoad(ctx, d.db, groupID)
+	if err != nil {
+		return fmt.Errorf("failed to get guild group metadata: %w", err)
+	}
+
+	// Update the specific role
+	roles := metadata.RoleMap
+	switch roleType {
+	case "member":
+		roles.Member = selectedRoleID
+	case "moderator":
+		roles.Enforcer = selectedRoleID
+	case "serverhost":
+		roles.ServerHost = selectedRoleID
+	case "suspension":
+		roles.Suspended = selectedRoleID
+	case "allocator":
+		roles.Allocator = selectedRoleID
+	default:
+		return simpleInteractionResponse(s, i, "Invalid role type.")
+	}
+
+	// Save the updated metadata
+	groupData, err := metadata.MarshalToMap()
+	if err != nil {
+		return fmt.Errorf("error marshalling group data: %w", err)
+	}
+
+	if err := nk.GroupUpdate(ctx, groupID, SystemUserID, "", "", "", "", "", false, groupData, 1000000); err != nil {
+		return fmt.Errorf("error updating group: %w", err)
+	}
+
+	// Update the registry
+	gg, err := GuildGroupLoad(ctx, nk, groupID)
+	if err != nil {
+		return fmt.Errorf("failed to load guild group: %w", err)
+	}
+	d.guildGroupRegistry.Add(gg)
+
+	// Update the interface to show the change
+	return d.handleConfigureRoles(ctx, logger, s, i, userID, groupID)
+}
+
+func (d *DiscordAppBot) preselectRoleInOptions(options []discordgo.SelectMenuOption, roleID string) {
+func (d *DiscordAppBot) preselectRoleInOptions(options []discordgo.SelectMenuOption, roleID string) {
+	// Reset all options to not be default
+	for i := range options {
+		options[i].Default = false
+	}
+	// Set the matching option as default
+	for i := range options {
+		if options[i].Value == roleID || (roleID == "" && options[i].Value == "none") {
+			options[i].Default = true
+			break
+		}
+	}
 }

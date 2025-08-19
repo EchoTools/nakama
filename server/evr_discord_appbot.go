@@ -622,45 +622,7 @@ var (
 		},
 		{
 			Name:        "set-roles",
-			Description: "link roles to EchoVRCE features. Non-members can only join private matches.",
-			Options: []*discordgo.ApplicationCommandOption{
-				{
-					Type:        discordgo.ApplicationCommandOptionRole,
-					Name:        "member",
-					Description: "If defined, this role allows joining social lobbies, matchmaking, or creating private matches.",
-					Required:    true,
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionRole,
-					Name:        "moderator",
-					Description: "Allowed access to more detailed `/lookup`information and moderation tools.",
-					Required:    true,
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionRole,
-					Name:        "serverhost",
-					Description: "Allowed to host a game server for the guild.",
-					Required:    true,
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionRole,
-					Name:        "suspension",
-					Description: "Disallowed from joining any guild matches.",
-					Required:    true,
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionRole,
-					Name:        "allocator",
-					Description: "Allowed to reserve game servers.",
-					Required:    true,
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionRole,
-					Name:        "is-linked",
-					Description: "Assigned/Removed by Nakama denoting if an account is linked to a headset.",
-					Required:    true,
-				},
-			},
+			Description: "Configure guild roles for EchoVRCE features. Non-members can only join private matches.",
 		},
 		{
 			Name:        "allocate",
@@ -2411,8 +2373,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			return simpleInteractionResponse(s, i, "No match found.")
 		},
 		"set-roles": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
-			options := i.ApplicationCommandData().Options
-
 			// Ensure the user is the owner of the guild
 			if user == nil || i.Member == nil || i.Member.User.ID == "" || i.GuildID == "" {
 				return nil
@@ -2432,47 +2392,27 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 			}
 
-			// Get the metadata
-			metadata, err := GroupMetadataLoad(ctx, d.db, groupID)
-			if err != nil {
-				return errors.New("failed to get guild group metadata")
+			// Create a message with a "Configure Roles" button
+			response := &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: "Click the button below to configure guild roles for EchoVRCE features.",
+					Components: []discordgo.MessageComponent{
+						discordgo.ActionsRow{
+							Components: []discordgo.MessageComponent{
+								discordgo.Button{
+									Label:    "Configure Roles",
+									Style:    discordgo.PrimaryButton,
+									CustomID: "configure_roles",
+								},
+							},
+						},
+					},
+					Flags: discordgo.MessageFlagsEphemeral,
+				},
 			}
 
-			roles := metadata.RoleMap
-			for _, o := range options {
-				roleID := o.RoleValue(s, guild.ID).ID
-				switch o.Name {
-				case "moderator":
-					roles.Enforcer = roleID
-				case "serverhost":
-					roles.ServerHost = roleID
-				case "suspension":
-					roles.Suspended = roleID
-				case "member":
-					roles.Member = roleID
-				case "allocator":
-					roles.Allocator = roleID
-				case "is_linked":
-					roles.AccountLinked = roleID
-				}
-			}
-
-			data, err := metadata.MarshalToMap()
-			if err != nil {
-				return fmt.Errorf("error marshalling group data: %w", err)
-			}
-
-			if err := nk.GroupUpdate(ctx, groupID, SystemUserID, "", "", "", "", "", false, data, 1000000); err != nil {
-				return fmt.Errorf("error updating group: %w", err)
-			}
-
-			gg, err := GuildGroupLoad(ctx, nk, groupID)
-			if err != nil {
-				return errors.New("failed to load guild group")
-			}
-			d.guildGroupRegistry.Add(gg)
-
-			return simpleInteractionResponse(s, i, "roles set!")
+			return s.InteractionRespond(i.Interaction, response)
 		},
 
 		"region-status": func(ctx context.Context, logger runtime.Logger, s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User, member *discordgo.Member, userID string, groupID string) error {
