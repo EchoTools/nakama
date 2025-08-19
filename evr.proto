@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package evr;
 
-option go_package = "github.com/heroiclabs/nakama-common/api";
+option go_package = "github.com/heroiclabs/nakama/v3/apigrpc";
 option java_package = "com.heroiclabs.evr.api";
 option java_multiple_files = true;
 option java_outer_classname = "EvrApi";
