@@ -133,7 +133,7 @@ func (ltm *LobbyTelemetryManager) BroadcastTelemetry(ctx context.Context, lobbyI
 		"type":      "lobby_telemetry",
 		"lobby_id":  lobbyID.String(),
 		"data":      telemetryData,
-		"timestamp": "2024-12-19T22:25:07Z", // Would use time.Now() in real implementation
+		"timestamp": time.Now().Format(time.RFC3339),
 	}
 
 	messageBytes, err := json.Marshal(telemetryMessage)
