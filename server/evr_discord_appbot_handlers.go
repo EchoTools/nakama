@@ -983,7 +983,6 @@ func (d *DiscordAppBot) handleRoleSelect(ctx context.Context, logger runtime.Log
 }
 
 func (d *DiscordAppBot) preselectRoleInOptions(options []discordgo.SelectMenuOption, roleID string) {
-func (d *DiscordAppBot) preselectRoleInOptions(options []discordgo.SelectMenuOption, roleID string) {
 	// Reset all options to not be default
 	for i := range options {
 		options[i].Default = false
