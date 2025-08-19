@@ -148,6 +148,11 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		return fmt.Errorf("unable to register /evr/api service: %w", err)
 	}
 
+	// Register HTTP Handler for Discord Linked Roles
+	if err := RegisterDiscordLinkedRolesHandler(ctx, logger, db, nk, initializer); err != nil {
+		return fmt.Errorf("unable to register Discord Linked Roles handler: %w", err)
+	}
+
 	// The statistics queue handles inserting match statistics into the leaderboard records
 	statisticsQueue := NewStatisticsQueue(logger, db, nk)
 
