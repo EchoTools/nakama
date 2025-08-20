@@ -231,18 +231,18 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 	regionCodes = append(regionCodes, fmt.Sprintf("0x%x", serverID))
 
 	var ipInfo IPInfo
-	if p.ipInfoCache != nil {
-		ipInfo, err = p.ipInfoCache.Get(ctx, externalIP.String())
-		if err != nil {
-			logger.Warn("Failed to get IPQS data", zap.Error(err))
-		}
-		if slices.Contains(regionCodes, "default") {
-			regionCodes = append(regionCodes,
-				LocationToRegionCode(ipInfo.CountryCode(), ipInfo.Region(), ipInfo.City()),
-				LocationToRegionCode(ipInfo.CountryCode(), ipInfo.Region(), ""),
-				LocationToRegionCode(ipInfo.CountryCode(), "", ""),
-			)
-		}
+
+	ipInfo, err = p.ipInfoCache.Get(ctx, externalIP.String())
+	if err != nil {
+		logger.Warn("Failed to get IPQS data", zap.Error(err))
+	}
+
+	if slices.Contains(regionCodes, "default") {
+		regionCodes = append(regionCodes,
+			LocationToRegionCode(ipInfo.CountryCode(), ipInfo.Region(), ipInfo.City()),
+			LocationToRegionCode(ipInfo.CountryCode(), ipInfo.Region(), ""),
+			LocationToRegionCode(ipInfo.CountryCode(), "", ""),
+		)
 	}
 
 	// Create the broadcaster config

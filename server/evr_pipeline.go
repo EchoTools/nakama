@@ -143,9 +143,8 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		}
 	}
 
-	var ipInfoCache *IPInfoCache
+	var providers []IPInfoProvider
 	if redisClient != nil {
-		var providers []IPInfoProvider
 		if vars["IPAPI_API_KEY"] != "" {
 			ipqsClient, err := NewIPQSClient(logger, metrics, redisClient, vars["IPQS_API_KEY"])
 			if err != nil {
@@ -160,16 +159,14 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		}
 		providers = append(providers, ipapiClient)
 
-		ipInfoCache, err = NewIPInfoCache(logger, metrics, providers...)
-		if err != nil {
-			logger.Fatal("Failed to create IP info cache", zap.Error(err))
-		}
+	}
+	ipInfoCache, err := NewIPInfoCache(logger, metrics, providers...)
+	if err != nil {
+		logger.Fatal("Failed to create IP info cache", zap.Error(err))
 	}
 
 	var appBot *DiscordAppBot
-	var discordIntegrator *DiscordIntegrator
-
-	discordIntegrator = NewDiscordIntegrator(ctx, logger, config, metrics, nk, db, dg, guildGroupRegistry)
+	discordIntegrator := NewDiscordIntegrator(ctx, logger, config, metrics, nk, db, dg, guildGroupRegistry)
 	discordIntegrator.Start()
 
 	appBot, err = NewDiscordAppBot(ctx, runtimeLogger, nk, db, metrics, pipeline, config, discordIntegrator, profileRegistry, statusRegistry, dg, ipInfoCache, guildGroupRegistry)
