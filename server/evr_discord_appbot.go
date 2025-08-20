@@ -3064,7 +3064,6 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					})
 				}
 			case "channels_modal":
-				userID := d.cache.DiscordIDToUserID(user.ID)
 				groupID := d.cache.GuildIDToGroupID(i.GuildID)
 				if err := d.handleChannelsModalSubmit(ctx, logger, i, user, groupID); err != nil {
 					logger.Error("Failed to handle channels modal submit", zap.Error(err))
@@ -3701,6 +3700,24 @@ func (d *DiscordAppBot) LogServerConnectionError(ctx context.Context, groupID st
 // LogDisplayNameError logs a display name related error
 func (d *DiscordAppBot) LogDisplayNameError(ctx context.Context, groupID string, message string, userID string, matchPresence *EvrMatchPresence) (*discordgo.Message, error) {
 	return d.LogUserErrorMessageWithContext(ctx, groupID, message, userID, matchPresence, nil, nil, true)
+}
+
+// LogDisplayNameInUseError logs when a user tries to use a display name already taken
+func (d *DiscordAppBot) LogDisplayNameInUseError(ctx context.Context, groupID string, userID string, displayName string, ownerDiscordID string, matchPresence *EvrMatchPresence) (*discordgo.Message, error) {
+	message := fmt.Sprintf("Display name **%s** is already in use by <@%s>. Please choose a different name.", displayName, ownerDiscordID)
+	return d.LogUserErrorMessageWithContext(ctx, groupID, message, userID, matchPresence, nil, nil, false)
+}
+
+// LogDisplayNameMessageError logs when we can't message a user about display name issues
+func (d *DiscordAppBot) LogDisplayNameMessageError(ctx context.Context, groupID string, userID string, targetDiscordID string, displayName string, reason string, matchPresence *EvrMatchPresence) (*discordgo.Message, error) {
+	message := fmt.Sprintf("Cannot message user <@%s> about display name **%s**: %s", targetDiscordID, displayName, reason)
+	return d.LogUserErrorMessageWithContext(ctx, groupID, message, userID, matchPresence, nil, nil, false)
+}
+
+// LogServerTimeoutDisconnection logs when a user is disconnected from server due to timeout
+func (d *DiscordAppBot) LogServerTimeoutDisconnection(ctx context.Context, groupID string, userID string, matchPresence *EvrMatchPresence, serverInfo *GameServerPresence) (*discordgo.Message, error) {
+	message := "User disconnected from server due to timeout"
+	return d.LogUserErrorMessageWithContext(ctx, groupID, message, userID, matchPresence, nil, serverInfo, true)
 }
 
 func (d *DiscordAppBot) SendErrorToUser(userID string, userErr error) error {
