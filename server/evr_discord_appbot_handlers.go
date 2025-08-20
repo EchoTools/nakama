@@ -178,7 +178,7 @@ func (d *DiscordAppBot) handleInteractionMessageComponent(ctx context.Context, l
 	switch commandName {
 	case "approve_ip":
 
-		history := &LoginHistory{}
+		history := NewLoginHistory(userID)
 		if err := StorableRead(ctx, nk, userID, history, true); err != nil {
 			return fmt.Errorf("failed to load login history: %w", err)
 		}
@@ -824,14 +824,9 @@ func (d *DiscordAppBot) handleConfigureRoles(ctx context.Context, logger runtime
 	d.preselectRoleInOptions(roleOptions, roles.ServerHost)
 	d.preselectRoleInOptions(roleOptions, roles.Suspended)
 	d.preselectRoleInOptions(roleOptions, roles.Allocator)
-		baseRoleOptions = append(baseRoleOptions, discordgo.SelectMenuOption{
-			Label:       role.Name,
-			Value:       role.ID,
-			Description: fmt.Sprintf("Role: %s", role.Name),
-		})
-	}
 
-	roles := metadata.RoleMap
+	// Create base role options for cloning
+	baseRoleOptions := roleOptions
 
 	// Helper to clone options and set default
 	cloneAndPreselect := func(options []discordgo.SelectMenuOption, roleID string) []discordgo.SelectMenuOption {
