@@ -60,7 +60,6 @@ func (ti *TelemetryIntegration) HandleMatchEnd(ctx context.Context, matchID stri
 		return nil // Graceful degradation when MongoDB is not available
 	}
 
-	// Calculate ping statistics (example implementation)
 // HandleMatchEnd processes match end events and creates match summaries
 // Added playerPings: map from playerID to slice of ping samples (float64)
 func (ti *TelemetryIntegration) HandleMatchEnd(ctx context.Context, matchID string, players []string, duration int, label string, playerPings map[string][]float64) error {
