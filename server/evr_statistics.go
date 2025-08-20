@@ -85,7 +85,7 @@ func ScoreToFloat64Legacy(score int64) float64 {
 // integer comparison (score first, then subscore), maintaining the same order as the original float64 values.
 // All score and subscore values are non-negative to comply with Nakama's leaderboard requirements.
 //
-// Supported range: -1e15 to +1e15 with ~1e-9 fractional precision.
+// Supported range: -999999999999999 to +1e15 with ~1e-9 fractional precision.
 // 
 // Examples:
 //   Float64ToScore(-2.5)  -> (999999999999997, 499999999, nil)  // Negative values
@@ -98,8 +98,11 @@ func Float64ToScore(f float64) (int64, int64, error) {
 	}
 	
 	// Limit to reasonable range to prevent overflow
-	if f > 1e15 || f < -1e15 {
-		return 0, 0, fmt.Errorf("value out of range: %f", f)
+	// For negative values, we need intPart < scoreOffset to ensure score stays non-negative
+	// So the minimum value we can encode is -(scoreOffset - 1) = -999999999999999
+	const maxNegative = -(1e15 - 1)
+	if f > 1e15 || f < maxNegative {
+		return 0, 0, fmt.Errorf("value out of range: %f (valid range: %f to %f)", f, maxNegative, 1e15)
 	}
 
 	const fracScale = LeaderboardScoreScalingFactor // 1e9 for fractional precision

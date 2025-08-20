@@ -20,7 +20,7 @@ The float64 encoding system uses both the `score` and `subscore` fields of Nakam
 1. **Non-negative constraint compliance**: All encoded values are non-negative integers
 2. **Sort order preservation**: Encoded values sort identically to original float64 values
 3. **High precision**: ~1e-9 fractional accuracy using 1e9 scaling factor
-4. **Wide range support**: Values from -1e15 to +1e15
+4. **Wide range support**: Values from -999999999999999 to +1e15
 
 ## Algorithm
 
@@ -388,7 +388,7 @@ if len(records) > 0 {
 
 ## Limitations and Considerations
 
-1. **Range**: Values must be between -1e15 and +1e15
+1. **Range**: Values must be between -999999999999999 and +1e15
 2. **Precision**: Fractional precision is ~1e-9 (9 decimal places)
 3. **Leaderboard Configuration**: Both ascending and descending sort work correctly
 4. **Migration**: Existing leaderboards using single-value encoding need migration
