@@ -19,6 +19,10 @@ const (
 	RedisSessionMessagesKey = "discord:session_messages"
 	// Update interval for session messages
 	SessionUpdateInterval = 15 * time.Second
+	// Maximum players for Arena and Combat Public modes
+	MaxPlayersArenaCombatPublic = 15
+	// Default Discord icon URL
+	DefaultDiscordIconURL = "https://cdn.discordapp.com/embed/avatars/0.png"
 )
 
 // SessionMessageTracker tracks active session messages for updates
@@ -323,9 +327,6 @@ func (sm *SessionsChannelManager) createMatchDetailsEmbed(label *MatchLabel) *di
 				remainingTime := label.GameState.RoundClock.Duration - label.GameState.RoundClock.Elapsed
 				if remainingTime > 0 {
 					roundLabel := "Current Round"
-					if label.GameState.RoundNumber > 0 {
-						roundLabel = fmt.Sprintf("%s Round", ordinal(label.GameState.RoundNumber))
-					}
 					description += fmt.Sprintf("\n%s (~%dm%02ds remaining)", 
 						roundLabel, 
 						int(remainingTime.Minutes()), 

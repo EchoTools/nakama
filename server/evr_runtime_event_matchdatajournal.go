@@ -9,6 +9,12 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 )
 
+const (
+	matchDataJournalEventThreshold = 1000
+	matchDataJournalMaxAge         = 5 * time.Minute
+	redisMatchDataJournalQueueKey  = "match_data_journal_queue"
+)
+
 var _ = Event(&EventMatchDataJournal{})
 
 type EventMatchDataJournal struct {
